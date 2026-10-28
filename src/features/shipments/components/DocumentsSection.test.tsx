@@ -9,10 +9,13 @@ import type {
 
 const listShipmentDocuments = vi.hoisted(() => vi.fn())
 const readyToInvoice = vi.hoisted(() => vi.fn())
+const getInvoice = vi.hoisted(() => vi.fn())
 
 vi.mock('@/lib/apiClient', () => ({
   listShipmentDocuments,
   readyToInvoice,
+  getInvoice,
+  getInvoicePdfUrl: vi.fn(async () => 'https://example.com/invoice.pdf'),
   getTmsSettings: vi.fn(async () => null),
   listDivisions: vi.fn(async () => []),
   listTrackingLinksByShipment: vi.fn(async () => []),
@@ -73,7 +76,7 @@ const DOCUMENTS: ShipmentDocumentRecord[] = [
   doc({ id: 'sdoc-misc', type: 'OTHER', name: 'dock-note.pdf', audience: 'INTERNAL' }),
 ]
 
-function bundle(): ShipmentBundle {
+function bundle(invoiceId: string | null = null): ShipmentBundle {
   const shipment: ShipmentRecord = {
     id: 'shp-1', number: 'S000001', status: 'DELIVERED', customerId: 'cust-1', customerName: 'Acme Freight',
     mode: 'FTL', source: 'MANUAL',
@@ -81,7 +84,7 @@ function bundle(): ShipmentBundle {
   }
   const order: OrderRecord = {
     id: 'ord-1', shipmentId: 'shp-1', customerId: 'cust-1', mode: 'FTL', arStatus: 'DOCS_NEEDED',
-    references: [], freight: [],
+    invoiceId, references: [], freight: [],
     createdBy: 'a@b.c', updatedBy: 'a@b.c', createdAt: WHEN, updatedAt: WHEN,
   }
   const load: ShipmentLoad = { id: 'load-1', orderId: 'ord-1', stops: [], status: 'DELIVERED', loadNumber: 'S000001-1', leg: 1 }
@@ -98,10 +101,10 @@ function bundle(): ShipmentBundle {
 
 const CUSTOMER = { id: 'cust-1', name: 'Acme Freight', requiredDocsForInvoice: ['POD', 'BOL'] } as CustomerRecord
 
-function renderSection(isAdmin = false) {
+function renderSection(isAdmin = false, invoiceId: string | null = null) {
   render(
     <DocumentsSection
-      bundle={bundle()}
+      bundle={bundle(invoiceId)}
       customer={CUSTOMER}
       locations={[]}
       catalog={[]}
@@ -163,5 +166,35 @@ describe('DocumentsSection', () => {
     renderSection()
     const strip = await screen.findByTestId('required-documents')
     expect(within(strip).queryByRole('button', { name: 'Override with note' })).toBeNull()
+  })
+
+  /**
+   * The invoice is derived from the order, so it has to survive a Customer section with
+   * no document rows in it — the empty-state used to swallow anything that was not a
+   * `ShipmentDocument`. It is also not a document: it can be read, never edited.
+   */
+  it('shows the issued invoice as a derived Customer row that cannot be voided or retyped', async () => {
+    listShipmentDocuments.mockResolvedValue([])
+    getInvoice.mockResolvedValue({
+      id: 'INV-000042', number: 'INV-000042', pdfKey: 'invoices/INV-000042.pdf', pdfVersion: 2,
+      issuedAt: WHEN, status: 'ISSUED',
+    })
+    renderSection(true, 'INV-000042')
+
+    const customer = await screen.findByTestId('documents-customer')
+    const line = await within(customer).findByTestId('invoice-line')
+    expect(line.textContent).toContain('INV-000042')
+    expect(line.textContent).toContain('v2')
+    expect(within(line).getByRole('button', { name: /Preview/ })).toBeTruthy()
+    expect(within(line).getByRole('button', { name: /Download/ })).toBeTruthy()
+    expect(within(line).queryByRole('button', { name: /Void/ })).toBeNull()
+    expect(within(line).queryByRole('button', { name: /Retype/ })).toBeNull()
+  })
+
+  it('asks for no invoice at all when the order has not been billed', async () => {
+    renderSection()
+    await screen.findByTestId('documents-customer')
+    expect(screen.queryByTestId('invoice-line')).toBeNull()
+    expect(getInvoice).not.toHaveBeenCalled()
   })
 })

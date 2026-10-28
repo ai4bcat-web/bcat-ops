@@ -11,6 +11,7 @@ import { useDispatchUnread } from '@/hooks/useDispatch'
 import { ACTIVE_STATUSES } from '@/lib/intake'
 import { useCheckCallWorklist } from '@/hooks/useCheckCallWorklist'
 import { useDocumentReviewQueue } from '@/hooks/useDocumentReviewQueue'
+import { useArToInvoiceCount } from '@/hooks/useArToInvoiceCount'
 import { NAV_GROUPS } from '@/lib/navItems'
 
 const BADGE_TONE: Record<string, { bg: string; color: string }> = {
@@ -23,6 +24,7 @@ const BADGE_TONE: Record<string, { bg: string; color: string }> = {
   dispatch:    { bg: 'var(--ds-blue-soft)',         color: '#0369a1' },
   checkCalls:  { bg: 'var(--ds-amber-soft)',        color: '#b45309' },
   documentReview: { bg: 'var(--ds-blue-soft)',        color: '#0369a1' },
+  arToInvoice: { bg: 'var(--ds-blue-soft)',           color: '#0369a1' },
 }
 
 function NavBadge({ count, toneKey }: { count: number; toneKey: string }) {
@@ -56,6 +58,8 @@ export function NavBar({
   const { dueCount: checkCallsDue } = useCheckCallWorklist({ enabled: hasPageAccess('loads') })
   // Carrier uploads nobody has accepted or refused yet; same page gate as the worklist.
   const { pendingCount: documentReviewCount } = useDocumentReviewQueue({ enabled: hasPageAccess('loads') })
+  // Delivered orders nobody has billed yet; the hook gates itself on `invoicing`.
+  const arToInvoiceCount = useArToInvoiceCount()
   // Unread driver texts/voicemails; polled only for people who can open the page.
   const dispatchUnread = useDispatchUnread(hasPageAccess('dispatch'))
 
@@ -84,6 +88,7 @@ export function NavBar({
     if (key === 'dispatch') return dispatchUnread || null
     if (key === 'checkCalls') return checkCallsDue || null
     if (key === 'documentReview') return documentReviewCount || null
+    if (key === 'arToInvoice') return arToInvoiceCount || null
     return null
   }
 

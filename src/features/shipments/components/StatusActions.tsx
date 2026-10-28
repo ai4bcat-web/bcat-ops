@@ -8,7 +8,6 @@
  */
 import { useState } from 'react'
 import { MoreHorizontal, Copy, PauseCircle, PlayCircle, Ban, RotateCcw, Trash2, Check, X, Truck, Building2, UserMinus, FileSignature } from 'lucide-react'
-import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -22,15 +21,19 @@ import { nextLoadStatuses, LOAD_WORKFLOW_STATUS_LABELS, isTruckloadMode } from '
 import { formatDateTimeInput, fromDateTimeInput } from '@/lib/date'
 import { formatCents } from '@/lib/tmsDirectory'
 import { BookCarrierDialog, type BookCarrierFields } from '@/features/carriers/components/BookCarrierDialog'
-import { readyToInvoice, type RemoveLoadCarrierReason } from '@/lib/apiClient'
+import { type RemoveLoadCarrierReason } from '@/lib/apiClient'
 import type { Driver } from '@/types'
 import type { Equipment } from '@/types/equipment'
 import type {
   ArStatus, LoadCarrierRecord, LoadWorkflowStatus, ShipmentBundle, ShipmentLoad, ShipmentMode, ShipmentRecord,
 } from '@/types/tms'
 
-/** UNPAID and PAID are written by invoicing (step F), never set by hand here. */
-const SETTABLE_AR_STATUSES = ['DOCS_NEEDED', 'UNBILLED', 'INVOICE_NOT_NEEDED'] as const
+/**
+ * UNPAID and PAID are written by invoicing, never set by hand. UNBILLED is not here
+ * either: Ready to invoice is the document gate and lives on the AR card, so this menu
+ * only holds the two values a person genuinely decides.
+ */
+const SETTABLE_AR_STATUSES = ['DOCS_NEEDED', 'INVOICE_NOT_NEEDED'] as const
 
 /**
  * Why an assignment ended. A bounce is the carrier falling off and keeping nothing; a
@@ -201,14 +204,14 @@ export interface LoadActionHandlers {
   onRemoveCarrier: (
     loadCarrierId: string, outcome: 'BOUNCED' | 'TONU', reason: RemoveLoadCarrierReason, note?: string,
   ) => Promise<void>
-  onSetArStatus: (status: 'DOCS_NEEDED' | 'UNBILLED' | 'INVOICE_NOT_NEEDED') => Promise<void>
+  onSetArStatus: (status: 'DOCS_NEEDED' | 'INVOICE_NOT_NEEDED') => Promise<void>
 }
 
 type LoadDialog =
   | { kind: 'asset' } | { kind: 'carrier' } | { kind: 'book' } | { kind: 'remove'; outcome: 'BOUNCED' | 'TONU' } | null
 
 export function LoadActions({
-  load, mode, bundle, activeCarrier, drivers, trucks, trailers, arStatus, isAdmin, handlers, onReload, onRateCon,
+  load, mode, bundle, activeCarrier, drivers, trucks, trailers, arStatus, isAdmin, handlers, onRateCon,
 }: {
   load: ShipmentLoad
   mode: ShipmentMode
@@ -220,8 +223,6 @@ export function LoadActions({
   arStatus: ArStatus | null
   isAdmin: boolean
   handlers: LoadActionHandlers
-  /** Re-read the shipment: READY_TO_INVOICE is called here, not through the handlers. */
-  onReload: () => Promise<void>
   /** The booker asked for the rate con straight after booking. */
   onRateCon: () => void
 }) {
@@ -232,33 +233,14 @@ export function LoadActions({
   // covered; everything else keeps the name-only assignment it always had.
   const bookable = load.status === 'SOURCING' && isTruckloadMode(mode) && !activeCarrier
 
+  // An issued invoice owns the AR rung: the card voids it, this menu does not move it.
+  const order = bundle.orders[0] ?? null
+  const invoiced = Boolean(order?.invoiceId)
+
   // Same contract as the shipment menu: the error is already on screen as a toast.
   const run = async (fn: () => Promise<void>) => {
     setBusy(true)
     try { await fn(); setDialog(null) } catch { /* already reported */ } finally { setBusy(false) }
-  }
-
-  /**
-   * Unbilled is the required-document gate, not a status somebody types.
-   *
-   * `READY_TO_INVOICE` writes the same Order fields `SET_AR_STATUS` does and refuses
-   * with the list of documents still missing, which is the message worth reading — so
-   * it is surfaced as the Lambda wrote it rather than as "AR status failed". The
-   * Documents tab is where the gate and the admin override live.
-   */
-  const moveToUnbilled = async () => {
-    const order = bundle.orders[0]
-    if (!order) { toast.error('This shipment has no order to bill'); return }
-    setBusy(true)
-    try {
-      await readyToInvoice({ orderId: order.id, expectedUpdatedAt: order.updatedAt })
-      await onReload()
-      toast.success('Ready to invoice')
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'The order could not be moved to Ready to invoice')
-    } finally {
-      setBusy(false)
-    }
   }
 
   return (
@@ -307,13 +289,19 @@ export function LoadActions({
 
           <DropdownMenuSeparator />
           <DropdownMenuLabel>AR status</DropdownMenuLabel>
+          {invoiced && (
+            <DropdownMenuLabel className="font-normal text-xs text-muted-foreground">
+              Invoice {order?.invoiceNumber ?? order?.invoiceId} is issued — void the invoice first.
+            </DropdownMenuLabel>
+          )}
           {SETTABLE_AR_STATUSES.map((s) => (
             <DropdownMenuItem
               key={s}
-              disabled={arStatus === s || busy}
-              onSelect={() => (s === 'UNBILLED' ? void moveToUnbilled() : run(() => handlers.onSetArStatus(s)))}
+              disabled={arStatus === s || busy || invoiced}
+              title={invoiced ? 'void the invoice first' : undefined}
+              onSelect={() => run(() => handlers.onSetArStatus(s))}
             >
-              {s === 'UNBILLED' ? 'unbilled — check the documents' : s.replace(/_/g, ' ').toLowerCase()}
+              {s.replace(/_/g, ' ').toLowerCase()}
             </DropdownMenuItem>
           ))}
         </DropdownMenuContent>

@@ -127,5 +127,16 @@ export const storage = defineStorage({
       allow.authenticated.to(['read']),
       allow.groups(STAFF_GROUPS).to(['read']),
     ],
+    /*
+     * Issued invoice PDFs (Step F), keyed invoices/{customerId}/{number}-v{n}.pdf.
+     *
+     * Written only by tms-finance-actions, with its own role, from bytes it rendered
+     * itself; the browser reads and never writes. Nothing is ever deleted — a voided
+     * invoice keeps its PDF, because somebody out there already has a copy of it.
+     */
+    'invoices/*': [
+      allow.authenticated.to(['read']),
+      allow.groups(STAFF_GROUPS).to(['read']),
+    ],
   })
 })

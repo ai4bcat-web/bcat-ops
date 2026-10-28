@@ -370,6 +370,22 @@ export interface TmsSettings {
   /** Voiding a document is an ADMIN-only action when true. Default true. */
   documentDeleteAdminOnly?: boolean | null
 
+  // Step F — AR: invoicing and payments
+  /** Taken with an atomic ADD. A failed generation skips a number, never reuses one. */
+  nextInvoiceNumber?: number | null
+  /** Terms printed at the foot of every invoice. */
+  invoiceTerms?: string | null
+  /** Body of the invoice e-mail. Must contain `{number}`. */
+  invoiceEmailTemplate?: string | null
+  /** Attached on top of the customer's required documents. Default POD + BOL. */
+  invoiceAttachTypes?: string[] | null
+  /** Where a factored customer pays. Printed instead of the division's remit-to. */
+  factorRemitTo?: RemitTo | null
+  /** Void, payment, credit, write-off and reversal are owner/ADMIN when true. Default true. */
+  arPostingAdminOnly?: boolean | null
+  /** One e-mail per invoice, or one per customer + bill-to. Default PER_INVOICE. */
+  invoiceBatchEmail?: InvoiceBatchEmailMode | null
+
   createdAt?: string
   updatedAt?: string
 }
@@ -491,7 +507,17 @@ export type LoadCarrierKind = 'OWN_ASSET' | 'CARRIER'
 /** BOUNCED = the carrier fell off and kept nothing; TONU = truck ordered not used, paid. */
 export type LoadCarrierStatus = 'ACTIVE' | 'BOUNCED' | 'TONU'
 
-export type ArStatus = 'DOCS_NEEDED' | 'UNBILLED' | 'UNPAID' | 'PAID' | 'INVOICE_NOT_NEEDED'
+/**
+ * LEGACY is an Aljex-era order whose bill went out before this system existed: it is
+ * never a worklist row, and its credit exposure falls back to the load rule.
+ */
+export type ArStatus =
+  | 'DOCS_NEEDED'
+  | 'UNBILLED'
+  | 'UNPAID'
+  | 'PAID'
+  | 'INVOICE_NOT_NEEDED'
+  | 'LEGACY'
 
 export type ApStatus = 'AWAITING_INVOICE' | 'IN_REVIEW' | 'TO_BE_PAID' | 'PAID'
 
@@ -656,6 +682,14 @@ export interface OrderRecord {
   /** Lets AR move ahead of delivery for customers that bill on pickup. */
   invoiceEarly?: boolean | null
   readyToInvoiceAt?: string | null
+  // Step F — cached from the Invoice, so no board cell has to read the invoice row
+  invoiceNumber?: string | null
+  invoicedAt?: string | null
+  paidAt?: string | null
+  /** What is still owed on this order. Null before it is invoiced. */
+  arBalanceCents?: number | null
+  /** The OTR queue row Send to Factor wrote for this order's invoice. */
+  factoringItemId?: string | null
   // Step E — what the required-document gate decided last time anything changed
   docsRequired?: string[] | null
   /** `[]` means complete. The board's Docs column reads this. */
@@ -1468,7 +1502,7 @@ export interface ShipmentDocumentRecord {
   updatedAt?: string
 }
 
-export type ShipmentNoticeKind = 'MILESTONE' | 'POD_REQUEST' | 'DOCUMENTS'
+export type ShipmentNoticeKind = 'MILESTONE' | 'POD_REQUEST' | 'DOCUMENTS' | 'INVOICE'
 
 export type ShipmentNoticeChannel = 'EMAIL' | 'COPY'
 
@@ -1563,4 +1597,163 @@ export interface CarrierUploadView {
   maxBytes: number
   contactPhone: string | null
   generatedAt: string
+}
+
+// ── AR: invoicing & payments (Step F) ────────────────────────────────────────
+
+export type InvoiceStatus = 'ISSUED' | 'PARTIAL' | 'PAID' | 'VOID'
+
+export type InvoiceBatchEmailMode = 'PER_INVOICE' | 'PER_BILL_TO'
+
+/** Where the money is sent. The division's own, or the factor's for a factored customer. */
+export interface RemitTo {
+  name: string
+  address?: Address | null
+  email?: string | null
+  /** The assignment notice a factor requires on the face of the invoice. */
+  noticeText?: string | null
+}
+
+/** Who is billed, frozen at issue. A later edit to the bill-to does not move it. */
+export interface InvoiceBillTo {
+  name: string
+  address?: Address | null
+  email?: string | null
+}
+
+/** One charge line, copied off the order's CUSTOMER LoadCharge rows at issue. */
+export interface InvoiceLine {
+  chargeId: string
+  loadId?: string | null
+  code: string
+  label?: string | null
+  calculatedBy?: ChargeCalc | null
+  rateCents: number
+  count: number
+  amountCents: number
+}
+
+/**
+ * One issued bill for one order. `id` is the invoice number.
+ *
+ * Everything printed on it is a snapshot: lines, references, bill-to, remit-to, terms
+ * and due date are taken once and never re-read from the order. A mistake is voided
+ * and re-issued, never edited.
+ */
+export interface InvoiceRecord {
+  id: string
+  number: string
+  orderId: string
+  shipmentId: string
+  shipmentNumber?: string | null
+  customerId: string
+  customerName?: string | null
+  billToId?: string | null
+  billTo?: InvoiceBillTo | null
+  divisionKey?: string | null
+  status: InvoiceStatus
+  /** YYYY-MM-DD. */
+  invoiceDate: string
+  issuedAt: string
+  issuedBy: string
+  /** YYYY-MM-DD. */
+  dueAt: string
+  termsDays: number
+  /** The terms text as printed. Snapshotted so a re-render reproduces the sent bill. */
+  termsText?: string | null
+  /** 'YYYY-MM' of invoiceDate. */
+  invoiceMonth: string
+  lines?: InvoiceLine[] | null
+  references?: OrderReference[] | null
+  subtotalCents: number
+  totalCents: number
+  paidCents: number
+  writtenOffCents: number
+  balanceCents: number
+  /** Sparse `'OPEN'` while ISSUED or PARTIAL; absent once PAID or VOID. */
+  arOpen?: string | null
+  paidAt?: string | null
+  remitTo?: RemitTo | null
+  factored?: boolean | null
+  factoringItemId?: string | null
+  pdfKey?: string | null
+  pdfSizeBytes?: number | null
+  pdfVersion?: number | null
+  attachDocumentIds?: string[] | null
+  sentAt?: string | null
+  /** Comma-joined, like `ShipmentNotice.to`. */
+  sentTo?: string | null
+  sentCount?: number | null
+  markedSentAt?: string | null
+  markedSentBy?: string | null
+  markedSentNote?: string | null
+  lastNoticeId?: string | null
+  voidedAt?: string | null
+  voidedBy?: string | null
+  voidReason?: string | null
+  note?: string | null
+  createdBy: string
+  updatedBy: string
+  version: number
+  createdAt?: string
+  updatedAt?: string
+}
+
+export type ArPaymentKind = 'PAYMENT' | 'CREDIT_MEMO' | 'WRITE_OFF' | 'REVERSAL'
+
+export type ArPaymentMethod = 'CHECK' | 'ACH' | 'WIRE' | 'CARD' | 'FACTOR' | 'OTHER'
+
+/** Money from this row put against one invoice. */
+export interface PaymentApplication {
+  invoiceId: string
+  amountCents: number
+}
+
+/** Unapplied money on an earlier row spent by this one. */
+export interface CreditApplication {
+  paymentId: string
+  amountCents: number
+}
+
+/**
+ * One posted cash row: a receipt, a credit memo, a write-off or a reversal.
+ *
+ * Immutable once written, except `unappliedCents` — spent down by a later payment with
+ * a conditional ADD — and `reversedByPaymentId`. Nothing deletes one; a mistake gets a
+ * REVERSAL row that restores the balances it took.
+ */
+export interface ArPaymentRecord {
+  id: string
+  customerId: string
+  kind: ArPaymentKind
+  /** The typed date at noon UTC, so a timezone cannot slide a receipt into last month. */
+  receivedAt: string
+  method?: ArPaymentMethod | null
+  reference?: string | null
+  amountCents: number
+  appliedCents: number
+  unappliedCents: number
+  applications?: PaymentApplication[] | null
+  creditApplications?: CreditApplication[] | null
+  /** WRITE_OFF names the invoice it clears. */
+  invoiceId?: string | null
+  reversesPaymentId?: string | null
+  reversedByPaymentId?: string | null
+  note?: string | null
+  createdBy: string
+  createdAt?: string
+  updatedAt?: string
+}
+
+/** The AR half of `TmsSettings`, as the settings card edits it. */
+export interface ArSettings {
+  invoiceNumberFormat?: string | null
+  nextInvoiceNumber?: number | null
+  invoiceTerms?: string | null
+  invoiceEmailTemplate?: string | null
+  invoiceAttachTypes?: string[] | null
+  factorRemitTo?: RemitTo | null
+  arPostingAdminOnly?: boolean | null
+  invoiceBatchEmail?: InvoiceBatchEmailMode | null
+  defaultPaymentTermsDays?: number | null
 }

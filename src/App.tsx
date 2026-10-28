@@ -55,6 +55,8 @@ import { SettingsPage } from '@/features/settings/SettingsPage'
 import { RedditQueuePage } from '@/features/reddit-queue/RedditQueuePage'
 import { PricingMarginPage } from '@/features/pricing-margin/PricingMarginPage'
 import { FactoringPage } from '@/features/factoring/FactoringPage'
+import { ArPage } from '@/features/ar/ArPage'
+import { InvoiceDetail } from '@/features/ar/InvoiceDetail'
 import { HoursPage } from '@/features/hours/HoursPage'
 import { VendorApPage } from '@/features/vendor-ap/VendorApPage'
 import { DispatchPage } from '@/features/dispatch/DispatchPage'
@@ -234,6 +236,9 @@ export default function App() {
               <Route path="/finances/review" element={<RequirePage page="finances"><ProfitReviewPage /></RequirePage>} />
               <Route path="/finance/cash-checkin" element={<RequirePage page="cashCheckIn"><WeeklyCashCheckInPage /></RequirePage>} />
               <Route path="/factoring" element={<RequirePage page="factoring"><FactoringPage /></RequirePage>} />
+              {/* Invoicing and the cash against it; its own page key, not `loads`. */}
+              <Route path="/ar" element={<RequirePage page="invoicing"><ArPage /></RequirePage>} />
+              <Route path="/ar/invoices/:id" element={<RequirePage page="invoicing"><InvoiceDetail /></RequirePage>} />
               <Route path="/hours" element={<RequirePage page="hours"><HoursPage /></RequirePage>} />
               <Route path="/vendor-ap" element={<RequirePage page="vendorAp"><VendorApPage /></RequirePage>} />
               <Route path="/dispatch" element={<RequirePage page="dispatch"><DispatchPage /></RequirePage>} />

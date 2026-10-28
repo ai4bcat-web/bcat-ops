@@ -46,6 +46,7 @@ import { marshall, unmarshall } from '@aws-sdk/util-dynamodb'
 import { createHash, randomBytes, randomUUID } from 'crypto'
 import {
   IDX_CHARGES_BY_SHIPMENT,
+  IDX_ORDERS_BY_SHIPMENT,
   batchGetByIds as storeBatchGetByIds,
   buildSearchKey,
   casCondition,
@@ -86,7 +87,7 @@ import {
   optionalString,
   parseInput,
   type Caller,
-} from './inputs'
+} from '../_shared/actionInputs'
 import {
   attachDriverDoc,
   commitDocument,
@@ -299,8 +300,11 @@ const CHARGE_SIDES: readonly ChargeSide[] = ['CUSTOMER', 'CARRIER']
 
 const CHARGE_CALCS: readonly ChargeCalc[] = ['FLAT', 'PER_MILE', 'PER_CWT', 'PERCENT']
 
-const AR_STATUSES: readonly ArStatus[] = ['DOCS_NEEDED', 'UNBILLED', 'UNPAID', 'PAID', 'INVOICE_NOT_NEEDED']
-/** B never infers invoicing or payment; UNPAID/PAID are written by step F only. */
+const AR_STATUSES: readonly ArStatus[] = ['DOCS_NEEDED', 'UNBILLED', 'UNPAID', 'PAID', 'INVOICE_NOT_NEEDED', 'LEGACY']
+/**
+ * B never infers invoicing or payment; UNPAID/PAID are written by step F only,
+ * and LEGACY is written by the Aljex backfill script, never by a person.
+ */
 const AR_STATUSES_WRITABLE: readonly ArStatus[] = ['DOCS_NEEDED', 'UNBILLED', 'INVOICE_NOT_NEEDED']
 
 const REFERENCE_LEVELS = ['ORDER', 'HANDLING_UNIT', 'PACKAGE', 'STOP'] as const
@@ -1516,6 +1520,20 @@ async function requireAdminForCancelDelete(action: string, caller: Caller, setti
   }
 }
 
+/**
+ * Step F: once an order is invoiced its money lives on the Invoice row, which
+ * this router cannot touch. Canceling or deleting the shipment under it would
+ * strand an open receivable, so both refuse and name the bill to void first.
+ */
+async function assertNoInvoicedOrders(shipmentId: string, verb: string): Promise<void> {
+  const orders = await queryIndex(ORDER_TABLE_NAME, IDX_ORDERS_BY_SHIPMENT, 'shipmentId', shipmentId)
+  const invoiced = orders.find((order) => order.arStatus === 'UNPAID' || order.arStatus === 'PAID')
+  if (invoiced) {
+    const label = optionalString(invoiced.invoiceNumber, 100) ?? optionalString(invoiced.invoiceId, 100) ?? 'an invoice'
+    throw new Error(`This shipment has invoice ${label}; void the invoice first, then ${verb} the shipment`)
+  }
+}
+
 async function setShipmentStatus(input: Row, caller: Caller): Promise<Row> {
   const shipmentId = assertString(input.shipmentId, 'shipmentId')
   const expectedUpdatedAt = assertExpectedUpdatedAt(input)
@@ -1535,6 +1553,7 @@ async function setShipmentStatus(input: Row, caller: Caller): Promise<Row> {
     await requireAdminForCancelDelete('CANCEL', caller, settings)
     if (current === 'CANCELED') throw new Error('That shipment is already canceled')
     if (!reason) throw new Error('A cancel reason is required')
+    await assertNoInvoicedOrders(shipmentId, 'cancel')
     patch.status = 'CANCELED'
     patch.previousStatus = current
     patch.cancelReason = reason
@@ -1624,6 +1643,7 @@ async function deleteShipment(input: Row, caller: Caller): Promise<Row> {
   if (!DELETABLE_STATUSES.includes(status)) {
     throw new Error(`A ${status} shipment cannot be deleted — cancel it first`)
   }
+  await assertNoInvoicedOrders(shipmentId, 'delete')
   const now = nowIso()
   await transact(
     [updateItemTx(SHIPMENT_TABLE_NAME, shipmentId, {
@@ -3717,6 +3737,13 @@ async function setArStatus(input: Row, caller: Caller): Promise<Row> {
 
   const order = await getById(ORDER_TABLE_NAME, orderId)
   if (!order) throw new Error(`Order not found: ${orderId}`)
+  const invoiceId = optionalString(order.invoiceId, 100)
+  if (invoiceId) {
+    // Step F: the invoice owns the ladder from UNPAID on. Hand-setting the order
+    // back to DOCS_NEEDED would leave an issued bill with nothing behind it.
+    const label = optionalString(order.invoiceNumber, 100) ?? invoiceId
+    throw new Error(`This order has invoice ${label}; void the invoice first`)
+  }
   const shipment = await getById(SHIPMENT_TABLE_NAME, String(order.shipmentId))
   if (!shipment) throw new Error(`Shipment not found: ${String(order.shipmentId)}`)
 

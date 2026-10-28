@@ -390,7 +390,16 @@ export interface Load extends ShipmentLoadFields {
   updatedBy: string
 }
 
-export type EntityType = 'Driver' | 'Load' | 'Shipment' | 'Order' | 'LoadCarrier' | 'LoadCharge' | 'LoadFinancials'
+export type EntityType =
+  | 'Driver'
+  | 'Load'
+  | 'Shipment'
+  | 'Order'
+  | 'LoadCarrier'
+  | 'LoadCharge'
+  | 'LoadFinancials'
+  | 'Invoice'
+  | 'ArPayment'
 export type AuditAction = 'create' | 'update' | 'delete'
 
 export interface AuditLogEntry {
@@ -521,6 +530,13 @@ export interface FactoringItem {
   /** The broker's accounts-payable address the invoice goes to. */
   apEmail?: string | null
   manualInvoicedAt?: string | null
+  // ── Raised by this system rather than by an intake e-mail (Step F) ────────
+  /** Null reads as EMAIL, so every row the intake wrote is untouched. */
+  source?: 'EMAIL' | 'TMS' | null
+  /** The issued invoice this row bills, and its order and shipment. */
+  invoiceId?: string | null
+  orderId?: string | null
+  shipmentId?: string | null
 }
 
 

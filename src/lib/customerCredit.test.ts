@@ -423,6 +423,11 @@ describe('creditBucketForOrder', () => {
   it('drops a deleted shipment even when it is mid-transit and unpaid', () => {
     expect(creditBucketForOrder({ status: 'IN_TRANSIT', deletedAt: '2026-10-05T00:00:00Z' }, 'UNPAID')).toBeNull()
   })
+
+  it('drops a legacy backfilled order — its freight is carried by its loads', () => {
+    expect(creditBucketForOrder({ status: 'DELIVERED', deletedAt: null }, 'LEGACY')).toBeNull()
+    expect(creditBucketForOrder({ status: 'IN_TRANSIT', deletedAt: null }, 'LEGACY')).toBeNull()
+  })
 })
 
 describe('creditExposureForOrders', () => {
@@ -441,6 +446,32 @@ describe('creditExposureForOrders', () => {
   it('treats a null revenue as zero and still counts the order', () => {
     const items = creditExposureForOrders(c, [makeOrder({ revenueCents: null })], [makeShipment()])
     expect(items).toEqual([{ bucket: 'OPEN', amountCents: 0 }])
+  })
+
+  it('exposes only the balance of a part-paid invoice', () => {
+    const order = makeOrder({ arStatus: 'UNPAID', revenueCents: 250_000, arBalanceCents: 90_000 })
+    expect(creditExposureForOrders(c, [order], [makeShipment()])).toEqual([
+      { bucket: 'INVOICED', amountCents: 90_000 },
+    ])
+  })
+
+  it('falls back to the revenue when an unpaid order carries no balance yet', () => {
+    const order = makeOrder({ arStatus: 'UNPAID', revenueCents: 250_000, arBalanceCents: null })
+    expect(creditExposureForOrders(c, [order], [makeShipment()])).toEqual([
+      { bucket: 'INVOICED', amountCents: 250_000 },
+    ])
+  })
+
+  it('exposes nothing for a paid order, balance or not', () => {
+    const paid = makeOrder({ arStatus: 'PAID', revenueCents: 250_000, arBalanceCents: 0 })
+    expect(creditExposureForOrders(c, [paid], [makeShipment()])).toEqual([])
+  })
+
+  it('ignores a stale balance on an order that is not invoiced yet', () => {
+    const order = makeOrder({ arStatus: 'UNBILLED', revenueCents: 250_000, arBalanceCents: 1 })
+    expect(creditExposureForOrders(c, [order], [makeShipment()])).toEqual([
+      { bucket: 'OPEN', amountCents: 250_000 },
+    ])
   })
 
   it('splits a customer\'s book across the four buckets', () => {
@@ -490,6 +521,31 @@ describe('creditExposure', () => {
     })
     expect(items).toHaveLength(2)
     expect(items.reduce((sum, i) => sum + i.amountCents, 0)).toBe(325_000)
+  })
+
+  it('carries a legacy order through its loads exactly once, never through the order', () => {
+    const items = creditExposure(c, {
+      orders: [makeOrder({ arStatus: 'LEGACY', revenueCents: 250_000 })],
+      shipments: [makeShipment()],
+      loads: [makeLoad({ id: 'l-legacy', customerId: c.id, orderId: 'o1', rate: 250_000 })],
+    })
+    expect(items).toEqual([{ bucket: 'OPEN', amountCents: 250_000 }])
+  })
+
+  it('still suppresses the loads of every order that is exposure in its own right', () => {
+    const items = creditExposure(c, {
+      orders: [
+        makeOrder({ id: 'o-legacy', shipmentId: 's-legacy', arStatus: 'LEGACY', revenueCents: 400_000 }),
+        makeOrder({ id: 'o-live', revenueCents: 100_000 }),
+      ],
+      shipments: [makeShipment(), makeShipment({ id: 's-legacy' })],
+      loads: [
+        makeLoad({ id: 'l-legacy', customerId: c.id, orderId: 'o-legacy', rate: 400_000 }),
+        makeLoad({ id: 'l-live', customerId: c.id, orderId: 'o-live', rate: 100_000 }),
+      ],
+    })
+    expect(items.reduce((sum, i) => sum + i.amountCents, 0)).toBe(500_000)
+    expect(items).toHaveLength(2)
   })
 })
 

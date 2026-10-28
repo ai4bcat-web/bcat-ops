@@ -17,6 +17,7 @@ import {
   DynamoDBDocumentClient,
   GetCommand,
   PutCommand,
+  QueryCommand,
   ScanCommand,
   UpdateCommand,
 } from '@aws-sdk/lib-dynamodb'
@@ -56,6 +57,10 @@ const CUSTOMER_TABLE = process.env.CUSTOMER_TABLE_NAME!
 const POD_TABLE = process.env.POD_DOCUMENT_TABLE_NAME
 const SUBMISSION_TABLE = process.env.DRIVER_SUBMISSION_TABLE_NAME
 const SUBMISSION_DOC_TABLE = process.env.DRIVER_SUBMISSION_DOC_TABLE_NAME
+// Step F: a shipment's own typed document rows — the third place a POD or a rate con can
+// be, and the only one a brokered load (no driver submission, no JobsDone text) ever uses.
+const SHIPMENT_DOC_TABLE = process.env.SHIPMENT_DOCUMENT_TABLE_NAME
+const IDX_DOCUMENTS_BY_SHIPMENT = 'shipmentDocumentsByShipmentIdAndUploadedAt'
 const POD_FUNCTION_NAME = process.env.POD_FUNCTION_NAME ?? ''
 const BUCKET = process.env.BUCKET_NAME!
 
@@ -134,8 +139,9 @@ async function findLoadByPro(pro: string): Promise<Row | null> {
     const r = await ddb.send(
       new ScanCommand({
         TableName: LOAD_TABLE,
+        // shipmentId / orderId carry a TMS-born load to its shipment's document rows.
         ProjectionExpression:
-          'id, aljexId, pickupNumber, rate, originCity, destinationCity, customer, customerId, rateConfirmKey, stops',
+          'id, aljexId, pickupNumber, rate, originCity, destinationCity, customer, customerId, rateConfirmKey, stops, shipmentId, orderId',
         ExclusiveStartKey,
       }),
     )
@@ -422,9 +428,119 @@ async function enhancedPodForSend(
   return pod
 }
 
-/** A POD for this load from either store. JobsDone first, since a human linked it there. */
-async function findPod(loadId: string, proNumber = ''): Promise<Row | null> {
-  return (await findJobsdonePod(loadId)) ?? (await findSubmittedPod(loadId, proNumber))
+/**
+ * Every typed document row on a shipment, newest first.
+ *
+ * Queried, not scanned: the index is `shipmentId` + `uploadedAt`, and a shipment holds a
+ * handful of rows, so one page is the whole answer in practice.
+ */
+async function shipmentDocuments(shipmentId: string): Promise<Row[]> {
+  if (!SHIPMENT_DOC_TABLE || !shipmentId) return []
+  const out: Row[] = []
+  let ExclusiveStartKey: Record<string, unknown> | undefined
+  do {
+    const r = await ddb.send(
+      new QueryCommand({
+        TableName: SHIPMENT_DOC_TABLE,
+        IndexName: IDX_DOCUMENTS_BY_SHIPMENT,
+        KeyConditionExpression: '#s = :s',
+        ExpressionAttributeNames: { '#s': 'shipmentId' },
+        ExpressionAttributeValues: { ':s': shipmentId },
+        // Newest upload first, so the first row that qualifies is the one to send.
+        ScanIndexForward: false,
+        ExclusiveStartKey,
+      }),
+    )
+    out.push(...((r.Items ?? []) as Row[]))
+    ExclusiveStartKey = r.LastEvaluatedKey
+  } while (ExclusiveStartKey)
+  return out
+}
+
+/**
+ * Is this row a document we may send to a factor at all?
+ *
+ * SUPERSEDED and VOID rows keep their bytes so history stays readable, and a
+ * carrier-portal upload is PENDING until somebody looks at it — neither is proof of
+ * anything. REJECTED is the explicit answer that it is not. Sending one would put a
+ * document the office refused in front of the people buying the invoice.
+ */
+function sendableDocument(doc: Row): boolean {
+  if (trim(doc.status) !== 'ACTIVE') return false
+  const review = trim(doc.reviewStatus)
+  if (review === 'PENDING' || review === 'REJECTED') return false
+  return !!trim(doc.s3Key)
+}
+
+/** The `{ originalKey, … }` shape uploadInvoiceDocuments reads, from a ShipmentDocument. */
+function shipmentDocRow(doc: Row, loadId: string, label: string): Row {
+  return {
+    id: doc.id,
+    loadId,
+    fileName: trim(doc.name) || `${label}-${String(doc.id).slice(-6)}.pdf`,
+    contentType: trim(doc.contentType) || 'application/pdf',
+    originalKey: trim(doc.s3Key),
+    createdAt: doc.uploadedAt,
+  }
+}
+
+/**
+ * The shipment's own POD, for a load that has one.
+ *
+ * A brokered load has no driver submission and no JobsDone text: its POD arrives through
+ * the carrier upload portal or a staff upload, and lands here. `loadId` unset means the
+ * document belongs to the shipment as a whole (a single-load shipment's POD usually
+ * does); a row naming a DIFFERENT load is another leg's paperwork and never counts.
+ */
+async function findShipmentPod(shipmentId: string, loadId: string): Promise<Row | null> {
+  const docs = await shipmentDocuments(shipmentId)
+  const hit = docs.find((d) => {
+    if (trim(d.type) !== 'POD' || !sendableDocument(d)) return false
+    const owner = trim(d.loadId)
+    return !owner || owner === loadId
+  })
+  return hit ? shipmentDocRow(hit, loadId, 'POD') : null
+}
+
+/**
+ * The shipment's own rate confirmation — the CUSTOMER side of it.
+ *
+ * What OTR buys is the broker's tender, so the order's `CUSTOMER_RATE_CON` is the
+ * document: `RATE_CON` in the Carrier section is what WE send a carrier, and uploading
+ * that instead would show the factor our cost. A Customer-section `RATE_CON` (a row
+ * typed before CUSTOMER_RATE_CON existed, or by a person who picked the plain type) is
+ * the fallback; the Carrier section is never read.
+ */
+async function findShipmentRatecon(
+  shipmentId: string,
+  loadId: string,
+  orderId: string,
+): Promise<Row | null> {
+  const docs = await shipmentDocuments(shipmentId)
+  const mine = (d: Row): boolean => {
+    const owner = trim(d.orderId)
+    return !!owner && (!orderId || owner === orderId)
+  }
+  const hit =
+    docs.find((d) => trim(d.type) === 'CUSTOMER_RATE_CON' && sendableDocument(d) && mine(d)) ??
+    docs.find((d) => trim(d.type) === 'RATE_CON' && sendableDocument(d) && mine(d))
+  return hit ? shipmentDocRow(hit, loadId, 'RateCon') : null
+}
+
+/**
+ * A POD for this load, from any of the three stores.
+ *
+ * JobsDone first, since a human linked it there; then the driver app; then the
+ * shipment's own documents, which is where a brokered load's POD lives. `shipmentId` is
+ * only known when the load belongs to a shipment — an own-fleet load that predates the
+ * shipment layer behaves exactly as before.
+ */
+async function findPod(loadId: string, proNumber = '', shipmentId = ''): Promise<Row | null> {
+  return (
+    (await findJobsdonePod(loadId)) ??
+    (await findSubmittedPod(loadId, proNumber)) ??
+    (await findShipmentPod(shipmentId, loadId))
+  )
 }
 
 /**
@@ -433,7 +549,9 @@ async function findPod(loadId: string, proNumber = ''): Promise<Row | null> {
  * The key on the Load wins: that is the one staff attached to the load itself, and it is
  * what the drawer shows. Failing that, a submission carrying a RATECON counts — the app
  * accepts rate confirmations as readily as PODs, and a document already in the building
- * should not have to be uploaded a second time to satisfy the queue.
+ * should not have to be uploaded a second time to satisfy the queue. Last, the shipment's
+ * own documents: a shipment booked in the TMS keeps the customer's tender there and
+ * nowhere else.
  */
 async function findRatecon(load: Row, proNumber = ''): Promise<Row | null> {
   const onLoad = trim(load.rateConfirmKey)
@@ -447,7 +565,10 @@ async function findRatecon(load: Row, proNumber = ''): Promise<Row | null> {
       createdAt: load.updatedAt,
     }
   }
-  return findSubmittedDoc(String(load.id), proNumber, 'RATECON')
+  return (
+    (await findSubmittedDoc(String(load.id), proNumber, 'RATECON')) ??
+    (await findShipmentRatecon(trim(load.shipmentId), String(load.id), trim(load.orderId)))
+  )
 }
 
 /**
@@ -486,8 +607,10 @@ async function buildReadiness(item: Row): Promise<{ readiness: OtrReadiness; loa
 
   const [rowCustomer, pod, ratecon] = await Promise.all([
     getCustomer((item.customerId ?? load?.customerId) as string | undefined),
-    load ? findPod(String(load.id), String(item.proNumber ?? '')) : Promise.resolve(null),
-    // Counts a rate con from EITHER store — see findRatecon. Reading only the key on the
+    load
+      ? findPod(String(load.id), String(item.proNumber ?? ''), trim(load.shipmentId))
+      : Promise.resolve(null),
+    // Counts a rate con from ANY store — see findRatecon. Reading only the key on the
     // Load reported one missing while it sat in a submission, and blocked the invoice.
     load ? findRatecon(load, String(item.proNumber ?? '')) : Promise.resolve(null),
   ])
@@ -636,7 +759,7 @@ async function uploadInvoiceDocuments(
 
   const proNumber = String(item.proNumber ?? '')
   const pod = await enhancedPodForSend(
-    await findPod(String(load.id), proNumber),
+    await findPod(String(load.id), proNumber, trim(load.shipmentId)),
     String(load.id),
     proNumber,
   )

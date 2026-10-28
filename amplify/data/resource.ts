@@ -18,6 +18,7 @@ import { otrActions } from '../functions/otr-actions/resource'
 import { dispatchActions } from '../functions/dispatch-actions/resource'
 import { tmsCarrierActions } from '../functions/tms-carrier-actions/resource'
 import { tmsTrackingActions } from '../functions/tms-tracking-actions/resource'
+import { tmsFinanceActions } from '../functions/tms-finance-actions/resource'
 
 // ExpenseCategory and ExpenseEntryMethod enums are defined inline on each
 // model field — Amplify Gen 2 does not require top-level enum declarations.
@@ -992,6 +993,17 @@ const schema = a.schema({
       podRequestEmailTemplate:  a.string(),       // must contain {url}
       bolTerms:                 a.string(),       // printed on every generated BOL
       documentDeleteAdminOnly:  a.boolean(),      // true — voiding a document is an admin act
+
+      // ── AR: invoicing & payments org defaults (Step F) ────────────────
+      // Taken with an atomic ADD, exactly like nextShipmentNumber: a failed
+      // generation skips a number rather than handing the same one out twice.
+      nextInvoiceNumber:        a.integer(),
+      invoiceTerms:             a.string(),      // printed at the foot of every invoice
+      invoiceEmailTemplate:     a.string(),      // must contain {number}
+      invoiceAttachTypes:       a.string().array(),  // ['POD','BOL'] on top of the customer's required docs
+      factorRemitTo:            a.json(),        // { name, address, email, noticeText }
+      arPostingAdminOnly:       a.boolean(),     // true — void/payment/credit/write-off/reversal
+      invoiceBatchEmail:        a.enum(['PER_INVOICE', 'PER_BILL_TO']),
     })
     // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
     // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
@@ -1110,12 +1122,23 @@ const schema = a.schema({
       customerRateCents: a.integer(),
       revenueCents:    a.integer(),
       // Invoicing and payment are never inferred: B writes DOCS_NEEDED, UNBILLED
-      // and INVOICE_NOT_NEEDED only. UNPAID/PAID belong to step F.
-      arStatus:        a.enum(['DOCS_NEEDED', 'UNBILLED', 'UNPAID', 'PAID', 'INVOICE_NOT_NEEDED']),
+      // and INVOICE_NOT_NEEDED only. UNPAID is written only by GENERATE_INVOICE and
+      // PAID only by RECORD_PAYMENT/WRITE_OFF, both inside tmsFinanceActions (step F).
+      // LEGACY (step F) is an Aljex-era order whose invoice went out before this system
+      // existed: it is never a worklist row and its credit falls back to the load rule.
+      arStatus:        a.enum(['DOCS_NEEDED', 'UNBILLED', 'UNPAID', 'PAID', 'INVOICE_NOT_NEEDED', 'LEGACY']),
       arStatusChangedAt: a.datetime(),
       invoiceId:       a.string(),
       invoiceEarly:    a.boolean(),          // bill before delivery
       readyToInvoiceAt: a.datetime(),
+      // ── AR (Step F) ─────────────────────────────────────────────────────
+      // Cached from the Invoice so the board, the credit math and the shipment
+      // card never have to read the invoice row to colour one cell.
+      invoiceNumber:   a.string(),
+      invoicedAt:      a.datetime(),
+      paidAt:          a.datetime(),
+      arBalanceCents:  a.integer(),          // what is still owed on this order
+      factoringItemId: a.string(),           // the OTR queue row Send to Factor wrote
       // ── Documents & delivery (Step E) ───────────────────────────────────
       // What the required-document gate decided last time anything changed.
       // `docsMissing: []` means complete; the board's Docs column reads it so
@@ -1135,6 +1158,9 @@ const schema = a.schema({
     .secondaryIndexes((index) => [
       index('shipmentId'),
       index('customerId').sortKeys(['pickupAppt']),
+      // Step F worklists: Docs needed / To invoice / Unpaid are each one query.
+      // Sparse by design — an order with no arStatusChangedAt is not a worklist row.
+      index('arStatus').sortKeys(['arStatusChangedAt']),
     ])
     .disableOperations(['subscriptions'])
     .authorization((allow) => [allow.authenticated().to(['read'])]),
@@ -1291,6 +1317,113 @@ const schema = a.schema({
       createdBy:       a.string().required(),
     })
     .secondaryIndexes((index) => [index('shipmentId').sortKeys(['sortOrder'])])
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  // ── AR: invoicing & payments (Step F) ──────────────────────────────────────
+  /*
+   * One issued bill for one order.
+   *
+   * The row's `id` IS the invoice number — put with `attribute_not_exists(id)`, the
+   * FactoringItem precedent — so two generations racing on the same counter cannot
+   * both land. `lines`, `references`, `billTo` and `remitTo` are a SNAPSHOT taken at
+   * issue: the charges may move afterwards (they cannot — generation freezes the
+   * load's financials — but the invoice does not care either way). Nothing re-reads
+   * them. A mistake is voided and re-issued, never edited.
+   *
+   * `arOpen` is the sparse marker 'OPEN', carried while ISSUED or PARTIAL and REMOVEd
+   * (never nulled — a NULL in an index key is rejected outright) on PAID or VOID, so
+   * the open book and the aging report are one query.
+   */
+  Invoice: a
+    .model({
+      number:          a.string().required(),   // same value as `id`
+      orderId:         a.string().required(),
+      shipmentId:      a.string().required(),
+      shipmentNumber:  a.string(),
+      customerId:      a.string().required(),
+      customerName:    a.string(),
+      billToId:        a.string(),
+      billTo:          a.json(),                // { name, address, email }
+      divisionKey:     a.string(),
+      status:          a.enum(['ISSUED', 'PARTIAL', 'PAID', 'VOID']),
+      invoiceDate:     a.string().required(),   // YYYY-MM-DD
+      issuedAt:        a.datetime().required(),
+      issuedBy:        a.string().required(),
+      dueAt:           a.string().required(),   // YYYY-MM-DD
+      termsDays:       a.integer().required(),
+      // The terms text as it was printed. Snapshotted, so re-rendering an old invoice
+      // reproduces the bill that was sent rather than today's settings.
+      termsText:       a.string(),
+      invoiceMonth:    a.string().required(),   // 'YYYY-MM' of invoiceDate
+      lines:           a.json(),                // InvoiceLine[] — the order's CUSTOMER charges
+      references:      a.json(),                // CUSTOMER|ALL OrderReference[] only
+      subtotalCents:   a.integer().required(),
+      totalCents:      a.integer().required(),
+      writtenOffCents: a.integer().required(),
+      balanceCents:    a.integer().required(),
+      arOpen:          a.string(),              // sparse 'OPEN'
+      paidAt:          a.datetime(),
+      remitTo:         a.json(),                // { name, address, email, noticeText }
+      factored:        a.boolean(),
+      factoringItemId: a.string(),
+      pdfKey:          a.string(),
+      pdfSizeBytes:    a.integer(),
+      pdfVersion:      a.integer(),
+      attachDocumentIds: a.string().array(),
+      sentAt:          a.datetime(),
+      sentTo:          a.string(),              // comma-joined, like ShipmentNotice.to
+      sentCount:       a.integer(),
+      markedSentAt:    a.datetime(),
+      markedSentBy:    a.string(),
+      markedSentNote:  a.string(),
+      lastNoticeId:    a.string(),
+      voidedAt:        a.datetime(),
+      voidedBy:        a.string(),
+      voidReason:      a.string(),
+      note:            a.string(),
+      createdBy:       a.string().required(),
+      updatedBy:       a.string().required(),
+      version:         a.integer().required(),
+    })
+    .secondaryIndexes((index) => [
+      index('customerId').sortKeys(['issuedAt']),
+      index('arOpen').sortKeys(['dueAt']),
+      index('invoiceMonth').sortKeys(['issuedAt']),
+    ])
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  /*
+   * Every cash receipt, credit memo, write-off and reversal, with its allocations.
+   *
+   * One model rather than four tables: each would otherwise need its own customer
+   * index, and `unappliedCents` — an overpayment kept as credit, or an unspent credit
+   * memo — is the same idea in all of them. A posted row is IMMUTABLE except for
+   * `unappliedCents` (spent down by a later payment, with a conditional ADD) and
+   * `reversedByPaymentId`. Nothing deletes one: a mistake gets a REVERSAL row.
+   */
+  ArPayment: a
+    .model({
+      customerId:      a.string().required(),
+      kind:            a.enum(['PAYMENT', 'CREDIT_MEMO', 'WRITE_OFF', 'REVERSAL']),
+      // The typed date at noon UTC, so the customer index sorts by the day the money
+      // arrived and a timezone cannot slide a receipt into the previous month.
+      receivedAt:      a.datetime().required(),
+      method:          a.enum(['CHECK', 'ACH', 'WIRE', 'CARD', 'FACTOR', 'OTHER']),
+      reference:       a.string(),
+      amountCents:     a.integer().required(),
+      appliedCents:    a.integer().required(),
+      unappliedCents:  a.integer().required(),
+      applications:    a.json(),                // [{ invoiceId, amountCents }]
+      creditApplications: a.json(),             // [{ paymentId, amountCents }]
+      invoiceId:       a.string(),              // WRITE_OFF names its invoice
+      reversesPaymentId:   a.string(),
+      reversedByPaymentId: a.string(),
+      note:            a.string(),
+      createdBy:       a.string().required(),
+    })
+    .secondaryIndexes((index) => [index('customerId').sortKeys(['receivedAt'])])
     .disableOperations(['subscriptions'])
     .authorization((allow) => [allow.authenticated().to(['read'])]),
 
@@ -1476,7 +1609,7 @@ const schema = a.schema({
       shipmentId:    a.string().required(),
       loadId:        a.string(),
       loadCarrierId: a.string(),
-      kind:          a.enum(['MILESTONE', 'POD_REQUEST', 'DOCUMENTS']),
+      kind:          a.enum(['MILESTONE', 'POD_REQUEST', 'DOCUMENTS', 'INVOICE']),
       // The CustomerNotification vocabulary; null on POD_REQUEST and DOCUMENTS.
       milestone:     a.string(),
       channel:       a.enum(['EMAIL', 'COPY']),
@@ -1792,6 +1925,12 @@ const schema = a.schema({
       otrDocsUploaded: a.json(), // { pod?: string, rateConfirmation?: string }
       // Last failure from OTR, surfaced on the row rather than only in logs.
       otrError:        a.string(),
+      // ── Step F: a row this system raised, rather than one an intake e-mail did.
+      // `source` null reads as EMAIL, so every existing row is untouched.
+      source:          a.enum(['EMAIL', 'TMS']),
+      invoiceId:       a.string(),
+      orderId:         a.string(),
+      shipmentId:      a.string(),
     })
     // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
     // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
@@ -2874,6 +3013,21 @@ const schema = a.schema({
     .authorization((allow) => [allow.authenticated()])
     .handler(a.handler.function(tmsTrackingActions)),
 
+  // Step F: everything that posts money against a customer — generate/e-mail/void an
+  // invoice, receive a payment, issue a credit, write off, reverse, hand an invoice to
+  // the factor. Its own router because tmsShipmentActions admits anyone with
+  // `page-loads`, and a ledger is not a dispatch board: this one is gated to
+  // owner / ADMIN / `page-invoicing`, with every posting action admin-only by default.
+  tmsFinanceActions: a
+    .mutation()
+    .arguments({
+      action: a.string().required(),
+      input:  a.json(),
+    })
+    .returns(a.json())
+    .authorization((allow) => [allow.authenticated()])
+    .handler(a.handler.function(tmsFinanceActions)),
+
   // Phase 1: server-side geocoding, Places autocomplete, and place details.
   tmsGeocode: a
     .query()
@@ -3008,6 +3162,9 @@ const schema = a.schema({
   // Step D: tmsTrackingActions owns TrackingLink through the SDK and reads
   // Shipment/Order/Load/LoadCarrier/Customer over IAM.
   allow.resource(tmsTrackingActions).to(['query', 'mutate']),
+  // Step F: tmsFinanceActions owns Invoice and ArPayment through the SDK and reads
+  // Order/Shipment/Load/LoadCharge/Customer/Division over IAM.
+  allow.resource(tmsFinanceActions).to(['query', 'mutate']),
 ])
 
 export type Schema = ClientSchema<typeof schema>

@@ -142,13 +142,17 @@ export function creditExposureForCustomer(
  * it is paid — or was never going to be billed — there is nothing left to carry.
  * A draft, a tender nobody accepted, a cancelation and a deleted shipment are all
  * work we have not committed to, so none of them consume credit.
+ *
+ * LEGACY is not exposure through this path at all: a backfilled order carries no
+ * trustworthy AR ladder, so its freight is counted the old way, off its loads
+ * (see `creditExposure`).
  */
 export function creditBucketForOrder(
   shipment: Pick<ShipmentRecord, 'status' | 'deletedAt'>,
   arStatus: ArStatus | null | undefined,
 ): CreditBucket | null {
   if (shipment.deletedAt) return null
-  if (arStatus === 'PAID' || arStatus === 'INVOICE_NOT_NEEDED') return null
+  if (arStatus === 'PAID' || arStatus === 'INVOICE_NOT_NEEDED' || arStatus === 'LEGACY') return null
   if (arStatus === 'UNPAID') return 'INVOICED'
   return MOVEMENT_BUCKET[shipment.status]
 }
@@ -178,6 +182,11 @@ const MOVEMENT_BUCKET: Record<ShipmentStatus, CreditBucket | null> = {
  * Orders always carry a real `customerId`, so there is no name matching here — an
  * order whose shipment is missing from `shipments` is skipped rather than guessed
  * at, because its status is what decides the bucket.
+ *
+ * An invoiced order is exposed for what is still owed on it, not for what it was
+ * worth: a half-paid invoice carries only its balance, and a PAID one carries
+ * nothing because it has no bucket. `arBalanceCents` is null until an invoice
+ * exists, so the revenue stands in for it everywhere else.
  */
 export function creditExposureForOrders(
   c: CustomerRecord,
@@ -192,7 +201,10 @@ export function creditExposureForOrders(
     if (!shipment) continue
     const bucket = creditBucketForOrder(shipment, order.arStatus)
     if (!bucket) continue
-    items.push({ bucket, amountCents: order.revenueCents ?? 0 })
+    const revenueCents = order.revenueCents ?? 0
+    const amountCents =
+      order.arStatus === 'UNPAID' ? (order.arBalanceCents ?? revenueCents) : revenueCents
+    items.push({ bucket, amountCents })
   }
   return items
 }
@@ -204,13 +216,22 @@ export function creditExposureForOrders(
  * mapped to an order — the legacy own-fleet rows — keep their load-derived exposure,
  * so nothing drops out of the number during the migration and nothing is counted
  * twice once a load has an `orderId`.
+ *
+ * A LEGACY order is the one place both eras meet: it has an `orderId` on its loads
+ * but no exposure of its own, so the same de-duplication rule lets its loads back
+ * into the load path. Every other order id still suppresses its loads, so no
+ * freight is ever counted twice.
  */
 export function creditExposure(
   c: CustomerRecord,
   data: { orders?: OrderRecord[]; shipments?: ShipmentRecord[]; loads?: Load[] },
 ): CreditExposureItem[] {
-  const items = creditExposureForOrders(c, data.orders ?? [], data.shipments ?? [])
-  const legacy = (data.loads ?? []).filter((l) => !l.orderId)
+  const orders = data.orders ?? []
+  const items = creditExposureForOrders(c, orders, data.shipments ?? [])
+  const legacyOrderIds = new Set(
+    orders.filter((o) => o.arStatus === 'LEGACY').map((o) => o.id),
+  )
+  const legacy = (data.loads ?? []).filter((l) => !l.orderId || legacyOrderIds.has(l.orderId))
   return [...items, ...creditExposureForCustomer(c, legacy)]
 }
 
@@ -218,6 +239,12 @@ export function creditExposure(
  * The credit answer for one customer, optionally including an order we have not
  * booked yet. `projectedCents` is what CHECK_CREDIT and SUBMIT_ORDER add on top of
  * current exposure before deciding whether the limit is blown.
+ *
+ * `oldestOpenInvoiceDays` is threaded straight through to `summarizeCredit`, which
+ * is the only input to the `INVOICE_PAST_MAX_DAYS_LATE` block reason. Nothing here
+ * derives it: `data` carries orders and loads, never invoices, so a caller that
+ * wants the past-due block has to read the customer's open invoices and pass the
+ * age of the oldest one. Omitted, the reason can never fire.
  */
 export function creditSummaryForCustomer(
   c: CustomerRecord,

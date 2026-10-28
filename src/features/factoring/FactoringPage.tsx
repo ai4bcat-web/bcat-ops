@@ -2,6 +2,7 @@ import { Fragment, useMemo, useState, useCallback } from 'react'
 import {
   RefreshCw, Search, Inbox, Mail, Loader2, AlertCircle, Trash2, ChevronRight, ChevronDown,
 } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { OtrPanel } from './OtrPanel'
@@ -716,6 +717,24 @@ export function FactoringPage() {
                         {/* The PRO opens the load it names — the expander is the chevron
                             beside it, so one control does not have to mean two things. */}
                         <ProLink loadId={item.loadId} proNumber={item.proNumber} />
+                        {/* Raised here rather than mailed in: the invoice it bills is ours,
+                            and the queue row is only the OTR half of it. */}
+                        {item.source === 'TMS' && (
+                          <>
+                            <span style={{ display: 'inline-flex', alignItems: 'center', height: 18, padding: '0 6px', borderRadius: 6, border: '1px solid #bfdbfe', background: '#eff6ff', color: '#1d4ed8', fontSize: 10, fontWeight: 700, letterSpacing: '0.02em' }}>
+                              TMS
+                            </span>
+                            {item.invoiceId && (
+                              <Link
+                                to={`/ar/invoices/${item.invoiceId}`}
+                                title="Open this invoice"
+                                style={{ fontSize: 12, color: 'var(--ds-accent, #2563eb)', textDecoration: 'underline', textUnderlineOffset: 3 }}
+                              >
+                                {item.invoiceId}
+                              </Link>
+                            )}
+                          </>
+                        )}
                         </span>
                       </td>
                       <td style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>

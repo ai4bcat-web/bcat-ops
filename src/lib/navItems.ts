@@ -1,7 +1,7 @@
 import {
   LayoutDashboard, CalendarDays, Table2, Inbox,
   Truck, Wrench, Fuel, History, CalendarClock,
-  LineChart, Wallet, Boxes, CalendarOff, FileText, FileCheck2, Receipt, Car, CalendarCheck, Scale, Gauge, Umbrella, MessageSquare, FolderOpen, SlidersHorizontal, Building2, MapPin, TrendingUp, Banknote, PackageCheck, Package, PhoneCall, ClipboardList, Clock, type LucideIcon,
+  LineChart, Wallet, Boxes, CalendarOff, FileText, FileCheck2, Receipt, Car, CalendarCheck, Scale, Gauge, Umbrella, MessageSquare, FolderOpen, SlidersHorizontal, Building2, MapPin, TrendingUp, Banknote, PackageCheck, Package, PhoneCall, ClipboardList, Clock, FileSpreadsheet, type LucideIcon,
 } from 'lucide-react'
 
 export interface NavItem {
@@ -56,6 +56,9 @@ export const NAV_GROUPS: NavSection[] = [
       { to: '/intake',    label: 'Intake',    icon: Inbox,           pageKey: 'intake', badgeKey: 'intake' },
       { to: '/pods',      label: 'PODs',      icon: PackageCheck,    pageKey: 'pods' },
       { to: '/factoring', label: 'Factoring Queue', icon: Banknote, pageKey: 'factoring' },
+      // Invoicing and the cash against it. Directly after the factoring queue: a factored
+      // invoice is raised here and submitted to OTR there.
+      { to: '/ar', label: 'Accounts Receivable', icon: FileSpreadsheet, pageKey: 'invoicing', badgeKey: 'arToInvoice' },
       { to: '/vendor-ap', label: 'Vendor AP Queue', icon: Receipt, pageKey: 'vendorAp' },
       // The directory: reusable customers + locations behind the Load form.
       { to: '/customers', label: 'Customers', icon: Building2,       pageKey: 'customers' },

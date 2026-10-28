@@ -21,14 +21,16 @@ import { CarrierSection } from './CarrierSection'
 import { TrackingSection } from './TrackingSection'
 import { DocumentsSection } from './DocumentsSection'
 import { DeliveryCard } from './DeliveryCard'
+import { ArCard } from './ArCard'
 import { LoadActions } from './StatusActions'
 import { DraftOrderEditor } from './DraftOrderEditor'
 import type { ShipmentActions } from '../useShipmentActions'
+import { type DetailTabKey } from '../shipmentViews'
 import type {
   ChargeCodeDef, CustomerRecord, LocationRecord, PricingDefaults, RequiredReference, ShipmentBundle,
 } from '@/types/tms'
 
-const TABS = [
+const TABS: readonly { key: DetailTabKey; label: string; icon: typeof Info }[] = [
   { key: 'summary', label: 'Summary', icon: Info },
   { key: 'details', label: 'Details', icon: ClipboardList },
   { key: 'stops', label: 'Stops', icon: MapPin },
@@ -36,9 +38,7 @@ const TABS = [
   { key: 'tracking', label: 'Tracking', icon: Radar },
   { key: 'documents', label: 'Documents', icon: FileText },
   { key: 'financials', label: 'Financials', icon: DollarSign },
-] as const
-
-type TabKey = typeof TABS[number]['key']
+]
 
 export interface ShipmentDetailProps {
   bundle: ShipmentBundle
@@ -51,15 +51,17 @@ export interface ShipmentDetailProps {
   credit: CreditSummary | null
   currentUser: string
   isAdmin: boolean
+  /** Which tab a deep link asked for; Summary when nobody said. */
+  initialTab?: DetailTabKey
   actions: ShipmentActions
 }
 
 export function ShipmentDetail(props: ShipmentDetailProps) {
   const {
     bundle, customer, locations, catalog, pricing, marginFloorBps, requiredReferences, credit, currentUser,
-    isAdmin, actions,
+    isAdmin, initialTab, actions,
   } = props
-  const [tab, setTab] = useState<TabKey>('summary')
+  const [tab, setTab] = useState<DetailTabKey>(initialTab ?? 'summary')
   const { drivers } = useDrivers()
   const { equipment } = useTrucks()
   const trucks = equipment.filter((e) => e.type === 'truck')
@@ -138,11 +140,11 @@ export function ShipmentDetail(props: ShipmentDetailProps) {
                 : '—'}
             />
             <Field label="Next check call" value={load?.nextCheckCallAt ? formatDateTime(load.nextCheckCallAt) : '—'} />
-            <Field label="AR" value={order?.arStatus ?? '—'} />
             <Field label="Revenue" value={`$${formatCents(totals.revenueCents)}`} />
             <Field label="Cost" value={`$${formatCents(totals.costCents)}`} />
             <Field label="Profit" value={`$${formatCents(totals.profitCents)} (${(totals.marginBps / 100).toFixed(1)}%)`} />
           </dl>
+          <ArCard bundle={bundle} onReload={actions.reload} />
           {shipment.holdReason && <Note label="On hold" text={shipment.holdReason} />}
           {shipment.cancelReason && <Note label="Canceled" text={shipment.cancelReason} />}
           {shipment.tenderRejectReason && <Note label="Tender rejected" text={shipment.tenderRejectReason} />}
@@ -177,7 +179,6 @@ export function ShipmentDetail(props: ShipmentDetailProps) {
                 arStatus={order?.arStatus ?? null}
                 isAdmin={isAdmin}
                 handlers={actions.load}
-                onReload={actions.reload}
                 onRateCon={() => setTab('carrier')}
               />
             )}

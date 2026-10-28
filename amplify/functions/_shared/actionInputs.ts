@@ -1,13 +1,13 @@
 /**
- * What an AppSync request to this router carries, and how each field is checked.
+ * What an AppSync request to a TMS action router carries, and how each field is checked.
  *
- * These started inside `handler.ts` and moved out when step E added
- * `documents.ts`: both modules validate the same kinds of field, and a second set
- * of near-identical validators would be two places for one rule to drift. Nothing
- * here reaches for a client or an environment variable, so either module can call
- * any of it without arranging anything first.
+ * These started inside `tms-shipment-actions/handler.ts`, moved out when step E added
+ * `documents.ts`, and moved here when step F added `tms-finance-actions`: four modules
+ * validate the same kinds of field, and a second set of near-identical validators would
+ * be two places for one rule to drift. Nothing here reaches for a client or an
+ * environment variable, so any module can call any of it without arranging anything.
  */
-import type { Row } from '../_shared/shipmentStore'
+import type { Row } from './shipmentStore'
 
 /** Element-validated JSON arrays are capped so one request cannot blow the item size. */
 export const MAX_JSON_ELEMENTS = 100

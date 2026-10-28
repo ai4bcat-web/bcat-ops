@@ -45,7 +45,7 @@ import {
   optionalInteger,
   optionalString,
   type Caller,
-} from './inputs'
+} from '../_shared/actionInputs'
 import {
   ACCEPTED_CONTENT_TYPES,
   CARRIER_UPLOADABLE_TYPES,

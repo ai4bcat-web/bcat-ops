@@ -82,7 +82,16 @@ vi.mock('@/hooks/useDirectory', () => ({
   }),
 }))
 vi.mock('@/hooks/useCustomerOrders', () => ({
-  useCustomerOrders: () => ({ loads: [], lastLoadAt: null, loading: false, error: null, refetch: vi.fn() }),
+  useCustomerOrders: () => ({
+    orders: [], shipments: [], loads: [], legacyLoads: [], lastLoadAt: null,
+    loading: false, error: null, refetch: vi.fn(),
+  }),
+}))
+vi.mock('@/hooks/useCustomerAr', () => ({
+  useCustomerAr: () => ({
+    invoices: [], payments: [], openCents: 0, unappliedCents: 0,
+    loading: false, error: null, refresh: vi.fn(async () => {}),
+  }),
 }))
 vi.mock('@/lib/apiClient', () => ({
   listDivisions: vi.fn(async () => [{ id: 'd1', key: 'BCAT_LOGISTICS', name: 'BCAT Logistics', active: true, createdAt: '', updatedAt: '' } satisfies Division]),

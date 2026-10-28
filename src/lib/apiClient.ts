@@ -21,6 +21,8 @@ import type {
   TrackingContact, TrackingLinkRecord, CustomerNotification,
   ShipmentDocumentRecord, ShipmentDocumentType, ShipmentDocumentAudience,
   ShipmentNoticeRecord, DocGateResult,
+  InvoiceRecord, ArPaymentRecord, ArPaymentMethod, ArSettings, ArStatus,
+  PaymentApplication, CreditApplication,
 } from '@/types/tms'
 import type { CreditSummary } from '@/lib/customerCredit'
 import { isActiveDirectoryRecord } from '@/lib/tmsDirectory'
@@ -767,6 +769,24 @@ const FACTORING_ITEM_FIELDS = `
   otrDocsUploaded otrError
   customerId manualReason manualSteps apEmail manualInvoicedAt
 `
+// Step F's columns: a row this system raised from an issued invoice rather than one an
+// intake e-mail did. Its own flag, like every other generation here — one unhandled
+// throw on a backend that predates the deploy empties the whole factoring queue.
+const FACTORING_ITEM_V2_FIELDS = ['source', 'invoiceId', 'orderId', 'shipmentId']
+let factoringItemsHaveTms = true
+
+/** Every FactoringItem read or write, with step F's group dropped and retried pre-deploy. */
+async function readFactoring<T>(run: (fields: string) => Promise<T>): Promise<T> {
+  for (;;) {
+    try {
+      return await run(factoringItemsHaveTms ? `${FACTORING_ITEM_FIELDS} ${FACTORING_ITEM_V2_FIELDS.join(' ')}` : FACTORING_ITEM_FIELDS)
+    } catch (err) {
+      if (!factoringItemsHaveTms || !fieldNamed(FACTORING_ITEM_V2_FIELDS, err)) throw err
+      console.warn('[apiClient] backend has no TMS fields on FactoringItem yet — querying without them until deploy')
+      factoringItemsHaveTms = false
+    }
+  }
+}
 
 /**
  * AppSync hands an `a.json()` column back as a JSON *string*, so the three JSON columns
@@ -793,20 +813,22 @@ function parseFactoringJson(item: FactoringItem): FactoringItem {
 
 /** Fetch every FactoringItem page so direct DynamoDB email inserts are never missed. */
 export async function listFactoringItems(): Promise<FactoringItem[]> {
-  const items: FactoringItem[] = []
-  let nextToken: string | null = null
-  do {
-    const result = await client.graphql({
-      query: `query ListFactoringItems($nextToken: String) { listFactoringItems(limit: 1000, nextToken: $nextToken) { items { ${FACTORING_ITEM_FIELDS} } nextToken } }`,
-      variables: { nextToken },
-    }) as { data: { listFactoringItems: { items: (FactoringItem | null)[]; nextToken?: string | null } } }
-    const page = result.data.listFactoringItems
-    for (const item of page.items ?? []) {
-      if (item) items.push(parseFactoringJson(item))
-    }
-    nextToken = page.nextToken ?? null
-  } while (nextToken)
-  return items
+  return readFactoring(async (fields) => {
+    const items: FactoringItem[] = []
+    let nextToken: string | null = null
+    do {
+      const result = await client.graphql({
+        query: `query ListFactoringItems($nextToken: String) { listFactoringItems(limit: 1000, nextToken: $nextToken) { items { ${fields} } nextToken } }`,
+        variables: { nextToken },
+      }) as { data: { listFactoringItems: { items: (FactoringItem | null)[]; nextToken?: string | null } } }
+      const page = result.data.listFactoringItems
+      for (const item of page.items ?? []) {
+        if (item) items.push(parseFactoringJson(item))
+      }
+      nextToken = page.nextToken ?? null
+    } while (nextToken)
+    return items
+  })
 }
 
 /** Staff may update status; email intake owns creation. */
@@ -814,11 +836,13 @@ export async function updateFactoringItem(
   id: string,
   patch: { status: FactoringItemStatus },
 ): Promise<FactoringItem> {
-  const result = await client.graphql({
-    query: `mutation UpdateFactoringItem($input: UpdateFactoringItemInput!) { updateFactoringItem(input: $input) { ${FACTORING_ITEM_FIELDS} } }`,
-    variables: { input: { id, ...patch } },
-  }) as { data: { updateFactoringItem: FactoringItem } }
-  return parseFactoringJson(result.data.updateFactoringItem)
+  return readFactoring(async (fields) => {
+    const result = await client.graphql({
+      query: `mutation UpdateFactoringItem($input: UpdateFactoringItemInput!) { updateFactoringItem(input: $input) { ${fields} } }`,
+      variables: { input: { id, ...patch } },
+    }) as { data: { updateFactoringItem: FactoringItem } }
+    return parseFactoringJson(result.data.updateFactoringItem)
+  })
 }
 
 /**
@@ -841,11 +865,13 @@ export async function setFactoringManualFields(
     const v = (value ?? '').trim()
     if (v) cleaned[key] = v
   }
-  const result = await client.graphql({
-    query: `mutation UpdateFactoringItem($input: UpdateFactoringItemInput!) { updateFactoringItem(input: $input) { ${FACTORING_ITEM_FIELDS} } }`,
-    variables: { input: { id, otrManualFields: JSON.stringify(cleaned) } },
-  }) as { data: { updateFactoringItem: FactoringItem } }
-  return parseFactoringJson(result.data.updateFactoringItem)
+  return readFactoring(async (selection) => {
+    const result = await client.graphql({
+      query: `mutation UpdateFactoringItem($input: UpdateFactoringItemInput!) { updateFactoringItem(input: $input) { ${selection} } }`,
+      variables: { input: { id, otrManualFields: JSON.stringify(cleaned) } },
+    }) as { data: { updateFactoringItem: FactoringItem } }
+    return parseFactoringJson(result.data.updateFactoringItem)
+  })
 }
 
 /** The model authorizes deletion only for the Cognito ADMIN group. */
@@ -1105,12 +1131,18 @@ const TMS_SETTINGS_V6_FIELDS = [
   'milestoneNoticesEnabled', 'podRequestEnabled', 'requiredCarrierUploadTypes', 'uploadLinkExpiryDays',
   'milestoneEmailTemplate', 'podRequestEmailTemplate', 'bolTerms', 'documentDeleteAdminOnly',
 ]
-const TMS_SETTINGS_JSON_FIELDS: (keyof TmsSettings)[] = ['accessorialCodes', 'loadStatusRules', 'defaultRequiredReferences', 'chargeCodes', 'quickPayTiers', 'trackingContact']
+// Step F's AR settings. Its own flag again, for the same reason.
+const TMS_SETTINGS_V7_FIELDS = [
+  'nextInvoiceNumber', 'invoiceTerms', 'invoiceEmailTemplate', 'invoiceAttachTypes',
+  'factorRemitTo', 'arPostingAdminOnly', 'invoiceBatchEmail',
+]
+const TMS_SETTINGS_JSON_FIELDS: (keyof TmsSettings)[] = ['accessorialCodes', 'loadStatusRules', 'defaultRequiredReferences', 'chargeCodes', 'quickPayTiers', 'trackingContact', 'factorRemitTo']
 let settingsHaveV2 = true
 let settingsHaveV3 = true
 let settingsHaveV4 = true
 let settingsHaveV5 = true
 let settingsHaveV6 = true
+let settingsHaveV7 = true
 const tmsSettingsFields = () => [
   TMS_SETTINGS_FIELDS_BASE,
   settingsHaveV2 ? TMS_SETTINGS_V2_FIELDS.join(' ') : '',
@@ -1118,6 +1150,7 @@ const tmsSettingsFields = () => [
   settingsHaveV4 ? TMS_SETTINGS_V4_FIELDS.join(' ') : '',
   settingsHaveV5 ? TMS_SETTINGS_V5_FIELDS.join(' ') : '',
   settingsHaveV6 ? TMS_SETTINGS_V6_FIELDS.join(' ') : '',
+  settingsHaveV7 ? TMS_SETTINGS_V7_FIELDS.join(' ') : '',
 ].filter(Boolean).join(' ')
 const fieldNamed = (names: string[], err: unknown) => {
   const msg = safeStringify(err)
@@ -1268,7 +1301,12 @@ export async function getTmsSettings(): Promise<TmsSettings | null> {
     try {
       return await run()
     } catch (err) {
-      if (attempt >= 5) throw err
+      if (attempt >= 6) throw err
+      if (settingsHaveV7 && fieldNamed(TMS_SETTINGS_V7_FIELDS, err)) {
+        console.warn('[apiClient] backend has no TmsSettings AR fields yet — querying without them until deploy')
+        settingsHaveV7 = false
+        continue
+      }
       if (settingsHaveV6 && fieldNamed(TMS_SETTINGS_V6_FIELDS, err)) {
         console.warn('[apiClient] backend has no TmsSettings document fields yet — querying without them until deploy')
         settingsHaveV6 = false
@@ -1352,13 +1390,27 @@ const ORDER_DOC_FIELDS = [
   'docsRequired', 'docsMissing', 'docsCheckedAt', 'docsOverrideAt', 'docsOverrideBy', 'docsOverrideNote',
 ]
 let ordersHaveDocs = true
+// Step F's cached invoice facts, so a board row can show the number and what is still
+// owed without opening the Invoice. Its own flag and its own retry, one generation
+// later than the document fields above.
+const ORDER_AR_FIELDS = ['invoiceNumber', 'invoicedAt', 'paidAt', 'arBalanceCents', 'factoringItemId']
+let ordersHaveAr = true
 
-/** Every Order read, with step E's group dropped and retried if the backend predates it. */
+/** Every Order read, with each newer group dropped and retried if the backend predates it. */
 async function readOrders<T>(run: (fields: string) => Promise<T>): Promise<T> {
   for (;;) {
     try {
-      return await run(ordersHaveDocs ? `${ORDER_FIELDS} ${ORDER_DOC_FIELDS.join(' ')}` : ORDER_FIELDS)
+      return await run([
+        ORDER_FIELDS,
+        ordersHaveDocs ? ORDER_DOC_FIELDS.join(' ') : '',
+        ordersHaveAr ? ORDER_AR_FIELDS.join(' ') : '',
+      ].filter(Boolean).join(' '))
     } catch (err) {
+      if (ordersHaveAr && fieldNamed(ORDER_AR_FIELDS, err)) {
+        console.warn('[apiClient] backend has no AR fields on Order yet — querying without them until deploy')
+        ordersHaveAr = false
+        continue
+      }
       if (!ordersHaveDocs || !fieldNamed(ORDER_DOC_FIELDS, err)) throw err
       console.warn('[apiClient] backend has no document fields on Order yet — querying without them until deploy')
       ordersHaveDocs = false
@@ -4665,4 +4717,398 @@ export async function uploadDispatchMedia(file: File): Promise<string> {
   const key = `dispatch-media/out/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`
   await uploadData({ path: key, data: file, options: { contentType: file.type || 'application/octet-stream' } }).result
   return key
+}
+
+// ── AR: invoicing & payments (tmsFinanceActions, Step F) ─────────────────────
+//
+// Money is posted by exactly one Lambda, the way the shipment layer is: every write is
+// an action on `tmsFinanceActions`, and the reads come straight off the Invoice and
+// ArPayment indexes. Both models arrive with step F's deploy — until it lands AppSync
+// has no such query at all, so the reads degrade to "no invoices" rather than failing
+// the page, the same bargain the document models strike above.
+
+export type {
+  InvoiceRecord, InvoiceLine, InvoiceStatus, InvoiceBillTo, InvoiceBatchEmailMode, RemitTo,
+  ArPaymentRecord, ArPaymentKind, ArPaymentMethod, PaymentApplication, CreditApplication,
+  ArSettings,
+} from '@/types/tms'
+
+const INVOICE_FIELDS = `
+  id number orderId shipmentId shipmentNumber customerId customerName billToId billTo
+  divisionKey status invoiceDate issuedAt issuedBy dueAt termsDays invoiceMonth
+  lines references subtotalCents totalCents paidCents writtenOffCents balanceCents
+  arOpen paidAt remitTo factored factoringItemId
+  pdfKey pdfSizeBytes pdfVersion attachDocumentIds
+  sentAt sentTo sentCount markedSentAt markedSentBy lastNoticeId
+  voidedAt voidedBy voidReason note
+  createdBy updatedBy version createdAt updatedAt
+`
+const INVOICE_JSON_FIELDS: (keyof InvoiceRecord)[] = ['billTo', 'lines', 'references', 'remitTo']
+
+const AR_PAYMENT_FIELDS = `
+  id customerId kind receivedAt method reference
+  amountCents appliedCents unappliedCents applications creditApplications
+  invoiceId reversesPaymentId reversedByPaymentId note
+  createdBy createdAt updatedAt
+`
+const AR_PAYMENT_JSON_FIELDS: (keyof ArPaymentRecord)[] = ['applications', 'creditApplications']
+
+/**
+ * Parse the `a.json()` columns of one AR row, the way `parseFactoringJson` does for the
+ * factoring queue: AppSync hands them back as JSON *strings* (sometimes double-encoded,
+ * because the Lambda stringifies into the column), so nothing can read a property off
+ * `invoice.lines` until they are unwrapped.
+ *
+ * A column that is absent or will not parse comes back `null` rather than throwing or
+ * leaking the raw string: one malformed line snapshot must not blank the whole AR page,
+ * and a caller reading `lines ?? []` then sees an empty invoice instead of a crash.
+ */
+export function parseArJson<T extends object>(row: T, fields: readonly (keyof T)[]): T {
+  const out = { ...row }
+  for (const field of fields) {
+    const value: unknown = out[field]
+    if (value == null) {
+      out[field] = null as T[typeof field]
+      continue
+    }
+    if (typeof value !== 'string') continue
+    const parsed = unwrapJson(value)
+    if (typeof parsed === 'string') {
+      console.warn('[ar] could not parse', String(field), 'on', (row as { id?: string }).id)
+      out[field] = null as T[typeof field]
+      continue
+    }
+    out[field] = parsed as T[typeof field]
+  }
+  return out
+}
+
+// Invoice, ArPayment and the Order arStatus index all arrive with step F's deploy, and
+// until then the error names the *query*, not a field, so the field-level self-heal
+// cannot see it. Degrade to an empty book rather than throwing on every AR read.
+let arModelsAvailable = true
+const isMissingArModel = (err: unknown) =>
+  /Cannot query field ['"](listInvoice|getInvoice|listArPayment|listOrderByArStatus)|Unknown type ['"](Invoice|ArPayment|ArStatus)/i
+    .test(safeStringify(err))
+
+/** False once a read proved the backend predates the AR models. */
+export const arModelsDeployed = () => arModelsAvailable
+
+function forgetArModels(err: unknown): void {
+  if (!isMissingArModel(err)) throw err
+  console.warn('[apiClient] backend has no AR models yet — reading no invoices until deploy')
+  arModelsAvailable = false
+}
+
+/**
+ * Every AR write. Same contract as `shipmentAction`: the Lambda's own refusal ("order
+ * is not UNBILLED", "payment exceeds the balance") is rethrown as the Error message, so
+ * the toast shows the real reason instead of `[object Object]`.
+ */
+export async function financeAction<T>(action: string, input: unknown): Promise<T> {
+  let r: { data: { tmsFinanceActions: unknown } }
+  try {
+    r = await client.graphql({
+      query: `mutation TmsFinanceActions($action: String!, $input: AWSJSON!) { tmsFinanceActions(action: $action, input: $input) }`,
+      variables: { action, input: JSON.stringify(input) },
+    }) as { data: { tmsFinanceActions: unknown } }
+  } catch (err) {
+    throw new Error(graphqlErrorText(err) || `${action} failed`, { cause: err })
+  }
+  const v = unwrapJson(r.data.tmsFinanceActions)
+  if (v == null) throw new Error(`${action} returned no result`)
+  return v as T
+}
+
+// ── AR reads ─────────────────────────────────────────────────────────────────
+
+export async function getInvoice(id: string): Promise<InvoiceRecord | null> {
+  if (!arModelsAvailable) return null
+  try {
+    const r = await client.graphql({
+      query: `query GetInvoice($id: ID!) { getInvoice(id: $id) { ${INVOICE_FIELDS} } }`,
+      variables: { id },
+    }) as { data: { getInvoice: InvoiceRecord | null } }
+    return r.data.getInvoice ? parseArJson(r.data.getInvoice, INVOICE_JSON_FIELDS) : null
+  } catch (err) {
+    forgetArModels(err)
+    return null
+  }
+}
+
+/** One customer's bills, newest issued first — the order the customer AR tab renders. */
+export async function listInvoicesByCustomer(customerId: string): Promise<InvoiceRecord[]> {
+  if (!arModelsAvailable) return []
+  try {
+    const rows = await listTrackingIndex<InvoiceRecord>({
+      name: 'listInvoiceByCustomerIdAndIssuedAt',
+      decls: '$customerId: String!',
+      args: 'customerId: $customerId',
+      variables: { customerId },
+      fields: INVOICE_FIELDS,
+      limit: 500,
+      sortDirection: 'DESC',
+    })
+    return rows.map((inv) => parseArJson(inv, INVOICE_JSON_FIELDS))
+  } catch (err) {
+    forgetArModels(err)
+    return []
+  }
+}
+
+/**
+ * The open book: every invoice still carrying a balance, oldest due date first.
+ *
+ * `arOpen` is the sparse marker 'OPEN' — carried only while ISSUED or PARTIAL — so this
+ * reads exactly the money outstanding however many invoices have ever been issued, and
+ * the aging report is this one query.
+ */
+export async function listOpenInvoices(): Promise<InvoiceRecord[]> {
+  if (!arModelsAvailable) return []
+  try {
+    const rows = await listTrackingIndex<InvoiceRecord>({
+      name: 'listInvoiceByArOpenAndDueAt',
+      decls: '$arOpen: String!',
+      args: 'arOpen: $arOpen',
+      variables: { arOpen: 'OPEN' },
+      fields: INVOICE_FIELDS,
+      limit: 500,
+      sortDirection: 'ASC',
+    })
+    return rows.map((inv) => parseArJson(inv, INVOICE_JSON_FIELDS))
+  } catch (err) {
+    forgetArModels(err)
+    return []
+  }
+}
+
+/** Everything issued in one 'YYYY-MM', newest first — the Paid/history tab's window. */
+export async function listInvoicesByMonth(month: string): Promise<InvoiceRecord[]> {
+  if (!arModelsAvailable) return []
+  try {
+    const rows = await listTrackingIndex<InvoiceRecord>({
+      name: 'listInvoiceByInvoiceMonthAndIssuedAt',
+      decls: '$invoiceMonth: String!',
+      args: 'invoiceMonth: $invoiceMonth',
+      variables: { invoiceMonth: month },
+      fields: INVOICE_FIELDS,
+      limit: 500,
+      sortDirection: 'DESC',
+    })
+    return rows.map((inv) => parseArJson(inv, INVOICE_JSON_FIELDS))
+  } catch (err) {
+    forgetArModels(err)
+    return []
+  }
+}
+
+/** One customer's cash rows — receipts, credits, write-offs, reversals — newest first. */
+export async function listArPaymentsByCustomer(customerId: string): Promise<ArPaymentRecord[]> {
+  if (!arModelsAvailable) return []
+  try {
+    const rows = await listTrackingIndex<ArPaymentRecord>({
+      name: 'listArPaymentByCustomerIdAndReceivedAt',
+      decls: '$customerId: String!',
+      args: 'customerId: $customerId',
+      variables: { customerId },
+      fields: AR_PAYMENT_FIELDS,
+      limit: 500,
+      sortDirection: 'DESC',
+    })
+    return rows.map((p) => parseArJson(p, AR_PAYMENT_JSON_FIELDS))
+  } catch (err) {
+    forgetArModels(err)
+    return []
+  }
+}
+
+/**
+ * One rung of the AR ladder, oldest change first — the worklist tabs.
+ *
+ * The index key is the `ArStatus` enum, so the variable must be declared as one; the
+ * index is sparse on `arStatusChangedAt`, so an order nobody has moved is not a row.
+ */
+export async function listOrdersByArStatus(status: ArStatus): Promise<OrderRecord[]> {
+  if (!arModelsAvailable) return []
+  try {
+    const rows = await readOrders((fields) => listAllByIndex<OrderRecord>(
+      'listOrderByArStatusAndArStatusChangedAt', { arStatus: status }, fields, 1000, { arStatus: 'ArStatus!' },
+    ))
+    return rows.map((o) => unwrapJsonFields(o, ORDER_JSON_FIELDS))
+  } catch (err) {
+    forgetArModels(err)
+    return []
+  }
+}
+
+/** Presigned GET for one invoice PDF under `invoices/*`. */
+export async function getInvoicePdfUrl(key: string): Promise<string> {
+  const result = await getUrl({ path: key, options: { expiresIn: 3600 } })
+  return result.url.toString()
+}
+
+// ── AR writes (tmsFinanceActions) ────────────────────────────────────────────
+
+/** What `PREVIEW_INVOICE` shows before anybody commits a number. It writes nothing. */
+export interface InvoicePreview {
+  readiness: { ready: boolean; reasons: string[] }
+  gate: DocGateResult
+  /** The invoice as it would be issued — never persisted. */
+  snapshot: InvoiceRecord
+  recipients: { to: string[]; cc: string[] }
+  attachments: { id: string; type: string; name: string; sizeBytes: number }[]
+}
+
+export async function previewInvoice(input: {
+  orderId: string
+  invoiceDate?: string
+  billToId?: string
+}): Promise<InvoicePreview> {
+  return financeAction<InvoicePreview>('PREVIEW_INVOICE', input)
+}
+
+export async function generateInvoice(input: {
+  orderId: string
+  invoiceDate?: string
+  dueAt?: string
+  billToId?: string
+  attachDocumentIds?: string[]
+  note?: string
+}): Promise<{ invoice: InvoiceRecord; gate: DocGateResult }> {
+  return financeAction<{ invoice: InvoiceRecord; gate: DocGateResult }>('GENERATE_INVOICE', input)
+}
+
+/** One row per order: the invoice it issued, or the reason it refused. Nothing throws. */
+export async function batchGenerateInvoices(input: {
+  orderIds: string[]
+  invoiceDate?: string
+}): Promise<{ results: { orderId: string; invoiceId?: string; number?: string; totalCents?: number; error?: string }[] }> {
+  return financeAction('BATCH_GENERATE', input)
+}
+
+export async function renderInvoicePdf(input: { invoiceId: string }): Promise<{ invoice: InvoiceRecord }> {
+  return financeAction<{ invoice: InvoiceRecord }>('RENDER_INVOICE_PDF', input)
+}
+
+/**
+ * What one invoice e-mail did — or did not do.
+ *
+ * SES is denied outside production, so `emailStatus` comes back NOT_SENT with the
+ * reason in `emailError` and the signed `downloads` to hand over by other means. The
+ * UI must say exactly that; a notice row is written either way.
+ */
+export interface InvoiceEmailResult {
+  notice: ShipmentNoticeRecord
+  emailStatus: 'SENT' | 'NOT_SENT' | 'COPY'
+  emailError: string | null
+  subject: string
+  body: string
+  to: string[]
+  cc: string[]
+  downloads: { name: string; url: string }[]
+}
+
+export async function emailInvoice(input: {
+  invoiceId: string
+  to?: string[]
+  cc?: string[]
+  message?: string
+  via?: 'EMAIL' | 'COPY'
+}): Promise<InvoiceEmailResult> {
+  return financeAction<InvoiceEmailResult>('EMAIL_INVOICE', input)
+}
+
+export async function batchEmailInvoices(input: {
+  invoiceIds: string[]
+}): Promise<{ results: { invoiceId: string; emailStatus?: string; emailError?: string | null; error?: string }[] }> {
+  return financeAction('BATCH_EMAIL', input)
+}
+
+/** "I sent this myself" — the note is required, because it is the only record of how. */
+export async function markInvoiceSent(input: { invoiceId: string; note: string }): Promise<{ invoice: InvoiceRecord }> {
+  return financeAction<{ invoice: InvoiceRecord }>('MARK_SENT', input)
+}
+
+export async function voidInvoice(input: { invoiceId: string; reason: string }): Promise<{ invoice: InvoiceRecord }> {
+  return financeAction<{ invoice: InvoiceRecord }>('VOID_INVOICE', input)
+}
+
+/**
+ * What a posted row leaves behind: the ArPayment itself and every invoice it moved.
+ *
+ * `duplicate` is true when the `clientRequestId` had already posted — a double click or
+ * a retried request returns the original row rather than taking the money twice.
+ */
+export interface PostedRow {
+  payment: ArPaymentRecord
+  invoices: InvoiceRecord[]
+  duplicate: boolean
+}
+
+export async function recordPayment(input: {
+  customerId: string
+  receivedAt: string
+  method: ArPaymentMethod
+  reference?: string
+  amountCents: number
+  applications: PaymentApplication[]
+  creditApplications: CreditApplication[]
+  note?: string
+  clientRequestId: string
+}): Promise<PostedRow> {
+  return financeAction<PostedRow>('RECORD_PAYMENT', input)
+}
+
+export async function createCredit(input: {
+  customerId: string
+  memoDate: string
+  reference?: string
+  amountCents: number
+  note: string
+  clientRequestId: string
+}): Promise<PostedRow> {
+  return financeAction<PostedRow>('CREATE_CREDIT', input)
+}
+
+export async function writeOffInvoice(input: {
+  invoiceId: string
+  amountCents: number
+  reason: string
+  clientRequestId: string
+}): Promise<PostedRow> {
+  return financeAction<PostedRow>('WRITE_OFF', input)
+}
+
+/** Nothing deletes a posted row; a mistake gets a REVERSAL that restores the balances. */
+export async function reversePayment(input: { paymentId: string; reason: string }): Promise<PostedRow> {
+  return financeAction<PostedRow>('REVERSE_PAYMENT', input)
+}
+
+/** What the factoring queue row would carry, and whether anything blocks writing it. */
+export async function previewFactor(input: { invoiceId: string }): Promise<{
+  ready: boolean
+  refusal: string | null
+  proNumber?: string
+  fields?: Record<string, string>
+  existing?: { id: string; status: string } | null
+}> {
+  return financeAction('PREVIEW_FACTOR', input)
+}
+
+/**
+ * Raise the OTR queue row for an issued invoice. This writes the row and prefills its
+ * typed fields; submitting it to OTR stays a separate human act on `/factoring`.
+ * `reused` is true when the invoice already had a row — it is never written twice.
+ */
+export async function sendToFactor(input: { invoiceId: string }): Promise<{
+  factoringItem: FactoringItem
+  invoice: InvoiceRecord
+  reused: boolean
+}> {
+  const result = await financeAction<{ factoringItem: FactoringItem; invoice: InvoiceRecord; reused: boolean }>('SEND_TO_FACTOR', input)
+  return { ...result, factoringItem: parseFactoringJson(result.factoringItem) }
+}
+
+export async function saveArSettings(input: Partial<ArSettings>): Promise<{ settings: TmsSettings }> {
+  return financeAction<{ settings: TmsSettings }>('SAVE_AR_SETTINGS', input)
 }

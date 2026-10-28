@@ -1,0 +1,154 @@
+/**
+ * Handing an issued invoice to the factor — which, precisely, means writing a row in the
+ * OTR queue and nothing else.
+ *
+ * Submission to OTR is a separate, human action on `/factoring`, and this dialog says so
+ * rather than implying the bill has gone anywhere. On dev the OTR secrets are neutered,
+ * so the queue row is the entire observable outcome; even on prod it would be, because
+ * SEND_TO_FACTOR never calls OTR.
+ *
+ * The eleven fields are shown read-only. They are prefilled from the invoice snapshot —
+ * a human-reviewed document, not a guess — and every one of them stays editable on the
+ * queue row, which is the one place that owns them.
+ */
+import { useCallback, useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
+import { AlertTriangle, ArrowRight, CheckCircle2, Loader2 } from 'lucide-react'
+import { toast } from 'sonner'
+import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { graphqlErrorText, previewFactor, sendToFactor } from '@/lib/apiClient'
+import { OTR_FIELD_LABEL, OTR_REQUIRED_FIELDS } from '@/lib/otrInvoice'
+
+/**
+ * What PREVIEW_FACTOR answers. Declared here rather than imported because the client
+ * wrapper exports no name for it; a refusal and the eleven prefilled fields are the
+ * whole of the contract this dialog needs.
+ */
+interface FactorPreview {
+  ready: boolean
+  refusal: string | null
+  proNumber?: string
+  fields?: Record<string, string>
+  existing?: { id: string; status: string } | null
+}
+
+export function SendToFactorDialog({ invoiceId, busy, onClose, onDone }: {
+  invoiceId: string
+  busy?: boolean
+  onClose: () => void
+  onDone: () => void
+}) {
+  const [preview, setPreview] = useState<FactorPreview | null>(null)
+  const [queuedPro, setQueuedPro] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [posting, setPosting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  // Non-async on purpose: `react-hooks/set-state-in-effect` cannot see through an
+  // `async` function, so every state write lives in an explicit promise chain.
+  const load = useCallback(() =>
+    previewFactor({ invoiceId })
+      .then((result) => { setPreview(result); setError(null) })
+      .catch((err: unknown) => { setError(graphqlErrorText(err)) })
+      .finally(() => setLoading(false)),
+  [invoiceId])
+
+  useEffect(() => { load() }, [load])
+
+  const fields = preview?.fields ?? {}
+  const disabled = busy === true || posting || loading
+
+  const submit = () => {
+    setPosting(true)
+    setError(null)
+    sendToFactor({ invoiceId })
+      .then((result) => {
+        setQueuedPro(result.factoringItem.proNumber ?? result.factoringItem.id)
+        toast.success(result.reused ? 'Updated the existing queue row' : 'Queue row created')
+      })
+      .catch((err: unknown) => {
+        const text = graphqlErrorText(err)
+        setError(text)
+        toast.error(text)
+      })
+      .finally(() => setPosting(false))
+  }
+
+  return (
+    <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader><DialogTitle>Send to factor</DialogTitle></DialogHeader>
+
+        {loading && (
+          <p className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader2 size={14} className="animate-spin" /> Checking the invoice…
+          </p>
+        )}
+
+        {!loading && preview && !preview.ready && (
+          <p className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-2 text-xs">
+            <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-600" />
+            {preview.refusal ?? 'This invoice cannot be factored.'}
+          </p>
+        )}
+
+        {!loading && preview?.ready && (
+          <div className="space-y-3">
+            {queuedPro ? (
+              <p className="flex items-start gap-2 rounded-lg border border-border bg-muted/30 p-2 text-xs">
+                <CheckCircle2 size={14} className="mt-0.5 shrink-0 text-emerald-600" />
+                Queue row {queuedPro} is ready. Nothing has been submitted to OTR — that is a
+                separate step a person takes on the factoring queue.
+              </p>
+            ) : (
+              <p className="rounded-lg border border-border bg-muted/30 p-2 text-xs">
+                This writes a queue row for PRO <strong>{preview.proNumber}</strong> with the
+                fields below. It does not submit anything to OTR.
+                {preview.existing && ` A row already exists for this PRO (${preview.existing.status.toLowerCase()}); it will be updated.`}
+              </p>
+            )}
+
+            <div>
+              <p className="text-xs uppercase tracking-wider text-muted-foreground">
+                OTR fields — edit these on the queue row
+              </p>
+              <dl className="mt-1 grid grid-cols-2 gap-x-4 gap-y-1 rounded-lg border border-border p-2 text-sm">
+                {OTR_REQUIRED_FIELDS.map((field) => (
+                  <div key={field} className="flex justify-between gap-2">
+                    <dt className="text-xs text-muted-foreground">{OTR_FIELD_LABEL[field]}</dt>
+                    <dd className={fields[field] ? 'font-medium' : 'text-muted-foreground'}>
+                      {fields[field] || '—'}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
+
+            {queuedPro && (
+              <Link
+                to="/factoring"
+                className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline"
+              >
+                Open the factoring queue to submit it to OTR <ArrowRight size={14} />
+              </Link>
+            )}
+          </div>
+        )}
+
+        {error && <p className="text-xs text-destructive">{error}</p>}
+
+        <DialogFooter>
+          <Button variant="ghost" onClick={queuedPro ? onDone : onClose} disabled={posting}>
+            {queuedPro ? 'Done' : 'Cancel'}
+          </Button>
+          {!queuedPro && (
+            <Button onClick={submit} disabled={disabled || preview?.ready !== true}>
+              {posting ? 'Creating…' : 'Create queue row'}
+            </Button>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}

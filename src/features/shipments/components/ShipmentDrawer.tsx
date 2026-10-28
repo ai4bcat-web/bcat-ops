@@ -11,6 +11,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sh
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { SHIPMENT_STATUS_LABELS } from '@/lib/shipmentStatus'
 import { ShipmentDetail } from './ShipmentDetail'
+import { type DetailTabKey } from '../shipmentViews'
 import { ShipmentRowActions } from './StatusActions'
 import { useShipmentContext, type ShipmentContextOptions } from '../useShipmentContext'
 
@@ -63,7 +64,12 @@ export function ShipmentDrawer({ shipmentId, onClose, onChanged, ...options }: S
 }
 
 /** Standalone route body: same content, no sheet. */
-export function ShipmentPageBody({ shipmentId, options }: { shipmentId: string; options: ShipmentContextOptions }) {
+export function ShipmentPageBody({ shipmentId, options, initialTab }: {
+  shipmentId: string
+  options: ShipmentContextOptions
+  /** `?tab=` on the route, so an AR worklist row can land on Documents. */
+  initialTab?: DetailTabKey
+}) {
   const ctx = useShipmentContext(shipmentId, options)
 
   if (ctx.loading) return <p className="p-6 text-sm text-muted-foreground">Loading shipment…</p>
@@ -84,7 +90,7 @@ export function ShipmentPageBody({ shipmentId, options }: { shipmentId: string; 
           />
         </div>
       </div>
-      <ShipmentDetail {...ctx.detailProps} />
+      <ShipmentDetail {...ctx.detailProps} initialTab={initialTab} />
     </div>
   )
 }

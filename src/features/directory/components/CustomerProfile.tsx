@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { X, Building2, MapPin, FileText, Settings, Phone, DollarSign, Truck } from 'lucide-react'
+import { X, Building2, MapPin, FileText, Settings, Phone, DollarSign, Truck, Banknote } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -11,13 +11,9 @@ import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { DocumentTypesField } from '@/features/documents/DocumentTypesField'
 import { useCustomerOrders } from '@/hooks/useCustomerOrders'
-import {
-  resolveCreditPolicy,
-  summarizeCredit,
-  creditExposureForCustomer,
-  effectiveCustomerStatus,
-  boardTab,
-} from '@/lib/customerCredit'
+import { creditSummaryForCustomer, effectiveCustomerStatus, boardTab } from '@/lib/customerCredit'
+import { oldestOpenInvoiceDays } from '@/lib/arAging'
+import { useCustomerAr } from '@/hooks/useCustomerAr'
 import { loadStatus } from '@/lib/loadStatus'
 import { formatCents } from '@/lib/tmsDirectory'
 import { cn } from '@/lib/utils'
@@ -29,6 +25,7 @@ import { ReferencesEditor } from './ReferencesEditor'
 import { PricingDefaultsForm } from './PricingDefaultsForm'
 import { QuotingDefaultsForm } from './QuotingDefaultsForm'
 import { CreditLimitCard } from './CreditLimitCard'
+import { CustomerArTab } from './CustomerArTab'
 import { StatusActionDialog } from './StatusActionDialog'
 import type {
   CustomerRecord,
@@ -62,6 +59,7 @@ const tabs = [
   { key: 'settings', label: 'Settings', icon: Settings },
   { key: 'quoting', label: 'Quoting', icon: DollarSign },
   { key: 'orders', label: 'Orders', icon: Truck },
+  { key: 'ar', label: 'AR', icon: Banknote },
 ]
 
 const statusColors: Record<CustomerStatus, string> = {
@@ -98,13 +96,21 @@ export function CustomerProfile({
   const [tab, setTab] = useState('account')
   const [saving, setSaving] = useState(false)
   const [statusAction, setStatusAction] = useState<'activate' | 'deactivate' | 'close' | null>(null)
-  const { loads, lastLoadAt, loading: loadsLoading } = useCustomerOrders(customer.id, customer)
+  const { loads, orders, shipments, lastLoadAt, loading: loadsLoading } = useCustomerOrders(customer.id, customer)
+  const ar = useCustomerAr(customer.id)
 
-  const creditSummary = useMemo(() => {
-    const policy = resolveCreditPolicy(customer, settings)
-    const items = creditExposureForCustomer(customer, loads)
-    return summarizeCredit(policy, items, { hold: customer.creditHoldFlag === true })
-  }, [customer, settings, loads])
+  /**
+   * Exposure now spans both eras: orders carry it from booking to paid, and the loads
+   * no order covers keep the Aljex-era rule. The oldest open invoice is what lets
+   * `INVOICE_PAST_MAX_DAYS_LATE` fire at all — without a real invoice date the block
+   * reason could never be reached, which is why it is read here rather than guessed.
+   */
+  const creditSummary = useMemo(() => creditSummaryForCustomer(
+    customer,
+    settings,
+    { orders, shipments, loads },
+    { oldestOpenInvoiceDays: oldestOpenInvoiceDays(ar.invoices, new Date().toISOString()) },
+  ), [customer, settings, orders, shipments, loads, ar.invoices])
 
   const effectiveStatus = useMemo(
     () => effectiveCustomerStatus(customer, lastLoadAt, new Date().toISOString()),
@@ -400,6 +406,20 @@ export function CustomerProfile({
                   </div>
                 ))}
             </div>
+          )}
+
+          {tab === 'ar' && (
+            <CustomerArTab
+              customerId={customer.id}
+              customerName={customer.name}
+              invoices={ar.invoices}
+              payments={ar.payments}
+              openCents={ar.openCents}
+              unappliedCents={ar.unappliedCents}
+              loading={ar.loading}
+              error={ar.error}
+              onRefresh={ar.refresh}
+            />
           )}
         </ScrollArea>
 

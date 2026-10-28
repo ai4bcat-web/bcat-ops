@@ -60,6 +60,7 @@ import { tmsDirectoryActions } from './functions/tms-directory-actions/resource'
 import { tmsShipmentActions } from './functions/tms-shipment-actions/resource'
 import { tmsCarrierActions } from './functions/tms-carrier-actions/resource'
 import { tmsTrackingActions } from './functions/tms-tracking-actions/resource'
+import { tmsFinanceActions } from './functions/tms-finance-actions/resource'
 import { loadTrackingProjector } from './functions/load-tracking-projector/resource'
 import { shipmentNotifier } from './functions/shipment-notifier/resource'
 import { checkCallNotifier } from './functions/check-call-notifier/resource'
@@ -115,6 +116,7 @@ const backend = defineBackend({
   tmsShipmentActions,
   tmsCarrierActions,
   tmsTrackingActions,
+  tmsFinanceActions,
   loadTrackingProjector,
   checkCallNotifier,
   shipmentNotifier,
@@ -2001,6 +2003,109 @@ backend.storage.resources.bucket.grantRead(trackingActionsFn, 'shipment-docs/*')
 backend.storage.resources.bucket.grantRead(trackingActionsFn, 'driver-docs/*')
 backend.storage.resources.bucket.grantRead(trackingActionsFn, 'rate-confirms/*')
 
+// ── tmsFinanceActions Lambda (Step F) ───────────────────────────────────────
+// Owns Invoice and ArPayment: the only writer of UNPAID, PAID and every cash row.
+// It reads the shipment cluster to take the invoice snapshot, freezes the load's
+// financials in the same transaction that issues the bill, renders the PDF itself
+// (pdf-lib, in memory) and writes it under invoices/*, e-mails it through the same
+// ShipmentNotice log every other outbound document uses, and writes the factoring
+// queue row that Send to Factor hands to the existing OTR submit.
+const financeActionsFn      = backend.tmsFinanceActions.resources.lambda as LambdaFunction
+const invoiceTable          = backend.data.resources.tables['Invoice']
+const arPaymentTable        = backend.data.resources.tables['ArPayment']
+const financeOrderTable     = backend.data.resources.tables['Order']
+const financeShipmentTable  = backend.data.resources.tables['Shipment']
+const financeLoadTable      = backend.data.resources.tables['Load']
+const financeLoadCarrierTbl = backend.data.resources.tables['LoadCarrier']
+const financeFinancialsTbl  = backend.data.resources.tables['LoadFinancials']
+const financeChargeTable    = backend.data.resources.tables['LoadCharge']
+const financeCustomerTable  = backend.data.resources.tables['Customer']
+const financeDivisionTable  = backend.data.resources.tables['Division']
+const financeSettingsTable  = backend.data.resources.tables['TmsSettings']
+const financeAuditLogTable  = backend.data.resources.tables['AuditLog']
+const financeFactoringTable = backend.data.resources.tables['FactoringItem']
+
+financeActionsFn.addToRolePolicy(
+  new PolicyStatement({
+    actions: [
+      'dynamodb:GetItem',
+      'dynamodb:PutItem',
+      'dynamodb:UpdateItem',
+      'dynamodb:Query',
+      'dynamodb:ConditionCheckItem',
+    ],
+    resources: [
+      invoiceTable.tableArn,
+      arPaymentTable.tableArn,
+      financeOrderTable.tableArn,
+      financeFinancialsTbl.tableArn,
+      financeSettingsTable.tableArn,
+      financeAuditLogTable.tableArn,
+      financeFactoringTable.tableArn,
+      shipmentNoticeTable.tableArn,
+      // Read-only here, but DynamoDB scopes by table, not by action.
+      financeShipmentTable.tableArn,
+      financeLoadTable.tableArn,
+      financeLoadCarrierTbl.tableArn,
+      financeChargeTable.tableArn,
+      financeCustomerTable.tableArn,
+      financeDivisionTable.tableArn,
+      shipmentDocumentTable.tableArn,
+    ],
+  })
+)
+// The open book, the Paid tab, a customer's ledger, the AR worklists, one shipment's
+// orders/loads/charges/documents and the factoring row for an invoice all come off GSIs.
+financeActionsFn.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['dynamodb:Query'],
+    resources: [
+      `${invoiceTable.tableArn}/index/*`,
+      `${arPaymentTable.tableArn}/index/*`,
+      `${financeOrderTable.tableArn}/index/*`,
+      `${financeLoadTable.tableArn}/index/*`,
+      `${financeLoadCarrierTbl.tableArn}/index/*`,
+      `${financeChargeTable.tableArn}/index/*`,
+      `${shipmentDocumentTable.tableArn}/index/*`,
+      `${shipmentNoticeTable.tableArn}/index/*`,
+    ],
+  })
+)
+financeActionsFn.addEnvironment('INVOICE_TABLE_NAME',            invoiceTable.tableName)
+financeActionsFn.addEnvironment('AR_PAYMENT_TABLE_NAME',         arPaymentTable.tableName)
+financeActionsFn.addEnvironment('ORDER_TABLE_NAME',              financeOrderTable.tableName)
+financeActionsFn.addEnvironment('SHIPMENT_TABLE_NAME',           financeShipmentTable.tableName)
+financeActionsFn.addEnvironment('LOAD_TABLE_NAME',               financeLoadTable.tableName)
+financeActionsFn.addEnvironment('LOAD_CARRIER_TABLE_NAME',       financeLoadCarrierTbl.tableName)
+financeActionsFn.addEnvironment('LOAD_FINANCIALS_TABLE_NAME',    financeFinancialsTbl.tableName)
+financeActionsFn.addEnvironment('LOAD_CHARGE_TABLE_NAME',        financeChargeTable.tableName)
+financeActionsFn.addEnvironment('CUSTOMER_TABLE_NAME',           financeCustomerTable.tableName)
+financeActionsFn.addEnvironment('DIVISION_TABLE_NAME',           financeDivisionTable.tableName)
+financeActionsFn.addEnvironment('SETTINGS_TABLE_NAME',           financeSettingsTable.tableName)
+financeActionsFn.addEnvironment('AUDIT_LOG_TABLE_NAME',          financeAuditLogTable.tableName)
+financeActionsFn.addEnvironment('FACTORING_ITEM_TABLE_NAME',     financeFactoringTable.tableName)
+financeActionsFn.addEnvironment('SHIPMENT_DOCUMENT_TABLE_NAME',  shipmentDocumentTable.tableName)
+financeActionsFn.addEnvironment('SHIPMENT_NOTICE_TABLE_NAME',    shipmentNoticeTable.tableName)
+financeActionsFn.addEnvironment('BUCKET_NAME',                   backend.storage.resources.bucket.bucketName)
+financeActionsFn.addEnvironment('USER_POOL_ID',                  backend.auth.resources.userPool.userPoolId)
+financeActionsFn.addEnvironment('PORTAL_ORIGIN',                 PORTAL_PROD_ORIGIN)
+financeActionsFn.addEnvironment('FROM_ADDRESS',                  'ai4bcat@gmail.com')
+financeActionsFn.addToRolePolicy(
+  new PolicyStatement({
+    // The caller's e-mail is the signature on every posted row.
+    actions:   ['cognito-idp:AdminGetUser'],
+    resources: [backend.auth.resources.userPool.userPoolArn],
+  })
+)
+financeActionsFn.addToRolePolicy(
+  new PolicyStatement({ actions: ['ses:SendEmail', 'ses:SendRawEmail'], resources: ['*'] })
+)
+// It writes the invoice PDFs it renders, and reads the paperwork it attaches to them.
+backend.storage.resources.bucket.grantReadWrite(financeActionsFn, 'invoices/*')
+backend.storage.resources.bucket.grantRead(financeActionsFn, 'shipment-docs/*')
+backend.storage.resources.bucket.grantRead(financeActionsFn, 'driver-docs/*')
+backend.storage.resources.bucket.grantRead(financeActionsFn, 'rate-confirms/*')
+
 // ── brokerLoadAlert Lambda (Load stream → broker task + global Slack ping) ──
 // Fires when a load is assigned to the "Broker Need to Cover" driver: creates an
 // IntakeItem task for Arcie and posts to the BCAT global Slack channel.
@@ -2397,7 +2502,7 @@ if (process.env.BCAT_ISOLATED_PREVIEW === 'true') {
     (rule.node.defaultChild as CfnRule).state = 'DISABLED'
   }
 
-  const previewCallable = new Set(['userManagement', 'vendorApActions', 'tmsDirectoryActions', 'tmsShipmentActions', 'tmsCarrierActions', 'tmsTrackingActions', 'tmsGeocode', 'podActions'])
+  const previewCallable = new Set(['userManagement', 'vendorApActions', 'tmsDirectoryActions', 'tmsShipmentActions', 'tmsCarrierActions', 'tmsTrackingActions', 'tmsFinanceActions', 'tmsGeocode', 'podActions'])
   for (const [name, construct] of Object.entries(backend)) {
     if (previewCallable.has(name)) continue
     const lambda = (construct as { resources?: { lambda?: LambdaFunction } }).resources?.lambda
@@ -2477,6 +2582,10 @@ otrActionsFn.addEnvironment('LOCATION_TABLE_NAME', otrLocationTable.tableName)
 otrActionsFn.addEnvironment('POD_DOCUMENT_TABLE_NAME', otrPodTable.tableName)
 otrActionsFn.addEnvironment('DRIVER_SUBMISSION_TABLE_NAME', otrSubmissionTable.tableName)
 otrActionsFn.addEnvironment('DRIVER_SUBMISSION_DOC_TABLE_NAME', otrSubmissionDocTable.tableName)
+// Step F: the third place a POD or the customer's tender can be. A load booked in the
+// TMS for an outside carrier has neither a JobsDone text nor a driver submission — its
+// documents are ShipmentDocument rows, read through the shipmentId index.
+otrActionsFn.addEnvironment('SHIPMENT_DOCUMENT_TABLE_NAME', shipmentDocumentTable.tableName)
 otrActionsFn.addEnvironment('BUCKET_NAME', backend.storage.resources.bucket.bucketName)
 
 // Queue rows: the router reads and writes; the poller only updates status fields.
@@ -2510,7 +2619,9 @@ otrActionsFn.addToRolePolicy(
   }),
 )
 
-// Locations, PODs and driver submissions are read-only here.
+// Locations, PODs, driver submissions and shipment documents are read-only here. The
+// shipment documents are reached only by Query on the shipmentId index, so the index ARN
+// is the one that matters.
 otrActionsFn.addToRolePolicy(
   new PolicyStatement({
     actions:   ['dynamodb:GetItem', 'dynamodb:Scan', 'dynamodb:Query'],
@@ -2522,6 +2633,8 @@ otrActionsFn.addToRolePolicy(
       `${otrSubmissionTable.tableArn}/index/*`,
       otrSubmissionDocTable.tableArn,
       `${otrSubmissionDocTable.tableArn}/index/*`,
+      shipmentDocumentTable.tableArn,
+      `${shipmentDocumentTable.tableArn}/index/*`,
     ],
   }),
 )

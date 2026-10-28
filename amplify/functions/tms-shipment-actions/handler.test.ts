@@ -881,6 +881,33 @@ describe('status', () => {
     expect(back.shipment.status).toBe('OPEN')
     expect(back.shipment.cancelReason).toBeNull()
   })
+
+  it('refuses to cancel under an invoiced order, and allows it once the invoice is gone', async () => {
+    const { shipmentId, orderId } = await openShipment()
+    table(TABLES.order).set(orderId, {
+      ...table(TABLES.order).get(orderId)!,
+      arStatus: 'UNPAID',
+      invoiceId: 'inv-412',
+      invoiceNumber: 'INV-000412',
+    })
+    const cancel = (): Promise<Row> =>
+      call('SET_SHIPMENT_STATUS', {
+        shipmentId,
+        expectedUpdatedAt: table(TABLES.shipment).get(shipmentId)!.updatedAt,
+        status: 'CANCELED',
+        reason: 'customer canceled',
+      })
+    await expect(cancel()).rejects.toThrow(/invoice INV-000412; void the invoice first/)
+
+    table(TABLES.order).set(orderId, {
+      ...table(TABLES.order).get(orderId)!,
+      arStatus: 'UNBILLED',
+      invoiceId: null,
+      invoiceNumber: null,
+    })
+    const canceled = (await cancel()) as { shipment: Row }
+    expect(canceled.shipment.status).toBe('CANCELED')
+  })
 })
 
 // ── Delete / restore ─────────────────────────────────────────────────────────
@@ -927,6 +954,28 @@ describe('DELETE_SHIPMENT', () => {
         expectedUpdatedAt: table(TABLES.shipment).get(ids.shipmentId)!.updatedAt,
       }),
     ).rejects.toThrow(/cancel it first/)
+  })
+
+  it('refuses to delete under an invoiced order, and allows it once the invoice is gone', async () => {
+    const { shipmentId, orderId } = await createDraft()
+    table(TABLES.order).set(orderId, {
+      ...table(TABLES.order).get(orderId)!,
+      arStatus: 'PAID',
+      invoiceId: 'inv-501',
+      invoiceNumber: 'INV-000501',
+    })
+    const remove = (): Promise<Row> =>
+      call('DELETE_SHIPMENT', { shipmentId, expectedUpdatedAt: table(TABLES.shipment).get(shipmentId)!.updatedAt })
+    await expect(remove()).rejects.toThrow(/invoice INV-000501; void the invoice first/)
+
+    table(TABLES.order).set(orderId, {
+      ...table(TABLES.order).get(orderId)!,
+      arStatus: 'DOCS_NEEDED',
+      invoiceId: null,
+      invoiceNumber: null,
+    })
+    const deleted = (await remove()) as { shipment: Row }
+    expect(deleted.shipment.deletedAt).toBeTruthy()
   })
 })
 
@@ -2163,6 +2212,32 @@ describe('SET_AR_STATUS', () => {
     const { orderId } = await deliverable()
     await expect(call('SET_AR_STATUS', { orderId, status: 'UNPAID' })).rejects.toThrow(/recorded by invoicing/)
     await expect(call('SET_AR_STATUS', { orderId, status: 'PAID' })).rejects.toThrow(/recorded by invoicing/)
+  })
+
+  it('refuses LEGACY, which only the backfill writes', async () => {
+    const { orderId } = await deliverable()
+    await expect(call('SET_AR_STATUS', { orderId, status: 'LEGACY' })).rejects.toThrow(
+      /recorded by invoicing, not set by hand/,
+    )
+  })
+
+  it('refuses any hand-set once the order carries an invoice', async () => {
+    const { orderId } = await deliverable()
+    table(TABLES.order).set(orderId, {
+      ...table(TABLES.order).get(orderId)!,
+      arStatus: 'UNPAID',
+      invoiceId: 'inv-123',
+      invoiceNumber: 'INV-000123',
+    })
+    await expect(call('SET_AR_STATUS', { orderId, status: 'DOCS_NEEDED' })).rejects.toThrow(
+      /invoice INV-000123; void the invoice first/,
+    )
+  })
+
+  it('still allows DOCS_NEEDED on an order with no invoice', async () => {
+    const { orderId } = await deliverable()
+    const bundle = (await call('SET_AR_STATUS', { orderId, status: 'DOCS_NEEDED' })) as { orders: Row[] }
+    expect(bundle.orders[0].arStatus).toBe('DOCS_NEEDED')
   })
 })
 

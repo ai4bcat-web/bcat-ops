@@ -75,6 +75,22 @@ export function tabFor(key: BoardTabKey): BoardTab {
   return BOARD_TABS.find((t) => t.key === key) ?? BOARD_TABS[0]
 }
 
+/**
+ * The detail body's tabs, as a vocabulary rather than as a rendered list: a link may
+ * ask for one by name (`/shipments/:id?tab=documents`), and a query string is not a
+ * `DetailTabKey` until something has checked it. The labels and icons stay with the
+ * component that draws them.
+ */
+export const DETAIL_TAB_KEYS = [
+  'summary', 'details', 'stops', 'carrier', 'tracking', 'documents', 'financials',
+] as const
+
+export type DetailTabKey = (typeof DETAIL_TAB_KEYS)[number]
+
+export function isDetailTabKey(value: string | null | undefined): value is DetailTabKey {
+  return DETAIL_TAB_KEYS.some((key) => key === value)
+}
+
 /** Deleted shipments never show on the board; Restore is reached by id from the admin menu. */
 export function isBoardVisible(row: ShipmentRow): boolean {
   return !row.deletedAt

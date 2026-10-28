@@ -36,8 +36,9 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { DocumentPreview } from '@/features/documents/DocumentPreview'
 import { LoadDriverDocs } from '@/features/loads/LoadDriverDocs'
 import {
-  attachDriverDoc, getRateConfirmUrl, getShipmentDocumentUrl, getTmsSettings, listDivisions,
-  listTrackingLinksByShipment, readyToInvoice, revokeUploadLink, sendUploadLink, updateDocument, voidDocument,
+  attachDriverDoc, getInvoice, getInvoicePdfUrl, getRateConfirmUrl, getShipmentDocumentUrl, getTmsSettings,
+  listDivisions, listTrackingLinksByShipment, readyToInvoice, revokeUploadLink, sendUploadLink, updateDocument,
+  voidDocument,
 } from '@/lib/apiClient'
 import { attachDocs, getDriverDocUrl, type DriverSubmissionRecord } from '@/lib/driverSubmissionsClient'
 import { downloadPodAsPdf } from '@/lib/podDownload'
@@ -51,7 +52,7 @@ import { UploadDocumentDialog } from './UploadDocumentDialog'
 import { GeneratedDocumentDialog, type GeneratedKind } from './GeneratedDocumentDialog'
 import { EmailDocumentsDialog } from './EmailDocumentsDialog'
 import type {
-  ChargeCodeDef, CustomerRecord, DocGateResult, LoadCarrierRecord, LocationRecord, ShipmentBundle,
+  ChargeCodeDef, CustomerRecord, DocGateResult, InvoiceRecord, LoadCarrierRecord, LocationRecord, ShipmentBundle,
   ShipmentDocumentAudience, ShipmentDocumentRecord, ShipmentDocumentSource, ShipmentDocumentType, TmsSettings,
   TrackingLinkRecord,
 } from '@/types/tms'
@@ -264,7 +265,12 @@ export function DocumentsSection({
         />
       )}
 
-      <Section title="Customer" count={customerDocs.length}>
+      <Section
+        title="Customer"
+        count={customerDocs.length}
+        // Derived from the order, not a document row — see InvoiceLine.
+        lead={order?.invoiceId ? <InvoiceLine invoiceId={order.invoiceId} /> : undefined}
+      >
         {customerDocs.map((doc) => (
           <DocumentRow key={doc.id} doc={doc} {...rowActions} />
         ))}
@@ -372,13 +378,27 @@ export function DocumentsSection({
   )
 }
 
-function Section({ title, count, children }: { title: string; count: number; children: ReactNode }) {
+/**
+ * One filed group. `count` is the number of document rows, so a derived line — one
+ * that has no `ShipmentDocument` behind it — is passed as `lead` instead: it is shown
+ * above the rows and keeps the count honest, and its presence means the group is not
+ * empty even when no document has been filed against it.
+ */
+function Section({ title, count, lead, children }: {
+  title: string
+  count: number
+  lead?: ReactNode
+  children: ReactNode
+}) {
   return (
     <div className="space-y-2" data-testid={`documents-${title.toLowerCase()}`}>
       <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
         {title} <span className="font-normal normal-case tracking-normal">({count})</span>
       </p>
-      {count === 0 ? <p className="text-sm text-muted-foreground">Nothing here yet.</p> : children}
+      {lead}
+      {count === 0 && !lead
+        ? <p className="text-sm text-muted-foreground">Nothing here yet.</p>
+        : children}
     </div>
   )
 }
@@ -650,6 +670,57 @@ function RateConLine({ assignment }: { assignment: LoadCarrierRecord }) {
       )}
       <Button variant="outline" size="sm" className="h-7" disabled={!key} onClick={() => { void open() }}>
         <Eye size={13} className="mr-1" />{key ? 'Open' : 'No file yet'}
+      </Button>
+    </div>
+  )
+}
+
+/**
+ * The issued invoice, derived from `Order.invoiceId` exactly as the rate con is derived
+ * from `LoadCarrier.rateConKey`: it is a snapshot the finance router owns, not a
+ * `ShipmentDocument` row, so it has no review state, cannot be retyped, and is never
+ * voided from here — voiding an invoice is an AR action with a reason behind it.
+ */
+function InvoiceLine({ invoiceId }: { invoiceId: string }) {
+  const [invoice, setInvoice] = useState<InvoiceRecord | null>(null)
+
+  // No synchronous setState before the first await; a failed read leaves the line bare.
+  useEffect(() => {
+    let live = true
+    getInvoice(invoiceId)
+      .then((row) => { if (live) setInvoice(row) })
+      .catch(() => { /* the line still names the invoice it belongs to */ })
+    return () => { live = false }
+  }, [invoiceId])
+
+  const key = invoice?.pdfKey ?? null
+  const name = `${invoice?.number ?? invoiceId}.pdf`
+
+  const open = async (download: boolean) => {
+    if (!key) return
+    try {
+      const url = await getInvoicePdfUrl(key)
+      if (download) await downloadPodAsPdf(url, name)
+      else window.open(url, '_blank', 'noopener')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not open the invoice')
+    }
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border p-2 text-sm" data-testid="invoice-line">
+      <Badge variant="outline" className="text-[10px]">Invoice</Badge>
+      <span className="min-w-0 flex-1 truncate">
+        {invoice?.number ?? invoiceId}
+        {invoice?.pdfVersion ? ` · v${invoice.pdfVersion}` : ''}
+        {invoice?.issuedAt ? ` · issued ${formatDateTime(invoice.issuedAt)}` : ''}
+        {invoice?.status === 'VOID' ? ' · void' : ''}
+      </span>
+      <Button variant="outline" size="sm" className="h-7" disabled={!key} onClick={() => { void open(false) }}>
+        <Eye size={13} className="mr-1" />{key ? 'Preview' : 'No PDF yet'}
+      </Button>
+      <Button variant="outline" size="sm" className="h-7" disabled={!key} onClick={() => { void open(true) }}>
+        <Download size={13} className="mr-1" />Download
       </Button>
     </div>
   )
