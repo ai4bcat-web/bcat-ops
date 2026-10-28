@@ -59,6 +59,9 @@ import { apptRequestEmailer } from './functions/appt-request-emailer/resource'
 import { tmsDirectoryActions } from './functions/tms-directory-actions/resource'
 import { tmsShipmentActions } from './functions/tms-shipment-actions/resource'
 import { tmsCarrierActions } from './functions/tms-carrier-actions/resource'
+import { tmsTrackingActions } from './functions/tms-tracking-actions/resource'
+import { loadTrackingProjector } from './functions/load-tracking-projector/resource'
+import { checkCallNotifier } from './functions/check-call-notifier/resource'
 import { rateConSignApi } from './functions/rate-con-sign-api/resource'
 import { tmsGeocode } from './functions/tms-geocode/resource'
 import { podActions } from './functions/pod-actions/resource'
@@ -110,6 +113,9 @@ const backend = defineBackend({
   tmsDirectoryActions,
   tmsShipmentActions,
   tmsCarrierActions,
+  tmsTrackingActions,
+  loadTrackingProjector,
+  checkCallNotifier,
   rateConSignApi,
   tmsGeocode,
   podActions,
@@ -722,7 +728,13 @@ const dispatchTableArns = [dispatchConversationTable.tableArn, dispatchMessageTa
 
 // driverApiFn is in the list because the driver app's stop events and POD sends are
 // written into the driver's conversation (recordDriverStatus) and mirrored to Slack.
-for (const fn of [dispatchWebhookFn, dispatchActionsFn, dispatchSlackBridgeFn, dispatchNudgeFn, driverApiFn]) {
+// trackingActionsFn is in it because Step D's carrier tracking link is texted to the
+// driver from the dispatch number, so the text and any reply live in Dispatch like
+// every other driver conversation. Note SETTINGS_TABLE_NAME below is *DispatchSettings*
+// (what tablesFromEnv reads); tmsTrackingActions reads TmsSettings from
+// TMS_SETTINGS_TABLE_NAME, wired with the rest of its own tables further down.
+const trackingActionsFn = backend.tmsTrackingActions.resources.lambda as LambdaFunction
+for (const fn of [dispatchWebhookFn, dispatchActionsFn, dispatchSlackBridgeFn, dispatchNudgeFn, driverApiFn, trackingActionsFn]) {
   fn.addEnvironment('CONVERSATION_TABLE_NAME', dispatchConversationTable.tableName)
   fn.addEnvironment('MESSAGE_TABLE_NAME', dispatchMessageTable.tableName)
   fn.addEnvironment('SETTINGS_TABLE_NAME', dispatchSettingsTable.tableName)
@@ -783,6 +795,7 @@ new CfnOutput(dispatchWebhookFn.stack, 'DispatchTwilioWebhookFunctionUrl', {
 // Delivery receipts for outbound texts come back to the webhook.
 dispatchActionsFn.addEnvironment('WEBHOOK_URL', dispatchWebhookUrl.url)
 dispatchSlackBridgeFn.addEnvironment('WEBHOOK_URL', dispatchWebhookUrl.url)
+trackingActionsFn.addEnvironment('WEBHOOK_URL', dispatchWebhookUrl.url)
 // Slack → driver: the intake webhook (which already receives every Slack event) recognises
 // a driver channel by the conversation table and hands the event to the bridge.
 webhookFn.addEnvironment('DISPATCH_CONVERSATION_TABLE_NAME', dispatchConversationTable.tableName)
@@ -1321,10 +1334,57 @@ trackingApiFn.addEnvironment('EQUIPMENT_TABLE_NAME', backend.data.resources.tabl
 trackingApiFn.addEnvironment('TRUCK_LOCATION_TABLE_NAME', backend.data.resources.tables['TruckLocation'].tableName)
 trackingApiFn.addEnvironment('DRIVER_TABLE_NAME', backend.data.resources.tables['Driver'].tableName)
 trackingApiFn.addEnvironment('LOAD_TABLE_NAME', backend.data.resources.tables['Load'].tableName)
+// ── Step D: the shipment Customer Link and the carrier ping link ───────────
+// Same public Lambda, three new routes (GET /s/<token>, GET /l/<token>,
+// POST /l/<token>/ping). The token IS the TrackingLink row's primary key, so the
+// lookup is a GetItem and no index can be walked from outside.
+{
+  const trackingLinkTable  = backend.data.resources.tables['TrackingLink']
+  const loadCheckCallTable = backend.data.resources.tables['LoadCheckCall']
+  const trackShipmentTable = backend.data.resources.tables['Shipment']
+  const trackOrderTable    = backend.data.resources.tables['Order']
+  const trackLoadCarrier   = backend.data.resources.tables['LoadCarrier']
+  const trackDivisionTable = backend.data.resources.tables['Division']
+  const trackSettingsTable = backend.data.resources.tables['TmsSettings']
+  const trackHistoryTable  = backend.data.resources.tables['TruckLocationHistory']
+  trackingApiFn.addToRolePolicy(new PolicyStatement({
+    // The link row itself: read it, bump its counters, expire it.
+    actions:   ['dynamodb:GetItem', 'dynamodb:UpdateItem'],
+    resources: [trackingLinkTable.tableArn],
+  }))
+  trackingApiFn.addToRolePolicy(new PolicyStatement({
+    // A ping writes one event row. Load is deliberately NOT writable from here.
+    actions:   ['dynamodb:PutItem'],
+    resources: [loadCheckCallTable.tableArn],
+  }))
+  trackingApiFn.addToRolePolicy(new PolicyStatement({
+    actions:   ['dynamodb:GetItem'],
+    resources: [trackShipmentTable.tableArn, trackDivisionTable.tableArn, trackSettingsTable.tableArn],
+  }))
+  trackingApiFn.addToRolePolicy(new PolicyStatement({
+    actions:   ['dynamodb:Query'],
+    resources: [
+      `${loadCheckCallTable.tableArn}/index/*`,
+      `${trackOrderTable.tableArn}/index/*`,
+      `${trackLoadCarrier.tableArn}/index/*`,
+      `${backend.data.resources.tables['Load'].tableArn}/index/*`,
+      `${trackHistoryTable.tableArn}/index/*`,
+    ],
+  }))
+  trackingApiFn.addEnvironment('TRACKING_LINK_TABLE_NAME',   trackingLinkTable.tableName)
+  trackingApiFn.addEnvironment('LOAD_CHECK_CALL_TABLE_NAME', loadCheckCallTable.tableName)
+  trackingApiFn.addEnvironment('SHIPMENT_TABLE_NAME',        trackShipmentTable.tableName)
+  trackingApiFn.addEnvironment('ORDER_TABLE_NAME',           trackOrderTable.tableName)
+  trackingApiFn.addEnvironment('LOAD_CARRIER_TABLE_NAME',    trackLoadCarrier.tableName)
+  trackingApiFn.addEnvironment('DIVISION_TABLE_NAME',        trackDivisionTable.tableName)
+  trackingApiFn.addEnvironment('TMS_SETTINGS_TABLE_NAME',    trackSettingsTable.tableName)
+  trackingApiFn.addEnvironment('TRUCK_LOCATION_HISTORY_TABLE_NAME', trackHistoryTable.tableName)
+}
 const trackingApiUrl = new FunctionUrl(trackingApiFn.stack, 'TrackingApiUrl', {
   function: trackingApiFn,
   authType: FunctionUrlAuthType.NONE,
-  cors: { allowedOrigins: PORTAL_ORIGINS, allowedMethods: [HttpMethod.GET], allowedHeaders: ['content-type'] },
+  // POST is the carrier driver's one-tap location ping; GET is every read page.
+  cors: { allowedOrigins: PORTAL_ORIGINS, allowedMethods: [HttpMethod.GET, HttpMethod.POST], allowedHeaders: ['content-type'] },
 })
 new CfnOutput(trackingApiFn.stack, 'TrackingApiFunctionUrl', { value: trackingApiUrl.url, description: 'Public truck tracking API URL' })
 
@@ -1632,6 +1692,10 @@ shipmentActionsFn.addToRolePolicy(
       shipmentCarrierTable.tableArn,
       shipmentCarrierDocTable.tableArn,
       shipmentDivisionTable.tableArn,
+      // Step D: LOG_CHECK_CALL writes the event log; REMOVE_LOAD_CARRIER revokes
+      // the carrier's ACTIVE tracking link when the carrier comes off the load.
+      backend.data.resources.tables['LoadCheckCall'].tableArn,
+      backend.data.resources.tables['TrackingLink'].tableArn,
     ],
   }),
 )
@@ -1648,6 +1712,8 @@ shipmentActionsFn.addToRolePolicy(
       `${shipmentCustomerTable.tableArn}/index/*`,
       `${shipmentCarrierTable.tableArn}/index/*`,
       `${shipmentCarrierDocTable.tableArn}/index/*`,
+      `${backend.data.resources.tables['LoadCheckCall'].tableArn}/index/*`,
+      `${backend.data.resources.tables['TrackingLink'].tableArn}/index/*`,
     ],
   }),
 )
@@ -1662,6 +1728,8 @@ shipmentActionsFn.addEnvironment('CUSTOMER_TABLE_NAME',        shipmentCustomerT
 shipmentActionsFn.addEnvironment('SETTINGS_TABLE_NAME',        shipmentSettingsTable.tableName)
 shipmentActionsFn.addEnvironment('AUDIT_LOG_TABLE_NAME',       shipmentAuditLogTable.tableName)
 shipmentActionsFn.addEnvironment('DRIVER_TABLE_NAME',          shipmentDriverTable.tableName)
+shipmentActionsFn.addEnvironment('LOAD_CHECK_CALL_TABLE_NAME', backend.data.resources.tables['LoadCheckCall'].tableName)
+shipmentActionsFn.addEnvironment('TRACKING_LINK_TABLE_NAME',   backend.data.resources.tables['TrackingLink'].tableName)
 shipmentActionsFn.addEnvironment('USER_POOL_ID',               backend.auth.resources.userPool.userPoolId)
 shipmentActionsFn.addToRolePolicy(
   new PolicyStatement({
@@ -1761,6 +1829,82 @@ carrierActionsFn.addToRolePolicy(
 // No delete: DELETE_DOCUMENT removes the row and leaves the file.
 backend.storage.resources.bucket.grantReadWrite(carrierActionsFn, 'carrier-docs/*')
 
+// ── tmsTrackingActions Lambda (Step D) ──────────────────────────────────────
+// Owns TrackingLink and everything that carries a link outside the office: the
+// carrier-driver ping link (texted from the dispatch number, wired in the dispatch
+// loop above) and the per-shipment Customer Link (SES). Check calls themselves
+// stay on tmsShipmentActions, which is where Load status and money already live.
+// Note SETTINGS_TABLE_NAME was set to DispatchSettings by the dispatch loop, so
+// TmsSettings arrives as TMS_SETTINGS_TABLE_NAME here.
+const trackingLinkTbl       = backend.data.resources.tables['TrackingLink']
+const trackingCheckCallTbl  = backend.data.resources.tables['LoadCheckCall']
+const trackingShipmentTbl   = backend.data.resources.tables['Shipment']
+const trackingOrderTbl      = backend.data.resources.tables['Order']
+const trackingLoadCarrTbl   = backend.data.resources.tables['LoadCarrier']
+const trackingLoadTbl       = backend.data.resources.tables['Load']
+const trackingCustomerTbl   = backend.data.resources.tables['Customer']
+const trackingSettingsTbl   = backend.data.resources.tables['TmsSettings']
+const trackingAuditLogTbl   = backend.data.resources.tables['AuditLog']
+const trackingDivisionTbl   = backend.data.resources.tables['Division']
+
+trackingActionsFn.addToRolePolicy(
+  new PolicyStatement({
+    actions: [
+      'dynamodb:GetItem',
+      'dynamodb:PutItem',
+      'dynamodb:UpdateItem',
+      'dynamodb:Query',
+    ],
+    resources: [
+      trackingLinkTbl.tableArn,
+      trackingCheckCallTbl.tableArn,
+      trackingLoadCarrTbl.tableArn,
+      trackingShipmentTbl.tableArn,
+      trackingSettingsTbl.tableArn,
+      trackingAuditLogTbl.tableArn,
+      // Read-only here, but DynamoDB scopes by table, not by action.
+      trackingOrderTbl.tableArn,
+      trackingLoadTbl.tableArn,
+      trackingCustomerTbl.tableArn,
+      trackingDivisionTbl.tableArn,
+    ],
+  })
+)
+trackingActionsFn.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['dynamodb:Query'],
+    resources: [
+      `${trackingLinkTbl.tableArn}/index/*`,
+      `${trackingCheckCallTbl.tableArn}/index/*`,
+      `${trackingLoadCarrTbl.tableArn}/index/*`,
+      `${trackingOrderTbl.tableArn}/index/*`,
+      `${trackingLoadTbl.tableArn}/index/*`,
+    ],
+  })
+)
+trackingActionsFn.addEnvironment('TRACKING_LINK_TABLE_NAME',    trackingLinkTbl.tableName)
+trackingActionsFn.addEnvironment('LOAD_CHECK_CALL_TABLE_NAME',  trackingCheckCallTbl.tableName)
+trackingActionsFn.addEnvironment('SHIPMENT_TABLE_NAME',         trackingShipmentTbl.tableName)
+trackingActionsFn.addEnvironment('ORDER_TABLE_NAME',            trackingOrderTbl.tableName)
+trackingActionsFn.addEnvironment('LOAD_CARRIER_TABLE_NAME',     trackingLoadCarrTbl.tableName)
+trackingActionsFn.addEnvironment('LOAD_TABLE_NAME',             trackingLoadTbl.tableName)
+trackingActionsFn.addEnvironment('CUSTOMER_TABLE_NAME',         trackingCustomerTbl.tableName)
+trackingActionsFn.addEnvironment('TMS_SETTINGS_TABLE_NAME',     trackingSettingsTbl.tableName)
+trackingActionsFn.addEnvironment('AUDIT_LOG_TABLE_NAME',        trackingAuditLogTbl.tableName)
+trackingActionsFn.addEnvironment('DIVISION_TABLE_NAME',         trackingDivisionTbl.tableName)
+trackingActionsFn.addEnvironment('USER_POOL_ID',                backend.auth.resources.userPool.userPoolId)
+trackingActionsFn.addEnvironment('PORTAL_ORIGIN',               PORTAL_PROD_ORIGIN)
+trackingActionsFn.addToRolePolicy(
+  new PolicyStatement({
+    // The Customer Link's contact card is the order's rep, read from the pool.
+    actions:   ['cognito-idp:AdminGetUser'],
+    resources: [backend.auth.resources.userPool.userPoolArn],
+  })
+)
+trackingActionsFn.addToRolePolicy(
+  new PolicyStatement({ actions: ['ses:SendEmail', 'ses:SendRawEmail'], resources: ['*'] })
+)
+
 // ── brokerLoadAlert Lambda (Load stream → broker task + global Slack ping) ──
 // Fires when a load is assigned to the "Broker Need to Cover" driver: creates an
 // IntakeItem task for Arcie and posts to the BCAT global Slack channel.
@@ -1812,6 +1956,96 @@ new EventSourceMapping(Stack.of(brokerAlertFn), 'BrokerLoadStreamMapping', {
   retryAttempts:     2,
   enabled:           process.env.BCAT_ISOLATED_PREVIEW !== 'true' && process.env.BCAT_DEV_STACK !== 'true',   // see the guards below
 })
+
+// ── loadTrackingProjector Lambda (Step D; Load stream → check-call rows) ────
+// The driver app, the POD close and the dispatch MMS auto-POD all stamp
+// stops[].arrivedAt / departedAt straight into Load and never touch Load.status.
+// This consumer turns a newly stamped time into the matching LoadCheckCall row
+// and advances the load through the same loadStatusFromStopTimes ladder the staff
+// actions use. Its own write changes no stop time, so it does not re-trigger.
+//
+// It is the one Load-stream consumer left ENABLED on dev: unlike brokerLoadAlert
+// and rateconAssignedText it only writes our own tables — no Slack, no Twilio,
+// no SES — so a dev stack running it cannot reach anybody.
+{
+  const projectorFn = backend.loadTrackingProjector.resources.lambda as LambdaFunction
+  projectorFn.addToRolePolicy(new PolicyStatement({
+    actions:   ['dynamodb:DescribeStream', 'dynamodb:GetRecords', 'dynamodb:GetShardIterator', 'dynamodb:ListStreams'],
+    resources: [loadTable.tableStreamArn!],
+  }))
+  // Writes: Load (status), LoadCheckCall (the stop event), Shipment (rederive).
+  // BatchGetItem is what readBundle uses to collect LoadFinancials by load id —
+  // without it rederiveShipmentStatus dies after the Load row has already moved.
+  projectorFn.addToRolePolicy(new PolicyStatement({
+    actions:   ['dynamodb:GetItem', 'dynamodb:BatchGetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem', 'dynamodb:Query'],
+    resources: [loadTable.tableArn, trackingCheckCallTbl.tableArn, trackingShipmentTbl.tableArn],
+  }))
+  // Read-only: the bundle's other halves and the driver roster.
+  projectorFn.addToRolePolicy(new PolicyStatement({
+    actions:   ['dynamodb:GetItem', 'dynamodb:BatchGetItem', 'dynamodb:Query', 'dynamodb:Scan'],
+    resources: [
+      trackingOrderTbl.tableArn,
+      trackingLoadCarrTbl.tableArn,
+      backend.data.resources.tables['LoadFinancials'].tableArn,
+      backend.data.resources.tables['LoadCharge'].tableArn,
+      backend.data.resources.tables['Driver'].tableArn,
+    ],
+  }))
+  projectorFn.addToRolePolicy(new PolicyStatement({
+    actions:   ['dynamodb:Query'],
+    resources: [
+      `${loadTable.tableArn}/index/*`,
+      `${trackingCheckCallTbl.tableArn}/index/*`,
+      `${trackingOrderTbl.tableArn}/index/*`,
+      `${trackingLoadCarrTbl.tableArn}/index/*`,
+      `${backend.data.resources.tables['LoadCharge'].tableArn}/index/*`,
+    ],
+  }))
+  projectorFn.addEnvironment('LOAD_TABLE_NAME',            loadTable.tableName)
+  projectorFn.addEnvironment('LOAD_CHECK_CALL_TABLE_NAME', trackingCheckCallTbl.tableName)
+  projectorFn.addEnvironment('SHIPMENT_TABLE_NAME',        trackingShipmentTbl.tableName)
+  projectorFn.addEnvironment('ORDER_TABLE_NAME',           trackingOrderTbl.tableName)
+  projectorFn.addEnvironment('LOAD_CARRIER_TABLE_NAME',    trackingLoadCarrTbl.tableName)
+  projectorFn.addEnvironment('LOAD_FINANCIALS_TABLE_NAME', backend.data.resources.tables['LoadFinancials'].tableName)
+  projectorFn.addEnvironment('LOAD_CHARGE_TABLE_NAME',     backend.data.resources.tables['LoadCharge'].tableName)
+  projectorFn.addEnvironment('DRIVER_TABLE_NAME',          backend.data.resources.tables['Driver'].tableName)
+  // Same own-stack scoping as BrokerLoadStreamMapping (deploy #227 cycle).
+  new EventSourceMapping(Stack.of(projectorFn), 'LoadTrackingProjectorStreamMapping', {
+    target:            projectorFn,
+    eventSourceArn:    loadTable.tableStreamArn,
+    startingPosition:  StartingPosition.LATEST,
+    batchSize:         10,
+    retryAttempts:     2,
+    enabled:           process.env.BCAT_ISOLATED_PREVIEW !== 'true',
+  })
+}
+
+// ── checkCallNotifier Lambda (Step D; every 5m) ─────────────────────────────
+// Rides Step B's sparse checkCallOpen + nextCheckCallAt index and DMs the load's
+// carrier rep on Slack once for DUE and once for OVERDUE per scheduled time.
+// The EventBridge rule defineFunction creates lives in the data stack, so the dev
+// guard's findAll loop disables it; dev proves the sweep through the in-app
+// worklist and a hand `aws lambda invoke`.
+{
+  const notifierFn = backend.checkCallNotifier.resources.lambda as LambdaFunction
+  notifierFn.addToRolePolicy(new PolicyStatement({
+    actions:   ['dynamodb:GetItem', 'dynamodb:UpdateItem', 'dynamodb:Query'],
+    resources: [loadTable.tableArn, trackingSettingsTbl.tableArn, trackingOrderTbl.tableArn, trackingLoadCarrTbl.tableArn],
+  }))
+  notifierFn.addToRolePolicy(new PolicyStatement({
+    actions:   ['dynamodb:Query'],
+    resources: [`${loadTable.tableArn}/index/*`, `${trackingOrderTbl.tableArn}/index/*`, `${trackingLoadCarrTbl.tableArn}/index/*`],
+  }))
+  notifierFn.addEnvironment('LOAD_TABLE_NAME',         loadTable.tableName)
+  notifierFn.addEnvironment('TMS_SETTINGS_TABLE_NAME', trackingSettingsTbl.tableName)
+  notifierFn.addEnvironment('ORDER_TABLE_NAME',        trackingOrderTbl.tableName)
+  notifierFn.addEnvironment('LOAD_CARRIER_TABLE_NAME', trackingLoadCarrTbl.tableName)
+  notifierFn.addEnvironment('USER_POOL_ID',            backend.auth.resources.userPool.userPoolId)
+  notifierFn.addToRolePolicy(new PolicyStatement({
+    actions:   ['cognito-idp:AdminGetUser'],
+    resources: [backend.auth.resources.userPool.userPoolArn],
+  }))
+}
 
 // ── podActions Lambda (JobsDone PODs) ──────────────────────────────────────
 // Custom AppSync router for JobsDone POD imports. All access is enforced here;
@@ -1988,7 +2222,7 @@ if (process.env.BCAT_ISOLATED_PREVIEW === 'true') {
     (rule.node.defaultChild as CfnRule).state = 'DISABLED'
   }
 
-  const previewCallable = new Set(['userManagement', 'vendorApActions', 'tmsDirectoryActions', 'tmsShipmentActions', 'tmsCarrierActions', 'tmsGeocode', 'podActions'])
+  const previewCallable = new Set(['userManagement', 'vendorApActions', 'tmsDirectoryActions', 'tmsShipmentActions', 'tmsCarrierActions', 'tmsTrackingActions', 'tmsGeocode', 'podActions'])
   for (const [name, construct] of Object.entries(backend)) {
     if (previewCallable.has(name)) continue
     const lambda = (construct as { resources?: { lambda?: LambdaFunction } }).resources?.lambda
@@ -2146,8 +2380,10 @@ factoringIntakeFn.addToRolePolicy(
 // to build and test before a change reaches main. Unlike BCAT_ISOLATED_PREVIEW it does
 // not zero the Lambdas — the point of dev is to use the whole app — but nothing on it
 // may act on the outside world by itself: every EventBridge schedule (including the
-// ones defineFunction creates) is disabled, both Load-stream consumers are created
-// disabled above, and every Lambda is denied SES. Slack, OTR, Paychex and Blue Ink are
+// ones defineFunction creates) is disabled, and the two Load-stream consumers that
+// reach the outside world (brokerLoadAlert, rateconAssignedText) are created disabled
+// above — loadTrackingProjector stays enabled because it writes only our own tables.
+// Every Lambda is denied SES. Slack, OTR, Paychex and Blue Ink are
 // neutered on dev by branch-level secret overrides (see Docs/DEV_STACK.md); Twilio
 // is inert because dev's user pool has no /bcat/dispatch/<poolId>/ config.
 // Runs last so every rule already exists. Refused on main.

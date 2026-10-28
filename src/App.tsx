@@ -25,6 +25,9 @@ import { CarriersPage } from '@/features/carriers/CarriersPage'
 import { RateConSignPage } from '@/features/carriers/RateConSignPage'
 import { ShipmentsBoard } from '@/features/shipments/ShipmentsBoard'
 import { ShipmentPage } from '@/features/shipments/ShipmentPage'
+import { CheckCallsPage } from '@/features/tracking/CheckCallsPage'
+import CustomerTrackPage from '@/features/tracking/CustomerTrackPage'
+import CarrierPingPage from '@/features/tracking/CarrierPingPage'
 import { InsurancePage } from '@/features/insurance/InsurancePage'
 import { AuditPage } from '@/features/audit/AuditPage'
 import { SchedulePage } from '@/features/schedule/SchedulePage'
@@ -183,6 +186,11 @@ export default function App() {
           {/* Public, tokenized rate confirmation signing for an outside carrier */}
           <Route path="/sign/rate-con/:token" element={<RateConSignPage />} />
           <Route path="/amazon-disputes" element={<DriverDisputesPage />} />
+          {/* Public tracking pages — the token in the URL is the key; no sign-in.
+              Both are declared before /track/:code so a 32-character link token is
+              never read as a truck code. */}
+          <Route path="/track/s/:token" element={<CustomerTrackPage />} />
+          <Route path="/track/l/:token" element={<CarrierPingPage />} />
           {/* Public truck tracking page — the code in the URL is the key; no sign-in. */}
           <Route path="/track/:code" element={<TrackPage />} />
           {/* Driver PWA — separate Cognito pool, separate layout, outside staff AuthGuard */}
@@ -206,6 +214,8 @@ export default function App() {
               {/* The MVMNT-style shipment layer; it shares the `loads` page permission. */}
               <Route path="/shipments" element={<RequirePage page="loads"><ShipmentsBoard /></RequirePage>} />
               <Route path="/shipments/:id" element={<RequirePage page="loads"><ShipmentPage /></RequirePage>} />
+              {/* The check-call worklist across every shipment; same `loads` permission. */}
+              <Route path="/check-calls" element={<RequirePage page="loads"><CheckCallsPage /></RequirePage>} />
               {/* Retired: the driver roster and editor now live in the Files hub. */}
               <Route path="/drivers" element={<Navigate to="/files" replace />} />
               <Route path="/fleet-dashboard" element={<RequirePage page="fleetManagerDashboard"><FleetManagerDashboardPage /></RequirePage>} />

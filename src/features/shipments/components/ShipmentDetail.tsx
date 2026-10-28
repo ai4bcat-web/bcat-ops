@@ -5,7 +5,7 @@
  * is the only shape difference between the two.
  */
 import { useMemo, useState } from 'react'
-import { Building2, ClipboardList, FileText, MapPin, DollarSign, Info } from 'lucide-react'
+import { Building2, ClipboardList, FileText, MapPin, DollarSign, Info, Radar } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import { formatCents } from '@/lib/tmsDirectory'
@@ -19,6 +19,7 @@ import type { CreditSummary } from '@/lib/customerCredit'
 import { StopCards } from './StopCards'
 import { FinancialLines } from './FinancialLines'
 import { CarrierSection } from './CarrierSection'
+import { TrackingSection } from './TrackingSection'
 import { LoadActions } from './StatusActions'
 import { DraftOrderEditor } from './DraftOrderEditor'
 import type { ShipmentActions } from '../useShipmentActions'
@@ -31,6 +32,7 @@ const TABS = [
   { key: 'details', label: 'Details', icon: ClipboardList },
   { key: 'stops', label: 'Stops', icon: MapPin },
   { key: 'carrier', label: 'Carrier', icon: Building2 },
+  { key: 'tracking', label: 'Tracking', icon: Radar },
   { key: 'documents', label: 'Documents', icon: FileText },
   { key: 'financials', label: 'Financials', icon: DollarSign },
 ] as const
@@ -125,6 +127,16 @@ export function ShipmentDetail(props: ShipmentDetailProps) {
             <Field label="Pickup" value={shipment.pickupAppt ? formatDateTime(shipment.pickupAppt) : '—'} />
             <Field label="Delivery" value={shipment.deliveryAppt ? formatDateTime(shipment.deliveryAppt) : '—'} />
             <Field label="Load status" value={load?.status ? LOAD_WORKFLOW_STATUS_LABELS[load.status] : '—'} />
+            <Field
+              label="Last update"
+              value={load?.lastKnownAt || load?.lastCheckCallAt
+                ? [
+                    formatDateTime(load.lastKnownAt ?? load.lastCheckCallAt),
+                    [load.lastKnownCity, load.lastKnownState].filter(Boolean).join(', '),
+                  ].filter(Boolean).join(' · ')
+                : '—'}
+            />
+            <Field label="Next check call" value={load?.nextCheckCallAt ? formatDateTime(load.nextCheckCallAt) : '—'} />
             <Field label="AR" value={order?.arStatus ?? '—'} />
             <Field label="Revenue" value={`$${formatCents(totals.revenueCents)}`} />
             <Field label="Cost" value={`$${formatCents(totals.costCents)}`} />
@@ -217,6 +229,10 @@ export function ShipmentDetail(props: ShipmentDetailProps) {
       )}
 
       {tab === 'carrier' && <CarrierSection bundle={bundle} actions={actions} />}
+
+      {tab === 'tracking' && (
+        <TrackingSection bundle={bundle} customer={customer} catalog={catalog} actions={actions} />
+      )}
 
       {tab === 'documents' && (
         <div className="space-y-4">

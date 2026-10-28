@@ -21,18 +21,20 @@
  * SEND_RATE_CON/VOID_RATE_CON own the rate confirmation's token and S3 copy, and
  * DISPATCH_LOAD moves a booked load onto the road. They reuse the same helpers as
  * everything above — one transaction, one audit row, one CAS.
+ *
+ * Step D adds the tracking log: LOG_CHECK_CALL writes a LoadCheckCall row, stamps
+ * the stop clock and moves the load from it, RESOLVE_INCIDENT closes an exception,
+ * SET_NEXT_CHECK_CALL owns the reminder and SET_ETA the carrier's promise. Every
+ * change to `checkCallOpen` — a sparse GSI hash key — goes through a raw UpdateItem
+ * that REMOVEs, because a stored NULL is an index key DynamoDB refuses.
  */
 import { getAmplifyDataClientConfig, type DataClientEnv } from '@aws-amplify/backend-function/runtime'
 import { Amplify } from 'aws-amplify'
 import { generateClient } from 'aws-amplify/data'
 import {
   DynamoDBClient,
-  BatchGetItemCommand,
-  GetItemCommand,
   PutItemCommand,
   UpdateItemCommand,
-  QueryCommand,
-  TransactWriteItemsCommand,
   ScanCommand,
   type AttributeValue,
   type TransactWriteItem,
@@ -42,6 +44,33 @@ import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2'
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb'
 import { createHash, randomBytes, randomUUID } from 'crypto'
+import {
+  IDX_CHARGES_BY_SHIPMENT,
+  batchGetByIds as storeBatchGetByIds,
+  buildSearchKey,
+  casCondition,
+  conditionCheckUpdatedAtTx,
+  conflictError,
+  deleteItemTx,
+  getById as storeGetById,
+  isConflict,
+  marshallRow,
+  monthOf,
+  nowIso,
+  numberOrNull,
+  putItem,
+  queryIndex as storeQueryIndex,
+  readBundle as storeReadBundle,
+  readStops,
+  rederiveShipmentStatus as storeRederiveShipmentStatus,
+  shipmentMirrors,
+  shipmentStoreFromEnv,
+  transact as storeTransact,
+  updateItemTx,
+  type Bundle,
+  type Row,
+  type StopShape,
+} from '../_shared/shipmentStore'
 
 import {
   computeFinancials,
@@ -53,8 +82,16 @@ import {
   canTransitionShipmentStatus,
   isTruckloadMode,
   loadStatusFromStopTimes,
-  shipmentStatusFromLoads,
 } from '../../../src/lib/shipmentStatus'
+import {
+  INCIDENT_TYPES,
+  MANUALLY_LOGGABLE_TYPES,
+  incidentChargeLines,
+  lastKnownPatch,
+  stampStopEvent,
+  statusAfterCheckCall,
+  stopEventId,
+} from '../../../src/lib/checkCalls'
 import { creditSummaryForCustomer, resolveCreditPolicy, type CreditSummary } from '../../../src/lib/customerCredit'
 import { evaluateCarrierBooking } from '../../../src/lib/carrierEligibility'
 import { quickPayFee, quickPayTiersOf, tierFor } from '../../../src/lib/quickPay'
@@ -64,16 +101,21 @@ import type {
   CarrierDocumentRecord,
   CarrierRecord,
   ChargeCalc,
+  ChargeCodeDef,
   ChargeSide,
+  CheckCallChargeSnapshot,
+  CheckCallSource,
+  CheckCallType,
   CustomerRecord,
   DefaultCharge,
-  LoadCarrierStatus,
+  IncidentType,
   LoadWorkflowStatus,
   OrderRecord,
   PricingDefaults,
   ShipmentMode,
   ShipmentRecord,
   ShipmentStatus,
+  StopEventType,
   TmsSettings as TmsSettingsRecord,
 } from '../../../src/types/tms'
 
@@ -101,26 +143,45 @@ const CARRIER_DOCUMENT_TABLE_NAME = process.env.CARRIER_DOCUMENT_TABLE_NAME ?? '
 const BUCKET_NAME = process.env.BUCKET_NAME ?? ''
 const FROM_ADDRESS = process.env.FROM_ADDRESS ?? 'ai4bcat@gmail.com'
 const PORTAL_ORIGIN = process.env.PORTAL_ORIGIN ?? ''
+// Step D tables. The tracking log is written here and by the projector, the public
+// tracking Lambda and tms-tracking-actions; the link table is only read here, to
+// revoke the carrier's ping link when the carrier comes off the load.
+const LOAD_CHECK_CALL_TABLE_NAME = process.env.LOAD_CHECK_CALL_TABLE_NAME ?? ''
+const TRACKING_LINK_TABLE_NAME = process.env.TRACKING_LINK_TABLE_NAME ?? ''
 
 const OWNER_EMAIL = 'ryne@bcatcorp.com'
 const ADMIN_GROUP = 'ADMIN'
 const SETTINGS_ID = 'default'
 
 // Amplify derives GSI names from the plural model name and the key fields.
-const IDX_ORDERS_BY_SHIPMENT = 'ordersByShipmentId'
-const IDX_LOADS_BY_SHIPMENT = 'loadsByShipmentId'
+// The four the shipment bundle reads come from `_shared/shipmentStore`.
 const IDX_LOADS_BY_CUSTOMER = 'loadsByCustomerId'
 const IDX_ORDERS_BY_CUSTOMER = 'ordersByCustomerIdAndPickupAppt'
-const IDX_CARRIERS_BY_SHIPMENT = 'loadCarriersByShipmentId'
 const IDX_CARRIERS_BY_LOAD = 'loadCarriersByLoadId'
-const IDX_CHARGES_BY_SHIPMENT = 'loadChargesByShipmentIdAndSortOrder'
 const IDX_CARRIERS_BY_CARRIER_ID = 'loadCarriersByCarrierId'
 const IDX_CARRIER_DOCS_BY_CARRIER = 'carrierDocumentsByCarrierIdAndType'
+const IDX_CHECK_CALLS_BY_LOAD = 'loadCheckCallsByLoadIdAndAt'
 
 /** DUPLICATE_SHIPMENT ceiling — one transaction per copy, and 20 is the plan's cap. */
 const MAX_DUPLICATE_COPIES = 20
 /** Element-validated JSON arrays are capped so one request cannot blow the item size. */
 const MAX_JSON_ELEMENTS = 100
+
+// ── Shared shipment store ────────────────────────────────────────────────────
+
+/**
+ * Reading a bundle and re-deriving a shipment's status live in
+ * `_shared/shipmentStore`, so a worker Lambda derives a shipment exactly the way
+ * this handler does. Bind them to this handler's client and tables once.
+ */
+const store = shipmentStoreFromEnv(dynamo)
+const getById = (tableName: string, id: string) => storeGetById(dynamo, tableName, id)
+const queryIndex = (tableName: string, indexName: string, keyName: string, keyValue: string) =>
+  storeQueryIndex(dynamo, tableName, indexName, keyName, keyValue)
+const batchGetByIds = (tableName: string, ids: string[]) => storeBatchGetByIds(dynamo, tableName, ids)
+const transact = (items: TransactWriteItem[], label: string) => storeTransact(dynamo, items, label)
+const readBundle = (shipmentId: string) => storeReadBundle(store, shipmentId)
+const rederiveShipmentStatus = (shipmentId: string, caller: Caller) => storeRederiveShipmentStatus(store, shipmentId, caller)
 
 // ── AppSync data client (Load writes only) ───────────────────────────────────
 
@@ -221,6 +282,12 @@ const OPEN_RATE_CON_STATUSES: readonly string[] = ['SENT', 'OPENED']
 const MAX_RATE_CON_BYTES = 10 * 1024 * 1024
 /** How long a signing link lives when neither the caller nor settings say. */
 const DEFAULT_RATE_CON_EXPIRY_HOURS = 48
+/** Step D. Clock skew between a phone and this Lambda gets five minutes, no more. */
+const CHECK_CALL_FUTURE_GRACE_MS = 5 * 60_000
+/** A check call is a sentence about where the truck is, not a narrative. */
+const MAX_CHECK_CALL_NOTE = 2000
+/** The three sides an incident charge may be entered on. */
+const INCIDENT_CHARGE_SIDES = ['CUSTOMER', 'CARRIER', 'BOTH'] as const
 
 type Action =
   | 'CREATE_SHIPMENT'
@@ -244,6 +311,10 @@ type Action =
   | 'REMOVE_LOAD_CARRIER'
   | 'RECALC_CHARGES'
   | 'SET_AR_STATUS'
+  | 'LOG_CHECK_CALL'
+  | 'RESOLVE_INCIDENT'
+  | 'SET_NEXT_CHECK_CALL'
+  | 'SET_ETA'
   | 'GET_SHIPMENT_BUNDLE'
   | 'BACKFILL_SHIPMENT'
 
@@ -267,8 +338,6 @@ interface Caller {
   groups: string[]
   isAdmin: boolean
 }
-
-type Row = Record<string, unknown>
 
 // ── Auth ─────────────────────────────────────────────────────────────────────
 
@@ -355,6 +424,17 @@ function optionalInteger(value: unknown, options?: { min?: number; max?: number;
   return num
 }
 
+/** A coordinate, which is the one number in this router that is not an integer. */
+function optionalFloat(value: unknown, options: { min: number; max: number; label: string }): number | null {
+  if (value == null || value === '') return null
+  const num = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(num)) throw new Error(`${options.label} must be a number`)
+  if (num < options.min || num > options.max) {
+    throw new Error(`${options.label} must be between ${options.min} and ${options.max}`)
+  }
+  return num
+}
+
 function optionalBoolean(value: unknown): boolean | null {
   if (value == null) return null
   if (typeof value === 'boolean') return value
@@ -406,81 +486,7 @@ function optionalIso(value: unknown, label: string): string | null {
   return assertIso(value, label)
 }
 
-function nowIso(): string {
-  return new Date().toISOString()
-}
-
-/** ES2020 lib lacks the ErrorOptions constructor; attach the cause explicitly. */
-function conflictError(itemLabel: string, cause: unknown): Error {
-  const err = new Error(`This ${itemLabel} was changed by someone else. Reload and try again.`)
-  ;(err as Error & { cause?: unknown }).cause = cause
-  return err
-}
-
-function isConflict(err: unknown): boolean {
-  const msg = err instanceof Error ? err.message : String(err)
-  return msg.includes('ConditionalCheckFailed') || msg.includes('TransactionCanceled')
-}
-
-function monthOf(appt: string | null | undefined): string | null {
-  if (!appt) return null
-  const m = /^(\d{4}-\d{2})/.exec(appt)
-  return m ? m[1] : null
-}
-
 // ── DynamoDB helpers ─────────────────────────────────────────────────────────
-
-async function getById(tableName: string, id: string): Promise<Row | null> {
-  if (!tableName) throw new Error('Table name is not configured')
-  const result = await dynamo.send(new GetItemCommand({ TableName: tableName, Key: marshall({ id }) }))
-  return result.Item ? unmarshall(result.Item) : null
-}
-
-async function queryIndex(
-  tableName: string,
-  indexName: string,
-  keyName: string,
-  keyValue: string,
-): Promise<Row[]> {
-  if (!tableName) throw new Error('Table name is not configured')
-  const items: Row[] = []
-  let lastKey: Record<string, AttributeValue> | undefined
-  do {
-    const result = await dynamo.send(
-      new QueryCommand({
-        TableName: tableName,
-        IndexName: indexName,
-        KeyConditionExpression: '#k = :v',
-        ExpressionAttributeNames: { '#k': keyName },
-        ExpressionAttributeValues: { ':v': { S: keyValue } },
-        ExclusiveStartKey: lastKey,
-      }),
-    )
-    if (result.Items) items.push(...result.Items.map((i) => unmarshall(i)))
-    lastKey = result.LastEvaluatedKey
-  } while (lastKey)
-  return items
-}
-
-async function batchGetByIds(tableName: string, ids: string[]): Promise<Row[]> {
-  const unique = [...new Set(ids.filter(Boolean))]
-  if (unique.length === 0) return []
-  const out: Row[] = []
-  for (let i = 0; i < unique.length; i += 100) {
-    const chunk = unique.slice(i, i + 100)
-    let keys = chunk.map((id) => marshall({ id }))
-    // BatchGetItem may return part of the request; the rest comes back as unprocessed.
-    for (let attempt = 0; attempt < 4 && keys.length > 0; attempt++) {
-      const result = await dynamo.send(
-        new BatchGetItemCommand({ RequestItems: { [tableName]: { Keys: keys } } }),
-      )
-      const got = result.Responses?.[tableName] ?? []
-      out.push(...got.map((item) => unmarshall(item)))
-      keys = result.UnprocessedKeys?.[tableName]?.Keys ?? []
-    }
-  }
-  return out
-}
 
 /**
  * Whole-table read. Only the backfill uses it, and only for the driver roster —
@@ -498,99 +504,11 @@ async function scanTable(tableName: string): Promise<Row[]> {
   return items
 }
 
-function marshallRow(item: Row): Record<string, AttributeValue> {
-  return marshall(item, { removeUndefinedValues: true })
-}
-
-function putItem(tableName: string, item: Row, guardNew = true): TransactWriteItem {
-  return {
-    Put: {
-      TableName: tableName,
-      Item: marshallRow(item),
-      ...(guardNew ? { ConditionExpression: 'attribute_not_exists(id)' } : {}),
-    },
-  }
-}
-
-/**
- * Compare-and-swap on `updatedAt`, with the empty string standing for "this row has
- * never been written". Same shape the directory Lambda uses, so a client that can
- * talk to one router can talk to both.
- */
-function casCondition(values: Record<string, AttributeValue>, expectedUpdatedAt: string): string {
-  values[':casExpectedUpdatedAt'] = { S: expectedUpdatedAt }
-  values[':casEmpty'] = { S: '' }
-  return '((attribute_exists(updatedAt) AND updatedAt = :casExpectedUpdatedAt) OR (attribute_not_exists(updatedAt) AND :casExpectedUpdatedAt = :casEmpty))'
-}
-
 function assertExpectedUpdatedAt(input: Row): string {
   const value = input.expectedUpdatedAt
   if (value == null) throw new Error('expectedUpdatedAt is required')
   if (typeof value !== 'string') throw new Error('expectedUpdatedAt must be a string')
   return value
-}
-
-/** Build a SET update for every own key of `patch`, with a CAS guard on updatedAt. */
-function updateItemTx(
-  tableName: string,
-  id: string,
-  patch: Row,
-  expectedUpdatedAt: string | null,
-): TransactWriteItem {
-  const names: Record<string, string> = {}
-  const values: Record<string, AttributeValue> = {}
-  const sets: string[] = []
-  for (const [key, value] of Object.entries(patch)) {
-    if (value === undefined) continue
-    names[`#${key}`] = key
-    values[`:${key}`] = marshallRow({ [key]: value })[key]
-    sets.push(`#${key} = :${key}`)
-  }
-  return {
-    Update: {
-      TableName: tableName,
-      Key: marshall({ id }),
-      UpdateExpression: `SET ${sets.join(', ')}`,
-      ExpressionAttributeNames: names,
-      ExpressionAttributeValues: values,
-      ...(expectedUpdatedAt == null ? {} : { ConditionExpression: casCondition(values, expectedUpdatedAt) }),
-    },
-  }
-}
-
-function deleteItemTx(tableName: string, id: string): TransactWriteItem {
-  return { Delete: { TableName: tableName, Key: marshall({ id }) } }
-}
-
-/**
- * Guard a row this transaction does not itself write: the whole thing is refused
- * if that row has moved since we read it. Used for the Load behind a booking,
- * whose own mutation goes through AppSync a moment later.
- */
-function conditionCheckUpdatedAtTx(tableName: string, id: string, expectedUpdatedAt: string): TransactWriteItem {
-  const values: Record<string, AttributeValue> = {}
-  const ConditionExpression = casCondition(values, expectedUpdatedAt)
-  return {
-    ConditionCheck: {
-      TableName: tableName,
-      Key: marshall({ id }),
-      ConditionExpression,
-      ExpressionAttributeValues: values,
-    },
-  }
-}
-
-async function transact(items: TransactWriteItem[], label: string): Promise<void> {
-  if (items.length === 0) return
-  if (items.length > MAX_JSON_ELEMENTS) {
-    throw new Error(`${label} needs ${items.length} writes; the transaction limit is ${MAX_JSON_ELEMENTS}`)
-  }
-  try {
-    await dynamo.send(new TransactWriteItemsCommand({ TransactItems: items }))
-  } catch (err) {
-    if (isConflict(err)) throw conflictError(label, err)
-    throw err
-  }
 }
 
 /**
@@ -624,50 +542,18 @@ async function writeAudit(entityType: string, entityId: string, action: string, 
 
 // ── Stops ────────────────────────────────────────────────────────────────────
 
-interface StopShape {
-  id?: string
-  type?: string
-  name?: string | null
-  city?: string | null
-  appt?: string
-  apptType?: string | null
-  apptEnd?: string | null
-  requestedStart?: string | null
-  requestedEnd?: string | null
-  apptRequestedBy?: string | null
-  apptNote?: string | null
-  refs?: unknown[] | null
-  documentContact?: Row | null
-  stopNotes?: string | null
-  driverId?: string | null
-  truckId?: string | null
-  colorKey?: string | null
-  sequence?: number
-  locationId?: string | null
-  address?: Row | null
-  contact?: Row | null
-  arrivedAt?: string | null
-  departedAt?: string | null
-  pieces?: number | null
-  weightLbs?: number | null
-  instructions?: string | null
-  [key: string]: unknown
-}
-
-/** `stops` is AWSJSON: a list once AppSync parsed it, but a string if double-encoded. */
-function readStops(load: Row): StopShape[] {
-  let v = load.stops
-  for (let i = 0; i < 4 && typeof v === 'string'; i++) {
-    try { v = JSON.parse(v) } catch { break }
-  }
-  if (!Array.isArray(v)) return []
-  return v
-    .filter((s): s is StopShape => !!s && typeof s === 'object')
-    .sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0))
-}
-
 function resequence(stops: StopShape[]): StopShape[] {
   return stops.map((s, i) => ({ ...s, sequence: i }))
+}
+
+/** The stop clock, as the status ladder reads it: type, order and the two stamps. */
+function stopTimesOf(stops: StopShape[]): { type: 'pickup' | 'delivery'; sequence: number; arrivedAt: string | null; departedAt: string | null }[] {
+  return stops.map((s) => ({
+    type: s.type === 'delivery' ? ('delivery' as const) : ('pickup' as const),
+    sequence: s.sequence ?? 0,
+    arrivedAt: s.arrivedAt ?? null,
+    departedAt: s.departedAt ?? null,
+  }))
 }
 
 /**
@@ -931,88 +817,7 @@ function pricingDefaultsOf(customer: Row | null): PricingDefaults | null {
   return p as PricingDefaults
 }
 
-// ── Bundle ───────────────────────────────────────────────────────────────────
-
-interface Bundle {
-  shipment: Row
-  orders: Row[]
-  loads: Row[]
-  loadCarriers: Row[]
-  charges: Row[]
-  financials: Row[]
-}
-
-async function readBundle(shipmentId: string): Promise<Bundle> {
-  const shipment = await getById(SHIPMENT_TABLE_NAME, shipmentId)
-  if (!shipment) throw new Error(`Shipment not found: ${shipmentId}`)
-  const [orders, loads, loadCarriers, charges] = await Promise.all([
-    queryIndex(ORDER_TABLE_NAME, IDX_ORDERS_BY_SHIPMENT, 'shipmentId', shipmentId),
-    queryIndex(LOAD_TABLE_NAME, IDX_LOADS_BY_SHIPMENT, 'shipmentId', shipmentId),
-    queryIndex(LOAD_CARRIER_TABLE_NAME, IDX_CARRIERS_BY_SHIPMENT, 'shipmentId', shipmentId),
-    queryIndex(LOAD_CHARGE_TABLE_NAME, IDX_CHARGES_BY_SHIPMENT, 'shipmentId', shipmentId),
-  ])
-  // LoadFinancials.id IS the load id, so the totals come back in one BatchGet.
-  const financials = await batchGetByIds(LOAD_FINANCIALS_TABLE_NAME, loads.map((l) => String(l.id)))
-  loads.sort((a, b) => Number(a.leg ?? 0) - Number(b.leg ?? 0))
-  charges.sort((a, b) => Number(a.sortOrder ?? 0) - Number(b.sortOrder ?? 0))
-  return { shipment, orders, loads, loadCarriers, charges, financials }
-}
-
-
-// ── Shipment mirrors ─────────────────────────────────────────────────────────
-
-/**
- * The board shows one row per shipment, so the shipment carries a copy of the
- * first pickup and the last delivery across its legs. They are mirrors: the stops
- * on the loads are the truth, and these are rewritten whenever a stop moves.
- */
-function shipmentMirrors(loads: Row[]): Row {
-  const stops = loads.flatMap((l) => readStops(l))
-  const pickups = stops.filter((s) => s.type === 'pickup' && s.appt)
-  const deliveries = stops.filter((s) => s.type === 'delivery' && s.appt)
-  pickups.sort((a, b) => String(a.appt).localeCompare(String(b.appt)))
-  deliveries.sort((a, b) => String(a.appt).localeCompare(String(b.appt)))
-  const firstPickup = pickups[0] ?? stops.find((s) => s.type === 'pickup') ?? null
-  const lastDelivery = deliveries[deliveries.length - 1] ?? stops.filter((s) => s.type === 'delivery').pop() ?? null
-  const pickupAppt = firstPickup?.appt || undefined
-  const pickupMonth = monthOf(pickupAppt as string) || undefined
-  return {
-    pickupAppt,
-    deliveryAppt: lastDelivery?.appt || undefined,
-    pickupMonth,
-    originCity: firstPickup?.city || undefined,
-    destinationCity: lastDelivery?.city || undefined,
-  }
-}
-
-/** Lower-cased number, customer, cities and every reference value, in one field. */
-function buildSearchKey(shipment: Row, orders: Row[], loads: Row[]): string {
-  const parts: string[] = [String(shipment.number ?? ''), String(shipment.customerName ?? '')]
-  const mirrors = shipmentMirrors(loads)
-  if (mirrors.originCity) parts.push(String(mirrors.originCity))
-  if (mirrors.destinationCity) parts.push(String(mirrors.destinationCity))
-  for (const order of orders) {
-    const refs = Array.isArray(order.references) ? (order.references as Row[]) : []
-    for (const ref of refs) {
-      if (typeof ref?.value === 'string') parts.push(ref.value)
-    }
-  }
-  for (const load of loads) {
-    for (const stop of readStops(load)) {
-      const refs = Array.isArray(stop.refs) ? (stop.refs as Row[]) : []
-      for (const ref of refs) {
-        if (typeof ref?.value === 'string') parts.push(ref.value)
-      }
-    }
-  }
-  return parts.filter(Boolean).join(' ').toLowerCase().slice(0, 1800)
-}
-
 // ── Credit ───────────────────────────────────────────────────────────────────
-
-function numberOrNull(value: unknown): number | null {
-  return typeof value === 'number' && Number.isFinite(value) ? value : null
-}
 
 /**
  * Everything the customer currently has riding on us, scored against their limit.
@@ -1832,43 +1637,6 @@ async function setShipmentStatus(input: Row, caller: Caller): Promise<Row> {
   return readBundle(shipmentId) as unknown as Row
 }
 
-/**
- * Re-derive the shipment's status from its legs after any load-level change.
- * Sticky states (draft, tender, hold, cancel) are left alone — a truck arriving
- * does not take a shipment off hold.
- */
-async function rederiveShipmentStatus(shipmentId: string, caller: Caller): Promise<Row> {
-  const bundle = await readBundle(shipmentId)
-  const { shipment } = bundle
-  const current = String(shipment.status ?? 'DRAFT') as ShipmentStatus
-  const derived = shipmentStatusFromLoads(
-    bundle.loads.map((l) => ({
-      status: (l.status ?? null) as LoadWorkflowStatus | null,
-      carrierStatuses: bundle.loadCarriers
-        .filter((c) => c.loadId === l.id)
-        .map((c) => String(c.status) as LoadCarrierStatus),
-    })),
-    current,
-  )
-  const mirrors = shipmentMirrors(bundle.loads)
-  const now = nowIso()
-  const patch: Row = {
-    ...mirrors,
-    searchKey: buildSearchKey(shipment, bundle.orders, bundle.loads),
-    updatedBy: caller.email,
-    updatedAt: now,
-    version: (numberOrNull(shipment.version) ?? 1) + 1,
-  }
-  if (derived !== current) {
-    patch.status = derived
-    patch.previousStatus = current
-    patch.statusChangedAt = now
-    patch.statusChangedBy = caller.email
-  }
-  await transact([updateItemTx(SHIPMENT_TABLE_NAME, shipmentId, patch, null)], 'shipment')
-  return readBundle(shipmentId) as unknown as Row
-}
-
 // ── SET_LOAD_STATUS ──────────────────────────────────────────────────────────
 
 async function setLoadStatus(input: Row, caller: Caller): Promise<Row> {
@@ -2237,6 +2005,10 @@ async function updateStop(input: Row, caller: Caller): Promise<Row> {
     return i
   }
 
+  // Step D: the stamps this call sets for the first time. Each one is a stop event
+  // the tracking log has to carry, exactly as the driver app's would be.
+  const newStamps: { stopId: string; event: StopEventType; at: string }[] = []
+
   switch (op) {
     case 'ADD': {
       const added = validateStop({ ...patch, sequence: stops.length }, stops.length)
@@ -2306,6 +2078,13 @@ async function updateStop(input: Row, caller: Caller): Promise<Row> {
       if (arrivedAt && departedAt && Date.parse(departedAt) < Date.parse(arrivedAt)) {
         throw new Error('A stop cannot be departed before it was arrived')
       }
+      const before = stops[i]
+      if (arrivedAt && !String(before.arrivedAt ?? '').trim()) {
+        newStamps.push({ stopId: String(before.id), event: 'ARRIVED', at: arrivedAt })
+      }
+      if (departedAt && !String(before.departedAt ?? '').trim()) {
+        newStamps.push({ stopId: String(before.id), event: 'DEPARTED', at: departedAt })
+      }
       stops = stops.map((s, idx) => idx === i ? {
         ...s,
         arrivedAt: arrivedAt ?? (patch.arrivedAt === null ? null : s.arrivedAt ?? null),
@@ -2346,16 +2125,27 @@ async function updateStop(input: Row, caller: Caller): Promise<Row> {
   // has left the pickup is in transit whatever anybody typed.
   const currentStatus = (optionalEnum(load.status, LOAD_STATUS_VALUES, 'status') ?? null) as LoadWorkflowStatus | null
   const derivedStatus = op === 'SET_TIMES'
-    ? loadStatusFromStopTimes(
-        stops.map((s) => ({
-          type: s.type === 'delivery' ? 'delivery' as const : 'pickup' as const,
-          sequence: s.sequence ?? 0,
-          arrivedAt: s.arrivedAt ?? null,
-          departedAt: s.departedAt ?? null,
-        })),
-        currentStatus,
-      )
+    ? loadStatusFromStopTimes(stopTimesOf(stops), currentStatus)
     : currentStatus
+
+  // The tracking log is written before the load moves, so a reader who sees the new
+  // status can already see what proved it. The `evt:` id is derived from the stop,
+  // so a stamp the driver app's projector already reported is a no-op here.
+  for (const stamp of newStamps) {
+    if (!shipmentId) break
+    await putCheckCallIfAbsent(checkCallRow({
+      id: stopEventId(loadId, stamp.stopId, stamp.event),
+      loadId,
+      shipmentId,
+      loadCarrierId: optionalString(load.activeLoadCarrierId, 100),
+      stopId: stamp.stopId,
+      at: stamp.at,
+      type: stamp.event,
+      source: 'MANUAL',
+      statusBefore: currentStatus,
+      statusAfter: derivedStatus && derivedStatus !== currentStatus ? derivedStatus : null,
+    }, caller))
+  }
 
   const now = nowIso()
   const client = await getDataClient()
@@ -2611,11 +2401,28 @@ async function removeLoadCarrier(input: Row, caller: Caller): Promise<Row> {
 
   // A rate con the carrier could still open is dead the moment they come off.
   const voidsRateCon = OPEN_RATE_CON_STATUSES.includes(String(carrier.rateConStatus ?? ''))
+  // So is the tracking link their driver was texted: we no longer track this truck,
+  // and a live token on a carrier we dropped is a public page nobody is watching.
+  const removedAt = nowIso()
+  const trackingLink = await activeCarrierPingLink(carrier)
+  const stopsTracking = trackingLink != null || carrier.trackingStartedAt != null
   await transact(
-    [retireCarrier(carrier, reason, outcome, caller, {
-      removalNote: note,
-      ...(voidsRateCon ? { rateConStatus: 'VOIDED', rateConToken: null } : {}),
-    })],
+    [
+      retireCarrier(carrier, reason, outcome, caller, {
+        removalNote: note,
+        ...(voidsRateCon ? { rateConStatus: 'VOIDED', rateConToken: null } : {}),
+        ...(stopsTracking ? { trackingLinkId: null, trackingStoppedAt: removedAt } : {}),
+      }),
+      ...(trackingLink
+        ? [updateItemTx(TRACKING_LINK_TABLE_NAME, String(trackingLink.id), {
+            status: 'REVOKED',
+            revokedAt: removedAt,
+            revokedBy: caller.email,
+            updatedBy: caller.email,
+            updatedAt: removedAt,
+          }, null)]
+        : []),
+    ],
     'assignment',
   )
 
@@ -2648,9 +2455,16 @@ async function removeLoadCarrier(input: Row, caller: Caller): Promise<Row> {
     }),
     'Load update',
   )
+  // The reminder belonged to the carrier that just came off. Leaving it armed
+  // keeps the worklist, the nav badge and the notifier nagging the rep to call a
+  // truck that is no longer on the load. Clearing goes through the REMOVE path
+  // because `checkCallOpen` is a sparse GSI hash key that refuses a stored NULL.
+  if (load.checkCallOpen != null || load.nextCheckCallAt != null) {
+    await writeCheckCallSchedule({ loadId, nextCheckCallAt: null, note: null, caller, expectedUpdatedAt: null })
+  }
 
   await writeAudit('LOAD_CARRIER', loadCarrierId, `REMOVE_LOAD_CARRIER:${outcome}`, caller, {
-    loadId, reason, note, voidedRateCon: voidsRateCon,
+    loadId, reason, note, voidedRateCon: voidsRateCon, revokedTrackingLink: trackingLink != null,
   })
   return rederiveShipmentStatus(shipmentId, caller)
 }
@@ -3266,11 +3080,34 @@ async function dispatchLoad(input: Row, caller: Caller): Promise<Row> {
   if (truckNumber) patch.truckNumber = truckNumber
   const trailerNumber = optionalString(input.trailerNumber, 40)
   if (trailerNumber) patch.trailerNumber = trailerNumber
-  await transact([updateItemTx(LOAD_CARRIER_TABLE_NAME, String(active.id), patch, null)], 'dispatch')
-
   const trackingProvider = optionalEnum(input.trackingProvider, TRACKING_PROVIDERS, 'trackingProvider')
   const nextCheckCallAt = optionalIso(input.nextCheckCallAt, 'nextCheckCallAt')
   const nextCheckCallNote = optionalString(input.nextCheckCallNote, 1000)
+  // The dispatch is the first row of the load's tracking log, and it carries the
+  // reminder it just scheduled so the timeline reads back as what actually happened.
+  const event = checkCallRow({
+    id: randomUUID(),
+    loadId,
+    shipmentId,
+    loadCarrierId: String(active.id),
+    at: dispatchedAt,
+    type: 'DISPATCH',
+    source: 'SYSTEM',
+    statusBefore: current,
+    statusAfter: 'DISPATCHED',
+    note: patch.dispatchNote as string | null,
+    pickupEtaAt: pickupEtaAt ?? (optionalString(active.pickupEtaAt, 40)),
+    nextCheckCallAt,
+    nextCheckCallNote,
+  }, caller)
+  await transact(
+    [
+      updateItemTx(LOAD_CARRIER_TABLE_NAME, String(active.id), patch, null),
+      putItem(LOAD_CHECK_CALL_TABLE_NAME, event),
+    ],
+    'dispatch',
+  )
+
   const client = await getDataClient()
   assertLoadWriteOk(
     await client.models.Load.update({
@@ -3296,32 +3133,31 @@ async function dispatchLoad(input: Row, caller: Caller): Promise<Row> {
 
 // ── RECALC_CHARGES ───────────────────────────────────────────────────────────
 
-async function recalcCharges(input: Row, caller: Caller): Promise<Row> {
-  const shipmentId = assertString(input.shipmentId, 'shipmentId')
-  const expectedVersion = optionalInteger(input.expectedVersion, { min: 0, label: 'expectedVersion' })
-  if (expectedVersion == null) throw new Error('expectedVersion is required')
-
-  const bundle = await readBundle(shipmentId)
+/**
+ * Every write that repricing a shipment's first leg implies: the charge lines
+ * themselves, the cached LoadFinancials, the order's revenue, the shipment's
+ * version and the active carrier's own pay. RECALC_CHARGES is this and nothing
+ * else; an incident's charge lines go through the same path, so a cached total
+ * can never drift from the lines underneath it.
+ */
+function repriceShipment(args: {
+  bundle: Bundle
+  charges: ChargeInput[]
+  customer: Row | null
+  settings: Row | null
+  caller: Caller
+  /** CAS on the shipment, or null when the caller already CAS'd the load. */
+  expectedShipmentUpdatedAt: string | null
+}): { writes: TransactWriteItem[]; chargeRows: Row[]; totals: FinancialsTotals } {
+  const { bundle, charges, customer, settings, caller } = args
   const { shipment } = bundle
-  if (shipment.deletedAt) throw new Error('That shipment is deleted')
-  const currentVersion = numberOrNull(shipment.version) ?? 1
-  if (currentVersion !== expectedVersion) throw conflictError('shipment', null)
-
+  const shipmentId = String(shipment.id)
   const order = bundle.orders[0]
   const load = bundle.loads[0]
   if (!order || !load) throw new Error('That shipment has no order or load to price')
   const loadId = String(load.id)
   const orderId = String(order.id)
-
   const existingFinancials = bundle.financials.find((f) => f.id === loadId) ?? null
-  if (existingFinancials?.frozenAt) {
-    throw new Error('This load\'s financials are frozen and can no longer be changed')
-  }
-
-  const customer = await getById(CUSTOMER_TABLE_NAME, String(shipment.customerId))
-  const settings = await getSettings()
-  const rules = chargeCodeRules(settings, customer)
-  const charges = assertArrayOf(input.charges, 'charges', (item, i) => validateChargeInput(item, i, rules))
 
   const activeCarrier = bundle.loadCarriers.find((c) => c.loadId === loadId && c.status === 'ACTIVE') ?? null
   const { amounts, totals } = priceFor(
@@ -3359,8 +3195,8 @@ async function recalcCharges(input: Row, caller: Caller): Promise<Row> {
     updateItemTx(SHIPMENT_TABLE_NAME, shipmentId, {
       updatedBy: caller.email,
       updatedAt: now,
-      version: currentVersion + 1,
-    }, String(shipment.updatedAt ?? '')),
+      version: (numberOrNull(shipment.version) ?? 1) + 1,
+    }, args.expectedShipmentUpdatedAt),
   ]
   if (activeCarrier) {
     const activeCarrierId = String(activeCarrier.id)
@@ -3380,6 +3216,40 @@ async function recalcCharges(input: Row, caller: Caller): Promise<Row> {
       updatedAt: now,
     }, null))
   }
+  return { writes, chargeRows, totals }
+}
+
+async function recalcCharges(input: Row, caller: Caller): Promise<Row> {
+  const shipmentId = assertString(input.shipmentId, 'shipmentId')
+  const expectedVersion = optionalInteger(input.expectedVersion, { min: 0, label: 'expectedVersion' })
+  if (expectedVersion == null) throw new Error('expectedVersion is required')
+
+  const bundle = await readBundle(shipmentId)
+  const { shipment } = bundle
+  if (shipment.deletedAt) throw new Error('That shipment is deleted')
+  const currentVersion = numberOrNull(shipment.version) ?? 1
+  if (currentVersion !== expectedVersion) throw conflictError('shipment', null)
+
+  const load = bundle.loads[0]
+  const loadId = load ? String(load.id) : ''
+  const existingFinancials = bundle.financials.find((f) => f.id === loadId) ?? null
+  if (existingFinancials?.frozenAt) {
+    throw new Error('This load\'s financials are frozen and can no longer be changed')
+  }
+
+  const customer = await getById(CUSTOMER_TABLE_NAME, String(shipment.customerId))
+  const settings = await getSettings()
+  const rules = chargeCodeRules(settings, customer)
+  const charges = assertArrayOf(input.charges, 'charges', (item, i) => validateChargeInput(item, i, rules))
+
+  const { writes, chargeRows, totals } = repriceShipment({
+    bundle,
+    charges,
+    customer,
+    settings,
+    caller,
+    expectedShipmentUpdatedAt: String(shipment.updatedAt ?? ''),
+  })
   await transact(writes, 'charges')
 
   // `Load.rate` is what the calendar, settlements and factoring read; it mirrors
@@ -3396,6 +3266,508 @@ async function recalcCharges(input: Row, caller: Caller): Promise<Row> {
     costCents: totals.costCents,
   })
   return readBundle(shipmentId) as unknown as Row
+}
+
+// ── Check calls and tracking (step D) ────────────────────────────────────────
+
+/** Everything a LoadCheckCall row may carry. Absent keys are never written. */
+interface CheckCallRowFields {
+  id: string
+  loadId: string
+  shipmentId: string
+  at: string
+  type: CheckCallType
+  source: CheckCallSource
+  loadCarrierId?: string | null
+  stopId?: string | null
+  incidentType?: IncidentType | null
+  /** Only ever the literal 'OPEN'; see below. */
+  incidentOpen?: 'OPEN'
+  statusBefore?: LoadWorkflowStatus | null
+  statusAfter?: LoadWorkflowStatus | null
+  city?: string | null
+  state?: string | null
+  lat?: number | null
+  lng?: number | null
+  personName?: string | null
+  note?: string | null
+  charges?: CheckCallChargeSnapshot[] | null
+  nextCheckCallAt?: string | null
+  nextCheckCallNote?: string | null
+  pickupEtaAt?: string | null
+  deliveryEtaAt?: string | null
+}
+
+/**
+ * One row of a load's tracking log.
+ *
+ * `incidentOpen` is the sparse hash key of the open-exceptions index, so it is
+ * only ever written as the literal 'OPEN' — a stored null would be an index key of
+ * type NULL, which DynamoDB refuses outright. `marshallRow` drops undefined keys,
+ * so a field nobody set never reaches the table.
+ */
+function checkCallRow(fields: CheckCallRowFields, caller: Caller): Row {
+  const now = nowIso()
+  return {
+    __typename: 'LoadCheckCall',
+    ...fields,
+    createdBy: caller.email,
+    createdAt: now,
+    updatedAt: now,
+  }
+}
+
+/**
+ * Write a check call only if nobody wrote it first.
+ *
+ * This handler and the driver app's projector race for the same derived `evt:` id.
+ * The loser's write is a no-op rather than an error: the stamp is already logged,
+ * and logging it twice is exactly what a derived id exists to prevent.
+ */
+async function putCheckCallIfAbsent(row: Row): Promise<boolean> {
+  try {
+    await dynamo.send(new PutItemCommand({
+      TableName: LOAD_CHECK_CALL_TABLE_NAME,
+      Item: marshallRow(row),
+      ConditionExpression: 'attribute_not_exists(id)',
+    }))
+    return true
+  } catch (err) {
+    if (isConditionalFailure(err)) return false
+    throw err
+  }
+}
+
+/** A conditional write that lost, whether it was alone or inside a transaction. */
+function isConditionalFailure(err: unknown): boolean {
+  return (err as { name?: string } | null)?.name === 'ConditionalCheckFailedException' || isConflict(err)
+}
+
+/** The live ping link on an assignment, if the driver was ever texted one. */
+async function activeCarrierPingLink(carrier: Row): Promise<Row | null> {
+  const linkId = optionalString(carrier.trackingLinkId, 100)
+  if (!linkId || !TRACKING_LINK_TABLE_NAME) return null
+  const link = await getById(TRACKING_LINK_TABLE_NAME, linkId)
+  if (!link || link.kind !== 'CARRIER_PING' || link.status !== 'ACTIVE') return null
+  return link
+}
+
+/**
+ * Write the check-call schedule onto a load.
+ *
+ * `checkCallOpen` is the sparse hash key of the worklist index. Amplify's `update`
+ * with null stores a NULL attribute and DynamoDB rejects the whole write with
+ * `Type mismatch for Index Key checkCallOpen … Actual: NULL`, so clearing has to
+ * REMOVE — which is why this is a raw UpdateItem rather than the generated
+ * mutation. Setting a new time drops the notifier's two stamps with it, so the
+ * reminder re-arms for the schedule that was just chosen.
+ */
+async function writeCheckCallSchedule(args: {
+  loadId: string
+  nextCheckCallAt: string | null
+  note: string | null
+  caller: Caller
+  expectedUpdatedAt: string | null
+}): Promise<void> {
+  const now = nowIso()
+  const names: Record<string, string> = {
+    '#updatedAt': 'updatedAt',
+    '#updatedBy': 'updatedBy',
+    '#checkCallOpen': 'checkCallOpen',
+    '#nextCheckCallAt': 'nextCheckCallAt',
+    '#nextCheckCallNote': 'nextCheckCallNote',
+    '#checkCallDueNotifiedAt': 'checkCallDueNotifiedAt',
+    '#checkCallOverdueNotifiedAt': 'checkCallOverdueNotifiedAt',
+  }
+  const values: Record<string, AttributeValue> = {
+    ':updatedAt': { S: now },
+    ':updatedBy': { S: args.caller.email },
+  }
+  const sets = ['#updatedAt = :updatedAt', '#updatedBy = :updatedBy']
+  const removes = ['#checkCallDueNotifiedAt', '#checkCallOverdueNotifiedAt']
+  if (args.nextCheckCallAt) {
+    sets.push('#nextCheckCallAt = :nextCheckCallAt', '#checkCallOpen = :open')
+    values[':nextCheckCallAt'] = { S: args.nextCheckCallAt }
+    values[':open'] = { S: 'OPEN' }
+    if (args.note) {
+      sets.push('#nextCheckCallNote = :note')
+      values[':note'] = { S: args.note }
+    } else {
+      removes.push('#nextCheckCallNote')
+    }
+  } else {
+    removes.push('#checkCallOpen', '#nextCheckCallAt', '#nextCheckCallNote')
+  }
+  try {
+    await dynamo.send(new UpdateItemCommand({
+      TableName: LOAD_TABLE_NAME,
+      Key: marshall({ id: args.loadId }),
+      UpdateExpression: `SET ${sets.join(', ')} REMOVE ${removes.join(', ')}`,
+      ExpressionAttributeNames: names,
+      ExpressionAttributeValues: values,
+      ...(args.expectedUpdatedAt == null
+        ? {}
+        : { ConditionExpression: casCondition(values, args.expectedUpdatedAt) }),
+    }))
+  } catch (err) {
+    if (isConditionalFailure(err)) throw conflictError('load', err)
+    throw err
+  }
+}
+
+/** A charge the incident dialog asked for, before the lib turns it into lines. */
+interface IncidentChargeInput {
+  side: ChargeSide | 'BOTH'
+  code: string
+  label: string | null
+  rateCents: number
+  count: number
+}
+
+function validateIncidentCharge(item: unknown, index: number): IncidentChargeInput {
+  const c = assertRecord(item, `charges[${index}]`)
+  return {
+    side: assertEnum(c.side, INCIDENT_CHARGE_SIDES, `charges[${index}].side`),
+    code: assertString(c.code, `charges[${index}].code`).toUpperCase(),
+    label: optionalString(c.label, 120),
+    rateCents: optionalInteger(c.rateCents, { label: `charges[${index}].rateCents` }) ?? 0,
+    count: optionalInteger(c.count, { min: 1, label: `charges[${index}].count` }) ?? 1,
+  }
+}
+
+/**
+ * Log what just happened to a load.
+ *
+ * The dispatcher's dialog is one call: it stamps the stop clock, moves the load
+ * from it, records where the truck is, opens an exception, bills for it and
+ * schedules the next reminder. Everything that has to agree — the log row, the
+ * charge lines and every cached total — moves in one transaction; the Load itself
+ * follows through the generated mutation so the board's subscriptions fire.
+ */
+async function logCheckCall(input: Row, caller: Caller): Promise<Row> {
+  const loadId = assertString(input.loadId, 'loadId')
+  const expectedUpdatedAt = assertExpectedUpdatedAt(input)
+  const at = assertIso(input.at, 'at')
+  const requestedType = assertString(input.type, 'type') as CheckCallType
+  if (!(MANUALLY_LOGGABLE_TYPES as readonly string[]).includes(requestedType)) {
+    throw new Error(`A ${requestedType} row is written by the system, not logged by hand`)
+  }
+  const stopId = optionalString(input.stopId, 100)
+  const incidentType = optionalEnum(input.incidentType, INCIDENT_TYPES, 'incidentType')
+  const city = optionalString(input.city, 120)
+  const state = optionalString(input.state, 40)
+  const lat = optionalFloat(input.lat, { min: -90, max: 90, label: 'lat' })
+  const lng = optionalFloat(input.lng, { min: -180, max: 180, label: 'lng' })
+  const personName = optionalString(input.personName, 120)
+  const note = optionalString(input.note, MAX_CHECK_CALL_NOTE)
+  const chargeRequests = input.charges == null
+    ? []
+    : assertArrayOf(input.charges, 'charges', validateIncidentCharge)
+  // An absent key leaves the reminder alone; null clears it; a time sets it.
+  const schedules = 'nextCheckCallAt' in input
+  const nextCheckCallAt = optionalIso(input.nextCheckCallAt, 'nextCheckCallAt')
+  const nextCheckCallNote = optionalString(input.nextCheckCallNote, 1000)
+
+  const load = await getById(LOAD_TABLE_NAME, loadId)
+  if (!load) throw new Error(`Load not found: ${loadId}`)
+  if (String(load.updatedAt ?? '') !== expectedUpdatedAt) throw conflictError('load', null)
+  const shipmentId = optionalString(load.shipmentId, 100)
+  if (!shipmentId) throw new Error('That load is not part of a shipment yet')
+  const statusBefore = (optionalEnum(load.status, LOAD_STATUS_VALUES, 'status') ?? null) as LoadWorkflowStatus | null
+  if (statusBefore === 'CANCELED') throw new Error('That load is canceled; there is nothing left to track')
+  if (Date.parse(at) > Date.now() + CHECK_CALL_FUTURE_GRACE_MS) {
+    throw new Error('A check call cannot be logged in the future')
+  }
+  if (requestedType === 'INCIDENT' && !incidentType) throw new Error('An incident needs an incident type')
+
+  const stops = readStops(load)
+  const stopEvent: StopEventType | null =
+    requestedType === 'ARRIVED' || requestedType === 'DEPARTED' ? requestedType : null
+  if (stopEvent && !stops.some((s) => s.id === stopId)) {
+    throw new Error('An arrival or a departure has to name a stop on this load')
+  }
+
+  const bundle = await readBundle(shipmentId)
+  const activeCarrier = bundle.loadCarriers.find((c) => c.loadId === loadId && c.status === 'ACTIVE') ?? null
+  const financials = bundle.financials.find((f) => f.id === loadId) ?? null
+  if (chargeRequests.length > 0 && financials?.frozenAt) {
+    throw new Error('This load\'s financials are frozen and can no longer be changed')
+  }
+
+  const settings = chargeRequests.length > 0 ? await getSettings() : null
+  const customer = chargeRequests.length > 0
+    ? await getById(CUSTOMER_TABLE_NAME, String(bundle.shipment.customerId))
+    : null
+  const order = bundle.orders[0] ?? null
+  // The lib refuses a carrier charge with nobody to pay and a negative one.
+  const lines = chargeRequests.length === 0 ? [] : incidentChargeLines({
+    charges: chargeRequests,
+    existing: bundle.charges.map((c) => ({ sortOrder: numberOrNull(c.sortOrder) })),
+    orderId: order ? String(order.id) : null,
+    loadId,
+    loadCarrierId: activeCarrier ? String(activeCarrier.id) : null,
+    codes: Array.isArray(settings?.chargeCodes) ? (settings?.chargeCodes as ChargeCodeDef[]) : null,
+  })
+
+  const eventId = stopEvent && stopId ? stopEventId(loadId, stopId, stopEvent) : null
+  // The driver app's projector writes this same derived id. If it got there first
+  // its stamp is the one that counts: the stop clock is left alone and this call is
+  // kept as a location update carrying the dispatcher's note.
+  const alreadyLogged = eventId != null && (await getById(LOAD_CHECK_CALL_TABLE_NAME, eventId)) != null
+  const type: CheckCallType = alreadyLogged ? 'LOCATION_UPDATE' : requestedType
+  // Only a stop with an id can be stamped, and `stopId` was checked against them.
+  const stamped = stops as (StopShape & { id: string })[]
+  const stamp = stopEvent && stopId && !alreadyLogged
+    ? stampStopEvent(stamped, stopId, stopEvent, at)
+    : { stops: stamped, stamped: false }
+  const statusAfter = stamp.stamped ? statusAfterCheckCall(stopTimesOf(stamp.stops), statusBefore) : null
+
+  const chargeIds = lines.map(() => `chg-${randomUUID()}`)
+  const event = checkCallRow({
+    id: alreadyLogged || eventId == null ? randomUUID() : eventId,
+    loadId,
+    shipmentId,
+    loadCarrierId: activeCarrier ? String(activeCarrier.id) : null,
+    stopId,
+    at,
+    type,
+    source: 'MANUAL',
+    incidentType: type === 'INCIDENT' ? incidentType : null,
+    ...(type === 'INCIDENT' ? { incidentOpen: 'OPEN' as const } : {}),
+    statusBefore,
+    statusAfter,
+    city,
+    state,
+    lat,
+    lng,
+    personName,
+    note,
+    charges: lines.length === 0
+      ? null
+      : lines.map((line, i) => ({
+          side: line.side,
+          code: line.code,
+          amountCents: line.amountCents,
+          chargeId: chargeIds[i],
+        })),
+    nextCheckCallAt: schedules ? nextCheckCallAt : null,
+    nextCheckCallNote: schedules && nextCheckCallAt ? nextCheckCallNote : null,
+  }, caller)
+
+  const writes: TransactWriteItem[] = [
+    // The Load's own mutation follows through AppSync under the same CAS. Guarding
+    // it here too is what makes the money atomic: the projector and the driver app
+    // both rewrite `updatedAt`, and one landing in the gap would otherwise leave a
+    // billed charge line and an orphan stop event behind — which the retry then
+    // downgrades to a location update and bills a second time.
+    conditionCheckUpdatedAtTx(LOAD_TABLE_NAME, loadId, expectedUpdatedAt),
+    putItem(LOAD_CHECK_CALL_TABLE_NAME, event),
+  ]
+  let revenueCents: number | null = null
+  if (lines.length > 0) {
+    // Incident money is priced by the one path that keeps LoadFinancials, the
+    // order and the carrier's cached pay agreeing with the lines underneath them.
+    const repriced = repriceShipment({
+      bundle,
+      charges: [
+        ...bundle.charges.map(chargeRowToInput),
+        ...lines.map((line, i): ChargeInput => ({
+          id: chargeIds[i],
+          side: line.side,
+          code: line.code,
+          label: line.label ?? null,
+          calculatedBy: 'FLAT',
+          rateCents: line.rateCents,
+          count: line.count ?? 1,
+          isRate: false,
+          release: null,
+          sortOrder: line.sortOrder ?? 0,
+          note: null,
+          loadId,
+          loadCarrierId: line.loadCarrierId ?? null,
+        })),
+      ],
+      customer,
+      settings,
+      caller,
+      expectedShipmentUpdatedAt: null,
+    })
+    writes.push(...repriced.writes)
+    revenueCents = repriced.totals.revenueCents
+  }
+  await transact(writes, 'check call')
+
+  const now = nowIso()
+  const client = await getDataClient()
+  assertLoadWriteOk(
+    await client.models.Load.update(
+      {
+        id: loadId,
+        ...(stamp.stamped ? { stops: JSON.stringify(stamp.stops), ...deriveLegacyFields(stamp.stops) } : {}),
+        ...(statusAfter
+          ? { status: statusAfter, statusChangedAt: now, statusChangedBy: caller.email, statusSource: 'CHECK_CALL' }
+          : {}),
+        ...(statusAfter === 'DELIVERED' ? { deliveredAt: at } : {}),
+        ...lastKnownPatch({ at, type, source: 'MANUAL', city, state, lat, lng }),
+        ...(type === 'INCIDENT'
+          ? { openIncidentCount: (numberOrNull(load.openIncidentCount) ?? 0) + 1 }
+          : {}),
+        ...(revenueCents == null ? {} : { rate: revenueCents }),
+        updatedBy: caller.email,
+      },
+      { condition: { updatedAt: { eq: expectedUpdatedAt } } },
+    ),
+    'Load update',
+  )
+  // The schedule carries a sparse index key, so it never rides the generated
+  // mutation. The CAS above already proved nobody else moved the load.
+  if (schedules) {
+    await writeCheckCallSchedule({ loadId, nextCheckCallAt, note: nextCheckCallNote, caller, expectedUpdatedAt: null })
+  }
+
+  await writeAudit('LOAD', loadId, `LOG_CHECK_CALL:${type}`, caller, {
+    checkCallId: event.id,
+    at,
+    statusAfter,
+    incidentType: incidentType ?? null,
+    charges: lines.length,
+    nextCheckCallAt: schedules ? nextCheckCallAt : null,
+  })
+  return { bundle: await rederiveShipmentStatus(shipmentId, caller), event } as unknown as Row
+}
+
+/**
+ * Close an exception. The sparse `incidentOpen` marker is REMOVEd, which is what
+ * takes the row off the worklist, and the load's open count is then recounted
+ * from the rows rather than decremented: a count is a cache, the rows are truth.
+ */
+async function resolveIncident(input: Row, caller: Caller): Promise<Row> {
+  const checkCallId = assertString(input.checkCallId, 'checkCallId')
+  const note = optionalString(input.note, MAX_CHECK_CALL_NOTE)
+
+  const row = await getById(LOAD_CHECK_CALL_TABLE_NAME, checkCallId)
+  if (!row) throw new Error(`Check call not found: ${checkCallId}`)
+  if (row.type !== 'INCIDENT') throw new Error('That check call is not an incident')
+  if (row.resolvedAt) throw new Error('That incident is already resolved')
+
+  const loadId = String(row.loadId)
+  const load = await getById(LOAD_TABLE_NAME, loadId)
+  if (!load) throw new Error(`Load not found: ${loadId}`)
+
+  const now = nowIso()
+  try {
+    await dynamo.send(new UpdateItemCommand({
+      TableName: LOAD_CHECK_CALL_TABLE_NAME,
+      Key: marshall({ id: checkCallId }),
+      UpdateExpression:
+        'SET #resolvedAt = :at, #resolvedBy = :by, #resolutionNote = :note, #updatedAt = :at REMOVE #incidentOpen',
+      ExpressionAttributeNames: {
+        '#resolvedAt': 'resolvedAt',
+        '#resolvedBy': 'resolvedBy',
+        '#resolutionNote': 'resolutionNote',
+        '#updatedAt': 'updatedAt',
+        '#incidentOpen': 'incidentOpen',
+      },
+      ExpressionAttributeValues: marshallRow({ ':at': now, ':by': caller.email, ':note': note }),
+      // Two dispatchers clearing the same exception must still only count once.
+      ConditionExpression: 'attribute_not_exists(resolvedAt)',
+    }))
+  } catch (err) {
+    if (isConditionalFailure(err)) {
+      // ES2020 lib lacks the ErrorOptions constructor; attach the cause explicitly.
+      const already = new Error('That incident is already resolved')
+      ;(already as Error & { cause?: unknown }).cause = err
+      throw already
+    }
+    throw err
+  }
+
+  // The rows are the truth; the counter is a cache. A decrement from the read
+  // above is a lost update the moment two dispatchers close two different
+  // exceptions on the same load, so recount what is still open instead.
+  const openIncidentCount = (await queryIndex(LOAD_CHECK_CALL_TABLE_NAME, IDX_CHECK_CALLS_BY_LOAD, 'loadId', loadId))
+    .filter((c) => c.incidentOpen === 'OPEN').length
+  const client = await getDataClient()
+  assertLoadWriteOk(
+    await client.models.Load.update({ id: loadId, openIncidentCount, updatedBy: caller.email }),
+    'Load update',
+  )
+
+  await writeAudit('LOAD', loadId, 'RESOLVE_INCIDENT', caller, { checkCallId, note, openIncidentCount })
+  const shipmentId = String(row.shipmentId)
+  return {
+    bundle: await readBundle(shipmentId),
+    event: await getById(LOAD_CHECK_CALL_TABLE_NAME, checkCallId),
+  } as unknown as Row
+}
+
+/** The banner's edit, snooze and "no reminder needed", which are all one write. */
+async function setNextCheckCall(input: Row, caller: Caller): Promise<Row> {
+  const loadId = assertString(input.loadId, 'loadId')
+  const expectedUpdatedAt = assertExpectedUpdatedAt(input)
+  if (!('nextCheckCallAt' in input)) {
+    throw new Error('nextCheckCallAt is required; send null for no reminder')
+  }
+  const nextCheckCallAt = optionalIso(input.nextCheckCallAt, 'nextCheckCallAt')
+  const note = optionalString(input.note, 1000)
+
+  const load = await getById(LOAD_TABLE_NAME, loadId)
+  if (!load) throw new Error(`Load not found: ${loadId}`)
+  if (String(load.updatedAt ?? '') !== expectedUpdatedAt) throw conflictError('load', null)
+  const shipmentId = optionalString(load.shipmentId, 100)
+  if (!shipmentId) throw new Error('That load is not part of a shipment yet')
+
+  await writeCheckCallSchedule({ loadId, nextCheckCallAt, note, caller, expectedUpdatedAt })
+  await writeAudit('LOAD', loadId, 'SET_NEXT_CHECK_CALL', caller, { nextCheckCallAt, note })
+  return { bundle: await readBundle(shipmentId), event: null } as unknown as Row
+}
+
+/**
+ * What the carrier now says about when they will be there. It is their promise, so
+ * it lives on the assignment, and the tracking log keeps every version of it.
+ */
+async function setEta(input: Row, caller: Caller): Promise<Row> {
+  const loadCarrierId = assertString(input.loadCarrierId, 'loadCarrierId')
+  const expectedUpdatedAt = assertExpectedUpdatedAt(input)
+  const pickupEtaAt = optionalIso(input.pickupEtaAt, 'pickupEtaAt')
+  const deliveryEtaAt = optionalIso(input.deliveryEtaAt, 'deliveryEtaAt')
+  const note = optionalString(input.note, MAX_CHECK_CALL_NOTE)
+  if (!pickupEtaAt && !deliveryEtaAt) throw new Error('An ETA update needs a pickup or a delivery time')
+
+  const carrier = await getById(LOAD_CARRIER_TABLE_NAME, loadCarrierId)
+  if (!carrier) throw new Error(`Load carrier not found: ${loadCarrierId}`)
+  if (carrier.status !== 'ACTIVE') throw new Error('Only the carrier currently on the load can give an ETA')
+  const loadId = String(carrier.loadId)
+  const shipmentId = String(carrier.shipmentId)
+
+  const now = nowIso()
+  const event = checkCallRow({
+    id: randomUUID(),
+    loadId,
+    shipmentId,
+    loadCarrierId,
+    at: now,
+    type: 'ETA_UPDATE',
+    source: 'SYSTEM',
+    note,
+    pickupEtaAt,
+    deliveryEtaAt,
+  }, caller)
+  await transact(
+    [
+      updateItemTx(LOAD_CARRIER_TABLE_NAME, loadCarrierId, {
+        ...(pickupEtaAt ? { pickupEtaAt } : {}),
+        ...(deliveryEtaAt ? { deliveryEtaAt } : {}),
+        updatedBy: caller.email,
+        updatedAt: now,
+      }, expectedUpdatedAt),
+      putItem(LOAD_CHECK_CALL_TABLE_NAME, event),
+    ],
+    'eta',
+  )
+
+  await writeAudit('LOAD_CARRIER', loadCarrierId, 'SET_ETA', caller, { loadId, pickupEtaAt, deliveryEtaAt, note })
+  return { bundle: await readBundle(shipmentId), event } as unknown as Row
 }
 
 // ── SET_AR_STATUS ────────────────────────────────────────────────────────────
@@ -3841,6 +4213,14 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return recalcCharges(input, caller)
     case 'SET_AR_STATUS':
       return setArStatus(input, caller)
+    case 'LOG_CHECK_CALL':
+      return logCheckCall(input, caller)
+    case 'RESOLVE_INCIDENT':
+      return resolveIncident(input, caller)
+    case 'SET_NEXT_CHECK_CALL':
+      return setNextCheckCall(input, caller)
+    case 'SET_ETA':
+      return setEta(input, caller)
     case 'GET_SHIPMENT_BUNDLE':
       return readBundle(assertString(input.shipmentId, 'shipmentId')) as unknown as Row
     case 'BACKFILL_SHIPMENT':

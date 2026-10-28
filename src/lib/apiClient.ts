@@ -17,6 +17,8 @@ import type {
   CarrierRecord, CarrierContactRecord, CarrierPaymentMethodRecord, CarrierDocumentRecord,
   CarrierBundle, CarrierStatus, CarrierStatusReason, CarrierContactType, CarrierDocumentType,
   CarrierPaymentMethodKind, CarrierPayeeType, QuickPayTier,
+  ChargeSide, CheckCallNotifyChannel, CheckCallType, IncidentType, LoadCheckCallRecord,
+  TrackingContact, TrackingLinkRecord,
 } from '@/types/tms'
 import type { CreditSummary } from '@/lib/customerCredit'
 import { isActiveDirectoryRecord } from '@/lib/tmsDirectory'
@@ -58,12 +60,16 @@ let loadsHaveFreight = true
 let loadsHaveCargoValue = true
 let loadsHavePodNotes = true
 // Step B's shipment layer: the link to Shipment/Order plus the carrier-side status
-// and assignment. One flag for the whole group — they deploy together.
+// and assignment. One flag for the whole group — they deploy together, and step D's
+// tracking columns ride the same flag because they land in the same Load deploy.
 let loadsHaveShipment = true
 const LOAD_SHIPMENT_FIELDS = `
   shipmentId orderId loadNumber leg status statusChangedAt statusChangedBy statusSource
   carrierRepId assignmentType activeLoadCarrierId carrierName equipmentType divisionKey
   trackingProvider nextCheckCallAt nextCheckCallNote checkCallOpen pickupMonth
+  lastCheckCallAt lastCheckCallType lastKnownAt lastKnownCity lastKnownState
+  lastKnownLat lastKnownLng lastKnownSource openIncidentCount deliveredAt
+  checkCallDueNotifiedAt checkCallOverdueNotifiedAt
 `
 const loadFields = () => {
   let f = LOAD_FIELDS
@@ -160,7 +166,7 @@ function undefinedLoadFields(err: unknown): { hot: boolean; stops: boolean; sort
     freight: /'(commodity|weight|pieces|piecesUnit)'/i.test(msg),
     cargoValue: /'cargoValueCents'/i.test(msg),
     podNotes: /'podNotes'/i.test(msg),
-    shipment: /'(shipmentId|orderId|loadNumber|leg|status|statusChangedAt|statusChangedBy|statusSource|carrierRepId|assignmentType|activeLoadCarrierId|carrierName|equipmentType|divisionKey|trackingProvider|nextCheckCallAt|nextCheckCallNote|checkCallOpen|pickupMonth)'/i.test(msg),
+    shipment: /'(shipmentId|orderId|loadNumber|leg|status|statusChangedAt|statusChangedBy|statusSource|carrierRepId|assignmentType|activeLoadCarrierId|carrierName|equipmentType|divisionKey|trackingProvider|nextCheckCallAt|nextCheckCallNote|checkCallOpen|pickupMonth|lastCheckCallAt|lastCheckCallType|lastKnownAt|lastKnownCity|lastKnownState|lastKnownLat|lastKnownLng|lastKnownSource|openIncidentCount|deliveredAt|checkCallDueNotifiedAt|checkCallOverdueNotifiedAt)'/i.test(msg),
   }
 }
 
@@ -1086,15 +1092,23 @@ const TMS_SETTINGS_V4_FIELDS = [
   'bookingRequiredFields', 'defaultCarrierTermsDays', 'quickPayTiers',
   'rateConExpiryHours', 'rateConRequiredFields', 'insuranceWarnDays',
 ]
-const TMS_SETTINGS_JSON_FIELDS: (keyof TmsSettings)[] = ['accessorialCodes', 'loadStatusRules', 'defaultRequiredReferences', 'chargeCodes', 'quickPayTiers']
+// Step D's tracking and check-call settings. Same treatment once more.
+const TMS_SETTINGS_V5_FIELDS = [
+  'checkCallDefaultIntervalHours', 'checkCallGraceMinutes', 'checkCallNotifyChannel',
+  'checkCallSlackChannelId', 'trackingLinkExpiryHours', 'customerLinkExpiryDays',
+  'customerLinkShowsCarrier', 'customerLinkShowsPosition', 'trackingContact', 'trackingSmsTemplate',
+]
+const TMS_SETTINGS_JSON_FIELDS: (keyof TmsSettings)[] = ['accessorialCodes', 'loadStatusRules', 'defaultRequiredReferences', 'chargeCodes', 'quickPayTiers', 'trackingContact']
 let settingsHaveV2 = true
 let settingsHaveV3 = true
 let settingsHaveV4 = true
+let settingsHaveV5 = true
 const tmsSettingsFields = () => [
   TMS_SETTINGS_FIELDS_BASE,
   settingsHaveV2 ? TMS_SETTINGS_V2_FIELDS.join(' ') : '',
   settingsHaveV3 ? TMS_SETTINGS_V3_FIELDS.join(' ') : '',
   settingsHaveV4 ? TMS_SETTINGS_V4_FIELDS.join(' ') : '',
+  settingsHaveV5 ? TMS_SETTINGS_V5_FIELDS.join(' ') : '',
 ].filter(Boolean).join(' ')
 const fieldNamed = (names: string[], err: unknown) => {
   const msg = safeStringify(err)
@@ -1245,7 +1259,12 @@ export async function getTmsSettings(): Promise<TmsSettings | null> {
     try {
       return await run()
     } catch (err) {
-      if (attempt >= 3) throw err
+      if (attempt >= 4) throw err
+      if (settingsHaveV5 && fieldNamed(TMS_SETTINGS_V5_FIELDS, err)) {
+        console.warn('[apiClient] backend has no TmsSettings tracking fields yet — querying without them until deploy')
+        settingsHaveV5 = false
+        continue
+      }
       if (settingsHaveV4 && fieldNamed(TMS_SETTINGS_V4_FIELDS, err)) {
         console.warn('[apiClient] backend has no TmsSettings carrier fields yet — querying without them until deploy')
         settingsHaveV4 = false
@@ -1662,11 +1681,24 @@ export interface LoadBoardSummary {
   orderId?: string | null
   status?: LoadWorkflowStatus | null
   assignmentType?: AssignmentType | null
+  // Step D — what the board's Last update, Next check call and Exceptions columns read.
+  lastKnownAt?: string | null
+  lastKnownCity?: string | null
+  lastKnownState?: string | null
+  lastCheckCallAt?: string | null
+  nextCheckCallAt?: string | null
+  checkCallOpen?: 'OPEN' | null
+  openIncidentCount?: number | null
 }
+const LOAD_SUMMARY_FIELDS = `
+  id shipmentId orderId status assignmentType
+  lastKnownAt lastKnownCity lastKnownState lastCheckCallAt
+  nextCheckCallAt checkCallOpen openIncidentCount
+`
 export async function listLoadSummaries(): Promise<LoadBoardSummary[]> {
   if (!loadsHaveShipment) return []
   try {
-    return await listAll<LoadBoardSummary>('listLoads', 'id shipmentId orderId status assignmentType', 10000)
+    return await listAll<LoadBoardSummary>('listLoads', LOAD_SUMMARY_FIELDS, 10000)
   } catch (err) {
     if (!undefinedLoadFields(err).shipment) throw err
     console.warn('[apiClient] backend has no shipment fields on Load yet — board facets stay empty until deploy')
@@ -1988,6 +2020,304 @@ export interface DispatchLoadInput {
 }
 export async function dispatchLoad(input: DispatchLoadInput): Promise<ShipmentBundle> {
   return shipmentAction<ShipmentBundle>('DISPATCH_LOAD', input)
+}
+
+// ── Tracking & check calls (tmsTrackingActions) ──────────────────────────────
+//
+// Step D. The event log (LoadCheckCall) and the tokenised links (TrackingLink). The
+// writes split by what they touch: anything that moves a Load's status or its money
+// stays on the shipment router and returns the bundle; the link, text and settings
+// actions live on their own router because they reach Twilio, SES and Cognito.
+
+export type {
+  CheckCallType, CheckCallSource, IncidentType, LoadCheckCallRecord, TrackingLinkRecord,
+  TrackingLinkKind, TrackingLinkStatus, TrackingLinkChannel, TrackingContact,
+  CheckCallNotifyChannel, CheckCallChargeSnapshot,
+} from '@/types/tms'
+
+const LOAD_CHECK_CALL_FIELDS = `
+  id loadId shipmentId loadCarrierId stopId at type source
+  incidentType incidentOpen resolvedAt resolvedBy resolutionNote
+  statusBefore statusAfter city state lat lng accuracyM
+  personName note driverMessageId charges
+  nextCheckCallAt nextCheckCallNote pickupEtaAt deliveryEtaAt
+  createdBy createdAt updatedAt
+`
+const LOAD_CHECK_CALL_JSON_FIELDS: (keyof LoadCheckCallRecord)[] = ['charges']
+
+const TRACKING_LINK_FIELDS = `
+  id kind shipmentId loadId loadCarrierId status expiresAt
+  sentTo sentVia sentAt smsMessageId contactName contactEmail contactPhone
+  showCarrier showPosition openCount lastOpenedAt requestCount
+  pingCount lastPingAt lastPingLat lastPingLng lastPingAccuracyM
+  revokedAt revokedBy createdBy createdAt updatedAt
+`
+
+/**
+ * Every tracking write. Same contract as `carrierAction`: the Lambda's own refusal
+ * ("own trucks track through Motive and the driver app") reaches the toast intact.
+ */
+export async function trackingAction<T>(action: string, input: unknown): Promise<T> {
+  let r: { data: { tmsTrackingActions: unknown } }
+  try {
+    r = await client.graphql({
+      query: `mutation TmsTrackingActions($action: String!, $input: AWSJSON!) { tmsTrackingActions(action: $action, input: $input) }`,
+      variables: { action, input: JSON.stringify(input) },
+    }) as { data: { tmsTrackingActions: unknown } }
+  } catch (err) {
+    throw new Error(graphqlErrorText(err) || `${action} failed`, { cause: err })
+  }
+  const v = unwrapJson(r.data.tmsTrackingActions)
+  if (v == null) throw new Error(`${action} returned no result`)
+  return v as T
+}
+
+// ── Writes ───────────────────────────────────────────────────────────────────
+
+/** A charge an incident asks for. BOTH bills the customer and pays the carrier. */
+export interface CheckCallChargeInput {
+  side: ChargeSide | 'BOTH'
+  code: string
+  label?: string | null
+  rateCents: number
+  count?: number | null
+}
+
+export interface LogCheckCallInput {
+  loadId: string
+  /** The Load's `updatedAt` as the dialog read it. */
+  expectedUpdatedAt: string
+  at: string
+  type: CheckCallType
+  stopId?: string | null
+  incidentType?: IncidentType | null
+  city?: string | null
+  state?: string | null
+  lat?: number | null
+  lng?: number | null
+  personName?: string | null
+  note?: string | null
+  charges?: CheckCallChargeInput[]
+  /** `null` clears the reminder; omitted leaves it alone. */
+  nextCheckCallAt?: string | null
+  nextCheckCallNote?: string | null
+}
+
+/**
+ * Every check-call write answers the same way: the whole bundle, plus the LoadCheckCall
+ * row it wrote. `event` is null for the one action that schedules without logging.
+ */
+export interface CheckCallResult {
+  bundle: ShipmentBundle
+  event: LoadCheckCallRecord | null
+}
+
+export async function logCheckCall(input: LogCheckCallInput): Promise<CheckCallResult> {
+  return shipmentAction<CheckCallResult>('LOG_CHECK_CALL', input)
+}
+
+export async function resolveIncident(input: { checkCallId: string; note?: string | null }): Promise<CheckCallResult> {
+  return shipmentAction<CheckCallResult>('RESOLVE_INCIDENT', input)
+}
+
+/** The banner's Edit reminder / Snooze / No reminder. `nextCheckCallAt: null` clears it. */
+export async function setNextCheckCall(input: {
+  loadId: string
+  expectedUpdatedAt: string
+  nextCheckCallAt: string | null
+  note?: string | null
+}): Promise<CheckCallResult> {
+  return shipmentAction<CheckCallResult>('SET_NEXT_CHECK_CALL', input)
+}
+
+/** ETAs live on the ACTIVE assignment, so this is keyed by LoadCarrier, not Load. */
+export async function setEta(input: {
+  loadCarrierId: string
+  expectedUpdatedAt: string
+  pickupEtaAt?: string | null
+  deliveryEtaAt?: string | null
+  note?: string | null
+}): Promise<CheckCallResult> {
+  return shipmentAction<CheckCallResult>('SET_ETA', input)
+}
+
+/** What the server did with the text. `url` is copyable whatever the status says. */
+export type TrackingSmsStatus = 'SENT' | 'COPY' | 'NOT_CONFIGURED' | 'FAILED'
+export interface SendTrackingLinkResult {
+  link: TrackingLinkRecord
+  url: string
+  smsStatus: TrackingSmsStatus
+  smsError: string | null
+  messageId: string | null
+}
+export async function sendTrackingLink(input: {
+  loadCarrierId: string
+  to?: string | null
+  via: 'SMS' | 'COPY'
+  message?: string | null
+}): Promise<SendTrackingLinkResult> {
+  return trackingAction<SendTrackingLinkResult>('SEND_TRACKING_LINK', input)
+}
+
+export async function revokeTrackingLink(input: { trackingLinkId: string }): Promise<{ link: TrackingLinkRecord }> {
+  return trackingAction<{ link: TrackingLinkRecord }>('REVOKE_TRACKING_LINK', input)
+}
+
+export type CustomerLinkEmailStatus = 'SENT' | 'COPY' | 'NOT_SENT'
+export interface SendCustomerLinkResult {
+  link: TrackingLinkRecord
+  url: string
+  emailStatus: CustomerLinkEmailStatus
+  emailError: string | null
+  /** The patched shipment, so the next call's `expectedVersion` needs no refetch. */
+  shipment: ShipmentRecord
+}
+export async function sendCustomerLink(input: {
+  shipmentId: string
+  expectedVersion: number
+  to: string[]
+  cc?: string[]
+  message?: string | null
+  via: 'EMAIL' | 'COPY'
+  regenerate?: boolean
+}): Promise<SendCustomerLinkResult> {
+  return trackingAction<SendCustomerLinkResult>('SEND_CUSTOMER_LINK', input)
+}
+
+export async function revokeCustomerLink(input: { trackingLinkId: string }): Promise<{ link: TrackingLinkRecord }> {
+  return trackingAction<{ link: TrackingLinkRecord }>('REVOKE_CUSTOMER_LINK', input)
+}
+
+/** The check-call dialog's "text this to the driver". Never undoes the check call. */
+export async function textDriver(input: { loadCarrierId: string; body: string }): Promise<{
+  messageId: string | null
+  smsStatus: TrackingSmsStatus
+  smsError: string | null
+}> {
+  return trackingAction<{ messageId: string | null; smsStatus: TrackingSmsStatus; smsError: string | null }>(
+    'TEXT_DRIVER', input,
+  )
+}
+
+/** The ten tracking fields on TmsSettings. Admin only, validated server-side. */
+export interface TrackingSettingsPatch {
+  checkCallDefaultIntervalHours?: number | null
+  checkCallGraceMinutes?: number | null
+  checkCallNotifyChannel?: CheckCallNotifyChannel | null
+  checkCallSlackChannelId?: string | null
+  trackingLinkExpiryHours?: number | null
+  customerLinkExpiryDays?: number | null
+  customerLinkShowsCarrier?: boolean | null
+  customerLinkShowsPosition?: boolean | null
+  trackingContact?: TrackingContact | null
+  trackingSmsTemplate?: string | null
+}
+export async function saveTrackingSettings(patch: TrackingSettingsPatch, expectedUpdatedAt?: string): Promise<TmsSettings> {
+  return trackingAction<TmsSettings>('SAVE_TRACKING_SETTINGS', { id: 'default', expectedUpdatedAt, ...patch })
+}
+
+// ── Reads ────────────────────────────────────────────────────────────────────
+
+/**
+ * Page a tracking index to the end. Separate from `listAllByIndex` because these
+ * queries need a sort direction and, for the Motive history, a key range — neither of
+ * which a map of scalar arguments can express.
+ */
+async function listTrackingIndex<T>(opts: {
+  name: string
+  /** Variable declarations without the paging token, e.g. `$loadId: String!`. */
+  decls: string
+  /** The arguments as the query passes them, e.g. `loadId: $loadId`. */
+  args: string
+  variables: Record<string, unknown>
+  fields: string
+  limit: number
+  sortDirection?: 'ASC' | 'DESC'
+}): Promise<T[]> {
+  const dir = opts.sortDirection ? `, sortDirection: ${opts.sortDirection}` : ''
+  const rows: T[] = []
+  let nextToken: string | null = null
+  do {
+    const r = await client.graphql({
+      query: `query ${opts.name}(${opts.decls}, $nextToken: String) {
+        ${opts.name}(${opts.args}, limit: ${opts.limit}${dir}, nextToken: $nextToken) {
+          items { ${opts.fields} } nextToken
+        }
+      }`,
+      variables: { ...opts.variables, nextToken },
+    }) as { data: Record<string, { items: (T | null)[]; nextToken?: string | null }> }
+    const page = r.data[opts.name]
+    for (const item of page.items) if (item) rows.push(item)
+    nextToken = page.nextToken ?? null
+  } while (nextToken)
+  return rows
+}
+
+/** One load's event log, newest first — the order the Tracking tab renders. */
+export async function listCheckCallsByLoad(loadId: string): Promise<LoadCheckCallRecord[]> {
+  const rows = await listTrackingIndex<LoadCheckCallRecord>({
+    name: 'listLoadCheckCallByLoadIdAndAt',
+    decls: '$loadId: String!',
+    args: 'loadId: $loadId',
+    variables: { loadId },
+    fields: LOAD_CHECK_CALL_FIELDS,
+    limit: 500,
+    sortDirection: 'DESC',
+  })
+  return rows.map((r) => unwrapJsonFields(r, LOAD_CHECK_CALL_JSON_FIELDS))
+}
+
+/** Every unresolved incident across the book, newest first. The sparse key is the filter. */
+export async function listOpenIncidents(): Promise<LoadCheckCallRecord[]> {
+  const rows = await listTrackingIndex<LoadCheckCallRecord>({
+    name: 'listLoadCheckCallByIncidentOpenAndAt',
+    decls: '$incidentOpen: String!',
+    args: 'incidentOpen: $incidentOpen',
+    variables: { incidentOpen: 'OPEN' },
+    fields: LOAD_CHECK_CALL_FIELDS,
+    limit: 500,
+    sortDirection: 'DESC',
+  })
+  return rows.map((r) => unwrapJsonFields(r, LOAD_CHECK_CALL_JSON_FIELDS))
+}
+
+export async function listTrackingLinksByShipment(shipmentId: string): Promise<TrackingLinkRecord[]> {
+  return listAllByIndex<TrackingLinkRecord>('listTrackingLinkByShipmentId', { shipmentId }, TRACKING_LINK_FIELDS, 200)
+}
+
+/** Motive breadcrumbs for one truck inside a window, oldest → newest. */
+export async function listTruckPositions(truckId: string, from: string, to: string): Promise<TruckLocation[]> {
+  return listTrackingIndex<TruckLocation>({
+    name: 'listTruckLocationHistoryByTruckIdAndLocatedAt',
+    decls: '$truckId: String!, $from: String!, $to: String!',
+    args: 'truckId: $truckId, locatedAt: { between: [$from, $to] }',
+    variables: { truckId, from, to },
+    fields: TRUCK_LOCATION_HISTORY_FIELDS,
+    limit: 1000,
+    sortDirection: 'ASC',
+  })
+}
+
+/**
+ * Every load with a check call on the clock, soonest first. `checkCallOpen` is the
+ * sparse GSI key, so this reads only the loads that are actually being tracked.
+ */
+export async function listCheckCallWorklist(): Promise<Load[]> {
+  const rows = await listTrackingIndex<Load>({
+    name: 'listLoadByCheckCallOpenAndNextCheckCallAt',
+    decls: '$checkCallOpen: String!',
+    args: 'checkCallOpen: $checkCallOpen',
+    variables: { checkCallOpen: 'OPEN' },
+    fields: loadFields(),
+    limit: 1000,
+    sortDirection: 'ASC',
+  })
+  return rows.map((l) => unwrapJsonFields(l, ['stops']))
+}
+
+/** One load's assignments — the worklist reads the ACTIVE one for carrier and driver phone. */
+export async function listLoadCarriersByLoad(loadId: string): Promise<LoadCarrierRecord[]> {
+  return listLoadCarriersByIndex('listLoadCarrierByLoadId', { loadId })
 }
 
 // ── Google geocoding proxy (tmsGeocode) — real upstream errors, no fallbacks ─────

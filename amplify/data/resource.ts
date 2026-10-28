@@ -17,6 +17,7 @@ import { podActions } from '../functions/pod-actions/resource'
 import { otrActions } from '../functions/otr-actions/resource'
 import { dispatchActions } from '../functions/dispatch-actions/resource'
 import { tmsCarrierActions } from '../functions/tms-carrier-actions/resource'
+import { tmsTrackingActions } from '../functions/tms-tracking-actions/resource'
 
 // ExpenseCategory and ExpenseEntryMethod enums are defined inline on each
 // model field — Amplify Gen 2 does not require top-level enum declarations.
@@ -92,7 +93,10 @@ const schema = a.schema({
       ]),
       statusChangedAt: a.datetime(),
       statusChangedBy: a.string(),
-      statusSource:    a.enum(['USER', 'DRIVER_APP', 'CHECK_CALL', 'BACKFILL']),
+      // SYSTEM: a stop time stamped by something that is not a person and not the
+      // driver app — the POD close, the dispatch MMS auto-POD — projected onto
+      // status by load-tracking-projector (Step D).
+      statusSource:    a.enum(['USER', 'DRIVER_APP', 'CHECK_CALL', 'BACKFILL', 'SYSTEM']),
       carrierRepId:    a.string(),   // Cognito username of the rep covering the load
       assignmentType:  a.enum(['OWN_ASSET', 'CARRIER', 'NEED_TO_COVER']),
       activeLoadCarrierId: a.string(),  // the ACTIVE LoadCarrier row, if any
@@ -109,6 +113,25 @@ const schema = a.schema({
       // What the freight is worth. Checked against the carrier's cargo policy
       // limit when a load is booked out — cents, like every other money field.
       cargoValueCents: a.integer(),
+
+      // ── Tracking & check calls (Step D) ─────────────────────────────────
+      // Denormalised "last update" strip for the board and the Tracking tab, so
+      // neither has to read the LoadCheckCall log to say where the freight is.
+      lastCheckCallAt:   a.datetime(),
+      lastCheckCallType: a.string(),
+      lastKnownAt:       a.datetime(),
+      lastKnownCity:     a.string(),
+      lastKnownState:    a.string(),
+      lastKnownLat:      a.float(),
+      lastKnownLng:      a.float(),
+      lastKnownSource:   a.enum(['MANUAL', 'DRIVER_APP', 'LINK', 'MOTIVE', 'SYSTEM']),
+      // Open INCIDENT rows on this load. F reads it; D only keeps it honest.
+      openIncidentCount: a.integer(),
+      deliveredAt:       a.datetime(),
+      // Stamped by check-call-notifier so one schedule nags once per state.
+      // Rescheduling moves nextCheckCallAt past them and re-arms both.
+      checkCallDueNotifiedAt:     a.datetime(),
+      checkCallOverdueNotifiedAt: a.datetime(),
       createdBy:       a.string().required(),
       updatedBy:       a.string().required(),
     })
@@ -945,6 +968,20 @@ const schema = a.schema({
       rateConExpiryHours:      a.integer(),         // how long a signing link lives (48)
       rateConRequiredFields:   a.string().array(),  // what the carrier must type to sign
       insuranceWarnDays:       a.integer(),         // expiring-soon window (30)
+
+      // ── Tracking & check calls org defaults (Step D) ──────────────────────
+      checkCallDefaultIntervalHours: a.integer(),   // 4
+      checkCallGraceMinutes:         a.integer(),   // 15 — DUE becomes OVERDUE after this
+      checkCallNotifyChannel:        a.enum(['IN_APP', 'SLACK', 'BOTH']),
+      checkCallSlackChannelId:       a.string(),
+      trackingLinkExpiryHours:       a.integer(),   // 72, counted from the last delivery appointment
+      customerLinkExpiryDays:        a.integer(),   // 14
+      customerLinkShowsCarrier:      a.boolean(),   // false
+      customerLinkShowsPosition:     a.boolean(),   // true
+      // { mode: 'CUSTOMER_REP' | 'FIXED', name?, email?, phone? } — whose details
+      // the public customer page prints as "who to call".
+      trackingContact:               a.json(),
+      trackingSmsTemplate:           a.string(),    // must contain {url}
     })
     // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
     // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
@@ -1015,6 +1052,11 @@ const schema = a.schema({
       // answer "find me 12345" without scanning five tables.
       searchKey:       a.string(),
       source:          a.enum(['MANUAL', 'TENDER', 'DUPLICATE', 'BACKFILL']),
+      // ── Tracking & check calls (Step D) ─────────────────────────────────
+      // The one ACTIVE CUSTOMER_VIEW TrackingLink for this shipment. Stable
+      // across re-sends; Regenerate revokes it and mints a new token.
+      customerLinkId:   a.string(),
+      customerLinkSentAt: a.datetime(),
       createdBy:       a.string().required(),
       updatedBy:       a.string().required(),
       version:         a.integer(),
@@ -1151,6 +1193,11 @@ const schema = a.schema({
       bookingWarnings:   a.string().array(),
       dispatchedAt:      a.datetime(),
       dispatchNote:      a.string(),
+      // ── Tracking & check calls (Step D) ─────────────────────────────────
+      // The ACTIVE CARRIER_PING TrackingLink texted to this carrier's driver.
+      trackingLinkId:    a.string(),
+      trackingStartedAt: a.datetime(),
+      trackingStoppedAt: a.datetime(),
       createdBy:       a.string().required(),
       updatedBy:       a.string().required(),
     })
@@ -1207,6 +1254,110 @@ const schema = a.schema({
       createdBy:       a.string().required(),
     })
     .secondaryIndexes((index) => [index('shipmentId').sortKeys(['sortOrder'])])
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  // ── Tracking & check calls (Step D) ────────────────────────────────────────
+  // One row per thing that happened to a load in transit: a check call somebody
+  // logged, a stop the driver app stamped, a ping off the carrier's SMS link, the
+  // dispatch itself, an ETA change, an incident. The Tracking tab is this table
+  // read newest-first; Motive fixes are NOT copied in here (six an hour per truck
+  // would swamp it) — they are merged in memory from TruckLocationHistory.
+  //
+  // Written by tmsShipmentActions, tmsTrackingActions, load-tracking-projector and
+  // the public tracking-api; the client only reads.
+  LoadCheckCall: a
+    .model({
+      loadId:        a.string().required(),
+      shipmentId:    a.string().required(),
+      loadCarrierId: a.string(),
+      stopId:        a.string(),
+      // When it happened. `createdAt` is when somebody typed it in.
+      at:            a.datetime().required(),
+      type: a.enum([
+        'DISPATCH', 'LOCATION_UPDATE', 'ARRIVED', 'DEPARTED', 'ETA_UPDATE',
+        'INCIDENT', 'NOTE', 'TRACKING_LINK_SENT', 'TRACKING_PING',
+      ]),
+      source:        a.enum(['MANUAL', 'DRIVER_APP', 'LINK', 'SYSTEM']),
+      incidentType: a.enum([
+        'ACCIDENT', 'ACTUAL_CLAIM', 'ATTEMPTED_DELIVERY', 'BREAKDOWN', 'DELAY',
+        'DELIVERY_NOT_COMPLETED', 'DETENTION', 'FRAUD', 'GENERAL_EXCEPTION', 'LAYOVER',
+        'LOAD_LOCK_ALERT', 'OVERAGE_SHORTAGE', 'PICKUP_EXCEPTION', 'POTENTIAL_CLAIM',
+        'REFUSED_BY_CONSIGNEE', 'REJECTION', 'SHIPMENT_CANCELLED', 'SHIPMENT_DAMAGED',
+        'SHIPMENT_DELAYED', 'SHIPMENT_RECONSIGNED', 'SHIPMENT_RETURNED_TO_SHIPPER',
+        'STORAGE_IN_TRANSIT', 'TONU',
+      ]),
+      // Sparse marker: the literal 'OPEN' only while an incident is unresolved,
+      // so the incidentOpen index holds the exceptions queue and nothing else.
+      incidentOpen:   a.string(),
+      resolvedAt:     a.datetime(),
+      resolvedBy:     a.string(),
+      resolutionNote: a.string(),
+      // Null when the event moved nothing.
+      statusBefore:   a.string(),
+      statusAfter:    a.string(),
+      city:           a.string(),
+      state:          a.string(),
+      lat:            a.float(),
+      lng:            a.float(),
+      accuracyM:      a.integer(),
+      personName:     a.string(),
+      note:           a.string(),
+      // The DispatchMessage id when the note was texted to the driver.
+      driverMessageId: a.string(),
+      // Snapshot of the charge lines this event created: { side, code, amountCents, chargeId }[]
+      charges:        a.json(),
+      // What this call scheduled next, kept so the timeline reads back honestly.
+      nextCheckCallAt:   a.datetime(),
+      nextCheckCallNote: a.string(),
+      pickupEtaAt:    a.datetime(),
+      deliveryEtaAt:  a.datetime(),
+      // staff e-mail · `driver:<id>` · `link:<token8>` · `system`
+      createdBy:      a.string().required(),
+    })
+    .secondaryIndexes((index) => [
+      index('loadId').sortKeys(['at']),
+      index('shipmentId').sortKeys(['at']),
+      index('incidentOpen').sortKeys(['at']),
+    ])
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  // A tokenised public link. The row's `id` IS the token (24 random bytes,
+  // base64url) — the public Lambda does a GetItem on it, so there is no token
+  // index anywhere and a guess has to hit a 192-bit primary key.
+  TrackingLink: a
+    .model({
+      kind:          a.enum(['CARRIER_PING', 'CUSTOMER_VIEW']),
+      shipmentId:    a.string().required(),
+      loadId:        a.string(),
+      loadCarrierId: a.string(),
+      status:        a.enum(['ACTIVE', 'REVOKED', 'EXPIRED']),
+      expiresAt:     a.datetime().required(),
+      sentTo:        a.string(),            // E.164, or comma-joined e-mails
+      sentVia:       a.enum(['SMS', 'EMAIL', 'COPY']),
+      sentAt:        a.datetime(),
+      smsMessageId:  a.string(),
+      // Snapshot of who the customer page says to call, taken when the link was minted.
+      contactName:   a.string(),
+      contactEmail:  a.string(),
+      contactPhone:  a.string(),
+      showCarrier:   a.boolean(),
+      showPosition:  a.boolean(),
+      openCount:     a.integer(),
+      lastOpenedAt:  a.datetime(),
+      // Rate limits, bumped with an atomic ADD by the public Lambda.
+      requestCount:  a.integer(),
+      pingCount:     a.integer(),
+      lastPingAt:        a.datetime(),
+      lastPingLat:       a.float(),
+      lastPingLng:       a.float(),
+      lastPingAccuracyM: a.integer(),
+      revokedAt:     a.datetime(),
+      revokedBy:     a.string(),
+      createdBy:     a.string().required(),
+    })
+    .secondaryIndexes((index) => [index('shipmentId'), index('loadId')])
     .disableOperations(['subscriptions'])
     .authorization((allow) => [allow.authenticated().to(['read'])]),
 
@@ -2568,6 +2719,21 @@ const schema = a.schema({
     .authorization((allow) => [allow.authenticated()])
     .handler(a.handler.function(tmsCarrierActions)),
 
+  // Step D: tracking links and the texts/e-mails that carry them. Kept off
+  // tmsShipmentActions so Twilio, SES, Cognito and the dispatch tables stay off
+  // that router's role. Actions: SEND_TRACKING_LINK, REVOKE_TRACKING_LINK,
+  // SEND_CUSTOMER_LINK, REVOKE_CUSTOMER_LINK, TEXT_DRIVER, SAVE_TRACKING_SETTINGS.
+  // Logging a check call moves Load status and money, so it stays in tmsShipmentActions.
+  tmsTrackingActions: a
+    .mutation()
+    .arguments({
+      action: a.string().required(),
+      input:  a.json(),
+    })
+    .returns(a.json())
+    .authorization((allow) => [allow.authenticated()])
+    .handler(a.handler.function(tmsTrackingActions)),
+
   // Phase 1: server-side geocoding, Places autocomplete, and place details.
   tmsGeocode: a
     .query()
@@ -2699,6 +2865,9 @@ const schema = a.schema({
   // Step C: tmsCarrierActions owns the four carrier tables through the SDK and
   // reaches the generated queries over IAM for the rows it only reads.
   allow.resource(tmsCarrierActions).to(['query', 'mutate']),
+  // Step D: tmsTrackingActions owns TrackingLink through the SDK and reads
+  // Shipment/Order/Load/LoadCarrier/Customer over IAM.
+  allow.resource(tmsTrackingActions).to(['query', 'mutate']),
 ])
 
 export type Schema = ClientSchema<typeof schema>

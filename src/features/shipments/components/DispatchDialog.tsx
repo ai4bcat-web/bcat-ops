@@ -10,6 +10,7 @@ import { useState } from 'react'
 import { AlertTriangle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -30,6 +31,12 @@ export interface DispatchFields {
   nextCheckCallAt?: string
   nextCheckCallNote?: string
   note?: string
+  /**
+   * Send the driver the ping link as soon as the dispatch lands. Not part of
+   * DISPATCH_LOAD — the caller fires SEND_TRACKING_LINK after it succeeds, because a
+   * text that fails is no reason to un-dispatch a truck that is rolling.
+   */
+  sendTrackingLink?: boolean
 }
 
 export function DispatchDialog({ loadCarrier, busy, onClose, onConfirm }: {
@@ -48,6 +55,9 @@ export function DispatchDialog({ loadCarrier, busy, onClose, onConfirm }: {
   const [checkCallAt, setCheckCallAt] = useState('')
   const [checkCallNote, setCheckCallNote] = useState('')
   const [note, setNote] = useState('')
+  // Checked by default exactly when it would work: a link-tracked load with a phone to
+  // text. Switching the provider to LINK ticks it, switching away unticks it.
+  const [sendLink, setSendLink] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const rateConSigned = loadCarrier.rateConStatus === 'SIGNED'
@@ -95,7 +105,11 @@ export function DispatchDialog({ loadCarrier, busy, onClose, onConfirm }: {
             <select
               aria-label="Dispatch tracking"
               value={trackingProvider}
-              onChange={(e) => setTrackingProvider(e.target.value as TrackingProvider)}
+              onChange={(e) => {
+                const next = e.target.value as TrackingProvider
+                setTrackingProvider(next)
+                setSendLink(next === 'LINK' && driverPhone.trim().length > 0)
+              }}
               className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
             >
               {TRACKING_PROVIDERS.map((p) => <option key={p} value={p}>{p.replace(/_/g, ' ').toLowerCase()}</option>)}
@@ -114,6 +128,18 @@ export function DispatchDialog({ loadCarrier, busy, onClose, onConfirm }: {
             <Textarea aria-label="Dispatch note" rows={2} value={note} onChange={(e) => setNote(e.target.value)} className="text-sm" />
           </div>
           {error && <p className="col-span-2 text-xs text-destructive">{error}</p>}
+          <div className="col-span-2">
+            <label className="flex items-center gap-2 text-sm">
+              <Checkbox
+                aria-label="Send tracking link now"
+                checked={sendLink}
+                disabled={!driverPhone.trim()}
+                onCheckedChange={(v) => setSendLink(v === true)}
+              />
+              Send tracking link now
+              {!driverPhone.trim() && <span className="text-xs text-muted-foreground">— needs a driver phone</span>}
+            </label>
+          </div>
         </div>
 
         <DialogFooter>
@@ -132,6 +158,7 @@ export function DispatchDialog({ loadCarrier, busy, onClose, onConfirm }: {
                 nextCheckCallAt: checkCallAt ? fromDateTimeInput(checkCallAt) : undefined,
                 nextCheckCallNote: checkCallNote.trim() || undefined,
                 note: note.trim() || undefined,
+                sendTrackingLink: sendLink && driverPhone.trim().length > 0,
               })
             }}
             disabled={busy}

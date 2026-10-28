@@ -9,15 +9,17 @@
 import { useCallback, useState } from 'react'
 import { toast } from 'sonner'
 import {
-  assignAsset, assignCarrier, bookCarrier, deleteShipment, dispatchLoad, duplicateShipment, recalcCharges,
-  removeLoadCarrier, restoreShipment, saveOrderForm, sendRateCon, setArStatus, setLoadStatus, setQuickPay,
-  setShipmentStatus, submitOrder, tenderRespond, updateStop, voidRateCon,
+  assignAsset, assignCarrier, bookCarrier, deleteShipment, dispatchLoad, duplicateShipment, getShipmentBundle,
+  logCheckCall, recalcCharges, removeLoadCarrier, resolveIncident, restoreShipment, saveOrderForm, sendRateCon,
+  setArStatus, setEta, setLoadStatus, setNextCheckCall, setQuickPay, setShipmentStatus, sendTrackingLink,
+  submitOrder, tenderRespond, updateStop, voidRateCon,
 } from '@/lib/apiClient'
 import type { LoadChargeInput, ShipmentBundle } from '@/types/tms'
 import type { BookCarrierFields } from '@/features/carriers/components/BookCarrierDialog'
 import type { OrderFormValues } from './components/DraftOrderEditor'
 import type { DispatchFields } from './components/DispatchDialog'
 import type { StopActionInput } from './components/StopCards'
+import type { CheckCallFormValues } from './components/LogCheckCallDialog'
 import type { ShipmentActionHandlers, LoadActionHandlers } from './components/StatusActions'
 
 export interface ShipmentActions {
@@ -33,7 +35,23 @@ export interface ShipmentActions {
   sendRateCon: (input: { loadCarrierId: string; pdfBase64: string; to: string[]; cc?: string[]; expiresHours?: number }) => Promise<void>
   voidRateCon: (input: { loadCarrierId: string }) => Promise<void>
   dispatchLoad: (input: DispatchFields) => Promise<void>
+  /** Step D — the tracking tab. Each answers with the bundle, which is swapped in here. */
+  tracking: TrackingActionHandlers
+  /**
+   * Re-read the shipment from the server. The link actions live on the tracking router
+   * and answer with a link, not a bundle, but they do write LoadCarrier, Load and
+   * Shipment — so the tab asks for the real rows rather than patching its own copy.
+   */
+  reload: () => Promise<void>
   busy: boolean
+}
+
+export interface TrackingActionHandlers {
+  logCheckCall: (values: CheckCallFormValues) => Promise<void>
+  resolveIncident: (checkCallId: string, note?: string) => Promise<void>
+  /** `null` clears the reminder — "I don't need to schedule one". */
+  setNextCheckCall: (nextCheckCallAt: string | null, note?: string) => Promise<void>
+  setEta: (input: { pickupEtaAt?: string | null; deliveryEtaAt?: string | null; note?: string }) => Promise<void>
 }
 
 export function useShipmentActions(
@@ -127,7 +145,54 @@ export function useShipmentActions(
       await call('Void rate con', () => voidRateCon(input))
     },
     dispatchLoad: async (input) => {
-      await call('Dispatch', () => dispatchLoad({ loadId: load?.id ?? '', ...input }))
+      const { sendTrackingLink: alsoSendLink, ...fields } = input
+      await call('Dispatch', () => dispatchLoad({ loadId: load?.id ?? '', ...fields }))
+      // Only after the truck is dispatched, and never rolled back into it: a text that
+      // fails to send is reported on its own and leaves the dispatch standing.
+      if (alsoSendLink) {
+        const loadCarrier = bundle?.loadCarriers.find((c) => c.status === 'ACTIVE') ?? null
+        if (!loadCarrier) return
+        try {
+          const sent = await sendTrackingLink({ loadCarrierId: loadCarrier.id, via: 'SMS' })
+          if (sent.smsStatus === 'SENT') toast.success('Tracking link texted to the driver')
+          else toast.warning(`Dispatched, but the tracking link was not texted (${sent.smsStatus.replace(/_/g, ' ').toLowerCase()}). Copy it from the Tracking tab.`)
+          onBundle(await getShipmentBundle(shipmentId))
+        } catch (err) {
+          toast.error(err instanceof Error ? err.message : 'Dispatched, but the tracking link could not be sent')
+        }
+      }
+    },
+    tracking: {
+      logCheckCall: async (values) => {
+        await call('Check call', async () => (await logCheckCall({
+          loadId: load?.id ?? '',
+          expectedUpdatedAt: load?.updatedAt ?? expectedUpdatedAt,
+          ...values,
+        })).bundle)
+      },
+      resolveIncident: async (checkCallId, note) => {
+        await call('Resolve exception', async () => (await resolveIncident({ checkCallId, note })).bundle)
+      },
+      setNextCheckCall: async (nextCheckCallAt, note) => {
+        await call('Next check call', async () => (await setNextCheckCall({
+          loadId: load?.id ?? '',
+          expectedUpdatedAt: load?.updatedAt ?? expectedUpdatedAt,
+          nextCheckCallAt,
+          note,
+        })).bundle)
+      },
+      setEta: async (input) => {
+        const loadCarrier = bundle?.loadCarriers.find((c) => c.status === 'ACTIVE') ?? null
+        await call('ETA', async () => (await setEta({
+          loadCarrierId: loadCarrier?.id ?? '',
+          expectedUpdatedAt: loadCarrier?.updatedAt ?? '',
+          ...input,
+        })).bundle)
+      },
+    },
+    reload: async () => {
+      if (!shipmentId) return
+      onBundle(await getShipmentBundle(shipmentId))
     },
     shipment: {
       onDuplicate: async (copies, sameCarrier) => {

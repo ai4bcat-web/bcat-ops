@@ -16,6 +16,7 @@ import type {
   ShipmentRecord,
   ShipmentStatus,
 } from '@/types/tms'
+import { checkCallState } from '@/lib/checkCalls'
 
 /**
  * A board row: the shipment plus the two facets that live on its order and its load.
@@ -26,6 +27,12 @@ export type ShipmentRow = ShipmentRecord & {
   arStatus?: ArStatus | null
   assignmentType?: AssignmentType | null
   loadStatus?: LoadWorkflowStatus | null
+  /** Step D — the load's tracking clock, projected onto the shipment. */
+  lastUpdateAt?: string | null
+  lastUpdatePlace?: string | null
+  nextCheckCallAt?: string | null
+  checkCallOpen?: 'OPEN' | null
+  openIncidentCount?: number | null
 }
 
 export type BoardTabKey =
@@ -90,10 +97,18 @@ export interface BoardFilters {
   mode: ShipmentMode | null
   arStatus: ArStatus | null
   assignmentType: AssignmentType | null
+  /**
+   * Step D toggles. `null` is off — they are never stored as `false`, so the "how many
+   * filters are on" count stays the count of filters that actually narrow the board.
+   */
+  checkCallDue: true | null
+  checkCallOverdue: true | null
+  openExceptions: true | null
 }
 
 export const EMPTY_FILTERS: BoardFilters = {
   customerId: null, pickupFrom: null, pickupTo: null, mode: null, arStatus: null, assignmentType: null,
+  checkCallDue: null, checkCallOverdue: null, openExceptions: null,
 }
 
 export function activeFilterCount(f: BoardFilters): number {
@@ -122,6 +137,14 @@ export function matchesFilters(row: ShipmentRow, f: BoardFilters): boolean {
     if (f.pickupFrom && day < f.pickupFrom) return false
     if (f.pickupTo && day > f.pickupTo) return false
   }
+  if (f.checkCallDue || f.checkCallOverdue) {
+    // Due vs overdue is the one state function, so the board agrees with the worklist
+    // and the notifier about which side of the grace a load is on.
+    const state = checkCallState({ nextCheckCallAt: row.nextCheckCallAt }, Date.now())
+    if (f.checkCallOverdue && state !== 'OVERDUE') return false
+    if (f.checkCallDue && !f.checkCallOverdue && state !== 'DUE' && state !== 'OVERDUE') return false
+  }
+  if (f.openExceptions && (row.openIncidentCount ?? 0) === 0) return false
   return true
 }
 
@@ -163,6 +186,15 @@ function shortDate(iso: string | null | undefined): string {
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
 
+/** Date and time, because a check call an hour from now and one tomorrow read alike otherwise. */
+function shortDateTime(iso: string | null | undefined): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  return Number.isNaN(d.getTime())
+    ? ''
+    : d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+}
+
 export const BOARD_COLUMNS: BoardColumn[] = [
   { key: 'number', label: 'Shipment', value: (r) => r.number ?? '' },
   { key: 'status', label: 'Status', value: (r) => r.status },
@@ -174,10 +206,14 @@ export const BOARD_COLUMNS: BoardColumn[] = [
   { key: 'deliveryAppt', label: 'Delivery', value: (r) => shortDate(r.deliveryAppt) },
   { key: 'arStatus', label: 'AR', value: (r) => r.arStatus ?? '' },
   { key: 'assignmentType', label: 'Assignment', value: (r) => r.assignmentType ?? '' },
+  { key: 'lastUpdateAt', label: 'Last update', value: (r) => [shortDateTime(r.lastUpdateAt), r.lastUpdatePlace].filter(Boolean).join(' · ') },
+  { key: 'nextCheckCallAt', label: 'Next check call', value: (r) => shortDateTime(r.nextCheckCallAt) },
+  { key: 'openIncidentCount', label: 'Exceptions', value: (r) => ((r.openIncidentCount ?? 0) > 0 ? String(r.openIncidentCount) : '') },
 ]
 
 export const DEFAULT_COLUMN_KEYS = [
   'number', 'status', 'customerName', 'mode', 'originCity', 'destinationCity', 'pickupAppt', 'deliveryAppt',
+  'lastUpdateAt', 'nextCheckCallAt', 'openIncidentCount',
 ]
 
 export function visibleColumns(keys: readonly string[]): BoardColumn[] {
@@ -229,6 +265,9 @@ function sanitizeFilters(v: unknown): BoardFilters {
     mode: str(raw.mode) as ShipmentMode | null,
     arStatus: str(raw.arStatus) as ArStatus | null,
     assignmentType: str(raw.assignmentType) as AssignmentType | null,
+    checkCallDue: raw.checkCallDue === true ? true : null,
+    checkCallOverdue: raw.checkCallOverdue === true ? true : null,
+    openExceptions: raw.openExceptions === true ? true : null,
   }
 }
 

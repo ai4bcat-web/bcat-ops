@@ -42,6 +42,8 @@ const TABLES = {
   carrierDirectory: 'Carrier-test',
   carrierDoc: 'CarrierDocument-test',
   driver: 'Driver-test',
+  checkCall: 'LoadCheckCall-test',
+  trackingLink: 'TrackingLink-test',
 }
 
 const store = vi.hoisted(() => {
@@ -57,6 +59,8 @@ const store = vi.hoisted(() => {
   process.env.DRIVER_TABLE_NAME = 'Driver-test'
   process.env.CARRIER_TABLE_NAME = 'Carrier-test'
   process.env.CARRIER_DOCUMENT_TABLE_NAME = 'CarrierDocument-test'
+  process.env.LOAD_CHECK_CALL_TABLE_NAME = 'LoadCheckCall-test'
+  process.env.TRACKING_LINK_TABLE_NAME = 'TrackingLink-test'
   process.env.BUCKET_NAME = 'bcat-test-bucket'
   process.env.PORTAL_ORIGIN = 'https://portal.test'
   process.env.AMPLIFY_DATA_DEFAULT_NAME = 'amplifyData'
@@ -93,7 +97,17 @@ interface UpdateSpec {
   ConditionExpression?: string
 }
 
-/** Apply the one `SET #a = :a, …` / `ADD counter :one` shape this handler emits. */
+/** Split `SET … ADD … REMOVE …` into its clauses, in whatever order they came. */
+function updateClauses(expression: string): Record<string, string> {
+  const clauses: Record<string, string> = {}
+  for (const part of expression.split(/\s+(?=SET\s|ADD\s|REMOVE\s)/)) {
+    const m = /^(SET|ADD|REMOVE)\s+(.*)$/s.exec(part.trim())
+    if (m) clauses[m[1]] = m[2]
+  }
+  return clauses
+}
+
+/** Apply the `SET #a = :a, …`, `ADD counter :one` and `REMOVE #a, #b` shapes. */
 function applyUpdate(spec: UpdateSpec): Row {
   const t = table(spec.TableName)
   const key = unmarshall(spec.Key as never) as { id: string }
@@ -102,6 +116,7 @@ function applyUpdate(spec: UpdateSpec): Row {
     ? (unmarshall(spec.ExpressionAttributeValues as never) as Row)
     : {}
   const names = spec.ExpressionAttributeNames ?? {}
+  const resolve = (token: string): string => (token.startsWith('#') ? names[token] : token)
 
   if (spec.ConditionExpression?.includes('casExpectedUpdatedAt')) {
     const expected = values[':casExpectedUpdatedAt']
@@ -110,28 +125,37 @@ function applyUpdate(spec: UpdateSpec): Row {
       throw new ConditionalCheckFailed(`CAS on ${spec.TableName}/${key.id}`)
     }
   }
+  const absent = /^attribute_not_exists\((\w+)\)$/.exec(spec.ConditionExpression ?? '')
+  if (absent && existing?.[absent[1]] != null) {
+    throw new ConditionalCheckFailed(`${absent[1]} already set on ${spec.TableName}/${key.id}`)
+  }
 
   const next: Row = { ...(existing ?? { id: key.id }) }
-  const addMatch = /ADD\s+(\w+)\s+(:\w+)/.exec(spec.UpdateExpression)
+  const clauses = updateClauses(spec.UpdateExpression)
+  const addMatch = clauses.ADD ? /^(\w+)\s+(:\w+)/.exec(clauses.ADD) : null
   if (addMatch) {
     const field = addMatch[1]
     const delta = Number(values[addMatch[2]] ?? 0)
     next[field] = Number(next[field] ?? 0) + delta
   }
-  const setClause = /SET\s+(.*)$/s.exec(spec.UpdateExpression)
-  if (setClause) {
-    for (const assignment of setClause[1].split(/,\s*/)) {
+  if (clauses.SET) {
+    for (const assignment of clauses.SET.split(/,\s*/)) {
       const m = /^\s*([#\w]+)\s*=\s*(.+?)\s*$/.exec(assignment)
       if (!m) continue
-      const field = m[1].startsWith('#') ? names[m[1]] : m[1]
+      const field = resolve(m[1])
       const rhs = m[2]
       const ifNotExists = /^if_not_exists\(\s*([#\w]+)\s*,\s*(:\w+)\s*\)$/.exec(rhs)
       if (ifNotExists) {
-        const target = ifNotExists[1].startsWith('#') ? names[ifNotExists[1]] : ifNotExists[1]
+        const target = resolve(ifNotExists[1])
         if (next[target] === undefined) next[target] = values[ifNotExists[2]]
         continue
       }
       next[field] = values[rhs]
+    }
+  }
+  if (clauses.REMOVE) {
+    for (const token of clauses.REMOVE.split(/,\s*/)) {
+      delete next[resolve(token.trim())]
     }
   }
   t.set(key.id, next)
@@ -247,7 +271,11 @@ function runCommand(cmd: MockCommand): unknown {
     }
     case 'Put': {
       const item = unmarshall(input.Item as never) as Row
-      table(String(input.TableName)).set(String(item.id), item)
+      const t = table(String(input.TableName))
+      if (input.ConditionExpression === 'attribute_not_exists(id)' && t.has(String(item.id))) {
+        throw new ConditionalCheckFailed(`${String(input.TableName)}/${String(item.id)} already exists`)
+      }
+      t.set(String(item.id), item)
       return {}
     }
     case 'Update':
@@ -1453,6 +1481,584 @@ describe('RECALC_CHARGES', () => {
         charges: [{ side: 'CARRIER', code: 'LINEHAUL', calculatedBy: 'FLAT', rateCents: -100, sortOrder: 0 }],
       }),
     ).rejects.toThrow(/cannot be negative/)
+  })
+})
+
+// ── Check calls and tracking (step D) ────────────────────────────────────────
+
+describe('check calls', () => {
+  async function openLoad(): Promise<{ shipmentId: string; loadId: string; orderId: string }> {
+    const ids = await createDraft()
+    await saveForm(ids.shipmentId)
+    await call('SUBMIT_ORDER', {
+      shipmentId: ids.shipmentId,
+      expectedUpdatedAt: table(TABLES.shipment).get(ids.shipmentId)!.updatedAt,
+      order: { equipmentType: "53' VAN" },
+      stops: [PICKUP, DELIVERY],
+    })
+    return ids
+  }
+
+  async function trackedLoad(): Promise<{ shipmentId: string; loadId: string; orderId: string; carrierId: string }> {
+    const ids = await openLoad()
+    await call('ASSIGN_CARRIER', { loadId: ids.loadId, carrierName: 'SWIFT', carrierRateCents: 180_000 })
+    const carrierId = String([...table(TABLES.carrier).values()].find((c) => c.status === 'ACTIVE')!.id)
+    return { ...ids, carrierId }
+  }
+
+  const stamp = (loadId: string): string => String(table(TABLES.load).get(loadId)!.updatedAt)
+  const logged = (): Row[] => [...table(TABLES.checkCall).values()]
+  const stopsOf = (loadId: string): Row[] => JSON.parse(String(table(TABLES.load).get(loadId)!.stops)) as Row[]
+
+  /** The last raw UpdateItem this handler sent to the Load table. */
+  function lastLoadUpdate(): UpdateSpec {
+    const updates = send.mock.calls
+      .map(([cmd]) => cmd as MockCommand)
+      .filter((cmd) => cmd.__type === 'Update' && cmd.input.TableName === TABLES.load)
+    return updates[updates.length - 1].input as unknown as UpdateSpec
+  }
+
+  it('logs where the truck is without touching the stop clock', async () => {
+    const { loadId } = await trackedLoad()
+    const result = (await call('LOG_CHECK_CALL', {
+      loadId,
+      expectedUpdatedAt: stamp(loadId),
+      at: '2026-03-02T15:00:00.000Z',
+      type: 'LOCATION_UPDATE',
+      city: 'JOLIET',
+      state: 'IL',
+      lat: 41.525,
+      lng: -88.081,
+      personName: 'Mark at Swift',
+      note: 'rolling, no delays',
+    })) as { bundle: { loads: Row[] }; event: Row }
+
+    expect(result.event).toMatchObject({
+      type: 'LOCATION_UPDATE',
+      source: 'MANUAL',
+      note: 'rolling, no delays',
+      createdBy: 'dispatch@bcatcorp.com',
+      statusAfter: null,
+    })
+    expect(table(TABLES.load).get(loadId)).toMatchObject({
+      status: 'BOOKED',
+      lastCheckCallAt: '2026-03-02T15:00:00.000Z',
+      lastCheckCallType: 'LOCATION_UPDATE',
+      lastKnownCity: 'JOLIET',
+      lastKnownState: 'IL',
+      lastKnownLat: 41.525,
+      lastKnownSource: 'MANUAL',
+    })
+    expect(stopsOf(loadId)[0].arrivedAt ?? null).toBeNull()
+    // The bundle comes back fresh, so the dialog's next call has a live CAS token.
+    expect(String(result.bundle.loads[0].updatedAt)).toBe(stamp(loadId))
+  })
+
+  it('stamps the stop it is told about and moves the load from the clock', async () => {
+    const { loadId } = await trackedLoad()
+    const result = (await call('LOG_CHECK_CALL', {
+      loadId,
+      expectedUpdatedAt: stamp(loadId),
+      at: '2026-03-02T13:05:00.000Z',
+      type: 'ARRIVED',
+      stopId: 'stp-pu',
+    })) as { event: Row }
+
+    expect(result.event.id).toBe(`evt:${loadId}:stp-pu:ARRIVED`)
+    expect(result.event).toMatchObject({ statusBefore: 'BOOKED', statusAfter: 'LOADING' })
+    expect(stopsOf(loadId)[0].arrivedAt).toBe('2026-03-02T13:05:00.000Z')
+    expect(table(TABLES.load).get(loadId)).toMatchObject({ status: 'LOADING', statusSource: 'CHECK_CALL' })
+  })
+
+  it('delivers the load and stamps when it happened', async () => {
+    const { loadId } = await trackedLoad()
+    await call('LOG_CHECK_CALL', {
+      loadId,
+      expectedUpdatedAt: stamp(loadId),
+      at: '2026-03-03T15:00:00.000Z',
+      type: 'DEPARTED',
+      stopId: 'stp-de',
+    })
+    expect(table(TABLES.load).get(loadId)).toMatchObject({
+      status: 'DELIVERED',
+      deliveredAt: '2026-03-03T15:00:00.000Z',
+    })
+  })
+
+  it('counts a stop event once when the driver app reported it first', async () => {
+    const { loadId, shipmentId } = await trackedLoad()
+    const eventId = `evt:${loadId}:stp-pu:ARRIVED`
+    table(TABLES.checkCall).set(eventId, {
+      id: eventId,
+      loadId,
+      shipmentId,
+      stopId: 'stp-pu',
+      at: '2026-03-02T12:55:00.000Z',
+      type: 'ARRIVED',
+      source: 'DRIVER_APP',
+      createdBy: 'driver:drv-1',
+    })
+
+    const result = (await call('LOG_CHECK_CALL', {
+      loadId,
+      expectedUpdatedAt: stamp(loadId),
+      at: '2026-03-02T13:30:00.000Z',
+      type: 'ARRIVED',
+      stopId: 'stp-pu',
+      note: 'driver says he is in the door',
+    })) as { event: Row }
+
+    expect(result.event.type).toBe('LOCATION_UPDATE')
+    expect(result.event.note).toBe('driver says he is in the door')
+    const arrivals = logged().filter((r) => r.type === 'ARRIVED')
+    expect(arrivals).toHaveLength(1)
+    expect(arrivals[0]).toMatchObject({ source: 'DRIVER_APP', at: '2026-03-02T12:55:00.000Z' })
+    // The first report of an arrival is the one that counts.
+    expect(stopsOf(loadId)[0].arrivedAt ?? null).toBeNull()
+  })
+
+  it('refuses a row the system writes for itself', async () => {
+    const { loadId } = await trackedLoad()
+    await expect(call('LOG_CHECK_CALL', {
+      loadId, expectedUpdatedAt: stamp(loadId), at: '2026-03-02T15:00:00.000Z', type: 'DISPATCH',
+    })).rejects.toThrow(/written by the system/)
+  })
+
+  it('refuses an arrival that names no stop on the load', async () => {
+    const { loadId } = await trackedLoad()
+    await expect(call('LOG_CHECK_CALL', {
+      loadId, expectedUpdatedAt: stamp(loadId), at: '2026-03-02T15:00:00.000Z', type: 'ARRIVED',
+    })).rejects.toThrow(/name a stop/)
+    await expect(call('LOG_CHECK_CALL', {
+      loadId, expectedUpdatedAt: stamp(loadId), at: '2026-03-02T15:00:00.000Z', type: 'DEPARTED', stopId: 'stp-nope',
+    })).rejects.toThrow(/name a stop/)
+  })
+
+  it('refuses an incident with no incident type', async () => {
+    const { loadId } = await trackedLoad()
+    await expect(call('LOG_CHECK_CALL', {
+      loadId, expectedUpdatedAt: stamp(loadId), at: '2026-03-02T15:00:00.000Z', type: 'INCIDENT',
+    })).rejects.toThrow(/incident type/)
+  })
+
+  it('refuses a check call logged from the future', async () => {
+    const { loadId } = await trackedLoad()
+    const future = new Date(Date.now() + 20 * 60_000).toISOString()
+    await expect(call('LOG_CHECK_CALL', {
+      loadId, expectedUpdatedAt: stamp(loadId), at: future, type: 'NOTE',
+    })).rejects.toThrow(/in the future/)
+  })
+
+  it('refuses a canceled load', async () => {
+    const { loadId } = await trackedLoad()
+    table(TABLES.load).set(loadId, { ...table(TABLES.load).get(loadId)!, status: 'CANCELED' })
+    await expect(call('LOG_CHECK_CALL', {
+      loadId, expectedUpdatedAt: stamp(loadId), at: '2026-03-02T15:00:00.000Z', type: 'NOTE',
+    })).rejects.toThrow(/canceled/)
+  })
+
+  it('refuses a load that is not part of a shipment', async () => {
+    table(TABLES.load).set('lod-legacy', {
+      id: 'lod-legacy', status: 'BOOKED', updatedAt: '2026-01-01T00:00:00.000Z',
+    })
+    await expect(call('LOG_CHECK_CALL', {
+      loadId: 'lod-legacy',
+      expectedUpdatedAt: '2026-01-01T00:00:00.000Z',
+      at: '2026-03-02T15:00:00.000Z',
+      type: 'NOTE',
+    })).rejects.toThrow(/not part of a shipment/)
+  })
+
+  it('refuses a load somebody else moved first', async () => {
+    const { loadId } = await trackedLoad()
+    await expect(call('LOG_CHECK_CALL', {
+      loadId,
+      expectedUpdatedAt: '2020-01-01T00:00:00.000Z',
+      at: '2026-03-02T15:00:00.000Z',
+      type: 'NOTE',
+    })).rejects.toThrow(/changed by someone else/)
+    expect(logged()).toHaveLength(0)
+  })
+
+  it('refuses incident charges once the financials are frozen', async () => {
+    const { loadId } = await trackedLoad()
+    const financials = table(TABLES.financials).get(loadId)!
+    table(TABLES.financials).set(loadId, { ...financials, frozenAt: '2026-03-10T00:00:00.000Z' })
+    await expect(call('LOG_CHECK_CALL', {
+      loadId,
+      expectedUpdatedAt: stamp(loadId),
+      at: '2026-03-02T15:00:00.000Z',
+      type: 'INCIDENT',
+      incidentType: 'DETENTION',
+      charges: [{ side: 'CUSTOMER', code: 'DETENTION', rateCents: 7_500 }],
+    })).rejects.toThrow(/frozen/)
+  })
+
+  it('refuses a carrier charge with nobody on the load, and a negative one', async () => {
+    const { loadId } = await openLoad()
+    await expect(call('LOG_CHECK_CALL', {
+      loadId,
+      expectedUpdatedAt: stamp(loadId),
+      at: '2026-03-02T15:00:00.000Z',
+      type: 'INCIDENT',
+      incidentType: 'DETENTION',
+      charges: [{ side: 'CARRIER', code: 'DETENTION', rateCents: 7_500 }],
+    })).rejects.toThrow(/active carrier/)
+
+    const { loadId: covered } = await trackedLoad()
+    await expect(call('LOG_CHECK_CALL', {
+      loadId: covered,
+      expectedUpdatedAt: stamp(covered),
+      at: '2026-03-02T15:00:00.000Z',
+      type: 'INCIDENT',
+      incidentType: 'DETENTION',
+      charges: [{ side: 'CARRIER', code: 'DETENTION', rateCents: -7_500 }],
+    })).rejects.toThrow(/cannot be negative/)
+    expect([...table(TABLES.charge).values()].filter((c) => c.code === 'DETENTION')).toHaveLength(0)
+  })
+
+  it('bills an incident on both sides and moves every cached total', async () => {
+    const { loadId, orderId, carrierId } = await trackedLoad()
+    const result = (await call('LOG_CHECK_CALL', {
+      loadId,
+      expectedUpdatedAt: stamp(loadId),
+      at: '2026-03-02T18:00:00.000Z',
+      type: 'INCIDENT',
+      incidentType: 'DETENTION',
+      note: 'three hours on the dock',
+      charges: [{ side: 'BOTH', code: 'DETENTION', rateCents: 7_500, count: 3 }],
+    })) as { event: Row }
+
+    const detention = [...table(TABLES.charge).values()].filter((c) => c.code === 'DETENTION')
+    expect(detention.map((c) => c.side).sort()).toEqual(['CARRIER', 'CUSTOMER'])
+    expect(detention.every((c) => c.amountCents === 22_500)).toBe(true)
+    expect(detention.find((c) => c.side === 'CARRIER')!.loadCarrierId).toBe(carrierId)
+    expect(detention.find((c) => c.side === 'CUSTOMER')!.loadCarrierId).toBeNull()
+    expect(table(TABLES.financials).get(loadId)).toMatchObject({
+      revenueCents: 272_500,
+      costCents: 202_500,
+      carrierRateCents: 180_000,
+    })
+    expect(table(TABLES.order).get(orderId)!.revenueCents).toBe(272_500)
+    expect(table(TABLES.load).get(loadId)).toMatchObject({ rate: 272_500, openIncidentCount: 1 })
+    expect(table(TABLES.carrier).get(carrierId)!.costCents).toBe(202_500)
+    expect(result.event.incidentOpen).toBe('OPEN')
+    expect(result.event.charges).toHaveLength(2)
+  })
+
+  it('refuses the event and its money when the load moves under the transaction', async () => {
+    const { loadId } = await trackedLoad()
+    const chargesBefore = table(TABLES.charge).size
+    const expectedUpdatedAt = stamp(loadId)
+    // The projector stamps the same load after the handler read it. The CAS the
+    // Load's own mutation carries is too late: the event row and the charge lines
+    // commit first, so the guard has to be inside the transaction.
+    send.mockImplementation(async (cmd: MockCommand) => {
+      if (cmd.__type === 'Transact') {
+        table(TABLES.load).set(loadId, {
+          ...table(TABLES.load).get(loadId)!,
+          updatedAt: '2026-03-02T18:00:01.000Z',
+        })
+      }
+      return runCommand(cmd)
+    })
+
+    await expect(call('LOG_CHECK_CALL', {
+      loadId,
+      expectedUpdatedAt,
+      at: '2026-03-02T18:00:00.000Z',
+      type: 'ARRIVED',
+      stopId: 'stp-pu',
+      charges: [{ side: 'BOTH', code: 'DETENTION', rateCents: 7_500, count: 3 }],
+    })).rejects.toThrow(/changed by someone else/)
+
+    const transacted = send.mock.calls
+      .map(([cmd]) => cmd as MockCommand)
+      .filter((cmd) => cmd.__type === 'Transact')
+      .pop()!.input.TransactItems as Record<string, Record<string, unknown>>[]
+    // The load's CAS is the first item, so the refusal covers the whole write.
+    expect(Object.keys(transacted[0])).toEqual(['ConditionCheck'])
+    const check = transacted[0].ConditionCheck as {
+      TableName: string
+      ExpressionAttributeValues: Record<string, { S?: string }>
+    }
+    expect(check.TableName).toBe(TABLES.load)
+    expect(check.ExpressionAttributeValues[':casExpectedUpdatedAt'].S).toBe(expectedUpdatedAt)
+
+    expect(logged()).toHaveLength(0)
+    expect(table(TABLES.charge).size).toBe(chargesBefore)
+    expect(stopsOf(loadId)[0].arrivedAt ?? null).toBeNull()
+  })
+
+  it('recounts the open incidents instead of decrementing a stale read', async () => {
+    const { loadId } = await trackedLoad()
+    const openIncident = async (incidentType: string, at: string): Promise<string> => {
+      const { event } = (await call('LOG_CHECK_CALL', {
+        loadId, expectedUpdatedAt: stamp(loadId), at, type: 'INCIDENT', incidentType,
+      })) as { event: Row }
+      return String(event.id)
+    }
+    const first = await openIncident('BREAKDOWN', '2026-03-02T18:00:00.000Z')
+    const second = await openIncident('DELAY', '2026-03-02T19:00:00.000Z')
+    expect(table(TABLES.load).get(loadId)!.openIncidentCount).toBe(2)
+
+    // Both dispatchers read the load while two exceptions are open. The first is
+    // held right after its REMOVE lands, so it writes the count last.
+    let release = (): void => {}
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    send.mockImplementation(async (cmd: MockCommand) => {
+      const holds = cmd.__type === 'Update'
+        && cmd.input.TableName === TABLES.checkCall
+        && JSON.stringify(cmd.input.Key).includes(first)
+      const result = runCommand(cmd)
+      if (holds) await held
+      return result
+    })
+
+    const slow = call('RESOLVE_INCIDENT', { checkCallId: first, note: 'towed in' })
+    await call('RESOLVE_INCIDENT', { checkCallId: second, note: 'roads opened' })
+    release()
+    await slow
+
+    expect([...table(TABLES.checkCall).values()].filter((c) => c.incidentOpen === 'OPEN')).toHaveLength(0)
+    expect(table(TABLES.load).get(loadId)!.openIncidentCount).toBe(0)
+  })
+
+  it('resolves an incident once, and refuses the second attempt', async () => {
+    const { loadId } = await trackedLoad()
+    const { event } = (await call('LOG_CHECK_CALL', {
+      loadId,
+      expectedUpdatedAt: stamp(loadId),
+      at: '2026-03-02T18:00:00.000Z',
+      type: 'INCIDENT',
+      incidentType: 'BREAKDOWN',
+      note: 'blew a steer tire',
+    })) as { event: Row }
+    expect(table(TABLES.load).get(loadId)!.openIncidentCount).toBe(1)
+
+    const resolved = (await call('RESOLVE_INCIDENT', {
+      checkCallId: event.id,
+      note: 'back on the road at 20:00',
+    })) as { event: Row }
+
+    expect(resolved.event).toMatchObject({
+      resolvedBy: 'dispatch@bcatcorp.com',
+      resolutionNote: 'back on the road at 20:00',
+    })
+    expect('incidentOpen' in table(TABLES.checkCall).get(String(event.id))!).toBe(false)
+    expect(table(TABLES.load).get(loadId)!.openIncidentCount).toBe(0)
+
+    await expect(call('RESOLVE_INCIDENT', { checkCallId: event.id })).rejects.toThrow(/already resolved/)
+    expect(table(TABLES.load).get(loadId)!.openIncidentCount).toBe(0)
+  })
+
+  it('sets the reminder, then clears it with a REMOVE rather than a stored null', async () => {
+    const { loadId } = await trackedLoad()
+    await call('LOG_CHECK_CALL', {
+      loadId,
+      expectedUpdatedAt: stamp(loadId),
+      at: '2026-03-02T15:00:00.000Z',
+      type: 'NOTE',
+      note: 'spoke to the driver',
+      nextCheckCallAt: '2026-03-02T19:00:00.000Z',
+      nextCheckCallNote: 'call once he clears the DC',
+    })
+    expect(table(TABLES.load).get(loadId)).toMatchObject({
+      checkCallOpen: 'OPEN',
+      nextCheckCallAt: '2026-03-02T19:00:00.000Z',
+      nextCheckCallNote: 'call once he clears the DC',
+    })
+
+    // The notifier nagged for that schedule before anybody cleared it.
+    table(TABLES.load).set(loadId, {
+      ...table(TABLES.load).get(loadId)!,
+      checkCallDueNotifiedAt: '2026-03-02T19:01:00.000Z',
+    })
+    await call('SET_NEXT_CHECK_CALL', { loadId, expectedUpdatedAt: stamp(loadId), nextCheckCallAt: null })
+
+    const load = table(TABLES.load).get(loadId)!
+    expect('checkCallOpen' in load).toBe(false)
+    expect('nextCheckCallAt' in load).toBe(false)
+    expect('nextCheckCallNote' in load).toBe(false)
+    expect('checkCallDueNotifiedAt' in load).toBe(false)
+    const update = lastLoadUpdate()
+    expect(update.UpdateExpression).toMatch(/REMOVE\b[^]*#checkCallOpen/)
+    expect(JSON.stringify(update.ExpressionAttributeValues)).not.toContain('NULL')
+  })
+
+  it('re-arms the notifier when the reminder is moved', async () => {
+    const { loadId } = await trackedLoad()
+    await call('SET_NEXT_CHECK_CALL', {
+      loadId, expectedUpdatedAt: stamp(loadId), nextCheckCallAt: '2026-03-02T19:00:00.000Z',
+    })
+    table(TABLES.load).set(loadId, {
+      ...table(TABLES.load).get(loadId)!,
+      checkCallDueNotifiedAt: '2026-03-02T19:01:00.000Z',
+      checkCallOverdueNotifiedAt: '2026-03-02T19:16:00.000Z',
+    })
+
+    await call('SET_NEXT_CHECK_CALL', {
+      loadId, expectedUpdatedAt: stamp(loadId), nextCheckCallAt: '2026-03-02T23:00:00.000Z', note: 'snoozed',
+    })
+    const load = table(TABLES.load).get(loadId)!
+    expect(load).toMatchObject({
+      checkCallOpen: 'OPEN',
+      nextCheckCallAt: '2026-03-02T23:00:00.000Z',
+      nextCheckCallNote: 'snoozed',
+    })
+    expect('checkCallDueNotifiedAt' in load).toBe(false)
+    expect('checkCallOverdueNotifiedAt' in load).toBe(false)
+  })
+
+  it('refuses a reminder on a load somebody else moved first', async () => {
+    const { loadId } = await trackedLoad()
+    await expect(call('SET_NEXT_CHECK_CALL', {
+      loadId, expectedUpdatedAt: '2020-01-01T00:00:00.000Z', nextCheckCallAt: null,
+    })).rejects.toThrow(/changed by someone else/)
+  })
+
+  it('records the ETA the carrier gave, and refuses one from a carrier off the load', async () => {
+    const { loadId, carrierId } = await trackedLoad()
+    const result = (await call('SET_ETA', {
+      loadCarrierId: carrierId,
+      expectedUpdatedAt: String(table(TABLES.carrier).get(carrierId)!.updatedAt),
+      deliveryEtaAt: '2026-03-03T12:00:00.000Z',
+      note: 'running two hours early',
+    })) as { event: Row }
+
+    expect(result.event).toMatchObject({
+      type: 'ETA_UPDATE',
+      source: 'SYSTEM',
+      loadId,
+      deliveryEtaAt: '2026-03-03T12:00:00.000Z',
+      createdBy: 'dispatch@bcatcorp.com',
+    })
+    expect(table(TABLES.carrier).get(carrierId)!.deliveryEtaAt).toBe('2026-03-03T12:00:00.000Z')
+
+    await call('REMOVE_LOAD_CARRIER', { loadCarrierId: carrierId, outcome: 'BOUNCED', reason: 'GAVE_BACK' })
+    await expect(call('SET_ETA', {
+      loadCarrierId: carrierId,
+      expectedUpdatedAt: String(table(TABLES.carrier).get(carrierId)!.updatedAt),
+      deliveryEtaAt: '2026-03-03T14:00:00.000Z',
+    })).rejects.toThrow(/currently on the load/)
+  })
+
+  it('logs the stop event a dispatcher types in, and never over the driver app', async () => {
+    const { loadId, shipmentId } = await trackedLoad()
+    await call('UPDATE_STOP', {
+      loadId,
+      expectedUpdatedAt: stamp(loadId),
+      op: 'SET_TIMES',
+      stopId: 'stp-pu',
+      patch: { arrivedAt: '2026-03-02T13:05:00.000Z', departedAt: '2026-03-02T15:00:00.000Z' },
+    })
+    expect(logged().map((r) => String(r.id)).sort()).toEqual([
+      `evt:${loadId}:stp-pu:ARRIVED`,
+      `evt:${loadId}:stp-pu:DEPARTED`,
+    ])
+    expect(logged().every((r) => r.source === 'MANUAL')).toBe(true)
+
+    // The projector got to the delivery first; the staff edit must not overwrite it.
+    const eventId = `evt:${loadId}:stp-de:ARRIVED`
+    table(TABLES.checkCall).set(eventId, {
+      id: eventId, loadId, shipmentId, stopId: 'stp-de',
+      at: '2026-03-03T11:00:00.000Z', type: 'ARRIVED', source: 'DRIVER_APP', createdBy: 'driver:drv-1',
+    })
+    await call('UPDATE_STOP', {
+      loadId,
+      expectedUpdatedAt: stamp(loadId),
+      op: 'SET_TIMES',
+      stopId: 'stp-de',
+      patch: { arrivedAt: '2026-03-03T11:30:00.000Z' },
+    })
+    expect(table(TABLES.checkCall).get(eventId)).toMatchObject({
+      source: 'DRIVER_APP',
+      at: '2026-03-03T11:00:00.000Z',
+    })
+    expect(logged()).toHaveLength(3)
+  })
+
+  it('opens the tracking log when the load is dispatched', async () => {
+    const { loadId } = await trackedLoad()
+    await call('DISPATCH_LOAD', {
+      loadId,
+      dispatchedAt: '2026-03-02T11:00:00.000Z',
+      nextCheckCallAt: '2026-03-02T15:00:00.000Z',
+      nextCheckCallNote: 'first call after the yard',
+    })
+    expect(logged()).toHaveLength(1)
+    expect(logged()[0]).toMatchObject({
+      type: 'DISPATCH',
+      source: 'SYSTEM',
+      at: '2026-03-02T11:00:00.000Z',
+      statusAfter: 'DISPATCHED',
+      nextCheckCallAt: '2026-03-02T15:00:00.000Z',
+    })
+    expect(table(TABLES.load).get(loadId)).toMatchObject({
+      status: 'DISPATCHED',
+      checkCallOpen: 'OPEN',
+    })
+  })
+
+  it('revokes the carrier ping link when the carrier comes off the load', async () => {
+    const { loadId, shipmentId, carrierId } = await trackedLoad()
+    table(TABLES.trackingLink).set('tok-1', {
+      id: 'tok-1',
+      kind: 'CARRIER_PING',
+      status: 'ACTIVE',
+      shipmentId,
+      loadId,
+      loadCarrierId: carrierId,
+      expiresAt: '2026-03-10T00:00:00.000Z',
+      createdBy: 'dispatch@bcatcorp.com',
+    })
+    table(TABLES.carrier).set(carrierId, {
+      ...table(TABLES.carrier).get(carrierId)!,
+      trackingLinkId: 'tok-1',
+      trackingStartedAt: '2026-03-01T00:00:00.000Z',
+    })
+
+    await call('REMOVE_LOAD_CARRIER', { loadCarrierId: carrierId, outcome: 'BOUNCED', reason: 'GAVE_BACK' })
+
+    expect(table(TABLES.trackingLink).get('tok-1')).toMatchObject({
+      status: 'REVOKED',
+      revokedBy: 'dispatch@bcatcorp.com',
+    })
+    expect(table(TABLES.trackingLink).get('tok-1')!.revokedAt).toBeTruthy()
+    const carrier = table(TABLES.carrier).get(carrierId)!
+    expect(carrier.trackingLinkId).toBeNull()
+    expect(carrier.trackingStoppedAt).toBeTruthy()
+  })
+
+  it('disarms the check-call reminder when the carrier comes off the load', async () => {
+    const { loadId, carrierId } = await trackedLoad()
+    await call('SET_NEXT_CHECK_CALL', {
+      loadId,
+      expectedUpdatedAt: stamp(loadId),
+      nextCheckCallAt: '2026-03-02T19:00:00.000Z',
+      note: 'call once he clears the DC',
+    })
+    table(TABLES.load).set(loadId, {
+      ...table(TABLES.load).get(loadId)!,
+      checkCallDueNotifiedAt: '2026-03-02T19:01:00.000Z',
+      checkCallOverdueNotifiedAt: '2026-03-02T19:16:00.000Z',
+    })
+
+    await call('REMOVE_LOAD_CARRIER', { loadCarrierId: carrierId, outcome: 'BOUNCED', reason: 'GAVE_BACK' })
+
+    const load = table(TABLES.load).get(loadId)!
+    expect(load.status).toBe('SOURCING')
+    expect('checkCallOpen' in load).toBe(false)
+    expect('nextCheckCallAt' in load).toBe(false)
+    expect('nextCheckCallNote' in load).toBe(false)
+    expect('checkCallDueNotifiedAt' in load).toBe(false)
+    expect('checkCallOverdueNotifiedAt' in load).toBe(false)
+    // Cleared through the REMOVE path; a stored NULL breaks the sparse GSI key.
+    const update = lastLoadUpdate()
+    expect(update.UpdateExpression).toMatch(/REMOVE\b[^]*#checkCallOpen/)
+    expect(JSON.stringify(update.ExpressionAttributeValues)).not.toContain('NULL')
   })
 })
 

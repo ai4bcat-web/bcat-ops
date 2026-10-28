@@ -84,9 +84,11 @@ describe('board search and filters', () => {
 
 describe('CSV export', () => {
   it('writes the visible column labels and quotes values containing a comma', () => {
-    const csv = toCsv([row('1', { customerName: 'Acme, Inc.', originCity: 'Chicago, IL' })], DEFAULT_COLUMN_KEYS)
+    // An explicit column list, so adding a column to the default view is not a CSV change.
+    const columns = ['number', 'status', 'customerName', 'originCity']
+    const csv = toCsv([row('1', { customerName: 'Acme, Inc.', originCity: 'Chicago, IL' })], columns)
     const [header, line] = csv.split('\n')
-    expect(header).toBe('Shipment,Status,Customer,Mode,Origin,Destination,Pickup,Delivery')
+    expect(header).toBe('Shipment,Status,Customer,Origin')
     expect(line).toContain('"Acme, Inc."')
     expect(line).toContain('"Chicago, IL"')
   })

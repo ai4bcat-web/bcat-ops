@@ -6,6 +6,7 @@ Markdown knowledge base for the in-app Help/Academy module and Ask assistant.
 
 - [Shipments, Orders, and Loads](shipments-orders-loads.md) — how a freight move is modelled as a Shipment, an Order, and its Loads, and how status is derived.
 - [Carriers and Booking](carriers-and-booking.md) — the carrier directory, the booking gates, quick pay, the rate confirmation, and bounce vs TONU.
+- [Tracking and Check Calls](tracking-and-check-calls.md) — the four tracking methods, logging check calls, due/overdue reminders, incidents and charges, the carrier ping link, and the public Customer Link.
 
 ## Article front-matter
 

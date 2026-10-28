@@ -26,6 +26,7 @@ import {
   restoreShipment, setShipmentStatus, tenderRespond,
 } from '@/lib/apiClient'
 import { SHIPMENT_STATUS_LABELS } from '@/lib/shipmentStatus'
+import { checkCallState } from '@/lib/checkCalls'
 import { effectiveCustomerStatus } from '@/lib/customerCredit'
 import { cn } from '@/lib/utils'
 import { ShipmentDrawer } from './components/ShipmentDrawer'
@@ -34,7 +35,8 @@ import { MODE_OPTIONS } from './orderDraft'
 import {
   BOARD_COLUMNS, BOARD_TABS, DEFAULT_COLUMN_KEYS, EMPTY_FILTERS, activeFilterCount, applyBoard,
   readSavedViews, removeView, tabCounts, toCsv, upsertView, visibleColumns, writeSavedViews,
-  type BoardFilters, type BoardTabKey, type SavedView, type ShipmentRow, type SortDir, type SortKey,
+  type BoardColumn, type BoardFilters, type BoardTabKey, type SavedView, type ShipmentRow, type SortDir,
+  type SortKey,
 } from './shipmentViews'
 import type { ArStatus, AssignmentType, CustomerRecord, ShipmentMode, TmsSettings } from '@/types/tms'
 
@@ -67,8 +69,16 @@ export function ShipmentsBoard() {
   const [saveViewOpen, setSaveViewOpen] = useState(false)
   const [newShipmentOpen, setNewShipmentOpen] = useState(false)
   const [openId, setOpenId] = useState<string | null>(null)
+  // The check-call column is toned against a clock held in state rather than one read
+  // during render: a DUE/OVERDUE tone only needs minute granularity, and a render-time
+  // `Date.now()` is impure. The lazy initialiser runs outside the render-purity analysis.
+  const [nowMs, setNowMs] = useState(() => Date.now())
 
   useEffect(() => { getTmsSettings().then(setSettings).catch(() => setSettings(null)) }, [])
+  useEffect(() => {
+    const t = setInterval(() => { setNowMs(Date.now()) }, 60_000)
+    return () => clearInterval(t)
+  }, [])
 
   const counts = useMemo(() => tabCounts(shipments), [shipments])
   const rows = useMemo(
@@ -232,9 +242,7 @@ export function ShipmentsBoard() {
               >
                 {columns.map((c) => (
                   <td key={c.key} className="px-2 py-2">
-                    {c.key === 'status'
-                      ? <Badge variant="outline" className="text-[10px]">{SHIPMENT_STATUS_LABELS[row.status]}</Badge>
-                      : c.value(row)}
+                    <BoardCell column={c} row={row} nowMs={nowMs} />
                   </td>
                 ))}
                 <td className="px-1">
@@ -284,6 +292,43 @@ export function ShipmentsBoard() {
       )}
     </div>
   )
+}
+
+/**
+ * One cell. Most columns are their own text, but status is a chip, the exception count is
+ * a badge, and the check-call clock is coloured by `checkCallState` — the same function
+ * the worklist and the notifier read, so one load is never amber here and red there.
+ */
+function BoardCell({ column, row, nowMs }: { column: BoardColumn; row: ShipmentRow; nowMs: number }) {
+  if (column.key === 'status') {
+    return <Badge variant="outline" className="text-[10px]">{SHIPMENT_STATUS_LABELS[row.status]}</Badge>
+  }
+  if (column.key === 'openIncidentCount') {
+    const open = row.openIncidentCount ?? 0
+    if (open === 0) return null
+    return (
+      <Badge variant="outline" className="border-destructive/40 text-[10px] text-destructive" data-testid="board-exceptions">
+        {open}
+      </Badge>
+    )
+  }
+  if (column.key === 'nextCheckCallAt') {
+    const state = checkCallState({ nextCheckCallAt: row.nextCheckCallAt }, nowMs)
+    return (
+      <span
+        data-testid="board-next-check-call"
+        data-state={state}
+        className={cn(
+          'tabular-nums',
+          state === 'OVERDUE' && 'font-medium text-destructive',
+          state === 'DUE' && 'font-medium text-amber-700',
+        )}
+      >
+        {column.value(row)}
+      </span>
+    )
+  }
+  return <>{column.value(row)}</>
 }
 
 /**
@@ -382,6 +427,35 @@ function FilterRail({ filters, customers, onChange }: {
           <option value="">All</option>
           {ASSIGNMENT_TYPES.map((t) => <option key={t} value={t}>{t.replace(/_/g, ' ').toLowerCase()}</option>)}
         </select>
+      </div>
+      <div className="col-span-2 flex flex-wrap items-center gap-4 sm:col-span-6">
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            aria-label="Filter check call due"
+            checked={filters.checkCallDue === true}
+            onChange={(e) => set('checkCallDue', e.target.checked ? true : null)}
+          />
+          Check call due
+        </label>
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            aria-label="Filter check call overdue"
+            checked={filters.checkCallOverdue === true}
+            onChange={(e) => set('checkCallOverdue', e.target.checked ? true : null)}
+          />
+          Overdue
+        </label>
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            aria-label="Filter open exceptions"
+            checked={filters.openExceptions === true}
+            onChange={(e) => set('openExceptions', e.target.checked ? true : null)}
+          />
+          Open exceptions
+        </label>
       </div>
     </div>
   )

@@ -26,6 +26,12 @@ export interface ShipmentListRow extends ShipmentRecord {
   arStatus: ArStatus | null
   assignmentType: AssignmentType | null
   loadStatus: LoadWorkflowStatus | null
+  /** Step D — the load's tracking clock, for the board's Last update / Next check call / Exceptions. */
+  lastUpdateAt: string | null
+  lastUpdatePlace: string | null
+  nextCheckCallAt: string | null
+  checkCallOpen: 'OPEN' | null
+  openIncidentCount: number | null
 }
 
 const DEFAULT_VIEW: ShipmentsView = { kind: 'all' }
@@ -83,10 +89,32 @@ export function useShipments(view: ShipmentsView = DEFAULT_VIEW) {
 
     const assignmentByShipment: Record<string, AssignmentType> = {}
     const statusByShipment: Record<string, LoadWorkflowStatus> = {}
+    // A multi-leg shipment is tracked as one line: the newest update across its legs, the
+    // soonest reminder, and every open exception added up.
+    const trackingByShipment: Record<string, {
+      lastUpdateAt: string | null
+      lastUpdatePlace: string | null
+      nextCheckCallAt: string | null
+      checkCallOpen: 'OPEN' | null
+      openIncidentCount: number
+    }> = {}
     for (const l of loads) {
       if (!l.shipmentId) continue
       if (l.assignmentType) assignmentByShipment[l.shipmentId] = l.assignmentType
       if (l.status) statusByShipment[l.shipmentId] = l.status
+      const t = trackingByShipment[l.shipmentId] ??= {
+        lastUpdateAt: null, lastUpdatePlace: null, nextCheckCallAt: null, checkCallOpen: null, openIncidentCount: 0,
+      }
+      const update = l.lastKnownAt ?? l.lastCheckCallAt ?? null
+      if (update && (!t.lastUpdateAt || update > t.lastUpdateAt)) {
+        t.lastUpdateAt = update
+        t.lastUpdatePlace = [l.lastKnownCity, l.lastKnownState].filter(Boolean).join(', ') || null
+      }
+      if (l.nextCheckCallAt && (!t.nextCheckCallAt || l.nextCheckCallAt < t.nextCheckCallAt)) {
+        t.nextCheckCallAt = l.nextCheckCallAt
+      }
+      if (l.checkCallOpen === 'OPEN') t.checkCallOpen = 'OPEN'
+      t.openIncidentCount += l.openIncidentCount ?? 0
     }
 
     return shipments.map((s) => ({
@@ -94,6 +122,11 @@ export function useShipments(view: ShipmentsView = DEFAULT_VIEW) {
       arStatus: arByShipment[s.id] ?? null,
       assignmentType: assignmentByShipment[s.id] ?? null,
       loadStatus: statusByShipment[s.id] ?? null,
+      lastUpdateAt: trackingByShipment[s.id]?.lastUpdateAt ?? null,
+      lastUpdatePlace: trackingByShipment[s.id]?.lastUpdatePlace ?? null,
+      nextCheckCallAt: trackingByShipment[s.id]?.nextCheckCallAt ?? null,
+      checkCallOpen: trackingByShipment[s.id]?.checkCallOpen ?? null,
+      openIncidentCount: trackingByShipment[s.id]?.openIncidentCount ?? null,
     }))
   }, [shipments, orders, loads])
 

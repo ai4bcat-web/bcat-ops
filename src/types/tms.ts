@@ -1,6 +1,6 @@
 // `Stop` lives in ./index, which imports Address and the step-B stop fields from
 // here. Type-only in both directions, so the cycle never reaches runtime.
-import type { Stop } from './index'
+import type { Stop, StopType } from './index'
 
 export interface Address {
   street?: string | null
@@ -332,6 +332,27 @@ export interface TmsSettings {
   /** How many days ahead an expiring insurance policy starts warning. Default 30. */
   insuranceWarnDays?: number | null
 
+  // Step D — tracking and check calls
+  /** Hours to the next check call when nobody picks a time. Default 4. */
+  checkCallDefaultIntervalHours?: number | null
+  /** How long a due check call has before it counts as overdue. Default 15. */
+  checkCallGraceMinutes?: number | null
+  checkCallNotifyChannel?: CheckCallNotifyChannel | null
+  /** Slack channel the due / overdue notices also post to. */
+  checkCallSlackChannelId?: string | null
+  /** How long a carrier ping link lives past the last delivery appointment. Default 72. */
+  trackingLinkExpiryHours?: number | null
+  /** How long a customer tracking link lives. Default 14. */
+  customerLinkExpiryDays?: number | null
+  /** Whether the customer page names the carrier. Default false. */
+  customerLinkShowsCarrier?: boolean | null
+  /** Whether the customer page shows the last known position. Default true. */
+  customerLinkShowsPosition?: boolean | null
+  /** Who the customer page says to call. */
+  trackingContact?: TrackingContact | null
+  /** Body of the carrier ping text. Must contain `{url}`. */
+  trackingSmsTemplate?: string | null
+
   createdAt?: string
   updatedAt?: string
 }
@@ -437,8 +458,12 @@ export type ShipmentMode =
 /** How the shipment came to exist. BACKFILL marks rows minted from legacy loads. */
 export type ShipmentSource = 'MANUAL' | 'TENDER' | 'DUPLICATE' | 'BACKFILL'
 
-/** Who moved a load's status last — the driver app and check calls write their own. */
-export type LoadStatusSource = 'USER' | 'DRIVER_APP' | 'CHECK_CALL' | 'BACKFILL'
+/**
+ * Who moved a load's status last — the driver app and check calls write their own.
+ * SYSTEM is load-tracking-projector reflecting a stop time that something other
+ * than a person or the driver app stamped (POD close, dispatch MMS auto-POD).
+ */
+export type LoadStatusSource = 'USER' | 'DRIVER_APP' | 'CHECK_CALL' | 'BACKFILL' | 'SYSTEM'
 
 export type AssignmentType = 'OWN_ASSET' | 'CARRIER' | 'NEED_TO_COVER'
 
@@ -572,6 +597,9 @@ export interface ShipmentRecord {
   /** Lower-cased number · customer · cities · reference values, for board search. */
   searchKey?: string | null
   source: ShipmentSource
+  // Step D — the customer tracking link, one stable token per shipment
+  customerLinkId?: string | null
+  customerLinkSentAt?: string | null
   createdBy: string
   updatedBy: string
   version?: number | null
@@ -685,6 +713,11 @@ export interface LoadCarrierRecord {
   bookingWarnings?: string[] | null
   dispatchedAt?: string | null
   dispatchNote?: string | null
+  // Step D — the carrier ping link
+  /** The ACTIVE CARRIER_PING TrackingLink, while one is out. */
+  trackingLinkId?: string | null
+  trackingStartedAt?: string | null
+  trackingStoppedAt?: string | null
   createdBy: string
   updatedBy: string
   createdAt: string
@@ -796,6 +829,21 @@ export interface ShipmentLoadFields {
   checkCallOpen?: 'OPEN' | null
   /** `YYYY-MM` of the first pickup, for the board's month GSI. */
   pickupMonth?: string | null
+  // Step D — tracking and check calls
+  lastCheckCallAt?: string | null
+  lastCheckCallType?: CheckCallType | null
+  lastKnownAt?: string | null
+  lastKnownCity?: string | null
+  lastKnownState?: string | null
+  lastKnownLat?: number | null
+  lastKnownLng?: number | null
+  lastKnownSource?: LastKnownSource | null
+  /** Unresolved INCIDENT check calls on this load. */
+  openIncidentCount?: number | null
+  deliveredAt?: string | null
+  /** When the notice for the CURRENT `nextCheckCallAt` went out; a reschedule re-arms both. */
+  checkCallDueNotifiedAt?: string | null
+  checkCallOverdueNotifiedAt?: string | null
 }
 
 /**
@@ -1046,4 +1094,239 @@ export interface CarrierBundle {
   paymentMethods: CarrierPaymentMethodRecord[]
   documents: CarrierDocumentRecord[]
   loadCarriers: LoadCarrierRecord[]
+}
+
+// ── Step D — tracking and check calls ───────────────────────────────────────
+//
+// One event log (LoadCheckCall) and one token table (TrackingLink) carry every
+// tracking fact: what somebody was told on the phone, what the driver app stamped,
+// what a tapped link pinged. The rules that read them are pure and live in
+// src/lib/checkCalls.ts, src/lib/trackingTimeline.ts and src/lib/trackingLink.ts.
+
+export type CheckCallType =
+  | 'DISPATCH'
+  | 'LOCATION_UPDATE'
+  | 'ARRIVED'
+  | 'DEPARTED'
+  | 'ETA_UPDATE'
+  | 'INCIDENT'
+  | 'NOTE'
+  | 'TRACKING_LINK_SENT'
+  | 'TRACKING_PING'
+
+/** The two events that stamp a stop clock, and so can move a load's status. */
+export type StopEventType = 'ARRIVED' | 'DEPARTED'
+
+export type CheckCallSource = 'MANUAL' | 'DRIVER_APP' | 'LINK' | 'SYSTEM'
+
+/** Where `Load.lastKnown*` came from. Motive fixes never become check calls. */
+export type LastKnownSource = 'MANUAL' | 'DRIVER_APP' | 'LINK' | 'MOTIVE' | 'SYSTEM'
+
+/** MVMNT's `LoadCheckCallIncidentType`, verbatim (spec §6.1). */
+export type IncidentType =
+  | 'ACCIDENT'
+  | 'ACTUAL_CLAIM'
+  | 'ATTEMPTED_DELIVERY'
+  | 'BREAKDOWN'
+  | 'DELAY'
+  | 'DELIVERY_NOT_COMPLETED'
+  | 'DETENTION'
+  | 'FRAUD'
+  | 'GENERAL_EXCEPTION'
+  | 'LAYOVER'
+  | 'LOAD_LOCK_ALERT'
+  | 'OVERAGE_SHORTAGE'
+  | 'PICKUP_EXCEPTION'
+  | 'POTENTIAL_CLAIM'
+  | 'REFUSED_BY_CONSIGNEE'
+  | 'REJECTION'
+  | 'SHIPMENT_CANCELLED'
+  | 'SHIPMENT_DAMAGED'
+  | 'SHIPMENT_DELAYED'
+  | 'SHIPMENT_RECONSIGNED'
+  | 'SHIPMENT_RETURNED_TO_SHIPPER'
+  | 'STORAGE_IN_TRANSIT'
+  | 'TONU'
+
+export type CheckCallNotifyChannel = 'IN_APP' | 'SLACK' | 'BOTH'
+
+/** Who the customer tracking page says to call: the order's rep, or a fixed desk. */
+export interface TrackingContact {
+  mode: 'CUSTOMER_REP' | 'FIXED'
+  name?: string | null
+  email?: string | null
+  phone?: string | null
+}
+
+/** What an incident charged, snapshotted on the check call that raised it. */
+export interface CheckCallChargeSnapshot {
+  side: ChargeSide
+  code: string
+  amountCents: number
+  chargeId?: string | null
+}
+
+/**
+ * One row of a load's tracking log. Stop events use the deterministic id
+ * `evt:<loadId>:<stopId>:<ARRIVED|DEPARTED>` so the staff action and the driver-app
+ * projector can never count the same stamp twice; everything else is a UUID.
+ */
+export interface LoadCheckCallRecord {
+  id: string
+  loadId: string
+  shipmentId: string
+  loadCarrierId?: string | null
+  stopId?: string | null
+  /** When it happened. `createdAt` is when it was logged. */
+  at: string
+  type: CheckCallType
+  source: CheckCallSource
+  incidentType?: IncidentType | null
+  /** Sparse GSI key: literally `'OPEN'` while the incident is unresolved. */
+  incidentOpen?: 'OPEN' | null
+  resolvedAt?: string | null
+  resolvedBy?: string | null
+  resolutionNote?: string | null
+  statusBefore?: LoadWorkflowStatus | null
+  /** Null when the call moved nothing. */
+  statusAfter?: LoadWorkflowStatus | null
+  city?: string | null
+  state?: string | null
+  lat?: number | null
+  lng?: number | null
+  accuracyM?: number | null
+  personName?: string | null
+  note?: string | null
+  /** DispatchMessage id, when the note was also texted to the driver. */
+  driverMessageId?: string | null
+  charges?: CheckCallChargeSnapshot[] | null
+  /** What this call scheduled. */
+  nextCheckCallAt?: string | null
+  nextCheckCallNote?: string | null
+  pickupEtaAt?: string | null
+  deliveryEtaAt?: string | null
+  /** Staff e-mail · `driver:<id>` · `link:<token8>` · `system`. */
+  createdBy: string
+  createdAt?: string
+  updatedAt?: string
+}
+
+export type TrackingLinkKind = 'CARRIER_PING' | 'CUSTOMER_VIEW'
+export type TrackingLinkStatus = 'ACTIVE' | 'REVOKED' | 'EXPIRED'
+export type TrackingLinkChannel = 'SMS' | 'EMAIL' | 'COPY'
+
+/**
+ * A tokenised public link. The `id` **is** the token (24 random bytes base64url), so
+ * the public Lambda reads it by primary key and no token index exists anywhere.
+ */
+export interface TrackingLinkRecord {
+  id: string
+  kind: TrackingLinkKind
+  shipmentId: string
+  loadId?: string | null
+  loadCarrierId?: string | null
+  status: TrackingLinkStatus
+  expiresAt: string
+  /** E.164 phone, or comma-joined e-mails. */
+  sentTo?: string | null
+  sentVia?: TrackingLinkChannel | null
+  sentAt?: string | null
+  smsMessageId?: string | null
+  contactName?: string | null
+  contactEmail?: string | null
+  contactPhone?: string | null
+  /** Settings snapshot, so later setting changes never widen a link already sent. */
+  showCarrier?: boolean | null
+  showPosition?: boolean | null
+  openCount?: number | null
+  lastOpenedAt?: string | null
+  /** Request budget, so a leaked link cannot be scraped forever. */
+  requestCount?: number | null
+  pingCount?: number | null
+  lastPingAt?: string | null
+  lastPingLat?: number | null
+  lastPingLng?: number | null
+  lastPingAccuracyM?: number | null
+  revokedAt?: string | null
+  revokedBy?: string | null
+  createdBy: string
+  createdAt?: string
+  updatedAt?: string
+}
+
+/** A reference number a tracking page is allowed to print. */
+export interface TrackingViewReference {
+  code: string
+  label: string | null
+  value: string
+}
+
+/** One stop as a tracking page renders it: the appointment and the clock, nothing else. */
+export interface TrackingViewStop {
+  id: string
+  type: StopType
+  sequence: number
+  name: string | null
+  city: string | null
+  state: string | null
+  appt: string | null
+  apptEnd: string | null
+  arrivedAt: string | null
+  departedAt: string | null
+  references: TrackingViewReference[]
+}
+
+export interface TrackingViewPosition {
+  lat: number
+  lng: number
+  at: string
+  description: string | null
+}
+
+export interface TrackingViewContact {
+  name: string | null
+  email: string | null
+  phone: string | null
+}
+
+/**
+ * What the Customer Link shows. Everything a customer must not see — rates, margin,
+ * the carrier, driver and dispatcher phones, internal references — is absent from the
+ * shape itself, so there is nothing to forget to strip.
+ */
+export interface CustomerTrackingView {
+  broker: { name: string }
+  number: string
+  status: ShipmentStatus
+  statusLabel: string
+  stops: TrackingViewStop[]
+  references: TrackingViewReference[]
+  eta: string | null
+  /** Rounded to three decimals (~100 m). Absent when the link hides position. */
+  position?: TrackingViewPosition
+  lastUpdate: { at: string; type: CheckCallType } | null
+  /** Name only, and only when the link was minted with `showCarrier`. */
+  carrier?: { name: string }
+  contact: TrackingViewContact | null
+  generatedAt: string
+}
+
+export interface TrackingViewPing {
+  at: string
+  lat: number | null
+  lng: number | null
+  accuracyM: number | null
+}
+
+/** What the driver's ping link shows. No customer, no money. */
+export interface CarrierTrackingView {
+  loadNumber: string
+  status: LoadWorkflowStatus
+  statusLabel: string
+  stops: TrackingViewStop[]
+  nextStop: TrackingViewStop | null
+  /** The pings this link itself sent, so the driver sees the tap landed. */
+  pings: TrackingViewPing[]
+  contactPhone: string | null
+  generatedAt: string
 }

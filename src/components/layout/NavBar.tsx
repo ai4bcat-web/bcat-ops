@@ -9,6 +9,7 @@ import { useReviewQueue } from '@/hooks/useReviewQueue'
 import { useTruckDocAlerts } from '@/hooks/useTruckDocAlerts'
 import { useDispatchUnread } from '@/hooks/useDispatch'
 import { ACTIVE_STATUSES } from '@/lib/intake'
+import { useCheckCallWorklist } from '@/hooks/useCheckCallWorklist'
 import { NAV_GROUPS } from '@/lib/navItems'
 
 const BADGE_TONE: Record<string, { bg: string; color: string }> = {
@@ -19,6 +20,7 @@ const BADGE_TONE: Record<string, { bg: string; color: string }> = {
   review:      { bg: 'var(--ds-blue-soft)',         color: '#0369a1' },
   truckDocs:   { bg: 'var(--ds-red-soft)',          color: '#dc2626' },
   dispatch:    { bg: 'var(--ds-blue-soft)',         color: '#0369a1' },
+  checkCalls:  { bg: 'var(--ds-amber-soft)',        color: '#b45309' },
 }
 
 function NavBadge({ count, toneKey }: { count: number; toneKey: string }) {
@@ -48,6 +50,8 @@ export function NavBar({
   const { items: intakeItems } = useIntakeItems()
   const { pendingCount: reviewCount } = useReviewQueue()
   const { outOfDateCount: truckDocAlerts } = useTruckDocAlerts()
+  // Check calls due or already overdue, by the same clock the notifier Lambda reads.
+  const { dueCount: checkCallsDue } = useCheckCallWorklist({ enabled: hasPageAccess('loads') })
   // Unread driver texts/voicemails; polled only for people who can open the page.
   const dispatchUnread = useDispatchUnread(hasPageAccess('dispatch'))
 
@@ -74,6 +78,7 @@ export function NavBar({
     if (key === 'review') return reviewCount || null
     if (key === 'truckDocs') return truckDocAlerts || null
     if (key === 'dispatch') return dispatchUnread || null
+    if (key === 'checkCalls') return checkCallsDue || null
     return null
   }
 

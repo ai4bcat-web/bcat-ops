@@ -7,6 +7,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { DivisionCard } from './DivisionCard'
 import { TmsSettingsCard } from './TmsSettingsCard'
 import { CarrierBookingSettingsCard } from './CarrierBookingSettingsCard'
+import { TrackingSettingsCard } from './TrackingSettingsCard'
 
 export function SettingsPage() {
   const { isAdmin } = useAuth()
@@ -47,6 +48,7 @@ export function SettingsPage() {
             <DivisionCard />
             <TmsSettingsCard />
             <CarrierBookingSettingsCard />
+            <TrackingSettingsCard />
           </>
         )}
 
