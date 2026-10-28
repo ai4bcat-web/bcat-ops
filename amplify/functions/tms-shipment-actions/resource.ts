@@ -15,6 +15,6 @@ import { defineFunction } from '@aws-amplify/backend'
 export const tmsShipmentActions = defineFunction({
   name: 'tms-shipment-actions',
   entry: './handler.ts',
-  resourceGroupName: 'tms',
+  resourceGroupName: 'data',
   timeoutSeconds: 60,
 })

@@ -17,6 +17,6 @@ import { defineFunction } from '@aws-amplify/backend'
 export const tmsTrackingActions = defineFunction({
   name: 'tms-tracking-actions',
   entry: './handler.ts',
-  resourceGroupName: 'tms',
+  resourceGroupName: 'data',
   timeoutSeconds: 30,
 })
