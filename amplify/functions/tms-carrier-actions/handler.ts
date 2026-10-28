@@ -415,6 +415,28 @@ function marshallRow(item: Row): Record<string, AttributeValue> {
   return marshall(item, { removeUndefinedValues: true })
 }
 
+/**
+ * Every GSI key attribute on the Carrier table. The handler builds a carrier row with
+ * every field present, so the optional ones arrive as `null` — and DynamoDB refuses a
+ * NULL (or an empty string) in an index key, failing the whole PutItem with
+ * "Type mismatch for Index Key dotNumber Expected: S Actual: NULL". Listing the keys
+ * rather than the two nullable field names keeps a later index addition safe.
+ */
+const CARRIER_INDEX_KEYS = ['normalizedName', 'mcNumber', 'dotNumber', 'status', 'name'] as const
+
+/**
+ * Marshall a carrier row with its empty index keys left off entirely. A carrier with
+ * no MC number is simply absent from `carriersByMcNumber`, which is what a sparse
+ * index is for; readers already treat a missing attribute and null alike.
+ */
+function marshallCarrierRow(item: Row): Record<string, AttributeValue> {
+  const row: Row = { ...item }
+  for (const key of CARRIER_INDEX_KEYS) {
+    if (row[key] == null || row[key] === '') delete row[key]
+  }
+  return marshallRow(row)
+}
+
 function putItem(tableName: string, item: Row, guardNew = true): TransactWriteItem {
   return {
     Put: {
@@ -441,22 +463,32 @@ function assertExpectedUpdatedAt(input: Row): string {
   return value
 }
 
-/** Build a SET update for every own key of `patch`, with a CAS guard on updatedAt. */
+/**
+ * Build an update for every own key of `patch`, with a CAS guard on updatedAt.
+ * A `null` REMOVEs the attribute for the same reason as `casUpdate`: DynamoDB refuses
+ * a NULL in a GSI key, and a removed attribute keeps the sparse indexes sparse.
+ */
 function updateItemTx(tableName: string, id: string, patch: Row, expectedUpdatedAt: string | null): TransactWriteItem {
   const names: Record<string, string> = {}
   const values: Record<string, AttributeValue> = {}
   const sets: string[] = []
+  const removes: string[] = []
   for (const [key, value] of Object.entries(patch)) {
     if (value === undefined) continue
     names[`#${key}`] = key
+    if (value === null) { removes.push(`#${key}`); continue }
     values[`:${key}`] = marshallRow({ [key]: value })[key]
     sets.push(`#${key} = :${key}`)
   }
+  const clauses = [
+    ...(sets.length ? [`SET ${sets.join(', ')}`] : []),
+    ...(removes.length ? [`REMOVE ${removes.join(', ')}`] : []),
+  ]
   return {
     Update: {
       TableName: tableName,
       Key: marshall({ id }),
-      UpdateExpression: `SET ${sets.join(', ')}`,
+      UpdateExpression: clauses.join(' '),
       ExpressionAttributeNames: names,
       ExpressionAttributeValues: values,
       ...(expectedUpdatedAt == null ? {} : { ConditionExpression: buildDynamoCasCondition(values, expectedUpdatedAt) }),
@@ -477,24 +509,38 @@ async function transact(items: TransactWriteItem[], label: string): Promise<void
   }
 }
 
-/** A single-row CAS update that hands the written row back. */
+/**
+ * A single-row CAS update that hands the written row back.
+ *
+ * A `null` in the patch REMOVEs the attribute rather than storing a NULL. DynamoDB
+ * refuses a NULL in a GSI key — clearing a carrier's DOT number by writing NULL fails
+ * the whole update with "Type mismatch for Index Key dotNumber" — and removing the
+ * attribute is also what keeps `carriersByMcNumber`/`carriersByDotNumber` sparse.
+ * Readers already treat a missing attribute and null alike.
+ */
 async function casUpdate(tableName: string, id: string, patch: Row, expectedUpdatedAt: string, label: string): Promise<Row> {
   const names: Record<string, string> = {}
   const values: Record<string, AttributeValue> = {}
   const sets: string[] = []
+  const removes: string[] = []
   for (const [key, value] of Object.entries(patch)) {
     if (value === undefined) continue
     names[`#${key}`] = key
+    if (value === null) { removes.push(`#${key}`); continue }
     values[`:${key}`] = marshallRow({ [key]: value })[key]
     sets.push(`#${key} = :${key}`)
   }
+  const clauses = [
+    ...(sets.length ? [`SET ${sets.join(', ')}`] : []),
+    ...(removes.length ? [`REMOVE ${removes.join(', ')}`] : []),
+  ]
   try {
     const result = await dynamo.send(
       new UpdateItemCommand({
         TableName: tableName,
         Key: marshall({ id }),
         ConditionExpression: buildDynamoCasCondition(values, expectedUpdatedAt),
-        UpdateExpression: `SET ${sets.join(', ')}`,
+        UpdateExpression: clauses.join(' '),
         ExpressionAttributeNames: names,
         ExpressionAttributeValues: values,
         ReturnValues: 'ALL_NEW',
@@ -704,7 +750,7 @@ async function upsertCarrier(input: Row, caller: Caller): Promise<Row> {
     await dynamo.send(
       new PutItemCommand({
         TableName: CARRIER_TABLE_NAME,
-        Item: marshallRow(item),
+        Item: marshallCarrierRow(item),
         ConditionExpression: 'attribute_not_exists(id)',
       }),
     )
