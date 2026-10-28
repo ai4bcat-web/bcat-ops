@@ -100,3 +100,26 @@ Scope note (added 2026-10-27): Ryne wants all of MVMNT, including every integrat
 Workflows page, all of My Brokerage and the Academy — not only the core TMS.
 
 Start with step A now.
+
+## Fable budget (added 2026-10-27)
+
+Claude Fable is the strongest model available and is subscription-metered on a 7-day window.
+Ryne's rule: spread what is left of the window evenly over the days until it resets, and
+**use the whole daily share every day on the pieces that benefit most from it**:
+
+1. the architecture plan at the start of each step (`plan` role);
+2. the review of each step's final diff (`reviewer`);
+3. the hard cores where a subtle bug costs money or data — credit-exposure math, financial
+   line items and totals, the status machines (shipment / load / AR / AP), backfill and
+   migration scripts that touch the copied data, Lambda routers that write several records
+   at once, the Ask-assistant retrieval logic;
+4. unblocking a stuck step (when two attempts on a cheaper model failed, escalate to `slow`).
+
+Do not spend Fable on mechanical edits, exploration, boilerplate UI or commit messages — that is
+what `scout`, `sonic`, `task` and the default model are for.
+
+The Claude Code check-in recomputes the daily share every half hour and flips the `plan`,
+`slow` and `reviewer` roles to Opus for the rest of the day once the share is spent, then back
+to Fable the next day. You do not need to track it yourself: `plan` always means "the best
+model Ryne can afford right now". If a step's plan is still waiting when the share runs out,
+go ahead on Opus rather than idling.
