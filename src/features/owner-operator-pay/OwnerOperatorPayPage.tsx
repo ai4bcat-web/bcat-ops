@@ -24,10 +24,10 @@ import { SendDriverInvite } from './SendDriverInvite'
 import { SettlementDocUpload } from './SettlementDocUpload'
 import { LoadDrawer } from '@/features/loads/LoadDrawer'
 import { PAY_HOLD_LABEL, type PayHoldReason } from '@/lib/payHold'
+import { PAY_EMAIL_CC } from '@/lib/payEmail'
 
 const money = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n)
 /** Every statement email copies the office, as the Amazon page does. */
-const PAY_EMAIL_CC = 'ryne@bcatcorp.com'
 
 const getInitials = (name: string) => name.trim().split(/\s+/).slice(0, 2).map((p) => p[0] ?? '').join('').toUpperCase() || '?'
 const pct = (n: number) => `${Math.round(n * 100)}%`

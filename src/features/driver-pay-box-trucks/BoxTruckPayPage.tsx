@@ -15,8 +15,8 @@ import { currentPeriodStart, shiftPeriod, periodEnd, periodLabelLong } from '@/l
 import type { Driver } from '@/types'
 import { TripModal, ImportModal, SettingsModal, CreditModal } from './BoxTruckPayForms'
 import { DeductionModal, EmailModal } from '../driver-pay/DriverPayForms'
+import { PAY_EMAIL_CC } from '@/lib/payEmail'
 
-const PAY_EMAIL_CC = 'ryne@bcatcorp.com'
 const money = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n)
 const getInitials = (name: string) => name.trim().split(/\s+/).slice(0, 2).map((p) => p[0] ?? '').join('').toUpperCase() || '?'
 const pct = (n: number) => `${Math.round(n * 100)}%`

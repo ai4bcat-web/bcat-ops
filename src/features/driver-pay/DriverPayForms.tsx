@@ -434,7 +434,7 @@ export function EmailModal({ driverName, defaultTo, defaultCc, defaultSubject, d
     <Modal title={`Email ${driverName}'s statement`} sub="Review the draft and the attached PDF, then send" onClose={onClose} width={720}>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
         <Field l="To" half><input style={input} value={to} onChange={(e) => setTo(e.target.value)} placeholder="driver@example.com" /></Field>
-        <Field l="Cc" half><input style={input} value={cc} onChange={(e) => setCc(e.target.value)} placeholder="ryne@bcatcorp.com" /></Field>
+        <Field l="Cc" half><input style={input} value={cc} onChange={(e) => setCc(e.target.value)} placeholder="ryne@bcatcorp.com, jenny@bcatcorp.com" /></Field>
         <Field l="Subject"><input style={input} value={subject} onChange={(e) => setSubject(e.target.value)} /></Field>
         <Field l="Message">
           <textarea value={body} onChange={(e) => setBody(e.target.value)} rows={5}

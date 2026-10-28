@@ -17,9 +17,9 @@ import { getColor } from '@/lib/driverColors'
 import type { Driver } from '@/types'
 import { sundayOf, shiftWeek, weekLabelLong } from './week'
 import { TripModal, ImportModal, MasterImportModal, DeductionModal, SettingsModal, EmailModal, CreditModal, WeeklyMileageRow } from './DriverPayForms'
+import { PAY_EMAIL_CC } from '@/lib/payEmail'
 
 // Owner is CC'd on every pay statement that goes out to a driver.
-const PAY_EMAIL_CC = 'ryne@bcatcorp.com'
 
 // "6/7" style short date for a YYYY-MM-DD (UTC-safe).
 function fmtShortDate(iso: string): string {
