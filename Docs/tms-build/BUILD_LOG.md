@@ -2,11 +2,16 @@
 
 One entry per unit of work (newest first). Decisions needed from Ryne go under **Decision needed**.
 
+## 2026-10-28 — Step A done; log update deployed; Step B starting
+
+- Step A log-only update commit `46d2943` pushed to `origin dev`. Amplify dev job `8` status `SUCCEED`.
+- Next: Step B — Shipment/Order/Load model and board, with backfill for existing loads.
+
 ## 2026-10-27 — Step A deployed successfully on dev
 
 - Commit `36858b9` pushed to `origin dev` (Customer v2 — status ladder, credit controls, contacts/billing/quoting defaults). Amplify dev job `7` for commit `36858b9acf023815a23ea1d229ab3391741cfe1a` status `SUCCEED`.
 - Required gates passed: `npm run typecheck`, `npm run lint` (3 pre-existing warnings), `npm run test` (3290 tests passed). Final Fable review blockers fixed before commit.
-- Verification: authenticated dev browser Customers board, profile tabs, org-default editor, status actions, and credit exposure verified against 98 copied customers.
+- Verification: authenticated dev browser Customers board, profile tabs, org-default editor, status actions, and credit exposure verified against 98 copied customers. Temporary dev identity removed.
 - **Decision needed:** harness has no registered `plan` agent. Main approved the same Fable model through `reviewer` with a planning-only assignment; continue that mapping per step. Customer hard-delete/merge remains a future decision; inactive records are retained.
 
 ## 2026-10-27 — Step A implementation in progress (not shipped)
