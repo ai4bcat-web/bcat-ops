@@ -5,6 +5,9 @@
  *
  * Own-fleet assignments land here too, but with none of the carrier paperwork: a driver
  * on our payroll has no rate con to sign and no quick-pay fee to deduct.
+ *
+ * The AP card sits under the quick-pay block, one per assignment this load has had, so
+ * what the carrier is owed is read beside what they were booked at.
  */
 import { useEffect, useState } from 'react'
 import { Building2, Send, Truck, UserMinus } from 'lucide-react'
@@ -16,6 +19,7 @@ import { getCarrierBundle, getTmsSettings } from '@/lib/apiClient'
 import { netPayable, quickPayFee, quickPayTiersOf, tierFor } from '@/lib/quickPay'
 import { formatCents } from '@/lib/tmsDirectory'
 import { formatDateTime } from '@/lib/date'
+import { ApCard } from './ApCard'
 import { DispatchDialog } from './DispatchDialog'
 import { RemoveCarrierDialog } from './StatusActions'
 import type { ShipmentActions } from '../useShipmentActions'
@@ -119,6 +123,8 @@ export function CarrierSection({ bundle, actions }: {
           </div>
         </div>
       )}
+
+      <ApCard bundle={bundle} onReload={actions.reload} />
 
       {!isOwnAsset && (
         <RateConPanel

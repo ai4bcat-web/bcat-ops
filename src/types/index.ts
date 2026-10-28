@@ -400,6 +400,8 @@ export type EntityType =
   | 'LoadFinancials'
   | 'Invoice'
   | 'ArPayment'
+  | 'CarrierBill'
+  | 'ApPayment'
 export type AuditAction = 'create' | 'update' | 'delete'
 
 export interface AuditLogEntry {

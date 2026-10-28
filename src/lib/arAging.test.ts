@@ -3,9 +3,12 @@ import type { InvoiceRecord, OrderRecord, ShipmentRecord } from '@/types/tms'
 import {
   AGING_BUCKETS,
   AGING_BUCKET_LABEL,
+  AP_AGING_CSV_HEADER,
   ageInvoices,
+  ageOpenItems,
   agingBucket,
   agingCsv,
+  apAgingCsv,
   avgDaysToInvoice,
   avgDaysToPay,
   daysLate,
@@ -136,6 +139,51 @@ describe('ageInvoices', () => {
     expect(summary.totalCents).toBe(0)
     expect(summary.byCustomer).toEqual([])
     expect(AGING_BUCKETS.every((b) => summary.byBucket[b] === 0)).toBe(true)
+  })
+})
+
+describe('ageOpenItems', () => {
+  const asOf = '2026-10-15'
+
+  it('buckets a ledger-neutral set of items exactly as ageInvoices buckets the same rows', () => {
+    const rows = [
+      invoice({ id: 'i1', dueAt: '2026-10-20', balanceCents: 100_000 }),
+      invoice({ id: 'i2', dueAt: '2026-10-01', balanceCents: 50_000, status: 'PARTIAL' }),
+      invoice({ id: 'i3', dueAt: '2026-08-01', balanceCents: 30_000 }),
+      invoice({ id: 'i4', customerId: 'c2', customerName: 'Rev, Inc', dueAt: '2026-06-01', balanceCents: 20_000 }),
+    ]
+    const fromInvoices = ageInvoices(rows, asOf)
+    const fromItems = ageOpenItems(
+      rows.map((r) => ({ partyId: r.customerId, partyName: r.customerName, dueAt: r.dueAt, balanceCents: r.balanceCents })),
+      asOf,
+    )
+
+    expect(fromItems.byBucket).toEqual(fromInvoices.byBucket)
+    expect(fromItems.totalCents).toBe(fromInvoices.totalCents)
+    expect(fromItems.lateCents).toBe(fromInvoices.lateCents)
+    expect(fromItems.byParty.map((p) => [p.partyId, p.partyName, p.totalCents, p.lateCount, p.oldestDays])).toEqual(
+      fromInvoices.byCustomer.map((c) => [c.customerId, c.customerName, c.totalCents, c.lateCount, c.oldestDays]),
+    )
+  })
+
+  it('counts an item due today as current, not late', () => {
+    const summary = ageOpenItems([{ partyId: 'car-1', partyName: 'Blue Line', dueAt: asOf, balanceCents: 75_000 }], asOf)
+    expect(summary.byBucket.CURRENT).toBe(75_000)
+    expect(summary.lateCents).toBe(0)
+    expect(summary.byParty[0]).toMatchObject({ lateCount: 0, oldestDays: 0 })
+  })
+
+  it('ages every item handed to it — which rows are still open is the caller\u2019s filter', () => {
+    const summary = ageOpenItems(
+      [
+        { partyId: 'car-1', dueAt: '2026-09-01', balanceCents: 10_000 },
+        { partyId: 'car-1', partyName: 'Blue Line', dueAt: '2026-10-20', balanceCents: 5_000 },
+      ],
+      asOf,
+    )
+    expect(summary.totalCents).toBe(15_000)
+    expect(summary.byParty).toHaveLength(1)
+    expect(summary.byParty[0].partyName).toBe('Blue Line')
   })
 })
 
@@ -273,5 +321,22 @@ describe('agingCsv', () => {
     ])
     expect(csv.split('\n')[1]).toContain('"Joe ""Big Joe"" Hauling"')
     expect(csv.split('\n')[1]).toContain('"-25.00"')
+  })
+})
+
+describe('apAgingCsv', () => {
+  it('heads the party column with the carrier and counts bills, not invoices', () => {
+    const { byParty } = ageOpenItems(
+      [
+        { partyId: 'car-1', partyName: 'Blue Line, Inc', dueAt: '2026-10-20', balanceCents: 125_050 },
+        { partyId: 'car-1', partyName: 'Blue Line, Inc', dueAt: '2026-08-01', balanceCents: 7 },
+      ],
+      '2026-10-15',
+    )
+    const lines = apAgingCsv(byParty).split('\n')
+    expect(lines[0]).toBe(AP_AGING_CSV_HEADER.map((h) => `"${h}"`).join(','))
+    expect(lines[0]).toContain('"Carrier"')
+    expect(lines[0]).toContain('"Late bills"')
+    expect(lines[1]).toBe('"Blue Line, Inc","1250.50","0.00","0.00","0.07","0.00","1250.57","1","75"')
   })
 })

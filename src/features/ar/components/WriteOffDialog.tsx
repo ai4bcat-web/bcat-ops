@@ -19,7 +19,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { graphqlErrorText, writeOffInvoice } from '@/lib/apiClient'
 import { formatCents } from '@/lib/invoiceBuild'
-import { writeOffPlan } from '@/lib/paymentApply'
+import { invoiceStatusAfter, writeOffPlan } from '@/lib/paymentApply'
 import { centsFromInput, inputFromCents } from './money'
 import type { InvoiceRecord } from '@/types/tms'
 
@@ -38,15 +38,15 @@ export function WriteOffDialog({ invoice, busy, onClose, onDone }: {
   const amountCents = centsFromInput(amount) ?? 0
   const plan = writeOffPlan({
     id: invoice.id,
-    customerId: invoice.customerId,
-    status: invoice.status,
+    partyId: invoice.customerId,
     totalCents: invoice.totalCents,
     paidCents: invoice.paidCents,
-    writtenOffCents: invoice.writtenOffCents,
+    offsetCents: invoice.writtenOffCents,
     balanceCents: invoice.balanceCents,
+    voided: invoice.status === 'VOID',
     number: invoice.number,
   }, amountCents)
-  const after = plan.invoices[0] ?? null
+  const after = plan.documents[0] ?? null
   const disabled = busy === true || posting
   const ready = plan.ok && reason.trim().length > 0
 
@@ -95,7 +95,7 @@ export function WriteOffDialog({ invoice, busy, onClose, onDone }: {
           <div className="flex items-end">
             <p className="text-xs text-muted-foreground">
               {after
-                ? `Leaves ${formatCents(after.balanceCents)} — ${after.status.toLowerCase()}`
+                ? `Leaves ${formatCents(after.balanceCents)} — ${invoiceStatusAfter(invoice.totalCents, after.paidCents, after.offsetCents).toLowerCase()}`
                 : 'Nothing to post yet'}
             </p>
           </div>

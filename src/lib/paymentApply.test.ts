@@ -6,21 +6,20 @@ import {
   suggestAllocation,
   writeOffPlan,
   type PlanCredit,
-  type PlanInvoice,
+  type PlanDocument,
 } from './paymentApply'
 
-function invoice(over: Partial<PlanInvoice> = {}): PlanInvoice {
+function invoice(over: Partial<PlanDocument> = {}): PlanDocument {
   const totalCents = over.totalCents ?? 100_000
   const paidCents = over.paidCents ?? 0
-  const writtenOffCents = over.writtenOffCents ?? 0
+  const offsetCents = over.offsetCents ?? 0
   return {
     id: 'INV-000001',
-    customerId: 'cus-1',
-    status: 'ISSUED',
+    partyId: 'cus-1',
     totalCents,
     paidCents,
-    writtenOffCents,
-    balanceCents: totalCents - paidCents - writtenOffCents,
+    offsetCents,
+    balanceCents: totalCents - paidCents - offsetCents,
     number: 'INV-000001',
     ...over,
   }
@@ -29,7 +28,7 @@ function invoice(over: Partial<PlanInvoice> = {}): PlanInvoice {
 function credit(over: Partial<PlanCredit> = {}): PlanCredit {
   return {
     id: 'cm-1',
-    customerId: 'cus-1',
+    partyId: 'cus-1',
     kind: 'CREDIT_MEMO',
     unappliedCents: 25_000,
     ...over,
@@ -53,27 +52,27 @@ describe('planPayment', () => {
   it('applies a payment in full and flips the invoice to PAID', () => {
     const plan = planPayment({
       kind: 'PAYMENT',
-      customerId: 'cus-1',
+      partyId: 'cus-1',
       amountCents: 100_000,
-      applications: [{ invoiceId: 'INV-000001', amountCents: 100_000 }],
+      applications: [{ documentId: 'INV-000001', amountCents: 100_000 }],
       creditApplications: [],
-      invoices: [invoice()],
+      documents: [invoice()],
       credits: [],
     })
     expect(plan.ok).toBe(true)
     expect(plan.appliedCents).toBe(100_000)
     expect(plan.unappliedCents).toBe(0)
-    expect(plan.invoices[0]).toMatchObject({ balanceCents: 0, status: 'PAID', becamePaid: true })
+    expect(plan.documents[0]).toMatchObject({ balanceCents: 0, settled: true, becamePaid: true })
   })
 
   it('refuses more than the invoice still owes, naming both figures', () => {
     const plan = planPayment({
       kind: 'PAYMENT',
-      customerId: 'cus-1',
+      partyId: 'cus-1',
       amountCents: 150_000,
-      applications: [{ invoiceId: 'INV-000001', amountCents: 150_000 }],
+      applications: [{ documentId: 'INV-000001', amountCents: 150_000 }],
       creditApplications: [],
-      invoices: [invoice()],
+      documents: [invoice()],
       credits: [],
     })
     expect(plan.ok).toBe(false)
@@ -83,11 +82,11 @@ describe('planPayment', () => {
   it('keeps an overpayment on the row as customer credit', () => {
     const plan = planPayment({
       kind: 'PAYMENT',
-      customerId: 'cus-1',
+      partyId: 'cus-1',
       amountCents: 120_000,
-      applications: [{ invoiceId: 'INV-000001', amountCents: 100_000 }],
+      applications: [{ documentId: 'INV-000001', amountCents: 100_000 }],
       creditApplications: [],
-      invoices: [invoice()],
+      documents: [invoice()],
       credits: [],
     })
     expect(plan.ok).toBe(true)
@@ -97,11 +96,11 @@ describe('planPayment', () => {
   it('refuses to spend more of a credit than is left on it', () => {
     const plan = planPayment({
       kind: 'PAYMENT',
-      customerId: 'cus-1',
+      partyId: 'cus-1',
       amountCents: 0,
-      applications: [{ invoiceId: 'INV-000001', amountCents: 40_000 }],
+      applications: [{ documentId: 'INV-000001', amountCents: 40_000 }],
       creditApplications: [{ paymentId: 'cm-1', amountCents: 40_000 }],
-      invoices: [invoice()],
+      documents: [invoice()],
       credits: [credit({ unappliedCents: 25_000 })],
     })
     expect(plan.ok).toBe(false)
@@ -111,12 +110,12 @@ describe('planPayment', () => {
   it('refuses another customer\u2019s credit and another customer\u2019s invoice', () => {
     const plan = planPayment({
       kind: 'PAYMENT',
-      customerId: 'cus-1',
+      partyId: 'cus-1',
       amountCents: 0,
-      applications: [{ invoiceId: 'INV-000001', amountCents: 10_000 }],
+      applications: [{ documentId: 'INV-000001', amountCents: 10_000 }],
       creditApplications: [{ paymentId: 'cm-1', amountCents: 10_000 }],
-      invoices: [invoice({ customerId: 'cus-2' })],
-      credits: [credit({ customerId: 'cus-2' })],
+      documents: [invoice({ partyId: 'cus-2' })],
+      credits: [credit({ partyId: 'cus-2' })],
     })
     expect(plan.ok).toBe(false)
     expect(plan.errors.filter((e) => /belongs to another customer/.test(e))).toHaveLength(2)
@@ -125,22 +124,22 @@ describe('planPayment', () => {
   it('refuses a void invoice and a settled one', () => {
     const voided = planPayment({
       kind: 'PAYMENT',
-      customerId: 'cus-1',
+      partyId: 'cus-1',
       amountCents: 10_000,
-      applications: [{ invoiceId: 'INV-000001', amountCents: 10_000 }],
+      applications: [{ documentId: 'INV-000001', amountCents: 10_000 }],
       creditApplications: [],
-      invoices: [invoice({ status: 'VOID' })],
+      documents: [invoice({ voided: true })],
       credits: [],
     })
     expect(voided.errors.join(' ')).toMatch(/void and takes no payment/)
 
     const settled = planPayment({
       kind: 'PAYMENT',
-      customerId: 'cus-1',
+      partyId: 'cus-1',
       amountCents: 10_000,
-      applications: [{ invoiceId: 'INV-000001', amountCents: 10_000 }],
+      applications: [{ documentId: 'INV-000001', amountCents: 10_000 }],
       creditApplications: [],
-      invoices: [invoice({ status: 'PAID', paidCents: 100_000 })],
+      documents: [invoice({ paidCents: 100_000 })],
       credits: [],
     })
     expect(settled.errors.join(' ')).toMatch(/already settled/)
@@ -149,28 +148,28 @@ describe('planPayment', () => {
   it('posts a zero-cash payment that spends a credit', () => {
     const plan = planPayment({
       kind: 'PAYMENT',
-      customerId: 'cus-1',
+      partyId: 'cus-1',
       amountCents: 0,
-      applications: [{ invoiceId: 'INV-000001', amountCents: 25_000 }],
+      applications: [{ documentId: 'INV-000001', amountCents: 25_000 }],
       creditApplications: [{ paymentId: 'cm-1', amountCents: 25_000 }],
-      invoices: [invoice()],
+      documents: [invoice()],
       credits: [credit()],
     })
     expect(plan.ok).toBe(true)
     expect(plan.fromCreditsCents).toBe(25_000)
     expect(plan.unappliedCents).toBe(0)
     expect(plan.credits[0].unappliedAfterCents).toBe(0)
-    expect(plan.invoices[0]).toMatchObject({ balanceCents: 75_000, status: 'PARTIAL' })
+    expect(plan.documents[0]).toMatchObject({ balanceCents: 75_000, settled: false })
   })
 
   it('never turns a credit back into a fresh credit', () => {
     const plan = planPayment({
       kind: 'PAYMENT',
-      customerId: 'cus-1',
+      partyId: 'cus-1',
       amountCents: 0,
-      applications: [{ invoiceId: 'INV-000001', amountCents: 10_000 }],
+      applications: [{ documentId: 'INV-000001', amountCents: 10_000 }],
       creditApplications: [{ paymentId: 'cm-1', amountCents: 25_000 }],
-      invoices: [invoice()],
+      documents: [invoice()],
       credits: [credit()],
     })
     expect(plan.ok).toBe(false)
@@ -180,14 +179,14 @@ describe('planPayment', () => {
   it('refuses the same invoice or the same credit listed twice', () => {
     const plan = planPayment({
       kind: 'PAYMENT',
-      customerId: 'cus-1',
+      partyId: 'cus-1',
       amountCents: 60_000,
       applications: [
-        { invoiceId: 'INV-000001', amountCents: 30_000 },
-        { invoiceId: 'INV-000001', amountCents: 30_000 },
+        { documentId: 'INV-000001', amountCents: 30_000 },
+        { documentId: 'INV-000001', amountCents: 30_000 },
       ],
       creditApplications: [],
-      invoices: [invoice()],
+      documents: [invoice()],
       credits: [],
     })
     expect(plan.ok).toBe(false)
@@ -197,11 +196,11 @@ describe('planPayment', () => {
   it('refuses fractional cents', () => {
     const plan = planPayment({
       kind: 'PAYMENT',
-      customerId: 'cus-1',
+      partyId: 'cus-1',
       amountCents: 10_000.5,
       applications: [],
       creditApplications: [],
-      invoices: [],
+      documents: [],
       credits: [],
     })
     expect(plan.ok).toBe(false)
@@ -211,11 +210,11 @@ describe('planPayment', () => {
   it('issues a credit memo unapplied and refuses one that tries to apply itself', () => {
     const clean = planPayment({
       kind: 'CREDIT_MEMO',
-      customerId: 'cus-1',
+      partyId: 'cus-1',
       amountCents: 25_000,
       applications: [],
       creditApplications: [],
-      invoices: [],
+      documents: [],
       credits: [],
     })
     expect(clean.ok).toBe(true)
@@ -223,15 +222,69 @@ describe('planPayment', () => {
 
     const applied = planPayment({
       kind: 'CREDIT_MEMO',
-      customerId: 'cus-1',
+      partyId: 'cus-1',
       amountCents: 25_000,
-      applications: [{ invoiceId: 'INV-000001', amountCents: 25_000 }],
+      applications: [{ documentId: 'INV-000001', amountCents: 25_000 }],
       creditApplications: [],
-      invoices: [invoice()],
+      documents: [invoice()],
       credits: [],
     })
     expect(applied.ok).toBe(false)
     expect(applied.errors.join(' ')).toMatch(/issued unapplied/)
+  })
+
+  it('refuses in the carrier vocabulary when AP plans a bill', () => {
+    const ap = planPayment({
+      kind: 'PAYMENT',
+      partyId: 'car-1',
+      amountCents: 10_000,
+      applications: [{ documentId: 'cb:x:1', amountCents: 10_000 }],
+      creditApplications: [{ paymentId: 'apcm-1', amountCents: 10_000 }],
+      documents: [invoice({ id: 'cb:x:1', number: null, partyId: 'car-1', paidCents: 100_000 })],
+      credits: [credit({ id: 'apcm-1', partyId: 'car-2' })],
+      vocabulary: { party: 'carrier', document: 'bill' },
+    })
+    expect(ap.errors).toContain('Bill cb:x:1 is already settled')
+    expect(ap.errors).toContain('Credit apcm-1 belongs to another carrier')
+
+    const ar = planPayment({
+      kind: 'PAYMENT',
+      partyId: 'cus-1',
+      amountCents: 10_000,
+      applications: [{ documentId: 'INV-000001', amountCents: 10_000 }],
+      creditApplications: [{ paymentId: 'cm-1', amountCents: 10_000 }],
+      documents: [invoice({ paidCents: 100_000 })],
+      credits: [credit({ partyId: 'cus-2' })],
+    })
+    expect(ar.errors).toContain('Invoice INV-000001 is already settled')
+    expect(ar.errors).toContain('Credit cm-1 belongs to another customer')
+  })
+
+  it('calls an invoice newly paid only where the balance reached zero here', () => {
+    const partial = planPayment({
+      kind: 'PAYMENT',
+      partyId: 'cus-1',
+      amountCents: 40_000,
+      applications: [{ documentId: 'INV-000001', amountCents: 40_000 }],
+      creditApplications: [],
+      documents: [invoice()],
+      credits: [],
+    })
+    expect(partial.documents[0]).toMatchObject({ settled: false, becamePaid: false })
+
+    // Settled before this row arrived: refused rather than planned, so the order is
+    // never moved to PAID a second time by a payment that put nothing on it.
+    const already = planPayment({
+      kind: 'PAYMENT',
+      partyId: 'cus-1',
+      amountCents: 10_000,
+      applications: [{ documentId: 'INV-000001', amountCents: 10_000 }],
+      creditApplications: [],
+      documents: [invoice({ paidCents: 100_000 })],
+      credits: [],
+    })
+    expect(already.ok).toBe(false)
+    expect(already.documents).toEqual([])
   })
 })
 
@@ -239,11 +292,11 @@ describe('writeOffPlan', () => {
   it('settles the rest of an invoice without touching paidCents', () => {
     const plan = writeOffPlan(invoice({ paidCents: 95_000 }), 5_000)
     expect(plan.ok).toBe(true)
-    expect(plan.invoices[0]).toMatchObject({
+    expect(plan.documents[0]).toMatchObject({
       paidCents: 95_000,
-      writtenOffCents: 5_000,
+      offsetCents: 5_000,
       balanceCents: 0,
-      status: 'PAID',
+      settled: true,
       becamePaid: true,
     })
   })
@@ -258,26 +311,26 @@ describe('writeOffPlan', () => {
 describe('reversalPlan', () => {
   const posted = {
     id: 'pay-1',
-    customerId: 'cus-1',
+    partyId: 'cus-1',
     kind: 'PAYMENT' as const,
     amountCents: 100_000,
     appliedCents: 100_000,
     unappliedCents: 0,
-    applications: [{ invoiceId: 'INV-000001', amountCents: 100_000 }],
-    creditApplications: [],
+    applications: [{ documentId: 'INV-000001', amountCents: 100_000 }],
+    creditApplications: [] as { paymentId: string; amountCents: number }[],
     reversedByPaymentId: null,
   }
 
   it('restores the balance and takes the invoice back off PAID', () => {
-    const plan = reversalPlan(posted, [invoice({ status: 'PAID', paidCents: 100_000 })], [])
+    const plan = reversalPlan(posted, [invoice({ paidCents: 100_000 })], [])
     expect(plan.ok).toBe(true)
-    expect(plan.invoices[0]).toMatchObject({ paidCents: 0, balanceCents: 100_000, status: 'ISSUED' })
+    expect(plan.documents[0]).toMatchObject({ paidCents: 0, balanceCents: 100_000, settled: false })
   })
 
   it('gives a spent credit back to the row it came from', () => {
     const plan = reversalPlan(
       { ...posted, amountCents: 75_000, creditApplications: [{ paymentId: 'cm-1', amountCents: 25_000 }] },
-      [invoice({ status: 'PAID', paidCents: 100_000 })],
+      [invoice({ paidCents: 100_000 })],
       [credit({ unappliedCents: 0 })],
     )
     expect(plan.ok).toBe(true)
@@ -287,7 +340,7 @@ describe('reversalPlan', () => {
   it('refuses once the unapplied remainder has been spent elsewhere', () => {
     const plan = reversalPlan(
       { ...posted, amountCents: 120_000, appliedCents: 100_000, unappliedCents: 5_000 },
-      [invoice({ status: 'PAID', paidCents: 100_000 })],
+      [invoice({ paidCents: 100_000 })],
       [],
     )
     expect(plan.ok).toBe(false)
@@ -314,13 +367,13 @@ describe('suggestAllocation', () => {
   const due = { 'INV-1': '2026-03-01', 'INV-2': '2026-01-15' }
 
   it('takes an exact balance match ahead of the oldest invoice', () => {
-    expect(suggestAllocation(50_000, [a, b], due)).toEqual([{ invoiceId: 'INV-1', amountCents: 50_000 }])
+    expect(suggestAllocation(50_000, [a, b], due)).toEqual([{ documentId: 'INV-1', amountCents: 50_000 }])
   })
 
   it('otherwise fills oldest-due first and stops when the money runs out', () => {
     expect(suggestAllocation(40_000, [a, b], due)).toEqual([
-      { invoiceId: 'INV-2', amountCents: 30_000 },
-      { invoiceId: 'INV-1', amountCents: 10_000 },
+      { documentId: 'INV-2', amountCents: 30_000 },
+      { documentId: 'INV-1', amountCents: 10_000 },
     ])
   })
 

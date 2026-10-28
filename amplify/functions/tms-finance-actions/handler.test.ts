@@ -45,6 +45,11 @@ const TABLES = {
   factoring: 'FactoringItem-test',
   document: 'ShipmentDocument-test',
   notice: 'ShipmentNotice-test',
+  carrierBill: 'CarrierBill-test',
+  apPayment: 'ApPayment-test',
+  carrier: 'Carrier-test',
+  carrierMethod: 'CarrierPaymentMethod-test',
+  carrierContact: 'CarrierContact-test',
 }
 
 const store = vi.hoisted(() => {
@@ -63,6 +68,11 @@ const store = vi.hoisted(() => {
   process.env.FACTORING_ITEM_TABLE_NAME = 'FactoringItem-test'
   process.env.SHIPMENT_DOCUMENT_TABLE_NAME = 'ShipmentDocument-test'
   process.env.SHIPMENT_NOTICE_TABLE_NAME = 'ShipmentNotice-test'
+  process.env.CARRIER_BILL_TABLE_NAME = 'CarrierBill-test'
+  process.env.AP_PAYMENT_TABLE_NAME = 'ApPayment-test'
+  process.env.CARRIER_TABLE_NAME = 'Carrier-test'
+  process.env.CARRIER_PAYMENT_METHOD_TABLE_NAME = 'CarrierPaymentMethod-test'
+  process.env.CARRIER_CONTACT_TABLE_NAME = 'CarrierContact-test'
   process.env.BUCKET_NAME = 'bcat-test-bucket'
   process.env.FROM_ADDRESS = 'ai4bcat@gmail.com'
   return new Map<string, Map<string, Record<string, unknown>>>()
@@ -1171,5 +1181,520 @@ describe('review regressions', () => {
     const raw = sesSend.mock.calls[0][0] as { input: { Content: { Raw: { Data: Uint8Array } } } }
     const mime = new TextDecoder().decode(raw.input.Content.Raw.Data)
     expect(mime).not.toContain('POD.pdf')
+  })
+})
+
+// ── AP: carrier bills & payments (Step G) ───────────────────────────────────
+
+const LOAD_CARRIER_ID = 'lc-1'
+const CARRIER_ID = 'car-1'
+const AP_USER = {
+  sub: 'sub-ap',
+  username: 'ap',
+  claims: { email: 'ap@bcatcorp.com', 'cognito:groups': ['page-carrierPay'] },
+}
+
+/** One brokered assignment, delivered, with its CARRIER line and a payee method. */
+function seedAssignment(over: { loadCarrier?: Row; carrier?: Row; method?: Row; settings?: Row } = {}): void {
+  if (over.settings) {
+    const settings = table(TABLES.settings).get('default') ?? {}
+    table(TABLES.settings).set('default', { ...settings, ...over.settings })
+  }
+  table(TABLES.load).set(LOAD_ID, { ...(table(TABLES.load).get(LOAD_ID) ?? {}), status: 'DELIVERED' })
+  table(TABLES.carrier).set(CARRIER_ID, {
+    id: CARRIER_ID,
+    name: 'Wheeler Trucking',
+    mcNumber: '998877',
+    status: 'ACTIVE',
+    paymentTermsDays: 21,
+    email: 'ap@wheeler.test',
+    ...over.carrier,
+  })
+  table(TABLES.carrierMethod).set('cpm-1', {
+    id: 'cpm-1',
+    carrierId: CARRIER_ID,
+    method: 'ACH',
+    recipientType: 'CARRIER',
+    status: 'ACTIVE',
+    isPreferred: true,
+    accountLast4: '4321',
+    bankDetailsKey: 'carrier-docs/car-1/private/ach.pdf',
+    payeeEmail: 'remit@wheeler.test',
+    ...over.method,
+  })
+  table(TABLES.loadCarrier).set(LOAD_CARRIER_ID, {
+    id: LOAD_CARRIER_ID,
+    loadId: LOAD_ID,
+    shipmentId: SHIPMENT_ID,
+    kind: 'CARRIER',
+    status: 'ACTIVE',
+    carrierId: CARRIER_ID,
+    carrierName: 'Wheeler Trucking',
+    carrierMc: '998877',
+    apStatus: 'AWAITING_INVOICE',
+    // Every booking path writes this as NULL, not absent — the condition that stops a
+    // second bill has to cope with that, so the fixture reproduces it.
+    invoiceId: null,
+    apOpen: 'OPEN',
+    rateConStatus: 'SIGNED',
+    costCents: 180_000,
+    createdBy: 'a@b.c',
+    updatedBy: 'a@b.c',
+    ...over.loadCarrier,
+  })
+  // The CARRIER charge seeded by `seed()` belongs to this assignment.
+  const charge = table(TABLES.charge).get('chg-2') ?? {}
+  table(TABLES.charge).set('chg-2', { ...charge, loadCarrierId: LOAD_CARRIER_ID })
+  // The paperwork AP wants before it pays: POD and the carrier's invoice.
+  for (const [id, type] of [['doc-pod', 'POD'], ['doc-inv', 'CARRIER_INVOICE']]) {
+    table(TABLES.document).set(id, {
+      id,
+      shipmentId: SHIPMENT_ID,
+      loadId: LOAD_ID,
+      loadCarrierId: LOAD_CARRIER_ID,
+      type,
+      name: `${type}.pdf`,
+      status: 'ACTIVE',
+      reviewStatus: 'ACCEPTED',
+      scope: 'CARRIER',
+      audience: 'ALL',
+      uploadedAt: '2026-10-21T10:00:00.000Z',
+    })
+  }
+}
+
+async function recordBill(input: Row = {}, identity: unknown = ADMIN): Promise<Row> {
+  const result = (await call('RECORD_BILL', { loadCarrierId: LOAD_CARRIER_ID, ...input }, identity)) as { bill: Row }
+  return result.bill
+}
+
+describe('RECORD_BILL', () => {
+  it('writes the bill, the rung and the charge freeze in one transaction', async () => {
+    seedAssignment()
+    const bill = await recordBill({ billNumber: 'W-5512' })
+
+    expect(bill.id).toBe(`cb:${LOAD_CARRIER_ID}:1`)
+    expect(bill.status).toBe('IN_REVIEW')
+    expect(bill.grossCents).toBe(180_000)
+    expect(bill.netCents).toBe(180_000)
+    expect(bill.balanceCents).toBe(180_000)
+
+    const assignment = table(TABLES.loadCarrier).get(LOAD_CARRIER_ID) as Row
+    expect(assignment.apStatus).toBe('IN_REVIEW')
+    expect(assignment.invoiceId).toBe(bill.id)
+    expect(assignment.chargesFinalizedAt).toBeTruthy()
+    expect(assignment.apBalanceCents).toBe(180_000)
+  })
+
+  it('refuses a second bill on an assignment that already has one', async () => {
+    seedAssignment()
+    await recordBill()
+    await expect(recordBill()).rejects.toThrow(/already/i)
+    expect(table(TABLES.carrierBill).size).toBe(1)
+  })
+
+  it('refuses an own-fleet leg and says where it is paid instead', async () => {
+    seedAssignment({ loadCarrier: { kind: 'OWN_ASSET', carrierId: null } })
+    await expect(recordBill()).rejects.toThrow(/settlement/i)
+    expect(table(TABLES.carrierBill).size).toBe(0)
+  })
+
+  it('takes the quick-pay fee once, and the quick-pay days become the terms', async () => {
+    seedAssignment({
+      loadCarrier: { quickPay: true, quickPayDays: 2, quickPayFeeBps: 300, quickPayFeeCents: 5_400 },
+    })
+    const bill = await recordBill({ billDate: '2026-10-22' })
+    expect(bill.grossCents).toBe(180_000)
+    expect(bill.quickPayFeeCents).toBe(5_400)
+    expect(bill.netCents).toBe(174_600)
+    expect(bill.termsDays).toBe(2)
+    expect(bill.dueAt).toBe('2026-10-24')
+  })
+
+  it('pays a factored carrier to the factor, with no quick-pay fee', async () => {
+    seedAssignment({
+      loadCarrier: { quickPay: true, quickPayDays: 2, quickPayFeeCents: 5_400 },
+      method: { recipientType: 'FACTOR', factorName: 'Apex Capital' },
+    })
+    const bill = await recordBill()
+    expect(bill.payeeKind).toBe('FACTOR')
+    expect(bill.quickPayFeeCents).toBe(0)
+    expect(bill.netCents).toBe(180_000)
+    expect((bill.remitTo as Row).name).toBe('Apex Capital')
+    // The account itself stays in the carrier directory, behind S3.
+    expect(JSON.stringify(bill.remitTo)).not.toContain('bankDetailsKey')
+  })
+
+  it('records and approves in one press when the gate is clear', async () => {
+    seedAssignment()
+    const bill = await recordBill({ approve: true })
+    expect(bill.status).toBe('TO_BE_PAID')
+    expect(bill.approvedBy).toBe('admin@bcatcorp.com')
+    expect((table(TABLES.loadCarrier).get(LOAD_CARRIER_ID) as Row).apStatus).toBe('TO_BE_PAID')
+  })
+
+  it('refuses to approve on the way in when the paperwork is missing', async () => {
+    seedAssignment()
+    table(TABLES.document).delete('doc-pod')
+    await expect(recordBill({ approve: true })).rejects.toThrow(/paperwork is missing/i)
+    // Nothing is written: the bill and the approval are one transaction.
+    expect(table(TABLES.carrierBill).size).toBe(0)
+    expect((table(TABLES.loadCarrier).get(LOAD_CARRIER_ID) as Row).apStatus).toBe('AWAITING_INVOICE')
+  })
+})
+
+describe('APPROVE_BILL', () => {
+  it('refuses a bill whose amount disagrees with its lines', async () => {
+    seedAssignment()
+    const bill = await recordBill({ billedCents: 185_000 })
+    expect(bill.varianceCents).toBe(5_000)
+    await expect(call('APPROVE_BILL', { billId: bill.id })).rejects.toThrow(/\$1,850\.00|variance|differs/i)
+  })
+
+  it('blocks an unsigned rate con for a rep and lets an admin acknowledge it', async () => {
+    seedAssignment({ loadCarrier: { rateConStatus: 'SENT' } })
+    const bill = await recordBill({}, AP_USER)
+    await expect(call('APPROVE_BILL', { billId: bill.id }, AP_USER)).rejects.toThrow(/rate con|Forbidden/i)
+
+    const approved = (await call('APPROVE_BILL', {
+      billId: bill.id,
+      acknowledgeWarnings: ['RATE_CON_UNSIGNED'],
+    })) as { bill: Row }
+    expect(approved.bill.status).toBe('TO_BE_PAID')
+    expect(approved.bill.approvalWarnings).toContain('RATE_CON_UNSIGNED')
+  })
+
+  it('records who overrode the paperwork gate and why', async () => {
+    seedAssignment()
+    table(TABLES.document).delete('doc-pod')
+    const bill = await recordBill()
+    const approved = (await call('APPROVE_BILL', {
+      billId: bill.id,
+      docsOverrideNote: 'POD came by fax; filed in the carrier packet',
+    })) as { bill: Row }
+    expect(approved.bill.status).toBe('TO_BE_PAID')
+    expect(approved.bill.docsOverrideBy).toBe('admin@bcatcorp.com')
+    expect(approved.bill.docsOverrideNote).toContain('fax')
+  })
+})
+
+describe('RECORD_AP_PAYMENT', () => {
+  async function approvedBill(over: Row = {}): Promise<Row> {
+    seedAssignment()
+    return recordBill({ approve: true, ...over })
+  }
+
+  it('settles the bill and the assignment only when the balance reaches zero', async () => {
+    const bill = await approvedBill()
+    const partial = (await call('RECORD_AP_PAYMENT', {
+      carrierId: CARRIER_ID,
+      paidAt: '2026-10-25',
+      method: 'ACH',
+      amountCents: 80_000,
+      applications: [{ billId: bill.id, amountCents: 80_000 }],
+    })) as { bills: Row[] }
+    expect(partial.bills[0].status).toBe('PARTIAL')
+    expect(partial.bills[0].balanceCents).toBe(100_000)
+    expect((table(TABLES.loadCarrier).get(LOAD_CARRIER_ID) as Row).apStatus).toBe('TO_BE_PAID')
+
+    const rest = (await call('RECORD_AP_PAYMENT', {
+      carrierId: CARRIER_ID,
+      paidAt: '2026-10-26',
+      method: 'ACH',
+      amountCents: 100_000,
+      applications: [{ billId: bill.id, amountCents: 100_000 }],
+    })) as { bills: Row[] }
+    expect(rest.bills[0].status).toBe('PAID')
+    expect(rest.bills[0].balanceCents).toBe(0)
+    expect(rest.bills[0].apOpen).toBeUndefined()
+
+    const assignment = table(TABLES.loadCarrier).get(LOAD_CARRIER_ID) as Row
+    expect(assignment.apStatus).toBe('PAID')
+    expect(assignment.apOpen).toBeUndefined()
+    expect(assignment.apPaidAt).toBeTruthy()
+  })
+
+  it('refuses cash it cannot allocate', async () => {
+    const bill = await approvedBill()
+    await expect(
+      call('RECORD_AP_PAYMENT', {
+        carrierId: CARRIER_ID,
+        paidAt: '2026-10-25',
+        method: 'ACH',
+        amountCents: 200_000,
+        applications: [{ billId: bill.id, amountCents: 180_000 }],
+      }),
+    ).rejects.toThrow(/allocated in full/i)
+    expect(table(TABLES.apPayment).size).toBe(0)
+  })
+
+  it('refuses to pay a bill that has not been approved', async () => {
+    seedAssignment()
+    const bill = await recordBill()
+    await expect(
+      call('RECORD_AP_PAYMENT', {
+        carrierId: CARRIER_ID,
+        paidAt: '2026-10-25',
+        method: 'ACH',
+        amountCents: 180_000,
+        applications: [{ billId: bill.id, amountCents: 180_000 }],
+      }),
+    ).rejects.toThrow(/approved/i)
+  })
+
+  it('pays part from a credit and records which part that was', async () => {
+    const bill = await approvedBill()
+    const credit = (await call('CREATE_AP_CREDIT', {
+      carrierId: CARRIER_ID,
+      memoDate: '2026-10-24',
+      amountCents: 30_000,
+      reason: 'Cargo claim withheld',
+    })) as { payment: Row }
+
+    const paid = (await call('RECORD_AP_PAYMENT', {
+      carrierId: CARRIER_ID,
+      paidAt: '2026-10-25',
+      method: 'ACH',
+      amountCents: 150_000,
+      applications: [{ billId: bill.id, amountCents: 180_000 }],
+      creditApplications: [{ paymentId: credit.payment.id, amountCents: 30_000 }],
+    })) as { payment: Row; bills: Row[] }
+
+    expect(paid.bills[0].status).toBe('PAID')
+    expect(paid.bills[0].paidCents).toBe(150_000)
+    expect(paid.bills[0].creditedCents).toBe(30_000)
+    expect((table(TABLES.apPayment).get(String(credit.payment.id)) as Row).unappliedCents).toBe(0)
+  })
+
+  it('reverses a credit-funded payment back to both columns', async () => {
+    const bill = await approvedBill()
+    const credit = (await call('CREATE_AP_CREDIT', {
+      carrierId: CARRIER_ID,
+      memoDate: '2026-10-24',
+      amountCents: 30_000,
+      reason: 'Cargo claim withheld',
+    })) as { payment: Row }
+    const paid = (await call('RECORD_AP_PAYMENT', {
+      carrierId: CARRIER_ID,
+      paidAt: '2026-10-25',
+      method: 'ACH',
+      amountCents: 150_000,
+      applications: [{ billId: bill.id, amountCents: 180_000 }],
+      creditApplications: [{ paymentId: credit.payment.id, amountCents: 30_000 }],
+    })) as { payment: Row }
+
+    await call('REVERSE_AP_PAYMENT', { paymentId: paid.payment.id, reason: 'Paid the wrong carrier' })
+
+    const after = table(TABLES.carrierBill).get(String(bill.id)) as Row
+    expect(after.paidCents).toBe(0)
+    expect(after.creditedCents).toBe(0)
+    expect(after.balanceCents).toBe(180_000)
+    expect(after.status).toBe('TO_BE_PAID')
+    // The claim is ours to spend again.
+    expect((table(TABLES.apPayment).get(String(credit.payment.id)) as Row).unappliedCents).toBe(30_000)
+  })
+
+  it('refuses a payment against a bill somebody pulled back to review', async () => {
+    const bill = await approvedBill()
+    const original = send.getMockImplementation()
+    let armed = true
+    send.mockImplementation((cmd: MockCommand) => {
+      if (armed && cmd.__type === 'Transact') {
+        armed = false
+        const row = table(TABLES.carrierBill).get(String(bill.id)) as Row
+        table(TABLES.carrierBill).set(String(bill.id), { ...row, status: 'IN_REVIEW' })
+      }
+      return original?.(cmd)
+    })
+    await expect(
+      call('RECORD_AP_PAYMENT', {
+        carrierId: CARRIER_ID,
+        paidAt: '2026-10-25',
+        method: 'ACH',
+        amountCents: 180_000,
+        applications: [{ billId: bill.id, amountCents: 180_000 }],
+      }),
+    ).rejects.toThrow(/changed by someone else/i)
+    send.mockImplementation(original as never)
+    expect((table(TABLES.carrierBill).get(String(bill.id)) as Row).paidCents).toBe(0)
+  })
+
+  it('posts once when the same request is sent twice', async () => {
+    const bill = await approvedBill()
+    const body = {
+      carrierId: CARRIER_ID,
+      paidAt: '2026-10-25',
+      method: 'ACH',
+      amountCents: 180_000,
+      applications: [{ billId: bill.id, amountCents: 180_000 }],
+      clientRequestId: 'press-1',
+    }
+    await call('RECORD_AP_PAYMENT', body)
+    const again = (await call('RECORD_AP_PAYMENT', body)) as { duplicate: boolean }
+    expect(again.duplicate).toBe(true)
+    expect(table(TABLES.apPayment).size).toBe(1)
+    expect((table(TABLES.carrierBill).get(String(bill.id)) as Row).paidCents).toBe(180_000)
+  })
+
+  it('loses to a payment that moved the bill underneath it', async () => {
+    const bill = await approvedBill()
+    const body = {
+      carrierId: CARRIER_ID,
+      paidAt: '2026-10-25',
+      method: 'ACH',
+      amountCents: 90_000,
+      applications: [{ billId: bill.id, amountCents: 90_000 }],
+    }
+    // Somebody else's payment lands between this one's read and its write.
+    const original = send.getMockImplementation()
+    let armed = true
+    send.mockImplementation((cmd: MockCommand) => {
+      if (armed && cmd.__type === 'Transact') {
+        armed = false
+        const row = table(TABLES.carrierBill).get(String(bill.id)) as Row
+        table(TABLES.carrierBill).set(String(bill.id), { ...row, paidCents: 90_000, balanceCents: 90_000 })
+      }
+      return original?.(cmd)
+    })
+    await expect(call('RECORD_AP_PAYMENT', body)).rejects.toThrow(/changed by someone else/i)
+    send.mockImplementation(original as never)
+    // The bill still carries only the other payment's money.
+    expect((table(TABLES.carrierBill).get(String(bill.id)) as Row).paidCents).toBe(90_000)
+  })
+})
+
+describe('REVERSE_AP_PAYMENT', () => {
+  it('restores the bill and reopens the assignment', async () => {
+    seedAssignment()
+    const bill = await recordBill({ approve: true })
+    const paid = (await call('RECORD_AP_PAYMENT', {
+      carrierId: CARRIER_ID,
+      paidAt: '2026-10-25',
+      method: 'ACH',
+      amountCents: 180_000,
+      applications: [{ billId: bill.id, amountCents: 180_000 }],
+    })) as { payment: Row }
+
+    await call('REVERSE_AP_PAYMENT', { paymentId: paid.payment.id, reason: 'Wrong account' })
+
+    const after = table(TABLES.carrierBill).get(String(bill.id)) as Row
+    expect(after.paidCents).toBe(0)
+    expect(after.balanceCents).toBe(180_000)
+    expect(after.status).toBe('TO_BE_PAID')
+    expect(after.apOpen).toBe('OPEN')
+    const assignment = table(TABLES.loadCarrier).get(LOAD_CARRIER_ID) as Row
+    expect(assignment.apStatus).toBe('TO_BE_PAID')
+    expect(assignment.apOpen).toBe('OPEN')
+    expect(assignment.apPaidAt).toBeUndefined()
+  })
+
+  it('refuses a second reversal', async () => {
+    seedAssignment()
+    const bill = await recordBill({ approve: true })
+    const paid = (await call('RECORD_AP_PAYMENT', {
+      carrierId: CARRIER_ID,
+      paidAt: '2026-10-25',
+      method: 'ACH',
+      amountCents: 180_000,
+      applications: [{ billId: bill.id, amountCents: 180_000 }],
+    })) as { payment: Row }
+    await call('REVERSE_AP_PAYMENT', { paymentId: paid.payment.id, reason: 'Wrong account' })
+    await expect(
+      call('REVERSE_AP_PAYMENT', { paymentId: paid.payment.id, reason: 'again' }),
+    ).rejects.toThrow(/reversed/i)
+  })
+})
+
+describe('VOID_BILL', () => {
+  it('releases the assignment and unfreezes its charges', async () => {
+    seedAssignment()
+    const bill = await recordBill()
+    await call('VOID_BILL', { billId: bill.id, reason: 'Carrier re-invoiced' })
+
+    const voided = table(TABLES.carrierBill).get(String(bill.id)) as Row
+    expect(voided.status).toBe('VOID')
+    expect(voided.apOpen).toBeUndefined()
+    const assignment = table(TABLES.loadCarrier).get(LOAD_CARRIER_ID) as Row
+    expect(assignment.apStatus).toBe('AWAITING_INVOICE')
+    expect(assignment.invoiceId).toBeNull()
+    expect(assignment.chargesFinalizedAt).toBeUndefined()
+  })
+
+  it('refuses while money is on the bill', async () => {
+    seedAssignment()
+    const bill = await recordBill({ approve: true })
+    await call('RECORD_AP_PAYMENT', {
+      carrierId: CARRIER_ID,
+      paidAt: '2026-10-25',
+      method: 'ACH',
+      amountCents: 10_000,
+      applications: [{ billId: bill.id, amountCents: 10_000 }],
+    })
+    await expect(call('VOID_BILL', { billId: bill.id, reason: 'oops' })).rejects.toThrow(/reverse the payment/i)
+  })
+})
+
+describe('SEND_REMITTANCE', () => {
+  it('records NOT_SENT with a download when SES refuses, and stamps nothing', async () => {
+    seedAssignment()
+    const bill = await recordBill({ approve: true })
+    const paid = (await call('RECORD_AP_PAYMENT', {
+      carrierId: CARRIER_ID,
+      paidAt: '2026-10-25',
+      method: 'ACH',
+      reference: 'ACH-88120',
+      amountCents: 180_000,
+      applications: [{ billId: bill.id, amountCents: 180_000 }],
+    })) as { payment: Row }
+
+    sesSend.mockRejectedValueOnce(new Error('Email address is not verified'))
+    const sent = (await call('SEND_REMITTANCE', { paymentId: paid.payment.id })) as {
+      emailStatus: string
+      downloads: { url: string }[]
+      body: string
+    }
+    expect(sent.emailStatus).toBe('NOT_SENT')
+    expect(sent.body).toContain('ACH-88120')
+    expect(sent.downloads.length).toBe(1)
+    expect((table(TABLES.apPayment).get(String(paid.payment.id)) as Row).remittanceSentAt).toBeUndefined()
+  })
+})
+
+describe('AP authorization', () => {
+  it('refuses every AP action to a user who may only invoice', async () => {
+    seedAssignment()
+    await expect(call('PREVIEW_BILL', { loadCarrierId: LOAD_CARRIER_ID }, BILLER)).rejects.toThrow(
+      /page-carrierPay/,
+    )
+  })
+
+  it('lets an AP rep record a bill but not pay one', async () => {
+    seedAssignment()
+    const bill = await recordBill({}, AP_USER)
+    expect(bill.status).toBe('IN_REVIEW')
+    await expect(
+      call('RECORD_AP_PAYMENT', {
+        carrierId: CARRIER_ID,
+        paidAt: '2026-10-25',
+        method: 'ACH',
+        amountCents: 1,
+        applications: [{ billId: bill.id, amountCents: 1 }],
+      }, AP_USER),
+    ).rejects.toThrow(/owner or ADMIN/)
+  })
+
+  it('refuses "Record and approve" to a rep while approval is admin-only', async () => {
+    seedAssignment()
+    await expect(recordBill({ approve: true }, AP_USER)).rejects.toThrow(/owner or ADMIN/)
+    // The bill is not quietly recorded unapproved either: the press is one act.
+    expect(table(TABLES.carrierBill).size).toBe(0)
+    expect((table(TABLES.loadCarrier).get(LOAD_CARRIER_ID) as Row).apStatus).toBe('AWAITING_INVOICE')
+  })
+
+  it('lets a rep record and approve once the org turns the toggle off', async () => {
+    seedAssignment({ settings: { apApprovalAdminOnly: false } })
+    const bill = await recordBill({ approve: true }, AP_USER)
+    expect(bill.status).toBe('TO_BE_PAID')
+    expect(bill.approvedBy).toBe('ap@bcatcorp.com')
   })
 })

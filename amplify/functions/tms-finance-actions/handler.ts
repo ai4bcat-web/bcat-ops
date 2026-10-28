@@ -27,7 +27,24 @@ import {
 import { createCredit, recordPayment, reversePayment, writeOffInvoice } from './payments'
 import { previewFactor, sendToFactor } from './factor'
 import {
+  approveBill,
+  previewBill,
+  recordBill,
+  saveApSettings,
+  unapproveBill,
+  voidBill,
+} from './bills'
+import {
+  createApCredit,
+  markRemittanceSent,
+  recordApPayment,
+  renderRemittancePdf,
+  reverseApPayment,
+  sendRemittance,
+} from './apPayments'
+import {
   ADMIN_GROUP,
+  CARRIER_PAY_PAGE_GROUP,
   INVOICING_PAGE_GROUP,
   OWNER_EMAIL,
   getCallerEmail,
@@ -53,6 +70,18 @@ type Action =
   | 'PREVIEW_FACTOR'
   | 'SEND_TO_FACTOR'
   | 'SAVE_AR_SETTINGS'
+  | 'PREVIEW_BILL'
+  | 'RECORD_BILL'
+  | 'APPROVE_BILL'
+  | 'UNAPPROVE_BILL'
+  | 'VOID_BILL'
+  | 'RECORD_AP_PAYMENT'
+  | 'CREATE_AP_CREDIT'
+  | 'REVERSE_AP_PAYMENT'
+  | 'SEND_REMITTANCE'
+  | 'RENDER_REMITTANCE_PDF'
+  | 'MARK_REMITTANCE_SENT'
+  | 'SAVE_AP_SETTINGS'
 
 /** The actions that move money and are owner/ADMIN while `arPostingAdminOnly` holds. */
 const POSTING_ACTIONS: Record<string, true> = {
@@ -63,9 +92,46 @@ const POSTING_ACTIONS: Record<string, true> = {
   REVERSE_PAYMENT: true,
 }
 
+/**
+ * AP is a separate permission from AR, and separately switchable.
+ *
+ * `page-invoicing` alone is refused on every one of these: billing a customer and
+ * paying a carrier are different jobs with different consequences, and MVMNT treats
+ * AP approval as its own capability.
+ */
+const AP_ACTIONS: Record<string, true> = {
+  PREVIEW_BILL: true,
+  RECORD_BILL: true,
+  APPROVE_BILL: true,
+  UNAPPROVE_BILL: true,
+  VOID_BILL: true,
+  RECORD_AP_PAYMENT: true,
+  CREATE_AP_CREDIT: true,
+  REVERSE_AP_PAYMENT: true,
+  SEND_REMITTANCE: true,
+  RENDER_REMITTANCE_PDF: true,
+  MARK_REMITTANCE_SENT: true,
+  SAVE_AP_SETTINGS: true,
+}
+
+/** Approving a bill is its own capability, behind `apApprovalAdminOnly`. */
+const AP_APPROVAL_ACTIONS: Record<string, true> = {
+  APPROVE_BILL: true,
+  UNAPPROVE_BILL: true,
+}
+
+/** Money leaving the bank, behind `apPostingAdminOnly`. */
+const AP_POSTING_ACTIONS: Record<string, true> = {
+  VOID_BILL: true,
+  RECORD_AP_PAYMENT: true,
+  CREATE_AP_CREDIT: true,
+  REVERSE_AP_PAYMENT: true,
+}
+
 /** Settings are an admin act in every router here, posting rule or not. */
 const ADMIN_ONLY_ACTIONS: Record<string, true> = {
   SAVE_AR_SETTINGS: true,
+  SAVE_AP_SETTINGS: true,
 }
 
 interface AppSyncEvent {
@@ -83,15 +149,22 @@ async function authorize(action: Action, identity?: AppSyncIdentity | null): Pro
   const groups = getGroups(identity)
   const isAdmin = email === OWNER_EMAIL || groups.includes(ADMIN_GROUP)
 
-  if (!isAdmin && !groups.includes(INVOICING_PAGE_GROUP)) {
-    throw new Error(`Forbidden: ${action} requires owner, ADMIN, or ${INVOICING_PAGE_GROUP}`)
+  const isAp = AP_ACTIONS[action] === true
+  const pageGroup = isAp ? CARRIER_PAY_PAGE_GROUP : INVOICING_PAGE_GROUP
+  if (!isAdmin && !groups.includes(pageGroup)) {
+    throw new Error(`Forbidden: ${action} requires owner, ADMIN, or ${pageGroup}`)
   }
   if (ADMIN_ONLY_ACTIONS[action] && !isAdmin) {
     throw new Error(`Forbidden: ${action} requires owner or ADMIN`)
   }
-  if (POSTING_ACTIONS[action] && !isAdmin) {
+  if (!isAdmin && (POSTING_ACTIONS[action] || AP_APPROVAL_ACTIONS[action] || AP_POSTING_ACTIONS[action])) {
     const settings = await getSettings()
-    if (settings.arPostingAdminOnly !== false) {
+    const flag = AP_APPROVAL_ACTIONS[action]
+      ? settings.apApprovalAdminOnly
+      : AP_POSTING_ACTIONS[action]
+        ? settings.apPostingAdminOnly
+        : settings.arPostingAdminOnly
+    if (flag !== false) {
       throw new Error(`Forbidden: ${action} requires owner or ADMIN`)
     }
   }
@@ -134,6 +207,30 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return sendToFactor(input, caller)
     case 'SAVE_AR_SETTINGS':
       return saveArSettings(input, caller)
+    case 'PREVIEW_BILL':
+      return previewBill(input, caller)
+    case 'RECORD_BILL':
+      return recordBill(input, caller)
+    case 'APPROVE_BILL':
+      return approveBill(input, caller)
+    case 'UNAPPROVE_BILL':
+      return unapproveBill(input, caller)
+    case 'VOID_BILL':
+      return voidBill(input, caller)
+    case 'RECORD_AP_PAYMENT':
+      return recordApPayment(input, caller) as unknown as Promise<Row>
+    case 'CREATE_AP_CREDIT':
+      return createApCredit(input, caller) as unknown as Promise<Row>
+    case 'REVERSE_AP_PAYMENT':
+      return reverseApPayment(input, caller) as unknown as Promise<Row>
+    case 'SEND_REMITTANCE':
+      return sendRemittance(input, caller)
+    case 'RENDER_REMITTANCE_PDF':
+      return renderRemittancePdf(input, caller)
+    case 'MARK_REMITTANCE_SENT':
+      return markRemittanceSent(input, caller)
+    case 'SAVE_AP_SETTINGS':
+      return saveApSettings(input, caller)
     default:
       throw new Error(`Unknown action: ${String(action)}`)
   }

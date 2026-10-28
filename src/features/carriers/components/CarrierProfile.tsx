@@ -11,7 +11,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  Building2, ExternalLink, FileText, History, Phone, Shield, Truck, Wallet, X,
+  Banknote, Building2, ExternalLink, FileText, History, Phone, Shield, Truck, Wallet, X,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
@@ -19,6 +19,7 @@ import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { useCarrier } from '@/hooks/useCarrier'
+import { useCarrierAp } from '@/hooks/useCarrierAp'
 import {
   archiveCarrierContact, archiveCarrierPaymentMethod, commitCarrierDocument, deleteCarrierDocument,
   getCarrierDocumentUrl, graphqlErrorText, listAuditLogs, prepareCarrierDocument, setCarrierStatus,
@@ -33,6 +34,7 @@ import { cn } from '@/lib/utils'
 import {
   DEFAULT_INSURANCE_WARN_DAYS, DEFAULT_REQUIRED_CARRIER_DOCS, INSURANCE_STATE_STYLES,
 } from '../carrierViews'
+import { CarrierApTab } from './CarrierApTab'
 import { CarrierContactsEditor, type CarrierContactDraft } from './CarrierContactsEditor'
 import { CarrierDocumentsEditor } from './CarrierDocumentsEditor'
 import { CarrierForm } from './CarrierForm'
@@ -53,6 +55,7 @@ const tabs = [
   { key: 'compliance', label: 'Compliance', icon: Shield },
   { key: 'contacts', label: 'Contacts', icon: Phone },
   { key: 'payment', label: 'Payment', icon: Wallet },
+  { key: 'ap', label: 'AP', icon: Banknote },
   { key: 'equipment', label: 'Equipment', icon: Truck },
   { key: 'loads', label: 'Loads', icon: FileText },
   { key: 'activity', label: 'Activity', icon: History },
@@ -86,6 +89,23 @@ export function CarrierProfile({ carrierId, isAdmin, settings, onClose, onChange
   const [statusOpen, setStatusOpen] = useState(false)
   const [logs, setLogs] = useState<AuditLogEntry[] | null>(null)
   const [logsError, setLogsError] = useState<string | null>(null)
+  const ap = useCarrierAp(carrierId)
+
+  /**
+   * Bills already approved and still unpaid — the money a missing payment method is
+   * actually holding up. TO_BE_PAID and PARTIAL are approved; IN_REVIEW is not agreed
+   * to yet, and a bill nobody has approved is not waiting on the bank details.
+   */
+  const awaitingPayment = useMemo(() => {
+    let count = 0
+    let cents = 0
+    for (const bill of ap.bills) {
+      if (bill.status !== 'TO_BE_PAID' && bill.status !== 'PARTIAL') continue
+      count += 1
+      cents += bill.balanceCents
+    }
+    return { count, cents }
+  }, [ap.bills])
 
   const carrier = bundle?.carrier ?? null
   const now = new Date().toISOString()
@@ -301,6 +321,7 @@ export function CarrierProfile({ carrierId, isAdmin, settings, onClose, onChange
               {tab === 'payment' && (
                 <CarrierPaymentEditor
                   methods={bundle.paymentMethods}
+                  awaitingPayment={awaitingPayment}
                   onSave={savePaymentMethod}
                   onArchive={async (method) => {
                     try {
@@ -311,6 +332,19 @@ export function CarrierProfile({ carrierId, isAdmin, settings, onClose, onChange
                       reportFailure(e, 'Archive failed')
                     }
                   }}
+                />
+              )}
+
+              {tab === 'ap' && (
+                <CarrierApTab
+                  carrierId={carrier.id}
+                  bills={ap.bills}
+                  payments={ap.payments}
+                  openCents={ap.openCents}
+                  unappliedCents={ap.unappliedCents}
+                  loading={ap.loading}
+                  error={ap.error}
+                  onRefresh={ap.refresh}
                 />
               )}
 

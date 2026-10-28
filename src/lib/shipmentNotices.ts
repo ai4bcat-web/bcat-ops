@@ -21,6 +21,11 @@
  * Lambdas bundle this file by path, so a `@/` alias would break the function build.
  */
 import type {
+  ApPaymentRecord,
+  CarrierBillRecord,
+  CarrierContactRecord,
+  CarrierPaymentMethodRecord,
+  CarrierRecord,
   CustomerContact,
   CustomerNotification,
   CustomerRecord,
@@ -71,6 +76,10 @@ export const DEFAULT_INVOICE_EMAIL_TEMPLATE =
 /** The covering note when one customer is sent several invoices at once. */
 export const DEFAULT_INVOICE_BATCH_TEMPLATE =
   'Please find {invoices} attached — {total} due in total.'
+
+/** The covering note for one AP payment. Must carry `{reference}`. */
+export const DEFAULT_REMITTANCE_EMAIL_TEMPLATE =
+  'Payment {reference} for {total} has been sent. The bills it covers are listed below.'
 
 export const MAX_NOTICE_BODY_CHARS = 20000
 
@@ -129,6 +138,14 @@ export function templateHasUrl(template: string | null | undefined): boolean {
 /** An invoice e-mail that cannot name the invoice is not one we can send. */
 export function templateHasNumber(template: string | null | undefined): boolean {
   return typeof template === 'string' && template.includes('{number}')
+}
+
+/**
+ * A remittance that cannot name the payment is not one we can send: the reference is
+ * the only thing the carrier's AP clerk can match the deposit against.
+ */
+export function templateHasReference(template: string | null | undefined): boolean {
+  return typeof template === 'string' && template.includes('{reference}')
 }
 
 export interface MilestoneEmailInput {
@@ -396,6 +413,112 @@ export function renderInvoiceBatchEmail(
   lines.push(input.brokerName)
 
   return { subject, body: lines.join('\n').slice(0, MAX_NOTICE_BODY_CHARS) }
+}
+
+/** What a remittance has to say about each bill it settles. */
+export type RemittanceEmailBill = Pick<
+  CarrierBillRecord,
+  'id' | 'billNumber' | 'shipmentNumber' | 'loadNumber' | 'netCents'
+>
+
+export interface RemittanceEmailInput {
+  payment: Pick<ApPaymentRecord, 'id' | 'reference' | 'paidAt' | 'method' | 'amountCents' | 'applications'>
+  bills: RemittanceEmailBill[]
+  carrierName?: string | null
+  template?: string | null
+  brokerName: string
+}
+
+/**
+ * The covering note for one payment. It goes to the carrier or their factor, so it
+ * carries the reference, the date, the amount and the bills it settles — and nothing
+ * else. No customer rate, no margin, no internal note, no bank detail.
+ *
+ * The amount is stated whatever the template says, for the same reason the invoice
+ * e-mail states the balance: nobody should have to open an attachment to learn what
+ * was sent. Per-bill amounts come from the payment's own allocations where it names
+ * the bill, so a part-payment reads as what was actually sent rather than as the net.
+ */
+export function renderRemittanceEmail(input: RemittanceEmailInput): { subject: string; body: string } {
+  const payment = input.payment
+  const reference = payment.reference?.trim() || payment.id
+  const date = payment.paidAt.slice(0, 10)
+  const total = `$${formatCents(payment.amountCents)}`
+  const subject = `Remittance ${reference} · ${input.brokerName}`
+  const template = templateHasReference(input.template)
+    ? (input.template as string)
+    : DEFAULT_REMITTANCE_EMAIL_TEMPLATE
+
+  const appliedById: Record<string, number> = {}
+  for (const application of payment.applications ?? []) {
+    appliedById[application.billId] = (appliedById[application.billId] ?? 0) + application.amountCents
+  }
+
+  const lines: string[] = []
+  lines.push('Hello,')
+  lines.push('')
+  lines.push(
+    applyTemplate(template, {
+      reference,
+      carrier: input.carrierName ?? '',
+      total,
+      date,
+      method: payment.method ?? '',
+      count: String(input.bills.length),
+      bills: `${input.bills.length} ${input.bills.length === 1 ? 'bill' : 'bills'}`,
+      broker: input.brokerName,
+    }),
+  )
+
+  if (input.bills.length > 0) {
+    lines.push('')
+    for (const bill of input.bills) {
+      const parts = [bill.billNumber || bill.loadNumber || bill.shipmentNumber || bill.id]
+      if (bill.shipmentNumber) parts.push(`shipment ${bill.shipmentNumber}`)
+      parts.push(`$${formatCents(appliedById[bill.id] ?? bill.netCents)}`)
+      lines.push(`  • ${parts.join(' — ')}`)
+    }
+  }
+
+  lines.push('')
+  lines.push(`Amount sent: ${total}`)
+  if (payment.method) lines.push(`Method: ${payment.method}`)
+  lines.push(`Sent ${date}.`)
+  lines.push('')
+  lines.push(input.brokerName)
+
+  return { subject, body: lines.join('\n').slice(0, MAX_NOTICE_BODY_CHARS) }
+}
+
+/**
+ * Where a remittance is sent, in the order a cheque would follow the money: the payee
+ * address on the payment method the bill was paid under, then the carrier's accounting
+ * people, then whatever single address the carrier record carries.
+ *
+ * One rung only — a factor's remit address is not improved by also copying the
+ * carrier's dispatcher. Empty is a normal answer, and an honest one: a caller that
+ * gets nothing back must say so rather than send to an empty address.
+ */
+export function remittanceRecipients(
+  carrier: Pick<CarrierRecord, 'email'> | null | undefined,
+  contacts: CarrierContactRecord[] | null | undefined,
+  method: Pick<CarrierPaymentMethodRecord, 'payeeEmail'> | null | undefined,
+): string[] {
+  const payee = (method?.payeeEmail ?? '').trim()
+  if (payee.includes('@')) return [payee]
+
+  const accounting: string[] = []
+  for (const contact of contacts ?? []) {
+    if (contact.active === false) continue
+    if (!(contact.types ?? []).includes('ACCOUNTING')) continue
+    const email = (contact.email ?? '').trim()
+    if (!email.includes('@') || accounting.includes(email)) continue
+    accounting.push(email)
+  }
+  if (accounting.length > 0) return accounting
+
+  const fallback = (carrier?.email ?? '').trim()
+  return fallback.includes('@') ? [fallback] : []
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000

@@ -1004,6 +1004,13 @@ const schema = a.schema({
       factorRemitTo:            a.json(),        // { name, address, email, noticeText }
       arPostingAdminOnly:       a.boolean(),     // true — void/payment/credit/write-off/reversal
       invoiceBatchEmail:        a.enum(['PER_INVOICE', 'PER_BILL_TO']),
+
+      // ── AP: carrier bills & payments org defaults (Step G) ────────────
+      apApprovalAdminOnly:      a.boolean(),     // true — only owner/ADMIN approve a bill
+      apPostingAdminOnly:       a.boolean(),     // true — payment/credit/reversal/void
+      apRequireSignedRateCon:   a.boolean(),     // true — unsigned blocks approval
+      remittanceEmailTemplate:  a.string(),      // must contain {reference}
+      apBillDocsRequired:       a.string().array(), // defaults to requiredCarrierUploadTypes
     })
     // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
     // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
@@ -1209,9 +1216,19 @@ const schema = a.schema({
       // Cached from LoadCharge CARRIER lines by RECALC_CHARGES.
       carrierRateCents: a.integer(),
       costCents:       a.integer(),
-      // B writes AWAITING_INVOICE only; the rest is step G.
+      // B writes AWAITING_INVOICE; G moves it the rest of the way. `invoiceId` is
+      // the CarrierBill id once one is recorded.
       apStatus:        a.enum(['AWAITING_INVOICE', 'IN_REVIEW', 'TO_BE_PAID', 'PAID']),
       invoiceId:       a.string(),
+      // ── AP (Step G) ──────────────────────────────────────────────────────
+      // The sparse 'OPEN' marker that makes "every outside-carrier assignment we
+      // still owe money on" one query. Carried on CARRIER rows that are ACTIVE or
+      // TONU from booking until the bill is PAID, and REMOVEd — never nulled, a
+      // NULL in an index key is rejected outright — on PAID and on a BOUNCE.
+      apOpen:            a.string(),
+      apStatusChangedAt: a.datetime(),
+      apBalanceCents:    a.integer(),
+      apPaidAt:          a.datetime(),
 
       // ── Carriers & booking (Step C) ──────────────────────────────────────
       // Quick pay: what we keep for paying early. Cached as both the bps the
@@ -1264,7 +1281,12 @@ const schema = a.schema({
       createdBy:       a.string().required(),
       updatedBy:       a.string().required(),
     })
-    .secondaryIndexes((index) => [index('loadId'), index('shipmentId'), index('carrierId')])
+    .secondaryIndexes((index) => [
+      index('loadId'),
+      index('shipmentId'),
+      index('carrierId'),
+      index('apOpen').sortKeys(['apStatusChangedAt']),
+    ])
     .disableOperations(['subscriptions'])
     .authorization((allow) => [allow.authenticated().to(['read'])]),
 
@@ -1425,6 +1447,134 @@ const schema = a.schema({
       createdBy:       a.string().required(),
     })
     .secondaryIndexes((index) => [index('customerId').sortKeys(['receivedAt'])])
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  // ── AP: carrier bills & payments (Step G) ──────────────────────────────────
+  /*
+   * One recorded bill for one carrier assignment.
+   *
+   * The row's `id` is `cb:<loadCarrierId>:<n>` and is put with
+   * `attribute_not_exists(id)`, so two Record presses racing cannot both land.
+   * `lines`, `remitTo`, the fee and the terms are a SNAPSHOT taken at RECORD_BILL,
+   * in the same transaction that stamps `LoadCarrier.chargesFinalizedAt`. Nothing
+   * re-reads them; a mistake is voided and re-recorded, never edited.
+   *
+   * `apOpen` is the sparse marker 'OPEN', carried while IN_REVIEW, TO_BE_PAID or
+   * PARTIAL and REMOVEd (never nulled) on PAID or VOID.
+   *
+   * Own-fleet legs never get a row here: they are paid through driver settlements.
+   */
+  CarrierBill: a
+    .model({
+      loadCarrierId:   a.string().required(),
+      loadId:          a.string().required(),
+      shipmentId:      a.string().required(),
+      shipmentNumber:  a.string(),
+      loadNumber:      a.string(),
+      carrierId:       a.string().required(),
+      carrierName:     a.string(),
+      carrierMc:       a.string(),
+      // Who is owed is always the carrier; a FACTOR payee only says where the
+      // money goes — and carries no quick-pay fee.
+      payeeKind:       a.enum(['CARRIER', 'FACTOR']),
+      paymentMethodId: a.string(),
+      // { name, factorName, method, accountLast4, payeeEmail, address } — never
+      // `bankDetailsKey`: a read of this table can not leak a bank account.
+      remitTo:         a.json(),
+      divisionKey:     a.string(),
+      status:          a.enum(['IN_REVIEW', 'TO_BE_PAID', 'PARTIAL', 'PAID', 'VOID']),
+      billNumber:      a.string(),             // the carrier's own invoice number
+      billDate:        a.string().required(),  // YYYY-MM-DD
+      billMonth:       a.string().required(),  // 'YYYY-MM' of billDate
+      recordedAt:      a.datetime().required(),
+      recordedBy:      a.string().required(),
+      recordedEarly:   a.boolean(),            // recorded before the load delivered
+      dueAt:           a.string().required(),  // YYYY-MM-DD
+      termsDays:       a.integer().required(),
+      quickPay:        a.boolean(),
+      quickPayDays:    a.integer(),
+      quickPayFeeBps:  a.integer(),
+      // [{ chargeId, code, label, calculatedBy, rateCents, count, amountCents }]
+      lines:           a.json(),
+      grossCents:      a.integer().required(), // Σ the assignment's CARRIER lines
+      quickPayFeeCents: a.integer().required(),
+      netCents:        a.integer().required(), // gross − fee; what we actually pay
+      billedCents:     a.integer().required(), // what the carrier's invoice says
+      varianceCents:   a.integer().required(), // billed − gross; must be 0 to approve
+      paidCents:       a.integer().required(),
+      creditedCents:   a.integer().required(),
+      balanceCents:    a.integer().required(), // net − paid − credited
+      apOpen:          a.string(),             // sparse 'OPEN'
+      documentId:      a.string(),             // the accepted CARRIER_INVOICE
+      approvedAt:      a.datetime(),
+      approvedBy:      a.string(),
+      approvalWarnings: a.string().array(),
+      docsOverrideAt:  a.datetime(),
+      docsOverrideBy:  a.string(),
+      docsOverrideNote: a.string(),
+      paidAt:          a.datetime(),
+      voidedAt:        a.datetime(),
+      voidedBy:        a.string(),
+      voidReason:      a.string(),
+      note:            a.string(),
+      createdBy:       a.string().required(),
+      updatedBy:       a.string().required(),
+      version:         a.integer().required(),
+    })
+    .secondaryIndexes((index) => [
+      index('carrierId').sortKeys(['recordedAt']),
+      index('apOpen').sortKeys(['dueAt']),
+      index('billMonth').sortKeys(['recordedAt']),
+    ])
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  /*
+   * Every payment sent to a carrier, every AP credit and every reversal, with its
+   * allocations — the AP twin of ArPayment, and immutable in the same way: a posted
+   * row only ever changes `unappliedCents` (spent down with a conditional ADD) and
+   * `reversedByPaymentId`. Nothing deletes one; a mistake gets a REVERSAL row.
+   */
+  ApPayment: a
+    .model({
+      carrierId:       a.string().required(),
+      payeeKind:       a.enum(['CARRIER', 'FACTOR']),
+      kind:            a.enum(['PAYMENT', 'CREDIT_MEMO', 'REVERSAL']),
+      // The typed date at noon UTC, so the carrier index sorts by the day the money
+      // left and a timezone cannot slide a payment into the previous month.
+      paidAt:          a.datetime().required(),
+      method:          a.enum(['ACH', 'WIRE', 'CHECK', 'ZELLE', 'VENMO', 'EFT', 'OTHER']),
+      reference:       a.string(),
+      amountCents:     a.integer().required(),
+      appliedCents:    a.integer().required(),
+      unappliedCents:  a.integer().required(),
+      applications:    a.json(),               // [{ billId, amountCents }]
+      creditApplications: a.json(),            // [{ paymentId, amountCents }]
+      remitTo:         a.json(),               // snapshot at send
+      /**
+       * Every attempt, sent or not. `remittanceCount` only counts the ones SES
+       * accepted, and the notice log keys on a deterministic id — so numbering the
+       * notice by the successes would reuse `remit:<payment>:1` after a refused send
+       * and make every later attempt a silent no-op.
+       */
+      remittanceAttempts: a.integer(),
+      loadCarrierId:   a.string(),             // a credit raised against one leg
+      reversesPaymentId:   a.string(),
+      reversedByPaymentId: a.string(),
+      pdfKey:          a.string(),
+      pdfVersion:      a.integer(),
+      remittanceSentAt: a.datetime(),
+      remittanceSentTo: a.string(),            // comma-joined
+      remittanceCount: a.integer(),
+      markedSentAt:    a.datetime(),
+      markedSentBy:    a.string(),
+      markedSentNote:  a.string(),
+      lastNoticeId:    a.string(),
+      note:            a.string(),
+      createdBy:       a.string().required(),
+    })
+    .secondaryIndexes((index) => [index('carrierId').sortKeys(['paidAt'])])
     .disableOperations(['subscriptions'])
     .authorization((allow) => [allow.authenticated().to(['read'])]),
 
@@ -1610,7 +1760,7 @@ const schema = a.schema({
       shipmentId:    a.string().required(),
       loadId:        a.string(),
       loadCarrierId: a.string(),
-      kind:          a.enum(['MILESTONE', 'POD_REQUEST', 'DOCUMENTS', 'INVOICE']),
+      kind:          a.enum(['MILESTONE', 'POD_REQUEST', 'DOCUMENTS', 'INVOICE', 'REMITTANCE']),
       // The CustomerNotification vocabulary; null on POD_REQUEST and DOCUMENTS.
       milestone:     a.string(),
       channel:       a.enum(['EMAIL', 'COPY']),

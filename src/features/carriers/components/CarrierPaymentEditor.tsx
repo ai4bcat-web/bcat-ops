@@ -11,6 +11,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { formatCents } from '@/lib/invoiceBuild'
 import type { CarrierPayeeType, CarrierPaymentMethodKind, CarrierPaymentMethodRecord } from '@/types/tms'
 
 const METHODS: CarrierPaymentMethodKind[] = ['ACH', 'WIRE', 'CHECK', 'ZELLE', 'VENMO', 'EFT']
@@ -33,20 +34,30 @@ export interface CarrierPaymentDraft {
 
 interface CarrierPaymentEditorProps {
   methods: CarrierPaymentMethodRecord[]
+  /**
+   * Approved bills still unpaid, from the profile's `useCarrierAp` read. With no method
+   * on file this is exactly the money the missing bank details are holding up, so the
+   * warning names it rather than talking about AP in the abstract.
+   */
+  awaitingPayment?: { count: number; cents: number }
   onSave: (draft: CarrierPaymentDraft) => Promise<void>
   onArchive: (method: CarrierPaymentMethodRecord) => Promise<void>
   disabled?: boolean
 }
 
-export function CarrierPaymentEditor({ methods, onSave, onArchive, disabled }: CarrierPaymentEditorProps) {
+export function CarrierPaymentEditor({ methods, awaitingPayment, onSave, onArchive, disabled }: CarrierPaymentEditorProps) {
   const [adding, setAdding] = useState(false)
   const active = methods.filter((m) => m.status !== 'INACTIVE')
+  const waiting = awaitingPayment?.count ?? 0
 
   return (
     <div className="space-y-3">
       {active.length === 0 && !adding && (
-        <p className="text-sm text-muted-foreground">
-          No payment method on file. AP cannot pay this carrier until one is added.
+        <p className="text-sm text-muted-foreground" data-testid="carrier-no-payment-method">
+          No payment method on file. AP cannot pay this carrier until one is added
+          {waiting > 0
+            ? ` — ${waiting} approved ${waiting === 1 ? 'bill is' : 'bills are'} waiting on it, ${formatCents(awaitingPayment?.cents ?? 0)} in all.`
+            : '.'}
         </p>
       )}
 

@@ -187,12 +187,20 @@ export function casCondition(values: Record<string, AttributeValue>, expectedUpd
   return '((attribute_exists(updatedAt) AND updatedAt = :casExpectedUpdatedAt) OR (attribute_not_exists(updatedAt) AND :casExpectedUpdatedAt = :casEmpty))'
 }
 
-/** Build a SET update for every own key of `patch`, with a CAS guard on updatedAt. */
+/**
+ * Build a SET/REMOVE update for every own key of `patch`, with a CAS guard on updatedAt.
+ *
+ * `remove` is how a field LEAVES the row instead of being set to null, which is
+ * what a sparse index hash key such as `apOpen` or `checkCallOpen` requires:
+ * DynamoDB answers `Type mismatch for Index Key … Actual: NULL` and refuses the
+ * write. Same shape the finance router's `updateTx` uses.
+ */
 export function updateItemTx(
   tableName: string,
   id: string,
   patch: Row,
   expectedUpdatedAt: string | null,
+  options: { remove?: string[] } = {},
 ): TransactWriteItem {
   const names: Record<string, string> = {}
   const values: Record<string, AttributeValue> = {}
@@ -203,14 +211,27 @@ export function updateItemTx(
     values[`:${key}`] = marshallRow({ [key]: value })[key]
     sets.push(`#${key} = :${key}`)
   }
+  const removes: string[] = []
+  for (const key of options.remove ?? []) {
+    // A key on both sides would be two actions on one attribute, which DynamoDB
+    // rejects; the patch wins, because it is the explicit value.
+    if (key in patch) continue
+    names[`#${key}`] = key
+    removes.push(`#${key}`)
+  }
+  const parts: string[] = []
+  if (sets.length > 0) parts.push(`SET ${sets.join(', ')}`)
+  if (removes.length > 0) parts.push(`REMOVE ${removes.join(', ')}`)
+  // Before the item is built: the guard seeds `values` with what it compares against.
+  const condition = expectedUpdatedAt == null ? null : casCondition(values, expectedUpdatedAt)
   return {
     Update: {
       TableName: tableName,
       Key: marshall({ id }),
-      UpdateExpression: `SET ${sets.join(', ')}`,
+      UpdateExpression: parts.join(' '),
       ExpressionAttributeNames: names,
-      ExpressionAttributeValues: values,
-      ...(expectedUpdatedAt == null ? {} : { ConditionExpression: casCondition(values, expectedUpdatedAt) }),
+      ...(Object.keys(values).length > 0 ? { ExpressionAttributeValues: values } : {}),
+      ...(condition == null ? {} : { ConditionExpression: condition }),
     },
   }
 }

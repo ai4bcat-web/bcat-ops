@@ -1,13 +1,20 @@
 import { describe, it, expect } from 'vitest'
 import {
   milestoneRecipients,
+  remittanceRecipients,
   renderInvoiceBatchEmail,
   renderInvoiceEmail,
   renderMilestoneEmail,
+  renderRemittanceEmail,
   uploadLinkExpiry,
 } from './shipmentNotices'
-import type { InvoiceEmailInvoice, NoticeStop } from './shipmentNotices'
-import type { CustomerContact, CustomerNotification, VisibilityPrefs } from '../types/tms'
+import type { InvoiceEmailInvoice, NoticeStop, RemittanceEmailBill } from './shipmentNotices'
+import type {
+  CarrierContactRecord,
+  CustomerContact,
+  CustomerNotification,
+  VisibilityPrefs,
+} from '../types/tms'
 
 const PREFS: VisibilityPrefs = { milestoneEmails: true, sharedTrackingLink: true, shipperPortal: false }
 
@@ -196,5 +203,118 @@ describe('renderInvoiceBatchEmail', () => {
   it('joins the numbers into a per-invoice template so a configured one still reads', () => {
     const { body } = batch(INVOICES, { template: 'Invoice {number} is attached.' })
     expect(body).toContain('Invoice INV-000123, INV-000124, INV-000125 is attached.')
+  })
+})
+
+describe('renderRemittanceEmail', () => {
+  const BILLS: RemittanceEmailBill[] = [
+    { id: 'cb:lc-1:1', billNumber: 'BL-55012', shipmentNumber: 'BC-1001', loadNumber: 'BC-1001-1', netCents: 247_500 },
+    { id: 'cb:lc-2:1', billNumber: null, shipmentNumber: 'BC-1002', loadNumber: 'BC-1002-1', netCents: 150_000 },
+  ]
+  const remittance = (overrides: Partial<Parameters<typeof renderRemittanceEmail>[0]> = {}) =>
+    renderRemittanceEmail({
+      payment: {
+        id: 'ap-1',
+        reference: 'ACH-88120',
+        paidAt: '2026-02-10T12:00:00.000Z',
+        method: 'ACH',
+        amountCents: 392_500,
+        applications: [
+          { billId: 'cb:lc-1:1', amountCents: 247_500 },
+          { billId: 'cb:lc-2:1', amountCents: 145_000, creditCents: 5_000 },
+        ],
+      },
+      bills: BILLS,
+      carrierName: 'Blue Line Trucking',
+      brokerName: 'BCAT Logistics',
+      ...overrides,
+    })
+
+  it('names the payment and the broker in the subject', () => {
+    expect(remittance().subject).toBe('Remittance ACH-88120 · BCAT Logistics')
+  })
+
+  it('substitutes the reference and every other token the caller may use', () => {
+    const { body } = remittance({ template: '{reference}|{carrier}|{total}|{date}|{method}|{bills}|{broker}' })
+    expect(body).toContain('ACH-88120|Blue Line Trucking|$3925.00|2026-02-10|ACH|2 bills|BCAT Logistics')
+  })
+
+  it('states the amount sent and the date whatever the template says', () => {
+    const { body } = remittance({ template: 'Remittance {reference} attached.' })
+    expect(body).toContain('Amount sent: $3925.00')
+    expect(body).toContain('Sent 2026-02-10.')
+  })
+
+  it('lists what was actually put against each bill, not the bill net', () => {
+    const { body } = remittance()
+    expect(body).toContain('  • BL-55012 — shipment BC-1001 — $2475.00')
+    expect(body).toContain('  • BC-1002-1 — shipment BC-1002 — $1450.00')
+  })
+
+  it('falls back to the default wording when the template cannot name the payment', () => {
+    const { body } = remittance({ template: 'Your money is on its way.' })
+    expect(body).not.toContain('Your money is on its way.')
+    expect(body).toContain('Payment ACH-88120 for $3925.00 has been sent.')
+  })
+
+  it('falls back to the payment id when no check or trace number was typed', () => {
+    const { subject, body } = remittance({
+      payment: { id: 'ap-1', reference: '  ', paidAt: '2026-02-10T12:00:00.000Z', method: 'CHECK', amountCents: 1_000, applications: [] },
+    })
+    expect(subject).toBe('Remittance ap-1 · BCAT Logistics')
+    expect(body).toContain('Payment ap-1')
+  })
+})
+
+describe('remittanceRecipients', () => {
+  const carrierContact = (id: string, overrides: Partial<CarrierContactRecord> = {}): CarrierContactRecord => ({
+    id,
+    carrierId: 'car-1',
+    name: `Contact ${id}`,
+    email: `${id}@blueline.test`,
+    types: ['ACCOUNTING'],
+    active: true,
+    createdBy: 'ryne',
+    updatedBy: 'ryne',
+    createdAt: '2026-01-01T00:00:00Z',
+    updatedAt: '2026-01-01T00:00:00Z',
+    ...overrides,
+  })
+  const CARRIER = { email: 'office@blueline.test' }
+  const CONTACTS = [
+    carrierContact('ann'),
+    carrierContact('bob', { active: false }),
+    carrierContact('cal', { types: ['DISPATCH'] }),
+    carrierContact('dee', { email: null }),
+    carrierContact('eve'),
+  ]
+
+  it('sends to the payee address on the method ahead of anyone else', () => {
+    expect(remittanceRecipients(CARRIER, CONTACTS, { payeeEmail: 'remit@otrcapital.test' })).toEqual([
+      'remit@otrcapital.test',
+    ])
+  })
+
+  it('falls to the active accounting contacts when the method carries no payee address', () => {
+    expect(remittanceRecipients(CARRIER, CONTACTS, { payeeEmail: null })).toEqual([
+      'ann@blueline.test',
+      'eve@blueline.test',
+    ])
+  })
+
+  it('falls to the carrier address only when no accounting contact can be written to', () => {
+    expect(remittanceRecipients(CARRIER, [carrierContact('cal', { types: ['DISPATCH'] })], null)).toEqual([
+      'office@blueline.test',
+    ])
+  })
+
+  it('returns nothing rather than a blank address when there is nobody to write to', () => {
+    expect(remittanceRecipients({ email: null }, [], null)).toEqual([])
+    expect(remittanceRecipients({ email: '   ' }, [carrierContact('dee', { email: '' })], { payeeEmail: '  ' })).toEqual([])
+  })
+
+  it('writes to an address once even when two contacts share it', () => {
+    const shared = [carrierContact('ann'), carrierContact('ann2', { email: 'ann@blueline.test' })]
+    expect(remittanceRecipients(CARRIER, shared, null)).toEqual(['ann@blueline.test'])
   })
 })

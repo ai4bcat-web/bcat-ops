@@ -28,6 +28,31 @@ export const AGING_BUCKET_LABEL: Record<AgingBucket, string> = {
   D91_PLUS: '90+',
 }
 
+/**
+ * One party's column of an aging table: a customer who owes us in AR, a carrier we owe
+ * in AP. `AgingCustomerRow` is the AR face of this row and keeps the customer wording
+ * the AR screens already read.
+ */
+export interface AgingPartyRow {
+  partyId: string
+  partyName: string
+  byBucket: Record<AgingBucket, number>
+  totalCents: number
+  /** How many of this party's open items are at least one day past due. */
+  lateCount: number
+  /** `daysLate` of the oldest late item; 0 when nothing is late. */
+  oldestDays: number
+}
+
+export interface AgingPartySummary {
+  totalCents: number
+  byBucket: Record<AgingBucket, number>
+  /** Everything outside CURRENT. */
+  lateCents: number
+  /** Sorted by open balance, largest first. */
+  byParty: AgingPartyRow[]
+}
+
 /** One customer's column of the aging table. */
 export interface AgingCustomerRow {
   customerId: string
@@ -116,42 +141,51 @@ const emptyBuckets = (): Record<AgingBucket, number> => ({
 })
 
 /**
- * Age a set of invoices as of a date.
+ * One open item to age: an AR invoice's balance, or — in AP — a carrier bill's.
  *
- * Only ISSUED and PARTIAL rows count: callers pass the `arOpen` index, but a row that was
- * paid or voided between the query and the render would otherwise show up as money owed.
- * The balance — not the total — is what is aged, so a part-paid invoice ages its
- * remainder.
+ * The aging arithmetic is the same money question on both sides of the ledger, so it is
+ * written once against this shape and the ledger-specific wrappers map onto it.
  */
-export function ageInvoices(openInvoices: InvoiceRecord[], asOf: string): AgingSummary {
+export interface AgingOpenItem {
+  partyId: string
+  partyName?: string | null
+  dueAt: string
+  balanceCents: number
+}
+
+/**
+ * Age a set of open balances as of a date. Every item passed is counted: filtering out
+ * what is no longer open is the caller's job, because only the caller knows which
+ * statuses mean "still owed" on its side of the ledger.
+ */
+export function ageOpenItems(items: AgingOpenItem[], asOf: string): AgingPartySummary {
   const byBucket = emptyBuckets()
-  const byCustomerId = new Map<string, AgingCustomerRow>()
+  const byPartyId = new Map<string, AgingPartyRow>()
   let totalCents = 0
   let lateCents = 0
 
-  for (const inv of openInvoices) {
-    if (!OPEN_STATUS[inv.status]) continue
-    const balance = inv.balanceCents
-    const late = daysLate(inv.dueAt, asOf)
-    const bucket = agingBucket(inv.dueAt, asOf)
+  for (const item of items) {
+    const balance = item.balanceCents
+    const late = daysLate(item.dueAt, asOf)
+    const bucket = agingBucket(item.dueAt, asOf)
 
     totalCents += balance
     byBucket[bucket] += balance
     if (late > 0) lateCents += balance
 
-    let row = byCustomerId.get(inv.customerId)
+    let row = byPartyId.get(item.partyId)
     if (!row) {
       row = {
-        customerId: inv.customerId,
-        customerName: inv.customerName ?? '',
+        partyId: item.partyId,
+        partyName: item.partyName ?? '',
         byBucket: emptyBuckets(),
         totalCents: 0,
         lateCount: 0,
         oldestDays: 0,
       }
-      byCustomerId.set(inv.customerId, row)
+      byPartyId.set(item.partyId, row)
     }
-    if (!row.customerName && inv.customerName) row.customerName = inv.customerName
+    if (!row.partyName && item.partyName) row.partyName = item.partyName
     row.byBucket[bucket] += balance
     row.totalCents += balance
     if (late > 0) {
@@ -160,14 +194,50 @@ export function ageInvoices(openInvoices: InvoiceRecord[], asOf: string): AgingS
     }
   }
 
-  const byCustomer = [...byCustomerId.values()].sort(
+  const byParty = [...byPartyId.values()].sort(
     (a, b) =>
       b.totalCents - a.totalCents ||
-      a.customerName.localeCompare(b.customerName) ||
-      a.customerId.localeCompare(b.customerId),
+      a.partyName.localeCompare(b.partyName) ||
+      a.partyId.localeCompare(b.partyId),
   )
 
-  return { totalCents, byBucket, lateCents, byCustomer }
+  return { totalCents, byBucket, lateCents, byParty }
+}
+
+/**
+ * Age a set of invoices as of a date.
+ *
+ * Only ISSUED and PARTIAL rows count: callers pass the `arOpen` index, but a row that was
+ * paid or voided between the query and the render would otherwise show up as money owed.
+ * The balance — not the total — is what is aged, so a part-paid invoice ages its
+ * remainder.
+ */
+export function ageInvoices(openInvoices: InvoiceRecord[], asOf: string): AgingSummary {
+  const items: AgingOpenItem[] = []
+  for (const inv of openInvoices) {
+    if (!OPEN_STATUS[inv.status]) continue
+    items.push({
+      partyId: inv.customerId,
+      partyName: inv.customerName,
+      dueAt: inv.dueAt,
+      balanceCents: inv.balanceCents,
+    })
+  }
+
+  const aged = ageOpenItems(items, asOf)
+  return {
+    totalCents: aged.totalCents,
+    byBucket: aged.byBucket,
+    lateCents: aged.lateCents,
+    byCustomer: aged.byParty.map((row) => ({
+      customerId: row.partyId,
+      customerName: row.partyName,
+      byBucket: row.byBucket,
+      totalCents: row.totalCents,
+      lateCount: row.lateCount,
+      oldestDays: row.oldestDays,
+    })),
+  }
 }
 
 /**
@@ -296,13 +366,17 @@ export const AGING_CSV_HEADER = [
   'Oldest days',
 ] as const
 
-/** The aging table as a CSV, in the order given (i.e. `ageInvoices` order). */
-export function agingCsv(rows: AgingCustomerRow[]): string {
-  const lines = [AGING_CSV_HEADER.map(q).join(',')]
+/** Both exports write the same table; only the party column and its heading differ. */
+function agingCsvOf<Row extends Omit<AgingPartyRow, 'partyId' | 'partyName'>>(
+  header: readonly string[],
+  rows: Row[],
+  nameOf: (row: Row) => string,
+): string {
+  const lines = [header.map(q).join(',')]
   for (const r of rows) {
     lines.push(
       [
-        r.customerName,
+        nameOf(r),
         ...AGING_BUCKETS.map((b) => dollars(r.byBucket[b])),
         dollars(r.totalCents),
         r.lateCount,
@@ -313,4 +387,22 @@ export function agingCsv(rows: AgingCustomerRow[]): string {
     )
   }
   return lines.join('\n')
+}
+
+/** The aging table as a CSV, in the order given (i.e. `ageInvoices` order). */
+export function agingCsv(rows: AgingCustomerRow[]): string {
+  return agingCsvOf(AGING_CSV_HEADER, rows, (r) => r.customerName)
+}
+
+export const AP_AGING_CSV_HEADER = [
+  'Carrier',
+  ...AGING_BUCKETS.map((b) => AGING_BUCKET_LABEL[b]),
+  'Total',
+  'Late bills',
+  'Oldest days',
+] as const
+
+/** The AP aging table as a CSV, in the order given (i.e. `ageOpenItems` order). */
+export function apAgingCsv(rows: AgingPartyRow[]): string {
+  return agingCsvOf(AP_AGING_CSV_HEADER, rows, (r) => r.partyName)
 }

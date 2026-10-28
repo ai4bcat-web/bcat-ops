@@ -57,6 +57,8 @@ import { PricingMarginPage } from '@/features/pricing-margin/PricingMarginPage'
 import { FactoringPage } from '@/features/factoring/FactoringPage'
 import { ArPage } from '@/features/ar/ArPage'
 import { InvoiceDetail } from '@/features/ar/InvoiceDetail'
+import { ApPage } from '@/features/ap/ApPage'
+import { BillDetail } from '@/features/ap/BillDetail'
 import { HoursPage } from '@/features/hours/HoursPage'
 import { VendorApPage } from '@/features/vendor-ap/VendorApPage'
 import { DispatchPage } from '@/features/dispatch/DispatchPage'
@@ -239,6 +241,9 @@ export default function App() {
               {/* Invoicing and the cash against it; its own page key, not `loads`. */}
               <Route path="/ar" element={<RequirePage page="invoicing"><ArPage /></RequirePage>} />
               <Route path="/ar/invoices/:id" element={<RequirePage page="invoicing"><InvoiceDetail /></RequirePage>} />
+              {/* The other side of the same freight; its own page key, not `invoicing`. */}
+              <Route path="/ap" element={<RequirePage page="carrierPay"><ApPage /></RequirePage>} />
+              <Route path="/ap/bills/:id" element={<RequirePage page="carrierPay"><BillDetail /></RequirePage>} />
               <Route path="/hours" element={<RequirePage page="hours"><HoursPage /></RequirePage>} />
               <Route path="/vendor-ap" element={<RequirePage page="vendorAp"><VendorApPage /></RequirePage>} />
               <Route path="/dispatch" element={<RequirePage page="dispatch"><DispatchPage /></RequirePage>} />

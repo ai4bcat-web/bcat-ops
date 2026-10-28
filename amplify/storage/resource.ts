@@ -138,5 +138,16 @@ export const storage = defineStorage({
       allow.authenticated.to(['read']),
       allow.groups(STAFF_GROUPS).to(['read']),
     ],
+    /*
+     * Remittance advices (Step G), keyed remittances/{carrierId}/{paymentId}-v{n}.pdf.
+     *
+     * Written only by tms-finance-actions from bytes it rendered itself; the browser
+     * reads and never writes, and nothing is ever deleted — a reversed payment keeps
+     * the advice the carrier was sent.
+     */
+    'remittances/*': [
+      allow.authenticated.to(['read']),
+      allow.groups(STAFF_GROUPS).to(['read']),
+    ],
   })
 })

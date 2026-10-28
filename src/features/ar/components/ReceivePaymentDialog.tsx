@@ -31,7 +31,7 @@ import {
   recordPayment,
 } from '@/lib/apiClient'
 import { formatCents } from '@/lib/invoiceBuild'
-import { planPayment, suggestAllocation, type PlanCredit, type PlanInvoice } from '@/lib/paymentApply'
+import { planPayment, suggestAllocation, type PlanCredit, type PlanDocument } from '@/lib/paymentApply'
 import { formatDateInput } from '@/lib/date'
 import { centsFromInput, inputFromCents } from './money'
 import type { ArPaymentMethod, ArPaymentRecord, CreditApplication, InvoiceRecord, PaymentApplication } from '@/types/tms'
@@ -110,14 +110,14 @@ export function ReceivePaymentDialog({ customerId, customerName, invoiceId, meth
     [payments],
   )
 
-  const planInvoices = useMemo<PlanInvoice[]>(() => invoices.map((row) => ({
+  const planDocuments = useMemo<PlanDocument[]>(() => invoices.map((row) => ({
     id: row.id,
-    customerId: row.customerId,
-    status: row.status,
+    partyId: row.customerId,
     totalCents: row.totalCents,
     paidCents: row.paidCents,
-    writtenOffCents: row.writtenOffCents,
+    offsetCents: row.writtenOffCents,
     balanceCents: row.balanceCents,
+    voided: row.status === 'VOID',
     number: row.number,
   })), [invoices])
 
@@ -126,7 +126,7 @@ export function ReceivePaymentDialog({ customerId, customerName, invoiceId, meth
   // name rather than reporting a credit that was "not found".
   const planCredits = useMemo<PlanCredit[]>(() => payments.map((row) => ({
     id: row.id,
-    customerId: row.customerId,
+    partyId: row.customerId,
     kind: row.kind,
     unappliedCents: row.unappliedCents,
     reference: row.reference,
@@ -145,13 +145,14 @@ export function ReceivePaymentDialog({ customerId, customerName, invoiceId, meth
 
   const plan = useMemo(() => planPayment({
     kind: 'PAYMENT',
-    customerId,
+    partyId: customerId,
     amountCents,
-    applications,
+    // The dialog posts and reads the AR shape; only the planner speaks `documentId`.
+    applications: applications.map((row) => ({ documentId: row.invoiceId, amountCents: row.amountCents })),
     creditApplications,
-    invoices: planInvoices,
+    documents: planDocuments,
     credits: planCredits,
-  }), [customerId, amountCents, applications, creditApplications, planInvoices, planCredits])
+  }), [customerId, amountCents, applications, creditApplications, planDocuments, planCredits])
 
   const duplicate = useMemo(() => {
     const typed = reference.trim().toLowerCase()
@@ -167,8 +168,8 @@ export function ReceivePaymentDialog({ customerId, customerName, invoiceId, meth
     const dueAtById: Record<string, string> = {}
     for (const row of invoices) dueAtById[row.id] = row.dueAt
     const next: AmountDrafts = {}
-    for (const row of suggestAllocation(funds, planInvoices, dueAtById)) {
-      next[row.invoiceId] = inputFromCents(row.amountCents)
+    for (const row of suggestAllocation(funds, planDocuments, dueAtById)) {
+      next[row.documentId] = inputFromCents(row.amountCents)
     }
     setAllocations(next)
   }

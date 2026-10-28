@@ -386,6 +386,18 @@ export interface TmsSettings {
   /** One e-mail per invoice, or one per customer + bill-to. Default PER_INVOICE. */
   invoiceBatchEmail?: InvoiceBatchEmailMode | null
 
+  // Step G — AP: carrier bills and payments
+  /** Only owner/ADMIN may approve a bill when true. Default true. */
+  apApprovalAdminOnly?: boolean | null
+  /** Payment, credit, reversal and void are owner/ADMIN when true. Default true. */
+  apPostingAdminOnly?: boolean | null
+  /** An unsigned rate con blocks approval when true. Default true. */
+  apRequireSignedRateCon?: boolean | null
+  /** Body of the remittance e-mail. Must contain `{reference}`. */
+  remittanceEmailTemplate?: string | null
+  /** Carrier paperwork a bill needs before approval. Defaults to `requiredCarrierUploadTypes`. */
+  apBillDocsRequired?: string[] | null
+
   createdAt?: string
   updatedAt?: string
 }
@@ -753,6 +765,12 @@ export interface LoadCarrierRecord {
   costCents?: number | null
   apStatus?: ApStatus | null
   invoiceId?: string | null
+  // Step G — AP: what the assignment still owes and when its rung last moved
+  /** Sparse `'OPEN'` while the leg owes a carrier money; absent once PAID or bounced. */
+  apOpen?: string | null
+  apStatusChangedAt?: string | null
+  apBalanceCents?: number | null
+  apPaidAt?: string | null
   // Step C — quick pay, the rate confirmation and the booking trail
   /** Free text behind `removalReason`, which is an enum. */
   removalNote?: string | null
@@ -1502,7 +1520,7 @@ export interface ShipmentDocumentRecord {
   updatedAt?: string
 }
 
-export type ShipmentNoticeKind = 'MILESTONE' | 'POD_REQUEST' | 'DOCUMENTS' | 'INVOICE'
+export type ShipmentNoticeKind = 'MILESTONE' | 'POD_REQUEST' | 'DOCUMENTS' | 'INVOICE' | 'REMITTANCE'
 
 export type ShipmentNoticeChannel = 'EMAIL' | 'COPY'
 
@@ -1756,4 +1774,174 @@ export interface ArSettings {
   arPostingAdminOnly?: boolean | null
   invoiceBatchEmail?: InvoiceBatchEmailMode | null
   defaultPaymentTermsDays?: number | null
+}
+
+// ── AP: carrier bills & payments (Step G) ────────────────────────────────────
+
+export type CarrierBillStatus = 'IN_REVIEW' | 'TO_BE_PAID' | 'PARTIAL' | 'PAID' | 'VOID'
+
+/** Who is owed is always the carrier; this says where the money is sent. */
+export type ApPayeeKind = 'CARRIER' | 'FACTOR'
+
+export type ApPaymentKind = 'PAYMENT' | 'CREDIT_MEMO' | 'REVERSAL'
+
+export type ApPaymentMethod = 'ACH' | 'WIRE' | 'CHECK' | 'ZELLE' | 'VENMO' | 'EFT' | 'OTHER'
+
+/**
+ * Where a carrier's money goes, snapshotted onto the bill at Record.
+ *
+ * Never carries `bankDetailsKey`: the account itself stays in S3 behind the carrier
+ * directory, and a bill is read by anyone who can read the AP board.
+ */
+export interface ApRemitTo {
+  name: string
+  factorName?: string | null
+  method?: ApPaymentMethod | null
+  accountLast4?: string | null
+  payeeEmail?: string | null
+  address?: Address | null
+}
+
+/** One charge line, copied off the assignment's CARRIER LoadCharge rows at Record. */
+export interface CarrierBillLine {
+  chargeId: string
+  code: string
+  label?: string | null
+  calculatedBy?: ChargeCalc | null
+  rateCents: number
+  count: number
+  amountCents: number
+}
+
+/**
+ * One recorded bill for one carrier assignment.
+ *
+ * Lines, fee, terms and remit-to are a snapshot taken at RECORD_BILL in the same
+ * transaction that finalizes the assignment's charges. A mistake is voided and
+ * re-recorded, never edited.
+ */
+export interface CarrierBillRecord {
+  id: string
+  loadCarrierId: string
+  loadId: string
+  shipmentId: string
+  shipmentNumber?: string | null
+  loadNumber?: string | null
+  carrierId: string
+  carrierName?: string | null
+  carrierMc?: string | null
+  payeeKind: ApPayeeKind
+  paymentMethodId?: string | null
+  remitTo?: ApRemitTo | null
+  divisionKey?: string | null
+  status: CarrierBillStatus
+  /** The carrier's own invoice number. */
+  billNumber?: string | null
+  /** YYYY-MM-DD. */
+  billDate: string
+  /** 'YYYY-MM' of billDate. */
+  billMonth: string
+  recordedAt: string
+  recordedBy: string
+  /** Recorded before the load delivered — approval says so out loud. */
+  recordedEarly?: boolean | null
+  /** YYYY-MM-DD. */
+  dueAt: string
+  termsDays: number
+  quickPay?: boolean | null
+  quickPayDays?: number | null
+  quickPayFeeBps?: number | null
+  lines?: CarrierBillLine[] | null
+  grossCents: number
+  quickPayFeeCents: number
+  /** gross − fee. What we actually pay. */
+  netCents: number
+  /** What the carrier's invoice says. */
+  billedCents: number
+  /** billed − gross. Must be zero before the bill can be approved. */
+  varianceCents: number
+  paidCents: number
+  creditedCents: number
+  /** net − paid − credited. */
+  balanceCents: number
+  /** Sparse `'OPEN'` while IN_REVIEW, TO_BE_PAID or PARTIAL; absent once PAID or VOID. */
+  apOpen?: string | null
+  documentId?: string | null
+  approvedAt?: string | null
+  approvedBy?: string | null
+  approvalWarnings?: string[] | null
+  docsOverrideAt?: string | null
+  docsOverrideBy?: string | null
+  docsOverrideNote?: string | null
+  paidAt?: string | null
+  voidedAt?: string | null
+  voidedBy?: string | null
+  voidReason?: string | null
+  note?: string | null
+  createdBy: string
+  updatedBy: string
+  version: number
+  createdAt?: string
+  updatedAt?: string
+}
+
+/**
+ * Money from one AP payment put against one bill.
+ *
+ * `creditCents` is the slice of it that came out of an AP credit rather than out of
+ * the bank, recorded at post so a reversal restores exactly what it took.
+ */
+export interface ApPaymentApplication {
+  billId: string
+  amountCents: number
+  creditCents?: number
+}
+
+/**
+ * One posted AP row: a payment we sent, a credit we hold against a carrier, or a
+ * reversal. Immutable once written, except `unappliedCents` — spent down by a later
+ * payment with a conditional ADD — and `reversedByPaymentId`.
+ */
+export interface ApPaymentRecord {
+  id: string
+  carrierId: string
+  payeeKind?: ApPayeeKind | null
+  kind: ApPaymentKind
+  /** The typed date at noon UTC, so a timezone cannot slide a payment into last month. */
+  paidAt: string
+  method?: ApPaymentMethod | null
+  reference?: string | null
+  amountCents: number
+  appliedCents: number
+  unappliedCents: number
+  applications?: ApPaymentApplication[] | null
+  creditApplications?: CreditApplication[] | null
+  remitTo?: ApRemitTo | null
+  /** A credit raised against one assignment (a TONU adjustment, a claim). */
+  loadCarrierId?: string | null
+  reversesPaymentId?: string | null
+  reversedByPaymentId?: string | null
+  pdfKey?: string | null
+  pdfVersion?: number | null
+  remittanceSentAt?: string | null
+  remittanceSentTo?: string | null
+  remittanceCount?: number | null
+  markedSentAt?: string | null
+  markedSentBy?: string | null
+  markedSentNote?: string | null
+  lastNoticeId?: string | null
+  note?: string | null
+  createdBy: string
+  createdAt?: string
+  updatedAt?: string
+}
+
+/** The AP half of `TmsSettings`, as the settings card edits it. */
+export interface ApSettings {
+  apApprovalAdminOnly?: boolean | null
+  apPostingAdminOnly?: boolean | null
+  apRequireSignedRateCon?: boolean | null
+  remittanceEmailTemplate?: string | null
+  apBillDocsRequired?: string[] | null
+  defaultCarrierTermsDays?: number | null
 }

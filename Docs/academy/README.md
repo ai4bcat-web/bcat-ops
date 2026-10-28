@@ -9,6 +9,7 @@ Markdown knowledge base for the in-app Help/Academy module and Ask assistant.
 - [Tracking and Check Calls](tracking-and-check-calls.md) — the four tracking methods, logging check calls, due/overdue reminders, incidents and charges, the carrier ping link, and the public Customer Link.
 - [Documents and Delivery](documents-and-delivery.md) — the Documents tab and its three sections, generating and superseding files, the required-document strip and Ready to invoice, reviewing carrier uploads, the carrier upload link, milestone e-mails, and rating a carrier.
 - [AR — Invoicing and Payments](ar-invoicing-and-payments.md) — the AR ladder and who moves each rung, invoicing early, what Generate freezes and why Void is the only undo, e-mailing and batch invoicing, payments, credits, overpayments, write-offs and reversals, the aging table, Send to Factor, and what LEGACY means.
+- [AP — Carrier Bills and Payments](ap-carrier-bills-and-payments.md) — the AP ladder and who moves each rung, why own-fleet legs are settled through driver pay, recording a carrier's bill and the charge freeze, the approval gate and its overrides, quick pay, paying a carrier with allocations, credits and reversals, factored carriers, the remittance advice, the AP aging, and how the Vendor AP Queue differs.
 
 ## Article front-matter
 

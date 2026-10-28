@@ -10,6 +10,7 @@ import { CarrierBookingSettingsCard } from './CarrierBookingSettingsCard'
 import { TrackingSettingsCard } from './TrackingSettingsCard'
 import { DocumentSettingsCard } from './DocumentSettingsCard'
 import { ArSettingsCard } from './ArSettingsCard'
+import { ApSettingsCard } from './ApSettingsCard'
 
 export function SettingsPage() {
   const { isAdmin } = useAuth()
@@ -53,6 +54,7 @@ export function SettingsPage() {
             <TrackingSettingsCard />
             <DocumentSettingsCard />
             <ArSettingsCard />
+            <ApSettingsCard />
           </>
         )}
 

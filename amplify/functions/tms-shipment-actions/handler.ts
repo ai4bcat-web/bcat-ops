@@ -45,6 +45,7 @@ import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2'
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb'
 import { createHash, randomBytes, randomUUID } from 'crypto'
 import {
+  IDX_CARRIERS_BY_SHIPMENT,
   IDX_CHARGES_BY_SHIPMENT,
   IDX_ORDERS_BY_SHIPMENT,
   batchGetByIds as storeBatchGetByIds,
@@ -341,6 +342,12 @@ const CHECK_CALL_FUTURE_GRACE_MS = 5 * 60_000
 const MAX_CHECK_CALL_NOTE = 2000
 /** The three sides an incident charge may be entered on. */
 const INCIDENT_CHARGE_SIDES = ['CUSTOMER', 'CARRIER', 'BOTH'] as const
+/**
+ * Step G. What a recorded carrier bill does to the charge lines underneath it:
+ * they are what AP promised to pay, so they stop moving until the bill is voided.
+ */
+const FINALIZED_CHARGES_MESSAGE =
+  'That assignment\'s bill is recorded; void it first, then change what the carrier is owed'
 
 type Action =
   | 'CREATE_SHIPMENT'
@@ -363,6 +370,7 @@ type Action =
   | 'DISPATCH_LOAD'
   | 'REMOVE_LOAD_CARRIER'
   | 'RECALC_CHARGES'
+  | 'UPDATE_CARRIER_CHARGES'
   | 'SET_AR_STATUS'
   | 'LOG_CHECK_CALL'
   | 'RESOLVE_INCIDENT'
@@ -426,9 +434,16 @@ async function authorize(action: Action, identity?: AppSyncIdentity | null): Pro
   if (!email) throw new Error('Unauthorized: could not resolve caller email')
   const groups = getGroups(identity)
   const isAdmin = email === OWNER_EMAIL || groups.includes(ADMIN_GROUP)
-  // Building and moving freight is the loads page's job; everything here belongs to it.
-  if (!isAdmin && !groups.includes('page-loads')) {
-    throw new Error(`Forbidden: ${action} requires owner, ADMIN, or page-loads`)
+  // Building and moving freight is the loads page's job; everything here belongs to
+  // it. Step G's one exception: what a carrier is owed is edited from the AP desk
+  // as often as from dispatch, so `page-carrierPay` may do that and nothing else.
+  const carrierPay = action === 'UPDATE_CARRIER_CHARGES' && groups.includes('page-carrierPay')
+  if (!isAdmin && !groups.includes('page-loads') && !carrierPay) {
+    throw new Error(
+      action === 'UPDATE_CARRIER_CHARGES'
+        ? `Forbidden: ${action} requires owner, ADMIN, page-loads, or page-carrierPay`
+        : `Forbidden: ${action} requires owner, ADMIN, or page-loads`,
+    )
   }
   return { email, sub: identity.sub, groups, isAdmin }
 }
@@ -923,6 +938,8 @@ function chargeRow(
   amountCents: number,
   ids: { shipmentId: string; orderId: string; loadId: string },
   caller: Caller,
+  /** The row this line already is, when it is being rewritten rather than minted. */
+  existing: Row | null = null,
 ): Row {
   const now = nowIso()
   return {
@@ -943,8 +960,10 @@ function chargeRow(
     release: charge.release,
     sortOrder: charge.sortOrder,
     note: charge.note,
-    createdBy: caller.email,
-    createdAt: now,
+    // Who first put this money on the load, which an edit does not change. These
+    // come off our own row, not off the request, so they are read and not validated.
+    createdBy: typeof existing?.createdBy === 'string' ? existing.createdBy : caller.email,
+    createdAt: typeof existing?.createdAt === 'string' ? existing.createdAt : now,
     updatedAt: now,
   }
 }
@@ -1524,6 +1543,10 @@ async function requireAdminForCancelDelete(action: string, caller: Caller, setti
  * Step F: once an order is invoiced its money lives on the Invoice row, which
  * this router cannot touch. Canceling or deleting the shipment under it would
  * strand an open receivable, so both refuse and name the bill to void first.
+ *
+ * Step G: the same is true of the other side. An assignment carrying `invoiceId`
+ * has a CarrierBill that is not voided — VOID_BILL is what clears the field — and
+ * canceling the shipment under it would strand a payable.
  */
 async function assertNoInvoicedOrders(shipmentId: string, verb: string): Promise<void> {
   const orders = await queryIndex(ORDER_TABLE_NAME, IDX_ORDERS_BY_SHIPMENT, 'shipmentId', shipmentId)
@@ -1531,6 +1554,12 @@ async function assertNoInvoicedOrders(shipmentId: string, verb: string): Promise
   if (invoiced) {
     const label = optionalString(invoiced.invoiceNumber, 100) ?? optionalString(invoiced.invoiceId, 100) ?? 'an invoice'
     throw new Error(`This shipment has invoice ${label}; void the invoice first, then ${verb} the shipment`)
+  }
+  const assignments = await queryIndex(LOAD_CARRIER_TABLE_NAME, IDX_CARRIERS_BY_SHIPMENT, 'shipmentId', shipmentId)
+  const billed = assignments.find((assignment) => assignment.invoiceId)
+  if (billed) {
+    const label = optionalString(billed.carrierName, 200) ?? 'a carrier'
+    throw new Error(`${label} has a carrier bill on this shipment; void the bill first, then ${verb} the shipment`)
   }
 }
 
@@ -1890,7 +1919,16 @@ async function duplicateShipment(input: Row, caller: Caller): Promise<Row> {
         chargesFinalizedAt: null,
         carrierRateCents: totals.carrierRateCents,
         costCents: totals.costCents,
-        apStatus: 'AWAITING_INVOICE',
+        // Step G. The copy owes its own money: nothing of the source's bill comes
+        // across, and an own-fleet leg gets no AP rung at all — it is settled through
+        // driver pay. `apOpen` is a sparse index hash key, so it is left off the row
+        // entirely (`marshallRow` drops the undefined) rather than stored as a NULL
+        // the index refuses.
+        apStatus: sourceCarrier.kind === 'CARRIER' ? 'AWAITING_INVOICE' : undefined,
+        apOpen: sourceCarrier.kind === 'CARRIER' ? 'OPEN' : undefined,
+        apStatusChangedAt: sourceCarrier.kind === 'CARRIER' ? now : undefined,
+        apBalanceCents: null,
+        apPaidAt: null,
         invoiceId: null,
         createdBy: caller.email,
         updatedBy: caller.email,
@@ -2152,7 +2190,13 @@ function retireCarrier(
     ...extra,
     updatedBy: caller.email,
     updatedAt: now,
-  }, null)
+  }, null, {
+    // Step G. A bounced carrier hauled nothing and is owed nothing, so the row
+    // leaves AP's worklist with its charges. A TONU'd one showed up and is still
+    // owed, so it stays. `apOpen` is a sparse index hash key: it has to leave the
+    // row rather than be set to null, which DynamoDB refuses outright.
+    remove: outcome === 'BOUNCED' ? ['apOpen'] : [],
+  })
 }
 
 async function assignAsset(input: Row, caller: Caller): Promise<Row> {
@@ -2196,7 +2240,8 @@ async function assignAsset(input: Row, caller: Caller): Promise<Row> {
     trailerNumber: optionalString(input.trailerNumber, 40),
     carrierRateCents: 0,
     costCents: 0,
-    apStatus: 'AWAITING_INVOICE',
+    // No apStatus: an own-fleet leg is paid through a driver settlement and never
+    // enters AP at all.
     createdBy: caller.email,
     updatedBy: caller.email,
     createdAt: now,
@@ -2287,6 +2332,10 @@ async function assignCarrier(input: Row, caller: Caller): Promise<Row> {
     carrierRateCents: carrierRateCents ?? 0,
     costCents: carrierRateCents ?? 0,
     apStatus: 'AWAITING_INVOICE',
+    // Step G. The AP worklist is an index on `apOpen`; a carrier we owe money to
+    // is on it from the moment they are booked.
+    apOpen: 'OPEN',
+    apStatusChangedAt: now,
     createdBy: caller.email,
     updatedBy: caller.email,
     createdAt: now,
@@ -2350,6 +2399,12 @@ async function removeLoadCarrier(input: Row, caller: Caller): Promise<Row> {
   const carrier = await getById(LOAD_CARRIER_TABLE_NAME, loadCarrierId)
   if (!carrier) throw new Error(`Load carrier not found: ${loadCarrierId}`)
   if (carrier.status !== 'ACTIVE') throw new Error('That assignment has already been removed')
+  // Step G. A bounce deletes the carrier's charge lines, which is the money a
+  // recorded bill was written against. The bill has to be voided first; a TONU is
+  // fine, because the assignment keeps its money and is still owed.
+  if (outcome === 'BOUNCED' && carrier.invoiceId) {
+    throw new Error('That assignment has a carrier bill; void the bill first, then bounce the carrier')
+  }
   const loadId = String(carrier.loadId)
   const shipmentId = String(carrier.shipmentId)
   const load = await getById(LOAD_TABLE_NAME, loadId)
@@ -2674,6 +2729,10 @@ async function bookCarrier(input: Row, caller: Caller): Promise<Row> {
     carrierRateCents,
     costCents: carrierCostCents,
     apStatus: 'AWAITING_INVOICE',
+    // Step G. The AP worklist is an index on `apOpen`; a carrier we owe money to
+    // is on it from the moment they are booked.
+    apOpen: 'OPEN',
+    apStatusChangedAt: now,
     createdBy: caller.email,
     updatedBy: caller.email,
     createdAt: now,
@@ -3087,14 +3146,68 @@ async function dispatchLoad(input: Row, caller: Caller): Promise<Row> {
   return rederiveShipmentStatus(shipmentId, caller)
 }
 
-// ── RECALC_CHARGES ───────────────────────────────────────────────────────────
+// ── Pricing (RECALC_CHARGES, UPDATE_CARRIER_CHARGES) ─────────────────────────
+
+/** Everything a charge line says about money and what it is for. */
+const CHARGE_CONTENT_FIELDS = [
+  'side', 'orderId', 'loadId', 'loadCarrierId', 'code', 'label', 'calculatedBy',
+  'rateCents', 'count', 'amountCents', 'isRate', 'release', 'sortOrder', 'note',
+] as const
+
+function sameCharge(existing: Row | null, next: Row): boolean {
+  if (!existing) return false
+  return CHARGE_CONTENT_FIELDS.every((field) => (existing[field] ?? null) === (next[field] ?? null))
+}
+
+/**
+ * A recorded bill is a promise to pay an exact number, so the lines under it stop
+ * moving: once an assignment carries `chargesFinalizedAt`, its CARRIER lines may
+ * not be edited, dropped or added to by any path through here. Voiding the bill
+ * clears the stamp and reopens them.
+ */
+function assertFinalizedChargesUnchanged(bundle: Bundle, chargeRows: Row[]): void {
+  const finalized = new Set(
+    bundle.loadCarriers.filter((c) => c.chargesFinalizedAt != null).map((c) => String(c.id)),
+  )
+  if (finalized.size === 0) return
+  const theirs = (row: Row): boolean => row.side === 'CARRIER' && finalized.has(String(row.loadCarrierId ?? ''))
+  const before = new Map(bundle.charges.filter(theirs).map((row) => [String(row.id), row]))
+  const after = new Map(chargeRows.filter(theirs).map((row) => [String(row.id), row]))
+  for (const [id, row] of before) {
+    const kept = after.get(id)
+    if (!kept || !sameCharge(row, kept)) throw new Error(FINALIZED_CHARGES_MESSAGE)
+  }
+  for (const id of after.keys()) {
+    if (!before.has(id)) throw new Error(FINALIZED_CHARGES_MESSAGE)
+  }
+}
+
+/** What one assignment is owed, re-derived from its own lines and cached on its row. */
+function carrierCachePatch(chargeRows: Row[], loadCarrier: Row, caller: Caller, now: string): Row {
+  // Their own lines, not the load's totals: a TONU'd carrier's retained line is
+  // still on the load and is not this carrier's money.
+  const id = String(loadCarrier.id)
+  const ownCostCents = carrierOwnCostCents(chargeRows, id)
+  const ownRateCents = carrierOwnCostCents(chargeRows.filter((r) => r.isRate === true), id)
+  return {
+    carrierRateCents: ownRateCents,
+    costCents: ownCostCents,
+    // The quick-pay fee is cached off that money, so an edited rate moves it;
+    // left alone it prints a stale fee and net payable on the rate con.
+    ...(loadCarrier.quickPay === true
+      ? { quickPayFeeCents: quickPayFee(ownCostCents, numberOrNull(loadCarrier.quickPayFeeBps) ?? 0) }
+      : {}),
+    updatedBy: caller.email,
+    updatedAt: now,
+  }
+}
 
 /**
  * Every write that repricing a shipment's first leg implies: the charge lines
  * themselves, the cached LoadFinancials, the order's revenue, the shipment's
  * version and the active carrier's own pay. RECALC_CHARGES is this and nothing
- * else; an incident's charge lines go through the same path, so a cached total
- * can never drift from the lines underneath it.
+ * else; an incident's charge lines and an AP charge edit go through the same path,
+ * so a cached total can never drift from the lines underneath it.
  */
 function repriceShipment(args: {
   bundle: Bundle
@@ -3114,6 +3227,7 @@ function repriceShipment(args: {
   const loadId = String(load.id)
   const orderId = String(order.id)
   const existingFinancials = bundle.financials.find((f) => f.id === loadId) ?? null
+  const existingById = new Map(bundle.charges.map((row) => [String(row.id), row]))
 
   const activeCarrier = bundle.loadCarriers.find((c) => c.loadId === loadId && c.status === 'ACTIVE') ?? null
   const { amounts, totals } = priceFor(
@@ -3128,13 +3242,19 @@ function repriceShipment(args: {
     amounts[i],
     { shipmentId, orderId, loadId },
     caller,
+    existingById.get(String(c.id ?? '')) ?? null,
   ))
   const keptIds = new Set(chargeRows.map((r) => String(r.id)))
   const removed = bundle.charges.filter((r) => !keptIds.has(String(r.id)))
+  assertFinalizedChargesUnchanged(bundle, chargeRows)
+  // Every caller resubmits the whole shipment, so most lines come back exactly as
+  // they were. Rewriting one of those would stamp an edit nobody made onto a line
+  // this action never claimed to touch — and spend a transaction slot on it.
+  const touched = chargeRows.filter((row) => !sameCharge(existingById.get(String(row.id)) ?? null, row))
   const now = nowIso()
 
   const writes: TransactWriteItem[] = [
-    ...chargeRows.map((row) => putItem(LOAD_CHARGE_TABLE_NAME, row, false)),
+    ...touched.map((row) => putItem(LOAD_CHARGE_TABLE_NAME, row, false)),
     ...removed.map((row) => deleteItemTx(LOAD_CHARGE_TABLE_NAME, String(row.id))),
     putItem(
       LOAD_FINANCIALS_TABLE_NAME,
@@ -3155,22 +3275,12 @@ function repriceShipment(args: {
     }, args.expectedShipmentUpdatedAt),
   ]
   if (activeCarrier) {
-    const activeCarrierId = String(activeCarrier.id)
-    // Their own lines, not the load's totals: a TONU'd carrier's retained line is
-    // still on the load and is not this carrier's money.
-    const ownCostCents = carrierOwnCostCents(chargeRows, activeCarrierId)
-    const ownRateCents = carrierOwnCostCents(chargeRows.filter((r) => r.isRate === true), activeCarrierId)
-    writes.push(updateItemTx(LOAD_CARRIER_TABLE_NAME, activeCarrierId, {
-      carrierRateCents: ownRateCents,
-      costCents: ownCostCents,
-      // The quick-pay fee is cached off that money, so an edited rate moves it;
-      // left alone it prints a stale fee and net payable on the rate con.
-      ...(activeCarrier.quickPay === true
-        ? { quickPayFeeCents: quickPayFee(ownCostCents, numberOrNull(activeCarrier.quickPayFeeBps) ?? 0) }
-        : {}),
-      updatedBy: caller.email,
-      updatedAt: now,
-    }, null))
+    writes.push(updateItemTx(
+      LOAD_CARRIER_TABLE_NAME,
+      String(activeCarrier.id),
+      carrierCachePatch(chargeRows, activeCarrier, caller, now),
+      null,
+    ))
   }
   return { writes, chargeRows, totals }
 }
@@ -3220,6 +3330,100 @@ async function recalcCharges(input: Row, caller: Caller): Promise<Row> {
     lines: chargeRows.length,
     revenueCents: totals.revenueCents,
     costCents: totals.costCents,
+  })
+  return readBundle(shipmentId) as unknown as Row
+}
+
+/**
+ * Rewrite one assignment's CARRIER charge lines, and nothing else.
+ *
+ * AP settles what a carrier is owed long after the customer's side is done, so
+ * this refuses on `chargesFinalizedAt` — a recorded bill names an exact number —
+ * and not on `frozenAt`, which froze the customer's lines and says nothing about
+ * the carrier's. Every other line on the shipment goes back in untouched, so the
+ * load's cached cost, profit and margin are re-derived by the one pricing path
+ * rather than patched here.
+ */
+async function updateCarrierCharges(input: Row, caller: Caller): Promise<Row> {
+  const loadCarrierId = assertString(input.loadCarrierId, 'loadCarrierId')
+  const expectedVersion = optionalInteger(input.expectedVersion, { min: 0, label: 'expectedVersion' })
+  if (expectedVersion == null) throw new Error('expectedVersion is required')
+
+  const assignment = await getById(LOAD_CARRIER_TABLE_NAME, loadCarrierId)
+  if (!assignment) throw new Error(`Load carrier not found: ${loadCarrierId}`)
+  if (assignment.kind !== 'CARRIER') {
+    throw new Error('An own-fleet leg is paid through a driver settlement, not through AP')
+  }
+  const status = String(assignment.status ?? '')
+  if (status !== 'ACTIVE' && status !== 'TONU') {
+    throw new Error('These charges belong to an assignment that is still owed money')
+  }
+  if (assignment.chargesFinalizedAt) throw new Error(FINALIZED_CHARGES_MESSAGE)
+
+  const shipmentId = String(assignment.shipmentId)
+  const bundle = await readBundle(shipmentId)
+  const { shipment } = bundle
+  if (shipment.deletedAt) throw new Error('That shipment is deleted')
+  const currentVersion = numberOrNull(shipment.version) ?? 1
+  if (currentVersion !== expectedVersion) throw conflictError('shipment', null)
+
+  const customer = await getById(CUSTOMER_TABLE_NAME, String(shipment.customerId))
+  const settings = await getSettings()
+  const rules = chargeCodeRules(settings, customer)
+  const theirs = (row: Row): boolean =>
+    row.side === 'CARRIER' && String(row.loadCarrierId ?? '') === loadCarrierId
+  const theirIds = new Set(bundle.charges.filter(theirs).map((row) => String(row.id)))
+  const requested = assertArrayOf(input.charges, 'charges', (item, i): ChargeInput => {
+    const charge = validateChargeInput(item, i, rules)
+    if (charge.side !== 'CARRIER') throw new Error(`charges[${i}].side must be CARRIER`)
+    // An id this assignment does not own would rewrite somebody else's line —
+    // the customer's, or a TONU'd sibling's — as a carrier charge of this one.
+    if (charge.id != null && !theirIds.has(charge.id)) {
+      throw new Error(`charges[${i}].id is not a line on this assignment`)
+    }
+    return { ...charge, loadId: String(assignment.loadId), loadCarrierId }
+  })
+  // Everything that is not this assignment's money goes back in exactly as it is:
+  // the pricing path needs the whole shipment to re-derive the load's totals, and
+  // a line that comes back unchanged is not rewritten.
+  const others = bundle.charges.filter((row) => !theirs(row)).map(chargeRowToInput)
+
+  const { writes, chargeRows, totals } = repriceShipment({
+    bundle,
+    charges: [...others, ...requested],
+    customer,
+    settings,
+    caller,
+    expectedShipmentUpdatedAt: String(shipment.updatedAt ?? ''),
+  })
+  const loadId = String(assignment.loadId)
+  const active = bundle.loadCarriers.find((c) => c.loadId === loadId && c.status === 'ACTIVE') ?? null
+  // A TONU'd assignment is still owed its retained lines, and repricing only
+  // re-caches the carrier currently on the load; this one has to be told itself.
+  if (String(active?.id ?? '') !== loadCarrierId) {
+    writes.push(updateItemTx(
+      LOAD_CARRIER_TABLE_NAME,
+      loadCarrierId,
+      carrierCachePatch(chargeRows, assignment, caller, nowIso()),
+      null,
+    ))
+  }
+  await transact(writes, 'charges')
+
+  // `Load.rate` mirrors the order's revenue. The carrier's side cannot move it,
+  // but the mirror is rewritten with the totals it belongs to rather than left to
+  // drift on the one path that does not refresh it.
+  const client = await getDataClient()
+  assertLoadWriteOk(
+    await client.models.Load.update({ id: loadId, rate: totals.revenueCents, updatedBy: caller.email }),
+    'Load update',
+  )
+
+  await writeAudit('LOAD_CARRIER', loadCarrierId, 'UPDATE_CARRIER_CHARGES', caller, {
+    loadId,
+    lines: requested.length,
+    costCents: carrierOwnCostCents(chargeRows, loadCarrierId),
+    loadCostCents: totals.costCents,
   })
   return readBundle(shipmentId) as unknown as Row
 }
@@ -4081,7 +4285,8 @@ async function backfillShipments(input: Row, caller: Caller): Promise<Row> {
           trailerNumber: optionalString(load.trailerNumber, 40),
           carrierRateCents: 0,
           costCents: 0,
-          apStatus: 'AWAITING_INVOICE',
+          // No apStatus: every row this backfill mints is own fleet, which is paid
+          // through a driver settlement and never enters AP.
           createdBy: caller.email,
           updatedBy: caller.email,
           createdAt: now,
@@ -4174,6 +4379,8 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return removeLoadCarrier(input, caller)
     case 'RECALC_CHARGES':
       return recalcCharges(input, caller)
+    case 'UPDATE_CARRIER_CHARGES':
+      return updateCarrierCharges(input, caller)
     case 'SET_AR_STATUS':
       return setArStatus(input, caller)
     case 'LOG_CHECK_CALL':

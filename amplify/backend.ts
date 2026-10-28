@@ -2024,6 +2024,13 @@ const financeDivisionTable  = backend.data.resources.tables['Division']
 const financeSettingsTable  = backend.data.resources.tables['TmsSettings']
 const financeAuditLogTable  = backend.data.resources.tables['AuditLog']
 const financeFactoringTable = backend.data.resources.tables['FactoringItem']
+// Step G (AP): the bill ledger, the payment ledger and the carrier directory rows a
+// bill's payee snapshot is taken from.
+const carrierBillTable      = backend.data.resources.tables['CarrierBill']
+const apPaymentTable        = backend.data.resources.tables['ApPayment']
+const financeCarrierTable   = backend.data.resources.tables['Carrier']
+const financeCarrierPayTbl  = backend.data.resources.tables['CarrierPaymentMethod']
+const financeCarrierCntTbl  = backend.data.resources.tables['CarrierContact']
 
 financeActionsFn.addToRolePolicy(
   new PolicyStatement({
@@ -2048,6 +2055,11 @@ financeActionsFn.addToRolePolicy(
       financeLoadTable.tableArn,
       financeLoadCarrierTbl.tableArn,
       financeChargeTable.tableArn,
+      carrierBillTable.tableArn,
+      apPaymentTable.tableArn,
+      financeCarrierTable.tableArn,
+      financeCarrierPayTbl.tableArn,
+      financeCarrierCntTbl.tableArn,
       financeCustomerTable.tableArn,
       financeDivisionTable.tableArn,
       shipmentDocumentTable.tableArn,
@@ -2068,6 +2080,10 @@ financeActionsFn.addToRolePolicy(
       `${financeChargeTable.tableArn}/index/*`,
       `${shipmentDocumentTable.tableArn}/index/*`,
       `${shipmentNoticeTable.tableArn}/index/*`,
+      `${carrierBillTable.tableArn}/index/*`,
+      `${apPaymentTable.tableArn}/index/*`,
+      `${financeCarrierPayTbl.tableArn}/index/*`,
+      `${financeCarrierCntTbl.tableArn}/index/*`,
     ],
   })
 )
@@ -2084,6 +2100,11 @@ financeActionsFn.addEnvironment('DIVISION_TABLE_NAME',           financeDivision
 financeActionsFn.addEnvironment('SETTINGS_TABLE_NAME',           financeSettingsTable.tableName)
 financeActionsFn.addEnvironment('AUDIT_LOG_TABLE_NAME',          financeAuditLogTable.tableName)
 financeActionsFn.addEnvironment('FACTORING_ITEM_TABLE_NAME',     financeFactoringTable.tableName)
+financeActionsFn.addEnvironment('CARRIER_BILL_TABLE_NAME',       carrierBillTable.tableName)
+financeActionsFn.addEnvironment('AP_PAYMENT_TABLE_NAME',         apPaymentTable.tableName)
+financeActionsFn.addEnvironment('CARRIER_TABLE_NAME',            financeCarrierTable.tableName)
+financeActionsFn.addEnvironment('CARRIER_PAYMENT_METHOD_TABLE_NAME', financeCarrierPayTbl.tableName)
+financeActionsFn.addEnvironment('CARRIER_CONTACT_TABLE_NAME',    financeCarrierCntTbl.tableName)
 financeActionsFn.addEnvironment('SHIPMENT_DOCUMENT_TABLE_NAME',  shipmentDocumentTable.tableName)
 financeActionsFn.addEnvironment('SHIPMENT_NOTICE_TABLE_NAME',    shipmentNoticeTable.tableName)
 financeActionsFn.addEnvironment('BUCKET_NAME',                   backend.storage.resources.bucket.bucketName)
@@ -2102,6 +2123,8 @@ financeActionsFn.addToRolePolicy(
 )
 // It writes the invoice PDFs it renders, and reads the paperwork it attaches to them.
 backend.storage.resources.bucket.grantReadWrite(financeActionsFn, 'invoices/*')
+// …and the remittance advices it renders for the carriers it pays.
+backend.storage.resources.bucket.grantReadWrite(financeActionsFn, 'remittances/*')
 backend.storage.resources.bucket.grantRead(financeActionsFn, 'shipment-docs/*')
 backend.storage.resources.bucket.grantRead(financeActionsFn, 'driver-docs/*')
 backend.storage.resources.bucket.grantRead(financeActionsFn, 'rate-confirms/*')

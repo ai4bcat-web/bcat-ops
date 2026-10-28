@@ -23,6 +23,8 @@ import type {
   ShipmentNoticeRecord, DocGateResult,
   InvoiceRecord, ArPaymentRecord, ArPaymentMethod, ArSettings, ArStatus,
   PaymentApplication, CreditApplication,
+  ApStatus, CarrierBillRecord, ApPaymentRecord, ApPaymentMethod, ApPaymentApplication,
+  ApPayeeKind, ApRemitTo, ApSettings,
 } from '@/types/tms'
 import type { CreditSummary } from '@/lib/customerCredit'
 import { isActiveDirectoryRecord } from '@/lib/tmsDirectory'
@@ -1136,6 +1138,11 @@ const TMS_SETTINGS_V7_FIELDS = [
   'nextInvoiceNumber', 'invoiceTerms', 'invoiceEmailTemplate', 'invoiceAttachTypes',
   'factorRemitTo', 'arPostingAdminOnly', 'invoiceBatchEmail',
 ]
+// Step G's AP settings. Its own flag again, for the same reason.
+const TMS_SETTINGS_V8_FIELDS = [
+  'apApprovalAdminOnly', 'apPostingAdminOnly', 'apRequireSignedRateCon',
+  'remittanceEmailTemplate', 'apBillDocsRequired',
+]
 const TMS_SETTINGS_JSON_FIELDS: (keyof TmsSettings)[] = ['accessorialCodes', 'loadStatusRules', 'defaultRequiredReferences', 'chargeCodes', 'quickPayTiers', 'trackingContact', 'factorRemitTo']
 let settingsHaveV2 = true
 let settingsHaveV3 = true
@@ -1143,6 +1150,7 @@ let settingsHaveV4 = true
 let settingsHaveV5 = true
 let settingsHaveV6 = true
 let settingsHaveV7 = true
+let settingsHaveV8 = true
 const tmsSettingsFields = () => [
   TMS_SETTINGS_FIELDS_BASE,
   settingsHaveV2 ? TMS_SETTINGS_V2_FIELDS.join(' ') : '',
@@ -1151,6 +1159,7 @@ const tmsSettingsFields = () => [
   settingsHaveV5 ? TMS_SETTINGS_V5_FIELDS.join(' ') : '',
   settingsHaveV6 ? TMS_SETTINGS_V6_FIELDS.join(' ') : '',
   settingsHaveV7 ? TMS_SETTINGS_V7_FIELDS.join(' ') : '',
+  settingsHaveV8 ? TMS_SETTINGS_V8_FIELDS.join(' ') : '',
 ].filter(Boolean).join(' ')
 const fieldNamed = (names: string[], err: unknown) => {
   const msg = safeStringify(err)
@@ -1301,7 +1310,12 @@ export async function getTmsSettings(): Promise<TmsSettings | null> {
     try {
       return await run()
     } catch (err) {
-      if (attempt >= 6) throw err
+      if (attempt >= 7) throw err
+      if (settingsHaveV8 && fieldNamed(TMS_SETTINGS_V8_FIELDS, err)) {
+        console.warn('[apiClient] backend has no TmsSettings AP fields yet — querying without them until deploy')
+        settingsHaveV8 = false
+        continue
+      }
       if (settingsHaveV7 && fieldNamed(TMS_SETTINGS_V7_FIELDS, err)) {
         console.warn('[apiClient] backend has no TmsSettings AR fields yet — querying without them until deploy')
         settingsHaveV7 = false
@@ -1442,18 +1456,28 @@ const LOAD_CARRIER_V3_FIELDS = [
   'uploadLinkId', 'podRequestedAt', 'docsMissing', 'ratingStars', 'ratingNote', 'ratedAt', 'ratedBy',
 ]
 let loadCarriersHaveDocuments = true
+// Step G's AP facts on the assignment: the sparse open marker, when the rung last moved,
+// what is still owed on it and when it was paid. A fourth generation with its own flag.
+const LOAD_CARRIER_V4_FIELDS = ['apOpen', 'apStatusChangedAt', 'apBalanceCents', 'apPaidAt']
+let loadCarriersHaveAp = true
 const loadCarrierFields = () => [
   LOAD_CARRIER_FIELDS,
   loadCarriersHaveCarrierV2 ? LOAD_CARRIER_V2_FIELDS.join(' ') : '',
   loadCarriersHaveDocuments ? LOAD_CARRIER_V3_FIELDS.join(' ') : '',
+  loadCarriersHaveAp ? LOAD_CARRIER_V4_FIELDS.join(' ') : '',
 ].filter(Boolean).join(' ')
 
-/** Every LoadCarrier index read, with a group dropped and retried if the backend predates it. */
-async function listLoadCarriersByIndex(name: string, args: Record<string, string>): Promise<LoadCarrierRecord[]> {
+/** Every LoadCarrier read, with a group dropped and retried if the backend predates it. */
+async function readLoadCarriers<T>(run: (fields: string) => Promise<T>): Promise<T> {
   for (;;) {
     try {
-      return await listAllByIndex<LoadCarrierRecord>(name, args, loadCarrierFields(), 1000)
+      return await run(loadCarrierFields())
     } catch (err) {
+      if (loadCarriersHaveAp && fieldNamed(LOAD_CARRIER_V4_FIELDS, err)) {
+        console.warn('[apiClient] backend has no AP fields on LoadCarrier yet — querying without them until deploy')
+        loadCarriersHaveAp = false
+        continue
+      }
       if (loadCarriersHaveDocuments && fieldNamed(LOAD_CARRIER_V3_FIELDS, err)) {
         console.warn('[apiClient] backend has no document fields on LoadCarrier yet — querying without them until deploy')
         loadCarriersHaveDocuments = false
@@ -1464,6 +1488,11 @@ async function listLoadCarriersByIndex(name: string, args: Record<string, string
       loadCarriersHaveCarrierV2 = false
     }
   }
+}
+
+/** The four index reads of the assignment table; `args` maps the generated arguments. */
+function listLoadCarriersByIndex(name: string, args: Record<string, string>): Promise<LoadCarrierRecord[]> {
+  return readLoadCarriers((fields) => listAllByIndex<LoadCarrierRecord>(name, args, fields, 1000))
 }
 const LOAD_FINANCIALS_FIELDS = `
   id loadId shipmentId orderId customerRateCents revenueCents carrierRateCents costCents
@@ -5114,4 +5143,356 @@ export async function sendToFactor(input: { invoiceId: string }): Promise<{
 
 export async function saveArSettings(input: Partial<ArSettings>): Promise<{ settings: TmsSettings }> {
   return financeAction<{ settings: TmsSettings }>('SAVE_AR_SETTINGS', input)
+}
+
+// ── AP: carrier bills & payments (tmsFinanceActions, Step G) ─────────────────
+//
+// The AP twin of the AR section above, and deliberately its shape: every write is an
+// action on `tmsFinanceActions`, and the reads come straight off the CarrierBill,
+// ApPayment and LoadCarrier indexes. Both models arrive with step G's deploy — until it
+// lands AppSync has no such query at all, so the reads degrade to "no bills" rather than
+// failing the page, the same bargain AR strikes above.
+
+export type {
+  CarrierBillRecord, CarrierBillLine, CarrierBillStatus, ApPayeeKind, ApRemitTo,
+  ApPaymentRecord, ApPaymentKind, ApPaymentMethod, ApPaymentApplication, ApSettings,
+} from '@/types/tms'
+
+const CARRIER_BILL_FIELDS = `
+  id loadCarrierId loadId shipmentId shipmentNumber loadNumber
+  carrierId carrierName carrierMc payeeKind paymentMethodId remitTo divisionKey
+  status billNumber billDate billMonth recordedAt recordedBy recordedEarly
+  dueAt termsDays quickPay quickPayDays quickPayFeeBps
+  lines grossCents quickPayFeeCents netCents billedCents varianceCents
+  paidCents creditedCents balanceCents apOpen documentId
+  approvedAt approvedBy approvalWarnings docsOverrideAt docsOverrideBy docsOverrideNote
+  paidAt voidedAt voidedBy voidReason note
+  createdBy updatedBy version createdAt updatedAt
+`
+const CARRIER_BILL_JSON_FIELDS: (keyof CarrierBillRecord)[] = ['remitTo', 'lines']
+
+const AP_PAYMENT_FIELDS = `
+  id carrierId payeeKind kind paidAt method reference
+  amountCents appliedCents unappliedCents applications creditApplications remitTo
+  loadCarrierId reversesPaymentId reversedByPaymentId
+  pdfKey pdfVersion remittanceSentAt remittanceSentTo remittanceCount
+  markedSentAt markedSentBy markedSentNote lastNoticeId note
+  createdBy createdAt updatedAt
+`
+const AP_PAYMENT_JSON_FIELDS: (keyof ApPaymentRecord)[] = ['applications', 'creditApplications', 'remitTo']
+
+// CarrierBill, ApPayment and the LoadCarrier apOpen index all arrive with step G's
+// deploy, and until then the error names the *query*, not a field, so the field-level
+// self-heal cannot see it. Degrade to an empty book rather than throwing on every AP read.
+let apModelsAvailable = true
+const isMissingApModel = (err: unknown) =>
+  /Cannot query field ['"](listCarrierBill|getCarrierBill|listApPayment|listLoadCarrierByApOpen)|Unknown type ['"](CarrierBill|ApPayment|LoadCarrierApStatus)/i
+    .test(safeStringify(err))
+
+/** False once a read proved the backend predates the AP models. */
+export const apModelsDeployed = () => apModelsAvailable
+
+function forgetApModels(err: unknown): void {
+  if (!isMissingApModel(err)) throw err
+  console.warn('[apiClient] backend has no AP models yet — reading no carrier bills until deploy')
+  apModelsAvailable = false
+}
+
+// ── AP reads ─────────────────────────────────────────────────────────────────
+// `parseArJson` is the AR parser by name only: the AWSJSON columns on a bill and on an
+// AP payment arrive double-encoded in exactly the same way, and one malformed line
+// snapshot must blank that column rather than the whole AP board.
+
+export async function getCarrierBill(id: string): Promise<CarrierBillRecord | null> {
+  if (!apModelsAvailable) return null
+  try {
+    const r = await client.graphql({
+      query: `query GetCarrierBill($id: ID!) { getCarrierBill(id: $id) { ${CARRIER_BILL_FIELDS} } }`,
+      variables: { id },
+    }) as { data: { getCarrierBill: CarrierBillRecord | null } }
+    return r.data.getCarrierBill ? parseArJson(r.data.getCarrierBill, CARRIER_BILL_JSON_FIELDS) : null
+  } catch (err) {
+    forgetApModels(err)
+    return null
+  }
+}
+
+/** One carrier's bills, newest recorded first — the order the carrier AP tab renders. */
+export async function listBillsByCarrier(carrierId: string): Promise<CarrierBillRecord[]> {
+  if (!apModelsAvailable) return []
+  try {
+    const rows = await listTrackingIndex<CarrierBillRecord>({
+      name: 'listCarrierBillByCarrierIdAndRecordedAt',
+      decls: '$carrierId: String!',
+      args: 'carrierId: $carrierId',
+      variables: { carrierId },
+      fields: CARRIER_BILL_FIELDS,
+      limit: 500,
+      sortDirection: 'DESC',
+    })
+    return rows.map((bill) => parseArJson(bill, CARRIER_BILL_JSON_FIELDS))
+  } catch (err) {
+    forgetApModels(err)
+    return []
+  }
+}
+
+/**
+ * Everything we still owe a carrier, oldest due date first — the pay run's working set.
+ *
+ * `apOpen` is the sparse marker 'OPEN', carried only while IN_REVIEW, TO_BE_PAID or
+ * PARTIAL, so this reads exactly the money outstanding however many bills have ever been
+ * recorded, and the AP aging is this one query.
+ */
+export async function listOpenBills(): Promise<CarrierBillRecord[]> {
+  if (!apModelsAvailable) return []
+  try {
+    const rows = await listTrackingIndex<CarrierBillRecord>({
+      name: 'listCarrierBillByApOpenAndDueAt',
+      decls: '$apOpen: String!',
+      args: 'apOpen: $apOpen',
+      variables: { apOpen: 'OPEN' },
+      fields: CARRIER_BILL_FIELDS,
+      limit: 500,
+      sortDirection: 'ASC',
+    })
+    return rows.map((bill) => parseArJson(bill, CARRIER_BILL_JSON_FIELDS))
+  } catch (err) {
+    forgetApModels(err)
+    return []
+  }
+}
+
+/** Everything recorded in one 'YYYY-MM', newest first — the paid/history tab's window. */
+export async function listBillsByMonth(month: string): Promise<CarrierBillRecord[]> {
+  if (!apModelsAvailable) return []
+  try {
+    const rows = await listTrackingIndex<CarrierBillRecord>({
+      name: 'listCarrierBillByBillMonthAndRecordedAt',
+      decls: '$billMonth: String!',
+      args: 'billMonth: $billMonth',
+      variables: { billMonth: month },
+      fields: CARRIER_BILL_FIELDS,
+      limit: 500,
+      sortDirection: 'DESC',
+    })
+    return rows.map((bill) => parseArJson(bill, CARRIER_BILL_JSON_FIELDS))
+  } catch (err) {
+    forgetApModels(err)
+    return []
+  }
+}
+
+/** One carrier's money rows — payments, credits and reversals — newest paid first. */
+export async function listApPaymentsByCarrier(carrierId: string): Promise<ApPaymentRecord[]> {
+  if (!apModelsAvailable) return []
+  try {
+    const rows = await listTrackingIndex<ApPaymentRecord>({
+      name: 'listApPaymentByCarrierIdAndPaidAt',
+      decls: '$carrierId: String!',
+      args: 'carrierId: $carrierId',
+      variables: { carrierId },
+      fields: AP_PAYMENT_FIELDS,
+      limit: 500,
+      sortDirection: 'DESC',
+    })
+    return rows.map((p) => parseArJson(p, AP_PAYMENT_JSON_FIELDS))
+  } catch (err) {
+    forgetApModels(err)
+    return []
+  }
+}
+
+/**
+ * Every carrier assignment still owing money, oldest change first — the AP worklist.
+ *
+ * `apOpen` is sparse: a leg nobody has to pay (own fleet, a bounced booking, one already
+ * paid) is not a row, so the whole ladder is one query. `apStatus` narrows it to a single
+ * rung for a tab; it is not the index key, so it goes through a filter — and Amplify names
+ * an inline model enum `<Model><Field>`, so the deployed schema calls that argument's type
+ * LoadCarrierApStatus. A wrong name is a hard validation error, not an empty list.
+ */
+export async function listOpenApAssignments(apStatus?: ApStatus): Promise<LoadCarrierRecord[]> {
+  if (!apModelsAvailable) return []
+  try {
+    return await readLoadCarriers((fields) => listTrackingIndex<LoadCarrierRecord>({
+      name: 'listLoadCarrierByApOpenAndApStatusChangedAt',
+      decls: apStatus ? '$apOpen: String!, $apStatus: LoadCarrierApStatus' : '$apOpen: String!',
+      args: apStatus ? 'apOpen: $apOpen, filter: { apStatus: { eq: $apStatus } }' : 'apOpen: $apOpen',
+      variables: apStatus ? { apOpen: 'OPEN', apStatus } : { apOpen: 'OPEN' },
+      fields,
+      limit: 1000,
+      sortDirection: 'ASC',
+    }))
+  } catch (err) {
+    forgetApModels(err)
+    return []
+  }
+}
+
+/** Presigned GET for one remittance advice PDF under `remittances/*`. */
+export async function getRemittancePdfUrl(key: string): Promise<string> {
+  const result = await getUrl({ path: key, options: { expiresIn: 3600 } })
+  return result.url.toString()
+}
+
+// ── AP writes (tmsFinanceActions) ────────────────────────────────────────────
+
+/** What `PREVIEW_BILL` shows before anybody records a bill. It writes nothing. */
+export interface BillPreview {
+  readiness: { ready: boolean; reasons: string[] }
+  /** The carrier-scope paperwork gate, evaluated live rather than off the cache. */
+  gate: DocGateResult
+  /** The bill as it would be recorded — never persisted. */
+  snapshot: CarrierBillRecord
+  payee: { kind: ApPayeeKind; paymentMethodId: string | null; remitTo: ApRemitTo | null }
+  /** This assignment's carrier-side documents, so the dialog can name the invoice. */
+  documents: { id: string; type: string; name: string; sizeBytes: number }[]
+}
+
+export async function previewBill(input: { loadCarrierId: string }): Promise<BillPreview> {
+  return financeAction<BillPreview>('PREVIEW_BILL', input)
+}
+
+/**
+ * Every bill write answers with the row it wrote, so a caller swaps the record it is
+ * showing rather than re-reading it. `RECORD_BILL` adds the live paperwork gate, because
+ * the review stage is where somebody has to see what is still missing.
+ */
+export async function recordBill(input: {
+  loadCarrierId: string
+  expectedUpdatedAt?: string
+  billNumber?: string
+  billDate?: string
+  billedCents?: number
+  dueAt?: string
+  documentId?: string
+  note?: string
+  /** Record and approve in one press — the server still runs every approval block. */
+  approve?: boolean
+}): Promise<{ bill: CarrierBillRecord; gate: DocGateResult }> {
+  return financeAction<{ bill: CarrierBillRecord; gate: DocGateResult }>('RECORD_BILL', input)
+}
+
+/**
+ * Move a reviewed bill to TO_BE_PAID.
+ *
+ * `acknowledgeWarnings` is the warning keys the approver ticked — the record of what
+ * they were told and signed off on; the blocks are not acknowledgeable at all.
+ * `docsOverrideNote` is required to approve past missing carrier paperwork, and is the
+ * only record of why.
+ */
+export async function approveBill(input: {
+  billId: string
+  acknowledgeWarnings?: string[]
+  docsOverrideNote?: string
+}): Promise<{ bill: CarrierBillRecord }> {
+  return financeAction<{ bill: CarrierBillRecord }>('APPROVE_BILL', input)
+}
+
+export async function unapproveBill(input: { billId: string; reason: string }): Promise<{ bill: CarrierBillRecord }> {
+  return financeAction<{ bill: CarrierBillRecord }>('UNAPPROVE_BILL', input)
+}
+
+export async function voidBill(input: { billId: string; reason: string }): Promise<{ bill: CarrierBillRecord }> {
+  return financeAction<{ bill: CarrierBillRecord }>('VOID_BILL', input)
+}
+
+/**
+ * What a posted AP row leaves behind: the ApPayment itself and every bill it moved.
+ *
+ * `duplicate` is true when the `clientRequestId` had already posted — a double click or a
+ * retried request returns the original row rather than paying the carrier twice.
+ */
+export interface ApPostedRow {
+  payment: ApPaymentRecord
+  bills: CarrierBillRecord[]
+  duplicate: boolean
+}
+
+export async function recordApPayment(input: {
+  carrierId: string
+  paidAt: string
+  method: ApPaymentMethod
+  reference?: string
+  amountCents: number
+  applications: ApPaymentApplication[]
+  creditApplications: CreditApplication[]
+  note?: string
+  clientRequestId: string
+}): Promise<ApPostedRow> {
+  return financeAction<ApPostedRow>('RECORD_AP_PAYMENT', input)
+}
+
+/** Money the carrier owes us back — a TONU adjustment, a claim — held against them. */
+export async function createApCredit(input: {
+  carrierId: string
+  memoDate: string
+  reference?: string
+  amountCents: number
+  reason: string
+  loadCarrierId?: string
+  clientRequestId: string
+}): Promise<ApPostedRow> {
+  return financeAction<ApPostedRow>('CREATE_AP_CREDIT', input)
+}
+
+/** Nothing deletes a posted row; a mistake gets a REVERSAL that restores the balances. */
+export async function reverseApPayment(input: { paymentId: string; reason: string }): Promise<ApPostedRow> {
+  return financeAction<ApPostedRow>('REVERSE_AP_PAYMENT', input)
+}
+
+/**
+ * What one remittance e-mail did — or did not do.
+ *
+ * SES is denied outside production, so `emailStatus` comes back NOT_SENT with the reason
+ * in `emailError` and the signed `downloads` to hand over by other means. The UI must say
+ * exactly that; a notice row is written either way.
+ */
+export interface RemittanceEmailResult {
+  payment: ApPaymentRecord
+  notice: ShipmentNoticeRecord
+  emailStatus: 'SENT' | 'NOT_SENT' | 'COPY'
+  emailError: string | null
+  subject: string
+  body: string
+  to: string[]
+  cc: string[]
+  downloads: { name: string; url: string }[]
+}
+
+export async function sendRemittance(input: {
+  paymentId: string
+  to?: string[]
+  cc?: string[]
+  message?: string
+  via?: 'EMAIL' | 'COPY'
+}): Promise<RemittanceEmailResult> {
+  return financeAction<RemittanceEmailResult>('SEND_REMITTANCE', input)
+}
+
+export async function renderRemittancePdf(input: { paymentId: string }): Promise<{ payment: ApPaymentRecord }> {
+  return financeAction<{ payment: ApPaymentRecord }>('RENDER_REMITTANCE_PDF', input)
+}
+
+/** "I sent this myself" — the note is required, because it is the only record of how. */
+export async function markRemittanceSent(input: { paymentId: string; note: string }): Promise<{ payment: ApPaymentRecord }> {
+  return financeAction<{ payment: ApPaymentRecord }>('MARK_REMITTANCE_SENT', input)
+}
+
+export async function saveApSettings(input: Partial<ApSettings>): Promise<{ settings: TmsSettings }> {
+  return financeAction<{ settings: TmsSettings }>('SAVE_AP_SETTINGS', input)
+}
+
+/**
+ * Edit the carrier side of a shipment's charges — the AP twin of the customer-side save,
+ * and a shipment write rather than a finance one: it moves LoadCharge rows and the cached
+ * cost. Refused once the assignment's charges are finalized, which recording a bill does.
+ */
+export async function updateCarrierCharges(input: {
+  loadCarrierId: string
+  expectedVersion: number
+  charges: LoadChargeInput[]
+}): Promise<ShipmentBundle> {
+  return shipmentAction<ShipmentBundle>('UPDATE_CARRIER_CHARGES', input)
 }

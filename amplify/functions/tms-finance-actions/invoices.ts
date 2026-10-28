@@ -90,7 +90,7 @@ import {
   nextInvoiceNumber,
   nowIso,
   numberOrNull,
-  putInvoicePdf,
+  putPdf,
   putTx,
   queryIndex,
   s3Bytes,
@@ -421,7 +421,7 @@ async function storePdf(invoice: InvoiceRecord, context: OrderContext, caller: C
       division: context.division,
       settings: context.settings,
     }))
-    await putInvoicePdf(key, bytes)
+    await putPdf(key, bytes)
     const now = nowIso()
     await transact(
       [updateTx(INVOICE_TABLE_NAME, invoice.id, {

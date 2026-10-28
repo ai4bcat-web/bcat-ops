@@ -21,7 +21,7 @@ import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { SESv2Client } from '@aws-sdk/client-sesv2'
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb'
-import { randomUUID } from 'crypto'
+import { createHash, randomUUID } from 'crypto'
 import {
   getById as storeGetById,
   marshallRow,
@@ -54,6 +54,11 @@ export const AUDIT_LOG_TABLE_NAME = process.env.AUDIT_LOG_TABLE_NAME ?? ''
 export const FACTORING_ITEM_TABLE_NAME = process.env.FACTORING_ITEM_TABLE_NAME ?? ''
 export const SHIPMENT_DOCUMENT_TABLE_NAME = process.env.SHIPMENT_DOCUMENT_TABLE_NAME ?? ''
 export const SHIPMENT_NOTICE_TABLE_NAME = process.env.SHIPMENT_NOTICE_TABLE_NAME ?? ''
+export const CARRIER_BILL_TABLE_NAME = process.env.CARRIER_BILL_TABLE_NAME ?? ''
+export const AP_PAYMENT_TABLE_NAME = process.env.AP_PAYMENT_TABLE_NAME ?? ''
+export const CARRIER_TABLE_NAME = process.env.CARRIER_TABLE_NAME ?? ''
+export const CARRIER_PAYMENT_METHOD_TABLE_NAME = process.env.CARRIER_PAYMENT_METHOD_TABLE_NAME ?? ''
+export const CARRIER_CONTACT_TABLE_NAME = process.env.CARRIER_CONTACT_TABLE_NAME ?? ''
 export const BUCKET_NAME = process.env.BUCKET_NAME ?? ''
 export const FROM_ADDRESS = process.env.FROM_ADDRESS ?? ''
 export const USER_POOL_ID = process.env.USER_POOL_ID ?? 'us-east-1_IbPKPNJC9'
@@ -61,6 +66,8 @@ export const USER_POOL_ID = process.env.USER_POOL_ID ?? 'us-east-1_IbPKPNJC9'
 export const OWNER_EMAIL = 'ryne@bcatcorp.com'
 export const ADMIN_GROUP = 'ADMIN'
 export const INVOICING_PAGE_GROUP = 'page-invoicing'
+/** AP is its own permission: the people who bill customers are not the people who pay carriers. */
+export const CARRIER_PAY_PAGE_GROUP = 'page-carrierPay'
 export const SETTINGS_ID = 'default'
 
 /**
@@ -73,6 +80,9 @@ export const IDX_LOADS_BY_SHIPMENT = 'loadsByShipmentId'
 export const IDX_CHARGES_BY_SHIPMENT = 'loadChargesByShipmentIdAndSortOrder'
 export const IDX_CARRIERS_BY_SHIPMENT = 'loadCarriersByShipmentId'
 export const IDX_DOCUMENTS_BY_SHIPMENT = 'shipmentDocumentsByShipmentIdAndUploadedAt'
+export const IDX_PAYMENT_METHODS_BY_CARRIER = 'carrierPaymentMethodsByCarrierId'
+export const IDX_CONTACTS_BY_CARRIER = 'carrierContactsByCarrierId'
+export const IDX_BILLS_BY_CARRIER = 'carrierBillsByCarrierIdAndRecordedAt'
 
 /** How long a download offered after a refused send stays good. */
 export const DOWNLOAD_URL_TTL_SECONDS = 3600
@@ -229,10 +239,16 @@ export function updateTx(
  * field under its own CAS, so the two orderings resolve the same way — whichever
  * commits first stands, and the other is refused.
  */
-export function spendCreditTx(id: string, usedCents: number, now: string, by: string): TransactWriteItem {
+export function spendCreditTx(
+  tableName: string,
+  id: string,
+  usedCents: number,
+  now: string,
+  by: string,
+): TransactWriteItem {
   return {
     Update: {
-      TableName: AR_PAYMENT_TABLE_NAME,
+      TableName: tableName,
       Key: marshall({ id }),
       UpdateExpression: 'ADD unappliedCents :negUsed, appliedCents :used SET updatedAt = :now, updatedBy = :by',
       ConditionExpression: `unappliedCents >= :used AND ${unsetCondition('reversedByPaymentId')}`,
@@ -270,6 +286,49 @@ export function putTx(tableName: string, item: Row): TransactWriteItem {
       Item: marshallRow(item),
       ConditionExpression: 'attribute_not_exists(id)',
     },
+  }
+}
+
+/**
+ * A deterministic row id when the caller supplies a request token.
+ *
+ * The dialog sends one per Post press, so a retried mutation — a dropped response, a
+ * double click, a Lambda retry — finds the row it already wrote and returns it instead
+ * of moving the money twice.
+ */
+export function paymentId(prefix: string, partyId: string, clientRequestId: string | null): string {
+  if (!clientRequestId) return `${prefix}-${randomUUID()}`
+  const digest = createHash('sha256').update(`${partyId}:${clientRequestId}`).digest('hex')
+  return `${prefix}-${digest.slice(0, 32)}`
+}
+
+/**
+ * Post the transaction, treating "that row already exists" as success.
+ *
+ * The caller's pre-flight read catches a retry that arrives after the first one
+ * finished; this catches the harder case — two copies of the same Post in flight at
+ * once, where both read nothing and both try to write. The loser's transaction is
+ * refused by `attribute_not_exists(id)` on the ledger put, and the right answer for it
+ * is the row the winner wrote, not an error the user would retry a third time.
+ *
+ * Only ever reached with a caller-supplied `clientRequestId`: without one the id is a
+ * fresh UUID and a collision is not a duplicate, it is a bug worth surfacing.
+ */
+export async function postOnce(
+  tableName: string,
+  writes: TransactWriteItem[],
+  label: string,
+  id: string,
+  idempotent: boolean,
+): Promise<boolean> {
+  try {
+    await transact(writes, label)
+    return false
+  } catch (err) {
+    if (!idempotent) throw err
+    const existing = await getById(tableName, id)
+    if (!existing) throw err
+    return true
   }
 }
 
@@ -321,7 +380,8 @@ export async function s3Bytes(key: string): Promise<{ bytes: Uint8Array; content
   return { bytes: await body.transformToByteArray(), contentType: out.ContentType ?? 'application/pdf' }
 }
 
-export async function putInvoicePdf(key: string, bytes: Uint8Array): Promise<void> {
+/** Store rendered PDF bytes under a key this Lambda built. Used for invoices and remittances. */
+export async function putPdf(key: string, bytes: Uint8Array): Promise<void> {
   await s3.send(
     new PutObjectCommand({
       Bucket: BUCKET_NAME,
@@ -342,4 +402,10 @@ export function signedDownload(key: string): Promise<string> {
 export function invoicePdfKey(customerId: string, number: string, version: number): string {
   const safeNumber = number.replace(/[^A-Za-z0-9._-]+/g, '-')
   return `invoices/${customerId}/${safeNumber}-v${version}.pdf`
+}
+
+/** `remittances/{carrierId}/{paymentId}-v{n}.pdf` — the row and its bytes name each other. */
+export function remittancePdfKey(carrierId: string, paymentRowId: string, version: number): string {
+  const safeId = paymentRowId.replace(/[^A-Za-z0-9._-]+/g, '-')
+  return `remittances/${carrierId}/${safeId}-v${version}.pdf`
 }

@@ -1269,6 +1269,19 @@ describe('carrier booking', () => {
     expect(table(TABLES.carrierDirectory).get('car-1')!.loadCount).toBe(3)
   })
 
+  it('puts the booked assignment on AP\'s worklist', async () => {
+    const { loadId } = await bookableLoad()
+    seedCarrier()
+    seedCarrierDocs()
+
+    await book(loadId)
+
+    const assignment = activeCarrier()
+    expect(assignment.apStatus).toBe('AWAITING_INVOICE')
+    expect(assignment.apOpen).toBe('OPEN')
+    expect(String(assignment.apStatusChangedAt)).toBe(String(assignment.bookedAt))
+  })
+
   it('refuses a rate over the load\'s top spend, and leaves nothing behind', async () => {
     const { loadId } = await bookableLoad()
     seedCarrier()
@@ -1582,6 +1595,246 @@ describe('RECALC_CHARGES', () => {
         charges: [{ side: 'CARRIER', code: 'LINEHAUL', calculatedBy: 'FLAT', rateCents: -100, sortOrder: 0 }],
       }),
     ).rejects.toThrow(/cannot be negative/)
+  })
+})
+
+// ── Carrier charges and AP state (step G) ────────────────────────────────────
+
+describe('UPDATE_CARRIER_CHARGES', () => {
+  async function assignedLoad(): Promise<{ shipmentId: string; loadId: string; loadCarrierId: string }> {
+    const ids = await createDraft()
+    await saveForm(ids.shipmentId)
+    await call('SUBMIT_ORDER', {
+      shipmentId: ids.shipmentId,
+      expectedUpdatedAt: table(TABLES.shipment).get(ids.shipmentId)!.updatedAt,
+      order: { equipmentType: "53' VAN" },
+      stops: [PICKUP, DELIVERY],
+    })
+    await call('ASSIGN_CARRIER', { loadId: ids.loadId, carrierName: 'SWIFT', carrierRateCents: 180_000 })
+    const loadCarrierId = String([...table(TABLES.carrier).values()].find((c) => c.status === 'ACTIVE')!.id)
+    return { ...ids, loadCarrierId }
+  }
+
+  function carrierLines(loadCarrierId: string): Row[] {
+    return [...table(TABLES.charge).values()]
+      .filter((c) => c.side === 'CARRIER' && c.loadCarrierId === loadCarrierId)
+      .sort((a, b) => Number(a.sortOrder ?? 0) - Number(b.sortOrder ?? 0))
+  }
+
+  function customerLines(): Row[] {
+    return [...table(TABLES.charge).values()].filter((c) => c.side === 'CUSTOMER')
+  }
+
+  function update(loadCarrierId: string, shipmentId: string, charges: Row[]): Promise<Row> {
+    return call('UPDATE_CARRIER_CHARGES', {
+      loadCarrierId,
+      expectedVersion: Number(table(TABLES.shipment).get(shipmentId)!.version),
+      charges,
+    })
+  }
+
+  it('rewrites the carrier lines, re-caches the cost and leaves the customer side alone', async () => {
+    const { shipmentId, loadId, loadCarrierId } = await assignedLoad()
+    const customerBefore = customerLines().map((c) => ({ ...c }))
+    const lineId = String(carrierLines(loadCarrierId)[0].id)
+
+    await update(loadCarrierId, shipmentId, [
+      { id: lineId, side: 'CARRIER', code: 'LINEHAUL', calculatedBy: 'FLAT', rateCents: 190_000, sortOrder: 0 },
+      { side: 'CARRIER', code: 'DETENTION', calculatedBy: 'FLAT', rateCents: 15_000, sortOrder: 1 },
+    ])
+
+    expect(carrierLines(loadCarrierId).map((c) => c.amountCents)).toEqual([190_000, 15_000])
+    expect(customerLines()).toEqual(customerBefore)
+    expect(table(TABLES.financials).get(loadId)!).toMatchObject({
+      revenueCents: 250_000,
+      costCents: 205_000,
+      profitCents: 45_000,
+    })
+    // Only the rate line is the carrier's rate; detention is cost on top of it.
+    expect(table(TABLES.carrier).get(loadCarrierId)!).toMatchObject({
+      carrierRateCents: 190_000,
+      costCents: 205_000,
+    })
+  })
+
+  it('refuses once the bill is recorded, and allows it while the customer side is frozen', async () => {
+    const { shipmentId, loadId, loadCarrierId } = await assignedLoad()
+    const assignment = table(TABLES.carrier).get(loadCarrierId)!
+    const lineId = String(carrierLines(loadCarrierId)[0].id)
+    const edit = [{ id: lineId, side: 'CARRIER', code: 'LINEHAUL', calculatedBy: 'FLAT', rateCents: 170_000, sortOrder: 0 }]
+
+    table(TABLES.carrier).set(loadCarrierId, {
+      ...assignment,
+      chargesFinalizedAt: '2026-03-12T00:00:00.000Z',
+      invoiceId: 'cbl-1',
+    })
+    await expect(update(loadCarrierId, shipmentId, edit)).rejects.toThrow(/void it first/)
+
+    // The customer's invoice froze the customer's lines; what the carrier is owed
+    // is still open until their own bill is recorded.
+    table(TABLES.carrier).set(loadCarrierId, assignment)
+    table(TABLES.financials).set(loadId, {
+      ...table(TABLES.financials).get(loadId)!,
+      frozenAt: '2026-03-12T00:00:00.000Z',
+      frozenBy: 'admin@bcatcorp.com',
+    })
+    await update(loadCarrierId, shipmentId, edit)
+
+    expect(table(TABLES.carrier).get(loadCarrierId)!.costCents).toBe(170_000)
+    expect(table(TABLES.financials).get(loadId)!).toMatchObject({
+      costCents: 170_000,
+      frozenAt: '2026-03-12T00:00:00.000Z',
+    })
+  })
+
+  it('refuses a customer line and a line belonging to somebody else', async () => {
+    const { shipmentId, loadCarrierId } = await assignedLoad()
+    const customerId = String(customerLines()[0].id)
+    await expect(
+      update(loadCarrierId, shipmentId, [{ side: 'CUSTOMER', code: 'LINEHAUL', rateCents: 1, sortOrder: 0 }]),
+    ).rejects.toThrow(/must be CARRIER/)
+    await expect(
+      update(loadCarrierId, shipmentId, [{ id: customerId, side: 'CARRIER', code: 'LINEHAUL', rateCents: 1, sortOrder: 0 }]),
+    ).rejects.toThrow(/not a line on this assignment/)
+    expect(customerLines()[0].amountCents).toBe(250_000)
+  })
+
+  it('re-caches a TONU\'d assignment, which is still owed its retained line', async () => {
+    const { shipmentId, loadCarrierId } = await assignedLoad()
+    await call('REMOVE_LOAD_CARRIER', { loadCarrierId, outcome: 'TONU', reason: 'CUSTOMER_NOT_READY' })
+    const lineId = String(carrierLines(loadCarrierId)[0].id)
+
+    await update(loadCarrierId, shipmentId, [
+      { id: lineId, side: 'CARRIER', code: 'TONU', calculatedBy: 'FLAT', rateCents: 50_000, sortOrder: 0 },
+    ])
+
+    expect(table(TABLES.carrier).get(loadCarrierId)!.costCents).toBe(50_000)
+  })
+
+  it('refuses an own-fleet leg, which is paid by settlement', async () => {
+    const ids = await createDraft()
+    await saveForm(ids.shipmentId)
+    await call('ASSIGN_ASSET', { loadId: ids.loadId, driverId: 'drv-1' })
+    const loadCarrierId = String([...table(TABLES.carrier).values()].find((c) => c.status === 'ACTIVE')!.id)
+    await expect(update(loadCarrierId, ids.shipmentId, [])).rejects.toThrow(/settlement/)
+  })
+
+  it('refuses a stale version', async () => {
+    const { loadCarrierId } = await assignedLoad()
+    await expect(
+      call('UPDATE_CARRIER_CHARGES', { loadCarrierId, expectedVersion: 99, charges: [] }),
+    ).rejects.toThrow(/changed by someone else/)
+  })
+
+  it('holds a finalized assignment\'s lines still against every other pricing path', async () => {
+    const { shipmentId, loadCarrierId } = await assignedLoad()
+    const customerId = String(customerLines()[0].id)
+    const lineId = String(carrierLines(loadCarrierId)[0].id)
+    table(TABLES.carrier).set(loadCarrierId, {
+      ...table(TABLES.carrier).get(loadCarrierId)!,
+      chargesFinalizedAt: '2026-03-12T00:00:00.000Z',
+    })
+    const recalc = (charges: Row[]): Promise<Row> =>
+      call('RECALC_CHARGES', {
+        shipmentId,
+        expectedVersion: Number(table(TABLES.shipment).get(shipmentId)!.version),
+        charges,
+      })
+    const customerLine = { id: customerId, side: 'CUSTOMER', code: 'LINEHAUL', calculatedBy: 'FLAT', rateCents: 250_000, count: 1, sortOrder: 0 }
+    const carrierLine = { id: lineId, side: 'CARRIER', code: 'LINEHAUL', calculatedBy: 'FLAT', rateCents: 180_000, count: 1, sortOrder: 0, loadCarrierId }
+
+    await expect(recalc([customerLine])).rejects.toThrow(/void it first/)
+    await expect(recalc([customerLine, { ...carrierLine, rateCents: 175_000 }])).rejects.toThrow(/void it first/)
+    await expect(
+      recalc([customerLine, carrierLine, { side: 'CARRIER', code: 'DETENTION', calculatedBy: 'FLAT', rateCents: 100, sortOrder: 1, loadCarrierId }]),
+    ).rejects.toThrow(/void it first/)
+
+    // The same lines, resubmitted unchanged, are not an edit.
+    await recalc([customerLine, carrierLine])
+    expect(carrierLines(loadCarrierId)).toHaveLength(1)
+    expect(carrierLines(loadCarrierId)[0].amountCents).toBe(180_000)
+  })
+})
+
+describe('AP state on an assignment', () => {
+  async function openLoad(): Promise<{ shipmentId: string; loadId: string }> {
+    const ids = await createDraft()
+    await saveForm(ids.shipmentId)
+    await call('SUBMIT_ORDER', {
+      shipmentId: ids.shipmentId,
+      expectedUpdatedAt: table(TABLES.shipment).get(ids.shipmentId)!.updatedAt,
+      order: { equipmentType: "53' VAN" },
+      stops: [PICKUP, DELIVERY],
+    })
+    return ids
+  }
+
+  function assignment(id: string): Row {
+    return table(TABLES.carrier).get(id)!
+  }
+
+  function activeId(): string {
+    return String([...table(TABLES.carrier).values()].find((c) => c.status === 'ACTIVE')!.id)
+  }
+
+  it('keeps an own-fleet leg out of AP entirely', async () => {
+    const { loadId } = await openLoad()
+    await call('ASSIGN_ASSET', { loadId, driverId: 'drv-1' })
+
+    const own = assignment(activeId())
+    expect(own.apStatus).toBeUndefined()
+    expect(own.apOpen).toBeUndefined()
+  })
+
+  it('takes a bounced assignment off the AP worklist and leaves a TONU\'d one on it', async () => {
+    const { loadId } = await openLoad()
+    await call('ASSIGN_CARRIER', { loadId, carrierName: 'SWIFT', carrierRateCents: 180_000 })
+    const bouncedId = activeId()
+    expect(assignment(bouncedId).apOpen).toBe('OPEN')
+
+    await call('REMOVE_LOAD_CARRIER', { loadCarrierId: bouncedId, outcome: 'BOUNCED', reason: 'CARRIER_CANNOT_TAKE' })
+    // The key has to leave the row: a NULL in an index key is refused outright.
+    expect('apOpen' in assignment(bouncedId)).toBe(false)
+
+    await call('ASSIGN_CARRIER', { loadId, carrierName: 'WERNER', carrierRateCents: 190_000 })
+    const tonuId = activeId()
+    await call('REMOVE_LOAD_CARRIER', { loadCarrierId: tonuId, outcome: 'TONU', reason: 'CUSTOMER_NOT_READY' })
+    expect(assignment(tonuId).apOpen).toBe('OPEN')
+  })
+
+  it('refuses to bounce an assignment that has a bill, and still allows a TONU', async () => {
+    const { loadId } = await openLoad()
+    await call('ASSIGN_CARRIER', { loadId, carrierName: 'SWIFT', carrierRateCents: 180_000 })
+    const loadCarrierId = activeId()
+    table(TABLES.carrier).set(loadCarrierId, { ...assignment(loadCarrierId), invoiceId: 'cbl-1' })
+
+    await expect(
+      call('REMOVE_LOAD_CARRIER', { loadCarrierId, outcome: 'BOUNCED', reason: 'CARRIER_CANNOT_TAKE' }),
+    ).rejects.toThrow(/void the bill first/)
+    expect(assignment(loadCarrierId).status).toBe('ACTIVE')
+
+    await call('REMOVE_LOAD_CARRIER', { loadCarrierId, outcome: 'TONU', reason: 'CUSTOMER_NOT_READY' })
+    expect(assignment(loadCarrierId).status).toBe('TONU')
+  })
+
+  it('refuses to cancel a shipment with a carrier bill on it', async () => {
+    const { shipmentId, loadId } = await openLoad()
+    await call('ASSIGN_CARRIER', { loadId, carrierName: 'SWIFT', carrierRateCents: 180_000 })
+    const loadCarrierId = activeId()
+    table(TABLES.carrier).set(loadCarrierId, { ...assignment(loadCarrierId), invoiceId: 'cbl-1' })
+
+    const cancel = (): Promise<Row> =>
+      call('SET_SHIPMENT_STATUS', {
+        shipmentId,
+        expectedUpdatedAt: table(TABLES.shipment).get(shipmentId)!.updatedAt,
+        status: 'CANCELED',
+        reason: 'customer canceled',
+      })
+    await expect(cancel()).rejects.toThrow(/SWIFT has a carrier bill/)
+
+    table(TABLES.carrier).set(loadCarrierId, { ...assignment(loadCarrierId), invoiceId: null })
+    const canceled = (await cancel()) as { shipment: Row }
+    expect(canceled.shipment.status).toBe('CANCELED')
   })
 })
 

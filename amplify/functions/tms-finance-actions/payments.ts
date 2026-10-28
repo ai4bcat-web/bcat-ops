@@ -16,7 +16,7 @@
  *    balances the original took, and the original keeps `reversedByPaymentId` so it can
  *    never be reversed twice.
  */
-import { createHash, randomUUID } from 'crypto'
+import { randomUUID } from 'crypto'
 import type { TransactWriteItem } from '@aws-sdk/client-dynamodb'
 import {
   assertArrayOf,
@@ -33,15 +33,15 @@ import {
   planPayment,
   reversalPlan,
   writeOffPlan,
+  type PlanApplication,
   type PlanCredit,
-  type PlanInvoice,
+  type PlanDocument,
   type PaymentPlan,
 } from '../../../src/lib/paymentApply'
 import type {
   ArPaymentKind,
   ArPaymentMethod,
   CreditApplication,
-  InvoiceStatus,
   PaymentApplication,
 } from '../../../src/types/tms'
 import {
@@ -52,6 +52,8 @@ import {
   NULL_TYPE_VALUE,
   nowIso,
   numberOrNull,
+  paymentId,
+  postOnce,
   putTx,
   spendCreditTx,
   transact,
@@ -71,18 +73,18 @@ interface PostedRow {
   duplicate: boolean
 }
 
-function planInvoiceOf(row: Row): PlanInvoice {
+function planInvoiceOf(row: Row): PlanDocument {
   const totalCents = numberOrNull(row.totalCents) ?? 0
   const paidCents = numberOrNull(row.paidCents) ?? 0
   const writtenOffCents = numberOrNull(row.writtenOffCents) ?? 0
   return {
     id: String(row.id),
-    customerId: String(row.customerId ?? ''),
-    status: (row.status as InvoiceStatus) ?? 'ISSUED',
+    partyId: String(row.customerId ?? ''),
     totalCents,
     paidCents,
-    writtenOffCents,
+    offsetCents: writtenOffCents,
     balanceCents: numberOrNull(row.balanceCents) ?? totalCents - paidCents - writtenOffCents,
+    voided: row.status === 'VOID',
     number: typeof row.number === 'string' ? row.number : null,
   }
 }
@@ -90,12 +92,25 @@ function planInvoiceOf(row: Row): PlanInvoice {
 function planCreditOf(row: Row): PlanCredit {
   return {
     id: String(row.id),
-    customerId: String(row.customerId ?? ''),
+    partyId: String(row.customerId ?? ''),
     kind: (row.kind as ArPaymentKind) ?? 'PAYMENT',
     unappliedCents: numberOrNull(row.unappliedCents) ?? 0,
     reference: typeof row.reference === 'string' ? row.reference : null,
     reversed: row.reversedByPaymentId != null,
   }
+}
+
+/**
+ * The persisted AR shape, as the planner wants it.
+ *
+ * `applications` on an ArPayment row stays `{ invoiceId, amountCents }` — the planner
+ * is the only thing that speaks `documentId`, and it speaks it to both ledgers.
+ */
+function planApplicationsOf(applications: PaymentApplication[]): PlanApplication[] {
+  return applications.map((application) => ({
+    documentId: application.invoiceId,
+    amountCents: application.amountCents,
+  }))
 }
 
 function assertApplications(value: unknown, label: string): PaymentApplication[] {
@@ -134,56 +149,14 @@ function receivedAtOf(value: unknown): string {
   return new Date(raw).toISOString()
 }
 
-/**
- * A deterministic row id when the caller supplies a request token.
- *
- * The dialog sends one per Post press, so a retried mutation — a dropped response, a
- * double click, a Lambda retry — finds the row it already wrote and returns it instead
- * of taking the customer's money twice.
- */
-function paymentId(prefix: string, customerId: string, clientRequestId: string | null): string {
-  if (!clientRequestId) return `${prefix}-${randomUUID()}`
-  const digest = createHash('sha256').update(`${customerId}:${clientRequestId}`).digest('hex')
-  return `${prefix}-${digest.slice(0, 32)}`
-}
-
 async function alreadyPosted(id: string): Promise<Row | null> {
   return getById(AR_PAYMENT_TABLE_NAME, id)
-}
-
-/**
- * Post the transaction, treating "that row already exists" as success.
- *
- * The pre-flight `alreadyPosted` read catches a retry that arrives after the first
- * one finished; this catches the harder case — two copies of the same Post in flight
- * at once, where both read nothing and both try to write. The loser's transaction is
- * refused by `attribute_not_exists(id)` on the ArPayment put, and the right answer for
- * it is the row the winner wrote, not an error the user would retry a third time.
- *
- * Only ever reached with a caller-supplied `clientRequestId`: without one the id is a
- * fresh UUID and a collision is not a duplicate, it is a bug worth surfacing.
- */
-async function postOnce(
-  writes: TransactWriteItem[],
-  label: string,
-  id: string,
-  idempotent: boolean,
-): Promise<boolean> {
-  try {
-    await transact(writes, label)
-    return false
-  } catch (err) {
-    if (!idempotent) throw err
-    const existing = await alreadyPosted(id)
-    if (!existing) throw err
-    return true
-  }
 }
 
 /** Everything a plan implies for the invoices and their orders, as transaction items. */
 async function ledgerWrites(
   plan: PaymentPlan,
-  before: Record<string, PlanInvoice>,
+  before: Record<string, PlanDocument>,
   caller: Caller,
   now: string,
   direction: 'APPLY' | 'REVERSE',
@@ -191,20 +164,20 @@ async function ledgerWrites(
   const writes: TransactWriteItem[] = []
   const invoiceIds: string[] = []
 
-  for (const planned of plan.invoices) {
+  for (const planned of plan.documents) {
     const prior = before[planned.id]
     const row = await getById(INVOICE_TABLE_NAME, planned.id)
     if (!row) throw new Error(`Invoice ${planned.id} was not found`)
-    const settled = planned.balanceCents <= 0
+    const settled = planned.settled
     writes.push(
       updateTx(
         INVOICE_TABLE_NAME,
         planned.id,
         {
           paidCents: planned.paidCents,
-          writtenOffCents: planned.writtenOffCents,
+          writtenOffCents: planned.offsetCents,
           balanceCents: planned.balanceCents,
-          status: planned.status,
+          status: invoiceStatusAfter(prior.totalCents, planned.paidCents, planned.offsetCents),
           ...(settled ? { paidAt: now } : {}),
           ...(settled ? {} : { arOpen: 'OPEN' }),
           updatedAt: now,
@@ -218,7 +191,7 @@ async function ledgerWrites(
           condition: 'attribute_exists(id) AND paidCents = :priorPaid AND writtenOffCents = :priorWritten AND #st <> :void',
           extraValues: {
             ':priorPaid': { N: String(prior.paidCents) },
-            ':priorWritten': { N: String(prior.writtenOffCents) },
+            ':priorWritten': { N: String(prior.offsetCents) },
             ':void': { S: 'VOID' },
           },
         },
@@ -258,7 +231,7 @@ async function ledgerWrites(
   }
 
   for (const credit of plan.credits) {
-    writes.push(spendCreditTx(credit.id, credit.usedCents, now, caller.email))
+    writes.push(spendCreditTx(AR_PAYMENT_TABLE_NAME, credit.id, credit.usedCents, now, caller.email))
   }
 
   return { writes, invoiceIds }
@@ -267,23 +240,23 @@ async function ledgerWrites(
 async function readPlanInputs(
   applications: PaymentApplication[],
   creditApplications: CreditApplication[],
-): Promise<{ invoices: PlanInvoice[]; credits: PlanCredit[]; before: Record<string, PlanInvoice> }> {
+): Promise<{ documents: PlanDocument[]; credits: PlanCredit[]; before: Record<string, PlanDocument> }> {
   const invoiceRows = await Promise.all(
     applications.map((application) => getById(INVOICE_TABLE_NAME, application.invoiceId)),
   )
   const creditRows = await Promise.all(
     creditApplications.map((use) => getById(AR_PAYMENT_TABLE_NAME, use.paymentId)),
   )
-  const invoices: PlanInvoice[] = []
-  const before: Record<string, PlanInvoice> = {}
+  const documents: PlanDocument[] = []
+  const before: Record<string, PlanDocument> = {}
   for (const row of invoiceRows) {
     if (!row) continue
     const plan = planInvoiceOf(row)
-    invoices.push(plan)
+    documents.push(plan)
     before[plan.id] = plan
   }
   const credits = creditRows.filter((row): row is Row => row != null).map(planCreditOf)
-  return { invoices, credits, before }
+  return { documents, credits, before }
 }
 
 async function readBack(paymentRowId: string, invoiceIds: string[], duplicate: boolean): Promise<PostedRow> {
@@ -316,14 +289,14 @@ export async function recordPayment(input: Row, caller: Caller): Promise<PostedR
     return readBack(id, ids, true)
   }
 
-  const { invoices, credits, before } = await readPlanInputs(applications, creditApplications)
+  const { documents, credits, before } = await readPlanInputs(applications, creditApplications)
   const plan = planPayment({
     kind: 'PAYMENT',
-    customerId,
+    partyId: customerId,
     amountCents,
-    applications,
+    applications: planApplicationsOf(applications),
     creditApplications,
-    invoices,
+    documents,
     credits,
   })
   if (!plan.ok) throw new Error(plan.errors.join('; '))
@@ -351,7 +324,7 @@ export async function recordPayment(input: Row, caller: Caller): Promise<PostedR
     }),
   )
 
-  const duplicate = await postOnce(writes, 'payment', id, clientRequestId != null)
+  const duplicate = await postOnce(AR_PAYMENT_TABLE_NAME, writes, 'payment', id, clientRequestId != null)
   if (!duplicate) {
     await writeAudit('ArPayment', id, 'RECORD_PAYMENT', caller, {
       customerId,
@@ -375,11 +348,11 @@ export async function createCredit(input: Row, caller: Caller): Promise<PostedRo
 
   const plan = planPayment({
     kind: 'CREDIT_MEMO',
-    customerId,
+    partyId: customerId,
     amountCents,
     applications: [],
     creditApplications: [],
-    invoices: [],
+    documents: [],
     credits: [],
   })
   if (!plan.ok) throw new Error(plan.errors.join('; '))
@@ -391,6 +364,7 @@ export async function createCredit(input: Row, caller: Caller): Promise<PostedRo
 
   const now = nowIso()
   const duplicate = await postOnce(
+    AR_PAYMENT_TABLE_NAME,
     [
       putTx(AR_PAYMENT_TABLE_NAME, {
         id,
@@ -433,7 +407,7 @@ export async function writeOffInvoice(input: Row, caller: Caller): Promise<Poste
   // posted would otherwise be refused as "already settled" — the plan is right about
   // the invoice and wrong about the request, and the user would see an error for a
   // write-off that went through.
-  const id = paymentId('wo', invoice.customerId, clientRequestId)
+  const id = paymentId('wo', invoice.partyId, clientRequestId)
   const existing = await alreadyPosted(id)
   if (existing) return readBack(id, [invoiceId], true)
 
@@ -446,7 +420,7 @@ export async function writeOffInvoice(input: Row, caller: Caller): Promise<Poste
     putTx(AR_PAYMENT_TABLE_NAME, {
       id,
       __typename: 'ArPayment',
-      customerId: invoice.customerId,
+      customerId: invoice.partyId,
       kind: 'WRITE_OFF',
       receivedAt: now,
       amountCents,
@@ -462,7 +436,7 @@ export async function writeOffInvoice(input: Row, caller: Caller): Promise<Poste
     }),
   )
 
-  const duplicate = await postOnce(writes, 'write-off', id, clientRequestId != null)
+  const duplicate = await postOnce(AR_PAYMENT_TABLE_NAME, writes, 'write-off', id, clientRequestId != null)
   if (!duplicate) await writeAudit('Invoice', invoiceId, 'WRITE_OFF', caller, { amountCents, reason })
   return readBack(id, invoiceIds, duplicate)
 }
@@ -477,21 +451,21 @@ export async function reversePayment(input: Row, caller: Caller): Promise<Posted
 
   const applications = (original.applications as PaymentApplication[] | undefined) ?? []
   const creditApplications = (original.creditApplications as CreditApplication[] | undefined) ?? []
-  const { invoices, credits, before } = await readPlanInputs(applications, creditApplications)
+  const { documents, credits, before } = await readPlanInputs(applications, creditApplications)
 
   const plan = reversalPlan(
     {
       id: String(original.id),
-      customerId: String(original.customerId ?? ''),
+      partyId: String(original.customerId ?? ''),
       kind: (original.kind as ArPaymentKind) ?? 'PAYMENT',
       amountCents: numberOrNull(original.amountCents) ?? 0,
       appliedCents: numberOrNull(original.appliedCents) ?? 0,
       unappliedCents: numberOrNull(original.unappliedCents) ?? 0,
-      applications,
+      applications: planApplicationsOf(applications),
       creditApplications,
       reversedByPaymentId: typeof original.reversedByPaymentId === 'string' ? original.reversedByPaymentId : null,
     },
-    invoices,
+    documents,
     credits,
   )
   if (!plan.ok) throw new Error(plan.errors.join('; '))
