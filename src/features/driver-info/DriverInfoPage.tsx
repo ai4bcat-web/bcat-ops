@@ -1,5 +1,6 @@
 import { TruckMapWidget } from '@/features/dashboard/TruckMapWidget'
 import { useIsMobile } from '@/hooks/useIsMobile'
+import { IvanPhones } from './IvanPhones'
 
 /**
  * Driver info — where every truck is right now, who is in it, the load under way, the
@@ -16,6 +17,7 @@ export function DriverInfoPage() {
           <p style={{ fontSize: 12.5, color: 'var(--ds-t3)', marginTop: 3 }}>Where each truck is, who is driving it, the load under way, and the tracking link and info block to hand a broker</p>
         </div>
         <TruckMapWidget />
+        <IvanPhones />
       </div>
     </div>
   )

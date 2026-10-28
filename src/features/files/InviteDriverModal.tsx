@@ -6,11 +6,11 @@ import { useAuth } from '@/hooks/useAuth'
 import {
   createOnboardingInvite, generateInviteToken, inviteExpiry, buildPortalUrl, writeComplianceAudit,
 } from '@/lib/complianceClient'
-import { FLEET_GROUPS, FLEET_GROUP_LABELS } from '@/lib/fleetGroups'
+import { DRIVER_FLEETS, DRIVER_FLEET_LABELS } from '@/lib/fleetGroups'
 import { applicationFormFor, templateIdForFleet } from '@/lib/driverOnboarding'
 import { classificationForFleet } from '@/lib/fileHub'
 import { generateChecklist, generateTemplateChecklist, resolveOnboardingTemplate } from '@/lib/complianceClient'
-import type { FleetGroup } from '@/types/equipment'
+import type { DriverFleet } from '@/types/equipment'
 
 /**
  * The only way a driver enters the system: you invite them to apply.
@@ -31,7 +31,7 @@ export function InviteDriverModal({ onClose }: { onClose: () => void }) {
 
   const [email, setEmail] = useState('')
   const [name, setName] = useState('')
-  const [fleetGroup, setFleetGroup] = useState<FleetGroup | ''>('')
+  const [fleetGroup, setFleetGroup] = useState<DriverFleet | ''>('')
   const [busy, setBusy] = useState(false)
   // Carried over from the onboarding wizard: create the file and checklist without
   // emailing anyone, for a driver who won't use a portal or whose paperwork you hold.
@@ -56,14 +56,17 @@ export function InviteDriverModal({ onClose }: { onClose: () => void }) {
         email: email.trim(),
         active: true,
         type: 'driver',
-        fleetGroup: fleetGroup as FleetGroup,
+        fleetGroup: fleetGroup as DriverFleet,
+        // Owner operators are also marked on driverType, which the dispatch board, the
+        // settlement page and the rate-con text all read.
+        ...(fleetGroup === 'OWNER_OPERATOR' ? { driverType: 'OWNER_OPERATOR' as const } : {}),
         onboardingStatus: internalOnly ? 'IN_PROGRESS' : 'INVITED',
       })
 
       // Generate the checklist as part of inviting. The old flow could create an invite
       // without one, leaving a driver in the portal with nothing to do.
-      const classification = classificationForFleet(fleetGroup as FleetGroup)
-      const templateId = templateIdForFleet(fleetGroup as FleetGroup)
+      const classification = classificationForFleet(fleetGroup as DriverFleet)
+      const templateId = templateIdForFleet(fleetGroup as DriverFleet)
       if (templateId) {
         const template = await resolveOnboardingTemplate(templateId)
         if (template) {
@@ -95,7 +98,7 @@ export function InviteDriverModal({ onClose }: { onClose: () => void }) {
         changes: {
           invitedEmail: email.trim(), fleetGroup, internalOnly,
           template: templateId ?? 'standard',
-          form: applicationFormFor(fleetGroup as FleetGroup)?.key,
+          form: applicationFormFor(fleetGroup as DriverFleet)?.key,
         },
       })
 
@@ -167,15 +170,17 @@ export function InviteDriverModal({ onClose }: { onClose: () => void }) {
               </div>
               <div>
                 <label style={label}>Fleet *</label>
-                <select style={input} value={fleetGroup} onChange={(e) => setFleetGroup(e.target.value as FleetGroup | '')}>
+                <select style={input} value={fleetGroup} onChange={(e) => setFleetGroup(e.target.value as DriverFleet | '')}>
                   <option value="">Select a fleet…</option>
-                  {FLEET_GROUPS.map((g) => <option key={g} value={g}>{FLEET_GROUP_LABELS[g]}</option>)}
+                  {DRIVER_FLEETS.map((g) => <option key={g} value={g}>{DRIVER_FLEET_LABELS[g]}</option>)}
                 </select>
                 <div style={{ fontSize: 11, color: 'var(--ds-t3)', marginTop: 4 }}>
                   Decides their application, their documents, and their onboarding flow
-                  {fleetGroup && (templateIdForFleet(fleetGroup as FleetGroup)
+                  {fleetGroup && (templateIdForFleet(fleetGroup as DriverFleet)
                     ? ' — Amazon Relay, in phases.'
-                    : ' — the standard checklist.')}
+                    : fleetGroup === 'OWNER_OPERATOR'
+                      ? ' — the owner-operator checklist (lease, W-9, insurance).'
+                      : ' — the standard checklist.')}
                 </div>
               </div>
               <div>

@@ -26,7 +26,7 @@ export const driverSchema = z.object({
   hireDate: z.string().optional(),
   assignedTruckId: z.string().nullable().optional(),
   assignedTrailerId: z.string().nullable().optional(),
-  fleetGroup: z.enum(['LOCAL', 'AMAZON', 'BOX_TRUCK']).nullable().optional(),
+  fleetGroup: z.enum(['LOCAL', 'AMAZON', 'BOX_TRUCK', 'OWNER_OPERATOR']).nullable().optional(),
   /*
    * Motive user id. Typed by staff, never inferred — it decides whose hours-of-service log
    * the Ivan app shows, and Motive's org contains both a "Chuck Best" for our "Charles

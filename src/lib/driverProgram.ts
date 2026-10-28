@@ -40,7 +40,7 @@ export function driverProgramOf(driver: ProgramInputs): DriverProgram {
   // Box truck drivers run the Ivan paperwork app too (no settlement, no clock by default).
   if (driver.fleetGroup === 'BOX_TRUCK') return 'PAPERWORK'
   // Either field naming an owner operator settles it, as on the dispatch board.
-  if (driver.fleetGroup === 'AMAZON') return 'SETTLEMENT'
+  if (driver.fleetGroup === 'AMAZON' || driver.fleetGroup === 'OWNER_OPERATOR') return 'SETTLEMENT'
   if (driver.driverType === 'OWNER_OPERATOR') return 'SETTLEMENT'
 
   // Positive evidence of Ivan's own fleet, from the driver record or the pay setting.

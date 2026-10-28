@@ -4,7 +4,7 @@ import { Rocket, Send, Copy, Check, CircleCheck, Circle, Clock } from 'lucide-re
 import { useDriverOnboarding } from '@/hooks/useDriverOnboarding'
 import { applicationFormFor, canSendApplication, driverStatus, showsOnboardingPercent, DRIVER_STATUS_LABELS, statusAfterToggle } from '@/lib/driverOnboarding'
 import { useAppStore } from '@/store/useAppStore'
-import { FLEET_GROUP_LABELS } from '@/lib/fleetGroups'
+import { DRIVER_FLEET_LABELS } from '@/lib/fleetGroups'
 import type { Driver, OnboardingTask } from '@/types'
 
 /**
@@ -78,7 +78,7 @@ export function DriverOnboardingSection({ driver }: { driver: Driver }) {
           background: status === 'ACTIVE' ? '#f0fdf4' : status === 'ONBOARDING' ? '#fffbeb' : 'var(--ds-bg)',
         }}>{DRIVER_STATUS_LABELS[status]}</span>
         {driver.fleetGroup && (
-          <span style={{ fontSize: 11, color: 'var(--ds-t3)' }}>{FLEET_GROUP_LABELS[driver.fleetGroup]}</span>
+          <span style={{ fontSize: 11, color: 'var(--ds-t3)' }}>{DRIVER_FLEET_LABELS[driver.fleetGroup]}</span>
         )}
         <div style={{ flex: 1 }} />
         {/* You control active vs inactive. Onboarding is not selectable — a driver sits

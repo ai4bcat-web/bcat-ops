@@ -98,7 +98,8 @@ const schema = a.schema({
       assignedTrailerId:  a.string(),
       // Which fleet this driver runs in. Mirrors DriverPaySetting.payGroup so the two
       // agree, and decides which documents their file requires (see src/lib/fileHub.ts).
-      fleetGroup:         a.enum(['LOCAL', 'AMAZON', 'BOX_TRUCK']),
+      // OWNER_OPERATOR is a driver-only value: trucks stay LOCAL/AMAZON/BOX_TRUCK.
+      fleetGroup:         a.enum(['LOCAL', 'AMAZON', 'BOX_TRUCK', 'OWNER_OPERATOR']),
       // Compliance & profile fields
       email:              a.string(),   // invite target; required for new drivers (enforced in Zod)
       cdl:                a.string(),   // CDL number e.g. "CDL-A IL-8823901"
@@ -1246,6 +1247,22 @@ const schema = a.schema({
     .identifier(['truckId'])
     // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
     // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated()]),
+
+  // ── Company phones handed to Ivan's local drivers ─────────────────────────
+  // One row per device ("Ivan Cartage #1", "Ivan Cartage Ipad"), keyed by that name so a
+  // device can never be entered twice. The number belongs to the device, not the driver:
+  // when a phone changes hands its number goes with it. The driver's own number stays on
+  // Driver.phone.
+  CompanyPhone: a
+    .model({
+      label:            a.string().required(),
+      number:           a.string(),
+      assignedDriverId: a.string(),   // Driver.id; null = in the office
+      sortOrder:        a.integer(),
+    })
+    .identifier(['label'])
     .disableOperations(['subscriptions'])
     .authorization((allow) => [allow.authenticated()]),
 

@@ -9,6 +9,7 @@ describe('driverProgramOf', () => {
 
   it('gives owner operators the settlement', () => {
     expect(driverProgramOf({ fleetGroup: 'AMAZON' })).toBe('SETTLEMENT')
+    expect(driverProgramOf({ fleetGroup: 'OWNER_OPERATOR' })).toBe('SETTLEMENT')
     expect(driverProgramOf({ driverType: 'OWNER_OPERATOR' })).toBe('SETTLEMENT')
     expect(driverProgramOf({ payGroup: 'OWNER_OPERATOR' })).toBe('SETTLEMENT')
   })

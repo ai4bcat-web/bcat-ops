@@ -20,7 +20,7 @@ import { useDrivers } from '@/hooks/useDrivers'
 import { useAppStore } from '@/store/useAppStore'
 import { uploadDriverPhoto, deleteDriverPhoto } from '@/lib/apiClient'
 import { COLOR_MAP } from '@/lib/driverColors'
-import { FLEET_GROUPS, FLEET_GROUP_LABELS } from '@/lib/fleetGroups'
+import { DRIVER_FLEETS, DRIVER_FLEET_LABELS } from '@/lib/fleetGroups'
 import { classificationForFleet, driverExpiry } from '@/lib/fileHub'
 import { useAllComplianceDocuments } from '@/hooks/useAllComplianceDocuments'
 import type { ColorKey } from '@/types'
@@ -312,7 +312,7 @@ export function DriverDrawer({ open, driver: driverProp, onClose }: DriverDrawer
                     render={({ field }) => (
                       <select value={field.value ?? ''} onChange={(e) => field.onChange(e.target.value || null)} className="h-9 w-full rounded-md border border-input bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20">
                         <option value="">— Unclassified —</option>
-                        {FLEET_GROUPS.map((g) => <option key={g} value={g}>{FLEET_GROUP_LABELS[g]}</option>)}
+                        {DRIVER_FLEETS.map((g) => <option key={g} value={g}>{DRIVER_FLEET_LABELS[g]}</option>)}
                       </select>
                     )}
                   />

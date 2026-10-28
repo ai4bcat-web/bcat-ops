@@ -11,7 +11,7 @@ import {
   slotsForDriver, slotsForAsset, readyScore, slotState, truckSlotState, driverExpiry, visibleSlots,
   type ReadyScore, type SlotState, type ExpiryInfo,
 } from '@/lib/fileHub'
-import { FLEET_GROUP_LABELS } from '@/lib/fleetGroups'
+import { DRIVER_FLEET_LABELS } from '@/lib/fleetGroups'
 import { listAllOnboardingTasks } from '@/lib/complianceClient'
 import { listDriverPaySettings } from '@/lib/apiClient'
 import { onboardingProgress, driverStatus, DRIVER_STATUS_LABELS, resolveDriverEmail, type DriverStatus } from '@/lib/driverOnboarding'
@@ -20,6 +20,7 @@ import { EntityFilePanel } from './EntityFilePanel'
 import { DriverDrawer } from '@/features/drivers/DriverDrawer'
 import { PrivateDocsModal } from './PrivateDocsModal'
 import { InviteDriverModal } from './InviteDriverModal'
+import { IvanPhones } from '@/features/driver-info/IvanPhones'
 import { useComplianceSettings } from '@/hooks/useComplianceSettings'
 import { downloadEntityPacket, packetToast, driverForTruck, type FileEntity } from './entityPacket'
 import type { Driver } from '@/types'
@@ -220,7 +221,7 @@ export function FilesPage() {
     if (!q) return activeDrivers
     return activeDrivers.filter((d) => {
       const truck = trucks.find((t) => t.id === d.assignedTruckId)
-      const fleet = d.fleetGroup ? FLEET_GROUP_LABELS[d.fleetGroup] : ''
+      const fleet = d.fleetGroup ? DRIVER_FLEET_LABELS[d.fleetGroup] : ''
       return [d.name, d.phone, emailOf(d), d.cdl, truck?.unitNumber, fleet].some((v) => (v ?? '').toLowerCase().includes(q))
     })
   }, [byStatus, trucks, q, emailOf])
@@ -385,7 +386,7 @@ export function FilesPage() {
                     </td>
                     <td style={{ ...TD }}>
                       {d.fleetGroup
-                        ? <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--ds-t2)', background: 'var(--ds-bg)', border: '1px solid var(--ds-border)', padding: '2px 7px', borderRadius: 999, whiteSpace: 'nowrap' }}>{FLEET_GROUP_LABELS[d.fleetGroup]}</span>
+                        ? <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--ds-t2)', background: 'var(--ds-bg)', border: '1px solid var(--ds-border)', padding: '2px 7px', borderRadius: 999, whiteSpace: 'nowrap' }}>{DRIVER_FLEET_LABELS[d.fleetGroup]}</span>
                         : <span style={{ color: 'var(--ds-t3)', fontSize: 12 }}>Unclassified</span>}
                     </td>
                     <td style={{ ...TD, maxWidth: 210 }}
@@ -467,6 +468,8 @@ export function FilesPage() {
             })}
           </div>
         )}
+
+        {tab === 'DRIVER' && <div style={{ marginTop: 16 }}><IvanPhones /></div>}
 
         {hub.loading && <div style={{ color: 'var(--ds-t3)', fontSize: 12.5, padding: '10px 2px' }}>Loading documents…</div>}
       </div>

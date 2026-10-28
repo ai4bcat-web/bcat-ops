@@ -21,7 +21,7 @@ export interface Driver {
    * Which fleet this driver runs in — mirrors DriverPaySetting.payGroup so the two
    * agree, and decides which documents their file requires.
    */
-  fleetGroup?: import('./equipment').FleetGroup | null
+  fleetGroup?: import('./equipment').DriverFleet | null
   // Compliance & profile fields
   email?: string
   cdl?: string           // CDL number e.g. "CDL-A IL-8823901"

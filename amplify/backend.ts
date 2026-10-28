@@ -839,7 +839,7 @@ dispatchActionsFn.addToRolePolicy(new PolicyStatement({
     startingPosition: StartingPosition.LATEST,
     batchSize:        10,
     retryAttempts:    2,
-    enabled:          process.env.BCAT_ISOLATED_PREVIEW !== 'true',
+    enabled:          process.env.BCAT_ISOLATED_PREVIEW !== 'true' && process.env.BCAT_DEV_STACK !== 'true',
   })
 }
 
@@ -1539,7 +1539,7 @@ new EventSourceMapping(Stack.of(brokerAlertFn), 'BrokerLoadStreamMapping', {
   startingPosition:  StartingPosition.LATEST,
   batchSize:         10,
   retryAttempts:     2,
-  enabled:           process.env.BCAT_ISOLATED_PREVIEW !== 'true',   // see the guard below
+  enabled:           process.env.BCAT_ISOLATED_PREVIEW !== 'true' && process.env.BCAT_DEV_STACK !== 'true',   // see the guards below
 })
 
 // ── podActions Lambda (JobsDone PODs) ──────────────────────────────────────
@@ -1868,3 +1868,30 @@ factoringIntakeFn.addEnvironment('OTR_ACTIONS_FUNCTION_NAME', otrFunctionName)
 factoringIntakeFn.addToRolePolicy(
   new PolicyStatement({ actions: ['lambda:InvokeFunction'], resources: [otrFunctionArn] }),
 )
+
+// ── Dev stack guard (ops-dev.bcatcorp.com) ──────────────────────────────────
+// BCAT_DEV_STACK=true marks the long-lived `dev` branch stack: a full working copy of
+// the app (every page, every Lambda callable) on its own tables, pool and bucket, used
+// to build and test before a change reaches main. Unlike BCAT_ISOLATED_PREVIEW it does
+// not zero the Lambdas — the point of dev is to use the whole app — but nothing on it
+// may act on the outside world by itself: every EventBridge schedule (including the
+// ones defineFunction creates) is disabled, both Load-stream consumers are created
+// disabled above, and every Lambda is denied SES. Slack, OTR, Paychex and Blue Ink are
+// neutered on dev by branch-level secret overrides (see Docs/DEV_STACK.md); Twilio
+// is inert because dev's user pool has no /bcat/dispatch/<poolId>/ config.
+// Runs last so every rule already exists. Refused on main.
+if (process.env.BCAT_DEV_STACK === 'true') {
+  if (process.env.AWS_BRANCH === 'main') {
+    throw new Error('BCAT_DEV_STACK must never be set on the main branch')
+  }
+  let devRootStack: Stack = backend.data.stack
+  while (devRootStack.nestedStackParent) devRootStack = devRootStack.nestedStackParent
+  for (const construct of devRootStack.node.findAll()) {
+    if (construct instanceof CfnRule) construct.state = 'DISABLED'
+  }
+  for (const construct of Object.values(backend)) {
+    const lambda = (construct as { resources?: { lambda?: LambdaFunction } }).resources?.lambda
+    if (!lambda) continue
+    lambda.addToRolePolicy(new PolicyStatement({ effect: Effect.DENY, actions: ['ses:*'], resources: ['*'] }))
+  }
+}

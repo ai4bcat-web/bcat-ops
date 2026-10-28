@@ -2110,6 +2110,41 @@ export async function upsertTruckConfig(
   }
 }
 
+// ── Company phones (Ivan local drivers) ─────────────────────────────────────────
+
+export interface CompanyPhone {
+  label: string
+  number?: string | null
+  assignedDriverId?: string | null
+  sortOrder?: number | null
+}
+
+const COMPANY_PHONE_FIELDS = `label number assignedDriverId sortOrder`
+
+export async function listCompanyPhones(): Promise<CompanyPhone[]> {
+  const result = await client.graphql({
+    query: `query ListCompanyPhones { listCompanyPhones(limit: 1000) { items { ${COMPANY_PHONE_FIELDS} } } }`,
+  }) as { data: { listCompanyPhones: { items: CompanyPhone[] } } }
+  return (result.data.listCompanyPhones.items ?? [])
+    .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99) || a.label.localeCompare(b.label))
+}
+
+export async function createCompanyPhone(input: CompanyPhone): Promise<CompanyPhone> {
+  const result = await client.graphql({
+    query: `mutation CreateCompanyPhone($input: CreateCompanyPhoneInput!) { createCompanyPhone(input: $input) { ${COMPANY_PHONE_FIELDS} } }`,
+    variables: { input },
+  }) as { data: { createCompanyPhone: CompanyPhone } }
+  return result.data.createCompanyPhone
+}
+
+export async function updateCompanyPhone(input: Pick<CompanyPhone, 'label'> & Partial<CompanyPhone>): Promise<CompanyPhone> {
+  const result = await client.graphql({
+    query: `mutation UpdateCompanyPhone($input: UpdateCompanyPhoneInput!) { updateCompanyPhone(input: $input) { ${COMPANY_PHONE_FIELDS} } }`,
+    variables: { input },
+  }) as { data: { updateCompanyPhone: CompanyPhone } }
+  return result.data.updateCompanyPhone
+}
+
 // ── Equipment (Fleet) ───────────────────────────────────────────────────────────
 // Stored field-for-field; the client supplies `id` on create so local/server ids stay aligned.
 
