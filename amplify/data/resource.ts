@@ -1360,6 +1360,7 @@ const schema = a.schema({
       references:      a.json(),                // CUSTOMER|ALL OrderReference[] only
       subtotalCents:   a.integer().required(),
       totalCents:      a.integer().required(),
+      paidCents:       a.integer().required(),
       writtenOffCents: a.integer().required(),
       balanceCents:    a.integer().required(),
       arOpen:          a.string(),              // sparse 'OPEN'
