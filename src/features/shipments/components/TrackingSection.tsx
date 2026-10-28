@@ -24,7 +24,7 @@ import { formatDateTime, formatDateTimeInput, fromDateTimeInput } from '@/lib/da
 import { useLoadTracking } from '@/hooks/useLoadTracking'
 import type { TimelineItem } from '@/lib/trackingTimeline'
 import type {
-  ChargeCodeDef, CheckCallSource, CustomerRecord, ShipmentBundle, TmsSettings,
+  ChargeCodeDef, CheckCallSource, CustomerRecord, ShipmentBundle, TmsSettings, TrackingLinkRecord,
 } from '@/types/tms'
 import { CustomerLinkDialog } from './CustomerLinkDialog'
 import { LogCheckCallDialog, type CheckCallFormValues } from './LogCheckCallDialog'
@@ -331,6 +331,17 @@ function timelineKey(item: TimelineItem): string {
   return `pos-${item.truckId}-${item.locatedAt}`
 }
 
+/**
+ * What a TrackingLink row says on the timeline. `sentAt` is stamped only when
+ * something actually left — a COPY link, or a send Twilio/SES refused, has none.
+ */
+function linkRowLabel(row: TrackingLinkRecord): string {
+  const who = row.kind === 'CUSTOMER_VIEW' ? 'customer' : 'driver'
+  if (row.sentVia === 'COPY') return `Tracking link created to copy for the ${who}`
+  if (!row.sentAt) return `Tracking link created for the ${who} — not sent`
+  return `Tracking link ${row.sentVia === 'EMAIL' ? 'emailed' : 'texted'} to the ${who}`
+}
+
 function TimelineRow({ item, busy, onResolve }: {
   item: TimelineItem
   busy: boolean
@@ -355,7 +366,9 @@ function TimelineRow({ item, busy, onResolve }: {
       <li className="flex items-start gap-2 rounded-lg border border-border p-2 text-sm">
         <Link2 size={14} className="mt-0.5 shrink-0 text-muted-foreground" />
         <div className="min-w-0">
-          <p>Tracking link {item.row.kind === 'CUSTOMER_VIEW' ? 'sent to the customer' : 'sent to the driver'}</p>
+          {/* Never assert a send that did not happen: on dev Twilio is unconfigured
+              and SES is denied, so a COPY link is created, not sent. */}
+          <p>{linkRowLabel(item.row)}</p>
           <p className="text-xs text-muted-foreground">
             {formatDateTime(item.at)}{item.row.sentTo ? ` · ${item.row.sentTo}` : ''} · {item.row.status.toLowerCase()}
           </p>

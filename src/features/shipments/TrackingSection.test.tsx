@@ -109,7 +109,7 @@ describe('TrackingSection', () => {
     expect(rows[0].textContent).toContain('Driver ping')
     expect(rows[1].textContent).toContain('Breakdown')
     expect(rows[2].textContent).toContain('Departed')
-    expect(rows[3].textContent).toContain('Tracking link sent to the driver')
+    expect(rows[3].textContent).toContain('Tracking link texted to the driver')
 
     // The call that moved the load shows what it moved it from and to.
     expect(rows[2].textContent).toContain('LDG')
@@ -134,6 +134,18 @@ describe('TrackingSection', () => {
   it('drops the position pins it knows onto the map', async () => {
     render(<TrackingSection bundle={bundle} customer={null} catalog={[]} actions={actions} />)
     await waitFor(() => expect(screen.getByTestId('mini-map').textContent).toContain('ping-cc-3'))
+  })
+
+  // Twilio is unconfigured on dev and SES is denied there, so a link is routinely
+  // created and copied rather than sent. The timeline must not claim otherwise.
+  it('says a copied link was copied, not sent', async () => {
+    links[0] = { ...links[0], sentVia: 'COPY', sentAt: null, sentTo: null, createdAt: '2026-03-02T14:00:00.000Z' }
+    render(<TrackingSection bundle={bundle} customer={null} catalog={[]} actions={actions} />)
+    const timeline = await screen.findByTestId('tracking-timeline')
+    await waitFor(() => expect(within(timeline).getAllByRole('listitem').length).toBe(4))
+    const text = timeline.textContent ?? ''
+    expect(text).toContain('Tracking link created to copy for the driver')
+    expect(text).not.toContain('texted to the driver')
   })
 })
 

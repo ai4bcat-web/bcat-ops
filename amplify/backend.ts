@@ -300,6 +300,11 @@ const PORTAL_ORIGINS = [
   'http://localhost:5173',
   'http://127.0.0.1:5173',
   PORTAL_PROD_ORIGIN,
+  // The dev stack's branch domain (ops-dev.bcatcorp.com) is not in DNS yet, so the
+  // only reachable dev origin is Amplify's default branch URL. Without it every
+  // public page — the truck link, the rate-con signing page, the customer tracking
+  // link — is blocked by CORS on dev and cannot be used or verified there.
+  ...(process.env.BCAT_DEV_STACK === 'true' ? ['https://dev.d3dejqzs77khq6.amplifyapp.com'] : []),
 ]
 
 // ── driver-app-api Lambda (driver PWA HTTP API) ────────────────────────────
