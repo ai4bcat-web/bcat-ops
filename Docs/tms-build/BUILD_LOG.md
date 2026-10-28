@@ -2,6 +2,148 @@
 
 One entry per unit of work (newest first). Decisions needed from Ryne go under **Decision needed**.
 
+## 2026-10-28 — Step H is live on dev, verified end to end; I planned
+
+- **Deployed.** Commit `49bbaa5` pushed to `origin dev`; Amplify job `37` SUCCEED —
+  BUILD, DEPLOY and VERIFY. This entry's own commit carries the three money and layout
+  fixes the browser pass turned up, and is job `38`. Both `Quote` and `LaneRateSample` are
+  ACTIVE on dev with exactly the five and two indexes the plan named —
+  `quotesByCustomerIdAndQuoteDate`,
+  `quotesByLoadIdAndQuoteDate`, `quotesByQuoteOpenAndExpiresAt`, `quotesByQuoteMonthAndQuoteDate`,
+  `quotesByLinkToken`, `laneRateSamplesByLaneKeyAndDate`, `laneRateSamplesByLaneKey3AndDate`
+  (read off the live tables, not assumed — `quotesByLinkToken` is the one `tracking-api`
+  queries, so it was worth checking before the public link went out).
+- **Template budget.** Measured on the build's own synth path with
+  `scripts/measureDataTemplate.mjs` (new, and the script the G entry's measurement was done
+  by hand): the dev data stack went **708,014 → 717,616 bytes**, +9,602 for two models,
+  seven GSIs, their read resolvers and the new table ARNs — **282,384 bytes under the cap**,
+  and the asset key moves, which is what forces the real upload. Well under the plan's
+  740,000-byte trigger, so the `quoteMonth` GSI stays. No other template in the 85-template
+  assembly exceeds 128,503 bytes.
+- **What shipped.** One `Quote` model for both sides (`side SELL` a customer quote,
+  `side BUY` a carrier offer) with its thread, its lines and its public-link token on the
+  row, and one `LaneRateSample` per delivered load; thirteen sell-side and five buy-side
+  actions inside `tmsShipmentActions` behind a new `page-quotes` key (`quotes.ts`,
+  `offers.ts`, `laneSamples.ts` — no new Lambda, judgement 1); `GET /q/<token>` and
+  `POST /q/<token>/respond` on the existing `tracking-api`; `src/lib/quotes.ts`,
+  `quoteNotices.ts`, `laneKey.ts`, `laneStats.ts`, `quoteLinkClient.ts`; `/quotes`,
+  `/quotes/:id`, `/rates`, the public `/quote/:token`, the Carrier-tab offers card, the
+  Financials and quote-form lane panels, the customer's Quotes tab and the settings card;
+  `scripts/backfillLaneSamples.mjs`; `Docs/academy/quotes-and-lane-rates.md`.
+- Gates before each commit: `npm run typecheck`, `npm run lint` (3 pre-existing warnings),
+  `npm run test` — **351 files / 4598 tests**, up from 342 / 4347.
+- **Fable review (`reviewer`, once, on the full diff) found two blockers and six majors,
+  every one fixed before the commit with a test that fails without the fix.** The two
+  blockers were both money or data loss: `COUNTER_OFFER` wrote our counter into
+  `amountCents` and the carrier's ask into `counterCents`, the inverse of the convention
+  `ourOfferCents`, `numberOnTheTable` and `carrierLastNumber` all read, so a $1,750 counter
+  on a $1,900 ask would have shown the carrier "our offer: $1,900" and booked the load at
+  it; and `REVERT_TO_QUOTE` SET `loadId: null` on a GSI hash key **after** soft-deleting the
+  shipment, which DynamoDB rejects — in production every revert would have deleted the
+  freight and then thrown, stranding the quote at WON with no way back. The majors:
+  `ACCEPT_OFFER` booked at `amountCents` even from RECEIVED_COUNTER, ignoring the number the
+  carrier actually agreed to; the public respond route stored `events` as a JSON string while
+  the staff router stores a list, so the first staff action after any public answer threw the
+  whole thread away; `absorbCounter` summed CARRIER lines into a customer total, so a quote
+  carrying a buy estimate could never take a counter; a sample with no ZIPs put `laneKey3:
+  NULL` on an index key and was silently dropped; a customer-less quote put `customerId: NULL`
+  on one and could not be saved at all; and `REQUEST_OFFERS` copied the book-now rate into
+  `amountCents`, so turning `quoteOffersCarrierSeesBookNow` off hid nothing.
+- **The NULL-on-an-index-key class is now caught by the test harness, not by production.**
+  `handler.test.ts`'s in-memory engine rejects a NULL on any index hash key the way DynamoDB
+  does. Adding that guard immediately failed 36 existing tests on a **pre-existing** bug:
+  `ASSIGN_CARRIER` wrote `carrierId: NULL` on every call, so every assignment of an
+  off-directory carrier would have been refused on the live table. Fixed here.
+- **A second pre-existing bug, found while wiring the quote e-mail's brokerage name:**
+  `Division` is identified by `key`, not `id` (`resource.ts:913`), but `tms-finance-actions`
+  read it through `getById`, which keys on `id`. DynamoDB answers that with a
+  `ValidationException`, so **any invoice, carrier bill or remittance on a row carrying a
+  `divisionKey` would have failed outright** — Step F and G never hit it because their
+  fixtures had no division. `store.ts` now has one `getDivision(key)` and the three call
+  sites use it; the finance harness honours the key schema so the regression test is real.
+- **Runtime verification on the deployed dev stack: `scripts/devVerifyQuotes.mjs`, 83 of 83
+  checks.** It builds its own two customers (one on a credit hold) and two insured carriers
+  and drives the real AppSync router and the real public Function URL: quote minted and
+  priced (Σ CUSTOMER lines, the CARRIER estimate excluded) → sent (NOT_SENT on dev, with a
+  copyable body carrying the link) → the customer's lead stage moves NEW → QUOTED → the
+  public page → counter → **the same POST again is 410 and the link is then 404** → our
+  counter on a fresh link → their accept → convert, where the Order's revenue equals the
+  quote's amount and carries `quoteId`/`quoteNumber`/`quoteAmountCents` → a second convert
+  refused → revert → re-convert leaving exactly one live shipment. The held customer's
+  convert is **blocked** and its quote is re-read and asserted unchanged. Duplicates, restore
+  (back at QUOTED with **no** token), cancel, pass, accept-counter, two sweeps proving
+  idempotency, and a link whose hour has passed answering 404 while the row is written
+  LOST/EXPIRED. On the buy side: one REQUESTED row per carrier under one `groupId`, a
+  `CARRIER_OFFER` notice recorded NOT_SENT, the carrier naming a price on the link, our
+  counter, their accept — **with the load still SOURCING, because a carrier's accept never
+  books** — then `ACCEPT_OFFER` booking at the rate they agreed to with `LoadCarrier.quoteId`
+  set and the sibling offer closed, and a plain `BOOK_CARRIER` cancelling the offers still
+  open on another load. Lane history: a delivered load writes `lrs:<loadId>` with the money
+  off `LoadFinancials`, a re-price refreshes that same row rather than duplicating it, and the
+  lane carries exactly one sample for the load.
+- **Nothing leaks, asserted by value rather than by eye.** The quote e-mail body and the
+  public page were searched for the target buy, the top spend, the margin, the buy estimate
+  and the internal note — as raw cents, as formatted dollars and as a key at any depth — and
+  for the carrier's name; the carrier's page was searched the same way for the customer's name
+  and rate. Nothing found, in the script and again in the browser.
+- **Migration.** `scripts/backfillLaneSamples.mjs` planned (934 loads read) → reviewed →
+  applied: **835 samples written, 0 failures**. A second plan over the same tables returns
+  **0 actions, 835 already current** — idempotent against the live data. The legacy class was
+  proved rather than assumed: the script compared `Load.rate` with `LoadFinancials.revenueCents`
+  across **919** loads that carry both, found 919 matching cents and none matching dollars, and
+  prints the arithmetic; no load needed the legacy path in the end, and a sample whose money had
+  to be guessed is never written. The one live sample the verification run had already written
+  was left exactly as it was and reported as needing a person.
+- **Browser pass on `https://dev.d3dejqzs77khq6.amplifyapp.com`**, signed in as a temporary
+  dev admin: `/quotes` with its six tabs, per-tab counts and the totals strip (open $, won this
+  month, win rate, median hours to reply); the Replies tab showing ours against theirs with the
+  responder's name; `/quotes/Q000014` with the thread, the priced lines and the lane panel;
+  `/rates` answering a real lane off the backfill with two samples and saying *"Every load in
+  this window ran on our own trucks"* rather than printing a zero carrier cost; the shipment's
+  Carrier tab offers card and its Financials lane panel; the customer's Quotes tab with a win
+  rate; and the settings card. **The public forms were driven by hand, not only by the script**:
+  a customer countered $2,950 on Q000014 through the page and the board showed it within the
+  minute, a reload of the spent link said *"This quote link is no longer active"*, and a carrier
+  quoted $1,925 on Q000015 — after which the row carries both the staff `REQUESTED` event and
+  the public `QUOTED_ON_LINK` one, which is the proof that the events-as-a-list fix holds across
+  the two writers.
+- Three things the browser pass turned up, fixed in the follow-up commit: the lane panel, the
+  offers card and the customer's Quotes tab printed money through the directory's `formatCents`,
+  which has no thousands separator, so a lane read `$2500.00` beside a board reading `$2,500.00`;
+  and the lane panel's five-column stat grid sized itself to the viewport, so inside the narrow
+  shipment column the labels overlapped — it now sizes to its own container.
+- **Nothing claims an e-mail was sent.** SES is denied on dev, so every send came back
+  `NOT_SENT` with the link and the body to copy, and the offer requests are
+  `ShipmentNotice` rows of kind `CARRIER_OFFER` marked `NOT_SENT`. No row anywhere on dev is
+  `SENT`. Separately, `PORTAL_ORIGIN` on dev is `https://ops-dev.bcatcorp.com`, which is still
+  **not in DNS** (the Step D entry raised this), so the link the Lambda writes into the body is
+  not reachable on dev; the same token works on the branch URL, which is what the browser pass
+  used. That is an environment gap, not a code one, and it disappears on production.
+- The temporary dev admin identity was created with a suppressed invite and a randomised
+  password that was never printed, and was deleted afterwards.
+- Dev-only rows left behind: customers *ZZ Quote Verification* and *ZZ Quote Credit Hold*,
+  carriers *ZZ Quote Carrier A* and *ZZ Quote Carrier B*, quotes `Q000001`–`Q000015`, and
+  shipments `S000041`–`S000047` (the verification ones soft-deleted, `S000047` left live
+  because its open offer is what the browser pass answered). Quotes are never deleted by the
+  script, as nothing else deletes a priced record.
+- **Decisions needed (Ryne):** Step H shipped every default its plan proposed — quotes inside
+  `tmsShipmentActions` under `page-quotes` rather than a new Lambda; the public link as
+  `/q/<token>` on `tracking-api`, one use per round; one `Quote` model for both sides with
+  `groupId` and `events` instead of `QuoteGroup`/`QuoteAction` tables; the ten-value status
+  enum with `SENT_REPLY`/`CREATED` dropped and `NOT_A_QUOTE` left to K; a carrier's accept on
+  the link never books — a dispatcher clicks Accept; WON written only at convert (sell) and at
+  booking (buy), with `REVERT_TO_QUOTE` the only way back; the quote id **is** the quote number,
+  `Q{n:6}`; below-floor and below-min-profit sends blocked for a rep and acknowledged by an
+  admin, toggled by `quoteBelowMinMarginAdminOnly`; expiry lazy plus a board sweep, no
+  scheduler; duplicates capped at 10 with exposure as a warning and a credit block only at
+  convert; lane samples written at DELIVERED+ with financials, re-put on reprice, own-fleet
+  legs out of carrier cost by default; no quote PDF until I. Confirm or change any of these.
+  Two further things to decide that the code surfaced: only the two `adminOnly` pricing
+  warnings gate a send — over-max-profit and over-top-spend are advisory — and a DISPATCHED
+  load may still be shopped for offers, only past dispatch is refused.
+- **Next:** Step I — settings, roles, teams, commissions, reporting. The plan is
+  `Docs/tms-build/I-plan.md`.
+
 ## 2026-10-28 — Step G is live on dev, verified end to end; H planned
 
 - **Deployed.** Job `34` (`1684273`) SUCCEED — BUILD, DEPLOY and VERIFY — the first dev

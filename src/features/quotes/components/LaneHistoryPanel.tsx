@@ -20,7 +20,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
 import { useLaneStats } from '@/hooks/useLaneStats'
 import { laneLabelFor } from '@/lib/laneKey'
-import { formatCents } from '@/lib/tmsDirectory'
+import { formatCents } from '@/lib/invoiceBuild'
 import type { LaneStatsSide, LaneStatsWindow, RateType } from '@/types/tms'
 
 const WINDOWS: { value: LaneStatsWindow; label: string }[] = [
@@ -33,7 +33,7 @@ const WINDOWS: { value: LaneStatsWindow; label: string }[] = [
 const RATE_TYPES: RateType[] = ['SPOT', 'CONTRACT']
 
 function money(cents: number | null): string {
-  return cents == null ? '—' : `$${formatCents(cents)}`
+  return cents == null ? '—' : formatCents(cents)
 }
 
 /** Cents per mile reads in dollars and cents, to the cent: `$2.41`. */
@@ -43,7 +43,7 @@ function perMile(cents: number | null): string {
 
 function SideStats({ title, side, note }: { title: string; side: LaneStatsSide; note?: string }) {
   return (
-    <div className="rounded-lg border border-border p-3">
+    <div className="@container rounded-lg border border-border p-3">
       <div className="flex items-baseline justify-between">
         <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{title}</p>
         <span className="text-xs text-muted-foreground">{side.count} {side.count === 1 ? 'load' : 'loads'}</span>
@@ -51,7 +51,7 @@ function SideStats({ title, side, note }: { title: string; side: LaneStatsSide; 
       {side.count === 0 ? (
         <p className="mt-2 text-sm text-muted-foreground">{note ?? 'Nothing in this window.'}</p>
       ) : (
-        <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-sm sm:grid-cols-5">
+        <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-sm @sm:grid-cols-3 @lg:grid-cols-5">
           <Cell label="Low" value={money(side.lowCents)} />
           <Cell label="Median" value={money(side.medianCents)} />
           <Cell label="Avg" value={money(side.avgCents)} />

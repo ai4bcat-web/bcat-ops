@@ -19,6 +19,7 @@ import { useCustomerAr } from '@/hooks/useCustomerAr'
 import { loadStatus } from '@/lib/loadStatus'
 import { laneLabelFor } from '@/lib/laneKey'
 import { QUOTE_STATUS_LABEL } from '@/lib/quotes'
+import { formatCents as formatQuoteCents } from '@/lib/invoiceBuild'
 import { formatCents } from '@/lib/tmsDirectory'
 import { cn } from '@/lib/utils'
 import { useCustomerForm } from './useCustomerForm'
@@ -496,7 +497,7 @@ function CustomerQuotesTab({ customerId }: { customerId: string }) {
             <div className="mt-1 text-xs text-muted-foreground">
               {laneLabelFor(quote.laneKey)} · {quote.quoteDate}
             </div>
-            <div className="mt-1 text-xs font-medium">${formatCents(quote.amountCents)}</div>
+            <div className="mt-1 text-xs font-medium">{formatQuoteCents(quote.amountCents)}</div>
           </Link>
         ))}
     </div>

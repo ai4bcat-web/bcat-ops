@@ -22,7 +22,7 @@ import { useLoadOffers } from '@/hooks/useLoadOffers'
 import { rejectOffer } from '@/lib/apiClient'
 import { quoteLinkFor } from '@/lib/quoteLinkClient'
 import { carrierLastNumber, isOpenQuoteStatus, OFFER_STATUS_LABEL, ourOfferCents } from '@/lib/quotes'
-import { formatCents } from '@/lib/tmsDirectory'
+import { formatCents } from '@/lib/invoiceBuild'
 import { AcceptOfferDialog } from './AcceptOfferDialog'
 import { CounterDialog } from './CounterDialog'
 import { LogOfferDialog } from './LogOfferDialog'
@@ -38,7 +38,7 @@ type OfferDialog =
   | null
 
 function money(cents: number | null | undefined): string {
-  return cents == null ? '—' : `$${formatCents(cents)}`
+  return cents == null ? '—' : formatCents(cents)
 }
 
 export function CarrierOffersCard({ bundle, onReload }: {
