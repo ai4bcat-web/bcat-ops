@@ -2,6 +2,47 @@
 
 One entry per unit of work (newest first). Decisions needed from Ryne go under **Decision needed**.
 
+## 2026-10-28 — Step C done on dev; Step D planned
+
+- Commit `b570b86` pushed to `origin dev` (Carrier/CarrierContact/CarrierPaymentMethod/CarrierDocument,
+  `tms-carrier-actions`, BOOK_CARRIER/SET_QUICK_PAY/SEND_RATE_CON/VOID_RATE_CON/DISPATCH_LOAD on
+  `tms-shipment-actions`, public `rate-con-sign-api` Function URL, carrierEligibility/quickPay/
+  carrierStatus/carrierRateCon, /carriers directory and profile, BookCarrierDialog, RateConPanel,
+  /sign/rate-con/:token, carrier booking settings card, Academy Step C article, importCarriers.mjs).
+  Amplify dev job `13` status `SUCCEED`.
+- Two follow-up commits, both found by verifying against the deployed stack rather than by tests:
+  `32d3eec` stops a DynamoDB NULL reaching a Carrier index key — editing a carrier without
+  re-supplying its DOT number, and creating a carrier with neither MC nor DOT, both failed outright
+  with `Type mismatch for Index Key … Actual: NULL`. Job `14` `SUCCEED`. `c0dcf89` grants
+  `dynamodb:ConditionCheckItem`, without which every BOOK_CARRIER was refused by IAM. Job `15` `SUCCEED`.
+  The Lambda had shipped with no test file; it now has 31 tests, and the fixes were proven by
+  reverting each one and watching the suite fail.
+- Required gates passed: `npm run typecheck`, `npm run lint` (3 pre-existing warnings),
+  `npm run test` (304 files, 3680 tests). Fable review ran before commit and found one money
+  blocker — BOOK_CARRIER wrote whole-load totals onto the per-carrier LoadCarrier row, so a rebook
+  after a TONU would have shown the previous carrier's pay on the new carrier's rate confirmation
+  and public signing page — plus a sign/decline race and a stale cached quick-pay fee. All fixed
+  before commit. LoadCarrier money is per-carrier; LoadFinancials money is whole-load.
+- Verification against dev with a temporary admin, since removed: booking gates refuse an uninsured
+  carrier and then require every warning acknowledged; quick pay 250 bps of $1,000.00 cached as
+  $25.00; TONU at $1,000.00 then rebook at $1,500.00 leaves the new LoadCarrier carrying $1,500.00
+  while LoadFinancials carries $2,500.00; duplicate MC/DOT, stale CAS, missing status reason,
+  FACTOR without a factor name and a full account number are all refused; the public sign endpoint
+  answers 404 on a bogus token and sets no CORS headers of its own. Browser on
+  `https://dev.d3dejqzs77khq6.amplifyapp.com/carriers`: tabs with counts, search, admin CSV,
+  profile with status pill, live insurance chips, seven tabs, and the load history off the new
+  `carrierId` index. The test load and its charge lines were restored to their original state;
+  the two verification carrier records are parked INACTIVE and are dev-only.
+- No dev migration: Step C adds no data that existing rows need. `scripts/importCarriers.mjs` is
+  written for the production cutover only and refuses to apply without a matching plan fingerprint.
+- Step D plan written: `Docs/tms-build/D-plan.md` (tracking, check calls, customer link). It needs
+  no new index on any existing table.
+- **Decisions needed (Ryne):** quick-pay tiers shipped as planned (21d/1.5% · 15d/2% · 7d/2.5% ·
+  1d/3%) with the fee as an AP deduction cached on LoadCarrier, not a rate-con charge line;
+  `allowedCarrierStatuses` defaults to ACTIVE only; rate-con required fields default to driver
+  name/phone + truck number; DO_NOT_USE may return to INACTIVE but only for an admin;
+  Highway/RMIS/MyCarrierPackets stay manual fields until Step J. Confirm or change any of these.
+
 ## 2026-10-28 — Step B done on dev; backfill complete
 
 - Commit `ee5b2cd` pushed to `origin dev` (Shipment/Order/Load model, board, draft editor,
