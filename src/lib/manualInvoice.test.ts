@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { MANUAL_STEPS, MANUAL_INVOICE_CC, manualProgress, withManualStep, isManualStepId } from './manualInvoice'
+import { MANUAL_STEPS, MANUAL_INVOICE_CC, manualProgress, withManualStep, isManualStepId, manualSentInfo } from './manualInvoice'
 
 describe('the manual-invoice steps', () => {
   it('are the three the office does, in order', () => {
@@ -26,5 +26,32 @@ describe('the manual-invoice steps', () => {
   it('rejects a step it does not know', () => {
     expect(isManualStepId('emailed')).toBe(true)
     expect(isManualStepId('faxed')).toBe(false)
+  })
+})
+
+describe('manualSentInfo', () => {
+  const ruben = { at: '2026-10-28T15:10:00Z', by: 'ruben@bcatcorp.com' }
+  const ryne = { at: '2026-10-28T16:00:00Z', by: 'ryne@bcatcorp.com' }
+  it('is nothing until every step is done', () => {
+    expect(manualSentInfo({ status: 'MANUAL_INVOICE', manualSteps: { billToUpdated: ruben, pdfExported: ruben } })).toBeNull()
+  })
+  it('reports the emailed tick as the send, with the AP address', () => {
+    const info = manualSentInfo({
+      status: 'INVOICED_MANUALLY', apEmail: ' ap@broker.com ',
+      manualSteps: { billToUpdated: ruben, pdfExported: ruben, emailed: ryne },
+      manualInvoicedAt: '2026-10-28T16:00:05Z',
+    })
+    expect(info).toEqual({ at: '2026-10-28T16:00:00Z', by: 'ryne@bcatcorp.com', to: 'ap@broker.com' })
+  })
+  it('falls back to the last tick when the row was finished out of order', () => {
+    const info = manualSentInfo({
+      status: 'INVOICED_MANUALLY',
+      manualSteps: { emailed: ruben, pdfExported: ruben, billToUpdated: ryne },
+      manualInvoicedAt: '2026-10-28T16:00:05Z',
+    })
+    // The emailed stamp still wins for "when"; it is the send.
+    expect(info?.at).toBe('2026-10-28T15:10:00Z')
+    expect(info?.by).toBe('ruben@bcatcorp.com')
+    expect(info?.to).toBeNull()
   })
 })

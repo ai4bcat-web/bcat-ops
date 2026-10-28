@@ -326,3 +326,44 @@ describe('documents that did not reach OTR', () => {
     await waitFor(() => expect(refresh).toHaveBeenCalled())
   })
 })
+
+describe('invoices sent by hand', () => {
+  const sentRow = item({
+    id: 'h1', proNumber: 'H1', status: 'INVOICED_MANUALLY', apEmail: 'ap@broker.com',
+    manualSteps: {
+      billToUpdated: { at: '2026-10-28T15:00:00Z', by: 'ruben@bcatcorp.com' },
+      pdfExported:   { at: '2026-10-28T15:05:00Z', by: 'ruben@bcatcorp.com' },
+      emailed:       { at: '2026-10-28T15:10:00Z', by: 'ruben@bcatcorp.com' },
+    },
+    manualInvoicedAt: '2026-10-28T15:10:00Z',
+  })
+
+  it('logs when each one went out, who sent it and where, on the Invoiced manually tab', () => {
+    setup([sentRow, item({ id: 'n1', proNumber: 'N1' })])
+    fireEvent.click(screen.getByRole('button', { name: /^Invoiced manually/ }))
+    expect(screen.getByRole('columnheader', { name: 'Sent' })).toBeInTheDocument()
+    expect(screen.queryByRole('columnheader', { name: 'Received' })).not.toBeInTheDocument()
+    const cell = screen.getByLabelText(/PRO H1 sent by hand/)
+    expect(cell).toHaveTextContent('by ruben')
+    expect(cell).toHaveTextContent('to ap@broker.com')
+  })
+
+  it('lists the newest send first', () => {
+    const older = item({
+      id: 'h0', proNumber: 'H0', status: 'INVOICED_MANUALLY', receivedAt: '2026-10-20T10:00:00Z',
+      manualSteps: { emailed: { at: '2026-10-20T12:00:00Z', by: 'dennis@bcatcorp.com' } },
+      manualInvoicedAt: '2026-10-20T12:00:00Z',
+    })
+    setup([older, sentRow])
+    fireEvent.click(screen.getByRole('button', { name: /^Invoiced manually/ }))
+    const labels = screen.getAllByLabelText(/sent by hand/).map((el) => el.getAttribute('aria-label') ?? '')
+    expect(labels[0]).toContain('PRO H1')
+    expect(labels[1]).toContain('PRO H0')
+  })
+
+  it('keeps the Received column everywhere else', () => {
+    setup([sentRow])
+    fireEvent.click(screen.getByRole('button', { name: /^All/ }))
+    expect(screen.getByRole('columnheader', { name: 'Received' })).toBeInTheDocument()
+  })
+})

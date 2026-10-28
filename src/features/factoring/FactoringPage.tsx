@@ -24,6 +24,7 @@ import { uploadOtrDocs, resolveLoad, assembleInvoice } from '@/lib/otrClient'
 import { loadFromFactoringItem } from './loadFromInvoice'
 import { FilePlus2 } from 'lucide-react'
 import { ManualInvoicePanel } from './ManualInvoicePanel'
+import { manualSentInfo } from '@/lib/manualInvoice'
 
 // ── Status labels ────────────────────────────────────────────────────────────
 
@@ -364,11 +365,32 @@ function OtrDocsFlag({ item, onResent }: { item: FactoringItem; onResent: () => 
   )
 }
 
+/**
+ * The send record for a row invoiced by hand — when it went out, who sent it, and to
+ * which AP address — so the Invoiced manually tab works as the log of everything that
+ * left without OTR. The stamps come from the steps the sender ticked.
+ */
+function SentByHandCell({ item }: { item: FactoringItem }) {
+  const sent = manualSentInfo(item)
+  if (!sent) return <span className="text-sm text-muted-foreground">—</span>
+  const who = sent.by.split('@')[0] || 'unknown'
+  return (
+    <div className="text-sm" aria-label={`PRO ${item.proNumber} sent by hand ${formatReceivedAt(sent.at)} by ${who}${sent.to ? ` to ${sent.to}` : ''}`}>
+      <div className="font-medium text-foreground">{formatReceivedAt(sent.at)}</div>
+      <div className="text-xs text-muted-foreground">by {who}{sent.to ? <> · to <span className="text-foreground">{sent.to}</span></> : ' · AP email not recorded'}</div>
+    </div>
+  )
+}
+
 function StatusBadge({ item }: { item: FactoringItem }) {
   const tone = STATUS_TONE[item.status]
+  const sent = item.status === 'INVOICED_MANUALLY' ? manualSentInfo(item) : null
+  const title = sent
+    ? `${STATUS_CAUSE[item.status]} Sent ${formatReceivedAt(sent.at)} by ${sent.by}${sent.to ? ` to ${sent.to}` : ''}.`
+    : STATUS_CAUSE[item.status]
   return (
     <span
-      title={STATUS_CAUSE[item.status]}
+      title={title}
       aria-label={`Status for PRO ${item.proNumber}: ${FACTORING_STATUS_LABEL[item.status]}`}
       style={{
         display: 'inline-flex', alignItems: 'center',
@@ -467,7 +489,10 @@ export function FactoringPage() {
       )
       .filter((item) => activeTab !== 'PENDING_WITH_OTR' || !otrFilter || otrLabelOf(item) === otrFilter)
       .filter((item) => matchesSearch(item, search))
-      .sort((a, b) => new Date(b.receivedAt).getTime() - new Date(a.receivedAt).getTime())
+      // The Invoiced manually tab is a send log, so it reads newest send first.
+      .sort((a, b) => activeTab === 'INVOICED_MANUALLY'
+        ? (manualSentInfo(b)?.at ?? '').localeCompare(manualSentInfo(a)?.at ?? '')
+        : new Date(b.receivedAt).getTime() - new Date(a.receivedAt).getTime())
   }, [items, activeTab, search, otrFilter])
 
   /*
@@ -669,7 +694,7 @@ export function FactoringPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr style={{ borderBottom: '1px solid var(--ds-border)', background: 'var(--ds-bg)' }}>
-                    {['PRO #', 'PO #', 'Customer', 'Amount', 'Fields', 'Required for OTR', 'Documents', 'Received', 'Status', ...(canDelete ? ['Actions'] : [])].map((col) => (
+                    {['PRO #', 'PO #', 'Customer', 'Amount', 'Fields', 'Required for OTR', 'Documents', activeTab === 'INVOICED_MANUALLY' ? 'Sent' : 'Received', 'Status', ...(canDelete ? ['Actions'] : [])].map((col) => (
                       <th
                         key={col}
                         style={{
@@ -796,9 +821,13 @@ export function FactoringPage() {
                         </div>
                       </td>
                       <td style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>
-                        <div className="text-sm text-muted-foreground" title={formatReceivedAt(item.receivedAt)}>
-                          {relativeReceived(item.receivedAt)}
-                        </div>
+                        {activeTab === 'INVOICED_MANUALLY'
+                          ? <SentByHandCell item={item} />
+                          : (
+                            <div className="text-sm text-muted-foreground" title={formatReceivedAt(item.receivedAt)}>
+                              {relativeReceived(item.receivedAt)}
+                            </div>
+                          )}
                       </td>
                       <td style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
