@@ -15,7 +15,7 @@ reviewed end to end on a real URL before anything reaches `main`, which is produ
 | EventBridge schedules | on | **all disabled** (`amplify/backend.ts`, dev stack guard) |
 | Load-stream consumers (`broker-load-alert`, `ratecon-assigned-text`) | on | created disabled |
 | SES (email) | on | **denied** on every Lambda |
-| Slack, OTR Solutions, Paychex, Blue Ink | real credentials (shared SSM secrets) | branch-level SSM overrides hold placeholder values, so the calls fail harmlessly |
+| Slack, OTR Solutions, Paychex, Blue Ink | real credentials (shared SSM secrets) | a synth-time Aspect in `backend.ts` removes those names from each Lambda's `AMPLIFY_SSM_ENV_CONFIG` and pins the variables to `disabled-on-dev`, so the calls fail harmlessly |
 | Twilio dispatch texting / calls | configured under `/bcat/dispatch/<prodPoolId>/` | inert — dev's pool has no config |
 | Anthropic, Google Maps, Motive (read-only) | real | real (shared secrets) |
 | Data | live | a point-in-time copy of production (see below); never synced back |
@@ -27,10 +27,18 @@ act on the outside world by itself. The guard throws if `BCAT_DEV_STACK` is ever
 ## Secrets
 
 Amplify resolves `secret('X')` from `/amplify/d3dejqzs77khq6/dev/X` first, then
-`/amplify/shared/d3dejqzs77khq6/X`. Dev overrides exist for `SLACK_BOT_TOKEN`,
-`OTR_USERNAME`, `OTR_PASSWORD`, `OTR_SUBSCRIPTION_KEY`, `PAYCHEX_CLIENT_ID`,
-`PAYCHEX_CLIENT_SECRET` and `BLUE_INK_TECH_API_KEY` (all placeholder strings). Everything
-else falls through to the shared production value.
+`/amplify/shared/d3dejqzs77khq6/X`, so dev reads the shared production values. The dev guard
+neuters `SLACK_BOT_TOKEN`, `OTR_USERNAME`, `OTR_PASSWORD`, `OTR_SUBSCRIPTION_KEY`,
+`PAYCHEX_CLIENT_ID`, `PAYCHEX_CLIENT_SECRET` and `BLUE_INK_TECH_API_KEY` in code (see the
+table above); every other secret is the real one. A branch-level SSM parameter under
+`/amplify/d3dejqzs77khq6/dev/` would be a second safety net if someone wants one.
+
+## Identifiers (2026-10-27)
+
+- Tables: `<Model>-nc3jsnxdmjhkpequimypiatkma-NONE` · staff pool `us-east-1_UKhMNVAG1` ·
+  driver pool `us-east-1_nnJzcFvTY` · bucket `amplify-d3dejqzs77khq6-de-bcatrateconfirmsbucketf4-u2z3qq1ar9hf`
+- Default URL https://dev.d3dejqzs77khq6.amplifyapp.com; `ops-dev` is in the bcatcorp.com domain association.
+- `node scripts/devStack.mjs env` prints the current Function URLs and ids.
 
 ## Branch environment variables
 
