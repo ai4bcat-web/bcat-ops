@@ -3,6 +3,81 @@
 One entry per unit of work (newest first). Decisions needed from Ryne go under **Decision needed**.
 
 
+## 2026-10-28 — Step E done on dev; backfill applied; Step F planned
+
+- Commit `eef2fae` pushed to `origin dev` (ShipmentDocument + ShipmentNotice models,
+  `TrackingLink.kind CARRIER_UPLOAD` with `uploadCount`/`lastUploadAt`/`neededTypes`, additive
+  fields on `TmsSettings`/`Shipment`/`Order`/`LoadCarrier`, storage prefix `shipment-docs/*`
+  browser-read-only; nine document actions on `tms-shipment-actions` (new `documents.ts`,
+  `inputs.ts`); `SEND_UPLOAD_LINK` / `REVOKE_UPLOAD_LINK` / `SEND_MILESTONE_NOTICE` /
+  `EMAIL_DOCUMENTS` / `SAVE_DOCUMENT_SETTINGS` on `tms-tracking-actions`; `GET /u/<token>` and
+  the presign/commit pair on `tracking-api`; new `shipment-notifier` on the Load stream;
+  `_shared/shipmentNotices.ts`; `shipmentDocuments` / `shipmentNotices` / `uploadPortal` /
+  `documentData` libs and the browser BOL and load-summary PDFs; Documents tab with the
+  required-document strip, four dialogs, delivery card, `/documents` review queue + nav badge,
+  board Docs column and filters, settings card, public `/track/u/:token` page;
+  `scripts/backfillShipmentDocuments.mjs`; Academy article
+  `Docs/academy/documents-and-delivery.md`). Amplify dev job `19` `SUCCEED`.
+- Follow-up commit `661b21f` (`tracking-api` needed `dynamodb:GetItem` on LoadCarrier and Load —
+  it held Query-on-index only, which the customer page needs but the upload view does not;
+  `GET /u/<token>` answered 500 until this landed). Amplify dev job `20` `SUCCEED`.
+- Required gates passed before each commit: `npm run typecheck`, `npm run lint` (3 pre-existing
+  warnings), `npm run test` — **3980 tests passed** across 325 files, up from 3840 at Step D.
+- Backfill: `node scripts/backfillShipmentDocuments.mjs --plan …` then `--apply`. Applied
+  **273 document rows** (60 `drv:` driver-app POD pointers, 213 `rck:` legacy CUSTOMER_RATE_CON
+  pointers — no bytes copied) and cached the gate on **894 orders**. 1 approved submission was
+  skipped because its load is not on a shipment; no row was invented for it. Required-doc lists
+  were already inside the new vocabulary, so nothing was rewritten and nothing is unrecognised.
+  A second plan run produced **0 actions**, proving the deterministic ids make it idempotent.
+- Fable reviewed the full diff; every real finding was fixed before the commit: the public role's
+  S3 grant narrowed off `grantReadWrite` (which carries `s3:DeleteObject*` and bucket `s3:List*`)
+  to `PutObject`+`GetObject` on the one prefix; the 20-file link budget enforced on commit as well
+  as presign; the presigned PUT actually pinned to its content type with `signableHeaders` (the
+  SDK treats `content-type` as unsignable by default, so the old comment was wrong); voiding a
+  PENDING upload now leaves the review queue and a non-ACTIVE row can no longer be accepted; a
+  merged multi-page POD files one document instead of one per page; and a non-final leg's carrier
+  is now asked for paperwork when their own leg lands, while the customer's DELIVERED notice still
+  waits for the last leg. One reported blocker was a false positive — `BUCKET_NAME` is already set
+  on `tmsTrackingActions` by the dispatch loop (`backend.ts:749`).
+- **Runtime verification on dev (38 of 38 checks passed)**, driven through the real AppSync
+  mutations and the real public Function URL against shipment **S000021**, built end to end by the
+  real Lambdas (create → order → submit → charges → book an outside carrier → dispatch → four
+  check calls to DELIVERED). Proven live: `READY_TO_INVOICE` refuses with *"This order still needs
+  Proof of delivery, Bill of lading"*; the presigned PUT is rejected (HTTP 403) when the PUT claims
+  a different content type; `COMMIT_DOCUMENT` refuses a foreign prefix and a size mismatch and is
+  idempotent on the key; committing the BOL drops it from `Order.docsMissing`; regenerating a load
+  summary mints v2, flips v1 to SUPERSEDED and keeps its bytes under a different key; a load
+  summary is filed INTERNAL and `EMAIL_DOCUMENTS` refuses to send it to a customer; the portal
+  refuses a disallowed type and an oversized file; a carrier upload lands PENDING attributed to
+  `link:<token8>`, leaves the gate still wanting a POD, appears in the review queue, and clears the
+  gate only once staff accept it; `READY_TO_INVOICE` then moves the order to UNBILLED; the rating
+  and the upload-link pointer are stored; a revoked link answers 404. The portal view was asserted
+  to contain no customer name, no money and no references.
+- **Nothing claims an e-mail was sent.** Dev denies `ses:*`, so the notice log for S000021 holds
+  `pod:<loadCarrierId>` written automatically by `shipment-notifier` when the leg delivered, plus
+  an `ntc-…` row for the manual re-send — both `NOT_SENT`, both carrying the 340-character body
+  that an operator copies. No row anywhere on dev is `SENT`.
+- Browser check of the public portal at `/track/u/<token>`: broker header, load `S000021-1`, both
+  stops with appointments, a "We still need" list showing Proof of delivery satisfied (struck
+  through) and Carrier invoice outstanding, the type select, a PDF/PNG/JPG picker with the 15 MB
+  hint, the expiry line and the dispatch note — and no customer, money or reference anywhere.
+- Temporary dev ADMIN identities (randomised passwords, never printed) were deleted in a `finally`
+  on every run. Verification scripts were throwaway and are removed.
+- Dev-only records left behind by the verification runs: shipments `S000005`–`S000021` (several
+  DRAFT, one DELIVERED) and one carrier *STEP E VERIFICATION CARRIER* (MC 987654). Left in place
+  rather than deleted — the brief forbids broad data cleanup, and they are harmless dev rows.
+- **Decisions needed (Ryne):** every Step E default shipped as the plan proposed — a customer's
+  required-doc list *replaces* the org default rather than unioning with it; a carrier-portal
+  upload needs staff acceptance before it satisfies the gate; an admin may invoice over a missing
+  document with a note, recorded on the order; milestone e-mails stay off per customer until
+  `visibilityPrefs.milestoneEmails` is switched on, and cover the six status transitions only;
+  a POD request goes to the carrier's dispatcher automatically on delivery asking for POD +
+  carrier invoice; upload links last 30 days from delivery and take 20 files of 15 MB, PDF/JPG/PNG;
+  the carrier may upload but never download; voiding a document is admin-only and keeps the file;
+  a BOL is numbered after its shipment with `-v{n}`; a rate con saved without e-sign does not count
+  as SIGNED. Confirm or change any of these.
+- Next: Step F — AR. The plan is `Docs/tms-build/F-plan.md`.
+
 ## 2026-10-28 — Step D done on dev; Step E planned
 
 - Commit `a2b4b10` pushed to `origin dev` (LoadCheckCall + TrackingLink models, additive fields on
