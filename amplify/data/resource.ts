@@ -1011,6 +1011,20 @@ const schema = a.schema({
       apRequireSignedRateCon:   a.boolean(),     // true — unsigned blocks approval
       remittanceEmailTemplate:  a.string(),      // must contain {reference}
       apBillDocsRequired:       a.string().array(), // defaults to requiredCarrierUploadTypes
+
+      // ── Quotes & rates org defaults (Step H) ──────────────────────────────
+      hoursToQuote:             a.integer(),     // 24 — how long a customer quote lives
+      offerExpiryHours:         a.integer(),     // 24, capped at the first pickup appointment
+      quoteNumberFormat:        a.string(),      // 'Q{n:6}' → Q000012
+      // Counter behind the quote number. Taken with an atomic ADD, exactly like
+      // nextShipmentNumber: a failed save skips a number, never repeats one.
+      nextQuoteNumber:          a.integer(),
+      quoteEmailTemplate:       a.string(),      // must contain {link}
+      counterEmailTemplate:     a.string(),      // must contain {link}
+      offerRequestEmailTemplate: a.string(),     // must contain {link}
+      quoteTermsText:           a.string(),      // printed on every public quote page
+      quoteBelowMinMarginAdminOnly: a.boolean(), // true — only owner/ADMIN send under the floor
+      quoteOffersCarrierSeesBookNow: a.boolean(), // true — the offer link may show a book-now rate
     })
     // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
     // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
@@ -1161,6 +1175,12 @@ const schema = a.schema({
       createdBy:       a.string().required(),
       updatedBy:       a.string().required(),
       version:         a.integer(),
+      // ── Quotes & rates (Step H) ──────────────────────────────────────────
+      // The quote this order was converted from, and the number it was won at.
+      quoteId:         a.string(),
+      quoteNumber:     a.string(),
+      quoteAmountCents: a.integer(),
+      quoteNotes:      a.string(),
     })
     .secondaryIndexes((index) => [
       index('shipmentId'),
@@ -1280,6 +1300,8 @@ const schema = a.schema({
       ratedBy:           a.string(),
       createdBy:       a.string().required(),
       updatedBy:       a.string().required(),
+      // The carrier offer this assignment was booked from (Step H).
+      quoteId:         a.string(),
     })
     .secondaryIndexes((index) => [
       index('loadId'),
@@ -1760,7 +1782,7 @@ const schema = a.schema({
       shipmentId:    a.string().required(),
       loadId:        a.string(),
       loadCarrierId: a.string(),
-      kind:          a.enum(['MILESTONE', 'POD_REQUEST', 'DOCUMENTS', 'INVOICE', 'REMITTANCE']),
+      kind:          a.enum(['MILESTONE', 'POD_REQUEST', 'DOCUMENTS', 'INVOICE', 'REMITTANCE', 'CARRIER_OFFER']),
       // The CustomerNotification vocabulary; null on POD_REQUEST and DOCUMENTS.
       milestone:     a.string(),
       channel:       a.enum(['EMAIL', 'COPY']),
@@ -1780,6 +1802,186 @@ const schema = a.schema({
       at:            a.datetime().required(),
     })
     .secondaryIndexes((index) => [index('shipmentId').sortKeys(['at'])])
+    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
+    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  // ── Quotes & rates (Step H) ────────────────────────────────────────────────
+  /*
+   * One priced thing, on either side of the deal: `side` SELL is a customer
+   * quote, BUY is an offer out to a carrier. Both walk the same ten-rung ladder,
+   * so the board, the expiry sweep and the public link are written once.
+   *
+   * The row's `id` IS the quote number ('Q000012'), minted from
+   * `TmsSettings.nextQuoteNumber` and put with `attribute_not_exists(id)`: a
+   * staff URL carries no secret and a lookup by number is a GetItem.
+   *
+   * `linkToken` is the public secret behind /q/<token> — 32 base64url
+   * characters, sparse and indexed, rotated every round and REMOVEd the moment
+   * the other side answers, so a spent link can never be replayed.
+   *
+   * `quoteOpen` is the sparse marker 'OPEN', carried from DRAFT through
+   * RECEIVED_COUNTER and REMOVEd — never nulled, a NULL in an index key is
+   * rejected outright — on WON, LOST, PASS or CANCELED.
+   *
+   * `stops`, `references` and `lines` are a SNAPSHOT of what we said at the
+   * time: converting a quote copies them onto the shipment, never the reverse.
+   *
+   * The enums below cannot carry .required() — Amplify Gen 2 enum fields take
+   * no modifiers. tmsShipmentActions demands them.
+   */
+  Quote: a
+    .model({
+      side:   a.enum(['SELL', 'BUY']),
+      status: a.enum([
+        'DRAFT', 'REQUESTED', 'QUOTED', 'SENT_COUNTER', 'RECEIVED_REPLY',
+        'RECEIVED_COUNTER', 'WON', 'LOST', 'PASS', 'CANCELED',
+      ]),
+      // A sell quote and its duplicates, or one request round across carriers.
+      groupId:         a.string(),
+      quoteDate:       a.string().required(),   // YYYY-MM-DD
+      quoteMonth:      a.string().required(),   // 'YYYY-MM' of quoteDate
+      customerId:      a.string(),
+      customerName:    a.string(),
+      contactName:     a.string(),
+      contactEmail:    a.string(),
+      customerRepId:   a.string(),              // Cognito username
+      carrierId:       a.string(),              // BUY only
+      carrierName:     a.string(),
+      carrierMc:       a.string(),
+      carrierEmail:    a.string(),
+      shipmentId:      a.string(),              // written at conversion
+      shipmentNumber:  a.string(),
+      orderId:         a.string(),
+      loadId:          a.string(),              // BUY: the leg being covered
+      loadNumber:      a.string(),
+      divisionKey:     a.string(),
+      mode: a.enum([
+        'FTL', 'PTL', 'BULK', 'DRAYAGE', 'INTERMODAL', 'RLTL', 'LTL', 'AIR', 'OCEAN', 'RAIL',
+      ]),
+      rateType:        a.enum(['SPOT', 'CONTRACT']),
+      equipmentType:   a.string(),
+      equipmentLengthFt: a.integer(),
+      stops:           a.json(),                // Stop[] — the Load.stops shape
+      laneKey:         a.string(),              // 'CHICAGO|IL>DANVILLE|IL'
+      laneKey3:        a.string(),              // '606>618'
+      pickupAppt:      a.datetime(),
+      deliveryAppt:    a.datetime(),
+      commodity:       a.string(),
+      weightLbs:       a.integer(),
+      miles:           a.integer(),
+      references:      a.json(),                // OrderReference[]
+      // SELL: the CUSTOMER lines. BUY: the one CARRIER rate line.
+      lines:           a.json(),                // LoadChargeInput[]
+      // SELL: Σ lines = revenue. BUY: the carrier's number.
+      amountCents:     a.integer().required(),
+      customerRateCents: a.integer(),
+      targetBuyCents:  a.integer(),
+      topSpendCents:   a.integer(),
+      marginBps:       a.integer(),
+      // BUY only: the number a carrier may accept outright on the link.
+      bookNowRateCents: a.integer(),
+      counterCents:    a.integer(),
+      counterBy:       a.enum(['US', 'THEM']),
+      rounds:          a.integer().required(),  // how many numbers have crossed
+      expiresAt:       a.datetime(),
+      // The current round's public secret. Sparse and indexed; gone once spent.
+      linkToken:       a.string(),
+      linkVersion:     a.integer(),             // bumped on every rotation
+      requestCount:    a.integer(),             // public reads, rate-limited
+      sentAt:          a.datetime(),
+      sentTo:          a.string(),              // comma-joined recipients
+      sendCount:       a.integer(),
+      lastSendStatus:  a.enum(['SENT', 'NOT_SENT']),
+      respondedAt:     a.datetime(),
+      response:        a.enum(['ACCEPTED', 'COUNTERED', 'DECLINED', 'PASSED']),
+      responderName:   a.string(),
+      responderEmail:  a.string(),
+      responderIp:     a.string(),
+      acceptedVia:     a.enum(['LINK', 'PHONE', 'EMAIL']),
+      lostReason: a.enum([
+        'EXPIRED', 'NO_RESPONSE', 'TOO_HIGH', 'TOO_SLOW', 'TRUCK_NOT_AVAILABLE',
+        'WITHDRAWN', 'OTHER', 'NO_REASON',
+      ]),
+      lostNote:        a.string(),
+      wonAt:           a.datetime(),
+      closedAt:        a.datetime(),
+      duplicatedFromId: a.string(),
+      // What pricing complained about when the number was last saved.
+      pricingWarnings: a.string().array(),
+      // Sparse 'OPEN' from DRAFT through RECEIVED_COUNTER; REMOVEd when it closes.
+      quoteOpen:       a.string(),
+      customerMessage: a.string(),              // travels onto the public page
+      internalNotes:   a.string(),              // never leaves the office
+      events:          a.json(),                // QuoteEvent[] — the thread
+      createdBy:       a.string().required(),
+      updatedBy:       a.string().required(),
+      version:         a.integer().required(),
+    })
+    .secondaryIndexes((index) => [
+      index('customerId').sortKeys(['quoteDate']),
+      index('loadId').sortKeys(['quoteDate']),
+      // Sparse by design: the open board and the expiry sweep are one query each.
+      index('quoteOpen').sortKeys(['expiresAt']),
+      index('quoteMonth').sortKeys(['quoteDate']),
+      // The public link's only door in — a GetItem is impossible, the token is
+      // not the key, and a Scan from a public Lambda is out of the question.
+      index('linkToken'),
+    ])
+    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
+    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  /*
+   * One delivered load, priced, keyed by lane: the whole of what the Historical
+   * Rates panel reads when somebody asks "what has this lane paid before?".
+   *
+   * The row's `id` is `lrs:<loadId>`, so a re-price overwrites the sample rather
+   * than doubling the lane's history. A load canceled or TONU'd after the sample
+   * was taken is marked `excluded` and kept — the record of what happened stays,
+   * the statistics simply stop counting it.
+   */
+  LaneRateSample: a
+    .model({
+      laneKey:         a.string().required(),   // 'CHICAGO|IL>DANVILLE|IL'
+      laneKey3:        a.string(),              // '606>618'
+      date:            a.string().required(),   // YYYY-MM-DD the load delivered
+      loadId:          a.string().required(),
+      shipmentId:      a.string().required(),
+      shipmentNumber:  a.string(),
+      orderId:         a.string(),
+      customerId:      a.string(),
+      customerName:    a.string(),
+      carrierId:       a.string(),
+      carrierName:     a.string(),
+      assignmentKind:  a.enum(['OWN_ASSET', 'CARRIER']),
+      divisionKey:     a.string(),
+      mode: a.enum([
+        'FTL', 'PTL', 'BULK', 'DRAYAGE', 'INTERMODAL', 'RLTL', 'LTL', 'AIR', 'OCEAN', 'RAIL',
+      ]),
+      rateType:        a.enum(['SPOT', 'CONTRACT']),
+      equipmentType:   a.string(),
+      miles:           a.integer(),
+      customerRateCents: a.integer(),
+      revenueCents:    a.integer(),
+      carrierRateCents: a.integer(),
+      costCents:       a.integer(),
+      profitCents:     a.integer(),
+      marginBps:       a.integer(),
+      loadStatus:      a.string(),
+      // Canceled or TONU'd after the sample was taken: kept, never counted.
+      excluded:        a.boolean(),
+      // Where the sample came from: a live load, the backfill, or a legacy load.
+      source:          a.enum(['LOAD', 'BACKFILL', 'LEGACY_LOAD']),
+      sampledAt:       a.datetime().required(),
+      version:         a.integer().required(),
+    })
+    .secondaryIndexes((index) => [
+      index('laneKey').sortKeys(['date']),
+      index('laneKey3').sortKeys(['date']),
+    ])
     // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
     // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
     .disableOperations(['subscriptions'])

@@ -87,6 +87,26 @@ function table(name: string): Map<string, Row> {
   return t
 }
 
+/**
+ * Division is the one table this router reads that is not keyed on `id`
+ * (`amplify/data/resource.ts`, `.identifier(['key'])`). The real table answers a
+ * GetItem whose `Key` names the wrong attribute with a ValidationException, not an
+ * empty read, so the engine does the same: an id-keyed read of a division has to
+ * fail here exactly as it fails in AWS.
+ */
+const KEY_ATTRIBUTE: Record<string, string> = { [TABLES.division]: 'key' }
+
+function keyOf(tableName: string, key: Row): string {
+  const attribute = KEY_ATTRIBUTE[tableName] ?? 'id'
+  const value = key[attribute]
+  if (typeof value !== 'string') {
+    throw new Error(
+      `ValidationException: The provided key element does not match the schema — ${tableName} is keyed on ${attribute}`,
+    )
+  }
+  return value
+}
+
 class ConditionalCheckFailed extends Error {
   constructor(message: string) {
     super(`ConditionalCheckFailedException: ${message}`)
@@ -327,8 +347,8 @@ function runCommand(cmd: MockCommand): unknown {
   const input = cmd.input
   switch (cmd.__type) {
     case 'Get': {
-      const key = unmarshall(input.Key as never) as { id: string }
-      const item = table(String(input.TableName)).get(key.id)
+      const key = unmarshall(input.Key as never) as Row
+      const item = table(String(input.TableName)).get(keyOf(String(input.TableName), key))
       return { Item: item ? marshall(item, { removeUndefinedValues: true }) : undefined }
     }
     case 'Query': {
@@ -426,8 +446,8 @@ function seed(over: { order?: Row; customer?: Row; settings?: Row } = {}): void 
     billToParties: [],
     ...over.customer,
   })
+  // Keyed on `key`, with no `id` attribute at all — as Amplify writes a Division row.
   table(TABLES.division).set('BCAT_LOGISTICS', {
-    id: 'BCAT_LOGISTICS',
     key: 'BCAT_LOGISTICS',
     name: 'BCAT Logistics',
     remitToName: 'BCAT Logistics LLC',
@@ -593,6 +613,16 @@ describe('GENERATE_INVOICE', () => {
       arBalanceCents: 250_000,
     })
     expect(table(TABLES.financials).get(LOAD_ID)!.frozenAt).toBeTruthy()
+  })
+
+  it("puts the load's division on the invoice, read by its own key", async () => {
+    // Division is identified by `key`, not `id`: a read built as `Key: { id }` is
+    // refused by DynamoDB with a ValidationException, so every invoice on a load
+    // that names a division would fail outright rather than lose the remit-to.
+    const { invoiceId } = await generate()
+    const invoice = table(TABLES.invoice).get(invoiceId)!
+    expect(invoice.divisionKey).toBe('BCAT_LOGISTICS')
+    expect(invoice.remitTo).toMatchObject({ name: 'BCAT Logistics LLC' })
   })
 
   it('refuses an order that is not UNBILLED, and writes nothing', async () => {

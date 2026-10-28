@@ -8,16 +8,21 @@
  *   GET  /u/<token>         the carrier's upload portal (Step E)
  *   POST /u/<token>/upload  a presigned PUT for one file
  *   POST /u/<token>/commit  the ShipmentDocument row for a file that landed
+ *   GET  /q/<token>         a customer's quote, or a carrier's offer (Step H)
+ *   POST /q/<token>/respond the one answer that link is good for
  *
- * For the tokenised routes the token **is** the TrackingLink row's primary key —
+ * For the tokenised links the token **is** the TrackingLink row's primary key —
  * 24 random bytes, base64url — so every lookup is a GetItem on a 192-bit key and no
- * index can be walked from outside. What each page may say is decided once, in
- * `src/lib/trackingLink.ts` and `src/lib/uploadPortal.ts`; this file only fetches
- * and guards.
+ * index can be walked from outside. The quote link is the one exception: a quote's
+ * id is its number, which staff put in a URL, so the same 24 bytes sit in a sparse
+ * `linkToken` index instead and are REMOVEd the moment that round is answered. What
+ * each page may say is decided once, in `src/lib/trackingLink.ts`,
+ * `src/lib/uploadPortal.ts` and `src/lib/quotes.ts`; this file only fetches and guards.
  *
  * This role cannot write Load. A ping is one LoadCheckCall row plus the link's own
  * counters, and "last known" is read back from those. An upload is one PENDING
- * ShipmentDocument row plus the link's counters — nothing else.
+ * ShipmentDocument row plus the link's counters. A quote answer is one conditioned
+ * UpdateItem on the row whose live token the caller is holding — nothing else.
  */
 import { randomUUID } from 'node:crypto'
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
@@ -25,17 +30,21 @@ import { DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand, ScanComma
 import { HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { currentLoadForDriver, laneLabel } from '../../../src/lib/driverJourney'
+import { quotePublicView } from '../../../src/lib/quotes'
 import { MAX_UPLOADS_PER_LINK, documentKey, documentPrefix } from '../../../src/lib/shipmentDocuments'
 import { pendingDeliveryEta } from '../../../src/lib/stopEvents'
 import { carrierView, customerView, isLinkToken } from '../../../src/lib/trackingLink'
 import { buildTimeline, lastKnownPosition, thinPositions, trackingWindow, type TrackPosition } from '../../../src/lib/trackingTimeline'
 import { carrierUploadView, portalUploadAllowed, uploadLinkUsable } from '../../../src/lib/uploadPortal'
+import { liveLinkStatuses, planResponse } from './quotes'
 import type { Load, Stop } from '../../../src/types'
 import type {
   Division,
   LoadCarrierRecord,
   LoadCheckCallRecord,
   OrderRecord,
+  QuoteEvent,
+  QuoteRecord,
   ShipmentDocumentRecord,
   ShipmentLoad,
   ShipmentRecord,
@@ -44,7 +53,10 @@ import type {
   TrackingLinkRecord,
 } from '../../../src/types/tms'
 
-const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}))
+// `removeUndefinedValues` is what `marshallRow` in tms-shipment-actions marshalls
+// with, and the two lambdas write the same rows: a field nobody set is left off
+// the item rather than refused outright, as a bare document client would.
+const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}), { marshallOptions: { removeUndefinedValues: true } })
 const s3 = new S3Client({})
 const EQUIPMENT_TABLE = process.env.EQUIPMENT_TABLE_NAME!
 const TRUCK_LOCATION_TABLE = process.env.TRUCK_LOCATION_TABLE_NAME!
@@ -62,6 +74,8 @@ const TRUCK_LOCATION_HISTORY_TABLE = process.env.TRUCK_LOCATION_HISTORY_TABLE_NA
 // Step E
 const SHIPMENT_DOCUMENT_TABLE = process.env.SHIPMENT_DOCUMENT_TABLE_NAME!
 const DOCUMENT_BUCKET = process.env.BUCKET_NAME!
+// Step H
+const QUOTE_TABLE = process.env.QUOTE_TABLE_NAME!
 
 const IDX_ORDERS_BY_SHIPMENT = 'ordersByShipmentId'
 const IDX_LOADS_BY_SHIPMENT = 'loadsByShipmentId'
@@ -72,9 +86,16 @@ const IDX_CHECK_CALLS_BY_LOAD = 'loadCheckCallsByLoadIdAndAt'
 // → truckLocationHistories…, exactly like ordersByShipmentId above.
 const IDX_POSITIONS_BY_TRUCK = 'truckLocationHistoriesByTruckIdAndLocatedAt'
 const IDX_DOCUMENTS_BY_SHIPMENT = 'shipmentDocumentsByShipmentIdAndUploadedAt'
+// The public link's only door in: the token is not the key, and a Scan from a
+// public Lambda is out of the question.
+const IDX_QUOTES_BY_TOKEN = 'quotesByLinkToken'
 
 /** The wording every dead link gets, whatever killed it: nothing leaks which. */
 const LINK_GONE = 'This tracking link is no longer active'
+/** The wording every dead quote link gets, whatever killed it. */
+const QUOTE_LINK_GONE = 'This quote link is no longer active'
+/** Somebody — them, a rep, or a sweep — moved this round before this answer landed. */
+const QUOTE_ANSWERED = 'This quote has already been answered'
 /** A leaked link cannot be scraped forever. */
 // Both public pages refresh every 60s while their tab is visible, so a customer
 // watching a load all week legitimately spends thousands of requests. The cap is
@@ -108,7 +129,7 @@ interface FnUrlEvent {
   rawPath?: string
   body?: string
   isBase64Encoded?: boolean
-  requestContext?: { http?: { method?: string } }
+  requestContext?: { http?: { method?: string; sourceIp?: string } }
 }
 
 function reply(status: number, body: unknown) {
@@ -760,6 +781,236 @@ async function uploadCommitRoute(token: string, event: FnUrlEvent) {
   return reply(200, { ok: true, documentId: file.documentId, uploadedAt: nowIso })
 }
 
+// ── Step H: the public quote link ───────────────────────────────────────────
+
+/** The row, with everything it keeps as AWSJSON read back as itself. */
+function toQuote(row: Row): QuoteRecord {
+  return {
+    ...row,
+    stops: parseJson<Stop[]>(row.stops) ?? [],
+    lines: parseJson(row.lines) ?? [],
+    references: parseJson(row.references) ?? [],
+    events: parseJson<QuoteEvent[]>(row.events) ?? [],
+  } as unknown as QuoteRecord
+}
+
+/**
+ * The quote this token is the live secret for, or nothing.
+ *
+ * The token is not the key — a quote's id is its number, which staff put in a URL
+ * — so the way in is the sparse `linkToken` index, and the row is only answerable
+ * on the rungs where somebody is actually waiting on an answer. Malformed, spent,
+ * already closed, never minted and past its date are one reply on the way out.
+ *
+ * A row with no `expiresAt` is not expired: it was never given a clock, and the
+ * one-use token is the guard. This is `quoteState`'s reading of expiry, not
+ * `activeLink`'s, because a quote's clock is a business promise and a tracking
+ * link's is a lease.
+ */
+async function liveQuote(token: string): Promise<QuoteRecord | null> {
+  if (!isLinkToken(token)) return null
+  const rows = await queryIndex({ table: QUOTE_TABLE, index: IDX_QUOTES_BY_TOKEN, key: 'linkToken', value: token, limit: 2 })
+  // One token, one quote. Two rows answering to the same secret is a mint bug, and
+  // guessing which one the customer meant is how the wrong freight gets sold.
+  if (rows.length !== 1) return null
+  const quote = toQuote(rows[0])
+  if (quote.linkToken !== token) return null
+  if (!liveLinkStatuses(quote.side).includes(quote.status)) return null
+  const expiresAt = Date.parse(quote.expiresAt ?? '')
+  if (Number.isFinite(expiresAt) && expiresAt <= Date.now()) {
+    await expireQuote(quote)
+    return null
+  }
+  return quote
+}
+
+/**
+ * A link read past its date dies where it is found, exactly as `expire()` kills a
+ * tracking link: LOST/EXPIRED, the token gone, off the open board. Conditioned on
+ * the token and the rung it was read at, so a sweep that closed it a second ago
+ * wins and this one writes nothing.
+ */
+async function expireQuote(quote: QuoteRecord): Promise<void> {
+  const nowIso = new Date().toISOString()
+  try {
+    await ddb.send(new UpdateCommand({
+      TableName: QUOTE_TABLE,
+      Key: { id: quote.id },
+      UpdateExpression:
+        'SET #st = :lost, lostReason = :expired, closedAt = :now, updatedAt = :now, updatedBy = :by, #vn = if_not_exists(#vn, :zero) + :one REMOVE #lt, #qo',
+      ConditionExpression: '#lt = :tok AND #st = :was',
+      ExpressionAttributeNames: { '#st': 'status', '#lt': 'linkToken', '#qo': 'quoteOpen', '#vn': 'version' },
+      ExpressionAttributeValues: {
+        ':lost': 'LOST',
+        ':expired': 'EXPIRED',
+        ':now': nowIso,
+        ':by': `link:${(quote.linkToken ?? '').slice(0, 8)}`,
+        ':tok': quote.linkToken,
+        ':was': quote.status,
+        ':zero': 0,
+        ':one': 1,
+      },
+    }))
+  } catch (err) {
+    // A sweep or a rep got there first: the link is dead either way.
+    if ((err as { name?: string } | null)?.name !== 'ConditionalCheckFailedException') throw err
+  }
+}
+
+/** One more read of this quote's page, if the link still has reads left. */
+async function countQuoteOpen(quote: QuoteRecord): Promise<boolean> {
+  try {
+    await ddb.send(new UpdateCommand({
+      TableName: QUOTE_TABLE,
+      Key: { id: quote.id },
+      UpdateExpression: 'ADD requestCount :one',
+      ConditionExpression: '#lt = :tok AND (attribute_not_exists(requestCount) OR requestCount < :max)',
+      ExpressionAttributeNames: { '#lt': 'linkToken' },
+      ExpressionAttributeValues: { ':tok': quote.linkToken, ':one': 1, ':max': MAX_LINK_REQUESTS },
+    }))
+    return true
+  } catch (err) {
+    if ((err as { name?: string } | null)?.name === 'ConditionalCheckFailedException') return false
+    throw err
+  }
+}
+
+/** The brokerage name on the page: the quote's own division, or ours. */
+async function quoteBrokerName(quote: QuoteRecord): Promise<string> {
+  const key = quote.divisionKey?.trim()
+  if (!key) return BROKER_FALLBACK
+  const row = await getRow(DIVISION_TABLE, { key })
+  return (row as unknown as Division | null)?.name?.trim() || BROKER_FALLBACK
+}
+
+/** `GET /q/<token>` — the customer's quote, or the carrier's offer. */
+async function quoteViewRoute(token: string) {
+  const quote = await liveQuote(token)
+  if (!quote) return reply(404, { error: QUOTE_LINK_GONE })
+  if (!(await countQuoteOpen(quote))) return reply(429, { error: 'This quote link has been opened too many times' })
+
+  const [brokerName, settingsRow] = await Promise.all([quoteBrokerName(quote), settings().catch(() => null)])
+  return reply(200, quotePublicView(quote, {
+    brokerName,
+    termsText: settingsRow?.quoteTermsText ?? null,
+    // Sell pages never carry a book-now rate: it is what we will pay, not what
+    // anybody is being sold.
+    showBookNow: quote.side === 'BUY' && settingsRow?.quoteOffersCarrierSeesBookNow !== false,
+    nowIso: new Date().toISOString(),
+  }))
+}
+
+/**
+ * `POST /q/<token>/respond` — the one answer this round's link is good for.
+ *
+ * The read above is only a courtesy: between it and the write, a rep can counter,
+ * a sweep can expire it, or a second tab can answer first. Only the condition —
+ * still this token, still a rung that is waiting — makes the answer once-only, and
+ * because it is on the base table a stale index read loses honestly with a 410.
+ */
+async function quoteRespondRoute(token: string, event: FnUrlEvent) {
+  const quote = await liveQuote(token)
+  if (!quote) return reply(404, { error: QUOTE_LINK_GONE })
+
+  const sent = event.isBase64Encoded && event.body ? Buffer.from(event.body, 'base64').toString('utf-8') : event.body
+  // Only a carrier's accept needs to know whether the book-now rate was on show.
+  const settingsRow = quote.side === 'BUY' ? await settings().catch(() => null) : null
+  const read = planResponse(quote, parseJson<Record<string, unknown>>(sent ?? null), {
+    showBookNow: settingsRow?.quoteOffersCarrierSeesBookNow !== false,
+  })
+  if ('error' in read) return reply(400, { error: read.error })
+  const { plan } = read
+
+  const nowIso = new Date().toISOString()
+  const events = [...(quote.events ?? []), {
+    at: nowIso,
+    by: plan.responderEmail,
+    kind: plan.eventKind,
+    amountCents: plan.counterCents ?? plan.amountCents ?? null,
+    note: plan.message,
+  }]
+
+  const sets = [
+    '#st = :status',
+    '#rp = :response',
+    '#ev = :events',
+    'responderName = :name',
+    'responderEmail = :email',
+    'responderIp = :ip',
+    'respondedAt = :now',
+    'updatedAt = :now',
+    'updatedBy = :by',
+    '#vn = if_not_exists(#vn, :zero) + :one',
+  ]
+  const values: Record<string, unknown> = {
+    ':status': plan.status,
+    ':response': plan.response,
+    // A list, not a string: tms-shipment-actions stores the thread as a native
+    // DynamoDB list and its `pushEvent` only appends to `Array.isArray(events)`.
+    // A string here makes the next staff action throw the whole thread away.
+    ':events': events,
+    ':name': plan.responderName,
+    ':email': plan.responderEmail,
+    ':ip': event.requestContext?.http?.sourceIp ?? 'unknown',
+    ':now': nowIso,
+    ':by': `link:${token.slice(0, 8)}`,
+    ':tok': token,
+    ':zero': 0,
+    ':one': 1,
+  }
+  if (plan.amountCents != null) {
+    sets.push('amountCents = :amount')
+    values[':amount'] = plan.amountCents
+  }
+  if (plan.counterCents != null) {
+    sets.push('counterCents = :counter', 'counterBy = :counterBy')
+    values[':counter'] = plan.counterCents
+    values[':counterBy'] = plan.counterBy
+  }
+  if (plan.lostReason) {
+    sets.push('lostReason = :lostReason')
+    values[':lostReason'] = plan.lostReason
+  }
+  if (plan.acceptedVia) {
+    sets.push('acceptedVia = :via')
+    values[':via'] = plan.acceptedVia
+  }
+  if (plan.closes) sets.push('closedAt = :now')
+
+  // The token always goes: one use per round, and the next round mints a new one.
+  const removes = plan.closes ? '#lt, #qo' : '#lt'
+  const rungs = plan.from.map((status, i) => {
+    values[`:from${i}`] = status
+    return `:from${i}`
+  })
+
+  try {
+    await ddb.send(new UpdateCommand({
+      TableName: QUOTE_TABLE,
+      Key: { id: quote.id },
+      UpdateExpression: `SET ${sets.join(', ')}${plan.bumpRounds ? ' ADD #rd :one' : ''} REMOVE ${removes}`,
+      ConditionExpression: `#lt = :tok AND #st IN (${rungs.join(', ')})`,
+      ExpressionAttributeNames: {
+        '#st': 'status',
+        '#rp': 'response',
+        '#ev': 'events',
+        '#lt': 'linkToken',
+        '#vn': 'version',
+        ...(plan.closes ? { '#qo': 'quoteOpen' } : {}),
+        ...(plan.bumpRounds ? { '#rd': 'rounds' } : {}),
+      },
+      ExpressionAttributeValues: values,
+    }))
+  } catch (err) {
+    if ((err as { name?: string } | null)?.name === 'ConditionalCheckFailedException') {
+      return reply(410, { error: QUOTE_ANSWERED })
+    }
+    throw err
+  }
+
+  return reply(200, { ok: true, status: plan.status, response: plan.response })
+}
+
 const TRUCK_PATH = /^\/t\/([A-Za-z0-9]{6,32})\/?$/
 const CUSTOMER_PATH = /^\/s\/([A-Za-z0-9_-]+)\/?$/
 const CARRIER_PATH = /^\/l\/([A-Za-z0-9_-]+)\/?$/
@@ -767,6 +1018,9 @@ const PING_PATH = /^\/l\/([A-Za-z0-9_-]+)\/ping\/?$/
 const UPLOAD_PATH = /^\/u\/([A-Za-z0-9_-]+)\/?$/
 const UPLOAD_PREPARE_PATH = /^\/u\/([A-Za-z0-9_-]+)\/upload\/?$/
 const UPLOAD_COMMIT_PATH = /^\/u\/([A-Za-z0-9_-]+)\/commit\/?$/
+// Step H: the public quote link.
+const QUOTE_PATH = /^\/q\/([A-Za-z0-9_-]+)\/?$/
+const QUOTE_RESPOND_PATH = /^\/q\/([A-Za-z0-9_-]+)\/respond\/?$/
 
 export const handler = async (event: FnUrlEvent) => {
   const method = event.requestContext?.http?.method ?? 'GET'
@@ -782,6 +1036,8 @@ export const handler = async (event: FnUrlEvent) => {
     if (carrier) return carrierRoute(carrier[1])
     const upload = UPLOAD_PATH.exec(path)
     if (upload) return uploadViewRoute(upload[1])
+    const quote = QUOTE_PATH.exec(path)
+    if (quote) return quoteViewRoute(quote[1])
     return reply(404, { error: 'Not found' })
   }
 
@@ -792,6 +1048,8 @@ export const handler = async (event: FnUrlEvent) => {
     if (prepare) return uploadPrepareRoute(prepare[1], event)
     const commit = UPLOAD_COMMIT_PATH.exec(path)
     if (commit) return uploadCommitRoute(commit[1], event)
+    const respond = QUOTE_RESPOND_PATH.exec(path)
+    if (respond) return quoteRespondRoute(respond[1], event)
     return reply(404, { error: 'Not found' })
   }
 

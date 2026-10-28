@@ -11,9 +11,11 @@ import { cn } from '@/lib/utils'
 import { formatCents } from '@/lib/tmsDirectory'
 import { formatDateTime } from '@/lib/date'
 import { computeFinancials } from '@/lib/shipmentCharges'
+import { laneKey3For, laneKeyFor } from '@/lib/laneKey'
 import { SHIPMENT_STATUS_LABELS, LOAD_WORKFLOW_STATUS_LABELS } from '@/lib/shipmentStatus'
 import { useDrivers } from '@/hooks/useDrivers'
 import { useTrucks } from '@/hooks/useTrucks'
+import { LaneHistoryPanel } from '@/features/quotes/components/LaneHistoryPanel'
 import type { CreditSummary } from '@/lib/customerCredit'
 import { StopCards } from './StopCards'
 import { FinancialLines } from './FinancialLines'
@@ -251,15 +253,25 @@ export function ShipmentDetail(props: ShipmentDetailProps) {
       )}
 
       {tab === 'financials' && (
-        <FinancialLines
-          charges={bundle.charges}
-          catalog={catalog}
-          context={{ miles: load?.miles ?? null }}
-          pricing={pricing}
-          marginFloorBps={marginFloorBps}
-          readOnly={chargesFrozen}
-          onSave={actions.saveCharges}
-        />
+        <>
+          <FinancialLines
+            charges={bundle.charges}
+            catalog={catalog}
+            context={{ miles: load?.miles ?? null }}
+            pricing={pricing}
+            marginFloorBps={marginFloorBps}
+            readOnly={chargesFrozen}
+            onSave={actions.saveCharges}
+          />
+          {/* What this lane has paid before, beside what it is being priced at now. */}
+          <LaneHistoryPanel
+            laneKey={laneKeyFor(load?.stops)}
+            laneKey3={laneKey3For(load?.stops)}
+            miles={load?.miles ?? null}
+            equipmentType={order?.equipmentType ?? null}
+            rateType={order?.rateType ?? null}
+          />
+        </>
       )}
     </div>
   )

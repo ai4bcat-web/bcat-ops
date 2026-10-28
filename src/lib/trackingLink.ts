@@ -45,6 +45,37 @@ export function isLinkToken(value: string | null | undefined): boolean {
   return TOKEN_RE.test(value ?? '')
 }
 
+/** The secret behind every public link: 24 random bytes, base64url, 32 characters. */
+export const TOKEN_BYTES = 24
+
+const BASE64URL =
+  'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'
+
+/**
+ * Mint one link token. The randomness is an argument rather than a global so this
+ * file stays pure — the Lambda hands it `randomBytes` from `node:crypto`, a test
+ * hands it a counter, and both get something `isLinkToken` accepts.
+ *
+ * 24 bytes divide into exactly eight base64 groups, so the encoding never pads and
+ * the token never carries an `=` that a URL would have to escape.
+ */
+export function newLinkToken(randomBytes: (n: number) => Uint8Array): string {
+  const bytes = randomBytes(TOKEN_BYTES)
+  if (bytes.length !== TOKEN_BYTES) {
+    throw new Error(`A link token needs ${TOKEN_BYTES} random bytes`)
+  }
+  let token = ''
+  for (let at = 0; at < TOKEN_BYTES; at += 3) {
+    const word = (bytes[at] << 16) | (bytes[at + 1] << 8) | bytes[at + 2]
+    token +=
+      BASE64URL[(word >> 18) & 63] +
+      BASE64URL[(word >> 12) & 63] +
+      BASE64URL[(word >> 6) & 63] +
+      BASE64URL[word & 63]
+  }
+  return token
+}
+
 /** How long a carrier ping link lives past the last delivery appointment. */
 export const DEFAULT_TRACKING_LINK_EXPIRY_HOURS = 72
 /** How long a customer tracking link lives. */

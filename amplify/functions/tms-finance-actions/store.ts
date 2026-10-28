@@ -11,6 +11,7 @@
  */
 import {
   DynamoDBClient,
+  GetItemCommand,
   PutItemCommand,
   UpdateItemCommand,
   type AttributeValue,
@@ -94,6 +95,19 @@ export { nowIso, numberOrNull, type Row }
 
 export function getById(tableName: string, id: string): Promise<Row | null> {
   return storeGetById(dynamo, tableName, id)
+}
+
+/**
+ * Division is keyed on `key`, not `id` (`amplify/data/resource.ts`, `.identifier(['key'])`),
+ * so the generic `getById` — which builds `Key: { id }` — is answered with a
+ * ValidationException, not an empty read: an invoice, a bill or a remittance on a row
+ * carrying a `divisionKey` would fail outright. Every finance read of a division goes
+ * through here, as the notifier and the tracking router already do.
+ */
+export async function getDivision(key: string): Promise<Row | null> {
+  if (!key || !DIVISION_TABLE_NAME) return null
+  const result = await dynamo.send(new GetItemCommand({ TableName: DIVISION_TABLE_NAME, Key: marshall({ key }) }))
+  return result.Item ? (unmarshall(result.Item) as Row) : null
 }
 
 export function queryIndex(tableName: string, indexName: string, keyName: string, keyValue: string): Promise<Row[]> {

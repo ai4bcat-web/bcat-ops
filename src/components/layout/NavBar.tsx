@@ -13,6 +13,7 @@ import { useCheckCallWorklist } from '@/hooks/useCheckCallWorklist'
 import { useDocumentReviewQueue } from '@/hooks/useDocumentReviewQueue'
 import { useArToInvoiceCount } from '@/hooks/useArToInvoiceCount'
 import { useApToReviewCount } from '@/hooks/useApToReviewCount'
+import { useQuotesToReplyCount } from '@/hooks/useQuotesToReplyCount'
 import { NAV_GROUPS } from '@/lib/navItems'
 
 const BADGE_TONE: Record<string, { bg: string; color: string }> = {
@@ -27,6 +28,7 @@ const BADGE_TONE: Record<string, { bg: string; color: string }> = {
   documentReview: { bg: 'var(--ds-blue-soft)',        color: '#0369a1' },
   arToInvoice: { bg: 'var(--ds-blue-soft)',           color: '#0369a1' },
   apToReview:  { bg: 'var(--ds-amber-soft)',          color: '#b45309' },
+  quotesToReply: { bg: 'var(--ds-amber-soft)',       color: '#b45309' },
 }
 
 function NavBadge({ count, toneKey }: { count: number; toneKey: string }) {
@@ -64,6 +66,8 @@ export function NavBar({
   const arToInvoiceCount = useArToInvoiceCount()
   // Carrier bills sitting on the review rung; the hook gates itself on `carrierPay`.
   const apToReviewCount = useApToReviewCount()
+  // Quotes and offers waiting on an answer from us; the hook gates itself on `quotes`.
+  const quotesToReplyCount = useQuotesToReplyCount()
   // Unread driver texts/voicemails; polled only for people who can open the page.
   const dispatchUnread = useDispatchUnread(hasPageAccess('dispatch'))
 
@@ -94,6 +98,7 @@ export function NavBar({
     if (key === 'documentReview') return documentReviewCount || null
     if (key === 'arToInvoice') return arToInvoiceCount || null
     if (key === 'apToReview') return apToReviewCount || null
+    if (key === 'quotesToReply') return quotesToReplyCount || null
     return null
   }
 

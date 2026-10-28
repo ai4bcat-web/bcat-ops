@@ -101,6 +101,37 @@ import {
   voidDocument,
   type DocumentDeps,
 } from './documents'
+import {
+  acceptCounter,
+  cancelQuote,
+  convertQuote,
+  counterQuote,
+  duplicateQuotes,
+  markQuoteLost,
+  passQuote,
+  restoreQuote,
+  revertToQuote,
+  saveQuote,
+  saveQuoteSettings,
+  sendQuote,
+  sweepExpiredQuotes,
+  type BookCarrierExtra,
+  type QuoteChargeRules,
+  type QuoteDeps,
+} from './quotes'
+import {
+  acceptOffer,
+  cancelOpenOffers,
+  counterOffer,
+  logOffer,
+  rejectOffer,
+  requestOffers,
+} from './offers'
+import {
+  excludeLaneSample,
+  isDeliveredOrLater,
+  writeLaneSample,
+} from './laneSamples'
 
 import {
   computeFinancials,
@@ -183,6 +214,18 @@ const TRACKING_LINK_TABLE_NAME = process.env.TRACKING_LINK_TABLE_NAME ?? ''
 // at a POD whose bytes stay where the driver app put them.
 const DRIVER_SUBMISSION_TABLE_NAME = process.env.DRIVER_SUBMISSION_TABLE_NAME ?? ''
 const DRIVER_SUBMISSION_DOC_TABLE_NAME = process.env.DRIVER_SUBMISSION_DOC_TABLE_NAME ?? ''
+// Step H tables. Quotes and lane samples are written here — this Lambda already
+// owns the pricing a quote is built on and the booking an offer turns into.
+// CarrierContact and Division are read only, to address an offer request at a
+// carrier's dispatch desk and to sign a quote with the division's name.
+const QUOTE_TABLE_NAME = process.env.QUOTE_TABLE_NAME ?? ''
+const LANE_RATE_SAMPLE_TABLE_NAME = process.env.LANE_RATE_SAMPLE_TABLE_NAME ?? ''
+const CARRIER_CONTACT_TABLE_NAME = process.env.CARRIER_CONTACT_TABLE_NAME ?? ''
+const DIVISION_TABLE_NAME = process.env.DIVISION_TABLE_NAME ?? ''
+// An offer request is a ShipmentNotice, the way every other outbound e-mail with a
+// shipment behind it is: the table is granted to this Lambda in `backend.ts` and
+// the request is recorded on the load's notice log whether SES takes it or not.
+const SHIPMENT_NOTICE_TABLE_NAME = process.env.SHIPMENT_NOTICE_TABLE_NAME ?? ''
 
 const OWNER_EMAIL = 'ryne@bcatcorp.com'
 const ADMIN_GROUP = 'ADMIN'
@@ -387,6 +430,68 @@ type Action =
   | 'VOID_DOCUMENT'
   | 'READY_TO_INVOICE'
   | 'RATE_CARRIER'
+  // Step H — the sell side of a quote, which is the quotes page's own work.
+  | 'SAVE_QUOTE'
+  | 'SEND_QUOTE'
+  | 'COUNTER_QUOTE'
+  | 'ACCEPT_COUNTER'
+  | 'MARK_QUOTE_LOST'
+  | 'RESTORE_QUOTE'
+  | 'CANCEL_QUOTE'
+  | 'PASS_QUOTE'
+  | 'SWEEP_EXPIRED_QUOTES'
+  | 'DUPLICATE_QUOTE'
+  | 'CONVERT_QUOTE'
+  | 'REVERT_TO_QUOTE'
+  | 'SAVE_QUOTE_SETTINGS'
+  // Step H — the buy side, which is dispatch's work as much as the quote desk's.
+  | 'REQUEST_OFFERS'
+  | 'LOG_OFFER'
+  | 'COUNTER_OFFER'
+  | 'REJECT_OFFER'
+  | 'ACCEPT_OFFER'
+
+/**
+ * Step H. Quoting is its own desk: a rep who prices freight all day has no business
+ * moving a load's status or re-pricing a shipment that already exists, and a
+ * dispatcher covering loads has no business sending a customer a price. So the sell
+ * side is `page-quotes` and the loads page alone cannot reach it — the same shape
+ * finance uses for its AP actions (`tms-finance-actions/handler.ts:102-172`).
+ */
+const QUOTE_ACTIONS: Record<string, true> = {
+  SAVE_QUOTE: true,
+  SEND_QUOTE: true,
+  COUNTER_QUOTE: true,
+  ACCEPT_COUNTER: true,
+  MARK_QUOTE_LOST: true,
+  RESTORE_QUOTE: true,
+  CANCEL_QUOTE: true,
+  PASS_QUOTE: true,
+  SWEEP_EXPIRED_QUOTES: true,
+  DUPLICATE_QUOTE: true,
+  CONVERT_QUOTE: true,
+  REVERT_TO_QUOTE: true,
+  SAVE_QUOTE_SETTINGS: true,
+}
+
+/**
+ * Finding a truck is both desks' work — the quote desk shops a lane while it is
+ * still quoting it, dispatch shops the leg it has to cover — so either page key
+ * opens the buy side. `ACCEPT_OFFER` is the exception that proves it: booking is
+ * BOOK_CARRIER, and it requires exactly what BOOK_CARRIER requires.
+ */
+const OFFER_ACTIONS: Record<string, true> = {
+  REQUEST_OFFERS: true,
+  LOG_OFFER: true,
+  COUNTER_OFFER: true,
+  REJECT_OFFER: true,
+}
+
+/** Org defaults are an admin act in every router here. */
+const QUOTE_ADMIN_ONLY_ACTIONS: Record<string, true> = { SAVE_QUOTE_SETTINGS: true }
+
+const QUOTES_PAGE_GROUP = 'page-quotes'
+const LOADS_PAGE_GROUP = 'page-loads'
 
 interface AppSyncIdentity {
   sub: string
@@ -434,11 +539,29 @@ async function authorize(action: Action, identity?: AppSyncIdentity | null): Pro
   if (!email) throw new Error('Unauthorized: could not resolve caller email')
   const groups = getGroups(identity)
   const isAdmin = email === OWNER_EMAIL || groups.includes(ADMIN_GROUP)
+  // Step H. The sell side belongs to the quote desk and nobody else; the buy side
+  // belongs to either desk. Both are decided before the loads-page rule below, so
+  // `page-quotes` alone still cannot touch a load's status or its charges.
+  if (QUOTE_ACTIONS[action]) {
+    if (!isAdmin && !groups.includes(QUOTES_PAGE_GROUP)) {
+      throw new Error(`Forbidden: ${action} requires owner, ADMIN, or ${QUOTES_PAGE_GROUP}`)
+    }
+    if (QUOTE_ADMIN_ONLY_ACTIONS[action] && !isAdmin) {
+      throw new Error(`Forbidden: ${action} requires owner or ADMIN`)
+    }
+    return { email, sub: identity.sub, groups, isAdmin }
+  }
+  if (OFFER_ACTIONS[action]) {
+    if (!isAdmin && !groups.includes(LOADS_PAGE_GROUP) && !groups.includes(QUOTES_PAGE_GROUP)) {
+      throw new Error(`Forbidden: ${action} requires owner, ADMIN, ${LOADS_PAGE_GROUP}, or ${QUOTES_PAGE_GROUP}`)
+    }
+    return { email, sub: identity.sub, groups, isAdmin }
+  }
   // Building and moving freight is the loads page's job; everything here belongs to
   // it. Step G's one exception: what a carrier is owed is edited from the AP desk
   // as often as from dispatch, so `page-carrierPay` may do that and nothing else.
   const carrierPay = action === 'UPDATE_CARRIER_CHARGES' && groups.includes('page-carrierPay')
-  if (!isAdmin && !groups.includes('page-loads') && !carrierPay) {
+  if (!isAdmin && !groups.includes(LOADS_PAGE_GROUP) && !carrierPay) {
     throw new Error(
       action === 'UPDATE_CARRIER_CHARGES'
         ? `Forbidden: ${action} requires owner, ADMIN, page-loads, or page-carrierPay`
@@ -1618,7 +1741,13 @@ async function setShipmentStatus(input: Row, caller: Caller): Promise<Row> {
   patch.version = (numberOrNull(shipment.version) ?? 1) + 1
   await transact([updateItemTx(SHIPMENT_TABLE_NAME, shipmentId, patch, expectedUpdatedAt)], 'shipment')
   await writeAudit('SHIPMENT', shipmentId, `SET_SHIPMENT_STATUS:${requested}`, caller, { from: current, to: patch.status, reason })
-  return readBundle(shipmentId) as unknown as Row
+  const bundle = await readBundle(shipmentId)
+  // Step H. A shipment canceled after it delivered does not un-deliver: the lane
+  // keeps the sample it recorded and the statistics stop counting it.
+  if (patch.status === 'CANCELED') {
+    for (const load of bundle.loads) await excludeLaneSample(quoteDeps, String(load.id))
+  }
+  return bundle as unknown as Row
 }
 
 // ── SET_LOAD_STATUS ──────────────────────────────────────────────────────────
@@ -1653,6 +1782,9 @@ async function setLoadStatus(input: Row, caller: Caller): Promise<Row> {
     'Load update',
   )
   await writeAudit('LOAD', loadId, 'SET_LOAD_STATUS', caller, { from: current, to: requested })
+  // Step H. Delivered and priced is a lane rate sample; `writeLaneSample` is the
+  // judge of the second half and of everything else that makes a sample a sample.
+  if (isDeliveredOrLater(requested)) await writeLaneSample(quoteDeps, loadId)
   return rederiveShipmentStatus(shipmentId, caller)
 }
 
@@ -1686,10 +1818,22 @@ async function deleteShipment(input: Row, caller: Caller): Promise<Row> {
     throw new Error(`A ${status} shipment cannot be deleted — cancel it first`)
   }
   await assertNoInvoicedOrders(shipmentId, 'delete')
+  const apBoardLegsClosed = await applySoftDelete(shipment, caller, expectedUpdatedAt)
+  await writeAudit('SHIPMENT', shipmentId, 'DELETE_SHIPMENT', caller, { status, apBoardLegsClosed })
+  return readBundle(shipmentId) as unknown as Row
+}
+
+/**
+ * The soft-delete itself: the shipment's marker, and the AP board markers that come
+ * off with it.
+ *
+ * The marker, and only the marker: the leg keeps its charges, its rung and its
+ * timestamps, so a restore is a re-SET rather than a reconstruction, and `updatedAt`
+ * does not move under a client holding the assignment's CAS token.
+ */
+async function applySoftDelete(shipment: Row, caller: Caller, expectedUpdatedAt: string | null): Promise<string[]> {
+  const shipmentId = String(shipment.id)
   const now = nowIso()
-  // The marker, and only the marker: the leg keeps its charges, its rung and its
-  // timestamps, so a restore is a re-SET rather than a reconstruction, and `updatedAt`
-  // does not move under a client holding the assignment's CAS token.
   const openLegs = (await apBoardLegsOf(shipmentId)).filter((row) => row.apOpen)
   await transact(
     [
@@ -1704,11 +1848,24 @@ async function deleteShipment(input: Row, caller: Caller): Promise<Row> {
     ],
     'shipment',
   )
+  return openLegs.map((row) => String(row.id))
+}
+
+/**
+ * Step H. The same write without DELETE_SHIPMENT's gates: a convert that failed
+ * half way is taking back a shipment it just made, and a revert has already proved
+ * the shipment is unbilled, uncovered and single-order. Neither is a person
+ * deleting somebody's freight, so neither asks `cancelDeleteAdminOnly`.
+ */
+async function softDeleteShipment(shipmentId: string, caller: Caller): Promise<void> {
+  const shipment = await getById(SHIPMENT_TABLE_NAME, shipmentId)
+  if (!shipment || shipment.deletedAt) return
+  const apBoardLegsClosed = await applySoftDelete(shipment, caller, null)
   await writeAudit('SHIPMENT', shipmentId, 'DELETE_SHIPMENT', caller, {
-    status,
-    apBoardLegsClosed: openLegs.map((row) => String(row.id)),
+    status: String(shipment.status ?? ''),
+    apBoardLegsClosed,
+    viaQuote: true,
   })
-  return readBundle(shipmentId) as unknown as Row
 }
 
 async function restoreShipment(input: Row, caller: Caller): Promise<Row> {
@@ -2314,6 +2471,8 @@ async function assignAsset(input: Row, caller: Caller): Promise<Row> {
   )
 
   await writeAudit('LOAD_CARRIER', newCarrierId, 'ASSIGN_ASSET', caller, { loadId, driverId, truckId })
+  // Step H. A covered load never shows a live request.
+  await cancelOpenOffers(quoteDeps, loadId, caller)
   return rederiveShipmentStatus(shipmentId, caller)
 }
 
@@ -2351,7 +2510,8 @@ async function assignCarrier(input: Row, caller: Caller): Promise<Row> {
     kind: 'CARRIER',
     status: 'ACTIVE',
     sequence,
-    carrierId: optionalString(input.carrierId, 100),
+    // No `carrierId`: this path is refused above when one is given, and a NULL on
+    // the `loadCarriersByCarrierId` hash key is an item DynamoDB will not take.
     carrierName,
     carrierMc: optionalString(input.carrierMc, 40),
     carrierRepId: optionalString(input.carrierRepId, 100) ?? optionalString(load.carrierRepId, 100),
@@ -2422,6 +2582,8 @@ async function assignCarrier(input: Row, caller: Caller): Promise<Row> {
   )
 
   await writeAudit('LOAD_CARRIER', newCarrierId, 'ASSIGN_CARRIER', caller, { loadId, carrierName, carrierRateCents })
+  // Step H. A covered load never shows a live request.
+  await cancelOpenOffers(quoteDeps, loadId, caller)
   return rederiveShipmentStatus(shipmentId, caller)
 }
 
@@ -2514,6 +2676,10 @@ async function removeLoadCarrier(input: Row, caller: Caller): Promise<Row> {
   await writeAudit('LOAD_CARRIER', loadCarrierId, `REMOVE_LOAD_CARRIER:${outcome}`, caller, {
     loadId, reason, note, voidedRateCon: voidsRateCon, revokedTrackingLink: trackingLink != null,
   })
+  // Step H. A TONU after the freight delivered does not un-deliver it: the lane
+  // keeps the sample it recorded and the statistics stop counting it. `load` was
+  // read before the removal, so this is the rung the load was actually at.
+  if (outcome === 'TONU' && isDeliveredOrLater(load.status)) await excludeLaneSample(quoteDeps, loadId)
   return rederiveShipmentStatus(shipmentId, caller)
 }
 
@@ -2575,7 +2741,7 @@ function carrierOwnCostCents(charges: Row[], loadCarrierId: string): number {
  * acknowledged by key, and the keys that were acknowledged are kept on the row so
  * the next person can see what was waved through and by whom.
  */
-async function bookCarrier(input: Row, caller: Caller): Promise<Row> {
+async function bookCarrier(input: Row, caller: Caller, extra?: BookCarrierExtra): Promise<Row> {
   const loadId = assertString(input.loadId, 'loadId')
   const expectedUpdatedAt = assertExpectedUpdatedAt(input)
   const carrierId = assertString(input.carrierId, 'carrierId')
@@ -2770,6 +2936,8 @@ async function bookCarrier(input: Row, caller: Caller): Promise<Row> {
     // is on it from the moment they are booked.
     apOpen: 'OPEN',
     apStatusChangedAt: now,
+    // Step H. An offer that won the load names itself on the assignment it bought.
+    ...(extra?.loadCarrierFields ?? {}),
     createdBy: caller.email,
     updatedBy: caller.email,
     createdAt: now,
@@ -2805,6 +2973,9 @@ async function bookCarrier(input: Row, caller: Caller): Promise<Row> {
         updatedBy: caller.email,
         updatedAt: now,
       }, null),
+      // Step H. ACCEPT_OFFER stamps its offer WON and closes the round's losers
+      // here, so the quote thread and the assignment land together or not at all.
+      ...(extra?.writes ?? []),
     ],
     'booking',
   )
@@ -2839,6 +3010,9 @@ async function bookCarrier(input: Row, caller: Caller): Promise<Row> {
     warnings: warnings.map((w) => w.key),
     acknowledged,
   })
+  // Step H. A covered load never shows a live request. ACCEPT_OFFER's own winner
+  // is already WON by the transaction above, so this only closes the rest.
+  await cancelOpenOffers(quoteDeps, loadId, caller)
   return rederiveShipmentStatus(shipmentId, caller)
 }
 
@@ -3368,6 +3542,9 @@ async function recalcCharges(input: Row, caller: Caller): Promise<Row> {
     revenueCents: totals.revenueCents,
     costCents: totals.costCents,
   })
+  // Step H. Revenue moves until the invoice freezes it, so a delivered load's
+  // lane sample is refreshed by every re-price rather than frozen at delivery.
+  if (isDeliveredOrLater(load?.status)) await writeLaneSample(quoteDeps, loadId)
   return readBundle(shipmentId) as unknown as Row
 }
 
@@ -3462,6 +3639,10 @@ async function updateCarrierCharges(input: Row, caller: Caller): Promise<Row> {
     costCents: carrierOwnCostCents(chargeRows, loadCarrierId),
     loadCostCents: totals.costCents,
   })
+  // Step H. Cost moves until the carrier's bill is recorded; same refresh.
+  if (isDeliveredOrLater(bundle.loads.find((row) => String(row.id) === loadId)?.status)) {
+    await writeLaneSample(quoteDeps, loadId)
+  }
   return readBundle(shipmentId) as unknown as Row
 }
 
@@ -4368,6 +4549,59 @@ async function backfillShipments(input: Row, caller: Caller): Promise<Row> {
   } as unknown as Row
 }
 
+// ── Quote, offer and lane-sample actions (step H) ────────────────────────────
+
+/**
+ * The quote board, the offer thread and the lane history live in `quotes.ts`,
+ * `offers.ts` and `laneSamples.ts`. Like the document module they are handed this
+ * handler's clients, tables and bodies rather than building their own: a quote is
+ * priced by the same `computeFinancials` as the shipment it becomes, and an offer
+ * is booked by this file's `BOOK_CARRIER` with its whole gate intact.
+ */
+const quoteDeps: QuoteDeps = {
+  db: dynamo,
+  ses,
+  store,
+  tables: {
+    quote: QUOTE_TABLE_NAME,
+    laneSample: LANE_RATE_SAMPLE_TABLE_NAME,
+    carrierContact: CARRIER_CONTACT_TABLE_NAME,
+    carrier: CARRIER_TABLE_NAME,
+    customer: CUSTOMER_TABLE_NAME,
+    settings: SETTINGS_TABLE_NAME,
+    division: DIVISION_TABLE_NAME,
+    order: ORDER_TABLE_NAME,
+    load: LOAD_TABLE_NAME,
+    loadCarrier: LOAD_CARRIER_TABLE_NAME,
+    loadFinancials: LOAD_FINANCIALS_TABLE_NAME,
+    shipment: SHIPMENT_TABLE_NAME,
+    shipmentNotice: SHIPMENT_NOTICE_TABLE_NAME,
+  },
+  fromAddress: FROM_ADDRESS,
+  portalOrigin: PORTAL_ORIGIN,
+  randomBytes,
+  writeAudit,
+  getSettings,
+  getActiveCustomer,
+  getById,
+  queryIndex,
+  transact,
+  readBundle,
+  chargeCodeRules: (settings, customer) => chargeCodeRules(settings, customer) as QuoteChargeRules,
+  validateChargeInput,
+  validateStop,
+  pricingDefaultsOf,
+  marginFloorBpsOf,
+  checkCredit,
+  assertCreditClear,
+  createShipment,
+  saveOrderForm,
+  submitOrder,
+  bookCarrier,
+  softDeleteShipment,
+  assertNoInvoicedOrders,
+}
+
 // ── Main handler ─────────────────────────────────────────────────────────────
 
 export const handler = async (event: AppSyncEvent): Promise<Row> => {
@@ -4450,6 +4684,42 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return readyToInvoice(documentDeps, input, caller)
     case 'RATE_CARRIER':
       return rateCarrier(documentDeps, input, caller)
+    case 'SAVE_QUOTE':
+      return saveQuote(quoteDeps, input, caller)
+    case 'SEND_QUOTE':
+      return sendQuote(quoteDeps, input, caller)
+    case 'COUNTER_QUOTE':
+      return counterQuote(quoteDeps, input, caller)
+    case 'ACCEPT_COUNTER':
+      return acceptCounter(quoteDeps, input, caller)
+    case 'MARK_QUOTE_LOST':
+      return markQuoteLost(quoteDeps, input, caller)
+    case 'RESTORE_QUOTE':
+      return restoreQuote(quoteDeps, input, caller)
+    case 'CANCEL_QUOTE':
+      return cancelQuote(quoteDeps, input, caller)
+    case 'PASS_QUOTE':
+      return passQuote(quoteDeps, input, caller)
+    case 'SWEEP_EXPIRED_QUOTES':
+      return sweepExpiredQuotes(quoteDeps, caller)
+    case 'DUPLICATE_QUOTE':
+      return duplicateQuotes(quoteDeps, input, caller)
+    case 'CONVERT_QUOTE':
+      return convertQuote(quoteDeps, input, caller)
+    case 'REVERT_TO_QUOTE':
+      return revertToQuote(quoteDeps, input, caller)
+    case 'SAVE_QUOTE_SETTINGS':
+      return saveQuoteSettings(quoteDeps, input, caller)
+    case 'REQUEST_OFFERS':
+      return requestOffers(quoteDeps, input, caller)
+    case 'LOG_OFFER':
+      return logOffer(quoteDeps, input, caller)
+    case 'COUNTER_OFFER':
+      return counterOffer(quoteDeps, input, caller)
+    case 'REJECT_OFFER':
+      return rejectOffer(quoteDeps, input, caller)
+    case 'ACCEPT_OFFER':
+      return acceptOffer(quoteDeps, input, caller)
     default:
       throw new Error(`Unknown action: ${action}`)
   }

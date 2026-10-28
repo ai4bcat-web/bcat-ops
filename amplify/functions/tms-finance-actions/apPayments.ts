@@ -64,7 +64,6 @@ import {
   CARRIER_CONTACT_TABLE_NAME,
   CARRIER_PAYMENT_METHOD_TABLE_NAME,
   CARRIER_TABLE_NAME,
-  DIVISION_TABLE_NAME,
   FROM_ADDRESS,
   IDX_CONTACTS_BY_CARRIER,
   IDX_PAYMENT_METHODS_BY_CARRIER,
@@ -73,6 +72,7 @@ import {
   SHIPMENT_NOTICE_TABLE_NAME,
   dynamo,
   getById,
+  getDivision,
   getSettings,
   nowIso,
   numberOrNull,
@@ -607,7 +607,7 @@ async function readRemittanceContext(paymentRowId: string): Promise<RemittanceCo
   ])
   const bills = billRows.filter((row): row is Row => row != null) as unknown as CarrierBillRecord[]
   const divisionKey = bills.find((bill) => bill.divisionKey)?.divisionKey ?? null
-  const division = divisionKey ? ((await getById(DIVISION_TABLE_NAME, divisionKey)) as unknown as Division) : null
+  const division = divisionKey ? ((await getDivision(divisionKey)) as unknown as Division) : null
 
   return {
     payment,

@@ -74,6 +74,10 @@ export const NAV_GROUPS: NavSection[] = [
   {
     title: 'Sales',
     items: [
+      // Customer quotes and carrier offers, and the lane history they are priced from.
+      // Both sit on the one `quotes` key: a rep who may quote may see what the lane paid.
+      { to: '/quotes', label: 'Quotes', icon: FileSpreadsheet, pageKey: 'quotes', badgeKey: 'quotesToReply' },
+      { to: '/rates', label: 'Lane Rates', icon: LineChart, pageKey: 'quotes' },
       { to: '/vehicle-quote', label: 'Vehicle Quote', icon: Car, pageKey: 'vehicleQuote' },
       { to: '/vehicle-confirmation', label: 'Booking Confirmation', icon: CalendarCheck, pageKey: 'vehicleConfirmation' },
       { to: '/pricing-margin', label: 'Pricing Margin', icon: TrendingUp, pageKey: 'pricingMargin' },

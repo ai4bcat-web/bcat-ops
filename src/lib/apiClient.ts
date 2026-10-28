@@ -25,8 +25,11 @@ import type {
   PaymentApplication, CreditApplication,
   ApStatus, CarrierBillRecord, ApPaymentRecord, ApPaymentMethod, ApPaymentApplication,
   ApPayeeKind, ApRemitTo, ApSettings,
+  QuoteRecord, QuoteSettings, QuoteLostReason, QuoteSide, QuoteAcceptedVia,
+  LaneRateSampleRecord, OrderReference, RateType,
 } from '@/types/tms'
 import type { CreditSummary } from '@/lib/customerCredit'
+import type { QuotePricingResult } from '@/lib/quotes'
 import { isActiveDirectoryRecord } from '@/lib/tmsDirectory'
 
 // Untyped client — our own types from src/types handle type safety
@@ -1143,6 +1146,12 @@ const TMS_SETTINGS_V8_FIELDS = [
   'apApprovalAdminOnly', 'apPostingAdminOnly', 'apRequireSignedRateCon',
   'remittanceEmailTemplate', 'apBillDocsRequired',
 ]
+// Step H's quotes & rates settings. Its own flag again, for the same reason.
+const TMS_SETTINGS_V9_FIELDS = [
+  'hoursToQuote', 'offerExpiryHours', 'quoteNumberFormat', 'nextQuoteNumber',
+  'quoteEmailTemplate', 'counterEmailTemplate', 'offerRequestEmailTemplate',
+  'quoteTermsText', 'quoteBelowMinMarginAdminOnly', 'quoteOffersCarrierSeesBookNow',
+]
 const TMS_SETTINGS_JSON_FIELDS: (keyof TmsSettings)[] = ['accessorialCodes', 'loadStatusRules', 'defaultRequiredReferences', 'chargeCodes', 'quickPayTiers', 'trackingContact', 'factorRemitTo']
 let settingsHaveV2 = true
 let settingsHaveV3 = true
@@ -1151,6 +1160,7 @@ let settingsHaveV5 = true
 let settingsHaveV6 = true
 let settingsHaveV7 = true
 let settingsHaveV8 = true
+let settingsHaveV9 = true
 const tmsSettingsFields = () => [
   TMS_SETTINGS_FIELDS_BASE,
   settingsHaveV2 ? TMS_SETTINGS_V2_FIELDS.join(' ') : '',
@@ -1160,6 +1170,7 @@ const tmsSettingsFields = () => [
   settingsHaveV6 ? TMS_SETTINGS_V6_FIELDS.join(' ') : '',
   settingsHaveV7 ? TMS_SETTINGS_V7_FIELDS.join(' ') : '',
   settingsHaveV8 ? TMS_SETTINGS_V8_FIELDS.join(' ') : '',
+  settingsHaveV9 ? TMS_SETTINGS_V9_FIELDS.join(' ') : '',
 ].filter(Boolean).join(' ')
 const fieldNamed = (names: string[], err: unknown) => {
   const msg = safeStringify(err)
@@ -1310,7 +1321,12 @@ export async function getTmsSettings(): Promise<TmsSettings | null> {
     try {
       return await run()
     } catch (err) {
-      if (attempt >= 7) throw err
+      if (attempt >= 8) throw err
+      if (settingsHaveV9 && fieldNamed(TMS_SETTINGS_V9_FIELDS, err)) {
+        console.warn('[apiClient] backend has no TmsSettings quote fields yet — querying without them until deploy')
+        settingsHaveV9 = false
+        continue
+      }
       if (settingsHaveV8 && fieldNamed(TMS_SETTINGS_V8_FIELDS, err)) {
         console.warn('[apiClient] backend has no TmsSettings AP fields yet — querying without them until deploy')
         settingsHaveV8 = false
@@ -5495,4 +5511,463 @@ export async function updateCarrierCharges(input: {
   charges: LoadChargeInput[]
 }): Promise<ShipmentBundle> {
   return shipmentAction<ShipmentBundle>('UPDATE_CARRIER_CHARGES', input)
+}
+
+// ── Quotes, carrier offers & lane history (Step H) ───────────────────────────
+//
+// Sell-side quotes and buy-side carrier offers are one model with two sides, and every
+// write is an action on `tmsShipmentActions` — the same Lambda that owns conversion and
+// booking, so a quote becoming a shipment and an offer booking a carrier stay inside one
+// transaction. The reads come straight off the Quote and LaneRateSample indexes.
+//
+// Both models arrive with step H's deploy; until it lands AppSync has no such query at
+// all, so the reads degrade to "no quotes" rather than failing the page — the bargain
+// the AR and AP models strike above.
+
+export type {
+  QuoteRecord, QuoteSide, QuoteStatus, QuoteEvent, QuoteLostReason, QuoteResponseKind,
+  QuoteSettings, QuotePublicView, LaneRateSampleRecord, LaneStats, LaneStatsFilters,
+} from '@/types/tms'
+
+const QUOTE_FIELDS = `
+  id side status groupId quoteDate quoteMonth
+  customerId customerName contactName contactEmail customerRepId
+  carrierId carrierName carrierMc carrierEmail
+  shipmentId shipmentNumber orderId loadId loadNumber divisionKey
+  mode rateType equipmentType equipmentLengthFt stops laneKey laneKey3
+  pickupAppt deliveryAppt commodity weightLbs miles references lines
+  amountCents customerRateCents targetBuyCents topSpendCents marginBps
+  bookNowRateCents counterCents counterBy rounds expiresAt
+  linkToken linkVersion requestCount
+  sentAt sentTo sendCount lastSendStatus
+  respondedAt response responderName responderEmail responderIp acceptedVia
+  lostReason lostNote wonAt closedAt duplicatedFromId pricingWarnings quoteOpen
+  customerMessage internalNotes events
+  createdBy updatedBy version createdAt updatedAt
+`
+// `pricingWarnings` is a String list, not a json column: it needs no unwrapping.
+const QUOTE_JSON_FIELDS: (keyof QuoteRecord)[] = ['stops', 'references', 'lines', 'events']
+
+// LaneRateSample has no `a.json()` columns at all — every field is a scalar — so there
+// is no JSON list beside this one.
+const LANE_SAMPLE_FIELDS = `
+  id laneKey laneKey3 date loadId shipmentId shipmentNumber orderId
+  customerId customerName carrierId carrierName assignmentKind divisionKey
+  mode rateType equipmentType miles
+  customerRateCents revenueCents carrierRateCents costCents profitCents marginBps
+  loadStatus excluded source sampledAt version createdAt updatedAt
+`
+
+// Quote and LaneRateSample both arrive with step H's deploy, and until then the error
+// names the *query*, not a field, so the field-level self-heal cannot see it. Degrade to
+// an empty board rather than throwing on every quote read.
+//
+// Both wordings are matched because AppSync and graphql-js disagree: AppSync answers a
+// query it has never heard of with `Validation error of type FieldUndefined: Field
+// 'getQuote' in type 'Query' is undefined`, graphql-js with `Cannot query field
+// "getQuote"`. Either way the name is quoted, and the quote may have been escaped by
+// the `JSON.stringify` inside `safeStringify` — hence the backslash in the class. The
+// delimiters are what keep "Not Authorized to access getQuote" out: a permission
+// refusal is a real error and must still reach the caller.
+let quoteModelsAvailable = true
+const isMissingQuoteModel = (err: unknown) =>
+  /[\\'"](get|list)(Quote|LaneRateSample)\w*[\\'"]|Unknown type [\\'"]+(Quote|LaneRateSample)/i
+    .test(safeStringify(err))
+
+/** False once a read proved the backend predates the quote models. */
+export const quoteModelsDeployed = () => quoteModelsAvailable
+
+function forgetQuoteModels(err: unknown): void {
+  if (!isMissingQuoteModel(err)) throw err
+  console.warn('[apiClient] backend has no quote models yet — reading no quotes until deploy')
+  quoteModelsAvailable = false
+}
+
+// ── Quote reads ──────────────────────────────────────────────────────────────
+
+/** One quote by its number — the id *is* the number, so the detail page is a GetItem. */
+export async function getQuote(id: string): Promise<QuoteRecord | null> {
+  if (!quoteModelsAvailable) return null
+  try {
+    const r = await client.graphql({
+      query: `query GetQuote($id: ID!) { getQuote(id: $id) { ${QUOTE_FIELDS} } }`,
+      variables: { id },
+    }) as { data: { getQuote: QuoteRecord | null } }
+    return r.data.getQuote ? parseArJson(r.data.getQuote, QUOTE_JSON_FIELDS) : null
+  } catch (err) {
+    forgetQuoteModels(err)
+    return null
+  }
+}
+
+/** One customer's quotes, newest first — the customer profile's Quotes tab. */
+export async function listQuotesByCustomer(customerId: string): Promise<QuoteRecord[]> {
+  if (!quoteModelsAvailable) return []
+  try {
+    const rows = await listTrackingIndex<QuoteRecord>({
+      name: 'listQuoteByCustomerIdAndQuoteDate',
+      decls: '$customerId: String!',
+      args: 'customerId: $customerId',
+      variables: { customerId },
+      fields: QUOTE_FIELDS,
+      limit: 500,
+      sortDirection: 'DESC',
+    })
+    return rows.map((q) => parseArJson(q, QUOTE_JSON_FIELDS))
+  } catch (err) {
+    forgetQuoteModels(err)
+    return []
+  }
+}
+
+/**
+ * Every offer ever made on one leg, newest first — open and closed both, because the
+ * card shows the round that booked beside the ones that did not.
+ */
+export async function listOffersByLoad(loadId: string): Promise<QuoteRecord[]> {
+  if (!quoteModelsAvailable) return []
+  try {
+    const rows = await listTrackingIndex<QuoteRecord>({
+      name: 'listQuoteByLoadIdAndQuoteDate',
+      decls: '$loadId: String!',
+      args: 'loadId: $loadId',
+      variables: { loadId },
+      fields: QUOTE_FIELDS,
+      limit: 500,
+      sortDirection: 'DESC',
+    })
+    return rows.map((q) => parseArJson(q, QUOTE_JSON_FIELDS))
+  } catch (err) {
+    forgetQuoteModels(err)
+    return []
+  }
+}
+
+/**
+ * The whole open board — both sides — soonest to expire first.
+ *
+ * `quoteOpen` is the sparse marker 'OPEN', carried from DRAFT through RECEIVED_COUNTER
+ * and REMOVEd the moment a quote closes, so this reads exactly what is still live
+ * however many quotes have ever been priced. The sweep and the badge are this one query.
+ */
+export async function listOpenQuotes(): Promise<QuoteRecord[]> {
+  if (!quoteModelsAvailable) return []
+  try {
+    const rows = await listTrackingIndex<QuoteRecord>({
+      name: 'listQuoteByQuoteOpenAndExpiresAt',
+      decls: '$quoteOpen: String!',
+      args: 'quoteOpen: $quoteOpen',
+      variables: { quoteOpen: 'OPEN' },
+      fields: QUOTE_FIELDS,
+      limit: 500,
+      sortDirection: 'ASC',
+    })
+    return rows.map((q) => parseArJson(q, QUOTE_JSON_FIELDS))
+  } catch (err) {
+    forgetQuoteModels(err)
+    return []
+  }
+}
+
+/** Everything quoted in one 'YYYY-MM', newest first — the Won / Lost tab's window. */
+export async function listQuotesByMonth(month: string): Promise<QuoteRecord[]> {
+  if (!quoteModelsAvailable) return []
+  try {
+    const rows = await listTrackingIndex<QuoteRecord>({
+      name: 'listQuoteByQuoteMonthAndQuoteDate',
+      decls: '$quoteMonth: String!',
+      args: 'quoteMonth: $quoteMonth',
+      variables: { quoteMonth: month },
+      fields: QUOTE_FIELDS,
+      limit: 500,
+      sortDirection: 'DESC',
+    })
+    return rows.map((q) => parseArJson(q, QUOTE_JSON_FIELDS))
+  } catch (err) {
+    forgetQuoteModels(err)
+    return []
+  }
+}
+
+/**
+ * One lane's delivered history, newest first. `fromDate` is a 'YYYY-MM-DD' floor on the
+ * sort key, so a 90-day window is 90 days of rows off the wire rather than the lane's
+ * whole life filtered in the browser.
+ */
+export async function listLaneSamples(laneKey: string, fromDate?: string): Promise<LaneRateSampleRecord[]> {
+  if (!quoteModelsAvailable || !laneKey) return []
+  try {
+    return await listTrackingIndex<LaneRateSampleRecord>({
+      name: 'listLaneRateSampleByLaneKeyAndDate',
+      decls: fromDate ? '$laneKey: String!, $from: String!' : '$laneKey: String!',
+      args: fromDate ? 'laneKey: $laneKey, date: { ge: $from }' : 'laneKey: $laneKey',
+      variables: fromDate ? { laneKey, from: fromDate } : { laneKey },
+      fields: LANE_SAMPLE_FIELDS,
+      limit: 500,
+      sortDirection: 'DESC',
+    })
+  } catch (err) {
+    forgetQuoteModels(err)
+    return []
+  }
+}
+
+/** The ZIP3 neighbourhood's history — what the panel falls back to on a cold lane. */
+export async function listLaneSamplesByZip3(laneKey3: string, fromDate?: string): Promise<LaneRateSampleRecord[]> {
+  if (!quoteModelsAvailable || !laneKey3) return []
+  try {
+    return await listTrackingIndex<LaneRateSampleRecord>({
+      name: 'listLaneRateSampleByLaneKey3AndDate',
+      decls: fromDate ? '$laneKey3: String!, $from: String!' : '$laneKey3: String!',
+      args: fromDate ? 'laneKey3: $laneKey3, date: { ge: $from }' : 'laneKey3: $laneKey3',
+      variables: fromDate ? { laneKey3, from: fromDate } : { laneKey3 },
+      fields: LANE_SAMPLE_FIELDS,
+      limit: 500,
+      sortDirection: 'DESC',
+    })
+  } catch (err) {
+    forgetQuoteModels(err)
+    return []
+  }
+}
+
+// ── Quote writes (tmsShipmentActions) ────────────────────────────────────────
+//
+// Every one answers with the quote row it wrote, so a caller swaps the record it is
+// showing rather than re-reading it. `expectedVersion` is the CAS token: the row as the
+// caller last saw it, refused server-side when somebody else has moved it since.
+
+/** What a send-shaped action did — or did not do. */
+export interface QuoteSendResult {
+  quote: QuoteRecord
+  /** The public link, present even when SES refused: on dev it is the only delivery. */
+  link: string | null
+  sent: boolean
+  subject: string
+  body: string
+}
+
+export interface SaveQuoteInput {
+  /** Absent on create: the number is minted server-side from the settings counter. */
+  quoteId?: string
+  expectedVersion?: number
+  side?: QuoteSide
+  /** An inbound request nobody has priced yet starts REQUESTED rather than DRAFT. */
+  intake?: boolean
+  customerId?: string | null
+  customerName?: string | null
+  contactName?: string | null
+  contactEmail?: string | null
+  customerRepId?: string | null
+  divisionKey?: string | null
+  stops?: Stop[]
+  pickupAppt?: string | null
+  deliveryAppt?: string | null
+  mode?: ShipmentMode | null
+  rateType?: RateType | null
+  equipmentType?: string | null
+  equipmentLengthFt?: number | null
+  commodity?: string | null
+  weightLbs?: number | null
+  miles?: number | null
+  references?: OrderReference[]
+  lines?: LoadChargeInput[]
+  targetBuyCents?: number | null
+  topSpendCents?: number | null
+  customerMessage?: string | null
+  internalNotes?: string | null
+}
+
+/** The saved row and what pricing made of it — the totals plus every warning raised. */
+export async function saveQuote(input: SaveQuoteInput): Promise<{ quote: QuoteRecord; pricing: QuotePricingResult }> {
+  return shipmentAction<{ quote: QuoteRecord; pricing: QuotePricingResult }>('SAVE_QUOTE', input)
+}
+
+export interface SendQuoteInput {
+  quoteId: string
+  expectedVersion?: number
+  /** Omitted: the server addresses the quote's own contact. */
+  to?: string[]
+  cc?: string[]
+  message?: string
+  /** COPY mints the link and writes the thread without asking SES to send anything. */
+  via?: 'EMAIL' | 'COPY'
+  /** The `key` of every pricing warning the sender ticked off. Blocks cannot be ticked. */
+  acknowledgeWarnings?: string[]
+}
+export async function sendQuote(input: SendQuoteInput): Promise<QuoteSendResult> {
+  return shipmentAction<QuoteSendResult>('SEND_QUOTE', input)
+}
+
+export interface CounterQuoteInput {
+  quoteId: string
+  expectedVersion?: number
+  /** Either the re-priced lines, or one number for `absorbCounter` to spread over them. */
+  lines?: LoadChargeInput[]
+  amountCents?: number
+  message?: string
+  to?: string[]
+  cc?: string[]
+  via?: 'EMAIL' | 'COPY'
+  acknowledgeWarnings?: string[]
+}
+export async function counterQuote(input: CounterQuoteInput): Promise<QuoteSendResult> {
+  return shipmentAction<QuoteSendResult>('COUNTER_QUOTE', input)
+}
+
+/** Take their number as ours: the lines absorb the counter and the quote becomes ours to convert. */
+export async function acceptCounter(input: { quoteId: string; expectedVersion?: number }): Promise<{ quote: QuoteRecord }> {
+  return shipmentAction<{ quote: QuoteRecord }>('ACCEPT_COUNTER', input)
+}
+
+export async function markQuoteLost(input: {
+  quoteId: string
+  expectedVersion?: number
+  reason: QuoteLostReason
+  note?: string
+}): Promise<{ quote: QuoteRecord }> {
+  return shipmentAction<{ quote: QuoteRecord }>('MARK_QUOTE_LOST', input)
+}
+
+/** Back onto the board at QUOTED — without a link, which a lost round has already spent. */
+export async function restoreQuote(input: { quoteId: string; expectedVersion?: number }): Promise<{ quote: QuoteRecord }> {
+  return shipmentAction<{ quote: QuoteRecord }>('RESTORE_QUOTE', input)
+}
+
+export async function cancelQuote(input: {
+  quoteId: string
+  expectedVersion?: number
+  reason?: string
+}): Promise<{ quote: QuoteRecord }> {
+  return shipmentAction<{ quote: QuoteRecord }>('CANCEL_QUOTE', input)
+}
+
+/** The buy side's "no truck": the carrier is out of this round, the load is not. */
+export async function passQuote(input: {
+  quoteId: string
+  expectedVersion?: number
+  note?: string
+}): Promise<{ quote: QuoteRecord }> {
+  return shipmentAction<{ quote: QuoteRecord }>('PASS_QUOTE', input)
+}
+
+/**
+ * Close every open quote past its expiry. Idempotent and conditioned server-side, so the
+ * board may fire it on every mount without racing another desk doing the same.
+ */
+export async function sweepExpiredQuotes(): Promise<{ expired: number }> {
+  return shipmentAction<{ expired: number }>('SWEEP_EXPIRED_QUOTES', {})
+}
+
+/**
+ * Copy one quote into `count` drafts — the multi-truck ask, priced once.
+ *
+ * `exposure` is what those drafts would add to the customer's open book against their
+ * credit limit: a warning on the dialog, and a block at conversion, never here.
+ */
+export interface DuplicateQuotesResult {
+  quotes: QuoteRecord[]
+  exposure: { projectedCents: number; creditLimitCents: number | null; overLimit: boolean }
+}
+export async function duplicateQuotes(input: {
+  quoteId: string
+  count: number
+  /** One pickup appointment per copy, when the trucks are not all the same day. */
+  pickupAppts?: (string | null)[]
+}): Promise<DuplicateQuotesResult> {
+  return shipmentAction<DuplicateQuotesResult>('DUPLICATE_QUOTE', input)
+}
+
+/** The won quote and the shipment it just became, in one transaction. */
+export async function convertQuote(input: {
+  quoteId: string
+  expectedVersion?: number
+  acceptedVia?: QuoteAcceptedVia
+  divisionKey?: string | null
+  customerRepId?: string | null
+}): Promise<{ quote: QuoteRecord; bundle: ShipmentBundle }> {
+  return shipmentAction<{ quote: QuoteRecord; bundle: ShipmentBundle }>('CONVERT_QUOTE', input)
+}
+
+/** The only way back out of WON: the shipment is undone and its quote is open again. */
+export async function revertToQuote(input: {
+  /** The shipment being undone, or the quote it came from — either names the pair. */
+  shipmentId?: string
+  quoteId?: string
+  reason: string
+}): Promise<{ quote: QuoteRecord }> {
+  return shipmentAction<{ quote: QuoteRecord }>('REVERT_TO_QUOTE', input)
+}
+
+// ── Carrier offers (buy side) ────────────────────────────────────────────────
+
+/** One REQUESTED offer per carrier, and what each send did. */
+export interface RequestOffersResult {
+  offers: QuoteRecord[]
+  sends: { quoteId: string; link: string | null; sent: boolean; subject: string; body: string; to: string[] }[]
+}
+export async function requestOffers(input: {
+  shipmentId?: string
+  loadId: string
+  carrierIds: string[]
+  message?: string
+  /** The number a carrier may accept outright on the link, when settings allow it. */
+  bookNowRateCents?: number | null
+  via?: 'EMAIL' | 'COPY'
+  /** Overrides `offerExpiryHours`; still capped at the first pickup appointment. */
+  expiryHours?: number
+}): Promise<RequestOffersResult> {
+  return shipmentAction<RequestOffersResult>('REQUEST_OFFERS', input)
+}
+
+/** A number that came in by phone: the offer row a carrier never clicked a link to make. */
+export async function logOffer(input: {
+  shipmentId?: string
+  loadId: string
+  carrierId: string
+  amountCents: number
+  note?: string
+  contactName?: string | null
+  carrierEmail?: string | null
+}): Promise<{ quote: QuoteRecord }> {
+  return shipmentAction<{ quote: QuoteRecord }>('LOG_OFFER', input)
+}
+
+export async function counterOffer(input: {
+  quoteId: string
+  expectedVersion?: number
+  amountCents: number
+  message?: string
+  via?: 'EMAIL' | 'COPY'
+}): Promise<QuoteSendResult> {
+  return shipmentAction<QuoteSendResult>('COUNTER_OFFER', input)
+}
+
+export async function rejectOffer(input: {
+  quoteId: string
+  expectedVersion?: number
+  reason?: QuoteLostReason
+  note?: string
+}): Promise<{ quote: QuoteRecord }> {
+  return shipmentAction<{ quote: QuoteRecord }>('REJECT_OFFER', input)
+}
+
+/**
+ * Book the carrier at their number. Everything `BOOK_CARRIER` demands is demanded here
+ * too — the same gate, the same refusals verbatim — and the offer's group closes in the
+ * booking transaction, so answering an offer can never leave a load double-covered.
+ */
+export type AcceptOfferInput = Omit<BookCarrierInput, 'carrierId' | 'carrierRateCents'> & {
+  quoteId: string
+  expectedVersion?: number
+  /** Omitted: the carrier is booked at the offer's own `amountCents`. */
+  carrierRateCents?: number
+}
+export async function acceptOffer(input: AcceptOfferInput): Promise<{ quote: QuoteRecord; bundle: ShipmentBundle }> {
+  return shipmentAction<{ quote: QuoteRecord; bundle: ShipmentBundle }>('ACCEPT_OFFER', input)
+}
+
+/** ADMIN only. Templates must carry `{link}` and the number format `{n}`; the server checks. */
+export async function saveQuoteSettings(input: Partial<QuoteSettings> & { expectedUpdatedAt?: string }): Promise<{ settings: TmsSettings }> {
+  return shipmentAction<{ settings: TmsSettings }>('SAVE_QUOTE_SETTINGS', input)
 }

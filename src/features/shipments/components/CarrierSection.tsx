@@ -8,6 +8,9 @@
  *
  * The AP card sits under the quick-pay block, one per assignment this load has had, so
  * what the carrier is owed is read beside what they were booked at.
+ *
+ * The offers card sits above all of it, because asking carriers comes before booking one:
+ * it is the only thing on this tab a load with nobody on it still has.
  */
 import { useEffect, useState } from 'react'
 import { Building2, Send, Truck, UserMinus } from 'lucide-react'
@@ -15,6 +18,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Label } from '@/components/ui/label'
 import { RateConPanel } from '@/features/carriers/components/RateConPanel'
+import { CarrierOffersCard } from '@/features/quotes/components/CarrierOffersCard'
 import { getCarrierBundle, getTmsSettings } from '@/lib/apiClient'
 import { netPayable, quickPayFee, quickPayTiersOf, tierFor } from '@/lib/quickPay'
 import { formatCents } from '@/lib/tmsDirectory'
@@ -53,8 +57,17 @@ export function CarrierSection({ bundle, actions }: {
     return () => { live = false }
   }, [carrierId])
 
+  // The offers come before the assignment on purpose: that is the order the work
+  // happens in, and a load with nobody on it is exactly when the buy side matters.
+  const offers = <CarrierOffersCard bundle={bundle} onReload={actions.reload} />
+
   if (!loadCarrier) {
-    return <p className="text-sm text-muted-foreground">Nobody is on this load yet. Book a carrier from the Details tab.</p>
+    return (
+      <div className="space-y-4">
+        {offers}
+        <p className="text-sm text-muted-foreground">Nobody is on this load yet. Book a carrier from the Details tab.</p>
+      </div>
+    )
   }
 
   const isOwnAsset = loadCarrier.kind === 'OWN_ASSET'
@@ -65,6 +78,8 @@ export function CarrierSection({ bundle, actions }: {
 
   return (
     <div className="space-y-4">
+      {offers}
+
       <div className="space-y-2 rounded-lg border border-border p-3">
         <div className="flex items-center gap-2">
           {isOwnAsset ? <Truck size={14} className="text-muted-foreground" /> : <Building2 size={14} className="text-muted-foreground" />}

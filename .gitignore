@@ -38,3 +38,10 @@ dist-ssr
 
 # tesseract.js language cache written by local scanner test runs
 *.traineddata
+
+# Scanned-invoice extractions: customer PII, never committed (TMS_BUILD_BRIEF.md)
+invoice_extraction.json
+invoice_ocr_raw.json
+
+# Migration plan artifacts reviewed before --apply; kept out of the tree
+plans/

@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
-import { X, Building2, MapPin, FileText, Settings, Phone, DollarSign, Truck, Banknote } from 'lucide-react'
+import { X, Building2, MapPin, FileText, FileSpreadsheet, Settings, Phone, DollarSign, Truck, Banknote } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -11,10 +12,13 @@ import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { DocumentTypesField } from '@/features/documents/DocumentTypesField'
 import { useCustomerOrders } from '@/hooks/useCustomerOrders'
+import { useCustomerQuotes } from '@/hooks/useCustomerQuotes'
 import { creditSummaryForCustomer, effectiveCustomerStatus, boardTab } from '@/lib/customerCredit'
 import { oldestOpenInvoiceDays } from '@/lib/arAging'
 import { useCustomerAr } from '@/hooks/useCustomerAr'
 import { loadStatus } from '@/lib/loadStatus'
+import { laneLabelFor } from '@/lib/laneKey'
+import { QUOTE_STATUS_LABEL } from '@/lib/quotes'
 import { formatCents } from '@/lib/tmsDirectory'
 import { cn } from '@/lib/utils'
 import { useCustomerForm } from './useCustomerForm'
@@ -59,6 +63,7 @@ const tabs = [
   { key: 'settings', label: 'Settings', icon: Settings },
   { key: 'quoting', label: 'Quoting', icon: DollarSign },
   { key: 'orders', label: 'Orders', icon: Truck },
+  { key: 'quotes', label: 'Quotes', icon: FileSpreadsheet },
   { key: 'ar', label: 'AR', icon: Banknote },
 ]
 
@@ -408,6 +413,8 @@ export function CustomerProfile({
             </div>
           )}
 
+          {tab === 'quotes' && <CustomerQuotesTab customerId={customer.id} />}
+
           {tab === 'ar' && (
             <CustomerArTab
               customerId={customer.id}
@@ -441,5 +448,57 @@ export function CustomerProfile({
         />
       </SheetContent>
     </Sheet>
+  )
+}
+
+/**
+ * This customer's quotes, newest first, with the one number that says whether we are
+ * pricing them well: the share of the quotes they actually decided that we won. Quotes
+ * we withdrew are not a decision and are left out of the denominator, so cancelling a
+ * duplicate cannot flatter or dent the rate.
+ *
+ * Its own component so the read only happens when somebody opens the tab.
+ */
+function CustomerQuotesTab({ customerId }: { customerId: string }) {
+  const { quotes, loading, error } = useCustomerQuotes(customerId)
+
+  const sell = useMemo(
+    () => quotes.filter((q) => q.side === 'SELL')
+      .slice()
+      .sort((a, b) => (a.quoteDate < b.quoteDate ? 1 : a.quoteDate > b.quoteDate ? -1 : 0)),
+    [quotes],
+  )
+  const won = sell.filter((q) => q.status === 'WON').length
+  const decided = sell.filter((q) => q.status === 'WON' || q.status === 'LOST' || q.status === 'PASS').length
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-3">
+        <div className="text-sm">
+          <span className="font-medium">{decided > 0 ? `${Math.round((won / decided) * 100)}%` : '—'}</span>
+          <span className="text-muted-foreground"> win rate · {won} of {decided} decided</span>
+        </div>
+        <Button asChild size="sm" className="ml-auto h-8">
+          <Link to={`/quotes/new?customerId=${encodeURIComponent(customerId)}`}>New quote</Link>
+        </Button>
+      </div>
+
+      {error && <p className="text-xs text-destructive">{error}</p>}
+
+      {loading && sell.length === 0 ? <p className="text-sm text-muted-foreground">Loading quotes…</p>
+        : sell.length === 0 ? <p className="text-sm text-muted-foreground">No quotes for this customer yet.</p>
+        : sell.map((quote) => (
+          <Link key={quote.id} to={`/quotes/${quote.id}`} className="block rounded-lg border border-border bg-card p-3 no-underline">
+            <div className="flex items-center justify-between">
+              <div className="text-sm font-medium">{quote.id}</div>
+              <Badge variant="outline" className="text-[10px]">{QUOTE_STATUS_LABEL[quote.status]}</Badge>
+            </div>
+            <div className="mt-1 text-xs text-muted-foreground">
+              {laneLabelFor(quote.laneKey)} · {quote.quoteDate}
+            </div>
+            <div className="mt-1 text-xs font-medium">${formatCents(quote.amountCents)}</div>
+          </Link>
+        ))}
+    </div>
   )
 }

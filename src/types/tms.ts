@@ -398,6 +398,24 @@ export interface TmsSettings {
   /** Carrier paperwork a bill needs before approval. Defaults to `requiredCarrierUploadTypes`. */
   apBillDocsRequired?: string[] | null
 
+  // ── Quotes & rates (Step H) ────────────────────────────────────────────────
+  /** Hours a customer gets to answer a quote, when the customer has not said. Default 24. */
+  hoursToQuote?: number | null
+  /** Hours a carrier gets to answer an offer, capped at the first pickup. Default 24. */
+  offerExpiryHours?: number | null
+  /** `Q{n:6}` — the quote number is the quote's id, so this is read once, at mint. */
+  quoteNumberFormat?: string | null
+  nextQuoteNumber?: number | null
+  /** Each must contain `{link}`: a quote e-mail with no link is not a quote. */
+  quoteEmailTemplate?: string | null
+  counterEmailTemplate?: string | null
+  offerRequestEmailTemplate?: string | null
+  quoteTermsText?: string | null
+  /** A below-floor or below-min-margin quote needs owner/ADMIN to send. Default true. */
+  quoteBelowMinMarginAdminOnly?: boolean | null
+  /** Whether the carrier's offer link shows the book-now rate. Default true. */
+  quoteOffersCarrierSeesBookNow?: boolean | null
+
   createdAt?: string
   updatedAt?: string
 }
@@ -1520,7 +1538,14 @@ export interface ShipmentDocumentRecord {
   updatedAt?: string
 }
 
-export type ShipmentNoticeKind = 'MILESTONE' | 'POD_REQUEST' | 'DOCUMENTS' | 'INVOICE' | 'REMITTANCE'
+export type ShipmentNoticeKind =
+  | 'MILESTONE'
+  | 'POD_REQUEST'
+  | 'DOCUMENTS'
+  | 'INVOICE'
+  | 'REMITTANCE'
+  /** Step H: an offer request sent to a carrier on this load. */
+  | 'CARRIER_OFFER'
 
 export type ShipmentNoticeChannel = 'EMAIL' | 'COPY'
 
@@ -1944,4 +1969,289 @@ export interface ApSettings {
   remittanceEmailTemplate?: string | null
   apBillDocsRequired?: string[] | null
   defaultCarrierTermsDays?: number | null
+}
+
+// ── Step H — quotes, carrier offers and lane history ─────────────────────────
+
+/** A customer quote (SELL) or a carrier offer (BUY). One model, two sides. */
+export type QuoteSide = 'SELL' | 'BUY'
+
+/**
+ * The rungs. `REQUESTED` is "somebody asked and we have not priced it" (a sell-side
+ * intake, or an offer request sitting with a carrier); `QUOTED` is "our number is
+ * with them"; the two RECEIVED_* rungs are "their move landed, it is ours now".
+ * WON is written only at conversion (SELL) or booking (BUY).
+ */
+export type QuoteStatus =
+  | 'DRAFT'
+  | 'REQUESTED'
+  | 'QUOTED'
+  | 'SENT_COUNTER'
+  | 'RECEIVED_REPLY'
+  | 'RECEIVED_COUNTER'
+  | 'WON'
+  | 'LOST'
+  | 'PASS'
+  | 'CANCELED'
+
+export type QuoteResponseKind = 'ACCEPTED' | 'COUNTERED' | 'DECLINED' | 'PASSED'
+
+export type QuoteLostReason =
+  | 'EXPIRED'
+  | 'NO_RESPONSE'
+  | 'TOO_HIGH'
+  | 'TOO_SLOW'
+  | 'TRUCK_NOT_AVAILABLE'
+  | 'WITHDRAWN'
+  | 'OTHER'
+  | 'NO_REASON'
+
+export type QuoteAcceptedVia = 'LINK' | 'PHONE' | 'EMAIL'
+
+export type QuoteCounterBy = 'US' | 'THEM'
+
+export type QuoteSendStatus = 'SENT' | 'NOT_SENT'
+
+/** One line of the quote's thread: what happened, when, and at what number. */
+export interface QuoteEvent {
+  at: string
+  by: string
+  kind: string
+  amountCents?: number | null
+  note?: string | null
+}
+
+/**
+ * One priced thing. `id` is the quote number (`Q000012`), minted from a settings
+ * counter, so a staff URL carries no secret and a lookup by number is a GetItem.
+ * `linkToken` is the public secret; it is rotated every round and REMOVEd the
+ * moment the other side answers.
+ */
+export interface QuoteRecord {
+  id: string
+  side: QuoteSide
+  status: QuoteStatus
+  /** A sell quote and its duplicates, or one request round across carriers. */
+  groupId?: string | null
+  quoteDate: string
+  quoteMonth: string
+  customerId?: string | null
+  customerName?: string | null
+  contactName?: string | null
+  contactEmail?: string | null
+  customerRepId?: string | null
+  carrierId?: string | null
+  carrierName?: string | null
+  carrierMc?: string | null
+  carrierEmail?: string | null
+  shipmentId?: string | null
+  shipmentNumber?: string | null
+  orderId?: string | null
+  loadId?: string | null
+  loadNumber?: string | null
+  divisionKey?: string | null
+  mode?: ShipmentMode | null
+  rateType?: RateType | null
+  equipmentType?: string | null
+  equipmentLengthFt?: number | null
+  stops?: Stop[] | null
+  laneKey?: string | null
+  laneKey3?: string | null
+  pickupAppt?: string | null
+  deliveryAppt?: string | null
+  commodity?: string | null
+  weightLbs?: number | null
+  miles?: number | null
+  references?: OrderReference[] | null
+  /** SELL: the CUSTOMER lines. BUY: one CARRIER rate line. */
+  lines?: LoadChargeInput[] | null
+  /** SELL: Σ lines = revenue. BUY: the carrier's number. */
+  amountCents: number
+  customerRateCents?: number | null
+  targetBuyCents?: number | null
+  topSpendCents?: number | null
+  marginBps?: number | null
+  /** BUY only: the number a carrier may accept outright on the link. */
+  bookNowRateCents?: number | null
+  counterCents?: number | null
+  counterBy?: QuoteCounterBy | null
+  rounds: number
+  expiresAt?: string | null
+  /** Sparse and indexed; present only while the current round's link is live. */
+  linkToken?: string | null
+  linkVersion?: number | null
+  requestCount?: number | null
+  sentAt?: string | null
+  sentTo?: string | null
+  sendCount?: number | null
+  lastSendStatus?: QuoteSendStatus | null
+  respondedAt?: string | null
+  response?: QuoteResponseKind | null
+  responderName?: string | null
+  responderEmail?: string | null
+  responderIp?: string | null
+  acceptedVia?: QuoteAcceptedVia | null
+  lostReason?: QuoteLostReason | null
+  lostNote?: string | null
+  wonAt?: string | null
+  closedAt?: string | null
+  duplicatedFromId?: string | null
+  pricingWarnings?: string[] | null
+  /** Sparse `'OPEN'` from DRAFT through RECEIVED_COUNTER; REMOVEd when it closes. */
+  quoteOpen?: string | null
+  customerMessage?: string | null
+  internalNotes?: string | null
+  events?: QuoteEvent[] | null
+  createdBy: string
+  updatedBy: string
+  version: number
+  createdAt?: string
+  updatedAt?: string
+}
+
+export type LaneAssignmentKind = 'OWN_ASSET' | 'CARRIER'
+
+export type LaneSampleSource = 'LOAD' | 'BACKFILL' | 'LEGACY_LOAD'
+
+/**
+ * One delivered load, priced, keyed by lane. The only thing the Historical Rates
+ * panel reads. `id` is `lrs:<loadId>`, so a re-price overwrites rather than doubles.
+ */
+export interface LaneRateSampleRecord {
+  id: string
+  /** `'CHICAGO|IL>DANVILLE|IL'`. */
+  laneKey: string
+  /** `'606>618'`. */
+  laneKey3?: string | null
+  date: string
+  loadId: string
+  shipmentId: string
+  shipmentNumber?: string | null
+  orderId?: string | null
+  customerId?: string | null
+  customerName?: string | null
+  carrierId?: string | null
+  carrierName?: string | null
+  assignmentKind?: LaneAssignmentKind | null
+  divisionKey?: string | null
+  mode?: ShipmentMode | null
+  rateType?: RateType | null
+  equipmentType?: string | null
+  miles?: number | null
+  customerRateCents?: number | null
+  revenueCents?: number | null
+  carrierRateCents?: number | null
+  costCents?: number | null
+  profitCents?: number | null
+  marginBps?: number | null
+  loadStatus?: string | null
+  /** Canceled or TONU'd after the sample was taken: kept, never counted. */
+  excluded?: boolean | null
+  source: LaneSampleSource
+  sampledAt: string
+  version: number
+  createdAt?: string
+  updatedAt?: string
+}
+
+/** The quotes half of `TmsSettings`, as the settings card edits it. */
+export interface QuoteSettings {
+  hoursToQuote?: number | null
+  offerExpiryHours?: number | null
+  quoteNumberFormat?: string | null
+  nextQuoteNumber?: number | null
+  quoteEmailTemplate?: string | null
+  counterEmailTemplate?: string | null
+  offerRequestEmailTemplate?: string | null
+  quoteTermsText?: string | null
+  quoteBelowMinMarginAdminOnly?: boolean | null
+  quoteOffersCarrierSeesBookNow?: boolean | null
+}
+
+/** One stop, as the public quote page is allowed to see it. */
+export interface QuotePublicStop {
+  type: string
+  city?: string | null
+  state?: string | null
+  appt?: string | null
+  apptType?: string | null
+  sequence: number
+}
+
+/** One priced line, as a customer sees it: a label and an amount, nothing else. */
+export interface QuotePublicLine {
+  label: string
+  amountCents: number
+}
+
+/**
+ * What the public page may say. Built by an allow-list in `quotePublicView`, never
+ * by deleting fields off the row: a field added to `QuoteRecord` tomorrow cannot
+ * leak by being forgotten here.
+ */
+export interface QuotePublicView {
+  side: QuoteSide
+  quoteNumber: string
+  status: QuoteStatus
+  brokerName: string
+  expiresAt?: string | null
+  expired: boolean
+  /** Whose move it is, in the public page's words. */
+  awaiting: 'YOU' | 'US' | 'NONE'
+  stops: QuotePublicStop[]
+  mode?: string | null
+  equipmentType?: string | null
+  equipmentLengthFt?: number | null
+  commodity?: string | null
+  weightLbs?: number | null
+  miles?: number | null
+  /** SELL: our price to the customer. BUY: what we offer the carrier. */
+  amountCents: number
+  /** SELL only: the lines behind the amount. */
+  lines: QuotePublicLine[]
+  /** BUY only: the number the carrier may accept outright, when enabled. */
+  bookNowRateCents?: number | null
+  /** BUY only: the carrier's own last number, so they see what they said. */
+  theirAmountCents?: number | null
+  message?: string | null
+  terms?: string | null
+  rounds: number
+  generatedAt: string
+}
+
+/** One side's statistics over a lane's samples. */
+export interface LaneStatsSide {
+  count: number
+  lowCents: number | null
+  medianCents: number | null
+  avgCents: number | null
+  highCents: number | null
+  /** Average cents per mile, over the samples that carry miles. */
+  perMileCents: number | null
+}
+
+export interface LaneStatsMonth {
+  month: string
+  customerAvgCents: number | null
+  carrierAvgCents: number | null
+  count: number
+}
+
+export interface LaneStats {
+  customer: LaneStatsSide
+  carrier: LaneStatsSide
+  marginAvgBps: number | null
+  milesAvg: number | null
+  byMonth: LaneStatsMonth[]
+  lastAt: string | null
+}
+
+export type LaneStatsWindow = 90 | 180 | 365 | 'ALL'
+
+export interface LaneStatsFilters {
+  windowDays?: LaneStatsWindow
+  equipmentType?: string | null
+  rateType?: RateType | null
+  /** Own-fleet legs carry `costCents: 0`; counting them would drag a lane to zero. */
+  includeOwnFleetCost?: boolean
 }

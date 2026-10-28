@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { carrierView, customerView, linkExpiry, smsBodyFor } from './trackingLink'
+import { TOKEN_BYTES, carrierView, customerView, isLinkToken, linkExpiry, newLinkToken, smsBodyFor } from './trackingLink'
 import { MAX_SMS_BODY } from './dispatch'
 import type { LastKnownFix } from './trackingTimeline'
 import type {
@@ -303,5 +303,25 @@ describe('smsBodyFor', () => {
     })
     expect(body.length).toBeLessThanOrEqual(MAX_SMS_BODY)
     expect(body.endsWith(url)).toBe(true)
+  })
+})
+
+describe('newLinkToken', () => {
+  it('mints something the link routes will accept', () => {
+    const bytes = (n: number) => Uint8Array.from({ length: n }, (_, at) => (at * 37 + 11) % 256)
+    const token = newLinkToken(bytes)
+    expect(token).toHaveLength(32)
+    expect(isLinkToken(token)).toBe(true)
+  })
+
+  it('carries every byte of the randomness it was handed', () => {
+    const first = newLinkToken((n) => Uint8Array.from({ length: n }, (_, at) => at))
+    const second = newLinkToken((n) => Uint8Array.from({ length: n }, (_, at) => (at === n - 1 ? at + 1 : at)))
+    expect(second).not.toBe(first)
+    expect(isLinkToken(second)).toBe(true)
+  })
+
+  it('refuses to mint a short token rather than mint a guessable one', () => {
+    expect(() => newLinkToken(() => new Uint8Array(TOKEN_BYTES - 1))).toThrow(/random bytes/)
   })
 })

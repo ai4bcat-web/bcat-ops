@@ -62,7 +62,6 @@ import type {
 } from '../../../src/types/tms'
 import {
   CUSTOMER_TABLE_NAME,
-  DIVISION_TABLE_NAME,
   FACTORING_ITEM_TABLE_NAME,
   FROM_ADDRESS,
   IDX_CARRIERS_BY_SHIPMENT,
@@ -85,6 +84,7 @@ import {
   SHIPMENT_TABLE_NAME,
   dynamo,
   getById,
+  getDivision,
   getSettings,
   invoicePdfKey,
   nextInvoiceNumber,
@@ -147,7 +147,7 @@ async function readOrderContext(orderId: string): Promise<OrderContext> {
   const gateIds = gateLoadIds(allLoads, orders, orderId)
   const loads = allLoads.filter((load) => gateIds.includes(load.id))
   const divisionKey = loads.find((load) => load.divisionKey)?.divisionKey ?? null
-  const division = divisionKey ? ((await getById(DIVISION_TABLE_NAME, divisionKey)) as unknown as Division | null) : null
+  const division = divisionKey ? ((await getDivision(divisionKey)) as unknown as Division | null) : null
 
   return {
     order,

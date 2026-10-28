@@ -23,6 +23,7 @@ describe('SettingsPage', () => {
     render(<SettingsPage />)
     expect(screen.getAllByText('Divisions').length).toBeGreaterThan(0)
     expect(screen.getAllByText('TMS defaults').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Quotes & offers').length).toBeGreaterThan(0)
   })
 
   it('Add division opens the create form', async () => {

@@ -1390,6 +1390,7 @@ trackingApiFn.addEnvironment('LOAD_TABLE_NAME', backend.data.resources.tables['L
   const trackDivisionTable = backend.data.resources.tables['Division']
   const trackSettingsTable = backend.data.resources.tables['TmsSettings']
   const trackHistoryTable  = backend.data.resources.tables['TruckLocationHistory']
+  const trackQuoteTable    = backend.data.resources.tables['Quote']
   trackingApiFn.addToRolePolicy(new PolicyStatement({
     // The link row itself: read it, bump its counters, expire it.
     actions:   ['dynamodb:GetItem', 'dynamodb:UpdateItem'],
@@ -1422,6 +1423,20 @@ trackingApiFn.addEnvironment('LOAD_TABLE_NAME', backend.data.resources.tables['L
   trackingApiFn.addEnvironment('DIVISION_TABLE_NAME',        trackDivisionTable.tableName)
   trackingApiFn.addEnvironment('TMS_SETTINGS_TABLE_NAME',    trackSettingsTable.tableName)
   trackingApiFn.addEnvironment('TRUCK_LOCATION_HISTORY_TABLE_NAME', trackHistoryTable.tableName)
+  // ── Step H: the public quote link (GET /q/<token>, POST /q/<token>/respond) ─
+  // The token is not the primary key, so the row is found through the linkToken
+  // index and the answer is one conditioned UpdateItem on the row itself. No
+  // Put and no Delete: a public caller may move a quote it holds the live
+  // secret for, and nothing else.
+  trackingApiFn.addToRolePolicy(new PolicyStatement({
+    actions:   ['dynamodb:GetItem', 'dynamodb:UpdateItem'],
+    resources: [trackQuoteTable.tableArn],
+  }))
+  trackingApiFn.addToRolePolicy(new PolicyStatement({
+    actions:   ['dynamodb:Query'],
+    resources: [`${trackQuoteTable.tableArn}/index/*`],
+  }))
+  trackingApiFn.addEnvironment('QUOTE_TABLE_NAME', trackQuoteTable.tableName)
   // ── Step E: the carrier upload portal (GET /u/<t>, POST /u/<t>/upload,
   // POST /u/<t>/commit) ─────────────────────────────────────────────────────
   // The public role may Put a ShipmentDocument row and Query the shipment's own
@@ -1743,6 +1758,12 @@ const shipmentDriverTable    = backend.data.resources.tables['Driver']
 const shipmentCarrierTable   = backend.data.resources.tables['Carrier']
 const shipmentCarrierDocTable = backend.data.resources.tables['CarrierDocument']
 const shipmentDivisionTable  = backend.data.resources.tables['Division']
+// Step H: quotes and carrier offers are written here — the same Lambda already
+// owns the pricing and the booking a quote turns into. CarrierContact is read
+// only, to address an offer request at a carrier's dispatch desk.
+const shipmentCarrierContactTable = backend.data.resources.tables['CarrierContact']
+const shipmentQuoteTable     = backend.data.resources.tables['Quote']
+const shipmentLaneSampleTable = backend.data.resources.tables['LaneRateSample']
 
 shipmentActionsFn.addToRolePolicy(
   new PolicyStatement({
@@ -1778,6 +1799,14 @@ shipmentActionsFn.addToRolePolicy(
       // the carrier's ACTIVE tracking link when the carrier comes off the load.
       backend.data.resources.tables['LoadCheckCall'].tableArn,
       backend.data.resources.tables['TrackingLink'].tableArn,
+      // Step H: the quote and offer rows, and the lane history a delivered load
+      // leaves behind. CarrierContact is read-only — the directory owns it.
+      // ShipmentNotice carries the CARRIER_OFFER rows an offer request writes,
+      // the same claim-then-send pattern the tracking and finance routers use.
+      shipmentCarrierContactTable.tableArn,
+      shipmentQuoteTable.tableArn,
+      shipmentLaneSampleTable.tableArn,
+      shipmentNoticeTable.tableArn,
     ],
   }),
 )
@@ -1796,6 +1825,10 @@ shipmentActionsFn.addToRolePolicy(
       `${shipmentCarrierDocTable.tableArn}/index/*`,
       `${backend.data.resources.tables['LoadCheckCall'].tableArn}/index/*`,
       `${backend.data.resources.tables['TrackingLink'].tableArn}/index/*`,
+      `${shipmentCarrierContactTable.tableArn}/index/*`,
+      `${shipmentQuoteTable.tableArn}/index/*`,
+      `${shipmentLaneSampleTable.tableArn}/index/*`,
+      `${shipmentNoticeTable.tableArn}/index/*`,
     ],
   }),
 )
@@ -1812,6 +1845,7 @@ shipmentActionsFn.addEnvironment('AUDIT_LOG_TABLE_NAME',       shipmentAuditLogT
 shipmentActionsFn.addEnvironment('DRIVER_TABLE_NAME',          shipmentDriverTable.tableName)
 shipmentActionsFn.addEnvironment('LOAD_CHECK_CALL_TABLE_NAME', backend.data.resources.tables['LoadCheckCall'].tableName)
 shipmentActionsFn.addEnvironment('TRACKING_LINK_TABLE_NAME',   backend.data.resources.tables['TrackingLink'].tableName)
+shipmentActionsFn.addEnvironment('SHIPMENT_NOTICE_TABLE_NAME', shipmentNoticeTable.tableName)
 shipmentActionsFn.addEnvironment('USER_POOL_ID',               backend.auth.resources.userPool.userPoolId)
 shipmentActionsFn.addToRolePolicy(
   new PolicyStatement({
@@ -1825,6 +1859,10 @@ shipmentActionsFn.addToRolePolicy(
 shipmentActionsFn.addEnvironment('CARRIER_TABLE_NAME',          shipmentCarrierTable.tableName)
 shipmentActionsFn.addEnvironment('CARRIER_DOCUMENT_TABLE_NAME', shipmentCarrierDocTable.tableName)
 shipmentActionsFn.addEnvironment('DIVISION_TABLE_NAME',         shipmentDivisionTable.tableName)
+// Step H: the quote board, the offer thread and the lane history.
+shipmentActionsFn.addEnvironment('CARRIER_CONTACT_TABLE_NAME',  shipmentCarrierContactTable.tableName)
+shipmentActionsFn.addEnvironment('QUOTE_TABLE_NAME',            shipmentQuoteTable.tableName)
+shipmentActionsFn.addEnvironment('LANE_RATE_SAMPLE_TABLE_NAME', shipmentLaneSampleTable.tableName)
 shipmentActionsFn.addEnvironment('BUCKET_NAME',                 backend.storage.resources.bucket.bucketName)
 shipmentActionsFn.addEnvironment('FROM_ADDRESS',                'ai4bcat@gmail.com')
 // The signing link in the email points at the app, not at the Function URL.

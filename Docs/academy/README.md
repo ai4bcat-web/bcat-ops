@@ -10,6 +10,7 @@ Markdown knowledge base for the in-app Help/Academy module and Ask assistant.
 - [Documents and Delivery](documents-and-delivery.md) — the Documents tab and its three sections, generating and superseding files, the required-document strip and Ready to invoice, reviewing carrier uploads, the carrier upload link, milestone e-mails, and rating a carrier.
 - [AR — Invoicing and Payments](ar-invoicing-and-payments.md) — the AR ladder and who moves each rung, invoicing early, what Generate freezes and why Void is the only undo, e-mailing and batch invoicing, payments, credits, overpayments, write-offs and reversals, the aging table, Send to Factor, and what LEGACY means.
 - [AP — Carrier Bills and Payments](ap-carrier-bills-and-payments.md) — the AP ladder and who moves each rung, why own-fleet legs are settled through driver pay, recording a carrier's bill and the charge freeze, the approval gate and its overrides, quick pay, paying a carrier with allocations, credits and reversals, factored carriers, the remittance advice, the AP aging, and how the Vendor AP Queue differs.
+- [Quotes and Lane Rates](quotes-and-lane-rates.md) — the quote ladder and whose move each rung is, pricing warnings, the public accept/counter/decline link and why it works once per round, counters and conversion, carrier offers on a load, the lane history behind a price, expiry and the sweep, and the Quotes & offers settings.
 
 ## Article front-matter
 

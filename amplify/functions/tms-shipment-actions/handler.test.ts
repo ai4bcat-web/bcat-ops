@@ -10,6 +10,9 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb'
+// The rule the public offer page shows a carrier, used here to answer a link the
+// way a carrier would rather than by hard-coding the number we hope is on it.
+import { ourOfferCents } from '../../../src/lib/quotes'
 
 type Row = Record<string, unknown>
 
@@ -47,6 +50,11 @@ const TABLES = {
   shipmentDocument: 'ShipmentDocument-test',
   driverSubmission: 'DriverSubmission-test',
   driverSubmissionDoc: 'DriverSubmissionDoc-test',
+  quote: 'Quote-test',
+  laneSample: 'LaneRateSample-test',
+  carrierContact: 'CarrierContact-test',
+  division: 'Division-test',
+  notice: 'ShipmentNotice-test',
 }
 
 const store = vi.hoisted(() => {
@@ -67,6 +75,11 @@ const store = vi.hoisted(() => {
   process.env.SHIPMENT_DOCUMENT_TABLE_NAME = 'ShipmentDocument-test'
   process.env.DRIVER_SUBMISSION_TABLE_NAME = 'DriverSubmission-test'
   process.env.DRIVER_SUBMISSION_DOC_TABLE_NAME = 'DriverSubmissionDoc-test'
+  process.env.QUOTE_TABLE_NAME = 'Quote-test'
+  process.env.LANE_RATE_SAMPLE_TABLE_NAME = 'LaneRateSample-test'
+  process.env.CARRIER_CONTACT_TABLE_NAME = 'CarrierContact-test'
+  process.env.DIVISION_TABLE_NAME = 'Division-test'
+  process.env.SHIPMENT_NOTICE_TABLE_NAME = 'ShipmentNotice-test'
   process.env.BUCKET_NAME = 'bcat-test-bucket'
   process.env.PORTAL_ORIGIN = 'https://portal.test'
   process.env.AMPLIFY_DATA_DEFAULT_NAME = 'amplifyData'
@@ -80,6 +93,38 @@ function table(name: string): Map<string, Row> {
     store.set(name, t)
   }
   return t
+}
+
+/**
+ * The GSI hash keys of every table this router writes (`amplify/data/resource.ts`).
+ *
+ * DynamoDB refuses an item that carries a NULL on one of these — `Type mismatch
+ * for Index Key …` — and refuses it only in production, where the indexes exist.
+ * A Map does not, which is how a revert that SET `loadId: null` passed its test and
+ * then stranded a quote at WON on dev. The engine enforces it here instead.
+ */
+const INDEX_HASH_KEYS: Record<string, readonly string[]> = {
+  [TABLES.shipment]: ['number', 'status', 'customerId', 'pickupMonth'],
+  [TABLES.order]: ['shipmentId', 'customerId', 'arStatus'],
+  [TABLES.load]: ['customerId', 'shipmentId', 'status', 'checkCallOpen'],
+  [TABLES.carrier]: ['loadId', 'shipmentId', 'carrierId', 'apOpen'],
+  [TABLES.checkCall]: ['loadId', 'shipmentId', 'incidentOpen'],
+  [TABLES.notice]: ['shipmentId', 'loadId'],
+  [TABLES.shipmentDocument]: ['shipmentId', 'reviewStatus'],
+  [TABLES.carrierDirectory]: ['normalizedName', 'status', 'mcNumber', 'dotNumber'],
+  [TABLES.carrierContact]: ['carrierId'],
+  [TABLES.carrierDoc]: ['carrierId'],
+  [TABLES.quote]: ['customerId', 'loadId', 'quoteOpen', 'quoteMonth', 'linkToken'],
+  [TABLES.laneSample]: ['laneKey', 'laneKey3'],
+}
+
+/** DynamoDB's own refusal, in its own words, before the item reaches the table. */
+function assertIndexKeys(tableName: string, item: Row): void {
+  for (const key of INDEX_HASH_KEYS[tableName] ?? []) {
+    if (key in item && item[key] === null) {
+      throw new Error(`ValidationException: Type mismatch for Index Key ${key} Expected: S Actual: NULL`)
+    }
+  }
 }
 
 class ConditionalCheckFailed extends Error {
@@ -113,6 +158,59 @@ function updateClauses(expression: string): Record<string, string> {
   return clauses
 }
 
+/**
+ * One term of a condition expression, against the row as it stands.
+ *
+ * A `#name` resolves through ExpressionAttributeNames, a `:token` through the
+ * values, and a bare word is the attribute itself — which is how
+ * `attribute_not_exists(id)` and step H's `#casStatus IN (…)` both read.
+ */
+function termHolds(term: string, existing: Row | null, values: Row, names: Record<string, string>): boolean {
+  const read = (token: string): unknown =>
+    token.startsWith(':') ? values[token] : existing?.[token.startsWith('#') ? names[token] : token]
+
+  const exists = /^attribute_(not_)?exists\(([#\w]+)\)$/.exec(term)
+  if (exists) {
+    const present = read(exists[2]) != null
+    return exists[1] ? !present : present
+  }
+  const inList = /^([#\w]+)\s+IN\s+\(([^)]*)\)$/.exec(term)
+  if (inList) {
+    const actual = read(inList[1])
+    return inList[2].split(',').some((token) => read(token.trim()) === actual)
+  }
+  const compare = /^([#\w]+)\s*(<>|<=|>=|=|<|>)\s*([:#\w]+)$/.exec(term)
+  if (compare) {
+    const left = read(compare[1])
+    const right = read(compare[3])
+    switch (compare[2]) {
+      case '=': return left === right
+      case '<>': return left !== right
+      case '<': return String(left ?? '') < String(right ?? '')
+      case '>': return String(left ?? '') > String(right ?? '')
+      case '<=': return String(left ?? '') <= String(right ?? '')
+      default: return String(left ?? '') >= String(right ?? '')
+    }
+  }
+  // A condition the engine cannot read is a test that cannot tell a guarded write
+  // from an unguarded one. Fail loudly rather than wave it through.
+  throw new Error(`Unhandled condition term: ${term}`)
+}
+
+/** The AND-joined terms of a condition, with the `updatedAt` CAS read whole. */
+function conditionHolds(
+  expression: string | undefined,
+  existing: Row | null,
+  values: Row,
+  names: Record<string, string>,
+): boolean {
+  if (!expression) return true
+  if (expression.includes('casExpectedUpdatedAt')) {
+    return String(values[':casExpectedUpdatedAt'] ?? '') === String(existing?.updatedAt ?? '')
+  }
+  return expression.split(' AND ').every((term) => termHolds(term.trim(), existing, values, names))
+}
+
 /** Apply the `SET #a = :a, …`, `ADD counter :one` and `REMOVE #a, #b` shapes. */
 function applyUpdate(spec: UpdateSpec): Row {
   const t = table(spec.TableName)
@@ -124,16 +222,8 @@ function applyUpdate(spec: UpdateSpec): Row {
   const names = spec.ExpressionAttributeNames ?? {}
   const resolve = (token: string): string => (token.startsWith('#') ? names[token] : token)
 
-  if (spec.ConditionExpression?.includes('casExpectedUpdatedAt')) {
-    const expected = values[':casExpectedUpdatedAt']
-    const actual = existing?.updatedAt ?? ''
-    if (String(expected ?? '') !== String(actual ?? '')) {
-      throw new ConditionalCheckFailed(`CAS on ${spec.TableName}/${key.id}`)
-    }
-  }
-  const absent = /^attribute_not_exists\((\w+)\)$/.exec(spec.ConditionExpression ?? '')
-  if (absent && existing?.[absent[1]] != null) {
-    throw new ConditionalCheckFailed(`${absent[1]} already set on ${spec.TableName}/${key.id}`)
+  if (!conditionHolds(spec.ConditionExpression, existing, values, names)) {
+    throw new ConditionalCheckFailed(`${spec.ConditionExpression} on ${spec.TableName}/${key.id}`)
   }
 
   const next: Row = { ...(existing ?? { id: key.id }) }
@@ -164,6 +254,7 @@ function applyUpdate(spec: UpdateSpec): Row {
       delete next[resolve(token.trim())]
     }
   }
+  assertIndexKeys(spec.TableName, next)
   t.set(key.id, next)
   return next
 }
@@ -256,8 +347,10 @@ function runCommand(cmd: MockCommand): unknown {
   const input = cmd.input
   switch (cmd.__type) {
     case 'Get': {
-      const key = unmarshall(input.Key as never) as { id: string }
-      const item = table(String(input.TableName)).get(key.id)
+      // `Division` is identified by `key`, every other model here by `id`; a GetItem
+      // that keys a division on `id` is a schema mismatch the real table refuses.
+      const key = unmarshall(input.Key as never) as { id?: string; key?: string }
+      const item = table(String(input.TableName)).get(String(key.id ?? key.key))
       return { Item: item ? marshall(item, { removeUndefinedValues: true }) : undefined }
     }
     case 'BatchGet': {
@@ -286,6 +379,7 @@ function runCommand(cmd: MockCommand): unknown {
       if (input.ConditionExpression === 'attribute_not_exists(id)' && t.has(String(item.id))) {
         throw new ConditionalCheckFailed(`${String(input.TableName)}/${String(item.id)} already exists`)
       }
+      assertIndexKeys(String(input.TableName), item)
       t.set(String(item.id), item)
       return {}
     }
@@ -309,6 +403,7 @@ function runCommand(cmd: MockCommand): unknown {
             if (put.ConditionExpression === 'attribute_not_exists(id)' && t.has(String(item.id))) {
               throw new ConditionalCheckFailed(`${put.TableName}/${String(item.id)} already exists`)
             }
+            assertIndexKeys(put.TableName, item)
             t.set(String(item.id), item)
           } else if (entry.Update) {
             applyUpdate(entry.Update as unknown as UpdateSpec)
@@ -3230,6 +3325,1143 @@ describe('BACKFILL_SHIPMENT', () => {
     await expect(
       call('BACKFILL_SHIPMENT', { loadIds: new Array(51).fill('lod-legacy') }, ADMIN),
     ).rejects.toThrow(/at most 50/)
+  })
+})
+
+// ── Quotes, offers and lane history (step H) ─────────────────────────────────
+
+const QUOTER = {
+  sub: 'sub-quote',
+  username: 'quoter',
+  claims: { email: 'quotes@bcatcorp.com', 'cognito:groups': ['page-quotes'] },
+}
+
+/** One priced customer line: $2,500 of line haul, which is the quote's whole number. */
+const QUOTE_LINES = [{ side: 'CUSTOMER', code: 'LINEHAUL', calculatedBy: 'FLAT', rateCents: 250_000, count: 1 }]
+
+function quoteRow(id: string): Row {
+  return table(TABLES.quote).get(id)!
+}
+
+function quotesOf(): Row[] {
+  return [...table(TABLES.quote).values()]
+}
+
+async function newQuote(input: Row = {}, identity: unknown = QUOTER): Promise<Row> {
+  const saved = (await call('SAVE_QUOTE', {
+    customerId: 'cus-1',
+    contactEmail: 'traffic@batory.test',
+    stops: [PICKUP, DELIVERY],
+    equipmentType: "53' VAN",
+    mode: 'FTL',
+    lines: QUOTE_LINES,
+    ...input,
+  }, identity)) as { quote: Row }
+  return saved.quote
+}
+
+/** Save and send, which is the only way a quote ever gets a link. */
+async function sentQuote(input: Row = {}, identity: unknown = QUOTER): Promise<Row> {
+  const quote = await newQuote(input, identity)
+  const sent = (await call('SEND_QUOTE', {
+    quoteId: quote.id,
+    expectedVersion: quote.version,
+    to: ['traffic@batory.test'],
+  }, identity)) as { quote: Row }
+  return sent.quote
+}
+
+/** A carrier with its authority, its insurance and its paperwork: no findings at all. */
+function seedBookableCarrier(id = 'car-1', extra: Row = {}): void {
+  table(TABLES.carrierDirectory).set(id, {
+    id,
+    __typename: 'Carrier',
+    name: id === 'car-1' ? 'SWIFT TRANSPORTATION' : 'KNIGHT REFRIGERATED',
+    type: 'TL',
+    status: 'ACTIVE',
+    authorityStatus: 'ACTIVE',
+    mcNumber: '123456',
+    dispatcherEmail: `dispatch@${id}.test`,
+    paymentTermsDays: 30,
+    insurancePolicies: [
+      { id: 'ins-1', type: 'AUTO_LIABILITY', limitCents: 100_000_00, expiresAt: '2030-01-01T00:00:00.000Z' },
+      { id: 'ins-2', type: 'CARGO', limitCents: 100_000_00, expiresAt: '2030-01-01T00:00:00.000Z' },
+    ],
+    createdBy: 'admin@bcatcorp.com',
+    updatedBy: 'admin@bcatcorp.com',
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+    ...extra,
+  })
+  for (const type of ['COI_CARGO', 'COI_AUTO', 'W9', 'CARRIER_AGREEMENT']) {
+    table(TABLES.carrierDoc).set(`cdoc-${id}-${type}`, {
+      id: `cdoc-${id}-${type}`,
+      __typename: 'CarrierDocument',
+      carrierId: id,
+      type,
+      name: `${type}.pdf`,
+      s3Key: `carrier-docs/${id}/${type}.pdf`,
+      contentType: 'application/pdf',
+      sizeBytes: 1024,
+      source: 'UPLOAD',
+      uploadedBy: 'admin@bcatcorp.com',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    })
+  }
+}
+
+/** A submitted shipment with one sourcing leg — what an offer request is about. */
+async function sourcingLoad(): Promise<{ shipmentId: string; loadId: string; orderId: string }> {
+  const ids = await createDraft()
+  await saveForm(ids.shipmentId)
+  await call('SUBMIT_ORDER', {
+    shipmentId: ids.shipmentId,
+    expectedUpdatedAt: table(TABLES.shipment).get(ids.shipmentId)!.updatedAt,
+    order: { equipmentType: "53' VAN" },
+    stops: [PICKUP, DELIVERY],
+  })
+  return ids
+}
+
+describe('SAVE_QUOTE', () => {
+  it('mints the number once on create and the next one on the next quote', async () => {
+    const first = await newQuote()
+    expect(first.id).toBe('Q000001')
+    expect(first).toMatchObject({
+      side: 'SELL',
+      status: 'DRAFT',
+      quoteOpen: 'OPEN',
+      amountCents: 250_000,
+      rounds: 0,
+      version: 1,
+      laneKey: 'CHICAGO|IL>KANSAS CITY|MO',
+    })
+    // The composite open-board index needs both keys, so an unsent quote carries a
+    // clock that never strikes rather than none at all.
+    expect(first.expiresAt).toBe('9999-12-31T23:59:59.999Z')
+    expect(first.linkToken).toBeUndefined()
+
+    // An edit is the same row, the same number and no visit to the counter.
+    await call('SAVE_QUOTE', { quoteId: 'Q000001', expectedVersion: 1, miles: 510 }, QUOTER)
+    expect(quotesOf()).toHaveLength(1)
+    expect(quoteRow('Q000001')).toMatchObject({ miles: 510, version: 2 })
+    expect(table(TABLES.settings).get('default')!.nextQuoteNumber).toBe(1)
+
+    expect((await newQuote()).id).toBe('Q000002')
+  })
+
+  it('lands an intake at REQUESTED instead of DRAFT', async () => {
+    expect((await newQuote({ intake: true })).status).toBe('REQUESTED')
+  })
+
+  it('carries no customerId at all on a quote nobody has named a customer for', async () => {
+    // An intake off the e-mail agent or a prospect somebody is pricing blind: a
+    // supported quote, and `customerId` is a GSI hash key, so it is absent rather
+    // than NULL — on the create, on the edit after it and on a duplicate of it.
+    const intake = (await call('SAVE_QUOTE', {
+      intake: true,
+      contactEmail: 'traffic@prospect.test',
+      stops: [PICKUP, DELIVERY],
+      lines: QUOTE_LINES,
+    }, QUOTER)) as { quote: Row }
+    expect(intake.quote.status).toBe('REQUESTED')
+    expect(intake.quote.customerId).toBeUndefined()
+    expect(quoteRow('Q000001').customerId).toBeUndefined()
+
+    await call('SAVE_QUOTE', { quoteId: 'Q000001', expectedVersion: 1, miles: 510 }, QUOTER)
+    expect(quoteRow('Q000001')).toMatchObject({ miles: 510, version: 2 })
+    expect(quoteRow('Q000001').customerId).toBeUndefined()
+
+    const copied = (await call('DUPLICATE_QUOTE', { quoteId: 'Q000001' }, QUOTER)) as { quotes: Row[] }
+    expect(copied.quotes[0].customerId).toBeUndefined()
+    expect(quoteRow(String(copied.quotes[0].id)).customerId).toBeUndefined()
+  })
+
+  it('refuses an edit once the number has gone out', async () => {
+    const quote = await sentQuote()
+    await expect(
+      call('SAVE_QUOTE', { quoteId: quote.id, expectedVersion: quote.version, miles: 10 }, QUOTER),
+    ).rejects.toThrow(/QUOTED quote can no longer be edited/)
+  })
+
+  it('refuses an edit against a stale version', async () => {
+    const quote = await newQuote()
+    await expect(
+      call('SAVE_QUOTE', { quoteId: quote.id, expectedVersion: 9, miles: 10 }, QUOTER),
+    ).rejects.toThrow(/changed by someone else/)
+  })
+})
+
+describe('SEND_QUOTE', () => {
+  it('writes QUOTED, the token, the clock and the lead stage in one go', async () => {
+    seedCustomer({ status: 'NEW' })
+    const quote = await newQuote()
+    const before = Date.now()
+    const result = (await call('SEND_QUOTE', {
+      quoteId: quote.id,
+      expectedVersion: quote.version,
+      to: ['traffic@batory.test'],
+    }, QUOTER)) as { quote: Row; link: string; sent: boolean; subject: string; body: string }
+
+    const row = quoteRow(String(quote.id))
+    expect(row.status).toBe('QUOTED')
+    expect(String(row.linkToken)).toMatch(/^[A-Za-z0-9_-]{32}$/)
+    expect(row.linkVersion).toBe(1)
+    expect(row.sendCount).toBe(1)
+    expect(row.sentTo).toBe('traffic@batory.test')
+    // The customer's own hours are unset, so the org's 24 apply.
+    const hours = (Date.parse(String(row.expiresAt)) - before) / 3_600_000
+    expect(hours).toBeGreaterThan(23.9)
+    expect(hours).toBeLessThan(24.1)
+
+    expect(result.sent).toBe(true)
+    expect(result.link).toBe(`https://portal.test/quote/${String(row.linkToken)}`)
+    expect(result.body).toContain(result.link)
+    expect(row.lastSendStatus).toBe('SENT')
+    // A lead that has been quoted is no longer merely contacted.
+    expect(table(TABLES.customer).get('cus-1')!.status).toBe('QUOTED')
+  })
+
+  it('keeps the token and reports the failure when SES refuses', async () => {
+    sesSend.mockRejectedValueOnce(new Error('AccessDenied'))
+    const quote = await newQuote()
+    const result = (await call('SEND_QUOTE', {
+      quoteId: quote.id,
+      expectedVersion: quote.version,
+      to: ['traffic@batory.test'],
+    }, QUOTER)) as { sent: boolean; link: string }
+
+    expect(result.sent).toBe(false)
+    expect(result.link).toContain('/quote/')
+    const row = quoteRow(String(quote.id))
+    expect(row.status).toBe('QUOTED')
+    expect(row.linkToken).toBeTruthy()
+    expect(row.lastSendStatus).toBe('NOT_SENT')
+  })
+
+  it('leaves the lead stage alone once the customer is active', async () => {
+    const quote = await sentQuote()
+    expect(quoteRow(String(quote.id)).status).toBe('QUOTED')
+    expect(table(TABLES.customer).get('cus-1')!.status).toBe('ACTIVE')
+  })
+
+  it('keeps the buy target an operator typed through the send and the counter', async () => {
+    // The customer's 2,000 bps default would price the target at $2,000; the
+    // operator decided $1,900 is what this one may be bought for, and a re-price
+    // of what we sell has no opinion about that.
+    const quote = await newQuote({ targetBuyCents: 190_000, topSpendCents: 205_000 })
+    expect(quote).toMatchObject({ targetBuyCents: 190_000, topSpendCents: 205_000 })
+
+    await call('SEND_QUOTE', {
+      quoteId: quote.id, expectedVersion: quote.version, to: ['traffic@batory.test'],
+    }, QUOTER)
+    expect(quoteRow(String(quote.id))).toMatchObject({ targetBuyCents: 190_000, topSpendCents: 205_000 })
+
+    // Their counter, then ours: the override survives that re-price too.
+    table(TABLES.quote).set(String(quote.id), {
+      ...quoteRow(String(quote.id)), status: 'RECEIVED_COUNTER', counterCents: 230_000, counterBy: 'THEM',
+    })
+    await call('COUNTER_QUOTE', { quoteId: quote.id, amountCents: 245_000 }, QUOTER)
+    expect(quoteRow(String(quote.id))).toMatchObject({ targetBuyCents: 190_000, topSpendCents: 205_000 })
+  })
+
+  it('refuses to send a quote that has already been won', async () => {
+    const quote = await sentQuote()
+    await call('CONVERT_QUOTE', { quoteId: quote.id, expectedVersion: quoteRow(String(quote.id)).version }, QUOTER)
+    await expect(
+      call('SEND_QUOTE', { quoteId: quote.id, to: ['traffic@batory.test'] }, QUOTER),
+    ).rejects.toThrow(/WON quote cannot be sent/)
+  })
+
+  it('refuses a below-floor send for a rep and allows it for an admin who acknowledges', async () => {
+    // $2,500 sold against a $2,400 buy is 400 bps, under the 1,500 bps floor.
+    const belowFloor = [
+      ...QUOTE_LINES,
+      { side: 'CARRIER', code: 'LINEHAUL', calculatedBy: 'FLAT', rateCents: 240_000, count: 1 },
+    ]
+    const quote = await newQuote({ lines: belowFloor })
+    const send = (identity: unknown, acknowledgeWarnings?: string[]): Promise<Row> =>
+      call('SEND_QUOTE', {
+        quoteId: quote.id,
+        to: ['traffic@batory.test'],
+        ...(acknowledgeWarnings ? { acknowledgeWarnings } : {}),
+      }, identity)
+
+    await expect(send(QUOTER)).rejects.toThrow(/Acknowledge these before sending/)
+    // Ticking a finding nobody but an admin may overrule does not make it theirs.
+    await expect(send(QUOTER, ['BELOW_MARGIN_FLOOR'])).rejects.toThrow(/Only an admin can send/)
+    expect(quoteRow(String(quote.id)).status).toBe('DRAFT')
+
+    await send(ADMIN, ['BELOW_MARGIN_FLOOR'])
+    const row = quoteRow(String(quote.id))
+    expect(row.status).toBe('QUOTED')
+    expect(row.pricingWarnings).toEqual(['BELOW_MARGIN_FLOOR'])
+  })
+})
+
+describe('COUNTER_QUOTE and ACCEPT_COUNTER', () => {
+  /** What the public `respond` leaves behind: their number, and no token. */
+  function theyCountered(id: string, counterCents: number): void {
+    const row = quoteRow(id)
+    delete row.linkToken
+    table(TABLES.quote).set(id, {
+      ...row,
+      status: 'RECEIVED_COUNTER',
+      counterCents,
+      counterBy: 'THEM',
+      response: 'COUNTERED',
+    })
+  }
+
+  it('rotates the token and counts the round', async () => {
+    const quote = await sentQuote()
+    const firstToken = String(quoteRow(String(quote.id)).linkToken)
+    theyCountered(String(quote.id), 230_000)
+
+    await call('COUNTER_QUOTE', {
+      quoteId: quote.id,
+      amountCents: 245_000,
+      to: ['traffic@batory.test'],
+    }, QUOTER)
+
+    const row = quoteRow(String(quote.id))
+    expect(row.status).toBe('SENT_COUNTER')
+    expect(row.amountCents).toBe(245_000)
+    expect(row.rounds).toBe(1)
+    expect(row.linkVersion).toBe(2)
+    expect(String(row.linkToken)).toMatch(/^[A-Za-z0-9_-]{32}$/)
+    expect(row.linkToken).not.toBe(firstToken)
+  })
+
+  it('refuses to counter a quote nobody has answered', async () => {
+    const quote = await sentQuote()
+    await expect(
+      call('COUNTER_QUOTE', { quoteId: quote.id, amountCents: 245_000 }, QUOTER),
+    ).rejects.toThrow(/has nothing to counter/)
+  })
+
+  it('refuses to accept a carrier\'s counter, which is money we pay', async () => {
+    const { loadId } = await sourcingLoad()
+    seedBookableCarrier()
+    const logged = (await call('LOG_OFFER', { loadId, carrierId: 'car-1', amountCents: 190_000 })) as { quote: Row }
+    const quoteId = String(logged.quote.id)
+    table(TABLES.quote).set(quoteId, {
+      ...quoteRow(quoteId), status: 'RECEIVED_COUNTER', counterCents: 182_500, counterBy: 'THEM',
+    })
+
+    await expect(
+      call('ACCEPT_COUNTER', { quoteId }, QUOTER),
+    ).rejects.toThrow(/Use ACCEPT_OFFER to book a carrier counter/)
+    // No invented CUSTOMER line, and the offer is still the carrier's to answer.
+    expect(quoteRow(quoteId)).toMatchObject({ status: 'RECEIVED_COUNTER', amountCents: 190_000 })
+  })
+
+  it('absorbs their number into the line haul so the lines still sum to it', async () => {
+    const withFuel = [
+      ...QUOTE_LINES,
+      { side: 'CUSTOMER', code: 'FSC', calculatedBy: 'PERCENT', rateCents: 1_500, count: 1 },
+    ]
+    const quote = await sentQuote({ lines: withFuel })
+    expect(quoteRow(String(quote.id)).amountCents).toBe(287_500)
+    theyCountered(String(quote.id), 230_000)
+
+    await call('ACCEPT_COUNTER', { quoteId: quote.id }, QUOTER)
+
+    const row = quoteRow(String(quote.id))
+    expect(row.status).toBe('RECEIVED_REPLY')
+    expect(row.acceptedVia).toBe('EMAIL')
+    expect(row.amountCents).toBe(230_000)
+    expect(row.linkToken).toBeUndefined()
+    // Only the line haul moved; the fuel line still rides on it at 15%.
+    const lines = row.lines as { code: string; rateCents: number }[]
+    const linehaul = lines.find((line) => line.code === 'LINEHAUL')!.rateCents
+    expect(lines.find((line) => line.code === 'FSC')!.rateCents).toBe(1_500)
+    expect(linehaul + Math.round((linehaul * 1_500) / 10_000)).toBe(230_000)
+  })
+})
+
+describe('quote rungs that close and reopen', () => {
+  it('marks a quote lost and takes it off the open board', async () => {
+    const quote = await sentQuote()
+    await call('MARK_QUOTE_LOST', { quoteId: quote.id, reason: 'TOO_HIGH', note: 'Beat by $200' }, QUOTER)
+
+    const row = quoteRow(String(quote.id))
+    expect(row).toMatchObject({ status: 'LOST', lostReason: 'TOO_HIGH', lostNote: 'Beat by $200' })
+    expect(row.quoteOpen).toBeUndefined()
+    expect(row.linkToken).toBeUndefined()
+  })
+
+  it('restores a lost quote to QUOTED without resurrecting its link', async () => {
+    const quote = await sentQuote()
+    const token = quoteRow(String(quote.id)).linkToken
+    await call('MARK_QUOTE_LOST', { quoteId: quote.id, reason: 'TOO_SLOW' }, QUOTER)
+    await call('RESTORE_QUOTE', { quoteId: quote.id }, QUOTER)
+
+    const row = quoteRow(String(quote.id))
+    expect(row).toMatchObject({ status: 'QUOTED', quoteOpen: 'OPEN', lostReason: null })
+    expect(row.linkToken).toBeUndefined()
+    expect(row.linkToken).not.toBe(token)
+    expect(row.expiresAt).toBe('9999-12-31T23:59:59.999Z')
+  })
+
+  it('refuses to close a quote twice', async () => {
+    const quote = await newQuote()
+    await call('CANCEL_QUOTE', { quoteId: quote.id }, QUOTER)
+    await expect(call('CANCEL_QUOTE', { quoteId: quote.id }, QUOTER)).rejects.toThrow(/already CANCELED/)
+  })
+})
+
+describe('SWEEP_EXPIRED_QUOTES', () => {
+  it('expires only the lapsed sent quotes, and says so once', async () => {
+    const lapsed = await sentQuote()
+    const draft = await newQuote()
+    const live = await sentQuote()
+    table(TABLES.quote).set(String(lapsed.id), {
+      ...quoteRow(String(lapsed.id)),
+      expiresAt: '2020-01-01T00:00:00.000Z',
+    })
+
+    expect(await call('SWEEP_EXPIRED_QUOTES', {}, QUOTER)).toEqual({ expired: 1 })
+    const row = quoteRow(String(lapsed.id))
+    expect(row).toMatchObject({ status: 'LOST', lostReason: 'EXPIRED' })
+    expect(row.quoteOpen).toBeUndefined()
+    expect(row.linkToken).toBeUndefined()
+    // A draft's never-striking clock is not a lapsed one, and a live quote is live.
+    expect(quoteRow(String(draft.id)).status).toBe('DRAFT')
+    expect(quoteRow(String(live.id)).status).toBe('QUOTED')
+
+    // Idempotent: the second sweep finds nothing left to close.
+    expect(await call('SWEEP_EXPIRED_QUOTES', {}, QUOTER)).toEqual({ expired: 0 })
+  })
+
+  it('loses the race to a customer who answered, rather than overwriting them', async () => {
+    const quote = await sentQuote()
+    table(TABLES.quote).set(String(quote.id), {
+      ...quoteRow(String(quote.id)),
+      expiresAt: '2020-01-01T00:00:00.000Z',
+    })
+    // The public `respond` lands in the window between the sweep's Query and its
+    // write, which is exactly what the update's condition exists for: the sweep's
+    // own in-memory filter has already decided this row is expirable.
+    send.mockImplementation(async (cmd: MockCommand) => {
+      const result = runCommand(cmd)
+      if (cmd.__type === 'Query' && String(cmd.input.TableName) === TABLES.quote) {
+        table(TABLES.quote).set(String(quote.id), {
+          ...quoteRow(String(quote.id)),
+          status: 'RECEIVED_REPLY',
+          response: 'ACCEPTED',
+        })
+      }
+      return result
+    })
+
+    expect(await call('SWEEP_EXPIRED_QUOTES', {}, QUOTER)).toEqual({ expired: 0 })
+    const row = quoteRow(String(quote.id))
+    expect(row).toMatchObject({ status: 'RECEIVED_REPLY', response: 'ACCEPTED' })
+    expect(row.lostReason).toBeUndefined()
+  })
+})
+
+describe('DUPLICATE_QUOTE', () => {
+  it('copies the freight without the conversation and scores the exposure', async () => {
+    const quote = await sentQuote()
+    const result = (await call('DUPLICATE_QUOTE', {
+      quoteId: quote.id,
+      count: 2,
+      pickupAppts: ['2026-04-06T13:00:00.000Z'],
+    }, QUOTER)) as { quotes: Row[]; exposure: { projectedCents: number; creditLimitCents: number; overLimit: boolean } }
+
+    expect(result.quotes.map((q) => q.id)).toEqual(['Q000002', 'Q000003'])
+    for (const copy of result.quotes) {
+      expect(copy).toMatchObject({ status: 'DRAFT', quoteOpen: 'OPEN', duplicatedFromId: quote.id, rounds: 0 })
+      expect(copy.linkToken).toBeUndefined()
+    }
+    expect(result.quotes[0].pickupAppt).toBe('2026-04-06T13:00:00.000Z')
+    // Three open sell quotes at $2,500 against a $10,000 limit: a warning, not a block.
+    expect(result.exposure).toEqual({ projectedCents: 750_000, creditLimitCents: 1_000_000, overLimit: false })
+  })
+})
+
+describe('CONVERT_QUOTE', () => {
+  it('builds the shipment, stamps the order and wins the quote', async () => {
+    const sibling = await newQuote({ groupId: 'grp-1' })
+    const quote = await sentQuote({ groupId: 'grp-1' })
+    const result = (await call('CONVERT_QUOTE', {
+      quoteId: quote.id,
+      expectedVersion: quoteRow(String(quote.id)).version,
+      acceptedVia: 'PHONE',
+    }, QUOTER)) as { quote: Row; bundle: { shipment: Row; orders: Row[]; loads: Row[]; charges: Row[] } }
+
+    expect(result.bundle.shipment.status).toBe('OPEN')
+    expect(result.bundle.loads).toHaveLength(1)
+    expect(result.bundle.orders[0]).toMatchObject({
+      quoteId: quote.id,
+      quoteNumber: quote.id,
+      quoteAmountCents: 250_000,
+      revenueCents: 250_000,
+      rateType: 'SPOT',
+    })
+
+    const row = quoteRow(String(quote.id))
+    expect(row).toMatchObject({ status: 'WON', shipmentId: result.bundle.shipment.id, acceptedVia: 'PHONE' })
+    expect(row.wonAt).toBeTruthy()
+    expect(row.quoteOpen).toBeUndefined()
+    expect(row.linkToken).toBeUndefined()
+    // The rest of the round goes down with it: priced, so LOST rather than canceled.
+    const other = quoteRow(String(sibling.id))
+    expect(other.status).toBe('LOST')
+    expect(other.quoteOpen).toBeUndefined()
+  })
+
+  it('files the order and the leg under the division and rep the dialog chose', async () => {
+    // `Division` is keyed by `key`, which is what a load's `divisionKey` points at.
+    table(TABLES.division).set('IVAN_CARTAGE', {
+      key: 'IVAN_CARTAGE', name: 'Ivan Cartage', active: true,
+    })
+    seedCustomer({ defaultDivisionKey: 'BCAT_LOGISTICS' })
+    const quote = await sentQuote()
+
+    const result = (await call('CONVERT_QUOTE', {
+      quoteId: quote.id,
+      expectedVersion: quoteRow(String(quote.id)).version,
+      divisionKey: 'IVAN_CARTAGE',
+      customerRepId: 'rep-amanda',
+    }, QUOTER)) as { bundle: { orders: Row[]; loads: Row[] } }
+
+    expect(result.bundle.orders[0].customerRepId).toBe('rep-amanda')
+    // Not the customer's default, which is what the shipment was created with.
+    expect(result.bundle.loads[0].divisionKey).toBe('IVAN_CARTAGE')
+
+    const events = quoteRow(String(quote.id)).events as { kind: string; note?: string | null }[]
+    const won = events[events.length - 1]
+    expect(won).toMatchObject({ kind: 'WON' })
+    expect(String(won.note)).toContain('IVAN_CARTAGE')
+    expect(String(won.note)).toContain('rep-amanda')
+  })
+
+  it('refuses a division key that is not on the table', async () => {
+    const quote = await sentQuote()
+
+    await expect(
+      call('CONVERT_QUOTE', { quoteId: quote.id, divisionKey: 'NO_SUCH_DIVISION' }, QUOTER),
+    ).rejects.toThrow(/Unknown division: NO_SUCH_DIVISION/)
+    // Refused before anything was written: no shipment, and the quote is where it was.
+    expect(quoteRow(String(quote.id)).status).toBe('QUOTED')
+    expect([...table(TABLES.shipment).values()]).toHaveLength(0)
+  })
+
+  it('blocks on credit and leaves the quote where it was', async () => {
+    const quote = await sentQuote()
+    seedCustomer({ creditHoldFlag: true })
+
+    await expect(call('CONVERT_QUOTE', { quoteId: quote.id }, QUOTER)).rejects.toThrow(/credit hold/)
+    expect(quoteRow(String(quote.id)).status).toBe('QUOTED')
+    expect([...table(TABLES.shipment).values()]).toHaveLength(0)
+  })
+
+  it('refuses when the shipment no longer prices to the quoted number', async () => {
+    const quote = await sentQuote()
+    // What a charge code re-rated behind the quote's back looks like from here.
+    table(TABLES.quote).set(String(quote.id), { ...quoteRow(String(quote.id)), amountCents: 300_000 })
+
+    await expect(call('CONVERT_QUOTE', { quoteId: quote.id }, QUOTER)).rejects.toThrow(/re-price the quote first/)
+    expect(quoteRow(String(quote.id)).status).toBe('QUOTED')
+    // The half-made shipment does not stay on the board.
+    expect([...table(TABLES.shipment).values()].every((s) => s.deletedAt)).toBe(true)
+  })
+
+  it('leaves the quote untouched when the shipment cannot be created', async () => {
+    const quote = await sentQuote()
+    loadCreate.mockResolvedValueOnce({ data: null, errors: [{ message: 'Load create refused' }] })
+
+    await expect(call('CONVERT_QUOTE', { quoteId: quote.id }, QUOTER)).rejects.toThrow(/Load create/)
+    expect(quoteRow(String(quote.id))).toMatchObject({ status: 'QUOTED', quoteOpen: 'OPEN', version: 2 })
+    expect([...table(TABLES.order).values()]).toHaveLength(0)
+  })
+
+  it('refuses an expired quote', async () => {
+    const quote = await sentQuote()
+    table(TABLES.quote).set(String(quote.id), {
+      ...quoteRow(String(quote.id)),
+      expiresAt: '2020-01-01T00:00:00.000Z',
+    })
+    await expect(call('CONVERT_QUOTE', { quoteId: quote.id }, QUOTER)).rejects.toThrow(/expired/)
+  })
+})
+
+describe('REVERT_TO_QUOTE', () => {
+  async function converted(): Promise<{ quoteId: string; shipmentId: string; loadId: string }> {
+    const quote = await sentQuote()
+    const result = (await call('CONVERT_QUOTE', { quoteId: quote.id }, QUOTER)) as {
+      bundle: { shipment: Row; loads: Row[] }
+    }
+    return {
+      quoteId: String(quote.id),
+      shipmentId: String(result.bundle.shipment.id),
+      loadId: String(result.bundle.loads[0].id),
+    }
+  }
+
+  it('takes the shipment back and puts the quote at RECEIVED_REPLY', async () => {
+    const { quoteId, shipmentId } = await converted()
+    const result = (await call('REVERT_TO_QUOTE', { quoteId, reason: 'Customer moved it to next week' }, QUOTER)) as {
+      quote: Row
+    }
+
+    expect(result.quote).toMatchObject({ status: 'RECEIVED_REPLY', quoteOpen: 'OPEN', wonAt: null })
+    expect(table(TABLES.shipment).get(shipmentId)!.deletedAt).toBeTruthy()
+    // `loadId` is a GSI hash key: the way off a load is REMOVE, never SET null.
+    const row = quoteRow(quoteId)
+    expect(row.loadId).toBeUndefined()
+    expect(row.shipmentId).toBeUndefined()
+    expect(row.orderId).toBeUndefined()
+  })
+
+  it('refuses a shipment that has grown a second leg', async () => {
+    const { quoteId, shipmentId } = await converted()
+    const first = [...table(TABLES.load).values()].find((l) => l.shipmentId === shipmentId)!
+    table(TABLES.load).set('lod-second', { ...first, id: 'lod-second', loadNumber: '2' })
+
+    await expect(
+      call('REVERT_TO_QUOTE', { quoteId, reason: 'Customer moved it' }, QUOTER),
+    ).rejects.toThrow(/single-order, single-load/)
+    expect(quoteRow(quoteId).status).toBe('WON')
+  })
+
+  it('refuses while a carrier is on the load', async () => {
+    const { quoteId, loadId } = await converted()
+    seedBookableCarrier()
+    await call('BOOK_CARRIER', {
+      loadId,
+      expectedUpdatedAt: table(TABLES.load).get(loadId)!.updatedAt,
+      carrierId: 'car-1',
+      carrierRateCents: 180_000,
+    }, ADMIN)
+
+    await expect(
+      call('REVERT_TO_QUOTE', { quoteId, reason: 'Customer moved it' }, QUOTER),
+    ).rejects.toThrow(/remove them first/)
+    expect(quoteRow(quoteId).status).toBe('WON')
+  })
+
+  it('refuses once the order is invoiced', async () => {
+    const { shipmentId } = await converted()
+    const order = [...table(TABLES.order).values()].find((o) => o.shipmentId === shipmentId)!
+    table(TABLES.order).set(String(order.id), { ...order, arStatus: 'UNPAID', invoiceNumber: 'INV-1' })
+
+    await expect(
+      call('REVERT_TO_QUOTE', { shipmentId, reason: 'Customer moved it' }, QUOTER),
+    ).rejects.toThrow(/void the invoice first/)
+  })
+
+  it('refuses when the two ids name different things', async () => {
+    const { shipmentId } = await converted()
+    const other = await newQuote()
+    await expect(
+      call('REVERT_TO_QUOTE', { shipmentId, quoteId: other.id, reason: 'Wrong one' }, QUOTER),
+    ).rejects.toThrow(/not Q000002/)
+  })
+})
+
+describe('carrier offers', () => {
+  async function requested(loadId: string, input: Row = {}): Promise<Row[]> {
+    seedBookableCarrier('car-1')
+    seedBookableCarrier('car-2')
+    const result = (await call('REQUEST_OFFERS', {
+      loadId,
+      carrierIds: ['car-1', 'car-2'],
+      message: 'Dry van, drop trailer at origin',
+      ...input,
+    }, QUOTER)) as { offers: Row[]; sends: Row[]; groupId: string }
+    return result.offers
+  }
+
+  it('writes one row per carrier under one group, each with its own link', async () => {
+    const { loadId, shipmentId } = await sourcingLoad()
+    const before = Date.now()
+    const offers = await requested(loadId, { bookNowRateCents: 180_000 })
+
+    expect(offers).toHaveLength(2)
+    expect(new Set(offers.map((o) => o.groupId)).size).toBe(1)
+    expect(new Set(offers.map((o) => o.linkToken)).size).toBe(2)
+    for (const offer of offers) {
+      expect(offer).toMatchObject({
+        side: 'BUY',
+        status: 'REQUESTED',
+        quoteOpen: 'OPEN',
+        loadId,
+        shipmentId,
+        // The org shows the book-now number, so it is also what we are offering.
+        amountCents: 180_000,
+        bookNowRateCents: 180_000,
+        laneKey: 'CHICAGO|IL>KANSAS CITY|MO',
+      })
+      expect(String(offer.linkToken)).toMatch(/^[A-Za-z0-9_-]{32}$/)
+      // The pickup is already behind us, so the clock is the one-hour floor rather
+      // than a link that was dead the moment it was minted.
+      const expiresAt = Date.parse(String(offer.expiresAt))
+      expect(expiresAt).toBeGreaterThan(before)
+      expect(expiresAt).toBeLessThan(before + 2 * 3_600_000)
+    }
+
+    // One notice per send, addressed at the carrier's dispatch desk.
+    const notices = [...table(TABLES.notice).values()]
+    expect(notices).toHaveLength(2)
+    expect(notices[0]).toMatchObject({ kind: 'CARRIER_OFFER', status: 'SENT', loadId })
+    expect(notices.map((n) => n.to).sort()).toEqual(['dispatch@car-1.test', 'dispatch@car-2.test'])
+  })
+
+  it('names no number at all when the org hides the book-now rate', async () => {
+    seedSettings({ quoteOffersCarrierSeesBookNow: false })
+    const { loadId } = await sourcingLoad()
+    const offers = await requested(loadId, { bookNowRateCents: 180_000 })
+
+    for (const offer of offers) {
+      // Nothing for `quotePublicView` to print as our offer, and nothing for
+      // `planResponse` to let a carrier take: an open request names no price.
+      expect(offer.amountCents).toBe(0)
+      expect(offer.bookNowRateCents).toBeNull()
+      expect(ourOfferCents(quoteRow(String(offer.id)) as never)).toBe(0)
+    }
+  })
+
+  it('records the request on the shipment\'s notice log when SES refuses it', async () => {
+    // Dev: SES is denied, and an offer request that cannot be sent is still a
+    // request somebody made — it belongs on the load's notice log either way.
+    sesSend.mockRejectedValue(new Error('AccessDenied'))
+    const { loadId, shipmentId } = await sourcingLoad()
+    const offers = await requested(loadId)
+
+    const notices = [...table(TABLES.notice).values()]
+    expect(notices).toHaveLength(2)
+    for (const notice of notices) {
+      expect(notice).toMatchObject({ kind: 'CARRIER_OFFER', status: 'NOT_SENT', loadId, shipmentId })
+    }
+    expect(notices.map((n) => n.id).sort()).toEqual(offers.map((o) => `cof:${String(o.id)}`).sort())
+    expect(offers.every((o) => quoteRow(String(o.id)).lastSendStatus === 'NOT_SENT')).toBe(true)
+  })
+
+  it('prefers the carrier\'s dispatch contacts over the row\'s own address', async () => {
+    const { loadId } = await sourcingLoad()
+    table(TABLES.carrierContact).set('cct-1', {
+      id: 'cct-1',
+      __typename: 'CarrierContact',
+      carrierId: 'car-1',
+      name: 'Night dispatch',
+      types: ['DISPATCH'],
+      email: 'nights@car-1.test',
+      active: true,
+    })
+    const offers = await requested(loadId)
+    expect(offers.find((o) => o.carrierId === 'car-1')!.carrierEmail).toBe('nights@car-1.test')
+  })
+
+  it('refuses on a load that is already covered', async () => {
+    const { loadId } = await sourcingLoad()
+    seedBookableCarrier()
+    await call('BOOK_CARRIER', {
+      loadId,
+      expectedUpdatedAt: table(TABLES.load).get(loadId)!.updatedAt,
+      carrierId: 'car-1',
+      carrierRateCents: 180_000,
+    })
+    await expect(
+      call('REQUEST_OFFERS', { loadId, carrierIds: ['car-1'] }, QUOTER),
+    ).rejects.toThrow(/already has an active assignment/)
+  })
+
+  it('refuses on a load that is already on the road', async () => {
+    const { loadId } = await sourcingLoad()
+    seedBookableCarrier()
+    await call('BOOK_CARRIER', {
+      loadId,
+      expectedUpdatedAt: table(TABLES.load).get(loadId)!.updatedAt,
+      carrierId: 'car-1',
+      carrierRateCents: 180_000,
+    })
+    await call('REMOVE_LOAD_CARRIER', { loadCarrierId: [...table(TABLES.carrier).values()][0].id, outcome: 'BOUNCED', reason: 'GAVE_BACK' })
+    for (const status of ['BOOKED', 'DISPATCHED', 'LOADING']) {
+      await call('SET_LOAD_STATUS', { loadId, status })
+    }
+    await expect(
+      call('REQUEST_OFFERS', { loadId, carrierIds: ['car-1'] }, QUOTER),
+    ).rejects.toThrow(/already LOADING/)
+  })
+
+  it('logs a phone quote at QUOTED with no link at all', async () => {
+    const { loadId } = await sourcingLoad()
+    seedBookableCarrier()
+    const result = (await call('LOG_OFFER', {
+      loadId,
+      carrierId: 'car-1',
+      amountCents: 175_000,
+      note: 'Called in',
+    })) as { quote: Row }
+
+    expect(result.quote).toMatchObject({
+      side: 'BUY', status: 'QUOTED', amountCents: 175_000, acceptedVia: 'PHONE', quoteOpen: 'OPEN',
+    })
+    expect(result.quote.linkToken).toBeUndefined()
+    expect(result.quote.expiresAt).toBe('9999-12-31T23:59:59.999Z')
+  })
+
+  it('counters a carrier with a fresh token and one more round', async () => {
+    const { loadId } = await sourcingLoad()
+    seedBookableCarrier()
+    const logged = (await call('LOG_OFFER', { loadId, carrierId: 'car-1', amountCents: 190_000 })) as { quote: Row }
+
+    await call('COUNTER_OFFER', { quoteId: logged.quote.id, amountCents: 175_000 }, QUOTER)
+
+    // Our number is the counter; theirs stays the row's own, which is what every
+    // reader of a BUY row — ours, the public page's and the booking's — takes it as.
+    const row = quoteRow(String(logged.quote.id))
+    expect(row).toMatchObject({
+      status: 'SENT_COUNTER', amountCents: 190_000, counterCents: 175_000, counterBy: 'US', rounds: 1,
+    })
+    expect(String(row.linkToken)).toMatch(/^[A-Za-z0-9_-]{32}$/)
+  })
+
+  it('books the carrier at our counter once they take it, not at their ask', async () => {
+    const { loadId } = await sourcingLoad()
+    seedBookableCarrier()
+    const logged = (await call('LOG_OFFER', { loadId, carrierId: 'car-1', amountCents: 190_000 })) as { quote: Row }
+    const quoteId = String(logged.quote.id)
+    await call('COUNTER_OFFER', { quoteId, amountCents: 175_000 }, QUOTER)
+
+    // What the carrier's click on the public link leaves behind: the number that
+    // was on the table becomes the row's own, and nothing is booked yet.
+    const onTheTable = ourOfferCents(quoteRow(quoteId) as never)
+    table(TABLES.quote).set(quoteId, {
+      ...quoteRow(quoteId),
+      status: 'RECEIVED_REPLY',
+      amountCents: onTheTable,
+      response: 'ACCEPTED',
+      acceptedVia: 'LINK',
+    })
+
+    const result = (await call('ACCEPT_OFFER', {
+      quoteId,
+      expectedUpdatedAt: table(TABLES.load).get(loadId)!.updatedAt,
+    })) as { bundle: { loadCarriers: Row[] } }
+
+    expect(result.bundle.loadCarriers.find((c) => c.status === 'ACTIVE')!.carrierRateCents).toBe(175_000)
+    expect(quoteRow(quoteId)).toMatchObject({ status: 'WON', amountCents: 175_000 })
+  })
+
+  it('books a carrier counter at their number and records it on the row', async () => {
+    const { loadId } = await sourcingLoad()
+    seedBookableCarrier()
+    const logged = (await call('LOG_OFFER', { loadId, carrierId: 'car-1', amountCents: 190_000 })) as { quote: Row }
+    const quoteId = String(logged.quote.id)
+    await call('COUNTER_OFFER', { quoteId, amountCents: 175_000 }, QUOTER)
+    // Their answer to our counter: 182,500, which is the number we would be buying at.
+    table(TABLES.quote).set(quoteId, {
+      ...quoteRow(quoteId),
+      status: 'RECEIVED_COUNTER',
+      counterCents: 182_500,
+      counterBy: 'THEM',
+    })
+
+    const result = (await call('ACCEPT_OFFER', {
+      quoteId,
+      expectedUpdatedAt: table(TABLES.load).get(loadId)!.updatedAt,
+    })) as { bundle: { loadCarriers: Row[]; charges: Row[] } }
+
+    expect(result.bundle.loadCarriers.find((c) => c.status === 'ACTIVE')!.carrierRateCents).toBe(182_500)
+    const linehaul = result.bundle.charges.find((c) => c.side === 'CARRIER' && c.code === 'LINEHAUL')!
+    expect(linehaul.amountCents).toBe(182_500)
+    expect(quoteRow(quoteId)).toMatchObject({ status: 'WON', amountCents: 182_500 })
+  })
+
+  it('refuses to book a counter the carrier has not answered', async () => {
+    const { loadId } = await sourcingLoad()
+    seedBookableCarrier()
+    const logged = (await call('LOG_OFFER', { loadId, carrierId: 'car-1', amountCents: 190_000 })) as { quote: Row }
+    const quoteId = String(logged.quote.id)
+    await call('COUNTER_OFFER', { quoteId, amountCents: 175_000 }, QUOTER)
+
+    await expect(
+      call('ACCEPT_OFFER', { quoteId, expectedUpdatedAt: table(TABLES.load).get(loadId)!.updatedAt }),
+    ).rejects.toThrow(/has not answered our counter/)
+    expect(quoteRow(quoteId).status).toBe('SENT_COUNTER')
+
+    // Unless the dispatcher names the rate they agreed on the phone.
+    const result = (await call('ACCEPT_OFFER', {
+      quoteId,
+      carrierRateCents: 180_000,
+      expectedUpdatedAt: table(TABLES.load).get(loadId)!.updatedAt,
+    })) as { bundle: { loadCarriers: Row[] } }
+    expect(result.bundle.loadCarriers.find((c) => c.status === 'ACTIVE')!.carrierRateCents).toBe(180_000)
+    expect(quoteRow(quoteId)).toMatchObject({ status: 'WON', amountCents: 180_000 })
+  })
+
+  it('rejects an offer without touching the load', async () => {
+    const { loadId } = await sourcingLoad()
+    seedBookableCarrier()
+    const logged = (await call('LOG_OFFER', { loadId, carrierId: 'car-1', amountCents: 190_000 })) as { quote: Row }
+
+    await call('REJECT_OFFER', { quoteId: logged.quote.id, reason: 'TOO_HIGH' }, QUOTER)
+
+    const row = quoteRow(String(logged.quote.id))
+    expect(row).toMatchObject({ status: 'LOST', lostReason: 'TOO_HIGH' })
+    expect(row.quoteOpen).toBeUndefined()
+    expect(table(TABLES.load).get(loadId)!.status).toBe('SOURCING')
+  })
+
+  it('books the winner, names the offer on the assignment and closes the round', async () => {
+    const { loadId } = await sourcingLoad()
+    const offers = await requested(loadId)
+    const winner = offers.find((o) => o.carrierId === 'car-1')!
+    const loser = offers.find((o) => o.carrierId === 'car-2')!
+    // What the carrier's public reply leaves behind: their number, and no token.
+    table(TABLES.quote).set(String(winner.id), {
+      ...quoteRow(String(winner.id)), status: 'QUOTED', amountCents: 178_500,
+    })
+
+    const result = (await call('ACCEPT_OFFER', {
+      quoteId: winner.id,
+      expectedUpdatedAt: table(TABLES.load).get(loadId)!.updatedAt,
+    })) as { quote: Row; bundle: { loadCarriers: Row[] } }
+
+    const assignment = result.bundle.loadCarriers.find((c) => c.status === 'ACTIVE')!
+    expect(assignment).toMatchObject({ carrierId: 'car-1', carrierRateCents: 178_500, quoteId: winner.id })
+    expect(quoteRow(String(winner.id))).toMatchObject({ status: 'WON' })
+    expect(quoteRow(String(winner.id)).quoteOpen).toBeUndefined()
+    // The sibling nobody priced was never in the running: canceled, not lost.
+    expect(quoteRow(String(loser.id))).toMatchObject({ status: 'CANCELED', lostReason: null })
+    expect(table(TABLES.load).get(loadId)!.status).toBe('BOOKED')
+  })
+
+  it('surfaces the booking gate\'s refusal verbatim and books nothing', async () => {
+    const { loadId } = await sourcingLoad()
+    const offers = await requested(loadId)
+    const winner = offers[0]
+    table(TABLES.quote).set(String(winner.id), {
+      ...quoteRow(String(winner.id)), status: 'QUOTED', amountCents: 178_500,
+    })
+    seedBookableCarrier(String(winner.carrierId), { authorityStatus: 'INACTIVE', status: 'INACTIVE' })
+
+    await expect(
+      call('ACCEPT_OFFER', {
+        quoteId: winner.id,
+        expectedUpdatedAt: table(TABLES.load).get(loadId)!.updatedAt,
+      }),
+    ).rejects.toThrow(/cannot be booked/)
+    expect(quoteRow(String(winner.id)).status).toBe('QUOTED')
+    expect([...table(TABLES.carrier).values()]).toHaveLength(0)
+  })
+
+  it('cancels the open offers when the load is covered by a plain booking', async () => {
+    const { loadId } = await sourcingLoad()
+    const offers = await requested(loadId)
+    seedBookableCarrier()
+
+    await call('BOOK_CARRIER', {
+      loadId,
+      expectedUpdatedAt: table(TABLES.load).get(loadId)!.updatedAt,
+      carrierId: 'car-1',
+      carrierRateCents: 180_000,
+    })
+
+    for (const offer of offers) {
+      const row = quoteRow(String(offer.id))
+      expect(row.status).toBe('CANCELED')
+      expect(row.quoteOpen).toBeUndefined()
+      expect(row.linkToken).toBeUndefined()
+    }
+  })
+
+  it('cancels the open offers when our own truck takes the load', async () => {
+    const { loadId } = await sourcingLoad()
+    const offers = await requested(loadId)
+    table(TABLES.driver).set('drv-1', { id: 'drv-1', name: 'R. LOPEZ' })
+
+    await call('ASSIGN_ASSET', { loadId, driverId: 'drv-1', driverName: 'R. LOPEZ' })
+
+    expect(offers.every((offer) => quoteRow(String(offer.id)).status === 'CANCELED')).toBe(true)
+  })
+})
+
+describe('lane rate samples', () => {
+  async function delivered(): Promise<{ shipmentId: string; loadId: string }> {
+    const ids = await sourcingLoad()
+    seedBookableCarrier()
+    await call('BOOK_CARRIER', {
+      loadId: ids.loadId,
+      expectedUpdatedAt: table(TABLES.load).get(ids.loadId)!.updatedAt,
+      carrierId: 'car-1',
+      carrierRateCents: 180_000,
+    })
+    for (const status of ['DISPATCHED', 'LOADING', 'IN_TRANSIT', 'UNLOADING', 'DELIVERED']) {
+      await call('SET_LOAD_STATUS', { loadId: ids.loadId, status })
+    }
+    return ids
+  }
+
+  it('records the lane when a priced load delivers', async () => {
+    const { loadId, shipmentId } = await delivered()
+
+    const sample = table(TABLES.laneSample).get(`lrs:${loadId}`)!
+    expect(sample).toMatchObject({
+      laneKey: 'CHICAGO|IL>KANSAS CITY|MO',
+      loadId,
+      shipmentId,
+      customerId: 'cus-1',
+      carrierId: 'car-1',
+      assignmentKind: 'CARRIER',
+      revenueCents: 250_000,
+      costCents: 180_000,
+      profitCents: 70_000,
+      loadStatus: 'DELIVERED',
+      source: 'LOAD',
+      version: 1,
+    })
+    expect(sample.excluded).toBe(false)
+  })
+
+  it('still records the lane when the stops carry no ZIPs', async () => {
+    // `laneKey3` is the hash key of the zip3 index, and these stops have no ZIPs to
+    // build one from. The attribute comes off the item — a NULL there is refused by
+    // DynamoDB, and this module's catch-all would swallow the refusal, leaving the
+    // lane with no history at all.
+    const { loadId } = await delivered()
+
+    const sample = table(TABLES.laneSample).get(`lrs:${loadId}`)!
+    expect(sample.laneKey).toBe('CHICAGO|IL>KANSAS CITY|MO')
+    expect('laneKey3' in sample).toBe(false)
+  })
+
+  it('records nothing for a load with no financials to learn from', async () => {
+    const ids = await sourcingLoad()
+    table(TABLES.financials).delete(ids.loadId)
+    for (const status of ['BOOKED', 'DISPATCHED', 'LOADING', 'IN_TRANSIT', 'UNLOADING', 'DELIVERED']) {
+      await call('SET_LOAD_STATUS', { loadId: ids.loadId, status })
+    }
+    expect(table(TABLES.laneSample).get(`lrs:${ids.loadId}`)).toBeUndefined()
+  })
+
+  it('refreshes the sample when the delivered load is re-priced', async () => {
+    const { loadId, shipmentId } = await delivered()
+    const shipment = table(TABLES.shipment).get(shipmentId)!
+    const charges = [...table(TABLES.charge).values()].map((row) => ({
+      id: row.id,
+      side: row.side,
+      code: row.code,
+      calculatedBy: row.calculatedBy,
+      rateCents: row.code === 'LINEHAUL' && row.side === 'CUSTOMER' ? 265_000 : row.rateCents,
+      count: row.count,
+      loadId: row.loadId,
+      loadCarrierId: row.loadCarrierId,
+    }))
+
+    await call('RECALC_CHARGES', { shipmentId, expectedVersion: shipment.version, charges })
+
+    const sample = table(TABLES.laneSample).get(`lrs:${loadId}`)!
+    expect(sample.revenueCents).toBe(265_000)
+    expect(sample.version).toBe(2)
+  })
+
+  it('keeps the sample but stops counting it after a post-delivery TONU', async () => {
+    const { loadId } = await delivered()
+    const assignment = [...table(TABLES.carrier).values()].find((c) => c.status === 'ACTIVE')!
+
+    await call('REMOVE_LOAD_CARRIER', {
+      loadCarrierId: assignment.id,
+      outcome: 'TONU',
+      reason: 'CONSIGNEE_NOT_READY',
+    })
+
+    const sample = table(TABLES.laneSample).get(`lrs:${loadId}`)!
+    expect(sample.excluded).toBe(true)
+    expect(sample.revenueCents).toBe(250_000)
+  })
+
+  it('keeps the sample but stops counting it when the shipment is canceled', async () => {
+    const { loadId, shipmentId } = await delivered()
+    const shipment = table(TABLES.shipment).get(shipmentId)!
+
+    await call('SET_SHIPMENT_STATUS', {
+      shipmentId,
+      expectedUpdatedAt: shipment.updatedAt,
+      status: 'CANCELED',
+      reason: 'Customer never shipped it',
+    }, ADMIN)
+
+    expect(table(TABLES.laneSample).get(`lrs:${loadId}`)!.excluded).toBe(true)
+  })
+})
+
+describe('step H authorization', () => {
+  it('does not let the quote desk re-price a shipment', async () => {
+    await expect(
+      call('RECALC_CHARGES', { shipmentId: 'shp-1', expectedVersion: 1, charges: [] }, QUOTER),
+    ).rejects.toThrow(/requires owner, ADMIN, or page-loads/)
+  })
+
+  it('does not let the quote desk move a load', async () => {
+    await expect(
+      call('SET_LOAD_STATUS', { loadId: 'lod-1', status: 'DELIVERED' }, QUOTER),
+    ).rejects.toThrow(/requires owner, ADMIN, or page-loads/)
+  })
+
+  it('does not let dispatch send a customer a price', async () => {
+    await expect(
+      call('SEND_QUOTE', { quoteId: 'Q000001', to: ['x@y.test'] }, DISPATCHER),
+    ).rejects.toThrow(/requires owner, ADMIN, or page-quotes/)
+  })
+
+  it('lets dispatch shop the load it has to cover', async () => {
+    const { loadId } = await sourcingLoad()
+    seedBookableCarrier()
+    const result = (await call('LOG_OFFER', { loadId, carrierId: 'car-1', amountCents: 175_000 }, DISPATCHER)) as {
+      quote: Row
+    }
+    expect(result.quote.status).toBe('QUOTED')
+  })
+
+  it('keeps org quote defaults in admin hands', async () => {
+    await expect(
+      call('SAVE_QUOTE_SETTINGS', { hoursToQuote: 48 }, QUOTER),
+    ).rejects.toThrow(/requires owner or ADMIN/)
+  })
+})
+
+describe('SAVE_QUOTE_SETTINGS', () => {
+  it('saves the quote defaults an admin may change', async () => {
+    const result = (await call('SAVE_QUOTE_SETTINGS', {
+      hoursToQuote: 48,
+      offerExpiryHours: 6,
+      quoteNumberFormat: 'Q{yyyy}-{n:4}',
+      quoteTermsText: 'Rates valid for the lane and dates quoted.',
+    }, ADMIN)) as { settings: Row }
+
+    expect(result.settings).toMatchObject({
+      hoursToQuote: 48,
+      offerExpiryHours: 6,
+      quoteNumberFormat: 'Q{yyyy}-{n:4}',
+    })
+    expect((await newQuote()).id).toBe('Q2026-0001')
+  })
+
+  it('refuses a template nobody could answer', async () => {
+    await expect(
+      call('SAVE_QUOTE_SETTINGS', { quoteEmailTemplate: 'Here is our price. Call us.' }, ADMIN),
+    ).rejects.toThrow(/\{link\} token/)
+  })
+
+  it('refuses a number format that would reuse the same id', async () => {
+    await expect(
+      call('SAVE_QUOTE_SETTINGS', { quoteNumberFormat: 'Q-{yyyy}' }, ADMIN),
+    ).rejects.toThrow(/\{n\} token/)
+  })
+
+  it('refuses to wind the counter back onto numbers that exist', async () => {
+    await newQuote()
+    await newQuote()
+    await expect(
+      call('SAVE_QUOTE_SETTINGS', { nextQuoteNumber: 1 }, ADMIN),
+    ).rejects.toThrow(/can only go forward/)
   })
 })
 

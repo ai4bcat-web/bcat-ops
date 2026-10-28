@@ -64,6 +64,22 @@ vi.mock('@/lib/carrierRateCon', () => ({
 vi.mock('@/hooks/useCarriers', () => ({
   useCarriers: () => ({ carriers: [], loading: false, error: null, refresh: vi.fn(), replace: vi.fn() }),
 }))
+// Step H — the Carrier tab's offers card and the Financials tab's lane history read
+// through these; this test is about the tabs, not about what the lane has paid.
+vi.mock('@/hooks/useLoadOffers', () => ({
+  useLoadOffers: () => ({ offers: [], loading: false, error: null, refresh: vi.fn(async () => {}) }),
+}))
+vi.mock('@/hooks/useLaneStats', () => ({
+  useLaneStats: () => ({
+    stats: {
+      customer: { count: 0, lowCents: null, medianCents: null, avgCents: null, highCents: null, perMileCents: null },
+      carrier: { count: 0, lowCents: null, medianCents: null, avgCents: null, highCents: null, perMileCents: null },
+      marginAvgBps: null, milesAvg: null, byMonth: [], lastAt: null,
+    },
+    basis: 'NONE', badge: 'No history on this lane', samples: [],
+    loading: false, error: null, refresh: vi.fn(async () => {}),
+  }),
+}))
 
 const stops: Stop[] = [
   { id: 'p1', type: 'pickup', sequence: 0, appt: '2026-04-01T13:00:00.000Z', driverId: null, name: 'Acme Dock 4', city: 'Chicago, IL' },
@@ -163,6 +179,13 @@ describe('ShipmentDetail', () => {
 
     fireEvent.click(screen.getByRole('tab', { name: 'Financials' }))
     await waitFor(() => expect(screen.getByTestId('financial-totals')).toBeTruthy())
+
+    // Step H: the lane history sits under the lines, and the offers card above the
+    // assignment block — a load with nobody on it still has a buy side.
+    expect(screen.getByTestId('lane-history')).toBeTruthy()
+    fireEvent.click(screen.getByRole('tab', { name: 'Carrier' }))
+    await waitFor(() => expect(screen.getByTestId('carrier-offers')).toBeTruthy())
+    expect(screen.getByText('Nobody is on this load yet. Book a carrier from the Details tab.')).toBeTruthy()
   })
 
   it('shows the draft editor instead of tabs while the shipment is a draft', () => {

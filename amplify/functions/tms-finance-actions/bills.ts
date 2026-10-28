@@ -52,7 +52,6 @@ import {
   CARRIER_BILL_TABLE_NAME,
   CARRIER_PAYMENT_METHOD_TABLE_NAME,
   CARRIER_TABLE_NAME,
-  DIVISION_TABLE_NAME,
   IDX_BILLS_BY_CARRIER,
   IDX_CARRIERS_BY_SHIPMENT,
   IDX_CHARGES_BY_SHIPMENT,
@@ -68,6 +67,7 @@ import {
   SHIPMENT_DOCUMENT_TABLE_NAME,
   SHIPMENT_TABLE_NAME,
   getById,
+  getDivision,
   getSettings,
   nowIso,
   numberOrNull,
@@ -119,7 +119,7 @@ export async function readAssignmentContext(loadCarrierId: string): Promise<Assi
   const divisionKey = load?.divisionKey ?? loads.find((item) => item.divisionKey)?.divisionKey ?? null
 
   const [division, methodRows, billRows] = await Promise.all([
-    divisionKey ? getById(DIVISION_TABLE_NAME, divisionKey) : Promise.resolve(null),
+    divisionKey ? getDivision(divisionKey) : Promise.resolve(null),
     loadCarrier.carrierId
       ? queryIndex(CARRIER_PAYMENT_METHOD_TABLE_NAME, IDX_PAYMENT_METHODS_BY_CARRIER, 'carrierId', loadCarrier.carrierId)
       : Promise.resolve([] as Row[]),

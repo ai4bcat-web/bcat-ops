@@ -54,6 +54,10 @@ import { FilesPage } from '@/features/files/FilesPage'
 import { SettingsPage } from '@/features/settings/SettingsPage'
 import { RedditQueuePage } from '@/features/reddit-queue/RedditQueuePage'
 import { PricingMarginPage } from '@/features/pricing-margin/PricingMarginPage'
+import { QuotesPage } from '@/features/quotes/QuotesPage'
+import { QuoteDetail } from '@/features/quotes/QuoteDetail'
+import { LaneRatesPage } from '@/features/quotes/LaneRatesPage'
+import { QuoteRespondPage } from '@/features/quotes/public/QuoteRespondPage'
 import { FactoringPage } from '@/features/factoring/FactoringPage'
 import { ArPage } from '@/features/ar/ArPage'
 import { InvoiceDetail } from '@/features/ar/InvoiceDetail'
@@ -191,6 +195,8 @@ export default function App() {
           <Route path="/onboard/:token" element={<DriverPortalPage />} />
           {/* Public, tokenized rate confirmation signing for an outside carrier */}
           <Route path="/sign/rate-con/:token" element={<RateConSignPage />} />
+          {/* Public, tokenized quote link — the customer or carrier answers without signing in */}
+          <Route path="/quote/:token" element={<QuoteRespondPage />} />
           <Route path="/amazon-disputes" element={<DriverDisputesPage />} />
           {/* Public tracking pages — the token in the URL is the key; no sign-in.
               All three are declared before /track/:code so a 32-character link token is
@@ -286,6 +292,12 @@ export default function App() {
               <Route path="/reddit-queue" element={<RequirePage page="redditQueue"><RedditQueuePage /></RequirePage>} />
               {/* Sales — pricing margin control */}
               <Route path="/pricing-margin" element={<RequirePage page="pricingMargin"><PricingMarginPage /></RequirePage>} />
+              {/* Sales — customer quotes, carrier offers and the lane history behind them.
+                  `/quotes/new` is the same editor with no id: a quote nobody has saved yet. */}
+              <Route path="/quotes" element={<RequirePage page="quotes"><QuotesPage /></RequirePage>} />
+              <Route path="/quotes/new" element={<RequirePage page="quotes"><QuoteDetail /></RequirePage>} />
+              <Route path="/quotes/:id" element={<RequirePage page="quotes"><QuoteDetail /></RequirePage>} />
+              <Route path="/rates" element={<RequirePage page="quotes"><LaneRatesPage /></RequirePage>} />
               {/* legacy redirects */}
               <Route path="/expenses" element={<Navigate to="/fuel" replace />} />
               <Route path="/grid" element={<Navigate to="/loads" replace />} />

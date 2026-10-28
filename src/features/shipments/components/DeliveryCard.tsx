@@ -31,6 +31,7 @@ const NOTICE_KIND_LABELS: Record<ShipmentNoticeRecord['kind'], string> = {
   DOCUMENTS: 'Documents',
   INVOICE: 'Invoice',
   REMITTANCE: 'Remittance',
+  CARRIER_OFFER: 'Carrier offer request',
 }
 
 export function DeliveryCard({ bundle, onReload }: {

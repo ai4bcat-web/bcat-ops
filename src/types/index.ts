@@ -402,6 +402,8 @@ export type EntityType =
   | 'ArPayment'
   | 'CarrierBill'
   | 'ApPayment'
+  | 'Quote'
+  | 'LaneRateSample'
 export type AuditAction = 'create' | 'update' | 'delete'
 
 export interface AuditLogEntry {

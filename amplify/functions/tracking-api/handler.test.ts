@@ -49,6 +49,7 @@ const TABLES = {
   equipment: 'test-Equipment',
   truckLocation: 'test-TruckLocation',
   driver: 'test-Driver',
+  quote: 'test-Quote',
 }
 
 beforeAll(async () => {
@@ -66,6 +67,7 @@ beforeAll(async () => {
   process.env.TRUCK_LOCATION_HISTORY_TABLE_NAME = TABLES.history
   process.env.SHIPMENT_DOCUMENT_TABLE_NAME = TABLES.document
   process.env.BUCKET_NAME = BUCKET
+  process.env.QUOTE_TABLE_NAME = TABLES.quote
   handler = (await import('./handler')).handler
 })
 
@@ -141,6 +143,7 @@ function route(by: {
   checkCalls?: unknown[]
   positions?: unknown[]
   division?: unknown
+  quotes?: unknown[]
   settings?: unknown
   onUpdate?: (cmd: Cmd) => void
 }) {
@@ -164,6 +167,7 @@ function route(by: {
       if (cmd.TableName === TABLES.checkCall) return { Items: by.checkCalls ?? [] }
       if (cmd.TableName === TABLES.history) return { Items: by.positions ?? [] }
       if (cmd.TableName === TABLES.document) return { Items: by.documents ?? [] }
+      if (cmd.TableName === TABLES.quote) return { Items: by.quotes ?? [] }
       return { Items: [] }
     }
     return { Items: [] }
@@ -654,5 +658,517 @@ describe('POST /u/<token>/commit', () => {
     const res = await post(`/u/${TOKEN}/commit`, { ...commit, documentId: '../../etc/passwd' })
     expect(res.statusCode).toBe(400)
     expect(writes()).toHaveLength(0)
+  })
+})
+
+
+// ── Step H: the public quote link ───────────────────────────────────────────
+
+/** Everything on a quote row that a public page may never print. */
+const QUOTE_SECRETS = {
+  internalNotes: 'Customer always pays late — hold the margin',
+  carrierName: 'Blue Sky Trucking',
+  carrierMc: 'MC-998877',
+  carrierEmail: 'dispatch@blueskytrucking.example',
+  customerName: 'Midwest Millwork',
+  customerId: 'cus-77421',
+  street: '4120 Dock Row',
+  reference: 'PO-55512',
+  targetBuyCents: 111_777,
+  topSpendCents: 123_456,
+  customerRateCents: 145_511,
+  marginBps: 2_447,
+}
+
+const QUOTE_STOPS = [
+  { id: 'qs-1', type: 'pickup', sequence: 0, name: 'Shipper', address: { street: QUOTE_SECRETS.street, city: 'Chicago', state: 'IL' }, appt: '2026-10-29T14:00:00.000Z' },
+  { id: 'qs-2', type: 'delivery', sequence: 1, name: 'Consignee', address: { street: QUOTE_SECRETS.street, city: 'Danville', state: 'IL' }, appt: '2026-10-30T09:00:00.000Z' },
+]
+
+const QUOTE_LINES = [
+  { side: 'CUSTOMER', code: 'LINEHAUL', calculatedBy: 'FLAT', rateCents: 120_000, isRate: true, sortOrder: 0 },
+  { side: 'CUSTOMER', code: 'FSC', calculatedBy: 'PERCENT', rateCents: 1_500, isRate: false, sortOrder: 1 },
+  { side: 'CARRIER', code: 'LINEHAUL', calculatedBy: 'FLAT', rateCents: QUOTE_SECRETS.targetBuyCents, isRate: true, sortOrder: 2 },
+]
+
+/** The thread as tms-shipment-actions stores it: one list, oldest line first. */
+const QUOTE_EVENTS = [{ at: '2026-10-28T12:00:00.000Z', by: 'rep@bcat.com', kind: 'SENT', amountCents: 145_500 }]
+
+/**
+ * The row as DynamoDB hands it back. Every list column is a native list: that is
+ * what `marshallRow` in tms-shipment-actions puts in, and a fixture that strings
+ * them is a fixture no writer agrees with.
+ */
+const quoteRow = (over: Record<string, unknown> = {}) => ({
+  id: 'Q000012',
+  side: 'SELL',
+  status: 'QUOTED',
+  groupId: 'grp-4',
+  quoteDate: '2026-10-28',
+  quoteMonth: '2026-10',
+  customerId: QUOTE_SECRETS.customerId,
+  customerName: QUOTE_SECRETS.customerName,
+  contactName: 'Dana Reed',
+  contactEmail: 'dana@midwest.example',
+  carrierId: 'car-5150',
+  carrierName: QUOTE_SECRETS.carrierName,
+  carrierMc: QUOTE_SECRETS.carrierMc,
+  carrierEmail: QUOTE_SECRETS.carrierEmail,
+  divisionKey: 'BCAT_LOGISTICS',
+  mode: 'FTL',
+  rateType: 'SPOT',
+  equipmentType: 'Dry Van',
+  equipmentLengthFt: 53,
+  stops: QUOTE_STOPS,
+  laneKey: 'CHICAGO|IL>DANVILLE|IL',
+  pickupAppt: '2026-10-29T14:00:00.000Z',
+  commodity: 'Paper',
+  weightLbs: 42_000,
+  miles: 412,
+  references: [{ code: 'PO', value: QUOTE_SECRETS.reference, level: 'ORDER', visibility: 'CUSTOMER' }],
+  lines: QUOTE_LINES,
+  amountCents: 145_500,
+  customerRateCents: QUOTE_SECRETS.customerRateCents,
+  targetBuyCents: QUOTE_SECRETS.targetBuyCents,
+  topSpendCents: QUOTE_SECRETS.topSpendCents,
+  marginBps: QUOTE_SECRETS.marginBps,
+  rounds: 1,
+  expiresAt: '2099-01-01T00:00:00.000Z',
+  linkToken: TOKEN,
+  quoteOpen: 'OPEN',
+  customerMessage: 'Rate includes two hours free at each stop.',
+  internalNotes: QUOTE_SECRETS.internalNotes,
+  events: QUOTE_EVENTS,
+  createdBy: 'rep@bcat.com',
+  updatedBy: 'rep@bcat.com',
+  version: 3,
+  ...over,
+})
+
+const offerRow = (over: Record<string, unknown> = {}) => quoteRow({
+  id: 'Q000013',
+  side: 'BUY',
+  status: 'QUOTED',
+  loadId: 'ld-1',
+  loadNumber: 'S-1001-1',
+  amountCents: 120_000,
+  bookNowRateCents: 125_000,
+  customerMessage: 'Tarps required.',
+  ...over,
+})
+
+const DIVISION = { key: 'BCAT_LOGISTICS', name: 'BCAT Logistics', active: true }
+
+const respond = (body: unknown, over: { token?: string; ip?: string } = {}) =>
+  handler({
+    rawPath: `/q/${over.token ?? TOKEN}/respond`,
+    body: JSON.stringify(body),
+    requestContext: { http: { method: 'POST', sourceIp: over.ip ?? '203.0.113.9' } },
+  })
+
+const ANSWER = { name: 'Dana Reed', email: 'dana@midwest.example' }
+
+describe('GET /q/<token>', () => {
+  it('renders the customer page off the linkToken index and counts the read', async () => {
+    route({ quotes: [quoteRow()], division: DIVISION, settings: { id: 'default', quoteTermsText: 'Payment net 30.' } })
+    const res = await get(`/q/${TOKEN}`)
+    expect(res.statusCode).toBe(200)
+
+    const query = sent().find((c) => c.__cmd === 'Query' && c.TableName === TABLES.quote)
+    // The physical GSI name Amplify mints for Quote's `index('linkToken')`, exactly
+    // as `loadCarriersByShipmentId` is minted for LoadCarrier's `index('shipmentId')`.
+    // A wrong name here is a 400 from DynamoDB on a page a customer is looking at.
+    expect(query?.IndexName).toBe('quotesByLinkToken')
+
+    const view = json(res)
+    expect(view).toMatchObject({
+      side: 'SELL',
+      quoteNumber: 'Q000012',
+      status: 'QUOTED',
+      brokerName: 'BCAT Logistics',
+      amountCents: 145_500,
+      awaiting: 'YOU',
+      terms: 'Payment net 30.',
+      rounds: 1,
+    })
+    expect((view.stops as unknown[]).length).toBe(2)
+
+    const counted = writes().filter((c) => c.TableName === TABLES.quote)
+    expect(counted).toHaveLength(1)
+    expect(counted[0].UpdateExpression).toBe('ADD requestCount :one')
+    expect(counted[0].ConditionExpression).toContain('requestCount < :max')
+  })
+
+  it('shows a carrier the book-now rate only while the setting allows it', async () => {
+    route({ quotes: [offerRow()], division: DIVISION, settings: { id: 'default' } })
+    expect(json(await get(`/q/${TOKEN}`))).toMatchObject({ side: 'BUY', bookNowRateCents: 125_000 })
+
+    route({ quotes: [offerRow()], division: DIVISION, settings: { id: 'default', quoteOffersCarrierSeesBookNow: false } })
+    expect(json(await get(`/q/${TOKEN}`)).bookNowRateCents).toBeNull()
+  })
+
+  it("prints none of the row's internal numbers, on either side", async () => {
+    for (const row of [quoteRow(), offerRow()]) {
+      route({ quotes: [row], division: DIVISION, settings: { id: 'default' } })
+      const res = await get(`/q/${TOKEN}`)
+      expect(res.statusCode).toBe(200)
+      const sell = row.side === 'SELL'
+      const forbidden = [
+        QUOTE_SECRETS.internalNotes,
+        QUOTE_SECRETS.street,
+        QUOTE_SECRETS.reference,
+        String(QUOTE_SECRETS.targetBuyCents),
+        String(QUOTE_SECRETS.topSpendCents),
+        String(QUOTE_SECRETS.customerRateCents),
+        String(QUOTE_SECRETS.marginBps),
+        TOKEN,
+        // A customer never learns who hauls it; a carrier never learns whose it is.
+        ...(sell ? [QUOTE_SECRETS.carrierName, QUOTE_SECRETS.carrierMc, QUOTE_SECRETS.carrierEmail] : [QUOTE_SECRETS.customerName, QUOTE_SECRETS.customerId]),
+      ]
+      for (const secret of forbidden) expect(res.body).not.toContain(secret)
+      for (const key of ['targetBuyCents', 'topSpendCents', 'marginBps', 'internalNotes', 'customerRateCents', 'linkToken', 'events']) {
+        expect(Object.keys(json(res))).not.toContain(key)
+      }
+    }
+  })
+
+  it('never reads the quote table for a malformed token', async () => {
+    route({})
+    const res = await get(`/q/${BAD_TOKEN}`)
+    expect(res.statusCode).toBe(404)
+    expect(json(res).error).toBe('This quote link is no longer active')
+    expect(mockSend).not.toHaveBeenCalled()
+  })
+
+  it('404s every rung that is not waiting on an answer, with one wording', async () => {
+    // REQUESTED is a buy-side rung: a sell quote nobody has priced has no number
+    // to show. WON, LOST and a token nobody minted answer the same way.
+    for (const quotes of [
+      [quoteRow({ status: 'REQUESTED' })],
+      [quoteRow({ status: 'WON' })],
+      [quoteRow({ status: 'LOST' })],
+      [quoteRow({ linkToken: 'Zz3Zn7Lp0vWx9TbKcRdYu1Ms4Ae6Gi2J' })],
+      [],
+      [quoteRow(), offerRow()],
+    ]) {
+      route({ quotes })
+      const res = await get(`/q/${TOKEN}`)
+      expect(res.statusCode).toBe(404)
+      expect(json(res).error).toBe('This quote link is no longer active')
+      expect(writes()).toHaveLength(0)
+    }
+  })
+
+  it('answers a carrier sitting on REQUESTED, which is a buy-side rung', async () => {
+    route({ quotes: [offerRow({ status: 'REQUESTED' })], division: DIVISION })
+    const res = await get(`/q/${TOKEN}`)
+    expect(res.statusCode).toBe(200)
+    expect(json(res)).toMatchObject({ side: 'BUY', status: 'REQUESTED', awaiting: 'YOU' })
+  })
+
+  it('writes an expired quote LOST/EXPIRED, takes the token off it, and 404s', async () => {
+    const updates: Cmd[] = []
+    route({ quotes: [quoteRow({ expiresAt: '2020-01-01T00:00:00.000Z' })], onUpdate: (c) => updates.push(c) })
+    const res = await get(`/q/${TOKEN}`)
+    expect(res.statusCode).toBe(404)
+    expect(json(res).error).toBe('This quote link is no longer active')
+
+    expect(updates).toHaveLength(1)
+    expect(updates[0].TableName).toBe(TABLES.quote)
+    expect(updates[0].Key).toEqual({ id: 'Q000012' })
+    expect(updates[0].ExpressionAttributeValues).toMatchObject({ ':lost': 'LOST', ':expired': 'EXPIRED', ':was': 'QUOTED' })
+    expect(updates[0].UpdateExpression).toContain('REMOVE #lt, #qo')
+    // A sweep that closed it a second ago must win, not be overwritten.
+    expect(updates[0].ConditionExpression).toBe('#lt = :tok AND #st = :was')
+  })
+
+  it('leaves a quote with no clock on it alone', async () => {
+    route({ quotes: [quoteRow({ expiresAt: null })], division: DIVISION })
+    expect((await get(`/q/${TOKEN}`)).statusCode).toBe(200)
+  })
+
+  it('429s once the link is past its request budget', async () => {
+    route({ quotes: [quoteRow()], onUpdate: () => { throw new ConditionalCheckFailedException() } })
+    const res = await get(`/q/${TOKEN}`)
+    expect(res.statusCode).toBe(429)
+    expect(json(res).error).toBe('This quote link has been opened too many times')
+  })
+})
+
+describe('POST /q/<token>/respond', () => {
+  const answered = (over: Record<string, unknown> = {}) => {
+    const updates: Cmd[] = []
+    route({ quotes: [over.row ?? quoteRow()], settings: over.settings, onUpdate: (c) => updates.push(c) })
+    return updates
+  }
+
+  it("accepts a customer's yes once, and 410s the replay the stale index serves", async () => {
+    let seen = 0
+    route({
+      quotes: [quoteRow()],
+      // The index still hands back the row with its token after the first answer:
+      // only the condition on the base table makes the answer once-only.
+      onUpdate: () => { if (++seen > 1) throw new ConditionalCheckFailedException() },
+    })
+
+    const first = await respond({ ...ANSWER, action: 'ACCEPT' })
+    expect(first.statusCode).toBe(200)
+    expect(json(first)).toEqual({ ok: true, status: 'RECEIVED_REPLY', response: 'ACCEPTED' })
+
+    const second = await respond({ ...ANSWER, action: 'ACCEPT' })
+    expect(second.statusCode).toBe(410)
+    expect(json(second).error).toBe('This quote has already been answered')
+  })
+
+  it('writes the whole answer in one conditioned update and spends the token', async () => {
+    const updates = answered()
+    const res = await respond({ ...ANSWER, action: 'ACCEPT', message: 'Go ahead.' }, { ip: '198.51.100.7' })
+    expect(res.statusCode).toBe(200)
+
+    expect(updates).toHaveLength(1)
+    const cmd = updates[0]
+    expect(cmd.TableName).toBe(TABLES.quote)
+    expect(cmd.ConditionExpression).toBe('#lt = :tok AND #st IN (:from0, :from1)')
+    expect(cmd.ExpressionAttributeValues).toMatchObject({
+      ':tok': TOKEN,
+      ':status': 'RECEIVED_REPLY',
+      ':response': 'ACCEPTED',
+      ':via': 'LINK',
+      ':name': 'Dana Reed',
+      ':email': 'dana@midwest.example',
+      ':ip': '198.51.100.7',
+      ':from0': 'QUOTED',
+      ':from1': 'SENT_COUNTER',
+    })
+    // One use per round: the next round mints a new token.
+    expect(cmd.UpdateExpression).toContain('REMOVE #lt')
+    // An accepted quote is still open — a rep converts it.
+    expect(cmd.UpdateExpression).not.toContain('#qo')
+    expect(cmd.UpdateExpression).not.toContain('ADD')
+
+    const events = cmd.ExpressionAttributeValues?.[':events'] as Record<string, unknown>[]
+    expect(events).toHaveLength(2)
+    expect(events[1]).toMatchObject({ kind: 'ACCEPTED_ON_LINK', by: 'dana@midwest.example', note: 'Go ahead.' })
+  })
+
+  it('hands the thread back as a list the staff writer can append to', async () => {
+    const updates = answered()
+    expect((await respond({ ...ANSWER, action: 'COUNTER', amountCents: 139_900 })).statusCode).toBe(200)
+
+    // tms-shipment-actions keeps Quote.events as a native DynamoDB list, and its
+    // `pushEvent` only appends to `Array.isArray(quote.events)`. A string written
+    // here reads back as no thread at all, so the first staff action after any
+    // public answer replaces the whole history with a single line.
+    const events = updates[0].ExpressionAttributeValues?.[':events']
+    expect(Array.isArray(events)).toBe(true)
+    const thread = events as Record<string, unknown>[]
+    expect(thread).toHaveLength(2)
+    // The rep's own line is still the first one on it, untouched.
+    expect(thread[0]).toEqual(QUOTE_EVENTS[0])
+    expect(thread[thread.length - 1]).toEqual({
+      at: expect.any(String),
+      by: 'dana@midwest.example',
+      kind: 'COUNTERED_ON_LINK',
+      amountCents: 139_900,
+      note: null,
+    })
+  })
+
+  it('declines to LOST with the reason, and takes it off the open board', async () => {
+    const updates = answered()
+    const res = await respond({ ...ANSWER, action: 'DECLINE', reason: 'TOO_HIGH' })
+    expect(res.statusCode).toBe(200)
+    expect(json(res)).toEqual({ ok: true, status: 'LOST', response: 'DECLINED' })
+    expect(updates[0].ExpressionAttributeValues).toMatchObject({ ':lostReason': 'TOO_HIGH' })
+    expect(updates[0].UpdateExpression).toContain('REMOVE #lt, #qo')
+  })
+
+  it('refuses a decline with no reason, or a reason nobody may send', async () => {
+    for (const body of [
+      { ...ANSWER, action: 'DECLINE' },
+      { ...ANSWER, action: 'DECLINE', reason: 'EXPIRED' },
+      { ...ANSWER, action: 'DECLINE', reason: 'NO_RESPONSE' },
+      { ...ANSWER, action: 'DECLINE', reason: 'not-a-reason' },
+    ]) {
+      const updates = answered()
+      const res = await respond(body)
+      expect(res.statusCode).toBe(400)
+      expect(json(res).error).toBe('Choose a reason so we know why this one did not work')
+      expect(updates).toHaveLength(0)
+    }
+  })
+
+  it('counters to RECEIVED_COUNTER at their number, and moves the round on', async () => {
+    const updates = answered()
+    const res = await respond({ ...ANSWER, action: 'COUNTER', amountCents: 139_900 })
+    expect(res.statusCode).toBe(200)
+    expect(json(res)).toEqual({ ok: true, status: 'RECEIVED_COUNTER', response: 'COUNTERED' })
+    expect(updates[0].ExpressionAttributeValues).toMatchObject({ ':counter': 139_900, ':counterBy': 'THEM' })
+    expect(updates[0].UpdateExpression).toContain('ADD #rd :one')
+  })
+
+  it('refuses a counter at the number already on the table, or at no number at all', async () => {
+    const same = answered()
+    const res = await respond({ ...ANSWER, action: 'COUNTER', amountCents: 145_500 })
+    expect(res.statusCode).toBe(400)
+    expect(json(res).error).toBe('That is already the number on the table — accept it instead')
+    expect(same).toHaveLength(0)
+
+    for (const amountCents of [undefined, 0, -100, 1_399.5, '139900']) {
+      const updates = answered()
+      expect((await respond({ ...ANSWER, action: 'COUNTER', amountCents })).statusCode).toBe(400)
+      expect(updates).toHaveLength(0)
+    }
+  })
+
+  it("refuses our own counter's number when it is the one on the table", async () => {
+    // SENT_COUNTER: the page is showing our counter on the buy side, so countering
+    // at that number is an accept wearing a counter's clothes.
+    const updates = answered({ row: offerRow({ status: 'SENT_COUNTER', counterCents: 118_000, counterBy: 'US' }) })
+    const res = await respond({ ...ANSWER, action: 'COUNTER', amountCents: 118_000 })
+    expect(res.statusCode).toBe(400)
+    expect(updates).toHaveLength(0)
+  })
+
+  it("takes a carrier's price onto the row, and only from the rung that asked", async () => {
+    const updates = answered({ row: offerRow({ status: 'REQUESTED', amountCents: 0 }) })
+    const res = await respond({ ...ANSWER, action: 'QUOTE', amountCents: 132_500 })
+    expect(res.statusCode).toBe(200)
+    expect(json(res)).toEqual({ ok: true, status: 'QUOTED', response: 'COUNTERED' })
+    expect(updates[0].ConditionExpression).toBe('#lt = :tok AND #st IN (:from0)')
+    expect(updates[0].ExpressionAttributeValues).toMatchObject({ ':from0': 'REQUESTED', ':amount': 132_500 })
+    expect(updates[0].UpdateExpression).toContain('ADD #rd :one')
+  })
+
+  it("refuses a carrier's quote with no price on it", async () => {
+    const updates = answered({ row: offerRow({ status: 'REQUESTED', amountCents: 0 }) })
+    const res = await respond({ ...ANSWER, action: 'QUOTE' })
+    expect(res.statusCode).toBe(400)
+    expect(json(res).error).toBe('Enter the rate you will haul this load for')
+    expect(updates).toHaveLength(0)
+  })
+
+  it('lets a carrier take our number or the book-now rate, and nothing else', async () => {
+    const ours = answered({ row: offerRow() })
+    expect((await respond({ ...ANSWER, action: 'ACCEPT' })).statusCode).toBe(200)
+    expect(ours[0].ExpressionAttributeValues).toMatchObject({ ':amount': 120_000, ':via': 'LINK' })
+
+    const bookNow = answered({ row: offerRow() })
+    expect((await respond({ ...ANSWER, action: 'ACCEPT', amountCents: 125_000 })).statusCode).toBe(200)
+    expect(bookNow[0].ExpressionAttributeValues).toMatchObject({ ':amount': 125_000 })
+
+    const invented = answered({ row: offerRow() })
+    const res = await respond({ ...ANSWER, action: 'ACCEPT', amountCents: 150_000 })
+    expect(res.statusCode).toBe(400)
+    expect(json(res).error).toBe('That is not a number this offer is open at')
+    expect(invented).toHaveLength(0)
+
+    // Hidden book-now rate: a number the page never showed cannot be accepted.
+    const hidden = answered({ row: offerRow(), settings: { id: 'default', quoteOffersCarrierSeesBookNow: false } })
+    expect((await respond({ ...ANSWER, action: 'ACCEPT', amountCents: 125_000 })).statusCode).toBe(400)
+    expect(hidden).toHaveLength(0)
+
+    // A request nobody has priced has no number on it to take.
+    const unpriced = answered({ row: offerRow({ status: 'REQUESTED', amountCents: 0, bookNowRateCents: null }) })
+    const bare = await respond({ ...ANSWER, action: 'ACCEPT' })
+    expect(bare.statusCode).toBe(400)
+    expect(json(bare).error).toBe('There is no rate on this offer to accept yet')
+    expect(unpriced).toHaveLength(0)
+  })
+
+  it('passes a carrier out of the round and off the open board', async () => {
+    const updates = answered({ row: offerRow() })
+    const res = await respond({ ...ANSWER, action: 'PASS' })
+    expect(res.statusCode).toBe(200)
+    expect(json(res)).toEqual({ ok: true, status: 'PASS', response: 'PASSED' })
+    expect(updates[0].UpdateExpression).toContain('REMOVE #lt, #qo')
+  })
+
+  it('refuses a verb that belongs to the other side', async () => {
+    const sell = answered()
+    const onSell = await respond({ ...ANSWER, action: 'PASS' })
+    expect(onSell.statusCode).toBe(400)
+    expect(json(onSell).error).toBe('This quote can be accepted, countered or declined')
+    expect(sell).toHaveLength(0)
+
+    const buy = answered({ row: offerRow() })
+    const onBuy = await respond({ ...ANSWER, action: 'DECLINE', reason: 'TOO_HIGH' })
+    expect(onBuy.statusCode).toBe(400)
+    expect(json(onBuy).error).toBe('This offer can be quoted, accepted, countered or passed')
+    expect(buy).toHaveLength(0)
+  })
+
+  it('refuses an answer with nobody behind it', async () => {
+    for (const body of [
+      { action: 'ACCEPT', email: 'dana@midwest.example' },
+      { action: 'ACCEPT', name: '  ', email: 'dana@midwest.example' },
+      { action: 'ACCEPT', name: '...', email: 'dana@midwest.example' },
+      { action: 'ACCEPT', name: 'Dana Reed' },
+      { action: 'ACCEPT', name: 'Dana Reed', email: 'dana@midwest' },
+      { action: 'ACCEPT', name: 'Dana Reed', email: 'dana at midwest.example' },
+      { action: 'NUDGE', name: 'Dana Reed', email: 'dana@midwest.example' },
+      { name: 'Dana Reed', email: 'dana@midwest.example' },
+    ]) {
+      const updates = answered()
+      expect((await respond(body)).statusCode).toBe(400)
+      expect(updates).toHaveLength(0)
+    }
+  })
+
+  it('never reads the quote table for a malformed token, and 404s a dead one', async () => {
+    route({})
+    const bad = await respond({ ...ANSWER, action: 'ACCEPT' }, { token: BAD_TOKEN })
+    expect(bad.statusCode).toBe(404)
+    expect(mockSend).not.toHaveBeenCalled()
+
+    route({ quotes: [quoteRow({ status: 'WON' })] })
+    const dead = await respond({ ...ANSWER, action: 'ACCEPT' })
+    expect(dead.statusCode).toBe(404)
+    expect(json(dead).error).toBe('This quote link is no longer active')
+    expect(writes()).toHaveLength(0)
+  })
+
+  it('says nothing but its own fixed sentence in every refusal', async () => {
+    // A refusal is read by whoever holds the link: a customer, or the carrier on
+    // the other side of the same load. Neither may learn a number off the row or
+    // who the other one is, and the 200 body is not the only way out of here.
+    const refusals: { statusCode: number; body: string }[] = []
+
+    route({ quotes: [quoteRow({ status: 'WON' })] })
+    refusals.push(await get(`/q/${TOKEN}`))
+    refusals.push(await respond({ ...ANSWER, action: 'ACCEPT' }))
+
+    // The budget on the way in, and the round moving under an answer on the way out.
+    route({ quotes: [quoteRow()], onUpdate: () => { throw new ConditionalCheckFailedException() } })
+    refusals.push(await get(`/q/${TOKEN}`))
+    refusals.push(await respond({ ...ANSWER, action: 'ACCEPT' }))
+
+    // The two refusals that are read against the row's own numbers.
+    route({ quotes: [offerRow({ status: 'SENT_COUNTER', counterCents: 118_000, counterBy: 'US' })] })
+    refusals.push(await respond({ ...ANSWER, action: 'COUNTER', amountCents: 118_000 }))
+    refusals.push(await respond({ ...ANSWER, action: 'ACCEPT', amountCents: 150_000 }))
+
+    expect(refusals.map((res) => res.statusCode)).toEqual([404, 404, 429, 410, 400, 400])
+    for (const res of refusals) {
+      const body = json(res)
+      expect(Object.keys(body)).toEqual(['error'])
+      // Fixed sentences: no amount, no round, no id can ride out on one.
+      expect(String(body.error)).not.toMatch(/\d/)
+      for (const secret of [
+        QUOTE_SECRETS.internalNotes,
+        QUOTE_SECRETS.street,
+        QUOTE_SECRETS.reference,
+        QUOTE_SECRETS.carrierName,
+        QUOTE_SECRETS.carrierMc,
+        QUOTE_SECRETS.carrierEmail,
+        QUOTE_SECRETS.customerName,
+        QUOTE_SECRETS.customerId,
+        String(QUOTE_SECRETS.targetBuyCents),
+        String(QUOTE_SECRETS.topSpendCents),
+        String(QUOTE_SECRETS.customerRateCents),
+        String(QUOTE_SECRETS.marginBps),
+        TOKEN,
+      ]) expect(res.body).not.toContain(secret)
+    }
   })
 })

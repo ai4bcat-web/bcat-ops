@@ -11,6 +11,7 @@ import { TrackingSettingsCard } from './TrackingSettingsCard'
 import { DocumentSettingsCard } from './DocumentSettingsCard'
 import { ArSettingsCard } from './ArSettingsCard'
 import { ApSettingsCard } from './ApSettingsCard'
+import { QuoteSettingsCard } from './QuoteSettingsCard'
 
 export function SettingsPage() {
   const { isAdmin } = useAuth()
@@ -55,6 +56,7 @@ export function SettingsPage() {
             <DocumentSettingsCard />
             <ArSettingsCard />
             <ApSettingsCard />
+            <QuoteSettingsCard />
           </>
         )}
 
