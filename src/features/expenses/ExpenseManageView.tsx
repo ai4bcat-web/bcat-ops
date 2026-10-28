@@ -3,6 +3,7 @@ import { reviseRecurringAmount, todayChicago } from '@/lib/recurringRevision'
 import { Plus, Pencil, Trash2, Check, X, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import { driverPayNotes, isDriverPayExpenseType, nextDriverPayPeriod } from '@/lib/driverPayExpensePeriod'
 import type { Equipment } from '@/types/equipment'
 import type {
   ExpenseDataState,
@@ -529,6 +530,26 @@ function ManualEntryTab({ data, trucks }: { data: ExpenseDataState; trucks: Equi
     notes:           '',
   })
 
+  // Driver pay is booked once per biweekly period: picking a driver-pay type lands the
+  // form on the period after the last one submitted for that type (or the current
+  // period when none exists yet). The pre-fill only touches empty fields.
+  const selectedType = data.expenseTypes.find((t) => t.id === form.expenseTypeId)
+  const driverPayPeriod = selectedType && isDriverPayExpenseType(selectedType.name)
+    ? nextDriverPayPeriod(data.records, selectedType.id)
+    : null
+  function pickType(expenseTypeId: string) {
+    const type = data.expenseTypes.find((t) => t.id === expenseTypeId)
+    setForm((f) => {
+      const next = { ...f, expenseTypeId, allocationId: '', directTruckId: '' }
+      if (type && isDriverPayExpenseType(type.name)) {
+        const period = nextDriverPayPeriod(data.records, type.id)
+        if (!f.transactionDate && !f.periodMonth) next.transactionDate = period.periodStart
+        if (!f.notes) next.notes = driverPayNotes(period.label)
+      }
+      return next
+    })
+  }
+
   async function submit() {
     if (!form.expenseTypeId || !form.amount) return
     if (!form.allocationId && !form.directTruckId) {
@@ -576,7 +597,7 @@ function ManualEntryTab({ data, trucks }: { data: ExpenseDataState; trucks: Equi
 
       <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 grid grid-cols-2 md:grid-cols-3 gap-3 max-w-2xl">
         <Field label="Expense Type">
-          <Select value={form.expenseTypeId} onChange={(e) => setForm((f) => ({ ...f, expenseTypeId: e.target.value, allocationId: '', directTruckId: '' }))}>
+          <Select value={form.expenseTypeId} onChange={(e) => pickType(e.target.value)}>
             <option value="">Select type…</option>
             {data.expenseTypes.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
           </Select>
@@ -607,6 +628,15 @@ function ManualEntryTab({ data, trucks }: { data: ExpenseDataState; trucks: Equi
         <Field label="Notes">
           <Input value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} placeholder="optional" className="md:col-span-3" />
         </Field>
+        {driverPayPeriod && (
+          <p className="col-span-full text-xs text-muted-foreground">
+            {driverPayPeriod.followsExisting ? 'Next pay period after the last one submitted' : 'No driver pay booked yet — current pay period'}:{' '}
+            <span className="font-medium text-foreground">{driverPayPeriod.label}</span>
+            {form.transactionDate !== driverPayPeriod.periodStart && (
+              <> · <button type="button" className="underline" onClick={() => setForm((f) => ({ ...f, transactionDate: driverPayPeriod.periodStart, periodMonth: '', notes: f.notes || driverPayNotes(driverPayPeriod.label) }))}>use it</button></>
+            )}
+          </p>
+        )}
         <div className="col-span-full flex items-center gap-3">
           <Button className="h-8 gap-1.5" disabled={saving} onClick={submit}>
             {saving ? <RefreshCw className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />} Add Record
