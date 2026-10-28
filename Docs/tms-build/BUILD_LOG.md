@@ -2,6 +2,61 @@
 
 One entry per unit of work (newest first). Decisions needed from Ryne go under **Decision needed**.
 
+## 2026-10-28 — Step G is live on dev, verified end to end; H planned
+
+- **Deployed.** Job `34` (`1684273`) SUCCEED — BUILD, DEPLOY and VERIFY — the first dev
+  deploy since job `25`. The data stack template published at **709,127 bytes** under a
+  new asset key `bfe5c4ce…`, 290,873 bytes under the cap. Job `35` (`122a874`) SUCCEED
+  too. Dev is now serving Step G's backend.
+- **Migration.** `scripts/backfillApOpen.mjs` planned (676 LoadCarrier rows: 670
+  OWN_ASSET, 6 CARRIER), was reviewed in `plans/g-ap-open.json`, then applied:
+  **670 cleared, 5 opened, 0 failures, 0 reviewables, 0 unresolved**. A second plan over
+  the same table returns **0 actions** (670 already clear, 5 already open) — idempotent
+  against the live data, not only in a fixture. `scripts/backfillApOpen.test.mjs` pins the
+  classifier on isolated fixtures: one row per branch, the `apStatusChangedAt → bookedAt →
+  createdAt` precedence, what it reports rather than guesses, and that its own applied plan
+  leaves it nothing to do.
+- **The AP lifecycle, on the deployed stack.** `scripts/devVerifyAp.mjs` — **35/35 checks**.
+  It builds its own customer, carrier (with real auto-liability and cargo cover, because
+  those are hard blocks on `BOOK_CARRIER`) and two shipments, then walks: book → the leg
+  opens on the board → `PREVIEW_BILL` → `RECORD_BILL` into review and the assignment to
+  IN_REVIEW in one transaction → the second bill and the charge edit both refused →
+  approve → part payment → the retry that posts once → the over-application refused →
+  credit memo → cash + credit settles the bill and closes the board → remittance
+  (NOT_SENT on dev, with the PDF to download) → `MARK_REMITTANCE_SENT` → reversal that
+  restores the balance and gives the credit back → the second reversal refused → void,
+  which puts the assignment back on the board unbilled and unfreezes the charges.
+  The own-driver path is its own fixture: an OWN_ASSET leg is created with no AP rung and
+  no board marker, `PREVIEW_BILL` refuses it in readiness without throwing, and
+  `RECORD_BILL` and `UPDATE_CARRIER_CHARGES` both refuse it outright.
+- Two of the script's own assertions were wrong and were corrected, not the product: a
+  bill recorded before delivery is marked `recordedEarly`, which by design turns the
+  "has not delivered" block into the RECORDED_EARLY warning (`carrierBill.ts:338-345`),
+  and `UPDATE_CARRIER_CHARGES` takes the **shipment's** version as its CAS token.
+- **Found by opening `/ap`, not by a test** (`122a874`): the worklist was listing carrier
+  legs of shipments that had been canceled and soft-deleted — S000004 among them. Delete
+  already refuses under a live carrier bill, so no money was at stake; what survived was
+  the sparse `apOpen` marker. `DELETE_SHIPMENT` now REMOVEs it in the transaction that
+  stamps `deletedAt`, and `RESTORE_SHIPMENT` puts it back on the legs that still qualify.
+  Regression test fails before the fix and passes after. The three stale rows were cleared
+  on dev through the fixed path itself (restore → delete); the board went 8 rows → 5, and
+  the browser confirms it.
+- **Browser pass over `/ap`:** six tabs with live counts (Awaiting invoice 5, the rest 0),
+  the open/approved strip, the worklist with its carrier, delivered, rate-con, paperwork
+  and cost columns, the quick-pay chip and the paperwork chips, and Record bill per row.
+  No load error anywhere — the Step F failure mode (an index query the deployed schema
+  rejects) does not recur here.
+- Gates before each commit: `npm run typecheck`, `npm run lint` (3 pre-existing warnings),
+  `npm run test` — **342 files / 4347 tests**, up from 341 / 4338.
+- The temporary dev identity used for the live runs was created with a suppressed invite
+  and **removed afterwards**. No production write, no main deploy.
+- **Next:** `Docs/tms-build/H-plan.md` is written — Quotes & rates: one additive `Quote`
+  model for both sides, the quote actions inside `tmsShipmentActions` under a new
+  `page-quotes` key rather than a new Lambda (template budget), the public
+  accept/counter/decline link served by the existing `tracking-api` as `/q/<token>`, and
+  lane history from a `LaneRateSample` written at the points where a lane's price becomes
+  a fact. Its **Decisions needed (Ryne)** block is the thing to read first.
+
 ## 2026-10-28 — the 1 MB template cap: why five fixes changed nothing, and the fix
 
 - **Root cause, with evidence.** The minification worked all along. It never reached
