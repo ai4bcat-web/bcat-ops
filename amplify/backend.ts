@@ -3,7 +3,7 @@ import { Effect, PolicyStatement } from 'aws-cdk-lib/aws-iam'
 import { CfnFunction, Function as LambdaFunction, FunctionUrl, FunctionUrlAuthType, HttpMethod, EventSourceMapping, StartingPosition } from 'aws-cdk-lib/aws-lambda'
 import { CfnRule, Rule, Schedule, RuleTargetInput } from 'aws-cdk-lib/aws-events'
 import { LambdaFunction as EventsLambdaTarget } from 'aws-cdk-lib/aws-events-targets'
-import { ArnFormat, CfnOutput, Duration, Lazy, Stack } from 'aws-cdk-lib'
+import { ArnFormat, CfnOutput, Duration, Lazy, Stack, type IResolveContext } from 'aws-cdk-lib'
 import {
   UserPool,
   UserPoolClient,
@@ -1910,8 +1910,8 @@ if (process.env.BCAT_DEV_STACK === 'true') {
     const removed = NEUTERED_SECRETS.filter((name) => envMap?.[name]?.value === '<value will be resolved during runtime>')
     if (removed.length === 0) continue
     for (const name of removed) lambda.addEnvironment(name, 'disabled-on-dev')
-    lambda.addEnvironment('AMPLIFY_SSM_ENV_CONFIG', Lazy.string({
-      produce: (ctx) => {
+    lambda.addEnvironment('AMPLIFY_SSM_ENV_CONFIG', Lazy.uncachedString({
+      produce: (ctx: IResolveContext) => {
         const parsed = JSON.parse(String(ctx.resolve(ssmConfig))) as Record<string, unknown>
         for (const name of removed) delete parsed[name]
         return JSON.stringify(parsed)
