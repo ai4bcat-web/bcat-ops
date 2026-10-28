@@ -1612,6 +1612,10 @@ shipmentActionsFn.addToRolePolicy(
       'dynamodb:DeleteItem',
       'dynamodb:Query',
       'dynamodb:Scan',
+      // ConditionCheckItem: BOOK_CARRIER guards the Load row inside the booking
+      // transaction, so a load that moved cancels the write instead of leaving an
+      // orphan ACTIVE LoadCarrier behind (same pattern as pod-actions' assign).
+      'dynamodb:ConditionCheckItem',
     ],
     resources: [
       shipmentTable.tableArn,
