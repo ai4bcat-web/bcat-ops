@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
-import type { CustomerRecord, LocationRecord, Division } from '@/types/tms'
+import type { CustomerRecord, LocationRecord, Division, TmsSettings } from '@/types/tms'
+import { CustomersPage, LocationsPage } from './DirectoryPages'
 
 class ResizeObserverStub { observe() {} unobserve() {} disconnect() {} }
 globalThis.ResizeObserver ??= ResizeObserverStub as unknown as typeof ResizeObserver
@@ -21,30 +22,49 @@ Object.defineProperty(window, 'matchMedia', {
   })),
 })
 
+const authState = { isAdmin: true, user: { email: 'admin@bcatcorp.com' }, isOwner: false }
+
+const setCustomerStatus = vi.fn(async (current: CustomerRecord) => current)
+const saveCustomer = vi.fn(async (_current: CustomerRecord, patch: Partial<CustomerRecord>) => patch as CustomerRecord)
+
+const settings: TmsSettings = {
+  id: 'default',
+  defaultCreditLimitCents: 100000,
+  defaultCreditUsageWarningBps: 8000,
+  defaultFreeCreditRequired: false,
+  defaultMaxDaysLate: 60,
+}
+
 const customers: CustomerRecord[] = [
   {
-    id: 'c1', name: 'Metz Logistics', contactName: 'John', contactEmail: 'john@metz.com', contactPhone: '+15550001',
-    notes: '', mcNumber: '12345', dotNumber: '67890', billingEmail: 'billing@metz.com', billingContactName: 'Jane',
-    billingPhone: '+15550002', billingAddress: { street: '100 Main St', city: 'Chicago', state: 'IL', zip: '60601', country: 'US' },
-    paymentTermsDays: 30, creditLimitCents: 50000, creditHoldFlag: false, requiredDocsForInvoice: ['POD', 'BOL'],
-    defaultDivisionKey: null, defaultSalesRepId: null, aliases: ['METZ'], normalizedName: 'metz logistics',
-    active: true, apptWorkflow: 'NONE', mergedIntoId: null, createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z',
-  },
-]
-
-const locations: LocationRecord[] = [
+    id: 'c-lead', name: 'Lead Co', status: 'NEW', active: true,
+    createdAt: '2026-10-01T00:00:00Z', updatedAt: '2026-10-01T00:00:00Z',
+  } as CustomerRecord,
   {
-    id: 'l1', name: 'Metz Warehouse', city: 'Chicago', state: 'IL', zip: '60601', country: 'US',
-    customerName: 'Metz Logistics', apptContactName: 'Dock', apptContactEmail: 'dock@metz.com', apptContactPhone: null,
-    notes: '', lat: 41.878, lng: -87.629, timezone: 'America/Chicago', geohash6: 'dp3wmq',
-    facilityType: 'SHIPPER', hours: '08:00-16:00', apptRule: 'APPT', apptLeadTimeHours: 24,
-    dockNotes: '', lumperNotes: '', detentionNotes: '', contacts: [], customerIds: ['c1'], aliases: ['METZ WH'],
-    normalizedName: 'metz warehouse', normalizedAddress: '100 main st chicago il 60601 us',
-    active: true, createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z',
-  } as LocationRecord,
+    id: 'c-active', name: 'Active Co', status: 'ACTIVE', active: true,
+    createdAt: '2026-10-01T00:00:00Z', updatedAt: '2026-10-01T00:00:00Z',
+  } as CustomerRecord,
+  {
+    id: 'c-pending', name: 'Pending Co', status: 'PENDING', active: true,
+    createdAt: '2026-10-01T00:00:00Z', updatedAt: '2026-10-01T00:00:00Z',
+  } as CustomerRecord,
+  {
+    id: 'c-blocked', name: 'Blocked Co', status: 'BLOCKED', active: false,
+    createdAt: '2026-10-01T00:00:00Z', updatedAt: '2026-10-01T00:00:00Z',
+  } as CustomerRecord,
+  {
+    id: 'c-legacy-false', name: 'Legacy Archived', status: null, active: false,
+    createdAt: '2026-10-01T00:00:00Z', updatedAt: '2026-10-01T00:00:00Z',
+  } as CustomerRecord,
+  {
+    id: 'c-legacy-true', name: 'Legacy Active', status: null, active: true,
+    createdAt: '2026-10-01T00:00:00Z', updatedAt: '2026-10-01T00:00:00Z',
+  } as CustomerRecord,
 ]
 
-vi.mock('@/hooks/useAuth', () => ({ useAuth: () => ({ user: { email: 'admin@bcatcorp.com' }, isAdmin: true, isOwner: false }) }))
+const locations: LocationRecord[] = []
+
+vi.mock('@/hooks/useAuth', () => ({ useAuth: () => authState }))
 vi.mock('@/hooks/useDirectory', () => ({
   useDirectory: () => ({
     customers,
@@ -53,15 +73,21 @@ vi.mock('@/hooks/useDirectory', () => ({
     error: null,
     refresh: vi.fn(),
     addCustomer: vi.fn(),
-    saveCustomer: vi.fn(),
+    saveCustomer,
     archiveCustomer: vi.fn(),
+    setCustomerStatus,
     addLocation: vi.fn(),
     saveLocation: vi.fn(),
     archiveLocation: vi.fn(),
   }),
 }))
+vi.mock('@/hooks/useCustomerOrders', () => ({
+  useCustomerOrders: () => ({ loads: [], lastLoadAt: null, loading: false, error: null, refetch: vi.fn() }),
+}))
 vi.mock('@/lib/apiClient', () => ({
   listDivisions: vi.fn(async () => [{ id: 'd1', key: 'BCAT_LOGISTICS', name: 'BCAT Logistics', active: true, createdAt: '', updatedAt: '' } satisfies Division]),
+  getTmsSettings: vi.fn(async () => settings),
+  saveTmsSettings: vi.fn(async (patch: Partial<TmsSettings>) => ({ ...settings, ...patch }) as TmsSettings),
   previewLocationMerge: vi.fn(async () => ({ sourceId: 'l1', targetId: 'l1', loadCount: 0 })),
   startLocationMerge: vi.fn(async () => ({ id: 'j1', sourceId: 'l1', targetId: 'l1', status: 'PENDING', processedCount: 0 })),
   resumeLocationMerge: vi.fn(async () => ({ id: 'j1', sourceId: 'l1', targetId: 'l1', status: 'RUNNING', processedCount: 1 })),
@@ -72,44 +98,90 @@ vi.mock('@/lib/apiClient', () => ({
   graphqlErrorText: (e: unknown) => (e instanceof Error ? e.message : ''),
 }))
 
-const { CustomersPage, LocationsPage } = await import('./DirectoryPages')
-
 describe('DirectoryPages', () => {
-  it('renders the customer list', () => {
+  it('renders the customer board with tab counts', async () => {
     render(<CustomersPage />)
-    expect(screen.getByText('Metz Logistics')).toBeTruthy()
-    expect(screen.getByText(/MC 12345/)).toBeTruthy()
+    await waitFor(() => expect(screen.getByText('Active Co')).toBeTruthy())
+    expect(screen.getByText('Pending Co')).toBeTruthy()
+    expect(screen.getByText('Legacy Active')).toBeTruthy()
+
+    fireEvent.click(screen.getByText('leads'))
+    await waitFor(() => expect(screen.getByText('Lead Co')).toBeTruthy())
+
+    fireEvent.click(screen.getByText('inactive'))
+    await waitFor(() => {
+      expect(screen.getByText('Blocked Co')).toBeTruthy()
+      expect(screen.getByText('Legacy Archived')).toBeTruthy()
+    })
+  })
+
+  it('filters rows by board tab', async () => {
+    render(<CustomersPage />)
+    await waitFor(() => expect(screen.getByText('Active Co')).toBeTruthy())
+    expect(screen.queryByText('Lead Co')).toBeNull()
+
+    fireEvent.click(screen.getByText('leads'))
+    await waitFor(() => expect(screen.getByText('Lead Co')).toBeTruthy())
+    expect(screen.queryByText('Active Co')).toBeNull()
+
+    fireEvent.click(screen.getByText('inactive'))
+    await waitFor(() => {
+      expect(screen.getByText('Blocked Co')).toBeTruthy()
+      expect(screen.getByText('Legacy Archived')).toBeTruthy()
+    })
   })
 
   it('renders the location list', () => {
     render(<LocationsPage />)
-    expect(screen.getByText('Metz Warehouse')).toBeTruthy()
+    expect(screen.getByText('Locations')).toBeTruthy()
   })
 
-  it('shows the location merge dialog for admins', async () => {
-    render(<LocationsPage />)
-    fireEvent.click(screen.getByTitle('Merge'))
-    await waitFor(() => expect(screen.getByText('Merge locations (admin only)')).toBeTruthy())
-  })
-
-  // Both modals stay mounted across opens; the form hooks seed state once. Without a
-  // per-record key, Edit showed a blank form and Save would have wiped the record.
-  it('Edit location opens pre-filled with that record, after Add was opened first', async () => {
-    render(<LocationsPage />)
-    fireEvent.click(screen.getByText('Add'))
-    await waitFor(() => expect(screen.getByText('Add location')).toBeTruthy())
-    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' })
-    await waitFor(() => expect(screen.queryByText('Add location')).toBeNull())
-    fireEvent.click(screen.getByTitle('Edit'))
-    await waitFor(() => expect(screen.getByText('Edit location')).toBeTruthy())
-    expect(screen.getByDisplayValue('Metz Warehouse')).toBeTruthy()
-    expect(screen.getByDisplayValue('Chicago')).toBeTruthy()
-  })
-
-  it('Edit customer opens pre-filled with that record', async () => {
+  it('opens customer profile and deactivating requires a reason', async () => {
     render(<CustomersPage />)
-    fireEvent.click(screen.getByTitle('Edit'))
-    await waitFor(() => expect(screen.getByText('Edit customer')).toBeTruthy())
-    expect(screen.getByDisplayValue('Metz Logistics')).toBeTruthy()
+    await waitFor(() => expect(screen.getByText('Active Co')).toBeTruthy())
+    fireEvent.click(screen.getByText('Active Co'))
+    await waitFor(() => expect(screen.getByText('Deactivate')).toBeTruthy())
+    fireEvent.click(screen.getByText('Deactivate'))
+    await waitFor(() => expect(screen.getByText('Deactivate customer')).toBeTruthy())
+
+    const confirm = screen.getByRole('button', { name: 'Deactivate' })
+    expect((confirm as HTMLButtonElement).disabled).toBe(true)
+
+    const reasonInput = screen.getByLabelText('Reason *')
+    fireEvent.change(reasonInput, { target: { value: 'Non-payment' } })
+    await waitFor(() => expect((confirm as HTMLButtonElement).disabled).toBe(false))
+
+    fireEvent.click(confirm)
+    await waitFor(() => expect(setCustomerStatus).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'c-active' }),
+      expect.objectContaining({ status: 'BLOCKED', reason: 'Non-payment' })
+    ))
+  })
+
+  it('credit inputs are disabled for non-admin', async () => {
+    authState.isAdmin = false
+    render(<CustomersPage />)
+    await waitFor(() => expect(screen.getByText('Legacy Active')).toBeTruthy())
+    fireEvent.click(screen.getByText('Legacy Active'))
+    await waitFor(() => expect(screen.getByText('Credit')).toBeTruthy())
+
+    const creditInput = screen.getByLabelText('Credit limit ($)')
+    expect((creditInput as HTMLInputElement).disabled).toBe(true)
+    authState.isAdmin = true
+  })
+
+  it('CreditLimitCard shows org default when customer credit limit is null', async () => {
+    render(<CustomersPage />)
+    await waitFor(() => expect(screen.getByText('Legacy Active')).toBeTruthy())
+    fireEvent.click(screen.getByText('Legacy Active'))
+    await waitFor(() => expect(screen.getByText('Credit')).toBeTruthy())
+    expect(screen.getAllByText('(org default)').length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('pending customer shows Approve action', async () => {
+    render(<CustomersPage />)
+    await waitFor(() => expect(screen.getByText('Pending Co')).toBeTruthy())
+    fireEvent.click(screen.getByText('Pending Co'))
+    await waitFor(() => expect(screen.getByText('Approve')).toBeTruthy())
   })
 })

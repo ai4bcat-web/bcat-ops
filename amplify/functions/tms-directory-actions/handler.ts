@@ -72,6 +72,7 @@ async function getDataClient(): Promise<DataClient> {
 
 type Action =
   | 'UPSERT_CUSTOMER'
+  | 'SET_CUSTOMER_STATUS'
   | 'UPSERT_LOCATION'
   | 'ARCHIVE_CUSTOMER'
   | 'ARCHIVE_LOCATION'
@@ -98,6 +99,7 @@ interface AppSyncEvent {
 interface Caller {
   email: string
   sub: string
+  groups?: string[]
 }
 
 // ── Auth ─────────────────────────────────────────────────────────────────────
@@ -136,6 +138,7 @@ async function authorize(action: Action, identity?: AppSyncIdentity | null): Pro
 
   const directoryActions: Partial<Record<Action, true>> = {
     UPSERT_CUSTOMER: true,
+    SET_CUSTOMER_STATUS: true,
     ARCHIVE_CUSTOMER: true,
     UPSERT_LOCATION: true,
     ARCHIVE_LOCATION: true,
@@ -156,7 +159,7 @@ async function authorize(action: Action, identity?: AppSyncIdentity | null): Pro
     if (!isOwner && !isAdmin) throw new Error(`Forbidden: ${action} requires owner or ADMIN`)
   }
 
-  return { email, sub: identity.sub }
+  return { email, sub: identity.sub, groups }
 }
 
 // ── Input helpers ──────────────────────────────────────────────────────────────
@@ -261,6 +264,225 @@ function validateAwsIntegerCents(value: unknown, label: string): number | null {
   if (num == null) return null
   if (num < -2_147_483_648 || num > 2_147_483_647) throw new Error(`${label} exceeds GraphQL integer range`)
   return num
+}
+
+// ── Customer v2 validators ───────────────────────────────────────────────────
+
+const CUSTOMER_STATUSES = [
+  'NEW', 'CONTACTED', 'QUALIFIED', 'QUOTED', 'NURTURING',
+  'PENDING', 'ACTIVE', 'DORMANT', 'CLOSED', 'BLOCKED',
+] as const
+type CustomerStatus = (typeof CUSTOMER_STATUSES)[number]
+
+const CUSTOMER_CONTACT_TYPES = ['PRIMARY', 'BILLING', 'OPERATIONS', 'SALES', 'CLAIMS', 'OTHER'] as const
+const CUSTOMER_NOTIFICATIONS = [
+  'APPT_SCHEDULED', 'LOADING', 'PICKED_UP', 'IN_TRANSIT',
+  'OUT_FOR_DELIVERY', 'UNLOADING', 'DELIVERED', 'INVOICE_SENT',
+] as const
+const REFERENCE_LEVELS = ['ORDER', 'HANDLING_UNIT', 'PACKAGE', 'STOP'] as const
+const CHARGE_CALCS = ['FLAT', 'PER_MILE', 'PER_CWT', 'PERCENT'] as const
+const PRICING_MODES = ['MARGIN', 'MARKUP', 'PROFIT'] as const
+const INVOICE_FREQUENCIES = ['DAILY', 'TWICE_WEEKLY', 'WEEKLY', 'MONTHLY'] as const
+
+function assertArrayOf<T>(
+  value: unknown,
+  label: string,
+  maxLen: number,
+  validate: (item: unknown, index: number) => T,
+): T[] | null {
+  const arr = optionalJsonArray(value)
+  if (arr == null) return null
+  if (arr.length > maxLen) throw new Error(`${label} must have at most ${maxLen} elements`)
+  return arr.map((item, i) => validate(item, i))
+}
+
+function assertRecord(item: unknown, index: number, label: string): Record<string, unknown> {
+  if (item == null || typeof item !== 'object' || Array.isArray(item)) {
+    throw new Error(`${label} element ${index} must be an object`)
+  }
+  return item as Record<string, unknown>
+}
+
+function assertNonEmptyString(value: unknown, label: string): string {
+  const s = assertString(value, label)
+  if (!s) throw new Error(`${label} cannot be empty`)
+  return s
+}
+
+function assertStringArray(value: unknown, label: string): string[] {
+  if (!Array.isArray(value)) throw new Error(`${label} must be an array`)
+  return value.map((v, i) => {
+    if (typeof v !== 'string' || !v.trim()) throw new Error(`${label} element ${i} must be a non-empty string`)
+    return v.trim()
+  })
+}
+
+function assertEnum<T extends string>(value: unknown, allowed: readonly T[], label: string): T {
+  const s = assertString(value, label)
+  if (!(allowed as readonly string[]).includes(s)) throw new Error(`${label} must be one of ${allowed.join(', ')}`)
+  return s as T
+}
+
+function optionalEnumStrict<T extends string>(value: unknown, allowed: readonly T[], label: string): T | null {
+  if (value == null) return null
+  return assertEnum(value, allowed, label)
+}
+
+function optionalAddress(value: unknown): Record<string, unknown> | null {
+  const obj = optionalJsonObject(value)
+  if (obj == null) return null
+  return {
+    street: optionalString(obj.street, 255),
+    city: optionalString(obj.city, 100),
+    state: optionalString(obj.state, 50),
+    zip: optionalString(obj.zip, 20),
+    country: optionalString(obj.country, 50),
+  }
+}
+
+function validateCustomerContacts(value: unknown, billToIds: Set<string>): Record<string, unknown>[] | null {
+  return assertArrayOf(value, 'contacts', 100, (item, i) => {
+    const c = assertRecord(item, i, 'contacts')
+    const id = assertNonEmptyString(c.id, `contacts[${i}].id`)
+    const types = assertStringArray(c.types ?? [], `contacts[${i}].types`)
+    for (const t of types) {
+      if (!CUSTOMER_CONTACT_TYPES.includes(t as (typeof CUSTOMER_CONTACT_TYPES)[number])) {
+        throw new Error(`contacts[${i}].types contains invalid value: ${t}`)
+      }
+    }
+    const notifications = assertStringArray(c.notifications ?? [], `contacts[${i}].notifications`)
+    for (const n of notifications) {
+      if (!CUSTOMER_NOTIFICATIONS.includes(n as (typeof CUSTOMER_NOTIFICATIONS)[number])) {
+        throw new Error(`contacts[${i}].notifications contains invalid value: ${n}`)
+      }
+    }
+    const billToId = c.billToId == null ? null : optionalString(c.billToId, 100)
+    if (billToId && !billToIds.has(billToId)) {
+      throw new Error(`contacts[${i}].billToId references a bill-to not present in this payload`)
+    }
+    return {
+      id,
+      name: assertNonEmptyString(c.name, `contacts[${i}].name`),
+      email: optionalString(c.email, 254),
+      phone: optionalString(c.phone, 50),
+      title: optionalString(c.title, 100),
+      types,
+      billToId,
+      notifications,
+      active: optionalBoolean(c.active) ?? true,
+    }
+  })
+}
+
+function validateBillToParties(value: unknown): { items: Record<string, unknown>[]; defaultId: string | null; ids: Set<string> } {
+  const items = assertArrayOf(value, 'billToParties', 100, (item, i) => {
+    const b = assertRecord(item, i, 'billToParties')
+    return {
+      id: assertNonEmptyString(b.id, `billToParties[${i}].id`),
+      name: assertNonEmptyString(b.name, `billToParties[${i}].name`),
+      address: optionalAddress(b.address),
+      email: optionalString(b.email, 254),
+      phone: optionalString(b.phone, 50),
+      paymentTermsDays: optionalInteger(b.paymentTermsDays, { min: 0 }),
+      isDefault: optionalBoolean(b.isDefault) ?? false,
+    }
+  })
+  const ids = new Set(items?.map((b) => String(b.id)) ?? [])
+  const defaults = items?.filter((b) => b.isDefault) ?? []
+  if (defaults.length > 1) throw new Error('At most one bill-to party may be default')
+  return { items: items ?? [], defaultId: (defaults[0]?.id as string) ?? null, ids }
+}
+
+function validateRequiredReferences(value: unknown): Record<string, unknown>[] | null {
+  return assertArrayOf(value, 'requiredReferences', 100, (item, i) => {
+    const r = assertRecord(item, i, 'requiredReferences')
+    const code = assertNonEmptyString(r.code, `requiredReferences[${i}].code`)
+    const level = assertEnum(r.level, REFERENCE_LEVELS, `requiredReferences[${i}].level`)
+    const count = optionalInteger(r.countOnNewOrder, { min: 0, max: 10 }) ?? 0
+    return { code, label: optionalString(r.label, 100), level, display: optionalBoolean(r.display) ?? true, countOnNewOrder: count }
+  })
+}
+
+function validateChargeCodeOverrides(value: unknown): Record<string, unknown>[] | null {
+  return assertArrayOf(value, 'chargeCodeOverrides', 100, (item, i) => {
+    const o = assertRecord(item, i, 'chargeCodeOverrides')
+    return {
+      code: assertNonEmptyString(o.code, `chargeCodeOverrides[${i}].code`),
+      display: optionalBoolean(o.display) ?? true,
+      customerCode: optionalString(o.customerCode, 50),
+      label: optionalString(o.label, 100),
+      category: optionalString(o.category, 100),
+      calculatedBy: optionalEnumStrict(o.calculatedBy, CHARGE_CALCS, `chargeCodeOverrides[${i}].calculatedBy`),
+      defaultAmountCents: validateAwsIntegerCents(o.defaultAmountCents, `chargeCodeOverrides[${i}].defaultAmountCents`),
+    }
+  })
+}
+
+function validateChargeCodes(value: unknown): Record<string, unknown>[] | null {
+  return assertArrayOf(value, 'chargeCodes', 1000, (item, i) => {
+    const d = assertRecord(item, i, 'chargeCodes')
+    return {
+      code: assertNonEmptyString(d.code, `chargeCodes[${i}].code`),
+      label: assertNonEmptyString(d.label, `chargeCodes[${i}].label`),
+      category: optionalString(d.category, 100),
+      calculatedBy: assertEnum(d.calculatedBy, CHARGE_CALCS, `chargeCodes[${i}].calculatedBy`),
+      defaultAmountCents: validateAwsIntegerCents(d.defaultAmountCents, `chargeCodes[${i}].defaultAmountCents`),
+    }
+  })
+}
+
+function validateDefaultCharges(value: unknown): Record<string, unknown>[] | null {
+  return assertArrayOf(value, 'defaultCharges', 100, (item, i) => {
+    const d = assertRecord(item, i, 'defaultCharges')
+    return {
+      code: assertNonEmptyString(d.code, `defaultCharges[${i}].code`),
+      amountCents: validateAwsIntegerCents(d.amountCents, `defaultCharges[${i}].amountCents`) ?? 0,
+      count: optionalInteger(d.count, { min: 0 }),
+    }
+  })
+}
+
+function validatePricingDefaults(value: unknown): Record<string, unknown> | null {
+  const obj = optionalJsonObject(value)
+  if (obj == null) return null
+  const mode = assertEnum(obj.mode, PRICING_MODES, 'pricingDefaults.mode')
+  return {
+    mode,
+    defaultBps: optionalInteger(obj.defaultBps, { min: 0, max: 10000 }),
+    defaultProfitCents: validateAwsIntegerCents(obj.defaultProfitCents, 'pricingDefaults.defaultProfitCents'),
+    minProfitCents: validateAwsIntegerCents(obj.minProfitCents, 'pricingDefaults.minProfitCents'),
+    maxProfitCents: validateAwsIntegerCents(obj.maxProfitCents, 'pricingDefaults.maxProfitCents'),
+    singleChargeCode: optionalString(obj.singleChargeCode, 50),
+    distribution: optionalString(obj.distribution, 100),
+    gpSplitBps: optionalInteger(obj.gpSplitBps, { min: 0, max: 10000 }),
+  }
+}
+
+function validateQuotingDefaults(value: unknown): Record<string, unknown> | null {
+  const obj = optionalJsonObject(value)
+  if (obj == null) return null
+  const portalStatusMask = optionalStringArray(obj.portalStatusMask, 50)
+  const blockedLtlCarrierIds = optionalStringArray(obj.blockedLtlCarrierIds, 100)
+  const selfQuoteCarrierIds = optionalStringArray(obj.selfQuoteCarrierIds, 100)
+  return {
+    defaultMode: optionalString(obj.defaultMode, 50),
+    hoursToQuote: optionalInteger(obj.hoursToQuote, { min: 0 }),
+    notes: optionalString(obj.notes, 4000),
+    portalLtlDispatchMode: optionalString(obj.portalLtlDispatchMode, 50),
+    portalStatusMask,
+    blockedLtlCarrierIds,
+    selfQuoteCarrierIds,
+  }
+}
+
+function validateVisibilityPrefs(value: unknown): Record<string, unknown> | null {
+  const obj = optionalJsonObject(value)
+  if (obj == null) return null
+  return {
+    milestoneEmails: optionalBoolean(obj.milestoneEmails) ?? false,
+    sharedTrackingLink: optionalBoolean(obj.sharedTrackingLink) ?? false,
+    shipperPortal: optionalBoolean(obj.shipperPortal) ?? false,
+  }
 }
 
 function nowIso(): string {
@@ -496,6 +718,20 @@ function deriveLegacyFields(stops: StopShape[]): Record<string, unknown> {
 
 // ── Customer actions ───────────────────────────────────────────────────────────
 
+function isLeadStatus(status: CustomerStatus | null): boolean {
+  if (status == null) return false
+  return ['NEW', 'CONTACTED', 'QUALIFIED', 'QUOTED', 'NURTURING'].includes(status)
+}
+
+function isInactiveStatus(status: CustomerStatus | null): boolean {
+  return status === 'CLOSED' || status === 'BLOCKED'
+}
+
+function deriveActiveFromStatus(status: CustomerStatus | null): boolean {
+  if (status == null) return true
+  return !isInactiveStatus(status)
+}
+
 async function upsertCustomer(input: Record<string, unknown>, caller: Caller): Promise<Record<string, unknown>> {
   const name = assertString(input.name, 'name')
   const normalizedName = normalizeName(name)
@@ -518,10 +754,22 @@ async function upsertCustomer(input: Record<string, unknown>, caller: Caller): P
     isCreate = true
   }
 
+  const existingStatus = (existing?.status as CustomerStatus | undefined) ?? null
+
   if (existing) {
     if (existing.mergedIntoId) throw new Error('Cannot edit a merged customer')
-    if (existing.active === false && input.active !== true) {
+    // Legacy archived rows (no status, active=false) require explicit reactivation.
+    // Once a status exists, active is derived and edits go through SET_CUSTOMER_STATUS.
+    if (existingStatus == null && existing.active === false && input.active !== true) {
       throw new Error('Cannot edit an archived customer; unarchive via another action')
+    }
+  }
+
+  // Status may only change through SET_CUSTOMER_STATUS.
+  if (!isCreate && input.status !== undefined) {
+    const requested = optionalEnumStrict(input.status, CUSTOMER_STATUSES, 'status')
+    if (requested !== existingStatus) {
+      throw new Error('Change status with SET_CUSTOMER_STATUS')
     }
   }
 
@@ -532,6 +780,58 @@ async function upsertCustomer(input: Record<string, unknown>, caller: Caller): P
       throw new Error(`Duplicate customer name: ${other.name} (id ${other.id}) — pick the existing record or add the name as its alias`)
     }
   }
+
+  // ── JSON array validation (order matters: bill-to IDs are referenced by contacts) ─
+  const { items: billToParties, ids: billToIds } = validateBillToParties(input.billToParties)
+  const contacts = validateCustomerContacts(input.contacts, billToIds)
+  const requiredReferences = validateRequiredReferences(input.requiredReferences)
+  const chargeCodeOverrides = validateChargeCodeOverrides(input.chargeCodeOverrides)
+  const defaultCharges = validateDefaultCharges(input.defaultCharges)
+  const pricingDefaults = validatePricingDefaults(input.pricingDefaults)
+  const quotingDefaults = validateQuotingDefaults(input.quotingDefaults)
+  const visibilityPrefs = validateVisibilityPrefs(input.visibilityPrefs)
+
+  // ── Admin-only credit fields ───────────────────────────────────────────────
+  const isAdmin = caller.email === OWNER_EMAIL || (caller.groups ?? []).includes(ADMIN_GROUP)
+  const creditFields = ['creditLimitCents', 'creditHoldFlag', 'freeCreditRequired', 'creditUsageWarningBps', 'maxDaysLate'] as const
+  for (const field of creditFields) {
+    if (input[field] !== undefined && !isAdmin) {
+      const existingValue = existing?.[field]
+      const requestedValue = field === 'creditLimitCents'
+        ? validateAwsIntegerCents(input[field], field)
+        : field === 'creditUsageWarningBps'
+          ? optionalInteger(input[field], { min: 0, max: 10000 })
+          : field === 'maxDaysLate'
+            ? optionalInteger(input[field], { min: 0 })
+            : optionalBoolean(input[field])
+      const coerceBoolean = (field === 'creditHoldFlag' || field === 'freeCreditRequired')
+      const normalizedRequested = coerceBoolean ? (requestedValue ?? false) : requestedValue
+      const normalizedExisting = coerceBoolean ? (existingValue ?? false) : (existingValue ?? null)
+      if (JSON.stringify(normalizedRequested) !== JSON.stringify(normalizedExisting)) {
+        throw new Error(`Forbidden: ${field} requires owner or ADMIN`)
+      }
+    }
+  }
+
+  // ── Status defaults and approvals ──────────────────────────────────────────
+  const settings = await getSettings()
+  const requireApproval = settings?.requireCustomerApproval === true
+
+  let status: CustomerStatus | null = null
+  if (isCreate) {
+    const requested = optionalEnumStrict(input.status, CUSTOMER_STATUSES, 'status')
+    if (requested != null) {
+      status = requested
+    } else {
+      // No status requested: default to ACTIVE, or PENDING if approval is required
+      // and the caller is not an owner/admin or primary owner of this account.
+      const autoActive = !requireApproval || isAdmin
+      status = autoActive ? 'ACTIVE' : 'PENDING'
+    }
+  }
+  // Updates keep existingStatus (status changes are handled by SET_CUSTOMER_STATUS).
+  const finalStatus = isCreate ? status : existingStatus
+  const active = finalStatus != null ? deriveActiveFromStatus(finalStatus) : (optionalBoolean(input.active) ?? true)
 
   const now = nowIso()
   const item: Record<string, unknown> = {
@@ -555,10 +855,39 @@ async function upsertCustomer(input: Record<string, unknown>, caller: Caller): P
     defaultSalesRepId: optionalString(input.defaultSalesRepId, 100),
     aliases,
     normalizedName,
-    active: optionalBoolean(input.active) ?? true,
+    active,
     // Unset stays null: the /batory/i name fallback remains in force until an admin decides.
     apptWorkflow: optionalEnum(input.apptWorkflow, ['NONE', 'BATORY'] as const, 'apptWorkflow'),
     mergedIntoId: undefined,
+
+    // Customer v2
+    status: finalStatus,
+    statusReason: isCreate ? null : (existing?.statusReason as string | undefined) ?? null,
+    statusChangedAt: isCreate ? null : (existing?.statusChangedAt as string | undefined) ?? null,
+    statusChangedBy: isCreate ? null : (existing?.statusChangedBy as string | undefined) ?? null,
+    replacementCustomerId: isCreate ? null : (existing?.replacementCustomerId as string | undefined) ?? null,
+    leadSource: optionalString(input.leadSource, 100),
+    industry: optionalString(input.industry, 100),
+    serviceTier: optionalString(input.serviceTier, 100),
+    website: optionalString(input.website, 255),
+    freeCreditRequired: optionalBoolean(input.freeCreditRequired),
+    creditUsageWarningBps: optionalInteger(input.creditUsageWarningBps, { min: 0, max: 10000 }),
+    maxDaysLate: optionalInteger(input.maxDaysLate, { min: 0 }),
+    contacts,
+    billToParties,
+    requiredReferences,
+    chargeCodeOverrides,
+    defaultCharges,
+    pricingDefaults,
+    quotingDefaults,
+    invoiceFrequency: optionalEnumStrict(input.invoiceFrequency, INVOICE_FREQUENCIES, 'invoiceFrequency'),
+    gpSplitBps: optionalInteger(input.gpSplitBps, { min: 0, max: 10000 }),
+    rateConTerms: optionalString(input.rateConTerms, 8000),
+    visibilityPrefs,
+    teamKey: optionalString(input.teamKey, 100),
+    operatedById: optionalString(input.operatedById, 100),
+    accountOwnerIds: optionalStringArray(input.accountOwnerIds, 100),
+
     createdBy: isCreate ? caller.email : (existing?.createdBy as string) ?? caller.email,
     updatedBy: caller.email,
     createdAt: isCreate ? now : (existing?.createdAt as string) ?? now,
@@ -601,6 +930,103 @@ async function upsertCustomer(input: Record<string, unknown>, caller: Caller): P
       }),
     )
     if (!result.Attributes) throw new Error('Customer update failed')
+    return unmarshall(result.Attributes)
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err)
+    if (msg.includes('ConditionalCheckFailed') || msg.includes('TransactionCanceled')) {
+      throw conflictError('customer', err)
+    }
+    throw err
+  }
+}
+
+async function setCustomerStatus(input: Record<string, unknown>, caller: Caller): Promise<Record<string, unknown>> {
+  const id = assertString(input.id, 'id')
+  const expectedUpdatedAt = assertExpectedUpdatedAt(input)
+  const requested = assertEnum(input.status, CUSTOMER_STATUSES, 'status')
+
+  if (requested === 'DORMANT') throw new Error('DORMANT is derived, not a stored status')
+
+  const existing = await getById(CUSTOMER_TABLE_NAME, id)
+  if (!existing) throw new Error(`Customer not found: ${id}`)
+  if (existing.mergedIntoId) throw new Error('Cannot change status of a merged customer')
+
+  const current = (existing.status as CustomerStatus | undefined) ?? null
+  const settings = await getSettings()
+  const requireApproval = settings?.requireCustomerApproval === true
+  const isAdmin = caller.email === OWNER_EMAIL || (caller.groups ?? []).includes(ADMIN_GROUP)
+
+  // Transition rules
+  let nextStatus: CustomerStatus = requested
+
+  if (requested === 'CLOSED' && !isLeadStatus(current)) {
+    throw new Error('CLOSED is only allowed from a lead stage')
+  }
+
+  if (requested === 'BLOCKED') {
+    const reason = assertString(input.reason ?? '', 'reason')
+    if (reason.length > 250) throw new Error('reason must be at most 250 characters')
+    const replacementId = optionalString(input.replacementCustomerId, 100)
+    if (replacementId) {
+      if (replacementId === id) throw new Error('replacementCustomerId cannot be the customer itself')
+      const replacement = await getById(CUSTOMER_TABLE_NAME, replacementId)
+      if (!replacement) throw new Error(`Replacement customer not found: ${replacementId}`)
+      if (replacement.mergedIntoId) throw new Error('Replacement customer is merged')
+      const replacementStatus = (replacement.status as CustomerStatus | undefined) ?? null
+      const replacementActive = replacementStatus != null ? deriveActiveFromStatus(replacementStatus) : replacement.active !== false
+      if (!replacementActive) throw new Error('Replacement customer is inactive')
+    }
+  }
+
+  if (requested === 'ACTIVE') {
+    if (current === 'PENDING') {
+      if (!isAdmin) throw new Error('PENDING → ACTIVE requires owner or ADMIN')
+      nextStatus = 'ACTIVE'
+    } else if (current === null || isLeadStatus(current) || current === 'BLOCKED') {
+      if (requireApproval && !isAdmin) {
+        nextStatus = 'PENDING'
+      } else {
+        nextStatus = 'ACTIVE'
+      }
+    } else {
+      // ACTIVE → ACTIVE or any other non-terminal transition to ACTIVE is fine.
+      nextStatus = 'ACTIVE'
+    }
+  }
+
+  // Lead stages may transition freely among themselves; nothing extra to enforce.
+  // PENDING/BLOCKED/null → ACTIVE handled above. BLOCKED → lead? Plan doesn't mention,
+  // so treat as allowed (blocked rows can be reactivated to any open state).
+
+  const now = nowIso()
+  const reason = requested === 'BLOCKED' ? assertString(input.reason ?? '', 'reason') : optionalString(input.reason, 250)
+  const replacementCustomerId = optionalString(input.replacementCustomerId, 100)
+  const statusReason = requested === 'BLOCKED' && reason ? reason : (requested === 'CLOSED' ? reason : null)
+
+  const values: Record<string, AttributeValue> = {
+    ':status': { S: nextStatus },
+    ':statusReason': statusReason == null ? { NULL: true } : { S: statusReason },
+    ':statusChangedAt': { S: now },
+    ':statusChangedBy': { S: caller.email },
+    ':replacementCustomerId': replacementCustomerId == null ? { NULL: true } : { S: replacementCustomerId },
+    ':active': { BOOL: deriveActiveFromStatus(nextStatus) },
+    ':updatedAt': { S: now },
+    ':updatedBy': { S: caller.email },
+  }
+
+  try {
+    const result = await dynamo.send(
+      new UpdateItemCommand({
+        TableName: CUSTOMER_TABLE_NAME,
+        Key: marshall({ id }),
+        ConditionExpression: buildDynamoCasCondition(values, expectedUpdatedAt),
+        UpdateExpression: 'SET #status = :status, statusReason = :statusReason, statusChangedAt = :statusChangedAt, statusChangedBy = :statusChangedBy, replacementCustomerId = :replacementCustomerId, active = :active, updatedAt = :updatedAt, updatedBy = :updatedBy',
+        ExpressionAttributeNames: { '#status': 'status' },
+        ExpressionAttributeValues: values,
+        ReturnValues: 'ALL_NEW',
+      }),
+    )
+    if (!result.Attributes) throw new Error('Customer status update failed')
     return unmarshall(result.Attributes)
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err)
@@ -989,6 +1415,18 @@ async function saveSettings(input: Record<string, unknown>, caller: Caller): Pro
     loadStatusRules: keep(input.loadStatusRules, optionalJsonObject, 'loadStatusRules'),
     invoiceNumberFormat: keep(input.invoiceNumberFormat, (v) => optionalString(v, 50), 'invoiceNumberFormat'),
     autoClearPastAppts: keep(input.autoClearPastAppts, (v) => (typeof v === 'boolean' ? v : undefined), 'autoClearPastAppts'),
+
+    // Customer v2 org defaults
+    defaultCreditLimitCents: keep(input.defaultCreditLimitCents, (v) => validateAwsIntegerCents(v, 'defaultCreditLimitCents'), 'defaultCreditLimitCents'),
+    defaultFreeCreditRequired: keep(input.defaultFreeCreditRequired, (v) => (typeof v === 'boolean' ? v : undefined), 'defaultFreeCreditRequired'),
+    defaultCreditUsageWarningBps: keep(input.defaultCreditUsageWarningBps, (v) => optionalInteger(v, { min: 0, max: 10000 }), 'defaultCreditUsageWarningBps'),
+    defaultMaxDaysLate: keep(input.defaultMaxDaysLate, (v) => optionalInteger(v, { min: 0 }), 'defaultMaxDaysLate'),
+    requireCustomerApproval: keep(input.requireCustomerApproval, (v) => (typeof v === 'boolean' ? v : undefined), 'requireCustomerApproval'),
+    defaultRequiredDocs: keep(input.defaultRequiredDocs, (v) => optionalStringArray(v, 50), 'defaultRequiredDocs'),
+    defaultRequiredReferences: keep(input.defaultRequiredReferences, validateRequiredReferences, 'defaultRequiredReferences'),
+    chargeCodes: keep(input.chargeCodes, (v) => validateChargeCodes(v), 'chargeCodes'),
+    rateConTerms: keep(input.rateConTerms, (v) => optionalString(v, 8000), 'rateConTerms'),
+
     updatedBy: caller.email,
     createdAt: isCreate ? now : (existing?.createdAt as string) ?? now,
     updatedAt: now,
@@ -1327,6 +1765,8 @@ export const handler = async (event: AppSyncEvent): Promise<Record<string, unkno
   switch (action) {
     case 'UPSERT_CUSTOMER':
       return upsertCustomer(input, caller)
+    case 'SET_CUSTOMER_STATUS':
+      return setCustomerStatus(input, caller)
     case 'UPSERT_LOCATION':
       return upsertLocation(input, caller)
     case 'ARCHIVE_CUSTOMER':

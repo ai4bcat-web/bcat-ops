@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import {
-  listCustomers, createCustomer, updateCustomer, archiveCustomer,
+  listCustomers, createCustomer, updateCustomer, archiveCustomer, setCustomerStatus as setCustomerStatusAction,
   listLocations, createLocation, updateLocation, archiveLocation,
 } from '@/lib/apiClient'
 import type { CustomerRecord, LocationRecord } from '@/types/tms'
@@ -48,6 +48,12 @@ export function useDirectory(opts?: { includeArchived?: boolean }) {
     archiveCustomer: async (current: CustomerRecord) => {
       const c = await archiveCustomer(current.id, current.updatedAt)
       if (includeArchived) replaceCustomer(c); else setCustomers((p) => p.filter((x) => x.id !== c.id))
+      return c
+    },
+    /** Status transitions are CAS-checked server-side; here we just refresh the local row. */
+    setCustomerStatus: async (current: CustomerRecord, input: Parameters<typeof setCustomerStatusAction>[2]) => {
+      const c = await setCustomerStatusAction(current.id, current.updatedAt, input)
+      replaceCustomer(c)
       return c
     },
     addLocation: async (input: Parameters<typeof createLocation>[0]) => {

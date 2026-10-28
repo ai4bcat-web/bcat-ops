@@ -10,6 +10,129 @@ export interface Address {
   geocodeExpiresAt?: string | null
 }
 
+export type CustomerStatus =
+  | 'NEW'
+  | 'CONTACTED'
+  | 'QUALIFIED'
+  | 'QUOTED'
+  | 'NURTURING'
+  | 'PENDING'
+  | 'ACTIVE'
+  | 'DORMANT'
+  | 'CLOSED'
+  | 'BLOCKED'
+
+export type CustomerContactType =
+  | 'PRIMARY'
+  | 'BILLING'
+  | 'OPERATIONS'
+  | 'SALES'
+  | 'CLAIMS'
+  | 'OTHER'
+
+export type CustomerNotification =
+  | 'APPT_SCHEDULED'
+  | 'LOADING'
+  | 'PICKED_UP'
+  | 'IN_TRANSIT'
+  | 'OUT_FOR_DELIVERY'
+  | 'UNLOADING'
+  | 'DELIVERED'
+  | 'INVOICE_SENT'
+
+export interface CustomerContact {
+  id: string
+  name: string
+  email?: string | null
+  phone?: string | null
+  title?: string | null
+  types: CustomerContactType[]
+  billToId?: string | null
+  notifications: CustomerNotification[]
+  active: boolean
+}
+
+export interface BillToParty {
+  id: string
+  name: string
+  address?: Address | null
+  email?: string | null
+  phone?: string | null
+  paymentTermsDays?: number | null
+  isDefault: boolean
+}
+
+export type ReferenceLevel = 'ORDER' | 'HANDLING_UNIT' | 'PACKAGE' | 'STOP'
+
+export interface RequiredReference {
+  code: string
+  label?: string | null
+  level: ReferenceLevel
+  display: boolean
+  countOnNewOrder: number
+}
+
+export type ChargeCalc = 'FLAT' | 'PER_MILE' | 'PER_CWT' | 'PERCENT'
+
+/** Org catalog entry. Stored on TmsSettings.chargeCodes. */
+export interface ChargeCodeDef {
+  code: string
+  label: string
+  category?: string | null
+  calculatedBy: ChargeCalc
+  defaultAmountCents?: number | null
+}
+
+export interface ChargeCodeOverride {
+  code: string
+  display: boolean
+  customerCode?: string | null
+  label?: string | null
+  category?: string | null
+  calculatedBy?: ChargeCalc | null
+  defaultAmountCents?: number | null
+}
+
+export interface DefaultCharge {
+  code: string
+  amountCents: number
+  count?: number | null
+}
+
+export type PricingMode = 'MARGIN' | 'MARKUP' | 'PROFIT'
+
+export interface PricingDefaults {
+  mode: PricingMode
+  defaultBps?: number | null
+  defaultProfitCents?: number | null
+  minProfitCents?: number | null
+  maxProfitCents?: number | null
+  singleChargeCode?: string | null
+  distribution?: string | null
+}
+
+export interface QuotingDefaults {
+  defaultMode?: string | null
+  hoursToQuote?: number | null
+  notes?: string | null
+  portalLtlDispatchMode?: string | null
+  portalStatusMask?: string[] | null
+  blockedLtlCarrierIds?: string[] | null
+  selfQuoteCarrierIds?: string[] | null
+}
+
+export type InvoiceFrequency =
+  | 'DAILY'
+  | 'TWICE_WEEKLY'
+  | 'WEEKLY'
+  | 'MONTHLY'
+
+export interface VisibilityPrefs {
+  milestoneEmails: boolean
+  sharedTrackingLink: boolean
+  shipperPortal: boolean
+}
+
 export interface CustomerRecord {
   id: string
   name: string
@@ -40,6 +163,44 @@ export interface CustomerRecord {
   active?: boolean | null
   apptWorkflow?: 'NONE' | 'BATORY' | null
   mergedIntoId?: string | null
+
+  // Status ladder
+  status?: CustomerStatus | null
+  statusReason?: string | null
+  statusChangedAt?: string | null
+  statusChangedBy?: string | null
+  replacementCustomerId?: string | null
+
+  // Account / lead profile
+  leadSource?: string | null
+  industry?: string | null
+  serviceTier?: string | null
+  website?: string | null
+
+  // Credit controls (customer overrides; org defaults live on TmsSettings)
+  freeCreditRequired?: boolean | null
+  creditUsageWarningBps?: number | null
+  maxDaysLate?: number | null
+
+  // Billing / communication preferences
+  invoiceFrequency?: InvoiceFrequency | null
+  visibilityPrefs?: VisibilityPrefs | null
+  gpSplitBps?: number | null
+
+  // Structured JSON arrays
+  contacts?: CustomerContact[] | null
+  billToParties?: BillToParty[] | null
+  requiredReferences?: RequiredReference[] | null
+  chargeCodeOverrides?: ChargeCodeOverride[] | null
+  defaultCharges?: DefaultCharge[] | null
+  pricingDefaults?: PricingDefaults | null
+  quotingDefaults?: QuotingDefaults | null
+
+  rateConTerms?: string | null
+  teamKey?: string | null
+  operatedById?: string | null
+  accountOwnerIds?: string[] | null
+
   createdAt: string
   updatedAt: string
 }
@@ -121,6 +282,20 @@ export interface TmsSettings {
   invoiceNumberFormat?: string | null
   /** Past days leave the appointment queue's working list on their own. See splitPastAppts. */
   autoClearPastAppts?: boolean | null
+
+  // Org defaults for customer credit controls
+  defaultCreditLimitCents?: number | null
+  defaultFreeCreditRequired?: boolean | null
+  defaultCreditUsageWarningBps?: number | null
+  defaultMaxDaysLate?: number | null
+
+  requireCustomerApproval?: boolean | null
+
+  defaultRequiredDocs?: string[] | null
+  defaultRequiredReferences?: RequiredReference[] | null
+  chargeCodes?: ChargeCodeDef[] | null
+  rateConTerms?: string | null
+
   createdAt?: string
   updatedAt?: string
 }

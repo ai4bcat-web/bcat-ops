@@ -9,12 +9,14 @@ export function MoneyField({
   onChange,
   error,
   placeholder = '0.00',
+  disabled,
 }: {
-  label: string
+  label?: string
   value?: number | null
   onChange: (cents: number | null) => void
   error?: string
   placeholder?: string
+  disabled?: boolean
 }) {
   const [draft, setDraft] = useState('')
   const [localError, setLocalError] = useState<string | null>(null)
@@ -55,6 +57,7 @@ export function MoneyField({
           }}
           onBlur={() => { commit() }}
           onChange={(e) => setDraft(e.target.value)}
+          disabled={disabled}
           className="h-9 pl-7 text-sm"
         />
       </div>

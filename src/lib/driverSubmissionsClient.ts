@@ -669,7 +669,7 @@ async function addDocsToSubmission(
  * as POD and, since a POD means the trip is done, mark the delivery. Nothing is copied —
  * the same file, under the right heading.
  */
-export async function useDriverDocAsPod(docId: string, loadId: string | null | undefined, driverId: string): Promise<void> {
+export async function fileDriverDocAsPod(docId: string, loadId: string | null | undefined, driverId: string): Promise<void> {
   await gql(
     `mutation UpdateDriverSubmissionDoc($input: UpdateDriverSubmissionDocInput!) {
       updateDriverSubmissionDoc(input: $input) { id kind }

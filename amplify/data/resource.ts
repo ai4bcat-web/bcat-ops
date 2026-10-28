@@ -724,6 +724,49 @@ const schema = a.schema({
       active:         a.boolean(),
       apptWorkflow:   a.enum(['NONE', 'BATORY']), // replaces /batory/i regex
       mergedIntoId:   a.string(),                // soft-merge pointer (customer merge future)
+
+      // ── Customer v2 (Step A) ───────────────────────────────────────────────
+      status: a.enum([
+        'NEW', 'CONTACTED', 'QUALIFIED', 'QUOTED', 'NURTURING',
+        'PENDING', 'ACTIVE', 'DORMANT', 'CLOSED', 'BLOCKED',
+      ]),
+      statusReason: a.string(),
+      statusChangedAt: a.datetime(),
+      statusChangedBy: a.string(),
+      replacementCustomerId: a.string(),         // successor named on BLOCKED
+
+      // Account / lead profile
+      leadSource: a.string(),
+      industry: a.string(),
+      serviceTier: a.string(),
+      website: a.string(),
+
+      // Credit policy (customer value ?? org default ?? null/false)
+      freeCreditRequired: a.boolean(),           // null = use org default
+      creditUsageWarningBps: a.integer(),        // 0..10000 basis points
+      maxDaysLate: a.integer(),                  // ≥0
+
+      // Directory JSON arrays (validated element-by-element in tmsDirectoryActions)
+      contacts: a.json(),                        // CustomerContact[]
+      billToParties: a.json(),                   // BillToParty[]
+      requiredReferences: a.json(),              // RequiredReference[]
+      chargeCodeOverrides: a.json(),             // ChargeCodeOverride[]
+      defaultCharges: a.json(),                  // DefaultCharge[]
+
+      // Pricing / quoting defaults
+      pricingDefaults: a.json(),                 // PricingDefaults (mode MARGIN/MARKUP/PROFIT)
+      quotingDefaults: a.json(),                 // QuotingDefaults
+      invoiceFrequency: a.enum(['DAILY', 'TWICE_WEEKLY', 'WEEKLY', 'MONTHLY']),
+      gpSplitBps: a.integer(),                 // 0..10000 basis points
+
+      // Document / portal preferences
+      rateConTerms: a.string(),                  // override of TmsSettings.rateConTerms
+      visibilityPrefs: a.json(),                 // { milestoneEmails, sharedTrackingLink, shipperPortal }
+
+      // Ownership
+      teamKey: a.string(),
+      operatedById: a.string(),                  // Cognito username
+      accountOwnerIds: a.string().array(),       // [0] is primary owner
     })
     .secondaryIndexes((index) => [index('normalizedName')])
     // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
@@ -822,6 +865,17 @@ const schema = a.schema({
        * turning it back off restores every row — nothing is written to the loads.
        */
       autoClearPastAppts:    a.boolean(),
+
+      // ── Customer v2 org defaults (Step A) ──────────────────────────────────
+      defaultCreditLimitCents: a.integer(),       // ≥0
+      defaultFreeCreditRequired: a.boolean(),
+      defaultCreditUsageWarningBps: a.integer(),  // 0..10000
+      defaultMaxDaysLate: a.integer(),            // ≥0
+      requireCustomerApproval: a.boolean(),       // non-admin creates land on PENDING
+      defaultRequiredDocs: a.string().array(),    // e.g. ['POD','BOL']
+      defaultRequiredReferences: a.json(),        // RequiredReference[]
+      chargeCodes: a.json(),                      // ChargeCodeDef[]
+      rateConTerms: a.string(),                   // default rate-con terms
     })
     // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
     // subscription resolvers keeps a fresh stack create under the CloudFormation cap.

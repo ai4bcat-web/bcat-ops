@@ -190,6 +190,20 @@ function makeDynamoItem(overrides: Record<string, unknown>): Record<string, Attr
   return marshall(overrides, { removeUndefinedValues: true })
 }
 
+/**
+ * Wraps a per-test mock so GetItem calls to the settings table return "not found".
+ * Customer creates now read org defaults; tests that do not care about settings can
+ * use this instead of enumerating every unrelated Get.
+ */
+function withSettingsGet(base: (cmd: MockCommand) => unknown): (cmd: MockCommand) => unknown {
+  return (cmd: MockCommand) => {
+    if (cmd.__type === 'Get' && String(cmd.input.TableName ?? '').includes('Settings')) {
+      return Promise.resolve({ Item: undefined })
+    }
+    return base(cmd)
+  }
+}
+
 // ── beforeEach ────────────────────────────────────────────────────────────────
 
 beforeEach(() => {
@@ -261,11 +275,11 @@ describe('authorization', () => {
 
 describe('UPSERT_CUSTOMER', () => {
   it('creates a customer with normalized name', async () => {
-    send.mockImplementation((cmd: MockCommand) => {
+    send.mockImplementation(withSettingsGet((cmd: MockCommand) => {
       if (cmd.__type === 'Scan') return Promise.resolve({ Items: [], LastEvaluatedKey: undefined })
       if (cmd.__type === 'Put') return Promise.resolve({})
       throw new Error('unexpected')
-    })
+    }))
     const result = await handler(
       event('UPSERT_CUSTOMER', { name: 'Batory Foods Inc.', contactName: 'Alice' }),
     )
@@ -277,10 +291,10 @@ describe('UPSERT_CUSTOMER', () => {
   })
 
   it('refuses an appointment workflow outside the schema enum', async () => {
-    send.mockImplementation((cmd: MockCommand) => {
+    send.mockImplementation(withSettingsGet((cmd: MockCommand) => {
       if (cmd.__type === 'Scan') return Promise.resolve({ Items: [], LastEvaluatedKey: undefined })
       throw new Error('unexpected')
-    })
+    }))
     await expect(handler(event('UPSERT_CUSTOMER', { name: 'Acme', apptWorkflow: 'batory' }))).rejects.toThrow('apptWorkflow must be one of NONE, BATORY')
   })
 
@@ -362,6 +376,368 @@ describe('UPSERT_CUSTOMER', () => {
     await expect(
       handler(event('UPSERT_CUSTOMER', { id: 'c-1', expectedUpdatedAt: '', name: 'Old Co' })),
     ).rejects.toThrow('Cannot edit a merged customer')
+  })
+
+  // ── Customer v2 ─────────────────────────────────────────────────────────────
+
+  it('creates a customer defaulting to ACTIVE', async () => {
+    send.mockImplementation(withSettingsGet((cmd: MockCommand) => {
+      if (cmd.__type === 'Scan') return Promise.resolve({ Items: [], LastEvaluatedKey: undefined })
+      if (cmd.__type === 'Put') return Promise.resolve({})
+      throw new Error('unexpected')
+    }))
+    const result = await handler(event('UPSERT_CUSTOMER', { name: 'Acme' }))
+    expect(result.status).toBe('ACTIVE')
+    expect(result.active).toBe(true)
+  })
+
+  it('creates a customer as PENDING under requireCustomerApproval for non-admin', async () => {
+    const settings = makeDynamoItem({ id: 'default', requireCustomerApproval: true })
+    send.mockImplementation((cmd: MockCommand) => {
+      if (cmd.__type === 'Get' && String(cmd.input.TableName ?? '').includes('Settings')) {
+        return Promise.resolve({ Item: settings })
+      }
+      if (cmd.__type === 'Scan') return Promise.resolve({ Items: [], LastEvaluatedKey: undefined })
+      if (cmd.__type === 'Put') return Promise.resolve({})
+      throw new Error('unexpected')
+    })
+    const result = await handler(event('UPSERT_CUSTOMER', { name: 'Acme' }))
+    expect(result.status).toBe('PENDING')
+    expect(result.active).toBe(true)
+  })
+
+  it('creates a customer as ACTIVE under requireCustomerApproval for admin', async () => {
+    const settings = makeDynamoItem({ id: 'default', requireCustomerApproval: true })
+    send.mockImplementation((cmd: MockCommand) => {
+      if (cmd.__type === 'Get' && String(cmd.input.TableName ?? '').includes('Settings')) {
+        return Promise.resolve({ Item: settings })
+      }
+      if (cmd.__type === 'Scan') return Promise.resolve({ Items: [], LastEvaluatedKey: undefined })
+      if (cmd.__type === 'Put') return Promise.resolve({})
+      throw new Error('unexpected')
+    })
+    const result = await handler(
+      event('UPSERT_CUSTOMER', { name: 'Acme' }, identity({ groups: ['ADMIN'] })),
+    )
+    expect(result.status).toBe('ACTIVE')
+  })
+
+  it('rejects update that carries a changed status', async () => {
+    const existing = makeDynamoItem({
+      id: 'c-1', name: 'Acme', normalizedName: 'acme', active: true, status: 'ACTIVE',
+      createdAt: '2025-01-01', createdBy: 'someone@bcatcorp.com', updatedAt: '2025-01-02',
+    })
+    send.mockImplementation((cmd: MockCommand) => {
+      if (cmd.__type === 'Get') return Promise.resolve({ Item: existing })
+      if (cmd.__type === 'Scan') return Promise.resolve({ Items: [existing], LastEvaluatedKey: undefined })
+      throw new Error('unexpected')
+    })
+    await expect(
+      handler(event('UPSERT_CUSTOMER', { id: 'c-1', expectedUpdatedAt: '2025-01-02', name: 'Acme', status: 'BLOCKED' })),
+    ).rejects.toThrow('Change status with SET_CUSTOMER_STATUS')
+  })
+
+  it('allows unchanged status echo on update', async () => {
+    const existing = makeDynamoItem({
+      id: 'c-1', name: 'Acme', normalizedName: 'acme', active: true, status: 'ACTIVE',
+      createdAt: '2025-01-01', createdBy: 'someone@bcatcorp.com', updatedAt: '2025-01-02',
+    })
+    send.mockImplementation((cmd: MockCommand) => {
+      if (cmd.__type === 'Get') return Promise.resolve({ Item: existing })
+      if (cmd.__type === 'Scan') return Promise.resolve({ Items: [existing], LastEvaluatedKey: undefined })
+      if (cmd.__type === 'Update') return Promise.resolve({ Attributes: existing })
+      throw new Error('unexpected')
+    })
+    const result = await handler(
+      event('UPSERT_CUSTOMER', { id: 'c-1', expectedUpdatedAt: '2025-01-02', name: 'Acme', status: 'ACTIVE' }),
+    )
+    expect(result).toBeDefined()
+  })
+
+  it('rejects non-admin credit-field change', async () => {
+    send.mockImplementation(withSettingsGet((cmd: MockCommand) => {
+      if (cmd.__type === 'Scan') return Promise.resolve({ Items: [], LastEvaluatedKey: undefined })
+      throw new Error('unexpected')
+    }))
+    await expect(
+      handler(event('UPSERT_CUSTOMER', { name: 'Acme', creditLimitCents: 50000 })),
+    ).rejects.toThrow('Forbidden: creditLimitCents requires owner or ADMIN')
+  })
+
+  it('allows unchanged credit-field echo for non-admin', async () => {
+    send.mockImplementation(withSettingsGet((cmd: MockCommand) => {
+      if (cmd.__type === 'Scan') return Promise.resolve({ Items: [], LastEvaluatedKey: undefined })
+      if (cmd.__type === 'Put') return Promise.resolve({})
+      throw new Error('unexpected')
+    }))
+    const result = await handler(
+      event('UPSERT_CUSTOMER', { name: 'Acme', creditLimitCents: null, creditHoldFlag: null, freeCreditRequired: null, creditUsageWarningBps: null, maxDaysLate: null }),
+    )
+    expect(result).toBeDefined()
+  })
+
+  it('rejects invalid contact type', async () => {
+    send.mockImplementation(withSettingsGet((cmd: MockCommand) => {
+      if (cmd.__type === 'Scan') return Promise.resolve({ Items: [], LastEvaluatedKey: undefined })
+      throw new Error('unexpected')
+    }))
+    await expect(
+      handler(event('UPSERT_CUSTOMER', {
+        name: 'Acme',
+        contacts: [{ id: 'x', name: 'Alice', types: ['NOT_A_TYPE'], notifications: [], active: true }],
+      })),
+    ).rejects.toThrow('contacts[0].types contains invalid value')
+  })
+
+  it('rejects duplicate default bill-to', async () => {
+    send.mockImplementation(withSettingsGet((cmd: MockCommand) => {
+      if (cmd.__type === 'Scan') return Promise.resolve({ Items: [], LastEvaluatedKey: undefined })
+      throw new Error('unexpected')
+    }))
+    await expect(
+      handler(event('UPSERT_CUSTOMER', {
+        name: 'Acme',
+        billToParties: [
+          { id: 'b1', name: 'Billing 1', isDefault: true },
+          { id: 'b2', name: 'Billing 2', isDefault: true },
+        ],
+      })),
+    ).rejects.toThrow('At most one bill-to party may be default')
+  })
+
+  it('rejects contact billToId not present in payload', async () => {
+    send.mockImplementation(withSettingsGet((cmd: MockCommand) => {
+      if (cmd.__type === 'Scan') return Promise.resolve({ Items: [], LastEvaluatedKey: undefined })
+      throw new Error('unexpected')
+    }))
+    await expect(
+      handler(event('UPSERT_CUSTOMER', {
+        name: 'Acme',
+        contacts: [{ id: 'x', name: 'Alice', types: ['PRIMARY'], billToId: 'missing', notifications: [], active: true }],
+      })),
+    ).rejects.toThrow('contacts[0].billToId references a bill-to not present in this payload')
+  })
+
+  it('rejects bps greater than 10000', async () => {
+    send.mockImplementation(withSettingsGet((cmd: MockCommand) => {
+      if (cmd.__type === 'Scan') return Promise.resolve({ Items: [], LastEvaluatedKey: undefined })
+      throw new Error('unexpected')
+    }))
+    await expect(
+      handler(event('UPSERT_CUSTOMER', { name: 'Acme', creditUsageWarningBps: 10001 })),
+    ).rejects.toThrow('Value must be at most 10000')
+  })
+
+  it('rejects invalid pricingDefaults mode', async () => {
+    send.mockImplementation(withSettingsGet((cmd: MockCommand) => {
+      if (cmd.__type === 'Scan') return Promise.resolve({ Items: [], LastEvaluatedKey: undefined })
+      throw new Error('unexpected')
+    }))
+    await expect(
+      handler(event('UPSERT_CUSTOMER', { name: 'Acme', pricingDefaults: { mode: 'GUESS' } })),
+    ).rejects.toThrow('pricingDefaults.mode must be one of MARGIN, MARKUP, PROFIT')
+  })
+
+  it('rejects invalid invoiceFrequency', async () => {
+    send.mockImplementation(withSettingsGet((cmd: MockCommand) => {
+      if (cmd.__type === 'Scan') return Promise.resolve({ Items: [], LastEvaluatedKey: undefined })
+      throw new Error('unexpected')
+    }))
+    await expect(
+      handler(event('UPSERT_CUSTOMER', { name: 'Acme', invoiceFrequency: 'YEARLY' })),
+    ).rejects.toThrow('invoiceFrequency must be one of DAILY, TWICE_WEEKLY, WEEKLY, MONTHLY')
+  })
+})
+
+// ── SET_CUSTOMER_STATUS ───────────────────────────────────────────────────────
+
+describe('SET_CUSTOMER_STATUS', () => {
+  function existingCustomer(overrides: Record<string, unknown> = {}) {
+    return makeDynamoItem({
+      id: 'c-1', name: 'Acme', normalizedName: 'acme', active: true, status: 'ACTIVE',
+      createdAt: '2025-01-01', createdBy: 'someone@bcatcorp.com', updatedAt: '2025-01-02',
+      ...overrides,
+    })
+  }
+
+  it('approves PENDING -> ACTIVE for admin', async () => {
+    const existing = existingCustomer({ status: 'PENDING' })
+    let update: MockUpdateCommand['input'] | undefined
+    send.mockImplementation((cmd: MockCommand) => {
+      if (cmd.__type === 'Get') return Promise.resolve({ Item: existing })
+      if (cmd.__type === 'Update') { update = cmd.input; return Promise.resolve({ Attributes: existing }) }
+      throw new Error('unexpected')
+    })
+    await handler(
+      event('SET_CUSTOMER_STATUS', { id: 'c-1', expectedUpdatedAt: '2025-01-02', status: 'ACTIVE' }, identity({ groups: ['ADMIN'] })),
+    )
+    const vals = update?.ExpressionAttributeValues ?? {}
+    expect(vals[':status']).toEqual({ S: 'ACTIVE' })
+    expect(vals[':active']).toEqual({ BOOL: true })
+  })
+
+  it('rejects PENDING -> ACTIVE for non-admin', async () => {
+    const existing = existingCustomer({ status: 'PENDING' })
+    send.mockImplementation((cmd: MockCommand) => {
+      if (cmd.__type === 'Get') return Promise.resolve({ Item: existing })
+      throw new Error('unexpected')
+    })
+    await expect(
+      handler(event('SET_CUSTOMER_STATUS', { id: 'c-1', expectedUpdatedAt: '2025-01-02', status: 'ACTIVE' })),
+    ).rejects.toThrow('PENDING → ACTIVE requires owner or ADMIN')
+  })
+
+  it('non-admin requesting ACTIVE while requireCustomerApproval lands on PENDING', async () => {
+    const existing = existingCustomer({ status: 'NEW' })
+    const settings = makeDynamoItem({ id: 'default', requireCustomerApproval: true })
+    let update: MockUpdateCommand['input'] | undefined
+    send.mockImplementation((cmd: MockCommand) => {
+      if (cmd.__type === 'Get') {
+        if (String(cmd.input.TableName ?? '').includes('Settings')) return Promise.resolve({ Item: settings })
+        return Promise.resolve({ Item: existing })
+      }
+      if (cmd.__type === 'Update') { update = cmd.input; return Promise.resolve({ Attributes: existing }) }
+      throw new Error('unexpected')
+    })
+    await handler(
+      event('SET_CUSTOMER_STATUS', { id: 'c-1', expectedUpdatedAt: '2025-01-02', status: 'ACTIVE' }),
+    )
+    const vals = update?.ExpressionAttributeValues ?? {}
+    expect(vals[':status']).toEqual({ S: 'PENDING' })
+    expect(vals[':active']).toEqual({ BOOL: true })
+  })
+
+  it('BLOCKED requires a reason', async () => {
+    const existing = existingCustomer()
+    send.mockImplementation((cmd: MockCommand) => {
+      if (cmd.__type === 'Get') return Promise.resolve({ Item: existing })
+      throw new Error('unexpected')
+    })
+    await expect(
+      handler(event('SET_CUSTOMER_STATUS', { id: 'c-1', expectedUpdatedAt: '2025-01-02', status: 'BLOCKED' }, identity({ groups: ['ADMIN'] }))),
+    ).rejects.toThrow('reason cannot be empty')
+  })
+
+  it('BLOCKED writes reason, replacement, and derived active=false', async () => {
+    const existing = existingCustomer()
+    const replacement = existingCustomer({ id: 'c-2', name: 'Replacement' })
+    let update: MockUpdateCommand['input'] | undefined
+    send.mockImplementation((cmd: MockCommand) => {
+      if (cmd.__type === 'Get') {
+        const keyId = cmd.input.Key?.id?.S
+        if (keyId === 'c-2') return Promise.resolve({ Item: replacement })
+        return Promise.resolve({ Item: existing })
+      }
+      if (cmd.__type === 'Update') { update = cmd.input; return Promise.resolve({ Attributes: existing }) }
+      throw new Error('unexpected')
+    })
+    await handler(
+      event('SET_CUSTOMER_STATUS', {
+        id: 'c-1', expectedUpdatedAt: '2025-01-02', status: 'BLOCKED',
+        reason: 'Bad debt', replacementCustomerId: 'c-2',
+      }, identity({ groups: ['ADMIN'] })),
+    )
+    const vals = update?.ExpressionAttributeValues ?? {}
+    expect(vals[':status']).toEqual({ S: 'BLOCKED' })
+    expect(vals[':active']).toEqual({ BOOL: false })
+    expect(vals[':statusReason']).toEqual({ S: 'Bad debt' })
+    expect(vals[':replacementCustomerId']).toEqual({ S: 'c-2' })
+  })
+
+  it('BLOCKED rejects self-replacement', async () => {
+    const existing = existingCustomer()
+    send.mockImplementation((cmd: MockCommand) => {
+      if (cmd.__type === 'Get') return Promise.resolve({ Item: existing })
+      throw new Error('unexpected')
+    })
+    await expect(
+      handler(event('SET_CUSTOMER_STATUS', {
+        id: 'c-1', expectedUpdatedAt: '2025-01-02', status: 'BLOCKED', reason: 'X', replacementCustomerId: 'c-1',
+      }, identity({ groups: ['ADMIN'] }))),
+    ).rejects.toThrow('replacementCustomerId cannot be the customer itself')
+  })
+
+  it('BLOCKED rejects inactive replacement', async () => {
+    const existing = existingCustomer()
+    const replacement = existingCustomer({ id: 'c-2', status: 'BLOCKED', active: false })
+    send.mockImplementation((cmd: MockCommand) => {
+      if (cmd.__type === 'Get') {
+        const keyId = cmd.input.Key?.id?.S
+        if (keyId === 'c-2') return Promise.resolve({ Item: replacement })
+        return Promise.resolve({ Item: existing })
+      }
+      throw new Error('unexpected')
+    })
+    await expect(
+      handler(event('SET_CUSTOMER_STATUS', {
+        id: 'c-1', expectedUpdatedAt: '2025-01-02', status: 'BLOCKED', reason: 'X', replacementCustomerId: 'c-2',
+      }, identity({ groups: ['ADMIN'] }))),
+    ).rejects.toThrow('Replacement customer is inactive')
+  })
+
+  it('CLOSED only allowed from a lead stage', async () => {
+    const existing = existingCustomer({ status: 'ACTIVE' })
+    send.mockImplementation((cmd: MockCommand) => {
+      if (cmd.__type === 'Get') return Promise.resolve({ Item: existing })
+      throw new Error('unexpected')
+    })
+    await expect(
+      handler(event('SET_CUSTOMER_STATUS', { id: 'c-1', expectedUpdatedAt: '2025-01-02', status: 'CLOSED' }, identity({ groups: ['ADMIN'] }))),
+    ).rejects.toThrow('CLOSED is only allowed from a lead stage')
+  })
+
+  it('allows CLOSED from a lead stage', async () => {
+    const existing = existingCustomer({ status: 'QUALIFIED' })
+    let update: MockUpdateCommand['input'] | undefined
+    send.mockImplementation((cmd: MockCommand) => {
+      if (cmd.__type === 'Get') return Promise.resolve({ Item: existing })
+      if (cmd.__type === 'Update') { update = cmd.input; return Promise.resolve({ Attributes: existing }) }
+      throw new Error('unexpected')
+    })
+    await handler(
+      event('SET_CUSTOMER_STATUS', { id: 'c-1', expectedUpdatedAt: '2025-01-02', status: 'CLOSED', reason: 'No longer interested' }, identity({ groups: ['ADMIN'] })),
+    )
+    const vals = update?.ExpressionAttributeValues ?? {}
+    expect(vals[':status']).toEqual({ S: 'CLOSED' })
+    expect(vals[':active']).toEqual({ BOOL: false })
+  })
+
+  it('rejects DORMANT as a target status', async () => {
+    const existing = existingCustomer()
+    send.mockImplementation((cmd: MockCommand) => {
+      if (cmd.__type === 'Get') return Promise.resolve({ Item: existing })
+      throw new Error('unexpected')
+    })
+    await expect(
+      handler(event('SET_CUSTOMER_STATUS', { id: 'c-1', expectedUpdatedAt: '2025-01-02', status: 'DORMANT' }, identity({ groups: ['ADMIN'] }))),
+    ).rejects.toThrow('DORMANT is derived, not a stored status')
+  })
+
+  it('refuses status change on merged customer', async () => {
+    const merged = existingCustomer({ mergedIntoId: 'c-2' })
+    send.mockImplementation((cmd: MockCommand) => {
+      if (cmd.__type === 'Get') return Promise.resolve({ Item: merged })
+      throw new Error('unexpected')
+    })
+    await expect(
+      handler(event('SET_CUSTOMER_STATUS', { id: 'c-1', expectedUpdatedAt: '2025-01-02', status: 'BLOCKED', reason: 'X' }, identity({ groups: ['ADMIN'] }))),
+    ).rejects.toThrow('Cannot change status of a merged customer')
+  })
+
+  it('fails on CAS mismatch', async () => {
+    const existing = existingCustomer()
+    send.mockImplementation((cmd: MockCommand) => {
+      if (cmd.__type === 'Get') return Promise.resolve({ Item: existing })
+      if (cmd.__type === 'Update') {
+        const err = new Error('ConditionalCheckFailed')
+        err.name = 'ConditionalCheckFailedException'
+        return Promise.reject(err)
+      }
+      throw new Error('unexpected')
+    })
+    await expect(
+      handler(event('SET_CUSTOMER_STATUS', { id: 'c-1', expectedUpdatedAt: 'wrong', status: 'BLOCKED', reason: 'X' }, identity({ groups: ['ADMIN'] }))),
+    ).rejects.toThrow('was changed by someone else')
   })
 })
 
@@ -570,6 +946,82 @@ describe('SAVE_DIVISION', () => {
     await expect(
       handler(event('SAVE_DIVISION', { key: 'BCAT_LOGISTICS', name: 'BCAT Logistics' }, identity({ groups: ['page-settings'] }))),
     ).rejects.toThrow('requires owner or ADMIN')
+  })
+})
+
+// ── SAVE_SETTINGS ─────────────────────────────────────────────────────────────
+
+describe('SAVE_SETTINGS', () => {
+  it('creates settings with v2 defaults', async () => {
+    let put: MockPutCommand['input'] | undefined
+    send.mockImplementation((cmd: MockCommand) => {
+      if (cmd.__type === 'Get') return Promise.resolve({ Item: undefined })
+      if (cmd.__type === 'Put') { put = cmd.input; return Promise.resolve({}) }
+      throw new Error('unexpected')
+    })
+    const result = await handler(
+      event('SAVE_SETTINGS', {
+        defaultCreditLimitCents: 100000,
+        defaultFreeCreditRequired: true,
+        defaultCreditUsageWarningBps: 8000,
+        defaultMaxDaysLate: 30,
+        requireCustomerApproval: true,
+        defaultRequiredDocs: ['POD', 'BOL'],
+        defaultRequiredReferences: [{ code: 'PO', level: 'ORDER', display: true, countOnNewOrder: 1 }],
+        chargeCodes: [{ code: 'FSC', label: 'Fuel Surcharge', calculatedBy: 'PERCENT' }],
+        rateConTerms: 'Net 30.',
+      }, identity({ groups: ['ADMIN'] })),
+    )
+    expect(result.defaultCreditLimitCents).toBe(100000)
+    expect(result.defaultFreeCreditRequired).toBe(true)
+    expect(result.defaultCreditUsageWarningBps).toBe(8000)
+    expect(result.defaultMaxDaysLate).toBe(30)
+    expect(result.requireCustomerApproval).toBe(true)
+    expect(result.defaultRequiredDocs).toEqual(['POD', 'BOL'])
+    expect(result.rateConTerms).toBe('Net 30.')
+    expect(put?.Item).toBeDefined()
+  })
+
+  it('keeps existing fields when not mentioned (keep semantics)', async () => {
+    const existing = makeDynamoItem({
+      id: 'default', marginFloorBps: 100, defaultCreditLimitCents: 50000, requireCustomerApproval: true,
+      updatedAt: '2025-01-02',
+    })
+    let update: MockUpdateCommand['input'] | undefined
+    send.mockImplementation((cmd: MockCommand) => {
+      if (cmd.__type === 'Get') return Promise.resolve({ Item: existing })
+      if (cmd.__type === 'Update') { update = cmd.input; return Promise.resolve({ Attributes: existing }) }
+      throw new Error('unexpected')
+    })
+    await handler(
+      event('SAVE_SETTINGS', { defaultMaxDaysLate: 45, expectedUpdatedAt: '2025-01-02' }, identity({ groups: ['ADMIN'] })),
+    )
+    const vals = update?.ExpressionAttributeValues ?? {}
+    expect(vals[':marginFloorBps']).toEqual({ N: '100' })
+    expect(vals[':defaultCreditLimitCents']).toEqual({ N: '50000' })
+    expect(vals[':defaultMaxDaysLate']).toEqual({ N: '45' })
+  })
+
+  it('validates charge code shape', async () => {
+    send.mockImplementation((cmd: MockCommand) => {
+      if (cmd.__type === 'Get') return Promise.resolve({ Item: undefined })
+      throw new Error('unexpected')
+    })
+    await expect(
+      handler(event('SAVE_SETTINGS', { chargeCodes: [{ code: 'FSC' }] }, identity({ groups: ['ADMIN'] }))),
+    ).rejects.toThrow('chargeCodes[0].label must be a string')
+  })
+
+  it('validates defaultRequiredReferences bounds', async () => {
+    send.mockImplementation((cmd: MockCommand) => {
+      if (cmd.__type === 'Get') return Promise.resolve({ Item: undefined })
+      throw new Error('unexpected')
+    })
+    await expect(
+      handler(event('SAVE_SETTINGS', {
+        defaultRequiredReferences: [{ code: 'PO', level: 'ORDER', countOnNewOrder: 11 }],
+      }, identity({ groups: ['ADMIN'] }))),
+    ).rejects.toThrow('Value must be at most 10')
   })
 })
 
@@ -852,11 +1304,11 @@ describe('DynamoDB write shape (sandbox regressions)', () => {
 
   it('UPSERT_CUSTOMER create omits the mergedIntoId GSI key', async () => {
     let put: MockPutCommand['input'] | undefined
-    send.mockImplementation((cmd: MockCommand) => {
+    send.mockImplementation(withSettingsGet((cmd: MockCommand) => {
       if (cmd.__type === 'Scan') return Promise.resolve({ Items: [], LastEvaluatedKey: undefined })
       if (cmd.__type === 'Put') { put = cmd.input; return Promise.resolve({}) }
       throw new Error('unexpected')
-    })
+    }))
     await handler(event('UPSERT_CUSTOMER', { name: 'Acme' }))
     expect(put?.Item).not.toHaveProperty('mergedIntoId')
   })

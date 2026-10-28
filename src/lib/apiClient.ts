@@ -1001,13 +1001,30 @@ export async function createApptMoveTask(args: {
 
 export type { CustomerRecord, LocationRecord, Division, TmsSettings, GeocodeResult, AutocompleteSuggestion, LocationMergePreview, LocationMergeJob } from '@/types/tms'
 
-const CUSTOMER_FIELDS = `
+const CUSTOMER_FIELDS_BASE = `
   id name contactName contactEmail contactPhone notes
   mcNumber dotNumber factored billingEmail billingContactName billingPhone billingAddress
   paymentTermsDays creditLimitCents creditHoldFlag requiredDocsForInvoice
   defaultDivisionKey defaultSalesRepId aliases normalizedName active apptWorkflow mergedIntoId
   createdAt updatedAt
 `
+const CUSTOMER_V2_FIELDS = [
+  'status', 'statusReason', 'statusChangedAt', 'statusChangedBy', 'replacementCustomerId',
+  'leadSource', 'industry', 'serviceTier', 'website',
+  'freeCreditRequired', 'creditUsageWarningBps', 'maxDaysLate',
+  'contacts', 'billToParties', 'requiredReferences', 'chargeCodeOverrides', 'defaultCharges',
+  'pricingDefaults', 'quotingDefaults',
+  'rateConTerms', 'teamKey', 'operatedById', 'accountOwnerIds',
+  'invoiceFrequency', 'visibilityPrefs', 'gpSplitBps',
+]
+const CUSTOMER_JSON_FIELDS: (keyof CustomerRecord)[] = ['billingAddress', 'contacts', 'billToParties', 'requiredReferences', 'chargeCodeOverrides', 'defaultCharges', 'pricingDefaults', 'quotingDefaults', 'visibilityPrefs']
+let customersHaveV2 = true
+const customerFields = () => customersHaveV2 ? `${CUSTOMER_FIELDS_BASE} ${CUSTOMER_V2_FIELDS.join(' ')}` : CUSTOMER_FIELDS_BASE
+function customerFieldUndefined(err: unknown): boolean {
+  const msg = safeStringify(err)
+  return CUSTOMER_V2_FIELDS.some((f) => new RegExp(`['"]${f}['"]`).test(msg))
+}
+
 const LOCATION_FIELDS = `
   id name city customerName apptContactName apptContactEmail apptContactPhone notes
   street state zip country lat lng timezone geohash6 placeId geocodedAt geocodeExpiresAt
@@ -1019,7 +1036,19 @@ const DIVISION_FIELDS = `
   id key name legalName mcNumber dotNumber scac remitToName remitToAddress remitToEmail
   invoicePrefix fleetGroup active createdAt updatedAt
 `
-const TMS_SETTINGS_FIELDS = `id marginFloorBps defaultPaymentTermsDays accessorialCodes loadStatusRules invoiceNumberFormat autoClearPastAppts createdAt updatedAt`
+
+const TMS_SETTINGS_FIELDS_BASE = `id marginFloorBps defaultPaymentTermsDays accessorialCodes loadStatusRules invoiceNumberFormat autoClearPastAppts createdAt updatedAt`
+const TMS_SETTINGS_V2_FIELDS = [
+  'defaultCreditLimitCents', 'defaultFreeCreditRequired', 'defaultCreditUsageWarningBps', 'defaultMaxDaysLate',
+  'requireCustomerApproval', 'defaultRequiredDocs', 'defaultRequiredReferences', 'chargeCodes', 'rateConTerms',
+]
+const TMS_SETTINGS_JSON_FIELDS: (keyof TmsSettings)[] = ['accessorialCodes', 'loadStatusRules', 'defaultRequiredReferences', 'chargeCodes']
+let settingsHaveV2 = true
+const tmsSettingsFields = () => settingsHaveV2 ? `${TMS_SETTINGS_FIELDS_BASE} ${TMS_SETTINGS_V2_FIELDS.join(' ')}` : TMS_SETTINGS_FIELDS_BASE
+function tmsSettingsFieldUndefined(err: unknown): boolean {
+  const msg = safeStringify(err)
+  return TMS_SETTINGS_V2_FIELDS.some((f) => new RegExp(`['"]${f}['"]`).test(msg))
+}
 const MERGE_JOB_FIELDS = `id sourceId targetId status processedCount remainingCount error createdAt updatedAt`
 
 // Both custom-op wrappers rethrow AppSync's `{errors:[…]}` payload as an Error carrying
@@ -1076,9 +1105,19 @@ export function withCustomerPolicy<T extends Pick<Load, 'customerId' | 'customer
 
 /** Active customers only unless asked; archived and merged records stay out of pickers. */
 export async function listCustomers(opts?: { includeArchived?: boolean }): Promise<CustomerRecord[]> {
-  const rows = (await listAll<CustomerRecord>('listCustomers', CUSTOMER_FIELDS, 1000))
-    .map((c) => rememberCustomerPolicy(unwrapJsonFields(c, ['billingAddress'])))
-  return opts?.includeArchived ? rows : rows.filter(isActiveDirectoryRecord)
+  const run = async () => (await listAll<CustomerRecord>('listCustomers', customerFields(), 1000))
+    .map((c) => rememberCustomerPolicy(unwrapJsonFields(c, CUSTOMER_JSON_FIELDS)))
+
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const rows = await run()
+      return opts?.includeArchived ? rows : rows.filter(isActiveDirectoryRecord)
+    } catch (err) {
+      if (attempt >= 2 || !customersHaveV2 || !customerFieldUndefined(err)) throw err
+      console.warn('[apiClient] backend has no Customer v2 fields yet — querying without them until deploy')
+      customersHaveV2 = false
+    }
+  }
 }
 export async function createCustomer(input: Omit<CustomerRecord, 'id' | 'createdAt' | 'updatedAt'>): Promise<CustomerRecord> {
   return rememberCustomerPolicy(await directoryAction<CustomerRecord>('UPSERT_CUSTOMER', input))
@@ -1089,6 +1128,14 @@ export async function updateCustomer(id: string, patch: Partial<Omit<CustomerRec
 }
 export async function archiveCustomer(id: string, expectedUpdatedAt: string): Promise<CustomerRecord> {
   return rememberCustomerPolicy(await directoryAction<CustomerRecord>('ARCHIVE_CUSTOMER', { id, expectedUpdatedAt }))
+}
+/** Status transitions go through a dedicated action so CAS and transition rules live server-side. */
+export async function setCustomerStatus(
+  id: string,
+  expectedUpdatedAt: string,
+  input: { status: CustomerRecord['status']; reason?: string; replacementCustomerId?: string },
+): Promise<CustomerRecord> {
+  return rememberCustomerPolicy(await directoryAction<CustomerRecord>('SET_CUSTOMER_STATUS', { id, expectedUpdatedAt, ...input }))
 }
 
 export async function listLocations(opts?: { includeArchived?: boolean }): Promise<LocationRecord[]> {
@@ -1134,10 +1181,22 @@ export async function saveDivision(input: Omit<Division, 'id' | 'createdAt' | 'u
   return directoryAction<Division>('SAVE_DIVISION', { expectedUpdatedAt, ...input })
 }
 export async function getTmsSettings(): Promise<TmsSettings | null> {
-  const r = await client.graphql({
-    query: `query GetTmsSettings { getTmsSettings(id: "default") { ${TMS_SETTINGS_FIELDS} } }`,
-  }) as { data: { getTmsSettings: TmsSettings | null } }
-  return r.data.getTmsSettings ? unwrapJsonFields(r.data.getTmsSettings, ['accessorialCodes', 'loadStatusRules']) : null
+  const run = async () => {
+    const r = await client.graphql({
+      query: `query GetTmsSettings { getTmsSettings(id: "default") { ${tmsSettingsFields()} } }`,
+    }) as { data: { getTmsSettings: TmsSettings | null } }
+    return r.data.getTmsSettings ? unwrapJsonFields(r.data.getTmsSettings, TMS_SETTINGS_JSON_FIELDS) : null
+  }
+
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await run()
+    } catch (err) {
+      if (attempt >= 2 || !settingsHaveV2 || !tmsSettingsFieldUndefined(err)) throw err
+      console.warn('[apiClient] backend has no TmsSettings v2 fields yet — querying without them until deploy')
+      settingsHaveV2 = false
+    }
+  }
 }
 export async function saveTmsSettings(patch: Partial<Omit<TmsSettings, 'id' | 'createdAt' | 'updatedAt'>>, expectedUpdatedAt?: string): Promise<TmsSettings> {
   return directoryAction<TmsSettings>('SAVE_SETTINGS', { id: 'default', expectedUpdatedAt, ...patch })

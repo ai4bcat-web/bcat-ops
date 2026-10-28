@@ -5,17 +5,22 @@ import { useAuth } from '@/hooks/useAuth'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import { useDirectory, type CustomerRecord, type LocationRecord } from '@/hooks/useDirectory'
 import { isActiveDirectoryRecord } from '@/lib/tmsDirectory'
-import { graphqlErrorText, listDivisions, previewLocationMerge, startLocationMerge, resumeLocationMerge, listLocationMergeJobs } from '@/lib/apiClient'
-import type { Division, LocationMergeJob, LocationMergePreview } from '@/types/tms'
+import { graphqlErrorText, listDivisions, previewLocationMerge, startLocationMerge, resumeLocationMerge, listLocationMergeJobs, getTmsSettings, saveTmsSettings } from '@/lib/apiClient'
+import { effectiveCustomerStatus, boardTab } from '@/lib/customerCredit'
+import type { Division, LocationMergeJob, LocationMergePreview, TmsSettings, ChargeCodeDef } from '@/types/tms'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Badge } from '@/components/ui/badge'
 import { CustomerForm } from './components/CustomerForm'
 import { useCustomerForm } from './components/useCustomerForm'
 import { LocationForm } from './components/LocationForm'
 import { useLocationForm } from './components/useLocationForm'
 import { LocationDetail } from './components/LocationDetail'
+import { CustomerProfile } from './components/CustomerProfile'
+import { cn } from '@/lib/utils'
+import { CustomerOrgDefaults } from './components/CustomerOrgDefaults'
 
 function PageShell({ title, sub, icon, count, query, setQuery, onAdd, onRefresh, children }: {
   title: string; sub: string; icon: React.ReactNode; count: number
@@ -54,43 +59,111 @@ function stripRecord<T extends { id: string; createdAt: string; updatedAt: strin
   return rest as Omit<T, 'id' | 'createdAt' | 'updatedAt'>
 }
 
+const statusColors: Record<NonNullable<CustomerRecord['status']>, string> = {
+  NEW: 'bg-slate-100 text-slate-700',
+  CONTACTED: 'bg-blue-100 text-blue-700',
+  QUALIFIED: 'bg-indigo-100 text-indigo-700',
+  QUOTED: 'bg-purple-100 text-purple-700',
+  NURTURING: 'bg-pink-100 text-pink-700',
+  PENDING: 'bg-amber-100 text-amber-700',
+  ACTIVE: 'bg-emerald-100 text-emerald-700',
+  DORMANT: 'bg-orange-100 text-orange-700',
+  CLOSED: 'bg-gray-100 text-gray-700',
+  BLOCKED: 'bg-red-100 text-red-700',
+}
+
 export function CustomersPage() {
-  const dir = useDirectory()
-  const { isAdmin } = useAuth()
+  const dir = useDirectory({ includeArchived: true })
+  const { isAdmin, user } = useAuth()
   const [query, setQuery] = useState('')
   const [editing, setEditing] = useState<CustomerRecord | 'new' | null>(null)
+  const [profileId, setProfileId] = useState<string | null>(null)
   const [divisions, setDivisions] = useState<Division[]>([])
-
+  const [settings, setSettings] = useState<TmsSettings | null>(null)
+  const [showDefaults, setShowDefaults] = useState(false)
   useEffect(() => {
     listDivisions().then(setDivisions).catch((e: unknown) => toast.error(graphqlErrorText(e) || 'Could not load divisions'))
+    getTmsSettings()
+      .then((s) => setSettings(s))
+      .catch((e: unknown) => toast.error(graphqlErrorText(e) || 'Could not load settings'))
   }, [])
 
-  const rows = useMemo(() => {
+  const catalog = useMemo<ChargeCodeDef[]>(() => settings?.chargeCodes ?? [], [settings])
+
+  const rowsWithStatus = useMemo(() => {
     const q = query.trim().toLowerCase()
-    return dir.customers.filter((c) =>
-      !q || [c.name, c.contactName, c.contactEmail, c.mcNumber, c.dotNumber].some((v) => (v ?? '').toLowerCase().includes(q))
-    )
+    return dir.customers
+      .filter((c) =>
+        !q || [c.name, c.contactName, c.contactEmail, c.mcNumber, c.dotNumber].some((v) => (v ?? '').toLowerCase().includes(q))
+      )
+      .map((c) => ({ record: c, effective: effectiveCustomerStatus(c, null, new Date().toISOString()), tab: boardTab(effectiveCustomerStatus(c, null, new Date().toISOString())) }))
   }, [dir.customers, query])
 
+  const counts = useMemo(() => ({
+    leads: rowsWithStatus.filter((r) => r.tab === 'leads').length,
+    active: rowsWithStatus.filter((r) => r.tab === 'active').length,
+    inactive: rowsWithStatus.filter((r) => r.tab === 'inactive').length,
+  }), [rowsWithStatus])
+
+  const [activeTab, setActiveTab] = useState<'leads' | 'active' | 'inactive'>('active')
+
+  const visibleRows = useMemo(() => rowsWithStatus.filter((r) => r.tab === activeTab), [rowsWithStatus, activeTab])
+
   useEffect(() => { if (dir.error) toast.error(dir.error) }, [dir.error])
+
+  const profileCustomer = useMemo(() => dir.customers.find((c) => c.id === profileId) ?? null, [dir.customers, profileId])
 
   const archive = async (c: CustomerRecord) => {
     if (!window.confirm(`Archive customer "${c.name}"?\n\nLoads keep their customer name; only the directory entry is marked inactive.`)) return
     try { await dir.archiveCustomer(c); toast.success('Customer archived') } catch (e) { toast.error(e instanceof Error ? e.message : String(e)) }
   }
 
+  const saveSettings = async (patch: Parameters<typeof saveTmsSettings>[0]) => {
+    if (!isAdmin) throw new Error('Admin only')
+    const next = await saveTmsSettings(patch, settings?.updatedAt)
+    setSettings(next)
+    toast.success('Org defaults saved')
+  }
+
   return (
     <PageShell title="Customers" icon={<Building2 size={18} />} count={dir.customers.filter(isActiveDirectoryRecord).length}
-      sub="Customers with billing contacts, terms, credit limits, aliases and default division/sales rep."
+      sub="Leads, active accounts and inactive customers with credit, contacts, billing and quoting defaults."
       query={query} setQuery={setQuery} onAdd={() => setEditing('new')} onRefresh={dir.refresh}>
-      {dir.loading && rows.length === 0 ? <div style={{ padding: 24, textAlign: 'center', fontSize: 12.5, color: 'var(--ds-t3)' }}>Loading…</div>
-        : rows.length === 0 ? <div style={{ ...cardStyle, justifyContent: 'center', fontSize: 12.5, color: 'var(--ds-t3)' }}>No customers yet — add the first one.</div>
-        : rows.map((c) => (
+      <div className="flex items-center gap-2 border-b pb-2">
+        {(['leads', 'active', 'inactive'] as const).map((t) => (
+          <button
+            key={t}
+            type="button"
+            onClick={() => setActiveTab(t)}
+            className={cn(
+              'inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md capitalize',
+              activeTab === t ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'
+            )}
+          >
+            {t}
+            <span className="rounded-full bg-background/50 px-1.5">{t === 'leads' ? counts.leads : t === 'active' ? counts.active : counts.inactive}</span>
+          </button>
+        ))}
+      </div>
+      {isAdmin && <div><Button variant="outline" size="sm" onClick={() => setShowDefaults(true)}>Organization defaults</Button></div>}
+      {showDefaults && <CustomerOrgDefaults settings={settings} onSave={saveSettings} onClose={() => setShowDefaults(false)} />}
+      {dir.loading && visibleRows.length === 0 ? <div style={{ padding: 24, textAlign: 'center', fontSize: 12.5, color: 'var(--ds-t3)' }}>Loading…</div>
+        : visibleRows.length === 0 ? <div style={{ ...cardStyle, justifyContent: 'center', fontSize: 12.5, color: 'var(--ds-t3)' }}>No customers in this tab.</div>
+        : visibleRows.map(({ record: c, effective }) => (
           <div key={c.id} style={cardStyle}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--ds-t1)' }}>
-                {c.name}
+                <button
+                  type="button"
+                  onClick={() => setProfileId(c.id)}
+                  className="text-left hover:underline"
+                  style={{ background: 'none', border: 'none', padding: 0, font: 'inherit', color: 'inherit', cursor: 'pointer' }}
+                >
+                  {c.name}
+                </button>
                 {c.apptWorkflow === 'BATORY' && <span style={{ fontSize: 10, fontWeight: 600, marginLeft: 8, padding: '1px 6px', borderRadius: 5, background: '#eff6ff', color: '#0369a1' }}>BATORY</span>}
+                {c.status && <Badge variant="secondary" className={cn('ml-2 text-[10px]', statusColors[c.status])}>{c.status}</Badge>}
+                {c.status && effective !== c.status && <span className="ml-2 text-[10px] text-muted-foreground">(effective {effective})</span>}
                 {c.active === false && <span style={{ fontSize: 10, fontWeight: 600, marginLeft: 8, padding: '1px 6px', borderRadius: 5, background: '#f3f4f6', color: '#6b7280' }}>ARCHIVED</span>}
               </div>
               <div style={{ fontSize: 12, color: 'var(--ds-t2)', marginTop: 3 }}>
@@ -100,14 +173,6 @@ export function CustomersPage() {
                 {c.mcNumber && <span style={{ color: 'var(--ds-t3)' }}> · MC {c.mcNumber}</span>}
                 {c.dotNumber && <span style={{ color: 'var(--ds-t3)' }}> · DOT {c.dotNumber}</span>}
               </div>
-              {/*
-                * Factored or not, and the booking rules that follow from it.
-                *
-                * Only a factored customer's loads reach OTR, and only OTR needs an MC and
-                * origin/destination ZIPs. Marking a customer here is what decides whether
-                * booking one of their loads demands that paperwork — so it sits on the row
-                * rather than behind the edit dialog, where nobody would find it.
-                */}
               <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 5, fontSize: 11.5, color: c.factored ? '#047857' : 'var(--ds-t3)', cursor: 'pointer' }}>
                 <input
                   type="checkbox"
@@ -115,9 +180,7 @@ export function CustomersPage() {
                   onChange={(e) => void dir.saveCustomer(c, { factored: e.target.checked })}
                   aria-label={`${c.name} is factored`}
                 />
-                {c.factored
-                  ? 'Factored — loads need an MC and both ZIPs'
-                  : 'Not factored — no MC or ZIP needed to book'}
+                {c.factored ? 'Factored — loads need an MC and both ZIPs' : 'Not factored — no MC or ZIP needed to book'}
               </label>
               {(c.billingEmail || c.billingAddress?.city) && (
                 <div style={{ fontSize: 11.5, color: 'var(--ds-t3)', marginTop: 3 }}>
@@ -135,8 +198,6 @@ export function CustomersPage() {
         ))}
 
       <CustomerModal
-        // The form hook seeds its state once; remount per record so Edit shows that record
-        // (a stale form would otherwise overwrite it with blanks on Save).
         key={editing === null ? 'closed' : editing === 'new' ? 'new' : editing.id}
         open={editing !== null}
         initial={editing === 'new' ? undefined : editing ?? undefined}
@@ -153,6 +214,28 @@ export function CustomersPage() {
           setEditing(null)
         }}
       />
+
+      {profileCustomer && (
+        <CustomerProfile
+          customer={profileCustomer}
+          divisions={divisions}
+          locations={dir.locations}
+          settings={settings}
+          catalog={catalog}
+          isAdmin={isAdmin}
+          currentUser={user?.email ?? ''}
+          activeCustomers={dir.customers.filter((c) => c.id !== profileCustomer.id && c.active !== false && c.status !== 'BLOCKED')}
+          onClose={() => setProfileId(null)}
+          onSave={async (current, next) => {
+            await dir.saveCustomer(current, next)
+            toast.success('Customer saved')
+          }}
+          onStatusChange={async (current, input) => {
+            await dir.setCustomerStatus(current, input)
+            toast.success('Status updated')
+          }}
+        />
+      )}
     </PageShell>
   )
 }
@@ -386,46 +469,27 @@ function MergeLocationDialog({
           </div>
 
           {preview && (
-            <div className="rounded-md border p-3 text-sm">
-              <p className="font-medium">{preview.loadCount} load(s) will point to the target.</p>
-              <p className="text-muted-foreground mt-1">Source {preview.sourceId} → target {preview.targetId}</p>
+            <div className="rounded-md bg-muted p-3 text-sm space-y-1">
+              <p>Load count: {preview.loadCount}</p>
             </div>
           )}
 
-          {job && (
-            <div className="rounded-md border p-3 text-sm">
-              <p className="font-medium">Merge job {job.id}</p>
-              <p className="text-muted-foreground mt-1">Status: {job.status}</p>
-              <p className="text-muted-foreground">Processed: {job.processedCount}{job.remainingCount != null ? ` / ${job.processedCount + job.remainingCount}` : ''}</p>
-              {job.error && <p className="text-destructive mt-1">{job.error}</p>}
-            </div>
-          )}
-
-          <div className="grid grid-cols-[1fr_auto] gap-2 items-end">
-            <div>
-              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Resume existing job</Label>
+          <div className="border-t pt-3 space-y-2">
+            <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Resume job</Label>
+            <div className="flex gap-2">
               <Input value={jobIdInput} onChange={(e) => setJobIdInput(e.target.value)} placeholder="Job ID" className="h-9 text-sm" />
+              <Button type="button" variant="outline" size="sm" className="h-9" onClick={runResume}>Resume</Button>
             </div>
-            <Button type="button" variant="outline" size="sm" className="h-9" onClick={runResume} disabled={!jobIdInput.trim()}>
-              Resume
-            </Button>
+            {job && <p className="text-xs text-muted-foreground">Job {job.id}: {job.status}</p>}
+            {jobs.length > 0 && (
+              <div className="max-h-32 overflow-y-auto space-y-1">
+                {jobs.map((j) => (
+                  <div key={j.id} className="text-xs text-muted-foreground">{j.id} · {j.status} · {j.processedCount}</div>
+                ))}
+              </div>
+            )}
           </div>
-
-          {jobs.length > 0 && (
-            <div className="rounded-md border p-3 space-y-1 text-sm">
-              <p className="font-medium">Recent jobs</p>
-              {jobs.slice(0, 5).map((j) => (
-                <div key={j.id} className="flex justify-between text-xs text-muted-foreground">
-                  <span>{j.id} · {j.status}</span>
-                  <span>{j.processedCount}</span>
-                </div>
-              ))}
-            </div>
-          )}
         </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose}>Close</Button>
-        </DialogFooter>
       </DialogContent>
     </Dialog>
   )

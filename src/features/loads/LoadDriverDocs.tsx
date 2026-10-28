@@ -21,7 +21,7 @@ import {
   removeDriverDocs,
   replaceDriverDocs,
   DRIVER_DOC_ACCEPT,
-  useDriverDocAsPod,
+  fileDriverDocAsPod,
 } from '@/lib/driverSubmissionsClient'
 import { queueDriverDocScan } from '@/lib/podsClient'
 import { useAuthUser } from '@/hooks/useAuth'
@@ -81,7 +81,7 @@ export function LoadDriverDocs({
     if (!window.confirm(`File "${doc.fileName?.trim() || 'this picture'}" as the POD for this load?`)) return
     setPromoting(doc.id)
     try {
-      await useDriverDocAsPod(doc.id, loadId, doc.driverId)
+      await fileDriverDocAsPod(doc.id, loadId, doc.driverId)
       toast.success('Filed as the POD')
       refresh()
     } catch (err) {
