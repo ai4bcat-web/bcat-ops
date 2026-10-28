@@ -4932,7 +4932,10 @@ export async function listOrdersByArStatus(status: ArStatus): Promise<OrderRecor
   if (!arModelsAvailable) return []
   try {
     const rows = await readOrders((fields) => listAllByIndex<OrderRecord>(
-      'listOrderByArStatusAndArStatusChangedAt', { arStatus: status }, fields, 1000, { arStatus: 'ArStatus!' },
+      // Amplify names an inline model enum `<Model><Field>`, not `<Field>`: the
+      // deployed schema calls this one OrderArStatus, and a wrong name is a hard
+      // validation error rather than an empty list.
+      'listOrderByArStatusAndArStatusChangedAt', { arStatus: status }, fields, 1000, { arStatus: 'OrderArStatus!' },
     ))
     return rows.map((o) => unwrapJsonFields(o, ORDER_JSON_FIELDS))
   } catch (err) {

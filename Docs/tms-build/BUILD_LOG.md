@@ -2,6 +2,94 @@
 
 One entry per unit of work (newest first). Decisions needed from Ryne go under **Decision needed**.
 
+## 2026-10-28 — Step F done on dev
+
+- Commit `3d50186` pushed to `origin dev` (Invoice + ArPayment models, `tms-finance-actions`
+  router, invoiceBuild/invoicePdf/paymentApply/arAging/factorHandoff, `/ar` with six tabs +
+  invoice detail + six dialogs, ArCard on the shipment, customer AR tab, AR settings card,
+  additive ShipmentDocument lookup in `otr-actions`, two refusals in `tms-shipment-actions`,
+  `scripts/backfillLegacyAr.mjs`, Academy article). Amplify dev job `22` status `SUCCEED`.
+  Follow-up commit `66785d3` — the AR worklist failed to load on the deployed stack
+  because the index query declared its enum argument as `ArStatus!` while Amplify generates
+  `OrderArStatus`; found by opening the page, not by a test.
+- Required gates passed before each commit: `npm run typecheck`, `npm run lint` (3
+  pre-existing warnings), `npm run test` (336 files, 4212 tests — 232 more than Step E's
+  3980).
+- Fable review ran once on the full staged diff and found two money blockers, both fixed and
+  both now covered by a test that fails without the fix. (1) The generate transaction
+  conditioned the order update on `attribute_not_exists(invoiceId)`, but `tms-shipment-actions`
+  creates every order with `invoiceId: null` and DynamoDB counts a NULL attribute as existing
+  — every Generate on a TMS-born order would have been refused *after* burning an invoice
+  number. The in-memory test engine had been treating null as absent; it now follows DynamoDB,
+  which is what turned the finding into a failing test. (2) `REVERSE_PAYMENT` stamped
+  `reversedByPaymentId` but left `unappliedCents` intact, so a reversed credit memo could be
+  spent again and under-bill the customer; the reversal now zeroes it under its own CAS, the
+  planner refuses a reversed credit by name, and the dialog and the customer AR total no
+  longer count one. Seven more findings fixed: void releases the order's `factoringItemId`
+  and releases (not just archives) the queue row, Send to Factor refuses a PRO already
+  billing another invoice and revives an archived row, MARK_SENT no longer writes `sentAt`
+  (it would have made the shipment card claim an e-mail nobody sent) and keeps its note in
+  its own field, a retried WRITE_OFF answers with the row it posted instead of "already
+  settled", RENDER_INVOICE_PDF refuses a void invoice, attachments are re-checked against
+  `canEmailTo` at send time, generation refuses a factored customer with no factor remit-to
+  configured and Send to Factor refuses a bill whose face says to pay us, and
+  `SAVE_AR_SETTINGS` validates the factor remit-to shape. Posting is also idempotent against
+  a *simultaneous* duplicate now, not only a sequential retry.
+- Verified against the deployed dev stack with a temporary admin identity (randomised
+  password, never printed, since deleted) and an isolated fixture — a dev-only customer
+  "ZZ AR Verification …" and its own shipment, so no copied customer, load or invoice was
+  touched. `scripts/devVerifyAr.mjs`, **37/37 checks passed**:
+  - Generate refused the order while it was DOCS_NEEDED and named the missing POD;
+    `READY_TO_INVOICE` with an override moved it to UNBILLED; `PREVIEW_INVOICE` reported
+    ready and wrote nothing.
+  - `GENERATE_INVOICE` issued `INV-000002` for $2,500.00 due 2026-11-27, stored
+    `invoices/<customer>/INV-000002-v1.pdf` (2,587 bytes), moved the order to UNPAID with
+    `arBalanceCents` 250000 and froze the load's financials — one transaction. A second
+    generate, a `RECALC_CHARGES`, a hand `SET_AR_STATUS` and a cancel were each refused with
+    the sentence they should have ("void the invoice first", "financials are frozen").
+  - `EMAIL_INVOICE` came back `NOT_SENT` with the IAM denial verbatim and a one-hour
+    download, and left `sentAt`/`sentCount` untouched — SES is denied on dev and nothing
+    claims otherwise.
+  - $1,000.00 left the invoice PARTIAL and the order UNPAID; the same request id posted once
+    (`duplicate=true` on the retry); $2,000.00 against a $1,500.00 balance was refused by the
+    figures; a $500.00 credit memo plus $1,000.00 cash settled it, removed `arOpen` and took
+    the order to PAID; voiding it then was refused ("reverse the payment first").
+  - The reversal restored the $1,500.00 balance, reopened the invoice, returned the $500.00
+    credit and was refused a second time; reversing the credit memo itself then made it
+    unspendable by name.
+  - A write-off settled the remainder as written-off rather than paid, and its retry answered
+    with the posted row.
+  - Void kept the PDF, cleared the order's invoice fields and unfroze the charges; the order
+    was re-invoiced as `INV-000003` (never the old number). `SEND_TO_FACTOR` wrote queue row
+    PRO `S000029-1`, `source TMS`, `messageId tms:INV-000003`, status NEED_TO_FACTOR with the
+    OTR fields prefilled (`InvoiceNo INV-000003`, `2500.00`, Chicago/IL → Dallas/TX) and no
+    `otrInvoiceId` — submitting to OTR stays a person's step on `/factoring`. A second press
+    reused the row (`reused=true`); nothing was double-factored.
+- Browser on `https://dev.d3dejqzs77khq6.amplifyapp.com/ar`: **Accounts Receivable** is in the
+  Operations nav, the page renders its six tabs with counts and the open-AR strip. That run is
+  what exposed the enum-name bug above; after the fix the worklist loads.
+- Dev data left as found: every verification shipment (`S000022`–`S000029`) is soft-deleted,
+  the four `ZZ AR Verification` fixture customers are archived, and the temporary identity is
+  deleted. No copied customer, load, invoice or factoring row was touched, and no production
+  table, bucket or branch was read or written.
+- Migration: `scripts/backfillLegacyAr.mjs` is written and refuses the production suffix
+  outright, but has **not been applied** — the 890 backfilled orders are still DOCS_NEEDED /
+  UNBILLED. Run it (plan → review → `--apply`) before anyone works the To-invoice tab on dev,
+  or that tab is the whole Aljex era.
+- **Decisions needed (Ryne):** Step F shipped its plan's defaults — `{prefix}{n:6}` from 1
+  with the division's prefix; one invoice per order, no consolidation; one e-mail per invoice;
+  owner/ADMIN for void/payment/credit/write-off/reversal and `page-invoicing` for
+  generate/e-mail/send-to-factor, under the new `invoicing` page key; a factored invoice stays
+  open until someone records a FACTOR payment; all eleven OTR fields prefilled from the issued
+  invoice and still editable on the queue row; legacy backfilled orders become `LEGACY`;
+  overpayment kept as credit by default; a duplicate payment reference warns but does not
+  block; terms fall back bill-to → customer → org → 30 days; default attachments are the
+  customer's required documents plus POD and BOL; cancel/delete of an invoiced shipment is
+  refused until void. Confirm or change any of these. Also: the `arUnbilledStage` skip was
+  not built, and no factor remit-to is configured yet, so a factored customer cannot be
+  invoiced until one is set in AR settings.
+
+
 
 ## 2026-10-28 — Step E done on dev; backfill applied; Step F planned
 
