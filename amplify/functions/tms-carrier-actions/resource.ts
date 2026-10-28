@@ -15,6 +15,6 @@ import { defineFunction } from '@aws-amplify/backend'
 export const tmsCarrierActions = defineFunction({
   name: 'tms-carrier-actions',
   entry: './handler.ts',
-  resourceGroupName: 'data',
+  resourceGroupName: 'tms',
   timeoutSeconds: 30,
 })
