@@ -3,7 +3,8 @@ import { Effect, PolicyStatement } from 'aws-cdk-lib/aws-iam'
 import { CfnFunction, Function as LambdaFunction, FunctionUrl, FunctionUrlAuthType, HttpMethod, EventSourceMapping, StartingPosition } from 'aws-cdk-lib/aws-lambda'
 import { CfnRule, Rule, Schedule, RuleTargetInput } from 'aws-cdk-lib/aws-events'
 import { LambdaFunction as EventsLambdaTarget } from 'aws-cdk-lib/aws-events-targets'
-import { ArnFormat, CfnOutput, Duration, Lazy, Stack, type IResolveContext } from 'aws-cdk-lib'
+import { ArnFormat, Aspects, CfnOutput, Duration, Stack } from 'aws-cdk-lib'
+import type { IConstruct } from 'constructs'
 import {
   UserPool,
   UserPoolClient,
@@ -1900,22 +1901,27 @@ if (process.env.BCAT_DEV_STACK === 'true') {
     if (!lambda) continue
     lambda.addToRolePolicy(new PolicyStatement({ effect: Effect.DENY, actions: ['ses:*'], resources: ['*'] }))
     lambda.addEnvironment('BCAT_DEV_STACK', 'true')
-    // Amplify sets AMPLIFY_SSM_ENV_CONFIG as a Lazy token (JSON of {name: {path, sharedPath}})
-    // and the secret variables themselves to a placeholder string. The neutered names are
-    // the ones whose current value is that placeholder; the config is re-wrapped in a Lazy
-    // that resolves Amplify's own token at synth and drops those names from it.
-    const envMap = (lambda as unknown as { environment?: Record<string, { value?: unknown }> }).environment
-    const ssmConfig = envMap?.AMPLIFY_SSM_ENV_CONFIG?.value
-    if (typeof ssmConfig !== 'string') continue
-    const removed = NEUTERED_SECRETS.filter((name) => envMap?.[name]?.value === '<value will be resolved during runtime>')
-    if (removed.length === 0) continue
-    for (const name of removed) lambda.addEnvironment(name, 'disabled-on-dev')
-    lambda.addEnvironment('AMPLIFY_SSM_ENV_CONFIG', Lazy.uncachedString({
-      produce: (ctx: IResolveContext) => {
-        const parsed = JSON.parse(String(ctx.resolve(ssmConfig))) as Record<string, unknown>
-        for (const name of removed) delete parsed[name]
-        return JSON.stringify(parsed)
-      },
-    }))
   }
+  // Amplify sets AMPLIFY_SSM_ENV_CONFIG to a Lazy token (JSON of {name: {path, sharedPath}})
+  // and each secret variable to a placeholder that its runtime shim replaces from SSM. The
+  // rendered environment is only knowable at synth, so an Aspect resolves it then, drops the
+  // neutered names from the SSM config and pins those variables to a placeholder string
+  // through property overrides (which apply after the L2 renders its environment).
+  Aspects.of(devRootStack).add({
+    visit(node: IConstruct) {
+      if (!(node instanceof CfnFunction)) return
+      const rendered = Stack.of(node).resolve(node.environment) as { variables?: Record<string, unknown> } | undefined
+      const vars = rendered?.variables ?? {}
+      const ssmConfig = vars.AMPLIFY_SSM_ENV_CONFIG
+      if (typeof ssmConfig !== 'string') return
+      const parsed = JSON.parse(ssmConfig) as Record<string, unknown>
+      const removed = NEUTERED_SECRETS.filter((name) => name in parsed)
+      if (removed.length === 0) return
+      for (const name of removed) {
+        delete parsed[name]
+        node.addPropertyOverride(`Environment.Variables.${name}`, 'disabled-on-dev')
+      }
+      node.addPropertyOverride('Environment.Variables.AMPLIFY_SSM_ENV_CONFIG', JSON.stringify(parsed))
+    },
+  })
 }
