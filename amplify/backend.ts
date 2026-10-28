@@ -1398,6 +1398,13 @@ trackingApiFn.addEnvironment('LOAD_TABLE_NAME', backend.data.resources.tables['L
     actions:   ['dynamodb:PutItem', 'dynamodb:Query', 'dynamodb:GetItem'],
     resources: [trackShipmentDocTable.tableArn, `${trackShipmentDocTable.tableArn}/index/*`],
   }))
+  // The upload view reads the one load and the one assignment the token names,
+  // by primary key. Both were Query-on-index only, which is enough for the
+  // customer page but not for this one.
+  trackingApiFn.addToRolePolicy(new PolicyStatement({
+    actions:   ['dynamodb:GetItem'],
+    resources: [trackLoadCarrier.tableArn, backend.data.resources.tables['Load'].tableArn],
+  }))
   trackingApiFn.addEnvironment('SHIPMENT_DOCUMENT_TABLE_NAME', trackShipmentDocTable.tableName)
   trackingApiFn.addEnvironment('BUCKET_NAME', backend.storage.resources.bucket.bucketName)
   // The upload is a presigned PUT this Lambda signs, pinned to the content type
