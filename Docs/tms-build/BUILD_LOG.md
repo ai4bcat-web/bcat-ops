@@ -2,6 +2,46 @@
 
 One entry per unit of work (newest first). Decisions needed from Ryne go under **Decision needed**.
 
+## 2026-10-28 — the 1 MB template cap: why five fixes changed nothing, and the fix
+
+- **Root cause, with evidence.** The minification worked all along. It never reached
+  CloudFormation, because a nested stack's asset key is hashed from the template's
+  *content*, not from the bytes of the file. Synthesizing this branch twice — once
+  indented, once suppressed — produces two files, 1,010,618 and 714,287 bytes, under
+  **the same** asset key `8882f04e…json`. `cdk-assets` finds that key already in S3,
+  skips the upload as unchanged, and CloudFormation re-reads the original. The S3
+  staging bucket confirms it: the only template object over 1 MB that has ever existed
+  is `da134f11…json`, 1,010,720 bytes, written `18:33:08Z` by job `26` — the Step G
+  commit itself. Jobs `27`, `28` and `32` uploaded **no new object at all**, and job
+  `32` then failed against job `26`'s bytes. That is why `cdk.json`, `CDK_CONTEXT_JSON`
+  and the `_suppressTemplateIndentation` field each "worked locally, did nothing in the
+  build": all three leave the template's content identical, so the key never moves.
+- **The fix** (`amplify/backend.ts`, above `defineBackend`): two documented CDK context
+  keys merged into `CDK_CONTEXT_JSON`, which is where the Amplify toolkit hands the App
+  its context and which it leaves writable — only `CDK_CONTEXT` and `CDK_OUTDIR` are
+  frozen during synth, which is why the earlier attempt looked like it was "replaced".
+  - `@aws-cdk/core:suppressTemplateIndentation` — same resources, no indentation.
+  - `@aws-cdk/aws-iam:minimizePolicies` — CDK's own IAM minimisation. Statements that
+    agree on their actions have their resources unioned and vice versa; equality on one
+    axis is required before the other is unioned, so no principal gains an action on a
+    resource it did not already have. It also moves the content, which is what forces
+    the new asset key and the real upload.
+  The private-field hack from job `32` is gone — one mechanism, and a supported one.
+- **Measured on the build's own synth path** (`toolkit.fromAssemblyBuilder` +
+  `tsImport('amplify/backend.ts')` + `amplifySynth`, dev branch context, dev branch env):
+  data stack **1,010,618 → 709,025 bytes**, 291 KB under the cap, and the asset key moves
+  `8882f04e… → 0490d397…`. No other template in the 83-template assembly exceeds 129 KB.
+- **Proved unchanged, not assumed:** across all 83 templates, 3,029 resources identical
+  (same logical id and type) and 4,104 atomic grants identical, where a grant is one
+  (principal set, effect, action, resource, condition) tuple — compared per *role*,
+  because minimisation changes where CDK splits a long role policy into its Overflow
+  policy. Zero wildcard DynamoDB table resources before and after. No schema change, no
+  second API, no `resourceGroupName` move (jobs `29`–`31` showed why).
+- Gates before the commit: `npm run typecheck`, `npm run lint` (3 pre-existing warnings),
+  `npm run test` — 341 files / 4338 tests.
+- This supersedes the **Decision needed** in the entry below: none of the three options
+  was taken. Per-table least privilege on dev is intact.
+
 ## 2026-10-28 — Step G built and reviewed; dev deploy BLOCKED on the 1 MB template cap
 
 - Step G (AP — carrier bills & payments) is code-complete and committed on `dev`:

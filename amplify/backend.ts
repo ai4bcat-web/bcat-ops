@@ -73,6 +73,40 @@ import { driverWelcome } from './functions/driver-welcome/resource'
 import { driverAppApi } from './functions/driver-app-api/resource'
 import { configurePodScanner } from './podScanner.js'
 
+/*
+ * Keep the data stack's CloudFormation template under the 1 MB hard cap.
+ *
+ * Step G took the data stack to 1,007,296 bytes and CloudFormation refused the update
+ * outright ("Template may not exceed 1000000 bytes in size"). Two CDK context keys fix
+ * that, and both have to be set here: a Stack reads them in its CONSTRUCTOR, out of the
+ * App's context, and `ampx pipeline-deploy` builds that App inside `defineBackend` in
+ * this process. `cdk.json` is never read on that path (job 27), so CDK_CONTEXT_JSON —
+ * which the CDK toolkit sets just before importing this file, and which it leaves
+ * writable (only CDK_CONTEXT and CDK_OUTDIR are frozen during synth) — is the one place
+ * both are true.
+ *
+ * - suppressTemplateIndentation drops the pretty-printer's whitespace. CloudFormation
+ *   counts what is uploaded, not what is readable: same resources, 1,010,618 -> 714,287
+ *   bytes on this branch.
+ * - minimizePolicies is CDK's own IAM minimisation: statements that agree on their
+ *   actions have their resources unioned (and vice versa), so every table ARN is named
+ *   once per distinct action set instead of once per call site. Equality on one axis is
+ *   required before the other is unioned, so the effective (action, resource) grants are
+ *   unchanged — no wildcards, no table gains an action it did not already have.
+ *
+ * Jobs 27, 28 and 32 each failed WITHOUT changing the uploaded template because a nested
+ * stack's asset key is hashed from the template CONTENT, not from the file's bytes: a
+ * re-indented but otherwise identical template keeps job 26's key, cdk-assets finds that
+ * object already in S3 and skips the upload, and CloudFormation re-reads the 1,010,720
+ * byte original. minimizePolicies changes the content, so the key moves and the minified
+ * template is actually published. See Docs/tms-build/BUILD_LOG.md.
+ */
+process.env.CDK_CONTEXT_JSON = JSON.stringify({
+  ...JSON.parse(process.env.CDK_CONTEXT_JSON ?? '{}'),
+  '@aws-cdk/core:suppressTemplateIndentation': true,
+  '@aws-cdk/aws-iam:minimizePolicies': true,
+})
+
 const backend = defineBackend({
   auth,
   data,
@@ -133,33 +167,6 @@ const backend = defineBackend({
   dispatchSlackBridge,
   dispatchNudge,
 })
-
-/*
- * Keep the data stack's CloudFormation template under the 1 MB hard cap.
- *
- * Step G took it to 1,007,296 bytes and CloudFormation refused the update outright
- * ("Template may not exceed 1000000 bytes in size"). Nearly a third of those bytes
- * were the pretty-printer's indentation; CloudFormation counts what is uploaded, not
- * what is readable, so dropping it leaves every resource exactly as it is and brings
- * the template to 642 KB.
- *
- * This reaches past CDK's public surface on purpose, and the alternatives were tried
- * first. The flag is a Stack constructor prop read from App context, and `ampx
- * pipeline-deploy` builds the App itself: cdk.json is never read (job 27) and
- * CDK_CONTEXT_JSON is replaced before our code runs (job 28). Splitting the stack is
- * the documented remedy, but every router AppSync calls has to live beside the API or
- * the two stacks reference each other (jobs 29-31). CDK reads this field at SYNTH
- * time — `const indent = this._suppressTemplateIndentation ? undefined : 1` — and
- * only ASSIGNS it in the constructor, so setting it here is honoured.
- *
- * This is headroom, not a cure. The step that next pushes the data stack over 1 MB
- * needs the real fix: fewer models in one API, or grants that do not name every table.
- */
-// `_suppressTemplateIndentation` is private to CDK's Stack; the cast names what we are
-// reaching for rather than hiding it inside the assignment.
-const dataStack: { _suppressTemplateIndentation: boolean } =
-  Stack.of(backend.data.resources.graphqlApi) as unknown as { _suppressTemplateIndentation: boolean }
-dataStack._suppressTemplateIndentation = true
 
 // ── Auth session lifetime ──────────────────────────────────────────────────
 // Stay logged in (mobile + desktop) until explicit logout, for up to 60 days. The
