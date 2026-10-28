@@ -68,6 +68,7 @@ function weekEndExclusive(periodStart: string): string {
  */
 const PAPERWORK_HISTORY_START = '2026-09-01'
 import { driverProgramOf, timeClockFor, trailerRequiredOnPickup } from '../../../src/lib/driverProgram'
+import { creditCounts } from '../../../src/lib/payCreditApproval'
 import { normalizePaperworkLocation, paperworkLocationLabel, type PaperworkLocation } from '../../../src/lib/paperworkLocation'
 import { parsePaperworkLocation } from './paperwork'
 import { pmStatus, type PmStatus } from '../../../src/lib/pmDue'
@@ -3234,7 +3235,7 @@ export const handler = async (event: FnUrlEvent) => {
       for (const start of weeks) {
         const weekTrips = trips.filter((t) => t.periodStart === start)
         if (start !== currentWeekStart && !weekTrips.length && !ownerOpCarriesWeeklyCharges(start)) continue
-        const mine = adjustments.filter((c) => c.periodStart === start)
+        const mine = adjustments.filter((c) => c.periodStart === start && creditCounts(c))
         const settlement = buildSettlement(start, weekTrips, setting,
           deductions.filter((d) => d.periodStart === start),
           mine.filter((c) => (c.kind ?? 'CREDIT') !== 'DEBIT'),
@@ -3655,8 +3656,10 @@ async function buildSettlementForDriver(
   ])
 
 
-  const credits = creditsAndDebits.filter((c) => (c.kind ?? 'CREDIT') !== 'DEBIT')
-  const debits = creditsAndDebits.filter((c) => c.kind === 'DEBIT')
+  // A credit waiting on Ryne's approval (or rejected) must not show up in the driver's app.
+  const counted = creditsAndDebits.filter(creditCounts)
+  const credits = counted.filter((c) => (c.kind ?? 'CREDIT') !== 'DEBIT')
+  const debits = counted.filter((c) => c.kind === 'DEBIT')
 
   return buildSettlement(periodStart, trips, setting, deductions, credits, debits, fuelTxs)
 }

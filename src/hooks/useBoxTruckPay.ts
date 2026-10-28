@@ -3,7 +3,7 @@ import {
   listBoxTruckTrips, createBoxTruckTrip, updateBoxTruckTrip, deleteBoxTruckTrip,
   listDriverPaySettings, createDriverPaySetting, updateDriverPaySetting,
   listDriverPayDeductions, createDriverPayDeduction, deleteDriverPayDeduction,
-  listDriverPayCredits, createDriverPayCredit, updateDriverPayCredit, deleteDriverPayCredit,
+  listDriverPayCredits, createDriverPayCredit, updateDriverPayCredit, deleteDriverPayCredit, managePayCredit,
   type BoxTruckTrip, type DriverPaySetting, type DriverPayDeduction, type DriverPayCredit,
   type DriverPayCreditInput, type FixedExpense, type FuelTransaction,
 } from '@/lib/apiClient'
@@ -12,6 +12,7 @@ import { useDrivers } from './useDrivers'
 import { useLoads } from './useLoads'
 import { calcDriverPay, effectivePayRate, effectiveFixedExpenses, fixedExpenseLineLabel, type DriverPayStatement, type PayDeductionInput, type PayDebitInput } from '@/lib/driverPay'
 import { creditLineLabel } from '@/lib/payCredits'
+import { creditCounts } from '@/lib/payCreditApproval'
 import { matchedFuelForCard, sumFuel, normalizeCard, effectiveFuelCard } from '@/lib/driverFuel'
 import { compareByOrder } from '@/lib/calendarOrder'
 import { periodEnd, shiftPeriod } from '@/lib/biweekly'
@@ -29,7 +30,9 @@ export interface BoxTruckPayRow {
   fuelTxns:   FuelTransaction[]
   deductions: PayDeductionInput[]   // fixed + fuel + one-offs, in display order
   oneOffs:    DriverPayDeduction[]
-  credits:    DriverPayCredit[]     // extra pay added to the check at 100% (detention, bonus…)
+  credits:    DriverPayCredit[]     // extra pay added to the check at 100% (detention, bonus…) — approved only
+  /** Credits waiting on Ryne's approval, or rejected — shown on the page, never on the check. */
+  pendingCredits: DriverPayCredit[]
   debits:     DriverPayCredit[]     // taken OFF the check at 100%, after the net (advance, damage…)
   /** After-split fixed charges — shown on the statement and subtracted in full after the % model. */
   fixedDebits: PayDebitInput[]
@@ -57,9 +60,11 @@ export interface BoxTruckPayState {
   saveSetting:    (driverId: string, patch: Omit<DriverPaySetting, 'id' | 'createdAt' | 'updatedAt' | 'driverId'>, expectedUpdatedAt: string | undefined) => Promise<void>
   addDeduction:   (input: Omit<DriverPayDeduction, 'id' | 'createdAt' | 'updatedAt'>) => Promise<void>
   removeDeduction:(id: string) => Promise<void>
-  addCredit:      (input: DriverPayCreditInput) => Promise<void>
-  updateCredit:   (id: string, patch: Partial<DriverPayCreditInput>) => Promise<void>
+  addCredit:      (input: DriverPayCreditInput) => Promise<DriverPayCredit>
+  updateCredit:   (id: string, patch: Partial<DriverPayCreditInput>) => Promise<DriverPayCredit>
   removeCredit:   (id: string) => Promise<void>
+  /** Owner/ADMIN approval decision on a pending credit (enforced server-side). */
+  decideCredit:   (id: string, action: 'APPROVE' | 'REJECT', reason?: string | null) => Promise<void>
 }
 
 /** A load's delivery DATE (YYYY-MM-DD), tolerant of full ISO datetimes. */
@@ -142,7 +147,10 @@ export function useBoxTruckPay(periodStart: string): BoxTruckPayState {
           .filter((c) => c.driverId === setting.driverId && c.periodStart === periodStart)
           .sort((a, b) => (a.date ?? '').localeCompare(b.date ?? '') || a.createdAt.localeCompare(b.createdAt))
         // null kind = CREDIT: every row written before debits existed is a credit.
-        const driverCredits = mine.filter((c) => (c.kind ?? 'CREDIT') === 'CREDIT')
+        // A credit Ruben added waits for Ryne (PENDING) and stays off the check until then.
+        const allCredits    = mine.filter((c) => (c.kind ?? 'CREDIT') === 'CREDIT')
+        const driverCredits = allCredits.filter(creditCounts)
+        const pendingCredits = allCredits.filter((c) => !creditCounts(c))
         const driverDebits  = mine.filter((c) => c.kind === 'DEBIT')
 
         // Gross = Σ gross profit. Pay model is the driver's setting (Zak = 50% after expenses).
@@ -156,7 +164,7 @@ export function useBoxTruckPay(periodStart: string): BoxTruckPayState {
           [...fixedDebits, ...driverDebits.map((c) => ({ label: creditLineLabel(c), amount: c.amount, reasonCode: c.reasonCode }))],
         )
 
-        return { driver, setting, trips: driverTrips, fuel, fuelTxns, deductions: ded, oneOffs, credits: driverCredits, debits: driverDebits, fixedDebits, statement, unpulledLoadCount }
+        return { driver, setting, trips: driverTrips, fuel, fuelTxns, deductions: ded, oneOffs, credits: driverCredits, pendingCredits, debits: driverDebits, fixedDebits, statement, unpulledLoadCount }
       })
       .filter((r): r is BoxTruckPayRow => r !== null)
       .sort((a, b) => a.driver.name.localeCompare(b.driver.name))
@@ -251,13 +259,33 @@ export function useBoxTruckPay(periodStart: string): BoxTruckPayState {
     setDeductions((p) => p.filter((d) => d.id !== id))
   }, [])
 
+  /** A PENDING credit pings Ryne on Slack; a Slack hiccup never loses the credit itself. */
+  const notifyPending = (credit: DriverPayCredit) => {
+    if (credit.approvalStatus !== 'PENDING') return
+    managePayCredit('NOTIFY', credit.id).catch((err) => console.warn('[box-truck-pay] approval ping failed', err))
+  }
   const addCredit = useCallback(async (input: DriverPayCreditInput) => {
     const created = await createDriverPayCredit(input)
     setCredits((p) => [...p, created])
+    notifyPending(created)
+    return created
   }, [])
   const updateCredit = useCallback(async (id: string, patch: Partial<DriverPayCreditInput>) => {
     const updated = await updateDriverPayCredit(id, patch)
     setCredits((p) => p.map((c) => c.id === id ? updated : c))
+    if (patch.approvalStatus === 'PENDING') notifyPending(updated)
+    return updated
+  }, [])
+  /** Owner/ADMIN decision; the Lambda enforces who may call it and DMs the requester. */
+  const decideCredit = useCallback(async (id: string, action: 'APPROVE' | 'REJECT', reason?: string | null) => {
+    const res = await managePayCredit(action, id, reason)
+    setCredits((p) => p.map((c) => c.id === id ? {
+      ...c,
+      approvalStatus: (res.approvalStatus as DriverPayCredit['approvalStatus']) ?? (action === 'APPROVE' ? 'APPROVED' : 'REJECTED'),
+      approvedBy: (res.approvedBy as string | null) ?? null,
+      approvedAt: (res.approvedAt as string | null) ?? null,
+      rejectionReason: (res.rejectionReason as string | null) ?? null,
+    } : c))
   }, [])
   const removeCredit = useCallback(async (id: string) => {
     await deleteDriverPayCredit(id)
@@ -281,6 +309,6 @@ export function useBoxTruckPay(periodStart: string): BoxTruckPayState {
   return {
     loading, error, rows, tripCount, unconfigured, refresh, pullFromCalendar,
     addTrip, updateTrip, removeTrip, pushTripToNextPeriod, clearPeriod, saveSetting,
-    addDeduction, removeDeduction, addCredit, updateCredit, removeCredit,
+    addDeduction, removeDeduction, addCredit, updateCredit, removeCredit, decideCredit,
   }
 }

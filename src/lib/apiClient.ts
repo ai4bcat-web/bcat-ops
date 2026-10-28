@@ -2764,13 +2764,33 @@ export interface DriverPayCredit {
   loadRef?:    string | null
   createdBy?:  string | null
   notes?:      string | null
+  /** null = approved (legacy / owner-added). PENDING credits stay off the check. */
+  approvalStatus?:  'PENDING' | 'APPROVED' | 'REJECTED' | null
+  requestedBy?:     string | null
+  requestedAt?:     string | null
+  approvedBy?:      string | null
+  approvedAt?:      string | null
+  rejectionReason?: string | null
   createdAt:   string
   updatedAt:   string
 }
 
 export type DriverPayCreditInput = Omit<DriverPayCredit, 'id' | 'createdAt' | 'updatedAt'>
 
-const PAY_CREDIT_FIELDS = `id driverId periodStart kind reasonCode label amount miles costPerMile date loadRef createdBy notes createdAt updatedAt`
+const PAY_CREDIT_FIELDS = `id driverId periodStart kind reasonCode label amount miles costPerMile date loadRef createdBy notes approvalStatus requestedBy requestedAt approvedBy approvedAt rejectionReason createdAt updatedAt`
+
+/**
+ * Approval gate for a credit (pay-credit-approval Lambda): NOTIFY DMs Ryne about a
+ * pending credit; APPROVE / REJECT are owner/ADMIN-only and stamp the row server-side.
+ */
+export async function managePayCredit(action: 'NOTIFY' | 'APPROVE' | 'REJECT', creditId: string, reason?: string | null): Promise<Record<string, unknown>> {
+  const result = await client.graphql({
+    query: `mutation ManagePayCredit($action: String!, $creditId: ID!, $reason: String) { managePayCredit(action: $action, creditId: $creditId, reason: $reason) }`,
+    variables: { action, creditId, reason: reason ?? null },
+  }) as { data: { managePayCredit: unknown } }
+  const raw = result.data.managePayCredit
+  return (typeof raw === 'string' ? JSON.parse(raw) : raw) as Record<string, unknown>
+}
 
 // The model ships with this feature; until the backend migration lands the API has no
 // such type. Degrade to "no credits" rather than breaking the whole pay page.

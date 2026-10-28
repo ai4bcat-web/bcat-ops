@@ -6,6 +6,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { useBoxTruckPay, type BoxTruckPayRow, type BoxTruckTrip, type DriverPayCredit } from '@/hooks/useBoxTruckPay'
 import { tripPayAmount, FACTORING_FEE_LABEL } from '@/lib/driverPay'
 import { creditLineLabel } from '@/lib/payCredits'
+import { approvalLabel, approvalStatusOf, initialApprovalStatus } from '@/lib/payCreditApproval'
 import { persistDragOrder } from '@/lib/calendarOrder'
 import { buildBoxTruckPayStatementPdf, boxTruckPdfFilename, pdfToBase64 } from '@/lib/payPdfBoxTruck'
 import { sendDriverPayEmail, payCreditsDeployed } from '@/lib/apiClient'
@@ -63,7 +64,10 @@ function download(name: string, text: string) {
 export function BoxTruckPayPage() {
   const [periodStart, setPeriodStart] = useState(currentPeriodStart)
   const pay = useBoxTruckPay(periodStart)
-  const { user } = useAuth()
+  const { user, isOwner, isAdmin } = useAuth()
+  // Only Ryne (owner) or an ADMIN can put money on a check outright; anyone else's credit
+  // waits for approval and pings Ryne on Slack.
+  const canApprove = isOwner || isAdmin
 
   const [tripModal, setTripModal] = useState<{ driverId: string } | null>(null)
   const [editTrip, setEditTrip]   = useState<BoxTruckTrip | null>(null)
@@ -95,6 +99,18 @@ export function BoxTruckPayPage() {
     } catch (e) {
       toast.error(`Couldn't pull from the calendar: ${e instanceof Error ? e.message : 'unknown error'}`)
     }
+  }
+
+  const handleDecideCredit = async (c: DriverPayCredit, action: 'APPROVE' | 'REJECT') => {
+    let reason: string | null = null
+    if (action === 'REJECT') {
+      reason = window.prompt(`Reject the ${money(c.amount)} ${creditLineLabel(c)} credit? Add a reason for ${c.requestedBy ?? 'the requester'} (optional):`)
+      if (reason === null) return
+    }
+    try {
+      await pay.decideCredit(c.id, action, reason)
+      toast.success(action === 'APPROVE' ? `Approved — ${money(c.amount)} is on the check` : 'Credit rejected')
+    } catch (e) { toast.error(`Couldn't ${action.toLowerCase()} the credit: ${e instanceof Error ? e.message : 'unknown error'}`) }
   }
 
   const handleRemoveCredit = async (c: DriverPayCredit) => {
@@ -200,6 +216,8 @@ export function BoxTruckPayPage() {
             onAddDebit={() => setCreditFor({ row: selectedRow, kind: 'DEBIT' })}
             onEditCredit={(c) => setCreditFor({ row: selectedRow, credit: c })}
             onRemoveCredit={handleRemoveCredit}
+            canApprove={canApprove}
+            onDecideCredit={handleDecideCredit}
             onSettings={() => setSettings(selectedRow.driver)}
             onEditTrip={setEditTrip}
             onRemoveTrip={pay.removeTrip}
@@ -248,8 +266,22 @@ export function BoxTruckPayPage() {
           createdBy={user?.email ?? null}
           onSave={async (input) => {
             const noun = input.kind === 'DEBIT' ? 'debit' : 'credit'
-            if (creditFor.credit) { await pay.updateCredit(creditFor.credit.id, input); toast.success(`${noun === 'debit' ? 'Debit' : 'Credit'} updated`) }
-            else { await pay.addCredit(input); toast.success(`Added ${money(input.amount)} ${noun} to ${creditFor.row.driver.name}'s check`) }
+            // A credit from anyone but Ryne/an ADMIN waits for approval — including an
+            // edit to one that was already approved, since the amount may have changed.
+            const status = initialApprovalStatus({ kind: input.kind, canApprove })
+            const gated = status === 'PENDING'
+              ? { approvalStatus: 'PENDING' as const, requestedBy: user?.email ?? null, requestedAt: new Date().toISOString(), approvedBy: null, approvedAt: null, rejectionReason: null }
+              : { approvalStatus: 'APPROVED' as const }
+            const pending = status === 'PENDING'
+            if (creditFor.credit) {
+              await pay.updateCredit(creditFor.credit.id, { ...input, ...gated })
+              toast.success(pending ? 'Credit updated — sent to Ryne for approval' : `${noun === 'debit' ? 'Debit' : 'Credit'} updated`)
+            } else {
+              await pay.addCredit({ ...input, ...gated })
+              toast.success(pending
+                ? `${money(input.amount)} credit for ${creditFor.row.driver.name} sent to Ryne for approval`
+                : `Added ${money(input.amount)} ${noun} to ${creditFor.row.driver.name}'s check`)
+            }
             setCreditFor(null)
           }}
           onClose={() => setCreditFor(null)}
@@ -271,10 +303,11 @@ export function BoxTruckPayPage() {
 }
 
 // ── One driver's biweekly statement ─────────────────────────────────────────
-function StatementCard({ row, onPull, onAddTrip, onImport, onAddDeduction, onAddCredit, onAddDebit, onEditCredit, onRemoveCredit, onSettings, onEditTrip, onRemoveTrip, onPushTrip, onRemoveDeduction, onWaiveDeduction, onExport, onPdf, onEmail, onUpdateTrip }: {
+function StatementCard({ row, onPull, onAddTrip, onImport, onAddDeduction, onAddCredit, onAddDebit, onEditCredit, onRemoveCredit, canApprove, onDecideCredit, onSettings, onEditTrip, onRemoveTrip, onPushTrip, onRemoveDeduction, onWaiveDeduction, onExport, onPdf, onEmail, onUpdateTrip }: {
   row: BoxTruckPayRow
   onPull: () => void; onAddTrip: () => void; onImport: () => void; onAddDeduction: () => void; onSettings: () => void
   onAddCredit: () => void; onAddDebit: () => void; onEditCredit: (c: DriverPayCredit) => void; onRemoveCredit: (c: DriverPayCredit) => void
+  canApprove: boolean; onDecideCredit: (c: DriverPayCredit, action: 'APPROVE' | 'REJECT') => void
   onEditTrip: (t: BoxTruckTrip) => void
   onRemoveTrip: (id: string) => void; onPushTrip: (t: BoxTruckTrip) => void
   onRemoveDeduction: (id: string) => void; onWaiveDeduction: (label: string, amount: number) => void; onExport: () => void
@@ -283,6 +316,7 @@ function StatementCard({ row, onPull, onAddTrip, onImport, onAddDeduction, onAdd
 }) {
   const { driver, setting, statement, oneOffs } = row
   const { trips: rowTrips } = row
+  const pendingCredits = row.pendingCredits ?? []   // rows built before the approval gate carry none
   const dragId = useRef<string | null>(null)
   const [draggingId, setDraggingId] = useState<string | null>(null)
   const [dragOrder, setDragOrder] = useState<string[] | null>(null)
@@ -460,7 +494,7 @@ function StatementCard({ row, onPull, onAddTrip, onImport, onAddDeduction, onAdd
         </div>
         {!payCreditsDeployed() ? (
           <div style={{ fontSize: 12.5, color: '#b45309' }}>Credits need the latest backend deploy (<code>npx ampx sandbox</code> / pipeline deploy) before they can be saved.</div>
-        ) : row.credits.length === 0 ? (
+        ) : row.credits.length === 0 && pendingCredits.length === 0 ? (
           <div style={{ fontSize: 12.5, color: 'var(--ds-t3)' }}>No credits. Add detention, layover, a bonus or a reimbursement to pay {driver.name} extra on this check.</div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
@@ -479,8 +513,38 @@ function StatementCard({ row, onPull, onAddTrip, onImport, onAddDeduction, onAdd
                 <button onClick={() => onRemoveCredit(c)} title="Remove credit" style={{ color: 'var(--ds-t3)', background: 'none', border: 'none', cursor: 'pointer', width: 16 }}><Trash2 size={12} /></button>
               </div>
             ))}
+            {pendingCredits.map((c) => {
+              const status = approvalStatusOf(c)
+              const rejected = status === 'REJECTED'
+              return (
+                <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5, opacity: rejected ? 0.7 : 1 }}>
+                  <span style={{ flex: 1, color: 'var(--ds-t2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {creditLineLabel(c)}
+                    <span style={{ color: 'var(--ds-t3)', fontSize: 11.5 }}>
+                      {c.date ? ` · ${fmtShort(c.date)}` : ''}{c.loadRef ? ` · ${c.loadRef}` : ''}
+                      {c.requestedBy ? ` · asked by ${c.requestedBy.split('@')[0]}` : ''}
+                      {rejected && c.rejectionReason ? ` · ${c.rejectionReason}` : ''}
+                    </span>
+                  </span>
+                  <span title={rejected ? `Rejected by ${c.approvedBy ?? ''}` : 'Waiting for Ryne — not on the check yet'}
+                    style={{ fontSize: 10.5, fontWeight: 700, padding: '1px 7px', borderRadius: 999, border: `1px solid ${rejected ? '#fca5a5' : '#fcd34d'}`, color: rejected ? '#dc2626' : '#b45309', background: 'var(--ds-surface)', whiteSpace: 'nowrap' }}>
+                    {approvalLabel(status)}
+                  </span>
+                  <span style={{ color: 'var(--ds-t3)', fontVariantNumeric: 'tabular-nums', fontWeight: 600, textDecoration: rejected ? 'line-through' : 'none' }}>+{money(c.amount)}</span>
+                  {canApprove && !rejected ? (
+                    <>
+                      <button onClick={() => onDecideCredit(c, 'APPROVE')} title="Approve — add it to the check" style={{ height: 22, padding: '0 8px', borderRadius: 6, border: '1px solid #86efac', background: 'var(--ds-surface)', color: '#15803d', cursor: 'pointer', fontSize: 11, fontWeight: 700, fontFamily: 'inherit' }}>Approve</button>
+                      <button onClick={() => onDecideCredit(c, 'REJECT')} title="Reject — keep it off the check" style={{ height: 22, padding: '0 8px', borderRadius: 6, border: '1px solid #fca5a5', background: 'var(--ds-surface)', color: '#dc2626', cursor: 'pointer', fontSize: 11, fontWeight: 700, fontFamily: 'inherit' }}>Reject</button>
+                    </>
+                  ) : (
+                    <button onClick={() => onEditCredit(c)} title="Edit credit" style={{ color: 'var(--ds-t3)', background: 'none', border: 'none', cursor: 'pointer', width: 16 }}><Pencil size={12} /></button>
+                  )}
+                  <button onClick={() => onRemoveCredit(c)} title="Remove credit" style={{ color: 'var(--ds-t3)', background: 'none', border: 'none', cursor: 'pointer', width: 16 }}><Trash2 size={12} /></button>
+                </div>
+              )
+            })}
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5, fontWeight: 700, borderTop: '1px solid var(--ds-border)', marginTop: 4, paddingTop: 6 }}>
-              <span style={{ flex: 1, color: 'var(--ds-t1)' }}>Total credits</span>
+              <span style={{ flex: 1, color: 'var(--ds-t1)' }}>Total credits{pendingCredits.some((c) => approvalStatusOf(c) === 'PENDING') ? ' (approved only)' : ''}</span>
               <span style={{ color: '#15803d', fontVariantNumeric: 'tabular-nums' }}>+{money(statement.totalCredits)}</span>
               <span style={{ width: 40 }} />
             </div>

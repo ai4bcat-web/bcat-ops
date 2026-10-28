@@ -25,6 +25,7 @@ import { vendorApIntake } from './functions/vendor-ap-intake/resource'
 import { vendorApExtract } from './functions/vendor-ap-extract/resource'
 import { apptNeedNotifier } from './functions/appt-need-notifier/resource'
 import { slackStatusNotifier } from './functions/slack-status-notifier/resource'
+import { payCreditApproval } from './functions/pay-credit-approval/resource'
 import { fuelImport } from './functions/fuel-import/resource'
 import { generateRecurringExpenses } from './functions/generate-recurring-expenses/resource'
 import { motiveMileageSync } from './functions/motive-mileage-sync/resource'
@@ -78,6 +79,7 @@ const backend = defineBackend({
   vendorApExtract,
   apptNeedNotifier,
   slackStatusNotifier,
+  payCreditApproval,
   fuelImport,
   generateRecurringExpenses,
   motiveMileageSync,
@@ -880,6 +882,31 @@ backend.slackStatusNotifier.resources.lambda.addToRolePolicy(
 )
 
 notifierFn.addEnvironment('TABLE_NAME', intakeTable.tableName)
+
+// ── payCreditApproval Lambda (managePayCredit mutation) ────────────────────
+// Box-truck pay credits added by anyone but the owner/ADMIN wait for Ryne's approval:
+// NOTIFY DMs him on Slack, APPROVE/REJECT stamp the credit (owner/ADMIN enforced in the
+// handler). The Lambda reads the credit and the driver's name and writes only the
+// approval fields; it never creates, deletes or re-prices a credit.
+const payApprovalFn = backend.payCreditApproval.resources.lambda as LambdaFunction
+const payApprovalCreditTable = backend.data.resources.tables['DriverPayCredit']
+payApprovalFn.addToRolePolicy(new PolicyStatement({
+  actions:   ['dynamodb:GetItem', 'dynamodb:UpdateItem'],
+  resources: [payApprovalCreditTable.tableArn],
+}))
+payApprovalFn.addToRolePolicy(new PolicyStatement({
+  actions:   ['dynamodb:GetItem'],
+  resources: [backend.data.resources.tables['Driver'].tableArn],
+}))
+payApprovalFn.addToRolePolicy(new PolicyStatement({
+  actions:   ['cognito-idp:AdminGetUser'],
+  resources: [backend.auth.resources.userPool.userPoolArn],
+}))
+payApprovalFn.addEnvironment('PAY_CREDIT_TABLE_NAME', payApprovalCreditTable.tableName)
+payApprovalFn.addEnvironment('DRIVER_TABLE_NAME', backend.data.resources.tables['Driver'].tableName)
+payApprovalFn.addEnvironment('USER_POOL_ID', backend.auth.resources.userPool.userPoolId)
+payApprovalFn.addEnvironment('PORTAL_BASE_URL', PORTAL_PROD_ORIGIN)
+payApprovalFn.addEnvironment('APPROVER_EMAIL', process.env.PAY_CREDIT_APPROVER_EMAIL ?? 'ryne@bcatcorp.com')
 
 // ── fuelImport Lambda ──────────────────────────────────────────────────────
 

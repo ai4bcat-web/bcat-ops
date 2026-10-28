@@ -1,6 +1,7 @@
 import { type ClientSchema, a, defineData } from '@aws-amplify/backend'
 import { userManagement } from '../functions/userManagement/resource'
 import { slackStatusNotifier } from '../functions/slack-status-notifier/resource'
+import { payCreditApproval } from '../functions/pay-credit-approval/resource'
 import { onboardingEmailer } from '../functions/onboarding-emailer/resource'
 import { driverPayEmailer } from '../functions/driver-pay-emailer/resource'
 import { tripScreenshotParser } from '../functions/trip-screenshot-parser/resource'
@@ -470,6 +471,15 @@ const schema = a.schema({
       loadRef:     a.string(),             // optional Aljex PRO / PU # the credit relates to
       createdBy:   a.string(),             // user email who added it (audit trail)
       notes:       a.string(),
+      // Approval gate (src/lib/payCreditApproval.ts): a credit added by anyone but the
+      // owner/ADMIN starts PENDING and stays off the check until Ryne approves it through
+      // `managePayCredit`; null = APPROVED so every pre-existing row keeps paying out.
+      approvalStatus:  a.string(),         // 'PENDING' | 'APPROVED' | 'REJECTED' | null
+      requestedBy:     a.string(),         // email of whoever asked (Ruben)
+      requestedAt:     a.string(),         // ISO
+      approvedBy:      a.string(),         // email of the decider
+      approvedAt:      a.string(),         // ISO
+      rejectionReason: a.string(),
     })
     .secondaryIndexes((index) => [index('periodStart').sortKeys(['driverId'])])
     // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
@@ -1711,6 +1721,19 @@ const schema = a.schema({
     // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
     .disableOperations(['subscriptions'])
     .authorization((allow) => [allow.authenticated()]),
+
+  // Pay-credit approval gate: NOTIFY (Slack DM to Ryne after a non-owner adds a credit),
+  // APPROVE / REJECT (owner or ADMIN only, enforced in the Lambda).
+  managePayCredit: a
+    .mutation()
+    .arguments({
+      action:   a.string().required(),   // 'NOTIFY' | 'APPROVE' | 'REJECT'
+      creditId: a.id().required(),
+      reason:   a.string(),              // rejection reason
+    })
+    .returns(a.json())
+    .authorization((allow) => [allow.authenticated()])
+    .handler(a.handler.function(payCreditApproval)),
 
   // Notify Slack when an IntakeItem status changes.
   // Called fire-and-forget from the frontend after a successful updateIntakeItem.
