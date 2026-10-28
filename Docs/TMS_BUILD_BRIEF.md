@@ -14,7 +14,7 @@ You are building the MVMNT-style TMS into BCAT Ops. Read, in this order, before 
 
 ## Goal
 
-Steps A → I of `MVMNT_TMS_SPEC.md` §7, in order, each one usable on dev with the copied
+Steps A → M of `MVMNT_TMS_SPEC.md` §7 and §9, in order, each one usable on dev with the copied
 production data before the next starts. Own-fleet work (Ivan Cartage, Amazon, box trucks,
 the driver app, PODs, settlements, the factoring queue) must keep working unchanged
 throughout — the TMS layer wraps it, it does not replace it. No driver downloads a new app;
@@ -85,5 +85,14 @@ G. AP — Awaiting invoice → In review → To be paid → Paid; record/approve
 H. Quotes & rates — customer quotes with accept/counter/decline link; carrier offers;
    lane history.
 I. Settings, roles, teams, commissions, reporting.
+J. Integration framework + every provider settings page (spec §8.1, §9) — stub mode for all,
+   live for providers BCAT has credentials for; list missing credentials in the build log.
+K. Workflows page: Errors + AI Agents, WorkflowRun model, the four email-agent inbox roles,
+   org/party AI memory (spec §8.2).
+L. My Brokerage: every settings page in spec §8.3 not already built.
+M. Academy: in-app help, glossary, FAQ, updates, training (spec §8.4).
+
+Scope note (added 2026-10-27): Ryne wants all of MVMNT, including every integration, the
+Workflows page, all of My Brokerage and the Academy — not only the core TMS.
 
 Start with step A now.
