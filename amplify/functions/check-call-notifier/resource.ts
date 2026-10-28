@@ -13,7 +13,7 @@ import { defineFunction, secret } from '@aws-amplify/backend'
 export const checkCallNotifier = defineFunction({
   name: 'check-call-notifier',
   entry: './handler.ts',
-  resourceGroupName: 'data',
+  resourceGroupName: 'ops',
   schedule: 'every 5m',
   timeoutSeconds: 60,
   memoryMB: 512,

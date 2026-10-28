@@ -11,7 +11,7 @@ import { defineFunction, secret } from '@aws-amplify/backend'
 export const cashCheckinReminder = defineFunction({
   name: 'cash-checkin-reminder',
   entry: './handler.ts',
-  resourceGroupName: 'data',
+  resourceGroupName: 'ops',
   timeoutSeconds: 30,
   environment: {
     SLACK_BOT_TOKEN: secret('SLACK_BOT_TOKEN'),

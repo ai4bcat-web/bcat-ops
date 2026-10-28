@@ -13,7 +13,7 @@ import { defineFunction, secret } from '@aws-amplify/backend'
 export const intakeReconcile = defineFunction({
   name: 'intake-reconcile',
   entry: './handler.ts',
-  resourceGroupName: 'data',
+  resourceGroupName: 'ops',
   timeoutSeconds: 300,
   environment: {
     SLACK_BOT_TOKEN: secret('SLACK_BOT_TOKEN'),

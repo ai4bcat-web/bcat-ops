@@ -14,7 +14,7 @@ import { defineFunction, secret } from '@aws-amplify/backend'
 export const paychexPaySync = defineFunction({
   name: 'paychex-pay-sync',
   entry: './handler.ts',
-  resourceGroupName: 'data',
+  resourceGroupName: 'ops',
   timeoutSeconds: 120,
   // Payroll runs Wednesday → sync Thursday 13:00 UTC (~8am CT), once payroll is
   // processed and the period reads as closed. Weekly + idempotent (off weeks just

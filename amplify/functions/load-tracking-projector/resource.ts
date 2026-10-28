@@ -15,7 +15,7 @@ import { defineFunction } from '@aws-amplify/backend'
 export const loadTrackingProjector = defineFunction({
   name: 'load-tracking-projector',
   entry: './handler.ts',
-  resourceGroupName: 'data',
+  resourceGroupName: 'ops',
   timeoutSeconds: 60,
   memoryMB: 512,
 })
