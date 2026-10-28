@@ -11,7 +11,7 @@ import { defineFunction, secret } from '@aws-amplify/backend'
 export const apptReport = defineFunction({
   name: 'appt-report',
   entry: './handler.ts',
-  resourceGroupName: 'ops',
+  resourceGroupName: 'data',
   timeoutSeconds: 60,
   environment: {
     SLACK_BOT_TOKEN: secret('SLACK_BOT_TOKEN'),

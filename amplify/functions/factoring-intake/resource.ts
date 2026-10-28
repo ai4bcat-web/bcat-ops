@@ -3,7 +3,7 @@ import { defineFunction, secret } from '@aws-amplify/backend'
 export const factoringIntake = defineFunction({
   name: 'factoring-intake',
   entry: './handler.ts',
-  resourceGroupName: 'ops',
+  resourceGroupName: 'data',
   timeoutSeconds: 30,
   environment: {
     // Shared webhook secret — the SAME token the existing fuel/intake Gmail bridge

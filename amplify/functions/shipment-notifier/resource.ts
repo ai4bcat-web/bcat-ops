@@ -16,7 +16,7 @@ import { defineFunction } from '@aws-amplify/backend'
 export const shipmentNotifier = defineFunction({
   name: 'shipment-notifier',
   entry: './handler.ts',
-  resourceGroupName: 'ops',
+  resourceGroupName: 'data',
   timeoutSeconds: 60,
   memoryMB: 512,
 })

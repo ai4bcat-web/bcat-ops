@@ -12,7 +12,7 @@ import { defineFunction, secret } from '@aws-amplify/backend'
 export const blueinkSync = defineFunction({
   name: 'blueink-sync',
   entry: './handler.ts',
-  resourceGroupName: 'ops',
+  resourceGroupName: 'data',
   timeoutSeconds: 300,
   environment: {
     BLUE_INK_TECH_API_KEY: secret('BLUE_INK_TECH_API_KEY'),

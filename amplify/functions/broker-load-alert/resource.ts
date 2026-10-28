@@ -13,7 +13,7 @@ import { defineFunction, secret } from '@aws-amplify/backend'
 export const brokerLoadAlert = defineFunction({
   name: 'broker-load-alert',
   entry: './handler.ts',
-  resourceGroupName: 'ops',
+  resourceGroupName: 'data',
   timeoutSeconds: 30,
   environment: {
     // Slack bot token (chat:write) — same secret the status notifier + gmail intake use.

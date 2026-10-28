@@ -134,6 +134,33 @@ const backend = defineBackend({
   dispatchNudge,
 })
 
+/*
+ * Keep the data stack's CloudFormation template under the 1 MB hard cap.
+ *
+ * Step G took it to 1,007,296 bytes and CloudFormation refused the update outright
+ * ("Template may not exceed 1000000 bytes in size"). Nearly a third of those bytes
+ * were the pretty-printer's indentation; CloudFormation counts what is uploaded, not
+ * what is readable, so dropping it leaves every resource exactly as it is and brings
+ * the template to 642 KB.
+ *
+ * This reaches past CDK's public surface on purpose, and the alternatives were tried
+ * first. The flag is a Stack constructor prop read from App context, and `ampx
+ * pipeline-deploy` builds the App itself: cdk.json is never read (job 27) and
+ * CDK_CONTEXT_JSON is replaced before our code runs (job 28). Splitting the stack is
+ * the documented remedy, but every router AppSync calls has to live beside the API or
+ * the two stacks reference each other (jobs 29-31). CDK reads this field at SYNTH
+ * time — `const indent = this._suppressTemplateIndentation ? undefined : 1` — and
+ * only ASSIGNS it in the constructor, so setting it here is honoured.
+ *
+ * This is headroom, not a cure. The step that next pushes the data stack over 1 MB
+ * needs the real fix: fewer models in one API, or grants that do not name every table.
+ */
+// `_suppressTemplateIndentation` is private to CDK's Stack; the cast names what we are
+// reaching for rather than hiding it inside the assignment.
+const dataStack: { _suppressTemplateIndentation: boolean } =
+  Stack.of(backend.data.resources.graphqlApi) as unknown as { _suppressTemplateIndentation: boolean }
+dataStack._suppressTemplateIndentation = true
+
 // ── Auth session lifetime ──────────────────────────────────────────────────
 // Stay logged in (mobile + desktop) until explicit logout, for up to 60 days. The
 // refresh token controls the overall session length; access/id tokens are short-lived
