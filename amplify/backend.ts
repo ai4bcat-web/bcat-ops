@@ -73,6 +73,30 @@ import { driverWelcome } from './functions/driver-welcome/resource'
 import { driverAppApi } from './functions/driver-app-api/resource'
 import { configurePodScanner } from './podScanner.js'
 
+/*
+ * Keep the data stack's CloudFormation template under the 1 MB hard cap.
+ *
+ * Step G took it to 1,007,296 bytes and the deploy was refused outright
+ * ("Template may not exceed 1000000 bytes in size", job 26). Nearly a third of those
+ * bytes were the pretty-printer's indentation — CloudFormation counts what is
+ * uploaded, not what is readable — so suppressing it leaves every resource exactly as
+ * it was and brings the template to 713,837 bytes.
+ *
+ * It has to be done HERE. A `Stack` reads this flag once, in its constructor, out of
+ * the App's context; `ampx pipeline-deploy` builds that App inside this process and
+ * hands it its context through `CDK_CONTEXT_JSON`, which it sets just before importing
+ * this file. Merging into that variable before `defineBackend` runs is the only point
+ * where both are true. `cdk.json` would not be read at all on the Amplify build.
+ *
+ * This is headroom, not a cure: the data stack grows with every model and every Lambda
+ * policy, and the step that next adds a table will need the real fix — moving the TMS
+ * routers' grants off the data stack, or splitting the data stack in two.
+ */
+process.env.CDK_CONTEXT_JSON = JSON.stringify({
+  ...JSON.parse(process.env.CDK_CONTEXT_JSON ?? '{}'),
+  '@aws-cdk/core:suppressTemplateIndentation': true,
+})
+
 const backend = defineBackend({
   auth,
   data,
