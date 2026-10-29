@@ -2,6 +2,115 @@
 
 One entry per unit of work (newest first). Decisions needed from Ryne go under **Decision needed**.
 
+## 2026-10-28 — Step I is live on dev; J planned
+
+- **Deployed.** Commit `2a645b0` pushed to `origin dev`; Amplify job **`39` SUCCEED**. All three
+  new tables are **ACTIVE on dev with exactly the indexes the plan named**, read off the live
+  tables rather than assumed: `Commission` →
+  `commissionsByRepIdAndCommissionMonth`, `commissionsByInvoiceId`, `commissionsByPayPeriodId`,
+  `commissionsByCommissionMonthAndTriggerAt`; `CommissionPayPeriod` and `UserProfile` → none, as
+  planned; `LaneRateSample` → its two Step H indexes plus the new
+  `laneRateSamplesBySampleMonthAndDate`. The **generated GraphQL query names were checked against
+  the deployed schema** (`aws appsync get-introspection-schema`), which is the `66785d3` lesson:
+  `listCommissionByInvoiceId`, `listCommissionByRepIdAndCommissionMonth`,
+  `listCommissionByCommissionMonthAndTriggerAt`, `listCommissionByPayPeriodId`,
+  `listCommissionPayPeriods`, `listUserProfiles` and `listLaneRateSampleBySampleMonthAndDate` all
+  exist verbatim as `apiClient.ts` asks for them.
+- **Template budget.** Measured with `scripts/measureDataTemplate.mjs` before the first schema
+  change and after the last: **718,390 → 732,259 bytes, +13,869** for three models, five GSIs,
+  their read resolvers and the new table ARNs — **267,741 under the cap** and well inside the
+  plan's 25,000-byte ceiling, so nothing from the drop order was needed. No other template in the
+  88-template assembly exceeds 128,503 bytes.
+- **What shipped.** A role is **data on `UserProfile` projected onto Cognito groups**, so the five
+  server-side `authorize()`s and `hasPageAccess` still read the token and a role change costs no
+  table read per call. `userManagement` moved from owner-only to **owner or ADMIN**, with
+  `setAdmin`, `delete` and granting the ADMIN role still owner-only, the lock-out guards (owner,
+  self, last admin) and its first test file. `Commission` and `CommissionPayPeriod` are a real
+  ledger written only by `tmsFinanceActions` (`commissions.ts`, thirteen actions behind a new
+  `page-commissions` key); `src/lib/commission.ts` holds the arithmetic. `LaneRateSample` became
+  the reporting fact table. New pages `/commissions` and `/reports`, a rebuilt `/users` under a
+  new `RequireAdmin`, five settings cards (shipments, charge codes, teams, roles & pages,
+  commissions), `RepPicker`/`TeamPicker` replacing the free-text rep inputs,
+  `scripts/backfillUserProfiles.mjs`, and three Academy articles.
+- Gates before the commit: `npm run typecheck`, `npm run lint` (3 pre-existing warnings),
+  `npm run test` — **365 files / 4,890 tests**, up from 351 / 4,598.
+- **Fable review (`reviewer`, once, on the full staged diff) found two blockers, seven majors and
+  three minors. Every one is fixed, each with a test that fails without the fix.** The two
+  blockers were both deploy-breaking: a REVERSAL row spread `payPeriodId: null` onto a row whose
+  `payPeriodId` is a GSI hash key, so **every `VOID_INVOICE` over an approved commission would
+  have been refused outright** by `Type mismatch … Actual: NULL` — the Step C lesson, in a new
+  place; and the ladder had **no rung out of `MANAGER_APPROVED`**, so under the shipped default
+  (managers approve) every row a manager approved was locked, unclaimable and never payable. The
+  majors: an explicit `splitBps` paid each person that percentage of the pot independently, so two
+  owners at 50 % of an odd pot **invented a cent** (splits are weights through `allocateCents`
+  now); reversal and adjustment ids were minted at `:1` regardless of what already existed, so a
+  second rerun or a cancelled adjustment would have failed **every later run of that invoice**; an
+  adjustment or reversal inherited the original `triggerAt`, so a late difference landed in a
+  closed period and **could never be netted off a rep's pay** (they are stamped with the moment
+  they are computed, and `SUBMIT_PAY_PERIOD` now sweeps stragglers back three months);
+  `userManagement` was missing `dynamodb:DeleteItem`, so deleting a user would have removed the
+  login and then thrown; `setAdmin` bypassed the role machinery, which let a non-owner's later
+  claim edit silently grant or revoke ADMIN; and a manager could **approve, override and accept
+  their own commission** — nobody signs off their own number now.
+- **Runtime verification on the deployed dev stack.** The gates and the tests are not the proof;
+  these are, taken by invoking the deployed Lambdas with real identity claims:
+  - `page-loads` alone on `RUN_COMMISSIONS` → *"Forbidden: RUN_COMMISSIONS requires owner, ADMIN,
+    or page-commissions"*; `page-invoicing` alone on `OPEN_PAY_PERIOD` → the same refusal. Billing
+    a customer does not put anybody on the commission ladder.
+  - A `role-CUSTOMER_REP` holder on `SAVE_COMMISSION_SETTINGS` → *"Forbidden:
+    SAVE_COMMISSION_SETTINGS requires owner or ADMIN"*; on `SAVE_SHIPMENT_SETTINGS` (the shipment
+    router) → *"Forbidden: SAVE_SHIPMENT_SETTINGS requires owner or ADMIN"*.
+  - The same rep on `RUN_COMMISSIONS` **gets through the door** and is stopped by the real
+    settings read: *"Commissions are turned off. Switch them on in Settings → Commissions first."*
+    — which also proves the Lambda's new table grants and env are wired, since it reached
+    `getSettings`.
+  - `manageUsers list` as a customer rep → *"Forbidden: managing users requires owner or ADMIN."*;
+    as the owner it returns the real pool joined to profiles and **mints the owner's `UserProfile`
+    row on first read**, exactly as planned.
+- **What is NOT yet verified, and why.** `scripts/devVerifyCommissions.mjs` is written and
+  committed — it builds its own customer, carrier and shipments, creates two temporary identities
+  with randomised passwords that are never printed, signs them in for real, and asserts the whole
+  of Step I end to end (the exact cents on a $2,500 / $1,800 order, an idempotent rerun, a rep's
+  counter and a manager's accept, an approved row adjusted rather than rewritten, half-cent
+  rounding, an own-fleet zero row, a void cancelling and reversing, a pay period open → paid with
+  a statement PDF, and the reporting index) and deletes every identity in a `finally`. **It has
+  not been run**: it signs in through Cognito with `BCAT_EMAIL` / `BCAT_PASSWORD`, and those
+  credentials are not present in this environment. The browser pass over `/commissions`,
+  `/reports`, `/users` and the five settings cards is blocked on the same credential. Both are a
+  single command once Ryne supplies it:
+  `BCAT_EMAIL=… BCAT_PASSWORD=… node scripts/devVerifyCommissions.mjs`.
+- **Migration.** `scripts/backfillUserProfiles.mjs` (plan → review → `--apply`) writes one profile
+  per Cognito login: the ADMIN group becomes `role ADMIN`, **everybody else becomes NONE** and
+  keeps every page they already hold as an extra grant — no role is inferred from a page grant,
+  because `page-invoicing` + `page-carrierPay` looks like AR/AP and might be a manager who also
+  bills. `scripts/backfillLaneSamples.mjs` now emits the six reporting fields and counts a sample
+  missing `sampleMonth` as stale, so the 835 Step H samples are refreshed rather than called
+  current; a third pass over refreshed rows is 0 actions. Neither has been applied to dev yet —
+  both need the same dev credential path as above, and both refuse the production suffix before a
+  single read.
+- **No commission is backfilled.** Pre-I invoices carry no plan, and a plan with an
+  `effectiveFrom` in the past would compute rows for money that was already paid out elsewhere.
+  The Academy article says to set `effectiveFrom` to the go-live date.
+- **Nothing claims an e-mail was sent.** Step I sends nothing: the five team sender addresses are
+  stored and unused until J/L, and SES is still denied on dev.
+- **Decisions needed (Ryne):** Step I shipped every default its plan proposed — roles as data
+  projected onto `role-*`/`page-*` groups; the role → pages table as the plan listed it; owner or
+  ADMIN manage users, owner alone grants ADMIN and deletes; own-fleet page keys stay per-user
+  extras outside every role; only credit-limit edit, AR/AP posting, AP approval and carrier status
+  are enforced claims and the rest are recorded; teams and commission plans as JSON on
+  `TmsSettings`; sender addresses stored now and used in J/L; the rep view limits as board filters
+  rather than read restrictions; the trigger offering GENERATE_INVOICE and INVOICE_PAID only, with
+  READY_TO_INVOICE dropped; basis = invoice total − write-offs with credit memos ignored;
+  own-fleet profit rows at 0 + needs-review; half-away-from-zero rounding and largest-remainder
+  splits; unapproved rows recomputed in place and approved rows only adjusted or reversed;
+  managers approve by default and admin-only pay; period tiers, draws and deductions deferred; no
+  commission backfill; `LaneRateSample` as the fact table; no chart builder in I; no new Lambda.
+  Two the review forced and which are worth confirming: **an admin now has to close a row a
+  manager approved** before it can be paid (a manager's approval is the first rung, not the last),
+  and **nobody — manager or admin — may approve, override or accept their own commission row**.
+- **Next:** Step J — the integration framework and every provider settings page. The plan is
+  `Docs/tms-build/J-plan.md`.
+
 ## 2026-10-28 — Step H is live on dev, verified end to end; I planned
 
 - **Deployed.** Commit `49bbaa5` pushed to `origin dev`; Amplify job `37` SUCCEED —

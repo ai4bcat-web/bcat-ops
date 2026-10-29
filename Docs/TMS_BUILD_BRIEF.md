@@ -67,16 +67,64 @@ Ryne reviewed dev and gave four corrections. They apply to every TMS page alread
    rule: do not remove the Load model or its fields; the Shipment page reads and writes the
    Load it mirrors (the Step B backfill mapping) so both stay in sync. Remove the
    `/loads` page from the nav and redirect it; remove the "Order" layer from every screen.
-3. **Two sidebar sections.** The sidebar has exactly two sections: **"MVMNT"** at the top
-   with the TMS pages in MVMNT's own order (Dashboard, Shipments, Rates, Invoicing, Carriers,
-   Factors, Customers, Locations, Vendors, Workflows, Academy, My Brokerage) under `/tms/*`
-   routes, and **"BCAT Ops"** below it with every existing page exactly as it is today
-   (the current dashboard included — "my current dashboard can move into the new section").
-   Permissions: the MVMNT section is visible to the owner and ADMIN and to `page-tms`;
-   each existing page keeps its own grant.
-4. **A TMS dashboard like MVMNT's.** `/tms/dashboard` reproduces MVMNT's dashboard: the
-   title row with Views and the chart picker, the filter row, and the 17 Classic charts in
-   MVMNT's order, computed from the TMS/Load data on dev (reference §3).
+   **Clarified by Ryne:** every existing page stays. Shipments is the ONE page shared across
+   the whole build and it replaces Loads for all three businesses. Each shipment carries its
+   own **revenue division** (`revDivision`: BROKERAGE | ASSETS | CAR_SHIPPING — BCAT
+   Logistics, Ivan Cartage, Best Care Auto Transport), its **driver** and its **sales rep**,
+   so every shipment is tagged and keeps flowing through the existing settlements (driver
+   pay reads the load's driver) and statistics. Add `revDivision` and `salesRepId`
+   additively on Load as well as Shipment and keep them mirrored, so nothing that reads
+   Load today changes; backfill: loads with an own-fleet driver → ASSETS, vehicle-transport
+   loads → CAR_SHIPPING, everything else → BROKERAGE, and log the counts.
+   **Own-fleet rule (Ryne):** when a shipment's carrier is **Ivan Cartage** (the built-in
+   own-fleet carrier from Step C), that shipment IS an own-fleet load for every existing
+   feature: it appears on the calendar, in dispatch, in the driver app, in box-truck and
+   driver settlements, in employee hours/stats and the fleet dashboards, exactly as a load
+   booked there today. Booking Ivan Cartage on a shipment (driver + truck from the picker)
+   writes the mirrored Load's driverId, truck, stops and dates; changing or bouncing the
+   carrier updates them; assigning an outside carrier leaves the Load out of those views.
+   Test on dev with a shipment booked to an Ivan driver and confirm it shows on the calendar
+   and in that driver's settlement before logging R done.
+   **Ivan Cartage subsidiaries (Ryne):** ASSETS has three subsidiaries, and a shipment is
+   tagged with one automatically from the driver assigned to it: **Owner Operators** (the
+   driver is an owner operator), **Box Trucks** (a box-truck driver) and **Local Drivers**
+   (a local driver). Add `revSubdivision` (OWNER_OPERATOR | BOX_TRUCK | LOCAL, null outside
+   ASSETS) additively on Shipment and Load, derived from the driver's existing program /
+   fleet-group fields (`src/lib/driverProgram.ts`, `Driver.fleetGroup`) at assignment and
+   re-derived when the driver changes; backfill existing loads the same way and log the
+   counts. Dashboards and reports group by division and, within ASSETS, by subsidiary, so
+   owner-operator, box-truck and local work can each be read on their own and still roll up
+   to Ivan Cartage.
+3. **Three sidebar sections — the three businesses** (Ryne, later the same evening; this
+   supersedes the earlier "two sections" wording). The whole system is divided into:
+   - **BROKERAGE (BCAT Logistics)** — the TMS pages, in MVMNT's own order (Dashboard,
+     Shipments, Rates, Invoicing, Carriers, Factors, Customers, Locations, Vendors,
+     Workflows, Academy, My Brokerage) under `/tms/*` routes.
+   - **ASSETS (Ivan Cartage)** — the existing own-fleet pages exactly as they are today:
+     the current dashboard, dispatch, drivers, trucks/fleet, box-truck and driver pay,
+     employee hours, fuel, maintenance, PODs, compliance, onboarding, and the like.
+   - **CAR SHIPPING (Best Care Auto Transport)** — the existing car-shipping pages (vehicle
+     quotes, bookings, the auto-transport intake and anything that serves
+     bestcareautotransport.com).
+   Pages that serve the whole company (Users, Finances, Profit Review, settings) go in a
+   small **Company** group at the bottom; list the full page-to-section mapping in the
+   build log for Ryne to correct. Section headers show the business name and the brand in
+   brackets. Permissions: the BROKERAGE section is visible to the owner, ADMIN and
+   `page-tms`; every existing page keeps its own grant.
+4. **The BCAT Logistics dashboard.** `/tms/dashboard` is the Brokerage dashboard. It
+   reproduces MVMNT's dashboard anatomy (title row with Views and the chart picker, the
+   filter row, chart cards — reference §3) with MVMNT's 17 Classic charts **plus** the
+   charts Ryne asked for, each filterable and grouped by **revenue division** (the
+   shipment's `revDivision` tag from rule 2; the Brokerage dashboard opens filtered to
+   BROKERAGE and the filter chip can widen it):
+   - Loads in each status; loads posted to DAT.
+   - Outstanding AR by rep; outstanding AP by rep; rep leaderboard.
+   - Loads currently being tracked (live); stats on loads historically tracked (share
+     tracked, tracking source, check-call compliance, time to first ping).
+   - Loads that need PODs; POD collection timing by carrier (median and 90th-percentile
+     hours from delivery to POD, by carrier, with the slowest listed).
+   Everything above is Brokerage-specific. Ivan Cartage keeps its current dashboard in the
+   ASSETS section; Car Shipping gets no new dashboard in this step.
 
 Models for Step R (Ryne's instruction): run Step R with **Fable** on the orchestrator, plan
 and reviewer regardless of the daily share; when R is logged done, the normal Fable budget
@@ -120,12 +168,13 @@ G. AP — Awaiting invoice → In review → To be paid → Paid; record/approve
 H. Quotes & rates — customer quotes with accept/counter/decline link; carrier offers;
    lane history.
 I. Settings, roles, teams, commissions, reporting.
-R. MVMNT UI + one shipment record + two-section sidebar + MVMNT dashboard (the direction
-   change above). Done means: every A–I page renders inside the `tms` shell with the MVMNT
-   look; `/loads` is gone from the nav and redirects to `/tms/shipments`; the sidebar shows
-   the two sections; `/tms/dashboard` shows the 17 charts against dev data; typecheck, lint,
-   tests green; deployed on dev; logged in the build log as "Step R done"; Academy articles
-   updated for the new navigation. Then J.
+R. MVMNT UI + one shipment record + three-business sidebar + BCAT Logistics dashboard (the
+   direction change above). Done means: every A–I page renders inside the `tms` shell with
+   the MVMNT look; `/loads` is gone from the nav and redirects to `/tms/shipments`; the
+   sidebar shows BROKERAGE / ASSETS / CAR SHIPPING (+ Company) with the mapping logged;
+   `/tms/dashboard` shows the 17 MVMNT charts and Ryne's brokerage charts against dev data,
+   grouped by revenue division; typecheck, lint, tests green; deployed on dev; logged in the
+   build log as "Step R done"; Academy articles updated for the new navigation. Then J.
 J. Integration framework + every provider settings page (spec §8.1, §9) — stub mode for all,
    live for providers BCAT has credentials for; list missing credentials in the build log.
 K. Workflows page: Errors + AI Agents, WorkflowRun model, the four email-agent inbox roles,
