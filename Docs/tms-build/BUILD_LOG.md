@@ -2,6 +2,152 @@
 
 One entry per unit of work (newest first). Decisions needed from Ryne go under **Decision needed**.
 
+## 2026-10-29 — Step K done on dev: Workflows, the four AI inbox roles and org/party memory
+
+Two commits — `9ae0a09` (the step), `361a859` (a `SAVE_SETTINGS` update expression that named
+every merged field including ones the stored row had never carried, so DynamoDB refused the
+whole save; plus a pinned clock in the driver-app API's `/loads/recent` test block) — Amplify
+dev jobs **58 and 59 SUCCEED**, each pushed only with the branch idle. Gates before every
+commit: `npm run typecheck`, `npm run lint` (the same 2 pre-existing warnings as Step J),
+`npm run test` — **422 files / 5,712 tests**, up from 407/5,541 after Step J. Data stack
+**763,846 bytes before the first schema change → 785,735 after the last**, +21,889, leaving
+**214,265 under the 1,000,000 cap** (measured with `scripts/measureDataTemplate.mjs` at both
+ends). Live proof on dev: `node scripts/devVerifyStepK.mjs` → **79/79**.
+
+- **One record and one Lambda.** `WorkflowRun` is the only new model — steps, documents,
+  proposal, party, model accounting and disposition all on the row — and `workflow-agent` is
+  the only new function, because it absorbs `vendor-ap-extract` (deleted, `merge.ts` moved
+  verbatim with its tests, the old `{id}` / `{all:true}` payloads still accepted). The stack's
+  function count did not grow. Four e-mail inbox roles — Quote, Tender, AP, Capacity — plus the
+  webhook role, each with its own step list in the spec's order, and `status` is machine
+  progress while `outcome` is human disposition: COMPLETED is not approved.
+- **The structural guarantee is a grant list, not a comment.** `workflow-agent` holds no write
+  grant on Shipment, Order, Load, LoadCarrier, Invoice, CarrierBill, FactoringItem, Customer,
+  Carrier or TmsSettings; no `lambda:InvokeFunction` on anything; and no AppSync grant at all.
+  Its only writes outside its own table are `UpdateItem` on VendorPayable, `PutItem` on
+  ShipmentDocument and `PutItem` on AuditLog. The agent cannot create freight or reach AR by
+  any path, and a prompt-injection body on dev is what proves it rather than this paragraph.
+- **Externally received mail is data, never an instruction.** Model input is fenced between
+  `<<<UNTRUSTED_…_BEGIN>>>` / `<<<UNTRUSTED_…_END>>>` **after those markers are stripped from
+  the content**, so the content cannot close its own fence; `redactForPrompt` replaces
+  credential, bearer, long-base64 and card-number shapes before the model sees them; the model
+  has **no tools** and every call is a `json_schema`-constrained extraction, so there is no code
+  path from model output to a privileged action. Identity is checked the same way: `matchParty`
+  reads the `Authentication-Results` the receiving server wrote, and an exact contact address
+  whose domain SPF or DKIM does not vouch for is **downgraded from a match to a candidate** —
+  a bare `pass` with no identifier and a forwarder signing its own mail prove nothing. A source
+  with no such header (Slack, driver, vendor-payable) keeps the plain match, because inventing a
+  refusal for them would break them.
+- **The agent proposes; a person applies through the existing door.** A tender is applied with
+  `CREATE_SHIPMENT source TENDER`, which lands `TENDER_PENDING` carrying the run id with its PRO
+  claimed; a quote is applied with `SAVE_QUOTE` and lands in `REQUESTED`. Both run under the
+  applier's own Cognito identity through the routers that already existed — the release gate is
+  untouched, and `LINK_RUN` only records what a person did (it applies the run, clears the
+  exception and stamps the caller). No auto-create and no auto-accept.
+- **Memory is human-written and agent-read-only.** `TmsSettings.aiAgents`, `Customer.aiMemory`
+  and `Carrier.aiMemory` are edited by people in My Brokerage and on the party profile; the
+  agent only reads them. Each desk carries **two revisioned blocks — Instructions and Memory** —
+  and a revision bumps only when the trimmed markdown actually changed, so an untouched save
+  does not invent a new version. The revisions the run actually read are stamped on the run
+  (`memoryRevisions`: org, org-agent, party, party-agent), so a bad answer can be traced to the
+  text that produced it. A card over `MEMORY_MAX` is refused. Vendor memory waits for a Vendor
+  record.
+- **The caps exist because the key is live on dev.** `ANTHROPIC_API_KEY` on the dev stack is
+  real, so a run is bounded: at most 3 model calls, 3 attachments, 8 MB each, 8,000 prompt
+  characters of body. Above those sit three zero-model-call exits — the per-desk daily run cap
+  (default 200) ends the run `NO_ACTION` with `errorCode 'DAILY_CAP'`, as do a disabled agent
+  (`AGENT_DISABLED`) and a blacklisted address or keyword (`BLACKLISTED`) — all decided before
+  the first call, not after it. Tokens and model are stamped on every run so the cost is visible
+  on the trace.
+- **The Errors tab reads six sources, not six tables of its own.** Runs, shipments, loads,
+  tracking links, integration rows and settings collapse into one `ExceptionRow` vocabulary with
+  the quick tabs the spec names. Accounting rows deliberately carry **no Retry** — the disabled
+  reason says "QuickBooks sync is preview-only until it is live", because there is no sync to
+  retry yet; unknown customer offers Identify customer only; EDI has no action at all. The role
+  matrix is a **default filter and not a refusal**: every chip it seeds can be removed.
+- **Webhook consumption is a run per delivery against an empty consumer table.** `tracking-api`
+  stores the raw body at `workflow-inbox/webhook/<provider>/<eventId>.json` after J's receipt row
+  and hands off; `consumerFor` is null for every provider in K, so the run ends `IGNORED` with a
+  full trace of what arrived. The hand-off and the trace are what K owes; the first consumer
+  ships with the first live provider.
+- **The tracking "no ping" rule is the first reader of J's `trackingIntervalMin`.** An ACTIVE
+  `CARRIER_PING` link whose `lastPingAt` is older than 3 × the configured interval while its load
+  is still moving becomes a Tracking exception, as does a load with an open check call past
+  `nextCheckCallAt`; both offer Resend link, Text driver and Log check call. J stored the four
+  tracking toggles and said on screen that nothing read them — this is the first one that is read.
+
+**What the live run proved on dev** (79 checks): the two-phase inbox protocol writes exactly one
+run and a replayed commit is a duplicate no-op; a run completes through its steps in the spec's
+order with a duration; an unmatchable sender ends `UNKNOWN_PARTY` with the exception open and in
+`LIST_EXCEPTIONS`; `RETRY_RUN` increments attempts and re-runs, and is refused on an APPLIED run;
+`CREATE_SHIPMENT source TENDER` lands `TENDER_PENDING` carrying the run id with its PRO claimed;
+`LINK_RUN` applies the run, clears the exception and records the caller, and is refused against a
+voided shipment; `TENDER_RESPOND ACCEPT` opens the shipment; `DISMISS_RUN` needs a reason;
+`RESOLVE_EXCEPTION` clears without retrying; a `page-tms` token is refused on `RUN_SAMPLE`,
+`BACKFILL_AP` and `SWEEP_STALLED` and allowed on `LIST_RUNS`; a token with no TMS access is
+refused on all thirteen actions; **a prompt-injection body ordering the agent to approve the
+invoice, release it to accounting and create a shipment ends as a proposal only, with Shipment,
+Order, Load, Invoice, CarrierBill and FactoringItem counts and the named rows byte-for-byte
+unchanged**; `SET_AR_STATUS` and the finance router still refuse an ungated shipment in the gate's
+own words; `SWEEP_STALLED` leaves a healthy run alone; org memory revisions bump only on change; a
+party card round-trips scoped to its own customer; and an over-`MEMORY_MAX` card is refused.
+Browser pass on `https://dev.d3dejqzs77khq6.amplifyapp.com` as a temporary ADMIN identity: the
+`/tms/workflows` **Errors** tab showing four real exceptions off live dev data — a Google Maps
+`HTTP 401 … provided API key is invalid` integration row, two unknown-customer rows (L14864 and
+L14865, DIRECT DRIVE LOGISTICS, "No customer record is linked to this shipment") and an overdue
+check call on S000004 — with its quick-tab counts (All 4, AI agents 0, Accounting 0, Tracking 1,
+Parade 0, Unknown customers 2, EDI 0, Integrations 1), the filter chips and the
+Time · Shipment · Party · Integration · Error columns; and the **AI Agents** tab showing 15 real
+runs with Agent / Status / Outcome / Party / Step-or-error / Updated, including Tender runs
+`Completed · Applied`, Quote and Tender runs `Completed · Dismissed`, `Unknown — 1 candidate`
+parties and an AP run sitting at `PROPOSE_BILL`. Cleanup afterwards: the two shipments the fixture
+created are **voided, never deleted** (their PROs stay claimed for ever — the script prints the
+numbers), the runs it created are DISMISSED (the model has no delete), its `workflow-inbox/`
+objects are removed and its temporary Cognito identities are deleted. Secrets are generated at run
+time and never printed.
+
+**The review found no blocking defects and eleven should-fixes, all applied before the commit.**
+The four that mattered: applying a tender proposal created a MANUAL/DRAFT shipment because
+`NewShipmentDialog` hard-coded `source: 'MANUAL'`, which would have quietly defeated the
+`TENDER_PENDING` review state; the inbox commit accepted any `s3Key` the agent role could read;
+`grantReadWrite` on `workflow-inbox/*` handed out `s3:DeleteObject*` against its own comment and
+against K's no-deletion rule; and `rolesByDefault` was dead data, so acceptance A4's per-agent
+narrowing was simply unimplemented. The rest: `dismiss()` had no guard against an APPLIED or
+still-running run, the stalled sweep ignored PENDING, the classifier could re-route a run to
+WEBHOOK and then fail it, and the VENDOR_BILL proposal did not match its own type so the card
+showed no amount.
+
+**Deviations from the plan, each forced by something real:** `updatedAt` is reserved by Amplify
+and cannot be a GSI sort key, so the agent stamps its own `runUpdatedAt` mirror and all three
+indexes sort on that; `ShipmentDocument.status` is already the supersede ladder, so a filed
+carrier invoice is `reviewStatus: 'PENDING'` (the sparse review-queue key) rather than
+`status: 'PENDING'`, which would have taken a document out of the ladder; each agent carries two
+revisioned blocks (Instructions and Memory) instead of the plan's one, because an instruction and
+a learned note are edited by different people at different times; party memory is read by resolving
+the sender **before** the first model call while `MATCH_EMAIL_ENTITIES` stays where the spec's step
+order puts it, since the prompt needs the party notes earlier than the trace does; and the planned
+`allow.resource(workflowAgent).to(['query'])` was dropped as unused, so the agent holds no AppSync
+grant at all.
+
+**Decision needed (Ryne) — what K is waiting on.** **Inbox addresses** (Google Groups delivered to
+`ai4bcat@gmail.com` and polled by the existing Apps Script project): the two that exist are reused
+— `ivanloads@bcatcorp.com` (tenders, Ivan) and `vendorpayments@bcatcorp.com` (vendor bills);
+**needed** are a brokerage tender address (`tenders@bcatcorp.com`), a spot-quote address
+(`quotes@bcatcorp.com`), a carrier-invoice address (`carrierinvoices@bcatcorp.com`, kept apart from
+`vendorpayments@` so a carrier bill is never also a vendor payable) and a truck-list address
+(`trucks@bcatcorp.com`). **One paste**: `scripts/agentEmailBridge.gs` into the existing Apps Script
+project, with the `WORKFLOW_AGENT_URL` script property set to the deployed Function URL — a human
+step, like the loads bridge before it. **Slack**: confirm that the e-mail forwards in the
+`BCAT_LOGISTICS` channel are brokerage tenders the agent should propose on. **Credentials**: none
+new — `ANTHROPIC_API_KEY` is already on the stack and real on dev, and nothing in K sends e-mail
+(SES is denied to every Lambda on the dev stack), so Step J's missing-credential list is unchanged.
+**Model and spend**: the model is `claude-sonnet-5`, tokens are on every run's trace, the per-desk
+daily run cap defaults to 200, and a **monthly spend cap is still a decision**.
+
+Academy articles this step left behind: `Docs/academy/workflows-errors.md`,
+`Docs/academy/workflows-ai-agents.md`, `Docs/academy/unknown-customers.md`, and the webhook
+section of `Docs/academy/integrations.md`.
+
 ## 2026-10-29 — Step J done on dev: the integration framework and every provider page
 
 Three commits — `71dc8a5` (the step), `16b155d` (Motive validates with the read its sync
