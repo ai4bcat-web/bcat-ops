@@ -2,6 +2,104 @@
 
 One entry per unit of work (newest first). Decisions needed from Ryne go under **Decision needed**.
 
+## 2026-10-29 — Step R acceptance gaps closed: the gate has no back door, a void leaves every working set, and no load is invisible
+
+The four items the previous entry listed as **Decisions needed (Ryne) 4–6** are hard rules in
+the brief, not choices, so they are closed rather than asked about. Two commits, each after
+`npm run typecheck`, `npm run lint` (the same 2 pre-existing warnings) and `npm run test`,
+pushed one at a time with no job running:
+`21bc173` (31 files, 391 / 5,291 tests) → job **49 SUCCEED**;
+`abba9ac` (21 files, 392 / 5,297 tests) → job **50 SUCCEED**.
+
+- **`BACKFILL_SHIPMENT` no longer mints AR readiness.** It read a legacy load's
+  `readyToInvoice` — a checkbox on the old calendar any `page-loads` user can tick — and wrote
+  `arStatus: 'UNBILLED'` straight onto the new order, which is the one rung the release gate
+  exists to guard. An imported order now lands on `DOCS_NEEDED` however that flag was left; the
+  flag still decides the load's *status*, because delivery is what it is evidence of.
+  `scripts/backfillLegacyAr.mjs` stays the way Aljex-era bills reach `LEGACY`.
+  **Reconciliation on dev: nothing to repair.** Scanned all 964 orders: every one of the 892
+  whose shipment carries `source BACKFILL` is already `LEGACY`, and **0** imported orders sit on
+  `UNBILLED` with or without an invoice. The 11 live `UNBILLED` orders are all `source MANUAL`
+  Step-R verification shipments (S000021, S000026, S000028–29, S000053, S000057, S000061,
+  S000063, S000066, S000068, S000071); 10 of the 11 are already voided and therefore off every
+  worklist. No invoice, payment or AR rung was rewritten.
+- **The void now reaches the fleet.** Void lives on the Shipment, but the calendar, dispatch,
+  the appointment queue, the schedule, the settlements and the pay hooks read the **Load** table
+  and never join a shipment — which is exactly why the calendar's Unscheduled strip still listed
+  voided freight. `Load.voidedAt` (additive, and **read-only to a signed-in client**: only
+  `VOID_SHIPMENT` writes it) is mirrored by the void; `listLoads()` returns the working set and
+  `listLoads({ includeVoided: true })` the identity table. **The store keeps the identity
+  table** — `proConflict` in `LoadDrawer` is the only Pro #-uniqueness check there is, and a
+  voided PRO must stay claimed forever — while `useLoads()` is the working set; ten readers that
+  are working sets take the filtered list and four that match a PRO or a load id (Intake, PODs,
+  the factoring queue and its document cell) keep the whole table. History is untouched: the
+  Voided tab, the shipment's History tab and the audit log still read every voided row.
+- **A load with no shipment is on the Shipments page again.** Step R retired `/loads`, and a
+  Load whose typed customer matched no record never got a Shipment, so it belonged to no list at
+  all — and the new-load form, the scheduler's duplicate and "create load from factoring item"
+  still mint such loads, so it is a live hole, not only the two rows the Step B backfill left.
+  It rides the one list as an **Unlinked load** row carrying only what it actually has (its own
+  PRO, the typed customer text, appointments, cities, rate), on **All** only (and **Voided** when
+  the load itself is voided), claimed by no status/mode/customer chip, no saved view and no
+  pipeline rung, and it opens the `LoadDrawer`. On dev that is the two DIRECT DRIVE LOGISTICS
+  loads, `14864` and `14865`.
+- **A saved view's `audience.divisions` hides the view** instead of being decoration, matched
+  against a new additive `UserProfile.divisions` edited on the Users page; the sidebar stopped
+  passing `role: null`, which had made the roles facet dead there too. Checked on dev first:
+  **0 of the 10 ShipmentView rows carry `audience.divisions`**, so nothing disappeared for
+  anybody. From here a division-scoped view needs the people who should see it tagged on
+  My Brokerage → Users.
+- **Basic KPIs** no longer prints "No data for these filters." under a strip of real figures: a
+  tiles-only card has no series rows by design.
+- **Found by Fable's review of the first commit and fixed in the second**, each one a way the
+  mirror had made things worse: the blinded Pro #-uniqueness check above; `Load.voidedAt` being
+  client-writable (a void in everything but name, with no owner/ADMIN check, no reason and no
+  audit row — now read-only, and the client never sends the field, so the scheduler's duplicate
+  cannot write a NULL over it); `BACKFILL_SHIPMENT` re-linking a refreshed load onto a shipment
+  somebody had voided (now skipped as `SHIPMENT_VOIDED`); and the mirror pass reading a stored
+  NULL `voidedAt` as an existing void.
+- **Proof carried by the suites, each verified to fail without its fix:** the Unscheduled strip
+  and the appointment day drop a voided load and its count reads 1 not 2
+  (`PlannerView.test.tsx`); Basic KPIs renders no empty state under its tiles
+  (`DashboardPage.test.tsx`); an imported `readyToInvoice` load is DELIVERED and `DOCS_NEEDED`
+  and a relink onto a voided shipment is refused (`tms-shipment-actions/handler.test.ts`, 246);
+  the void is mirrored onto the load in the same step as the void; a voided load is absent from
+  `useLoads()` and present where the duplicate-PRO check looks (`useLoads.test.ts`); the
+  unlinked row lists, searches, opens the drawer and stays off the live tabs when voided
+  (`ShipmentsBoard.unlinked.test.tsx`); division audience hides and admits
+  (`shipmentViewDefs.test.ts`, `TmsLayout.test.tsx`).
+- **Schema:** additive only — `Load.voidedAt`, `UserProfile.divisions`. Synthesized locally
+  before pushing (`scripts/measureDataTemplate.mjs`): data stack **745,586 bytes**, 254,414
+  under the 1,000,000-byte cap, unchanged by the two fields (model fields live in the GraphQL
+  asset, not the template).
+- **Still to run on dev, and the only thing outstanding:** `scripts/backfillRevDivision.mjs`
+  gained a sixth **MIRROR** pass that stamps `voidedAt` on the loads of shipments that were
+  already voided before the field existed. Scanned on dev: **38 voided/soft-deleted shipments,
+  38 mirrored loads, 0 stamped**, and **23 of those loads are not even CANCELED** (10 DELIVERED,
+  11 SOURCING, 2 BOOKED) — the pre-R soft deletes whose loads were never cancelled, which is the
+  freight Ryne was seeing. Until the pass is applied those 23 keep their calendar rows on data
+  older than this deploy; every void from job 49 onward mirrors itself. The pass is
+  plan→apply→re-plan like every other, writes under `attribute_not_exists(voidedAt) OR
+  voidedAt = :nothing`, and never overwrites a real void. `scripts/devVerifyStepR.mjs` likewise
+  gained the live checks (import lands on DOCS_NEEDED and still has to pass the gate;
+  `PREVIEW_FACTOR` runs the same gate as invoicing; the void is mirrored onto the load; no token
+  can write `Load.voidedAt`) and has not been run against job 50 — both need
+  `BCAT_EMAIL`/`BCAT_PASSWORD`, which this session did not have.
+- **Step J plan refreshed** (`Docs/tms-build/J-plan.md`): it had been written before Step R and
+  said so. It now targets the `tms` shell and kit, mounts Integrations as the eighth
+  `BrokeragePage` tab at `/tms/brokerage/integrations`, carries the measured template budget,
+  has every file:line citation re-checked, and adds a section on the Step R invariants J must
+  keep — a factoring adapter runs the same release gate and is not a second door into AR, no
+  adapter writes `Load.voidedAt`, no adapter introduces a delete path, and every provider list
+  that reads loads must say whether it wants the working set or the identity table. Nothing of
+  Step J is implemented.
+- **Decisions needed (Ryne):** (1) The three Step R questions that really are choices still
+  stand: an Amazon row under Ivan Cartage; no un-void exists; CAR_SHIPPING has no data signal.
+  (2) A legacy `CANCELED` load that was never voided still shows on the calendar — only *voided*
+  freight is hidden now. Hide cancelled loads there too? (3) Nothing in the app mints a Shipment
+  for an unlinked load: the row tells the user to set its customer and an admin then runs
+  `scripts/backfillShipments.mjs`. Should the board offer that as a button for owner/ADMIN?
+
 ## 2026-10-29 — Step R done on dev: MVMNT UI, one Shipment record, three-business sidebar, Brokerage dashboard, Void, the accounting gate
 
 - **Deployed, in order, each after `npm run typecheck`, `npm run lint` (2 pre-existing warnings) and
