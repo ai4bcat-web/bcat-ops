@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
-import type { CarrierRecord } from '@/types/tms'
+import type { CarrierRecord, UserProfileRecord } from '@/types/tms'
 import { CarriersPage } from './CarriersPage'
 
 class ResizeObserverStub { observe() {} unobserve() {} disconnect() {} }
@@ -45,10 +45,21 @@ vi.mock('@/hooks/useAuth', () => ({
 vi.mock('@/hooks/useCarriers', () => ({
   useCarriers: () => ({ carriers, loading: false, error: null, refresh: vi.fn(), replace: vi.fn() }),
 }))
+const { upsertCarrier } = vi.hoisted(() => ({
+  upsertCarrier: vi.fn(async () => ({ id: 'car-new' })),
+}))
+// The account-owner field is a RepPicker, so the dialog reads the staff directory.
+const staff = vi.hoisted(() => [
+  {
+    id: 'dana@bcatcorp.com', email: 'dana@bcatcorp.com', name: 'Dana Carr', role: 'CARRIER_REP',
+    createdBy: 'a@b.c', updatedBy: 'a@b.c', version: 1,
+  },
+] as UserProfileRecord[])
 vi.mock('@/lib/apiClient', () => ({
   getTmsSettings: vi.fn(async () => null),
   listCarrierDocuments: vi.fn(async () => []),
-  upsertCarrier: vi.fn(),
+  listUserProfiles: vi.fn(async () => staff),
+  upsertCarrier,
   graphqlErrorText: () => '',
 }))
 vi.mock('./components/CarrierProfile', () => ({ CarrierProfile: () => null }))
@@ -113,5 +124,41 @@ describe('CarriersPage', () => {
 
     fireEvent.change(screen.getByLabelText('Search carriers'), { target: { value: 'nobody' } })
     await waitFor(() => expect(screen.getByText('No carriers in this view.')).toBeTruthy())
+  })
+
+  it('creates a carrier owned by the rep picked from the directory', async () => {
+    renderBoard()
+    await waitFor(() => expect(screen.getByText('Carriers')).toBeTruthy())
+    fireEvent.click(screen.getByRole('button', { name: /Carrier$/ }))
+
+    fireEvent.change(await screen.findByLabelText('Carrier name'), { target: { value: 'New Haul' } })
+    fireEvent.change(screen.getByLabelText('MC number'), { target: { value: '999999' } })
+    fireEvent.click(screen.getByText('Pick an account owner…'))
+    fireEvent.click(await screen.findByRole('option', { name: /Dana Carr/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add carrier' }))
+
+    await waitFor(() => expect(upsertCarrier).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'New Haul', accountOwnerIds: ['dana@bcatcorp.com'] }),
+    ))
+  })
+
+  it('still takes an owner nobody has a profile for, exactly as typed', async () => {
+    renderBoard()
+    await waitFor(() => expect(screen.getByText('Carriers')).toBeTruthy())
+    fireEvent.click(screen.getByRole('button', { name: /Carrier$/ }))
+
+    fireEvent.change(await screen.findByLabelText('Carrier name'), { target: { value: 'Old Haul' } })
+    fireEvent.change(screen.getByLabelText('MC number'), { target: { value: '888888' } })
+    fireEvent.click(screen.getByText('Pick an account owner…'))
+    const search = await screen.findByLabelText('Search people')
+    fireEvent.change(search, { target: { value: 'legacy.rep@nowhere.test' } })
+    fireEvent.click(await screen.findByRole('option', { name: /Use “legacy\.rep@nowhere\.test”/ }))
+
+    expect(screen.getByText('not a user')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Add carrier' }))
+
+    await waitFor(() => expect(upsertCarrier).toHaveBeenCalledWith(
+      expect.objectContaining({ accountOwnerIds: ['legacy.rep@nowhere.test'] }),
+    ))
   })
 })

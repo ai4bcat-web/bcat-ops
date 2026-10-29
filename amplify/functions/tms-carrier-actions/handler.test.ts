@@ -626,6 +626,21 @@ describe('SET_CARRIER_STATUS', () => {
     expect(reopened.status).toBe('INACTIVE')
   })
 
+  it('lets claim-CARRIER_STATUS_EDIT reopen a DO_NOT_USE carrier without ADMIN', async () => {
+    carrier({ status: 'DO_NOT_USE' })
+    const clerk = {
+      sub: 'sub-clerk',
+      username: 'clerk',
+      claims: { email: 'clerk@bcatcorp.com', 'cognito:groups': ['page-carriers', 'claim-CARRIER_STATUS_EDIT'] },
+    }
+    const move = { id: 'car-1', expectedUpdatedAt: '2026-01-01T00:00:00.000Z', status: 'INACTIVE', reason: 'SAFETY_ISSUES' }
+    await expect(call('SET_CARRIER_STATUS', move)).rejects.toThrow('Cannot move a carrier from DO_NOT_USE to INACTIVE')
+
+    const reopened = await call('SET_CARRIER_STATUS', move, clerk)
+    expect(reopened.status).toBe('INACTIVE')
+    expect(reopened.statusChangedBy).toBe('clerk@bcatcorp.com')
+  })
+
   it('never reopens DO_NOT_USE straight to ACTIVE, even for an admin', async () => {
     carrier({ status: 'DO_NOT_USE' })
     await expect(

@@ -7,6 +7,8 @@
  * Form state is strings because that is what inputs give back; `carrierFormInput` is the
  * single place that turns them into the typed patch the Lambda takes.
  */
+import { useEffect, useState } from 'react'
+import { RepPicker, TeamPicker } from '@/components/RepPicker'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
@@ -14,11 +16,13 @@ import { Textarea } from '@/components/ui/textarea'
 import {
   CARRIER_EQUIPMENT, CARRIER_TYPES, type CarrierFormValue,
 } from './carrierFormModel'
+import { getTmsSettings } from '@/lib/apiClient'
 import type {
   AuthorityStatus,
   CarrierType,
   ComplianceCheckStatus,
   SafetyRating,
+  Team,
 } from '@/types/tms'
 
 const AUTHORITY_STATUSES: AuthorityStatus[] = ['ACTIVE', 'INACTIVE', 'NONE', 'UNKNOWN']
@@ -35,6 +39,19 @@ interface CarrierFormProps {
 }
 
 export function CarrierForm({ value, set, section }: CarrierFormProps) {
+  const [teams, setTeams] = useState<Team[]>([])
+  const accountOwnerIds = value.accountOwnersText.split(/\r?\n/).map((s) => s.trim()).filter(Boolean)
+
+  // Only the identity section shows a team, so only it pays for the settings read.
+  useEffect(() => {
+    if (section !== 'identity') return
+    let alive = true
+    getTmsSettings()
+      .then((s) => { if (alive) setTeams(s?.teams ?? []) })
+      .catch(() => {})
+    return () => { alive = false }
+  }, [section])
+
   const text = <K extends keyof CarrierFormValue>(key: K, label: string) => (
     <div>
       <Label className={labelClass}>{label}</Label>
@@ -101,15 +118,26 @@ export function CarrierForm({ value, set, section }: CarrierFormProps) {
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <Label className={labelClass}>Account owners (one email per line)</Label>
-            <Textarea
-              aria-label="Account owners"
-              value={value.accountOwnersText}
-              onChange={(e) => set('accountOwnersText', e.target.value)}
-              className="text-sm"
+            <Label className={labelClass}>Account owners</Label>
+            <RepPicker
+              multiple
+              role="CARRIER_REP"
+              allowUnknown
+              value={accountOwnerIds}
+              onChange={(next) => set('accountOwnersText', next.join('\n'))}
+              placeholder="Add an account owner…"
             />
           </div>
-          {text('teamKey', 'Team')}
+          <div>
+            <Label className={labelClass}>Team</Label>
+            <TeamPicker
+              value={value.teamKey}
+              onChange={(v) => set('teamKey', v)}
+              teams={teams}
+              allowEmpty
+              className="h-9 text-sm"
+            />
+          </div>
         </div>
         <div>
           <Label className={labelClass}>Internal notes</Label>

@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { X, Building2, MapPin, FileText, FileSpreadsheet, Settings, Phone, DollarSign, Truck, Banknote } from 'lucide-react'
 import { Link } from 'react-router-dom'
+import { RepPicker, TeamPicker } from '@/components/RepPicker'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -104,6 +105,7 @@ export function CustomerProfile({
   const [statusAction, setStatusAction] = useState<'activate' | 'deactivate' | 'close' | null>(null)
   const { loads, orders, shipments, lastLoadAt, loading: loadsLoading } = useCustomerOrders(customer.id, customer)
   const ar = useCustomerAr(customer.id)
+  const accountOwnerIds = value.accountOwnerIdsText.split(/\r?\n/).map((s) => s.trim()).filter(Boolean)
 
   /**
    * Exposure now spans both eras: orders carry it from booking to paid, and the loads
@@ -344,17 +346,36 @@ export function CustomerProfile({
                 </div>
                 <div>
                   <Label className="text-xs uppercase tracking-wider text-muted-foreground">Team key</Label>
-                  <Input value={value.teamKey} onChange={(e) => set('teamKey', e.target.value)} className="h-9 text-sm" />
+                  <TeamPicker
+                    value={value.teamKey}
+                    onChange={(v) => set('teamKey', v)}
+                    teams={settings?.teams}
+                    allowEmpty
+                    className="h-9 text-sm"
+                  />
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <Label className="text-xs uppercase tracking-wider text-muted-foreground">Operated by</Label>
-                  <Input value={value.operatedById} onChange={(e) => set('operatedById', e.target.value)} className="h-9 text-sm" />
+                  <RepPicker
+                    role="CUSTOMER_REP"
+                    allowUnknown
+                    value={value.operatedById}
+                    onChange={(v) => set('operatedById', v)}
+                    placeholder="Pick who operates it…"
+                  />
                 </div>
                 <div>
                   <Label className="text-xs uppercase tracking-wider text-muted-foreground">Account owners</Label>
-                  <Textarea value={value.accountOwnerIdsText} onChange={(e) => set('accountOwnerIdsText', e.target.value)} className="text-sm" placeholder="One username per line" />
+                  <RepPicker
+                    multiple
+                    role="CUSTOMER_REP"
+                    allowUnknown
+                    value={accountOwnerIds}
+                    onChange={(next) => set('accountOwnerIdsText', next.join('\n'))}
+                    placeholder="Add an account owner…"
+                  />
                 </div>
               </div>
               <div className="space-y-2">

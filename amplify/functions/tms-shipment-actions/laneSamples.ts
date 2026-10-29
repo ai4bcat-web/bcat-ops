@@ -71,6 +71,11 @@ export async function writeLaneSample(deps: QuoteDeps, loadId: string): Promise<
     if (!financials) return
     const orderId = String(load.orderId ?? '')
     const order = orderId ? await deps.getById(deps.tables.order, orderId) : null
+    // Step I. The team the revenue belongs to is on the billed account, not on the
+    // load, so the customer row is read for `teamKey` — the one field a sample
+    // cannot derive from the freight itself.
+    const customerId = String(order?.customerId ?? shipment?.customerId ?? '')
+    const customer = customerId ? await deps.getById(deps.tables.customer, customerId) : null
     // The carrier whose money is on this load: the one on it now, or the TONU'd one
     // that is still owed. A bounced assignment took its charges with it.
     const assignments = shipmentId
@@ -86,6 +91,7 @@ export async function writeLaneSample(deps: QuoteDeps, loadId: string): Promise<
         order: order as never,
         loadCarrier: loadCarrier as never,
         shipment: shipment as never,
+        customer: customer as never,
       },
       nowIso(),
     )

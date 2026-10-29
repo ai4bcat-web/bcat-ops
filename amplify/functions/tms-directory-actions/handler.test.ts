@@ -7,7 +7,7 @@
 
 import type { AttributeValue } from '@aws-sdk/client-dynamodb'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { marshall } from '@aws-sdk/util-dynamodb'
+import { marshall, unmarshall } from '@aws-sdk/util-dynamodb'
 
 // ── Cognito mock ──────────────────────────────────────────────────────────────
 const cognitoSend = vi.hoisted(() => vi.fn())
@@ -33,6 +33,7 @@ const send = vi.hoisted(() => {
   process.env.SETTINGS_TABLE_NAME = 'TmsSettings-test'
   process.env.MERGE_JOB_TABLE_NAME = 'DirectoryMergeJob-test'
   process.env.LOAD_TABLE_NAME = 'Load-test'
+  process.env.USER_PROFILE_TABLE_NAME = 'UserProfile-test'
   process.env.GEOCODE_TOKEN_SECRET = 'test-geocode-secret'
   return vi.fn()
 })
@@ -462,6 +463,21 @@ describe('UPSERT_CUSTOMER', () => {
     await expect(
       handler(event('UPSERT_CUSTOMER', { name: 'Acme', creditLimitCents: 50000 })),
     ).rejects.toThrow('Forbidden: creditLimitCents requires owner or ADMIN')
+  })
+
+  it('lets claim-CREDIT_LIMIT_EDIT set a credit limit without ADMIN', async () => {
+    let put: MockPutCommand['input'] | undefined
+    send.mockImplementation(withSettingsGet((cmd: MockCommand) => {
+      if (cmd.__type === 'Scan') return Promise.resolve({ Items: [], LastEvaluatedKey: undefined })
+      if (cmd.__type === 'Put') { put = cmd.input; return Promise.resolve({}) }
+      throw new Error('unexpected')
+    }))
+    await handler(event(
+      'UPSERT_CUSTOMER',
+      { name: 'Acme', creditLimitCents: 50000 },
+      identity({ groups: ['page-customers', 'claim-CREDIT_LIMIT_EDIT'] }),
+    ))
+    expect(put?.Item?.creditLimitCents).toEqual({ N: '50000' })
   })
 
   it('allows unchanged credit-field echo for non-admin', async () => {
@@ -1022,6 +1038,69 @@ describe('SAVE_SETTINGS', () => {
         defaultRequiredReferences: [{ code: 'PO', level: 'ORDER', countOnNewOrder: 11 }],
       }, identity({ groups: ['ADMIN'] }))),
     ).rejects.toThrow('Value must be at most 10')
+  })
+
+  it('stores the teams and mirrors membership onto the staff rows that moved', async () => {
+    const existing = makeDynamoItem({ id: 'default', updatedAt: '2025-01-02' })
+    const profiles = [
+      makeDynamoItem({ id: 'rep@bcatcorp.com', email: 'rep@bcatcorp.com', teamKeys: [] }),
+      makeDynamoItem({ id: 'other@bcatcorp.com', email: 'other@bcatcorp.com', teamKeys: [] }),
+    ]
+    const updates: MockUpdateCommand['input'][] = []
+    send.mockImplementation((cmd: MockCommand) => {
+      if (cmd.__type === 'Get') return Promise.resolve({ Item: existing })
+      if (cmd.__type === 'Scan') return Promise.resolve({ Items: profiles, LastEvaluatedKey: undefined })
+      if (cmd.__type === 'Update') { updates.push(cmd.input); return Promise.resolve({ Attributes: existing }) }
+      throw new Error('unexpected')
+    })
+
+    await handler(event('SAVE_SETTINGS', {
+      teams: [{ key: 'east', name: 'East desk', memberIds: ['REP@bcatcorp.com'] }],
+      limitCustomerRepView: true,
+      expectedUpdatedAt: '2025-01-02',
+    }, identity({ groups: ['ADMIN'] })))
+
+    const settingsUpdate = updates.find((u) => u.TableName === 'TmsSettings-test')
+    const vals = settingsUpdate?.ExpressionAttributeValues ?? {}
+    expect(unmarshall({ teams: vals[':teams'] }).teams).toEqual([
+      { key: 'EAST', name: 'East desk', memberIds: ['REP@bcatcorp.com'], active: true },
+    ])
+    expect(vals[':limitCustomerRepView']).toEqual({ BOOL: true })
+
+    // Only the member's row moved; the staff row already matching is left alone.
+    const mirrored = updates.filter((u) => u.TableName === 'UserProfile-test')
+    expect(mirrored).toHaveLength(1)
+    expect(mirrored[0].Key?.id).toEqual({ S: 'rep@bcatcorp.com' })
+    expect(mirrored[0].ExpressionAttributeValues?.[':keys']).toEqual({ L: [{ S: 'EAST' }] })
+  })
+
+  it('refuses a team nobody is on', async () => {
+    send.mockImplementation((cmd: MockCommand) => {
+      if (cmd.__type === 'Get') return Promise.resolve({ Item: undefined })
+      throw new Error('unexpected')
+    })
+    await expect(
+      handler(event('SAVE_SETTINGS', {
+        teams: [{ key: 'EAST', name: 'East desk', memberIds: [] }],
+      }, identity({ groups: ['ADMIN'] }))),
+    ).rejects.toThrow('Team EAST needs at least one member.')
+  })
+
+  it('refuses a commission plan paying a role the engine does not know', async () => {
+    send.mockImplementation((cmd: MockCommand) => {
+      if (cmd.__type === 'Get') return Promise.resolve({ Item: undefined })
+      throw new Error('unexpected')
+    })
+    await expect(
+      handler(event('SAVE_SETTINGS', {
+        commissionsEnabled: true,
+        commissionPlans: [{
+          id: 'house',
+          name: 'House plan',
+          roles: [{ roleName: 'DISPATCHER', rateType: 'PERCENT_PROFIT', rateBps: 1000 }],
+        }],
+      }, identity({ groups: ['ADMIN'] }))),
+    ).rejects.toThrow('commissionPlans[0].roles[0].roleName "DISPATCHER" is not a commission role')
   })
 })
 

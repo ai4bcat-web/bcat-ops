@@ -14,6 +14,7 @@ import { ChevronLeft, Copy, Download, ExternalLink, RefreshCw } from 'lucide-rea
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { useAuthUser } from '@/hooks/useAuth'
 import { useFactoringItems } from '@/hooks/useFactoringItems'
 import { useInvoice } from '@/hooks/useInvoice'
 import {
@@ -23,6 +24,7 @@ import { chicagoDateStr, formatDateTime } from '@/lib/date'
 import { downloadFromUrl } from '@/lib/download'
 import { formatCents } from '@/lib/invoiceBuild'
 import { otrStatusLabel } from '@/lib/otrInvoiceStatus'
+import { InvoiceCommissionCard } from '@/features/commissions/CommissionsPage'
 import {
   NOTICE_STATUS_LABEL, agingChipFor, appliedToInvoice, formatDay, noticeStatusDetail, recipientList,
 } from './arViews'
@@ -57,6 +59,10 @@ export function InvoiceDetail() {
   const { id } = useParams<{ id: string }>()
   const { invoice, bundle, notices, payments, loading, error, refresh } = useInvoice(id ?? null)
   const { items: factoringItems } = useFactoringItems()
+  // Groups, not `useAuth()`: this page is also mounted in tests and drawers that sit
+  // outside the provider, and the commission card's two buttons are not worth throwing
+  // the whole invoice away for. The server decides either way.
+  const groups = useAuthUser()?.groups ?? []
 
   const [dialog, setDialog] = useState<DetailDialog | null>(null)
   const [busy, setBusy] = useState(false)
@@ -368,6 +374,13 @@ export function InvoiceDetail() {
             </table>
           )}
         </section>
+
+        <InvoiceCommissionCard
+          invoiceId={invoice.id}
+          orderId={invoice.orderId}
+          isAdmin={groups.includes('ADMIN')}
+          isManager={groups.includes('role-MANAGER')}
+        />
 
         <section className={CARD}>
           <div className="mb-2 flex items-center gap-2">

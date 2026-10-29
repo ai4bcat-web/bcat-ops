@@ -4320,6 +4320,15 @@ describe('lane rate samples', () => {
     expect(sample.excluded).toBe(false)
   })
 
+  it('stamps the sample with the team the billed account belongs to', async () => {
+    seedCustomer({ teamKey: 'EAST' })
+    const { loadId } = await delivered()
+
+    const sample = table(TABLES.laneSample).get(`lrs:${loadId}`)!
+    expect(sample.teamKey).toBe('EAST')
+    expect(sample.sampleMonth).toBe('2026-03')
+  })
+
   it('still records the lane when the stops carry no ZIPs', async () => {
     // `laneKey3` is the hash key of the zip3 index, and these stops have no ZIPs to
     // build one from. The attribute comes off the item — a NULL there is refused by
@@ -4462,6 +4471,51 @@ describe('SAVE_QUOTE_SETTINGS', () => {
     await expect(
       call('SAVE_QUOTE_SETTINGS', { nextQuoteNumber: 1 }, ADMIN),
     ).rejects.toThrow(/can only go forward/)
+  })
+})
+
+describe('SAVE_SHIPMENT_SETTINGS', () => {
+  it('keeps the org shipment defaults out of the loads page', async () => {
+    await expect(
+      call('SAVE_SHIPMENT_SETTINGS', { shipmentPrefix: 'BC' }, DISPATCHER),
+    ).rejects.toThrow('Forbidden: SAVE_SHIPMENT_SETTINGS requires owner or ADMIN')
+  })
+
+  it('saves the prefix, the default mode and the flags, and numbers the next shipment with them', async () => {
+    const result = (await call('SAVE_SHIPMENT_SETTINGS', {
+      shipmentPrefix: 'BC-',
+      defaultMode: 'DRAYAGE',
+      cancelDeleteAdminOnly: true,
+      arUnbilledStage: 'Unbilled',
+      apInReviewStage: 'In review',
+    }, ADMIN)) as { settings: Row }
+
+    expect(result.settings).toMatchObject({
+      shipmentPrefix: 'BC-',
+      defaultMode: 'DRAYAGE',
+      cancelDeleteAdminOnly: true,
+      arUnbilledStage: 'Unbilled',
+      apInReviewStage: 'In review',
+    })
+
+    const { shipmentId } = await createDraft()
+    expect(table(TABLES.shipment).get(shipmentId)!.number).toBe('BC-000001')
+  })
+
+  it('refuses to wind the shipment counter back onto numbers that exist', async () => {
+    seedSettings({ nextShipmentNumber: 7 })
+    await expect(
+      call('SAVE_SHIPMENT_SETTINGS', { nextShipmentNumber: 3 }, ADMIN),
+    ).rejects.toThrow('The shipment counter is at 7 and can only go forward')
+  })
+
+  it('refuses a prefix a shipment number could not be built from', async () => {
+    await expect(
+      call('SAVE_SHIPMENT_SETTINGS', { shipmentPrefix: 'BC 1' }, ADMIN),
+    ).rejects.toThrow('A shipment prefix is up to 8 letters, numbers or dashes')
+    await expect(
+      call('SAVE_SHIPMENT_SETTINGS', { shipmentPrefix: 'BCATCORP1' }, ADMIN),
+    ).rejects.toThrow('A shipment prefix is up to 8 letters, numbers or dashes')
   })
 })
 

@@ -70,6 +70,21 @@ export function RequireOwner({ children }: { children: ReactNode }) {
   return fallback ? <Navigate to={fallback} replace /> : <NoAccess />
 }
 
+/**
+ * Guards an admin route (Step I: the Users page).
+ *
+ * An admin may manage people; only the owner may grant ADMIN or delete an
+ * account, and the page disables those two controls for everybody else. The
+ * server refuses them regardless — `userManagement` keeps its own owner gate,
+ * and this guard is the courtesy, not the boundary.
+ */
+export function RequireAdmin({ children }: { children: ReactNode }) {
+  const { isAdmin, isOwner, hasPageAccess } = useAuth()
+  if (isOwner || isAdmin) return <>{children}</>
+  const fallback = preferredLandingPath(hasPageAccess)
+  return fallback ? <Navigate to={fallback} replace /> : <NoAccess />
+}
+
 /** Sends "/" to the user's preferred landing page (dashboard-style if available). */
 export function LandingRedirect() {
   const { hasPageAccess } = useAuth()

@@ -1,7 +1,7 @@
 import {
   LayoutDashboard, CalendarDays, Table2, Inbox,
   Truck, Wrench, Fuel, History, CalendarClock,
-  LineChart, Wallet, Boxes, CalendarOff, FileText, FileCheck2, Receipt, Car, CalendarCheck, Scale, Gauge, Umbrella, MessageSquare, FolderOpen, SlidersHorizontal, Building2, MapPin, TrendingUp, Banknote, PackageCheck, Package, PhoneCall, ClipboardList, Clock, FileSpreadsheet, CreditCard, type LucideIcon,
+  LineChart, Wallet, Boxes, CalendarOff, FileText, FileCheck2, Receipt, Car, CalendarCheck, Scale, Gauge, Umbrella, MessageSquare, FolderOpen, SlidersHorizontal, Building2, MapPin, TrendingUp, Banknote, PackageCheck, Package, PhoneCall, ClipboardList, Clock, FileSpreadsheet, CreditCard, BarChart3, type LucideIcon,
 } from 'lucide-react'
 
 export interface NavItem {
@@ -81,6 +81,11 @@ export const NAV_GROUPS: NavSection[] = [
       { to: '/vehicle-quote', label: 'Vehicle Quote', icon: Car, pageKey: 'vehicleQuote' },
       { to: '/vehicle-confirmation', label: 'Booking Confirmation', icon: CalendarCheck, pageKey: 'vehicleConfirmation' },
       { to: '/pricing-margin', label: 'Pricing Margin', icon: TrendingUp, pageKey: 'pricingMargin' },
+      // What a rep is owed on the freight they closed. Its own key: a quoting rep
+      // is not thereby on the commission ladder, and an AR user is not either.
+      // No badge: the sidebar's counts all come off rows the app already holds, and
+      // a commission count would mean polling the ledger on every page.
+      { to: '/commissions', label: 'Commissions', icon: Wallet, pageKey: 'commissions' },
     ],
   },
   {
@@ -113,6 +118,9 @@ export const NAV_GROUPS: NavSection[] = [
       { to: '/finances/review', label: 'Profit Review', icon: ClipboardList, pageKey: 'finances' },
       { to: '/finance/cash-checkin', label: 'Weekly Cash Check-in', icon: Wallet, pageKey: 'cashCheckIn' },
       { to: '/insurance', label: 'Insurance', icon: Umbrella,  pageKey: 'insurance' },
+      // The classic dashboard over delivered, priced freight, with the AR/AP and
+      // quote panels beside it.
+      { to: '/reports', label: 'Reports', icon: BarChart3, pageKey: 'reports' },
     ],
   },
   {
@@ -150,3 +158,19 @@ export const PERMISSION_PAGES: { key: string; label: string }[] = [
   ...NAV_ITEMS.map((i) => ({ key: i.pageKey, label: i.label })),
   ...OFF_NAV_PERMISSION_PAGES,
 ]
+
+/**
+ * Every grantable page, once. `PERMISSION_PAGES` repeats a key whenever two nav
+ * items share one permission (Loads / Shipments / Check calls / Documents), and a
+ * permission list that shows the same checkbox four times is a list nobody trusts.
+ */
+export function pageOptions(): { key: string; label: string }[] {
+  const seen = new Set<string>()
+  const options: { key: string; label: string }[] = []
+  for (const page of PERMISSION_PAGES) {
+    if (seen.has(page.key)) continue
+    seen.add(page.key)
+    options.push({ key: page.key, label: page.label })
+  }
+  return options
+}

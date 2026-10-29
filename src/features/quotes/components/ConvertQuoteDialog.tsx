@@ -13,9 +13,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import { AlertTriangle, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
+import { RepPicker } from '@/components/RepPicker'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { useAuthUser } from '@/hooks/useAuth'
@@ -181,15 +181,16 @@ export function ConvertQuoteDialog({ quote, open, onOpenChange, onDone }: {
                 </select>
               </div>
               <div>
-                <Label className="text-xs uppercase tracking-wider text-muted-foreground" htmlFor="convert-rep">
+                <Label className="text-xs uppercase tracking-wider text-muted-foreground">
                   Customer rep
                 </Label>
-                <Input
-                  id="convert-rep"
-                  className="h-9 text-sm"
+                <RepPicker
+                  role="CUSTOMER_REP"
+                  allowUnknown
                   value={repId}
+                  onChange={setRepId}
                   disabled={busy}
-                  onChange={(e) => setRepId(e.target.value)}
+                  placeholder="Pick a customer rep…"
                 />
               </div>
             </div>

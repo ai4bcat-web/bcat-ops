@@ -235,4 +235,56 @@ describe('laneSampleFor', () => {
     input.load.miles = 0
     expect(laneSampleFor(input, '2026-02-20T00:00:00.000Z')?.miles).toBeNull()
   })
+
+  it('stamps the reporting month from the sample date', () => {
+    const sample = laneSampleFor(base(), '2026-02-20T00:00:00.000Z')
+    expect(sample?.date).toBe('2026-02-12')
+    expect(sample?.sampleMonth).toBe('2026-02')
+  })
+
+  it('takes the customer rep off the order and the carrier rep off the active assignment', () => {
+    const input = base()
+    input.order = { ...input.order, customerRepId: 'rep-cust' }
+    input.load.carrierRepId = 'rep-load'
+    input.loadCarrier = { ...input.loadCarrier, carrierRepId: 'rep-assign' }
+    const sample = laneSampleFor(input, '2026-02-20T00:00:00.000Z')
+    expect(sample?.customerRepId).toBe('rep-cust')
+    expect(sample?.carrierRepId).toBe('rep-assign')
+  })
+
+  it('falls back to the load carrier rep when the assignment carries none', () => {
+    const input = base()
+    input.load.carrierRepId = 'rep-load'
+    expect(laneSampleFor(input, '2026-02-20T00:00:00.000Z')?.carrierRepId).toBe('rep-load')
+  })
+
+  it('takes the team off the billed customer', () => {
+    const input = base()
+    input.customer = { id: 'cust-1', teamKey: 'MIDWEST' }
+    expect(laneSampleFor(input, '2026-02-20T00:00:00.000Z')?.teamKey).toBe('MIDWEST')
+  })
+
+  it('dates the invoice month off the order, from a stamp or a plain date', () => {
+    const input = base()
+    input.order = { ...input.order, invoiceId: 'inv-7', invoicedAt: '2026-03-02T19:30:00.000Z' }
+    expect(laneSampleFor(input, '2026-02-20T00:00:00.000Z')).toMatchObject({
+      invoiceId: 'inv-7',
+      invoiceMonth: '2026-03',
+    })
+
+    input.order = { ...input.order, invoicedAt: '2026-04-01' }
+    expect(laneSampleFor(input, '2026-02-20T00:00:00.000Z')?.invoiceMonth).toBe('2026-04')
+  })
+
+  it('still samples when nothing names a rep, a team or an invoice', () => {
+    const input = base()
+    input.order = { id: 'order-1', customerId: 'cust-1' }
+    const sample = laneSampleFor(input, '2026-02-20T00:00:00.000Z')
+    expect(sample?.sampleMonth).toBe('2026-02')
+    expect(sample?.customerRepId).toBeNull()
+    expect(sample?.carrierRepId).toBeNull()
+    expect(sample?.teamKey).toBeNull()
+    expect(sample?.invoiceId).toBeNull()
+    expect(sample?.invoiceMonth).toBeNull()
+  })
 })

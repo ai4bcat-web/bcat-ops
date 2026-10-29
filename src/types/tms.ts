@@ -416,6 +416,22 @@ export interface TmsSettings {
   /** Whether the carrier's offer link shows the book-now rate. Default true. */
   quoteOffersCarrierSeesBookNow?: boolean | null
 
+  // ── Roles, teams, commissions (Step I) ─────────────────────────────────────
+  /** `Team[]`, the brokerage's teams and their sender addresses. */
+  teams?: Team[] | null
+  /** Default the "Mine" board filter on for customer reps. A filter, not a boundary. */
+  limitCustomerRepView?: boolean | null
+  limitCarrierRepView?: boolean | null
+  /** Nothing is computed, written or shown until this is on. Default false. */
+  commissionsEnabled?: boolean | null
+  commissionTrigger?: CommissionTrigger | null
+  commissionPlans?: CommissionPlan[] | null
+  commissionPaySchedule?: CommissionPaySchedule | null
+  /** False — a manager may approve. True — owner/ADMIN only. */
+  commissionApprovalAdminOnly?: boolean | null
+  /** True — only owner/ADMIN submit, approve or pay a period. */
+  commissionPayAdminOnly?: boolean | null
+
   createdAt?: string
   updatedAt?: string
 }
@@ -2150,6 +2166,14 @@ export interface LaneRateSampleRecord {
   source: LaneSampleSource
   sampledAt: string
   version: number
+  /** `'YYYY-MM'` of `date` — the reporting index's hash key (Step I). */
+  sampleMonth?: string | null
+  customerRepId?: string | null
+  carrierRepId?: string | null
+  teamKey?: string | null
+  invoiceId?: string | null
+  /** `'YYYY-MM'` of the order's `invoicedAt`. */
+  invoiceMonth?: string | null
   createdAt?: string
   updatedAt?: string
 }
@@ -2254,4 +2278,349 @@ export interface LaneStatsFilters {
   rateType?: RateType | null
   /** Own-fleet legs carry `costCents: 0`; counting them would drag a lane to zero. */
   includeOwnFleetCost?: boolean
+}
+
+// ── Step I — staff, roles, teams, commissions and reporting ──────────────────
+
+/** The six TMS roles plus NONE (own-fleet-only staff, and anyone not assigned yet). */
+export type RoleKey =
+  | 'ADMIN'
+  | 'MANAGER'
+  | 'CUSTOMER_REP'
+  | 'CARRIER_REP'
+  | 'AR_AP'
+  | 'COMPLIANCE'
+  | 'NONE'
+
+/** Per-user "additional permissions". Only some of these are enforced server-side. */
+export type ClaimKey =
+  | 'CREDIT_LIMIT_EDIT'
+  | 'AR_POSTING'
+  | 'AP_POSTING'
+  | 'AP_APPROVAL'
+  | 'CARRIER_STATUS_EDIT'
+  | 'AR_CHARGES'
+  | 'AP_CHARGES'
+  | 'CARRIER_INSURANCE_EDIT'
+  | 'NO_AR_INVOICE'
+
+export type UserStatus = 'PENDING' | 'ACTIVE' | 'INACTIVE'
+
+/**
+ * One staff login. `id` IS the Cognito username (the e-mail for everyone invited
+ * through the Users page), which is what every rep field on an order, load,
+ * customer or carrier already holds.
+ */
+export interface UserProfileRecord {
+  id: string
+  email: string
+  name?: string | null
+  role?: RoleKey | null
+  teamKeys?: string[] | null
+  managerId?: string | null
+  claims?: string[] | null
+  /** Page keys granted on top of the role — the mirror of the `page-*` groups. */
+  extraPages?: string[] | null
+  status?: UserStatus | null
+  title?: string | null
+  phone?: string | null
+  datEmail?: string | null
+  invitedAt?: string | null
+  invitedBy?: string | null
+  lastRoleChangeAt?: string | null
+  lastRoleChangeBy?: string | null
+  createdBy: string
+  updatedBy: string
+  version: number
+  createdAt?: string
+  updatedAt?: string
+}
+
+/** The five sender slots a team can own (stored now, wired to SES in J/L). */
+export interface TeamSenderAddresses {
+  shipment?: string | null
+  rateCon?: string | null
+  quoteReply?: string | null
+  customerInvoice?: string | null
+  remittance?: string | null
+}
+
+export interface Team {
+  key: string
+  name: string
+  memberIds: string[]
+  senderAddresses?: TeamSenderAddresses | null
+  /** Print the team's contact on the public tracking page instead of the rep's. */
+  showContactOnTracking?: boolean | null
+  active?: boolean | null
+}
+
+// ── Commissions ──────────────────────────────────────────────────────────────
+
+/** Who gets paid, resolved from the people already named on the records. */
+export type CommissionRoleName =
+  | 'PRIMARY_ACCOUNT_OWNER'
+  | 'SECONDARY_ACCOUNT_OWNER'
+  | 'PRIMARY_CARRIER_REP'
+  | 'SECONDARY_CARRIER_REP'
+  | 'PRIMARY_OPERATED_BY'
+  | 'SECONDARY_OPERATED_BY'
+  | 'CARRIER_BOOKING_REP'
+  | 'CREATED_BY'
+  | 'MANAGER'
+  | 'SPECIFIC_USER'
+
+export type CommissionRateType = 'FIXED' | 'PERCENT_PROFIT' | 'PERCENT_REVENUE'
+
+/**
+ * READY_TO_INVOICE is deliberately not offered: at UNBILLED nothing is frozen,
+ * and a commission on a number that can still change is a number that will be wrong.
+ */
+export type CommissionTrigger = 'GENERATE_INVOICE' | 'INVOICE_PAID'
+
+export type CommissionTierType = 'PER_LOAD_MARGIN_BPS' | 'PER_LOAD_PROFIT_CENTS'
+
+export type CommissionStatus =
+  | 'UN_APPROVED'
+  | 'REP_COUNTERED'
+  | 'MANAGER_COUNTERED'
+  | 'MANAGER_APPROVED'
+  | 'FULLY_APPROVED'
+  | 'PAID'
+  | 'CANCELLED'
+
+export type CommissionKind = 'EARNED' | 'ADJUSTMENT' | 'REVERSAL'
+
+export type CommissionBasisKind = 'REVENUE' | 'PROFIT' | 'FIXED'
+
+export type CommissionSource = 'RUN' | 'RERUN' | 'VOID' | 'WRITE_OFF' | 'OVERRIDE'
+
+export interface CommissionTier {
+  /** Lower bound of the band, in the tier type's own unit. Ascending, first is 0. */
+  fromBps?: number | null
+  fromCents?: number | null
+  rateBps?: number | null
+  rateCents?: number | null
+  label?: string | null
+}
+
+export interface CommissionPlanRole {
+  roleName: CommissionRoleName
+  rateType: CommissionRateType
+  rateBps?: number | null
+  rateCents?: number | null
+  /** Share of the role's amount for each person when a role resolves to several. */
+  splitBps?: number | null
+  /** Named people, for SPECIFIC_USER. */
+  userIds?: string[] | null
+  tierType?: CommissionTierType | null
+  /** True: each band pays its own rate on its own slice. False: one rate on the whole. */
+  graduated?: boolean | null
+  tiers?: CommissionTier[] | null
+}
+
+export interface CommissionPlanScope {
+  userIds?: string[] | null
+  customerIds?: string[] | null
+  teamKeys?: string[] | null
+}
+
+export interface CommissionPlan {
+  id: string
+  name: string
+  active?: boolean | null
+  effectiveFrom?: string | null
+  effectiveTo?: string | null
+  /** Which date decides whether an order falls in the plan's window. */
+  dateField?: 'INVOICED' | 'DELIVERED' | null
+  scope?: CommissionPlanScope | null
+  roles: CommissionPlanRole[]
+}
+
+export type PayScheduleFrequency = 'WEEKLY' | 'BIWEEKLY' | 'SEMI_MONTHLY' | 'MONTHLY'
+
+export interface CommissionPaySchedule {
+  frequency: PayScheduleFrequency
+  /** 0–6 for WEEKLY/BIWEEKLY (0 = Sunday); 1–28 for MONTHLY; ignored for SEMI_MONTHLY. */
+  payDay?: number | null
+  /** Days after the period ends before it is paid. */
+  daysUntilPay?: number | null
+  /** The Monday a BIWEEKLY cadence counts from. */
+  anchorDate?: string | null
+}
+
+/** One entry in a commission row's own history. */
+export interface CommissionEvent {
+  at: string
+  by: string
+  action: string
+  note?: string | null
+  amountCents?: number | null
+}
+
+export interface CommissionRecord {
+  id: string
+  kind?: CommissionKind | null
+  /** The EARNED row an ADJUSTMENT or REVERSAL answers. */
+  adjustsId?: string | null
+  orderId: string
+  shipmentId?: string | null
+  shipmentNumber?: string | null
+  invoiceId: string
+  invoiceNumber?: string | null
+  customerId?: string | null
+  customerName?: string | null
+  carrierId?: string | null
+  carrierName?: string | null
+  divisionKey?: string | null
+  teamKey?: string | null
+  repId: string
+  repName?: string | null
+  managerId?: string | null
+  roleName: CommissionRoleName
+  planId?: string | null
+  planName?: string | null
+  rateType?: CommissionRateType | null
+  rateBps?: number | null
+  rateCents?: number | null
+  tierLabel?: string | null
+  splitBps?: number | null
+  basis?: CommissionBasisKind | null
+  basisCents: number
+  revenueCents: number
+  costCents: number
+  profitCents: number
+  marginBps?: number | null
+  /** What the plan says. Never erased by an override or a counter. */
+  amountCents: number
+  overrideCents?: number | null
+  overrideBy?: string | null
+  overrideNote?: string | null
+  /** What is actually owed: override ?? accepted counter ?? amount. */
+  netCents: number
+  /** e.g. `'OWN_FLEET_NO_COST'` or `'NO_PERSON'`. */
+  basisNote?: string | null
+  needsReview?: boolean | null
+  /** Every carrier assignment is finalized (or own-asset), so the cost cannot move. */
+  costFinal?: boolean | null
+  status?: CommissionStatus | null
+  counterCents?: number | null
+  counterBy?: string | null
+  counterNote?: string | null
+  approvedAt?: string | null
+  approvedBy?: string | null
+  cancelledAt?: string | null
+  cancelReason?: string | null
+  trigger?: CommissionTrigger | null
+  triggerAt: string
+  commissionMonth: string
+  payPeriodId?: string | null
+  paidAt?: string | null
+  paymentRef?: string | null
+  source?: CommissionSource | null
+  computedAt: string
+  events?: CommissionEvent[] | null
+  createdBy: string
+  updatedBy: string
+  version: number
+  createdAt?: string
+  updatedAt?: string
+}
+
+export type CommissionPayPeriodStatus = 'OPEN' | 'PENDING_APPROVAL' | 'APPROVED' | 'PAID'
+
+export interface CommissionPayPeriodRepRow {
+  repId: string
+  repName?: string | null
+  count: number
+  amountCents: number
+  statementKey?: string | null
+}
+
+export interface CommissionPayPeriodRecord {
+  id: string
+  periodStart: string
+  periodEnd: string
+  payDate: string
+  status?: CommissionPayPeriodStatus | null
+  commissionCount?: number | null
+  totalCents?: number | null
+  byRep?: CommissionPayPeriodRepRow[] | null
+  submittedAt?: string | null
+  submittedBy?: string | null
+  approvedAt?: string | null
+  approvedBy?: string | null
+  paidAt?: string | null
+  paidBy?: string | null
+  paymentRef?: string | null
+  note?: string | null
+  createdBy: string
+  updatedBy: string
+  version: number
+  createdAt?: string
+  updatedAt?: string
+}
+
+/** The commissions half of `TmsSettings`, as the settings card edits it. */
+export interface CommissionSettings {
+  commissionsEnabled?: boolean | null
+  commissionTrigger?: CommissionTrigger | null
+  commissionPlans?: CommissionPlan[] | null
+  commissionPaySchedule?: CommissionPaySchedule | null
+  commissionApprovalAdminOnly?: boolean | null
+  commissionPayAdminOnly?: boolean | null
+}
+
+/** The shipment half of `TmsSettings`, as the settings card edits it. */
+export interface ShipmentSettings {
+  shipmentPrefix?: string | null
+  nextShipmentNumber?: number | null
+  cancelDeleteAdminOnly?: boolean | null
+  defaultMode?: ShipmentMode | null
+  arUnbilledStage?: string | null
+  apInReviewStage?: string | null
+}
+
+// ── Reporting ────────────────────────────────────────────────────────────────
+
+export type ReportGroupBy =
+  | 'REP'
+  | 'CUSTOMER'
+  | 'CARRIER'
+  | 'DIVISION'
+  | 'TEAM'
+  | 'MODE'
+  | 'EQUIPMENT'
+  | 'MONTH'
+
+export interface ReportFilters {
+  divisionKey?: string | null
+  teamKey?: string | null
+  repId?: string | null
+  customerId?: string | null
+  carrierId?: string | null
+  mode?: string | null
+  equipmentType?: string | null
+}
+
+export interface ReportRow {
+  key: string
+  label: string
+  loads: number
+  revenueCents: number
+  costCents: number
+  profitCents: number
+  marginBps: number | null
+  miles: number
+  rpmCents: number | null
+  cpmCents: number | null
+  /** Loads run on our own trucks: counted in revenue, their cost lives in settlements. */
+  ownFleet: number
+}
+
+export interface ProfitReport {
+  rows: ReportRow[]
+  totals: ReportRow
+  /** Samples skipped because they were canceled or TONU'd. */
+  excluded: number
 }

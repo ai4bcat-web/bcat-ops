@@ -12,6 +12,11 @@ import { DocumentSettingsCard } from './DocumentSettingsCard'
 import { ArSettingsCard } from './ArSettingsCard'
 import { ApSettingsCard } from './ApSettingsCard'
 import { QuoteSettingsCard } from './QuoteSettingsCard'
+import { ShipmentSettingsCard } from './ShipmentSettingsCard'
+import { ChargeCodesCard } from './ChargeCodesCard'
+import { TeamsCard } from './TeamsCard'
+import { UsersRolesCard } from './UsersRolesCard'
+import { CommissionSettingsCard } from './CommissionSettingsCard'
 
 export function SettingsPage() {
   const { isAdmin } = useAuth()
@@ -57,6 +62,11 @@ export function SettingsPage() {
             <ArSettingsCard />
             <ApSettingsCard />
             <QuoteSettingsCard />
+            <ShipmentSettingsCard />
+            <ChargeCodesCard />
+            <TeamsCard />
+            <UsersRolesCard />
+            <CommissionSettingsCard />
           </>
         )}
 

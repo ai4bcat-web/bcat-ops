@@ -450,6 +450,9 @@ type Action =
   | 'COUNTER_OFFER'
   | 'REJECT_OFFER'
   | 'ACCEPT_OFFER'
+  // Step I — the shipment half of the org defaults. Not quote work and not the
+  // loads page's either: org defaults are an admin act in every router here.
+  | 'SAVE_SHIPMENT_SETTINGS'
 
 /**
  * Step H. Quoting is its own desk: a rep who prices freight all day has no business
@@ -489,6 +492,13 @@ const OFFER_ACTIONS: Record<string, true> = {
 
 /** Org defaults are an admin act in every router here. */
 const QUOTE_ADMIN_ONLY_ACTIONS: Record<string, true> = { SAVE_QUOTE_SETTINGS: true }
+
+/**
+ * Step I. Admin-only actions that are not quote work. They are decided in their
+ * own branch below, above the loads-page rule a dispatcher would otherwise pass:
+ * the settings card lives on the loads page, the defaults behind it do not.
+ */
+const ADMIN_ONLY_ACTIONS: Record<string, true> = { SAVE_SHIPMENT_SETTINGS: true }
 
 const QUOTES_PAGE_GROUP = 'page-quotes'
 const LOADS_PAGE_GROUP = 'page-loads'
@@ -555,6 +565,10 @@ async function authorize(action: Action, identity?: AppSyncIdentity | null): Pro
     if (!isAdmin && !groups.includes(LOADS_PAGE_GROUP) && !groups.includes(QUOTES_PAGE_GROUP)) {
       throw new Error(`Forbidden: ${action} requires owner, ADMIN, ${LOADS_PAGE_GROUP}, or ${QUOTES_PAGE_GROUP}`)
     }
+    return { email, sub: identity.sub, groups, isAdmin }
+  }
+  if (ADMIN_ONLY_ACTIONS[action]) {
+    if (!isAdmin) throw new Error(`Forbidden: ${action} requires owner or ADMIN`)
     return { email, sub: identity.sub, groups, isAdmin }
   }
   // Building and moving freight is the loads page's job; everything here belongs to
@@ -989,6 +1003,60 @@ async function nextShipmentNumber(caller: Caller): Promise<string> {
     ? settings.shipmentPrefix.trim()
     : 'S'
   return `${prefix}${String(counter).padStart(6, '0')}`
+}
+
+/**
+ * Step I. The shipment half of `TmsSettings`, patched the way the quotes half is
+ * (`quotes.ts:1566`): every field is optional, `'field' in input` decides whether
+ * it moves, and the counter may only ever rise — lowering it points the next
+ * shipment at a number that already exists, whose Put is then refused.
+ */
+async function saveShipmentSettings(input: Row, caller: Caller): Promise<Row> {
+  const settings = await getSettings()
+  const patch: Row = {}
+
+  if ('shipmentPrefix' in input) {
+    const prefix = optionalString(input.shipmentPrefix)
+    if (prefix != null && (prefix.length > 8 || !/^[A-Z0-9-]+$/.test(prefix))) {
+      throw new Error('A shipment prefix is up to 8 letters, numbers or dashes')
+    }
+    patch.shipmentPrefix = prefix
+  }
+  if ('nextShipmentNumber' in input) {
+    const next = optionalInteger(input.nextShipmentNumber, { min: 0, label: 'nextShipmentNumber' })
+    const current = numberOrNull(settings?.nextShipmentNumber) ?? 0
+    if (next != null && next < current) {
+      throw new Error(`The shipment counter is at ${current} and can only go forward`)
+    }
+    if (next != null) patch.nextShipmentNumber = next
+  }
+  if ('cancelDeleteAdminOnly' in input) patch.cancelDeleteAdminOnly = optionalBoolean(input.cancelDeleteAdminOnly)
+  if ('defaultMode' in input) patch.defaultMode = optionalEnum(input.defaultMode, SHIPMENT_MODES, 'defaultMode')
+  if ('arUnbilledStage' in input) patch.arUnbilledStage = optionalString(input.arUnbilledStage, 60)
+  if ('apInReviewStage' in input) patch.apInReviewStage = optionalString(input.apInReviewStage, 60)
+  if (Object.keys(patch).length === 0) throw new Error('Nothing to save')
+
+  // The settings singleton is created by the directory router; here it is patched,
+  // seeding `__typename` the way every counter write on this row already does.
+  const names: Record<string, string> = { '#tn': '__typename' }
+  const values: Record<string, AttributeValue> = { ':tn': { S: 'TmsSettings' } }
+  const sets = ['#tn = if_not_exists(#tn, :tn)']
+  for (const [key, value] of Object.entries({ ...patch, updatedBy: caller.email, updatedAt: nowIso() })) {
+    names[`#${key}`] = key
+    values[`:${key}`] = marshallRow({ [key]: value })[key]
+    sets.push(`#${key} = :${key}`)
+  }
+  await dynamo.send(
+    new UpdateItemCommand({
+      TableName: SETTINGS_TABLE_NAME,
+      Key: marshall({ id: SETTINGS_ID }),
+      UpdateExpression: `SET ${sets.join(', ')}`,
+      ExpressionAttributeNames: names,
+      ExpressionAttributeValues: values,
+    }),
+  )
+  await writeAudit('TMS_SETTINGS', SETTINGS_ID, 'SAVE_SHIPMENT_SETTINGS', caller, patch)
+  return { settings: await getById(SETTINGS_TABLE_NAME, SETTINGS_ID) } as unknown as Row
 }
 
 // ── Load row construction ────────────────────────────────────────────────────
@@ -4710,6 +4778,8 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return revertToQuote(quoteDeps, input, caller)
     case 'SAVE_QUOTE_SETTINGS':
       return saveQuoteSettings(quoteDeps, input, caller)
+    case 'SAVE_SHIPMENT_SETTINGS':
+      return saveShipmentSettings(input, caller)
     case 'REQUEST_OFFERS':
       return requestOffers(quoteDeps, input, caller)
     case 'LOG_OFFER':

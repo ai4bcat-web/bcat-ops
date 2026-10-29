@@ -48,6 +48,41 @@ no production infrastructure changes until Ryne merges `dev` → `main`.
   poll-based hooks, `apiClient.ts` typed GraphQL strings, `src/lib/*.ts` pure functions
   with Vitest tests next to them).
 
+## Direction change — Ryne, 2026-10-28 evening (hard rules from here on)
+
+Ryne reviewed dev and gave four corrections. They apply to every TMS page already built
+(A–I) and every step after. They are done as **Step R**, before J.
+
+1. **MVMNT's UI, not BCAT Ops'.** Every TMS page adopts the MVMNT look documented in
+   `Docs/tms-build/MVMNT_UI_REFERENCE.md` (dark shell, Inter, yellow primary, 175px sidebar,
+   38px top bar, the list/filter/table/empty-state/footer anatomy, the dashboard anatomy).
+   Build it once as a `tms` shell + component kit under `src/features/tms/` (theme scoped to
+   `.tms-shell`), then re-skin the A–I pages onto it. The existing BCAT Ops pages are not
+   touched.
+2. **One record: a load IS a shipment.** Ryne: "loads and shipments are the same exact thing.
+   Remove the redundancy." The user sees exactly one list, one detail page, one vocabulary
+   ("Shipment"). The existing Loads page and the TMS Shipments page merge into the TMS
+   Shipments page; the legacy Load record stays in the data (the driver app, dispatch, pay and
+   factoring read it) but is never shown as a second thing. Under the hood keep the additive
+   rule: do not remove the Load model or its fields; the Shipment page reads and writes the
+   Load it mirrors (the Step B backfill mapping) so both stay in sync. Remove the
+   `/loads` page from the nav and redirect it; remove the "Order" layer from every screen.
+3. **Two sidebar sections.** The sidebar has exactly two sections: **"MVMNT"** at the top
+   with the TMS pages in MVMNT's own order (Dashboard, Shipments, Rates, Invoicing, Carriers,
+   Factors, Customers, Locations, Vendors, Workflows, Academy, My Brokerage) under `/tms/*`
+   routes, and **"BCAT Ops"** below it with every existing page exactly as it is today
+   (the current dashboard included — "my current dashboard can move into the new section").
+   Permissions: the MVMNT section is visible to the owner and ADMIN and to `page-tms`;
+   each existing page keeps its own grant.
+4. **A TMS dashboard like MVMNT's.** `/tms/dashboard` reproduces MVMNT's dashboard: the
+   title row with Views and the chart picker, the filter row, and the 17 Classic charts in
+   MVMNT's order, computed from the TMS/Load data on dev (reference §3).
+
+Models for Step R (Ryne's instruction): run Step R with **Fable** on the orchestrator, plan
+and reviewer regardless of the daily share; when R is logged done, the normal Fable budget
+rule resumes for J–M. Seed data: Ryne wants the dev tables refreshed from production for
+testing (`node scripts/devStack.mjs copy-data`, run by Claude Code, not by this agent).
+
 ## Working method (cost-aware)
 
 - Plan each step with the `plan` role (Claude Fable) before editing: write the plan to
@@ -85,6 +120,12 @@ G. AP — Awaiting invoice → In review → To be paid → Paid; record/approve
 H. Quotes & rates — customer quotes with accept/counter/decline link; carrier offers;
    lane history.
 I. Settings, roles, teams, commissions, reporting.
+R. MVMNT UI + one shipment record + two-section sidebar + MVMNT dashboard (the direction
+   change above). Done means: every A–I page renders inside the `tms` shell with the MVMNT
+   look; `/loads` is gone from the nav and redirects to `/tms/shipments`; the sidebar shows
+   the two sections; `/tms/dashboard` shows the 17 charts against dev data; typecheck, lint,
+   tests green; deployed on dev; logged in the build log as "Step R done"; Academy articles
+   updated for the new navigation. Then J.
 J. Integration framework + every provider settings page (spec §8.1, §9) — stub mode for all,
    live for providers BCAT has credentials for; list missing credentials in the build log.
 K. Workflows page: Errors + AI Agents, WorkflowRun model, the four email-agent inbox roles,

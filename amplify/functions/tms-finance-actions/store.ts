@@ -60,6 +60,11 @@ export const AP_PAYMENT_TABLE_NAME = process.env.AP_PAYMENT_TABLE_NAME ?? ''
 export const CARRIER_TABLE_NAME = process.env.CARRIER_TABLE_NAME ?? ''
 export const CARRIER_PAYMENT_METHOD_TABLE_NAME = process.env.CARRIER_PAYMENT_METHOD_TABLE_NAME ?? ''
 export const CARRIER_CONTACT_TABLE_NAME = process.env.CARRIER_CONTACT_TABLE_NAME ?? ''
+// Step I: the commission ledger, its pay periods, and the staff directory the
+// commission roles resolve a manager and a display name from.
+export const COMMISSION_TABLE_NAME = process.env.COMMISSION_TABLE_NAME ?? ''
+export const COMMISSION_PAY_PERIOD_TABLE_NAME = process.env.COMMISSION_PAY_PERIOD_TABLE_NAME ?? ''
+export const USER_PROFILE_TABLE_NAME = process.env.USER_PROFILE_TABLE_NAME ?? ''
 export const BUCKET_NAME = process.env.BUCKET_NAME ?? ''
 export const FROM_ADDRESS = process.env.FROM_ADDRESS ?? ''
 export const USER_POOL_ID = process.env.USER_POOL_ID ?? 'us-east-1_IbPKPNJC9'
@@ -84,6 +89,10 @@ export const IDX_DOCUMENTS_BY_SHIPMENT = 'shipmentDocumentsByShipmentIdAndUpload
 export const IDX_PAYMENT_METHODS_BY_CARRIER = 'carrierPaymentMethodsByCarrierId'
 export const IDX_CONTACTS_BY_CARRIER = 'carrierContactsByCarrierId'
 export const IDX_BILLS_BY_CARRIER = 'carrierBillsByCarrierIdAndRecordedAt'
+export const IDX_COMMISSIONS_BY_INVOICE = 'commissionsByInvoiceId'
+export const IDX_COMMISSIONS_BY_REP = 'commissionsByRepIdAndCommissionMonth'
+export const IDX_COMMISSIONS_BY_MONTH = 'commissionsByCommissionMonthAndTriggerAt'
+export const IDX_COMMISSIONS_BY_PAY_PERIOD = 'commissionsByPayPeriodId'
 
 /** How long a download offered after a refused send stays good. */
 export const DOWNLOAD_URL_TTL_SECONDS = 3600

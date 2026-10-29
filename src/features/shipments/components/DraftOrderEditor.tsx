@@ -11,6 +11,7 @@
  */
 import { useMemo, useState } from 'react'
 import { AlertTriangle, Plus, Trash2, ShieldCheck } from 'lucide-react'
+import { RepPicker } from '@/components/RepPicker'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -308,12 +309,13 @@ export function DraftOrderEditor({
         </Button>
         {showRepField ? (
           <div className="flex items-center gap-2">
-            <Input
-              aria-label="Carrier rep"
+            <RepPicker
+              role="CARRIER_REP"
+              allowUnknown
               value={carrierRepId}
-              onChange={(e) => setCarrierRepId(e.target.value)}
-              placeholder="rep@bcatcorp.com"
-              className="h-9 w-56 text-sm"
+              onChange={setCarrierRepId}
+              placeholder="Pick a carrier rep…"
+              className="w-56"
             />
             <Button type="button" onClick={() => submit(true)} disabled={submitting || issues.length > 0}>
               Submit and assign

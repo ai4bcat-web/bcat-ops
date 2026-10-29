@@ -62,6 +62,7 @@ import {
   writeAudit,
   type Row,
 } from './store'
+import { runCommissionsAfter } from './commissions'
 
 const METHODS: readonly ArPaymentMethod[] = ['CHECK', 'ACH', 'WIRE', 'CARD', 'FACTOR', 'OTHER']
 const MAX_NOTE = 2000
@@ -335,6 +336,10 @@ export async function recordPayment(input: Row, caller: Caller): Promise<PostedR
       creditApplications,
     })
   }
+  // Step I. A settled invoice is the second trigger a commission plan may use,
+  // and a part payment can still move an invoice's balance, so the run decides
+  // for itself whether anything is owed yet.
+  for (const invoiceId of invoiceIds) await runCommissionsAfter(invoiceId, caller, 'RUN')
   return readBack(id, invoiceIds, duplicate)
 }
 
@@ -438,6 +443,9 @@ export async function writeOffInvoice(input: Row, caller: Caller): Promise<Poste
 
   const duplicate = await postOnce(AR_PAYMENT_TABLE_NAME, writes, 'write-off', id, clientRequestId != null)
   if (!duplicate) await writeAudit('Invoice', invoiceId, 'WRITE_OFF', caller, { amountCents, reason })
+  // Step I. A write-off lowers the basis: the commission on revenue we decided
+  // not to collect is recomputed, or adjusted when it was already approved.
+  await runCommissionsAfter(invoiceId, caller, 'WRITE_OFF')
   return readBack(id, invoiceIds, duplicate)
 }
 

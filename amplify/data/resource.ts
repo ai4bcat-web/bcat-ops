@@ -1025,6 +1025,19 @@ const schema = a.schema({
       quoteTermsText:           a.string(),      // printed on every public quote page
       quoteBelowMinMarginAdminOnly: a.boolean(), // true — only owner/ADMIN send under the floor
       quoteOffersCarrierSeesBookNow: a.boolean(), // true — the offer link may show a book-now rate
+
+      // ── Roles, teams, commissions (Step I) ───────────────────────────────
+      // Team[] — [{ key, name, memberIds[], senderAddresses{...}, showContactOnTracking, active }].
+      // Configuration an admin edits, a handful of rows: JSON on the singleton, not a table.
+      teams:                    a.json(),
+      limitCustomerRepView:     a.boolean(),     // false — a board filter, never a read boundary
+      limitCarrierRepView:      a.boolean(),     // false — same
+      commissionsEnabled:       a.boolean(),     // false — nothing is computed until this is on
+      commissionTrigger:        a.enum(['GENERATE_INVOICE', 'INVOICE_PAID']),
+      commissionPlans:          a.json(),        // CommissionPlan[] — validated on save
+      commissionPaySchedule:    a.json(),        // { frequency, payDay, daysUntilPay }
+      commissionApprovalAdminOnly: a.boolean(),  // false — managers approve
+      commissionPayAdminOnly:   a.boolean(),     // true — only owner/ADMIN pay a period
     })
     // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
     // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
@@ -1977,13 +1990,174 @@ const schema = a.schema({
       source:          a.enum(['LOAD', 'BACKFILL', 'LEGACY_LOAD']),
       sampledAt:       a.datetime().required(),
       version:         a.integer().required(),
+
+      // ── Reporting fact fields (Step I) ───────────────────────────────────
+      // This row already is one delivered, priced load; the classic dashboard
+      // reads it by month instead of scanning Load + LoadFinancials.
+      sampleMonth:     a.string(),              // 'YYYY-MM' of `date`
+      customerRepId:   a.string(),              // Order.customerRepId
+      carrierRepId:    a.string(),              // LoadCarrier.carrierRepId ?? Load.carrierRepId
+      teamKey:         a.string(),              // the customer's team at sample time
+      invoiceId:       a.string(),
+      invoiceMonth:    a.string(),              // 'YYYY-MM' of Order.invoicedAt
     })
     .secondaryIndexes((index) => [
       index('laneKey').sortKeys(['date']),
       index('laneKey3').sortKeys(['date']),
+      // The reporting read: every delivered load in a month, newest first.
+      index('sampleMonth').sortKeys(['date']),
     ])
     // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
     // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  // ── Staff, roles & commissions (Step I) ────────────────────────────────────
+  /*
+   * One row per staff login. `id` IS the Cognito username, which is the e-mail for
+   * everybody created through the Users page — the same value every rep field on
+   * Order/Load/Customer/Carrier already holds, so a picker resolves a name with a
+   * GetItem and no index.
+   *
+   * The role is data here and is PROJECTED onto Cognito groups by userManagement:
+   * nothing reads this table to authorize. Access stays `cognito:groups` in the
+   * token, so a role change costs no table read per request.
+   */
+  UserProfile: a
+    .model({
+      email:        a.string().required(),
+      name:         a.string(),
+      role: a.enum([
+        'ADMIN', 'MANAGER', 'CUSTOMER_REP', 'CARRIER_REP', 'AR_AP', 'COMPLIANCE', 'NONE',
+      ]),
+      teamKeys:     a.string().array(),
+      managerId:    a.string(),
+      claims:       a.string().array(),     // UserClaim keys; only a few are enforced
+      extraPages:   a.string().array(),     // page keys granted beyond the role
+      status:       a.enum(['PENDING', 'ACTIVE', 'INACTIVE']),
+      title:        a.string(),
+      phone:        a.string(),
+      datEmail:     a.string(),             // stored now, used by J
+      invitedAt:    a.string(),
+      invitedBy:    a.string(),
+      lastRoleChangeAt: a.string(),
+      lastRoleChangeBy: a.string(),
+      createdBy:    a.string().required(),
+      updatedBy:    a.string().required(),
+      version:      a.integer().required(),
+    })
+    // No GSI: a staff table is tens of rows and `list` is the only read.
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  /*
+   * One immutable row per order × commission role × rep. Written only by
+   * tmsFinanceActions, and only once the money is frozen (invoice generated, or
+   * invoice paid when that is the trigger).
+   *
+   * An unapproved row is a proposal and is recomputed in place; from
+   * MANAGER_APPROVED on it is a liability and every later change arrives as an
+   * ADJUSTMENT or a REVERSAL, exactly as the AR and AP ledgers already work.
+   */
+  Commission: a
+    .model({
+      kind:          a.enum(['EARNED', 'ADJUSTMENT', 'REVERSAL']),
+      adjustsId:     a.string(),
+      orderId:       a.string().required(),
+      shipmentId:    a.string(),
+      shipmentNumber: a.string(),
+      invoiceId:     a.string().required(),
+      invoiceNumber: a.string(),
+      customerId:    a.string(),
+      customerName:  a.string(),
+      carrierId:     a.string(),
+      carrierName:   a.string(),
+      divisionKey:   a.string(),
+      teamKey:       a.string(),
+      repId:         a.string().required(),
+      repName:       a.string(),
+      managerId:     a.string(),
+      roleName:      a.string().required(),   // CommissionRoleName
+      planId:        a.string(),
+      planName:      a.string(),
+      rateType:      a.enum(['FIXED', 'PERCENT_PROFIT', 'PERCENT_REVENUE']),
+      rateBps:       a.integer(),
+      rateCents:     a.integer(),
+      tierLabel:     a.string(),
+      splitBps:      a.integer(),
+      basis:         a.enum(['REVENUE', 'PROFIT', 'FIXED']),
+      basisCents:    a.integer().required(),
+      revenueCents:  a.integer().required(),
+      costCents:     a.integer().required(),
+      profitCents:   a.integer().required(),
+      marginBps:     a.integer(),
+      amountCents:   a.integer().required(),  // the computed number, never erased
+      overrideCents: a.integer(),
+      overrideBy:    a.string(),
+      overrideNote:  a.string(),
+      netCents:      a.integer().required(),  // override ?? counter ?? amount
+      basisNote:     a.string(),              // e.g. 'OWN_FLEET_NO_COST'
+      needsReview:   a.boolean(),
+      costFinal:     a.boolean(),
+      status: a.enum([
+        'UN_APPROVED', 'REP_COUNTERED', 'MANAGER_COUNTERED', 'MANAGER_APPROVED',
+        'FULLY_APPROVED', 'PAID', 'CANCELLED',
+      ]),
+      counterCents:  a.integer(),
+      counterBy:     a.string(),
+      counterNote:   a.string(),
+      approvedAt:    a.string(),
+      approvedBy:    a.string(),
+      cancelledAt:   a.string(),
+      cancelReason:  a.string(),
+      trigger:       a.enum(['GENERATE_INVOICE', 'INVOICE_PAID']),
+      triggerAt:     a.string().required(),
+      commissionMonth: a.string().required(),  // 'YYYY-MM' of triggerAt
+      payPeriodId:   a.string(),
+      paidAt:        a.string(),
+      paymentRef:    a.string(),
+      source:        a.enum(['RUN', 'RERUN', 'VOID', 'WRITE_OFF', 'OVERRIDE']),
+      computedAt:    a.string().required(),
+      events:        a.json(),                 // ≤ 50 entries, the Quote precedent
+      createdBy:     a.string().required(),
+      updatedBy:     a.string().required(),
+      version:       a.integer().required(),
+    })
+    .secondaryIndexes((index) => [
+      index('repId').sortKeys(['commissionMonth']),
+      index('invoiceId'),
+      index('payPeriodId'),
+      index('commissionMonth').sortKeys(['triggerAt']),
+    ])
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  /*
+   * A commission pay period. `id` is `cpp:<periodStart>`. Paying a period records
+   * that payroll happened elsewhere — no money leaves this stack, the same way
+   * MARK_SENT records an invoice that a person e-mailed.
+   */
+  CommissionPayPeriod: a
+    .model({
+      periodStart:  a.string().required(),   // YYYY-MM-DD
+      periodEnd:    a.string().required(),
+      payDate:      a.string().required(),
+      status:       a.enum(['OPEN', 'PENDING_APPROVAL', 'APPROVED', 'PAID']),
+      commissionCount: a.integer(),
+      totalCents:   a.integer(),
+      byRep:        a.json(),                // [{repId, repName, count, amountCents, statementKey}]
+      submittedAt:  a.string(),
+      submittedBy:  a.string(),
+      approvedAt:   a.string(),
+      approvedBy:   a.string(),
+      paidAt:       a.string(),
+      paidBy:       a.string(),
+      paymentRef:   a.string(),
+      note:         a.string(),
+      createdBy:    a.string().required(),
+      updatedBy:    a.string().required(),
+      version:      a.integer().required(),
+    })
     .disableOperations(['subscriptions'])
     .authorization((allow) => [allow.authenticated().to(['read'])]),
 
@@ -3067,6 +3241,11 @@ const schema = a.schema({
     .query()
     .arguments({
       action:   a.string().required(),
+      // Step I: the role/team/claim/profile actions. `input` is a JSON string
+      // carrying whatever the action needs beyond these scalars — one argument
+      // instead of a dozen, the way every TMS router already takes its input.
+      role:     a.string(),
+      input:    a.string(),
       email:    a.string(),
       username: a.string(),
       pages:    a.string(),

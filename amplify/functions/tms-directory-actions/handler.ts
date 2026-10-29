@@ -25,6 +25,9 @@ import {
 import { AdminGetUserCommand, CognitoIdentityProviderClient } from '@aws-sdk/client-cognito-identity-provider'
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb'
 import { createHmac, timingSafeEqual } from 'crypto'
+import { validateCommissionPlans, validatePaySchedule } from '../../../src/lib/commission'
+import { teamMembership, validateTeams } from '../../../src/lib/teams'
+import type { CommissionTrigger, Team } from '../../../src/types/tms'
 
 const dynamo = new DynamoDBClient({})
 const cognito = new CognitoIdentityProviderClient({})
@@ -36,6 +39,7 @@ const DIVISION_TABLE_NAME = process.env.DIVISION_TABLE_NAME ?? TABLE_NAME
 const SETTINGS_TABLE_NAME = process.env.SETTINGS_TABLE_NAME ?? TABLE_NAME
 const MERGE_JOB_TABLE_NAME = process.env.MERGE_JOB_TABLE_NAME ?? TABLE_NAME
 const LOAD_TABLE_NAME = process.env.LOAD_TABLE_NAME ?? ''
+const USER_PROFILE_TABLE_NAME = process.env.USER_PROFILE_TABLE_NAME ?? ''
 const GEOCODE_TOKEN_SECRET = process.env.GEOCODE_TOKEN_SECRET ?? ''
 const USER_POOL_ID = process.env.USER_POOL_ID ?? 'us-east-1_IbPKPNJC9'
 
@@ -794,8 +798,11 @@ async function upsertCustomer(input: Record<string, unknown>, caller: Caller): P
   // ── Admin-only credit fields ───────────────────────────────────────────────
   const isAdmin = caller.email === OWNER_EMAIL || (caller.groups ?? []).includes(ADMIN_GROUP)
   const creditFields = ['creditLimitCents', 'creditHoldFlag', 'freeCreditRequired', 'creditUsageWarningBps', 'maxDaysLate'] as const
+  // Step I. `claim-CREDIT_LIMIT_EDIT` is the one claim these fields answer to: a
+  // credit manager who is not an admin sets limits, and nothing else admin-only.
+  const mayEditCredit = isAdmin || (caller.groups ?? []).includes('claim-CREDIT_LIMIT_EDIT')
   for (const field of creditFields) {
-    if (input[field] !== undefined && !isAdmin) {
+    if (input[field] !== undefined && !mayEditCredit) {
       const existingValue = existing?.[field]
       const requestedValue = field === 'creditLimitCents'
         ? validateAwsIntegerCents(input[field], field)
@@ -1389,6 +1396,51 @@ async function saveDivision(input: Record<string, unknown>, caller: Caller): Pro
   }
 }
 
+/**
+ * Step I. `UserProfile.teamKeys` is a mirror of the `teams` list the settings card
+ * edits — the list is where membership is decided, this is the copy every rep-scoped
+ * query reads. Best effort, row by row: a staff row that would not take the write is
+ * logged the way the audit write is, and never refuses the settings save that caused it.
+ */
+async function mirrorTeamKeys(teams: Team[], caller: Caller): Promise<void> {
+  if (!USER_PROFILE_TABLE_NAME) return
+  const membership = teamMembership(teams)
+  try {
+    let lastKey: Record<string, AttributeValue> | undefined
+    do {
+      const result = await dynamo.send(
+        new ScanCommand({ TableName: USER_PROFILE_TABLE_NAME, ExclusiveStartKey: lastKey, Limit: 500 }),
+      )
+      for (const raw of result.Items ?? []) {
+        const row = unmarshall(raw)
+        const id = typeof row.id === 'string' ? row.id : ''
+        if (!id) continue
+        const keys = membership[id.trim().toLowerCase()] ?? []
+        const current = Array.isArray(row.teamKeys)
+          ? row.teamKeys.filter((key): key is string => typeof key === 'string')
+          : []
+        // Only the rows whose membership actually moved are written.
+        if (current.length === keys.length && current.every((key, i) => key === keys[i])) continue
+        try {
+          await dynamo.send(
+            new UpdateItemCommand({
+              TableName: USER_PROFILE_TABLE_NAME,
+              Key: marshall({ id }),
+              UpdateExpression: 'SET teamKeys = :keys, updatedBy = :by, updatedAt = :now',
+              ExpressionAttributeValues: marshall({ ':keys': keys, ':by': caller.email, ':now': nowIso() }),
+            }),
+          )
+        } catch (err: unknown) {
+          console.warn(`[tms-directory-actions] team mirror failed for ${id}:`, String(err))
+        }
+      }
+      lastKey = result.LastEvaluatedKey
+    } while (lastKey)
+  } catch (err: unknown) {
+    console.warn('[tms-directory-actions] team mirror scan failed:', String(err))
+  }
+}
+
 async function saveSettings(input: Record<string, unknown>, caller: Caller): Promise<Record<string, unknown>> {
   const id = 'default'
   const existing = await getSettings()
@@ -1427,6 +1479,23 @@ async function saveSettings(input: Record<string, unknown>, caller: Caller): Pro
     chargeCodes: keep(input.chargeCodes, (v) => validateChargeCodes(v), 'chargeCodes'),
     rateConTerms: keep(input.rateConTerms, (v) => optionalString(v, 8000), 'rateConTerms'),
 
+    // Step I — teams, the two rep-scoped view limits and the commission defaults.
+    teams: keep(input.teams, validateTeams, 'teams'),
+    limitCustomerRepView: keep(input.limitCustomerRepView, (v) => (typeof v === 'boolean' ? v : undefined), 'limitCustomerRepView'),
+    limitCarrierRepView: keep(input.limitCarrierRepView, (v) => (typeof v === 'boolean' ? v : undefined), 'limitCarrierRepView'),
+    commissionsEnabled: keep(input.commissionsEnabled, (v) => (typeof v === 'boolean' ? v : undefined), 'commissionsEnabled'),
+    commissionTrigger: keep(input.commissionTrigger, (v) => {
+      if (v == null) return null
+      if (v !== 'GENERATE_INVOICE' && v !== 'INVOICE_PAID') {
+        throw new Error('commissionTrigger must be GENERATE_INVOICE or INVOICE_PAID')
+      }
+      return v as CommissionTrigger
+    }, 'commissionTrigger'),
+    commissionPlans: keep(input.commissionPlans, validateCommissionPlans, 'commissionPlans'),
+    commissionPaySchedule: keep(input.commissionPaySchedule, validatePaySchedule, 'commissionPaySchedule'),
+    commissionApprovalAdminOnly: keep(input.commissionApprovalAdminOnly, (v) => (typeof v === 'boolean' ? v : undefined), 'commissionApprovalAdminOnly'),
+    commissionPayAdminOnly: keep(input.commissionPayAdminOnly, (v) => (typeof v === 'boolean' ? v : undefined), 'commissionPayAdminOnly'),
+
     updatedBy: caller.email,
     createdAt: isCreate ? now : (existing?.createdAt as string) ?? now,
     updatedAt: now,
@@ -1440,6 +1509,7 @@ async function saveSettings(input: Record<string, unknown>, caller: Caller): Pro
         ConditionExpression: 'attribute_not_exists(id)',
       }),
     )
+    if (input.teams !== undefined) await mirrorTeamKeys(item.teams as Team[], caller)
     return item
   }
 
@@ -1467,6 +1537,7 @@ async function saveSettings(input: Record<string, unknown>, caller: Caller): Pro
       }),
     )
     if (!result.Attributes) throw new Error('Settings update failed')
+    if (input.teams !== undefined) await mirrorTeamKeys(item.teams as Team[], caller)
     return unmarshall(result.Attributes)
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err)

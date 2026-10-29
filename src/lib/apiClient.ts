@@ -27,6 +27,8 @@ import type {
   ApPayeeKind, ApRemitTo, ApSettings,
   QuoteRecord, QuoteSettings, QuoteLostReason, QuoteSide, QuoteAcceptedVia,
   LaneRateSampleRecord, OrderReference, RateType,
+  UserProfileRecord, RoleKey, CommissionRecord, CommissionPayPeriodRecord,
+  CommissionSettings, ShipmentSettings,
 } from '@/types/tms'
 import type { CreditSummary } from '@/lib/customerCredit'
 import type { QuotePricingResult } from '@/lib/quotes'
@@ -1152,7 +1154,13 @@ const TMS_SETTINGS_V9_FIELDS = [
   'quoteEmailTemplate', 'counterEmailTemplate', 'offerRequestEmailTemplate',
   'quoteTermsText', 'quoteBelowMinMarginAdminOnly', 'quoteOffersCarrierSeesBookNow',
 ]
-const TMS_SETTINGS_JSON_FIELDS: (keyof TmsSettings)[] = ['accessorialCodes', 'loadStatusRules', 'defaultRequiredReferences', 'chargeCodes', 'quickPayTiers', 'trackingContact', 'factorRemitTo']
+// Step I's teams, view limits and commission settings. Its own flag again, for the same reason.
+const TMS_SETTINGS_V10_FIELDS = [
+  'teams', 'limitCustomerRepView', 'limitCarrierRepView',
+  'commissionsEnabled', 'commissionTrigger', 'commissionPlans', 'commissionPaySchedule',
+  'commissionApprovalAdminOnly', 'commissionPayAdminOnly',
+]
+const TMS_SETTINGS_JSON_FIELDS: (keyof TmsSettings)[] = ['accessorialCodes', 'loadStatusRules', 'defaultRequiredReferences', 'chargeCodes', 'quickPayTiers', 'trackingContact', 'factorRemitTo', 'teams', 'commissionPlans', 'commissionPaySchedule']
 let settingsHaveV2 = true
 let settingsHaveV3 = true
 let settingsHaveV4 = true
@@ -1161,6 +1169,7 @@ let settingsHaveV6 = true
 let settingsHaveV7 = true
 let settingsHaveV8 = true
 let settingsHaveV9 = true
+let settingsHaveV10 = true
 const tmsSettingsFields = () => [
   TMS_SETTINGS_FIELDS_BASE,
   settingsHaveV2 ? TMS_SETTINGS_V2_FIELDS.join(' ') : '',
@@ -1171,6 +1180,7 @@ const tmsSettingsFields = () => [
   settingsHaveV7 ? TMS_SETTINGS_V7_FIELDS.join(' ') : '',
   settingsHaveV8 ? TMS_SETTINGS_V8_FIELDS.join(' ') : '',
   settingsHaveV9 ? TMS_SETTINGS_V9_FIELDS.join(' ') : '',
+  settingsHaveV10 ? TMS_SETTINGS_V10_FIELDS.join(' ') : '',
 ].filter(Boolean).join(' ')
 const fieldNamed = (names: string[], err: unknown) => {
   const msg = safeStringify(err)
@@ -1321,7 +1331,12 @@ export async function getTmsSettings(): Promise<TmsSettings | null> {
     try {
       return await run()
     } catch (err) {
-      if (attempt >= 8) throw err
+      if (attempt >= 9) throw err
+      if (settingsHaveV10 && fieldNamed(TMS_SETTINGS_V10_FIELDS, err)) {
+        console.warn('[apiClient] backend has no TmsSettings commission fields yet — querying without them until deploy')
+        settingsHaveV10 = false
+        continue
+      }
       if (settingsHaveV9 && fieldNamed(TMS_SETTINGS_V9_FIELDS, err)) {
         console.warn('[apiClient] backend has no TmsSettings quote fields yet — querying without them until deploy')
         settingsHaveV9 = false
@@ -3112,6 +3127,10 @@ export interface CognitoUser {
   status: string
   enabled: boolean
   createdAt: string
+  /** Step I: the `UserProfile` row the Lambda joined on, absent until the deploy lands. */
+  profile?: UserProfileRecord | null
+  /** The caller's Cognito groups, as the Lambda read them — `role-*`, `claim-*`, `page-*`. */
+  groups?: string[]
 }
 
 // AppSync AWSJSON round-trips can return a parsed value, a JSON string, or even a
@@ -3140,10 +3159,21 @@ export async function listCognitoUsers(): Promise<CognitoUser[]> {
   throw new Error(`manageUsers returned an unexpected shape (${typeof v}): ${JSON.stringify(v).slice(0, 300)}`)
 }
 
-export async function createCognitoUser(email: string): Promise<void> {
+/**
+ * Invite a user. `opts` is step I's addition: the role and teams the profile is created
+ * with, carried in the generic `input` payload so the plain one-argument call is untouched.
+ */
+export async function createCognitoUser(email: string, opts?: { name?: string; role?: RoleKey; teamKeys?: string[] }): Promise<void> {
+  if (!opts) {
+    await client.graphql({
+      query: `query ManageUsers($action: String!, $email: String) { manageUsers(action: $action, email: $email) }`,
+      variables: { action: 'create', email },
+    })
+    return
+  }
   await client.graphql({
-    query: `query ManageUsers($action: String!, $email: String) { manageUsers(action: $action, email: $email) }`,
-    variables: { action: 'create', email },
+    query: `query ManageUsers($action: String!, $email: String, $input: String) { manageUsers(action: $action, email: $email, input: $input) }`,
+    variables: { action: 'create', email, input: JSON.stringify(opts) },
   })
 }
 
@@ -3196,6 +3226,94 @@ export async function setUserAdmin(username: string, isAdmin: boolean): Promise<
   await client.graphql({
     query: `query ManageUsers($action: String!, $username: String, $isAdmin: Boolean) { manageUsers(action: $action, username: $username, isAdmin: $isAdmin) }`,
     variables: { action: 'setAdmin', username, isAdmin },
+  })
+}
+
+// ── Staff profiles & roles (Step I) ──────────────────────────────────────────
+//
+// A role is data on `UserProfile`, projected onto the Cognito groups; every write goes
+// through `manageUsers`, which owns both halves. The read below is the exception: it is
+// readable by any authenticated user because it is what every rep picker renders.
+
+export type { UserProfileRecord, RoleKey, ClaimKey, UserStatus, Team, TeamSenderAddresses } from '@/types/tms'
+
+const USER_PROFILE_FIELDS = `
+  id email name role teamKeys managerId claims extraPages status
+  title phone datEmail invitedAt invitedBy lastRoleChangeAt lastRoleChangeBy
+  createdBy updatedBy version createdAt updatedAt
+`
+
+// UserProfile arrives with step I's deploy, and until then AppSync has no such query at
+// all — the error names the query, not a field, so the field-level self-heal cannot see
+// it. Degrade to "no staff" rather than breaking every picker on the page. The quoting
+// and the delimiters are the `quoteModelsAvailable` bargain, for the same reasons.
+let userProfilesAvailable = true
+const isMissingUserProfileModel = (err: unknown) =>
+  /[\\'"](get|list)UserProfile\w*[\\'"]|Unknown type [\\'"]+UserProfile/i.test(safeStringify(err))
+
+function forgetUserProfiles(err: unknown): void {
+  if (!isMissingUserProfileModel(err)) throw err
+  console.warn('[apiClient] backend has no UserProfile model yet — reading no staff until deploy')
+  userProfilesAvailable = false
+}
+
+/** Every staff login, for the rep and team pickers. Any authenticated user may read it. */
+export async function listUserProfiles(): Promise<UserProfileRecord[]> {
+  if (!userProfilesAvailable) return []
+  try {
+    return await listAll<UserProfileRecord>('listUserProfiles', USER_PROFILE_FIELDS, 1000)
+  } catch (err) {
+    forgetUserProfiles(err)
+    return []
+  }
+}
+
+/** Owner-only when `role` is ADMIN; the Lambda refuses a lock-out with its own message. */
+export async function setUserRole(username: string, role: RoleKey): Promise<void> {
+  await client.graphql({
+    query: `query ManageUsers($action: String!, $username: String, $role: String) { manageUsers(action: $action, username: $username, role: $role) }`,
+    variables: { action: 'setRole', username, role },
+  })
+}
+
+export async function setUserTeams(username: string, teamKeys: string[]): Promise<void> {
+  await client.graphql({
+    query: `query ManageUsers($action: String!, $username: String, $input: String) { manageUsers(action: $action, username: $username, input: $input) }`,
+    variables: { action: 'setTeams', username, input: JSON.stringify({ teamKeys }) },
+  })
+}
+
+export async function setUserClaims(username: string, claims: string[]): Promise<void> {
+  await client.graphql({
+    query: `query ManageUsers($action: String!, $username: String, $input: String) { manageUsers(action: $action, username: $username, input: $input) }`,
+    variables: { action: 'setClaims', username, input: JSON.stringify({ claims }) },
+  })
+}
+
+/** The profile fields that carry no permission: everything else has its own action. */
+export async function updateUserProfile(
+  username: string,
+  patch: { name?: string; title?: string; phone?: string; managerId?: string; datEmail?: string },
+): Promise<void> {
+  await client.graphql({
+    query: `query ManageUsers($action: String!, $username: String, $input: String) { manageUsers(action: $action, username: $username, input: $input) }`,
+    variables: { action: 'updateProfile', username, input: JSON.stringify(patch) },
+  })
+}
+
+/** Re-send the invitation to a user who never signed in. */
+export async function reinviteUser(username: string): Promise<void> {
+  await client.graphql({
+    query: `query ManageUsers($action: String!, $username: String, $input: String) { manageUsers(action: $action, username: $username, input: $input) }`,
+    variables: { action: 'reinvite', username, input: JSON.stringify({ username }) },
+  })
+}
+
+/** Revoke every session: the next request with an old token is refused. */
+export async function forceSignOut(username: string): Promise<void> {
+  await client.graphql({
+    query: `query ManageUsers($action: String!, $username: String, $input: String) { manageUsers(action: $action, username: $username, input: $input) }`,
+    variables: { action: 'forceSignOut', username, input: JSON.stringify({ username }) },
   })
 }
 
@@ -5970,4 +6088,266 @@ export async function acceptOffer(input: AcceptOfferInput): Promise<{ quote: Quo
 /** ADMIN only. Templates must carry `{link}` and the number format `{n}`; the server checks. */
 export async function saveQuoteSettings(input: Partial<QuoteSettings> & { expectedUpdatedAt?: string }): Promise<{ settings: TmsSettings }> {
   return shipmentAction<{ settings: TmsSettings }>('SAVE_QUOTE_SETTINGS', input)
+}
+
+// ── Commissions (tmsFinanceActions, Step I) ──────────────────────────────────
+//
+// Same bargain as AR and AP: every write is an action on the one finance Lambda, which
+// owns the transaction across Commission, CommissionPayPeriod and the invoice it was
+// triggered by; the reads come straight off the Commission indexes. Nothing is computed,
+// written or shown until `commissionsEnabled` is on.
+
+export type {
+  CommissionRecord, CommissionPayPeriodRecord, CommissionPayPeriodRepRow, CommissionSettings,
+  CommissionStatus, CommissionKind, CommissionTrigger, CommissionPlan, CommissionPlanRole,
+  CommissionRoleName, CommissionPaySchedule, ShipmentSettings,
+} from '@/types/tms'
+
+const COMMISSION_FIELDS = `
+  id kind adjustsId orderId shipmentId shipmentNumber invoiceId invoiceNumber
+  customerId customerName carrierId carrierName divisionKey teamKey
+  repId repName managerId roleName planId planName
+  rateType rateBps rateCents tierLabel splitBps basis basisCents
+  revenueCents costCents profitCents marginBps
+  amountCents overrideCents overrideBy overrideNote netCents
+  basisNote needsReview costFinal status
+  counterCents counterBy counterNote approvedAt approvedBy cancelledAt cancelReason
+  trigger triggerAt commissionMonth payPeriodId paidAt paymentRef
+  source computedAt events
+  createdBy updatedBy version createdAt updatedAt
+`
+const COMMISSION_JSON_FIELDS: (keyof CommissionRecord)[] = ['events']
+
+const PAY_PERIOD_FIELDS = `
+  id periodStart periodEnd payDate status commissionCount totalCents byRep
+  submittedAt submittedBy approvedAt approvedBy paidAt paidBy paymentRef note
+  createdBy updatedBy version createdAt updatedAt
+`
+const PAY_PERIOD_JSON_FIELDS: (keyof CommissionPayPeriodRecord)[] = ['byRep']
+
+// Commission and CommissionPayPeriod both arrive with step I's deploy, and until then
+// the error names the *query*, not a field — the same blind spot the quote models have,
+// answered the same way: one flag for both models, an empty board instead of a throw.
+// The delimiters keep "Not Authorized to access listCommissions" out: a permission
+// refusal is a real error and must still reach the caller.
+let commissionModelsAvailable = true
+const isMissingCommissionModel = (err: unknown) =>
+  /[\\'"](get|list)Commission\w*[\\'"]|Unknown type [\\'"]+Commission/i.test(safeStringify(err))
+
+/** False once a read proved the backend predates the commission models. */
+export const commissionModelsDeployed = () => commissionModelsAvailable
+
+function forgetCommissionModels(err: unknown): void {
+  if (!isMissingCommissionModel(err)) throw err
+  console.warn('[apiClient] backend has no commission models yet — reading no commissions until deploy')
+  commissionModelsAvailable = false
+}
+
+// ── Commission reads ─────────────────────────────────────────────────────────
+//
+// The index query names below are Amplify's own derivations, which pluralise
+// irregularly: each one is verified against the deployed schema before use (the lead
+// confirms them post-deploy, the `66785d3` lesson).
+
+/** One rep's rows, newest first — the Mine tab. `month` is a 'YYYY-MM' window. */
+export async function listCommissionsByRep(repId: string, month?: string): Promise<CommissionRecord[]> {
+  if (!commissionModelsAvailable || !repId) return []
+  try {
+    const rows = await listTrackingIndex<CommissionRecord>({
+      name: 'listCommissionByRepIdAndCommissionMonth',
+      decls: month ? '$repId: String!, $month: String!' : '$repId: String!',
+      args: month ? 'repId: $repId, commissionMonth: { eq: $month }' : 'repId: $repId',
+      variables: month ? { repId, month } : { repId },
+      fields: COMMISSION_FIELDS,
+      limit: 500,
+      sortDirection: 'DESC',
+    })
+    return rows.map((c) => unwrapJsonFields(c, COMMISSION_JSON_FIELDS))
+  } catch (err) {
+    forgetCommissionModels(err)
+    return []
+  }
+}
+
+/** Everything one invoice earned — the Commission card on the invoice detail. */
+export async function listCommissionsByInvoice(invoiceId: string): Promise<CommissionRecord[]> {
+  if (!commissionModelsAvailable || !invoiceId) return []
+  try {
+    const rows = await listTrackingIndex<CommissionRecord>({
+      name: 'listCommissionByInvoiceId',
+      decls: '$invoiceId: String!',
+      args: 'invoiceId: $invoiceId',
+      variables: { invoiceId },
+      fields: COMMISSION_FIELDS,
+      limit: 500,
+    })
+    return rows.map((c) => unwrapJsonFields(c, COMMISSION_JSON_FIELDS))
+  } catch (err) {
+    forgetCommissionModels(err)
+    return []
+  }
+}
+
+/** One 'YYYY-MM' across every rep, newest trigger first — the To approve and History tabs. */
+export async function listCommissionsByMonth(month: string): Promise<CommissionRecord[]> {
+  if (!commissionModelsAvailable || !month) return []
+  try {
+    const rows = await listTrackingIndex<CommissionRecord>({
+      name: 'listCommissionByCommissionMonthAndTriggerAt',
+      decls: '$month: String!',
+      args: 'commissionMonth: $month',
+      variables: { month },
+      fields: COMMISSION_FIELDS,
+      limit: 500,
+      sortDirection: 'DESC',
+    })
+    return rows.map((c) => unwrapJsonFields(c, COMMISSION_JSON_FIELDS))
+  } catch (err) {
+    forgetCommissionModels(err)
+    return []
+  }
+}
+
+/** Every row a pay period gathered — what the statement and the per-rep totals read. */
+export async function listCommissionsByPayPeriod(payPeriodId: string): Promise<CommissionRecord[]> {
+  if (!commissionModelsAvailable || !payPeriodId) return []
+  try {
+    const rows = await listTrackingIndex<CommissionRecord>({
+      name: 'listCommissionByPayPeriodId',
+      decls: '$payPeriodId: String!',
+      args: 'payPeriodId: $payPeriodId',
+      variables: { payPeriodId },
+      fields: COMMISSION_FIELDS,
+      limit: 1000,
+    })
+    return rows.map((c) => unwrapJsonFields(c, COMMISSION_JSON_FIELDS))
+  } catch (err) {
+    forgetCommissionModels(err)
+    return []
+  }
+}
+
+export async function listPayPeriods(): Promise<CommissionPayPeriodRecord[]> {
+  if (!commissionModelsAvailable) return []
+  try {
+    const rows = await listAll<CommissionPayPeriodRecord>('listCommissionPayPeriods', PAY_PERIOD_FIELDS, 500)
+    return rows.map((p) => unwrapJsonFields(p, PAY_PERIOD_JSON_FIELDS))
+  } catch (err) {
+    forgetCommissionModels(err)
+    return []
+  }
+}
+
+/**
+ * Every delivered sample stamped with one 'YYYY-MM' — a report period is read month by
+ * month off the `sampleMonth` index rather than the whole lane history filtered here.
+ * The six step I columns ride along; they are on the same model, so they drop with it.
+ */
+export async function listLaneSamplesByMonth(ym: string): Promise<LaneRateSampleRecord[]> {
+  if (!quoteModelsAvailable || !ym) return []
+  try {
+    return await listTrackingIndex<LaneRateSampleRecord>({
+      name: 'listLaneRateSampleBySampleMonthAndDate',
+      decls: '$sampleMonth: String!',
+      args: 'sampleMonth: $sampleMonth',
+      variables: { sampleMonth: ym },
+      fields: `${LANE_SAMPLE_FIELDS} sampleMonth customerRepId carrierRepId teamKey invoiceId invoiceMonth`,
+      limit: 1000,
+      sortDirection: 'ASC',
+    })
+  } catch (err) {
+    forgetQuoteModels(err)
+    return []
+  }
+}
+
+// ── Commission writes (tmsFinanceActions) ────────────────────────────────────
+
+/** What one invoice's re-run did, row by row: the counters `RUN_COMMISSIONS` answers with. */
+export interface CommissionRunReport {
+  invoiceId: string
+  puts: number
+  updates: number
+  adjustments: number
+  cancels: number
+  reversals: number
+  untouched: number
+  /** Set instead of the counters when the invoice was passed over, with the reason. */
+  skipped?: string
+}
+
+/** Compute (or recompute) one invoice's rows, or re-run a whole 'YYYY-MM'. */
+export async function runCommissions(input: { invoiceId?: string; month?: string }): Promise<{ reports: CommissionRunReport[] }> {
+  return financeAction<{ reports: CommissionRunReport[] }>('RUN_COMMISSIONS', input)
+}
+
+/**
+ * What the plans would pay on one order today — computed, never written. An order that
+ * is not invoiced yet answers with no `rows` and a `note` saying so.
+ */
+export interface CommissionPreview {
+  rows: CommissionRecord[]
+  /** The rows already written for the order, to compare the preview against. */
+  existing?: CommissionRecord[]
+  enabled?: boolean
+  note?: string
+}
+export async function previewCommissions(input: { orderId: string }): Promise<CommissionPreview> {
+  return financeAction<CommissionPreview>('PREVIEW_COMMISSIONS', input)
+}
+
+/** Manager/admin: pay a different number than the plan said. `amountCents` is the net. */
+export async function overrideCommission(input: { commissionId: string; amountCents: number; note: string }): Promise<{ commission: CommissionRecord }> {
+  return financeAction<{ commission: CommissionRecord }>('OVERRIDE_COMMISSION', input)
+}
+
+export async function approveCommission(input: { commissionId: string }): Promise<{ commission: CommissionRecord }> {
+  return financeAction<{ commission: CommissionRecord }>('APPROVE_COMMISSION', input)
+}
+
+/** The rep's own counter-offer; a manager accepts it with `acceptCommissionCounter`. */
+export async function counterCommission(input: { commissionId: string; amountCents: number; note: string }): Promise<{ commission: CommissionRecord }> {
+  return financeAction<{ commission: CommissionRecord }>('COUNTER_COMMISSION', input)
+}
+
+export async function acceptCommissionCounter(input: { commissionId: string }): Promise<{ commission: CommissionRecord }> {
+  return financeAction<{ commission: CommissionRecord }>('ACCEPT_COMMISSION_COUNTER', input)
+}
+
+export async function cancelCommission(input: { commissionId: string; reason: string }): Promise<{ commission: CommissionRecord }> {
+  return financeAction<{ commission: CommissionRecord }>('CANCEL_COMMISSION', input)
+}
+
+/** Open the next period. `periodStart` omitted: the schedule in settings picks it. */
+export async function openPayPeriod(input: { periodStart?: string }): Promise<{ payPeriod: CommissionPayPeriodRecord }> {
+  return financeAction<{ payPeriod: CommissionPayPeriodRecord }>('OPEN_PAY_PERIOD', input)
+}
+
+/** `claimed` is how many commission rows the period gathered as it closed. */
+export async function submitPayPeriod(input: { payPeriodId: string }): Promise<{ payPeriod: CommissionPayPeriodRecord; claimed: number }> {
+  return financeAction<{ payPeriod: CommissionPayPeriodRecord; claimed: number }>('SUBMIT_PAY_PERIOD', input)
+}
+
+export async function approvePayPeriod(input: { payPeriodId: string }): Promise<{ payPeriod: CommissionPayPeriodRecord }> {
+  return financeAction<{ payPeriod: CommissionPayPeriodRecord }>('APPROVE_PAY_PERIOD', input)
+}
+
+/** `paid` is how many rows were stamped paid with the reference. */
+export async function payPayPeriod(input: { payPeriodId: string; paidAt: string; reference: string }): Promise<{ payPeriod: CommissionPayPeriodRecord; paid: number }> {
+  return financeAction<{ payPeriod: CommissionPayPeriodRecord; paid: number }>('PAY_PAY_PERIOD', input)
+}
+
+/** One rep's statement for the period: the S3 key it was written to and a link to it. */
+export async function renderCommissionStatement(input: { payPeriodId: string; repId: string }): Promise<{ key: string; url: string; payPeriodId: string; repId: string }> {
+  return financeAction<{ key: string; url: string; payPeriodId: string; repId: string }>('RENDER_COMMISSION_STATEMENT', input)
+}
+
+/** ADMIN only, like the AR and AP settings beside it. */
+export async function saveCommissionSettings(patch: CommissionSettings): Promise<{ settings: TmsSettings }> {
+  return financeAction<{ settings: TmsSettings }>('SAVE_COMMISSION_SETTINGS', patch)
+}
+
+/** The shipment half of the settings row — numbering, the cancel gate, the AR/AP stages. */
+export async function saveShipmentSettings(patch: ShipmentSettings): Promise<{ settings: TmsSettings }> {
+  return shipmentAction<{ settings: TmsSettings }>('SAVE_SHIPMENT_SETTINGS', patch)
 }

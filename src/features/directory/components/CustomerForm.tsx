@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { RepPicker, TeamPicker } from '@/components/RepPicker'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -6,7 +7,8 @@ import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { DocumentTypesField } from '@/features/documents/DocumentTypesField'
 import { MoneyField } from './MoneyField'
-import type { Division, CustomerStatus } from '@/types/tms'
+import { getTmsSettings } from '@/lib/apiClient'
+import type { Division, CustomerStatus, Team } from '@/types/tms'
 import type { CustomerFormValue } from './useCustomerForm'
 import { APPT_WORKFLOW_OPTIONS, INVOICE_FREQUENCY_OPTIONS } from './useCustomerForm'
 import { cn } from '@/lib/utils'
@@ -27,6 +29,18 @@ export function CustomerForm({
   divisions: Division[]
 }) {
   const [tab, setTab] = useState('Overview')
+  const [teams, setTeams] = useState<Team[]>([])
+  const accountOwnerIds = value.accountOwnerIdsText.split(/\r?\n/).map((s) => s.trim()).filter(Boolean)
+
+  // The dialog that hosts this form has no settings of its own, and threading one read
+  // down through the directory page would buy nothing: the teams list is tiny and cached.
+  useEffect(() => {
+    let alive = true
+    getTmsSettings()
+      .then((s) => { if (alive) setTeams(s?.teams ?? []) })
+      .catch(() => {})
+    return () => { alive = false }
+  }, [])
 
   return (
     <div className="space-y-4">
@@ -225,17 +239,36 @@ export function CustomerForm({
             </div>
             <div>
               <Label className="text-xs uppercase tracking-wider text-muted-foreground">Team key</Label>
-              <Input value={value.teamKey} onChange={(e) => set('teamKey', e.target.value)} className="h-9 text-sm" />
+              <TeamPicker
+                value={value.teamKey}
+                onChange={(v) => set('teamKey', v)}
+                teams={teams}
+                allowEmpty
+                className="h-9 text-sm"
+              />
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label className="text-xs uppercase tracking-wider text-muted-foreground">Operated by</Label>
-              <Input value={value.operatedById} onChange={(e) => set('operatedById', e.target.value)} className="h-9 text-sm" />
+              <RepPicker
+                role="CUSTOMER_REP"
+                allowUnknown
+                value={value.operatedById}
+                onChange={(v) => set('operatedById', v)}
+                placeholder="Pick who operates it…"
+              />
             </div>
             <div>
               <Label className="text-xs uppercase tracking-wider text-muted-foreground">Account owners</Label>
-              <Textarea value={value.accountOwnerIdsText} onChange={(e) => set('accountOwnerIdsText', e.target.value)} className="text-sm" placeholder="One username per line" />
+              <RepPicker
+                multiple
+                role="CUSTOMER_REP"
+                allowUnknown
+                value={accountOwnerIds}
+                onChange={(next) => set('accountOwnerIdsText', next.join('\n'))}
+                placeholder="Add an account owner…"
+              />
             </div>
           </div>
           <div className="space-y-2">

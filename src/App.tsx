@@ -67,7 +67,9 @@ import { HoursPage } from '@/features/hours/HoursPage'
 import { VendorApPage } from '@/features/vendor-ap/VendorApPage'
 import { DispatchPage } from '@/features/dispatch/DispatchPage'
 import { PodsPage } from '@/features/pods/PodsPage'
-import { RequirePage, RequireOwner, LandingRedirect } from '@/components/RequirePage'
+import { RequirePage, RequireAdmin, LandingRedirect } from '@/components/RequirePage'
+import { CommissionsPage } from '@/features/commissions/CommissionsPage'
+import { ReportsPage } from '@/features/reports/ReportsPage'
 import { DriverAuthProvider } from '@/features/driver-app/DriverAuthContext'
 import { useDriverAuth } from '@/features/driver-app/useDriverAuth'
 import { DriverApp, ScanPage, SubmissionsPage, SettlementPage, PaperworkPage, TimeClockPage, AccountPage } from '@/features/driver-app/DriverApp'
@@ -277,7 +279,9 @@ export default function App() {
               <Route path="/intake"   element={<RequirePage page="intake"><IntakePage /></RequirePage>} />
               <Route path="/pods"     element={<RequirePage page="pods"><PodsPage /></RequirePage>} />
               <Route path="/tasks"   element={<RequirePage page="tasks"><TasksPage /></RequirePage>} />
-              <Route path="/users" element={<RequireOwner><UsersPage /></RequireOwner>} />
+              {/* Step I: an admin manages people; the owner alone grants ADMIN or deletes,
+                  which `userManagement` enforces regardless of what this guard admits. */}
+              <Route path="/users" element={<RequireAdmin><UsersPage /></RequireAdmin>} />
               <Route path="/vehicle-quote" element={<RequirePage page="vehicleQuote"><VehicleQuotePage /></RequirePage>} />
               <Route path="/vehicle-confirmation" element={<RequirePage page="vehicleConfirmation"><VehicleConfirmationPage /></RequirePage>} />
               {/* Retired — compliance lives in the driver and truck files now, and the
@@ -298,6 +302,9 @@ export default function App() {
               <Route path="/quotes/new" element={<RequirePage page="quotes"><QuoteDetail /></RequirePage>} />
               <Route path="/quotes/:id" element={<RequirePage page="quotes"><QuoteDetail /></RequirePage>} />
               <Route path="/rates" element={<RequirePage page="quotes"><LaneRatesPage /></RequirePage>} />
+              {/* Step I — what a rep is owed, and the reports over delivered freight. */}
+              <Route path="/commissions" element={<RequirePage page="commissions"><CommissionsPage /></RequirePage>} />
+              <Route path="/reports" element={<RequirePage page="reports"><ReportsPage /></RequirePage>} />
               {/* legacy redirects */}
               <Route path="/expenses" element={<Navigate to="/fuel" replace />} />
               <Route path="/grid" element={<Navigate to="/loads" replace />} />

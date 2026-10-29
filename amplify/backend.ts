@@ -300,6 +300,10 @@ backend.userManagement.resources.lambda.addToRolePolicy(
       'cognito-idp:AdminRemoveUserFromGroup',
       'cognito-idp:AdminResetUserPassword',
       'cognito-idp:CreateGroup',
+      // Step I: a role change signs the user out of their old groups only on the
+      // next token refresh, so an admin can force it; a re-invite resends the
+      // temporary password Cognito already minted.
+      'cognito-idp:AdminUserGlobalSignOut',
     ],
     resources: [backend.auth.resources.userPool.userPoolArn],
   })
@@ -308,6 +312,31 @@ backend.userManagement.resources.lambda.addToRolePolicy(
 ;(backend.userManagement.resources.lambda as LambdaFunction).addEnvironment(
   'USER_POOL_ID',
   backend.auth.resources.userPool.userPoolId
+)
+
+// Step I: the staff directory. The role lives here and is projected onto the
+// Cognito groups above; every change is stamped into the shared audit log.
+const userProfileTable = backend.data.resources.tables['UserProfile']
+const userMgmtAuditTable = backend.data.resources.tables['AuditLog']
+;(backend.userManagement.resources.lambda as LambdaFunction).addToRolePolicy(
+  new PolicyStatement({
+    actions: [
+      'dynamodb:GetItem',
+      'dynamodb:PutItem',
+      'dynamodb:UpdateItem',
+      'dynamodb:DeleteItem',
+      'dynamodb:Scan',
+    ],
+    resources: [userProfileTable.tableArn, userMgmtAuditTable.tableArn],
+  })
+)
+;(backend.userManagement.resources.lambda as LambdaFunction).addEnvironment(
+  'USER_PROFILE_TABLE_NAME',
+  userProfileTable.tableName
+)
+;(backend.userManagement.resources.lambda as LambdaFunction).addEnvironment(
+  'AUDIT_LOG_TABLE_NAME',
+  userMgmtAuditTable.tableName
 )
 
 // ── driverSignupGate Lambda (driver pool PreSignUp trigger) ────────────────
@@ -1703,6 +1732,9 @@ const directoryTableArns = [
   directorySettingsTable.tableArn,
   directoryMergeJobTable.tableArn,
   directoryLoadTable.tableArn,
+  // Step I: saving teams mirrors the membership onto each UserProfile.teamKeys,
+  // so the one save keeps the settings row and the staff rows in step.
+  backend.data.resources.tables['UserProfile'].tableArn,
 ]
 
 directoryActionsFn.addToRolePolicy(
@@ -1719,6 +1751,10 @@ directoryActionsFn.addEnvironment('DIVISION_TABLE_NAME',           directoryDivi
 directoryActionsFn.addEnvironment('SETTINGS_TABLE_NAME',           directorySettingsTable.tableName)
 directoryActionsFn.addEnvironment('MERGE_JOB_TABLE_NAME',          directoryMergeJobTable.tableName)
 directoryActionsFn.addEnvironment('LOAD_TABLE_NAME',               directoryLoadTable.tableName)
+directoryActionsFn.addEnvironment(
+  'USER_PROFILE_TABLE_NAME',
+  backend.data.resources.tables['UserProfile'].tableName,
+)
 directoryActionsFn.addEnvironment('USER_POOL_ID',                  backend.auth.resources.userPool.userPoolId)
 directoryActionsFn.addToRolePolicy(
   new PolicyStatement({
@@ -2103,6 +2139,11 @@ const apPaymentTable        = backend.data.resources.tables['ApPayment']
 const financeCarrierTable   = backend.data.resources.tables['Carrier']
 const financeCarrierPayTbl  = backend.data.resources.tables['CarrierPaymentMethod']
 const financeCarrierCntTbl  = backend.data.resources.tables['CarrierContact']
+// Step I: the commission ledger, its pay periods and the staff directory the
+// commission roles resolve people from.
+const commissionTable       = backend.data.resources.tables['Commission']
+const commissionPeriodTable = backend.data.resources.tables['CommissionPayPeriod']
+const financeUserProfileTbl = backend.data.resources.tables['UserProfile']
 
 financeActionsFn.addToRolePolicy(
   new PolicyStatement({
@@ -2135,6 +2176,9 @@ financeActionsFn.addToRolePolicy(
       financeCustomerTable.tableArn,
       financeDivisionTable.tableArn,
       shipmentDocumentTable.tableArn,
+      commissionTable.tableArn,
+      commissionPeriodTable.tableArn,
+      financeUserProfileTbl.tableArn,
     ],
   })
 )
@@ -2156,6 +2200,7 @@ financeActionsFn.addToRolePolicy(
       `${apPaymentTable.tableArn}/index/*`,
       `${financeCarrierPayTbl.tableArn}/index/*`,
       `${financeCarrierCntTbl.tableArn}/index/*`,
+      `${commissionTable.tableArn}/index/*`,
     ],
   })
 )
@@ -2179,6 +2224,9 @@ financeActionsFn.addEnvironment('CARRIER_PAYMENT_METHOD_TABLE_NAME', financeCarr
 financeActionsFn.addEnvironment('CARRIER_CONTACT_TABLE_NAME',    financeCarrierCntTbl.tableName)
 financeActionsFn.addEnvironment('SHIPMENT_DOCUMENT_TABLE_NAME',  shipmentDocumentTable.tableName)
 financeActionsFn.addEnvironment('SHIPMENT_NOTICE_TABLE_NAME',    shipmentNoticeTable.tableName)
+financeActionsFn.addEnvironment('COMMISSION_TABLE_NAME',          commissionTable.tableName)
+financeActionsFn.addEnvironment('COMMISSION_PAY_PERIOD_TABLE_NAME', commissionPeriodTable.tableName)
+financeActionsFn.addEnvironment('USER_PROFILE_TABLE_NAME',        financeUserProfileTbl.tableName)
 financeActionsFn.addEnvironment('BUCKET_NAME',                   backend.storage.resources.bucket.bucketName)
 financeActionsFn.addEnvironment('USER_POOL_ID',                  backend.auth.resources.userPool.userPoolId)
 financeActionsFn.addEnvironment('PORTAL_ORIGIN',                 PORTAL_PROD_ORIGIN)
@@ -2200,6 +2248,8 @@ backend.storage.resources.bucket.grantReadWrite(financeActionsFn, 'remittances/*
 backend.storage.resources.bucket.grantRead(financeActionsFn, 'shipment-docs/*')
 backend.storage.resources.bucket.grantRead(financeActionsFn, 'driver-docs/*')
 backend.storage.resources.bucket.grantRead(financeActionsFn, 'rate-confirms/*')
+// …and the commission statements a pay period renders per rep.
+backend.storage.resources.bucket.grantReadWrite(financeActionsFn, 'commissions/*')
 
 // ── brokerLoadAlert Lambda (Load stream → broker task + global Slack ping) ──
 // Fires when a load is assigned to the "Broker Need to Cover" driver: creates an

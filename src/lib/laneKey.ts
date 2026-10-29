@@ -20,6 +20,7 @@
  */
 import type { Stop } from '../types'
 import type {
+  CustomerRecord,
   LaneRateSampleRecord,
   LoadCarrierRecord,
   LoadFinancialsRecord,
@@ -137,6 +138,8 @@ export interface LaneSampleInput {
   /** The ACTIVE assignment, if there is one. */
   loadCarrier?: Partial<LoadCarrierRecord> | null
   shipment?: Partial<ShipmentRecord> | null
+  /** The billed account, for the team the revenue belongs to. */
+  customer?: Partial<CustomerRecord> | null
 }
 
 function cents(value: number | null | undefined): number | null {
@@ -166,7 +169,7 @@ export function laneSampleFor(
   input: LaneSampleInput,
   nowIso: string,
 ): Omit<LaneRateSampleRecord, 'version'> | null {
-  const { load, financials, order, loadCarrier, shipment } = input
+  const { load, financials, order, loadCarrier, shipment, customer } = input
   if (!financials) return null
 
   const stops = load.stops ?? null
@@ -182,6 +185,7 @@ export function laneSampleFor(
   const date = dayOf(ends?.delivery.appt) ?? dayOf(load.deliveredAt) ?? dayOf(nowIso) ?? nowIso.slice(0, 10)
   const miles = typeof load.miles === 'number' && Number.isFinite(load.miles) ? Math.round(load.miles) : null
   const kind = loadCarrier?.kind
+  const invoicedOn = dayOf(order?.invoicedAt)
 
   return {
     id: `lrs:${load.id}`,
@@ -212,5 +216,13 @@ export function laneSampleFor(
     excluded: shipment?.status === 'CANCELED' || loadCarrier?.status === 'TONU',
     source: 'LOAD',
     sampledAt: nowIso,
+    // Step I — the reporting fact table's keys. `sampleMonth` is a GSI hash key, so it
+    // is always written; everything else is dropped by `compact()` when it is null.
+    sampleMonth: date.slice(0, 7),
+    customerRepId: text(order?.customerRepId),
+    carrierRepId: text(loadCarrier?.carrierRepId) ?? text(load.carrierRepId),
+    teamKey: text(customer?.teamKey),
+    invoiceId: text(order?.invoiceId),
+    invoiceMonth: invoicedOn ? invoicedOn.slice(0, 7) : null,
   }
 }

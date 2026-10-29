@@ -50,6 +50,9 @@ const TABLES = {
   carrier: 'Carrier-test',
   carrierMethod: 'CarrierPaymentMethod-test',
   carrierContact: 'CarrierContact-test',
+  commission: 'Commission-test',
+  payPeriod: 'CommissionPayPeriod-test',
+  userProfile: 'UserProfile-test',
 }
 
 const store = vi.hoisted(() => {
@@ -73,6 +76,9 @@ const store = vi.hoisted(() => {
   process.env.CARRIER_TABLE_NAME = 'Carrier-test'
   process.env.CARRIER_PAYMENT_METHOD_TABLE_NAME = 'CarrierPaymentMethod-test'
   process.env.CARRIER_CONTACT_TABLE_NAME = 'CarrierContact-test'
+  process.env.COMMISSION_TABLE_NAME = 'Commission-test'
+  process.env.COMMISSION_PAY_PERIOD_TABLE_NAME = 'CommissionPayPeriod-test'
+  process.env.USER_PROFILE_TABLE_NAME = 'UserProfile-test'
   process.env.BUCKET_NAME = 'bcat-test-bucket'
   process.env.FROM_ADDRESS = 'ai4bcat@gmail.com'
   return new Map<string, Map<string, Record<string, unknown>>>()
@@ -1726,5 +1732,332 @@ describe('AP authorization', () => {
     const bill = await recordBill({ approve: true }, AP_USER)
     expect(bill.status).toBe('TO_BE_PAID')
     expect(bill.approvedBy).toBe('ap@bcatcorp.com')
+  })
+})
+
+// ── commissions (Step I) ────────────────────────────────────────────────────
+
+const COMMISSION_REP = {
+  sub: 'sub-rep',
+  username: 'rep',
+  claims: { email: 'owner1@bcatcorp.com', 'cognito:groups': ['page-commissions'] },
+}
+const COMMISSION_MANAGER = {
+  sub: 'sub-mgr',
+  username: 'mgr',
+  claims: { email: 'boss@bcatcorp.com', 'cognito:groups': ['page-commissions', 'role-MANAGER'] },
+}
+
+/** A house plan paying the primary account owner 10 % of the gross profit. */
+const HOUSE_PLAN = {
+  id: 'plan-house',
+  name: 'House plan',
+  active: true,
+  roles: [{ roleName: 'PRIMARY_ACCOUNT_OWNER', rateType: 'PERCENT_PROFIT', rateBps: 1000 }],
+}
+
+function seedCommissions(over: { settings?: Row; customer?: Row } = {}): void {
+  seed({
+    settings: { commissionsEnabled: true, commissionPlans: [HOUSE_PLAN], ...over.settings },
+    customer: { accountOwnerIds: ['owner1@bcatcorp.com'], teamKey: 'EAST', ...over.customer },
+  })
+  table(TABLES.userProfile).set('owner1@bcatcorp.com', {
+    id: 'owner1@bcatcorp.com',
+    email: 'owner1@bcatcorp.com',
+    name: 'Owner One',
+    role: 'CUSTOMER_REP',
+    managerId: 'boss@bcatcorp.com',
+    version: 1,
+  })
+}
+
+function commissionRows(): Row[] {
+  return [...table(TABLES.commission).values()]
+}
+
+describe('commissions', () => {
+  it('writes one row per role when the invoice freezes the money, and nothing the second time', async () => {
+    seedCommissions()
+    const { invoiceId } = await generate()
+
+    const rows = commissionRows()
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({
+      repId: 'owner1@bcatcorp.com',
+      roleName: 'PRIMARY_ACCOUNT_OWNER',
+      revenueCents: 250_000,
+      costCents: 180_000,
+      profitCents: 70_000,
+      amountCents: 7_000,
+      netCents: 7_000,
+      status: 'UN_APPROVED',
+      invoiceId,
+    })
+
+    const report = (await call('RUN_COMMISSIONS', { invoiceId })) as { reports: Row[] }
+    expect(report.reports[0]).toMatchObject({ puts: 0, updates: 0, adjustments: 0, untouched: 1 })
+    expect(commissionRows()).toHaveLength(1)
+  })
+
+  it('writes nothing at all while commissions are switched off', async () => {
+    seed({ customer: { accountOwnerIds: ['owner1@bcatcorp.com'] } })
+    await generate()
+    expect(commissionRows()).toHaveLength(0)
+    await expect(call('RUN_COMMISSIONS', { invoiceId: 'inv-x' })).rejects.toThrow(/turned off/)
+  })
+
+  it('refuses the commission desk to a user who only holds page-invoicing', async () => {
+    seedCommissions()
+    await expect(call('RUN_COMMISSIONS', { month: '2026-10' }, BILLER)).rejects.toThrow(/page-commissions/)
+  })
+
+  it('refuses to compute before the invoice is paid when that is the trigger', async () => {
+    seedCommissions({ settings: { commissionTrigger: 'INVOICE_PAID' } })
+    await generate()
+    expect(commissionRows()).toHaveLength(0)
+  })
+
+  it('pays on the invoice the plan was waiting for once the customer settles it', async () => {
+    seedCommissions({ settings: { commissionTrigger: 'INVOICE_PAID' } })
+    const { invoiceId } = await generate()
+    await call('RECORD_PAYMENT', {
+      customerId: CUSTOMER_ID,
+      receivedAt: '2026-10-25',
+      method: 'ACH',
+      amountCents: 250_000,
+      applications: [{ invoiceId, amountCents: 250_000 }],
+    })
+    expect(commissionRows()).toHaveLength(1)
+    expect(commissionRows()[0]).toMatchObject({ trigger: 'INVOICE_PAID', amountCents: 7_000 })
+  })
+
+  it('lowers the basis when revenue is written off, rewriting the unapproved row in place', async () => {
+    seedCommissions()
+    const { invoiceId } = await generate()
+    await call('WRITE_OFF', { invoiceId, amountCents: 50_000, reason: 'short pay', clientRequestId: 'wo-1' })
+
+    const rows = commissionRows()
+    expect(rows).toHaveLength(1)
+    // Revenue $2,500 − $500 written off = $2,000; profit $200; 10 % = $20.00.
+    expect(rows[0]).toMatchObject({ revenueCents: 200_000, profitCents: 20_000, amountCents: 2_000, source: 'WRITE_OFF' })
+  })
+
+  it('never rewrites an approved row: the difference arrives as its own adjustment', async () => {
+    seedCommissions()
+    const { invoiceId } = await generate()
+    const id = String(commissionRows()[0].id)
+
+    await call('APPROVE_COMMISSION', { commissionId: id }, COMMISSION_MANAGER)
+    expect((table(TABLES.commission).get(id) as Row).status).toBe('MANAGER_APPROVED')
+
+    await call('WRITE_OFF', { invoiceId, amountCents: 50_000, reason: 'short pay', clientRequestId: 'wo-2' })
+
+    const rows = commissionRows()
+    expect(rows).toHaveLength(2)
+    const earned = rows.find((r) => r.kind === 'EARNED') as Row
+    const adjustment = rows.find((r) => r.kind === 'ADJUSTMENT') as Row
+    expect(earned.amountCents).toBe(7_000)
+    expect(earned.status).toBe('MANAGER_APPROVED')
+    expect(adjustment).toMatchObject({ amountCents: -5_000, adjustsId: id, status: 'UN_APPROVED' })
+  })
+
+  it('cancels an unapproved commission and reverses an approved one when the invoice is voided', async () => {
+    seedCommissions()
+    const { invoiceId } = await generate()
+    const openId = String(commissionRows()[0].id)
+    await call('VOID_INVOICE', { invoiceId, reason: 'rebill' })
+    expect((table(TABLES.commission).get(openId) as Row)).toMatchObject({
+      status: 'CANCELLED',
+      cancelReason: 'INVOICE_VOIDED',
+      netCents: 0,
+    })
+
+    // Again, this time with the row approved before the void.
+    store.clear()
+    seedCommissions()
+    const second = await generate()
+    const approvedId = String(commissionRows()[0].id)
+    await call('APPROVE_COMMISSION', { commissionId: approvedId }, ADMIN)
+    await call('VOID_INVOICE', { invoiceId: second.invoiceId, reason: 'rebill' })
+
+    const after = commissionRows()
+    expect((table(TABLES.commission).get(approvedId) as Row).status).toBe('FULLY_APPROVED')
+    const reversal = after.find((r) => r.kind === 'REVERSAL') as Row
+    expect(reversal).toMatchObject({ amountCents: -7_000, adjustsId: approvedId })
+  })
+
+  it('lets a rep counter only their own row, and the manager answer it', async () => {
+    seedCommissions()
+    await generate()
+    const id = String(commissionRows()[0].id)
+
+    await expect(
+      call('APPROVE_COMMISSION', { commissionId: id }, COMMISSION_REP),
+    ).rejects.toThrow(/cannot be approved by you/)
+
+    await call('COUNTER_COMMISSION', { commissionId: id, amountCents: 9_000, note: 'I booked it' }, COMMISSION_REP)
+    expect((table(TABLES.commission).get(id) as Row).status).toBe('REP_COUNTERED')
+
+    await call('ACCEPT_COMMISSION_COUNTER', { commissionId: id }, COMMISSION_MANAGER)
+    const row = table(TABLES.commission).get(id) as Row
+    expect(row).toMatchObject({ status: 'FULLY_APPROVED', netCents: 9_000, amountCents: 7_000 })
+  })
+
+  it('keeps the computed number beside an override and demands a reason', async () => {
+    seedCommissions()
+    await generate()
+    const id = String(commissionRows()[0].id)
+    await expect(
+      call('OVERRIDE_COMMISSION', { commissionId: id, amountCents: 12_500 }, COMMISSION_MANAGER),
+    ).rejects.toThrow(/note/)
+
+    await call('OVERRIDE_COMMISSION', { commissionId: id, amountCents: 12_500, note: 'agreed with Ryne' }, COMMISSION_MANAGER)
+    expect(table(TABLES.commission).get(id)).toMatchObject({
+      amountCents: 7_000,
+      overrideCents: 12_500,
+      netCents: 12_500,
+    })
+  })
+
+  it('keeps a manager off the ladder entirely when approval is admin-only', async () => {
+    seedCommissions({ settings: { commissionApprovalAdminOnly: true } })
+    await generate()
+    const id = String(commissionRows()[0].id)
+    await expect(call('APPROVE_COMMISSION', { commissionId: id }, COMMISSION_MANAGER)).rejects.toThrow(/cannot be approved/)
+    await call('APPROVE_COMMISSION', { commissionId: id }, ADMIN)
+    expect((table(TABLES.commission).get(id) as Row).status).toBe('FULLY_APPROVED')
+  })
+
+  it('pays an own-fleet order nothing under a profit plan and says why', async () => {
+    seedCommissions()
+    table(TABLES.loadCarrier).set('lc-own', {
+      id: 'lc-own',
+      loadId: LOAD_ID,
+      shipmentId: SHIPMENT_ID,
+      kind: 'OWN_ASSET',
+      status: 'ACTIVE',
+    })
+    table(TABLES.financials).set(LOAD_ID, {
+      ...(table(TABLES.financials).get(LOAD_ID) as Row),
+      costCents: 0,
+    })
+    await generate()
+    expect(commissionRows()[0]).toMatchObject({
+      amountCents: 0,
+      basisNote: 'OWN_FLEET_NO_COST',
+      needsReview: true,
+    })
+  })
+
+  it('carries a period from open to paid and stamps every row exactly once', async () => {
+    seedCommissions({ settings: { commissionPaySchedule: { frequency: 'MONTHLY', daysUntilPay: 5 } } })
+    await generate()
+    const id = String(commissionRows()[0].id)
+    await call('APPROVE_COMMISSION', { commissionId: id }, ADMIN)
+
+    const opened = (await call('OPEN_PAY_PERIOD', { periodStart: '2026-10-20' })) as { payPeriod: Row }
+    const payPeriodId = String(opened.payPeriod.id)
+    expect(opened.payPeriod).toMatchObject({ periodStart: '2026-10-01', periodEnd: '2026-10-31', status: 'OPEN' })
+
+    const submitted = (await call('SUBMIT_PAY_PERIOD', { payPeriodId })) as { payPeriod: Row; claimed: number }
+    expect(submitted.claimed).toBe(1)
+    expect(submitted.payPeriod).toMatchObject({ status: 'PENDING_APPROVAL', totalCents: 7_000, commissionCount: 1 })
+    expect((table(TABLES.commission).get(id) as Row).payPeriodId).toBe(payPeriodId)
+
+    await expect(call('PAY_PAY_PERIOD', { payPeriodId, reference: 'PR-1' })).rejects.toThrow(/only an approved period/)
+    await call('APPROVE_PAY_PERIOD', { payPeriodId })
+    const paid = (await call('PAY_PAY_PERIOD', { payPeriodId, paidAt: '2026-11-05', reference: 'PR-1' })) as { paid: number }
+    expect(paid.paid).toBe(1)
+    expect(table(TABLES.commission).get(id)).toMatchObject({ status: 'PAID', paymentRef: 'PR-1' })
+
+    // A paid period is closed: nobody can be paid out of it a second time.
+    await expect(call('PAY_PAY_PERIOD', { payPeriodId, reference: 'PR-2' })).rejects.toThrow(/only an approved period/)
+    await expect(call('SUBMIT_PAY_PERIOD', { payPeriodId })).rejects.toThrow(/PAID, not open/)
+    expect(table(TABLES.commission).get(id)).toMatchObject({ status: 'PAID', paymentRef: 'PR-1' })
+  })
+
+  it('refuses to pay a period without the payroll reference it was paid under', async () => {
+    seedCommissions()
+    const opened = (await call('OPEN_PAY_PERIOD', {})) as { payPeriod: Row }
+    await expect(
+      call('PAY_PAY_PERIOD', { payPeriodId: String(opened.payPeriod.id) }),
+    ).rejects.toThrow(/reference/)
+  })
+
+  it('refuses a commission plan the engine could not act on', async () => {
+    await expect(
+      call('SAVE_COMMISSION_SETTINGS', {
+        commissionPlans: [{ id: 'p', name: 'P', roles: [{ roleName: 'NOBODY', rateType: 'PERCENT_PROFIT', rateBps: 100 }] }],
+      }),
+    ).rejects.toThrow(/not a commission role/)
+    await expect(
+      call('SAVE_COMMISSION_SETTINGS', { commissionsEnabled: true }, COMMISSION_MANAGER),
+    ).rejects.toThrow(/owner or ADMIN/)
+  })
+
+  it('previews what an order would pay without writing anything', async () => {
+    seedCommissions()
+    await generate()
+    store.get(TABLES.commission)?.clear()
+    const preview = (await call('PREVIEW_COMMISSIONS', { orderId: ORDER_ID })) as { rows: Row[] }
+    expect(preview.rows).toHaveLength(1)
+    expect(preview.rows[0]).toMatchObject({ amountCents: 7_000 })
+    expect(commissionRows()).toHaveLength(0)
+  })
+})
+
+describe('commissions — the ladder closes and the period nets (review fixes)', () => {
+  it('a manager approves, an admin closes, and the period claims it', async () => {
+    seedCommissions()
+    await generate()
+    const id = String(commissionRows()[0].id)
+
+    await call('APPROVE_COMMISSION', { commissionId: id }, COMMISSION_MANAGER)
+    expect((table(TABLES.commission).get(id) as Row).status).toBe('MANAGER_APPROVED')
+
+    await call('APPROVE_COMMISSION', { commissionId: id }, ADMIN)
+    expect((table(TABLES.commission).get(id) as Row).status).toBe('FULLY_APPROVED')
+
+    const opened = (await call('OPEN_PAY_PERIOD', { periodStart: '2026-10-20' })) as { payPeriod: Row }
+    const submitted = (await call('SUBMIT_PAY_PERIOD', { payPeriodId: String(opened.payPeriod.id) })) as { claimed: number }
+    expect(submitted.claimed).toBe(1)
+  })
+
+  it('refuses a manager who tries to approve their own commission', async () => {
+    seedCommissions({ customer: { accountOwnerIds: ['boss@bcatcorp.com'] } })
+    table(TABLES.userProfile).set('boss@bcatcorp.com', {
+      id: 'boss@bcatcorp.com', email: 'boss@bcatcorp.com', role: 'MANAGER', version: 1,
+    })
+    await generate()
+    const id = String(commissionRows()[0].id)
+    await expect(call('APPROVE_COMMISSION', { commissionId: id }, COMMISSION_MANAGER)).rejects.toThrow(/cannot be approved by you/)
+    // They may still argue their own number.
+    await call('COUNTER_COMMISSION', { commissionId: id, amountCents: 9_000, note: 'mine' }, COMMISSION_MANAGER)
+    expect((table(TABLES.commission).get(id) as Row).status).toBe('REP_COUNTERED')
+  })
+
+  it('nets a late adjustment into the period that is open now, not the one it was earned in', async () => {
+    seedCommissions()
+    const { invoiceId } = await generate()
+    const id = String(commissionRows()[0].id)
+    await call('APPROVE_COMMISSION', { commissionId: id }, COMMISSION_MANAGER)
+    await call('APPROVE_COMMISSION', { commissionId: id }, ADMIN)
+    await call('WRITE_OFF', { invoiceId, amountCents: 50_000, reason: 'short pay', clientRequestId: 'wo-late' })
+
+    const adjustment = commissionRows().find((r) => r.kind === 'ADJUSTMENT') as Row
+    expect(adjustment.amountCents).toBe(-5_000)
+    const adjustmentId = String(adjustment.id)
+    await call('APPROVE_COMMISSION', { commissionId: adjustmentId }, COMMISSION_MANAGER)
+    await call('APPROVE_COMMISSION', { commissionId: adjustmentId }, ADMIN)
+
+    // A period opened later still sweeps the earlier adjustment in, so the
+    // overpayment is taken back instead of sitting approved forever.
+    const opened = (await call('OPEN_PAY_PERIOD', { periodStart: '2026-12-05' })) as { payPeriod: Row }
+    const submitted = (await call('SUBMIT_PAY_PERIOD', { payPeriodId: String(opened.payPeriod.id) })) as {
+      claimed: number
+      payPeriod: Row
+    }
+    expect(submitted.claimed).toBe(2)
+    expect(submitted.payPeriod.totalCents).toBe(7_000 - 5_000)
   })
 })

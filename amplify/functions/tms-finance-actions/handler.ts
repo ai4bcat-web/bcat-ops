@@ -43,6 +43,21 @@ import {
   sendRemittance,
 } from './apPayments'
 import {
+  acceptCommissionCounter,
+  approveCommission,
+  approvePayPeriod,
+  cancelCommission,
+  counterCommission,
+  openPayPeriod,
+  overrideCommission,
+  payPayPeriod,
+  previewCommissions,
+  renderCommissionStatement,
+  runCommissions,
+  saveCommissionSettings,
+  submitPayPeriod,
+} from './commissions'
+import {
   ADMIN_GROUP,
   CARRIER_PAY_PAGE_GROUP,
   INVOICING_PAGE_GROUP,
@@ -82,6 +97,19 @@ type Action =
   | 'RENDER_REMITTANCE_PDF'
   | 'MARK_REMITTANCE_SENT'
   | 'SAVE_AP_SETTINGS'
+  | 'RUN_COMMISSIONS'
+  | 'PREVIEW_COMMISSIONS'
+  | 'APPROVE_COMMISSION'
+  | 'COUNTER_COMMISSION'
+  | 'ACCEPT_COMMISSION_COUNTER'
+  | 'OVERRIDE_COMMISSION'
+  | 'CANCEL_COMMISSION'
+  | 'OPEN_PAY_PERIOD'
+  | 'SUBMIT_PAY_PERIOD'
+  | 'APPROVE_PAY_PERIOD'
+  | 'PAY_PAY_PERIOD'
+  | 'RENDER_COMMISSION_STATEMENT'
+  | 'SAVE_COMMISSION_SETTINGS'
 
 /** The actions that move money and are owner/ADMIN while `arPostingAdminOnly` holds. */
 const POSTING_ACTIONS: Record<string, true> = {
@@ -132,7 +160,34 @@ const AP_POSTING_ACTIONS: Record<string, true> = {
 const ADMIN_ONLY_ACTIONS: Record<string, true> = {
   SAVE_AR_SETTINGS: true,
   SAVE_AP_SETTINGS: true,
+  SAVE_COMMISSION_SETTINGS: true,
 }
+
+/**
+ * Commissions are their own desk (Step I).
+ *
+ * `page-commissions` opens the ledger and a rep's own negotiation; the approval
+ * ladder inside it is decided per row by `commissionState`, not by this table,
+ * because "may I approve this" depends on whose row it is. A manager is admitted
+ * here by `role-MANAGER` as well, since the role's page set grants the key.
+ */
+const COMMISSION_ACTIONS: Record<string, true> = {
+  RUN_COMMISSIONS: true,
+  PREVIEW_COMMISSIONS: true,
+  APPROVE_COMMISSION: true,
+  COUNTER_COMMISSION: true,
+  ACCEPT_COMMISSION_COUNTER: true,
+  OVERRIDE_COMMISSION: true,
+  CANCEL_COMMISSION: true,
+  OPEN_PAY_PERIOD: true,
+  SUBMIT_PAY_PERIOD: true,
+  APPROVE_PAY_PERIOD: true,
+  PAY_PAY_PERIOD: true,
+  RENDER_COMMISSION_STATEMENT: true,
+  SAVE_COMMISSION_SETTINGS: true,
+}
+
+const COMMISSIONS_PAGE_GROUP = 'page-commissions'
 
 interface AppSyncEvent {
   arguments: {
@@ -148,6 +203,19 @@ async function authorize(action: Action, identity?: AppSyncIdentity | null): Pro
   if (!email) throw new Error('Unauthorized: could not resolve caller email')
   const groups = getGroups(identity)
   const isAdmin = email === OWNER_EMAIL || groups.includes(ADMIN_GROUP)
+
+  // The commission desk is its own door, decided before the AR/AP page rule:
+  // a rep who may see their own commission is not thereby an invoicing user,
+  // and an invoicing user is not thereby on the commission ladder.
+  if (COMMISSION_ACTIONS[action]) {
+    if (!isAdmin && !groups.includes(COMMISSIONS_PAGE_GROUP)) {
+      throw new Error(`Forbidden: ${action} requires owner, ADMIN, or ${COMMISSIONS_PAGE_GROUP}`)
+    }
+    if (ADMIN_ONLY_ACTIONS[action] && !isAdmin) {
+      throw new Error(`Forbidden: ${action} requires owner or ADMIN`)
+    }
+    return { email, sub: identity.sub, groups, isAdmin }
+  }
 
   const isAp = AP_ACTIONS[action] === true
   const pageGroup = isAp ? CARRIER_PAY_PAGE_GROUP : INVOICING_PAGE_GROUP
@@ -231,6 +299,32 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return markRemittanceSent(input, caller)
     case 'SAVE_AP_SETTINGS':
       return saveApSettings(input, caller)
+    case 'RUN_COMMISSIONS':
+      return runCommissions(input, caller)
+    case 'PREVIEW_COMMISSIONS':
+      return previewCommissions(input)
+    case 'APPROVE_COMMISSION':
+      return approveCommission(input, caller)
+    case 'COUNTER_COMMISSION':
+      return counterCommission(input, caller)
+    case 'ACCEPT_COMMISSION_COUNTER':
+      return acceptCommissionCounter(input, caller)
+    case 'OVERRIDE_COMMISSION':
+      return overrideCommission(input, caller)
+    case 'CANCEL_COMMISSION':
+      return cancelCommission(input, caller)
+    case 'OPEN_PAY_PERIOD':
+      return openPayPeriod(input, caller)
+    case 'SUBMIT_PAY_PERIOD':
+      return submitPayPeriod(input, caller)
+    case 'APPROVE_PAY_PERIOD':
+      return approvePayPeriod(input, caller)
+    case 'PAY_PAY_PERIOD':
+      return payPayPeriod(input, caller)
+    case 'RENDER_COMMISSION_STATEMENT':
+      return renderCommissionStatement(input, caller)
+    case 'SAVE_COMMISSION_SETTINGS':
+      return saveCommissionSettings(input, caller)
     default:
       throw new Error(`Unknown action: ${String(action)}`)
   }

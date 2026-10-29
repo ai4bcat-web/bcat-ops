@@ -102,6 +102,7 @@ import {
   writeAudit,
   type Row,
 } from './store'
+import { commissionVoidWrites, runCommissionsAfter } from './commissions'
 
 const MAX_NOTE = 2000
 /** The four prefixes an invoice may carry bytes from. Anything else is refused. */
@@ -404,6 +405,11 @@ export async function generateInvoice(input: Row, caller: Caller): Promise<Row> 
     totalCents: invoice.totalCents,
     dueAt: invoice.dueAt,
   })
+
+  // Step I. The money is frozen by the transaction above, which is the first
+  // moment a commission can be computed on a number that will not move again.
+  // Best-effort like the PDF below: a run that fails is fixed by the next one.
+  await runCommissionsAfter(invoice.id, caller, 'RUN')
 
   const stored = await storePdf(invoice, context, caller)
   return { invoice: stored as unknown as Row, gate }
@@ -761,6 +767,11 @@ export async function voidInvoice(input: Row, caller: Caller): Promise<Row> {
       { remove: ['invoiceId'] },
     ))
   }
+
+  // Step I. The commissions ride INSIDE the void's own transaction: an unapproved
+  // row is cancelled, an approved or paid one is reversed, and neither can end up
+  // disagreeing with the invoice because neither commits without the other.
+  writes.push(...(await commissionVoidWrites(invoiceId, caller, now)))
 
   await transact(writes, 'void invoice')
   await writeAudit('Invoice', invoiceId, 'VOID_INVOICE', caller, { reason, orderId: invoice.orderId })

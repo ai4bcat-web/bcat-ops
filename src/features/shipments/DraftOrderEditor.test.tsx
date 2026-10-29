@@ -3,8 +3,17 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { DraftOrderEditor } from './components/DraftOrderEditor'
 import type { CreditSummary } from '@/lib/customerCredit'
-import type { OrderRecord, RequiredReference, ShipmentBundle, ShipmentLoad, ShipmentRecord } from '@/types/tms'
+import type { OrderRecord, RequiredReference, ShipmentBundle, ShipmentLoad, ShipmentRecord, UserProfileRecord } from '@/types/tms'
 import type { Stop } from '@/types'
+
+// The carrier-rep field is a RepPicker, so the editor now reads the staff directory.
+const staff = vi.hoisted(() => [
+  {
+    id: 'dana@bcatcorp.com', email: 'dana@bcatcorp.com', name: 'Dana Carr', role: 'CARRIER_REP',
+    createdBy: 'a@b.c', updatedBy: 'a@b.c', version: 1,
+  },
+] as UserProfileRecord[])
+vi.mock('@/lib/apiClient', () => ({ listUserProfiles: vi.fn(async () => staff) }))
 
 class ResizeObserverStub { observe() {} unobserve() {} disconnect() {} }
 globalThis.ResizeObserver ??= ResizeObserverStub as unknown as typeof ResizeObserver
@@ -132,15 +141,26 @@ describe('DraftOrderEditor', () => {
     await waitFor(() => expect(onSaveForm).toHaveBeenCalledWith(expect.objectContaining({ costCenter: 'CC-12' })))
   })
 
-  it('passes the carrier rep through the assign variant of submit', async () => {
+  it('passes the picked carrier rep through the assign variant of submit', async () => {
     const { onSubmit } = renderEditor()
     fireEvent.click(screen.getByRole('button', { name: 'Submit and assign to a carrier rep' }))
 
-    await waitFor(() => expect(screen.getByLabelText('Carrier rep')).toBeTruthy())
-    fireEvent.change(screen.getByLabelText('Carrier rep'), { target: { value: 'rep@bcatcorp.com' } })
+    fireEvent.click(await screen.findByText('ryne@bcatcorp.com'))
+    fireEvent.click(await screen.findByRole('option', { name: /Dana Carr/ }))
     fireEvent.click(screen.getByRole('button', { name: 'Submit and assign' }))
 
-    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith('rep@bcatcorp.com'))
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith('dana@bcatcorp.com'))
+  })
+
+  it('keeps a rep nobody has a profile for exactly as it was typed', async () => {
+    const { onSubmit } = renderEditor({ currentUser: 'legacy.rep@nowhere.test' })
+    fireEvent.click(screen.getByRole('button', { name: 'Submit and assign to a carrier rep' }))
+
+    expect(await screen.findByText('legacy.rep@nowhere.test')).toBeTruthy()
+    expect(screen.getByText('not a user')).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Submit and assign' }))
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith('legacy.rep@nowhere.test'))
   })
 
   it('warns when the order is larger than the available credit', () => {

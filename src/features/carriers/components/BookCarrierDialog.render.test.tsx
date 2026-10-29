@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { BookCarrierDialog, type BookCarrierFields } from './BookCarrierDialog'
-import type { CarrierRecord, ShipmentBundle, TmsSettings } from '@/types/tms'
+import type { CarrierRecord, ShipmentBundle, TmsSettings, UserProfileRecord } from '@/types/tms'
 
 class ResizeObserverStub { observe() {} unobserve() {} disconnect() {} }
 globalThis.ResizeObserver ??= ResizeObserverStub as unknown as typeof ResizeObserver
@@ -22,7 +22,16 @@ const { getTmsSettings, getCarrierBundle, bookCarrier } = vi.hoisted(() => ({
   getCarrierBundle: vi.fn(),
   bookCarrier: vi.fn(async (_input: BookCarrierFields & { loadId: string; expectedUpdatedAt: string }) => ({})),
 }))
-vi.mock('@/lib/apiClient', () => ({ getTmsSettings, getCarrierBundle, bookCarrier }))
+// The carrier-rep field is a RepPicker, so the dialog reads the staff directory.
+const staff = vi.hoisted(() => [
+  {
+    id: 'dana@bcatcorp.com', email: 'dana@bcatcorp.com', name: 'Dana Carr', role: 'CARRIER_REP',
+    createdBy: 'a@b.c', updatedBy: 'a@b.c', version: 1,
+  },
+] as UserProfileRecord[])
+vi.mock('@/lib/apiClient', () => ({
+  getTmsSettings, getCarrierBundle, bookCarrier, listUserProfiles: vi.fn(async () => staff),
+}))
 
 /** Only W9 and the carrier agreement are required, so the warning set is exactly two. */
 const settings: TmsSettings = {
@@ -133,5 +142,21 @@ describe('BookCarrierDialog', () => {
       carrierRateCents: 150000,
       acknowledgeWarnings: ['MISSING_DOC:W9', 'MISSING_DOC:CARRIER_AGREEMENT'],
     })
+  })
+
+  it('sends the picked carrier rep with the booking', async () => {
+    state.carrier = carrier()
+    renderDialog()
+    await pickCarrierAndRate()
+
+    for (const box of screen.getAllByRole('checkbox')) fireEvent.click(box)
+    fireEvent.click(screen.getByRole('tab', { name: '3. Dispatch' }))
+    fireEvent.click(await screen.findByText('Pick a carrier rep…'))
+    fireEvent.click(await screen.findByRole('option', { name: /Dana Carr/ }))
+
+    await waitFor(() => expect(bookButton().disabled).toBe(false))
+    fireEvent.click(bookButton())
+    await waitFor(() => expect(bookCarrier).toHaveBeenCalledTimes(1))
+    expect(bookCarrier.mock.calls[0][0]).toMatchObject({ carrierRepId: 'dana@bcatcorp.com' })
   })
 })

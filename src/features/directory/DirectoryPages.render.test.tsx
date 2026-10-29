@@ -1,8 +1,10 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
-import type { CustomerRecord, LocationRecord, Division, TmsSettings } from '@/types/tms'
+import type { CustomerRecord, LocationRecord, Division, TmsSettings, UserProfileRecord } from '@/types/tms'
 import { CustomersPage, LocationsPage } from './DirectoryPages'
+import { CustomerForm } from './components/CustomerForm'
+import { useCustomerForm } from './components/useCustomerForm'
 
 class ResizeObserverStub { observe() {} unobserve() {} disconnect() {} }
 globalThis.ResizeObserver ??= ResizeObserverStub as unknown as typeof ResizeObserver
@@ -27,12 +29,22 @@ const authState = { isAdmin: true, user: { email: 'admin@bcatcorp.com' }, isOwne
 const setCustomerStatus = vi.fn(async (current: CustomerRecord) => current)
 const saveCustomer = vi.fn(async (_current: CustomerRecord, patch: Partial<CustomerRecord>) => patch as CustomerRecord)
 
+// The settings tab's rep and team fields are pickers now: one reads the staff
+// directory, the other the teams on the org settings.
+const staff = vi.hoisted(() => [
+  {
+    id: 'dana@bcatcorp.com', email: 'dana@bcatcorp.com', name: 'Dana Carr', role: 'CUSTOMER_REP',
+    createdBy: 'a@b.c', updatedBy: 'a@b.c', version: 1,
+  },
+] as UserProfileRecord[])
+
 const settings: TmsSettings = {
   id: 'default',
   defaultCreditLimitCents: 100000,
   defaultCreditUsageWarningBps: 8000,
   defaultFreeCreditRequired: false,
   defaultMaxDaysLate: 60,
+  teams: [{ key: 'DESK_1', name: 'Desk One', memberIds: [] }],
 }
 
 const customers: CustomerRecord[] = [
@@ -56,8 +68,11 @@ const customers: CustomerRecord[] = [
     id: 'c-legacy-false', name: 'Legacy Archived', status: null, active: false,
     createdAt: '2026-10-01T00:00:00Z', updatedAt: '2026-10-01T00:00:00Z',
   } as CustomerRecord,
+  // Free text typed before there were profiles: the pickers must print it, flag it and
+  // hand it back to the server unchanged.
   {
     id: 'c-legacy-true', name: 'Legacy Active', status: null, active: true,
+    operatedById: 'legacy.rep@nowhere.test', accountOwnerIds: ['legacy.owner@nowhere.test'],
     createdAt: '2026-10-01T00:00:00Z', updatedAt: '2026-10-01T00:00:00Z',
   } as CustomerRecord,
 ]
@@ -94,6 +109,7 @@ vi.mock('@/hooks/useCustomerAr', () => ({
   }),
 }))
 vi.mock('@/lib/apiClient', () => ({
+  listUserProfiles: vi.fn(async () => staff),
   listDivisions: vi.fn(async () => [{ id: 'd1', key: 'BCAT_LOGISTICS', name: 'BCAT Logistics', active: true, createdAt: '', updatedAt: '' } satisfies Division]),
   getTmsSettings: vi.fn(async () => settings),
   saveTmsSettings: vi.fn(async (patch: Partial<TmsSettings>) => ({ ...settings, ...patch }) as TmsSettings),
@@ -192,5 +208,92 @@ describe('DirectoryPages', () => {
     await waitFor(() => expect(screen.getByText('Pending Co')).toBeTruthy())
     fireEvent.click(screen.getByText('Pending Co'))
     await waitFor(() => expect(screen.getByText('Approve')).toBeTruthy())
+  })
+
+  it('keeps a free-text rep and owner exactly as the record holds them', async () => {
+    render(<CustomersPage />)
+    await waitFor(() => expect(screen.getByText('Legacy Active')).toBeTruthy())
+    fireEvent.click(screen.getByText('Legacy Active'))
+    fireEvent.click(await screen.findByText('Settings'))
+
+    expect(await screen.findByText('legacy.rep@nowhere.test')).toBeTruthy()
+    expect(screen.getByText('legacy.owner@nowhere.test')).toBeTruthy()
+    expect(screen.getAllByText('not a user')).toHaveLength(2)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(saveCustomer).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'c-legacy-true' }),
+      expect.objectContaining({
+        operatedById: 'legacy.rep@nowhere.test',
+        accountOwnerIds: ['legacy.owner@nowhere.test'],
+      }),
+    ))
+  })
+
+  it('saves the username of a rep picked from the directory', async () => {
+    render(<CustomersPage />)
+    await waitFor(() => expect(screen.getByText('Legacy Active')).toBeTruthy())
+    fireEvent.click(screen.getByText('Legacy Active'))
+    fireEvent.click(await screen.findByText('Settings'))
+
+    fireEvent.click(await screen.findByText('legacy.rep@nowhere.test'))
+    fireEvent.click(await screen.findByRole('option', { name: /Dana Carr/ }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(saveCustomer).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'c-legacy-true' }),
+      expect.objectContaining({ operatedById: 'dana@bcatcorp.com' }),
+    ))
+  })
+})
+
+/** The add/edit dialog's form, driven the way the dialog drives it. */
+function CustomerFormHarness({ initial, onSave }: { initial: CustomerRecord; onSave: (record: CustomerRecord) => void }) {
+  const { value, set, toRecord, errors } = useCustomerForm(initial)
+  return (
+    <>
+      <CustomerForm value={value} set={set} errors={errors} divisions={[]} />
+      <button type="button" onClick={() => onSave(toRecord())}>Save form</button>
+    </>
+  )
+}
+
+describe('CustomerForm', () => {
+  const legacy = {
+    id: 'c-form', name: 'Form Co', status: 'ACTIVE', active: true, teamKey: 'DESK_1',
+    operatedById: 'legacy.rep@nowhere.test', accountOwnerIds: ['legacy.owner@nowhere.test'],
+    createdAt: '2026-10-01T00:00:00Z', updatedAt: '2026-10-01T00:00:00Z',
+  } as CustomerRecord
+
+  it('hands back the free-text rep and owner it was given', async () => {
+    const onSave = vi.fn()
+    render(<CustomerFormHarness initial={legacy} onSave={onSave} />)
+    fireEvent.click(screen.getByText('Settings'))
+
+    expect(await screen.findByText('legacy.rep@nowhere.test')).toBeTruthy()
+    expect(screen.getAllByText('not a user')).toHaveLength(2)
+    // The key on the record, printed as the team's name off the org settings.
+    expect(screen.getByText('Desk One')).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save form' }))
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
+      operatedById: 'legacy.rep@nowhere.test',
+      accountOwnerIds: ['legacy.owner@nowhere.test'],
+      teamKey: 'DESK_1',
+    }))
+  })
+
+  it('adds a picked account owner to the saved record', async () => {
+    const onSave = vi.fn()
+    render(<CustomerFormHarness initial={legacy} onSave={onSave} />)
+    fireEvent.click(screen.getByText('Settings'))
+
+    fireEvent.click(await screen.findByText('Add an account owner…'))
+    fireEvent.click(await screen.findByRole('option', { name: /Dana Carr/ }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save form' }))
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
+      accountOwnerIds: ['legacy.owner@nowhere.test', 'dana@bcatcorp.com'],
+    }))
   })
 })

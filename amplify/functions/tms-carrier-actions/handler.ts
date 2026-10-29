@@ -821,7 +821,11 @@ async function setCarrierStatus(input: Row, caller: Caller): Promise<Row> {
   if (!existing) throw new Error(`Carrier not found: ${id}`)
   const from = (existing.status as CarrierStatus | undefined) ?? null
 
-  if (!canTransitionCarrierStatus(from, status, caller.isAdmin)) {
+  // Step I. `claim-CARRIER_STATUS_EDIT` stands in for ADMIN on this one decision:
+  // the compliance clerk who may take a carrier back out of DO_NOT_USE is not
+  // necessarily an admin, and nothing else about them changes.
+  const mayEditStatus = caller.isAdmin || caller.groups.includes('claim-CARRIER_STATUS_EDIT')
+  if (!canTransitionCarrierStatus(from, status, mayEditStatus)) {
     throw new Error(`Cannot move a carrier from ${from ?? 'PENDING'} to ${status}`)
   }
 

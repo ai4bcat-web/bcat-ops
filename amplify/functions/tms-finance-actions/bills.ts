@@ -79,6 +79,7 @@ import {
   writeAudit,
   type Row,
 } from './store'
+import { runCommissionsForOrder } from './commissions'
 
 const MAX_NOTE = 2000
 
@@ -421,6 +422,9 @@ export async function recordBill(input: Row, caller: Caller): Promise<Row> {
     billedCents: bill.billedCents,
     approved: bill.status === 'TO_BE_PAID',
   })
+  // Step I. Billing a carrier finalizes that leg's charges, which is the cost
+  // half of every percent-of-profit commission on the order.
+  await runCommissionsForOrder(context.load?.orderId ?? null, caller, 'RERUN')
   return { bill: (await getById(CARRIER_BILL_TABLE_NAME, id)) ?? {}, gate: gate as unknown as Row }
 }
 
@@ -510,6 +514,8 @@ export async function approveBill(input: Row, caller: Caller): Promise<Row> {
     docsOverrideNote,
     netCents: bill.netCents,
   })
+  // Step I. Approving the bill is the last word on this leg's cost.
+  await runCommissionsForOrder(context.load?.orderId ?? null, caller, 'RERUN')
   return { bill: (await getById(CARRIER_BILL_TABLE_NAME, billId)) ?? {} }
 }
 

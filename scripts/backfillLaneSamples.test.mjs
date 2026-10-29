@@ -72,10 +72,10 @@ function baseSource({ unit = 'dollars', comparables = 10 } = {}) {
       { id: 'shp-1', number: 'S10001', customerId: 'cust-1', customerName: 'Acme Foods', mode: 'FTL', status: 'DELIVERED' },
     ],
     Order: [
-      { id: 'ord-1', shipmentId: 'shp-1', customerId: 'cust-1', customerName: 'Acme Foods', mode: 'FTL', rateType: 'SPOT', equipmentType: 'DRY_VAN' },
+      { id: 'ord-1', shipmentId: 'shp-1', customerId: 'cust-1', customerName: 'Acme Foods', mode: 'FTL', rateType: 'SPOT', equipmentType: 'DRY_VAN', customerRepId: 'rep@bcatcorp.com', invoiceId: 'inv-1', invoicedAt: '2026-04-02T12:00:00.000Z' },
     ],
     LoadCarrier: [
-      { id: 'lc-1', loadId: 'tms-delivered', kind: 'CARRIER', status: 'ACTIVE', carrierId: 'car-1', carrierName: 'Blue Line Trucking' },
+      { id: 'lc-1', loadId: 'tms-delivered', kind: 'CARRIER', status: 'ACTIVE', carrierId: 'car-1', carrierName: 'Blue Line Trucking', carrierRepId: 'carrier.rep@bcatcorp.com' },
     ],
     Load: [
       // BACKFILL: delivered, priced, lane on both ends. `stops` arrives as the AWSJSON
@@ -132,6 +132,7 @@ function baseSource({ unit = 'dollars', comparables = 10 } = {}) {
       ...cmpLoads,
     ],
     LoadFinancials: [financials('tms-delivered', 245_000), financials('tms-no-state', 100_000), ...cmpFins],
+    Customer: [{ id: 'cust-1', name: 'Acme Foods', teamKey: 'EAST' }],
     LaneRateSample: [],
   };
 }
@@ -444,5 +445,49 @@ describe('backfillLaneSamples — the lane key mirrors src/lib/laneKey.ts', () =
   it('is not trivially agreeing because both sides return null', () => {
     expect(laneKeyFor(stops('St. Louis, MO', 'Danville, IL'))).toBe('ST LOUIS|MO>DANVILLE|IL');
     expect(laneKey3For(stops('Chicago, IL', 'Danville, IL', { zips: ['60601', '61832-1234'] }))).toBe('606>618');
+  });
+});
+
+describe('backfillLaneSamples — the Step I reporting fields', () => {
+  it('stamps the month, both reps, the team and the invoice on a sample', () => {
+    const planned = planLaneSamples(baseSource(), NOW);
+    const { item } = actionFor(planned, 'tms-delivered');
+    expect(item.sampleMonth).toBe(item.date.slice(0, 7));
+    expect(item.customerRepId).toBe('rep@bcatcorp.com');
+    expect(item.carrierRepId).toBe('carrier.rep@bcatcorp.com');
+    expect(item.teamKey).toBe('EAST');
+    expect(item.invoiceId).toBe('inv-1');
+    expect(item.invoiceMonth).toBe('2026-04');
+  });
+
+  it('refreshes a Step H sample that predates those fields rather than calling it current', () => {
+    const source = baseSource();
+    const first = planLaneSamples(source, NOW);
+    const { item } = actionFor(first, 'tms-delivered');
+    // A Step H row: every field it knew about, none of the Step I ones.
+    const stale = { ...item };
+    for (const field of ['sampleMonth', 'customerRepId', 'carrierRepId', 'teamKey', 'invoiceId', 'invoiceMonth']) {
+      delete stale[field];
+    }
+    const replanned = planLaneSamples({ ...source, LaneRateSample: [stale] }, NOW);
+    expect(actionFor(replanned, 'tms-delivered')).toBeDefined();
+    expect(replanned.alreadyCurrent).toBe(0);
+
+    // …and once refreshed, a third pass has nothing left to do.
+    const settled = planLaneSamples({ ...source, LaneRateSample: [item] }, NOW);
+    expect(actionFor(settled, 'tms-delivered')).toBeUndefined();
+    expect(settled.alreadyCurrent).toBe(1);
+  });
+
+  it('leaves the reporting fields absent rather than null when nobody is named', () => {
+    const source = baseSource();
+    source.Order = [{ id: 'ord-1', shipmentId: 'shp-1', customerId: 'cust-1', customerName: 'Acme Foods', mode: 'FTL' }];
+    source.LoadCarrier = [{ id: 'lc-1', loadId: 'tms-delivered', kind: 'CARRIER', status: 'ACTIVE', carrierId: 'car-1' }];
+    source.Customer = [];
+    const { item } = actionFor(planLaneSamples(source, NOW), 'tms-delivered');
+    expect(item.sampleMonth).toBeTruthy();
+    expect('customerRepId' in item).toBe(false);
+    expect('teamKey' in item).toBe(false);
+    expect('invoiceMonth' in item).toBe(false);
   });
 });

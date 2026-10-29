@@ -404,6 +404,9 @@ export type EntityType =
   | 'ApPayment'
   | 'Quote'
   | 'LaneRateSample'
+  | 'UserProfile'
+  | 'Commission'
+  | 'CommissionPayPeriod'
 export type AuditAction = 'create' | 'update' | 'delete'
 
 export interface AuditLogEntry {

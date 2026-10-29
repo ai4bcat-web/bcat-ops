@@ -43,6 +43,13 @@ vi.mock('@/lib/apiClient', () => ({
   renderInvoicePdf: vi.fn(),
   markInvoiceSent: vi.fn(),
   getInvoicePdfUrl: vi.fn().mockResolvedValue('blob:pdf'),
+  // The invoice detail now carries a Commission card; it reads settings before it reads
+  // anything else, and commissions are off here, so the card renders nothing.
+  commissionModelsDeployed: () => true,
+  getTmsSettings: vi.fn().mockResolvedValue({ id: 'default', commissionsEnabled: false }),
+  listCommissionsByInvoice: vi.fn().mockResolvedValue([]),
+  previewCommissions: vi.fn(),
+  runCommissions: vi.fn(),
 }))
 // The dialogs are mount-to-open and fetch their own context; their behaviour has its own
 // tests, and here they would only drag the finance Lambda into a test about the board.

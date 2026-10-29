@@ -13,6 +13,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { Download, Filter, Plus, RefreshCw, Search, Truck } from 'lucide-react'
 import { toast } from 'sonner'
+import { RepPicker } from '@/components/RepPicker'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -376,7 +377,13 @@ function NewCarrierDialog({ onClose, onCreated }: { onClose: () => void; onCreat
           </div>
           <div>
             <Label className="text-xs uppercase tracking-wider text-muted-foreground">Account owner</Label>
-            <Input aria-label="Account owner" placeholder="name@bcatcorp.com" value={owner} onChange={(e) => setOwner(e.target.value)} className="h-9 text-sm" />
+            <RepPicker
+              role="CARRIER_REP"
+              allowUnknown
+              value={owner}
+              onChange={setOwner}
+              placeholder="Pick an account owner…"
+            />
           </div>
           <p className="text-xs text-muted-foreground">
             New carriers land in Pending. They cannot be booked until compliance moves them to Active.

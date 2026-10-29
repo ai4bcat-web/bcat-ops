@@ -14,6 +14,7 @@
  */
 import { useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, Building2, Plus, Search, Trash2 } from 'lucide-react'
+import { RepPicker } from '@/components/RepPicker'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -99,6 +100,7 @@ export function BookCarrierDialog({ bundle, isAdmin, busy, onClose, onConfirm, o
   const [plates, setPlates] = useState('')
   const [vin, setVin] = useState('')
   const [equipmentType, setEquipmentType] = useState('')
+  const [carrierRepId, setCarrierRepId] = useState('')
   const [trackingProvider, setTrackingProvider] = useState<TrackingProvider>('NONE')
   const [quickPayDays, setQuickPayDays] = useState('')
   const [termsDays, setTermsDays] = useState('')
@@ -200,6 +202,7 @@ export function BookCarrierDialog({ bundle, isAdmin, busy, onClose, onConfirm, o
     try {
       await onConfirm({
         carrierId,
+        carrierRepId: carrierRepId.trim() || undefined,
         carrierRateCents: rateCents,
         charges: charges
           .filter((c) => c.code.trim() && c.amountCents != null)
@@ -448,6 +451,16 @@ export function BookCarrierDialog({ bundle, isAdmin, busy, onClose, onConfirm, o
             <Text label="Plates" value={plates} onChange={setPlates} />
             <Text label="VIN" value={vin} onChange={setVin} />
             <Text label="Equipment" value={equipmentType} onChange={setEquipmentType} />
+            <div>
+              <Label className="text-xs uppercase tracking-wider text-muted-foreground">Carrier rep</Label>
+              <RepPicker
+                role="CARRIER_REP"
+                allowUnknown
+                value={carrierRepId}
+                onChange={setCarrierRepId}
+                placeholder="Pick a carrier rep…"
+              />
+            </div>
             <div>
               <Label className="text-xs uppercase tracking-wider text-muted-foreground">Tracking</Label>
               <select

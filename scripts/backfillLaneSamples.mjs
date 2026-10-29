@@ -112,7 +112,7 @@ export const MOVEMENT_RANK = {
  * LaneRateSample is read as well as written: the planner compares what it would write
  * against what is already there, which is what makes the second dry run empty.
  */
-const MODELS = ['Shipment', 'Order', 'Load', 'LoadCarrier', 'LoadFinancials', 'LaneRateSample'];
+const MODELS = ['Shipment', 'Order', 'Load', 'LoadCarrier', 'LoadFinancials', 'LaneRateSample', 'Customer'];
 
 const USAGE = `
 Usage: node scripts/backfillLaneSamples.mjs [options]
@@ -381,6 +381,10 @@ const MATERIAL_FIELDS = [
   'divisionKey', 'mode', 'rateType', 'equipmentType', 'miles', 'customerRateCents',
   'revenueCents', 'carrierRateCents', 'costCents', 'profitCents', 'marginBps',
   'loadStatus', 'excluded', 'source',
+  // Step I: the reporting fact fields. Listed here so the 835 samples written by
+  // Step H, which carry none of them, are re-planned and refreshed rather than
+  // counted as already current — `sampleMonth` is the reports index's hash key.
+  'sampleMonth', 'customerRepId', 'carrierRepId', 'teamKey', 'invoiceId', 'invoiceMonth',
 ];
 
 /**
@@ -435,7 +439,8 @@ export function stopsOf(load) {
  * @returns {Record<string, unknown>}
  */
 export function sampleItemFor({
-  load, stops, financials, order, loadCarrier, shipment, laneKey, date, source, legacyCents = null, nowIso,
+  load, stops, financials, order, loadCarrier, shipment, customer, laneKey, date, source,
+  legacyCents = null, nowIso,
 }) {
   const rawStatus = text(load.status);
   const status = rawStatus && rawStatus in MOVEMENT_RANK ? rawStatus : null;
@@ -479,6 +484,16 @@ export function sampleItemFor({
     loadStatus: status,
     excluded: shipment?.status === 'CANCELED' || loadCarrier?.status === 'TONU',
     source,
+    // Step I — the reporting fact fields. `sampleMonth` is the hash key of the
+    // reports index, so it is derived from the sample's own date and is never
+    // absent; the rest come off the records that name them and stay absent when
+    // nobody is named.
+    sampleMonth: date.slice(0, 7),
+    customerRepId: text(order?.customerRepId),
+    carrierRepId: text(loadCarrier?.carrierRepId) ?? text(load.carrierRepId),
+    teamKey: text(customer?.teamKey),
+    invoiceId: text(order?.invoiceId),
+    invoiceMonth: dayOf(order?.invoicedAt)?.slice(0, 7) ?? null,
     sampledAt: nowIso,
     version: 1,
     createdAt: nowIso,
@@ -505,6 +520,8 @@ export function planLaneSamples(source, nowIso) {
   }
   const ordersById = new Map((source.Order ?? []).map((r) => [String(r.id), r]));
   const shipmentsById = new Map((source.Shipment ?? []).map((r) => [String(r.id), r]));
+  // Step I: the sample's `teamKey` is the billed customer's team at sample time.
+  const customersById = new Map((source.Customer ?? []).map((r) => [String(r.id), r]));
   const samplesById = new Map((source.LaneRateSample ?? []).map((r) => [String(r.id), r]));
 
   const carriersById = new Map();
@@ -604,6 +621,8 @@ export function planLaneSamples(source, nowIso) {
       order,
       loadCarrier,
       shipment,
+      customer:
+        customersById.get(text(order?.customerId) ?? text(shipment?.customerId) ?? '') ?? null,
       laneKey,
       date,
       source: sampleSource,
@@ -660,14 +679,16 @@ export function sourceRowsOf(source) {
       'customer', 'customerId', 'carrierName', 'divisionKey', 'equipmentType',
       'activeLoadCarrierId', 'loadNumber', 'originName', 'originCity', 'destinationName',
       'destinationCity', 'pickupAppt', 'pickupApptType', 'deliveryAppt', 'deliveryApptType',
+      'carrierRepId',
     ],
     LoadFinancials: [
       'loadId', 'customerRateCents', 'revenueCents', 'carrierRateCents', 'costCents',
       'profitCents', 'marginBps',
     ],
-    LoadCarrier: ['loadId', 'kind', 'status', 'carrierId', 'carrierName'],
-    Order: ['customerId', 'customerName', 'mode', 'rateType', 'equipmentType'],
+    LoadCarrier: ['loadId', 'kind', 'status', 'carrierId', 'carrierName', 'carrierRepId'],
+    Order: ['customerId', 'customerName', 'mode', 'rateType', 'equipmentType', 'customerRepId', 'invoiceId', 'invoicedAt'],
     Shipment: ['number', 'customerId', 'customerName', 'mode', 'status'],
+    Customer: ['teamKey'],
     LaneRateSample: MATERIAL_FIELDS,
   };
   const rows = [];
