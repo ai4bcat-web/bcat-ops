@@ -4,13 +4,30 @@ One entry per unit of work (newest first). Decisions needed from Ryne go under *
 
 ## 2026-10-29 — Step R follow-up and Step R2 done on dev: Ryne's seven answers, and the Aljex-style Shipments board
 
-Three commits — `a7ceb2b` (the step), `7127220` (the Status cell and the live verification
-script), `<this entry>` — Amplify dev jobs **61 and 62 SUCCEED**, each pushed with the branch
-idle and announced first. Gates before every commit: `npm run typecheck`, `npm run lint`
-(the same 2 pre-existing warnings as Step K), `npm run test` — **433 files / 5,848 tests**,
-up from 422/5,712 after Step K. Live proof on dev: `node scripts/devVerifyR2.mjs` →
-**99 PASS / 0 FAIL**, summary line
+Five commits — `a7ceb2b` (the step), `7127220` (the Status cell and the live verification
+script), `07fd1f2` (one source for that cell, and this entry), `4642476` (a saved filter set
+comes back the way it was saved) and the entry update — Amplify dev jobs **61, 62, 63 and 64
+SUCCEED**, each pushed with the branch idle and announced first. Gates before every commit:
+`npm run typecheck`, `npm run lint` (the same 2 pre-existing warnings as Step K),
+`npm run test` — **433 files / 5,856 tests**, up from 422/5,712 after Step K. Live proof on
+dev: `node scripts/devVerifyR2.mjs` → **99 PASS / 0 FAIL**, summary line
 `{"seedCreated":0,"seedUpdated":8,"seedDeactivated":0,"divisionCount":7,"ruleCount":8,"viewCount":12,"loadsWithoutShipmentBefore":0,"loadsWithoutShipmentAfter":0,"canceledUnscheduledLoads":0}`.
+
+Browser proof on `https://dev.d3dejqzs77khq6.amplifyapp.com`, beside Ryne's own Aljex
+screenshot (`Docs/tms-build/mvmnt-ui/aljex-active-shipments-board.webp`):
+`Docs/tms-build/r2-proof/active-shipments-default.webp` (the board lands on Active Shipments,
+Shipments pinned at the top of the sidebar with its views beneath it, whole-row colour,
+live status counts), `icon-key-and-footer.webp` (the nine row tones and the exception icons,
+and the footer reading *Records shown 50 of 907 · Next refresh: 28s · ON · Get next 50 ·
+Refresh · Export to CSV · Show map · Icon key · New tab*, with Batch task greyed until rows
+are checked) and `saved-view-roundtrip.webp` (a filter set created in the browser, then
+re-opened by URL in a fresh load with its eight statuses checked, Voided not, no
+Unsaved-changes marker and Update disabled).
+
+The round trip is the second thing the live run caught: the views hook resolves after the
+first render and the pane built its working set once, from nothing, so every saved view
+opened empty with Update and Revert comparing against an empty baseline. Fixed in `4642476`
+with five tests that fail without it.
 
 ### Ryne's seven answers, as shipped
 
