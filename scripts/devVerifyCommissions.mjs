@@ -87,8 +87,12 @@ async function manageUsersAs(authToken, args) {
   const decls = names.map((n) => `$${n}: ${typeOf(n)}${n === 'action' ? '!' : ''}`).join(', ')
   const passed = names.map((n) => `${n}: $${n}`).join(', ')
   const data = await gqlAs(authToken, `query M(${decls}) { manageUsers(${passed}) }`, args)
-  const raw = data.manageUsers
-  return typeof raw === 'string' ? JSON.parse(raw) : raw
+  // The Lambda returns a JSON string; AppSync's String field hands it back encoded once more.
+  let value = data.manageUsers
+  while (typeof value === 'string') {
+    try { value = JSON.parse(value) } catch { break }
+  }
+  return value
 }
 const manageUsers = (args) => manageUsersAs(token, args)
 
@@ -139,15 +143,16 @@ async function setPoolPassword(username, password) {
 
 /**
  * The owner-only `delete` fallback: the login goes from the dev pool and its profile
- * row from the dev table, the same two writes the Users API makes. Only ever pointed
+ * row — keyed by the pool username, not the e-mail — from the dev table, the same two
+ * writes the Users API makes. Only ever pointed
  * at an identity this run created.
  */
-async function deleteFromPool(username) {
+async function deleteFromPool(username, profileId) {
   const [{ sdk, client }, { DynamoDBClient, DeleteItemCommand }] =
     await Promise.all([cognitoAdmin(), import('@aws-sdk/client-dynamodb')])
   await new DynamoDBClient({ region }).send(new DeleteItemCommand({
     TableName: `UserProfile-${DEV_TABLE_SUFFIX}`,
-    Key: { id: { S: username } },
+    Key: { id: { S: profileId ?? username } },
   }))
   await client.send(new sdk.AdminDeleteUserCommand({ UserPoolId: DEV_POOL, Username: username }))
 }
@@ -210,10 +215,10 @@ async function main() {
     // Lambda's invite goes to a mailbox that does not exist and the challenge password
     // in it is nobody's to read.
     const repCreated = await manageUsers({ action: 'create', email: repEmail, role: 'CUSTOMER_REP' })
-    createdUsers.push(repEmail)
+    createdUsers.push({ email: repEmail, profileId: repCreated.profile?.id ?? null })
     await setPoolPassword(repEmail, repPassword)
     const noneCreated = await manageUsers({ action: 'create', email: noneEmail, role: 'NONE' })
-    createdUsers.push(noneEmail)
+    createdUsers.push({ email: noneEmail, profileId: noneCreated.profile?.id ?? null })
     await setPoolPassword(noneEmail, nonePassword)
     // The pool names people by a generated id and signs them in by e-mail. The profile
     // is keyed by that id, `list` joins on it, and RepPicker stores it on orders and
@@ -334,25 +339,33 @@ async function main() {
       notes: 'Dev-only Step I verification fixture. Safe to delete.',
     }).then((r) => r.carrier ?? r)
 
-    /** A priced, delivered, invoiceable shipment of our own. */
+    /**
+     * A priced, delivered, invoiceable shipment of our own. Each one picks up on its
+     * own day so the one fixture carrier is never double-booked, and the cost is the
+     * booked carrier rate and nothing else — a CARRIER charge on the order form on top
+     * of a booking would count the same truck twice.
+     */
+    let fixtureDay = 0
     const makeShipment = async ({ revenueCents, costCents, ownFleet = false }) => {
+      fixtureDay += 1
+      const day = new Date(Date.now() + fixtureDay * 24 * 3600 * 1000).toISOString().slice(0, 10)
       let b = await shipAction('CREATE_SHIPMENT', { customerId: customer.id })
       const id = b.shipment.id
       createdShipments.push(id)
       b = await shipAction('SAVE_ORDER_FORM', {
         shipmentId: id,
         expectedUpdatedAt: b.shipment.updatedAt,
-        order: { mode: 'FTL', equipmentType: 'Dry Van', customerRepId: repId ?? repEmail },
+        order: {
+          mode: 'FTL',
+          equipmentType: 'Dry Van',
+          customerRepId: repId ?? repEmail,
+          references: [{ code: 'PO', label: 'Purchase order', value: `VERIFY-${stamp}`, level: 'ORDER', visibility: 'CUSTOMER' }],
+        },
         stops: [
-          { type: 'pickup', name: 'Verify Shipper', city: 'Chicago, IL', address: { city: 'Chicago', state: 'IL', zip: '60601' }, appt: `${today}T13:00:00.000Z` },
-          { type: 'delivery', name: 'Verify Receiver', city: 'Dallas, TX', address: { city: 'Dallas', state: 'TX', zip: '75201' }, appt: `${today}T23:00:00.000Z` },
+          { type: 'pickup', name: 'Verify Shipper', city: 'Chicago, IL', address: { city: 'Chicago', state: 'IL', zip: '60601' }, appt: `${day}T13:00:00.000Z` },
+          { type: 'delivery', name: 'Verify Receiver', city: 'Dallas, TX', address: { city: 'Dallas', state: 'TX', zip: '75201' }, appt: `${day}T23:00:00.000Z` },
         ],
-        charges: ownFleet
-          ? [{ side: 'CUSTOMER', code: 'LINEHAUL', rateCents: revenueCents, count: 1 }]
-          : [
-              { side: 'CUSTOMER', code: 'LINEHAUL', rateCents: revenueCents, count: 1 },
-              { side: 'CARRIER', code: 'LINEHAUL', rateCents: costCents, count: 1 },
-            ],
+        charges: [{ side: 'CUSTOMER', code: 'LINEHAUL', rateCents: revenueCents, count: 1 }],
       })
       await shipAction('SUBMIT_ORDER', { shipmentId: id, expectedUpdatedAt: b.shipment.updatedAt })
       b = await shipAction('GET_SHIPMENT_BUNDLE', { shipmentId: id })
@@ -362,8 +375,12 @@ async function main() {
           loadId: b.loads[0].id,
           expectedUpdatedAt: b.loads[0].updatedAt,
           carrierId: carrier.id,
-          rateCents: costCents,
-          acknowledgeWarnings: ['ALL'],
+          carrierRateCents: costCents,
+          // A carrier built here has no certificates in the bucket: warnings, not blocks.
+          acknowledgeWarnings: [
+            'MISSING_DOC:COI_CARGO', 'MISSING_DOC:COI_AUTO', 'MISSING_DOC:W9', 'MISSING_DOC:CARRIER_AGREEMENT',
+            'INSURANCE_UNVERIFIED',
+          ],
         }).catch((err) => console.log(`  (book: ${String(err.message).slice(0, 120)})`))
       }
       b = await shipAction('GET_SHIPMENT_BUNDLE', { shipmentId: id })
@@ -372,14 +389,22 @@ async function main() {
 
     /** Move the shipment to delivered and invoice it, returning the invoice. */
     const invoice = async (bundle) => {
-      const order = bundle.orders?.[0] ?? bundle.order
-      await shipAction('SET_SHIPMENT_STATUS', {
-        shipmentId: bundle.shipment.id,
-        expectedUpdatedAt: bundle.shipment.updatedAt,
-        status: 'DELIVERED',
-      }).catch(() => {})
-      await shipAction('READY_TO_INVOICE', { orderId: order.id, overrideNote: 'dev verification' }).catch((err) =>
-        console.log(`  (ready: ${String(err.message).slice(0, 120)})`))
+      // The shipment's movement status is derived from its loads, so the fixture is
+      // walked up the load ladder rather than hand-set.
+      let fresh = bundle
+      for (const status of ['BOOKED', 'PLANNED', 'DISPATCHED', 'LOADING', 'PICKED_UP', 'IN_TRANSIT', 'UNLOADING', 'DELIVERED']) {
+        const load = fresh.loads[0]
+        await shipAction('SET_LOAD_STATUS', { loadId: load.id, status, expectedUpdatedAt: load.updatedAt })
+          .catch((err) => console.log(`  (load ${status} skipped: ${String(err.message).slice(0, 70)})`))
+        fresh = await shipAction('GET_SHIPMENT_BUNDLE', { shipmentId: bundle.shipment.id })
+      }
+      const order = fresh.orders?.[0] ?? fresh.order
+      await shipAction('READY_TO_INVOICE', {
+        orderId: order.id,
+        expectedUpdatedAt: order.updatedAt,
+        override: true,
+        overrideNote: 'dev verification fixture; no paperwork exists',
+      }).catch((err) => console.log(`  (ready: ${String(err.message).slice(0, 120)})`))
       const result = await finAction('GENERATE_INVOICE', { orderId: order.id })
       return result.invoice
     }
@@ -405,7 +430,10 @@ async function main() {
     const primary = rows.find((r) => r.roleName === 'PRIMARY_ACCOUNT_OWNER')
     const secondary = rows.find((r) => r.roleName === 'SECONDARY_ACCOUNT_OWNER')
     equals('the primary account owner earns 10 % of the gross profit', primary?.amountCents, 7000, dollars(7000))
-    equals('the secondary owner earns half the role rate', secondary?.amountCents, 3500, dollars(3500))
+    // `splitBps` is a weight over the role's pot, not a percentage paid independently (the
+    // review's fix: two owners at 50 % of an odd pot invented a cent). Alone, the secondary
+    // owner takes the whole secondary pot.
+    equals('a lone secondary owner takes the whole secondary pot — a split is a weight', secondary?.amountCents, 7000, dollars(7000))
     equals('the basis is the profit on the frozen money', primary?.profitCents, 70000, dollars(70000))
     equals('the row opens unapproved', primary?.status, 'UN_APPROVED')
     equals('the rows are attributed to the people on the customer, by username', primary?.repId, repId ?? repEmail)
@@ -445,24 +473,22 @@ async function main() {
     rows = await commissionsOf(mainInvoice.id)
     const approvedAfter = rows.find((r) => r.id === secondary.id)
     const adjustment = rows.find((r) => r.kind === 'ADJUSTMENT' && r.adjustsId === secondary.id)
-    equals('the approved row is untouched by the write-off', approvedAfter?.amountCents, 3500, dollars(3500))
-    // Revenue $2,500 − $500 = $2,000; profit $200; 10 % = $20.00; half = $10.00.
-    equals('the difference arrives as its own adjustment row', adjustment?.amountCents, -2500, dollars(-2500))
+    equals('the approved row is untouched by the write-off', approvedAfter?.amountCents, 7000, dollars(7000))
+    // Revenue $2,500 − $500 = $2,000; profit $200; 10 % = $20.00; the difference is −$50.00.
+    equals('the difference arrives as its own adjustment row', adjustment?.amountCents, -5000, dollars(-5000))
     equals('the adjustment opens unapproved', adjustment?.status, 'UN_APPROVED')
 
     // ── 5. rounding: a half-cent is taken away from zero, once ──────────────
-    // $1,000.05 revenue, $0 cost → profit 100005 cents; 10 % = 10000.5 → 10001.
-    const rounding = await makeShipment({ revenueCents: 100005, costCents: 1, ownFleet: false })
+    // $1,000.15 revenue, $0.10 booked cost → profit 100005 cents; 10 % = 10000.5 → 10001.
+    const rounding = await makeShipment({ revenueCents: 100015, costCents: 10 })
     const roundingInvoice = await invoice(rounding)
     const roundingRows = await commissionsOf(roundingInvoice.id)
     const roundedPrimary = roundingRows.find((r) => r.roleName === 'PRIMARY_ACCOUNT_OWNER')
     const roundedSecondary = roundingRows.find((r) => r.roleName === 'SECONDARY_ACCOUNT_OWNER')
-    const expectedProfit = (roundedPrimary?.profitCents ?? 0)
-    const expectedPrimary = Math.sign(expectedProfit) * Math.round(Math.abs(expectedProfit * 0.1))
-    equals('a half-cent rounds away from zero, once', roundedPrimary?.amountCents, expectedPrimary,
-      `profit ${dollars(expectedProfit)} → ${dollars(roundedPrimary?.amountCents ?? 0)}`)
-    const expectedSecondary = Math.sign(expectedPrimary) * Math.round(Math.abs(expectedPrimary * 0.5))
-    equals('the split takes half of the role rate, rounded the same way', roundedSecondary?.amountCents, expectedSecondary,
+    equals('the fixture lands on half a cent', roundedPrimary?.profitCents, 100005, dollars(100005))
+    equals('a half-cent rounds away from zero, once', roundedPrimary?.amountCents, 10001,
+      `profit ${dollars(roundedPrimary?.profitCents ?? 0)} → ${dollars(roundedPrimary?.amountCents ?? 0)}`)
+    equals('the secondary pot rounds the same way and is not rounded again when allocated', roundedSecondary?.amountCents, 10001,
       dollars(roundedSecondary?.amountCents ?? 0))
 
     // ── 6. own fleet: zero and flagged, never an invented cost ──────────────
@@ -500,7 +526,16 @@ async function main() {
     equals('…and the approved row still stands', afterVoid.find((r) => r.id === approvedRow.id)?.status, 'FULLY_APPROVED')
 
     // ── 8. a pay period, open to paid ───────────────────────────────────────
-    const opened = await finAction('OPEN_PAY_PERIOD', { periodStart: today })
+    // One period per schedule window, and a window already paid by an earlier run stays
+    // paid: the first window from this month on that is still OPEN is the one used, and
+    // SUBMIT sweeps approved rows up to three months back into it.
+    let opened = null
+    for (let ahead = 0; ahead < 12 && !opened; ahead += 1) {
+      const probe = new Date(Date.UTC(Number(today.slice(0, 4)), Number(today.slice(5, 7)) - 1 + ahead, 15)).toISOString().slice(0, 10)
+      const candidate = await finAction('OPEN_PAY_PERIOD', { periodStart: probe })
+      if (candidate.payPeriod?.status === 'OPEN') opened = candidate
+    }
+    if (!opened) throw new Error('no open pay period window within a year')
     const periodId = opened.payPeriod.id
     await refuses('a manager cannot pay a period while paying is admin-only', /owner or ADMIN/i, () =>
       repFin('SUBMIT_PAY_PERIOD', { payPeriodId: periodId }))
@@ -556,7 +591,7 @@ async function main() {
     // ── cleanup: the identities first, then the freight ────────────────────
     token = (await authenticateTmsUser(outputs).catch(() => ({ token }))).token ?? token
     let ownerOnlyRefusalSeen = false
-    for (const email of createdUsers) {
+    for (const { email, profileId } of createdUsers) {
       try {
         await manageUsers({ action: 'delete', username: email })
         console.log(`cleanup: deleted temporary identity ${email}`)
@@ -567,7 +602,7 @@ async function main() {
             ownerOnlyRefusalSeen = true
             ok('an admin who is not the owner cannot delete a user', message.slice(0, 140))
           }
-          await deleteFromPool(email)
+          await deleteFromPool(email, profileId)
             .then(() => console.log(`cleanup: removed temporary identity ${email} from the dev pool directly`))
             .catch((e) => console.log(`cleanup: could not remove ${email}: ${String(e.message).slice(0, 120)}`))
         } else {
