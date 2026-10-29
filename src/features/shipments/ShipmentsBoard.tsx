@@ -74,8 +74,6 @@ import {
   massReleaseReady,
   matchesBoardFilters,
   matchesQuery,
-  statusLabel,
-  stopProgressOf,
   toCsv,
   visibleColumns,
   type BoardDetailKey,
@@ -161,11 +159,14 @@ function rowSortValue(row: ShipmentRow, key: string): string | number {
   }
 }
 
+/**
+ * The screen and the CSV print the same Status text, because they ask the same
+ * column for it. A second copy of this here is how `DEL` ended up on the board
+ * beside a checkbox reading `Delivered`.
+ */
+const STATUS_COLUMN = BOARD_COLUMNS.find((c) => c.key === 'status')
 function statusCellText(row: ShipmentRow): string {
-  const label = statusLabel(row)
-  const { done, total } = stopProgressOf(row)
-  if (total === 0) return label
-  return `${label} ${done}/${total}`
+  return STATUS_COLUMN ? STATUS_COLUMN.value(row) : ''
 }
 
 function sortRows(rows: ShipmentRow[], sort: BoardGridSort | null): ShipmentRow[] {

@@ -246,6 +246,63 @@ Keep the TMS shell (dark theme, MVMNT chrome); change the Shipments page's own l
 - **Footer bar**: "Records shown N of M", next-refresh countdown with auto-refresh, Get next
   50, Refresh, Export to CSV, Show map (stops of the filtered shipments), Icon key, New tab,
   Batch task (batch actions on the checked rows), Split screen.
+- **Duplicate and batch actions (Ryne, 2026-10-29 13:40).** On the shipment and in the
+  row menu: **Duplicate shipment** — a new shipment born through the normal path (new PRO
+  claimed, status Open/Building, same customer, lane, stops, equipment, commodity,
+  references, rates and division; no carrier, no documents, no invoices; audited as a copy
+  of the source). The footer's **Batch task** on the checked rows offers at least:
+  **Release to billing** (each row goes through the Step F gate; the result lists which
+  released and which were refused and why), **Change sales rep**, **Change revenue
+  division** (and subsidiary), and Change carrier rep/team (P2). Every batch action is
+  owner/ADMIN or the role the Step I permissions allow, applies through the routers (never
+  a client-side loop of raw updates), and writes one audit row per shipment.
+- **Column customization (Ryne, 2026-10-29 13:50).** A **Columns** picker on the board: the
+  full catalog of fields below, grouped by source, with a search box; checking adds a
+  column, **drag to reorder**, pin left, set width; saved as the column template (per user,
+  shareable) that the filter set / view carries. The catalog is every field a user could
+  want, formatted for display (money in dollars, cents never shown raw; dates in Central;
+  ids resolved to names):
+  - *Shipment:* number/PRO, status, previous status, status changed at/by, hold reason,
+    cancel/void reason, customer, mode, pickup appt, delivery appt, pickup month, origin
+    city/state, destination city/state, source, customer link sent, delivered at, last
+    notice, revenue division, subsidiary, tag source, sales rep, DAT posted at, voided at/by,
+    created at/by, updated at/by, department views it is in.
+  - *Order (the customer side):* customer rep, bill-to, cost center, rate type, references
+    (PO, PU, delivery #, BOL, each as its own column), equipment type and length, special
+    requirements, freight (commodity, weight, pieces, pallets), customer notes, internal
+    notes, customer rate, revenue, AR status and changed at, invoice number, invoiced at,
+    paid at, AR balance, factoring item, docs required / missing / checked / override,
+    quote number and amount.
+  - *Load (legacy and own-fleet):* PRO (aljexId), TMS id, pickup number, origin name,
+    destination name, pickup/delivery appt start, end and type, pickup/delivery driver,
+    truck, trailer number, rate, miles, hot flag, commodity, weight, pieces, paperwork
+    location, ELD logs reviewed at/by, ready to invoice, rate con on file, carrier rep,
+    assignment type, carrier name, equipment type, division key, tracking provider, next
+    check call at/note, check call open, last check call at/type, last known at /
+    city / state / source, open incidents, delivered at, cargo value, notes, POD notes.
+  - *Carrier leg (LoadCarrier):* carrier name, MC, carrier rep, dispatcher name/phone/
+    email, driver name/phone (and driver 2), truck number, trailer number, plates, VIN,
+    seal, trip number, pickup ETA, delivery ETA, rate con status / sent at / signed at,
+    carrier rate, cost, AP status, AP balance, AP paid at, quick pay (days, fee), payment
+    terms, booked at, dispatched at, tracking started/stopped, POD requested at, docs
+    missing, rating.
+  - *Customer:* name, MC, DOT, factored, payment terms, credit limit, credit hold,
+    status, service tier, team, account owners, default sales rep, invoice frequency.
+  - *Carrier:* name, MC, DOT, SCAC, status, authority status, safety rating, insurance
+    (cargo/liability expiry), MyCarrierPackets status, Highway status, RMIS status,
+    quick-pay eligible, team, account owners, load count, last load.
+  - *Computed:* stop progress ("2/2"), gross profit, net margin %, days in status, docs
+    needed count, POD present, rate con present, posted boards, next event ("Pickup starts
+    in 23 h"), tracking motion, exceptions.
+- **Filter pickers are type-ahead tags, not lists (Ryne, same message; screenshot
+  `Docs/tms-build/mvmnt-ui/board-filters-listbox-problem.png`).** Every Details filter
+  (customer, carrier, pick-up name, consignee, states, equipment, office, regions, sales
+  rep, service rep, dispatchers, revenue type) is a **type-ahead**: type part of a name, a
+  short match list appears (searching the directory server-side or over the loaded
+  index), choose one and it becomes a **tag**; several tags OR together; each tag has an
+  × and the Exclude toggle inverts the whole set. Never render every record as a scrolling
+  list box. Recently used values show first; the free text also matches codes (MC, SCAC,
+  state abbreviations).
 - Department views (Step R) and saved filter sets are the same thing: saving a filter set
   creates/updates a view; seed the Aljex-style "Active Shipments" view as the default.
 Done means: the board renders inside the shell with the panel, grid, colours and footer

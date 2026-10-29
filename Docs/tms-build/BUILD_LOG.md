@@ -2,6 +2,123 @@
 
 One entry per unit of work (newest first). Decisions needed from Ryne go under **Decision needed**.
 
+## 2026-10-29 — Step R follow-up and Step R2 done on dev: Ryne's seven answers, and the Aljex-style Shipments board
+
+Three commits — `a7ceb2b` (the step), `7127220` (the Status cell and the live verification
+script), `<this entry>` — Amplify dev jobs **61 and 62 SUCCEED**, each pushed with the branch
+idle and announced first. Gates before every commit: `npm run typecheck`, `npm run lint`
+(the same 2 pre-existing warnings as Step K), `npm run test` — **433 files / 5,848 tests**,
+up from 422/5,712 after Step K. Live proof on dev: `node scripts/devVerifyR2.mjs` →
+**99 PASS / 0 FAIL**, summary line
+`{"seedCreated":0,"seedUpdated":8,"seedDeactivated":0,"divisionCount":7,"ruleCount":8,"viewCount":12,"loadsWithoutShipmentBefore":0,"loadsWithoutShipmentAfter":0,"canceledUnscheduledLoads":0}`.
+
+### Ryne's seven answers, as shipped
+
+- **Amazon drivers are owner operators.** `rule-seed-amazon` (`DRIVER_FLEET_GROUP_IS AMAZON →
+  OWNER_OPERATOR`) is now the first rule, and **no Amazon division exists** — the seven
+  division codes on dev are exactly ASSETS, BOX_TRUCK, BROKERAGE, CAR_SHIPPING, COMPANY,
+  LOCAL, OWNER_OPERATOR.
+- **Auto Shipper is car shipping, by customer.** `rule-seed-auto-shipper`
+  (`CUSTOMER_IS 1793167776316-ub09ebk5w → CAR_SHIPPING`) replaced the old reference-text rule,
+  which is deactivated rather than deleted; the seed resolved the id from the dev customer
+  **AUTO SHIPPER** by name, and writes the rule inactive with an explaining name where no such
+  customer exists. A shipment created for that customer tags CAR_SHIPPING on dev.
+- **Seeds converge.** `ENSURE_OWNERSHIP_SEED` updates a seed rule in place, deactivates a seed
+  rule the seed dropped, and counts created/updated/deactivated/unchanged. A second run creates
+  nothing and deactivates nothing. **An admin-authored rule survives a re-seed still active** —
+  the first cut of the sweep would have deactivated every hand-written rule on the stack, which
+  the review caught before it shipped.
+- **Un-void**, owner/ADMIN, audited, `expectedUpdatedAt` required like void. Proved on dev:
+  the three void markers cleared, the load back to **DELIVERED** — the exact status it held —
+  `readyToInvoice` restored, the carrier leg back on the AP board, and the **PRO claim row
+  byte-identical** either side, read strongly consistent. A load that was `CANCELED` *before*
+  the void is still `CANCELED` after the un-void: the void now snapshots `previousStatus` and
+  `previousReadyToInvoice` on the loads it actually changes, so the un-void restores rather
+  than re-derives.
+- **Customer re-pointing.** Before invoicing, `REPOINT_SHIPMENT_CUSTOMER` moves Shipment,
+  Order and Load and writes one audit row; a non-admin is refused. On an invoiced order it
+  refuses with `INVOICED: … invoice INV-000025 …`, and `REPOINT_INVOICED_CUSTOMER` credits it:
+  one `CREDIT_MEMO` of $2,500.00 for the balance, the invoice's `number`, `totalCents` and
+  `lines` **byte-identical before and after**, the order back on the gate as `UNBILLED` with
+  no `invoiceId`, the customer moved, and a replay with the same `idempotencyKey` writing
+  nothing. An invoice with money already applied is refused outright ("reverse the payment
+  before repointing"). It is owner/ADMIN **regardless of `arPostingAdminOnly`**, commissions
+  are recomputed as a write-off does, and `RESOLVE_REV_TAG` re-resolves the revenue tag the
+  customer rule decides while leaving a hand tag alone — all five of those were review
+  findings on the first cut.
+- **Create shipment** for a legacy load with none, owner/ADMIN, through the same
+  `BACKFILL_SHIPMENT` path the backfill script uses. Dev had **0** unlinked loads left, so the
+  verification seeds one legacy row, mints its Shipment and voids it again.
+- **Legacy CANCELED loads leave the calendar's Unscheduled strip**, as voided freight already
+  had. Dev currently has **0** canceled-and-unscheduled loads, so this one is proved by test
+  rather than by dev data, and the count is logged so Ryne can see why.
+- **Square** is a provider in the Step J framework — stub until credentials — with the
+  customer-import row shape it will feed the Car Shipping board declared and served by the
+  generic stub adapter.
+
+### Step R2 — the board
+
+- `/tms/shipments` lands on the seeded **Active Shipments** view (Open, Covered, Dispatched,
+  Arrived, Departed, Delivered checked; Hold, Reserved, Voided not), with the Aljex column
+  order and the department views as the other tabs. A 240px collapsible left panel carries the
+  filter-set controls, the column-template picker, the eight status checkboxes **with live
+  counts** (dev: Open 46 · Covered 0 · Dispatched 0 · Arrived 1 · Departed 3 · Delivered 857 ·
+  Hold 0 · Reserved 25 · Voided 122), the fifteen detail filters each with its own Exclude,
+  four Fixed/Range date filters, the tracking narrowings the pre-R2 board had, and Clear/Reset.
+- A filter set **is** a saved view. A column template is new, per user or shared: a private one
+  may be changed only by its owner — not even by an admin — a shared one by its owner or an
+  admin **without transferring ownership**, every column key is validated by name, and a view
+  whose template was deleted falls back to its own columns. All six proved on dev.
+- Whole-row colour from nine theme token pairs, legible on dark, voided struck through; the
+  Icon Key is the legend. Footer: records shown, a real refresh countdown, Get next 50,
+  Refresh, Export to CSV, Show Map, Icon Key, New Tab, Batch Task, Split Screen. Mass release
+  reaches AR **through** the Step F gate.
+- **Shipments is pinned to the very top of the sidebar**, above Brokerage, Assets and Car
+  Shipping, with its department views as children. Nobody's access changed — the pinned row is
+  visible to exactly whoever could see it inside BROKERAGE, and `RequirePage` keeps the same
+  landing redirect for a loads-only user.
+- Two things the deployed board turned up, fixed in `7127220` and the entry commit: the Status
+  cell printed MVMNT's `DEL` beside a checkbox reading `Delivered`, and every legacy row read
+  `DEL 0/2` because the stop array carries no departure stamps. The cell now speaks the board's
+  own vocabulary, from the same column the CSV uses, and freight that demonstrably moved with
+  no stop evidence shows the status alone rather than claiming nothing has happened.
+- The filter engine moved into `src/lib/shipmentViewDefs.ts`, which the directory Lambda
+  bundles by path, so the board and the server decide a view the same way — and the Lambda
+  bundle test is what caught the aliased import that would have broken the function build.
+
+### Review
+
+Fable reviewed the whole diff before the first commit and returned **7 blockers and 11
+shoulds**, every one real; all are closed. The blockers worth naming: the invoiced re-point
+credited only the open balance of a partly-paid invoice and silently re-pointed a fully paid
+one; it left commissions unadjusted; the dialog's `useId()` idempotency key is stable per tree
+position, so a second genuine credit-and-rebill of one shipment no-opped while reporting
+success; `REPOINT_INVOICED_CUSTOMER` was only admin-gated while `arPostingAdminOnly` held; the
+un-void resurrected loads canceled before the void; the rewritten board left Duplicate, Hold,
+Cancel and the tender actions wired to empty functions; and the seed sweep deactivated
+hand-written ownership rules.
+
+### Dev data left as found
+
+Every verification fixture is voided (never deleted), the three fixture customers are BLOCKED,
+the seeded legacy load is voided, and every temporary identity — the admin the script mints
+and the two non-admins it uses for the authorization checks — is deleted in a `finally`. No
+production table was read or written.
+
+- Plans written: `Docs/tms-build/R2-plan.md` (the board, from the vision read of Ryne's Aljex
+  screenshot) and `Docs/tms-build/P-plan.md` (P1–P11 with Ryne's 09:05 answers folded in;
+  voice is deferred, with the channel declared and disabled rather than stubbed).
+- Academy: new `shipments-board.md`, plus navigation, one-record, divisions, tracking,
+  integrations, release-to-accounting, unknown-customers and the index.
+
+**Decision needed (Ryne):** the car-shipping rule is bound to the dev customer named
+**AUTO SHIPPER** — confirm that is the right record, since Best Care's real customers are to
+come from Square later. Dev has no canceled-and-unscheduled loads and no unlinked loads left,
+so the calendar and Create-shipment changes are proved by test and by a seeded row rather than
+by live data; say if you want production-like data copied down to see them. And "Office" in the
+filter panel is the sales rep's Step I **team**, because this TMS has no branch-office record —
+tell me if you want a real office field instead.
+
 ## 2026-10-29 — Step K done on dev: Workflows, the four AI inbox roles and org/party memory
 
 Two commits — `9ae0a09` (the step), `361a859` (a `SAVE_SETTINGS` update expression that named
