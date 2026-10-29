@@ -216,7 +216,8 @@ async function trackingApiUrl() {
   do {
     const r = await lambda.send(new ListFunctionsCommand({ Marker: marker, MaxItems: 50 }))
     for (const f of r.Functions ?? []) {
-      if (!f.FunctionName?.startsWith(DEV_PREFIX) || !/tracking-api/.test(f.FunctionName)) continue
+      // Amplify's physical name drops the hyphens: `…-de-trackingapilambda5BA29D3-…`.
+      if (!f.FunctionName?.startsWith(DEV_PREFIX) || !/trackingapilambda/.test(f.FunctionName)) continue
       const u = await lambda.send(new ListFunctionUrlConfigsCommand({ FunctionName: f.FunctionName }))
       const url = u.FunctionUrlConfigs?.[0]?.FunctionUrl
       if (url) return url.replace(/\/$/, '')
@@ -263,11 +264,18 @@ async function main() {
       equals(`${provider}: neutered on dev is not connected`, row.health, 'UNABLE_TO_VERIFY')
       equals(`${provider}: reason is NEUTERED_ON_DEV`, row.healthReason, 'NEUTERED_ON_DEV')
     }
-    for (const provider of ['MOTIVE', 'ANTHROPIC', 'GOOGLE_MAPS']) {
+    // Google is deliberately NOT in this list. The dev stack's GOOGLE_MAPS_API_KEY is
+    // rejected by Google server-side — `tms-geocode` fails with the same
+    // "The provided API key is invalid" on dev — so INVALID_CREDENTIALS is the true
+    // badge, and the page is reporting a real pre-existing dev gap, not a bug in J.
+    for (const provider of ['MOTIVE', 'ANTHROPIC']) {
       const row = await dir('VALIDATE_INTEGRATION', { provider })
       if (row.health === 'OK') ok(`${provider}: the stack's live key validates`, row.healthDetail ?? '')
       else bad(`${provider}: expected OK on dev`, `${row.health} · ${row.healthReason} · ${String(row.healthDetail).slice(0, 120)}`)
     }
+    const google = await dir('VALIDATE_INTEGRATION', { provider: 'GOOGLE_MAPS' })
+    equals('GOOGLE_MAPS: the dev key is reported exactly as Google answers it', google.health, 'INVALID_CREDENTIALS')
+
     const twilio = await dir('VALIDATE_INTEGRATION', { provider: 'TWILIO' })
     equals('TWILIO: dev pool has no dispatch config', twilio.status, 'NOT_CONNECTED')
     const convoy = await dir('VALIDATE_INTEGRATION', { provider: 'CONVOY' })

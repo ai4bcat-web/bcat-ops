@@ -774,7 +774,7 @@ export const PROVIDERS: ProviderDescriptor[] = [
     settingsFields: [],
     capabilities: ['validate', 'track'],
     liveCapabilities: ['validate', 'track'],
-    validateHow: { describe: 'GET https://api.gomotive.com/v1/users/me with the API key.', liveCheck: 'MOTIVE_USERS_ME' },
+    validateHow: { describe: 'GET https://api.gomotive.com/v1/vehicle_locations with the API key — one row, the same read the hourly location sync makes.', liveCheck: 'MOTIVE_VEHICLE_LOCATIONS' },
     applicability: 'LIVE_CAPABLE',
     loadsRead: 'NONE',
     feeds: 'Own-truck positions, odometer, mileage and fault codes, and the driver app’s hours of service.',

@@ -2130,8 +2130,8 @@ describe('VALIDATE_INTEGRATION', () => {
   it('connects a STACK provider that answers, and keeps its 2xx body out of the row', async () => {
     const tables = integrationTables()
     ssmStore()
-    // Motive's /users/me answers with the account holder. A successful check must
-    // say that it worked, not who it worked as — nothing of this body is stored.
+    // Motive's vehicle list answers with drivers and positions. A successful check
+    // must say that it worked, not who it worked as — nothing of this body is stored.
     mockFetch({ status: 200, body: '{"user":{"email":"ryne@bcatcorp.com","phone":"630-555-0100"}}' })
     process.env.MOTIVE_API_KEY = 'motive-live-key'
 

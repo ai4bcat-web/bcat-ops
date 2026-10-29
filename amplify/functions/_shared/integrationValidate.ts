@@ -131,8 +131,8 @@ function requireCreds(
  *
  * `healthFrom` puts the message into `healthDetail` and into the events list,
  * both of which any signed-in reader of the Integration table can see. Motive's
- * `/users/me` is the account holder's name, e-mail and phone; HubSpot's contact
- * list is a real person; QBO's companyinfo is the company record. A successful
+ * vehicle list carries driver names and positions; HubSpot's contact list is a
+ * real person; QBO's companyinfo is the company record. A successful
  * check needs to say "it worked", not who it worked as. A non-2xx body IS the
  * diagnostic, so that one is kept (redacted).
  */
@@ -185,12 +185,15 @@ export async function validateProvider(
 
   try {
     switch (check) {
-      case 'MOTIVE_USERS_ME': {
+      case 'MOTIVE_VEHICLE_LOCATIONS': {
         const got = requireCreds(creds, ['MOTIVE_API_KEY'])
         if (!got.ok) return got.outcome
         const [key] = got.values
+        // The read the location sync already makes every hour, asked for one row.
+        // `/v1/users/me` answers 400 "id is invalid" to an org API key — that route
+        // wants a user token — so checking it would badge a working key as broken.
         return httpOutcome(
-          await call(fetchImpl, 'https://api.gomotive.com/v1/users/me', {
+          await call(fetchImpl, 'https://api.gomotive.com/v1/vehicle_locations?per_page=1&page_no=1', {
             method: 'GET',
             headers: { 'X-API-Key': key, Accept: 'application/json' },
           }),

@@ -151,12 +151,12 @@ export interface SettingsField {
 
 /** How `VALIDATE_INTEGRATION` proves the credential — one read call, or why there is none. */
 export interface ValidateHow {
-  /** Human sentence printed on the page: "GET https://api.gomotive.com/v1/users/me". */
+  /** Human sentence printed on the page: "GET https://api.gomotive.com/v1/vehicle_locations". */
   describe: string
   /** The adapter key the Lambda dispatches on; absent when nothing can be called. */
   liveCheck?:
     | 'OTR_BROKER_CHECK'
-    | 'MOTIVE_USERS_ME'
+    | 'MOTIVE_VEHICLE_LOCATIONS'
     | 'BLUE_INK_VEHICLES'
     | 'GOOGLE_GEOCODE'
     | 'ANTHROPIC_MODELS'
