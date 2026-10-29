@@ -2,6 +2,99 @@
 
 One entry per unit of work (newest first). Decisions needed from Ryne go under **Decision needed**.
 
+## 2026-10-29 — Step R done on dev: MVMNT UI, one Shipment record, three-business sidebar, Brokerage dashboard, Void, the accounting gate
+
+- **Deployed, in order, each after `npm run typecheck`, `npm run lint` (2 pre-existing warnings) and
+  `npm run test`:** `9cdab14` (the step, 387 files / 5,237 tests) → job **45 SUCCEED**; `de215c5`
+  (Fable's review fixes, 389 / 5,262) → job **46 SUCCEED**; `a895d1c` (calendar crash on a
+  Shipment-page load, section titles; 389 / 5,263) → job **47 SUCCEED**. The first R commit carries
+  Ryne's brief changes; the reference doc and the two MVMNT screenshots were already in `740e8a3`.
+  Deploys serialized; nothing pushed while a job ran. Data-stack template 732,260 → 745,586 bytes
+  (+13,326: three models, no GSI; the `delete` resolvers on Shipment and Load removed).
+- **What shipped** (plan `R-plan.md` + its Addendum; page mapping `R-nav-mapping.md`):
+  `src/features/tms` shell + kit (theme scoped to `.tms-shell` / `.tms-portal`, Inter, 175px
+  sidebar, 38px top bar, the list/filter/table/empty-state/footer anatomy, chart cards); every A–I
+  page re-skinned under `/tms/*` (Dashboard, Shipments, Rates, Invoicing with Receivable/Payable
+  tabs, Carriers, Factors, Customers, Locations, Vendors, Workflows, Academy, My Brokerage with
+  Settings/Users/Commissions/Reports/Audit/Divisions & ownership/Shipment views) with every old path
+  redirecting; the sidebars read one config grouped by the division tree: **BROKERAGE [BCAT
+  Logistics]**, **ASSETS [Ivan Cartage]**, **CAR SHIPPING [Best Care Auto Transport]**, **COMPANY**
+  (Users, Settings, Finances, Profit Review, Weekly Cash Check-in, Reddit Queue). Existing pages
+  keep their look; `/loads` (GridPage) is gone and redirects to `/tms/shipments`; new grant `tms`.
+  Workflows says it arrives in Step K; Academy renders `Docs/academy` and says the assistant
+  arrives in Step M — neither pretends to be more.
+- **One record.** The Shipments list carries driver, truck, division chip and sales rep; no
+  "Order" wording anywhere a user reads; `revDivision` / `revSubdivision` / `salesRepId` mirrored on
+  Shipment and Load. Booking Ivan Cartage writes the Load's pickup/delivery driver, stops[].driverId,
+  truck and dates (`src/lib/loadMirror.ts`); an outside carrier or a bounce clears them. Department
+  views (`ShipmentView`, 10 seeded) are sidebar children and board tabs; "Save as view" for owner/ADMIN.
+- **Taxonomy as data.** `OwnershipDivision` (any depth, ownership + flow settings), `OwnershipRule`
+  (ordered, first match wins, hand tag beats rules, `ALWAYS` catch-all), seeded by
+  `ENSURE_OWNERSHIP_SEED`; admin editors with drag ordering, "Test a shipment" and "Re-tag all".
+  Own fleet is `CARRIER_IS OWN_FLEET` (there is no Carrier row for Ivan Cartage — plan Addendum).
+- **PRO permanence.** `deleteLoad`, `onDeleteLoad` and `deleteShipment` no longer exist in the
+  deployed schema (introspected); `DELETE_SHIPMENT` / `RESTORE_SHIPMENT` resolve to "Unknown
+  action"; every delete button is gone (GridPage, SchedulerView, LoadDrawer, the board, the
+  detail). **Audit of what A–I exposed:** the generated `deleteLoad` mutation (hard delete,
+  client-writable Load, three UIs), `DELETE_SHIPMENT` + `RESTORE_SHIPMENT` (soft), the quote
+  revert's quiet soft delete, the convert-failure rollback and the CREATE_SHIPMENT rollback that
+  `Delete`d the Shipment/Order/Financials rows. All replaced by **VOID_SHIPMENT** (owner/ADMIN from
+  the token, reason required, PRO/legs/documents/history kept, Load CANCELED with its driver marks
+  cleared, apOpen/check-call cleared, audited, no un-void). 27 legacy soft deletes on dev became
+  voids. Void reaches every reader: credit exposure, AR aging, AR/AP worklists, invoice preview,
+  the tracking router, the notifier, carrier bills (TONU only).
+- **Release-to-accounting gate** (`src/lib/releaseGate.ts`, `_shared/releaseGateInput.ts`):
+  delivered, required documents (BOL, POD always; RATE_CON with an outside-carrier leg; the
+  customer's list), required references, carrier bill recorded or own-fleet leg, no open
+  exceptions. Enforced in READY_TO_INVOICE, SET_AR_STATUS, PREVIEW/GENERATE/BATCH invoicing,
+  PREVIEW/SEND_TO_FACTOR; the documents override and `invoiceEarly` admission are gone; the UI
+  prints the exact `missing[].message` list (Invoicing tab, AR card, batch refusals).
+- **Dashboard** `/tms/dashboard`: the 17 Classic charts in MVMNT order plus Ryne's nine
+  (status counts, DAT, AR/AP by rep, rep leaderboard, live tracking, tracking history, PODs
+  needed, POD timing p50/p90 by carrier), opening on `Division is BCAT Logistics` + this month,
+  group-by division/subdivision/rep/customer/carrier/status/month, chart picker, Classic +
+  saved views, CSV export. Real data only: with this month's window the Brokerage slice is a
+  true zero on dev (October pickups are own-fleet); widened to all divisions it reads 257 shipments
+  / $198,580.40 revenue grouped Ivan Cartage vs BCAT Logistics (`r-proof/dashboard-all-divisions.webp`).
+- **Backfills on dev** (plan → apply → second plan = no-op): `backfillRevDivision` seeded 7
+  divisions / 7 rules / 10 views, re-tagged **927 shipments: ASSETS 676 (LOCAL 490, BOX_TRUCK 108,
+  OWNER_OPERATOR 37), BROKERAGE 251, CAR_SHIPPING 0** (nothing in the data marks a car-shipping
+  load — plan Addendum), untagged 0, hand-tagged 0, 35 voided; sales reps: 918 orders carry no
+  rep, 9 name the deleted Step I proof identities and were left alone; the two DIRECT DRIVE
+  LOGISTICS loads without a shipment reported, not invented. `backfillLaneSamples --refresh`:
+  846 samples rewritten with the Step R facts + 13 live samples patched; second plan 0.
+- **Live proof** `scripts/devVerifyStepR.mjs` → **82/82** against job 47 with a temporary ADMIN
+  (suppressed invite, password never printed, deleted after) and a CUSTOMER_REP token minted
+  through the Users API: schema has no delete; seed idempotent; Ivan booking tags ASSETS/BOX_TRUCK
+  on Shipment AND Load and writes pickupDriverId / deliveryDriverId / stops[].driverId / truckId;
+  switching to an outside carrier clears them and tags BROKERAGE; hand tag survives a bounce;
+  CLEAR returns to the rules; SET_SALES_REP mirrors; the gate refuses with the exact list
+  (`Missing document: BOL; Missing document: POD`, `1 open exception`, `Missing document:
+  RATE_CON; Carrier charges not settled: …`), `override` is ignored, SET_AR_STATUS / GENERATE /
+  BATCH / PREVIEW all gated, two concurrent GENERATE_INVOICE calls issue one invoice, an invoiced
+  shipment cannot be voided, the rep token is refused (`requires owner or ADMIN`), the admin void
+  keeps the PRO, 3 legs and 2 documents, cancels the Load and clears its driver, refuses every
+  write afterwards and reads VOIDED in the invoice preview; RETAG dry run writes nothing.
+- **Browser pass** (temporary admin, dev URL): Shipments list and view tabs, shipment detail
+  (Division card "Ivan Cartage · Box Trucks, tagged by rule Box truck driver"; Carrier/Driver tab
+  "On the calendar · in Dispatch · pays through driver settlements"), `/calendar` showing the
+  Ivan-booked proof shipment S000070 on Zak Pace, **`/driver-pay-box-trucks` "Pull from calendar"
+  listing S000070-1 at $950.00 gross on Zak Pace's check** (then cleared and the shipment voided —
+  the Load's driver is null again), Divisions & ownership, Invoicing. Screenshots without customer
+  data in `Docs/tms-build/r-proof/`.
+- **Found and fixed on the way:** the Day calendar crashed on any Shipment-page load
+  (`pickupApptType` null → `toUpperCase`), regression test added; Fable's review (one BLOCKER:
+  voided shipments still consumed credit; three MAJOR; five MINOR) all fixed in `de215c5`.
+- **Decisions needed (Ryne):** (1) AMAZON drivers tag ASSETS with no subsidiary — add an Amazon
+  row under Ivan Cartage? (2) No un-void exists; a mistaken void stays voided. (3) CAR_SHIPPING
+  has no data signal; the seed rule matches references containing vehicle / auto transport /
+  car shipping — name the customers instead? (4) The legacy calendar's "Unscheduled" strip still
+  lists CANCELED loads (voided shipments' loads among them) — hide canceled loads there?
+  (5) `BACKFILL_SHIPMENT` still maps a legacy load's readyToInvoice → UNBILLED without the gate
+  (legacy import only; `backfillLegacyAr` turns them LEGACY). (6) The Basic KPIs card prints
+  "No data" under its tiles when the by-month series is empty — cosmetic.
+- **Step R done.** Next: Step J (`Docs/tms-build/J-plan.md`).
+
 ## 2026-10-28 — Step I proved live on dev (47/47); every backfill rerun on the refreshed data; R next
 
 - **Deployed.** `50787c3` → job **41 SUCCEED**, `3da9683` → job **42 SUCCEED**, `edf1f43` (the
