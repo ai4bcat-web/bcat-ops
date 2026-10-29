@@ -59,6 +59,7 @@ import {
   readStops,
   type Row,
 } from '../_shared/shipmentStore'
+import { isVoided } from '../_shared/voided'
 import {
   DEFAULT_REQUIRED_CARRIER_UPLOAD_TYPES,
   DEFAULT_UPLOAD_LINK_EXPIRY_DAYS,
@@ -418,9 +419,10 @@ async function notifyRecord(record: StreamRecord, deps: NotifierDeps): Promise<N
     console.warn('[shipment-notifier] load points at a shipment that is not there', { loadId, shipmentId })
     return summary
   }
-  // A shipment somebody put in the trash still has a Load row and still gets stream
-  // records; it has no business e-mailing a customer.
-  if (text(shipment.deletedAt)) return summary
+  // A voided shipment still has a Load row and still gets stream records; it has no
+  // business e-mailing a customer. `deletedAt` is the pre-R soft delete and counts
+  // as a void, which is what `isVoided` reads.
+  if (isVoided(shipment)) return summary
 
   const now = deps.now()
   let deliveredAt = text(shipment.deliveredAt) || null

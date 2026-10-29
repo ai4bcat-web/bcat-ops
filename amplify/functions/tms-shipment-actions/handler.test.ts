@@ -691,6 +691,23 @@ describe('CREATE_SHIPMENT', () => {
     const bundle = (await call('CREATE_SHIPMENT', { customerId: 'cus-1' })) as { shipment: Row }
     expect(bundle.shipment.mode).toBe('DRAYAGE')
   })
+
+  it('audits the void when the leg cannot be created, so the consumed PRO has a history', async () => {
+    loadCreate.mockResolvedValueOnce({ data: null, errors: [{ message: 'Load create refused' }] })
+
+    await expect(call('CREATE_SHIPMENT', { customerId: 'cus-1' })).rejects.toThrow(/Load create/)
+
+    const shipment = [...table(TABLES.shipment).values()][0]
+    expect(shipment.voidedAt).toBeTruthy()
+    const audit = [...table(TABLES.audit).values()].find((row) => row.action === 'VOID_SHIPMENT')
+    expect(audit).toMatchObject({ entityType: 'SHIPMENT', entityId: String(shipment.id) })
+    expect(JSON.parse(String(audit!.changes))).toMatchObject({
+      number: 'S000001',
+      status: 'DRAFT',
+      viaCreate: true,
+      reason: expect.stringMatching(/Load create failed/),
+    })
+  })
 })
 
 // ── SAVE_ORDER_FORM ──────────────────────────────────────────────────────────
@@ -1232,6 +1249,34 @@ describe('ownership tagging', () => {
       expect(tags.shipment, `shipment ${JSON.stringify(driver)}`).toMatchObject(expected)
       expect(tags.load, `load ${JSON.stringify(driver)}`).toMatchObject(expected)
     }
+  })
+
+  it('tags BROKERAGE right after an own-fleet assignment, even when the leg index is stale', async () => {
+    const ids = await createDraft()
+    await saveForm(ids.shipmentId)
+    seedDriver('drv-stale', { fleetGroup: 'BOX_TRUCK' })
+    await call('ASSIGN_ASSET', { loadId: ids.loadId, driverId: 'drv-stale' })
+    expect(tagsOf(ids.shipmentId, ids.loadId).shipment).toMatchObject({
+      revDivision: 'ASSETS', revSubdivision: 'BOX_TRUCK',
+    })
+
+    // What an eventually-consistent GSI looks like a moment after the write: the
+    // own-fleet leg is still ACTIVE on it and comes back first, and the carrier leg
+    // ASSIGN_CARRIER is about to write is not on it at all.
+    const stale = [...table(TABLES.carrier).values()].map((row) => ({ ...row }))
+    send.mockImplementation(async (cmd: MockCommand) => {
+      if (cmd.__type === 'Query' && cmd.input.IndexName === 'loadCarriersByShipmentId') {
+        return { Items: stale.map((row) => marshall(row, { removeUndefinedValues: true })) }
+      }
+      return runCommand(cmd)
+    })
+
+    await call('ASSIGN_CARRIER', { loadId: ids.loadId, carrierName: 'RELIABLE XPRESS', carrierRateCents: 150_000 })
+
+    expect(tagsOf(ids.shipmentId, ids.loadId)).toMatchObject({
+      shipment: { revDivision: 'BROKERAGE', revSubdivision: null, revTagSource: 'RULE' },
+      load: { revDivision: 'BROKERAGE', revTagSource: 'RULE' },
+    })
   })
 
   it('tags an outside carrier BROKERAGE, and CAR_SHIPPING when the freight is vehicles', async () => {

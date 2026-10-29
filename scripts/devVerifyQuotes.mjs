@@ -6,9 +6,11 @@
  * of step H through the DEPLOYED router and the DEPLOYED public Function URL —
  * quote → link → counter → accept → convert → revert, the credit block, the other
  * sell rungs, the carrier offer round from request to booking, the expiry sweep and
- * the lane history — asserting the observable result of every step. It touches no
- * copied customer, carrier, load or quote, it never prints a password or a whole
- * token, and it refuses to run against anything but the dev API.
+ * the lane history — asserting the observable result of every step. Every fixture
+ * shipment it builds is retired with VOID_SHIPMENT, because there is no delete: the
+ * PRO stays taken. It touches no copied customer, carrier, load or quote, it never
+ * prints a password or a whole token, and it refuses to run against anything but the
+ * dev API.
  *
  *   BCAT_EMAIL=… BCAT_PASSWORD=… node scripts/devVerifyQuotes.mjs
  */
@@ -232,20 +234,20 @@ async function main() {
   }
 
   /**
-   * Cancel, then soft-delete: a BOOKED shipment refuses the delete outright, and a
-   * shipment that is already gone is left alone. Declared out here because the
-   * cleanup runs in the `finally`, whatever happened in the middle.
+   * Step R. A fixture is retired by voiding it; there is no delete anywhere. The PRO
+   * stays taken, the legs and charges stay readable, and every write path refuses the
+   * shipment from then on. A shipment that is already voided is left alone. Declared
+   * out here because the cleanup runs in the `finally`, whatever happened in the
+   * middle.
    */
   const retireShipment = async (id, label) => {
-    for (const step of ['cancel', 'delete']) {
-      const current = await shipAction('GET_SHIPMENT_BUNDLE', { shipmentId: id }).catch(() => null)
-      if (!current || current.shipment.deletedAt) return
-      const args = { shipmentId: id, expectedUpdatedAt: current.shipment.updatedAt, reason: 'dev verification fixture' }
-      await shipAction(
-        step === 'cancel' ? 'SET_SHIPMENT_STATUS' : 'DELETE_SHIPMENT',
-        step === 'cancel' ? { ...args, status: 'CANCELED' } : args,
-      ).catch((err) => console.log(`  (${label} ${step} skipped: ${String(err.message).slice(0, 90)})`))
-    }
+    const current = await shipAction('GET_SHIPMENT_BUNDLE', { shipmentId: id }).catch(() => null)
+    if (!current || current.shipment.voidedAt || current.shipment.deletedAt) return
+    await shipAction('VOID_SHIPMENT', {
+      shipmentId: id,
+      expectedUpdatedAt: current.shipment.updatedAt,
+      reason: 'Dev verification fixture',
+    }).catch((err) => console.log(`  (${label} void skipped: ${String(err.message).slice(0, 90)})`))
   }
 
   try {
@@ -655,10 +657,12 @@ async function main() {
     }
 
     const revertedBundle = await shipAction('GET_SHIPMENT_BUNDLE', { shipmentId: firstShipmentId })
-    if (revertedBundle.shipment.deletedAt) {
-      ok('the shipment the quote built is soft-deleted by the revert', `${revertedBundle.shipment.number} deletedAt ${revertedBundle.shipment.deletedAt}`)
+    // Step R: the revert voids the shipment it took back. The PRO stays taken.
+    const revertedVoidedAt = revertedBundle.shipment.voidedAt ?? revertedBundle.shipment.deletedAt
+    if (revertedVoidedAt) {
+      ok('the shipment the quote built is voided by the revert', `${revertedBundle.shipment.number} voidedAt ${revertedVoidedAt}`)
     } else {
-      bad('the shipment the quote built is soft-deleted', `${revertedBundle.shipment.number} is still live`)
+      bad('the shipment the quote built is voided', `${revertedBundle.shipment.number} is still live`)
     }
 
     const reconverted = await shipAction('CONVERT_QUOTE', { quoteId, acceptedVia: 'LINK' })
@@ -666,8 +670,9 @@ async function main() {
     noteShipment(reconverted.bundle, 'the live conversion')
     const liveQuoteRow = await getQuote(quoteId)
     if (reconverted.quote.status === 'WON' && liveShipmentId !== firstShipmentId
-      && !reconverted.bundle.shipment.deletedAt && liveQuoteRow.shipmentId === liveShipmentId) {
-      ok('converting again works and leaves exactly one live shipment', `${revertedBundle.shipment.number} deleted · ${reconverted.bundle.shipment.number} live and on the quote`)
+      && !reconverted.bundle.shipment.voidedAt && !reconverted.bundle.shipment.deletedAt
+      && liveQuoteRow.shipmentId === liveShipmentId) {
+      ok('converting again works and leaves exactly one live shipment', `${revertedBundle.shipment.number} voided · ${reconverted.bundle.shipment.number} live and on the quote`)
     } else {
       bad('converting again leaves one live shipment', JSON.stringify({ status: reconverted.quote.status, live: liveShipmentId, first: firstShipmentId, onQuote: liveQuoteRow.shipmentId }).slice(0, 220))
     }
@@ -1191,19 +1196,19 @@ async function main() {
     for (const row of made.shipments) {
       await retireShipment(row.id, row.label)
       const after = await shipAction('GET_SHIPMENT_BUNDLE', { shipmentId: row.id }).catch(() => null)
-      const gone = !!after?.shipment.deletedAt
+      const gone = !!(after?.shipment.voidedAt ?? after?.shipment.deletedAt)
       if (!gone) standing.push(`${row.number} (${row.id}) — ${row.label}, status ${after?.shipment.status ?? 'unreadable'}`)
     }
     if (standing.length === 0) {
-      ok('every fixture shipment was soft-deleted', made.shipments.map((s) => s.number).join(', ') || 'none were built')
+      ok('every fixture shipment was voided', made.shipments.map((s) => s.number).join(', ') || 'none were built')
     } else {
-      bad('every fixture shipment was soft-deleted', `still live: ${standing.join(' · ')}`)
+      bad('every fixture shipment was voided', `still live: ${standing.join(' · ')}`)
     }
 
     console.log('\ndev-only rows left behind by this run:')
     console.log(`  customers: ${made.customers.join(' · ') || 'none'}`)
     console.log(`  carriers:  ${made.carriers.join(' · ') || 'none'}`)
-    console.log(`  shipments: ${standing.length === 0 ? 'all soft-deleted' : `STILL LIVE — ${standing.join(' · ')}`}`)
+    console.log(`  shipments: ${standing.length === 0 ? 'all voided (PROs kept)' : `STILL LIVE — ${standing.join(' · ')}`}`)
     console.log(`  quotes (kept, never deleted): ${made.quotes.join(' · ') || 'none'}`)
   }
 

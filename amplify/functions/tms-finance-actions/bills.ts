@@ -261,6 +261,7 @@ export async function previewBill(input: Row, caller: Caller): Promise<Row> {
     loadCarrier: context.loadCarrier,
     load: context.load,
     carrier: context.carrier,
+    shipment: context.shipment,
     charges: context.charges,
     existingBills: context.existingBills,
   })
@@ -326,6 +327,7 @@ export async function recordBill(input: Row, caller: Caller): Promise<Row> {
     loadCarrier: context.loadCarrier,
     load: context.load,
     carrier: context.carrier,
+    shipment: context.shipment,
     charges: context.charges,
     existingBills: context.existingBills,
   })

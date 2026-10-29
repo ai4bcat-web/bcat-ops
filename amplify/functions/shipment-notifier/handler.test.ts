@@ -234,6 +234,21 @@ describe('notifyLoadStream', () => {
     expect(db.all(TABLES.shipmentNotice)).toHaveLength(1)
   })
 
+  it('says nothing to the customer about a voided shipment', async () => {
+    const { db, ses, deps } = setup()
+    db.seed(TABLES.shipment, {
+      __typename: 'Shipment', id: 'ship-1', number: 'S-1001', status: 'DISPATCHED',
+      customerId: 'cus-1', customerName: 'Acme Foods', version: 4,
+      voidedAt: '2026-10-28T10:00:00.000Z', voidedBy: 'ryne@bcatcorp.com', voidReason: 'Double-entered',
+    })
+
+    const result = await notifyLoadStream(moved(loadRow(), loadRow({ status: 'IN_TRANSIT' })), deps)
+
+    expect(result).toMatchObject({ considered: 1, milestones: 0, sent: 0, podRequests: 0 })
+    expect(ses.sent).toHaveLength(0)
+    expect(db.all(TABLES.shipmentNotice)).toHaveLength(0)
+  })
+
   it('holds the customer milestone and the delivery stamp until the last leg has delivered', async () => {
     const { db, ses, deps } = setup()
     const legTwo = loadRow({ id: 'load-2', leg: 2, loadNumber: 'S-1001-2', status: 'IN_TRANSIT', activeLoadCarrierId: null })

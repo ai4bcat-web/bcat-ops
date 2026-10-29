@@ -253,6 +253,7 @@ describe('deliveredNotInvoiced', () => {
     shipment({ id: 's5', number: 'B1005', status: 'IN_TRANSIT', deliveredAt: null }),
     shipment({ id: 's6', number: 'B1006', deliveredAt: '2026-10-02T12:00:00Z' }),
     shipment({ id: 's7', number: 'B1007', deliveredAt: '2026-10-02T12:00:00Z' }),
+    shipment({ id: 's8', number: 'B1008', deliveredAt: '2026-10-02T12:00:00Z', voidedAt: '2026-10-02T13:00:00Z' }),
   ]
   const orders = [
     order({ id: 'o1', shipmentId: 's1', arStatus: 'DOCS_NEEDED', revenueCents: 150_000 }),
@@ -285,6 +286,11 @@ describe('deliveredNotInvoiced', () => {
     const rows = deliveredNotInvoiced([order({ id: 'o1', shipmentId: 's1', revenueCents: null })], ships, '2026-10-08')
     expect(rows).toHaveLength(1)
     expect(rows[0].revenueCents).toBe(0)
+  })
+
+  it('drops a voided shipment, not just a pre-R soft delete', () => {
+    const rows = deliveredNotInvoiced([order({ id: 'o9', shipmentId: 's8', arStatus: 'UNBILLED' })], ships, '2026-10-08')
+    expect(rows).toEqual([])
   })
 })
 

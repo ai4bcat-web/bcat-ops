@@ -566,6 +566,15 @@ describe('SEND_TRACKING_LINK', () => {
     expect(links()).toHaveLength(0)
   })
 
+  it('refuses a voided shipment — the leg is still ACTIVE but the freight is gone', async () => {
+    seed({ shipment: { voidedAt: '2026-01-03T00:00:00.000Z', voidReason: 'Duplicate' } })
+
+    await expect(call('SEND_TRACKING_LINK', { loadCarrierId: 'lc-1', via: 'COPY' })).rejects.toThrow(
+      /Shipment BC1001 is voided/,
+    )
+    expect(links()).toHaveLength(0)
+  })
+
   it('refuses an assignment the carrier already bounced off', async () => {
     seed({ loadCarrier: { status: 'BOUNCED' } })
 
@@ -771,12 +780,19 @@ describe('SEND_CUSTOMER_LINK', () => {
     expect(links()).toHaveLength(0)
   })
 
-  it('refuses a shipment in the trash', async () => {
-    seed({ shipment: { deletedAt: '2026-01-03T00:00:00.000Z' } })
+  it('refuses a voided shipment, and reads the pre-R soft delete as a void too', async () => {
+    seed({ shipment: { voidedAt: '2026-01-03T00:00:00.000Z' } })
 
     await expect(
       call('SEND_CUSTOMER_LINK', { shipmentId: 'shp-1', expectedVersion: 3, via: 'COPY', to: [] }),
-    ).rejects.toThrow(/trash/)
+    ).rejects.toThrow(/Shipment BC1001 is voided/)
+    expect(links()).toHaveLength(0)
+
+    seed({ shipment: { voidedAt: null, deletedAt: '2026-01-03T00:00:00.000Z' } })
+
+    await expect(
+      call('SEND_CUSTOMER_LINK', { shipmentId: 'shp-1', expectedVersion: 3, via: 'COPY', to: [] }),
+    ).rejects.toThrow(/Shipment BC1001 is voided/)
   })
 
   it('refuses a stale expectedVersion', async () => {
@@ -927,6 +943,14 @@ describe('TEXT_DRIVER', () => {
     expect(result).toMatchObject({ smsStatus: 'FAILED', smsError: expect.stringContaining('No driver phone') })
   })
 
+  it('refuses to text the driver on a voided shipment', async () => {
+    seed({ shipment: { voidedAt: '2026-01-03T00:00:00.000Z' } })
+
+    await expect(call('TEXT_DRIVER', { loadCarrierId: 'lc-1', body: 'Where are you?' })).rejects.toThrow(
+      /Shipment BC1001 is voided/,
+    )
+  })
+
   it('returns the DispatchMessage id when the text goes out', async () => {
     seed()
     dispatchConfig.mockResolvedValue({
@@ -1030,6 +1054,15 @@ describe('SEND_UPLOAD_LINK', () => {
 
     expect(early.emailStatus).toBe('COPY')
     expect(links()).toHaveLength(1)
+  })
+
+  it('refuses to ask for paperwork on a voided shipment', async () => {
+    seed({ load: { status: 'DELIVERED' }, shipment: { voidedAt: '2026-01-03T00:00:00.000Z' } })
+
+    await expect(call('SEND_UPLOAD_LINK', { loadCarrierId: 'lc-1', via: 'COPY' })).rejects.toThrow(
+      /Shipment BC1001 is voided/,
+    )
+    expect(links()).toHaveLength(0)
   })
 
   it('re-mails the same token, and mints a new one only on regenerate', async () => {
@@ -1210,6 +1243,16 @@ describe('SEND_MILESTONE_NOTICE', () => {
       call('SEND_MILESTONE_NOTICE', { shipmentId: 'shp-1', milestone: 'DELIVERED', via: 'COPY' }),
     ).rejects.toThrow(/Submit the order/)
   })
+
+  it('refuses to tell the customer anything about a voided shipment', async () => {
+    seed({ shipment: { status: 'DELIVERED', voidedAt: '2026-01-03T00:00:00.000Z' } })
+    seedCustomer()
+
+    await expect(
+      call('SEND_MILESTONE_NOTICE', { shipmentId: 'shp-1', milestone: 'DELIVERED', via: 'EMAIL' }),
+    ).rejects.toThrow(/Shipment BC1001 is voided/)
+    expect(notices()).toHaveLength(0)
+  })
 })
 
 // ── EMAIL_DOCUMENTS ──────────────────────────────────────────────────────────
@@ -1236,6 +1279,18 @@ describe('EMAIL_DOCUMENTS', () => {
         shipmentId: 'shp-1', documentIds: ['sdoc-ci'], to: ['ap@acme.test'], recipientKind: 'CUSTOMER',
       }),
     ).rejects.toThrow(/does not go to the customer/)
+  })
+
+  it('refuses to e-mail documents off a voided shipment', async () => {
+    seed({ shipment: { voidedAt: '2026-01-03T00:00:00.000Z' } })
+    seedDocument()
+
+    await expect(
+      call('EMAIL_DOCUMENTS', {
+        shipmentId: 'shp-1', documentIds: ['sdoc-1'], to: ['ap@acme.test'], recipientKind: 'CUSTOMER',
+      }),
+    ).rejects.toThrow(/Shipment BC1001 is voided/)
+    expect(notices()).toHaveLength(0)
   })
 
   it('refuses a carrier-portal upload nobody has reviewed yet', async () => {

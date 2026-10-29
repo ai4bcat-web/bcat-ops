@@ -48,6 +48,20 @@ function baseSource() {
     ],
     Load: [
       { id: 'lod-1', shipmentId: 'shp-1', loadNumber: '1001', status: 'DELIVERED' },
+      // shp-4's mirrored load: soft-deleted a year ago and still on a driver's
+      // calendar, still on a truck, still flagged ready to bill.
+      {
+        id: 'lod-4', shipmentId: 'shp-4', loadNumber: '1004', status: 'ASSIGNED',
+        pickupDriverId: 'drv-1', deliveryDriverId: 'drv-1', truckId: 'trk-9', readyToInvoice: true,
+        stops: JSON.stringify([
+          { id: 's0', type: 'pickup', sequence: 0, appt: '2026-04-20T08:00:00.000Z', driverId: 'drv-1', truckId: 'trk-9' },
+          { id: 's1', type: 'delivery', sequence: 1, appt: '2026-04-21T08:00:00.000Z', driverId: 'drv-1' },
+        ]),
+      },
+      // shp-4's second leg: nobody on it and nothing to bill — nothing to clear.
+      { id: 'lod-4b', shipmentId: 'shp-4', loadNumber: '1004-2', status: 'CANCELED', readyToInvoice: false },
+      // shp-5's load was canceled already, but a driver is still named on it.
+      { id: 'lod-5', shipmentId: 'shp-5', loadNumber: '1005', status: 'CANCELED', pickupDriverId: 'drv-2', readyToInvoice: false },
       // The two the Step B backfill left unlinked: no customer row carries the name.
       { id: 'lod-direct-1', loadNumber: '9001', customer: 'DIRECT DRIVE LOGISTICS' },
       { id: 'lod-direct-2', loadNumber: '9002', customer: 'DIRECT DRIVE LOGISTICS' },
@@ -163,6 +177,34 @@ describe('backfillRevDivision — legacy soft deletes become voids', () => {
     );
     expect(planLegacyVoids(shipments)).toHaveLength(0);
   });
+
+  it('plans the mirrored loads a void has to take our fleet off, and only those', () => {
+    const source = baseSource();
+    const [forShp4, forShp5] = planLegacyVoids(source.Shipment, source.Load);
+
+    // lod-4b carries no driver and nothing to bill, so there is nothing to write.
+    expect(forShp4.loads.map((l) => l.loadId)).toEqual(['lod-4']);
+    expect(forShp4.loads[0]).toMatchObject({
+      loadNumber: '1004',
+      driverMarks: [
+        'pickupDriverId', 'deliveryDriverId', 'truckId',
+        'stops[0].driverId', 'stops[0].truckId', 'stops[1].driverId',
+      ],
+      readyToInvoice: true,
+      canceling: true,
+    });
+    // The stops lose our fleet and keep everything else they said.
+    expect(forShp4.loads[0].stops).toEqual([
+      { id: 's0', type: 'pickup', sequence: 0, appt: '2026-04-20T08:00:00.000Z', driverId: null },
+      { id: 's1', type: 'delivery', sequence: 1, appt: '2026-04-21T08:00:00.000Z', driverId: null },
+    ]);
+
+    // Canceled already, but still naming a driver: cleared without re-canceling.
+    expect(forShp5.loads[0]).toMatchObject({
+      loadId: 'lod-5', driverMarks: ['pickupDriverId'], readyToInvoice: false, canceling: false,
+    });
+    expect(forShp5.loads[0].stops).toBeNull();
+  });
 });
 
 describe('backfillRevDivision — what it reports', () => {
@@ -197,6 +239,10 @@ describe('backfillRevDivision — what it reports', () => {
     expect(printed).toContain('gone@bcatcorp.com: 1 shipment(s) — no UserProfile carries it');
     expect(printed).toContain('Legacy soft deletes to void: 2');
     expect(printed).toContain('DIRECT DRIVE LOGISTICS');
+    // The loads a person has to know about: a driver's calendar and a settlement move.
+    expect(printed).toContain('Mirrored loads cleared with them: 2');
+    expect(printed).toContain('lod-4 (1004) on BC1004 — pickupDriverId, deliveryDriverId, truckId, stops[0].driverId, stops[0].truckId, stops[1].driverId, readyToInvoice');
+    expect(printed).toContain('lod-5 (1005) on BC1005 — pickupDriverId (already CANCELED)');
   });
 });
 
@@ -307,6 +353,43 @@ describe('backfillRevDivision — apply', () => {
     expect(calls.dynamo.some((c) => c.input.Item?.action === 'VOID_SHIPMENT')).toBe(true);
   });
 
+  it('takes our fleet off the mirrored loads in the same step as the void', async () => {
+    const plan = buildRevDivisionPlan({ source: baseSource(), retag: RETAG, environment: 'dev', suffix: DEV_TABLE_SUFFIX });
+    const { calls, client, doc } = harness();
+
+    const report = await applyRevDivisionPlan({ client, doc, plan, suffix: DEV_TABLE_SUFFIX });
+
+    expect(report.loadsCleared).toBe(2);
+    expect(report.failures).toHaveLength(0);
+
+    const cleared = calls.dynamo.find((c) => c.input.Key?.id === 'lod-4');
+    expect(cleared.input.TableName).toBe(`Load-${DEV_TABLE_SUFFIX}`);
+    for (const clause of [
+      'pickupDriverId = :null', 'deliveryDriverId = :null', 'truckId = :null',
+      'trailerNumber = :null', 'readyToInvoice = :false', 'stops = :stops',
+      '#status = :canceled', 'statusSource = :system',
+    ]) {
+      expect(cleared.input.UpdateExpression).toContain(clause);
+    }
+    expect(cleared.input.ExpressionAttributeValues).toMatchObject({ ':null': null, ':false': false, ':canceled': 'CANCELED', ':system': 'SYSTEM' });
+    // The stops go back as the AWSJSON string the column holds, our fleet off them.
+    expect(JSON.parse(cleared.input.ExpressionAttributeValues[':stops'])).toEqual([
+      { id: 's0', type: 'pickup', sequence: 0, appt: '2026-04-20T08:00:00.000Z', driverId: null },
+      { id: 's1', type: 'delivery', sequence: 1, appt: '2026-04-21T08:00:00.000Z', driverId: null },
+    ]);
+
+    // Already CANCELED, and nothing re-cancels it; its driver still comes off.
+    const already = calls.dynamo.find((c) => c.input.Key?.id === 'lod-5');
+    expect(already.input.UpdateExpression).toContain('pickupDriverId = :null');
+    expect(already.input.UpdateExpression).not.toContain('#status');
+    // Nothing is written for the leg that carried no driver and nothing to bill.
+    expect(calls.dynamo.some((c) => c.input.Key?.id === 'lod-4b')).toBe(false);
+
+    // The audit names the loads, so a person can check those drivers' calendars.
+    const audit = calls.dynamo.find((c) => c.input.Item?.action === 'VOID_SHIPMENT' && c.input.Item.entityId === 'shp-4');
+    expect(JSON.parse(audit.input.Item.changes).loadsCleared).toEqual(['lod-4']);
+  });
+
   it('counts a shipment voided since the plan as already done, not as a failure', async () => {
     const plan = buildRevDivisionPlan({ source: baseSource(), retag: RETAG, environment: 'dev', suffix: DEV_TABLE_SUFFIX });
     const { client, doc } = harness({ conditionFails: true });
@@ -316,6 +399,8 @@ describe('backfillRevDivision — apply', () => {
     expect(report.voidsWritten).toBe(0);
     expect(report.voidsAlready).toBe(2);
     expect(report.failures).toHaveLength(0);
+    // The real void cleared its own loads; this run must not write over them.
+    expect(report.loadsCleared).toBe(0);
   });
 
   it('refuses to write to production even with a plan in hand', async () => {

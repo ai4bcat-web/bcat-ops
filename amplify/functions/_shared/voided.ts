@@ -10,7 +10,7 @@
  * carry it are voided too — the field stays in the schema (additive rule), and a
  * reader that only looked at `voidedAt` would put those shipments back on the board.
  */
-import type { Row } from '../_shared/shipmentStore'
+import type { Row } from './shipmentStore'
 
 /** The shape every caller actually has: a shipment row, however it was read. */
 export type VoidableShipment = Pick<Row, never> & {

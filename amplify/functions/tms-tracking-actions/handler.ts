@@ -63,6 +63,7 @@ import {
   type Row,
   type StopShape,
 } from '../_shared/shipmentStore'
+import { isVoided } from '../_shared/voided'
 import { DispatchStore, tablesFromEnv } from '../_shared/dispatchStore'
 import { loadDispatchConfig, type DispatchConfig } from '../_shared/dispatchConfig'
 import { sendDispatchText, type SendDeps } from '../_shared/dispatchSend'
@@ -374,6 +375,27 @@ const transact = (items: TransactWriteItem[], label: string) => storeTransact(dy
 function getSettings(): Promise<Row | null> {
   if (!TMS_SETTINGS_TABLE_NAME) return Promise.resolve(null)
   return getById(TMS_SETTINGS_TABLE_NAME, SETTINGS_ID)
+}
+
+/**
+ * The shipment behind a send, refused when it is voided.
+ *
+ * Void is the only way a shipment leaves the working set, and it deliberately
+ * leaves `status` alone — so `UNTRACKABLE_SHIPMENT_STATUSES` never catches it and
+ * a stale tab could otherwise e-mail a customer a link, a "picked up" notice or a
+ * paperwork request for freight that no longer exists. Nothing goes out of this
+ * router about a voided shipment.
+ */
+async function liveShipment(shipmentId: string): Promise<Row> {
+  const shipment = await getById(SHIPMENT_TABLE_NAME, shipmentId)
+  if (!shipment) throw new Error(`Shipment not found: ${shipmentId}`)
+  assertLiveShipment(shipment, shipmentId)
+  return shipment
+}
+
+function assertLiveShipment(shipment: Row, shipmentId: string): void {
+  if (!isVoided(shipment)) return
+  throw new Error(`Shipment ${optionalString(shipment.number, 60) ?? shipmentId} is voided`)
 }
 
 /** Division's primary key is `key`, not `id`, so it cannot go through `getById`. */
@@ -690,7 +712,7 @@ async function sendTrackingLink(input: Row, caller: Caller): Promise<Row> {
 
   const loadId = String(loadCarrier.loadId)
   const shipmentId = String(loadCarrier.shipmentId)
-  const load = await getById(LOAD_TABLE_NAME, loadId)
+  const [load] = await Promise.all([getById(LOAD_TABLE_NAME, loadId), liveShipment(shipmentId)])
   if (!load) throw new Error(`Load not found: ${loadId}`)
   const loadStatus = String(load.status ?? '')
   if (CLOSED_LOAD_STATUSES.includes(loadStatus)) {
@@ -952,9 +974,7 @@ async function sendCustomerLink(input: Row, caller: Caller): Promise<Row> {
   const regenerate = input.regenerate === true
   if (via === 'EMAIL' && to.length === 0) throw new Error('A customer link needs at least one recipient')
 
-  const shipment = await getById(SHIPMENT_TABLE_NAME, shipmentId)
-  if (!shipment) throw new Error(`Shipment not found: ${shipmentId}`)
-  if (shipment.deletedAt) throw new Error('That shipment is in the trash; restore it before sending a tracking link')
+  const shipment = await liveShipment(shipmentId)
   const status = String(shipment.status ?? '')
   if (UNTRACKABLE_SHIPMENT_STATUSES.includes(status)) {
     throw new Error(
@@ -1111,6 +1131,7 @@ async function textDriver(input: Row, caller: Caller): Promise<Row> {
 
   const loadCarrier = await getById(LOAD_CARRIER_TABLE_NAME, loadCarrierId)
   if (!loadCarrier) throw new Error(`Load carrier not found: ${loadCarrierId}`)
+  await liveShipment(String(loadCarrier.shipmentId))
 
   const phone = toE164Strict(optionalString(loadCarrier.driverPhone, 40))
   if (!phone) {
@@ -1406,6 +1427,7 @@ async function sendUploadLink(input: Row, caller: Caller): Promise<Row> {
     getSettings(),
   ])
   if (!load) throw new Error(`Load not found: ${loadId}`)
+  if (shipment) assertLiveShipment(shipment, shipmentId)
   // Asking for a POD before the freight is off the truck wastes everybody's time —
   // but a carrier who already has the signed paperwork can be asked early on purpose.
   if (!DELIVERED_LOAD_STATUSES.includes(String(load.status ?? '')) && !early) {
@@ -1572,8 +1594,7 @@ async function sendMilestoneNotice(input: Row, caller: Caller): Promise<Row> {
   const explicitTo = assertEmailList(input.to, 'to')
   const message = optionalString(input.message, MAX_MESSAGE)
 
-  const shipment = await getById(SHIPMENT_TABLE_NAME, shipmentId)
-  if (!shipment) throw new Error(`Shipment not found: ${shipmentId}`)
+  const shipment = await liveShipment(shipmentId)
   const status = String(shipment.status ?? '')
   if (UNTRACKABLE_SHIPMENT_STATUSES.includes(status)) {
     throw new Error(
@@ -1696,8 +1717,7 @@ async function emailDocuments(input: Row, caller: Caller): Promise<Row> {
     throw new Error(`One e-mail carries at most ${MAX_EMAIL_DOCUMENTS} documents`)
   }
 
-  const shipment = await getById(SHIPMENT_TABLE_NAME, shipmentId)
-  if (!shipment) throw new Error(`Shipment not found: ${shipmentId}`)
+  const shipment = await liveShipment(shipmentId)
 
   const docs: Row[] = []
   for (const documentId of documentIds) {

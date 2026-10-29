@@ -1163,7 +1163,10 @@ const schema = a.schema({
       index('customerId').sortKeys(['pickupAppt']),
       index('pickupMonth').sortKeys(['pickupAppt']),
     ])
-    .disableOperations(['subscriptions'])
+    // Ryne, 2026-10-28: a PRO can never be deleted through any path. The client was
+    // already read-only here; dropping the delete resolver means no identity — not
+    // even a Lambda's IAM role — can reach `deleteShipment`. Void is the only exit.
+    .disableOperations(['subscriptions', 'delete'])
     .authorization((allow) => [allow.authenticated().to(['read'])]),
 
   // The sell side of a shipment: what the customer ordered and what they owe.

@@ -140,18 +140,20 @@ export function creditExposureForCustomer(
  * Where the money is decides the bucket, and the AR ladder outranks the movement:
  * once an invoice exists the exposure is INVOICED wherever the truck is, and once
  * it is paid — or was never going to be billed — there is nothing left to carry.
- * A draft, a tender nobody accepted, a cancelation and a deleted shipment are all
- * work we have not committed to, so none of them consume credit.
+ * A draft, a tender nobody accepted, a cancelation and a voided shipment are all
+ * work we have not committed to, so none of them consume credit. Void is the only
+ * way a shipment leaves the working set, and `deletedAt` is the marker Step B's
+ * removed soft delete wrote — either one means the freight is gone.
  *
  * LEGACY is not exposure through this path at all: a backfilled order carries no
  * trustworthy AR ladder, so its freight is counted the old way, off its loads
  * (see `creditExposure`).
  */
 export function creditBucketForOrder(
-  shipment: Pick<ShipmentRecord, 'status' | 'deletedAt'>,
+  shipment: Pick<ShipmentRecord, 'status' | 'deletedAt' | 'voidedAt'>,
   arStatus: ArStatus | null | undefined,
 ): CreditBucket | null {
-  if (shipment.deletedAt) return null
+  if (shipment.voidedAt || shipment.deletedAt) return null
   if (arStatus === 'PAID' || arStatus === 'INVOICE_NOT_NEEDED' || arStatus === 'LEGACY') return null
   if (arStatus === 'UNPAID') return 'INVOICED'
   return MOVEMENT_BUCKET[shipment.status]

@@ -219,11 +219,18 @@ describe('invoiceReadiness', () => {
     expect(reasons).toEqual(['Shipment B-1042 is canceled; it cannot be invoiced.'])
   })
 
-  it('refuses a soft-deleted shipment', () => {
+  it('refuses a voided shipment', () => {
+    const { reasons } = invoiceReadiness(
+      readinessInput({ shipment: { number: 'B-1042', status: 'DELIVERED', voidedAt: '2026-03-10T00:00:00.000Z' } }),
+    )
+    expect(reasons).toEqual(['Shipment B-1042 is voided and cannot be invoiced.'])
+  })
+
+  it('refuses a pre-R soft delete, which is a void too', () => {
     const { reasons } = invoiceReadiness(
       readinessInput({ shipment: { number: 'B-1042', status: 'DELIVERED', deletedAt: '2026-03-10T00:00:00.000Z' } }),
     )
-    expect(reasons).toEqual(['Shipment B-1042 is deleted; restore it before invoicing.'])
+    expect(reasons).toEqual(['Shipment B-1042 is voided and cannot be invoiced.'])
   })
 
   it('refuses an order with no revenue', () => {

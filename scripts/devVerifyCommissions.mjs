@@ -18,9 +18,10 @@
  *   - the reporting index answers by month.
  *
  * Every temporary identity is created with a randomised password that is NEVER
- * printed, and deleted in a `finally` whatever happens. Every fixture it creates is
- * retired at the end. It touches no copied customer, carrier, load or invoice, and
- * it refuses to run against anything but the dev API.
+ * printed, and deleted in a `finally` whatever happens. Every fixture shipment it
+ * creates is retired with VOID_SHIPMENT at the end — there is no delete anywhere, and
+ * the PRO a fixture took is never handed out again. It touches no copied customer,
+ * carrier, load or invoice, and it refuses to run against anything but the dev API.
  *
  * The caller is any dev ADMIN — the owner, or a temporary admin minted in the dev
  * pool for the run. `delete` on the Users API is owner-only, so when the caller is
@@ -80,6 +81,26 @@ const shipAction = (action, input) => routerAs(token, 'tmsShipmentActions')(acti
 const finAction = (action, input) => routerAs(token, 'tmsFinanceActions')(action, input)
 const dirAction = (action, input) => routerAs(token, 'tmsDirectoryActions')(action, input)
 const carrierAction = (action, input) => routerAs(token, 'tmsCarrierActions')(action, input)
+
+// ── documents: a tiny real PDF through PREPARE → PUT → COMMIT ────────────────
+// The release gate has no override, so a fixture earns its BOL and POD the way a
+// dispatcher does before anything can be invoiced.
+const TINY_PDF = Buffer.from(
+  '%PDF-1.1\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n',
+)
+async function attachDocument(shipmentId, orderId, loadId, type) {
+  const name = `verify-${type.toLowerCase()}.pdf`
+  const prepared = await shipAction('PREPARE_DOCUMENT_UPLOAD', {
+    shipmentId, type, name, contentType: 'application/pdf', sizeBytes: TINY_PDF.length,
+  })
+  const put = await fetch(prepared.uploadUrl, { method: 'PUT', headers: { 'content-type': 'application/pdf' }, body: TINY_PDF })
+  if (!put.ok) throw new Error(`upload failed: ${put.status}`)
+  return shipAction('COMMIT_DOCUMENT', {
+    shipmentId, documentId: prepared.documentId, s3Key: prepared.s3Key, type, name,
+    contentType: 'application/pdf', sizeBytes: TINY_PDF.length,
+    ...(type === 'BOL' || type === 'POD' ? { loadId } : { orderId }),
+  })
+}
 
 async function manageUsersAs(authToken, args) {
   const names = Object.keys(args)
@@ -398,12 +419,15 @@ async function main() {
           .catch((err) => console.log(`  (load ${status} skipped: ${String(err.message).slice(0, 70)})`))
         fresh = await shipAction('GET_SHIPMENT_BUNDLE', { shipmentId: bundle.shipment.id })
       }
+      // Step R: READY_TO_INVOICE has no override. The fixture uploads the BOL and the
+      // POD the release gate asks for, then the gate opens on its own.
+      await attachDocument(bundle.shipment.id, (fresh.orders?.[0] ?? fresh.order).id, fresh.loads[0].id, 'BOL')
+      await attachDocument(bundle.shipment.id, (fresh.orders?.[0] ?? fresh.order).id, fresh.loads[0].id, 'POD')
+      fresh = await shipAction('GET_SHIPMENT_BUNDLE', { shipmentId: bundle.shipment.id })
       const order = fresh.orders?.[0] ?? fresh.order
       await shipAction('READY_TO_INVOICE', {
         orderId: order.id,
         expectedUpdatedAt: order.updatedAt,
-        override: true,
-        overrideNote: 'dev verification fixture; no paperwork exists',
       }).catch((err) => console.log(`  (ready: ${String(err.message).slice(0, 120)})`))
       const result = await finAction('GENERATE_INVOICE', { orderId: order.id })
       return result.invoice
@@ -610,16 +634,23 @@ async function main() {
         }
       }
     }
+    // Step R. A fixture is retired by voiding it — there is no delete, and the PRO it
+    // took is never handed out again. A shipment whose order was invoiced has to have
+    // that invoice voided first: VOID_SHIPMENT refuses an invoiced order outright.
     for (const shipmentId of createdShipments) {
-      for (const step of ['cancel', 'delete']) {
-        const current = await shipAction('GET_SHIPMENT_BUNDLE', { shipmentId }).catch(() => null)
-        if (!current) break
-        const args = { shipmentId, expectedUpdatedAt: current.shipment.updatedAt, reason: 'dev verification fixture' }
-        await shipAction(
-          step === 'cancel' ? 'SET_SHIPMENT_STATUS' : 'DELETE_SHIPMENT',
-          step === 'cancel' ? { ...args, status: 'CANCELED' } : args,
-        ).catch(() => {})
+      const current = await shipAction('GET_SHIPMENT_BUNDLE', { shipmentId }).catch(() => null)
+      if (!current || current.shipment.voidedAt || current.shipment.deletedAt) continue
+      for (const order of current.orders ?? []) {
+        if (!order.invoiceId) continue
+        await finAction('VOID_INVOICE', { invoiceId: order.invoiceId, reason: 'dev verification cleanup' })
+          .catch((err) => console.log(`cleanup: could not void invoice ${order.invoiceId}: ${String(err.message).slice(0, 120)}`))
       }
+      const fresh = await shipAction('GET_SHIPMENT_BUNDLE', { shipmentId }).catch(() => current)
+      await shipAction('VOID_SHIPMENT', {
+        shipmentId,
+        expectedUpdatedAt: fresh.shipment.updatedAt,
+        reason: 'Dev verification fixture',
+      }).catch((err) => console.log(`cleanup: could not void ${shipmentId}: ${String(err.message).slice(0, 120)}`))
     }
     if (settingsBefore) {
       await finAction('SAVE_COMMISSION_SETTINGS', {

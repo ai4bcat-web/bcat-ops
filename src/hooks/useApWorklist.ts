@@ -17,6 +17,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { listOpenApAssignments, listShipments } from '@/lib/apiClient'
+import { isShipmentVoided } from '@/lib/shipmentVoid'
 import type { LoadCarrierRecord, ShipmentRecord } from '@/types/tms'
 
 const POLL_MS = 60_000
@@ -26,7 +27,7 @@ export type ApWorklistTab = 'AWAITING_INVOICE' | 'IN_REVIEW' | 'TO_BE_PAID'
 
 export interface ApWorklistRow {
   assignment: LoadCarrierRecord
-  /** Null only while the shipment read has not landed, or the shipment was deleted. */
+  /** Null only while the shipment read has not landed; voided shipments are dropped. */
   shipment: ShipmentRecord | null
   loadCarrierId: string
   loadId: string
@@ -91,41 +92,45 @@ export function useApWorklist(tab: ApWorklistTab): ApWorklist {
     const byId = new Map<string, ShipmentRecord>()
     for (const s of shipments) byId.set(s.id, s)
 
-    const built = assignments.map((assignment): ApWorklistRow => {
-      const shipment = byId.get(assignment.shipmentId) ?? null
-      const docsMissing = assignment.docsMissing ?? []
-      const docsReady = docsMissing.length === 0
-      const rateConSigned = assignment.rateConStatus === 'SIGNED'
-      const costCents = assignment.costCents ?? 0
+    const built = assignments
+      .map((assignment): ApWorklistRow | null => {
+        const shipment = byId.get(assignment.shipmentId) ?? null
+        // A voided shipment is out of every working set — its leg does not sit on a tab.
+        // `voidedAt` is the R marker; a pre-R `deletedAt` is the same thing.
+        if (isShipmentVoided(shipment)) return null
+        const docsMissing = assignment.docsMissing ?? []
+        const docsReady = docsMissing.length === 0
+        const rateConSigned = assignment.rateConStatus === 'SIGNED'
+        const costCents = assignment.costCents ?? 0
 
-      const reasons: string[] = []
-      if (!docsReady) reasons.push(`Missing ${docsMissing.join(', ')}`)
-      if (costCents <= 0) reasons.push('No carrier charges')
-      if (!rateConSigned) reasons.push('Rate con not signed')
-      if (shipment?.deletedAt) reasons.push('Shipment deleted')
-      else if (shipment?.status === 'CANCELED') reasons.push('Shipment canceled')
-      else if (!shipment?.deliveredAt) reasons.push('Not delivered')
+        const reasons: string[] = []
+        if (!docsReady) reasons.push(`Missing ${docsMissing.join(', ')}`)
+        if (costCents <= 0) reasons.push('No carrier charges')
+        if (!rateConSigned) reasons.push('Rate con not signed')
+        if (shipment?.status === 'CANCELED') reasons.push('Shipment canceled')
+        else if (!shipment?.deliveredAt) reasons.push('Not delivered')
 
-      return {
-        assignment,
-        shipment,
-        loadCarrierId: assignment.id,
-        loadId: assignment.loadId,
-        shipmentId: assignment.shipmentId,
-        shipmentNumber: shipment?.number ?? null,
-        carrierId: assignment.carrierId ?? null,
-        carrierName: assignment.carrierName ?? '',
-        billId: assignment.invoiceId ?? null,
-        deliveredAt: shipment?.deliveredAt ?? null,
-        apStatusChangedAt: assignment.apStatusChangedAt ?? null,
-        costCents,
-        apBalanceCents: assignment.apBalanceCents ?? null,
-        docsMissing,
-        docsReady,
-        rateConSigned,
-        reasons,
-      }
-    })
+        return {
+          assignment,
+          shipment,
+          loadCarrierId: assignment.id,
+          loadId: assignment.loadId,
+          shipmentId: assignment.shipmentId,
+          shipmentNumber: shipment?.number ?? null,
+          carrierId: assignment.carrierId ?? null,
+          carrierName: assignment.carrierName ?? '',
+          billId: assignment.invoiceId ?? null,
+          deliveredAt: shipment?.deliveredAt ?? null,
+          apStatusChangedAt: assignment.apStatusChangedAt ?? null,
+          costCents,
+          apBalanceCents: assignment.apBalanceCents ?? null,
+          docsMissing,
+          docsReady,
+          rateConSigned,
+          reasons,
+        }
+      })
+      .filter((row): row is ApWorklistRow => row !== null)
 
     return built.sort((a, b) => {
       const at = a.apStatusChangedAt ?? ''

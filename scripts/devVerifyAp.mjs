@@ -5,8 +5,9 @@
  * own carrier, drives the whole AP lifecycle through the deployed `tmsFinanceActions`
  * — record → approve → pay → remittance → reverse → void — walks the own-driver path
  * that must stay OUT of AP, exercises the refusals and the idempotency guards, then
- * soft-deletes the fixture it made. It touches no copied carrier, load or bill, and it
- * refuses to run against anything but the dev API.
+ * voids the fixture it made — void is the only way a shipment leaves the working set,
+ * and the PRO it took is never handed out again. It touches no copied carrier, load or
+ * bill, and it refuses to run against anything but the dev API.
  *
  *   BCAT_EMAIL=… BCAT_PASSWORD=… node scripts/devVerifyAp.mjs
  */
@@ -142,15 +143,18 @@ async function main() {
   }
   const legsOf = (b) => b.loadCarriers ?? b.carriers ?? []
 
-  /** Cancel, then soft-delete: a BOOKED shipment refuses the delete outright. */
+  /**
+   * Step R. A fixture is retired by voiding it; there is no delete anywhere. The PRO,
+   * the legs, the charges and the history stay, the mirrored load is canceled, and
+   * every write path refuses the shipment from then on.
+   */
   const retireShipment = async (id, label) => {
-    for (const step of ['cancel', 'delete']) {
-      const current = await shipAction('GET_SHIPMENT_BUNDLE', { shipmentId: id })
-      const args = { shipmentId: id, expectedUpdatedAt: current.shipment.updatedAt, reason: 'dev verification fixture' }
-      await shipAction(step === 'cancel' ? 'SET_SHIPMENT_STATUS' : 'DELETE_SHIPMENT',
-        step === 'cancel' ? { ...args, status: 'CANCELED' } : args)
-        .catch((err) => console.log(`  (${label} ${step} skipped: ${String(err.message).slice(0, 90)})`))
-    }
+    const current = await shipAction('GET_SHIPMENT_BUNDLE', { shipmentId: id })
+    await shipAction('VOID_SHIPMENT', {
+      shipmentId: id,
+      expectedUpdatedAt: current.shipment.updatedAt,
+      reason: 'Dev verification fixture',
+    }).catch((err) => console.log(`  (${label} void skipped: ${String(err.message).slice(0, 90)})`))
   }
 
   // ── the own-driver path: it must never reach AP ───────────────────────────
@@ -397,7 +401,7 @@ async function main() {
 
   // ── cleanup ───────────────────────────────────────────────────────────────
   await retireShipment(shipmentId, 'carrier-path cleanup')
-  ok('the fixture shipment was soft-deleted', shipmentId)
+  ok('the fixture shipment was voided', shipmentId)
 
   const failed = results.filter((r) => !r.ok)
   console.log(`\n${results.length - failed.length}/${results.length} checks passed`)

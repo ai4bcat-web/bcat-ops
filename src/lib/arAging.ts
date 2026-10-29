@@ -1,6 +1,7 @@
 // Relative, not `@/` — the tmsFinanceActions Lambda bundles this file by path for the AR
 // summary it returns, and the alias does not exist in the function build.
 import type { InvoiceRecord, OrderRecord, ShipmentRecord } from '../types/tms'
+import { isShipmentVoided } from './shipmentVoid'
 
 /**
  * AR aging: how old the open money is, how long delivery-to-invoice and invoice-to-cash
@@ -307,7 +308,7 @@ export function avgDaysToPay(invoices: InvoiceRecord[]): number | null {
  *
  * LEGACY (Aljex-era, billed outside the TMS), INVOICE_NOT_NEEDED, UNPAID and PAID are all
  * excluded — the first two are never going to be invoiced here and the last two already
- * were. Deleted shipments are excluded with them.
+ * were. Voided shipments (a `voidedAt`, or a pre-R `deletedAt`) are excluded with them.
  *
  * Newest delivery first, so the list reads as a to-do with the freshest work on top.
  */
@@ -318,7 +319,7 @@ export function deliveredNotInvoiced(
 ): DeliveredNotInvoicedRow[] {
   const byId = new Map<string, { shipment: ShipmentRecord; deliveredAt: string }>()
   for (const s of shipments) {
-    if (s.status !== 'DELIVERED' || s.deletedAt || !s.deliveredAt) continue
+    if (s.status !== 'DELIVERED' || isShipmentVoided(s) || !s.deliveredAt) continue
     byId.set(s.id, { shipment: s, deliveredAt: s.deliveredAt })
   }
 

@@ -69,7 +69,7 @@ import {
 } from '../../../src/lib/shipmentDocuments'
 import { loadReleaseGateInput } from '../_shared/releaseGateInput'
 import { evaluateReleaseGate, releaseGateError } from '../../../src/lib/releaseGate'
-import { isVoided } from './voided'
+import { isVoided } from '../_shared/voided'
 import type {
   CustomerRecord,
   DocGateResult,

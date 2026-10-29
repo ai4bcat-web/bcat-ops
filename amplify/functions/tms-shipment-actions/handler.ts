@@ -142,9 +142,10 @@ import {
   shipmentTagPatch,
   tagPatch,
   type OwnershipDeps,
+  type ShipmentRecords,
   type ShipmentTag,
 } from './ownershipResolve'
-import { assertNotVoided, isVoided } from './voided'
+import { assertNotVoided, isVoided } from '../_shared/voided'
 
 import {
   computeFinancials,
@@ -1431,12 +1432,14 @@ async function createShipment(input: Row, caller: Caller): Promise<Row> {
     // — come off it. The order and the financials stay beside the shipment they
     // describe, exactly as they do on any other void.
     const now = nowIso()
+    const reason = `Load create failed: ${err instanceof Error ? err.message : String(err)}`
+      .slice(0, MAX_VOID_REASON)
     await transact(
       [
         updateItemTx(SHIPMENT_TABLE_NAME, shipmentId, {
           voidedAt: now,
           voidedBy: caller.email,
-          voidReason: `Load create failed: ${err instanceof Error ? err.message : String(err)}`.slice(0, MAX_VOID_REASON),
+          voidReason: reason,
           updatedBy: caller.email,
           updatedAt: now,
           version: 2,
@@ -1444,7 +1447,20 @@ async function createShipment(input: Row, caller: Caller): Promise<Row> {
         ...chargeRows.map((row) => deleteItemTx(LOAD_CHARGE_TABLE_NAME, String(row.id))),
       ],
       'shipment rollback',
-    ).catch((rollbackErr) => console.error('[tms-shipment-actions] rollback failed:', String(rollbackErr)))
+    )
+      // Audit every void, this one included: the PRO was consumed and the board now
+      // carries a VOIDED row, so the history has to say who voided it and why.
+      .then(() =>
+        writeAudit('SHIPMENT', shipmentId, 'VOID_SHIPMENT', caller, {
+          number,
+          status: 'DRAFT',
+          reason,
+          apBoardLegsClosed: [],
+          loadsCanceled: [],
+          viaCreate: true,
+        }),
+      )
+      .catch((rollbackErr) => console.error('[tms-shipment-actions] rollback failed:', String(rollbackErr)))
     throw err
   }
 
@@ -2154,8 +2170,7 @@ function salesRepOf(shipment: Row, order: Row | null): string | null {
 }
 
 /**
- * Re-resolve a shipment's tag and write it on the Shipment, returning the same
- * fields for the caller's own Load write.
+ * Resolve a shipment's owner and write the tag onto the Shipment row.
  *
  * Two rules live here. A `HAND` tag is a person's answer and the rules never
  * overrule it — the shipment keeps what it was given and only the rep is refreshed.
@@ -2163,10 +2178,21 @@ function salesRepOf(shipment: Row, order: Row | null): string | null {
  * a reporting problem, and refusing to book a truck over one would be a worse bug
  * than an untagged load. The explicit tag actions below do throw, because there the
  * tag is the whole point of the call.
+ *
+ * A caller that just wrote the leg passes the records it has rather than a
+ * shipment id: `readShipmentRecords` finds the ACTIVE leg through a GSI, and a GSI
+ * can still be serving the retired leg a moment after the transaction committed —
+ * which would tag a load just booked to an outside carrier as own-fleet, with no
+ * re-resolve until somebody pressed Retag.
  */
-async function applyTag(shipmentId: string, caller: Caller, opts: { ignoreHand?: boolean } = {}): Promise<Row> {
+async function applyTag(
+  target: string | ShipmentRecords,
+  caller: Caller,
+  opts: { ignoreHand?: boolean } = {},
+): Promise<Row> {
   try {
-    const { records, tag } = await resolveForShipment(ownershipDeps, shipmentId)
+    const { records, tag } = await resolveForShipment(ownershipDeps, target)
+    const shipmentId = String(records.shipment.id)
     const { shipment, order } = records
     const hand = !opts.ignoreHand && shipment.revTagSource === 'HAND'
     const source = hand ? 'HAND' : 'RULE'
@@ -2221,6 +2247,27 @@ async function applyTagToLoads(shipmentId: string, caller: Caller, opts: { ignor
     )
   }
   return patch
+}
+
+/**
+ * The resolver's records assembled from the rows an assignment action already has.
+ *
+ * The shipment, the load and the leg are rows this handler read or wrote itself, so
+ * a GSI that has not caught up cannot hand the resolver the leg that was just
+ * retired. Only the order and the own-fleet driver are read, which is what
+ * `readShipmentRecords` would have done anyway.
+ */
+async function recordsForTag(shipment: Row, load: Row, loadCarrier: Row | null): Promise<ShipmentRecords> {
+  const orderId = optionalString(load.orderId, 100)
+  const driverId = optionalString(loadCarrier?.driverId, 100)
+  const [order, driver] = await Promise.all([
+    orderId
+      ? getById(ORDER_TABLE_NAME, orderId)
+      : queryIndex(ORDER_TABLE_NAME, IDX_ORDERS_BY_SHIPMENT, 'shipmentId', String(shipment.id))
+        .then((orders) => orders[0] ?? null),
+    driverId ? getById(DRIVER_TABLE_NAME, driverId) : Promise.resolve(null),
+  ])
+  return { shipment, order, load, loadCarrier, driver }
 }
 
 /** The division codes an admin may hand-tag with: the active rows, and nothing else. */
@@ -2972,7 +3019,7 @@ async function assignAsset(input: Row, caller: Caller): Promise<Row> {
   if (!load) throw new Error(`Load not found: ${loadId}`)
   const shipmentId = optionalString(load.shipmentId, 100)
   if (!shipmentId) throw new Error('That load is not part of a shipment yet')
-  await requireLiveShipment(shipmentId)
+  const shipment = await requireLiveShipment(shipmentId)
 
   const carriers = await queryIndex(LOAD_CARRIER_TABLE_NAME, IDX_CARRIERS_BY_LOAD, 'loadId', loadId)
   const activeCarrier = carriers.find((c) => c.status === 'ACTIVE') ?? null
@@ -2980,9 +3027,7 @@ async function assignAsset(input: Row, caller: Caller): Promise<Row> {
   const newCarrierId = `lcr-${randomUUID()}`
   const now = nowIso()
 
-  const writes: TransactWriteItem[] = []
-  if (activeCarrier) writes.push(retireCarrier(activeCarrier, 'REASSIGNED', 'BOUNCED', caller))
-  writes.push(putItem(LOAD_CARRIER_TABLE_NAME, {
+  const newLeg: Row = {
     id: newCarrierId,
     __typename: 'LoadCarrier',
     loadId,
@@ -3007,7 +3052,10 @@ async function assignAsset(input: Row, caller: Caller): Promise<Row> {
     updatedBy: caller.email,
     createdAt: now,
     updatedAt: now,
-  }))
+  }
+  const writes: TransactWriteItem[] = []
+  if (activeCarrier) writes.push(retireCarrier(activeCarrier, 'REASSIGNED', 'BOUNCED', caller))
+  writes.push(putItem(LOAD_CARRIER_TABLE_NAME, newLeg))
   await transact(writes, 'assignment')
 
   // The driver and truck live on the stops — exactly where the dispatch drawer puts
@@ -3021,8 +3069,10 @@ async function assignAsset(input: Row, caller: Caller): Promise<Row> {
   })
   const currentStatus = (optionalEnum(load.status, LOAD_STATUS_VALUES, 'status') ?? null) as LoadWorkflowStatus | null
   const nextStatus = currentStatus == null || currentStatus === 'SOURCING' ? 'BOOKED' : currentStatus
-  // Step R. The leg is written, so the rules can now see whose truck this is.
-  const tag = await applyTag(shipmentId, caller)
+  // Step R. The leg is written, so the rules can now see whose truck this is — and
+  // they see the row this call just put, not whatever the leg index is still
+  // serving.
+  const tag = await applyTag(await recordsForTag(shipment, load, newLeg), caller)
 
   const client = await getDataClient()
   assertLoadWriteOk(
@@ -3060,7 +3110,7 @@ async function assignCarrier(input: Row, caller: Caller): Promise<Row> {
   if (!load) throw new Error(`Load not found: ${loadId}`)
   const shipmentId = optionalString(load.shipmentId, 100)
   if (!shipmentId) throw new Error('That load is not part of a shipment yet')
-  await requireLiveShipment(shipmentId)
+  const shipment = await requireLiveShipment(shipmentId)
 
   const carriers = await queryIndex(LOAD_CARRIER_TABLE_NAME, IDX_CARRIERS_BY_LOAD, 'loadId', loadId)
   const activeCarrier = carriers.find((c) => c.status === 'ACTIVE') ?? null
@@ -3071,9 +3121,7 @@ async function assignCarrier(input: Row, caller: Caller): Promise<Row> {
   const financials = await getById(LOAD_FINANCIALS_TABLE_NAME, loadId)
   if (financials?.frozenAt) throw new Error('This load\'s financials are frozen and can no longer be changed')
 
-  const writes: TransactWriteItem[] = []
-  if (activeCarrier) writes.push(retireCarrier(activeCarrier, 'REASSIGNED', 'BOUNCED', caller))
-  writes.push(putItem(LOAD_CARRIER_TABLE_NAME, {
+  const newLeg: Row = {
     id: newCarrierId,
     __typename: 'LoadCarrier',
     loadId,
@@ -3108,7 +3156,10 @@ async function assignCarrier(input: Row, caller: Caller): Promise<Row> {
     updatedBy: caller.email,
     createdAt: now,
     updatedAt: now,
-  }))
+  }
+  const writes: TransactWriteItem[] = []
+  if (activeCarrier) writes.push(retireCarrier(activeCarrier, 'REASSIGNED', 'BOUNCED', caller))
+  writes.push(putItem(LOAD_CARRIER_TABLE_NAME, newLeg))
   // The agreed rate is a charge line like any other, so one place adds up the cost.
   if (carrierRateCents != null) {
     writes.push(putItem(LOAD_CHARGE_TABLE_NAME, chargeRow(
@@ -3140,7 +3191,9 @@ async function assignCarrier(input: Row, caller: Caller): Promise<Row> {
   // out of every driver settlement: whatever own-fleet assignment was on it before
   // has to be cleared, not merely overwritten with a carrier name.
   const cleared = outsideCarrierLoadPatch(readStops(load) as MirrorStop[], { carrierName })
-  const tag = await applyTag(shipmentId, caller)
+  // The leg this call just wrote is what the rules read; the leg index may still be
+  // serving the one it retired.
+  const tag = await applyTag(await recordsForTag(shipment, load, newLeg), caller)
   const client = await getDataClient()
   assertLoadWriteOk(
     await client.models.Load.update({
@@ -3183,7 +3236,7 @@ async function removeLoadCarrier(input: Row, caller: Caller): Promise<Row> {
   }
   const loadId = String(carrier.loadId)
   const shipmentId = String(carrier.shipmentId)
-  await requireLiveShipment(shipmentId)
+  const shipment = await requireLiveShipment(shipmentId)
   const load = await getById(LOAD_TABLE_NAME, loadId)
   if (!load) throw new Error(`Load not found: ${loadId}`)
 
@@ -3230,7 +3283,9 @@ async function removeLoadCarrier(input: Row, caller: Caller): Promise<Row> {
   // only cleared `assignmentType` would leave the load on that driver's calendar
   // and in their settlement forever.
   const uncovered = uncoveredLoadPatch(readStops(load) as MirrorStop[])
-  const tag = await applyTag(shipmentId, caller)
+  // Nobody is on the load now, so that is what the rules are given — not whatever
+  // the leg index still has as ACTIVE.
+  const tag = await applyTag(await recordsForTag(shipment, load, null), caller)
   const client = await getDataClient()
   assertLoadWriteOk(
     await client.models.Load.update({
@@ -3568,7 +3623,10 @@ async function bookCarrier(input: Row, caller: Caller, extra?: BookCarrierExtra)
   // clear the driver, the truck and the stop-level assignment, or the load stays on
   // the calendar and in that driver's settlement while somebody else hauls it.
   const cleared = outsideCarrierLoadPatch(readStops(load) as MirrorStop[], { carrierName })
-  const tag = await applyTag(shipmentId, caller)
+  // Every record the rules read is already in hand — including the leg this call
+  // just put, which the leg index may not be serving yet. An outside carrier never
+  // carries one of our drivers, so there is no driver row to look up.
+  const tag = await applyTag({ shipment, order, load, loadCarrier, driver: null }, caller)
   const client = await getDataClient()
   assertLoadWriteOk(
     await client.models.Load.update(

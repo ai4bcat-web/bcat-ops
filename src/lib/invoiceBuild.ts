@@ -17,6 +17,7 @@
  * the `@/` alias does not exist in the function build.
  */
 import { canEmailTo, DOCUMENT_TYPE_LABELS, normalizeRequiredDocTypes, requiredDocTypesFor } from './shipmentDocuments'
+import { isShipmentVoided } from './shipmentVoid'
 import type {
   Address,
   BillToParty,
@@ -203,7 +204,7 @@ export function formatCents(cents: number): string {
 
 export interface InvoiceReadinessInput {
   order: Pick<OrderRecord, 'id' | 'arStatus' | 'revenueCents' | 'references'>
-  shipment: Pick<ShipmentRecord, 'number' | 'status' | 'deletedAt'> | null | undefined
+  shipment: Pick<ShipmentRecord, 'number' | 'status' | 'deletedAt' | 'voidedAt'> | null | undefined
   customer: Pick<CustomerRecord, 'requiredReferences' | 'factored' | 'name'> | null | undefined
   settings: Pick<TmsSettings, 'defaultRequiredReferences' | 'factorRemitTo'> | null | undefined
   charges: readonly LoadChargeRecord[]
@@ -230,8 +231,8 @@ export function invoiceReadiness(input: InvoiceReadinessInput): InvoiceReadiness
   }
 
   const shipmentName = shipment?.number ? `Shipment ${shipment.number}` : 'This shipment'
-  if (shipment?.deletedAt) {
-    reasons.push(`${shipmentName} is deleted; restore it before invoicing.`)
+  if (isShipmentVoided(shipment)) {
+    reasons.push(`${shipmentName} is voided and cannot be invoiced.`)
   } else if (shipment?.status === 'CANCELED') {
     reasons.push(`${shipmentName} is canceled; it cannot be invoiced.`)
   }

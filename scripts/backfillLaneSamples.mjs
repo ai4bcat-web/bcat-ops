@@ -70,6 +70,17 @@
  * derived in `laneSampleFacts` and are material: a sample written before them is
  * stale and is re-planned. `--refresh` additionally carries them onto the samples
  * the live Lambda wrote, whose money this script still never touches.
+ *
+ * THOSE TEN COLUMNS HAVE TWO WRITERS AND MUST HAVE ONE DEFINITION. The live one is
+ * `amplify/functions/tms-shipment-actions/laneSamples.ts` — `AUTOMATIC_PING_SOURCES`,
+ * `PING_TYPES`, `trackingFactsOf` and `podReceivedAtOf` — and the functions of the
+ * same names below are ported from it line for line and must stay identical to it.
+ * They do not merely have to agree in spirit: `--refresh` patches a live sample
+ * whenever a derived fact differs from the stored one, so a rule that counts one
+ * extra ping here makes every run re-patch the Lambda's numbers, the next
+ * `writeLaneSample` put them back, and the dashboard's POD-timing and tracked-%
+ * cards depend on whichever writer touched the row last. A change to the rule is a
+ * change to both files, in the same commit.
  */
 
 import { resolve } from 'node:path';
@@ -300,20 +311,92 @@ export const STEP_R_FACT_FIELDS = [
   'trackingProvider', 'firstPingAt', 'datPostedAt', 'checkCallsDue', 'checkCallsMet',
 ];
 
-/** A check call that reported a position — how "tracked" is proved, not claimed. */
-function isPositionReport(call) {
-  const type = text(call.type);
-  if (type === 'TRACKING_PING') return true;
-  return typeof call.lat === 'number' && typeof call.lng === 'number';
+/**
+ * A position report the truck sent us, as opposed to a dispatcher typing where it
+ * said it was. Ported from `AUTOMATIC_PING_SOURCES` in
+ * `amplify/functions/tms-shipment-actions/laneSamples.ts:42` — a MANUAL row is a
+ * note, not tracking, and counting it here would overstate the tracked-% card and
+ * disagree with the live writer on the same load.
+ */
+export const AUTOMATIC_PING_SOURCES = { LINK: true, DRIVER_APP: true, MOTIVE: true };
+/** The two row types that carry a position rather than an event (`laneSamples.ts:44`). */
+export const PING_TYPES = { TRACKING_PING: true, LOCATION_UPDATE: true };
+
+/**
+ * Compliance and the first ping, off the log. A line-for-line port of
+ * `trackingFactsOf` (`laneSamples.ts:62`): every row that armed a reminder is one
+ * check call that came due, and it was met when a later row landed by the deadline
+ * plus the org's grace.
+ *
+ * @param {Array<Record<string, any>>} rows
+ * @param {number} graceMinutes
+ * @returns {{firstPingAt: string | null, checkCallsDue: number, checkCallsMet: number}}
+ */
+function trackingFactsOf(rows, graceMinutes) {
+  const ordered = [...rows].sort((a, b) => String(a.at ?? '').localeCompare(String(b.at ?? '')));
+  const graceMs = graceMinutes * MINUTE_MS;
+  let firstPingAt = null;
+  let checkCallsDue = 0;
+  let checkCallsMet = 0;
+
+  for (const row of ordered) {
+    const at = typeof row.at === 'string' ? row.at : '';
+    if (
+      firstPingAt == null
+      && at
+      && PING_TYPES[String(row.type ?? '')]
+      && AUTOMATIC_PING_SOURCES[String(row.source ?? '')]
+    ) {
+      firstPingAt = at;
+    }
+    const due = typeof row.nextCheckCallAt === 'string' ? row.nextCheckCallAt : '';
+    if (!due) continue;
+    checkCallsDue += 1;
+    const deadline = Date.parse(due) + graceMs;
+    if (Number.isNaN(deadline)) continue;
+    const met = ordered.some((other) => {
+      if (other === row) return false;
+      const otherAt = typeof other.at === 'string' ? Date.parse(other.at) : NaN;
+      return !Number.isNaN(otherAt) && otherAt > Date.parse(at) && otherAt <= deadline;
+    });
+    if (met) checkCallsMet += 1;
+  }
+  return { firstPingAt, checkCallsDue, checkCallsMet };
+}
+
+/**
+ * When the POD actually arrived: the earliest active one filed against THIS load. A
+ * line-for-line port of `podReceivedAtOf` (`laneSamples.ts:99`), which scopes by
+ * `loadId` and drops unreviewed and rejected uploads the way `documents.ts` does —
+ * a portal upload still waiting for review is not a POD we have, which is the same
+ * rule the release gate applies.
+ *
+ * @param {Array<Record<string, any>>} documents
+ * @param {string} loadId
+ * @returns {string | null}
+ */
+function podReceivedAtOf(documents, loadId) {
+  let earliest = null;
+  for (const doc of documents) {
+    if (doc.type !== 'POD' || doc.status !== 'ACTIVE') continue;
+    if (doc.reviewStatus === 'PENDING' || doc.reviewStatus === 'REJECTED') continue;
+    const docLoadId = typeof doc.loadId === 'string' ? doc.loadId : '';
+    if (docLoadId && docLoadId !== loadId) continue;
+    const at = typeof doc.uploadedAt === 'string' ? doc.uploadedAt : (typeof doc.createdAt === 'string' ? doc.createdAt : '');
+    if (at && (earliest == null || at < earliest)) earliest = at;
+  }
+  return earliest;
 }
 
 /**
  * The Step R columns of one sample, off the records that hold them.
  *
- * `checkCallsDue` / `checkCallsMet` read the way the check-call notifier does: a row
- * that scheduled a next call is a DUE, and it was MET when a later call landed no
- * later than that time plus the org's grace. Nothing is inferred from a load that
- * never scheduled anything — no schedule is zero dues, not a missed call.
+ * Every derivation here is the live writer's, not this script's: see the note at the
+ * top of the file. `checkCallsDue` / `checkCallsMet` read the way the check-call
+ * notifier does — a row that scheduled a next call is a DUE, and it was MET when a
+ * later call landed no later than that time plus the org's grace. Nothing is
+ * inferred from a load that never scheduled anything: no schedule is zero dues, not
+ * a missed call.
  *
  * @param {object} input
  * @param {Record<string, any>} input.load
@@ -329,30 +412,7 @@ export function laneSampleFacts({ load, shipment = null, checkCalls = [], podDoc
       ? graceMinutes
       : DEFAULT_CHECK_CALL_GRACE_MINUTES;
 
-  const calls = checkCalls
-    .filter((c) => text(c.at) != null)
-    .sort((a, b) => String(a.at).localeCompare(String(b.at)));
-
-  let checkCallsDue = 0;
-  let checkCallsMet = 0;
-  for (const call of calls) {
-    const scheduled = text(call.nextCheckCallAt);
-    if (!scheduled) continue;
-    const dueMs = Date.parse(scheduled);
-    const fromMs = Date.parse(String(call.at));
-    if (!Number.isFinite(dueMs) || !Number.isFinite(fromMs)) continue;
-    checkCallsDue += 1;
-    const met = calls.some((later) => {
-      const atMs = Date.parse(String(later.at));
-      return Number.isFinite(atMs) && atMs > fromMs && atMs <= dueMs + grace * MINUTE_MS;
-    });
-    if (met) checkCallsMet += 1;
-  }
-
-  const firstPing = calls.find(isPositionReport);
-  const pod = [...podDocs]
-    .filter((d) => text(d.createdAt) != null)
-    .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)))[0] ?? null;
+  const tracking = trackingFactsOf(checkCalls, grace);
 
   return {
     // Load and Shipment are kept mirrored by the router, so the Load answers first
@@ -362,11 +422,11 @@ export function laneSampleFacts({ load, shipment = null, checkCalls = [], podDoc
     salesRepId: text(load.salesRepId) ?? text(shipment?.salesRepId),
     deliveredAt: text(load.deliveredAt),
     trackingProvider: text(load.trackingProvider),
-    firstPingAt: firstPing ? text(firstPing.at) : null,
-    podReceivedAt: pod ? text(pod.createdAt) : null,
+    firstPingAt: tracking.firstPingAt,
+    podReceivedAt: podReceivedAtOf(podDocs, String(load.id ?? '')),
     datPostedAt: text(shipment?.datPostedAt),
-    checkCallsDue,
-    checkCallsMet,
+    checkCallsDue: tracking.checkCallsDue,
+    checkCallsMet: tracking.checkCallsMet,
   };
 }
 
@@ -659,6 +719,9 @@ export function planLaneSamples(source, nowIso, { refreshLive = false } = {}) {
     if (!checkCallsByLoad.has(key)) checkCallsByLoad.set(key, []);
     checkCallsByLoad.get(key).push(row);
   }
+  // The POD rule itself lives in `podReceivedAtOf`, which also scopes by load and
+  // drops unreviewed and rejected uploads; this index only narrows the scan to the
+  // rows that rule can possibly accept.
   const podsByShipment = new Map();
   for (const row of source.ShipmentDocument ?? []) {
     const key = text(row.shipmentId);
@@ -779,14 +842,26 @@ export function planLaneSamples(source, nowIso, { refreshLive = false } = {}) {
       // the current ones; a migration must not talk over them. `--refresh` still
       // brings the Step R facts onto it: the live writer prices the load, it does
       // not write the dashboard's tracking and POD history.
+      // A fact this script derives is written; a fact it cannot derive is REMOVEd
+      // only when the row still carries one. Anything else re-patches the same row
+      // on every run: a null can never be SET on DynamoDB, and leaving a stored
+      // value in place while calling the row stale plans it again forever.
       const facts = {};
+      const clears = [];
       let stale = false;
       for (const field of STEP_R_FACT_FIELDS) {
         const value = item[field] ?? null;
-        if ((existing[field] ?? null) !== value) stale = true;
-        if (value !== null) facts[field] = value;
+        const before = existing[field] ?? null;
+        if (value === null) {
+          if (before !== null) { clears.push(field); stale = true; }
+          continue;
+        }
+        facts[field] = value;
+        if (before !== value) stale = true;
       }
-      if (refreshLive && stale) {
+      // `stale` implies one of the two is non-empty; the guard is here so an entry
+      // with nothing to say can never reach apply and build `UpdateExpression: 'SET '`.
+      if (refreshLive && stale && (Object.keys(facts).length > 0 || clears.length > 0)) {
         factsPatched += 1;
         actions.push({
           action: 'PATCH_LANE_SAMPLE_FACTS',
@@ -796,6 +871,7 @@ export function planLaneSamples(source, nowIso, { refreshLive = false } = {}) {
           laneKey: text(existing.laneKey) ?? laneKey,
           source: LIVE_SOURCE,
           facts,
+          clears,
           sampledAt: text(existing.sampledAt),
           before: Object.fromEntries(STEP_R_FACT_FIELDS.map((f) => [f, existing[f] ?? null])),
         });
@@ -858,8 +934,11 @@ export function sourceRowsOf(source) {
     Order: ['customerId', 'customerName', 'mode', 'rateType', 'equipmentType', 'customerRepId', 'invoiceId', 'invoicedAt'],
     Shipment: ['number', 'customerId', 'customerName', 'mode', 'status', 'revDivision', 'revSubdivision', 'salesRepId', 'datPostedAt'],
     Customer: ['teamKey'],
-    LoadCheckCall: ['loadId', 'at', 'type', 'lat', 'lng', 'nextCheckCallAt'],
-    ShipmentDocument: ['shipmentId', 'type', 'status', 'createdAt'],
+    // Step R: exactly what `trackingFactsOf` and `podReceivedAtOf` read. `source`
+    // decides whether a row is a ping at all; `reviewStatus`, `loadId` and
+    // `uploadedAt` decide which POD the dashboard times from.
+    LoadCheckCall: ['loadId', 'at', 'type', 'source', 'nextCheckCallAt'],
+    ShipmentDocument: ['shipmentId', 'loadId', 'type', 'status', 'reviewStatus', 'uploadedAt', 'createdAt'],
     TmsSettings: ['checkCallGraceMinutes'],
     LaneRateSample: MATERIAL_FIELDS,
   };
@@ -1089,10 +1168,21 @@ export async function applyLaneSamplePlan({ doc, plan, suffix }) {
           const names = {};
           const values = { ':sampledAt': entry.sampledAt };
           const sets = [];
-          for (const [field, value] of Object.entries(entry.facts)) {
+          const removes = [];
+          for (const [field, value] of Object.entries(entry.facts ?? {})) {
             names[`#${field}`] = field;
             values[`:${field}`] = value;
             sets.push(`#${field} = :${field}`);
+          }
+          // A fact that went null leaves the row rather than being written as NULL:
+          // the dashboard reads "absent" as "we never learned it", and DynamoDB has
+          // no way to SET a column to nothing.
+          for (const field of entry.clears ?? []) {
+            names[`#${field}`] = field;
+            removes.push(`#${field}`);
+          }
+          if (sets.length === 0 && removes.length === 0) {
+            throw new Error(`PATCH_LANE_SAMPLE_FACTS ${entry.id} has nothing to set or remove`);
           }
           // Only the Step R columns move, and only while the row is still the one
           // this plan read: a load re-sampled live since then keeps its own facts.
@@ -1100,7 +1190,10 @@ export async function applyLaneSamplePlan({ doc, plan, suffix }) {
             TableName: sampleTable,
             Key: { id: entry.id },
             ConditionExpression: 'attribute_exists(id) AND sampledAt = :sampledAt',
-            UpdateExpression: `SET ${sets.join(', ')}`,
+            UpdateExpression: [
+              sets.length > 0 ? `SET ${sets.join(', ')}` : '',
+              removes.length > 0 ? `REMOVE ${removes.join(', ')}` : '',
+            ].filter(Boolean).join(' '),
             ExpressionAttributeNames: names,
             ExpressionAttributeValues: values,
           }));
@@ -1110,6 +1203,7 @@ export async function applyLaneSamplePlan({ doc, plan, suffix }) {
             laneKey: entry.laneKey,
             before: entry.before,
             after: entry.facts,
+            cleared: entry.clears ?? [],
           });
         } catch (err) {
           if (err?.name !== 'ConditionalCheckFailedException') throw err;

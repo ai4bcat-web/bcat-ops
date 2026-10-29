@@ -29,6 +29,14 @@
  *                  before the PRO rule. It becomes a void that says so, written
  *                  straight to DynamoDB under `attribute_not_exists(voidedAt)` so a
  *                  re-run cannot overwrite a real void somebody has since recorded.
+ *                  A void is not three columns: `applyVoid` in the shipment router
+ *                  also takes our fleet off the mirrored loads, because the calendar,
+ *                  dispatch, settlements and the driver app key on `stops[].driverId`
+ *                  and the `pickupDriverId`/`deliveryDriverId`/`truckId` mirrors and
+ *                  never read `Load.status`. So every mirrored load that still carries
+ *                  a driver mark, or is still flagged `readyToInvoice`, is cleared and
+ *                  canceled in the same apply step and PRINTED IN THE PLAN REVIEW, so
+ *                  a person sees which drivers' calendars and settlements move.
  *                  Nothing is deleted and no PRO is released.
  *   5. REPORT    — the resulting counts per division and per subdivision over EVERY
  *                  shipment, and the loads that carry no shipment at all. Those loads
@@ -98,7 +106,11 @@ SALES REP: a Shipment with no salesRepId takes its order's customerRepId; an e-m
            resolved to the UserProfile that carries it. Unresolved values are listed and
            left alone.
 VOIDS:     a Shipment with deletedAt and no voidedAt becomes a void that says
-           "${LEGACY_VOID_REASON}". Nothing is deleted; no PRO is released.
+           "${LEGACY_VOID_REASON}", and every mirrored Load that still carries a
+           driver mark (stops, pickup/delivery driver, truck) or readyToInvoice is
+           cleared and CANCELED with it, exactly as the shipment router's own void
+           does. Each such load is named in the plan review. Nothing is deleted; no
+           PRO is released.
 
 Dry run reads the tables, asks both Lambdas to plan, prints everything and writes
 nothing to AWS. Apply re-reads the same tables, refuses a plan whose sources have
@@ -227,18 +239,89 @@ export function planSalesReps({ shipments, orders, profiles }) {
 // ── Legacy soft deletes ──────────────────────────────────────────────────────
 
 /**
+ * A Load's stops as an array, or null when the row has none of its own. AWSJSON
+ * arrives as a string; a legacy load with no `stops` keeps its two mirror fields and
+ * nothing is synthesised for it, because writing a synthesised array back would
+ * invent stops this migration never read.
+ * @param {Record<string, any>} load
+ * @returns {any[] | null}
+ */
+function stopsOf(load) {
+  let stops = load.stops;
+  for (let i = 0; i < 4 && typeof stops === 'string'; i += 1) {
+    try { stops = JSON.parse(stops); } catch { return null; }
+  }
+  return Array.isArray(stops) && stops.length > 0 ? stops : null;
+}
+
+/**
+ * What a void has to take off a load. The calendar, dispatch, box-truck and
+ * owner-operator pay, employee stats and the driver schedule never read
+ * `Load.status`: they key on these. A voided shipment that kept them would still pay
+ * a driver for freight that never ran.
+ * @param {Record<string, any>} load
+ * @returns {string[]} the marks found, named for the plan review
+ */
+export function driverMarksOf(load) {
+  const marks = [];
+  if (text(load.pickupDriverId)) marks.push('pickupDriverId');
+  if (text(load.deliveryDriverId)) marks.push('deliveryDriverId');
+  if (text(load.truckId)) marks.push('truckId');
+  (stopsOf(load) ?? []).forEach((stop, i) => {
+    if (text(stop?.driverId)) marks.push(`stops[${i}].driverId`);
+    if (text(stop?.truckId)) marks.push(`stops[${i}].truckId`);
+  });
+  return marks;
+}
+
+/**
  * Every shipment that was soft-deleted before Void existed, as the void it should
- * have been. The PRO stays, the history stays, the documents stay: only the three
- * void columns are written.
+ * have been — and the mirrored loads that void has to clear. The PRO stays, the
+ * history stays, the documents stay.
+ *
+ * A load is listed only when there is something to take off it: a driver mark, or a
+ * `readyToInvoice` flag on freight nobody ran. `stops` is rewritten exactly the way
+ * `clearedStops` does in `src/lib/loadMirror.ts` — the driver and truck off each
+ * stop, every appointment, address, reference and arrival time left alone.
  *
  * @param {Array<Record<string, any>>} shipments
+ * @param {Array<Record<string, any>>} [loads] every Load, to find the mirrors by shipmentId
  * @returns {any[]}
  */
-export function planLegacyVoids(shipments) {
+export function planLegacyVoids(shipments, loads = []) {
+  const loadsByShipment = new Map();
+  for (const load of [...(loads ?? [])].sort((a, b) => String(a.id).localeCompare(String(b.id)))) {
+    const key = text(load.shipmentId);
+    if (!key) continue;
+    if (!loadsByShipment.has(key)) loadsByShipment.set(key, []);
+    loadsByShipment.get(key).push(load);
+  }
+
   const actions = [];
   for (const shipment of [...(shipments ?? [])].sort((a, b) => String(a.id).localeCompare(String(b.id)))) {
     const deletedAt = text(shipment.deletedAt);
     if (!deletedAt || text(shipment.voidedAt)) continue;
+
+    const mirrored = [];
+    for (const load of loadsByShipment.get(String(shipment.id)) ?? []) {
+      const driverMarks = driverMarksOf(load);
+      const readyToInvoice = load.readyToInvoice === true;
+      if (driverMarks.length === 0 && !readyToInvoice) continue;
+      const stops = stopsOf(load);
+      mirrored.push({
+        loadId: String(load.id),
+        loadNumber: text(load.loadNumber),
+        status: text(load.status),
+        driverMarks,
+        readyToInvoice,
+        // Null when the load has no stops array of its own: the two mirror columns
+        // below carry its drivers and they are cleared by name.
+        stops: stops ? stops.map(({ truckId: _truckId, ...rest }) => ({ ...rest, driverId: null })) : null,
+        // The router cancels a load that is not canceled already and leaves one that is.
+        canceling: text(load.status) !== 'CANCELED',
+      });
+    }
+
     actions.push({
       action: 'VOID_LEGACY_SOFT_DELETE',
       purpose: 'A pre-Step-R soft delete, recorded as the void it always was',
@@ -248,6 +331,7 @@ export function planLegacyVoids(shipments) {
       voidedBy: text(shipment.deletedBy) ?? MIGRATION_USER,
       voidReason: LEGACY_VOID_REASON,
       version: typeof shipment.version === 'number' ? shipment.version : 0,
+      loads: mirrored,
     });
   }
   return actions;
@@ -315,7 +399,9 @@ export function sourceRowsOf(source) {
   const FIELDS = {
     Shipment: ['number', 'salesRepId', 'revDivision', 'revSubdivision', 'revTagSource', 'deletedAt', 'deletedBy', 'voidedAt', 'version'],
     Order: ['shipmentId', 'customerRepId'],
-    Load: ['shipmentId', 'loadNumber', 'customer', 'status'],
+    // The driver marks a void clears are read off the Load, so a dispatcher who
+    // reassigns one between plan and apply invalidates the plan.
+    Load: ['shipmentId', 'loadNumber', 'customer', 'status', 'stops', 'pickupDriverId', 'deliveryDriverId', 'truckId', 'readyToInvoice'],
     UserProfile: ['email'],
   };
   const rows = [];
@@ -343,7 +429,7 @@ export function buildRevDivisionPlan({ source, retag, environment, suffix }) {
     orders: source.Order ?? [],
     profiles: source.UserProfile ?? [],
   });
-  const voids = planLegacyVoids(shipments);
+  const voids = planLegacyVoids(shipments, source.Load ?? []);
   const orphanLoads = loadsWithoutShipment(source.Load ?? []);
 
   const actions = [
@@ -385,6 +471,10 @@ export function buildRevDivisionPlan({ source, retag, environment, suffix }) {
         unresolvedByValue: reps.byValue,
       },
       legacyVoids: voids.length,
+      // Named one by one, not counted: each is a driver's calendar or settlement.
+      legacyVoidLoads: voids.flatMap((entry) =>
+        entry.loads.map((load) => ({ ...load, shipmentId: entry.shipmentId, shipmentNumber: entry.shipmentNumber }))
+      ),
       tagsNow: countTags(shipments),
       loadsWithoutShipment: orphanLoads,
       rowsDeleted: 0,
@@ -443,6 +533,24 @@ export function reviewText(plan) {
   for (const [value, count] of values) lines.push(`        ${value}: ${count} shipment(s) — no UserProfile carries it`);
 
   lines.push('', `Legacy soft deletes to void: ${s.legacyVoids} ("${LEGACY_VOID_REASON}")`);
+  const voidLoads = s.legacyVoidLoads ?? [];
+  lines.push(
+    `    Mirrored loads cleared with them: ${voidLoads.length} — our fleet comes off the`,
+    '    load (stops, pickup/delivery driver, truck, trailer), readyToInvoice goes false',
+    '    and the load is CANCELED, the way the shipment router\'s own void does it:'
+  );
+  if (voidLoads.length === 0) lines.push('        (none — no voided shipment carries a driver mark)');
+  for (const load of voidLoads) {
+    const marks = [
+      ...load.driverMarks,
+      ...(load.readyToInvoice ? ['readyToInvoice'] : []),
+    ].join(', ');
+    lines.push(
+      `        ${load.loadId}${load.loadNumber ? ` (${load.loadNumber})` : ''} on ` +
+      `${load.shipmentNumber ?? load.shipmentId} — ${marks}` +
+      `${load.canceling ? '' : ' (already CANCELED)'}`
+    );
+  }
 
   const tags = s.tagsNow;
   lines.push('', 'Tags over ALL shipments right now:');
@@ -551,6 +659,55 @@ async function writeAudit(doc, table, entityId, changes) {
 }
 
 /**
+ * Take our fleet off one mirrored load, the way `applyVoid` does in
+ * `amplify/functions/tms-shipment-actions/handler.ts`: the stops and the four mirror
+ * columns cleared, nothing ready to bill, and the load canceled by the SYSTEM rather
+ * than by a person. Who held it stays readable on `assignmentType`, `carrierName`
+ * and the LoadCarrier legs — that is the record, and it is deliberately not touched.
+ *
+ * @param {any} doc
+ * @param {string} table
+ * @param {Record<string, any>} load one entry of a VOID_LEGACY_SOFT_DELETE's `loads`
+ */
+async function clearVoidedLoad(doc, table, load) {
+  const now = new Date().toISOString();
+  const names = {};
+  const values = {
+    ':null': null,
+    ':false': false,
+    ':now': now,
+    ':user': MIGRATION_USER,
+  };
+  const sets = [
+    'pickupDriverId = :null',
+    'deliveryDriverId = :null',
+    'truckId = :null',
+    'trailerNumber = :null',
+    'readyToInvoice = :false',
+    'updatedAt = :now',
+    'updatedBy = :user',
+  ];
+  if (load.stops) {
+    // AWSJSON: the column holds the serialised array, which is how it was read.
+    values[':stops'] = JSON.stringify(load.stops);
+    sets.push('stops = :stops');
+  }
+  if (load.canceling) {
+    names['#status'] = 'status';
+    values[':canceled'] = 'CANCELED';
+    values[':system'] = 'SYSTEM';
+    sets.push('#status = :canceled', 'statusChangedAt = :now', 'statusChangedBy = :user', 'statusSource = :system');
+  }
+  await doc.send(new UpdateCommand({
+    TableName: table,
+    Key: { id: load.loadId },
+    UpdateExpression: `SET ${sets.join(', ')}`,
+    ...(Object.keys(names).length > 0 ? { ExpressionAttributeNames: names } : {}),
+    ExpressionAttributeValues: values,
+  }));
+}
+
+/**
  * Replay a reviewed plan. The order is the plan's order: seed, retag, reps, voids.
  *
  * @param {object} input
@@ -566,6 +723,7 @@ export async function applyRevDivisionPlan({ client, doc, plan, suffix }) {
     throw new Error(`Refusing to write shipments in production tables (${suffix})`);
   }
   const shipmentTable = `Shipment-${suffix}`;
+  const loadTable = `Load-${suffix}`;
   const auditTable = `AuditLog-${suffix}`;
   const report = {
     seed: null,
@@ -573,6 +731,7 @@ export async function applyRevDivisionPlan({ client, doc, plan, suffix }) {
     salesRepsWritten: 0,
     voidsWritten: 0,
     voidsAlready: 0,
+    loadsCleared: 0,
     failures: [],
   };
 
@@ -612,11 +771,20 @@ export async function applyRevDivisionPlan({ client, doc, plan, suffix }) {
             },
           }));
           report.voidsWritten += 1;
+          // The void is not finished until the freight is off our drivers: the
+          // calendar, dispatch and settlements key on the load, not on the shipment.
+          // Only on the branch that wrote the void — when the condition fails, a real
+          // void landed since the plan was built and the router already cleared these.
+          for (const load of entry.loads ?? []) {
+            await clearVoidedLoad(doc, loadTable, load);
+            report.loadsCleared += 1;
+          }
           await writeAudit(doc, auditTable, entry.shipmentId, {
             voidedAt: entry.voidedAt,
             voidedBy: entry.voidedBy,
             voidReason: entry.voidReason,
             shipmentNumber: entry.shipmentNumber,
+            loadsCleared: (entry.loads ?? []).map((load) => load.loadId),
           });
         } catch (err) {
           if (err?.name !== 'ConditionalCheckFailedException') throw err;

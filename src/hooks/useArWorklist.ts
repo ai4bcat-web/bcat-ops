@@ -17,6 +17,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { listOrdersByArStatus, listShipments } from '@/lib/apiClient'
+import { isShipmentVoided } from '@/lib/shipmentVoid'
 import type { OrderRecord, ShipmentRecord } from '@/types/tms'
 
 const POLL_MS = 60_000
@@ -26,7 +27,7 @@ export type ArWorklistTab = 'DOCS_NEEDED' | 'UNBILLED' | 'UNPAID'
 
 export interface ArWorklistRow {
   order: OrderRecord
-  /** Null only while the shipment read has not landed, or the shipment was deleted. */
+  /** Null only while the shipment read has not landed; voided shipments are dropped. */
   shipment: ShipmentRecord | null
   orderId: string
   shipmentId: string
@@ -91,41 +92,45 @@ export function useArWorklist(tab: ArWorklistTab): ArWorklist {
     const byId = new Map<string, ShipmentRecord>()
     for (const s of shipments) byId.set(s.id, s)
 
-    const built = orders.map((order): ArWorklistRow => {
-      const shipment = byId.get(order.shipmentId) ?? null
-      const docsRequired = order.docsRequired ?? []
-      const docsMissing = order.docsMissing ?? []
-      const docsReady = docsMissing.length === 0
-      const revenueCents = order.revenueCents ?? 0
+    const built = orders
+      .map((order): ArWorklistRow | null => {
+        const shipment = byId.get(order.shipmentId) ?? null
+        // A voided shipment is out of every working set — its order does not sit on a
+        // tab. `voidedAt` is the R marker; a pre-R `deletedAt` is the same thing.
+        if (isShipmentVoided(shipment)) return null
+        const docsRequired = order.docsRequired ?? []
+        const docsMissing = order.docsMissing ?? []
+        const docsReady = docsMissing.length === 0
+        const revenueCents = order.revenueCents ?? 0
 
-      const reasons: string[] = []
-      if (!docsReady) reasons.push(`Missing ${docsMissing.join(', ')}`)
-      if (revenueCents <= 0) reasons.push('No customer charges')
-      if (shipment?.deletedAt) reasons.push('Shipment deleted')
-      else if (shipment?.status === 'CANCELED') reasons.push('Shipment canceled')
-      else if (!shipment?.deliveredAt) reasons.push('Not delivered')
+        const reasons: string[] = []
+        if (!docsReady) reasons.push(`Missing ${docsMissing.join(', ')}`)
+        if (revenueCents <= 0) reasons.push('No customer charges')
+        if (shipment?.status === 'CANCELED') reasons.push('Shipment canceled')
+        else if (!shipment?.deliveredAt) reasons.push('Not delivered')
 
-      return {
-        order,
-        shipment,
-        orderId: order.id,
-        shipmentId: order.shipmentId,
-        shipmentNumber: shipment?.number ?? null,
-        customerId: order.customerId,
-        customerName: order.customerName ?? shipment?.customerName ?? '',
-        billToId: order.billToId ?? null,
-        deliveredAt: shipment?.deliveredAt ?? null,
-        arStatusChangedAt: order.arStatusChangedAt ?? null,
-        revenueCents,
-        docsRequired,
-        docsMissing,
-        docsReady,
-        invoiceNumber: order.invoiceNumber ?? null,
-        invoicedAt: order.invoicedAt ?? null,
-        arBalanceCents: order.arBalanceCents ?? null,
-        reasons,
-      }
-    })
+        return {
+          order,
+          shipment,
+          orderId: order.id,
+          shipmentId: order.shipmentId,
+          shipmentNumber: shipment?.number ?? null,
+          customerId: order.customerId,
+          customerName: order.customerName ?? shipment?.customerName ?? '',
+          billToId: order.billToId ?? null,
+          deliveredAt: shipment?.deliveredAt ?? null,
+          arStatusChangedAt: order.arStatusChangedAt ?? null,
+          revenueCents,
+          docsRequired,
+          docsMissing,
+          docsReady,
+          invoiceNumber: order.invoiceNumber ?? null,
+          invoicedAt: order.invoicedAt ?? null,
+          arBalanceCents: order.arBalanceCents ?? null,
+          reasons,
+        }
+      })
+      .filter((row): row is ArWorklistRow => row !== null)
 
     return built.sort((a, b) => {
       const at = a.arStatusChangedAt ?? ''

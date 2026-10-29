@@ -3,8 +3,9 @@
  *
  * Throwaway: it builds its own shipment, drives the whole AR lifecycle through the
  * deployed `tmsFinanceActions`, exercises the refusals and the concurrency/idempotency
- * guards, then soft-deletes the fixture it made. It touches no copied customer, load
- * or invoice, and it refuses to run against anything but the dev API.
+ * guards, then voids the fixture it made — void is the only way a shipment leaves the
+ * working set, and the PRO it took is never handed out again. It touches no copied
+ * customer, load or invoice, and it refuses to run against anything but the dev API.
  *
  *   BCAT_EMAIL=… BCAT_PASSWORD=… node scripts/devVerifyAr.mjs
  */
@@ -66,6 +67,26 @@ async function refuses(name, pattern, run) {
     if (pattern.test(message)) ok(name, message.slice(0, 120))
     else bad(name, `refused for the wrong reason: ${message.slice(0, 160)}`)
   }
+}
+
+// ── documents: a tiny real PDF through PREPARE → PUT → COMMIT ────────────────
+// The release gate has no override, so the fixture earns its BOL and POD the same
+// way a dispatcher does.
+const TINY_PDF = Buffer.from(
+  '%PDF-1.1\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n',
+)
+async function attachDocument(shipmentId, orderId, loadId, type) {
+  const name = `verify-${type.toLowerCase()}.pdf`
+  const prepared = await shipAction('PREPARE_DOCUMENT_UPLOAD', {
+    shipmentId, type, name, contentType: 'application/pdf', sizeBytes: TINY_PDF.length,
+  })
+  const put = await fetch(prepared.uploadUrl, { method: 'PUT', headers: { 'content-type': 'application/pdf' }, body: TINY_PDF })
+  if (!put.ok) throw new Error(`upload failed: ${put.status}`)
+  return shipAction('COMMIT_DOCUMENT', {
+    shipmentId, documentId: prepared.documentId, s3Key: prepared.s3Key, type, name,
+    contentType: 'application/pdf', sizeBytes: TINY_PDF.length,
+    ...(type === 'BOL' || type === 'POD' ? { loadId } : { orderId }),
+  })
 }
 
 async function main() {
@@ -141,12 +162,14 @@ async function main() {
   await refuses('GENERATE refuses an order still waiting on documents', /UNBILLED/i, () =>
     finAction('GENERATE_INVOICE', { orderId }))
 
-  await shipAction('READY_TO_INVOICE', {
-    orderId,
-    expectedUpdatedAt: bundle.orders[0].updatedAt,
-    override: true,
-    overrideNote: 'dev verification fixture; no paperwork exists',
-  })
+  // Step R: READY_TO_INVOICE has no override any more. The fixture earns the BOL and
+  // the POD the gate asks for, and the gate opens on its own.
+  await refuses('READY_TO_INVOICE refuses while the paperwork is missing', /Missing document/i, () =>
+    shipAction('READY_TO_INVOICE', { orderId, expectedUpdatedAt: bundle.orders[0].updatedAt }))
+  await attachDocument(shipmentId, orderId, bundle.loads[0].id, 'BOL')
+  await attachDocument(shipmentId, orderId, bundle.loads[0].id, 'POD')
+  await reload()
+  await shipAction('READY_TO_INVOICE', { orderId, expectedUpdatedAt: bundle.orders[0].updatedAt })
   await reload()
   ok('READY_TO_INVOICE moved the order to UNBILLED', bundle.orders[0].arStatus)
 
@@ -297,11 +320,11 @@ async function main() {
   } else bad('the void restored the order', JSON.stringify(bundle.orders[0]).slice(0, 200))
 
   // ── the factoring hand-off, on a live unpaid invoice ──────────────────────
+  // The BOL and POD uploaded above are still on the shipment, so the gate opens
+  // again without anybody overriding anything.
   await shipAction('READY_TO_INVOICE', {
     orderId,
     expectedUpdatedAt: bundle.orders[0].updatedAt,
-    override: true,
-    overrideNote: 'dev verification fixture; no paperwork exists',
   }).catch(() => undefined)
   const reissued = await finAction('GENERATE_INVOICE', { orderId })
   const secondId = reissued.invoice.id
@@ -326,10 +349,12 @@ async function main() {
   })
   await reload()
 
-  await shipAction('DELETE_SHIPMENT', {
-    shipmentId, expectedUpdatedAt: bundle.shipment.updatedAt, reason: 'dev verification fixture',
+  // Step R. A fixture is retired by voiding it: the PRO, the legs, the charges and
+  // the history all stay, and every write path refuses it from here on.
+  await shipAction('VOID_SHIPMENT', {
+    shipmentId, expectedUpdatedAt: bundle.shipment.updatedAt, reason: 'Dev verification fixture',
   })
-  ok('the fixture shipment was soft-deleted', shipmentId)
+  ok('the fixture shipment was voided', shipmentId)
 
   const failed = results.filter((r) => !r.ok)
   console.log(`\n${results.length - failed.length}/${results.length} checks passed`)

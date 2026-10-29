@@ -424,6 +424,21 @@ describe('creditBucketForOrder', () => {
     expect(creditBucketForOrder({ status: 'IN_TRANSIT', deletedAt: '2026-10-05T00:00:00Z' }, 'UNPAID')).toBeNull()
   })
 
+  it('drops a voided shipment even when it is delivered and unbilled', () => {
+    expect(
+      creditBucketForOrder(
+        { status: 'DELIVERED', deletedAt: null, voidedAt: '2026-10-28T00:00:00Z' },
+        'UNBILLED',
+      ),
+    ).toBeNull()
+    expect(
+      creditBucketForOrder(
+        { status: 'IN_TRANSIT', deletedAt: null, voidedAt: '2026-10-28T00:00:00Z' },
+        'UNPAID',
+      ),
+    ).toBeNull()
+  })
+
   it('drops a legacy backfilled order — its freight is carried by its loads', () => {
     expect(creditBucketForOrder({ status: 'DELIVERED', deletedAt: null }, 'LEGACY')).toBeNull()
     expect(creditBucketForOrder({ status: 'IN_TRANSIT', deletedAt: null }, 'LEGACY')).toBeNull()
@@ -465,6 +480,12 @@ describe('creditExposureForOrders', () => {
   it('exposes nothing for a paid order, balance or not', () => {
     const paid = makeOrder({ arStatus: 'PAID', revenueCents: 250_000, arBalanceCents: 0 })
     expect(creditExposureForOrders(c, [paid], [makeShipment()])).toEqual([])
+  })
+
+  it('carries nothing for a voided delivered order — void frees the credit', () => {
+    const order = makeOrder({ arStatus: 'UNBILLED', revenueCents: 250_000 })
+    const voided = makeShipment({ status: 'DELIVERED', voidedAt: '2026-10-28T00:00:00Z' })
+    expect(creditExposureForOrders(c, [order], [voided])).toEqual([])
   })
 
   it('ignores a stale balance on an order that is not invoiced yet', () => {

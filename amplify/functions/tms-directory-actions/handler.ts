@@ -2107,6 +2107,25 @@ async function saveOwnershipDivision(
   const errors = validateDivisions(next)
   if (errors.length > 0) throw new Error(errors.join(' '))
 
+  // Structure is not enough: an active subdivision under an archived parent would
+  // tag shipments with a top-level code the sidebar and the dashboards no longer
+  // list, because `resolveDivision` reads only the matched row's `active` and then
+  // rolls up through `parentId`. Every ancestor has to be active too.
+  if (item.active === true) {
+    const byId = new Map(next.map((d) => [d.id, d]))
+    const seen = new Set<string>([code])
+    let parentId = optionalString(item.parentId, 64)
+    while (parentId && !seen.has(parentId)) {
+      seen.add(parentId)
+      const parent = byId.get(parentId)
+      if (!parent) break
+      if (!parent.active) {
+        throw new Error(`"${name}" cannot be active under the archived division "${parent.name}"`)
+      }
+      parentId = parent.parentId ?? null
+    }
+  }
+
   await putVersioned(OWNERSHIP_DIVISION_TABLE_NAME, item, existing ? existing.version ?? 0 : null, 'division')
   await writeAudit('OwnershipDivision', code, 'SAVE_OWNERSHIP_DIVISION', caller, {
     created: existing == null,

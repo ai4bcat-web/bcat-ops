@@ -1578,6 +1578,35 @@ describe('SAVE_OWNERSHIP_DIVISION', () => {
     await handler(event('SAVE_OWNERSHIP_DIVISION', { id: 'LOCAL', code: 'LOCAL', name: 'Local drivers', parentId: 'ASSETS' }, ADMIN_CALLER))
     expect(tables.divisions.get('LOCAL')).toMatchObject({ name: 'Local drivers', version: 2 })
   })
+
+  it('refuses an active subdivision under an archived parent, at any depth', async () => {
+    const tables = ownershipTables({
+      'OwnershipDivision-test': [
+        division({ code: 'ASSETS', active: false }),
+        division({ code: 'BOX_TRUCK', parentId: 'ASSETS', active: false }),
+      ],
+    })
+
+    await expect(
+      handler(event('SAVE_OWNERSHIP_DIVISION', {
+        id: 'BOX_TRUCK', code: 'BOX_TRUCK', name: 'Box trucks', parentId: 'ASSETS', active: true,
+      }, ADMIN_CALLER)),
+    ).rejects.toThrow(/"Box trucks" cannot be active under the archived division "Division ASSETS"/)
+
+    // A grandchild is refused by the same walk, through an active parent.
+    await expect(
+      handler(event('SAVE_OWNERSHIP_DIVISION', {
+        code: 'LOCAL', name: 'Local drivers', parentId: 'BOX_TRUCK', active: true,
+      }, ADMIN_CALLER)),
+    ).rejects.toThrow(/cannot be active under the archived division/)
+    expect(tables.divisions.get('LOCAL')).toBeUndefined()
+
+    // An archived child under an archived parent is fine — nothing is tagged with it.
+    await handler(event('SAVE_OWNERSHIP_DIVISION', {
+      id: 'BOX_TRUCK', code: 'BOX_TRUCK', name: 'Box trucks', parentId: 'ASSETS', active: false,
+    }, ADMIN_CALLER))
+    expect(tables.divisions.get('BOX_TRUCK')).toMatchObject({ name: 'Box trucks', active: false })
+  })
 })
 
 describe('ARCHIVE_OWNERSHIP_DIVISION', () => {

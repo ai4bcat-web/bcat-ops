@@ -145,17 +145,23 @@ function baseSource({ unit = 'dollars', comparables = 10 } = {}) {
     LoadFinancials: [financials('tms-delivered', 245_000), financials('tms-no-state', 100_000), ...cmpFins],
     Customer: [{ id: 'cust-1', name: 'Acme Foods', teamKey: 'EAST' }],
     // Step R facts: two scheduled check calls (one answered inside the grace, one
-    // answered an hour late), a ping, a superseded POD and the POD that counts.
+    // answered an hour late), and the rows where the rule this script used to apply
+    // and the rule the live Lambda applies give different answers — a dispatcher-typed
+    // ping carrying a position, a POD still waiting for review, and a POD filed
+    // against the other leg of the same shipment.
     LoadCheckCall: [
       { id: 'cc-1', loadId: 'tms-delivered', at: '2026-03-02T08:00:00.000Z', type: 'DISPATCH', nextCheckCallAt: '2026-03-02T14:00:00.000Z' },
-      { id: 'cc-2', loadId: 'tms-delivered', at: '2026-03-02T14:10:00.000Z', type: 'TRACKING_PING', lat: 41.5, lng: -88.1, nextCheckCallAt: '2026-03-03T02:00:00.000Z' },
-      { id: 'cc-3', loadId: 'tms-delivered', at: '2026-03-03T03:00:00.000Z', type: 'LOCATION_UPDATE', lat: 40.1, lng: -88.3 },
+      { id: 'cc-manual', loadId: 'tms-delivered', at: '2026-03-02T09:30:00.000Z', type: 'TRACKING_PING', source: 'MANUAL', lat: 41.6, lng: -87.9 },
+      { id: 'cc-2', loadId: 'tms-delivered', at: '2026-03-02T14:10:00.000Z', type: 'TRACKING_PING', source: 'LINK', lat: 41.5, lng: -88.1, nextCheckCallAt: '2026-03-03T02:00:00.000Z' },
+      { id: 'cc-3', loadId: 'tms-delivered', at: '2026-03-03T03:00:00.000Z', type: 'LOCATION_UPDATE', source: 'MOTIVE', lat: 40.1, lng: -88.3 },
     ],
     ShipmentDocument: [
       { id: 'doc-bol', shipmentId: 'shp-1', type: 'BOL', status: 'ACTIVE', createdAt: '2026-03-02T09:00:00.000Z' },
       { id: 'doc-pod-void', shipmentId: 'shp-1', type: 'POD', status: 'VOID', createdAt: '2026-03-04T18:00:00.000Z' },
-      { id: 'doc-pod', shipmentId: 'shp-1', type: 'POD', status: 'ACTIVE', createdAt: '2026-03-05T10:00:00.000Z' },
-      { id: 'doc-pod-2', shipmentId: 'shp-1', type: 'POD', status: 'ACTIVE', createdAt: '2026-03-06T10:00:00.000Z' },
+      { id: 'doc-pod-other-leg', shipmentId: 'shp-1', loadId: 'tms-moving', type: 'POD', status: 'ACTIVE', reviewStatus: 'APPROVED', uploadedAt: '2026-03-03T10:00:00.000Z', createdAt: '2026-03-03T10:00:00.000Z' },
+      { id: 'doc-pod-pending', shipmentId: 'shp-1', loadId: 'tms-delivered', type: 'POD', status: 'ACTIVE', reviewStatus: 'PENDING', uploadedAt: '2026-03-04T19:00:00.000Z', createdAt: '2026-03-04T19:00:00.000Z' },
+      { id: 'doc-pod', shipmentId: 'shp-1', loadId: 'tms-delivered', type: 'POD', status: 'ACTIVE', reviewStatus: 'APPROVED', uploadedAt: '2026-03-05T10:00:00.000Z', createdAt: '2026-03-05T11:00:00.000Z' },
+      { id: 'doc-pod-2', shipmentId: 'shp-1', loadId: 'tms-delivered', type: 'POD', status: 'ACTIVE', reviewStatus: 'APPROVED', uploadedAt: '2026-03-06T10:00:00.000Z', createdAt: '2026-03-06T10:00:00.000Z' },
     ],
     TmsSettings: [{ id: 'default', checkCallGraceMinutes: 20 }],
     LaneRateSample: [],
@@ -526,12 +532,28 @@ describe('backfillLaneSamples — the Step R dashboard facts', () => {
     expect(item.deliveredAt).toBe('2026-03-04T15:00:00.000Z');
     expect(item.trackingProvider).toBe('LINK');
     expect(item.datPostedAt).toBe('2026-03-01T09:00:00.000Z');
-    // The first call that reported a position, not the dispatch note before it.
+    // The first ping the truck sent, not the dispatch note before it.
     expect(item.firstPingAt).toBe('2026-03-02T14:10:00.000Z');
-    // The earliest ACTIVE POD; the voided one and the BOL are not PODs.
+    // The earliest POD we actually have; the voided one and the BOL are not PODs.
     expect(item.podReceivedAt).toBe('2026-03-05T10:00:00.000Z');
     // A subsidiary nobody assigned stays absent rather than being written as null.
     expect('revSubdivision' in item).toBe(false);
+  });
+
+  it('derives the ping and the POD the way the live writer does, not the way it used to', () => {
+    const { item } = actionFor(planLaneSamples(baseSource(), NOW), 'tms-delivered');
+
+    // `cc-manual` is a TRACKING_PING carrying lat/lng that a dispatcher typed at
+    // 09:30. The rule this script applied before — any TRACKING_PING, or any row
+    // with a position — called it the first ping. `laneSamples.ts` counts
+    // LINK/DRIVER_APP/MOTIVE only, so the LINK ping at 14:10 is the first one.
+    expect(item.firstPingAt).toBe('2026-03-02T14:10:00.000Z');
+    // The earliest ACTIVE POD on the shipment by `createdAt` — the old rule — is the
+    // one filed against the other leg (03-03 10:00), and after it the portal upload
+    // still waiting for review (03-04 19:00). The live rule scopes to this load and
+    // drops unreviewed uploads, and times from `uploadedAt` rather than `createdAt`,
+    // which is 10:00 on 03-05 and not 11:00.
+    expect(item.podReceivedAt).toBe('2026-03-05T10:00:00.000Z');
   });
 
   it('counts a scheduled call as met only when a later call lands inside the grace', () => {
@@ -631,6 +653,45 @@ describe('backfillLaneSamples — the Step R dashboard facts', () => {
     expect(update.input.ConditionExpression).toContain('sampledAt = :sampledAt');
     expect(update.input.UpdateExpression).toMatch(/#revDivision = :revDivision/);
     expect(update.input.UpdateExpression).not.toMatch(/revenueCents/);
+  });
+
+  it('clears a fact that went null with a REMOVE, and then stops planning the row', async () => {
+    const source = baseSource();
+    const { item } = actionFor(planLaneSamples(source, NOW), 'tms-delivered');
+    // The live row carries a subdivision nothing on the freight says any more: the
+    // only difference between the two is a fact that has gone null.
+    const live = { ...item, source: 'LOAD', sampledAt: '2026-03-20T00:00:00.000Z', revSubdivision: 'BOX_TRUCK' };
+
+    const plan = buildLaneSamplePlan({
+      source: { ...source, LaneRateSample: [live] },
+      environment: 'dev',
+      suffix: 'nc3jsnxdmjhkpequimypiatkma-NONE',
+      nowIso: NOW,
+      refreshLive: true,
+    });
+    const patch = plan.actions.find((a) => a.action === 'PATCH_LANE_SAMPLE_FACTS');
+    expect(patch.clears).toEqual(['revSubdivision']);
+    expect(patch.facts).not.toHaveProperty('revSubdivision');
+
+    const sent = [];
+    const doc = { send: async (cmd) => { sent.push(cmd); return {}; } };
+    const report = await applyLaneSamplePlan({ doc, plan, suffix: 'nc3jsnxdmjhkpequimypiatkma-NONE' });
+
+    expect(report.factsPatched).toBe(1);
+    const update = sent.find((c) => c.input.UpdateExpression);
+    // A REMOVE, not a NULL, and never a SET with nothing after it.
+    expect(update.input.UpdateExpression).toMatch(/REMOVE #revSubdivision$/);
+    expect(update.input.UpdateExpression).not.toMatch(/SET\s*(REMOVE|$)/);
+    expect(update.input.ExpressionAttributeValues).not.toHaveProperty(':revSubdivision');
+
+    // The row as the patch leaves it: facts set, the cleared column gone. A run
+    // against it plans nothing — before, the null was never written and the row was
+    // called stale on every pass forever.
+    const applied = { ...live, ...patch.facts };
+    delete applied.revSubdivision;
+    const second = planLaneSamples({ ...source, LaneRateSample: [applied] }, NOW, { refreshLive: true });
+    expect(second.actions.some((a) => a.action === 'PATCH_LANE_SAMPLE_FACTS')).toBe(false);
+    expect(second.factsPatched).toBe(0);
   });
 
   it('fingerprints the rows the facts are read from, so a new check call invalidates the plan', () => {

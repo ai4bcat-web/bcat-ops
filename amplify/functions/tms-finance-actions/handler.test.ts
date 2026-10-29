@@ -1548,6 +1548,27 @@ describe('RECORD_BILL', () => {
     expect(table(TABLES.carrierBill).size).toBe(0)
   })
 
+  it('refuses a bill against a voided shipment, and still records the TONU', async () => {
+    seedAssignment()
+    table(TABLES.shipment).set(SHIPMENT_ID, {
+      ...table(TABLES.shipment).get(SHIPMENT_ID)!,
+      voidedAt: '2026-10-23T00:00:00.000Z',
+      voidedBy: 'admin@bcatcorp.com',
+      voidReason: 'Double-entered by dispatch',
+    })
+
+    await expect(recordBill()).rejects.toThrow(/Shipment S000001 is voided — only a TONU bill may be recorded/)
+    expect(table(TABLES.carrierBill).size).toBe(0)
+
+    // The carrier that showed up is still owed, so the TONU goes through.
+    table(TABLES.loadCarrier).set(LOAD_CARRIER_ID, {
+      ...table(TABLES.loadCarrier).get(LOAD_CARRIER_ID)!,
+      status: 'TONU',
+    })
+    const bill = await recordBill()
+    expect(bill.status).toBe('IN_REVIEW')
+  })
+
   it('takes the quick-pay fee once, and the quick-pay days become the terms', async () => {
     seedAssignment({
       loadCarrier: { quickPay: true, quickPayDays: 2, quickPayFeeBps: 300, quickPayFeeCents: 5_400 },

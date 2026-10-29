@@ -45,7 +45,7 @@ import {
   optionalString,
   type Caller,
 } from '../_shared/actionInputs'
-import { isVoided } from './voided'
+import { isVoided } from '../_shared/voided'
 
 import { laneKey3For, laneKeyFor } from '../../../src/lib/laneKey'
 import {

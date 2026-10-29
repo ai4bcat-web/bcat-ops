@@ -227,6 +227,12 @@ export interface BillReadinessInput {
   load: Pick<ShipmentLoad, 'id' | 'loadNumber'> | null | undefined
   /** The directory row behind `loadCarrier.carrierId`, when it resolves. */
   carrier: (Pick<CarrierRecord, 'id' | 'name'> & { mergedIntoId?: string | null }) | null | undefined
+  /**
+   * The shipment the leg hangs off, for the void gate. Void takes the freight out of
+   * every working set, but a carrier who showed up to a voided load is still owed a
+   * TONU — so that one bill is still allowed through.
+   */
+  shipment?: { number?: string | null; voidedAt?: string | null; deletedAt?: string | null } | null
   charges: readonly LoadChargeRecord[]
   /** Every bill already recorded against this assignment, voided ones included. */
   existingBills: readonly Pick<CarrierBillRecord, 'id' | 'status' | 'billNumber'>[]
@@ -256,6 +262,17 @@ export function billReadiness(input: BillReadinessInput): BillReadiness {
   if (loadCarrier.status !== 'ACTIVE' && loadCarrier.status !== 'TONU') {
     reasons.push(
       `This assignment is ${loadCarrier.status}; only an ACTIVE or TONU assignment can be billed.`,
+    )
+  }
+
+  // Step R. `applyVoid` leaves the legs exactly where they are, so an ACTIVE leg on
+  // a voided shipment is still billable by id. The only bill that makes sense there
+  // is the TONU the carrier earned by showing up.
+  const { shipment } = input
+  if ((shipment?.voidedAt || shipment?.deletedAt) && loadCarrier.status !== 'TONU') {
+    const number = trimmed(shipment?.number)
+    reasons.push(
+      `${number ? `Shipment ${number}` : 'This shipment'} is voided — only a TONU bill may be recorded.`,
     )
   }
 

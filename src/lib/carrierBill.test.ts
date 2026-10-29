@@ -138,6 +138,7 @@ function readinessInput(overrides: Partial<BillReadinessInput> = {}): BillReadin
     loadCarrier: loadCarrier(),
     load: { id: 'ld-1', loadNumber: 'S-1001-1' },
     carrier: carrier(),
+    shipment: { number: 'S-1001', voidedAt: null, deletedAt: null },
     charges: [charge()],
     existingBills: [],
     ...overrides,
@@ -308,6 +309,22 @@ describe('billReadiness', () => {
     expect(bounced.ready).toBe(false)
     expect(bounced.reasons.join(' ')).toContain('BOUNCED')
     expect(billReadiness(readinessInput({ loadCarrier: loadCarrier({ status: 'TONU' }) })).ready).toBe(true)
+  })
+
+  it('refuses a bill against a voided shipment unless it is the TONU', () => {
+    const voided = { number: 'S-1001', voidedAt: '2026-10-28T00:00:00.000Z', deletedAt: null }
+    const active = billReadiness(readinessInput({ shipment: voided }))
+    expect(active.ready).toBe(false)
+    expect(active.reasons).toEqual(['Shipment S-1001 is voided — only a TONU bill may be recorded.'])
+
+    // The carrier that showed up to voided freight is still owed its TONU.
+    expect(billReadiness(readinessInput({ shipment: voided, loadCarrier: loadCarrier({ status: 'TONU' }) })).ready)
+      .toBe(true)
+
+    // A shipment soft-deleted before Void existed is voided too.
+    expect(
+      billReadiness(readinessInput({ shipment: { ...voided, voidedAt: null, deletedAt: '2026-02-01T00:00:00.000Z' } })).ready,
+    ).toBe(false)
   })
 
   it('refuses a second bill on an assignment that already has one', () => {
