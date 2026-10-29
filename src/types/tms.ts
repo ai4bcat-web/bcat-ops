@@ -774,6 +774,10 @@ export interface ShipmentRecord {
   revTaggedBy?: string | null
   /** Cognito username of the rep who sold it. */
   salesRepId?: string | null
+  /** Step I. Cognito username of the rep covering the shipment; mirrored onto every load. */
+  carrierRepId?: string | null
+  /** Step I. Team assigned to cover the shipment. */
+  carrierTeamKey?: string | null
   /** Void is the only exit: the PRO, the history and the documents all stay. */
   voidedAt?: string | null
   voidedBy?: string | null
@@ -1017,6 +1021,24 @@ export interface ShipmentBundle {
   financials: LoadFinancialsRecord[]
   /** Step E: the shipment's typed document index, newest last. */
   documents: ShipmentDocumentRecord[]
+}
+
+export type BatchShipmentTask =
+  | 'RELEASE_TO_BILLING'
+  | 'SET_SALES_REP'
+  | 'SET_REV_DIVISION'
+  | 'SET_CARRIER_REP'
+  | 'SET_STATUS'
+
+export interface BatchShipmentTaskRowResult {
+  shipmentId: string
+  number: string | null
+  ok: boolean
+  message: string | null
+}
+
+export interface BatchShipmentTaskResult {
+  results: BatchShipmentTaskRowResult[]
 }
 
 /**
@@ -2956,6 +2978,7 @@ export interface ShipmentColumnTemplateRecord {
   name: string
   columns: string[]
   widths: Record<string, number> | null
+  pinned: string[] | null
   ownerEmail: string
   shared: boolean
   createdBy: string

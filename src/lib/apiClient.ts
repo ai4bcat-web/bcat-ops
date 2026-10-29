@@ -22,6 +22,7 @@ import type {
   ShipmentDocumentRecord, ShipmentDocumentType, ShipmentDocumentAudience,
   ShipmentNoticeRecord, DocGateResult,
   InvoiceRecord, ArPaymentRecord, ArPaymentMethod, ArSettings, ArStatus,
+  BatchShipmentTask, BatchShipmentTaskResult,
   PaymentApplication, CreditApplication,
   ApStatus, CarrierBillRecord, ApPaymentRecord, ApPaymentMethod, ApPaymentApplication,
   ApPayeeKind, ApRemitTo, ApSettings,
@@ -1575,6 +1576,8 @@ const SHIPMENT_REV_FIELDS = [
   'voidedAt', 'voidedBy', 'voidReason', 'datPostedAt',
 ]
 let shipmentsHaveRevTag = true
+const SHIPMENT_COVERAGE_FIELDS = ['carrierRepId', 'carrierTeamKey']
+let shipmentsHaveCoverage = true
 
 /** Every Shipment read, with each newer group dropped and retried if the backend predates it. */
 async function readShipments<T>(run: (fields: string) => Promise<T>): Promise<T> {
@@ -1584,8 +1587,13 @@ async function readShipments<T>(run: (fields: string) => Promise<T>): Promise<T>
         SHIPMENT_FIELDS,
         shipmentsHaveDelivery ? SHIPMENT_DELIVERY_FIELDS.join(' ') : '',
         shipmentsHaveRevTag ? SHIPMENT_REV_FIELDS.join(' ') : '',
+        shipmentsHaveCoverage ? SHIPMENT_COVERAGE_FIELDS.join(' ') : '',
       ].filter(Boolean).join(' '))
     } catch (err) {
+      if (shipmentsHaveCoverage && fieldNamed(SHIPMENT_COVERAGE_FIELDS, err)) {
+        shipmentsHaveCoverage = false
+        continue
+      }
       if (shipmentsHaveRevTag && fieldNamed(SHIPMENT_REV_FIELDS, err)) {
         console.warn('[apiClient] backend has no revenue tags on Shipment yet — querying without them until deploy')
         shipmentsHaveRevTag = false
@@ -1938,7 +1946,7 @@ export async function createShipmentForLoad(loadId: string): Promise<unknown> {
  * click cannot credit the same invoice twice.
  */
 export async function repointInvoicedCustomer(
-  input: { shipmentId: string; customerId: string; reason: string; idempotencyKey: string },
+  input: { shipmentId: string; customerId: string; reason: string; idempotencyKey: string; acknowledgePaid?: boolean },
 ): Promise<unknown> {
   return financeAction<unknown>('REPOINT_INVOICED_CUSTOMER', input)
 }
@@ -2112,7 +2120,7 @@ export async function archiveShipmentView(input: { id: string }): Promise<Shipme
 // then the picker degrades to the default column set rather than failing.
 
 const SHIPMENT_COLUMN_TEMPLATE_FIELDS = `
-  id name columns widths ownerEmail shared createdBy updatedBy version createdAt updatedAt
+  id name columns widths pinned ownerEmail shared createdBy updatedBy version createdAt updatedAt
 `
 
 let shipmentColumnTemplateModelsAvailable = true
@@ -2130,14 +2138,23 @@ export async function listShipmentColumnTemplates(): Promise<ShipmentColumnTempl
   if (!shipmentColumnTemplateModelsAvailable) return []
   try {
     const rows = await listAll<ShipmentColumnTemplateRecord>('listShipmentColumnTemplates', SHIPMENT_COLUMN_TEMPLATE_FIELDS, 200)
-    return rows.map((r) => unwrapJsonFields(r, ['columns', 'widths']))
+    return rows.map((r) => unwrapJsonFields(r, ['columns', 'widths', 'pinned']))
   } catch (err) {
     forgetShipmentColumnTemplates(err)
     return []
   }
 }
 
-export async function saveShipmentColumnTemplate(input: unknown): Promise<unknown> {
+export interface SaveColumnTemplateInput {
+  id?: string
+  name: string
+  columns: string[]
+  widths?: Record<string, number>
+  pinned?: string[]
+  shared: boolean
+}
+
+export async function saveShipmentColumnTemplate(input: SaveColumnTemplateInput): Promise<unknown> {
   return directoryAction('SAVE_COLUMN_TEMPLATE', input)
 }
 
@@ -2167,8 +2184,6 @@ export interface DuplicateShipmentCopy {
 export interface DuplicateShipmentInput {
   shipmentId: string
   copies: DuplicateShipmentCopy[]
-  /** Carry the source shipment's carrier assignment onto every copy. */
-  sameCarrier?: boolean
   /**
    * Which leg to copy. Without it the server takes the shipment's first load, which is
    * wrong when the operator right-clicked the second leg of a multi-leg shipment.
@@ -2190,6 +2205,25 @@ export interface DuplicateShipmentResult extends ShipmentBundle {
 }
 export async function duplicateShipment(input: DuplicateShipmentInput): Promise<DuplicateShipmentResult> {
   return shipmentAction<DuplicateShipmentResult>('DUPLICATE_SHIPMENT', input)
+}
+
+export interface AssignCarrierRepInput {
+  shipmentId: string
+  repId?: string | null
+  teamKey?: string | null
+  expectedUpdatedAt?: string
+}
+export async function assignCarrierRep(input: AssignCarrierRepInput): Promise<ShipmentBundle> {
+  return shipmentAction<ShipmentBundle>('ASSIGN_CARRIER_REP', input)
+}
+
+export interface BatchShipmentTaskInput {
+  task: BatchShipmentTask
+  shipmentIds: string[]
+  params?: Record<string, unknown>
+}
+export async function batchShipmentTask(input: BatchShipmentTaskInput): Promise<BatchShipmentTaskResult> {
+  return shipmentAction<BatchShipmentTaskResult>('BATCH_SHIPMENT_TASK', input)
 }
 
 export type StopOp =
@@ -2444,6 +2478,31 @@ export interface LoadBoardSummary {
   destinationCity?: string | null
   createdAt?: string | null
   voidedAt?: string | null
+  // Step R2 — the full catalog the column picker will need.
+  tmsId?: string | null
+  pickupNumber?: string | null
+  pickupApptEnd?: string | null
+  pickupApptType?: string | null
+  deliveryApptEnd?: string | null
+  deliveryApptType?: string | null
+  trailerNumber?: string | null
+  miles?: number | null
+  hot?: boolean | null
+  weight?: number | null
+  pieces?: number | null
+  piecesUnit?: string | null
+  paperworkLocation?: unknown | null
+  eldLogsReviewedAt?: string | null
+  eldLogsReviewedBy?: string | null
+  readyToInvoice?: boolean | null
+  rateConfirmKey?: string | null
+  divisionKey?: string | null
+  nextCheckCallNote?: string | null
+  lastCheckCallType?: string | null
+  lastKnownSource?: string | null
+  cargoValueCents?: number | null
+  notes?: string | null
+  podNotes?: string | null
 }
 const LOAD_SUMMARY_FIELDS = `
   id shipmentId orderId status assignmentType
@@ -2453,6 +2512,10 @@ const LOAD_SUMMARY_FIELDS = `
   pickupAppt deliveryAppt pickupDriverId deliveryDriverId truckId
   loadNumber aljexId customer rate originName originCity destinationName destinationCity createdAt
   carrierRepId statusChangedBy equipmentType commodity
+  tmsId pickupNumber pickupApptEnd pickupApptType deliveryApptEnd deliveryApptType
+  trailerNumber miles hot weight pieces piecesUnit paperworkLocation
+  eldLogsReviewedAt eldLogsReviewedBy readyToInvoice rateConfirmKey divisionKey
+  nextCheckCallNote lastCheckCallType lastKnownSource cargoValueCents notes podNotes
 `
 export async function listLoadSummaries(): Promise<LoadBoardSummary[]> {
   if (!loadsHaveShipment) return []
@@ -2469,7 +2532,7 @@ export async function listLoadSummaries(): Promise<LoadBoardSummary[]> {
         loadsHaveVoided ? 'voidedAt' : '',
       ].filter(Boolean).join(' ')
       const rows = await listAll<LoadBoardSummary>('listLoads', fields, 10000)
-      return rows.map((l) => unwrapJsonFields(l, ['stops']))
+      return rows.map((l) => unwrapJsonFields(l, ['stops', 'paperworkLocation']))
     } catch (err) {
       const u = undefinedLoadFields(err)
       if (u.shipment) {

@@ -83,6 +83,7 @@ const store = vi.hoisted(() => {
   process.env.SHIPMENT_NOTICE_TABLE_NAME = 'ShipmentNotice-test'
   process.env.PRO_CLAIM_TABLE_NAME = 'ProClaim-test'
   process.env.BUCKET_NAME = 'bcat-test-bucket'
+  process.env.USER_PROFILE_TABLE_NAME = 'UserProfile-test'
   process.env.PORTAL_ORIGIN = 'https://portal.test'
   process.env.AMPLIFY_DATA_DEFAULT_NAME = 'amplifyData'
   return new Map<string, Map<string, Record<string, unknown>>>()
@@ -1850,10 +1851,38 @@ describe('ownership tagging', () => {
   it('keeps the sales rep on the shipment, the load and the order', async () => {
     const ids = await createDraft()
     await saveForm(ids.shipmentId)
+    table('UserProfile-test').set('amanda', { id: 'amanda', role: 'CUSTOMER_REP' })
     await call('SET_SALES_REP', { shipmentId: ids.shipmentId, repId: 'amanda' }, ADMIN)
     expect(table(TABLES.shipment).get(ids.shipmentId)!.salesRepId).toBe('amanda')
     expect(table(TABLES.load).get(ids.loadId)!.salesRepId).toBe('amanda')
     expect(table(TABLES.order).get(ids.orderId)!.customerRepId).toBe('amanda')
+  })
+
+  it('mirrors carrier rep onto every leg and active assignment, but not historical assignments', async () => {
+    const ids = await createDraft()
+    table('UserProfile-test').set('carrier-rep', { id: 'carrier-rep', role: 'CARRIER_REP' })
+    table(TABLES.load).set('leg-two', { ...table(TABLES.load).get(ids.loadId)!, id: 'leg-two' })
+    for (const [id, loadId, status] of [['active-one', ids.loadId, 'ACTIVE'], ['active-two', 'leg-two', 'ACTIVE'], ['old', ids.loadId, 'BOUNCED']]) {
+      table(TABLES.carrier).set(id, { id, loadId, shipmentId: ids.shipmentId, status, carrierRepId: 'old-rep' })
+    }
+    await call('ASSIGN_CARRIER_REP', { shipmentId: ids.shipmentId, repId: 'carrier-rep', teamKey: 'EAST' }, ADMIN)
+    expect(table(TABLES.shipment).get(ids.shipmentId)).toMatchObject({ carrierRepId: 'carrier-rep', carrierTeamKey: 'EAST' })
+    expect([ids.loadId, 'leg-two'].map((id) => table(TABLES.load).get(id)!.carrierRepId)).toEqual(['carrier-rep', 'carrier-rep'])
+    expect(['active-one', 'active-two', 'old'].map((id) => table(TABLES.carrier).get(id)!.carrierRepId)).toEqual(['carrier-rep', 'carrier-rep', 'old-rep'])
+    await call('ASSIGN_CARRIER_REP', { shipmentId: ids.shipmentId, teamKey: 'WEST' }, ADMIN)
+    expect(table(TABLES.shipment).get(ids.shipmentId)).toMatchObject({ carrierRepId: 'carrier-rep', carrierTeamKey: 'WEST' })
+    Object.assign(table(TABLES.shipment).get(ids.shipmentId)!, { voidedAt: '2026-10-29T00:00:00Z' })
+    await expect(call('ASSIGN_CARRIER_REP', { shipmentId: ids.shipmentId, repId: null }, ADMIN)).rejects.toThrow(/voided/)
+    expect(table(TABLES.load).get(ids.loadId)!.carrierRepId).toBe('carrier-rep')
+  })
+
+  it('refuses missing profiles and non-carrier reps without changing the assignment', async () => {
+    const ids = await createDraft()
+    table('UserProfile-test').set('sales', { id: 'sales', role: 'CUSTOMER_REP' })
+    await expect(call('ASSIGN_CARRIER_REP', { shipmentId: ids.shipmentId, repId: 'missing' }, ADMIN)).rejects.toThrow(/user profile/)
+    await expect(call('ASSIGN_CARRIER_REP', { shipmentId: ids.shipmentId, repId: 'sales' }, ADMIN)).rejects.toThrow(/not a carrier rep/)
+    await expect(call('SET_SALES_REP', { shipmentId: ids.shipmentId, repId: 'missing' }, ADMIN)).rejects.toThrow(/user profile/)
+    expect(table(TABLES.shipment).get(ids.shipmentId)!.carrierRepId).toBeUndefined()
   })
 
   it('previews the rules without writing anything', async () => {
@@ -4038,6 +4067,31 @@ describe('READY_TO_INVOICE', () => {
       identity,
     )
   }
+  it('batch releases three shipments through the same gate and preserves the refusal reason', async () => {
+    const shipments = []
+    for (let i = 0; i < 3; i += 1) {
+      const ids = await deliveredOrder({ requiredDocsForInvoice: ['POD', 'BOL'] })
+      seedDocs(ids, i === 1 ? ['BOL'] : ['BOL', 'POD'])
+      for (const [id, doc] of table(TABLES.shipmentDocument)) {
+        if (doc.shipmentId === ids.shipmentId && id.startsWith('sdoc-')) {
+          table(TABLES.shipmentDocument).delete(id)
+          table(TABLES.shipmentDocument).set(ids.shipmentId + id, { ...doc, id: ids.shipmentId + id })
+        }
+      }
+      shipments.push(ids)
+    }
+    const result = await call('BATCH_SHIPMENT_TASK', {
+      task: 'RELEASE_TO_BILLING', shipmentIds: shipments.map((row) => row.shipmentId),
+    }) as { results: { shipmentId: string; ok: boolean; message: string | null }[] }
+    expect(result.results.map((row) => row.shipmentId)).toEqual(shipments.map((row) => row.shipmentId))
+    expect(result.results.map((row) => row.ok)).toEqual([true, false, true])
+    expect(result.results[1].message).toBe('Not ready for accounting: Missing document: POD')
+    expect(shipments.map((row) => table(TABLES.order).get(row.orderId)!.arStatus)).toEqual(['UNBILLED', 'DOCS_NEEDED', 'UNBILLED'])
+    const releaseAudits = [...table(TABLES.audit).values()].filter((row) => row.action === 'READY_TO_INVOICE')
+    expect(releaseAudits.map((row) => [row.entityType, row.entityId])).toEqual([
+      ['SHIPMENT', shipments[0].shipmentId], ['SHIPMENT', shipments[2].shipmentId],
+    ])
+  })
 
   it('lists exactly what accounting is still waiting on', async () => {
     const ids = await deliveredOrder({ requiredDocsForInvoice: ['POD', 'BOL'] })
@@ -4172,8 +4226,7 @@ describe('DUPLICATE_SHIPMENT', () => {
     const copies = [...table(TABLES.shipment).values()].filter((s) => s.id !== ids.shipmentId)
     expect(copies).toHaveLength(1)
     const copy = copies[0]
-    expect(copy.status).toBe('DRAFT')
-    expect(copy.source).toBe('DUPLICATE')
+    expect(copy.status).toBe('OPEN')
     expect(copy.number).not.toBe(table(TABLES.shipment).get(ids.shipmentId)!.number)
 
     const copiedLoad = [...table(TABLES.load).values()].find((l) => l.shipmentId === copy.id)!
@@ -4181,6 +4234,44 @@ describe('DUPLICATE_SHIPMENT', () => {
     const stops = JSON.parse(String(copiedLoad.stops)) as Row[]
     expect(stops.map((s) => s.appt)).toEqual(['2026-03-09T13:00:00.000Z', '2026-03-10T13:00:00.000Z'])
     expect(stops.every((s) => s.driverId === null && s.arrivedAt === null)).toBe(true)
+  })
+  it('copies invoiced, covered, POD-complete freight without its execution or accounting state', async () => {
+    const ids = await createDraft()
+    await saveForm(ids.shipmentId)
+    const source = table(TABLES.shipment).get(ids.shipmentId)!
+    Object.assign(source, { revDivision: 'ASSETS', revSubdivision: 'LOCAL_DRIVER', revTagSource: 'RULE', salesRepId: 'seller' })
+    Object.assign(source, { status: 'DELIVERED', customerLinkId: 'link', customerLinkSentAt: '2026-01-01T00:00:00Z',
+      deliveredAt: '2026-01-01T00:00:00Z', lastNoticeAt: '2026-01-01T00:00:00Z', lastNoticeStatus: 'SENT',
+      datPostedAt: '2026-01-01T00:00:00Z', workflowRunId: 'run', parentShipmentId: 'parent' })
+    const arFields = ['invoiceId', 'invoiceNumber', 'invoicedAt', 'paidAt', 'arBalanceCents', 'factoringItemId',
+      'readyToInvoiceAt', 'docsMissing', 'docsCheckedAt', 'docsOverrideAt', 'docsOverrideBy', 'docsOverrideNote']
+    const sourceOrder = table(TABLES.order).get(ids.orderId)!
+    const sourceCharge = [...table(TABLES.charge).values()][0]
+    table(TABLES.charge).set('carrier-charge', { ...sourceCharge, id: 'carrier-charge', side: 'CARRIER', loadCarrierId: 'source-carrier', amountCents: 100000 })
+    Object.assign(sourceOrder, Object.fromEntries(arFields.map((key) => [key, key === 'arBalanceCents' ? 250000 : key === 'docsMissing' ? [] : 'source-value'])), { arStatus: 'UNPAID' })
+    table(TABLES.carrier).set('source-carrier', { id: 'source-carrier', shipmentId: ids.shipmentId, loadId: ids.loadId, kind: 'CARRIER', status: 'ACTIVE', carrierId: 'car-1' })
+    table(TABLES.shipmentDocument).set('pod', { id: 'pod', shipmentId: ids.shipmentId, type: 'POD', status: 'ACTIVE', reviewStatus: 'ACCEPTED' })
+    Object.assign(table(TABLES.load).get(ids.loadId)!, { assignmentType: 'CARRIER', activeLoadCarrierId: 'source-carrier', carrierName: 'Carrier' })
+    const result = await call('DUPLICATE_SHIPMENT', { shipmentId: ids.shipmentId, copies: [{}] }) as { created: string[] }
+    const copyId = result.created[0]
+    const copy = table(TABLES.shipment).get(copyId)!
+    expect(copy).toMatchObject({ status: 'OPEN', customerId: source.customerId, mode: source.mode,
+      customerLinkId: null, customerLinkSentAt: null, deliveredAt: null, lastNoticeAt: null,
+      lastNoticeStatus: null, datPostedAt: null, workflowRunId: null, parentShipmentId: null })
+    const order = [...table(TABLES.order).values()].find((row) => row.shipmentId === copyId)!
+    expect(order.arStatus).toBe('DOCS_NEEDED')
+    for (const field of arFields) expect(order[field], field).toBeNull()
+    expect([...table(TABLES.carrier).values()].filter((row) => row.shipmentId === copyId)).toEqual([])
+    expect([...table(TABLES.shipmentDocument).values()].filter((row) => row.shipmentId === copyId)).toEqual([])
+    const load = [...table(TABLES.load).values()].find((row) => row.shipmentId === copyId)!
+    expect(load).toMatchObject({ status: 'SOURCING', assignmentType: 'NEED_TO_COVER', activeLoadCarrierId: null, carrierName: null })
+    expect(copy).toMatchObject({ revDivision: 'ASSETS', revSubdivision: 'LOCAL_DRIVER', salesRepId: 'seller' })
+    expect(load).toMatchObject({ revDivision: 'ASSETS', revSubdivision: 'LOCAL_DRIVER', salesRepId: 'seller' })
+    expect([...table(TABLES.charge).values()].filter((row) => row.shipmentId === copyId).map((row) => row.side)).toEqual(['CUSTOMER'])
+    expect(load.aljexId).toBe(copy.number + '-1')
+    expect(table(TABLES.proClaim).get(String(copy.number) + '1')).toMatchObject({ shipmentId: copyId, loadId: load.id })
+    const audit = [...table(TABLES.audit).values()].find((row) => row.entityId === copyId && row.action === 'DUPLICATE_SHIPMENT')!
+    expect(JSON.parse(String(audit.changes))).toEqual({ sourceShipmentId: ids.shipmentId, sourceNumber: source.number, number: copy.number, pro: load.aljexId })
   })
 
   it('credit-checks the whole batch, not one copy', async () => {

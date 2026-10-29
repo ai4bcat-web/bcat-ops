@@ -35,5 +35,5 @@ export interface BoardColumnTemplateOption {
 export interface BoardDetailDef {
   key: BoardDetailKey
   label: string
-  options: Array<{ value: string; label: string; count: number }>
+  options: Array<{ value: string; label: string; count: number; codes?: string[] }>
 }

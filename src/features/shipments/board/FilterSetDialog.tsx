@@ -1,13 +1,14 @@
+/**
+ * Name a saved view and say who may see it.
+ *
+ * Columns are not here any more: the Columns picker is the one place a board layout is
+ * chosen, and two column editors that could disagree is exactly the confusion R2 set
+ * out to remove. This dialog saves the filters the panel is showing under a name.
+ */
 import { useState } from 'react'
-import { ArrowDown, ArrowUp, Trash2 } from 'lucide-react'
-import { TmsButton, TmsDialog, TmsIconButton, TmsInput } from '@/features/tms/kit'
+import { Trash2 } from 'lucide-react'
+import { TmsButton, TmsDialog, TmsInput } from '@/features/tms/kit'
 import { BoardCheckbox } from './parts'
-
-export interface BoardColumnItem {
-  key: string
-  header: string
-  selected: boolean
-}
 
 export interface FilterSetDialogProps {
   open: boolean
@@ -15,9 +16,6 @@ export interface FilterSetDialogProps {
   mode: 'create' | 'edit'
   name: string
   onNameChange: (name: string) => void
-  columns: BoardColumnItem[]
-  onToggleColumn: (key: string) => void
-  onMoveColumn: (key: string, direction: 'up' | 'down') => void
   shared: boolean
   onSharedChange: (shared: boolean) => void
   canDelete: boolean
@@ -25,16 +23,12 @@ export interface FilterSetDialogProps {
   onSave: () => void
 }
 
-/** Create or update a saved filter set / view, including its visible columns. */
 export function FilterSetDialog({
   open,
   onOpenChange,
   mode,
   name,
   onNameChange,
-  columns,
-  onToggleColumn,
-  onMoveColumn,
   shared,
   onSharedChange,
   canDelete,
@@ -42,20 +36,18 @@ export function FilterSetDialog({
   onSave,
 }: FilterSetDialogProps) {
   const [confirming, setConfirming] = useState(false)
-  const selectedColumns = columns.filter((c) => c.selected)
 
   return (
     <TmsDialog
       open={open}
       onOpenChange={onOpenChange}
-      title={mode === 'create' ? 'Create filter set' : 'Update filter set'}
-      className="tms-dialog-wide"
+      title={mode === 'create' ? 'Save as view' : 'Update view'}
       footer={
         <>
           {canDelete ? (
             confirming ? (
               <div className="tms-board-confirm">
-                <span>Delete this filter set?</span>
+                <span>Delete this view?</span>
                 <TmsButton size="sm" variant="destructive" onClick={onDelete}>
                   Confirm
                 </TmsButton>
@@ -74,7 +66,7 @@ export function FilterSetDialog({
           <TmsButton variant="ghost" onClick={() => onOpenChange(false)}>
             Cancel
           </TmsButton>
-          <TmsButton variant="primary" onClick={onSave} disabled={!name.trim() || selectedColumns.length === 0}>
+          <TmsButton variant="primary" onClick={onSave} disabled={!name.trim()}>
             {mode === 'create' ? 'Create' : 'Save'}
           </TmsButton>
         </>
@@ -88,7 +80,7 @@ export function FilterSetDialog({
           id="tms-filter-set-name"
           value={name}
           onChange={(e) => onNameChange(e.target.value)}
-          placeholder="Filter set name"
+          placeholder="View name"
         />
 
         <div className="tms-board-save-scope">
@@ -98,43 +90,6 @@ export function FilterSetDialog({
             checked={shared}
             onChange={onSharedChange}
           />
-        </div>
-
-        <label className="tms-board-save-label">Columns</label>
-        <div className="tms-board-column-list">
-          {columns.map((col, index) => {
-            const active = col.selected
-            return (
-              <div key={col.key} className={`tms-board-column-row${active ? '' : ' tms-board-column-off'}`}>
-                <BoardCheckbox
-                  id={`tms-fs-col-${col.key}`}
-                  label={col.header}
-                  checked={active}
-                  onChange={() => onToggleColumn(col.key)}
-                />
-                {active ? (
-                  <div className="tms-board-column-order">
-                    <TmsIconButton
-                      shape="plain"
-                      aria-label={`Move ${col.header} up`}
-                      disabled={index === 0}
-                      onClick={() => onMoveColumn(col.key, 'up')}
-                    >
-                      <ArrowUp size={14} />
-                    </TmsIconButton>
-                    <TmsIconButton
-                      shape="plain"
-                      aria-label={`Move ${col.header} down`}
-                      disabled={index === columns.length - 1}
-                      onClick={() => onMoveColumn(col.key, 'down')}
-                    >
-                      <ArrowDown size={14} />
-                    </TmsIconButton>
-                  </div>
-                ) : null}
-              </div>
-            )
-          })}
         </div>
       </div>
     </TmsDialog>

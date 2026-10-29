@@ -17,9 +17,6 @@ export const GROUP_BY_OPTIONS: { value: DashboardGroupBy; label: string }[] = [
   { value: 'MONTH', label: 'Month' },
 ]
 
-/** The Brokerage dashboard opens on BCAT Logistics; the chip can widen it to all. */
-export const DEFAULT_DIVISION = 'BROKERAGE'
-
 export const CLASSIC_VIEW = 'Classic'
 
 export type DatePresetKey = 'this-month' | 'last-month' | 'last-30' | 'custom'
@@ -55,11 +52,11 @@ export function presetRange(key: Exclude<DatePresetKey, 'custom'>, nowIso: strin
   return { from: start.toISOString().slice(0, 10), to }
 }
 
-/** What the page opens on: BROKERAGE, this month, nothing else narrowed. */
+/** What the page opens on: every division, this month, nothing else narrowed. */
 export function defaultFilters(nowIso: string): DashboardFilters {
   const { from, to } = presetRange('this-month', nowIso)
   return {
-    divisions: [DEFAULT_DIVISION],
+    divisions: [],
     subdivisions: [],
     from,
     to,

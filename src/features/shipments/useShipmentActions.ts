@@ -220,8 +220,8 @@ export function useShipmentActions(
       onBundle(await getShipmentBundle(shipmentId))
     },
     shipment: {
-      onDuplicate: async (copies, sameCarrier) => {
-        await call('Duplicate', () => duplicateShipment({ shipmentId, copies, sameCarrier }))
+      onDuplicate: async (copies) => {
+        await call('Duplicate', () => duplicateShipment({ shipmentId, copies }))
         toast.success(`${copies.length} copy${copies.length === 1 ? '' : 'ies'} created`)
       },
       onSetStatus: async (status, reason) => {

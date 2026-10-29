@@ -1411,6 +1411,8 @@ const schema = a.schema({
       revRuleId:       a.string(),   // the OwnershipRule that resolved it
       revTaggedBy:     a.string(),   // who set a HAND tag; null while the rules decide
       salesRepId:      a.string(),   // Cognito username of the rep who sold it
+      carrierRepId:    a.string(),   // Step I. rep covering the shipment, mirrored onto every load
+      carrierTeamKey:  a.string(),   // Step I. team assigned to cover the shipment
       // Ryne, 2026-10-28: Void is the only way a shipment leaves the working
       // set. The row, the PRO, the history and the documents all stay; the
       // number is never reused and the shipment can never be invoiced again.
@@ -2434,6 +2436,7 @@ const schema = a.schema({
       name:        a.string().required(),
       columns:     a.string().array().required(),
       widths:      a.json(),
+      pinned:      a.string().array(),
       ownerEmail:  a.string().required(),
       shared:      a.boolean().required(),
       createdBy:   a.string().required(),

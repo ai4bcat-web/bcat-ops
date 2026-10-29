@@ -1,12 +1,7 @@
-import {
-  ChevronLeft,
-  Filter,
-  Plus,
-  Settings,
-  SlidersHorizontal,
-} from 'lucide-react'
+import { ChevronLeft, Filter, Settings, SlidersHorizontal } from 'lucide-react'
 import { TmsButton, TmsIconButton, TmsSelect } from '@/features/tms/kit'
-import { BoardCheckbox, BoardMultiSelect, BoardRadio, BoardSectionTitle } from './parts'
+import { BoardCheckbox, BoardRadio, BoardSectionTitle } from './parts'
+import { BoardTagPicker } from './BoardTagPicker'
 import type {
   BoardColumnTemplateOption,
   BoardDateFilter,
@@ -50,6 +45,8 @@ const FLAG_KEYS = Object.keys(FLAG_LABELS) as Array<keyof typeof FLAG_LABELS>
 export interface BoardFilterPanelProps {
   collapsed: boolean
   onToggleCollapse: () => void
+  /** Active view name shown in the view selector. */
+  viewName: string
   filterSets: BoardFilterSetOption[]
   activeFilterSetId: string | null
   filterSetDirty: boolean
@@ -58,10 +55,10 @@ export interface BoardFilterPanelProps {
   onUpdateFilterSet: () => void
   onRevertFilterSet: () => void
   onDeleteFilterSet: () => void
-  columnTemplates: BoardColumnTemplateOption[]
-  activeColumnTemplateId: string | null
-  onSelectColumnTemplate: (id: string) => void
-  onManageColumnTemplates: () => void
+  columnTemplates?: BoardColumnTemplateOption[]
+  activeColumnTemplateId?: string | null
+  onSelectColumnTemplate?: (id: string) => void
+  onManageColumnTemplates?: () => void
   statuses: BoardStatusKey[]
   statusCounts: Record<BoardStatusKey, number>
   selectedStatuses: BoardStatusKey[]
@@ -77,6 +74,8 @@ export interface BoardFilterPanelProps {
   onClearFilters: () => void
   onResetFilters: () => void
   activeFilterCount: number
+  /** localStorage namespace for per-facet recent values. */
+  recentStorageKey: string
 }
 
 /**
@@ -87,6 +86,7 @@ export interface BoardFilterPanelProps {
 export function BoardFilterPanel({
   collapsed,
   onToggleCollapse,
+  viewName,
   filterSets,
   activeFilterSetId,
   filterSetDirty,
@@ -114,6 +114,7 @@ export function BoardFilterPanel({
   onClearFilters,
   onResetFilters,
   activeFilterCount,
+  recentStorageKey,
 }: BoardFilterPanelProps) {
   if (collapsed) {
     return (
@@ -151,10 +152,10 @@ export function BoardFilterPanel({
       </div>
 
       <div className="tms-board-panel-body">
-        {/* Filter set */}
+        {/* View */}
         <section className="tms-board-panel-section">
-          <BoardSectionTitle hint={filterSetDirty ? 'Unsaved changes' : undefined}>
-            Filter Set
+          <BoardSectionTitle hint={filterSetDirty ? `Unsaved changes · ${viewName}` : viewName}>
+            View
           </BoardSectionTitle>
           <div className="tms-board-panel-row">
             <TmsSelect
@@ -162,42 +163,49 @@ export function BoardFilterPanel({
               value={activeFilterSetId ?? ''}
               onChange={(e) => onSelectFilterSet(e.target.value)}
               options={filterSets.map((fs) => ({ value: fs.id, label: fs.name }))}
-              placeholder="Select a filter set"
+              placeholder="Select a view"
+              aria-label="View"
             />
           </div>
           <div className="tms-board-panel-actions">
-            <TmsButton size="sm" variant="primary" onClick={onCreateFilterSet}>
-              <Plus size={14} />
-              Create
+            <TmsButton
+              size="sm"
+              variant="primary"
+              onClick={onUpdateFilterSet}
+              disabled={!filterSetDirty || !activeFilterSetId}
+            >
+              Save
             </TmsButton>
-            <TmsButton size="sm" variant="secondary" onClick={onUpdateFilterSet} disabled={!filterSetDirty}>
-              Update
+            <TmsButton size="sm" variant="secondary" onClick={onCreateFilterSet}>
+              Save as view
             </TmsButton>
-            <TmsButton size="sm" variant="secondary" onClick={onRevertFilterSet}>
+            <TmsButton size="sm" variant="secondary" onClick={onRevertFilterSet} disabled={!activeFilterSetId}>
               Revert
             </TmsButton>
-            <TmsButton size="sm" variant="destructive" onClick={onDeleteFilterSet}>
+            <TmsButton size="sm" variant="destructive" onClick={onDeleteFilterSet} disabled={!activeFilterSetId}>
               Delete
             </TmsButton>
           </div>
         </section>
 
         {/* Column template */}
-        <section className="tms-board-panel-section">
-          <BoardSectionTitle>Column Templates</BoardSectionTitle>
-          <div className="tms-board-panel-row">
-            <TmsSelect
-              className="tms-board-panel-select"
-              value={activeColumnTemplateId ?? ''}
-              onChange={(e) => onSelectColumnTemplate(e.target.value)}
-              options={columnTemplates.map((ct) => ({ value: ct.id, label: ct.name }))}
-              placeholder="Select a template"
-            />
-            <TmsIconButton shape="square" aria-label="Manage column templates" title="Manage" onClick={onManageColumnTemplates}>
-              <Settings size={16} />
-            </TmsIconButton>
-          </div>
-        </section>
+        {columnTemplates ? (
+          <section className="tms-board-panel-section">
+            <BoardSectionTitle>Column Templates</BoardSectionTitle>
+            <div className="tms-board-panel-row">
+              <TmsSelect
+                className="tms-board-panel-select"
+                value={activeColumnTemplateId ?? ''}
+                onChange={(e) => onSelectColumnTemplate?.(e.target.value)}
+                options={columnTemplates.map((ct) => ({ value: ct.id, label: ct.name }))}
+                placeholder="Select a template"
+              />
+              <TmsIconButton shape="square" aria-label="Manage column templates" title="Manage" onClick={onManageColumnTemplates}>
+                <Settings size={16} />
+              </TmsIconButton>
+            </div>
+          </section>
+        ) : null}
 
         {/* Statuses */}
         <section className="tms-board-panel-section">
@@ -228,24 +236,16 @@ export function BoardFilterPanel({
               const current = detailFilters[def.key] ?? { values: [], exclude: false }
               return (
                 <div key={def.key} className="tms-board-detail-row">
-                  <label className="tms-board-detail-label" htmlFor={`tms-detail-${def.key}`}>
-                    {def.label}
-                  </label>
-                  <div className="tms-board-detail-controls">
-                    <BoardMultiSelect
-                      id={`tms-detail-${def.key}`}
-                      value={current.values}
-                      options={def.options}
-                      placeholder="Any"
-                      onChange={(values) => onDetailChange(def.key, values)}
-                    />
-                    <BoardCheckbox
-                      id={`tms-detail-${def.key}-exclude`}
-                      label={`Exclude ${def.label.toLowerCase()}`}
-                      checked={current.exclude}
-                      onChange={(exclude) => onDetailExcludeChange(def.key, exclude)}
-                    />
-                  </div>
+                  <BoardTagPicker
+                    facet={def.key}
+                    label={def.label}
+                    options={def.options}
+                    values={current.values}
+                    exclude={current.exclude}
+                    onChange={(values) => onDetailChange(def.key, values)}
+                    onExcludeChange={(exclude) => onDetailExcludeChange(def.key, exclude)}
+                    recentStorageKey={recentStorageKey}
+                  />
                 </div>
               )
             })}

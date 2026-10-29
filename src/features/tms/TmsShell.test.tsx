@@ -1,21 +1,29 @@
 // @vitest-environment jsdom
+/**
+ * The TMS shell sidebar is the only place the MVMNT nav renders: pinned pages,
+ * business sections, and the Shipments row with its fixed workstation children plus
+ * saved board views under a labelled group. These tests guard that shape and the
+ * collapse / active behaviour.
+ */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import { MemoryRouter } from 'react-router-dom'
 import { LayoutDashboard, Package, Truck } from 'lucide-react'
 import { TmsShell } from './TmsShell'
-import type { TmsNavSection } from './TmsShell'
+import type { TmsNavItem, TmsNavSection } from './TmsShell'
+
+const PINNED: TmsNavItem[] = [
+  { to: '/tms/dashboard', label: 'Company Dashboard', icon: LayoutDashboard },
+  { to: '/tms/shipments', label: 'Shipments', icon: Package },
+]
 
 const SECTIONS: TmsNavSection[] = [
   {
     key: 'BROKERAGE',
     name: 'BROKERAGE',
     brand: 'BCAT Logistics',
-    items: [
-      { to: '/tms/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-      { to: '/tms/shipments', label: 'Shipments', icon: Package },
-    ],
+    items: [{ to: '/tms/rates', label: 'Rates', icon: LayoutDashboard }],
   },
   {
     key: 'ASSETS',
@@ -26,7 +34,7 @@ const SECTIONS: TmsNavSection[] = [
 ]
 
 const VIEWS = [
-  { slug: 'dispatch', name: 'Dispatch' },
+  { slug: 'brokerage-board', name: 'Brokerage Board' },
   { slug: 'pod-collection', name: 'POD collection' },
 ]
 
@@ -34,6 +42,7 @@ function renderShell(activePath = '/tms/shipments', onSearch?: (q: string) => vo
   return render(
     <MemoryRouter initialEntries={[activePath]}>
       <TmsShell
+        pinned={PINNED}
         sections={SECTIONS}
         activePath={activePath}
         pageTitle="Shipments"
@@ -58,26 +67,45 @@ describe('TmsShell', () => {
     expect(screen.getByText(/ASSETS/)).toHaveTextContent('ASSETS [Ivan Cartage]')
   })
 
+  it('pins Company Dashboard first and Shipments second', () => {
+    renderShell()
+    const pinned = screen.getAllByRole('link', { name: /^Company Dashboard$|^Shipments$/ })
+    expect(pinned[0]).toHaveAttribute('href', '/tms/dashboard')
+    expect(pinned[1]).toHaveAttribute('href', '/tms/shipments')
+  })
+
   it('marks the item matching activePath active and leaves the others alone', () => {
     renderShell('/tms/shipments')
-    expect(screen.getByRole('link', { name: /Shipments/ })).toHaveClass('tms-active')
-    expect(screen.getByRole('link', { name: /Dashboard/ })).not.toHaveClass('tms-active')
-  })
-
-  it('treats a deeper path as active on its parent item', () => {
-    renderShell('/tms/shipments/view/dispatch')
     expect(screen.getByRole('link', { name: /^Shipments$/ })).toHaveClass('tms-active')
-    expect(screen.getByRole('link', { name: 'Dispatch' })).toHaveClass('tms-active')
+    expect(screen.getByRole('link', { name: /^Company Dashboard$/ })).not.toHaveClass('tms-active')
   })
 
-  it('lists the shipment views as children of Shipments', () => {
+  it('treats a deeper board view as active on the Shipments parent and on Active Shipments', () => {
+    renderShell('/tms/shipments/view/brokerage-board')
+    expect(screen.getByRole('link', { name: /^Shipments$/ })).toHaveClass('tms-active')
+    expect(screen.getByRole('link', { name: 'Active Shipments' })).toHaveClass('tms-active')
+    expect(screen.getByRole('link', { name: 'Brokerage Board' })).toHaveClass('tms-active')
+  })
+
+  it('renders the four fixed workstation pages before the Views group', () => {
     renderShell()
-    const dispatch = screen.getByRole('link', { name: 'Dispatch' })
-    expect(dispatch).toHaveAttribute('href', '/tms/shipments/view/dispatch')
+    expect(screen.getByRole('link', { name: 'Active Shipments' })).toHaveAttribute('href', '/tms/shipments')
+    expect(screen.getByRole('link', { name: 'Dispatch' })).toHaveAttribute('href', '/tms/dispatch')
+    expect(screen.getByRole('link', { name: 'Tracking' })).toHaveAttribute('href', '/tms/tracking')
+    expect(screen.getByRole('link', { name: 'Documents' })).toHaveAttribute('href', '/tms/documents')
+  })
+
+  it('lists the saved views under the Views group', () => {
+    renderShell()
+    expect(screen.getByRole('link', { name: 'Brokerage Board' })).toHaveAttribute(
+      'href',
+      '/tms/shipments/view/brokerage-board'
+    )
     expect(screen.getByRole('link', { name: 'POD collection' })).toHaveAttribute(
       'href',
       '/tms/shipments/view/pod-collection'
     )
+    expect(screen.getByText('Views')).toBeInTheDocument()
   })
 
   it('collapses the children when the caret is clicked', () => {

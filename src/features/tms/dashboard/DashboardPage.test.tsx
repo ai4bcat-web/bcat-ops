@@ -64,13 +64,38 @@ vi.mock('@/lib/apiClient', () => ({
   ]),
   listOwnershipDivisions: vi.fn(async () => [
     {
-      id: 'BROKERAGE', code: 'BROKERAGE', name: 'BCAT Logistics', brand: null, parentId: null, color: null,
-      sortOrder: 0, active: true, owners: null, flows: null, createdBy: 't', updatedBy: 't', version: 1,
+      id: 'BROKERAGE', code: 'BROKERAGE', name: 'BCAT Logistics', brand: 'BCAT Logistics', parentId: null, color: null,
+      sortOrder: 10, active: true, owners: null, flows: null, createdBy: 't', updatedBy: 't', version: 1,
       createdAt: PICKUP, updatedAt: PICKUP,
     },
     {
-      id: 'ASSETS', code: 'ASSETS', name: 'Ivan Cartage', brand: null, parentId: null, color: null,
-      sortOrder: 1, active: true, owners: null, flows: null, createdBy: 't', updatedBy: 't', version: 1,
+      id: 'ASSETS', code: 'ASSETS', name: 'Ivan Cartage', brand: 'Ivan Cartage', parentId: null, color: null,
+      sortOrder: 20, active: true, owners: null, flows: null, createdBy: 't', updatedBy: 't', version: 1,
+      createdAt: PICKUP, updatedAt: PICKUP,
+    },
+    {
+      id: 'OWNER_OPERATOR', code: 'OWNER_OPERATOR', name: 'Owner Operators', brand: null, parentId: 'ASSETS', color: null,
+      sortOrder: 21, active: true, owners: null, flows: null, createdBy: 't', updatedBy: 't', version: 1,
+      createdAt: PICKUP, updatedAt: PICKUP,
+    },
+    {
+      id: 'BOX_TRUCK', code: 'BOX_TRUCK', name: 'Box Trucks', brand: null, parentId: 'ASSETS', color: null,
+      sortOrder: 22, active: true, owners: null, flows: null, createdBy: 't', updatedBy: 't', version: 1,
+      createdAt: PICKUP, updatedAt: PICKUP,
+    },
+    {
+      id: 'LOCAL', code: 'LOCAL', name: 'Local Drivers', brand: null, parentId: 'ASSETS', color: null,
+      sortOrder: 23, active: true, owners: null, flows: null, createdBy: 't', updatedBy: 't', version: 1,
+      createdAt: PICKUP, updatedAt: PICKUP,
+    },
+    {
+      id: 'CAR_SHIPPING', code: 'CAR_SHIPPING', name: 'Best Care Auto Transport', brand: 'Best Care Auto Transport', parentId: null, color: null,
+      sortOrder: 30, active: true, owners: null, flows: null, createdBy: 't', updatedBy: 't', version: 1,
+      createdAt: PICKUP, updatedAt: PICKUP,
+    },
+    {
+      id: 'COMPANY', code: 'COMPANY', name: 'Company', brand: null, parentId: null, color: null,
+      sortOrder: 40, active: true, owners: null, flows: null, createdBy: 't', updatedBy: 't', version: 1,
       createdAt: PICKUP, updatedAt: PICKUP,
     },
   ]),
@@ -102,16 +127,16 @@ const titles = () => Array.from(document.querySelectorAll('.tms-chart-title')).m
 
 const ALL = [...CLASSIC_CHARTS, ...BROKERAGE_CHARTS]
 
-describe('the Brokerage dashboard', () => {
+describe('the company dashboard', () => {
   it('draws every chart, Classic first, in MVMNT order', async () => {
     render(<DashboardPage />)
     await waitFor(() => expect(titles().length).toBe(ALL.length))
     expect(titles()).toEqual(ALL.map((chart) => chart.title))
   })
 
-  it('opens on BCAT Logistics and this month', async () => {
+  it('opens on all divisions and this month', async () => {
     render(<DashboardPage />)
-    await waitFor(() => expect(screen.getByText(/Division is BCAT Logistics/)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(/Division is All divisions/)).toBeInTheDocument())
     const nowIso = new Date().toISOString()
     expect(screen.getByText(`Pick Up ${dateChipLabel(defaultFilters(nowIso), nowIso)}`)).toBeInTheDocument()
   })
@@ -120,8 +145,8 @@ describe('the Brokerage dashboard', () => {
     render(<DashboardPage />)
     await waitFor(() => expect(titles().length).toBe(ALL.length))
     const card = screen.getByText('Basic KPIs').closest('.tms-chart-card') as HTMLElement
-    // One BROKERAGE shipment in the window, priced at $1,500 revenue / $300 profit.
-    expect(within(card).getByText('1')).toBeInTheDocument()
+    // Two shipments in the window company-wide, one priced at $1,500 revenue / $300 profit.
+    expect(within(card).getByText('2')).toBeInTheDocument()
     expect(within(card).getByText('$1,500.00')).toBeInTheDocument()
     expect(within(card).getByText('$1,200.00')).toBeInTheDocument()
     expect(within(card).getByText('$300.00')).toBeInTheDocument()
@@ -181,7 +206,65 @@ describe('the Brokerage dashboard', () => {
     expect(saved).toHaveLength(1)
     expect(saved[0].name).toBe('Month end')
     expect(saved[0].chartKeys).not.toContain('margin')
-    expect(saved[0].filters.divisions).toEqual(['BROKERAGE'])
+    expect(saved[0].filters.divisions).toEqual([])
     expect(within(screen.getByLabelText('Views')).getByRole('option', { name: 'Month end' })).toBeInTheDocument()
+  })
+
+  it('renders one KPI strip per top-level division, company-wide by default', async () => {
+    render(<DashboardPage />)
+    await waitFor(() => expect(screen.getAllByRole('button', { name: /BCAT Logistics|Ivan Cartage|Best Care Auto Transport|Company/ })).toHaveLength(4))
+    expect(screen.getByRole('button', { name: 'BCAT Logistics' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Ivan Cartage' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Best Care Auto Transport' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Company' })).toBeInTheDocument()
+  })
+
+  it('counts an ASSETS/BOX_TRUCK shipment in the Assets strip and the Box Trucks sub-row', async () => {
+    render(<DashboardPage />)
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Ivan Cartage' })).toBeInTheDocument())
+
+    const assets = screen.getByRole('button', { name: 'Ivan Cartage' }).closest('.tms-business-strip') as HTMLElement
+    // The Assets top-level strip sees one IN_TRANSIT shipment.
+    const topStatuses = assets.querySelector('.tms-strip-statuses') as HTMLElement
+    expect(within(topStatuses).getByText('1 INTRAN')).toBeInTheDocument()
+
+    // Box Trucks is the only Assets subdivision with data.
+    const boxTrucks = within(assets).getByText('Box Trucks').closest('.tms-strip-sub') as HTMLElement
+    expect(within(boxTrucks).getByText('1 INTRAN')).toBeInTheDocument()
+  })
+
+  it('sets the division filter when a strip heading is clicked, narrowing the charts too', async () => {
+    render(<DashboardPage />)
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Ivan Cartage' })).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: 'Ivan Cartage' }))
+
+    await waitFor(() => expect(screen.getByText(/Division is Ivan Cartage/)).toBeInTheDocument())
+
+    const card = screen.getByText('Basic KPIs').closest('.tms-chart-card') as HTMLElement
+    // Only the ASSETS shipment remains after narrowing.
+    expect(within(card).getByText('1')).toBeInTheDocument()
+  })
+
+  it('renders empty figures, not zeros, for a division with no data', async () => {
+    render(<DashboardPage />)
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Best Care Auto Transport' })).toBeInTheDocument())
+
+    const carShipping = screen.getByRole('button', { name: 'Best Care Auto Transport' }).closest('.tms-business-strip') as HTMLElement
+    // No status pills and no $0.00 for money figures.
+    expect(within(carShipping).queryByText(/\$0\.00/)).not.toBeInTheDocument()
+    expect(within(carShipping).queryByText('0')).not.toBeInTheDocument()
+    expect(within(carShipping).queryByText('0.0%')).not.toBeInTheDocument()
+  })
+
+  it('clears the division filter when the active strip heading is clicked again', async () => {
+    render(<DashboardPage />)
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Ivan Cartage' })).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: 'Ivan Cartage' }))
+    await waitFor(() => expect(screen.getByText(/Division is Ivan Cartage/)).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: 'Ivan Cartage' }))
+    await waitFor(() => expect(screen.getByText(/Division is All divisions/)).toBeInTheDocument())
   })
 })

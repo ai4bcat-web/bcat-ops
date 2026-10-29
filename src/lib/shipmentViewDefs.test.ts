@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest'
 import {
   ALJEX_COLUMN_KEYS,
   BOARD_COLUMN_KEYS,
+  IN_TRANSIT_STATUSES,
+  RETIRED_SEED_VIEWS,
   SEED_VIEWS,
   applyViewFilters,
   slugify,
@@ -9,6 +11,7 @@ import {
   viewCallerOf,
   viewsVisibleTo,
 } from './shipmentViewDefs'
+import { BOARD_COLUMNS } from '../features/shipments/shipmentViews'
 import type { ShipmentViewRecord, ShipmentViewRow } from '../types/tms'
 
 // A fixed Wednesday, so "today", "tomorrow" and the Monday-start week are stable.
@@ -80,32 +83,12 @@ const view = (slug: string) => {
 const apply = (slug: string) => ids(applyViewFilters(view(slug).filters, ROWS, NOW))
 
 describe('the seed views over a fixture board', () => {
-  it('ships the default view plus the ten department views Ryne named', () => {
+  it('ships the default view plus the five business/subsidiary boards', () => {
     expect(SEED_VIEWS.map((v) => v.slug)).toEqual([
-      'active-shipments', 'dispatch', 'tracking', 'pod-collection', 'accounting', 'sales',
-      'brokerage-board', 'car-shipping-board', 'owner-operators', 'box-trucks', 'local-drivers',
+      'active-shipments', 'brokerage-board', 'car-shipping-board', 'owner-operators', 'box-trucks', 'local-drivers',
     ])
-  })
-
-  it('Dispatch shows own-fleet pickups today and tomorrow', () => {
-    expect(apply('dispatch')).toEqual(['r1', 'r2', 'r4'])
-  })
-
-  it('Tracking shows rolling freight somebody is tracking', () => {
-    expect(apply('tracking')).toEqual(['r2', 'r4', 'r5'])
-  })
-
-  it('POD collection shows delivered shipments still missing the POD', () => {
-    expect(apply('pod-collection')).toEqual(['r6', 'r10'])
-  })
-
-  it('Accounting shows docs needed, unbilled and unpaid', () => {
-    expect(apply('accounting')).toEqual(['r6', 'r8', 'r9'])
-  })
-
-  it('Sales shows the shipments that came from a quote', () => {
-    expect(apply('sales')).toEqual(['r7', 'r12'])
-    expect(view('sales').sort).toEqual({ key: 'salesRepId', dir: 'asc' })
+    expect(SEED_VIEWS.filter((v) => v.isDefault)).toHaveLength(1)
+    expect(RETIRED_SEED_VIEWS).toEqual(['dispatch', 'tracking', 'pod-collection', 'accounting', 'sales'])
   })
 
   it('the division boards split brokerage from car shipping', () => {
@@ -167,6 +150,34 @@ describe('applyViewFilters clauses', () => {
     expect(ids(applyViewFilters({ apStatuses: ['TO_BE_PAID'] }, ROWS, NOW))).toEqual(['r9'])
     expect(ids(applyViewFilters({ search: 'ACME' }, ROWS, NOW))).toEqual(['r1'])
     expect(ids(applyViewFilters({ search: 'nothing here' }, ROWS, NOW))).toEqual([])
+  })
+
+  it('filters to ASSETS pickups scheduled today or tomorrow', () => {
+    expect(ids(applyViewFilters({ divisions: ['ASSETS'], pickupWindow: 'today_tomorrow' }, ROWS, NOW))).toEqual([
+      'r1', 'r2', 'r4',
+    ])
+  })
+
+  it('filters to in-transit shipments that are tracked', () => {
+    expect(ids(applyViewFilters({ statuses: IN_TRANSIT_STATUSES, trackingState: 'TRACKED' }, ROWS, NOW))).toEqual([
+      'r2', 'r4', 'r5',
+    ])
+  })
+
+  it('filters to delivered shipments still missing a POD', () => {
+    expect(ids(applyViewFilters({ statuses: ['DELIVERED'], docsState: 'POD_MISSING' }, ROWS, NOW))).toEqual([
+      'r6', 'r10',
+    ])
+  })
+
+  it('filters to AR statuses that need attention', () => {
+    expect(
+      ids(applyViewFilters({ arStatuses: ['DOCS_NEEDED', 'UNBILLED', 'UNPAID'] }, ROWS, NOW)),
+    ).toEqual(['r6', 'r8', 'r9'])
+  })
+
+  it('filters to shipments that came from quotes', () => {
+    expect(ids(applyViewFilters({ quoteToBooked: true }, ROWS, NOW))).toEqual(['r7', 'r12'])
   })
 })
 
@@ -336,19 +347,17 @@ describe('R2 board filters inside a saved view', () => {
 })
 
 describe('BOARD_COLUMN_KEYS', () => {
-  it('lists every valid board column key', () => {
-    expect(BOARD_COLUMN_KEYS).toContain('number')
-    expect(BOARD_COLUMN_KEYS).toContain('exceptions')
-    expect(BOARD_COLUMN_KEYS).toContain('docsMissing')
-    expect(BOARD_COLUMN_KEYS).toHaveLength(33)
+  it('is exactly the set of keys the column catalog declares', () => {
+    // The Lambda validates saved column templates against this list; a column added
+    // to the catalog without landing here can never be saved, and a key left here
+    // after its column is gone validates a template nothing can render.
+    expect([...BOARD_COLUMN_KEYS].sort()).toEqual(BOARD_COLUMNS.map((c) => c.key).sort())
     expect(new Set(BOARD_COLUMN_KEYS).size).toBe(BOARD_COLUMN_KEYS.length)
   })
 
-  it('contains every Aljex column key and has no duplicates', () => {
+  it('contains every Aljex column key', () => {
     for (const key of ALJEX_COLUMN_KEYS) {
       expect(BOARD_COLUMN_KEYS).toContain(key)
     }
-    expect(BOARD_COLUMN_KEYS).toHaveLength(33)
-    expect(new Set(BOARD_COLUMN_KEYS).size).toBe(BOARD_COLUMN_KEYS.length)
   })
 })

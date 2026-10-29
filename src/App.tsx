@@ -34,6 +34,9 @@ import CustomerTrackPage from '@/features/tracking/CustomerTrackPage'
 import CarrierPingPage from '@/features/tracking/CarrierPingPage'
 import CarrierUploadPage from '@/features/tracking/CarrierUploadPage'
 import { DocumentReviewPage } from '@/features/documents/DocumentReviewPage'
+import { DispatchWorkstation } from '@/features/shipments/workstations/DispatchWorkstation'
+import { TrackingWorkstation } from '@/features/shipments/workstations/TrackingWorkstation'
+import { DocumentsWorkstation } from '@/features/shipments/workstations/DocumentsWorkstation'
 import { InsurancePage } from '@/features/insurance/InsurancePage'
 import { SchedulePage } from '@/features/schedule/SchedulePage'
 import { TimeOffPage } from '@/features/time-off/TimeOffPage'
@@ -247,8 +250,12 @@ export default function App() {
                   {/* A saved department view — the slug is a `ShipmentView` id. */}
                   <Route path="shipments/view/:slug" element={<RequirePage page={['loads', 'tms']}><ShipmentsBoard /></RequirePage>} />
                   <Route path="shipments/:id" element={<RequirePage page={['loads', 'tms']}><ShipmentPage /></RequirePage>} />
+                  <Route path="dispatch" element={<RequirePage page={['loads', 'tms']}><DispatchWorkstation /></RequirePage>} />
+                  <Route path="tracking" element={<RequirePage page={['loads', 'tms']}><TrackingWorkstation /></RequirePage>} />
+                  <Route path="documents/review" element={<RequirePage page={['loads', 'tms']}><DocumentReviewPage /></RequirePage>} />
+                  <Route path="documents/view/:slug" element={<RequirePage page={['loads', 'tms']}><DocumentsWorkstation /></RequirePage>} />
+                  <Route path="documents" element={<RequirePage page={['loads', 'tms']}><DocumentsWorkstation /></RequirePage>} />
                   <Route path="check-calls" element={<RequirePage page={['loads', 'tms']}><CheckCallsPage /></RequirePage>} />
-                  <Route path="documents" element={<RequirePage page={['loads', 'tms']}><DocumentReviewPage /></RequirePage>} />
                   {/* Rates: customer quotes and carrier offers, with the lane history behind them. */}
                   <Route path="rates" element={<RequirePage page={['quotes', 'tms']}><QuotesPage /></RequirePage>} />
                   <Route path="rates/lanes" element={<RequirePage page={['quotes', 'tms']}><LaneRatesPage /></RequirePage>} />

@@ -59,7 +59,7 @@ const TONU_REASONS: { value: RemoveLoadCarrierReason; label: string }[] = [
 const REMOVAL_NOTE_MAX = 250
 
 export interface ShipmentActionHandlers {
-  onDuplicate: (copies: { pickupAppt: string; deliveryAppt: string }[], sameCarrier: boolean) => Promise<void>
+  onDuplicate: (copies: { pickupAppt: string; deliveryAppt: string }[]) => Promise<void>
   onSetStatus: (status: 'ON_HOLD' | 'OPEN' | 'CANCELED' | 'UNCANCEL', reason?: string) => Promise<void>
   /** The void dialog does the call; this swaps the voided bundle in. */
   onVoid: (bundle: ShipmentBundle) => void
@@ -210,7 +210,7 @@ export function ShipmentRowActions({ shipment, isAdmin, cancelDeleteAdminOnly, h
           deliveryAppt={shipment.deliveryAppt ?? null}
           busy={busy}
           onClose={() => setDialog(null)}
-          onConfirm={(copies, sameCarrier) => run(() => handlers.onDuplicate(copies, sameCarrier))}
+          onConfirm={(copies) => run(() => handlers.onDuplicate(copies))}
         />
       )}
       {dialog?.kind === 'void' && (
@@ -423,12 +423,11 @@ function DuplicateDialog({ pickupAppt, deliveryAppt, busy, onClose, onConfirm }:
   deliveryAppt: string | null
   busy: boolean
   onClose: () => void
-  onConfirm: (copies: { pickupAppt: string; deliveryAppt: string }[], sameCarrier: boolean) => void
+  onConfirm: (copies: { pickupAppt: string; deliveryAppt: string }[]) => void
 }) {
   const [count, setCount] = useState(1)
   const [pickup, setPickup] = useState(pickupAppt ? formatDateTimeInput(pickupAppt) : '')
   const [delivery, setDelivery] = useState(deliveryAppt ? formatDateTimeInput(deliveryAppt) : '')
-  const [sameCarrier, setSameCarrier] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   return (
@@ -446,7 +445,6 @@ function DuplicateDialog({ pickupAppt, deliveryAppt, busy, onClose, onConfirm }:
               if (!pickup || !delivery) { setError('Both dates are required.'); return }
               onConfirm(
                 Array.from({ length: count }, () => ({ pickupAppt: fromDateTimeInput(pickup), deliveryAppt: fromDateTimeInput(delivery) })),
-                sameCarrier,
               )
             }}
             disabled={busy}
@@ -466,9 +464,6 @@ function DuplicateDialog({ pickupAppt, deliveryAppt, busy, onClose, onConfirm }:
         <TmsField label="Delivery">
           <TmsInput aria-label="Duplicate delivery" type="datetime-local" value={delivery} onChange={(e) => setDelivery(e.target.value)} />
         </TmsField>
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={sameCarrier} onChange={(e) => setSameCarrier(e.target.checked)} /> Book the same carrier
-        </label>
         {error && <p className="tms-field-error">{error}</p>}
       </div>
     </TmsDialog>

@@ -324,14 +324,55 @@ export const ALJEX_COLUMN_KEYS = [
 /**
  * Every valid board column key the R2 shipments board can render. Column templates
  * saved from the UI are validated against this list, so it must stay in sync with
- * `BOARD_COLUMNS` in the UI module without importing that aliased module.
+ * `BOARD_COLUMNS` in the UI module without importing that aliased module — the test
+ * in this file fails the moment the two drift apart.
  */
 export const BOARD_COLUMN_KEYS = [
+  // The original MVMNT and Aljex-board columns, in the catalog's order.
   'number', 'exceptions', 'status', 'proNumber', 'massRelease', 'equip', 'customerReference',
   'description', 'revenueType', 'salesRep', 'customerName', 'carrier', 'customerTotalRate',
   'carrierTotalRates', 'grossProfit', 'netMargin', 'pickupShip', 'originCity', 'destinationCity',
   'pickupAppt', 'deliveryAppt', 'stops', 'salesRepId', 'division', 'driver', 'truck', 'arStatus',
   'apStatus', 'lastUpdateAt', 'nextCheckCallAt', 'openIncidentCount', 'mode', 'docsMissing',
+  // Shipment.
+  'previousStatus', 'statusChangedAt', 'statusChangedBy', 'holdReason', 'voidReason',
+  'pickupMonth', 'originState', 'destinationState', 'source', 'customerLinkSentAt',
+  'deliveredAt', 'lastNoticeAt', 'revSubdivision', 'revTagSource', 'datPostedAt',
+  'voidedAt', 'voidedBy', 'createdAt', 'createdBy', 'updatedAt', 'updatedBy',
+  // Order.
+  'billTo', 'costCenter', 'rateType', 'refPo', 'refPu', 'refDelivery', 'refBol',
+  'equipmentLength', 'specialRequirements', 'freightCommodity', 'freightWeight',
+  'freightPieces', 'freightPallets', 'customerNotes', 'internalNotes', 'customerRate',
+  'orderRevenue', 'arStatusChangedAt', 'invoiceNumber', 'invoicedAt', 'paidAt', 'arBalance',
+  'factoringItem', 'docsRequired', 'docsCheckedAt', 'docsOverride', 'quoteNumber', 'quoteAmount',
+  // Load.
+  'loadAljexId', 'loadTmsId', 'pickupNumber', 'originName', 'destinationName',
+  'pickupApptEnd', 'pickupApptType', 'deliveryApptEnd', 'deliveryApptType',
+  'pickupDriver', 'deliveryDriver', 'loadTrailer', 'loadRate', 'miles', 'hot',
+  'loadCommodity', 'loadWeight', 'loadPieces', 'paperworkLocation', 'eldReviewedAt',
+  'eldReviewedBy', 'readyToInvoice', 'rateConOnFile', 'assignmentType', 'divisionKey',
+  'trackingProvider', 'nextCheckCallNote', 'checkCallOpen', 'lastCheckCallAt',
+  'lastCheckCallType', 'lastKnownAt', 'lastKnownCity', 'lastKnownState', 'lastKnownSource',
+  'loadDeliveredAt', 'cargoValue', 'loadNotes', 'podNotes',
+  // Carrier leg.
+  'carrierName', 'carrierMc', 'carrierRep', 'carrierDispatcher', 'carrierDispatcherPhone',
+  'carrierDispatcherEmail', 'driverPhone', 'driver2', 'driver2Phone', 'trailerNumber',
+  'plates', 'vin', 'seal', 'tripNumber', 'pickupEta', 'deliveryEta', 'rateConStatus',
+  'rateConSentAt', 'rateConSignedAt', 'carrierRate', 'legCost', 'apBalance', 'apPaidAt',
+  'quickPay', 'paymentTerms', 'bookedAt', 'dispatchedAt', 'trackingStartedAt',
+  'trackingStoppedAt', 'podRequestedAt', 'legDocs', 'rating',
+  // Customer.
+  'customerMc', 'customerDot', 'customerFactored', 'customerPaymentTerms', 'creditLimit',
+  'creditHold', 'customerStatus', 'serviceTier', 'customerTeam', 'customerOwners',
+  'defaultSalesRep', 'invoiceFrequency',
+  // Carrier.
+  'carrierDot', 'carrierScac', 'carrierStatus', 'authorityStatus', 'safetyRating',
+  'cargoInsuranceExpiry', 'liabilityInsuranceExpiry', 'mcpStatus', 'highwayStatus',
+  'rmisStatus', 'quickPayEligible', 'carrierTeam', 'carrierOwners', 'carrierLoadCount',
+  'carrierLastLoadAt',
+  // Computed.
+  'stopProgress', 'daysInStatus', 'docsNeededCount', 'podPresent', 'rateConPresent',
+  'postedBoards', 'nextEvent', 'trackingMotion',
 ]
 
 /**
@@ -481,6 +522,13 @@ const seed = (
   ...extra,
 })
 
+/**
+ * Seeded views that R2's follow-up retired, by id. They are deactivated rather than
+ * deleted, because somebody may have bookmarked one and an archived view still
+ * answers for its slug. A view an admin wrote is never in this list.
+ */
+export const RETIRED_SEED_VIEWS = ['dispatch', 'tracking', 'pod-collection', 'accounting', 'sales'] as const
+
 export const SEED_VIEWS: ShipmentViewSeed[] = [
   seed('active-shipments', 'Active Shipments', 'Shipments',
     'The default Aljex-style board: open, covered, in transit and delivered (Hold and Reserved off).', 0,
@@ -492,22 +540,9 @@ export const SEED_VIEWS: ShipmentViewSeed[] = [
       },
     },
     { columns: ALJEX_COLUMN_KEYS, isDefault: true }),
-  seed('dispatch', 'Dispatch', 'Dispatch',
-    "Ivan Cartage's own trucks, picking up today or tomorrow.", 10,
-    { divisions: ['ASSETS'], pickupWindow: 'today_tomorrow' }),
-  seed('tracking', 'Tracking', 'Tracking',
-    'Everything rolling that somebody is tracking.', 20,
-    { statuses: IN_TRANSIT_STATUSES, trackingState: 'TRACKED' }),
-  seed('pod-collection', 'POD collection', 'Documents',
-    'Delivered, with the POD still outstanding.', 30,
-    { statuses: ['DELIVERED'], docsState: 'POD_MISSING' }),
-  seed('accounting', 'Accounting', 'Accounting',
-    'Docs needed, unbilled and unpaid — the AR worklist.', 40,
-    { arStatuses: ['DOCS_NEEDED', 'UNBILLED', 'UNPAID'] }),
-  seed('sales', 'Sales', 'Sales',
-    'Quotes that became shipments, by rep.', 50,
-    { quoteToBooked: true },
-    { sort: { key: 'salesRepId', dir: 'asc' } }),
+  // Dispatch, Tracking and Documents are workstation pages now, each with its own UI
+  // (R2 follow-up); Accounting and Sales left the Shipments menu for the AR/AP queues
+  // and the quote flow that already own them. The seed sweep deactivates them.
   seed('brokerage-board', 'Brokerage board', 'Brokerage',
     'Everything earned by BCAT Logistics.', 60,
     { divisions: ['BROKERAGE'] }),

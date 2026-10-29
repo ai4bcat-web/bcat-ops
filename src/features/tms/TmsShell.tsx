@@ -24,13 +24,19 @@ export interface TmsNavChild {
   label: string
 }
 
+export interface TmsNavChildGroup {
+  label: string
+  children: TmsNavChild[]
+}
+
 export interface TmsNavItem {
   to: string
   label: string
   icon: LucideIcon
   badge?: string | null
-  /** Explicit sub-items. The Shipments item gets `shipmentViews` when it has none. */
+  /** Explicit sub-items. The Shipments item computes its own children plus groups. */
   children?: TmsNavChild[]
+  childGroups?: TmsNavChildGroup[]
 }
 
 export interface TmsNavSection {
@@ -64,10 +70,37 @@ function readCollapsed(): boolean {
   }
 }
 
-function childrenFor(item: TmsNavItem, shipmentViews: TmsShellProps['shipmentViews']): TmsNavChild[] {
-  if (item.children?.length) return item.children
-  if (item.to !== SHIPMENTS_PATH) return []
-  return shipmentViews.map((v) => ({ to: `${SHIPMENTS_PATH}/view/${v.slug}`, label: v.name }))
+function isChildActive(activePath: string, child: TmsNavChild): boolean {
+  // Active Shipments is the default board view, so it stays selected for the bare
+  // shipments path and for any saved board view slug under it.
+  if (child.to === SHIPMENTS_PATH) {
+    return activePath === SHIPMENTS_PATH || activePath.startsWith(`${SHIPMENTS_PATH}/view/`)
+  }
+  return activePath === child.to
+}
+
+interface NavChildren {
+  items: TmsNavChild[]
+  groups: TmsNavChildGroup[]
+}
+
+function childrenFor(item: TmsNavItem, shipmentViews: TmsShellProps['shipmentViews']): NavChildren {
+  if (item.to !== SHIPMENTS_PATH) {
+    return { items: item.children ?? [], groups: item.childGroups ?? [] }
+  }
+  const items: TmsNavChild[] = [
+    { to: SHIPMENTS_PATH, label: 'Active Shipments' },
+    { to: '/tms/dispatch', label: 'Dispatch' },
+    { to: '/tms/tracking', label: 'Tracking' },
+    { to: '/tms/documents', label: 'Documents' },
+  ]
+  const groups: TmsNavChildGroup[] = shipmentViews.length
+    ? [{
+        label: 'Views',
+        children: shipmentViews.map((v) => ({ to: `${SHIPMENTS_PATH}/view/${v.slug}`, label: v.name })),
+      }]
+    : []
+  return { items, groups }
 }
 
 function NavRow({
@@ -79,16 +112,22 @@ function NavRow({
   activePath: string
   shipmentViews: TmsShellProps['shipmentViews']
 }) {
-  const kids = useMemo(() => childrenFor(item, shipmentViews), [item, shipmentViews])
+  const { items, groups } = useMemo(() => childrenFor(item, shipmentViews), [item, shipmentViews])
   const parentActive = isPathActive(activePath, item.to)
+  const anyChildActive = useMemo(
+    () =>
+      items.some((c) => isChildActive(activePath, c)) ||
+      groups.some((g) => g.children.some((c) => isChildActive(activePath, c))),
+    [activePath, items, groups]
+  )
   // Landing under the item opens it; a caret click afterwards is remembered for that
   // path only, so the next navigation under the item opens it again.
   const [toggle, setToggle] = useState<{ path: string; open: boolean } | null>(null)
-  const open = toggle?.path === activePath ? toggle.open : parentActive || (toggle?.open ?? false)
+  const open = toggle?.path === activePath ? toggle.open : parentActive || anyChildActive || (toggle?.open ?? false)
   const setOpen = (next: boolean) => setToggle({ path: activePath, open: next })
 
   const Icon = item.icon
-  const hasKids = kids.length > 0
+  const hasKids = items.length > 0 || groups.length > 0
 
   return (
     <div className={`tms-nav-rowwrap${hasKids ? ' tms-has-children' : ''}`}>
@@ -115,15 +154,32 @@ function NavRow({
       ) : null}
       {hasKids && open ? (
         <div className="tms-nav-children">
-          {kids.map((child) => (
+          {items.map((child) => (
             <NavLink
               key={child.to}
               to={child.to}
-              className={`tms-nav-child${activePath === child.to ? ' tms-active' : ''}`}
+              className={`tms-nav-child${isChildActive(activePath, child) ? ' tms-active' : ''}`}
               title={child.label}
             >
               {child.label}
             </NavLink>
+          ))}
+          {groups.map((group) => (
+            <div key={group.label}>
+              <div className="tms-nav-childgroup" aria-hidden="true">
+                {group.label}
+              </div>
+              {group.children.map((child) => (
+                <NavLink
+                  key={child.to}
+                  to={child.to}
+                  className={`tms-nav-child${isChildActive(activePath, child) ? ' tms-active' : ''}`}
+                  title={child.label}
+                >
+                  {child.label}
+                </NavLink>
+              ))}
+            </div>
           ))}
         </div>
       ) : null}

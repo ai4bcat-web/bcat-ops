@@ -60,45 +60,6 @@ export function BoardRadio({
   )
 }
 
-/** Native multi-select for detail filters; the theme keeps it legible on dark surfaces. */
-export function BoardMultiSelect({
-  id,
-  value,
-  options,
-  placeholder,
-  onChange,
-}: {
-  id?: string
-  value: string[]
-  options: Array<{ value: string; label: string }>
-  placeholder?: string
-  onChange?: (values: string[]) => void
-}) {
-  return (
-    <select
-      id={id}
-      multiple
-      className="tms-board-multi"
-      value={value}
-      onChange={(e) => {
-        const selected = Array.from(e.target.selectedOptions).map((o) => o.value)
-        onChange?.(selected)
-      }}
-    >
-      {placeholder ? (
-        <option value="" disabled>
-          {placeholder}
-        </option>
-      ) : null}
-      {options.map((o) => (
-        <option key={o.value} value={o.value}>
-          {o.label}
-        </option>
-      ))}
-    </select>
-  )
-}
-
 /** Section header used inside the filter panel. */
 export function BoardSectionTitle({ children, hint }: { children: ReactNode; hint?: ReactNode }) {
   return (

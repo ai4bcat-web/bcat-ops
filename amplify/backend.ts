@@ -2094,6 +2094,9 @@ const shipmentLaneSampleTable = backend.data.resources.tables['LaneRateSample']
 const shipmentOwnershipDivisionTable = backend.data.resources.tables['OwnershipDivision']
 const shipmentOwnershipRuleTable     = backend.data.resources.tables['OwnershipRule']
 const shipmentProClaimTable          = backend.data.resources.tables['ProClaim']
+// Step I. ASSIGN_CARRIER_REP validates the rep against a real UserProfile, and
+// BATCH_SHIPMENT_TASK reuses the same lookup for SET_SALES_REP.
+const shipmentUserProfileTable       = backend.data.resources.tables['UserProfile']
 
 shipmentActionsFn.addToRolePolicy(
   new PolicyStatement({
@@ -2147,6 +2150,11 @@ shipmentActionsFn.addToRolePolicy(
     ],
   }),
 )
+// Staff validation never grants this writer authority to change staff records.
+shipmentActionsFn.addToRolePolicy(new PolicyStatement({
+  actions: ['dynamodb:GetItem'],
+  resources: [shipmentUserProfileTable.tableArn],
+}))
 // Board and bundle reads come off the GSIs declared on these models.
 shipmentActionsFn.addToRolePolicy(
   new PolicyStatement({
@@ -2186,6 +2194,7 @@ shipmentActionsFn.addEnvironment('SHIPMENT_NOTICE_TABLE_NAME', shipmentNoticeTab
 shipmentActionsFn.addEnvironment('OWNERSHIP_DIVISION_TABLE_NAME', shipmentOwnershipDivisionTable.tableName)
 shipmentActionsFn.addEnvironment('OWNERSHIP_RULE_TABLE_NAME',     shipmentOwnershipRuleTable.tableName)
 shipmentActionsFn.addEnvironment('PRO_CLAIM_TABLE_NAME',       shipmentProClaimTable.tableName)
+shipmentActionsFn.addEnvironment('USER_PROFILE_TABLE_NAME',    shipmentUserProfileTable.tableName)
 shipmentActionsFn.addEnvironment('USER_POOL_ID',               backend.auth.resources.userPool.userPoolId)
 shipmentActionsFn.addToRolePolicy(
   new PolicyStatement({

@@ -220,3 +220,137 @@
 .tms-portal .tms-chart-tip-row strong {
   margin-left: auto;
 }
+
+/* ── Business KPI strips ──────────────────────────────────────────────────── */
+
+.tms-shell .tms-business-strips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 8px 0 16px;
+}
+
+.tms-shell .tms-business-strip {
+  flex: 1 1 280px;
+  min-width: 260px;
+  max-width: 100%;
+  border: 1px solid var(--tms-border);
+  border-radius: var(--tms-radius);
+  background: var(--tms-card);
+}
+
+.tms-shell .tms-business-strip.tms-strip-active {
+  border-color: var(--tms-primary);
+  box-shadow: 0 0 0 1px var(--tms-primary);
+}
+
+.tms-shell .tms-strip-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 12px;
+  border: none;
+  border-bottom: 1px solid var(--tms-border);
+  background: transparent;
+  color: var(--tms-text);
+  font-size: 14px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tms-shell .tms-strip-heading:hover {
+  background: var(--tms-surface);
+}
+
+.tms-shell .tms-strip-name {
+  flex: 1 1 auto;
+}
+
+.tms-shell .tms-strip-brand {
+  color: var(--tms-muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.tms-shell .tms-strip-statuses {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--tms-border);
+  min-height: 34px;
+}
+
+.tms-shell .tms-strip-pill {
+  padding: 2px 8px;
+  border-radius: 9999px;
+  background: var(--tms-surface);
+  color: var(--tms-text);
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.tms-shell .tms-strip-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin: 0;
+  padding: 10px 12px;
+}
+
+.tms-shell .tms-strip-metrics > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.tms-shell .tms-strip-metrics dt {
+  color: var(--tms-muted);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+.tms-shell .tms-strip-metrics dd {
+  margin: 0;
+  color: var(--tms-text);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.tms-shell .tms-strip-subdivisions {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  border-top: 1px solid var(--tms-border);
+  background: var(--tms-border);
+}
+
+.tms-shell .tms-strip-sub {
+  display: grid;
+  grid-template-columns: minmax(120px, 1.2fr) 1.5fr repeat(6, minmax(56px, 1fr));
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--tms-card);
+  font-size: 12px;
+}
+
+.tms-shell .tms-strip-sub-name {
+  color: var(--tms-text);
+  font-weight: 500;
+}
+
+.tms-shell .tms-strip-sub-statuses {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.tms-shell .tms-strip-sub-metric {
+  color: var(--tms-text);
+  text-align: right;
+}

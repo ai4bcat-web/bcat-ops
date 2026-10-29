@@ -1,5 +1,5 @@
 /**
- * The Brokerage dashboard's contract (Step R).
+ * The `/tms/dashboard` contract (Step R).
  *
  * One shape for the data a card may read, one shape for what a card returns, and one
  * `ChartDef` per card. The Classic cards (`classicCharts.ts`) and the brokerage cards

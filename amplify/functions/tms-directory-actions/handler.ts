@@ -29,7 +29,7 @@ import { createHmac, randomUUID, timingSafeEqual } from 'crypto'
 import { validateCommissionPlans, validatePaySchedule } from '../../../src/lib/commission'
 import { teamMembership, validateTeams } from '../../../src/lib/teams'
 import { SEED_DIVISIONS, SEED_RULES, validateDivisions, validateRules } from '../../../src/lib/ownership'
-import { SEED_VIEWS, slugify, validateView, BOARD_COLUMN_KEYS } from '../../../src/lib/shipmentViewDefs'
+import { RETIRED_SEED_VIEWS, SEED_VIEWS, slugify, validateView, BOARD_COLUMN_KEYS } from '../../../src/lib/shipmentViewDefs'
 import { validateAiAgents, validatePartyMemory } from '../../../src/lib/workflows/memory'
 import type {
   CommissionTrigger,
@@ -2449,6 +2449,12 @@ async function saveColumnTemplate(
   const name = assertString(input.name, 'name')
   const columns = assertColumnTemplateColumns(input.columns)
   const widths = optionalJsonObject(input.widths) ?? {}
+  // Pins are part of the layout, not a second list of columns: a pinned key that is
+  // not among the chosen columns would render nowhere, so it is refused here.
+  const pinned = input.pinned == null ? [] : assertColumnTemplateColumns(input.pinned)
+  for (const key of pinned) {
+    if (!columns.includes(key)) throw new Error(`"${key}" is pinned but is not one of the template's columns`)
+  }
   const shared = optionalBoolean(input.shared) ?? false
   const id = optionalString(input.id, 64) ?? newId()
 
@@ -2465,6 +2471,7 @@ async function saveColumnTemplate(
     name,
     columns,
     widths,
+    pinned,
     ownerEmail: existing?.ownerEmail ?? caller.email,
     shared,
     createdBy: existing?.createdBy ?? caller.email,
@@ -2672,6 +2679,16 @@ async function ensureOwnershipSeed(caller: Caller): Promise<Record<string, unkno
     if (await putIfAbsent(SHIPMENT_VIEW_TABLE_NAME, stamp({ ...view }, 'ShipmentView'))) viewsCreated += 1
   }
 
+  // The views R2's follow-up turned into pages leave the sidebar the same way a
+  // dropped seed rule leaves the stack: deactivated, never deleted.
+  let viewsDeactivated = 0
+  for (const id of RETIRED_SEED_VIEWS) {
+    const existing = await getById(SHIPMENT_VIEW_TABLE_NAME, id)
+    if (!existing || existing.active === false) continue
+    await archiveVersioned(SHIPMENT_VIEW_TABLE_NAME, id, existing, caller, 'shipment view')
+    viewsDeactivated += 1
+  }
+
   const report = {
     divisionsCreated,
     rulesCreated,
@@ -2679,11 +2696,12 @@ async function ensureOwnershipSeed(caller: Caller): Promise<Record<string, unkno
     rulesDeactivated,
     rulesUnchanged,
     viewsCreated,
+    viewsDeactivated,
     divisionsPresent: SEED_DIVISIONS.length,
     rulesPresent: seedRules.length,
     viewsPresent: SEED_VIEWS.length,
   }
-  if (divisionsCreated + rulesCreated + rulesUpdated + rulesDeactivated + viewsCreated > 0) {
+  if (divisionsCreated + rulesCreated + rulesUpdated + rulesDeactivated + viewsCreated + viewsDeactivated > 0) {
     await writeAudit('OwnershipDivision', 'seed', 'ENSURE_OWNERSHIP_SEED', caller, report)
   }
   return report

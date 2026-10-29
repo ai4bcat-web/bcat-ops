@@ -325,6 +325,18 @@
   display: block;
 }
 
+.tms-shell .tms-nav-childgroup {
+  margin-top: 6px;
+  padding: 8px 12px 4px 36px;
+  border-top: 1px solid var(--tms-border);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.2;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--tms-muted);
+}
+
 .tms-shell .tms-nav-child {
   position: relative;
   display: flex;

@@ -30,14 +30,18 @@ export function TmsLayout() {
   // The sidebar lists exactly the views the Shipments page will let this person open,
   // so it builds its caller the same way the board does — the role off the `role-*`
   // group and the divisions off the profile. Anything less and the rail offers a link
-  // to a view the page then refuses to show.
+  // to a view the page then refuses to show. The default view is left out: it is the
+  // Active Shipments row itself, and listing it twice invites the question of which
+  // one is the board.
   const shipmentViews = useMemo(
     () => viewsVisibleTo(views, viewCallerOf({
       groups: user?.groups,
       divisions: me?.divisions,
       isOwner,
       isAdmin,
-    })).map((view) => ({ slug: view.slug, name: view.name })),
+    }))
+      .filter((view) => !view.isDefault)
+      .map((view) => ({ slug: view.slug, name: view.name })),
     [views, user?.groups, me?.divisions, isOwner, isAdmin],
   )
 

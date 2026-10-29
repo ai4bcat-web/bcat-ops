@@ -4,7 +4,7 @@
  */
 export { TmsShell, SHIPMENTS_PATH } from '../TmsShell'
 export { isPathActive } from '../navActive'
-export type { TmsShellProps, TmsNavSection, TmsNavItem, TmsNavChild } from '../TmsShell'
+export type { TmsShellProps, TmsNavSection, TmsNavItem, TmsNavChild, TmsNavChildGroup } from '../TmsShell'
 
 export { TmsPage } from './TmsPage'
 export type { TmsPageProps } from './TmsPage'

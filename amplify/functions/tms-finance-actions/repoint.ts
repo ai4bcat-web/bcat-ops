@@ -5,8 +5,9 @@
  * Owner/ADMIN only, idempotent on the caller-supplied `idempotencyKey`.
  */
 import type { TransactWriteItem } from '@aws-sdk/client-dynamodb'
-import { assertString, type Caller } from '../_shared/actionInputs'
+import { assertString, optionalBoolean, type Caller } from '../_shared/actionInputs'
 import type { PaymentPlan, PlanDocument, PlannedDocument } from '../../../src/lib/paymentApply'
+import { planRepointCredit, type RepointInvoiceInput } from '../../../src/lib/repointCredit'
 import { ledgerWrites, planInvoiceOf } from './payments'
 import { resolveCreditPolicy } from '../../../src/lib/customerCredit'
 import { runCommissionsAfter } from './commissions'
@@ -61,6 +62,7 @@ export async function repointInvoicedCustomer(input: Row, caller: Caller): Promi
   const customerId = assertString(input.customerId, 'customerId')
   const reason = assertString(input.reason, 'reason')
   const idempotencyKey = assertString(input.idempotencyKey, 'idempotencyKey')
+  const acknowledgePaid = optionalBoolean(input.acknowledgePaid) ?? false
 
   const shipment = await getById(SHIPMENT_TABLE_NAME, shipmentId)
   if (!shipment) throw new Error(`Shipment not found: ${shipmentId}`)
@@ -103,68 +105,74 @@ export async function repointInvoicedCustomer(input: Row, caller: Caller): Promi
     }
   }
 
-  if (invoiceRows.some((inv) => inv.status === 'VOID')) {
-    throw new Error('This shipment has a void invoice; it cannot be repointed')
+  // ── plan the credit memo(s) ──────────────────────────────────────────────
+  const planInputs: RepointInvoiceInput[] = invoiceRows.map((inv) => ({
+    id: String(inv.id),
+    number: typeof inv.number === 'string' ? inv.number : null,
+    status: String(inv.status ?? ''),
+    totalCents: numberOrNull(inv.totalCents) ?? 0,
+    paidCents: numberOrNull(inv.paidCents) ?? 0,
+    writtenOffCents: numberOrNull(inv.writtenOffCents) ?? 0,
+    balanceCents: numberOrNull(inv.balanceCents) ?? 0,
+    factoringItemId: inv.factoringItemId != null ? String(inv.factoringItemId) : null,
+    orderId: inv.orderId != null ? String(inv.orderId) : null,
+  }))
+
+  const plan = planRepointCredit(planInputs)
+  if (plan.refusal) {
+    throw new Error(plan.refusal)
   }
 
-  const touchedByMoney = invoiceRows.some(
-    (inv) => (numberOrNull(inv.paidCents) ?? 0) > 0 || (numberOrNull(inv.writtenOffCents) ?? 0) > 0,
-  )
-  if (touchedByMoney) {
-    throw new Error('This shipment has an invoice with a payment or write-off; reverse the payment before repointing')
+  if (plan.moneyApplied && !acknowledgePaid) {
+    throw new Error('This shipment has an invoice with a payment; confirm the credit before repointing')
   }
 
-  const openInvoices = invoiceRows.filter((inv) => inv.status === 'ISSUED')
-
-  // The customer who is being credited comes from the first open invoice (which is
+  // The customer who is being credited comes from the first planned invoice (which is
   // the party the AR system always bills). Fall back to the shipment customer for
   // the edge case of a fully-paid-or-void remix where no credits are being posted.
   const creditCustomerId =
-    String(openInvoices[0]?.customerId ?? shipment.customerId ?? '')
+    String(plan.entries[0]?.invoiceId ? invoiceRows.find((inv) => String(inv.id) === plan.entries[0].invoiceId)?.customerId : null)
+    || String(shipment.customerId ?? '')
 
   const now = nowIso()
   const documents: PlannedDocument[] = []
   const before: Record<string, PlanDocument> = {}
   const applications: { invoiceId: string; amountCents: number }[] = []
-  let totalCreditedCents = 0
   const creditedOrderIds = new Set<string>()
 
-  for (const invoice of openInvoices) {
+  for (const entry of plan.entries) {
+    const invoice = invoiceRows.find((inv) => String(inv.id) === entry.invoiceId)
+    if (!invoice) continue
     const prior = planInvoiceOf(invoice)
-    // A PARTIAL row that was settled between the read and now, as remote as that is,
-    // has nothing left to credit — skip rather than build a 0-application entry.
-    if (prior.balanceCents <= 0) continue
-    const amount = prior.balanceCents
-    totalCreditedCents += amount
     documents.push({
       id: prior.id,
-      appliedCents: amount,
-      paidCents: prior.paidCents + amount,
+      appliedCents: entry.appliedCents,
+      paidCents: prior.paidCents + entry.appliedCents,
       offsetCents: prior.offsetCents,
       balanceCents: 0,
       settled: true,
       becamePaid: true,
     })
     before[prior.id] = prior
-    applications.push({ invoiceId: prior.id, amountCents: amount })
-    const orderId = String(invoice.orderId ?? '')
+    applications.push({ invoiceId: prior.id, amountCents: entry.appliedCents })
+    const orderId = entry.orderId ?? String(invoice.orderId ?? '')
     if (orderId) creditedOrderIds.add(orderId)
   }
 
   // ── build the plan and get the invoice ledger writes ────────────────────
   // Re-use the same transaction items every other cash move uses, so the money
   // math is in one place. Order updates are skipped — we write our own below.
-  const plan: PaymentPlan = {
+  const paymentPlan: PaymentPlan = {
     ok: true,
     errors: [],
-    appliedCents: totalCreditedCents,
+    appliedCents: plan.totalAppliedCents,
     fromCreditsCents: 0,
-    unappliedCents: 0,
+    unappliedCents: plan.totalUnappliedCents,
     documents,
     credits: [],
   }
 
-  const { writes: invoiceWrites } = await ledgerWrites(plan, before, caller, now, 'APPLY', {
+  const { writes: invoiceWrites } = await ledgerWrites(paymentPlan, before, caller, now, 'APPLY', {
     skipOrderUpdates: true,
   })
 
@@ -173,7 +181,7 @@ export async function repointInvoicedCustomer(input: Row, caller: Caller): Promi
 
   // The operation row is the idempotency marker. Only post one when money
   // actually moved — a zero-credit repoint needs no AR record.
-  if (totalCreditedCents > 0) {
+  if (plan.totalCreditCents > 0) {
     writes.push(
       putTx(AR_PAYMENT_TABLE_NAME, {
         id: operationId,
@@ -182,9 +190,9 @@ export async function repointInvoicedCustomer(input: Row, caller: Caller): Promi
         kind: 'CREDIT_MEMO',
         receivedAt: now,
         reference: idempotencyKey,
-        amountCents: totalCreditedCents,
-        appliedCents: totalCreditedCents,
-        unappliedCents: 0,
+        amountCents: plan.totalCreditCents,
+        appliedCents: plan.totalAppliedCents,
+        unappliedCents: plan.totalUnappliedCents,
         applications,
         creditApplications: [],
         note: `${reason} (repoint key: ${idempotencyKey})`,
@@ -280,7 +288,7 @@ export async function repointInvoicedCustomer(input: Row, caller: Caller): Promi
     throw failure
   }
 
-  const creditedInvoiceIds = openInvoices.map((inv) => String(inv.id))
+  const creditedInvoiceIds = plan.entries.map((entry) => entry.invoiceId)
   for (const invoiceId of creditedInvoiceIds) {
     await runCommissionsAfter(invoiceId, caller, 'WRITE_OFF')
   }
@@ -293,7 +301,10 @@ export async function repointInvoicedCustomer(input: Row, caller: Caller): Promi
     reason,
     idempotencyKey,
     creditedInvoiceIds,
-    creditedCents: totalCreditedCents,
+    creditedCents: plan.totalCreditCents,
+    appliedCents: plan.totalAppliedCents,
+    unappliedCents: plan.totalUnappliedCents,
+    acknowledgePaid,
     ordersRebilled: [...creditedOrderIds],
   })
 

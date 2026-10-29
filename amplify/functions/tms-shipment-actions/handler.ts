@@ -147,6 +147,7 @@ import {
   type ShipmentTag,
 } from './ownershipResolve'
 import { assertNotVoided, isVoided } from '../_shared/voided'
+import { batchShipmentTask, BATCH_TASK_ACTIONS } from './batch'
 
 import {
   computeFinancials,
@@ -227,6 +228,9 @@ const SETTINGS_TABLE_NAME = process.env.SETTINGS_TABLE_NAME ?? ''
 const AUDIT_LOG_TABLE_NAME = process.env.AUDIT_LOG_TABLE_NAME ?? ''
 const DRIVER_TABLE_NAME = process.env.DRIVER_TABLE_NAME ?? ''
 const USER_POOL_ID = process.env.USER_POOL_ID ?? 'us-east-1_IbPKPNJC9'
+// Step I. ASSIGN_CARRIER_REP and BATCH_SHIPMENT_TASK validate rep ids against real
+// UserProfile rows. The table is owned by userManagement; this Lambda only reads it.
+const USER_PROFILE_TABLE_NAME = process.env.USER_PROFILE_TABLE_NAME ?? ''
 // Step C tables. The carrier directory is written by tms-carrier-actions; this
 // handler only reads it, and writes the booking counters back onto the row.
 const CARRIER_TABLE_NAME = process.env.CARRIER_TABLE_NAME ?? ''
@@ -455,6 +459,8 @@ type Action =
   | 'CLEAR_REV_TAG'
   | 'RESOLVE_REV_TAG'
   | 'SET_SALES_REP'
+  | 'ASSIGN_CARRIER_REP'
+  | 'BATCH_SHIPMENT_TASK'
   | 'TEST_OWNERSHIP_RULES'
   | 'RETAG_SHIPMENTS'
   | 'TENDER_RESPOND'
@@ -624,53 +630,52 @@ function getGroups(identity?: AppSyncIdentity | null): string[] {
   return []
 }
 
+/**
+ * Reusable authorization predicate. The batch action uses the strictest predicate
+ * of its underlying task, so the same rule decides both a single-row call and a
+ * batch row.
+ */
+function isActionAuthorized(action: Action, caller: Caller): boolean {
+  if (caller.isAdmin) return true
+  const groups = caller.groups
+  const tms = groups.includes(TMS_PAGE_GROUP)
+  if (QUOTE_ACTIONS[action]) {
+    if (QUOTE_ADMIN_ONLY_ACTIONS[action]) return false
+    return groups.includes(QUOTES_PAGE_GROUP) || tms
+  }
+  if (OFFER_ACTIONS[action]) {
+    return groups.includes(LOADS_PAGE_GROUP) || groups.includes(QUOTES_PAGE_GROUP) || tms
+  }
+  if (ADMIN_ONLY_ACTIONS[action]) return false
+  if (action === 'UPDATE_CARRIER_CHARGES') {
+    return groups.includes(LOADS_PAGE_GROUP) || tms || groups.includes('page-carrierPay')
+  }
+  return groups.includes(LOADS_PAGE_GROUP) || tms
+}
+
 async function authorize(action: Action, identity?: AppSyncIdentity | null): Promise<Caller> {
   if (!identity) throw new Error('Unauthorized: missing identity')
   const email = await getCallerEmail(identity)
   if (!email) throw new Error('Unauthorized: could not resolve caller email')
   const groups = getGroups(identity)
   const isAdmin = email === OWNER_EMAIL || groups.includes(ADMIN_GROUP)
-  // Step H. The sell side belongs to the quote desk and nobody else; the buy side
-  // belongs to either desk. Both are decided before the loads-page rule below, so
-  // `page-quotes` alone still cannot touch a load's status or its charges.
-  //
-  // Step R. `page-tms` is the BROKERAGE section's key, and the section contains the
-  // pages all three of these keys used to open, so it is accepted wherever they are.
-  const tms = groups.includes(TMS_PAGE_GROUP)
-  if (QUOTE_ACTIONS[action]) {
-    if (!isAdmin && !groups.includes(QUOTES_PAGE_GROUP) && !tms) {
-      throw new Error(`Forbidden: ${action} requires owner, ADMIN, ${QUOTES_PAGE_GROUP}, or ${TMS_PAGE_GROUP}`)
-    }
-    if (QUOTE_ADMIN_ONLY_ACTIONS[action] && !isAdmin) {
+  const caller: Caller = { email, sub: identity.sub, groups, isAdmin }
+  if (!isActionAuthorized(action, caller)) {
+    if (ADMIN_ONLY_ACTIONS[action] || QUOTE_ADMIN_ONLY_ACTIONS[action]) {
       throw new Error(`Forbidden: ${action} requires owner or ADMIN`)
     }
-    return { email, sub: identity.sub, groups, isAdmin }
-  }
-  if (OFFER_ACTIONS[action]) {
-    if (!isAdmin && !groups.includes(LOADS_PAGE_GROUP) && !groups.includes(QUOTES_PAGE_GROUP) && !tms) {
-      throw new Error(
-        `Forbidden: ${action} requires owner, ADMIN, ${LOADS_PAGE_GROUP}, ${QUOTES_PAGE_GROUP}, or ${TMS_PAGE_GROUP}`,
-      )
-    }
-    return { email, sub: identity.sub, groups, isAdmin }
-  }
-  if (ADMIN_ONLY_ACTIONS[action]) {
-    // Ryne's PRO rule in one line: no page key is enough, only who the caller is.
-    if (!isAdmin) throw new Error(`Forbidden: ${action} requires owner or ADMIN`)
-    return { email, sub: identity.sub, groups, isAdmin }
-  }
-  // Building and moving freight is the loads page's job; everything here belongs to
-  // it. Step G's one exception: what a carrier is owed is edited from the AP desk
-  // as often as from dispatch, so `page-carrierPay` may do that and nothing else.
-  const carrierPay = action === 'UPDATE_CARRIER_CHARGES' && groups.includes('page-carrierPay')
-  if (!isAdmin && !groups.includes(LOADS_PAGE_GROUP) && !tms && !carrierPay) {
+    const tms = groups.includes(TMS_PAGE_GROUP)
     throw new Error(
       action === 'UPDATE_CARRIER_CHARGES'
         ? `Forbidden: ${action} requires owner, ADMIN, page-loads, ${TMS_PAGE_GROUP}, or page-carrierPay`
-        : `Forbidden: ${action} requires owner, ADMIN, page-loads, or ${TMS_PAGE_GROUP}`,
+        : QUOTE_ACTIONS[action] && !tms
+          ? `Forbidden: ${action} requires owner, ADMIN, ${QUOTES_PAGE_GROUP}, or ${TMS_PAGE_GROUP}`
+          : OFFER_ACTIONS[action] && !tms
+            ? `Forbidden: ${action} requires owner, ADMIN, ${LOADS_PAGE_GROUP}, ${QUOTES_PAGE_GROUP}, or ${TMS_PAGE_GROUP}`
+            : `Forbidden: ${action} requires owner, ADMIN, page-loads, or ${TMS_PAGE_GROUP}`,
     )
   }
-  return { email, sub: identity.sub, groups, isAdmin }
+  return caller
 }
 
 // ── DynamoDB helpers ─────────────────────────────────────────────────────────
@@ -689,6 +694,26 @@ async function scanTable(tableName: string): Promise<Row[]> {
     lastKey = result.LastEvaluatedKey
   } while (lastKey)
   return items
+}
+
+/**
+ * A rep id is a Cognito username. Before a shipment field points at one, confirm
+ * the row exists — clearing with null is always allowed.
+ */
+async function assertRepProfile(repId: string | null, label: string): Promise<void> {
+  if (repId == null || repId === '') return
+  const profile = await getById(USER_PROFILE_TABLE_NAME, repId)
+  if (!profile) throw new Error(`${label} is not a user profile: ${repId}`)
+}
+
+/** Carrier rep assignment also checks the role, because coverage is its own desk. */
+async function assertCarrierRepProfile(repId: string | null): Promise<void> {
+  if (repId == null || repId === '') return
+  const profile = await getById(USER_PROFILE_TABLE_NAME, repId)
+  if (!profile) throw new Error(`Carrier rep is not a user profile: ${repId}`)
+  if (profile.role !== 'CARRIER_REP') {
+    throw new Error(`${repId} is not a carrier rep`)
+  }
 }
 
 /**
@@ -2738,7 +2763,7 @@ async function applyTag(
 
 /**
  * The same, for the paths that are not already writing the Load themselves —
- * CREATE_SHIPMENT, the order form, DUPLICATE_SHIPMENT and the backfill. The Load
+ * CREATE_SHIPMENT, the order form and the backfill. The Load
  * goes through AppSync so the calendar's subscriptions see the change.
  */
 async function applyTagToLoads(shipmentId: string, caller: Caller, opts: { ignoreHand?: boolean } = {}): Promise<Row> {
@@ -2877,6 +2902,7 @@ async function setSalesRep(input: Row, caller: Caller): Promise<Row> {
   const shipment = await getById(SHIPMENT_TABLE_NAME, shipmentId)
   if (!shipment) throw new Error(`Shipment not found: ${shipmentId}`)
   assertNotVoided(shipment)
+  await assertRepProfile(repId, 'Sales rep')
 
   const orders = await queryIndex(ORDER_TABLE_NAME, IDX_ORDERS_BY_SHIPMENT, 'shipmentId', shipmentId)
   const now = nowIso()
@@ -2906,6 +2932,60 @@ async function setSalesRep(input: Row, caller: Caller): Promise<Row> {
     )
   }
   await writeAudit('SHIPMENT', shipmentId, 'SET_SALES_REP', caller, { from: shipment.salesRepId ?? null, to: repId })
+  return readBundle(shipmentId) as unknown as Row
+}
+
+/**
+ * ASSIGN_CARRIER_REP — the coverage desk owns the rep and team on a shipment.
+ *
+ * The value is written on the Shipment, mirrored onto every Load of the shipment,
+ * and stamped on the ACTIVE LoadCarrier row so the board's "Dispatcher Assigned"
+ * facet reads one value. Clearing is allowed; a voided shipment is not.
+ */
+async function assignCarrierRep(input: Row, caller: Caller): Promise<Row> {
+  const shipmentId = assertString(input.shipmentId, 'shipmentId')
+  const expectedUpdatedAt = input.expectedUpdatedAt == null ? null : assertExpectedUpdatedAt(input)
+
+  const shipment = await getById(SHIPMENT_TABLE_NAME, shipmentId)
+  if (!shipment) throw new Error(`Shipment not found: ${shipmentId}`)
+  assertNotVoided(shipment)
+  const repId = optionalString('repId' in input ? input.repId : shipment.carrierRepId, 100)
+  const teamKey = optionalString('teamKey' in input ? input.teamKey : shipment.carrierTeamKey, 100)
+  await assertCarrierRepProfile(repId)
+
+  const assignments = await queryIndex(LOAD_CARRIER_TABLE_NAME, IDX_CARRIERS_BY_SHIPMENT, 'shipmentId', shipmentId)
+  const now = nowIso()
+  const version = (numberOrNull(shipment.version) ?? 1) + 1
+
+  const writes: TransactWriteItem[] = [
+    updateItemTx(SHIPMENT_TABLE_NAME, shipmentId, {
+      carrierRepId: repId,
+      carrierTeamKey: teamKey,
+      updatedBy: caller.email,
+      updatedAt: now,
+      version,
+    }, expectedUpdatedAt ?? optionalString(shipment.updatedAt, 100)),
+    ...assignments.filter((assignment) => assignment.status === 'ACTIVE').map((assignment) =>
+      updateItemTx(LOAD_CARRIER_TABLE_NAME, String(assignment.id), {
+        carrierRepId: repId,
+        updatedBy: caller.email,
+        updatedAt: now,
+      }, optionalString(assignment.updatedAt, 100))),
+  ]
+  await transact(writes, 'carrier rep')
+
+  const loads = await queryIndex(LOAD_TABLE_NAME, IDX_LOADS_BY_SHIPMENT, 'shipmentId', shipmentId)
+  const client = await getDataClient()
+  for (const load of loads) {
+    assertLoadWriteOk(
+      await client.models.Load.update({ id: String(load.id), carrierRepId: repId, updatedBy: caller.email }),
+      'Load update',
+    )
+  }
+  await writeAudit('SHIPMENT', shipmentId, 'ASSIGN_CARRIER_REP', caller, {
+    from: { carrierRepId: shipment.carrierRepId ?? null, carrierTeamKey: shipment.carrierTeamKey ?? null },
+    to: { carrierRepId: repId, carrierTeamKey: teamKey },
+  })
   return readBundle(shipmentId) as unknown as Row
 }
 
@@ -3134,7 +3214,6 @@ function shiftStops(
 
 async function duplicateShipment(input: Row, caller: Caller): Promise<Row> {
   const shipmentId = assertString(input.shipmentId, 'shipmentId')
-  const sameCarrier = optionalBoolean(input.sameCarrier) ?? false
   // Which leg is being copied, and whether the driver comes with it. Both answer the
   // scheduler's Duplicate, which is pressed on one leg of a multi-leg shipment and by
   // a dispatcher looking at their own fleet's lane.
@@ -3168,7 +3247,6 @@ async function duplicateShipment(input: Row, caller: Caller): Promise<Row> {
     : source.loads[0]
   if (sourceLoadId && !sourceLoad) throw new Error(`Load ${sourceLoadId} is not a leg of shipment ${shipmentId}`)
   if (!sourceOrder || !sourceLoad) throw new Error('That shipment cannot be duplicated: it has no order or load')
-  const sourceCarrier = source.loadCarriers.find((c) => c.loadId === sourceLoad.id && c.status === 'ACTIVE') ?? null
   const sourceCharges = source.charges.map(chargeRowToInput)
   const sourceCustomerId = optionalString(source.shipment.customerId, 100)
   const sourceCustomerName = optionalString(source.shipment.customerName, 200)
@@ -3180,16 +3258,15 @@ async function duplicateShipment(input: Row, caller: Caller): Promise<Row> {
     const newShipmentId = `shp-${randomUUID()}`
     const newOrderId = `ord-${randomUUID()}`
     const newLoadId = `lod-${randomUUID()}`
-    const newCarrierId = `lcr-${randomUUID()}`
     const stops = shiftStops(readStops(sourceLoad), copy.pickupAppt, copy.deliveryAppt, keepDriver)
     const now = nowIso()
 
-    const charges = sourceCharges.map((c) => ({
+    const charges = sourceCharges.filter((c) => c.side === 'CUSTOMER').map((c) => ({
       ...c,
       id: null,
       loadId: newLoadId,
-      loadCarrierId: c.side === 'CARRIER' && sameCarrier ? newCarrierId : null,
-    })).filter((c) => c.side === 'CUSTOMER' || sameCarrier)
+      loadCarrierId: null,
+    }))
 
     const { amounts, totals } = priceFor(
       charges,
@@ -3216,21 +3293,27 @@ async function duplicateShipment(input: Row, caller: Caller): Promise<Row> {
       id: newShipmentId,
       __typename: 'Shipment',
       number,
-      status: 'DRAFT',
+      status: 'OPEN',
       previousStatus: null,
       statusChangedAt: now,
       statusChangedBy: caller.email,
       holdReason: null,
       cancelReason: null,
       tenderRejectReason: null,
-      // A copy starts clean: neither marker the source may carry comes across, and
-      // the tag is re-resolved from the copy's own records rather than inherited.
+      customerLinkId: null,
+      customerLinkSentAt: null,
+      deliveredAt: null,
+      lastNoticeAt: null,
+      lastNoticeStatus: null,
+      datPostedAt: null,
+      workflowRunId: null,
+      parentShipmentId: null,
+      // Execution and accounting state never travel; the commercial division does.
       deletedAt: null,
       deletedBy: null,
       voidedAt: null,
       voidedBy: null,
       voidReason: null,
-      revTaggedBy: null,
       orderIds: [newOrderId],
       loadIds: [newLoadId],
       ...mirrors,
@@ -3254,6 +3337,16 @@ async function duplicateShipment(input: Row, caller: Caller): Promise<Row> {
       arStatusChangedAt: now,
       invoiceId: null,
       readyToInvoiceAt: null,
+      invoiceNumber: null,
+      invoicedAt: null,
+      paidAt: null,
+      arBalanceCents: null,
+      factoringItemId: null,
+      docsMissing: null,
+      docsCheckedAt: null,
+      docsOverrideAt: null,
+      docsOverrideBy: null,
+      docsOverrideNote: null,
       pickupAppt: mirrors.pickupAppt,
       createdBy: caller.email,
       updatedBy: caller.email,
@@ -3270,40 +3363,6 @@ async function duplicateShipment(input: Row, caller: Caller): Promise<Row> {
         putItem(LOAD_CHARGE_TABLE_NAME, chargeRow(c, amounts[i], { shipmentId: newShipmentId, orderId: newOrderId, loadId: newLoadId }, caller)),
       ),
     ]
-    if (sameCarrier && sourceCarrier) {
-      writes.push(putItem(LOAD_CARRIER_TABLE_NAME, {
-        ...sourceCarrier,
-        id: newCarrierId,
-        __typename: 'LoadCarrier',
-        loadId: newLoadId,
-        shipmentId: newShipmentId,
-        status: 'ACTIVE',
-        sequence: 1,
-        removalReason: null,
-        removedAt: null,
-        removedBy: null,
-        rateConSignedAt: null,
-        rateConKey: null,
-        chargesFinalizedAt: null,
-        carrierRateCents: totals.carrierRateCents,
-        costCents: totals.costCents,
-        // Step G. The copy owes its own money: nothing of the source's bill comes
-        // across, and an own-fleet leg gets no AP rung at all — it is settled through
-        // driver pay. `apOpen` is a sparse index hash key, so it is left off the row
-        // entirely (`marshallRow` drops the undefined) rather than stored as a NULL
-        // the index refuses.
-        apStatus: sourceCarrier.kind === 'CARRIER' ? 'AWAITING_INVOICE' : undefined,
-        apOpen: sourceCarrier.kind === 'CARRIER' ? 'OPEN' : undefined,
-        apStatusChangedAt: sourceCarrier.kind === 'CARRIER' ? now : undefined,
-        apBalanceCents: null,
-        apPaidAt: null,
-        invoiceId: null,
-        createdBy: caller.email,
-        updatedBy: caller.email,
-        createdAt: now,
-        updatedAt: now,
-      }))
-    }
     writes.unshift(proClaimPut(pro, {
       loadId: newLoadId,
       shipmentId: newShipmentId,
@@ -3328,26 +3387,29 @@ async function duplicateShipment(input: Row, caller: Caller): Promise<Row> {
             equipmentType: optionalString(sourceOrder.equipmentType, 80),
             divisionKey: optionalString(sourceLoad.divisionKey, 100),
             carrierRepId: optionalString(sourceLoad.carrierRepId, 100),
-            status: sameCarrier && sourceCarrier ? 'BOOKED' : 'SOURCING',
+            status: keptDriver ? 'BOOKED' : 'SOURCING',
           },
           caller,
         ),
+        revDivision: source.shipment.revDivision ?? null,
+        revSubdivision: source.shipment.revSubdivision ?? null,
+        revTagSource: source.shipment.revTagSource ?? null,
+        revRuleId: source.shipment.revRuleId ?? null,
+        salesRepId: source.shipment.salesRepId ?? null,
         miles: numberOrNull(sourceLoad.miles),
         weight: numberOrNull(sourceLoad.weight),
         commodity: optionalString(sourceLoad.commodity, 200),
         truckId: keptDriver ? optionalString(sourceLoad.truckId, 100) : null,
-        assignmentType: sameCarrier && sourceCarrier
-          ? sourceCarrier.kind
-          : keptDriver ? 'OWN_ASSET' : 'NEED_TO_COVER',
-        activeLoadCarrierId: sameCarrier && sourceCarrier ? newCarrierId : null,
-        carrierName: sameCarrier && sourceCarrier ? optionalString(sourceCarrier.carrierName, 200) : null,
+        assignmentType: keptDriver ? 'OWN_ASSET' : 'NEED_TO_COVER',
+        activeLoadCarrierId: null,
+        carrierName: null,
         pickupMonth: monthOf(legacy.pickupAppt as string),
       }),
       'Load create',
     )
-    // Step R. The copy is tagged from its own records — it may have been duplicated
-    // without the carrier, which is a different answer from the one the source has.
-    await applyTagToLoads(newShipmentId, caller)
+    await writeAudit('SHIPMENT', newShipmentId, 'DUPLICATE_SHIPMENT', caller, {
+      sourceShipmentId: shipmentId, sourceNumber: source.shipment.number, number, pro,
+    })
     created.push(newShipmentId)
   }
 
@@ -6170,8 +6232,11 @@ const quoteDeps: QuoteDeps = {
 
 export const handler = async (event: AppSyncEvent): Promise<Row> => {
   const action = event.arguments.action as Action
-  const caller = await authorize(action, event.identity)
   const input = parseInput(event.arguments.input)
+  const authorizedAction = action === 'BATCH_SHIPMENT_TASK'
+    ? BATCH_TASK_ACTIONS[assertEnum(input.task, Object.keys(BATCH_TASK_ACTIONS) as (keyof typeof BATCH_TASK_ACTIONS)[], 'task')]
+    : action
+  const caller = await authorize(authorizedAction, event.identity)
 
   switch (action) {
     case 'CREATE_SHIPMENT':
@@ -6200,6 +6265,25 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return resolveRevTag(input, caller)
     case 'SET_SALES_REP':
       return setSalesRep(input, caller)
+    case 'ASSIGN_CARRIER_REP':
+      return assignCarrierRep(input, caller)
+    case 'BATCH_SHIPMENT_TASK':
+      return { ...(await batchShipmentTask({
+        getShipment: (id) => getById(SHIPMENT_TABLE_NAME, id),
+        getOrders: (id) => queryIndex(ORDER_TABLE_NAME, IDX_ORDERS_BY_SHIPMENT, 'shipmentId', id),
+        authorize: isActionAuthorized,
+        releaseToBilling: (row, actor) => readyToInvoice({
+          ...documentDeps,
+          // The batch history is shipment-scoped even though the gate writes its order.
+          writeAudit: (_type, _id, action, actor, changes) =>
+            writeAudit('SHIPMENT', String(row.shipmentId), action, actor, changes),
+        }, row, actor),
+        setSalesRep,
+        setRevTag,
+        assignCarrierRep,
+        setStatus: setShipmentStatus,
+        writeAudit,
+      }, input, caller)) }
     case 'TEST_OWNERSHIP_RULES':
       return testOwnershipRules(input)
     case 'RETAG_SHIPMENTS':

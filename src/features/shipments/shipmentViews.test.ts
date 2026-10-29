@@ -1,7 +1,9 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import type { AssignmentType, BoardStatusKey } from '@/types/tms'
 import {
   ALJEX_COLUMN_KEYS,
+  BOARD_COLUMNS,
+  BOARD_COLUMN_GROUPS,
   DEFAULT_COLUMN_KEYS,
   EMPTY_BOARD_FILTER_SET,
   boardFilterCount,
@@ -350,8 +352,25 @@ describe('detail options', () => {
       row('2', { revDivision: 'ASSETS', revSubdivision: null }),
     ]
     expect(detailOptions(rows, 'revenueType')).toEqual([
-      { value: 'ASSETS', label: 'ASSETS', count: 2 },
-      { value: 'BOX_TRUCK', label: 'BOX_TRUCK', count: 1 },
+      { value: 'ASSETS', label: 'ASSETS', count: 2, codes: ['ASSETS'] },
+      { value: 'BOX_TRUCK', label: 'BOX_TRUCK', count: 1, codes: ['BOX_TRUCK'] },
+    ])
+  })
+
+  it('carries the carrier MC and SCAC as codes on the carrier facet', () => {
+    const rows = [
+      row('1', { carrierName: 'Bay Logistics', carrierMc: 'MC-123', carrierScac: 'BAYL' }),
+      row('2', { carrierName: 'Road One', carrierMc: null, carrierScac: null }),
+    ]
+    expect(detailOptions(rows, 'carrier')).toEqual([
+      { value: 'Bay Logistics', label: 'Bay Logistics', count: 1, codes: ['MC-123', 'BAYL'] },
+      { value: 'Road One', label: 'Road One', count: 1 },
+    ])
+  })
+
+  it('carries the two-letter abbreviation as the state facet code', () => {
+    expect(detailOptions([row('1', { fromState: 'IL' })], 'fromStates')).toEqual([
+      { value: 'IL', label: 'IL', count: 1, codes: ['IL'] },
     ])
   })
 })
@@ -436,5 +455,96 @@ describe('Aljex column order', () => {
     const cols = visibleColumns(['customerTotalRate', 'carrierTotalRates', 'grossProfit', 'netMargin'])
     const r = row('r', { revenueCents: 123456, costCents: 98765, profitCents: 24691, marginBps: 1234 })
     expect(cols.map((c) => c.value(r))).toEqual(['$1,234.56', '$987.65', '$246.91', '12.34%'])
+  })
+})
+
+describe('R2 column catalog', () => {
+  it('groups every column by its source record, in the catalog display order', () => {
+    expect(BOARD_COLUMN_GROUPS).toEqual(['Shipment', 'Order', 'Load', 'Carrier leg', 'Customer', 'Carrier', 'Computed'])
+    for (const col of BOARD_COLUMNS) {
+      expect(BOARD_COLUMN_GROUPS).toContain(col.group)
+    }
+    const keys = BOARD_COLUMNS.map((c) => c.key)
+    expect(new Set(keys).size).toBe(keys.length)
+  })
+
+  it('prints a timestamp in Central time even when the UTC day has already rolled', () => {
+    // 02:30 UTC on March 10 is 9:30 PM CDT on March 9 — the board must say March 9.
+    const [col] = visibleColumns(['createdAt'])
+    expect(col.value(row('r', { createdAt: '2026-03-10T02:30:00.000Z' }))).toBe('Mar 9, 9:30 PM')
+  })
+
+  it('prints dollars from cents on every money column the catalog adds', () => {
+    const r = row('r', {
+      customerRateCents: 123450, arBalanceCents: 999, loadRateCents: 250000,
+      cargoValueCents: 10000000, creditLimitCents: 5000000,
+    })
+    const value = (key: string) => visibleColumns([key])[0]!.value(r)
+    expect(value('customerRate')).toBe('$1,234.50')
+    expect(value('arBalance')).toBe('$9.99')
+    expect(value('loadRate')).toBe('$2,500.00')
+    expect(value('cargoValue')).toBe('$100,000.00')
+    expect(value('creditLimit')).toBe('$50,000.00')
+  })
+
+  it('prints nothing — never 0, never a dash — when the source is absent', () => {
+    const r = row('r')
+    for (const key of [
+      'carrierMc', 'billTo', 'invoiceNumber', 'arBalance', 'miles', 'cargoValue',
+      'quickPay', 'customerFactored', 'podPresent', 'nextEvent', 'trackingMotion',
+      'loadAljexId', 'rating', 'stopProgress', 'postedBoards',
+    ]) {
+      expect(visibleColumns([key])[0]!.value(r), key).toBe('')
+    }
+  })
+
+  it('resolves rep ids to the names the data layer projected', () => {
+    const r = row('r', { salesRepId: 'dennis@bcat.io', salesRepName: 'Dennis' })
+    expect(visibleColumns(['salesRep'])[0]!.value(r)).toBe('Dennis')
+    // No projection, no guess: the raw id is still what the record holds.
+    const raw = row('r2', { salesRepId: 'dennis@bcat.io' })
+    expect(visibleColumns(['salesRep'])[0]!.value(raw)).toBe('dennis@bcat.io')
+  })
+
+  it('counts whole days in the current status', () => {
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(new Date('2026-03-10T12:00:00.000Z'))
+      const r = row('r', { statusChangedAt: '2026-03-07T12:00:00.000Z' })
+      expect(visibleColumns(['daysInStatus'])[0]!.value(r)).toBe('3')
+      expect(visibleColumns(['daysInStatus'])[0]!.value(row('x', { statusChangedAt: null }))).toBe('')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('announces the next event in hours, and nothing when nothing is coming', () => {
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(new Date('2026-03-10T12:00:00.000Z'))
+      const pickup = row('r', { status: 'OPEN', pickupAppt: '2026-03-11T11:00:00.000Z', stops: [] })
+      expect(visibleColumns(['nextEvent'])[0]!.value(pickup)).toBe('Pickup starts in 23 h')
+      const delivered = row('r2', { status: 'DELIVERED', pickupAppt: '2026-03-01T11:00:00.000Z', deliveryAppt: '2026-03-02T11:00:00.000Z' })
+      expect(visibleColumns(['nextEvent'])[0]!.value(delivered)).toBe('')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('reads motion off the newest stop clock', () => {
+    const rolling = row('r', {
+      stops: [
+        { id: 's1', type: 'pickup' as const, appt: '2026-03-01T10:00:00.000Z', sequence: 0, driverId: null, arrivedAt: '2026-03-01T09:00:00.000Z', departedAt: '2026-03-01T10:00:00.000Z' },
+        { id: 's2', type: 'delivery' as const, appt: '2026-03-02T10:00:00.000Z', sequence: 1, driverId: null },
+      ],
+    })
+    expect(visibleColumns(['trackingMotion'])[0]!.value(rolling)).toBe('Rolling')
+    const atStop = row('r2', {
+      stops: [
+        { id: 's1', type: 'pickup' as const, appt: '2026-03-01T10:00:00.000Z', sequence: 0, driverId: null, departedAt: '2026-03-01T10:00:00.000Z' },
+        { id: 's2', type: 'delivery' as const, appt: '2026-03-02T10:00:00.000Z', sequence: 1, driverId: null, arrivedAt: '2026-03-02T09:00:00.000Z' },
+      ],
+    })
+    expect(visibleColumns(['trackingMotion'])[0]!.value(atStop)).toBe('At stop')
   })
 })

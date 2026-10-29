@@ -48,21 +48,24 @@ beforeEach(() => {
 })
 
 describe('buildNavSections', () => {
-  it('pins Shipments above every section and keeps its view children working', () => {
+  it('pins Company Dashboard first and Shipments second, and keeps its view children working', () => {
     const { pinned, sections } = buildNavSections({ divisions: FOUR, hasPageAccess: grants('tms') })
 
-    // Shipments is the only pinned item, and it does not also live inside a section.
-    expect(pinned.map((i) => i.label)).toEqual(['Shipments'])
-    expect(pinned[0].to).toBe('/tms/shipments')
+    // Company Dashboard is the top-level home; Shipments is the shared freight list.
+    // Neither item also lives inside a business section.
+    expect(pinned.map((i) => i.label)).toEqual(['Company Dashboard', 'Shipments'])
+    expect(pinned[0].to).toBe('/tms/dashboard')
+    expect(pinned[1].to).toBe('/tms/shipments')
     for (const section of sections) {
+      expect(section.items.some((i) => i.to === '/tms/dashboard')).toBe(false)
       expect(section.items.some((i) => i.to === '/tms/shipments')).toBe(false)
     }
 
-    // The same NavRow / childrenFor path that rendered children when Shipments was in
-    // BROKERAGE still renders them now that it is pinned.
+    // The Shipments row renders fixed workstation pages first, then saved views under
+    // a labelled group.
     const views = [
-      { slug: 'active', name: 'Active Shipments' },
-      { slug: 'dispatch', name: 'Dispatch' },
+      { slug: 'brokerage-board', name: 'Brokerage Board' },
+      { slug: 'car-shipping', name: 'Car Shipping Board' },
     ]
     render(
       createElement(
@@ -82,20 +85,29 @@ describe('buildNavSections', () => {
         )
       )
     )
+    expect(screen.getByRole('link', { name: /^Company Dashboard$/ })).toHaveAttribute('href', '/tms/dashboard')
     expect(screen.getByRole('link', { name: /^Shipments$/ })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Active Shipments' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: 'Active Shipments' })).toHaveAttribute('href', '/tms/shipments')
+    expect(screen.getByRole('link', { name: 'Dispatch' })).toHaveAttribute('href', '/tms/dispatch')
+    expect(screen.getByRole('link', { name: 'Tracking' })).toHaveAttribute('href', '/tms/tracking')
+    expect(screen.getByRole('link', { name: 'Documents' })).toHaveAttribute('href', '/tms/documents')
+    expect(screen.getByRole('link', { name: 'Brokerage Board' })).toHaveAttribute(
       'href',
-      '/tms/shipments/view/active'
+      '/tms/shipments/view/brokerage-board'
     )
-    expect(screen.getByRole('link', { name: 'Dispatch' })).toHaveAttribute('href', '/tms/shipments/view/dispatch')
+    expect(screen.getByRole('link', { name: 'Car Shipping Board' })).toHaveAttribute(
+      'href',
+      '/tms/shipments/view/car-shipping'
+    )
   })
 
   it('opens the whole Brokerage section on the one `tms` grant, and nothing else', () => {
     const { pinned, sections } = buildNavSections({ divisions: FOUR, hasPageAccess: grants('tms') })
+    expect(pinned.map((i) => i.label)).toEqual(['Company Dashboard', 'Shipments'])
     expect(sections.map((s) => s.key)).toEqual(['BROKERAGE'])
     expect(sections[0].items.map((i) => i.to)).toEqual(TMS_ITEMS.map((i) => i.to))
+    expect(sections[0].items.some((i) => i.label === 'Dashboard')).toBe(false)
     expect(sections[0].brand).toBe('BCAT Logistics')
-    expect(pinned.map((i) => i.to)).toEqual(PINNED_ITEMS.map((i) => i.to))
   })
 
   it('still opens a Brokerage page on its original grant alone', () => {
@@ -124,12 +136,35 @@ describe('buildNavSections', () => {
     expect(pinned).toEqual([])
   })
 
-  it('shows Shipments to a shared-loads grant exactly as before', () => {
+  it('shows Shipments and its workstation children to a shared-loads grant', () => {
     const { pinned, sections } = buildNavSections({ divisions: FOUR, hasPageAccess: grants('loads') })
     // Shipments is still reachable for the same people; it just lives in pinned now.
+    // Company Dashboard is not visible on `loads` alone.
     expect(pinned.map((i) => i.label)).toEqual(['Shipments'])
     // No other Brokerage page leaks through.
     expect(sections).toEqual([])
+
+    render(
+      createElement(
+        MemoryRouter,
+        { initialEntries: ['/tms/shipments'] },
+        createElement(
+          TmsShell,
+          {
+            pinned,
+            sections,
+            activePath: '/tms/shipments',
+            pageTitle: 'Shipments',
+            user: { initial: 'R', email: 'ryne@bcatcorp.com' },
+            shipmentViews: [{ slug: 'local', name: 'Local Drivers' }],
+          },
+          createElement('div', null, 'page body')
+        )
+      )
+    )
+    expect(screen.getByRole('link', { name: 'Active Shipments' })).toHaveAttribute('href', '/tms/shipments')
+    expect(screen.getByRole('link', { name: 'Dispatch' })).toHaveAttribute('href', '/tms/dispatch')
+    expect(screen.getByRole('link', { name: 'Local Drivers' })).toHaveAttribute('href', '/tms/shipments/view/local')
   })
 
   it('gives a division with no pages of its own a shipments link', () => {

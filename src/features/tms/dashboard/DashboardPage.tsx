@@ -1,13 +1,13 @@
 /**
- * `/tms/dashboard` — the BCAT Logistics (Brokerage) dashboard.
+ * `/tms/dashboard` — the one company-wide dashboard.
  *
  * MVMNT's anatomy (`MVMNT_UI_REFERENCE.md` §3): title row with the Views selector and the
- * yellow chart picker, the filter row of italic chips, then a vertical stack of chart
- * cards — the 17 Classic cards followed by the brokerage cards Ryne asked for. The page
- * opens filtered to BROKERAGE and this month, grouped by division; the division chip can
- * widen to every business and every card can override the grouping.
+ * yellow chart picker, the filter row of italic chips, a KPI strip per business above the
+ * chart grid, then the 17 Classic cards followed by the brokerage cards Ryne asked for.
+ * The page opens on every division and this month; the division chip narrows to one business
+ * and every card obeys the same filter.
  *
- * Everything on screen is read from the dev data. A card with nothing to show says so.
+ * Everything on screen is read from the dev data. A card or strip with nothing to show says so.
  */
 import { useCallback, useMemo, useState } from 'react'
 import {
@@ -17,9 +17,12 @@ import { TmsButton, TmsDialog, TmsFilterChip, TmsIconButton, TmsInput, TmsPage }
 import { useAuth } from '@/hooks/useAuth'
 import { SHIPMENT_STATUS_LABELS } from '@/lib/shipmentStatus'
 import { indexOf } from '@/lib/dashboardCharts'
+import { formatCents } from '@/lib/invoiceBuild'
+import { SEED_DIVISIONS } from '@/lib/ownership'
 import { BROKERAGE_CHARTS } from './brokerageCards'
 import { CLASSIC_CHARTS } from './classicCharts'
 import { ChartCard } from './ChartCard'
+import { buildBusinessStrips } from './businessStrips'
 import { useBrokerageDashboard } from './useBrokerageDashboard'
 import {
   CLASSIC_VIEW, DATE_PRESETS, GROUP_BY_OPTIONS, chartsToCsv, dateChipLabel, defaultFilters,
@@ -30,6 +33,14 @@ import type { ChartDef, DashboardData, DashboardFilters, DashboardGroupBy } from
 import './dashboard.css'
 
 const ALL_CHARTS: ChartDef[] = [...CLASSIC_CHARTS, ...BROKERAGE_CHARTS]
+
+/**
+ * The strips count whatever statuses the window actually holds, so the key is a plain
+ * string; the label table is keyed by the enum. A status with no label prints itself.
+ */
+function statusLabel(status: string): string {
+  return (SHIPMENT_STATUS_LABELS as Record<string, string>)[status] ?? status
+}
 
 /** Which filter panel is open. `add` is the "+ Filter" chooser. */
 type ChipKey = 'date' | 'division' | 'mode' | 'status' | 'customer' | 'carrier' | 'rep' | 'add'
@@ -107,6 +118,20 @@ export function DashboardPage() {
     [data],
   )
 
+  const divisions = data?.divisions && data.divisions.length > 0 ? data.divisions : SEED_DIVISIONS
+  const strips = useMemo(
+    () => (data ? buildBusinessStrips(data, filters, divisions) : []),
+    [data, filters, divisions],
+  )
+
+  const selectDivision = useCallback((code: string) => {
+    setFilters((current) =>
+      current.divisions.length === 1 && current.divisions[0] === code
+        ? { ...current, divisions: [], subdivisions: [] }
+        : { ...current, divisions: [code], subdivisions: [] },
+    )
+  }, [])
+
   const visible = useMemo(
     () => ALL_CHARTS.filter((chart) => visibleKeys.includes(chart.key)),
     [visibleKeys],
@@ -178,7 +203,7 @@ export function DashboardPage() {
   }, [saveName, views, visibleKeys, filters, groupBy, email])
 
   const divisionValue = filters.divisions.length === 0
-    ? 'all'
+    ? 'All divisions'
     : filters.divisions.map((code) => divisionOptions.find((option) => option.value === code)?.label ?? code).join(', ')
 
   const labelFor = (list: Option[], value: string | null) =>
@@ -288,9 +313,9 @@ export function DashboardPage() {
             <input
               type="checkbox"
               checked={filters.divisions.length === 0}
-              onChange={() => setFilters((current) => ({ ...current, divisions: current.divisions.length === 0 ? ['BROKERAGE'] : [], subdivisions: [] }))}
+              onChange={() => setFilters((current) => ({ ...current, divisions: [], subdivisions: [] }))}
             />
-            Widen to all divisions
+            All divisions
           </label>
           {divisionOptions.map((option) => (
             <label key={option.value} className="tms-dash-check">
@@ -353,6 +378,68 @@ export function DashboardPage() {
         </p>
       ) : null}
       {loading && !data ? <p className="tms-dash-loading">Loading the window…</p> : null}
+
+      {strips.length > 0 ? (
+        <div className="tms-business-strips">
+          {strips.map((strip) => {
+            const active = filters.divisions.includes(strip.code)
+            return (
+              <div key={strip.code} className={`tms-business-strip${active ? ' tms-strip-active' : ''}`}>
+                <button
+                  type="button"
+                  className="tms-strip-heading"
+                  aria-pressed={active}
+                  onClick={() => selectDivision(strip.code)}
+                >
+                  <span className="tms-strip-name">{strip.name}</span>
+                  {strip.brand && strip.brand !== strip.name ? (
+                    <span className="tms-strip-brand">{strip.brand}</span>
+                  ) : null}
+                </button>
+                <div className="tms-strip-statuses">
+                  {Object.entries(strip.shipmentsByStatus).map(([status, count]) => (
+                    <span key={status} className="tms-strip-pill" title={statusLabel(status)}>
+                      {count} {statusLabel(status)}
+                    </span>
+                  ))}
+                </div>
+                <dl className="tms-strip-metrics">
+                  <div><dt>Revenue</dt><dd>{strip.revenueCents != null ? formatCents(strip.revenueCents) : '—'}</dd></div>
+                  <div><dt>Profit</dt><dd>{strip.profitCents != null ? formatCents(strip.profitCents) : '—'}</dd></div>
+                  <div><dt>Margin</dt><dd>{strip.marginBps != null ? `${(strip.marginBps / 100).toFixed(1)}%` : '—'}</dd></div>
+                  <div><dt>AR</dt><dd>{strip.arOpenCents != null ? formatCents(strip.arOpenCents) : '—'}</dd></div>
+                  <div><dt>AP</dt><dd>{strip.apOpenCents != null ? formatCents(strip.apOpenCents) : '—'}</dd></div>
+                  <div><dt>Tracked</dt><dd>{strip.trackedCount != null ? strip.trackedCount : '—'}</dd></div>
+                  <div><dt>PODs</dt><dd>{strip.podNeededCount != null ? strip.podNeededCount : '—'}</dd></div>
+                </dl>
+                {strip.subdivisions.length > 0 ? (
+                  <div className="tms-strip-subdivisions">
+                    {strip.subdivisions.map((sub) => (
+                      <div key={sub.code} className="tms-strip-sub">
+                        <span className="tms-strip-sub-name">{sub.name}</span>
+                        <span className="tms-strip-sub-statuses">
+                          {Object.entries(sub.shipmentsByStatus).map(([status, count]) => (
+                            <span key={status} className="tms-strip-pill" title={statusLabel(status)}>
+                              {count} {statusLabel(status)}
+                            </span>
+                          ))}
+                        </span>
+                        <span className="tms-strip-sub-metric">{sub.revenueCents != null ? formatCents(sub.revenueCents) : '—'}</span>
+                        <span className="tms-strip-sub-metric">{sub.profitCents != null ? formatCents(sub.profitCents) : '—'}</span>
+                        <span className="tms-strip-sub-metric">{sub.marginBps != null ? `${(sub.marginBps / 100).toFixed(1)}%` : '—'}</span>
+                        <span className="tms-strip-sub-metric">{sub.arOpenCents != null ? formatCents(sub.arOpenCents) : '—'}</span>
+                        <span className="tms-strip-sub-metric">{sub.apOpenCents != null ? formatCents(sub.apOpenCents) : '—'}</span>
+                        <span className="tms-strip-sub-metric">{sub.trackedCount != null ? sub.trackedCount : '—'}</span>
+                        <span className="tms-strip-sub-metric">{sub.podNeededCount != null ? sub.podNeededCount : '—'}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            )
+          })}
+        </div>
+      ) : null}
 
       <div className="tms-dash-cards">
         {cards.map((card) => (

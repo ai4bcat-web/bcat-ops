@@ -61,20 +61,20 @@ export interface NavSectionsResult {
 
 /**
  * Pages that sit above the business sections because they serve all three businesses.
- * Shipments is the shared freight list; its department views are rendered as children
- * by `TmsShell` through `SHIPMENTS_PATH`.
+ * The company dashboard is the top-level home; Shipments is the shared freight list.
+ * Shipments renders its workstation pages and saved views as children in `TmsShell`.
  */
 export const PINNED_ITEMS: NavItemDef[] = [
+  { to: '/tms/dashboard', label: 'Company Dashboard', icon: LayoutDashboard, pageKey: 'tms', section: BROKERAGE, tms: true },
   { to: '/tms/shipments', label: 'Shipments', icon: Package, pageKey: 'loads', section: BROKERAGE, tms: true, badgeKey: 'checkCalls' },
 ]
 
 /**
  * The Brokerage pages, in MVMNT's sidebar order (MVMNT_UI_REFERENCE §1). Each keeps the
  * page key its old path used, so an existing grant still opens the re-homed page.
- * Shipments is pinned above the sections and is not in this bucket.
+ * The company dashboard and Shipments are pinned above the sections and are not in this bucket.
  */
 export const TMS_ITEMS: NavItemDef[] = [
-  { to: '/tms/dashboard',  label: 'Dashboard',    icon: LayoutDashboard, pageKey: 'tms',       section: BROKERAGE, tms: true },
   { to: '/tms/rates',      label: 'Rates',        icon: LineChart,       pageKey: 'quotes',    section: BROKERAGE, tms: true, badgeKey: 'quotesToReply' },
   { to: '/tms/invoicing',  label: 'Invoicing',    icon: FileSpreadsheet, pageKey: 'invoicing', section: BROKERAGE, tms: true, badgeKey: 'arToInvoice' },
   { to: '/tms/carriers',   label: 'Carriers',     icon: Truck,           pageKey: 'carriers',  section: BROKERAGE, tms: true },

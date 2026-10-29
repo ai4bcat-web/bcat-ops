@@ -2492,7 +2492,7 @@ describe('REPOINT_INVOICED_CUSTOMER', () => {
 
     await expect(
       repoint({ shipmentId: SHIPMENT_ID, customerId: TARGET_ID, reason: 'late move', idempotencyKey: 'k-paid' }),
-    ).rejects.toThrow(/payment or write-off/)
+    ).rejects.toThrow('This shipment has an invoice with a payment; confirm the credit before repointing')
   })
 
   it('refuses an invoice that has a write-off', async () => {
@@ -2501,7 +2501,7 @@ describe('REPOINT_INVOICED_CUSTOMER', () => {
 
     await expect(
       repoint({ shipmentId: SHIPMENT_ID, customerId: TARGET_ID, reason: 'late move', idempotencyKey: 'k-wo' }),
-    ).rejects.toThrow(/payment or write-off/)
+    ).rejects.toThrow('This shipment has an invoice with a write-off; reverse the write-off before repointing')
   })
 
   it('refuses a biller when arPostingAdminOnly is turned off', async () => {

@@ -148,6 +148,10 @@ const {
   voidShipment,
   repointShipmentCustomer,
   repointInvoicedCustomer,
+  batchShipmentTask,
+  resolveRevTag,
+  getShipmentBundle,
+  getInvoice,
   saveShipmentView,
   archiveShipmentView,
   saveShipmentColumnTemplate,
@@ -168,6 +172,10 @@ const {
   voidShipment: vi.fn(),
   repointShipmentCustomer: vi.fn(),
   repointInvoicedCustomer: vi.fn(),
+  batchShipmentTask: vi.fn(),
+  resolveRevTag: vi.fn(),
+  getShipmentBundle: vi.fn(),
+  getInvoice: vi.fn(),
   saveShipmentView: vi.fn(),
   archiveShipmentView: vi.fn(),
   saveShipmentColumnTemplate: vi.fn(),
@@ -248,6 +256,10 @@ vi.mock('@/lib/apiClient', () => ({
   voidShipment,
   repointShipmentCustomer,
   repointInvoicedCustomer,
+  batchShipmentTask,
+  resolveRevTag,
+  getShipmentBundle,
+  getInvoice,
   getTmsSettings,
   graphqlErrorText,
 }))
@@ -285,7 +297,7 @@ describe('ShipmentsBoard', () => {
       row('S004', { status: 'DELIVERED', voidedAt: '2026-02-01T00:00:00Z' }),
     ]
     renderBoard('/tms/shipments', shipments)
-    await waitFor(() => expect(screen.getByRole('tab', { name: /Active Shipments/i, selected: true })).toBeTruthy())
+    await waitFor(() => expect(screen.getByRole('combobox', { name: /View/i })).toHaveValue('active-shipments'))
 
     // Default view excludes VOIDED and HOLD rows.
     expect(screen.queryByText('S003')).toBeNull()
@@ -330,11 +342,21 @@ describe('ShipmentsBoard', () => {
     renderBoard('/tms/shipments/view/active-shipments', shipments)
     await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
 
-    // Pick Acme Freight in the Customer facet and flip Exclude.
-    const customerSelect = screen.getByRole('listbox', { name: /Customer/i })
-    fireEvent.change(customerSelect, { target: { value: 'cust-1' } })
+    // Pick Acme Freight in the Customer facet type-ahead.
+    const customerInput = screen.getByRole('combobox', { name: /Customer/i })
+    fireEvent.change(customerInput, { target: { value: 'Acme' } })
 
-    const excludeCheckbox = screen.getByRole('checkbox', { name: /Exclude customer/i })
+    const customerOptions = await screen.findByRole('listbox', { name: /Customer options/i })
+    fireEvent.click(within(customerOptions).getByText('Acme Freight'))
+
+    await waitFor(() => expect(screen.getByRole('button', { name: /Remove Acme Freight/i })).toBeTruthy())
+    expect(screen.getByText('S001')).toBeTruthy()
+    expect(screen.getByText('S003')).toBeTruthy()
+    expect(screen.queryByText('S002')).toBeNull()
+
+    // Flip Exclude for Customer only.
+    const customerFacet = customerInput.closest('.tms-board-detail-row') as HTMLElement
+    const excludeCheckbox = within(customerFacet).getByRole('checkbox', { name: /Exclude/i })
     fireEvent.click(excludeCheckbox)
 
     await waitFor(() => {
@@ -342,6 +364,10 @@ describe('ShipmentsBoard', () => {
       expect(screen.queryByText('S003')).toBeNull()
     })
     expect(screen.getByText('S002')).toBeTruthy()
+
+    // Other facets (statuses) stay untouched.
+    expect(screen.getByRole('checkbox', { name: /Open\s+2/i })).toBeChecked()
+    expect(screen.getByRole('checkbox', { name: /Delivered\s+1/i })).toBeChecked()
   })
 
   it('gives a row the tone its status implies and voided rows are struck through', async () => {
@@ -412,8 +438,12 @@ describe('ShipmentsBoard', () => {
   })
 
   it('Batch Task reports a per-row failure rather than swallowing it', async () => {
-    readyToInvoice.mockRejectedValueOnce(new Error('Gate refused: missing POD'))
-    readyToInvoice.mockResolvedValueOnce({ releaseGate: { ok: true, missing: [] } })
+    batchShipmentTask.mockResolvedValueOnce({
+      results: [
+        { shipmentId: 'S001', number: 'S-a', ok: true, message: null },
+        { shipmentId: 'S002', number: 'S-b', ok: false, message: 'Gate refused: missing POD' },
+      ],
+    })
 
     const shipments = [deliveredRow('S001'), deliveredRow('S002')]
     vi.mocked(listOrders).mockResolvedValue([
@@ -434,9 +464,20 @@ describe('ShipmentsBoard', () => {
     fireEvent.change(within(dialog).getByRole('combobox'), { target: { value: 'release' } })
     fireEvent.click(screen.getByRole('button', { name: /^Run$/i }))
 
-    await waitFor(() => expect(screen.getByText('Gate refused: missing POD')).toBeTruthy())
-    expect(screen.getAllByText('S001').length).toBeGreaterThanOrEqual(1)
-    expect(screen.getAllByText('S002').length).toBeGreaterThanOrEqual(1)
+    await waitFor(() => expect(batchShipmentTask).toHaveBeenCalledTimes(1))
+    expect(batchShipmentTask).toHaveBeenCalledWith(expect.objectContaining({
+      task: 'RELEASE_TO_BILLING',
+      shipmentIds: ['S001', 'S002'],
+      params: {},
+    }))
+    expect(readyToInvoice).not.toHaveBeenCalled()
+
+    const resultDialog = screen.getByRole('dialog', { name: /Batch task/i })
+    await waitFor(() => {
+      expect(within(resultDialog).getByText('S001')).toBeTruthy()
+      expect(within(resultDialog).getByText('S002')).toBeTruthy()
+      expect(within(resultDialog).getByText('Gate refused: missing POD')).toBeTruthy()
+    })
   })
 
   it('Create shipment lists only loads without a shipment and calls the backfill wrapper', async () => {
@@ -489,21 +530,30 @@ describe('ShipmentsBoard', () => {
     })))
   })
 
-  it('repoint refused with INVOICED: offers the credit path and sends one idempotency key', async () => {
+  it('repoint refused with INVOICED: offers the credit path and sends a fresh idempotency key per credit path', async () => {
+    getShipmentBundle.mockResolvedValue({ orders: [] })
+    resolveRevTag.mockResolvedValue({})
+
     const shipments = [row('S001', { status: 'DELIVERED', customerId: 'cust-1' })]
     renderBoard('/tms/shipments/view/active-shipments', shipments)
     await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
 
-    fireEvent.pointerDown(screen.getByLabelText('Shipment actions'), { button: 0, pointerType: 'mouse' })
-    fireEvent.click(await screen.findByRole('menuitem', { name: /Re-point customer/i }))
+    const openRepoint = async () => {
+      fireEvent.pointerDown(screen.getByLabelText('Shipment actions'), { button: 0, pointerType: 'mouse' })
+      fireEvent.click(await screen.findByRole('menuitem', { name: /Re-point customer/i }))
+      await waitFor(() => expect(screen.getByRole('dialog', { name: /Re-point customer/i })).toBeTruthy())
+    }
 
-    await waitFor(() => expect(screen.getByRole('dialog', { name: /Re-point customer/i })).toBeTruthy())
+    const fillAndSubmit = async () => {
+      fireEvent.change(screen.getByRole('combobox', { name: /New customer/i }), { target: { value: 'cust-2' } })
+      fireEvent.change(screen.getByRole('textbox', { name: /Reason/i }), { target: { value: 'Sold to different division' } })
+      fireEvent.click(screen.getByRole('button', { name: /^Re-point$/i }))
+    }
 
-    fireEvent.change(screen.getByRole('combobox', { name: /New customer/i }), { target: { value: 'cust-2' } })
-    fireEvent.change(screen.getByRole('textbox', { name: /Reason/i }), { target: { value: 'Sold to different division' } })
-
+    // First credit path.
+    await openRepoint()
     repointShipmentCustomer.mockRejectedValueOnce(new Error('INVOICED: This shipment has already been invoiced.'))
-    fireEvent.click(screen.getByRole('button', { name: /^Re-point$/i }))
+    await fillAndSubmit()
 
     await waitFor(() => expect(repointShipmentCustomer).toHaveBeenCalledWith(expect.objectContaining({
       shipmentId: 'S001',
@@ -512,20 +562,27 @@ describe('ShipmentsBoard', () => {
       expectedUpdatedAt: '2026-01-01T00:00:00.000Z',
     })))
 
-    await waitFor(() => expect(screen.getByText(/original invoice will be credited/i)).toBeTruthy())
+    await waitFor(() => expect(screen.getByText(/already been invoiced/i)).toBeTruthy())
 
-    repointInvoicedCustomer.mockRejectedValueOnce(new Error('Network hiccup'))
     repointInvoicedCustomer.mockResolvedValueOnce({})
-    const creditButton = await screen.findByRole('button', { name: /Credit original and rebill/i })
-    fireEvent.click(creditButton)
+    fireEvent.click(await screen.findByRole('button', { name: /Credit original and rebill/i }))
+    await waitFor(() => expect(repointInvoicedCustomer).toHaveBeenCalledTimes(1))
+    const firstKey = repointInvoicedCustomer.mock.calls[0][0].idempotencyKey
+    expect(firstKey).toEqual(expect.any(String))
 
-    await waitFor(() => expect(repointInvoicedCustomer).toHaveBeenCalledWith(expect.objectContaining({ idempotencyKey: expect.any(String) })))
-    const key = repointInvoicedCustomer.mock.calls[0][0].idempotencyKey
+    // A successful confirmation closes the dialog; the next one uses a new key.
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: /Re-point customer/i })).toBeNull())
 
-    // A second confirm attempt re-uses the same key; the first failure leaves the dialog open.
-    fireEvent.click(creditButton)
+    // Second credit path.
+    await openRepoint()
+    repointShipmentCustomer.mockRejectedValueOnce(new Error('INVOICED: This shipment has already been invoiced.'))
+    await fillAndSubmit()
+    await waitFor(() => expect(screen.getByText(/already been invoiced/i)).toBeTruthy())
+
+    repointInvoicedCustomer.mockResolvedValueOnce({})
+    fireEvent.click(await screen.findByRole('button', { name: /Credit original and rebill/i }))
     await waitFor(() => expect(repointInvoicedCustomer).toHaveBeenCalledTimes(2))
-    expect(repointInvoicedCustomer.mock.calls[1][0].idempotencyKey).toBe(key)
+    expect(repointInvoicedCustomer.mock.calls[1][0].idempotencyKey).not.toBe(firstKey)
   })
 
   it('Unvoid surfaces a stale-token refusal as a readable message', async () => {
@@ -692,13 +749,11 @@ describe('ShipmentsBoard', () => {
 
     await waitFor(() => expect(screen.getByRole('dialog', { name: /Duplicate shipment/i })).toBeTruthy())
     fireEvent.change(screen.getByRole('spinbutton', { name: /Copies/i }), { target: { value: '2' } })
-    fireEvent.click(screen.getByRole('checkbox', { name: /Book the same carrier/i }))
     fireEvent.click(screen.getByRole('button', { name: /^Duplicate$/i }))
 
     await waitFor(() => expect(duplicateShipment).toHaveBeenCalledWith(expect.objectContaining({
       shipmentId: 'S001',
       copies: expect.arrayContaining([expect.objectContaining({ pickupAppt: expect.any(String) })]),
-      sameCarrier: true,
     })))
   })
 
@@ -805,12 +860,12 @@ describe('ShipmentsBoard', () => {
       expect(screen.getByRole('checkbox', { name: /Open\s+1/i })).toBeChecked()
     })
 
-    expect(screen.queryByText('Unsaved changes')).toBeNull()
+    expect(screen.queryByText(/Unsaved changes/)).toBeNull()
 
     fireEvent.click(screen.getByRole('checkbox', { name: /Open\s+1/i }))
 
     await waitFor(() => {
-      expect(screen.getByText('Unsaved changes')).toBeTruthy()
+      expect(screen.getByText(/Unsaved changes · Active Shipments/i)).toBeTruthy()
     })
   })
 
@@ -831,7 +886,7 @@ describe('ShipmentsBoard', () => {
     fireEvent.click(screen.getByRole('checkbox', { name: /Open\s+1/i }))
     await waitFor(() => {
       expect(screen.getByRole('checkbox', { name: /Open\s+1/i })).not.toBeChecked()
-      expect(screen.getByText('Unsaved changes')).toBeTruthy()
+      expect(screen.getByText(/Unsaved changes · Active Shipments/i)).toBeTruthy()
     })
 
     fireEvent.click(screen.getByRole('button', { name: /Revert/i }))
@@ -839,7 +894,7 @@ describe('ShipmentsBoard', () => {
     await waitFor(() => {
       expect(screen.getByRole('checkbox', { name: /Open\s+1/i })).toBeChecked()
       expect(screen.getByRole('checkbox', { name: /Delivered\s+1/i })).toBeChecked()
-      expect(screen.queryByText('Unsaved changes')).toBeNull()
+      expect(screen.queryByText(/Unsaved changes/)).toBeNull()
     })
   })
 
@@ -847,29 +902,28 @@ describe('ShipmentsBoard', () => {
     const shipments = [row('S001', { status: 'OPEN' }), deliveredRow('S002')]
     renderBoard('/tms/shipments/view/active-shipments', shipments)
 
-    await waitFor(() => {
-      expect(screen.getByRole('tab', { name: /Active Shipments/i, selected: true })).toBeTruthy()
-    })
+    const viewSelect = await waitFor(() => screen.getByRole('combobox', { name: /View/i }))
+    await waitFor(() => expect(viewSelect).toHaveValue('active-shipments'))
 
     expect(screen.getByRole('checkbox', { name: /Open\s+1/i })).toBeChecked()
     expect(screen.getByRole('checkbox', { name: /Delivered\s+1/i })).toBeChecked()
 
-    fireEvent.click(screen.getByRole('tab', { name: /All Shipments/ }))
+    fireEvent.change(viewSelect, { target: { value: 'all-shipments' } })
 
     await waitFor(() => {
-      expect(screen.getByRole('tab', { name: /All Shipments/, selected: true })).toBeTruthy()
+      expect(screen.getByRole('combobox', { name: /View/i })).toHaveValue('all-shipments')
       expect(screen.getByRole('checkbox', { name: /Open\s+1/i })).not.toBeChecked()
       expect(screen.getByRole('checkbox', { name: /Delivered\s+1/i })).not.toBeChecked()
-      expect(screen.queryByText('Unsaved changes')).toBeNull()
+      expect(screen.queryByText(/Unsaved changes/)).toBeNull()
     })
 
-    fireEvent.click(screen.getByRole('tab', { name: /Active Shipments/i }))
+    fireEvent.change(screen.getByRole('combobox', { name: /View/i }), { target: { value: 'active-shipments' } })
 
     await waitFor(() => {
-      expect(screen.getByRole('tab', { name: /Active Shipments/i, selected: true })).toBeTruthy()
+      expect(screen.getByRole('combobox', { name: /View/i })).toHaveValue('active-shipments')
       expect(screen.getByRole('checkbox', { name: /Open\s+1/i })).toBeChecked()
       expect(screen.getByRole('checkbox', { name: /Delivered\s+1/i })).toBeChecked()
-      expect(screen.queryByText('Unsaved changes')).toBeNull()
+      expect(screen.queryByText(/Unsaved changes/)).toBeNull()
     })
   })
 

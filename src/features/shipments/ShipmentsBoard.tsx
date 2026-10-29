@@ -21,31 +21,29 @@ import {
 import { toast } from 'sonner'
 
 import { BoardFilterPanel } from './board/BoardFilterPanel'
-import { BoardViewTabs, type BoardViewTab } from './board/BoardViewTabs'
+import { useBoardFilters } from './board/useBoardFilters'
 import { BoardGrid, type BoardGridColumn, type BoardGridSort } from './board/BoardGrid'
 import { BoardFooterBar } from './board/BoardFooterBar'
 import { IconKeyDialog, type BoardToneKey, type BoardExceptionKey } from './board/IconKeyDialog'
 import { BatchTaskDialog, type BatchTaskAction, type BatchTaskResult } from './board/BatchTaskDialog'
 import { BoardMapView } from './board/BoardMapView'
-import { ColumnTemplateDialog, type BoardColumnItem } from './board/ColumnTemplateDialog'
+import { ColumnsPickerDialog } from './board/ColumnsPickerDialog'
 import { FilterSetDialog } from './board/FilterSetDialog'
 import { TmsBadge, TmsButton, TmsInput, statusTone } from '@/features/tms/kit'
-import { useShipmentViews } from '@/features/tms/useShipmentViews'
+import { useOwnershipDivisions, useShipmentViews } from '@/features/tms/useShipmentViews'
 import { useAuth } from '@/hooks/useAuth'
 import { useDirectory } from '@/hooks/useDirectory'
 import { useShipments } from '@/hooks/useShipments'
 import { useStaff } from '@/hooks/useStaff'
 import {
-  archiveShipmentView,
+  batchShipmentTask,
   deleteShipmentColumnTemplate,
   duplicateShipment,
   getTmsSettings,
   listOrders,
   listShipmentColumnTemplates,
-  readyToInvoice,
   saveShipmentColumnTemplate,
   saveShipmentView,
-  setSalesRep,
   setShipmentStatus,
   tenderRespond,
 } from '@/lib/apiClient'
@@ -54,6 +52,7 @@ import { checkCallState } from '@/lib/checkCalls'
 import { customerDisplayName, isCustomerUnresolved } from '@/lib/customerResolution'
 import { displayName } from '@/lib/roles'
 import { slugify, viewCallerOf, viewsVisibleTo } from '@/lib/shipmentViewDefs'
+import { SEED_DIVISIONS } from '@/lib/ownership'
 import { cn } from '@/lib/utils'
 import { ShipmentDrawer } from './components/ShipmentDrawer'
 import { ShipmentRowActions, type ShipmentActionHandlers } from './components/StatusActions'
@@ -65,22 +64,15 @@ import {
   ALJEX_COLUMN_KEYS,
   BOARD_COLUMNS,
   EMPTY_BOARD_FILTER_SET,
-  boardFilterCount,
-  boardFiltersEqual,
   boardRowTone,
-  boardStatusCounts,
   carrierLabel,
-  detailOptions,
   massReleaseReady,
-  matchesBoardFilters,
-  matchesQuery,
   toCsv,
   visibleColumns,
-  type BoardDetailKey,
   type BoardFilterSet,
   type ShipmentRow,
 } from './shipmentViews'
-import type { CustomerRecord, LocationRecord, OrderRecord, ShipmentColumnTemplateRecord, ShipmentViewRecord, TmsSettings, UserProfileRecord } from '@/types/tms'
+import type { BatchShipmentTask, CustomerRecord, LocationRecord, OrderRecord, ShipmentColumnTemplateRecord, ShipmentViewRecord, TmsSettings, UserProfileRecord } from '@/types/tms'
 
 const MAPS_KEY = (import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string | undefined) ?? ''
 const MAPS_MAP_ID = (import.meta.env.VITE_GOOGLE_MAPS_MAP_ID as string | undefined) ?? undefined
@@ -97,27 +89,28 @@ function normalizePageSize(size: number): number {
   return Number.isFinite(size) && size > 0 ? size : PAGE_SIZES[1]
 }
 
-const DETAIL_LABELS: Record<BoardDetailKey, string> = {
-  customer: 'Customer',
-  carrier: 'Carrier',
-  pickupName: 'Pick Up Name',
-  consigneeName: 'Consignee Name',
-  fromStates: 'From States',
-  toStates: 'To States',
-  revenueType: 'Revenue Types',
-  equipment: 'Equip Type',
-  office: 'Office (team)',
-  fromRegion: 'From Region',
-  toRegion: 'To Region',
-  salesRep: 'Sales Rep',
-  serviceRep: 'Service Rep',
-  dispatcherAssigned: 'Dispatcher Assigned',
-  dispatcherActual: 'Dispatcher Actual',
-}
+const SETTABLE_STATUSES = ['ON_HOLD', 'OPEN', 'CANCELED', 'UNCANCEL'] as const
 
 const DEFAULT_SORT: BoardGridSort = { key: 'pickupShip', dir: 'asc' }
 
-const SETTABLE_STATUSES = ['ON_HOLD', 'OPEN', 'CANCELED', 'UNCANCEL'] as const
+/**
+ * The footer's Batch task offers one flat list of choices; the router takes a task and
+ * its parameters. This is the one place the two vocabularies meet.
+ */
+function batchTaskOf(action: string): { task: BatchShipmentTask; params: Record<string, unknown> } | null {
+  if (action === 'release') return { task: 'RELEASE_TO_BILLING', params: {} }
+  if (action.startsWith('rep:')) return { task: 'SET_SALES_REP', params: { repId: action.slice(4) } }
+  if (action.startsWith('carrierRep:')) return { task: 'SET_CARRIER_REP', params: { repId: action.slice(11) } }
+  if (action.startsWith('carrierTeam:')) return { task: 'SET_CARRIER_REP', params: { teamKey: action.slice(12) } }
+  if (action.startsWith('division:')) {
+    const [divisionCode, subdivisionCode] = action.slice(9).split(':')
+    return { task: 'SET_REV_DIVISION', params: subdivisionCode ? { divisionCode, subdivisionCode } : { divisionCode } }
+  }
+  if (action.startsWith('status:')) {
+    return { task: 'SET_STATUS', params: { status: action.slice(7), reason: 'Batch task' } }
+  }
+  return null
+}
 
 function sentence(value: string): string {
   return value.toLowerCase().replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase())
@@ -418,6 +411,13 @@ function BoardPane({
   onSplit,
 }: BoardPaneProps) {
   const { staff: staffProfiles, nameOf: staffNameOf } = staff
+  const divisions = useOwnershipDivisions().divisions ?? SEED_DIVISIONS
+  // Step I teams are a property of the people, so the batch offers exactly the teams
+  // somebody is actually on rather than a list nobody maintains.
+  const teamKeys = useMemo(
+    () => [...new Set(staffProfiles.flatMap((u) => u.teamKeys ?? []))].sort(),
+    [staffProfiles],
+  )
   const navigate = useNavigate()
   const [params, setParams] = useSearchParams()
   const urlQuery = params.get('q')
@@ -449,8 +449,10 @@ function BoardPane({
     [activeView],
   )
 
-  const [filters, setFilters] = useState<BoardFilterSet>(() => savedFilters)
   const [columnKeys, setColumnKeys] = useState<string[]>(() => savedColumns)
+  const [columnWidths, setColumnWidths] = useState<Record<string, number>>({})
+  const [pinnedKeys, setPinnedKeys] = useState<string[]>([])
+  const [columnsOpen, setColumnsOpen] = useState(false)
   const [sort, setSort] = useState<BoardGridSort>(() =>
     activeView?.sort ? { key: activeView.sort.key, dir: activeView.sort.dir } : DEFAULT_SORT,
   )
@@ -464,38 +466,51 @@ function BoardPane({
   const [filterSetDialog, setFilterSetDialog] = useState<{ open: boolean; mode: 'create' | 'edit' } | null>(null)
   const [filterSetName, setFilterSetName] = useState('')
   const [filterSetShared, setFilterSetShared] = useState(false)
-  const [columnTemplateDialog, setColumnTemplateDialog] = useState<{ open: boolean; mode: 'create' | 'edit'; id?: string } | null>(null)
-  const [templateName, setTemplateName] = useState('')
-  const [templateShared, setTemplateShared] = useState(false)
   const [columnTemplateId, setColumnTemplateId] = useState<string | null>(null)
   const [dialogShipment, setDialogShipment] = useState<ShipmentRow | null>(null)
   const [dialogKind, setDialogKind] = useState<'unvoid' | 'repoint' | null>(null)
 
-  // Hydrate working filters/columns/sort from the active view whenever the
-  // view identity changes. The lazy useState initializers may have captured an
-  // empty stub while views were still loading, and the pane's React key does
-  // not always change when the same view resolves, so this effect is the
-  // backstop. We intentionally ignore changes to the same view (e.g. polls) so
-  // we do not clobber edits in progress.
+  const handleCreateFilterSet = useCallback(() => {
+    setFilterSetName('')
+    setFilterSetShared(false)
+    setFilterSetDialog({ open: true, mode: 'create' })
+  }, [])
+
+  // The filters, the facet options and the panel itself are the same three things the
+  // Dispatch, Tracking and Documents workstations show, so they come from one hook.
+  // The board keeps what is its own: columns, sort, selection and the batch.
+  const {
+    filters,
+    setFilters,
+    rows: filteredRows,
+    panelProps,
+  } = useBoardFilters({
+    rows: allRows,
+    customers,
+    staffNameOf,
+    views: visibleViews,
+    viewSlug: currentViewId,
+    onSelectView,
+    onCreateView: handleCreateFilterSet,
+    storageKey: panelStorageKey(email, pane),
+    baseFilters: savedFilters,
+    query,
+    onQueryChange: setQuery,
+  })
+
+  // Columns and sort hydrate with the view the same way the filters do inside the
+  // hook: only when the view identity changes, so a poll never discards an edit.
   const lastHydratedViewIdRef = useRef<string | null>(null)
   useEffect(() => {
     const nextId = activeView?.id ?? null
     if (nextId === lastHydratedViewIdRef.current) return
     lastHydratedViewIdRef.current = nextId
-    setFilters(savedFilters)
     setColumnKeys(savedColumns)
     setSort(activeView?.sort ? { key: activeView.sort.key, dir: activeView.sort.dir } : DEFAULT_SORT)
     setColumnTemplateId(null)
-  }, [activeView, savedFilters, savedColumns])
-
-  const [collapsed, setCollapsed] = useState(() => {
-    if (typeof window === 'undefined') return false
-    return window.localStorage.getItem(panelStorageKey(email, pane)) === 'true'
-  })
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    window.localStorage.setItem(panelStorageKey(email, pane), String(collapsed))
-  }, [collapsed, email, pane])
+    setColumnWidths({})
+    setPinnedKeys([])
+  }, [activeView, savedColumns])
 
   // Countdown refetch.
   const [secondsToRefresh, setSecondsToRefresh] = useState(REFRESH_SECONDS)
@@ -519,53 +534,14 @@ function BoardPane({
     return refresh()
   }, [refresh])
 
-  // Search is applied first; counts and facets come from this set so checking a box
-  // does not zero out the counts beside the other boxes.
-  const queryRows = useMemo(() => {
-    if (!query) return allRows
-    return allRows.filter((r) => matchesQuery(r, query))
-  }, [allRows, query])
-
-  const filteredRows = useMemo(() => {
-    const now = new Date()
-    return queryRows.filter((r) => matchesBoardFilters(r, filters, now))
-  }, [queryRows, filters])
-
   const sortedRows = useMemo(() => sortRows(filteredRows, sort), [filteredRows, sort])
   const shownRows = useMemo(() => sortedRows.slice(0, pageSize), [sortedRows, pageSize])
 
-  const statusCounts = useMemo(() => boardStatusCounts(queryRows), [queryRows])
-  const detailDefs = useMemo(() => {
-    const labels: Record<string, string> = {}
-    for (const c of customers) labels[c.id] = c.name
-    return (Object.keys(DETAIL_LABELS) as BoardDetailKey[]).map((key) => {
-      const options = detailOptions(queryRows, key).map((opt) => {
-        let label = opt.value
-        if (key === 'customer') label = labels[opt.value] ?? opt.value
-        if (['salesRep', 'serviceRep', 'dispatcherAssigned', 'dispatcherActual'].includes(key)) {
-          label = staffNameOf(opt.value)
-        }
-        return { ...opt, label }
-      })
-      return { key, label: DETAIL_LABELS[key], options }
-    })
-  }, [queryRows, customers, staffNameOf])
+  const columnsDirty = useMemo(() => !arraysEqual(columnKeys, savedColumns), [columnKeys, savedColumns])
 
-  const filterSetDirty = useMemo(() => {
-    const filtersDirty = !boardFiltersEqual(filters, savedFilters)
-    const columnsDirty = !arraysEqual(columnKeys, savedColumns)
-    return filtersDirty || columnsDirty
-  }, [filters, savedFilters, columnKeys, savedColumns])
-
-  const tabs = useMemo<BoardViewTab[]>(() => {
-    return [{ id: '', name: 'All shipments' }, ...visibleViews.map((v) => ({ id: v.slug, name: v.name }))]
-  }, [visibleViews])
-
-  const onSelectTab = useCallback(
-    (id: string) => {
-      onSelectView(id)
-    },
-    [onSelectView],
+  const activeTemplate = useMemo(
+    () => columnTemplates.find((ct) => ct.id === columnTemplateId) ?? null,
+    [columnTemplates, columnTemplateId],
   )
 
   const activeColumnTemplateId = useMemo(() => {
@@ -580,17 +556,6 @@ function BoardPane({
     () => columnTemplates.map((ct) => ({ id: ct.id, name: ct.name })),
     [columnTemplates],
   )
-
-  const filterSetOptions = useMemo(
-    () => visibleViews.map((v) => ({ id: v.slug, name: v.name, isDefault: v.isDefault })),
-    [visibleViews],
-  )
-
-  const handleCreateFilterSet = useCallback(() => {
-    setFilterSetName('')
-    setFilterSetShared(false)
-    setFilterSetDialog({ open: true, mode: 'create' })
-  }, [])
 
   const handleUpdateFilterSet = useCallback(async () => {
     if (!activeView) return
@@ -620,48 +585,15 @@ function BoardPane({
     setColumnKeys(savedColumns)
     setSort(activeView?.sort ? { key: activeView.sort.key, dir: activeView.sort.dir } : DEFAULT_SORT)
     setColumnTemplateId(null)
-  }, [savedFilters, savedColumns, activeView])
-
-  const handleDeleteFilterSet = useCallback(async () => {
-    if (!activeView) return
-    try {
-      await archiveShipmentView({ id: activeView.id })
-      toast.success('View archived')
-      onSelectTab('')
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Archive failed')
-    }
-  }, [activeView, onSelectTab])
-
-  const handleDuplicateView = useCallback(async () => {
-    if (!activeView) return
-    const name = `${activeView.name} copy`
-    try {
-      const saved = await saveShipmentView({
-        name,
-        slug: slugify(name),
-        department: activeView.department,
-        description: activeView.description,
-        filters: activeView.filters,
-        columns: activeView.columns,
-        sort: activeView.sort,
-        isDefault: false,
-        audience: activeView.audience,
-        sortOrder: activeView.sortOrder + 1,
-        active: true,
-      })
-      toast.success('View duplicated')
-      onSelectTab(saved.slug)
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Duplicate failed')
-    }
-  }, [activeView, onSelectTab])
+  }, [savedFilters, savedColumns, activeView, setFilters])
 
   const handleSelectColumnTemplate = useCallback(
     (id: string) => {
       const t = columnTemplates.find((ct) => ct.id === id)
       if (t) {
         setColumnKeys([...t.columns])
+        setColumnWidths({ ...(t.widths ?? {}) })
+        setPinnedKeys([...(t.pinned ?? [])])
         setColumnTemplateId(id)
       }
     },
@@ -673,18 +605,33 @@ function BoardPane({
     saveBlob(new Blob([csv], { type: 'text/csv' }), `shipments-${new Date().toISOString().slice(0, 10)}.csv`)
   }, [filteredRows, columnKeys])
 
-  // Batch task actions.
+  // Batch task actions. Everything but the CSV runs on the server: one call, one
+  // audit row per shipment, and the release gate decides each row for itself.
   const batchActions = useMemo<BatchTaskAction[]>(() => {
-    const actions: BatchTaskAction[] = [{ key: 'release', label: 'Release to accounting' }]
+    const actions: BatchTaskAction[] = [{ key: 'release', label: 'Release to billing' }]
+    for (const u of staffProfiles) {
+      actions.push({ key: `rep:${u.id}`, label: `Change sales rep to ${displayName(u)}` })
+    }
+    for (const d of divisions) {
+      if (!d.active) continue
+      const parent = d.parentId ? divisions.find((p) => p.id === d.parentId) ?? null : null
+      actions.push({
+        key: `division:${parent ? `${parent.code}:${d.code}` : d.code}`,
+        label: `Change revenue division to ${parent ? `${parent.name} · ${d.name}` : d.name}`,
+      })
+    }
+    for (const u of staffProfiles) {
+      actions.push({ key: `carrierRep:${u.id}`, label: `Change carrier rep to ${displayName(u)}` })
+    }
+    for (const team of teamKeys) {
+      actions.push({ key: `carrierTeam:${team}`, label: `Change carrier team to ${team}` })
+    }
     for (const status of SETTABLE_STATUSES) {
       actions.push({ key: `status:${status}`, label: `Set status to ${sentence(status)}` })
     }
-    for (const u of staffProfiles) {
-      actions.push({ key: `rep:${u.id}`, label: `Assign sales rep to ${displayName(u)}` })
-    }
     actions.push({ key: 'export', label: 'Export selected' })
     return actions
-  }, [staffProfiles])
+  }, [staffProfiles, divisions, teamKeys])
 
   const selectedRows = useMemo(
     () => shownRows.filter((r) => selectedIds.includes(r.id)),
@@ -695,21 +642,12 @@ function BoardPane({
     if (!batchAction || selectedRows.length === 0) return
     setBatchRunning(true)
     setBatchResults(undefined)
-    const orderByShipment: Record<string, OrderRecord> = {}
-    // The pane already has access to the same orders fetched by the outer board.
-    // Re-fetching here keeps the CAS token fresh for the batch.
-    try {
-      const freshOrders = await listOrders()
-      for (const o of freshOrders) {
-        if (o.shipmentId) orderByShipment[o.shipmentId] = o
-      }
-    } catch {
-      // fall through and let each row fail with a clear message
-    }
 
-    const results: BatchTaskResult[] = []
+    const labelOf = (shipmentId: string, fallback: string | null) =>
+      selectedRows.find((r) => r.id === shipmentId)?.number ?? fallback ?? shipmentId
 
     if (batchAction === 'export') {
+      const results: BatchTaskResult[] = []
       try {
         const csv = toCsv(selectedRows, columnKeys)
         saveBlob(new Blob([csv], { type: 'text/csv' }), `shipments-selected-${new Date().toISOString().slice(0, 10)}.csv`)
@@ -717,38 +655,48 @@ function BoardPane({
       } catch (err) {
         results.push({ rowId: 'export', rowLabel: 'Export selected', success: false, message: err instanceof Error ? err.message : 'Export failed' })
       }
-    } else {
-      for (const row of selectedRows) {
-        try {
-          if (batchAction === 'release') {
-            const order = orderByShipment[row.id]
-            if (!order) throw new Error('No order linked to this shipment')
-            const res = await readyToInvoice({ orderId: order.id, expectedUpdatedAt: order.updatedAt })
-            if (res.releaseGate.ok) {
-              results.push({ rowId: row.id, rowLabel: row.number, success: true })
-            } else {
-              results.push({ rowId: row.id, rowLabel: row.number, success: false, message: res.releaseGate.missing.map((m) => m.message).join(', ') })
-            }
-          } else if (batchAction.startsWith('status:')) {
-            const status = batchAction.slice(7) as 'ON_HOLD' | 'OPEN' | 'CANCELED' | 'UNCANCEL'
-            await setShipmentStatus({ shipmentId: row.id, expectedUpdatedAt: row.updatedAt, status, reason: 'Batch task' })
-            results.push({ rowId: row.id, rowLabel: row.number, success: true })
-          } else if (batchAction.startsWith('rep:')) {
-            const repId = batchAction.slice(4)
-            await setSalesRep({ shipmentId: row.id, repId })
-            results.push({ rowId: row.id, rowLabel: row.number, success: true })
-          }
-        } catch (err) {
-          results.push({ rowId: row.id, rowLabel: row.number, success: false, message: err instanceof Error ? err.message : 'Failed' })
-        }
-      }
+      setBatchResults(results)
+      setBatchRunning(false)
+      return
     }
 
-    setBatchResults(results)
-    setBatchRunning(false)
-    if (results.every((r) => r.success)) {
-      setSelectedIds([])
-      await handleRefresh()
+    const task = batchTaskOf(batchAction)
+    if (!task) {
+      setBatchResults([{ rowId: 'batch', rowLabel: 'Batch task', success: false, message: 'Unknown task' }])
+      setBatchRunning(false)
+      return
+    }
+
+    try {
+      const res = await batchShipmentTask({
+        task: task.task,
+        shipmentIds: selectedRows.map((r) => r.id),
+        params: task.params,
+      })
+      const results: BatchTaskResult[] = res.results.map((r) => ({
+        rowId: r.shipmentId,
+        rowLabel: labelOf(r.shipmentId, r.number),
+        success: r.ok,
+        message: r.message ?? undefined,
+      }))
+      setBatchResults(results)
+      setBatchRunning(false)
+      if (results.every((r) => r.success)) {
+        setSelectedIds([])
+        await handleRefresh()
+      } else {
+        await handleRefresh()
+      }
+    } catch (err) {
+      setBatchResults(
+        selectedRows.map((r) => ({
+          rowId: r.id,
+          rowLabel: r.number,
+          success: false,
+          message: err instanceof Error ? err.message : 'Batch failed',
+        })),
+      )
+      setBatchRunning(false)
     }
   }, [batchAction, selectedRows, columnKeys, handleRefresh])
 
@@ -852,9 +800,9 @@ function BoardPane({
         }
       }
       return {
-        onDuplicate: (copies, sameCarrier) =>
+        onDuplicate: (copies) =>
           run(`${copies.length} copy${copies.length === 1 ? '' : 'ies'} created`, () =>
-            duplicateShipment({ shipmentId: row.id, copies, sameCarrier })),
+            duplicateShipment({ shipmentId: row.id, copies })),
         onSetStatus: (status, reason) =>
           run('Status updated', () =>
             setShipmentStatus({ shipmentId: row.id, expectedUpdatedAt: row.updatedAt, status, reason })),
@@ -908,108 +856,19 @@ function BoardPane({
     return [...meanings.entries()].map(([meaning, icon]) => ({ icon, meaning }))
   }, [shownRows])
 
-  const dialogColumnItems = useMemo<BoardColumnItem[]>(
-    () =>
-      BOARD_COLUMNS.map((c) => ({
-        key: c.key,
-        header: c.label,
-        selected: columnKeys.includes(c.key),
-      })),
-    [columnKeys],
-  )
-
-  const onToggleDialogColumn = useCallback((key: string) => {
-    setColumnKeys((prev) =>
-      prev.includes(key)
-        ? prev.filter((k) => k !== key)
-        : [...prev, key],
-    )
-    setColumnTemplateId(null)
-  }, [])
-
-  const onMoveDialogColumn = useCallback((key: string, direction: 'up' | 'down') => {
-    setColumnKeys((prev) => {
-      const idx = prev.indexOf(key)
-      if (idx < 0) return prev
-      const next = [...prev]
-      const swap = direction === 'up' ? idx - 1 : idx + 1
-      if (swap < 0 || swap >= next.length) return prev
-      ;[next[idx], next[swap]] = [next[swap], next[idx]]
-      return next
-    })
-    setColumnTemplateId(null)
-  }, [])
-
   return (
     <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-      <BoardViewTabs
-        tabs={tabs}
-        activeTabId={currentViewId}
-        onSelect={onSelectTab}
-        onNew={handleCreateFilterSet}
-        onDuplicate={handleDuplicateView}
-      />
-
       <div className="flex flex-1 overflow-hidden">
         <BoardFilterPanel
-          collapsed={collapsed}
-          onToggleCollapse={() => setCollapsed((c) => !c)}
-          filterSets={filterSetOptions}
-          activeFilterSetId={currentViewId}
-          filterSetDirty={filterSetDirty}
-          onSelectFilterSet={(id) => onSelectTab(id)}
-          onCreateFilterSet={handleCreateFilterSet}
-          onUpdateFilterSet={handleUpdateFilterSet}
-          onRevertFilterSet={handleRevertFilterSet}
-          onDeleteFilterSet={handleDeleteFilterSet}
+          {...panelProps}
+          filterSetDirty={panelProps.filterSetDirty || columnsDirty}
           columnTemplates={columnTemplateOptions}
           activeColumnTemplateId={activeColumnTemplateId}
           onSelectColumnTemplate={handleSelectColumnTemplate}
-          onManageColumnTemplates={() => {
-            if (activeColumnTemplateId) {
-              const t = columnTemplates.find((ct) => ct.id === activeColumnTemplateId)
-              setTemplateName(t?.name ?? '')
-              setTemplateShared(t?.shared ?? false)
-            } else {
-              setTemplateName('')
-              setTemplateShared(false)
-            }
-            setColumnTemplateDialog({ open: true, mode: activeColumnTemplateId ? 'edit' : 'create', id: activeColumnTemplateId ?? undefined })
-          }}
-          statuses={['OPEN', 'COVERED', 'DISPATCHED', 'ARRIVED', 'DEPARTED', 'DELIVERED', 'HOLD', 'RESERVED', 'VOIDED']}
-          statusCounts={statusCounts}
-          selectedStatuses={filters.statuses}
-          onToggleStatus={(status) =>
-            setFilters((prev) => ({
-              ...prev,
-              statuses: prev.statuses.includes(status) ? prev.statuses.filter((s) => s !== status) : [...prev.statuses, status],
-            }))
-          }
-          detailDefs={detailDefs}
-          detailFilters={filters.details}
-          onDetailChange={(key, values) =>
-            setFilters((prev) => ({
-              ...prev,
-              details: { ...prev.details, [key]: { ...(prev.details[key] ?? { values: [], exclude: false }), values } },
-            }))
-          }
-          onDetailExcludeChange={(key, exclude) =>
-            setFilters((prev) => ({
-              ...prev,
-              details: { ...prev.details, [key]: { ...(prev.details[key] ?? { values: [], exclude: false }), exclude } },
-            }))
-          }
-          dateFilters={filters.dates}
-          onDateChange={(key, filter) =>
-            setFilters((prev) => ({ ...prev, dates: { ...prev.dates, [key]: filter } }))
-          }
-          flags={filters.flags}
-          onFlagChange={(key, checked) =>
-            setFilters((prev) => ({ ...prev, flags: { ...prev.flags, [key]: checked } }))
-          }
-          onClearFilters={() => setFilters(EMPTY_BOARD_FILTER_SET)}
+          onManageColumnTemplates={() => setColumnsOpen(true)}
+          onUpdateFilterSet={() => { void handleUpdateFilterSet() }}
+          onRevertFilterSet={handleRevertFilterSet}
           onResetFilters={handleRevertFilterSet}
-          activeFilterCount={boardFilterCount(filters)}
         />
 
         <div className="flex min-w-0 flex-1 flex-col">
@@ -1100,9 +959,6 @@ function BoardPane({
         mode={filterSetDialog?.mode ?? 'create'}
         name={filterSetName}
         onNameChange={setFilterSetName}
-        columns={dialogColumnItems}
-        onToggleColumn={onToggleDialogColumn}
-        onMoveColumn={onMoveDialogColumn}
         shared={filterSetShared}
         onSharedChange={setFilterSetShared}
         canDelete={false}
@@ -1140,7 +996,7 @@ function BoardPane({
                 sortOrder: (visibleViews[visibleViews.length - 1]?.sortOrder ?? 0) + 10,
               })
               toast.success('View created')
-              onSelectTab(saved.slug)
+              onSelectView(saved.slug)
             }
             setFilterSetDialog(null)
           } catch (err) {
@@ -1149,49 +1005,51 @@ function BoardPane({
         }}
       />
 
-      <ColumnTemplateDialog
-        open={columnTemplateDialog?.open ?? false}
-        onOpenChange={(open) => { if (!open) setColumnTemplateDialog(null) }}
-        mode={columnTemplateDialog?.mode ?? 'create'}
-        name={templateName}
-        onNameChange={setTemplateName}
-        columns={dialogColumnItems}
-        onToggleColumn={onToggleDialogColumn}
-        onMoveColumn={onMoveDialogColumn}
-        shared={templateShared}
-        onSharedChange={setTemplateShared}
-        canDelete={columnTemplateDialog?.mode === 'edit' && columnTemplateDialog?.id ? (isOwner || isAdmin || columnTemplates.find((ct) => ct.id === columnTemplateDialog.id)?.ownerEmail === email) : false}
-        onDelete={async () => {
-          if (!columnTemplateDialog?.id) return
-          try {
-            await deleteShipmentColumnTemplate({ id: columnTemplateDialog.id })
-            toast.success('Template deleted')
-            if (columnTemplateId === columnTemplateDialog.id) {
-              setColumnTemplateId(null)
-            }
-            refreshTemplates()
-            setColumnTemplateDialog(null)
-          } catch (err) {
-            toast.error(err instanceof Error ? err.message : 'Delete failed')
-          }
+      <ColumnsPickerDialog
+        open={columnsOpen}
+        onOpenChange={setColumnsOpen}
+        columns={columnKeys}
+        widths={columnWidths}
+        pinned={pinnedKeys}
+        onApply={(next) => {
+          setColumnKeys(next.columns)
+          setColumnWidths(next.widths)
+          setPinnedKeys(next.pinned)
+          setColumnTemplateId(null)
         }}
-        onSave={async () => {
-          const name = templateName.trim()
-          if (!name) { toast.error('Name the template.'); return }
+        onSaveTemplate={async (next) => {
           try {
             await saveShipmentColumnTemplate({
-              id: columnTemplateDialog?.mode === 'edit' ? columnTemplateDialog.id : undefined,
-              name,
-              columns: columnKeys,
-              shared: templateShared,
+              id: activeColumnTemplateId ?? undefined,
+              name: next.name,
+              columns: next.columns,
+              widths: next.widths,
+              pinned: next.pinned,
+              shared: next.shared,
             })
+            setColumnKeys(next.columns)
+            setColumnWidths(next.widths)
+            setPinnedKeys(next.pinned)
             toast.success('Template saved')
             refreshTemplates()
-            setColumnTemplateDialog(null)
           } catch (err) {
             toast.error(err instanceof Error ? err.message : 'Save failed')
           }
         }}
+        onDeleteTemplate={
+          activeTemplate && (isOwner || isAdmin || activeTemplate.ownerEmail === email)
+            ? async () => {
+                try {
+                  await deleteShipmentColumnTemplate({ id: activeTemplate.id })
+                  toast.success('Template deleted')
+                  setColumnTemplateId(null)
+                  refreshTemplates()
+                } catch (err) {
+                  toast.error(err instanceof Error ? err.message : 'Delete failed')
+                }
+              }
+            : undefined
+        }
       />
 
       {openDrawerId && (
