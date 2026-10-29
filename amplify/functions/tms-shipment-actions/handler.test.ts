@@ -817,6 +817,25 @@ describe('CREATE_SHIPMENT', () => {
     expect(bundle.loads[0].pickupNumber).toBe('14591')
   })
 
+  it('lands tendered freight in TENDER_PENDING with its PRO claimed like any other', async () => {
+    // Step K. A tender is freight a customer offered us: it waits for TENDER_RESPOND,
+    // not in somebody's drafts. Nothing else about the create moves — the number, the
+    // PRO claim and the mirrored leg are the same ones every other source gets.
+    const bundle = (await call('CREATE_SHIPMENT', {
+      customerId: 'cus-1',
+      source: 'TENDER',
+      workflowRunId: 'wf:TENDER:abc123',
+    })) as { shipment: Row; loads: Row[] }
+
+    expect(bundle.shipment.status).toBe('TENDER_PENDING')
+    expect(bundle.shipment.previousStatus).toBeNull()
+    expect(bundle.shipment.source).toBe('TENDER')
+    expect(bundle.shipment.workflowRunId).toBe('wf:TENDER:abc123')
+    expect(table(TABLES.proClaim).get('S0000011')).toMatchObject({ origin: 'CREATE' })
+    // The leg is still a leg nobody has covered; only the shipment waits on an answer.
+    expect(bundle.loads[0].status).toBe('SOURCING')
+  })
+
   it('treats a leg bag rate as a total even when LINEHAUL is priced by the mile', async () => {
     // The rate on a bag is money somebody already invoiced. A customer whose LINEHAUL
     // default is PER_MILE would otherwise turn $2,500 into $2,500 a mile.
@@ -4504,6 +4523,16 @@ describe('SAVE_QUOTE', () => {
 
   it('lands an intake at REQUESTED instead of DRAFT', async () => {
     expect((await newQuote({ intake: true })).status).toBe('REQUESTED')
+  })
+
+  it('keeps the run a person applied, and an edit that does not name one leaves it alone', async () => {
+    // Step K. The back-reference is how a quote points at the proposal it came from;
+    // an ordinary edit must not quietly erase it.
+    const created = await newQuote({ workflowRunId: 'wf:QUOTE:abc123' })
+    expect(created.workflowRunId).toBe('wf:QUOTE:abc123')
+
+    await call('SAVE_QUOTE', { quoteId: String(created.id), expectedVersion: 1, miles: 510 }, QUOTER)
+    expect(quoteRow(String(created.id)).workflowRunId).toBe('wf:QUOTE:abc123')
   })
 
   it('carries no customerId at all on a quote nobody has named a customer for', async () => {

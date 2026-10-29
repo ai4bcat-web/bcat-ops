@@ -30,6 +30,7 @@ import type {
   UserProfileRecord, RoleKey, CommissionRecord, CommissionPayPeriodRecord,
   CommissionSettings, ShipmentSettings,
   OwnershipDivisionRecord, OwnershipRuleRecord, ShipmentViewRecord, RevTagSource,
+  WorkflowRunRecord, WorkflowAgentKey,
 } from '@/types/tms'
 import type { CreditSummary } from '@/lib/customerCredit'
 import type { QuotePricingResult } from '@/lib/quotes'
@@ -1138,13 +1139,18 @@ const CUSTOMER_V2_FIELDS = [
 // Step J's per-customer integration pointers. Its own flag, like the settings
 // generations above: a backend without them keeps serving every v2 field.
 const CUSTOMER_V3_FIELDS = ['project44CustomerId', 'hubspotId', 'ediSettings', 'haulpayDebtorId']
-const CUSTOMER_JSON_FIELDS: (keyof CustomerRecord)[] = ['billingAddress', 'contacts', 'billToParties', 'requiredReferences', 'chargeCodeOverrides', 'defaultCharges', 'pricingDefaults', 'quotingDefaults', 'visibilityPrefs', 'ediSettings']
+// Step K's per-party AI memory. Its own flag again: a backend that predates the field
+// must keep serving every v3 field rather than losing the whole directory.
+const CUSTOMER_V4_FIELDS = ['aiMemory']
+const CUSTOMER_JSON_FIELDS: (keyof CustomerRecord)[] = ['billingAddress', 'contacts', 'billToParties', 'requiredReferences', 'chargeCodeOverrides', 'defaultCharges', 'pricingDefaults', 'quotingDefaults', 'visibilityPrefs', 'ediSettings', 'aiMemory']
 let customersHaveV2 = true
 let customersHaveV3 = true
+let customersHaveV4 = true
 const customerFields = () => [
   CUSTOMER_FIELDS_BASE,
   customersHaveV2 ? CUSTOMER_V2_FIELDS.join(' ') : '',
   customersHaveV3 ? CUSTOMER_V3_FIELDS.join(' ') : '',
+  customersHaveV4 ? CUSTOMER_V4_FIELDS.join(' ') : '',
 ].filter(Boolean).join(' ')
 
 const LOCATION_FIELDS = `
@@ -1216,7 +1222,10 @@ const TMS_SETTINGS_V11_FIELDS = [
   'trackByDefault', 'autoStatusFromGeofence', 'trackingIntervalMin', 'trackingDurationHours',
   'postalCodeAliases', 'hubspotPortalId', 'integrationsNotifyChannel',
 ]
-const TMS_SETTINGS_JSON_FIELDS: (keyof TmsSettings)[] = ['accessorialCodes', 'loadStatusRules', 'defaultRequiredReferences', 'chargeCodes', 'quickPayTiers', 'trackingContact', 'factorRemitTo', 'teams', 'commissionPlans', 'commissionPaySchedule', 'postalCodeAliases']
+// Step K's AI agent settings: the one human-edited blob the workflow agent reads and
+// never writes. Its own flag again, for the same reason.
+const TMS_SETTINGS_V12_FIELDS = ['aiAgents']
+const TMS_SETTINGS_JSON_FIELDS: (keyof TmsSettings)[] = ['accessorialCodes', 'loadStatusRules', 'defaultRequiredReferences', 'chargeCodes', 'quickPayTiers', 'trackingContact', 'factorRemitTo', 'teams', 'commissionPlans', 'commissionPaySchedule', 'postalCodeAliases', 'aiAgents']
 let settingsHaveV2 = true
 let settingsHaveV3 = true
 let settingsHaveV4 = true
@@ -1227,6 +1236,7 @@ let settingsHaveV8 = true
 let settingsHaveV9 = true
 let settingsHaveV10 = true
 let settingsHaveV11 = true
+let settingsHaveV12 = true
 const tmsSettingsFields = () => [
   TMS_SETTINGS_FIELDS_BASE,
   settingsHaveV2 ? TMS_SETTINGS_V2_FIELDS.join(' ') : '',
@@ -1239,6 +1249,7 @@ const tmsSettingsFields = () => [
   settingsHaveV9 ? TMS_SETTINGS_V9_FIELDS.join(' ') : '',
   settingsHaveV10 ? TMS_SETTINGS_V10_FIELDS.join(' ') : '',
   settingsHaveV11 ? TMS_SETTINGS_V11_FIELDS.join(' ') : '',
+  settingsHaveV12 ? TMS_SETTINGS_V12_FIELDS.join(' ') : '',
 ].filter(Boolean).join(' ')
 const fieldNamed = (names: string[], err: unknown) => {
   const msg = safeStringify(err)
@@ -1308,7 +1319,12 @@ export async function listCustomers(opts?: { includeArchived?: boolean }): Promi
       const rows = await run()
       return opts?.includeArchived ? rows : rows.filter(isActiveDirectoryRecord)
     } catch (err) {
-      if (attempt >= 3) throw err
+      if (attempt >= 4) throw err
+      if (customersHaveV4 && fieldNamed(CUSTOMER_V4_FIELDS, err)) {
+        console.warn('[apiClient] backend has no Customer AI memory yet — querying without it until deploy')
+        customersHaveV4 = false
+        continue
+      }
       if (customersHaveV3 && fieldNamed(CUSTOMER_V3_FIELDS, err)) {
         console.warn('[apiClient] backend has no Customer integration fields yet — querying without them until deploy')
         customersHaveV3 = false
@@ -1398,7 +1414,12 @@ export async function getTmsSettings(): Promise<TmsSettings | null> {
     try {
       return await run()
     } catch (err) {
-      if (attempt >= 10) throw err
+      if (attempt >= 11) throw err
+      if (settingsHaveV12 && fieldNamed(TMS_SETTINGS_V12_FIELDS, err)) {
+        console.warn('[apiClient] backend has no TmsSettings AI agent fields yet — querying without them until deploy')
+        settingsHaveV12 = false
+        continue
+      }
       if (settingsHaveV11 && fieldNamed(TMS_SETTINGS_V11_FIELDS, err)) {
         console.warn('[apiClient] backend has no TmsSettings integration fields yet — querying without them until deploy')
         settingsHaveV11 = false
@@ -1796,7 +1817,10 @@ export interface CreateShipmentInput {
   customerName?: string
   mode?: ShipmentMode
   pro?: string
-  source?: 'MANUAL' | 'DUPLICATE' | 'FACTORING' | 'BACKFILL'
+  /** `TENDER` is a workflow proposal a person applied; the server opens it TENDER_PENDING. */
+  source?: 'MANUAL' | 'DUPLICATE' | 'FACTORING' | 'BACKFILL' | 'TENDER'
+  /** The WorkflowRun this came from. Read-only afterwards: only CREATE_SHIPMENT writes it. */
+  workflowRunId?: string
   load?: CreateShipmentLoadBag
 }
 export async function createShipment(input: CreateShipmentInput): Promise<ShipmentBundle> {
@@ -2384,7 +2408,7 @@ export type {
   QuickPayTier, RateConStatus, RateConRequiredField, BookingRequiredField,
 } from '@/types/tms'
 
-const CARRIER_FIELDS = `
+const CARRIER_FIELDS_BASE = `
   id name dbaName normalizedName type status statusReason statusNote statusChangedAt statusChangedBy
   mcNumber dotNumber scac einNumber inFmcsa
   authorityStatus authorityGrantedAt authorityExpiresAt
@@ -2396,7 +2420,11 @@ const CARRIER_FIELDS = `
   highwayStatus rmisStatus mcpStatus accountOwnerIds teamKey internalNotes
   loadCount lastLoadAt createdBy updatedBy version createdAt updatedAt
 `
-const CARRIER_JSON_FIELDS: (keyof CarrierRecord)[] = ['insurancePolicies', 'address']
+// Step K's per-party AI memory. Its own flag, like the Customer group above: a backend
+// that predates the field must keep serving every other carrier field.
+const CARRIER_V2_FIELDS = ['aiMemory']
+let carriersHaveV2 = true
+const CARRIER_JSON_FIELDS: (keyof CarrierRecord)[] = ['insurancePolicies', 'address', 'aiMemory']
 const CARRIER_CONTACT_FIELDS = `
   id carrierId name types email phone isPrimary rateConRecipient active
   createdBy updatedBy createdAt updatedAt
@@ -2411,6 +2439,22 @@ const CARRIER_DOCUMENT_FIELDS = `
   id carrierId type name s3Key contentType sizeBytes expiresAt loadCarrierId source
   uploadedBy createdAt updatedAt
 `
+
+/** Every Carrier read, with the newest group dropped and retried if the backend predates it. */
+async function readCarriers<T>(run: (fields: string) => Promise<T>): Promise<T> {
+  for (;;) {
+    try {
+      return await run([
+        CARRIER_FIELDS_BASE,
+        carriersHaveV2 ? CARRIER_V2_FIELDS.join(' ') : '',
+      ].filter(Boolean).join(' '))
+    } catch (err) {
+      if (!carriersHaveV2 || !fieldNamed(CARRIER_V2_FIELDS, err)) throw err
+      console.warn('[apiClient] backend has no Carrier AI memory yet — querying without it until deploy')
+      carriersHaveV2 = false
+    }
+  }
+}
 
 /**
  * Every carrier write. Same contract as `directoryAction`: the Lambda's own message is
@@ -2435,30 +2479,30 @@ export async function carrierAction<T>(action: string, input: unknown): Promise<
 // ── Reads ────────────────────────────────────────────────────────────────────
 
 export async function listCarriers(): Promise<CarrierRecord[]> {
-  const rows = await listAll<CarrierRecord>('listCarriers', CARRIER_FIELDS, 1000)
+  const rows = await readCarriers((fields) => listAll<CarrierRecord>('listCarriers', fields, 1000))
   return rows.map((c) => unwrapJsonFields(c, CARRIER_JSON_FIELDS))
 }
 export async function listCarriersByStatus(status: CarrierStatus): Promise<CarrierRecord[]> {
   // The index key is the Carrier.status enum, so the variable must be declared as one.
-  const rows = await listAllByIndex<CarrierRecord>(
-    'listCarrierByStatusAndName', { status }, CARRIER_FIELDS, 1000, { status: 'CarrierStatus!' },
-  )
+  const rows = await readCarriers((fields) => listAllByIndex<CarrierRecord>(
+    'listCarrierByStatusAndName', { status }, fields, 1000, { status: 'CarrierStatus!' },
+  ))
   return rows.map((c) => unwrapJsonFields(c, CARRIER_JSON_FIELDS))
 }
 /** MC and DOT are the two numbers a broker dedupes on; both indexes answer with a list. */
 export async function carriersByMc(mcNumber: string): Promise<CarrierRecord[]> {
-  const rows = await listAllByIndex<CarrierRecord>('listCarrierByMcNumber', { mcNumber }, CARRIER_FIELDS, 1000)
+  const rows = await readCarriers((fields) => listAllByIndex<CarrierRecord>('listCarrierByMcNumber', { mcNumber }, fields, 1000))
   return rows.map((c) => unwrapJsonFields(c, CARRIER_JSON_FIELDS))
 }
 export async function carriersByDot(dotNumber: string): Promise<CarrierRecord[]> {
-  const rows = await listAllByIndex<CarrierRecord>('listCarrierByDotNumber', { dotNumber }, CARRIER_FIELDS, 1000)
+  const rows = await readCarriers((fields) => listAllByIndex<CarrierRecord>('listCarrierByDotNumber', { dotNumber }, fields, 1000))
   return rows.map((c) => unwrapJsonFields(c, CARRIER_JSON_FIELDS))
 }
 export async function getCarrier(id: string): Promise<CarrierRecord | null> {
-  const r = await client.graphql({
-    query: `query GetCarrier($id: ID!) { getCarrier(id: $id) { ${CARRIER_FIELDS} } }`,
+  const r = await readCarriers(async (fields) => await client.graphql({
+    query: `query GetCarrier($id: ID!) { getCarrier(id: $id) { ${fields} } }`,
     variables: { id },
-  }) as { data: { getCarrier: CarrierRecord | null } }
+  }) as { data: { getCarrier: CarrierRecord | null } })
   return r.data.getCarrier ? unwrapJsonFields(r.data.getCarrier, CARRIER_JSON_FIELDS) : null
 }
 /** Every document in the system — the board's "missing required docs" filter reads it. */
@@ -2970,6 +3014,47 @@ export async function listTrackingLinksByShipment(shipmentId: string): Promise<T
   }
 }
 
+/**
+ * Every ACTIVE carrier-ping link, for the Errors tab's "this truck has gone quiet" rule.
+ *
+ * This is a filtered list, not a query, and the cost is worth stating plainly:
+ * `TrackingLink` is indexed on `shipmentId` and `loadId` only, so there is no key that
+ * answers "which links are live" and the filter is applied by the server after it reads
+ * the table. What comes back is bounded — a ping link is minted when a load is dispatched
+ * and revoked or expired when it delivers, so the rows are the trucks currently rolling —
+ * but the read behind it is not, which is why both the rows kept and the pages walked are
+ * capped here and why the Errors tab asks once a minute rather than on every render.
+ *
+ * The alternative is one `listTrackingLinkByShipmentId` per in-transit shipment on every
+ * poll, which is a query per shipment instead of a request per poll — worse, and it grows
+ * with the board. The upload fields stay out of the selection, so this read needs none of
+ * `listTrackingLinksByShipment`'s pre-deploy flag.
+ */
+export async function listCarrierPingLinks(limit = 500): Promise<TrackingLinkRecord[]> {
+  const rows: TrackingLinkRecord[] = []
+  let nextToken: string | null = null
+  // A filtered page can come back empty with more behind it, so paging stops on the rows
+  // collected or on the page budget, never on an empty page.
+  for (let page = 0; page < 8; page += 1) {
+    const r = await client.graphql({
+      query: `query ListTrackingLinks($filter: ModelTrackingLinkFilterInput, $nextToken: String) {
+        listTrackingLinks(filter: $filter, limit: 1000, nextToken: $nextToken) {
+          items { ${TRACKING_LINK_FIELDS} } nextToken
+        }
+      }`,
+      variables: {
+        filter: { status: { eq: 'ACTIVE' }, kind: { eq: 'CARRIER_PING' } },
+        nextToken,
+      },
+    }) as { data: { listTrackingLinks: { items: (TrackingLinkRecord | null)[]; nextToken?: string | null } } }
+    const got = r.data.listTrackingLinks
+    for (const item of got.items) if (item) rows.push(item)
+    nextToken = got.nextToken ?? null
+    if (!nextToken || rows.length >= limit) break
+  }
+  return rows.length > limit ? rows.slice(0, limit) : rows
+}
+
 /** Motive breadcrumbs for one truck inside a window, oldest → newest. */
 export async function listTruckPositions(truckId: string, from: string, to: string): Promise<TruckLocation[]> {
   return listTrackingIndex<TruckLocation>({
@@ -3423,6 +3508,14 @@ export async function notifySlackStatusChange(args: {
   }
 }
 
+/**
+ * A signed GET for an intake-side object. The prefixes that reach here are
+ * `intake-pdfs/` (Slack and vendor-AP PDFs), `intake-attachments/` (files that came in on a
+ * tender) and, from Step K, `workflow-inbox/` — the agent's own copy of an inbox message and
+ * its attachments, which RunTrace links to. The allow-list itself is the `access` map in
+ * `amplify/storage/resource.ts`; this helper only mints the URL, so a prefix missing there
+ * fails at S3 rather than here.
+ */
 export async function getIntakePdfUrl(s3Key: string): Promise<string> {
   return getRateConfirmUrl(s3Key) // same bucket, same presigned URL mechanism
 }
@@ -6425,6 +6518,8 @@ export interface SaveQuoteInput {
   topSpendCents?: number | null
   customerMessage?: string | null
   internalNotes?: string | null
+  /** The WorkflowRun a person applied to raise this quote; the server stores it once. */
+  workflowRunId?: string
 }
 
 /** The saved row and what pricing made of it — the totals plus every warning raised. */
@@ -6902,4 +6997,122 @@ export async function saveCommissionSettings(patch: CommissionSettings): Promise
 /** The shipment half of the settings row — numbering, the cancel gate, the AR/AP stages. */
 export async function saveShipmentSettings(patch: ShipmentSettings): Promise<{ settings: TmsSettings }> {
   return shipmentAction<{ settings: TmsSettings }>('SAVE_SHIPMENT_SETTINGS', patch)
+}
+
+// ── Workflows & AI agents (tmsWorkflowActions, Step K) ───────────────────────
+//
+// One router again, the same contract as `shipmentAction`: the Lambda's own refusal
+// ("this run is already APPLIED") is rethrown as the Error message, so a toast shows the
+// real reason instead of `[object Object]`. Nothing here deletes a row — a run is
+// DISMISSED or RESOLVED — and no call applies a proposal: a person does that through
+// CREATE_SHIPMENT / SAVE_QUOTE / REVIEW_DOCUMENT with their own identity, and then links
+// the run with `linkWorkflowRun`.
+
+export type { WorkflowRunRecord, WorkflowAgentKey } from '@/types/tms'
+
+/**
+ * The round trip itself, kept separate from the null guard below: `GET_RUN` answers with
+ * `null` for an id nothing matches, which is an answer rather than a failure.
+ */
+async function callWorkflow(action: string, input: unknown): Promise<unknown> {
+  let r: { data: { tmsWorkflowActions: unknown } }
+  try {
+    r = await client.graphql({
+      query: `mutation TmsWorkflowActions($action: String!, $input: AWSJSON!) { tmsWorkflowActions(action: $action, input: $input) }`,
+      variables: { action, input: JSON.stringify(input) },
+    }) as { data: { tmsWorkflowActions: unknown } }
+  } catch (err) {
+    throw new Error(graphqlErrorText(err) || `${action} failed`, { cause: err })
+  }
+  return unwrapJson(r.data.tmsWorkflowActions)
+}
+
+export async function workflowAction<T>(action: string, input: unknown): Promise<T> {
+  const v = await callWorkflow(action, input)
+  if (v == null) throw new Error(`${action} returned no result`)
+  return v as T
+}
+
+/**
+ * Newest first. Without an agent the server merges one query per agent, so the cost is the
+ * same either way; `limit` above 200 is refused.
+ */
+export async function listWorkflowRuns(agent?: WorkflowAgentKey, limit?: number): Promise<WorkflowRunRecord[]> {
+  return workflowAction<WorkflowRunRecord[]>('LIST_RUNS', { agent, limit })
+}
+
+/** `null` is an id nothing matches — the trace page renders "run not found", not an error. */
+export async function getWorkflowRun(id: string): Promise<WorkflowRunRecord | null> {
+  const v = await callWorkflow('GET_RUN', { id })
+  return (v ?? null) as WorkflowRunRecord | null
+}
+
+/** Every run that touched one shipment, for the detail page's AI Agent tab. */
+export async function listWorkflowRunsForShipment(shipmentId: string): Promise<WorkflowRunRecord[]> {
+  return workflowAction<WorkflowRunRecord[]>('LIST_RUNS_FOR_SHIPMENT', { shipmentId })
+}
+
+/** The open AI exceptions, off the sparse `exceptionOpen` index. Capped at 200 server-side. */
+export async function listWorkflowExceptions(): Promise<WorkflowRunRecord[]> {
+  return workflowAction<WorkflowRunRecord[]>('LIST_EXCEPTIONS', { limit: 200 })
+}
+
+/**
+ * Run it again from the top. The server refuses a run that is not retryable — one already
+ * APPLIED, or past the five-attempt cap — and refuses a stale `expectedVersion`.
+ */
+export async function retryWorkflowRun(id: string, expectedVersion: number): Promise<WorkflowRunRecord> {
+  return workflowAction<WorkflowRunRecord>('RETRY_RUN', { id, expectedVersion })
+}
+
+/**
+ * Point a PROPOSED run at the shipment or quote a person just created from it. The server
+ * refuses any other outcome, a target that does not exist or is voided, and a stale version.
+ */
+export async function linkWorkflowRun(
+  id: string,
+  link: { shipmentId?: string; quoteId?: string },
+  expectedVersion: number,
+): Promise<WorkflowRunRecord> {
+  return workflowAction<WorkflowRunRecord>('LINK_RUN', { id, ...link, expectedVersion })
+}
+
+/**
+ * Name the party the matcher could not. The server refuses a run whose outcome is not
+ * UNKNOWN_PARTY; on success it clears the exception and re-runs from the match step on.
+ */
+export async function setWorkflowRunParty(
+  id: string,
+  party: { partyKind: string; partyId: string },
+  expectedVersion: number,
+): Promise<WorkflowRunRecord> {
+  return workflowAction<WorkflowRunRecord>('SET_RUN_PARTY', { id, ...party, expectedVersion })
+}
+
+/** The proposal is not wanted. The server refuses a blank reason and a stale version. */
+export async function dismissWorkflowRun(id: string, reason: string, expectedVersion: number): Promise<WorkflowRunRecord> {
+  return workflowAction<WorkflowRunRecord>('DISMISS_RUN', { id, reason, expectedVersion })
+}
+
+/** Clears `exceptionOpen` and nothing else: status and outcome are left as they were. */
+export async function resolveWorkflowException(id: string, reason?: string): Promise<WorkflowRunRecord> {
+  return workflowAction<WorkflowRunRecord>('RESOLVE_EXCEPTION', { id, reason })
+}
+
+/** Twenty entries per run; the server drops the oldest rather than refusing the write. */
+export async function saveWorkflowFeedback(id: string, rating: 'UP' | 'DOWN', text?: string): Promise<WorkflowRunRecord> {
+  return workflowAction<WorkflowRunRecord>('SAVE_FEEDBACK', { id, rating, text })
+}
+
+/**
+ * A real run against typed text, for the AI Agents settings page. Owner or ADMIN only —
+ * the server refuses everybody else — and it sends nothing: the result is a run row.
+ */
+export async function runWorkflowSample(input: {
+  agent: WorkflowAgentKey
+  subject: string
+  body: string
+  fromEmail: string
+}): Promise<WorkflowRunRecord> {
+  return workflowAction<WorkflowRunRecord>('RUN_SAMPLE', input)
 }

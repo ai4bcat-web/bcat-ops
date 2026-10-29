@@ -391,3 +391,48 @@ describe('the new load is written before the store has heard of it', () => {
     expect(stops.find((s) => s.type === 'pickup')?.apptThreadTs).toBe('ts-appts-1')
   })
 })
+
+/*
+ * The tender path is the one opener that asks for anything but a MANUAL draft: a run's
+ * proposal is applied by a person here, and the shipment has to land TENDER_PENDING with
+ * the run on it or TENDER_RESPOND has nothing to accept and the link is one-way.
+ */
+describe('applying a tender proposal', () => {
+  it('sends source TENDER and the run id to CREATE_SHIPMENT', async () => {
+    render(
+      <NewShipmentDialog
+        open
+        onClose={vi.fn()}
+        prefill={{
+          dateStr: '2026-10-09',
+          tender: tenderFor('Axle Logistics, LLC', AXLE.id),
+          source: 'TENDER',
+          workflowRunId: 'wf:TENDER:abc',
+        }}
+      />,
+    )
+    pickCustomer('Axle Logistics, LLC')
+    fillStopDates('2026-10-09')
+    save()
+
+    await waitFor(() => expect(createShipmentMock).toHaveBeenCalledTimes(1))
+    expect(createShipmentMock.mock.calls[0][0]).toMatchObject({
+      source: 'TENDER',
+      workflowRunId: 'wf:TENDER:abc',
+    })
+  })
+
+  it('leaves every other opener on MANUAL with no run attached', async () => {
+    // The calendar, the scheduler, intake's Build Load, the tasks queue and the board all
+    // pass a prefill that says neither, and must keep creating ordinary drafts.
+    render(<NewShipmentDialog open onClose={vi.fn()} prefill={{ dateStr: '2026-10-09' }} />)
+    pickCustomer('Axle Logistics, LLC')
+    fillStopDates('2026-10-09')
+    save()
+
+    await waitFor(() => expect(createShipmentMock).toHaveBeenCalledTimes(1))
+    const input = createShipmentMock.mock.calls[0][0] as Record<string, unknown>
+    expect(input.source).toBe('MANUAL')
+    expect('workflowRunId' in input).toBe(false)
+  })
+})

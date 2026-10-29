@@ -7,16 +7,17 @@
  * Step R merged the old Summary and Details tabs into Overview: there is one record and
  * one vocabulary, so the customer's fields and the load's fields are one set of facts
  * with no "Order" heading between them.
+ *
+ * Step K added AI Agent, the one tab that is not always there: it is drawn only while an
+ * agent run is linked to this shipment, so it never offers an empty trace of work nobody
+ * asked for.
  */
-import { useContext, useMemo, useState } from 'react'
+import { useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import { AuthContext } from '@/hooks/useAuth'
 import { formatCents } from '@/lib/tmsDirectory'
-import { effectiveCustomerStatus } from '@/lib/customerCredit'
-import {
-  UNRESOLVED_CUSTOMER_LABEL, customerDisplayName, isCustomerUnresolved, unresolvedCustomerMessage,
-} from '@/lib/customerResolution'
+import { customerDisplayName, isCustomerUnresolved } from '@/lib/customerResolution'
 import { formatDateTime } from '@/lib/date'
 import { computeFinancials } from '@/lib/shipmentCharges'
 import { laneKey3For, laneKeyFor } from '@/lib/laneKey'
@@ -24,9 +25,11 @@ import { SHIPMENT_STATUS_LABELS, LOAD_WORKFLOW_STATUS_LABELS } from '@/lib/shipm
 import { useDrivers } from '@/hooks/useDrivers'
 import { useTrucks } from '@/hooks/useTrucks'
 import { LaneHistoryPanel } from '@/features/quotes/components/LaneHistoryPanel'
-import { TmsBadge, TmsButton, TmsCard, TmsField, TmsIconButton, TmsSelect, TmsTabs } from '@/features/tms/kit'
+import { UnresolvedCustomerCard } from '@/features/workflows/IdentifyCustomerDialog'
+import { TmsBadge, TmsButton, TmsCard, TmsIconButton, TmsKeyHint, TmsTabs, statusTone } from '@/features/tms/kit'
 import { useIntegrations } from '@/hooks/useIntegrations'
-import { runIntegrationStub } from '@/lib/apiClient'
+import { listWorkflowRunsForShipment, runIntegrationStub } from '@/lib/apiClient'
+import { AGENTS } from '@/lib/workflows/agents'
 import { PROVIDERS, isApplicable, liveCapabilitiesOf } from '@/lib/integrations/registry'
 import { badgeOf } from '@/lib/integrations/health'
 import type { Capability, IntegrationRecord, ProviderDescriptor } from '@/lib/integrations/types'
@@ -48,7 +51,7 @@ import { DETAIL_TABS, type DetailTabKey } from './detailTabs'
 import type { ShipmentActions } from '../useShipmentActions'
 import type {
   ChargeCodeDef, CustomerRecord, LocationRecord, PricingDefaults, RequiredReference, ShipmentBundle,
-  ShipmentRecord,
+  WorkflowRunRecord,
 } from '@/types/tms'
 
 export interface ShipmentDetailProps {
@@ -105,6 +108,51 @@ export function ShipmentDetail(props: ShipmentDetailProps) {
   const chargesFrozen = voided || bundle.financials.some((f) => f.frozenAt)
 
   /*
+   * The agent runs linked to this shipment, read once per shipment id in the same
+   * promise-chain shape `HistorySection` uses for the audit log: no synchronous
+   * setState before the first await, and a stale answer is dropped rather than applied.
+   * A refused or failed read leaves the list empty, which is simply no tab — a shipment
+   * no agent ever touched is the common case, so there is nothing to report.
+   */
+  const [runs, setRuns] = useState<WorkflowRunRecord[]>([])
+  useEffect(() => {
+    let live = true
+    listWorkflowRunsForShipment(shipment.id)
+      .then((rows) => { if (live) setRuns(rows) })
+      .catch(() => { if (live) setRuns([]) })
+    return () => { live = false }
+  }, [shipment.id])
+
+  const hasRuns = runs.length > 0
+  const visibleTabs = useMemo(() => DETAIL_TABS.filter((t) => t.key !== 'aiAgent' || hasRuns), [hasRuns])
+  // `?tab=aiAgent` names a real key, but on a shipment no agent touched there is no such
+  // tab to select, so the deep link lands on Overview instead of on nothing.
+  const activeTab: DetailTabKey = tab === 'aiAgent' && !hasRuns ? 'overview' : tab
+
+  /*
+   * A opens the AI Agent tab. The listener sits on this detail's own root rather than on
+   * `window` because two details can be mounted at once (a drawer over a page), and it
+   * is registered only while the tab exists, so the key never does something invisible.
+   */
+  const rootRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const root = rootRef.current
+    if (!root || !hasRuns) return
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'a' && e.key !== 'A') return
+      if (e.metaKey || e.ctrlKey || e.altKey) return
+      // Typing a letter into a field is typing, never a shortcut.
+      const target = e.target
+      if (target instanceof Element
+        && target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])')) return
+      e.preventDefault()
+      setTab('aiAgent')
+    }
+    root.addEventListener('keydown', onKeyDown)
+    return () => { root.removeEventListener('keydown', onKeyDown) }
+  }, [hasRuns])
+
+  /*
    * A shipment can exist on nothing but the operator's typed customer text — the legacy
    * entrypoints often have nothing else and nothing invents a Customer record. The gates
    * refuse such a shipment outright, so the card says so and carries the only fix, above
@@ -143,11 +191,22 @@ export function ShipmentDetail(props: ShipmentDetailProps) {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4" ref={rootRef} data-testid="shipment-detail">
       {unresolvedCustomer}
-      <TmsTabs tabs={DETAIL_TABS.map((t) => ({ key: t.key, label: t.label }))} active={tab} onSelect={(key) => setTab(key as DetailTabKey)} />
+      <div className="flex items-center gap-2">
+        <TmsTabs
+          tabs={visibleTabs.map((t) => ({ key: t.key, label: t.label }))}
+          active={activeTab}
+          onSelect={(key) => setTab(key as DetailTabKey)}
+        />
+        {/*
+         * `TmsTab.label` is a string, so the key cap sits beside the strip rather than
+         * inside the button — the same cap the kit draws in a list page's footer.
+         */}
+        {hasRuns && <TmsKeyHint title="Open the AI Agent tab">A</TmsKeyHint>}
+      </div>
 
-      {tab === 'overview' && (
+      {activeTab === 'overview' && (
         <div className="space-y-3">
           <TmsCard
             title="Shipment"
@@ -265,7 +324,7 @@ export function ShipmentDetail(props: ShipmentDetailProps) {
         </div>
       )}
 
-      {tab === 'stops' && (
+      {activeTab === 'stops' && (
         <StopCards
           stops={load?.stops ?? []}
           locations={locations}
@@ -274,13 +333,13 @@ export function ShipmentDetail(props: ShipmentDetailProps) {
         />
       )}
 
-      {tab === 'carrier' && <CarrierSection bundle={bundle} actions={actions} />}
+      {activeTab === 'carrier' && <CarrierSection bundle={bundle} actions={actions} />}
 
-      {tab === 'tracking' && (
+      {activeTab === 'tracking' && (
         <TrackingSection bundle={bundle} customer={customer} catalog={catalog} actions={actions} />
       )}
 
-      {tab === 'documents' && (
+      {activeTab === 'documents' && (
         <DocumentsSection
           bundle={bundle}
           customer={customer}
@@ -292,7 +351,7 @@ export function ShipmentDetail(props: ShipmentDetailProps) {
         />
       )}
 
-      {tab === 'financials' && (
+      {activeTab === 'financials' && (
         <>
           <FinancialLines
             charges={bundle.charges}
@@ -314,16 +373,18 @@ export function ShipmentDetail(props: ShipmentDetailProps) {
         </>
       )}
 
-      {tab === 'invoicing' && (
+      {activeTab === 'invoicing' && (
         <div className="space-y-3">
           <ArCard bundle={bundle} onReload={actions.reload} />
           <ReleaseGateCard shipment={shipment} order={order ?? null} />
         </div>
       )}
 
-      {tab === 'carrierPay' && <ApCard bundle={bundle} onReload={actions.reload} />}
+      {activeTab === 'carrierPay' && <ApCard bundle={bundle} onReload={actions.reload} />}
 
-      {tab === 'history' && <HistorySection bundle={bundle} />}
+      {activeTab === 'history' && <HistorySection bundle={bundle} />}
+
+      {activeTab === 'aiAgent' && <AiAgentRuns runs={runs} />}
     </div>
   )
 }
@@ -468,71 +529,35 @@ function ProviderRow({ descriptor, capability, row, busy, result, onRunStub, onO
 }
 
 /**
- * The one record carrying only typed customer text, and the one move that resolves it.
+ * The agent runs linked to this shipment, and nothing else.
  *
- * Readiness is `customerId == null` and never status: the backfill sets status from the
- * stop clock, so one of these can arrive already DELIVERED and would otherwise reach AR
- * and die on a customer id that was never there. The copy is `unresolvedCustomerMessage`
- * so the screen says exactly what the Lambda says when it refuses the submit, the
- * invoice or the factoring.
+ * Deliberately thin: what the agent read, the steps it recorded, the documents and the
+ * proposal all live on the run's own trace, and a second copy here would be a second
+ * place to keep right. The row is the way to the trace, not a summary of it.
  */
-function UnresolvedCustomerCard({ shipment, customers, frozen, onLink }: {
-  shipment: ShipmentRecord
-  customers: CustomerRecord[]
-  /** A voided shipment is refused every write, so it is told, not asked. */
-  frozen: boolean
-  onLink: (customerId: string) => Promise<void>
-}) {
-  const [customerId, setCustomerId] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  // SET_SHIPMENT_CUSTOMER runs the same ACTIVE check CREATE_SHIPMENT runs, and dormant
-  // is an automatic "no shipment in 90 days" label new freight clears. The server
-  // re-checks; this list exists so nobody is offered a name it is going to refuse.
-  const now = new Date().toISOString()
-  const shippable = customers.filter((c) => {
-    const status = effectiveCustomerStatus(c, null, now)
-    return status === 'ACTIVE' || status === 'DORMANT'
-  })
-
+function AiAgentRuns({ runs }: { runs: WorkflowRunRecord[] }) {
   return (
-    <TmsCard title={UNRESOLVED_CUSTOMER_LABEL}>
-      <p className="text-sm" data-testid="unresolved-customer-note">
-        {unresolvedCustomerMessage(shipment, 'submitting, invoicing or factoring it')}
-      </p>
-      {!frozen && (
-        <div className="mt-3 flex items-end gap-2">
-          <TmsField label="Customer" error={error}>
-            <TmsSelect
-              aria-label="Customer to link"
-              value={customerId}
-              onChange={(e) => { setCustomerId(e.target.value); setError(null) }}
-            >
-              <option value="">— select —</option>
-              {shippable.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </TmsSelect>
-          </TmsField>
-          <TmsButton
-            variant="primary"
-            disabled={busy}
-            onClick={async () => {
-              if (!customerId) { setError('Pick a customer.'); return }
-              setBusy(true)
-              try {
-                await onLink(customerId)
-              } catch {
-                // `useShipmentActions` already toasted the Lambda's own refusal.
-                setError('Could not link that customer.')
-              } finally {
-                setBusy(false)
-              }
-            }}
-          >
-            {busy ? 'Linking…' : 'Link customer'}
-          </TmsButton>
-        </div>
-      )}
+    <TmsCard title="AI Agent">
+      <ul className="space-y-2" data-testid="shipment-workflow-runs">
+        {runs.map((run) => (
+          <li key={run.id} className="border-b border-[color:var(--tms-border)] pb-2 last:border-b-0 last:pb-0">
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+              <Link className="font-medium underline underline-offset-2" to={`/tms/workflows/runs/${run.id}`}>
+                {AGENTS[run.agent]?.label ?? run.agent}
+              </Link>
+              {/*
+               * `statusTone` knows the shipment, AR and AP vocabularies, not the agent's.
+               * FAILED is the one value a gray cap would misreport, so it is named here.
+               */}
+              <TmsBadge tone={run.status === 'FAILED' ? 'red' : statusTone(run.status)}>{run.status}</TmsBadge>
+              {run.outcome && <TmsBadge tone="gray">{run.outcome}</TmsBadge>}
+              <span className="tms-muted ml-auto">
+                {run.updatedAt ? formatDateTime(run.updatedAt) : '—'}
+              </span>
+            </div>
+          </li>
+        ))}
+      </ul>
     </TmsCard>
   )
 }

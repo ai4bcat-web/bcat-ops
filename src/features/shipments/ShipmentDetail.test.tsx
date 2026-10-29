@@ -7,7 +7,7 @@ import { normalizeDetailTab } from './components/detailTabs'
 import type { ShipmentActions } from './useShipmentActions'
 import type {
   CustomerRecord, LoadCarrierRecord, LoadChargeRecord, OrderRecord, ShipmentBundle, ShipmentLoad, ShipmentRecord,
-  ShipmentStatus,
+  ShipmentStatus, WorkflowRunRecord,
 } from '@/types/tms'
 import type { Stop } from '@/types'
 
@@ -23,6 +23,8 @@ const listAuditLogs = vi.hoisted(() => vi.fn())
 // Step J — the Overview Integrations card reads the rows and runs a stub through these.
 const listIntegrations = vi.hoisted(() => vi.fn())
 const runIntegrationStub = vi.hoisted(() => vi.fn())
+// Step K — the AI Agent tab exists only while this answers with a run.
+const listWorkflowRunsForShipment = vi.hoisted(() => vi.fn())
 
 vi.mock('@/hooks/useDrivers', () => ({ useDrivers: () => ({ drivers: [] }) }))
 vi.mock('@/hooks/useTrucks', () => ({ useTrucks: () => ({ equipment: [] }) }))
@@ -68,6 +70,7 @@ vi.mock('@/lib/apiClient', () => ({
   getInvoicePdfUrl: vi.fn(async () => ''),
   listIntegrations,
   runIntegrationStub,
+  listWorkflowRunsForShipment,
 }))
 vi.mock('@/lib/driverSubmissionsClient', () => ({
   getDriverDocUrl: vi.fn(async () => ''),
@@ -186,6 +189,7 @@ beforeEach(() => {
   listOwnershipRules.mockResolvedValue([])
   listAuditLogs.mockResolvedValue([])
   listIntegrations.mockResolvedValue([])
+  listWorkflowRunsForShipment.mockResolvedValue([])
 })
 
 function renderDetail(
@@ -329,6 +333,62 @@ describe('ShipmentDetail tabs', () => {
     })
     fireEvent.click(screen.getByRole('tab', { name: 'Stops' }))
     await waitFor(() => expect((screen.getByLabelText('Stop 1 actions') as HTMLButtonElement).disabled).toBe(true))
+  })
+})
+
+/*
+ * Step K — an agent run is linked to a shipment, not to every shipment. The tab is drawn
+ * only where one is, and the shortcut exists only where the tab does.
+ */
+describe('the AI Agent tab', () => {
+  const run: WorkflowRunRecord = {
+    id: 'wf:TENDER:9f2c', agent: 'TENDER', status: 'COMPLETED', outcome: 'APPLIED',
+    sourceId: 'intake-1', shipmentId: 'shp-1', createdBy: 'workflow-agent', updatedBy: 'workflow-agent',
+    createdAt: '2026-04-03T09:00:00.000Z', updatedAt: '2026-04-03T10:00:00.000Z',
+  }
+
+  it('is not in the strip while no run is linked to the shipment', async () => {
+    renderDetail()
+    await waitFor(() => expect(listWorkflowRunsForShipment).toHaveBeenCalledWith('shp-1'))
+    expect(screen.queryByRole('tab', { name: 'AI Agent' })).toBeNull()
+  })
+
+  it('sends a ?tab=aiAgent deep link to Overview when there is no such tab', async () => {
+    renderDetail('BOOKED', { initialTab: 'aiAgent' })
+    await waitFor(() => expect(listWorkflowRunsForShipment).toHaveBeenCalled())
+    expect(screen.getByRole('tab', { name: 'Overview' }).getAttribute('aria-selected')).toBe('true')
+    expect(screen.queryByTestId('shipment-workflow-runs')).toBeNull()
+  })
+
+  it('lists the linked run and points it at the trace', async () => {
+    listWorkflowRunsForShipment.mockResolvedValue([run])
+    renderDetail()
+    fireEvent.click(await screen.findByRole('tab', { name: 'AI Agent' }))
+    const list = await screen.findByTestId('shipment-workflow-runs')
+    expect(within(list).getByRole('link', { name: 'Tender' }).getAttribute('href')).toBe('/tms/workflows/runs/wf:TENDER:9f2c')
+    expect(within(list).getByText('COMPLETED')).toBeTruthy()
+    expect(within(list).getByText('APPLIED')).toBeTruthy()
+  })
+
+  it('opens on A pressed inside the detail', async () => {
+    listWorkflowRunsForShipment.mockResolvedValue([run])
+    renderDetail()
+    await screen.findByRole('tab', { name: 'AI Agent' })
+
+    fireEvent.keyDown(screen.getByTestId('shipment-detail'), { key: 'a' })
+    await waitFor(() => expect(screen.getByTestId('shipment-workflow-runs')).toBeTruthy())
+    expect(screen.getByRole('tab', { name: 'AI Agent' }).getAttribute('aria-selected')).toBe('true')
+  })
+
+  it('leaves A alone while it is being typed into a field', async () => {
+    listWorkflowRunsForShipment.mockResolvedValue([run])
+    renderDetail()
+    await screen.findByRole('tab', { name: 'AI Agent' })
+    fireEvent.click(screen.getByRole('tab', { name: 'Financials' }))
+
+    fireEvent.keyDown(await screen.findByLabelText('CUSTOMER count 1'), { key: 'a' })
+    expect(screen.getByRole('tab', { name: 'Financials' }).getAttribute('aria-selected')).toBe('true')
+    expect(screen.queryByTestId('shipment-workflow-runs')).toBeNull()
   })
 })
 

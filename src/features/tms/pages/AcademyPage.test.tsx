@@ -8,7 +8,6 @@ import { describe, it, expect } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { AcademyPage } from './AcademyPage'
-import { WorkflowsPage } from './WorkflowsPage'
 
 function at(path: string) {
   render(
@@ -16,7 +15,6 @@ function at(path: string) {
       <Routes>
         <Route path="/tms/academy" element={<AcademyPage />} />
         <Route path="/tms/academy/:slug" element={<AcademyPage />} />
-        <Route path="/tms/workflows" element={<WorkflowsPage />} />
       </Routes>
     </MemoryRouter>,
   )
@@ -49,13 +47,5 @@ describe('AcademyPage', () => {
     at('/tms/academy/not-a-real-article')
     expect(screen.getByText(/not in the Academy/i)).toBeTruthy()
     expect(screen.getByRole('link', { name: /Back to the Academy/i })).toBeTruthy()
-  })
-})
-
-describe('WorkflowsPage', () => {
-  it('is honest that nothing is configured yet and points at the Academy', () => {
-    at('/tms/workflows')
-    expect(screen.getByText(/Step K of the TMS/i)).toBeTruthy()
-    expect(screen.getByRole('link', { name: /Read the Academy/i }).getAttribute('href')).toBe('/tms/academy')
   })
 })

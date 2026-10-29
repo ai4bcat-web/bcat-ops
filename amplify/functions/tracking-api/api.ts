@@ -27,6 +27,8 @@ import type { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb'
 import { GetCommand, PutCommand, QueryCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb'
 import type { SSMClient } from '@aws-sdk/client-ssm'
 import { GetParameterCommand } from '@aws-sdk/client-ssm'
+import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
+import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda'
 import {
   TOKEN_TTL_SECONDS,
   clientSecretMatches,
@@ -76,6 +78,20 @@ const TOO_MANY = 'This API client has made too many requests today'
 const NO_WEBHOOK = 'No webhook endpoint for that provider'
 /** One wording for a bad signature, a malformed header and a replayed timestamp. */
 const BAD_DELIVERY = 'That delivery could not be verified'
+
+/*
+ * Step K. The webhook receipt archives its raw body and hands the delivery to the
+ * workflow agent. Both are read from the environment rather than `ApiDeps`: neither
+ * is part of a route's answer, and an unset name is simply "not wired here yet",
+ * which is the state every environment but dev is in.
+ *
+ * `BUCKET_NAME` is the same document bucket the tracking handler already presigns
+ * against — there is one bucket in this stack, not a second one for workflows.
+ */
+const DOCUMENT_BUCKET = process.env.BUCKET_NAME ?? ''
+const WORKFLOW_AGENT_FUNCTION_NAME = process.env.WORKFLOW_AGENT_FUNCTION_NAME ?? ''
+const s3 = new S3Client({})
+const lambda = new LambdaClient({})
 
 /**
  * A day's worth of calls for one client. A customer's TMS polling every shipment it
@@ -492,6 +508,39 @@ export async function webhookRoute(deps: ApiDeps, provider: string, event: FnUrl
     ConditionExpression: 'attribute_exists(id)',
     ExpressionAttributeValues: { ':now': nowIso, ':one': 1 },
   }))
+
+  // Step K. The delivery is receipted; now it is handed to the workflow agent, which
+  // reads the raw body back out of S3 rather than taking it from an event payload.
+  // Both halves are best-effort by design: this route's answer is the receipt, and a
+  // bucket or a function that is not there yet must not turn a verified, deduped
+  // delivery into a 500 the provider will redeliver. The duplicate path above has
+  // already returned, so a given event is handed off at most once.
+  const sourceKey = `workflow-inbox/webhook/${key}/${eventId}.json`
+  if (DOCUMENT_BUCKET) {
+    try {
+      await s3.send(new PutObjectCommand({
+        Bucket: DOCUMENT_BUCKET,
+        Key: sourceKey,
+        Body: rawBody,
+        ContentType: 'application/json',
+      }))
+    } catch (err) {
+      console.warn('[tracking-api] webhook body not archived', String(err))
+    }
+  }
+  if (WORKFLOW_AGENT_FUNCTION_NAME) {
+    try {
+      await lambda.send(new InvokeCommand({
+        FunctionName: WORKFLOW_AGENT_FUNCTION_NAME,
+        InvocationType: 'Event',
+        Payload: Buffer.from(JSON.stringify({
+          runFor: { sourceKind: 'WEBHOOK', sourceId: eventId, inboxRole: 'WEBHOOK', provider: key, sourceKey },
+        })),
+      }))
+    } catch (err) {
+      console.warn('[tracking-api] workflow agent not invoked', String(err))
+    }
+  }
 
   return { status: 200, body: { ok: true, duplicate: false, eventId } }
 }

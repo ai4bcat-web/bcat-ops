@@ -1,7 +1,7 @@
 /**
  * My Brokerage — the settings of the business and the desks run from it.
  *
- * One page, eight tabs, each its own URL under `/tms/brokerage/*` so a tab can be
+ * One page, nine tabs, each its own URL under `/tms/brokerage/*` so a tab can be
  * linked and bookmarked. The h1 and the tab strip live here; every tab body is just a
  * body (no title row of its own), which is why `SettingsPage`, `UsersPage`,
  * `CommissionsPage`, `ReportsPage` and `AuditPage` render no heading.
@@ -19,6 +19,7 @@ import { CommissionsPage } from '@/features/commissions/CommissionsPage'
 import { ReportsPage } from '@/features/reports/ReportsPage'
 import { SettingsPage } from '@/features/settings/SettingsPage'
 import DivisionsPage from '@/features/tms/settings/DivisionsPage'
+import AiAgentsPage from '@/features/tms/settings/AiAgentsPage'
 import ShipmentViewsPage from '@/features/tms/settings/ShipmentViewsPage'
 import { IntegrationsTab } from '@/features/tms/integrations/IntegrationsTab'
 import { UsersPage } from '@/features/users/UsersPage'
@@ -50,6 +51,7 @@ const TABS: BrokerageTab[] = [
   { key: 'divisions', label: 'Divisions & ownership', path: 'divisions', pages: [] },
   { key: 'views', label: 'Shipment views', path: 'views', pages: [] },
   { key: 'integrations', label: 'Integrations', path: 'integrations', pages: [] },
+  { key: 'ai-agents', label: 'AI Agents', path: 'ai-agents', pages: [] },
 ]
 
 /** The deepest tab whose path the URL is on — '' only matches the bare root. */
@@ -90,6 +92,9 @@ export function BrokeragePage() {
         {/* The tab owns its own index and `:provider` routes, so the strip stays lit
             on a deep link; the guard is here, where a typed URL still meets it. */}
         <Route path="integrations/*" element={<RequireAdmin><IntegrationsTab /></RequireAdmin>} />
+        {/* The page carries its own inner tab strip under one path, so the route is a
+            wildcard for the same reason Integrations is. */}
+        <Route path="ai-agents/*" element={<RequireAdmin><AiAgentsPage /></RequireAdmin>} />
         {/* An unknown tab is a stale link, not a dead end: Settings is the page's home. */}
         <Route path="*" element={<Navigate to={ROOT} replace />} />
       </Routes>

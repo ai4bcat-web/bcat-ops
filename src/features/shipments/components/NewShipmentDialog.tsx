@@ -79,6 +79,17 @@ export interface NewShipmentPrefill {
   tender?: TenderPrefill
   /** The intake item this shipment is being built for: linked and marked DONE on success. */
   intakeItemId?: string
+  /**
+   * Set only by `proposalToPrefill` when a person applies a TENDER workflow proposal:
+   * the server opens a `TENDER` shipment in TENDER_PENDING so TENDER_RESPOND can
+   * Accept or Reject it. Every other opener leaves it unset and gets `MANUAL`/DRAFT.
+   */
+  source?: 'TENDER'
+  /**
+   * The WorkflowRun the tender was read from, so the shipment carries the back-reference
+   * CREATE_SHIPMENT writes once. Only the workflow proposal card sets it.
+   */
+  workflowRunId?: string
 }
 
 export interface NewShipmentDialogProps {
@@ -438,7 +449,12 @@ export function NewShipmentDialog({ open, prefill, defaultMode = 'FTL', onClose,
         ...(customerId ? { customerId } : { customerName: typed }),
         mode,
         ...(typedPro ? { pro: typedPro } : {}),
-        source: 'MANUAL',
+        // The agent never creates freight. This runs in the browser under the operator's
+        // own Cognito identity, the server claims the PRO in the same transaction as for
+        // any manual shipment, and a `TENDER` source only opens it TENDER_PENDING so
+        // TENDER_RESPOND stays the review. A prefill that says nothing is MANUAL.
+        source: prefill?.source ?? 'MANUAL',
+        ...(prefill?.workflowRunId ? { workflowRunId: prefill.workflowRunId } : {}),
         load: {
           stops,
           tmsId: values.tmsId?.trim() || undefined,

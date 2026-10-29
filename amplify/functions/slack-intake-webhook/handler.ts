@@ -28,6 +28,9 @@ const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN ?? ''
 // id is looked up on the conversation table and the event handed to dispatch-slack-bridge.
 const DISPATCH_CONVERSATION_TABLE_NAME = process.env.DISPATCH_CONVERSATION_TABLE_NAME ?? ''
 const DISPATCH_SLACK_BRIDGE_FUNCTION_NAME = process.env.DISPATCH_SLACK_BRIDGE_FUNCTION_NAME ?? ''
+// Step K. The tender agent reads forwarded e-mail. Empty until the backend wires it,
+// and an empty name simply means no hand-off — never an error on the intake path.
+const WORKFLOW_AGENT_FUNCTION_NAME = process.env.WORKFLOW_AGENT_FUNCTION_NAME ?? ''
 const lambda = new LambdaClient({})
 
 async function isDispatchChannel(channelId: string): Promise<boolean> {
@@ -333,6 +336,24 @@ export const handler = async (event: LambdaFunctionUrlEvent) => {
       return { statusCode: 200, body: 'Duplicate' }
     }
     throw err
+  }
+
+  // Only a forwarded e-mail starts a workflow run. A typed Slack message is a task
+  // somebody works by hand — there is no sender, no attachment and nothing to parse.
+  // Fire-and-forget and never fatal: the IntakeItem is already written, and the
+  // duplicate path above returned before reaching here, so a run starts exactly once.
+  if (isEmail && WORKFLOW_AGENT_FUNCTION_NAME) {
+    try {
+      await lambda.send(new InvokeCommand({
+        FunctionName: WORKFLOW_AGENT_FUNCTION_NAME,
+        InvocationType: 'Event',
+        Payload: Buffer.from(JSON.stringify({
+          runFor: { sourceKind: 'INTAKE_ITEM', sourceId: id, inboxRole: 'TENDER', provider: 'SLACK' },
+        })),
+      }))
+    } catch (err) {
+      console.warn('[intake] workflow agent not invoked', String(err))
+    }
   }
 
   console.log('[intake] done, item created:', id)

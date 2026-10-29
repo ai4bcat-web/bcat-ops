@@ -12,7 +12,8 @@ import { DashboardPage } from '@/features/dashboard/DashboardPage'
 import { CalendarPage } from '@/features/calendar/CalendarPage'
 import { TmsLayout } from '@/features/tms/TmsLayout'
 import { DashboardPage as TmsDashboardPage } from '@/features/tms/dashboard/DashboardPage'
-import { WorkflowsPage } from '@/features/tms/pages/WorkflowsPage'
+import { WorkflowsPage } from '@/features/workflows/WorkflowsPage'
+import { RunTracePage } from '@/features/workflows/RunTracePage'
 import { AcademyPage } from '@/features/tms/pages/AcademyPage'
 import { TrucksPage } from '@/features/trucks/TrucksPage'
 import { TruckDocumentsPage } from '@/features/truck-docs/TruckDocumentsPage'
@@ -265,6 +266,7 @@ export default function App() {
                   <Route path="locations" element={<RequirePage page={['locations', 'tms']}><LocationsPage /></RequirePage>} />
                   <Route path="vendors" element={<RequirePage page={['vendorAp', 'tms']}><VendorApPage /></RequirePage>} />
                   <Route path="workflows" element={<RequirePage page="tms"><WorkflowsPage /></RequirePage>} />
+                  <Route path="workflows/runs/:id" element={<RequirePage page="tms"><RunTracePage /></RequirePage>} />
                   <Route path="academy" element={<RequirePage page="tms"><AcademyPage /></RequirePage>} />
                   <Route path="academy/:slug" element={<RequirePage page="tms"><AcademyPage /></RequirePage>} />
                   {/* My Brokerage owns its own tab strip and nested routes; each tab

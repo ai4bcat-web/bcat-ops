@@ -427,6 +427,7 @@ export type EntityType =
   | 'Commission'
   | 'CommissionPayPeriod'
   | 'Integration'
+  | 'WorkflowRun'
 export type AuditAction = 'create' | 'update' | 'delete'
 
 export interface AuditLogEntry {

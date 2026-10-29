@@ -170,6 +170,8 @@ const DRIVER_SUBMISSION_TABLE = process.env.DRIVER_SUBMISSION_TABLE_NAME!
 const DRIVER_SUBMISSION_DOC_TABLE = process.env.DRIVER_SUBMISSION_DOC_TABLE_NAME!
 /** pod-actions runs the scan cleanup. Absent in stacks where PODs are not wired. */
 const POD_FUNCTION_NAME = process.env.POD_FUNCTION_NAME ?? ''
+/** Step K. The workflow agent a committed rate confirmation is handed to. */
+const WORKFLOW_AGENT_FUNCTION_NAME = process.env.WORKFLOW_AGENT_FUNCTION_NAME ?? ''
 const DRIVER_TABLE = process.env.DRIVER_TABLE_NAME!
 const DRIVER_LOAD_TIME_TABLE = process.env.DRIVER_LOAD_TIME_TABLE_NAME ?? ''
 const DRIVER_PAY_SETTING_TABLE = process.env.DRIVER_PAY_SETTING_TABLE_NAME!
@@ -2397,6 +2399,25 @@ async function handleEmailIntakeCommit(event: FnUrlEvent) {
   )
 
   const result = await completeSubmission(submission.driverId, submissionId, 'RATECON')
+
+  // Step K. The rate confirmation just committed is the tender agent's input. The
+  // endpoint's answer is unchanged: this is fire-and-forget, and a hand-off that
+  // throws must never turn a committed submission into a 500 the bridge retries.
+  if (WORKFLOW_AGENT_FUNCTION_NAME) {
+    try {
+      await new LambdaClient({}).send(
+        new InvokeCommand({
+          FunctionName: WORKFLOW_AGENT_FUNCTION_NAME,
+          InvocationType: 'Event',
+          Payload: Buffer.from(JSON.stringify({
+            runFor: { sourceKind: 'DRIVER_SUBMISSION', sourceId: submissionId, inboxRole: 'TENDER', provider: 'GMAIL' },
+          })),
+        }),
+      )
+    } catch (err) {
+      console.warn('[driver-app-api] workflow agent not invoked', String(err))
+    }
+  }
   return reply(200, { ok: true, notified: !result.error, error: result.error })
 }
 

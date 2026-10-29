@@ -2,6 +2,9 @@
 // here. Type-only in both directions, so the cycle never reaches runtime.
 import type { Stop, StopType } from './index'
 import type { PostalAlias } from '../lib/integrations/postalAliases'
+// `TenderPrefill` is the shape a tender proposal carries. Type-only, so the cycle
+// through `../lib/intakeTender` (which reads `CustomerRecord` from here) never runs.
+import type { TenderPrefill } from '../lib/intakeTender'
 
 // ── Integrations (Step J) ────────────────────────────────────────────────────
 // The integration contract lives in `src/lib/integrations/types`, which the Lambdas
@@ -240,6 +243,10 @@ export interface CustomerRecord {
   } | null
   /** Stored for a future HaulPay factor; null until BCAT factors outside OTR. */
   haulpayDebtorId?: string | null
+
+  // ── Workflows & AI agents (Step K) ─────────────────────────────────────────
+  /** Human-edited notes the agents read for this customer. Never agent-written. */
+  aiMemory?: PartyAiMemory | null
 
   createdAt: string
   updatedAt: string
@@ -480,6 +487,10 @@ export interface TmsSettings {
   hubspotPortalId?: string | null
   /** Slack channel for integration health changes. Stored by J, used by K. */
   integrationsNotifyChannel?: string | null
+
+  // ── Workflows & AI agents (Step K) ─────────────────────────────────────────
+  /** Human-edited agent configuration. The agent reads it and never writes it. */
+  aiAgents?: AiAgentsSettings | null
 
   createdAt?: string
   updatedAt?: string
@@ -769,6 +780,11 @@ export interface ShipmentRecord {
   voidReason?: string | null
   /** When the load was posted to the DAT board (written in step J). */
   datPostedAt?: string | null
+  /**
+   * The WorkflowRun a person applied to create this shipment. Read-only to a client
+   * (the `voidedAt` pattern): CREATE_SHIPMENT writes it, nothing else.
+   */
+  workflowRunId?: string | null
   createdBy: string
   updatedBy: string
   version?: number | null
@@ -1202,6 +1218,8 @@ export interface CarrierRecord {
   vehicleInspections?: number | null
   vehicleOos?: number | null
   insurancePolicies?: InsurancePolicy[] | null
+  /** Human-edited notes the agents read for this carrier. Never agent-written. */
+  aiMemory?: PartyAiMemory | null
   equipment?: string[] | null
   cargoTypes?: string[] | null
   powerUnits?: number | null
@@ -2194,6 +2212,8 @@ export interface QuoteRecord {
   customerMessage?: string | null
   internalNotes?: string | null
   events?: QuoteEvent[] | null
+  /** The WorkflowRun a person applied to save this quote. SAVE_QUOTE writes it. */
+  workflowRunId?: string | null
   createdBy: string
   updatedBy: string
   version: number
@@ -2898,4 +2918,273 @@ export interface ShipmentViewRow {
   quoteId: string | null
   searchKey: string | null
   voidedAt: string | null
+}
+
+// ── Workflows & AI agents (Step K) ───────────────────────────────────────────
+
+export type WorkflowAgentKey = 'QUOTE' | 'TENDER' | 'AP' | 'CAPACITY' | 'WEBHOOK'
+
+/** Every agent a human can configure. WEBHOOK has no inbox and no instructions. */
+export type AiAgentKey = Exclude<WorkflowAgentKey, 'WEBHOOK'>
+
+/** Machine progress. COMPLETED is not approval — that is `outcome`. */
+export type WorkflowRunStatus = 'PENDING' | 'IN_PROGRESS' | 'COMPLETED' | 'FAILED'
+
+/** Human disposition. APPLIED is the only one that means a person acted on it. */
+export type WorkflowOutcome =
+  | 'PROPOSED'
+  | 'APPLIED'
+  | 'DISMISSED'
+  | 'NOTED'
+  | 'UNKNOWN_PARTY'
+  | 'IGNORED'
+  | 'NO_ACTION'
+
+export type WorkflowSourceKind =
+  | 'INTAKE_ITEM'
+  | 'VENDOR_PAYABLE'
+  | 'DRIVER_SUBMISSION'
+  | 'INBOX'
+  | 'WEBHOOK'
+
+export type WorkflowProposalKind =
+  | 'TENDER'
+  | 'QUOTE'
+  | 'CARRIER_BILL'
+  | 'VENDOR_BILL'
+  | 'CAPACITY'
+  | 'NONE'
+
+export type WorkflowPartyKind = 'CUSTOMER' | 'CARRIER' | 'VENDOR' | 'UNKNOWN'
+
+export type WorkflowMatchHow = 'EMAIL' | 'DOMAIN' | 'NAME' | 'NONE'
+
+export type WorkflowStepStatus = 'RUNNING' | 'DONE' | 'SKIPPED' | 'FAILED'
+
+/** How sure the model said it was. Lower-case because that is what the schema asks for. */
+export type WorkflowConfidence = 'low' | 'medium' | 'high'
+
+/** One entry on a run's steps rail. `detail` is redacted before it is stored. */
+export interface WorkflowStep {
+  key: string
+  status: WorkflowStepStatus
+  startedAt?: string | null
+  endedAt?: string | null
+  ms?: number | null
+  note?: string | null
+  detail?: string | null
+}
+
+/** An attachment the run read. The bytes stay in S3; the row only points at them. */
+export interface WorkflowDocumentRef {
+  s3Key: string
+  name: string
+  contentType: string
+  size: number
+}
+
+/**
+ * A party the matcher could not rule out. Candidates are shown to a person; only a
+ * single exact e-mail hit is ever promoted to the run's party.
+ */
+export interface WorkflowPartyCandidate {
+  kind: 'CUSTOMER' | 'CARRIER'
+  id: string
+  name: string
+  how: 'EMAIL' | 'DOMAIN' | 'NAME'
+}
+
+export interface WorkflowFeedback {
+  at: string
+  by: string
+  rating: 'UP' | 'DOWN'
+  text?: string | null
+}
+
+/**
+ * A block of human-written markdown with a revision counter. The counter moves only
+ * when the text actually changes, so a run can record exactly which words it read.
+ */
+export interface AgentMemory {
+  markdown: string
+  revision: number
+  updatedAt: string
+  updatedBy: string
+}
+
+export interface AgentSettings {
+  enabled?: boolean | null
+  /** The address this agent's mail arrives on. Display only; routing is by inbox role. */
+  inbox?: string | null
+  /** How this agent is told to behave. Human-written, agent-read-only, revisioned. */
+  instructions?: AgentMemory | null
+  /**
+   * The spec's Memory card: what the desk has learnt about this kind of mail. Kept
+   * apart from `instructions` so editing one does not bump the other's revision —
+   * a run stamps both, and the trace has to be able to say which text it read.
+   */
+  memory?: AgentMemory | null
+}
+
+export type AiAgentsSettings = {
+  general?: AgentMemory | null
+  dailyRunCap?: number | null
+} & { [K in AiAgentKey]?: AgentSettings | null }
+
+export type PartyAiMemory = {
+  general?: AgentMemory | null
+} & { [K in AiAgentKey]?: AgentMemory | null }
+
+/** What a person would type into New shipment, nothing more. */
+export interface TenderProposal {
+  kind: 'TENDER'
+  tender: TenderPrefill
+  customerName?: string | null
+  confidence?: WorkflowConfidence | null
+}
+
+export interface QuoteProposalPlace {
+  city?: string | null
+  state?: string | null
+  zip?: string | null
+}
+
+export interface QuoteProposal {
+  kind: 'QUOTE'
+  customerName?: string | null
+  origin?: QuoteProposalPlace | null
+  destination?: QuoteProposalPlace | null
+  pickupDate?: string | null
+  deliveryDate?: string | null
+  equipmentType?: string | null
+  commodity?: string | null
+  weightLbs?: number | null
+  /** The number the customer named, when they named one. Never a number we invented. */
+  targetRateCents?: number | null
+  notes?: string | null
+  /** The memory line that shaped the read, so a reviewer can see why. */
+  memoryHint?: string | null
+  confidence?: WorkflowConfidence | null
+}
+
+export interface CarrierBillProposal {
+  kind: 'CARRIER_BILL'
+  invoiceNumber?: string | null
+  amountCents: number | null
+  invoiceDate?: string | null
+  dueDate?: string | null
+  loadCarrierId?: string | null
+  carrierId?: string | null
+  carrierName?: string | null
+  shipmentId?: string | null
+  shipmentNumber?: string | null
+  confidence?: WorkflowConfidence | null
+}
+
+export interface VendorBillProposal {
+  kind: 'VENDOR_BILL'
+  vendorPayableId?: string | null
+  vendorName?: string | null
+  invoiceNumber?: string | null
+  amountCents: number | null
+  invoiceDate?: string | null
+  dueDate?: string | null
+  confidence?: WorkflowConfidence | null
+}
+
+export interface CapacityProposal {
+  kind: 'CAPACITY'
+  carrierName?: string | null
+  /** Normalised to the `Carrier.equipment` vocabulary, or null when unrecognised. */
+  equipment?: string | null
+  originCity?: string | null
+  originState?: string | null
+  destinationCity?: string | null
+  destinationState?: string | null
+  availableDate?: string | null
+  trucks?: number | null
+  notes?: string | null
+  confidence?: WorkflowConfidence | null
+}
+
+export type WorkflowProposal =
+  | TenderProposal
+  | QuoteProposal
+  | CarrierBillProposal
+  | VendorBillProposal
+  | CapacityProposal
+
+/**
+ * One agent run. Never deleted: a run is DISMISSED or RESOLVED, and the trace of what
+ * the agent read and proposed stays on file either way.
+ */
+export interface WorkflowRunRecord {
+  id: string
+  agent: WorkflowAgentKey
+  /** The inbox the mail actually arrived on, even when CLASSIFY_EMAIL re-routed it. */
+  inboxRole?: string | null
+  status: WorkflowRunStatus
+  outcome?: WorkflowOutcome | null
+  currentStep?: string | null
+  errorCode?: string | null
+  /** Redacted, <= 1 KB. */
+  error?: string | null
+  /** Sparse index key: literally `'OPEN'` while the exception is unresolved. */
+  exceptionOpen?: string | null
+  sourceKind?: WorkflowSourceKind | null
+  sourceId: string
+  sourceKey?: string | null
+  provider?: string | null
+  subject?: string | null
+  fromEmail?: string | null
+  fromName?: string | null
+  fromDomain?: string | null
+  receivedAt?: string | null
+  /** <= 500 chars. */
+  bodyPreview?: string | null
+  partyKind?: WorkflowPartyKind | null
+  partyId?: string | null
+  partyName?: string | null
+  partyMatchHow?: WorkflowMatchHow | null
+  partyCandidates?: WorkflowPartyCandidate[] | null
+  shipmentId?: string | null
+  shipmentNumber?: string | null
+  quoteId?: string | null
+  documentIds?: string[] | null
+  proposalKind?: WorkflowProposalKind | null
+  proposal?: WorkflowProposal | null
+  steps?: WorkflowStep[] | null
+  documents?: WorkflowDocumentRef[] | null
+  attempts?: number | null
+  lastAttemptAt?: string | null
+  startedAt?: string | null
+  endedAt?: string | null
+  durationMs?: number | null
+  model?: string | null
+  modelCalls?: number | null
+  inputTokens?: number | null
+  outputTokens?: number | null
+  memoryRevisions?: WorkflowMemoryRevisions | null
+  feedback?: WorkflowFeedback[] | null
+  appliedAt?: string | null
+  appliedBy?: string | null
+  dismissedAt?: string | null
+  dismissedBy?: string | null
+  dismissReason?: string | null
+  resolvedAt?: string | null
+  resolvedBy?: string | null
+  createdBy: string
+  updatedBy: string
+  version?: number | null
+  createdAt?: string
+  updatedAt?: string
+}
+
+/** Which revision of each memory block the run read. Null where there was none. */
+export interface WorkflowMemoryRevisions {
+  org: number | null
+  orgAgent: number | null
+  orgAgentMemory: number | null
+  party: number | null
+  partyAgent: number | null
 }

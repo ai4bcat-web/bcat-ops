@@ -6,9 +6,14 @@
  * Step R merged the old Summary and Details tabs into Overview — one shipment, one set
  * of facts — so both legacy keys still resolve, and every link written before the merge
  * keeps working.
+ *
+ * Step K appended `aiAgent`. It is the only key the detail may refuse to draw: the tab
+ * exists only while a workflow run is linked to the shipment, so `?tab=aiAgent` is a
+ * valid key that still falls back to Overview on a shipment no agent ever touched.
  */
 export const DETAIL_TAB_KEYS = [
   'overview', 'stops', 'carrier', 'tracking', 'documents', 'financials', 'invoicing', 'carrierPay', 'history',
+  'aiAgent',
 ] as const
 
 export type DetailTabKey = (typeof DETAIL_TAB_KEYS)[number]
@@ -24,6 +29,7 @@ export const DETAIL_TABS: readonly { key: DetailTabKey; label: string }[] = [
   { key: 'invoicing', label: 'Invoicing' },
   { key: 'carrierPay', label: 'Carrier Pay' },
   { key: 'history', label: 'History' },
+  { key: 'aiAgent', label: 'AI Agent' },
 ]
 
 /** Keys that existed before Overview absorbed them. */

@@ -409,7 +409,16 @@ async function handleCommit(payload: CommitPayload, dynamo: DynamoDBClient, s3: 
   console.log('[vendor-ap-intake] row created', { rowId, attachments: verified.length })
   if (EXTRACT_FUNCTION_NAME) {
     try {
-      await lambda.send(new InvokeCommand({ FunctionName: EXTRACT_FUNCTION_NAME, InvocationType: 'Event', Payload: Buffer.from(JSON.stringify({ id: rowId })) }))
+      // Step K. `VENDOR_AP_EXTRACT_FUNCTION_NAME` now names the workflow agent, which
+      // speaks the run hand-off shape. The duplicate path above returned already, so a
+      // vendor payable starts exactly one AP run.
+      await lambda.send(new InvokeCommand({
+        FunctionName: EXTRACT_FUNCTION_NAME,
+        InvocationType: 'Event',
+        Payload: Buffer.from(JSON.stringify({
+          runFor: { sourceKind: 'VENDOR_PAYABLE', sourceId: rowId, inboxRole: 'AP', provider: 'GMAIL' },
+        })),
+      }))
     } catch (err) {
       console.warn('[vendor-ap-intake] extractor not invoked', String(err))
     }

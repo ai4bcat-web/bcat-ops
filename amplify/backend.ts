@@ -23,7 +23,7 @@ import { twofaIntake } from './functions/twofa-intake/resource'
 import { factoringIntake } from './functions/factoring-intake/resource'
 import { vendorApActions } from './functions/vendor-ap-actions/resource'
 import { vendorApIntake } from './functions/vendor-ap-intake/resource'
-import { vendorApExtract } from './functions/vendor-ap-extract/resource'
+import { workflowAgent } from './functions/workflow-agent/resource'
 import { apptNeedNotifier } from './functions/appt-need-notifier/resource'
 import { slackStatusNotifier } from './functions/slack-status-notifier/resource'
 import { fuelImport } from './functions/fuel-import/resource'
@@ -118,7 +118,7 @@ const backend = defineBackend({
   factoringIntake,
   vendorApActions,
   vendorApIntake,
-  vendorApExtract,
+  workflowAgent,
   apptNeedNotifier,
   slackStatusNotifier,
   fuelImport,
@@ -756,17 +756,11 @@ vendorApIntakeFn.addToRolePolicy(new PolicyStatement({
 }))
 backend.storage.resources.bucket.grantPut(vendorApIntakeFn, 'intake-pdfs/vendor-ap/*')
 backend.storage.resources.bucket.grantRead(vendorApIntakeFn, 'intake-pdfs/vendor-ap/*')
-// Reads each invoice for vendor / amount / dates; intake hands it the new row's id.
-const vendorApExtractFn = backend.vendorApExtract.resources.lambda as LambdaFunction
-vendorApExtractFn.addEnvironment('TABLE_NAME', vendorApTable.tableName)
-vendorApExtractFn.addEnvironment('BUCKET_NAME', backend.storage.resources.bucket.bucketName)
-vendorApExtractFn.addToRolePolicy(new PolicyStatement({
-  actions: ['dynamodb:GetItem', 'dynamodb:UpdateItem', 'dynamodb:Scan'],
-  resources: [vendorApTable.tableArn],
-}))
-backend.storage.resources.bucket.grantRead(vendorApExtractFn, 'intake-pdfs/vendor-ap/*')
-vendorApIntakeFn.addEnvironment('VENDOR_AP_EXTRACT_FUNCTION_NAME', vendorApExtractFn.functionName)
-vendorApExtractFn.grantInvoke(vendorApIntakeFn)
+// The invoice extractor that used to live in `vendor-ap-extract` moved into
+// `workflow-agent` (Step K), which answers the old `{ id }` / `{ all: true }` payloads
+// unchanged. Its VendorPayable and S3 grants, and this bridge's invoke permission, are
+// wired in the workflow-agent block below — that block also grants the three edge
+// Lambdas, and `trackingApiFn` is not declared until further down this file.
 const vendorApIntakeUrl = new FunctionUrl(vendorApIntakeFn.stack, 'VendorApIntakeUrl', {
   function: vendorApIntakeFn,
   authType: FunctionUrlAuthType.NONE,
@@ -1557,6 +1551,186 @@ const trackingApiUrl = new FunctionUrl(trackingApiFn.stack, 'TrackingApiUrl', {
   cors: { allowedOrigins: PORTAL_ORIGINS, allowedMethods: [HttpMethod.GET, HttpMethod.POST], allowedHeaders: ['content-type'] },
 })
 new CfnOutput(trackingApiFn.stack, 'TrackingApiFunctionUrl', { value: trackingApiUrl.url, description: 'Public truck tracking API URL' })
+
+// ── workflow-agent Lambda (Step K: AI agents, the workflow inbox, AP extract) ─
+//
+// One worker for every AI workflow: quote / tender / AP / capacity e-mail and provider
+// webhooks. It reads the directory, asks the model a schema-constrained question, and
+// writes a WorkflowRun describing what it found.
+//
+// THE STRUCTURAL GUARANTEE, and the reason the grants below are written out one table
+// at a time instead of a `grantReadWriteData` sweep: this role holds
+//   * no write of any kind on Shipment, Order, Load, LoadCarrier, Invoice, CarrierBill,
+//     FactoringItem, Customer, Carrier or TmsSettings, and
+//   * no `lambda:InvokeFunction` on anything at all.
+// So the agent cannot create freight and cannot reach AR, by IAM rather than by code
+// review. Applying a proposal is still CREATE_SHIPMENT / SAVE_QUOTE / RECORD_BILL
+// through the normal routers, under the person's own Cognito identity. The two writes
+// it does hold are the ones that are its own output: the VendorPayable fields the AP
+// extractor already filled in, and a PENDING ShipmentDocument row for an invoice it
+// filed. Any widening here has to be argued on its own.
+const workflowAgentFn = backend.workflowAgent.resources.lambda as LambdaFunction
+const workflowRunTable         = backend.data.resources.tables['WorkflowRun']
+const workflowShipmentTable    = backend.data.resources.tables['Shipment']
+const workflowOrderTable       = backend.data.resources.tables['Order']
+const workflowLoadTable        = backend.data.resources.tables['Load']
+const workflowLoadCarrierTable = backend.data.resources.tables['LoadCarrier']
+const workflowCustomerTable    = backend.data.resources.tables['Customer']
+const workflowCarrierTable     = backend.data.resources.tables['Carrier']
+const workflowCarrierContactTable = backend.data.resources.tables['CarrierContact']
+const workflowLocationTable    = backend.data.resources.tables['Location']
+const workflowQuoteTable       = backend.data.resources.tables['Quote']
+const workflowShipmentDocTable = backend.data.resources.tables['ShipmentDocument']
+const workflowSettingsTable    = backend.data.resources.tables['TmsSettings']
+const workflowIntakeTable      = backend.data.resources.tables['IntakeItem']
+const workflowSubmissionTable  = backend.data.resources.tables['DriverSubmission']
+const workflowProClaimTable    = backend.data.resources.tables['ProClaim']
+const workflowIntegrationTable = backend.data.resources.tables['Integration']
+const workflowAuditLogTable    = backend.data.resources.tables['AuditLog']
+
+// TABLE_NAME is VendorPayable: the moved AP extractor reads it under that name and
+// changing it would be a rename for no gain.
+workflowAgentFn.addEnvironment('TABLE_NAME',                    vendorApTable.tableName)
+workflowAgentFn.addEnvironment('BUCKET_NAME',                   backend.storage.resources.bucket.bucketName)
+workflowAgentFn.addEnvironment('WORKFLOW_RUN_TABLE_NAME',       workflowRunTable.tableName)
+workflowAgentFn.addEnvironment('SHIPMENT_TABLE_NAME',           workflowShipmentTable.tableName)
+workflowAgentFn.addEnvironment('ORDER_TABLE_NAME',              workflowOrderTable.tableName)
+workflowAgentFn.addEnvironment('LOAD_TABLE_NAME',               workflowLoadTable.tableName)
+workflowAgentFn.addEnvironment('LOAD_CARRIER_TABLE_NAME',       workflowLoadCarrierTable.tableName)
+workflowAgentFn.addEnvironment('CUSTOMER_TABLE_NAME',           workflowCustomerTable.tableName)
+workflowAgentFn.addEnvironment('CARRIER_TABLE_NAME',            workflowCarrierTable.tableName)
+workflowAgentFn.addEnvironment('CARRIER_CONTACT_TABLE_NAME',    workflowCarrierContactTable.tableName)
+workflowAgentFn.addEnvironment('LOCATION_TABLE_NAME',           workflowLocationTable.tableName)
+workflowAgentFn.addEnvironment('QUOTE_TABLE_NAME',              workflowQuoteTable.tableName)
+workflowAgentFn.addEnvironment('SHIPMENT_DOCUMENT_TABLE_NAME',  workflowShipmentDocTable.tableName)
+workflowAgentFn.addEnvironment('TMS_SETTINGS_TABLE_NAME',       workflowSettingsTable.tableName)
+workflowAgentFn.addEnvironment('INTAKE_ITEM_TABLE_NAME',        workflowIntakeTable.tableName)
+workflowAgentFn.addEnvironment('DRIVER_SUBMISSION_TABLE_NAME',  workflowSubmissionTable.tableName)
+workflowAgentFn.addEnvironment('PRO_CLAIM_TABLE_NAME',          workflowProClaimTable.tableName)
+workflowAgentFn.addEnvironment('INTEGRATION_TABLE_NAME',        workflowIntegrationTable.tableName)
+workflowAgentFn.addEnvironment('AUDIT_LOG_TABLE_NAME',          workflowAuditLogTable.tableName)
+// Access tokens carry no e-mail; the action router resolves the caller through
+// AdminGetUser for the owner/ADMIN checks, the vendorApActions pattern above.
+workflowAgentFn.addEnvironment('USER_POOL_ID',                  backend.auth.resources.userPool.userPoolId)
+
+// The run table is the agent's own. No DeleteItem: a run is DISMISSED or RESOLVED,
+// never removed. The index ARNs carry the three queues (byAgent, byShipment, the
+// sparse exceptionOpen worklist).
+workflowAgentFn.addToRolePolicy(new PolicyStatement({
+  actions:   ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem', 'dynamodb:Query'],
+  resources: [workflowRunTable.tableArn, `${workflowRunTable.tableArn}/index/*`],
+}))
+
+// Everything the agent needs to recognise a sender, a shipment or a document — read
+// only. Scan is here because the directory match walks Customer/Carrier/CarrierContact
+// whole; the rest are reached by key or through an index.
+workflowAgentFn.addToRolePolicy(new PolicyStatement({
+  actions:   ['dynamodb:GetItem', 'dynamodb:Query', 'dynamodb:Scan'],
+  resources: [
+    workflowShipmentTable.tableArn,       `${workflowShipmentTable.tableArn}/index/*`,
+    workflowOrderTable.tableArn,          `${workflowOrderTable.tableArn}/index/*`,
+    workflowLoadTable.tableArn,           `${workflowLoadTable.tableArn}/index/*`,
+    workflowLoadCarrierTable.tableArn,    `${workflowLoadCarrierTable.tableArn}/index/*`,
+    workflowCustomerTable.tableArn,       `${workflowCustomerTable.tableArn}/index/*`,
+    workflowCarrierTable.tableArn,        `${workflowCarrierTable.tableArn}/index/*`,
+    workflowCarrierContactTable.tableArn, `${workflowCarrierContactTable.tableArn}/index/*`,
+    workflowLocationTable.tableArn,       `${workflowLocationTable.tableArn}/index/*`,
+    workflowQuoteTable.tableArn,          `${workflowQuoteTable.tableArn}/index/*`,
+    workflowShipmentDocTable.tableArn,    `${workflowShipmentDocTable.tableArn}/index/*`,
+    workflowSettingsTable.tableArn,       `${workflowSettingsTable.tableArn}/index/*`,
+    workflowIntakeTable.tableArn,         `${workflowIntakeTable.tableArn}/index/*`,
+    workflowSubmissionTable.tableArn,     `${workflowSubmissionTable.tableArn}/index/*`,
+    workflowProClaimTable.tableArn,       `${workflowProClaimTable.tableArn}/index/*`,
+    workflowIntegrationTable.tableArn,    `${workflowIntegrationTable.tableArn}/index/*`,
+  ],
+}))
+
+// The AP extractor's one business write, unchanged from vendor-ap-extract: it fills the
+// invoice fields nobody typed on a payable row it was handed. GetItem/Scan for the
+// `{ all: true }` backfill. VendorPayable only — no other table is writable here.
+workflowAgentFn.addToRolePolicy(new PolicyStatement({
+  actions:   ['dynamodb:GetItem', 'dynamodb:Scan', 'dynamodb:UpdateItem'],
+  resources: [vendorApTable.tableArn],
+}))
+// A carrier invoice the agent filed becomes one PENDING ShipmentDocument row that a
+// person reviews. Put only: it can add a document, never change or accept one.
+workflowAgentFn.addToRolePolicy(new PolicyStatement({
+  actions:   ['dynamodb:PutItem'],
+  resources: [workflowShipmentDocTable.tableArn],
+}))
+// Every disposition writes its audit row.
+workflowAgentFn.addToRolePolicy(new PolicyStatement({
+  actions:   ['dynamodb:PutItem'],
+  resources: [workflowAuditLogTable.tableArn],
+}))
+workflowAgentFn.addToRolePolicy(new PolicyStatement({
+  actions:   ['cognito-idp:AdminGetUser'],
+  resources: [backend.auth.resources.userPool.userPoolArn],
+}))
+
+// Attachments the agent reads: vendor invoices, Slack tender files, driver uploads.
+// Read-only — the bytes a sender gave us are the record of what arrived.
+backend.storage.resources.bucket.grantRead(workflowAgentFn, 'intake-pdfs/vendor-ap/*')
+backend.storage.resources.bucket.grantRead(workflowAgentFn, 'intake-attachments/*')
+backend.storage.resources.bucket.grantRead(workflowAgentFn, 'driver-docs/*')
+// Its own inbox: the presigned PUTs it hands the bridge, the message.json it writes at
+// commit, and the parked webhook bodies.
+//
+// Spelled out rather than grantReadWrite, which is BUCKET_READ_ACTIONS plus
+// s3:DeleteObject* and bucket-wide s3:GetBucket*/s3:List*. This Lambda has a public
+// NONE-auth Function URL, and the message is the evidence a run was ever justified:
+// nothing here may delete one, and nothing here needs to list the bucket.
+backend.storage.resources.bucket.grantRead(workflowAgentFn, 'workflow-inbox/*')
+workflowAgentFn.addToRolePolicy(new PolicyStatement({
+  actions:   ['s3:PutObject'],
+  resources: [`${backend.storage.resources.bucket.bucketArn}/workflow-inbox/*`],
+}))
+
+// The e-mail bridge posts here. authType NONE, so the shared intake secret in the body
+// is the only authentication — the handler compares it with timingSafeEqual.
+const workflowAgentUrl = new FunctionUrl(workflowAgentFn.stack, 'WorkflowAgentUrl', {
+  function: workflowAgentFn,
+  authType: FunctionUrlAuthType.NONE,
+})
+new CfnOutput(workflowAgentFn.stack, 'WorkflowAgentFunctionUrl', {
+  value:       workflowAgentUrl.url,
+  description: 'Workflow inbox (prepare/commit); requires the shared intake secret and a `role` of QUOTE | TENDER | AP | CAPACITY',
+})
+
+// Fails runs that died mid-flight (a timeout leaves IN_PROGRESS behind, and nothing
+// else would ever close it). DISABLED on dev by the BCAT_DEV_STACK guard at the bottom
+// of this file, where SWEEP_STALLED is the manual door.
+const workflowSweepRule = new Rule(workflowAgentFn.stack, 'WorkflowAgentSweepRule', {
+  schedule:    Schedule.rate(Duration.minutes(15)),
+  description: 'Fail stalled workflow runs every 15 minutes',
+})
+workflowSweepRule.addTarget(new EventsLambdaTarget(workflowAgentFn, {
+  event: RuleTargetInput.fromObject({ sweep: true }),
+}))
+
+// ── The four bridges that hand work to the agent ───────────────────────────
+// Each is one asynchronous invoke inside a try/catch that only warns: a workflow that
+// cannot start must never fail the intake that was going to succeed. The invoke grant
+// points at workflowAgentFn — the agent itself still holds no InvokeFunction anywhere.
+//
+// vendor-ap-intake keeps the old env var name: its payload is unchanged and the new
+// handler answers it, so the AP bridge is repointed rather than rewritten.
+vendorApIntakeFn.addEnvironment('VENDOR_AP_EXTRACT_FUNCTION_NAME', workflowAgentFn.functionName)
+workflowAgentFn.grantInvoke(vendorApIntakeFn)
+// slack-intake-webhook: an e-mailed tender that landed as an IntakeItem.
+webhookFn.addEnvironment('WORKFLOW_AGENT_FUNCTION_NAME', workflowAgentFn.functionName)
+workflowAgentFn.grantInvoke(webhookFn)
+// driver-app-api: the loads inbox commit (a driver/Ivan e-mail submission).
+driverApiFn.addEnvironment('WORKFLOW_AGENT_FUNCTION_NAME', workflowAgentFn.functionName)
+workflowAgentFn.grantInvoke(driverApiFn)
+// tracking-api: a provider webhook, parked in S3 first so the agent reads the body it
+// was actually sent rather than a re-serialised copy.
+trackingApiFn.addEnvironment('WORKFLOW_AGENT_FUNCTION_NAME', workflowAgentFn.functionName)
+workflowAgentFn.grantInvoke(trackingApiFn)
+trackingApiFn.addToRolePolicy(new PolicyStatement({
+  actions:   ['s3:PutObject'],
+  resources: [`${backend.storage.resources.bucket.bucketArn}/workflow-inbox/*`],
+}))
 
 // ── rateConSignApi Lambda (public rate-confirmation signing page) ──────────
 // A carrier signs without an account: the emailed link carries a one-time token

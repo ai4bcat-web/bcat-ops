@@ -43,6 +43,19 @@ export const storage = defineStorage({
       allow.authenticated.to(['read']),
       allow.groups(STAFF_GROUPS).to(['read']),
     ],
+    /*
+     * The AI agents' inbox (Step K): the e-mail bodies and attachments a bridge hands
+     * over, keyed workflow-inbox/{runId}/…, plus parked webhook bodies.
+     *
+     * Read only from the browser, the `intake-pdfs/*` rule above: every byte here is
+     * written by workflow-agent's own role through a presigned PUT it signed and then
+     * HEAD-verified, and the run trace only ever shows what arrived. No delete — the
+     * message is the evidence for what the model was given.
+     */
+    'workflow-inbox/*': [
+      allow.authenticated.to(['read']),
+      allow.groups(STAFF_GROUPS).to(['read']),
+    ],
     // Appointment-confirmation screenshots (E2Open update + email confirmation),
     // pasted/uploaded per stop from the Appts page. Keyed appt-proofs/{loadId}/{stopId}/…
     'appt-proofs/*': [

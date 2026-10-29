@@ -10,6 +10,11 @@
  * Every verb is gated by `quoteState`. A quote that expired offers Send and not Convert;
  * a counter that landed offers Accept and Counter and not Send. The page never compares
  * a status to a string to decide what may be done, because the Lambda does not either.
+ *
+ * `/tms/rates/new?run=<id>` is the QUOTE agent's door (Step K). The run's proposal is
+ * pre-typed into the blank editor and nothing else: the agent holds no write grant on
+ * Quote and cannot invoke anything. `SAVE_QUOTE` runs from this page with the operator's
+ * own token, lands the quote in REQUESTED, and the run is linked to the saved id after.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
@@ -22,7 +27,8 @@ import { useAuthUser } from '@/hooks/useAuth'
 import { useDirectory } from '@/hooks/useDirectory'
 import { useQuote } from '@/hooks/useQuote'
 import {
-  acceptCounter, cancelQuote, getTmsSettings, graphqlErrorText, restoreQuote, saveQuote,
+  acceptCounter, cancelQuote, getTmsSettings, getWorkflowRun, graphqlErrorText, linkWorkflowRun,
+  restoreQuote, saveQuote,
 } from '@/lib/apiClient'
 import { formatDateTime } from '@/lib/date'
 import { formatCents } from '@/lib/invoiceBuild'
@@ -37,8 +43,8 @@ import { MarkLostDialog } from './components/MarkLostDialog'
 import { SendQuoteDialog } from './components/SendQuoteDialog'
 import { expiryChip, laneLookupKeys, marginChip, quoteLinkUrl, statusLabel, whoseMoveLabel } from './quoteViews'
 import type {
-  ChargeCalc, ChargeCodeDef, CustomerRecord, LoadChargeInput, QuoteRecord, RateType, ShipmentMode,
-  TmsSettings,
+  ChargeCalc, ChargeCodeDef, CustomerRecord, LoadChargeInput, QuoteProposal, QuoteRecord, RateType,
+  ShipmentMode, TmsSettings, WorkflowRunRecord,
 } from '@/types/tms'
 import type { Stop, StopType } from '@/types'
 
@@ -134,6 +140,99 @@ function linesFrom(quote: QuoteRecord | null): LoadChargeInput[] {
   }]
 }
 
+/** What `/tms/rates/new?run=…` seeds into the blank editor, and the run it came from. */
+interface RunSeed {
+  run: WorkflowRunRecord
+  form: QuoteForm
+  stops: StopDraft[]
+  /** The name the agent read, carried only when the party was never matched to an id. */
+  customerName: string | null
+}
+
+/**
+ * Why a `?run=…` seeded nothing, or null when the run may seed the form.
+ *
+ * A stale link is ordinary — a colleague applied the run an hour ago, or dismissed it —
+ * so the page opens as a blank New quote and says why rather than failing.
+ */
+function seedRefusal(runId: string, run: WorkflowRunRecord | null): string | null {
+  if (run == null) return `Workflow run ${runId} was not found, so nothing was seeded.`
+  if (run.proposalKind !== 'QUOTE' || run.proposal?.kind !== 'QUOTE') {
+    return `Workflow run ${runId} did not propose a quote, so nothing was seeded.`
+  }
+  if (run.outcome !== 'PROPOSED') {
+    const outcome = (run.outcome ?? 'unresolved').toLowerCase()
+    return `Workflow run ${runId} is already ${outcome}, so nothing was seeded.`
+  }
+  return null
+}
+
+/**
+ * A rate request carries a date, never an appointment time: `2026-03-18` is the day the
+ * customer asked for, and the stop's clock is left at midnight for a person to set.
+ */
+function apptFromProposal(value: string | null | undefined): string {
+  const stated = (value ?? '').trim()
+  if (!stated) return ''
+  if (/^\d{4}-\d{2}-\d{2}$/.test(stated)) return `${stated}T00:00`
+  return toLocalInput(stated)
+}
+
+/**
+ * The target the customer named, and anything else the agent read, as an internal note.
+ *
+ * Their number is not our price, so it never touches a charge line or the target buy —
+ * it is recorded where the desk can read it while pricing and the customer cannot.
+ */
+function requestNoteFrom(proposal: QuoteProposal): string {
+  const parts: string[] = []
+  if (proposal.targetRateCents != null) {
+    parts.push(`Target rate named in the e-mail: ${formatCents(proposal.targetRateCents)}`)
+  }
+  const notes = (proposal.notes ?? '').trim()
+  if (notes) parts.push(notes)
+  return parts.join('\n\n')
+}
+
+/**
+ * The blank editor, filled in with what the agent read out of the e-mail.
+ *
+ * Only fields the proposal actually states are seeded: `mode` and the rate type stay on
+ * the form's own defaults because a rate request names neither, and a guess here would be
+ * indistinguishable from something the customer wrote. The customer picker takes an id
+ * only when the run matched the party by e-mail address — the same rule tenders apply in
+ * `proposalToPrefill`, because a domain or a name is a candidate, never an answer.
+ */
+function seedFromRun(run: WorkflowRunRecord, proposal: QuoteProposal): RunSeed {
+  const matchedId = run.partyKind === 'CUSTOMER' && run.partyMatchHow === 'EMAIL' ? (run.partyId ?? '') : ''
+  const [pickup, delivery] = stopsFrom(null)
+  const place = (part: QuoteProposal['origin'], dateStr: string | null | undefined) => ({
+    city: (part?.city ?? '').trim(),
+    state: (part?.state ?? '').trim(),
+    zip: (part?.zip ?? '').trim(),
+    appt: apptFromProposal(dateStr),
+  })
+  return {
+    run,
+    form: {
+      ...formFrom(null, matchedId),
+      contactName: (run.fromName ?? '').trim(),
+      contactEmail: (run.fromEmail ?? '').trim(),
+      equipmentType: (proposal.equipmentType ?? '').trim(),
+      commodity: (proposal.commodity ?? '').trim(),
+      weightLbs: proposal.weightLbs != null ? String(proposal.weightLbs) : '',
+      internalNotes: requestNoteFrom(proposal),
+    },
+    stops: [
+      { ...pickup, ...place(proposal.origin, proposal.pickupDate) },
+      { ...delivery, ...place(proposal.destination, proposal.deliveryDate) },
+    ],
+    // Nothing was matched to a directory row, so the name the agent read is all there is.
+    // It rides along to SAVE_QUOTE so a REQUESTED quote still says who asked.
+    customerName: matchedId ? null : ((proposal.customerName ?? run.partyName ?? '').trim() || null),
+  }
+}
+
 export function QuoteDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
@@ -148,6 +247,10 @@ export function QuoteDetail() {
   // applied by `SAVE_QUOTE`, so the selection is the whole of the prefill.
   const [search] = useSearchParams()
   const presetCustomerId = quoteId ? '' : (search.get('customerId') ?? '')
+  // `/tms/rates/new?run=…` — the Create quote button on a QUOTE proposal. The agent never
+  // writes the quote: this opens the same editor the desk opens, pre-typed with what it
+  // read, and SAVE_QUOTE runs below from the browser under the operator's own identity.
+  const seedRunId = quoteId ? '' : (search.get('run') ?? '')
 
   const [settings, setSettings] = useState<TmsSettings | null>(null)
   // The editor mirrors the server row until somebody types, exactly as the Financials
@@ -160,6 +263,8 @@ export function QuoteDetail() {
   const [dialog, setDialog] = useState<DetailDialog | null>(null)
   const [busy, setBusy] = useState(false)
   const [now, setNow] = useState(() => new Date().toISOString())
+  const [seed, setSeed] = useState<RunSeed | null>(null)
+  const [seedNote, setSeedNote] = useState<string | null>(null)
 
   // Non-async on purpose (react-hooks/set-state-in-effect).
   useEffect(() => {
@@ -169,6 +274,29 @@ export function QuoteDetail() {
       .catch(() => {})
     return () => { alive = false }
   }, [])
+
+  // Non-async on purpose, as above. The seed is applied once, into empty drafts: a run
+  // that resolves after the operator has started typing must not overwrite them.
+  useEffect(() => {
+    if (!seedRunId) return
+    let alive = true
+    getWorkflowRun(seedRunId)
+      .then((run) => {
+        if (!alive) return
+        const refusal = seedRefusal(seedRunId, run)
+        if (refusal != null) { setSeedNote(refusal); return }
+        // `seedRefusal` already proved both of these; the re-check is what narrows the type.
+        if (run == null || run.proposal?.kind !== 'QUOTE') return
+        const next = seedFromRun(run, run.proposal)
+        setSeed(next)
+        setFormDraft((prev) => prev ?? next.form)
+        setStopsDraft((prev) => prev ?? next.stops)
+      })
+      .catch(() => {
+        if (alive) setSeedNote(`Workflow run ${seedRunId} could not be read, so nothing was seeded.`)
+      })
+    return () => { alive = false }
+  }, [seedRunId])
 
   const form = formDraft ?? formFrom(quote, presetCustomerId)
   const stops = useMemo(() => stopsDraft ?? stopsFrom(quote), [stopsDraft, quote])
@@ -227,15 +355,34 @@ export function QuoteDetail() {
     sequence: index,
   })), [stops])
 
+  /**
+   * Point the run at the quote a person just saved from it.
+   *
+   * The quote is the record and it is already written; the link is bookkeeping. A failed
+   * LINK_RUN says so and stops there — nothing is rolled back and no second quote is
+   * raised, exactly as the tender card handles the same case.
+   */
+  const linkSeededRun = async (seeded: RunSeed, savedQuoteId: string) => {
+    try {
+      await linkWorkflowRun(seeded.run.id, { quoteId: savedQuoteId }, seeded.run.version ?? 0)
+      toast.success(`${seeded.run.id} linked to ${savedQuoteId}`)
+    } catch (e: unknown) {
+      toast.error(graphqlErrorText(e) || `${savedQuoteId} was saved, but the run could not be linked to it`)
+    }
+  }
+
   const save = () => {
     setBusy(true)
     const built = toStops()
+    // A seeded run only applies to the quote being created here; an edit of a saved row
+    // never re-links, because the row already carries the run it was raised from.
+    const seeded = quote == null ? seed : null
     saveQuote({
       quoteId: quote?.id,
       expectedVersion: quote?.version,
       side: 'SELL',
       customerId: form.customerId || null,
-      customerName: customer?.name ?? null,
+      customerName: customer?.name ?? seeded?.customerName ?? null,
       contactName: form.contactName || null,
       contactEmail: form.contactEmail || null,
       customerRepId: quote?.customerRepId ?? user?.email ?? null,
@@ -253,13 +400,18 @@ export function QuoteDetail() {
       targetBuyCents: form.targetBuyCents,
       customerMessage: form.customerMessage || null,
       internalNotes: form.internalNotes || null,
+      // `intake` is what makes a request somebody e-mailed in land in REQUESTED rather
+      // than DRAFT: nobody has priced it yet. `workflowRunId` is stamped on the row once,
+      // by the server, so the quote itself says which run it was raised from.
+      ...(seeded ? { intake: true, workflowRunId: seeded.run.id } : {}),
     })
-      .then((result) => {
+      .then(async (result) => {
         toast.success(`${result.quote.id} saved — ${formatCents(result.pricing.revenueCents)}`)
         // The saved row is the truth now; the local draft has nothing left to say.
         forgetDraft()
+        if (seeded) await linkSeededRun(seeded, result.quote.id)
         if (quote == null) navigate(`/tms/rates/${result.quote.id}`)
-        else return refresh()
+        else await refresh()
       })
       .catch((e: unknown) => toast.error(graphqlErrorText(e) || 'Could not save the quote'))
       .finally(() => setBusy(false))
@@ -394,6 +546,31 @@ export function QuoteDetail() {
           </TmsButton>
         )}
       </div>
+
+      {seedNote && <p className="tms-muted" style={{ fontSize: 12 }}>{seedNote}</p>}
+
+      {seed && (
+        <TmsCard
+          title="Seeded from an e-mail"
+          actions={<Link to={`/tms/workflows/runs/${seed.run.id}`} className="tms-btn tms-btn-ghost tms-btn-sm">{seed.run.id}</Link>}
+        >
+          <p style={{ margin: 0 }}>
+            The fields below were read by the AI agent out of{' '}
+            {seed.run.subject ? <em>{seed.run.subject}</em> : 'a message'}
+            {seed.run.fromEmail ? `, sent by ${seed.run.fromEmail}` : ''} — text somebody outside this
+            company wrote, not anything BCAT entered. Read the e-mail before you price it.
+          </p>
+          {seed.customerName && (
+            <p className="tms-muted" style={{ margin: '8px 0 0', fontSize: 12 }}>
+              The agent read the customer as {seed.customerName} but matched no directory row to that
+              address, so the picker is yours to set.
+            </p>
+          )}
+          <p className="tms-muted" style={{ margin: '8px 0 0', fontSize: 12 }}>
+            Save raises the quote in REQUESTED under your own login, then links {seed.run.id} to it.
+          </p>
+        </TmsCard>
+      )}
 
       <div className="tms-grid" style={{ gridTemplateColumns: 'minmax(0, 2fr) minmax(0, 1fr)' }}>
         <div style={{ display: 'grid', gap: 16, alignContent: 'start' }}>

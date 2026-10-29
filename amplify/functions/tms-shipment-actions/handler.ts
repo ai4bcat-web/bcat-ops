@@ -1445,8 +1445,12 @@ function priceFor(
 
 // ── CREATE_SHIPMENT ──────────────────────────────────────────────────────────
 
-/** Where a shipment came from. `Shipment.source` in `resource.ts`, minus TENDER. */
-const CREATE_SOURCES = ['MANUAL', 'DUPLICATE', 'FACTORING', 'BACKFILL'] as const
+/**
+ * Where a shipment came from — every value `Shipment.source` lists in `resource.ts`.
+ * `Shipment.source` already listed TENDER; nothing produced one until Step K's tender
+ * agent, so the create door now accepts it.
+ */
+const CREATE_SOURCES = ['MANUAL', 'DUPLICATE', 'FACTORING', 'BACKFILL', 'TENDER'] as const
 
 /**
  * The rate code a customer's linehaul is carried on, everywhere in this router:
@@ -1628,6 +1632,9 @@ async function createShipment(input: Row, caller: Caller): Promise<Row> {
     optionalEnum(settings?.defaultMode, SHIPMENT_MODES, 'settings.defaultMode') ??
     'FTL'
   const source = optionalEnum(input.source, CREATE_SOURCES, 'source') ?? 'MANUAL'
+  // The run a person applied to get here. It is a back-reference, not a decision:
+  // the agent proposed, this caller's own identity is what created the freight.
+  const workflowRunId = optionalString(input.workflowRunId, 120)
   const bag = validateLoadBag(input.load)
 
   const suppliedPro = optionalString(input.pro, 120)
@@ -1686,7 +1693,11 @@ async function createShipment(input: Row, caller: Caller): Promise<Row> {
     id: shipmentId,
     __typename: 'Shipment',
     number,
-    status: 'DRAFT',
+    // A tender is freight somebody else offered us: it waits for an accept or a
+    // reject (`TENDER_RESPOND`) rather than sitting in a dispatcher's drafts. Every
+    // other source still opens as a draft, and `previousStatus` stays null either
+    // way — nothing preceded a brand-new row.
+    status: source === 'TENDER' ? 'TENDER_PENDING' : 'DRAFT',
     previousStatus: null,
     statusChangedAt: now,
     statusChangedBy: caller.email,
@@ -1705,6 +1716,7 @@ async function createShipment(input: Row, caller: Caller): Promise<Row> {
     // Step R. The rep who sells the freight, mirrored onto the Load below and kept
     // in step by SET_SALES_REP. The order carries the same id as `customerRepId`.
     salesRepId,
+    workflowRunId,
     createdBy: caller.email,
     updatedBy: caller.email,
     version: 1,
@@ -1852,7 +1864,7 @@ async function createShipment(input: Row, caller: Caller): Promise<Row> {
   // board and the dashboard never show an untagged row.
   await applyTagToLoads(shipmentId, caller)
   await writeAudit('SHIPMENT', shipmentId, 'CREATE_SHIPMENT', caller, {
-    number, customerId, customerName, mode, source, pro,
+    number, customerId, customerName, mode, source, pro, workflowRunId,
   })
   return readBundle(shipmentId) as unknown as Row
 }

@@ -719,6 +719,9 @@ async function getQuotableCustomer(deps: QuoteDeps, customerId: string): Promise
  */
 export async function saveQuote(deps: QuoteDeps, input: Row, caller: Caller): Promise<Row> {
   const quoteId = optionalString(input.quoteId, 100)
+  // The run a person applied to get here, kept as a back-reference. An edit that
+  // does not name one leaves whatever the row already carries alone.
+  const workflowRunId = optionalString(input.workflowRunId, 120)
   const settings = await deps.getSettings()
   const existing = quoteId ? await loadQuote(deps, quoteId) : null
 
@@ -750,6 +753,7 @@ export async function saveQuote(deps: QuoteDeps, input: Row, caller: Caller): Pr
       ...form.patch,
       ...money,
       customerId,
+      ...(workflowRunId ? { workflowRunId } : {}),
       customerName: optionalString(customer?.name, 200) ?? optionalString(existing.customerName, 200),
       ...stamp(existing, caller, now),
     }
@@ -784,6 +788,7 @@ export async function saveQuote(deps: QuoteDeps, input: Row, caller: Caller): Pr
     quoteDate,
     quoteMonth: monthOf(quoteDate) ?? quoteDate.slice(0, 7),
     customerId,
+    workflowRunId,
     customerName: optionalString(customer?.name, 200),
     ...form.patch,
     ...money,

@@ -29,6 +29,7 @@ import { validateCommissionPlans, validatePaySchedule } from '../../../src/lib/c
 import { teamMembership, validateTeams } from '../../../src/lib/teams'
 import { SEED_DIVISIONS, SEED_RULES, validateDivisions, validateRules } from '../../../src/lib/ownership'
 import { SEED_VIEWS, slugify, validateView } from '../../../src/lib/shipmentViewDefs'
+import { validateAiAgents, validatePartyMemory } from '../../../src/lib/workflows/memory'
 import type {
   CommissionTrigger,
   OwnershipDivisionRecord,
@@ -903,6 +904,9 @@ async function upsertCustomer(input: Record<string, unknown>, caller: Caller): P
   const active = finalStatus != null ? deriveActiveFromStatus(finalStatus) : (optionalBoolean(input.active) ?? true)
 
   const now = nowIso()
+  // Step K — the standing notes the AI agents read before they propose anything for
+  // this customer. Human-edited here and nowhere else; the agent only reads it.
+  const aiMemory = validatePartyMemory(input.aiMemory, existing?.aiMemory, caller.email, now)
   const item: Record<string, unknown> = {
     id,
     name,
@@ -963,6 +967,7 @@ async function upsertCustomer(input: Record<string, unknown>, caller: Caller): P
     hubspotId: optionalString(input.hubspotId, 100),
     haulpayDebtorId: optionalString(input.haulpayDebtorId, 100),
     ediSettings: optionalJsonObject(input.ediSettings),
+    aiMemory,
 
     createdBy: isCreate ? caller.email : (existing?.createdBy as string) ?? caller.email,
     updatedBy: caller.email,
@@ -1564,6 +1569,11 @@ async function saveSettings(input: Record<string, unknown>, caller: Caller): Pro
     commissionPaySchedule: keep(input.commissionPaySchedule, validatePaySchedule, 'commissionPaySchedule'),
     commissionApprovalAdminOnly: keep(input.commissionApprovalAdminOnly, (v) => (typeof v === 'boolean' ? v : undefined), 'commissionApprovalAdminOnly'),
     commissionPayAdminOnly: keep(input.commissionPayAdminOnly, (v) => (typeof v === 'boolean' ? v : undefined), 'commissionPayAdminOnly'),
+
+    // Step K — the org's AI agent settings and their standing instructions. The
+    // validator bumps a memory revision only when the markdown actually changed, so
+    // re-saving the settings card does not invent a new revision every time.
+    aiAgents: keep(input.aiAgents, (v) => validateAiAgents(v, existing?.aiAgents, caller.email, now), 'aiAgents'),
 
     updatedBy: caller.email,
     createdAt: isCreate ? now : (existing?.createdAt as string) ?? now,

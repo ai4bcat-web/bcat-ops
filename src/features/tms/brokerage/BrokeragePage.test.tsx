@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /**
- * My Brokerage is eight desks behind one tab strip, and the only thing that can go
+ * My Brokerage is nine desks behind one tab strip, and the only thing that can go
  * quietly wrong is access: a tab drawn for somebody who may not open it, or a tab
  * missing for somebody who may. The guard behind each route is the boundary — these
  * assertions are about the strip agreeing with it, and about a tab actually routing.
@@ -31,6 +31,7 @@ vi.mock('@/features/audit/AuditPage', () => ({ AuditPage: () => <p>audit body</p
 vi.mock('@/features/tms/settings/DivisionsPage', () => ({ default: () => <p>divisions body</p> }))
 vi.mock('@/features/tms/settings/ShipmentViewsPage', () => ({ default: () => <p>views body</p> }))
 vi.mock('@/features/tms/integrations/IntegrationsTab', () => ({ IntegrationsTab: () => <p>integrations body</p> }))
+vi.mock('@/features/tms/settings/AiAgentsPage', () => ({ default: () => <p>ai agents body</p> }))
 
 import { BrokeragePage } from './BrokeragePage'
 
@@ -59,7 +60,7 @@ describe('BrokeragePage', () => {
 
     expect(tabNames()).toEqual([
       'Settings', 'Users', 'Commissions', 'Reports', 'Audit', 'Divisions & ownership', 'Shipment views',
-      'Integrations',
+      'Integrations', 'AI Agents',
     ])
     expect(screen.getByText('settings body')).toBeInTheDocument()
   })

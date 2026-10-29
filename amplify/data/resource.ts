@@ -19,6 +19,7 @@ import { dispatchActions } from '../functions/dispatch-actions/resource'
 import { tmsCarrierActions } from '../functions/tms-carrier-actions/resource'
 import { tmsTrackingActions } from '../functions/tms-tracking-actions/resource'
 import { tmsFinanceActions } from '../functions/tms-finance-actions/resource'
+import { workflowAgent } from '../functions/workflow-agent/resource'
 
 // ExpenseCategory and ExpenseEntryMethod enums are defined inline on each
 // model field — Amplify Gen 2 does not require top-level enum declarations.
@@ -893,6 +894,7 @@ const schema = a.schema({
       requiredReferences: a.json(),              // RequiredReference[]
       chargeCodeOverrides: a.json(),             // ChargeCodeOverride[]
       defaultCharges: a.json(),                  // DefaultCharge[]
+      aiMemory: a.json(),                        // PartyAiMemory — human-edited, agent-read
 
       // Pricing / quoting defaults
       pricingDefaults: a.json(),                 // PricingDefaults (mode MARGIN/MARKUP/PROFIT)
@@ -1133,6 +1135,11 @@ const schema = a.schema({
       hubspotPortalId:          a.string(),
       // Slack channel health changes are posted to. Stored by J, used by K.
       integrationsNotifyChannel: a.string(),
+
+      // ── Workflows & AI agents (Step K) ────────────────────────────────────
+      // { general: Memory, dailyRunCap, QUOTE|TENDER|AP|CAPACITY: AgentSettings }
+      // Human-edited; the agent reads it and never writes it.
+      aiAgents:                 a.json(),
     })
     // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
     // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
@@ -1206,6 +1213,102 @@ const schema = a.schema({
     // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
     // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
     // `delete` is dropped too — nothing in step J removes an integration row.
+    .disableOperations(['subscriptions', 'delete'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  /*
+   * Step K. One row per piece of work an AI agent did: an inbound e-mail, a
+   * vendor payable, a driver submission, a provider webhook.
+   *
+   * `id` is `wf:<AGENT>:<sha20(sourceKey)>` — a deterministic hash of the source,
+   * not a random ULID, so the conditional put `attribute_not_exists(id)` IS the
+   * dedupe. Two bridges handing the same message over (a Slack retry, a Gmail
+   * redelivery) collide on the primary key and the second one does no work.
+   *
+   * `delete` is dropped: a run is DISMISSED or RESOLVED, never removed — it is
+   * the audit trail for what the model was shown and what it proposed, and a
+   * row linked from a Shipment must outlive the inbox it came from.
+   * `subscriptions` are dropped for the TMS_DESIGN §12 reason the Integration
+   * model above gives: no client subscribes, and three fewer resolvers keeps a
+   * fresh stack create under the CloudFormation resource cap. The trace view
+   * polls instead.
+   *
+   * Three indexes, one per screen:
+   *   byAgent        — the AI Agents tab's per-agent list, newest first, and the
+   *                    daily-cap count the pipeline takes before any model call.
+   *   byShipment     — a shipment's AI Agent tab: the runs that touched this load.
+   *   exceptionOpen  — the Errors queue. Sparse on the literal 'OPEN', the
+   *                    `Load.checkCallOpen` precedent: the index holds the open
+   *                    worklist and nothing else, so the queue never pays for the
+   *                    runs that already succeeded.
+   */
+  WorkflowRun: a
+    .model({
+      agent:        a.enum(['QUOTE', 'TENDER', 'AP', 'CAPACITY', 'WEBHOOK']),
+      inboxRole:    a.string(),
+      status:       a.enum(['PENDING', 'IN_PROGRESS', 'COMPLETED', 'FAILED']),
+      outcome:      a.enum(['PROPOSED', 'APPLIED', 'DISMISSED', 'NOTED', 'UNKNOWN_PARTY', 'IGNORED', 'NO_ACTION']),
+      currentStep:  a.string(),
+      errorCode:    a.string(),
+      error:        a.string(),            // redacted, <= 1 KB
+      exceptionOpen: a.string(),           // sparse: literal 'OPEN' while unresolved
+      sourceKind:   a.enum(['INTAKE_ITEM', 'VENDOR_PAYABLE', 'DRIVER_SUBMISSION', 'INBOX', 'WEBHOOK']),
+      sourceId:     a.string().required(),
+      sourceKey:    a.string(),
+      provider:     a.string(),
+      subject:      a.string(),
+      fromEmail:    a.string(),
+      fromName:     a.string(),
+      fromDomain:   a.string(),
+      receivedAt:   a.datetime(),
+      bodyPreview:  a.string(),            // <= 500 chars
+      partyKind:    a.enum(['CUSTOMER', 'CARRIER', 'VENDOR', 'UNKNOWN']),
+      partyId:      a.string(),
+      partyName:    a.string(),
+      partyMatchHow: a.enum(['EMAIL', 'DOMAIN', 'NAME', 'NONE']),
+      partyCandidates: a.json(),           // <= 3 { kind, id, name, how }
+      shipmentId:   a.string(),
+      shipmentNumber: a.string(),
+      quoteId:      a.string(),
+      documentIds:  a.string().array(),
+      proposalKind: a.enum(['TENDER', 'QUOTE', 'CARRIER_BILL', 'VENDOR_BILL', 'CAPACITY', 'NONE']),
+      proposal:     a.json(),
+      steps:        a.json(),              // <= 12 WorkflowStep
+      documents:    a.json(),              // WorkflowDocumentRef[]
+      attempts:     a.integer(),
+      lastAttemptAt: a.datetime(),
+      startedAt:    a.datetime(),
+      endedAt:      a.datetime(),
+      durationMs:   a.integer(),
+      model:        a.string(),
+      modelCalls:   a.integer(),
+      inputTokens:  a.integer(),
+      outputTokens: a.integer(),
+      memoryRevisions: a.json(),           // { org, orgAgent, party, partyAgent }
+      feedback:     a.json(),              // <= 20 { at, by, rating, text }
+      appliedAt:    a.datetime(),
+      appliedBy:    a.string(),
+      dismissedAt:  a.datetime(),
+      dismissedBy:  a.string(),
+      dismissReason: a.string(),
+      resolvedAt:   a.datetime(),
+      resolvedBy:   a.string(),
+      /*
+       * The sort key of all three indexes. Amplify reserves `updatedAt` as a system
+       * field and refuses it as a sort key, so the agent stamps its own copy on every
+       * write — the `Quote.expiresAt` precedent. Newest-first on this is what makes
+       * "the last 200 runs" and the exception queue one query apiece.
+       */
+      runUpdatedAt: a.datetime(),
+      createdBy:    a.string().required(),
+      updatedBy:    a.string().required(),
+      version:      a.integer(),
+    })
+    .secondaryIndexes((index) => [
+      index('agent').sortKeys(['runUpdatedAt']),
+      index('shipmentId').sortKeys(['runUpdatedAt']),
+      index('exceptionOpen').sortKeys(['runUpdatedAt']),
+    ])
     .disableOperations(['subscriptions', 'delete'])
     .authorization((allow) => [allow.authenticated().to(['read'])]),
 
@@ -1309,6 +1412,9 @@ const schema = a.schema({
       // When the load was posted to the DAT board. Written in step J; the
       // Brokerage dashboard's "posted to DAT" chart reads it from here.
       datPostedAt:     a.datetime(),
+      // The WorkflowRun a person applied to create this shipment. Read-only to a
+      // client (the `voidedAt` pattern above): CREATE_SHIPMENT writes it, nothing else.
+      workflowRunId:   a.string().authorization((allow) => [allow.authenticated().to(['read'])]),
       createdBy:       a.string().required(),
       updatedBy:       a.string().required(),
       version:         a.integer(),
@@ -2126,6 +2232,9 @@ const schema = a.schema({
       customerMessage: a.string(),              // travels onto the public page
       internalNotes:   a.string(),              // never leaves the office
       events:          a.json(),                // QuoteEvent[] — the thread
+      // The WorkflowRun a person applied to create this quote. Read-only to a
+      // client (the `voidedAt` pattern): SAVE_QUOTE writes it, nothing else.
+      workflowRunId:   a.string().authorization((allow) => [allow.authenticated().to(['read'])]),
       createdBy:       a.string().required(),
       updatedBy:       a.string().required(),
       version:         a.integer().required(),
@@ -2517,6 +2626,7 @@ const schema = a.schema({
       // InsurancePolicy[] — validated element-by-element in tmsCarrierActions,
       // capped at 50. Expiry against the pickup date is what blocks a booking.
       insurancePolicies: a.json(),
+      aiMemory: a.json(),                    // PartyAiMemory — human-edited, agent-read
       equipment:    a.string().array(),      // CONTAINER | FLATBED | POWER_ONLY | REEFER | SPECIALIZED | TANKER | VAN
       cargoTypes:   a.string().array(),
       powerUnits:   a.integer(),
@@ -3825,6 +3935,19 @@ const schema = a.schema({
     .authorization((allow) => [allow.authenticated()])
     .handler(a.handler.function(tmsShipmentActions)),
 
+  // Step K: every workflow/AI-agent read and disposition goes through this Lambda.
+  // Actions: LIST_RUNS, GET_RUN, LIST_RUNS_FOR_SHIPMENT, LIST_EXCEPTIONS, RETRY_RUN,
+  // LINK_RUN, SET_RUN_PARTY, DISMISS_RUN, RESOLVE_EXCEPTION, SAVE_FEEDBACK,
+  // RUN_SAMPLE, BACKFILL_AP, SWEEP_STALLED. None of them creates freight: applying a
+  // proposal is still CREATE_SHIPMENT / SAVE_QUOTE / RECORD_BILL under the person's
+  // own identity.
+  tmsWorkflowActions: a
+    .mutation()
+    .arguments({ action: a.string().required(), input: a.json() })
+    .returns(a.json())
+    .authorization((allow) => [allow.authenticated()])
+    .handler(a.handler.function(workflowAgent)),
+
   // Step C: every carrier-directory write goes through this Lambda. Actions:
   // UPSERT_CARRIER, SET_CARRIER_STATUS, UPSERT_CONTACT, ARCHIVE_CONTACT,
   // UPSERT_PAYMENT_METHOD, ARCHIVE_PAYMENT_METHOD, PREPARE_DOCUMENT,
@@ -4008,6 +4131,9 @@ const schema = a.schema({
   // Step F: tmsFinanceActions owns Invoice and ArPayment through the SDK and reads
   // Order/Shipment/Load/LoadCharge/Customer/Division over IAM.
   allow.resource(tmsFinanceActions).to(['query', 'mutate']),
+  // Step K: workflowAgent deliberately holds NO schema grant — it reads its tables
+  // directly over DynamoDB, so an appsync:GraphQL grant on every Query field (Invoice
+  // and FactoringItem reads included) would be authority nothing exercises.
 ])
 
 export type Schema = ClientSchema<typeof schema>

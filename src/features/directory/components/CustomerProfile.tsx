@@ -14,6 +14,7 @@ import {
 } from '@/features/tms/kit'
 import type { TmsTone } from '@/features/tms/kit'
 import { DocumentTypesField } from '@/features/documents/DocumentTypesField'
+import { PartyAiMemoryTab } from '@/features/tms/settings/AiAgentsPage'
 import { useCustomerOrders } from '@/hooks/useCustomerOrders'
 import { useCustomerQuotes } from '@/hooks/useCustomerQuotes'
 import { creditSummaryForCustomer, effectiveCustomerStatus, boardTab } from '@/lib/customerCredit'
@@ -35,9 +36,11 @@ import { CreditLimitCard } from './CreditLimitCard'
 import { CustomerArTab } from './CustomerArTab'
 import { StatusActionDialog } from './StatusActionDialog'
 import type {
+  AiAgentKey,
   CustomerRecord,
   Division,
   LocationRecord,
+  PartyAiMemory,
   TmsSettings,
   ChargeCodeDef,
   CustomerStatus,
@@ -65,10 +68,14 @@ const tabs = [
   { key: 'locations', label: 'Shipping locations' },
   { key: 'settings', label: 'Settings' },
   { key: 'quoting', label: 'Quoting' },
+  { key: 'aiAgents', label: 'AI Agents' },
   { key: 'shipments', label: 'Shipments' },
   { key: 'quotes', label: 'Quotes' },
   { key: 'ar', label: 'AR' },
 ]
+
+/** The two agents that ever read a customer: their mail is quotes and tenders. */
+const CUSTOMER_AGENTS: readonly AiAgentKey[] = ['QUOTE', 'TENDER']
 
 const statusTones: Record<CustomerStatus, TmsTone> = {
   NEW: 'gray',
@@ -147,6 +154,15 @@ export function CustomerProfile({
     } finally {
       setSaving(false)
     }
+  }
+
+  /**
+   * The notes ride the profile's one write door — `UPSERT_CUSTOMER` through `onSave` —
+   * rather than a second path of their own, so a save from this tab is the same save
+   * the footer button makes, with `aiMemory` added.
+   */
+  const saveAiMemory = async (aiMemory: PartyAiMemory) => {
+    await onSave(customer, { ...stripRecord(toRecord({ includeStatus: false })), aiMemory })
   }
 
   return (
@@ -379,6 +395,16 @@ export function CustomerProfile({
               <TmsTextarea value={value.rateConTerms} onChange={(e) => set('rateConTerms', e.target.value)} aria-label="Rate con terms override" />
             </TmsCard>
           </div>
+        )}
+
+        {tab === 'aiAgents' && (
+          <PartyAiMemoryTab
+            partyId={customer.id}
+            partyWord="customer"
+            agents={CUSTOMER_AGENTS}
+            memory={customer.aiMemory}
+            onSave={saveAiMemory}
+          />
         )}
 
         {tab === 'shipments' && (

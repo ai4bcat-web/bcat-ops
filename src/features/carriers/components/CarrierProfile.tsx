@@ -9,7 +9,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  Banknote, Building2, ExternalLink, FileText, History, Phone, Shield, Truck, Wallet, X,
+  Banknote, Bot, Building2, ExternalLink, FileText, History, Phone, Shield, Truck, Wallet, X,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { TmsBadge, TmsButton, TmsCard, TmsIconButton, TmsTabs } from '@/features/tms/kit'
@@ -22,6 +22,7 @@ import {
   getCarrierDocumentUrl, graphqlErrorText, listAuditLogs, prepareCarrierDocument, setCarrierStatus,
   upsertCarrier, upsertCarrierContact, upsertCarrierPaymentMethod, uploadCarrierDocumentFile,
 } from '@/lib/apiClient'
+import type { UpsertCarrierInput } from '@/lib/apiClient'
 import { insuranceState, oosBps } from '@/lib/carrierEligibility'
 import {
   CARRIER_STATUS_LABELS, CARRIER_STATUS_REASON_LABELS, effectiveCarrierStatus,
@@ -30,6 +31,7 @@ import { formatCents } from '@/lib/tmsDirectory'
 import {
   DEFAULT_INSURANCE_WARN_DAYS, DEFAULT_REQUIRED_CARRIER_DOCS, INSURANCE_STATE_TONE,
 } from '../carrierViews'
+import { PartyAiMemoryTab } from '@/features/tms/settings/AiAgentsPage'
 import { CarrierApTab } from './CarrierApTab'
 import { CarrierContactsEditor, type CarrierContactDraft } from './CarrierContactsEditor'
 import { CarrierDocumentsEditor } from './CarrierDocumentsEditor'
@@ -44,7 +46,8 @@ import { InsurancePoliciesEditor } from './InsurancePoliciesEditor'
 import type { AuditLogEntry } from '@/types'
 import type { TmsTone } from '@/features/tms/kit'
 import type {
-  CarrierDocumentType, CarrierRecord, CarrierStatus, InsurancePolicy, TmsSettings,
+  AiAgentKey, CarrierDocumentType, CarrierRecord, CarrierStatus, InsurancePolicy, PartyAiMemory,
+  TmsSettings,
 } from '@/types/tms'
 
 const TABS = [
@@ -54,9 +57,13 @@ const TABS = [
   { key: 'payment', label: 'Payment', icon: Wallet },
   { key: 'ap', label: 'AP', icon: Banknote },
   { key: 'equipment', label: 'Equipment', icon: Truck },
+  { key: 'aiAgents', label: 'AI Agents', icon: Bot },
   { key: 'loads', label: 'Shipments', icon: FileText },
   { key: 'activity', label: 'Activity', icon: History },
 ]
+
+/** The two agents that ever read a carrier: their mail is invoices and capacity. */
+const CARRIER_AGENTS: readonly AiAgentKey[] = ['AP', 'CAPACITY']
 
 const STATUS_TONE: Record<CarrierStatus, TmsTone> = {
   PENDING: 'orange',
@@ -128,7 +135,9 @@ export function CarrierProfile({ carrierId, isAdmin, settings, onClose, onChange
 
   const effective = carrier ? effectiveCarrierStatus(carrier, now) : null
 
-  const saveCarrier = async (patch: CarrierPatch) => {
+  // Widened past `CarrierPatch` so the AI Agents tab can send `aiMemory` through the
+  // same door the form uses: `UPSERT_CARRIER` is the carrier's only write path.
+  const saveCarrier = async (patch: Omit<UpsertCarrierInput, 'id' | 'expectedUpdatedAt'>) => {
     if (!carrier) return
     const next = await upsertCarrier({ id: carrier.id, expectedUpdatedAt: carrier.updatedAt, ...patch })
     replaceCarrier(next)
@@ -335,6 +344,16 @@ export function CarrierProfile({ carrierId, isAdmin, settings, onClose, onChange
                   loading={ap.loading}
                   error={ap.error}
                   onRefresh={ap.refresh}
+                />
+              )}
+
+              {tab === 'aiAgents' && (
+                <PartyAiMemoryTab
+                  partyId={carrier.id}
+                  partyWord="carrier"
+                  agents={CARRIER_AGENTS}
+                  memory={carrier.aiMemory}
+                  onSave={(aiMemory: PartyAiMemory) => saveCarrier({ aiMemory })}
                 />
               )}
 

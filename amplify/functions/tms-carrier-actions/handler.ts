@@ -45,6 +45,7 @@ import {
 } from '../../../src/lib/carrierStatus'
 import { normalizeQuickPayTiers } from '../../../src/lib/quickPay'
 import { normalizeName } from '../../../src/lib/tmsDirectory'
+import { validatePartyMemory } from '../../../src/lib/workflows/memory'
 import type { CarrierStatus, CarrierStatusReason, InsurancePolicy } from '../../../src/types/tms'
 
 const dynamo = new DynamoDBClient({})
@@ -711,6 +712,9 @@ async function upsertCarrier(input: Row, caller: Caller): Promise<Row> {
     vehicleOos: optionalInteger(input.vehicleOos, { min: 0, label: 'vehicleOos' }),
 
     insurancePolicies: validateInsurancePolicies(input.insurancePolicies),
+    // Step K — the standing notes the AI agents read before they propose anything
+    // for this carrier. Human-edited here and nowhere else; the agent only reads it.
+    aiMemory: validatePartyMemory(input.aiMemory, existing?.aiMemory, caller.email, now),
     equipment: optionalStringArray(input.equipment, 50),
     cargoTypes: optionalStringArray(input.cargoTypes, 100),
     powerUnits: optionalInteger(input.powerUnits, { min: 0, label: 'powerUnits' }),
