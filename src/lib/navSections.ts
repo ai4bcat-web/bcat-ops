@@ -73,6 +73,11 @@ export const TMS_ITEMS: NavItemDef[] = [
   { to: '/tms/brokerage',  label: 'My Brokerage', icon: Building,        pageKey: 'settings',  section: BROKERAGE, tms: true },
 ]
 
+/** A division code as a section header: `CAR_SHIPPING` reads `CAR SHIPPING`. */
+export function sectionTitle(code: string): string {
+  return code.replace(/_/g, ' ')
+}
+
 /** The title the TMS top bar shows for a path — the longest matching item wins. */
 export function tmsPageTitle(pathname: string): string {
   let best: NavItemDef | null = null
@@ -137,7 +142,7 @@ export function buildNavSections({
         // The rails render "CODE [brand]"; the code IS the section label, and the
         // business it trades as is the brand beside it.
         key: division.code,
-        name: division.code,
+        name: sectionTitle(division.code),
         brand: division.brand ?? null,
         items: [{
           to: `/tms/shipments/view/division-${division.code}`,
@@ -158,7 +163,7 @@ export function buildNavSections({
       badgeKey: def.badgeKey,
     }))
     if (items.length === 0) continue
-    sections.push({ key: division.code, name: division.code, brand: division.brand ?? null, items })
+    sections.push({ key: division.code, name: sectionTitle(division.code), brand: division.brand ?? null, items })
   }
   return sections
 }

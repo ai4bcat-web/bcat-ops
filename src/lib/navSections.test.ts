@@ -55,6 +55,9 @@ describe('buildNavSections', () => {
     const sections = buildNavSections({ divisions: FOUR, hasPageAccess: () => false, isOwner: true })
     expect(sections.map((s) => s.key)).toEqual(['BROKERAGE', 'ASSETS', 'CAR_SHIPPING', 'COMPANY'])
     expect(sections[3].items.map((i) => i.label)).toContain('Finances')
+    // The header reads as a business name, not as a code: `CAR SHIPPING [Best Care Auto Transport]`.
+    expect(sections[2].name).toBe('CAR SHIPPING')
+    expect(sections[2].brand).toBe('Best Care Auto Transport')
   })
 
   it('keeps a fleet user out of the Brokerage section', () => {

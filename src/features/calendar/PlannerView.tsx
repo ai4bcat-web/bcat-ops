@@ -178,7 +178,8 @@ function ApptCell({ iso, type, apptEnd, colorCls, yard, city }: {
   // label rather than a misleading 12:00 AM.
   const noTime = type !== 'fcfs' && type !== 'tbd' && type !== 'range' && !apptHasTime(iso)
   const isSpecial = type === 'fcfs' || type === 'tbd' || noTime
-  const specialLabel = type === 'tbd' ? needLabel(iso) : noTime ? PENDING_LABEL : type!.toUpperCase()
+  // A load the Shipment page created carries no appt type at all; it reads as exact.
+  const specialLabel = type === 'tbd' ? needLabel(iso) : noTime ? PENDING_LABEL : (type ?? 'exact').toUpperCase()
   return (
     <div className={`flex flex-col justify-center px-1.5 leading-tight ${colorCls}`} style={{ width: w }}>
       <span className="text-[10px] text-slate-400 truncate">{formatDateShort(iso)}</span>

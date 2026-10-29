@@ -128,3 +128,16 @@ describe('POD column', () => {
     expect(screen.getAllByLabelText('POD: still loading').length).toBeGreaterThan(0)
   })
 })
+
+describe('PlannerView and a load the Shipment page created', () => {
+  it('renders a timed appointment that carries no appt type instead of crashing', () => {
+    const weekStart = new Date('2026-08-17T00:00:00-05:00')
+    const load = batoryLoad({
+      id: 'l2', aljexId: 'S000070-1',
+      pickupApptType: null, deliveryApptType: null,
+      stops: [pickupStop({ apptType: undefined }), deliveryStop({ appt: fromDateTimeInput('2026-08-21T15:00'), apptType: undefined })],
+    } as unknown as Partial<Load>)
+    render(<PlannerView loads={[load]} drivers={[{ id: 'd1', name: 'Zak Pace' }]} weekStart={weekStart} numDays={7} />)
+    expect(screen.getByText('S000070-1')).toBeTruthy()
+  })
+})
