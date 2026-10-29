@@ -14,8 +14,10 @@
  * against an explicitly named non-production environment.
  *
  * Idempotent in both directions: a load that already carries a `shipmentId` is
- * skipped, and the rows are written under deterministic ids with conditional puts,
- * so an interrupted run can simply be run again.
+ * skipped, a load whose link was erased (a Load table refreshed from production) is
+ * pointed back at the Shipment that already exists under its deterministic id, and
+ * the rows are written under deterministic ids with conditional puts, so an
+ * interrupted run can simply be run again.
  */
 
 import { resolve } from 'node:path';
@@ -77,13 +79,19 @@ export function tallyPlanned(planned) {
   const byShipmentStatus = {};
   const byArStatus = {};
   const byAssignment = {};
+  const bySkipReason = {};
+  let relink = 0;
+  let create = 0;
   for (const p of planned) {
     byLoadStatus[p.loadStatus] = (byLoadStatus[p.loadStatus] ?? 0) + 1;
     byShipmentStatus[p.shipmentStatus] = (byShipmentStatus[p.shipmentStatus] ?? 0) + 1;
     byArStatus[p.arStatus] = (byArStatus[p.arStatus] ?? 0) + 1;
     byAssignment[p.assignmentType] = (byAssignment[p.assignmentType] ?? 0) + 1;
+    if (p.skipped) bySkipReason[p.skipped] = (bySkipReason[p.skipped] ?? 0) + 1;
+    else if (p.relink) relink += 1;
+    else create += 1;
   }
-  return { byLoadStatus, byShipmentStatus, byArStatus, byAssignment };
+  return { byLoadStatus, byShipmentStatus, byArStatus, byAssignment, bySkipReason, relink, create };
 }
 
 const LOAD_FIELDS = `

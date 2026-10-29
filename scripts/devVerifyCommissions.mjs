@@ -22,6 +22,12 @@
  * retired at the end. It touches no copied customer, carrier, load or invoice, and
  * it refuses to run against anything but the dev API.
  *
+ * The caller is any dev ADMIN — the owner, or a temporary admin minted in the dev
+ * pool for the run. `delete` on the Users API is owner-only, so when the caller is
+ * not the owner the refusal is recorded as a check of its own and the temporary
+ * identities are removed straight from the dev pool and the UserProfile table
+ * instead, with the same AWS credentials the backfills use.
+ *
  *   BCAT_EMAIL=… BCAT_PASSWORD=… node scripts/devVerifyCommissions.mjs
  */
 import { randomBytes } from 'node:crypto'
@@ -30,6 +36,9 @@ import { authenticateTmsUser } from './lib/tmsAuth.mjs'
 const DEV_API = 'https://f5iqzdpidzalvjys7yxijn5ave.appsync-api.us-east-1.amazonaws.com/graphql'
 const DEV_POOL = 'us-east-1_UKhMNVAG1'
 const DEV_CLIENT = '59284j3vm69gqg49cinjrr4dci'
+const DEV_TABLE_SUFFIX = 'nc3jsnxdmjhkpequimypiatkma-NONE'
+/** Must match OWNER_EMAIL in amplify/functions/userManagement/handler.ts. */
+const OWNER_EMAIL = 'ryne@bcatcorp.com'
 
 const outputs = {
   auth: {
@@ -112,6 +121,37 @@ function secret() {
   return `Aa1!${randomBytes(18).toString('base64url')}`
 }
 
+const region = 'us-east-1'
+let poolClient = null
+async function cognitoAdmin() {
+  const sdk = await import('@aws-sdk/client-cognito-identity-provider')
+  poolClient ??= new sdk.CognitoIdentityProviderClient({ region })
+  return { sdk, client: poolClient }
+}
+
+/** A permanent password for a temporary identity this run created, set in the dev pool. */
+async function setPoolPassword(username, password) {
+  const { sdk, client } = await cognitoAdmin()
+  await client.send(new sdk.AdminSetUserPasswordCommand({
+    UserPoolId: DEV_POOL, Username: username, Password: password, Permanent: true,
+  }))
+}
+
+/**
+ * The owner-only `delete` fallback: the login goes from the dev pool and its profile
+ * row from the dev table, the same two writes the Users API makes. Only ever pointed
+ * at an identity this run created.
+ */
+async function deleteFromPool(username) {
+  const [{ sdk, client }, { DynamoDBClient, DeleteItemCommand }] =
+    await Promise.all([cognitoAdmin(), import('@aws-sdk/client-dynamodb')])
+  await new DynamoDBClient({ region }).send(new DeleteItemCommand({
+    TableName: `UserProfile-${DEV_TABLE_SUFFIX}`,
+    Key: { id: { S: username } },
+  }))
+  await client.send(new sdk.AdminDeleteUserCommand({ UserPoolId: DEV_POOL, Username: username }))
+}
+
 let amplifyAuth = null
 async function authModule() {
   if (!amplifyAuth) {
@@ -160,25 +200,21 @@ async function main() {
     ).then((d) => d.getTmsSettings)
 
     // ── roles: two temporary identities, created and signed in for real ─────
-    const repEmail = `zz-rep-${stamp}@bcatcorp.com`
-    const noneEmail = `zz-none-${stamp}@bcatcorp.com`
+    const repEmail = `zz-rep-${stamp}@example.invalid`
+    const noneEmail = `zz-none-${stamp}@example.invalid`
     const repPassword = secret()
     const nonePassword = secret()
 
-    await manageUsers({
-      action: 'create',
-      email: repEmail,
-      role: 'CUSTOMER_REP',
-      input: JSON.stringify({ temporaryPassword: repPassword, suppressInvite: true }),
-    })
+    // Created through the Users API exactly as an invite from the page is — that is the
+    // path under test — then given a password straight in the dev pool, since the
+    // Lambda's invite goes to a mailbox that does not exist and the challenge password
+    // in it is nobody's to read.
+    await manageUsers({ action: 'create', email: repEmail, role: 'CUSTOMER_REP' })
     createdUsers.push(repEmail)
-    await manageUsers({
-      action: 'create',
-      email: noneEmail,
-      role: 'NONE',
-      input: JSON.stringify({ temporaryPassword: nonePassword, suppressInvite: true }),
-    })
+    await setPoolPassword(repEmail, repPassword)
+    await manageUsers({ action: 'create', email: noneEmail, role: 'NONE' })
     createdUsers.push(noneEmail)
+    await setPoolPassword(noneEmail, nonePassword)
 
     const repGroups = await manageUsers({ action: 'getGroups', username: repEmail })
     const repGroupNames = Array.isArray(repGroups) ? repGroups : repGroups?.groups ?? []
@@ -206,7 +242,7 @@ async function main() {
 
     // ── lock-out guards, from the server ────────────────────────────────────
     await refuses("the owner's role cannot be changed", /owner/i, () =>
-      manageUsers({ action: 'setRole', username: process.env.BCAT_EMAIL ?? '', role: 'CUSTOMER_REP' }))
+      manageUsers({ action: 'setRole', username: OWNER_EMAIL, role: 'CUSTOMER_REP' }))
     await refuses('a non-admin cannot list users', /owner or ADMIN|Forbidden/i, () =>
       manageUsersAs(repToken, { action: 'list' }))
     await refuses('a customer rep cannot grant admin', /owner/i, () =>
@@ -506,10 +542,25 @@ async function main() {
   } finally {
     // ── cleanup: the identities first, then the freight ────────────────────
     token = (await authenticateTmsUser(outputs).catch(() => ({ token }))).token ?? token
+    let ownerOnlyRefusalSeen = false
     for (const email of createdUsers) {
-      await manageUsers({ action: 'delete', username: email })
-        .then(() => console.log(`cleanup: deleted temporary identity ${email}`))
-        .catch((err) => console.log(`cleanup: could not delete ${email}: ${String(err.message).slice(0, 120)}`))
+      try {
+        await manageUsers({ action: 'delete', username: email })
+        console.log(`cleanup: deleted temporary identity ${email}`)
+      } catch (err) {
+        const message = String(err.message ?? err)
+        if (/only the owner may delete/i.test(message)) {
+          if (!ownerOnlyRefusalSeen) {
+            ownerOnlyRefusalSeen = true
+            ok('an admin who is not the owner cannot delete a user', message.slice(0, 140))
+          }
+          await deleteFromPool(email)
+            .then(() => console.log(`cleanup: removed temporary identity ${email} from the dev pool directly`))
+            .catch((e) => console.log(`cleanup: could not remove ${email}: ${String(e.message).slice(0, 120)}`))
+        } else {
+          console.log(`cleanup: could not delete ${email}: ${message.slice(0, 120)}`)
+        }
+      }
     }
     for (const shipmentId of createdShipments) {
       for (const step of ['cancel', 'delete']) {

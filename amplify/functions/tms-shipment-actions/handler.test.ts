@@ -3181,6 +3181,38 @@ describe('BACKFILL_SHIPMENT', () => {
     expect(JSON.stringify([...table(TABLES.shipment).values()])).toBe(first)
   })
 
+  it('points a load whose link was erased back at its surviving shipment, without a second one', async () => {
+    // A Load table refreshed from production: the freight is back as it was, the
+    // shipmentId/orderId/customerId a previous run wrote are gone, the Shipment,
+    // Order and own-asset leg it wrote are still there.
+    seedLegacyLoad('lod-legacy')
+    await call('BACKFILL_SHIPMENT', { loadIds: ['lod-legacy'], dryRun: false }, ADMIN)
+    const shipmentsBefore = JSON.stringify([...table(TABLES.shipment).values()])
+    const ordersBefore = JSON.stringify([...table(TABLES.order).values()])
+    const legsBefore = JSON.stringify([...table(TABLES.carrier).values()])
+    const linked = table(TABLES.load).get('lod-legacy')!
+    const { shipmentId, orderId, loadNumber, activeLoadCarrierId } = linked
+    seedLegacyLoad('lod-legacy', { customerId: null, customer: 'SOME SHIPPER WE NEVER ADDED' })
+
+    const plan = (await call('BACKFILL_SHIPMENT', { loadIds: ['lod-legacy'] }, ADMIN)) as {
+      planned: { relink: boolean; skipped: string | null; customerId: string | null }[]
+    }
+    expect(plan.planned[0]).toMatchObject({ relink: true, skipped: null, customerId: 'cus-1' })
+
+    const report = (await call('BACKFILL_SHIPMENT', { loadIds: ['lod-legacy'], dryRun: false }, ADMIN)) as {
+      applied: number
+      skipped: unknown[]
+    }
+    expect(report).toMatchObject({ applied: 1, skipped: [] })
+    expect(table(TABLES.shipment).size).toBe(1)
+    expect(JSON.stringify([...table(TABLES.shipment).values()])).toBe(shipmentsBefore)
+    expect(JSON.stringify([...table(TABLES.order).values()])).toBe(ordersBefore)
+    expect(JSON.stringify([...table(TABLES.carrier).values()])).toBe(legsBefore)
+    expect(table(TABLES.load).get('lod-legacy')).toMatchObject({
+      shipmentId, orderId, loadNumber, activeLoadCarrierId, assignmentType: 'OWN_ASSET',
+    })
+  })
+
   it('leaves a broker pseudo-driver load needing cover, with no carrier row', async () => {
     seedLegacyLoad('lod-broker', {
       stops: JSON.stringify([

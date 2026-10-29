@@ -56,6 +56,37 @@ describe('backfillCustomers planning', () => {
     expect(update.customerKey).toBe('new customer');
   });
 
+  it('leaves a load that already carries a customerId alone', async () => {
+    const client = createMemoryClient({
+      customers: [{ id: 'cust-1', name: 'Acme LLC', normalizedName: 'acme', active: true }],
+      loads: [
+        { id: 'l1', customer: 'ACME LLC', customerId: 'cust-1', updatedAt: 't1' },
+        { id: 'l2', customer: 'ACME LLC', customerId: 'cust-other', updatedAt: 't2' },
+        { id: 'l3', customer: 'ACME LLC', updatedAt: 't3' },
+      ],
+    });
+    const plan = await buildCustomerPlan({ client, env: 'test', endpoint: 'memory://' });
+    expect(plan.summary).toMatchObject({ loadsToUpdate: 1, loadsAlreadyLinked: 2 });
+    expect(plan.actions.map((a) => a.loadId)).toEqual(['l3']);
+  });
+
+  it('link-only creates nobody and reports the names it could not link, with their loads', async () => {
+    const client = createMemoryClient({
+      customers: [{ id: 'cust-1', name: 'Acme LLC', normalizedName: 'acme', active: true }],
+      loads: [
+        { id: 'l1', customer: 'ACME LLC', updatedAt: 't1' },
+        { id: 'l2', customer: 'New Customer Inc.', updatedAt: 't2' },
+        { id: 'l3', customer: 'NEW CUSTOMER', updatedAt: 't3' },
+      ],
+    });
+    const plan = await buildCustomerPlan({ client, env: 'test', endpoint: 'memory://', linkOnly: true });
+    expect(plan.actions.map((a) => [a.action, a.loadId])).toEqual([['updateLoad', 'l1']]);
+    expect(plan.summary).toMatchObject({ newCustomers: 0, loadsToUpdate: 1, unmatchedNames: 1, unmatchedLoads: 2 });
+    expect(plan.unresolved).toEqual([
+      expect.objectContaining({ kind: 'NO_CUSTOMER_MATCH', normalizedName: 'new customer', loadCount: 2 }),
+    ]);
+  });
+
   it('flags ambiguous customer matches for review', async () => {
     const client = createMemoryClient({
       customers: [

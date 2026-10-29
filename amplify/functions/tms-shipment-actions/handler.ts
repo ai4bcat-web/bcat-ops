@@ -4383,6 +4383,8 @@ interface BackfillPlan {
   loadCarrierId: string | null
   driverId: string | null
   revenueCents: number
+  /** The Shipment under this load's deterministic id already exists: re-point only. */
+  relink: boolean
   skipped: string | null
 }
 
@@ -4392,8 +4394,18 @@ interface BackfillPlan {
  * Nothing here invents history: the number keeps the Aljex id the office already
  * says out loud, the status comes from the stop clock, and AR never goes past
  * UNBILLED because no invoice has been recorded for any of these loads.
+ *
+ * When the Shipment already exists — a Load table refreshed from production keeps
+ * the freight and loses the link a previous run wrote — that row is the record:
+ * the load is pointed back at it and its customer, the number is the one it already
+ * carries, and no customer match is asked for, because nothing is being created.
  */
-function planBackfill(load: Row, brokerDriverIds: Set<string>, customerId: string | null): BackfillPlan {
+function planBackfill(
+  load: Row,
+  brokerDriverIds: Set<string>,
+  customerId: string | null,
+  existing: Row | null,
+): BackfillPlan {
   const loadId = String(load.id)
   const stops = readStops(load)
   const driverIds = stops
@@ -4407,12 +4419,14 @@ function planBackfill(load: Row, brokerDriverIds: Set<string>, customerId: strin
 
   const loadStatus = backfillLoadStatus(load)
   const revenueCents = numberOrNull(load.rate) ?? 0
+  const relink = existing != null
+  const existingOrderId = relink && Array.isArray(existing.orderIds) ? optionalString(existing.orderIds[0], 100) : null
   return {
     loadId,
     shipmentId: stableId('shp', loadId),
-    orderId: stableId('ord', loadId),
-    number: `L${String(load.aljexId ?? loadId)}`,
-    customerId,
+    orderId: existingOrderId ?? stableId('ord', loadId),
+    number: (relink ? optionalString(existing.number, 40) : null) ?? `L${String(load.aljexId ?? loadId)}`,
+    customerId: (relink ? optionalString(existing.customerId, 100) : null) ?? customerId,
     loadStatus,
     shipmentStatus: loadStatus === 'SOURCING' ? 'OPEN' : (loadStatus as ShipmentStatus),
     arStatus: loadStatus !== 'DELIVERED' ? 'DOCS_NEEDED' : (load.readyToInvoice === true ? 'UNBILLED' : 'DOCS_NEEDED'),
@@ -4420,7 +4434,8 @@ function planBackfill(load: Row, brokerDriverIds: Set<string>, customerId: strin
     loadCarrierId: ownAsset ? stableId('lcr', loadId) : null,
     driverId: realDriverId,
     revenueCents,
-    skipped: load.shipmentId ? 'ALREADY_LINKED' : customerId ? null : 'NO_CUSTOMER_MATCH',
+    relink,
+    skipped: load.shipmentId ? 'ALREADY_LINKED' : (relink || customerId) ? null : 'NO_CUSTOMER_MATCH',
   }
 }
 
@@ -4450,7 +4465,8 @@ async function backfillShipments(input: Row, caller: Caller): Promise<Row> {
       missing.push(loadId)
       continue
     }
-    const plan = planBackfill(load, brokerDriverIds, resolveBackfillCustomerId(load, customersByName))
+    const existing = load.shipmentId ? null : await getById(SHIPMENT_TABLE_NAME, stableId('shp', loadId))
+    const plan = planBackfill(load, brokerDriverIds, resolveBackfillCustomerId(load, customersByName), existing)
     planned.push(plan)
     if (dryRun || plan.skipped) continue
 
@@ -4463,10 +4479,10 @@ async function backfillShipments(input: Row, caller: Caller): Promise<Row> {
     const deliveryAppt = optionalString(legacy.deliveryAppt, 64) ?? optionalString(load.deliveryAppt, 64) ?? undefined
     const pickupMonth = monthOf(pickupAppt) ?? undefined
 
-    // A half-finished earlier run leaves the rows but not the link; re-running then
-    // only has to repoint the load, and the conditional puts guarantee it either way.
-    const already = await getById(SHIPMENT_TABLE_NAME, plan.shipmentId)
-    if (!already) {
+    // The rows survive a refresh of the Load table; only the link on the load is lost.
+    // Re-running then only has to repoint the load, and the conditional puts guarantee
+    // it either way.
+    if (!plan.relink) {
       const writes: TransactWriteItem[] = [
         putItem(SHIPMENT_TABLE_NAME, {
           id: plan.shipmentId,
@@ -4582,6 +4598,17 @@ async function backfillShipments(input: Row, caller: Caller): Promise<Row> {
       await transact(writes, 'backfill')
     }
 
+    // On a relink the leg that is really on the load wins over a fresh derivation:
+    // the own-asset row a previous run wrote, or a carrier booked on the mirror since.
+    let assignmentType: 'OWN_ASSET' | 'CARRIER' | 'NEED_TO_COVER' = plan.assignmentType
+    let activeLoadCarrierId = plan.loadCarrierId
+    if (plan.relink) {
+      const legs = await queryIndex(LOAD_CARRIER_TABLE_NAME, IDX_CARRIERS_BY_LOAD, 'loadId', plan.loadId)
+      const active = legs.find((c) => c.status === 'ACTIVE') ?? null
+      activeLoadCarrierId = active ? String(active.id) : null
+      assignmentType = active ? (active.kind === 'CARRIER' ? 'CARRIER' : 'OWN_ASSET') : 'NEED_TO_COVER'
+    }
+
     const client = await getDataClient()
     assertLoadWriteOk(
       await client.models.Load.update({
@@ -4594,8 +4621,8 @@ async function backfillShipments(input: Row, caller: Caller): Promise<Row> {
         statusChangedAt: now,
         statusChangedBy: caller.email,
         statusSource: 'BACKFILL',
-        assignmentType: plan.assignmentType,
-        activeLoadCarrierId: plan.loadCarrierId,
+        assignmentType,
+        activeLoadCarrierId,
         ...(pickupMonth ? { pickupMonth } : {}),
         updatedBy: caller.email,
       }),
