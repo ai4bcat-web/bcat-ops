@@ -28,7 +28,7 @@ The entry points that create freight often have only the typed text — a shipme
 - **Refuse to record the freight at all.** The truck still moves; now nothing in BCAT knows about it.
 - **Say "we do not know yet".** The shipment is real, the typed text is kept exactly as written, and the one missing fact is visible and fixable.
 
-BCAT takes the third. The unresolved shipment shows on the board, has a PRO, takes stops, documents and a carrier — and sits in the **Unknown customers** tab of [Workflow Errors](workflows-errors.md) until somebody links a record.
+BCAT takes the third. The unresolved shipment shows on the board with an unresolved-customer exception icon (see the **Icon Key** on the Shipments board), and sits in the **Unknown customers** tab of [Workflow Errors](workflows-errors.md) until somebody links a record.
 
 ## The dialog, and what it does
 

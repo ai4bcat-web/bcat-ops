@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '@/hooks/useAuth'
 import { NAV_ITEMS } from '@/lib/navItems'
-import { TMS_ITEMS } from '@/lib/navSections'
+import { PINNED_ITEMS, TMS_ITEMS } from '@/lib/navSections'
 
 /**
  * Route-level access control. `hasPageAccess` is the SAME allowlist the sidebar uses,
@@ -13,9 +13,10 @@ import { TMS_ITEMS } from '@/lib/navSections'
  * passes its own guard. If they can open nothing, they get a plain "no access" panel.
  *
  * The TMS pages come first: `/tms/*` is where a brokerage user lives, and every one of
- * those routes accepts its original page key OR `tms`.
+ * those routes accepts its original page key OR `tms`. Pinned items (Shipments) are
+ * included so a shared-loads grant still has a landing target.
  */
-const ALL_ITEMS = [...TMS_ITEMS, ...NAV_ITEMS]
+const ALL_ITEMS = [...PINNED_ITEMS, ...TMS_ITEMS, ...NAV_ITEMS]
 
 function firstAccessiblePath(hasPageAccess: (k: string) => boolean): string | null {
   return ALL_ITEMS.find((i) => hasPageAccess(i.pageKey))?.to ?? null

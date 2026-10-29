@@ -1,18 +1,20 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi } from 'vitest'
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
-import type * as AuthModule from '@/hooks/useAuth'
-import type { ShipmentViewRecord } from '@/types/tms'
-import type { ShipmentRow } from './shipmentViews'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { render, screen, within, fireEvent, waitFor } from '@testing-library/react'
+import '@testing-library/jest-dom/vitest'
+import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import { ShipmentsBoard } from './ShipmentsBoard'
+import type { ShipmentRow } from './shipmentViews'
+import type { ShipmentViewRecord, OrderRecord } from '@/types/tms'
+import type { Load } from '@/types'
 
-class ResizeObserverStub { observe() {} unobserve() {} disconnect() {} }
-globalThis.ResizeObserver ??= ResizeObserverStub as unknown as typeof ResizeObserver
+// Force the tab strip to show every tab; its ResizeObserver would otherwise collapse
+// everything into the overflow menu under jsdom's zero-width container.
+globalThis.ResizeObserver = undefined as unknown as typeof ResizeObserver
 if (!Element.prototype.hasPointerCapture) Element.prototype.hasPointerCapture = () => false
 if (!Element.prototype.scrollIntoView) Element.prototype.scrollIntoView = () => {}
 
-function row(id: string, patch: Partial<ShipmentRow>): ShipmentRow {
+function row(id: string, patch: Partial<ShipmentRow> = {}): ShipmentRow {
   return {
     id,
     number: id,
@@ -26,91 +28,162 @@ function row(id: string, patch: Partial<ShipmentRow>): ShipmentRow {
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
     ...patch,
-  }
+  } as ShipmentRow
 }
 
-/** Noon today, local — what "picking up today" means to the quick-tab. */
-const today = () => {
-  const d = new Date()
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 12).toISOString()
-}
-
-const shipments: ShipmentRow[] = [
-  row('S000001', { status: 'DRAFT', searchKey: 's000001 acme freight chicago il' }),
-  row('S000002', {
-    status: 'OPEN',
-    searchKey: 's000002 acme freight dallas tx',
-    pickupAppt: today(),
-    revDivision: 'ASSETS',
-    revSubdivision: 'BOX_TRUCK',
-    salesRepId: 'pavel',
-  }),
-  row('S000003', {
-    status: 'IN_TRANSIT',
-    searchKey: 's000003 globex denver co',
-    customerName: 'Globex',
-    revDivision: 'BROKERAGE',
-  }),
-  row('S000004', { status: 'DELIVERED', searchKey: 's000004 globex denver co', customerName: 'Globex' }),
-  row('S000005', { status: 'UNLOADING', searchKey: 's000005 initech boise id', customerName: 'Initech' }),
-  row('S000006', {
+function deliveredRow(id: string, patch: Partial<ShipmentRow> = {}): ShipmentRow {
+  return row(id, {
     status: 'DELIVERED',
-    searchKey: 's000006 acme freight voided',
-    voidedAt: '2026-02-01T00:00:00.000Z',
-    voidedBy: 'ryne@bcatcorp.com',
-    voidReason: 'Billed twice by mistake',
-  }),
-  // Step R — a shipment that carries only the operator's typed customer text.
-  row('S000007', {
-    status: 'PLANNED',
-    searchKey: 's000007 direct drive logistics',
-    customerId: null,
-    customerName: 'DIRECT DRIVE LOGISTICS',
-  }),
+    docsMissing: [],
+    revenueCents: 100_000,
+    costCents: 80_000,
+    profitCents: 20_000,
+    marginBps: 2000,
+    stops: [{ type: 'pickup', departedAt: '2026-01-02T00:00:00Z' }, { type: 'delivery', departedAt: '2026-01-03T00:00:00Z' }] as unknown as ShipmentRow['stops'],
+    ...patch,
+  })
+}
+
+const customers = [
+  { id: 'cust-1', name: 'Acme Freight' },
+  { id: 'cust-2', name: 'Globex' },
 ]
 
-const views: ShipmentViewRecord[] = [{
-  id: 'brokerage-board',
-  slug: 'brokerage-board',
-  name: 'Brokerage board',
-  department: 'Brokerage',
-  description: null,
-  filters: { divisions: ['BROKERAGE'] },
-  columns: null,
-  sort: null,
-  isDefault: false,
-  audience: null,
-  sortOrder: 10,
-  active: true,
-  createdBy: 'a@b.c',
-  updatedBy: 'a@b.c',
-  version: 1,
-  createdAt: '2026-01-01T00:00:00.000Z',
-  updatedAt: '2026-01-01T00:00:00.000Z',
-}]
+const views: ShipmentViewRecord[] = [
+  {
+    id: 'active-shipments',
+    slug: 'active-shipments',
+    name: 'Active Shipments',
+    department: 'Shipments',
+    description: null,
+    filters: {
+      board: {
+        statuses: ['OPEN', 'COVERED', 'DISPATCHED', 'ARRIVED', 'DEPARTED', 'DELIVERED'],
+        details: {},
+        dates: {},
+      },
+    },
+    columns: null,
+    sort: null,
+    isDefault: true,
+    audience: null,
+    sortOrder: 0,
+    active: true,
+    createdBy: 'a@b.c',
+    updatedBy: 'a@b.c',
+    version: 1,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  },
+  {
+    id: 'all-shipments',
+    slug: 'all-shipments',
+    name: 'All Shipments',
+    department: 'Shipments',
+    description: null,
+    filters: {
+      board: {
+        statuses: [],
+        details: {},
+        dates: {},
+      },
+    },
+    columns: null,
+    sort: null,
+    isDefault: false,
+    audience: null,
+    sortOrder: 10,
+    active: true,
+    createdBy: 'a@b.c',
+    updatedBy: 'a@b.c',
+    version: 1,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  },
+]
 
 const { auth } = vi.hoisted(() => ({ auth: { isAdmin: true, isOwner: false } }))
+
+const {
+  setShipmentStatus,
+  duplicateShipment,
+  tenderRespond,
+  readyToInvoice,
+  setSalesRep,
+  createShipmentForLoad,
+  unvoidShipment,
+  voidShipment,
+  repointShipmentCustomer,
+  repointInvoicedCustomer,
+  saveShipmentView,
+  archiveShipmentView,
+  saveShipmentColumnTemplate,
+  deleteShipmentColumnTemplate,
+  listOrders,
+  listShipmentColumnTemplates,
+  saveBlob,
+  getTmsSettings,
+  graphqlErrorText,
+} = vi.hoisted(() => ({
+  setShipmentStatus: vi.fn(),
+  duplicateShipment: vi.fn(),
+  tenderRespond: vi.fn(),
+  readyToInvoice: vi.fn(),
+  setSalesRep: vi.fn(),
+  createShipmentForLoad: vi.fn(),
+  unvoidShipment: vi.fn(),
+  voidShipment: vi.fn(),
+  repointShipmentCustomer: vi.fn(),
+  repointInvoicedCustomer: vi.fn(),
+  saveShipmentView: vi.fn(),
+  archiveShipmentView: vi.fn(),
+  saveShipmentColumnTemplate: vi.fn(),
+  deleteShipmentColumnTemplate: vi.fn(),
+  listOrders: vi.fn(async () => []),
+  listShipmentColumnTemplates: vi.fn(async () => []),
+  saveBlob: vi.fn(),
+  getTmsSettings: vi.fn(async () => null),
+  graphqlErrorText: vi.fn((err: unknown) => (err instanceof Error ? err.message : 'Error')),
+}))
+
 vi.mock('@/hooks/useAuth', async (importOriginal) => ({
-  ...(await importOriginal<typeof AuthModule>()),
+  ...(await importOriginal<typeof import('@/hooks/useAuth')>()),
   useAuth: () => ({ ...auth, user: { email: 'ryne@bcatcorp.com', userId: 'ryne', groups: ['ADMIN'] } }),
   useAuthUser: () => ({ email: 'ryne@bcatcorp.com', userId: 'ryne', groups: ['ADMIN'] }),
 }))
-vi.mock('@/hooks/useDirectory', () => ({ useDirectory: () => ({ customers: [], locations: [] }) }))
-vi.mock('@/hooks/useShipments', () => ({
-  useShipments: () => ({ shipments, loading: false, error: null, refresh: vi.fn() }),
+
+vi.mock('@/hooks/useDirectory', () => ({
+  useDirectory: () => ({ customers, locations: [] }),
 }))
+
+const refresh = vi.fn()
+let __shipments: ShipmentRow[] = []
+vi.mock('@/hooks/useShipments', () => ({
+  useShipments: () => ({ shipments: __shipments, loading: false, error: null, refresh }),
+}))
+
+let __loads: Load[] = []
+vi.mock('@/hooks/useLoads', () => ({
+  useLoads: () => ({ allLoads: __loads, loads: [], updateLoad: vi.fn() }),
+}))
+
 vi.mock('@/hooks/useStaff', () => ({
   useStaff: () => ({
-    staff: [], byId: {}, loading: false, error: null, refresh: vi.fn(),
+    staff: [],
+    byId: {},
+    loading: false,
+    error: null,
+    refresh: vi.fn(),
     nameOf: (id: string | null) => (id ? `Rep ${id}` : '—'),
+    me: null,
   }),
 }))
+
 vi.mock('@/features/tms/useShipmentViews', () => ({
   useShipmentViews: () => ({ views, loading: false, error: null, refresh: vi.fn() }),
   useOwnershipDivisions: () => ({
     divisions: [
       { code: 'ASSETS', name: 'Ivan Cartage', color: '#1ba774' },
-      { code: 'BOX_TRUCK', name: 'Box trucks', color: '#0a81ff' },
       { code: 'BROKERAGE', name: 'BCAT Logistics', color: '#f4c50c' },
     ],
     loading: false,
@@ -118,23 +191,34 @@ vi.mock('@/features/tms/useShipmentViews', () => ({
     refresh: vi.fn(),
   }),
 }))
-const { setShipmentStatus } = vi.hoisted(() => ({ setShipmentStatus: vi.fn(async () => ({})) }))
-vi.mock('@/lib/apiClient', () => ({
-  getTmsSettings: vi.fn(async () => null),
-  duplicateShipment: vi.fn(),
-  saveShipmentView: vi.fn(),
-  setShipmentStatus,
-  tenderRespond: vi.fn(),
-  voidShipment: vi.fn(),
-  graphqlErrorText: () => '',
-  listDocumentReviewQueue: vi.fn(async () => []),
-}))
-vi.mock('./components/ShipmentDrawer', () => ({ ShipmentDrawer: () => null }))
-// Stubbed for its identity only: this test asks what the board lists, not what the
-// create form does with it.
-vi.mock('./components/NewShipmentDialog', () => ({ NewShipmentDialog: () => null }))
 
-function renderBoard(path = '/tms/shipments') {
+vi.mock('@/lib/apiClient', () => ({
+  listOrders,
+  listShipmentColumnTemplates,
+  saveShipmentView,
+  archiveShipmentView,
+  saveShipmentColumnTemplate,
+  deleteShipmentColumnTemplate,
+  setShipmentStatus,
+  duplicateShipment,
+  tenderRespond,
+  setSalesRep,
+  readyToInvoice,
+  createShipmentForLoad,
+  unvoidShipment,
+  voidShipment,
+  repointShipmentCustomer,
+  repointInvoicedCustomer,
+  getTmsSettings,
+  graphqlErrorText,
+}))
+
+vi.mock('@/lib/download', () => ({ saveBlob }))
+
+vi.mock('./components/ShipmentDrawer', () => ({ ShipmentDrawer: () => null }))
+
+function renderBoard(path = '/tms/shipments', initialShipments: ShipmentRow[] = []) {
+  __shipments = initialShipments
   return render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
@@ -145,165 +229,501 @@ function renderBoard(path = '/tms/shipments') {
   )
 }
 
-/** The status quick-tabs are the second tablist; the first is the saved views. */
-function tab(name: string): HTMLElement {
-  const lists = screen.getAllByRole('tablist')
-  return within(lists[lists.length - 1]).getByRole('tab', { name: new RegExp(`^${name}`) })
-}
-
-function rowMenu(id: string): HTMLElement {
-  const rowEl = screen.getByText(id).closest('tr')
-  if (!rowEl) throw new Error(`no row for ${id}`)
-  return within(rowEl).getByLabelText('Shipment actions')
-}
-
 describe('ShipmentsBoard', () => {
-  it('counts MVMNT’s quick-tab groups', async () => {
-    renderBoard()
-    await waitFor(() => expect(screen.getByText('Shipments')).toBeTruthy())
-
-    expect(within(tab("Today's Open")).getByText('1')).toBeTruthy()
-    expect(within(tab('In Transit')).getByText('1')).toBeTruthy()
-    expect(within(tab('Unload')).getByText('1')).toBeTruthy()
-    expect(within(tab('Del')).getByText('1')).toBeTruthy()
-    // The voided shipment is in the book but out of every working tab.
-    expect(within(tab('All')).getByText('6')).toBeTruthy()
-    expect(within(tab('Voided')).getByText('1')).toBeTruthy()
-  })
-
-  it('lists only the selected tab’s shipments', async () => {
-    renderBoard()
-    await waitFor(() => expect(screen.getByText('S000001')).toBeTruthy())
-
-    fireEvent.click(tab('In Transit'))
-    await waitFor(() => expect(screen.queryByText('S000001')).toBeNull())
-    expect(screen.getByText('S000003')).toBeTruthy()
-    expect(screen.queryByText('S000005')).toBeNull()
-  })
-
-  it('shows a voided shipment only under Voided, with who, when and why', async () => {
-    renderBoard()
-    await waitFor(() => expect(screen.getByText('S000001')).toBeTruthy())
-    expect(screen.queryByText('S000006')).toBeNull()
-
-    fireEvent.click(tab('Voided'))
-    await waitFor(() => expect(screen.getByText('S000006')).toBeTruthy())
-    expect(screen.queryByText('S000001')).toBeNull()
-
-    const badge = screen.getByText('VOIDED')
-    expect(badge.getAttribute('title')).toContain('ryne@bcatcorp.com')
-    expect(badge.getAttribute('title')).toContain('Billed twice by mistake')
-  })
-
-  it('lists a shipment with no customer record as an ordinary row, marked not linked', async () => {
-    renderBoard()
-    await waitFor(() => expect(screen.getByText('S000007')).toBeTruthy())
-
-    // Its own status puts it on a status tab; nothing quarantines it to All.
-    fireEvent.click(tab('Booked'))
-    await waitFor(() => expect(screen.queryByText('S000001')).toBeNull())
-
-    const rowEl = screen.getByText('S000007').closest('tr')
-    if (!rowEl) throw new Error('no row for S000007')
-    // The typed text is shown, and said to be text: no Customer record is linked to it.
-    expect(within(rowEl).getByText('DIRECT DRIVE LOGISTICS')).toBeTruthy()
-    expect(within(rowEl).getByTestId('board-customer-unresolved')).toBeTruthy()
-    // And it is a real shipment: the row menu acts on it like any other.
-    expect(within(rowEl).getByLabelText('Shipment actions')).toBeTruthy()
-  })
-
-  it('narrows the list from the search box', async () => {
-    renderBoard()
-    await waitFor(() => expect(screen.getByText('S000003')).toBeTruthy())
-
-    fireEvent.change(screen.getByLabelText('Search'), { target: { value: 'globex denver' } })
-    await waitFor(() => expect(screen.queryByText('S000001')).toBeNull())
-    expect(screen.getByText('S000003')).toBeTruthy()
-    expect(screen.getByText('S000004')).toBeTruthy()
-  })
-
-  it('opens the view named in the URL and filters to it', async () => {
-    renderBoard('/tms/shipments/view/brokerage-board')
-    await waitFor(() => expect(screen.getByText('S000003')).toBeTruthy())
-
-    expect(screen.queryByText('S000002')).toBeNull()
-    expect(screen.getByRole('tab', { name: 'Brokerage board' }).getAttribute('aria-selected')).toBe('true')
-  })
-
-  it('filters to one division from the sidebar’s synthetic view', async () => {
-    renderBoard('/tms/shipments/view/division-ASSETS')
-    await waitFor(() => expect(screen.getByText('S000002')).toBeTruthy())
-    expect(screen.queryByText('S000003')).toBeNull()
-  })
-
-  it('chips the division with its name, its subsidiary and its colour', async () => {
-    renderBoard()
-    await waitFor(() => expect(screen.getByText('S000002')).toBeTruthy())
-
-    const chip = screen.getByText('Ivan Cartage (Box trucks)')
-    expect(chip.dataset.testid).toBe('board-division')
-    expect(chip.style.color).toBe('rgb(27, 167, 116)')
-  })
-
-  it('names the rep behind the id', async () => {
-    renderBoard()
-    await waitFor(() => expect(screen.getByText('Rep pavel')).toBeTruthy())
-  })
-
-  it('offers Save as view to an admin and to nobody else', async () => {
-    const admin = renderBoard()
-    await waitFor(() => expect(screen.getByLabelText('Save as view')).toBeTruthy())
-    admin.unmount()
-
-    auth.isAdmin = false
+  beforeEach(() => {
+    vi.clearAllMocks()
+    auth.isAdmin = true
     auth.isOwner = false
-    renderBoard()
-    await waitFor(() => expect(screen.getByText('Shipments')).toBeTruthy())
-    expect(screen.queryByLabelText('Save as view')).toBeNull()
-    auth.isAdmin = true
   })
 
-  it('never says “Order” anywhere on the page', async () => {
-    renderBoard()
-    await waitFor(() => expect(screen.getByText('S000001')).toBeTruthy())
-    expect(screen.queryByText(/\bOrder\b/)).toBeNull()
+  it('lands on the Active Shipments default view', async () => {
+    const shipments = [
+      row('S001', { status: 'OPEN' }),
+      row('S002', { status: 'DELIVERED' }),
+      row('S003', { status: 'ON_HOLD' }),
+      row('S004', { status: 'DELIVERED', voidedAt: '2026-02-01T00:00:00Z' }),
+    ]
+    renderBoard('/tms/shipments', shipments)
+    await waitFor(() => expect(screen.getByRole('tab', { name: /Active Shipments/i, selected: true })).toBeTruthy())
+
+    // Default view excludes VOIDED and HOLD rows.
+    expect(screen.queryByText('S003')).toBeNull()
+    expect(screen.queryByText('S004')).toBeNull()
+    expect(screen.getByText('S001')).toBeTruthy()
+    expect(screen.getByText('S002')).toBeTruthy()
   })
 
-  it('cancels a shipment from the row menu with the row’s own CAS token', async () => {
-    renderBoard()
-    await waitFor(() => expect(screen.getByText('S000002')).toBeTruthy())
+  it('filters rows when a status is checked and keeps counts from the unfiltered set', async () => {
+    const shipments = [
+      row('S001', { status: 'OPEN' }),
+      row('S002', { status: 'DELIVERED' }),
+      row('S003', { status: 'DELIVERED' }),
+    ]
+    renderBoard('/tms/shipments/view/active-shipments', shipments)
+    await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
 
-    fireEvent.pointerDown(rowMenu('S000002'), { button: 0, ctrlKey: false, pointerType: 'mouse' })
-    await waitFor(() => expect(screen.getByText('Cancel')).toBeTruthy())
-    fireEvent.click(screen.getByText('Cancel'))
+    // The Open checkbox shows the unfiltered count (1).
+    const openCheckbox = screen.getByRole('checkbox', { name: /Open\s+1/i })
+    expect(openCheckbox).toBeChecked()
 
-    await waitFor(() => expect(screen.getByText('Cancel shipment')).toBeTruthy())
-    fireEvent.change(screen.getByLabelText('Reason'), { target: { value: 'Customer pulled the freight' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Confirm' }))
+    // Uncheck Delivered; the count stays visible.
+    const deliveredCheckbox = screen.getByRole('checkbox', { name: /Delivered\s+2/i })
+    expect(deliveredCheckbox).toBeChecked()
+    fireEvent.click(deliveredCheckbox)
 
-    await waitFor(() => expect(setShipmentStatus).toHaveBeenCalledWith({
-      shipmentId: 'S000002',
+    await waitFor(() => expect(screen.queryByText('S002')).toBeNull())
+    expect(screen.queryByText('S003')).toBeNull()
+    expect(screen.getByText('S001')).toBeTruthy()
+
+    // Counts remain the same.
+    expect(screen.getByRole('checkbox', { name: /Delivered\s+2/i })).toBeTruthy()
+    expect(screen.getByRole('checkbox', { name: /Open\s+1/i })).toBeTruthy()
+  })
+
+  it('Exclude toggle inverts one facet only', async () => {
+    const shipments = [
+      row('S001', { status: 'OPEN', customerId: 'cust-1' }),
+      row('S002', { status: 'OPEN', customerId: 'cust-2' }),
+      row('S003', { status: 'DELIVERED', customerId: 'cust-1' }),
+    ]
+    renderBoard('/tms/shipments/view/active-shipments', shipments)
+    await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
+
+    // Pick Acme Freight in the Customer facet and flip Exclude.
+    const customerSelect = screen.getByRole('listbox', { name: /Customer/i })
+    fireEvent.change(customerSelect, { target: { value: 'cust-1' } })
+
+    const excludeCheckbox = screen.getByRole('checkbox', { name: /Exclude customer/i })
+    fireEvent.click(excludeCheckbox)
+
+    await waitFor(() => {
+      expect(screen.queryByText('S001')).toBeNull()
+      expect(screen.queryByText('S003')).toBeNull()
+    })
+    expect(screen.getByText('S002')).toBeTruthy()
+  })
+
+  it('gives a row the tone its status implies and voided rows are struck through', async () => {
+    const shipments = [deliveredRow('S001'), row('S002', { status: 'OPEN', voidedAt: '2026-02-01T00:00:00Z' })]
+    renderBoard('/tms/shipments/view/active-shipments', shipments)
+    await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
+
+    const deliveredRowEl = screen.getByText('S001').closest('tr')!
+    expect(deliveredRowEl).toHaveAttribute('data-tone', 'delivered')
+
+    // Show the voided row by selecting VOIDED.
+    const voidedCheckbox = screen.getByRole('checkbox', { name: /Voided/i })
+    fireEvent.click(voidedCheckbox)
+    await waitFor(() => expect(screen.getByText('S002')).toBeTruthy())
+
+    const voidedRowEl = screen.getByText('S002').closest('tr')!
+    expect(voidedRowEl).toHaveAttribute('data-tone', 'voided')
+  })
+
+  it('shows a Mass Release checkbox only for releasable shipments and the reason otherwise', async () => {
+    const shipments = [
+      deliveredRow('S001', { docsMissing: [] }),
+      deliveredRow('S002', { docsMissing: null }),
+      deliveredRow('S003', { docsMissing: ['POD'], readyToInvoiceAt: null }),
+      deliveredRow('S004', { docsMissing: [], readyToInvoiceAt: '2026-02-01T00:00:00Z' }),
+    ]
+    renderBoard('/tms/shipments/view/active-shipments', shipments)
+    await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
+
+    const row1 = screen.getByText('S001').closest('tr')!
+    expect(within(row1).getByRole('checkbox', { name: /Release S001/i })).toBeTruthy()
+
+    const row2 = screen.getByText('S002').closest('tr')!
+    expect(within(row2).getByText('Documents not checked')).toBeTruthy()
+
+    const row3 = screen.getByText('S003').closest('tr')!
+    expect(within(row3).getByText(/Missing documents:/i)).toBeTruthy()
+
+    const row4 = screen.getByText('S004').closest('tr')!
+    expect(within(row4).getByText('Already released to accounting')).toBeTruthy()
+  })
+
+  it('Get next 50 shows more rows', async () => {
+    const shipments = Array.from({ length: 75 }, (_, i) => row(`S${String(i).padStart(3, '0')}`, { status: 'OPEN' }))
+    renderBoard('/tms/shipments/view/active-shipments', shipments)
+    await waitFor(() => expect(screen.getByText('S000')).toBeTruthy())
+
+    expect(screen.getByText((_, node) => node?.textContent === 'Records shown 50 of 75')).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: /Get next 50/i }))
+    await waitFor(() => expect(screen.getByText((_, node) => node?.textContent === 'Records shown 75 of 75')).toBeTruthy())
+  })
+
+  it('Export to CSV writes the visible columns', async () => {
+    const shipments = [deliveredRow('S001', { customerReference: 'PO-123', equipmentType: 'Van', revenueCents: 100_000 })]
+    renderBoard('/tms/shipments/view/active-shipments', shipments)
+    await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
+
+    fireEvent.click(screen.getByRole('button', { name: /Export to CSV/i }))
+
+    await waitFor(() => expect(saveBlob).toHaveBeenCalled())
+    const blob = saveBlob.mock.calls[0][0] as Blob
+    const csv = await blob.text()
+    expect(csv).toContain('Status')
+    expect(csv).toContain('PRO #')
+    expect(csv).toContain('Customer Reference Number')
+    expect(csv).toContain('PO-123')
+  })
+
+  it('Batch Task reports a per-row failure rather than swallowing it', async () => {
+    readyToInvoice.mockRejectedValueOnce(new Error('Gate refused: missing POD'))
+    readyToInvoice.mockResolvedValueOnce({ releaseGate: { ok: true, missing: [] } })
+
+    const shipments = [deliveredRow('S001'), deliveredRow('S002')]
+    vi.mocked(listOrders).mockResolvedValue([
+      { id: 'ord-1', shipmentId: 'S001', updatedAt: '2026-01-01T00:00:00Z' },
+      { id: 'ord-2', shipmentId: 'S002', updatedAt: '2026-01-01T00:00:00Z' },
+    ] as unknown as OrderRecord[])
+
+    renderBoard('/tms/shipments/view/active-shipments', shipments)
+    await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
+
+    // Select both rows via the master checkbox.
+    fireEvent.click(screen.getByRole('checkbox', { name: /Select all rows/i }))
+
+    fireEvent.click(screen.getByRole('button', { name: /Batch task/i }))
+    await waitFor(() => expect(screen.getByRole('dialog', { name: /Batch task/i })).toBeTruthy())
+
+    const dialog = screen.getByRole('dialog', { name: /Batch task/i })
+    fireEvent.change(within(dialog).getByRole('combobox'), { target: { value: 'release' } })
+    fireEvent.click(screen.getByRole('button', { name: /^Run$/i }))
+
+    await waitFor(() => expect(screen.getByText('Gate refused: missing POD')).toBeTruthy())
+    expect(screen.getAllByText('S001').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText('S002').length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('Create shipment lists only loads without a shipment and calls the backfill wrapper', async () => {
+    const loads = [
+      { id: 'load-1', pickupNumber: 'L001', shipmentId: 'ship-1', originCity: 'Chicago', destinationCity: 'Dallas', pickupAppt: '2026-01-01T00:00:00Z' },
+      { id: 'load-2', pickupNumber: 'L002', shipmentId: null, originCity: 'Denver', destinationCity: 'Boise', pickupAppt: '2026-01-02T00:00:00Z' },
+    ]
+    __loads = loads as unknown as Load[]
+
+    renderBoard('/tms/shipments/view/active-shipments')
+    await waitFor(() => expect(screen.getByRole('button', { name: /Create shipment/i })).toBeTruthy())
+
+    fireEvent.click(screen.getByRole('button', { name: /Create shipment/i }))
+    await waitFor(() => expect(screen.getByRole('dialog', { name: /Create shipment/i })).toBeTruthy())
+
+    expect(screen.queryByText('L001')).toBeNull()
+    expect(screen.getByText('L002')).toBeTruthy()
+
+    createShipmentForLoad.mockResolvedValueOnce({})
+    fireEvent.click(screen.getByRole('button', { name: /^Create$/i }))
+
+    await waitFor(() => expect(createShipmentForLoad).toHaveBeenCalledWith('load-2'))
+  })
+
+  it('Unvoid requires a reason', async () => {
+    const shipments = [row('S001', { status: 'CANCELED', voidedAt: '2026-02-01T00:00:00Z', voidedBy: 'admin', voidReason: 'test' })]
+    renderBoard('/tms/shipments/view/active-shipments', shipments)
+
+    // Make voided rows visible by selecting VOIDED.
+    const voidedCheckbox = screen.getByRole('checkbox', { name: /Voided/i })
+    fireEvent.click(voidedCheckbox)
+    await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
+
+    fireEvent.pointerDown(screen.getByLabelText('Shipment actions'), { button: 0, pointerType: 'mouse' })
+    fireEvent.click(await screen.findByRole('menuitem', { name: /Unvoid shipment/i }))
+
+    await waitFor(() => expect(screen.getByRole('dialog', { name: /Unvoid shipment/i })).toBeTruthy())
+
+    fireEvent.click(screen.getByRole('button', { name: /^Unvoid$/i }))
+    await waitFor(() => expect(screen.getByText('A reason is required.')).toBeTruthy())
+    expect(unvoidShipment).not.toHaveBeenCalled()
+
+    fireEvent.change(screen.getByRole('textbox', { name: /Reason/i }), { target: { value: 'Customer corrected' } })
+    unvoidShipment.mockResolvedValueOnce({})
+    fireEvent.click(screen.getByRole('button', { name: /^Unvoid$/i }))
+
+    await waitFor(() => expect(unvoidShipment).toHaveBeenCalledWith(expect.objectContaining({
+      reason: 'Customer corrected',
       expectedUpdatedAt: '2026-01-01T00:00:00.000Z',
-      status: 'CANCELED',
-      reason: 'Customer pulled the freight',
-    }))
+    })))
   })
 
-  it('offers Void to an admin, and no delete to anybody', async () => {
-    const admin = renderBoard()
-    await waitFor(() => expect(screen.getByText('S000002')).toBeTruthy())
-    fireEvent.pointerDown(rowMenu('S000002'), { button: 0, ctrlKey: false, pointerType: 'mouse' })
-    await waitFor(() => expect(screen.getByText(/Void shipment/)).toBeTruthy())
-    expect(screen.queryByText(/Delete/)).toBeNull()
-    expect(screen.queryByText(/Restore/)).toBeNull()
-    admin.unmount()
+  it('repoint refused with INVOICED: offers the credit path and sends one idempotency key', async () => {
+    const shipments = [row('S001', { status: 'DELIVERED', customerId: 'cust-1' })]
+    renderBoard('/tms/shipments/view/active-shipments', shipments)
+    await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
 
-    auth.isAdmin = false
-    renderBoard()
-    await waitFor(() => expect(screen.getByText('S000002')).toBeTruthy())
-    fireEvent.pointerDown(rowMenu('S000002'), { button: 0, ctrlKey: false, pointerType: 'mouse' })
-    await waitFor(() => expect(screen.getByText('Duplicate')).toBeTruthy())
-    expect(screen.queryByText(/Void shipment/)).toBeNull()
-    auth.isAdmin = true
+    fireEvent.pointerDown(screen.getByLabelText('Shipment actions'), { button: 0, pointerType: 'mouse' })
+    fireEvent.click(await screen.findByRole('menuitem', { name: /Re-point customer/i }))
+
+    await waitFor(() => expect(screen.getByRole('dialog', { name: /Re-point customer/i })).toBeTruthy())
+
+    fireEvent.change(screen.getByRole('combobox', { name: /New customer/i }), { target: { value: 'cust-2' } })
+    fireEvent.change(screen.getByRole('textbox', { name: /Reason/i }), { target: { value: 'Sold to different division' } })
+
+    repointShipmentCustomer.mockRejectedValueOnce(new Error('INVOICED: This shipment has already been invoiced.'))
+    fireEvent.click(screen.getByRole('button', { name: /^Re-point$/i }))
+
+    await waitFor(() => expect(repointShipmentCustomer).toHaveBeenCalledWith(expect.objectContaining({
+      shipmentId: 'S001',
+      customerId: 'cust-2',
+      reason: 'Sold to different division',
+      expectedUpdatedAt: '2026-01-01T00:00:00.000Z',
+    })))
+
+    await waitFor(() => expect(screen.getByText(/original invoice will be credited/i)).toBeTruthy())
+
+    repointInvoicedCustomer.mockRejectedValueOnce(new Error('Network hiccup'))
+    repointInvoicedCustomer.mockResolvedValueOnce({})
+    const creditButton = await screen.findByRole('button', { name: /Credit original and rebill/i })
+    fireEvent.click(creditButton)
+
+    await waitFor(() => expect(repointInvoicedCustomer).toHaveBeenCalledWith(expect.objectContaining({ idempotencyKey: expect.any(String) })))
+    const key = repointInvoicedCustomer.mock.calls[0][0].idempotencyKey
+
+    // A second confirm attempt re-uses the same key; the first failure leaves the dialog open.
+    fireEvent.click(creditButton)
+    await waitFor(() => expect(repointInvoicedCustomer).toHaveBeenCalledTimes(2))
+    expect(repointInvoicedCustomer.mock.calls[1][0].idempotencyKey).toBe(key)
+  })
+
+  it('Unvoid surfaces a stale-token refusal as a readable message', async () => {
+    const shipments = [row('S001', { status: 'CANCELED', voidedAt: '2026-02-01T00:00:00.000Z', voidedBy: 'admin', voidReason: 'test' })]
+    renderBoard('/tms/shipments/view/active-shipments', shipments)
+
+    const voidedCheckbox = screen.getByRole('checkbox', { name: /Voided/i })
+    fireEvent.click(voidedCheckbox)
+    await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
+
+    fireEvent.pointerDown(screen.getByLabelText('Shipment actions'), { button: 0, pointerType: 'mouse' })
+    fireEvent.click(await screen.findByRole('menuitem', { name: /Unvoid shipment/i }))
+
+    await waitFor(() => expect(screen.getByRole('dialog', { name: /Unvoid shipment/i })).toBeTruthy())
+
+    fireEvent.change(screen.getByRole('textbox', { name: /Reason/i }), { target: { value: 'Customer corrected' } })
+    unvoidShipment.mockRejectedValueOnce(new Error('This shipment was changed by someone else. Reload and try again.'))
+    fireEvent.click(screen.getByRole('button', { name: /^Unvoid$/i }))
+
+    await waitFor(() => expect(screen.getByText('This shipment was changed by someone else. Reload and try again.')).toBeTruthy())
+  })
+
+  it('Re-point customer surfaces a stale-token refusal as a readable message', async () => {
+    const shipments = [row('S001', { status: 'DELIVERED', customerId: 'cust-1' })]
+    renderBoard('/tms/shipments/view/active-shipments', shipments)
+    await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
+
+    fireEvent.pointerDown(screen.getByLabelText('Shipment actions'), { button: 0, pointerType: 'mouse' })
+    fireEvent.click(await screen.findByRole('menuitem', { name: /Re-point customer/i }))
+
+    await waitFor(() => expect(screen.getByRole('dialog', { name: /Re-point customer/i })).toBeTruthy())
+
+    fireEvent.change(screen.getByRole('combobox', { name: /New customer/i }), { target: { value: 'cust-2' } })
+    fireEvent.change(screen.getByRole('textbox', { name: /Reason/i }), { target: { value: 'Sold to different division' } })
+    repointShipmentCustomer.mockRejectedValueOnce(new Error('This shipment was changed by someone else. Reload and try again.'))
+    fireEvent.click(screen.getByRole('button', { name: /^Re-point$/i }))
+
+    await waitFor(() => expect(screen.getByText('This shipment was changed by someone else. Reload and try again.')).toBeTruthy())
+  })
+
+  it('tones the next check call cell overdue or due', async () => {
+    const now = new Date('2026-01-15T12:00:00.000Z')
+    vi.setSystemTime(now)
+    const overdue = deliveredRow('S001', { nextCheckCallAt: '2026-01-15T11:00:00.000Z', checkCallOpen: 'OPEN' })
+    const due = deliveredRow('S002', { nextCheckCallAt: '2026-01-15T12:00:00.000Z', checkCallOpen: 'OPEN' })
+    const future = deliveredRow('S003', { nextCheckCallAt: '2026-01-15T13:00:00.000Z', checkCallOpen: 'OPEN' })
+    renderBoard('/tms/shipments/view/active-shipments', [overdue, due, future])
+    await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
+
+    const overdueRow = screen.getByText('S001').closest('tr')!
+    const dueRow = screen.getByText('S002').closest('tr')!
+    const futureRow = screen.getByText('S003').closest('tr')!
+
+    expect(overdueRow.querySelector('.tms-overdue')).toBeTruthy()
+    expect(dueRow.querySelector('.tms-due')).toBeTruthy()
+    expect(futureRow.querySelector('.tms-overdue')).toBeNull()
+    expect(futureRow.querySelector('.tms-due')).toBeNull()
+
+    vi.useRealTimers()
+  })
+
+  it('renders exception icons for incidents, open check calls and missing documents', async () => {
+    const shipments = [
+      deliveredRow('S001', { openIncidentCount: 2 }),
+      deliveredRow('S002', { nextCheckCallAt: '2026-01-01T00:00:00.000Z', checkCallOpen: 'OPEN' }),
+      deliveredRow('S003', { docsMissing: ['POD', 'Lumper Receipt'] }),
+      deliveredRow('S004', { customerId: null, customerName: 'Unknown' }),
+    ]
+    renderBoard('/tms/shipments/view/active-shipments', shipments)
+    await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
+
+    const row1 = screen.getByText('S001').closest('tr')!
+    expect(within(row1).getByTitle('2 open incident(s)')).toBeTruthy()
+
+    const row2 = screen.getByText('S002').closest('tr')!
+    expect(within(row2).getByTitle('Overdue check call')).toBeTruthy()
+
+    const row3 = screen.getByText('S003').closest('tr')!
+    expect(within(row3).getByTitle('Missing documents: POD, Lumper Receipt')).toBeTruthy()
+
+    const row4 = screen.getByText('S004').closest('tr')!
+    expect(within(row4).getByTitle('Customer not linked')).toBeTruthy()
+  })
+
+  it('narrows rows when a tracking/paperwork flag is checked', async () => {
+    const shipments = [
+      deliveredRow('S001', { docsMissing: ['POD'] }),
+      deliveredRow('S002', { docsMissing: [] }),
+    ]
+    renderBoard('/tms/shipments/view/active-shipments', shipments)
+    await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
+
+    fireEvent.click(screen.getByRole('checkbox', { name: /Missing documents/i }))
+
+    await waitFor(() => {
+      expect(screen.getByText('S001')).toBeTruthy()
+      expect(screen.queryByText('S002')).toBeNull()
+    })
+  })
+
+  it('Cancel shipment calls setShipmentStatus with reason', async () => {
+    const shipments = [row('S001', { status: 'OPEN' })]
+    renderBoard('/tms/shipments/view/active-shipments', shipments)
+    await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
+
+    setShipmentStatus.mockResolvedValueOnce({})
+    fireEvent.pointerDown(screen.getByLabelText('Shipment actions'), { button: 0, pointerType: 'mouse' })
+    fireEvent.click(await screen.findByRole('menuitem', { name: /Cancel/i }))
+
+    await waitFor(() => expect(screen.getByRole('dialog', { name: /Cancel shipment/i })).toBeTruthy())
+    fireEvent.change(screen.getByRole('textbox', { name: /Reason/i }), { target: { value: 'Customer called off' } })
+    fireEvent.click(screen.getByRole('button', { name: /^Confirm$/i }))
+
+    await waitFor(() => expect(setShipmentStatus).toHaveBeenCalledWith(expect.objectContaining({
+      shipmentId: 'S001',
+      status: 'CANCELED',
+      reason: 'Customer called off',
+    })))
+  })
+
+  it('Un-cancel shipment calls setShipmentStatus', async () => {
+    const shipments = [row('S001', { status: 'CANCELED' })]
+    renderBoard('/tms/shipments/view/all-shipments', shipments)
+    await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
+
+    setShipmentStatus.mockResolvedValueOnce({})
+    fireEvent.pointerDown(screen.getByLabelText('Shipment actions'), { button: 0, pointerType: 'mouse' })
+    fireEvent.click(await screen.findByRole('menuitem', { name: /Un-cancel/i }))
+
+    await waitFor(() => expect(setShipmentStatus).toHaveBeenCalledWith(expect.objectContaining({
+      shipmentId: 'S001',
+      status: 'UNCANCEL',
+    })))
+  })
+
+  it('Put on hold and take off hold call setShipmentStatus', async () => {
+    const shipments = [row('S001', { status: 'OPEN' })]
+    renderBoard('/tms/shipments/view/active-shipments', shipments)
+    await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
+
+    setShipmentStatus.mockResolvedValueOnce({})
+    fireEvent.pointerDown(screen.getByLabelText('Shipment actions'), { button: 0, pointerType: 'mouse' })
+    fireEvent.click(await screen.findByRole('menuitem', { name: /Put on hold/i }))
+
+    await waitFor(() => expect(screen.getByRole('dialog', { name: /Put on hold/i })).toBeTruthy())
+    fireEvent.change(screen.getByRole('textbox', { name: /Reason/i }), { target: { value: 'Waiting on docs' } })
+    fireEvent.click(screen.getByRole('button', { name: /^Confirm$/i }))
+
+    await waitFor(() => expect(setShipmentStatus).toHaveBeenCalledWith(expect.objectContaining({
+      shipmentId: 'S001',
+      status: 'ON_HOLD',
+      reason: 'Waiting on docs',
+    })))
+  })
+
+  it('Duplicate shipment calls duplicateShipment with copies', async () => {
+    const shipments = [row('S001', { status: 'OPEN', pickupAppt: '2026-01-02T10:00:00.000Z', deliveryAppt: '2026-01-03T10:00:00.000Z' })]
+    renderBoard('/tms/shipments/view/active-shipments', shipments)
+    await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
+
+    duplicateShipment.mockResolvedValueOnce({})
+    fireEvent.pointerDown(screen.getByLabelText('Shipment actions'), { button: 0, pointerType: 'mouse' })
+    fireEvent.click(await screen.findByRole('menuitem', { name: /Duplicate/i }))
+
+    await waitFor(() => expect(screen.getByRole('dialog', { name: /Duplicate shipment/i })).toBeTruthy())
+    fireEvent.change(screen.getByRole('spinbutton', { name: /Copies/i }), { target: { value: '2' } })
+    fireEvent.click(screen.getByRole('checkbox', { name: /Book the same carrier/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^Duplicate$/i }))
+
+    await waitFor(() => expect(duplicateShipment).toHaveBeenCalledWith(expect.objectContaining({
+      shipmentId: 'S001',
+      copies: expect.arrayContaining([expect.objectContaining({ pickupAppt: expect.any(String) })]),
+      sameCarrier: true,
+    })))
+  })
+
+  it('Void shipment triggers refresh after the void dialog succeeds', async () => {
+    const shipments = [row('S001', { status: 'OPEN' })]
+    renderBoard('/tms/shipments/view/active-shipments', shipments)
+    await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
+
+    voidShipment.mockResolvedValueOnce({ id: 'S001', number: 'S001', status: 'VOIDED' })
+    fireEvent.pointerDown(screen.getByLabelText('Shipment actions'), { button: 0, pointerType: 'mouse' })
+    fireEvent.click(await screen.findByRole('menuitem', { name: /Void shipment/i }))
+
+    await waitFor(() => expect(screen.getByRole('dialog', { name: /Void shipment S001/i })).toBeTruthy())
+    fireEvent.change(screen.getByRole('textbox', { name: /Reason/i }), { target: { value: 'Customer no longer needs it' } })
+
+    fireEvent.click(screen.getByRole('button', { name: /^Void shipment$/i }))
+    await waitFor(() => expect(refresh).toHaveBeenCalled())
+  })
+
+  it('Accept tender calls tenderRespond', async () => {
+    const shipments = [row('S001', { status: 'TENDER_PENDING' })]
+    renderBoard('/tms/shipments/view/all-shipments', shipments)
+    await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
+
+    tenderRespond.mockResolvedValueOnce({})
+    fireEvent.pointerDown(screen.getByLabelText('Shipment actions'), { button: 0, pointerType: 'mouse' })
+    fireEvent.click(await screen.findByRole('menuitem', { name: /Accept tender/i }))
+
+    await waitFor(() => expect(tenderRespond).toHaveBeenCalledWith(expect.objectContaining({
+      shipmentId: 'S001',
+      decision: 'ACCEPT',
+    })))
+  })
+
+  it('Reject tender calls tenderRespond with reason', async () => {
+    const shipments = [row('S001', { status: 'TENDER_PENDING' })]
+    renderBoard('/tms/shipments/view/all-shipments', shipments)
+    await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
+
+    tenderRespond.mockResolvedValueOnce({})
+    fireEvent.pointerDown(screen.getByLabelText('Shipment actions'), { button: 0, pointerType: 'mouse' })
+    fireEvent.click(await screen.findByRole('menuitem', { name: /Reject tender/i }))
+
+    await waitFor(() => expect(screen.getByRole('dialog', { name: /Reject tender/i })).toBeTruthy())
+    fireEvent.change(screen.getByRole('textbox', { name: /Reason/i }), { target: { value: 'Rates too low' } })
+    fireEvent.click(screen.getByRole('button', { name: /^Confirm$/i }))
+
+    await waitFor(() => expect(tenderRespond).toHaveBeenCalledWith(expect.objectContaining({
+      shipmentId: 'S001',
+      decision: 'REJECT',
+      reason: 'Rates too low',
+    })))
+  })
+
+  it('Reset tender calls tenderRespond', async () => {
+    const shipments = [row('S001', { status: 'TENDER_REJECTED' })]
+    renderBoard('/tms/shipments/view/all-shipments', shipments)
+    await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
+
+    tenderRespond.mockResolvedValueOnce({})
+    fireEvent.pointerDown(screen.getByLabelText('Shipment actions'), { button: 0, pointerType: 'mouse' })
+    fireEvent.click(await screen.findByRole('menuitem', { name: /Reset tender/i }))
+
+    await waitFor(() => expect(tenderRespond).toHaveBeenCalledWith(expect.objectContaining({
+      shipmentId: 'S001',
+      decision: 'RESET',
+    })))
   })
 })

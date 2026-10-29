@@ -53,6 +53,7 @@ const EXPECTED: ProviderKey[] = [
   'TWILIO',
   'PAYCHEX',
   'JOBSDONE',
+  'SQUARE',
 ]
 
 describe('PROVIDERS', () => {

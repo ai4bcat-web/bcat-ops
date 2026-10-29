@@ -6,9 +6,9 @@
  * offer counted as the quote the shipment was sold off, and "the backend sent no stop
  * list" flattened into "this shipment has no stops".
  */
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderHook, waitFor } from '@testing-library/react'
-import type { LoadCarrierRecord, OrderRecord, QuoteRecord, ShipmentRecord } from '@/types/tms'
+import type { LoadCarrierRecord, LoadFinancialsRecord, OrderRecord, QuoteRecord, ShipmentRecord, UserProfileRecord } from '@/types/tms'
 import type { LoadBoardSummary } from '@/lib/apiClient'
 import { useShipments, type ShipmentListRow } from './useShipments'
 
@@ -19,6 +19,8 @@ const { data } = vi.hoisted(() => ({
     loads: [] as unknown[],
     loadCarriers: [] as unknown[],
     quotes: [] as unknown[],
+    loadFinancials: [] as unknown[],
+    userProfiles: [] as unknown[],
   },
 }))
 
@@ -31,7 +33,19 @@ vi.mock('@/lib/apiClient', () => ({
   listLoadSummaries: async () => data.loads,
   listLoadCarriers: async () => data.loadCarriers,
   listQuotes: async () => data.quotes,
+  listLoadFinancials: async () => data.loadFinancials,
+  listUserProfiles: async () => data.userProfiles,
 }))
+
+beforeEach(() => {
+  data.shipments = []
+  data.orders = []
+  data.loads = []
+  data.loadCarriers = []
+  data.quotes = []
+  data.loadFinancials = []
+  data.userProfiles = []
+})
 
 const shipment = (id: string, patch: Partial<ShipmentRecord> = {}): ShipmentRecord => ({
   id,
@@ -137,5 +151,155 @@ describe('useShipments projection', () => {
     expect(row.nextCheckCallAt).toBe('2026-03-03T12:00:00.000Z')
     expect(row.openIncidentCount).toBe(3)
     expect(row.trackingProvider).toBe('MOTIVE')
+  })
+
+  it('projects LoadFinancials money onto the row and derives margin from revenue', async () => {
+    data.shipments = [shipment('shp-1')]
+    data.orders = []
+    data.loads = [{ id: 'lod-1', shipmentId: 'shp-1' } as LoadBoardSummary]
+    data.loadFinancials = [{
+      id: 'lod-1', loadId: 'lod-1', shipmentId: 'shp-1', orderId: 'ord-1',
+      customerRateCents: 250_000, revenueCents: 250_000, carrierRateCents: 200_000,
+      costCents: 200_000, profitCents: 50_000, marginBps: 2000,
+      updatedBy: 'a@b.c', version: 1, createdAt: '2026-03-01T00:00:00.000Z', updatedAt: '2026-03-01T00:00:00.000Z',
+    }] as LoadFinancialsRecord[]
+
+    const [row] = await rowsFor()
+    expect(row.revenueCents).toBe(250_000)
+    expect(row.costCents).toBe(200_000)
+    expect(row.profitCents).toBe(50_000)
+    expect(row.marginBps).toBe(2000)
+  })
+
+  it('leaves marginBps null instead of 0 when revenue is unknown', async () => {
+    data.shipments = [shipment('shp-1')]
+    data.orders = []
+    data.loads = [{ id: 'lod-1', shipmentId: 'shp-1' } as LoadBoardSummary]
+    data.loadFinancials = []
+
+    const [row] = await rowsFor()
+    expect(row.revenueCents).toBeNull()
+    expect(row.profitCents).toBeNull()
+    expect(row.marginBps).toBeNull()
+  })
+
+  it('reports null money for a multi-leg shipment when any leg lacks financials', async () => {
+    data.shipments = [shipment('shp-1', { loadIds: ['lod-1', 'lod-2'] })]
+    data.orders = []
+    data.loads = [
+      { id: 'lod-1', shipmentId: 'shp-1' } as LoadBoardSummary,
+      { id: 'lod-2', shipmentId: 'shp-1' } as LoadBoardSummary,
+    ]
+    data.loadFinancials = [{
+      id: 'fin-1', loadId: 'lod-1', shipmentId: 'shp-1', orderId: 'ord-1',
+      customerRateCents: 250_000, revenueCents: 250_000, carrierRateCents: 200_000,
+      costCents: 200_000, profitCents: 50_000, marginBps: 2000,
+      updatedBy: 'a@b.c', version: 1, createdAt: '2026-03-01T00:00:00.000Z', updatedAt: '2026-03-01T00:00:00.000Z',
+    }] as LoadFinancialsRecord[]
+
+    const [row] = await rowsFor()
+    expect(row.revenueCents).toBeNull()
+    expect(row.costCents).toBeNull()
+    expect(row.profitCents).toBeNull()
+    expect(row.marginBps).toBeNull()
+  })
+
+  it('sums money across every load when all legs have financials', async () => {
+    data.shipments = [shipment('shp-1', { loadIds: ['lod-1', 'lod-2'] })]
+    data.orders = []
+    data.loads = [
+      { id: 'lod-1', shipmentId: 'shp-1' } as LoadBoardSummary,
+      { id: 'lod-2', shipmentId: 'shp-1' } as LoadBoardSummary,
+    ]
+    data.loadFinancials = [
+      {
+        id: 'fin-1', loadId: 'lod-1', shipmentId: 'shp-1', orderId: 'ord-1',
+        customerRateCents: 150_000, revenueCents: 150_000, carrierRateCents: 100_000,
+        costCents: 100_000, profitCents: 50_000, marginBps: 3333,
+        updatedBy: 'a@b.c', version: 1, createdAt: '2026-03-01T00:00:00.000Z', updatedAt: '2026-03-01T00:00:00.000Z',
+      },
+      {
+        id: 'fin-2', loadId: 'lod-2', shipmentId: 'shp-1', orderId: 'ord-1',
+        customerRateCents: 100_000, revenueCents: 100_000, carrierRateCents: 80_000,
+        costCents: 80_000, profitCents: 20_000, marginBps: 2000,
+        updatedBy: 'a@b.c', version: 1, createdAt: '2026-03-01T00:00:00.000Z', updatedAt: '2026-03-01T00:00:00.000Z',
+      },
+    ] as LoadFinancialsRecord[]
+
+    const [row] = await rowsFor()
+    expect(row.revenueCents).toBe(250_000)
+    expect(row.costCents).toBe(180_000)
+    expect(row.profitCents).toBe(70_000)
+    expect(row.marginBps).toBe(2800)
+  })
+
+  it('reads pickup, consignee and both states from the stop array', async () => {
+    data.shipments = [shipment('shp-1', { loadIds: ['lod-1'] })]
+    data.orders = []
+    data.loads = [{
+      id: 'lod-1', shipmentId: 'shp-1',
+      stops: [
+        { id: 's1', type: 'pickup', sequence: 0, appt: '2026-03-01T10:00:00.000Z', driverId: null, name: 'Acme Shipping', city: 'Dallas, TX' },
+        { id: 's2', type: 'delivery', sequence: 1, appt: '2026-03-02T10:00:00.000Z', driverId: null, name: 'Beta Receiving', city: 'Austin, TX' },
+      ],
+    } as LoadBoardSummary]
+
+    const [row] = await rowsFor()
+    expect(row.pickupName).toBe('Acme Shipping')
+    expect(row.consigneeName).toBe('Beta Receiving')
+    expect(row.fromState).toBe('TX')
+    expect(row.toState).toBe('TX')
+    expect(row.stops).toHaveLength(2)
+  })
+
+  it('falls back to the load mirror city string for states when there are no stops', async () => {
+    data.shipments = [shipment('shp-1', { loadIds: ['lod-1'] })]
+    data.orders = []
+    data.loads = [{
+      id: 'lod-1', shipmentId: 'shp-1',
+      originName: 'Acme Shipping', originCity: 'Dallas, TX',
+      destinationName: 'Beta Receiving', destinationCity: 'Chicago, IL',
+    } as LoadBoardSummary]
+
+    const [row] = await rowsFor()
+    expect(row.pickupName).toBe('Acme Shipping')
+    expect(row.consigneeName).toBe('Beta Receiving')
+    expect(row.fromState).toBe('TX')
+    expect(row.toState).toBe('IL')
+    expect(row.stops).toBeNull()
+  })
+
+  it('resolves officeTeamKeys from the sales rep profile and stays null for an unknown rep', async () => {
+    data.shipments = [
+      shipment('shp-1', { salesRepId: 'rep@bcat.io' }),
+      shipment('shp-2', { salesRepId: 'unknown@bcat.io' }),
+    ]
+    data.orders = []
+    data.loads = []
+    data.userProfiles = [{
+      id: 'rep@bcat.io', email: 'rep@bcat.io', teamKeys: ['TEAM-A', 'TEAM-B'],
+      createdBy: 'a@b.c', updatedBy: 'a@b.c', version: 1, createdAt: '2026-03-01T00:00:00.000Z', updatedAt: '2026-03-01T00:00:00.000Z',
+    }] as UserProfileRecord[]
+
+    const rows = await rowsFor()
+    expect(rows[0].officeTeamKeys).toEqual(['TEAM-A', 'TEAM-B'])
+    expect(rows[1].officeTeamKeys).toBeNull()
+  })
+
+  it('leaves R2 facets null and still returns rows when financials and profiles are unavailable', async () => {
+    data.shipments = [shipment('shp-1', { salesRepId: 'rep@bcat.io', loadIds: ['lod-1'] })]
+    data.orders = []
+    data.loads = [{ id: 'lod-1', shipmentId: 'shp-1', equipmentType: 'VAN', commodity: 'widgets' } as LoadBoardSummary]
+    data.loadFinancials = []
+    data.userProfiles = []
+
+    const [row] = await rowsFor()
+    expect(row.revenueCents).toBeNull()
+    expect(row.costCents).toBeNull()
+    expect(row.profitCents).toBeNull()
+    expect(row.marginBps).toBeNull()
+    expect(row.officeTeamKeys).toBeNull()
+    expect(row.equipmentType).toBe('VAN')
+    expect(row.id).toBe('shp-1')
   })
 })

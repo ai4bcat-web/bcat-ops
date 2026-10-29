@@ -11,7 +11,7 @@
  * A voided shipment is read-only — every item in both menus is disabled on it.
  */
 import { useContext, useState } from 'react'
-import { MoreHorizontal, Copy, PauseCircle, PlayCircle, Ban, RotateCcw, Check, X, Truck, Building2, UserMinus, FileSignature } from 'lucide-react'
+import { MoreHorizontal, Copy, PauseCircle, PlayCircle, Ban, RotateCcw, Check, X, Truck, Building2, UserMinus, FileSignature, UserCog } from 'lucide-react'
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
@@ -61,9 +61,11 @@ const REMOVAL_NOTE_MAX = 250
 export interface ShipmentActionHandlers {
   onDuplicate: (copies: { pickupAppt: string; deliveryAppt: string }[], sameCarrier: boolean) => Promise<void>
   onSetStatus: (status: 'ON_HOLD' | 'OPEN' | 'CANCELED' | 'UNCANCEL', reason?: string) => Promise<void>
-  /** The void dialog does the call; this swaps the voided bundle in. No un-void exists. */
+  /** The void dialog does the call; this swaps the voided bundle in. */
   onVoid: (bundle: ShipmentBundle) => void
   onTenderRespond: (decision: 'ACCEPT' | 'REJECT' | 'RESET', reason?: string) => Promise<void>
+  onUnvoid?: () => void
+  onRepointCustomer?: () => void
 }
 
 /** Everything the row menu needs to read, including what the void dialog stamps. */
@@ -168,13 +170,25 @@ export function ShipmentRowActions({ shipment, isAdmin, cancelDeleteAdminOnly, h
           {mayVoid && (
             <>
               <DropdownMenuSeparator />
-              <DropdownMenuItem
-                className="text-[color:var(--tms-badge-red)]"
-                disabled={voided}
-                onSelect={() => setDialog({ kind: 'void' })}
-              >
-                <Ban size={14} className="mr-2" />Void shipment…
-              </DropdownMenuItem>
+              {voided && handlers.onUnvoid && (
+                <DropdownMenuItem onSelect={() => handlers.onUnvoid?.()}>
+                  <RotateCcw size={14} className="mr-2" />Unvoid shipment…
+                </DropdownMenuItem>
+              )}
+              {!voided && (
+                <DropdownMenuItem
+                  className="text-[color:var(--tms-badge-red)]"
+                  disabled={voided}
+                  onSelect={() => setDialog({ kind: 'void' })}
+                >
+                  <Ban size={14} className="mr-2" />Void shipment…
+                </DropdownMenuItem>
+              )}
+              {handlers.onRepointCustomer && (
+                <DropdownMenuItem onSelect={() => handlers.onRepointCustomer?.()}>
+                  <UserCog size={14} className="mr-2" />Re-point customer…
+                </DropdownMenuItem>
+              )}
             </>
           )}
         </DropdownMenuContent>

@@ -41,6 +41,11 @@ Every shipment carries three tags, shown on the page and editable where your rol
 
 How a tag is chosen, how to hand-tag one, and where to edit the rules: [Divisions and Ownership](divisions-and-ownership.md).
 
+Two ownership rules are worth calling out:
+
+- An **Amazon driver** is tagged as an **owner operator** (`OWNER_OPERATOR`), not a separate subsidiary.
+- A shipment whose **customer is Auto Shipper** is tagged as **Car Shipping** (`CAR_SHIPPING`).
+
 ## Void, never delete
 
 A shipment and its PRO number can never be deleted — by anyone, through any path. There is no delete button, no delete action and no delete mutation.
@@ -49,11 +54,31 @@ The only way a shipment leaves the working set is **Void**. Void is owner/ADMIN 
 
 - keeps its PRO, its history, its legs, its charges and its documents;
 - shows as voided, with who voided it, when, and why;
-- **cannot be invoiced**, and no un-void exists — the PRO is never reused;
+- **cannot be invoiced**;
 - gets `CANCELED` on its mirrored Load, so dispatch and AP stop chasing a load that is not going to run, and its open carrier legs and check calls are closed off;
-- is refused for every other write action — a voided shipment only takes a Void.
+- is refused for every other write action — a voided shipment only takes a Void or an Unvoid.
 
 A shipment that already carries an invoice cannot be voided: void the invoice first. Voiding is for the mistake that was never billed; once money is on the customer, the correction is on the invoice, not the shipment.
+
+## Un-void
+
+A voided shipment can be brought back with **Unvoid**. This is owner/ADMIN only, enforced in the server from your identity, and requires a reason. Unvoid clears the void markers, reopens any carrier leg that is still owed money, and restores each mirrored Load to the status the stop evidence supports.
+
+What unvoid deliberately does **not** do:
+
+- It does not restore the PRO claim — the PRO was never released and stays claimed.
+- It does not bring back driver marks or stop stamps that were cleared.
+- It does not make the shipment ready to invoice automatically — the document gate must be satisfied again.
+
+## Re-pointing a customer
+
+If a shipment was linked to the wrong customer, owner/ADMIN can **Re-point customer**. Before invoicing, this is a simple correction: the shipment, its orders and mirrored loads are pointed at the new customer record, with an audit row recording the change.
+
+After invoicing, the simple re-point is refused. The credit-and-rebill path then credits the original invoice (the invoice is never edited), repoints the shipment, and puts the credited orders back through the normal release-to-accounting gate so the new customer can be rebilled.
+
+## Create shipment for a legacy load
+
+Some loads were created before the Shipment record existed. Owner and ADMIN see **Create shipment** on the Shipments board for any such load. It mints the Shipment, Order and mirrored records for that one load using the same path the backfill script uses. After it runs, the load appears on the board like any other shipment.
 
 ## What is not here yet
 

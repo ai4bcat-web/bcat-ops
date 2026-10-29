@@ -4,11 +4,11 @@ Markdown knowledge base for the in-app Help/Academy module and Ask assistant.
 
 ## Articles
 
-- [Navigation](navigation.md) — the three businesses plus Company in the sidebar, what lives where, the `/tms/*` paths, the redirects from every old path, and the `tms` grant.
-- [Shipments Are the One Record](shipments-one-record.md) — a load IS a shipment; the Order and Load records stay underneath; one list for all three businesses; division/subdivision/rep tags; own-fleet booking; Void instead of delete.
+- [Navigation](navigation.md) — Shipments pinned at the top of the sidebar, the three businesses plus Company below it, what lives where, the `/tms/*` paths, the redirects from every old path, and the `tms` grant.
+- [Shipments Are the One Record](shipments-one-record.md) — a load IS a shipment; the Order and Load records stay underneath; one list for all three businesses; division/subdivision/rep tags; own-fleet booking; Amazon driver as owner operator; Auto Shipper as car shipping; Void, Un-void, Create shipment and Re-point customer.
 - [Shipments, Orders, and Loads](shipments-orders-loads.md) — the data underneath: how a freight move is modelled as a Shipment, an Order, and its Loads, and how status is derived.
 - [Divisions and Ownership](divisions-and-ownership.md) — the division tree, ownership settings, the rules and first-match-wins, hand tags, testing a shipment, re-tagging, and where to edit it.
-- [Shipment Views](shipment-views.md) — the department views, the seed views, saving the current filters as a view, and a view's audience.
+- [The Shipments Board](shipments-board.md) — the Aljex-style board: filters, column templates, status checkboxes, the fifteen detail filters, row colours, the Icon Key, footer actions, batch tasks, un-void, re-point and create shipment.
 - [Brokerage Dashboard](brokerage-dashboard.md) — the 17 Classic charts plus the Brokerage charts, the filter row, grouping by division and subdivision, and what is still coming.
 - [Release to Accounting](release-to-accounting.md) — the release gate: delivered, required documents, required references, carrier charges settled or own-fleet leg recorded, no open exceptions; no override; where the missing list shows; factoring and batch obey it.
 - [Carriers and Booking](carriers-and-booking.md) — the carrier directory, the booking gates, quick pay, the rate confirmation, and bounce vs TONU.

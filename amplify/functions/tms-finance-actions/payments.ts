@@ -74,7 +74,7 @@ interface PostedRow {
   duplicate: boolean
 }
 
-function planInvoiceOf(row: Row): PlanDocument {
+export function planInvoiceOf(row: Row): PlanDocument {
   const totalCents = numberOrNull(row.totalCents) ?? 0
   const paidCents = numberOrNull(row.paidCents) ?? 0
   const writtenOffCents = numberOrNull(row.writtenOffCents) ?? 0
@@ -155,15 +155,17 @@ async function alreadyPosted(id: string): Promise<Row | null> {
 }
 
 /** Everything a plan implies for the invoices and their orders, as transaction items. */
-async function ledgerWrites(
+export async function ledgerWrites(
   plan: PaymentPlan,
   before: Record<string, PlanDocument>,
   caller: Caller,
   now: string,
   direction: 'APPLY' | 'REVERSE',
+  options: { skipOrderUpdates?: boolean } = {},
 ): Promise<{ writes: TransactWriteItem[]; invoiceIds: string[] }> {
   const writes: TransactWriteItem[] = []
   const invoiceIds: string[] = []
+  const skipOrderUpdates = options.skipOrderUpdates ?? false
 
   for (const planned of plan.documents) {
     const prior = before[planned.id]
@@ -203,7 +205,7 @@ async function ledgerWrites(
     if (update?.ExpressionAttributeNames) update.ExpressionAttributeNames['#st'] = 'status'
 
     const orderId = String(row.orderId ?? '')
-    if (orderId) {
+    if (orderId && !skipOrderUpdates) {
       const order = await getById(ORDER_TABLE_NAME, orderId)
       writes.push(
         updateTx(
@@ -456,6 +458,19 @@ export async function reversePayment(input: Row, caller: Caller): Promise<Posted
 
   const original = await getById(AR_PAYMENT_TABLE_NAME, paymentRowId)
   if (!original) throw new Error(`Payment not found: ${paymentRowId}`)
+
+  // A credit memo issued by REPOINT_INVOICED_CUSTOMER moved the order off the invoice;
+  // reversing it here would try to update an order that is no longer attached.
+  // Move the shipment back to the original customer with REPOINT_INVOICED_CUSTOMER instead.
+  if (
+    original.kind === 'CREDIT_MEMO'
+    && typeof original.note === 'string'
+    && original.note.includes('repoint key:')
+  ) {
+    throw new Error(
+      'This credit memo was created by a customer repoint; use REPOINT_INVOICED_CUSTOMER to move the shipment back instead',
+    )
+  }
 
   const applications = (original.applications as PaymentApplication[] | undefined) ?? []
   const creditApplications = (original.creditApplications as CreditApplication[] | undefined) ?? []

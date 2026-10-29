@@ -1,11 +1,17 @@
+// @vitest-environment jsdom
 /**
  * The sidebar is now the org chart: three businesses plus the company, built from
  * division rows. What breaks silently here is access — a Brokerage grant that leaks the
  * fleet's pages into somebody's rail, or a division that has no pages of its own
  * vanishing instead of showing its shipments.
  */
-import { describe, it, expect } from 'vitest'
-import { buildNavSections, TMS_ITEMS, tmsPageTitle } from './navSections'
+import { describe, it, expect, beforeEach } from 'vitest'
+import { render, screen } from '@testing-library/react'
+import '@testing-library/jest-dom/vitest'
+import { MemoryRouter } from 'react-router-dom'
+import { createElement } from 'react'
+import { buildNavSections, PINNED_ITEMS, TMS_ITEMS, tmsPageTitle } from './navSections'
+import { TmsShell } from '@/features/tms/TmsShell'
 import type { OwnershipDivisionRecord } from '@/types/tms'
 
 function division(partial: Partial<OwnershipDivisionRecord> & { code: string }): OwnershipDivisionRecord {
@@ -37,38 +43,98 @@ const FOUR = [
 
 const grants = (...keys: string[]) => (key: string) => keys.includes(key)
 
+beforeEach(() => {
+  window.localStorage.clear()
+})
+
 describe('buildNavSections', () => {
+  it('pins Shipments above every section and keeps its view children working', () => {
+    const { pinned, sections } = buildNavSections({ divisions: FOUR, hasPageAccess: grants('tms') })
+
+    // Shipments is the only pinned item, and it does not also live inside a section.
+    expect(pinned.map((i) => i.label)).toEqual(['Shipments'])
+    expect(pinned[0].to).toBe('/tms/shipments')
+    for (const section of sections) {
+      expect(section.items.some((i) => i.to === '/tms/shipments')).toBe(false)
+    }
+
+    // The same NavRow / childrenFor path that rendered children when Shipments was in
+    // BROKERAGE still renders them now that it is pinned.
+    const views = [
+      { slug: 'active', name: 'Active Shipments' },
+      { slug: 'dispatch', name: 'Dispatch' },
+    ]
+    render(
+      createElement(
+        MemoryRouter,
+        { initialEntries: ['/tms/shipments'] },
+        createElement(
+          TmsShell,
+          {
+            pinned,
+            sections,
+            activePath: '/tms/shipments',
+            pageTitle: 'Shipments',
+            user: { initial: 'R', email: 'ryne@bcatcorp.com' },
+            shipmentViews: views,
+          },
+          createElement('div', null, 'page body')
+        )
+      )
+    )
+    expect(screen.getByRole('link', { name: /^Shipments$/ })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Active Shipments' })).toHaveAttribute(
+      'href',
+      '/tms/shipments/view/active'
+    )
+    expect(screen.getByRole('link', { name: 'Dispatch' })).toHaveAttribute('href', '/tms/shipments/view/dispatch')
+  })
+
   it('opens the whole Brokerage section on the one `tms` grant, and nothing else', () => {
-    const sections = buildNavSections({ divisions: FOUR, hasPageAccess: grants('tms') })
+    const { pinned, sections } = buildNavSections({ divisions: FOUR, hasPageAccess: grants('tms') })
     expect(sections.map((s) => s.key)).toEqual(['BROKERAGE'])
     expect(sections[0].items.map((i) => i.to)).toEqual(TMS_ITEMS.map((i) => i.to))
     expect(sections[0].brand).toBe('BCAT Logistics')
+    expect(pinned.map((i) => i.to)).toEqual(PINNED_ITEMS.map((i) => i.to))
   })
 
   it('still opens a Brokerage page on its original grant alone', () => {
-    const sections = buildNavSections({ divisions: FOUR, hasPageAccess: grants('carriers') })
+    const { pinned, sections } = buildNavSections({ divisions: FOUR, hasPageAccess: grants('carriers') })
     expect(sections.map((s) => s.key)).toEqual(['BROKERAGE'])
     expect(sections[0].items.map((i) => i.label)).toEqual(['Carriers'])
+    // A carrier-only grant does not open Shipments.
+    expect(pinned).toEqual([])
   })
 
   it('gives the owner all four sections, Company last', () => {
-    const sections = buildNavSections({ divisions: FOUR, hasPageAccess: () => false, isOwner: true })
+    const { pinned, sections } = buildNavSections({ divisions: FOUR, hasPageAccess: () => false, isOwner: true })
     expect(sections.map((s) => s.key)).toEqual(['BROKERAGE', 'ASSETS', 'CAR_SHIPPING', 'COMPANY'])
     expect(sections[3].items.map((i) => i.label)).toContain('Finances')
     // The header reads as a business name, not as a code: `CAR SHIPPING [Best Care Auto Transport]`.
     expect(sections[2].name).toBe('CAR SHIPPING')
     expect(sections[2].brand).toBe('Best Care Auto Transport')
+    expect(pinned.map((i) => i.to)).toEqual(PINNED_ITEMS.map((i) => i.to))
   })
 
   it('keeps a fleet user out of the Brokerage section', () => {
-    const sections = buildNavSections({ divisions: FOUR, hasPageAccess: grants('calendar', 'trucks') })
+    const { pinned, sections } = buildNavSections({ divisions: FOUR, hasPageAccess: grants('calendar', 'trucks') })
     expect(sections.map((s) => s.key)).toEqual(['ASSETS'])
     expect(sections[0].items.map((i) => i.label)).toEqual(['Calendar', 'Fleet'])
+    // Fleet-only access does not open Shipments.
+    expect(pinned).toEqual([])
+  })
+
+  it('shows Shipments to a shared-loads grant exactly as before', () => {
+    const { pinned, sections } = buildNavSections({ divisions: FOUR, hasPageAccess: grants('loads') })
+    // Shipments is still reachable for the same people; it just lives in pinned now.
+    expect(pinned.map((i) => i.label)).toEqual(['Shipments'])
+    // No other Brokerage page leaks through.
+    expect(sections).toEqual([])
   })
 
   it('gives a division with no pages of its own a shipments link', () => {
     const withNew = [...FOUR, division({ code: 'FLATBED', name: 'Flatbed Division', sortOrder: 25 })]
-    const sections = buildNavSections({ divisions: withNew, hasPageAccess: grants('tms') })
+    const { pinned, sections } = buildNavSections({ divisions: withNew, hasPageAccess: grants('tms') })
     const flatbed = sections.find((s) => s.key === 'FLATBED')
     expect(flatbed?.items).toEqual([{
       to: '/tms/shipments/view/division-FLATBED',
@@ -77,6 +143,7 @@ describe('buildNavSections', () => {
       badge: null,
       pageKey: 'tms',
     }])
+    expect(pinned.map((i) => i.to)).toEqual(PINNED_ITEMS.map((i) => i.to))
   })
 
   it('drops an inactive division and rolls a subsidiary up into its parent', () => {
@@ -84,14 +151,14 @@ describe('buildNavSections', () => {
       ...FOUR.map((d) => (d.code === 'CAR_SHIPPING' ? { ...d, active: false } : d)),
       division({ code: 'OWNER_OPERATOR', name: 'Owner Operators', parentId: 'ASSETS', sortOrder: 21 }),
     ]
-    const sections = buildNavSections({ divisions, hasPageAccess: () => true })
+    const { sections } = buildNavSections({ divisions, hasPageAccess: () => true })
     expect(sections.map((s) => s.key)).toEqual(['BROKERAGE', 'ASSETS', 'COMPANY'])
     // The subsidiary is not a section of its own; its pages belong to the fleet.
     expect(sections.find((s) => s.key === 'ASSETS')?.items.map((i) => i.label)).toContain('Owner Operator Settlements')
   })
 
   it('falls back to the seed divisions before the table has loaded', () => {
-    const sections = buildNavSections({ divisions: null, hasPageAccess: () => true })
+    const { sections } = buildNavSections({ divisions: null, hasPageAccess: () => true })
     expect(sections.map((s) => s.key)).toEqual(['BROKERAGE', 'ASSETS', 'CAR_SHIPPING', 'COMPANY'])
   })
 })

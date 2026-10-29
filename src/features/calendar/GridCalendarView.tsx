@@ -15,7 +15,7 @@ import { ApptEditPopover } from '@/components/ApptEditPopover'
 import { computeMoveDates, computeStopMove } from '@/lib/calendarMoves'
 import { compareByOrder, persistDragOrder } from '@/lib/calendarOrder'
 import { requiresApptProofs } from '@/lib/apptQueue'
-import { isLoadVoided } from '@/lib/shipmentVoid'
+import { isLoadCanceled, isLoadVoided } from '@/lib/shipmentVoid'
 import { PodMark } from './CalendarPaperwork'
 import type { Load, Driver, ViewMode, Stop } from '@/types'
 import type { DriverAvailability } from '@/lib/apiClient'
@@ -970,8 +970,9 @@ export function GridCalendarView({ loads: allLoads, drivers, startDate, viewMode
   const currentMonth = viewMode === 'month' ? startDate.getMonth() : -1
 
   // Unscheduled (orphan) lane entries — one card per stop in multi-stop mode, else per load.
+  // Canceled freight is not unscheduled work, so it stays off the lane like voided freight.
   const unscheduledEntries = useMemo<DayEntry[]>(() => {
-    const u = loads.filter((l) => l.unscheduled)
+    const u = loads.filter((l) => l.unscheduled && !isLoadCanceled(l))
     return u.map((l) => ({ load: l, role: 'same-day' as Role, key: `${l.id}:same-day` }))
   }, [loads])
 

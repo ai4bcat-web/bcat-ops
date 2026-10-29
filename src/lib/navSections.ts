@@ -54,13 +54,27 @@ export interface NavSection extends TmsNavSection {
   items: NavSectionItem[]
 }
 
+export interface NavSectionsResult {
+  pinned: NavSectionItem[]
+  sections: NavSection[]
+}
+
+/**
+ * Pages that sit above the business sections because they serve all three businesses.
+ * Shipments is the shared freight list; its department views are rendered as children
+ * by `TmsShell` through `SHIPMENTS_PATH`.
+ */
+export const PINNED_ITEMS: NavItemDef[] = [
+  { to: '/tms/shipments', label: 'Shipments', icon: Package, pageKey: 'loads', section: BROKERAGE, tms: true, badgeKey: 'checkCalls' },
+]
+
 /**
  * The Brokerage pages, in MVMNT's sidebar order (MVMNT_UI_REFERENCE §1). Each keeps the
  * page key its old path used, so an existing grant still opens the re-homed page.
+ * Shipments is pinned above the sections and is not in this bucket.
  */
 export const TMS_ITEMS: NavItemDef[] = [
   { to: '/tms/dashboard',  label: 'Dashboard',    icon: LayoutDashboard, pageKey: 'tms',       section: BROKERAGE, tms: true },
-  { to: '/tms/shipments',  label: 'Shipments',    icon: Package,         pageKey: 'loads',     section: BROKERAGE, tms: true, badgeKey: 'checkCalls' },
   { to: '/tms/rates',      label: 'Rates',        icon: LineChart,       pageKey: 'quotes',    section: BROKERAGE, tms: true, badgeKey: 'quotesToReply' },
   { to: '/tms/invoicing',  label: 'Invoicing',    icon: FileSpreadsheet, pageKey: 'invoicing', section: BROKERAGE, tms: true, badgeKey: 'arToInvoice' },
   { to: '/tms/carriers',   label: 'Carriers',     icon: Truck,           pageKey: 'carriers',  section: BROKERAGE, tms: true },
@@ -73,6 +87,8 @@ export const TMS_ITEMS: NavItemDef[] = [
   { to: '/tms/brokerage',  label: 'My Brokerage', icon: Building,        pageKey: 'settings',  section: BROKERAGE, tms: true },
 ]
 
+const ALL_TMS_ITEMS: NavItemDef[] = [...PINNED_ITEMS, ...TMS_ITEMS]
+
 /** A division code as a section header: `CAR_SHIPPING` reads `CAR SHIPPING`. */
 export function sectionTitle(code: string): string {
   return code.replace(/_/g, ' ')
@@ -81,7 +97,7 @@ export function sectionTitle(code: string): string {
 /** The title the TMS top bar shows for a path — the longest matching item wins. */
 export function tmsPageTitle(pathname: string): string {
   let best: NavItemDef | null = null
-  for (const item of TMS_ITEMS) {
+  for (const item of ALL_TMS_ITEMS) {
     if (pathname === item.to || pathname.startsWith(`${item.to}/`)) {
       if (!best || item.to.length > best.to.length) best = item
     }
@@ -109,7 +125,7 @@ export function buildNavSections({
   hasPageAccess: (pageKey: string) => boolean
   isOwner?: boolean
   isAdmin?: boolean
-}): NavSection[] {
+}): NavSectionsResult {
   // Null means "the divisions have not loaded (or the table is not deployed yet)". The
   // seeds are the same four the Lambda writes, so the rail looks right either way.
   const all: DivisionLike[] = divisions ?? SEED_DIVISIONS
@@ -117,6 +133,17 @@ export function buildNavSections({
   const canOpenTms = everything || hasPageAccess(TMS_PAGE_KEY)
   const visible = (def: NavItemDef): boolean =>
     everything || hasPageAccess(def.pageKey) || ((def.tms === true || def.section === BROKERAGE) && canOpenTms)
+
+  // Pinned items are never part of a business section; they render first and are gated
+  // exactly like any other page, so a shared-loads grant keeps seeing Shipments.
+  const pinned: NavSectionItem[] = PINNED_ITEMS.filter(visible).map((def) => ({
+    to: def.to,
+    label: def.label,
+    icon: def.icon,
+    badge: def.badge ?? null,
+    pageKey: def.pageKey,
+    badgeKey: def.badgeKey,
+  }))
 
   // An item tagged with a subdivision (Owner Operators, Box Trucks…) belongs to the
   // business that owns it, so it rolls up to the top-level division's section.
@@ -165,5 +192,5 @@ export function buildNavSections({
     if (items.length === 0) continue
     sections.push({ key: division.code, name: sectionTitle(division.code), brand: division.brand ?? null, items })
   }
-  return sections
+  return { pinned, sections }
 }

@@ -47,7 +47,10 @@ The seed sets ASSETS' flows on (an own-fleet shipment is a load for every own-fl
 | Reference matches | any of the shipment's references matches the pattern |
 | Everything else | always true — the catch-all last rule |
 
-Resolution walks the list in order and **the first match wins**; an inactive rule is skipped. The seed rules put the driver rules first (so an own-fleet load lands in the right subsidiary), the Ivan Cartage carrier rule behind them, the vehicle-transport reference rule next, and the catch-all BROKERAGE last.
+Resolution walks the list in order and **the first match wins**; an inactive rule is skipped. The seed rules put the driver rules first (so an own-fleet load lands in the right subsidiary), the Ivan Cartage carrier rule behind them, the **Auto Shipper customer rule** next (so a shipment whose customer is Auto Shipper becomes `CAR_SHIPPING`), and the catch-all `BROKERAGE` last. Two rules are worth naming:
+
+- **Amazon driver** — a driver whose fleet group is `AMAZON` is tagged as an **owner operator** (`OWNER_OPERATOR`), not a separate subsidiary.
+- **Auto Shipper customer** — a shipment whose customer is Auto Shipper is tagged as **Best Care Auto Transport** (`CAR_SHIPPING`).
 
 Resolution runs automatically — unless the shipment was hand-tagged — whenever a shipment is created, submitted, has its customer changed, or has a carrier or own-fleet asset assigned or removed, and when it is duplicated or backfilled. The result is written to the shipment **and** its Load, so anything reading the Load sees the same tag.
 

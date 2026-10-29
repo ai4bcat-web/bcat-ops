@@ -7,6 +7,7 @@
  * there is nothing for it to release into AR behind the gate.
  */
 import { modeOf } from './health'
+import { squareCustomerImportSample } from './customerImport'
 import type { Adapter, AdapterContext, AdapterResult, Capability, ProviderDescriptor } from './types'
 
 const STUB_PREFIX = 'STUB — '
@@ -78,7 +79,16 @@ export function stubAdapter(d: ProviderDescriptor): Adapter {
     adapter.factor = async (_ctx: AdapterContext, sample: Record<string, unknown>) => stubResult(d, 'factor', sample)
   }
   if (declared.has('sync')) {
-    adapter.sync = async (_ctx: AdapterContext, input: Record<string, unknown>) => stubResult(d, 'sync', input)
+    adapter.sync = async (_ctx: AdapterContext, input: Record<string, unknown>) => {
+      // The Square stub returns real-shaped customer-import rows when no sample
+      // is supplied, so the Car Shipping board has something to consume before
+      // credentials exist. Every other provider just echoes the sample back.
+      const sample =
+        d.key === 'SQUARE' && Object.keys(input).length === 0
+          ? { rows: squareCustomerImportSample() }
+          : input
+      return stubResult(d, 'sync', sample)
+    }
   }
 
   return adapter

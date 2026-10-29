@@ -111,7 +111,7 @@ describe('ShipmentViewsPage', () => {
     })
     expect(input.audience).toBeNull()
     expect(input.columns).toEqual([
-      'number', 'status', 'reference', 'originCity', 'destinationCity', 'pickupAppt', 'deliveryAppt',
+      'number', 'status', 'originCity', 'destinationCity', 'pickupAppt', 'deliveryAppt',
       'stops', 'salesRepId', 'customerName', 'carrier', 'division', 'driver',
     ])
   })

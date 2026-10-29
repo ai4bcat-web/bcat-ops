@@ -42,6 +42,7 @@ import {
   reverseApPayment,
   sendRemittance,
 } from './apPayments'
+import { repointInvoicedCustomer } from './repoint'
 import {
   acceptCommissionCounter,
   approveCommission,
@@ -110,6 +111,7 @@ type Action =
   | 'PAY_PAY_PERIOD'
   | 'RENDER_COMMISSION_STATEMENT'
   | 'SAVE_COMMISSION_SETTINGS'
+  | 'REPOINT_INVOICED_CUSTOMER'
 
 /** The actions that move money and are owner/ADMIN while `arPostingAdminOnly` holds. */
 const POSTING_ACTIONS: Record<string, true> = {
@@ -161,6 +163,7 @@ const ADMIN_ONLY_ACTIONS: Record<string, true> = {
   SAVE_AR_SETTINGS: true,
   SAVE_AP_SETTINGS: true,
   SAVE_COMMISSION_SETTINGS: true,
+  REPOINT_INVOICED_CUSTOMER: true,
 }
 
 /**
@@ -274,6 +277,8 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return writeOffInvoice(input, caller) as unknown as Promise<Row>
     case 'REVERSE_PAYMENT':
       return reversePayment(input, caller) as unknown as Promise<Row>
+    case 'REPOINT_INVOICED_CUSTOMER':
+      return repointInvoicedCustomer(input, caller) as unknown as Promise<Row>
     case 'PREVIEW_FACTOR':
       return previewFactor(input)
     case 'SEND_TO_FACTOR':

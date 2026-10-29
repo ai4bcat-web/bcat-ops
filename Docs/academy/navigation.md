@@ -9,13 +9,14 @@ related: [shipments-one-record, divisions-and-ownership, shipment-views]
 
 # Navigation
 
-The sidebar is grouped by the business that owns each page. This article is the map: which of the three businesses owns which page, where every TMS page lives, what the old links do, and the one permission that opens the brokerage side.
+The sidebar is grouped by the business that owns each page, with one shared section at the top. This article is the map: which of the three businesses owns which page, where every TMS page lives, what the old links do, and the one permission that opens the brokerage side.
 
 ## The four sidebar groups
 
 Both rails — the legacy BCAT Ops sidebar and the MVMNT rail — render the same grouping from one config (`src/lib/navSections.ts`):
 
-- **BROKERAGE [BCAT Logistics]** — the TMS pages: Dashboard, Shipments, Rates, Invoicing, Carriers, Factors, Customers, Locations, Vendors, Workflows and Academy. These render in the MVMNT shell (dark, Inter, yellow primary) under `/tms/*`.
+- **Shipments** — pinned at the very top, above the three business sections, because freight is shared by all three businesses. It expands to show the department views (Dispatch, Tracking, POD Collection, Accounting, Sales, Brokerage board, Car shipping board, Owner operators, Box trucks, Local drivers) as children. The same people who could reach Shipments before can reach it now; no permission changed.
+- **BROKERAGE [BCAT Logistics]** — the remaining TMS pages: Dashboard, Rates, Invoicing, Carriers, Factors, Customers, Locations, Vendors, Workflows and Academy. These render in the MVMNT shell (dark, Inter, yellow primary) under `/tms/*`.
 - **ASSETS [Ivan Cartage]** — the own-fleet pages exactly as they were: Dashboard, Dispatch, Driver info, Calendar, Appts, Files, PODs, the settlements, the driver app, hours, fuel, maintenance, trucks, insurance and the rest. Same paths, same look.
 - **CAR SHIPPING [Best Care Auto Transport]** — vehicle quote, booking confirmation and pricing margin.
 - **COMPANY** — the pages that serve the whole company: Finances, Profit Review, Weekly Cash Check-in and the marketing Reddit queue.

@@ -22,7 +22,7 @@ export function TmsLayout() {
   const location = useLocation()
   const navigate = useNavigate()
 
-  const sections = useMemo(
+  const { pinned, sections } = useMemo(
     () => buildNavSections({ divisions, hasPageAccess, isOwner, isAdmin }),
     [divisions, hasPageAccess, isOwner, isAdmin],
   )
@@ -44,6 +44,7 @@ export function TmsLayout() {
   const email = user?.email ?? ''
   return (
     <TmsShell
+      pinned={pinned}
       sections={sections}
       activePath={location.pathname}
       pageTitle={tmsPageTitle(location.pathname)}

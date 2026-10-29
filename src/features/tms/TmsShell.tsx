@@ -41,6 +41,7 @@ export interface TmsNavSection {
 }
 
 export interface TmsShellProps {
+  pinned?: TmsNavItem[]
   sections: TmsNavSection[]
   /** The current pathname. Drives the active row, not react-router's own matching. */
   activePath: string
@@ -131,6 +132,7 @@ function NavRow({
 }
 
 export function TmsShell({
+  pinned = [],
   sections,
   activePath,
   pageTitle,
@@ -189,6 +191,13 @@ export function TmsShell({
         </div>
 
         <nav className="tms-sidebar-scroll" aria-label="TMS sections">
+          {pinned.length > 0 && (
+            <div className="tms-pinned">
+              {pinned.map((item) => (
+                <NavRow key={item.to} item={item} activePath={activePath} shipmentViews={shipmentViews} />
+              ))}
+            </div>
+          )}
           {sections.map((section) => (
             <div key={section.key}>
               <div className="tms-section-head">

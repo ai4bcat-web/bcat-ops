@@ -65,19 +65,26 @@ describe('resolveDivision with the seed rules', () => {
     }))).toEqual({ revDivision: 'ASSETS', revSubdivision: 'LOCAL', ruleId: 'rule-seed-4' })
   })
 
-  it('leaves an Amazon driver in Ivan Cartage with no subsidiary', () => {
+  it('tags an Amazon driver as an owner operator', () => {
     expect(resolveDivision(divisions, rules, ctx({
       carrierId: OWN_FLEET_CARRIER_CODE,
       driverFleetGroup: 'AMAZON',
       driverProgram: 'SETTLEMENT',
-    }))).toEqual({ revDivision: 'ASSETS', revSubdivision: null, ruleId: 'rule-seed-5' })
+    }))).toEqual({ revDivision: 'ASSETS', revSubdivision: 'OWNER_OPERATOR', ruleId: 'rule-seed-amazon' })
   })
 
-  it('reads a vehicle reference on an outside carrier as car shipping', () => {
+  it('reads the Auto Shipper customer as car shipping', () => {
+    expect(resolveDivision(divisions, rules, ctx({
+      carrierId: 'carrier-9',
+      customerId: 'auto-shipper-id-resolved-at-seed',
+    }))).toEqual({ revDivision: 'CAR_SHIPPING', revSubdivision: null, ruleId: 'rule-seed-auto-shipper' })
+  })
+
+  it('falls through to Brokerage when a reference looks like car shipping but the customer is not Auto Shipper', () => {
     expect(resolveDivision(divisions, rules, ctx({
       carrierId: 'carrier-9',
       references: ['PO 55120', 'VEHICLE 2019 HONDA'],
-    }))).toEqual({ revDivision: 'CAR_SHIPPING', revSubdivision: null, ruleId: 'rule-seed-6' })
+    }))).toEqual({ revDivision: 'BROKERAGE', revSubdivision: null, ruleId: 'rule-seed-7' })
   })
 
   it('falls through to Brokerage for a plain outside carrier', () => {

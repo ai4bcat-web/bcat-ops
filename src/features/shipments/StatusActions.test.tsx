@@ -128,8 +128,33 @@ describe('the PRO never leaves', () => {
     )
     openMenu()
     await waitFor(() => expect(screen.getByText('Duplicate')).toBeTruthy())
-    for (const label of ['Duplicate', 'Put on hold', 'Cancel', 'Void shipment…']) {
+    for (const label of ['Duplicate', 'Put on hold', 'Cancel']) {
       expect(screen.getByText(label).closest('[role="menuitem"]')?.getAttribute('aria-disabled')).toBe('true')
     }
+    // Without the new handlers, neither void-related exit nor re-point appears.
+    expect(screen.queryByText('Void shipment…')).toBeNull()
+    expect(screen.queryByText('Unvoid shipment…')).toBeNull()
+    expect(screen.queryByText('Re-point customer…')).toBeNull()
+  })
+
+  it('offers Unvoid on a voided row when the board provides a handler', async () => {
+    const voided = { ...shipment, voidedAt: '2026-04-02T00:00:00.000Z' } as ShipmentRecord
+    const onUnvoid = vi.fn()
+    render(
+      <ShipmentRowActions shipment={voided} isAdmin cancelDeleteAdminOnly={false} handlers={handlers({ onUnvoid })} />,
+    )
+    openMenu()
+    fireEvent.click(await screen.findByText('Unvoid shipment…'))
+    await waitFor(() => expect(onUnvoid).toHaveBeenCalled())
+  })
+
+  it('offers Re-point customer to an admin when the board provides a handler', async () => {
+    const onRepointCustomer = vi.fn()
+    render(
+      <ShipmentRowActions shipment={shipment} isAdmin cancelDeleteAdminOnly={false} handlers={handlers({ onRepointCustomer })} />,
+    )
+    openMenu()
+    fireEvent.click(await screen.findByText('Re-point customer…'))
+    await waitFor(() => expect(onRepointCustomer).toHaveBeenCalled())
   })
 })

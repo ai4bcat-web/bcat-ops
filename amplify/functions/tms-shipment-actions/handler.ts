@@ -447,10 +447,13 @@ type Action =
   // Step R. Void is the only exit a shipment has; DELETE_SHIPMENT and
   // RESTORE_SHIPMENT are gone, and nothing replaces them. A PRO is permanent.
   | 'VOID_SHIPMENT'
+  | 'UNVOID_SHIPMENT'
+  | 'REPOINT_SHIPMENT_CUSTOMER'
   // Step R. Who earns the shipment: the rules' answer, a person's answer, and the
   // two reads that let an admin see what the rules would say before they say it.
   | 'SET_REV_TAG'
   | 'CLEAR_REV_TAG'
+  | 'RESOLVE_REV_TAG'
   | 'SET_SALES_REP'
   | 'TEST_OWNERSHIP_RULES'
   | 'RETAG_SHIPMENTS'
@@ -566,6 +569,9 @@ const QUOTE_ADMIN_ONLY_ACTIONS: Record<string, true> = { SAVE_QUOTE_SETTINGS: tr
 const ADMIN_ONLY_ACTIONS: Record<string, true> = {
   SAVE_SHIPMENT_SETTINGS: true,
   VOID_SHIPMENT: true,
+  UNVOID_SHIPMENT: true,
+  REPOINT_SHIPMENT_CUSTOMER: true,
+  RESOLVE_REV_TAG: true,
   RETAG_SHIPMENTS: true,
 }
 
@@ -2464,6 +2470,7 @@ async function applyVoid(
     // legs, which is the record, so those are deliberately not touched here.
     const { assignmentType: _type, carrierName: _name, ...cleared } = uncoveredLoadPatch(readStops(load) as MirrorStop[])
     const canceling = load.status !== 'CANCELED'
+    const preReadyToInvoice = load.readyToInvoice === true
     assertLoadWriteOk(
       await client.models.Load.update({
         id: loadId,
@@ -2472,6 +2479,10 @@ async function applyVoid(
         voidedAt: now,
         // Nothing about a voided shipment is ready to bill.
         readyToInvoice: false,
+        // Record what the void changed so UNVOID_SHIPMENT can restore exactly that.
+        // A load that was already CANCELED is not re-canceled, so its status is
+        // left alone and no status snapshot is kept.
+        previousReadyToInvoice: preReadyToInvoice,
         ...(canceling
           ? {
             status: 'CANCELED',
@@ -2479,8 +2490,9 @@ async function applyVoid(
             statusChangedBy: caller.email,
             // Not a person moving this load: the shipment above it was voided.
             statusSource: 'SYSTEM',
+            previousStatus: String(load.status),
           }
-          : {}),
+          : { previousStatus: null }),
         updatedBy: caller.email,
       }),
       'Load update',
@@ -2515,6 +2527,90 @@ async function voidShipment(input: Row, caller: Caller): Promise<Row> {
     reason,
     apBoardLegsClosed,
     loadsCanceled,
+  })
+  return readBundle(shipmentId) as unknown as Row
+}
+
+/**
+ * UNVOID_SHIPMENT. Owner or ADMIN only — enforced in `authorize`. The only legal
+ * way back from a void: it clears the void markers, reopens any carrier leg that
+ * is still owed money, and restores each mirrored Load to the status the evidence
+ * supports. The PRO claim is untouched.
+ */
+async function unvoidShipment(input: Row, caller: Caller): Promise<Row> {
+  const shipmentId = assertString(input.shipmentId, 'shipmentId')
+  const reason = assertString(input.reason, 'reason')
+  if (reason.length > MAX_VOID_REASON) throw new Error(`reason exceeds maximum length of ${MAX_VOID_REASON}`)
+  const expectedUpdatedAt = assertExpectedUpdatedAt(input)
+
+  const shipment = await getById(SHIPMENT_TABLE_NAME, shipmentId)
+  if (!shipment) throw new Error(`Shipment not found: ${shipmentId}`)
+  if (!isVoided(shipment)) {
+    throw new Error(`Shipment ${String(shipment.number ?? shipmentId)} is not voided`)
+  }
+
+  const now = nowIso()
+  const openLegs = (await apBoardLegsOf(shipmentId)).filter(
+    (row) => row.kind === 'CARRIER' && row.apStatus !== 'PAID' && row.apStatus !== 'BOUNCED',
+  )
+  const apBoardLegsReopened: string[] = openLegs.map((row) => String(row.id))
+
+  await transact(
+    [
+      updateItemTx(
+        SHIPMENT_TABLE_NAME,
+        shipmentId,
+        {
+          updatedBy: caller.email,
+          updatedAt: now,
+          version: (numberOrNull(shipment.version) ?? 1) + 1,
+        },
+        expectedUpdatedAt,
+        { remove: ['voidedAt', 'voidedBy', 'voidReason'] },
+      ),
+      ...openLegs.map((row) => updateItemTx(LOAD_CARRIER_TABLE_NAME, String(row.id), { apOpen: 'OPEN' }, null)),
+    ],
+    'shipment unvoid',
+  )
+
+  const loads = await queryIndex(LOAD_TABLE_NAME, IDX_LOADS_BY_SHIPMENT, 'shipmentId', shipmentId)
+  const loadsRestored: string[] = []
+  const client = await getDataClient()
+  for (const load of loads) {
+    const loadId = String(load.id)
+    const previousStatus = optionalString(load.previousStatus, 40)
+    const previousReadyToInvoice = typeof load.previousReadyToInvoice === 'boolean' ? load.previousReadyToInvoice : null
+    const patch: Row = {
+      id: loadId,
+      voidedAt: null,
+      updatedBy: caller.email,
+    }
+    if (previousStatus != null) {
+      // The void canceled this load: put its status and readyToInvoice back exactly.
+      patch.status = previousStatus
+      patch.statusChangedAt = now
+      patch.statusChangedBy = caller.email
+      patch.statusSource = 'SYSTEM'
+      patch.previousStatus = null
+      patch.previousReadyToInvoice = null
+      patch.readyToInvoice = previousReadyToInvoice === true
+      loadsRestored.push(loadId)
+    } else {
+      // The load was already canceled before the void: its status is left alone,
+      // but the void still flipped readyToInvoice, so restore that if we recorded it.
+      if (previousReadyToInvoice != null) {
+        patch.readyToInvoice = previousReadyToInvoice === true
+        patch.previousReadyToInvoice = null
+      }
+    }
+    assertLoadWriteOk(await client.models.Load.update(patch), 'Load update')
+  }
+
+  await writeAudit('SHIPMENT', shipmentId, 'UNVOID_SHIPMENT', caller, {
+    number: optionalString(shipment.number, 60),
+    reason,
+    apBoardLegsReopened,
+    loadsRestored,
   })
   return readBundle(shipmentId) as unknown as Row
 }
@@ -2742,6 +2838,27 @@ async function clearRevTag(input: Row, caller: Caller): Promise<Row> {
   assertNotVoided(shipment)
   const patch = await applyTagToLoads(shipmentId, caller, { ignoreHand: true })
   await writeAudit('SHIPMENT', shipmentId, 'CLEAR_REV_TAG', caller, {
+    from: { revDivision: shipment.revDivision ?? null, revSubdivision: shipment.revSubdivision ?? null },
+    to: { revDivision: patch.revDivision ?? null, revSubdivision: patch.revSubdivision ?? null },
+  })
+  return readBundle(shipmentId) as unknown as Row
+}
+
+/**
+ * RESOLVE_REV_TAG — re-resolve the ownership tag from the shipment as it stands.
+ *
+ * Used after a customer re-point that moved revenue onto a different customer:
+ * the Auto Shipper rule keys on CUSTOMER_IS, so the tag that matched the old
+ * customer may no longer match the new one. A hand tag still wins, just like on
+ * create, save and SET_SHIPMENT_CUSTOMER.
+ */
+async function resolveRevTag(input: Row, caller: Caller): Promise<Row> {
+  const shipmentId = assertString(input.shipmentId, 'shipmentId')
+  const shipment = await getById(SHIPMENT_TABLE_NAME, shipmentId)
+  if (!shipment) throw new Error(`Shipment not found: ${shipmentId}`)
+  assertNotVoided(shipment)
+  const patch = await applyTagToLoads(shipmentId, caller)
+  await writeAudit('SHIPMENT', shipmentId, 'RESOLVE_REV_TAG', caller, {
     from: { revDivision: shipment.revDivision ?? null, revSubdivision: shipment.revSubdivision ?? null },
     to: { revDivision: patch.revDivision ?? null, revSubdivision: patch.revSubdivision ?? null },
   })
@@ -3245,6 +3362,76 @@ async function duplicateShipment(input: Row, caller: Caller): Promise<Row> {
 // ── SET_SHIPMENT_CUSTOMER ────────────────────────────────────────────────────
 
 /**
+ * Shared write that points a Shipment, its Orders and the mirrored Loads at one
+ * customer. Used by both the first link (`SET_SHIPMENT_CUSTOMER`) and the admin
+ * correction that re-points freight after it was linked (`REPOINT_SHIPMENT_CUSTOMER`).
+ * The rep only ever fills a blank: a shipment or order that already has a sales rep
+ * keeps the rep it has.
+ */
+async function writeCustomerToBundle(
+  shipmentId: string,
+  customer: Row,
+  caller: Caller,
+  expectedUpdatedAt: string | null,
+): Promise<void> {
+  const bundle = await readBundle(shipmentId)
+  const { shipment } = bundle
+  const settings = await getSettings()
+  const policy = resolveCreditPolicy(customer as unknown as CustomerRecord, settings as unknown as TmsSettingsRecord | null)
+  if (policy.freeCreditRequired && policy.creditLimitCents == null) {
+    throw new Error(`${String(customer.name ?? customer.id)} requires an approved credit limit before an order can be built`)
+  }
+
+  const customerId = String(customer.id)
+  const customerName = optionalString(customer.name, 200)
+  const defaultRepId = optionalString(customer.defaultSalesRepId, 100)
+  const now = nowIso()
+  const linked: Row = { ...shipment, customerId, customerName }
+  const takesRep = defaultRepId != null && optionalString(shipment.salesRepId, 100) == null
+  await transact(
+    [
+      updateItemTx(SHIPMENT_TABLE_NAME, shipmentId, {
+        customerId,
+        customerName,
+        searchKey: buildSearchKey(linked, bundle.orders, bundle.loads),
+        ...(takesRep ? { salesRepId: defaultRepId } : {}),
+        updatedBy: caller.email,
+        updatedAt: now,
+        version: (numberOrNull(shipment.version) ?? 1) + 1,
+      }, expectedUpdatedAt),
+      ...bundle.orders.map((order) => updateItemTx(ORDER_TABLE_NAME, String(order.id), {
+        customerId,
+        customerName,
+        ...(defaultRepId != null && optionalString(order.customerRepId, 100) == null
+          ? { customerRepId: defaultRepId }
+          : {}),
+        updatedBy: caller.email,
+        updatedAt: now,
+        version: (numberOrNull(order.version) ?? 1) + 1,
+      }, null)),
+    ],
+    'shipment customer',
+  )
+
+  const client = await getDataClient()
+  for (const load of bundle.loads) {
+    assertLoadWriteOk(
+      await client.models.Load.update({
+        id: String(load.id),
+        customerId,
+        customer: customerName,
+        updatedBy: caller.email,
+      }),
+      'Load update',
+    )
+  }
+
+  // An ownership rule may key on the customer, so the tag is re-resolved from what
+  // the shipment says now rather than from what it said before.
+  await applyTagToLoads(shipmentId, caller)
+}
+
+/**
  * Step R cutover. The only writer of customer identity on freight that already
  * exists, and the way an unresolved shipment stops being unresolved.
  *
@@ -3271,66 +3458,58 @@ async function setShipmentCustomer(input: Row, caller: Caller): Promise<Row> {
     )
   }
 
-  const settings = await getSettings()
   const customer = await getActiveCustomer(customerId)
-  const policy = resolveCreditPolicy(customer as unknown as CustomerRecord, settings as unknown as TmsSettingsRecord | null)
-  if (policy.freeCreditRequired && policy.creditLimitCents == null) {
-    throw new Error(`${String(customer.name ?? customerId)} requires an approved credit limit before an order can be built`)
-  }
+  await writeCustomerToBundle(shipmentId, customer, caller, null)
+  await writeAudit('SHIPMENT', shipmentId, 'SET_SHIPMENT_CUSTOMER', caller, {
+    customerId,
+    customerName: optionalString(customer.name, 200),
+    orders: bundle.orders.length,
+    loads: bundle.loads.length,
+  })
+  return readBundle(shipmentId) as unknown as Row
+}
 
-  const customerName = optionalString(customer.name, 200)
-  const defaultRepId = optionalString(customer.defaultSalesRepId, 100)
-  const now = nowIso()
-  const linked: Row = { ...shipment, customerId, customerName }
-  // The rep only ever fills a blank: a shipment somebody already assigned stays
-  // assigned, and the customer's default is a starting point, not an override.
-  const takesRep = defaultRepId != null && optionalString(shipment.salesRepId, 100) == null
-  await transact(
-    [
-      updateItemTx(SHIPMENT_TABLE_NAME, shipmentId, {
-        customerId,
-        customerName,
-        searchKey: buildSearchKey(linked, bundle.orders, bundle.loads),
-        ...(takesRep ? { salesRepId: defaultRepId } : {}),
-        updatedBy: caller.email,
-        updatedAt: now,
-        version: (numberOrNull(shipment.version) ?? 1) + 1,
-      }, null),
-      ...bundle.orders.map((order) => updateItemTx(ORDER_TABLE_NAME, String(order.id), {
-        customerId,
-        customerName,
-        ...(defaultRepId != null && optionalString(order.customerRepId, 100) == null
-          ? { customerRepId: defaultRepId }
-          : {}),
-        updatedBy: caller.email,
-        updatedAt: now,
-        version: (numberOrNull(order.version) ?? 1) + 1,
-      }, null)),
-    ],
-    'shipment customer',
-  )
+/**
+ * Step R. Re-point a linked shipment's customer. Owner/ADMIN only: this moves revenue
+ * that may already be committed, so it is audited and refused once an order has
+ * been invoiced. The invoiced path is handled by `REPOINT_INVOICED_CUSTOMER` in
+ * tms-finance-actions, which credits the original invoice and rebills the new customer.
+ */
+async function repointShipmentCustomer(input: Row, caller: Caller): Promise<Row> {
+  const shipmentId = assertString(input.shipmentId, 'shipmentId')
+  const customerId = assertString(input.customerId, 'customerId')
+  const reason = assertString(input.reason, 'reason')
+  const expectedUpdatedAt = assertExpectedUpdatedAt(input)
 
-  // The legs carry the link and the booked-name snapshot the own-fleet pages read;
-  // they go through AppSync so the calendar's subscriptions see the change.
-  const client = await getDataClient()
-  for (const load of bundle.loads) {
-    assertLoadWriteOk(
-      await client.models.Load.update({
-        id: String(load.id),
-        customerId,
-        customer: customerName,
-        updatedBy: caller.email,
-      }),
-      'Load update',
+  const bundle = await readBundle(shipmentId)
+  const { shipment } = bundle
+  assertNotVoided(shipment)
+  if (isCustomerUnresolved(shipment as unknown as CustomerResolvable)) {
+    throw new Error(
+      `${String(shipment.number ?? shipmentId)} has no customer yet. Use SET_SHIPMENT_CUSTOMER to link it to a customer.`,
     )
   }
 
-  // An ownership rule may key on the customer, so the tag is re-resolved from what
-  // the shipment says now rather than from what it said while it was unresolved.
-  await applyTagToLoads(shipmentId, caller)
-  await writeAudit('SHIPMENT', shipmentId, 'SET_SHIPMENT_CUSTOMER', caller, {
+  const orders = await queryIndex(ORDER_TABLE_NAME, IDX_ORDERS_BY_SHIPMENT, 'shipmentId', shipmentId)
+  const invoiced = orders.find((order) => order.arStatus === 'UNPAID' || order.arStatus === 'PAID')
+  if (invoiced) {
+    const label = optionalString(invoiced.invoiceNumber, 100) ?? optionalString(invoiced.invoiceId, 100) ?? 'an invoice'
+    throw new Error(
+      `INVOICED: This shipment has invoice ${label}; re-point an invoiced shipment by crediting the original invoice and rebilling the new customer.`,
+    )
+  }
+
+  const fromCustomerId = String(shipment.customerId)
+  const fromCustomerName = optionalString(shipment.customerName, 200)
+  const customer = await getActiveCustomer(customerId)
+  const customerName = optionalString(customer.name, 200)
+  await writeCustomerToBundle(shipmentId, customer, caller, expectedUpdatedAt)
+  await writeAudit('SHIPMENT', shipmentId, 'REPOINT_SHIPMENT_CUSTOMER', caller, {
+    fromCustomerId,
+    fromCustomerName,
     customerId,
     customerName,
+    reason,
     orders: bundle.orders.length,
     loads: bundle.loads.length,
   })
@@ -6009,10 +6188,16 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return setLoadStatus(input, caller)
     case 'VOID_SHIPMENT':
       return voidShipment(input, caller)
+    case 'UNVOID_SHIPMENT':
+      return unvoidShipment(input, caller)
+    case 'REPOINT_SHIPMENT_CUSTOMER':
+      return repointShipmentCustomer(input, caller)
     case 'SET_REV_TAG':
       return setRevTag(input, caller)
     case 'CLEAR_REV_TAG':
       return clearRevTag(input, caller)
+    case 'RESOLVE_REV_TAG':
+      return resolveRevTag(input, caller)
     case 'SET_SALES_REP':
       return setSalesRep(input, caller)
     case 'TEST_OWNERSHIP_RULES':

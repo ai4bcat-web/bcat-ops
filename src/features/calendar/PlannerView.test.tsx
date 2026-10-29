@@ -166,4 +166,16 @@ describe('PlannerView and a voided shipment', () => {
     render(<PlannerView loads={[voided]} drivers={drivers} weekStart={weekStart} numDays={7} />)
     expect(screen.queryByText('VOIDED-2')).toBeNull()
   })
+
+  it('leaves a legacy CANCELED load out of the Unscheduled strip and off its count', () => {
+    const live = batoryLoad({ id: 'l4', aljexId: 'LIVE-2', unscheduled: true } as unknown as Partial<Load>)
+    const canceled = batoryLoad({
+      id: 'l5', aljexId: 'CANCELED-1', unscheduled: true, status: 'CANCELED',
+    } as unknown as Partial<Load>)
+    render(<PlannerView loads={[live, canceled]} drivers={drivers} weekStart={weekStart} numDays={7} />)
+
+    expect(screen.getByText('LIVE-2')).toBeTruthy()
+    expect(screen.queryByText('CANCELED-1')).toBeNull()
+    expect(screen.getByText('· 1 load with no firm date')).toBeTruthy()
+  })
 })

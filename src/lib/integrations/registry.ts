@@ -898,6 +898,26 @@ export const PROVIDERS: ProviderDescriptor[] = [
     managedBy: 'the POD connection page at /pods (amplify/functions/pod-actions)',
     note: 'Connected and tested from the POD page, which owns its own stored connection; this row lists it so every integration is in one place, and never re-asks for the credential.',
   },
+  {
+    key: 'SQUARE',
+    label: 'Square',
+    category: 'CRM',
+    credentialSource: 'PAGE',
+    credentialFields: [
+      { key: 'accessToken', label: 'Access token', secret: true, kind: 'password' },
+      { key: 'locationId', label: 'Location ID', secret: false },
+    ],
+    stackSecretNames: [],
+    settingsFields: [],
+    capabilities: ['connect', 'validate', 'sync'],
+    validateHow: {
+      describe: 'GET https://connect.squareup.com/v2/locations with the access token as a bearer token.',
+    },
+    applicability: 'LIVE_CAPABLE',
+    loadsRead: 'NONE',
+    feeds: "Best Care Auto Transport's customer source. The customer-import adapter is served by the generic stub until credentials exist.",
+    note: 'The sync capability imports Auto Shipper customers for the Car Shipping board.',
+  },
 ]
 
 export const PROVIDER_KEYS: ProviderKey[] = PROVIDERS.map((p) => p.key)

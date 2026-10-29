@@ -24,11 +24,13 @@ const api = vi.hoisted(() => ({
   listLoadSummaries: vi.fn(async () => [] as unknown[]),
   listLoadCarriers: vi.fn(async () => [] as unknown[]),
   listLoadCarriersByLoad: vi.fn(async () => [] as unknown[]),
+  listLoadFinancials: vi.fn(async () => [] as unknown[]),
   listQuotes: vi.fn(async () => [] as unknown[]),
   listCheckCallWorklist: vi.fn(async () => [] as unknown[]),
   listCarrierPingLinks: vi.fn(async () => [] as unknown[]),
   listCustomers: vi.fn(async () => [] as unknown[]),
   listLocations: vi.fn(async () => [] as unknown[]),
+  listUserProfiles: vi.fn(async () => [] as unknown[]),
   createCustomer: vi.fn(), updateCustomer: vi.fn(), archiveCustomer: vi.fn(), setCustomerStatus: vi.fn(),
   createLocation: vi.fn(), updateLocation: vi.fn(), archiveLocation: vi.fn(),
   listIntegrations: vi.fn(async () => [] as unknown[]),
@@ -98,6 +100,8 @@ beforeEach(() => {
   api.listIntegrations.mockResolvedValue([])
   api.listCheckCallWorklist.mockResolvedValue([])
   api.listCarrierPingLinks.mockResolvedValue([])
+  api.listLoadFinancials.mockResolvedValue([])
+  api.listUserProfiles.mockResolvedValue([])
   api.getTmsSettings.mockResolvedValue(null)
 })
 

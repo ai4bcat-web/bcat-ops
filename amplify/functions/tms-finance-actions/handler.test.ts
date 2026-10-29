@@ -2295,3 +2295,256 @@ describe('commissions — the ladder closes and the period nets (review fixes)',
     expect(submitted.payPeriod.totalCents).toBe(7_000 - 5_000)
   })
 })
+
+// ── REPOINT_INVOICED_CUSTOMER ──────────────────────────────────────────────
+
+const TARGET_ID = 'cus-target'
+const TARGET_ID2 = 'cus-target2'
+
+describe('REPOINT_INVOICED_CUSTOMER', () => {
+  beforeEach(() => {
+    table(TABLES.customer).set(TARGET_ID, {
+      id: TARGET_ID,
+      name: 'Acme Logistics',
+      billingEmail: 'ar@acmelogistics.test',
+      contacts: [],
+      billToParties: [],
+    })
+    table(TABLES.customer).set(TARGET_ID2, {
+      id: TARGET_ID2,
+      name: 'Acme Warehousing',
+      billingEmail: 'ar@acmewarehousing.test',
+      contacts: [],
+      billToParties: [],
+    })
+  })
+
+  async function repoint(input: Row = {}, identity: unknown = ADMIN) {
+    return handler({
+      arguments: { action: 'REPOINT_INVOICED_CUSTOMER', input: JSON.stringify(input) },
+      identity,
+    } as never)
+  }
+
+  async function invoicedShipment() {
+    seed()
+    const { invoiceId, number } = await generate()
+    return { invoiceId, number }
+  }
+
+  it('refuses a non-admin user', async () => {
+    await invoicedShipment()
+    await expect(
+      repoint({ shipmentId: SHIPMENT_ID, customerId: TARGET_ID, reason: 'test', idempotencyKey: 'k1' }, DISPATCHER),
+    ).rejects.toThrow('Forbidden')
+  })
+
+  it('refuses when the target customer is the same as the current one', async () => {
+    await invoicedShipment()
+    const err = repoint({ shipmentId: SHIPMENT_ID, customerId: CUSTOMER_ID, reason: 'test', idempotencyKey: 'k1' })
+    await expect(err).rejects.toThrow('already belongs to this customer')
+  })
+
+  it('refuses a voided shipment', async () => {
+    await invoicedShipment()
+    const ship = table(TABLES.shipment).get(SHIPMENT_ID)!
+    ship.voidedAt = '2026-10-29T12:00:00.000Z'
+    table(TABLES.shipment).set(SHIPMENT_ID, ship)
+    await expect(
+      repoint({ shipmentId: SHIPMENT_ID, customerId: TARGET_ID, reason: 'test', idempotencyKey: 'k1' }),
+    ).rejects.toThrow('Cannot repoint a voided shipment')
+  })
+
+  it('refuses a missing or inactive target customer', async () => {
+    await invoicedShipment()
+    table(TABLES.customer).set('cus-dead', {
+      id: 'cus-dead',
+      name: 'Deactivated Inc',
+      active: false,
+    })
+    await expect(
+      repoint({ shipmentId: SHIPMENT_ID, customerId: 'cus-dead', reason: 'test', idempotencyKey: 'k1' }),
+    ).rejects.toThrow('inactive')
+    await expect(
+      repoint({ shipmentId: SHIPMENT_ID, customerId: 'cus-ghost', reason: 'test', idempotencyKey: 'k1' }),
+    ).rejects.toThrow('not found')
+  })
+
+  it('credits an ISSUED invoice for its full balance and puts the order back on the gate', async () => {
+    const { invoiceId, number } = await invoicedShipment()
+    const invoice = table(TABLES.invoice).get(invoiceId) as Row
+    expect(invoice.status).toBe('ISSUED')
+    const balance = invoice.balanceCents as number
+    expect(balance).toBe(250_000)
+
+    const result = (await repoint({
+      shipmentId: SHIPMENT_ID,
+      customerId: TARGET_ID,
+      reason: 'billing department change',
+      idempotencyKey: 'key-credit',
+    })) as Row
+
+    expect(result.duplicate).toBe(false)
+    expect(result.creditedCents).toBe(250_000)
+
+    const arPayments = [...table(TABLES.arPayment).values()]
+    expect(arPayments).toHaveLength(1)
+    const payment = arPayments[0]
+    expect(payment.kind).toBe('CREDIT_MEMO')
+    expect(payment.amountCents).toBe(250_000)
+    expect(payment.appliedCents).toBe(250_000)
+    expect(payment.unappliedCents).toBe(0)
+    expect((payment.applications as Row[])[0].invoiceId).toBe(invoiceId)
+    expect((payment.applications as Row[])[0].amountCents).toBe(250_000)
+
+    // Invoice row: balance zero, paid, but number / total / lines untouched.
+    const updated = table(TABLES.invoice).get(invoiceId) as Row
+    expect(updated.status).toBe('PAID')
+    expect(updated.balanceCents).toBe(0)
+    expect(updated.paidCents).toBe(250_000)
+    expect(updated.paidAt).toBeTruthy()
+    expect(updated.arOpen).toBeUndefined()
+    expect(updated.number).toBe(number)
+    expect(updated.totalCents).toBe(250_000)
+    expect(updated.lines).toEqual(invoice.lines)
+
+    // Order is back on the gate.
+    const order = table(TABLES.order).get(ORDER_ID) as Row
+    expect(order.arStatus).toBe('UNBILLED')
+    expect(order.invoiceId).toBeUndefined()
+    expect(order.invoiceNumber).toBeUndefined()
+    expect(order.customerId).toBe(TARGET_ID)
+    expect(order.customerName).toBe('Acme Logistics')
+
+    const shipment = table(TABLES.shipment).get(SHIPMENT_ID) as Row
+    expect(shipment.customerId).toBe(TARGET_ID)
+    expect(shipment.customerName).toBe('Acme Logistics')
+
+    const load = table(TABLES.load).get(LOAD_ID) as Row
+    expect(load.customerId).toBe(TARGET_ID)
+    expect(load.customer).toBe('Acme Logistics')
+  })
+
+  it('a replay with the same idempotencyKey writes nothing new', async () => {
+    await invoicedShipment()
+
+    const first = (await repoint({
+      shipmentId: SHIPMENT_ID,
+      customerId: TARGET_ID,
+      reason: 'test replay',
+      idempotencyKey: 'key-replay',
+    })) as Row
+    expect(first.duplicate).toBe(false)
+
+    const arPaymentCount = [...table(TABLES.arPayment).values()].length
+
+    const second = (await repoint({
+      shipmentId: SHIPMENT_ID,
+      customerId: TARGET_ID,
+      reason: 'test replay',
+      idempotencyKey: 'key-replay',
+    })) as Row
+    expect(second.duplicate).toBe(true)
+    expect(second.creditedCents).toBe(250_000)
+    expect([...table(TABLES.arPayment).values()]).toHaveLength(arPaymentCount)
+  })
+
+  it('two different keys cannot credit the same invoice twice', async () => {
+    await invoicedShipment()
+
+    await repoint({
+      shipmentId: SHIPMENT_ID,
+      customerId: TARGET_ID,
+      reason: 'first move',
+      idempotencyKey: 'key-a',
+    })
+
+    // At this point the invoice is PAID and the order has no invoiceId, so a
+    // second repoint with a new key would see no open invoices to credit.
+    // Even if the caller tries, it cannot reach the old invoice.
+    await repoint({
+      shipmentId: SHIPMENT_ID,
+      customerId: TARGET_ID2,
+      reason: 'second move',
+      idempotencyKey: 'key-b',
+    })
+
+    // No new ArPayment rows beyond the first.
+    const payments = [...table(TABLES.arPayment).values()]
+    expect(payments).toHaveLength(1)
+    expect(payments[0].reference).toBe('key-a')
+
+    // The second repoint did re-point again (different customer), but did not
+    // touch the invoice.
+    const shipment = table(TABLES.shipment).get(SHIPMENT_ID) as Row
+    expect(shipment.customerId).toBe(TARGET_ID2)
+  })
+
+  it('refuses an invoice that already has a payment applied', async () => {
+    const { invoiceId } = await invoicedShipment()
+    await call('RECORD_PAYMENT', {
+      customerId: CUSTOMER_ID,
+      receivedAt: '2026-10-25',
+      method: 'CHECK',
+      amountCents: 50_000,
+      applications: [{ invoiceId, amountCents: 50_000 }],
+    })
+
+    await expect(
+      repoint({ shipmentId: SHIPMENT_ID, customerId: TARGET_ID, reason: 'late move', idempotencyKey: 'k-paid' }),
+    ).rejects.toThrow(/payment or write-off/)
+  })
+
+  it('refuses an invoice that has a write-off', async () => {
+    const { invoiceId } = await invoicedShipment()
+    await call('WRITE_OFF', { invoiceId, amountCents: 25_000, reason: 'short pay', clientRequestId: 'wo-repoint' })
+
+    await expect(
+      repoint({ shipmentId: SHIPMENT_ID, customerId: TARGET_ID, reason: 'late move', idempotencyKey: 'k-wo' }),
+    ).rejects.toThrow(/payment or write-off/)
+  })
+
+  it('refuses a biller when arPostingAdminOnly is turned off', async () => {
+    seed({ settings: { arPostingAdminOnly: false } })
+    await generate()
+
+    await expect(
+      repoint({ shipmentId: SHIPMENT_ID, customerId: TARGET_ID, reason: 'test', idempotencyKey: 'k-admin' }, BILLER),
+    ).rejects.toThrow(/owner or ADMIN/)
+  })
+
+  it('runs commissions for every credited invoice as a write-off', async () => {
+    seedCommissions()
+    await generate()
+    const originalId = String(commissionRows()[0].id)
+
+    await repoint({ shipmentId: SHIPMENT_ID, customerId: TARGET_ID, reason: 'account change', idempotencyKey: 'k-comm' })
+
+    const row = table(TABLES.commission).get(originalId) as Row
+    expect(row.status).toBe('CANCELLED')
+  })
+
+  it('refuses the target customer when credit policy requires an approved limit', async () => {
+    await invoicedShipment()
+    table(TABLES.customer).set(TARGET_ID, {
+      ...(table(TABLES.customer).get(TARGET_ID) as Row),
+      freeCreditRequired: true,
+    })
+
+    await expect(
+      repoint({ shipmentId: SHIPMENT_ID, customerId: TARGET_ID, reason: 'test', idempotencyKey: 'k-limit' }),
+    ).rejects.toThrow(/approved credit limit/)
+  })
+
+  it('refuses to reverse a repoint credit memo directly', async () => {
+    await invoicedShipment()
+    await repoint({ shipmentId: SHIPMENT_ID, customerId: TARGET_ID, reason: 'wrong dept', idempotencyKey: 'k-rev' })
+
+    const credit = [...table(TABLES.arPayment).values()].find((p) => p.kind === 'CREDIT_MEMO')
+    expect(credit).toBeTruthy()
+
+    await expect(
+      call('REVERSE_PAYMENT', { paymentId: String(credit!.id), reason: 'undo' }),
+    ).rejects.toThrow(/REPOINT_INVOICED_CUSTOMER/)
+  })
+})

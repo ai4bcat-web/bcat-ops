@@ -37,6 +37,7 @@ const send = vi.hoisted(() => {
   process.env.OWNERSHIP_DIVISION_TABLE_NAME = 'OwnershipDivision-test'
   process.env.OWNERSHIP_RULE_TABLE_NAME = 'OwnershipRule-test'
   process.env.SHIPMENT_VIEW_TABLE_NAME = 'ShipmentView-test'
+  process.env.SHIPMENT_COLUMN_TEMPLATE_TABLE_NAME = 'ShipmentColumnTemplate-test'
   process.env.AUDIT_LOG_TABLE_NAME = 'AuditLog-test'
   process.env.GEOCODE_TOKEN_SECRET = 'test-geocode-secret'
   // Step J — the integration framework's table and its SSM path.
@@ -78,6 +79,13 @@ vi.mock('@aws-sdk/client-dynamodb', () => {
       this.input = input
     }
   }
+  class DeleteItemCommand {
+    input: unknown
+    __type = 'Delete'
+    constructor(input: unknown) {
+      this.input = input
+    }
+  }
   class TransactWriteItemsCommand {
     input: unknown
     __type = 'Transact'
@@ -91,6 +99,7 @@ vi.mock('@aws-sdk/client-dynamodb', () => {
     PutItemCommand,
     UpdateItemCommand,
     ScanCommand,
+    DeleteItemCommand,
     TransactWriteItemsCommand,
   }
 })
@@ -158,7 +167,7 @@ vi.mock('@aws-amplify/backend-function/runtime', () => {
   }
 })
 
-import { handler, parseInput } from './handler'
+import { handler, parseInput, resolveViewColumns } from './handler'
 // The real signer: the token the geocode Lambda mints must verify here, byte for byte.
 import { signGeocodePayload } from '../tms-geocode/handler'
 import { SEED_DIVISIONS, SEED_RULES } from '../../../src/lib/ownership'
@@ -208,7 +217,18 @@ interface MockScanCommand {
   }
 }
 
-type MockCommand = MockGetCommand | MockPutCommand | MockUpdateCommand | MockScanCommand
+interface MockDeleteCommand {
+  __type: 'Delete'
+  input: {
+    TableName?: string
+    Key?: Record<string, AttributeValue>
+    ConditionExpression?: string
+    ExpressionAttributeNames?: Record<string, string>
+    ExpressionAttributeValues?: Record<string, AttributeValue>
+  }
+}
+
+type MockCommand = MockGetCommand | MockPutCommand | MockUpdateCommand | MockScanCommand | MockDeleteCommand
 
 interface TestIdentity {
   sub: string
@@ -1601,11 +1621,20 @@ describe('ENSURE_OWNERSHIP_SEED', () => {
     expect(first).toMatchObject({
       divisionsCreated: SEED_DIVISIONS.length,
       rulesCreated: SEED_RULES.length,
+      rulesUpdated: 0,
+      rulesDeactivated: 0,
       viewsCreated: SEED_VIEWS.length,
     })
 
     const second = await handler(event('ENSURE_OWNERSHIP_SEED', {}, ADMIN_CALLER)) as Record<string, number>
-    expect(second).toMatchObject({ divisionsCreated: 0, rulesCreated: 0, viewsCreated: 0 })
+    expect(second).toMatchObject({
+      divisionsCreated: 0,
+      rulesCreated: 0,
+      rulesUpdated: 0,
+      rulesDeactivated: 0,
+      rulesUnchanged: SEED_RULES.length,
+      viewsCreated: 0,
+    })
 
     expect(tables.divisions.size).toBe(SEED_DIVISIONS.length)
     expect(tables.rules.size).toBe(SEED_RULES.length)
@@ -1619,6 +1648,108 @@ describe('ENSURE_OWNERSHIP_SEED', () => {
     })
     await handler(event('ENSURE_OWNERSHIP_SEED', {}, ADMIN_CALLER))
     expect(tables.divisions.get('ASSETS')).toMatchObject({ name: 'Ivan Cartage LLC', active: false, version: 4 })
+  })
+
+  it('resolves the Auto Shipper customer and points the car-shipping rule at it', async () => {
+    const tables = ownershipTables({
+      'Customer-test': [{ id: 'cust-auto', name: 'Auto Shipper', active: true }],
+    })
+
+    await handler(event('ENSURE_OWNERSHIP_SEED', {}, ADMIN_CALLER))
+
+    const rule = tables.rules.get('rule-seed-auto-shipper')
+    expect(rule).toMatchObject({
+      name: 'Auto Shipper customer',
+      active: true,
+      condition: { kind: 'CUSTOMER_IS', value: 'cust-auto' },
+    })
+  })
+
+  it('writes the Auto Shipper rule inactive when the customer is missing', async () => {
+    const tables = ownershipTables()
+
+    const result = await handler(event('ENSURE_OWNERSHIP_SEED', {}, ADMIN_CALLER)) as Record<string, number>
+
+    expect(result.rulesCreated).toBe(SEED_RULES.length)
+    const rule = tables.rules.get('rule-seed-auto-shipper')
+    expect(rule).toMatchObject({
+      name: 'Auto Shipper customer (not found — rule inactive)',
+      active: false,
+      condition: { kind: 'CUSTOMER_IS', value: '' },
+    })
+  })
+
+  it('updates a changed seed rule in place', async () => {
+    const tables = ownershipTables({
+      'OwnershipRule-test': [
+        ownershipRule({
+          id: 'rule-seed-1',
+          name: 'Old owner operator name',
+          condition: { kind: 'DRIVER_FLEET_GROUP_IS', value: 'OWNER_OPERATOR' },
+          divisionCode: 'OWNER_OPERATOR',
+          sortOrder: 200,
+          version: 3,
+        }),
+      ],
+    })
+
+    const result = await handler(event('ENSURE_OWNERSHIP_SEED', {}, ADMIN_CALLER)) as Record<string, number>
+
+    expect(result.rulesUpdated).toBe(1)
+    expect(tables.rules.get('rule-seed-1')).toMatchObject({ name: 'Owner operator driver', sortOrder: 10, version: 4 })
+  })
+
+  it('deactivates a rule that was removed from the seed', async () => {
+    const tables = ownershipTables({
+      'OwnershipRule-test': [
+        ownershipRule({
+          id: 'rule-seed-legacy',
+          name: 'Retired rule',
+          condition: { kind: 'ALWAYS', value: null },
+          divisionCode: 'BROKERAGE',
+          sortOrder: 999,
+          active: true,
+          version: 2,
+        }),
+      ],
+    })
+
+    const result = await handler(event('ENSURE_OWNERSHIP_SEED', {}, ADMIN_CALLER)) as Record<string, number>
+
+    expect(result.rulesDeactivated).toBe(1)
+    expect(tables.rules.get('rule-seed-legacy')).toMatchObject({ active: false, version: 3 })
+  })
+
+  it('leaves an admin-authored ownership rule active when re-seeding', async () => {
+    const tables = ownershipTables({
+      'OwnershipRule-test': [
+        ownershipRule({
+          id: 'rule-b9965c7a-3f10-4b26-9f3e-3e3e3e3e3e3e',
+          name: 'Acme account catch-all',
+          condition: { kind: 'CUSTOMER_IS', value: 'cust-acme' },
+          divisionCode: 'BROKERAGE',
+          sortOrder: 100,
+          active: true,
+          version: 1,
+        }),
+      ],
+    })
+
+    const result = await handler(event('ENSURE_OWNERSHIP_SEED', {}, ADMIN_CALLER)) as Record<string, number>
+
+    expect(result.rulesDeactivated).toBe(0)
+    expect(tables.rules.get('rule-b9965c7a-3f10-4b26-9f3e-3e3e3e3e3e3e')).toMatchObject({
+      active: true,
+      version: 1,
+    })
+  })
+
+  it('leaves exactly one Active Shipments view on a second seed', async () => {
+    const tables = ownershipTables()
+    await handler(event('ENSURE_OWNERSHIP_SEED', {}, ADMIN_CALLER))
+    await handler(event('ENSURE_OWNERSHIP_SEED', {}, ADMIN_CALLER))
+    const active = [...tables.views.values()].filter((v) => v.slug === 'active-shipments')
+    expect(active).toHaveLength(1)
   })
 })
 
@@ -1806,6 +1937,184 @@ describe('ownership authorization', () => {
     }))
     await expect(handler(event('UPSERT_CUSTOMER', { name: 'Shipments Inc' }, identity({ groups: ['page-tms'] }))))
       .resolves.toMatchObject({ name: 'Shipments Inc' })
+  })
+})
+
+// ── Step R2: column templates ───────────────────────────────────────────────
+
+function columnTemplateTables(seed: Record<string, Record<string, unknown>[]> = {}) {
+  const tables = new Map<string, Map<string, Record<string, unknown>>>()
+  const tableOf = (name: string): Map<string, Record<string, unknown>> => {
+    const found = tables.get(name)
+    if (found) return found
+    const created = new Map<string, Record<string, unknown>>()
+    tables.set(name, created)
+    return created
+  }
+  for (const [name, rows] of Object.entries(seed)) {
+    for (const row of rows) tableOf(name).set(String(row.id), row)
+  }
+
+  send.mockImplementation((cmd: MockCommand) => {
+    const tableName = String(cmd.input.TableName ?? '')
+    const table = tableOf(tableName)
+    const type = cmd.__type
+    if (type === 'Scan') {
+      return Promise.resolve({ Items: [...table.values()].map((row) => makeDynamoItem(row)), LastEvaluatedKey: undefined })
+    }
+    if (type === 'Get') {
+      const row = table.get(String(cmd.input.Key?.id?.S ?? ''))
+      return Promise.resolve({ Item: row ? makeDynamoItem(row) : undefined })
+    }
+    if (type === 'Put') {
+      const condition = cmd.input.ConditionExpression ?? ''
+      const item = unmarshall(cmd.input.Item ?? {})
+      const existing = table.get(String(item.id))
+      if (condition.includes('attribute_not_exists(id)') && existing) return Promise.reject(conditionFailed())
+      if (condition.includes('#version = :expectedVersion') && Number(existing?.version ?? 0) !== Number(cmd.input.ExpressionAttributeValues?.[':expectedVersion']?.N)) {
+        return Promise.reject(conditionFailed())
+      }
+      table.set(String(item.id), item)
+      return Promise.resolve({})
+    }
+    if (type === 'Update') {
+      const values = cmd.input.ExpressionAttributeValues ?? {}
+      const id = String(cmd.input.Key?.id?.S ?? '')
+      const existing = table.get(id)
+      if ((cmd.input.ConditionExpression ?? '').includes('#version = :expectedVersion') && Number(existing?.version ?? 0) !== Number(values[':expectedVersion']?.N)) {
+        return Promise.reject(conditionFailed())
+      }
+      const next = {
+        ...(existing ?? { id }),
+        active: values[':active']?.BOOL ?? false,
+        updatedAt: values[':updatedAt']?.S,
+        updatedBy: values[':updatedBy']?.S,
+        version: Number(values[':version']?.N ?? 1),
+      }
+      table.set(id, next)
+      return Promise.resolve({ Attributes: makeDynamoItem(next) })
+    }
+    if (type === 'Delete') {
+      const id = String(cmd.input.Key?.id?.S ?? '')
+      const existing = table.get(id)
+      if (!existing) {
+        const err = new Error('ResourceNotFoundException')
+        err.name = 'ResourceNotFoundException'
+        return Promise.reject(err)
+      }
+      if ((cmd.input.ConditionExpression ?? '').includes('#version = :expectedVersion') && Number(existing.version ?? 0) !== Number(cmd.input.ExpressionAttributeValues?.[':expectedVersion']?.N)) {
+        return Promise.reject(conditionFailed())
+      }
+      table.delete(id)
+      return Promise.resolve({})
+    }
+    throw new Error(`unexpected ${type}`)
+  })
+
+  return {
+    templates: tableOf('ShipmentColumnTemplate-test'),
+    views: tableOf('ShipmentView-test'),
+    audit: tableOf('AuditLog-test'),
+  }
+}
+
+const template = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
+  id: 't-1',
+  name: 'Template',
+  columns: ['status'],
+  widths: {},
+  ownerEmail: 'alice@bcatcorp.com',
+  shared: false,
+  createdBy: 'alice@bcatcorp.com',
+  updatedBy: 'alice@bcatcorp.com',
+  version: 1,
+  createdAt: '2026-01-01T00:00:00.000Z',
+  updatedAt: '2026-01-01T00:00:00.000Z',
+  ...over,
+})
+
+describe('SAVE_COLUMN_TEMPLATE and DELETE_COLUMN_TEMPLATE', () => {
+  const TMS_CALLER = identity({ groups: ['page-tms'] })
+  const ADMIN = identity({ groups: ['ADMIN'] })
+
+  it('creates a template and takes ownerEmail from the caller, ignoring input', async () => {
+    const tables = columnTemplateTables()
+    const result = (await handler(event('SAVE_COLUMN_TEMPLATE', {
+      name: 'Ryne',
+      columns: ['status', 'proNumber'],
+      ownerEmail: 'someone@else.com',
+    }, TMS_CALLER))) as Record<string, unknown>
+    expect(result).toMatchObject({ name: 'Ryne', ownerEmail: 'dennis@bcatcorp.com', shared: false, version: 1 })
+    expect(result.columns).toEqual(['status', 'proNumber'])
+    expect(tables.templates.size).toBe(1)
+  })
+
+  it('refuses an unknown column key by name', async () => {
+    columnTemplateTables()
+    await expect(
+      handler(event('SAVE_COLUMN_TEMPLATE', { name: 'Bad', columns: ['status', 'notAColumn'] }, TMS_CALLER)),
+    ).rejects.toThrow('"notAColumn" is not a board column')
+  })
+
+  it('refuses an empty column list', async () => {
+    columnTemplateTables()
+    await expect(
+      handler(event('SAVE_COLUMN_TEMPLATE', { name: 'Empty', columns: [] }, TMS_CALLER)),
+    ).rejects.toThrow('columns cannot be empty')
+  })
+
+  it('refuses a non-owner update of a private template', async () => {
+    const tables = columnTemplateTables({ 'ShipmentColumnTemplate-test': [template({ id: 't-private' })] })
+    await expect(
+      handler(event('SAVE_COLUMN_TEMPLATE', { id: 't-private', name: 'Hacked', columns: ['status'] }, identity({ email: 'bob@bcatcorp.com', groups: ['page-tms'] }))),
+    ).rejects.toThrow(/Forbidden/)
+    expect(tables.templates.get('t-private')).toMatchObject({ name: 'Template' })
+  })
+
+  it('refuses a non-owner delete of a private template', async () => {
+    const tables = columnTemplateTables({ 'ShipmentColumnTemplate-test': [template({ id: 't-private' })] })
+    await expect(
+      handler(event('DELETE_COLUMN_TEMPLATE', { id: 't-private' }, identity({ email: 'bob@bcatcorp.com', groups: ['page-tms'] }))),
+    ).rejects.toThrow(/Forbidden/)
+    expect(tables.templates.has('t-private')).toBe(true)
+  })
+
+  it('lets an admin update a shared template', async () => {
+    const tables = columnTemplateTables({ 'ShipmentColumnTemplate-test': [template({ id: 't-shared', shared: true })] })
+    const result = (await handler(event('SAVE_COLUMN_TEMPLATE', { id: 't-shared', name: 'Updated', columns: ['status'] }, ADMIN))) as Record<string, unknown>
+    expect(result.name).toBe('Updated')
+    expect(tables.templates.get('t-shared')).toMatchObject({ name: 'Updated', version: 2 })
+  })
+
+  it('resolves a view to its own columns when its template is gone', () => {
+    const templates = new Map<string, Record<string, unknown>>()
+    expect(resolveViewColumns({ columnTemplateId: 'deleted', columns: ['originCity'] }, templates)).toEqual(['originCity'])
+    templates.set('deleted', { columns: ['status'] })
+    expect(resolveViewColumns({ columnTemplateId: 'deleted', columns: ['originCity'] }, templates)).toEqual(['status'])
+  })
+
+  it('preserves the existing ownerEmail when an admin edits a shared template', async () => {
+    const tables = columnTemplateTables({ 'ShipmentColumnTemplate-test': [template({ id: 't-shared', shared: true, ownerEmail: 'alice@bcatcorp.com' })] })
+    const result = (await handler(event('SAVE_COLUMN_TEMPLATE', { id: 't-shared', name: 'Updated', columns: ['status'] }, ADMIN))) as Record<string, unknown>
+    expect(result.ownerEmail).toBe('alice@bcatcorp.com')
+    expect(tables.templates.get('t-shared')).toMatchObject({ ownerEmail: 'alice@bcatcorp.com', version: 2 })
+  })
+
+  it('accepts non-default board columns that are still valid', async () => {
+    const tables = columnTemplateTables()
+    const result = (await handler(event('SAVE_COLUMN_TEMPLATE', {
+      name: 'Extended',
+      columns: ['number', 'pickupAppt', 'salesRepId', 'division'],
+    }, TMS_CALLER))) as Record<string, unknown>
+    expect(result.columns).toEqual(['number', 'pickupAppt', 'salesRepId', 'division'])
+    expect(tables.templates.size).toBe(1)
+  })
+
+  it('refuses an unknown column key by name even when validating against the full board list', async () => {
+    columnTemplateTables()
+    await expect(
+      handler(event('SAVE_COLUMN_TEMPLATE', { name: 'Bad', columns: ['status', 'notAColumn'] }, TMS_CALLER)),
+    ).rejects.toThrow('"notAColumn" is not a board column')
   })
 })
 

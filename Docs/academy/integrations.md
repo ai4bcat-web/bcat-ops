@@ -95,6 +95,12 @@ A provider in that position reads **Unable to verify — Live on main · neutere
 
 This release ships **connect, validate, mappings and the preview**. The actual push of invoices and bills is deliberately not here: it waits until the mappings are confirmed against the real chart of accounts and until the Workflows page has the Errors and Retry tab, because a sync that can fail silently is worse than no sync. Until then the preview is marked *Stub* and sends nothing. Customer and vendor links are shown as "arrives with live sync".
 
+## Square
+
+**Square** is listed as a provider under My Brokerage → Integrations. It is a stub until credentials are entered: the page accepts an access token and a location ID, validates with a real `GET /v2/locations` call when credentials exist, and the sync capability imports customers for Best Care Auto Transport.
+
+Until Square credentials are stored, the adapter returns sample rows of the same shape so the Car Shipping board has something real to consume. A Square sync never creates or edits a customer record on its own; the rows it returns are the shape a future live connection will hand to the importer. When live credentials arrive, the same adapter runs against Square's API and feeds the same customer-import path.
+
 ## The BCAT API
 
 **OpenAPI** is BCAT's own read-only API, for a customer's system that wants shipment status without a login.

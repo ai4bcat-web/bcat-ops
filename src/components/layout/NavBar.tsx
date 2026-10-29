@@ -15,7 +15,7 @@ import { useDocumentReviewQueue } from '@/hooks/useDocumentReviewQueue'
 import { useArToInvoiceCount } from '@/hooks/useArToInvoiceCount'
 import { useApToReviewCount } from '@/hooks/useApToReviewCount'
 import { useQuotesToReplyCount } from '@/hooks/useQuotesToReplyCount'
-import { buildNavSections } from '@/lib/navSections'
+import { buildNavSections, type NavSectionItem } from '@/lib/navSections'
 import { useOwnershipDivisions } from '@/features/tms/useShipmentViews'
 
 const BADGE_TONE: Record<string, { bg: string; color: string }> = {
@@ -113,6 +113,28 @@ export function NavBar({
     ? user.email.slice(0, 2).toUpperCase()
     : 'U'
 
+  const { pinned, sections } = buildNavSections({ divisions, hasPageAccess, isOwner, isAdmin })
+
+  const renderItem = ({ to, label, icon: Icon, badgeKey, badge }: NavSectionItem) => {
+    const count = getBadgeCount(badgeKey)
+    return (
+      <NavLink
+        key={to}
+        to={to}
+        onClick={onClose}
+        title={collapsed ? label : undefined}
+        className={({ isActive }) => `sidebar-link${isActive ? ' active' : ''}`}
+      >
+        <Icon size={16} style={{ flexShrink: 0 }} />
+        {!collapsed && <span style={{ flex: 1 }}>{label}</span>}
+        {!collapsed && count != null && <NavBadge count={count} toneKey={badgeKey!} />}
+        {!collapsed && count == null && badge
+          ? <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.06em', color: 'var(--ds-t3)' }}>{badge}</span>
+          : null}
+      </NavLink>
+    )
+  }
+
   return (
     <aside className={`sidebar${open ? ' open' : ''}${collapsed ? ' collapsed' : ''}`}>
       {/* Logo — real BCAT logo on a black tile (its dark artwork blends in).
@@ -156,38 +178,21 @@ export function NavBar({
 
       {/* Nav */}
       <nav style={{ flex: 1, overflowY: 'auto', padding: '4px 10px 16px' }}>
-        {buildNavSections({ divisions, hasPageAccess, isOwner, isAdmin }).map((section, gi) => {
+        {pinned.map(renderItem)}
+        {sections.map((section, gi) => {
           const items = section.items
           if (items.length === 0) return null
           return (
-            <div key={section.key} style={{ marginTop: gi > 0 ? 14 : 4 }}>
+            <div key={section.key} style={{ marginTop: gi > 0 || pinned.length > 0 ? 14 : 4 }}>
               {/* Section header — the division code, with the business it trades as. */}
               {collapsed ? (
-                gi > 0 && <div style={{ height: 1, background: 'var(--ds-border)', margin: '4px 8px 8px' }} />
+                gi > 0 || pinned.length > 0 ? <div style={{ height: 1, background: 'var(--ds-border)', margin: '4px 8px 8px' }} /> : null
               ) : (
                 <div style={{ padding: '0 10px 4px', fontSize: 10, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--ds-t3)' }}>
                   {section.name}{section.brand ? ` [${section.brand}]` : ''}
                 </div>
               )}
-              {items.map(({ to, label, icon: Icon, badgeKey, badge }) => {
-                const count = getBadgeCount(badgeKey)
-                return (
-                  <NavLink
-                    key={to}
-                    to={to}
-                    onClick={onClose}
-                    title={collapsed ? label : undefined}
-                    className={({ isActive }) => `sidebar-link${isActive ? ' active' : ''}`}
-                  >
-                    <Icon size={16} style={{ flexShrink: 0 }} />
-                    {!collapsed && <span style={{ flex: 1 }}>{label}</span>}
-                    {!collapsed && count != null && <NavBadge count={count} toneKey={badgeKey!} />}
-                    {!collapsed && count == null && badge
-                      ? <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.06em', color: 'var(--ds-t3)' }}>{badge}</span>
-                      : null}
-                  </NavLink>
-                )
-              })}
+              {items.map(renderItem)}
             </div>
           )
         })}

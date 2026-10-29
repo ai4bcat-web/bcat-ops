@@ -9,7 +9,7 @@ related: [shipments-one-record, divisions-and-ownership, navigation]
 
 # Shipment Views
 
-The Shipments page is one list for all three businesses, and a **view** is a saved slice of it — the filters a department opens to. This article covers what a view is, the seed views, how a view is chosen, how to save the current filters as a new one, and who sees it.
+The Shipments page is one list for all three businesses. A **view** is a saved slice of that list — the filters a department opens to. The board itself (left panel, grid, footer and batch actions) is covered in [The Shipments Board](shipments-board.md). This article covers what a view is, the seed views, how a view is chosen, how to save the current filters as a new one, and who sees it.
 
 Views live on the Shipments page (`/tms/shipments`) as the view tabs before the status quick-tabs, and as children of Shipments in the sidebar at `/tms/shipments/view/<slug>`. They are edited in **My Brokerage → Shipment views**, owner/ADMIN only.
 

@@ -61,6 +61,8 @@ export type ProviderKey =
   | 'BLUE_INK'
   | 'PAYCHEX'
   | 'JOBSDONE'
+  // Customer import
+  | 'SQUARE'
 
 export type IntegrationCategory =
   | 'LOAD_BOARD'

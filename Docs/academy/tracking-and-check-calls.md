@@ -133,6 +133,7 @@ The link expires 14 days after it is sent by default, and can be revoked at any 
 
 - **Shipments board** — **Last update** and **Next check call** columns, the second toned for due and overdue, plus the Exceptions badge. Filters for check call due, overdue and open exceptions.
 - **Shipment summary tab** — Last update and Next check call as facts.
+- **Calendar** — a voided shipment's load has no lane on the calendar, and a `CANCELED` legacy load no longer clutters the Unscheduled strip.
 - **Dispatch dialog** — *Send tracking link now*, pre-checked when the provider is `LINK` and we have a driver phone, fired after the dispatch succeeds.
 - **My Brokerage → Tracking & check calls** — the default interval and grace, the notify channel and Slack channel, link expiry for both link types, whether the customer page shows the carrier and the position, who the contact card names, and the SMS template (which must contain `{url}`).
 

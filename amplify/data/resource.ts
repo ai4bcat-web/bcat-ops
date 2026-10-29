@@ -152,7 +152,15 @@ const schema = a.schema({
       revRuleId:       a.string(),   // the OwnershipRule that resolved it
       salesRepId:      a.string(),   // Cognito username of the rep who sold it
 
-      // ── Void, mirrored (Step R) ──────────────────────────────────────────
+      // ── Void snapshot (Step R) ──────────────────────────────────────────
+      // What the void changed, recorded on the load so UNVOID_SHIPMENT can put
+      // it back exactly. A load the void did not cancel carries no status snapshot
+      // and is left completely alone. Read-only to clients: the Lambda writes these
+      // through the schema's resource grant, same as `voidedAt`.
+      previousStatus:        a.string().authorization((allow) => [allow.authenticated().to(['read'])]),
+      previousReadyToInvoice: a.boolean().authorization((allow) => [allow.authenticated().to(['read'])]),
+
+      // ── Void, mirrored (Step R) ─────────────────────────────────────────
       // Void lives on the Shipment, but the fleet reads the Load table: the
       // calendar, dispatch, appointments, settlements and the pay hooks never
       // join a shipment. Stamping the void here is what takes voided freight
@@ -2403,6 +2411,7 @@ const schema = a.schema({
       // quoteToBooked, search.
       filters:     a.json(),
       columns:     a.string().array(),
+      columnTemplateId: a.string(),
       sort:        a.json(),               // { key, dir }
       isDefault:   a.boolean(),
       // { groups, roles, divisions } — empty or null means everyone who can open
@@ -2410,6 +2419,23 @@ const schema = a.schema({
       audience:    a.json(),
       sortOrder:   a.integer().required(),
       active:      a.boolean().required(),
+      createdBy:   a.string().required(),
+      updatedBy:   a.string().required(),
+      version:     a.integer().required(),
+    })
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  // A saved column set for the R2 board. Written only by tms-directory-actions;
+  // the client reads directly and never writes.
+  ShipmentColumnTemplate: a
+    .model({
+      id:          a.id(),
+      name:        a.string().required(),
+      columns:     a.string().array().required(),
+      widths:      a.json(),
+      ownerEmail:  a.string().required(),
+      shared:      a.boolean().required(),
       createdBy:   a.string().required(),
       updatedBy:   a.string().required(),
       version:     a.integer().required(),

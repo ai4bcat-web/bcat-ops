@@ -16,6 +16,7 @@ import { Amplify } from 'aws-amplify'
 import { generateClient } from 'aws-amplify/data'
 import {
   DynamoDBClient,
+  DeleteItemCommand,
   GetItemCommand,
   PutItemCommand,
   UpdateItemCommand,
@@ -28,7 +29,7 @@ import { createHmac, randomUUID, timingSafeEqual } from 'crypto'
 import { validateCommissionPlans, validatePaySchedule } from '../../../src/lib/commission'
 import { teamMembership, validateTeams } from '../../../src/lib/teams'
 import { SEED_DIVISIONS, SEED_RULES, validateDivisions, validateRules } from '../../../src/lib/ownership'
-import { SEED_VIEWS, slugify, validateView } from '../../../src/lib/shipmentViewDefs'
+import { SEED_VIEWS, slugify, validateView, BOARD_COLUMN_KEYS } from '../../../src/lib/shipmentViewDefs'
 import { validateAiAgents, validatePartyMemory } from '../../../src/lib/workflows/memory'
 import type {
   CommissionTrigger,
@@ -61,6 +62,7 @@ const USER_PROFILE_TABLE_NAME = process.env.USER_PROFILE_TABLE_NAME ?? ''
 const OWNERSHIP_DIVISION_TABLE_NAME = process.env.OWNERSHIP_DIVISION_TABLE_NAME ?? ''
 const OWNERSHIP_RULE_TABLE_NAME = process.env.OWNERSHIP_RULE_TABLE_NAME ?? ''
 const SHIPMENT_VIEW_TABLE_NAME = process.env.SHIPMENT_VIEW_TABLE_NAME ?? ''
+const SHIPMENT_COLUMN_TEMPLATE_TABLE_NAME = process.env.SHIPMENT_COLUMN_TEMPLATE_TABLE_NAME ?? ''
 const AUDIT_LOG_TABLE_NAME = process.env.AUDIT_LOG_TABLE_NAME ?? ''
 // Step J — one row per integration provider, API client and webhook receipt.
 // This Lambda is its only writer apart from tracking-api's `lastUsedAt` stamp.
@@ -117,6 +119,8 @@ type Action =
   | 'SAVE_OWNERSHIP_RULES'
   | 'SAVE_SHIPMENT_VIEW'
   | 'ARCHIVE_SHIPMENT_VIEW'
+  | 'SAVE_COLUMN_TEMPLATE'
+  | 'DELETE_COLUMN_TEMPLATE'
   | 'ENSURE_OWNERSHIP_SEED'
   // Step J — the integration framework. Owner/ADMIN only, every one of them.
   | IntegrationActionName
@@ -185,6 +189,8 @@ async function authorize(action: Action, identity?: AppSyncIdentity | null): Pro
     ARCHIVE_CUSTOMER: true,
     UPSERT_LOCATION: true,
     ARCHIVE_LOCATION: true,
+    SAVE_COLUMN_TEMPLATE: true,
+    DELETE_COLUMN_TEMPLATE: true,
   }
   // Divisions, rules, views and the seed decide who earns every shipment and what
   // each department sees: shared configuration, owner/ADMIN only, like TMS settings.
@@ -2016,12 +2022,34 @@ async function listRuleRows(): Promise<OwnershipRuleRecord[]> {
 
 async function listViewRows(): Promise<ShipmentViewRecord[]> {
   const rows = await scanTable(SHIPMENT_VIEW_TABLE_NAME)
-  return rows.map((row) => ({
-    ...(row as unknown as ShipmentViewRecord),
-    filters: asJson(row.filters) ?? {},
-    sort: asJson(row.sort),
-    audience: asJson(row.audience),
-  }))
+  // Read-time fallback: a view that points at a deleted column template resolves
+  // to its own `columns` array, so deleting a template never breaks the views
+  // that reference it.
+  const templates = await scanTable(SHIPMENT_COLUMN_TEMPLATE_TABLE_NAME)
+  const templatesById = new Map(templates.map((t) => [String(t.id), t]))
+  return rows.map((row) => {
+    const view = {
+      ...(row as unknown as ShipmentViewRecord),
+      filters: asJson(row.filters) ?? {},
+      sort: asJson(row.sort),
+      audience: asJson(row.audience),
+    } as ShipmentViewRecord
+    const resolved = resolveViewColumns(view as unknown as Record<string, unknown>, templatesById)
+    ;(view as unknown as Record<string, unknown>).resolvedColumns = resolved
+    return view
+  })
+}
+
+export function resolveViewColumns(
+  view: Record<string, unknown>,
+  templatesById: Map<string, Record<string, unknown>>,
+): string[] | null {
+  const fallback = Array.isArray(view.columns) ? (view.columns as string[]) : null
+  const templateId = typeof view.columnTemplateId === 'string' ? view.columnTemplateId : null
+  if (!templateId) return fallback
+  const template = templatesById.get(templateId)
+  if (!template) return fallback
+  return Array.isArray(template.columns) ? (template.columns as string[]) : fallback
 }
 
 /** The next free slot at the end of a list, so a new row never lands in the middle. */
@@ -2276,7 +2304,7 @@ async function saveOwnershipRules(
 }
 
 /** Every clause a saved view may carry. An unknown key is a typo that would filter nothing. */
-const SHIPMENT_VIEW_FILTER_KEYS: Record<keyof ShipmentViewFilters, 'list' | 'text' | 'flag'> = {
+const SHIPMENT_VIEW_FILTER_KEYS: Record<keyof ShipmentViewFilters, 'list' | 'text' | 'flag' | 'json'> = {
   divisions: 'list',
   subdivisions: 'list',
   statuses: 'list',
@@ -2289,7 +2317,12 @@ const SHIPMENT_VIEW_FILTER_KEYS: Record<keyof ShipmentViewFilters, 'list' | 'tex
   apStatuses: 'list',
   quoteToBooked: 'flag',
   search: 'text',
+  board: 'json',
 }
+
+const BOARD_COLUMN_KEYS_LOOKUP: Record<string, true> = Object.fromEntries(
+  BOARD_COLUMN_KEYS.map((key) => [key, true]),
+)
 
 function validateViewFilters(value: unknown): ShipmentViewFilters {
   const raw = optionalJsonObject(value) ?? {}
@@ -2300,6 +2333,7 @@ function validateViewFilters(value: unknown): ShipmentViewFilters {
     if (!kind) throw new Error(`"${key}" is not a shipment filter.`)
     if (kind === 'list') out[key] = optionalStringArray(entry, 64)
     else if (kind === 'flag') out[key] = optionalBoolean(entry)
+    else if (kind === 'json') out[key] = optionalJsonObject(entry)
     else out[key] = optionalString(entry, 200)
   }
   return out as ShipmentViewFilters
@@ -2327,6 +2361,10 @@ async function saveShipmentView(
     description: optionalString(input.description, 400),
     filters: validateViewFilters(input.filters),
     columns: optionalStringArray(input.columns, 64),
+    columnTemplateId:
+      optionalString(input.columnTemplateId, 64) ??
+      ((existing as unknown as Record<string, unknown> | null)?.columnTemplateId as string | null | undefined) ??
+      null,
     sort: optionalJsonObject(input.sort),
     isDefault: optionalBoolean(input.isDefault) ?? existing?.isDefault ?? false,
     audience: optionalJsonObject(input.audience),
@@ -2372,10 +2410,135 @@ async function archiveShipmentView(
   return archived
 }
 
+function authorizeColumnTemplateMutation(
+  existing: Record<string, unknown>,
+  caller: Caller,
+): void {
+  const ownerEmail = String(existing.ownerEmail ?? '')
+  const shared = !!existing.shared
+  const isOwner = caller.email === ownerEmail
+  const isAdmin = caller.groups?.includes(ADMIN_GROUP) || caller.email === OWNER_EMAIL
+  if (!isOwner && !(shared && isAdmin)) {
+    throw new Error(
+      shared
+        ? 'Forbidden: only the owner or an admin can change a shared column template'
+        : 'Forbidden: only the owner can change a private column template',
+    )
+  }
+}
+
+function assertColumnTemplateColumns(value: unknown): string[] {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new Error('columns cannot be empty')
+  }
+  const columns: string[] = []
+  for (let i = 0; i < value.length; i++) {
+    const key = assertString(value[i], `columns[${i}]`)
+    if (!BOARD_COLUMN_KEYS_LOOKUP[key]) {
+      throw new Error(`"${key}" is not a board column`)
+    }
+    columns.push(key)
+  }
+  return columns
+}
+
+async function saveColumnTemplate(
+  input: Record<string, unknown>,
+  caller: Caller,
+): Promise<Record<string, unknown>> {
+  const name = assertString(input.name, 'name')
+  const columns = assertColumnTemplateColumns(input.columns)
+  const widths = optionalJsonObject(input.widths) ?? {}
+  const shared = optionalBoolean(input.shared) ?? false
+  const id = optionalString(input.id, 64) ?? newId()
+
+  const tableName = SHIPMENT_COLUMN_TEMPLATE_TABLE_NAME
+  const existing = await getById(tableName, id)
+  if (existing) {
+    authorizeColumnTemplateMutation(existing, caller)
+  }
+
+  const now = nowIso()
+  const item: Record<string, unknown> = {
+    id,
+    __typename: 'ShipmentColumnTemplate',
+    name,
+    columns,
+    widths,
+    ownerEmail: existing?.ownerEmail ?? caller.email,
+    shared,
+    createdBy: existing?.createdBy ?? caller.email,
+    updatedBy: caller.email,
+    version: Number(existing?.version ?? 0) + 1,
+    createdAt: existing?.createdAt ?? now,
+    updatedAt: now,
+  }
+
+  await putVersioned(tableName, item, existing ? Number(existing.version ?? 0) : null, 'column template')
+  await writeAudit('ShipmentColumnTemplate', id, 'SAVE_COLUMN_TEMPLATE', caller, {
+    created: existing == null,
+    name,
+    columns,
+  })
+  return item
+}
+
+async function deleteColumnTemplate(
+  input: Record<string, unknown>,
+  caller: Caller,
+): Promise<Record<string, unknown>> {
+  const id = assertString(input.id, 'id')
+  const tableName = SHIPMENT_COLUMN_TEMPLATE_TABLE_NAME
+  const existing = await getById(tableName, id)
+  if (!existing) throw new Error(`Column template not found: ${id}`)
+  authorizeColumnTemplateMutation(existing, caller)
+
+  try {
+    await dynamo.send(
+      new DeleteItemCommand({
+        TableName: tableName,
+        Key: marshall({ id }),
+        ConditionExpression: '#version = :expectedVersion',
+        ExpressionAttributeNames: { '#version': 'version' },
+        ExpressionAttributeValues: { ':expectedVersion': { N: String(existing.version ?? 0) } },
+      }),
+    )
+  } catch (err: unknown) {
+    if (isConditionalCheckFailed(err)) throw conflictError('column template', err)
+    throw err
+  }
+
+  await writeAudit('ShipmentColumnTemplate', id, 'DELETE_COLUMN_TEMPLATE', caller, {
+    name: existing.name ?? null,
+  })
+  return { id, deleted: true }
+}
+
+/**
+ * Resolve the Auto Shipper customer id by normalized name. The CAR_SHIPPING seed
+ * rule points at this id; when the customer does not exist the rule is written
+ * inactive with an explanatory name and counted, rather than inventing a customer.
+ */
+async function resolveAutoShipperCustomerId(): Promise<string | null> {
+  try {
+    const target = normalizeName('Auto Shipper')
+    const customers = await scanActiveCustomers()
+    const found = customers.find(
+      (c) => typeof c.name === 'string' && normalizeName(c.name) === target,
+    )
+    return found && typeof found.id === 'string' ? found.id : null
+  } catch (err: unknown) {
+    console.warn('[tms-directory-actions] could not resolve Auto Shipper customer:', err)
+    return null
+  }
+}
+
 /**
  * The three businesses, Ivan's subsidiaries, the seed rules and the ten department
- * views, written once. `attribute_not_exists(id)` per row makes it idempotent AND
- * safe: a row an admin has since edited or archived is never put back.
+ * views, written once. Divisions and views stay `attribute_not_exists(id)` idempotent
+ * so an admin edit is never overwritten. Rules converge instead: an existing seed id
+ * is updated in place, a rule no longer in the seed is deactivated, and every change
+ * is counted so a re-seed is observable.
  */
 async function ensureOwnershipSeed(caller: Caller): Promise<Record<string, unknown>> {
   const now = nowIso()
@@ -2405,16 +2568,105 @@ async function ensureOwnershipSeed(caller: Caller): Promise<Record<string, unkno
     }
   }
 
+  // Resolve the one rule whose value lives in Customer data, not in source code.
+  const autoShipperId = await resolveAutoShipperCustomerId()
+  const seedRules = SEED_RULES.map((r) => {
+    if (r.id !== 'rule-seed-auto-shipper') return r
+    if (autoShipperId) {
+      return {
+        ...r,
+        name: 'Auto Shipper customer',
+        condition: { ...r.condition, value: autoShipperId },
+        active: true,
+      }
+    }
+    return {
+      ...r,
+      name: 'Auto Shipper customer (not found — rule inactive)',
+      condition: { ...r.condition, value: '' },
+      active: false,
+    }
+  })
+
   let divisionsCreated = 0
   for (const division of SEED_DIVISIONS) {
     if (await putIfAbsent(OWNERSHIP_DIVISION_TABLE_NAME, stamp({ ...division }, 'OwnershipDivision'))) {
       divisionsCreated += 1
     }
   }
+
+  const existingRules = await listRuleRows()
+  const existingById = new Map(existingRules.map((r) => [r.id, r]))
   let rulesCreated = 0
-  for (const rule of SEED_RULES) {
-    if (await putIfAbsent(OWNERSHIP_RULE_TABLE_NAME, stamp({ ...rule }, 'OwnershipRule'))) rulesCreated += 1
+  let rulesUpdated = 0
+  let rulesUnchanged = 0
+  const seenIds = new Set<string>()
+
+  for (let i = 0; i < seedRules.length; i++) {
+    const seed = seedRules[i]
+    seenIds.add(seed.id)
+    const existing = existingById.get(seed.id)
+
+    const desired: Record<string, unknown> = {
+      id: seed.id,
+      __typename: 'OwnershipRule',
+      name: seed.name,
+      sortOrder: i * 10,
+      active: seed.active,
+      condition: seed.condition,
+      divisionCode: seed.divisionCode,
+    }
+
+    if (!existing) {
+      await putVersioned(
+        OWNERSHIP_RULE_TABLE_NAME,
+        { ...desired, createdBy: 'seed', updatedBy: 'seed', version: 1, createdAt: now, updatedAt: now },
+        null,
+        'ownership rule',
+      )
+      rulesCreated += 1
+      continue
+    }
+
+    const same =
+      existing.name === desired.name &&
+      existing.sortOrder === desired.sortOrder &&
+      existing.active === desired.active &&
+      existing.divisionCode === desired.divisionCode &&
+      JSON.stringify(existing.condition) === JSON.stringify(desired.condition)
+
+    if (same) {
+      rulesUnchanged += 1
+      continue
+    }
+
+    await putVersioned(
+      OWNERSHIP_RULE_TABLE_NAME,
+      {
+        ...existing,
+        ...desired,
+        createdBy: existing.createdBy ?? 'seed',
+        createdAt: existing.createdAt ?? now,
+        updatedBy: caller.email,
+        updatedAt: now,
+        version: (existing.version ?? 0) + 1,
+      },
+      existing.version ?? 0,
+      'ownership rule',
+    )
+    rulesUpdated += 1
   }
+
+  let rulesDeactivated = 0
+  for (const existing of existingRules) {
+    // The seed only owns rule-seed-* rows. A person-authored rule-<uuid> must never
+    // be deactivated by re-seeding, or its freight would silently fall through to
+    // the BROKERAGE catch-all.
+    if (!existing.id.startsWith('rule-seed-') || seenIds.has(existing.id) || !existing.active) continue
+    await archiveVersioned(OWNERSHIP_RULE_TABLE_NAME, existing.id, existing, caller, 'ownership rule')
+    rulesDeactivated += 1
+  }
+
   let viewsCreated = 0
   for (const view of SEED_VIEWS) {
     if (await putIfAbsent(SHIPMENT_VIEW_TABLE_NAME, stamp({ ...view }, 'ShipmentView'))) viewsCreated += 1
@@ -2423,12 +2675,15 @@ async function ensureOwnershipSeed(caller: Caller): Promise<Record<string, unkno
   const report = {
     divisionsCreated,
     rulesCreated,
+    rulesUpdated,
+    rulesDeactivated,
+    rulesUnchanged,
     viewsCreated,
     divisionsPresent: SEED_DIVISIONS.length,
-    rulesPresent: SEED_RULES.length,
+    rulesPresent: seedRules.length,
     viewsPresent: SEED_VIEWS.length,
   }
-  if (divisionsCreated + rulesCreated + viewsCreated > 0) {
+  if (divisionsCreated + rulesCreated + rulesUpdated + rulesDeactivated + viewsCreated > 0) {
     await writeAudit('OwnershipDivision', 'seed', 'ENSURE_OWNERSHIP_SEED', caller, report)
   }
   return report
@@ -2494,6 +2749,10 @@ export const handler = async (event: AppSyncEvent): Promise<Record<string, unkno
       return saveShipmentView(input, caller)
     case 'ARCHIVE_SHIPMENT_VIEW':
       return archiveShipmentView(input, caller)
+    case 'SAVE_COLUMN_TEMPLATE':
+      return saveColumnTemplate(input, caller)
+    case 'DELETE_COLUMN_TEMPLATE':
+      return deleteColumnTemplate(input, caller)
     case 'ENSURE_OWNERSHIP_SEED':
       return ensureOwnershipSeed(caller)
     default:

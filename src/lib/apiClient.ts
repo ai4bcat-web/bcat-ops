@@ -29,7 +29,7 @@ import type {
   LaneRateSampleRecord, OrderReference, RateType,
   UserProfileRecord, RoleKey, CommissionRecord, CommissionPayPeriodRecord,
   CommissionSettings, ShipmentSettings,
-  OwnershipDivisionRecord, OwnershipRuleRecord, ShipmentViewRecord, RevTagSource,
+  OwnershipDivisionRecord, OwnershipRuleRecord, ShipmentViewRecord, ShipmentColumnTemplateRecord, RevTagSource,
   WorkflowRunRecord, WorkflowAgentKey,
 } from '@/types/tms'
 import type { CreditSummary } from '@/lib/customerCredit'
@@ -1552,7 +1552,7 @@ export async function revokeApiClient(clientId: string): Promise<IntegrationReco
 export type {
   ShipmentRecord, OrderRecord, LoadCarrierRecord, LoadFinancialsRecord, LoadChargeRecord,
   LoadChargeInput, ShipmentBundle, ShipmentLoad, ShipmentStatus, LoadWorkflowStatus,
-  ShipmentMode, ArStatus, AssignmentType,
+  ShipmentMode, ArStatus, AssignmentType, ShipmentColumnTemplateRecord,
 } from '@/types/tms'
 
 const SHIPMENT_FIELDS = `
@@ -1915,6 +1915,44 @@ export async function voidShipment(input: { shipmentId: string; reason: string; 
   return shipmentAction<ShipmentBundle>('VOID_SHIPMENT', input)
 }
 
+/** The only way back from a void. Owner/ADMIN only. */
+export async function unvoidShipment(input: { shipmentId: string; reason: string; expectedUpdatedAt?: string | null }): Promise<unknown> {
+  return shipmentAction<unknown>('UNVOID_SHIPMENT', input)
+}
+
+/** Re-point a linked shipment's customer. Owner/ADMIN only; throws INVOICED: when billed. */
+export async function repointShipmentCustomer(input: { shipmentId: string; customerId: string; reason: string; expectedUpdatedAt?: string | null }): Promise<unknown> {
+  return shipmentAction<unknown>('REPOINT_SHIPMENT_CUSTOMER', input)
+}
+
+/** Create a Shipment for a legacy Load that does not have one. Owner/ADMIN only. */
+export async function createShipmentForLoad(loadId: string): Promise<unknown> {
+  return shipmentAction<unknown>('BACKFILL_SHIPMENT', { loadIds: [loadId], dryRun: false })
+}
+
+/**
+ * The invoiced half of a re-point. Owner/ADMIN only, and the only path that may move
+ * freight whose customer has already been billed: it credits the original invoice —
+ * which is never edited — and puts the order back on the gate so the new customer is
+ * rebilled the normal way. `idempotencyKey` is minted once per dialog, so a double
+ * click cannot credit the same invoice twice.
+ */
+export async function repointInvoicedCustomer(
+  input: { shipmentId: string; customerId: string; reason: string; idempotencyKey: string },
+): Promise<unknown> {
+  return financeAction<unknown>('REPOINT_INVOICED_CUSTOMER', input)
+}
+
+/**
+ * Re-resolve one shipment's revenue tag from the rules as they read now. The
+ * invoiced half of a customer re-point runs in the finance Lambda, which cannot
+ * reach the ownership tables, and a rule that keys on the customer is wrong the
+ * moment the customer moves. A tag somebody set by hand still wins.
+ */
+export async function resolveRevTag(input: { shipmentId: string }): Promise<unknown> {
+  return shipmentAction<unknown>('RESOLVE_REV_TAG', input)
+}
+
 // ── Revenue tags (tmsShipmentActions) ────────────────────────────────────────
 
 /** Tag by hand. A hand tag beats the rules and survives a carrier or driver change. */
@@ -2065,6 +2103,46 @@ export async function saveShipmentView(input: ShipmentViewInput): Promise<Shipme
 }
 export async function archiveShipmentView(input: { id: string }): Promise<ShipmentViewRecord> {
   return directoryAction<ShipmentViewRecord>('ARCHIVE_SHIPMENT_VIEW', input)
+}
+
+// ── Shipment column templates (tmsDirectoryActions) ───────────────────────────
+//
+// Saved column sets are read by every authenticated client and written by the
+// directory Lambda. Like ownership views, they arrive with their own model; until
+// then the picker degrades to the default column set rather than failing.
+
+const SHIPMENT_COLUMN_TEMPLATE_FIELDS = `
+  id name columns widths ownerEmail shared createdBy updatedBy version createdAt updatedAt
+`
+
+let shipmentColumnTemplateModelsAvailable = true
+const isMissingShipmentColumnTemplateModel = (err: unknown) =>
+  /[\\'"](get|list)ShipmentColumnTemplate\w*[\\'"]|Unknown type [\\'"]+ShipmentColumnTemplate/i.test(safeStringify(err))
+
+function forgetShipmentColumnTemplates(err: unknown): void {
+  if (!isMissingShipmentColumnTemplateModel(err)) throw err
+  console.warn('[apiClient] backend has no ShipmentColumnTemplate model yet — column templates stay empty until deploy')
+  shipmentColumnTemplateModelsAvailable = false
+}
+
+/** Every reusable column set visible to the caller. */
+export async function listShipmentColumnTemplates(): Promise<ShipmentColumnTemplateRecord[]> {
+  if (!shipmentColumnTemplateModelsAvailable) return []
+  try {
+    const rows = await listAll<ShipmentColumnTemplateRecord>('listShipmentColumnTemplates', SHIPMENT_COLUMN_TEMPLATE_FIELDS, 200)
+    return rows.map((r) => unwrapJsonFields(r, ['columns', 'widths']))
+  } catch (err) {
+    forgetShipmentColumnTemplates(err)
+    return []
+  }
+}
+
+export async function saveShipmentColumnTemplate(input: unknown): Promise<unknown> {
+  return directoryAction('SAVE_COLUMN_TEMPLATE', input)
+}
+
+export async function deleteShipmentColumnTemplate(input: { id: string }): Promise<unknown> {
+  return directoryAction('DELETE_COLUMN_TEMPLATE', input)
 }
 
 /** Idempotent: writes the seed divisions, rules and views that are not there yet. */
@@ -2286,6 +2364,28 @@ export async function getLoadFinancials(loadId: string): Promise<LoadFinancialsR
   return r.data.getLoadFinancials
 }
 
+// LoadFinancials lands with the shipment layer; until then the board leaves money empty.
+let loadFinancialsModelsAvailable = true
+const isMissingLoadFinancialsModel = (err: unknown) =>
+  /[\\'"](get|list)LoadFinancials\w*[\\'"]|Unknown type [\\'"]+LoadFinancials/i.test(safeStringify(err))
+
+function forgetLoadFinancials(err: unknown): void {
+  if (!isMissingLoadFinancialsModel(err)) throw err
+  console.warn('[apiClient] backend has no LoadFinancials model yet — board money stays empty until deploy')
+  loadFinancialsModelsAvailable = false
+}
+
+/** Every cached load total; the board aggregates these per shipment. */
+export async function listLoadFinancials(): Promise<LoadFinancialsRecord[]> {
+  if (!loadFinancialsModelsAvailable) return []
+  try {
+    return await listAll<LoadFinancialsRecord>('listLoadFinancials', LOAD_FINANCIALS_FIELDS, 10000)
+  } catch (err) {
+    forgetLoadFinancials(err)
+    return []
+  }
+}
+
 /**
  * Just enough of every load to colour a board row: no stops detail beyond the stop
  * list the STOPS column counts, no rate-con URLs.
@@ -2327,6 +2427,13 @@ export interface LoadBoardSummary {
   revTagSource?: string | null
   revRuleId?: string | null
   salesRepId?: string | null
+  // Step R2 — facets the board projects onto the shipment row.
+  carrierRepId?: string | null
+  statusChangedBy?: string | null
+  equipmentType?: string | null
+  commodity?: string | null
+  originName?: string | null
+  destinationName?: string | null
   // A load with no `shipmentId` is still a row on the one Shipments list, so the
   // board reads its own identifiers and facts off the load itself.
   aljexId?: string | null
@@ -2344,7 +2451,8 @@ const LOAD_SUMMARY_FIELDS = `
   nextCheckCallAt checkCallOpen openIncidentCount
   activeLoadCarrierId carrierName trackingProvider deliveredAt
   pickupAppt deliveryAppt pickupDriverId deliveryDriverId truckId
-  loadNumber aljexId customer rate originCity destinationCity createdAt
+  loadNumber aljexId customer rate originName originCity destinationName destinationCity createdAt
+  carrierRepId statusChangedBy equipmentType commodity
 `
 export async function listLoadSummaries(): Promise<LoadBoardSummary[]> {
   if (!loadsHaveShipment) return []

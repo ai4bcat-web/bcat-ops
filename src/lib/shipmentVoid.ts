@@ -25,3 +25,16 @@ export function isShipmentVoided(
 export function isLoadVoided(l: { voidedAt?: string | null } | null | undefined): boolean {
   return Boolean(l?.voidedAt)
 }
+
+/**
+ * A legacy load whose status is `CANCELED`.
+ *
+ * The Unscheduled strip on the calendar is a work list: freight that was
+ * canceled before Step R's void marker existed is not work, so it stays off the
+ * strip exactly as voided freight already does. Day columns and every other view
+ * keep today's behaviour — a canceled load with a firm date is still visible on its
+ * day.
+ */
+export function isLoadCanceled(l: { status?: string | null } | null | undefined): boolean {
+  return l?.status === 'CANCELED'
+}

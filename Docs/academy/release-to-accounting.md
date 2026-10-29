@@ -35,6 +35,7 @@ Readiness is re-checked against the rows as they are at that second, so a docume
 ## Where the missing list shows
 
 - The shipment's **Documents** tab carries the required-document strip — each required type ticks with what satisfies it or crosses as missing — and the **Ready to invoice** control sits at its end, refusing with exactly what is missing.
+- The **Shipments board** has a **Mass Release** column. It shows a checkbox only when the shipment is ready to release; otherwise it shows why, muted. Checking the box selects the row for the footer's **Batch Task → Release to accounting**, which calls the same gate.
 - The AR page's **To invoice** tab lists each `UNBILLED` order with its readiness reasons inline; **Generate invoice** is refused, rather than silently failing, with the same reasons.
 - **Send to Factor** and **Batch** report the same structured list.
 

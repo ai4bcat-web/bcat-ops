@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { useAppStore } from '@/store/useAppStore'
 import type { Load, Driver } from '@/types'
-import { isLoadVoided } from '@/lib/shipmentVoid'
+import { isLoadCanceled, isLoadVoided } from '@/lib/shipmentVoid'
 
 /**
  * Mobile replacement for the resource-timeline calendar: a day-grouped agenda list
@@ -37,7 +37,8 @@ export function MobileLoadAgenda({ loads: allLoads, drivers }: { loads: Load[]; 
     const sorted = [...loads].sort((a, b) => (a.pickupAppt ?? '').localeCompare(b.pickupAppt ?? ''))
     const m = new Map<string, Load[]>()
     for (const l of sorted) {
-      const k = l.unscheduled ? ORPHAN : dayKey(l.pickupAppt)
+      // The Unscheduled group is a work list; canceled freight is not work.
+      const k = l.unscheduled && !isLoadCanceled(l) ? ORPHAN : dayKey(l.pickupAppt)
       const arr = m.get(k)
       if (arr) arr.push(l)
       else m.set(k, [l])

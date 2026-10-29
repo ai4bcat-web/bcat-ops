@@ -28,7 +28,7 @@ import type { Load, Driver, ColorKey, Stop } from '@/types'
 import type { DriverAvailability } from '@/lib/apiClient'
 import { apptWorkflowStatus, endStatus, statusLabel, STATUS_META, STATUS_TONE_COLORS, canSetChangeNeeded, type EffectiveApptStatus } from '@/lib/apptStatus'
 import { requiresApptProofs } from '@/lib/apptQueue'
-import { isLoadVoided } from '@/lib/shipmentVoid'
+import { isLoadCanceled, isLoadVoided } from '@/lib/shipmentVoid'
 import { PodMark } from './CalendarPaperwork'
 
 // ── Column widths ─────────────────────────────────────────────────────────────
@@ -952,8 +952,9 @@ export function PlannerView({ loads: allLoads, drivers, weekStart, numDays = 7, 
   }, [loads])
 
   // Orphan / unscheduled loads — shown in their own section so they're visible here too.
+  // Canceled freight is not unscheduled work, so it stays off the strip like voided freight.
   const unscheduledEntries = useMemo<DayEntry[]>(() => {
-    const u = loads.filter((l) => l.unscheduled)
+    const u = loads.filter((l) => l.unscheduled && !isLoadCanceled(l))
     return u.map((l) => ({ load: l, role: 'same-day', key: `${l.id}:same-day` }))
   }, [loads])
 

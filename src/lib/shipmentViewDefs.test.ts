@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
+  ALJEX_COLUMN_KEYS,
+  BOARD_COLUMN_KEYS,
   SEED_VIEWS,
   applyViewFilters,
   slugify,
@@ -31,6 +33,26 @@ const row = (id: string, patch: Partial<ShipmentViewRow>): ShipmentViewRow => ({
   quoteId: null,
   searchKey: null,
   voidedAt: null,
+  customerId: null,
+  carrierName: null,
+  pickupName: null,
+  consigneeName: null,
+  fromState: null,
+  toState: null,
+  equipmentType: null,
+  officeTeamKeys: null,
+  dispatcherAssignedId: null,
+  dispatcherActualId: null,
+  shipDate: null,
+  deliveryAppt: null,
+  createdAt: '2026-01-01T00:00:00.000Z',
+  stops: null,
+  revenueCents: null,
+  costCents: null,
+  profitCents: null,
+  marginBps: null,
+  customerReference: null,
+  commodity: null,
   ...patch,
 })
 
@@ -58,9 +80,9 @@ const view = (slug: string) => {
 const apply = (slug: string) => ids(applyViewFilters(view(slug).filters, ROWS, NOW))
 
 describe('the seed views over a fixture board', () => {
-  it('ships the ten department views Ryne named', () => {
+  it('ships the default view plus the ten department views Ryne named', () => {
     expect(SEED_VIEWS.map((v) => v.slug)).toEqual([
-      'dispatch', 'tracking', 'pod-collection', 'accounting', 'sales',
+      'active-shipments', 'dispatch', 'tracking', 'pod-collection', 'accounting', 'sales',
       'brokerage-board', 'car-shipping-board', 'owner-operators', 'box-trucks', 'local-drivers',
     ])
   })
@@ -258,5 +280,75 @@ describe('slugify and validateView', () => {
       'The sort direction must be asc or desc.',
       'The sort needs a column.',
     ])
+  })
+})
+
+describe('R2 board filters inside a saved view', () => {
+  const NOW = new Date('2026-03-10T17:00:00.000Z')
+
+  it('runs the board filter set alongside existing view filters', () => {
+    const rows = [
+      row('brokerage-van', { revDivision: 'BROKERAGE', equipmentType: 'VAN' }),
+      row('brokerage-flat', { revDivision: 'BROKERAGE', equipmentType: 'FLATBED' }),
+      row('assets-van', { revDivision: 'ASSETS', equipmentType: 'VAN' }),
+    ]
+    const filters: ShipmentViewFilters = {
+      divisions: ['BROKERAGE'],
+      board: { statuses: [], details: { equipment: { values: ['VAN'], exclude: false } }, dates: {} },
+    }
+    expect(ids(applyViewFilters(filters, rows, NOW))).toEqual(['brokerage-van'])
+  })
+
+  it('keeps dropping voided rows unless VOIDED is selected', () => {
+    const rows = [
+      row('live', { status: 'DELIVERED' }),
+      row('void', { status: 'DELIVERED', voidedAt: '2026-02-01T00:00:00.000Z' }),
+    ]
+    expect(ids(applyViewFilters({ board: { statuses: [], details: {}, dates: {} } }, rows, NOW))).toEqual(['live'])
+    expect(ids(applyViewFilters({ board: { statuses: ['VOIDED'], details: {}, dates: {} } }, rows, NOW))).toEqual(['void'])
+  })
+
+  it('applies board date filters to the projected view row', () => {
+    const rows = [
+      row('on-day', { shipDate: '2026-03-10T12:00:00.000Z' }),
+      row('next-day', { shipDate: '2026-03-11T12:00:00.000Z' }),
+    ]
+    const filters: ShipmentViewFilters = {
+      board: { statuses: [], details: {}, dates: { ship: { mode: 'FIXED', date: '2026-03-10' } } },
+    }
+    expect(ids(applyViewFilters(filters, rows, NOW))).toEqual(['on-day'])
+  })
+
+  it('agrees on FIXED and RANGE at a local/UTC boundary', () => {
+    // 2026-03-10 23:30 in UTC-5 is 2026-03-11 04:30 UTC, so the UTC date part is the 11th
+    // but the viewer's local calendar day is the 10th.
+    const localZoneTestTime = '2026-03-11T04:30:00.000Z'
+    const rows = [row('late-local', { shipDate: localZoneTestTime })]
+    const fixed: ShipmentViewFilters = {
+      board: { statuses: [], details: {}, dates: { ship: { mode: 'FIXED', date: '2026-03-10' } } },
+    }
+    const range: ShipmentViewFilters = {
+      board: { statuses: [], details: {}, dates: { ship: { mode: 'RANGE', from: '2026-03-10', to: '2026-03-10' } } },
+    }
+    // The exact match depends on the zone the test runs in. Assert both branches agree.
+    expect(ids(applyViewFilters(fixed, rows, NOW))).toEqual(ids(applyViewFilters(range, rows, NOW)))
+  })
+})
+
+describe('BOARD_COLUMN_KEYS', () => {
+  it('lists every valid board column key', () => {
+    expect(BOARD_COLUMN_KEYS).toContain('number')
+    expect(BOARD_COLUMN_KEYS).toContain('exceptions')
+    expect(BOARD_COLUMN_KEYS).toContain('docsMissing')
+    expect(BOARD_COLUMN_KEYS).toHaveLength(33)
+    expect(new Set(BOARD_COLUMN_KEYS).size).toBe(BOARD_COLUMN_KEYS.length)
+  })
+
+  it('contains every Aljex column key and has no duplicates', () => {
+    for (const key of ALJEX_COLUMN_KEYS) {
+      expect(BOARD_COLUMN_KEYS).toContain(key)
+    }
+    expect(BOARD_COLUMN_KEYS).toHaveLength(33)
+    expect(new Set(BOARD_COLUMN_KEYS).size).toBe(BOARD_COLUMN_KEYS.length)
   })
 })

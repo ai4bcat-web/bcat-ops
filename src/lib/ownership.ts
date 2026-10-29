@@ -463,17 +463,29 @@ export const SEED_DIVISIONS: OwnershipDivisionSeed[] = [
 /**
  * The rules Ryne described, in the order he described them.
  *
- * The driver rules come FIRST so an own-fleet load lands in the right subsidiary;
- * the carrier rule behind them catches every other own-fleet load (an Amazon driver,
- * a driver with no fleet group) for Ivan Cartage with no subsidiary. The reference
- * rule is how a vehicle move is recognised today — nothing in the data marks one —
- * and the catch-all keeps every remaining shipment in Brokerage.
+ * The Amazon and driver rules come FIRST so an own-fleet load lands in the right
+ * subsidiary; the carrier rule behind them catches every other own-fleet load (a
+ * driver with no fleet group) for Ivan Cartage with no subsidiary. The Auto Shipper
+ * customer rule is how a vehicle move is recognised today — nothing in the reference
+ * text marks one — and the catch-all keeps every remaining shipment in Brokerage.
+ *
+ * The Auto Shipper rule's value is resolved at seed time by
+ * `ENSURE_OWNERSHIP_SEED`; the static array carries a placeholder so the rule
+ * still validates before the seed writer has run.
  */
 export const SEED_RULES: OwnershipRuleSeed[] = [
   {
+    id: 'rule-seed-amazon',
+    name: 'Amazon driver',
+    sortOrder: 1,
+    active: true,
+    condition: { kind: 'DRIVER_FLEET_GROUP_IS', value: 'AMAZON' },
+    divisionCode: 'OWNER_OPERATOR',
+  },
+  {
     id: 'rule-seed-1',
     name: 'Owner operator driver',
-    sortOrder: 1,
+    sortOrder: 2,
     active: true,
     condition: { kind: 'DRIVER_FLEET_GROUP_IS', value: 'OWNER_OPERATOR' },
     divisionCode: 'OWNER_OPERATOR',
@@ -481,7 +493,7 @@ export const SEED_RULES: OwnershipRuleSeed[] = [
   {
     id: 'rule-seed-2',
     name: 'Owner operator by driver type',
-    sortOrder: 2,
+    sortOrder: 3,
     active: true,
     condition: { kind: 'DRIVER_TYPE_IS', value: 'OWNER_OPERATOR' },
     divisionCode: 'OWNER_OPERATOR',
@@ -489,7 +501,7 @@ export const SEED_RULES: OwnershipRuleSeed[] = [
   {
     id: 'rule-seed-3',
     name: 'Box truck driver',
-    sortOrder: 3,
+    sortOrder: 4,
     active: true,
     condition: { kind: 'DRIVER_FLEET_GROUP_IS', value: 'BOX_TRUCK' },
     divisionCode: 'BOX_TRUCK',
@@ -497,7 +509,7 @@ export const SEED_RULES: OwnershipRuleSeed[] = [
   {
     id: 'rule-seed-4',
     name: 'Local driver',
-    sortOrder: 4,
+    sortOrder: 5,
     active: true,
     condition: { kind: 'DRIVER_FLEET_GROUP_IS', value: 'LOCAL' },
     divisionCode: 'LOCAL',
@@ -505,23 +517,23 @@ export const SEED_RULES: OwnershipRuleSeed[] = [
   {
     id: 'rule-seed-5',
     name: 'Own fleet',
-    sortOrder: 5,
+    sortOrder: 6,
     active: true,
     condition: { kind: 'CARRIER_IS', value: OWN_FLEET_CARRIER_CODE },
     divisionCode: 'ASSETS',
   },
   {
-    id: 'rule-seed-6',
-    name: 'Vehicle transport',
-    sortOrder: 6,
+    id: 'rule-seed-auto-shipper',
+    name: 'Auto Shipper customer',
+    sortOrder: 7,
     active: true,
-    condition: { kind: 'REFERENCE_MATCHES', value: 'vehicle|auto transport|car shipping' },
+    condition: { kind: 'CUSTOMER_IS', value: 'auto-shipper-id-resolved-at-seed' },
     divisionCode: 'CAR_SHIPPING',
   },
   {
     id: 'rule-seed-7',
     name: 'Everything else',
-    sortOrder: 7,
+    sortOrder: 8,
     active: true,
     condition: { kind: 'ALWAYS', value: null },
     divisionCode: 'BROKERAGE',

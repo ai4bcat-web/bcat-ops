@@ -1272,6 +1272,14 @@ function voidCall(shipmentId: string, identity: unknown = ADMIN, reason = 'Custo
   return call('VOID_SHIPMENT', { shipmentId, reason, expectedUpdatedAt: shipmentUpdatedAt(shipmentId) }, identity)
 }
 
+function unvoidCall(shipmentId: string, identity: unknown = ADMIN, reason = 'Reinstated per dispatcher'): Promise<Row> {
+  return call('UNVOID_SHIPMENT', { shipmentId, reason, expectedUpdatedAt: shipmentUpdatedAt(shipmentId) }, identity)
+}
+
+function repointCall(shipmentId: string, customerId: string, reason = 'Customer name corrected'): Promise<Row> {
+  return call('REPOINT_SHIPMENT_CUSTOMER', { shipmentId, customerId, reason, expectedUpdatedAt: shipmentUpdatedAt(shipmentId) }, ADMIN)
+}
+
 describe('VOID_SHIPMENT', () => {
   it('refuses every page key and accepts only the owner or ADMIN', async () => {
     const a = await createDraft()
@@ -1311,13 +1319,15 @@ describe('VOID_SHIPMENT', () => {
     expect(table(TABLES.shipment).get(shipmentId)!.voidedAt).toBeUndefined()
   })
 
-  it('refuses a second void and offers no way back', async () => {
+  it('refuses a second void; DELETE and RESTORE are gone, UNVOID is the way back', async () => {
     const { shipmentId } = await createDraft()
     await voidCall(shipmentId, ADMIN)
     await expect(voidCall(shipmentId, ADMIN)).rejects.toThrow(/already voided/)
-    for (const action of ['DELETE_SHIPMENT', 'RESTORE_SHIPMENT', 'UNVOID_SHIPMENT']) {
+    for (const action of ['DELETE_SHIPMENT', 'RESTORE_SHIPMENT']) {
       await expect(call(action, { shipmentId }, ADMIN)).rejects.toThrow(/Unknown action/)
     }
+    const unvoided = (await call('UNVOID_SHIPMENT', { shipmentId, reason: 'Found the load', expectedUpdatedAt: shipmentUpdatedAt(shipmentId) }, ADMIN)) as { shipment: Row }
+    expect(unvoided.shipment.voidedAt).toBeUndefined()
   })
 
   it('keeps the PRO, the legs, the charges and the documents, and cancels the load', async () => {
@@ -1443,6 +1453,265 @@ function seedDriver(id: string, extra: Row = {}): void {
   table(TABLES.driver).set(id, { id, name: `Driver ${id}`, status: 'Active', ...extra })
 }
 
+describe('UNVOID_SHIPMENT', () => {
+  it('refuses every page key and accepts only the owner or ADMIN', async () => {
+    const { shipmentId } = await createDraft()
+    await voidCall(shipmentId, ADMIN)
+    await expect(unvoidCall(shipmentId, DISPATCHER)).rejects.toThrow(/requires owner or ADMIN/)
+    await expect(unvoidCall(shipmentId, TMS_USER)).rejects.toThrow(/requires owner or ADMIN/)
+
+    const byAdmin = (await unvoidCall(shipmentId, ADMIN)) as { shipment: Row }
+    expect(byAdmin.shipment.voidedAt).toBeUndefined()
+  })
+
+  it('refuses to unvoid a shipment that is not voided, naming the number', async () => {
+    const { shipmentId } = await createDraft()
+    await expect(unvoidCall(shipmentId, ADMIN)).rejects.toThrow(/is not voided/)
+  })
+
+  it('records the reason and refuses an empty one', async () => {
+    const { shipmentId } = await createDraft()
+    await voidCall(shipmentId, ADMIN)
+    await expect(unvoidCall(shipmentId, ADMIN, '')).rejects.toThrow(/reason/)
+
+    const unvoided = (await unvoidCall(shipmentId, ADMIN, 'Dispatcher found the load')) as { shipment: Row }
+    expect(unvoided.shipment.voidReason).toBeUndefined()
+    const audit = [...table(TABLES.audit).values()].find((row) => row.action === 'UNVOID_SHIPMENT')
+    expect(audit).toBeTruthy()
+    expect(JSON.parse(String(audit!.changes)).reason).toBe('Dispatcher found the load')
+  })
+
+  it('clears the three void markers from the shipment', async () => {
+    const { shipmentId } = await createDraft()
+    await voidCall(shipmentId, ADMIN, 'Mistake')
+    const before = table(TABLES.shipment).get(shipmentId)!
+    expect(before.voidedAt).toBeTruthy()
+    expect(before.voidedBy).toBeTruthy()
+    expect(before.voidReason).toBe('Mistake')
+
+    const bundle = (await unvoidCall(shipmentId, ADMIN)) as { shipment: Row }
+    const after = bundle.shipment
+    expect(after.voidedAt).toBeUndefined()
+    expect(after.voidedBy).toBeUndefined()
+    expect(after.voidReason).toBeUndefined()
+    expect(Number(after.version)).toBeGreaterThan(Number(before.version))
+  })
+
+  it('reopens only the still-open carrier legs', async () => {
+    const { shipmentId, loadId } = await createDraft()
+    await saveForm(shipmentId)
+    table(TABLES.carrier).set('lcr-open', {
+      id: 'lcr-open', shipmentId, loadId, kind: 'CARRIER', status: 'ACTIVE',
+      carrierName: 'Open Carrier', apStatus: 'AWAITING_INVOICE', apOpen: 'OPEN',
+      createdAt: '2026-10-01T00:00:00.000Z', updatedAt: '2026-10-01T00:00:00.000Z',
+    })
+    table(TABLES.carrier).set('lcr-paid', {
+      id: 'lcr-paid', shipmentId, loadId, kind: 'CARRIER', status: 'ACTIVE',
+      carrierName: 'Paid Carrier', apStatus: 'PAID',
+      createdAt: '2026-10-01T00:00:00.000Z', updatedAt: '2026-10-01T00:00:00.000Z',
+    })
+    table(TABLES.carrier).set('lcr-bounced', {
+      id: 'lcr-bounced', shipmentId, loadId, kind: 'CARRIER', status: 'ACTIVE',
+      carrierName: 'Bounced Carrier', apStatus: 'BOUNCED',
+      createdAt: '2026-10-01T00:00:00.000Z', updatedAt: '2026-10-01T00:00:00.000Z',
+    })
+
+    await voidCall(shipmentId, ADMIN)
+    expect(table(TABLES.carrier).get('lcr-open')!.apOpen).toBeUndefined()
+
+    await unvoidCall(shipmentId, ADMIN)
+    expect(table(TABLES.carrier).get('lcr-open')!.apOpen).toBe('OPEN')
+    expect(table(TABLES.carrier).get('lcr-paid')!.apOpen).toBeUndefined()
+    expect(table(TABLES.carrier).get('lcr-bounced')!.apOpen).toBeUndefined()
+  })
+
+  it('restores a CANCELED load off CANCELED and leaves the PRO claim alone', async () => {
+    const { shipmentId, loadId } = await createDraft()
+    await saveForm(shipmentId)
+    // Claim a PRO so the test can prove it survives both void and unvoid.
+    await call('SET_LOAD_PRO', { loadId, pro: 'BCAT-UNVOID-01', expectedUpdatedAt: table(TABLES.load).get(loadId)!.updatedAt }, ADMIN)
+    await voidCall(shipmentId, ADMIN)
+    const loadAfterVoid = table(TABLES.load).get(loadId)!
+    expect(loadAfterVoid.status).toBe('CANCELED')
+    expect(loadAfterVoid.voidedAt).toBeTruthy()
+    const proAfterVoid = loadAfterVoid.aljexId
+
+    await unvoidCall(shipmentId, ADMIN)
+    const load = table(TABLES.load).get(loadId)!
+    expect(load.status).not.toBe('CANCELED')
+    expect(load.voidedAt).toBeFalsy()
+    expect(load.aljexId).toBe(proAfterVoid)
+    expect(load.statusSource).toBe('SYSTEM')
+  })
+
+  it('leaves a load that was already CANCELED before the void in CANCELED', async () => {
+    const { shipmentId, loadId } = await createDraft()
+    await saveForm(shipmentId)
+    table(TABLES.load).set(loadId, {
+      ...table(TABLES.load).get(loadId)!,
+      status: 'CANCELED',
+      statusChangedAt: '2026-03-01T00:00:00.000Z',
+      statusChangedBy: 'dispatch@bcatcorp.com',
+      statusSource: 'USER',
+      readyToInvoice: true,
+    })
+
+    await voidCall(shipmentId, ADMIN)
+    const afterVoid = table(TABLES.load).get(loadId)!
+    expect(afterVoid.status).toBe('CANCELED')
+    expect(afterVoid.previousStatus).toBeNull()
+    expect(afterVoid.previousReadyToInvoice).toBe(true)
+    expect(afterVoid.readyToInvoice).toBe(false)
+
+    await unvoidCall(shipmentId, ADMIN)
+    const afterUnvoid = table(TABLES.load).get(loadId)!
+    expect(afterUnvoid.status).toBe('CANCELED')
+    expect(afterUnvoid.statusSource).toBe('USER')
+    expect(afterUnvoid.readyToInvoice).toBe(true)
+    expect(afterUnvoid.previousStatus).toBeNull()
+    expect(afterUnvoid.previousReadyToInvoice).toBeNull()
+  })
+
+  it('restores a load the void canceled to the exact status it held before', async () => {
+    const { shipmentId, loadId } = await createDraft()
+    await saveForm(shipmentId)
+    table(TABLES.load).set(loadId, {
+      ...table(TABLES.load).get(loadId)!,
+      status: 'IN_TRANSIT',
+      statusChangedAt: '2026-03-01T00:00:00.000Z',
+      statusChangedBy: 'dispatch@bcatcorp.com',
+      statusSource: 'USER',
+    })
+
+    await voidCall(shipmentId, ADMIN)
+    expect(table(TABLES.load).get(loadId)!).toMatchObject({
+      status: 'CANCELED',
+      previousStatus: 'IN_TRANSIT',
+      statusSource: 'SYSTEM',
+    })
+
+    await unvoidCall(shipmentId, ADMIN)
+    const load = table(TABLES.load).get(loadId)!
+    expect(load.status).toBe('IN_TRANSIT')
+    expect(load.statusSource).toBe('SYSTEM')
+    expect(load.previousStatus).toBeNull()
+  })
+
+  it('restores readyToInvoice to the state the void found it in', async () => {
+    const { shipmentId, loadId } = await createDraft()
+    await saveForm(shipmentId)
+    table(TABLES.load).set(loadId, {
+      ...table(TABLES.load).get(loadId)!,
+      status: 'DELIVERED',
+      readyToInvoice: true,
+    })
+
+    await voidCall(shipmentId, ADMIN)
+    expect(table(TABLES.load).get(loadId)!).toMatchObject({
+      readyToInvoice: false,
+      previousReadyToInvoice: true,
+    })
+
+    await unvoidCall(shipmentId, ADMIN)
+    const load = table(TABLES.load).get(loadId)!
+    expect(load.readyToInvoice).toBe(true)
+    expect(load.previousReadyToInvoice).toBeNull()
+  })
+
+  it('refuses to unvoid without a fresh CAS token', async () => {
+    const { shipmentId } = await createDraft()
+    await voidCall(shipmentId, ADMIN)
+    await expect(call('UNVOID_SHIPMENT', { shipmentId, reason: 'x' }, ADMIN)).rejects.toThrow(
+      /expectedUpdatedAt is required/,
+    )
+    await expect(
+      call('UNVOID_SHIPMENT', { shipmentId, reason: 'x', expectedUpdatedAt: '1999-01-01T00:00:00.000Z' }, ADMIN),
+    ).rejects.toThrow(/changed by someone else/)
+  })
+})
+
+describe('REPOINT_SHIPMENT_CUSTOMER', () => {
+  it('refuses every page key and accepts only the owner or ADMIN', async () => {
+    const { shipmentId } = await createDraft()
+    await saveForm(shipmentId)
+    await expect(
+      call('REPOINT_SHIPMENT_CUSTOMER', { shipmentId, customerId: 'cus-2', reason: 'x' }, DISPATCHER),
+    ).rejects.toThrow(/requires owner or ADMIN/)
+    await expect(
+      call('REPOINT_SHIPMENT_CUSTOMER', { shipmentId, customerId: 'cus-2', reason: 'x' }, TMS_USER),
+    ).rejects.toThrow(/requires owner or ADMIN/)
+  })
+
+  it('refuses an unlinked shipment and names SET_SHIPMENT_CUSTOMER', async () => {
+    // CREATE_SHIPMENT needs exactly one of customerId or customerName; a typed name
+    // creates an unresolved shipment, which is the only state REPOINT does not serve.
+    const unresolved = (await call('CREATE_SHIPMENT', { customerName: 'UNKNOWN CUSTOMER' }, ADMIN)) as { shipment: Row }
+    const unresolvedId = String(unresolved.shipment.id)
+    seedCustomer({ id: 'cus-2', name: 'SECOND CUSTOMER', status: 'ACTIVE', active: true, creditLimitCents: 10_000_00 })
+    await expect(
+      call('REPOINT_SHIPMENT_CUSTOMER', {
+        shipmentId: unresolvedId,
+        customerId: 'cus-2',
+        reason: 'x',
+        expectedUpdatedAt: table(TABLES.shipment).get(unresolvedId)!.updatedAt,
+      }, ADMIN),
+    ).rejects.toThrow(/SET_SHIPMENT_CUSTOMER/)
+  })
+
+  it('throws INVOICED: when an order has been invoiced', async () => {
+    const { shipmentId, orderId } = await createDraft()
+    await saveForm(shipmentId)
+    seedCustomer({ id: 'cus-2', name: 'SECOND CUSTOMER', status: 'ACTIVE', active: true, creditLimitCents: 10_000_00 })
+    table(TABLES.order).set(orderId, {
+      ...table(TABLES.order).get(orderId)!,
+      arStatus: 'PAID',
+      invoiceId: 'inv-901',
+      invoiceNumber: 'INV-000901',
+    })
+    await expect(repointCall(shipmentId, 'cus-2')).rejects.toThrow(/^INVOICED:/)
+  })
+
+  it('moves Shipment, Order and Load to the new customer and writes one audit row', async () => {
+    const { shipmentId } = await createDraft()
+    await saveForm(shipmentId)
+    seedCustomer({ id: 'cus-2', name: 'SECOND CUSTOMER', status: 'ACTIVE', active: true, creditLimitCents: 10_000_00 })
+
+    const bundle = (await repointCall(shipmentId, 'cus-2', 'Wrong customer selected')) as {
+      shipment: Row
+      orders: Row[]
+      loads: Row[]
+    }
+    expect(bundle.shipment.customerId).toBe('cus-2')
+    expect(bundle.shipment.customerName).toBe('SECOND CUSTOMER')
+    expect(bundle.orders[0].customerId).toBe('cus-2')
+    expect(bundle.loads[0].customerId).toBe('cus-2')
+
+    const audit = [...table(TABLES.audit).values()].filter((row) => row.action === 'REPOINT_SHIPMENT_CUSTOMER')
+    expect(audit).toHaveLength(1)
+    const changes = JSON.parse(String(audit[0].changes))
+    expect(changes.fromCustomerId).toBe('cus-1')
+    expect(changes.customerId).toBe('cus-2')
+    expect(changes.reason).toBe('Wrong customer selected')
+  })
+
+  it('refuses to repoint without a fresh CAS token', async () => {
+    const { shipmentId } = await createDraft()
+    await saveForm(shipmentId)
+    seedCustomer({ id: 'cus-2', name: 'SECOND CUSTOMER', status: 'ACTIVE', active: true, creditLimitCents: 10_000_00 })
+
+    await expect(
+      call('REPOINT_SHIPMENT_CUSTOMER', { shipmentId, customerId: 'cus-2', reason: 'x' }, ADMIN),
+    ).rejects.toThrow(/expectedUpdatedAt is required/)
+    await expect(
+      call(
+        'REPOINT_SHIPMENT_CUSTOMER',
+        { shipmentId, customerId: 'cus-2', reason: 'x', expectedUpdatedAt: '1999-01-01T00:00:00.000Z' },
+        ADMIN,
+      ),
+    ).rejects.toThrow(/changed by someone else/)
+  })
+})
+
 /** The tag as it stands on both mirrored rows, which must never disagree. */
 function tagsOf(shipmentId: string, loadId: string): { shipment: Row; load: Row } {
   const pick = (row: Row): Row => ({
@@ -1508,9 +1777,8 @@ describe('ownership tagging', () => {
     })
   })
 
-  it('tags an outside carrier BROKERAGE, and CAR_SHIPPING when the freight is vehicles', async () => {
+  it('tags an outside carrier BROKERAGE, and CAR_SHIPPING when the customer is Auto Shipper', async () => {
     seedBookableCarrier('car-1')
-    seedBookableCarrier('car-2')
     const plain = await sourcingLoad()
     await call('BOOK_CARRIER', {
       loadId: plain.loadId,
@@ -1522,29 +1790,24 @@ describe('ownership tagging', () => {
       revDivision: 'BROKERAGE', revSubdivision: null, revTagSource: 'RULE',
     })
 
-    const vehicles = await createDraft()
-    await saveForm(vehicles.shipmentId, {
-      order: {
-        equipmentType: "53' VAN",
-        references: [{ code: 'NOTE', value: '2 units — auto transport', level: 'ORDER' }],
-      },
-    })
+    // The CAR_SHIPPING seed rule keys on the customer, not reference text. The
+    // placeholder id is what `src/lib/ownership.ts` ships until the directory
+    // Lambda resolves it against a real Auto Shipper customer.
+    seedCustomer({ id: 'auto-shipper-id-resolved-at-seed', name: 'Auto Shipper' })
+    const autoShipper = (await call('CREATE_SHIPMENT', { customerId: 'auto-shipper-id-resolved-at-seed' })) as {
+      shipment: Row
+      loads: Row[]
+    }
+    const shipmentId = String(autoShipper.shipment.id)
+    const loadId = String(autoShipper.loads[0].id)
+    await saveForm(shipmentId)
     await call('SUBMIT_ORDER', {
-      shipmentId: vehicles.shipmentId,
-      expectedUpdatedAt: table(TABLES.shipment).get(vehicles.shipmentId)!.updatedAt,
-      order: {
-        equipmentType: "53' VAN",
-        references: [{ code: 'NOTE', value: '2 units — auto transport', level: 'ORDER' }],
-      },
+      shipmentId,
+      expectedUpdatedAt: table(TABLES.shipment).get(shipmentId)!.updatedAt,
+      order: { equipmentType: "53' VAN" },
       stops: [PICKUP, DELIVERY],
     })
-    await call('BOOK_CARRIER', {
-      loadId: vehicles.loadId,
-      expectedUpdatedAt: table(TABLES.load).get(vehicles.loadId)!.updatedAt,
-      carrierId: 'car-2',
-      carrierRateCents: 180_000,
-    })
-    const tags = tagsOf(vehicles.shipmentId, vehicles.loadId)
+    const tags = tagsOf(shipmentId, loadId)
     expect(tags.shipment).toMatchObject({ revDivision: 'CAR_SHIPPING', revTagSource: 'RULE' })
     expect(tags.load).toMatchObject({ revDivision: 'CAR_SHIPPING', revTagSource: 'RULE' })
   })
@@ -1665,6 +1928,92 @@ describe('ownership tagging', () => {
     expect(table(TABLES.shipment).get(ids.shipmentId)!.salesRepId).toBe('amanda')
     expect(table(TABLES.order).get(ids.orderId)!.customerRepId).toBe('amanda')
     expect(table(TABLES.load).get(ids.loadId)!.salesRepId).toBe('amanda')
+  })
+})
+
+// ── RESOLVE_REV_TAG ─────────────────────────────────────────────────────────
+
+describe('RESOLVE_REV_TAG', () => {
+  it('re-resolves a rule tag after a customer change and leaves a hand tag alone', async () => {
+    seedCustomer({
+      id: 'auto-shipper-id-resolved-at-seed',
+      name: 'Auto Shipper',
+      status: 'ACTIVE',
+      active: true,
+      creditLimitCents: 10_000_00,
+    })
+
+    // Rule-tagged shipment: Auto Shipper resolves to CAR_SHIPPING.
+    const rule = (await call(
+      'CREATE_SHIPMENT',
+      { customerId: 'auto-shipper-id-resolved-at-seed' },
+      ADMIN,
+    )) as { shipment: Row; loads: Row[] }
+    const ruleShipmentId = String(rule.shipment.id)
+    const ruleLoadId = String(rule.loads[0].id)
+    await saveForm(ruleShipmentId)
+    await call('SUBMIT_ORDER', {
+      shipmentId: ruleShipmentId,
+      expectedUpdatedAt: table(TABLES.shipment).get(ruleShipmentId)!.updatedAt,
+      order: { equipmentType: "53' VAN" },
+      stops: [PICKUP, DELIVERY],
+    })
+    expect(tagsOf(ruleShipmentId, ruleLoadId).shipment).toMatchObject({
+      revDivision: 'CAR_SHIPPING',
+      revTagSource: 'RULE',
+    })
+
+    // Simulate what tms-finance-actions does after an invoiced customer re-point:
+    // the customer moves, but the ownership tables are not reachable there, so
+    // the tag is stale. RESOLVE_REV_TAG is the corrective action.
+    table(TABLES.shipment).set(ruleShipmentId, {
+      ...table(TABLES.shipment).get(ruleShipmentId)!,
+      customerId: 'cus-1',
+      customerName: 'BATORY FOODS',
+    })
+
+    const resolved = (await call('RESOLVE_REV_TAG', { shipmentId: ruleShipmentId }, ADMIN)) as { shipment: Row }
+    expect(resolved.shipment).toMatchObject({ revDivision: 'BROKERAGE', revTagSource: 'RULE' })
+    expect(tagsOf(ruleShipmentId, ruleLoadId).load).toMatchObject({ revDivision: 'BROKERAGE', revTagSource: 'RULE' })
+    const audit = [...table(TABLES.audit).values()].find((row) => row.action === 'RESOLVE_REV_TAG')
+    expect(audit).toBeTruthy()
+    expect(JSON.parse(String(audit!.changes))).toMatchObject({
+      from: { revDivision: 'CAR_SHIPPING' },
+      to: { revDivision: 'BROKERAGE' },
+    })
+
+    // Hand-tagged shipment: the person chose CAR_SHIPPING, and it stays there
+    // even though the customer no longer matches the Auto Shipper rule.
+    const hand = (await call(
+      'CREATE_SHIPMENT',
+      { customerId: 'auto-shipper-id-resolved-at-seed' },
+      ADMIN,
+    )) as { shipment: Row; loads: Row[] }
+    const handShipmentId = String(hand.shipment.id)
+    const handLoadId = String(hand.loads[0].id)
+    await saveForm(handShipmentId)
+    await call('SET_REV_TAG', { shipmentId: handShipmentId, divisionCode: 'CAR_SHIPPING' }, ADMIN)
+    expect(table(TABLES.shipment).get(handShipmentId)!.revTagSource).toBe('HAND')
+
+    table(TABLES.shipment).set(handShipmentId, {
+      ...table(TABLES.shipment).get(handShipmentId)!,
+      customerId: 'cus-1',
+      customerName: 'BATORY FOODS',
+    })
+
+    await call('RESOLVE_REV_TAG', { shipmentId: handShipmentId }, ADMIN)
+    expect(tagsOf(handShipmentId, handLoadId).shipment).toMatchObject({
+      revDivision: 'CAR_SHIPPING',
+      revTagSource: 'HAND',
+    })
+  })
+
+  it('refuses a voided shipment and a non-admin', async () => {
+    const { shipmentId } = await createDraft()
+    await saveForm(shipmentId)
+    await expect(call('RESOLVE_REV_TAG', { shipmentId }, DISPATCHER)).rejects.toThrow(/requires owner or ADMIN/)
+    await voidCall(shipmentId, ADMIN)
+    await expect(call('RESOLVE_REV_TAG', { shipmentId }, ADMIN)).rejects.toThrow(/is voided/)
   })
 })
 

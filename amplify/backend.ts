@@ -1950,6 +1950,7 @@ const directoryMergeJobTable = backend.data.resources.tables['DirectoryMergeJob'
 const directoryOwnershipDivisionTable = backend.data.resources.tables['OwnershipDivision']
 const directoryOwnershipRuleTable     = backend.data.resources.tables['OwnershipRule']
 const directoryShipmentViewTable      = backend.data.resources.tables['ShipmentView']
+const directoryShipmentColumnTemplateTable = backend.data.resources.tables['ShipmentColumnTemplate']
 const directoryLoadTable = backend.data.resources.tables['Load']
 // Step J: one row per integration provider, API client and webhook receipt.
 const directoryIntegrationTable = backend.data.resources.tables['Integration']
@@ -1970,6 +1971,7 @@ const directoryTableArns = [
   directoryOwnershipDivisionTable.tableArn,
   directoryOwnershipRuleTable.tableArn,
   directoryShipmentViewTable.tableArn,
+  directoryShipmentColumnTemplateTable.tableArn,
   // Step R: the taxonomy and view edits are audited like every other settings write.
   backend.data.resources.tables['AuditLog'].tableArn,
   // Step J: the integration framework's only table. Note what is NOT here —
@@ -1980,7 +1982,7 @@ const directoryTableArns = [
 
 directoryActionsFn.addToRolePolicy(
   new PolicyStatement({
-    actions: ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem', 'dynamodb:Scan'],
+    actions: ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem', 'dynamodb:DeleteItem', 'dynamodb:Scan'],
     resources: directoryTableArns,
   }),
 )
@@ -1995,6 +1997,7 @@ directoryActionsFn.addEnvironment('LOAD_TABLE_NAME',               directoryLoad
 directoryActionsFn.addEnvironment('OWNERSHIP_DIVISION_TABLE_NAME',  directoryOwnershipDivisionTable.tableName)
 directoryActionsFn.addEnvironment('OWNERSHIP_RULE_TABLE_NAME',      directoryOwnershipRuleTable.tableName)
 directoryActionsFn.addEnvironment('SHIPMENT_VIEW_TABLE_NAME',       directoryShipmentViewTable.tableName)
+directoryActionsFn.addEnvironment('SHIPMENT_COLUMN_TEMPLATE_TABLE_NAME', directoryShipmentColumnTemplateTable.tableName)
 directoryActionsFn.addEnvironment('AUDIT_LOG_TABLE_NAME',           backend.data.resources.tables['AuditLog'].tableName)
 directoryActionsFn.addEnvironment(
   'USER_PROFILE_TABLE_NAME',

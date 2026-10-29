@@ -2837,6 +2837,58 @@ export type ShipmentViewPickupWindow =
   | 'this_month'
   | 'last_30_days'
 
+export type BoardStatusKey =
+  | 'OPEN'
+  | 'COVERED'
+  | 'DISPATCHED'
+  | 'ARRIVED'
+  | 'DEPARTED'
+  | 'DELIVERED'
+  | 'HOLD'
+  | 'RESERVED'
+  | 'VOIDED'
+
+export type BoardDetailKey =
+  | 'customer'
+  | 'carrier'
+  | 'pickupName'
+  | 'consigneeName'
+  | 'fromStates'
+  | 'toStates'
+  | 'revenueType'
+  | 'equipment'
+  | 'office'
+  | 'fromRegion'
+  | 'toRegion'
+  | 'salesRep'
+  | 'serviceRep'
+  | 'dispatcherAssigned'
+  | 'dispatcherActual'
+
+export interface BoardDetailFilter {
+  values: string[]
+  exclude: boolean
+}
+
+export interface BoardDateFilter {
+  mode: 'FIXED' | 'RANGE'
+  date?: string | null
+  from?: string | null
+  to?: string | null
+}
+
+export interface BoardFilterSet {
+  statuses: BoardStatusKey[]
+  details: Partial<Record<BoardDetailKey, BoardDetailFilter>>
+  dates: Partial<Record<'ship' | 'pickup' | 'delivery' | 'created', BoardDateFilter>>
+  flags?: {
+    checkCallDue?: boolean
+    checkCallOverdue?: boolean
+    openExceptions?: boolean
+    docsMissing?: boolean
+  }
+}
+
 export type ShipmentViewCarrierType = 'OWN_FLEET' | 'CARRIER' | 'NEED_TO_COVER'
 
 export type ShipmentViewDocsState = 'POD_MISSING' | 'DOCS_NEEDED' | 'COMPLETE'
@@ -2857,6 +2909,8 @@ export interface ShipmentViewFilters {
   apStatuses?: ApStatus[]
   quoteToBooked?: boolean
   search?: string | null
+  /** The R2 board's left-panel filters, stored inside a saved view so it round-trips. */
+  board?: BoardFilterSet | null
 }
 
 /** Null or empty means everyone who can open Shipments. */
@@ -2896,9 +2950,24 @@ export interface ShipmentViewRecord {
   updatedAt: string
 }
 
+/** A reusable set of column keys and widths for the shipments board. */
+export interface ShipmentColumnTemplateRecord {
+  id: string
+  name: string
+  columns: string[]
+  widths: Record<string, number> | null
+  ownerEmail: string
+  shared: boolean
+  createdBy: string
+  updatedBy: string
+  version: number
+  createdAt: string
+  updatedAt: string
+}
+
 /**
  * The row shape a view's filters read. The Shipments page maps its own rows onto
- * it, so the filter code never has to know how the board assembles a row.
+ * it, so the filter code never has to know how a board row is assembled.
  */
 export interface ShipmentViewRow {
   id: string
@@ -2918,6 +2987,28 @@ export interface ShipmentViewRow {
   quoteId: string | null
   searchKey: string | null
   voidedAt: string | null
+  // Board facets projected from the shipment/order/load so a saved view's board
+  // filters can be applied to the flat shape as well as to a full ShipmentRow.
+  customerId?: string | null
+  carrierName?: string | null
+  pickupName?: string | null
+  consigneeName?: string | null
+  fromState?: string | null
+  toState?: string | null
+  equipmentType?: string | null
+  officeTeamKeys?: string[] | null
+  dispatcherAssignedId?: string | null
+  dispatcherActualId?: string | null
+  shipDate?: string | null
+  deliveryAppt?: string | null
+  createdAt?: string | null
+  stops?: Stop[] | null
+  revenueCents?: number | null
+  costCents?: number | null
+  profitCents?: number | null
+  marginBps?: number | null
+  customerReference?: string | null
+  commodity?: string | null
 }
 
 // ── Workflows & AI agents (Step K) ───────────────────────────────────────────
