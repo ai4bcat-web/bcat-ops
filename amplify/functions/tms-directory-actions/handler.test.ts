@@ -1072,6 +1072,37 @@ describe('SAVE_SETTINGS', () => {
     expect(vals[':defaultMaxDaysLate']).toEqual({ N: '45' })
   })
 
+  /*
+   * Every settings field a row has never carried reads back `undefined`. Naming one in
+   * the SET clause without a value is a DynamoDB validation error that takes the whole
+   * save down with it — so saving the tracking toggles on a row that has never had an
+   * AI memory card used to fail on `:aiAgents`, and saving anything on a fresh row
+   * would fail on whichever field it had never seen.
+   */
+  it('does not name a field the row has never carried, and still writes an explicit clear', async () => {
+    const existing = makeDynamoItem({ id: 'default', marginFloorBps: 100, updatedAt: '2025-01-02' })
+    let update: MockUpdateCommand['input'] | undefined
+    send.mockImplementation((cmd: MockCommand) => {
+      if (cmd.__type === 'Get') return Promise.resolve({ Item: existing })
+      if (cmd.__type === 'Update') { update = cmd.input; return Promise.resolve({ Attributes: existing }) }
+      throw new Error('unexpected')
+    })
+    await handler(
+      event('SAVE_SETTINGS', { defaultMaxDaysLate: 45, rateConTerms: null, expectedUpdatedAt: '2025-01-02' }, identity({ groups: ['ADMIN'] })),
+    )
+    const vals = update?.ExpressionAttributeValues ?? {}
+    const sets = String(update?.UpdateExpression ?? '')
+    for (const [placeholder, value] of Object.entries(vals)) {
+      expect(value, `${placeholder} was named with no value`).toBeDefined()
+    }
+    expect(sets).not.toContain(':aiAgents')
+    expect(vals[':aiAgents']).toBeUndefined()
+    // An explicit null is a clear, not an absence: it still has to be written.
+    expect(vals[':rateConTerms']).toEqual({ NULL: true })
+    expect(vals[':defaultMaxDaysLate']).toEqual({ N: '45' })
+    expect(vals[':marginFloorBps']).toEqual({ N: '100' })
+  })
+
   it('validates charge code shape', async () => {
     send.mockImplementation((cmd: MockCommand) => {
       if (cmd.__type === 'Get') return Promise.resolve({ Item: undefined })

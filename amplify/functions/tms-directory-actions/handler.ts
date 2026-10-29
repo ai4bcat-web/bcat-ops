@@ -1598,6 +1598,13 @@ async function saveSettings(input: Record<string, unknown>, caller: Caller): Pro
   const sets: string[] = []
   for (const [key, value] of Object.entries(item)) {
     if (key === 'id' || key === 'createdAt') continue
+    /*
+     * A field nobody has ever saved reads back `undefined` from `keep`, and naming it
+     * in the SET clause with no value is a DynamoDB validation error that fails the
+     * whole save — every other setting on the card with it. `null` is different: it is
+     * an explicit clear and marshals to NULL, so it is still written.
+     */
+    if (value === undefined) continue
     names[`#${key}`] = key
     values[`:${key}`] = marshall({ [key]: value }, { removeUndefinedValues: true })[key]
     sets.push(`#${key} = :${key}`)

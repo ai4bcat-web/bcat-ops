@@ -1200,9 +1200,21 @@ describe('driver-app-api handler', () => {
   })
 
   describe('attaching a POD to a load', () => {
+    /*
+     * `/loads/recent` grades the fixtures against a 30-day window taken from the real
+     * clock, so without a pinned date these cases quietly stop testing anything the
+     * month after they were written — and then fail outright, which is what happened on
+     * 2026-10-29 when `load-c-1` (delivered 2026-09-29) aged out mid-suite.
+     */
     beforeEach(() => {
+      vi.useFakeTimers()
+      vi.setSystemTime(new Date('2026-10-05T12:00:00Z'))
       mockVerify.mockReset()
       mockVerify.mockResolvedValue({ email: EMAIL_C, email_verified: true })
+    })
+
+    afterEach(() => {
+      vi.useRealTimers()
     })
 
     /** A POD driver C sent with no load number. */
