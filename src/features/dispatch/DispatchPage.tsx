@@ -9,6 +9,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import { useDispatch } from '@/hooks/useDispatch'
 import { useDrivers } from '@/hooks/useDrivers'
+import { useLoads } from '@/hooks/useLoads'
 import { useAppStore } from '@/store/useAppStore'
 import { listTruckLocations, type TruckLocation } from '@/lib/apiClient'
 import { whereaboutsOf, whereaboutsLine, statusLine, unitLine } from './driverWhereabouts'
@@ -64,8 +65,9 @@ export function DispatchPage({ compact = false, onHide }: { compact?: boolean; o
   const [now, setNow] = useState(() => new Date())
   useEffect(() => { const t = setInterval(() => setNow(new Date()), 30_000); return () => clearInterval(t) }, [])
   // Where each truck is, for the location line under a driver: refreshed every minute.
-  const loads = useAppStore((s) => s.loads)
-  const updateLoad = useAppStore((s) => s.updateLoad)
+  // The live working set: a voided load is not dispatchable work, so it gives no driver a
+  // location line and shows up in no POD-filing picker here.
+  const { loads, updateLoad } = useLoads()
   /** An inbound attachment being filed as a POD, while the load picker is open. */
   const [filingPod, setFilingPod] = useState<DispatchMedia | null>(null)
   const equipment = useAppStore((s) => s.equipment)

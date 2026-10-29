@@ -79,6 +79,8 @@ function relativeReceived(iso: string) {
  */
 function ProLink({ loadId, proNumber }: { loadId: string | null | undefined; proNumber: string }) {
   const setSelectedLoad = useAppStore((s) => s.setSelectedLoad)
+  // The identity table on purpose: this resolves a factoring row's load id to a real load,
+  // and a voided load is still the owner of that Pro # and that id.
   const loads = useAppStore((s) => s.loads)
   const known = loadId ? loads.some((l) => l.id === loadId) : false
   const text = <span className="font-bold tabular-nums">{proNumber}</span>

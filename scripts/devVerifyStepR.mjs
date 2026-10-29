@@ -404,6 +404,8 @@ async function main() {
     equals('the voided Load pays nobody (deliveryDriverId cleared)', bLoad.deliveryDriverId, null)
     equals('the void is mirrored onto the Load (it leaves every fleet working set)', bLoad.voidedAt, vs.voidedAt)
     await refuses('a voided shipment refuses a second void', /voided/i, () => shipAction('VOID_SHIPMENT', { shipmentId: bId, reason: 'again', expectedUpdatedAt: b.shipment.updatedAt }))
+    await refuses('no token can write the void on a Load — only VOID_SHIPMENT can', /Unauthorized|not authorized|FieldUndefined|Validation/i, () =>
+      gql(`mutation U($id: ID!) { updateLoad(input: { id: $id, voidedAt: null }) { id voidedAt } }`, { id: bLoadId }))
     await refuses('a voided shipment refuses edits', /voided/i, () =>
       shipAction('SAVE_ORDER_FORM', { shipmentId: bId, expectedUpdatedAt: b.shipment.updatedAt, order: { customerNotes: 'x' } }))
     await refuses('a voided shipment refuses a document upload', /voided/i, () =>

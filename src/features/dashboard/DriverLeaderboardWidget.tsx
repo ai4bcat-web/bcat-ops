@@ -15,6 +15,7 @@ import { driverGroupOf } from '@/lib/driverFilter'
 import { getColor } from '@/lib/driverColors'
 import { errorText } from '@/lib/errorText'
 import { useAppStore } from '@/store/useAppStore'
+import { useLoads } from '@/hooks/useLoads'
 import { formatApptTime } from '@/lib/date'
 import { PerMileKpis } from './PerMileKpis'
 
@@ -62,7 +63,8 @@ export function DriverLeaderboardWidget() {
   // Gross is what is BOOKED for the period (every load delivering in it, by rate), not what
   // has been settled — a settlement only counts loads whose POD is in, which hid most of
   // the week until Friday.
-  const loads = useAppStore((s) => s.loads)
+  // The live working set: a voided load pays nobody, so it never reaches a board.
+  const { loads } = useLoads()
   // Real, active drivers only — test accounts stay off the board.
   const real = useMemo(() => drivers.filter((d) => d.active !== false && d.type !== 'broker' && !/\btest\b/i.test(d.name)), [drivers])
   const ownerOps = useMemo(() => real.filter((d) => driverGroupOf(d) === 'OWNER_OP'), [real])

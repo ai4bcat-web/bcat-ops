@@ -2,6 +2,7 @@ import { NavLink } from 'react-router-dom'
 import { UserCog, LogOut, Plus, Truck, ChevronsLeft, ChevronsRight } from 'lucide-react'
 import bcatLogo from '@/assets/bcat-logo.png'
 import { useAuth } from '@/hooks/useAuth'
+import { useLoads } from '@/hooks/useLoads'
 import { useAppStore } from '@/store/useAppStore'
 import { apptQueueCount } from '@/lib/apptQueue'
 import { useIntakeItems } from '@/hooks/useIntakeItems'
@@ -57,7 +58,8 @@ export function NavBar({
   // The three businesses the rail groups by. Null until they load: `buildNavSections`
   // renders the seed divisions then, so the rail never flashes empty.
   const { divisions } = useOwnershipDivisions()
-  const loads = useAppStore(s => s.loads)
+  // The badge counts live work, so the working set: a voided load left the board.
+  const { loads } = useLoads()
   const maintenanceTasks = useAppStore(s => s.maintenanceTasks)
   const { items: intakeItems } = useIntakeItems()
   const { pendingCount: reviewCount } = useReviewQueue()

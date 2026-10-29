@@ -498,7 +498,11 @@ export const useAppStore = create<AppState>()(
         set({ isLoading: true, error: null, currentUserEmail: userEmail })
         try {
           const [loads, drivers, auditLog] = await Promise.all([
-            api.listLoads(),
+            // The store is the IDENTITY TABLE, so it asks for voided loads too: a Pro #
+            // is claimed forever and the duplicate-Pro check has to keep seeing the
+            // voided load that holds it. The live working set — no voided rows — is
+            // `useLoads()`, which filters this array for every screen that shows work.
+            api.listLoads({ includeVoided: true }),
             api.listDrivers(),
             api.listAuditLogs(),
           ])
@@ -567,7 +571,9 @@ export const useAppStore = create<AppState>()(
       // transient network blip doesn't blank the calendar.
       refreshCalendarData: async () => {
         try {
-          const [loads, drivers] = await Promise.all([api.listLoads(), api.listDrivers()])
+          // Same identity-table rule as initializeData: refetch everything, voided
+          // included, and let `useLoads()` hide the voided rows from the calendar.
+          const [loads, drivers] = await Promise.all([api.listLoads({ includeVoided: true }), api.listDrivers()])
           set({ loads, drivers })
         } catch (err) {
           console.warn('[store] refreshCalendarData failed', err)

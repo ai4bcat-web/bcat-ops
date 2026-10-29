@@ -146,9 +146,14 @@ export function isUnlinkedLoad(row: ShipmentRow): boolean {
 /** What the Status column says about such a row, in the user's words. */
 export const UNLINKED_LOAD_LABEL = 'Unlinked load'
 
-/** The one line the board shows so the label is not a riddle. */
+/**
+ * The one line the board shows so the label is not a riddle. It says what actually
+ * resolves it: nothing in the app mints a Shipment for a stray load, so a customer
+ * has to be matched first and `scripts/backfillShipments.mjs` links it after that.
+ */
 export const UNLINKED_LOAD_NOTE =
-  'Unlinked load: no customer record is matched to it, so it has no shipment yet. Open it and set its customer.'
+  'Unlinked load: no customer record is matched to it, so no shipment was ever created for it. '
+  + 'Open it and set its customer — an admin then links it with the shipment backfill.'
 
 /** Local calendar day of an ISO instant, as `YYYY-MM-DD`. */
 function localDay(at: Date): string {

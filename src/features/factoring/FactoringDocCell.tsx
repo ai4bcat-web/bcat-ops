@@ -56,6 +56,8 @@ export function FactoringDocCell({
 }) {
   const input = useRef<HTMLInputElement>(null)
   const [busy, setBusy] = useState(false)
+  // The identity table on purpose: the cell looks a load up by id to hang its documents on,
+  // and a voided load keeps both its id and its Pro #.
   const loads = useAppStore((s) => s.loads)
   const updateLoad = useAppStore((s) => s.updateLoad)
   const load: Load | undefined = loadId ? loads.find((l) => l.id === loadId) : undefined

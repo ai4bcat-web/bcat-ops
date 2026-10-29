@@ -1312,7 +1312,11 @@ export function LoadDrawer() {
   const setSelectedLoad       = useAppStore((s) => s.setSelectedLoad)
   const pendingIntakeItemId   = useAppStore((s) => s.pendingIntakeItemId)
   const setPendingIntakeItem  = useAppStore((s) => s.setPendingIntakeItem)
-  const { loads, addLoad, updateLoad } = useLoads()
+  // The identity table, not the live working set. Two reasons: `proConflict` below is the
+  // only Pro #-uniqueness check in the app and a voided load keeps its Pro # forever, so
+  // hiding voided rows here would let a dead Pro # be reissued; and the drawer opens on a
+  // load id, which the Voided tab hands it, so the record has to still be findable.
+  const { allLoads: loads, addLoad, updateLoad } = useLoads()
   const { drivers } = useDrivers()
   // What the driver app recorded at each stop, plus when the POD came in. Looked up by the
   // selected load id so the hook runs on every render, ahead of the mode-based early returns.

@@ -9,7 +9,7 @@ import { useDashboardMetrics, type DateRangeKey } from '@/hooks/useDashboardMetr
 import { useFactoringItems } from '@/hooks/useFactoringItems'
 import { factoringTotals, type FactoringTotals } from '@/lib/factoringTotals'
 import type { RevenueSplit, LoadsSplit } from '@/lib/revenueByFleet'
-import { useAppStore } from '@/store/useAppStore'
+import { useLoads } from '@/hooks/useLoads'
 import { ComplianceAlertsWidget } from './ComplianceAlertsWidget'
 import { RepairInvoicesWidget } from './RepairInvoicesWidget'
 import { VendorApCard } from './VendorApCard'
@@ -341,7 +341,8 @@ export function DashboardPage() {
    * card and the page can never disagree about how much is waiting.
    */
   const { items: factoringItems, loading: factoringLoading } = useFactoringItems()
-  const loads = useAppStore((s) => s.loads)
+  // The live working set — a voided load is not revenue and must not be counted here.
+  const { loads } = useLoads()
   /*
    * Valued off the loads as well as the queue: nothing is submitted yet on a NEED_TO_FACTOR
    * row, so it has no OTR amount and the rate on the load it resolves to is the only figure

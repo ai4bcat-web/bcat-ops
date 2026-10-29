@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import { useAppStore } from '@/store/useAppStore'
+import { isLoadVoided } from '@/lib/shipmentVoid'
 import { apptOutstanding, requiresApptProofs } from '@/lib/apptQueue'
 import { revenueByFleet, loadsByFleet, type RevenueSplit, type LoadsSplit } from '@/lib/revenueByFleet'
 import type { Driver, Load } from '@/types'
@@ -99,7 +100,10 @@ function loadsInRange(loads: Load[], start: Date, end: Date): Load[] {
 }
 
 export function useDashboardMetrics(rangeKey: DateRangeKey): DashboardMetrics {
-  const loads   = useAppStore((s) => s.loads)
+  const allLoads = useAppStore((s) => s.loads)
+  // Same rule as every other working set: a voided load is not live work and is counted in
+  // no dashboard figure. Filtered in a memo, never in the selector.
+  const loads   = useMemo(() => allLoads.filter((l) => !isLoadVoided(l)), [allLoads])
   const drivers = useAppStore((s) => s.drivers)
 
   return useMemo(() => {

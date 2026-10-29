@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { APIProvider, Map as GoogleMap, AdvancedMarker } from '@vis.gl/react-google-maps'
 import { useAppStore } from '@/store/useAppStore'
+import { isLoadVoided } from '@/lib/shipmentVoid'
 import { getStops } from '@/lib/stops'
 import { dwellMinutes } from '@/lib/tmsDirectory'
 import { formatDateTime } from '@/lib/date'
@@ -18,7 +19,10 @@ const MAPS_MAP_ID = import.meta.env.VITE_GOOGLE_MAPS_MAP_ID as string | undefine
  */
 export function LocationDetail({ location }: { location: LocationRecord }) {
   const [openedAt] = useState(() => Date.now())
-  const loads = useAppStore((s) => s.loads)
+  const allLoads = useAppStore((s) => s.loads)
+  // This facility's visit history is real work done there, so voided loads drop out. The
+  // filter lives in a memo because the selector must return the store's own array.
+  const loads = useMemo(() => allLoads.filter((l) => !isLoadVoided(l)), [allLoads])
   const history = useMemo(() => {
     const rows: { load: Load; stop: Stop }[] = []
     for (const load of loads) {

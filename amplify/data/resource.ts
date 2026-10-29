@@ -151,7 +151,14 @@ const schema = a.schema({
       // join a shipment. Stamping the void here is what takes voided freight
       // out of the live working set everywhere at once; the row, its PRO and
       // its history stay, so the Voided tab and the History tab still read it.
-      voidedAt:        a.datetime(),
+      //
+      // Read-only to a signed-in client. Every other Load field is client-writable
+      // and always has been, but this one carries the void: left open, any token
+      // could take a load out of every working set with no owner/ADMIN check, no
+      // reason and no audit row, or clear the mirror and put voided freight back on
+      // the calendar and in the settlements. VOID_SHIPMENT writes it through the
+      // schema's `allow.resource(tmsShipmentActions)` grant.
+      voidedAt:        a.datetime().authorization((allow) => [allow.authenticated().to(['read'])]),
       createdBy:       a.string().required(),
       updatedBy:       a.string().required(),
     })

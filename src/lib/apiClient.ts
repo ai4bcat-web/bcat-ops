@@ -319,7 +319,11 @@ function serializeLoadInput<T extends { stops?: unknown; sortOrder?: unknown; cu
     }
     out = rest as T
   }
-  if (!loadsHaveVoided && 'voidedAt' in (out as object)) {
+  // Never from here. `voidedAt` is read-only to a signed-in client — VOID_SHIPMENT
+  // owns it — and a page that spreads a whole load into a write (the scheduler's
+  // duplicate does) would otherwise send the field and be refused outright, or write
+  // a NULL attribute onto a brand-new load.
+  if ('voidedAt' in (out as object)) {
     const { voidedAt: _drop, ...rest } = out as T & { voidedAt?: unknown }
     out = rest as T
   }

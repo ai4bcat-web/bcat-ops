@@ -3745,6 +3745,32 @@ describe('BACKFILL_SHIPMENT', () => {
     })
   })
 
+  it('refuses to re-link a refreshed load onto a shipment somebody voided', async () => {
+    // The void mirror is the only thing keeping voided freight off the calendar, out
+    // of dispatch and out of the pay hooks. Re-linking would put it back there under
+    // a shipment that has left the working set.
+    seedLegacyLoad('lod-voided')
+    await call('BACKFILL_SHIPMENT', { loadIds: ['lod-voided'], dryRun: false }, ADMIN)
+    const shipmentId = String(table(TABLES.load).get('lod-voided')!.shipmentId)
+    table(TABLES.shipment).set(shipmentId, {
+      ...table(TABLES.shipment).get(shipmentId)!,
+      voidedAt: '2026-03-01T00:00:00.000Z',
+      voidedBy: 'ryne@bcatcorp.com',
+      voidReason: 'Customer cancelled',
+    })
+    // The refresh: the freight is back, the link a previous run wrote is gone.
+    seedLegacyLoad('lod-voided')
+
+    const report = (await call('BACKFILL_SHIPMENT', { loadIds: ['lod-voided'], dryRun: false }, ADMIN)) as {
+      applied: number
+      skipped: { loadId: string; reason: string }[]
+      planned: { skipped: string | null }[]
+    }
+    expect(report.planned[0].skipped).toBe('SHIPMENT_VOIDED')
+    expect(report.applied).toBe(0)
+    expect(table(TABLES.load).get('lod-voided')!.shipmentId).toBeUndefined()
+  })
+
   it('leaves a broker pseudo-driver load needing cover, with no carrier row', async () => {
     seedLegacyLoad('lod-broker', {
       stops: JSON.stringify([

@@ -11,6 +11,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { ChevronLeft, ChevronRight, Camera, FileWarning, Check, AlertTriangle, ArrowUpDown } from 'lucide-react'
 import { useAppStore } from '@/store/useAppStore'
 import { listDriverSubmissions, type SubmissionWithDocs } from '@/lib/driverSubmissionsClient'
+import { isLoadVoided } from '@/lib/shipmentVoid'
 import { weekLabelLong, sundayOf, shiftWeek } from '@/features/driver-pay/week'
 import { IvanDriverWeek } from './IvanDriverWeek'
 import { Avatar } from '@/components/ui/avatar'
@@ -112,7 +113,10 @@ function PodChip({ row }: { row: IvanLoadRow }) {
 
 export function IvanDriverAppPage() {
   const drivers = useAppStore((s) => s.drivers)
-  const loads = useAppStore((s) => s.loads)
+  const allLoads = useAppStore((s) => s.loads)
+  // The driver's board is live work, so voided loads are filtered out here — in a memo on
+  // the store's array, never in the selector, which has to return a stable reference.
+  const loads = useMemo(() => allLoads.filter((l) => !isLoadVoided(l)), [allLoads])
   const equipment = useAppStore((s) => s.equipment)
   const [periodStart, setPeriodStart] = useState(() => sundayOf())
   // One driver at a time, picked from the chips at the top — as on the owner-operator page.

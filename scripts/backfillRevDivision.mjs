@@ -844,11 +844,16 @@ export async function applyRevDivisionPlan({ client, doc, plan, suffix }) {
             TableName: loadTable,
             Key: { id: entry.loadId },
             // A void already on the load is the router's own and wins; this pass only
-            // fills the ones written before the load carried the field.
-            ConditionExpression: 'attribute_not_exists(voidedAt)',
+            // fills the ones written before the load carried the field. A row the
+            // client wrote with an explicit `voidedAt: null` — a duplicate made in the
+            // scheduler spreads the whole load into `createLoad` — stores the
+            // attribute as NULL, which `attribute_not_exists` counts as present, so
+            // that case is named here rather than silently reported as already done.
+            ConditionExpression: 'attribute_not_exists(voidedAt) OR voidedAt = :nothing',
             UpdateExpression: 'SET voidedAt = :voidedAt, updatedAt = :updatedAt, updatedBy = :updatedBy',
             ExpressionAttributeValues: {
               ':voidedAt': entry.voidedAt,
+              ':nothing': null,
               ':updatedAt': new Date().toISOString(),
               ':updatedBy': MIGRATION_USER,
             },

@@ -563,6 +563,8 @@ export function IntakePage() {
   const { user } = useAuth()
   const setSelectedLoad      = useAppStore((s) => s.setSelectedLoad)
   const setPendingIntakeItem = useAppStore((s) => s.setPendingIntakeItem)
+  // The identity table on purpose: a tender is matched by Pro #, and a voided load still
+  // owns its Pro # forever, so the match has to be able to land on one.
   const loads                = useAppStore((s) => s.loads)
   // Needed to bind the tender's broker to a real customer record (and so its MC).
   const { customers }        = useDirectory()

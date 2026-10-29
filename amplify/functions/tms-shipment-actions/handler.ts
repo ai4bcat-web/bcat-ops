@@ -5052,6 +5052,11 @@ function planBackfill(
   const loadStatus = backfillLoadStatus(load)
   const revenueCents = numberOrNull(load.rate) ?? 0
   const relink = existing != null
+  // A refreshed Load table can point back at a shipment somebody has since voided.
+  // Re-linking it would put the freight back on the calendar, in dispatch and in the
+  // pay hooks under a shipment that has left the working set, and the void mirror is
+  // the only thing keeping it out of them. That is a person's call, not an import's.
+  const voidedTarget = relink && (optionalString(existing.voidedAt, 40) || optionalString(existing.deletedAt, 40)) != null
   const existingOrderId = relink && Array.isArray(existing.orderIds) ? optionalString(existing.orderIds[0], 100) : null
   return {
     loadId,
@@ -5067,7 +5072,11 @@ function planBackfill(
     driverId: realDriverId,
     revenueCents,
     relink,
-    skipped: load.shipmentId ? 'ALREADY_LINKED' : (relink || customerId) ? null : 'NO_CUSTOMER_MATCH',
+    skipped: load.shipmentId
+      ? 'ALREADY_LINKED'
+      : voidedTarget
+        ? 'SHIPMENT_VOIDED'
+        : (relink || customerId) ? null : 'NO_CUSTOMER_MATCH',
   }
 }
 

@@ -3,6 +3,7 @@ import { formatDistanceToNow, formatDistanceToNowStrict } from 'date-fns'
 import { MapPin, Plus, ClipboardCopy } from 'lucide-react'
 import { toast } from 'sonner'
 import { listTruckLocations, type TruckLocation } from '@/lib/apiClient'
+import { isLoadVoided } from '@/lib/shipmentVoid'
 import { TrackingLinkCell } from './TrackingLinkCell'
 import { useAppStore } from '@/store/useAppStore'
 import { driverForTruck } from '@/lib/assignments'
@@ -88,7 +89,11 @@ export function TruckMapWidget() {
   const drivers             = useAppStore((s) => s.drivers)
   const assignTruckToDriver = useAppStore((s) => s.assignTruckToDriver)
   const addEquipment        = useAppStore((s) => s.addEquipment)
-  const loads               = useAppStore((s) => s.loads)
+  const allLoads            = useAppStore((s) => s.loads)
+  // The map shows what each truck is running now, so the working set only: a voided load
+  // is not a trip. Filtered here rather than in the selector, which must keep returning
+  // the store's own array.
+  const loads = useMemo(() => allLoads.filter((l) => !isLoadVoided(l)), [allLoads])
   const activeDrivers = useMemo(() => drivers.filter((d) => d.active), [drivers])
 
   // Initial load + auto-refresh every 2 min so newly-synced trucks/positions

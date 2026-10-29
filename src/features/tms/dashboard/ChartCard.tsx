@@ -130,8 +130,8 @@ function ChartBody({ def, series, numbers }: { def: ChartDef; series: ChartSerie
   const showTable = numbers || kind === 'table' || kind === 'kpis'
 
   // The tiles are data. A card that answered with numbers is not empty, so the
-  // empty state belongs only to a card that said nothing at all (line 115) —
-  // never underneath a strip of real KPI figures.
+  // empty state belongs only to a card that said nothing at all (the early return
+  // above) — never underneath a strip of real KPI figures.
   return (
     <div className="tms-chart-inner">
       {tiles}

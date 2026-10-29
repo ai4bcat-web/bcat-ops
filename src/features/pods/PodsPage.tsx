@@ -62,6 +62,8 @@ const btn: React.CSSProperties = {
 
 export function PodsPage() {
   const { user } = useAuth()
+  // The identity table on purpose: a POD is matched to a load by Pro #, and a voided load
+  // keeps its Pro #, so its paperwork must still find it rather than land nowhere.
   const loads = useAppStore((s) => s.loads)
   const drivers = useAppStore((s) => s.drivers)
 

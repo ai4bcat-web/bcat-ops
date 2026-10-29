@@ -398,7 +398,9 @@ export interface Load extends ShipmentLoadFields {
   /**
    * The shipment's void, mirrored (Step R). Set = the shipment left the working
    * set, so `listLoads` does not return this row unless a history view asks.
-   * Written only by tmsShipmentActions.
+   * Written by VOID_SHIPMENT in tmsShipmentActions and by the MIRROR pass of
+   * `scripts/backfillRevDivision.mjs`; the generated `updateLoad` can reach it too,
+   * because Load has no field-level auth — nothing but those two should.
    */
   voidedAt?: string | null
   createdAt: string

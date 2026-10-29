@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { ChevronDown, ChevronRight, Search, Wrench } from 'lucide-react'
 import { useAppStore } from '@/store/useAppStore'
+import { isLoadVoided } from '@/lib/shipmentVoid'
 import { auditFleetRevenue, type AuditBucket, type RevenueAudit } from '@/lib/revenueAudit'
 import type { DateRange } from '@/lib/fleetProfitability'
 import type { FleetGroup } from '@/types/equipment'
@@ -69,7 +70,10 @@ export function RevenueAuditPanel({ range, group, expectedRevenue }: {
   const [expanded, setExpanded] = useState<Set<AuditBucket>>(new Set(['noTruck', 'unattributed']))
   const [q, setQ] = useState('')
 
-  const loads = useAppStore((s) => s.loads)
+  const allLoads = useAppStore((s) => s.loads)
+  // The audit reconciles money actually earned, so it works off the live set: a voided load
+  // has no revenue to attribute. The memo keeps the selector returning the store's array.
+  const loads = useMemo(() => allLoads.filter((l) => !isLoadVoided(l)), [allLoads])
   const drivers = useAppStore((s) => s.drivers)
   const equipment = useAppStore((s) => s.equipment)
   const assignTruckToDriver = useAppStore((s) => s.assignTruckToDriver)
