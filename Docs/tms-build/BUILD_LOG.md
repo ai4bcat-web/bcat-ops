@@ -2,6 +2,91 @@
 
 One entry per unit of work (newest first). Decisions needed from Ryne go under **Decision needed**.
 
+## 2026-10-28 — Step I proved live on dev (47/47); every backfill rerun on the refreshed data; R next
+
+- **Deployed.** `50787c3` → job **41 SUCCEED**, `3da9683` → job **42 SUCCEED**, `edf1f43` (the
+  proof script) with this entry. Each commit passed `npm run typecheck`, `npm run lint` (3
+  pre-existing warnings) and `npm run test` (**365 files / 4,895 tests**, up from 4,890). Deploys
+  were serialized: nothing was pushed while a job was RUNNING.
+- **The live proof did not wait for `BCAT_EMAIL`.** A temporary ADMIN was minted in the dev pool
+  (`us-east-1_UKhMNVAG1`) with a suppressed invite and a randomised permanent password that was
+  never printed, used for the script and the browser pass, and deleted afterwards; the script's
+  two temporary identities are created through the Users API (the path under test), given a
+  password straight in the pool, live at `example.invalid` so the invite reaches nobody, and are
+  removed from the pool and the `UserProfile` table in a `finally`. No `zz-` login or profile
+  remains; the only profile row is Ryne's. **`node scripts/devVerifyCommissions.mjs` → 47/47**
+  against job 42: a rep's token gets through `page-commissions` and is refused on
+  `SAVE_SHIPMENT_SETTINGS` / `SAVE_COMMISSION_SETTINGS` / `setAdmin` / `list`; a roleless token
+  is refused at the commission door; the owner's role cannot be changed; **a non-owner admin
+  cannot delete a user**; $2,500 / $1,800 → profit $700 → primary $70.00, lone secondary $70.00
+  (a `splitBps` is a weight over the role's pot, the review's semantics — alone, the secondary
+  takes the whole pot); a rerun writes nothing (`puts 0 updates 0 adjustments 0 untouched 2`);
+  the rep counters their own row (REP_COUNTERED) and cannot approve it or counter another's;
+  the manager's accept settles $90.00 with $70.00 kept beside it; a $500 write-off leaves the
+  approved row at $70.00 and lands **−$50.00 as its own UN_APPROVED adjustment**; revenue
+  $1,000.15 against a $0.10 booking lands on profit $1,000.05 and **10 % rounds once, away from
+  zero, to $100.01** on both rows; an own-fleet order pays 0 with `OWN_FLEET_NO_COST` and
+  `needsReview`; a void cancels the open row (`INVOICE_VOIDED`) and **reverses the approved one
+  (−$100.00) without rewriting it**; a pay period goes open → submit (6 rows, $520.00) → approve
+  → paid under a payroll reference, refusing the manager, the unapproved period and the missing
+  reference on the way, with a statement PDF stored under `commissions/<rep>/cpp_2026-11-01.pdf`;
+  the reporting index answers 2026-10 and the ledger answers by month.
+- **Browser pass**, signed in as the temporary admin: `/commissions` (switched-off state, as the
+  settings are restored after each run), `/reports` (after the lane-sample refresh: 514 loads
+  Aug–Oct, revenue, cost, margin, RPM/CPM, the own-fleet caveat, the customer table), `/users`
+  (totals, invite form with the seven roles, the owner-only note, the cards) and `/settings`.
+- **Bugs the proof found, fixed at the source, each with a test that fails without the fix:**
+  - `userManagement` ran on the **3 s default timeout**; `create` on a cold start timed out after
+    the login had been made (`Task timed out after 3.00 seconds`, read off the dev log group).
+    30 s, like the other routers. The stray login that run left behind was removed.
+  - **The pool names people by a generated id, not the e-mail.** Ryne's own profile is keyed by
+    one. `create` keyed the new profile by the e-mail, so `list` never joined it and an invited
+    rep showed as "No role" with a CUSTOMER_REP profile nobody read; `commissionState` decided
+    "own row" by e-mail while RepPicker stores the username, so a rep could never counter the
+    row attributed to them. Profiles are keyed by the username Cognito returns; the caller
+    carries its username (`sub` in the Lambda, `userId` on the page) and a row names them by
+    either; Mine reads both. The two comments that said the opposite are corrected.
+- **Backfills rerun on the refreshed dev tables** (Load 941 = 892 production + 49 dev fixtures;
+  TMS tables kept). Every plan → review → `--apply` → second plan, in this order, with the
+  second plan a no-op in each case:
+  - `backfillShipments` (B): **888 loads had lost `shipmentId` while their Shipment survived**.
+    `BACKFILL_SHIPMENT` decided on the link alone and would have read them as 757 "no customer
+    match" and 131 fresh ledgers. It now treats the Shipment under the load's deterministic id as
+    the record and only re-points the load (its order, number, customer; the leg really on it
+    sets `assignmentType` / `activeLoadCarrierId`). Applied **890: 888 relinked, 2 created** (the
+    two new BATORY FOODS loads), **2 skipped NO_CUSTOMER_MATCH** (DIRECT DRIVE LOGISTICS — no
+    row carries that name and none was invented). Second plan: 0 relink / 0 create / 2 skipped.
+    Shipment 937 → **939, no duplicate** (892 BACKFILL = 890 + 2); `erasedButShipmentExists` 0.
+  - `backfillCustomers` (P1): it proposed a write for every load, linked ones included, and
+    would have minted 23 customers. A linked load is now counted and left alone, and the new
+    `--link-only` links to the customers that exist and reports the rest. Applied **696 loads
+    linked** (176 already); second plan 0. Left honestly unlinked: **67 loads — 56 with no
+    customer text, 8 under 13 ambiguous names, 3 under names with no row** (DIRECT DRIVE ×2,
+    TRINITY LOGISTICS ×1). 23 names have no customer; none was created or renamed.
+  - `backfillLocations` (P1): **331 loads** had their stops linked to existing Locations;
+    second plan 0; **683 stop keys match no Location** and none was created.
+  - `backfillShipmentDocuments` (E): 3 `rck:` rate-con pointers, 40 order gates recached; second
+    plan 0; 1 submission and 2 loads left (no shipment).
+  - `backfillLegacyAr` (F) — never applied until now: **892 BACKFILL orders → `LEGACY`**
+    (841 were UNBILLED, 51 DOCS_NEEDED; none carried an invoice); second plan 0 / 892 already.
+  - `backfillApOpen` (G): would have put the carrier legs of **five deleted verification
+    shipments back on the AP board** — DELETE_SHIPMENT takes the marker off on purpose. It now
+    reads Shipment `deletedAt` and skips them, counted. Plan over dev: **0 actions** (676 own
+    legs clear, 5 open, 5 skipped deleted, 1 bounced).
+  - `backfillLaneSamples` (H, I's refresh): **846 samples written** (844 BACKFILL, 2 LEGACY_LOAD)
+    with the six reporting fields; second plan 0 / 846 current; 95 loads not sampled (76 below
+    delivered, 18 no lane key, 1 live sample wins); `Load.rate` proved cents on 922 of 922.
+  - `backfillUserProfiles` (I): after the temporary identities were gone, plan and apply wrote
+    **0** — the owner's profile already exists; second plan 0.
+  - Not run, on purpose: `seedDivisions` (operator JSON input; Division has 0 rows on dev and
+    nothing is invented), `importCarriers` (the production cutover, refuses dev apply).
+    **Risk for Ryne:** `scripts/backfillDriverDocScans.mjs` predates the TMS build, has no
+    production guard and its default suffix *is* production; it was not touched or run.
+- **Nothing production was read or written**; no `main` deploy. The new direction docs
+  (`TMS_BUILD_BRIEF.md` changes, `MVMNT_UI_REFERENCE.md`, the images) are left uncommitted for
+  the first R commit, as asked.
+- **Next:** Step R — `Docs/tms-build/R-plan.md`.
+
 ## 2026-10-28 — Step I is live on dev; J planned
 
 - **Deployed.** Commit `2a645b0` pushed to `origin dev`; Amplify job **`39` SUCCEED**. All three
