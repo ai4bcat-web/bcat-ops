@@ -2,6 +2,107 @@
 
 One entry per unit of work (newest first). Decisions needed from Ryne go under **Decision needed**.
 
+## 2026-10-29 — Step R cutover: one record is a Shipment, and a PRO is claimed forever
+
+The previous entry closed Step R's acceptance gaps but left the real one open: three
+entrypoints still minted a `Load` with no shipment, and the board labelled the result
+**"Unlinked load"** and opened a second detail surface for it. That is a second record
+vocabulary. This entry removes it. One commit, `6c6437b` (70 files, +6,038 / −2,391),
+after `npm run typecheck`, `npm run lint` (the same 2 pre-existing warnings) and
+`npm run test` — **396 files / 5,354 tests** — pushed with no job running → job
+**52 SUCCEED**. Data stack **749,425 bytes**, 250,575 under the cap (+3,839 for one model,
+measured with `scripts/measureDataTemplate.mjs` before the push).
+
+- **Unresolved customer is now a state a Shipment can be in.** `Shipment.customerId` and
+  `Order.customerId` are optional and the attribute is **omitted** — never `''`, never
+  `NULL`, either of which a sparse GSI hash key refuses — so such a row simply stays out of
+  the customer index. `customerName` keeps the operator's typed text verbatim: **no customer
+  name is ever invented and no Customer record is created.** Readiness is derived from
+  `customerId` alone and never from status, because the backfill sets status from the stop
+  clock and an unresolved row can arrive `DELIVERED`; a "DRAFT means unresolved" rule would
+  have waved it through to AR. `src/lib/customerResolution.ts` is the one predicate the
+  board, the detail and the Lambda's refusals all share, so the wording matches exactly.
+- **One creation door.** `CREATE_SHIPMENT` takes the PRO a legacy entrypoint already owns, a
+  whitelisted leg bag, and an optional source. `readyToInvoice`, `status` and the identity
+  columns are refused outright — `loadFromFactoringItem` sets `readyToInvoice: true`, and
+  honouring it would walk straight past `evaluateReleaseGate`. A supplied rate becomes a
+  CUSTOMER LINEHAUL charge pinned to **FLAT**, so `Order.revenueCents`, `LoadFinancials` and
+  `Load.rate` agree instead of a $0 order under a $X load; without the pin a customer whose
+  linehaul is PER_MILE turned a $2,500 invoice into $2,500 × miles. A factoring create lands
+  on the **LEGACY** AR rung — money OTR already bought does not enter the AR worklist — and
+  keeps its PO in `tmsId` rather than having the PRO overwrite it.
+- **A PRO is claimed, not merely checked.** A `ProClaim` row keyed by the normalized PRO
+  (`src/lib/proNumber.ts`, moved out of `podPresence` because PRO identity is no longer a POD
+  detail) is written with a conditional put **inside the shipment transaction**, so two
+  dispatchers racing on one number cannot both win. A GSI could not have done this job: the
+  live table stores PROs padded (`'14547  '`) so an equality query would miss them, and an
+  index read is eventually consistent besides. **The claim is never released** — not on
+  rollback, not on void. `proConflict` stays as the fast browser answer but is no longer the
+  rule.
+- **Both client doors are shut.** `Load` model auth is `read`/`update` only, so no browser
+  token can mint freight; `aljexId`, `tmsId` and `pickupNumber` join `voidedAt` as
+  field-level read-only, so `updateLoad` can no longer rename a leg onto a dead PRO.
+  `SET_LOAD_PRO` is the only way a PRO moves. `apiClient.createLoad` and `useAppStore.addLoad`
+  are deleted, not wrapped.
+- **The entrypoints kept their affordance.** `NewShipmentDialog` is the one creation form and
+  writes **once on Save, never on open** — a shipment number is permanent and an abandoned
+  form must not burn one. `LoadDrawer` lost create mode and stays what it legitimately is, the
+  editor for a leg. The scheduler duplicate goes through `DUPLICATE_SHIPMENT` with the clicked
+  leg and `keepDriver`, which also kills an old bug: it spread `shipmentId` through, so a
+  shipment-born load duplicated under the old code became a phantom extra leg on the *source*
+  shipment. The side effects that hung off `addLoad` moved with it — the Batory appointment
+  ladder, intake linking, directory stop filing and the Slack appointment notices — and now
+  write through the API rather than the store, which the `onCreateLoad` subscription used to
+  outrun, silently dropping the tender PDF and the #appts-ivan thread.
+
+### Counts on dev, after job 52
+
+- **PRO claims:** scanned **970 loads**, **41 of them voided** (their PROs are claimed too —
+  that is the point), **970 claims written**, **0 failures**, **0 collisions**, **0
+  unclaimable**. A re-plan reports **0 left to write**. Every PRO on the board is unique once
+  normalized, so the invariant was enforceable with no data cleanup.
+- **The orphans are migrated, not labelled.** `BACKFILL_SHIPMENT` no longer skips a load whose
+  customer matches nobody. The two DIRECT DRIVE LOGISTICS loads became `L14864` (IN_TRANSIT)
+  and `L14865` (BOOKED), each carrying `customerName: DIRECT DRIVE LOGISTICS` with **no
+  `customerId` attribute at all** — verified on the row, not inferred. **Loads with no
+  shipment on dev: 2 → 0.** 977 were already linked and were not touched.
+- **Void mirror backfill applied:** **38 mirrored**, 0 already, 0 failures, **0 rows deleted**;
+  the re-plan reports **0 remaining**. After the cutover the same plan still reports 0 for
+  every pass — mirror, legacy voids, retag, sales reps — over **979 shipments**, 50 voided,
+  0 untagged.
+- **Live proof:** `scripts/devVerifyStepR.mjs` **110/110** against job 52 (was 90/90), the 20
+  new checks covering: a client token can no longer create a Load (`Not Authorized to access
+  createLoad`) or write `aljexId` (`Unauthorized on [aljexId]`); a typed-text create leaves
+  `customerId` absent and invents no Customer; `READY_TO_INVOICE` refuses it by name and, once
+  linked, the release gate still speaks for itself; a voided PRO is refused; two concurrent
+  creates on one PRO yield exactly one shipment; `SET_LOAD_PRO` moves a leg and the PRO it
+  moved off is **still claimed**; `keepDriver` leaves a duplicate on the driver's lane; and a
+  factoring create lands on LEGACY with its PO intact.
+- **Browser pass (authenticated, job 52).** The board shows `L14864` as an ordinary row with
+  its real `IN_TRANSIT` status, cities and dates, the typed customer text and a **Not linked**
+  badge; "Unlinked load" appears nowhere. Its detail is the **Shipment** detail with the full
+  tab row (Stops, Carrier/Driver, Tracking, Documents, Financials, Invoicing, Carrier Pay,
+  History) — not a second drawer — carrying the shared refusal sentence and a **Link customer**
+  control. The calendar's button now reads **New Shipment** and opens the dialog with the
+  explicit "No matching customer — record the name for now" branch and a PRO field
+  ("Blank: the shipment numbers its own leg"). Four saved views render 20 rows each with no
+  errors. Factoring loads clean with no "Create load" affordance left.
+- **Restricted audience proved, not assumed.** `viewsVisibleTo` lets owner/ADMIN past the
+  audience by design (`shipmentViewDefs.ts:205`), so an admin session could not show this. A
+  temporary **non-admin** identity (`page-loads` only, no division) was used: with
+  `box-trucks` narrowed to `CAR_SHIPPING` the view **disappeared** from its board while
+  Owner operators, Local drivers, Dispatch and Accounting stayed. The narrowing was then
+  reverted and the row is back to `Everyone`.
+- **Identities.** Both temporary dev identities were created with a suppressed invite and a
+  random password held only in memory, and **both were deleted at the end**; 0 `stepr-verify`
+  users remain in the pool. No production stack was touched: the repo-root
+  `amplify_outputs.json` is production and every script refuses it.
+
+**Decision needed (Ryne).** Resolving a shipment's customer is a one-way act today:
+`SET_SHIPMENT_CUSTOMER` refuses a shipment that already has one, because re-pointing freight
+at a different customer is a correction with money attached, not a data fix. If you want that
+re-point, say under what conditions and whether an invoiced order may ever move.
+
 ## 2026-10-29 — Step R acceptance gaps closed: the gate has no back door, a void leaves every working set, and no load is invisible
 
 The four items the previous entry listed as **Decisions needed (Ryne) 4–6** are hard rules in
