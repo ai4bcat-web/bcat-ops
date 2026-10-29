@@ -324,7 +324,7 @@ export function InvoicesPage() {
     try {
       const result = await sendMaintenanceInvoiceToVendorAp(inv.id)
       toast.success(result.duplicate ? 'This invoice is already in Vendor AP' : 'Invoice sent to Vendor AP', {
-        action: hasPageAccess('vendorAp') ? { label: 'Open queue', onClick: () => navigate('/vendor-ap') } : undefined,
+        action: hasPageAccess('vendorAp') ? { label: 'Open queue', onClick: () => navigate('/tms/vendors') } : undefined,
       })
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Could not send invoice to Vendor AP')

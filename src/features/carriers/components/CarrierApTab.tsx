@@ -16,23 +16,22 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Banknote, Mail, Plus } from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
+import { TmsBadge, TmsButton, TmsCard } from '@/features/tms/kit'
 import { AGING_BUCKET_LABEL, agingBucket, type AgingBucket } from '@/lib/arAging'
 import { formatCents } from '@/lib/invoiceBuild'
-import { cn } from '@/lib/utils'
 import { PayCarrierDialog } from '@/features/ap/components/PayCarrierDialog'
 import { ApCreditDialog } from '@/features/ap/components/ApCreditDialog'
 import { SendRemittanceDialog } from '@/features/ap/components/SendRemittanceDialog'
+import type { TmsTone } from '@/features/tms/kit'
 import type { ApPaymentRecord, CarrierBillRecord } from '@/types/tms'
 
 /** Late money gets a loud chip; everything inside terms is quiet. */
-const BUCKET_TONE: Record<AgingBucket, string> = {
-  CURRENT: 'border-border text-muted-foreground',
-  D1_30: 'border-amber-500/40 text-amber-700',
-  D31_60: 'border-amber-500/40 text-amber-700',
-  D61_90: 'border-destructive/40 text-destructive',
-  D91_PLUS: 'border-destructive/40 text-destructive',
+const BUCKET_TONE: Record<AgingBucket, TmsTone> = {
+  CURRENT: 'gray',
+  D1_30: 'orange',
+  D31_60: 'orange',
+  D61_90: 'red',
+  D91_PLUS: 'red',
 }
 
 const KIND_LABEL: Record<ApPaymentRecord['kind'], string> = {
@@ -74,49 +73,61 @@ export function CarrierApTab({
   open.sort((a, b) => a.dueAt.localeCompare(b.dueAt))
 
   return (
-    <div className="space-y-6" data-testid="carrier-ap">
-      <div className="flex flex-wrap items-center gap-3">
-        <div>
-          <p className="text-xs uppercase tracking-wider text-muted-foreground">Open AP</p>
-          <p className="text-lg font-semibold">{formatCents(openCents)}</p>
+    <div className="flex flex-col gap-4" data-testid="carrier-ap">
+      <TmsCard
+        title="Carrier AP"
+        actions={
+          <>
+            <TmsButton variant="primary" size="sm" onClick={() => setDialog({ kind: 'pay' })}>
+              <Banknote size={14} />Pay carrier
+            </TmsButton>
+            <TmsButton size="sm" onClick={() => setDialog({ kind: 'credit' })}>
+              <Plus size={14} />New credit
+            </TmsButton>
+          </>
+        }
+      >
+        <div className="flex flex-wrap items-center gap-6">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-wider tms-muted">Open AP</p>
+            <p className="text-lg font-semibold">{formatCents(openCents)}</p>
+          </div>
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-wider tms-muted">Unapplied credit</p>
+            <p
+              className="text-lg font-semibold"
+              style={unappliedCents > 0 ? { color: 'var(--tms-badge-green)' } : undefined}
+            >
+              {formatCents(unappliedCents)}
+            </p>
+          </div>
         </div>
-        <div>
-          <p className="text-xs uppercase tracking-wider text-muted-foreground">Unapplied credit</p>
-          <p className={cn('text-lg font-semibold', unappliedCents > 0 && 'text-emerald-700')}>
-            {formatCents(unappliedCents)}
-          </p>
-        </div>
-        <div className="ml-auto flex gap-2">
-          <Button size="sm" className="h-8" onClick={() => setDialog({ kind: 'pay' })}>
-            <Banknote size={14} className="mr-1" />Pay carrier
-          </Button>
-          <Button size="sm" variant="outline" className="h-8" onClick={() => setDialog({ kind: 'credit' })}>
-            <Plus size={14} className="mr-1" />New credit
-          </Button>
-        </div>
-      </div>
 
-      {error && <p className="text-xs text-destructive">{error}</p>}
-      {loading && <p className="text-sm text-muted-foreground">Loading AP…</p>}
+        {error && <p className="mt-2 text-xs" style={{ color: 'var(--tms-badge-red)' }}>{error}</p>}
+        {loading && <p className="mt-2 tms-muted">Loading AP…</p>}
+      </TmsCard>
 
-      <section>
-        <h3 className="mb-2 text-sm font-semibold">Open bills</h3>
+      <TmsCard title="Open bills">
         {open.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Nothing outstanding.</p>
+          <p className="tms-muted">Nothing outstanding.</p>
         ) : (
-          <div className="space-y-1">
+          <div className="flex flex-col gap-1">
             {open.map((bill) => {
               const bucket = agingBucket(bill.dueAt, asOf)
               return (
-                <div key={bill.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-border p-2 text-sm">
-                  <Link to={`/ap/bills/${bill.id}`} className="font-medium underline underline-offset-2">
+                <div
+                  key={bill.id}
+                  className="flex flex-wrap items-center gap-2 p-2"
+                  style={{ border: '1px solid var(--tms-border)', borderRadius: 'var(--tms-radius)' }}
+                >
+                  <Link to={`/tms/invoicing/payable/bills/${bill.id}`} className="font-medium">
                     {bill.billNumber ?? bill.id}
                   </Link>
-                  <Badge variant="outline" className="text-[10px]">{STATUS_LABEL[bill.status]}</Badge>
-                  <Badge variant="outline" className={cn('text-[10px]', BUCKET_TONE[bucket])}>
+                  <TmsBadge tone="gray">{STATUS_LABEL[bill.status]}</TmsBadge>
+                  <TmsBadge tone={BUCKET_TONE[bucket]}>
                     {bucket === 'CURRENT' ? 'Current' : `${AGING_BUCKET_LABEL[bucket]} days late`}
-                  </Badge>
-                  <span className="text-xs text-muted-foreground">
+                  </TmsBadge>
+                  <span className="text-xs tms-muted">
                     {bill.shipmentNumber ? `${bill.shipmentNumber} · ` : ''}recorded {bill.billDate} · due {bill.dueAt}
                   </span>
                   <span className="ml-auto tabular-nums">{formatCents(bill.netCents)}</span>
@@ -126,46 +137,44 @@ export function CarrierApTab({
             })}
           </div>
         )}
-      </section>
+      </TmsCard>
 
-      <section>
-        <h3 className="mb-2 text-sm font-semibold">Payments &amp; credits</h3>
+      <TmsCard title="Payments & credits">
         {payments.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Nothing posted yet.</p>
+          <p className="tms-muted">Nothing posted yet.</p>
         ) : (
-          <div className="space-y-1">
+          <div className="flex flex-col gap-1">
             {payments.map((row) => (
-              <div key={row.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-border p-2 text-sm">
-                <Badge variant="outline" className="text-[10px]">{KIND_LABEL[row.kind]}</Badge>
-                {row.reversedByPaymentId && <Badge variant="outline" className="text-[10px]">reversed</Badge>}
-                <span className="text-xs text-muted-foreground">
+              <div
+                key={row.id}
+                className="flex flex-wrap items-center gap-2 p-2"
+                style={{ border: '1px solid var(--tms-border)', borderRadius: 'var(--tms-radius)' }}
+              >
+                <TmsBadge tone="gray">{KIND_LABEL[row.kind]}</TmsBadge>
+                {row.reversedByPaymentId && <TmsBadge tone="gray">reversed</TmsBadge>}
+                <span className="text-xs tms-muted">
                   {row.paidAt.slice(0, 10)}
                   {row.method ? ` · ${row.method.toLowerCase()}` : ''}
                   {row.reference ? ` · ${row.reference}` : ''}
                 </span>
                 <span className="ml-auto tabular-nums">{formatCents(row.amountCents)}</span>
-                <span className="w-24 text-right text-xs text-muted-foreground tabular-nums">
+                <span className="w-24 text-right text-xs tms-muted tabular-nums">
                   applied {formatCents(row.appliedCents)}
                 </span>
                 <span className="w-28 text-right text-xs tabular-nums">
                   {row.unappliedCents > 0 && !row.reversedByPaymentId ? `${formatCents(row.unappliedCents)} unapplied` : ''}
                 </span>
                 {row.kind === 'PAYMENT' && !row.reversedByPaymentId && (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="h-7"
-                    onClick={() => setDialog({ kind: 'remittance', payment: row })}
-                  >
-                    <Mail size={13} className="mr-1" />
+                  <TmsButton variant="ghost" size="sm" onClick={() => setDialog({ kind: 'remittance', payment: row })}>
+                    <Mail size={13} />
                     {row.remittanceSentAt || row.markedSentAt ? 'Remittance again' : 'Remittance'}
-                  </Button>
+                  </TmsButton>
                 )}
               </div>
             ))}
           </div>
         )}
-      </section>
+      </TmsCard>
 
       {dialog?.kind === 'pay' && (
         <PayCarrierDialog

@@ -1,8 +1,6 @@
 import { useState, useCallback, useRef } from 'react'
 import { MapPin, Loader2 } from 'lucide-react'
-import { Label } from '@/components/ui/label'
-import { Input } from '@/components/ui/input'
-import { Button } from '@/components/ui/button'
+import { TmsButton, TmsInput } from '@/features/tms/kit'
 import type { GeocodeResult, AutocompleteSuggestion, Address } from '@/types/tms'
 import { autocompleteAddress, getPlaceDetails, geocodeAddress } from '@/lib/apiClient'
 
@@ -81,35 +79,44 @@ export function AddressAutocomplete({
   }
 
   return (
-    <div className="space-y-1.5">
-      {label && <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{label}</Label>}
-      <div className="relative">
-        <div className="flex gap-2">
-          <div className="relative flex-1">
-            <Input
+    <div className="tms-field">
+      {label && <span className="tms-field-label">{label}</span>}
+      <div style={{ position: 'relative' }}>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <div style={{ position: 'relative', flex: 1 }}>
+            <TmsInput
               value={query}
               onChange={(e) => { setQuery(e.target.value); void fetchSuggestions(e.target.value) }}
               onFocus={onFocus}
               onBlur={onBlur}
               placeholder="Search address (Google Places)"
-              className="h-9 text-sm"
             />
-            {loading && <Loader2 className="absolute right-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground animate-spin" />}
+            {loading && (
+              <Loader2
+                className="tms-muted"
+                size={14}
+                style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)' }}
+              />
+            )}
           </div>
-          <Button type="button" variant="outline" size="sm" className="h-9 px-2" onClick={geocodeCurrent} disabled={geocoding || !query.trim()}>
-            {geocoding ? <Loader2 className="size-3.5 animate-spin" /> : <MapPin className="size-3.5" />}
-          </Button>
+          <TmsButton aria-label="Geocode this address" onClick={geocodeCurrent} disabled={geocoding || !query.trim()}>
+            {geocoding ? <Loader2 size={14} /> : <MapPin size={14} />}
+          </TmsButton>
         </div>
         {suggestions.length > 0 && (
           <ul
-            className="absolute z-50 left-0 right-0 mt-1 max-h-48 overflow-auto rounded-md border bg-popover text-popover-foreground shadow-md"
+            style={{
+              position: 'absolute', zIndex: 50, left: 0, right: 0, marginTop: 4, maxHeight: 192, overflow: 'auto',
+              borderRadius: 'var(--tms-radius)', border: '1px solid var(--tms-border)', background: 'var(--tms-card)',
+              color: 'var(--tms-text)', listStyle: 'none', padding: 0,
+            }}
             onMouseDown={(e) => e.preventDefault()}
           >
             {suggestions.map((s) => (
               <li key={s.placeId}>
                 <button
                   type="button"
-                  className="w-full px-3 py-2 text-left text-sm hover:bg-accent hover:text-accent-foreground"
+                  style={{ width: '100%', padding: '8px 12px', textAlign: 'left', fontSize: 13, background: 'none', border: 'none', color: 'inherit', cursor: 'pointer' }}
                   onClick={() => void applyPlace(s.placeId)}
                 >
                   {s.description}
@@ -119,10 +126,8 @@ export function AddressAutocomplete({
           </ul>
         )}
       </div>
-      {(error || fetchError) && <p className="text-xs text-destructive">{error || fetchError}</p>}
-      {address?.formattedAddress && (
-        <p className="text-xs text-muted-foreground">{address.formattedAddress}</p>
-      )}
+      {(error || fetchError) && <span className="tms-field-error">{error || fetchError}</span>}
+      {address?.formattedAddress && <span className="tms-field-hint">{address.formattedAddress}</span>}
     </div>
   )
 }

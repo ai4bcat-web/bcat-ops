@@ -11,6 +11,7 @@
  */
 import { CARRIER_STATUS_LABELS, effectiveCarrierStatus } from '@/lib/carrierStatus'
 import { insuranceState, type InsuranceState } from '@/lib/carrierEligibility'
+import type { TmsTone } from '@/features/tms/kit'
 import type {
   CarrierDocumentRecord,
   CarrierRecord,
@@ -40,11 +41,12 @@ export const DEFAULT_REQUIRED_CARRIER_DOCS = ['COI_CARGO', 'COI_AUTO', 'W9', 'CA
 
 export const DEFAULT_INSURANCE_WARN_DAYS = 30
 
-export const INSURANCE_STATE_STYLES: Record<InsuranceState, string> = {
-  UPCOMING: 'bg-slate-100 text-slate-700',
-  ACTIVE: 'bg-emerald-100 text-emerald-700',
-  EXPIRING: 'bg-amber-100 text-amber-700',
-  EXPIRED: 'bg-red-100 text-red-700',
+/** Insurance states onto the kit's badge colours. */
+export const INSURANCE_STATE_TONE: Record<InsuranceState, TmsTone> = {
+  UPCOMING: 'gray',
+  ACTIVE: 'green',
+  EXPIRING: 'orange',
+  EXPIRED: 'red',
 }
 
 /**

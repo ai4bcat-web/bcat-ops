@@ -11,17 +11,17 @@
  * The example beside the counter is built the way the Lambda builds a number —
  * prefix plus the counter zero-padded to six — so what an admin reads here is what
  * the next shipment is actually called.
+ *
+ * `cancelDeleteAdminOnly` keeps its stored name; what it gates on screen is cancel
+ * and **void**. A PRO number is permanent — nothing deletes a shipment.
  */
 import { useEffect, useState } from 'react'
 import { Package, Save } from 'lucide-react'
 import { toast } from 'sonner'
-import { Button } from '@/components/ui/button'
-import { Checkbox } from '@/components/ui/checkbox'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { TmsButton, TmsField, TmsInput, TmsSelect } from '@/features/tms/kit'
 import { getTmsSettings, saveShipmentSettings } from '@/lib/apiClient'
 import type { ShipmentMode, TmsSettings } from '@/types/tms'
+import { CheckRow, ErrorText, Loading, SettingsCard, Stack } from './settingsKit'
 
 const SHIPMENT_MODES: ShipmentMode[] = [
   'FTL', 'PTL', 'BULK', 'DRAYAGE', 'INTERMODAL', 'RLTL', 'LTL', 'AIR', 'OCEAN', 'RAIL',
@@ -29,11 +29,6 @@ const SHIPMENT_MODES: ShipmentMode[] = [
 
 /** No mode at all is a real answer: the customer's own default decides. */
 const NO_MODE = '__NONE__'
-
-/** The number the Lambda would mint next: prefix + the counter, padded to six. */
-function shipmentNumberPreview(prefix: string, next: number): string {
-  return `${prefix.trim() || 'S'}${String(next).padStart(6, '0')}`
-}
 
 export function ShipmentSettingsCard() {
   const [loading, setLoading] = useState(true)
@@ -69,7 +64,9 @@ export function ShipmentSettingsCard() {
 
   const typedNext = nextNumber.trim() ? Number(nextNumber.trim()) : null
   const nextValid = typedNext === null || (Number.isInteger(typedNext) && typedNext >= 0)
-  const preview = shipmentNumberPreview(prefix, nextValid && typedNext !== null ? typedNext : currentNumber || 1)
+  // The number the Lambda would mint next: prefix + the counter, padded to six.
+  const counter = nextValid && typedNext !== null ? typedNext : currentNumber || 1
+  const preview = `${prefix.trim() || 'S'}${String(counter).padStart(6, '0')}`
 
   const save = async () => {
     setError(null)
@@ -98,109 +95,94 @@ export function ShipmentSettingsCard() {
   }
 
   return (
-    <div style={{ border: '1px solid var(--ds-border)', borderRadius: 12, background: 'var(--ds-surface)', padding: 16, boxShadow: 'var(--sh-sm)', display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <div className="flex items-center gap-2.5">
-        <Package size={16} style={{ color: 'var(--ds-t3)' }} />
-        <div>
-          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)' }}>Shipments</div>
-          <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 2 }}>
-            How shipments are numbered, what mode they start in, who may cancel one, and what the AR and AP boards call their first rung.
-          </div>
-        </div>
-      </div>
-
-      {loading ? <div className="text-sm text-muted-foreground">Loading…</div> : (
-        <div className="space-y-3">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Shipment prefix</Label>
-              <Input
+    <SettingsCard
+      icon={Package}
+      title="Shipments"
+      description="How shipments are numbered, what mode they start in, who may cancel one, and what the AR and AP boards call their first rung."
+    >
+      {loading ? <Loading /> : (
+        <Stack>
+          <div className="tms-grid tms-grid-2">
+            <TmsField label="Shipment prefix" hint="Up to 8 letters, numbers or dashes.">
+              <TmsInput
                 aria-label="Shipment prefix"
                 value={prefix}
                 onChange={(e) => setPrefix(e.target.value)}
                 placeholder="S"
-                className="h-9 text-sm"
               />
-              <p className="mt-1 text-xs text-muted-foreground">
-                Up to 8 letters, numbers or dashes.
-              </p>
-            </div>
-            <div>
-              <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Next shipment number</Label>
-              <Input
+            </TmsField>
+            <TmsField
+              label="Next shipment number"
+              hint={
+                <>
+                  The counter only goes forward — it is taken with an atomic add, so setting it back would mint a number a live shipment already has.{' '}
+                  Next shipment: <strong data-testid="shipment-number-example">{preview}</strong>
+                </>
+              }
+            >
+              <TmsInput
                 aria-label="Next shipment number"
                 inputMode="numeric"
                 value={nextNumber}
                 onChange={(e) => setNextNumber(e.target.value)}
                 placeholder={String(currentNumber)}
-                className="h-9 text-sm"
               />
-              <p className="mt-1 text-xs text-muted-foreground">
-                The counter only goes forward — it is taken with an atomic add, so setting it back would mint a number a live shipment already has.{' '}
-                Next shipment: <span className="font-medium text-foreground" data-testid="shipment-number-example">{preview}</span>
-              </p>
-            </div>
+            </TmsField>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Default mode</Label>
-              <Select value={defaultMode} onValueChange={setDefaultMode}>
-                <SelectTrigger className="h-9 text-sm" aria-label="Default mode"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={NO_MODE}>— the customer&rsquo;s own default —</SelectItem>
-                  {SHIPMENT_MODES.map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}
-                </SelectContent>
-              </Select>
-              <p className="mt-1 text-xs text-muted-foreground">
-                What a new shipment starts as when the customer has no default of their own.
-              </p>
-            </div>
-            <label className="flex items-end gap-2.5 pb-1 text-sm" style={{ color: 'var(--ds-t2)' }}>
-              <Checkbox
-                aria-label="Cancel and delete admin only"
+          <div className="tms-grid tms-grid-2">
+            <TmsField
+              label="Default mode"
+              hint="What a new shipment starts as when the customer has no default of their own."
+            >
+              <TmsSelect aria-label="Default mode" value={defaultMode} onChange={(e) => setDefaultMode(e.target.value)}>
+                <option value={NO_MODE}>— the customer&rsquo;s own default —</option>
+                {SHIPMENT_MODES.map((m) => <option key={m} value={m}>{m}</option>)}
+              </TmsSelect>
+            </TmsField>
+            <div style={{ display: 'flex', alignItems: 'flex-end', paddingBottom: 6 }}>
+              <CheckRow
+                ariaLabel="Cancel and void admin only"
+                label="Only an admin may cancel or void a shipment"
                 checked={cancelDeleteAdminOnly}
-                onCheckedChange={(v) => setCancelDeleteAdminOnly(v === true)}
+                onChange={setCancelDeleteAdminOnly}
               />
-              Only an admin may cancel or delete a shipment
-            </label>
+            </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">AR unbilled stage</Label>
-              <Input
+          <div className="tms-grid tms-grid-2">
+            <TmsField
+              label="AR unbilled stage"
+              hint="What the AR board calls delivered freight that has not been invoiced yet."
+            >
+              <TmsInput
                 aria-label="AR unbilled stage"
                 value={arUnbilledStage}
                 onChange={(e) => setArUnbilledStage(e.target.value)}
                 placeholder="To invoice"
-                className="h-9 text-sm"
               />
-              <p className="mt-1 text-xs text-muted-foreground">
-                What the AR board calls delivered freight that has not been invoiced yet.
-              </p>
-            </div>
-            <div>
-              <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">AP in-review stage</Label>
-              <Input
+            </TmsField>
+            <TmsField
+              label="AP in-review stage"
+              hint="What the AP board calls a carrier bill that is recorded but not approved to pay."
+            >
+              <TmsInput
                 aria-label="AP in review stage"
                 value={apInReviewStage}
                 onChange={(e) => setApInReviewStage(e.target.value)}
                 placeholder="In review"
-                className="h-9 text-sm"
               />
-              <p className="mt-1 text-xs text-muted-foreground">
-                What the AP board calls a carrier bill that is recorded but not approved to pay.
-              </p>
-            </div>
+            </TmsField>
           </div>
 
-          {error && <p className="text-xs text-destructive">{error}</p>}
-          <Button type="button" size="sm" className="h-8 gap-1" onClick={save} disabled={saving}>
-            <Save className="size-3.5" /> Save shipment settings
-          </Button>
-        </div>
+          {error && <ErrorText>{error}</ErrorText>}
+          <div>
+            <TmsButton variant="primary" size="sm" onClick={save} disabled={saving}>
+              <Save size={14} /> Save shipment settings
+            </TmsButton>
+          </div>
+        </Stack>
       )}
-    </div>
+    </SettingsCard>
   )
 }

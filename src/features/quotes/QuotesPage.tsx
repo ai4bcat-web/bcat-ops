@@ -1,5 +1,5 @@
 /**
- * `/quotes` — the quote desk (spec §6.6 sell side, §6.5 buy side).
+ * `/tms/rates` — the quote desk (spec §6.6 sell side, §6.5 buy side).
  *
  * Six tabs that follow one number from "somebody asked" to "we hauled it": what nobody
  * has priced, what is sitting with a customer, what came back, what was never sent, how
@@ -17,10 +17,12 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { FileText, Link2, Plus, RefreshCw } from 'lucide-react'
+import { Link2 } from 'lucide-react'
 import { toast } from 'sonner'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
+import {
+  TmsBadge, TmsButton, TmsDialog, TmsField, TmsListPage, TmsSelect,
+} from '@/features/tms/kit'
+import type { ColumnDef, TmsTone } from '@/features/tms/kit'
 import { useQuoteWorklist } from '@/hooks/useQuoteWorklist'
 import {
   acceptCounter, getTmsSettings, graphqlErrorText, listQuotesByMonth, rejectOffer, restoreQuote,
@@ -28,7 +30,6 @@ import {
 import { chicagoDateStr, formatDateTime } from '@/lib/date'
 import { formatCents } from '@/lib/invoiceBuild'
 import { quoteState } from '@/lib/quotes'
-import { cn } from '@/lib/utils'
 import { lastThreeMonths, monthLabel } from '@/features/ar/arViews'
 import {
   LOST_REASON_LABEL, QUOTE_TABS, ageHours, expiryChip, marginChip, quoteLinkUrl, quoteTabCounts,
@@ -50,20 +51,16 @@ type QuotesDialog =
   | { kind: 'markLost'; quote: QuoteRecord }
   | { kind: 'acceptOffer'; quote: QuoteRecord }
 
-const TH = 'px-2 py-2 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground'
-const TD = 'px-2 py-2 align-top'
-const MONEY = 'px-2 py-2 text-right tabular-nums align-top'
-
-const CHIP_VARIANT: Record<QuoteChip['tone'], 'default' | 'secondary' | 'destructive' | 'outline'> = {
-  muted: 'outline',
-  warn: 'secondary',
-  danger: 'destructive',
-  good: 'outline',
+const CHIP_TONE: Record<QuoteChip['tone'], TmsTone> = {
+  muted: 'gray',
+  warn: 'orange',
+  danger: 'red',
+  good: 'green',
 }
 
 function Chip({ chip }: { chip: QuoteChip | null }) {
   if (!chip) return null
-  return <Badge variant={CHIP_VARIANT[chip.tone]} className="ml-1 text-[10px]">{chip.text}</Badge>
+  return <TmsBadge tone={CHIP_TONE[chip.tone]}>{chip.text}</TmsBadge>
 }
 
 /** `Chicago, IL → Danville, IL` off whatever the row knows about its lane. */
@@ -81,6 +78,23 @@ function dayText(iso: string | null | undefined): string {
   return iso ? formatDateTime(iso) : '—'
 }
 
+const MONEY_CELL: React.CSSProperties = { display: 'block', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }
+const ACTIONS_CELL: React.CSSProperties = { display: 'flex', justifyContent: 'flex-end', gap: 4, whiteSpace: 'nowrap' }
+
+/** The quote number, always a link to the one page that can change it. */
+function QuoteLink({ quote }: { quote: QuoteRecord }) {
+  return <Link to={`/tms/rates/${quote.id}`}>{quote.id}</Link>
+}
+
+const EMPTY_TEXT: Record<QuoteTabKey, string> = {
+  'to-price': 'Nothing is waiting to be priced.',
+  sent: 'No quote is sitting with a customer.',
+  replies: 'Nobody has come back to us.',
+  drafts: 'No draft is waiting to go out.',
+  'won-lost': 'Nothing closed in this month.',
+  offers: 'No offer is out with a carrier.',
+}
+
 export function QuotesPage() {
   // One clock for the whole board: every chip, every gate and the strip answer as of the
   // same instant, so a row cannot read "Expires in 1h" beside a disabled Convert.
@@ -93,6 +107,9 @@ export function QuotesPage() {
   const [dialog, setDialog] = useState<QuotesDialog | null>(null)
   const [busy, setBusy] = useState(false)
   const [marginFloorBps, setMarginFloorBps] = useState<number | null>(null)
+  const [query, setQuery] = useState('')
+  const [filtersOpen, setFiltersOpen] = useState(false)
+  const [pageSize, setPageSize] = useState(50)
 
   const months = useMemo(() => lastThreeMonths(asOf), [asOf])
   const [month, setMonth] = useState(() => months[0])
@@ -178,142 +195,406 @@ export function QuotesPage() {
   const lostFacets = useMemo(() => {
     const seen: string[] = []
     for (const quote of rows['won-lost']) {
-      if (quote.lostReason && !seen.includes(quote.lostReason)) seen.push(quote.lostReason)
+      if (quote.lostReason && seen.includes(quote.lostReason) === false) seen.push(quote.lostReason)
     }
     return seen
   }, [rows])
 
-  const closedRows = lostFacet
-    ? rows['won-lost'].filter((quote) => quote.lostReason === lostFacet)
-    : rows['won-lost']
+  const tabRows = useMemo(() => {
+    const base = tab === 'won-lost'
+      ? (lostFacet ? rows['won-lost'].filter((quote) => quote.lostReason === lostFacet) : rows['won-lost'])
+      : rows[tab]
+    const q = query.trim().toLowerCase()
+    if (q.length === 0) return base
+    return base.filter((quote) => [
+      quote.id, quote.customerName, quote.carrierName, quote.shipmentNumber, quote.loadNumber, laneText(quote),
+    ].some((v) => (v ?? '').toLowerCase().includes(q)))
+  }, [tab, rows, lostFacet, query])
+
+  const pageRows = useMemo(() => tabRows.slice(0, pageSize), [tabRows, pageSize])
+
+  /* ── Columns, one set per tab; every row is a QuoteRecord. ───────────────── */
+
+  const quoteCol: ColumnDef<QuoteRecord> = { key: 'quote', header: 'QUOTE', width: 120, render: (q) => <QuoteLink quote={q} /> }
+  const customerCol: ColumnDef<QuoteRecord> = { key: 'customer', header: 'CUSTOMER', width: 180, render: (q) => q.customerName || '—' }
+  const laneCol: ColumnDef<QuoteRecord> = { key: 'lane', header: 'LANE', width: 220, render: (q) => laneText(q) }
+
+  const columnsByTab: Record<QuoteTabKey, Array<ColumnDef<QuoteRecord>>> = {
+    'to-price': [
+      quoteCol, customerCol, laneCol,
+      { key: 'pickup', header: 'PICK UP', width: 170, render: (q) => dayText(q.pickupAppt) },
+      { key: 'equipment', header: 'EQUIPMENT', width: 130, render: (q) => q.equipmentType || '—' },
+      {
+        key: 'age',
+        header: 'AGE',
+        width: 90,
+        render: (q) => { const age = ageHours(q, now); return age === null ? '—' : `${Math.round(age)}h` },
+      },
+      {
+        key: 'actions',
+        header: '',
+        width: 120,
+        render: (q) => (
+          <div style={ACTIONS_CELL}>
+            <Link className="tms-btn tms-btn-secondary tms-btn-sm" to={`/tms/rates/${q.id}`} aria-label={`Price quote ${q.id}`}>Price</Link>
+          </div>
+        ),
+      },
+    ],
+    sent: [
+      quoteCol, customerCol, laneCol,
+      {
+        key: 'amount',
+        header: 'AMOUNT',
+        width: 150,
+        render: (q) => (
+          <span style={MONEY_CELL}>
+            {formatCents(q.amountCents)} <Chip chip={marginChip(q, marginFloorBps)} />
+          </span>
+        ),
+      },
+      { key: 'expires', header: 'EXPIRES', width: 130, render: (q) => <Chip chip={expiryChip(q, now)} /> },
+      {
+        key: 'sent',
+        header: 'LAST SENT',
+        width: 180,
+        render: (q) => (
+          <span>
+            {dayText(q.sentAt)}
+            {q.lastSendStatus === 'NOT_SENT' && <TmsBadge tone="red">Not sent</TmsBadge>}
+          </span>
+        ),
+      },
+      {
+        key: 'link',
+        header: 'LINK',
+        width: 130,
+        render: (q) => <span className="tms-muted" style={{ fontSize: 12 }}>{q.linkToken ? `Live · round ${q.rounds}` : 'Spent'}</span>,
+      },
+      {
+        key: 'actions',
+        header: '',
+        width: 330,
+        render: (q) => {
+          const state = quoteState(q, now)
+          return (
+            <div style={ACTIONS_CELL}>
+              <TmsButton
+                variant="ghost"
+                size="sm"
+                aria-label={`Copy link for ${q.id}`}
+                disabled={busy || q.linkToken == null}
+                onClick={() => copyLink(q)}
+              >
+                <Link2 size={13} /> Copy link
+              </TmsButton>
+              {state.canSend && (
+                <TmsButton variant="ghost" size="sm" aria-label={`Re-send ${q.id}`} disabled={busy} onClick={() => setDialog({ kind: 'send', quote: q })}>
+                  Re-send
+                </TmsButton>
+              )}
+              {state.canConvert && (
+                <TmsButton variant="ghost" size="sm" aria-label={`Convert ${q.id}`} disabled={busy} onClick={() => setDialog({ kind: 'convert', quote: q })}>
+                  Convert
+                </TmsButton>
+              )}
+              {state.canMarkLost && (
+                <TmsButton variant="ghost" size="sm" aria-label={`Mark ${q.id} lost`} disabled={busy} onClick={() => setDialog({ kind: 'markLost', quote: q })}>
+                  Mark lost
+                </TmsButton>
+              )}
+            </div>
+          )
+        },
+      },
+    ],
+    replies: [
+      quoteCol, customerCol,
+      { key: 'ours', header: 'OURS', width: 120, render: (q) => <span style={MONEY_CELL}>{formatCents(q.amountCents)}</span> },
+      {
+        key: 'theirs',
+        header: 'THEIRS',
+        width: 120,
+        render: (q) => {
+          const theirs = theirNumberCents(q)
+          return <span style={{ ...MONEY_CELL, fontWeight: 600 }}>{theirs === null ? '—' : formatCents(theirs)}</span>
+        },
+      },
+      {
+        key: 'message',
+        header: 'MESSAGE',
+        width: 260,
+        render: (q) => {
+          const lastEvent = (q.events ?? []).filter((e) => e.note).slice(-1)[0] ?? null
+          return <span className="tms-muted" style={{ fontSize: 12 }}>{lastEvent?.note ?? '—'}</span>
+        },
+      },
+      {
+        key: 'answered',
+        header: 'ANSWERED BY',
+        width: 190,
+        render: (q) => (
+          <span>
+            {q.responderName || q.responderEmail || '—'}
+            <span className="tms-muted" style={{ display: 'block', fontSize: 12 }}>{dayText(q.respondedAt)}</span>
+          </span>
+        ),
+      },
+      {
+        key: 'actions',
+        header: '',
+        width: 330,
+        render: (q) => {
+          const state = quoteState(q, now)
+          return (
+            <div style={ACTIONS_CELL}>
+              {state.canConvert && (
+                <TmsButton variant="ghost" size="sm" aria-label={`Convert ${q.id}`} disabled={busy} onClick={() => setDialog({ kind: 'convert', quote: q })}>
+                  Convert
+                </TmsButton>
+              )}
+              {state.canAccept && (
+                <TmsButton variant="ghost" size="sm" aria-label={`Accept counter on ${q.id}`} disabled={busy} onClick={() => runAcceptCounter(q)}>
+                  Accept counter
+                </TmsButton>
+              )}
+              {state.canCounter && (
+                <TmsButton variant="ghost" size="sm" aria-label={`Counter ${q.id}`} disabled={busy} onClick={() => setDialog({ kind: 'counter', quote: q })}>
+                  Counter
+                </TmsButton>
+              )}
+              {state.canMarkLost && (
+                <TmsButton variant="ghost" size="sm" aria-label={`Mark ${q.id} lost`} disabled={busy} onClick={() => setDialog({ kind: 'markLost', quote: q })}>
+                  Mark lost
+                </TmsButton>
+              )}
+            </div>
+          )
+        },
+      },
+    ],
+    drafts: [
+      quoteCol, customerCol, laneCol,
+      { key: 'amount', header: 'AMOUNT', width: 120, render: (q) => <span style={MONEY_CELL}>{formatCents(q.amountCents)}</span> },
+      { key: 'written', header: 'WRITTEN', width: 130, render: (q) => q.quoteDate },
+      {
+        key: 'actions',
+        header: '',
+        width: 180,
+        render: (q) => {
+          const state = quoteState(q, now)
+          return (
+            <div style={ACTIONS_CELL}>
+              <Link className="tms-btn tms-btn-ghost tms-btn-sm" to={`/tms/rates/${q.id}`} aria-label={`Price quote ${q.id}`}>Price</Link>
+              {state.canSend && (
+                <TmsButton size="sm" aria-label={`Send ${q.id}`} disabled={busy} onClick={() => setDialog({ kind: 'send', quote: q })}>
+                  Send
+                </TmsButton>
+              )}
+            </div>
+          )
+        },
+      },
+    ],
+    'won-lost': [
+      quoteCol, customerCol, laneCol,
+      { key: 'amount', header: 'AMOUNT', width: 120, render: (q) => <span style={MONEY_CELL}>{formatCents(q.amountCents)}</span> },
+      {
+        key: 'outcome',
+        header: 'OUTCOME',
+        width: 180,
+        render: (q) => (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            {statusLabel(q)}
+            {q.lostReason && <TmsBadge tone="gray">{LOST_REASON_LABEL[q.lostReason]}</TmsBadge>}
+          </span>
+        ),
+      },
+      { key: 'closed', header: 'CLOSED', width: 170, render: (q) => dayText(q.closedAt ?? q.wonAt) },
+      {
+        key: 'actions',
+        header: '',
+        width: 200,
+        render: (q) => {
+          const state = quoteState(q, now)
+          return (
+            <div style={ACTIONS_CELL}>
+              {q.shipmentId && (
+                <Link className="tms-btn tms-btn-ghost tms-btn-sm" to={`/tms/shipments/${q.shipmentId}`} aria-label={`Shipment for ${q.id}`}>Shipment</Link>
+              )}
+              {state.canRestore && (
+                <TmsButton variant="ghost" size="sm" aria-label={`Restore ${q.id}`} disabled={busy} onClick={() => runRestore(q)}>
+                  Restore
+                </TmsButton>
+              )}
+            </div>
+          )
+        },
+      },
+    ],
+    offers: [
+      {
+        key: 'shipment',
+        header: 'SHIPMENT',
+        width: 150,
+        render: (q) => (q.shipmentId
+          ? <Link to={`/tms/shipments/${q.shipmentId}`}>{q.shipmentNumber ?? q.loadNumber ?? q.shipmentId}</Link>
+          : q.loadNumber ?? '—'),
+      },
+      {
+        key: 'carrier',
+        header: 'CARRIER',
+        width: 200,
+        render: (q) => (
+          <span>
+            {q.carrierName || '—'}
+            {q.carrierMc && <span className="tms-muted" style={{ marginLeft: 4, fontSize: 12 }}>MC {q.carrierMc}</span>}
+          </span>
+        ),
+      },
+      { key: 'ours', header: 'OURS', width: 120, render: (q) => <span style={MONEY_CELL}>{formatCents(q.amountCents)}</span> },
+      {
+        key: 'theirs',
+        header: 'THEIRS',
+        width: 120,
+        render: (q) => {
+          const theirs = theirNumberCents(q)
+          return <span style={{ ...MONEY_CELL, fontWeight: 600 }}>{theirs === null ? '—' : formatCents(theirs)}</span>
+        },
+      },
+      { key: 'status', header: 'STATUS', width: 150, render: (q) => statusLabel(q) },
+      { key: 'expires', header: 'EXPIRES', width: 130, render: (q) => <Chip chip={expiryChip(q, now)} /> },
+      { key: 'move', header: 'WHOSE MOVE', width: 150, render: (q) => whoseMoveLabel(q, now) },
+      {
+        key: 'actions',
+        header: '',
+        width: 330,
+        render: (q) => {
+          const actions = offerActions(q, now)
+          return (
+            <div style={ACTIONS_CELL}>
+              {actions.canAccept && (
+                <TmsButton variant="ghost" size="sm" aria-label={`Accept offer ${q.id}`} disabled={busy} onClick={() => setDialog({ kind: 'acceptOffer', quote: q })}>
+                  Accept
+                </TmsButton>
+              )}
+              {actions.canCounter && (
+                <TmsButton variant="ghost" size="sm" aria-label={`Counter offer ${q.id}`} disabled={busy} onClick={() => setDialog({ kind: 'counter', quote: q })}>
+                  Counter
+                </TmsButton>
+              )}
+              {actions.canReject && (
+                <TmsButton variant="ghost" size="sm" aria-label={`Reject offer ${q.id}`} disabled={busy} onClick={() => runRejectOffer(q)}>
+                  Reject
+                </TmsButton>
+              )}
+              <TmsButton
+                variant="ghost"
+                size="sm"
+                aria-label={`Copy link for ${q.id}`}
+                disabled={busy || actions.canCopyLink === false}
+                onClick={() => copyLink(q)}
+              >
+                <Link2 size={13} /> Copy link
+              </TmsButton>
+            </div>
+          )
+        },
+      },
+    ],
+  }
+
+  const banner = (
+    <section aria-label="Quote totals" className="tms-grid tms-grid-4">
+      <Totals label="Open quotes" value={formatCents(totals.openCents)} note={`${totals.openCount} live`} />
+      <Totals
+        label={`Won ${monthLabel(month)}`}
+        value={formatCents(totals.wonCents)}
+        note={`${totals.wonCount} quote${totals.wonCount === 1 ? '' : 's'}`}
+      />
+      <Totals
+        label="Win rate"
+        value={`${totals.winRatePct}%`}
+        note={`${totals.wonCount} won / ${totals.lostCount} lost`}
+      />
+      <Totals
+        label="Median hours to reply"
+        value={totals.medianReplyHours === null ? '—' : `${totals.medianReplyHours}h`}
+        note={totals.medianReplyHours === null ? 'nobody has answered yet' : 'from send to answer'}
+      />
+    </section>
+  )
+
+  const chips = tab === 'won-lost'
+    ? [
+      { key: 'month', label: 'Month is', value: monthLabel(month), onClick: () => setFiltersOpen(true) },
+      {
+        key: 'outcome',
+        label: 'Outcome is',
+        value: lostFacet ? (LOST_REASON_LABEL[lostFacet as keyof typeof LOST_REASON_LABEL] ?? lostFacet) : null,
+        onClick: () => setFiltersOpen(true),
+      },
+    ]
+    : []
 
   return (
-    <div className="flex h-full flex-col">
-      <header className="flex flex-wrap items-center gap-2 border-b border-border px-5 py-3">
-        <FileText size={18} />
-        <h1 className="text-lg font-semibold">Quotes</h1>
-        <Badge variant="outline">{formatCents(totals.openCents)} open</Badge>
-        <Badge variant="outline">{totals.openCount} on the table</Badge>
-        <Button asChild size="sm" className="ml-auto">
-          <Link to="/quotes/new" aria-label="New quote"><Plus size={14} /> New quote</Link>
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-9 w-9"
-          aria-label="Refresh quotes"
-          onClick={() => void refreshAll()}
-        >
-          <RefreshCw size={14} className={worklist.loading ? 'animate-spin' : undefined} />
-        </Button>
-      </header>
+    <>
+      <TmsListPage<QuoteRecord>
+        title="Rates"
+        primaryAction={{ label: 'Quote', onClick: () => navigate('/tms/rates/new') }}
+        actions={
+          <Link className="tms-btn tms-btn-secondary" to="/tms/rates/lanes">Lane rates</Link>
+        }
+        search={{ value: query, onChange: setQuery, placeholder: 'Search quotes, customers, lanes' }}
+        onRefresh={() => void refreshAll()}
+        filterChips={chips}
+        onAddFilter={tab === 'won-lost' ? () => setFiltersOpen(true) : undefined}
+        quickTabs={{
+          tabs: QUOTE_TABS.map((t) => ({ key: t.key, label: t.label, count: counts[t.key] })),
+          active: tab,
+          onSelect: (key) => setTab(key as QuoteTabKey),
+        }}
+        banner={banner}
+        columns={columnsByTab[tab]}
+        rows={pageRows}
+        rowKey={(q) => q.id}
+        page={{ from: pageRows.length === 0 ? 0 : 1, to: pageRows.length, total: tabRows.length, pageSize, onPageSize: setPageSize }}
+        emptyText={
+          worklist.error
+            ?? (tab === 'won-lost' && monthLoading ? `Reading ${monthLabel(month)}…` : EMPTY_TEXT[tab])
+        }
+        onClearFilters={() => { setQuery(''); setLostFacet('') }}
+      />
 
-      <section aria-label="Quote totals" className="grid grid-cols-2 gap-3 border-b border-border px-5 py-3 md:grid-cols-4">
-        <Totals label="Open quotes" value={formatCents(totals.openCents)} note={`${totals.openCount} live`} />
-        <Totals
-          label={`Won ${monthLabel(month)}`}
-          value={formatCents(totals.wonCents)}
-          note={`${totals.wonCount} quote${totals.wonCount === 1 ? '' : 's'}`}
-        />
-        <Totals
-          label="Win rate"
-          value={`${totals.winRatePct}%`}
-          note={`${totals.wonCount} won / ${totals.lostCount} lost`}
-        />
-        <Totals
-          label="Median hours to reply"
-          value={totals.medianReplyHours === null ? '—' : `${totals.medianReplyHours}h`}
-          note={totals.medianReplyHours === null ? 'nobody has answered yet' : 'from send to answer'}
-        />
-      </section>
-
-      <nav role="tablist" aria-label="Quote views" className="flex gap-1 overflow-x-auto border-b border-border px-5">
-        {QUOTE_TABS.map((t) => (
-          <button
-            key={t.key}
-            role="tab"
-            type="button"
-            aria-selected={tab === t.key}
-            aria-label={t.label}
-            onClick={() => setTab(t.key)}
-            className={cn(
-              'flex items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-2 text-sm',
-              tab === t.key ? 'border-primary font-medium text-foreground' : 'border-transparent text-muted-foreground',
-            )}
-          >
-            {t.label}
-            <Badge variant="outline" className="text-[10px]">{counts[t.key]}</Badge>
-          </button>
-        ))}
-      </nav>
-
-      {worklist.error && <p className="px-5 py-3 text-sm text-destructive">{worklist.error}</p>}
-
-      <div className="flex-1 overflow-auto px-5 py-3">
-        {tab === 'to-price' && <ToPriceTab rows={rows['to-price']} now={now} />}
-
-        {tab === 'sent' && (
-          <SentTab
-            rows={rows.sent}
-            now={now}
-            busy={busy}
-            marginFloorBps={marginFloorBps}
-            onCopyLink={copyLink}
-            onSend={(quote) => setDialog({ kind: 'send', quote })}
-            onConvert={(quote) => setDialog({ kind: 'convert', quote })}
-            onMarkLost={(quote) => setDialog({ kind: 'markLost', quote })}
-          />
-        )}
-
-        {tab === 'replies' && (
-          <RepliesTab
-            rows={rows.replies}
-            now={now}
-            busy={busy}
-            onConvert={(quote) => setDialog({ kind: 'convert', quote })}
-            onAcceptCounter={runAcceptCounter}
-            onCounter={(quote) => setDialog({ kind: 'counter', quote })}
-            onMarkLost={(quote) => setDialog({ kind: 'markLost', quote })}
-          />
-        )}
-
-        {tab === 'drafts' && (
-          <DraftsTab
-            rows={rows.drafts}
-            now={now}
-            busy={busy}
-            onSend={(quote) => setDialog({ kind: 'send', quote })}
-          />
-        )}
-
-        {tab === 'won-lost' && (
-          <WonLostTab
-            rows={closedRows}
-            months={months}
-            month={month}
-            loading={monthLoading}
-            busy={busy}
-            now={now}
-            facets={lostFacets}
-            facet={lostFacet}
-            onFacet={setLostFacet}
-            onMonth={(ym) => { setMonthLoading(true); setMonth(ym) }}
-            onRestore={runRestore}
-          />
-        )}
-
-        {tab === 'offers' && (
-          <OffersTab
-            rows={rows.offers}
-            now={now}
-            busy={busy}
-            onAccept={(quote) => setDialog({ kind: 'acceptOffer', quote })}
-            onCounter={(quote) => setDialog({ kind: 'counter', quote })}
-            onReject={runRejectOffer}
-            onCopyLink={copyLink}
-          />
-        )}
-      </div>
+      <TmsDialog
+        open={filtersOpen}
+        onOpenChange={setFiltersOpen}
+        title="Filter closed quotes"
+        footer={<TmsButton variant="primary" onClick={() => setFiltersOpen(false)}>Done</TmsButton>}
+      >
+        <div style={{ display: 'grid', gap: 14 }}>
+          <TmsField label="Month">
+            <TmsSelect
+              aria-label="Quote month"
+              value={month}
+              onChange={(e) => { setMonthLoading(true); setMonth(e.target.value) }}
+              options={months.map((ym) => ({ value: ym, label: monthLabel(ym) }))}
+            />
+          </TmsField>
+          <TmsField label="Outcome">
+            <TmsSelect
+              aria-label="Lost reason"
+              value={lostFacet}
+              onChange={(e) => setLostFacet(e.target.value)}
+              placeholder="Every outcome"
+              options={lostFacets.map((reason) => ({
+                value: reason,
+                label: LOST_REASON_LABEL[reason as keyof typeof LOST_REASON_LABEL] ?? reason,
+              }))}
+            />
+          </TmsField>
+        </div>
+      </TmsDialog>
 
       {dialog?.kind === 'send' && (
         <SendQuoteDialog
@@ -339,7 +620,7 @@ export function QuotesPage() {
           onDone={(shipmentId) => {
             setDialog(null)
             void refreshAll()
-            if (shipmentId) navigate(`/shipments/${shipmentId}`)
+            if (shipmentId) navigate(`/tms/shipments/${shipmentId}`)
           }}
         />
       )}
@@ -359,449 +640,18 @@ export function QuotesPage() {
           onDone={closeAndRefresh}
         />
       )}
-    </div>
+    </>
   )
 }
 
 function Totals({ label, value, note }: { label: string; value: string; note: string }) {
   return (
-    <div className="rounded-md border border-border bg-card px-3 py-2">
-      <div className="text-xs uppercase tracking-wider text-muted-foreground">{label}</div>
-      <div className="text-lg font-semibold tabular-nums">{value}</div>
-      <div className="text-xs text-muted-foreground">{note}</div>
-    </div>
-  )
-}
-
-/** The quote number, always a link to the one page that can change it. */
-function QuoteLink({ quote }: { quote: QuoteRecord }) {
-  return (
-    <Link className="text-primary hover:underline" to={`/quotes/${quote.id}`}>{quote.id}</Link>
-  )
-}
-
-function Empty({ columns, children }: { columns: number; children: string }) {
-  return (
-    <tr><td colSpan={columns} className="py-8 text-center text-sm text-muted-foreground">{children}</td></tr>
-  )
-}
-
-/* ── To price ────────────────────────────────────────────────────────────── */
-
-function ToPriceTab({ rows, now }: { rows: QuoteRecord[]; now: string }) {
-  return (
-    <table className="w-full text-sm">
-      <thead>
-        <tr className="border-b border-border">
-          <th className={TH} scope="col">Quote</th>
-          <th className={TH} scope="col">Customer</th>
-          <th className={TH} scope="col">Lane</th>
-          <th className={TH} scope="col">Pickup</th>
-          <th className={TH} scope="col">Equipment</th>
-          <th className={TH} scope="col">Age</th>
-          <th className={TH} scope="col"><span className="sr-only">Price</span></th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.length === 0 && <Empty columns={7}>Nothing is waiting to be priced.</Empty>}
-        {rows.map((quote) => {
-          const age = ageHours(quote, now)
-          return (
-            <tr key={quote.id} className="border-b border-border/60">
-              <td className={TD}><QuoteLink quote={quote} /></td>
-              <td className={TD}>{quote.customerName || '—'}</td>
-              <td className={TD}>{laneText(quote)}</td>
-              <td className={TD}>{dayText(quote.pickupAppt)}</td>
-              <td className={TD}>{quote.equipmentType || '—'}</td>
-              <td className={TD}>{age === null ? '—' : `${Math.round(age)}h`}</td>
-              <td className={cn(TD, 'whitespace-nowrap text-right')}>
-                <Button asChild size="sm" variant="outline">
-                  <Link to={`/quotes/${quote.id}`} aria-label={`Price quote ${quote.id}`}>Price</Link>
-                </Button>
-              </td>
-            </tr>
-          )
-        })}
-      </tbody>
-    </table>
-  )
-}
-
-/* ── Sent ────────────────────────────────────────────────────────────────── */
-
-function SentTab({ rows, now, busy, marginFloorBps, onCopyLink, onSend, onConvert, onMarkLost }: {
-  rows: QuoteRecord[]
-  now: string
-  busy: boolean
-  marginFloorBps: number | null
-  onCopyLink: (quote: QuoteRecord) => void
-  onSend: (quote: QuoteRecord) => void
-  onConvert: (quote: QuoteRecord) => void
-  onMarkLost: (quote: QuoteRecord) => void
-}) {
-  return (
-    <table className="w-full text-sm">
-      <thead>
-        <tr className="border-b border-border">
-          <th className={TH} scope="col">Quote</th>
-          <th className={TH} scope="col">Customer</th>
-          <th className={TH} scope="col">Lane</th>
-          <th className={cn(TH, 'text-right')} scope="col">Amount</th>
-          <th className={TH} scope="col">Expires</th>
-          <th className={TH} scope="col">Last sent</th>
-          <th className={TH} scope="col">Link</th>
-          <th className={TH} scope="col"><span className="sr-only">Actions</span></th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.length === 0 && <Empty columns={8}>No quote is sitting with a customer.</Empty>}
-        {rows.map((quote) => {
-          const state = quoteState(quote, now)
-          return (
-            <tr key={quote.id} className="border-b border-border/60">
-              <td className={TD}><QuoteLink quote={quote} /></td>
-              <td className={TD}>{quote.customerName || '—'}</td>
-              <td className={TD}>{laneText(quote)}</td>
-              <td className={MONEY}>
-                {formatCents(quote.amountCents)}
-                <Chip chip={marginChip(quote, marginFloorBps)} />
-              </td>
-              <td className={TD}><Chip chip={expiryChip(quote, now)} /></td>
-              <td className={TD}>
-                {dayText(quote.sentAt)}
-                {quote.lastSendStatus === 'NOT_SENT' && (
-                  <Badge variant="destructive" className="ml-1 text-[10px]">Not sent</Badge>
-                )}
-              </td>
-              <td className={TD}>
-                {quote.linkToken
-                  ? <span className="text-xs text-muted-foreground">Live · round {quote.rounds}</span>
-                  : <span className="text-xs text-muted-foreground">Spent</span>}
-              </td>
-              <td className={cn(TD, 'whitespace-nowrap text-right')}>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  aria-label={`Copy link for ${quote.id}`}
-                  disabled={busy || !quote.linkToken}
-                  onClick={() => onCopyLink(quote)}
-                >
-                  <Link2 size={13} /> Copy link
-                </Button>
-                {state.canSend && (
-                  <Button size="sm" variant="ghost" aria-label={`Re-send ${quote.id}`} disabled={busy} onClick={() => onSend(quote)}>
-                    Re-send
-                  </Button>
-                )}
-                {state.canConvert && (
-                  <Button size="sm" variant="ghost" aria-label={`Convert ${quote.id}`} disabled={busy} onClick={() => onConvert(quote)}>
-                    Convert
-                  </Button>
-                )}
-                {state.canMarkLost && (
-                  <Button size="sm" variant="ghost" aria-label={`Mark ${quote.id} lost`} disabled={busy} onClick={() => onMarkLost(quote)}>
-                    Mark lost
-                  </Button>
-                )}
-              </td>
-            </tr>
-          )
-        })}
-      </tbody>
-    </table>
-  )
-}
-
-/* ── Replies ─────────────────────────────────────────────────────────────── */
-
-function RepliesTab({ rows, now, busy, onConvert, onAcceptCounter, onCounter, onMarkLost }: {
-  rows: QuoteRecord[]
-  now: string
-  busy: boolean
-  onConvert: (quote: QuoteRecord) => void
-  onAcceptCounter: (quote: QuoteRecord) => void
-  onCounter: (quote: QuoteRecord) => void
-  onMarkLost: (quote: QuoteRecord) => void
-}) {
-  return (
-    <table className="w-full text-sm">
-      <thead>
-        <tr className="border-b border-border">
-          <th className={TH} scope="col">Quote</th>
-          <th className={TH} scope="col">Customer</th>
-          <th className={cn(TH, 'text-right')} scope="col">Ours</th>
-          <th className={cn(TH, 'text-right')} scope="col">Theirs</th>
-          <th className={TH} scope="col">Message</th>
-          <th className={TH} scope="col">Answered by</th>
-          <th className={TH} scope="col"><span className="sr-only">Actions</span></th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.length === 0 && <Empty columns={7}>Nobody has come back to us.</Empty>}
-        {rows.map((quote) => {
-          const state = quoteState(quote, now)
-          const theirs = theirNumberCents(quote)
-          const lastEvent = (quote.events ?? []).filter((e) => e.note).slice(-1)[0] ?? null
-          return (
-            <tr key={quote.id} className="border-b border-border/60">
-              <td className={TD}><QuoteLink quote={quote} /></td>
-              <td className={TD}>{quote.customerName || '—'}</td>
-              <td className={MONEY}>{formatCents(quote.amountCents)}</td>
-              <td className={cn(MONEY, 'font-medium')}>{theirs === null ? '—' : formatCents(theirs)}</td>
-              <td className={cn(TD, 'max-w-[20rem] text-xs text-muted-foreground')}>{lastEvent?.note ?? '—'}</td>
-              <td className={TD}>
-                {quote.responderName || quote.responderEmail || '—'}
-                <div className="text-xs text-muted-foreground">{dayText(quote.respondedAt)}</div>
-              </td>
-              <td className={cn(TD, 'whitespace-nowrap text-right')}>
-                {state.canConvert && (
-                  <Button size="sm" variant="ghost" aria-label={`Convert ${quote.id}`} disabled={busy} onClick={() => onConvert(quote)}>
-                    Convert
-                  </Button>
-                )}
-                {state.canAccept && (
-                  <Button size="sm" variant="ghost" aria-label={`Accept counter on ${quote.id}`} disabled={busy} onClick={() => onAcceptCounter(quote)}>
-                    Accept counter
-                  </Button>
-                )}
-                {state.canCounter && (
-                  <Button size="sm" variant="ghost" aria-label={`Counter ${quote.id}`} disabled={busy} onClick={() => onCounter(quote)}>
-                    Counter
-                  </Button>
-                )}
-                {state.canMarkLost && (
-                  <Button size="sm" variant="ghost" aria-label={`Mark ${quote.id} lost`} disabled={busy} onClick={() => onMarkLost(quote)}>
-                    Mark lost
-                  </Button>
-                )}
-              </td>
-            </tr>
-          )
-        })}
-      </tbody>
-    </table>
-  )
-}
-
-/* ── Drafts ──────────────────────────────────────────────────────────────── */
-
-function DraftsTab({ rows, now, busy, onSend }: {
-  rows: QuoteRecord[]
-  now: string
-  busy: boolean
-  onSend: (quote: QuoteRecord) => void
-}) {
-  return (
-    <table className="w-full text-sm">
-      <thead>
-        <tr className="border-b border-border">
-          <th className={TH} scope="col">Quote</th>
-          <th className={TH} scope="col">Customer</th>
-          <th className={TH} scope="col">Lane</th>
-          <th className={cn(TH, 'text-right')} scope="col">Amount</th>
-          <th className={TH} scope="col">Written</th>
-          <th className={TH} scope="col"><span className="sr-only">Actions</span></th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.length === 0 && <Empty columns={6}>No draft is waiting to go out.</Empty>}
-        {rows.map((quote) => {
-          const state = quoteState(quote, now)
-          return (
-            <tr key={quote.id} className="border-b border-border/60">
-              <td className={TD}><QuoteLink quote={quote} /></td>
-              <td className={TD}>{quote.customerName || '—'}</td>
-              <td className={TD}>{laneText(quote)}</td>
-              <td className={MONEY}>{formatCents(quote.amountCents)}</td>
-              <td className={TD}>{quote.quoteDate}</td>
-              <td className={cn(TD, 'whitespace-nowrap text-right')}>
-                <Button asChild size="sm" variant="ghost">
-                  <Link to={`/quotes/${quote.id}`} aria-label={`Price quote ${quote.id}`}>Price</Link>
-                </Button>
-                {state.canSend && (
-                  <Button size="sm" variant="outline" aria-label={`Send ${quote.id}`} disabled={busy} onClick={() => onSend(quote)}>
-                    Send
-                  </Button>
-                )}
-              </td>
-            </tr>
-          )
-        })}
-      </tbody>
-    </table>
-  )
-}
-
-/* ── Won / Lost ──────────────────────────────────────────────────────────── */
-
-function WonLostTab({ rows, months, month, loading, busy, now, facets, facet, onFacet, onMonth, onRestore }: {
-  rows: QuoteRecord[]
-  months: string[]
-  month: string
-  loading: boolean
-  busy: boolean
-  now: string
-  facets: string[]
-  facet: string
-  onFacet: (value: string) => void
-  onMonth: (ym: string) => void
-  onRestore: (quote: QuoteRecord) => void
-}) {
-  return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <select
-          aria-label="Quote month"
-          className="h-9 rounded-md border border-border bg-background px-2 text-sm"
-          value={month}
-          onChange={(e) => onMonth(e.target.value)}
-        >
-          {months.map((ym) => <option key={ym} value={ym}>{monthLabel(ym)}</option>)}
-        </select>
-        <select
-          aria-label="Lost reason"
-          className="h-9 rounded-md border border-border bg-background px-2 text-sm"
-          value={facet}
-          onChange={(e) => onFacet(e.target.value)}
-        >
-          <option value="">Every outcome</option>
-          {facets.map((reason) => (
-            <option key={reason} value={reason}>{LOST_REASON_LABEL[reason as keyof typeof LOST_REASON_LABEL] ?? reason}</option>
-          ))}
-        </select>
-        {loading && <span className="text-xs text-muted-foreground">Reading {monthLabel(month)}…</span>}
+    <div className="tms-card">
+      <div className="tms-card-body">
+        <div className="tms-field-label">{label}</div>
+        <div style={{ fontSize: 18, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{value}</div>
+        <div className="tms-muted" style={{ fontSize: 12 }}>{note}</div>
       </div>
-
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b border-border">
-            <th className={TH} scope="col">Quote</th>
-            <th className={TH} scope="col">Customer</th>
-            <th className={TH} scope="col">Lane</th>
-            <th className={cn(TH, 'text-right')} scope="col">Amount</th>
-            <th className={TH} scope="col">Outcome</th>
-            <th className={TH} scope="col">Closed</th>
-            <th className={TH} scope="col"><span className="sr-only">Actions</span></th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.length === 0 && <Empty columns={7}>Nothing closed in this month.</Empty>}
-          {rows.map((quote) => {
-            const state = quoteState(quote, now)
-            return (
-              <tr key={quote.id} className="border-b border-border/60">
-                <td className={TD}><QuoteLink quote={quote} /></td>
-                <td className={TD}>{quote.customerName || '—'}</td>
-                <td className={TD}>{laneText(quote)}</td>
-                <td className={MONEY}>{formatCents(quote.amountCents)}</td>
-                <td className={TD}>
-                  {statusLabel(quote)}
-                  {quote.lostReason && (
-                    <Badge variant="outline" className="ml-1 text-[10px]">{LOST_REASON_LABEL[quote.lostReason]}</Badge>
-                  )}
-                </td>
-                <td className={TD}>{dayText(quote.closedAt ?? quote.wonAt)}</td>
-                <td className={cn(TD, 'whitespace-nowrap text-right')}>
-                  {quote.shipmentId && (
-                    <Button asChild size="sm" variant="ghost">
-                      <Link to={`/shipments/${quote.shipmentId}`} aria-label={`Shipment for ${quote.id}`}>Shipment</Link>
-                    </Button>
-                  )}
-                  {state.canRestore && (
-                    <Button size="sm" variant="ghost" aria-label={`Restore ${quote.id}`} disabled={busy} onClick={() => onRestore(quote)}>
-                      Restore
-                    </Button>
-                  )}
-                </td>
-              </tr>
-            )
-          })}
-        </tbody>
-      </table>
     </div>
-  )
-}
-
-/* ── Carrier offers ──────────────────────────────────────────────────────── */
-
-function OffersTab({ rows, now, busy, onAccept, onCounter, onReject, onCopyLink }: {
-  rows: QuoteRecord[]
-  now: string
-  busy: boolean
-  onAccept: (quote: QuoteRecord) => void
-  onCounter: (quote: QuoteRecord) => void
-  onReject: (quote: QuoteRecord) => void
-  onCopyLink: (quote: QuoteRecord) => void
-}) {
-  return (
-    <table className="w-full text-sm">
-      <thead>
-        <tr className="border-b border-border">
-          <th className={TH} scope="col">Load</th>
-          <th className={TH} scope="col">Carrier</th>
-          <th className={cn(TH, 'text-right')} scope="col">Ours</th>
-          <th className={cn(TH, 'text-right')} scope="col">Theirs</th>
-          <th className={TH} scope="col">Status</th>
-          <th className={TH} scope="col">Expires</th>
-          <th className={TH} scope="col">Whose move</th>
-          <th className={TH} scope="col"><span className="sr-only">Actions</span></th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.length === 0 && <Empty columns={8}>No offer is out with a carrier.</Empty>}
-        {rows.map((quote) => {
-          const actions = offerActions(quote, now)
-          const theirs = theirNumberCents(quote)
-          return (
-            <tr key={quote.id} className="border-b border-border/60">
-              <td className={TD}>
-                {quote.shipmentId
-                  ? (
-                    <Link className="text-primary hover:underline" to={`/shipments/${quote.shipmentId}`}>
-                      {quote.shipmentNumber ?? quote.loadNumber ?? quote.shipmentId}
-                    </Link>
-                  )
-                  : quote.loadNumber ?? '—'}
-              </td>
-              <td className={TD}>
-                {quote.carrierName || '—'}
-                {quote.carrierMc && <span className="ml-1 text-xs text-muted-foreground">MC {quote.carrierMc}</span>}
-              </td>
-              <td className={MONEY}>{formatCents(quote.amountCents)}</td>
-              <td className={cn(MONEY, 'font-medium')}>{theirs === null ? '—' : formatCents(theirs)}</td>
-              <td className={TD}>{statusLabel(quote)}</td>
-              <td className={TD}><Chip chip={expiryChip(quote, now)} /></td>
-              <td className={TD}>{whoseMoveLabel(quote, now)}</td>
-              <td className={cn(TD, 'whitespace-nowrap text-right')}>
-                {actions.canAccept && (
-                  <Button size="sm" variant="ghost" aria-label={`Accept offer ${quote.id}`} disabled={busy} onClick={() => onAccept(quote)}>
-                    Accept
-                  </Button>
-                )}
-                {actions.canCounter && (
-                  <Button size="sm" variant="ghost" aria-label={`Counter offer ${quote.id}`} disabled={busy} onClick={() => onCounter(quote)}>
-                    Counter
-                  </Button>
-                )}
-                {actions.canReject && (
-                  <Button size="sm" variant="ghost" aria-label={`Reject offer ${quote.id}`} disabled={busy} onClick={() => onReject(quote)}>
-                    Reject
-                  </Button>
-                )}
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  aria-label={`Copy link for ${quote.id}`}
-                  disabled={busy || !actions.canCopyLink}
-                  onClick={() => onCopyLink(quote)}
-                >
-                  <Link2 size={13} /> Copy link
-                </Button>
-              </td>
-            </tr>
-          )
-        })}
-      </tbody>
-    </table>
   )
 }

@@ -28,17 +28,13 @@ const SHORT: Record<OtrRequiredField, string> = {
 
 export function FactoringRowFields({ readiness }: { readiness: OtrReadiness | null }) {
   if (!readiness) {
-    return (
-      <span style={{ fontSize: 11.5, color: 'var(--ds-t3)' }}>
-        Not prepared yet
-      </span>
-    )
+    return <span className="text-[11.5px] tms-muted">Not prepared yet</span>
   }
 
   const missing = new Set<OtrRequiredField>(readiness.missingFields)
 
   return (
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, maxWidth: 300 }}>
+    <div className="flex max-w-[300px] flex-wrap gap-[3px]">
       {OTR_REQUIRED_FIELDS.map((field) => {
         const ok = !missing.has(field)
         const value = readiness.payload?.[field]
@@ -50,16 +46,12 @@ export function FactoringRowFields({ readiness }: { readiness: OtrReadiness | nu
                 ? `${OTR_FIELD_LABEL[field]}: ${String(value)}`
                 : `${OTR_FIELD_LABEL[field]} is missing`
             }
+            className="rounded px-1.5 text-[10px] font-bold"
             style={{
-              fontSize: 10,
-              fontWeight: 700,
-              padding: '1px 5px',
-              borderRadius: 4,
               whiteSpace: 'nowrap',
               border: '1px solid',
-              ...(ok
-                ? { background: '#dcfce7', color: '#15803d', borderColor: '#86efac' }
-                : { background: '#fee2e2', color: '#b91c1c', borderColor: '#fca5a5' }),
+              color: ok ? 'var(--tms-badge-green)' : 'var(--tms-badge-red)',
+              borderColor: ok ? 'var(--tms-badge-green)' : 'var(--tms-badge-red)',
             }}
           >
             {SHORT[field]}

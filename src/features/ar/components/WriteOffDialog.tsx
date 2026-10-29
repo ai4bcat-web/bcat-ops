@@ -12,11 +12,7 @@
  */
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { TmsButton, TmsDialog, TmsField, TmsInput, TmsTextarea } from '@/features/tms/kit'
 import { graphqlErrorText, writeOffInvoice } from '@/lib/apiClient'
 import { formatCents } from '@/lib/invoiceBuild'
 import { invoiceStatusAfter, writeOffPlan } from '@/lib/paymentApply'
@@ -70,65 +66,61 @@ export function WriteOffDialog({ invoice, busy, onClose, onDone }: {
   }
 
   return (
-    <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
-      <DialogContent className="max-w-lg">
-        <DialogHeader><DialogTitle>Write off invoice {invoice.number}</DialogTitle></DialogHeader>
-
-        <p className="rounded-lg border border-border bg-muted/30 p-2 text-xs">
-          {formatCents(invoice.totalCents)} billed · {formatCents(invoice.paidCents)} paid ·
-          {' '}<strong>{formatCents(invoice.balanceCents)} outstanding</strong>
-        </p>
-
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <Label className="text-xs uppercase tracking-wider text-muted-foreground">Amount</Label>
-            <Input
-              aria-label="Write-off amount"
-              inputMode="decimal"
-              value={amount}
-              disabled={disabled}
-              placeholder="0.00"
-              onChange={(e) => setAmount(e.target.value)}
-              className="h-9 text-sm"
-            />
-          </div>
-          <div className="flex items-end">
-            <p className="text-xs text-muted-foreground">
-              {after
-                ? `Leaves ${formatCents(after.balanceCents)} — ${invoiceStatusAfter(invoice.totalCents, after.paidCents, after.offsetCents).toLowerCase()}`
-                : 'Nothing to post yet'}
-            </p>
-          </div>
-          <div className="col-span-2">
-            <Label className="text-xs uppercase tracking-wider text-muted-foreground">Reason</Label>
-            <Textarea
-              aria-label="Write-off reason"
-              rows={3}
-              value={reason}
-              disabled={disabled}
-              placeholder="why this balance will not be collected"
-              onChange={(e) => setReason(e.target.value)}
-              className="text-sm"
-            />
-          </div>
-          {plan.errors.map((text) => (
-            <p key={text} className="col-span-2 text-xs text-destructive">{text}</p>
-          ))}
-          {error && <p className="col-span-2 text-xs text-destructive">{error}</p>}
-        </div>
-
-        <DialogFooter className="flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-xs text-muted-foreground">
+    <TmsDialog
+      open
+      onOpenChange={(open) => { if (!open) onClose() }}
+      title={`Write off invoice ${invoice.number}`}
+      footer={
+        <>
+          <p className="mr-auto text-xs tms-muted">
             Posted as a WRITE_OFF row — the balance is settled, not collected.
           </p>
-          <div className="flex gap-2">
-            <Button variant="ghost" onClick={onClose} disabled={posting}>Cancel</Button>
-            <Button onClick={submit} disabled={disabled || !ready}>
-              {posting ? 'Posting…' : 'Write off'}
-            </Button>
-          </div>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          <TmsButton variant="ghost" onClick={onClose} disabled={posting}>Cancel</TmsButton>
+          <TmsButton variant="primary" onClick={submit} disabled={disabled || !ready}>
+            {posting ? 'Posting…' : 'Write off'}
+          </TmsButton>
+        </>
+      }
+    >
+      <p className="p-2 text-xs" style={{ border: '1px solid var(--tms-border)', borderRadius: 'var(--tms-radius)' }}>
+        {formatCents(invoice.totalCents)} billed · {formatCents(invoice.paidCents)} paid ·
+        {' '}<strong>{formatCents(invoice.balanceCents)} outstanding</strong>
+      </p>
+
+      <div className="tms-grid tms-grid-2">
+        <TmsField label="Amount">
+          <TmsInput
+            aria-label="Write-off amount"
+            inputMode="decimal"
+            value={amount}
+            disabled={disabled}
+            placeholder="0.00"
+            onChange={(e) => setAmount(e.target.value)}
+          />
+        </TmsField>
+        <div className="flex items-end">
+          <p className="text-xs tms-muted">
+            {after
+              ? `Leaves ${formatCents(after.balanceCents)} — ${invoiceStatusAfter(invoice.totalCents, after.paidCents, after.offsetCents).toLowerCase()}`
+              : 'Nothing to post yet'}
+          </p>
+        </div>
+      </div>
+
+      <TmsField label="Reason">
+        <TmsTextarea
+          aria-label="Write-off reason"
+          rows={3}
+          value={reason}
+          disabled={disabled}
+          placeholder="why this balance will not be collected"
+          onChange={(e) => setReason(e.target.value)}
+        />
+      </TmsField>
+      {plan.errors.map((text) => (
+        <p key={text} className="text-xs" style={{ color: 'var(--tms-badge-red)' }}>{text}</p>
+      ))}
+      {error && <p className="text-xs" style={{ color: 'var(--tms-badge-red)' }}>{error}</p>}
+    </TmsDialog>
   )
 }

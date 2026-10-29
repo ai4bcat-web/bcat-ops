@@ -18,11 +18,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, Loader2, Wand2 } from 'lucide-react'
 import { toast } from 'sonner'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { TmsButton, TmsDialog, TmsField, TmsInput, TmsSelect, TmsTextarea } from '@/features/tms/kit'
 import {
   graphqlErrorText,
   listApPaymentsByCarrier,
@@ -225,179 +221,168 @@ export function PayCarrierDialog({ carrierId, preselectBillIds, open, onOpenChan
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl">
-        <DialogHeader>
-          <DialogTitle>Pay carrier{bills[0]?.carrierName ? ` — ${bills[0].carrierName}` : ''}</DialogTitle>
-        </DialogHeader>
+    <TmsDialog
+      open={open}
+      onOpenChange={onOpenChange}
+      title={`Pay carrier${bills[0]?.carrierName ? ` — ${bills[0].carrierName}` : ''}`}
+      className="tms-dialog-wide"
+      footer={
+        <>
+          <TmsButton variant="ghost" onClick={() => onOpenChange(false)} disabled={posting}>Cancel</TmsButton>
+          <TmsButton variant="primary" onClick={submit} disabled={disabled || !plan.ok || unallocated}>
+            {posting ? 'Posting…' : 'Post'}
+          </TmsButton>
+        </>
+      }
+    >
+      {loading && (
+        <p className="flex items-center gap-2 tms-muted">
+          <Loader2 size={14} className="animate-spin" /> Reading what this carrier is owed…
+        </p>
+      )}
 
-        {loading && (
-          <p className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 size={14} className="animate-spin" /> Reading what this carrier is owed…
-          </p>
-        )}
+      {!loading && (
+        <div className="flex flex-col gap-4">
+          <div className="tms-grid tms-grid-4">
+            <TmsField label="Paid">
+              <TmsInput
+                aria-label="Payment date"
+                type="date"
+                value={paidAt}
+                disabled={disabled}
+                onChange={(e) => setPaidAt(e.target.value)}
+              />
+            </TmsField>
+            <TmsField label="Method">
+              <TmsSelect
+                aria-label="Payment method"
+                value={method ?? 'ACH'}
+                disabled={disabled}
+                onChange={(e) => setMethod(e.target.value as ApPaymentMethod)}
+              >
+                {METHODS.map((row) => <option key={row} value={row}>{row.toLowerCase()}</option>)}
+              </TmsSelect>
+            </TmsField>
+            <TmsField label="Reference">
+              <TmsInput
+                aria-label="Payment reference"
+                value={reference}
+                disabled={disabled}
+                placeholder="cheque or trace #"
+                onChange={(e) => setReference(e.target.value)}
+              />
+            </TmsField>
+            <TmsField label="Amount">
+              <TmsInput
+                aria-label="Payment amount"
+                inputMode="decimal"
+                value={amount}
+                disabled={disabled}
+                placeholder="0.00"
+                onChange={(e) => setAmount(e.target.value)}
+              />
+            </TmsField>
+          </div>
 
-        {!loading && (
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-              <div>
-                <Label className="text-xs uppercase tracking-wider text-muted-foreground">Paid</Label>
-                <Input
-                  aria-label="Payment date"
-                  type="date"
-                  value={paidAt}
-                  disabled={disabled}
-                  onChange={(e) => setPaidAt(e.target.value)}
-                  className="h-9 text-sm"
-                />
-              </div>
-              <div>
-                <Label className="text-xs uppercase tracking-wider text-muted-foreground">Method</Label>
-                <select
-                  aria-label="Payment method"
-                  value={method ?? 'ACH'}
-                  disabled={disabled}
-                  onChange={(e) => setMethod(e.target.value as ApPaymentMethod)}
-                  className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
-                >
-                  {METHODS.map((row) => <option key={row} value={row}>{row.toLowerCase()}</option>)}
-                </select>
-              </div>
-              <div>
-                <Label className="text-xs uppercase tracking-wider text-muted-foreground">Reference</Label>
-                <Input
-                  aria-label="Payment reference"
-                  value={reference}
-                  disabled={disabled}
-                  placeholder="cheque or trace #"
-                  onChange={(e) => setReference(e.target.value)}
-                  className="h-9 text-sm"
-                />
-              </div>
-              <div>
-                <Label className="text-xs uppercase tracking-wider text-muted-foreground">Amount</Label>
-                <Input
-                  aria-label="Payment amount"
-                  inputMode="decimal"
-                  value={amount}
-                  disabled={disabled}
-                  placeholder="0.00"
-                  onChange={(e) => setAmount(e.target.value)}
-                  className="h-9 text-sm"
-                />
-              </div>
+          {duplicate && (
+            <p
+              className="flex items-start gap-2 p-2 text-xs"
+              style={{ border: '1px solid var(--tms-badge-orange)', borderRadius: 'var(--tms-radius)' }}
+            >
+              <AlertTriangle size={14} className="mt-0.5 shrink-0" style={{ color: 'var(--tms-badge-orange)' }} />
+              This carrier already has a {duplicate.kind.toLowerCase().replace('_', ' ')} with reference
+              {' '}{duplicate.reference} for {formatCents(duplicate.amountCents)} on {duplicate.paidAt.slice(0, 10)}.
+              Post anyway if this is a different payment.
+            </p>
+          )}
+
+          <div>
+            <div className="flex items-center justify-between">
+              <p className="text-[11px] font-semibold uppercase tracking-wider tms-muted">Approved bills</p>
+              <TmsButton size="sm" aria-label="Auto-allocate" onClick={autoAllocate} disabled={disabled}>
+                <Wand2 size={12} /> Auto-allocate
+              </TmsButton>
             </div>
+            {bills.length === 0 ? (
+              <p className="mt-1 text-xs tms-muted">
+                Nothing is approved for this carrier. A bill is paid once it has been through review.
+              </p>
+            ) : (
+              <ul className="mt-1" style={{ border: '1px solid var(--tms-border)', borderRadius: 'var(--tms-radius)' }}>
+                {bills.map((row) => (
+                  <li key={row.id} className="flex items-center gap-3 px-2 py-1.5">
+                    <span className="w-32 shrink-0 truncate font-medium">{billName(row)}</span>
+                    <span className="w-24 shrink-0 text-xs tms-muted">due {row.dueAt}</span>
+                    <span className="flex-1 text-right text-xs tms-muted">{formatCents(row.balanceCents)} open</span>
+                    <TmsInput
+                      aria-label={`Apply to bill ${billName(row)}`}
+                      inputMode="decimal"
+                      value={allocations[row.id] ?? ''}
+                      disabled={disabled}
+                      placeholder="0.00"
+                      onChange={(e) => setAllocations((prev) => ({ ...prev, [row.id]: e.target.value }))}
+                      className="w-28"
+                    />
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
 
-            {duplicate && (
-              <p className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-2 text-xs">
-                <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-600" />
-                This carrier already has a {duplicate.kind.toLowerCase().replace('_', ' ')} with reference
-                {' '}{duplicate.reference} for {formatCents(duplicate.amountCents)} on {duplicate.paidAt.slice(0, 10)}.
-                Post anyway if this is a different payment.
+          {credits.length > 0 && (
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wider tms-muted">Available credits</p>
+              <ul className="mt-1" style={{ border: '1px solid var(--tms-border)', borderRadius: 'var(--tms-radius)' }}>
+                {credits.map((row) => (
+                  <li key={row.id} className="flex items-center gap-3 px-2 py-1.5">
+                    <span className="w-32 shrink-0 truncate font-medium">{row.reference ?? row.kind.toLowerCase()}</span>
+                    <span className="w-24 shrink-0 text-xs tms-muted">{row.paidAt.slice(0, 10)}</span>
+                    <span className="flex-1 text-right text-xs tms-muted">{formatCents(row.unappliedCents)} left</span>
+                    <TmsInput
+                      aria-label={`Use credit ${row.reference ?? row.id}`}
+                      inputMode="decimal"
+                      value={creditUses[row.id] ?? ''}
+                      disabled={disabled}
+                      placeholder="0.00"
+                      onChange={(e) => setCreditUses((prev) => ({ ...prev, [row.id]: e.target.value }))}
+                      className="w-28"
+                    />
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          <TmsField label="Note">
+            <TmsTextarea
+              aria-label="Payment note"
+              rows={2}
+              value={note}
+              disabled={disabled}
+              onChange={(e) => setNote(e.target.value)}
+            />
+          </TmsField>
+
+          <div className="p-2" style={{ border: '1px solid var(--tms-border)', borderRadius: 'var(--tms-radius)' }}>
+            <div className="flex flex-wrap gap-x-6 gap-y-1">
+              <span>Applied <strong aria-label="Applied total">{formatCents(plan.appliedCents)}</strong></span>
+              <span>From credits <strong aria-label="From credits total">{formatCents(plan.fromCreditsCents)}</strong></span>
+              <span>Unallocated <strong aria-label="Unallocated total">{formatCents(plan.unappliedCents)}</strong></span>
+            </div>
+            {unallocated && (
+              <p className="mt-1 text-xs" style={{ color: 'var(--tms-badge-red)' }}>
+                {formatCents(plan.unappliedCents)} is unallocated. A payment to a carrier goes against
+                bills — allocate it, or lower the amount.
               </p>
             )}
-
-            <div>
-              <div className="flex items-center justify-between">
-                <Label className="text-xs uppercase tracking-wider text-muted-foreground">Approved bills</Label>
-                <Button size="sm" variant="outline" aria-label="Auto-allocate" onClick={autoAllocate} disabled={disabled}>
-                  <Wand2 size={12} className="mr-1" /> Auto-allocate
-                </Button>
-              </div>
-              {bills.length === 0 ? (
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Nothing is approved for this carrier. A bill is paid once it has been through review.
-                </p>
-              ) : (
-                <ul className="mt-1 divide-y divide-border rounded-lg border border-border">
-                  {bills.map((row) => (
-                    <li key={row.id} className="flex items-center gap-3 px-2 py-1.5 text-sm">
-                      <span className="w-32 shrink-0 truncate font-medium">{billName(row)}</span>
-                      <span className="w-24 shrink-0 text-xs text-muted-foreground">due {row.dueAt}</span>
-                      <span className="flex-1 text-right text-xs text-muted-foreground">
-                        {formatCents(row.balanceCents)} open
-                      </span>
-                      <Input
-                        aria-label={`Apply to bill ${billName(row)}`}
-                        inputMode="decimal"
-                        value={allocations[row.id] ?? ''}
-                        disabled={disabled}
-                        placeholder="0.00"
-                        onChange={(e) => setAllocations((prev) => ({ ...prev, [row.id]: e.target.value }))}
-                        className="h-8 w-28 text-sm"
-                      />
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-
-            {credits.length > 0 && (
-              <div>
-                <Label className="text-xs uppercase tracking-wider text-muted-foreground">Available credits</Label>
-                <ul className="mt-1 divide-y divide-border rounded-lg border border-border">
-                  {credits.map((row) => (
-                    <li key={row.id} className="flex items-center gap-3 px-2 py-1.5 text-sm">
-                      <span className="w-32 shrink-0 truncate font-medium">{row.reference ?? row.kind.toLowerCase()}</span>
-                      <span className="w-24 shrink-0 text-xs text-muted-foreground">{row.paidAt.slice(0, 10)}</span>
-                      <span className="flex-1 text-right text-xs text-muted-foreground">
-                        {formatCents(row.unappliedCents)} left
-                      </span>
-                      <Input
-                        aria-label={`Use credit ${row.reference ?? row.id}`}
-                        inputMode="decimal"
-                        value={creditUses[row.id] ?? ''}
-                        disabled={disabled}
-                        placeholder="0.00"
-                        onChange={(e) => setCreditUses((prev) => ({ ...prev, [row.id]: e.target.value }))}
-                        className="h-8 w-28 text-sm"
-                      />
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            <div>
-              <Label className="text-xs uppercase tracking-wider text-muted-foreground">Note</Label>
-              <Textarea
-                aria-label="Payment note"
-                rows={2}
-                value={note}
-                disabled={disabled}
-                onChange={(e) => setNote(e.target.value)}
-                className="text-sm"
-              />
-            </div>
-
-            <div className="rounded-lg border border-border bg-muted/30 p-2 text-sm">
-              <div className="flex flex-wrap gap-x-6 gap-y-1">
-                <span>Applied <strong aria-label="Applied total">{formatCents(plan.appliedCents)}</strong></span>
-                <span>From credits <strong aria-label="From credits total">{formatCents(plan.fromCreditsCents)}</strong></span>
-                <span>Unallocated <strong aria-label="Unallocated total">{formatCents(plan.unappliedCents)}</strong></span>
-              </div>
-              {unallocated && (
-                <p className="mt-1 text-xs text-destructive">
-                  {formatCents(plan.unappliedCents)} is unallocated. A payment to a carrier goes against
-                  bills — allocate it, or lower the amount.
-                </p>
-              )}
-              {plan.errors.map((reason) => (
-                <p key={reason} className="mt-1 text-xs text-destructive">{reason}</p>
-              ))}
-            </div>
-
-            {error && <p className="text-xs text-destructive">{error}</p>}
+            {plan.errors.map((reason) => (
+              <p key={reason} className="mt-1 text-xs" style={{ color: 'var(--tms-badge-red)' }}>{reason}</p>
+            ))}
           </div>
-        )}
 
-        <DialogFooter>
-          <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={posting}>Cancel</Button>
-          <Button onClick={submit} disabled={disabled || !plan.ok || unallocated}>
-            {posting ? 'Posting…' : 'Post'}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          {error && <p className="text-xs" style={{ color: 'var(--tms-badge-red)' }}>{error}</p>}
+        </div>
+      )}
+    </TmsDialog>
   )
 }

@@ -17,15 +17,13 @@
 import { useEffect, useState } from 'react'
 import { Banknote, Save } from 'lucide-react'
 import { toast } from 'sonner'
-import { Button } from '@/components/ui/button'
-import { Checkbox } from '@/components/ui/checkbox'
-import { Textarea } from '@/components/ui/textarea'
-import { Label } from '@/components/ui/label'
+import { TmsButton, TmsField, TmsTextarea } from '@/features/tms/kit'
 import { DocumentTypesField } from '@/features/documents/DocumentTypesField'
 import { getTmsSettings, saveApSettings } from '@/lib/apiClient'
 import { CARRIER_UPLOADABLE_TYPES } from '@/lib/shipmentDocuments'
 import { DEFAULT_REMITTANCE_EMAIL_TEMPLATE, templateHasReference } from '@/lib/shipmentNotices'
 import type { TmsSettings } from '@/types/tms'
+import { CheckRow, ErrorText, Hint, Loading, SettingsCard, Stack } from './settingsKit'
 
 export function ApSettingsCard() {
   const [loading, setLoading] = useState(true)
@@ -78,48 +76,37 @@ export function ApSettingsCard() {
   }
 
   return (
-    <div style={{ border: '1px solid var(--ds-border)', borderRadius: 12, background: 'var(--ds-surface)', padding: 16, boxShadow: 'var(--sh-sm)', display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <div className="flex items-center gap-2.5">
-        <Banknote size={16} style={{ color: 'var(--ds-t3)' }} />
-        <div>
-          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)' }}>Carrier bills &amp; AP</div>
-          <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 2 }}>
-            Who may approve a bill, who may send money, what a bill needs on file before it is approved, and what the remittance says.
-          </div>
-        </div>
-      </div>
-
-      {loading ? <div className="text-sm text-muted-foreground">Loading…</div> : (
-        <div className="space-y-3">
-          <div className="space-y-2">
-            <label className="flex items-start gap-2.5 text-sm" style={{ color: 'var(--ds-t2)' }}>
-              <Checkbox
-                aria-label="AP approval admin only"
-                checked={approvalAdminOnly}
-                onCheckedChange={(v) => setApprovalAdminOnly(v === true)}
-              />
-              Only an admin may approve a bill for payment
-            </label>
-            <label className="flex items-start gap-2.5 text-sm" style={{ color: 'var(--ds-t2)' }}>
-              <Checkbox
-                aria-label="AP posting admin only"
-                checked={postingAdminOnly}
-                onCheckedChange={(v) => setPostingAdminOnly(v === true)}
-              />
-              Only an admin may pay, credit, reverse or void
-            </label>
-            <label className="flex items-start gap-2.5 text-sm" style={{ color: 'var(--ds-t2)' }}>
-              <Checkbox
-                aria-label="Require signed rate confirmation"
-                checked={requireSignedRateCon}
-                onCheckedChange={(v) => setRequireSignedRateCon(v === true)}
-              />
-              A rate confirmation must be signed before the bill is approved
-            </label>
-            <p className="text-xs text-muted-foreground">
-              An unsigned rate con blocks a rep outright; an admin may approve past it and the acknowledgement is kept on the bill.
-            </p>
-          </div>
+    <SettingsCard
+      icon={Banknote}
+      title="Carrier bills & AP"
+      description="Who may approve a bill, who may send money, what a bill needs on file before it is approved, and what the remittance says."
+    >
+      {loading ? <Loading /> : (
+        <Stack>
+          <Stack gap={8}>
+            <CheckRow
+              ariaLabel="AP approval admin only"
+              align="start"
+              label="Only an admin may approve a bill for payment"
+              checked={approvalAdminOnly}
+              onChange={setApprovalAdminOnly}
+            />
+            <CheckRow
+              ariaLabel="AP posting admin only"
+              align="start"
+              label="Only an admin may pay, credit, reverse or void"
+              checked={postingAdminOnly}
+              onChange={setPostingAdminOnly}
+            />
+            <CheckRow
+              ariaLabel="Require signed rate confirmation"
+              align="start"
+              label="A rate confirmation must be signed before the bill is approved"
+              checked={requireSignedRateCon}
+              onChange={setRequireSignedRateCon}
+            />
+            <Hint>An unsigned rate con blocks a rep outright; an admin may approve past it and the acknowledgement is kept on the bill.</Hint>
+          </Stack>
 
           <DocumentTypesField
             label="Documents a bill needs before approval"
@@ -130,27 +117,27 @@ export function ApSettingsCard() {
             help="Leave every box clear to follow whatever the carrier upload link already asks for. An admin can still approve past a missing document, with a written note."
           />
 
-          <div>
-            <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Remittance e-mail</Label>
-            <Textarea
+          <TmsField
+            label="Remittance e-mail"
+            hint={<>{'{reference}'}, {'{carrier}'}, {'{total}'}, {'{date}'} and {'{method}'} are filled in. {'{reference}'} is required.</>}
+          >
+            <TmsTextarea
               aria-label="Remittance email template"
               rows={3}
               value={remittanceTemplate}
               onChange={(e) => setRemittanceTemplate(e.target.value)}
               placeholder={DEFAULT_REMITTANCE_EMAIL_TEMPLATE}
-              className="text-sm"
             />
-            <p className="mt-1 text-xs text-muted-foreground">
-              {'{reference}'}, {'{carrier}'}, {'{total}'}, {'{date}'} and {'{method}'} are filled in. {'{reference}'} is required.
-            </p>
-          </div>
+          </TmsField>
 
-          {error && <p className="text-xs text-destructive">{error}</p>}
-          <Button type="button" size="sm" className="h-8 gap-1" onClick={save} disabled={saving}>
-            <Save className="size-3.5" /> Save AP settings
-          </Button>
-        </div>
+          {error && <ErrorText>{error}</ErrorText>}
+          <div>
+            <TmsButton variant="primary" size="sm" onClick={save} disabled={saving}>
+              <Save size={14} /> Save AP settings
+            </TmsButton>
+          </div>
+        </Stack>
       )}
-    </div>
+    </SettingsCard>
   )
 }

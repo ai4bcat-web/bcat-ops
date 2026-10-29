@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useParams } from 'react-router-dom'
 import { readScanIntent, scanIntentPath } from '@/features/driver-app/scanner/scanIntent'
 import { Toaster } from 'sonner'
 import { UpdateBanner } from '@/components/UpdateBanner'
@@ -10,7 +10,10 @@ import { AuthGuard } from '@/components/AuthGuard'
 import { AppLayout } from '@/components/layout/AppLayout'
 import { DashboardPage } from '@/features/dashboard/DashboardPage'
 import { CalendarPage } from '@/features/calendar/CalendarPage'
-import { GridPage } from '@/features/grid/GridPage'
+import { TmsLayout } from '@/features/tms/TmsLayout'
+import { DashboardPage as TmsDashboardPage } from '@/features/tms/dashboard/DashboardPage'
+import { WorkflowsPage } from '@/features/tms/pages/WorkflowsPage'
+import { AcademyPage } from '@/features/tms/pages/AcademyPage'
 import { TrucksPage } from '@/features/trucks/TrucksPage'
 import { TruckDocumentsPage } from '@/features/truck-docs/TruckDocumentsPage'
 import { FuelPage } from '@/features/fuel/FuelPage'
@@ -31,7 +34,6 @@ import CarrierPingPage from '@/features/tracking/CarrierPingPage'
 import CarrierUploadPage from '@/features/tracking/CarrierUploadPage'
 import { DocumentReviewPage } from '@/features/documents/DocumentReviewPage'
 import { InsurancePage } from '@/features/insurance/InsurancePage'
-import { AuditPage } from '@/features/audit/AuditPage'
 import { SchedulePage } from '@/features/schedule/SchedulePage'
 import { TimeOffPage } from '@/features/time-off/TimeOffPage'
 import { DriverPayPage } from '@/features/driver-pay/DriverPayPage'
@@ -41,7 +43,6 @@ import { DriverAppViewPage } from '@/features/owner-operator-pay/DriverAppViewPa
 import { IvanDriverAppPage } from '@/features/ivan-driver-app/IvanDriverAppPage'
 import { MaintenancePage } from '@/features/maintenance/MaintenancePage'
 import { InvoicesPage } from '@/features/invoices/InvoicesPage'
-import { UsersPage } from '@/features/users/UsersPage'
 import { IntakePage } from '@/features/intake/IntakePage'
 import { TasksPage } from '@/features/tasks/TasksPage'
 import { DriverPortalPage } from '@/features/driver-portal/DriverPortalPage'
@@ -51,7 +52,6 @@ import { FleetManagerDashboardPage } from '@/features/fleet-dashboard/FleetManag
 import { DisputesPage } from '@/features/disputes/DisputesPage'
 import { DriverDisputesPage } from '@/features/disputes/DriverDisputesPage'
 import { FilesPage } from '@/features/files/FilesPage'
-import { SettingsPage } from '@/features/settings/SettingsPage'
 import { RedditQueuePage } from '@/features/reddit-queue/RedditQueuePage'
 import { PricingMarginPage } from '@/features/pricing-margin/PricingMarginPage'
 import { QuotesPage } from '@/features/quotes/QuotesPage'
@@ -59,17 +59,15 @@ import { QuoteDetail } from '@/features/quotes/QuoteDetail'
 import { LaneRatesPage } from '@/features/quotes/LaneRatesPage'
 import { QuoteRespondPage } from '@/features/quotes/public/QuoteRespondPage'
 import { FactoringPage } from '@/features/factoring/FactoringPage'
-import { ArPage } from '@/features/ar/ArPage'
+import { InvoicingPage } from '@/features/ar/InvoicingPage'
 import { InvoiceDetail } from '@/features/ar/InvoiceDetail'
-import { ApPage } from '@/features/ap/ApPage'
 import { BillDetail } from '@/features/ap/BillDetail'
 import { HoursPage } from '@/features/hours/HoursPage'
 import { VendorApPage } from '@/features/vendor-ap/VendorApPage'
 import { DispatchPage } from '@/features/dispatch/DispatchPage'
 import { PodsPage } from '@/features/pods/PodsPage'
-import { RequirePage, RequireAdmin, LandingRedirect } from '@/components/RequirePage'
-import { CommissionsPage } from '@/features/commissions/CommissionsPage'
-import { ReportsPage } from '@/features/reports/ReportsPage'
+import { RequirePage, LandingRedirect } from '@/components/RequirePage'
+import { BrokeragePage } from '@/features/tms/brokerage/BrokeragePage'
 import { DriverAuthProvider } from '@/features/driver-app/DriverAuthContext'
 import { useDriverAuth } from '@/features/driver-app/useDriverAuth'
 import { DriverApp, ScanPage, SubmissionsPage, SettlementPage, PaperworkPage, TimeClockPage, AccountPage } from '@/features/driver-app/DriverApp'
@@ -187,6 +185,22 @@ function isPhone(): boolean {
   return typeof window !== 'undefined' && window.matchMedia?.('(max-width: 640px)').matches === true
 }
 
+/**
+ * A legacy path redirected to its `/tms/*` home, carrying its route params, query and
+ * hash across — a bookmarked `/ar/invoices/INV-12?tab=email` must land on the same
+ * invoice, on the same tab.
+ */
+function ParamRedirect({ to }: { to: string }) {
+  const params = useParams()
+  const { search, hash } = useLocation()
+  const path = to
+    .split('/')
+    .map((segment) => (segment.startsWith(':') ? params[segment.slice(1)] ?? '' : segment))
+    .join('/')
+  return <Navigate to={`${path}${search}${hash}`} replace />
+}
+
+
 export default function App() {
   return (
     <BrowserRouter>
@@ -221,19 +235,53 @@ export default function App() {
           <Route path="/*" element={
             <AuthGuard>
               <Routes>
+                {/*
+                  * The Brokerage section: the MVMNT skin, its own shell, and every page
+                  * reachable on its original permission OR the one `tms` grant.
+                  */}
+                <Route path="/tms" element={<TmsLayout />}>
+                  <Route index element={<Navigate to="/tms/dashboard" replace />} />
+                  <Route path="dashboard" element={<RequirePage page="tms"><TmsDashboardPage /></RequirePage>} />
+                  <Route path="shipments" element={<RequirePage page={['loads', 'tms']}><ShipmentsBoard /></RequirePage>} />
+                  {/* A saved department view — the slug is a `ShipmentView` id. */}
+                  <Route path="shipments/view/:slug" element={<RequirePage page={['loads', 'tms']}><ShipmentsBoard /></RequirePage>} />
+                  <Route path="shipments/:id" element={<RequirePage page={['loads', 'tms']}><ShipmentPage /></RequirePage>} />
+                  <Route path="check-calls" element={<RequirePage page={['loads', 'tms']}><CheckCallsPage /></RequirePage>} />
+                  <Route path="documents" element={<RequirePage page={['loads', 'tms']}><DocumentReviewPage /></RequirePage>} />
+                  {/* Rates: customer quotes and carrier offers, with the lane history behind them. */}
+                  <Route path="rates" element={<RequirePage page={['quotes', 'tms']}><QuotesPage /></RequirePage>} />
+                  <Route path="rates/lanes" element={<RequirePage page={['quotes', 'tms']}><LaneRatesPage /></RequirePage>} />
+                  <Route path="rates/new" element={<RequirePage page={['quotes', 'tms']}><QuoteDetail /></RequirePage>} />
+                  <Route path="rates/:id" element={<RequirePage page={['quotes', 'tms']}><QuoteDetail /></RequirePage>} />
+                  {/* Invoicing: what we are owed, with carrier pay as its payable side. */}
+                  <Route path="invoicing" element={<RequirePage page={['invoicing', 'tms']}><InvoicingPage /></RequirePage>} />
+                  <Route path="invoicing/invoices/:id" element={<RequirePage page={['invoicing', 'tms']}><InvoiceDetail /></RequirePage>} />
+                  <Route path="invoicing/payable" element={<RequirePage page={['carrierPay', 'tms']}><InvoicingPage /></RequirePage>} />
+                  <Route path="invoicing/payable/bills/:id" element={<RequirePage page={['carrierPay', 'tms']}><BillDetail /></RequirePage>} />
+                  <Route path="carriers" element={<RequirePage page={['carriers', 'tms']}><CarriersPage /></RequirePage>} />
+                  <Route path="carriers/:id" element={<RequirePage page={['carriers', 'tms']}><CarriersPage /></RequirePage>} />
+                  <Route path="factors" element={<RequirePage page={['factoring', 'tms']}><FactoringPage /></RequirePage>} />
+                  <Route path="customers" element={<RequirePage page={['customers', 'tms']}><CustomersPage /></RequirePage>} />
+                  <Route path="locations" element={<RequirePage page={['locations', 'tms']}><LocationsPage /></RequirePage>} />
+                  <Route path="vendors" element={<RequirePage page={['vendorAp', 'tms']}><VendorApPage /></RequirePage>} />
+                  <Route path="workflows" element={<RequirePage page="tms"><WorkflowsPage /></RequirePage>} />
+                  <Route path="academy" element={<RequirePage page="tms"><AcademyPage /></RequirePage>} />
+                  <Route path="academy/:slug" element={<RequirePage page="tms"><AcademyPage /></RequirePage>} />
+                  {/* My Brokerage owns its own tab strip and nested routes; each tab
+                      keeps the guard its standalone route carried before Step R. */}
+                  <Route path="brokerage/*" element={<BrokeragePage />} />
+                </Route>
                 <Route element={<AppLayout />}>
               <Route index element={<LandingRedirect />} />
               <Route path="/dashboard" element={<RequirePage page="dashboard"><DashboardPage /></RequirePage>} />
               <Route path="/calendar" element={<RequirePage page="calendar"><CalendarPage /></RequirePage>} />
               <Route path="/driver-info" element={<RequirePage page="dispatch"><DriverInfoPage /></RequirePage>} />
-              <Route path="/loads" element={<RequirePage page="loads"><GridPage /></RequirePage>} />
-              {/* The MVMNT-style shipment layer; it shares the `loads` page permission. */}
-              <Route path="/shipments" element={<RequirePage page="loads"><ShipmentsBoard /></RequirePage>} />
-              <Route path="/shipments/:id" element={<RequirePage page="loads"><ShipmentPage /></RequirePage>} />
-              {/* The check-call worklist across every shipment; same `loads` permission. */}
-              <Route path="/check-calls" element={<RequirePage page="loads"><CheckCallsPage /></RequirePage>} />
-              {/* Carrier uploads waiting for somebody to accept or reject them. */}
-              <Route path="/documents" element={<RequirePage page="loads"><DocumentReviewPage /></RequirePage>} />
+              {/* The loads grid is retired: one shipment list, under the TMS shell. */}
+              <Route path="/loads" element={<Navigate to="/tms/shipments" replace />} />
+              <Route path="/shipments" element={<ParamRedirect to="/tms/shipments" />} />
+              <Route path="/shipments/:id" element={<ParamRedirect to="/tms/shipments/:id" />} />
+              <Route path="/check-calls" element={<ParamRedirect to="/tms/check-calls" />} />
+              <Route path="/documents" element={<ParamRedirect to="/tms/documents" />} />
               {/* Retired: the driver roster and editor now live in the Files hub. */}
               <Route path="/drivers" element={<Navigate to="/files" replace />} />
               <Route path="/fleet-dashboard" element={<RequirePage page="fleetManagerDashboard"><FleetManagerDashboardPage /></RequirePage>} />
@@ -245,22 +293,19 @@ export default function App() {
               <Route path="/finances" element={<RequirePage page="finances"><FinancesPage /></RequirePage>} />
               <Route path="/finances/review" element={<RequirePage page="finances"><ProfitReviewPage /></RequirePage>} />
               <Route path="/finance/cash-checkin" element={<RequirePage page="cashCheckIn"><WeeklyCashCheckInPage /></RequirePage>} />
-              <Route path="/factoring" element={<RequirePage page="factoring"><FactoringPage /></RequirePage>} />
-              {/* Invoicing and the cash against it; its own page key, not `loads`. */}
-              <Route path="/ar" element={<RequirePage page="invoicing"><ArPage /></RequirePage>} />
-              <Route path="/ar/invoices/:id" element={<RequirePage page="invoicing"><InvoiceDetail /></RequirePage>} />
-              {/* The other side of the same freight; its own page key, not `invoicing`. */}
-              <Route path="/ap" element={<RequirePage page="carrierPay"><ApPage /></RequirePage>} />
-              <Route path="/ap/bills/:id" element={<RequirePage page="carrierPay"><BillDetail /></RequirePage>} />
+              <Route path="/factoring" element={<ParamRedirect to="/tms/factors" />} />
+              <Route path="/ar" element={<ParamRedirect to="/tms/invoicing" />} />
+              <Route path="/ar/invoices/:id" element={<ParamRedirect to="/tms/invoicing/invoices/:id" />} />
+              <Route path="/ap" element={<ParamRedirect to="/tms/invoicing/payable" />} />
+              <Route path="/ap/bills/:id" element={<ParamRedirect to="/tms/invoicing/payable/bills/:id" />} />
               <Route path="/hours" element={<RequirePage page="hours"><HoursPage /></RequirePage>} />
-              <Route path="/vendor-ap" element={<RequirePage page="vendorAp"><VendorApPage /></RequirePage>} />
+              <Route path="/vendor-ap" element={<ParamRedirect to="/tms/vendors" />} />
               <Route path="/dispatch" element={<RequirePage page="dispatch"><DispatchPage /></RequirePage>} />
               <Route path="/appts" element={<RequirePage page="appts"><ApptsPage /></RequirePage>} />
-              <Route path="/customers" element={<RequirePage page="customers"><CustomersPage /></RequirePage>} />
-              <Route path="/locations" element={<RequirePage page="locations"><LocationsPage /></RequirePage>} />
-              {/* Outside carriers: the directory, and one carrier's own URL. */}
-              <Route path="/carriers" element={<RequirePage page="carriers"><CarriersPage /></RequirePage>} />
-              <Route path="/carriers/:id" element={<RequirePage page="carriers"><CarriersPage /></RequirePage>} />
+              <Route path="/customers" element={<ParamRedirect to="/tms/customers" />} />
+              <Route path="/locations" element={<ParamRedirect to="/tms/locations" />} />
+              <Route path="/carriers" element={<ParamRedirect to="/tms/carriers" />} />
+              <Route path="/carriers/:id" element={<ParamRedirect to="/tms/carriers/:id" />} />
               <Route path="/insurance" element={<RequirePage page="insurance"><InsurancePage /></RequirePage>} />
               <Route path="/schedule" element={<RequirePage page="schedule"><SchedulePage /></RequirePage>} />
               <Route path="/time-off" element={<RequirePage page="timeOff"><TimeOffPage /></RequirePage>} />
@@ -274,14 +319,12 @@ export default function App() {
               <Route path="/driver-view/:driverId" element={<RequirePage page="ownerOperatorPay"><DriverAppViewPage /></RequirePage>} />
               <Route path="/disputes" element={<RequirePage page="disputes"><DisputesPage /></RequirePage>} />
               <Route path="/files" element={<RequirePage page="files"><FilesPage /></RequirePage>} />
-              <Route path="/settings" element={<RequirePage page="settings"><SettingsPage /></RequirePage>} />
-              <Route path="/audit-log" element={<RequirePage page="audit"><AuditPage /></RequirePage>} />
+              <Route path="/settings" element={<ParamRedirect to="/tms/brokerage" />} />
+              <Route path="/audit-log" element={<ParamRedirect to="/tms/brokerage/audit" />} />
               <Route path="/intake"   element={<RequirePage page="intake"><IntakePage /></RequirePage>} />
               <Route path="/pods"     element={<RequirePage page="pods"><PodsPage /></RequirePage>} />
               <Route path="/tasks"   element={<RequirePage page="tasks"><TasksPage /></RequirePage>} />
-              {/* Step I: an admin manages people; the owner alone grants ADMIN or deletes,
-                  which `userManagement` enforces regardless of what this guard admits. */}
-              <Route path="/users" element={<RequireAdmin><UsersPage /></RequireAdmin>} />
+              <Route path="/users" element={<ParamRedirect to="/tms/brokerage/users" />} />
               <Route path="/vehicle-quote" element={<RequirePage page="vehicleQuote"><VehicleQuotePage /></RequirePage>} />
               <Route path="/vehicle-confirmation" element={<RequirePage page="vehicleConfirmation"><VehicleConfirmationPage /></RequirePage>} />
               {/* Retired — compliance lives in the driver and truck files now, and the
@@ -296,19 +339,16 @@ export default function App() {
               <Route path="/reddit-queue" element={<RequirePage page="redditQueue"><RedditQueuePage /></RequirePage>} />
               {/* Sales — pricing margin control */}
               <Route path="/pricing-margin" element={<RequirePage page="pricingMargin"><PricingMarginPage /></RequirePage>} />
-              {/* Sales — customer quotes, carrier offers and the lane history behind them.
-                  `/quotes/new` is the same editor with no id: a quote nobody has saved yet. */}
-              <Route path="/quotes" element={<RequirePage page="quotes"><QuotesPage /></RequirePage>} />
-              <Route path="/quotes/new" element={<RequirePage page="quotes"><QuoteDetail /></RequirePage>} />
-              <Route path="/quotes/:id" element={<RequirePage page="quotes"><QuoteDetail /></RequirePage>} />
-              <Route path="/rates" element={<RequirePage page="quotes"><LaneRatesPage /></RequirePage>} />
-              {/* Step I — what a rep is owed, and the reports over delivered freight. */}
-              <Route path="/commissions" element={<RequirePage page="commissions"><CommissionsPage /></RequirePage>} />
-              <Route path="/reports" element={<RequirePage page="reports"><ReportsPage /></RequirePage>} />
+              <Route path="/quotes" element={<ParamRedirect to="/tms/rates" />} />
+              <Route path="/quotes/new" element={<ParamRedirect to="/tms/rates/new" />} />
+              <Route path="/quotes/:id" element={<ParamRedirect to="/tms/rates/:id" />} />
+              <Route path="/rates" element={<ParamRedirect to="/tms/rates/lanes" />} />
+              <Route path="/commissions" element={<ParamRedirect to="/tms/brokerage/commissions" />} />
+              <Route path="/reports" element={<ParamRedirect to="/tms/brokerage/reports" />} />
               {/* legacy redirects */}
               <Route path="/expenses" element={<Navigate to="/fuel" replace />} />
-              <Route path="/grid" element={<Navigate to="/loads" replace />} />
-              <Route path="/audit" element={<Navigate to="/audit-log" replace />} />
+              <Route path="/grid" element={<Navigate to="/tms/shipments" replace />} />
+              <Route path="/audit" element={<Navigate to="/tms/brokerage/audit" replace />} />
                 </Route>
               </Routes>
             </AuthGuard>

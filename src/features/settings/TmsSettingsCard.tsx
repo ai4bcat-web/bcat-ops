@@ -1,12 +1,10 @@
 import { useEffect, useState } from 'react'
 import { Save, Cog } from 'lucide-react'
 import { toast } from 'sonner'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
+import { TmsButton, TmsField, TmsInput, TmsTextarea } from '@/features/tms/kit'
 import { getTmsSettings, saveTmsSettings } from '@/lib/apiClient'
 import type { TmsSettings } from '@/types/tms'
+import { ErrorText, Loading, SettingsCard, Stack } from './settingsKit'
 
 export function TmsSettingsCard() {
   const [settings, setSettings] = useState<TmsSettings | null>(null)
@@ -36,14 +34,10 @@ export function TmsSettingsCard() {
 
   const save = async () => {
     setError(null)
-    let parsedAccessorialCodes: unknown[] | null = null
-
-    if (accessorialCodes.trim()) {
-      try {
-        const parsed = parseTextArray(accessorialCodes)
-        parsedAccessorialCodes = parsed
-      } catch { setError('Accessorial codes must be one value per line'); return }
-    }
+    // One code per line; blank lines are not codes.
+    const parsedAccessorialCodes = accessorialCodes.trim()
+      ? accessorialCodes.split(/\r?\n/).map((s) => s.trim()).filter(Boolean)
+      : null
 
 
     let margin: number | null = null
@@ -76,46 +70,35 @@ export function TmsSettingsCard() {
   }
 
   return (
-    <div style={{ border: '1px solid var(--ds-border)', borderRadius: 12, background: 'var(--ds-surface)', padding: 16, boxShadow: 'var(--sh-sm)', display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <div className="flex items-center gap-2.5">
-        <Cog size={16} style={{ color: 'var(--ds-t3)' }} />
-        <div>
-          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)' }}>TMS defaults</div>
-          <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 2 }}>Margin floor, payment terms, accessorial codes, invoice format. Leave unknown fields empty — nothing is guessed.</div>
-        </div>
-      </div>
-
-      {loading ? <div className="text-sm text-muted-foreground">Loading…</div> : (
-        <div className="space-y-3">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Margin floor (basis points)</Label>
-              <Input value={marginFloorBps} onChange={(e) => setMarginFloorBps(e.target.value)} placeholder="e.g. 1500 for 15%" className="h-9 text-sm" />
-            </div>
-            <div>
-              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Default payment terms (days)</Label>
-              <Input value={defaultPaymentTermsDays} onChange={(e) => setDefaultPaymentTermsDays(e.target.value)} placeholder="e.g. 30" className="h-9 text-sm" />
-            </div>
+    <SettingsCard
+      icon={Cog}
+      title="TMS defaults"
+      description="Margin floor, payment terms, accessorial codes, invoice format. Leave unknown fields empty — nothing is guessed."
+    >
+      {loading ? <Loading /> : (
+        <Stack>
+          <div className="tms-grid tms-grid-2">
+            <TmsField label="Margin floor (basis points)">
+              <TmsInput value={marginFloorBps} onChange={(e) => setMarginFloorBps(e.target.value)} placeholder="e.g. 1500 for 15%" />
+            </TmsField>
+            <TmsField label="Default payment terms (days)">
+              <TmsInput value={defaultPaymentTermsDays} onChange={(e) => setDefaultPaymentTermsDays(e.target.value)} placeholder="e.g. 30" />
+            </TmsField>
           </div>
+          <TmsField label="Accessorial codes (one per line)">
+            <TmsTextarea value={accessorialCodes} onChange={(e) => setAccessorialCodes(e.target.value)} placeholder="LINEHAUL&#10;FSC&#10;DETENTION" rows={4} />
+          </TmsField>
+          <TmsField label="Invoice number format">
+            <TmsInput value={invoiceNumberFormat} onChange={(e) => setInvoiceNumberFormat(e.target.value)} placeholder="e.g. BL{YYYY}-{SEQ:0000}" />
+          </TmsField>
+          {error && <ErrorText>{error}</ErrorText>}
           <div>
-            <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Accessorial codes (one per line)</Label>
-            <Textarea value={accessorialCodes} onChange={(e) => setAccessorialCodes(e.target.value)} placeholder="LINEHAUL&#10;FSC&#10;DETENTION" rows={4} className="text-sm" />
+            <TmsButton variant="primary" size="sm" onClick={save} disabled={saving}>
+              <Save size={14} /> Save settings
+            </TmsButton>
           </div>
-          <div>
-            <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Invoice number format</Label>
-            <Input value={invoiceNumberFormat} onChange={(e) => setInvoiceNumberFormat(e.target.value)} placeholder="e.g. BL{YYYY}-{SEQ:0000}" className="h-9 text-sm" />
-          </div>
-          {error && <p className="text-xs text-destructive">{error}</p>}
-          <Button type="button" size="sm" className="h-8 gap-1" onClick={save} disabled={saving}>
-            <Save className="size-3.5" /> Save settings
-          </Button>
-        </div>
+        </Stack>
       )}
-    </div>
+    </SettingsCard>
   )
-}
-
-
-function parseTextArray(text: string): string[] {
-  return text.split(/\r?\n/).map((s) => s.trim()).filter(Boolean)
 }

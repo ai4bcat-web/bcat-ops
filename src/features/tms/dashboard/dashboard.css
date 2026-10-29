@@ -1,0 +1,222 @@
+/*
+ * Dashboard-only rules. The kit's tokens and surfaces live in
+ * `src/features/tms/theme.css`; everything here is what the chart stack needs on top of
+ * them, and every selector stays under `.tms-shell` / `.tms-portal` so no BCAT Ops page
+ * is touched.
+ */
+
+.tms-shell .tms-dash-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.tms-shell .tms-dash-views {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--tms-muted);
+}
+
+.tms-shell .tms-dash-view-select,
+.tms-shell .tms-dash-groupby .tms-select,
+.tms-shell .tms-chart-groupby {
+  width: auto;
+  min-width: 120px;
+  height: 32px;
+  font-size: 13px;
+  font-style: italic;
+}
+
+.tms-shell .tms-dash-picker-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 32px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: var(--tms-primary);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.tms-shell .tms-dash-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--tms-border);
+}
+
+.tms-shell .tms-dash-groupby {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  color: var(--tms-muted);
+  font-size: 13px;
+}
+
+.tms-shell .tms-dash-panel {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  margin: 8px 0;
+  border: 1px solid var(--tms-border);
+  border-radius: var(--tms-radius);
+  background: var(--tms-card);
+}
+
+.tms-shell .tms-dash-picker,
+.tms-shell .tms-dash-divisions {
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.tms-shell .tms-dash-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 220px;
+  font-size: 13px;
+  color: var(--tms-text);
+}
+
+.tms-shell .tms-dash-date {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--tms-muted);
+}
+
+.tms-shell .tms-dash-date .tms-input {
+  width: 160px;
+}
+
+.tms-shell .tms-dash-error {
+  margin: 10px 0;
+  padding: 8px 10px;
+  border: 1px solid var(--tms-border);
+  border-radius: var(--tms-radius);
+  color: var(--tms-badge-red);
+  font-size: 13px;
+}
+
+.tms-shell .tms-dash-loading {
+  padding: 12px 0;
+  color: var(--tms-muted);
+  font-size: 13px;
+}
+
+.tms-shell .tms-dash-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 12px 0 32px;
+}
+
+/* ── Chart body ───────────────────────────────────────────────────────────── */
+
+.tms-shell .tms-chart-inner,
+.tms-portal .tms-chart-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+}
+
+.tms-shell .tms-chart-note,
+.tms-portal .tms-chart-note {
+  margin: 0;
+  color: var(--tms-muted);
+  font-size: 12px;
+}
+
+.tms-shell .tms-chart-expanded,
+.tms-portal .tms-chart-expanded {
+  height: 60vh;
+}
+
+/* One row of tiles whatever the card carries — four KPIs or five. */
+.tms-shell .tms-kpi-strip,
+.tms-portal .tms-kpi-strip {
+  flex: 0 0 auto;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+}
+
+.tms-shell .tms-kpi,
+.tms-portal .tms-kpi {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--tms-border);
+  border-radius: var(--tms-radius);
+  background: var(--tms-card);
+}
+
+.tms-shell .tms-kpi-label,
+.tms-portal .tms-kpi-label {
+  color: var(--tms-muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+.tms-shell .tms-kpi-value,
+.tms-portal .tms-kpi-value {
+  color: var(--tms-text);
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.tms-shell .tms-kpi-sub,
+.tms-portal .tms-kpi-sub {
+  color: var(--tms-muted);
+  font-size: 12px;
+}
+
+.tms-shell .tms-chart-tip,
+.tms-portal .tms-chart-tip {
+  padding: 8px 10px;
+  border: 1px solid var(--tms-border);
+  border-radius: var(--tms-radius);
+  background: var(--tms-topbar);
+  color: var(--tms-text);
+  font-size: 12px;
+}
+
+.tms-shell .tms-chart-tip-label,
+.tms-portal .tms-chart-tip-label {
+  margin-bottom: 4px;
+  color: var(--tms-muted);
+}
+
+.tms-shell .tms-chart-tip-row,
+.tms-portal .tms-chart-tip-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tms-shell .tms-chart-tip-dot,
+.tms-portal .tms-chart-tip-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.tms-shell .tms-chart-tip-row strong,
+.tms-portal .tms-chart-tip-row strong {
+  margin-left: auto;
+}

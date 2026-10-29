@@ -14,13 +14,10 @@
  * and integer cents. Nothing here multiplies money by a float.
  */
 import { useEffect, useState } from 'react'
+import type { CSSProperties } from 'react'
 import { Plus, Save, Trash2, Wallet } from 'lucide-react'
 import { toast } from 'sonner'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Switch } from '@/components/ui/switch'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { TmsButton, TmsField, TmsIconButton, TmsInput, TmsSelect } from '@/features/tms/kit'
 import { useStaff } from '@/hooks/useStaff'
 import { getTmsSettings, saveCommissionSettings } from '@/lib/apiClient'
 import {
@@ -33,6 +30,7 @@ import type {
   CommissionPaySchedule, CommissionPlan, CommissionRateType, CommissionRoleName, CommissionTierType,
   CommissionTrigger, PayScheduleFrequency, TmsSettings,
 } from '@/types/tms'
+import { CheckRow, ErrorText, GroupLabel, Hint, Loading, Panel, SettingsCard, Stack } from './settingsKit'
 
 const TRIGGER_LABELS: Record<CommissionTrigger, string> = {
   GENERATE_INVOICE: 'When the invoice is generated',
@@ -59,6 +57,13 @@ const FREQUENCY_LABELS: Record<PayScheduleFrequency, string> = {
 
 const NO_TIERS = '__NONE__'
 const ANY_DATE = '__ANY__'
+
+const CHIP: CSSProperties = {
+  display: 'inline-flex', alignItems: 'center', gap: 4,
+  border: '1px solid var(--tms-border)', borderRadius: 999, padding: '2px 8px', fontSize: 12,
+}
+const CHIP_ROW: CSSProperties = { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6 }
+const END_ALIGNED: CSSProperties = { display: 'flex', alignItems: 'flex-end', paddingBottom: 6 }
 
 /** "3.5" → 350 basis points. Decimal text only; junk yields NaN, which the validator names. */
 function bpsFromPercent(text: string): number | null {
@@ -269,465 +274,405 @@ export function CommissionSettingsCard() {
   }
 
   return (
-    <div style={{ border: '1px solid var(--ds-border)', borderRadius: 12, background: 'var(--ds-surface)', padding: 16, boxShadow: 'var(--sh-sm)', display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <div className="flex items-center gap-2.5">
-        <Wallet size={16} style={{ color: 'var(--ds-t3)' }} />
-        <div>
-          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)' }}>Commissions</div>
-          <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 2 }}>
-            Whether commissions are computed at all, what triggers them, who is paid what, and when a period pays out.
-          </div>
-        </div>
-      </div>
+    <SettingsCard
+      icon={Wallet}
+      title="Commissions"
+      description="Whether commissions are computed at all, what triggers them, who is paid what, and when a period pays out."
+    >
+      {loading ? <Loading /> : (
+        <Stack>
+          <CheckRow ariaLabel="Commissions enabled" label="Compute commissions" checked={enabled} onChange={setEnabled} />
+          <Hint>Nothing is computed, written or shown while this is off.</Hint>
 
-      {loading ? <div className="text-sm text-muted-foreground">Loading…</div> : (
-        <div className="space-y-3">
-          <label className="flex items-center gap-2.5 text-sm" style={{ color: 'var(--ds-t2)' }}>
-            <Switch aria-label="Commissions enabled" checked={enabled} onCheckedChange={setEnabled} />
-            Compute commissions
-          </label>
-          <p className="text-xs text-muted-foreground">
-            Nothing is computed, written or shown while this is off.
-          </p>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Earned</Label>
-              <Select value={trigger} onValueChange={(v) => setTrigger(v as CommissionTrigger)}>
-                <SelectTrigger className="h-9 text-sm" aria-label="Commission trigger"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="GENERATE_INVOICE">{TRIGGER_LABELS.GENERATE_INVOICE}</SelectItem>
-                  <SelectItem value="INVOICE_PAID">{TRIGGER_LABELS.INVOICE_PAID}</SelectItem>
-                </SelectContent>
-              </Select>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Ready-to-invoice is deliberately not offered: at that rung nothing is frozen, and a commission on a number that can still change is a number that will be wrong.
-              </p>
-            </div>
-            <div className="space-y-2">
-              <label className="flex items-center gap-2.5 text-sm" style={{ color: 'var(--ds-t2)' }}>
-                <Switch aria-label="Commission approval admin only" checked={approvalAdminOnly} onCheckedChange={setApprovalAdminOnly} />
-                Only an admin may approve a commission
-              </label>
-              <label className="flex items-center gap-2.5 text-sm" style={{ color: 'var(--ds-t2)' }}>
-                <Switch aria-label="Commission pay admin only" checked={payAdminOnly} onCheckedChange={setPayAdminOnly} />
-                Only an admin may submit, approve or pay a period
-              </label>
-            </div>
+          <div className="tms-grid tms-grid-2">
+            <TmsField
+              label="Earned"
+              hint="Ready-to-invoice is deliberately not offered: at that rung nothing is frozen, and a commission on a number that can still change is a number that will be wrong."
+            >
+              <TmsSelect
+                aria-label="Commission trigger"
+                value={trigger}
+                onChange={(e) => setTrigger(e.target.value as CommissionTrigger)}
+              >
+                <option value="GENERATE_INVOICE">{TRIGGER_LABELS.GENERATE_INVOICE}</option>
+                <option value="INVOICE_PAID">{TRIGGER_LABELS.INVOICE_PAID}</option>
+              </TmsSelect>
+            </TmsField>
+            <Stack gap={8}>
+              <CheckRow
+                ariaLabel="Commission approval admin only"
+                label="Only an admin may approve a commission"
+                checked={approvalAdminOnly}
+                onChange={setApprovalAdminOnly}
+              />
+              <CheckRow
+                ariaLabel="Commission pay admin only"
+                label="Only an admin may submit, approve or pay a period"
+                checked={payAdminOnly}
+                onChange={setPayAdminOnly}
+              />
+            </Stack>
           </div>
 
-          <div className="space-y-2 rounded-lg border border-border p-3">
-            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Pay schedule</p>
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-              <div>
-                <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Frequency</Label>
-                <Select value={frequency} onValueChange={(v) => setFrequency(v as PayScheduleFrequency)}>
-                  <SelectTrigger className="h-9 text-sm" aria-label="Pay frequency"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {PAY_SCHEDULE_FREQUENCIES.map((f) => <SelectItem key={f} value={f}>{FREQUENCY_LABELS[f]}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Pay day</Label>
-                <Input
+          <Panel>
+            <GroupLabel>Pay schedule</GroupLabel>
+            <div className="tms-grid tms-grid-4">
+              <TmsField label="Frequency">
+                <TmsSelect
+                  aria-label="Pay frequency"
+                  value={frequency}
+                  onChange={(e) => setFrequency(e.target.value as PayScheduleFrequency)}
+                >
+                  {PAY_SCHEDULE_FREQUENCIES.map((f) => <option key={f} value={f}>{FREQUENCY_LABELS[f]}</option>)}
+                </TmsSelect>
+              </TmsField>
+              <TmsField label="Pay day">
+                <TmsInput
                   aria-label="Pay day"
                   inputMode="numeric"
                   value={payDay}
                   onChange={(e) => setPayDay(e.target.value)}
                   placeholder={frequency === 'MONTHLY' ? '1–28' : '0 = Sunday'}
-                  className="h-9 text-sm"
                 />
-              </div>
-              <div>
-                <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Days until pay</Label>
-                <Input
+              </TmsField>
+              <TmsField label="Days until pay">
+                <TmsInput
                   aria-label="Days until pay"
                   inputMode="numeric"
                   value={daysUntilPay}
                   onChange={(e) => setDaysUntilPay(e.target.value)}
                   placeholder="7"
-                  className="h-9 text-sm"
                 />
-              </div>
-              <div>
-                <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Anchor Monday</Label>
-                <Input
+              </TmsField>
+              <TmsField label="Anchor Monday">
+                <TmsInput
                   aria-label="Anchor date"
                   type="date"
                   value={anchorDate}
                   onChange={(e) => setAnchorDate(e.target.value)}
-                  className="h-9 text-sm"
                 />
-              </div>
+              </TmsField>
             </div>
-            <p className="text-xs text-muted-foreground">
+            <Hint>
               This period:{' '}
-              <span className="font-medium text-foreground" data-testid="commission-period-preview">
+              <strong data-testid="commission-period-preview">
                 {period.periodStart} to {period.periodEnd}, paid {period.payDate}
-              </span>
+              </strong>
               . The anchor only matters on a fortnightly cadence.
-            </p>
-          </div>
+            </Hint>
+          </Panel>
 
-          <div className="space-y-3">
-            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Plans</p>
-            {plans.length === 0 && <p className="text-xs text-muted-foreground">No commission plans yet.</p>}
+          <Stack>
+            <GroupLabel>Plans</GroupLabel>
+            {plans.length === 0 && <Hint>No commission plans yet.</Hint>}
 
             {plans.map((plan, i) => (
-              <div key={i} className="space-y-3 rounded-lg border border-border p-3">
-                <div className="grid grid-cols-[8rem_1fr_auto_auto] items-end gap-3">
-                  <div>
-                    <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Id</Label>
-                    <Input
+              <Panel key={i}>
+                <div className="tms-grid" style={{ gridTemplateColumns: '8rem minmax(0, 1fr) auto auto', alignItems: 'flex-end' }}>
+                  <TmsField label="Id">
+                    <TmsInput
                       aria-label={`Plan ${i + 1} id`}
                       value={plan.id}
                       onChange={(e) => updatePlan(i, { id: e.target.value })}
                       placeholder="house-2026"
-                      className="h-9 text-sm"
                     />
-                  </div>
-                  <div>
-                    <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Name</Label>
-                    <Input
+                  </TmsField>
+                  <TmsField label="Name">
+                    <TmsInput
                       aria-label={`Plan ${i + 1} name`}
                       value={plan.name}
                       onChange={(e) => updatePlan(i, { name: e.target.value })}
                       placeholder="House plan"
-                      className="h-9 text-sm"
+                    />
+                  </TmsField>
+                  <div style={END_ALIGNED}>
+                    <CheckRow
+                      ariaLabel={`Plan ${i + 1} active`}
+                      label="Active"
+                      checked={plan.active}
+                      onChange={(v) => updatePlan(i, { active: v })}
                     />
                   </div>
-                  <label className="flex items-center gap-2 pb-2 text-sm" style={{ color: 'var(--ds-t2)' }}>
-                    <Switch
-                      aria-label={`Plan ${i + 1} active`}
-                      checked={plan.active}
-                      onCheckedChange={(v) => updatePlan(i, { active: v })}
-                    />
-                    Active
-                  </label>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="mb-1 h-8 w-8"
+                  <TmsIconButton
+                    shape="plain"
                     aria-label={`Remove plan ${i + 1}`}
                     onClick={() => setPlans((prev) => prev.filter((_, j) => j !== i))}
                   >
                     <Trash2 size={14} />
-                  </Button>
+                  </TmsIconButton>
                 </div>
 
-                <div className="grid grid-cols-3 gap-3">
-                  <div>
-                    <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Effective from</Label>
-                    <Input
+                <div className="tms-grid tms-grid-3">
+                  <TmsField label="Effective from">
+                    <TmsInput
                       aria-label={`Plan ${i + 1} effective from`}
                       type="date"
                       value={plan.effectiveFrom}
                       onChange={(e) => updatePlan(i, { effectiveFrom: e.target.value })}
-                      className="h-9 text-sm"
                     />
-                  </div>
-                  <div>
-                    <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Effective to</Label>
-                    <Input
+                  </TmsField>
+                  <TmsField label="Effective to">
+                    <TmsInput
                       aria-label={`Plan ${i + 1} effective to`}
                       type="date"
                       value={plan.effectiveTo}
                       onChange={(e) => updatePlan(i, { effectiveTo: e.target.value })}
-                      className="h-9 text-sm"
                     />
-                  </div>
-                  <div>
-                    <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Dated by</Label>
-                    <select
+                  </TmsField>
+                  <TmsField label="Dated by">
+                    <TmsSelect
                       aria-label={`Plan ${i + 1} date field`}
                       value={plan.dateField}
                       onChange={(e) => updatePlan(i, { dateField: e.target.value })}
-                      className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
                     >
                       <option value={ANY_DATE}>— either date —</option>
                       <option value="INVOICED">Invoiced date</option>
                       <option value="DELIVERED">Delivered date</option>
-                    </select>
-                  </div>
+                    </TmsSelect>
+                  </TmsField>
                 </div>
 
-                <div className="grid grid-cols-3 gap-3">
-                  <div>
-                    <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Only these people</Label>
-                    <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                <div className="tms-grid tms-grid-3">
+                  <TmsField label="Only these people">
+                    <div style={CHIP_ROW}>
                       {plan.userIds.map((id) => (
-                        <span key={id} className="inline-flex items-center gap-1 rounded-full border border-border bg-background px-2 py-0.5 text-xs">
+                        <span key={id} style={CHIP}>
                           {nameOf(id)}
-                          <button
-                            type="button"
+                          <TmsIconButton
+                            shape="plain"
                             aria-label={`Remove ${id} from plan ${i + 1}`}
                             onClick={() => updatePlan(i, { userIds: plan.userIds.filter((u) => u !== id) })}
-                            className="text-muted-foreground hover:text-foreground"
                           >
                             ×
-                          </button>
+                          </TmsIconButton>
                         </span>
                       ))}
-                      <select
+                      <TmsSelect
                         aria-label={`Add person to plan ${i + 1}`}
                         value=""
                         onChange={(e) => {
                           const id = e.target.value
                           if (id && !plan.userIds.includes(id)) updatePlan(i, { userIds: [...plan.userIds, id] })
                         }}
-                        className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+                        style={{ width: 'auto' }}
                       >
                         <option value="">— add —</option>
                         {staff.filter((p) => !plan.userIds.includes(p.id)).map((p) => (
                           <option key={p.id} value={p.id}>{nameOf(p.id)}</option>
                         ))}
-                      </select>
+                      </TmsSelect>
                     </div>
-                  </div>
-                  <div>
-                    <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Only these customers</Label>
-                    <Input
+                  </TmsField>
+                  <TmsField label="Only these customers">
+                    <TmsInput
                       aria-label={`Plan ${i + 1} customer ids`}
                       value={plan.customerIds}
                       onChange={(e) => updatePlan(i, { customerIds: e.target.value })}
                       placeholder="customer ids, comma separated"
-                      className="h-9 text-sm"
                     />
-                  </div>
-                  <div>
-                    <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Only these teams</Label>
-                    <Input
+                  </TmsField>
+                  <TmsField label="Only these teams">
+                    <TmsInput
                       aria-label={`Plan ${i + 1} team keys`}
                       value={plan.teamKeys}
                       onChange={(e) => updatePlan(i, { teamKeys: e.target.value })}
                       placeholder="SALES, EAST"
-                      className="h-9 text-sm"
                     />
-                  </div>
+                  </TmsField>
                 </div>
 
-                <div className="space-y-2">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Roles paid</p>
+                <Stack gap={8}>
+                  <GroupLabel>Roles paid</GroupLabel>
                   {plan.roles.map((role, j) => (
-                    <div key={j} className="space-y-2 rounded-md border border-border bg-background p-2.5">
-                      <div className="grid grid-cols-[1fr_1fr_6rem_6rem_auto] items-end gap-2">
-                        <div>
-                          <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Role</Label>
-                          <select
+                    <Panel key={j} style={{ gap: 8, padding: 10 }}>
+                      <div className="tms-grid" style={{ gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr) 6rem 6rem auto', alignItems: 'flex-end', gap: 8 }}>
+                        <TmsField label="Role">
+                          <TmsSelect
                             aria-label={`Plan ${i + 1} role ${j + 1} name`}
                             value={role.roleName}
                             onChange={(e) => updateRole(i, j, { roleName: e.target.value as CommissionRoleName })}
-                            className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
                           >
                             {COMMISSION_ROLE_NAMES.map((r) => <option key={r} value={r}>{COMMISSION_ROLE_LABELS[r]}</option>)}
-                          </select>
-                        </div>
-                        <div>
-                          <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Paid on</Label>
-                          <select
+                          </TmsSelect>
+                        </TmsField>
+                        <TmsField label="Paid on">
+                          <TmsSelect
                             aria-label={`Plan ${i + 1} role ${j + 1} rate type`}
                             value={role.rateType}
                             onChange={(e) => updateRole(i, j, { rateType: e.target.value as CommissionRateType })}
-                            className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
                           >
                             {COMMISSION_RATE_TYPES.map((t) => <option key={t} value={t}>{RATE_TYPE_LABELS[t]}</option>)}
-                          </select>
-                        </div>
-                        <div>
-                          <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                            {role.rateType === 'FIXED' ? 'Rate $' : 'Rate %'}
-                          </Label>
-                          <Input
+                          </TmsSelect>
+                        </TmsField>
+                        <TmsField label={role.rateType === 'FIXED' ? 'Rate $' : 'Rate %'}>
+                          <TmsInput
                             aria-label={`Plan ${i + 1} role ${j + 1} rate`}
                             inputMode="decimal"
                             value={role.rate}
                             onChange={(e) => updateRole(i, j, { rate: e.target.value })}
                             placeholder={role.rateType === 'FIXED' ? '50.00' : '3.5'}
-                            className="h-9 text-sm"
                           />
-                        </div>
-                        <div>
-                          <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Split %</Label>
-                          <Input
+                        </TmsField>
+                        <TmsField label="Split %">
+                          <TmsInput
                             aria-label={`Plan ${i + 1} role ${j + 1} split`}
                             inputMode="decimal"
                             value={role.split}
                             onChange={(e) => updateRole(i, j, { split: e.target.value })}
                             placeholder="equal shares"
-                            className="h-9 text-sm"
                           />
-                        </div>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="mb-1 h-8 w-8"
+                        </TmsField>
+                        <TmsIconButton
+                          shape="plain"
                           aria-label={`Remove plan ${i + 1} role ${j + 1}`}
                           onClick={() => updatePlan(i, { roles: plan.roles.filter((_, k) => k !== j) })}
                         >
                           <Trash2 size={14} />
-                        </Button>
+                        </TmsIconButton>
                       </div>
 
                       {role.rateType === 'FIXED' && Number.isInteger(centsFromDollars(role.rate)) && (
-                        <p className="text-xs text-muted-foreground">
-                          Stored as {formatCents(centsFromDollars(role.rate) ?? 0)} per person on the role.
-                        </p>
+                        <Hint>Stored as {formatCents(centsFromDollars(role.rate) ?? 0)} per person on the role.</Hint>
                       )}
 
                       {role.roleName === 'SPECIFIC_USER' && (
-                        <div>
-                          <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">People</Label>
-                          <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                        <TmsField label="People">
+                          <div style={CHIP_ROW}>
                             {role.userIds.map((id) => (
-                              <span key={id} className="inline-flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-xs">
+                              <span key={id} style={CHIP}>
                                 {nameOf(id)}
-                                <button
-                                  type="button"
+                                <TmsIconButton
+                                  shape="plain"
                                   aria-label={`Remove ${id} from plan ${i + 1} role ${j + 1}`}
                                   onClick={() => updateRole(i, j, { userIds: role.userIds.filter((u) => u !== id) })}
-                                  className="text-muted-foreground hover:text-foreground"
                                 >
                                   ×
-                                </button>
+                                </TmsIconButton>
                               </span>
                             ))}
-                            <select
+                            <TmsSelect
                               aria-label={`Add person to plan ${i + 1} role ${j + 1}`}
                               value=""
                               onChange={(e) => {
                                 const id = e.target.value
                                 if (id && !role.userIds.includes(id)) updateRole(i, j, { userIds: [...role.userIds, id] })
                               }}
-                              className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+                              style={{ width: 'auto' }}
                             >
                               <option value="">— add —</option>
                               {staff.filter((p) => !role.userIds.includes(p.id)).map((p) => (
                                 <option key={p.id} value={p.id}>{nameOf(p.id)}</option>
                               ))}
-                            </select>
+                            </TmsSelect>
                           </div>
-                        </div>
+                        </TmsField>
                       )}
 
-                      <div className="grid grid-cols-[1fr_auto] items-end gap-2">
-                        <div>
-                          <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Tier ladder</Label>
-                          <select
+                      <div className="tms-grid" style={{ gridTemplateColumns: 'minmax(0, 1fr) auto', alignItems: 'flex-end', gap: 8 }}>
+                        <TmsField label="Tier ladder">
+                          <TmsSelect
                             aria-label={`Plan ${i + 1} role ${j + 1} tier type`}
                             value={role.tierType}
                             onChange={(e) => updateRole(i, j, { tierType: e.target.value })}
-                            className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
                           >
                             <option value={NO_TIERS}>— one rate, no bands —</option>
                             {COMMISSION_TIER_TYPES.map((t) => <option key={t} value={t}>{TIER_TYPE_LABELS[t]}</option>)}
-                          </select>
-                        </div>
+                          </TmsSelect>
+                        </TmsField>
                         {role.tierType !== NO_TIERS && (
-                          <label className="flex items-center gap-2 pb-2 text-sm" style={{ color: 'var(--ds-t2)' }}>
-                            <Switch
-                              aria-label={`Plan ${i + 1} role ${j + 1} graduated`}
+                          <div style={END_ALIGNED}>
+                            <CheckRow
+                              ariaLabel={`Plan ${i + 1} role ${j + 1} graduated`}
+                              label="Graduated"
                               checked={role.graduated}
-                              onCheckedChange={(v) => updateRole(i, j, { graduated: v })}
+                              onChange={(v) => updateRole(i, j, { graduated: v })}
                             />
-                            Graduated
-                          </label>
+                          </div>
                         )}
                       </div>
 
                       {role.tierType !== NO_TIERS && (
-                        <div className="space-y-1.5">
+                        <Stack gap={6}>
                           {role.tiers.map((tier, k) => (
-                            <div key={k} className="grid grid-cols-[7rem_6rem_1fr_auto] items-center gap-2">
-                              <Input
+                            <div key={k} className="tms-grid" style={{ gridTemplateColumns: '7rem 6rem minmax(0, 1fr) auto', alignItems: 'center', gap: 8 }}>
+                              <TmsInput
                                 aria-label={`Plan ${i + 1} role ${j + 1} tier ${k + 1} from`}
                                 inputMode="decimal"
                                 value={tier.from}
                                 onChange={(e) => updateTier(i, j, k, { from: e.target.value })}
                                 placeholder={role.tierType === 'PER_LOAD_MARGIN_BPS' ? 'from %' : 'from $'}
-                                className="h-9 text-sm"
                               />
-                              <Input
+                              <TmsInput
                                 aria-label={`Plan ${i + 1} role ${j + 1} tier ${k + 1} rate`}
                                 inputMode="decimal"
                                 value={tier.rate}
                                 onChange={(e) => updateTier(i, j, k, { rate: e.target.value })}
                                 placeholder="rate %"
-                                className="h-9 text-sm"
                               />
-                              <Input
+                              <TmsInput
                                 aria-label={`Plan ${i + 1} role ${j + 1} tier ${k + 1} label`}
                                 value={tier.label}
                                 onChange={(e) => updateTier(i, j, k, { label: e.target.value })}
                                 placeholder="what this band is called"
-                                className="h-9 text-sm"
                               />
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon"
-                                className="h-7 w-7"
+                              <TmsIconButton
+                                shape="plain"
                                 aria-label={`Remove plan ${i + 1} role ${j + 1} tier ${k + 1}`}
                                 onClick={() => updateRole(i, j, { tiers: role.tiers.filter((_, m) => m !== k) })}
                               >
                                 <Trash2 size={13} />
-                              </Button>
+                              </TmsIconButton>
                             </div>
                           ))}
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            className="h-7 gap-1 text-xs"
-                            onClick={() => updateRole(i, j, { tiers: [...role.tiers, { from: '', rate: '', label: '' }] })}
-                          >
-                            <Plus size={12} /> Add band
-                          </Button>
-                          <p className="text-xs text-muted-foreground">
-                            Bands ascend and the first starts at 0, so every load lands in one. Graduated pays each band its own rate on its own slice, which only works on gross-profit bands.
-                          </p>
-                        </div>
+                          <div>
+                            <TmsButton
+                              size="sm"
+                              onClick={() => updateRole(i, j, { tiers: [...role.tiers, { from: '', rate: '', label: '' }] })}
+                            >
+                              <Plus size={12} /> Add band
+                            </TmsButton>
+                          </div>
+                          <Hint>Bands ascend and the first starts at 0, so every load lands in one. Graduated pays each band its own rate on its own slice, which only works on gross-profit bands.</Hint>
+                        </Stack>
                       )}
-                    </div>
+                    </Panel>
                   ))}
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="h-7 gap-1 text-xs"
-                    onClick={() => updatePlan(i, { roles: [...plan.roles, {
-                      roleName: 'PRIMARY_ACCOUNT_OWNER', rateType: 'PERCENT_PROFIT', rate: '', split: '',
-                      userIds: [], tierType: NO_TIERS, graduated: false, tiers: [],
-                    }] })}
-                  >
-                    <Plus size={12} /> Add role
-                  </Button>
-                </div>
-              </div>
+                  <div>
+                    <TmsButton
+                      size="sm"
+                      onClick={() => updatePlan(i, { roles: [...plan.roles, {
+                        roleName: 'PRIMARY_ACCOUNT_OWNER', rateType: 'PERCENT_PROFIT', rate: '', split: '',
+                        userIds: [], tierType: NO_TIERS, graduated: false, tiers: [],
+                      }] })}
+                    >
+                      <Plus size={12} /> Add role
+                    </TmsButton>
+                  </div>
+                </Stack>
+              </Panel>
             ))}
 
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-8 gap-1"
-              onClick={() => setPlans((prev) => [...prev, {
-                id: '', name: '', active: true, effectiveFrom: '', effectiveTo: '', dateField: ANY_DATE,
-                userIds: [], customerIds: '', teamKeys: '', roles: [],
-              }])}
-            >
-              <Plus size={14} /> Add plan
-            </Button>
-          </div>
+            <div>
+              <TmsButton
+                size="sm"
+                onClick={() => setPlans((prev) => [...prev, {
+                  id: '', name: '', active: true, effectiveFrom: '', effectiveTo: '', dateField: ANY_DATE,
+                  userIds: [], customerIds: '', teamKeys: '', roles: [],
+                }])}
+              >
+                <Plus size={14} /> Add plan
+              </TmsButton>
+            </div>
+          </Stack>
 
-          {error && <p className="text-xs text-destructive">{error}</p>}
-          <Button type="button" size="sm" className="h-8 gap-1" onClick={save} disabled={saving}>
-            <Save className="size-3.5" /> Save commission settings
-          </Button>
-        </div>
+          {error && <ErrorText>{error}</ErrorText>}
+          <div>
+            <TmsButton variant="primary" size="sm" onClick={save} disabled={saving}>
+              <Save size={14} /> Save commission settings
+            </TmsButton>
+          </div>
+        </Stack>
       )}
-    </div>
+    </SettingsCard>
   )
 }

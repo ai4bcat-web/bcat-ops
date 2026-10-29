@@ -1,10 +1,6 @@
 import { useState, useMemo } from 'react'
-import { Button } from '@/components/ui/button'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
+import { TmsButton, TmsDialog, TmsField, TmsInput, TmsSelect } from '@/features/tms/kit'
 import type { CustomerRecord, CustomerStatus } from '@/types/tms'
-
 
 interface StatusActionDialogProps {
   open: boolean
@@ -49,43 +45,38 @@ export function StatusActionDialog({ open, customer, action, activeCustomers, on
   }
 
   return (
-    <Dialog open={open} onOpenChange={(v) => { if (!v) onClose() }}>
-      <DialogContent className="max-w-md">
-        <DialogHeader><DialogTitle>{title}</DialogTitle></DialogHeader>
-        <div className="space-y-4">
-          <p className="text-sm text-muted-foreground">
-            {customer.name} · current status <span className="font-medium text-foreground">{customer.status ?? '—'}</span>
-          </p>
-          {action === 'deactivate' && (
-            <>
-              <div>
-                <Label htmlFor="status-reason" className="text-xs uppercase tracking-wider text-muted-foreground">Reason *</Label>
-                <Input id="status-reason" value={reason} onChange={(e) => setReason(e.target.value)} maxLength={250} className="h-9 text-sm" />
-              </div>
-              <div>
-                <Label htmlFor="status-replacement" className="text-xs uppercase tracking-wider text-muted-foreground">Replacement customer</Label>
-                <select
-                  id="status-replacement"
-                  value={replacementId}
-                  onChange={(e) => setReplacementId(e.target.value)}
-                  className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
-                >
-                  <option value="">— none —</option>
-                  {activeCustomers
-                    .filter((c) => c.id !== customer.id)
-                    .map((c) => (
-                      <option key={c.id} value={c.id}>{c.name}</option>
-                    ))}
-                </select>
-              </div>
-            </>
-          )}
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button onClick={handleConfirm} disabled={!canConfirm}>{confirmLabel}</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <TmsDialog
+      open={open}
+      onOpenChange={(v) => { if (!v) onClose() }}
+      title={title}
+      footer={
+        <>
+          <TmsButton onClick={onClose}>Cancel</TmsButton>
+          <TmsButton variant="primary" onClick={handleConfirm} disabled={!canConfirm}>{confirmLabel}</TmsButton>
+        </>
+      }
+    >
+      <div style={{ display: 'grid', gap: 14 }}>
+        <p className="tms-muted" style={{ fontSize: 13 }}>
+          {customer.name} · current status <span style={{ fontWeight: 600, color: 'var(--tms-text)' }}>{customer.status ?? '—'}</span>
+        </p>
+        {action === 'deactivate' && (
+          <>
+            <TmsField label="Reason *" htmlFor="status-reason">
+              <TmsInput id="status-reason" value={reason} onChange={(e) => setReason(e.target.value)} maxLength={250} />
+            </TmsField>
+            <TmsField label="Replacement customer" htmlFor="status-replacement">
+              <TmsSelect
+                id="status-replacement"
+                value={replacementId}
+                onChange={(e) => setReplacementId(e.target.value)}
+                placeholder="— none —"
+                options={activeCustomers.filter((c) => c.id !== customer.id).map((c) => ({ value: c.id, label: c.name }))}
+              />
+            </TmsField>
+          </>
+        )}
+      </div>
+    </TmsDialog>
   )
 }

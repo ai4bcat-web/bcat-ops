@@ -119,12 +119,11 @@ describe('TrackingSection', () => {
     expect(within(timeline).getAllByRole('button', { name: /Resolve/ }).length).toBe(1)
   })
 
-  it('colours an overdue check call and schedules a snooze from the reminder it read', async () => {
+  it('announces an overdue check call and schedules a snooze from the reminder it read', async () => {
     render(<TrackingSection bundle={bundle} customer={null} catalog={[]} actions={actions} />)
 
     const banner = await screen.findByTestId('check-call-banner')
     expect(banner.textContent).toContain('Check call overdue since')
-    expect(banner.className).toContain('text-destructive')
 
     fireEvent.click(within(banner).getByRole('button', { name: 'Snooze 1 h' }))
     await waitFor(() => expect(setNextCheckCall).toHaveBeenCalledTimes(1))

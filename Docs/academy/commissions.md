@@ -11,11 +11,11 @@ related: [users-roles-and-teams, reports, ar-invoicing-and-payments]
 
 What a rep earned on a load, who has to agree to it, and the period those agreed numbers were handed to payroll in. This article covers switching commissions on, the event that earns one and why there is no earlier option, plans — roles, rates, splits and tier ladders — which plan a load falls under, what the number is a percentage of, how the arithmetic rounds, the own-fleet load that pays nothing on purpose, what happens when the money moves afterwards, the approval ladder and countering, and pay periods — which record that payroll ran and **pay nobody from here**.
 
-Commissions live on the **Commissions** page (`/commissions`, Sales → Commissions, page key `commissions`) with four tabs — **Mine**, **To approve**, **Pay periods** and **History** — and on a **Commissions card** on an invoice, where the rows for that one invoice sit with **Preview** and **Recompute** beside them. The house rules are the **Commissions** card in Settings.
+Commissions live on the **Commissions** page (`/tms/brokerage/commissions`, page key `commissions`) with four tabs — **Mine**, **To approve**, **Pay periods** and **History** — and on a **Commissions card** on an invoice, where the rows for that one invoice sit with **Preview** and **Recompute** beside them. The house rules are the **Commissions** card in My Brokerage.
 
 ## Switching them on
 
-The card's first switch is **Compute commissions**, and under it: *"Nothing is computed, written or shown while this is off."* That is literal — with it off the page is a stub saying commissions are switched off, no row is ever written, and every action is refused with *"Commissions are turned off. Switch them on in Settings → Commissions first."*
+The card's first switch is **Compute commissions**, and under it: *"Nothing is computed, written or shown while this is off."* That is literal — with it off the page is a stub saying commissions are switched off, no row is ever written, and every action is refused with *"Commissions are turned off. Switch them on in My Brokerage → Commissions first."*
 
 Turning it on does not back-fill anything. It takes effect on the next invoice that is generated or paid, and on anything somebody recomputes by hand.
 

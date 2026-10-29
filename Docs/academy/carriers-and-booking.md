@@ -9,7 +9,7 @@ related: [shipments-orders-loads]
 
 # Carriers and Booking
 
-A load is covered either by a BCAT truck or by an outside carrier. This article covers the outside-carrier path: the directory at **Operations → Carriers**, the gates that stand between a carrier and a load, quick pay, the rate confirmation, and what happens when a covered load falls apart.
+A load is covered either by a BCAT truck or by an outside carrier. This article covers the outside-carrier path: the directory at **Carriers** (`/tms/carriers`), the gates that stand between a carrier and a load, quick pay, the rate confirmation, and what happens when a covered load falls apart.
 
 ## Own fleet or outside carrier
 
@@ -89,7 +89,7 @@ For a non-admin these are blocks and there is no checkbox. For an admin they app
 | `MISSING_REQUIRED_FIELD` | A field listed in `bookingRequiredFields` is blank on the load (commodity, description, cargo value, weight) |
 | `DOUBLE_BOOKED` | This carrier is already active on another load picking up the same calendar day |
 
-Required documents default to `COI_CARGO`, `COI_AUTO`, `W9`, and `CARRIER_AGREEMENT`. All of these lists live in **Settings → Carrier booking**.
+Required documents default to `COI_CARGO`, `COI_AUTO`, `W9`, and `CARRIER_AGREEMENT`. All of these lists live in **My Brokerage → Carrier booking**.
 
 ## Quick pay
 
@@ -102,7 +102,7 @@ Quick pay buys the carrier its money sooner and charges a fee in basis points. F
 | 7 days | 2.50% (250 bps) |
 | 1 day | 3.00% (300 bps) |
 
-A tier is matched on an **exact** day count. Offering a carrier "about ten days" is not a thing you can save; either 7 or 15 is picked. Tiers are editable in **Settings → Carrier booking**, and a longer wait may never cost more than a shorter one — the settings card refuses to save a list where the fee climbs with the days.
+A tier is matched on an **exact** day count. Offering a carrier "about ten days" is not a thing you can save; either 7 or 15 is picked. Tiers are editable in **My Brokerage → Carrier booking**, and a longer wait may never cost more than a shorter one — the settings card refuses to save a list where the fee climbs with the days.
 
 **Worked example.** The carrier rate is **$2,400.00** and the carrier takes the 7-day tier at 250 bps:
 
@@ -150,6 +150,6 @@ Nothing is guessed. Every imported carrier lands on `PENDING` and has to be vett
 - **Book is disabled and there is no checkbox** — that is a block, not a warning. Read the reason: expired or missing insurance and an inactive authority are fixed on the carrier profile, `ALREADY_COVERED` means somebody else got there first.
 - **An admin sees a checkbox where I see a block** — `CARGO_VALUE_EXCEEDS_INSURANCE`, `INSURANCE_UNVERIFIED`, and `COST_EXCEEDS_TOP_SPEND` are admin-overridable by design. Ask, do not work around.
 - **The carrier says the signing link is dead** — somebody re-sent or voided it. Only the newest link works; send the current one.
-- **Quick pay will not take the number I want** — the day count has to match a configured tier exactly. Change the tier list in **Settings → Carrier booking** or pick a tier that exists.
+- **Quick pay will not take the number I want** — the day count has to match a configured tier exactly. Change the tier list in **My Brokerage → Carrier booking** or pick a tier that exists.
 - **The carrier shows Inactive but nobody changed it** — every cargo policy on file has expired. Upload a current certificate and the status returns on its own.
 - **A carrier I just made inactive is still on a load** — status changes never bounce loads. The load carries a `CARRIER_STATUS_CHANGED` warning; bounce or re-cover it deliberately.

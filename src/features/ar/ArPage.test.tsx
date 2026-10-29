@@ -113,7 +113,6 @@ function worklistRow(patch: Partial<ArWorklistRow> = {}): ArWorklistRow {
     docsRequired: ['POD'],
     docsMissing: [],
     docsReady: true,
-    docsOverride: false,
     invoiceNumber: null,
     invoicedAt: null,
     arBalanceCents: null,
@@ -202,7 +201,7 @@ beforeEach(() => vi.clearAllMocks())
 describe('the AR board', () => {
   it('offers every view of the money, and each one renders', () => {
     setup({ UNBILLED: [worklistRow()], DOCS_NEEDED: [worklistRow({ docsMissing: ['POD'], docsReady: false })] })
-    for (const label of ['To invoice', 'Docs needed', 'Unpaid', 'Paid', 'Payments & credits', 'Aging']) {
+    for (const label of ['Unbilled', 'Docs needed', 'Unpaid', 'Paid', 'Payments & credits', 'Aging']) {
       const tab = screen.getByRole('tab', { name: new RegExp(`^${label}`) })
       fireEvent.click(tab)
       expect(tab.getAttribute('aria-selected')).toBe('true')
@@ -224,8 +223,8 @@ describe('the AR board', () => {
     const strip = within(screen.getByLabelText('AR totals'))
     expect(within(strip.getByText('Open AR').closest('div') as HTMLElement).getByText('$2,500.00')).toBeTruthy()
     expect(within(strip.getByText('Late').closest('div') as HTMLElement).getByText('$2,500.00')).toBeTruthy()
-    // The delivered order nobody has billed, counted off the worklist rows.
-    expect(within(strip.getByText('Delivered, not invoiced').closest('div') as HTMLElement).getByText('1 order')).toBeTruthy()
+    // The delivered shipment nobody has billed, counted off the worklist rows.
+    expect(within(strip.getByText('Delivered, not invoiced').closest('div') as HTMLElement).getByText('1 shipment')).toBeTruthy()
     // Nothing has been collected, so the lag is unmeasured — not zero.
     expect(within(strip.getByText('Avg days to pay').closest('div') as HTMLElement).getByText('—')).toBeTruthy()
   })
@@ -272,6 +271,8 @@ describe('one invoice', () => {
         <Routes><Route path="/ar/invoices/:id" element={<InvoiceDetail />} /></Routes>
       </MemoryRouter>,
     )
+    // The send history is the E-mail tab of the detail page.
+    fireEvent.click(screen.getByRole('tab', { name: 'E-mail' }))
 
     expect(screen.getByText('Not sent')).toBeTruthy()
     expect(screen.queryByText('Sent')).toBeNull()

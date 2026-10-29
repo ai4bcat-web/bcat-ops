@@ -17,8 +17,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AlertTriangle, CheckCircle2, Loader2, Send, ShieldCheck, RefreshCw } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import { TmsButton, TmsInput } from '@/features/tms/kit'
 import { toast } from 'sonner'
 import {
   OTR_FIELD_LABEL,
@@ -150,16 +149,16 @@ export function OtrPanel({ item, onChanged }: Props) {
   // The invoice exists at OTR but a document did not reach it: red, with the way out.
   if (submitted && otrDocsIncomplete(item)) {
     return (
-      <div className="rounded-md border border-red-300 bg-red-50 p-3 text-sm" role="alert">
-        <p className="flex items-start gap-1.5 font-semibold text-red-700">
+      <div className="rounded-md border border-[var(--tms-badge-red)] p-3 text-sm" role="alert">
+        <p className="flex items-start gap-1.5 font-semibold text-[var(--tms-badge-red)]">
           <AlertTriangle className="mt-0.5 size-4 shrink-0" />
           OTR invoice {item.otrInvoiceId} is missing its documents
         </p>
-        <p className="mt-1 text-xs text-red-700">{item.otrError ?? 'The POD or rate confirmation did not reach OTR.'}</p>
-        <p className="mt-2 text-xs text-muted-foreground">
+        <p className="mt-1 text-xs text-[var(--tms-badge-red)]">{item.otrError ?? 'The POD or rate confirmation did not reach OTR.'}</p>
+        <p className="mt-2 text-xs tms-muted">
           Upload the document again in the POD / Rate con columns on this row, then press Resend documents. The row stays in Need to factor until OTR has both.
         </p>
-        <Button
+        <TmsButton
           size="sm"
           className="mt-2"
           disabled={busy !== null}
@@ -167,7 +166,7 @@ export function OtrPanel({ item, onChanged }: Props) {
         >
           {busy === 'docs' ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
           Resend documents
-        </Button>
+        </TmsButton>
       </div>
     )
   }
@@ -175,9 +174,9 @@ export function OtrPanel({ item, onChanged }: Props) {
   // Already at OTR: show their board rather than the assembly panel.
   if (submitted) {
     return (
-      <div className="rounded-md border border-[var(--ds-border)] bg-[var(--ds-bg)] p-3 text-sm">
+      <div className="rounded-md border border-[var(--tms-border)] bg-[var(--tms-bg)] p-3 text-sm">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-          <span className="font-semibold text-foreground">OTR invoice {item.otrInvoiceId}</span>
+          <span className="font-semibold ">OTR invoice {item.otrInvoiceId}</span>
           {/*
             OTR's own word for it, in OTR's own colour — so a glance here and a glance at
             their portal agree. The mapping lives in src/lib/otrInvoiceStatus.ts; their API
@@ -194,7 +193,7 @@ export function OtrPanel({ item, onChanged }: Props) {
             const meta = otrStatusMeta(item.otrStatus)
             if (!meta) {
               return (
-                <span className="text-xs text-muted-foreground">
+                <span className="text-xs tms-muted">
                   Submitted &mdash; waiting for OTR&rsquo;s first status
                 </span>
               )
@@ -210,17 +209,17 @@ export function OtrPanel({ item, onChanged }: Props) {
             )
           })()}
           {item.otrScheduleId && (
-            <span className="text-muted-foreground">Schedule {item.otrScheduleId}</span>
+            <span className="tms-muted">Schedule {item.otrScheduleId}</span>
           )}
           {item.otrStatusSyncedAt && (
-            <span className="text-xs text-muted-foreground">
+            <span className="text-xs tms-muted">
               synced {new Date(item.otrStatusSyncedAt).toLocaleString()}
             </span>
           )}
         </div>
         {item.otrError && (
           <div className="mt-2 space-y-2">
-            <p className="flex items-start gap-1.5 text-xs text-amber-700">
+            <p className="flex items-start gap-1.5 text-xs text-[var(--tms-badge-orange)]">
               <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
               {item.otrError}
             </p>
@@ -228,9 +227,9 @@ export function OtrPanel({ item, onChanged }: Props) {
               * The invoice exists; only the paperwork failed. Submitting again would create
               * a second invoice, so this sends the documents to the one OTR already has.
               */}
-            <Button
+            <TmsButton
               size="sm"
-              variant="outline"
+              variant="secondary"
               disabled={busy !== null}
               onClick={() =>
                 run('docs', () => uploadOtrDocs(item.id), 'Documents sent to OTR')
@@ -242,7 +241,7 @@ export function OtrPanel({ item, onChanged }: Props) {
                 <RefreshCw className="size-3.5" />
               )}
               Send the documents again
-            </Button>
+            </TmsButton>
           </div>
         )}
       </div>
@@ -251,10 +250,10 @@ export function OtrPanel({ item, onChanged }: Props) {
 
   if (!readiness) {
     return (
-      <div className="flex items-center gap-2 rounded-md border border-dashed border-[var(--ds-border)] p-3 text-sm text-muted-foreground">
+      <div className="flex items-center gap-2 rounded-md border border-dashed border-[var(--tms-border)] p-3 text-sm tms-muted">
         {prepareFailed ? (
           <>
-            <AlertTriangle className="size-3.5 text-amber-600" />
+            <AlertTriangle className="size-3.5 text-[var(--tms-badge-orange)]" />
             <span>Could not prepare this row automatically.</span>
           </>
         ) : (
@@ -263,9 +262,9 @@ export function OtrPanel({ item, onChanged }: Props) {
             <span>Working out what OTR still needs\u2026</span>
           </>
         )}
-        <Button
+        <TmsButton
           size="sm"
-          variant="outline"
+          variant="secondary"
           disabled={busy !== null}
           onClick={() => run('assemble', () => assembleInvoice(item.id), 'Prepared for OTR')}
         >
@@ -275,7 +274,7 @@ export function OtrPanel({ item, onChanged }: Props) {
             <RefreshCw className="size-3.5" />
           )}
           {prepareFailed ? 'Try again' : 'Prepare now'}
-        </Button>
+        </TmsButton>
       </div>
     )
   }
@@ -297,7 +296,7 @@ export function OtrPanel({ item, onChanged }: Props) {
     )
 
   return (
-    <div className="space-y-3 rounded-md border border-[var(--ds-border)] bg-[var(--ds-bg)] p-3">
+    <div className="space-y-3 rounded-md border border-[var(--tms-border)] bg-[var(--tms-bg)] p-3">
       {/* Every required field, with its source. Missing ones are called out. */}
       <div className="grid gap-x-6 gap-y-1 text-xs sm:grid-cols-2 lg:grid-cols-3">
         {/*
@@ -339,14 +338,14 @@ export function OtrPanel({ item, onChanged }: Props) {
         * half of what a row needs — sending them back up to a pair of small chips on the
         * collapsed row to attach a POD is how a row ends up opened, read and left alone.
         */}
-      <div className="flex flex-wrap items-center gap-3 rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] p-2.5">
-        <span className="text-xs font-semibold text-muted-foreground">Documents</span>
+      <div className="flex flex-wrap items-center gap-3 rounded-md border border-[var(--tms-border)] bg-[var(--tms-card)] p-2.5">
+        <span className="text-xs font-semibold tms-muted">Documents</span>
         {(['POD', 'RATECON'] as const).map((kind) => {
           const label = kind === 'POD' ? 'POD' : 'Rate confirmation'
           const present = !readiness.missingDocuments?.includes(label)
           return (
             <span key={kind} className="flex items-center gap-1.5">
-              <span className={`text-xs ${present ? 'text-muted-foreground' : 'font-semibold text-red-700'}`}>
+              <span className={`text-xs ${present ? 'tms-muted' : 'font-semibold text-[var(--tms-badge-red)]'}`}>
                 {label}
               </span>
               <FactoringDocCell
@@ -364,7 +363,7 @@ export function OtrPanel({ item, onChanged }: Props) {
       </div>
 
       {readiness.missingDocuments?.length > 0 && (
-        <p className="flex items-center gap-1.5 text-xs font-semibold text-red-700">
+        <p className="flex items-center gap-1.5 text-xs font-semibold text-[var(--tms-badge-red)]">
           <AlertTriangle className="size-3.5" />
           OTR will not take this invoice without the {readiness.missingDocuments.join(' and the ')}.
         </p>
@@ -372,7 +371,7 @@ export function OtrPanel({ item, onChanged }: Props) {
 
       {/* Conflicts do not block submission, but a human is told before they send. */}
       {readiness.warnings?.map((w) => (
-        <p key={w.field} className="flex items-start gap-1.5 text-xs text-amber-700">
+        <p key={w.field} className="flex items-start gap-1.5 text-xs text-[var(--tms-badge-orange)]">
           <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
           {w.message}
         </p>
@@ -382,10 +381,10 @@ export function OtrPanel({ item, onChanged }: Props) {
         <p
           className={`flex items-center gap-1.5 text-xs ${
             item.brokerCheckResult === 'APPROVED'
-              ? 'text-emerald-700'
+              ? 'text-[var(--tms-badge-green)]'
               : item.brokerCheckResult === 'NOT_FOUND'
-                ? 'text-red-700'
-                : 'text-amber-700'
+                ? 'text-[var(--tms-badge-red)]'
+                : 'text-[var(--tms-badge-orange)]'
           }`}
         >
           <ShieldCheck className="size-3.5" />
@@ -400,9 +399,9 @@ export function OtrPanel({ item, onChanged }: Props) {
       )}
 
       <div className="flex flex-wrap items-center gap-2">
-        <Button
+        <TmsButton
           size="sm"
-          variant="outline"
+          variant="secondary"
           disabled={busy !== null}
           onClick={() => run('assemble', () => assembleInvoice(item.id), 'Refreshed')}
         >
@@ -412,12 +411,12 @@ export function OtrPanel({ item, onChanged }: Props) {
             <RefreshCw className="size-3.5" />
           )}
           Refresh
-        </Button>
+        </TmsButton>
 
         {!needsMc && (
-          <Button
+          <TmsButton
             size="sm"
-            variant="outline"
+            variant="secondary"
             disabled={busy !== null}
             onClick={() =>
               run('broker', () => checkBroker(item.id), 'Broker checked with OTR')
@@ -429,10 +428,11 @@ export function OtrPanel({ item, onChanged }: Props) {
               <ShieldCheck className="size-3.5" />
             )}
             Check broker
-          </Button>
+          </TmsButton>
         )}
 
-        <Button
+        <TmsButton
+          variant="primary"
           size="sm"
           disabled={busy !== null || !canSubmit}
           title={
@@ -452,11 +452,11 @@ export function OtrPanel({ item, onChanged }: Props) {
             <Send className="size-3.5" />
           )}
           Submit to OTR
-        </Button>
+        </TmsButton>
 
         {/* Billing it direct is always an option; No Buy is the version OTR chooses for us. */}
         {item.status === 'NEED_TO_FACTOR' && (
-          <Button
+          <TmsButton
             size="sm"
             variant="ghost"
             disabled={busy !== null}
@@ -464,14 +464,14 @@ export function OtrPanel({ item, onChanged }: Props) {
             onClick={() => run('manual', () => markManualInvoice(item.id), 'Moved to Invoice manually')}
           >
             Invoice manually instead
-          </Button>
+          </TmsButton>
         )}
         {/*
           * OTR refused a submitted invoice. Their API carries no reason — the No Buy shows
           * in their portal or an email — so the person who read it moves the row.
           */}
         {item.status === 'PENDING_WITH_OTR' && (
-          <Button
+          <TmsButton
             size="sm"
             variant="ghost"
             className="text-pink-700"
@@ -480,7 +480,7 @@ export function OtrPanel({ item, onChanged }: Props) {
             onClick={() => run('manual', () => markManualInvoice(item.id, { reason: 'NO_BUY' }), 'Flagged No Buy — moved to Invoice manually')}
           >
             OTR won’t buy it — invoice manually
-          </Button>
+          </TmsButton>
         )}
       </div>
     </div>
@@ -535,9 +535,9 @@ function CustomerRow({
    */
   if (!name) {
     return (
-      <div className="flex items-center gap-1.5 rounded-md bg-red-50 px-1.5 py-1" aria-label={`Customer for PRO ${pro}`}>
-        <span className="shrink-0 font-semibold text-red-700">Customer</span>
-        <span className="min-w-0 flex-1 text-red-700">Enter the Broker MC to name it</span>
+      <div className="flex items-center gap-1.5 rounded-md px-1.5 py-1" aria-label={`Customer for PRO ${pro}`}>
+        <span className="shrink-0 font-semibold text-[var(--tms-badge-red)]">Customer</span>
+        <span className="min-w-0 flex-1 text-[var(--tms-badge-red)]">Enter the Broker MC to name it</span>
       </div>
     )
   }
@@ -545,15 +545,15 @@ function CustomerRow({
   const verified = source === 'verified'
   return (
     <div className="flex items-baseline justify-between gap-2">
-      <span className="text-muted-foreground">Customer</span>
+      <span className="tms-muted">Customer</span>
       <span className="flex min-w-0 items-baseline gap-1">
         <span
-          className={`truncate ${verified ? 'font-medium text-foreground' : 'italic text-muted-foreground'}`}
+          className={`truncate ${verified ? 'font-medium ' : 'italic tms-muted'}`}
           title={name}
         >
           {name}
         </span>
-        <span className="shrink-0 text-[10px] text-muted-foreground">
+        <span className="shrink-0 text-[10px] tms-muted">
           ({source ? SOURCE_NOTE[source] : 'unknown'})
         </span>
       </span>
@@ -595,7 +595,9 @@ function FieldRow({
   if (showInput) {
     return (
       <form
-        className={`flex items-center gap-1.5 ${isGap ? 'rounded-md bg-red-50 px-1.5 py-1' : ''}`}
+        className={`flex items-center gap-1.5 ${isGap ? 'rounded-md px-1.5 py-1' : ''}`}
+        data-gap={isGap ? 'true' : undefined}
+        style={isGap ? { border: '1px solid var(--tms-badge-red)' } : undefined}
         onSubmit={(e) => {
           e.preventDefault()
           onSave(draft)
@@ -603,43 +605,43 @@ function FieldRow({
           setDraft('')
         }}
       >
-        <span className={`shrink-0 ${isGap ? 'font-semibold text-red-700' : 'text-muted-foreground'}`}>
+        <span className={`shrink-0 ${isGap ? 'font-semibold text-[var(--tms-badge-red)]' : 'tms-muted'}`}>
           {label}
         </span>
-        <Input
+        <TmsInput
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           placeholder={hint?.placeholder}
           inputMode={hint?.inputMode}
-          className={`h-7 min-w-0 flex-1 text-xs ${isGap ? 'border-red-300 bg-white' : ''}`}
+          className={`h-7 min-w-0 flex-1 text-xs ${isGap ? 'border-[var(--tms-badge-red)]' : ''}`}
           aria-label={`${label} for PRO ${pro}`}
         />
         {/* Named, not just "Save": several of these are open at once on a row with
             more than one gap, and a bare "Save" is ambiguous to a screen reader and
             to anyone automating the page. */}
-        <Button
+        <TmsButton
           type="submit"
           size="sm"
-          variant="outline"
+          variant="secondary"
           className="h-7 px-2 text-xs"
           disabled={busy}
           aria-label={`Save ${label} for PRO ${pro}`}
         >
           {saving ? <Loader2 className="size-3 animate-spin" /> : 'Save'}
-        </Button>
+        </TmsButton>
       </form>
     )
   }
 
   return (
     <div className="flex items-baseline justify-between gap-2">
-      <span className="text-muted-foreground">{label}</span>
+      <span className="tms-muted">{label}</span>
       <span className="flex min-w-0 items-baseline gap-1">
-        <span className="truncate font-medium text-foreground" title={String(value)}>
+        <span className="truncate font-medium " title={String(value)}>
           {String(value)}
         </span>
         {source && (
-          <span className="shrink-0 text-[10px] text-muted-foreground">
+          <span className="shrink-0 text-[10px] tms-muted">
             {/* The date is the day Submit is pressed, which assembly records as a 'load' value. */}
             ({field === 'InvoiceDate' && source === 'load' ? 'date of submit' : SOURCE_LABEL[source] ?? source})
           </span>
@@ -647,7 +649,7 @@ function FieldRow({
         {editable && (
           <button
             type="button"
-            className="shrink-0 text-[10px] font-semibold text-[var(--ds-blue,#2563eb)] underline-offset-2 hover:underline disabled:opacity-50"
+            className="shrink-0 text-[10px] font-semibold text-[var(--tms-primary,#2563eb)] underline-offset-2 hover:underline disabled:opacity-50"
             disabled={busy}
             aria-label={`${typed ? 'Change' : 'Override'} ${label} for PRO ${pro}`}
             onClick={() => { setDraft(typed ? String(value ?? '') : ''); setOpen(true) }}

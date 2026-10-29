@@ -7,7 +7,6 @@ import { useAuth } from '@/hooks/useAuth'
 const ROUTE_LABELS: Record<string, string> = {
   dashboard:   'Dashboard',
   calendar:    'Calendar',
-  loads:       'Loads',
   intake:      'Intake',
   tasks:       'Tasks',
   appts:       'Appts',
@@ -62,11 +61,17 @@ export function Topbar({ onMenuToggle }: { onMenuToggle?: () => void } = {}) {
               fontSize: 13, color: 'var(--ds-t1)', fontFamily: 'inherit', outline: 'none',
               boxSizing: 'border-box',
             }}
-            placeholder="Search loads, drivers, equipment…"
+            placeholder="Search shipments, drivers, equipment…"
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter' && searchQuery.trim()) navigate('/loads') }}
-            aria-label="Search loads"
+            // The Shipments list reads `?q=` as its search box, so the term travels
+            // with the jump instead of being retyped there.
+            onKeyDown={e => {
+              if (e.key === 'Enter' && searchQuery.trim()) {
+                navigate(`/tms/shipments?q=${encodeURIComponent(searchQuery.trim())}`)
+              }
+            }}
+            aria-label="Search shipments"
           />
           <span style={{
             position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
@@ -104,7 +109,7 @@ export function Topbar({ onMenuToggle }: { onMenuToggle?: () => void } = {}) {
 
         {/* Settings */}
         {hasPageAccess('settings') && (
-          <button aria-label="Settings" onClick={() => navigate('/settings')} style={{
+          <button aria-label="Settings" onClick={() => navigate('/tms/brokerage')} style={{
             width: 34, height: 34, display: 'flex', alignItems: 'center', justifyContent: 'center',
             background: 'transparent', border: '1px solid transparent', borderRadius: 7,
             cursor: 'pointer', color: 'var(--ds-t2)',

@@ -75,7 +75,9 @@ function row(over: Partial<CommissionRecord> & { id: string }): CommissionRecord
 
 const draw = () => render(<MemoryRouter><CommissionsPage /></MemoryRouter>)
 
-const tab = (label: string) => screen.getByRole('tab', { name: label })
+// The MVMNT tab carries its count inside the button, so the accessible name reads
+// "<label><count>"; the tab is still identified by its label.
+const tab = (label: string) => screen.getByRole('tab', { name: new RegExp(`^${label}`) })
 
 beforeEach(() => {
   vi.clearAllMocks()

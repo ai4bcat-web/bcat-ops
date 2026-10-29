@@ -15,10 +15,8 @@
 import { useState } from 'react'
 import { AlertTriangle, Check, Copy, PackageCheck, RotateCw, Send, Star } from 'lucide-react'
 import { toast } from 'sonner'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
+import { TmsBadge, TmsButton, TmsCard, TmsTextarea } from '@/features/tms/kit'
 import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
 import { rateCarrier, sendMilestoneNotice, sendUploadLink } from '@/lib/apiClient'
 import { MILESTONE_LABELS } from '@/lib/shipmentNotices'
 import { formatDateTime } from '@/lib/date'
@@ -104,17 +102,18 @@ export function DeliveryCard({ bundle, onReload }: {
   }
 
   return (
-    <div className="space-y-3 rounded-lg border border-border p-3 text-sm" data-testid="delivery-card">
+    <TmsCard title="Delivery">
+      <div className="space-y-3 text-sm" data-testid="delivery-card">
       <div className="flex flex-wrap items-center gap-2">
-        <PackageCheck size={14} className="text-emerald-600" />
+        <PackageCheck size={14} className="text-[color:var(--tms-badge-green)]" />
         <p className="font-medium">Delivered {formatDateTime(delivered[delivered.length - 1])}</p>
         {delivered.length > 1 && (
-          <Badge variant="outline" className="text-[10px]">{delivered.length} legs</Badge>
+          <TmsBadge tone="gray" className="text-[10px]">{delivered.length} legs</TmsBadge>
         )}
       </div>
 
       <div>
-        <p className="text-xs uppercase tracking-wider text-muted-foreground">Paperwork request</p>
+        <p className="text-xs uppercase tracking-wider tms-muted">Paperwork request</p>
         {outside ? (
           <p className="mt-0.5">
             {outside.podRequestedAt
@@ -122,55 +121,53 @@ export function DeliveryCard({ bundle, onReload }: {
               : 'The carrier has not been asked for their paperwork yet.'}
           </p>
         ) : (
-          <p className="mt-0.5 text-muted-foreground">
+          <p className="mt-0.5 tms-muted">
             Our own driver — the paperwork comes through the driver app.
           </p>
         )}
       </div>
 
       <div>
-        <p className="text-xs uppercase tracking-wider text-muted-foreground">
+        <p className="text-xs uppercase tracking-wider tms-muted">
           E-mails{notices.failedCount > 0 ? ` · ${notices.failedCount} not sent` : ''}
         </p>
         {notices.loading && notices.notices.length === 0 && (
-          <p className="mt-0.5 text-muted-foreground">Reading the e-mail history…</p>
+          <p className="mt-0.5 tms-muted">Reading the e-mail history…</p>
         )}
         {!notices.loading && notices.notices.length === 0 && (
-          <p className="mt-0.5 text-muted-foreground">Nothing has been sent about this shipment.</p>
+          <p className="mt-0.5 tms-muted">Nothing has been sent about this shipment.</p>
         )}
         <ul className="mt-1 space-y-1">
           {notices.notices.map((n) => (
-            <li key={n.id} className="flex flex-wrap items-center gap-2 rounded-md border border-border px-2 py-1.5">
-              <Badge variant="outline" className="text-[10px]">
+            <li key={n.id} className="flex flex-wrap items-center gap-2 rounded-md border border-[color:var(--tms-border)] px-2 py-1.5">
+              <TmsBadge tone="gray" className="text-[10px]">
                 {NOTICE_KIND_LABELS[n.kind]}
                 {n.milestone ? ` · ${MILESTONE_LABELS[n.milestone]}` : ''}
-              </Badge>
+              </TmsBadge>
               <span className="min-w-0 flex-1 truncate text-xs">{n.to}</span>
               <span className="flex items-center gap-1 text-[11px]">
-                {n.status === 'SENT' && <><Check size={12} className="text-emerald-600" />sent</>}
+                {n.status === 'SENT' && <><Check size={12} className="text-[color:var(--tms-badge-green)]" />sent</>}
                 {n.status === 'COPY' && <>copy only</>}
                 {(n.status === 'NOT_SENT' || n.status === 'FAILED') && (
                   <>
-                    <AlertTriangle size={12} className="text-amber-600" />
+                    <AlertTriangle size={12} className="text-[color:var(--tms-badge-orange)]" />
                     not sent{n.error ? ` — ${n.error}` : ''}
                   </>
                 )}
               </span>
-              <Button
-                variant="outline" size="sm" className="h-7"
+              <TmsButton size="sm" className="h-7"
                 onClick={() => { void navigator.clipboard?.writeText(n.body); toast.success('Message copied') }}
               >
                 <Copy size={13} className="mr-1" />Copy body
-              </Button>
+              </TmsButton>
               {(n.kind === 'MILESTONE' || n.kind === 'POD_REQUEST') && (
-                <Button
-                  variant="outline" size="sm" className="h-7"
+                <TmsButton size="sm" className="h-7"
                   disabled={busy !== null}
                   onClick={() => { void resend(n) }}
                 >
                   {busy === n.id ? <RotateCw size={13} className="mr-1 animate-spin" /> : <Send size={13} className="mr-1" />}
                   Resend
-                </Button>
+                </TmsButton>
               )}
             </li>
           ))}
@@ -179,9 +176,9 @@ export function DeliveryCard({ bundle, onReload }: {
 
       {outside && (
         <div>
-          <p className="text-xs uppercase tracking-wider text-muted-foreground">Rate this carrier</p>
+          <p className="text-xs uppercase tracking-wider tms-muted">Rate this carrier</p>
           {outside.ratedAt && (
-            <p className="mt-0.5 text-xs text-muted-foreground">
+            <p className="mt-0.5 text-xs tms-muted">
               Rated {outside.ratingStars}★ on {formatDateTime(outside.ratedAt)}
               {outside.ratingNote ? ` · ${outside.ratingNote}` : ''}
             </p>
@@ -195,18 +192,18 @@ export function DeliveryCard({ bundle, onReload }: {
                 aria-pressed={(stars ?? outside.ratingStars ?? 0) >= n}
                 onClick={() => setStars(n)}
                 disabled={busy !== null}
-                className="text-muted-foreground disabled:opacity-50"
+                className="tms-muted disabled:opacity-50"
               >
                 <Star
                   size={18}
-                  className={(stars ?? outside.ratingStars ?? 0) >= n ? 'fill-amber-400 text-amber-500' : ''}
+                  className={(stars ?? outside.ratingStars ?? 0) >= n ? 'fill-amber-400 text-[color:var(--tms-badge-orange)]' : ''}
                 />
               </button>
             ))}
           </div>
           <div className="mt-2">
-            <Label className="text-xs uppercase tracking-wider text-muted-foreground">Note</Label>
-            <Textarea
+            <Label className="tms-field-label">Note</Label>
+            <TmsTextarea
               aria-label="Rating note"
               rows={2}
               placeholder="What the next booker should know"
@@ -215,21 +212,22 @@ export function DeliveryCard({ bundle, onReload }: {
               className="text-sm"
             />
           </div>
-          <Button
+          <TmsButton variant="primary"
             size="sm" className="mt-2"
             disabled={busy !== null || stars == null}
             onClick={() => { void rate() }}
           >
             {busy === 'rate' ? 'Saving…' : 'Save rating'}
-          </Button>
+          </TmsButton>
         </div>
       )}
 
       {error && (
-        <p className="flex items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/5 p-2 text-xs text-destructive">
+        <p className="flex items-start gap-2 rounded-[var(--tms-radius)] border border-[color:var(--tms-badge-red)]  p-2 text-xs text-[color:var(--tms-badge-red)]">
           <AlertTriangle size={14} className="mt-0.5 shrink-0" />{error}
         </p>
       )}
-    </div>
+      </div>
+    </TmsCard>
   )
 }

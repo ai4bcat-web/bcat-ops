@@ -1,19 +1,20 @@
 /**
- * `/ar/invoices/:id` — one issued bill, everything that has happened to it, and the four
- * things anybody does next: e-mail it, bank it, factor it, or void it.
+ * `/tms/invoicing/invoices/:id` — one issued bill, everything that has happened to it,
+ * and the actions that can still happen.
  *
- * The page is deliberately literal about the e-mail history. SES is denied outside
- * production, so on dev every send comes back NOT_SENT with the refusal attached; the
- * row says "Not sent" and offers the body to copy, rather than a green tick for a mail
- * that never left. A bill the customer never received, shown as sent, is money that goes
- * uncollected for a month.
+ * An invoice is a snapshot: the lines, the terms and the bill-to were frozen when it was
+ * generated, and nothing on this page edits them. A mistake is voided and raised again,
+ * which is why Void asks for a reason and leaves the voided invoice on the record.
+ *
+ * On dev, SES is denied: an invoice e-mail comes back NOT_SENT with the refusal and a
+ * signed download. The E-mail tab reports exactly that and never claims a send that did
+ * not happen.
  */
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { ChevronLeft, Copy, Download, ExternalLink, RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
+import { TmsBadge, TmsButton, TmsCard, TmsPage, TmsTabs, statusTone } from '@/features/tms/kit'
 import { useAuthUser } from '@/hooks/useAuth'
 import { useFactoringItems } from '@/hooks/useFactoringItems'
 import { useInvoice } from '@/hooks/useInvoice'
@@ -33,7 +34,7 @@ import { ReasonDialog } from './components/ReasonDialog'
 import { ReceivePaymentDialog } from './components/ReceivePaymentDialog'
 import { SendToFactorDialog } from './components/SendToFactorDialog'
 import { WriteOffDialog } from './components/WriteOffDialog'
-import type { ArPaymentMethod, InvoiceStatus } from '@/types/tms'
+import type { ArPaymentMethod } from '@/types/tms'
 
 type DetailDialog =
   | { kind: 'email' }
@@ -43,17 +44,15 @@ type DetailDialog =
   | { kind: 'void' }
   | { kind: 'markSent' }
 
-const STATUS_TONE: Record<InvoiceStatus, 'default' | 'secondary' | 'destructive' | 'outline'> = {
-  ISSUED: 'outline',
-  PARTIAL: 'secondary',
-  PAID: 'default',
-  VOID: 'destructive',
-}
+const TABS = [
+  { key: 'summary', label: 'Summary' },
+  { key: 'pdf', label: 'PDF' },
+  { key: 'email', label: 'E-mail' },
+  { key: 'payments', label: 'Payments' },
+  { key: 'factoring', label: 'Factoring' },
+]
 
-const CARD = 'rounded-md border border-border bg-card p-4'
-const TH = 'px-2 py-1.5 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground'
-const TD = 'px-2 py-1.5 align-top'
-const MONEY = 'px-2 py-1.5 text-right tabular-nums align-top'
+const RED = { color: 'var(--tms-badge-red)' }
 
 export function InvoiceDetail() {
   const { id } = useParams<{ id: string }>()
@@ -64,6 +63,7 @@ export function InvoiceDetail() {
   // the whole invoice away for. The server decides either way.
   const groups = useAuthUser()?.groups ?? []
 
+  const [tab, setTab] = useState('summary')
   const [dialog, setDialog] = useState<DetailDialog | null>(null)
   const [busy, setBusy] = useState(false)
   const [pdfUrl, setPdfUrl] = useState<string | null>(null)
@@ -82,13 +82,13 @@ export function InvoiceDetail() {
   }, [pdfKey])
   useEffect(() => { loadPdf() }, [loadPdf])
 
-  if (!id) return <p className="p-6 text-sm text-muted-foreground">No invoice selected.</p>
+  if (!id) return <p className="tms-muted">No invoice selected.</p>
   if (!invoice) {
     return (
-      <div className="p-6 text-sm">
-        {loading ? <span className="text-muted-foreground">Loading invoice…</span> : null}
-        {!loading && <span className="text-destructive">{error ?? 'Invoice not found.'}</span>}
-      </div>
+      <p>
+        {loading ? <span className="tms-muted">Loading invoice…</span> : null}
+        {!loading && <span style={RED}>{error ?? 'Invoice not found.'}</span>}
+      </p>
     )
   }
 
@@ -153,253 +153,269 @@ export function InvoiceDetail() {
   }
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="border-b border-border px-6 py-2">
-        <Button asChild variant="ghost" size="sm">
-          <Link to="/ar" aria-label="Back to AR"><ChevronLeft size={14} className="mr-1" /> AR</Link>
-        </Button>
-      </div>
+    <TmsPage
+      title={
+        <span className="flex items-center gap-2">
+          <Link className="tms-icon-btn tms-icon-btn-plain" to="/tms/invoicing" aria-label="Back to Invoicing">
+            <ChevronLeft size={16} />
+          </Link>
+          {invoice.number}
+          <TmsBadge tone={statusTone(invoice.status)}>{invoice.status}</TmsBadge>
+          <TmsBadge tone={chip.late ? 'red' : 'gray'}>{chip.label}</TmsBadge>
+        </span>
+      }
+      actions={
+        <>
+          <TmsButton variant="primary" aria-label="E-mail invoice" disabled={busy} onClick={() => setDialog({ kind: 'email' })}>
+            E-mail
+          </TmsButton>
+          <TmsButton aria-label="Receive payment" disabled={busy} onClick={() => setDialog({ kind: 'payment' })}>
+            Receive payment
+          </TmsButton>
+          <TmsButton aria-label="Send to factor" disabled={busy} onClick={() => setDialog({ kind: 'factor' })}>
+            Send to Factor
+          </TmsButton>
+          <TmsButton aria-label="Write off balance" disabled={busy} onClick={() => setDialog({ kind: 'writeOff' })}>
+            Write off
+          </TmsButton>
+          <TmsButton variant="destructive" aria-label="Void invoice" disabled={busy} onClick={() => setDialog({ kind: 'void' })}>
+            Void
+          </TmsButton>
+        </>
+      }
+    >
+      <TmsCard>
+        <dl className="tms-grid tms-grid-4">
+          <Field label="Customer" value={invoice.customerName ?? invoice.customerId} />
+          <Field label="Bill-to" value={invoice.billTo?.name ?? invoice.customerName ?? '—'} />
+          <Field
+            label="Shipment"
+            value={<Link to={`/tms/shipments/${invoice.shipmentId}`}>{invoice.shipmentNumber ?? invoice.shipmentId}</Link>}
+          />
+          <Field label="Terms" value={`Net ${invoice.termsDays}`} />
+          <Field label="Issued" value={formatDay(invoice.invoiceDate)} />
+          <Field label="Due" value={formatDay(invoice.dueAt)} />
+          <Field label="Total" value={formatCents(invoice.totalCents)} />
+          <Field label="Paid" value={formatCents(invoice.paidCents)} />
+          <Field label="Written off" value={formatCents(invoice.writtenOffCents)} />
+          <Field label="Balance" value={<span className="font-semibold">{formatCents(invoice.balanceCents)}</span>} />
+          {invoice.status === 'VOID' && <Field label="Voided" value={invoice.voidReason ?? 'No reason recorded'} />}
+        </dl>
+      </TmsCard>
 
-      <div className="flex-1 space-y-4 overflow-auto px-6 py-4">
-        <header className={CARD}>
-          <div className="flex flex-wrap items-center gap-2">
-            <h1 className="text-lg font-semibold">{invoice.number}</h1>
-            <Badge variant={STATUS_TONE[invoice.status]}>{invoice.status}</Badge>
-            <Badge variant={chip.late ? 'destructive' : 'outline'} className="text-[10px]">{chip.label}</Badge>
-            <div className="ml-auto flex flex-wrap gap-2">
-              <Button size="sm" aria-label="E-mail invoice" disabled={busy} onClick={() => setDialog({ kind: 'email' })}>
-                E-mail
-              </Button>
-              <Button size="sm" variant="outline" aria-label="Receive payment" disabled={busy} onClick={() => setDialog({ kind: 'payment' })}>
-                Receive payment
-              </Button>
-              <Button size="sm" variant="outline" aria-label="Send to factor" disabled={busy} onClick={() => setDialog({ kind: 'factor' })}>
-                Send to Factor
-              </Button>
-              <Button size="sm" variant="outline" aria-label="Write off balance" disabled={busy} onClick={() => setDialog({ kind: 'writeOff' })}>
-                Write off
-              </Button>
-              <Button size="sm" variant="destructive" aria-label="Void invoice" disabled={busy} onClick={() => setDialog({ kind: 'void' })}>
-                Void
-              </Button>
+      <TmsTabs tabs={TABS} active={tab} onSelect={setTab} />
+
+      {tab === 'summary' && (
+        <>
+          <TmsCard title="Lines" flush>
+            <div className="tms-table-wrap">
+              <table className="tms-table">
+                <thead>
+                  <tr>
+                    <th scope="col">CODE</th>
+                    <th scope="col">DESCRIPTION</th>
+                    <th scope="col">RATE</th>
+                    <th scope="col">COUNT</th>
+                    <th scope="col">AMOUNT</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {lines.length === 0 && (
+                    <tr><td colSpan={5} className="tms-muted">This invoice has no lines.</td></tr>
+                  )}
+                  {lines.map((line) => (
+                    <tr key={line.chargeId}>
+                      <td>{line.code}</td>
+                      <td>{line.label ?? line.code}</td>
+                      <td className="text-right tabular-nums">{formatCents(line.rateCents)}</td>
+                      <td className="text-right tabular-nums">{line.count}</td>
+                      <td className="text-right tabular-nums">{formatCents(line.amountCents)}</td>
+                    </tr>
+                  ))}
+                  <tr>
+                    <td colSpan={4}>Subtotal</td>
+                    <td className="text-right tabular-nums">{formatCents(invoice.subtotalCents)}</td>
+                  </tr>
+                  <tr>
+                    <td colSpan={4} className="font-semibold">Total</td>
+                    <td className="text-right font-semibold tabular-nums">{formatCents(invoice.totalCents)}</td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
+          </TmsCard>
+
+          <div className="tms-grid tms-grid-2">
+            <TmsCard title="References">
+              {references.length === 0 && <p className="tms-muted">None on the bill.</p>}
+              <dl className="tms-grid tms-grid-2">
+                {references.map((r) => (
+                  <Field key={`${r.code}:${r.value}`} label={r.label ?? r.code} value={r.value} />
+                ))}
+              </dl>
+            </TmsCard>
+
+            <TmsCard title="Attachments">
+              {attachments.length === 0 && <p className="tms-muted">Nothing was attached to this invoice.</p>}
+              <ul className="flex flex-col gap-1">
+                {attachments.map((doc) => (
+                  <li key={doc.id} className="flex items-center gap-2">
+                    <span className="tms-muted">{doc.type}</span>
+                    <span>{doc.name}</span>
+                    <span className="text-xs tms-muted">{Math.round(doc.sizeBytes / 1024)} KB</span>
+                  </li>
+                ))}
+              </ul>
+            </TmsCard>
           </div>
+        </>
+      )}
 
-          <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-sm sm:grid-cols-4">
-            <Field label="Customer" value={invoice.customerName ?? invoice.customerId} />
-            <Field label="Bill-to" value={invoice.billTo?.name ?? invoice.customerName ?? '—'} />
-            <Field
-              label="Shipment"
-              value={
-                <Link className="text-primary hover:underline" to={`/shipments/${invoice.shipmentId}`}>
-                  {invoice.shipmentNumber ?? invoice.shipmentId}
-                </Link>
-              }
-            />
-            <Field label="Terms" value={`Net ${invoice.termsDays}`} />
-            <Field label="Issued" value={formatDay(invoice.invoiceDate)} />
-            <Field label="Due" value={formatDay(invoice.dueAt)} />
-            <Field label="Total" value={formatCents(invoice.totalCents)} />
-            <Field label="Paid" value={formatCents(invoice.paidCents)} />
-            <Field label="Written off" value={formatCents(invoice.writtenOffCents)} />
-            <Field label="Balance" value={<span className="font-semibold">{formatCents(invoice.balanceCents)}</span>} />
-            {invoice.status === 'VOID' && <Field label="Voided" value={invoice.voidReason ?? 'No reason recorded'} />}
-          </dl>
-        </header>
-
-        <section className={CARD}>
-          <div className="mb-2 flex items-center gap-2">
-            <h2 className="text-sm font-semibold">PDF</h2>
-            <div className="ml-auto flex gap-2">
-              <Button size="sm" variant="outline" aria-label="Re-render invoice PDF" disabled={busy} onClick={runRender}>
-                <RefreshCw size={14} className="mr-1" /> Re-render
-              </Button>
+      {tab === 'pdf' && (
+        <TmsCard
+          title="PDF"
+          actions={
+            <>
+              <TmsButton size="sm" aria-label="Re-render invoice PDF" disabled={busy} onClick={runRender}>
+                <RefreshCw size={14} /> Re-render
+              </TmsButton>
               {pdfUrl && (
-                <Button size="sm" variant="outline" aria-label="Download invoice PDF" onClick={downloadPdf}>
-                  <Download size={14} className="mr-1" /> Download
-                </Button>
+                <TmsButton size="sm" aria-label="Download invoice PDF" onClick={downloadPdf}>
+                  <Download size={14} /> Download
+                </TmsButton>
               )}
-            </div>
-          </div>
+            </>
+          }
+        >
           {!pdfKey && (
-            <p className="text-sm text-muted-foreground">
+            <p className="tms-muted">
               No PDF stored yet. Re-render writes one from the invoice snapshot — nothing on the bill changes.
             </p>
           )}
-          {pdfKey && !pdfUrl && <p className="text-sm text-muted-foreground">Opening the stored PDF…</p>}
+          {pdfKey && !pdfUrl && <p className="tms-muted">Opening the stored PDF…</p>}
           {pdfKey && pdfUrl && (
-            <iframe title={`Invoice ${invoice.number} PDF`} src={pdfUrl} className="h-[560px] w-full rounded border border-border" />
+            <iframe
+              title={`Invoice ${invoice.number} PDF`}
+              src={pdfUrl}
+              className="h-[560px] w-full"
+              style={{ border: '1px solid var(--tms-border)', borderRadius: 'var(--tms-radius)' }}
+            />
           )}
-        </section>
+        </TmsCard>
+      )}
 
-        <section className={CARD}>
-          <h2 className="mb-2 text-sm font-semibold">Lines</h2>
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border">
-                <th className={TH} scope="col">Code</th>
-                <th className={TH} scope="col">Description</th>
-                <th className={`${TH} text-right`} scope="col">Rate</th>
-                <th className={`${TH} text-right`} scope="col">Count</th>
-                <th className={`${TH} text-right`} scope="col">Amount</th>
-              </tr>
-            </thead>
-            <tbody>
-              {lines.length === 0 && (
-                <tr><td colSpan={5} className="py-4 text-center text-sm text-muted-foreground">This invoice has no lines.</td></tr>
-              )}
-              {lines.map((line) => (
-                <tr key={line.chargeId} className="border-b border-border/60">
-                  <td className={TD}>{line.code}</td>
-                  <td className={TD}>{line.label ?? line.code}</td>
-                  <td className={MONEY}>{formatCents(line.rateCents)}</td>
-                  <td className={MONEY}>{line.count}</td>
-                  <td className={MONEY}>{formatCents(line.amountCents)}</td>
-                </tr>
-              ))}
-              <tr>
-                <td className={TD} colSpan={4}>Subtotal</td>
-                <td className={MONEY}>{formatCents(invoice.subtotalCents)}</td>
-              </tr>
-              <tr>
-                <td className={`${TD} font-semibold`} colSpan={4}>Total</td>
-                <td className={`${MONEY} font-semibold`}>{formatCents(invoice.totalCents)}</td>
-              </tr>
-            </tbody>
-          </table>
-        </section>
-
-        <div className="grid gap-4 lg:grid-cols-2">
-          <section className={CARD}>
-            <h2 className="mb-2 text-sm font-semibold">References</h2>
-            {references.length === 0 && <p className="text-sm text-muted-foreground">None on the bill.</p>}
-            <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
-              {references.map((r) => (
-                <Field key={`${r.code}:${r.value}`} label={r.label ?? r.code} value={r.value} />
-              ))}
-            </dl>
-          </section>
-
-          <section className={CARD}>
-            <h2 className="mb-2 text-sm font-semibold">Attachments</h2>
-            {attachments.length === 0 && (
-              <p className="text-sm text-muted-foreground">Nothing was attached to this invoice.</p>
-            )}
-            <ul className="space-y-1 text-sm">
-              {attachments.map((doc) => (
-                <li key={doc.id} className="flex items-center gap-2">
-                  <span className="text-muted-foreground">{doc.type}</span>
-                  <span>{doc.name}</span>
-                  <span className="text-xs text-muted-foreground">{Math.round(doc.sizeBytes / 1024)} KB</span>
-                </li>
-              ))}
-            </ul>
-          </section>
-        </div>
-
-        <section className={CARD}>
-          <div className="mb-2 flex items-center gap-2">
-            <h2 className="text-sm font-semibold">E-mail history</h2>
-            <div className="ml-auto flex gap-2">
-              <Button size="sm" variant="outline" aria-label="Resend invoice" disabled={busy} onClick={() => setDialog({ kind: 'email' })}>
+      {tab === 'email' && (
+        <TmsCard
+          title="E-mail history"
+          actions={
+            <>
+              <TmsButton size="sm" aria-label="Resend invoice" disabled={busy} onClick={() => setDialog({ kind: 'email' })}>
                 Resend
-              </Button>
-              <Button size="sm" variant="outline" aria-label="Mark as sent" disabled={busy} onClick={() => setDialog({ kind: 'markSent' })}>
+              </TmsButton>
+              <TmsButton size="sm" aria-label="Mark as sent" disabled={busy} onClick={() => setDialog({ kind: 'markSent' })}>
                 Mark as sent
-              </Button>
-            </div>
-          </div>
-
-          {notices.length === 0 && (
-            <p className="text-sm text-muted-foreground">This invoice has never been e-mailed from here.</p>
-          )}
-          <ul className="space-y-2">
+              </TmsButton>
+            </>
+          }
+        >
+          {notices.length === 0 && <p className="tms-muted">This invoice has never been e-mailed from here.</p>}
+          <ul className="flex flex-col gap-2">
             {notices.map((notice) => {
               const detail = noticeStatusDetail(notice)
               return (
-                <li key={notice.id} className="rounded border border-border/60 p-2 text-sm">
+                <li
+                  key={notice.id}
+                  className="p-2"
+                  style={{ border: '1px solid var(--tms-border)', borderRadius: 'var(--tms-radius)' }}
+                >
                   <div className="flex flex-wrap items-center gap-2">
-                    <Badge variant={notice.status === 'SENT' ? 'default' : 'destructive'} className="text-[10px]">
+                    <TmsBadge tone={notice.status === 'SENT' ? 'green' : 'red'}>
                       {NOTICE_STATUS_LABEL[notice.status]}
-                    </Badge>
+                    </TmsBadge>
                     <span>{recipientList(notice.to) || 'no recipients'}</span>
-                    <span className="text-xs text-muted-foreground">{formatDateTime(notice.at)}</span>
-                    <Button
-                      size="sm"
+                    <span className="text-xs tms-muted">{formatDateTime(notice.at)}</span>
+                    <TmsButton
                       variant="ghost"
+                      size="sm"
                       className="ml-auto"
                       aria-label={`Copy e-mail body sent ${notice.at}`}
                       onClick={() => copyBody(notice.body)}
                     >
-                      <Copy size={13} className="mr-1" /> Copy body
-                    </Button>
+                      <Copy size={13} /> Copy body
+                    </TmsButton>
                   </div>
-                  {notice.cc && <p className="text-xs text-muted-foreground">cc {recipientList(notice.cc)}</p>}
+                  {notice.cc && <p className="text-xs tms-muted">cc {recipientList(notice.cc)}</p>}
                   <p className="mt-1 text-xs">{notice.subject}</p>
-                  {detail && <p className="mt-1 text-xs text-destructive">{detail}</p>}
+                  {detail && <p className="mt-1 text-xs" style={RED}>{detail}</p>}
                 </li>
               )
             })}
           </ul>
           {invoice.markedSentAt && (
-            <p className="mt-2 text-xs text-muted-foreground">
+            <p className="mt-2 text-xs tms-muted">
               Marked sent by hand on {formatDateTime(invoice.markedSentAt)} by {invoice.markedSentBy ?? 'unknown'}.
             </p>
           )}
-        </section>
+        </TmsCard>
+      )}
 
-        <section className={CARD}>
-          <h2 className="mb-2 text-sm font-semibold">Payments applied</h2>
-          {payments.length === 0 && <p className="text-sm text-muted-foreground">Nothing has been put against this invoice.</p>}
-          {payments.length > 0 && (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border">
-                  <th className={TH} scope="col">Kind</th>
-                  <th className={TH} scope="col">Date</th>
-                  <th className={TH} scope="col">Reference</th>
-                  <th className={`${TH} text-right`} scope="col">Applied here</th>
-                </tr>
-              </thead>
-              <tbody>
-                {payments.map((p) => (
-                  <tr key={p.id} className="border-b border-border/60">
-                    <td className={TD}>{p.kind}</td>
-                    <td className={TD}>{formatDay(p.receivedAt)}</td>
-                    <td className={TD}>{p.reference || '—'}</td>
-                    <td className={MONEY}>{formatCents(appliedToInvoice(p, invoice.id))}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </section>
+      {tab === 'payments' && (
+        <>
+          <TmsCard title="Payments applied" flush={payments.length > 0}>
+            {payments.length === 0 && <p className="tms-muted">Nothing has been put against this invoice.</p>}
+            {payments.length > 0 && (
+              <div className="tms-table-wrap">
+                <table className="tms-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">KIND</th>
+                      <th scope="col">DATE</th>
+                      <th scope="col">REFERENCE</th>
+                      <th scope="col">APPLIED HERE</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {payments.map((p) => (
+                      <tr key={p.id}>
+                        <td>{p.kind}</td>
+                        <td>{formatDay(p.receivedAt)}</td>
+                        <td>{p.reference || '—'}</td>
+                        <td className="text-right tabular-nums">{formatCents(appliedToInvoice(p, invoice.id))}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </TmsCard>
 
-        <InvoiceCommissionCard
-          invoiceId={invoice.id}
-          orderId={invoice.orderId}
-          isAdmin={groups.includes('ADMIN')}
-          isManager={groups.includes('role-MANAGER')}
-        />
+          <InvoiceCommissionCard
+            invoiceId={invoice.id}
+            orderId={invoice.orderId}
+            isAdmin={groups.includes('ADMIN')}
+            isManager={groups.includes('role-MANAGER')}
+          />
+        </>
+      )}
 
-        <section className={CARD}>
-          <div className="mb-2 flex items-center gap-2">
-            <h2 className="text-sm font-semibold">Factoring</h2>
-            <Button asChild size="sm" variant="ghost" className="ml-auto">
-              <Link to="/factoring" aria-label="Open the factoring queue">
-                Factoring queue <ExternalLink size={13} className="ml-1" />
-              </Link>
-            </Button>
-          </div>
+      {tab === 'factoring' && (
+        <TmsCard
+          title="Factoring"
+          actions={
+            <Link className="tms-btn tms-btn-ghost tms-btn-sm" to="/tms/factors" aria-label="Open the factoring queue">
+              Factoring queue <ExternalLink size={13} />
+            </Link>
+          }
+        >
           {!factoringItem && (
-            <p className="text-sm text-muted-foreground">
+            <p className="tms-muted">
               {invoice.factoringItemId
                 ? 'A queue row exists but has not loaded yet.'
                 : 'Not in the factoring queue. "Send to Factor" writes the row; submitting it to OTR stays a step on the queue page.'}
             </p>
           )}
           {factoringItem && (
-            <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm sm:grid-cols-4">
+            <dl className="tms-grid tms-grid-4">
               <Field label="PRO" value={factoringItem.proNumber} />
               <Field label="Queue status" value={factoringItem.status} />
               <Field label="OTR status" value={otrStatusLabel(factoringItem.otrStatus) ?? 'Not submitted'} />
@@ -407,18 +423,16 @@ export function InvoiceDetail() {
             </dl>
           )}
           <div className="mt-2">
-            <Button
-              size="sm"
-              variant="outline"
+            <TmsButton
               aria-label="Record factor payment"
               disabled={busy}
               onClick={() => setDialog({ kind: 'payment', method: 'FACTOR' })}
             >
               Record factor payment
-            </Button>
+            </TmsButton>
           </div>
-        </section>
-      </div>
+        </TmsCard>
+      )}
 
       {dialog?.kind === 'email' && (
         <EmailInvoiceDialog invoiceId={invoice.id} busy={busy} onClose={() => setDialog(null)} onDone={closeAndRefresh} />
@@ -443,7 +457,7 @@ export function InvoiceDetail() {
       {dialog?.kind === 'void' && (
         <ReasonDialog
           title={`Void invoice ${invoice.number}`}
-          description="Voiding reopens the order for a fresh invoice and leaves this one on the record. It cannot be undone."
+          description="Voiding reopens the shipment for a fresh invoice and leaves this one on the record. It cannot be undone."
           label="Why it is being voided"
           confirmLabel="Void invoice"
           busy={busy}
@@ -463,16 +477,15 @@ export function InvoiceDetail() {
           onConfirm={runMarkSent}
         />
       )}
-    </div>
+    </TmsPage>
   )
 }
 
 function Field({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div>
-      <dt className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</dt>
+      <dt className="text-[11px] font-semibold uppercase tracking-wider tms-muted">{label}</dt>
       <dd>{value}</dd>
     </div>
   )
 }
-

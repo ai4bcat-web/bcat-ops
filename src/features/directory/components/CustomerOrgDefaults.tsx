@@ -1,9 +1,5 @@
 import { useState } from 'react'
-import { Button } from '@/components/ui/button'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
+import { TmsButton, TmsDialog, TmsField, TmsInput, TmsTextarea } from '@/features/tms/kit'
 import type { TmsSettings } from '@/types/tms'
 import { MoneyField } from './MoneyField'
 import { ReferencesEditor } from './ReferencesEditor'
@@ -36,31 +32,77 @@ export function CustomerOrgDefaults({ settings, onSave, onClose }: {
     finally { setSaving(false) }
   }
   return (
-    <Dialog open onOpenChange={(open) => { if (!open && !saving) onClose() }}>
-      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader><DialogTitle>Customer organization defaults</DialogTitle></DialogHeader>
-        <p className="text-sm text-muted-foreground">Used when a customer has no override. Changes do not rewrite customer records.</p>
-        <div className="grid grid-cols-2 gap-4">
+    <TmsDialog
+      open
+      onOpenChange={(open) => { if (!open && !saving) onClose() }}
+      title="Customer organization defaults"
+      description="Used when a customer has no override. Changes do not rewrite customer records."
+      className="tms-dialog-wide"
+      footer={
+        <>
+          <TmsButton onClick={onClose} disabled={saving}>Cancel</TmsButton>
+          <TmsButton variant="primary" onClick={() => void save()} disabled={saving}>{saving ? 'Saving…' : 'Save defaults'}</TmsButton>
+        </>
+      }
+    >
+      <div style={{ display: 'grid', gap: 16 }}>
+        <div className="tms-grid tms-grid-2">
           <MoneyField label="Default credit limit" value={draft.defaultCreditLimitCents} onChange={(value) => setDraft({ ...draft, defaultCreditLimitCents: value })} disabled={saving} />
-          <Label>Credit warning %<Input aria-label="Default credit warning percent" type="number" min={0} max={100} step="0.01" value={draft.defaultCreditUsageWarningBps == null ? '' : draft.defaultCreditUsageWarningBps / 100} onChange={(e) => setDraft({ ...draft, defaultCreditUsageWarningBps: e.target.value === '' ? null : Math.round(Number(e.target.value) * 100) })} disabled={saving} /></Label>
-          <Label>Maximum days late<Input aria-label="Default maximum days late" type="number" min={0} step={1} value={draft.defaultMaxDaysLate ?? ''} onChange={(e) => setDraft({ ...draft, defaultMaxDaysLate: e.target.value === '' ? null : Number(e.target.value) })} disabled={saving} /></Label>
-          <div className="space-y-3">
-            <label className="flex gap-2 text-sm"><input type="checkbox" checked={draft.defaultFreeCreditRequired === true} onChange={(e) => setDraft({ ...draft, defaultFreeCreditRequired: e.target.checked })} disabled={saving} />Require free credit</label>
-            <label className="flex gap-2 text-sm"><input type="checkbox" checked={draft.requireCustomerApproval === true} onChange={(e) => setDraft({ ...draft, requireCustomerApproval: e.target.checked })} disabled={saving} />Require customer approval</label>
+          <TmsField label="Credit warning %">
+            <TmsInput
+              aria-label="Default credit warning percent"
+              type="number"
+              min={0}
+              max={100}
+              step="0.01"
+              value={draft.defaultCreditUsageWarningBps == null ? '' : draft.defaultCreditUsageWarningBps / 100}
+              onChange={(e) => setDraft({ ...draft, defaultCreditUsageWarningBps: e.target.value === '' ? null : Math.round(Number(e.target.value) * 100) })}
+              disabled={saving}
+            />
+          </TmsField>
+          <TmsField label="Maximum days late">
+            <TmsInput
+              aria-label="Default maximum days late"
+              type="number"
+              min={0}
+              step={1}
+              value={draft.defaultMaxDaysLate ?? ''}
+              onChange={(e) => setDraft({ ...draft, defaultMaxDaysLate: e.target.value === '' ? null : Number(e.target.value) })}
+              disabled={saving}
+            />
+          </TmsField>
+          <div style={{ display: 'grid', gap: 10, alignContent: 'center' }}>
+            <label style={{ display: 'flex', gap: 8, fontSize: 13 }}>
+              <input type="checkbox" checked={draft.defaultFreeCreditRequired === true} onChange={(e) => setDraft({ ...draft, defaultFreeCreditRequired: e.target.checked })} disabled={saving} />
+              Require free credit
+            </label>
+            <label style={{ display: 'flex', gap: 8, fontSize: 13 }}>
+              <input type="checkbox" checked={draft.requireCustomerApproval === true} onChange={(e) => setDraft({ ...draft, requireCustomerApproval: e.target.checked })} disabled={saving} />
+              Require customer approval
+            </label>
           </div>
         </div>
         <DocumentTypesField
-          label="Required documents"
+          label="Required for accounting release"
           value={draft.defaultRequiredDocs}
           onChange={(next) => setDraft({ ...draft, defaultRequiredDocs: next })}
           disabled={saving}
-          help="What every customer needs on file before an order can be invoiced, unless that customer asks for its own list."
+          help="What every customer needs on file before a shipment can be released to accounting and invoiced, unless that customer asks for its own list."
         />
-        <div><h3 className="mb-2 text-sm font-medium">Required references</h3><ReferencesEditor references={draft.defaultRequiredReferences ?? []} onChange={(refs) => setDraft({ ...draft, defaultRequiredReferences: refs })} disabled={saving} /></div>
-        <Label>Default rate confirmation terms<Textarea aria-label="Default rate confirmation terms" value={draft.rateConTerms ?? ''} onChange={(e) => setDraft({ ...draft, rateConTerms: e.target.value || null })} disabled={saving} /></Label>
-        {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-        <DialogFooter><Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button><Button onClick={() => void save()} disabled={saving}>{saving ? 'Saving…' : 'Save defaults'}</Button></DialogFooter>
-      </DialogContent>
-    </Dialog>
+        <div>
+          <h3 style={{ marginBottom: 8 }}>Required references</h3>
+          <ReferencesEditor references={draft.defaultRequiredReferences ?? []} onChange={(refs) => setDraft({ ...draft, defaultRequiredReferences: refs })} disabled={saving} />
+        </div>
+        <TmsField label="Default rate confirmation terms">
+          <TmsTextarea
+            aria-label="Default rate confirmation terms"
+            value={draft.rateConTerms ?? ''}
+            onChange={(e) => setDraft({ ...draft, rateConTerms: e.target.value || null })}
+            disabled={saving}
+          />
+        </TmsField>
+        {error && <p role="alert" className="tms-field-error">{error}</p>}
+      </div>
+    </TmsDialog>
   )
 }

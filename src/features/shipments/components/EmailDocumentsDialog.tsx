@@ -10,12 +10,8 @@
 import { useMemo, useState } from 'react'
 import { AlertTriangle, Check, Copy, Mail, Send } from 'lucide-react'
 import { toast } from 'sonner'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import { TmsBadge, TmsButton, TmsDialog, TmsInput, TmsSelect, TmsTextarea } from '@/features/tms/kit'
 import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { emailDocuments, type EmailDocumentsResult } from '@/lib/apiClient'
 import { canEmailTo, DOCUMENT_TYPE_LABELS } from '@/lib/shipmentDocuments'
 import { renderDocumentsEmail } from '@/lib/shipmentNotices'
@@ -118,14 +114,31 @@ export function EmailDocumentsDialog({
   }
 
   return (
-    <Dialog open onOpenChange={(open) => { if (!open && !busy) onClose() }}>
-      <DialogContent className="max-w-2xl">
-        <DialogHeader><DialogTitle>Send documents</DialogTitle></DialogHeader>
-
+    <TmsDialog
+      open
+      onOpenChange={(open) => { if (!open && !busy) onClose() }}
+      title="Send documents"
+      className="tms-dialog-wide"
+      footer={
+        <>
+          <TmsButton variant="ghost" onClick={onClose} disabled={busy}>Close</TmsButton>
+          <TmsButton
+            onClick={() => { void navigator.clipboard?.writeText(preview.body); toast.success('Message copied') }}
+            disabled={busy}
+          >
+            <Copy size={14} className="mr-1" />Copy
+          </TmsButton>
+          <TmsButton variant="primary" onClick={() => { void send() }} disabled={busy || chosen.length === 0}>
+            {busy ? <Mail size={14} className="mr-1" /> : <Send size={14} className="mr-1" />}
+            {busy ? 'Sending…' : `Send ${chosen.length || ''}`.trim()}
+          </TmsButton>
+        </>
+      }
+    >
         <div className="flex flex-wrap items-end gap-3">
           <div className="min-w-48">
-            <Label className="text-xs uppercase tracking-wider text-muted-foreground">Send to</Label>
-            <select
+            <Label className="tms-field-label">Send to</Label>
+            <TmsSelect
               aria-label="Recipient kind"
               value={kind}
               onChange={(e) => {
@@ -135,17 +148,17 @@ export function EmailDocumentsDialog({
                 setToOverride(null)
               }}
               disabled={busy}
-              className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+              className="mt-1 h-9 w-full rounded-md border border-[color:var(--tms-input-border)] bg-[color:var(--tms-input)] px-2 text-sm"
             >
               <option value="CUSTOMER">Customer{customer?.name ? ` — ${customer.name}` : ''}</option>
               <option value="CARRIER">
                 Carrier{assignment?.carrierName ? ` — ${assignment.carrierName}` : ''}
               </option>
-            </select>
+            </TmsSelect>
           </div>
           <div className="flex-1 min-w-56">
-            <Label className="text-xs uppercase tracking-wider text-muted-foreground">To</Label>
-            <Input
+            <Label className="tms-field-label">To</Label>
+            <TmsInput
               aria-label="Recipients"
               value={to}
               onChange={(e) => setToOverride(e.target.value)}
@@ -154,17 +167,17 @@ export function EmailDocumentsDialog({
             />
           </div>
           <div className="min-w-48">
-            <Label className="text-xs uppercase tracking-wider text-muted-foreground">CC</Label>
-            <Input aria-label="CC" value={cc} onChange={(e) => setCc(e.target.value)} className="h-9 text-sm" />
+            <Label className="tms-field-label">CC</Label>
+            <TmsInput aria-label="CC" value={cc} onChange={(e) => setCc(e.target.value)} className="h-9 text-sm" />
           </div>
         </div>
 
-        <div className="max-h-56 space-y-1 overflow-auto rounded-lg border border-border p-2">
-          {rows.length === 0 && <p className="text-sm text-muted-foreground">This shipment has no documents yet.</p>}
+        <div className="max-h-56 space-y-1 overflow-auto rounded-[var(--tms-radius)] border border-[color:var(--tms-border)] p-2">
+          {rows.length === 0 && <p className="text-sm tms-muted">This shipment has no documents yet.</p>}
           {rows.map(({ doc, reason }) => (
             <label
               key={doc.id}
-              className={`flex items-center gap-2 rounded-md px-1.5 py-1 text-sm ${reason ? 'text-muted-foreground' : ''}`}
+              className={`flex items-center gap-2 rounded-md px-1.5 py-1 text-sm ${reason ? 'tms-muted' : ''}`}
             >
               <input
                 type="checkbox"
@@ -175,7 +188,7 @@ export function EmailDocumentsDialog({
                   e.target.checked ? [...prev, doc.id] : prev.filter((id) => id !== doc.id)
                 ))}
               />
-              <Badge variant="outline" className="text-[10px]">{DOCUMENT_TYPE_LABELS[doc.type]}</Badge>
+              <TmsBadge tone="gray" className="text-[10px]">{DOCUMENT_TYPE_LABELS[doc.type]}</TmsBadge>
               <span className="min-w-0 flex-1 truncate">{doc.name}</span>
               <span className="text-[10px] uppercase tracking-wider">v{doc.version}</span>
               {reason && <span className="text-[11px] italic">{reason}</span>}
@@ -185,8 +198,8 @@ export function EmailDocumentsDialog({
 
         <div className="grid grid-cols-1 gap-3">
           <div>
-            <Label className="text-xs uppercase tracking-wider text-muted-foreground">Subject</Label>
-            <Input
+            <Label className="tms-field-label">Subject</Label>
+            <TmsInput
               aria-label="Subject"
               value={subject}
               onChange={(e) => setSubject(e.target.value)}
@@ -195,8 +208,8 @@ export function EmailDocumentsDialog({
             />
           </div>
           <div>
-            <Label className="text-xs uppercase tracking-wider text-muted-foreground">Message</Label>
-            <Textarea
+            <Label className="tms-field-label">Message</Label>
+            <TmsTextarea
               aria-label="Message"
               rows={2}
               placeholder="Leave blank for the standard covering note"
@@ -205,17 +218,17 @@ export function EmailDocumentsDialog({
               className="text-sm"
             />
           </div>
-          <div className="rounded-lg border border-border bg-muted/30 p-2">
-            <p className="text-xs uppercase tracking-wider text-muted-foreground">Preview</p>
+          <div className="rounded-[var(--tms-radius)] border border-[color:var(--tms-border)] bg-[color:var(--tms-card)] p-2">
+            <p className="text-xs uppercase tracking-wider tms-muted">Preview</p>
             <p className="mt-1 text-sm font-medium">{preview.subject}</p>
             <p className="mt-1 whitespace-pre-wrap break-words text-sm" data-testid="documents-email-preview">{preview.body}</p>
           </div>
         </div>
 
         {result && result.emailStatus !== 'SENT' && (
-          <div className="space-y-1 rounded-lg border border-border bg-muted/30 p-2 text-xs">
+          <div className="space-y-1 rounded-[var(--tms-radius)] border border-[color:var(--tms-border)] bg-[color:var(--tms-card)] p-2 text-xs">
             <p className="flex items-start gap-2">
-              <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-600" />
+              <AlertTriangle size={14} className="mt-0.5 shrink-0 text-[color:var(--tms-badge-orange)]" />
               {result.emailStatus === 'COPY'
                 ? 'Nothing was e-mailed — the message and the links below are yours to send by hand.'
                 : `The e-mail did not send${result.emailError ? `: ${result.emailError}` : ''}. The links below are live for an hour — send them by hand.`}
@@ -231,37 +244,21 @@ export function EmailDocumentsDialog({
                 {d.name}
               </a>
             ))}
-            <Button
-              type="button" variant="outline" size="sm" className="mt-1"
+            <TmsButton
+              type="button" size="sm" className="mt-1"
               onClick={() => { void navigator.clipboard?.writeText(result.notice.body); toast.success('Message copied') }}
             >
               <Copy size={14} className="mr-1" />Copy the message
-            </Button>
+            </TmsButton>
           </div>
         )}
         {result && result.emailStatus === 'SENT' && (
-          <p className="flex items-center gap-2 text-xs text-muted-foreground">
-            <Check size={14} className="text-emerald-600" />Sent to {result.notice.to}
+          <p className="flex items-center gap-2 text-xs tms-muted">
+            <Check size={14} className="text-[color:var(--tms-badge-green)]" />Sent to {result.notice.to}
           </p>
         )}
 
-        {error && <p className="text-xs text-destructive">{error}</p>}
-
-        <DialogFooter>
-          <Button variant="ghost" onClick={onClose} disabled={busy}>Close</Button>
-          <Button
-            variant="outline"
-            onClick={() => { void navigator.clipboard?.writeText(preview.body); toast.success('Message copied') }}
-            disabled={busy}
-          >
-            <Copy size={14} className="mr-1" />Copy
-          </Button>
-          <Button onClick={() => { void send() }} disabled={busy || chosen.length === 0}>
-            {busy ? <Mail size={14} className="mr-1" /> : <Send size={14} className="mr-1" />}
-            {busy ? 'Sending…' : `Send ${chosen.length || ''}`.trim()}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        {error && <p className="text-xs text-[color:var(--tms-badge-red)]">{error}</p>}
+    </TmsDialog>
   )
 }

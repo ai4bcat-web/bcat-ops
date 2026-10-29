@@ -16,9 +16,8 @@
 import { useRef, useState } from 'react'
 import { AlertTriangle, FileUp, Upload } from 'lucide-react'
 import { toast } from 'sonner'
-import { Button } from '@/components/ui/button'
+import { TmsButton, TmsDialog, TmsSelect } from '@/features/tms/kit'
 import { Label } from '@/components/ui/label'
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { commitDocument, prepareDocumentUpload, putPresignedFile } from '@/lib/apiClient'
 import {
   ACCEPTED_CONTENT_TYPES, DEFAULT_AUDIENCE, DOCUMENT_TYPE_LABELS, MAX_DOCUMENT_BYTES, SHIPMENT_DOCUMENT_TYPES,
@@ -141,25 +140,34 @@ export function UploadDocumentDialog({ bundle, onClose, onSaved }: {
   }
 
   return (
-    <Dialog open onOpenChange={(open) => { if (!open && !busy) onClose() }}>
-      <DialogContent className="max-w-lg">
-        <DialogHeader><DialogTitle>Upload a document</DialogTitle></DialogHeader>
-
+    <TmsDialog
+      open
+      onOpenChange={(open) => { if (!open && !busy) onClose() }}
+      title="Upload a document"
+      footer={
+        <>
+          <TmsButton variant="ghost" onClick={onClose} disabled={busy}>Cancel</TmsButton>
+          <TmsButton variant="primary" onClick={() => { void upload() }} disabled={busy || !file}>
+            <Upload size={14} className="mr-1" />{busy ? 'Uploading…' : 'Upload'}
+          </TmsButton>
+        </>
+      }
+    >
         <div
           onDragOver={(e) => { e.preventDefault(); setDragging(true) }}
           onDragLeave={() => setDragging(false)}
           onDrop={(e) => { e.preventDefault(); setDragging(false); take(e.dataTransfer.files?.[0]) }}
-          className={`rounded-lg border border-dashed p-4 text-center text-sm ${dragging ? 'border-primary bg-primary/5' : 'border-border'}`}
+          className={`rounded-[var(--tms-radius)] border border-dashed p-4 text-center text-sm ${dragging ? 'border-primary bg-[color:var(--tms-primary)]/5' : 'border-[color:var(--tms-border)]'}`}
         >
-          <FileUp size={18} className="mx-auto mb-1 text-muted-foreground" />
+          <FileUp size={18} className="mx-auto mb-1 tms-muted" />
           {file ? (
-            <p className="font-medium">{file.name} <span className="font-normal text-muted-foreground">· {(file.size / 1024).toFixed(0)} KB</span></p>
+            <p className="font-medium">{file.name} <span className="font-normal tms-muted">· {(file.size / 1024).toFixed(0)} KB</span></p>
           ) : (
-            <p className="text-muted-foreground">Drop a PDF, PNG or JPEG here — up to {MAX_MB} MB</p>
+            <p className="tms-muted">Drop a PDF, PNG or JPEG here — up to {MAX_MB} MB</p>
           )}
-          <Button type="button" variant="outline" size="sm" className="mt-2" onClick={() => picker.current?.click()} disabled={busy}>
+          <TmsButton type="button" size="sm" className="mt-2" onClick={() => picker.current?.click()} disabled={busy}>
             Choose a file
-          </Button>
+          </TmsButton>
           <input
             ref={picker}
             type="file"
@@ -172,28 +180,28 @@ export function UploadDocumentDialog({ bundle, onClose, onSaved }: {
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div>
-            <Label className="text-xs uppercase tracking-wider text-muted-foreground">Type</Label>
-            <select
+            <Label className="tms-field-label">Type</Label>
+            <TmsSelect
               aria-label="Document type"
               value={type}
               onChange={(e) => setType(e.target.value as ShipmentDocumentType)}
               disabled={busy}
-              className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+              className="mt-1 h-9 w-full rounded-md border border-[color:var(--tms-input-border)] bg-[color:var(--tms-input)] px-2 text-sm"
             >
               {SHIPMENT_DOCUMENT_TYPES.map((t) => (
                 <option key={t} value={t}>{DOCUMENT_TYPE_LABELS[t]}</option>
               ))}
-            </select>
+            </TmsSelect>
           </div>
 
           <div>
-            <Label className="text-xs uppercase tracking-wider text-muted-foreground">Section</Label>
-            <select
+            <Label className="tms-field-label">Section</Label>
+            <TmsSelect
               aria-label="Document section"
               value={placement}
               onChange={(e) => setPlacement(e.target.value)}
               disabled={busy}
-              className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+              className="mt-1 h-9 w-full rounded-md border border-[color:var(--tms-input-border)] bg-[color:var(--tms-input)] px-2 text-sm"
             >
               {order && <option value={`ORDER:${order.id}`}>Customer order</option>}
               {assignments.map((c) => (
@@ -203,24 +211,24 @@ export function UploadDocumentDialog({ bundle, onClose, onSaved }: {
                 </option>
               ))}
               <option value="SHIPMENT">Shipment</option>
-            </select>
+            </TmsSelect>
           </div>
 
           <div className="sm:col-span-2">
-            <Label className="text-xs uppercase tracking-wider text-muted-foreground">Who may receive it</Label>
-            <select
+            <Label className="tms-field-label">Who may receive it</Label>
+            <TmsSelect
               aria-label="Document audience"
               value={effectiveAudience}
               onChange={(e) => setAudience(e.target.value as ShipmentDocumentAudience)}
               disabled={busy}
-              className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+              className="mt-1 h-9 w-full rounded-md border border-[color:var(--tms-input-border)] bg-[color:var(--tms-input)] px-2 text-sm"
             >
               {AUDIENCES.map((a) => (
                 <option key={a} value={a}>{AUDIENCE_LABELS[a]}</option>
               ))}
-            </select>
+            </TmsSelect>
             {audience === null && (
-              <p className="mt-1 text-[11px] text-muted-foreground">
+              <p className="mt-1 text-[11px] tms-muted">
                 Default for a {DOCUMENT_TYPE_LABELS[type].toLowerCase()}.
               </p>
             )}
@@ -228,18 +236,10 @@ export function UploadDocumentDialog({ bundle, onClose, onSaved }: {
         </div>
 
         {error && (
-          <p className="flex items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/5 p-2 text-xs text-destructive">
+          <p className="flex items-start gap-2 rounded-[var(--tms-radius)] border border-[color:var(--tms-badge-red)]  p-2 text-xs text-[color:var(--tms-badge-red)]">
             <AlertTriangle size={14} className="mt-0.5 shrink-0" />{error}
           </p>
         )}
-
-        <DialogFooter>
-          <Button variant="ghost" onClick={onClose} disabled={busy}>Cancel</Button>
-          <Button onClick={() => { void upload() }} disabled={busy || !file}>
-            <Upload size={14} className="mr-1" />{busy ? 'Uploading…' : 'Upload'}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    </TmsDialog>
   )
 }

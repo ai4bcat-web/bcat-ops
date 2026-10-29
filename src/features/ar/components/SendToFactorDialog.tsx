@@ -15,10 +15,10 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { AlertTriangle, ArrowRight, CheckCircle2, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
-import { Button } from '@/components/ui/button'
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { TmsButton, TmsDialog } from '@/features/tms/kit'
 import { graphqlErrorText, previewFactor, sendToFactor } from '@/lib/apiClient'
 import { OTR_FIELD_LABEL, OTR_REQUIRED_FIELDS } from '@/lib/otrInvoice'
+import type { ReleaseGateResult } from '@/lib/releaseGate'
 
 /**
  * What PREVIEW_FACTOR answers. Declared here rather than imported because the client
@@ -28,6 +28,8 @@ import { OTR_FIELD_LABEL, OTR_REQUIRED_FIELDS } from '@/lib/otrInvoice'
 interface FactorPreview {
   ready: boolean
   refusal: string | null
+  /** The release gate's verdict, so each thing that is missing is listed on its own. */
+  releaseGate?: ReleaseGateResult
   proNumber?: string
   fields?: Record<string, string>
   existing?: { id: string; status: string } | null
@@ -75,80 +77,100 @@ export function SendToFactorDialog({ invoiceId, busy, onClose, onDone }: {
       .finally(() => setPosting(false))
   }
 
+  const missing = preview?.releaseGate && !preview.releaseGate.ok ? preview.releaseGate.missing : []
+
   return (
-    <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
-      <DialogContent className="max-w-2xl">
-        <DialogHeader><DialogTitle>Send to factor</DialogTitle></DialogHeader>
+    <TmsDialog
+      open
+      onOpenChange={(open) => { if (!open) onClose() }}
+      title="Send to factor"
+      className="tms-dialog-wide"
+      footer={
+        <>
+          <TmsButton variant="ghost" onClick={queuedPro ? onDone : onClose} disabled={posting}>
+            {queuedPro ? 'Done' : 'Cancel'}
+          </TmsButton>
+          {!queuedPro && (
+            <TmsButton variant="primary" onClick={submit} disabled={disabled || preview?.ready !== true}>
+              {posting ? 'Creating…' : 'Create queue row'}
+            </TmsButton>
+          )}
+        </>
+      }
+    >
+      {loading && (
+        <p className="flex items-center gap-2 tms-muted">
+          <Loader2 size={14} className="animate-spin" /> Checking the invoice…
+        </p>
+      )}
 
-        {loading && (
-          <p className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 size={14} className="animate-spin" /> Checking the invoice…
-          </p>
-        )}
-
-        {!loading && preview && !preview.ready && (
-          <p className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-2 text-xs">
-            <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-600" />
+      {!loading && preview && !preview.ready && (
+        <div
+          className="p-2 text-xs"
+          style={{ border: '1px solid var(--tms-badge-orange)', borderRadius: 'var(--tms-radius)' }}
+        >
+          <p className="flex items-start gap-2">
+            <AlertTriangle size={14} className="mt-0.5 shrink-0" style={{ color: 'var(--tms-badge-orange)' }} />
             {preview.refusal ?? 'This invoice cannot be factored.'}
           </p>
-        )}
-
-        {!loading && preview?.ready && (
-          <div className="space-y-3">
-            {queuedPro ? (
-              <p className="flex items-start gap-2 rounded-lg border border-border bg-muted/30 p-2 text-xs">
-                <CheckCircle2 size={14} className="mt-0.5 shrink-0 text-emerald-600" />
-                Queue row {queuedPro} is ready. Nothing has been submitted to OTR — that is a
-                separate step a person takes on the factoring queue.
-              </p>
-            ) : (
-              <p className="rounded-lg border border-border bg-muted/30 p-2 text-xs">
-                This writes a queue row for PRO <strong>{preview.proNumber}</strong> with the
-                fields below. It does not submit anything to OTR.
-                {preview.existing && ` A row already exists for this PRO (${preview.existing.status.toLowerCase()}); it will be updated.`}
-              </p>
-            )}
-
-            <div>
-              <p className="text-xs uppercase tracking-wider text-muted-foreground">
-                OTR fields — edit these on the queue row
-              </p>
-              <dl className="mt-1 grid grid-cols-2 gap-x-4 gap-y-1 rounded-lg border border-border p-2 text-sm">
-                {OTR_REQUIRED_FIELDS.map((field) => (
-                  <div key={field} className="flex justify-between gap-2">
-                    <dt className="text-xs text-muted-foreground">{OTR_FIELD_LABEL[field]}</dt>
-                    <dd className={fields[field] ? 'font-medium' : 'text-muted-foreground'}>
-                      {fields[field] || '—'}
-                    </dd>
-                  </div>
-                ))}
-              </dl>
-            </div>
-
-            {queuedPro && (
-              <Link
-                to="/factoring"
-                className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline"
-              >
-                Open the factoring queue to submit it to OTR <ArrowRight size={14} />
-              </Link>
-            )}
-          </div>
-        )}
-
-        {error && <p className="text-xs text-destructive">{error}</p>}
-
-        <DialogFooter>
-          <Button variant="ghost" onClick={queuedPro ? onDone : onClose} disabled={posting}>
-            {queuedPro ? 'Done' : 'Cancel'}
-          </Button>
-          {!queuedPro && (
-            <Button onClick={submit} disabled={disabled || preview?.ready !== true}>
-              {posting ? 'Creating…' : 'Create queue row'}
-            </Button>
+          {missing.length > 0 && (
+            <ul className="mt-1 list-disc pl-6">
+              {missing.map((reason) => <li key={reason.code + (reason.detail ?? '')}>{reason.message}</li>)}
+            </ul>
           )}
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </div>
+      )}
+
+      {!loading && preview?.ready && (
+        <div className="flex flex-col gap-3">
+          {queuedPro ? (
+            <p
+              className="flex items-start gap-2 p-2 text-xs"
+              style={{ border: '1px solid var(--tms-border)', borderRadius: 'var(--tms-radius)' }}
+            >
+              <CheckCircle2 size={14} className="mt-0.5 shrink-0" style={{ color: 'var(--tms-badge-green)' }} />
+              Queue row {queuedPro} is ready. Nothing has been submitted to OTR — that is a
+              separate step a person takes on the factoring queue.
+            </p>
+          ) : (
+            <p
+              className="p-2 text-xs"
+              style={{ border: '1px solid var(--tms-border)', borderRadius: 'var(--tms-radius)' }}
+            >
+              This writes a queue row for PRO <strong>{preview.proNumber}</strong> with the
+              fields below. It does not submit anything to OTR.
+              {preview.existing && ` A row already exists for this PRO (${preview.existing.status.toLowerCase()}); it will be updated.`}
+            </p>
+          )}
+
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-wider tms-muted">
+              OTR fields — edit these on the queue row
+            </p>
+            <dl
+              className="tms-grid tms-grid-2 mt-1 p-2"
+              style={{ border: '1px solid var(--tms-border)', borderRadius: 'var(--tms-radius)' }}
+            >
+              {OTR_REQUIRED_FIELDS.map((field) => (
+                <div key={field} className="flex justify-between gap-2">
+                  <dt className="text-xs tms-muted">{OTR_FIELD_LABEL[field]}</dt>
+                  <dd className={fields[field] ? 'font-medium' : 'tms-muted'}>
+                    {fields[field] || '—'}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          </div>
+
+          {queuedPro && (
+            <Link to="/tms/factors" className="inline-flex items-center gap-1 font-medium">
+              Open the factoring queue to submit it to OTR <ArrowRight size={14} />
+            </Link>
+          )}
+        </div>
+      )}
+
+      {error && <p className="text-xs" style={{ color: 'var(--tms-badge-red)' }}>{error}</p>}
+    </TmsDialog>
   )
 }

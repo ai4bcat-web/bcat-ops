@@ -1,76 +1,121 @@
 /**
- * The Shipments board — MVMNT's shipment list (spec §6.4 "Board", §6.8 status tabs).
+ * The one Shipments list — MVMNT's list anatomy over BCAT's data (UI reference §2,
+ * spec §6.4 "Board", §6.8 status tabs).
  *
- * Status tabs with counts, a search box over the server-built `searchKey`, a filter rail,
- * a column picker, this user's saved views, CSV of exactly what is on screen (admins),
- * single click → drawer, double click → full page. All of the deciding lives in
- * `shipmentViews.ts`; this file renders what those functions return.
+ * Title row with Views and "+ Shipment", a filter row of italic chips, the saved
+ * department views as tabs, MVMNT's status quick-tabs with counts, the thirteen
+ * default columns of a thirty-column set, and the footer the kit draws. All of the
+ * deciding lives in `shipmentViews.ts` and `src/lib/shipmentViewDefs.ts`; this file
+ * renders what those functions return.
+ *
+ * Single click opens the drawer, double click opens `/tms/shipments/:id`. Void is the
+ * only way a shipment leaves the list, and only the owner or an ADMIN is offered it —
+ * the Lambda enforces that from the token, this is only the door.
  */
 import { useEffect, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { Check, Columns3, Download, Filter, Plus, RefreshCw, Save, Search, Star, Trash2, Truck } from 'lucide-react'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { Check, Download, FileText, MoreHorizontal, RotateCcw, Save, XCircle } from 'lucide-react'
 import { toast } from 'sonner'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import {
+  TmsBadge, TmsButton, TmsDialog, TmsField, TmsIconButton, TmsInput, TmsListPage, TmsSelect, statusTone,
+} from '@/features/tms/kit'
+import type { ColumnDef } from '@/features/tms/kit'
+import { useOwnershipDivisions, useShipmentViews } from '@/features/tms/useShipmentViews'
 import { useAuth } from '@/hooks/useAuth'
 import { useDirectory } from '@/hooks/useDirectory'
-import { useShipments } from '@/hooks/useShipments'
 import { useDocumentReviewQueue } from '@/hooks/useDocumentReviewQueue'
+import { useShipments } from '@/hooks/useShipments'
+import { useStaff } from '@/hooks/useStaff'
 import {
-  createShipment, deleteShipment, duplicateShipment, getTmsSettings, graphqlErrorText,
-  restoreShipment, setShipmentStatus, tenderRespond,
+  createShipment, duplicateShipment, getTmsSettings, graphqlErrorText, saveShipmentView,
+  setShipmentStatus, tenderRespond,
 } from '@/lib/apiClient'
-import { SHIPMENT_STATUS_LABELS } from '@/lib/shipmentStatus'
 import { checkCallState } from '@/lib/checkCalls'
 import { effectiveCustomerStatus } from '@/lib/customerCredit'
+import { SEED_DIVISIONS } from '@/lib/ownership'
+import { ROLES, ROLE_LABELS } from '@/lib/roles'
+import { SHIPMENT_STATUSES } from '@/lib/shipmentStatus'
+import { applyViewFilters, slugify, viewsVisibleTo } from '@/lib/shipmentViewDefs'
 import { cn } from '@/lib/utils'
 import { ShipmentDrawer } from './components/ShipmentDrawer'
 import { ShipmentRowActions, type ShipmentActionHandlers } from './components/StatusActions'
 import { MODE_OPTIONS } from './orderDraft'
 import {
   BOARD_COLUMNS, BOARD_TABS, DEFAULT_COLUMN_KEYS, EMPTY_FILTERS, activeFilterCount, applyBoard,
-  readSavedViews, removeView, tabCounts, toCsv, upsertView, visibleColumns, writeSavedViews,
-  type BoardColumn, type BoardFilters, type BoardTabKey, type SavedView, type ShipmentRow, type SortDir,
-  type SortKey,
+  carrierLabel, divisionCodeOfViewSlug, filtersToViewFilters, isBoardTabKey, isSortKey,
+  statusLabel, tabCounts, toCsv, toViewRow, visibleColumns, voidedAtOf,
+  type BoardFilters, type BoardTabKey, type ShipmentRow, type SortDir, type SortKey,
 } from './shipmentViews'
-import type { ArStatus, AssignmentType, CustomerRecord, ShipmentMode, TmsSettings } from '@/types/tms'
+import type {
+  ApStatus, ArStatus, AssignmentType, CustomerRecord, ShipmentMode, ShipmentStatus, ShipmentViewRecord,
+  TmsSettings,
+} from '@/types/tms'
 
 const AR_STATUSES: ArStatus[] = ['DOCS_NEEDED', 'UNBILLED', 'UNPAID', 'PAID', 'INVOICE_NOT_NEEDED']
+const AP_STATUSES: ApStatus[] = ['AWAITING_INVOICE', 'IN_REVIEW', 'TO_BE_PAID', 'PAID']
 const ASSIGNMENT_TYPES: AssignmentType[] = ['OWN_ASSET', 'CARRIER', 'NEED_TO_COVER']
+const PAGE_SIZES = [20, 50, 100]
+
+/** The chips of MVMNT's filter row, in MVMNT's order. `all` is the "+ Filter" panel. */
+type ChipKey =
+  | 'customerId' | 'status' | 'pickup' | 'delivery' | 'origin' | 'destination'
+  | 'division' | 'assignmentType' | 'repId' | 'arStatus' | 'all'
+
+const CHIPS: { key: ChipKey; label: string }[] = [
+  { key: 'customerId', label: 'Customer is' },
+  { key: 'status', label: 'Status is' },
+  { key: 'pickup', label: 'Pick Up on' },
+  { key: 'delivery', label: 'Delivery on' },
+  { key: 'origin', label: 'Origin is' },
+  { key: 'destination', label: 'Destination is' },
+  { key: 'division', label: 'Division is' },
+  { key: 'assignmentType', label: 'Carrier type is' },
+  { key: 'repId', label: 'Rep is' },
+  { key: 'arStatus', label: 'AR Status is' },
+]
+
+const sentence = (value: string): string =>
+  value.toLowerCase().replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase())
 
 export function ShipmentsBoard() {
   const navigate = useNavigate()
-  const { isAdmin, user } = useAuth()
+  const { slug } = useParams()
+  const { isAdmin, isOwner, user } = useAuth()
   const email = user?.email ?? ''
   const { shipments, loading, error, refresh } = useShipments()
   const { customers, locations } = useDirectory()
+  const { nameOf } = useStaff()
+  const { views, refresh: refreshViews } = useShipmentViews()
+  const { divisions } = useOwnershipDivisions()
   const docReview = useDocumentReviewQueue()
   const [settings, setSettings] = useState<TmsSettings | null>(null)
 
-  // Saved views are per user and per browser; the one marked default decides the landing
-  // state, so re-opening the board returns to the list this person works from. Read once
-  // at mount — a sign-in change remounts the board.
-  const [boot] = useState(() => {
-    const saved = readSavedViews(email)
-    return { saved, landing: saved.find((v) => v.isDefault) ?? null }
-  })
-  const [tab, setTab] = useState<BoardTabKey>(boot.landing?.tab ?? 'all')
-  const [query, setQuery] = useState(boot.landing?.query ?? '')
-  const [filters, setFilters] = useState<BoardFilters>(boot.landing?.filters ?? EMPTY_FILTERS)
-  const [columnKeys, setColumnKeys] = useState<string[]>(boot.landing?.columnKeys ?? [...DEFAULT_COLUMN_KEYS])
-  const [sortKey, setSortKey] = useState<SortKey>(boot.landing?.sortKey ?? 'pickupAppt')
-  const [sortDir, setSortDir] = useState<SortDir>(boot.landing?.sortDir ?? 'asc')
-  const [views, setViews] = useState<SavedView[]>(boot.saved)
-  const [showFilters, setShowFilters] = useState(false)
+  const [tab, setTab] = useState<BoardTabKey>('all')
+  // The shell's global search sends people here as `?q=…`; while that param is present
+  // it IS the search box, so a second search from the top bar changes this list.
+  const [params, setParams] = useSearchParams()
+  const urlQuery = params.get('q')
+  const [typed, setTyped] = useState('')
+  const query = urlQuery ?? typed
+  const setQuery = (next: string) => {
+    setPage(0)
+    setTyped(next)
+    if (urlQuery !== null) setParams(next ? { q: next } : {}, { replace: true })
+  }
+  const [filters, setFilters] = useState<BoardFilters>(EMPTY_FILTERS)
+  const [openChip, setOpenChip] = useState<ChipKey | null>(null)
+  // Null means "whatever the open view says"; a value means the user overrode it here.
+  const [columnOverride, setColumnOverride] = useState<string[] | null>(null)
+  const [sortOverride, setSortOverride] = useState<{ key: SortKey; dir: SortDir } | null>(null)
+  const [fieldsOpen, setFieldsOpen] = useState(false)
   const [saveViewOpen, setSaveViewOpen] = useState(false)
   const [newShipmentOpen, setNewShipmentOpen] = useState(false)
   const [openId, setOpenId] = useState<string | null>(null)
+  const [pageSize, setPageSize] = useState(20)
+  const [page, setPage] = useState(0)
   // The check-call column is toned against a clock held in state rather than one read
   // during render: a DUE/OVERDUE tone only needs minute granularity, and a render-time
   // `Date.now()` is impure. The lazy initialiser runs outside the render-purity analysis.
@@ -82,34 +127,74 @@ export function ShipmentsBoard() {
     return () => clearInterval(t)
   }, [])
 
+  const caller = useMemo(
+    () => {
+      const groups = user?.groups ?? []
+      const roleGroup = groups.find((g) => g.startsWith('role-'))
+      return { groups, role: roleGroup ? roleGroup.slice('role-'.length) : null, isOwner, isAdmin }
+    },
+    [user?.groups, isOwner, isAdmin],
+  )
+  const myViews = useMemo(() => viewsVisibleTo(views, caller), [views, caller])
+
+  const divisionRows = divisions ?? SEED_DIVISIONS
+  const divisionNameOf = (code: string) => divisionRows.find((d) => d.code === code)?.name ?? code
+  const divisionColorOf = (code: string) => divisionRows.find((d) => d.code === code)?.color ?? null
+
+  /** The open view: a saved one, or the sidebar's synthetic per-division slice. */
+  const activeView: ShipmentViewRecord | null = myViews.find((v) => v.slug === slug) ?? null
+  const divisionSlug = divisionCodeOfViewSlug(slug)
+  const viewFilters = useMemo(
+    () => activeView?.filters ?? (divisionSlug ? { divisions: [divisionSlug] } : null),
+    [activeView, divisionSlug],
+  )
+
   // The review queue is the only place that knows a carrier upload is waiting, so the
-  // board borrows its counts for the "Uploads to review" filter. Rows are rebuilt only
+  // list borrows its counts for the "Uploads to review" filter. Rows are rebuilt only
   // when something is actually pending — the common case copies nothing.
   const pendingByShipment = useMemo(() => {
     const counts: Record<string, number> = {}
     for (const doc of docReview.documents) counts[doc.shipmentId] = (counts[doc.shipmentId] ?? 0) + 1
     return counts
   }, [docReview.documents])
-  const boardRows = useMemo(
+  const allRows: ShipmentRow[] = useMemo(
     () => (docReview.documents.length === 0
       ? shipments
       : shipments.map((s) => ({ ...s, pendingDocReviewCount: pendingByShipment[s.id] ?? null }))),
     [shipments, pendingByShipment, docReview.documents.length],
   )
 
-  const counts = useMemo(() => tabCounts(boardRows), [boardRows])
+  /*
+   * A view is a working list, so `applyViewFilters` drops voided rows outright. The
+   * Voided tab is the book's record of what was voided, which is a different question,
+   * so it is answered over every row rather than over the view's slice.
+   */
+  const viewRows = useMemo(() => {
+    if (!viewFilters || tab === 'voided') return allRows
+    const allowed = new Set(applyViewFilters(viewFilters, allRows.map(toViewRow), new Date(nowMs)).map((r) => r.id))
+    return allRows.filter((r) => allowed.has(r.id))
+  }, [allRows, viewFilters, tab, nowMs])
+
+  const counts = useMemo(() => tabCounts(viewRows, nowMs), [viewRows, nowMs])
+
+  const viewSort = activeView?.sort && isSortKey(activeView.sort.key)
+    ? { key: activeView.sort.key, dir: activeView.sort.dir }
+    : null
+  const sort = sortOverride ?? viewSort ?? { key: 'pickupAppt' as SortKey, dir: 'asc' as SortDir }
+  const columnKeys = columnOverride ?? activeView?.columns ?? DEFAULT_COLUMN_KEYS
+
   const rows = useMemo(
-    () => applyBoard(boardRows, { tab, query, filters, sortKey, sortDir }),
-    [boardRows, tab, query, filters, sortKey, sortDir],
+    () => applyBoard(viewRows, { tab, query, filters, sortKey: sort.key, sortDir: sort.dir, nowMs }),
+    [viewRows, tab, query, filters, sort.key, sort.dir, nowMs],
   )
-  const columns = visibleColumns(columnKeys)
+  // The page index is clamped rather than reset from an effect: a narrower filter can
+  // leave the list shorter than the page the user was on, and a render that shows
+  // nothing before an effect fixes it is a blank screen the data never justified.
+  const lastPage = Math.max(0, Math.ceil(rows.length / pageSize) - 1)
+  const currentPage = Math.min(page, lastPage)
+  const pageRows = rows.slice(currentPage * pageSize, currentPage * pageSize + pageSize)
 
-  const applyView = (view: SavedView) => {
-    setTab(view.tab); setQuery(view.query); setFilters(view.filters)
-    setColumnKeys(view.columnKeys); setSortKey(view.sortKey); setSortDir(view.sortDir)
-  }
-
-  const persistViews = (next: SavedView[]) => { setViews(next); writeSavedViews(email, next) }
+  const clearFilters = () => { setPage(0); setFilters(EMPTY_FILTERS); setQuery(''); setOpenChip(null) }
 
   const exportCsv = () => {
     const csv = toCsv(rows, columnKeys)
@@ -121,160 +206,164 @@ export function ShipmentsBoard() {
     URL.revokeObjectURL(url)
   }
 
+  const chipValue = (key: ChipKey): string | null => {
+    switch (key) {
+      case 'customerId': return customers.find((c) => c.id === filters.customerId)?.name ?? null
+      case 'status': return filters.status ? sentence(filters.status) : null
+      case 'pickup': return [filters.pickupFrom, filters.pickupTo].filter(Boolean).join(' – ') || null
+      case 'delivery': return [filters.deliveryFrom, filters.deliveryTo].filter(Boolean).join(' – ') || null
+      case 'origin': return filters.origin
+      case 'destination': return filters.destination
+      case 'division': return filters.division ? divisionNameOf(filters.division) : null
+      case 'assignmentType': return filters.assignmentType ? sentence(filters.assignmentType) : null
+      case 'repId': return filters.repId ? nameOf(filters.repId) : null
+      case 'arStatus': return filters.arStatus ? sentence(filters.arStatus) : null
+      case 'all': return null
+    }
+  }
+
+  const columns: Array<ColumnDef<ShipmentRow>> = visibleColumns(columnKeys).map((col) => ({
+    key: col.key,
+    header: col.label,
+    width: col.width,
+    sortable: col.sortKey != null,
+    render: (row) => <BoardCell columnKey={col.key} text={col.value(row)} row={row} nowMs={nowMs}
+      repName={nameOf} divisionName={divisionNameOf} divisionColor={divisionColorOf} />,
+  }))
+  columns.push({
+    key: 'actions',
+    header: '',
+    width: 44,
+    render: (row) => (
+      <ShipmentRowActions
+        shipment={row}
+        isAdmin={isAdmin}
+        cancelDeleteAdminOnly={settings?.cancelDeleteAdminOnly ?? false}
+        handlers={rowHandlers(row, refresh)}
+      />
+    ),
+  })
+
   return (
-    <div className="flex h-full flex-col">
-      <header className="flex flex-wrap items-center gap-2 border-b border-border px-5 py-3">
-        <Truck size={18} />
-        <h1 className="text-lg font-semibold">Shipments</h1>
-        <Badge variant="outline">{rows.length}</Badge>
-        <div className="relative ml-2 w-64">
-          <Search size={14} className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            aria-label="Search shipments"
-            placeholder="Number, customer, city, reference…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            className="h-9 pl-7 text-sm"
+    <>
+      <TmsListPage<ShipmentRow>
+        title="Shipments"
+        primaryAction={{ label: 'Shipment', onClick: () => setNewShipmentOpen(true) }}
+        actions={
+          <>
+            <TmsIconButton aria-label="Clear filters" onClick={clearFilters}>
+              <XCircle size={16} />
+            </TmsIconButton>
+            {(isOwner || isAdmin) && (
+              <TmsIconButton aria-label="Save as view" onClick={() => setSaveViewOpen(true)}>
+                <Save size={16} />
+              </TmsIconButton>
+            )}
+            <TmsIconButton aria-label="Export CSV" onClick={exportCsv}>
+              <FileText size={16} />
+            </TmsIconButton>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <TmsIconButton aria-label="More actions"><MoreHorizontal size={16} /></TmsIconButton>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="tms-portal w-56">
+                <DropdownMenuLabel>This list</DropdownMenuLabel>
+                <DropdownMenuItem onSelect={() => refresh()}>
+                  <RotateCcw size={14} className="mr-2" />Refresh
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={exportCsv}>
+                  <Download size={14} className="mr-2" />Download CSV
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onSelect={() => setFieldsOpen(true)}>Choose fields…</DropdownMenuItem>
+                <DropdownMenuItem onSelect={clearFilters}>Clear all filters</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </>
+        }
+        viewTabs={{
+          tabs: [
+            { key: '', label: 'All shipments' },
+            ...myViews.map((v) => ({ key: v.slug, label: v.name })),
+            ...(divisionSlug && !myViews.some((v) => v.slug === slug)
+              ? [{ key: slug ?? '', label: divisionNameOf(divisionSlug) }]
+              : []),
+          ],
+          active: slug ?? '',
+          onSelect: (key) => {
+            setPage(0)
+            setColumnOverride(null)
+            setSortOverride(null)
+            navigate(key ? `/tms/shipments/view/${key}` : '/tms/shipments')
+          },
+        }}
+        quickTabs={{
+          tabs: BOARD_TABS.map((t) => ({ key: t.key, label: t.label, count: counts[t.key] })),
+          active: tab,
+          onSelect: (key) => { if (isBoardTabKey(key)) { setPage(0); setTab(key) } },
+        }}
+        search={{ value: query, onChange: setQuery, placeholder: 'Search' }}
+        onRefresh={() => refresh()}
+        filterChips={CHIPS.map((chip) => ({
+          key: chip.key,
+          label: chip.label,
+          value: chipValue(chip.key),
+          onClick: () => setOpenChip((open) => (open === chip.key ? null : chip.key)),
+        }))}
+        onAddFilter={() => setOpenChip((open) => (open === 'all' ? null : 'all'))}
+        fieldsLabel={`${columnKeys.length} Fields`}
+        onFields={() => setFieldsOpen(true)}
+        columns={columns}
+        rows={pageRows}
+        rowKey={(row) => row.id}
+        sort={sort}
+        onSort={(key) => {
+          if (!isSortKey(key)) return
+          setSortOverride(sort.key === key
+            ? { key, dir: sort.dir === 'asc' ? 'desc' : 'asc' }
+            : { key, dir: 'asc' })
+        }}
+        onRowClick={(row) => setOpenId(row.id)}
+        onRowDoubleClick={(row) => navigate(`/tms/shipments/${row.id}`)}
+        page={{
+          from: rows.length === 0 ? 0 : currentPage * pageSize + 1,
+          to: Math.min(rows.length, currentPage * pageSize + pageSize),
+          total: rows.length,
+          pageSize,
+          onPageSize: (size) => { setPage(0); setPageSize(PAGE_SIZES.includes(size) ? size : 20) },
+        }}
+        emptyText={error ?? (loading ? 'Loading shipments…' : 'Please try again using a different query.')}
+        onClearFilters={clearFilters}
+        banner={openChip ? (
+          <FilterPanel
+            chip={openChip}
+            filters={filters}
+            customers={customers.map((c) => ({ id: c.id, name: c.name }))}
+            divisions={divisionRows.map((d) => ({ code: d.code, name: d.name }))}
+            repName={nameOf}
+            reps={repIdsOn(allRows)}
+            onChange={(next) => { setPage(0); setFilters(next) }}
+            onClose={() => setOpenChip(null)}
           />
-        </div>
-        <Button variant="outline" size="sm" onClick={() => setShowFilters((s) => !s)}>
-          <Filter size={14} className="mr-1" /> Filters
-          {activeFilterCount(filters) > 0 && <Badge className="ml-1">{activeFilterCount(filters)}</Badge>}
-        </Button>
-
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="outline" size="sm"><Columns3 size={14} className="mr-1" /> Columns</Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="w-52">
-            {BOARD_COLUMNS.map((c) => (
-              <DropdownMenuItem
-                key={c.key}
-                onSelect={(e) => {
-                  e.preventDefault()
-                  setColumnKeys((prev) => prev.includes(c.key) ? prev.filter((k) => k !== c.key) : [...prev, c.key])
-                }}
+        ) : null}
+        footerExtra={
+          rows.length > pageSize ? (
+            <span className="tms-footer-count">
+              <TmsButton size="sm" disabled={currentPage === 0} onClick={() => setPage(Math.max(0, currentPage - 1))}>
+                Previous
+              </TmsButton>{' '}
+              <TmsButton
+                size="sm"
+                disabled={currentPage >= lastPage}
+                onClick={() => setPage(Math.min(lastPage, currentPage + 1))}
               >
-                <input type="checkbox" readOnly checked={columnKeys.includes(c.key)} className="mr-2" />{c.label}
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
+                Next
+              </TmsButton>
+            </span>
+          ) : null
+        }
+      />
 
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="outline" size="sm"><Star size={14} className="mr-1" /> Views</Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="w-60">
-            <DropdownMenuLabel>Saved views</DropdownMenuLabel>
-            {views.length === 0 && <DropdownMenuItem disabled>No saved views</DropdownMenuItem>}
-            {views.map((v) => (
-              <DropdownMenuItem key={v.id} onSelect={() => applyView(v)}>
-                {v.isDefault && <Star size={12} className="mr-2 fill-current" />}
-                <span className="flex-1 truncate">{v.name}</span>
-                <Trash2
-                  size={12}
-                  className="ml-2 opacity-60"
-                  onClick={(e) => { e.stopPropagation(); persistViews(removeView(views, v.id)) }}
-                />
-              </DropdownMenuItem>
-            ))}
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onSelect={() => setSaveViewOpen(true)}>
-              <Save size={14} className="mr-2" />Save current view
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-
-        {isAdmin && (
-          <Button variant="outline" size="sm" onClick={exportCsv}><Download size={14} className="mr-1" /> CSV</Button>
-        )}
-        <Button variant="ghost" size="icon" className="h-9 w-9" aria-label="Refresh" onClick={() => refresh()}>
-          <RefreshCw size={14} className={loading ? 'animate-spin' : undefined} />
-        </Button>
-        <Button size="sm" className="ml-auto" onClick={() => setNewShipmentOpen(true)}>
-          <Plus size={14} className="mr-1" /> Shipment
-        </Button>
-      </header>
-
-      <nav role="tablist" aria-label="Shipment status" className="flex gap-1 overflow-x-auto border-b border-border px-5">
-        {BOARD_TABS.map((t) => (
-          <button
-            key={t.key}
-            role="tab"
-            aria-selected={tab === t.key}
-            onClick={() => setTab(t.key)}
-            className={cn(
-              'flex items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-2 text-sm',
-              tab === t.key ? 'border-primary font-medium text-foreground' : 'border-transparent text-muted-foreground',
-            )}
-          >
-            {t.label}
-            <Badge variant="outline" className="text-[10px]">{counts[t.key]}</Badge>
-          </button>
-        ))}
-      </nav>
-
-      {showFilters && (
-        <FilterRail
-          filters={filters}
-          customers={customers.map((c) => ({ id: c.id, name: c.name }))}
-          onChange={setFilters}
-        />
-      )}
-
-      {error && <p className="px-5 py-3 text-sm text-destructive">{error}</p>}
-
-      <div className="flex-1 overflow-auto px-5 py-3">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-border text-left text-xs uppercase tracking-wider text-muted-foreground">
-              {columns.map((c) => (
-                <th key={c.key} className="px-2 py-2">
-                  <button
-                    onClick={() => {
-                      const key = c.key as SortKey
-                      if (!['pickupAppt', 'number', 'customerName', 'status'].includes(key)) return
-                      if (sortKey === key) setSortDir(sortDir === 'asc' ? 'desc' : 'asc')
-                      else { setSortKey(key); setSortDir('asc') }
-                    }}
-                  >
-                    {c.label}{sortKey === c.key ? (sortDir === 'asc' ? ' ▲' : ' ▼') : ''}
-                  </button>
-                </th>
-              ))}
-              <th className="w-10" />
-            </tr>
-          </thead>
-          <tbody>
-            {rows.length === 0 && !loading && (
-              <tr><td colSpan={columns.length + 1} className="py-8 text-center text-sm text-muted-foreground">No shipments in this view.</td></tr>
-            )}
-            {rows.map((row) => (
-              <tr
-                key={row.id}
-                className="cursor-pointer border-b border-border/60 hover:bg-muted/40"
-                onClick={() => setOpenId(row.id)}
-                onDoubleClick={() => navigate(`/shipments/${row.id}`)}
-              >
-                {columns.map((c) => (
-                  <td key={c.key} className="px-2 py-2">
-                    <BoardCell column={c} row={row} nowMs={nowMs} />
-                  </td>
-                ))}
-                <td className="px-1">
-                  <ShipmentRowActions
-                    shipment={row}
-                    isAdmin={isAdmin}
-                    cancelDeleteAdminOnly={settings?.cancelDeleteAdminOnly ?? false}
-                    handlers={rowHandlers(row, refresh)}
-                  />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
 
       <ShipmentDrawer
         shipmentId={openId}
@@ -287,14 +376,30 @@ export function ShipmentsBoard() {
         currentUser={email}
       />
 
-      {saveViewOpen && (
+      <FieldsDialog
+        open={fieldsOpen}
+        keys={columnKeys}
+        onClose={() => setFieldsOpen(false)}
+        onChange={setColumnOverride}
+      />
+
+      {(isOwner || isAdmin) && (
         <SaveViewDialog
+          open={saveViewOpen}
           onClose={() => setSaveViewOpen(false)}
-          onSave={(name, isDefault) => {
-            persistViews(upsertView(views, {
-              id: `view-${Date.now()}`, name, tab, query, filters, columnKeys, sortKey, sortDir, isDefault,
-            }))
+          onSave={async (draft) => {
+            const saved = await saveShipmentView({
+              ...draft,
+              filters: filtersToViewFilters(filters, query, tab),
+              columns: [...columnKeys],
+              sort: { key: sort.key, dir: sort.dir },
+              sortOrder: (views.at(-1)?.sortOrder ?? 0) + 10,
+              active: true,
+            })
+            await refreshViews()
+            toast.success(`Saved the view "${saved.name}"`)
             setSaveViewOpen(false)
+            navigate(`/tms/shipments/view/${saved.slug}`)
           }}
         />
       )}
@@ -307,48 +412,96 @@ export function ShipmentsBoard() {
           onCreated={(id) => { setNewShipmentOpen(false); refresh(); setOpenId(id) }}
         />
       )}
-    </div>
+    </>
   )
 }
 
-/**
- * One cell. Most columns are their own text, but status is a chip, the exception count is
- * a badge, and the check-call clock is coloured by `checkCallState` — the same function
- * the worklist and the notifier read, so one load is never amber here and red there.
- */
-function BoardCell({ column, row, nowMs }: { column: BoardColumn; row: ShipmentRow; nowMs: number }) {
-  if (column.key === 'status') {
-    return <Badge variant="outline" className="text-[10px]">{SHIPMENT_STATUS_LABELS[row.status]}</Badge>
+/** Every rep id the list actually carries, so the Rep chip offers names, not a guess. */
+function repIdsOn(rows: readonly ShipmentRow[]): string[] {
+  const ids = new Set<string>()
+  for (const row of rows) {
+    if (row.salesRepId) ids.add(row.salesRepId)
+    if (row.customerRepId) ids.add(row.customerRepId)
   }
-  if (column.key === 'openIncidentCount') {
-    const open = row.openIncidentCount ?? 0
-    if (open === 0) return null
+  return [...ids].sort()
+}
+
+/**
+ * One cell. Most columns are their own text, but status and division are chips, the
+ * exception count is a badge, and the check-call clock is coloured by `checkCallState`
+ * — the same function the worklist and the notifier read, so one load is never amber
+ * here and red there.
+ */
+function BoardCell({ columnKey, text, row, nowMs, repName, divisionName, divisionColor }: {
+  columnKey: string
+  text: string
+  row: ShipmentRow
+  nowMs: number
+  repName: (id: string | null | undefined) => string
+  divisionName: (code: string) => string
+  divisionColor: (code: string) => string | null
+}) {
+  if (columnKey === 'status') {
+    const voidedAt = voidedAtOf(row)
+    const label = statusLabel(row)
     return (
-      <Badge variant="outline" className="border-destructive/40 text-[10px] text-destructive" data-testid="board-exceptions">
-        {open}
-      </Badge>
+      <TmsBadge
+        tone={statusTone(label)}
+        title={voidedAt
+          ? `Voided ${new Date(voidedAt).toLocaleString()} by ${row.voidedBy ?? 'unknown'}${row.voidReason ? ` — ${row.voidReason}` : ''}`
+          : undefined}
+      >
+        {label}
+      </TmsBadge>
     )
   }
-  if (column.key === 'docsMissing') {
+  if (columnKey === 'division') {
+    if (!row.revDivision) return null
+    const color = divisionColor(row.revDivision)
+    return (
+      <span
+        className="tms-division-chip"
+        data-testid="board-division"
+        style={color ? { borderColor: color, color } : undefined}
+      >
+        {row.revSubdivision
+          ? `${divisionName(row.revDivision)} (${divisionName(row.revSubdivision)})`
+          : divisionName(row.revDivision)}
+      </span>
+    )
+  }
+  if (columnKey === 'salesRepId') {
+    const id = row.salesRepId ?? row.customerRepId ?? null
+    return <>{id ? repName(id) : ''}</>
+  }
+  if (columnKey === 'carrier') {
+    return <span className={cn(carrierLabel(row) === 'Need to cover' && 'tms-muted')}>{text}</span>
+  }
+  if (columnKey === 'arStatus' || columnKey === 'apStatus') {
+    if (!text) return null
+    return <TmsBadge tone={statusTone(columnKey === 'arStatus' ? row.arStatus ?? '' : row.apStatus ?? '')}>{text}</TmsBadge>
+  }
+  if (columnKey === 'openIncidentCount') {
+    const open = row.openIncidentCount ?? 0
+    if (open === 0) return null
+    return <TmsBadge tone="red"><span data-testid="board-exceptions">{open}</span></TmsBadge>
+  }
+  if (columnKey === 'docsMissing') {
     // Blank means the gate has never run for this shipment. Saying "complete" there
     // would be a claim nothing has checked.
     if (row.docsMissing == null) return null
     if (row.docsMissing.length === 0) {
-      return <Check size={14} className="text-emerald-600" data-testid="board-docs" data-state="complete" />
+      return <Check size={14} className="text-[color:var(--tms-badge-green)]" data-testid="board-docs" data-state="complete" />
     }
     return (
-      <Badge
-        variant="outline"
-        className="border-amber-500/40 text-[10px] text-amber-700"
-        data-testid="board-docs"
-        data-state="missing"
-        title={row.docsMissing.join(', ')}
-      >
-        {row.docsMissing.length} missing
-      </Badge>
+      <TmsBadge tone="orange">
+        <span data-testid="board-docs" data-state="missing" title={row.docsMissing.join(', ')}>
+          {row.docsMissing.length} missing
+        </span>
+      </TmsBadge>
     )
   }
-  if (column.key === 'nextCheckCallAt') {
+  if (columnKey === 'nextCheckCallAt') {
     const state = checkCallState({ nextCheckCallAt: row.nextCheckCallAt }, nowMs)
     return (
       <span
@@ -356,21 +509,22 @@ function BoardCell({ column, row, nowMs }: { column: BoardColumn; row: ShipmentR
         data-state={state}
         className={cn(
           'tabular-nums',
-          state === 'OVERDUE' && 'font-medium text-destructive',
-          state === 'DUE' && 'font-medium text-amber-700',
+          state === 'OVERDUE' && 'tms-overdue',
+          state === 'DUE' && 'tms-due',
         )}
       >
-        {column.value(row)}
+        {text}
       </span>
     )
   }
-  return <>{column.value(row)}</>
+  return <>{text}</>
 }
 
 /**
  * The row menu acts on the row itself: every one of these needs only the shipment id and
- * the `updatedAt` the user is looking at, both of which the board already holds. Opening
- * the drawer first would be a round trip for nothing.
+ * the `updatedAt` the user is looking at, both of which the list already holds. Opening
+ * the drawer first would be a round trip for nothing. There is no delete and no restore:
+ * Void is the only exit, and the void dialog makes that call itself.
  */
 function rowHandlers(row: ShipmentRow, refresh: () => void): ShipmentActionHandlers {
   const shipmentId = row.id
@@ -393,152 +547,324 @@ function rowHandlers(row: ShipmentRow, refresh: () => void): ShipmentActionHandl
         () => duplicateShipment({ shipmentId, copies, sameCarrier })),
     onSetStatus: (status, reason) =>
       run('Status updated', () => setShipmentStatus({ shipmentId, expectedUpdatedAt, status, reason })),
-    onDelete: () => run('Shipment deleted', () => deleteShipment({ shipmentId, expectedUpdatedAt })),
-    onRestore: () => run('Shipment restored', () => restoreShipment({ shipmentId, expectedUpdatedAt })),
+    onVoid: () => { toast.success(`${row.number} voided`); refresh() },
     onTenderRespond: (decision, reason) =>
       run('Tender updated', () => tenderRespond({ shipmentId, expectedUpdatedAt, decision, reason })),
   }
 }
 
-function FilterRail({ filters, customers, onChange }: {
+/**
+ * One chip's editor, under the filter row. `all` is the "+ Filter" panel: every filter
+ * the list has, including the ones MVMNT has no chip for (mode, AP, the tracking and
+ * paperwork toggles), so nothing the board could narrow by before has been lost.
+ */
+function FilterPanel({ chip, filters, customers, divisions, reps, repName, onChange, onClose }: {
+  chip: ChipKey
   filters: BoardFilters
   customers: { id: string; name: string }[]
+  divisions: { code: string; name: string }[]
+  reps: string[]
+  repName: (id: string | null | undefined) => string
   onChange: (filters: BoardFilters) => void
+  onClose: () => void
 }) {
   const set = <K extends keyof BoardFilters>(key: K, value: BoardFilters[K]) => onChange({ ...filters, [key]: value })
+  const show = (key: ChipKey) => chip === 'all' || chip === key
+
   return (
-    <div className="grid grid-cols-2 gap-3 border-b border-border bg-muted/20 px-5 py-3 sm:grid-cols-6">
-      <div>
-        <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">Customer</Label>
-        <select
-          aria-label="Filter customer"
-          value={filters.customerId ?? ''}
-          onChange={(e) => set('customerId', e.target.value || null)}
-          className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-sm"
-        >
-          <option value="">All</option>
-          {customers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-        </select>
+    <div className="tms-filter-panel tms-card" data-testid="filter-panel">
+      <div className="tms-grid tms-grid-3">
+        {show('customerId') && (
+          <TmsField label="Customer">
+            <TmsSelect
+              aria-label="Filter customer"
+              value={filters.customerId ?? ''}
+              onChange={(e) => set('customerId', e.target.value || null)}
+            >
+              <option value="">All</option>
+              {customers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </TmsSelect>
+          </TmsField>
+        )}
+        {show('status') && (
+          <TmsField label="Status">
+            <TmsSelect
+              aria-label="Filter status"
+              value={filters.status ?? ''}
+              onChange={(e) => set('status', (e.target.value || null) as ShipmentStatus | null)}
+            >
+              <option value="">All</option>
+              {SHIPMENT_STATUSES.map((s) => <option key={s} value={s}>{sentence(s)}</option>)}
+            </TmsSelect>
+          </TmsField>
+        )}
+        {show('pickup') && (
+          <>
+            <TmsField label="Pick up from">
+              <TmsInput
+                aria-label="Filter pickup from" type="date" value={filters.pickupFrom ?? ''}
+                onChange={(e) => set('pickupFrom', e.target.value || null)}
+              />
+            </TmsField>
+            <TmsField label="Pick up to">
+              <TmsInput
+                aria-label="Filter pickup to" type="date" value={filters.pickupTo ?? ''}
+                onChange={(e) => set('pickupTo', e.target.value || null)}
+              />
+            </TmsField>
+          </>
+        )}
+        {show('delivery') && (
+          <>
+            <TmsField label="Delivery from">
+              <TmsInput
+                aria-label="Filter delivery from" type="date" value={filters.deliveryFrom ?? ''}
+                onChange={(e) => set('deliveryFrom', e.target.value || null)}
+              />
+            </TmsField>
+            <TmsField label="Delivery to">
+              <TmsInput
+                aria-label="Filter delivery to" type="date" value={filters.deliveryTo ?? ''}
+                onChange={(e) => set('deliveryTo', e.target.value || null)}
+              />
+            </TmsField>
+          </>
+        )}
+        {show('origin') && (
+          <TmsField label="Origin">
+            <TmsInput
+              aria-label="Filter origin" placeholder="City or state" value={filters.origin ?? ''}
+              onChange={(e) => set('origin', e.target.value || null)}
+            />
+          </TmsField>
+        )}
+        {show('destination') && (
+          <TmsField label="Destination">
+            <TmsInput
+              aria-label="Filter destination" placeholder="City or state" value={filters.destination ?? ''}
+              onChange={(e) => set('destination', e.target.value || null)}
+            />
+          </TmsField>
+        )}
+        {show('division') && (
+          <TmsField label="Division">
+            <TmsSelect
+              aria-label="Filter division"
+              value={filters.division ?? ''}
+              onChange={(e) => set('division', e.target.value || null)}
+            >
+              <option value="">All</option>
+              {divisions.map((d) => <option key={d.code} value={d.code}>{d.name}</option>)}
+            </TmsSelect>
+          </TmsField>
+        )}
+        {show('assignmentType') && (
+          <TmsField label="Carrier type">
+            <TmsSelect
+              aria-label="Filter carrier type"
+              value={filters.assignmentType ?? ''}
+              onChange={(e) => set('assignmentType', (e.target.value || null) as AssignmentType | null)}
+            >
+              <option value="">All</option>
+              {ASSIGNMENT_TYPES.map((t) => <option key={t} value={t}>{sentence(t)}</option>)}
+            </TmsSelect>
+          </TmsField>
+        )}
+        {show('repId') && (
+          <TmsField label="Rep">
+            <TmsSelect
+              aria-label="Filter rep"
+              value={filters.repId ?? ''}
+              onChange={(e) => set('repId', e.target.value || null)}
+            >
+              <option value="">All</option>
+              {reps.map((id) => <option key={id} value={id}>{repName(id)}</option>)}
+            </TmsSelect>
+          </TmsField>
+        )}
+        {show('arStatus') && (
+          <TmsField label="AR status">
+            <TmsSelect
+              aria-label="Filter AR status"
+              value={filters.arStatus ?? ''}
+              onChange={(e) => set('arStatus', (e.target.value || null) as ArStatus | null)}
+            >
+              <option value="">All</option>
+              {AR_STATUSES.map((s) => <option key={s} value={s}>{sentence(s)}</option>)}
+            </TmsSelect>
+          </TmsField>
+        )}
+        {chip === 'all' && (
+          <>
+            <TmsField label="AP status">
+              <TmsSelect
+                aria-label="Filter AP status"
+                value={filters.apStatus ?? ''}
+                onChange={(e) => set('apStatus', (e.target.value || null) as ApStatus | null)}
+              >
+                <option value="">All</option>
+                {AP_STATUSES.map((s) => <option key={s} value={s}>{sentence(s)}</option>)}
+              </TmsSelect>
+            </TmsField>
+            <TmsField label="Mode">
+              <TmsSelect
+                aria-label="Filter mode"
+                value={filters.mode ?? ''}
+                onChange={(e) => set('mode', (e.target.value || null) as ShipmentMode | null)}
+              >
+                <option value="">All</option>
+                {MODE_OPTIONS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+              </TmsSelect>
+            </TmsField>
+          </>
+        )}
       </div>
-      <div>
-        <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">Pickup from</Label>
-        <Input aria-label="Filter pickup from" type="date" value={filters.pickupFrom ?? ''} onChange={(e) => set('pickupFrom', e.target.value || null)} className="mt-1 h-8 text-sm" />
-      </div>
-      <div>
-        <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">Pickup to</Label>
-        <Input aria-label="Filter pickup to" type="date" value={filters.pickupTo ?? ''} onChange={(e) => set('pickupTo', e.target.value || null)} className="mt-1 h-8 text-sm" />
-      </div>
-      <div>
-        <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">Mode</Label>
-        <select
-          aria-label="Filter mode"
-          value={filters.mode ?? ''}
-          onChange={(e) => set('mode', (e.target.value || null) as ShipmentMode | null)}
-          className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-sm"
-        >
-          <option value="">All</option>
-          {MODE_OPTIONS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
-        </select>
-      </div>
-      <div>
-        <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">AR</Label>
-        <select
-          aria-label="Filter AR status"
-          value={filters.arStatus ?? ''}
-          onChange={(e) => set('arStatus', (e.target.value || null) as ArStatus | null)}
-          className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-sm"
-        >
-          <option value="">All</option>
-          {AR_STATUSES.map((s) => <option key={s} value={s}>{s.replace(/_/g, ' ').toLowerCase()}</option>)}
-        </select>
-      </div>
-      <div>
-        <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">Assignment</Label>
-        <select
-          aria-label="Filter assignment"
-          value={filters.assignmentType ?? ''}
-          onChange={(e) => set('assignmentType', (e.target.value || null) as AssignmentType | null)}
-          className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-sm"
-        >
-          <option value="">All</option>
-          {ASSIGNMENT_TYPES.map((t) => <option key={t} value={t}>{t.replace(/_/g, ' ').toLowerCase()}</option>)}
-        </select>
-      </div>
-      <div className="col-span-2 flex flex-wrap items-center gap-4 sm:col-span-6">
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            aria-label="Filter check call due"
-            checked={filters.checkCallDue === true}
-            onChange={(e) => set('checkCallDue', e.target.checked ? true : null)}
-          />
-          Check call due
-        </label>
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            aria-label="Filter check call overdue"
-            checked={filters.checkCallOverdue === true}
-            onChange={(e) => set('checkCallOverdue', e.target.checked ? true : null)}
-          />
-          Overdue
-        </label>
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            aria-label="Filter open exceptions"
-            checked={filters.openExceptions === true}
-            onChange={(e) => set('openExceptions', e.target.checked ? true : null)}
-          />
-          Open exceptions
-        </label>
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            aria-label="Filter docs missing"
-            checked={filters.docsMissing === true}
-            onChange={(e) => set('docsMissing', e.target.checked ? true : null)}
-          />
-          Docs missing
-        </label>
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            aria-label="Filter uploads to review"
-            checked={filters.uploadsToReview === true}
-            onChange={(e) => set('uploadsToReview', e.target.checked ? true : null)}
-          />
-          Uploads to review
-        </label>
+
+      {chip === 'all' && (
+        <div className="tms-filter-toggles">
+          {([
+            ['checkCallDue', 'Check call due'],
+            ['checkCallOverdue', 'Overdue'],
+            ['openExceptions', 'Open exceptions'],
+            ['docsMissing', 'Docs missing'],
+            ['uploadsToReview', 'Uploads to review'],
+          ] as const).map(([key, label]) => (
+            <label key={key} className="tms-check">
+              <input
+                type="checkbox"
+                aria-label={`Filter ${label.toLowerCase()}`}
+                checked={filters[key] === true}
+                onChange={(e) => set(key, e.target.checked ? true : null)}
+              />
+              {label}
+            </label>
+          ))}
+        </div>
+      )}
+
+      <div className="tms-filter-panel-foot">
+        <span className="tms-muted">{activeFilterCount(filters)} filters on</span>
+        <TmsButton size="sm" onClick={onClose}>Done</TmsButton>
       </div>
     </div>
   )
 }
 
-function SaveViewDialog({ onClose, onSave }: { onClose: () => void; onSave: (name: string, isDefault: boolean) => void }) {
-  const [name, setName] = useState('')
-  const [isDefault, setIsDefault] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+/** The "N Fields" picker: which of the thirty columns this list shows. */
+function FieldsDialog({ open, keys, onClose, onChange }: {
+  open: boolean
+  keys: readonly string[]
+  onClose: () => void
+  onChange: (keys: string[]) => void
+}) {
   return (
-    <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
-      <DialogContent className="max-w-sm">
-        <DialogHeader><DialogTitle>Save view</DialogTitle></DialogHeader>
-        <div className="space-y-3">
-          <div>
-            <Label className="text-xs uppercase tracking-wider text-muted-foreground">Name</Label>
-            <Input aria-label="View name" value={name} onChange={(e) => setName(e.target.value)} className="h-9 text-sm" />
-          </div>
-          <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={isDefault} onChange={(e) => setIsDefault(e.target.checked)} /> Make this my default view
+    <TmsDialog open={open} onOpenChange={(next) => { if (!next) onClose() }} title="Fields" className="tms-dialog-wide">
+      <div className="tms-grid tms-grid-3">
+        {BOARD_COLUMNS.map((c) => (
+          <label key={c.key} className="tms-check">
+            <input
+              type="checkbox"
+              checked={keys.includes(c.key)}
+              onChange={() => onChange(
+                keys.includes(c.key)
+                  ? keys.filter((k) => k !== c.key)
+                  : BOARD_COLUMNS.filter((col) => col.key === c.key || keys.includes(col.key)).map((col) => col.key),
+              )}
+            />
+            {c.label}
           </label>
-          {error && <p className="text-xs text-destructive">{error}</p>}
+        ))}
+      </div>
+    </TmsDialog>
+  )
+}
+
+interface ViewDraft {
+  name: string
+  department: string | null
+  description: string | null
+  audience: { groups: string[] } | null
+  isDefault: boolean
+  slug: string
+}
+
+/** "Save as view" — the chips on screen become a department view everyone named can open. */
+function SaveViewDialog({ open, onClose, onSave }: {
+  open: boolean
+  onClose: () => void
+  onSave: (draft: ViewDraft) => Promise<void>
+}) {
+  const [name, setName] = useState('')
+  const [department, setDepartment] = useState('')
+  const [description, setDescription] = useState('')
+  const [roles, setRoles] = useState<string[]>([])
+  const [isDefault, setIsDefault] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const submit = async () => {
+    if (!name.trim()) { setError('Name the view.'); return }
+    setBusy(true)
+    try {
+      await onSave({
+        name: name.trim(),
+        slug: slugify(name),
+        department: department.trim() || null,
+        description: description.trim() || null,
+        audience: roles.length > 0 ? { groups: roles.map((r) => `role-${r}`) } : null,
+        isDefault,
+      })
+    } catch (err) {
+      setError(graphqlErrorText(err) || (err instanceof Error ? err.message : 'Save failed'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <TmsDialog
+      open={open}
+      onOpenChange={(next) => { if (!next && !busy) onClose() }}
+      title="Save as view"
+      description="The filters, columns and sort on screen become a view in the sidebar."
+      footer={
+        <>
+          <TmsButton variant="ghost" onClick={onClose} disabled={busy}>Cancel</TmsButton>
+          <TmsButton variant="primary" onClick={() => { void submit() }} disabled={busy}>
+            {busy ? 'Saving…' : 'Save view'}
+          </TmsButton>
+        </>
+      }
+    >
+      <TmsField label="Name" error={error}>
+        <TmsInput aria-label="View name" value={name} onChange={(e) => { setName(e.target.value); setError(null) }} />
+      </TmsField>
+      <TmsField label="Department" hint="Dispatch, Accounting, Sales…">
+        <TmsInput aria-label="Department" value={department} onChange={(e) => setDepartment(e.target.value)} />
+      </TmsField>
+      <TmsField label="Description">
+        <TmsInput aria-label="Description" value={description} onChange={(e) => setDescription(e.target.value)} />
+      </TmsField>
+      <TmsField label="Who sees it" hint="Nobody named means everyone who can open Shipments.">
+        <div className="tms-filter-toggles">
+          {ROLES.filter((r) => r !== 'NONE').map((role) => (
+            <label key={role} className="tms-check">
+              <input
+                type="checkbox"
+                aria-label={ROLE_LABELS[role]}
+                checked={roles.includes(role)}
+                onChange={(e) => setRoles((prev) => (e.target.checked ? [...prev, role] : prev.filter((r) => r !== role)))}
+              />
+              {ROLE_LABELS[role]}
+            </label>
+          ))}
         </div>
-        <DialogFooter>
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button onClick={() => { if (!name.trim()) { setError('Name the view.'); return } onSave(name.trim(), isDefault) }}>Save</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      </TmsField>
+      <label className="tms-check">
+        <input type="checkbox" checked={isDefault} onChange={(e) => setIsDefault(e.target.checked)} />
+        Open this view by default
+      </label>
+    </TmsDialog>
   )
 }
 
@@ -554,7 +880,7 @@ function NewShipmentDialog({ customers, defaultMode, onClose, onCreated }: {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // Dormant is an automatic "no order in 90 days" label that a new order clears, so a
+  // Dormant is an automatic "no shipment in 90 days" label that new freight clears, so a
   // dormant customer is still shippable; only the lead stages, Pending and Blocked are
   // refused. The Lambda re-checks — this list exists so the user is not offered a name
   // the server will reject.
@@ -565,39 +891,15 @@ function NewShipmentDialog({ customers, defaultMode, onClose, onCreated }: {
   })
 
   return (
-    <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
-      <DialogContent className="max-w-sm">
-        <DialogHeader><DialogTitle>New shipment</DialogTitle></DialogHeader>
-        <div className="space-y-3">
-          <div>
-            <Label className="text-xs uppercase tracking-wider text-muted-foreground">Customer</Label>
-            <select
-              aria-label="Customer"
-              value={customerId}
-              onChange={(e) => setCustomerId(e.target.value)}
-              className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
-            >
-              <option value="">— select —</option>
-              {active.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-            <p className="mt-1 text-xs text-muted-foreground">Only active customers can be shipped.</p>
-          </div>
-          <div>
-            <Label className="text-xs uppercase tracking-wider text-muted-foreground">Mode</Label>
-            <select
-              aria-label="Mode"
-              value={mode}
-              onChange={(e) => setMode(e.target.value as ShipmentMode)}
-              className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
-            >
-              {MODE_OPTIONS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
-            </select>
-          </div>
-          {error && <p className="text-xs text-destructive">{error}</p>}
-        </div>
-        <DialogFooter>
-          <Button variant="ghost" onClick={onClose} disabled={busy}>Cancel</Button>
-          <Button
+    <TmsDialog
+      open
+      onOpenChange={(next) => { if (!next) onClose() }}
+      title="New shipment"
+      footer={
+        <>
+          <TmsButton variant="ghost" onClick={onClose} disabled={busy}>Cancel</TmsButton>
+          <TmsButton
+            variant="primary"
             disabled={busy}
             onClick={async () => {
               if (!customerId) { setError('Pick a customer.'); return }
@@ -613,9 +915,21 @@ function NewShipmentDialog({ customers, defaultMode, onClose, onCreated }: {
             }}
           >
             {busy ? 'Creating…' : 'Create draft'}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          </TmsButton>
+        </>
+      }
+    >
+      <TmsField label="Customer" hint="Only active customers can be shipped." error={error}>
+        <TmsSelect aria-label="Customer" value={customerId} onChange={(e) => setCustomerId(e.target.value)}>
+          <option value="">— select —</option>
+          {active.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </TmsSelect>
+      </TmsField>
+      <TmsField label="Mode">
+        <TmsSelect aria-label="Mode" value={mode} onChange={(e) => setMode(e.target.value as ShipmentMode)}>
+          {MODE_OPTIONS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+        </TmsSelect>
+      </TmsField>
+    </TmsDialog>
   )
 }

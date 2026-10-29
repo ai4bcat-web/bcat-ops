@@ -126,6 +126,8 @@ const FROM_ADDRESS = process.env.FROM_ADDRESS ?? 'ai4bcat@gmail.com'
 const OWNER_EMAIL = 'ryne@bcatcorp.com'
 const ADMIN_GROUP = 'ADMIN'
 const LOAD_PAGE_GROUP = 'page-loads'
+/** Step R: /loads became the one Shipments page, so `page-tms` opens the same door. */
+const TMS_PAGE_GROUP = 'page-tms'
 const SETTINGS_ID = 'default'
 
 // Amplify derives GSI names from the plural model name and the key fields.
@@ -278,8 +280,8 @@ async function authorize(action: Action, identity?: AppSyncIdentity | null): Pro
   // one load.
   if (action === 'SAVE_TRACKING_SETTINGS' || action === 'SAVE_DOCUMENT_SETTINGS') {
     if (!isAdmin) throw new Error(`Forbidden: ${action} requires owner or ADMIN`)
-  } else if (!isAdmin && !groups.includes(LOAD_PAGE_GROUP)) {
-    throw new Error(`Forbidden: ${action} requires owner, ADMIN, or ${LOAD_PAGE_GROUP}`)
+  } else if (!isAdmin && !groups.includes(LOAD_PAGE_GROUP) && !groups.includes(TMS_PAGE_GROUP)) {
+    throw new Error(`Forbidden: ${action} requires owner, ADMIN, ${LOAD_PAGE_GROUP}, or ${TMS_PAGE_GROUP}`)
   }
 
   return { email, sub: identity.sub, groups, isAdmin }

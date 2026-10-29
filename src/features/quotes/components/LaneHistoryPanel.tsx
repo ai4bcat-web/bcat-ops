@@ -13,11 +13,8 @@
  * lane's average to the floor.
  */
 import { useMemo, useState } from 'react'
-import { History, RefreshCw } from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Checkbox } from '@/components/ui/checkbox'
-import { Label } from '@/components/ui/label'
+import { RefreshCw } from 'lucide-react'
+import { TmsBadge, TmsButton, TmsCard, TmsField, TmsIconButton, TmsSelect } from '@/features/tms/kit'
 import { useLaneStats } from '@/hooks/useLaneStats'
 import { laneLabelFor } from '@/lib/laneKey'
 import { formatCents } from '@/lib/invoiceBuild'
@@ -43,15 +40,15 @@ function perMile(cents: number | null): string {
 
 function SideStats({ title, side, note }: { title: string; side: LaneStatsSide; note?: string }) {
   return (
-    <div className="@container rounded-lg border border-border p-3">
-      <div className="flex items-baseline justify-between">
-        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{title}</p>
-        <span className="text-xs text-muted-foreground">{side.count} {side.count === 1 ? 'load' : 'loads'}</span>
+    <div style={{ borderRadius: 'var(--tms-radius)', border: '1px solid var(--tms-border)', padding: 10 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
+        <p className="tms-field-label">{title}</p>
+        <span className="tms-muted" style={{ fontSize: 12 }}>{side.count} {side.count === 1 ? 'shipment' : 'shipments'}</span>
       </div>
       {side.count === 0 ? (
-        <p className="mt-2 text-sm text-muted-foreground">{note ?? 'Nothing in this window.'}</p>
+        <p className="tms-muted" style={{ marginTop: 8, fontSize: 13 }}>{note ?? 'Nothing in this window.'}</p>
       ) : (
-        <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-sm @sm:grid-cols-3 @lg:grid-cols-5">
+        <dl className="tms-grid tms-grid-3" style={{ marginTop: 8, fontSize: 13 }}>
           <Cell label="Low" value={money(side.lowCents)} />
           <Cell label="Median" value={money(side.medianCents)} />
           <Cell label="Avg" value={money(side.avgCents)} />
@@ -66,8 +63,8 @@ function SideStats({ title, side, note }: { title: string; side: LaneStatsSide; 
 function Cell({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <dt className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</dt>
-      <dd className="truncate font-medium">{value}</dd>
+      <dt className="tms-field-label">{label}</dt>
+      <dd style={{ margin: 0, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis' }}>{value}</dd>
     </div>
   )
 }
@@ -103,131 +100,114 @@ export function LaneHistoryPanel({ laneKey, laneKey3, miles, equipmentType, rate
   }, [samples, equipmentType])
 
   const empty = basis === 'NONE'
-  const nothingInWindow = !empty && stats.customer.count === 0 && stats.carrier.count === 0
+  const nothingInWindow = empty === false && stats.customer.count === 0 && stats.carrier.count === 0
 
   return (
-    <div className="space-y-3 rounded-lg border border-border p-3" data-testid="lane-history">
-      <div className="flex flex-wrap items-center gap-2">
-        <History size={14} className="text-muted-foreground" />
-        <p className="text-sm font-medium">Lane history</p>
-        <span className="text-xs text-muted-foreground">{laneLabelFor(laneKey)}</span>
-        {basis !== 'NONE' && (
-          <Badge variant="outline" className="text-[10px]">{badge}</Badge>
-        )}
-        {basis === 'ZIP3' && (
-          <Badge variant="outline" className="text-[10px]">ZIP3 neighbourhood</Badge>
-        )}
-        <Button
-          variant="ghost"
-          size="sm"
-          className="ml-auto h-7 px-2"
-          onClick={() => { void refresh() }}
-          disabled={loading}
-          aria-label="Refresh lane history"
-        >
+    <TmsCard
+      title={
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+          Lane history
+          <span className="tms-muted" style={{ fontSize: 12, fontWeight: 400 }}>{laneLabelFor(laneKey)}</span>
+          {basis !== 'NONE' && <TmsBadge tone="purple">{badge}</TmsBadge>}
+          {basis === 'ZIP3' && <TmsBadge tone="gray">ZIP3 neighbourhood</TmsBadge>}
+        </span>
+      }
+      actions={
+        <TmsIconButton shape="plain" aria-label="Refresh lane history" disabled={loading} onClick={() => { void refresh() }}>
           <RefreshCw size={13} />
-        </Button>
-      </div>
-
-      <div className="flex flex-wrap items-end gap-3">
-        <div className="flex gap-1" role="group" aria-label="Lane history window">
-          {WINDOWS.map((w) => (
-            <Button
-              key={String(w.value)}
-              type="button"
-              size="sm"
-              variant={windowDays === w.value ? 'default' : 'outline'}
-              className="h-7 px-2 text-xs"
-              onClick={() => setWindowDays(w.value)}
-            >
-              {w.label}
-            </Button>
-          ))}
-        </div>
-        <div>
-          <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">Equipment</Label>
-          <select
-            aria-label="Lane history equipment"
-            value={equipment}
-            onChange={(e) => setEquipment(e.target.value)}
-            className="mt-1 h-8 rounded-md border border-input bg-background px-2 text-sm"
-          >
-            <option value="">Any equipment</option>
-            {equipmentOptions.map((option) => (
-              <option key={option} value={option}>{option}</option>
+        </TmsIconButton>
+      }
+    >
+      <div style={{ display: 'grid', gap: 12 }} data-testid="lane-history">
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-end', gap: 12 }}>
+          <div style={{ display: 'flex', gap: 4 }} role="group" aria-label="Lane history window">
+            {WINDOWS.map((w) => (
+              <TmsButton
+                key={String(w.value)}
+                size="sm"
+                variant={windowDays === w.value ? 'primary' : 'secondary'}
+                onClick={() => setWindowDays(w.value)}
+              >
+                {w.label}
+              </TmsButton>
             ))}
-          </select>
-        </div>
-        <div>
-          <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">Rate type</Label>
-          <select
-            aria-label="Lane history rate type"
-            value={rate}
-            onChange={(e) => {
-              const next = e.target.value
-              setRate(next === 'SPOT' || next === 'CONTRACT' ? next : '')
-            }}
-            className="mt-1 h-8 rounded-md border border-input bg-background px-2 text-sm"
-          >
-            <option value="">Any rate</option>
-            {RATE_TYPES.map((value) => (
-              <option key={value} value={value}>{value === 'SPOT' ? 'Spot' : 'Contract'}</option>
-            ))}
-          </select>
-        </div>
-      </div>
-
-      {error && <p className="text-xs text-destructive">{error}</p>}
-
-      {loading && samples.length === 0 ? (
-        <p className="text-sm text-muted-foreground">Loading lane history…</p>
-      ) : empty ? (
-        <p className="text-sm text-muted-foreground">No history on this lane.</p>
-      ) : nothingInWindow ? (
-        <p className="text-sm text-muted-foreground">No history on this lane in this window.</p>
-      ) : (
-        <>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <SideStats title="Customer" side={stats.customer} />
-            <SideStats
-              title="Carrier cost"
-              side={stats.carrier}
-              note={includeOwnFleetCost ? 'Nothing in this window.' : 'Every load in this window ran on our own trucks.'}
+          </div>
+          <TmsField label="Equipment">
+            <TmsSelect
+              aria-label="Lane history equipment"
+              value={equipment}
+              onChange={(e) => setEquipment(e.target.value)}
+              placeholder="Any equipment"
+              options={equipmentOptions.map((option) => ({ value: option, label: option }))}
             />
-          </div>
+          </TmsField>
+          <TmsField label="Rate type">
+            <TmsSelect
+              aria-label="Lane history rate type"
+              value={rate}
+              onChange={(e) => {
+                const next = e.target.value
+                setRate(next === 'SPOT' || next === 'CONTRACT' ? next : '')
+              }}
+              placeholder="Any rate"
+              options={RATE_TYPES.map((value) => ({ value, label: value === 'SPOT' ? 'Spot' : 'Contract' }))}
+            />
+          </TmsField>
+        </div>
 
-          <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-            <span>Avg margin {stats.marginAvgBps != null ? `${(stats.marginAvgBps / 100).toFixed(1)}%` : '—'}</span>
-            <span>Avg miles {stats.milesAvg != null ? Math.round(stats.milesAvg) : '—'}</span>
-            {miles != null && <span>This load {Math.round(miles)} mi</span>}
-            <span>Last {stats.lastAt ?? '—'}</span>
-          </div>
+        {error && <p className="tms-field-error">{error}</p>}
 
-          {stats.byMonth.length > 0 && (
-            <div className="overflow-x-auto">
-              <div className="flex gap-2" data-testid="lane-history-months">
-                {stats.byMonth.map((month) => (
-                  <div key={month.month} className="min-w-24 rounded-md border border-border px-2 py-1">
-                    <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{month.month}</p>
-                    <p className="text-xs font-medium">{money(month.customerAvgCents)}</p>
-                    <p className="text-xs text-muted-foreground">{money(month.carrierAvgCents)}</p>
-                    <p className="text-[10px] text-muted-foreground">{month.count} {month.count === 1 ? 'load' : 'loads'}</p>
-                  </div>
-                ))}
-              </div>
+        {loading && samples.length === 0 ? (
+          <p className="tms-muted" style={{ fontSize: 13 }}>Loading lane history…</p>
+        ) : empty ? (
+          <p className="tms-muted" style={{ fontSize: 13 }}>No history on this lane.</p>
+        ) : nothingInWindow ? (
+          <p className="tms-muted" style={{ fontSize: 13 }}>No history on this lane in this window.</p>
+        ) : (
+          <>
+            <div className="tms-grid tms-grid-2">
+              <SideStats title="Customer" side={stats.customer} />
+              <SideStats
+                title="Carrier cost"
+                side={stats.carrier}
+                note={includeOwnFleetCost ? 'Nothing in this window.' : 'Every shipment in this window ran on our own trucks.'}
+              />
             </div>
-          )}
-        </>
-      )}
 
-      <label className="flex items-start gap-2.5 text-xs text-muted-foreground">
-        <Checkbox
-          aria-label="Include own fleet cost"
-          checked={includeOwnFleetCost}
-          onCheckedChange={(v) => setIncludeOwnFleetCost(v === true)}
-        />
-        Own-fleet legs are left out of the carrier cost unless this is ticked — our own truck bought nothing.
-      </label>
-    </div>
+            <div className="tms-muted" style={{ display: 'flex', flexWrap: 'wrap', gap: 16, fontSize: 12 }}>
+              <span>Avg margin {stats.marginAvgBps != null ? `${(stats.marginAvgBps / 100).toFixed(1)}%` : '—'}</span>
+              <span>Avg miles {stats.milesAvg != null ? Math.round(stats.milesAvg) : '—'}</span>
+              {miles != null && <span>This shipment {Math.round(miles)} mi</span>}
+              <span>Last {stats.lastAt ?? '—'}</span>
+            </div>
+
+            {stats.byMonth.length > 0 && (
+              <div style={{ overflowX: 'auto' }}>
+                <div style={{ display: 'flex', gap: 8 }} data-testid="lane-history-months">
+                  {stats.byMonth.map((month) => (
+                    <div key={month.month} style={{ minWidth: 96, borderRadius: 'var(--tms-radius)', border: '1px solid var(--tms-border)', padding: '4px 8px' }}>
+                      <p className="tms-field-label">{month.month}</p>
+                      <p style={{ fontSize: 12, fontWeight: 600 }}>{money(month.customerAvgCents)}</p>
+                      <p className="tms-muted" style={{ fontSize: 12 }}>{money(month.carrierAvgCents)}</p>
+                      <p className="tms-muted" style={{ fontSize: 10 }}>{month.count} {month.count === 1 ? 'shipment' : 'shipments'}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
+        )}
+
+        <label className="tms-muted" style={{ display: 'flex', alignItems: 'flex-start', gap: 10, fontSize: 12 }}>
+          <input
+            type="checkbox"
+            aria-label="Include own fleet cost"
+            checked={includeOwnFleetCost}
+            onChange={(e) => setIncludeOwnFleetCost(e.target.checked)}
+          />
+          Own-fleet legs are left out of the carrier cost unless this is ticked — our own truck bought nothing.
+        </label>
+      </div>
+    </TmsCard>
   )
 }

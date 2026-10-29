@@ -171,7 +171,8 @@ describe('UsersPage', () => {
     fireEvent.click(screen.getByLabelText('Toggle permissions'))
 
     const pages = await waitFor(() => screen.getAllByTestId('user-page-toggle'))
-    const loads = pages.find((b) => b.textContent?.startsWith('Loads'))!
+    // The `loads` grant is labelled "Shipments" — one list, one word (Step R).
+    const loads = pages.find((b) => b.textContent?.startsWith('Shipments'))!
     const dashboard = pages.find((b) => b.textContent?.startsWith('Dashboard'))!
 
     expect(loads).toHaveTextContent('from role')
@@ -215,7 +216,7 @@ describe('UsersPage', () => {
 
     const pageButtons = await waitFor(() => screen.getAllByTestId('user-page-toggle'))
     const dashboardButton = pageButtons.find((b) => b.textContent?.includes('Dashboard'))
-    const loadsButton = pageButtons.find((b) => b.textContent?.includes('Loads'))
+    const loadsButton = pageButtons.find((b) => b.textContent?.includes('Shipments'))
 
     expect(dashboardButton).toBeDefined()
     expect(loadsButton).toBeDefined()

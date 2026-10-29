@@ -9,7 +9,11 @@
  *
  * A lag with nothing to measure renders as `—`, not `0 days`: no invoice has been paid
  * yet is a different fact from "paid the same day".
+ *
+ * On the MVMNT shell it is one card row: a `TmsCard` whose body is the figures side by
+ * side, the same place the dashboard puts its KPI strip.
  */
+import { TmsCard } from '@/features/tms/kit'
 import { formatCents } from '@/lib/invoiceBuild'
 import { AR_STRIP_LABELS, type AgingStripLabels } from './agingStripLabels'
 
@@ -59,19 +63,21 @@ export function AgingStrip({
   ]
 
   return (
-    <dl
-      aria-label={labels.aria}
-      className={cells.length === 5 ? 'grid grid-cols-2 gap-3 sm:grid-cols-5' : 'grid grid-cols-2 gap-3 sm:grid-cols-4'}
-    >
-      {cells.map((c) => (
-        <div key={c.label} className="rounded-md border border-border bg-card px-3 py-2">
-          <dt className="text-[10px] uppercase tracking-wider text-muted-foreground">{c.label}</dt>
-          <dd className={c.tone === 'late' ? 'text-base font-semibold text-destructive' : 'text-base font-semibold'}>
-            {c.value}
-          </dd>
-          {c.hint && <p className="text-[11px] text-muted-foreground">{c.hint}</p>}
-        </div>
-      ))}
-    </dl>
+    <TmsCard title={labels.aria}>
+      <dl aria-label={labels.aria} className="flex flex-wrap gap-3">
+        {cells.map((c) => (
+          <div key={c.label} className="min-w-[150px] flex-1">
+            <dt className="text-[11px] font-semibold uppercase tracking-wider tms-muted">{c.label}</dt>
+            <dd
+              className="text-lg font-semibold"
+              style={c.tone === 'late' ? { color: 'var(--tms-badge-red)' } : undefined}
+            >
+              {c.value}
+            </dd>
+            {c.hint && <p className="text-[11px] tms-muted">{c.hint}</p>}
+          </div>
+        ))}
+      </dl>
+    </TmsCard>
   )
 }

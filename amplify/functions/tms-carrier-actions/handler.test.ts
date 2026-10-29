@@ -751,10 +751,17 @@ describe('UPSERT_PAYMENT_METHOD', () => {
 // ── Authorization ────────────────────────────────────────────────────────────
 
 describe('authorization', () => {
-  it('refuses a caller who is neither owner, admin, nor on the carriers page', async () => {
+  it('refuses a caller who is neither owner, admin, nor on the carriers or TMS page', async () => {
     await expect(
       call('UPSERT_CARRIER', { name: 'Anything', type: 'TL' }, OUTSIDER),
-    ).rejects.toThrow('Forbidden: UPSERT_CARRIER requires owner, ADMIN, or page-carriers')
+    ).rejects.toThrow('Forbidden: UPSERT_CARRIER requires owner, ADMIN, page-carriers, or page-tms')
+  })
+
+  it('lets a page-tms caller work the carrier directory', async () => {
+    // Step R: Carriers is a BROKERAGE page, and `page-tms` is the one grant for it.
+    const tmsUser = { sub: 'sub-tms', username: 'tms', claims: { email: 'broker@bcatcorp.com', 'cognito:groups': ['page-tms'] } }
+    const saved = await call('UPSERT_CARRIER', { name: 'Page TMS Carrier', type: 'TL' }, tmsUser)
+    expect(saved.name).toBe('Page TMS Carrier')
   })
 
   it('refuses a missing identity', async () => {

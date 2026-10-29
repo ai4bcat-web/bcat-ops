@@ -1,13 +1,17 @@
+/**
+ * Admin email controls: portal + escalation kill switches (default PAUSED) + manager
+ * recipients.
+ *
+ * Only My Brokerage → Settings renders this, so it wears the MVMNT kit rather than the
+ * compliance pages' own `Card` chrome; the compliance pages themselves are untouched.
+ */
 import { useState, useMemo } from 'react'
+import type { ReactNode } from 'react'
 import { Mail, Pause, Play } from 'lucide-react'
 import { toast } from 'sonner'
-import { Switch } from '@/components/ui/switch'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import { TmsButton, TmsCard, TmsInput } from '@/features/tms/kit'
 import { useComplianceSettings } from '@/hooks/useComplianceSettings'
-import { Card } from './components'
 
-/** Admin email controls: portal + escalation kill switches (default PAUSED) + manager recipients. */
 export function EmailSettingsCard() {
   const { settings, loading, patch } = useComplianceSettings()
   const [managerEmails, setManagerEmails] = useState('')
@@ -28,9 +32,10 @@ export function EmailSettingsCard() {
   }
 
   return (
-    <Card title="Email settings" sub="Both kill switches default to PAUSED until you flip them">
+    <TmsCard title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><Mail size={14} aria-hidden="true" />Email settings</span>}>
+      <p className="tms-field-hint" style={{ margin: '0 0 12px' }}>Both kill switches default to PAUSED until you flip them</p>
       {loading || !settings ? (
-        <div style={{ fontSize: 13, color: 'var(--ds-t3)' }}>Loading…</div>
+        <p className="tms-muted" style={{ margin: 0, fontSize: 14 }}>Loading…</p>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <Row
@@ -47,36 +52,53 @@ export function EmailSettingsCard() {
             paused={settings.escalationEmailsPaused}
             onToggle={(p) => toggle('escalationEmailsPaused', p)}
           />
-          <div style={{ borderTop: '1px solid var(--ds-border)', paddingTop: 12 }}>
-            <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginBottom: 6 }}>Manager recipients (escalation, comma-separated)</div>
+          <div style={{ borderTop: '1px solid var(--tms-border)', paddingTop: 12 }}>
+            <div className="tms-field-label" style={{ marginBottom: 6 }}>Manager recipients (escalation, comma-separated)</div>
             <div style={{ display: 'flex', gap: 8 }}>
-              <Input value={displayed} onChange={(e) => { setDirty(true); setManagerEmails(e.target.value) }} placeholder="ops@bcatcorp.com, safety@bcatcorp.com" className="h-9" />
-              <Button size="sm" variant="outline" style={{ paddingInline: 18 }} onClick={saveManagers}>Save</Button>
+              <TmsInput
+                aria-label="Manager recipients"
+                value={displayed}
+                onChange={(e) => { setDirty(true); setManagerEmails(e.target.value) }}
+                placeholder="ops@bcatcorp.com, safety@bcatcorp.com"
+              />
+              <TmsButton size="sm" onClick={saveManagers}>Save</TmsButton>
             </div>
           </div>
         </div>
       )}
-    </Card>
+    </TmsCard>
   )
 }
 
 function Row({ icon, title, desc, paused, onToggle }: {
-  icon: React.ReactNode; title: string; desc: string; paused: boolean; onToggle: (paused: boolean) => void
+  icon: ReactNode; title: string; desc: string; paused: boolean; onToggle: (paused: boolean) => void
 }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
       <div style={{ display: 'flex', gap: 10 }}>
-        <div style={{ color: paused ? 'var(--ds-t3)' : '#16a34a', marginTop: 2 }}>{paused ? <Pause size={15} /> : <Play size={15} />}{icon}</div>
+        <div className={paused ? 'tms-muted' : undefined} style={{ marginTop: 2, color: paused ? undefined : 'var(--tms-badge-green)' }}>
+          {paused ? <Pause size={15} /> : <Play size={15} />}{icon}
+        </div>
         <div>
-          <div style={{ fontSize: 13.5, fontWeight: 500, color: 'var(--ds-t1)' }}>{title}</div>
-          <div style={{ fontSize: 12, color: 'var(--ds-t3)' }}>{desc}</div>
+          <div style={{ fontSize: 14, fontWeight: 500 }}>{title}</div>
+          <div className="tms-muted" style={{ fontSize: 12 }}>{desc}</div>
         </div>
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <span style={{ fontSize: 12, fontWeight: 600, color: paused ? '#b45309' : '#16a34a' }}>{paused ? 'PAUSED' : 'LIVE'}</span>
-        {/* Switch ON = emails live (not paused) */}
-        <Switch checked={!paused} onCheckedChange={(v) => onToggle(!v)} />
-      </div>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+        <span
+          style={{ fontSize: 12, fontWeight: 600, color: paused ? 'var(--tms-badge-orange)' : 'var(--tms-badge-green)' }}
+        >
+          {paused ? 'PAUSED' : 'LIVE'}
+        </span>
+        {/* Ticked = emails live (not paused) */}
+        <input
+          type="checkbox"
+          aria-label={`${title} live`}
+          checked={!paused}
+          onChange={(e) => onToggle(!e.target.checked)}
+          style={{ accentColor: 'var(--tms-primary)', width: 15, height: 15 }}
+        />
+      </label>
     </div>
   )
 }

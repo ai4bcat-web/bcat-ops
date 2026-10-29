@@ -9,11 +9,7 @@
  */
 import { useRef, useState } from 'react'
 import { Download, Trash2, Upload } from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { cn } from '@/lib/utils'
+import { TmsBadge, TmsButton, TmsField, TmsIconButton, TmsInput, TmsSelect } from '@/features/tms/kit'
 import type { CarrierDocumentRecord, CarrierDocumentType } from '@/types/tms'
 
 const DOCUMENT_TYPES: CarrierDocumentType[] = [
@@ -78,7 +74,7 @@ export function CarrierDocumentsEditor({
   }
 
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col gap-4">
       <div className="flex flex-wrap gap-2">
         {requiredDocs.map((required) => {
           const matching = documents.filter((d) => d.type === required)
@@ -86,117 +82,100 @@ export function CarrierDocumentsEditor({
             const expires = d.expiresAt ? Date.parse(d.expiresAt) : NaN
             return Number.isFinite(expires) && expires < nowMs
           })
-          const style = matching.length === 0
-            ? 'bg-red-100 text-red-700'
-            : expired ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'
+          const tone = matching.length === 0 ? 'red' : expired ? 'orange' : 'green'
           const suffix = matching.length === 0 ? 'missing' : expired ? 'expired' : 'on file'
           return (
-            <Badge key={required} variant="secondary" className={cn('text-[10px]', style)}>
+            <TmsBadge key={required} tone={tone}>
               {DOCUMENT_TYPE_LABELS[required as CarrierDocumentType] ?? required} · {suffix}
-            </Badge>
+            </TmsBadge>
           )
         })}
       </div>
 
-      <div className="rounded-lg border border-border p-3">
-        <div className="grid grid-cols-4 items-end gap-3">
-          <div>
-            <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">Type</Label>
-            <select
+      <div className="p-3" style={{ border: '1px solid var(--tms-border)', borderRadius: 'var(--tms-radius)' }}>
+        <div className="tms-grid tms-grid-4 items-end">
+          <TmsField label="Type">
+            <TmsSelect
               aria-label="Document type"
               value={type}
               onChange={(e) => setType(e.target.value as CarrierDocumentType)}
-              className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-sm"
             >
               {DOCUMENT_TYPES.map((t) => <option key={t} value={t}>{DOCUMENT_TYPE_LABELS[t]}</option>)}
-            </select>
-          </div>
-          <div>
-            <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">Expires</Label>
-            <Input
+            </TmsSelect>
+          </TmsField>
+          <TmsField label="Expires">
+            <TmsInput
               aria-label="Document expires"
               type="date"
               value={expiresAt}
               onChange={(e) => setExpiresAt(e.target.value)}
-              className="h-8 text-sm"
             />
-          </div>
-          <div>
-            <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">File</Label>
+          </TmsField>
+          <TmsField label="File">
             <input
               ref={fileRef}
               type="file"
               aria-label="Document file"
               accept="application/pdf,image/png,image/jpeg"
-              className="mt-1 block w-full text-xs"
+              className="block w-full text-xs"
             />
-          </div>
-          <Button size="sm" onClick={upload} disabled={busy}>
-            <Upload size={14} className="mr-1" /> {busy ? 'Uploading…' : 'Upload'}
-          </Button>
+          </TmsField>
+          <TmsButton variant="primary" size="sm" onClick={upload} disabled={busy}>
+            <Upload size={14} /> {busy ? 'Uploading…' : 'Upload'}
+          </TmsButton>
         </div>
-        {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
+        {error && <p className="mt-2 text-xs" style={{ color: 'var(--tms-badge-red)' }}>{error}</p>}
       </div>
 
       {documents.length === 0 ? (
-        <p className="text-sm text-muted-foreground">Nothing uploaded yet.</p>
+        <p className="tms-muted">Nothing uploaded yet.</p>
       ) : (
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-border text-left text-xs uppercase tracking-wider text-muted-foreground">
-              <th className="px-2 py-2">Type</th>
-              <th className="px-2 py-2">Name</th>
-              <th className="px-2 py-2">Expires</th>
-              <th className="px-2 py-2">Uploaded</th>
-              <th className="w-20" />
-            </tr>
-          </thead>
-          <tbody>
-            {documents.map((document) => {
-              const expires = document.expiresAt ? Date.parse(document.expiresAt) : NaN
-              const isExpired = Number.isFinite(expires) && expires < nowMs
-              return (
-                <tr key={document.id} className="border-b border-border/60">
-                  <td className="px-2 py-2">{DOCUMENT_TYPE_LABELS[document.type] ?? document.type}</td>
-                  <td className="px-2 py-2">
-                    {document.name}
-                    {document.source !== 'UPLOAD' && (
-                      <Badge variant="outline" className="ml-2 text-[10px]">{document.source.toLowerCase()}</Badge>
-                    )}
-                  </td>
-                  <td className={cn('px-2 py-2', isExpired && 'text-destructive')}>
-                    {document.expiresAt ? new Date(document.expiresAt).toLocaleDateString() : '—'}
-                  </td>
-                  <td className="px-2 py-2 text-xs text-muted-foreground">
-                    {document.uploadedBy} · {new Date(document.createdAt).toLocaleDateString()}
-                  </td>
-                  <td className="px-1">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8"
-                      aria-label={`Open ${document.name}`}
-                      onClick={() => void onOpen(document)}
-                    >
-                      <Download size={14} />
-                    </Button>
-                    {canDelete && (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8"
-                        aria-label={`Delete ${document.name}`}
-                        onClick={() => void onDelete(document)}
-                      >
-                        <Trash2 size={14} />
-                      </Button>
-                    )}
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
+        <div className="tms-table-wrap">
+          <table className="tms-table">
+            <thead>
+              <tr>
+                <th scope="col">TYPE</th>
+                <th scope="col">NAME</th>
+                <th scope="col">EXPIRES</th>
+                <th scope="col">UPLOADED</th>
+                <th scope="col" />
+              </tr>
+            </thead>
+            <tbody>
+              {documents.map((document) => {
+                const expires = document.expiresAt ? Date.parse(document.expiresAt) : NaN
+                const isExpired = Number.isFinite(expires) && expires < nowMs
+                return (
+                  <tr key={document.id}>
+                    <td>{DOCUMENT_TYPE_LABELS[document.type] ?? document.type}</td>
+                    <td>
+                      {document.name}
+                      {document.source !== 'UPLOAD' && (
+                        <> <TmsBadge tone="gray">{document.source.toLowerCase()}</TmsBadge></>
+                      )}
+                    </td>
+                    <td style={isExpired ? { color: 'var(--tms-badge-red)' } : undefined}>
+                      {document.expiresAt ? new Date(document.expiresAt).toLocaleDateString() : '—'}
+                    </td>
+                    <td className="text-xs tms-muted">
+                      {document.uploadedBy} · {new Date(document.createdAt).toLocaleDateString()}
+                    </td>
+                    <td>
+                      <TmsIconButton aria-label={`Open ${document.name}`} onClick={() => void onOpen(document)}>
+                        <Download size={14} />
+                      </TmsIconButton>
+                      {canDelete && (
+                        <TmsIconButton aria-label={`Delete ${document.name}`} onClick={() => void onDelete(document)}>
+                          <Trash2 size={14} />
+                        </TmsIconButton>
+                      )}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   )

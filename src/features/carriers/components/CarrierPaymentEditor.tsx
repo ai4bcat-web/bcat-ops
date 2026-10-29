@@ -7,10 +7,7 @@
  */
 import { useState } from 'react'
 import { Plus, Trash2 } from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
+import { TmsBadge, TmsButton, TmsField, TmsIconButton, TmsInput, TmsSelect } from '@/features/tms/kit'
 import { formatCents } from '@/lib/invoiceBuild'
 import type { CarrierPayeeType, CarrierPaymentMethodKind, CarrierPaymentMethodRecord } from '@/types/tms'
 
@@ -51,9 +48,9 @@ export function CarrierPaymentEditor({ methods, awaitingPayment, onSave, onArchi
   const waiting = awaitingPayment?.count ?? 0
 
   return (
-    <div className="space-y-3">
+    <div className="flex flex-col gap-3">
       {active.length === 0 && !adding && (
-        <p className="text-sm text-muted-foreground" data-testid="carrier-no-payment-method">
+        <p className="tms-muted" data-testid="carrier-no-payment-method">
           No payment method on file. AP cannot pay this carrier until one is added
           {waiting > 0
             ? ` — ${waiting} approved ${waiting === 1 ? 'bill is' : 'bills are'} waiting on it, ${formatCents(awaitingPayment?.cents ?? 0)} in all.`
@@ -81,9 +78,11 @@ export function CarrierPaymentEditor({ methods, awaitingPayment, onSave, onArchi
       )}
 
       {!adding && (
-        <Button variant="outline" size="sm" disabled={disabled} onClick={() => setAdding(true)}>
-          <Plus size={14} className="mr-1" /> Add payment method
-        </Button>
+        <div>
+          <TmsButton size="sm" disabled={disabled} onClick={() => setAdding(true)}>
+            <Plus size={14} /> Add payment method
+          </TmsButton>
+        </div>
       )}
     </div>
   )
@@ -151,82 +150,68 @@ function PaymentRow({ method, disabled, onSave, onArchive, onCancel }: {
   }
 
   return (
-    <div className="rounded-lg border border-border p-3">
-      <div className="grid grid-cols-4 gap-3">
-        <div>
-          <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">Method</Label>
-          <select
+    <div className="p-3" style={{ border: '1px solid var(--tms-border)', borderRadius: 'var(--tms-radius)' }}>
+      <div className="tms-grid tms-grid-4">
+        <TmsField label="Method">
+          <TmsSelect
             aria-label="Payment method"
             value={kind}
             disabled={disabled}
             onChange={(e) => setKind(e.target.value as CarrierPaymentMethodKind)}
-            className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-sm"
           >
             {METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
-          </select>
-        </div>
-        <div>
-          <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">Pay to</Label>
-          <select
+          </TmsSelect>
+        </TmsField>
+        <TmsField label="Pay to">
+          <TmsSelect
             aria-label="Pay to"
             value={recipientType}
             disabled={disabled}
             onChange={(e) => setRecipientType(e.target.value as CarrierPayeeType)}
-            className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-sm"
           >
             {PAYEE_TYPES.map((t) => <option key={t} value={t}>{t.toLowerCase()}</option>)}
-          </select>
-        </div>
-        <div className="col-span-2">
-          <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">
-            {recipientType === 'FACTOR' ? 'Factor name *' : 'Account name'}
-          </Label>
-          <Input
-            aria-label={recipientType === 'FACTOR' ? 'Factor name' : 'Account name'}
-            value={recipientType === 'FACTOR' ? factorName : accountName}
-            disabled={disabled}
-            onChange={(e) => (recipientType === 'FACTOR' ? setFactorName(e.target.value) : setAccountName(e.target.value))}
-            className="h-8 text-sm"
-          />
+          </TmsSelect>
+        </TmsField>
+        <div style={{ gridColumn: 'span 2' }}>
+          <TmsField label={recipientType === 'FACTOR' ? 'Factor name *' : 'Account name'}>
+            <TmsInput
+              aria-label={recipientType === 'FACTOR' ? 'Factor name' : 'Account name'}
+              value={recipientType === 'FACTOR' ? factorName : accountName}
+              disabled={disabled}
+              onChange={(e) => (recipientType === 'FACTOR' ? setFactorName(e.target.value) : setAccountName(e.target.value))}
+            />
+          </TmsField>
         </div>
       </div>
 
-      <div className="mt-3 grid grid-cols-4 gap-3">
-        <div>
-          <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">Bank</Label>
-          <Input aria-label="Bank" value={bankName} disabled={disabled} onChange={(e) => setBankName(e.target.value)} className="h-8 text-sm" />
-        </div>
-        <div>
-          <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">Account last 4</Label>
-          <Input aria-label="Account last 4" maxLength={4} value={accountLast4} disabled={disabled} onChange={(e) => setAccountLast4(e.target.value)} className="h-8 text-sm" />
-        </div>
-        <div>
-          <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">Routing last 4</Label>
-          <Input aria-label="Routing last 4" maxLength={4} value={routingLast4} disabled={disabled} onChange={(e) => setRoutingLast4(e.target.value)} className="h-8 text-sm" />
-        </div>
-        <div>
-          <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">Payee email</Label>
-          <Input aria-label="Payee email" value={payeeEmail} disabled={disabled} onChange={(e) => setPayeeEmail(e.target.value)} className="h-8 text-sm" />
-        </div>
+      <div className="tms-grid tms-grid-4 mt-3">
+        <TmsField label="Bank">
+          <TmsInput aria-label="Bank" value={bankName} disabled={disabled} onChange={(e) => setBankName(e.target.value)} />
+        </TmsField>
+        <TmsField label="Account last 4">
+          <TmsInput aria-label="Account last 4" maxLength={4} value={accountLast4} disabled={disabled} onChange={(e) => setAccountLast4(e.target.value)} />
+        </TmsField>
+        <TmsField label="Routing last 4">
+          <TmsInput aria-label="Routing last 4" maxLength={4} value={routingLast4} disabled={disabled} onChange={(e) => setRoutingLast4(e.target.value)} />
+        </TmsField>
+        <TmsField label="Payee email">
+          <TmsInput aria-label="Payee email" value={payeeEmail} disabled={disabled} onChange={(e) => setPayeeEmail(e.target.value)} />
+        </TmsField>
       </div>
 
-      <div className="mt-3 grid grid-cols-4 gap-3">
-        <div>
-          <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">Remit-to street</Label>
-          <Input aria-label="Remit-to street" value={street} disabled={disabled} onChange={(e) => setStreet(e.target.value)} className="h-8 text-sm" />
-        </div>
-        <div>
-          <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">City</Label>
-          <Input aria-label="Remit-to city" value={city} disabled={disabled} onChange={(e) => setCity(e.target.value)} className="h-8 text-sm" />
-        </div>
-        <div>
-          <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">State</Label>
-          <Input aria-label="Remit-to state" value={state} disabled={disabled} onChange={(e) => setState(e.target.value)} className="h-8 text-sm" />
-        </div>
-        <div>
-          <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">ZIP</Label>
-          <Input aria-label="Remit-to ZIP" value={zip} disabled={disabled} onChange={(e) => setZip(e.target.value)} className="h-8 text-sm" />
-        </div>
+      <div className="tms-grid tms-grid-4 mt-3">
+        <TmsField label="Remit-to street">
+          <TmsInput aria-label="Remit-to street" value={street} disabled={disabled} onChange={(e) => setStreet(e.target.value)} />
+        </TmsField>
+        <TmsField label="City">
+          <TmsInput aria-label="Remit-to city" value={city} disabled={disabled} onChange={(e) => setCity(e.target.value)} />
+        </TmsField>
+        <TmsField label="State">
+          <TmsInput aria-label="Remit-to state" value={state} disabled={disabled} onChange={(e) => setState(e.target.value)} />
+        </TmsField>
+        <TmsField label="ZIP">
+          <TmsInput aria-label="Remit-to ZIP" value={zip} disabled={disabled} onChange={(e) => setZip(e.target.value)} />
+        </TmsField>
       </div>
 
       <div className="mt-3 flex items-center gap-4">
@@ -234,27 +219,24 @@ function PaymentRow({ method, disabled, onSave, onArchive, onCancel }: {
           <input type="checkbox" aria-label="Preferred" checked={isPreferred} disabled={disabled} onChange={(e) => setIsPreferred(e.target.checked)} />
           Preferred
         </label>
-        {method?.isPreferred && <Badge variant="outline" className="text-[10px]">preferred on file</Badge>}
+        {method?.isPreferred && <TmsBadge tone="gray">preferred on file</TmsBadge>}
 
         <div className="ml-auto flex items-center gap-2">
-          {onCancel && <Button variant="ghost" size="sm" onClick={onCancel} disabled={busy}>Cancel</Button>}
-          <Button size="sm" onClick={save} disabled={busy || disabled}>{busy ? 'Saving…' : 'Save'}</Button>
+          {onCancel && <TmsButton variant="ghost" size="sm" onClick={onCancel} disabled={busy}>Cancel</TmsButton>}
+          <TmsButton variant="primary" size="sm" onClick={save} disabled={busy || disabled}>{busy ? 'Saving…' : 'Save'}</TmsButton>
           {onArchive && (
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8"
+            <TmsIconButton
               aria-label={`Archive ${method?.method ?? 'payment method'}`}
               disabled={busy || disabled}
               onClick={() => { setBusy(true); onArchive().finally(() => setBusy(false)) }}
             >
               <Trash2 size={14} />
-            </Button>
+            </TmsIconButton>
           )}
         </div>
       </div>
 
-      {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
+      {error && <p className="mt-2 text-xs" style={{ color: 'var(--tms-badge-red)' }}>{error}</p>}
     </div>
   )
 }

@@ -5,6 +5,5 @@ export function useLoads() {
   const loads = useAppStore((s) => s.loads)
   const addLoad = useAppStore((s) => s.addLoad)
   const updateLoad = useAppStore((s) => s.updateLoad)
-  const deleteLoad = useAppStore((s) => s.deleteLoad)
-  return { loads, addLoad, updateLoad, deleteLoad }
+  return { loads, addLoad, updateLoad }
 }

@@ -18,9 +18,13 @@ import type {
 
 export type ArTabKey = 'to-invoice' | 'docs-needed' | 'unpaid' | 'paid' | 'payments' | 'aging'
 
+/**
+ * The AR ladder in the order a shipment climbs it — Docs needed → Unbilled → Unpaid →
+ * Paid (MVMNT's own vocabulary) — then the two ledger views that are not rungs.
+ */
 export const AR_TABS: { key: ArTabKey; label: string }[] = [
-  { key: 'to-invoice', label: 'To invoice' },
   { key: 'docs-needed', label: 'Docs needed' },
+  { key: 'to-invoice', label: 'Unbilled' },
   { key: 'unpaid', label: 'Unpaid' },
   { key: 'paid', label: 'Paid' },
   { key: 'payments', label: 'Payments & credits' },

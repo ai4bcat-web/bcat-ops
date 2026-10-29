@@ -4,33 +4,31 @@
  * Three operational tabs with counts, a search box over name/DBA/MC/DOT, a filter rail,
  * CSV of the current view (admins), single click → profile sheet, double click → the
  * carrier's own URL. All of the deciding lives in `carrierViews.ts`; this file renders
- * what those functions return.
+ * what those functions return onto the MVMNT list page.
  *
- * `/carriers/:id` renders the same board with that carrier's profile already open, so a
- * link to a carrier lands somewhere you can keep working from.
+ * `/tms/carriers/:id` renders the same board with that carrier's profile already open, so
+ * a link to a carrier lands somewhere you can keep working from.
  */
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { Download, Filter, Plus, RefreshCw, Search, Truck } from 'lucide-react'
+import { Download } from 'lucide-react'
 import { toast } from 'sonner'
 import { RepPicker } from '@/components/RepPicker'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
+import {
+  TmsBadge, TmsButton, TmsCard, TmsDialog, TmsField, TmsInput, TmsListPage, TmsSelect,
+  type ColumnDef,
+} from '@/features/tms/kit'
 import { useAuth } from '@/hooks/useAuth'
 import { useCarriers } from '@/hooks/useCarriers'
 import { getTmsSettings, graphqlErrorText, listCarrierDocuments, upsertCarrier } from '@/lib/apiClient'
 import { CARRIER_STATUS_LABELS, effectiveCarrierStatus } from '@/lib/carrierStatus'
-import { cn } from '@/lib/utils'
 import { CarrierProfile } from './components/CarrierProfile'
 import { CARRIER_TYPES } from './components/carrierFormModel'
 import {
   CARRIER_COLUMNS, CARRIER_TABS, DEFAULT_INSURANCE_WARN_DAYS, DEFAULT_REQUIRED_CARRIER_DOCS,
   EMPTY_CARRIER_FILTERS, activeCarrierFilterCount, applyCarrierBoard, carrierEquipmentOptions,
   carrierOwnerOptions, carrierTabCounts, carriersToCsv,
-  type CarrierBoardContext, type CarrierFilters, type CarrierSortDir, type CarrierSortKey,
+  type CarrierBoardContext, type CarrierFilters, type CarrierRow, type CarrierSortDir, type CarrierSortKey,
   type CarrierTabKey, type InsuranceFilter,
 } from './carrierViews'
 import type { CarrierDocumentRecord, CarrierType, TmsSettings } from '@/types/tms'
@@ -86,12 +84,25 @@ export function CarriersPage() {
     () => applyCarrierBoard(carriers, { tab, query, filters, sortKey, sortDir, ctx }),
     [carriers, tab, query, filters, sortKey, sortDir, ctx],
   )
-  const columns = CARRIER_COLUMNS.filter((c) => VISIBLE_COLUMN_KEYS.includes(c.key))
+
+  const columns = useMemo<ColumnDef<CarrierRow>[]>(
+    () => CARRIER_COLUMNS.filter((c) => VISIBLE_COLUMN_KEYS.includes(c.key)).map((c) => ({
+      key: c.key,
+      header: c.label.toUpperCase(),
+      sortable: SORTABLE_KEYS.includes(c.key as CarrierSortKey),
+      render: (row: CarrierRow) => (
+        c.key === 'status'
+          ? <TmsBadge tone="gray">{CARRIER_STATUS_LABELS[effectiveCarrierStatus(row, now).status]}</TmsBadge>
+          : c.value(row, ctx)
+      ),
+    })),
+    [ctx, now],
+  )
 
   const profileId = params.id ?? openId
   const closeProfile = () => {
     setOpenId(null)
-    if (params.id) navigate('/carriers')
+    if (params.id) navigate('/tms/carriers')
   }
 
   const exportCsv = () => {
@@ -104,117 +115,78 @@ export function CarriersPage() {
     URL.revokeObjectURL(url)
   }
 
+  const activeFilters = activeCarrierFilterCount(filters)
+
   return (
-    <div className="flex h-full flex-col">
-      <header className="flex flex-wrap items-center gap-2 border-b border-border px-5 py-3">
-        <Truck size={18} />
-        <h1 className="text-lg font-semibold">Carriers</h1>
-        <Badge variant="outline">{rows.length}</Badge>
-        <div className="relative ml-2 w-64">
-          <Search size={14} className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            aria-label="Search carriers"
-            placeholder="Name, DBA, MC, DOT…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            className="h-9 pl-7 text-sm"
-          />
-        </div>
-        <Button variant="outline" size="sm" onClick={() => setShowFilters((s) => !s)}>
-          <Filter size={14} className="mr-1" /> Filters
-          {activeCarrierFilterCount(filters) > 0 && <Badge className="ml-1">{activeCarrierFilterCount(filters)}</Badge>}
-        </Button>
-        {isAdmin && (
-          <Button variant="outline" size="sm" onClick={exportCsv}><Download size={14} className="mr-1" /> CSV</Button>
-        )}
-        <Button variant="ghost" size="icon" className="h-9 w-9" aria-label="Refresh" onClick={() => refresh()}>
-          <RefreshCw size={14} className={loading ? 'animate-spin' : undefined} />
-        </Button>
-        <Button size="sm" className="ml-auto" onClick={() => setNewCarrierOpen(true)}>
-          <Plus size={14} className="mr-1" /> Carrier
-        </Button>
-      </header>
-
-      <nav role="tablist" aria-label="Carrier status" className="flex gap-1 overflow-x-auto border-b border-border px-5">
-        {CARRIER_TABS.map((t) => (
-          <button
-            key={t.key}
-            role="tab"
-            aria-selected={tab === t.key}
-            onClick={() => setTab(t.key)}
-            className={cn(
-              'flex items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-2 text-sm',
-              tab === t.key ? 'border-primary font-medium text-foreground' : 'border-transparent text-muted-foreground',
+    <>
+      <TmsListPage<CarrierRow>
+        title="Carriers"
+        primaryAction={{ label: 'Carrier', onClick: () => setNewCarrierOpen(true) }}
+        actions={
+          isAdmin
+            ? <TmsButton aria-label="CSV" onClick={exportCsv}><Download size={14} /> CSV</TmsButton>
+            : undefined
+        }
+        quickTabs={{
+          tabs: CARRIER_TABS.map((t) => ({ key: t.key, label: t.label, count: counts[t.key] })),
+          active: tab,
+          onSelect: (key) => setTab(key as CarrierTabKey),
+        }}
+        search={{
+          value: query,
+          onChange: setQuery,
+          placeholder: 'Name, DBA, MC, DOT…',
+        }}
+        onRefresh={() => { void refresh() }}
+        filterChips={[
+          { key: 'type', label: 'Type is', value: filters.type, onClick: () => setShowFilters((s) => !s) },
+          { key: 'equipment', label: 'Equipment is', value: filters.equipment, onClick: () => setShowFilters((s) => !s) },
+          { key: 'owner', label: 'Account owner is', value: filters.ownerId, onClick: () => setShowFilters((s) => !s) },
+          {
+            key: 'insurance',
+            label: 'Insurance is',
+            value: filters.insurance ? (filters.insurance === 'EXPIRING' ? 'Expiring soon' : 'Expired') : null,
+            onClick: () => setShowFilters((s) => !s),
+          },
+          {
+            key: 'docs',
+            label: 'Paperwork is',
+            value: filters.missingDocs ? 'Missing required docs' : null,
+            onClick: () => setShowFilters((s) => !s),
+          },
+        ]}
+        onAddFilter={() => setShowFilters((s) => !s)}
+        fieldsLabel={activeFilters > 0 ? `${activeFilters} Filters` : undefined}
+        onFields={() => setShowFilters((s) => !s)}
+        banner={
+          <>
+            {error && <p style={{ color: 'var(--tms-badge-red)' }}>{error}</p>}
+            {showFilters && (
+              <FilterRail
+                filters={filters}
+                equipment={carrierEquipmentOptions(carriers)}
+                owners={carrierOwnerOptions(carriers)}
+                onChange={setFilters}
+              />
             )}
-          >
-            {t.label}
-            <Badge variant="outline" className="text-[10px]">{counts[t.key]}</Badge>
-          </button>
-        ))}
-      </nav>
-
-      {showFilters && (
-        <FilterRail
-          filters={filters}
-          equipment={carrierEquipmentOptions(carriers)}
-          owners={carrierOwnerOptions(carriers)}
-          onChange={setFilters}
-        />
-      )}
-
-      {error && <p className="px-5 py-3 text-sm text-destructive">{error}</p>}
-
-      <div className="flex-1 overflow-auto px-5 py-3">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-border text-left text-xs uppercase tracking-wider text-muted-foreground">
-              {columns.map((c) => (
-                <th key={c.key} className="px-2 py-2">
-                  <button
-                    onClick={() => {
-                      const key = c.key as CarrierSortKey
-                      if (!SORTABLE_KEYS.includes(key)) return
-                      if (sortKey === key) setSortDir(sortDir === 'asc' ? 'desc' : 'asc')
-                      else { setSortKey(key); setSortDir('asc') }
-                    }}
-                  >
-                    {c.label}{sortKey === c.key ? (sortDir === 'asc' ? ' ▲' : ' ▼') : ''}
-                  </button>
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.length === 0 && !loading && (
-              <tr>
-                <td colSpan={columns.length} className="py-8 text-center text-sm text-muted-foreground">
-                  No carriers in this view.
-                </td>
-              </tr>
-            )}
-            {rows.map((row) => (
-              <tr
-                key={row.id}
-                className="cursor-pointer border-b border-border/60 hover:bg-muted/40"
-                onClick={() => setOpenId(row.id)}
-                onDoubleClick={() => navigate(`/carriers/${row.id}`)}
-              >
-                {columns.map((c) => (
-                  <td key={c.key} className="px-2 py-2">
-                    {c.key === 'status'
-                      ? (
-                        <Badge variant="outline" className="text-[10px]">
-                          {CARRIER_STATUS_LABELS[effectiveCarrierStatus(row, now).status]}
-                        </Badge>
-                      )
-                      : c.value(row, ctx)}
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+          </>
+        }
+        columns={columns}
+        rows={rows}
+        rowKey={(row) => row.id}
+        sort={{ key: sortKey, dir: sortDir }}
+        onSort={(key) => {
+          const next = key as CarrierSortKey
+          if (!SORTABLE_KEYS.includes(next)) return
+          if (sortKey === next) setSortDir(sortDir === 'asc' ? 'desc' : 'asc')
+          else { setSortKey(next); setSortDir('asc') }
+        }}
+        onRowClick={(row) => setOpenId(row.id)}
+        onRowDoubleClick={(row) => navigate(`/tms/carriers/${row.id}`)}
+        page={{ from: rows.length === 0 ? 0 : 1, to: rows.length, total: rows.length, pageSize: rows.length }}
+        emptyText={loading ? 'Reading the carrier directory…' : 'No carriers in this view.'}
+        onClearFilters={() => { setFilters(EMPTY_CARRIER_FILTERS); setQuery('') }}
+      />
 
       {profileId && (
         <CarrierProfile
@@ -238,7 +210,7 @@ export function CarriersPage() {
           }}
         />
       )}
-    </div>
+    </>
   )
 }
 
@@ -250,57 +222,51 @@ function FilterRail({ filters, equipment, owners, onChange }: {
 }) {
   const set = <K extends keyof CarrierFilters>(key: K, value: CarrierFilters[K]) => onChange({ ...filters, [key]: value })
   return (
-    <div className="grid grid-cols-2 gap-3 border-b border-border bg-muted/20 px-5 py-3 sm:grid-cols-5">
-      <div>
-        <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">Type</Label>
-        <select
-          aria-label="Filter type"
-          value={filters.type ?? ''}
-          onChange={(e) => set('type', (e.target.value || null) as CarrierType | null)}
-          className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-sm"
-        >
-          <option value="">All</option>
-          {CARRIER_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-        </select>
+    <TmsCard title="Filters">
+      <div className="tms-grid tms-grid-4">
+        <TmsField label="Type">
+          <TmsSelect
+            aria-label="Filter type"
+            value={filters.type ?? ''}
+            onChange={(e) => set('type', (e.target.value || null) as CarrierType | null)}
+          >
+            <option value="">All</option>
+            {CARRIER_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+          </TmsSelect>
+        </TmsField>
+        <TmsField label="Equipment">
+          <TmsSelect
+            aria-label="Filter equipment"
+            value={filters.equipment ?? ''}
+            onChange={(e) => set('equipment', e.target.value || null)}
+          >
+            <option value="">All</option>
+            {equipment.map((code) => <option key={code} value={code}>{code.replace(/_/g, ' ').toLowerCase()}</option>)}
+          </TmsSelect>
+        </TmsField>
+        <TmsField label="Account owner">
+          <TmsSelect
+            aria-label="Filter account owner"
+            value={filters.ownerId ?? ''}
+            onChange={(e) => set('ownerId', e.target.value || null)}
+          >
+            <option value="">All</option>
+            {owners.map((owner) => <option key={owner} value={owner}>{owner}</option>)}
+          </TmsSelect>
+        </TmsField>
+        <TmsField label="Insurance">
+          <TmsSelect
+            aria-label="Filter insurance"
+            value={filters.insurance ?? ''}
+            onChange={(e) => set('insurance', (e.target.value || null) as InsuranceFilter | null)}
+          >
+            <option value="">All</option>
+            <option value="EXPIRING">Expiring soon</option>
+            <option value="EXPIRED">Expired</option>
+          </TmsSelect>
+        </TmsField>
       </div>
-      <div>
-        <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">Equipment</Label>
-        <select
-          aria-label="Filter equipment"
-          value={filters.equipment ?? ''}
-          onChange={(e) => set('equipment', e.target.value || null)}
-          className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-sm"
-        >
-          <option value="">All</option>
-          {equipment.map((code) => <option key={code} value={code}>{code.replace(/_/g, ' ').toLowerCase()}</option>)}
-        </select>
-      </div>
-      <div>
-        <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">Account owner</Label>
-        <select
-          aria-label="Filter account owner"
-          value={filters.ownerId ?? ''}
-          onChange={(e) => set('ownerId', e.target.value || null)}
-          className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-sm"
-        >
-          <option value="">All</option>
-          {owners.map((owner) => <option key={owner} value={owner}>{owner}</option>)}
-        </select>
-      </div>
-      <div>
-        <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">Insurance</Label>
-        <select
-          aria-label="Filter insurance"
-          value={filters.insurance ?? ''}
-          onChange={(e) => set('insurance', (e.target.value || null) as InsuranceFilter | null)}
-          className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-sm"
-        >
-          <option value="">All</option>
-          <option value="EXPIRING">Expiring soon</option>
-          <option value="EXPIRED">Expired</option>
-        </select>
-      </div>
-      <label className="flex items-end gap-2 pb-1 text-sm">
+      <label className="mt-2 flex items-center gap-2">
         <input
           type="checkbox"
           aria-label="Filter missing documents"
@@ -309,7 +275,7 @@ function FilterRail({ filters, equipment, owners, onChange }: {
         />
         Missing required docs
       </label>
-    </div>
+    </TmsCard>
   )
 }
 
@@ -346,55 +312,46 @@ function NewCarrierDialog({ onClose, onCreated }: { onClose: () => void; onCreat
   }
 
   return (
-    <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
-      <DialogContent className="max-w-sm">
-        <DialogHeader><DialogTitle>Add carrier</DialogTitle></DialogHeader>
-        <div className="space-y-3">
-          <div>
-            <Label className="text-xs uppercase tracking-wider text-muted-foreground">Carrier name</Label>
-            <Input aria-label="Carrier name" value={name} onChange={(e) => setName(e.target.value)} className="h-9 text-sm" />
-          </div>
-          <div>
-            <Label className="text-xs uppercase tracking-wider text-muted-foreground">Type</Label>
-            <select
-              aria-label="Carrier type"
-              value={type}
-              onChange={(e) => setType(e.target.value as CarrierType)}
-              className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
-            >
-              {CARRIER_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-            </select>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label className="text-xs uppercase tracking-wider text-muted-foreground">MC #</Label>
-              <Input aria-label="MC number" value={mcNumber} onChange={(e) => setMcNumber(e.target.value)} className="h-9 text-sm" />
-            </div>
-            <div>
-              <Label className="text-xs uppercase tracking-wider text-muted-foreground">DOT #</Label>
-              <Input aria-label="DOT number" value={dotNumber} onChange={(e) => setDotNumber(e.target.value)} className="h-9 text-sm" />
-            </div>
-          </div>
-          <div>
-            <Label className="text-xs uppercase tracking-wider text-muted-foreground">Account owner</Label>
-            <RepPicker
-              role="CARRIER_REP"
-              allowUnknown
-              value={owner}
-              onChange={setOwner}
-              placeholder="Pick an account owner…"
-            />
-          </div>
-          <p className="text-xs text-muted-foreground">
-            New carriers land in Pending. They cannot be booked until compliance moves them to Active.
-          </p>
-          {error && <p className="text-xs text-destructive">{error}</p>}
-        </div>
-        <DialogFooter>
-          <Button variant="ghost" onClick={onClose} disabled={busy}>Cancel</Button>
-          <Button onClick={create} disabled={busy}>{busy ? 'Adding…' : 'Add carrier'}</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <TmsDialog
+      open
+      onOpenChange={(open) => { if (!open) onClose() }}
+      title="Add carrier"
+      footer={
+        <>
+          <TmsButton variant="ghost" onClick={onClose} disabled={busy}>Cancel</TmsButton>
+          <TmsButton variant="primary" onClick={create} disabled={busy}>{busy ? 'Adding…' : 'Add carrier'}</TmsButton>
+        </>
+      }
+    >
+      <TmsField label="Carrier name">
+        <TmsInput aria-label="Carrier name" value={name} onChange={(e) => setName(e.target.value)} />
+      </TmsField>
+      <TmsField label="Type">
+        <TmsSelect aria-label="Carrier type" value={type} onChange={(e) => setType(e.target.value as CarrierType)}>
+          {CARRIER_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+        </TmsSelect>
+      </TmsField>
+      <div className="tms-grid tms-grid-2">
+        <TmsField label="MC #">
+          <TmsInput aria-label="MC number" value={mcNumber} onChange={(e) => setMcNumber(e.target.value)} />
+        </TmsField>
+        <TmsField label="DOT #">
+          <TmsInput aria-label="DOT number" value={dotNumber} onChange={(e) => setDotNumber(e.target.value)} />
+        </TmsField>
+      </div>
+      <TmsField label="Account owner">
+        <RepPicker
+          role="CARRIER_REP"
+          allowUnknown
+          value={owner}
+          onChange={setOwner}
+          placeholder="Pick an account owner…"
+        />
+      </TmsField>
+      <p className="text-xs tms-muted">
+        New carriers land in Pending. They cannot be booked until compliance moves them to Active.
+      </p>
+      {error && <p className="text-xs" style={{ color: 'var(--tms-badge-red)' }}>{error}</p>}
+    </TmsDialog>
   )
 }

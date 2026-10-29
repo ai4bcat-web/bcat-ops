@@ -156,16 +156,11 @@ describe('DocumentsSection', () => {
     expect(readyToInvoice).not.toHaveBeenCalled()
   })
 
-  it('offers the admin override only to an admin, and only with a note', async () => {
+  it('offers no override, to an admin or anybody else', async () => {
     renderSection(true)
     const strip = await screen.findByTestId('required-documents')
-    expect(within(strip).getByRole('button', { name: 'Override with note' })).toBeTruthy()
-  })
-
-  it('keeps the override away from everyone else', async () => {
-    renderSection()
-    const strip = await screen.findByTestId('required-documents')
     expect(within(strip).queryByRole('button', { name: 'Override with note' })).toBeNull()
+    expect(within(strip).queryByRole('button', { name: 'Bill it anyway' })).toBeNull()
   })
 
   /**

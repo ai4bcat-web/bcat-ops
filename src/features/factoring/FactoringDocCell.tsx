@@ -261,6 +261,6 @@ export function FactoringDocCell({
 const iconBtn: React.CSSProperties = {
   display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
   width: 22, height: 22, borderRadius: 5, cursor: 'pointer',
-  border: '1px solid var(--ds-border)', background: 'var(--ds-surface)',
-  color: 'var(--ds-t2)', fontFamily: 'inherit',
+  border: '1px solid var(--tms-border)', background: 'var(--tms-card)',
+  color: 'var(--tms-text)', fontFamily: 'inherit',
 }

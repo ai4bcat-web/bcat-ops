@@ -1,27 +1,26 @@
 /**
- * The check-call worklist: every load with a reminder on the clock, grouped by how late
- * it is, plus the open exceptions nobody has closed out.
+ * The check-call worklist: every shipment with a reminder on the clock, grouped by how
+ * late it is, plus the open exceptions nobody has closed out.
  *
  * It is the same data the sidebar badge counts and the notifier Lambda sweeps — one
- * `checkCallState` for all three — so a load that is overdue here is overdue in Slack.
- * Logging a call from this page is the same dialog and the same CAS token as the one on
- * the shipment's Tracking tab; there is no second write path.
+ * `checkCallState` for all three — so a shipment that is overdue here is overdue in
+ * Slack. Logging a call from this page is the same dialog and the same CAS token as the
+ * one on the shipment's Tracking tab; there is no second write path.
  */
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { AlertTriangle, Clock, ExternalLink, PhoneCall, RefreshCw } from 'lucide-react'
+import { AlertTriangle, Clock, ExternalLink, PhoneCall } from 'lucide-react'
 import { toast } from 'sonner'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
+import { TmsBadge, TmsButton, TmsListPage } from '@/features/tms/kit'
+import type { ColumnDef, TmsTabGroup } from '@/features/tms/kit'
 import { getTmsSettings, logCheckCall, resolveIncident, setNextCheckCall, textDriver } from '@/lib/apiClient'
 import { CHECK_CALL_TYPE_LABELS, INCIDENT_TYPE_LABELS } from '@/lib/checkCalls'
 import { LOAD_WORKFLOW_STATUS_LABELS } from '@/lib/shipmentStatus'
 import { formatDateTime } from '@/lib/date'
-import { cn } from '@/lib/utils'
 import { useCheckCallWorklist, type CheckCallWorklistRow } from '@/hooks/useCheckCallWorklist'
 import { useOpenIncidents } from '@/hooks/useOpenIncidents'
 import { LogCheckCallDialog } from '@/features/shipments/components/LogCheckCallDialog'
-import type { ChargeCodeDef, TmsSettings } from '@/types/tms'
+import type { ChargeCodeDef, LoadCheckCallRecord, TmsSettings } from '@/types/tms'
 
 const HOUR_MS = 3_600_000
 
@@ -33,6 +32,8 @@ export function CheckCallsPage() {
   const [tab, setTab] = useState<TabKey>('overdue')
   const [logging, setLogging] = useState<CheckCallWorklistRow | null>(null)
   const [busy, setBusy] = useState(false)
+  const [query, setQuery] = useState('')
+  const [pageSize, setPageSize] = useState(50)
 
   useEffect(() => {
     let live = true
@@ -49,15 +50,20 @@ export function CheckCallsPage() {
     scheduled: worklist.rows.filter((r) => r.state === 'SCHEDULED'),
   }), [worklist.rows])
 
-  const tabs: { key: TabKey; label: string; count: number }[] = [
-    { key: 'overdue', label: 'Overdue', count: byState.overdue.length },
-    { key: 'due', label: 'Due', count: byState.due.length },
-    { key: 'scheduled', label: 'Scheduled', count: byState.scheduled.length },
-    { key: 'exceptions', label: 'Exceptions', count: incidents.incidents.length },
-  ]
+  const quickTabs: TmsTabGroup = {
+    tabs: [
+      { key: 'overdue', label: 'Overdue', count: byState.overdue.length },
+      { key: 'due', label: 'Due', count: byState.due.length },
+      { key: 'scheduled', label: 'Scheduled', count: byState.scheduled.length },
+      { key: 'exceptions', label: 'Exceptions', count: incidents.incidents.length },
+    ],
+    active: tab,
+    onSelect: (key) => setTab(key as TabKey),
+  }
 
-  const rows = tab === 'exceptions' ? [] : byState[tab]
   const catalog = (settings?.chargeCodes ?? []) as ChargeCodeDef[]
+  const refreshAll = () => { void worklist.refresh(); void incidents.refresh() }
+  const error = worklist.error ?? incidents.error
 
   const snooze = async (row: CheckCallWorklistRow) => {
     setBusy(true)
@@ -85,152 +91,144 @@ export function CheckCallsPage() {
     } finally { setBusy(false) }
   }
 
+  const q = query.trim().toLowerCase()
+
+  const worklistRows = useMemo(() => {
+    const rows = tab === 'exceptions' ? [] : byState[tab]
+    if (!q) return rows
+    return rows.filter((r) => [
+      r.load.loadNumber, r.load.aljexId, r.load.customer, r.load.originCity, r.load.destinationCity,
+      r.carrier?.carrierName ?? r.load.carrierName, r.load.carrierRepId,
+    ].some((v) => (v ?? '').toLowerCase().includes(q)))
+  }, [tab, byState, q])
+
+  const exceptionRows = useMemo(() => {
+    if (!q) return incidents.incidents
+    return incidents.incidents.filter((row) => [row.note, row.createdBy].some((v) => (v ?? '').toLowerCase().includes(q)))
+  }, [incidents.incidents, q])
+
+  const worklistColumns: Array<ColumnDef<CheckCallWorklistRow>> = [
+    { key: 'shipment', header: 'SHIPMENT', width: 150, render: (row) => <span style={{ fontWeight: 600 }}>{row.load.loadNumber ?? row.load.aljexId}</span> },
+    { key: 'customer', header: 'CUSTOMER', width: 180, render: (row) => row.load.customer ?? '—' },
+    {
+      key: 'lane',
+      header: 'LANE',
+      width: 220,
+      render: (row) => [row.load.originCity, row.load.destinationCity].filter(Boolean).join(' → ') || '—',
+    },
+    {
+      key: 'status',
+      header: 'STATUS',
+      width: 130,
+      render: (row) => (row.load.status
+        ? <TmsBadge tone="blue">{LOAD_WORKFLOW_STATUS_LABELS[row.load.status]}</TmsBadge>
+        : '—'),
+    },
+    {
+      key: 'carrier',
+      header: 'CARRIER · DRIVER',
+      width: 220,
+      render: (row) => (
+        <span>
+          {row.carrier?.carrierName ?? row.load.carrierName ?? '—'}
+          {row.carrier?.driverPhone && (
+            <>
+              {' · '}
+              <a href={`tel:${row.carrier.driverPhone}`}>{row.carrier.driverPhone}</a>
+            </>
+          )}
+        </span>
+      ),
+    },
+    {
+      key: 'due',
+      header: 'DUE',
+      width: 180,
+      render: (row) => (
+        <span style={{ color: row.state === 'OVERDUE' ? 'var(--tms-badge-red)' : row.state === 'DUE' ? 'var(--tms-badge-orange)' : undefined }}>
+          <Clock size={12} style={{ marginRight: 4, display: 'inline' }} />{formatDateTime(row.load.nextCheckCallAt)}
+        </span>
+      ),
+    },
+    { key: 'rep', header: 'REP', width: 170, render: (row) => <span className="tms-muted">{row.load.carrierRepId ?? '—'}</span> },
+    {
+      key: 'actions',
+      header: '',
+      width: 280,
+      render: (row) => (
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 4 }}>
+          <TmsButton variant="primary" size="sm" disabled={busy} onClick={() => setLogging(row)}>
+            <PhoneCall size={13} />Log check call
+          </TmsButton>
+          <TmsButton size="sm" disabled={busy} onClick={() => { void snooze(row) }}>Snooze</TmsButton>
+          <TmsButton variant="ghost" size="sm" aria-label="Open shipment" onClick={() => navigate(`/tms/shipments/${row.load.shipmentId}`)}>
+            <ExternalLink size={13} />
+          </TmsButton>
+        </div>
+      ),
+    },
+  ]
+
+  const exceptionColumns: Array<ColumnDef<LoadCheckCallRecord>> = [
+    { key: 'raised', header: 'RAISED', width: 180, render: (row) => formatDateTime(row.at) },
+    {
+      key: 'exception',
+      header: 'EXCEPTION',
+      width: 160,
+      render: (row) => (
+        <TmsBadge tone="orange">
+          {row.incidentType ? INCIDENT_TYPE_LABELS[row.incidentType] : CHECK_CALL_TYPE_LABELS[row.type]}
+        </TmsBadge>
+      ),
+    },
+    { key: 'note', header: 'NOTE', width: 320, render: (row) => row.note ?? '—' },
+    { key: 'by', header: 'LOGGED BY', width: 200, render: (row) => <span className="tms-muted">{row.createdBy}</span> },
+    {
+      key: 'actions',
+      header: '',
+      width: 180,
+      render: (row) => (
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 4 }}>
+          <TmsButton size="sm" disabled={busy} onClick={() => { void resolve(row.id) }}>
+            <AlertTriangle size={13} />Resolve
+          </TmsButton>
+          <TmsButton variant="ghost" size="sm" aria-label="Open shipment" onClick={() => navigate(`/tms/shipments/${row.shipmentId}`)}>
+            <ExternalLink size={13} />
+          </TmsButton>
+        </div>
+      ),
+    },
+  ]
+
   return (
-    <div className="flex h-full flex-col">
-      <header className="flex flex-wrap items-center gap-2 border-b border-border px-5 py-3">
-        <PhoneCall size={18} />
-        <h1 className="text-lg font-semibold">Check calls</h1>
-        <Badge variant="outline">{worklist.dueCount}</Badge>
-        <Button
-          variant="ghost" size="icon" className="ml-auto h-9 w-9" aria-label="Refresh"
-          onClick={() => { void worklist.refresh(); void incidents.refresh() }}
-        >
-          <RefreshCw size={14} className={worklist.loading ? 'animate-spin' : undefined} />
-        </Button>
-      </header>
-
-      <nav role="tablist" aria-label="Check call state" className="flex gap-1 overflow-x-auto border-b border-border px-5">
-        {tabs.map((t) => (
-          <button
-            key={t.key}
-            role="tab"
-            aria-selected={tab === t.key}
-            onClick={() => setTab(t.key)}
-            className={cn(
-              'flex items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-2 text-sm',
-              tab === t.key ? 'border-primary font-medium text-foreground' : 'border-transparent text-muted-foreground',
-            )}
-          >
-            {t.label}
-            <Badge variant="outline" className="text-[10px]">{t.count}</Badge>
-          </button>
-        ))}
-      </nav>
-
-      {(worklist.error || incidents.error) && (
-        <p className="px-5 py-3 text-sm text-destructive">{worklist.error ?? incidents.error}</p>
+    <>
+      {tab === 'exceptions' ? (
+        <TmsListPage<LoadCheckCallRecord>
+          title="Check calls"
+          search={{ value: query, onChange: setQuery, placeholder: 'Search exceptions' }}
+          onRefresh={refreshAll}
+          quickTabs={quickTabs}
+          columns={exceptionColumns}
+          rows={exceptionRows.slice(0, pageSize)}
+          rowKey={(row) => row.id}
+          page={{ from: exceptionRows.length === 0 ? 0 : 1, to: Math.min(exceptionRows.length, pageSize), total: exceptionRows.length, pageSize, onPageSize: setPageSize }}
+          emptyText={error ?? (incidents.loading ? 'Loading exceptions…' : 'Nothing is open.')}
+          onClearFilters={() => setQuery('')}
+        />
+      ) : (
+        <TmsListPage<CheckCallWorklistRow>
+          title="Check calls"
+          search={{ value: query, onChange: setQuery, placeholder: 'Search shipments, carriers, reps' }}
+          onRefresh={refreshAll}
+          quickTabs={quickTabs}
+          columns={worklistColumns}
+          rows={worklistRows.slice(0, pageSize)}
+          rowKey={(row) => row.load.id}
+          page={{ from: worklistRows.length === 0 ? 0 : 1, to: Math.min(worklistRows.length, pageSize), total: worklistRows.length, pageSize, onPageSize: setPageSize }}
+          emptyText={error ?? (worklist.loading ? 'Loading the worklist…' : 'Nothing in this view.')}
+          onClearFilters={() => setQuery('')}
+        />
       )}
-
-      <div className="flex-1 overflow-auto px-5 py-3">
-        {tab === 'exceptions' ? (
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border text-left text-xs uppercase tracking-wider text-muted-foreground">
-                <th className="px-2 py-2">Raised</th>
-                <th className="px-2 py-2">Exception</th>
-                <th className="px-2 py-2">Note</th>
-                <th className="px-2 py-2">Logged by</th>
-                <th className="w-44" />
-              </tr>
-            </thead>
-            <tbody>
-              {incidents.incidents.length === 0 && !incidents.loading && (
-                <tr><td colSpan={5} className="py-8 text-center text-sm text-muted-foreground">Nothing is open.</td></tr>
-              )}
-              {incidents.incidents.map((row) => (
-                <tr key={row.id} className="border-b border-border/60">
-                  <td className="px-2 py-2">{formatDateTime(row.at)}</td>
-                  <td className="px-2 py-2">
-                    <Badge variant="outline" className="text-[10px]">
-                      {row.incidentType ? INCIDENT_TYPE_LABELS[row.incidentType] : CHECK_CALL_TYPE_LABELS[row.type]}
-                    </Badge>
-                  </td>
-                  <td className="max-w-md truncate px-2 py-2">{row.note ?? '—'}</td>
-                  <td className="px-2 py-2 text-muted-foreground">{row.createdBy}</td>
-                  <td className="px-1 py-2">
-                    <div className="flex justify-end gap-1">
-                      <Button variant="outline" size="sm" className="h-7" disabled={busy} onClick={() => { void resolve(row.id) }}>
-                        <AlertTriangle size={13} className="mr-1" />Resolve
-                      </Button>
-                      <Button
-                        variant="ghost" size="sm" className="h-7"
-                        onClick={() => navigate(`/shipments/${row.shipmentId}`)}
-                      >
-                        <ExternalLink size={13} />
-                      </Button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        ) : (
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border text-left text-xs uppercase tracking-wider text-muted-foreground">
-                <th className="px-2 py-2">Load</th>
-                <th className="px-2 py-2">Customer</th>
-                <th className="px-2 py-2">Lane</th>
-                <th className="px-2 py-2">Status</th>
-                <th className="px-2 py-2">Carrier · driver</th>
-                <th className="px-2 py-2">Due</th>
-                <th className="px-2 py-2">Rep</th>
-                <th className="w-60" />
-              </tr>
-            </thead>
-            <tbody>
-              {rows.length === 0 && !worklist.loading && (
-                <tr><td colSpan={8} className="py-8 text-center text-sm text-muted-foreground">Nothing in this view.</td></tr>
-              )}
-              {rows.map((row) => (
-                <tr key={row.load.id} className="border-b border-border/60">
-                  <td className="px-2 py-2 font-medium">{row.load.loadNumber ?? row.load.aljexId}</td>
-                  <td className="px-2 py-2">{row.load.customer ?? '—'}</td>
-                  <td className="px-2 py-2">
-                    {[row.load.originCity, row.load.destinationCity].filter(Boolean).join(' → ') || '—'}
-                  </td>
-                  <td className="px-2 py-2">
-                    <Badge variant="outline" className="text-[10px]">
-                      {row.load.status ? LOAD_WORKFLOW_STATUS_LABELS[row.load.status] : '—'}
-                    </Badge>
-                  </td>
-                  <td className="px-2 py-2">
-                    <span>{row.carrier?.carrierName ?? row.load.carrierName ?? '—'}</span>
-                    {row.carrier?.driverPhone && (
-                      <>
-                        {' · '}
-                        <a href={`tel:${row.carrier.driverPhone}`} className="underline underline-offset-2">
-                          {row.carrier.driverPhone}
-                        </a>
-                      </>
-                    )}
-                  </td>
-                  <td className={cn('px-2 py-2', row.state === 'OVERDUE' && 'text-destructive', row.state === 'DUE' && 'text-amber-700')}>
-                    <Clock size={12} className="mr-1 inline" />{formatDateTime(row.load.nextCheckCallAt)}
-                  </td>
-                  <td className="px-2 py-2 text-muted-foreground">{row.load.carrierRepId ?? '—'}</td>
-                  <td className="px-1 py-2">
-                    <div className="flex justify-end gap-1">
-                      <Button size="sm" className="h-7" disabled={busy} onClick={() => setLogging(row)}>
-                        <PhoneCall size={13} className="mr-1" />Log check call
-                      </Button>
-                      <Button variant="outline" size="sm" className="h-7" disabled={busy} onClick={() => { void snooze(row) }}>
-                        Snooze
-                      </Button>
-                      <Button
-                        variant="ghost" size="sm" className="h-7" aria-label="Open shipment"
-                        onClick={() => navigate(`/shipments/${row.load.shipmentId}`)}
-                      >
-                        <ExternalLink size={13} />
-                      </Button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
 
       {logging && (
         <LogCheckCallDialog
@@ -259,7 +257,7 @@ export function CheckCallsPage() {
           }}
         />
       )}
-    </div>
+    </>
   )
 }
 

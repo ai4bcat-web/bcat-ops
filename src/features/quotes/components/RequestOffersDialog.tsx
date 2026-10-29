@@ -1,9 +1,9 @@
 /**
- * Asking the market what it wants for a load.
+ * Asking the market what it wants for a shipment.
  *
  * One press creates one REQUESTED offer per carrier, each with its own link and its own
  * clock, all in one group — so the first truck to take it closes the rest rather than
- * leaving five live offers on a load that is covered.
+ * leaving five live offers on a shipment that is covered.
  *
  * Only carriers the org will actually book are offered: `effectiveCarrierStatus` is the
  * same reading `BOOK_CARRIER` gates on, so nobody is asked for a price we could not pay.
@@ -16,18 +16,18 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link2, Loader2, Search } from 'lucide-react'
 import { toast } from 'sonner'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Checkbox } from '@/components/ui/checkbox'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { TmsBadge, TmsButton, TmsDialog, TmsField, TmsInput, TmsTextarea } from '@/features/tms/kit'
 import { MoneyField } from '@/features/directory/components/MoneyField'
 import { useCarriers } from '@/hooks/useCarriers'
 import { getTmsSettings, graphqlErrorText, requestOffers, type RequestOffersResult } from '@/lib/apiClient'
 import { CARRIER_STATUS_LABELS, effectiveCarrierStatus } from '@/lib/carrierStatus'
 import type { TmsSettings } from '@/types/tms'
+
+const CODE_STYLE: React.CSSProperties = {
+  flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12,
+  borderRadius: 'var(--tms-radius)', border: '1px solid var(--tms-border)',
+  background: 'var(--tms-card)', padding: '2px 8px',
+}
 
 export function RequestOffersDialog({ shipmentId, loadId, open, onOpenChange, onDone }: {
   shipmentId: string
@@ -63,7 +63,7 @@ export function RequestOffersDialog({ shipmentId, loadId, open, onOpenChange, on
     const now = new Date()
     return carriers
       .filter((carrier) => allowed.includes(effectiveCarrierStatus(carrier, now).status))
-      .filter((carrier) => !needle || [carrier.name, carrier.dbaName, carrier.mcNumber]
+      .filter((carrier) => needle.length === 0 || [carrier.name, carrier.dbaName, carrier.mcNumber]
         .some((value) => value?.toLowerCase().includes(needle)))
       .slice(0, 40)
     // `allowed` is derived from settings, which is in the dep list through `settings`.
@@ -104,152 +104,134 @@ export function RequestOffersDialog({ shipmentId, loadId, open, onOpenChange, on
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>Request offers</DialogTitle>
-        </DialogHeader>
-
-        {!result && (
-          <div className="space-y-3">
-            <div className="relative">
-              <Search size={14} className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                aria-label="Search carriers"
-                className="h-9 pl-7 text-sm"
-                placeholder="name or MC"
-                value={search}
-                disabled={busy}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-            </div>
-
-            <div className="max-h-56 overflow-auto rounded-md border border-border">
-              {carriersLoading && (
-                <p className="flex items-center gap-2 p-2 text-sm text-muted-foreground">
-                  <Loader2 size={14} className="animate-spin" /> Reading the directory…
-                </p>
-              )}
-              {!carriersLoading && candidates.length === 0 && (
-                <p className="p-2 text-sm text-muted-foreground">No carrier the org will book matches that.</p>
-              )}
-              {candidates.map((carrier) => {
-                const status = effectiveCarrierStatus(carrier, new Date()).status
-                return (
-                  <label key={carrier.id} className="flex items-start gap-2 border-b border-border/60 p-2 text-sm last:border-0">
-                    <Checkbox
-                      aria-label={`Ask ${carrier.name}`}
-                      checked={picked.includes(carrier.id)}
-                      disabled={busy}
-                      onCheckedChange={(v) => setPicked((prev) => (
-                        v === true ? [...prev, carrier.id] : prev.filter((id) => id !== carrier.id)
-                      ))}
-                      className="mt-0.5"
-                    />
-                    <span className="flex-1">
-                      {carrier.name}
-                      {carrier.mcNumber && <span className="ml-1 text-xs text-muted-foreground">MC {carrier.mcNumber}</span>}
-                      <Badge variant="outline" className="ml-1 text-[10px]">{CARRIER_STATUS_LABELS[status] ?? status}</Badge>
-                      {(carrier.equipment ?? []).slice(0, 3).map((type) => (
-                        <Badge key={type} variant="outline" className="ml-1 text-[10px]">{type}</Badge>
-                      ))}
-                      {!carrier.email && <span className="ml-1 text-xs text-destructive">no e-mail on file</span>}
-                    </span>
-                  </label>
-                )
-              })}
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              {showBookNow && (
-                <MoneyField
-                  label="Book-now rate (optional)"
-                  value={bookNowCents}
-                  onChange={setBookNowCents}
-                  disabled={busy}
-                />
-              )}
-              <div>
-                <Label className="text-xs uppercase tracking-wider text-muted-foreground" htmlFor="offers-expiry">
-                  Hours to answer
-                </Label>
-                <Input
-                  id="offers-expiry"
-                  type="number"
-                  min={1}
-                  className="h-9 text-sm"
-                  placeholder={String(settings?.offerExpiryHours ?? 24)}
-                  value={expiryHours}
-                  disabled={busy}
-                  onChange={(e) => setExpiryHours(e.target.value)}
-                />
-                <p className="mt-1 text-xs text-muted-foreground">Always capped at the first pickup.</p>
-              </div>
-            </div>
-
-            <div>
-              <Label className="text-xs uppercase tracking-wider text-muted-foreground" htmlFor="offers-message">
-                A line to the carriers
-              </Label>
-              <Textarea
-                id="offers-message"
-                rows={2}
-                className="text-sm"
-                value={message}
-                disabled={busy}
-                onChange={(e) => setMessage(e.target.value)}
-              />
-            </div>
-
-            {error && <p className="text-xs text-destructive">{error}</p>}
+    <TmsDialog
+      open={open}
+      onOpenChange={onOpenChange}
+      className="tms-dialog-wide"
+      title="Request offers"
+      footer={
+        result ? (
+          <TmsButton variant="primary" onClick={onDone}>Done</TmsButton>
+        ) : (
+          <>
+            <TmsButton variant="ghost" onClick={() => onOpenChange(false)} disabled={busy}>Cancel</TmsButton>
+            <TmsButton variant="primary" aria-label="Send the offer requests" disabled={busy || picked.length === 0} onClick={submit}>
+              {busy ? 'Asking…' : `Ask ${picked.length} carrier${picked.length === 1 ? '' : 's'}`}
+            </TmsButton>
+          </>
+        )
+      }
+    >
+      {result === null && (
+        <div style={{ display: 'grid', gap: 12 }}>
+          <div style={{ position: 'relative' }}>
+            <Search size={14} className="tms-muted" style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)' }} />
+            <TmsInput
+              aria-label="Search carriers"
+              style={{ paddingLeft: 28 }}
+              placeholder="name or MC"
+              value={search}
+              disabled={busy}
+              onChange={(e) => setSearch(e.target.value)}
+            />
           </div>
-        )}
 
-        {result && (
-          <div className="space-y-2">
-            {result.sends.map((send) => (
-              <div key={send.quoteId} className="rounded-md border border-border p-2 text-sm">
-                <div className="flex items-center gap-2">
-                  <span className="font-medium">{send.quoteId}</span>
-                  <span className="text-xs text-muted-foreground">{send.to.join(', ') || 'no address'}</span>
-                  {send.sent
-                    ? <Badge variant="outline" className="text-[10px]">Sent</Badge>
-                    : <Badge variant="destructive" className="text-[10px]">Not sent</Badge>}
+          <div style={{ maxHeight: 224, overflow: 'auto', borderRadius: 'var(--tms-radius)', border: '1px solid var(--tms-border)' }}>
+            {carriersLoading && (
+              <p className="tms-muted" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 8, fontSize: 13 }}>
+                <Loader2 size={14} /> Reading the directory…
+              </p>
+            )}
+            {carriersLoading === false && candidates.length === 0 && (
+              <p className="tms-muted" style={{ padding: 8, fontSize: 13 }}>No carrier the org will book matches that.</p>
+            )}
+            {candidates.map((carrier) => {
+              const status = effectiveCarrierStatus(carrier, new Date()).status
+              return (
+                <label key={carrier.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, borderBottom: '1px solid var(--tms-border)', padding: 8, fontSize: 13 }}>
+                  <input
+                    type="checkbox"
+                    aria-label={`Ask ${carrier.name}`}
+                    checked={picked.includes(carrier.id)}
+                    disabled={busy}
+                    onChange={(e) => setPicked((prev) => (
+                      e.target.checked ? [...prev, carrier.id] : prev.filter((id) => id !== carrier.id)
+                    ))}
+                  />
+                  <span style={{ flex: 1, display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 4 }}>
+                    {carrier.name}
+                    {carrier.mcNumber && <span className="tms-muted" style={{ fontSize: 12 }}>MC {carrier.mcNumber}</span>}
+                    <TmsBadge tone="blue">{CARRIER_STATUS_LABELS[status] ?? status}</TmsBadge>
+                    {(carrier.equipment ?? []).slice(0, 3).map((type) => (
+                      <TmsBadge key={type} tone="gray">{type}</TmsBadge>
+                    ))}
+                    {carrier.email == null && <span className="tms-field-error">no e-mail on file</span>}
+                  </span>
+                </label>
+              )
+            })}
+          </div>
+
+          <div className="tms-grid tms-grid-2">
+            {showBookNow && (
+              <MoneyField
+                label="Book-now rate (optional)"
+                value={bookNowCents}
+                onChange={setBookNowCents}
+                disabled={busy}
+              />
+            )}
+            <TmsField label="Hours to answer" htmlFor="offers-expiry" hint="Always capped at the first pickup.">
+              <TmsInput
+                id="offers-expiry"
+                type="number"
+                min={1}
+                placeholder={String(settings?.offerExpiryHours ?? 24)}
+                value={expiryHours}
+                disabled={busy}
+                onChange={(e) => setExpiryHours(e.target.value)}
+              />
+            </TmsField>
+          </div>
+
+          <TmsField label="A line to the carriers" htmlFor="offers-message">
+            <TmsTextarea
+              id="offers-message"
+              rows={2}
+              value={message}
+              disabled={busy}
+              onChange={(e) => setMessage(e.target.value)}
+            />
+          </TmsField>
+
+          {error && <p className="tms-field-error">{error}</p>}
+        </div>
+      )}
+
+      {result && (
+        <div style={{ display: 'grid', gap: 8 }}>
+          {result.sends.map((send) => (
+            <div key={send.quoteId} style={{ borderRadius: 'var(--tms-radius)', border: '1px solid var(--tms-border)', padding: 8, fontSize: 13 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontWeight: 600 }}>{send.quoteId}</span>
+                <span className="tms-muted" style={{ fontSize: 12 }}>{send.to.join(', ') || 'no address'}</span>
+                {send.sent ? <TmsBadge tone="green">Sent</TmsBadge> : <TmsBadge tone="red">Not sent</TmsBadge>}
+              </div>
+              {send.link && (
+                <div style={{ marginTop: 4, display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <code style={CODE_STYLE}>{send.link}</code>
+                  <TmsButton size="sm" aria-label={`Copy link for ${send.quoteId}`} onClick={() => copy(send.link ?? '')}>
+                    <Link2 size={13} /> Copy
+                  </TmsButton>
                 </div>
-                {send.link && (
-                  <div className="mt-1 flex items-center gap-2">
-                    <code className="flex-1 truncate rounded border border-border bg-muted/40 px-2 py-0.5 text-xs">{send.link}</code>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      aria-label={`Copy link for ${send.quoteId}`}
-                      onClick={() => copy(send.link ?? '')}
-                    >
-                      <Link2 size={13} /> Copy
-                    </Button>
-                  </div>
-                )}
-              </div>
-            ))}
-            <p className="text-xs text-muted-foreground">
-              Every offer that was not e-mailed still has a live link — that is the delivery on dev.
-            </p>
-          </div>
-        )}
-
-        <DialogFooter>
-          {result ? (
-            <Button onClick={onDone}>Done</Button>
-          ) : (
-            <>
-              <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={busy}>Cancel</Button>
-              <Button aria-label="Send the offer requests" disabled={busy || picked.length === 0} onClick={submit}>
-                {busy ? 'Asking…' : `Ask ${picked.length} carrier${picked.length === 1 ? '' : 's'}`}
-              </Button>
-            </>
-          )}
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+              )}
+            </div>
+          ))}
+          <p className="tms-muted" style={{ fontSize: 12 }}>
+            Every offer that was not e-mailed still has a live link — that is the delivery on dev.
+          </p>
+        </div>
+      )}
+    </TmsDialog>
   )
 }

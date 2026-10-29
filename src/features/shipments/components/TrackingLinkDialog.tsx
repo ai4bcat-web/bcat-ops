@@ -9,12 +9,8 @@
 import { useState } from 'react'
 import { AlertTriangle, Check, Copy, Send, StopCircle } from 'lucide-react'
 import { toast } from 'sonner'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import { TmsBadge, TmsButton, TmsDialog, TmsInput, TmsTextarea } from '@/features/tms/kit'
 import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { revokeTrackingLink, sendTrackingLink, type SendTrackingLinkResult } from '@/lib/apiClient'
 import { MAX_SMS_BODY } from '@/lib/dispatch'
 import { smsBodyFor } from '@/lib/trackingLink'
@@ -88,17 +84,34 @@ export function TrackingLinkDialog({
   }
 
   return (
-    <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
-      <DialogContent className="max-w-lg">
-        <DialogHeader><DialogTitle>Send tracking link</DialogTitle></DialogHeader>
-
+    <TmsDialog
+      open
+      onOpenChange={(open) => { if (!open) onClose() }}
+      title="Send tracking link"
+      footer={
+        <>
+          {link && link.status === 'ACTIVE' && (
+            <TmsButton onClick={() => { void stop() }} disabled={busy} className="mr-auto">
+              <StopCircle size={14} className="mr-1" />Stop tracking
+            </TmsButton>
+          )}
+          <TmsButton variant="ghost" onClick={onClose} disabled={busy}>Close</TmsButton>
+          <TmsButton onClick={() => { void send('COPY') }} disabled={busy}>
+            <Copy size={14} className="mr-1" />Copy link
+          </TmsButton>
+          <TmsButton variant="primary" onClick={() => { void send('SMS') }} disabled={busy || !phone.trim()}>
+            <Send size={14} className="mr-1" />{busy ? 'Sending…' : 'Send'}
+          </TmsButton>
+        </>
+      }
+    >
         {link && (
-          <div className="space-y-1 rounded-lg border border-border p-3 text-sm">
+          <div className="space-y-1 rounded-[var(--tms-radius)] border border-[color:var(--tms-border)] p-3 text-sm">
             <div className="flex items-center gap-2">
-              <Badge variant="outline" className="text-[10px]">{link.status}</Badge>
-              <span className="text-xs text-muted-foreground">Expires {formatDateTime(link.expiresAt)}</span>
+              <TmsBadge tone="gray" className="text-[10px]">{link.status}</TmsBadge>
+              <span className="text-xs tms-muted">Expires {formatDateTime(link.expiresAt)}</span>
             </div>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs tms-muted">
               Sent {link.sentAt ? formatDateTime(link.sentAt) : 'not yet'}
               {' · '}opened {link.openCount ?? 0}×
               {' · '}last ping {link.lastPingAt ? formatDateTime(link.lastPingAt) : 'none'}
@@ -108,12 +121,12 @@ export function TrackingLinkDialog({
 
         <div className="grid grid-cols-1 gap-3">
           <div>
-            <Label className="text-xs uppercase tracking-wider text-muted-foreground">Driver phone</Label>
-            <Input aria-label="Tracking link phone" value={phone} onChange={(e) => setPhone(e.target.value)} className="h-9 text-sm" />
+            <Label className="tms-field-label">Driver phone</Label>
+            <TmsInput aria-label="Tracking link phone" value={phone} onChange={(e) => setPhone(e.target.value)} className="h-9 text-sm" />
           </div>
           <div>
-            <Label className="text-xs uppercase tracking-wider text-muted-foreground">Message</Label>
-            <Textarea
+            <Label className="tms-field-label">Message</Label>
+            <TmsTextarea
               aria-label="Tracking link message"
               rows={2}
               placeholder="Leave blank to use the house template"
@@ -122,55 +135,39 @@ export function TrackingLinkDialog({
               className="text-sm"
             />
           </div>
-          <div className="rounded-lg border border-border bg-muted/30 p-2">
-            <p className="text-xs uppercase tracking-wider text-muted-foreground">Text preview</p>
+          <div className="rounded-[var(--tms-radius)] border border-[color:var(--tms-border)] bg-[color:var(--tms-card)] p-2">
+            <p className="text-xs uppercase tracking-wider tms-muted">Text preview</p>
             <p className="mt-1 whitespace-pre-wrap break-words text-sm" data-testid="sms-preview">{body}</p>
-            <p className="mt-1 text-[10px] text-muted-foreground">{body.length} / {MAX_SMS_BODY} characters</p>
+            <p className="mt-1 text-[10px] tms-muted">{body.length} / {MAX_SMS_BODY} characters</p>
           </div>
         </div>
 
         {result && (result.smsStatus === 'NOT_CONFIGURED' || result.smsStatus === 'FAILED') && (
-          <p className="flex items-start gap-2 rounded-lg border border-border bg-muted/30 p-2 text-xs">
-            <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-600" />
+          <p className="flex items-start gap-2 rounded-[var(--tms-radius)] border border-[color:var(--tms-border)] bg-[color:var(--tms-card)] p-2 text-xs">
+            <AlertTriangle size={14} className="mt-0.5 shrink-0 text-[color:var(--tms-badge-orange)]" />
             {result.smsStatus === 'NOT_CONFIGURED'
               ? 'Texting is not configured on this environment, so nothing was sent. The link below is live — send it by hand.'
               : `The text did not send${result.smsError ? `: ${result.smsError}` : ''}. The link below is live — send it by hand.`}
           </p>
         )}
         {result && result.smsStatus === 'SENT' && (
-          <p className="flex items-center gap-2 text-xs text-muted-foreground">
-            <Check size={14} className="text-emerald-600" />Texted to {result.link.sentTo ?? phone}
+          <p className="flex items-center gap-2 text-xs tms-muted">
+            <Check size={14} className="text-[color:var(--tms-badge-green)]" />Texted to {result.link.sentTo ?? phone}
           </p>
         )}
         {url && (
           <div className="flex items-center gap-2">
-            <Input aria-label="Tracking link URL" readOnly value={url} className="h-9 text-xs" />
-            <Button
-              type="button" variant="outline" size="sm"
+            <TmsInput aria-label="Tracking link URL" readOnly value={url} className="h-9 text-xs" />
+            <TmsButton
+              type="button" size="sm"
               onClick={() => { void navigator.clipboard?.writeText(url); toast.success('Link copied') }}
             >
               <Copy size={14} className="mr-1" />Copy
-            </Button>
+            </TmsButton>
           </div>
         )}
 
-        {error && <p className="text-xs text-destructive">{error}</p>}
-
-        <DialogFooter>
-          {link && link.status === 'ACTIVE' && (
-            <Button variant="outline" onClick={() => { void stop() }} disabled={busy} className="mr-auto">
-              <StopCircle size={14} className="mr-1" />Stop tracking
-            </Button>
-          )}
-          <Button variant="ghost" onClick={onClose} disabled={busy}>Close</Button>
-          <Button variant="outline" onClick={() => { void send('COPY') }} disabled={busy}>
-            <Copy size={14} className="mr-1" />Copy link
-          </Button>
-          <Button onClick={() => { void send('SMS') }} disabled={busy || !phone.trim()}>
-            <Send size={14} className="mr-1" />{busy ? 'Sending…' : 'Send'}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        {error && <p className="text-xs text-[color:var(--tms-badge-red)]">{error}</p>}
+    </TmsDialog>
   )
 }

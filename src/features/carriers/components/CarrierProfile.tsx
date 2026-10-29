@@ -1,12 +1,10 @@
 /**
  * One carrier, everything about them, in a sheet over the board — the same shape as the
- * customer profile (spec §3.3).
+ * customer profile, on the MVMNT kit: a header strip with the status and the compliance
+ * badges, the eight tabs, and a card per section.
  *
- * The header is the compliance answer at a glance: the status pill is the *effective*
- * status, so a carrier whose cargo insurance lapsed reads "Inactive — expired insurance"
- * without anybody having touched the record. Identity, equipment and compliance are a
- * draft saved with one button; contacts, payment methods and documents are their own
- * rows and save on their own.
+ * The sheet carries `tms-portal` because Radix renders it into `document.body`, outside
+ * `.tms-shell`, where the dark tokens would not otherwise reach.
  */
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -14,10 +12,9 @@ import {
   Banknote, Building2, ExternalLink, FileText, History, Phone, Shield, Truck, Wallet, X,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { ScrollArea } from '@/components/ui/scroll-area'
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
+import { TmsBadge, TmsButton, TmsCard, TmsIconButton, TmsTabs } from '@/features/tms/kit'
+import { Sheet, SheetContent } from '@/components/ui/sheet'
+import * as DialogPrimitive from '@radix-ui/react-dialog'
 import { useCarrier } from '@/hooks/useCarrier'
 import { useCarrierAp } from '@/hooks/useCarrierAp'
 import {
@@ -30,9 +27,8 @@ import {
   CARRIER_STATUS_LABELS, CARRIER_STATUS_REASON_LABELS, effectiveCarrierStatus,
 } from '@/lib/carrierStatus'
 import { formatCents } from '@/lib/tmsDirectory'
-import { cn } from '@/lib/utils'
 import {
-  DEFAULT_INSURANCE_WARN_DAYS, DEFAULT_REQUIRED_CARRIER_DOCS, INSURANCE_STATE_STYLES,
+  DEFAULT_INSURANCE_WARN_DAYS, DEFAULT_REQUIRED_CARRIER_DOCS, INSURANCE_STATE_TONE,
 } from '../carrierViews'
 import { CarrierApTab } from './CarrierApTab'
 import { CarrierContactsEditor, type CarrierContactDraft } from './CarrierContactsEditor'
@@ -46,27 +42,28 @@ import { CarrierPaymentEditor, type CarrierPaymentDraft } from './CarrierPayment
 import { CarrierStatusDialog } from './CarrierStatusDialog'
 import { InsurancePoliciesEditor } from './InsurancePoliciesEditor'
 import type { AuditLogEntry } from '@/types'
+import type { TmsTone } from '@/features/tms/kit'
 import type {
   CarrierDocumentType, CarrierRecord, CarrierStatus, InsurancePolicy, TmsSettings,
 } from '@/types/tms'
 
-const tabs = [
+const TABS = [
   { key: 'profile', label: 'Profile', icon: Building2 },
   { key: 'compliance', label: 'Compliance', icon: Shield },
   { key: 'contacts', label: 'Contacts', icon: Phone },
   { key: 'payment', label: 'Payment', icon: Wallet },
   { key: 'ap', label: 'AP', icon: Banknote },
   { key: 'equipment', label: 'Equipment', icon: Truck },
-  { key: 'loads', label: 'Loads', icon: FileText },
+  { key: 'loads', label: 'Shipments', icon: FileText },
   { key: 'activity', label: 'Activity', icon: History },
 ]
 
-const statusStyles: Record<CarrierStatus, string> = {
-  PENDING: 'bg-amber-100 text-amber-700',
-  REVIEW: 'bg-blue-100 text-blue-700',
-  ACTIVE: 'bg-emerald-100 text-emerald-700',
-  INACTIVE: 'bg-gray-100 text-gray-700',
-  DO_NOT_USE: 'bg-red-100 text-red-700',
+const STATUS_TONE: Record<CarrierStatus, TmsTone> = {
+  PENDING: 'orange',
+  REVIEW: 'blue',
+  ACTIVE: 'green',
+  INACTIVE: 'gray',
+  DO_NOT_USE: 'red',
 }
 
 function saferUrl(dotNumber: string): string {
@@ -175,21 +172,21 @@ export function CarrierProfile({ carrierId, isAdmin, settings, onClose, onChange
 
   return (
     <Sheet open onOpenChange={(v) => { if (!v) onClose() }}>
-      <SheetContent className="w-full sm:max-w-4xl flex flex-col p-0">
-        <SheetHeader className="px-6 py-4 border-b">
+      <SheetContent className="tms-portal w-full sm:max-w-4xl flex flex-col p-0 bg-[var(--tms-bg)]">
+        <div className="flex flex-col gap-2 p-4" style={{ borderBottom: '1px solid var(--tms-border)' }}>
           <div className="flex items-start justify-between gap-3">
-            <div className="space-y-1">
-              <SheetTitle className="flex items-center gap-2 text-base">
+            <div>
+              <DialogPrimitive.Title className="flex items-center gap-2 text-base font-semibold">
                 {carrier?.name ?? (loading ? 'Loading…' : 'Carrier')}
                 {effective && (
-                  <Badge variant="secondary" className={cn('text-[10px]', statusStyles[effective.status])}>
+                  <TmsBadge tone={STATUS_TONE[effective.status]}>
                     {CARRIER_STATUS_LABELS[effective.status]}
-                  </Badge>
+                  </TmsBadge>
                 )}
-                {effective?.derived && <span className="text-[10px] text-muted-foreground">(derived)</span>}
-              </SheetTitle>
+                {effective?.derived && <span className="text-[10px] tms-muted">(derived)</span>}
+              </DialogPrimitive.Title>
               {carrier && (
-                <p className="text-xs text-muted-foreground">
+                <p className="text-xs tms-muted">
                   {carrier.type}
                   {carrier.mcNumber && <> · MC {carrier.mcNumber}</>}
                   {carrier.dotNumber && <> · DOT {carrier.dotNumber}</>}
@@ -207,57 +204,47 @@ export function CarrierProfile({ carrierId, isAdmin, settings, onClose, onChange
               )}
             </div>
             <div className="flex items-center gap-2">
-              {carrier && <Button size="sm" variant="outline" onClick={() => setStatusOpen(true)}>Change status</Button>}
-              <Button size="icon" variant="ghost" aria-label="Close" onClick={onClose}><X size={16} /></Button>
+              {carrier && <TmsButton size="sm" onClick={() => setStatusOpen(true)}>Change status</TmsButton>}
+              <TmsIconButton shape="plain" aria-label="Close" onClick={onClose}><X size={16} /></TmsIconButton>
             </div>
           </div>
 
           {effective && effective.reason && (
-            <p className="mt-2 rounded-md bg-red-50 px-3 py-2 text-xs text-red-700">
+            <p
+              className="p-2 text-xs"
+              style={{ border: '1px solid var(--tms-badge-red)', borderRadius: 'var(--tms-radius)' }}
+            >
               {CARRIER_STATUS_REASON_LABELS[effective.reason]}
               {carrier?.statusNote && <> — {carrier.statusNote}</>}
             </p>
           )}
 
           {carrier && (
-            <div className="flex flex-wrap gap-1 pt-2">
-              {carrier.highwayStatus && <Badge variant="outline" className="text-[10px]">Highway {carrier.highwayStatus}</Badge>}
-              {carrier.rmisStatus && <Badge variant="outline" className="text-[10px]">RMIS {carrier.rmisStatus}</Badge>}
-              {carrier.mcpStatus && <Badge variant="outline" className="text-[10px]">MCP {carrier.mcpStatus}</Badge>}
+            <div className="flex flex-wrap gap-1">
+              {carrier.highwayStatus && <TmsBadge tone="gray">Highway {carrier.highwayStatus}</TmsBadge>}
+              {carrier.rmisStatus && <TmsBadge tone="gray">RMIS {carrier.rmisStatus}</TmsBadge>}
+              {carrier.mcpStatus && <TmsBadge tone="gray">MCP {carrier.mcpStatus}</TmsBadge>}
               {(carrier.insurancePolicies ?? []).map((policy) => {
                 const state = insuranceState(policy, now, warnDays)
                 return (
-                  <Badge key={policy.id} variant="secondary" className={cn('text-[10px]', INSURANCE_STATE_STYLES[state])}>
+                  <TmsBadge key={policy.id} tone={INSURANCE_STATE_TONE[state]}>
                     {policy.type.replace(/_/g, ' ').toLowerCase()} · {state.toLowerCase()}
-                  </Badge>
+                  </TmsBadge>
                 )
               })}
             </div>
           )}
 
-          <div className="flex flex-wrap gap-1 pt-2">
-            {tabs.map((t) => {
-              const Icon = t.icon
-              return (
-                <button
-                  key={t.key}
-                  type="button"
-                  onClick={() => setTab(t.key)}
-                  className={cn(
-                    'inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md',
-                    tab === t.key ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted',
-                  )}
-                >
-                  <Icon size={13} /> {t.label}
-                </button>
-              )
-            })}
-          </div>
-        </SheetHeader>
+          <TmsTabs
+            tabs={TABS.map((t) => ({ key: t.key, label: t.label }))}
+            active={tab}
+            onSelect={setTab}
+          />
+        </div>
 
-        <ScrollArea className="flex-1 px-6 py-4">
-          {error && <p className="text-sm text-destructive">{error}</p>}
-          {!bundle && loading && <p className="text-sm text-muted-foreground">Loading…</p>}
+        <div className="flex flex-1 flex-col gap-3 overflow-auto p-4">
+          {error && <p style={{ color: 'var(--tms-badge-red)' }}>{error}</p>}
+          {!bundle && loading && <p className="tms-muted">Loading…</p>}
 
           {bundle && carrier && (
             <>
@@ -273,8 +260,7 @@ export function CarrierProfile({ carrierId, isAdmin, settings, onClose, onChange
               )}
 
               {tab === 'compliance' && (
-                <section className="mt-6">
-                  <h3 className="mb-3 text-sm font-semibold">Documents</h3>
+                <TmsCard title="Documents">
                   <CarrierDocumentsEditor
                     documents={bundle.documents}
                     requiredDocs={requiredDocs}
@@ -299,40 +285,44 @@ export function CarrierProfile({ carrierId, isAdmin, settings, onClose, onChange
                       }
                     }}
                   />
-                </section>
+                </TmsCard>
               )}
 
               {tab === 'contacts' && (
-                <CarrierContactsEditor
-                  contacts={bundle.contacts}
-                  onSave={saveContact}
-                  onArchive={async (contact) => {
-                    try {
-                      await archiveCarrierContact({ id: contact.id, expectedUpdatedAt: contact.updatedAt })
-                      await refresh()
-                      toast.success('Contact archived')
-                    } catch (e) {
-                      reportFailure(e, 'Archive failed')
-                    }
-                  }}
-                />
+                <TmsCard title="Contacts">
+                  <CarrierContactsEditor
+                    contacts={bundle.contacts}
+                    onSave={saveContact}
+                    onArchive={async (contact) => {
+                      try {
+                        await archiveCarrierContact({ id: contact.id, expectedUpdatedAt: contact.updatedAt })
+                        await refresh()
+                        toast.success('Contact archived')
+                      } catch (e) {
+                        reportFailure(e, 'Archive failed')
+                      }
+                    }}
+                  />
+                </TmsCard>
               )}
 
               {tab === 'payment' && (
-                <CarrierPaymentEditor
-                  methods={bundle.paymentMethods}
-                  awaitingPayment={awaitingPayment}
-                  onSave={savePaymentMethod}
-                  onArchive={async (method) => {
-                    try {
-                      await archiveCarrierPaymentMethod({ id: method.id, expectedUpdatedAt: method.updatedAt })
-                      await refresh()
-                      toast.success('Payment method archived')
-                    } catch (e) {
-                      reportFailure(e, 'Archive failed')
-                    }
-                  }}
-                />
+                <TmsCard title="Payment methods">
+                  <CarrierPaymentEditor
+                    methods={bundle.paymentMethods}
+                    awaitingPayment={awaitingPayment}
+                    onSave={savePaymentMethod}
+                    onArchive={async (method) => {
+                      try {
+                        await archiveCarrierPaymentMethod({ id: method.id, expectedUpdatedAt: method.updatedAt })
+                        await refresh()
+                        toast.success('Payment method archived')
+                      } catch (e) {
+                        reportFailure(e, 'Archive failed')
+                      }
+                    }}
+                  />
+                </TmsCard>
               )}
 
               {tab === 'ap' && (
@@ -349,58 +339,71 @@ export function CarrierProfile({ carrierId, isAdmin, settings, onClose, onChange
               )}
 
               {tab === 'loads' && (
-                <div className="space-y-2">
-                  {bundle.loadCarriers.length === 0 && (
-                    <p className="text-sm text-muted-foreground">This carrier has not been booked on a load yet.</p>
-                  )}
-                  {bundle.loadCarriers.map((row) => (
-                    <button
-                      key={row.id}
-                      type="button"
-                      onClick={() => navigate(`/shipments/${row.shipmentId}`)}
-                      className="flex w-full items-center gap-3 rounded-lg border border-border px-3 py-2 text-left text-sm hover:bg-muted/40"
-                    >
-                      <Badge variant="outline" className="text-[10px]">{row.status}</Badge>
-                      <span className="font-medium">Load {row.loadId}</span>
-                      {row.carrierRateCents != null && <span>${formatCents(row.carrierRateCents)}</span>}
-                      {row.rateConStatus && (
-                        <span className="text-xs text-muted-foreground">rate con {row.rateConStatus.toLowerCase()}</span>
-                      )}
-                      <span className="ml-auto text-xs text-muted-foreground">
-                        {row.bookedAt ? new Date(row.bookedAt).toLocaleDateString() : ''}
-                        {row.dispatchedAt && ' · dispatched'}
-                      </span>
-                    </button>
-                  ))}
-                </div>
+                <TmsCard title="Shipments">
+                  <div className="flex flex-col gap-2">
+                    {bundle.loadCarriers.length === 0 && (
+                      <p className="tms-muted">This carrier has not been booked on a shipment yet.</p>
+                    )}
+                    {bundle.loadCarriers.map((row) => (
+                      <button
+                        key={row.id}
+                        type="button"
+                        onClick={() => navigate(`/tms/shipments/${row.shipmentId}`)}
+                        className="flex w-full items-center gap-3 px-3 py-2 text-left"
+                        style={{
+                          border: '1px solid var(--tms-border)',
+                          borderRadius: 'var(--tms-radius)',
+                          background: 'none',
+                          color: 'inherit',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <TmsBadge tone="gray">{row.status}</TmsBadge>
+                        <span className="font-medium">Shipment {row.shipmentId}</span>
+                        {row.carrierRateCents != null && <span>${formatCents(row.carrierRateCents)}</span>}
+                        {row.rateConStatus && (
+                          <span className="text-xs tms-muted">rate con {row.rateConStatus.toLowerCase()}</span>
+                        )}
+                        <span className="ml-auto text-xs tms-muted">
+                          {row.bookedAt ? new Date(row.bookedAt).toLocaleDateString() : ''}
+                          {row.dispatchedAt && ' · dispatched'}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </TmsCard>
               )}
 
               {tab === 'activity' && (
-                <div className="space-y-2">
-                  {logsError && <p className="text-sm text-destructive">{logsError}</p>}
-                  {!logs && !logsError && <p className="text-sm text-muted-foreground">Loading activity…</p>}
-                  {logs && carrierLogs.length === 0 && (
-                    <p className="text-sm text-muted-foreground">No recorded changes yet.</p>
-                  )}
-                  {carrierLogs.map((entry) => (
-                    <div key={entry.id} className="rounded-lg border border-border px-3 py-2 text-sm">
-                      <div className="flex items-center gap-2">
-                        <Badge variant="outline" className="text-[10px]">{entry.action}</Badge>
-                        <span className="font-medium">{entry.entityType}</span>
-                        <span className="ml-auto text-xs text-muted-foreground">
-                          {entry.user} · {new Date(entry.createdAt).toLocaleString()}
-                        </span>
+                <TmsCard title="Activity">
+                  <div className="flex flex-col gap-2">
+                    {logsError && <p style={{ color: 'var(--tms-badge-red)' }}>{logsError}</p>}
+                    {!logs && !logsError && <p className="tms-muted">Loading activity…</p>}
+                    {logs && carrierLogs.length === 0 && <p className="tms-muted">No recorded changes yet.</p>}
+                    {carrierLogs.map((entry) => (
+                      <div
+                        key={entry.id}
+                        className="px-3 py-2"
+                        style={{ border: '1px solid var(--tms-border)', borderRadius: 'var(--tms-radius)' }}
+                      >
+                        <div className="flex items-center gap-2">
+                          <TmsBadge tone="gray">{entry.action}</TmsBadge>
+                          <span className="font-medium">{entry.entityType}</span>
+                          <span className="ml-auto text-xs tms-muted">
+                            {entry.user} · {new Date(entry.createdAt).toLocaleString()}
+                          </span>
+                        </div>
+                        <p className="mt-1 text-xs tms-muted">
+                          {Object.keys(entry.changes ?? {}).join(', ') || 'no field detail'}
+                        </p>
                       </div>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {Object.keys(entry.changes ?? {}).join(', ') || 'no field detail'}
-                      </p>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                </TmsCard>
               )}
             </>
           )}
-        </ScrollArea>
+        </div>
 
         {statusOpen && carrier && (
           <CarrierStatusDialog
@@ -455,36 +458,40 @@ function CarrierDraft({ carrier, section, warnDays, now, onSave }: {
     }
   }
 
+  const title = section === 'profile' ? 'Carrier' : section === 'equipment' ? 'Equipment' : 'Compliance'
+
   return (
-    <div className="space-y-5">
-      <CarrierForm
-        value={value}
-        set={(key, next) => setValue((prev) => ({ ...prev, [key]: next }))}
-        section={section === 'profile' ? 'identity' : section}
-      />
+    <TmsCard
+      title={title}
+      actions={<TmsButton variant="primary" size="sm" onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save carrier'}</TmsButton>}
+    >
+      <div className="flex flex-col gap-5">
+        <CarrierForm
+          value={value}
+          set={(key, next) => setValue((prev) => ({ ...prev, [key]: next }))}
+          section={section === 'profile' ? 'identity' : section}
+        />
 
-      {section === 'compliance' && (
-        <>
-          <p className="text-xs text-muted-foreground">
-            Driver out-of-service {driverOos == null ? '—' : `${(driverOos / 100).toFixed(2)}%`} ·
-            {' '}vehicle out-of-service {vehicleOos == null ? '—' : `${(vehicleOos / 100).toFixed(2)}%`}
-          </p>
-          <section>
-            <h3 className="mb-3 text-sm font-semibold">Insurance</h3>
-            <InsurancePoliciesEditor
-              policies={policies}
-              warnDays={warnDays}
-              now={now}
-              onChange={setPolicies}
-            />
-          </section>
-        </>
-      )}
+        {section === 'compliance' && (
+          <>
+            <p className="text-xs tms-muted">
+              Driver out-of-service {driverOos == null ? '—' : `${(driverOos / 100).toFixed(2)}%`} ·
+              {' '}vehicle out-of-service {vehicleOos == null ? '—' : `${(vehicleOos / 100).toFixed(2)}%`}
+            </p>
+            <section>
+              <h3 className="mb-3 text-sm font-semibold">Insurance</h3>
+              <InsurancePoliciesEditor
+                policies={policies}
+                warnDays={warnDays}
+                now={now}
+                onChange={setPolicies}
+              />
+            </section>
+          </>
+        )}
 
-      {error && <p className="text-xs text-destructive">{error}</p>}
-      <div className="flex justify-end">
-        <Button onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save carrier'}</Button>
+        {error && <p className="text-xs" style={{ color: 'var(--tms-badge-red)' }}>{error}</p>}
       </div>
-    </div>
+    </TmsCard>
   )
 }

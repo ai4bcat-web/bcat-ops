@@ -1,12 +1,12 @@
 /**
- * The buy side of a load, on the Carrier tab: who we asked, what we offered, what they
- * came back with, and the four things a dispatcher does about it.
+ * The buy side of a shipment, on the Carrier tab: who we asked, what we offered, what
+ * they came back with, and the four things a dispatcher does about it.
  *
  * It sits above the assignment block because that is the order the work happens in —
  * offers out, then one of them booked. Once an assignment is ACTIVE the card stops being
- * a worklist and becomes the record of how this load got its carrier: no Request, no Log,
- * no per-row action, because the booking is already made and re-accepting a sibling offer
- * would book a second truck.
+ * a worklist and becomes the record of how this shipment got its carrier: no Request, no
+ * Log, no per-row action, because the booking is already made and re-accepting a sibling
+ * offer would book a second truck.
  *
  * The two numbers on a row are `ourOfferCents` and `carrierLastNumber` — the same pair the
  * public offer link shows the carrier, so the dispatcher and the carrier read the same
@@ -14,10 +14,9 @@
  * carrier answers, and a dead link handed out is worse than none.
  */
 import { useMemo, useState } from 'react'
-import { Check, Copy, Handshake, Plus, RefreshCw, Send, X } from 'lucide-react'
+import { Check, Copy, Plus, RefreshCw, Send, X } from 'lucide-react'
 import { toast } from 'sonner'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
+import { TmsBadge, TmsButton, TmsCard, TmsIconButton } from '@/features/tms/kit'
 import { useLoadOffers } from '@/hooks/useLoadOffers'
 import { rejectOffer } from '@/lib/apiClient'
 import { quoteLinkFor } from '@/lib/quoteLinkClient'
@@ -58,14 +57,14 @@ export function CarrierOffersCard({ bundle, onReload }: {
   const [nowIso] = useState(() => new Date().toISOString())
   const { open, closed } = useMemo(() => ({
     open: offers.filter((o) => isOpenQuoteStatus(o.status)),
-    closed: offers.filter((o) => !isOpenQuoteStatus(o.status)),
+    closed: offers.filter((o) => isOpenQuoteStatus(o.status) === false),
   }), [offers])
 
   // Booked: the whole thread is history, in the order it happened.
   const rows = booked ? offers : open
   const history = booked ? [] : closed
 
-  if (!loadId) return null
+  if (loadId == null) return null
 
   const done = async () => {
     setDialog(null)
@@ -91,128 +90,118 @@ export function CarrierOffersCard({ bundle, onReload }: {
   }
 
   return (
-    <div className="space-y-3 rounded-lg border border-border p-3" data-testid="carrier-offers">
-      <div className="flex flex-wrap items-center gap-2">
-        <Handshake size={14} className="text-muted-foreground" />
-        <p className="text-sm font-medium">Carrier offers</p>
-        {booked && <Badge variant="outline" className="text-[10px]">Booked — history only</Badge>}
-        <Button
-          variant="ghost"
-          size="sm"
-          className="ml-auto h-7 px-2"
-          onClick={() => { void refresh() }}
-          disabled={loading}
-          aria-label="Refresh carrier offers"
-        >
-          <RefreshCw size={13} />
-        </Button>
-        {!booked && (
-          <>
-            <Button size="sm" className="h-7 px-2 text-xs" onClick={() => setDialog({ kind: 'request' })} disabled={busy}>
-              <Send size={13} className="mr-1" />Request offers
-            </Button>
-            <Button variant="outline" size="sm" className="h-7 px-2 text-xs" onClick={() => setDialog({ kind: 'log' })} disabled={busy}>
-              <Plus size={13} className="mr-1" />Log offer
-            </Button>
-          </>
-        )}
-      </div>
+    <TmsCard
+      title={
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+          Carrier offers
+          {booked && <TmsBadge tone="gray">Booked — history only</TmsBadge>}
+        </span>
+      }
+      actions={
+        <>
+          <TmsIconButton shape="plain" aria-label="Refresh carrier offers" disabled={loading} onClick={() => { void refresh() }}>
+            <RefreshCw size={13} />
+          </TmsIconButton>
+          {booked === false && (
+            <>
+              <TmsButton variant="primary" size="sm" onClick={() => setDialog({ kind: 'request' })} disabled={busy}>
+                <Send size={13} />Request offers
+              </TmsButton>
+              <TmsButton size="sm" onClick={() => setDialog({ kind: 'log' })} disabled={busy}>
+                <Plus size={13} />Log offer
+              </TmsButton>
+            </>
+          )}
+        </>
+      }
+    >
+      <div style={{ display: 'grid', gap: 12 }} data-testid="carrier-offers">
+        {error && <p className="tms-field-error">{error}</p>}
 
-      {error && <p className="text-xs text-destructive">{error}</p>}
-
-      {loading && offers.length === 0 ? (
-        <p className="text-sm text-muted-foreground">Loading offers…</p>
-      ) : rows.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          {booked ? 'This load was booked without an offer on file.' : 'No offers out on this load yet.'}
-        </p>
-      ) : (
-        <div className="space-y-2">
-          {rows.map((quote) => {
-            const can = offerActions(quote, nowIso)
-            const chip = expiryChip(quote, nowIso)
-            return (
-              <div key={quote.id} className="rounded-lg border border-border p-2" data-testid="carrier-offer-row">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-sm font-medium">{quote.carrierName ?? 'Carrier'}</span>
-                  {quote.carrierMc && <Badge variant="outline" className="text-[10px]">MC {quote.carrierMc}</Badge>}
-                  <Badge variant="outline" className="text-[10px]">{OFFER_STATUS_LABEL[quote.status]}</Badge>
-                  <span className="text-xs text-muted-foreground">{quote.id}</span>
-                  {chip && (
-                    <span className={`text-xs ${chip.tone === 'danger' ? 'text-destructive' : 'text-muted-foreground'}`}>
-                      {chip.text}
-                    </span>
-                  )}
-                </div>
-                <div className="mt-1 flex flex-wrap gap-x-4 text-sm">
-                  <span>Ours <span className="font-medium">{money(ourOfferCents(quote))}</span></span>
-                  <span className="text-muted-foreground">
-                    Theirs <span className="font-medium text-foreground">{money(carrierLastNumber(quote))}</span>
-                  </span>
-                </div>
-
-                {!booked && (
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    <Button
-                      size="sm"
-                      className="h-7 px-2 text-xs"
-                      disabled={busy || !can.canAccept}
-                      onClick={() => setDialog({ kind: 'accept', quote })}
-                    >
-                      <Check size={13} className="mr-1" />Accept
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-7 px-2 text-xs"
-                      disabled={busy || !can.canCounter}
-                      onClick={() => setDialog({ kind: 'counter', quote })}
-                    >
-                      Counter
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-7 px-2 text-xs"
-                      disabled={busy || !can.canReject}
-                      onClick={() => { void reject(quote) }}
-                    >
-                      <X size={13} className="mr-1" />Reject
-                    </Button>
-                    {can.canCopyLink && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-7 px-2 text-xs"
-                        onClick={() => { void copyLink(quote) }}
+        {loading && offers.length === 0 ? (
+          <p className="tms-muted" style={{ fontSize: 13 }}>Loading offers…</p>
+        ) : rows.length === 0 ? (
+          <p className="tms-muted" style={{ fontSize: 13 }}>
+            {booked ? 'This shipment was booked without an offer on file.' : 'No offers out on this shipment yet.'}
+          </p>
+        ) : (
+          <div style={{ display: 'grid', gap: 8 }}>
+            {rows.map((quote) => {
+              const can = offerActions(quote, nowIso)
+              const chip = expiryChip(quote, nowIso)
+              return (
+                <div
+                  key={quote.id}
+                  style={{ borderRadius: 'var(--tms-radius)', border: '1px solid var(--tms-border)', padding: 8 }}
+                  data-testid="carrier-offer-row"
+                >
+                  <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 13, fontWeight: 600 }}>{quote.carrierName ?? 'Carrier'}</span>
+                    {quote.carrierMc && <TmsBadge tone="gray">MC {quote.carrierMc}</TmsBadge>}
+                    <TmsBadge tone="blue">{OFFER_STATUS_LABEL[quote.status]}</TmsBadge>
+                    <span className="tms-muted" style={{ fontSize: 12 }}>{quote.id}</span>
+                    {chip && (
+                      <span
+                        className={chip.tone === 'danger' ? undefined : 'tms-muted'}
+                        style={{ fontSize: 12, color: chip.tone === 'danger' ? 'var(--tms-badge-red)' : undefined }}
                       >
-                        <Copy size={13} className="mr-1" />Copy link
-                      </Button>
+                        {chip.text}
+                      </span>
                     )}
                   </div>
-                )}
-              </div>
-            )
-          })}
-        </div>
-      )}
+                  <div style={{ marginTop: 4, display: 'flex', flexWrap: 'wrap', gap: 16, fontSize: 13 }}>
+                    <span>Ours <span style={{ fontWeight: 600 }}>{money(ourOfferCents(quote))}</span></span>
+                    <span className="tms-muted">
+                      Theirs <span style={{ fontWeight: 600, color: 'var(--tms-text)' }}>{money(carrierLastNumber(quote))}</span>
+                    </span>
+                  </div>
 
-      {history.length > 0 && (
-        <details>
-          <summary className="cursor-pointer text-xs text-muted-foreground">
-            {history.length} closed {history.length === 1 ? 'offer' : 'offers'}
-          </summary>
-          <div className="mt-2 space-y-1">
-            {history.map((quote) => (
-              <div key={quote.id} className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                <span>{quote.carrierName ?? 'Carrier'}</span>
-                <span>{OFFER_STATUS_LABEL[quote.status]}</span>
-                <span>{money(carrierLastNumber(quote) ?? ourOfferCents(quote))}</span>
-              </div>
-            ))}
+                  {booked === false && (
+                    <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                      <TmsButton
+                        variant="primary"
+                        size="sm"
+                        disabled={busy || can.canAccept === false}
+                        onClick={() => setDialog({ kind: 'accept', quote })}
+                      >
+                        <Check size={13} />Accept
+                      </TmsButton>
+                      <TmsButton size="sm" disabled={busy || can.canCounter === false} onClick={() => setDialog({ kind: 'counter', quote })}>
+                        Counter
+                      </TmsButton>
+                      <TmsButton size="sm" disabled={busy || can.canReject === false} onClick={() => { void reject(quote) }}>
+                        <X size={13} />Reject
+                      </TmsButton>
+                      {can.canCopyLink && (
+                        <TmsButton variant="ghost" size="sm" onClick={() => { void copyLink(quote) }}>
+                          <Copy size={13} />Copy link
+                        </TmsButton>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
           </div>
-        </details>
-      )}
+        )}
+
+        {history.length > 0 && (
+          <details>
+            <summary className="tms-muted" style={{ cursor: 'pointer', fontSize: 12 }}>
+              {history.length} closed {history.length === 1 ? 'offer' : 'offers'}
+            </summary>
+            <div style={{ marginTop: 8, display: 'grid', gap: 4 }}>
+              {history.map((quote) => (
+                <div key={quote.id} className="tms-muted" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, fontSize: 12 }}>
+                  <span>{quote.carrierName ?? 'Carrier'}</span>
+                  <span>{OFFER_STATUS_LABEL[quote.status]}</span>
+                  <span>{money(carrierLastNumber(quote) ?? ourOfferCents(quote))}</span>
+                </div>
+              ))}
+            </div>
+          </details>
+        )}
+      </div>
 
       <RequestOffersDialog
         shipmentId={bundle.shipment.id}
@@ -244,6 +233,6 @@ export function CarrierOffersCard({ bundle, onReload }: {
           onDone={() => { void done() }}
         />
       )}
-    </div>
+    </TmsCard>
   )
 }

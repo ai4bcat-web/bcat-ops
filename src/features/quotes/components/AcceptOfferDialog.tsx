@@ -14,12 +14,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Checkbox } from '@/components/ui/checkbox'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { TmsBadge, TmsButton, TmsDialog, TmsField, TmsInput, TmsSelect } from '@/features/tms/kit'
 import { MoneyField } from '@/features/directory/components/MoneyField'
 import { useAuth } from '@/hooks/useAuth'
 import {
@@ -85,7 +80,7 @@ export function AcceptOfferDialog({ quote, open, onOpenChange, onDone }: {
   const carrier = carrierBundle?.carrier ?? null
 
   const preview = useMemo(() => {
-    if (!carrier || !leg) return null
+    if (carrier == null || leg == null) return null
     return evaluateCarrierBooking({
       carrier,
       documents: carrierBundle?.documents ?? [],
@@ -112,12 +107,12 @@ export function AcceptOfferDialog({ quote, open, onOpenChange, onDone }: {
 
   const blocks = preview?.blocks ?? []
   const warnings = preview?.warnings ?? []
-  const unacknowledged = warnings.filter((warning) => !acked.includes(warning.key))
+  const unacknowledged = warnings.filter((warning) => acked.includes(warning.key) === false)
   const revenueCents = financials?.revenueCents ?? 0
   const profitCents = revenueCents - (rateCents ?? 0)
 
   const submit = () => {
-    if (!leg) { setError('The load behind this offer could not be read.'); return }
+    if (leg == null) { setError('The load behind this offer could not be read.'); return }
     if (rateCents == null || rateCents <= 0) { setError('A booking needs a rate.'); return }
     setBusy(true)
     setError(null)
@@ -151,127 +146,118 @@ export function AcceptOfferDialog({ quote, open, onOpenChange, onDone }: {
       .finally(() => setBusy(false))
   }
 
-  const blocked = !leg || !carrier || blocks.length > 0 || unacknowledged.length > 0
+  const blocked = leg == null || carrier == null || blocks.length > 0 || unacknowledged.length > 0
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>
-            Book {quote.carrierName ?? 'carrier'} — {formatCents(theirNumberCents(quote) ?? quote.amountCents)}
-          </DialogTitle>
-        </DialogHeader>
-
-        {loading && (
-          <p className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 size={14} className="animate-spin" /> Reading the load and the carrier's file…
-          </p>
-        )}
-
-        {!loading && (
-          <div className="space-y-3">
-            <div className="grid grid-cols-3 gap-3 rounded-md border border-border p-2 text-sm">
-              <div>
-                <div className="text-xs uppercase tracking-wider text-muted-foreground">Revenue</div>
-                <div className="tabular-nums">{formatCents(revenueCents)}</div>
-              </div>
-              <div>
-                <div className="text-xs uppercase tracking-wider text-muted-foreground">Their number</div>
-                <div className="tabular-nums">{formatCents(theirNumberCents(quote) ?? quote.amountCents)}</div>
-              </div>
-              <div>
-                <div className="text-xs uppercase tracking-wider text-muted-foreground">Profit</div>
-                <div className={profitCents < 0 ? 'tabular-nums text-destructive' : 'tabular-nums'}>
-                  {formatCents(profitCents)}
-                </div>
-              </div>
-            </div>
-
-            {blocks.length > 0 && (
-              <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-2">
-                <p className="flex items-start gap-2 text-xs font-medium">
-                  <AlertTriangle size={14} className="mt-0.5 shrink-0 text-destructive" />
-                  This carrier cannot be booked.
-                </p>
-                <ul className="mt-1 space-y-1 text-xs text-destructive">
-                  {blocks.map((block) => <li key={block.key}>{block.detail}</li>)}
-                </ul>
-              </div>
-            )}
-
-            {warnings.length > 0 && (
-              <div className="space-y-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-2">
-                <p className="text-xs font-medium">Read these and say so; the acknowledgement is kept on the booking.</p>
-                {warnings.map((warning) => (
-                  <label key={warning.key} className="flex items-start gap-2 text-xs">
-                    <Checkbox
-                      aria-label={`Acknowledge ${warning.key}`}
-                      checked={acked.includes(warning.key)}
-                      disabled={busy}
-                      onCheckedChange={(v) => setAcked((prev) => (
-                        v === true ? [...prev, warning.key] : prev.filter((key) => key !== warning.key)
-                      ))}
-                      className="mt-0.5"
-                    />
-                    {warning.detail}
-                  </label>
-                ))}
-              </div>
-            )}
-
-            <MoneyField label="Carrier rate" value={rateCents} onChange={setRateCents} disabled={busy} />
-
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="Dispatcher" value={dispatcherName} disabled={busy} onChange={setDispatcherName} />
-              <Field label="Dispatcher e-mail" value={dispatcherEmail} disabled={busy} onChange={setDispatcherEmail} />
-              <Field label="Dispatcher phone" value={dispatcherPhone} disabled={busy} onChange={setDispatcherPhone} />
-              <Field label="Driver" value={driverName} disabled={busy} onChange={setDriverName} />
-              <Field label="Driver phone" value={driverPhone} disabled={busy} onChange={setDriverPhone} />
-              <Field label="Truck #" value={truckNumber} disabled={busy} onChange={setTruckNumber} />
-              <Field label="Trailer #" value={trailerNumber} disabled={busy} onChange={setTrailerNumber} />
-              <div>
-                <Label className="text-xs uppercase tracking-wider text-muted-foreground" htmlFor="accept-offer-tracking">
-                  Tracking
-                </Label>
-                <select
-                  id="accept-offer-tracking"
-                  className="h-9 w-full rounded-md border border-border bg-background px-2 text-sm"
-                  value={trackingProvider}
-                  disabled={busy}
-                  onChange={(e) => setTrackingProvider(e.target.value as TrackingProvider)}
-                >
-                  {TRACKING_PROVIDERS.map((provider) => (
-                    <option key={provider} value={provider}>{provider}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            {!leg && !error && (
-              <p className="text-xs text-destructive">
-                This offer does not name a load that can be read, so nothing can be booked against it.
-              </p>
-            )}
-
-            {quote.groupId && (
-              <p className="text-xs text-muted-foreground">
-                <Badge variant="outline" className="mr-1 text-[10px]">Round {quote.rounds}</Badge>
-                Booking this one closes every other offer in the round.
-              </p>
-            )}
-
-            {error && <p className="text-xs text-destructive">{error}</p>}
-          </div>
-        )}
-
-        <DialogFooter>
-          <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={busy}>Cancel</Button>
-          <Button aria-label="Book this carrier" disabled={busy || loading || blocked} onClick={submit}>
+    <TmsDialog
+      open={open}
+      onOpenChange={onOpenChange}
+      className="tms-dialog-wide"
+      title={`Book ${quote.carrierName ?? 'carrier'} — ${formatCents(theirNumberCents(quote) ?? quote.amountCents)}`}
+      footer={
+        <>
+          <TmsButton variant="ghost" onClick={() => onOpenChange(false)} disabled={busy}>Cancel</TmsButton>
+          <TmsButton variant="primary" aria-label="Book this carrier" disabled={busy || loading || blocked} onClick={submit}>
             {busy ? 'Booking…' : 'Accept and book'}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          </TmsButton>
+        </>
+      }
+    >
+      {loading && (
+        <p className="tms-muted" style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
+          <Loader2 size={14} /> Reading the shipment and the carrier's file…
+        </p>
+      )}
+
+      {loading === false && (
+        <div style={{ display: 'grid', gap: 12 }}>
+          <div className="tms-grid tms-grid-3" style={{ border: '1px solid var(--tms-border)', borderRadius: 'var(--tms-radius)', padding: 8, fontSize: 13 }}>
+            <div>
+              <div className="tms-field-label">Revenue</div>
+              <div style={{ fontVariantNumeric: 'tabular-nums' }}>{formatCents(revenueCents)}</div>
+            </div>
+            <div>
+              <div className="tms-field-label">Their number</div>
+              <div style={{ fontVariantNumeric: 'tabular-nums' }}>{formatCents(theirNumberCents(quote) ?? quote.amountCents)}</div>
+            </div>
+            <div>
+              <div className="tms-field-label">Profit</div>
+              <div style={{ fontVariantNumeric: 'tabular-nums', color: profitCents < 0 ? 'var(--tms-badge-red)' : undefined }}>
+                {formatCents(profitCents)}
+              </div>
+            </div>
+          </div>
+
+          {blocks.length > 0 && (
+            <div style={{ borderRadius: 'var(--tms-radius)', border: '1px solid var(--tms-badge-red)', background: 'rgba(237,90,118,0.14)', padding: 8 }}>
+              <p style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 12, fontWeight: 600, margin: 0 }}>
+                <AlertTriangle size={14} style={{ marginTop: 2, flexShrink: 0, color: 'var(--tms-badge-red)' }} />
+                This carrier cannot be booked.
+              </p>
+              <ul style={{ margin: '4px 0 0', paddingLeft: 18, fontSize: 12, color: 'var(--tms-badge-red)' }}>
+                {blocks.map((block) => <li key={block.key}>{block.detail}</li>)}
+              </ul>
+            </div>
+          )}
+
+          {warnings.length > 0 && (
+            <div style={{ display: 'grid', gap: 8, borderRadius: 'var(--tms-radius)', border: '1px solid var(--tms-badge-orange)', background: 'rgba(255,136,10,0.12)', padding: 8 }}>
+              <p style={{ fontSize: 12, fontWeight: 600, margin: 0 }}>Read these and say so; the acknowledgement is kept on the booking.</p>
+              {warnings.map((warning) => (
+                <label key={warning.key} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 12 }}>
+                  <input
+                    type="checkbox"
+                    aria-label={`Acknowledge ${warning.key}`}
+                    checked={acked.includes(warning.key)}
+                    disabled={busy}
+                    onChange={(e) => setAcked((prev) => (
+                      e.target.checked ? [...prev, warning.key] : prev.filter((key) => key !== warning.key)
+                    ))}
+                  />
+                  {warning.detail}
+                </label>
+              ))}
+            </div>
+          )}
+
+          <MoneyField label="Carrier rate" value={rateCents} onChange={setRateCents} disabled={busy} />
+
+          <div className="tms-grid tms-grid-2">
+            <Field label="Dispatcher" value={dispatcherName} disabled={busy} onChange={setDispatcherName} />
+            <Field label="Dispatcher e-mail" value={dispatcherEmail} disabled={busy} onChange={setDispatcherEmail} />
+            <Field label="Dispatcher phone" value={dispatcherPhone} disabled={busy} onChange={setDispatcherPhone} />
+            <Field label="Driver" value={driverName} disabled={busy} onChange={setDriverName} />
+            <Field label="Driver phone" value={driverPhone} disabled={busy} onChange={setDriverPhone} />
+            <Field label="Truck #" value={truckNumber} disabled={busy} onChange={setTruckNumber} />
+            <Field label="Trailer #" value={trailerNumber} disabled={busy} onChange={setTrailerNumber} />
+            <TmsField label="Tracking" htmlFor="accept-offer-tracking">
+              <TmsSelect
+                id="accept-offer-tracking"
+                value={trackingProvider}
+                disabled={busy}
+                onChange={(e) => setTrackingProvider(e.target.value as TrackingProvider)}
+                options={TRACKING_PROVIDERS.map((provider) => ({ value: provider, label: provider }))}
+              />
+            </TmsField>
+          </div>
+
+          {leg == null && error == null && (
+            <p className="tms-field-error">
+              This offer does not name a shipment that can be read, so nothing can be booked against it.
+            </p>
+          )}
+
+          {quote.groupId && (
+            <p className="tms-muted" style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <TmsBadge tone="gray">Round {quote.rounds}</TmsBadge>
+              Booking this one closes every other offer in the round.
+            </p>
+          )}
+
+          {error && <p className="tms-field-error">{error}</p>}
+        </div>
+      )}
+    </TmsDialog>
   )
 }
 
@@ -282,15 +268,8 @@ function Field({ label, value, disabled, onChange }: {
   onChange: (value: string) => void
 }) {
   return (
-    <div>
-      <Label className="text-xs uppercase tracking-wider text-muted-foreground">{label}</Label>
-      <Input
-        aria-label={label}
-        className="h-9 text-sm"
-        value={value}
-        disabled={disabled}
-        onChange={(e) => onChange(e.target.value)}
-      />
-    </div>
+    <TmsField label={label}>
+      <TmsInput value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)} />
+    </TmsField>
   )
 }

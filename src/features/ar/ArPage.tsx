@@ -1,22 +1,27 @@
 /**
- * `/ar` — the accounts-receivable desk (spec §3.6, §6.6; `TMS_DESIGN` §4.12).
+ * The receivable half of `/tms/invoicing` (spec §3.6, §6.6; `TMS_DESIGN` §4.12).
  *
- * Six tabs that follow one order's money from delivered to banked: what is waiting on
+ * Six views that follow one shipment's money from delivered to banked: what is waiting on
  * paperwork, what is ready to bill, what is owed, what was collected, every cash row, and
  * the aging behind all of it. Every number on the page is integer cents formatted once,
  * by `formatCents`; the deciding lives in `arViews.ts` and `@/lib/arAging`.
+ *
+ * It renders as one MVMNT list page: the Receivable/Payable view tabs come from
+ * `InvoicingPage`, the AR ladder is the status quick-tab strip, and each view swaps the
+ * columns under it.
  *
  * On dev, SES is denied: an invoice e-mail comes back NOT_SENT with the refusal and a
  * signed download. The page reports exactly that and never claims a send that did not
  * happen — a false "sent" here is a customer who never got their bill.
  */
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
-import { Download, Filter, Mail, RefreshCw, Wallet } from 'lucide-react'
+import { Download, Mail } from 'lucide-react'
 import { toast } from 'sonner'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Label } from '@/components/ui/label'
+import {
+  TmsBadge, TmsButton, TmsCard, TmsField, TmsSelect, TmsListPage,
+  type ColumnDef, type TmsListPageProps, type TmsTabGroup,
+} from '@/features/tms/kit'
 import { useArWorklist, type ArWorklistRow } from '@/hooks/useArWorklist'
 import { useCustomerAr } from '@/hooks/useCustomerAr'
 import { useOpenInvoices } from '@/hooks/useOpenInvoices'
@@ -33,7 +38,6 @@ import { chicagoDateStr } from '@/lib/date'
 import { saveBlob } from '@/lib/download'
 import { formatCents } from '@/lib/invoiceBuild'
 import { otrStatusLabel } from '@/lib/otrInvoiceStatus'
-import { cn } from '@/lib/utils'
 import { AgingStrip } from './AgingStrip'
 import {
   AR_PAYMENT_KIND_LABEL, AR_PAYMENT_METHOD_LABEL, AR_TABS, BATCH_GENERATE_LIMIT, EMPTY_UNPAID_FILTERS,
@@ -59,11 +63,31 @@ type ArDialog =
   | { kind: 'void'; invoice: InvoiceRecord }
   | { kind: 'reverse'; payment: ArPaymentRecord }
 
-const TH = 'px-2 py-2 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground'
-const TD = 'px-2 py-2 align-top'
-const MONEY = 'px-2 py-2 text-right tabular-nums align-top'
+/** One shipment the batch would not bill, and exactly what the release gate said. */
+interface BatchRefusal {
+  orderId: string
+  shipmentNumber: string
+  reasons: string[]
+}
 
-export function ArPage() {
+const RIGHT = 'block text-right tabular-nums'
+
+/** The lists do not page: the footer counts what the view holds. */
+function wholeList(total: number) {
+  return { from: total === 0 ? 0 : 1, to: total, total, pageSize: total }
+}
+
+/**
+ * One view's half of the list page. Columns, rows and `rowKey` are built together by the
+ * view that owns them, so the row type is erased here and the page renders them all.
+ */
+type ListView = Omit<TmsListPageProps<never>, 'title' | 'viewTabs' | 'quickTabs' | 'onRefresh'>
+
+function view<T>(config: Omit<TmsListPageProps<T>, 'title' | 'viewTabs' | 'quickTabs' | 'onRefresh'>): ListView {
+  return config as unknown as ListView
+}
+
+export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   // One clock for the whole page: the chips, the buckets and the CSV all answer as of the
   // same day, so a row cannot read "Current" next to a 1–30 column it was counted in.
   const [asOf] = useState(() => chicagoDateStr(new Date()))
@@ -74,7 +98,7 @@ export function ArPage() {
 
   const unbilled = useArWorklist('UNBILLED')
   const docsNeeded = useArWorklist('DOCS_NEEDED')
-  // Invoiced-but-unpaid orders carry the shipments the open invoices were raised against;
+  // Invoiced-but-unpaid shipments carry the ones the open invoices were raised against;
   // that pairing is the only way to measure delivery → invoice.
   const invoiced = useArWorklist('UNPAID')
   const open = useOpenInvoices()
@@ -84,6 +108,8 @@ export function ArPage() {
   const [selected, setSelected] = useState<string[]>([])
   /** What the last batch generated, so "Batch e-mail" bills exactly those invoices. */
   const [justGenerated, setJustGenerated] = useState<string[]>([])
+  /** What the last batch refused, with the release gate's own sentences. */
+  const [refusals, setRefusals] = useState<BatchRefusal[]>([])
 
   const [unpaidFilters, setUnpaidFilters] = useState<UnpaidFilters>(EMPTY_UNPAID_FILTERS)
   const [showFilters, setShowFilters] = useState(false)
@@ -124,8 +150,8 @@ export function ArPage() {
   )
 
   /**
-   * A DOCS_NEEDED order whose freight has not moved yet is not a paperwork problem —
-   * nobody can upload a POD for it. The tab is the chase list: delivered, or a customer
+   * A DOCS_NEEDED shipment whose freight has not moved yet is not a paperwork problem —
+   * nobody can upload a POD for it. The view is the chase list: delivered, or a customer
    * that bills on pickup.
    */
   const docsNeededRows = useMemo(
@@ -155,14 +181,26 @@ export function ArPage() {
 
   const runBatchGenerate = () => {
     setBusy(true)
+    const byOrder = new Map(unbilled.rows.map((r) => [r.orderId, r]))
     batchGenerateInvoices({ orderIds: selected })
       .then(({ results }) => {
         const made = results.flatMap((r) => (r.invoiceId ? [r.invoiceId] : []))
         const failed = results.filter((r) => r.error)
         setJustGenerated(made)
         setSelected([])
+        // The gate's own sentences, row by row — a toast per refusal scrolls away before
+        // anybody can act on eleven of them.
+        setRefusals(failed.map((f) => ({
+          orderId: f.orderId,
+          shipmentNumber: byOrder.get(f.orderId)?.shipmentNumber ?? f.orderId,
+          reasons: f.releaseGate && !f.releaseGate.ok
+            ? f.releaseGate.missing.map((m) => m.message)
+            : [f.error ?? 'Refused'],
+        })))
         if (made.length > 0) toast.success(`${made.length} invoice${made.length === 1 ? '' : 's'} generated`)
-        for (const f of failed) toast.error(`${f.orderId}: ${f.error ?? 'refused'}`)
+        if (failed.length > 0) {
+          toast.error(`${failed.length} shipment${failed.length === 1 ? '' : 's'} refused — the reasons are listed above the table`)
+        }
         return refreshAll()
       })
       .catch((e: unknown) => toast.error(graphqlErrorText(e) || 'Batch generate failed'))
@@ -226,128 +264,96 @@ export function ArPage() {
   }
 
   const error = unbilled.error ?? docsNeeded.error ?? open.error ?? customerAr.error
-  const loading = unbilled.loading || docsNeeded.loading || open.loading
+
+  const chrome = {
+    title: 'Invoicing',
+    viewTabs,
+    quickTabs: {
+      tabs: AR_TABS.map((t) => ({ key: t.key, label: t.label, count: counts[t.key] })),
+      active: tab,
+      onSelect: (key: string) => setTab(key as ArTabKey),
+    },
+    onRefresh: () => void refreshAll(),
+  }
+
+  const errorBanner = error
+    ? <p style={{ color: 'var(--tms-badge-red)' }} className="text-sm">{error}</p>
+    : null
+
+  const customer = customers.find((c) => c.id === arCustomerId) ?? null
+
+  // One `TmsListPage` for all six views: switching view swaps the columns and the rows
+  // under the same chrome, so the tab strip itself is never torn down and remounted.
+  const current =
+    tab === 'to-invoice' ? toInvoiceView({
+      banner: <>{errorBanner}<RefusalsCard refusals={refusals} onDismiss={() => setRefusals([])} /></>,
+      rows: unbilled.rows,
+      customersById,
+      selected,
+      justGenerated,
+      busy,
+      onSelect: setSelected,
+      onGenerate: (row) => setDialog({ kind: 'generate', orderId: row.orderId, shipmentNumber: row.shipmentNumber }),
+      onBatchGenerate: runBatchGenerate,
+      onBatchEmail: runBatchEmail,
+    })
+    : tab === 'docs-needed' ? docsNeededView({ banner: errorBanner, rows: docsNeededRows })
+    : tab === 'unpaid' ? unpaidView({
+      errorBanner,
+      invoices: unpaidRows,
+      allInvoices: open.invoices,
+      filters: unpaidFilters,
+      showFilters,
+      asOf,
+      busy,
+      factorByItemId,
+      onToggleFilters: () => setShowFilters((s) => !s),
+      onFilters: setUnpaidFilters,
+      onEmail: (inv) => setDialog({ kind: 'email', invoiceId: inv.id }),
+      onPayment: (inv) => setDialog({
+        kind: 'payment',
+        customerId: inv.customerId,
+        customerName: inv.customerName ?? '',
+        invoiceId: inv.id,
+      }),
+      onFactor: (inv) => setDialog({ kind: 'factor', invoiceId: inv.id }),
+      onVoid: (inv) => setDialog({ kind: 'void', invoice: inv }),
+    })
+    : tab === 'paid' ? paidView({
+      banner: errorBanner,
+      invoices: paidInvoices,
+      months,
+      month,
+      loading: paidLoading,
+      onMonth: (ym: string) => { setPaidLoading(true); setMonth(ym) },
+    })
+    : tab === 'payments' ? paymentsView({
+      banner: errorBanner,
+      customers,
+      customer,
+      payments: customerAr.payments,
+      openCents: customerAr.openCents,
+      unappliedCents: customerAr.unappliedCents,
+      busy,
+      onCustomer: setArCustomerId,
+      onPayment: (customerId, customerName) => setDialog({ kind: 'payment', customerId, customerName }),
+      onCredit: (customerId, customerName) => setDialog({ kind: 'credit', customerId, customerName }),
+      onReverse: (payment) => setDialog({ kind: 'reverse', payment }),
+    })
+    : agingView({
+      errorBanner,
+      aging: open.aging,
+      uninvoicedCents: uninvoiced.reduce((sum, r) => sum + r.revenueCents, 0),
+      uninvoicedCount: uninvoiced.length,
+      avgDaysToInvoice: lagDays,
+      avgDaysToPay: avgDaysToPay(paidInvoices),
+      paidMonthLabel: monthLabel(month),
+      onCsv: downloadAgingCsv,
+    })
 
   return (
-    <div className="flex h-full flex-col">
-      <header className="flex flex-wrap items-center gap-2 border-b border-border px-5 py-3">
-        <Wallet size={18} />
-        <h1 className="text-lg font-semibold">AR</h1>
-        <Badge variant="outline">{formatCents(open.aging.totalCents)} open</Badge>
-        {open.aging.lateCents > 0 && (
-          <Badge variant="destructive">{formatCents(open.aging.lateCents)} late</Badge>
-        )}
-        <Button
-          variant="ghost"
-          size="icon"
-          className="ml-auto h-9 w-9"
-          aria-label="Refresh AR"
-          onClick={() => void refreshAll()}
-        >
-          <RefreshCw size={14} className={loading ? 'animate-spin' : undefined} />
-        </Button>
-      </header>
-
-      <nav role="tablist" aria-label="AR views" className="flex gap-1 overflow-x-auto border-b border-border px-5">
-        {AR_TABS.map((t) => (
-          <button
-            key={t.key}
-            role="tab"
-            type="button"
-            aria-selected={tab === t.key}
-            aria-label={t.label}
-            onClick={() => setTab(t.key)}
-            className={cn(
-              'flex items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-2 text-sm',
-              tab === t.key ? 'border-primary font-medium text-foreground' : 'border-transparent text-muted-foreground',
-            )}
-          >
-            {t.label}
-            <Badge variant="outline" className="text-[10px]">{counts[t.key]}</Badge>
-          </button>
-        ))}
-      </nav>
-
-      {error && <p className="px-5 py-3 text-sm text-destructive">{error}</p>}
-
-      <div className="flex-1 overflow-auto px-5 py-3">
-        {tab === 'to-invoice' && (
-          <ToInvoiceTab
-            rows={unbilled.rows}
-            customersById={customersById}
-            selected={selected}
-            justGenerated={justGenerated}
-            busy={busy}
-            onSelect={setSelected}
-            onGenerate={(row) => setDialog({ kind: 'generate', orderId: row.orderId, shipmentNumber: row.shipmentNumber })}
-            onBatchGenerate={runBatchGenerate}
-            onBatchEmail={runBatchEmail}
-          />
-        )}
-
-        {tab === 'docs-needed' && <DocsNeededTab rows={docsNeededRows} />}
-
-        {tab === 'unpaid' && (
-          <UnpaidTab
-            invoices={unpaidRows}
-            allInvoices={open.invoices}
-            filters={unpaidFilters}
-            showFilters={showFilters}
-            asOf={asOf}
-            busy={busy}
-            factorByItemId={factorByItemId}
-            onToggleFilters={() => setShowFilters((s) => !s)}
-            onFilters={setUnpaidFilters}
-            onEmail={(inv) => setDialog({ kind: 'email', invoiceId: inv.id })}
-            onPayment={(inv) => setDialog({
-              kind: 'payment',
-              customerId: inv.customerId,
-              customerName: inv.customerName ?? '',
-              invoiceId: inv.id,
-            })}
-            onFactor={(inv) => setDialog({ kind: 'factor', invoiceId: inv.id })}
-            onVoid={(inv) => setDialog({ kind: 'void', invoice: inv })}
-          />
-        )}
-
-        {tab === 'paid' && (
-          <PaidTab
-            invoices={paidInvoices}
-            months={months}
-            month={month}
-            loading={paidLoading}
-            onMonth={(ym) => { setPaidLoading(true); setMonth(ym) }}
-          />
-        )}
-
-        {tab === 'payments' && (
-          <PaymentsTab
-            customers={customers}
-            customerId={arCustomerId}
-            payments={customerAr.payments}
-            openCents={customerAr.openCents}
-            unappliedCents={customerAr.unappliedCents}
-            loading={customerAr.loading}
-            busy={busy}
-            onCustomer={setArCustomerId}
-            onPayment={(customerId, customerName) => setDialog({ kind: 'payment', customerId, customerName })}
-            onCredit={(customerId, customerName) => setDialog({ kind: 'credit', customerId, customerName })}
-            onReverse={(payment) => setDialog({ kind: 'reverse', payment })}
-          />
-        )}
-
-        {tab === 'aging' && (
-          <AgingTab
-            aging={open.aging}
-            uninvoicedCents={uninvoiced.reduce((sum, r) => sum + r.revenueCents, 0)}
-            uninvoicedCount={uninvoiced.length}
-            avgDaysToInvoice={lagDays}
-            avgDaysToPay={avgDaysToPay(paidInvoices)}
-            paidMonthLabel={monthLabel(month)}
-            onCsv={downloadAgingCsv}
-          />
-        )}
-      </div>
+    <>
+      <TmsListPage<never> {...chrome} {...current} />
 
       {dialog?.kind === 'generate' && (
         <GenerateInvoiceDialog
@@ -395,7 +401,7 @@ export function ArPage() {
       {dialog?.kind === 'void' && (
         <ReasonDialog
           title={`Void invoice ${dialog.invoice.number}`}
-          description="Voiding reopens the order for a fresh invoice and leaves this one on the record. It cannot be undone."
+          description="Voiding reopens the shipment for a fresh invoice and leaves this one on the record. It cannot be undone."
           label="Why it is being voided"
           confirmLabel="Void invoice"
           busy={busy}
@@ -414,15 +420,44 @@ export function ArPage() {
           onConfirm={(reason) => runReverse(dialog.payment, reason)}
         />
       )}
-    </div>
+    </>
   )
 }
 
-/* ── To invoice ──────────────────────────────────────────────────────────── */
+/** The chrome every AR view shares comes from `ArPage`; each view builds only its table. */
 
-function ToInvoiceTab({
-  rows, customersById, selected, justGenerated, busy, onSelect, onGenerate, onBatchGenerate, onBatchEmail,
+/* ── Unbilled ────────────────────────────────────────────────────────────── */
+
+/**
+ * What the release gate refused in the last batch, shipment by shipment. The gate is
+ * server-side and absolute; the only thing this page can do is say exactly what is
+ * missing so somebody can go and fix it.
+ */
+function RefusalsCard({ refusals, onDismiss }: { refusals: BatchRefusal[]; onDismiss: () => void }) {
+  if (refusals.length === 0) return null
+  return (
+    <TmsCard
+      title={`${refusals.length} shipment${refusals.length === 1 ? '' : 's'} not ready for accounting`}
+      actions={<TmsButton variant="ghost" size="sm" onClick={onDismiss}>Dismiss</TmsButton>}
+    >
+      <ul className="flex flex-col gap-2 text-sm">
+        {refusals.map((r) => (
+          <li key={r.orderId}>
+            <span className="font-medium">{r.shipmentNumber}</span>
+            <ul className="mt-0.5 flex flex-col gap-0.5 text-[13px]" style={{ color: 'var(--tms-badge-red)' }}>
+              {r.reasons.map((reason) => <li key={reason}>{reason}</li>)}
+            </ul>
+          </li>
+        ))}
+      </ul>
+    </TmsCard>
+  )
+}
+
+function toInvoiceView({
+  banner, rows, customersById, selected, justGenerated, busy, onSelect, onGenerate, onBatchGenerate, onBatchEmail,
 }: {
+  banner: ReactNode
   rows: ArWorklistRow[]
   customersById: Map<string, CustomerRecord>
   selected: string[]
@@ -432,164 +467,168 @@ function ToInvoiceTab({
   onGenerate: (row: ArWorklistRow) => void
   onBatchGenerate: () => void
   onBatchEmail: () => void
-}) {
+}): ListView {
   const toggle = (orderId: string) => {
     onSelect(selected.includes(orderId) ? selected.filter((id) => id !== orderId) : [...selected, orderId])
   }
 
-  return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-sm text-muted-foreground">
+  const columns: ColumnDef<ArWorklistRow>[] = [
+    {
+      key: 'select',
+      header: '',
+      width: 36,
+      render: (row) => (
+        <input
+          type="checkbox"
+          aria-label={`Select ${row.shipmentNumber ?? row.orderId}`}
+          checked={selected.includes(row.orderId)}
+          disabled={row.reasons.length > 0}
+          onChange={() => toggle(row.orderId)}
+        />
+      ),
+    },
+    {
+      key: 'shipment',
+      header: 'SHIPMENT',
+      render: (row) => <Link to={`/tms/shipments/${row.shipmentId}`}>{row.shipmentNumber ?? row.shipmentId}</Link>,
+    },
+    { key: 'customer', header: 'CUSTOMER', render: (row) => row.customerName || '—' },
+    {
+      key: 'billTo',
+      header: 'BILL-TO',
+      render: (row) => billToLabel(customersById.get(row.customerId), row.billToId),
+    },
+    {
+      key: 'delivered',
+      header: 'DELIVERED',
+      render: (row) => (row.deliveredAt ? formatDay(row.deliveredAt) : 'Not delivered'),
+    },
+    { key: 'revenue', header: 'REVENUE', render: (row) => <span className={RIGHT}>{formatCents(row.revenueCents)}</span> },
+    {
+      key: 'docs',
+      header: 'DOCS',
+      render: (row) => (
+        <>
+          {row.docsReady
+            ? <span>✓</span>
+            : <span style={{ color: 'var(--tms-badge-red)' }}>{row.docsMissing.join(', ') || 'Missing'}</span>}
+          {row.reasons.length > 0 && (
+            <ul className="mt-1 text-xs" style={{ color: 'var(--tms-badge-red)' }}>
+              {row.reasons.map((reason) => <li key={reason}>{reason}</li>)}
+            </ul>
+          )}
+        </>
+      ),
+    },
+    {
+      key: 'generate',
+      header: '',
+      render: (row) => (
+        <TmsButton
+          size="sm"
+          aria-label={`Generate invoice for ${row.shipmentNumber ?? row.orderId}`}
+          disabled={busy || row.reasons.length > 0}
+          onClick={() => onGenerate(row)}
+        >
+          Generate
+        </TmsButton>
+      ),
+    },
+  ]
+
+  return view<ArWorklistRow>({
+    actions: (
+      <>
+        <span className="text-sm tms-muted">
           {selected.length} selected{selected.length > BATCH_GENERATE_LIMIT ? ` — ${BATCH_GENERATE_LIMIT} at a time` : ''}
         </span>
-        <Button
-          size="sm"
+        <TmsButton
+          variant="primary"
           aria-label="Batch generate invoices"
           disabled={busy || selected.length === 0 || selected.length > BATCH_GENERATE_LIMIT}
           onClick={onBatchGenerate}
         >
           Batch generate
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
+        </TmsButton>
+        <TmsButton
           aria-label="Batch e-mail generated invoices"
           disabled={busy || justGenerated.length === 0}
           onClick={onBatchEmail}
         >
-          <Mail size={14} className="mr-1" /> Batch e-mail ({justGenerated.length})
-        </Button>
-      </div>
-
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b border-border">
-            <th className={TH} scope="col"><span className="sr-only">Select</span></th>
-            <th className={TH} scope="col">Shipment</th>
-            <th className={TH} scope="col">Customer</th>
-            <th className={TH} scope="col">Bill-to</th>
-            <th className={TH} scope="col">Delivered</th>
-            <th className={cn(TH, 'text-right')} scope="col">Revenue</th>
-            <th className={TH} scope="col">Docs</th>
-            <th className={TH} scope="col"><span className="sr-only">Generate</span></th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.length === 0 && (
-            <tr><td colSpan={8} className="py-8 text-center text-sm text-muted-foreground">Nothing is waiting to be billed.</td></tr>
-          )}
-          {rows.map((row) => {
-            const ready = row.reasons.length === 0
-            return (
-              <tr key={row.orderId} className="border-b border-border/60">
-                <td className={TD}>
-                  <input
-                    type="checkbox"
-                    aria-label={`Select ${row.shipmentNumber ?? row.orderId}`}
-                    checked={selected.includes(row.orderId)}
-                    disabled={!ready}
-                    onChange={() => toggle(row.orderId)}
-                  />
-                </td>
-                <td className={TD}>
-                  <Link className="text-primary hover:underline" to={`/shipments/${row.shipmentId}`}>
-                    {row.shipmentNumber ?? row.shipmentId}
-                  </Link>
-                </td>
-                <td className={TD}>{row.customerName || '—'}</td>
-                <td className={TD}>{billToLabel(customersById.get(row.customerId), row.billToId)}</td>
-                <td className={TD}>{row.deliveredAt ? formatDay(row.deliveredAt) : 'Not delivered'}</td>
-                <td className={MONEY}>{formatCents(row.revenueCents)}</td>
-                <td className={TD}>
-                  {row.docsReady
-                    ? <span>{row.docsOverride ? 'Override' : '✓'}</span>
-                    : <span className="text-destructive">{row.docsMissing.join(', ') || 'Missing'}</span>}
-                  {!ready && (
-                    <ul className="mt-1 space-y-0.5 text-xs text-destructive">
-                      {row.reasons.map((reason) => <li key={reason}>{reason}</li>)}
-                    </ul>
-                  )}
-                </td>
-                <td className={cn(TD, 'text-right')}>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    aria-label={`Generate invoice for ${row.shipmentNumber ?? row.orderId}`}
-                    disabled={busy || !ready}
-                    onClick={() => onGenerate(row)}
-                  >
-                    Generate
-                  </Button>
-                </td>
-              </tr>
-            )
-          })}
-        </tbody>
-      </table>
-    </div>
-  )
+          <Mail size={14} /> Batch e-mail ({justGenerated.length})
+        </TmsButton>
+      </>
+    ),
+    banner,
+    columns,
+    rows,
+    rowKey: (row) => row.orderId,
+    page: wholeList(rows.length),
+    emptyText: 'Nothing is waiting to be billed.',
+  })
 }
 
 /* ── Docs needed ─────────────────────────────────────────────────────────── */
 
-function DocsNeededTab({ rows }: { rows: ArWorklistRow[] }) {
-  return (
-    <table className="w-full text-sm">
-      <thead>
-        <tr className="border-b border-border">
-          <th className={TH} scope="col">Shipment</th>
-          <th className={TH} scope="col">Customer</th>
-          <th className={TH} scope="col">Delivered</th>
-          <th className={cn(TH, 'text-right')} scope="col">Revenue</th>
-          <th className={TH} scope="col">Still missing</th>
-          <th className={TH} scope="col"><span className="sr-only">Documents</span></th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.length === 0 && (
-          <tr><td colSpan={6} className="py-8 text-center text-sm text-muted-foreground">No shipment is waiting on paperwork.</td></tr>
-        )}
-        {rows.map((row) => (
-          <tr key={row.orderId} className="border-b border-border/60">
-            <td className={TD}>
-              <Link className="text-primary hover:underline" to={`/shipments/${row.shipmentId}?tab=documents`}>
-                {row.shipmentNumber ?? row.shipmentId}
-              </Link>
-            </td>
-            <td className={TD}>{row.customerName || '—'}</td>
-            <td className={TD}>
-              {row.deliveredAt ? formatDay(row.deliveredAt) : row.order.invoiceEarly ? 'Bills early' : 'Not delivered'}
-            </td>
-            <td className={MONEY}>{formatCents(row.revenueCents)}</td>
-            <td className={TD}>
-              {row.docsMissing.length > 0
-                ? <span className="text-destructive">{row.docsMissing.join(', ')}</span>
-                : <span className="text-muted-foreground">Nothing — ready for review</span>}
-            </td>
-            <td className={cn(TD, 'text-right')}>
-              <Button asChild size="sm" variant="outline">
-                <Link
-                  aria-label={`Open documents for ${row.shipmentNumber ?? row.shipmentId}`}
-                  to={`/shipments/${row.shipmentId}?tab=documents`}
-                >
-                  Documents
-                </Link>
-              </Button>
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  )
+function docsNeededView({ banner, rows }: { banner: ReactNode; rows: ArWorklistRow[] }): ListView {
+  const columns: ColumnDef<ArWorklistRow>[] = [
+    {
+      key: 'shipment',
+      header: 'SHIPMENT',
+      render: (row) => (
+        <Link to={`/tms/shipments/${row.shipmentId}?tab=documents`}>{row.shipmentNumber ?? row.shipmentId}</Link>
+      ),
+    },
+    { key: 'customer', header: 'CUSTOMER', render: (row) => row.customerName || '—' },
+    {
+      key: 'delivered',
+      header: 'DELIVERED',
+      render: (row) => (
+        row.deliveredAt ? formatDay(row.deliveredAt) : row.order.invoiceEarly ? 'Bills early' : 'Not delivered'
+      ),
+    },
+    { key: 'revenue', header: 'REVENUE', render: (row) => <span className={RIGHT}>{formatCents(row.revenueCents)}</span> },
+    {
+      key: 'missing',
+      header: 'STILL MISSING',
+      render: (row) => (
+        row.docsMissing.length > 0
+          ? <span style={{ color: 'var(--tms-badge-red)' }}>{row.docsMissing.join(', ')}</span>
+          : <span className="tms-muted">Nothing — ready for review</span>
+      ),
+    },
+    {
+      key: 'documents',
+      header: '',
+      render: (row) => (
+        <Link
+          className="tms-btn tms-btn-secondary tms-btn-sm"
+          aria-label={`Open documents for ${row.shipmentNumber ?? row.shipmentId}`}
+          to={`/tms/shipments/${row.shipmentId}?tab=documents`}
+        >
+          Documents
+        </Link>
+      ),
+    },
+  ]
+
+  return view<ArWorklistRow>({
+    banner,
+    columns,
+    rows,
+    rowKey: (row) => row.orderId,
+    page: wholeList(rows.length),
+    emptyText: 'No shipment is waiting on paperwork.',
+  })
 }
 
 /* ── Unpaid ──────────────────────────────────────────────────────────────── */
 
-function UnpaidTab({
-  invoices, allInvoices, filters, showFilters, asOf, busy, factorByItemId,
+function unpaidView({
+  errorBanner, invoices, allInvoices, filters, showFilters, asOf, busy, factorByItemId,
   onToggleFilters, onFilters, onEmail, onPayment, onFactor, onVoid,
 }: {
+  errorBanner: ReactNode
   invoices: InvoiceRecord[]
   allInvoices: InvoiceRecord[]
   filters: UnpaidFilters
@@ -603,289 +642,260 @@ function UnpaidTab({
   onPayment: (invoice: InvoiceRecord) => void
   onFactor: (invoice: InvoiceRecord) => void
   onVoid: (invoice: InvoiceRecord) => void
-}) {
-  const active = (filters.customerId ? 1 : 0) + (filters.bucket ? 1 : 0) + (filters.factored ? 1 : 0)
+}): ListView {
+  const customerName = invoiceCustomerOptions(allInvoices).find((c) => c.id === filters.customerId)?.name ?? null
 
-  return (
-    <div className="space-y-3">
-      <div className="flex items-center gap-2">
-        <Button variant="outline" size="sm" aria-label="Filter unpaid invoices" onClick={onToggleFilters}>
-          <Filter size={14} className="mr-1" /> Filters
-          {active > 0 && <Badge className="ml-1">{active}</Badge>}
-        </Button>
-        <span className="text-sm text-muted-foreground">{invoices.length} invoices</span>
-      </div>
+  const columns: ColumnDef<InvoiceRecord>[] = [
+    {
+      key: 'invoice',
+      header: 'INVOICE',
+      render: (inv) => <Link to={`/tms/invoicing/invoices/${inv.id}`}>{inv.number}</Link>,
+    },
+    { key: 'customer', header: 'CUSTOMER', render: (inv) => inv.customerName || '—' },
+    { key: 'issued', header: 'ISSUED', render: (inv) => formatDay(inv.invoiceDate) },
+    { key: 'due', header: 'DUE', render: (inv) => formatDay(inv.dueAt) },
+    {
+      key: 'age',
+      header: 'AGE',
+      render: (inv) => {
+        const chip = agingChipFor(inv.dueAt, asOf)
+        return <TmsBadge tone={chip.late ? 'red' : 'gray'}>{chip.label}</TmsBadge>
+      },
+    },
+    { key: 'total', header: 'TOTAL', render: (inv) => <span className={RIGHT}>{formatCents(inv.totalCents)}</span> },
+    { key: 'paid', header: 'PAID', render: (inv) => <span className={RIGHT}>{formatCents(inv.paidCents)}</span> },
+    {
+      key: 'balance',
+      header: 'BALANCE',
+      render: (inv) => <span className={`${RIGHT} font-medium`}>{formatCents(inv.balanceCents)}</span>,
+    },
+    { key: 'sent', header: 'SENT', render: (inv) => (inv.sentCount ? `✓ ${inv.sentCount}` : '—') },
+    {
+      key: 'factor',
+      header: 'FACTOR',
+      render: (inv) => {
+        const item = inv.factoringItemId ? factorByItemId.get(inv.factoringItemId) : undefined
+        const factor = otrStatusLabel(item?.otrStatus) ?? (inv.factoringItemId ? 'In the factoring queue' : null)
+        return factor ?? (inv.factored ? 'Factored customer' : '—')
+      },
+    },
+    {
+      key: 'actions',
+      header: '',
+      render: (inv) => (
+        <span className="flex justify-end gap-1 whitespace-nowrap">
+          <TmsButton variant="ghost" size="sm" aria-label={`E-mail invoice ${inv.number}`} disabled={busy} onClick={() => onEmail(inv)}>E-mail</TmsButton>
+          <TmsButton variant="ghost" size="sm" aria-label={`Receive payment for invoice ${inv.number}`} disabled={busy} onClick={() => onPayment(inv)}>Receive payment</TmsButton>
+          <TmsButton variant="ghost" size="sm" aria-label={`Send invoice ${inv.number} to factor`} disabled={busy} onClick={() => onFactor(inv)}>Send to Factor</TmsButton>
+          <TmsButton variant="ghost" size="sm" aria-label={`Void invoice ${inv.number}`} disabled={busy} onClick={() => onVoid(inv)}>Void</TmsButton>
+        </span>
+      ),
+    },
+  ]
 
-      {showFilters && (
-        <div className="grid grid-cols-2 gap-3 rounded-md border border-border bg-muted/20 px-3 py-2 sm:grid-cols-3">
-          <div>
-            <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">Customer</Label>
-            <select
-              aria-label="Filter customer"
-              className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-sm"
-              value={filters.customerId}
-              onChange={(e) => onFilters({ ...filters, customerId: e.target.value })}
-            >
-              <option value="">All</option>
-              {invoiceCustomerOptions(allInvoices).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-          </div>
-          <div>
-            <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">Aging</Label>
-            <select
-              aria-label="Filter aging bucket"
-              className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-sm"
-              value={filters.bucket}
-              onChange={(e) => onFilters({ ...filters, bucket: e.target.value as UnpaidFilters['bucket'] })}
-            >
-              <option value="">All</option>
-              {AGING_BUCKETS.map((b) => <option key={b} value={b}>{AGING_BUCKET_LABEL[b]}</option>)}
-            </select>
-          </div>
-          <div>
-            <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">Factored</Label>
-            <select
-              aria-label="Filter factored"
-              className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-sm"
-              value={filters.factored}
-              onChange={(e) => onFilters({ ...filters, factored: e.target.value as UnpaidFilters['factored'] })}
-            >
-              <option value="">All</option>
-              <option value="YES">Factored</option>
-              <option value="NO">Not factored</option>
-            </select>
-          </div>
-        </div>
-      )}
-
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b border-border">
-            <th className={TH} scope="col">Invoice</th>
-            <th className={TH} scope="col">Customer</th>
-            <th className={TH} scope="col">Issued</th>
-            <th className={TH} scope="col">Due</th>
-            <th className={TH} scope="col">Age</th>
-            <th className={cn(TH, 'text-right')} scope="col">Total</th>
-            <th className={cn(TH, 'text-right')} scope="col">Paid</th>
-            <th className={cn(TH, 'text-right')} scope="col">Balance</th>
-            <th className={TH} scope="col">Sent</th>
-            <th className={TH} scope="col">Factor</th>
-            <th className={TH} scope="col"><span className="sr-only">Actions</span></th>
-          </tr>
-        </thead>
-        <tbody>
-          {invoices.length === 0 && (
-            <tr><td colSpan={11} className="py-8 text-center text-sm text-muted-foreground">Nothing is owed in this view.</td></tr>
+  return view<InvoiceRecord>({
+    filterChips: [
+        { key: 'customer', label: 'Customer is', value: customerName, onClick: onToggleFilters },
+        {
+          key: 'bucket',
+          label: 'Aging is',
+          value: filters.bucket ? AGING_BUCKET_LABEL[filters.bucket] : null,
+          onClick: onToggleFilters,
+        },
+        {
+          key: 'factored',
+          label: 'Factored is',
+          value: filters.factored ? (filters.factored === 'YES' ? 'Factored' : 'Not factored') : null,
+          onClick: onToggleFilters,
+        },
+    ],
+    onAddFilter: onToggleFilters,
+    banner: (
+        <>
+          {errorBanner}
+          {showFilters && (
+            <TmsCard title="Filters">
+              <div className="tms-grid tms-grid-3">
+                <TmsField label="Customer">
+                  <TmsSelect
+                    aria-label="Filter customer"
+                    value={filters.customerId}
+                    onChange={(e) => onFilters({ ...filters, customerId: e.target.value })}
+                  >
+                    <option value="">All</option>
+                    {invoiceCustomerOptions(allInvoices).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </TmsSelect>
+                </TmsField>
+                <TmsField label="Aging">
+                  <TmsSelect
+                    aria-label="Filter aging bucket"
+                    value={filters.bucket}
+                    onChange={(e) => onFilters({ ...filters, bucket: e.target.value as UnpaidFilters['bucket'] })}
+                  >
+                    <option value="">All</option>
+                    {AGING_BUCKETS.map((b) => <option key={b} value={b}>{AGING_BUCKET_LABEL[b]}</option>)}
+                  </TmsSelect>
+                </TmsField>
+                <TmsField label="Factored">
+                  <TmsSelect
+                    aria-label="Filter factored"
+                    value={filters.factored}
+                    onChange={(e) => onFilters({ ...filters, factored: e.target.value as UnpaidFilters['factored'] })}
+                  >
+                    <option value="">All</option>
+                    <option value="YES">Factored</option>
+                    <option value="NO">Not factored</option>
+                  </TmsSelect>
+                </TmsField>
+              </div>
+            </TmsCard>
           )}
-          {invoices.map((inv) => {
-            const chip = agingChipFor(inv.dueAt, asOf)
-            const item = inv.factoringItemId ? factorByItemId.get(inv.factoringItemId) : undefined
-            const factor = otrStatusLabel(item?.otrStatus) ?? (inv.factoringItemId ? 'In the factoring queue' : null)
-            return (
-              <tr key={inv.id} className="border-b border-border/60">
-                <td className={TD}>
-                  <Link className="text-primary hover:underline" to={`/ar/invoices/${inv.id}`}>{inv.number}</Link>
-                </td>
-                <td className={TD}>{inv.customerName || '—'}</td>
-                <td className={TD}>{formatDay(inv.invoiceDate)}</td>
-                <td className={TD}>{formatDay(inv.dueAt)}</td>
-                <td className={TD}>
-                  <Badge variant={chip.late ? 'destructive' : 'outline'} className="text-[10px]">{chip.label}</Badge>
-                </td>
-                <td className={MONEY}>{formatCents(inv.totalCents)}</td>
-                <td className={MONEY}>{formatCents(inv.paidCents)}</td>
-                <td className={cn(MONEY, 'font-medium')}>{formatCents(inv.balanceCents)}</td>
-                <td className={TD}>{inv.sentCount ? `✓ ${inv.sentCount}` : '—'}</td>
-                <td className={TD}>{factor ?? (inv.factored ? 'Factored customer' : '—')}</td>
-                <td className={cn(TD, 'whitespace-nowrap text-right')}>
-                  <Button size="sm" variant="ghost" aria-label={`E-mail invoice ${inv.number}`} disabled={busy} onClick={() => onEmail(inv)}>E-mail</Button>
-                  <Button size="sm" variant="ghost" aria-label={`Receive payment for invoice ${inv.number}`} disabled={busy} onClick={() => onPayment(inv)}>Receive payment</Button>
-                  <Button size="sm" variant="ghost" aria-label={`Send invoice ${inv.number} to factor`} disabled={busy} onClick={() => onFactor(inv)}>Send to Factor</Button>
-                  <Button size="sm" variant="ghost" aria-label={`Void invoice ${inv.number}`} disabled={busy} onClick={() => onVoid(inv)}>Void</Button>
-                </td>
-              </tr>
-            )
-          })}
-        </tbody>
-      </table>
-    </div>
-  )
+        </>
+    ),
+    columns,
+    rows: invoices,
+    rowKey: (inv) => inv.id,
+    page: wholeList(invoices.length),
+    emptyText: 'Nothing is owed in this view.',
+    onClearFilters: () => onFilters(EMPTY_UNPAID_FILTERS),
+  })
 }
 
 /* ── Paid ────────────────────────────────────────────────────────────────── */
 
-function PaidTab({ invoices, months, month, loading, onMonth }: {
+function paidView({ banner, invoices, months, month, loading, onMonth }: {
+  banner: ReactNode
   invoices: InvoiceRecord[]
   months: string[]
   month: string
   loading: boolean
   onMonth: (ym: string) => void
-}) {
+}): ListView {
   const paid = invoices.filter((inv) => inv.status === 'PAID')
-  return (
-    <div className="space-y-3">
-      <div className="flex items-center gap-2">
-        <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">Invoice month</Label>
-        <select
-          aria-label="Invoice month"
-          className="h-8 rounded-md border border-input bg-background px-2 text-sm"
-          value={month}
-          onChange={(e) => onMonth(e.target.value)}
-        >
-          {months.map((ym) => <option key={ym} value={ym}>{monthLabel(ym)}</option>)}
-        </select>
-        {loading && <span className="text-sm text-muted-foreground">Loading…</span>}
-      </div>
+  const columns: ColumnDef<InvoiceRecord>[] = [
+    {
+      key: 'invoice',
+      header: 'INVOICE',
+      render: (inv) => <Link to={`/tms/invoicing/invoices/${inv.id}`}>{inv.number}</Link>,
+    },
+    { key: 'customer', header: 'CUSTOMER', render: (inv) => inv.customerName || '—' },
+    { key: 'issued', header: 'ISSUED', render: (inv) => formatDay(inv.invoiceDate) },
+    { key: 'paid', header: 'PAID', render: (inv) => formatDay(inv.paidAt) },
+    { key: 'total', header: 'TOTAL', render: (inv) => <span className={RIGHT}>{formatCents(inv.totalCents)}</span> },
+    {
+      key: 'writtenOff',
+      header: 'WRITTEN OFF',
+      render: (inv) => <span className={RIGHT}>{inv.writtenOffCents ? formatCents(inv.writtenOffCents) : '—'}</span>,
+    },
+  ]
 
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b border-border">
-            <th className={TH} scope="col">Invoice</th>
-            <th className={TH} scope="col">Customer</th>
-            <th className={TH} scope="col">Issued</th>
-            <th className={TH} scope="col">Paid</th>
-            <th className={cn(TH, 'text-right')} scope="col">Total</th>
-            <th className={cn(TH, 'text-right')} scope="col">Written off</th>
-          </tr>
-        </thead>
-        <tbody>
-          {paid.length === 0 && !loading && (
-            <tr><td colSpan={6} className="py-8 text-center text-sm text-muted-foreground">Nothing was collected in {monthLabel(month)}.</td></tr>
-          )}
-          {paid.map((inv) => (
-            <tr key={inv.id} className="border-b border-border/60">
-              <td className={TD}>
-                <Link className="text-primary hover:underline" to={`/ar/invoices/${inv.id}`}>{inv.number}</Link>
-              </td>
-              <td className={TD}>{inv.customerName || '—'}</td>
-              <td className={TD}>{formatDay(inv.invoiceDate)}</td>
-              <td className={TD}>{formatDay(inv.paidAt)}</td>
-              <td className={MONEY}>{formatCents(inv.totalCents)}</td>
-              <td className={MONEY}>{inv.writtenOffCents ? formatCents(inv.writtenOffCents) : '—'}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  )
+  return view<InvoiceRecord>({
+    actions: (
+      <>
+        <TmsSelect aria-label="Invoice month" value={month} onChange={(e) => onMonth(e.target.value)}>
+          {months.map((ym) => <option key={ym} value={ym}>{monthLabel(ym)}</option>)}
+        </TmsSelect>
+        {loading && <span className="text-sm tms-muted">Loading…</span>}
+      </>
+    ),
+    banner,
+    columns,
+    rows: paid,
+    rowKey: (inv) => inv.id,
+    page: wholeList(paid.length),
+    emptyText: `Nothing was collected in ${monthLabel(month)}.`,
+  })
 }
 
 /* ── Payments & credits ──────────────────────────────────────────────────── */
 
-function PaymentsTab({
-  customers, customerId, payments, openCents, unappliedCents, loading, busy,
+function paymentsView({
+  banner, customers, customer, payments, openCents, unappliedCents, busy,
   onCustomer, onPayment, onCredit, onReverse,
 }: {
+  banner: ReactNode
   customers: CustomerRecord[]
-  customerId: string | null
+  customer: CustomerRecord | null
   payments: ArPaymentRecord[]
   openCents: number
   unappliedCents: number
-  loading: boolean
   busy: boolean
   onCustomer: (id: string | null) => void
   onPayment: (customerId: string, customerName: string) => void
   onCredit: (customerId: string, customerName: string) => void
   onReverse: (payment: ArPaymentRecord) => void
-}) {
-  const customer = customers.find((c) => c.id === customerId) ?? null
+}): ListView {
+  const columns: ColumnDef<ArPaymentRecord>[] = [
+    { key: 'kind', header: 'KIND', render: (p) => AR_PAYMENT_KIND_LABEL[p.kind] },
+    { key: 'date', header: 'DATE', render: (p) => formatDay(p.receivedAt) },
+    { key: 'method', header: 'METHOD', render: (p) => (p.method ? AR_PAYMENT_METHOD_LABEL[p.method] : '—') },
+    { key: 'reference', header: 'REFERENCE', render: (p) => p.reference || '—' },
+    { key: 'amount', header: 'AMOUNT', render: (p) => <span className={RIGHT}>{formatCents(p.amountCents)}</span> },
+    { key: 'applied', header: 'APPLIED', render: (p) => <span className={RIGHT}>{formatCents(p.appliedCents)}</span> },
+    { key: 'unapplied', header: 'UNAPPLIED', render: (p) => <span className={RIGHT}>{formatCents(p.unappliedCents)}</span> },
+    {
+      key: 'reverse',
+      header: '',
+      render: (p) => (
+        <span className="flex justify-end">
+          {p.kind !== 'REVERSAL' && !p.reversedByPaymentId && (
+            <TmsButton
+              variant="ghost"
+              size="sm"
+              aria-label={`Reverse ${AR_PAYMENT_KIND_LABEL[p.kind].toLowerCase()} of ${formatCents(p.amountCents)}`}
+              disabled={busy}
+              onClick={() => onReverse(p)}
+            >
+              Reverse
+            </TmsButton>
+          )}
+          {p.reversedByPaymentId && <span className="text-xs tms-muted">Reversed</span>}
+        </span>
+      ),
+    },
+  ]
 
-  return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">Customer</Label>
-        <select
+  return view<ArPaymentRecord>({
+    actions: (
+      <>
+        <TmsSelect
           aria-label="Choose customer"
-          className="h-8 min-w-56 rounded-md border border-input bg-background px-2 text-sm"
-          value={customerId ?? ''}
+          value={customer?.id ?? ''}
           onChange={(e) => onCustomer(e.target.value || null)}
         >
           <option value="">Choose a customer…</option>
           {customers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-        </select>
+        </TmsSelect>
         {customer && (
           <>
-            <Badge variant="outline">{formatCents(openCents)} open</Badge>
-            <Badge variant="outline">{formatCents(unappliedCents)} unapplied</Badge>
-            <Button
-              size="sm"
-              aria-label="Receive payment"
-              disabled={busy}
-              onClick={() => onPayment(customer.id, customer.name)}
-            >
+            <TmsBadge tone="gray">{formatCents(openCents)} open</TmsBadge>
+            <TmsBadge tone="gray">{formatCents(unappliedCents)} unapplied</TmsBadge>
+            <TmsButton variant="primary" aria-label="Receive payment" disabled={busy} onClick={() => onPayment(customer.id, customer.name)}>
               Receive payment
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              aria-label="New credit"
-              disabled={busy}
-              onClick={() => onCredit(customer.id, customer.name)}
-            >
+            </TmsButton>
+            <TmsButton aria-label="New credit" disabled={busy} onClick={() => onCredit(customer.id, customer.name)}>
               New credit
-            </Button>
+            </TmsButton>
           </>
         )}
-      </div>
-
-      {!customer && <p className="text-sm text-muted-foreground">Choose a customer to see their cash rows.</p>}
-
-      {customer && (
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-border">
-              <th className={TH} scope="col">Kind</th>
-              <th className={TH} scope="col">Date</th>
-              <th className={TH} scope="col">Method</th>
-              <th className={TH} scope="col">Reference</th>
-              <th className={cn(TH, 'text-right')} scope="col">Amount</th>
-              <th className={cn(TH, 'text-right')} scope="col">Applied</th>
-              <th className={cn(TH, 'text-right')} scope="col">Unapplied</th>
-              <th className={TH} scope="col"><span className="sr-only">Reverse</span></th>
-            </tr>
-          </thead>
-          <tbody>
-            {payments.length === 0 && !loading && (
-              <tr><td colSpan={8} className="py-8 text-center text-sm text-muted-foreground">No cash has been posted for {customer.name}.</td></tr>
-            )}
-            {payments.map((p) => (
-              <tr key={p.id} className="border-b border-border/60">
-                <td className={TD}>{AR_PAYMENT_KIND_LABEL[p.kind]}</td>
-                <td className={TD}>{formatDay(p.receivedAt)}</td>
-                <td className={TD}>{p.method ? AR_PAYMENT_METHOD_LABEL[p.method] : '—'}</td>
-                <td className={TD}>{p.reference || '—'}</td>
-                <td className={MONEY}>{formatCents(p.amountCents)}</td>
-                <td className={MONEY}>{formatCents(p.appliedCents)}</td>
-                <td className={MONEY}>{formatCents(p.unappliedCents)}</td>
-                <td className={cn(TD, 'text-right')}>
-                  {p.kind !== 'REVERSAL' && !p.reversedByPaymentId && (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      aria-label={`Reverse ${AR_PAYMENT_KIND_LABEL[p.kind].toLowerCase()} of ${formatCents(p.amountCents)}`}
-                      disabled={busy}
-                      onClick={() => onReverse(p)}
-                    >
-                      Reverse
-                    </Button>
-                  )}
-                  {p.reversedByPaymentId && <span className="text-xs text-muted-foreground">Reversed</span>}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-    </div>
-  )
+      </>
+    ),
+    banner,
+    columns,
+    rows: customer ? payments : [],
+    rowKey: (p) => p.id,
+    page: wholeList(customer ? payments.length : 0),
+    emptyText: customer ? `No cash has been posted for ${customer.name}.` : 'Choose a customer to see their cash rows.',
+  })
 }
 
 /* ── Aging ───────────────────────────────────────────────────────────────── */
 
-function AgingTab({
-  aging, uninvoicedCents, uninvoicedCount, avgDaysToInvoice: lag, avgDaysToPay: dso, paidMonthLabel, onCsv,
+function agingView({
+  errorBanner, aging, uninvoicedCents, uninvoicedCount, avgDaysToInvoice: lag, avgDaysToPay: dso,
+  paidMonthLabel, onCsv,
 }: {
+  errorBanner: ReactNode
   aging: AgingSummary
   uninvoicedCents: number
   uninvoicedCount: number
@@ -893,50 +903,48 @@ function AgingTab({
   avgDaysToPay: number | null
   paidMonthLabel: string
   onCsv: () => void
-}) {
-  return (
-    <div className="space-y-4">
-      <AgingStrip
-        openCents={aging.totalCents}
-        lateCents={aging.lateCents}
-        deliveredNotInvoicedCents={uninvoicedCents}
-        deliveredNotInvoicedCount={uninvoicedCount}
-        avgDaysToInvoice={lag}
-        avgDaysToPay={dso}
-        paidMonthLabel={paidMonthLabel}
-      />
+}): ListView {
+  type Row = AgingSummary['byCustomer'][number]
+  const columns: ColumnDef<Row>[] = [
+    { key: 'customer', header: 'CUSTOMER', render: (row) => row.customerName || row.customerId },
+    ...AGING_BUCKETS.map((b) => ({
+      key: b,
+      header: AGING_BUCKET_LABEL[b].toUpperCase(),
+      render: (row: Row) => <span className={RIGHT}>{formatCents(row.byBucket[b])}</span>,
+    })),
+    {
+      key: 'total',
+      header: 'TOTAL',
+      render: (row) => <span className={`${RIGHT} font-medium`}>{formatCents(row.totalCents)}</span>,
+    },
+    { key: 'late', header: 'LATE', render: (row) => <span className={RIGHT}>{row.lateCount || '—'}</span> },
+    { key: 'oldest', header: 'OLDEST', render: (row) => <span className={RIGHT}>{row.oldestDays ? `${row.oldestDays}d` : '—'}</span> },
+  ]
 
-      <div className="flex justify-end">
-        <Button variant="outline" size="sm" aria-label="Download aging CSV" onClick={onCsv}>
-          <Download size={14} className="mr-1" /> CSV
-        </Button>
-      </div>
-
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b border-border">
-            <th className={TH} scope="col">Customer</th>
-            {AGING_BUCKETS.map((b) => <th key={b} className={cn(TH, 'text-right')} scope="col">{AGING_BUCKET_LABEL[b]}</th>)}
-            <th className={cn(TH, 'text-right')} scope="col">Total</th>
-            <th className={cn(TH, 'text-right')} scope="col">Late</th>
-            <th className={cn(TH, 'text-right')} scope="col">Oldest</th>
-          </tr>
-        </thead>
-        <tbody>
-          {aging.byCustomer.length === 0 && (
-            <tr><td colSpan={9} className="py-8 text-center text-sm text-muted-foreground">Nothing is owed.</td></tr>
-          )}
-          {aging.byCustomer.map((row) => (
-            <tr key={row.customerId} className="border-b border-border/60">
-              <td className={TD}>{row.customerName || row.customerId}</td>
-              {AGING_BUCKETS.map((b) => <td key={b} className={MONEY}>{formatCents(row.byBucket[b])}</td>)}
-              <td className={cn(MONEY, 'font-medium')}>{formatCents(row.totalCents)}</td>
-              <td className={MONEY}>{row.lateCount || '—'}</td>
-              <td className={MONEY}>{row.oldestDays ? `${row.oldestDays}d` : '—'}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  )
+  return view<Row>({
+    actions: (
+      <TmsButton aria-label="Download aging CSV" onClick={onCsv}>
+        <Download size={14} /> CSV
+      </TmsButton>
+    ),
+    banner: (
+      <>
+        {errorBanner}
+        <AgingStrip
+          openCents={aging.totalCents}
+          lateCents={aging.lateCents}
+          deliveredNotInvoicedCents={uninvoicedCents}
+          deliveredNotInvoicedCount={uninvoicedCount}
+          avgDaysToInvoice={lag}
+          avgDaysToPay={dso}
+          paidMonthLabel={paidMonthLabel}
+        />
+      </>
+    ),
+    columns,
+    rows: aging.byCustomer,
+    rowKey: (row) => row.customerId,
+    page: wholeList(aging.byCustomer.length),
+    emptyText: 'Nothing is owed.',
+  })
 }

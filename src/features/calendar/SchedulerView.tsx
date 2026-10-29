@@ -5,7 +5,7 @@ import interactionPlugin from '@fullcalendar/interaction'
 import type { EventContentArg, EventDropArg, EventClickArg, DatesSetArg } from '@fullcalendar/core'
 import type { EventResizeDoneArg as EventResizeArg } from '@fullcalendar/interaction'
 import { toast } from 'sonner'
-import { UserCheck, Trash2, Copy, X } from 'lucide-react'
+import { UserCheck, Copy, X } from 'lucide-react'
 import { useLoads } from '@/hooks/useLoads'
 import { useAppStore } from '@/store/useAppStore'
 import { getColor, UNASSIGNED_COLOR } from '@/lib/driverColors'
@@ -57,7 +57,7 @@ interface SchedulerViewProps {
 export function SchedulerView({
   calendarRef, loads, drivers, conflictIds, filterDriverId, viewMode, weekStart, onDatesSet,
 }: SchedulerViewProps) {
-  const { updateLoad, addLoad, deleteLoad } = useLoads()
+  const { updateLoad, addLoad } = useLoads()
   const setSelectedLoad = useAppStore((s) => s.setSelectedLoad)
 
   const dragModifierRef = useRef<'none' | 'shift' | 'alt'>('none')
@@ -376,12 +376,8 @@ export function SchedulerView({
     setSelectedIds(new Set())
   }
 
-  const bulkDelete = () => {
-    if (!confirm(`Delete ${selectedLoads.length} load(s)?`)) return
-    selectedLoads.forEach((l) => deleteLoad(l.id))
-    toast(`${selectedLoads.length} load(s) deleted`)
-    setSelectedIds(new Set())
-  }
+  // No bulk delete: a load carries a PRO number and a PRO number is permanent
+  // (Ryne, 2026-10-28). A shipment leaves the working set by being voided.
 
   // ── Context menu actions ──────────────────────────────────────────────────
 
@@ -403,14 +399,6 @@ export function SchedulerView({
     delete duplicate.updatedAt
     addLoad(duplicate as Omit<Load, 'id' | 'createdAt' | 'updatedAt'>)
     toast(`Duplicated ${ctxLoad.aljexId}`)
-    setContextMenu(null)
-  }
-
-  const ctxDelete = () => {
-    if (!ctxLoad) return
-    if (!confirm(`Delete ${ctxLoad.aljexId}?`)) return
-    deleteLoad(ctxLoad.id)
-    toast(`Deleted ${ctxLoad.aljexId}`)
     setContextMenu(null)
   }
 
@@ -519,13 +507,6 @@ export function SchedulerView({
               <DropdownMenuItem onClick={ctxDuplicate}>
                 <Copy className="size-3.5 mr-2" /> Duplicate
               </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                onClick={ctxDelete}
-                className="text-destructive focus:text-destructive"
-              >
-                <Trash2 className="size-3.5 mr-2" /> Delete
-              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
@@ -544,14 +525,7 @@ export function SchedulerView({
           >
             <UserCheck className="size-3.5" /> Mark RTI
           </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            className="h-7 px-2.5 text-red-400 hover:bg-red-900/40 hover:text-red-300 text-xs gap-1"
-            onClick={bulkDelete}
-          >
-            <Trash2 className="size-3.5" /> Delete
-          </Button>
+
           <button
             className="ml-1 text-slate-400 hover:text-white"
             onClick={() => setSelectedIds(new Set())}

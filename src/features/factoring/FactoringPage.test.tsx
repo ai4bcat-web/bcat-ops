@@ -59,12 +59,17 @@ function setup(items: FactoringItem[], email = 'ryne@bcatcorp.com') {
   return { refresh, removeItem }
 }
 
+/** The kit's list footer: "Showing 1 – 10 of 25 items". */
+function range(): string {
+  return screen.getByText(/^Showing/, { selector: '.tms-footer-count' }).textContent ?? ''
+}
+
 beforeEach(() => vi.clearAllMocks())
 
 describe('filters', () => {
   it('lists them in work order with Need to factor first', () => {
     setup([item()])
-    const labels = screen.getAllByRole('button')
+    const labels = screen.getAllByRole('tab')
       .map((b) => b.textContent?.replace(/\d+$/, '').trim())
       .filter((t) => ['Need to factor', 'Pending with OTR', 'Invoice manually', 'All', 'Factored', 'Invoiced manually'].includes(t ?? ''))
     expect(labels).toEqual(['Need to factor', 'Pending with OTR', 'Invoice manually', 'All', 'Factored', 'Invoiced manually'])
@@ -85,7 +90,7 @@ describe('filters', () => {
       item({ id: 'a', proNumber: 'A1', status: 'NEED_TO_FACTOR' }),
       item({ id: 'b', proNumber: 'B2', status: 'FACTORED' }),
     ])
-    fireEvent.click(screen.getByRole('button', { name: /^Factored/ }))
+    fireEvent.click(screen.getByRole('tab', { name: /^Factored/ }))
     expect(screen.getByText('B2')).toBeInTheDocument()
     expect(screen.queryByText('A1')).not.toBeInTheDocument()
   })
@@ -215,18 +220,18 @@ describe('paging through the queue', () => {
 
   it('shows ten by default', () => {
     setup(many(25))
-    expect(screen.getByText('1–10 of 25')).toBeInTheDocument()
+    expect(range()).toContain('1 – 10 of 25')
     expect(screen.getByText('Page 1 of 3')).toBeInTheDocument()
   })
 
   it('moves through the pages', () => {
     setup(many(25))
     fireEvent.click(screen.getByRole('button', { name: 'Next page' }))
-    expect(screen.getByText('11–20 of 25')).toBeInTheDocument()
+    expect(range()).toContain('11 – 20 of 25')
     fireEvent.click(screen.getByRole('button', { name: 'Next page' }))
-    expect(screen.getByText('21–25 of 25')).toBeInTheDocument()
+    expect(range()).toContain('21 – 25 of 25')
     fireEvent.click(screen.getByRole('button', { name: 'Previous page' }))
-    expect(screen.getByText('11–20 of 25')).toBeInTheDocument()
+    expect(range()).toContain('11 – 20 of 25')
   })
 
   it('offers 10, 50 and 100', () => {
@@ -234,7 +239,7 @@ describe('paging through the queue', () => {
     const select = screen.getByLabelText('Invoices per page')
     expect([...select.querySelectorAll('option')].map((o) => o.textContent)).toEqual(['10', '50', '100'])
     fireEvent.change(select, { target: { value: '50' } })
-    expect(screen.getByText('1–25 of 25')).toBeInTheDocument()
+    expect(range()).toContain('1 – 25 of 25')
     expect(screen.getByText('Page 1 of 1')).toBeInTheDocument()
   })
 
@@ -242,15 +247,15 @@ describe('paging through the queue', () => {
     // Otherwise a narrower filter leaves an empty table with the rows behind you.
     setup(many(25))
     fireEvent.click(screen.getByRole('button', { name: 'Next page' }))
-    expect(screen.getByText('11–20 of 25')).toBeInTheDocument()
+    expect(range()).toContain('11 – 20 of 25')
     fireEvent.change(screen.getByPlaceholderText(/Search/i), { target: { value: '2000' } })
-    expect(screen.getByText(/^1–/)).toBeInTheDocument()
+    expect(range()).toMatch(/Showing 1 –/)
   })
 
   it('says so plainly when a filter matches nothing', () => {
     setup(many(3))
     fireEvent.change(screen.getByPlaceholderText(/Search/i), { target: { value: 'zzzzzz' } })
-    expect(screen.queryByText(/of 3$/)).not.toBeInTheDocument()
+    expect(range()).toContain('0 – 0 of 0')
   })
 })
 
@@ -261,7 +266,7 @@ describe('invoicing by hand', () => {
       item({ id: 'b', proNumber: 'B2', status: 'MANUAL_INVOICE', manualReason: 'NO_BUY', brokerCheckResult: 'NO_BUY', brokerMcChecked: '592002' }),
     ])
     expect(screen.queryByText('B2')).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: /^Invoice manually/ }))
+    fireEvent.click(screen.getByRole('tab', { name: /^Invoice manually/ }))
     expect(screen.getByText('B2')).toBeInTheDocument()
     expect(screen.getByText('NO BUY')).toBeInTheDocument()
     expect(screen.queryByText('A1')).not.toBeInTheDocument()
@@ -269,7 +274,7 @@ describe('invoicing by hand', () => {
 
   it('opens a manual row to its checklist, not the OTR editor', () => {
     setup([item({ id: 'b', proNumber: 'B2', status: 'MANUAL_INVOICE', manualReason: 'NO_BUY' })])
-    fireEvent.click(screen.getByRole('button', { name: /^Invoice manually/ }))
+    fireEvent.click(screen.getByRole('tab', { name: /^Invoice manually/ }))
     fireEvent.click(screen.getByRole('button', { name: /Open the steps for PRO B2/ }))
     expect(screen.getByTestId('manual-panel')).toBeInTheDocument()
     expect(screen.queryByTestId('otr-panel')).not.toBeInTheDocument()
@@ -282,7 +287,7 @@ describe('Pending with OTR shows what OTR says', () => {
 
   it("flags each row with OTR's own status and breaks the tab down by it", () => {
     setup([pending('14564', '6'), pending('14550', '8'), pending('14604', '1'), pending('14599', '1'), pending('14700', null)])
-    fireEvent.click(screen.getByRole('button', { name: /Pending with OTR/ }))
+    fireEvent.click(screen.getByRole('tab', { name: /Pending with OTR/ }))
     expect(screen.getByLabelText('OTR status for PRO 14564: IssueClient')).toHaveTextContent('OTR: IssueClient ⚠')
     expect(screen.getByLabelText('OTR status for PRO 14550: IssueFollowUp')).toBeInTheDocument()
     expect(screen.getByLabelText('OTR status for PRO 14604: Pending')).toHaveTextContent('OTR: Pending')
@@ -294,7 +299,7 @@ describe('Pending with OTR shows what OTR says', () => {
 
   it('narrows the tab to one OTR status and back', () => {
     setup([pending('14564', '6'), pending('14604', '1'), pending('14700', null)])
-    fireEvent.click(screen.getByRole('button', { name: /Pending with OTR/ }))
+    fireEvent.click(screen.getByRole('tab', { name: /Pending with OTR/ }))
     const group = screen.getByRole('group', { name: 'OTR status' })
     fireEvent.click(within(group).getByRole('button', { name: /IssueClient/ }))
     expect(screen.getByText('14564')).toBeInTheDocument()

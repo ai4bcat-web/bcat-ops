@@ -13,13 +13,11 @@
  * payroll does not.
  */
 import { useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, Building2, Plus, Search, Trash2 } from 'lucide-react'
+import { AlertTriangle, Building2, Plus, Trash2 } from 'lucide-react'
 import { RepPicker } from '@/components/RepPicker'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Badge } from '@/components/ui/badge'
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import {
+  TmsBadge, TmsButton, TmsDialog, TmsField, TmsIconButton, TmsInput, TmsSelect, TmsTabs,
+} from '@/features/tms/kit'
 import { MoneyField } from '@/features/directory/components/MoneyField'
 import { useCarriers } from '@/hooks/useCarriers'
 import { getCarrierBundle, getTmsSettings } from '@/lib/apiClient'
@@ -27,7 +25,6 @@ import { evaluateCarrierBooking } from '@/lib/carrierEligibility'
 import { effectiveCarrierStatus, CARRIER_STATUS_LABELS } from '@/lib/carrierStatus'
 import { netPayable, quickPayFee, quickPayTiersOf, tierFor } from '@/lib/quickPay'
 import { formatCents } from '@/lib/tmsDirectory'
-import { cn } from '@/lib/utils'
 import type { CarrierBundle, CarrierRecord, LoadChargeInput, ShipmentBundle, TmsSettings, TrackingProvider } from '@/types/tms'
 
 /** Everything BOOK_CARRIER takes except the load it is being booked onto. */
@@ -242,185 +239,186 @@ export function BookCarrierDialog({ bundle, isAdmin, busy, onClose, onConfirm, o
 
   if (booked) {
     return (
-      <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader><DialogTitle>Carrier booked</DialogTitle></DialogHeader>
-          <p className="text-sm text-muted-foreground">
-            {carrier?.name} is on the load. The rate confirmation has not been sent yet.
-          </p>
-          <DialogFooter>
-            <Button variant="ghost" onClick={onClose}>Done</Button>
-            <Button onClick={() => { onRateCon(); onClose() }}>Generate rate con</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <TmsDialog
+        open
+        onOpenChange={(open) => { if (!open) onClose() }}
+        title="Carrier booked"
+        footer={
+          <>
+            <TmsButton variant="ghost" onClick={onClose}>Done</TmsButton>
+            <TmsButton variant="primary" onClick={() => { onRateCon(); onClose() }}>Generate rate con</TmsButton>
+          </>
+        }
+      >
+        <p className="tms-muted">
+          {carrier?.name} is on the shipment. The rate confirmation has not been sent yet.
+        </p>
+      </TmsDialog>
     )
   }
 
   return (
-    <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
-      <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
-        <DialogHeader><DialogTitle>Book carrier</DialogTitle></DialogHeader>
+    <TmsDialog
+      open
+      onOpenChange={(open) => { if (!open) onClose() }}
+      title="Book carrier"
+      className="tms-dialog-wide"
+      footer={
+        <>
+          <TmsButton variant="ghost" onClick={onClose} disabled={busy || working}>Cancel</TmsButton>
+          {step < 3 ? (
+            <TmsButton onClick={() => setStep((s) => (s === 1 ? 2 : 3))} disabled={!carrierId}>Next</TmsButton>
+          ) : null}
+          <TmsButton variant="primary" onClick={confirm} disabled={busy || working || !canBook}>
+            {working ? 'Booking…' : 'Book'}
+          </TmsButton>
+        </>
+      }
+    >
+      <TmsTabs
+        tabs={STEPS.map((s) => ({ key: String(s.key), label: `${s.key}. ${s.label}` }))}
+        active={String(step)}
+        onSelect={(key) => { if (key === '1' || carrierId) setStep(Number(key) as 1 | 2 | 3) }}
+      />
 
-        <div role="tablist" className="flex gap-1 border-b border-border">
-          {STEPS.map((s) => (
-            <button
-              key={s.key}
-              role="tab"
-              aria-selected={step === s.key}
-              disabled={s.key > 1 && !carrierId}
-              onClick={() => setStep(s.key)}
-              className={cn(
-                'border-b-2 px-3 py-2 text-sm disabled:opacity-40',
-                step === s.key ? 'border-primary font-medium text-foreground' : 'border-transparent text-muted-foreground',
-              )}
-            >
-              {s.key}. {s.label}
-            </button>
-          ))}
-        </div>
-
-        {step === 1 && (
-          <div className="space-y-2">
-            <div className="relative">
-              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                aria-label="Search carriers"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Name, MC or DOT"
-                className="h-9 pl-8 text-sm"
-              />
-            </div>
-            {carriersLoading && <p className="text-sm text-muted-foreground">Loading carriers…</p>}
-            {!carriersLoading && candidates.length === 0 && (
-              <p className="text-sm text-muted-foreground">No bookable carrier matches that search.</p>
-            )}
-            <ul className="space-y-1">
-              {candidates.map((c) => (
-                <li key={c.id}>
-                  <button
-                    onClick={() => { setCarrierId(c.id); setAcked([]); setStep(2) }}
-                    aria-pressed={carrierId === c.id}
-                    className={cn(
-                      'flex w-full items-center gap-2 rounded-lg border p-2 text-left text-sm',
-                      carrierId === c.id ? 'border-primary bg-muted/40' : 'border-border',
-                    )}
-                  >
-                    <Building2 size={14} className="text-muted-foreground" />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate font-medium">{c.name}</span>
-                      <span className="block truncate text-xs text-muted-foreground">
-                        {[c.mcNumber && `MC ${c.mcNumber}`, c.dotNumber && `DOT ${c.dotNumber}`, c.type]
-                          .filter(Boolean).join(' · ')}
-                      </span>
-                    </span>
-                    <Badge variant="outline" className="text-[10px]">
-                      {CARRIER_STATUS_LABELS[effectiveCarrierStatus(c, now).status]}
-                    </Badge>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-
-        {step === 2 && (
-          <div className="space-y-3">
-            <MoneyField label="Carrier rate" value={rateCents} onChange={setRateCents} />
-
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label className="text-xs uppercase tracking-wider text-muted-foreground">Carrier accessorials</Label>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setCharges((prev) => [...prev, { key: `c${prev.length}-${Date.now()}`, code: '', amountCents: null }])}
+      {step === 1 && (
+        <div className="mt-3 flex flex-col gap-2">
+          <TmsInput
+            aria-label="Search carriers"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Name, MC or DOT"
+          />
+          {carriersLoading && <p className="tms-muted">Loading carriers…</p>}
+          {!carriersLoading && candidates.length === 0 && (
+            <p className="tms-muted">No bookable carrier matches that search.</p>
+          )}
+          <ul className="flex flex-col gap-1">
+            {candidates.map((c) => (
+              <li key={c.id}>
+                <button
+                  onClick={() => { setCarrierId(c.id); setAcked([]); setStep(2) }}
+                  aria-pressed={carrierId === c.id}
+                  className="flex w-full items-center gap-2 p-2 text-left"
+                  style={{
+                    border: `1px solid ${carrierId === c.id ? 'var(--tms-primary)' : 'var(--tms-border)'}`,
+                    borderRadius: 'var(--tms-radius)',
+                    background: 'none',
+                    color: 'inherit',
+                    cursor: 'pointer',
+                  }}
                 >
-                  <Plus size={14} className="mr-1" />Add
-                </Button>
-              </div>
-              {charges.map((c, i) => (
-                <div key={c.key} className="grid grid-cols-[1fr_1fr_auto] items-end gap-2">
-                  <div>
-                    <select
-                      aria-label={`Charge code ${i + 1}`}
-                      value={c.code}
-                      onChange={(e) => setCharges((prev) => prev.map((x) => (x.key === c.key ? { ...x, code: e.target.value } : x)))}
-                      className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
-                    >
-                      <option value="">— code —</option>
-                      {(settings?.chargeCodes ?? []).map((def) => (
-                        <option key={def.code} value={def.code}>{def.label}</option>
-                      ))}
-                    </select>
-                  </div>
+                  <Building2 size={14} className="tms-muted" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate font-medium">{c.name}</span>
+                    <span className="block truncate text-xs tms-muted">
+                      {[c.mcNumber && `MC ${c.mcNumber}`, c.dotNumber && `DOT ${c.dotNumber}`, c.type]
+                        .filter(Boolean).join(' · ')}
+                    </span>
+                  </span>
+                  <TmsBadge tone="gray">
+                    {CARRIER_STATUS_LABELS[effectiveCarrierStatus(c, now).status]}
+                  </TmsBadge>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {step === 2 && (
+        <div className="mt-3 flex flex-col gap-3">
+          <MoneyField label="Carrier rate" value={rateCents} onChange={setRateCents} />
+
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between">
+              <p className="text-[11px] font-semibold uppercase tracking-wider tms-muted">Carrier accessorials</p>
+              <TmsButton
+                variant="ghost"
+                size="sm"
+                onClick={() => setCharges((prev) => [...prev, { key: `c${prev.length}-${Date.now()}`, code: '', amountCents: null }])}
+              >
+                <Plus size={14} />Add
+              </TmsButton>
+            </div>
+            {charges.map((c, i) => (
+              <div key={c.key} className="flex items-end gap-2">
+                <div className="flex-1">
+                  <TmsSelect
+                    aria-label={`Charge code ${i + 1}`}
+                    value={c.code}
+                    onChange={(e) => setCharges((prev) => prev.map((x) => (x.key === c.key ? { ...x, code: e.target.value } : x)))}
+                  >
+                    <option value="">— code —</option>
+                    {(settings?.chargeCodes ?? []).map((def) => (
+                      <option key={def.code} value={def.code}>{def.label}</option>
+                    ))}
+                  </TmsSelect>
+                </div>
+                <div className="flex-1">
                   <MoneyField
                     label="Amount"
                     value={c.amountCents}
                     onChange={(cents) => setCharges((prev) => prev.map((x) => (x.key === c.key ? { ...x, amountCents: cents } : x)))}
                   />
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    aria-label={`Remove charge ${i + 1}`}
-                    className="h-9 w-9"
-                    onClick={() => setCharges((prev) => prev.filter((x) => x.key !== c.key))}
-                  >
-                    <Trash2 size={14} />
-                  </Button>
                 </div>
-              ))}
-            </div>
-
-            <dl className="grid grid-cols-2 gap-x-4 gap-y-1 rounded-lg border border-border bg-muted/30 p-3 text-sm sm:grid-cols-4">
-              <Money label="Revenue" cents={revenueCents} />
-              <Money label="Cost" cents={costCents} />
-              <Money label="Profit" cents={profitCents} note={`${(marginBps / 100).toFixed(1)}%`} />
-              <Money label="Top spend" cents={topSpendCents} />
-            </dl>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label className="text-xs uppercase tracking-wider text-muted-foreground">Quick pay</Label>
-                <select
-                  aria-label="Quick pay"
-                  value={quickPayDays}
-                  onChange={(e) => setQuickPayDays(e.target.value)}
-                  className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                <TmsIconButton
+                  aria-label={`Remove charge ${i + 1}`}
+                  onClick={() => setCharges((prev) => prev.filter((x) => x.key !== c.key))}
                 >
-                  <option value="">— standard terms —</option>
-                  {tiers.map((t) => (
-                    <option key={t.days} value={String(t.days)}>{t.days} day · {(t.feeBps / 100).toFixed(2)}%</option>
-                  ))}
-                </select>
+                  <Trash2 size={14} />
+                </TmsIconButton>
               </div>
-              <div>
-                <Label className="text-xs uppercase tracking-wider text-muted-foreground">Payment terms (days)</Label>
-                <Input
-                  aria-label="Payment terms"
-                  type="number"
-                  min={0}
-                  value={termsDays}
-                  onChange={(e) => setTermsDays(e.target.value)}
-                  placeholder={String(settings?.defaultCarrierTermsDays ?? 30)}
-                  className="h-9 text-sm"
-                />
-              </div>
-            </div>
-            {feeCents != null && netCents != null && (
-              <p className="text-xs text-muted-foreground">
-                Quick-pay fee ${formatCents(feeCents)} · net payable ${formatCents(netCents)}
-              </p>
-            )}
+            ))}
           </div>
-        )}
 
-        {step === 3 && (
-          <div className="grid grid-cols-2 gap-3">
-            <div className="col-span-2">
-              <Label className="text-xs uppercase tracking-wider text-muted-foreground">Dispatch contact</Label>
-              <select
+          <dl
+            className="tms-grid tms-grid-4 p-3"
+            style={{ border: '1px solid var(--tms-border)', borderRadius: 'var(--tms-radius)' }}
+          >
+            <Money label="Revenue" cents={revenueCents} />
+            <Money label="Cost" cents={costCents} />
+            <Money label="Profit" cents={profitCents} note={`${(marginBps / 100).toFixed(1)}%`} />
+            <Money label="Top spend" cents={topSpendCents} />
+          </dl>
+
+          <div className="tms-grid tms-grid-2">
+            <TmsField label="Quick pay">
+              <TmsSelect
+                aria-label="Quick pay"
+                value={quickPayDays}
+                onChange={(e) => setQuickPayDays(e.target.value)}
+              >
+                <option value="">— standard terms —</option>
+                {tiers.map((t) => (
+                  <option key={t.days} value={String(t.days)}>{t.days} day · {(t.feeBps / 100).toFixed(2)}%</option>
+                ))}
+              </TmsSelect>
+            </TmsField>
+            <TmsField label="Payment terms (days)">
+              <TmsInput
+                aria-label="Payment terms"
+                type="number"
+                min={0}
+                value={termsDays}
+                onChange={(e) => setTermsDays(e.target.value)}
+                placeholder={String(settings?.defaultCarrierTermsDays ?? 30)}
+              />
+            </TmsField>
+          </div>
+          {feeCents != null && netCents != null && (
+            <p className="text-xs tms-muted">
+              Quick-pay fee ${formatCents(feeCents)} · net payable ${formatCents(netCents)}
+            </p>
+          )}
+        </div>
+      )}
+
+      {step === 3 && (
+        <div className="tms-grid tms-grid-2 mt-3">
+          <div style={{ gridColumn: '1 / -1' }}>
+            <TmsField label="Dispatch contact">
+              <TmsSelect
                 aria-label="Dispatch contact"
                 value={contactId}
                 onChange={(e) => {
@@ -433,93 +431,84 @@ export function BookCarrierDialog({ bundle, isAdmin, busy, onClose, onConfirm, o
                     setDispatcherEmail(c.email ?? '')
                   }
                 }}
-                className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
               >
                 <option value="">— type one in —</option>
                 {(carrierBundle?.contacts ?? []).filter((c) => c.active !== false).map((c) => (
                   <option key={c.id} value={c.id}>{c.name}</option>
                 ))}
-              </select>
-            </div>
-            <Text label="Dispatcher" value={dispatcherName} onChange={setDispatcherName} />
-            <Text label="Dispatcher phone" value={dispatcherPhone} onChange={setDispatcherPhone} />
-            <Text label="Dispatcher email" value={dispatcherEmail} onChange={setDispatcherEmail} />
-            <Text label="Driver" value={driverName} onChange={setDriverName} />
-            <Text label="Driver phone" value={driverPhone} onChange={setDriverPhone} />
-            <Text label="Truck #" value={truckNumber} onChange={setTruckNumber} />
-            <Text label="Trailer #" value={trailerNumber} onChange={setTrailerNumber} />
-            <Text label="Plates" value={plates} onChange={setPlates} />
-            <Text label="VIN" value={vin} onChange={setVin} />
-            <Text label="Equipment" value={equipmentType} onChange={setEquipmentType} />
-            <div>
-              <Label className="text-xs uppercase tracking-wider text-muted-foreground">Carrier rep</Label>
-              <RepPicker
-                role="CARRIER_REP"
-                allowUnknown
-                value={carrierRepId}
-                onChange={setCarrierRepId}
-                placeholder="Pick a carrier rep…"
+              </TmsSelect>
+            </TmsField>
+          </div>
+          <Text label="Dispatcher" value={dispatcherName} onChange={setDispatcherName} />
+          <Text label="Dispatcher phone" value={dispatcherPhone} onChange={setDispatcherPhone} />
+          <Text label="Dispatcher email" value={dispatcherEmail} onChange={setDispatcherEmail} />
+          <Text label="Driver" value={driverName} onChange={setDriverName} />
+          <Text label="Driver phone" value={driverPhone} onChange={setDriverPhone} />
+          <Text label="Truck #" value={truckNumber} onChange={setTruckNumber} />
+          <Text label="Trailer #" value={trailerNumber} onChange={setTrailerNumber} />
+          <Text label="Plates" value={plates} onChange={setPlates} />
+          <Text label="VIN" value={vin} onChange={setVin} />
+          <Text label="Equipment" value={equipmentType} onChange={setEquipmentType} />
+          <TmsField label="Carrier rep">
+            <RepPicker
+              role="CARRIER_REP"
+              allowUnknown
+              value={carrierRepId}
+              onChange={setCarrierRepId}
+              placeholder="Pick a carrier rep…"
+            />
+          </TmsField>
+          <TmsField label="Tracking">
+            <TmsSelect
+              aria-label="Tracking"
+              value={trackingProvider}
+              onChange={(e) => setTrackingProvider(e.target.value as TrackingProvider)}
+            >
+              {TRACKING_PROVIDERS.map((p) => <option key={p} value={p}>{p.replace(/_/g, ' ').toLowerCase()}</option>)}
+            </TmsSelect>
+          </TmsField>
+        </div>
+      )}
+
+      {carrierId && (
+        <div
+          className="mt-3 flex flex-col gap-2 p-3"
+          style={{ border: '1px solid var(--tms-border)', borderRadius: 'var(--tms-radius)' }}
+        >
+          <p className="text-[11px] font-semibold uppercase tracking-wider tms-muted">Preflight</p>
+          {blocks.length === 0 && warnings.length === 0 && (
+            <p className="tms-muted">Nothing in the way.</p>
+          )}
+          {blocks.map((b) => (
+            <p key={b.key} className="flex items-start gap-2" style={{ color: 'var(--tms-badge-red)' }}>
+              <AlertTriangle size={14} className="mt-0.5 shrink-0" />{b.detail}
+            </p>
+          ))}
+          {warnings.map((w) => (
+            <label key={w.key} className="flex items-start gap-2">
+              <input
+                type="checkbox"
+                className="mt-1"
+                aria-label={w.detail}
+                checked={acked.includes(w.key)}
+                disabled={w.adminOnly && !isAdmin}
+                onChange={() => toggleAck(w.key)}
               />
-            </div>
-            <div>
-              <Label className="text-xs uppercase tracking-wider text-muted-foreground">Tracking</Label>
-              <select
-                aria-label="Tracking"
-                value={trackingProvider}
-                onChange={(e) => setTrackingProvider(e.target.value as TrackingProvider)}
-                className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
-              >
-                {TRACKING_PROVIDERS.map((p) => <option key={p} value={p}>{p.replace(/_/g, ' ').toLowerCase()}</option>)}
-              </select>
-            </div>
-          </div>
-        )}
+              <span>{w.detail}</span>
+            </label>
+          ))}
+        </div>
+      )}
 
-        {carrierId && (
-          <div className="space-y-2 rounded-lg border border-border p-3">
-            <p className="text-xs uppercase tracking-wider text-muted-foreground">Preflight</p>
-            {blocks.length === 0 && warnings.length === 0 && (
-              <p className="text-sm text-muted-foreground">Nothing in the way.</p>
-            )}
-            {blocks.map((b) => (
-              <p key={b.key} className="flex items-start gap-2 text-sm text-destructive">
-                <AlertTriangle size={14} className="mt-0.5 shrink-0" />{b.detail}
-              </p>
-            ))}
-            {warnings.map((w) => (
-              <label key={w.key} className="flex items-start gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  className="mt-1"
-                  aria-label={w.detail}
-                  checked={acked.includes(w.key)}
-                  disabled={w.adminOnly && !isAdmin}
-                  onChange={() => toggleAck(w.key)}
-                />
-                <span>{w.detail}</span>
-              </label>
-            ))}
-          </div>
-        )}
-
-        {error && <p className="text-xs text-destructive">{error}</p>}
-
-        <DialogFooter>
-          <Button variant="ghost" onClick={onClose} disabled={busy || working}>Cancel</Button>
-          {step < 3 ? (
-            <Button onClick={() => setStep((s) => (s === 1 ? 2 : 3))} disabled={!carrierId}>Next</Button>
-          ) : null}
-          <Button onClick={confirm} disabled={busy || working || !canBook}>{working ? 'Booking…' : 'Book'}</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      {error && <p className="mt-2 text-xs" style={{ color: 'var(--tms-badge-red)' }}>{error}</p>}
+    </TmsDialog>
   )
 }
 
 function Money({ label, cents, note }: { label: string; cents: number | null; note?: string }) {
   return (
     <div>
-      <dt className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</dt>
+      <dt className="text-[11px] font-semibold uppercase tracking-wider tms-muted">{label}</dt>
       <dd>{cents == null ? '—' : `$${formatCents(cents)}`}{note ? ` (${note})` : ''}</dd>
     </div>
   )
@@ -527,9 +516,8 @@ function Money({ label, cents, note }: { label: string; cents: number | null; no
 
 function Text({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
   return (
-    <div>
-      <Label className="text-xs uppercase tracking-wider text-muted-foreground">{label}</Label>
-      <Input aria-label={label} value={value} onChange={(e) => onChange(e.target.value)} className="h-9 text-sm" />
-    </div>
+    <TmsField label={label}>
+      <TmsInput aria-label={label} value={value} onChange={(e) => onChange(e.target.value)} />
+    </TmsField>
   )
 }

@@ -4,14 +4,14 @@ slug: quotes-and-lane-rates
 type: HOW_TO
 category: Operations
 productAreas: [TMS, Customers, Carriers]
-related: [shipments-orders-loads, carriers-and-booking, ar-invoicing-and-payments]
+related: [shipments-orders-loads, carriers-and-booking, ar-invoicing-and-payments, release-to-accounting]
 ---
 
 # Quotes and Lane Rates
 
 Everything before the freight exists. A customer asks what a lane costs, we put a number in front of them, they take it or they push back — and on the other side of the same deal we ask carriers what they want to haul it. This article covers the rungs a quote climbs and whose move each one is, pricing and what the warnings mean, the public link and why it works once per round, counters both ways, converting a quote into freight, carrier offers on a load, the lane history behind every price, expiry, and what an admin can change.
 
-Quotes live on the **Quotes** board (`/quotes`, Sales → Quotes, with a badge counting the customer quotes waiting on us), on each quote's own page at `/quotes/:id` (`/quotes/new` is the same editor with nothing saved yet), and on the **Lane Rates** page (`/rates`). The buy side sits on a shipment's **Carrier** tab; the lane history also sits on the **Financials** tab; and the house rules are on the **Quotes & offers** card in Settings. A customer's own quotes are on their **Quotes** tab in the directory, newest first, with the share of the quotes they actually decided that we won — quotes we canceled are not a decision and are left out of that figure.
+Quotes live on the **Rates** board (`/tms/rates`, with a badge counting the customer quotes waiting on us), on each quote's own page at `/tms/rates/:id` (`/tms/rates/new` is the same editor with nothing saved yet), and on the **Lane rates** page (`/tms/rates/lanes`). The buy side sits on a shipment's **Carrier** tab; the lane history also sits on the **Financials** tab; and the house rules are on the **Quotes & offers** card in My Brokerage. A customer's own quotes are on their **Quotes** tab in the directory, newest first, with the share of the quotes they actually decided that we won — quotes we canceled are not a decision and are left out of that figure.
 
 ## The rungs, and whose move each one is
 
@@ -47,7 +47,7 @@ Four things the price can be told about itself:
 - **Over the maximum profit this customer is quoted at.**
 - **The carrier side is over what this quote can spend** — cost above top spend.
 
-The first two are the ones with teeth. While *"Only an admin may send a quote below the customer's minimum margin"* is ticked in Settings, each must be acknowledged by name before a send or a counter goes out, **and a rep who acknowledges it is still refused** — a finding nobody may overrule is not a checkbox. The other two are said out loud and never block anything.
+The first two are the ones with teeth. While *"Only an admin may send a quote below the customer's minimum margin"* is ticked in My Brokerage, each must be acknowledged by name before a send or a counter goes out, **and a rep who acknowledges it is still refused** — a finding nobody may overrule is not a checkbox. The other two are said out loud and never block anything.
 
 Lines, stops, references and the customer are editable only on `DRAFT` and `REQUESTED`. Once a number has gone out the way to change it is to counter it or send it again — editing is refused by name.
 
@@ -82,7 +82,7 @@ Both refuse the impossible rather than fudging it: a counter below the quote's o
 
 The customer's credit is checked before anything is written, with this quote's amount projected onto their open book, exactly as submitting an order would check it a moment later.
 
-What exists afterwards is an ordinary shipment, built by the ordinary path and indistinguishable from an order somebody typed: a **Shipment**, its **Order**, its **Load** over the quote's stops, the references, and the customer charge lines exactly as quoted — which is what the dialog lists before you press the button. The load takes the customer's default division and the order takes the sales rep named on the quote. The order also carries the trail back — which quote it came from, its number, the amount it was sold at and the quote's internal notes — so a later re-price can be read against what was actually sold. The quote itself keeps the shipment, order and load numbers it produced, and how they accepted (on the link, by phone or by e-mail).
+What exists afterwards is an ordinary shipment, built by the ordinary path and indistinguishable from a shipment somebody typed: a **Shipment**, its **Order**, its **Load** over the quote's stops, the references, and the customer charge lines exactly as quoted — which is what the dialog lists before you press the button. The load takes the customer's default division and the order takes the sales rep named on the quote. The order also carries the trail back — which quote it came from, its number, the amount it was sold at and the quote's internal notes — so a later re-price can be read against what was actually sold. The quote itself keeps the shipment, order and load numbers it produced, and how they accepted (on the link, by phone or by e-mail).
 
 Two safety rails:
 
@@ -121,7 +121,7 @@ A load canceled or TONU'd after its sample was taken is **kept and marked exclud
 
 **"No history on this lane"** means exactly that — neither the lane nor its ZIP3 neighbourhood has a delivered, priced load behind it. The panel says so rather than drawing zeros, because a zero here reads as free freight and somebody would quote against it.
 
-`/rates` is the same panel on its own page: type an origin and a destination (city and state, or ZIPs) and it answers with the lane's numbers and the loads underneath them. The history that was already on dev before any of this existed was loaded in by a one-off migration (`scripts/backfillLaneSamples.mjs`), which samples delivered loads from the money rows that hold money and invents nothing.
+`/tms/rates/lanes` is the same panel on its own page: type an origin and a destination (city and state, or ZIPs) and it answers with the lane's numbers and the loads underneath them. The history that was already on dev before any of this existed was loaded in by a one-off migration (`scripts/backfillLaneSamples.mjs`), which samples delivered loads from the money rows that hold money and invents nothing.
 
 ## Expiry and the sweep
 
@@ -133,7 +133,7 @@ Nothing runs on a timer. The board **sweeps once each time somebody opens it**, 
 
 ## What an admin can change
 
-The **Quotes & offers** card in Settings, saveable by an owner or admin only:
+The **Quotes & offers** card in My Brokerage, saveable by an owner or admin only:
 
 - **Hours to quote** — how long a customer quote stands. A customer's own setting beats this; blank means 24 hours.
 - **Offer expiry hours** — the same for a carrier offer, always capped at the first pickup.
@@ -147,7 +147,7 @@ The **Quotes & offers** card in Settings, saveable by an owner or admin only:
 
 The sell side — saving, sending, countering, accepting, converting, closing, restoring, duplicating, sweeping — needs owner, ADMIN or the **`page-quotes`** grant, and nothing else falls through to it: a dispatcher covering loads has no business sending a customer a price. The buy side (request, log, counter, reject) opens to **`page-loads` or `page-quotes`**, because finding a truck is both desks' work. **Accept offer** requires exactly what booking a carrier requires. Saving the settings card is owner or admin.
 
-`/quotes` and `/rates` sit on the one `quotes` page key: a rep who may quote may see what the lane has paid.
+`/tms/rates` and `/tms/rates/lanes` sit on the one `quotes` page key: a rep who may quote may see what the lane has paid.
 
 ## On dev, nothing is e-mailed
 

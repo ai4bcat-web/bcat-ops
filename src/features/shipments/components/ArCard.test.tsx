@@ -92,7 +92,7 @@ describe('ArCard', () => {
     renderCard({ arStatus: 'UNPAID', invoiceId: 'INV-000012', invoiceNumber: 'INV-000012' })
 
     await waitFor(() => expect(screen.getByText('$1,500.00')).toBeTruthy())
-    expect(screen.getByRole('link', { name: 'INV-000012' }).getAttribute('href')).toBe('/ar/invoices/INV-000012')
+    expect(screen.getByRole('link', { name: 'INV-000012' }).getAttribute('href')).toBe('/tms/invoicing/invoices/INV-000012')
     expect(screen.getByText('$2,000.00')).toBeTruthy()
     expect(screen.getByText('2026-05-01')).toBeTruthy()
   })

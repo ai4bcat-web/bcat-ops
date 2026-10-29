@@ -188,8 +188,9 @@ describe('OtrPanel', () => {
     const { container } = render(<OtrPanel item={item({ otrReadiness: r })} onChanged={vi.fn()} />)
 
     const label = screen.getByText('Destination ZIP')
-    expect(label.className).toMatch(/text-red-700/)
-    expect(container.querySelector('.bg-red-50')).not.toBeNull()
+    // The gap is coloured with the kit's danger token and the row itself is marked.
+    expect(label.className).toMatch(/tms-badge-red/)
+    expect(container.querySelector('[data-gap="true"]')).not.toBeNull()
   })
 
   it('asks for the customer in red when the row has none', () => {

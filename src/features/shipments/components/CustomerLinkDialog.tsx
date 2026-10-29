@@ -10,13 +10,9 @@
 import { useState } from 'react'
 import { AlertTriangle, Check, Copy, RefreshCw, Send, Ban } from 'lucide-react'
 import { toast } from 'sonner'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
+import { TmsBadge, TmsButton, TmsDialog, TmsInput, TmsTextarea } from '@/features/tms/kit'
 import { Checkbox } from '@/components/ui/checkbox'
-import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { revokeCustomerLink, sendCustomerLink, type SendCustomerLinkResult } from '@/lib/apiClient'
 import { formatDateTime } from '@/lib/date'
 import type { CustomerRecord, ShipmentRecord, TmsSettings, TrackingLinkRecord } from '@/types/tms'
@@ -50,7 +46,7 @@ export function CustomerLinkDialog({
   const url = result?.url ?? ''
   const contactPreview = settings?.trackingContact?.mode === 'FIXED'
     ? [settings.trackingContact.name, settings.trackingContact.email, settings.trackingContact.phone].filter(Boolean).join(' · ')
-    : 'The rep on the order'
+    : 'The rep on the shipment'
 
   const send = async (via: 'EMAIL' | 'COPY', regenerate = false) => {
     setError(null)
@@ -95,32 +91,52 @@ export function CustomerLinkDialog({
   }
 
   return (
-    <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
-      <DialogContent className="max-h-[90vh] max-w-lg overflow-y-auto">
-        <DialogHeader><DialogTitle>Customer tracking link</DialogTitle></DialogHeader>
-
+    <TmsDialog
+      open
+      onOpenChange={(open) => { if (!open) onClose() }}
+      title="Customer tracking link"
+      footer={
+        <>
+          {link && link.status === 'ACTIVE' && (
+            <TmsButton onClick={() => { void revoke() }} disabled={busy} className="mr-auto">
+              <Ban size={14} className="mr-1" />Revoke
+            </TmsButton>
+          )}
+          <TmsButton variant="ghost" onClick={onClose} disabled={busy}>Close</TmsButton>
+          <TmsButton onClick={() => { void send('COPY', true) }} disabled={busy}>
+            <RefreshCw size={14} className="mr-1" />Regenerate
+          </TmsButton>
+          <TmsButton onClick={() => { void send('COPY') }} disabled={busy}>
+            <Copy size={14} className="mr-1" />Copy link
+          </TmsButton>
+          <TmsButton variant="primary" onClick={() => { void send('EMAIL') }} disabled={busy || emails.length === 0}>
+            <Send size={14} className="mr-1" />{busy ? 'Sending…' : 'Send'}
+          </TmsButton>
+        </>
+      }
+    >
         {link && (
-          <div className="space-y-1 rounded-lg border border-border p-3 text-sm">
+          <div className="space-y-1 rounded-[var(--tms-radius)] border border-[color:var(--tms-border)] p-3 text-sm">
             <div className="flex items-center gap-2">
-              <Badge variant="outline" className="text-[10px]">{link.status}</Badge>
-              <span className="text-xs text-muted-foreground">Expires {formatDateTime(link.expiresAt)}</span>
+              <TmsBadge tone="gray" className="text-[10px]">{link.status}</TmsBadge>
+              <span className="text-xs tms-muted">Expires {formatDateTime(link.expiresAt)}</span>
             </div>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs tms-muted">
               Sent {link.sentAt ? formatDateTime(link.sentAt) : 'not yet'}
               {' · '}opened {link.openCount ?? 0}×
               {link.lastOpenedAt ? ` · last ${formatDateTime(link.lastOpenedAt)}` : ''}
             </p>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs tms-muted">
               Shows {link.showCarrier ? 'the carrier name' : 'no carrier'} · {link.showPosition ? 'the last position' : 'no position'}
             </p>
           </div>
         )}
 
         <div>
-          <Label className="text-xs uppercase tracking-wider text-muted-foreground">Recipients</Label>
+          <Label className="tms-field-label">Recipients</Label>
           <div className="mt-1.5 space-y-1.5">
             {contacts.length === 0 && (
-              <p className="text-xs text-muted-foreground">This customer has no contact with an e-mail on file — type one below.</p>
+              <p className="text-xs tms-muted">This customer has no contact with an e-mail on file — type one below.</p>
             )}
             {contacts.map((c) => (
               <label key={c.id} className="flex items-center gap-2 text-sm">
@@ -135,7 +151,7 @@ export function CustomerLinkDialog({
               </label>
             ))}
           </div>
-          <Input
+          <TmsInput
             aria-label="Other recipients"
             placeholder="other@customer.com, someone@else.com"
             value={extra}
@@ -145,61 +161,44 @@ export function CustomerLinkDialog({
         </div>
 
         <div>
-          <Label className="text-xs uppercase tracking-wider text-muted-foreground">Cc</Label>
-          <Input aria-label="Cc" value={cc} onChange={(e) => setCc(e.target.value)} className="h-9 text-sm" />
+          <Label className="tms-field-label">Cc</Label>
+          <TmsInput aria-label="Cc" value={cc} onChange={(e) => setCc(e.target.value)} className="h-9 text-sm" />
         </div>
 
         <div>
-          <Label className="text-xs uppercase tracking-wider text-muted-foreground">Message</Label>
-          <Textarea aria-label="Customer link message" rows={2} value={message} onChange={(e) => setMessage(e.target.value)} className="text-sm" />
+          <Label className="tms-field-label">Message</Label>
+          <TmsTextarea aria-label="Customer link message" rows={2} value={message} onChange={(e) => setMessage(e.target.value)} className="text-sm" />
         </div>
 
-        <p className="text-xs text-muted-foreground">The page tells them to contact: {contactPreview}</p>
+        <p className="text-xs tms-muted">The page tells them to contact: {contactPreview}</p>
 
         {result && result.emailStatus === 'NOT_SENT' && (
-          <p className="flex items-start gap-2 rounded-lg border border-border bg-muted/30 p-2 text-xs">
-            <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-600" />
+          <p className="flex items-start gap-2 rounded-[var(--tms-radius)] border border-[color:var(--tms-border)] bg-[color:var(--tms-card)] p-2 text-xs">
+            <AlertTriangle size={14} className="mt-0.5 shrink-0 text-[color:var(--tms-badge-orange)]" />
             E-mail is not enabled on this environment, so nothing was sent
             {result.emailError ? ` (${result.emailError})` : ''}. The link below is live — send it by hand.
           </p>
         )}
         {result && result.emailStatus === 'SENT' && (
-          <p className="flex items-center gap-2 text-xs text-muted-foreground">
-            <Check size={14} className="text-emerald-600" />Sent to {emails.join(', ')}
+          <p className="flex items-center gap-2 text-xs tms-muted">
+            <Check size={14} className="text-[color:var(--tms-badge-green)]" />Sent to {emails.join(', ')}
           </p>
         )}
         {url && (
           <div className="flex items-center gap-2">
-            <Input aria-label="Customer link URL" readOnly value={url} className="h-9 text-xs" />
-            <Button
-              type="button" variant="outline" size="sm"
+            <TmsInput aria-label="Customer link URL" readOnly value={url} className="h-9 text-xs" />
+            <TmsButton
+              type="button" size="sm"
               onClick={() => { void navigator.clipboard?.writeText(url); toast.success('Link copied') }}
             >
               <Copy size={14} className="mr-1" />Copy
-            </Button>
+            </TmsButton>
           </div>
         )}
 
-        {error && <p className="text-xs text-destructive">{error}</p>}
+        {error && <p className="text-xs text-[color:var(--tms-badge-red)]">{error}</p>}
 
-        <DialogFooter className="flex-wrap">
-          {link && link.status === 'ACTIVE' && (
-            <Button variant="outline" onClick={() => { void revoke() }} disabled={busy} className="mr-auto">
-              <Ban size={14} className="mr-1" />Revoke
-            </Button>
-          )}
-          <Button variant="ghost" onClick={onClose} disabled={busy}>Close</Button>
-          <Button variant="outline" onClick={() => { void send('COPY', true) }} disabled={busy}>
-            <RefreshCw size={14} className="mr-1" />Regenerate
-          </Button>
-          <Button variant="outline" onClick={() => { void send('COPY') }} disabled={busy}>
-            <Copy size={14} className="mr-1" />Copy link
-          </Button>
-          <Button onClick={() => { void send('EMAIL') }} disabled={busy || emails.length === 0}>
-            <Send size={14} className="mr-1" />{busy ? 'Sending…' : 'Send'}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+
+    </TmsDialog>
   )
 }

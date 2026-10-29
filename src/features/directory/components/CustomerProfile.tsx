@@ -1,16 +1,18 @@
 import { useMemo, useState } from 'react'
-import { X, Building2, MapPin, FileText, FileSpreadsheet, Settings, Phone, DollarSign, Truck, Banknote } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { RepPicker, TeamPicker } from '@/components/RepPicker'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
-import { Switch } from '@/components/ui/switch'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
-import { Badge } from '@/components/ui/badge'
-import { ScrollArea } from '@/components/ui/scroll-area'
+import {
+  TmsBadge,
+  TmsButton,
+  TmsCard,
+  TmsDialog,
+  TmsField,
+  TmsInput,
+  TmsSelect,
+  TmsTabs,
+  TmsTextarea,
+} from '@/features/tms/kit'
+import type { TmsTone } from '@/features/tms/kit'
 import { DocumentTypesField } from '@/features/documents/DocumentTypesField'
 import { useCustomerOrders } from '@/hooks/useCustomerOrders'
 import { useCustomerQuotes } from '@/hooks/useCustomerQuotes'
@@ -22,7 +24,6 @@ import { laneLabelFor } from '@/lib/laneKey'
 import { QUOTE_STATUS_LABEL } from '@/lib/quotes'
 import { formatCents as formatQuoteCents } from '@/lib/invoiceBuild'
 import { formatCents } from '@/lib/tmsDirectory'
-import { cn } from '@/lib/utils'
 import { useCustomerForm } from './useCustomerForm'
 import { INVOICE_FREQUENCY_OPTIONS } from './useCustomerForm'
 import { ContactsEditor } from './ContactsEditor'
@@ -58,28 +59,28 @@ interface CustomerProfileProps {
 }
 
 const tabs = [
-  { key: 'account', label: 'Account', icon: Building2 },
-  { key: 'contacts', label: 'Contacts', icon: Phone },
-  { key: 'documents', label: 'Documents', icon: FileText },
-  { key: 'locations', label: 'Shipping locations', icon: MapPin },
-  { key: 'settings', label: 'Settings', icon: Settings },
-  { key: 'quoting', label: 'Quoting', icon: DollarSign },
-  { key: 'orders', label: 'Orders', icon: Truck },
-  { key: 'quotes', label: 'Quotes', icon: FileSpreadsheet },
-  { key: 'ar', label: 'AR', icon: Banknote },
+  { key: 'account', label: 'Account' },
+  { key: 'contacts', label: 'Contacts' },
+  { key: 'documents', label: 'Documents' },
+  { key: 'locations', label: 'Shipping locations' },
+  { key: 'settings', label: 'Settings' },
+  { key: 'quoting', label: 'Quoting' },
+  { key: 'shipments', label: 'Shipments' },
+  { key: 'quotes', label: 'Quotes' },
+  { key: 'ar', label: 'AR' },
 ]
 
-const statusColors: Record<CustomerStatus, string> = {
-  NEW: 'bg-slate-100 text-slate-700',
-  CONTACTED: 'bg-blue-100 text-blue-700',
-  QUALIFIED: 'bg-indigo-100 text-indigo-700',
-  QUOTED: 'bg-purple-100 text-purple-700',
-  NURTURING: 'bg-pink-100 text-pink-700',
-  PENDING: 'bg-amber-100 text-amber-700',
-  ACTIVE: 'bg-emerald-100 text-emerald-700',
-  DORMANT: 'bg-orange-100 text-orange-700',
-  CLOSED: 'bg-gray-100 text-gray-700',
-  BLOCKED: 'bg-red-100 text-red-700',
+const statusTones: Record<CustomerStatus, TmsTone> = {
+  NEW: 'gray',
+  CONTACTED: 'blue',
+  QUALIFIED: 'turquoise',
+  QUOTED: 'purple',
+  NURTURING: 'pink',
+  PENDING: 'orange',
+  ACTIVE: 'green',
+  DORMANT: 'orange',
+  CLOSED: 'gray',
+  BLOCKED: 'red',
 }
 
 function stripRecord<T extends { id: string; createdAt: string; updatedAt: string }>(record: T): Omit<T, 'id' | 'createdAt' | 'updatedAt'> {
@@ -108,8 +109,8 @@ export function CustomerProfile({
   const accountOwnerIds = value.accountOwnerIdsText.split(/\r?\n/).map((s) => s.trim()).filter(Boolean)
 
   /**
-   * Exposure now spans both eras: orders carry it from booking to paid, and the loads
-   * no order covers keep the Aljex-era rule. The oldest open invoice is what lets
+   * Exposure now spans both eras: shipments carry it from booking to paid, and the loads
+   * no shipment covers keep the Aljex-era rule. The oldest open invoice is what lets
    * `INVOICE_PAST_MAX_DAYS_LATE` fire at all — without a real invoice date the block
    * reason could never be reached, which is why it is read here rather than guessed.
    */
@@ -149,327 +150,289 @@ export function CustomerProfile({
   }
 
   return (
-    <Sheet open onOpenChange={(v) => { if (!v) onClose() }}>
-      <SheetContent className="w-full sm:max-w-4xl flex flex-col p-0">
-        <SheetHeader className="px-6 py-4 border-b">
-          <div className="flex items-center justify-between">
-            <div className="space-y-1">
-              <SheetTitle className="flex items-center gap-2 text-base">
-                {customer.name}
-                {customer.status && (
-                  <Badge variant="secondary" className={cn('text-[10px]', statusColors[customer.status])}>
-                    {customer.status}
-                  </Badge>
-                )}
-              </SheetTitle>
-              <p className="text-xs text-muted-foreground">
-                Board: {boardTab(effectiveStatus)} · effective status {effectiveStatus}
-              </p>
-            </div>
-            <div className="flex items-center gap-2">
-              {canActivate && (
-                <Button size="sm" onClick={() => setStatusAction('activate')}>
-                  {customer.status === 'PENDING' ? 'Approve' : 'Activate'}
-                </Button>
-              )}
-              {canClose && (
-                <Button size="sm" variant="outline" onClick={() => setStatusAction('close')}>Close lead</Button>
-              )}
-              <Button size="sm" variant="outline" onClick={() => setStatusAction('deactivate')}>Deactivate</Button>
-              <Button size="icon" variant="ghost" onClick={onClose}><X size={16} /></Button>
-            </div>
+    <TmsDialog
+      open
+      onOpenChange={(v) => { if (!v) onClose() }}
+      className="tms-dialog-xl"
+      title={
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+          {customer.name}
+          {customer.status && <TmsBadge tone={statusTones[customer.status]}>{customer.status}</TmsBadge>}
+        </span>
+      }
+      footer={
+        <>
+          <TmsButton onClick={onClose}>Cancel</TmsButton>
+          <TmsButton variant="primary" onClick={save} disabled={saving || Object.keys(errors).length > 0}>{saving ? 'Saving…' : 'Save'}</TmsButton>
+        </>
+      }
+    >
+      <div style={{ display: 'grid', gap: 14 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <p className="tms-muted" style={{ fontSize: 12, margin: 0 }}>
+            Board: {boardTab(effectiveStatus)} · effective status {effectiveStatus}
+          </p>
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+            {canActivate && (
+              <TmsButton variant="primary" size="sm" onClick={() => setStatusAction('activate')}>
+                {customer.status === 'PENDING' ? 'Approve' : 'Activate'}
+              </TmsButton>
+            )}
+            {canClose && <TmsButton size="sm" onClick={() => setStatusAction('close')}>Close lead</TmsButton>}
+            <TmsButton size="sm" onClick={() => setStatusAction('deactivate')}>Deactivate</TmsButton>
           </div>
-          <div className="flex flex-wrap gap-1 pt-2">
-            {tabs.map((t) => {
-              const Icon = t.icon
-              return (
-                <button
-                  key={t.key}
-                  type="button"
-                  onClick={() => setTab(t.key)}
-                  className={cn(
-                    'inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md',
-                    tab === t.key ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'
-                  )}
-                >
-                  <Icon size={13} /> {t.label}
-                </button>
-              )
-            })}
-          </div>
-        </SheetHeader>
+        </div>
 
-        <ScrollArea className="flex-1 px-6 py-4">
-          {tab === 'account' && (
-            <div className="space-y-6">
-              <div className="grid grid-cols-3 gap-3">
-                <div>
-                  <Label className="text-xs uppercase tracking-wider text-muted-foreground">Customer name</Label>
-                  <Input value={value.name} onChange={(e) => set('name', e.target.value)} className="h-9 text-sm" />
+        <TmsTabs tabs={tabs} active={tab} onSelect={setTab} />
+
+        {tab === 'account' && (
+          <div style={{ display: 'grid', gap: 16 }}>
+            <TmsCard title="Account">
+              <div style={{ display: 'grid', gap: 16 }}>
+                <div className="tms-grid tms-grid-3">
+                  <TmsField label="Customer name">
+                    <TmsInput value={value.name} onChange={(e) => set('name', e.target.value)} />
+                  </TmsField>
+                  <TmsField label="MC #">
+                    <TmsInput value={value.mcNumber} onChange={(e) => set('mcNumber', e.target.value)} />
+                  </TmsField>
+                  <TmsField label="DOT #">
+                    <TmsInput value={value.dotNumber} onChange={(e) => set('dotNumber', e.target.value)} />
+                  </TmsField>
                 </div>
-                <div>
-                  <Label className="text-xs uppercase tracking-wider text-muted-foreground">MC #</Label>
-                  <Input value={value.mcNumber} onChange={(e) => set('mcNumber', e.target.value)} className="h-9 text-sm" />
+                <div className="tms-grid tms-grid-4">
+                  <TmsField label="Lead source">
+                    <TmsInput value={value.leadSource} onChange={(e) => set('leadSource', e.target.value)} />
+                  </TmsField>
+                  <TmsField label="Industry">
+                    <TmsInput value={value.industry} onChange={(e) => set('industry', e.target.value)} />
+                  </TmsField>
+                  <TmsField label="Service tier">
+                    <TmsInput value={value.serviceTier} onChange={(e) => set('serviceTier', e.target.value)} />
+                  </TmsField>
+                  <TmsField label="Website">
+                    <TmsInput value={value.website} onChange={(e) => set('website', e.target.value)} />
+                  </TmsField>
                 </div>
-                <div>
-                  <Label className="text-xs uppercase tracking-wider text-muted-foreground">DOT #</Label>
-                  <Input value={value.dotNumber} onChange={(e) => set('dotNumber', e.target.value)} className="h-9 text-sm" />
+                <div className="tms-grid tms-grid-2">
+                  <TmsField label="Payment terms (days)">
+                    <TmsInput type="number" min={0} value={value.paymentTermsDays} onChange={(e) => set('paymentTermsDays', e.target.value)} />
+                  </TmsField>
+                  <TmsField label="Default division">
+                    <TmsSelect
+                      value={value.defaultDivisionKey || ''}
+                      onChange={(e) => set('defaultDivisionKey', e.target.value)}
+                      placeholder="— unset —"
+                      options={divisions.map((d) => ({ value: d.key, label: d.name }))}
+                    />
+                  </TmsField>
                 </div>
+                <TmsField label="Notes">
+                  <TmsTextarea value={value.notes} onChange={(e) => set('notes', e.target.value)} />
+                </TmsField>
               </div>
-              <div className="grid grid-cols-4 gap-3">
-                <div>
-                  <Label className="text-xs uppercase tracking-wider text-muted-foreground">Lead source</Label>
-                  <Input value={value.leadSource} onChange={(e) => set('leadSource', e.target.value)} className="h-9 text-sm" />
-                </div>
-                <div>
-                  <Label className="text-xs uppercase tracking-wider text-muted-foreground">Industry</Label>
-                  <Input value={value.industry} onChange={(e) => set('industry', e.target.value)} className="h-9 text-sm" />
-                </div>
-                <div>
-                  <Label className="text-xs uppercase tracking-wider text-muted-foreground">Service tier</Label>
-                  <Input value={value.serviceTier} onChange={(e) => set('serviceTier', e.target.value)} className="h-9 text-sm" />
-                </div>
-                <div>
-                  <Label className="text-xs uppercase tracking-wider text-muted-foreground">Website</Label>
-                  <Input value={value.website} onChange={(e) => set('website', e.target.value)} className="h-9 text-sm" />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <Label className="text-xs uppercase tracking-wider text-muted-foreground">Payment terms (days)</Label>
-                  <Input type="number" min={0} value={value.paymentTermsDays} onChange={(e) => set('paymentTermsDays', e.target.value)} className="h-9 text-sm" />
-                </div>
-                <div>
-                  <Label className="text-xs uppercase tracking-wider text-muted-foreground">Default division</Label>
-                  <Select value={value.defaultDivisionKey || '__UNSET__'} onValueChange={(v) => set('defaultDivisionKey', v === '__UNSET__' ? '' : v)}>
-                    <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__UNSET__">— unset —</SelectItem>
-                      {divisions.map((d) => <SelectItem key={d.key} value={d.key}>{d.name}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              <div>
-                <Label className="text-xs uppercase tracking-wider text-muted-foreground">Notes</Label>
-                <Textarea value={value.notes} onChange={(e) => set('notes', e.target.value)} className="text-sm" />
-              </div>
-              <CreditLimitCard
-                policy={creditSummary.policy}
-                summary={creditSummary}
-                editable={isAdmin}
-                onChange={(patch) => {
-                  if (patch.creditLimitCents !== undefined) set('creditLimitCents', patch.creditLimitCents)
-                  if (patch.freeCreditRequired !== undefined) set('freeCreditRequired', patch.freeCreditRequired)
-                  if (patch.creditUsageWarningBps !== undefined) set('creditUsageWarningBps', patch.creditUsageWarningBps)
-                  if (patch.maxDaysLate !== undefined) set('maxDaysLate', patch.maxDaysLate)
-                }}
+            </TmsCard>
+            <CreditLimitCard
+              policy={creditSummary.policy}
+              summary={creditSummary}
+              editable={isAdmin}
+              onChange={(patch) => {
+                if (patch.creditLimitCents !== undefined) set('creditLimitCents', patch.creditLimitCents)
+                if (patch.freeCreditRequired !== undefined) set('freeCreditRequired', patch.freeCreditRequired)
+                if (patch.creditUsageWarningBps !== undefined) set('creditUsageWarningBps', patch.creditUsageWarningBps)
+                if (patch.maxDaysLate !== undefined) set('maxDaysLate', patch.maxDaysLate)
+              }}
+            />
+          </div>
+        )}
+
+        {tab === 'contacts' && (
+          <div style={{ display: 'grid', gap: 16 }}>
+            <TmsCard title="Contacts">
+              <ContactsEditor
+                contacts={value.contacts}
+                billToPartyIds={value.billToParties.map((p) => p.id)}
+                onChange={(contacts) => set('contacts', contacts)}
               />
-            </div>
-          )}
+            </TmsCard>
+            <TmsCard title="Bill-to parties">
+              <BillToEditor parties={value.billToParties} onChange={(parties) => set('billToParties', parties)} />
+            </TmsCard>
+          </div>
+        )}
 
-          {tab === 'contacts' && (
-            <div className="space-y-6">
-              <section>
-                <h3 className="text-sm font-semibold mb-3">Contacts</h3>
-                <ContactsEditor
-                  contacts={value.contacts}
-                  billToPartyIds={value.billToParties.map((p) => p.id)}
-                  onChange={(contacts) => set('contacts', contacts)}
+        {tab === 'documents' && (
+          <div style={{ display: 'grid', gap: 16 }}>
+            <TmsCard title="Required for accounting release">
+              <DocumentTypesField
+                label="Required documents"
+                value={value.requiredDocs}
+                onChange={(next) => set('requiredDocs', next)}
+                help="What must be on file before this customer's shipments can be released to accounting and invoiced. Leave every box clear to use the organization default; document upload is managed per shipment."
+              />
+            </TmsCard>
+            <TmsCard title="Required references">
+              <ReferencesEditor references={value.requiredReferences} onChange={(refs) => set('requiredReferences', refs)} />
+            </TmsCard>
+          </div>
+        )}
+
+        {tab === 'locations' && (
+          <div style={{ display: 'grid', gap: 8 }}>
+            {matchedLocations.length === 0 && <p className="tms-muted" style={{ fontSize: 13 }}>No linked locations.</p>}
+            {matchedLocations.map((l) => (
+              <div key={l.id} className="tms-card">
+                <div className="tms-card-body">
+                  <div style={{ fontWeight: 600 }}>{l.name}</div>
+                  <div className="tms-muted" style={{ fontSize: 12 }}>
+                    {[l.street, [l.city, l.state].filter(Boolean).join(', '), l.zip, l.country].filter(Boolean).join(' · ')}
+                  </div>
+                  {l.facilityType && <div style={{ marginTop: 4 }}><TmsBadge tone="blue">{l.facilityType}</TmsBadge></div>}
+                  {l.apptContactEmail && (
+                    <div className="tms-muted" style={{ fontSize: 12, marginTop: 4 }}>
+                      Appt: {[l.apptContactName, l.apptContactEmail, l.apptContactPhone].filter(Boolean).join(' · ')}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {tab === 'settings' && (
+          <div style={{ display: 'grid', gap: 16 }}>
+            <div className="tms-grid tms-grid-3">
+              <TmsField label="Invoice frequency">
+                <TmsSelect
+                  value={value.invoiceFrequency || ''}
+                  onChange={(e) => set('invoiceFrequency', e.target.value as InvoiceFrequency | '')}
+                  placeholder="— unset —"
+                  options={INVOICE_FREQUENCY_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
                 />
-              </section>
-              <section>
-                <h3 className="text-sm font-semibold mb-3">Bill-to parties</h3>
-                <BillToEditor parties={value.billToParties} onChange={(parties) => set('billToParties', parties)} />
-              </section>
-            </div>
-          )}
-
-          {tab === 'documents' && (
-            <div className="space-y-6">
-              <section>
-                <DocumentTypesField
-                  label="Required documents for invoice"
-                  value={value.requiredDocs}
-                  onChange={(next) => set('requiredDocs', next)}
-                  help="What must be on file before this customer's orders can be invoiced. Leave every box clear to use the organization default; document upload is managed per shipment."
+              </TmsField>
+              <TmsField label="GP split (bps)">
+                <TmsInput type="number" min={0} max={10000} value={value.gpSplitBps ?? ''} onChange={(e) => set('gpSplitBps', e.target.value ? Number(e.target.value) : null)} />
+              </TmsField>
+              <div className="tms-field">
+                <span className="tms-field-label">Team key</span>
+                <TeamPicker
+                  value={value.teamKey}
+                  onChange={(v) => set('teamKey', v)}
+                  teams={settings?.teams}
+                  allowEmpty
+                  className="h-9 text-sm"
                 />
-              </section>
-              <section>
-                <h3 className="text-sm font-semibold mb-3">Required references</h3>
-                <ReferencesEditor references={value.requiredReferences} onChange={(refs) => set('requiredReferences', refs)} />
-              </section>
+              </div>
             </div>
-          )}
+            <div className="tms-grid tms-grid-2">
+              <div className="tms-field">
+                <span className="tms-field-label">Operated by</span>
+                <RepPicker
+                  role="CUSTOMER_REP"
+                  allowUnknown
+                  value={value.operatedById}
+                  onChange={(v) => set('operatedById', v)}
+                  placeholder="Pick who operates it…"
+                />
+              </div>
+              <div className="tms-field">
+                <span className="tms-field-label">Account owners</span>
+                <RepPicker
+                  multiple
+                  role="CUSTOMER_REP"
+                  allowUnknown
+                  value={accountOwnerIds}
+                  onChange={(next) => set('accountOwnerIdsText', next.join('\n'))}
+                  placeholder="Add an account owner…"
+                />
+              </div>
+            </div>
+            <div style={{ display: 'grid', gap: 8 }}>
+              <span className="tms-field-label">Visibility preferences</span>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
+                <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}>
+                  <input type="checkbox" checked={value.visibilityPrefs.milestoneEmails} onChange={(e) => setPartial({ visibilityPrefs: { ...value.visibilityPrefs, milestoneEmails: e.target.checked } })} />
+                  Milestone emails
+                </label>
+                <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}>
+                  <input type="checkbox" checked={value.visibilityPrefs.sharedTrackingLink} onChange={(e) => setPartial({ visibilityPrefs: { ...value.visibilityPrefs, sharedTrackingLink: e.target.checked } })} />
+                  Shared tracking link
+                </label>
+                <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}>
+                  <input type="checkbox" checked={value.visibilityPrefs.shipperPortal} onChange={(e) => setPartial({ visibilityPrefs: { ...value.visibilityPrefs, shipperPortal: e.target.checked } })} />
+                  Shipper portal
+                </label>
+              </div>
+            </div>
+          </div>
+        )}
 
-          {tab === 'locations' && (
-            <div className="space-y-3">
-              {matchedLocations.length === 0 && <p className="text-sm text-muted-foreground">No linked locations.</p>}
-              {matchedLocations.map((l) => (
-                <div key={l.id} className="rounded-lg border border-border bg-card p-3">
-                  <div className="flex items-start gap-3">
-                    <MapPin size={16} className="mt-0.5 text-muted-foreground" />
-                    <div className="flex-1">
-                      <div className="text-sm font-medium">{l.name}</div>
-                      <div className="text-xs text-muted-foreground">
-                        {[l.street, [l.city, l.state].filter(Boolean).join(', '), l.zip, l.country].filter(Boolean).join(' · ')}
-                      </div>
-                      {l.facilityType && <Badge variant="outline" className="mt-1 text-[10px]">{l.facilityType}</Badge>}
-                      {l.apptContactEmail && (
-                        <div className="text-xs text-muted-foreground mt-1">
-                          Appt: {[l.apptContactName, l.apptContactEmail, l.apptContactPhone].filter(Boolean).join(' · ')}
-                        </div>
-                      )}
+        {tab === 'quoting' && (
+          <div style={{ display: 'grid', gap: 16 }}>
+            <TmsCard title="Pricing defaults">
+              <PricingDefaultsForm value={value.pricingDefaults} catalog={catalog} onChange={(pricingDefaults) => set('pricingDefaults', pricingDefaults)} />
+            </TmsCard>
+            <TmsCard title="Quoting defaults">
+              <QuotingDefaultsForm value={value.quotingDefaults} onChange={(quotingDefaults) => set('quotingDefaults', quotingDefaults)} />
+            </TmsCard>
+            <TmsCard title="Rate con terms override">
+              <TmsTextarea value={value.rateConTerms} onChange={(e) => set('rateConTerms', e.target.value)} aria-label="Rate con terms override" />
+            </TmsCard>
+          </div>
+        )}
+
+        {tab === 'shipments' && (
+          <div style={{ display: 'grid', gap: 8 }}>
+            {loadsLoading ? <p className="tms-muted" style={{ fontSize: 13 }}>Loading shipments…</p>
+              : loads.length === 0 ? <p className="tms-muted" style={{ fontSize: 13 }}>No matching shipments.</p>
+              : loads.map((load) => (
+                <div key={load.id} className="tms-card">
+                  <div className="tms-card-body">
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                      <div style={{ fontWeight: 600 }}>{load.tmsId || load.aljexId || load.id}</div>
+                      <TmsBadge>{loadStatus(load)}</TmsBadge>
+                    </div>
+                    <div className="tms-muted" style={{ fontSize: 12, marginTop: 4 }}>
+                      {load.originCity} → {load.destinationCity} · {new Date(load.pickupAppt).toLocaleDateString()}
+                    </div>
+                    <div style={{ fontSize: 12, marginTop: 4 }} className={load.rate == null ? 'tms-muted' : undefined}>
+                      {load.rate != null ? formatCents(load.rate) : 'No rate'}
                     </div>
                   </div>
                 </div>
               ))}
-            </div>
-          )}
+          </div>
+        )}
 
-          {tab === 'settings' && (
-            <div className="space-y-6">
-              <div className="grid grid-cols-3 gap-3">
-                <div>
-                  <Label className="text-xs uppercase tracking-wider text-muted-foreground">Invoice frequency</Label>
-                  <Select value={value.invoiceFrequency || '__UNSET__'} onValueChange={(v) => set('invoiceFrequency', v === '__UNSET__' ? '' : (v as InvoiceFrequency))}>
-                    <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__UNSET__">— unset —</SelectItem>
-                      {INVOICE_FREQUENCY_OPTIONS.map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <Label className="text-xs uppercase tracking-wider text-muted-foreground">GP split (bps)</Label>
-                  <Input type="number" min={0} max={10000} value={value.gpSplitBps ?? ''} onChange={(e) => set('gpSplitBps', e.target.value ? Number(e.target.value) : null)} className="h-9 text-sm" />
-                </div>
-                <div>
-                  <Label className="text-xs uppercase tracking-wider text-muted-foreground">Team key</Label>
-                  <TeamPicker
-                    value={value.teamKey}
-                    onChange={(v) => set('teamKey', v)}
-                    teams={settings?.teams}
-                    allowEmpty
-                    className="h-9 text-sm"
-                  />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <Label className="text-xs uppercase tracking-wider text-muted-foreground">Operated by</Label>
-                  <RepPicker
-                    role="CUSTOMER_REP"
-                    allowUnknown
-                    value={value.operatedById}
-                    onChange={(v) => set('operatedById', v)}
-                    placeholder="Pick who operates it…"
-                  />
-                </div>
-                <div>
-                  <Label className="text-xs uppercase tracking-wider text-muted-foreground">Account owners</Label>
-                  <RepPicker
-                    multiple
-                    role="CUSTOMER_REP"
-                    allowUnknown
-                    value={accountOwnerIds}
-                    onChange={(next) => set('accountOwnerIdsText', next.join('\n'))}
-                    placeholder="Add an account owner…"
-                  />
-                </div>
-              </div>
-              <div className="space-y-2">
-                <p className="text-xs uppercase tracking-wider text-muted-foreground">Visibility preferences</p>
-                <div className="flex flex-wrap gap-4">
-                  <Label className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <Switch checked={value.visibilityPrefs.milestoneEmails} onCheckedChange={(checked) => setPartial({ visibilityPrefs: { ...value.visibilityPrefs, milestoneEmails: checked } })} />
-                    Milestone emails
-                  </Label>
-                  <Label className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <Switch checked={value.visibilityPrefs.sharedTrackingLink} onCheckedChange={(checked) => setPartial({ visibilityPrefs: { ...value.visibilityPrefs, sharedTrackingLink: checked } })} />
-                    Shared tracking link
-                  </Label>
-                  <Label className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <Switch checked={value.visibilityPrefs.shipperPortal} onCheckedChange={(checked) => setPartial({ visibilityPrefs: { ...value.visibilityPrefs, shipperPortal: checked } })} />
-                    Shipper portal
-                  </Label>
-                </div>
-              </div>
-            </div>
-          )}
+        {tab === 'quotes' && <CustomerQuotesTab customerId={customer.id} />}
 
-          {tab === 'quoting' && (
-            <div className="space-y-6">
-              <section>
-                <h3 className="text-sm font-semibold mb-3">Pricing defaults</h3>
-                <PricingDefaultsForm value={value.pricingDefaults} catalog={catalog} onChange={(pricingDefaults) => set('pricingDefaults', pricingDefaults)} />
-              </section>
-              <section>
-                <h3 className="text-sm font-semibold mb-3">Quoting defaults</h3>
-                <QuotingDefaultsForm value={value.quotingDefaults} onChange={(quotingDefaults) => set('quotingDefaults', quotingDefaults)} />
-              </section>
-              <section>
-                <h3 className="text-sm font-semibold mb-3">Rate con terms override</h3>
-                <Textarea value={value.rateConTerms} onChange={(e) => set('rateConTerms', e.target.value)} className="text-sm" />
-              </section>
-            </div>
-          )}
+        {tab === 'ar' && (
+          <CustomerArTab
+            customerId={customer.id}
+            customerName={customer.name}
+            invoices={ar.invoices}
+            payments={ar.payments}
+            openCents={ar.openCents}
+            unappliedCents={ar.unappliedCents}
+            loading={ar.loading}
+            error={ar.error}
+            onRefresh={ar.refresh}
+          />
+        )}
+      </div>
 
-          {tab === 'orders' && (
-            <div className="space-y-3">
-              {loadsLoading ? <p className="text-sm text-muted-foreground">Loading orders…</p>
-                : loads.length === 0 ? <p className="text-sm text-muted-foreground">No matching loads.</p>
-                : loads.map((load) => (
-                  <div key={load.id} className="rounded-lg border border-border bg-card p-3">
-                    <div className="flex items-center justify-between">
-                      <div className="text-sm font-medium">{load.tmsId || load.aljexId || load.id}</div>
-                      <Badge variant="outline" className="text-[10px]">{loadStatus(load)}</Badge>
-                    </div>
-                    <div className="text-xs text-muted-foreground mt-1">
-                      {load.originCity} → {load.destinationCity} · {new Date(load.pickupAppt).toLocaleDateString()}
-                    </div>
-                    {load.rate != null && <div className="text-xs font-medium mt-1">{formatCents(load.rate)}</div>}
-                    {load.rate == null && <div className="text-xs text-muted-foreground mt-1">No rate</div>}
-                  </div>
-                ))}
-            </div>
-          )}
-
-          {tab === 'quotes' && <CustomerQuotesTab customerId={customer.id} />}
-
-          {tab === 'ar' && (
-            <CustomerArTab
-              customerId={customer.id}
-              customerName={customer.name}
-              invoices={ar.invoices}
-              payments={ar.payments}
-              openCents={ar.openCents}
-              unappliedCents={ar.unappliedCents}
-              loading={ar.loading}
-              error={ar.error}
-              onRefresh={ar.refresh}
-            />
-          )}
-        </ScrollArea>
-
-        <div className="border-t px-6 py-4 flex justify-end gap-2">
-          <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button onClick={save} disabled={saving || Object.keys(errors).length > 0}>{saving ? 'Saving…' : 'Save'}</Button>
-        </div>
-
-        <StatusActionDialog
-          open={statusAction !== null}
-          customer={customer}
-          action={statusAction}
-          activeCustomers={activeCustomers}
-          onClose={() => setStatusAction(null)}
-          onConfirm={(input) => {
-            void onStatusChange(customer, input)
-            setStatusAction(null)
-          }}
-        />
-      </SheetContent>
-    </Sheet>
+      <StatusActionDialog
+        open={statusAction !== null}
+        customer={customer}
+        action={statusAction}
+        activeCustomers={activeCustomers}
+        onClose={() => setStatusAction(null)}
+        onConfirm={(input) => {
+          void onStatusChange(customer, input)
+          setStatusAction(null)
+        }}
+      />
+    </TmsDialog>
   )
 }
 
@@ -494,31 +457,33 @@ function CustomerQuotesTab({ customerId }: { customerId: string }) {
   const decided = sell.filter((q) => q.status === 'WON' || q.status === 'LOST' || q.status === 'PASS').length
 
   return (
-    <div className="space-y-3">
-      <div className="flex items-center gap-3">
-        <div className="text-sm">
-          <span className="font-medium">{decided > 0 ? `${Math.round((won / decided) * 100)}%` : '—'}</span>
-          <span className="text-muted-foreground"> win rate · {won} of {decided} decided</span>
+    <div style={{ display: 'grid', gap: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <div style={{ fontSize: 13 }}>
+          <span style={{ fontWeight: 600 }}>{decided > 0 ? `${Math.round((won / decided) * 100)}%` : '—'}</span>
+          <span className="tms-muted"> win rate · {won} of {decided} decided</span>
         </div>
-        <Button asChild size="sm" className="ml-auto h-8">
-          <Link to={`/quotes/new?customerId=${encodeURIComponent(customerId)}`}>New quote</Link>
-        </Button>
+        <Link to={`/tms/rates/new?customerId=${encodeURIComponent(customerId)}`} className="tms-btn tms-btn-primary tms-btn-sm" style={{ marginLeft: 'auto' }}>
+          New quote
+        </Link>
       </div>
 
-      {error && <p className="text-xs text-destructive">{error}</p>}
+      {error && <p className="tms-field-error">{error}</p>}
 
-      {loading && sell.length === 0 ? <p className="text-sm text-muted-foreground">Loading quotes…</p>
-        : sell.length === 0 ? <p className="text-sm text-muted-foreground">No quotes for this customer yet.</p>
+      {loading && sell.length === 0 ? <p className="tms-muted" style={{ fontSize: 13 }}>Loading quotes…</p>
+        : sell.length === 0 ? <p className="tms-muted" style={{ fontSize: 13 }}>No quotes for this customer yet.</p>
         : sell.map((quote) => (
-          <Link key={quote.id} to={`/quotes/${quote.id}`} className="block rounded-lg border border-border bg-card p-3 no-underline">
-            <div className="flex items-center justify-between">
-              <div className="text-sm font-medium">{quote.id}</div>
-              <Badge variant="outline" className="text-[10px]">{QUOTE_STATUS_LABEL[quote.status]}</Badge>
+          <Link key={quote.id} to={`/tms/rates/${quote.id}`} className="tms-card" style={{ display: 'block', textDecoration: 'none', color: 'inherit' }}>
+            <div className="tms-card-body">
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                <div style={{ fontWeight: 600 }}>{quote.id}</div>
+                <TmsBadge>{QUOTE_STATUS_LABEL[quote.status]}</TmsBadge>
+              </div>
+              <div className="tms-muted" style={{ fontSize: 12, marginTop: 4 }}>
+                {laneLabelFor(quote.laneKey)} · {quote.quoteDate}
+              </div>
+              <div style={{ fontSize: 12, fontWeight: 600, marginTop: 4 }}>{formatQuoteCents(quote.amountCents)}</div>
             </div>
-            <div className="mt-1 text-xs text-muted-foreground">
-              {laneLabelFor(quote.laneKey)} · {quote.quoteDate}
-            </div>
-            <div className="mt-1 text-xs font-medium">{formatQuoteCents(quote.amountCents)}</div>
           </Link>
         ))}
     </div>

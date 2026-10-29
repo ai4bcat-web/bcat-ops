@@ -28,10 +28,11 @@ function StaffView() {
   if (loading) return <p>Checking access</p>
   if (!user) return <p>Signed out</p>
   return <>
-    <nav>{hasPageAccess('loads') && <a href="/loads">Loads</a>}{hasPageAccess('settings') && <a href="/settings">Settings</a>}</nav>
+    <nav>{hasPageAccess('loads') && <a href="/tms/shipments">Shipments</a>}{hasPageAccess('settings') && <a href="/settings">Settings</a>}</nav>
     <Routes>
       <Route path="/settings" element={<RequirePage page="settings"><p>Protected settings content</p></RequirePage>} />
-      <Route path="/loads" element={<RequirePage page="loads"><p>Allowed loads content</p></RequirePage>} />
+      {/* A `loads` grant lands on the shipment list, which lives under the TMS shell. */}
+      <Route path="/tms/shipments" element={<RequirePage page="loads"><p>Allowed loads content</p></RequirePage>} />
     </Routes>
   </>
 }
@@ -60,7 +61,7 @@ describe('explicit staff page grants', () => {
     auth.groups = auth.cachedGroups = ['ADMIN']
     openSettings()
     await screen.findByText('Protected settings content')
-    expect(screen.getAllByRole('link').map((a) => a.textContent)).toEqual(['Loads', 'Settings'])
+    expect(screen.getAllByRole('link').map((a) => a.textContent)).toEqual(['Shipments', 'Settings'])
   })
 
   it('keeps the owner able to administer the site without page grants', async () => {

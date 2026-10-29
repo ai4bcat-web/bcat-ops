@@ -1,10 +1,12 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { MemoryRouter } from 'react-router-dom'
 import { ShipmentDetail } from './components/ShipmentDetail'
+import { normalizeDetailTab } from './components/detailTabs'
 import type { ShipmentActions } from './useShipmentActions'
 import type {
-  LoadChargeRecord, OrderRecord, ShipmentBundle, ShipmentLoad, ShipmentRecord, ShipmentStatus,
+  LoadCarrierRecord, LoadChargeRecord, OrderRecord, ShipmentBundle, ShipmentLoad, ShipmentRecord, ShipmentStatus,
 } from '@/types/tms'
 import type { Stop } from '@/types'
 
@@ -12,6 +14,11 @@ class ResizeObserverStub { observe() {} unobserve() {} disconnect() {} }
 globalThis.ResizeObserver ??= ResizeObserverStub as unknown as typeof ResizeObserver
 if (!Element.prototype.hasPointerCapture) Element.prototype.hasPointerCapture = () => false
 if (!Element.prototype.scrollIntoView) Element.prototype.scrollIntoView = () => {}
+
+const listOwnershipDivisions = vi.hoisted(() => vi.fn())
+const listOwnershipRules = vi.hoisted(() => vi.fn())
+const previewInvoice = vi.hoisted(() => vi.fn())
+const listAuditLogs = vi.hoisted(() => vi.fn())
 
 vi.mock('@/hooks/useDrivers', () => ({ useDrivers: () => ({ drivers: [] }) }))
 vi.mock('@/hooks/useTrucks', () => ({ useTrucks: () => ({ equipment: [] }) }))
@@ -40,8 +47,21 @@ vi.mock('@/lib/apiClient', () => ({
   rateCarrier: vi.fn(),
   prepareDocumentUpload: vi.fn(),
   commitDocument: vi.fn(),
-  putPresignedFile: vi.fn(),
   saveGeneratedDocument: vi.fn(),
+  putPresignedFile: vi.fn(),
+  // Step R — the Overview division card, the Invoicing gate and the History tab.
+  listOwnershipDivisions,
+  listOwnershipRules,
+  previewInvoice,
+  listAuditLogs,
+  listUserProfiles: vi.fn(async () => []),
+  getInvoice: vi.fn(async () => null),
+  getCarrier: vi.fn(async () => null),
+  getCarrierBill: vi.fn(async () => null),
+  voidBill: vi.fn(),
+  voidInvoice: vi.fn(),
+  saveOrderForm: vi.fn(),
+  getInvoicePdfUrl: vi.fn(async () => ''),
 }))
 vi.mock('@/lib/driverSubmissionsClient', () => ({
   getDriverDocUrl: vi.fn(async () => ''),
@@ -92,10 +112,11 @@ const charges: LoadChargeRecord[] = [{
   createdBy: 'a@b.c', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
 }]
 
-function bundle(status: ShipmentStatus): ShipmentBundle {
+function bundle(status: ShipmentStatus, over: Partial<ShipmentBundle> = {}): ShipmentBundle {
   const shipment: ShipmentRecord = {
     id: 'shp-1', number: 'S000001', status, customerId: 'cust-1', customerName: 'Acme Freight',
     mode: 'FTL', source: 'MANUAL', originCity: 'Chicago, IL', destinationCity: 'Dallas, TX',
+    revDivision: 'BROKERAGE', revTagSource: 'RULE', revRuleId: 'rule-seed-7',
     createdBy: 'a@b.c', updatedBy: 'a@b.c', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
   }
   const order: OrderRecord = {
@@ -104,99 +125,294 @@ function bundle(status: ShipmentStatus): ShipmentBundle {
     createdBy: 'a@b.c', updatedBy: 'a@b.c', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
   }
   const load: ShipmentLoad = { id: 'load-1', stops, miles: 900, status: 'BOOKED', loadNumber: 'S000001-1', leg: 1 }
-  return { shipment, orders: [order], loads: [load], loadCarriers: [], charges, financials: [], documents: [] }
+  return {
+    shipment, orders: [order], loads: [load], loadCarriers: [], charges, financials: [], documents: [],
+    ...over,
+  }
 }
 
-const actions = {
-  busy: false,
-  saveForm: vi.fn(async () => {}),
-  submit: vi.fn(async () => {}),
-  stopAction: vi.fn(async () => {}),
-  saveCharges: vi.fn(async () => {}),
-  shipment: {
-    onDuplicate: vi.fn(async () => {}), onSetStatus: vi.fn(async () => {}), onDelete: vi.fn(async () => {}),
-    onRestore: vi.fn(async () => {}), onTenderRespond: vi.fn(async () => {}),
-  },
-  bookCarrier: vi.fn(async () => {}),
-  setQuickPay: vi.fn(async () => {}),
-  sendRateCon: vi.fn(async () => {}),
-  voidRateCon: vi.fn(async () => {}),
-  dispatchLoad: vi.fn(async () => {}),
-  load: {
-    onSetLoadStatus: vi.fn(async () => {}), onAssignAsset: vi.fn(async () => {}), onAssignCarrier: vi.fn(async () => {}),
-    onBookCarrier: vi.fn(async () => {}), onRemoveCarrier: vi.fn(async () => {}), onSetArStatus: vi.fn(async () => {}),
-  },
-  tracking: {
-    logCheckCall: vi.fn(async () => {}), resolveIncident: vi.fn(async () => {}),
-    setNextCheckCall: vi.fn(async () => {}), setEta: vi.fn(async () => {}),
-  },
-  reload: vi.fn(async () => {}),
-} satisfies ShipmentActions
+function ownAssetLeg(): LoadCarrierRecord {
+  return {
+    id: 'lc-1', loadId: 'load-1', shipmentId: 'shp-1', kind: 'OWN_ASSET', status: 'ACTIVE',
+    driverId: 'drv-1', driverName: 'Pavel Ivanov', truckNumber: '204', trailerNumber: 'T-19',
+    createdBy: 'a@b.c', updatedBy: 'a@b.c', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
+  }
+}
 
-function renderDetail(status: ShipmentStatus = 'BOOKED') {
+function makeActions(): ShipmentActions {
+  return {
+    busy: false,
+    saveForm: vi.fn(async () => {}),
+    submit: vi.fn(async () => {}),
+    stopAction: vi.fn(async () => {}),
+    saveCharges: vi.fn(async () => {}),
+    shipment: {
+      onDuplicate: vi.fn(async () => {}), onSetStatus: vi.fn(async () => {}),
+      onVoid: vi.fn(), onTenderRespond: vi.fn(async () => {}),
+    },
+    bookCarrier: vi.fn(async () => {}),
+    setQuickPay: vi.fn(async () => {}),
+    sendRateCon: vi.fn(async () => {}),
+    voidRateCon: vi.fn(async () => {}),
+    onSetRevTag: vi.fn(async () => {}),
+    onClearRevTag: vi.fn(async () => {}),
+    onSetSalesRep: vi.fn(async () => {}),
+    dispatchLoad: vi.fn(async () => {}),
+    load: {
+      onSetLoadStatus: vi.fn(async () => {}), onAssignAsset: vi.fn(async () => {}), onAssignCarrier: vi.fn(async () => {}),
+      onBookCarrier: vi.fn(async () => {}), onRemoveCarrier: vi.fn(async () => {}), onSetArStatus: vi.fn(async () => {}),
+    },
+    tracking: {
+      logCheckCall: vi.fn(async () => {}), resolveIncident: vi.fn(async () => {}),
+      setNextCheckCall: vi.fn(async () => {}), setEta: vi.fn(async () => {}),
+    },
+    reload: vi.fn(async () => {}),
+  }
+}
+
+let actions = makeActions()
+
+beforeEach(() => {
+  vi.clearAllMocks()
+  actions = makeActions()
+  listOwnershipDivisions.mockResolvedValue([])
+  listOwnershipRules.mockResolvedValue([])
+  listAuditLogs.mockResolvedValue([])
+})
+
+function renderDetail(
+  status: ShipmentStatus = 'BOOKED',
+  over: Partial<React.ComponentProps<typeof ShipmentDetail>> = {},
+  bundleOver: Partial<ShipmentBundle> = {},
+) {
   render(
-    <ShipmentDetail
-      bundle={bundle(status)}
-      customer={null}
-      locations={[]}
-      catalog={[]}
-      pricing={null}
-      marginFloorBps={null}
-      requiredReferences={[]}
-      credit={null}
-      currentUser="ryne@bcatcorp.com"
-      isAdmin={false}
-      actions={actions}
-    />,
+    <MemoryRouter>
+      <ShipmentDetail
+        bundle={bundle(status, bundleOver)}
+        customer={null}
+        locations={[]}
+        catalog={[]}
+        pricing={null}
+        marginFloorBps={null}
+        requiredReferences={[]}
+        credit={null}
+        currentUser="ryne@bcatcorp.com"
+        isAdmin={false}
+        actions={actions}
+        {...over}
+      />
+    </MemoryRouter>,
   )
 }
 
-describe('ShipmentDetail', () => {
-  it('opens on Summary with the shipment’s own facts', () => {
+describe('ShipmentDetail tabs', () => {
+  it('opens on Overview with the facts the old Summary and Details tabs both held', () => {
     renderDetail()
-    expect(screen.getByRole('tab', { name: 'Summary' }).getAttribute('aria-selected')).toBe('true')
+    expect(screen.getByRole('tab', { name: 'Overview' }).getAttribute('aria-selected')).toBe('true')
     expect(screen.getByText('Acme Freight')).toBeTruthy()
     expect(screen.getByText('Chicago, IL')).toBeTruthy()
     expect(screen.getByText('$2000.00')).toBeTruthy()
+    // Previously the Details tab: one record, one set of facts.
+    expect(screen.getByText('S000001-1')).toBeTruthy()
+    expect(screen.getByText("53' Dry Van")).toBeTruthy()
   })
 
-  it('shows all seven tabs and switches between them', async () => {
+  it('shows the nine tabs and switches between them', async () => {
     renderDetail()
-    for (const name of ['Summary', 'Details', 'Stops', 'Carrier', 'Tracking', 'Documents', 'Financials']) {
-      expect(screen.getByRole('tab', { name })).toBeTruthy()
-    }
+    const names = [
+      'Overview', 'Stops', 'Carrier/Driver', 'Tracking', 'Documents', 'Financials', 'Invoicing', 'Carrier Pay', 'History',
+    ]
+    for (const name of names) expect(screen.getByRole('tab', { name })).toBeTruthy()
 
     fireEvent.click(screen.getByRole('tab', { name: 'Stops' }))
     await waitFor(() => expect(screen.getByText('Acme Dock 4')).toBeTruthy())
-    expect(screen.getByText('Globex DC')).toBeTruthy()
-
-    fireEvent.click(screen.getByRole('tab', { name: 'Details' }))
-    await waitFor(() => expect(screen.getByText('S000001-1')).toBeTruthy())
 
     fireEvent.click(screen.getByRole('tab', { name: 'Documents' }))
     await waitFor(() => expect(screen.getByText('docs:POD')).toBeTruthy())
-    expect(screen.getByText('docs:RATECON')).toBeTruthy()
 
     fireEvent.click(screen.getByRole('tab', { name: 'Financials' }))
     await waitFor(() => expect(screen.getByTestId('financial-totals')).toBeTruthy())
-
-    // Step H: the lane history sits under the lines, and the offers card above the
-    // assignment block — a load with nobody on it still has a buy side.
     expect(screen.getByTestId('lane-history')).toBeTruthy()
-    fireEvent.click(screen.getByRole('tab', { name: 'Carrier' }))
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Carrier/Driver' }))
     await waitFor(() => expect(screen.getByTestId('carrier-offers')).toBeTruthy())
-    expect(screen.getByText('Nobody is on this load yet. Book a carrier from the Details tab.')).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('tab', { name: 'History' }))
+    await waitFor(() => expect(listAuditLogs).toHaveBeenCalled())
+  })
+
+  it('maps the pre-merge deep links onto Overview and keeps the new keys', () => {
+    expect(normalizeDetailTab('summary')).toBe('overview')
+    expect(normalizeDetailTab('details')).toBe('overview')
+    expect(normalizeDetailTab('carrierPay')).toBe('carrierPay')
+    expect(normalizeDetailTab('nonsense')).toBeUndefined()
+  })
+
+  it('opens on the tab a deep link asked for', async () => {
+    renderDetail('BOOKED', { initialTab: 'carrierPay' })
+    await waitFor(() => expect(screen.getByRole('tab', { name: 'Carrier Pay' }).getAttribute('aria-selected')).toBe('true'))
+  })
+
+  it('never shows the user the word Order', () => {
+    renderDetail()
+    expect(screen.queryByText(/\bOrder\b/)).toBeNull()
   })
 
   it('shows the draft editor instead of tabs while the shipment is a draft', () => {
     renderDetail('DRAFT')
-    expect(screen.queryByRole('tab', { name: 'Summary' })).toBeNull()
-    expect(screen.getByRole('button', { name: 'Submit order' })).toBeTruthy()
+    expect(screen.queryByRole('tab', { name: 'Overview' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Submit shipment' })).toBeTruthy()
   })
 
   it('refuses stop edits on a canceled shipment', async () => {
     renderDetail('CANCELED')
     fireEvent.click(screen.getByRole('tab', { name: 'Stops' }))
     await waitFor(() => expect((screen.getByLabelText('Stop 1 actions') as HTMLButtonElement).disabled).toBe(true))
+  })
+
+  it('freezes stop edits on a voided shipment', async () => {
+    renderDetail('BOOKED', {}, {
+      shipment: {
+        ...bundle('BOOKED').shipment,
+        voidedAt: '2026-04-04T10:00:00.000Z', voidedBy: 'ryne@bcatcorp.com', voidReason: 'Duplicate of S000002',
+      },
+    })
+    fireEvent.click(screen.getByRole('tab', { name: 'Stops' }))
+    await waitFor(() => expect((screen.getByLabelText('Stop 1 actions') as HTMLButtonElement).disabled).toBe(true))
+  })
+})
+
+describe('Overview division card', () => {
+  const divisions = [
+    {
+      id: 'BROKERAGE', code: 'BROKERAGE', name: 'BCAT Logistics', brand: 'BCAT Logistics', parentId: null,
+      color: '#f4c50c', sortOrder: 10, active: true, owners: null, flows: null,
+      createdBy: 'a@b.c', updatedBy: 'a@b.c', version: 1, createdAt: '', updatedAt: '',
+    },
+    {
+      id: 'ASSETS', code: 'ASSETS', name: 'Ivan Cartage', brand: 'Ivan Cartage', parentId: null,
+      color: '#0a81ff', sortOrder: 20, active: true, owners: null, flows: null,
+      createdBy: 'a@b.c', updatedBy: 'a@b.c', version: 1, createdAt: '', updatedAt: '',
+    },
+    {
+      id: 'BOX_TRUCK', code: 'BOX_TRUCK', name: 'Box Trucks', brand: null, parentId: 'ASSETS',
+      color: null, sortOrder: 10, active: true, owners: null, flows: null,
+      createdBy: 'a@b.c', updatedBy: 'a@b.c', version: 1, createdAt: '', updatedAt: '',
+    },
+  ]
+  const rules = [{
+    id: 'rule-seed-7', name: 'Everything else is Brokerage', sortOrder: 70, active: true,
+    condition: { kind: 'ALWAYS' as const }, divisionCode: 'BROKERAGE',
+    createdBy: 'a@b.c', updatedBy: 'a@b.c', version: 1, createdAt: '', updatedAt: '',
+  }]
+
+  it('names the rule that tagged the shipment', async () => {
+    listOwnershipDivisions.mockResolvedValue(divisions)
+    listOwnershipRules.mockResolvedValue(rules)
+    renderDetail()
+    await waitFor(() => expect(screen.getByTestId('division-chip').textContent).toBe('BCAT Logistics'))
+    expect(screen.getByTestId('division-provenance').textContent).toBe('Tagged by rule Everything else is Brokerage')
+  })
+
+  it('hand-tags through the client and offers the way back to the rules', async () => {
+    listOwnershipDivisions.mockResolvedValue(divisions)
+    listOwnershipRules.mockResolvedValue(rules)
+    renderDetail('BOOKED', { isAdmin: true })
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Set tag…' }))
+    fireEvent.change(await screen.findByLabelText('Division'), { target: { value: 'ASSETS' } })
+    fireEvent.change(screen.getByLabelText('Subdivision'), { target: { value: 'BOX_TRUCK' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Set tag' }))
+
+    await waitFor(() => expect(actions.onSetRevTag).toHaveBeenCalledWith({
+      divisionCode: 'ASSETS', subdivisionCode: 'BOX_TRUCK',
+    }))
+  })
+
+  it('offers Back to rules only on a hand tag, and clears through the client', async () => {
+    listOwnershipDivisions.mockResolvedValue(divisions)
+    listOwnershipRules.mockResolvedValue(rules)
+    renderDetail('BOOKED', { isAdmin: true }, {
+      shipment: {
+        ...bundle('BOOKED').shipment,
+        revTagSource: 'HAND', revRuleId: null, revDivision: 'ASSETS', revTaggedBy: 'dennis@bcatcorp.com',
+      },
+    })
+
+    await waitFor(() => expect(screen.getByTestId('division-provenance').textContent)
+      .toBe('Hand-tagged by dennis@bcatcorp.com'))
+    fireEvent.click(screen.getByRole('button', { name: 'Back to rules' }))
+    await waitFor(() => expect(actions.onClearRevTag).toHaveBeenCalled())
+  })
+
+  it('hides the tag controls from a user who may not tag', async () => {
+    listOwnershipDivisions.mockResolvedValue(divisions)
+    renderDetail()
+    await waitFor(() => expect(screen.getByTestId('division-card')).toBeTruthy())
+    expect(screen.queryByRole('button', { name: 'Set tag…' })).toBeNull()
+  })
+})
+
+describe('Invoicing release gate', () => {
+  it('lists every missing requirement the gate reported', async () => {
+    previewInvoice.mockResolvedValue({
+      readiness: { ready: false, reasons: [] },
+      gate: { ok: false, required: [], present: [], missing: [] },
+      releaseGate: {
+        ok: false,
+        missing: [
+          { code: 'DOC_MISSING', detail: 'POD', message: 'Missing document: POD' },
+          { code: 'REFERENCE_MISSING', detail: 'PO', message: 'Missing reference: PO number' },
+        ],
+      },
+      snapshot: {},
+      recipients: { to: [], cc: [] },
+      attachments: [],
+    })
+    renderDetail('DELIVERED')
+    fireEvent.click(screen.getByRole('tab', { name: 'Invoicing' }))
+
+    const list = await screen.findByTestId('release-gate-missing')
+    expect(list.textContent).toContain('Missing document: POD')
+    expect(list.textContent).toContain('Missing reference: PO number')
+  })
+
+  it('says it is ready when the gate passes', async () => {
+    previewInvoice.mockResolvedValue({
+      readiness: { ready: true, reasons: [] },
+      gate: { ok: true, required: [], present: [], missing: [] },
+      releaseGate: { ok: true, missing: [] },
+      snapshot: {},
+      recipients: { to: [], cc: [] },
+      attachments: [],
+    })
+    renderDetail('DELIVERED')
+    fireEvent.click(screen.getByRole('tab', { name: 'Invoicing' }))
+
+    expect((await screen.findByTestId('release-gate-ok')).textContent).toContain('Ready for accounting')
+  })
+
+  it('does not run the gate before the shipment is delivered', async () => {
+    renderDetail('BOOKED')
+    fireEvent.click(screen.getByRole('tab', { name: 'Invoicing' }))
+    await waitFor(() => expect(screen.getByTestId('release-gate')).toBeTruthy())
+    expect(previewInvoice).not.toHaveBeenCalled()
+  })
+})
+
+describe('own fleet on the Carrier/Driver tab', () => {
+  it('shows the driver, the truck, the trailer and where the load already is', async () => {
+    renderDetail('BOOKED', {}, { loadCarriers: [ownAssetLeg()] })
+    fireEvent.click(screen.getByRole('tab', { name: 'Carrier/Driver' }))
+
+    await waitFor(() => expect(screen.getAllByText('Pavel Ivanov').length).toBeGreaterThan(0))
+    expect(screen.getByText('204')).toBeTruthy()
+    expect(screen.getByText('T-19')).toBeTruthy()
+
+    const links = screen.getByTestId('own-fleet-links')
+    expect(links.querySelector('a[href="/calendar"]')).toBeTruthy()
+    expect(links.querySelector('a[href="/dispatch"]')).toBeTruthy()
+    // No driver profile in the store, so the generic weekly settlement page.
+    expect(screen.getByTestId('own-fleet-settlement').getAttribute('href')).toBe('/driver-pay')
   })
 })

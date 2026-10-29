@@ -12,13 +12,9 @@
 import { useMemo, useState } from 'react'
 import { AlertTriangle, Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
-import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
+import { TmsBadge, TmsButton, TmsDialog, TmsInput, TmsSelect, TmsTextarea } from '@/features/tms/kit'
 import { Checkbox } from '@/components/ui/checkbox'
-import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { MoneyField } from '@/features/directory/components/MoneyField'
 import { formatDateTimeInput, fromDateTimeInput } from '@/lib/date'
 import {
@@ -165,37 +161,45 @@ export function LogCheckCallDialog({
   const working = busy || saving
 
   return (
-    <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
-      <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
-        <DialogHeader><DialogTitle>Log check call</DialogTitle></DialogHeader>
-
+    <TmsDialog
+      open
+      onOpenChange={(open) => { if (!open) onClose() }}
+      title="Log check call"
+      className="tms-dialog-wide"
+      footer={
+        <>
+          <TmsButton variant="ghost" onClick={onClose} disabled={working}>Cancel</TmsButton>
+          <TmsButton variant="primary" onClick={() => { void submit() }} disabled={working}>{working ? 'Logging…' : 'Log check call'}</TmsButton>
+        </>
+      }
+    >
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <Label className="text-xs uppercase tracking-wider text-muted-foreground">When</Label>
-            <Input aria-label="Check call time" type="datetime-local" value={at} onChange={(e) => setAt(e.target.value)} className="h-9 text-sm" />
+            <Label className="tms-field-label">When</Label>
+            <TmsInput aria-label="Check call time" type="datetime-local" value={at} onChange={(e) => setAt(e.target.value)} className="h-9 text-sm" />
           </div>
           <div>
-            <Label className="text-xs uppercase tracking-wider text-muted-foreground">Event</Label>
-            <select
+            <Label className="tms-field-label">Event</Label>
+            <TmsSelect
               aria-label="Check call type"
               value={type}
               onChange={(e) => setType(e.target.value as CheckCallType)}
-              className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+              className="mt-1 h-9 w-full rounded-md border border-[color:var(--tms-input-border)] bg-[color:var(--tms-input)] px-2 text-sm"
             >
               {MANUALLY_LOGGABLE_TYPES.map((t) => (
                 <option key={t} value={t}>{CHECK_CALL_TYPE_LABELS[t]}</option>
               ))}
-            </select>
+            </TmsSelect>
           </div>
 
           {isStopEvent && (
             <div className="col-span-2">
-              <Label className="text-xs uppercase tracking-wider text-muted-foreground">Stop</Label>
-              <select
+              <Label className="tms-field-label">Stop</Label>
+              <TmsSelect
                 aria-label="Check call stop"
                 value={stopId}
                 onChange={(e) => setStopId(e.target.value)}
-                className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                className="mt-1 h-9 w-full rounded-md border border-[color:var(--tms-input-border)] bg-[color:var(--tms-input)] px-2 text-sm"
               >
                 {stops.length === 0 && <option value="">— this load has no stops —</option>}
                 {stops.map((s) => (
@@ -203,50 +207,50 @@ export function LogCheckCallDialog({
                     {s.sequence + 1}. {s.type} — {[s.name, s.city].filter(Boolean).join(', ') || 'stop'}
                   </option>
                 ))}
-              </select>
+              </TmsSelect>
             </div>
           )}
 
           {type === 'INCIDENT' && (
             <div className="col-span-2">
-              <Label className="text-xs uppercase tracking-wider text-muted-foreground">Incident</Label>
-              <select
+              <Label className="tms-field-label">Incident</Label>
+              <TmsSelect
                 aria-label="Incident type"
                 value={incidentType}
                 onChange={(e) => setIncidentType(e.target.value as IncidentType | '')}
-                className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                className="mt-1 h-9 w-full rounded-md border border-[color:var(--tms-input-border)] bg-[color:var(--tms-input)] px-2 text-sm"
               >
                 <option value="">— pick one —</option>
                 {INCIDENT_TYPES.map((i) => (
                   <option key={i} value={i}>{INCIDENT_TYPE_LABELS[i]}</option>
                 ))}
-              </select>
+              </TmsSelect>
             </div>
           )}
 
           <div>
-            <Label className="text-xs uppercase tracking-wider text-muted-foreground">City</Label>
-            <Input aria-label="Check call city" value={city} onChange={(e) => setCity(e.target.value)} className="h-9 text-sm" />
+            <Label className="tms-field-label">City</Label>
+            <TmsInput aria-label="Check call city" value={city} onChange={(e) => setCity(e.target.value)} className="h-9 text-sm" />
           </div>
           <div>
-            <Label className="text-xs uppercase tracking-wider text-muted-foreground">State</Label>
-            <Input aria-label="Check call state" value={stateCode} onChange={(e) => setStateCode(e.target.value)} className="h-9 text-sm" />
+            <Label className="tms-field-label">State</Label>
+            <TmsInput aria-label="Check call state" value={stateCode} onChange={(e) => setStateCode(e.target.value)} className="h-9 text-sm" />
           </div>
           <div>
-            <Label className="text-xs uppercase tracking-wider text-muted-foreground">Latitude</Label>
-            <Input aria-label="Check call latitude" inputMode="decimal" value={lat} onChange={(e) => setLat(e.target.value)} className="h-9 text-sm" />
+            <Label className="tms-field-label">Latitude</Label>
+            <TmsInput aria-label="Check call latitude" inputMode="decimal" value={lat} onChange={(e) => setLat(e.target.value)} className="h-9 text-sm" />
           </div>
           <div>
-            <Label className="text-xs uppercase tracking-wider text-muted-foreground">Longitude</Label>
-            <Input aria-label="Check call longitude" inputMode="decimal" value={lng} onChange={(e) => setLng(e.target.value)} className="h-9 text-sm" />
+            <Label className="tms-field-label">Longitude</Label>
+            <TmsInput aria-label="Check call longitude" inputMode="decimal" value={lng} onChange={(e) => setLng(e.target.value)} className="h-9 text-sm" />
           </div>
           <div>
-            <Label className="text-xs uppercase tracking-wider text-muted-foreground">Who we spoke to</Label>
-            <Input aria-label="Person name" value={personName} onChange={(e) => setPersonName(e.target.value)} className="h-9 text-sm" />
+            <Label className="tms-field-label">Who we spoke to</Label>
+            <TmsInput aria-label="Person name" value={personName} onChange={(e) => setPersonName(e.target.value)} className="h-9 text-sm" />
           </div>
           <div className="col-span-2">
-            <Label className="text-xs uppercase tracking-wider text-muted-foreground">Notes</Label>
-            <Textarea aria-label="Check call note" rows={2} value={note} onChange={(e) => setNote(e.target.value)} className="text-sm" />
+            <Label className="tms-field-label">Notes</Label>
+            <TmsTextarea aria-label="Check call note" rows={2} value={note} onChange={(e) => setNote(e.target.value)} className="text-sm" />
           </div>
         </div>
 
@@ -262,43 +266,43 @@ export function LogCheckCallDialog({
         )}
 
         {type === 'INCIDENT' && (
-          <section className="space-y-2 rounded-lg border border-border p-3">
+          <section className="space-y-2 rounded-[var(--tms-radius)] border border-[color:var(--tms-border)] p-3">
             <div className="flex items-center justify-between">
-              <p className="text-xs uppercase tracking-wider text-muted-foreground">Charges</p>
-              <Button
-                type="button" variant="outline" size="sm" className="h-7"
+              <p className="text-xs uppercase tracking-wider tms-muted">Charges</p>
+              <TmsButton
+                type="button" size="sm" className="h-7"
                 onClick={() => setCharges((prev) => [...prev, { side: 'CUSTOMER', code: '', rateCents: 0 }])}
               >
                 <Plus size={13} className="mr-1" />Add charge
-              </Button>
+              </TmsButton>
             </div>
-            {charges.length === 0 && <p className="text-xs text-muted-foreground">No charges — most incidents cost nothing.</p>}
+            {charges.length === 0 && <p className="text-xs tms-muted">No charges — most incidents cost nothing.</p>}
             {charges.map((row, index) => (
               <div key={index} className="grid grid-cols-12 items-end gap-2">
                 <div className="col-span-3">
-                  <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">Side</Label>
-                  <select
+                  <Label className="tms-field-label">Side</Label>
+                  <TmsSelect
                     aria-label={`Charge ${index + 1} side`}
                     value={row.side}
                     onChange={(e) => setCharges((prev) => prev.map((r, i) => i === index ? { ...r, side: e.target.value as ChargeRow['side'] } : r))}
-                    className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                    className="mt-1 h-9 w-full rounded-md border border-[color:var(--tms-input-border)] bg-[color:var(--tms-input)] px-2 text-sm"
                   >
                     <option value="CUSTOMER">Customer</option>
                     <option value="CARRIER">Carrier</option>
                     <option value="BOTH">Both</option>
-                  </select>
+                  </TmsSelect>
                 </div>
                 <div className="col-span-5">
-                  <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">Code</Label>
-                  <select
+                  <Label className="tms-field-label">Code</Label>
+                  <TmsSelect
                     aria-label={`Charge ${index + 1} code`}
                     value={row.code}
                     onChange={(e) => setCharges((prev) => prev.map((r, i) => i === index ? { ...r, code: e.target.value } : r))}
-                    className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                    className="mt-1 h-9 w-full rounded-md border border-[color:var(--tms-input-border)] bg-[color:var(--tms-input)] px-2 text-sm"
                   >
                     <option value="">— pick a code —</option>
                     {catalog.map((c) => <option key={c.code} value={c.code}>{c.code} · {c.label}</option>)}
-                  </select>
+                  </TmsSelect>
                 </div>
                 <div className="col-span-3">
                   <MoneyField
@@ -308,18 +312,18 @@ export function LogCheckCallDialog({
                   />
                 </div>
                 <div className="col-span-1 flex justify-end pb-1">
-                  <Button
-                    type="button" variant="ghost" size="icon" className="h-7 w-7"
+                  <TmsButton variant="ghost"
+                    type="button" size="sm" className="h-7 w-7"
                     aria-label={`Remove charge ${index + 1}`}
                     onClick={() => setCharges((prev) => prev.filter((_, i) => i !== index))}
                   >
                     <Trash2 size={14} />
-                  </Button>
+                  </TmsButton>
                 </div>
               </div>
             ))}
             {charges.some((c) => c.side !== 'CUSTOMER') && !loadCarrier && (
-              <p className="flex items-start gap-2 text-xs text-destructive">
+              <p className="flex items-start gap-2 text-xs text-[color:var(--tms-badge-red)]">
                 <AlertTriangle size={13} className="mt-0.5 shrink-0" />
                 Nothing can be charged to a carrier until one is assigned.
               </p>
@@ -327,33 +331,27 @@ export function LogCheckCallDialog({
           </section>
         )}
 
-        <section className="space-y-2 rounded-lg border border-border p-3">
-          <p className="text-xs uppercase tracking-wider text-muted-foreground">Next check call</p>
+        <section className="space-y-2 rounded-[var(--tms-radius)] border border-[color:var(--tms-border)] p-3">
+          <p className="text-xs uppercase tracking-wider tms-muted">Next check call</p>
           <div className="flex flex-wrap items-center gap-2">
-            <Button type="button" variant="outline" size="sm" className="h-7" onClick={() => setNextAt(formatDateTimeInput(new Date(Date.now() + 2 * HOUR_MS).toISOString()))}>+2 h</Button>
-            <Button type="button" variant="outline" size="sm" className="h-7" onClick={() => setNextAt(formatDateTimeInput(new Date(Date.now() + 4 * HOUR_MS).toISOString()))}>+4 h</Button>
-            <Button type="button" variant="outline" size="sm" className="h-7" onClick={() => setNextAt(formatDateTimeInput(tomorrowMorning()))}>Tomorrow 08:00</Button>
-            <Button type="button" variant="ghost" size="sm" className="h-7" onClick={() => setNextAt('')}>No reminder</Button>
+            <TmsButton type="button" size="sm" className="h-7" onClick={() => setNextAt(formatDateTimeInput(new Date(Date.now() + 2 * HOUR_MS).toISOString()))}>+2 h</TmsButton>
+            <TmsButton type="button" size="sm" className="h-7" onClick={() => setNextAt(formatDateTimeInput(new Date(Date.now() + 4 * HOUR_MS).toISOString()))}>+4 h</TmsButton>
+            <TmsButton type="button" size="sm" className="h-7" onClick={() => setNextAt(formatDateTimeInput(tomorrowMorning()))}>Tomorrow 08:00</TmsButton>
+            <TmsButton variant="ghost" type="button" size="sm" className="h-7" onClick={() => setNextAt('')}>No reminder</TmsButton>
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <Input aria-label="Next check call at" type="datetime-local" value={nextAt} onChange={(e) => setNextAt(e.target.value)} className="h-9 text-sm" />
-            <Input aria-label="Next check call note" placeholder="What to ask next time" value={nextNote} onChange={(e) => setNextNote(e.target.value)} className="h-9 text-sm" />
+            <TmsInput aria-label="Next check call at" type="datetime-local" value={nextAt} onChange={(e) => setNextAt(e.target.value)} className="h-9 text-sm" />
+            <TmsInput aria-label="Next check call note" placeholder="What to ask next time" value={nextNote} onChange={(e) => setNextNote(e.target.value)} className="h-9 text-sm" />
           </div>
         </section>
 
         <div className="flex items-center gap-1.5 text-sm" data-testid="check-call-preview">
           {preview
-            ? <>Moves the load to <Badge variant="outline" className="text-[10px]">{preview}</Badge></>
-            : <span className="text-muted-foreground">Does not change the load status.</span>}
+            ? <>Moves the load to <TmsBadge tone="gray" className="text-[10px]">{preview}</TmsBadge></>
+            : <span className="tms-muted">Does not change the load status.</span>}
         </div>
 
-        {error && <p className="text-xs text-destructive">{error}</p>}
-
-        <DialogFooter>
-          <Button variant="ghost" onClick={onClose} disabled={working}>Cancel</Button>
-          <Button onClick={() => { void submit() }} disabled={working}>{working ? 'Logging…' : 'Log check call'}</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        {error && <p className="text-xs text-[color:var(--tms-badge-red)]">{error}</p>}
+    </TmsDialog>
   )
 }

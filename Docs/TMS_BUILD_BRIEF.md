@@ -42,6 +42,22 @@ no production infrastructure changes until Ryne merges `dev` → `main`.
   `aws amplify list-jobs --app-id d3dejqzs77khq6 --branch-name dev --max-results 1` is not
   RUNNING/PENDING (two concurrent deploys collide in CloudFormation). A failed deploy is
   yours to fix next, before any other work.
+- **PRO numbers are permanent (Ryne, 2026-10-28 — "the most important thing").** A shipment
+  and its PRO number can never be deleted, by anyone, through any path: no delete mutation
+  on Shipment/Load reachable from the client, no delete action in any router, no delete
+  button. The only way a shipment leaves the working set is **Void**, and only the owner or
+  a member of the ADMIN group may void, enforced in the Lambda from the caller's identity
+  (not from the UI). A voided shipment keeps its PRO, its history and its documents, shows as
+  VOIDED with who/when/why, cannot be invoiced, and the PRO is never reused. Audit every
+  void. If any existing TMS code (A–I) exposes a delete, remove it in Step R and log it.
+- **Release to accounting is gated (Ryne).** A shipment reaches AR ("Docs needed" →
+  "Unbilled" and onward, Step F) only when it meets every MVMNT requirement from the spec:
+  delivered status, the customer's required document types all present (BOL, POD, rate
+  confirmation, and whatever the customer's invoice settings require), the customer's
+  required reference numbers all filled, carrier charges settled or the own-fleet leg
+  recorded, and no open exceptions. The gate is enforced server-side in the finance router;
+  the UI lists exactly what is missing. Nothing may bypass it, including the factoring
+  hand-off and batch invoicing.
 - Do not commit `invoice_extraction.json` or `invoice_ocr_raw.json` (customer PII).
 - Do not add dependencies without a one-line reason in the commit message.
 - Follow `Docs/STYLE.md` and the patterns already in `src/features/*` (Zustand store,
@@ -95,6 +111,44 @@ Ryne reviewed dev and gave four corrections. They apply to every TMS page alread
    counts. Dashboards and reports group by division and, within ASSETS, by subsidiary, so
    owner-operator, box-truck and local work can each be read on their own and still roll up
    to Ivan Cartage.
+   **Self-serve ownership taxonomy (Ryne):** none of the above is hard-coded. Divisions,
+   subsidiaries and the rules that tag a shipment are **data an admin edits**, so BCAT can
+   add tags or subsidiaries itself and the same TMS could be handed to another company who
+   defines their own parties. Build it as:
+   - `OwnershipDivision` model: `code`, `name`, `brand` (shown in brackets in the sidebar),
+     `parentId` (null = top-level business; set = subsidiary; any depth), `color`, `sortOrder`,
+     `active`, and per-division **ownership settings**: which party owns *building*,
+     *booking*, *tracking*, *invoicing (AR)*, *carrier pay (AP)* and *settlements* for its
+     shipments, and which existing views it flows into (calendar, dispatch, driver app,
+     driver pay, fleet dashboards, car-shipping pages). The three businesses, the three Ivan
+     subsidiaries and the Company group are the **seed rows**, not constants.
+   - `OwnershipRule` model: ordered rules an admin edits — a condition (carrier is / driver
+     program is / driver fleet group is / customer is / equipment or mode is / load source
+     is / reference matches) → a division; first match wins; a shipment can also be tagged
+     by hand, and a hand tag beats the rules. The rules Ryne described (Ivan Cartage carrier
+     → ASSETS; owner-operator / box-truck / local driver → the matching subsidiary; vehicle
+     transport → CAR_SHIPPING; otherwise BROKERAGE) are the seed rules.
+   - Shipment/Load `revDivision` and `revSubdivision` store division **codes** resolved
+     through the rules; re-resolve on carrier/driver/customer change unless hand-tagged.
+   - Admin UI under My Brokerage → Settings → **Divisions & ownership**: tree of divisions
+     with their brands and ownership settings, the rule list with drag ordering and a
+     "test a shipment" preview, and a re-tag button that re-runs the rules over existing
+     shipments and reports counts. Owner/ADMIN only. Sidebar sections, dashboard grouping
+     and reports read the division tree, so adding a division adds it everywhere.
+   **Department views under Shipments (Ryne):** Shipments gets a sub-category of saved
+   **department views**, so each department opens the slice it cares about. Build on
+   MVMNT's "Views" idea: a `ShipmentView` model (`name`, `department`, `description`,
+   `filters` JSON — division/subdivision, status, carrier type, rep, date window, docs
+   state, tracking state, AR/AP state —, `columns`, `sort`, `isDefault`, `audience`: the
+   roles/groups/divisions that see it, `sortOrder`, `active`), admin-editable in the same
+   self-serve way as divisions (My Brokerage → Settings → **Shipment views**, with "save the
+   current filters as a view" available right on the Shipments page for owner/ADMIN).
+   In the sidebar, Shipments becomes expandable and lists the views the signed-in user may
+   see as children (`/tms/shipments/view/<slug>`); on the page they are the view tabs. Seed
+   views: Dispatch (Ivan Cartage, today/tomorrow), Tracking (in transit, tracked), POD
+   collection (delivered, POD missing), Accounting (docs needed / unbilled / unpaid), Sales
+   (by rep, quotes → booked), Brokerage board, Car shipping board, Owner operators, Box
+   trucks, Local drivers. Views are data: adding a department is adding a row.
 3. **Three sidebar sections — the three businesses** (Ryne, later the same evening; this
    supersedes the earlier "two sections" wording). The whole system is divided into:
    - **BROKERAGE (BCAT Logistics)** — the TMS pages, in MVMNT's own order (Dashboard,

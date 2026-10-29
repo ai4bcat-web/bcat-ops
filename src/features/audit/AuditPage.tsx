@@ -1,77 +1,69 @@
+/**
+ * The audit log, as the Audit tab of My Brokerage.
+ *
+ * `BrokeragePage` owns the h1 and the tab strip, so this is an embedded list: the
+ * MVMNT filter row, table, empty state and footer, with no title row of its own.
+ */
+import { useMemo, useState } from 'react'
+import { TmsBadge, TmsListPage } from '@/features/tms/kit'
+import type { ColumnDef, TmsTone } from '@/features/tms/kit'
 import { useAuditLog } from '@/hooks/useAuditLog'
-import { Badge } from '@/components/ui/badge'
-import {
-  Table, TableHeader, TableBody, TableRow, TableHead, TableCell,
-} from '@/components/ui/table'
 import { formatDateTime } from '@/lib/date'
+import type { AuditAction, AuditLogEntry } from '@/types'
 
-const ACTION_VARIANTS = {
-  create: 'green' as const,
-  update: 'orange' as const,
-  delete: 'destructive' as const,
+const ACTION_TONES: Record<AuditAction, TmsTone> = {
+  create: 'green',
+  update: 'orange',
+  delete: 'red',
 }
+
+const COLUMNS: ColumnDef<AuditLogEntry>[] = [
+  { key: 'time', header: 'TIME', width: 170, render: (e) => formatDateTime(e.createdAt) },
+  { key: 'action', header: 'ACTION', width: 110, render: (e) => <TmsBadge tone={ACTION_TONES[e.action] ?? 'gray'}>{e.action}</TmsBadge> },
+  { key: 'entity', header: 'ENTITY', width: 150, render: (e) => e.entityType },
+  { key: 'id', header: 'ID', width: 120, render: (e) => `${e.entityId.slice(0, 8)}…` },
+  { key: 'user', header: 'USER', width: 200, render: (e) => e.user },
+  {
+    key: 'changes',
+    header: 'CHANGES',
+    render: (e) => (
+      <details>
+        <summary style={{ cursor: 'pointer' }}>{Object.keys(e.changes).length} field(s)</summary>
+        <pre style={{ margin: '6px 0 0', fontSize: 10, maxWidth: 360, overflow: 'auto' }}>
+          {JSON.stringify(e.changes, null, 2)}
+        </pre>
+      </details>
+    ),
+  },
+]
 
 export function AuditPage() {
   const { entries } = useAuditLog()
+  const [query, setQuery] = useState('')
+
+  const rows = useMemo(() => {
+    const needle = query.trim().toLowerCase()
+    if (!needle) return entries
+    return entries.filter((e) =>
+      `${e.entityType} ${e.entityId} ${e.user} ${e.action}`.toLowerCase().includes(needle),
+    )
+  }, [entries, query])
 
   return (
-    <div style={{ height: '100%', overflowY: 'auto', background: 'var(--ds-bg)' }}>
-      <div style={{ padding: '20px 32px', borderBottom: '1px solid var(--ds-border)', position: 'sticky', top: 0, zIndex: 10, background: 'var(--ds-surface)' }}>
-        <h1 style={{ fontSize: 22, fontWeight: 600, color: 'var(--ds-t1)', letterSpacing: '-0.01em', margin: 0 }}>Audit Log</h1>
-        <p style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 2 }}>{entries.length} entries · most recent first</p>
-      </div>
-
-      <div style={{ padding: 32 }}>
-        {entries.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: '64px 0', color: 'var(--ds-t3)', fontSize: 14 }}>
-            No audit entries yet. Make a change to see it here.
-          </div>
-        ) : (
-          <div style={{ borderRadius: 12, border: '1px solid var(--ds-border)', overflow: 'hidden', background: 'var(--ds-surface)', boxShadow: 'var(--sh-sm)' }}>
-            <Table>
-              <TableHeader>
-                <TableRow className="hover:bg-transparent">
-                  <TableHead>Time</TableHead>
-                  <TableHead>Action</TableHead>
-                  <TableHead>Entity</TableHead>
-                  <TableHead>ID</TableHead>
-                  <TableHead>User</TableHead>
-                  <TableHead>Changes</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {entries.map((entry) => (
-                  <TableRow key={entry.id}>
-                    <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
-                      {formatDateTime(entry.createdAt)}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={ACTION_VARIANTS[entry.action]} className="capitalize text-xs">
-                        {entry.action}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="font-medium text-foreground">{entry.entityType}</TableCell>
-                    <TableCell className="font-mono text-xs text-muted-foreground">
-                      {entry.entityId.slice(0, 8)}…
-                    </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">{entry.user}</TableCell>
-                    <TableCell>
-                      <details className="cursor-pointer">
-                        <summary className="text-xs text-muted-foreground hover:text-foreground transition-colors">
-                          {Object.keys(entry.changes).length} field(s)
-                        </summary>
-                        <pre className="mt-1.5 text-[10px] text-muted-foreground rounded-md p-2 max-w-xs overflow-auto border border-border" style={{ background: 'var(--ds-bg)' }}>
-                          {JSON.stringify(entry.changes, null, 2)}
-                        </pre>
-                      </details>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        )}
-      </div>
-    </div>
+    <TmsListPage
+      embedded
+      title="Audit log"
+      columns={COLUMNS}
+      rows={rows}
+      rowKey={(e) => e.id}
+      search={{ value: query, onChange: setQuery, placeholder: 'Search entity, id or user' }}
+      emptyText={
+        entries.length === 0
+          ? 'No audit entries yet. Make a change to see it here.'
+          : 'Please try again using a different query.'
+      }
+      onClearFilters={query ? () => setQuery('') : undefined}
+      page={{ from: rows.length === 0 ? 0 : 1, to: rows.length, total: rows.length, pageSize: rows.length }}
+    />
   )
 }

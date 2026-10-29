@@ -4,14 +4,14 @@ slug: ar-invoicing-and-payments
 type: HOW_TO
 category: Billing
 productAreas: [TMS, Billing, Customers]
-related: [documents-and-delivery, shipments-orders-loads, carriers-and-booking]
+related: [documents-and-delivery, release-to-accounting, shipments-orders-loads, carriers-and-booking]
 ---
 
 # AR — Invoicing and Payments
 
 A delivered load with the paperwork in hand is a bill waiting to be raised. This article covers the money end of a shipment: the AR ladder and who moves each rung, invoicing early, what **Generate** actually does to an order, sending the bill, taking the money in — payments, credits, overpayments, write-offs and reversals — reading the aging, sending a bill to the factor, and what `LEGACY` means.
 
-AR lives on the **Accounts Receivable** page (`/ar`, Operations → Accounts Receivable, directly after the Factoring Queue), on each invoice's own page at `/ar/invoices/<number>`, on the **AR card** on a shipment's Summary tab, and on a customer's **AR** tab in the directory.
+AR lives on the **Invoicing** page (`/tms/invoicing`), on each invoice's own page at `/tms/invoicing/invoices/<id>`, on the **AR card** on a shipment's Summary tab, and on a customer's **AR** tab in the directory.
 
 ## The AR ladder
 
@@ -28,7 +28,7 @@ Every order carries one AR status, and it only ever goes one way (except a void,
 
 Only the first two and `INVOICE_NOT_NEEDED` can be set by hand. Ask for `UNPAID`, `PAID` or `LEGACY` from the AR dropdown and you are told they are *"recorded by invoicing, not set by hand"*: those rungs are written inside the actions that post money, so the ladder and the ledger cannot disagree. `INVOICE_NOT_NEEDED` is refused on an order that has revenue — *"an order with revenue still needs an invoice"*.
 
-Once an invoice exists, the AR dropdown is closed entirely (*"void the invoice first"*), and so are **Cancel shipment** and **Delete shipment**. A bill the customer is holding is not something to tidy up behind.
+Once an invoice exists, the AR dropdown is closed entirely (*"void the invoice first"*), and so are **Cancel shipment** and **Void shipment** (void is refused once an invoice exists). A bill the customer is holding is not something to tidy up behind.
 
 ## Invoice early
 
@@ -38,16 +38,18 @@ Once an invoice exists, the AR dropdown is closed entirely (*"void the invoice f
 
 **Generate invoice** is offered on the AR card and on the AR page's **To invoice** tab. The dialog shows the readiness strip, the bill-to, the dates, the documents that will travel with the bill, and a preview of the actual PDF — rendered in your browser by the same code that renders the stored file, so what you see is what the customer gets.
 
+Generation runs the **release gate** first — delivered, the customer's required documents and references, carrier charges settled and no open exceptions — and there is no override (see [Release to Accounting](release-to-accounting.md)).
+
 ### What it refuses, and why it says all of it at once
 
 Generation re-checks readiness against the rows as they are at that second, and reports **every** reason together rather than one per attempt:
 
 - the order's AR status is not `UNBILLED`;
-- the shipment is deleted, or canceled;
+- the shipment is voided, or canceled;
 - the order has no revenue to bill;
 - the customer charge lines do not total the order's revenue — *recalculate the charges*;
 - a reference the customer requires is missing, named;
-- a required document is missing, named, unless an admin has overridden the document gate.
+- a required document is missing, named — the release gate has no override.
 
 An attachment you picked is refused if it is void, internal, still awaiting review, rejected, or belongs to another shipment.
 
@@ -110,7 +112,7 @@ The **To invoice** tab selects up to **25** orders and generates them one at a t
 
 ## Taking the money in
 
-Four things can post against a customer's AR, and all four are **owner/admin** work by default (the setting is in Settings → AR, so it can be opened up). Holding the invoicing page lets you generate, e-mail and send to the factor; it does not let you post money.
+Four things can post against a customer's AR, and all four are **owner/admin** work by default (the setting is in My Brokerage → AR, so it can be opened up). Holding the invoicing page lets you generate, e-mail and send to the factor; it does not let you post money.
 
 ### Receive payment
 
@@ -163,9 +165,9 @@ A customer's oldest late invoice also feeds their credit check, so a customer wh
 
 ## Send to Factor
 
-**Send to Factor** on an issued invoice writes the row into the existing **Factoring Queue** — the same shape the Aljex invoice e-mail writes, keyed by the load's PRO — and links it to the invoice. The eleven OTR fields are prefilled **from the invoice snapshot**, not from the load: invoice number, PO (only a reference the customer can see), broker MC, amount, invoice date, and the from/to city, state and ZIP taken from the first pickup and the last delivery. Every one of them stays editable on the queue row.
+**Send to Factor** on an issued invoice writes the row into the existing **Factors** queue (`/tms/factors`) — the same shape the Aljex invoice e-mail writes, keyed by the load's PRO — and links it to the invoice. The eleven OTR fields are prefilled **from the invoice snapshot**, not from the load: invoice number, PO (only a reference the customer can see), broker MC, amount, invoice date, and the from/to city, state and ZIP taken from the first pickup and the last delivery. Every one of them stays editable on the queue row.
 
-**It does not submit anything to OTR.** That step is the existing **Submit** on the `/factoring` row, pressed by a person looking at the bill — which is exactly where it was before, and where it stays. Sending to the factor creates the row; submitting is a separate, human decision.
+**It does not submit anything to OTR.** That step is the existing **Submit** on the `/tms/factors` row, pressed by a person looking at the bill — which is exactly where it was before, and where it stays. Sending to the factor creates the row; submitting is a separate, human decision.
 
 The preview tells you in one sentence why it cannot go, in the order a person would ask:
 
@@ -180,13 +182,13 @@ A queue row that already exists for that PRO and has not been submitted is updat
 
 A factored invoice **stays open** until somebody records a payment against it, with method `FACTOR`. The OTR sync never marks a bill paid, because the factor advancing against it is not the customer paying it.
 
-> On dev the OTR credentials are neutered, so Send to Factor writes the queue row and the Submit step on `/factoring` is as far as you can take it.
+> On dev the OTR credentials are neutered, so Send to Factor writes the queue row and the Submit step on `/tms/factors` is as far as you can take it.
 
 ## What LEGACY means
 
 The 890 loads that came over from Aljex became shipments and orders in this system, and every one of those orders started on the first AR rung. Those bills were raised, sent and mostly paid years ago in Aljex: they are not ours to invoice, and leaving them on `DOCS_NEEDED` would open the AR page onto hundreds of rows nobody will ever act on.
 
-`LEGACY` is the rung they sit on instead. It is written **only** by the migration (`scripts/backfillLegacyAr.mjs`) — the AR dropdown refuses it like `UNPAID` and `PAID` — and it means: real freight, real history, no bill to raise here. A `LEGACY` order appears in no AR worklist and counts toward nothing in the aging. The Aljex-era invoices themselves live where they always did, in the **Factoring Queue**, under their PRO; none were copied into this system, because a fictional invoice with a number nobody sent is worse than no invoice at all.
+`LEGACY` is the rung they sit on instead. It is written **only** by the migration (`scripts/backfillLegacyAr.mjs`) — the AR dropdown refuses it like `UNPAID` and `PAID` — and it means: real freight, real history, no bill to raise here. A `LEGACY` order appears in no AR worklist and counts toward nothing in the aging. The Aljex-era invoices themselves live where they always did, in the **Factors** queue (`/tms/factors`), under their PRO; none were copied into this system, because a fictional invoice with a number nobody sent is worse than no invoice at all.
 
 A legacy load that is genuinely re-billed today is invoiced like anything else, and keeps its new invoice.
 

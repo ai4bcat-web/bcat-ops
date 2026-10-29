@@ -6,14 +6,15 @@
  * The legacy fields hold free text typed before there were profiles, so a value that
  * matches nobody is still printed, flagged "not a user", and never silently rewritten:
  * the picker shows what the record says, not what it wishes the record said.
+ *
+ * Every field that renders it now lives under the TMS shell, so it is drawn with the
+ * MVMNT kit: the trigger is a `.tms-input`, the list is a plain absolutely-positioned
+ * panel inside the tree (never a portal, so it inherits the dark tokens), and the chips
+ * are `TmsBadge`.
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronDown, X } from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
-import { Input } from '@/components/ui/input'
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from '@/components/ui/select'
+import { TmsBadge, TmsInput, TmsSelect } from '@/features/tms/kit'
 import { useStaff } from '@/hooks/useStaff'
 import { displayName } from '@/lib/roles'
 import { cn } from '@/lib/utils'
@@ -54,6 +55,12 @@ function keyOf(value: string): string {
   return value.trim().toLowerCase()
 }
 
+const OPTION_STYLE: React.CSSProperties = {
+  display: 'flex', width: '100%', alignItems: 'center', gap: 6,
+  borderRadius: 4, padding: '6px 8px', textAlign: 'left', fontSize: 13,
+  background: 'none', border: 'none', color: 'var(--tms-text)', cursor: 'pointer',
+}
+
 export function RepPicker(props: RepPickerProps) {
   const { role, placeholder = 'Pick a person…', allowUnknown = false, disabled = false, className } = props
   const { staff, loading } = useStaff()
@@ -81,7 +88,7 @@ export function RepPicker(props: RepPickerProps) {
   useEffect(() => {
     if (!open) return
     const onDown = (e: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false)
+      if (rootRef.current && rootRef.current.contains(e.target as Node) === false) setOpen(false)
     }
     document.addEventListener('mousedown', onDown)
     return () => document.removeEventListener('mousedown', onDown)
@@ -93,14 +100,14 @@ export function RepPicker(props: RepPickerProps) {
 
   const q = query.trim().toLowerCase()
   const options = pool
-    .filter((p) => !selected.some((v) => keyOf(v) === keyOf(p.id) || (p.email && keyOf(v) === keyOf(p.email))))
+    .filter((p) => selected.some((v) => keyOf(v) === keyOf(p.id) || (p.email && keyOf(v) === keyOf(p.email))) === false)
     .filter((p) => (q ? `${displayName(p)} ${p.email ?? ''} ${p.id}`.toLowerCase().includes(q) : true))
 
   const commit = (value: string) => {
     const next = value.trim()
     if (props.multiple) {
       const current = (props.value ?? []).filter(Boolean)
-      if (next && !current.some((v) => keyOf(v) === keyOf(next))) props.onChange([...current, next])
+      if (next && current.some((v) => keyOf(v) === keyOf(next)) === false) props.onChange([...current, next])
     } else {
       props.onChange(next)
     }
@@ -119,18 +126,23 @@ export function RepPicker(props: RepPickerProps) {
       <span
         key={value}
         data-testid="rep-chip"
-        className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs text-slate-700"
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: 6,
+          borderRadius: 4, border: '1px solid var(--tms-border)', background: 'var(--tms-card)',
+          padding: '2px 8px', fontSize: 12,
+        }}
       >
         {person ? repLabel(person) : value}
-        {!person && <Badge variant="secondary">not a user</Badge>}
-        {!disabled && (
+        {person == null && <TmsBadge tone="orange">not a user</TmsBadge>}
+        {disabled === false && (
           <button
             type="button"
             aria-label={`Remove ${value}`}
             onClick={() => remove(value)}
-            className="text-slate-400 hover:text-destructive"
+            className="tms-muted"
+            style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'inline-flex' }}
           >
-            <X className="size-3" />
+            <X size={12} />
           </button>
         )}
       </span>
@@ -139,51 +151,62 @@ export function RepPicker(props: RepPickerProps) {
 
   const current = props.multiple ? '' : (props.value ?? '').trim()
   const currentPerson = current ? byKey.get(keyOf(current)) : undefined
-  const showUnknownQuery = allowUnknown && q.length > 0 && !options.some((p) => keyOf(p.id) === q || keyOf(p.email ?? '') === q)
+  const showUnknownQuery = allowUnknown && q.length > 0
+    && options.some((p) => keyOf(p.id) === q || keyOf(p.email ?? '') === q) === false
 
   return (
-    <div ref={rootRef} className={cn('relative', className)}>
+    <div ref={rootRef} className={cn('relative', className)} style={{ position: 'relative' }}>
       {props.multiple && selected.length > 0 && (
-        <div className="flex flex-wrap gap-1.5 mb-1.5">{selected.map(chip)}</div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 6 }}>{selected.map(chip)}</div>
       )}
 
-      <div className="flex items-center gap-1.5">
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
         <button
           type="button"
           role="combobox"
           aria-expanded={open}
           aria-haspopup="listbox"
           disabled={disabled}
-          onClick={() => setOpen((v) => !v)}
-          className="flex h-9 w-full items-center justify-between gap-2 rounded-md border border-input bg-transparent px-3 py-2 text-left text-sm shadow-xs disabled:cursor-not-allowed disabled:opacity-50"
+          onClick={() => setOpen((v) => v === false)}
+          className="tms-input"
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, textAlign: 'left', cursor: disabled ? 'not-allowed' : 'pointer' }}
         >
-          <span className="flex min-w-0 items-center gap-1.5 truncate">
-            {props.multiple || !current ? (
-              <span className="text-muted-foreground">{placeholder}</span>
+          <span style={{ display: 'flex', minWidth: 0, alignItems: 'center', gap: 6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {props.multiple || current.length === 0 ? (
+              <span className="tms-muted">{placeholder}</span>
             ) : (
               <>
-                <span className="truncate">{currentPerson ? repLabel(currentPerson) : current}</span>
-                {!currentPerson && <Badge variant="secondary">not a user</Badge>}
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {currentPerson ? repLabel(currentPerson) : current}
+                </span>
+                {currentPerson == null && <TmsBadge tone="orange">not a user</TmsBadge>}
               </>
             )}
           </span>
-          <ChevronDown className="size-4 shrink-0 opacity-50" />
+          <ChevronDown size={16} style={{ flexShrink: 0, opacity: 0.6 }} />
         </button>
-        {!props.multiple && current && !disabled && (
+        {props.multiple !== true && current && disabled === false && (
           <button
             type="button"
             aria-label="Clear selection"
             onClick={() => remove(current)}
-            className="shrink-0 rounded-md p-1 text-slate-400 hover:text-destructive"
+            className="tms-muted"
+            style={{ flexShrink: 0, borderRadius: 4, padding: 4, background: 'none', border: 'none', cursor: 'pointer' }}
           >
-            <X className="size-3.5" />
+            <X size={14} />
           </button>
         )}
       </div>
 
       {open && (
-        <div className="absolute z-50 mt-1 w-full rounded-md border bg-popover p-1 shadow-md">
-          <Input
+        <div
+          style={{
+            position: 'absolute', zIndex: 50, marginTop: 4, width: '100%',
+            borderRadius: 'var(--tms-radius)', border: '1px solid var(--tms-border)',
+            background: 'var(--tms-card)', padding: 4, boxShadow: '0 12px 30px rgba(0,0,0,0.45)',
+          }}
+        >
+          <TmsInput
             autoFocus
             aria-label="Search people"
             placeholder="Search people…"
@@ -193,14 +216,14 @@ export function RepPicker(props: RepPickerProps) {
               if (e.key === 'Enter' && allowUnknown && query.trim()) { e.preventDefault(); commit(query) }
               if (e.key === 'Escape') setOpen(false)
             }}
-            className="h-8 mb-1"
+            style={{ marginBottom: 4 }}
           />
-          <div role="listbox" className="max-h-60 overflow-y-auto">
+          <div role="listbox" style={{ maxHeight: 240, overflowY: 'auto' }}>
             {loading && options.length === 0 && (
-              <p className="px-2 py-1.5 text-xs text-muted-foreground">Loading people…</p>
+              <p className="tms-muted" style={{ padding: '6px 8px', fontSize: 12 }}>Loading people…</p>
             )}
-            {!loading && options.length === 0 && !showUnknownQuery && (
-              <p className="px-2 py-1.5 text-xs text-muted-foreground">No matching people.</p>
+            {loading === false && options.length === 0 && showUnknownQuery === false && (
+              <p className="tms-muted" style={{ padding: '6px 8px', fontSize: 12 }}>No matching people.</p>
             )}
             {options.map((person) => (
               <button
@@ -209,7 +232,7 @@ export function RepPicker(props: RepPickerProps) {
                 role="option"
                 aria-selected={false}
                 onClick={() => commit(person.id)}
-                className="flex w-full items-center rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent"
+                style={OPTION_STYLE}
               >
                 {repLabel(person)}
               </button>
@@ -220,10 +243,10 @@ export function RepPicker(props: RepPickerProps) {
                 role="option"
                 aria-selected={false}
                 onClick={() => commit(query)}
-                className="flex w-full items-center gap-1.5 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent"
+                style={OPTION_STYLE}
               >
                 Use “{query.trim()}”
-                <Badge variant="secondary">not a user</Badge>
+                <TmsBadge tone="orange">not a user</TmsBadge>
               </button>
             )}
           </div>
@@ -232,8 +255,6 @@ export function RepPicker(props: RepPickerProps) {
     </div>
   )
 }
-
-const NO_TEAM = '__none'
 
 export interface TeamPickerProps {
   value: string | null | undefined
@@ -249,31 +270,31 @@ export interface TeamPickerProps {
 /**
  * One team, picked by key. Retired teams are not offered, but a value already pointing
  * at one is still printed: a record that named a desk keeps naming it after it closes.
+ *
+ * A native select rather than a Radix one: it needs no portal, so it cannot land outside
+ * the shell with the app's light tokens, and the browser keeps the keyboard behaviour.
  */
 export function TeamPicker({ value, onChange, teams, allowEmpty = false, placeholder = 'Pick a team…', disabled = false, className }: TeamPickerProps) {
   const all = teams ?? []
   const active = all.filter((t) => t.active !== false)
   const current = (value ?? '').trim()
-  const retained = current && !active.some((t) => t.key === current)
+  const retained = current && active.some((t) => t.key === current) === false
     ? all.find((t) => t.key === current) ?? { key: current, name: current, memberIds: [] }
     : null
 
   return (
-    <Select
-      value={current || NO_TEAM}
-      onValueChange={(v) => onChange(v === NO_TEAM ? '' : v)}
+    <TmsSelect
+      aria-label="Team"
+      className={className}
+      value={current}
       disabled={disabled}
+      onChange={(e) => onChange(e.target.value)}
     >
-      <SelectTrigger className={className} aria-label="Team">
-        <SelectValue placeholder={placeholder} />
-      </SelectTrigger>
-      <SelectContent>
-        {allowEmpty && <SelectItem value={NO_TEAM}>No team</SelectItem>}
-        {active.map((team) => (
-          <SelectItem key={team.key} value={team.key}>{team.name}</SelectItem>
-        ))}
-        {retained && <SelectItem value={retained.key}>{retained.name} (retired)</SelectItem>}
-      </SelectContent>
-    </Select>
+      <option value="">{allowEmpty ? 'No team' : placeholder}</option>
+      {active.map((team) => (
+        <option key={team.key} value={team.key}>{team.name}</option>
+      ))}
+      {retained && <option value={retained.key}>{retained.name} (retired)</option>}
+    </TmsSelect>
   )
 }

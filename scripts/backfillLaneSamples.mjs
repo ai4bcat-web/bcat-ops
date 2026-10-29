@@ -62,12 +62,20 @@
  *   node scripts/backfillLaneSamples.mjs --help
  *   node scripts/backfillLaneSamples.mjs --plan plans/h-lane-samples.json
  *   node scripts/backfillLaneSamples.mjs --apply --plan plans/h-lane-samples.json
+ *
+ * Step R adds ten fact columns to the row — the division and rep that earn the load,
+ * delivery and POD times, how it was tracked, when it first pinged, and its
+ * check-call compliance — so the Brokerage dashboard reads one month of samples
+ * instead of scanning Load, LoadCheckCall and ShipmentDocument per card. They are
+ * derived in `laneSampleFacts` and are material: a sample written before them is
+ * stale and is re-planned. `--refresh` additionally carries them onto the samples
+ * the live Lambda wrote, whose money this script still never touches.
  */
 
 import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocumentClient, ScanCommand, PutCommand } from '@aws-sdk/lib-dynamodb';
+import { DynamoDBDocumentClient, ScanCommand, PutCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { parseTmsArgs } from './lib/tmsConfig.mjs';
 import { createPlan, loadPlan, savePlan, validatePlan, summarize } from './lib/tmsPlan.mjs';
 import { getStops } from './lib/tmsStops.mjs';
@@ -112,7 +120,11 @@ export const MOVEMENT_RANK = {
  * LaneRateSample is read as well as written: the planner compares what it would write
  * against what is already there, which is what makes the second dry run empty.
  */
-const MODELS = ['Shipment', 'Order', 'Load', 'LoadCarrier', 'LoadFinancials', 'LaneRateSample', 'Customer'];
+const MODELS = [
+  'Shipment', 'Order', 'Load', 'LoadCarrier', 'LoadFinancials', 'LaneRateSample', 'Customer',
+  // Step R: the Brokerage dashboard's tracking, POD and division facts.
+  'LoadCheckCall', 'ShipmentDocument', 'TmsSettings',
+];
 
 const USAGE = `
 Usage: node scripts/backfillLaneSamples.mjs [options]
@@ -124,6 +136,9 @@ Options:
   --region <r>      AWS region (default ${REGION_DEFAULT}).
   --plan <path>     (dry-run) write the plan file; (apply) read it back.
   --apply           Apply the reviewed plan.
+  --refresh         Also write the Step R facts (division, rep, tracking, POD,
+                    check-call compliance) onto samples the live Lambda wrote.
+                    Their money is never touched.
 
 BACKFILL:    a Load at DELIVERED or later with a LoadFinancials row. All money comes
              off that row and nowhere else.
@@ -141,6 +156,9 @@ touched: this writes LaneRateSample rows and AuditLog lines.
 Dry run reads the tables, prints what it would write, and writes nothing to AWS.
 Apply re-reads the same tables, refuses a plan whose sources have changed, and then
 writes each row under a condition that makes a re-run free.
+
+  node scripts/backfillLaneSamples.mjs --refresh --plan plans/r-lane-facts.json
+  node scripts/backfillLaneSamples.mjs --refresh --apply --plan plans/r-lane-facts.json
 `;
 
 /**
@@ -265,6 +283,93 @@ function dayOf(value) {
   return /^\d{4}-\d{2}-\d{2}/.test(raw) ? raw.slice(0, 10) : null;
 }
 
+// ── Step R: the Brokerage dashboard's facts ──────────────────────────────────
+//
+// The dashboard charts tracking history and POD timing by month, and a chart that
+// scanned Load + LoadCheckCall + ShipmentDocument per card would read the whole
+// table on every filter change. The facts are therefore written ONTO the sample,
+// where the month index already is, by the same pass that writes the money.
+
+/** The grace the check-call notifier uses when TmsSettings does not say. */
+export const DEFAULT_CHECK_CALL_GRACE_MINUTES = 15;
+const MINUTE_MS = 60_000;
+
+/** The ten columns Step R added to LaneRateSample, in schema order. */
+export const STEP_R_FACT_FIELDS = [
+  'revDivision', 'revSubdivision', 'salesRepId', 'deliveredAt', 'podReceivedAt',
+  'trackingProvider', 'firstPingAt', 'datPostedAt', 'checkCallsDue', 'checkCallsMet',
+];
+
+/** A check call that reported a position — how "tracked" is proved, not claimed. */
+function isPositionReport(call) {
+  const type = text(call.type);
+  if (type === 'TRACKING_PING') return true;
+  return typeof call.lat === 'number' && typeof call.lng === 'number';
+}
+
+/**
+ * The Step R columns of one sample, off the records that hold them.
+ *
+ * `checkCallsDue` / `checkCallsMet` read the way the check-call notifier does: a row
+ * that scheduled a next call is a DUE, and it was MET when a later call landed no
+ * later than that time plus the org's grace. Nothing is inferred from a load that
+ * never scheduled anything — no schedule is zero dues, not a missed call.
+ *
+ * @param {object} input
+ * @param {Record<string, any>} input.load
+ * @param {Record<string, any> | null} [input.shipment]
+ * @param {Array<Record<string, any>>} [input.checkCalls] every LoadCheckCall of this load
+ * @param {Array<Record<string, any>>} [input.podDocs] every ACTIVE POD of this shipment
+ * @param {number | null} [input.graceMinutes]
+ * @returns {Record<string, unknown>}
+ */
+export function laneSampleFacts({ load, shipment = null, checkCalls = [], podDocs = [], graceMinutes = null }) {
+  const grace =
+    typeof graceMinutes === 'number' && Number.isFinite(graceMinutes) && graceMinutes >= 0
+      ? graceMinutes
+      : DEFAULT_CHECK_CALL_GRACE_MINUTES;
+
+  const calls = checkCalls
+    .filter((c) => text(c.at) != null)
+    .sort((a, b) => String(a.at).localeCompare(String(b.at)));
+
+  let checkCallsDue = 0;
+  let checkCallsMet = 0;
+  for (const call of calls) {
+    const scheduled = text(call.nextCheckCallAt);
+    if (!scheduled) continue;
+    const dueMs = Date.parse(scheduled);
+    const fromMs = Date.parse(String(call.at));
+    if (!Number.isFinite(dueMs) || !Number.isFinite(fromMs)) continue;
+    checkCallsDue += 1;
+    const met = calls.some((later) => {
+      const atMs = Date.parse(String(later.at));
+      return Number.isFinite(atMs) && atMs > fromMs && atMs <= dueMs + grace * MINUTE_MS;
+    });
+    if (met) checkCallsMet += 1;
+  }
+
+  const firstPing = calls.find(isPositionReport);
+  const pod = [...podDocs]
+    .filter((d) => text(d.createdAt) != null)
+    .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)))[0] ?? null;
+
+  return {
+    // Load and Shipment are kept mirrored by the router, so the Load answers first
+    // and the Shipment is the fallback for a row the mirror never reached.
+    revDivision: text(load.revDivision) ?? text(shipment?.revDivision),
+    revSubdivision: text(load.revSubdivision) ?? text(shipment?.revSubdivision),
+    salesRepId: text(load.salesRepId) ?? text(shipment?.salesRepId),
+    deliveredAt: text(load.deliveredAt),
+    trackingProvider: text(load.trackingProvider),
+    firstPingAt: firstPing ? text(firstPing.at) : null,
+    podReceivedAt: pod ? text(pod.createdAt) : null,
+    datPostedAt: text(shipment?.datPostedAt),
+    checkCallsDue,
+    checkCallsMet,
+  };
+}
+
 // ── The legacy rate's unit ───────────────────────────────────────────────────
 
 /**
@@ -385,6 +490,9 @@ const MATERIAL_FIELDS = [
   // Step H, which carry none of them, are re-planned and refreshed rather than
   // counted as already current — `sampleMonth` is the reports index's hash key.
   'sampleMonth', 'customerRepId', 'carrierRepId', 'teamKey', 'invoiceId', 'invoiceMonth',
+  // Step R: the Brokerage dashboard's facts. Listed here for the same reason — a
+  // sample written before them is stale, not current, and is re-planned.
+  ...STEP_R_FACT_FIELDS,
 ];
 
 /**
@@ -435,12 +543,15 @@ export function stopsOf(load) {
  * @param {string} input.date
  * @param {'BACKFILL'|'LEGACY_LOAD'} input.source
  * @param {number | null} [input.legacyCents]
+ * @param {Array<Record<string, any>>} [input.checkCalls] every LoadCheckCall of this load
+ * @param {Array<Record<string, any>>} [input.podDocs] every ACTIVE POD of this shipment
+ * @param {number | null} [input.graceMinutes]
  * @param {string} input.nowIso
  * @returns {Record<string, unknown>}
  */
 export function sampleItemFor({
   load, stops, financials, order, loadCarrier, shipment, customer, laneKey, date, source,
-  legacyCents = null, nowIso,
+  legacyCents = null, checkCalls = [], podDocs = [], graceMinutes = null, nowIso,
 }) {
   const rawStatus = text(load.status);
   const status = rawStatus && rawStatus in MOVEMENT_RANK ? rawStatus : null;
@@ -494,6 +605,9 @@ export function sampleItemFor({
     teamKey: text(customer?.teamKey),
     invoiceId: text(order?.invoiceId),
     invoiceMonth: dayOf(order?.invoicedAt)?.slice(0, 7) ?? null,
+    // Step R — the Brokerage dashboard's facts: the division that earns the load,
+    // its rep, and the tracking and POD history the charts read by month.
+    ...laneSampleFacts({ load, shipment, checkCalls, podDocs, graceMinutes }),
     sampledAt: nowIso,
     version: 1,
     createdAt: nowIso,
@@ -506,13 +620,16 @@ export function sampleItemFor({
  *
  * @param {Record<string, any[]>} source
  * @param {string} nowIso
+ * @param {{refreshLive?: boolean}} [options] `--refresh` also brings the Step R facts
+ *   to the samples the live Lambda wrote, whose money it never touches.
  * @returns {{
  *   actions: any[], alreadyCurrent: number, skipped: any[], reviewables: any[],
  *   bySource: Record<string, number>, byReason: Record<string, number>,
- *   legacyUnit: ReturnType<typeof proveLegacyRateUnit>, legacyCandidates: number
+ *   legacyUnit: ReturnType<typeof proveLegacyRateUnit>, legacyCandidates: number,
+ *   factsPatched: number
  * }}
  */
-export function planLaneSamples(source, nowIso) {
+export function planLaneSamples(source, nowIso, { refreshLive = false } = {}) {
   const loads = [...(source.Load ?? [])].sort((a, b) => String(a.id).localeCompare(String(b.id)));
   const financialsByLoad = new Map();
   for (const row of source.LoadFinancials ?? []) {
@@ -534,6 +651,24 @@ export function planLaneSamples(source, nowIso) {
     carriersByLoad.get(key).push(row);
   }
 
+  // Step R: the dashboard's tracking and POD history, indexed once per pass.
+  const checkCallsByLoad = new Map();
+  for (const row of source.LoadCheckCall ?? []) {
+    const key = text(row.loadId);
+    if (!key) continue;
+    if (!checkCallsByLoad.has(key)) checkCallsByLoad.set(key, []);
+    checkCallsByLoad.get(key).push(row);
+  }
+  const podsByShipment = new Map();
+  for (const row of source.ShipmentDocument ?? []) {
+    const key = text(row.shipmentId);
+    if (!key || text(row.type) !== 'POD' || text(row.status) !== 'ACTIVE') continue;
+    if (!podsByShipment.has(key)) podsByShipment.set(key, []);
+    podsByShipment.get(key).push(row);
+  }
+  const settings = (source.TmsSettings ?? []).find((r) => String(r.id) === 'default') ?? null;
+  const graceMinutes = cents(settings?.checkCallGraceMinutes);
+
   // Pass 0: prove the legacy rate's unit before anything decides to use it.
   const comparables = [];
   for (const load of loads) {
@@ -552,6 +687,7 @@ export function planLaneSamples(source, nowIso) {
   const byReason = {};
   let alreadyCurrent = 0;
   let legacyCandidates = 0;
+  let factsPatched = 0;
 
   const today = dayOf(nowIso) ?? nowIso.slice(0, 10);
 
@@ -627,6 +763,9 @@ export function planLaneSamples(source, nowIso) {
       date,
       source: sampleSource,
       legacyCents: sampleSource === 'LEGACY_LOAD' ? legacyRateCents(load.rate, legacyUnit.unit) : null,
+      checkCalls: checkCallsByLoad.get(loadId) ?? [],
+      podDocs: podsByShipment.get(text(load.shipmentId) ?? text(shipment?.id) ?? '') ?? [],
+      graceMinutes,
       nowIso,
     });
 
@@ -637,12 +776,37 @@ export function planLaneSamples(source, nowIso) {
     }
     if (existing && text(existing.source) === LIVE_SOURCE) {
       // The Lambda has already sampled this load from the live row. Its numbers are
-      // the current ones; a migration must not talk over them.
+      // the current ones; a migration must not talk over them. `--refresh` still
+      // brings the Step R facts onto it: the live writer prices the load, it does
+      // not write the dashboard's tracking and POD history.
+      const facts = {};
+      let stale = false;
+      for (const field of STEP_R_FACT_FIELDS) {
+        const value = item[field] ?? null;
+        if ((existing[field] ?? null) !== value) stale = true;
+        if (value !== null) facts[field] = value;
+      }
+      if (refreshLive && stale) {
+        factsPatched += 1;
+        actions.push({
+          action: 'PATCH_LANE_SAMPLE_FACTS',
+          purpose: "Step R facts onto a live sample, leaving the live load's money alone",
+          id: item.id,
+          loadId,
+          laneKey: text(existing.laneKey) ?? laneKey,
+          source: LIVE_SOURCE,
+          facts,
+          sampledAt: text(existing.sampledAt),
+          before: Object.fromEntries(STEP_R_FACT_FIELDS.map((f) => [f, existing[f] ?? null])),
+        });
+        continue;
+      }
       reviewables.push({
         kind: 'LIVE_SAMPLE_DIFFERS',
         reason:
           `LaneRateSample ${item.id} was written by the live load (source ${LIVE_SOURCE}) and says ` +
-          `something different from this backfill; left exactly as it is`,
+          `something different from this backfill; left exactly as it is` +
+          (stale ? ' — its Step R facts are missing; re-run with --refresh to write them' : ''),
         source: { loadId, laneKey: text(existing.laneKey), revenueCents: cents(existing.revenueCents) },
       });
       skip(load, 'liveSampleWins');
@@ -662,7 +826,10 @@ export function planLaneSamples(source, nowIso) {
     });
   }
 
-  return { actions, alreadyCurrent, skipped, reviewables, bySource, byReason, legacyUnit, legacyCandidates };
+  return {
+    actions, alreadyCurrent, skipped, reviewables, bySource, byReason, legacyUnit,
+    legacyCandidates, factsPatched,
+  };
 }
 
 /**
@@ -680,6 +847,8 @@ export function sourceRowsOf(source) {
       'activeLoadCarrierId', 'loadNumber', 'originName', 'originCity', 'destinationName',
       'destinationCity', 'pickupAppt', 'pickupApptType', 'deliveryAppt', 'deliveryApptType',
       'carrierRepId',
+      // Step R: the tag the dashboard groups by and how the load was tracked.
+      'revDivision', 'revSubdivision', 'salesRepId', 'trackingProvider',
     ],
     LoadFinancials: [
       'loadId', 'customerRateCents', 'revenueCents', 'carrierRateCents', 'costCents',
@@ -687,8 +856,11 @@ export function sourceRowsOf(source) {
     ],
     LoadCarrier: ['loadId', 'kind', 'status', 'carrierId', 'carrierName', 'carrierRepId'],
     Order: ['customerId', 'customerName', 'mode', 'rateType', 'equipmentType', 'customerRepId', 'invoiceId', 'invoicedAt'],
-    Shipment: ['number', 'customerId', 'customerName', 'mode', 'status'],
+    Shipment: ['number', 'customerId', 'customerName', 'mode', 'status', 'revDivision', 'revSubdivision', 'salesRepId', 'datPostedAt'],
     Customer: ['teamKey'],
+    LoadCheckCall: ['loadId', 'at', 'type', 'lat', 'lng', 'nextCheckCallAt'],
+    ShipmentDocument: ['shipmentId', 'type', 'status', 'createdAt'],
+    TmsSettings: ['checkCallGraceMinutes'],
     LaneRateSample: MATERIAL_FIELDS,
   };
   const rows = [];
@@ -708,10 +880,14 @@ export function sourceRowsOf(source) {
  * @param {string} input.environment
  * @param {string} input.suffix
  * @param {string} [input.nowIso]
+ * @param {boolean} [input.refreshLive] `--refresh`: also write the Step R facts onto
+ *   the samples the live Lambda wrote.
  */
-export function buildLaneSamplePlan({ source, environment, suffix, nowIso = new Date().toISOString() }) {
+export function buildLaneSamplePlan({
+  source, environment, suffix, nowIso = new Date().toISOString(), refreshLive = false,
+}) {
   const loads = source.Load ?? [];
-  const planned = planLaneSamples(source, nowIso);
+  const planned = planLaneSamples(source, nowIso, { refreshLive });
 
   return createPlan({
     environment,
@@ -726,6 +902,8 @@ export function buildLaneSamplePlan({ source, environment, suffix, nowIso = new 
       existingSamples: (source.LaneRateSample ?? []).length,
       toWrite: planned.actions.length,
       alreadyCurrent: planned.alreadyCurrent,
+      factsPatched: planned.factsPatched,
+      refreshLive,
       bySource: planned.bySource,
       skippedByReason: planned.byReason,
       legacyRate: {
@@ -760,7 +938,8 @@ export function reviewText(plan) {
     '',
     `Loads read:                    ${s.loads}`,
     `LaneRateSample rows present:   ${s.existingSamples}`,
-    `Samples to write:              ${s.toWrite}`,
+    `Samples to write:              ${s.toWrite - (s.factsPatched ?? 0)}`,
+    `Live samples to fact-refresh:  ${s.factsPatched ?? 0}${s.refreshLive ? '' : ' (--refresh not given)'}`,
     `Already current:               ${s.alreadyCurrent}`,
     '',
     'Samples by source:',
@@ -897,6 +1076,7 @@ export async function applyLaneSamplePlan({ doc, plan, suffix }) {
   const auditTable = `AuditLog-${suffix}`;
   const report = {
     written: 0,
+    factsPatched: 0,
     alreadyCurrent: 0,
     bySource: { BACKFILL: 0, LEGACY_LOAD: 0 },
     failures: [],
@@ -904,6 +1084,39 @@ export async function applyLaneSamplePlan({ doc, plan, suffix }) {
 
   for (const entry of plan.actions) {
     try {
+      if (entry.action === 'PATCH_LANE_SAMPLE_FACTS') {
+        try {
+          const names = {};
+          const values = { ':sampledAt': entry.sampledAt };
+          const sets = [];
+          for (const [field, value] of Object.entries(entry.facts)) {
+            names[`#${field}`] = field;
+            values[`:${field}`] = value;
+            sets.push(`#${field} = :${field}`);
+          }
+          // Only the Step R columns move, and only while the row is still the one
+          // this plan read: a load re-sampled live since then keeps its own facts.
+          await doc.send(new UpdateCommand({
+            TableName: sampleTable,
+            Key: { id: entry.id },
+            ConditionExpression: 'attribute_exists(id) AND sampledAt = :sampledAt',
+            UpdateExpression: `SET ${sets.join(', ')}`,
+            ExpressionAttributeNames: names,
+            ExpressionAttributeValues: values,
+          }));
+          report.factsPatched += 1;
+          await writeAudit(doc, auditTable, entry.id, 'REFRESH_LANE_SAMPLE_FACTS', {
+            loadId: entry.loadId,
+            laneKey: entry.laneKey,
+            before: entry.before,
+            after: entry.facts,
+          });
+        } catch (err) {
+          if (err?.name !== 'ConditionalCheckFailedException') throw err;
+          report.alreadyCurrent += 1;
+        }
+        continue;
+      }
       if (entry.action !== 'PUT_LANE_SAMPLE') throw new Error(`Unknown action ${entry.action}`);
       try {
         await doc.send(new PutCommand({
@@ -945,7 +1158,11 @@ export async function applyLaneSamplePlan({ doc, plan, suffix }) {
 // ── CLI ──────────────────────────────────────────────────────────────────────
 
 async function main() {
-  const args = parseTmsArgs({ suffix: { type: 'string' }, region: { type: 'string' } });
+  const args = parseTmsArgs({
+    suffix: { type: 'string' },
+    region: { type: 'string' },
+    refresh: { type: 'boolean' },
+  });
   if (args.values.help) {
     console.log(USAGE);
     process.exit(0);
@@ -960,7 +1177,7 @@ async function main() {
   const source = await readSource(doc, suffix);
 
   if (!args.values.apply) {
-    const plan = buildLaneSamplePlan({ source, environment, suffix });
+    const plan = buildLaneSamplePlan({ source, environment, suffix, refreshLive: Boolean(args.values.refresh) });
     console.log(reviewText(plan));
     if (args.values.plan) {
       const planPath = resolve(process.cwd(), args.values.plan);

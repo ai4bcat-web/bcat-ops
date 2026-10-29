@@ -1,10 +1,6 @@
 import { useMemo } from 'react'
 import { Plus, Trash2 } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Switch } from '@/components/ui/switch'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { TmsButton, TmsField, TmsInput, TmsSelect } from '@/features/tms/kit'
 import { MoneyField } from './MoneyField'
 import type { ChargeCodeDef, ChargeCodeOverride, ChargeCalc } from '@/types/tms'
 
@@ -46,67 +42,58 @@ export function ChargeCodesEditor({ overrides, catalog, onChange, disabled }: Ch
   const remove = (idx: number) => onChange(overrides.filter((_, i) => i !== idx))
 
   return (
-    <div className="space-y-3">
-      {overrides.length === 0 && <p className="text-xs text-muted-foreground">No charge-code overrides.</p>}
+    <div style={{ display: 'grid', gap: 12 }}>
+      {overrides.length === 0 && <p className="tms-muted" style={{ fontSize: 12 }}>No charge-code overrides.</p>}
       {overrides.map((o, idx) => (
-        <div key={idx} className="rounded-lg border border-border bg-card p-3">
-          <div className="flex items-center justify-between gap-2">
-            <div className="grid grid-cols-2 gap-3 flex-1">
-              <div>
-                <Label className="text-xs uppercase tracking-wider text-muted-foreground">Code</Label>
-                <select
-                  value={o.code}
-                  onChange={(e) => selectCatalogCode(idx, e.target.value)}
-                  disabled={disabled}
-                  className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
-                >
-                  <option value="">— select —</option>
-                  {catalog.map((c) => (
-                    <option key={c.code} value={c.code}>{c.label} ({c.code})</option>
-                  ))}
-                </select>
+        <div key={idx} className="tms-card">
+          <div className="tms-card-body" style={{ display: 'grid', gap: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'flex-end', gap: 12 }}>
+              <div className="tms-grid tms-grid-2" style={{ flex: 1 }}>
+                <TmsField label="Code">
+                  <TmsSelect
+                    value={o.code}
+                    onChange={(e) => selectCatalogCode(idx, e.target.value)}
+                    disabled={disabled}
+                    placeholder="— select —"
+                    options={catalog.map((c) => ({ value: c.code, label: `${c.label} (${c.code})` }))}
+                  />
+                </TmsField>
+                <TmsField label="Customer code">
+                  <TmsInput value={o.customerCode ?? ''} onChange={(e) => update(idx, { customerCode: e.target.value || null })} disabled={disabled} />
+                </TmsField>
               </div>
-              <div>
-                <Label className="text-xs uppercase tracking-wider text-muted-foreground">Customer code</Label>
-                <Input value={o.customerCode ?? ''} onChange={(e) => update(idx, { customerCode: e.target.value || null })} disabled={disabled} className="h-9 text-sm" />
-              </div>
-            </div>
-            <div className="flex items-center gap-2 pt-4">
-              <Label className="text-xs text-muted-foreground flex items-center gap-1.5">
-                <Switch checked={o.display} onCheckedChange={(checked) => update(idx, { display: checked })} disabled={disabled} />
+              <label className="tms-muted" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, paddingBottom: 10 }}>
+                <input type="checkbox" checked={o.display} onChange={(e) => update(idx, { display: e.target.checked })} disabled={disabled} />
                 Show
-              </Label>
-              <Button type="button" variant="ghost" size="icon" className="h-7 w-7" onClick={() => remove(idx)} disabled={disabled}>
+              </label>
+              <TmsButton variant="ghost" size="sm" aria-label="Remove override" onClick={() => remove(idx)} disabled={disabled}>
                 <Trash2 size={14} />
-              </Button>
+              </TmsButton>
             </div>
-          </div>
-          <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-3">
-            <div>
-              <Label className="text-xs uppercase tracking-wider text-muted-foreground">Label override</Label>
-              <Input value={o.label ?? ''} onChange={(e) => update(idx, { label: e.target.value || null })} disabled={disabled} className="h-9 text-sm" />
+            <div className="tms-grid tms-grid-4">
+              <TmsField label="Label override">
+                <TmsInput value={o.label ?? ''} onChange={(e) => update(idx, { label: e.target.value || null })} disabled={disabled} />
+              </TmsField>
+              <TmsField label="Category override">
+                <TmsInput value={o.category ?? ''} onChange={(e) => update(idx, { category: e.target.value || null })} disabled={disabled} />
+              </TmsField>
+              <TmsField label="Calc override">
+                <TmsSelect
+                  value={o.calculatedBy ?? ''}
+                  onChange={(e) => update(idx, { calculatedBy: e.target.value ? (e.target.value as ChargeCalc) : null })}
+                  disabled={disabled}
+                  placeholder="— no override —"
+                  options={CALC_OPTIONS.map((c) => ({ value: c, label: c }))}
+                />
+              </TmsField>
+              <MoneyField label="Default amount" value={o.defaultAmountCents} onChange={(cents) => update(idx, { defaultAmountCents: cents })} disabled={disabled} />
             </div>
-            <div>
-              <Label className="text-xs uppercase tracking-wider text-muted-foreground">Category override</Label>
-              <Input value={o.category ?? ''} onChange={(e) => update(idx, { category: e.target.value || null })} disabled={disabled} className="h-9 text-sm" />
-            </div>
-            <div>
-              <Label className="text-xs uppercase tracking-wider text-muted-foreground">Calc override</Label>
-              <Select value={o.calculatedBy ?? '__UNSET__'} onValueChange={(v) => update(idx, { calculatedBy: v === '__UNSET__' ? null : (v as ChargeCalc) })} disabled={disabled}>
-                <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__UNSET__">— no override —</SelectItem>
-                  {CALC_OPTIONS.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-            <MoneyField label="Default amount" value={o.defaultAmountCents} onChange={(cents) => update(idx, { defaultAmountCents: cents })} disabled={disabled} />
           </div>
         </div>
       ))}
-      <Button type="button" variant="outline" size="sm" onClick={add} disabled={disabled}>
-        <Plus size={14} className="mr-1" /> Add override
-      </Button>
+      <TmsButton size="sm" onClick={add} disabled={disabled}>
+        <Plus size={14} /> Add override
+      </TmsButton>
     </div>
   )
 }

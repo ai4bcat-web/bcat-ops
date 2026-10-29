@@ -1,5 +1,5 @@
 /**
- * `/quotes/:id` — one quote, and `/quotes/new` — the next one.
+ * `/tms/rates/:id` — one quote, and `/tms/rates/new` — the next one.
  *
  * The page is the quote: the freight it covers, the lines behind the number, what the
  * lane has actually paid, and everything that has happened to it. Pricing is live and
@@ -15,11 +15,9 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { ChevronLeft, Copy, Loader2, Plus, RefreshCw, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
+import {
+  TmsBadge, TmsButton, TmsCard, TmsField, TmsIconButton, TmsInput, TmsPage, TmsSelect, TmsTextarea,
+} from '@/features/tms/kit'
 import { useAuthUser } from '@/hooks/useAuth'
 import { useDirectory } from '@/hooks/useDirectory'
 import { useQuote } from '@/hooks/useQuote'
@@ -76,7 +74,6 @@ interface QuoteForm {
   targetBuyCents: number | null
 }
 
-const CARD = 'rounded-md border border-border bg-card p-4'
 const CALC_OPTIONS: ChargeCalc[] = ['FLAT', 'PER_MILE', 'PER_CWT', 'PERCENT']
 
 /** `2026-03-18T15:00:00.000Z` → `2026-03-18T15:00`, which is what a datetime input eats. */
@@ -107,7 +104,7 @@ function stopsFrom(quote: QuoteRecord | null): StopDraft[] {
 }
 
 /**
- * `preselectedCustomerId` is what `/quotes/new?customerId=…` asked for: a saved quote
+ * `preselectedCustomerId` is what `/tms/rates/new?customerId=…` asked for: a saved quote
  * carries its own customer, a blank one takes the id the directory handed over.
  */
 function formFrom(quote: QuoteRecord | null, preselectedCustomerId = ''): QuoteForm {
@@ -144,9 +141,9 @@ export function QuoteDetail() {
   const quoteId = id ?? null
   const { quote, loading, error, refresh } = useQuote(quoteId)
   const { customers } = useDirectory()
-  // `/quotes/new?customerId=…` — the New quote button on a customer's profile hands the
-  // customer over so the editor opens on them instead of making the operator find them
-  // again. Only a blank quote takes it; a saved one has a customer of its own. The
+  // `/tms/rates/new?customerId=…` — the New quote button on a customer's profile hands
+  // the customer over so the editor opens on them instead of making the operator find
+  // them again. Only a blank quote takes it; a saved one has a customer of its own. The
   // pricing defaults and the default charge lines that follow from the choice are
   // applied by `SAVE_QUOTE`, so the selection is the whole of the prefill.
   const [search] = useSearchParams()
@@ -209,7 +206,7 @@ export function QuoteDetail() {
   const laneKeys = useMemo(() => {
     const first = stops[0]
     const last = stops[stops.length - 1]
-    if (!first || !last) return { laneKey: null, laneKey3: null }
+    if (first == null || last == null) return { laneKey: null, laneKey3: null }
     return laneLookupKeys({
       originCity: first.city, originState: first.state, originZip: first.zip,
       destCity: last.city, destState: last.state, destZip: last.zip,
@@ -217,7 +214,8 @@ export function QuoteDetail() {
   }, [stops])
 
   const state = quote ? quoteState(quote, now) : null
-  const editable = !quote || (state?.canEdit ?? false)
+  const editable = quote == null || (state?.canEdit ?? false)
+  const locked = editable === false || busy
 
   const toStops = useCallback((): Stop[] => stops.map((draft, index) => ({
     id: draft.id || `stop-${index}`,
@@ -260,7 +258,7 @@ export function QuoteDetail() {
         toast.success(`${result.quote.id} saved — ${formatCents(result.pricing.revenueCents)}`)
         // The saved row is the truth now; the local draft has nothing left to say.
         forgetDraft()
-        if (!quote) navigate(`/quotes/${result.quote.id}`)
+        if (quote == null) navigate(`/tms/rates/${result.quote.id}`)
         else return refresh()
       })
       .catch((e: unknown) => toast.error(graphqlErrorText(e) || 'Could not save the quote'))
@@ -268,7 +266,7 @@ export function QuoteDetail() {
   }
 
   const runAcceptCounter = () => {
-    if (!quote) return
+    if (quote == null) return
     setBusy(true)
     acceptCounter({ quoteId: quote.id, expectedVersion: quote.version })
       .then(() => {
@@ -280,7 +278,7 @@ export function QuoteDetail() {
   }
 
   const runRestore = () => {
-    if (!quote) return
+    if (quote == null) return
     setBusy(true)
     restoreQuote({ quoteId: quote.id, expectedVersion: quote.version })
       .then(() => {
@@ -292,7 +290,7 @@ export function QuoteDetail() {
   }
 
   const runCancel = () => {
-    if (!quote) return
+    if (quote == null) return
     setBusy(true)
     cancelQuote({ quoteId: quote.id, expectedVersion: quote.version })
       .then(() => {
@@ -317,408 +315,355 @@ export function QuoteDetail() {
     void refresh()
   }
 
-  if (quoteId && !quote) {
+  if (quoteId && quote == null) {
     return (
-      <div className="p-6 text-sm">
+      <TmsPage title="Quote">
         {loading
-          ? <span className="flex items-center gap-2 text-muted-foreground"><Loader2 size={14} className="animate-spin" /> Loading quote…</span>
-          : <span className="text-destructive">{error ?? 'Quote not found.'}</span>}
-      </div>
+          ? <span className="tms-muted" style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Loader2 size={14} /> Loading quote…</span>
+          : <span className="tms-field-error">{error ?? 'Quote not found.'}</span>}
+      </TmsPage>
     )
   }
 
+  const chip = quote ? expiryChip(quote, now) : null
+
   return (
-    <div className="flex h-full flex-col overflow-auto">
-      <header className="flex flex-wrap items-center gap-2 border-b border-border px-5 py-3">
-        <Button asChild variant="ghost" size="sm">
-          <Link to="/quotes" aria-label="Back to quotes"><ChevronLeft size={14} /> Quotes</Link>
-        </Button>
-        <h1 className="text-lg font-semibold">{quote?.id ?? 'New quote'}</h1>
-        {quote && <Badge variant="outline">{statusLabel(quote)}</Badge>}
-        {quote && (() => {
-          const chip = expiryChip(quote, now)
-          return chip ? <Badge variant={chip.tone === 'danger' ? 'destructive' : 'outline'}>{chip.text}</Badge> : null
-        })()}
-        {quote && <span className="text-sm text-muted-foreground">{quote.customerName ?? 'No customer'}</span>}
-        {quote?.customerRepId && <span className="text-xs text-muted-foreground">rep {quote.customerRepId}</span>}
-        {quote && <span className="text-xs text-muted-foreground">whose move: {whoseMoveLabel(quote, now)}</span>}
-        <Button
-          variant="ghost"
-          size="icon"
-          className="ml-auto h-9 w-9"
+    <TmsPage
+      title={
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <Link to="/tms/rates" aria-label="Back to quotes" className="tms-btn tms-btn-ghost tms-btn-sm">
+            <ChevronLeft size={14} /> Rates
+          </Link>
+          {quote?.id ?? 'New quote'}
+          {quote && <TmsBadge tone="blue">{statusLabel(quote)}</TmsBadge>}
+          {chip && <TmsBadge tone={chip.tone === 'danger' ? 'red' : 'gray'}>{chip.text}</TmsBadge>}
+        </span>
+      }
+      actions={
+        <TmsIconButton
           aria-label="Refresh quote"
           onClick={() => { setNow(new Date().toISOString()); void refresh() }}
         >
-          <RefreshCw size={14} className={loading ? 'animate-spin' : undefined} />
-        </Button>
-      </header>
+          <RefreshCw size={14} />
+        </TmsIconButton>
+      }
+    >
+      {quote && (
+        <div className="tms-muted" style={{ display: 'flex', flexWrap: 'wrap', gap: 12, fontSize: 12 }}>
+          <span>{quote.customerName ?? 'No customer'}</span>
+          {quote.customerRepId && <span>rep {quote.customerRepId}</span>}
+          <span>whose move: {whoseMoveLabel(quote, now)}</span>
+        </div>
+      )}
 
-      <div className="flex flex-wrap items-center gap-2 border-b border-border px-5 py-2">
-        <Button aria-label="Save the quote" disabled={busy || !editable} onClick={save}>Save</Button>
-        {(!quote || state?.canSend) && (
-          <Button
-            variant="outline"
-            aria-label="Send the quote"
-            disabled={busy || !quote}
-            onClick={() => setDialog({ kind: 'send' })}
-          >
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+        <TmsButton variant="primary" aria-label="Save the quote" disabled={busy || editable === false} onClick={save}>Save</TmsButton>
+        {(quote == null || state?.canSend) && (
+          <TmsButton aria-label="Send the quote" disabled={busy || quote == null} onClick={() => setDialog({ kind: 'send' })}>
             Send…
-          </Button>
+          </TmsButton>
         )}
         {state?.canCounter && (
-          <Button variant="outline" aria-label="Counter the quote" disabled={busy} onClick={() => setDialog({ kind: 'counter' })}>
-            Counter…
-          </Button>
+          <TmsButton aria-label="Counter the quote" disabled={busy} onClick={() => setDialog({ kind: 'counter' })}>Counter…</TmsButton>
         )}
         {state?.canAccept && (
-          <Button variant="outline" aria-label="Accept their counter" disabled={busy} onClick={runAcceptCounter}>
-            Accept counter
-          </Button>
+          <TmsButton aria-label="Accept their counter" disabled={busy} onClick={runAcceptCounter}>Accept counter</TmsButton>
         )}
         {state?.canConvert && (
-          <Button variant="outline" aria-label="Convert to shipment" disabled={busy} onClick={() => setDialog({ kind: 'convert' })}>
+          <TmsButton aria-label="Convert to shipment" disabled={busy} onClick={() => setDialog({ kind: 'convert' })}>
             Convert to shipment
-          </Button>
+          </TmsButton>
         )}
         {quote && (
-          <Button variant="outline" aria-label="Duplicate the quote" disabled={busy} onClick={() => setDialog({ kind: 'duplicate' })}>
-            Duplicate…
-          </Button>
+          <TmsButton aria-label="Duplicate the quote" disabled={busy} onClick={() => setDialog({ kind: 'duplicate' })}>Duplicate…</TmsButton>
         )}
         {state?.canMarkLost && (
-          <Button variant="ghost" aria-label="Mark the quote lost" disabled={busy} onClick={() => setDialog({ kind: 'markLost' })}>
+          <TmsButton variant="ghost" aria-label="Mark the quote lost" disabled={busy} onClick={() => setDialog({ kind: 'markLost' })}>
             Mark lost
-          </Button>
+          </TmsButton>
         )}
         {state?.canRestore && (
-          <Button variant="ghost" aria-label="Restore the quote" disabled={busy} onClick={runRestore}>Restore</Button>
+          <TmsButton variant="ghost" aria-label="Restore the quote" disabled={busy} onClick={runRestore}>Restore</TmsButton>
         )}
         {state?.canCancel && (
-          <Button variant="ghost" aria-label="Cancel the quote" disabled={busy} onClick={runCancel}>Cancel</Button>
+          <TmsButton variant="ghost" aria-label="Cancel the quote" disabled={busy} onClick={runCancel}>Cancel</TmsButton>
         )}
         {quote?.linkToken && (
-          <Button variant="ghost" aria-label="Copy the public link" disabled={busy} onClick={copyLink}>
+          <TmsButton variant="ghost" aria-label="Copy the public link" disabled={busy} onClick={copyLink}>
             <Copy size={13} /> Copy link
-          </Button>
+          </TmsButton>
         )}
       </div>
 
-      <div className="grid flex-1 gap-4 px-5 py-4 lg:grid-cols-3">
-        <div className="space-y-4 lg:col-span-2">
-          {/* ── Freight ───────────────────────────────────────────────── */}
-          <section className={CARD}>
-            <h2 className="mb-3 text-sm font-semibold">Freight</h2>
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
-              <div>
-                <Label className="text-xs uppercase tracking-wider text-muted-foreground" htmlFor="quote-customer">Customer</Label>
-                <select
+      <div className="tms-grid" style={{ gridTemplateColumns: 'minmax(0, 2fr) minmax(0, 1fr)' }}>
+        <div style={{ display: 'grid', gap: 16, alignContent: 'start' }}>
+          <TmsCard title="Freight">
+            <div className="tms-grid tms-grid-3">
+              <TmsField label="Customer" htmlFor="quote-customer">
+                <TmsSelect
                   id="quote-customer"
-                  className="h-9 w-full rounded-md border border-border bg-background px-2 text-sm"
                   value={form.customerId}
-                  disabled={!editable || busy}
+                  disabled={locked}
                   onChange={(e) => editForm((prev) => ({ ...prev, customerId: e.target.value }))}
-                >
-                  <option value="">Pick a customer</option>
-                  {customers.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}
-                </select>
-              </div>
-              <Text label="Contact" value={form.contactName} disabled={!editable || busy}
+                  placeholder="Pick a customer"
+                  options={customers.map((row) => ({ value: row.id, label: row.name }))}
+                />
+              </TmsField>
+              <Text label="Contact" value={form.contactName} disabled={locked}
                 onChange={(v) => editForm((prev) => ({ ...prev, contactName: v }))} />
-              <Text label="Contact e-mail" value={form.contactEmail} disabled={!editable || busy}
+              <Text label="Contact e-mail" value={form.contactEmail} disabled={locked}
                 onChange={(v) => editForm((prev) => ({ ...prev, contactEmail: v }))} />
-              <div>
-                <Label className="text-xs uppercase tracking-wider text-muted-foreground" htmlFor="quote-mode">Mode</Label>
-                <select
+              <TmsField label="Mode" htmlFor="quote-mode">
+                <TmsSelect
                   id="quote-mode"
-                  className="h-9 w-full rounded-md border border-border bg-background px-2 text-sm"
                   value={form.mode}
-                  disabled={!editable || busy}
+                  disabled={locked}
                   onChange={(e) => editForm((prev) => ({ ...prev, mode: e.target.value as ShipmentMode }))}
-                >
-                  {MODE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                </select>
-              </div>
-              <div>
-                <Label className="text-xs uppercase tracking-wider text-muted-foreground" htmlFor="quote-rate-type">Rate type</Label>
-                <select
+                  options={MODE_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
+                />
+              </TmsField>
+              <TmsField label="Rate type" htmlFor="quote-rate-type">
+                <TmsSelect
                   id="quote-rate-type"
-                  className="h-9 w-full rounded-md border border-border bg-background px-2 text-sm"
                   value={form.rateType}
-                  disabled={!editable || busy}
+                  disabled={locked}
                   onChange={(e) => editForm((prev) => ({ ...prev, rateType: e.target.value as RateType }))}
-                >
-                  <option value="SPOT">Spot</option>
-                  <option value="CONTRACT">Contract</option>
-                </select>
-              </div>
-              <Text label="Equipment" value={form.equipmentType} disabled={!editable || busy}
+                  options={[{ value: 'SPOT', label: 'Spot' }, { value: 'CONTRACT', label: 'Contract' }]}
+                />
+              </TmsField>
+              <Text label="Equipment" value={form.equipmentType} disabled={locked}
                 onChange={(v) => editForm((prev) => ({ ...prev, equipmentType: v }))} />
-              <Text label="Length (ft)" value={form.equipmentLengthFt} disabled={!editable || busy}
+              <Text label="Length (ft)" value={form.equipmentLengthFt} disabled={locked}
                 onChange={(v) => editForm((prev) => ({ ...prev, equipmentLengthFt: v }))} />
-              <Text label="Commodity" value={form.commodity} disabled={!editable || busy}
+              <Text label="Commodity" value={form.commodity} disabled={locked}
                 onChange={(v) => editForm((prev) => ({ ...prev, commodity: v }))} />
-              <Text label="Weight (lbs)" value={form.weightLbs} disabled={!editable || busy}
+              <Text label="Weight (lbs)" value={form.weightLbs} disabled={locked}
                 onChange={(v) => editForm((prev) => ({ ...prev, weightLbs: v }))} />
-              <Text label="Miles" value={form.miles} disabled={!editable || busy}
+              <Text label="Miles" value={form.miles} disabled={locked}
                 onChange={(v) => editForm((prev) => ({ ...prev, miles: v }))} />
             </div>
-          </section>
+          </TmsCard>
 
-          {/* ── Stops ─────────────────────────────────────────────────── */}
-          <section className={CARD}>
-            <div className="mb-3 flex items-center gap-2">
-              <h2 className="text-sm font-semibold">Stops</h2>
-              <span className="text-xs text-muted-foreground">{laneKeys.laneKey ?? 'lane not keyed yet'}</span>
-              {editable && (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="ml-auto"
-                  aria-label="Add a stop"
-                  disabled={busy}
-                  onClick={() => editStops((prev) => [
-                    ...prev.slice(0, -1),
-                    { id: `stop-${prev.length}`, type: 'delivery', city: '', state: '', zip: '', appt: '' },
-                    prev[prev.length - 1],
-                  ])}
-                >
-                  <Plus size={13} /> Stop
-                </Button>
-              )}
-            </div>
-            <div className="space-y-2">
+          <TmsCard
+            title={
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                Stops
+                <span className="tms-muted" style={{ fontSize: 12, fontWeight: 400 }}>{laneKeys.laneKey ?? 'lane not keyed yet'}</span>
+              </span>
+            }
+            actions={editable ? (
+              <TmsButton
+                size="sm"
+                aria-label="Add a stop"
+                disabled={busy}
+                onClick={() => editStops((prev) => [
+                  ...prev.slice(0, -1),
+                  { id: `stop-${prev.length}`, type: 'delivery', city: '', state: '', zip: '', appt: '' },
+                  prev[prev.length - 1],
+                ])}
+              >
+                <Plus size={13} /> Stop
+              </TmsButton>
+            ) : null}
+          >
+            <div style={{ display: 'grid', gap: 8 }}>
               {stops.map((stop, index) => (
-                <div key={stop.id} className="grid grid-cols-12 items-end gap-2">
-                  <div className="col-span-2">
-                    <Label className="text-xs uppercase tracking-wider text-muted-foreground">Type</Label>
-                    <select
+                <div key={stop.id} style={{ display: 'flex', alignItems: 'flex-end', gap: 8 }}>
+                  <TmsField label="Type">
+                    <TmsSelect
                       aria-label={`Stop ${index + 1} type`}
-                      className="h-9 w-full rounded-md border border-border bg-background px-2 text-sm"
                       value={stop.type}
-                      disabled={!editable || busy}
+                      disabled={locked}
                       onChange={(e) => editStops((prev) => prev.map((row, i) => (
                         i === index ? { ...row, type: e.target.value as StopType } : row
                       )))}
-                    >
-                      <option value="pickup">Pickup</option>
-                      <option value="delivery">Delivery</option>
-                    </select>
-                  </div>
-                  <div className="col-span-3">
-                    <Text label={`Stop ${index + 1} city`} value={stop.city} disabled={!editable || busy}
-                      onChange={(v) => editStops((prev) => prev.map((row, i) => (i === index ? { ...row, city: v } : row)))} />
-                  </div>
-                  <div className="col-span-2">
-                    <Text label={`Stop ${index + 1} state`} value={stop.state} disabled={!editable || busy}
-                      onChange={(v) => editStops((prev) => prev.map((row, i) => (i === index ? { ...row, state: v } : row)))} />
-                  </div>
-                  <div className="col-span-2">
-                    <Text label={`Stop ${index + 1} ZIP`} value={stop.zip} disabled={!editable || busy}
-                      onChange={(v) => editStops((prev) => prev.map((row, i) => (i === index ? { ...row, zip: v } : row)))} />
-                  </div>
-                  <div className="col-span-2">
-                    <Label className="text-xs uppercase tracking-wider text-muted-foreground">Appointment</Label>
-                    <Input
+                      options={[{ value: 'pickup', label: 'Pickup' }, { value: 'delivery', label: 'Delivery' }]}
+                    />
+                  </TmsField>
+                  <Text label={`Stop ${index + 1} city`} value={stop.city} disabled={locked}
+                    onChange={(v) => editStops((prev) => prev.map((row, i) => (i === index ? { ...row, city: v } : row)))} />
+                  <Text label={`Stop ${index + 1} state`} value={stop.state} disabled={locked}
+                    onChange={(v) => editStops((prev) => prev.map((row, i) => (i === index ? { ...row, state: v } : row)))} />
+                  <Text label={`Stop ${index + 1} ZIP`} value={stop.zip} disabled={locked}
+                    onChange={(v) => editStops((prev) => prev.map((row, i) => (i === index ? { ...row, zip: v } : row)))} />
+                  <TmsField label="Appointment">
+                    <TmsInput
                       type="datetime-local"
                       aria-label={`Stop ${index + 1} appointment`}
-                      className="h-9 text-sm"
                       value={stop.appt}
-                      disabled={!editable || busy}
+                      disabled={locked}
                       onChange={(e) => editStops((prev) => prev.map((row, i) => (
                         i === index ? { ...row, appt: e.target.value } : row
                       )))}
                     />
-                  </div>
-                  <div className="col-span-1">
-                    {editable && stops.length > 2 && (
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="h-9 w-9"
-                        aria-label={`Remove stop ${index + 1}`}
-                        disabled={busy}
-                        onClick={() => editStops((prev) => prev.filter((_, i) => i !== index))}
-                      >
-                        <Trash2 size={13} />
-                      </Button>
-                    )}
-                  </div>
+                  </TmsField>
+                  {editable && stops.length > 2 && (
+                    <TmsButton
+                      variant="ghost"
+                      aria-label={`Remove stop ${index + 1}`}
+                      disabled={busy}
+                      onClick={() => editStops((prev) => prev.filter((_, i) => i !== index))}
+                    >
+                      <Trash2 size={13} />
+                    </TmsButton>
+                  )}
                 </div>
               ))}
             </div>
-          </section>
+          </TmsCard>
 
-          {/* ── The price ─────────────────────────────────────────────── */}
-          <section className={CARD}>
-            <div className="mb-3 flex items-center gap-2">
-              <h2 className="text-sm font-semibold">Customer lines</h2>
-              {editable && (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="ml-auto"
-                  aria-label="Add a charge line"
-                  disabled={busy}
-                  onClick={() => editLines((prev) => [...prev, {
-                    side: 'CUSTOMER', code: '', label: null, calculatedBy: 'FLAT', rateCents: 0,
-                    count: 1, isRate: false, sortOrder: prev.length, note: null,
-                  }])}
-                >
-                  <Plus size={13} /> Line
-                </Button>
-              )}
-            </div>
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border text-xs uppercase tracking-wider text-muted-foreground">
-                  <th className="px-1 py-1 text-left">Code</th>
-                  <th className="px-1 py-1 text-left">How</th>
-                  <th className="px-1 py-1 text-right">Rate</th>
-                  <th className="px-1 py-1 text-right">Count</th>
-                  <th className="px-1 py-1" />
-                </tr>
-              </thead>
-              <tbody>
-                {lines.map((line, index) => (
-                  <tr key={`${line.code}-${index}`} className="border-b border-border/60">
-                    <td className="px-1 py-1">
-                      <select
-                        aria-label={`Line ${index + 1} code`}
-                        className="h-8 w-full rounded-md border border-border bg-background px-1 text-sm"
-                        value={line.code}
-                        disabled={!editable || busy}
-                        onChange={(e) => editLines((prev) => prev.map((row, i) => (
-                          i === index ? { ...row, code: e.target.value } : row
-                        )))}
-                      >
-                        <option value="">Pick a code</option>
-                        {catalog.map((code) => <option key={code.code} value={code.code}>{code.label}</option>)}
-                        {line.code && !catalog.some((code) => code.code === line.code) && (
-                          <option value={line.code}>{humanChargeCode(line.code)}</option>
-                        )}
-                      </select>
-                    </td>
-                    <td className="px-1 py-1">
-                      <select
-                        aria-label={`Line ${index + 1} calculation`}
-                        className="h-8 w-full rounded-md border border-border bg-background px-1 text-sm"
-                        value={line.calculatedBy}
-                        disabled={!editable || busy}
-                        onChange={(e) => editLines((prev) => prev.map((row, i) => (
-                          i === index ? { ...row, calculatedBy: e.target.value as ChargeCalc } : row
-                        )))}
-                      >
-                        {CALC_OPTIONS.map((calc) => <option key={calc} value={calc}>{calc}</option>)}
-                      </select>
-                    </td>
-                    <td className="px-1 py-1">
-                      <MoneyField
-                        value={line.rateCents}
-                        disabled={!editable || busy}
-                        onChange={(cents) => editLines((prev) => prev.map((row, i) => (
-                          i === index ? { ...row, rateCents: cents ?? 0 } : row
-                        )))}
-                      />
-                    </td>
-                    <td className="px-1 py-1">
-                      <Input
-                        type="number"
-                        aria-label={`Line ${index + 1} count`}
-                        className="h-8 w-20 text-right text-sm"
-                        value={line.count ?? 1}
-                        disabled={!editable || busy}
-                        onChange={(e) => editLines((prev) => prev.map((row, i) => (
-                          i === index ? { ...row, count: Number(e.target.value) || 0 } : row
-                        )))}
-                      />
-                    </td>
-                    <td className="px-1 py-1 text-right">
-                      {editable && lines.length > 1 && (
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="h-8 w-8"
-                          aria-label={`Remove line ${index + 1}`}
-                          disabled={busy}
-                          onClick={() => editLines((prev) => prev.filter((_, i) => i !== index))}
-                        >
-                          <Trash2 size={13} />
-                        </Button>
-                      )}
-                    </td>
+          <TmsCard
+            title="Customer lines"
+            actions={editable ? (
+              <TmsButton
+                size="sm"
+                aria-label="Add a charge line"
+                disabled={busy}
+                onClick={() => editLines((prev) => [...prev, {
+                  side: 'CUSTOMER', code: '', label: null, calculatedBy: 'FLAT', rateCents: 0,
+                  count: 1, isRate: false, sortOrder: prev.length, note: null,
+                }])}
+              >
+                <Plus size={13} /> Line
+              </TmsButton>
+            ) : null}
+          >
+            <div className="tms-table-wrap">
+              <table className="tms-table">
+                <thead>
+                  <tr>
+                    <th scope="col">CODE</th>
+                    <th scope="col">HOW</th>
+                    <th scope="col">RATE</th>
+                    <th scope="col">COUNT</th>
+                    <th scope="col" />
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {lines.map((line, index) => (
+                    <tr key={`${line.code}-${index}`}>
+                      <td>
+                        <TmsSelect
+                          aria-label={`Line ${index + 1} code`}
+                          value={line.code}
+                          disabled={locked}
+                          onChange={(e) => editLines((prev) => prev.map((row, i) => (
+                            i === index ? { ...row, code: e.target.value } : row
+                          )))}
+                        >
+                          <option value="">Pick a code</option>
+                          {catalog.map((code) => <option key={code.code} value={code.code}>{code.label}</option>)}
+                          {line.code && catalog.some((code) => code.code === line.code) === false && (
+                            <option value={line.code}>{humanChargeCode(line.code)}</option>
+                          )}
+                        </TmsSelect>
+                      </td>
+                      <td>
+                        <TmsSelect
+                          aria-label={`Line ${index + 1} calculation`}
+                          value={line.calculatedBy}
+                          disabled={locked}
+                          onChange={(e) => editLines((prev) => prev.map((row, i) => (
+                            i === index ? { ...row, calculatedBy: e.target.value as ChargeCalc } : row
+                          )))}
+                          options={CALC_OPTIONS.map((calc) => ({ value: calc, label: calc }))}
+                        />
+                      </td>
+                      <td>
+                        <MoneyField
+                          value={line.rateCents}
+                          disabled={locked}
+                          onChange={(cents) => editLines((prev) => prev.map((row, i) => (
+                            i === index ? { ...row, rateCents: cents ?? 0 } : row
+                          )))}
+                        />
+                      </td>
+                      <td>
+                        <TmsInput
+                          type="number"
+                          aria-label={`Line ${index + 1} count`}
+                          style={{ width: 80, textAlign: 'right' }}
+                          value={line.count ?? 1}
+                          disabled={locked}
+                          onChange={(e) => editLines((prev) => prev.map((row, i) => (
+                            i === index ? { ...row, count: Number(e.target.value) || 0 } : row
+                          )))}
+                        />
+                      </td>
+                      <td style={{ textAlign: 'right' }}>
+                        {editable && lines.length > 1 && (
+                          <TmsButton
+                            variant="ghost"
+                            size="sm"
+                            aria-label={`Remove line ${index + 1}`}
+                            disabled={busy}
+                            onClick={() => editLines((prev) => prev.filter((_, i) => i !== index))}
+                          >
+                            <Trash2 size={13} />
+                          </TmsButton>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
 
-            <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-4">
+            <div className="tms-grid tms-grid-4" style={{ marginTop: 12 }}>
               <Money label="Revenue" cents={pricing.revenueCents} />
               <Money label="Cost" cents={pricing.costCents} />
               <Money label="Profit" cents={pricing.profitCents} />
               <div>
-                <div className="text-xs uppercase tracking-wider text-muted-foreground">Margin</div>
-                <div className="tabular-nums">{(pricing.marginBps / 100).toFixed(1)}%</div>
+                <div className="tms-field-label">Margin</div>
+                <div style={{ fontVariantNumeric: 'tabular-nums' }}>{(pricing.marginBps / 100).toFixed(1)}%</div>
               </div>
               <Money label="Top spend" cents={pricing.topSpendCents} />
               {pricing.targetBuyCents != null && <Money label="Target buy" cents={pricing.targetBuyCents} />}
-              <div className="md:col-span-2">
-                <MoneyField
-                  label="Target buy override"
-                  value={form.targetBuyCents}
-                  disabled={!editable || busy}
-                  onChange={(cents) => editForm((prev) => ({ ...prev, targetBuyCents: cents }))}
-                />
-              </div>
+              <MoneyField
+                label="Target buy override"
+                value={form.targetBuyCents}
+                disabled={locked}
+                onChange={(cents) => editForm((prev) => ({ ...prev, targetBuyCents: cents }))}
+              />
             </div>
 
             {pricing.warnings.length > 0 && (
-              <ul className="mt-3 space-y-1 rounded-lg border border-amber-500/40 bg-amber-500/10 p-2 text-xs">
+              <ul style={{ marginTop: 12, display: 'grid', gap: 4, borderRadius: 'var(--tms-radius)', border: '1px solid var(--tms-badge-orange)', background: 'rgba(255,136,10,0.12)', padding: '8px 8px 8px 24px', fontSize: 12 }}>
                 {pricing.warnings.map((warning) => (
                   <li key={warning.key}>
                     {warning.message}
-                    {warning.adminOnly && <Badge variant="outline" className="ml-1 text-[10px]">owner / admin</Badge>}
+                    {warning.adminOnly && <TmsBadge tone="gray">owner / admin</TmsBadge>}
                   </li>
                 ))}
               </ul>
             )}
-          </section>
+          </TmsCard>
 
-          {/* ── Notes ─────────────────────────────────────────────────── */}
-          <section className={CARD}>
-            <h2 className="mb-3 text-sm font-semibold">Notes</h2>
-            <div className="grid gap-3 md:grid-cols-2">
-              <div>
-                <Label className="text-xs uppercase tracking-wider text-muted-foreground" htmlFor="quote-message">
-                  What the customer reads
-                </Label>
-                <Textarea
+          <TmsCard title="Notes">
+            <div className="tms-grid tms-grid-2">
+              <TmsField label="What the customer reads" htmlFor="quote-message">
+                <TmsTextarea
                   id="quote-message"
                   rows={3}
-                  className="text-sm"
                   value={form.customerMessage}
                   disabled={busy}
                   onChange={(e) => editForm((prev) => ({ ...prev, customerMessage: e.target.value }))}
                 />
-              </div>
-              <div>
-                <Label className="text-xs uppercase tracking-wider text-muted-foreground" htmlFor="quote-internal">
-                  Internal — never leaves the building
-                </Label>
-                <Textarea
+              </TmsField>
+              <TmsField label="Internal — never leaves the building" htmlFor="quote-internal">
+                <TmsTextarea
                   id="quote-internal"
                   rows={3}
-                  className="text-sm"
                   value={form.internalNotes}
                   disabled={busy}
                   onChange={(e) => editForm((prev) => ({ ...prev, internalNotes: e.target.value }))}
                 />
-              </div>
+              </TmsField>
             </div>
-          </section>
+          </TmsCard>
         </div>
 
-        {/* ── Lane history and the thread ───────────────────────────── */}
-        <div className="space-y-4">
+        <div style={{ display: 'grid', gap: 16, alignContent: 'start' }}>
           <LaneHistoryPanel
             laneKey={quote?.laneKey ?? laneKeys.laneKey}
             laneKey3={quote?.laneKey3 ?? laneKeys.laneKey3}
@@ -744,7 +689,7 @@ export function QuoteDetail() {
           onOpenChange={(o) => { if (!o) setDialog(null) }}
           onDone={(shipmentId) => {
             setDialog(null)
-            if (shipmentId) navigate(`/shipments/${shipmentId}`)
+            if (shipmentId) navigate(`/tms/shipments/${shipmentId}`)
             else void refresh()
           }}
         />
@@ -755,7 +700,7 @@ export function QuoteDetail() {
       {quote && dialog?.kind === 'markLost' && (
         <MarkLostDialog open quote={quote} onOpenChange={(o) => { if (!o) setDialog(null) }} onDone={closeAndRefresh} />
       )}
-    </div>
+    </TmsPage>
   )
 }
 
@@ -766,24 +711,17 @@ function Text({ label, value, disabled, onChange }: {
   onChange: (value: string) => void
 }) {
   return (
-    <div>
-      <Label className="text-xs uppercase tracking-wider text-muted-foreground">{label}</Label>
-      <Input
-        aria-label={label}
-        className="h-9 text-sm"
-        value={value}
-        disabled={disabled}
-        onChange={(e) => onChange(e.target.value)}
-      />
-    </div>
+    <TmsField label={label}>
+      <TmsInput value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)} />
+    </TmsField>
   )
 }
 
 function Money({ label, cents }: { label: string; cents: number }) {
   return (
     <div>
-      <div className="text-xs uppercase tracking-wider text-muted-foreground">{label}</div>
-      <div className="tabular-nums">{formatCents(cents)}</div>
+      <div className="tms-field-label">{label}</div>
+      <div style={{ fontVariantNumeric: 'tabular-nums' }}>{formatCents(cents)}</div>
     </div>
   )
 }
@@ -797,51 +735,51 @@ function Thread({ quote }: { quote: QuoteRecord }) {
   const events = quote.events ?? []
   const marginBadge = marginChip(quote, null)
   return (
-    <section className={CARD}>
-      <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold">
-        Thread
-        <Badge variant="outline" className="text-[10px]">round {quote.rounds}</Badge>
-        {marginBadge && <Badge variant="outline" className="text-[10px]">{marginBadge.text}</Badge>}
-      </h2>
-
-      <dl className="mb-3 grid grid-cols-2 gap-2 text-xs">
+    <TmsCard
+      title={
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+          Thread
+          <TmsBadge tone="gray">round {quote.rounds}</TmsBadge>
+          {marginBadge && <TmsBadge tone="gray">{marginBadge.text}</TmsBadge>}
+        </span>
+      }
+    >
+      <dl className="tms-grid tms-grid-2" style={{ marginBottom: 12, fontSize: 12 }}>
         <div>
-          <dt className="uppercase tracking-wider text-muted-foreground">Sent</dt>
-          <dd>
+          <dt className="tms-field-label">Sent</dt>
+          <dd style={{ margin: 0 }}>
             {quote.sentAt ? formatDateTime(quote.sentAt) : 'never'}
             {quote.sendCount ? ` · ${quote.sendCount} send${quote.sendCount === 1 ? '' : 's'}` : ''}
-            {quote.lastSendStatus === 'NOT_SENT' && (
-              <Badge variant="destructive" className="ml-1 text-[10px]">Not sent</Badge>
-            )}
+            {quote.lastSendStatus === 'NOT_SENT' && <TmsBadge tone="red">Not sent</TmsBadge>}
           </dd>
         </div>
         <div>
-          <dt className="uppercase tracking-wider text-muted-foreground">To</dt>
-          <dd className="truncate">{quote.sentTo ?? quote.contactEmail ?? '—'}</dd>
+          <dt className="tms-field-label">To</dt>
+          <dd style={{ margin: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{quote.sentTo ?? quote.contactEmail ?? '—'}</dd>
         </div>
         <div>
-          <dt className="uppercase tracking-wider text-muted-foreground">Answered</dt>
-          <dd>{quote.respondedAt ? `${quote.response ?? ''} ${formatDateTime(quote.respondedAt)}` : 'not yet'}</dd>
+          <dt className="tms-field-label">Answered</dt>
+          <dd style={{ margin: 0 }}>{quote.respondedAt ? `${quote.response ?? ''} ${formatDateTime(quote.respondedAt)}` : 'not yet'}</dd>
         </div>
         <div>
-          <dt className="uppercase tracking-wider text-muted-foreground">By</dt>
-          <dd className="truncate">{quote.responderName ?? quote.responderEmail ?? '—'}</dd>
+          <dt className="tms-field-label">By</dt>
+          <dd style={{ margin: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{quote.responderName ?? quote.responderEmail ?? '—'}</dd>
         </div>
       </dl>
 
-      <ol className="space-y-2 text-xs">
-        {events.length === 0 && <li className="text-muted-foreground">Nothing has happened to this quote yet.</li>}
+      <ol style={{ display: 'grid', gap: 8, fontSize: 12, listStyle: 'none', padding: 0, margin: 0 }}>
+        {events.length === 0 && <li className="tms-muted">Nothing has happened to this quote yet.</li>}
         {events.map((event, index) => (
-          <li key={`${event.at}-${index}`} className="border-l-2 border-border pl-2">
-            <div className="font-medium">
+          <li key={`${event.at}-${index}`} style={{ borderLeft: '2px solid var(--tms-border)', paddingLeft: 8 }}>
+            <div style={{ fontWeight: 600 }}>
               {event.kind.replace(/_/g, ' ').toLowerCase()}
-              {event.amountCents != null && <span className="ml-1 tabular-nums">{formatCents(event.amountCents)}</span>}
+              {event.amountCents != null && <span style={{ marginLeft: 4, fontVariantNumeric: 'tabular-nums' }}>{formatCents(event.amountCents)}</span>}
             </div>
-            <div className="text-muted-foreground">{formatDateTime(event.at)} · {event.by}</div>
-            {event.note && <div className="mt-0.5">{event.note}</div>}
+            <div className="tms-muted">{formatDateTime(event.at)} · {event.by}</div>
+            {event.note && <div style={{ marginTop: 2 }}>{event.note}</div>}
           </li>
         ))}
       </ol>
-    </section>
+    </TmsCard>
   )
 }

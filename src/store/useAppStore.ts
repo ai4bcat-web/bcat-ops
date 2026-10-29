@@ -395,7 +395,8 @@ interface AppState {
   // ── Load actions ───────────────────────────────────────────────────────────
   addLoad: (l: Omit<Load, 'id' | 'createdAt' | 'updatedAt'>) => Promise<Load>
   updateLoad: (id: string, patch: Partial<Omit<Load, 'id' | 'createdAt'>>) => Promise<void>
-  deleteLoad: (id: string) => Promise<void>
+  // No deleteLoad: a PRO number is permanent (Ryne, 2026-10-28). The Load model has
+  // no delete operation at all; a shipment leaves the working set by being voided.
 
   // ── Equipment actions (optimistic local update + write-through to backend) ──
   addEquipment: (e: Omit<Equipment, 'id' | 'createdAt' | 'updatedAt'>) => Equipment
@@ -558,9 +559,7 @@ export const useAppStore = create<AppState>()(
           onUpdate: (load) => set((s) => ({
             loads: s.loads.map((l) => l.id === load.id ? load : l),
           })),
-          onDelete: (id) => set((s) => ({
-            loads: s.loads.filter((l) => l.id !== id),
-          })),
+          // No onDelete: loads are never deleted, so the subscription does not exist.
         })
       },
 
@@ -685,16 +684,6 @@ export const useAppStore = create<AppState>()(
         }, before)))
         set((s) => ({ loads: s.loads.map((l) => (l.id === id ? after : l)) }))
         writeAudit(get().currentUserEmail, 'Load', id, 'update', diffChanges(before, after))
-      },
-
-      deleteLoad: async (id) => {
-        const before = get().loads.find((l) => l.id === id)
-        if (!before) return
-        await api.deleteLoad(id)
-        set((s) => ({ loads: s.loads.filter((l) => l.id !== id) }))
-        writeAudit(get().currentUserEmail, 'Load', id, 'delete', {
-          _snapshot: { from: before, to: null },
-        })
       },
 
       // ── Equipment ──────────────────────────────────────────────────────────

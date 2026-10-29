@@ -11,7 +11,7 @@ related: [shipments-orders-loads, carriers-and-booking]
 
 Once a load is dispatched, the question stops being "who is hauling it" and becomes "where is it". This article covers the four ways BCAT knows where freight is, how to log a check call, which events move a load's status, the reminder system, incidents, and the two public links — the one the carrier's driver taps and the one the customer watches.
 
-Everything here lives on the shipment's **Tracking** tab (between Carrier and Documents) and on **Operations → Check calls**.
+Everything here lives on the shipment's **Tracking** tab (between Carrier and Documents) and on **Check calls** (`/tms/check-calls`).
 
 ## The four tracking methods
 
@@ -63,7 +63,7 @@ The same holds the other way round. The driver app, the POD close and the dispat
 
 ## Reminders: due and overdue
 
-Dispatching a load schedules the next check call (default four hours out; change the default in Settings). Any check call can schedule the next one, with quick picks for +2 h, +4 h, tomorrow 08:00, or none.
+Dispatching a load schedules the next check call (default four hours out; change the default in My Brokerage). Any check call can schedule the next one, with quick picks for +2 h, +4 h, tomorrow 08:00, or none.
 
 A load with an outstanding check call shows a banner on the Tracking tab:
 
@@ -71,7 +71,7 @@ A load with an outstanding check call shows a banner on the Tracking tab:
 - **Due** — the time has arrived (exactly at the scheduled minute).
 - **Overdue** — the grace period has run out on top of that (default 15 minutes).
 
-From the banner you can edit the reminder, snooze an hour, or say there is no reminder needed. **Operations → Check calls** is the same data as a worklist, with tabs for Overdue, Due, Scheduled and Exceptions, the driver's phone as a tap-to-call link, and Log check call inline. The nav badge counts Due plus Overdue.
+From the banner you can edit the reminder, snooze an hour, or say there is no reminder needed. **Check calls** (`/tms/check-calls`) is the same data as a worklist, with tabs for Overdue, Due, Scheduled and Exceptions, the driver's phone as a tap-to-call link, and Log check call inline. The nav badge counts Due plus Overdue.
 
 Outside the app, a scheduled job sweeps every five minutes and Slack-DMs the load's carrier rep (and/or a channel you nominate) once for Due and once for Overdue per scheduled time. Rescheduling a check call re-arms both. The channel is configurable: in-app only, Slack only, or both. Staff are never texted or emailed about a check call.
 
@@ -120,7 +120,7 @@ The customer page shows the brokerage header, the shipment number, a status step
 What it never shows, by construction:
 
 - any rate, cost, margin or money of any kind;
-- the carrier's name (off by default; it can be turned on in Settings);
+- the carrier's name (off by default; it can be turned on in My Brokerage);
 - driver or dispatcher phone numbers;
 - internal notes, internal-only references, or carrier-only references;
 - anything about a carrier that bounced off the load.
@@ -134,7 +134,7 @@ The link expires 14 days after it is sent by default, and can be revoked at any 
 - **Shipments board** — **Last update** and **Next check call** columns, the second toned for due and overdue, plus the Exceptions badge. Filters for check call due, overdue and open exceptions.
 - **Shipment summary tab** — Last update and Next check call as facts.
 - **Dispatch dialog** — *Send tracking link now*, pre-checked when the provider is `LINK` and we have a driver phone, fired after the dispatch succeeds.
-- **Settings → Tracking & check calls** — the default interval and grace, the notify channel and Slack channel, link expiry for both link types, whether the customer page shows the carrier and the position, who the contact card names, and the SMS template (which must contain `{url}`).
+- **My Brokerage → Tracking & check calls** — the default interval and grace, the notify channel and Slack channel, link expiry for both link types, whether the customer page shows the carrier and the position, who the contact card names, and the SMS template (which must contain `{url}`).
 
 ## Troubleshooting
 
@@ -142,5 +142,5 @@ The link expires 14 days after it is sent by default, and can be revoked at any 
 - **"Own trucks track through Motive and the driver app"** — the load is on an own-asset assignment. There is no ping link for it; the driver app and Motive already report.
 - **The driver says the location button does nothing** — their browser is refusing location. The page says so explicitly; iOS needs Settings → Safari → Location and the site allowed.
 - **"Location too imprecise"** — the phone answered from cell towers rather than GPS. Outdoors, with precise location on, works.
-- **The customer says they can see the carrier** — somebody turned on *customer link shows carrier* in Settings. It is off by default and applies to links minted after the change; regenerate the link to re-snapshot it.
+- **The customer says they can see the carrier** — somebody turned on *customer link shows carrier* in My Brokerage → Tracking & check calls. It is off by default and applies to links minted after the change; regenerate the link to re-snapshot it.
 - **A check call I logged did not move the status** — only `ARRIVED` and `DEPARTED` on the first pickup or last delivery move it, and never backwards. The dialog tells you in advance.

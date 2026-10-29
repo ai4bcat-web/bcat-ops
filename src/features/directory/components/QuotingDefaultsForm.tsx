@@ -1,6 +1,4 @@
-import { Label } from '@/components/ui/label'
-import { Input } from '@/components/ui/input'
-import { Textarea } from '@/components/ui/textarea'
+import { TmsField, TmsInput, TmsTextarea } from '@/features/tms/kit'
 import type { QuotingDefaults } from '@/types/tms'
 
 interface QuotingDefaultsFormProps {
@@ -21,69 +19,57 @@ export function QuotingDefaultsForm({ value, onChange, disabled }: QuotingDefaul
   const update = (patch: Partial<QuotingDefaults>) => onChange({ ...value, ...patch })
 
   return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-3 gap-3">
-        <div>
-          <Label className="text-xs uppercase tracking-wider text-muted-foreground">Default mode</Label>
-          <Input value={value.defaultMode ?? ''} onChange={(e) => update({ defaultMode: e.target.value || null })} disabled={disabled} className="h-9 text-sm" />
-        </div>
-        <div>
-          <Label className="text-xs uppercase tracking-wider text-muted-foreground">Hours to quote</Label>
-          <Input
+    <div style={{ display: 'grid', gap: 12 }}>
+      <div className="tms-grid tms-grid-3">
+        <TmsField label="Default mode">
+          <TmsInput value={value.defaultMode ?? ''} onChange={(e) => update({ defaultMode: e.target.value || null })} disabled={disabled} />
+        </TmsField>
+        <TmsField label="Hours to quote">
+          <TmsInput
             type="number"
             min={0}
             value={value.hoursToQuote ?? ''}
             onChange={(e) => update({ hoursToQuote: e.target.value ? Number(e.target.value) : null })}
             disabled={disabled}
-            className="h-9 text-sm"
           />
-        </div>
-        <div>
-          <Label className="text-xs uppercase tracking-wider text-muted-foreground">Portal LTL dispatch</Label>
-          <Input
+        </TmsField>
+        <TmsField label="Portal LTL dispatch">
+          <TmsInput
             value={value.portalLtlDispatchMode ?? ''}
             onChange={(e) => update({ portalLtlDispatchMode: e.target.value || null })}
             disabled={disabled}
-            className="h-9 text-sm"
           />
-        </div>
+        </TmsField>
       </div>
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <Label className="text-xs uppercase tracking-wider text-muted-foreground">Portal status mask</Label>
-          <Textarea
+      <div className="tms-grid tms-grid-2">
+        <TmsField label="Portal status mask">
+          <TmsTextarea
             value={arrayToLines(value.portalStatusMask)}
             onChange={(e) => update({ portalStatusMask: linesToArray(e.target.value) })}
             disabled={disabled}
-            className="text-sm min-h-[72px]"
             placeholder="One status per line"
           />
-        </div>
-        <div>
-          <Label className="text-xs uppercase tracking-wider text-muted-foreground">Blocked LTL carrier IDs</Label>
-          <Textarea
+        </TmsField>
+        <TmsField label="Blocked LTL carrier IDs">
+          <TmsTextarea
             value={arrayToLines(value.blockedLtlCarrierIds)}
             onChange={(e) => update({ blockedLtlCarrierIds: linesToArray(e.target.value) })}
             disabled={disabled}
-            className="text-sm min-h-[72px]"
             placeholder="One ID per line"
           />
-        </div>
+        </TmsField>
       </div>
-      <div>
-        <Label className="text-xs uppercase tracking-wider text-muted-foreground">Self-quote carrier IDs</Label>
-        <Textarea
+      <TmsField label="Self-quote carrier IDs">
+        <TmsTextarea
           value={arrayToLines(value.selfQuoteCarrierIds)}
           onChange={(e) => update({ selfQuoteCarrierIds: linesToArray(e.target.value) })}
           disabled={disabled}
-          className="text-sm min-h-[72px]"
           placeholder="One ID per line"
         />
-      </div>
-      <div>
-        <Label className="text-xs uppercase tracking-wider text-muted-foreground">Notes</Label>
-        <Textarea value={value.notes ?? ''} onChange={(e) => update({ notes: e.target.value || null })} disabled={disabled} className="text-sm" />
-      </div>
+      </TmsField>
+      <TmsField label="Notes">
+        <TmsTextarea value={value.notes ?? ''} onChange={(e) => update({ notes: e.target.value || null })} disabled={disabled} />
+      </TmsField>
     </div>
   )
 }

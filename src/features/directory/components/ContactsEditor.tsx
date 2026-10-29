@@ -1,12 +1,7 @@
 import { useState } from 'react'
 import { Plus, Trash2 } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Switch } from '@/components/ui/switch'
-import { Checkbox } from '@/components/ui/checkbox'
+import { TmsButton, TmsField, TmsInput, TmsSelect } from '@/features/tms/kit'
 import type { CustomerContact, CustomerContactType, CustomerNotification } from '@/types/tms'
-import { cn } from '@/lib/utils'
 
 const CONTACT_TYPES: CustomerContactType[] = ['PRIMARY', 'BILLING', 'OPERATIONS', 'SALES', 'CLAIMS', 'OTHER']
 const NOTIFICATIONS: CustomerNotification[] = [
@@ -76,148 +71,111 @@ export function ContactsEditor({ contacts, billToPartyIds = [], onChange, disabl
   const remove = (id: string) => onChange(contacts.filter((c) => c.id !== id))
 
   return (
-    <div className="space-y-3">
-      {contacts.length === 0 && (
-        <p className="text-xs text-muted-foreground">No contacts yet.</p>
-      )}
+    <div style={{ display: 'grid', gap: 12 }}>
+      {contacts.length === 0 && <p className="tms-muted" style={{ fontSize: 12 }}>No contacts yet.</p>}
       {contacts.map((c) => {
         const open = expanded[c.id] ?? true
         return (
-          <div key={c.id} className="rounded-lg border border-border bg-card p-3">
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setExpanded((p) => ({ ...p, [c.id]: !open }))}
-                className="flex-1 text-left text-sm font-medium"
-              >
-                {c.name || 'New contact'}
-                {c.types.length > 0 && (
-                  <span className="ml-2 text-xs text-muted-foreground">{c.types.join(', ')}</span>
-                )}
-              </button>
-              <div className="flex items-center gap-2">
-                <Label className="text-xs text-muted-foreground flex items-center gap-1.5">
-                  <Switch
+          <div key={c.id} className="tms-card">
+            <div className="tms-card-body" style={{ display: 'grid', gap: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <button
+                  type="button"
+                  onClick={() => setExpanded((p) => ({ ...p, [c.id]: !open }))}
+                  style={{ flex: 1, textAlign: 'left', background: 'none', border: 'none', color: 'inherit', font: 'inherit', fontWeight: 600, cursor: 'pointer', padding: 0 }}
+                >
+                  {c.name || 'New contact'}
+                  {c.types.length > 0 && <span className="tms-muted" style={{ marginLeft: 8, fontSize: 12 }}>{c.types.join(', ')}</span>}
+                </button>
+                <label className="tms-muted" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+                  <input
+                    type="checkbox"
                     checked={c.active}
-                    onCheckedChange={(checked) => update(c.id, { active: checked })}
+                    onChange={(e) => update(c.id, { active: e.target.checked })}
                     disabled={disabled}
                   />
                   Active
-                </Label>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7"
-                  onClick={() => remove(c.id)}
-                  disabled={disabled}
-                >
+                </label>
+                <TmsButton variant="ghost" size="sm" aria-label="Remove contact" onClick={() => remove(c.id)} disabled={disabled}>
                   <Trash2 size={14} />
-                </Button>
+                </TmsButton>
               </div>
-            </div>
-            {open && (
-              <div className="mt-3 grid gap-3">
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <Label className="text-xs uppercase tracking-wider text-muted-foreground">Name</Label>
-                    <Input
-                      value={c.name}
-                      onChange={(e) => update(c.id, { name: e.target.value })}
-                      disabled={disabled}
-                      className="h-9 text-sm"
-                    />
+              {open && (
+                <div style={{ display: 'grid', gap: 12 }}>
+                  <div className="tms-grid tms-grid-2">
+                    <TmsField label="Name">
+                      <TmsInput value={c.name} onChange={(e) => update(c.id, { name: e.target.value })} disabled={disabled} />
+                    </TmsField>
+                    <TmsField label="Title">
+                      <TmsInput value={c.title ?? ''} onChange={(e) => update(c.id, { title: e.target.value })} disabled={disabled} />
+                    </TmsField>
+                    <TmsField label="Email">
+                      <TmsInput value={c.email ?? ''} onChange={(e) => update(c.id, { email: e.target.value })} disabled={disabled} />
+                    </TmsField>
+                    <TmsField label="Phone">
+                      <TmsInput value={c.phone ?? ''} onChange={(e) => update(c.id, { phone: e.target.value })} disabled={disabled} />
+                    </TmsField>
                   </div>
                   <div>
-                    <Label className="text-xs uppercase tracking-wider text-muted-foreground">Title</Label>
-                    <Input
-                      value={c.title ?? ''}
-                      onChange={(e) => update(c.id, { title: e.target.value })}
-                      disabled={disabled}
-                      className="h-9 text-sm"
-                    />
-                  </div>
-                  <div>
-                    <Label className="text-xs uppercase tracking-wider text-muted-foreground">Email</Label>
-                    <Input
-                      value={c.email ?? ''}
-                      onChange={(e) => update(c.id, { email: e.target.value })}
-                      disabled={disabled}
-                      className="h-9 text-sm"
-                    />
-                  </div>
-                  <div>
-                    <Label className="text-xs uppercase tracking-wider text-muted-foreground">Phone</Label>
-                    <Input
-                      value={c.phone ?? ''}
-                      onChange={(e) => update(c.id, { phone: e.target.value })}
-                      disabled={disabled}
-                      className="h-9 text-sm"
-                    />
-                  </div>
-                </div>
-                <div>
-                  <Label className="text-xs uppercase tracking-wider text-muted-foreground mb-1.5 block">Types</Label>
-                  <div className="flex flex-wrap gap-2">
-                    {CONTACT_TYPES.map((type) => (
-                      <label
-                        key={type}
-                        className={cn(
-                          'inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs cursor-pointer',
-                          c.types.includes(type)
-                            ? 'border-primary bg-primary/10 text-primary'
-                            : 'border-border text-muted-foreground'
-                        )}
-                      >
-                        <Checkbox
-                          checked={c.types.includes(type)}
-                          onCheckedChange={() => toggleType(c.id, type)}
-                          disabled={disabled}
-                        />
-                        {type}
-                      </label>
-                    ))}
-                  </div>
-                </div>
-                {c.types.includes('BILLING') && billToPartyIds.length > 0 && (
-                  <div>
-                    <Label className="text-xs uppercase tracking-wider text-muted-foreground">Linked bill-to</Label>
-                    <select
-                      value={c.billToId ?? ''}
-                      onChange={(e) => update(c.id, { billToId: e.target.value || null })}
-                      disabled={disabled}
-                      className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
-                    >
-                      <option value="">— none —</option>
-                      {billToPartyIds.map((id) => (
-                        <option key={id} value={id}>{id}</option>
+                    <div className="tms-field-label" style={{ marginBottom: 6 }}>Types</div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                      {CONTACT_TYPES.map((type) => (
+                        <label
+                          key={type}
+                          style={{
+                            display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: 'pointer',
+                            borderRadius: 4, padding: '3px 8px',
+                            border: `1px solid ${c.types.includes(type) ? 'var(--tms-primary)' : 'var(--tms-border)'}`,
+                            color: c.types.includes(type) ? 'var(--tms-primary)' : 'var(--tms-muted)',
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={c.types.includes(type)}
+                            onChange={() => toggleType(c.id, type)}
+                            disabled={disabled}
+                          />
+                          {type}
+                        </label>
                       ))}
-                    </select>
+                    </div>
                   </div>
-                )}
-                <div>
-                  <Label className="text-xs uppercase tracking-wider text-muted-foreground mb-1.5 block">Notifications</Label>
-                  <div className="grid grid-cols-2 gap-2">
-                    {NOTIFICATIONS.map((n) => (
-                      <label key={n} className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-                        <Checkbox
-                          checked={c.notifications.includes(n)}
-                          onCheckedChange={() => toggleNotification(c.id, n)}
-                          disabled={disabled}
-                        />
-                        {notificationLabels[n]}
-                      </label>
-                    ))}
+                  {c.types.includes('BILLING') && billToPartyIds.length > 0 && (
+                    <TmsField label="Linked bill-to">
+                      <TmsSelect
+                        value={c.billToId ?? ''}
+                        onChange={(e) => update(c.id, { billToId: e.target.value || null })}
+                        disabled={disabled}
+                        placeholder="— none —"
+                        options={billToPartyIds.map((id) => ({ value: id, label: id }))}
+                      />
+                    </TmsField>
+                  )}
+                  <div>
+                    <div className="tms-field-label" style={{ marginBottom: 6 }}>Notifications</div>
+                    <div className="tms-grid tms-grid-2">
+                      {NOTIFICATIONS.map((n) => (
+                        <label key={n} className="tms-muted" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+                          <input
+                            type="checkbox"
+                            checked={c.notifications.includes(n)}
+                            onChange={() => toggleNotification(c.id, n)}
+                            disabled={disabled}
+                          />
+                          {notificationLabels[n]}
+                        </label>
+                      ))}
+                    </div>
                   </div>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         )
       })}
-      <Button type="button" variant="outline" size="sm" onClick={add} disabled={disabled}>
-        <Plus size={14} className="mr-1" /> Add contact
-      </Button>
+      <TmsButton size="sm" onClick={add} disabled={disabled}>
+        <Plus size={14} /> Add contact
+      </TmsButton>
     </div>
   )
 }

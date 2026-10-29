@@ -15,11 +15,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { AlertTriangle, CheckCircle2, Copy, Download, Loader2, X } from 'lucide-react'
 import { toast } from 'sonner'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { TmsButton, TmsDialog, TmsField, TmsInput, TmsTextarea } from '@/features/tms/kit'
 import {
   getCarrier,
   getTmsSettings,
@@ -54,24 +50,29 @@ function Recipients({ label, ariaLabel, emails, disabled, onChange }: {
 
   return (
     <div>
-      <Label className="text-xs uppercase tracking-wider text-muted-foreground">{label}</Label>
+      <p className="text-[11px] font-semibold uppercase tracking-wider tms-muted">{label}</p>
       <div className="mt-1 flex flex-wrap gap-1">
         {emails.map((email) => (
-          <span key={email} className="flex items-center gap-1 rounded-full border border-border bg-muted/40 px-2 py-0.5 text-xs">
+          <span
+            key={email}
+            className="flex items-center gap-1 rounded-full px-2 py-0.5 text-xs"
+            style={{ border: '1px solid var(--tms-border)' }}
+          >
             {email}
             <button
               type="button"
               aria-label={`Remove ${email} from ${label}`}
               disabled={disabled}
               onClick={() => onChange(emails.filter((row) => row !== email))}
-              className="text-muted-foreground hover:text-foreground"
+              className="tms-muted"
+              style={{ background: 'none', border: 0, cursor: 'pointer', padding: 0 }}
             >
               <X size={11} />
             </button>
           </span>
         ))}
       </div>
-      <Input
+      <TmsInput
         aria-label={ariaLabel}
         value={draft}
         disabled={disabled}
@@ -79,7 +80,7 @@ function Recipients({ label, ariaLabel, emails, disabled, onChange }: {
         onChange={(e) => setDraft(e.target.value)}
         onBlur={add}
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); add() } }}
-        className="mt-1 h-9 text-sm"
+        className="mt-1"
       />
     </div>
   )
@@ -196,170 +197,163 @@ export function SendRemittanceDialog({ payment, open, onOpenChange, onDone }: {
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>
-            Remittance {payment.reference ?? payment.id} · {formatCents(payment.amountCents)}
-          </DialogTitle>
-        </DialogHeader>
+    <TmsDialog
+      open={open}
+      onOpenChange={onOpenChange}
+      title={`Remittance ${payment.reference ?? payment.id} · ${formatCents(payment.amountCents)}`}
+      className="tms-dialog-wide"
+      footer={
+        <>
+          <TmsButton variant="ghost" onClick={() => onOpenChange(false)} disabled={sending || marking}>Close</TmsButton>
+          <TmsButton onClick={() => send('COPY')} disabled={disabled}>Copy</TmsButton>
+          <TmsButton variant="primary" onClick={() => send('EMAIL')} disabled={disabled || to.length === 0}>
+            {sending ? 'Sending…' : 'Send'}
+          </TmsButton>
+          {result && <TmsButton onClick={onDone}>Done</TmsButton>}
+        </>
+      }
+    >
+      {loading && (
+        <p className="flex items-center gap-2 tms-muted">
+          <Loader2 size={14} className="animate-spin" /> Reading the payment…
+        </p>
+      )}
 
-        {loading && (
-          <p className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 size={14} className="animate-spin" /> Reading the payment…
-          </p>
-        )}
-
-        {!loading && (
-          <div className="space-y-3">
-            <Recipients label="To" ariaLabel="Remittance recipient" emails={to} disabled={disabled} onChange={setTo} />
-            <Recipients label="CC" ariaLabel="Remittance CC" emails={cc} disabled={disabled} onChange={setCc} />
-            {to.length === 0 && (
-              <p className="text-xs text-amber-600">
-                Nobody is addressed. Put a remit-to e-mail on the carrier's payment method,
-                or type an address above.
-              </p>
-            )}
-
-            <p className="text-xs text-muted-foreground">
-              {bills.length === 0
-                ? 'This payment names no bills, so the advice lists none.'
-                : `Covers ${bills.length} ${bills.length === 1 ? 'bill' : 'bills'}.`}
+      {!loading && (
+        <div className="flex flex-col gap-3">
+          <Recipients label="To" ariaLabel="Remittance recipient" emails={to} disabled={disabled} onChange={setTo} />
+          <Recipients label="CC" ariaLabel="Remittance CC" emails={cc} disabled={disabled} onChange={setCc} />
+          {to.length === 0 && (
+            <p className="text-xs" style={{ color: 'var(--tms-badge-orange)' }}>
+              Nobody is addressed. Put a remit-to e-mail on the carrier's payment method,
+              or type an address above.
             </p>
-            {!payment.pdfKey && (
-              <p className="flex items-center gap-2 text-xs text-amber-600">
-                <AlertTriangle size={13} />
-                The advice PDF was never stored, so this would go out with no attachment.
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-6 px-2 text-xs"
-                  disabled={disabled || rebuilding}
-                  onClick={rebuild}
-                >
-                  {rebuilding ? 'Rebuilding…' : 'Rebuild it'}
-                </Button>
-              </p>
-            )}
+          )}
 
-            <div>
-              <Label className="text-xs uppercase tracking-wider text-muted-foreground">Message</Label>
-              <Textarea
-                aria-label="Remittance message"
-                rows={2}
-                value={message}
-                disabled={disabled}
-                placeholder="optional — replaces the covering line"
-                onChange={(e) => setMessage(e.target.value)}
-                className="text-sm"
-              />
+          <p className="text-xs tms-muted">
+            {bills.length === 0
+              ? 'This payment names no bills, so the advice lists none.'
+              : `Covers ${bills.length} ${bills.length === 1 ? 'bill' : 'bills'}.`}
+          </p>
+          {!payment.pdfKey && (
+            <p className="flex items-center gap-2 text-xs" style={{ color: 'var(--tms-badge-orange)' }}>
+              <AlertTriangle size={13} />
+              The advice PDF was never stored, so this would go out with no attachment.
+              <TmsButton size="sm" disabled={disabled || rebuilding} onClick={rebuild}>
+                {rebuilding ? 'Rebuilding…' : 'Rebuild it'}
+              </TmsButton>
+            </p>
+          )}
+
+          <TmsField label="Message">
+            <TmsTextarea
+              aria-label="Remittance message"
+              rows={2}
+              value={message}
+              disabled={disabled}
+              placeholder="optional — replaces the covering line"
+              onChange={(e) => setMessage(e.target.value)}
+            />
+          </TmsField>
+
+          {preview && (
+            <div className="p-2" style={{ border: '1px solid var(--tms-border)', borderRadius: 'var(--tms-radius)' }}>
+              <p className="text-xs font-medium">{preview.subject}</p>
+              <pre className="mt-1 whitespace-pre-wrap text-xs tms-muted">
+                {message.trim() ? `${preview.body.split('\n')[0]}\n\n${message.trim()}` : preview.body}
+              </pre>
             </div>
+          )}
 
-            {preview && (
-              <div className="rounded-lg border border-border bg-muted/30 p-2">
-                <p className="text-xs font-medium">{preview.subject}</p>
-                <pre className="mt-1 whitespace-pre-wrap text-xs text-muted-foreground">
-                  {message.trim() ? `${preview.body.split('\n')[0]}\n\n${message.trim()}` : preview.body}
-                </pre>
-              </div>
-            )}
+          {result && result.emailStatus === 'SENT' && (
+            <p
+              className="flex items-start gap-2 p-2 text-xs"
+              style={{ border: '1px solid var(--tms-border)', borderRadius: 'var(--tms-radius)' }}
+            >
+              <CheckCircle2 size={14} className="mt-0.5 shrink-0" style={{ color: 'var(--tms-badge-green)' }} />
+              Sent to {result.to.join(', ')}{result.cc.length > 0 ? ` (cc ${result.cc.join(', ')})` : ''}.
+            </p>
+          )}
 
-            {result && result.emailStatus === 'SENT' && (
-              <p className="flex items-start gap-2 rounded-lg border border-border bg-muted/30 p-2 text-xs">
-                <CheckCircle2 size={14} className="mt-0.5 shrink-0 text-emerald-600" />
-                Sent to {result.to.join(', ')}{result.cc.length > 0 ? ` (cc ${result.cc.join(', ')})` : ''}.
+          {notSent && result && (
+            <div
+              className="flex flex-col gap-2 p-2"
+              style={{ border: '1px solid var(--tms-badge-orange)', borderRadius: 'var(--tms-radius)' }}
+            >
+              <p className="flex items-start gap-2 text-xs font-medium">
+                <AlertTriangle size={14} className="mt-0.5 shrink-0" style={{ color: 'var(--tms-badge-orange)' }} />
+                Nothing was sent. The payment is posted and the advice is on record, but no
+                e-mail left this system. Copy the body below and send it yourself — the
+                download links last one hour.
               </p>
-            )}
-
-            {notSent && result && (
-              <div className="space-y-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-2">
-                <p className="flex items-start gap-2 text-xs font-medium">
-                  <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-600" />
-                  Nothing was sent. The payment is posted and the advice is on record, but no
-                  e-mail left this system. Copy the body below and send it yourself — the
-                  download links last one hour.
-                </p>
-                {result.emailError && (
-                  <p className="text-xs text-muted-foreground">Mail service said: {result.emailError}</p>
-                )}
-                <div className="rounded border border-border bg-background p-2">
-                  <p className="text-xs font-medium">{result.subject}</p>
-                  <pre className="mt-1 whitespace-pre-wrap text-xs text-muted-foreground">{result.body}</pre>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <Button size="sm" variant="outline" aria-label="Copy remittance subject" onClick={() => copy(result.subject, 'Subject')}>
-                    <Copy size={12} className="mr-1" /> Subject
-                  </Button>
-                  <Button size="sm" variant="outline" aria-label="Copy remittance body" onClick={() => copy(result.body, 'Body')}>
-                    <Copy size={12} className="mr-1" /> Body
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    aria-label="Copy recipient addresses"
-                    onClick={() => copy([...result.to, ...result.cc].join(', '), 'Addresses')}
+              {result.emailError && (
+                <p className="text-xs tms-muted">Mail service said: {result.emailError}</p>
+              )}
+              <div className="p-2" style={{ border: '1px solid var(--tms-border)', borderRadius: 'var(--tms-radius)' }}>
+                <p className="text-xs font-medium">{result.subject}</p>
+                <pre className="mt-1 whitespace-pre-wrap text-xs tms-muted">{result.body}</pre>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <TmsButton size="sm" aria-label="Copy remittance subject" onClick={() => copy(result.subject, 'Subject')}>
+                  <Copy size={12} /> Subject
+                </TmsButton>
+                <TmsButton size="sm" aria-label="Copy remittance body" onClick={() => copy(result.body, 'Body')}>
+                  <Copy size={12} /> Body
+                </TmsButton>
+                <TmsButton
+                  size="sm"
+                  aria-label="Copy recipient addresses"
+                  onClick={() => copy([...result.to, ...result.cc].join(', '), 'Addresses')}
+                >
+                  <Copy size={12} /> Addresses
+                </TmsButton>
+                {result.downloads.map((file) => (
+                  <a
+                    key={file.name}
+                    href={file.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    aria-label={`Download ${file.name}`}
+                    className="tms-btn tms-btn-secondary tms-btn-sm"
                   >
-                    <Copy size={12} className="mr-1" /> Addresses
-                  </Button>
-                  {result.downloads.map((file) => (
-                    <a
-                      key={file.name}
-                      href={file.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      aria-label={`Download ${file.name}`}
-                      className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs hover:bg-muted"
-                    >
-                      <Download size={12} /> {file.name}
-                    </a>
-                  ))}
-                </div>
-                <div className="flex flex-wrap items-end gap-2">
-                  <div className="flex-1">
-                    <Label className="text-xs uppercase tracking-wider text-muted-foreground">How it was sent</Label>
-                    <Input
+                    <Download size={12} /> {file.name}
+                  </a>
+                ))}
+              </div>
+              <div className="flex flex-wrap items-end gap-2">
+                <div className="flex-1">
+                  <TmsField label="How it was sent">
+                    <TmsInput
                       aria-label="How the remittance was sent"
                       value={sentNote}
                       disabled={disabled}
                       placeholder="e-mailed from Outlook, faxed, read out on the phone…"
                       onChange={(e) => setSentNote(e.target.value)}
-                      className="h-9 text-sm"
                     />
-                  </div>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    aria-label="Mark remittance sent"
-                    disabled={disabled || sentNote.trim().length === 0}
-                    onClick={markSent}
-                  >
-                    {marking ? 'Recording…' : 'Mark sent'}
-                  </Button>
+                  </TmsField>
                 </div>
+                <TmsButton
+                  size="sm"
+                  aria-label="Mark remittance sent"
+                  disabled={disabled || sentNote.trim().length === 0}
+                  onClick={markSent}
+                >
+                  {marking ? 'Recording…' : 'Mark sent'}
+                </TmsButton>
               </div>
-            )}
+            </div>
+          )}
 
-            {payment.markedSentAt && (
-              <p className="text-xs text-muted-foreground">
-                Marked sent by hand on {payment.markedSentAt.slice(0, 10)} by {payment.markedSentBy ?? 'unknown'}
-                {payment.markedSentNote ? ` — ${payment.markedSentNote}` : ''}.
-              </p>
-            )}
+          {payment.markedSentAt && (
+            <p className="text-xs tms-muted">
+              Marked sent by hand on {payment.markedSentAt.slice(0, 10)} by {payment.markedSentBy ?? 'unknown'}
+              {payment.markedSentNote ? ` — ${payment.markedSentNote}` : ''}.
+            </p>
+          )}
 
-            {error && <p className="text-xs text-destructive">{error}</p>}
-          </div>
-        )}
-
-        <DialogFooter>
-          <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={sending || marking}>Close</Button>
-          <Button variant="outline" onClick={() => send('COPY')} disabled={disabled}>Copy</Button>
-          <Button onClick={() => send('EMAIL')} disabled={disabled || to.length === 0}>
-            {sending ? 'Sending…' : 'Send'}
-          </Button>
-          {result && <Button variant="outline" onClick={onDone}>Done</Button>}
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          {error && <p className="text-xs" style={{ color: 'var(--tms-badge-red)' }}>{error}</p>}
+        </div>
+      )}
+    </TmsDialog>
   )
 }

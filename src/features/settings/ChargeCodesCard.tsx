@@ -15,13 +15,12 @@
 import { useEffect, useState } from 'react'
 import { Plus, Save, Tags, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
+import { TmsButton, TmsIconButton, TmsInput, TmsSelect } from '@/features/tms/kit'
 import { getTmsSettings, saveTmsSettings } from '@/lib/apiClient'
 import { formatCents } from '@/lib/invoiceBuild'
 import { formatCents as dollarsOf, parseCents } from '@/lib/tmsDirectory'
 import type { ChargeCalc, ChargeCodeDef, TmsSettings } from '@/types/tms'
+import { ErrorText, Hint, Loading, SettingsCard, Stack } from './settingsKit'
 
 /** The same four the directory Lambda validates `calculatedBy` against. */
 const CHARGE_CALCS: ChargeCalc[] = ['FLAT', 'PER_MILE', 'PER_CWT', 'PERCENT']
@@ -32,6 +31,9 @@ const CALC_LABELS: Record<ChargeCalc, string> = {
   PER_CWT: 'Per hundredweight',
   PERCENT: 'Percent of linehaul',
 }
+
+/** The six columns of a code row, header and body alike. */
+const ROW_COLUMNS = { gridTemplateColumns: '7rem minmax(0, 1fr) 8rem 9rem 7rem 2rem', alignItems: 'center' } as const
 
 /** A row as it is edited: the amount stays the text that was typed until it is saved. */
 interface CodeRow {
@@ -115,23 +117,17 @@ export function ChargeCodesCard() {
   }
 
   return (
-    <div style={{ border: '1px solid var(--ds-border)', borderRadius: 12, background: 'var(--ds-surface)', padding: 16, boxShadow: 'var(--sh-sm)', display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <div className="flex items-center gap-2.5">
-        <Tags size={16} style={{ color: 'var(--ds-t3)' }} />
-        <div>
-          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)' }}>Charge codes</div>
-          <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 2 }}>
-            Every code a charge can be raised under. A customer may override the label, category, calculation or amount — but only for a code that exists here.
-          </div>
-        </div>
-      </div>
-
-      {loading ? <div className="text-sm text-muted-foreground">Loading…</div> : (
-        <div className="space-y-3">
-          {rows.length === 0 && <p className="text-xs text-muted-foreground">No charge codes yet.</p>}
+    <SettingsCard
+      icon={Tags}
+      title="Charge codes"
+      description="Every code a charge can be raised under. A customer may override the label, category, calculation or amount — but only for a code that exists here."
+    >
+      {loading ? <Loading /> : (
+        <Stack>
+          {rows.length === 0 && <Hint>No charge codes yet.</Hint>}
 
           {rows.length > 0 && (
-            <div className="grid grid-cols-[7rem_1fr_8rem_9rem_7rem_2rem] gap-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            <div className="tms-grid tms-field-label" style={{ ...ROW_COLUMNS, gap: 8, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.04em' }}>
               <div>Code</div>
               <div>Label</div>
               <div>Category</div>
@@ -143,81 +139,69 @@ export function ChargeCodesCard() {
 
           {rows.map((row, i) => {
             const cents = centsOrNull(row.amount)
-            const hint = cents != null ? formatCents(cents) : null
             return (
-              <div key={i} className="grid grid-cols-[7rem_1fr_8rem_9rem_7rem_2rem] items-center gap-2">
-                <Input
+              <div key={i} className="tms-grid" style={{ ...ROW_COLUMNS, gap: 8 }}>
+                <TmsInput
                   aria-label={`Charge code ${i + 1} code`}
                   value={row.code}
                   onChange={(e) => update(i, { code: e.target.value.toUpperCase() })}
-                  className="h-9 text-sm"
                 />
-                <Input
+                <TmsInput
                   aria-label={`Charge code ${i + 1} label`}
                   value={row.label}
                   onChange={(e) => update(i, { label: e.target.value })}
-                  className="h-9 text-sm"
                 />
-                <Input
+                <TmsInput
                   aria-label={`Charge code ${i + 1} category`}
                   value={row.category}
                   onChange={(e) => update(i, { category: e.target.value })}
-                  className="h-9 text-sm"
                 />
-                <select
+                <TmsSelect
                   aria-label={`Charge code ${i + 1} calculated by`}
                   value={row.calculatedBy}
                   onChange={(e) => update(i, { calculatedBy: e.target.value as ChargeCalc })}
-                  className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
                 >
                   {CHARGE_CALCS.map((c) => <option key={c} value={c}>{CALC_LABELS[c]}</option>)}
-                </select>
+                </TmsSelect>
                 <div>
-                  <Input
+                  <TmsInput
                     aria-label={`Charge code ${i + 1} default amount`}
                     inputMode="decimal"
                     value={row.amount}
                     onChange={(e) => update(i, { amount: e.target.value })}
                     placeholder="0.00"
-                    className="h-9 text-sm"
                   />
-                  {hint && <p className="mt-0.5 text-[10px] text-muted-foreground">{hint}</p>}
+                  {cents != null && <span className="tms-field-hint">{formatCents(cents)}</span>}
                 </div>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7"
+                <TmsIconButton
+                  shape="plain"
                   aria-label={`Remove charge code ${i + 1}`}
                   onClick={() => setRows((prev) => prev.filter((_, j) => j !== i))}
                 >
                   <Trash2 size={14} />
-                </Button>
+                </TmsIconButton>
               </div>
             )
           })}
 
-          <div className="flex items-center gap-2">
-            <Button
-              type="button"
-              variant="outline"
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <TmsButton
               size="sm"
-              className="h-8 gap-1"
               onClick={() => setRows((prev) => [...prev, { code: '', label: '', category: '', calculatedBy: 'FLAT', amount: '' }])}
             >
               <Plus size={14} /> Add charge code
-            </Button>
-            <Label className="text-xs text-muted-foreground">
-              Amounts are typed in dollars and stored as integer cents.
-            </Label>
+            </TmsButton>
+            <Hint>Amounts are typed in dollars and stored as integer cents.</Hint>
           </div>
 
-          {error && <p className="text-xs text-destructive">{error}</p>}
-          <Button type="button" size="sm" className="h-8 gap-1" onClick={save} disabled={saving}>
-            <Save className="size-3.5" /> Save charge codes
-          </Button>
-        </div>
+          {error && <ErrorText>{error}</ErrorText>}
+          <div>
+            <TmsButton variant="primary" size="sm" onClick={save} disabled={saving}>
+              <Save size={14} /> Save charge codes
+            </TmsButton>
+          </div>
+        </Stack>
       )}
-    </div>
+    </SettingsCard>
   )
 }

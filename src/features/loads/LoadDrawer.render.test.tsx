@@ -54,7 +54,7 @@ const { LoadDrawer } = await import('./LoadDrawer')
 const baseState = (drawerMode: string | null) => ({
   loads: [load], drivers: [], equipment: [], selectedLoadId: 'l1', drawerMode,
   createPreFill: null, setSelectedLoad: vi.fn(), pendingIntakeItemId: null,
-  setPendingIntakeItem: vi.fn(), updateLoad: vi.fn(), deleteLoad: vi.fn(), addLoad: vi.fn(),
+  setPendingIntakeItem: vi.fn(), updateLoad: vi.fn(), addLoad: vi.fn(),
   maintenanceInvoices: [], intakeItems: [],
 })
 
@@ -97,11 +97,13 @@ describe('LoadDrawer uses the shared panel, not its own chrome', () => {
     expect(screen.getAllByText(/Metz/).length).toBeGreaterThan(0)
   })
 
-  it('offers Delete and Edit Load in the pinned footer', () => {
+  // Ryne, 2026-10-28: a PRO number is permanent, so no screen may offer to delete a
+  // load. The drawer is the last place one was reachable from.
+  it('offers Edit Load in the pinned footer and no way to delete the load', () => {
     state = baseState('view')
     render(<LoadDrawer />)
-    expect(screen.getByRole('button', { name: /Delete load/i })).toBeTruthy()
     expect(screen.getByText(/Edit Load/i)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /delete/i })).toBeNull()
   })
 })
 

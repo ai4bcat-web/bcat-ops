@@ -47,6 +47,7 @@ import { createHash, randomBytes, randomUUID } from 'crypto'
 import {
   IDX_CARRIERS_BY_SHIPMENT,
   IDX_CHARGES_BY_SHIPMENT,
+  IDX_LOADS_BY_SHIPMENT,
   IDX_ORDERS_BY_SHIPMENT,
   batchGetByIds as storeBatchGetByIds,
   buildSearchKey,
@@ -132,6 +133,18 @@ import {
   isDeliveredOrLater,
   writeLaneSample,
 } from './laneSamples'
+import {
+  contextOf,
+  loadTaxonomy,
+  resolveForShipment,
+  sameTag,
+  tagFor,
+  shipmentTagPatch,
+  tagPatch,
+  type OwnershipDeps,
+  type ShipmentTag,
+} from './ownershipResolve'
+import { assertNotVoided, isVoided } from './voided'
 
 import {
   computeFinancials,
@@ -156,6 +169,15 @@ import {
 import { creditSummaryForCustomer, resolveCreditPolicy, type CreditSummary } from '../../../src/lib/customerCredit'
 import { evaluateCarrierBooking } from '../../../src/lib/carrierEligibility'
 import { quickPayFee, quickPayTiersOf, tierFor } from '../../../src/lib/quickPay'
+import {
+  outsideCarrierLoadPatch,
+  ownFleetLoadPatch,
+  uncoveredLoadPatch,
+  type MirrorStop,
+} from '../../../src/lib/loadMirror'
+import { topLevelOf } from '../../../src/lib/ownership'
+import { evaluateReleaseGate, releaseGateError } from '../../../src/lib/releaseGate'
+import { loadReleaseGateInput } from '../_shared/releaseGateInput'
 import type { Load as LoadForCredit } from '../../../src/types'
 import type {
   ArStatus,
@@ -226,6 +248,12 @@ const DIVISION_TABLE_NAME = process.env.DIVISION_TABLE_NAME ?? ''
 // shipment behind it is: the table is granted to this Lambda in `backend.ts` and
 // the request is recorded on the load's notice log whether SES takes it or not.
 const SHIPMENT_NOTICE_TABLE_NAME = process.env.SHIPMENT_NOTICE_TABLE_NAME ?? ''
+// Step R tables, read only. The division tree and the ordered rules that decide
+// which business earns a shipment are rows an admin edits from Divisions &
+// ownership; `tms-directory-actions` writes them, this router only resolves against
+// them and falls back to the seed rows while the tables are still empty.
+const OWNERSHIP_DIVISION_TABLE_NAME = process.env.OWNERSHIP_DIVISION_TABLE_NAME ?? ''
+const OWNERSHIP_RULE_TABLE_NAME = process.env.OWNERSHIP_RULE_TABLE_NAME ?? ''
 
 const OWNER_EMAIL = 'ryne@bcatcorp.com'
 const ADMIN_GROUP = 'ADMIN'
@@ -399,8 +427,16 @@ type Action =
   | 'SUBMIT_ORDER'
   | 'SET_SHIPMENT_STATUS'
   | 'SET_LOAD_STATUS'
-  | 'DELETE_SHIPMENT'
-  | 'RESTORE_SHIPMENT'
+  // Step R. Void is the only exit a shipment has; DELETE_SHIPMENT and
+  // RESTORE_SHIPMENT are gone, and nothing replaces them. A PRO is permanent.
+  | 'VOID_SHIPMENT'
+  // Step R. Who earns the shipment: the rules' answer, a person's answer, and the
+  // two reads that let an admin see what the rules would say before they say it.
+  | 'SET_REV_TAG'
+  | 'CLEAR_REV_TAG'
+  | 'SET_SALES_REP'
+  | 'TEST_OWNERSHIP_RULES'
+  | 'RETAG_SHIPMENTS'
   | 'TENDER_RESPOND'
   | 'DUPLICATE_SHIPMENT'
   | 'UPDATE_STOP'
@@ -490,18 +526,40 @@ const OFFER_ACTIONS: Record<string, true> = {
   REJECT_OFFER: true,
 }
 
-/** Org defaults are an admin act in every router here. */
-const QUOTE_ADMIN_ONLY_ACTIONS: Record<string, true> = { SAVE_QUOTE_SETTINGS: true }
+/**
+ * Org defaults are an admin act in every router here.
+ *
+ * Step R adds REVERT_TO_QUOTE: it un-makes freight, and the only way to un-make
+ * freight is to void the shipment it became (`voidShipmentForQuote` below). Void is
+ * owner/ADMIN by Ryne's PRO rule, read from the token, so the action that performs
+ * one has to be too — a quote-desk rep may no longer revert.
+ */
+const QUOTE_ADMIN_ONLY_ACTIONS: Record<string, true> = { SAVE_QUOTE_SETTINGS: true, REVERT_TO_QUOTE: true }
 
 /**
  * Step I. Admin-only actions that are not quote work. They are decided in their
  * own branch below, above the loads-page rule a dispatcher would otherwise pass:
  * the settings card lives on the loads page, the defaults behind it do not.
+ *
+ * Step R: VOID_SHIPMENT is here because Ryne's rule says so in exactly these words
+ * — "only the owner or a member of the ADMIN group may void, enforced in the Lambda
+ * from the caller's identity (not from the UI)". RETAG_SHIPMENTS rewrites the tag on
+ * every shipment in the company, which is the same kind of act.
  */
-const ADMIN_ONLY_ACTIONS: Record<string, true> = { SAVE_SHIPMENT_SETTINGS: true }
+const ADMIN_ONLY_ACTIONS: Record<string, true> = {
+  SAVE_SHIPMENT_SETTINGS: true,
+  VOID_SHIPMENT: true,
+  RETAG_SHIPMENTS: true,
+}
 
 const QUOTES_PAGE_GROUP = 'page-quotes'
 const LOADS_PAGE_GROUP = 'page-loads'
+/**
+ * Step R. The BROKERAGE section's one grant. The TMS merged the loads page, the
+ * quotes page and the carrier-pay card into `/tms/*`, so a user who holds this key
+ * reaches everything those three keys reached — nothing more.
+ */
+const TMS_PAGE_GROUP = 'page-tms'
 
 interface AppSyncIdentity {
   sub: string
@@ -552,9 +610,13 @@ async function authorize(action: Action, identity?: AppSyncIdentity | null): Pro
   // Step H. The sell side belongs to the quote desk and nobody else; the buy side
   // belongs to either desk. Both are decided before the loads-page rule below, so
   // `page-quotes` alone still cannot touch a load's status or its charges.
+  //
+  // Step R. `page-tms` is the BROKERAGE section's key, and the section contains the
+  // pages all three of these keys used to open, so it is accepted wherever they are.
+  const tms = groups.includes(TMS_PAGE_GROUP)
   if (QUOTE_ACTIONS[action]) {
-    if (!isAdmin && !groups.includes(QUOTES_PAGE_GROUP)) {
-      throw new Error(`Forbidden: ${action} requires owner, ADMIN, or ${QUOTES_PAGE_GROUP}`)
+    if (!isAdmin && !groups.includes(QUOTES_PAGE_GROUP) && !tms) {
+      throw new Error(`Forbidden: ${action} requires owner, ADMIN, ${QUOTES_PAGE_GROUP}, or ${TMS_PAGE_GROUP}`)
     }
     if (QUOTE_ADMIN_ONLY_ACTIONS[action] && !isAdmin) {
       throw new Error(`Forbidden: ${action} requires owner or ADMIN`)
@@ -562,12 +624,15 @@ async function authorize(action: Action, identity?: AppSyncIdentity | null): Pro
     return { email, sub: identity.sub, groups, isAdmin }
   }
   if (OFFER_ACTIONS[action]) {
-    if (!isAdmin && !groups.includes(LOADS_PAGE_GROUP) && !groups.includes(QUOTES_PAGE_GROUP)) {
-      throw new Error(`Forbidden: ${action} requires owner, ADMIN, ${LOADS_PAGE_GROUP}, or ${QUOTES_PAGE_GROUP}`)
+    if (!isAdmin && !groups.includes(LOADS_PAGE_GROUP) && !groups.includes(QUOTES_PAGE_GROUP) && !tms) {
+      throw new Error(
+        `Forbidden: ${action} requires owner, ADMIN, ${LOADS_PAGE_GROUP}, ${QUOTES_PAGE_GROUP}, or ${TMS_PAGE_GROUP}`,
+      )
     }
     return { email, sub: identity.sub, groups, isAdmin }
   }
   if (ADMIN_ONLY_ACTIONS[action]) {
+    // Ryne's PRO rule in one line: no page key is enough, only who the caller is.
     if (!isAdmin) throw new Error(`Forbidden: ${action} requires owner or ADMIN`)
     return { email, sub: identity.sub, groups, isAdmin }
   }
@@ -575,11 +640,11 @@ async function authorize(action: Action, identity?: AppSyncIdentity | null): Pro
   // it. Step G's one exception: what a carrier is owed is edited from the AP desk
   // as often as from dispatch, so `page-carrierPay` may do that and nothing else.
   const carrierPay = action === 'UPDATE_CARRIER_CHARGES' && groups.includes('page-carrierPay')
-  if (!isAdmin && !groups.includes(LOADS_PAGE_GROUP) && !carrierPay) {
+  if (!isAdmin && !groups.includes(LOADS_PAGE_GROUP) && !tms && !carrierPay) {
     throw new Error(
       action === 'UPDATE_CARRIER_CHARGES'
-        ? `Forbidden: ${action} requires owner, ADMIN, page-loads, or page-carrierPay`
-        : `Forbidden: ${action} requires owner, ADMIN, or page-loads`,
+        ? `Forbidden: ${action} requires owner, ADMIN, page-loads, ${TMS_PAGE_GROUP}, or page-carrierPay`
+        : `Forbidden: ${action} requires owner, ADMIN, page-loads, or ${TMS_PAGE_GROUP}`,
     )
   }
   return { email, sub: identity.sub, groups, isAdmin }
@@ -1276,6 +1341,9 @@ async function createShipment(input: Row, caller: Caller): Promise<Row> {
     loadIds: [loadId],
     searchKey: [number, customerName].filter(Boolean).join(' ').toLowerCase(),
     source: 'MANUAL',
+    // Step R. The rep who sells the freight, mirrored onto the Load below and kept
+    // in step by SET_SALES_REP. The order carries the same id as `customerRepId`.
+    salesRepId: optionalString(customer.defaultSalesRepId, 100),
     createdBy: caller.email,
     updatedBy: caller.email,
     version: 1,
@@ -1356,13 +1424,23 @@ async function createShipment(input: Row, caller: Caller): Promise<Row> {
       'Load create',
     )
   } catch (err) {
-    // The shipment is a draft with no leg; leaving it behind would put an unusable
-    // row on the board, so take the three rows back out before reporting the failure.
+    // Step R. The shipment has a PRO, and a PRO is permanent even when the leg under
+    // it never got written: the number was already taken from the counter and must
+    // never be handed out twice. So the draft is voided with the reason, not deleted,
+    // and the charge lines — which are money, not a record of anything that happened
+    // — come off it. The order and the financials stay beside the shipment they
+    // describe, exactly as they do on any other void.
+    const now = nowIso()
     await transact(
       [
-        deleteItemTx(SHIPMENT_TABLE_NAME, shipmentId),
-        deleteItemTx(ORDER_TABLE_NAME, orderId),
-        deleteItemTx(LOAD_FINANCIALS_TABLE_NAME, loadId),
+        updateItemTx(SHIPMENT_TABLE_NAME, shipmentId, {
+          voidedAt: now,
+          voidedBy: caller.email,
+          voidReason: `Load create failed: ${err instanceof Error ? err.message : String(err)}`.slice(0, MAX_VOID_REASON),
+          updatedBy: caller.email,
+          updatedAt: now,
+          version: 2,
+        }, null),
         ...chargeRows.map((row) => deleteItemTx(LOAD_CHARGE_TABLE_NAME, String(row.id))),
       ],
       'shipment rollback',
@@ -1370,6 +1448,10 @@ async function createShipment(input: Row, caller: Caller): Promise<Row> {
     throw err
   }
 
+  // Step R. A brand-new draft has no carrier and no driver yet, so this is the
+  // catch-all rule's answer — but it is written now rather than left blank, so the
+  // board and the dashboard never show an untagged row.
+  await applyTagToLoads(shipmentId, caller)
   await writeAudit('SHIPMENT', shipmentId, 'CREATE_SHIPMENT', caller, { number, customerId, mode })
   return readBundle(shipmentId) as unknown as Row
 }
@@ -1478,7 +1560,7 @@ async function saveOrderForm(input: Row, caller: Caller): Promise<SavedForm> {
   const expectedUpdatedAt = assertExpectedUpdatedAt(input)
   const bundle = await readBundle(shipmentId)
   const { shipment } = bundle
-  if (shipment.deletedAt) throw new Error('That shipment is deleted')
+  assertNotVoided(shipment)
   if (shipment.status !== 'DRAFT') throw new Error('Only a draft order can be edited on the order form')
 
   const order = bundle.orders[0]
@@ -1629,6 +1711,11 @@ async function saveOrderForm(input: Row, caller: Caller): Promise<SavedForm> {
     'Load update',
   )
 
+  // Step R. The order form is where the customer's references, equipment, mode and
+  // sales rep are set, and all four are things a rule may read. Re-resolve against
+  // what was just saved; `applyTagToLoads` writes nothing when nothing moved.
+  await applyTagToLoads(shipmentId, caller)
+
   await writeAudit('SHIPMENT', shipmentId, 'SAVE_ORDER_FORM', caller, {
     stops: stops.length,
     charges: chargeRows.length,
@@ -1647,6 +1734,7 @@ async function submitOrder(input: Row, caller: Caller): Promise<Row> {
   // Re-read the current shipment and CAS against that.
   const currentShipment = await getById(SHIPMENT_TABLE_NAME, shipmentId)
   if (!currentShipment) throw new Error(`Shipment not found: ${shipmentId}`)
+  assertNotVoided(currentShipment)
   // Submit requires a complete route; drafts can be saved with partial stops.
   const firstLoadId = String((currentShipment.loadIds as string[] | undefined)?.[0] ?? '')
   const submitStops = input.stops != null
@@ -1724,7 +1812,8 @@ async function checkCredit(input: Row): Promise<Row> {
 
 // ── Shipment status ──────────────────────────────────────────────────────────
 
-async function requireAdminForCancelDelete(action: string, caller: Caller, settings: Row | null): Promise<void> {
+/** The org's "only an admin cancels" switch. Void has its own, harder rule above. */
+async function requireAdminForCancel(action: string, caller: Caller, settings: Row | null): Promise<void> {
   if (settings?.cancelDeleteAdminOnly === true && !caller.isAdmin) {
     throw new Error(`Forbidden: ${action} requires owner or ADMIN`)
   }
@@ -1762,7 +1851,7 @@ async function setShipmentStatus(input: Row, caller: Caller): Promise<Row> {
 
   const shipment = await getById(SHIPMENT_TABLE_NAME, shipmentId)
   if (!shipment) throw new Error(`Shipment not found: ${shipmentId}`)
-  if (shipment.deletedAt) throw new Error('That shipment is deleted')
+  assertNotVoided(shipment)
   const current = String(shipment.status ?? 'DRAFT') as ShipmentStatus
   const settings = await getSettings()
 
@@ -1770,7 +1859,7 @@ async function setShipmentStatus(input: Row, caller: Caller): Promise<Row> {
   const patch: Row = { updatedBy: caller.email, updatedAt: now, statusChangedAt: now, statusChangedBy: caller.email }
 
   if (requested === 'CANCELED') {
-    await requireAdminForCancelDelete('CANCEL', caller, settings)
+    await requireAdminForCancel('CANCEL', caller, settings)
     if (current === 'CANCELED') throw new Error('That shipment is already canceled')
     if (!reason) throw new Error('A cancel reason is required')
     await assertNoInvoicedOrders(shipmentId, 'cancel')
@@ -1778,7 +1867,7 @@ async function setShipmentStatus(input: Row, caller: Caller): Promise<Row> {
     patch.previousStatus = current
     patch.cancelReason = reason
   } else if (requested === 'UNCANCEL') {
-    await requireAdminForCancelDelete('UNCANCEL', caller, settings)
+    await requireAdminForCancel('UNCANCEL', caller, settings)
     if (current !== 'CANCELED') throw new Error('Only a canceled shipment can be un-canceled')
     patch.status = (optionalEnum(shipment.previousStatus, SHIPMENT_STATUS_VALUES, 'previousStatus') ?? 'OPEN')
     patch.previousStatus = 'CANCELED'
@@ -1827,6 +1916,7 @@ async function setLoadStatus(input: Row, caller: Caller): Promise<Row> {
   if (!load) throw new Error(`Load not found: ${loadId}`)
   const shipmentId = optionalString(load.shipmentId, 100)
   if (!shipmentId) throw new Error('That load is not part of a shipment yet')
+  await requireLiveShipment(shipmentId)
 
   const current = (optionalEnum(load.status, LOAD_STATUS_VALUES, 'status') ?? null) as LoadWorkflowStatus | null
   if (requested === 'INVOICING') {
@@ -1856,16 +1946,24 @@ async function setLoadStatus(input: Row, caller: Caller): Promise<Row> {
   return rederiveShipmentStatus(shipmentId, caller)
 }
 
-// ── DELETE / RESTORE ─────────────────────────────────────────────────────────
+// ── VOID ─────────────────────────────────────────────────────────────────────
 
-const DELETABLE_STATUSES: readonly string[] = ['DRAFT', 'CANCELED', 'TENDER_REJECTED']
+/**
+ * Ryne, 2026-10-28 — "the most important thing": a PRO number is permanent. There
+ * is no delete here any more, soft or otherwise. DELETE_SHIPMENT, RESTORE_SHIPMENT
+ * and the quote rollback's quiet soft delete are all one action now, VOID_SHIPMENT,
+ * and there is no un-void.
+ */
+
+/** A void reason is a sentence for whoever reads this PRO in two years. */
+const MAX_VOID_REASON = 500
 
 /**
  * The carrier legs of one shipment that are sitting on the AP board.
  *
  * `apOpen` is the sparse marker behind "every outside carrier we still owe money on".
- * A deleted shipment is one nobody can open, so a leg of it is work no one can do —
- * it comes off the board with the shipment and goes back on if the shipment is restored.
+ * A voided shipment is freight nobody will run, so its leg is work no one can do —
+ * it comes off the board with the shipment, exactly as the removed soft delete did.
  * A leg that is paid, bounced or own-fleet never carried the marker in the first place.
  */
 async function apBoardLegsOf(shipmentId: string): Promise<Row[]> {
@@ -1873,104 +1971,493 @@ async function apBoardLegsOf(shipmentId: string): Promise<Row[]> {
   return assignments.filter((row) => row.kind === 'CARRIER')
 }
 
-async function deleteShipment(input: Row, caller: Caller): Promise<Row> {
-  const shipmentId = assertString(input.shipmentId, 'shipmentId')
-  const expectedUpdatedAt = assertExpectedUpdatedAt(input)
+/**
+ * The same guard for the actions that are handed a load, a leg or a check call
+ * rather than a shipment: read the shipment they hang off and refuse if it is
+ * voided. One extra GetItem, on every write path that moves freight.
+ */
+async function requireLiveShipment(shipmentId: string): Promise<Row> {
   const shipment = await getById(SHIPMENT_TABLE_NAME, shipmentId)
   if (!shipment) throw new Error(`Shipment not found: ${shipmentId}`)
-  if (shipment.deletedAt) throw new Error('That shipment is already deleted')
-  const settings = await getSettings()
-  await requireAdminForCancelDelete('DELETE_SHIPMENT', caller, settings)
-  const status = String(shipment.status ?? '')
-  if (!DELETABLE_STATUSES.includes(status)) {
-    throw new Error(`A ${status} shipment cannot be deleted — cancel it first`)
-  }
-  await assertNoInvoicedOrders(shipmentId, 'delete')
-  const apBoardLegsClosed = await applySoftDelete(shipment, caller, expectedUpdatedAt)
-  await writeAudit('SHIPMENT', shipmentId, 'DELETE_SHIPMENT', caller, { status, apBoardLegsClosed })
-  return readBundle(shipmentId) as unknown as Row
+  assertNotVoided(shipment)
+  return shipment
 }
 
 /**
- * The soft-delete itself: the shipment's marker, and the AP board markers that come
- * off with it.
+ * The void itself: the three markers on the shipment, the AP board markers that
+ * come off with it, and the mirrored loads canceled so the calendar, dispatch and
+ * the check-call worklist stop showing freight nobody is running.
  *
- * The marker, and only the marker: the leg keeps its charges, its rung and its
- * timestamps, so a restore is a re-SET rather than a reconstruction, and `updatedAt`
- * does not move under a client holding the assignment's CAS token.
+ * Nothing is retired beyond that. The legs, the charges, the documents and the
+ * history stay exactly where they are — a voided shipment is a readable record of
+ * what happened, which is the entire point of never deleting one.
  */
-async function applySoftDelete(shipment: Row, caller: Caller, expectedUpdatedAt: string | null): Promise<string[]> {
+async function applyVoid(
+  shipment: Row,
+  caller: Caller,
+  reason: string,
+  expectedUpdatedAt: string | null,
+): Promise<{ apBoardLegsClosed: string[]; loadsCanceled: string[] }> {
   const shipmentId = String(shipment.id)
   const now = nowIso()
   const openLegs = (await apBoardLegsOf(shipmentId)).filter((row) => row.apOpen)
   await transact(
     [
       updateItemTx(SHIPMENT_TABLE_NAME, shipmentId, {
-        deletedAt: now,
-        deletedBy: caller.email,
+        voidedAt: now,
+        voidedBy: caller.email,
+        voidReason: reason,
         updatedBy: caller.email,
         updatedAt: now,
         version: (numberOrNull(shipment.version) ?? 1) + 1,
       }, expectedUpdatedAt),
+      // `apOpen` is a sparse index hash key: it has to leave the row rather than be
+      // set to null, which DynamoDB refuses outright.
       ...openLegs.map((row) => updateItemTx(LOAD_CARRIER_TABLE_NAME, String(row.id), {}, null, { remove: ['apOpen'] })),
     ],
     'shipment',
   )
-  return openLegs.map((row) => String(row.id))
+
+  const loads = await queryIndex(LOAD_TABLE_NAME, IDX_LOADS_BY_SHIPMENT, 'shipmentId', shipmentId)
+  const loadsCanceled: string[] = []
+  const client = await getDataClient()
+  for (const load of loads) {
+    const loadId = String(load.id)
+    // The reminder belonged to freight that is no longer moving. `checkCallOpen` is
+    // another sparse GSI hash key, so clearing goes through the REMOVE path.
+    if (load.checkCallOpen != null || load.nextCheckCallAt != null) {
+      await writeCheckCallSchedule({ loadId, nextCheckCallAt: null, note: null, caller, expectedUpdatedAt: null })
+    }
+    // Our own-fleet readers — the calendar, dispatch, box-truck and owner-operator
+    // pay, employee stats, the driver schedule — never look at `Load.status`: they
+    // key on `stops[].driverId` and the `pickupDriverId`/`deliveryDriverId` mirrors.
+    // A voided shipment that kept them would still pay a driver for freight that
+    // never ran. `uncoveredLoadPatch` is the same clear a bounce writes; who held
+    // the load stays readable on `assignmentType`, `carrierName` and the LoadCarrier
+    // legs, which is the record, so those are deliberately not touched here.
+    const { assignmentType: _type, carrierName: _name, ...cleared } = uncoveredLoadPatch(readStops(load) as MirrorStop[])
+    const canceling = load.status !== 'CANCELED'
+    assertLoadWriteOk(
+      await client.models.Load.update({
+        id: loadId,
+        ...cleared,
+        stops: JSON.stringify(cleared.stops),
+        // Nothing about a voided shipment is ready to bill.
+        readyToInvoice: false,
+        ...(canceling
+          ? {
+            status: 'CANCELED',
+            statusChangedAt: now,
+            statusChangedBy: caller.email,
+            // Not a person moving this load: the shipment above it was voided.
+            statusSource: 'SYSTEM',
+          }
+          : {}),
+        updatedBy: caller.email,
+      }),
+      'Load update',
+    )
+    if (canceling) loadsCanceled.push(loadId)
+  }
+  return { apBoardLegsClosed: openLegs.map((row) => String(row.id)), loadsCanceled }
 }
 
 /**
- * Step H. The same write without DELETE_SHIPMENT's gates: a convert that failed
- * half way is taking back a shipment it just made, and a revert has already proved
- * the shipment is unbilled, uncovered and single-order. Neither is a person
- * deleting somebody's freight, so neither asks `cancelDeleteAdminOnly`.
+ * VOID_SHIPMENT. Owner or ADMIN only — enforced in `authorize` from the caller's
+ * token, never from the UI — and refused on a shipment that has been invoiced or
+ * that is already voided. The PRO, the number and everything under them survive.
  */
-async function softDeleteShipment(shipmentId: string, caller: Caller): Promise<void> {
+async function voidShipment(input: Row, caller: Caller): Promise<Row> {
+  const shipmentId = assertString(input.shipmentId, 'shipmentId')
+  const reason = assertString(input.reason, 'reason')
+  if (reason.length > MAX_VOID_REASON) throw new Error(`reason exceeds maximum length of ${MAX_VOID_REASON}`)
+  const expectedUpdatedAt = assertExpectedUpdatedAt(input)
+
   const shipment = await getById(SHIPMENT_TABLE_NAME, shipmentId)
-  if (!shipment || shipment.deletedAt) return
-  const apBoardLegsClosed = await applySoftDelete(shipment, caller, null)
-  await writeAudit('SHIPMENT', shipmentId, 'DELETE_SHIPMENT', caller, {
-    status: String(shipment.status ?? ''),
+  if (!shipment) throw new Error(`Shipment not found: ${shipmentId}`)
+  if (isVoided(shipment)) {
+    throw new Error(`Shipment ${String(shipment.number ?? shipmentId)} is already voided`)
+  }
+  await assertNoInvoicedOrders(shipmentId, 'void')
+
+  const { apBoardLegsClosed, loadsCanceled } = await applyVoid(shipment, caller, reason, expectedUpdatedAt)
+  await writeAudit('SHIPMENT', shipmentId, 'VOID_SHIPMENT', caller, {
+    number: optionalString(shipment.number, 60),
+    status: optionalString(shipment.status, 40),
+    reason,
     apBoardLegsClosed,
+    loadsCanceled,
+  })
+  return readBundle(shipmentId) as unknown as Row
+}
+
+/**
+ * Step H's rollback, as a void.
+ *
+ * A convert that failed half way is taking back a shipment it just made, and a
+ * revert has already proved the shipment is unbilled, uncovered and single-order.
+ * Neither is a person removing somebody's freight, so neither re-asks the gates —
+ * but the shipment still only ever gets voided, and the PRO it took still exists.
+ */
+async function voidShipmentForQuote(shipmentId: string, caller: Caller, reason: string): Promise<void> {
+  const shipment = await getById(SHIPMENT_TABLE_NAME, shipmentId)
+  if (!shipment || isVoided(shipment)) return
+  const { apBoardLegsClosed, loadsCanceled } = await applyVoid(
+    shipment,
+    caller,
+    reason.slice(0, MAX_VOID_REASON),
+    null,
+  )
+  await writeAudit('SHIPMENT', shipmentId, 'VOID_SHIPMENT', caller, {
+    number: optionalString(shipment.number, 60),
+    status: optionalString(shipment.status, 40),
+    reason,
+    apBoardLegsClosed,
+    loadsCanceled,
     viaQuote: true,
   })
 }
 
-async function restoreShipment(input: Row, caller: Caller): Promise<Row> {
+// ── Ownership tagging (step R) ───────────────────────────────────────────────
+
+/**
+ * Which business earns a shipment, resolved from the division tree and the ordered
+ * rules an admin edits. `ownershipResolve.ts` does the reading and the caching;
+ * `src/lib/ownership.ts` makes the decision; this section is where the answer is
+ * written onto the two mirrored rows.
+ */
+const ownershipDeps: OwnershipDeps = {
+  db: dynamo,
+  tables: {
+    shipment: SHIPMENT_TABLE_NAME,
+    order: ORDER_TABLE_NAME,
+    load: LOAD_TABLE_NAME,
+    loadCarrier: LOAD_CARRIER_TABLE_NAME,
+    driver: DRIVER_TABLE_NAME,
+    division: OWNERSHIP_DIVISION_TABLE_NAME,
+    rule: OWNERSHIP_RULE_TABLE_NAME,
+  },
+  getById,
+  queryIndex,
+}
+
+/** The columns a Load mirrors from its shipment: the tag, and the rep who sold it. */
+const LOAD_TAG_FIELDS = ['revDivision', 'revSubdivision', 'revTagSource', 'revRuleId', 'salesRepId'] as const
+
+/**
+ * The rep the shipment belongs to: the one on its order, which is what the draft
+ * editor writes and what SET_SALES_REP keeps in step with. Falls back to whatever
+ * the shipment already carries, so a re-resolve never erases a rep.
+ */
+function salesRepOf(shipment: Row, order: Row | null): string | null {
+  return optionalString(order?.customerRepId, 100) ?? optionalString(shipment.salesRepId, 100)
+}
+
+/**
+ * Re-resolve a shipment's tag and write it on the Shipment, returning the same
+ * fields for the caller's own Load write.
+ *
+ * Two rules live here. A `HAND` tag is a person's answer and the rules never
+ * overrule it — the shipment keeps what it was given and only the rep is refreshed.
+ * And a resolution that fails is logged, not thrown: an unreadable division table is
+ * a reporting problem, and refusing to book a truck over one would be a worse bug
+ * than an untagged load. The explicit tag actions below do throw, because there the
+ * tag is the whole point of the call.
+ */
+async function applyTag(shipmentId: string, caller: Caller, opts: { ignoreHand?: boolean } = {}): Promise<Row> {
+  try {
+    const { records, tag } = await resolveForShipment(ownershipDeps, shipmentId)
+    const { shipment, order } = records
+    const hand = !opts.ignoreHand && shipment.revTagSource === 'HAND'
+    const source = hand ? 'HAND' : 'RULE'
+    const effective: ShipmentTag = hand
+      ? {
+        revDivision: optionalString(shipment.revDivision, 60),
+        revSubdivision: optionalString(shipment.revSubdivision, 60),
+        revRuleId: null,
+      }
+      : tag
+    const taggedBy = hand ? optionalString(shipment.revTaggedBy, 200) : null
+    const salesRepId = salesRepOf(shipment, order)
+
+    const unchanged = sameTag(shipment, effective, source, taggedBy)
+      && (optionalString(shipment.salesRepId, 100) ?? null) === salesRepId
+    if (!unchanged) {
+      const now = nowIso()
+      await transact(
+        [updateItemTx(SHIPMENT_TABLE_NAME, shipmentId, {
+          ...shipmentTagPatch(effective, source, taggedBy),
+          salesRepId,
+          updatedBy: caller.email,
+          updatedAt: now,
+          version: (numberOrNull(shipment.version) ?? 1) + 1,
+        }, null)],
+        'shipment tag',
+      )
+    }
+    return { ...tagPatch(effective, source), salesRepId }
+  } catch (err) {
+    console.warn('[tms-shipment-actions] ownership tag skipped:', String(err))
+    return {}
+  }
+}
+
+/**
+ * The same, for the paths that are not already writing the Load themselves —
+ * CREATE_SHIPMENT, the order form, DUPLICATE_SHIPMENT and the backfill. The Load
+ * goes through AppSync so the calendar's subscriptions see the change.
+ */
+async function applyTagToLoads(shipmentId: string, caller: Caller, opts: { ignoreHand?: boolean } = {}): Promise<Row> {
+  const patch = await applyTag(shipmentId, caller, opts)
+  if (Object.keys(patch).length === 0) return patch
+  const loads = await queryIndex(LOAD_TABLE_NAME, IDX_LOADS_BY_SHIPMENT, 'shipmentId', shipmentId)
+  if (loads.length === 0) return patch
+  const client = await getDataClient()
+  for (const load of loads) {
+    if (LOAD_TAG_FIELDS.every((field) => (load[field] ?? null) === (patch[field] ?? null))) continue
+    assertLoadWriteOk(
+      await client.models.Load.update({ id: String(load.id), ...patch, updatedBy: caller.email }),
+      'Load update',
+    )
+  }
+  return patch
+}
+
+/** The division codes an admin may hand-tag with: the active rows, and nothing else. */
+async function assertTaggableDivision(divisionCode: string, subdivisionCode: string | null): Promise<void> {
+  const taxonomy = await loadTaxonomy(ownershipDeps)
+  const active = taxonomy.divisions.filter((d) => d.active)
+  const division = active.find((d) => d.code === divisionCode)
+  if (!division) throw new Error(`Unknown or archived division: ${divisionCode}`)
+  if (division.parentId) throw new Error(`${divisionCode} is a subdivision; tag with its parent and name it as the subdivision`)
+  if (!subdivisionCode) return
+  const sub = active.find((d) => d.code === subdivisionCode)
+  if (!sub) throw new Error(`Unknown or archived division: ${subdivisionCode}`)
+  // The pair has to be a parent and its own descendant, or the roll-up lies.
+  if (topLevelOf(taxonomy.divisions, subdivisionCode) !== divisionCode) {
+    throw new Error(`${subdivisionCode} is not part of ${divisionCode}`)
+  }
+}
+
+/** SET_REV_TAG — a person says who earned this load, and the rules stop arguing. */
+async function setRevTag(input: Row, caller: Caller): Promise<Row> {
   const shipmentId = assertString(input.shipmentId, 'shipmentId')
-  const expectedUpdatedAt = assertExpectedUpdatedAt(input)
+  const divisionCode = assertString(input.divisionCode, 'divisionCode')
+  const subdivisionCode = optionalString(input.subdivisionCode, 60)
   const shipment = await getById(SHIPMENT_TABLE_NAME, shipmentId)
   if (!shipment) throw new Error(`Shipment not found: ${shipmentId}`)
-  if (!shipment.deletedAt) throw new Error('That shipment is not deleted')
-  const settings = await getSettings()
-  await requireAdminForCancelDelete('RESTORE_SHIPMENT', caller, settings)
+  assertNotVoided(shipment)
+  await assertTaggableDivision(divisionCode, subdivisionCode)
+
+  const tag: ShipmentTag = { revDivision: divisionCode, revSubdivision: subdivisionCode, revRuleId: null }
   const now = nowIso()
-  // Back on the board under the same rule the rest of AP uses: an outside carrier we
-  // are still on the hook for. A leg paid or bounced while the shipment was away stays
-  // off, and one with no `apStatusChangedAt` was never in the sparse index to begin with.
-  const reopen = (await apBoardLegsOf(shipmentId)).filter((row) =>
-    !row.apOpen
-    && (row.status === 'ACTIVE' || row.status === 'TONU')
-    && row.apStatus !== 'PAID'
-    && typeof row.apStatusChangedAt === 'string'
-    && row.apStatusChangedAt !== '')
+  await transact(
+    [updateItemTx(SHIPMENT_TABLE_NAME, shipmentId, {
+      ...shipmentTagPatch(tag, 'HAND', caller.email),
+      updatedBy: caller.email,
+      updatedAt: now,
+      version: (numberOrNull(shipment.version) ?? 1) + 1,
+    }, null)],
+    'shipment tag',
+  )
+  const loads = await queryIndex(LOAD_TABLE_NAME, IDX_LOADS_BY_SHIPMENT, 'shipmentId', shipmentId)
+  const client = await getDataClient()
+  for (const load of loads) {
+    assertLoadWriteOk(
+      await client.models.Load.update({ id: String(load.id), ...tagPatch(tag, 'HAND'), updatedBy: caller.email }),
+      'Load update',
+    )
+  }
+  await writeAudit('SHIPMENT', shipmentId, 'SET_REV_TAG', caller, {
+    from: { revDivision: shipment.revDivision ?? null, revSubdivision: shipment.revSubdivision ?? null },
+    to: tag,
+  })
+  return readBundle(shipmentId) as unknown as Row
+}
+
+/** CLEAR_REV_TAG — back to whatever the rules say, as of right now. */
+async function clearRevTag(input: Row, caller: Caller): Promise<Row> {
+  const shipmentId = assertString(input.shipmentId, 'shipmentId')
+  const shipment = await getById(SHIPMENT_TABLE_NAME, shipmentId)
+  if (!shipment) throw new Error(`Shipment not found: ${shipmentId}`)
+  assertNotVoided(shipment)
+  const patch = await applyTagToLoads(shipmentId, caller, { ignoreHand: true })
+  await writeAudit('SHIPMENT', shipmentId, 'CLEAR_REV_TAG', caller, {
+    from: { revDivision: shipment.revDivision ?? null, revSubdivision: shipment.revSubdivision ?? null },
+    to: { revDivision: patch.revDivision ?? null, revSubdivision: patch.revSubdivision ?? null },
+  })
+  return readBundle(shipmentId) as unknown as Row
+}
+
+/**
+ * SET_SALES_REP. The rep is one fact kept in three places: the Shipment the board
+ * groups by, the Load every own-fleet reader already has in hand, and the Order,
+ * which is where the draft editor and the invoice read it from.
+ */
+async function setSalesRep(input: Row, caller: Caller): Promise<Row> {
+  const shipmentId = assertString(input.shipmentId, 'shipmentId')
+  if (!('repId' in input)) throw new Error('repId is required; send null to clear it')
+  const repId = optionalString(input.repId, 100)
+  const shipment = await getById(SHIPMENT_TABLE_NAME, shipmentId)
+  if (!shipment) throw new Error(`Shipment not found: ${shipmentId}`)
+  assertNotVoided(shipment)
+
+  const orders = await queryIndex(ORDER_TABLE_NAME, IDX_ORDERS_BY_SHIPMENT, 'shipmentId', shipmentId)
+  const now = nowIso()
   await transact(
     [
       updateItemTx(SHIPMENT_TABLE_NAME, shipmentId, {
-        deletedAt: null,
-        deletedBy: null,
+        salesRepId: repId,
         updatedBy: caller.email,
         updatedAt: now,
         version: (numberOrNull(shipment.version) ?? 1) + 1,
-      }, expectedUpdatedAt),
-      ...reopen.map((row) => updateItemTx(LOAD_CARRIER_TABLE_NAME, String(row.id), { apOpen: 'OPEN' }, null)),
+      }, null),
+      ...orders.map((order) => updateItemTx(ORDER_TABLE_NAME, String(order.id), {
+        customerRepId: repId,
+        updatedBy: caller.email,
+        updatedAt: now,
+        version: (numberOrNull(order.version) ?? 1) + 1,
+      }, null)),
     ],
-    'shipment',
+    'sales rep',
   )
-  await writeAudit('SHIPMENT', shipmentId, 'RESTORE_SHIPMENT', caller, {
-    apBoardLegsReopened: reopen.map((row) => String(row.id)),
-  })
+  const loads = await queryIndex(LOAD_TABLE_NAME, IDX_LOADS_BY_SHIPMENT, 'shipmentId', shipmentId)
+  const client = await getDataClient()
+  for (const load of loads) {
+    assertLoadWriteOk(
+      await client.models.Load.update({ id: String(load.id), salesRepId: repId, updatedBy: caller.email }),
+      'Load update',
+    )
+  }
+  await writeAudit('SHIPMENT', shipmentId, 'SET_SALES_REP', caller, { from: shipment.salesRepId ?? null, to: repId })
   return readBundle(shipmentId) as unknown as Row
+}
+
+/**
+ * TEST_OWNERSHIP_RULES — the Divisions & ownership page's "test a shipment" preview.
+ * Reads the same records a real resolution reads and writes nothing at all.
+ */
+async function testOwnershipRules(input: Row): Promise<Row> {
+  const shipmentId = assertString(input.shipmentId, 'shipmentId')
+  const { records, context, resolution } = await resolveForShipment(ownershipDeps, shipmentId)
+  return {
+    context,
+    resolution,
+    current: {
+      revDivision: records.shipment.revDivision ?? null,
+      revSubdivision: records.shipment.revSubdivision ?? null,
+      revTagSource: records.shipment.revTagSource ?? null,
+      revRuleId: records.shipment.revRuleId ?? null,
+      revTaggedBy: records.shipment.revTaggedBy ?? null,
+    },
+  } as unknown as Row
+}
+
+/** DynamoDB's transaction ceiling is 100; a Shipment and its Load are two items. */
+const RETAG_BATCH_ITEMS = 90
+
+/**
+ * RETAG_SHIPMENTS — re-run the rules over every shipment and report what moved.
+ *
+ * Five whole-table reads rather than four reads per shipment: at ~900 shipments the
+ * per-row version is thousands of round trips, and the rules need the same five
+ * tables for all of them. Hand-tagged and voided rows are counted and skipped — a
+ * hand tag is a person's answer, and a voided shipment is not work.
+ */
+async function retagShipments(input: Row, caller: Caller): Promise<Row> {
+  const dryRun = optionalBoolean(input.dryRun) ?? true
+  const [shipments, orders, loads, legs, drivers] = await Promise.all([
+    scanTable(SHIPMENT_TABLE_NAME),
+    scanTable(ORDER_TABLE_NAME),
+    scanTable(LOAD_TABLE_NAME),
+    scanTable(LOAD_CARRIER_TABLE_NAME),
+    scanTable(DRIVER_TABLE_NAME),
+  ])
+  const taxonomy = await loadTaxonomy(ownershipDeps)
+
+  const orderOf = new Map<string, Row>()
+  for (const order of orders) {
+    const key = String(order.shipmentId ?? '')
+    if (key && !orderOf.has(key)) orderOf.set(key, order)
+  }
+  const loadOf = new Map<string, Row>()
+  for (const load of loads) {
+    const key = String(load.shipmentId ?? '')
+    if (!key) continue
+    const held = loadOf.get(key)
+    if (!held || Number(load.leg ?? 0) < Number(held.leg ?? 0)) loadOf.set(key, load)
+  }
+  const legOf = new Map<string, Row>()
+  for (const leg of legs) {
+    const key = String(leg.loadId ?? '')
+    if (key && leg.status === 'ACTIVE') legOf.set(key, leg)
+  }
+  const driverOf = new Map<string, Row>()
+  for (const driver of drivers) driverOf.set(String(driver.id), driver)
+
+  const report = {
+    dryRun,
+    scanned: 0,
+    changed: 0,
+    byDivision: {} as Record<string, number>,
+    bySubdivision: {} as Record<string, number>,
+    handTagged: 0,
+  }
+  let writes: TransactWriteItem[] = []
+  const flush = async (): Promise<void> => {
+    if (dryRun || writes.length === 0) return
+    await transact(writes, 'retag')
+    writes = []
+  }
+
+  for (const shipment of shipments) {
+    if (isVoided(shipment)) continue
+    report.scanned++
+    if (shipment.revTagSource === 'HAND') {
+      report.handTagged++
+      const held = optionalString(shipment.revDivision, 60)
+      const heldSub = optionalString(shipment.revSubdivision, 60)
+      if (held) report.byDivision[held] = (report.byDivision[held] ?? 0) + 1
+      if (heldSub) report.bySubdivision[heldSub] = (report.bySubdivision[heldSub] ?? 0) + 1
+      continue
+    }
+    const shipmentId = String(shipment.id)
+    const load = loadOf.get(shipmentId) ?? null
+    const leg = load ? legOf.get(String(load.id)) ?? null : null
+    const driverId = typeof leg?.driverId === 'string' ? leg.driverId : ''
+    const { tag } = tagFor(taxonomy, contextOf({
+      shipment,
+      order: orderOf.get(shipmentId) ?? null,
+      load,
+      loadCarrier: leg,
+      driver: driverId ? driverOf.get(driverId) ?? null : null,
+    }))
+    if (tag.revDivision) report.byDivision[tag.revDivision] = (report.byDivision[tag.revDivision] ?? 0) + 1
+    if (tag.revSubdivision) report.bySubdivision[tag.revSubdivision] = (report.bySubdivision[tag.revSubdivision] ?? 0) + 1
+    if (sameTag(shipment, tag, 'RULE') && (load == null || sameTag(load, tag, 'RULE'))) continue
+
+    report.changed++
+    if (dryRun) continue
+    const now = nowIso()
+    writes.push(updateItemTx(SHIPMENT_TABLE_NAME, shipmentId, {
+      ...shipmentTagPatch(tag, 'RULE', null),
+      updatedBy: caller.email,
+      updatedAt: now,
+      version: (numberOrNull(shipment.version) ?? 1) + 1,
+    }, null))
+    if (load) {
+      writes.push(updateItemTx(LOAD_TABLE_NAME, String(load.id), {
+        ...tagPatch(tag, 'RULE'),
+        updatedBy: caller.email,
+        updatedAt: now,
+      }, null))
+    }
+    if (writes.length >= RETAG_BATCH_ITEMS) await flush()
+  }
+  await flush()
+
+  if (!dryRun) await writeAudit('SHIPMENT', 'RETAG', 'RETAG_SHIPMENTS', caller, report)
+  return report as unknown as Row
 }
 
 // ── TENDER_RESPOND ───────────────────────────────────────────────────────────
@@ -1983,7 +2470,7 @@ async function tenderRespond(input: Row, caller: Caller): Promise<Row> {
 
   const bundle = await readBundle(shipmentId)
   const { shipment } = bundle
-  if (shipment.deletedAt) throw new Error('That shipment is deleted')
+  assertNotVoided(shipment)
   const current = String(shipment.status ?? '')
   const now = nowIso()
   const patch: Row = {
@@ -2071,6 +2558,7 @@ async function duplicateShipment(input: Row, caller: Caller): Promise<Row> {
   if (copies.length === 0) throw new Error('copies must have at least one entry')
 
   const source = await readBundle(shipmentId)
+  assertNotVoided(source.shipment)
   const customer = await getActiveCustomer(String(source.shipment.customerId))
   const settings = await getSettings()
 
@@ -2123,8 +2611,14 @@ async function duplicateShipment(input: Row, caller: Caller): Promise<Row> {
       holdReason: null,
       cancelReason: null,
       tenderRejectReason: null,
+      // A copy starts clean: neither marker the source may carry comes across, and
+      // the tag is re-resolved from the copy's own records rather than inherited.
       deletedAt: null,
       deletedBy: null,
+      voidedAt: null,
+      voidedBy: null,
+      voidReason: null,
+      revTaggedBy: null,
       orderIds: [newOrderId],
       loadIds: [newLoadId],
       ...mirrors,
@@ -2230,6 +2724,9 @@ async function duplicateShipment(input: Row, caller: Caller): Promise<Row> {
       }),
       'Load create',
     )
+    // Step R. The copy is tagged from its own records — it may have been duplicated
+    // without the carrier, which is a different answer from the one the source has.
+    await applyTagToLoads(newShipmentId, caller)
     created.push(newShipmentId)
   }
 
@@ -2252,6 +2749,7 @@ async function updateStop(input: Row, caller: Caller): Promise<Row> {
   if (!load) throw new Error(`Load not found: ${loadId}`)
   if (String(load.updatedAt ?? '') !== expectedUpdatedAt) throw conflictError('load', null)
   const shipmentId = optionalString(load.shipmentId, 100)
+  if (shipmentId) await requireLiveShipment(shipmentId)
 
   let stops = readStops(load)
   const indexOfStop = (): number => {
@@ -2474,6 +2972,7 @@ async function assignAsset(input: Row, caller: Caller): Promise<Row> {
   if (!load) throw new Error(`Load not found: ${loadId}`)
   const shipmentId = optionalString(load.shipmentId, 100)
   if (!shipmentId) throw new Error('That load is not part of a shipment yet')
+  await requireLiveShipment(shipmentId)
 
   const carriers = await queryIndex(LOAD_CARRIER_TABLE_NAME, IDX_CARRIERS_BY_LOAD, 'loadId', loadId)
   const activeCarrier = carriers.find((c) => c.status === 'ACTIVE') ?? null
@@ -2512,24 +3011,27 @@ async function assignAsset(input: Row, caller: Caller): Promise<Row> {
   await transact(writes, 'assignment')
 
   // The driver and truck live on the stops — exactly where the dispatch drawer puts
-  // them — so every own-fleet reader keeps seeing the assignment it already understands.
-  const stops = readStops(load).map((s) => ({ ...s, driverId, ...(truckId ? { truckId } : {}) }))
-  const legacy = deriveLegacyFields(stops)
+  // them — so every own-fleet reader keeps seeing the assignment it already
+  // understands. `ownFleetLoadPatch` is that mapping, shared with the backfill so
+  // one definition says what an own-fleet load looks like.
+  const ownFleet = ownFleetLoadPatch(readStops(load) as MirrorStop[], {
+    driverId,
+    truckId: truckId ?? optionalString(load.truckId, 100),
+    trailerNumber: optionalString(input.trailerNumber, 40) ?? optionalString(load.trailerNumber, 40),
+  })
   const currentStatus = (optionalEnum(load.status, LOAD_STATUS_VALUES, 'status') ?? null) as LoadWorkflowStatus | null
   const nextStatus = currentStatus == null || currentStatus === 'SOURCING' ? 'BOOKED' : currentStatus
+  // Step R. The leg is written, so the rules can now see whose truck this is.
+  const tag = await applyTag(shipmentId, caller)
 
   const client = await getDataClient()
   assertLoadWriteOk(
     await client.models.Load.update({
       id: loadId,
-      stops: JSON.stringify(stops),
-      ...legacy,
-      truckId: truckId ?? load.truckId ?? null,
-      trailerNumber: optionalString(input.trailerNumber, 40) ?? load.trailerNumber ?? null,
-      assignmentType: 'OWN_ASSET',
+      ...ownFleet,
+      stops: JSON.stringify(ownFleet.stops),
       activeLoadCarrierId: newCarrierId,
-      carrierName: null,
-      trackingProvider: 'DRIVER_APP',
+      ...tag,
       ...(nextStatus !== currentStatus
         ? { status: nextStatus, statusChangedAt: now, statusChangedBy: caller.email, statusSource: 'USER' }
         : {}),
@@ -2558,6 +3060,7 @@ async function assignCarrier(input: Row, caller: Caller): Promise<Row> {
   if (!load) throw new Error(`Load not found: ${loadId}`)
   const shipmentId = optionalString(load.shipmentId, 100)
   if (!shipmentId) throw new Error('That load is not part of a shipment yet')
+  await requireLiveShipment(shipmentId)
 
   const carriers = await queryIndex(LOAD_CARRIER_TABLE_NAME, IDX_CARRIERS_BY_LOAD, 'loadId', loadId)
   const activeCarrier = carriers.find((c) => c.status === 'ACTIVE') ?? null
@@ -2633,14 +3136,20 @@ async function assignCarrier(input: Row, caller: Caller): Promise<Row> {
 
   const currentStatus = (optionalEnum(load.status, LOAD_STATUS_VALUES, 'status') ?? null) as LoadWorkflowStatus | null
   const nextStatus = currentStatus == null || currentStatus === 'SOURCING' ? 'BOOKED' : currentStatus
+  // Step R. An outside carrier takes the load off the calendar, out of dispatch and
+  // out of every driver settlement: whatever own-fleet assignment was on it before
+  // has to be cleared, not merely overwritten with a carrier name.
+  const cleared = outsideCarrierLoadPatch(readStops(load) as MirrorStop[], { carrierName })
+  const tag = await applyTag(shipmentId, caller)
   const client = await getDataClient()
   assertLoadWriteOk(
     await client.models.Load.update({
       id: loadId,
-      assignmentType: 'CARRIER',
+      ...cleared,
+      stops: JSON.stringify(cleared.stops),
       activeLoadCarrierId: newCarrierId,
-      carrierName,
-      trackingProvider: optionalEnum(input.trackingProvider, ['NONE', 'MANUAL', 'LINK', 'DRIVER_APP', 'MOTIVE'] as const, 'trackingProvider') ?? 'MANUAL',
+      trackingProvider: optionalEnum(input.trackingProvider, TRACKING_PROVIDERS, 'trackingProvider') ?? 'MANUAL',
+      ...tag,
       ...(nextStatus !== currentStatus
         ? { status: nextStatus, statusChangedAt: now, statusChangedBy: caller.email, statusSource: 'USER' }
         : {}),
@@ -2674,6 +3183,7 @@ async function removeLoadCarrier(input: Row, caller: Caller): Promise<Row> {
   }
   const loadId = String(carrier.loadId)
   const shipmentId = String(carrier.shipmentId)
+  await requireLiveShipment(shipmentId)
   const load = await getById(LOAD_TABLE_NAME, loadId)
   if (!load) throw new Error(`Load not found: ${loadId}`)
 
@@ -2715,16 +3225,21 @@ async function removeLoadCarrier(input: Row, caller: Caller): Promise<Row> {
   }
 
   const now = nowIso()
-  const stops = readStops(load).map((s) => ({ ...s, driverId: null }))
+  // Nobody is on it. The driver, the truck and the trailer come off whether the leg
+  // that left was ours or an outside carrier's: a bounce of an own-fleet leg that
+  // only cleared `assignmentType` would leave the load on that driver's calendar
+  // and in their settlement forever.
+  const uncovered = uncoveredLoadPatch(readStops(load) as MirrorStop[])
+  const tag = await applyTag(shipmentId, caller)
   const client = await getDataClient()
   assertLoadWriteOk(
     await client.models.Load.update({
       id: loadId,
-      ...(carrier.kind === 'OWN_ASSET' ? { stops: JSON.stringify(stops), ...deriveLegacyFields(stops) } : {}),
-      assignmentType: 'NEED_TO_COVER',
+      ...uncovered,
+      stops: JSON.stringify(uncovered.stops),
       activeLoadCarrierId: null,
-      carrierName: null,
       trackingProvider: 'NONE',
+      ...tag,
       status: 'SOURCING',
       statusChangedAt: now,
       statusChangedBy: caller.email,
@@ -2827,14 +3342,15 @@ async function bookCarrier(input: Row, caller: Caller, extra?: BookCarrierExtra)
   if (!load) throw new Error(`Load not found: ${loadId}`)
   const shipmentId = optionalString(load.shipmentId, 100)
   if (!shipmentId) throw new Error('That load is not part of a shipment yet')
+  // Voided first: a voided shipment's load is CANCELED, and "it is not sourcing"
+  // would be a confusing way to say "that shipment no longer exists".
+  const bundle = await readBundle(shipmentId)
+  const { shipment } = bundle
+  assertNotVoided(shipment)
   if (String(load.updatedAt ?? '') !== expectedUpdatedAt) throw conflictError('load', null)
   if (String(load.status ?? '') !== 'SOURCING') {
     throw new Error('Only a load that is still sourcing can be booked')
   }
-
-  const bundle = await readBundle(shipmentId)
-  const { shipment } = bundle
-  if (shipment.deletedAt) throw new Error('That shipment is deleted')
   const mode = optionalEnum(shipment.mode, SHIPMENT_MODES, 'mode')
   if (!isTruckloadMode(mode)) throw new Error('Only a truckload shipment books an outside carrier')
   if (bundle.loadCarriers.some((c) => c.loadId === loadId && c.status === 'ACTIVE')) {
@@ -3048,16 +3564,22 @@ async function bookCarrier(input: Row, caller: Caller, extra?: BookCarrierExtra)
     'booking',
   )
 
+  // Step R. Booking an outside carrier onto a load our own fleet was holding has to
+  // clear the driver, the truck and the stop-level assignment, or the load stays on
+  // the calendar and in that driver's settlement while somebody else hauls it.
+  const cleared = outsideCarrierLoadPatch(readStops(load) as MirrorStop[], { carrierName })
+  const tag = await applyTag(shipmentId, caller)
   const client = await getDataClient()
   assertLoadWriteOk(
     await client.models.Load.update(
       {
         id: loadId,
-        assignmentType: 'CARRIER',
+        ...cleared,
+        stops: JSON.stringify(cleared.stops),
         activeLoadCarrierId: newCarrierId,
-        carrierName,
         equipmentType,
         trackingProvider,
+        ...tag,
         status: 'BOOKED',
         statusChangedAt: now,
         statusChangedBy: caller.email,
@@ -3106,6 +3628,7 @@ async function setQuickPay(input: Row, caller: Caller): Promise<Row> {
   }
   const loadId = String(carrier.loadId)
   const shipmentId = String(carrier.shipmentId)
+  await requireLiveShipment(shipmentId)
   const financials = await getById(LOAD_FINANCIALS_TABLE_NAME, loadId)
   if (financials?.frozenAt) {
     throw new Error('This load\'s financials are frozen and can no longer be changed')
@@ -3208,6 +3731,7 @@ async function sendRateCon(input: Row, caller: Caller): Promise<Row> {
   if (!carrierId) throw new Error('That assignment is not a directory carrier; book it with BOOK_CARRIER first')
   const loadId = String(carrier.loadId)
   const shipmentId = String(carrier.shipmentId)
+  await requireLiveShipment(shipmentId)
   const load = await getById(LOAD_TABLE_NAME, loadId)
   if (!load) throw new Error(`Load not found: ${loadId}`)
   if (!BUCKET_NAME) throw new Error('Document storage is not configured')
@@ -3339,6 +3863,7 @@ async function dispatchLoad(input: Row, caller: Caller): Promise<Row> {
   if (!load) throw new Error(`Load not found: ${loadId}`)
   const shipmentId = optionalString(load.shipmentId, 100)
   if (!shipmentId) throw new Error('That load is not part of a shipment yet')
+  await requireLiveShipment(shipmentId)
   const current = (optionalEnum(load.status, LOAD_STATUS_VALUES, 'status') ?? null) as LoadWorkflowStatus | null
   if (current !== 'BOOKED') throw new Error('Only a booked load can be dispatched')
   if (!canTransitionLoadStatus(current, 'DISPATCHED')) {
@@ -3571,7 +4096,7 @@ async function recalcCharges(input: Row, caller: Caller): Promise<Row> {
 
   const bundle = await readBundle(shipmentId)
   const { shipment } = bundle
-  if (shipment.deletedAt) throw new Error('That shipment is deleted')
+  assertNotVoided(shipment)
   const currentVersion = numberOrNull(shipment.version) ?? 1
   if (currentVersion !== expectedVersion) throw conflictError('shipment', null)
 
@@ -3645,7 +4170,7 @@ async function updateCarrierCharges(input: Row, caller: Caller): Promise<Row> {
   const shipmentId = String(assignment.shipmentId)
   const bundle = await readBundle(shipmentId)
   const { shipment } = bundle
-  if (shipment.deletedAt) throw new Error('That shipment is deleted')
+  assertNotVoided(shipment)
   const currentVersion = numberOrNull(shipment.version) ?? 1
   if (currentVersion !== expectedVersion) throw conflictError('shipment', null)
 
@@ -3919,6 +4444,7 @@ async function logCheckCall(input: Row, caller: Caller): Promise<Row> {
   if (String(load.updatedAt ?? '') !== expectedUpdatedAt) throw conflictError('load', null)
   const shipmentId = optionalString(load.shipmentId, 100)
   if (!shipmentId) throw new Error('That load is not part of a shipment yet')
+  await requireLiveShipment(shipmentId)
   const statusBefore = (optionalEnum(load.status, LOAD_STATUS_VALUES, 'status') ?? null) as LoadWorkflowStatus | null
   if (statusBefore === 'CANCELED') throw new Error('That load is canceled; there is nothing left to track')
   if (Date.parse(at) > Date.now() + CHECK_CALL_FUTURE_GRACE_MS) {
@@ -4099,6 +4625,7 @@ async function resolveIncident(input: Row, caller: Caller): Promise<Row> {
   const loadId = String(row.loadId)
   const load = await getById(LOAD_TABLE_NAME, loadId)
   if (!load) throw new Error(`Load not found: ${loadId}`)
+  if (row.shipmentId) await requireLiveShipment(String(row.shipmentId))
 
   const now = nowIso()
   try {
@@ -4162,6 +4689,7 @@ async function setNextCheckCall(input: Row, caller: Caller): Promise<Row> {
   if (String(load.updatedAt ?? '') !== expectedUpdatedAt) throw conflictError('load', null)
   const shipmentId = optionalString(load.shipmentId, 100)
   if (!shipmentId) throw new Error('That load is not part of a shipment yet')
+  await requireLiveShipment(shipmentId)
 
   await writeCheckCallSchedule({ loadId, nextCheckCallAt, note, caller, expectedUpdatedAt })
   await writeAudit('LOAD', loadId, 'SET_NEXT_CHECK_CALL', caller, { nextCheckCallAt, note })
@@ -4185,6 +4713,7 @@ async function setEta(input: Row, caller: Caller): Promise<Row> {
   if (carrier.status !== 'ACTIVE') throw new Error('Only the carrier currently on the load can give an ETA')
   const loadId = String(carrier.loadId)
   const shipmentId = String(carrier.shipmentId)
+  await requireLiveShipment(shipmentId)
 
   const now = nowIso()
   const event = checkCallRow({
@@ -4234,15 +4763,46 @@ async function setArStatus(input: Row, caller: Caller): Promise<Row> {
     const label = optionalString(order.invoiceNumber, 100) ?? invoiceId
     throw new Error(`This order has invoice ${label}; void the invoice first`)
   }
-  const shipment = await getById(SHIPMENT_TABLE_NAME, String(order.shipmentId))
-  if (!shipment) throw new Error(`Shipment not found: ${String(order.shipmentId)}`)
+  const shipmentId = String(order.shipmentId)
+  const shipment = await getById(SHIPMENT_TABLE_NAME, shipmentId)
+  if (!shipment) throw new Error(`Shipment not found: ${shipmentId}`)
+  assertNotVoided(shipment)
 
   const revenue = numberOrNull(order.revenueCents) ?? 0
   if (requested === 'UNBILLED') {
-    const delivered = shipment.status === 'DELIVERED'
-    if (!delivered && order.invoiceEarly !== true) {
-      throw new Error('An order is only ready to bill once it is delivered, or when it is marked to invoice early')
-    }
+    // Ryne's release-to-accounting rule, the same one READY_TO_INVOICE and every
+    // finance path run: delivered, every required document and reference present,
+    // the cost of the move recorded, nothing still open. `invoiceEarly` used to let
+    // an undelivered order through here; it does not any more, because a gate with
+    // a flag that opens it is not a gate.
+    const bundle = await readBundle(shipmentId)
+    const customerId = optionalString(order.customerId, 100)
+    const release = evaluateReleaseGate(
+      await loadReleaseGateInput(
+        {
+          db: dynamo,
+          tables: {
+            ...store.tables,
+            customer: CUSTOMER_TABLE_NAME,
+            settings: SETTINGS_TABLE_NAME,
+            loadCheckCall: LOAD_CHECK_CALL_TABLE_NAME,
+          },
+        },
+        {
+          shipmentId,
+          orderId,
+          shipment: bundle.shipment,
+          order,
+          orders: bundle.orders,
+          loads: bundle.loads,
+          loadCarriers: bundle.loadCarriers,
+          documents: bundle.documents,
+          customer: customerId ? await getById(CUSTOMER_TABLE_NAME, customerId) : null,
+          settings: await getSettings(),
+        },
+      ),
+    )
+    if (!release.ok) throw releaseGateError(release.missing)
   }
   if (requested === 'INVOICE_NOT_NEEDED' && revenue !== 0) {
     throw new Error('An order with revenue still needs an invoice')
@@ -4628,6 +5188,9 @@ async function backfillShipments(input: Row, caller: Caller): Promise<Row> {
       }),
       'Load update',
     )
+    // Step R. A backfilled shipment is tagged the same way a new one is: the leg
+    // the plan just wrote names the driver, and the rules read it from there.
+    await applyTagToLoads(plan.shipmentId, caller)
     applied++
   }
 
@@ -4693,7 +5256,7 @@ const quoteDeps: QuoteDeps = {
   saveOrderForm,
   submitOrder,
   bookCarrier,
-  softDeleteShipment,
+  voidShipmentForQuote,
   assertNoInvoicedOrders,
 }
 
@@ -4717,10 +5280,18 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return setShipmentStatus(input, caller)
     case 'SET_LOAD_STATUS':
       return setLoadStatus(input, caller)
-    case 'DELETE_SHIPMENT':
-      return deleteShipment(input, caller)
-    case 'RESTORE_SHIPMENT':
-      return restoreShipment(input, caller)
+    case 'VOID_SHIPMENT':
+      return voidShipment(input, caller)
+    case 'SET_REV_TAG':
+      return setRevTag(input, caller)
+    case 'CLEAR_REV_TAG':
+      return clearRevTag(input, caller)
+    case 'SET_SALES_REP':
+      return setSalesRep(input, caller)
+    case 'TEST_OWNERSHIP_RULES':
+      return testOwnershipRules(input)
+    case 'RETAG_SHIPMENTS':
+      return retagShipments(input, caller)
     case 'TENDER_RESPOND':
       return tenderRespond(input, caller)
     case 'DUPLICATE_SHIPMENT':

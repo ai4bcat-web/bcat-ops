@@ -7,16 +7,20 @@
  * `userManagement` Lambda refuses them for anybody else regardless, and every refusal it
  * writes (owner demotion, self-demotion, last admin) is shown here word for word rather
  * than guessed at client-side.
+ *
+ * Step R re-skinned it onto the MVMNT kit as the Users tab of My Brokerage, so it is a
+ * *body*: `BrokeragePage` owns the h1 and the tab strip. Nothing about who may do what
+ * changed.
  */
 import { useState, useEffect } from 'react'
+import type { CSSProperties, ReactNode } from 'react'
 import { errorMessage } from '@/lib/utils/errorMessage'
 import {
-  Mail, Plus, KeyRound, UserX, UserCheck, ChevronDown, ShieldCheck, Shield,
+  Plus, KeyRound, UserX, UserCheck, ChevronDown, ShieldCheck, Shield,
   Check, Loader2, RefreshCw, AlertTriangle, Users, Trash2, Send, LogOut, Info,
 } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { Avatar } from '@/components/ui/avatar'
-import { Checkbox } from '@/components/ui/checkbox'
+import { TmsBadge, TmsButton, TmsCard, TmsField, TmsInput, TmsSelect } from '@/features/tms/kit'
+import type { TmsTone } from '@/features/tms/kit'
 import { RepPicker } from '@/components/RepPicker'
 import { useAuth } from '@/hooks/useAuth'
 import { OWNER_EMAIL } from '@/lib/auth/admin'
@@ -36,7 +40,6 @@ import {
 } from '@/lib/roles'
 import type { ClaimKey, RoleKey, Team, UserProfileRecord, UserStatus } from '@/types/tms'
 import { toast } from 'sonner'
-import { cn } from '@/lib/utils'
 
 const PAGE_OPTIONS = pageOptions()
 const TOTAL_PAGES = PAGE_OPTIONS.length
@@ -50,14 +53,31 @@ interface UserRow extends CognitoUser {
   profile: UserProfileRecord | null
 }
 
-// ── Helpers ─────────────────────────────────────────────────────────────────
+// ── Shared styles (theme tokens only — this page lives in the dark shell) ─────
 
-const AVATAR_COLORS = ['#1ea8f3', '#a78bfa', '#f59e0b', '#22c55e', '#ec4899', '#14b8a6', '#ef4444', '#3b82f6']
-function avatarColor(seed: string): string {
-  let h = 0
-  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0
-  return AVATAR_COLORS[h % AVATAR_COLORS.length]
+const CARD: CSSProperties = {
+  border: '1px solid var(--tms-border)',
+  borderRadius: 'var(--tms-radius)',
+  background: 'var(--tms-card)',
+  overflow: 'hidden',
 }
+const SUB_PANEL: CSSProperties = {
+  borderTop: '1px solid var(--tms-border)',
+  padding: '16px 20px',
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 20,
+}
+const PILL: CSSProperties = {
+  display: 'inline-flex', alignItems: 'center', gap: 6, height: 28, padding: '0 10px',
+  borderRadius: 999, border: '1px solid var(--tms-border)', background: 'transparent',
+  color: 'var(--tms-muted)', fontSize: 12, fontWeight: 500, cursor: 'pointer',
+}
+const PILL_ON: CSSProperties = {
+  ...PILL, borderColor: 'var(--tms-primary)', color: 'var(--tms-primary)',
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────────────
 
 function getInitials(name: string): string {
   return name.split(' ').slice(0, 2).map((n) => n[0] ?? '').join('').toUpperCase() || '?'
@@ -110,23 +130,26 @@ async function fetchUsers(): Promise<UserRow[]> {
   return list.map((u, i) => ({ ...u, groups: groups[i], profile: u.profile ?? null }))
 }
 
-const STATUS_STYLES: Record<UserStatus, string> = {
-  PENDING: 'bg-amber-50 text-amber-700 border-amber-200',
-  ACTIVE: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-  INACTIVE: 'bg-slate-100 text-slate-500 border-slate-200',
+const STATUS_TONES: Record<UserStatus, TmsTone> = {
+  PENDING: 'orange',
+  ACTIVE: 'green',
+  INACTIVE: 'gray',
+}
+const STATUS_LABELS: Record<UserStatus, string> = {
+  PENDING: 'Pending',
+  ACTIVE: 'Active',
+  INACTIVE: 'Inactive',
 }
 
-function StatusPill({ status }: { status: UserStatus }) {
+function SectionLabel({ children }: { children: ReactNode }) {
   return (
-    <span className={cn('inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded-full border', STATUS_STYLES[status])}>
-      {status === 'ACTIVE' && <span className="size-1.5 rounded-full bg-emerald-500" />}
-      {status === 'PENDING' ? 'Pending' : status === 'ACTIVE' ? 'Active' : 'Inactive'}
-    </span>
+    <p
+      className="tms-field-label"
+      style={{ margin: '0 0 8px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.04em' }}
+    >
+      {children}
+    </p>
   )
-}
-
-function SectionLabel({ children }: { children: React.ReactNode }) {
-  return <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">{children}</p>
 }
 
 // ── User card (expandable) ────────────────────────────────────────────────────
@@ -162,7 +185,6 @@ function UserCard({
   const [expanded, setExpanded] = useState(false)
   const admin = isUserAdmin(user)
   const name = displayName({ email: user.email, name: user.profile?.name, username: user.username })
-  const color = avatarColor(user.email ?? user.username ?? '')
   const role = roleOf(user)
   const status = statusOf(user)
   const rolePages = rolePagesFor(role)
@@ -178,98 +200,97 @@ function UserCard({
   const isAdminBusy = busyAdminId === user.username
 
   return (
-    <div data-testid="user-card" style={{ borderRadius: 12, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', boxShadow: 'var(--sh-sm)', overflow: 'hidden' }}>
+    <div data-testid="user-card" style={CARD}>
       {/* Header */}
-      <div className="flex items-center gap-4 px-5 py-4">
-        <div className="relative shrink-0">
-          <Avatar initials={getInitials(name)} size="lg" style={{ background: color, color: '#fff' }} />
-          {user.enabled && (
-            <span className="absolute -bottom-0.5 -right-0.5 size-3 rounded-full bg-emerald-500 ring-2 ring-white" title="Active" />
-          )}
-        </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '14px 18px' }}>
+        <span
+          aria-hidden="true"
+          style={{
+            width: 36, height: 36, borderRadius: 999, flex: '0 0 auto',
+            background: 'var(--tms-primary)', color: 'var(--tms-on-primary)',
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 13, fontWeight: 600,
+          }}
+        >
+          {getInitials(name)}
+        </span>
 
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-semibold text-foreground truncate">{name}</span>
-            {admin && (
-              <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-full border bg-violet-50 text-violet-700 border-violet-200 shrink-0">
-                <ShieldCheck className="size-3" />Admin
-              </span>
-            )}
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 14, fontWeight: 600 }}>{name}</span>
+            {admin && <TmsBadge tone="purple">Admin</TmsBadge>}
           </div>
-          <div className="text-xs text-muted-foreground truncate mt-0.5">
-            {user.email}
-            <span className="text-muted-foreground/60"> · {ROLE_LABELS[role]}</span>
+          <div className="tms-muted" style={{ fontSize: 12, marginTop: 2 }}>
+            {user.email} · {ROLE_LABELS[role]}
           </div>
         </div>
 
-        <div className="hidden md:block shrink-0 text-right">
-          <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Access</div>
-          <div className={cn('text-xs mt-0.5', grantedCount > 0 && !openPages ? 'font-mono text-foreground' : 'text-muted-foreground')}>{access}</div>
+        <div style={{ flex: '0 0 auto', textAlign: 'right' }}>
+          <div className="tms-field-label" style={{ textTransform: 'uppercase', letterSpacing: '.04em', fontWeight: 600 }}>Access</div>
+          <div style={{ fontSize: 12, marginTop: 2 }}>{access}</div>
         </div>
 
-        <div className="shrink-0"><StatusPill status={status} /></div>
+        <TmsBadge tone={STATUS_TONES[status]}>{STATUS_LABELS[status]}</TmsBadge>
 
-        <div className="flex items-center gap-2 shrink-0">
-          <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={() => onReset(user)} disabled={isResetting || !user.enabled}>
-            {isResetting ? <Loader2 className="size-3 animate-spin" /> : <KeyRound className="size-3" />}Reset
-          </Button>
-          <Button
-            variant="outline"
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: '0 0 auto' }}>
+          <TmsButton size="sm" onClick={() => onReset(user)} disabled={isResetting || !user.enabled}>
+            {isResetting ? <Loader2 size={13} /> : <KeyRound size={13} />}Reset
+          </TmsButton>
+          <TmsButton
             size="sm"
-            className={cn('h-8 gap-1.5 text-xs', user.enabled ? 'text-destructive border-destructive/30 hover:bg-destructive/5' : 'text-emerald-700 border-emerald-300 hover:bg-emerald-50')}
+            variant={user.enabled ? 'destructive' : 'secondary'}
             onClick={() => onToggleEnabled(user)}
             disabled={isToggling}
           >
-            {isToggling ? <Loader2 className="size-3 animate-spin" /> : user.enabled ? <UserX className="size-3" /> : <UserCheck className="size-3" />}
+            {isToggling ? <Loader2 size={13} /> : user.enabled ? <UserX size={13} /> : <UserCheck size={13} />}
             {user.enabled ? 'Disable' : 'Enable'}
-          </Button>
-          <Button
-            variant="outline"
+          </TmsButton>
+          <TmsButton
             size="sm"
-            className="h-8 gap-1.5 text-xs text-destructive border-destructive/30 hover:bg-destructive/5"
+            variant="destructive"
             onClick={() => onDelete(user)}
             disabled={isToggling || !callerIsOwner}
             title={callerIsOwner
               ? 'Remove this user entirely — sign-in, groups and page access'
               : OWNER_ONLY}
           >
-            <Trash2 className="size-3" />Delete
-          </Button>
+            <Trash2 size={13} />Delete
+          </TmsButton>
           <button
+            type="button"
             onClick={() => setExpanded((v) => !v)}
-            className="h-8 w-8 flex items-center justify-center rounded-md text-muted-foreground hover:bg-slate-100 transition-colors"
+            className="tms-icon-btn tms-icon-btn-plain"
             aria-label="Toggle permissions"
           >
-            <ChevronDown className={cn('size-4 transition-transform', expanded && 'rotate-180')} />
+            <ChevronDown size={16} style={{ transform: expanded ? 'rotate(180deg)' : undefined }} />
           </button>
         </div>
       </div>
 
       {/* Expanded body */}
       {expanded && (
-        <div style={{ background: 'var(--ds-bg)', borderTop: '1px solid var(--ds-border)', padding: '16px 20px' }} className="space-y-5">
+        <div style={SUB_PANEL}>
 
           {/* Role */}
           <div>
             <SectionLabel>Role</SectionLabel>
-            <div className="flex flex-wrap items-center gap-3">
-              <select
+            <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 12 }}>
+              <TmsSelect
                 aria-label={`Role for ${user.email}`}
                 value={role}
                 disabled={savingPermissions}
                 onChange={(e) => onRole(user, e.target.value as RoleKey)}
-                className="h-9 rounded-md border border-input bg-white px-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                style={{ width: 'auto' }}
               >
                 {ROLES.map((key) => (
                   <option key={key} value={key}>{ROLE_LABELS[key]}</option>
                 ))}
-              </select>
-              <span className="text-xs text-muted-foreground">{ROLE_DESCRIPTIONS[role]}</span>
+              </TmsSelect>
+              <span className="tms-muted" style={{ fontSize: 12 }}>{ROLE_DESCRIPTIONS[role]}</span>
             </div>
             {roleChangedHere && (
-              <p className="mt-2 inline-flex items-start gap-1.5 text-[11px] text-amber-700">
-                <Info className="size-3.5 shrink-0 mt-px" />{SIGN_IN_NOTICE}
+              <p style={{ margin: '8px 0 0', display: 'inline-flex', alignItems: 'flex-start', gap: 6, fontSize: 12, color: 'var(--tms-badge-orange)' }}>
+                <Info size={14} style={{ flex: '0 0 auto', marginTop: 1 }} />{SIGN_IN_NOTICE}
               </p>
             )}
           </div>
@@ -278,9 +299,9 @@ function UserCard({
           <div>
             <SectionLabel>Teams</SectionLabel>
             {teams.length === 0 ? (
-              <p className="text-xs text-muted-foreground">No teams yet — add them in Settings → Teams.</p>
+              <p className="tms-field-hint" style={{ margin: 0 }}>No teams yet — add them in Settings → Teams.</p>
             ) : (
-              <div className="flex flex-wrap gap-1.5">
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                 {teams.filter((t) => t.active !== false).map((team) => {
                   const on = teamKeys.includes(team.key)
                   return (
@@ -290,12 +311,9 @@ function UserCard({
                       aria-pressed={on}
                       disabled={savingPermissions}
                       onClick={() => onToggleTeam(user, team.key)}
-                      className={cn(
-                        'inline-flex items-center gap-1 h-7 px-2.5 rounded-full border text-xs font-medium transition-all disabled:opacity-60 disabled:cursor-not-allowed',
-                        on ? 'bg-blue-50 border-blue-300 text-blue-700' : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300',
-                      )}
+                      style={on ? PILL_ON : PILL}
                     >
-                      {on && <Check className="size-3 shrink-0" />}{team.name}
+                      {on && <Check size={12} />}{team.name}
                     </button>
                   )
                 })}
@@ -306,7 +324,7 @@ function UserCard({
           {/* Manager */}
           <div>
             <SectionLabel>Manager</SectionLabel>
-            <div className="max-w-sm">
+            <div style={{ maxWidth: 384 }}>
               <RepPicker
                 value={user.profile?.managerId ?? ''}
                 onChange={(id) => onManager(user, id)}
@@ -319,22 +337,32 @@ function UserCard({
           {/* Claims */}
           <div>
             <SectionLabel>Additional permissions</SectionLabel>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+            <div className="tms-grid tms-grid-3">
               {CLAIMS.map((claim) => {
                 const on = claims.includes(claim)
                 const enforced = isEnforcedClaim(claim)
                 return (
-                  <label key={claim} className="flex items-start gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2">
-                    <Checkbox
+                  <label
+                    key={claim}
+                    style={{
+                      display: 'flex', alignItems: 'flex-start', gap: 8, cursor: 'pointer',
+                      border: '1px solid var(--tms-border)', borderRadius: 'var(--tms-radius)', padding: '8px 10px',
+                    }}
+                  >
+                    <input
+                      type="checkbox"
                       aria-label={CLAIM_LABELS[claim]}
                       checked={on}
                       disabled={savingPermissions}
-                      onCheckedChange={() => onToggleClaim(user, claim)}
-                      className="mt-0.5"
+                      onChange={() => onToggleClaim(user, claim)}
+                      style={{ accentColor: 'var(--tms-primary)', width: 15, height: 15, marginTop: 2, flex: '0 0 auto' }}
                     />
-                    <span className="min-w-0">
-                      <span className="block text-xs text-slate-700">{CLAIM_LABELS[claim]}</span>
-                      <span className={cn('text-[10px] font-semibold uppercase tracking-wide', enforced ? 'text-emerald-700' : 'text-slate-400')}>
+                    <span style={{ minWidth: 0 }}>
+                      <span style={{ display: 'block', fontSize: 12 }}>{CLAIM_LABELS[claim]}</span>
+                      <span
+                        className={enforced ? undefined : 'tms-muted'}
+                        style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.04em', color: enforced ? 'var(--tms-badge-green)' : undefined }}
+                      >
                         {enforced ? 'enforced' : 'recorded'}
                       </span>
                     </span>
@@ -342,72 +370,72 @@ function UserCard({
                 )
               })}
             </div>
-            <p className="text-[11px] text-muted-foreground mt-2">
+            <p className="tms-field-hint" style={{ margin: '8px 0 0' }}>
               A recorded claim is a record of who may do something, not a restriction — only the enforced ones are refused by the server.
             </p>
           </div>
 
           {/* Page access */}
           <div>
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Page access</p>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+              <SectionLabel>Page access</SectionLabel>
               {!isTargetOwner && (
                 <button
+                  type="button"
                   onClick={() => onToggleAdmin(user, !admin)}
                   disabled={isAdminBusy || savingPermissions || !callerIsOwner}
                   title={callerIsOwner ? undefined : OWNER_ONLY}
-                  className={cn(
-                    'inline-flex items-center gap-1 text-[11px] font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed',
-                    admin ? 'text-muted-foreground hover:text-destructive' : 'text-violet-600 hover:text-violet-800',
-                  )}
+                  className="tms-btn tms-btn-ghost tms-btn-sm"
                 >
-                  {isAdminBusy ? <Loader2 className="size-3 animate-spin" /> : <Shield className="size-3" />}
+                  {isAdminBusy ? <Loader2 size={12} /> : <Shield size={12} />}
                   {admin ? 'Remove admin' : 'Make admin'}
                 </button>
               )}
             </div>
 
             {openPages ? (
-              <div className="flex items-center gap-2 rounded-lg border border-violet-200 bg-violet-50 px-4 py-3">
-                <ShieldCheck className="size-4 text-violet-600 shrink-0" />
-                <span className="text-sm font-medium text-violet-700">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, border: '1px solid var(--tms-border)', borderRadius: 'var(--tms-radius)', padding: '10px 14px' }}>
+                <ShieldCheck size={16} style={{ color: 'var(--tms-badge-purple)', flex: '0 0 auto' }} />
+                <span style={{ fontSize: 14, fontWeight: 500 }}>
                   {isTargetOwner ? 'Owner — full access to all pages' : 'Admin — full access to all pages'}
                 </span>
               </div>
             ) : (
               <>
-                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+                <div className="tms-grid tms-grid-4">
                   {PAGE_OPTIONS.map(({ key, label }) => {
                     const fromRole = rolePages.includes(key)
                     const on = fromRole || extraPages.includes(key)
                     return (
                       <button
                         key={key}
+                        type="button"
                         data-testid="user-page-toggle"
                         onClick={() => onTogglePage(user, key)}
                         disabled={savingPermissions || fromRole}
                         title={fromRole ? `Granted by the ${ROLE_LABELS[role]} role — change the role to remove it` : undefined}
-                        className={cn(
-                          'flex items-center justify-between gap-1.5 h-9 px-3 rounded-lg border text-xs font-medium transition-all disabled:cursor-not-allowed',
-                          fromRole
-                            ? 'bg-violet-50 border-violet-200 text-violet-700 opacity-90'
-                            : on
-                              ? 'bg-blue-50 border-blue-300 text-blue-700 disabled:opacity-60'
-                              : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300 disabled:opacity-60',
-                        )}
+                        style={{
+                          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6,
+                          height: 36, padding: '0 10px', borderRadius: 'var(--tms-radius)',
+                          border: `1px solid ${on ? 'var(--tms-primary)' : 'var(--tms-border)'}`,
+                          background: 'transparent',
+                          color: on ? 'var(--tms-primary)' : 'var(--tms-muted)',
+                          fontSize: 12, fontWeight: 500,
+                          cursor: fromRole ? 'not-allowed' : 'pointer',
+                        }}
                       >
-                        <span className="inline-flex items-center gap-1.5 truncate">
-                          {on && <Check className="size-3.5 shrink-0" />}{label}
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {on && <Check size={13} style={{ flex: '0 0 auto' }} />}{label}
                         </span>
-                        <span className="text-[9px] font-semibold uppercase tracking-wide opacity-70 shrink-0">
+                        <span style={{ fontSize: 9, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.04em', opacity: 0.7, flex: '0 0 auto' }}>
                           {fromRole ? 'from role' : on ? 'extra' : ''}
                         </span>
                       </button>
                     )
                   })}
                 </div>
-                <p className="text-[11px] text-muted-foreground mt-2">
-                  Pages marked <span className="font-semibold">from role</span> come with {ROLE_LABELS[role]} and cannot be
+                <p className="tms-field-hint" style={{ margin: '8px 0 0' }}>
+                  Pages marked <strong>from role</strong> come with {ROLE_LABELS[role]} and cannot be
                   unticked here — change the role instead. Everything else is an extra grant and saves instantly.
                 </p>
               </>
@@ -415,14 +443,14 @@ function UserCard({
           </div>
 
           {/* Account actions */}
-          <div className="flex flex-wrap items-center gap-2 border-t border-slate-200 pt-3">
-            <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={() => onReinvite(user)} disabled={isToggling}>
-              <Send className="size-3" />Reinvite
-            </Button>
-            <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={() => onSignOut(user)} disabled={isToggling}>
-              <LogOut className="size-3" />Force sign-out
-            </Button>
-            <span className="text-[11px] text-muted-foreground">
+          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, borderTop: '1px solid var(--tms-border)', paddingTop: 12 }}>
+            <TmsButton size="sm" onClick={() => onReinvite(user)} disabled={isToggling}>
+              <Send size={13} />Reinvite
+            </TmsButton>
+            <TmsButton size="sm" onClick={() => onSignOut(user)} disabled={isToggling}>
+              <LogOut size={13} />Force sign-out
+            </TmsButton>
+            <span className="tms-field-hint">
               Force sign-out drops every session, so a role change takes effect at once.
             </span>
           </div>
@@ -671,194 +699,163 @@ export function UsersPage() {
 
   if (authLoading) return null
 
-  const total       = users.length
-  const activeCount = users.filter((u) => u.enabled).length
-  const adminCount  = users.filter(isUserAdmin).length
-  const disabled    = users.filter((u) => !u.enabled).length
-
   const KPIS = [
-    { label: 'Total Users', value: total,       color: '#1ea8f3' },
-    { label: 'Active',      value: activeCount,  color: '#22c55e' },
-    { label: 'Admins',      value: adminCount,   color: '#a78bfa' },
-    { label: 'Disabled',    value: disabled,     color: 'var(--ds-t3)' },
+    { label: 'Total Users', value: users.length },
+    { label: 'Active', value: users.filter((u) => u.enabled).length },
+    { label: 'Admins', value: users.filter(isUserAdmin).length },
+    { label: 'Disabled', value: users.filter((u) => !u.enabled).length },
   ]
 
   const activeTeams = teams.filter((t) => t.active !== false)
 
   return (
-    <div style={{ height: '100%', overflowY: 'auto', background: 'var(--ds-bg)' }}>
-      {/* Header */}
-      <div style={{ position: 'sticky', top: 0, zIndex: 10, background: 'var(--ds-surface)', borderBottom: '1px solid var(--ds-border)' }}>
-        <div className="flex items-center justify-between px-8 pt-5 pb-4">
-          <div>
-            <h1 className="text-2xl font-semibold text-foreground tracking-tight">User Management</h1>
-            <p style={{ fontSize: 12.5, color: 'var(--ds-t3)', marginTop: 2 }}>Workspace members · roles · teams · access</p>
-          </div>
-          <Button variant="outline" size="sm" className="h-9 gap-1.5" onClick={refreshUsers} disabled={loading}>
-            <RefreshCw className={cn('size-3.5', loading && 'animate-spin')} />Refresh
-          </Button>
-        </div>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+        <p className="tms-field-hint" style={{ margin: 0 }}>Workspace members · roles · teams · access</p>
+        <TmsButton size="sm" onClick={refreshUsers} disabled={loading}>
+          <RefreshCw size={14} />Refresh
+        </TmsButton>
       </div>
 
-      <div style={{ padding: 32 }}>
-        {!isOwner && (
-          <div className="mb-5 flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2.5">
-            <Shield className="size-4 text-slate-400 shrink-0" />
-            <span className="text-xs text-slate-600">
-              Granting admin and deleting an account are the owner's — everything else on this page is yours.
-            </span>
-          </div>
-        )}
-
-        {/* KPIs */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 20 }}>
-          {KPIS.map((k) => (
-            <div key={k.label} style={{ background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 12, boxShadow: 'var(--sh-sm)', padding: '16px 18px' }}>
-              <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--ds-t3)', letterSpacing: '0.03em', textTransform: 'uppercase' }}>{k.label}</div>
-              <div style={{ fontSize: 28, fontWeight: 600, color: k.color, letterSpacing: '-0.02em', marginTop: 4, fontVariantNumeric: 'tabular-nums' }}>{k.value}</div>
-            </div>
-          ))}
+      {!isOwner && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, border: '1px solid var(--tms-border)', borderRadius: 'var(--tms-radius)', padding: '8px 14px' }}>
+          <Shield size={16} className="tms-muted" style={{ flex: '0 0 auto' }} />
+          <span className="tms-muted" style={{ fontSize: 12 }}>
+            Granting admin and deleting an account are the owner&rsquo;s — everything else on this page is yours.
+          </span>
         </div>
+      )}
 
-        {/* 2-column grid: sticky invite + user list */}
-        <div style={{ display: 'grid', gridTemplateColumns: '360px 1fr', gap: 20, alignItems: 'start' }}>
+      <div className="tms-grid tms-grid-4">
+        {KPIS.map((k) => (
+          <TmsCard key={k.label}>
+            <div className="tms-field-label" style={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.04em' }}>{k.label}</div>
+            <div style={{ fontSize: 28, fontWeight: 600, marginTop: 4, fontVariantNumeric: 'tabular-nums' }}>{k.value}</div>
+          </TmsCard>
+        ))}
+      </div>
 
-          {/* Invite card */}
-          <div style={{ position: 'sticky', top: 24 }}>
-            <div style={{ background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 12, boxShadow: 'var(--sh-sm)', padding: 22 }}>
-              <h2 className="text-base font-semibold text-foreground">Invite New User</h2>
-              <p className="text-xs text-muted-foreground mt-0.5 mb-4">They'll receive an email with a temporary password.</p>
+      <div className="tms-grid" style={{ gridTemplateColumns: '360px minmax(0, 1fr)', gap: 20, alignItems: 'start' }}>
+        {/* Invite card */}
+        <TmsCard title="Invite New User">
+          <p className="tms-field-hint" style={{ margin: '0 0 12px' }}>They&rsquo;ll receive an email with a temporary password.</p>
 
-              <form onSubmit={handleCreate} className="flex flex-col gap-4">
-                {/* Email */}
-                <div className="space-y-1.5">
-                  <label htmlFor="invite-email" className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Email Address</label>
-                  <div className="relative">
-                    <Mail className="size-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-                    <input
-                      id="invite-email"
-                      type="email"
-                      placeholder="driver@bcatcorp.com"
-                      value={newEmail}
-                      onChange={(e) => setNewEmail(e.target.value)}
-                      required
-                      disabled={creating}
-                      style={{ width: '100%', height: 38, paddingLeft: 36, paddingRight: 12, boxSizing: 'border-box', background: 'var(--ds-bg)', border: '1px solid var(--ds-border)', borderRadius: 8, fontSize: 13, color: 'var(--ds-t1)', fontFamily: 'inherit', outline: 'none' }}
-                    />
-                  </div>
+          <form onSubmit={handleCreate} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <TmsField label="Email Address" htmlFor="invite-email">
+              <TmsInput
+                id="invite-email"
+                type="email"
+                placeholder="driver@bcatcorp.com"
+                value={newEmail}
+                onChange={(e) => setNewEmail(e.target.value)}
+                required
+                disabled={creating}
+              />
+            </TmsField>
+
+            <TmsField label="Role" htmlFor="invite-role" hint={ROLE_DESCRIPTIONS[inviteRole]}>
+              <TmsSelect
+                id="invite-role"
+                value={inviteRole}
+                disabled={creating}
+                onChange={(e) => setInviteRole(e.target.value as RoleKey)}
+              >
+                {ROLES.map((key) => (
+                  <option key={key} value={key}>{ROLE_LABELS[key]}</option>
+                ))}
+              </TmsSelect>
+            </TmsField>
+
+            <div>
+              <SectionLabel>Teams</SectionLabel>
+              {activeTeams.length === 0 ? (
+                <p className="tms-field-hint" style={{ margin: 0 }}>No teams yet — add them in Settings → Teams.</p>
+              ) : (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {activeTeams.map((team) => {
+                    const on = inviteTeams.includes(team.key)
+                    return (
+                      <button
+                        key={team.key}
+                        type="button"
+                        aria-pressed={on}
+                        disabled={creating}
+                        onClick={() => setInviteTeams((prev) => (on ? prev.filter((k) => k !== team.key) : [...prev, team.key]))}
+                        style={on ? PILL_ON : PILL}
+                      >
+                        {on && <Check size={12} />}{team.name}
+                      </button>
+                    )
+                  })}
                 </div>
-
-                {/* Role */}
-                <div className="space-y-1.5">
-                  <label htmlFor="invite-role" className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Role</label>
-                  <select
-                    id="invite-role"
-                    value={inviteRole}
-                    disabled={creating}
-                    onChange={(e) => setInviteRole(e.target.value as RoleKey)}
-                    className="h-9 w-full rounded-md border border-input bg-white px-2 text-sm disabled:opacity-50"
-                  >
-                    {ROLES.map((key) => (
-                      <option key={key} value={key}>{ROLE_LABELS[key]}</option>
-                    ))}
-                  </select>
-                  <p className="text-[11px] text-muted-foreground">{ROLE_DESCRIPTIONS[inviteRole]}</p>
-                </div>
-
-                {/* Teams */}
-                <div className="space-y-1.5">
-                  <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Teams</span>
-                  {activeTeams.length === 0 ? (
-                    <p className="text-[11px] text-muted-foreground">No teams yet — add them in Settings → Teams.</p>
-                  ) : (
-                    <div className="flex flex-wrap gap-1.5">
-                      {activeTeams.map((team) => {
-                        const on = inviteTeams.includes(team.key)
-                        return (
-                          <button
-                            key={team.key}
-                            type="button"
-                            aria-pressed={on}
-                            disabled={creating}
-                            onClick={() => setInviteTeams((prev) => (on ? prev.filter((k) => k !== team.key) : [...prev, team.key]))}
-                            className={cn(
-                              'inline-flex items-center gap-1 h-7 px-2.5 rounded-full border text-xs font-medium transition-all disabled:opacity-60',
-                              on ? 'bg-blue-50 border-blue-300 text-blue-700' : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300',
-                            )}
-                          >
-                            {on && <Check className="size-3 shrink-0" />}{team.name}
-                          </button>
-                        )
-                      })}
-                    </div>
-                  )}
-                </div>
-
-                <p className="text-[11px] text-muted-foreground">
-                  The role decides the pages. Extra pages and permissions are granted on the user's card once they appear.
-                </p>
-
-                <Button type="submit" className="gap-1.5 mt-1" disabled={creating || !newEmail.trim()}>
-                  {creating ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
-                  {creating ? 'Sending…' : 'Send Invite'}
-                </Button>
-              </form>
+              )}
             </div>
-          </div>
 
-          {/* User list */}
-          <div className="space-y-3">
-            <h2 className="text-sm font-semibold text-foreground">
-              All Users {!loading && <span className="text-muted-foreground font-normal">({users.length})</span>}
-            </h2>
+            <p className="tms-field-hint" style={{ margin: 0 }}>
+              The role decides the pages. Extra pages and permissions are granted on the user&rsquo;s card once they appear.
+            </p>
 
-            {error && (
-              <div className="rounded-xl border border-destructive/30 bg-red-50 px-5 py-4 flex items-center gap-3">
-                <AlertTriangle className="size-4 text-destructive shrink-0" />
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm text-destructive font-medium">Failed to load users</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">{error}</p>
-                </div>
-                <Button variant="outline" size="sm" className="h-8 text-xs shrink-0" onClick={refreshUsers}>Retry</Button>
-              </div>
-            )}
+            <div>
+              <TmsButton type="submit" variant="primary" disabled={creating || !newEmail.trim()}>
+                {creating ? <Loader2 size={15} /> : <Plus size={15} />}
+                {creating ? 'Sending…' : 'Send Invite'}
+              </TmsButton>
+            </div>
+          </form>
+        </TmsCard>
 
-            {loading ? (
-              <div className="flex items-center gap-2 py-10 text-muted-foreground text-sm">
-                <Loader2 className="size-4 animate-spin" /> Loading users…
+        {/* User list */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <h2 style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>
+            All Users {!loading && <span className="tms-muted" style={{ fontWeight: 400 }}>({users.length})</span>}
+          </h2>
+
+          {error && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, border: '1px solid var(--tms-badge-red)', borderRadius: 'var(--tms-radius)', padding: '14px 18px' }}>
+              <AlertTriangle size={16} style={{ color: 'var(--tms-badge-red)', flex: '0 0 auto' }} />
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <p style={{ margin: 0, fontSize: 14, fontWeight: 500, color: 'var(--tms-badge-red)' }}>Failed to load users</p>
+                <p className="tms-field-hint" style={{ margin: '2px 0 0' }}>{error}</p>
               </div>
-            ) : !error && users.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-16 gap-2 text-muted-foreground">
-                <Users className="size-8 opacity-20" />
-                <p className="text-sm">No users found.</p>
-              </div>
-            ) : !error ? (
-              users.map((u) => (
-                <UserCard
-                  key={u.username}
-                  user={u}
-                  teams={teams}
-                  callerIsOwner={isOwner}
-                  roleChangedHere={roleChanged.includes(u.username)}
-                  onRole={handleRole}
-                  onToggleTeam={handleToggleTeam}
-                  onManager={handleManager}
-                  onToggleClaim={handleToggleClaim}
-                  onTogglePage={handleTogglePage}
-                  onToggleAdmin={handleToggleAdmin}
-                  onReset={handleReset}
-                  onReinvite={handleReinvite}
-                  onSignOut={handleSignOut}
-                  onToggleEnabled={handleToggleEnabled}
-                  onDelete={handleDelete}
-                  busyAdminId={busyAdminId}
-                  resettingId={resettingId}
-                  togglingId={togglingId}
-                  savingPermissions={savingPermissions}
-                />
-              ))
-            ) : null}
-          </div>
+              <TmsButton size="sm" onClick={refreshUsers}>Retry</TmsButton>
+            </div>
+          )}
+
+          {loading ? (
+            <div className="tms-muted" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '40px 0', fontSize: 14 }}>
+              <Loader2 size={16} /> Loading users…
+            </div>
+          ) : !error && users.length === 0 ? (
+            <div className="tms-muted" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '64px 0', gap: 8 }}>
+              <Users size={32} style={{ opacity: 0.3 }} />
+              <p style={{ margin: 0, fontSize: 14 }}>No users found.</p>
+            </div>
+          ) : !error ? (
+            users.map((u) => (
+              <UserCard
+                key={u.username}
+                user={u}
+                teams={teams}
+                callerIsOwner={isOwner}
+                roleChangedHere={roleChanged.includes(u.username)}
+                onRole={handleRole}
+                onToggleTeam={handleToggleTeam}
+                onManager={handleManager}
+                onToggleClaim={handleToggleClaim}
+                onTogglePage={handleTogglePage}
+                onToggleAdmin={handleToggleAdmin}
+                onReset={handleReset}
+                onReinvite={handleReinvite}
+                onSignOut={handleSignOut}
+                onToggleEnabled={handleToggleEnabled}
+                onDelete={handleDelete}
+                busyAdminId={busyAdminId}
+                resettingId={resettingId}
+                togglingId={togglingId}
+                savingPermissions={savingPermissions}
+              />
+            ))
+          ) : null}
         </div>
       </div>
     </div>

@@ -14,10 +14,7 @@
 import { useMemo, useState } from 'react'
 import { AlertTriangle, Copy, Link2 } from 'lucide-react'
 import { toast } from 'sonner'
-import { Button } from '@/components/ui/button'
-import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { TmsButton, TmsDialog, TmsField, TmsTextarea } from '@/features/tms/kit'
 import { MoneyField } from '@/features/directory/components/MoneyField'
 import { counterOffer, counterQuote, graphqlErrorText, type QuoteSendResult } from '@/lib/apiClient'
 import { formatCents } from '@/lib/invoiceBuild'
@@ -25,6 +22,18 @@ import { absorbCounter, humanChargeCode } from '@/lib/quotes'
 import { priceCharges } from '@/lib/shipmentCharges'
 import { theirNumberCents } from '../quoteViews'
 import type { LoadChargeInput, QuoteRecord } from '@/types/tms'
+
+const PRE_STYLE: React.CSSProperties = {
+  maxHeight: 224, overflow: 'auto', whiteSpace: 'pre-wrap', fontSize: 12, margin: 0,
+  borderRadius: 'var(--tms-radius)', border: '1px solid var(--tms-border)',
+  background: 'var(--tms-card)', padding: 8,
+}
+
+const CODE_STYLE: React.CSSProperties = {
+  flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12,
+  borderRadius: 'var(--tms-radius)', border: '1px solid var(--tms-border)',
+  background: 'var(--tms-card)', padding: '4px 8px',
+}
 
 export function CounterDialog({ quote, open, onOpenChange, onDone }: {
   quote: QuoteRecord
@@ -45,7 +54,7 @@ export function CounterDialog({ quote, open, onOpenChange, onDone }: {
   // The preview is the refusal too: `absorbCounter` throws when a number cannot be
   // spread over these lines, and that sentence is the one the Lambda would answer with.
   const absorbed = useMemo((): { lines: LoadChargeInput[] } | { error: string } | null => {
-    if (!sell || amountCents == null || lines.length === 0) return null
+    if (sell === false || amountCents == null || lines.length === 0) return null
     try {
       return { lines: absorbCounter(lines, amountCents, { miles: quote.miles ?? null, weightLbs: quote.weightLbs ?? null }) }
     } catch (err) {
@@ -94,110 +103,102 @@ export function CounterDialog({ quote, open, onOpenChange, onDone }: {
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-xl">
-        <DialogHeader>
-          <DialogTitle>Counter {quote.id} — {sell ? quote.customerName ?? 'customer' : quote.carrierName ?? 'carrier'}</DialogTitle>
-        </DialogHeader>
-
-        {!result && (
-          <div className="space-y-3">
-            <div className="grid grid-cols-2 gap-3 text-sm">
-              <div>
-                <div className="text-xs uppercase tracking-wider text-muted-foreground">Ours</div>
-                <div className="tabular-nums">{formatCents(quote.amountCents)}</div>
-              </div>
-              <div>
-                <div className="text-xs uppercase tracking-wider text-muted-foreground">Theirs</div>
-                <div className="tabular-nums font-medium">{theirs === null ? '—' : formatCents(theirs)}</div>
-              </div>
-            </div>
-
-            <MoneyField label="Our counter" value={amountCents} onChange={setAmountCents} disabled={busy} />
-
-            {sell && previewLines.length > 0 && (
-              <div className="rounded-md border border-border p-2">
-                <div className="mb-1 text-xs uppercase tracking-wider text-muted-foreground">
-                  Where the money lands
-                </div>
-                <table className="w-full text-xs">
-                  <tbody>
-                    {previewLines.map((row, index) => (
-                      <tr key={`${row.priced.code}-${index}`}>
-                        <td className="py-0.5">{row.draft?.label || humanChargeCode(row.priced.code)}</td>
-                        <td className="py-0.5 text-right tabular-nums">{formatCents(row.priced.amountCents)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-
-            {absorbError && (
-              <p className="flex items-start gap-2 text-xs text-destructive">
-                <AlertTriangle size={13} className="mt-0.5 shrink-0" /> {absorbError}
-              </p>
-            )}
-
+    <TmsDialog
+      open={open}
+      onOpenChange={onOpenChange}
+      title={`Counter ${quote.id} — ${sell ? quote.customerName ?? 'customer' : quote.carrierName ?? 'carrier'}`}
+      footer={
+        result ? (
+          <TmsButton variant="primary" onClick={onDone}>Done</TmsButton>
+        ) : (
+          <>
+            <TmsButton variant="ghost" onClick={() => onOpenChange(false)} disabled={busy}>Cancel</TmsButton>
+            <TmsButton
+              variant="primary"
+              aria-label="Send the counter"
+              disabled={busy || amountCents == null || amountCents <= 0 || absorbError !== null}
+              onClick={submit}
+            >
+              {busy ? 'Countering…' : 'Send counter'}
+            </TmsButton>
+          </>
+        )
+      }
+    >
+      {result === null && (
+        <div style={{ display: 'grid', gap: 12 }}>
+          <div className="tms-grid tms-grid-2" style={{ fontSize: 13 }}>
             <div>
-              <Label className="text-xs uppercase tracking-wider text-muted-foreground" htmlFor="counter-message">
-                What to say with it
-              </Label>
-              <Textarea
-                id="counter-message"
-                rows={2}
-                value={message}
-                disabled={busy}
-                onChange={(e) => setMessage(e.target.value)}
-                className="text-sm"
-              />
+              <div className="tms-field-label">Ours</div>
+              <div style={{ fontVariantNumeric: 'tabular-nums' }}>{formatCents(quote.amountCents)}</div>
             </div>
-
-            {error && <p className="text-xs text-destructive">{error}</p>}
+            <div>
+              <div className="tms-field-label">Theirs</div>
+              <div style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>{theirs === null ? '—' : formatCents(theirs)}</div>
+            </div>
           </div>
-        )}
 
-        {result && (
-          <div className="space-y-3">
-            {!result.sent && (
-              <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-2 text-sm">
-                Nothing was e-mailed. The counter is recorded and the link below is live — send it by hand.
-              </div>
-            )}
-            {result.link && (
-              <div className="flex items-center gap-2">
-                <code className="flex-1 truncate rounded-md border border-border bg-muted/40 px-2 py-1 text-xs">{result.link}</code>
-                <Button size="sm" variant="outline" aria-label="Copy counter link" onClick={() => copy(result.link ?? '', 'Link')}>
-                  <Link2 size={13} /> Copy
-                </Button>
-              </div>
-            )}
-            <pre className="max-h-56 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-muted/40 p-2 text-xs">
-              {result.body}
-            </pre>
-            <Button size="sm" variant="outline" aria-label="Copy e-mail body" onClick={() => copy(result.body, 'E-mail body')}>
-              <Copy size={13} /> Copy the body
-            </Button>
-          </div>
-        )}
+          <MoneyField label="Our counter" value={amountCents} onChange={setAmountCents} disabled={busy} />
 
-        <DialogFooter>
-          {result ? (
-            <Button onClick={onDone}>Done</Button>
-          ) : (
-            <>
-              <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={busy}>Cancel</Button>
-              <Button
-                aria-label="Send the counter"
-                disabled={busy || amountCents == null || amountCents <= 0 || absorbError !== null}
-                onClick={submit}
-              >
-                {busy ? 'Countering…' : 'Send counter'}
-              </Button>
-            </>
+          {sell && previewLines.length > 0 && (
+            <div style={{ border: '1px solid var(--tms-border)', borderRadius: 'var(--tms-radius)', padding: 8 }}>
+              <div className="tms-field-label">Where the money lands</div>
+              <table style={{ width: '100%', fontSize: 12 }}>
+                <tbody>
+                  {previewLines.map((row, index) => (
+                    <tr key={`${row.priced.code}-${index}`}>
+                      <td style={{ padding: '2px 0' }}>{row.draft?.label || humanChargeCode(row.priced.code)}</td>
+                      <td style={{ padding: '2px 0', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{formatCents(row.priced.amountCents)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+
+          {absorbError && (
+            <p className="tms-field-error" style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+              <AlertTriangle size={13} style={{ marginTop: 2, flexShrink: 0 }} /> {absorbError}
+            </p>
+          )}
+
+          <TmsField label="What to say with it" htmlFor="counter-message">
+            <TmsTextarea
+              id="counter-message"
+              rows={2}
+              value={message}
+              disabled={busy}
+              onChange={(e) => setMessage(e.target.value)}
+            />
+          </TmsField>
+
+          {error && <p className="tms-field-error">{error}</p>}
+        </div>
+      )}
+
+      {result && (
+        <div style={{ display: 'grid', gap: 12 }}>
+          {result.sent === false && (
+            <div style={{ borderRadius: 'var(--tms-radius)', border: '1px solid var(--tms-badge-orange)', background: 'rgba(255,136,10,0.12)', padding: 8, fontSize: 13 }}>
+              Nothing was e-mailed. The counter is recorded and the link below is live — send it by hand.
+            </div>
+          )}
+          {result.link && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <code style={CODE_STYLE}>{result.link}</code>
+              <TmsButton size="sm" aria-label="Copy counter link" onClick={() => copy(result.link ?? '', 'Link')}>
+                <Link2 size={13} /> Copy
+              </TmsButton>
+            </div>
+          )}
+          <pre style={PRE_STYLE}>{result.body}</pre>
+          <div>
+            <TmsButton size="sm" aria-label="Copy e-mail body" onClick={() => copy(result.body, 'E-mail body')}>
+              <Copy size={13} /> Copy the body
+            </TmsButton>
+          </div>
+        </div>
+      )}
+    </TmsDialog>
   )
 }

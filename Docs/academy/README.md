@@ -4,7 +4,13 @@ Markdown knowledge base for the in-app Help/Academy module and Ask assistant.
 
 ## Articles
 
-- [Shipments, Orders, and Loads](shipments-orders-loads.md) — how a freight move is modelled as a Shipment, an Order, and its Loads, and how status is derived.
+- [Navigation](navigation.md) — the three businesses plus Company in the sidebar, what lives where, the `/tms/*` paths, the redirects from every old path, and the `tms` grant.
+- [Shipments Are the One Record](shipments-one-record.md) — a load IS a shipment; the Order and Load records stay underneath; one list for all three businesses; division/subdivision/rep tags; own-fleet booking; Void instead of delete.
+- [Shipments, Orders, and Loads](shipments-orders-loads.md) — the data underneath: how a freight move is modelled as a Shipment, an Order, and its Loads, and how status is derived.
+- [Divisions and Ownership](divisions-and-ownership.md) — the division tree, ownership settings, the rules and first-match-wins, hand tags, testing a shipment, re-tagging, and where to edit it.
+- [Shipment Views](shipment-views.md) — the department views, the seed views, saving the current filters as a view, and a view's audience.
+- [Brokerage Dashboard](brokerage-dashboard.md) — the 17 Classic charts plus the Brokerage charts, the filter row, grouping by division and subdivision, and what is still coming.
+- [Release to Accounting](release-to-accounting.md) — the release gate: delivered, required documents, required references, carrier charges settled or own-fleet leg recorded, no open exceptions; no override; where the missing list shows; factoring and batch obey it.
 - [Carriers and Booking](carriers-and-booking.md) — the carrier directory, the booking gates, quick pay, the rate confirmation, and bounce vs TONU.
 - [Tracking and Check Calls](tracking-and-check-calls.md) — the four tracking methods, logging check calls, due/overdue reminders, incidents and charges, the carrier ping link, and the public Customer Link.
 - [Documents and Delivery](documents-and-delivery.md) — the Documents tab and its three sections, generating and superseding files, the required-document strip and Ready to invoice, reviewing carrier uploads, the carrier upload link, milestone e-mails, and rating a carrier.
@@ -33,6 +39,6 @@ related: [slug-1, slug-2]
 ## Rules
 
 - One concept or task per article.
-- Use BCAT-specific names and paths (`/shipments`, `Load`, `Shipment`, `Order`).
+- Use BCAT-specific names and paths. The TMS pages live under `/tms/*` (`/tms/shipments`, `/tms/rates`, `/tms/invoicing`, `/tms/invoicing/payable`, …); the old paths redirect and belong in a "was" note only. The word a user sees is **Shipment**; keep `Order` and `Load` only where the article explains the underlying data record.
 - Mention what changed if the article replaces an older workflow.
 - Keep articles accurate for the current `dev` branch; stale articles are worse than missing ones.

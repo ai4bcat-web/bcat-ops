@@ -17,12 +17,7 @@
 import { useEffect, useState } from 'react'
 import { Receipt, Save } from 'lucide-react'
 import { toast } from 'sonner'
-import { Button } from '@/components/ui/button'
-import { Checkbox } from '@/components/ui/checkbox'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { TmsButton, TmsField, TmsInput, TmsSelect, TmsTextarea } from '@/features/tms/kit'
 import { DocumentTypesField } from '@/features/documents/DocumentTypesField'
 import { getTmsSettings, listDivisions, saveArSettings } from '@/lib/apiClient'
 import {
@@ -30,6 +25,7 @@ import {
 } from '@/lib/invoiceBuild'
 import { DEFAULT_INVOICE_EMAIL_TEMPLATE, templateHasNumber } from '@/lib/shipmentNotices'
 import type { InvoiceBatchEmailMode, TmsSettings } from '@/types/tms'
+import { CheckRow, ErrorText, GroupLabel, Hint, Loading, Panel, SettingsCard, Stack } from './settingsKit'
 
 /** What `{prefix}` resolves to when no division has set one. */
 const FALLBACK_PREFIX = 'INV-'
@@ -135,77 +131,67 @@ export function ArSettingsCard() {
   }
 
   return (
-    <div style={{ border: '1px solid var(--ds-border)', borderRadius: 12, background: 'var(--ds-surface)', padding: 16, boxShadow: 'var(--sh-sm)', display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <div className="flex items-center gap-2.5">
-        <Receipt size={16} style={{ color: 'var(--ds-t3)' }} />
-        <div>
-          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)' }}>Invoicing &amp; AR</div>
-          <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 2 }}>
-            How invoices are numbered, what they say, what travels with them, where a factored customer pays, and who may post money.
-          </div>
-        </div>
-      </div>
-
-      {loading ? <div className="text-sm text-muted-foreground">Loading…</div> : (
-        <div className="space-y-3">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Invoice number format</Label>
-              <Input
+    <SettingsCard
+      icon={Receipt}
+      title="Invoicing & AR"
+      description="How invoices are numbered, what they say, what travels with them, where a factored customer pays, and who may post money."
+    >
+      {loading ? <Loading /> : (
+        <Stack>
+          <div className="tms-grid tms-grid-2">
+            <TmsField
+              label="Invoice number format"
+              hint={
+                <>
+                  {'{prefix}'} is the division&rsquo;s invoice prefix, {'{yyyy}'} the year, {'{n}'} or {'{n:6}'} the counter.{' '}
+                  {formatError
+                    ? <span className="tms-field-error">{formatError}.</span>
+                    : <>Next invoice: <strong data-testid="invoice-number-example">{example}</strong></>}
+                </>
+              }
+            >
+              <TmsInput
                 aria-label="Invoice number format"
                 value={numberFormat}
                 onChange={(e) => setNumberFormat(e.target.value)}
                 placeholder={DEFAULT_INVOICE_NUMBER_FORMAT}
-                className="h-9 text-sm"
               />
-              <p className="mt-1 text-xs text-muted-foreground">
-                {'{prefix}'} is the division&rsquo;s invoice prefix, {'{yyyy}'} the year, {'{n}'} or {'{n:6}'} the counter.{' '}
-                {formatError
-                  ? <span className="text-destructive">{formatError}.</span>
-                  : <>Next invoice: <span className="font-medium text-foreground" data-testid="invoice-number-example">{example}</span></>}
-              </p>
-            </div>
-            <div>
-              <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Next number</Label>
-              <Input
+            </TmsField>
+            <TmsField
+              label="Next number"
+              hint="Taken with an atomic add when an invoice is generated; it cannot be set by hand."
+            >
+              <TmsInput
                 aria-label="Next invoice number"
                 value={nextNumber != null ? String(nextNumber) : '1'}
                 readOnly
                 disabled
-                className="h-9 text-sm"
               />
-              <p className="mt-1 text-xs text-muted-foreground">
-                Taken with an atomic add when an invoice is generated; it cannot be set by hand.
-              </p>
-            </div>
+            </TmsField>
           </div>
 
-          <div>
-            <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Invoice terms</Label>
-            <Textarea
+          <TmsField label="Invoice terms">
+            <TmsTextarea
               aria-label="Invoice terms"
               rows={3}
               value={terms}
               onChange={(e) => setTerms(e.target.value)}
               placeholder="Printed at the foot of every invoice this system generates."
-              className="text-sm"
             />
-          </div>
+          </TmsField>
 
-          <div>
-            <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Invoice e-mail</Label>
-            <Textarea
+          <TmsField
+            label="Invoice e-mail"
+            hint={<>{'{number}'}, {'{shipment}'}, {'{total}'} and {'{dueAt}'} are filled in. {'{number}'} is required.</>}
+          >
+            <TmsTextarea
               aria-label="Invoice email template"
               rows={3}
               value={emailTemplate}
               onChange={(e) => setEmailTemplate(e.target.value)}
               placeholder={DEFAULT_INVOICE_EMAIL_TEMPLATE}
-              className="text-sm"
             />
-            <p className="mt-1 text-xs text-muted-foreground">
-              {'{number}'}, {'{shipment}'}, {'{total}'} and {'{dueAt}'} are filled in. {'{number}'} is required.
-            </p>
-          </div>
+          </TmsField>
 
           <DocumentTypesField
             label="Documents attached to an invoice"
@@ -215,80 +201,70 @@ export function ArSettingsCard() {
             help={`Attached on top of whatever the customer's own required-document list asks for. Leave every box clear for the house default: ${DEFAULT_INVOICE_ATTACH_TYPES.join(' and ')}.`}
           />
 
-          <div className="space-y-2 rounded-lg border border-border p-3">
-            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Factor remit-to</p>
-            <p className="text-xs text-muted-foreground">
-              Printed instead of the division&rsquo;s remit-to on a factored customer&rsquo;s invoice. Leave the name blank to turn it off.
-            </p>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Name</Label>
-                <Input aria-label="Factor name" value={factorName} onChange={(e) => setFactorName(e.target.value)} className="h-9 text-sm" />
-              </div>
-              <div>
-                <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">E-mail</Label>
-                <Input aria-label="Factor email" value={factorEmail} onChange={(e) => setFactorEmail(e.target.value)} className="h-9 text-sm" />
-              </div>
+          <Panel>
+            <GroupLabel>Factor remit-to</GroupLabel>
+            <Hint>Printed instead of the division&rsquo;s remit-to on a factored customer&rsquo;s invoice. Leave the name blank to turn it off.</Hint>
+            <div className="tms-grid tms-grid-2">
+              <TmsField label="Name">
+                <TmsInput aria-label="Factor name" value={factorName} onChange={(e) => setFactorName(e.target.value)} />
+              </TmsField>
+              <TmsField label="E-mail">
+                <TmsInput aria-label="Factor email" value={factorEmail} onChange={(e) => setFactorEmail(e.target.value)} />
+              </TmsField>
             </div>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-              <div className="sm:col-span-2">
-                <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Street</Label>
-                <Input aria-label="Factor street" value={factorStreet} onChange={(e) => setFactorStreet(e.target.value)} className="h-9 text-sm" />
-              </div>
-              <div>
-                <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">City</Label>
-                <Input aria-label="Factor city" value={factorCity} onChange={(e) => setFactorCity(e.target.value)} className="h-9 text-sm" />
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">State</Label>
-                  <Input aria-label="Factor state" value={factorState} onChange={(e) => setFactorState(e.target.value)} className="h-9 text-sm" />
-                </div>
-                <div>
-                  <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">ZIP</Label>
-                  <Input aria-label="Factor ZIP" value={factorZip} onChange={(e) => setFactorZip(e.target.value)} className="h-9 text-sm" />
-                </div>
-              </div>
+            <div className="tms-grid tms-grid-4">
+              <TmsField label="Street">
+                <TmsInput aria-label="Factor street" value={factorStreet} onChange={(e) => setFactorStreet(e.target.value)} />
+              </TmsField>
+              <TmsField label="City">
+                <TmsInput aria-label="Factor city" value={factorCity} onChange={(e) => setFactorCity(e.target.value)} />
+              </TmsField>
+              <TmsField label="State">
+                <TmsInput aria-label="Factor state" value={factorState} onChange={(e) => setFactorState(e.target.value)} />
+              </TmsField>
+              <TmsField label="ZIP">
+                <TmsInput aria-label="Factor ZIP" value={factorZip} onChange={(e) => setFactorZip(e.target.value)} />
+              </TmsField>
             </div>
-            <div>
-              <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Assignment notice</Label>
-              <Textarea
+            <TmsField label="Assignment notice">
+              <TmsTextarea
                 aria-label="Factor notice text"
                 rows={2}
                 value={factorNotice}
                 onChange={(e) => setFactorNotice(e.target.value)}
                 placeholder="The notice of assignment the factor requires on the face of the invoice."
-                className="text-sm"
               />
-            </div>
-          </div>
+            </TmsField>
+          </Panel>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Batch e-mail</Label>
-              <Select value={batchEmail} onValueChange={(v) => setBatchEmail(v as InvoiceBatchEmailMode)}>
-                <SelectTrigger className="h-9 text-sm" aria-label="Batch e-mail mode"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {BATCH_MODES.map((m) => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-            <label className="flex items-end gap-2.5 pb-1 text-sm" style={{ color: 'var(--ds-t2)' }}>
-              <Checkbox
-                aria-label="AR posting admin only"
+          <div className="tms-grid tms-grid-2">
+            <TmsField label="Batch e-mail">
+              <TmsSelect
+                aria-label="Batch e-mail mode"
+                value={batchEmail}
+                onChange={(e) => setBatchEmail(e.target.value as InvoiceBatchEmailMode)}
+              >
+                {BATCH_MODES.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+              </TmsSelect>
+            </TmsField>
+            <div style={{ display: 'flex', alignItems: 'flex-end', paddingBottom: 6 }}>
+              <CheckRow
+                ariaLabel="AR posting admin only"
+                label="Only an admin may void, pay, credit, write off or reverse"
                 checked={postingAdminOnly}
-                onCheckedChange={(v) => setPostingAdminOnly(v === true)}
+                onChange={setPostingAdminOnly}
               />
-              Only an admin may void, pay, credit, write off or reverse
-            </label>
+            </div>
           </div>
 
-          {error && <p className="text-xs text-destructive">{error}</p>}
-          <Button type="button" size="sm" className="h-8 gap-1" onClick={save} disabled={saving}>
-            <Save className="size-3.5" /> Save invoicing settings
-          </Button>
-        </div>
+          {error && <ErrorText>{error}</ErrorText>}
+          <div>
+            <TmsButton variant="primary" size="sm" onClick={save} disabled={saving}>
+              <Save size={14} /> Save invoicing settings
+            </TmsButton>
+          </div>
+        </Stack>
       )}
-    </div>
+    </SettingsCard>
   )
 }

@@ -1,17 +1,16 @@
-import { Fragment, useMemo, useState, useCallback } from 'react'
-import {
-  RefreshCw, Search, Inbox, Mail, Loader2, AlertCircle, Trash2, ChevronRight, ChevronDown,
-} from 'lucide-react'
+import { useMemo, useState, useCallback } from 'react'
+import { Loader2, Trash2, FilePlus2 } from 'lucide-react'
 import { Link } from 'react-router-dom'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import {
+  TmsBadge, TmsButton, TmsCard, TmsDialog, TmsIconButton, TmsListPage, TmsSelect,
+  type ColumnDef, type TmsTone,
+} from '@/features/tms/kit'
 import { OtrPanel } from './OtrPanel'
 import { LoadDrawer } from '@/features/loads/LoadDrawer'
 import { useAppStore } from '@/store/useAppStore'
 import { useFactoringItems } from '@/hooks/useFactoringItems'
 import { useAuth } from '@/hooks/useAuth'
 import { canDeleteFactoringItem } from '@/lib/auth/admin'
-import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 import { FactoringRowFields } from './FactoringRowFields'
 import { fieldsReadyLabel, isReadyToSubmit } from './factoringFields'
@@ -23,7 +22,6 @@ import { otrStatusMeta } from '@/lib/otrInvoiceStatus'
 import { otrDocsIncomplete, otrDocsErrorMessage } from '@/lib/otrSubmitOutcome'
 import { uploadOtrDocs, resolveLoad, assembleInvoice } from '@/lib/otrClient'
 import { loadFromFactoringItem } from './loadFromInvoice'
-import { FilePlus2 } from 'lucide-react'
 import { ManualInvoicePanel } from './ManualInvoicePanel'
 
 // ── Status labels ────────────────────────────────────────────────────────────
@@ -44,6 +42,8 @@ const FACTORING_STATUS_LABEL: Record<FactoringItemStatus, string> = {
  */
 const FILTER_ORDER = ['NEED_TO_FACTOR', 'PENDING_WITH_OTR', 'MANUAL_INVOICE', 'ALL', 'FACTORED', 'INVOICED_MANUALLY', 'ARCHIVED'] as const
 type FilterKey = (typeof FILTER_ORDER)[number]
+
+const RED = { color: 'var(--tms-badge-red)' }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -71,8 +71,8 @@ function relativeReceived(iso: string) {
  * The PRO number, as the way into the load it names.
  *
  * Everything in this queue is discussed by PRO, and the next question after "why is 14538
- * still red" is always on the load — its stops, its rate, its rate confirmation. Opening
- * the drawer here beats copying the number onto the Loads page.
+ * still red" is always on the shipment — its stops, its rate, its rate confirmation.
+ * Opening the drawer here beats copying the number onto another page.
  *
  * A row whose PRO never matched a load keeps its plain number: an underline that goes
  * nowhere is worse than no underline.
@@ -81,13 +81,9 @@ function ProLink({ loadId, proNumber }: { loadId: string | null | undefined; pro
   const setSelectedLoad = useAppStore((s) => s.setSelectedLoad)
   const loads = useAppStore((s) => s.loads)
   const known = loadId ? loads.some((l) => l.id === loadId) : false
-  const text = (
-    <span style={{ fontSize: 14, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
-      {proNumber}
-    </span>
-  )
+  const text = <span className="font-bold tabular-nums">{proNumber}</span>
   if (!known || !loadId) {
-    return <span style={{ color: 'var(--ds-t1)' }} title="This PRO is not linked to a load yet">{text}</span>
+    return <span title="This PRO is not linked to a load yet">{text}</span>
   }
   return (
     <button
@@ -97,7 +93,7 @@ function ProLink({ loadId, proNumber }: { loadId: string | null | undefined; pro
       title="Open this load"
       style={{
         border: 'none', background: 'none', padding: 0, cursor: 'pointer',
-        fontFamily: 'inherit', color: 'var(--ds-accent, #2563eb)',
+        fontFamily: 'inherit', color: 'var(--tms-primary)',
         textDecoration: 'underline', textUnderlineOffset: 3,
       }}
     >
@@ -131,7 +127,7 @@ const CUSTOMER_SOURCE_NOTE: Record<string, string> = {
   verified: 'Looked up from the broker MC',
   entered: 'Entered on this row',
   directory: 'From the broker record on this load \u2014 not checked against the MC',
-  load: 'From the load \u2014 often a shipper or an agent, not the broker being factored',
+  email: 'Read off the forwarded e-mail \u2014 not checked against the MC',
 }
 
 /** The PO number OTR requires, once it has resolved. */
@@ -155,7 +151,7 @@ function matchesSearch(item: FactoringItem, query: string) {
   )
 }
 
-// ── Status select for a row ──────────────────────────────────────────────────
+// ── Row cells ────────────────────────────────────────────────────────────────
 
 /**
  * What the invoice is worth.
@@ -168,26 +164,18 @@ function matchesSearch(item: FactoringItem, query: string) {
 function AmountCell({ item, onEdit }: { item: FactoringItem; onEdit: () => void }) {
   const amount = invoiceAmountOf(item)
   if (amount != null) {
-    return (
-      <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--ds-t1)', fontVariantNumeric: 'tabular-nums' }}>
-        {money(amount)}
-      </span>
-    )
+    return <span className="font-semibold tabular-nums">{money(amount)}</span>
   }
   return (
-    <button
-      type="button"
+    <TmsButton
+      size="sm"
       onClick={onEdit}
       aria-label={`Add the rate for PRO ${item.proNumber}`}
       title="Type the invoice amount for this row"
-      style={{
-        border: '1px solid #fca5a5', background: '#fee2e2', color: '#b91c1c',
-        borderRadius: 6, padding: '2px 8px', fontSize: 11, fontWeight: 700,
-        cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap',
-      }}
+      style={{ borderColor: 'var(--tms-badge-red)', color: 'var(--tms-badge-red)' }}
     >
       Add rate
-    </button>
+    </TmsButton>
   )
 }
 
@@ -208,41 +196,30 @@ function StatusTotals({ items }: { items: FactoringItem[] }) {
   ] as const
 
   return (
-    <div
-      role="group"
-      aria-label="What the queue is worth, by status"
-      style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 12 }}
-    >
-      {buckets.map(([key, label]) => {
-        const t = totals[key]
-        const isAll = key === 'ALL'
-        return (
-          <div
-            key={key}
-            aria-label={`${label}: ${money(t.total)} across ${t.count} invoices`}
-            style={{
-              flex: '1 1 160px', minWidth: 160,
-              border: '1px solid var(--ds-border)', borderRadius: 9,
-              padding: '8px 12px',
-              background: isAll ? 'var(--ds-bg)' : 'var(--ds-surface)',
-            }}
-          >
-            <p style={{ margin: 0, fontSize: 10.5, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--ds-t3)' }}>
-              {label}
-            </p>
-            <p style={{ margin: '2px 0 0', fontSize: 17, fontWeight: 700, color: 'var(--ds-t1)', fontVariantNumeric: 'tabular-nums' }}>
-              {money(t.total)}
-            </p>
-            <p style={{ margin: 0, fontSize: 11, color: 'var(--ds-t3)' }}>
-              {t.count} {t.count === 1 ? 'invoice' : 'invoices'}
-              {t.missingRate > 0 && (
-                <span style={{ color: '#b91c1c', fontWeight: 600 }}> \u00b7 {t.missingRate} with no rate</span>
-              )}
-            </p>
-          </div>
-        )
-      })}
-    </div>
+    <TmsCard title="What the queue is worth">
+      <div role="group" aria-label="What the queue is worth, by status" className="flex flex-wrap gap-3">
+        {buckets.map(([key, label]) => {
+          const t = totals[key]
+          return (
+            <div
+              key={key}
+              aria-label={`${label}: ${money(t.total)} across ${t.count} invoices`}
+              className="min-w-[160px] flex-1 px-3 py-2"
+              style={{ border: '1px solid var(--tms-border)', borderRadius: 'var(--tms-radius)' }}
+            >
+              <p className="text-[11px] font-semibold uppercase tracking-wider tms-muted">{label}</p>
+              <p className="text-lg font-bold tabular-nums">{money(t.total)}</p>
+              <p className="text-[11px] tms-muted">
+                {t.count} {t.count === 1 ? 'invoice' : 'invoices'}
+                {t.missingRate > 0 && (
+                  <span className="font-semibold" style={RED}> {'\u00b7'} {t.missingRate} with no rate</span>
+                )}
+              </p>
+            </div>
+          )
+        })}
+      </div>
+    </TmsCard>
   )
 }
 
@@ -250,11 +227,7 @@ function StatusTotals({ items }: { items: FactoringItem[] }) {
 function CustomerCell({ item }: { item: FactoringItem }) {
   const { name, source } = customerOf(item)
   if (!name) {
-    return (
-      <span style={{ fontSize: 12.5, color: 'var(--ds-t3)' }} title="Open the row to enter it">
-        {'\u2014'}
-      </span>
-    )
+    return <span className="tms-muted" title="Open the row to enter it">{'\u2014'}</span>
   }
   // Only a real lookup earns plain, confident styling. Everything else reads as a guess,
   // because that is what it is.
@@ -262,13 +235,7 @@ function CustomerCell({ item }: { item: FactoringItem }) {
   return (
     <span
       title={source ? CUSTOMER_SOURCE_NOTE[source] : undefined}
-      style={{
-        display: 'block', fontSize: 12.5, overflow: 'hidden',
-        textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        color: verified ? 'var(--ds-t1)' : 'var(--ds-t3)',
-        fontWeight: verified ? 600 : 400,
-        fontStyle: verified ? 'normal' : 'italic',
-      }}
+      className={verified ? 'block truncate font-semibold' : 'block truncate italic tms-muted'}
     >
       {name}
     </span>
@@ -297,25 +264,22 @@ const STATUS_CAUSE: Record<FactoringItemStatus, string> = {
   ARCHIVED: 'Taken out of the queue by hand. Nothing was deleted — set a status to bring it back.',
 }
 
-const STATUS_TONE: Record<FactoringItemStatus, { bg: string; fg: string; border: string }> = {
-  NEED_TO_FACTOR: { bg: '#fef3c7', fg: '#b45309', border: '#fcd34d' },
-  PENDING_WITH_OTR: { bg: '#dbeafe', fg: '#1d4ed8', border: '#93c5fd' },
-  MANUAL_INVOICE: { bg: '#fce7f3', fg: '#be185d', border: '#f9a8d4' },
-  FACTORED: { bg: '#dcfce7', fg: '#15803d', border: '#86efac' },
-  INVOICED_MANUALLY: { bg: '#ede9fe', fg: '#6d28d9', border: '#c4b5fd' },
-  ARCHIVED: { bg: '#f1f5f9', fg: '#64748b', border: '#cbd5e1' },
+const STATUS_TONE: Record<FactoringItemStatus, TmsTone> = {
+  NEED_TO_FACTOR: 'orange',
+  PENDING_WITH_OTR: 'blue',
+  MANUAL_INVOICE: 'pink',
+  FACTORED: 'green',
+  INVOICED_MANUALLY: 'purple',
+  ARCHIVED: 'gray',
 }
 
 /** OTR knows this broker and will not buy its paper. Said on the row, not only in the panel. */
 function NoBuyFlag({ item }: { item: FactoringItem }) {
   if (item.brokerCheckResult !== 'NO_BUY') return null
   return (
-    <span
-      title={`OTR will not buy from MC ${item.brokerMcChecked ?? ''} — invoice manually`}
-      style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 8px', borderRadius: 999, background: '#fce7f3', color: '#be185d', border: '1px solid #f9a8d4', fontSize: 11, fontWeight: 700, letterSpacing: '0.02em', whiteSpace: 'nowrap' }}
-    >
+    <TmsBadge tone="pink" title={`OTR will not buy from MC ${item.brokerMcChecked ?? ''} — invoice manually`}>
       NO BUY
-    </span>
+    </TmsBadge>
   )
 }
 
@@ -343,43 +307,37 @@ function OtrDocsFlag({ item, onResent }: { item: FactoringItem; onResent: () => 
     }
   }
   return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-      <span
+    <span className="inline-flex items-center gap-1">
+      <TmsBadge
+        tone="red"
         title={item.otrError ?? 'A document did not reach OTR — upload it again and press Resend'}
         aria-label={`OTR documents missing for PRO ${item.proNumber}`}
-        style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 8px', borderRadius: 999, background: '#fecaca', color: '#b91c1c', border: '1px solid #f87171', fontSize: 11, fontWeight: 700, letterSpacing: '0.02em', whiteSpace: 'nowrap' }}
       >
         DOCS NOT AT OTR
-      </span>
-      <button
-        type="button"
+      </TmsBadge>
+      <TmsButton
+        size="sm"
         disabled={busy}
         onClick={(e) => void resend(e)}
         aria-label={`Resend documents for PRO ${item.proNumber}`}
         title="Send the POD and rate con on this row to the invoice OTR already has"
-        style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 8px', borderRadius: 999, background: 'var(--ds-surface)', color: '#b91c1c', border: '1px solid #f87171', fontSize: 11, fontWeight: 700, cursor: busy ? 'wait' : 'pointer', fontFamily: 'inherit' }}
+        style={{ borderColor: 'var(--tms-badge-red)', color: 'var(--tms-badge-red)' }}
       >
         {busy ? <Loader2 className="size-3 animate-spin" /> : null} Resend
-      </button>
+      </TmsButton>
     </span>
   )
 }
 
 function StatusBadge({ item }: { item: FactoringItem }) {
-  const tone = STATUS_TONE[item.status]
   return (
-    <span
+    <TmsBadge
+      tone={STATUS_TONE[item.status]}
       title={STATUS_CAUSE[item.status]}
       aria-label={`Status for PRO ${item.proNumber}: ${FACTORING_STATUS_LABEL[item.status]}`}
-      style={{
-        display: 'inline-flex', alignItems: 'center',
-        padding: '3px 10px', borderRadius: 999,
-        fontSize: 11.5, fontWeight: 700, whiteSpace: 'nowrap',
-        background: tone.bg, color: tone.fg, border: `1px solid ${tone.border}`,
-      }}
     >
       {FACTORING_STATUS_LABEL[item.status]}
-    </span>
+    </TmsBadge>
   )
 }
 
@@ -396,7 +354,8 @@ function OtrStatusFlag({ item }: { item: FactoringItem }) {
       <span
         title={`Submitted to OTR; their board has not reported a status yet${synced}`}
         aria-label={`OTR status for PRO ${item.proNumber}: not reported yet`}
-        style={{ display: 'inline-flex', alignItems: 'center', padding: '2px 8px', borderRadius: 999, fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap', background: 'var(--ds-surface)', color: 'var(--ds-t3)', border: '1px dashed var(--ds-border)' }}
+        className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold tms-muted"
+        style={{ border: '1px dashed var(--tms-border)', whiteSpace: 'nowrap' }}
       >
         OTR: {OTR_UNREPORTED.toLowerCase()}
       </span>
@@ -406,7 +365,13 @@ function OtrStatusFlag({ item }: { item: FactoringItem }) {
     <span
       title={`${meta.needsAttention ? 'OTR or the broker is waiting on us' : "OTR's board"}${synced}`}
       aria-label={`OTR status for PRO ${item.proNumber}: ${meta.label}`}
-      style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 8px', borderRadius: 999, fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap', background: meta.tone.bg, color: meta.tone.fg, border: `1px solid ${meta.tone.border}` }}
+      className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-bold"
+      style={{
+        whiteSpace: 'nowrap',
+        background: meta.tone.bg,
+        color: meta.tone.fg,
+        border: `1px solid ${meta.tone.border}`,
+      }}
     >
       OTR: {meta.label}{meta.needsAttention ? ' ⚠' : ''}
     </span>
@@ -423,19 +388,11 @@ export function FactoringPage() {
   /** On the Pending tab: one of OTR's own labels (or OTR_UNREPORTED) to narrow to, or null for all. */
   const [otrFilter, setOtrFilter] = useState<string | null>(null)
   /**
-   * Which rows are open. Collapsed by default: the panel is an editor, and rendering one
-   * per row turned a list of twenty PROs into twenty stacked forms. The row itself already
-   * says what is missing, so opening one is a decision, not the only way to see anything.
+   * The row whose editor is open. One at a time and over the list, not inside it: the
+   * panel is eleven fields, two documents and a submit button, and ten of those stacked
+   * turned a queue of twenty PROs into a page nobody could scan.
    */
-  const [expanded, setExpanded] = useState<Set<string>>(new Set())
-  const toggleExpanded = useCallback((id: string) => {
-    setExpanded((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
-  }, [])
+  const [openId, setOpenId] = useState<string | null>(null)
 
   // Deleting a row drops the record that a PRO was ever sent for factoring, so it is
   // limited to the two people who run factoring rather than every admin.
@@ -490,11 +447,8 @@ export function FactoringPage() {
   }, [items])
 
   /*
-   * Ten at a time.
-   *
-   * A row here opens into a panel of eleven fields, two documents and a submit button, so
-   * ten of them is already a long page — and the queue runs to hundreds. Expanding one row
-   * at the bottom of all of them is a scroll nobody wants to repeat.
+   * Ten at a time: the queue runs to hundreds, and a page of ten is what somebody works
+   * through before refreshing.
    */
   const [perPage, setPerPage] = useState(10)
   const pageCount = Math.max(1, Math.ceil(filtered.length / perPage))
@@ -516,6 +470,9 @@ export function FactoringPage() {
     [filtered, safePage, perPage],
   )
 
+  const openItem = openId ? items.find((i) => i.id === openId) ?? null : null
+  const manualPanel = openItem?.status === 'MANUAL_INVOICE' || openItem?.status === 'INVOICED_MANUALLY'
+
   const handleDelete = useCallback(async (item: FactoringItem) => {
     if (!window.confirm(
       `Delete the queue row for PRO ${item.proNumber}?\n\n` +
@@ -530,400 +487,292 @@ export function FactoringPage() {
     }
   }, [removeItem])
 
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', background: 'var(--ds-bg)' }}>
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 32px', borderBottom: '1px solid var(--ds-border)', background: 'var(--ds-surface)', flexShrink: 0 }}>
-        <div>
-          <h1 style={{ fontSize: 20, fontWeight: 600, color: 'var(--ds-t1)', letterSpacing: '-0.01em', margin: 0 }}>Factoring Queue</h1>
-          <p style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 2 }}>
-            One row per PRO. Emails forwarded to ivanfactoring@bcatcorp.com appear automatically.
-          </p>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-8 gap-1.5"
-            onClick={refresh}
-            disabled={loading}
+  const columns: ColumnDef<FactoringItem>[] = [
+    {
+      key: 'pro',
+      header: 'PRO #',
+      render: (item) => (
+        <span className="inline-flex items-center gap-2 whitespace-nowrap">
+          <TmsIconButton
+            shape="plain"
+            aria-expanded={openId === item.id}
+            aria-label={
+              item.status === 'MANUAL_INVOICE' || item.status === 'INVOICED_MANUALLY'
+                ? `${openId === item.id ? 'Hide' : 'Open'} the steps for PRO ${item.proNumber}`
+                : `${openId === item.id ? 'Hide' : 'Edit'} the OTR fields for PRO ${item.proNumber}`
+            }
+            title={item.subject || undefined}
+            onClick={() => setOpenId(openId === item.id ? null : item.id)}
           >
-            <RefreshCw className={cn('size-3.5', loading && 'animate-spin')} />
-            Refresh
-          </Button>
-        </div>
-      </div>
-
-      {/* Filters */}
-      <div style={{ padding: '16px 32px', borderBottom: '1px solid var(--ds-border)', background: 'var(--ds-surface)', flexShrink: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-          {/* Status tabs */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            {FILTER_ORDER.map((key) => {
-              const isActive = activeTab === key
-              const label = key === 'ALL' ? 'All' : FACTORING_STATUS_LABEL[key]
-              const count = counts[key]
-              return (
-                <button
-                  key={key}
-                  onClick={() => setActiveTab(key)}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 6,
-                    padding: '7px 12px', fontSize: 12, fontWeight: 600,
-                    borderRadius: 7, border: '1px solid transparent',
-                    background: isActive ? 'var(--ds-blue)' : 'transparent',
-                    color: isActive ? '#fff' : 'var(--ds-t2)',
-                    borderColor: isActive ? 'var(--ds-blue)' : 'var(--ds-border)',
-                    cursor: 'pointer', transition: 'all 0.15s',
-                  }}
-                >
-                  {label}
-                  {count > 0 && (
-                    <span style={{
-                      fontSize: 10, fontWeight: 700, borderRadius: 999,
-                      padding: '1px 6px', minWidth: 16, height: 16,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      background: isActive ? 'rgba(255,255,255,0.25)' : 'var(--ds-border)',
-                      color: isActive ? '#fff' : 'var(--ds-t2)',
-                    }}>
-                      {count}
-                    </span>
-                  )}
-                </button>
-              )
-            })}
-          </div>
-
-          {/* What OTR's board says, as chips: click one to see only those rows. */}
-          {activeTab === 'PENDING_WITH_OTR' && otrBreakdown.length > 0 && (
-            <div role="group" aria-label="OTR status" style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-              <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>OTR says</span>
-              {otrBreakdown.map(({ label, count, attention }) => {
-                const meta = label === OTR_UNREPORTED ? null : otrStatusMeta(label)
-                const on = otrFilter === label
-                return (
-                  <button
-                    key={label}
-                    type="button"
-                    aria-pressed={on}
-                    onClick={() => setOtrFilter(on ? null : label)}
-                    title={attention ? 'OTR or the broker is waiting on us' : undefined}
-                    style={{
-                      display: 'inline-flex', alignItems: 'center', gap: 5,
-                      padding: '4px 10px', fontSize: 11.5, fontWeight: 700, borderRadius: 999, cursor: 'pointer',
-                      background: meta ? meta.tone.bg : 'var(--ds-surface)',
-                      color: meta ? meta.tone.fg : 'var(--ds-t3)',
-                      border: `${meta ? '1px solid' : '1px dashed'} ${meta ? meta.tone.border : 'var(--ds-border)'}`,
-                      outline: on ? '2px solid var(--ds-blue)' : 'none', outlineOffset: 1,
-                    }}
-                  >
-                    {label}{attention ? ' ⚠' : ''}
-                    <span style={{ fontSize: 10, fontWeight: 700, borderRadius: 999, padding: '0 6px', background: 'rgba(0,0,0,0.08)' }}>{count}</span>
-                  </button>
-                )
-              })}
-            </div>
+            {openId === item.id ? '\u2212' : '\u2026'}
+          </TmsIconButton>
+          <ProLink loadId={item.loadId} proNumber={item.proNumber} />
+          {/* Raised here rather than mailed in: the invoice it bills is ours, and the
+              queue row is only the OTR half of it. */}
+          {item.source === 'TMS' && (
+            <>
+              <TmsBadge tone="blue">TMS</TmsBadge>
+              {item.invoiceId && (
+                <Link to={`/tms/invoicing/invoices/${item.invoiceId}`} title="Open this invoice">
+                  {item.invoiceId}
+                </Link>
+              )}
+            </>
           )}
-
-          {/* Search */}
-          <div style={{ position: 'relative', flex: 1, minWidth: 220, maxWidth: 360 }}>
-            <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--ds-t3)', pointerEvents: 'none' }} />
-            <Input
-              placeholder="Search PRO, subject, or sender…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              aria-label="Search factoring queue"
-              className="h-8 text-xs"
-              style={{ paddingLeft: 36 }}
-            />
-          </div>
+        </span>
+      ),
+    },
+    {
+      key: 'po',
+      header: 'PO #',
+      render: (item) => (
+        <span className="tabular-nums" style={poOf(item) ? undefined : { ...RED, fontWeight: 600 }}>
+          {poOf(item) || 'missing'}
+        </span>
+      ),
+    },
+    { key: 'customer', header: 'CUSTOMER', width: 190, render: (item) => <CustomerCell item={item} /> },
+    {
+      key: 'amount',
+      header: 'AMOUNT',
+      render: (item) => (
+        <span className="block whitespace-nowrap text-right">
+          <AmountCell item={item} onEdit={() => setOpenId(item.id)} />
+        </span>
+      ),
+    },
+    {
+      // How close this row is to being invoiceable, as a count then the individual
+      // fields. Green means resolved, red means still missing.
+      key: 'fields',
+      header: 'FIELDS',
+      render: (item) => (
+        <span
+          className="whitespace-nowrap font-bold tabular-nums"
+          style={isReadyToSubmit(readinessOf(item)) ? { color: 'var(--tms-badge-green)' } : undefined}
+        >
+          {fieldsReadyLabel(readinessOf(item))}
+        </span>
+      ),
+    },
+    {
+      key: 'required',
+      header: 'REQUIRED FOR OTR',
+      render: (item) => <FactoringRowFields readiness={readinessOf(item)} />,
+    },
+    {
+      key: 'documents',
+      header: 'DOCUMENTS',
+      render: (item) => (
+        <div className="flex items-center gap-1.5">
+          {/* No load in BCAT Ops for this PRO: the documents have nothing to attach to until one exists. */}
+          {!item.loadId && (
+            <TmsButton
+              size="sm"
+              disabled={creatingLoadFor === item.id}
+              title={`No load for PRO ${item.proNumber} in BCAT Ops. Create one from this invoice so the POD and rate confirmation can be attached and the row submitted.`}
+              onClick={async () => {
+                setCreatingLoadFor(item.id)
+                try {
+                  const created = await addLoad(loadFromFactoringItem(item, readinessOf(item), staffEmail, new Date().toISOString()))
+                  await resolveLoad(item.id)
+                  await assembleInvoice(item.id).catch(() => undefined)
+                  await refresh()
+                  toast.success(`Load ${created.aljexId} created and linked — upload the POD and rate confirmation now`)
+                } catch (err) {
+                  toast.error(err instanceof Error ? err.message : 'Could not create the load')
+                } finally {
+                  setCreatingLoadFor(null)
+                }
+              }}
+            >
+              <FilePlus2 size={12} /> {creatingLoadFor === item.id ? 'Creating…' : 'Create load'}
+            </TmsButton>
+          )}
+          <FactoringDocCell
+            kind="POD"
+            present={!missingDocs(item).includes('POD')}
+            loadId={item.loadId}
+            proNumber={item.proNumber}
+            itemId={item.id}
+            staffEmail={staffEmail}
+            onUploaded={refresh}
+          />
+          <FactoringDocCell
+            kind="RATECON"
+            present={!missingDocs(item).includes('Rate confirmation')}
+            loadId={item.loadId}
+            proNumber={item.proNumber}
+            itemId={item.id}
+            staffEmail={staffEmail}
+            onUploaded={refresh}
+          />
         </div>
-        {/* What the queue is worth, not just how many rows are in it. */}
-        <StatusTotals items={items} />
-      </div>
-
-      {/* Error banner — never shown as an empty state */}
-      {error && (
-        <div style={{ margin: '16px 32px 0', padding: '10px 14px', borderRadius: 8, background: 'var(--ds-red-bg, #fee2e2)', border: '1px solid var(--ds-red-border, #fecaca)', color: 'var(--ds-red-text, #991b1b)', display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
-          <AlertCircle className="size-4 shrink-0" />
-          {error}
+      ),
+    },
+    {
+      key: 'received',
+      header: 'RECEIVED',
+      render: (item) => (
+        <span className="whitespace-nowrap tms-muted" title={formatReceivedAt(item.receivedAt)}>
+          {relativeReceived(item.receivedAt)}
+        </span>
+      ),
+    },
+    {
+      key: 'status',
+      header: 'STATUS',
+      render: (item) => (
+        <div className="flex items-center gap-2 whitespace-nowrap">
+          <StatusBadge item={item} />
+          <OtrStatusFlag item={item} />
+          <NoBuyFlag item={item} />
+          <OtrDocsFlag item={item} onResent={refresh} />
+          {pendingIds.has(item.id) && <Loader2 className="size-3.5 animate-spin tms-muted" />}
         </div>
-      )}
+      ),
+    },
+    ...(canDelete
+      ? [{
+        key: 'actions',
+        header: 'ACTIONS',
+        render: (item: FactoringItem) => (
+          <TmsIconButton
+            aria-label={`Delete queue row for PRO ${item.proNumber}`}
+            title="Delete queue row"
+            disabled={pendingIds.has(item.id)}
+            onClick={() => handleDelete(item)}
+          >
+            <Trash2 size={14} />
+          </TmsIconButton>
+        ),
+      }]
+      : []),
+  ]
 
-      {/* Content */}
-      <div className="flex-1 overflow-y-auto px-8 py-6">
-        <div style={{ background: 'var(--ds-surface)', borderRadius: 12, border: '1px solid var(--ds-border)', overflow: 'hidden', boxShadow: 'var(--sh-sm)' }}>
-          {loading && items.length === 0 ? (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '64px 0', gap: 10, color: 'var(--ds-t3)' }}>
-              <Loader2 className="size-6 animate-spin opacity-50" />
-              <p className="text-sm">Loading factoring queue…</p>
-            </div>
-          ) : filtered.length === 0 ? (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '64px 0', gap: 10, color: 'var(--ds-t3)' }}>
-              <Inbox className="size-10 opacity-20" />
-              <p className="text-sm">
-                {error ? 'Couldn’t load queue. Try refreshing.' : 'No items match the current filters.'}
-              </p>
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr style={{ borderBottom: '1px solid var(--ds-border)', background: 'var(--ds-bg)' }}>
-                    {['PRO #', 'PO #', 'Customer', 'Amount', 'Fields', 'Required for OTR', 'Documents', 'Received', 'Status', ...(canDelete ? ['Actions'] : [])].map((col) => (
-                      <th
-                        key={col}
-                        style={{
-                          padding: '10px 16px', textAlign: 'left',
-                          fontSize: 11, fontWeight: 600, color: 'var(--ds-t3)',
-                          textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap',
-                        }}
-                      >
-                        {col}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {paged.map((item) => (
-                    <Fragment key={item.id}>
-                    <tr
-                      style={{ borderBottom: '1px solid var(--ds-border)' }}
-                      className="hover:bg-[var(--ds-bg)] transition-colors"
-                    >
-                      <td style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                        <button
-                          onClick={() => toggleExpanded(item.id)}
-                          aria-expanded={expanded.has(item.id)}
-                          aria-label={
-                            item.status === 'MANUAL_INVOICE' || item.status === 'INVOICED_MANUALLY'
-                              ? `${expanded.has(item.id) ? 'Hide' : 'Open'} the steps for PRO ${item.proNumber}`
-                              : `${expanded.has(item.id) ? 'Hide' : 'Edit'} the OTR fields for PRO ${item.proNumber}`
-                          }
-                          title={item.subject || undefined}
-                          style={{
-                            display: 'flex', alignItems: 'center', gap: 8, border: 'none',
-                            background: 'none', padding: 0, cursor: 'pointer', fontFamily: 'inherit',
-                          }}
-                        >
-                          {expanded.has(item.id)
-                            ? <ChevronDown className="size-4 text-muted-foreground" />
-                            : <ChevronRight className="size-4 text-muted-foreground" />}
-                          <span className="inline-flex items-center justify-center size-7 rounded-md bg-slate-100 text-slate-600">
-                            <Mail className="size-3.5" />
-                          </span>
-                        </button>
-                        {/* The PRO opens the load it names — the expander is the chevron
-                            beside it, so one control does not have to mean two things. */}
-                        <ProLink loadId={item.loadId} proNumber={item.proNumber} />
-                        {/* Raised here rather than mailed in: the invoice it bills is ours,
-                            and the queue row is only the OTR half of it. */}
-                        {item.source === 'TMS' && (
-                          <>
-                            <span style={{ display: 'inline-flex', alignItems: 'center', height: 18, padding: '0 6px', borderRadius: 6, border: '1px solid #bfdbfe', background: '#eff6ff', color: '#1d4ed8', fontSize: 10, fontWeight: 700, letterSpacing: '0.02em' }}>
-                              TMS
-                            </span>
-                            {item.invoiceId && (
-                              <Link
-                                to={`/ar/invoices/${item.invoiceId}`}
-                                title="Open this invoice"
-                                style={{ fontSize: 12, color: 'var(--ds-accent, #2563eb)', textDecoration: 'underline', textUnderlineOffset: 3 }}
-                              >
-                                {item.invoiceId}
-                              </Link>
-                            )}
-                          </>
-                        )}
-                        </span>
-                      </td>
-                      <td style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>
-                        <span style={{
-                          fontSize: 13, color: poOf(item) ? 'var(--ds-t1)' : '#b91c1c',
-                          fontWeight: poOf(item) ? 500 : 600,
-                          fontVariantNumeric: 'tabular-nums',
-                        }}>
-                          {poOf(item) || 'missing'}
-                        </span>
-                      </td>
-                      <td style={{ padding: '14px 16px', maxWidth: 190 }}>
-                        <CustomerCell item={item} />
-                      </td>
-                      <td style={{ padding: '14px 16px', whiteSpace: 'nowrap', textAlign: 'right' }}>
-                        <AmountCell item={item} onEdit={() => toggleExpanded(item.id)} />
-                      </td>
-                      {/* How close this row is to being invoiceable, as a count then the
-                          individual fields. Green means resolved, red means still missing. */}
-                      <td style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>
-                        <span style={{
-                          fontSize: 12.5, fontWeight: 700,
-                          // Green only when OTR would actually take it — same rule as Submit.
-                          color: isReadyToSubmit(readinessOf(item)) ? '#15803d' : 'var(--ds-t2)',
-                          fontVariantNumeric: 'tabular-nums',
-                        }}>
-                          {fieldsReadyLabel(readinessOf(item))}
-                        </span>
-                      </td>
-                      <td style={{ padding: '14px 16px' }}>
-                        <FactoringRowFields readiness={readinessOf(item)} />
-                      </td>
-                      <td style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>
-                        <div style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
-                          {/* No load in BCAT Ops for this PRO: the documents have nothing to attach to until one exists. */}
-                          {!item.loadId && (
-                            <button
-                              type="button"
-                              disabled={creatingLoadFor === item.id}
-                              title={`No load for PRO ${item.proNumber} in BCAT Ops. Create one from this invoice so the POD and rate confirmation can be attached and the row submitted.`}
-                              onClick={async () => {
-                                setCreatingLoadFor(item.id)
-                                try {
-                                  const created = await addLoad(loadFromFactoringItem(item, readinessOf(item), staffEmail, new Date().toISOString()))
-                                  await resolveLoad(item.id)
-                                  await assembleInvoice(item.id).catch(() => undefined)
-                                  await refresh()
-                                  toast.success(`Load ${created.aljexId} created and linked — upload the POD and rate confirmation now`)
-                                } catch (err) {
-                                  toast.error(err instanceof Error ? err.message : 'Could not create the load')
-                                } finally {
-                                  setCreatingLoadFor(null)
-                                }
-                              }}
-                              style={{ display: 'inline-flex', alignItems: 'center', gap: 4, height: 24, padding: '0 7px', borderRadius: 6, fontSize: 11, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer', border: '1px solid #fcd34d', background: '#fffbeb', color: '#b45309', whiteSpace: 'nowrap' }}
-                            >
-                              <FilePlus2 size={12} /> {creatingLoadFor === item.id ? 'Creating…' : 'Create load'}
-                            </button>
-                          )}
-                          <FactoringDocCell
-                            kind="POD"
-                            present={!missingDocs(item).includes('POD')}
-                            loadId={item.loadId}
-                            proNumber={item.proNumber}
-                            itemId={item.id}
-                            staffEmail={staffEmail}
-                            onUploaded={refresh}
-                          />
-                          <FactoringDocCell
-                            kind="RATECON"
-                            present={!missingDocs(item).includes('Rate confirmation')}
-                            loadId={item.loadId}
-                            proNumber={item.proNumber}
-                            itemId={item.id}
-                            staffEmail={staffEmail}
-                            onUploaded={refresh}
-                          />
-                        </div>
-                      </td>
-                      <td style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>
-                        <div className="text-sm text-muted-foreground" title={formatReceivedAt(item.receivedAt)}>
-                          {relativeReceived(item.receivedAt)}
-                        </div>
-                      </td>
-                      <td style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <StatusBadge item={item} />
-                          <OtrStatusFlag item={item} />
-                          <NoBuyFlag item={item} />
-                          <OtrDocsFlag item={item} onResent={refresh} />
-                          {pendingIds.has(item.id) && (
-                            <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
-                          )}
-                        </div>
-                      </td>
-                      {canDelete && (
-                        <td style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="size-8 text-muted-foreground hover:text-red-600"
-                            aria-label={`Delete queue row for PRO ${item.proNumber}`}
-                            title="Delete queue row"
-                            disabled={pendingIds.has(item.id)}
-                            onClick={() => handleDelete(item)}
-                          >
-                            <Trash2 className="size-4" />
-                          </Button>
-                        </td>
-                      )}
-                    </tr>
-                      {/* The editor, only for a row someone opened. */}
-                      {expanded.has(item.id) && (
-                        <tr>
-                          <td colSpan={canDelete ? 10 : 9} style={{ padding: '0 16px 14px' }}>
-                            {item.status === 'MANUAL_INVOICE' || item.status === 'INVOICED_MANUALLY'
-                              ? <ManualInvoicePanel item={item} onChanged={refresh} />
-                              : <OtrPanel item={item} onChanged={refresh} />}
-                          </td>
-                        </tr>
-                      )}
-                    </Fragment>
-                  ))}
-                </tbody>
-              </table>
-
-              {/* Where you are in the queue, and how much of it to see at once. */}
-              <div style={{
-                display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between',
-                gap: 12, padding: '10px 16px', borderTop: '1px solid var(--ds-border)',
-              }}>
-                <span style={{ fontSize: 12.5, color: 'var(--ds-t3)' }}>
-                  {filtered.length === 0
-                    ? 'No invoices'
-                    : `${(safePage - 1) * perPage + 1}–${Math.min(safePage * perPage, filtered.length)} of ${filtered.length}`}
-                </span>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <label style={{ fontSize: 12.5, color: 'var(--ds-t3)' }}>
-                    Per page{' '}
-                    <select
-                      value={perPage}
-                      onChange={(e) => setPerPage(Number(e.target.value))}
-                      aria-label="Invoices per page"
+  return (
+    <>
+      <TmsListPage<FactoringItem>
+        title="Factoring"
+        quickTabs={{
+          tabs: FILTER_ORDER.map((key) => ({
+            key,
+            label: key === 'ALL' ? 'All' : FACTORING_STATUS_LABEL[key],
+            count: counts[key],
+          })),
+          active: activeTab,
+          onSelect: (key) => setActiveTab(key as FilterKey),
+        }}
+        search={{
+          value: search,
+          onChange: setSearch,
+          placeholder: 'Search PRO, subject, or sender…',
+        }}
+        onRefresh={() => { void refresh() }}
+        banner={
+          <>
+            {error && <p style={RED}>{error}</p>}
+            {activeTab === 'PENDING_WITH_OTR' && otrBreakdown.length > 0 && (
+              <div role="group" aria-label="OTR status" className="flex flex-wrap items-center gap-2">
+                <span className="text-[11px] font-semibold uppercase tracking-wider tms-muted">OTR says</span>
+                {otrBreakdown.map(({ label, count, attention }) => {
+                  const meta = label === OTR_UNREPORTED ? null : otrStatusMeta(label)
+                  const on = otrFilter === label
+                  return (
+                    <button
+                      key={label}
+                      type="button"
+                      aria-pressed={on}
+                      onClick={() => setOtrFilter(on ? null : label)}
+                      title={attention ? 'OTR or the broker is waiting on us' : undefined}
+                      className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11.5px] font-bold"
                       style={{
-                        height: 28, borderRadius: 8, border: '1px solid var(--ds-border)',
-                        background: 'var(--ds-surface)', color: 'var(--ds-t2)', fontSize: 12.5,
-                        padding: '0 6px', fontFamily: 'inherit',
+                        cursor: 'pointer',
+                        background: meta ? meta.tone.bg : 'transparent',
+                        color: meta ? meta.tone.fg : 'var(--tms-muted)',
+                        border: `${meta ? '1px solid' : '1px dashed'} ${meta ? meta.tone.border : 'var(--tms-border)'}`,
+                        outline: on ? '2px solid var(--tms-primary)' : 'none',
+                        outlineOffset: 1,
                       }}
                     >
-                      {[10, 50, 100].map((n) => <option key={n} value={n}>{n}</option>)}
-                    </select>
-                  </label>
-                  <button
-                    onClick={() => setPage((p) => Math.max(1, p - 1))}
-                    disabled={safePage <= 1}
-                    aria-label="Previous page"
-                    style={{
-                      height: 28, padding: '0 10px', borderRadius: 8, border: '1px solid var(--ds-border)',
-                      background: 'var(--ds-surface)', color: 'var(--ds-t2)', fontSize: 12.5, fontWeight: 600,
-                      cursor: safePage <= 1 ? 'default' : 'pointer', opacity: safePage <= 1 ? 0.4 : 1,
-                      fontFamily: 'inherit',
-                    }}
-                  >
-                    Prev
-                  </button>
-                  <span style={{ fontSize: 12.5, color: 'var(--ds-t2)', minWidth: 76, textAlign: 'center' }}>
-                    Page {safePage} of {pageCount}
-                  </span>
-                  <button
-                    onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
-                    disabled={safePage >= pageCount}
-                    aria-label="Next page"
-                    style={{
-                      height: 28, padding: '0 10px', borderRadius: 8, border: '1px solid var(--ds-border)',
-                      background: 'var(--ds-surface)', color: 'var(--ds-t2)', fontSize: 12.5, fontWeight: 600,
-                      cursor: safePage >= pageCount ? 'default' : 'pointer', opacity: safePage >= pageCount ? 0.4 : 1,
-                      fontFamily: 'inherit',
-                    }}
-                  >
-                    Next
-                  </button>
-                </div>
+                      {label}{attention ? ' ⚠' : ''}
+                      <span className="rounded-full px-1.5 text-[10px] font-bold" style={{ background: 'rgba(0,0,0,0.15)' }}>
+                        {count}
+                      </span>
+                    </button>
+                  )
+                })}
               </div>
-            </div>
-          )}
-        </div>
-      </div>
+            )}
+            {/* What the queue is worth, not just how many rows are in it. */}
+            <StatusTotals items={items} />
+          </>
+        }
+        columns={columns}
+        rows={paged}
+        rowKey={(item) => item.id}
+        page={{
+          from: filtered.length === 0 ? 0 : (safePage - 1) * perPage + 1,
+          to: Math.min(safePage * perPage, filtered.length),
+          total: filtered.length,
+          pageSize: perPage,
+        }}
+        emptyText={
+          loading && items.length === 0
+            ? 'Loading factoring queue…'
+            : error ? 'Couldn’t load queue. Try refreshing.' : 'No items match the current filters.'
+        }
+        onClearFilters={() => { setSearch(''); setOtrFilter(null) }}
+        footerExtra={
+          <div className="flex items-center gap-2">
+            <label className="text-xs tms-muted">
+              Per page{' '}
+              <TmsSelect
+                aria-label="Invoices per page"
+                value={perPage}
+                onChange={(e) => setPerPage(Number(e.target.value))}
+                className="w-auto"
+              >
+                {[10, 50, 100].map((n) => <option key={n} value={n}>{n}</option>)}
+              </TmsSelect>
+            </label>
+            <TmsButton
+              size="sm"
+              aria-label="Previous page"
+              disabled={safePage <= 1}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+            >
+              Prev
+            </TmsButton>
+            <span className="min-w-[76px] text-center text-xs tms-muted">Page {safePage} of {pageCount}</span>
+            <TmsButton
+              size="sm"
+              aria-label="Next page"
+              disabled={safePage >= pageCount}
+              onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
+            >
+              Next
+            </TmsButton>
+          </div>
+        }
+      />
+
+      {/* The editor, over the queue rather than inside it. */}
+      {openItem && (
+        <TmsDialog
+          open
+          onOpenChange={(next) => { if (!next) setOpenId(null) }}
+          title={`PRO ${openItem.proNumber}`}
+          className="tms-dialog-xl"
+        >
+          {manualPanel
+            ? <ManualInvoicePanel item={openItem} onChanged={refresh} />
+            : <OtrPanel item={openItem} onChanged={refresh} />}
+        </TmsDialog>
+      )}
+
       {/* Opened by the PRO column. */}
       <LoadDrawer />
-    </div>
+    </>
   )
 }

@@ -70,7 +70,9 @@ describe('the quote board', () => {
   it('offers every view of the pipeline, and each one renders', () => {
     setup({ open: [quote({ id: 'Q1', status: 'REQUESTED' })] })
     for (const label of ['To price', 'Sent', 'Replies', 'Drafts', 'Won / Lost', 'Carrier offers']) {
-      const tab = screen.getByRole('tab', { name: label })
+      // The MVMNT quick tab carries its count inside the button, so the accessible
+      // name is "To price 1"; the tab is still identified by the label it leads with.
+      const tab = screen.getByRole('tab', { name: new RegExp(`^${label.replace('/', '.')}`) })
       fireEvent.click(tab)
       expect(tab.getAttribute('aria-selected')).toBe('true')
     }
@@ -94,7 +96,7 @@ describe('the quote board', () => {
       'To price': '1', Sent: '2', Replies: '1', Drafts: '1', 'Carrier offers': '1',
     }
     for (const [label, count] of Object.entries(counts)) {
-      expect(within(screen.getByRole('tab', { name: label })).getByText(count)).toBeTruthy()
+      expect(within(screen.getByRole('tab', { name: new RegExp(`^${label}`) })).getByText(count)).toBeTruthy()
     }
 
     // To price is the opening tab, and it draws the one REQUESTED sell quote.
@@ -108,7 +110,7 @@ describe('the quote board', () => {
    */
   it('offers Re-send and not Convert on a quote whose link has lapsed', () => {
     setup({ open: [quote({ id: 'Q9', status: 'QUOTED', expiresAt: YESTERDAY, linkToken: 'tok' })] })
-    fireEvent.click(screen.getByRole('tab', { name: 'Sent' }))
+    fireEvent.click(screen.getByRole('tab', { name: /^Sent/ }))
 
     expect(screen.getByText('Expired')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Re-send Q9' })).toBeTruthy()

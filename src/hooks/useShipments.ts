@@ -1,7 +1,13 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { listOrders, listLoadSummaries, listShipments, listShipmentsByCustomer, listShipmentsByMonth, listShipmentsByStatus } from '@/lib/apiClient'
+import {
+  listLoadCarriers, listLoadSummaries, listOrders, listQuotes, listShipments, listShipmentsByCustomer,
+  listShipmentsByMonth, listShipmentsByStatus,
+} from '@/lib/apiClient'
 import type { LoadBoardSummary } from '@/lib/apiClient'
-import type { ArStatus, AssignmentType, LoadWorkflowStatus, OrderRecord, ShipmentRecord, ShipmentStatus } from '@/types/tms'
+import type {
+  ApStatus, ArStatus, AssignmentType, LoadCarrierRecord, LoadWorkflowStatus, OrderRecord, QuoteRecord,
+  ShipmentRecord, ShipmentStatus,
+} from '@/types/tms'
 
 export type { ShipmentRecord }
 
@@ -17,23 +23,37 @@ export type ShipmentsView =
   | { kind: 'month'; month: string }
 
 /**
- * A board row: the shipment, plus the two facets that live on its order and its
- * load. Null means not known — either the row has no order/load yet, or the backend
- * predates the fields — and the board shows such a row under every filter rather
- * than hiding it.
+ * A board row: the shipment, plus the facets that live on its order, its loads and the
+ * active assignment on those loads. Null means not known — either the row has no
+ * order/load yet, or the backend predates the fields — and the board shows such a row
+ * under every filter rather than hiding it.
  */
 export interface ShipmentListRow extends ShipmentRecord {
   arStatus: ArStatus | null
+  /** Step G — the active assignment's AP rung, for the board's AP column. */
+  apStatus: ApStatus | null
   assignmentType: AssignmentType | null
   loadStatus: LoadWorkflowStatus | null
   /** Step D — the load's tracking clock, for the board's Last update / Next check call / Exceptions. */
   lastUpdateAt: string | null
   lastUpdatePlace: string | null
   nextCheckCallAt: string | null
+  lastCheckCallAt: string | null
   checkCallOpen: 'OPEN' | null
   openIncidentCount: number | null
+  trackingProvider: string | null
   /** Step E — the order's cached gate verdict. `[]` is complete; null is never computed. */
   docsMissing: string[] | null
+  /** Step R — MVMNT's columns: the first reference, the route length, who is hauling it. */
+  reference: string | null
+  stopCount: number | null
+  carrierName: string | null
+  driverName: string | null
+  truckNumber: string | null
+  /** The order's rep, behind the shipment's own `salesRepId`. */
+  customerRepId: string | null
+  /** The customer quote this shipment was sold off, when it came from one. */
+  quoteId: string | null
 }
 
 const DEFAULT_VIEW: ShipmentsView = { kind: 'all' }
@@ -65,6 +85,8 @@ export function useShipments(view: ShipmentsView = DEFAULT_VIEW) {
   const [shipments, setShipments] = useState<ShipmentRecord[]>([])
   const [orders, setOrders] = useState<OrderRecord[]>([])
   const [loads, setLoads] = useState<LoadBoardSummary[]>([])
+  const [loadCarriers, setLoadCarriers] = useState<LoadCarrierRecord[]>([])
+  const [quotes, setQuotes] = useState<QuoteRecord[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -76,8 +98,10 @@ export function useShipments(view: ShipmentsView = DEFAULT_VIEW) {
   // No synchronous setState before the first await (react-hooks/set-state-in-effect):
   // every state write lives in the promise chain. `refresh` sets loading itself.
   const load = useCallback(() =>
-    Promise.all([fetchShipments(kind, arg), listOrders(), listLoadSummaries()])
-      .then(([s, o, l]) => { setShipments(s); setOrders(o); setLoads(l); setError(null) })
+    Promise.all([fetchShipments(kind, arg), listOrders(), listLoadSummaries(), listLoadCarriers(), listQuotes()])
+      .then(([s, o, l, lc, q]) => {
+        setShipments(s); setOrders(o); setLoads(l); setLoadCarriers(lc); setQuotes(q); setError(null)
+      })
       .catch((err: unknown) => { setError(err instanceof Error ? err.message : 'Shipments failed to load') })
       .finally(() => setLoading(false)),
   [kind, arg])
@@ -87,7 +111,16 @@ export function useShipments(view: ShipmentsView = DEFAULT_VIEW) {
 
   const rows = useMemo<ShipmentListRow[]>(() => {
     const arByShipment: Record<string, ArStatus> = {}
-    for (const o of orders) if (o.arStatus) arByShipment[o.shipmentId] = o.arStatus
+    const repByShipment: Record<string, string> = {}
+    // MVMNT's REFERENCE column is the first reference the order carries — the number
+    // the customer calls the load by, which is why it sits beside the PRO.
+    const referenceByShipment: Record<string, string> = {}
+    for (const o of orders) {
+      if (o.arStatus) arByShipment[o.shipmentId] = o.arStatus
+      if (o.customerRepId) repByShipment[o.shipmentId] = o.customerRepId
+      const reference = o.references?.find((r) => (r.value ?? '').trim() !== '')
+      if (reference) referenceByShipment[o.shipmentId] ??= reference.value
+    }
 
     // `[]` means the gate ran and found nothing outstanding (the column ticks); absent
     // means it has never run (the column stays blank), so the empty array has to survive
@@ -99,49 +132,87 @@ export function useShipments(view: ShipmentsView = DEFAULT_VIEW) {
       for (const type of o.docsMissing) if (!missing.includes(type)) missing.push(type)
     }
 
+    // The quote a shipment was sold off. Carrier offers (BUY) are a different story and
+    // are not what "this shipment came from a quote" means.
+    const quoteByShipment: Record<string, string> = {}
+    for (const q of quotes) if (q.side === 'SELL' && q.shipmentId) quoteByShipment[q.shipmentId] ??= q.id
+
+    // One ACTIVE assignment per load; the newest one wins when a shipment has several
+    // legs, because that is the truck the list is talking about.
+    const activeByShipment: Record<string, LoadCarrierRecord> = {}
+    for (const lc of loadCarriers) {
+      if (lc.status !== 'ACTIVE' || !lc.shipmentId) continue
+      const held = activeByShipment[lc.shipmentId]
+      if (!held || (lc.createdAt ?? '') > (held.createdAt ?? '')) activeByShipment[lc.shipmentId] = lc
+    }
+
     const assignmentByShipment: Record<string, AssignmentType> = {}
     const statusByShipment: Record<string, LoadWorkflowStatus> = {}
     // A multi-leg shipment is tracked as one line: the newest update across its legs, the
-    // soonest reminder, and every open exception added up.
+    // soonest reminder, every open exception added up, and every stop on the route.
     const trackingByShipment: Record<string, {
       lastUpdateAt: string | null
       lastUpdatePlace: string | null
       nextCheckCallAt: string | null
+      lastCheckCallAt: string | null
       checkCallOpen: 'OPEN' | null
       openIncidentCount: number
+      trackingProvider: string | null
+      /** Null until a load answers with a stop list: "not sent" is not "no stops". */
+      stopCount: number | null
     }> = {}
     for (const l of loads) {
       if (!l.shipmentId) continue
       if (l.assignmentType) assignmentByShipment[l.shipmentId] = l.assignmentType
       if (l.status) statusByShipment[l.shipmentId] = l.status
       const t = trackingByShipment[l.shipmentId] ??= {
-        lastUpdateAt: null, lastUpdatePlace: null, nextCheckCallAt: null, checkCallOpen: null, openIncidentCount: 0,
+        lastUpdateAt: null, lastUpdatePlace: null, nextCheckCallAt: null, lastCheckCallAt: null,
+        checkCallOpen: null, openIncidentCount: 0, trackingProvider: null, stopCount: null,
       }
       const update = l.lastKnownAt ?? l.lastCheckCallAt ?? null
       if (update && (!t.lastUpdateAt || update > t.lastUpdateAt)) {
         t.lastUpdateAt = update
         t.lastUpdatePlace = [l.lastKnownCity, l.lastKnownState].filter(Boolean).join(', ') || null
       }
+      if (l.lastCheckCallAt && (!t.lastCheckCallAt || l.lastCheckCallAt > t.lastCheckCallAt)) {
+        t.lastCheckCallAt = l.lastCheckCallAt
+      }
       if (l.nextCheckCallAt && (!t.nextCheckCallAt || l.nextCheckCallAt < t.nextCheckCallAt)) {
         t.nextCheckCallAt = l.nextCheckCallAt
       }
       if (l.checkCallOpen === 'OPEN') t.checkCallOpen = 'OPEN'
+      if (l.trackingProvider) t.trackingProvider ??= l.trackingProvider
+      if (l.stops) t.stopCount = (t.stopCount ?? 0) + l.stops.length
       t.openIncidentCount += l.openIncidentCount ?? 0
     }
 
-    return shipments.map((s) => ({
-      ...s,
-      arStatus: arByShipment[s.id] ?? null,
-      docsMissing: docsByShipment[s.id] ?? null,
-      assignmentType: assignmentByShipment[s.id] ?? null,
-      loadStatus: statusByShipment[s.id] ?? null,
-      lastUpdateAt: trackingByShipment[s.id]?.lastUpdateAt ?? null,
-      lastUpdatePlace: trackingByShipment[s.id]?.lastUpdatePlace ?? null,
-      nextCheckCallAt: trackingByShipment[s.id]?.nextCheckCallAt ?? null,
-      checkCallOpen: trackingByShipment[s.id]?.checkCallOpen ?? null,
-      openIncidentCount: trackingByShipment[s.id]?.openIncidentCount ?? null,
-    }))
-  }, [shipments, orders, loads])
+    return shipments.map((s) => {
+      const active = activeByShipment[s.id]
+      const tracking = trackingByShipment[s.id]
+      return {
+        ...s,
+        arStatus: arByShipment[s.id] ?? null,
+        apStatus: active?.apStatus ?? null,
+        docsMissing: docsByShipment[s.id] ?? null,
+        assignmentType: assignmentByShipment[s.id] ?? null,
+        loadStatus: statusByShipment[s.id] ?? null,
+        lastUpdateAt: tracking?.lastUpdateAt ?? null,
+        lastUpdatePlace: tracking?.lastUpdatePlace ?? null,
+        nextCheckCallAt: tracking?.nextCheckCallAt ?? null,
+        lastCheckCallAt: tracking?.lastCheckCallAt ?? null,
+        checkCallOpen: tracking?.checkCallOpen ?? null,
+        openIncidentCount: tracking?.openIncidentCount ?? null,
+        trackingProvider: tracking?.trackingProvider ?? null,
+        stopCount: tracking?.stopCount ?? null,
+        reference: referenceByShipment[s.id] ?? null,
+        carrierName: active?.carrierName ?? null,
+        driverName: active?.driverName ?? null,
+        truckNumber: active?.truckNumber ?? null,
+        customerRepId: repByShipment[s.id] ?? null,
+        quoteId: quoteByShipment[s.id] ?? null,
+      }
+    })
+  }, [shipments, orders, loads, loadCarriers, quotes])
 
   return { shipments: rows, loading, error, refresh }
 }

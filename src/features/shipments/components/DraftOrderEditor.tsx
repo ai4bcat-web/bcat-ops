@@ -1,5 +1,5 @@
 /**
- * The draft order editor — MVMNT's "create → Draft → Submit" form (spec §6.4).
+ * The draft shipment editor — MVMNT's "create → Draft → Submit" form (spec §6.4).
  *
  * Sections follow the mode: General, Stops, Shipment Contents, Financials, References,
  * Notes, and Equipment + Driver for the truckload family. Fields autosave on blur so a
@@ -8,16 +8,17 @@
  * Submit re-saves and then runs the server credit check. The banner here is advisory —
  * it shows what the last `CHECK_CREDIT` said so the user is not surprised by a refusal,
  * but it never substitutes for the server's decision.
+ *
+ * One record, one word: the user reads "shipment" everywhere. The Order row behind it
+ * is data, and no screen names it.
  */
 import { useMemo, useState } from 'react'
 import { AlertTriangle, Plus, Trash2, ShieldCheck } from 'lucide-react'
 import { RepPicker } from '@/components/RepPicker'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
-import { Badge } from '@/components/ui/badge'
+import {
+  TmsBadge, TmsButton, TmsCard, TmsField, TmsIconButton, TmsInput, TmsSelect, TmsTextarea,
+} from '@/features/tms/kit'
 import { formatCents } from '@/lib/tmsDirectory'
 import { computeFinancials } from '@/lib/shipmentCharges'
 import type { CreditSummary } from '@/lib/customerCredit'
@@ -33,7 +34,7 @@ import type { Stop } from '@/types'
 
 const HANDLING_UNITS: HandlingUnit[] = ['PALLET', 'SKID', 'CRATE', 'BOX', 'DRUM', 'TOTE', 'BUNDLE', 'ROLL', 'OTHER']
 
-/** The order fields this form owns; everything else on the order is server-derived. */
+/** The fields this form owns; everything else on the record is server-derived. */
 export interface OrderFormValues {
   mode: ShipmentMode
   rateType: RateType
@@ -165,64 +166,55 @@ export function DraftOrderEditor({
       <CreditBanner credit={credit} projectedCents={totals.revenueCents} short={creditShort} customerName={customer?.name} />
 
       <Section title="General" issues={issuesForSection(issues, 'general')}>
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <Label className="text-xs uppercase tracking-wider text-muted-foreground">Mode</Label>
-            <select
+        <div className="tms-grid tms-grid-2">
+          <TmsField label="Mode">
+            <TmsSelect
               aria-label="Mode"
               value={values.mode}
               onChange={(e) => set('mode', e.target.value as ShipmentMode)}
               onBlur={commit}
-              className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
             >
               {MODE_OPTIONS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
-            </select>
-          </div>
-          <div>
-            <Label className="text-xs uppercase tracking-wider text-muted-foreground">Rate type</Label>
-            <select
+            </TmsSelect>
+          </TmsField>
+          <TmsField label="Rate type">
+            <TmsSelect
               aria-label="Rate type"
               value={values.rateType}
               onChange={(e) => set('rateType', e.target.value as RateType)}
               onBlur={commit}
-              className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
             >
               <option value="SPOT">Spot</option>
               <option value="CONTRACT">Contract</option>
-            </select>
-          </div>
-          <div>
-            <Label className="text-xs uppercase tracking-wider text-muted-foreground">Customer contact</Label>
-            <select
+            </TmsSelect>
+          </TmsField>
+          <TmsField label="Customer contact">
+            <TmsSelect
               aria-label="Customer contact"
               value={values.customerContactId}
               onChange={(e) => set('customerContactId', e.target.value)}
               onBlur={commit}
-              className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
             >
               <option value="">— none —</option>
               {(customer?.contacts ?? []).map((c) => (
                 <option key={c.id} value={c.id}>{c.name}{c.types?.length ? ` (${c.types.join(', ').toLowerCase()})` : ''}</option>
               ))}
-            </select>
-          </div>
-          <div>
-            <Label className="text-xs uppercase tracking-wider text-muted-foreground">Bill to</Label>
-            <select
+            </TmsSelect>
+          </TmsField>
+          <TmsField label="Bill to">
+            <TmsSelect
               aria-label="Bill to"
               value={values.billToId}
               onChange={(e) => set('billToId', e.target.value)}
               onBlur={commit}
-              className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
             >
               <option value="">— customer —</option>
               {(customer?.billToParties ?? []).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-            </select>
-          </div>
-          <div>
-            <Label className="text-xs uppercase tracking-wider text-muted-foreground">Cost center</Label>
-            <Input aria-label="Cost center" value={values.costCenter} onChange={(e) => set('costCenter', e.target.value)} onBlur={commit} className="h-9 text-sm" />
-          </div>
+            </TmsSelect>
+          </TmsField>
+          <TmsField label="Cost center">
+            <TmsInput aria-label="Cost center" value={values.costCenter} onChange={(e) => set('costCenter', e.target.value)} onBlur={commit} />
+          </TmsField>
         </div>
       </Section>
 
@@ -259,29 +251,25 @@ export function DraftOrderEditor({
       </Section>
 
       <Section title="Notes" issues={[]}>
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <Label className="text-xs uppercase tracking-wider text-muted-foreground">Customer notes</Label>
-            <Textarea aria-label="Customer notes" rows={3} value={values.customerNotes} onChange={(e) => set('customerNotes', e.target.value)} onBlur={commit} className="text-sm" />
-          </div>
-          <div>
-            <Label className="text-xs uppercase tracking-wider text-muted-foreground">Internal notes</Label>
-            <Textarea aria-label="Internal notes" rows={3} value={values.internalNotes} onChange={(e) => set('internalNotes', e.target.value)} onBlur={commit} className="text-sm" />
-          </div>
+        <div className="tms-grid tms-grid-2">
+          <TmsField label="Customer notes">
+            <TmsTextarea aria-label="Customer notes" rows={3} value={values.customerNotes} onChange={(e) => set('customerNotes', e.target.value)} onBlur={commit} />
+          </TmsField>
+          <TmsField label="Internal notes">
+            <TmsTextarea aria-label="Internal notes" rows={3} value={values.internalNotes} onChange={(e) => set('internalNotes', e.target.value)} onBlur={commit} />
+          </TmsField>
         </div>
       </Section>
 
       {isTruckload && (
         <Section title="Equipment + Driver" issues={issuesForSection(issues, 'equipment')}>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label className="text-xs uppercase tracking-wider text-muted-foreground">Equipment type</Label>
-              <Input aria-label="Equipment type" value={values.equipmentType} onChange={(e) => set('equipmentType', e.target.value)} onBlur={commit} className="h-9 text-sm" placeholder="53' Dry Van" />
-            </div>
-            <div>
-              <Label className="text-xs uppercase tracking-wider text-muted-foreground">Length (ft)</Label>
-              <Input aria-label="Equipment length" type="number" value={values.equipmentLengthFt} onChange={(e) => set('equipmentLengthFt', e.target.value)} onBlur={commit} className="h-9 text-sm" />
-            </div>
+          <div className="tms-grid tms-grid-2">
+            <TmsField label="Equipment type">
+              <TmsInput aria-label="Equipment type" value={values.equipmentType} onChange={(e) => set('equipmentType', e.target.value)} onBlur={commit} placeholder="53' Dry Van" />
+            </TmsField>
+            <TmsField label="Length (ft)">
+              <TmsInput aria-label="Equipment length" type="number" value={values.equipmentLengthFt} onChange={(e) => set('equipmentLengthFt', e.target.value)} onBlur={commit} />
+            </TmsField>
           </div>
           <div className="mt-3 flex flex-wrap gap-4">
             {([['team', 'Team'], ['tarps', 'Tarps'], ['straps', 'Straps'], ['liftgate', 'Liftgate'], ['hazmat', 'Hazmat']] as const).map(([key, label]) => (
@@ -298,15 +286,15 @@ export function DraftOrderEditor({
         </Section>
       )}
 
-      {error && <p className="text-xs text-destructive">{error}</p>}
+      {error && <p className="tms-field-error">{error}</p>}
 
-      <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
-        <Button type="button" variant="outline" onClick={commit} disabled={saving || submitting}>
+      <div className="flex flex-wrap items-center gap-2 border-t border-[color:var(--tms-border)] pt-3">
+        <TmsButton onClick={commit} disabled={saving || submitting}>
           {saving ? 'Saving…' : 'Save draft'}
-        </Button>
-        <Button type="button" onClick={() => submit(false)} disabled={submitting || issues.length > 0}>
-          {submitting ? 'Submitting…' : 'Submit order'}
-        </Button>
+        </TmsButton>
+        <TmsButton variant="primary" onClick={() => submit(false)} disabled={submitting || issues.length > 0}>
+          {submitting ? 'Submitting…' : 'Submit shipment'}
+        </TmsButton>
         {showRepField ? (
           <div className="flex items-center gap-2">
             <RepPicker
@@ -317,17 +305,17 @@ export function DraftOrderEditor({
               placeholder="Pick a carrier rep…"
               className="w-56"
             />
-            <Button type="button" onClick={() => submit(true)} disabled={submitting || issues.length > 0}>
+            <TmsButton variant="primary" onClick={() => submit(true)} disabled={submitting || issues.length > 0}>
               Submit and assign
-            </Button>
+            </TmsButton>
           </div>
         ) : (
-          <Button type="button" variant="ghost" onClick={() => setShowRepField(true)} disabled={submitting}>
+          <TmsButton variant="ghost" onClick={() => setShowRepField(true)} disabled={submitting}>
             Submit and assign to a carrier rep
-          </Button>
+          </TmsButton>
         )}
         {issues.length > 0 && (
-          <span className="text-xs text-amber-600">{issues.length} problem{issues.length === 1 ? '' : 's'} to fix</span>
+          <span className="text-xs text-[color:var(--tms-badge-orange)]">{issues.length} problem{issues.length === 1 ? '' : 's'} to fix</span>
         )}
       </div>
     </div>
@@ -336,22 +324,21 @@ export function DraftOrderEditor({
 
 function Section({ title, issues, children }: { title: string; issues: { message: string }[]; children: React.ReactNode }) {
   return (
-    <section className="rounded-lg border border-border bg-card p-3">
-      <div className="mb-3 flex items-center gap-2">
-        <h3 className="text-sm font-semibold">{title}</h3>
-        {issues.length > 0 && <Badge className="bg-amber-100 text-amber-700">{issues.length}</Badge>}
-      </div>
+    <TmsCard
+      title={title}
+      actions={issues.length > 0 ? <TmsBadge tone="orange">{issues.length}</TmsBadge> : undefined}
+    >
       {issues.length > 0 && (
         <ul className="mb-3 space-y-1">
           {issues.map((i) => (
-            <li key={i.message} className="flex items-center gap-1 text-xs text-amber-700">
+            <li key={i.message} className="flex items-center gap-1 text-xs text-[color:var(--tms-badge-orange)]">
               <AlertTriangle size={12} /> {i.message}
             </li>
           ))}
         </ul>
       )}
       {children}
-    </section>
+    </TmsCard>
   )
 }
 
@@ -363,18 +350,20 @@ function CreditBanner({ credit, projectedCents, short, customerName }: {
 }) {
   if (!credit) return null
   const blocked = credit.blockReasons.length > 0
-  const tone = blocked || short ? 'border-destructive/40 bg-destructive/5 text-destructive'
-    : credit.warning ? 'border-amber-300 bg-amber-50 text-amber-800'
-    : 'border-border bg-muted/30 text-muted-foreground'
+  const tone = blocked || short
+    ? 'border-[color:var(--tms-badge-red)] text-[color:var(--tms-badge-red)]'
+    : credit.warning
+      ? 'border-[color:var(--tms-badge-orange)] text-[color:var(--tms-badge-orange)]'
+      : 'border-[color:var(--tms-border)] text-[color:var(--tms-muted)]'
   return (
-    <div data-testid="credit-banner" className={`flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border p-3 text-xs ${tone}`}>
+    <div data-testid="credit-banner" className={`flex flex-wrap items-center gap-x-4 gap-y-1 rounded-[var(--tms-radius)] border p-3 text-xs ${tone}`}>
       <span className="flex items-center gap-1 font-medium">
         <ShieldCheck size={14} /> {customerName ?? 'Customer'} credit
       </span>
       <span>Available {credit.availableCents != null ? formatCents(credit.availableCents) : 'no limit set'}</span>
-      <span>This order {formatCents(projectedCents)}</span>
+      <span>This shipment {formatCents(projectedCents)}</span>
       {blocked && <span>Blocked: {credit.blockReasons.join(', ')}</span>}
-      {!blocked && short && <span>Order exceeds available credit — submit will be refused.</span>}
+      {!blocked && short && <span>Shipment exceeds available credit — submit will be refused.</span>}
     </div>
   )
 }
@@ -389,50 +378,53 @@ function FreightEditor({ freight, onChange, onCommit }: {
 
   return (
     <div className="space-y-2">
-      {freight.length === 0 && <p className="text-xs text-muted-foreground">No freight lines.</p>}
+      {freight.length === 0 && <p className="tms-muted text-xs">No freight lines.</p>}
       {freight.map((item, index) => (
-        <div key={item.id} className="grid grid-cols-12 items-end gap-2 rounded-lg border border-border p-2">
+        <div key={item.id} className="grid grid-cols-12 items-end gap-2 rounded-[var(--tms-radius)] border border-[color:var(--tms-border)] p-2">
           <div className="col-span-3">
-            <Label className="text-xs uppercase tracking-wider text-muted-foreground">Handling unit</Label>
-            <select
-              aria-label={`Handling unit ${index + 1}`}
-              value={item.handlingUnit}
-              onChange={(e) => update(index, { handlingUnit: e.target.value as HandlingUnit })}
-              onBlur={onCommit}
-              className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
-            >
-              {HANDLING_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
-            </select>
+            <TmsField label="Handling unit">
+              <TmsSelect
+                aria-label={`Handling unit ${index + 1}`}
+                value={item.handlingUnit}
+                onChange={(e) => update(index, { handlingUnit: e.target.value as HandlingUnit })}
+                onBlur={onCommit}
+              >
+                {HANDLING_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
+              </TmsSelect>
+            </TmsField>
           </div>
           <div className="col-span-2">
-            <Label className="text-xs uppercase tracking-wider text-muted-foreground">Qty</Label>
-            <Input aria-label={`Freight quantity ${index + 1}`} type="number" min={1} value={item.qty} onChange={(e) => update(index, { qty: Number(e.target.value) })} onBlur={onCommit} className="h-9 text-sm" />
+            <TmsField label="Qty">
+              <TmsInput aria-label={`Freight quantity ${index + 1}`} type="number" min={1} value={item.qty} onChange={(e) => update(index, { qty: Number(e.target.value) })} onBlur={onCommit} />
+            </TmsField>
           </div>
           <div className="col-span-2">
-            <Label className="text-xs uppercase tracking-wider text-muted-foreground">Weight (lb)</Label>
-            <Input aria-label={`Freight weight ${index + 1}`} type="number" min={0} value={item.weightLbs ?? ''} onChange={(e) => update(index, { weightLbs: e.target.value === '' ? null : Number(e.target.value) })} onBlur={onCommit} className="h-9 text-sm" />
+            <TmsField label="Weight (lb)">
+              <TmsInput aria-label={`Freight weight ${index + 1}`} type="number" min={0} value={item.weightLbs ?? ''} onChange={(e) => update(index, { weightLbs: e.target.value === '' ? null : Number(e.target.value) })} onBlur={onCommit} />
+            </TmsField>
           </div>
           <div className="col-span-4">
-            <Label className="text-xs uppercase tracking-wider text-muted-foreground">Description</Label>
-            <Input aria-label={`Freight description ${index + 1}`} value={item.description ?? ''} onChange={(e) => update(index, { description: e.target.value })} onBlur={onCommit} className="h-9 text-sm" />
+            <TmsField label="Description">
+              <TmsInput aria-label={`Freight description ${index + 1}`} value={item.description ?? ''} onChange={(e) => update(index, { description: e.target.value })} onBlur={onCommit} />
+            </TmsField>
           </div>
           <div className="col-span-1 flex justify-end pb-1">
-            <Button
-              type="button" variant="ghost" size="icon" className="h-7 w-7"
+            <TmsIconButton
+              shape="plain"
               aria-label={`Remove freight line ${index + 1}`}
               onClick={() => { onChange(freight.filter((_, i) => i !== index)); onCommit() }}
             >
               <Trash2 size={14} />
-            </Button>
+            </TmsIconButton>
           </div>
         </div>
       ))}
-      <Button
-        type="button" variant="outline" size="sm"
+      <TmsButton
+        size="sm"
         onClick={() => onChange([...freight, { id: `fr-${Date.now()}-${freight.length}`, handlingUnit: 'PALLET', qty: 1 }])}
       >
         <Plus size={14} className="mr-1" /> Add freight line
-      </Button>
+      </TmsButton>
     </div>
   )
 }
@@ -449,61 +441,63 @@ function ReferenceEditor({ references, required, onChange, onCommit }: {
   return (
     <div className="space-y-2">
       {required.length > 0 && (
-        <p className="text-xs text-muted-foreground">
-          Required on a new order: {required.filter((r) => r.countOnNewOrder > 0).map((r) => `${r.label || r.code} ×${r.countOnNewOrder}`).join(', ') || 'none'}
+        <p className="tms-muted text-xs">
+          Required on a new shipment: {required.filter((r) => r.countOnNewOrder > 0).map((r) => `${r.label || r.code} ×${r.countOnNewOrder}`).join(', ') || 'none'}
         </p>
       )}
       {references.map((ref, index) => (
-        <div key={index} className="grid grid-cols-12 items-end gap-2 rounded-lg border border-border p-2">
+        <div key={index} className="grid grid-cols-12 items-end gap-2 rounded-[var(--tms-radius)] border border-[color:var(--tms-border)] p-2">
           <div className="col-span-3">
-            <Label className="text-xs uppercase tracking-wider text-muted-foreground">Code</Label>
-            <Input aria-label={`Reference code ${index + 1}`} value={ref.code} onChange={(e) => update(index, { code: e.target.value })} onBlur={onCommit} className="h-9 text-sm" />
+            <TmsField label="Code">
+              <TmsInput aria-label={`Reference code ${index + 1}`} value={ref.code} onChange={(e) => update(index, { code: e.target.value })} onBlur={onCommit} />
+            </TmsField>
           </div>
           <div className="col-span-4">
-            <Label className="text-xs uppercase tracking-wider text-muted-foreground">Value</Label>
-            <Input aria-label={`Reference value ${index + 1}`} value={ref.value} onChange={(e) => update(index, { value: e.target.value })} onBlur={onCommit} className="h-9 text-sm" />
+            <TmsField label="Value">
+              <TmsInput aria-label={`Reference value ${index + 1}`} value={ref.value} onChange={(e) => update(index, { value: e.target.value })} onBlur={onCommit} />
+            </TmsField>
           </div>
           <div className="col-span-2">
-            <Label className="text-xs uppercase tracking-wider text-muted-foreground">Level</Label>
-            <select
-              aria-label={`Reference level ${index + 1}`}
-              value={ref.level}
-              onChange={(e) => update(index, { level: e.target.value as ReferenceLevel })}
-              onBlur={onCommit}
-              className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
-            >
-              {(['ORDER', 'HANDLING_UNIT', 'PACKAGE', 'STOP'] as ReferenceLevel[]).map((l) => <option key={l} value={l}>{l}</option>)}
-            </select>
+            <TmsField label="Level">
+              <TmsSelect
+                aria-label={`Reference level ${index + 1}`}
+                value={ref.level}
+                onChange={(e) => update(index, { level: e.target.value as ReferenceLevel })}
+                onBlur={onCommit}
+              >
+                {(['ORDER', 'HANDLING_UNIT', 'PACKAGE', 'STOP'] as ReferenceLevel[]).map((l) => <option key={l} value={l}>{l}</option>)}
+              </TmsSelect>
+            </TmsField>
           </div>
           <div className="col-span-2">
-            <Label className="text-xs uppercase tracking-wider text-muted-foreground">Visible to</Label>
-            <select
-              aria-label={`Reference visibility ${index + 1}`}
-              value={ref.visibility}
-              onChange={(e) => update(index, { visibility: e.target.value as ReferenceVisibility })}
-              onBlur={onCommit}
-              className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
-            >
-              {(['INTERNAL', 'CUSTOMER', 'CARRIER', 'ALL'] as ReferenceVisibility[]).map((v) => <option key={v} value={v}>{v}</option>)}
-            </select>
+            <TmsField label="Visible to">
+              <TmsSelect
+                aria-label={`Reference visibility ${index + 1}`}
+                value={ref.visibility}
+                onChange={(e) => update(index, { visibility: e.target.value as ReferenceVisibility })}
+                onBlur={onCommit}
+              >
+                {(['INTERNAL', 'CUSTOMER', 'CARRIER', 'ALL'] as ReferenceVisibility[]).map((v) => <option key={v} value={v}>{v}</option>)}
+              </TmsSelect>
+            </TmsField>
           </div>
           <div className="col-span-1 flex justify-end pb-1">
-            <Button
-              type="button" variant="ghost" size="icon" className="h-7 w-7"
+            <TmsIconButton
+              shape="plain"
               aria-label={`Remove reference ${index + 1}`}
               onClick={() => { onChange(references.filter((_, i) => i !== index)); onCommit() }}
             >
               <Trash2 size={14} />
-            </Button>
+            </TmsIconButton>
           </div>
         </div>
       ))}
-      <Button
-        type="button" variant="outline" size="sm"
+      <TmsButton
+        size="sm"
         onClick={() => onChange([...references, { code: '', value: '', level: 'ORDER', visibility: 'ALL' }])}
       >
         <Plus size={14} className="mr-1" /> Add reference
-      </Button>
+      </TmsButton>
     </div>
   )
 }

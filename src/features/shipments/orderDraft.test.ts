@@ -34,7 +34,7 @@ describe('validateOrderDraft', () => {
 
   it('requires equipment for the truckload family but not for LTL', () => {
     const issues = validateOrderDraft(draft({ equipmentType: '' }), [pickup, delivery], [])
-    expect(issues.map((i) => i.message)).toContain('Truckload orders need an equipment type.')
+    expect(issues.map((i) => i.message)).toContain('Truckload shipments need an equipment type.')
     expect(validateOrderDraft(draft({ mode: 'LTL', equipmentType: '' }), [pickup, delivery], [])).toEqual([])
   })
 

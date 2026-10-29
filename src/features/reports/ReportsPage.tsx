@@ -1,6 +1,6 @@
 /**
- * `/reports` — the numbers the office is allowed to quote (spec §3.9; `I-plan.md`
- * "Reporting").
+ * Reports — the numbers the office is allowed to quote (spec §3.9; `I-plan.md`
+ * "Reporting"), as the Reports tab of My Brokerage.
  *
  * Six panels over one period: profit cut however you ask for it, the board's pipeline,
  * both sides of the ledger, the quote funnel and what the reps are owed. It is not a
@@ -18,15 +18,16 @@
  *
  * Reads are memoised per month in `@/lib/reportsClient`, so switching tabs and re-cutting
  * the table costs nothing, and a month that fails is named rather than silently missing.
+ *
+ * Step R re-skinned it onto the MVMNT kit; `BrokeragePage` owns the h1, so this is a body.
  */
 import { useEffect, useMemo, useState } from 'react'
+import type { CSSProperties, ReactNode } from 'react'
 import { Link } from 'react-router-dom'
-import { BarChart3, Download, RefreshCw } from 'lucide-react'
+import { Download, RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
 import { RepPicker } from '@/components/RepPicker'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Label } from '@/components/ui/label'
+import { TmsBadge, TmsButton, TmsCard, TmsField, TmsSelect, TmsTabs } from '@/features/tms/kit'
 import { useArWorklist } from '@/hooks/useArWorklist'
 import { useDirectory } from '@/hooks/useDirectory'
 import { useOpenBills } from '@/hooks/useOpenBills'
@@ -48,7 +49,6 @@ import {
   type FailedMonth, type MonthlyRead,
 } from '@/lib/reportsClient'
 import { displayName } from '@/lib/roles'
-import { cn } from '@/lib/utils'
 import { AgingStrip } from '@/features/ar/AgingStrip'
 import { AP_STRIP_LABELS } from '@/features/ar/agingStripLabels'
 import { monthLabel } from '@/features/ar/arViews'
@@ -60,11 +60,12 @@ import type {
   LaneRateSampleRecord, OrderRecord, ReportFilters, ReportGroupBy, ShipmentRecord, TmsSettings,
 } from '@/types/tms'
 
-const TH = 'px-2 py-2 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground'
-const TD = 'px-2 py-2 align-top'
-const MONEY = 'px-2 py-2 text-right tabular-nums align-top'
-const SELECT = 'mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-sm'
-const FIELD_LABEL = 'text-[10px] uppercase tracking-wider text-muted-foreground'
+/** Numbers read down a column, so they are right-aligned and tabular. */
+const NUM: CSSProperties = { textAlign: 'right', fontVariantNumeric: 'tabular-nums' }
+const STACK: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 16 }
+const TILE: CSSProperties = {
+  border: '1px solid var(--tms-border)', borderRadius: 'var(--tms-radius)', padding: '8px 12px',
+}
 
 /** The report period: two `'YYYY-MM'` ends, inclusive. */
 interface ReportPeriod {
@@ -79,12 +80,12 @@ const EMPTY_FILTERS: ReportFilters = {}
 /** One row of figures. A cell with no answer passes `—`; nothing here invents a zero. */
 function FigureStrip({ label, cells }: { label: string; cells: { label: string; value: string; hint?: string }[] }) {
   return (
-    <dl aria-label={label} className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
+    <dl aria-label={label} className="tms-grid tms-grid-4" style={{ margin: 0 }}>
       {cells.map((c) => (
-        <div key={c.label} className="rounded-md border border-border bg-card px-3 py-2">
-          <dt className="text-[10px] uppercase tracking-wider text-muted-foreground">{c.label}</dt>
-          <dd className="text-base font-semibold tabular-nums">{c.value}</dd>
-          {c.hint && <p className="text-[11px] text-muted-foreground">{c.hint}</p>}
+        <div key={c.label} style={TILE}>
+          <dt className="tms-field-label" style={{ textTransform: 'uppercase', letterSpacing: '.04em' }}>{c.label}</dt>
+          <dd style={{ margin: 0, fontSize: 16, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{c.value}</dd>
+          {c.hint && <p className="tms-field-hint" style={{ margin: 0 }}>{c.hint}</p>}
         </div>
       ))}
     </dl>
@@ -92,13 +93,30 @@ function FigureStrip({ label, cells }: { label: string; cells: { label: string; 
 }
 
 function Empty({ children }: { children: string }) {
-  return <p className="py-8 text-center text-sm text-muted-foreground">{children}</p>
+  return <p className="tms-muted" style={{ padding: '32px 0', textAlign: 'center', fontSize: 14, margin: 0 }}>{children}</p>
+}
+
+function Loading() {
+  return <p className="tms-muted" style={{ margin: 0, fontSize: 14 }}>Loading…</p>
+}
+
+function Table({ label, children }: { label?: string; children: ReactNode }) {
+  return (
+    <div className="tms-table-wrap">
+      <table className="tms-table" aria-label={label}>{children}</table>
+    </div>
+  )
 }
 
 function FailedMonths({ failed }: { failed: FailedMonth[] }) {
   if (failed.length === 0) return null
   return (
-    <p className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+    <p
+      style={{
+        margin: 0, border: '1px solid var(--tms-badge-red)', borderRadius: 'var(--tms-radius)',
+        padding: '8px 12px', fontSize: 14, color: 'var(--tms-badge-red)',
+      }}
+    >
       {failed.map((f) => `${monthLabel(f.month)}: ${f.message}`).join(' · ')} — the figures below are missing
       {failed.length === 1 ? ' that month' : ' those months'}.
     </p>
@@ -170,71 +188,52 @@ export function ReportsPage() {
     : `${monthLabel(period.from)} – ${monthLabel(period.to)}`
 
   return (
-    <div className="flex h-full flex-col">
-      <header className="flex flex-wrap items-center gap-2 border-b border-border px-5 py-3">
-        <BarChart3 size={18} />
-        <h1 className="text-lg font-semibold">Reports</h1>
-        <Badge variant="outline">{periodLabel}</Badge>
-        <div className="ml-auto flex items-end gap-2">
-          <div>
-            <Label className={FIELD_LABEL} htmlFor="report-from">From</Label>
-            <select
+    <div style={STACK}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-end', gap: 12 }}>
+        <TmsBadge tone="gray">{periodLabel}</TmsBadge>
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'flex-end', gap: 8 }}>
+          <TmsField label="From" htmlFor="report-from">
+            <TmsSelect
               id="report-from"
               aria-label="From month"
-              className={cn(SELECT, 'w-40')}
               value={period.from}
               onChange={(e) => setFrom(e.target.value)}
+              style={{ width: 160 }}
             >
               {months.map((ym) => <option key={ym} value={ym}>{monthLabel(ym)}</option>)}
-            </select>
-          </div>
-          <div>
-            <Label className={FIELD_LABEL} htmlFor="report-to">To</Label>
-            <select
+            </TmsSelect>
+          </TmsField>
+          <TmsField label="To" htmlFor="report-to">
+            <TmsSelect
               id="report-to"
               aria-label="To month"
-              className={cn(SELECT, 'w-40')}
               value={period.to}
               onChange={(e) => setTo(e.target.value)}
+              style={{ width: 160 }}
             >
               {months.map((ym) => <option key={ym} value={ym}>{monthLabel(ym)}</option>)}
-            </select>
-          </div>
-          <Button variant="ghost" size="icon" className="h-9 w-9" aria-label="Refresh reports" onClick={refresh}>
+            </TmsSelect>
+          </TmsField>
+          <TmsButton size="sm" aria-label="Refresh reports" onClick={refresh}>
             <RefreshCw size={14} />
-          </Button>
+          </TmsButton>
         </div>
-      </header>
-
-      <nav role="tablist" aria-label="Report panels" className="flex gap-1 overflow-x-auto border-b border-border px-5">
-        {REPORT_TABS.map((t) => (
-          <button
-            key={t.key}
-            role="tab"
-            type="button"
-            aria-selected={tab === t.key}
-            aria-label={t.label}
-            onClick={() => setTab(t.key)}
-            className={cn(
-              'flex items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-2 text-sm',
-              tab === t.key ? 'border-primary font-medium text-foreground' : 'border-transparent text-muted-foreground',
-            )}
-          >
-            {t.label}
-          </button>
-        ))}
-      </nav>
-
-      <div className="flex-1 overflow-auto px-5 py-3">
-        {tab === 'profit' && <ProfitPanel period={period} staffNames={staffNames} refreshKey={refreshKey} />}
-        {tab === 'pipeline' && <PipelinePanel />}
-        {tab === 'ar' && <ArPanel period={period} asOf={asOf} periodLabel={periodLabel} refreshKey={refreshKey} />}
-        {tab === 'ap' && <ApPanel asOf={asOf} periodLabel={periodLabel} />}
-        {tab === 'quotes' && <QuotesPanel period={period} refreshKey={refreshKey} />}
-        {tab === 'commissions' && (
-          <CommissionsPanel period={period} staffNames={staffNames} refreshKey={refreshKey} />
-        )}
       </div>
+
+      <TmsTabs
+        tabs={REPORT_TABS.map((t) => ({ key: t.key, label: t.label }))}
+        active={tab}
+        onSelect={(key) => setTab(key as ReportTabKey)}
+      />
+
+      {tab === 'profit' && <ProfitPanel period={period} staffNames={staffNames} refreshKey={refreshKey} />}
+      {tab === 'pipeline' && <PipelinePanel />}
+      {tab === 'ar' && <ArPanel period={period} asOf={asOf} periodLabel={periodLabel} refreshKey={refreshKey} />}
+      {tab === 'ap' && <ApPanel asOf={asOf} periodLabel={periodLabel} />}
+      {tab === 'quotes' && <QuotesPanel period={period} refreshKey={refreshKey} />}
+      {tab === 'commissions' && (
+        <CommissionsPanel period={period} staffNames={staffNames} refreshKey={refreshKey} />
+      )}
     </div>
   )
 }
@@ -298,144 +297,141 @@ function ProfitPanel({ period, staffNames, refreshKey }: {
   }
 
   return (
-    <div className="space-y-4">
-      <FailedMonths failed={failedMonths} />
+    <TmsCard title="Profit">
+      <div style={STACK}>
+        <FailedMonths failed={failedMonths} />
 
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-8">
-        <div>
-          <Label className={FIELD_LABEL} htmlFor="report-group-by">Group by</Label>
-          <select
-            id="report-group-by"
-            aria-label="Group by"
-            className={SELECT}
-            value={groupBy}
-            onChange={(e) => setGroupBy(e.target.value as ReportGroupBy)}
-          >
-            {GROUP_BY_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </select>
-        </div>
-        <FilterSelect label="Division" value={filters.divisionKey} options={options.divisions} onChange={(v) => setFilter('divisionKey', v)} />
-        <FilterSelect label="Team" value={filters.teamKey} options={options.teams} onChange={(v) => setFilter('teamKey', v)} />
-        <FilterSelect label="Mode" value={filters.mode} options={options.modes} onChange={(v) => setFilter('mode', v)} />
-        <FilterSelect label="Equipment" value={filters.equipmentType} options={options.equipment} onChange={(v) => setFilter('equipmentType', v)} />
-        <FilterSelect label="Customer" value={filters.customerId} options={options.customers} onChange={(v) => setFilter('customerId', v)} />
-        <FilterSelect label="Carrier" value={filters.carrierId} options={options.carriers} onChange={(v) => setFilter('carrierId', v)} />
-        <div>
+        <div className="tms-grid tms-grid-4">
+          <TmsField label="Group by" htmlFor="report-group-by">
+            <TmsSelect
+              id="report-group-by"
+              aria-label="Group by"
+              value={groupBy}
+              onChange={(e) => setGroupBy(e.target.value as ReportGroupBy)}
+            >
+              {GROUP_BY_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </TmsSelect>
+          </TmsField>
+          <FilterSelect label="Division" value={filters.divisionKey} options={options.divisions} onChange={(v) => setFilter('divisionKey', v)} />
+          <FilterSelect label="Team" value={filters.teamKey} options={options.teams} onChange={(v) => setFilter('teamKey', v)} />
+          <FilterSelect label="Mode" value={filters.mode} options={options.modes} onChange={(v) => setFilter('mode', v)} />
+          <FilterSelect label="Equipment" value={filters.equipmentType} options={options.equipment} onChange={(v) => setFilter('equipmentType', v)} />
+          <FilterSelect label="Customer" value={filters.customerId} options={options.customers} onChange={(v) => setFilter('customerId', v)} />
+          <FilterSelect label="Carrier" value={filters.carrierId} options={options.carriers} onChange={(v) => setFilter('carrierId', v)} />
           {/* The canonical rep control, so a report filters by the same username the
               order carries — a rep with no load in the window answers with no rows. */}
-          <Label className={FIELD_LABEL}>Rep</Label>
-          <div className="mt-1">
+          <TmsField label="Rep">
             <RepPicker
               value={filters.repId ?? ''}
               placeholder="All"
               onChange={(v) => setFilter('repId', v)}
             />
-          </div>
+          </TmsField>
         </div>
-      </div>
 
-      {loading && <p className="text-sm text-muted-foreground">Loading…</p>}
+        {loading && <Loading />}
 
-      {!loading && totals.loads === 0 && <Empty>No delivered loads in this window.</Empty>}
+        {!loading && totals.loads === 0 && <Empty>No delivered loads in this window.</Empty>}
 
-      {totals.loads > 0 && (
-        <>
-          <FigureStrip
-            label="Profit totals"
-            cells={[
-              { label: 'Loads', value: String(totals.loads) },
-              { label: 'Revenue', value: formatMoneyCents(totals.revenueCents) },
-              { label: 'Cost', value: formatMoneyCents(totals.costCents) },
-              { label: 'Profit', value: formatMoneyCents(totals.profitCents) },
-              { label: 'Margin', value: formatMarginBps(totals.marginBps) },
-              { label: 'RPM', value: formatPerMile(totals.rpmCents), hint: `${totals.miles} mi` },
-              { label: 'CPM', value: formatPerMile(totals.cpmCents) },
-            ]}
-          />
+        {totals.loads > 0 && (
+          <>
+            <FigureStrip
+              label="Profit totals"
+              cells={[
+                { label: 'Loads', value: String(totals.loads) },
+                { label: 'Revenue', value: formatMoneyCents(totals.revenueCents) },
+                { label: 'Cost', value: formatMoneyCents(totals.costCents) },
+                { label: 'Profit', value: formatMoneyCents(totals.profitCents) },
+                { label: 'Margin', value: formatMarginBps(totals.marginBps) },
+                { label: 'RPM', value: formatPerMile(totals.rpmCents), hint: `${totals.miles} mi` },
+                { label: 'CPM', value: formatPerMile(totals.cpmCents) },
+              ]}
+            />
 
-          {note && (
-            <p className="rounded-md border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
-              {note}{' '}
-              <Link to="/finances" className="underline">Own-fleet profitability lives on Finances.</Link>
-            </p>
-          )}
+            {note && (
+              <p className="tms-muted" style={{ ...TILE, margin: 0, fontSize: 14 }}>
+                {note}{' '}
+                <Link to="/finances">Own-fleet profitability lives on Finances.</Link>
+              </p>
+            )}
 
-          {report.excluded > 0 && (
-            <p className="text-xs text-muted-foreground">
-              {report.excluded} canceled or TONU&apos;d load{report.excluded === 1 ? '' : 's'} excluded.
-            </p>
-          )}
+            {report.excluded > 0 && (
+              <p className="tms-field-hint" style={{ margin: 0 }}>
+                {report.excluded} canceled or TONU&apos;d load{report.excluded === 1 ? '' : 's'} excluded.
+              </p>
+            )}
 
-          <div className="flex justify-end">
-            <Button variant="outline" size="sm" aria-label="Download profit CSV" onClick={downloadCsv}>
-              <Download size={14} className="mr-1" /> CSV
-            </Button>
-          </div>
-
-          <table className="w-full text-sm" aria-label="Profit by group">
-            <thead>
-              <tr className="border-b border-border">
-                <th className={TH} scope="col">{groupLabel}</th>
-                <th className={cn(TH, 'text-right')} scope="col">Loads</th>
-                <th className={cn(TH, 'text-right')} scope="col">Revenue</th>
-                <th className={cn(TH, 'text-right')} scope="col">Cost</th>
-                <th className={cn(TH, 'text-right')} scope="col">Profit</th>
-                <th className={cn(TH, 'text-right')} scope="col">Margin</th>
-                <th className={cn(TH, 'text-right')} scope="col">Miles</th>
-                <th className={cn(TH, 'text-right')} scope="col">RPM</th>
-                <th className={cn(TH, 'text-right')} scope="col">CPM</th>
-                <th className={cn(TH, 'text-right')} scope="col">Own fleet</th>
-              </tr>
-            </thead>
-            <tbody>
-              {report.rows.map((row) => (
-                <tr key={row.key || row.label} className="border-b border-border/60">
-                  <td className={TD}>{row.label}</td>
-                  <td className={MONEY}>{row.loads}</td>
-                  <td className={MONEY}>{formatMoneyCents(row.revenueCents)}</td>
-                  <td className={MONEY}>{formatMoneyCents(row.costCents)}</td>
-                  <td className={cn(MONEY, 'font-medium')}>{formatMoneyCents(row.profitCents)}</td>
-                  {/* An own-fleet row's cost is a settlement we have not loaded, so its
-                      margin is not a margin: say so rather than print a flattering one. */}
-                  <td className={MONEY}>{row.ownFleet === row.loads && row.loads > 0 ? '—' : formatMarginBps(row.marginBps)}</td>
-                  <td className={MONEY}>{row.miles}</td>
-                  <td className={MONEY}>{formatPerMile(row.rpmCents)}</td>
-                  <td className={MONEY}>{row.ownFleet === row.loads && row.loads > 0 ? '—' : formatPerMile(row.cpmCents)}</td>
-                  <td className={MONEY}>{row.ownFleet || '—'}</td>
-                </tr>
-              ))}
-              <tr className="border-b-2 border-border font-medium">
-                <td className={TD}>Total</td>
-                <td className={MONEY}>{totals.loads}</td>
-                <td className={MONEY}>{formatMoneyCents(totals.revenueCents)}</td>
-                <td className={MONEY}>{formatMoneyCents(totals.costCents)}</td>
-                <td className={MONEY}>{formatMoneyCents(totals.profitCents)}</td>
-                <td className={MONEY}>{formatMarginBps(totals.marginBps)}</td>
-                <td className={MONEY}>{totals.miles}</td>
-                <td className={MONEY}>{formatPerMile(totals.rpmCents)}</td>
-                <td className={MONEY}>{formatPerMile(totals.cpmCents)}</td>
-                <td className={MONEY}>{totals.ownFleet || '—'}</td>
-              </tr>
-            </tbody>
-          </table>
-
-          <section aria-label="Profit by month" className="space-y-2">
-            <h2 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">By month</h2>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-              {byMonth.rows.map((row) => (
-                <div key={row.key} className="rounded-md border border-border bg-card px-3 py-2">
-                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{monthLabel(row.key)}</p>
-                  <p className="text-base font-semibold tabular-nums">{formatMoneyCents(row.profitCents)}</p>
-                  <p className="text-[11px] text-muted-foreground">
-                    {row.loads} load{row.loads === 1 ? '' : 's'} · {formatMarginBps(row.marginBps)}
-                  </p>
-                </div>
-              ))}
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <TmsButton size="sm" aria-label="Download profit CSV" onClick={downloadCsv}>
+                <Download size={14} /> CSV
+              </TmsButton>
             </div>
-          </section>
-        </>
-      )}
-    </div>
+
+            <Table label="Profit by group">
+              <thead>
+                <tr>
+                  <th scope="col">{groupLabel}</th>
+                  <th scope="col" style={NUM}>Loads</th>
+                  <th scope="col" style={NUM}>Revenue</th>
+                  <th scope="col" style={NUM}>Cost</th>
+                  <th scope="col" style={NUM}>Profit</th>
+                  <th scope="col" style={NUM}>Margin</th>
+                  <th scope="col" style={NUM}>Miles</th>
+                  <th scope="col" style={NUM}>RPM</th>
+                  <th scope="col" style={NUM}>CPM</th>
+                  <th scope="col" style={NUM}>Own fleet</th>
+                </tr>
+              </thead>
+              <tbody>
+                {report.rows.map((row) => (
+                  <tr key={row.key || row.label}>
+                    <td>{row.label}</td>
+                    <td style={NUM}>{row.loads}</td>
+                    <td style={NUM}>{formatMoneyCents(row.revenueCents)}</td>
+                    <td style={NUM}>{formatMoneyCents(row.costCents)}</td>
+                    <td style={{ ...NUM, fontWeight: 500 }}>{formatMoneyCents(row.profitCents)}</td>
+                    {/* An own-fleet row's cost is a settlement we have not loaded, so its
+                        margin is not a margin: say so rather than print a flattering one. */}
+                    <td style={NUM}>{row.ownFleet === row.loads && row.loads > 0 ? '—' : formatMarginBps(row.marginBps)}</td>
+                    <td style={NUM}>{row.miles}</td>
+                    <td style={NUM}>{formatPerMile(row.rpmCents)}</td>
+                    <td style={NUM}>{row.ownFleet === row.loads && row.loads > 0 ? '—' : formatPerMile(row.cpmCents)}</td>
+                    <td style={NUM}>{row.ownFleet || '—'}</td>
+                  </tr>
+                ))}
+                <tr style={{ fontWeight: 500 }}>
+                  <td>Total</td>
+                  <td style={NUM}>{totals.loads}</td>
+                  <td style={NUM}>{formatMoneyCents(totals.revenueCents)}</td>
+                  <td style={NUM}>{formatMoneyCents(totals.costCents)}</td>
+                  <td style={NUM}>{formatMoneyCents(totals.profitCents)}</td>
+                  <td style={NUM}>{formatMarginBps(totals.marginBps)}</td>
+                  <td style={NUM}>{totals.miles}</td>
+                  <td style={NUM}>{formatPerMile(totals.rpmCents)}</td>
+                  <td style={NUM}>{formatPerMile(totals.cpmCents)}</td>
+                  <td style={NUM}>{totals.ownFleet || '—'}</td>
+                </tr>
+              </tbody>
+            </Table>
+
+            <section aria-label="Profit by month" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <h2 className="tms-field-label" style={{ margin: 0, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.04em' }}>By month</h2>
+              <div className="tms-grid tms-grid-3">
+                {byMonth.rows.map((row) => (
+                  <div key={row.key} style={TILE}>
+                    <p className="tms-field-label" style={{ margin: 0, textTransform: 'uppercase', letterSpacing: '.04em' }}>{monthLabel(row.key)}</p>
+                    <p style={{ margin: 0, fontSize: 16, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{formatMoneyCents(row.profitCents)}</p>
+                    <p className="tms-field-hint" style={{ margin: 0 }}>
+                      {row.loads} load{row.loads === 1 ? '' : 's'} · {formatMarginBps(row.marginBps)}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </section>
+          </>
+        )}
+      </div>
+    </TmsCard>
   )
 }
 
@@ -446,18 +442,16 @@ function FilterSelect({ label, value, options, onChange }: {
   onChange: (value: string) => void
 }) {
   return (
-    <div>
-      <Label className={FIELD_LABEL}>{label}</Label>
-      <select
+    <TmsField label={label}>
+      <TmsSelect
         aria-label={`Filter ${label.toLowerCase()}`}
-        className={SELECT}
         value={value ?? ''}
         onChange={(e) => onChange(e.target.value)}
       >
         <option value="">All</option>
         {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-      </select>
-    </div>
+      </TmsSelect>
+    </TmsField>
   )
 }
 
@@ -468,24 +462,26 @@ function PipelinePanel() {
   const counts = useMemo(() => pipelineCounts(shipments), [shipments])
 
   return (
-    <div className="space-y-3">
-      <p className="text-xs text-muted-foreground">
-        The board as it stands right now — not the report period: a shipment sits on a rung until it moves.
-      </p>
-      {error && <p className="text-sm text-destructive">{error}</p>}
-      {loading && counts.length === 0 && <p className="text-sm text-muted-foreground">Loading…</p>}
-      {!loading && counts.length === 0 && <Empty>No shipments on the board.</Empty>}
-      {counts.length > 0 && (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6">
-          {counts.map((c) => (
-            <div key={c.status} className="rounded-md border border-border bg-card px-3 py-2">
-              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{c.status || 'Unknown'}</p>
-              <p className="text-xl font-semibold tabular-nums">{c.count}</p>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
+    <TmsCard title="Pipeline">
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <p className="tms-field-hint" style={{ margin: 0 }}>
+          The board as it stands right now — not the report period: a shipment sits on a rung until it moves.
+        </p>
+        {error && <p style={{ margin: 0, fontSize: 14, color: 'var(--tms-badge-red)' }}>{error}</p>}
+        {loading && counts.length === 0 && <Loading />}
+        {!loading && counts.length === 0 && <Empty>No shipments on the board.</Empty>}
+        {counts.length > 0 && (
+          <div className="tms-grid tms-grid-4">
+            {counts.map((c) => (
+              <div key={c.status} style={TILE}>
+                <p className="tms-field-label" style={{ margin: 0, textTransform: 'uppercase', letterSpacing: '.04em' }}>{c.status || 'Unknown'}</p>
+                <p style={{ margin: 0, fontSize: 20, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{c.count}</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </TmsCard>
   )
 }
 
@@ -556,97 +552,95 @@ function ArPanel({ period, asOf, periodLabel, refreshKey }: {
   const uninvoicedCents = uninvoiced.reduce((sum, r) => sum + r.revenueCents, 0)
 
   return (
-    <div className="space-y-4">
-      <AgingStrip
-        openCents={open.aging.totalCents}
-        lateCents={open.aging.lateCents}
-        deliveredNotInvoicedCents={uninvoicedCents}
-        deliveredNotInvoicedCount={uninvoiced.length}
-        avgDaysToInvoice={lag}
-        avgDaysToPay={dso}
-        paidMonthLabel={periodLabel}
-      />
+    <TmsCard title="Accounts receivable">
+      <div style={STACK}>
+        <AgingStrip
+          openCents={open.aging.totalCents}
+          lateCents={open.aging.lateCents}
+          deliveredNotInvoicedCents={uninvoicedCents}
+          deliveredNotInvoicedCount={uninvoiced.length}
+          avgDaysToInvoice={lag}
+          avgDaysToPay={dso}
+          paidMonthLabel={periodLabel}
+        />
 
-      <section aria-label="Aging buckets" className="grid grid-cols-2 gap-3 sm:grid-cols-5">
-        {AGING_BUCKETS.map((b) => (
-          <div key={b} className="rounded-md border border-border bg-card px-3 py-2">
-            <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{AGING_BUCKET_LABEL[b]}</p>
-            <p className="text-base font-semibold tabular-nums">{formatMoneyCents(open.aging.byBucket[b])}</p>
-          </div>
-        ))}
-      </section>
-      {open.aging.byCustomer.length === 0 && !open.loading && <Empty>Nothing is owed to us.</Empty>}
+        <section aria-label="Aging buckets" className="tms-grid tms-grid-4">
+          {AGING_BUCKETS.map((b) => (
+            <div key={b} style={TILE}>
+              <p className="tms-field-label" style={{ margin: 0, textTransform: 'uppercase', letterSpacing: '.04em' }}>{AGING_BUCKET_LABEL[b]}</p>
+              <p style={{ margin: 0, fontSize: 16, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{formatMoneyCents(open.aging.byBucket[b])}</p>
+            </div>
+          ))}
+        </section>
+        {open.aging.byCustomer.length === 0 && !open.loading && <Empty>Nothing is owed to us.</Empty>}
 
-      <section aria-label="Delivered, not invoiced" className="space-y-2">
-        <h2 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Delivered, not invoiced</h2>
-        {uninvoiced.length === 0 ? (
-          <Empty>No delivered load is waiting to be billed.</Empty>
-        ) : (
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border">
-                <th className={TH} scope="col">Shipment</th>
-                <th className={TH} scope="col">Customer</th>
-                <th className={cn(TH, 'text-right')} scope="col">Waiting</th>
-                <th className={cn(TH, 'text-right')} scope="col">Revenue</th>
-              </tr>
-            </thead>
-            <tbody>
-              {uninvoiced.map((row) => (
-                <tr key={row.orderId} className="border-b border-border/60">
-                  <td className={TD}>
-                    <Link to={`/shipments/${row.shipmentId}`} className="underline">{row.shipmentNumber}</Link>
-                  </td>
-                  <td className={TD}>{row.customerName || row.customerId}</td>
-                  <td className={MONEY}>{row.daysWaiting}d</td>
-                  <td className={MONEY}>{formatMoneyCents(row.revenueCents)}</td>
+        <section aria-label="Delivered, not invoiced" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <h2 className="tms-field-label" style={{ margin: 0, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.04em' }}>Delivered, not invoiced</h2>
+          {uninvoiced.length === 0 ? (
+            <Empty>No delivered load is waiting to be billed.</Empty>
+          ) : (
+            <Table>
+              <thead>
+                <tr>
+                  <th scope="col">Shipment</th>
+                  <th scope="col">Customer</th>
+                  <th scope="col" style={NUM}>Waiting</th>
+                  <th scope="col" style={NUM}>Revenue</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </section>
+              </thead>
+              <tbody>
+                {uninvoiced.map((row) => (
+                  <tr key={row.orderId}>
+                    <td><Link to={`/tms/shipments/${row.shipmentId}`}>{row.shipmentNumber}</Link></td>
+                    <td>{row.customerName || row.customerId}</td>
+                    <td style={NUM}>{row.daysWaiting}d</td>
+                    <td style={NUM}>{formatMoneyCents(row.revenueCents)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+          )}
+        </section>
 
-      <section aria-label="Credit exposure" className="space-y-2">
-        <h2 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Credit exposure</h2>
-        {exposure.length === 0 ? (
-          <Empty>No customer is carrying exposure.</Empty>
-        ) : (
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border">
-                <th className={TH} scope="col">Customer</th>
-                <th className={cn(TH, 'text-right')} scope="col">Exposure</th>
-                <th className={cn(TH, 'text-right')} scope="col">Limit</th>
-                <th className={cn(TH, 'text-right')} scope="col">Available</th>
-                <th className={TH} scope="col">Standing</th>
-              </tr>
-            </thead>
-            <tbody>
-              {exposure.map(({ customer, summary }) => (
-                <tr key={customer.id} className="border-b border-border/60">
-                  <td className={TD}>
-                    <Link to={`/customers/${customer.id}`} className="underline">{customer.name}</Link>
-                  </td>
-                  <td className={MONEY}>{formatMoneyCents(summary.usedCents)}</td>
-                  <td className={MONEY}>
-                    {summary.policy.creditLimitCents == null ? 'No limit' : formatMoneyCents(summary.policy.creditLimitCents)}
-                  </td>
-                  <td className={MONEY}>
-                    {summary.availableCents == null ? '—' : formatMoneyCents(summary.availableCents)}
-                  </td>
-                  <td className={TD}>
-                    {summary.hold && <Badge variant="destructive" className="mr-1">Hold</Badge>}
-                    {summary.blockReasons.length > 0 && <Badge variant="destructive" className="mr-1">Blocked</Badge>}
-                    {summary.warning && summary.blockReasons.length === 0 && <Badge variant="outline">Near limit</Badge>}
-                  </td>
+        <section aria-label="Credit exposure" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <h2 className="tms-field-label" style={{ margin: 0, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.04em' }}>Credit exposure</h2>
+          {exposure.length === 0 ? (
+            <Empty>No customer is carrying exposure.</Empty>
+          ) : (
+            <Table>
+              <thead>
+                <tr>
+                  <th scope="col">Customer</th>
+                  <th scope="col" style={NUM}>Exposure</th>
+                  <th scope="col" style={NUM}>Limit</th>
+                  <th scope="col" style={NUM}>Available</th>
+                  <th scope="col">Standing</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </section>
-    </div>
+              </thead>
+              <tbody>
+                {exposure.map(({ customer, summary }) => (
+                  <tr key={customer.id}>
+                    <td><Link to="/tms/customers">{customer.name}</Link></td>
+                    <td style={NUM}>{formatMoneyCents(summary.usedCents)}</td>
+                    <td style={NUM}>
+                      {summary.policy.creditLimitCents == null ? 'No limit' : formatMoneyCents(summary.policy.creditLimitCents)}
+                    </td>
+                    <td style={NUM}>
+                      {summary.availableCents == null ? '—' : formatMoneyCents(summary.availableCents)}
+                    </td>
+                    <td>
+                      {summary.hold && <TmsBadge tone="red">Hold</TmsBadge>}
+                      {summary.blockReasons.length > 0 && <TmsBadge tone="red">Blocked</TmsBadge>}
+                      {summary.warning && summary.blockReasons.length === 0 && <TmsBadge tone="orange">Near limit</TmsBadge>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+          )}
+        </section>
+      </div>
+    </TmsCard>
   )
 }
 
@@ -664,65 +658,67 @@ function ApPanel({ asOf, periodLabel }: { asOf: string; periodLabel: string }) {
   }
 
   return (
-    <div className="space-y-4">
-      {error && <p className="text-sm text-destructive">{error}</p>}
+    <TmsCard title="Accounts payable">
+      <div style={STACK}>
+        {error && <p style={{ margin: 0, fontSize: 14, color: 'var(--tms-badge-red)' }}>{error}</p>}
 
-      <AgingStrip
-        labels={AP_STRIP_LABELS}
-        openCents={aging.totalCents}
-        lateCents={aging.lateCents}
-        deliveredNotInvoicedCents={inReview.reduce((sum, b) => sum + b.balanceCents, 0)}
-        deliveredNotInvoicedCount={inReview.length}
-        avgDaysToPay={null}
-        paidMonthLabel={periodLabel}
-      />
+        <AgingStrip
+          labels={AP_STRIP_LABELS}
+          openCents={aging.totalCents}
+          lateCents={aging.lateCents}
+          deliveredNotInvoicedCents={inReview.reduce((sum, b) => sum + b.balanceCents, 0)}
+          deliveredNotInvoicedCount={inReview.length}
+          avgDaysToPay={null}
+          paidMonthLabel={periodLabel}
+        />
 
-      <section aria-label="AP aging buckets" className="grid grid-cols-2 gap-3 sm:grid-cols-5">
-        {AGING_BUCKETS.map((b) => (
-          <div key={b} className="rounded-md border border-border bg-card px-3 py-2">
-            <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{AGING_BUCKET_LABEL[b]}</p>
-            <p className="text-base font-semibold tabular-nums">{formatMoneyCents(aging.byBucket[b])}</p>
-          </div>
-        ))}
-      </section>
+        <section aria-label="AP aging buckets" className="tms-grid tms-grid-4">
+          {AGING_BUCKETS.map((b) => (
+            <div key={b} style={TILE}>
+              <p className="tms-field-label" style={{ margin: 0, textTransform: 'uppercase', letterSpacing: '.04em' }}>{AGING_BUCKET_LABEL[b]}</p>
+              <p style={{ margin: 0, fontSize: 16, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{formatMoneyCents(aging.byBucket[b])}</p>
+            </div>
+          ))}
+        </section>
 
-      {loading && aging.byParty.length === 0 && <p className="text-sm text-muted-foreground">Loading…</p>}
-      {!loading && aging.byParty.length === 0 ? (
-        <Empty>We owe nothing.</Empty>
-      ) : (
-        <>
-          <div className="flex justify-end">
-            <Button variant="outline" size="sm" aria-label="Download AP aging CSV" onClick={downloadCsv}>
-              <Download size={14} className="mr-1" /> CSV
-            </Button>
-          </div>
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border">
-                <th className={TH} scope="col">Carrier</th>
-                {AGING_BUCKETS.map((b) => (
-                  <th key={b} className={cn(TH, 'text-right')} scope="col">{AGING_BUCKET_LABEL[b]}</th>
-                ))}
-                <th className={cn(TH, 'text-right')} scope="col">Total</th>
-                <th className={cn(TH, 'text-right')} scope="col">Late</th>
-                <th className={cn(TH, 'text-right')} scope="col">Oldest</th>
-              </tr>
-            </thead>
-            <tbody>
-              {aging.byParty.map((row) => (
-                <tr key={row.partyId} className="border-b border-border/60">
-                  <td className={TD}>{row.partyName || row.partyId}</td>
-                  {AGING_BUCKETS.map((b) => <td key={b} className={MONEY}>{formatMoneyCents(row.byBucket[b])}</td>)}
-                  <td className={cn(MONEY, 'font-medium')}>{formatMoneyCents(row.totalCents)}</td>
-                  <td className={MONEY}>{row.lateCount || '—'}</td>
-                  <td className={MONEY}>{row.oldestDays ? `${row.oldestDays}d` : '—'}</td>
+        {loading && aging.byParty.length === 0 && <Loading />}
+        {!loading && aging.byParty.length === 0 ? (
+          <Empty>We owe nothing.</Empty>
+        ) : (
+          <>
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <TmsButton size="sm" aria-label="Download AP aging CSV" onClick={downloadCsv}>
+                <Download size={14} /> CSV
+              </TmsButton>
+            </div>
+            <Table>
+              <thead>
+                <tr>
+                  <th scope="col">Carrier</th>
+                  {AGING_BUCKETS.map((b) => (
+                    <th key={b} scope="col" style={NUM}>{AGING_BUCKET_LABEL[b]}</th>
+                  ))}
+                  <th scope="col" style={NUM}>Total</th>
+                  <th scope="col" style={NUM}>Late</th>
+                  <th scope="col" style={NUM}>Oldest</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </>
-      )}
-    </div>
+              </thead>
+              <tbody>
+                {aging.byParty.map((row) => (
+                  <tr key={row.partyId}>
+                    <td>{row.partyName || row.partyId}</td>
+                    {AGING_BUCKETS.map((b) => <td key={b} style={NUM}>{formatMoneyCents(row.byBucket[b])}</td>)}
+                    <td style={{ ...NUM, fontWeight: 500 }}>{formatMoneyCents(row.totalCents)}</td>
+                    <td style={NUM}>{row.lateCount || '—'}</td>
+                    <td style={NUM}>{row.oldestDays ? `${row.oldestDays}d` : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+          </>
+        )}
+      </div>
+    </TmsCard>
   )
 }
 
@@ -746,29 +742,31 @@ function QuotesPanel({ period, refreshKey }: { period: ReportPeriod; refreshKey:
   const nothing = funnel.sent === 0 && funnel.won === 0 && funnel.lost === 0
 
   return (
-    <div className="space-y-4">
-      <FailedMonths failed={failedMonths} />
-      {loading && <p className="text-sm text-muted-foreground">Loading…</p>}
-      {!loading && nothing && <Empty>No customer quotes in this window.</Empty>}
-      {!nothing && (
-        <FigureStrip
-          label="Quote funnel"
-          cells={[
-            { label: 'Sent', value: String(funnel.sent) },
-            { label: 'Won', value: String(funnel.won) },
-            { label: 'Lost', value: String(funnel.lost) },
-            { label: 'Still out', value: String(funnel.open) },
-            { label: 'Win rate', value: formatMarginBps(funnel.winRateBps), hint: 'of the decided ones' },
-            {
-              label: 'Reply time',
-              value: funnel.medianHoursToReply == null ? '—' : `${funnel.medianHoursToReply}h`,
-              hint: 'median, sent → answered',
-            },
-            { label: 'Won value', value: formatMoneyCents(funnel.wonCents) },
-          ]}
-        />
-      )}
-    </div>
+    <TmsCard title="Quotes">
+      <div style={STACK}>
+        <FailedMonths failed={failedMonths} />
+        {loading && <Loading />}
+        {!loading && nothing && <Empty>No customer quotes in this window.</Empty>}
+        {!nothing && (
+          <FigureStrip
+            label="Quote funnel"
+            cells={[
+              { label: 'Sent', value: String(funnel.sent) },
+              { label: 'Won', value: String(funnel.won) },
+              { label: 'Lost', value: String(funnel.lost) },
+              { label: 'Still out', value: String(funnel.open) },
+              { label: 'Win rate', value: formatMarginBps(funnel.winRateBps), hint: 'of the decided ones' },
+              {
+                label: 'Reply time',
+                value: funnel.medianHoursToReply == null ? '—' : `${funnel.medianHoursToReply}h`,
+                hint: 'median, sent → answered',
+              },
+              { label: 'Won value', value: formatMoneyCents(funnel.wonCents) },
+            ]}
+          />
+        )}
+      </div>
+    </TmsCard>
   )
 }
 
@@ -783,51 +781,53 @@ function CommissionsPanel({ period, staffNames, refreshKey }: {
   const report = useMemo(() => commissionReport(rows, staffNames), [rows, staffNames])
 
   return (
-    <div className="space-y-4">
-      <FailedMonths failed={failedMonths} />
-      <p className="text-xs text-muted-foreground">
-        Canceled rows are in neither the count nor the money.{' '}
-        <Link to="/commissions" className="underline">The approval board is on Commissions.</Link>
-      </p>
-      {loading && <p className="text-sm text-muted-foreground">Loading…</p>}
-      {!loading && report.rows.length === 0 ? (
-        <Empty>No commissions were triggered in this window.</Empty>
-      ) : (
-        report.rows.length > 0 && (
-          <table className="w-full text-sm" aria-label="Commissions by rep">
-            <thead>
-              <tr className="border-b border-border">
-                <th className={TH} scope="col">Rep</th>
-                <th className={cn(TH, 'text-right')} scope="col">Rows</th>
-                <th className={cn(TH, 'text-right')} scope="col">Gross</th>
-                <th className={cn(TH, 'text-right')} scope="col">Net</th>
-                <th className={cn(TH, 'text-right')} scope="col">Unapproved</th>
-                <th className={cn(TH, 'text-right')} scope="col">Paid</th>
-              </tr>
-            </thead>
-            <tbody>
-              {report.rows.map((row) => (
-                <tr key={row.repId || row.repName} className="border-b border-border/60">
-                  <td className={TD}>{row.repName}</td>
-                  <td className={MONEY}>{row.count}</td>
-                  <td className={MONEY}>{formatMoneyCents(row.amountCents)}</td>
-                  <td className={cn(MONEY, 'font-medium')}>{formatMoneyCents(row.netCents)}</td>
-                  <td className={MONEY}>{formatMoneyCents(row.unapprovedCents)}</td>
-                  <td className={MONEY}>{formatMoneyCents(row.paidCents)}</td>
+    <TmsCard title="Commissions">
+      <div style={STACK}>
+        <FailedMonths failed={failedMonths} />
+        <p className="tms-field-hint" style={{ margin: 0 }}>
+          Canceled rows are in neither the count nor the money.{' '}
+          <Link to="/tms/brokerage/commissions">The approval board is on Commissions.</Link>
+        </p>
+        {loading && <Loading />}
+        {!loading && report.rows.length === 0 ? (
+          <Empty>No commissions were triggered in this window.</Empty>
+        ) : (
+          report.rows.length > 0 && (
+            <Table label="Commissions by rep">
+              <thead>
+                <tr>
+                  <th scope="col">Rep</th>
+                  <th scope="col" style={NUM}>Rows</th>
+                  <th scope="col" style={NUM}>Gross</th>
+                  <th scope="col" style={NUM}>Net</th>
+                  <th scope="col" style={NUM}>Unapproved</th>
+                  <th scope="col" style={NUM}>Paid</th>
                 </tr>
-              ))}
-              <tr className="border-b-2 border-border font-medium">
-                <td className={TD}>Total</td>
-                <td className={MONEY}>{report.totals.count}</td>
-                <td className={MONEY}>{formatMoneyCents(report.totals.amountCents)}</td>
-                <td className={MONEY}>{formatMoneyCents(report.totals.netCents)}</td>
-                <td className={MONEY}>{formatMoneyCents(report.totals.unapprovedCents)}</td>
-                <td className={MONEY}>{formatMoneyCents(report.totals.paidCents)}</td>
-              </tr>
-            </tbody>
-          </table>
-        )
-      )}
-    </div>
+              </thead>
+              <tbody>
+                {report.rows.map((row) => (
+                  <tr key={row.repId || row.repName}>
+                    <td>{row.repName}</td>
+                    <td style={NUM}>{row.count}</td>
+                    <td style={NUM}>{formatMoneyCents(row.amountCents)}</td>
+                    <td style={{ ...NUM, fontWeight: 500 }}>{formatMoneyCents(row.netCents)}</td>
+                    <td style={NUM}>{formatMoneyCents(row.unapprovedCents)}</td>
+                    <td style={NUM}>{formatMoneyCents(row.paidCents)}</td>
+                  </tr>
+                ))}
+                <tr style={{ fontWeight: 500 }}>
+                  <td>Total</td>
+                  <td style={NUM}>{report.totals.count}</td>
+                  <td style={NUM}>{formatMoneyCents(report.totals.amountCents)}</td>
+                  <td style={NUM}>{formatMoneyCents(report.totals.netCents)}</td>
+                  <td style={NUM}>{formatMoneyCents(report.totals.unapprovedCents)}</td>
+                  <td style={NUM}>{formatMoneyCents(report.totals.paidCents)}</td>
+                </tr>
+              </tbody>
+            </Table>
+          )
+        )}
+      </div>
+    </TmsCard>
   )
 }

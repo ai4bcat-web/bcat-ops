@@ -62,7 +62,7 @@ beforeEach(() => {
   state = {
     loads: [load], drivers: [], equipment: [], selectedLoadId: 'l1', drawerMode: 'edit',
     createPreFill: null, setSelectedLoad: vi.fn(), pendingIntakeItemId: null,
-    setPendingIntakeItem: vi.fn(), updateLoad: updateLoadMock, deleteLoad: vi.fn(), addLoad: vi.fn(),
+    setPendingIntakeItem: vi.fn(), updateLoad: updateLoadMock, addLoad: vi.fn(),
     maintenanceInvoices: [], intakeItems: [],
   }
 })

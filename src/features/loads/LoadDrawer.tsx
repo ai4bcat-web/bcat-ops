@@ -736,7 +736,7 @@ function NewLoadDialog({
   mode = 'create',
   saving = false,
   aljexId,
-  onDelete,
+  // No onDelete: a load carries a PRO number, and a PRO number is permanent.
   tender,
   isBatory = false,
 }: {
@@ -754,7 +754,6 @@ function NewLoadDialog({
   /** A save is in flight: the button goes dead so a double-click cannot create twice. */
   saving?: boolean
   aljexId?: string
-  onDelete?: () => void
   /** What intake parsed off the tender, including any document it carried. */
   tender?: TenderPrefill | null
   /** Batory loads take their appointments from the request ladder, never from a tender. */
@@ -1255,16 +1254,7 @@ function NewLoadDialog({
           display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0,
           background: 'var(--ds-surface)',
         }}>
-          {mode === 'edit' && onDelete && (
-            <Button
-              type="button"
-              variant="outline"
-              className="h-9 px-4 text-destructive border-destructive/30 hover:bg-destructive/5"
-              onClick={onDelete}
-            >
-              <Trash2 className="size-4 mr-1" /> Delete
-            </Button>
-          )}
+          {/* A load is never deleted here: the PRO is permanent (Ryne, 2026-10-28). */}
           {Object.keys(errors).length > 0 && (
             <span style={{ flex: 1, fontSize: 12, color: 'var(--ds-red, #dc2626)' }}>
               Please fill in the required fields above.
@@ -1322,7 +1312,7 @@ export function LoadDrawer() {
   const setSelectedLoad       = useAppStore((s) => s.setSelectedLoad)
   const pendingIntakeItemId   = useAppStore((s) => s.pendingIntakeItemId)
   const setPendingIntakeItem  = useAppStore((s) => s.setPendingIntakeItem)
-  const { loads, addLoad, updateLoad, deleteLoad } = useLoads()
+  const { loads, addLoad, updateLoad } = useLoads()
   const { drivers } = useDrivers()
   // What the driver app recorded at each stop, plus when the POD came in. Looked up by the
   // selected load id so the hook runs on every render, ahead of the mode-based early returns.
@@ -1729,13 +1719,6 @@ export function LoadDrawer() {
     }
   }
 
-  const handleDelete = () => {
-    if (!load) return
-    deleteLoad(load.id)
-    toast.success('Load deleted')
-    onClose()
-  }
-
   const driverName = (id: string | null) => id ? (drivers.find((d) => d.id === id)?.name ?? id) : '—'
 
   const apptLabel = (appt: string, type?: string, apptEnd?: string) => {
@@ -1764,7 +1747,6 @@ export function LoadDrawer() {
         mode={isCreate ? 'create' : 'edit'}
         saving={isSubmitting}
         aljexId={load?.aljexId}
-        onDelete={!isCreate ? handleDelete : undefined}
         tender={createPreFill?.tender ?? null}
         isBatory={createPreFillIsBatory}
       />
@@ -1780,13 +1762,9 @@ export function LoadDrawer() {
   // 540px width and px-8/py-5 header. Every other drawer in the app is the SidePanel
   // shell on --ds-surface / --ds-border, so this one ignored the theme and read as a
   // different component — which is what "doesn't match" was.
+  // No Delete button: the PRO number on this load is permanent (Ryne, 2026-10-28).
   const panelFooter = (
     <>
-      {load && (
-        <button type="button" onClick={handleDelete} style={panelBtn.danger} aria-label="Delete load">
-          <Trash2 size={14} /> Delete
-        </button>
-      )}
       <div style={{ flex: 1 }} />
       <button type="button" onClick={() => setSelectedLoad(selectedLoadId, 'edit')} style={panelBtn.primary}>
         <Edit2 size={14} /> Edit Load

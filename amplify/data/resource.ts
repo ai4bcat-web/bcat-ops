@@ -133,6 +133,17 @@ const schema = a.schema({
       // Rescheduling moves nextCheckCallAt past them and re-arms both.
       checkCallDueNotifiedAt:     a.datetime(),
       checkCallOverdueNotifiedAt: a.datetime(),
+
+      // ── Revenue ownership (Step R) ───────────────────────────────────────
+      // Mirrored from the Shipment so everything that already reads Load —
+      // settlements, the fleet dashboards, the driver app — can be grouped by
+      // business without joining. Codes, not enums: divisions are data an admin
+      // edits (OwnershipDivision), so a new subsidiary needs no deploy.
+      revDivision:     a.string(),   // top-level OwnershipDivision code
+      revSubdivision:  a.string(),   // the matched descendant, when deeper
+      revTagSource:    a.string(),   // 'HAND' | 'RULE' — a hand tag beats the rules
+      revRuleId:       a.string(),   // the OwnershipRule that resolved it
+      salesRepId:      a.string(),   // Cognito username of the rep who sold it
       createdBy:       a.string().required(),
       updatedBy:       a.string().required(),
     })
@@ -146,6 +157,11 @@ const schema = a.schema({
       index('status'),
       index('checkCallOpen').sortKeys(['nextCheckCallAt']),
     ])
+    // Ryne, 2026-10-28: a PRO number is permanent. No delete mutation and no
+    // onDelete subscription exist on Load, so no token can erase a load and its
+    // PRO; the only exit is Void on the shipment. onCreate/onUpdate stay — the
+    // calendar subscribes to them.
+    .disableOperations(['delete', 'onDelete'])
     .authorization((allow) => [
       // Phase 1: Load remains userPool-editable; merge repoints use schema-level IAM auth.
       allow.authenticated(),
@@ -1118,6 +1134,25 @@ const schema = a.schema({
       deliveredAt:      a.datetime(),
       lastNoticeAt:     a.datetime(),
       lastNoticeStatus: a.string(),
+
+      // ── Revenue ownership, Void and DAT (Step R) ────────────────────────
+      // Which business earned this shipment. Resolved through OwnershipRule
+      // unless somebody tagged it by hand, and mirrored onto the Load.
+      revDivision:     a.string(),   // top-level OwnershipDivision code
+      revSubdivision:  a.string(),   // the matched descendant, when deeper
+      revTagSource:    a.string(),   // 'HAND' | 'RULE'
+      revRuleId:       a.string(),   // the OwnershipRule that resolved it
+      revTaggedBy:     a.string(),   // who set a HAND tag; null while the rules decide
+      salesRepId:      a.string(),   // Cognito username of the rep who sold it
+      // Ryne, 2026-10-28: Void is the only way a shipment leaves the working
+      // set. The row, the PRO, the history and the documents all stay; the
+      // number is never reused and the shipment can never be invoiced again.
+      voidedAt:        a.datetime(),
+      voidedBy:        a.string(),
+      voidReason:      a.string(),
+      // When the load was posted to the DAT board. Written in step J; the
+      // Brokerage dashboard's "posted to DAT" chart reads it from here.
+      datPostedAt:     a.datetime(),
       createdBy:       a.string().required(),
       updatedBy:       a.string().required(),
       version:         a.integer(),
@@ -2000,6 +2035,21 @@ const schema = a.schema({
       teamKey:         a.string(),              // the customer's team at sample time
       invoiceId:       a.string(),
       invoiceMonth:    a.string(),              // 'YYYY-MM' of Order.invoicedAt
+
+      // ── Brokerage dashboard facts (Step R) ───────────────────────────────
+      // Grouping by business, and the tracking / POD-timing history the
+      // Brokerage dashboard charts, all written by the sample refresh so no
+      // chart has to scan Load, LoadCheckCall and ShipmentDocument per month.
+      revDivision:     a.string(),              // Shipment.revDivision at sample time
+      revSubdivision:  a.string(),
+      salesRepId:      a.string(),
+      deliveredAt:     a.datetime(),            // Load.deliveredAt
+      podReceivedAt:   a.datetime(),            // the POD document's createdAt
+      trackingProvider: a.string(),             // how this load was tracked
+      firstPingAt:     a.datetime(),            // first position report of any kind
+      datPostedAt:     a.datetime(),
+      checkCallsDue:   a.integer(),             // check calls the schedule asked for
+      checkCallsMet:   a.integer(),             // how many actually landed on time
     })
     .secondaryIndexes((index) => [
       index('laneKey').sortKeys(['date']),
@@ -2009,6 +2059,89 @@ const schema = a.schema({
     ])
     // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
     // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  // ── Revenue ownership & department views (Step R) ──────────────────────────
+  /*
+   * Ryne, 2026-10-28: who owns a shipment is DATA, not code. BCAT runs three
+   * businesses today (BCAT Logistics, Ivan Cartage with its three subsidiaries,
+   * Best Care Auto Transport) and must be able to add a fourth — or hand the TMS
+   * to a company with entirely different parties — without a deploy.
+   *
+   * All three tables are tiny (tens of rows), read with one `list`, and written
+   * only by tmsDirectoryActions. No secondary indexes, no subscriptions.
+   */
+
+  // One business or subsidiary. `id` IS the code ('BROKERAGE', 'BOX_TRUCK'), so a
+  // Shipment/Load carrying the code resolves with a GetItem and survives a rename.
+  OwnershipDivision: a
+    .model({
+      id:          a.id(),
+      code:        a.string().required(),  // same value as `id`
+      name:        a.string().required(),
+      brand:       a.string(),             // shown in brackets in the sidebar
+      parentId:    a.string(),             // null = top-level business; any depth
+      color:       a.string(),             // '#f4c50c'
+      sortOrder:   a.integer().required(),
+      active:      a.boolean().required(),
+      // Which party owns each part of this division's work:
+      // { building, booking, tracking, invoicing, carrierPay, settlements }.
+      owners:      a.json(),
+      // Which existing views its shipments flow into:
+      // { calendar, dispatch, driverApp, driverPay, fleetDashboards, carShipping }.
+      flows:       a.json(),
+      createdBy:   a.string().required(),
+      updatedBy:   a.string().required(),
+      version:     a.integer().required(),
+    })
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  // An ordered rule that tags a shipment with a division. First match wins; a hand
+  // tag (Shipment.revTagSource 'HAND') beats every rule.
+  OwnershipRule: a
+    .model({
+      name:        a.string(),
+      sortOrder:   a.integer().required(),
+      active:      a.boolean().required(),
+      // { kind: CARRIER_IS | DRIVER_FLEET_GROUP_IS | DRIVER_TYPE_IS |
+      //         DRIVER_PROGRAM_IS | CUSTOMER_IS | EQUIPMENT_IS | MODE_IS |
+      //         LOAD_SOURCE_IS | REFERENCE_MATCHES | ALWAYS, value }
+      condition:   a.json(),
+      divisionCode: a.string().required(),
+      createdBy:   a.string().required(),
+      updatedBy:   a.string().required(),
+      version:     a.integer().required(),
+    })
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  // A saved slice of the Shipments page — one per department. `id` IS the slug, so
+  // `/tms/shipments/view/<slug>` resolves without an index.
+  ShipmentView: a
+    .model({
+      id:          a.id(),
+      slug:        a.string().required(),  // same value as `id`
+      name:        a.string().required(),
+      department:  a.string(),
+      description: a.string(),
+      // ShipmentViewFilters: divisions, subdivisions, statuses, carrierType, repId,
+      // pickupWindow, docsState, trackingState, arStatuses, apStatuses,
+      // quoteToBooked, search.
+      filters:     a.json(),
+      columns:     a.string().array(),
+      sort:        a.json(),               // { key, dir }
+      isDefault:   a.boolean(),
+      // { groups, roles, divisions } — empty or null means everyone who can open
+      // Shipments; `divisions` groups the view, it never hides it.
+      audience:    a.json(),
+      sortOrder:   a.integer().required(),
+      active:      a.boolean().required(),
+      createdBy:   a.string().required(),
+      updatedBy:   a.string().required(),
+      version:     a.integer().required(),
+    })
     .disableOperations(['subscriptions'])
     .authorization((allow) => [allow.authenticated().to(['read'])]),
 

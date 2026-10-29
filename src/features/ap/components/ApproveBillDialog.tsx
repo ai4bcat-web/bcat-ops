@@ -19,11 +19,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, Loader2, ShieldAlert } from 'lucide-react'
 import { toast } from 'sonner'
-import { Button } from '@/components/ui/button'
-import { Checkbox } from '@/components/ui/checkbox'
-import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { TmsButton, TmsDialog, TmsField, TmsTextarea } from '@/features/tms/kit'
 import { useAuth } from '@/hooks/useAuth'
 import { approveBill, getCarrier, getShipmentBundle, getTmsSettings, graphqlErrorText, previewBill } from '@/lib/apiClient'
 import { approvalReadiness } from '@/lib/carrierBill'
@@ -122,108 +118,108 @@ export function ApproveBillDialog({ bill, open, onOpenChange, onDone }: {
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>
-            Approve {bill.billNumber ? `bill ${bill.billNumber}` : 'carrier bill'} — {formatCents(bill.netCents)}
-          </DialogTitle>
-        </DialogHeader>
+    <TmsDialog
+      open={open}
+      onOpenChange={onOpenChange}
+      title={`Approve ${bill.billNumber ? `bill ${bill.billNumber}` : 'carrier bill'} — ${formatCents(bill.netCents)}`}
+      className="tms-dialog-wide"
+      footer={
+        <>
+          <TmsButton variant="ghost" onClick={() => onOpenChange(false)} disabled={saving}>Cancel</TmsButton>
+          <TmsButton variant="primary" onClick={submit} disabled={disabled || blocked}>
+            {saving ? 'Approving…' : 'Approve'}
+          </TmsButton>
+        </>
+      }
+    >
+      {loading && (
+        <p className="flex items-center gap-2 tms-muted">
+          <Loader2 size={14} className="animate-spin" /> Reading the assignment and its paperwork…
+        </p>
+      )}
 
-        {loading && (
-          <p className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 size={14} className="animate-spin" /> Reading the assignment and its paperwork…
+      {!loading && (
+        <div className="flex flex-col gap-3">
+          <p className="tms-muted">
+            Approving moves this bill to To be paid. {bill.carrierName ?? 'The carrier'} is owed
+            {' '}{formatCents(bill.netCents)}
+            {bill.quickPayFeeCents > 0
+              ? ` — ${formatCents(bill.grossCents)} billed less a ${formatCents(bill.quickPayFeeCents)} quick-pay fee.`
+              : '.'}
           </p>
-        )}
 
-        {!loading && (
-          <div className="space-y-3">
-            <p className="text-sm text-muted-foreground">
-              Approving moves this bill to To be paid. {bill.carrierName ?? 'The carrier'} is owed
-              {' '}{formatCents(bill.netCents)}
-              {bill.quickPayFeeCents > 0
-                ? ` — ${formatCents(bill.grossCents)} billed less a ${formatCents(bill.quickPayFeeCents)} quick-pay fee.`
-                : '.'}
+          {!assignment && !error && (
+            <p className="text-xs" style={{ color: 'var(--tms-badge-red)' }}>
+              The assignment behind this bill could not be read, so nothing can be judged yet.
             </p>
+          )}
 
-            {!assignment && !error && (
-              <p className="text-xs text-destructive">
-                The assignment behind this bill could not be read, so nothing can be judged yet.
+          {readiness.blocks.length > 0 && (
+            <div className="p-2" style={{ border: '1px solid var(--tms-badge-red)', borderRadius: 'var(--tms-radius)' }}>
+              <p className="flex items-start gap-2 text-xs font-medium">
+                <AlertTriangle size={14} className="mt-0.5 shrink-0" style={{ color: 'var(--tms-badge-red)' }} />
+                This bill cannot be approved.
               </p>
-            )}
+              <ul className="mt-1 flex flex-col gap-1 text-xs" style={{ color: 'var(--tms-badge-red)' }}>
+                {readiness.blocks.map((reason) => <li key={reason}>{reason}</li>)}
+              </ul>
+            </div>
+          )}
 
-            {readiness.blocks.length > 0 && (
-              <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-2">
-                <p className="flex items-start gap-2 text-xs font-medium">
-                  <AlertTriangle size={14} className="mt-0.5 shrink-0 text-destructive" />
-                  This bill cannot be approved.
-                </p>
-                <ul className="mt-1 space-y-1 text-xs text-destructive">
-                  {readiness.blocks.map((reason) => <li key={reason}>{reason}</li>)}
-                </ul>
-              </div>
-            )}
+          {readiness.warnings.length > 0 && (
+            <div
+              className="flex flex-col gap-2 p-2"
+              style={{ border: '1px solid var(--tms-badge-orange)', borderRadius: 'var(--tms-radius)' }}
+            >
+              <p className="flex items-start gap-2 text-xs font-medium">
+                <ShieldAlert size={14} className="mt-0.5 shrink-0" style={{ color: 'var(--tms-badge-orange)' }} />
+                Read these and say so; the acknowledgement is kept on the bill.
+              </p>
+              {readiness.warnings.map((warning) => (
+                <label key={warning.key} className="flex items-start gap-2 text-xs">
+                  <input
+                    type="checkbox"
+                    aria-label={`Acknowledge ${warning.key}`}
+                    checked={acked.includes(warning.key)}
+                    disabled={disabled}
+                    onChange={(e) => setAcked((prev) => (
+                      e.target.checked ? [...prev, warning.key] : prev.filter((key) => key !== warning.key)
+                    ))}
+                    className="mt-0.5"
+                  />
+                  {warning.message}
+                </label>
+              ))}
+            </div>
+          )}
 
-            {readiness.warnings.length > 0 && (
-              <div className="space-y-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-2">
-                <p className="flex items-start gap-2 text-xs font-medium">
-                  <ShieldAlert size={14} className="mt-0.5 shrink-0 text-amber-600" />
-                  Read these and say so; the acknowledgement is kept on the bill.
-                </p>
-                {readiness.warnings.map((warning) => (
-                  <label key={warning.key} className="flex items-start gap-2 text-xs">
-                    <Checkbox
-                      aria-label={`Acknowledge ${warning.key}`}
-                      checked={acked.includes(warning.key)}
-                      disabled={disabled}
-                      onCheckedChange={(v) => setAcked((prev) => (
-                        v === true ? [...prev, warning.key] : prev.filter((key) => key !== warning.key)
-                      ))}
-                      className="mt-0.5"
-                    />
-                    {warning.message}
-                  </label>
-                ))}
-              </div>
-            )}
-
-            {missing.length > 0 && isAdmin && (
-              <div>
-                <Label className="text-xs uppercase tracking-wider text-muted-foreground">
-                  Paperwork override — {missing.join(', ')} still missing
-                </Label>
-                <Textarea
+          {missing.length > 0 && isAdmin && (
+            <div>
+              <TmsField label={`Paperwork override — ${missing.join(', ')} still missing`}>
+                <TmsTextarea
                   aria-label="Paperwork override note"
                   rows={2}
                   value={overrideNote}
                   disabled={disabled}
                   placeholder="why this bill is approved without the paperwork"
                   onChange={(e) => setOverrideNote(e.target.value)}
-                  className="text-sm"
                 />
-                <p className="mt-1 text-xs text-muted-foreground">
-                  The note is the only record of why. Leave it blank and the gate stands.
-                </p>
-              </div>
-            )}
-
-            {missing.length > 0 && !isAdmin && (
-              <p className="text-xs text-muted-foreground">
-                Only an owner or admin can approve past missing paperwork.
+              </TmsField>
+              <p className="mt-1 text-xs tms-muted">
+                The note is the only record of why. Leave it blank and the gate stands.
               </p>
-            )}
+            </div>
+          )}
 
-            {error && <p className="text-xs text-destructive">{error}</p>}
-          </div>
-        )}
+          {missing.length > 0 && !isAdmin && (
+            <p className="text-xs tms-muted">
+              Only an owner or admin can approve past missing paperwork.
+            </p>
+          )}
 
-        <DialogFooter>
-          <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={saving}>Cancel</Button>
-          <Button onClick={submit} disabled={disabled || blocked}>
-            {saving ? 'Approving…' : 'Approve'}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          {error && <p className="text-xs" style={{ color: 'var(--tms-badge-red)' }}>{error}</p>}
+        </div>
+      )}
+    </TmsDialog>
   )
 }

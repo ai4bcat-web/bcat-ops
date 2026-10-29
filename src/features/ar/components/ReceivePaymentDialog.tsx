@@ -18,12 +18,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, Loader2, Wand2 } from 'lucide-react'
 import { toast } from 'sonner'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Checkbox } from '@/components/ui/checkbox'
-import { Textarea } from '@/components/ui/textarea'
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { TmsButton, TmsDialog, TmsField, TmsInput, TmsSelect, TmsTextarea } from '@/features/tms/kit'
 import {
   graphqlErrorText,
   listArPaymentsByCustomer,
@@ -203,185 +198,181 @@ export function ReceivePaymentDialog({ customerId, customerName, invoiceId, meth
   }
 
   return (
-    <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
-      <DialogContent className="max-w-3xl">
-        <DialogHeader>
-          <DialogTitle>Receive payment{customerName ? ` — ${customerName}` : ''}</DialogTitle>
-        </DialogHeader>
+    <TmsDialog
+      open
+      onOpenChange={(open) => { if (!open) onClose() }}
+      title={`Receive payment${customerName ? ` — ${customerName}` : ''}`}
+      className="tms-dialog-wide"
+      footer={
+        <>
+          <TmsButton variant="ghost" onClick={onClose} disabled={posting}>Cancel</TmsButton>
+          <TmsButton variant="primary" onClick={submit} disabled={disabled || !plan.ok || remainderBlocked}>
+            {posting ? 'Posting…' : 'Post'}
+          </TmsButton>
+        </>
+      }
+    >
+      {loading && (
+        <p className="flex items-center gap-2 tms-muted">
+          <Loader2 size={14} className="animate-spin" /> Reading the account…
+        </p>
+      )}
 
-        {loading && (
-          <p className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 size={14} className="animate-spin" /> Reading the account…
-          </p>
-        )}
+      {!loading && (
+        <div className="flex flex-col gap-4">
+          <div className="tms-grid tms-grid-4">
+            <TmsField label="Received">
+              <TmsInput
+                aria-label="Payment date"
+                type="date"
+                value={receivedAt}
+                disabled={disabled}
+                onChange={(e) => setReceivedAt(e.target.value)}
+              />
+            </TmsField>
+            <TmsField label="Method">
+              <TmsSelect
+                aria-label="Payment method"
+                value={method}
+                disabled={disabled}
+                onChange={(e) => setMethod(e.target.value as ArPaymentMethod)}
+              >
+                {METHODS.map((row) => <option key={row} value={row}>{row.toLowerCase()}</option>)}
+              </TmsSelect>
+            </TmsField>
+            <TmsField label="Reference">
+              <TmsInput
+                aria-label="Payment reference"
+                value={reference}
+                disabled={disabled}
+                placeholder="cheque or trace #"
+                onChange={(e) => setReference(e.target.value)}
+              />
+            </TmsField>
+            <TmsField label="Amount">
+              <TmsInput
+                aria-label="Payment amount"
+                inputMode="decimal"
+                value={amount}
+                disabled={disabled}
+                placeholder="0.00"
+                onChange={(e) => setAmount(e.target.value)}
+              />
+            </TmsField>
+          </div>
 
-        {!loading && (
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-              <div>
-                <Label className="text-xs uppercase tracking-wider text-muted-foreground">Received</Label>
-                <Input
-                  aria-label="Payment date"
-                  type="date"
-                  value={receivedAt}
-                  disabled={disabled}
-                  onChange={(e) => setReceivedAt(e.target.value)}
-                  className="h-9 text-sm"
-                />
-              </div>
-              <div>
-                <Label className="text-xs uppercase tracking-wider text-muted-foreground">Method</Label>
-                <select
-                  aria-label="Payment method"
-                  value={method}
-                  disabled={disabled}
-                  onChange={(e) => setMethod(e.target.value as ArPaymentMethod)}
-                  className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
-                >
-                  {METHODS.map((row) => <option key={row} value={row}>{row.toLowerCase()}</option>)}
-                </select>
-              </div>
-              <div>
-                <Label className="text-xs uppercase tracking-wider text-muted-foreground">Reference</Label>
-                <Input
-                  aria-label="Payment reference"
-                  value={reference}
-                  disabled={disabled}
-                  placeholder="cheque or trace #"
-                  onChange={(e) => setReference(e.target.value)}
-                  className="h-9 text-sm"
-                />
-              </div>
-              <div>
-                <Label className="text-xs uppercase tracking-wider text-muted-foreground">Amount</Label>
-                <Input
-                  aria-label="Payment amount"
-                  inputMode="decimal"
-                  value={amount}
-                  disabled={disabled}
-                  placeholder="0.00"
-                  onChange={(e) => setAmount(e.target.value)}
-                  className="h-9 text-sm"
-                />
-              </div>
+          {duplicate && (
+            <p
+              className="flex items-start gap-2 p-2 text-xs"
+              style={{ border: '1px solid var(--tms-badge-orange)', borderRadius: 'var(--tms-radius)' }}
+            >
+              <AlertTriangle size={14} className="mt-0.5 shrink-0" style={{ color: 'var(--tms-badge-orange)' }} />
+              This customer already has a {duplicate.kind.toLowerCase().replace('_', ' ')} with reference
+              {' '}{duplicate.reference} for {formatCents(duplicate.amountCents)} on {duplicate.receivedAt.slice(0, 10)}.
+              Post anyway if this is a different cheque.
+            </p>
+          )}
+
+          <div>
+            <div className="flex items-center justify-between">
+              <p className="text-[11px] font-semibold uppercase tracking-wider tms-muted">Open invoices</p>
+              <TmsButton size="sm" aria-label="Auto-allocate" onClick={autoAllocate} disabled={disabled}>
+                <Wand2 size={12} /> Auto-allocate
+              </TmsButton>
             </div>
+            {invoices.length === 0 ? (
+              <p className="mt-1 text-xs tms-muted">Nothing is open for this customer.</p>
+            ) : (
+              <ul
+                className="mt-1"
+                style={{ border: '1px solid var(--tms-border)', borderRadius: 'var(--tms-radius)' }}
+              >
+                {invoices.map((row) => (
+                  <li key={row.id} className="flex items-center gap-3 px-2 py-1.5">
+                    <span className="w-32 shrink-0 font-medium">{row.number}</span>
+                    <span className="w-24 shrink-0 text-xs tms-muted">due {row.dueAt}</span>
+                    <span className="flex-1 text-right text-xs tms-muted">{formatCents(row.balanceCents)} open</span>
+                    <TmsInput
+                      aria-label={`Apply to invoice ${row.number}`}
+                      inputMode="decimal"
+                      value={allocations[row.id] ?? ''}
+                      disabled={disabled}
+                      placeholder="0.00"
+                      onChange={(e) => setAllocations((prev) => ({ ...prev, [row.id]: e.target.value }))}
+                      className="w-28"
+                    />
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
 
-            {duplicate && (
-              <p className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-2 text-xs">
-                <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-600" />
-                This customer already has a {duplicate.kind.toLowerCase().replace('_', ' ')} with reference
-                {' '}{duplicate.reference} for {formatCents(duplicate.amountCents)} on {duplicate.receivedAt.slice(0, 10)}.
-                Post anyway if this is a different cheque.
+          {credits.length > 0 && (
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wider tms-muted">Available credits</p>
+              <ul
+                className="mt-1"
+                style={{ border: '1px solid var(--tms-border)', borderRadius: 'var(--tms-radius)' }}
+              >
+                {credits.map((row) => (
+                  <li key={row.id} className="flex items-center gap-3 px-2 py-1.5">
+                    <span className="w-32 shrink-0 font-medium">{row.reference ?? row.kind.toLowerCase()}</span>
+                    <span className="w-24 shrink-0 text-xs tms-muted">{row.receivedAt.slice(0, 10)}</span>
+                    <span className="flex-1 text-right text-xs tms-muted">{formatCents(row.unappliedCents)} left</span>
+                    <TmsInput
+                      aria-label={`Use credit ${row.reference ?? row.id}`}
+                      inputMode="decimal"
+                      value={creditUses[row.id] ?? ''}
+                      disabled={disabled}
+                      placeholder="0.00"
+                      onChange={(e) => setCreditUses((prev) => ({ ...prev, [row.id]: e.target.value }))}
+                      className="w-28"
+                    />
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          <TmsField label="Note">
+            <TmsTextarea
+              aria-label="Payment note"
+              rows={2}
+              value={note}
+              disabled={disabled}
+              onChange={(e) => setNote(e.target.value)}
+            />
+          </TmsField>
+
+          <div className="p-2" style={{ border: '1px solid var(--tms-border)', borderRadius: 'var(--tms-radius)' }}>
+            <div className="flex flex-wrap gap-x-6 gap-y-1">
+              <span>Applied <strong aria-label="Applied total">{formatCents(plan.appliedCents)}</strong></span>
+              <span>From credits <strong aria-label="From credits total">{formatCents(plan.fromCreditsCents)}</strong></span>
+              <span>Unapplied <strong aria-label="Unapplied total">{formatCents(plan.unappliedCents)}</strong></span>
+            </div>
+            <label className="mt-2 flex items-center gap-2 text-xs">
+              <input
+                type="checkbox"
+                aria-label="Keep the remainder as customer credit"
+                checked={keepRemainder}
+                disabled={disabled}
+                onChange={(e) => setKeepRemainder(e.target.checked)}
+              />
+              Keep the remainder as customer credit
+            </label>
+            {remainderBlocked && (
+              <p className="mt-1 text-xs" style={{ color: 'var(--tms-badge-red)' }}>
+                {formatCents(plan.unappliedCents)} is unapplied. Allocate it, or keep it as customer credit.
               </p>
             )}
-
-            <div>
-              <div className="flex items-center justify-between">
-                <Label className="text-xs uppercase tracking-wider text-muted-foreground">Open invoices</Label>
-                <Button size="sm" variant="outline" aria-label="Auto-allocate" onClick={autoAllocate} disabled={disabled}>
-                  <Wand2 size={12} className="mr-1" /> Auto-allocate
-                </Button>
-              </div>
-              {invoices.length === 0 ? (
-                <p className="mt-1 text-xs text-muted-foreground">Nothing is open for this customer.</p>
-              ) : (
-                <ul className="mt-1 divide-y divide-border rounded-lg border border-border">
-                  {invoices.map((row) => (
-                    <li key={row.id} className="flex items-center gap-3 px-2 py-1.5 text-sm">
-                      <span className="w-32 shrink-0 font-medium">{row.number}</span>
-                      <span className="w-24 shrink-0 text-xs text-muted-foreground">due {row.dueAt}</span>
-                      <span className="flex-1 text-right text-xs text-muted-foreground">
-                        {formatCents(row.balanceCents)} open
-                      </span>
-                      <Input
-                        aria-label={`Apply to invoice ${row.number}`}
-                        inputMode="decimal"
-                        value={allocations[row.id] ?? ''}
-                        disabled={disabled}
-                        placeholder="0.00"
-                        onChange={(e) => setAllocations((prev) => ({ ...prev, [row.id]: e.target.value }))}
-                        className="h-8 w-28 text-sm"
-                      />
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-
-            {credits.length > 0 && (
-              <div>
-                <Label className="text-xs uppercase tracking-wider text-muted-foreground">Available credits</Label>
-                <ul className="mt-1 divide-y divide-border rounded-lg border border-border">
-                  {credits.map((row) => (
-                    <li key={row.id} className="flex items-center gap-3 px-2 py-1.5 text-sm">
-                      <span className="w-32 shrink-0 font-medium">{row.reference ?? row.kind.toLowerCase()}</span>
-                      <span className="w-24 shrink-0 text-xs text-muted-foreground">{row.receivedAt.slice(0, 10)}</span>
-                      <span className="flex-1 text-right text-xs text-muted-foreground">
-                        {formatCents(row.unappliedCents)} left
-                      </span>
-                      <Input
-                        aria-label={`Use credit ${row.reference ?? row.id}`}
-                        inputMode="decimal"
-                        value={creditUses[row.id] ?? ''}
-                        disabled={disabled}
-                        placeholder="0.00"
-                        onChange={(e) => setCreditUses((prev) => ({ ...prev, [row.id]: e.target.value }))}
-                        className="h-8 w-28 text-sm"
-                      />
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            <div>
-              <Label className="text-xs uppercase tracking-wider text-muted-foreground">Note</Label>
-              <Textarea
-                aria-label="Payment note"
-                rows={2}
-                value={note}
-                disabled={disabled}
-                onChange={(e) => setNote(e.target.value)}
-                className="text-sm"
-              />
-            </div>
-
-            <div className="rounded-lg border border-border bg-muted/30 p-2 text-sm">
-              <div className="flex flex-wrap gap-x-6 gap-y-1">
-                <span>Applied <strong aria-label="Applied total">{formatCents(plan.appliedCents)}</strong></span>
-                <span>From credits <strong aria-label="From credits total">{formatCents(plan.fromCreditsCents)}</strong></span>
-                <span>Unapplied <strong aria-label="Unapplied total">{formatCents(plan.unappliedCents)}</strong></span>
-              </div>
-              <label className="mt-2 flex items-center gap-2 text-xs">
-                <Checkbox
-                  aria-label="Keep the remainder as customer credit"
-                  checked={keepRemainder}
-                  disabled={disabled}
-                  onCheckedChange={(v) => setKeepRemainder(v === true)}
-                />
-                Keep the remainder as customer credit
-              </label>
-              {remainderBlocked && (
-                <p className="mt-1 text-xs text-destructive">
-                  {formatCents(plan.unappliedCents)} is unapplied. Allocate it, or keep it as customer credit.
-                </p>
-              )}
-              {plan.errors.map((reason) => (
-                <p key={reason} className="mt-1 text-xs text-destructive">{reason}</p>
-              ))}
-            </div>
-
-            {error && <p className="text-xs text-destructive">{error}</p>}
+            {plan.errors.map((reason) => (
+              <p key={reason} className="mt-1 text-xs" style={{ color: 'var(--tms-badge-red)' }}>{reason}</p>
+            ))}
           </div>
-        )}
 
-        <DialogFooter>
-          <Button variant="ghost" onClick={onClose} disabled={posting}>Cancel</Button>
-          <Button onClick={submit} disabled={disabled || !plan.ok || remainderBlocked}>
-            {posting ? 'Posting…' : 'Post'}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          {error && <p className="text-xs" style={{ color: 'var(--tms-badge-red)' }}>{error}</p>}
+        </div>
+      )}
+    </TmsDialog>
   )
 }

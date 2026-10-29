@@ -11,7 +11,7 @@ related: [commissions, reports, ar-invoicing-and-payments]
 
 Who works here, what each of them opens, and which desk they sit at. This article covers the six roles and the pages each one grants, why a role change lands at the next sign-in and how to make it land now, the extra pages you can hand somebody beside their role, claims — which ones the server actually refuses on and which are only a record — who may manage people and who may not, the three ways the system refuses to let the office lock itself out, teams and the five addresses a team owns, and the two switches that look like permissions and are not.
 
-People live on the **Users** page (`/users`), which the owner and every admin can open — it is not on the sidebar; the **Users** button on the Roles & pages card in Settings is the way in. The house rules live on two cards in Settings: **Roles & pages** (the matrix, read-only, plus the two board switches) and **Teams**.
+People live on the **Users** page (`/tms/brokerage/users`), which the owner and every admin can open — it is not on the sidebar; the **Users** button on the Roles & pages card in My Brokerage is the way in. The house rules live on two cards in My Brokerage: **Roles & pages** (the matrix, read-only, plus the two board switches) and **Teams**.
 
 ## The six roles, and what each one opens
 
@@ -25,7 +25,7 @@ People live on the **Users** page (`/users`), which the owner and every admin ca
 | **Compliance** | Carrier, customer and location profiles. | Carriers · Customers · Locations |
 | **No role** | No TMS pages — own-fleet work only, granted page by page. | Nothing |
 
-One page key can open more than one screen: **Loads** is the calendar grid, the Shipments board, Check calls and the carrier-upload Documents queue, and **Quotes** is both `/quotes` and `/rates`. Admin is ticked all the way across the matrix because an admin holds the `ADMIN` group, which opens every page — there is no list of admin pages to drift out of date.
+One page key can open more than one screen: **Loads** is the calendar grid, the Shipments board, Check calls and the carrier-upload Documents queue, and **Quotes** is both `/tms/rates` and `/tms/rates/lanes`. Admin is ticked all the way across the matrix because an admin holds the `ADMIN` group, which opens every page — there is no list of admin pages to drift out of date.
 
 **A role's pages are code, not settings.** The matrix on the Roles & pages card is deliberately read-only: *"A role's pages are code, not settings — they are re-applied to Cognito every time a profile is saved."* An edit there would be overwritten by the next save. What you change per person — their role, their extra pages, their claims — is on the Users page.
 
@@ -89,7 +89,7 @@ One more refusal worth knowing, from the **Manager** field: *"A manager must be 
 
 ## Teams
 
-A team is a desk: a key, a name, its members, and the addresses that desk sends from. Teams are edited on the **Teams** card in Settings, and the card checks them against the same rules the server uses, so you read the refusal against the team in front of you:
+A team is a desk: a key, a name, its members, and the addresses that desk sends from. Teams are edited on the **Teams** card in My Brokerage, and the card checks them against the same rules the server uses, so you read the refusal against the team in front of you:
 
 - *"Every team needs a key."*, and a key is letters, digits, `-` and `_`, up to 24 characters — *"Team key "east desk" may only use letters, digits, "-" and "_", up to 24 characters."* Keys are stored upper-cased, and *"Team key "EAST" is used twice."*
 - *"Team EAST needs a name."*

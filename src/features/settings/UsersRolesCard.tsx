@@ -16,17 +16,40 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ExternalLink, Save, ShieldCheck } from 'lucide-react'
 import { toast } from 'sonner'
-import { Button } from '@/components/ui/button'
-import { Switch } from '@/components/ui/switch'
+import { TmsButton, TmsTable } from '@/features/tms/kit'
+import type { ColumnDef } from '@/features/tms/kit'
 import { getTmsSettings, saveTmsSettings } from '@/lib/apiClient'
 import { pageOptions } from '@/lib/navItems'
 import { ROLES, ROLE_DESCRIPTIONS, ROLE_LABELS, ROLE_PAGES } from '@/lib/roles'
-import type { TmsSettings } from '@/types/tms'
+import type { RoleKey, TmsSettings } from '@/types/tms'
+import { CheckRow, ErrorText, Hint, Loading, SettingsCard, Stack } from './settingsKit'
 
 /** Only the pages some role actually grants: a column nothing ticks teaches nothing. */
 const GRANTED_PAGES = pageOptions().filter((page) =>
   ROLES.some((role) => ROLE_PAGES[role].includes(page.key)),
 )
+
+const COLUMNS: ColumnDef<RoleKey>[] = [
+  {
+    key: 'role',
+    header: 'Role',
+    render: (role) => (
+      <div>
+        <div style={{ fontWeight: 600 }}>{ROLE_LABELS[role]}</div>
+        <div className="tms-muted" style={{ fontSize: 12 }}>{ROLE_DESCRIPTIONS[role]}</div>
+      </div>
+    ),
+  },
+  // An admin opens every page, so that row is ticked throughout rather than looked up.
+  ...GRANTED_PAGES.map((page): ColumnDef<RoleKey> => ({
+    key: page.key,
+    header: page.label,
+    render: (role) => (role === 'ADMIN' || ROLE_PAGES[role].includes(page.key) ? '✓' : '·'),
+  })),
+]
+
+/** The matrix rows. `ROLES` is readonly; the table takes a mutable array. */
+const ROLE_ROWS: RoleKey[] = [...ROLES]
 
 export function UsersRolesCard() {
   const [settings, setSettings] = useState<TmsSettings | null>(null)
@@ -65,85 +88,45 @@ export function UsersRolesCard() {
   }
 
   return (
-    <div style={{ border: '1px solid var(--ds-border)', borderRadius: 12, background: 'var(--ds-surface)', padding: 16, boxShadow: 'var(--sh-sm)', display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <div className="flex items-center gap-2.5">
-        <ShieldCheck size={16} style={{ color: 'var(--ds-t3)' }} />
-        <div className="flex-1">
-          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)' }}>Roles &amp; pages</div>
-          <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 2 }}>
-            What each role opens. Roles are given to people on the Users page; extra pages and claims are granted there too.
-          </div>
-        </div>
-        <Link
-          to="/users"
-          className="inline-flex h-8 items-center gap-1 rounded-md border border-border px-3 text-xs font-semibold"
-          style={{ color: 'var(--ds-t2)', background: 'var(--ds-bg)' }}
-        >
+    <SettingsCard
+      icon={ShieldCheck}
+      title="Roles & pages"
+      description="What each role opens. Roles are given to people on the Users page; extra pages and claims are granted there too."
+      actions={
+        <Link to="/tms/brokerage/users" className="tms-btn tms-btn-secondary tms-btn-sm">
           Users <ExternalLink size={12} />
         </Link>
-      </div>
+      }
+    >
+      <Stack>
+        <TmsTable columns={COLUMNS} rows={ROLE_ROWS} rowKey={(role) => role} />
+        <Hint>An admin opens every page, which is why that row is ticked throughout. A role&rsquo;s pages are code, not settings — they are re-applied to Cognito every time a profile is saved.</Hint>
 
-      <div className="overflow-x-auto">
-        <table className="w-full border-collapse text-xs">
-          <thead>
-            <tr>
-              <th className="border-b border-border px-2 py-1.5 text-left font-semibold text-muted-foreground">Role</th>
-              {GRANTED_PAGES.map((page) => (
-                <th key={page.key} className="border-b border-border px-2 py-1.5 text-center font-semibold text-muted-foreground">
-                  {page.label}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {ROLES.map((role) => (
-              <tr key={role}>
-                <td className="border-b border-border px-2 py-1.5 align-top">
-                  <div className="font-semibold" style={{ color: 'var(--ds-t1)' }}>{ROLE_LABELS[role]}</div>
-                  <div className="text-muted-foreground">{ROLE_DESCRIPTIONS[role]}</div>
-                </td>
-                {GRANTED_PAGES.map((page) => (
-                  <td key={page.key} className="border-b border-border px-2 py-1.5 text-center" style={{ color: 'var(--ds-t2)' }}>
-                    {role === 'ADMIN' ? '✓' : ROLE_PAGES[role].includes(page.key) ? '✓' : '·'}
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <p className="text-xs text-muted-foreground">
-        An admin opens every page, which is why that row is ticked throughout. A role&rsquo;s pages are code, not settings — they are re-applied to Cognito every time a profile is saved.
-      </p>
-
-      {loading ? <div className="text-sm text-muted-foreground">Loading…</div> : (
-        <div className="space-y-2">
-          <label className="flex items-center gap-2.5 text-sm" style={{ color: 'var(--ds-t2)' }}>
-            <Switch
-              aria-label="Limit customer rep view"
+        {loading ? <Loading /> : (
+          <Stack gap={8}>
+            <CheckRow
+              ariaLabel="Limit customer rep view"
+              label={<>Customer reps start on &ldquo;Mine&rdquo;</>}
               checked={limitCustomerRepView}
-              onCheckedChange={setLimitCustomerRepView}
+              onChange={setLimitCustomerRepView}
             />
-            Customer reps start on &ldquo;Mine&rdquo;
-          </label>
-          <label className="flex items-center gap-2.5 text-sm" style={{ color: 'var(--ds-t2)' }}>
-            <Switch
-              aria-label="Limit carrier rep view"
+            <CheckRow
+              ariaLabel="Limit carrier rep view"
+              label={<>Carrier reps start on &ldquo;Mine&rdquo;</>}
               checked={limitCarrierRepView}
-              onCheckedChange={setLimitCarrierRepView}
+              onChange={setLimitCarrierRepView}
             />
-            Carrier reps start on &ldquo;Mine&rdquo;
-          </label>
-          <p className="text-xs text-muted-foreground">
-            These two default the boards&rsquo; &ldquo;Mine&rdquo; filter for reps. They are not a read restriction: every signed-in user can still read every customer, carrier and load, and clearing the filter shows them.
-          </p>
+            <Hint>These two default the boards&rsquo; &ldquo;Mine&rdquo; filter for reps. They are not a read restriction: every signed-in user can still read every customer, carrier and load, and clearing the filter shows them.</Hint>
 
-          {error && <p className="text-xs text-destructive">{error}</p>}
-          <Button type="button" size="sm" className="h-8 gap-1" onClick={save} disabled={saving}>
-            <Save className="size-3.5" /> Save role settings
-          </Button>
-        </div>
-      )}
-    </div>
+            {error && <ErrorText>{error}</ErrorText>}
+            <div>
+              <TmsButton variant="primary" size="sm" onClick={save} disabled={saving}>
+                <Save size={14} /> Save role settings
+              </TmsButton>
+            </div>
+          </Stack>
+        )}
+      </Stack>
+    </SettingsCard>
   )
 }

@@ -5,6 +5,7 @@ import {
   buildLaneSamplePlan,
   laneKey3For,
   laneKeyFor,
+  laneSampleFacts,
   legacyRateCents,
   materialOf,
   planLaneSamples,
@@ -69,7 +70,13 @@ function baseSource({ unit = 'dollars', comparables = 10 } = {}) {
 
   return {
     Shipment: [
-      { id: 'shp-1', number: 'S10001', customerId: 'cust-1', customerName: 'Acme Foods', mode: 'FTL', status: 'DELIVERED' },
+      {
+        id: 'shp-1', number: 'S10001', customerId: 'cust-1', customerName: 'Acme Foods',
+        mode: 'FTL', status: 'DELIVERED',
+        // Step R: the dashboard's facts live on the shipment and its mirrored load.
+        revDivision: 'BROKERAGE', revSubdivision: null, salesRepId: 'rep-sub-1',
+        datPostedAt: '2026-03-01T09:00:00.000Z',
+      },
     ],
     Order: [
       { id: 'ord-1', shipmentId: 'shp-1', customerId: 'cust-1', customerName: 'Acme Foods', mode: 'FTL', rateType: 'SPOT', equipmentType: 'DRY_VAN', customerRepId: 'rep@bcatcorp.com', invoiceId: 'inv-1', invoicedAt: '2026-04-02T12:00:00.000Z' },
@@ -89,6 +96,10 @@ function baseSource({ unit = 'dollars', comparables = 10 } = {}) {
         miles: 132,
         divisionKey: 'BROKERAGE',
         equipmentType: 'REEFER',
+        revDivision: 'BROKERAGE',
+        salesRepId: 'rep-sub-1',
+        trackingProvider: 'LINK',
+        deliveredAt: '2026-03-04T15:00:00.000Z',
         stops: JSON.stringify(stops('Chicago, IL', 'Danville, IL', { zips: ['60601', '61832-1234'] })),
       },
       // Still moving: priced, but there is no rate history in a load that has not landed.
@@ -133,6 +144,20 @@ function baseSource({ unit = 'dollars', comparables = 10 } = {}) {
     ],
     LoadFinancials: [financials('tms-delivered', 245_000), financials('tms-no-state', 100_000), ...cmpFins],
     Customer: [{ id: 'cust-1', name: 'Acme Foods', teamKey: 'EAST' }],
+    // Step R facts: two scheduled check calls (one answered inside the grace, one
+    // answered an hour late), a ping, a superseded POD and the POD that counts.
+    LoadCheckCall: [
+      { id: 'cc-1', loadId: 'tms-delivered', at: '2026-03-02T08:00:00.000Z', type: 'DISPATCH', nextCheckCallAt: '2026-03-02T14:00:00.000Z' },
+      { id: 'cc-2', loadId: 'tms-delivered', at: '2026-03-02T14:10:00.000Z', type: 'TRACKING_PING', lat: 41.5, lng: -88.1, nextCheckCallAt: '2026-03-03T02:00:00.000Z' },
+      { id: 'cc-3', loadId: 'tms-delivered', at: '2026-03-03T03:00:00.000Z', type: 'LOCATION_UPDATE', lat: 40.1, lng: -88.3 },
+    ],
+    ShipmentDocument: [
+      { id: 'doc-bol', shipmentId: 'shp-1', type: 'BOL', status: 'ACTIVE', createdAt: '2026-03-02T09:00:00.000Z' },
+      { id: 'doc-pod-void', shipmentId: 'shp-1', type: 'POD', status: 'VOID', createdAt: '2026-03-04T18:00:00.000Z' },
+      { id: 'doc-pod', shipmentId: 'shp-1', type: 'POD', status: 'ACTIVE', createdAt: '2026-03-05T10:00:00.000Z' },
+      { id: 'doc-pod-2', shipmentId: 'shp-1', type: 'POD', status: 'ACTIVE', createdAt: '2026-03-06T10:00:00.000Z' },
+    ],
+    TmsSettings: [{ id: 'default', checkCallGraceMinutes: 20 }],
     LaneRateSample: [],
   };
 }
@@ -489,5 +514,132 @@ describe('backfillLaneSamples — the Step I reporting fields', () => {
     expect('customerRepId' in item).toBe(false);
     expect('teamKey' in item).toBe(false);
     expect('invoiceMonth' in item).toBe(false);
+  });
+});
+
+describe('backfillLaneSamples — the Step R dashboard facts', () => {
+  it('stamps the division, the rep, the delivery, the tracking and the POD onto a sample', () => {
+    const { item } = actionFor(planLaneSamples(baseSource(), NOW), 'tms-delivered');
+
+    expect(item.revDivision).toBe('BROKERAGE');
+    expect(item.salesRepId).toBe('rep-sub-1');
+    expect(item.deliveredAt).toBe('2026-03-04T15:00:00.000Z');
+    expect(item.trackingProvider).toBe('LINK');
+    expect(item.datPostedAt).toBe('2026-03-01T09:00:00.000Z');
+    // The first call that reported a position, not the dispatch note before it.
+    expect(item.firstPingAt).toBe('2026-03-02T14:10:00.000Z');
+    // The earliest ACTIVE POD; the voided one and the BOL are not PODs.
+    expect(item.podReceivedAt).toBe('2026-03-05T10:00:00.000Z');
+    // A subsidiary nobody assigned stays absent rather than being written as null.
+    expect('revSubdivision' in item).toBe(false);
+  });
+
+  it('counts a scheduled call as met only when a later call lands inside the grace', () => {
+    const { item } = actionFor(planLaneSamples(baseSource(), NOW), 'tms-delivered');
+    // Two calls scheduled a next one: 14:00 answered at 14:10 (grace 20), and
+    // 02:00 answered an hour late.
+    expect(item.checkCallsDue).toBe(2);
+    expect(item.checkCallsMet).toBe(1);
+  });
+
+  it('falls back to the notifier default grace when the org never set one', () => {
+    const calls = [
+      { id: 'c1', at: '2026-03-02T08:00:00.000Z', nextCheckCallAt: '2026-03-02T14:00:00.000Z' },
+      { id: 'c2', at: '2026-03-02T14:18:00.000Z' },
+    ];
+    // 18 minutes late is met at a 20-minute grace and missed at the 15-minute default.
+    expect(laneSampleFacts({ load: { id: 'l' }, checkCalls: calls, graceMinutes: 20 })).toMatchObject({ checkCallsDue: 1, checkCallsMet: 1 });
+    expect(laneSampleFacts({ load: { id: 'l' }, checkCalls: calls })).toMatchObject({ checkCallsDue: 1, checkCallsMet: 0 });
+  });
+
+  it('counts no dues on a load nobody ever scheduled a call for', () => {
+    const facts = laneSampleFacts({
+      load: { id: 'l' },
+      checkCalls: [{ id: 'c1', at: '2026-03-02T08:00:00.000Z', type: 'NOTE' }],
+    });
+    expect(facts).toMatchObject({ checkCallsDue: 0, checkCallsMet: 0, firstPingAt: null });
+  });
+
+  it('re-plans a Step I sample that predates the facts, and settles on the next pass', () => {
+    const source = baseSource();
+    const { item } = actionFor(planLaneSamples(source, NOW), 'tms-delivered');
+    const stale = { ...item };
+    for (const field of ['revDivision', 'salesRepId', 'deliveredAt', 'podReceivedAt', 'checkCallsDue', 'checkCallsMet']) {
+      delete stale[field];
+    }
+
+    const replanned = planLaneSamples({ ...source, LaneRateSample: [stale] }, NOW);
+    expect(actionFor(replanned, 'tms-delivered')).toBeDefined();
+
+    const settled = planLaneSamples({ ...source, LaneRateSample: [item] }, NOW);
+    expect(actionFor(settled, 'tms-delivered')).toBeUndefined();
+    expect(settled.alreadyCurrent).toBe(1);
+  });
+
+  it('--refresh carries the facts onto a live sample and leaves its money alone', () => {
+    const source = baseSource();
+    const { item } = actionFor(planLaneSamples(source, NOW), 'tms-delivered');
+    // What the live Lambda wrote: its own price, none of the Step R facts.
+    const live = { ...item, source: 'LOAD', revenueCents: 999_999, sampledAt: '2026-03-20T00:00:00.000Z' };
+    for (const field of ['revDivision', 'salesRepId', 'deliveredAt', 'podReceivedAt', 'trackingProvider', 'firstPingAt', 'datPostedAt', 'checkCallsDue', 'checkCallsMet']) {
+      delete live[field];
+    }
+    const withLive = { ...source, LaneRateSample: [live] };
+
+    const left = planLaneSamples(withLive, NOW);
+    expect(actionFor(left, 'tms-delivered')).toBeUndefined();
+    expect(left.reviewables[0].reason).toMatch(/--refresh/);
+
+    const refreshed = planLaneSamples(withLive, NOW, { refreshLive: true });
+    const patch = refreshed.actions.find((a) => a.action === 'PATCH_LANE_SAMPLE_FACTS');
+    expect(refreshed.factsPatched).toBe(1);
+    expect(patch.sampledAt).toBe('2026-03-20T00:00:00.000Z');
+    expect(patch.facts).toMatchObject({ revDivision: 'BROKERAGE', checkCallsDue: 2, checkCallsMet: 1 });
+    expect(patch.facts).not.toHaveProperty('revenueCents');
+
+    // Once the facts are on the live row, a second --refresh plan has nothing to do.
+    const patched = { ...live, ...patch.facts };
+    const second = planLaneSamples({ ...source, LaneRateSample: [patched] }, NOW, { refreshLive: true });
+    expect(second.actions.some((a) => a.action === 'PATCH_LANE_SAMPLE_FACTS')).toBe(false);
+    expect(second.factsPatched).toBe(0);
+  });
+
+  it('applies a facts patch as an update that touches only the fact columns', async () => {
+    const source = baseSource();
+    const { item } = actionFor(planLaneSamples(source, NOW), 'tms-delivered');
+    const live = { ...item, source: 'LOAD', revenueCents: 999_999, sampledAt: '2026-03-20T00:00:00.000Z' };
+    delete live.revDivision;
+    delete live.checkCallsDue;
+
+    const plan = buildLaneSamplePlan({
+      source: { ...source, LaneRateSample: [live] },
+      environment: 'dev',
+      suffix: 'nc3jsnxdmjhkpequimypiatkma-NONE',
+      nowIso: NOW,
+      refreshLive: true,
+    });
+
+    const sent = [];
+    const doc = { send: async (cmd) => { sent.push(cmd); return {}; } };
+    const report = await applyLaneSamplePlan({ doc, plan, suffix: 'nc3jsnxdmjhkpequimypiatkma-NONE' });
+
+    expect(report.factsPatched).toBe(1);
+    // The live row is patched, never re-put: no PUT carries its id.
+    expect(sent.some((c) => c.input.Item?.id === 'lrs:tms-delivered')).toBe(false);
+    const update = sent.find((c) => c.input.UpdateExpression);
+    expect(update.input.Key).toEqual({ id: 'lrs:tms-delivered' });
+    expect(update.input.ConditionExpression).toContain('sampledAt = :sampledAt');
+    expect(update.input.UpdateExpression).toMatch(/#revDivision = :revDivision/);
+    expect(update.input.UpdateExpression).not.toMatch(/revenueCents/);
+  });
+
+  it('fingerprints the rows the facts are read from, so a new check call invalidates the plan', () => {
+    const source = baseSource();
+    const before = sourceRowsOf(source);
+    const after = sourceRowsOf({
+      ...source,
+      LoadCheckCall: [...source.LoadCheckCall, { id: 'cc-4', loadId: 'tms-delivered', at: '2026-03-03T09:00:00.000Z', type: 'NOTE' }],
+    });
+    expect(after.length).toBe(before.length + 1);
   });
 });

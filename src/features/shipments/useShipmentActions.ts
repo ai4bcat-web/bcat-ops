@@ -9,10 +9,10 @@
 import { useCallback, useState } from 'react'
 import { toast } from 'sonner'
 import {
-  assignAsset, assignCarrier, bookCarrier, deleteShipment, dispatchLoad, duplicateShipment, getShipmentBundle,
-  logCheckCall, recalcCharges, removeLoadCarrier, resolveIncident, restoreShipment, saveOrderForm, sendRateCon,
-  setArStatus, setEta, setLoadStatus, setNextCheckCall, setQuickPay, setShipmentStatus, sendTrackingLink,
-  submitOrder, tenderRespond, updateStop, voidRateCon,
+  assignAsset, assignCarrier, bookCarrier, clearRevTag, dispatchLoad, duplicateShipment, getShipmentBundle,
+  logCheckCall, recalcCharges, removeLoadCarrier, resolveIncident, saveOrderForm, sendRateCon,
+  setArStatus, setEta, setLoadStatus, setNextCheckCall, setQuickPay, setRevTag, setSalesRep, setShipmentStatus,
+  sendTrackingLink, submitOrder, tenderRespond, updateStop, voidRateCon,
 } from '@/lib/apiClient'
 import type { LoadChargeInput, ShipmentBundle } from '@/types/tms'
 import type { BookCarrierFields } from '@/features/carriers/components/BookCarrierDialog'
@@ -34,6 +34,13 @@ export interface ShipmentActions {
   setQuickPay: (input: { loadCarrierId: string; quickPayDays: number | null }) => Promise<void>
   sendRateCon: (input: { loadCarrierId: string; pdfBase64: string; to: string[]; cc?: string[]; expiresHours?: number }) => Promise<void>
   voidRateCon: (input: { loadCarrierId: string }) => Promise<void>
+  /**
+   * Step R — the revenue tag and the sales rep. The tag is normally the ownership
+   * rules' answer; these two are the hand override and the way back to the rules.
+   */
+  onSetRevTag: (input: { divisionCode: string; subdivisionCode?: string }) => Promise<void>
+  onClearRevTag: () => Promise<void>
+  onSetSalesRep: (repId: string | null) => Promise<void>
   dispatchLoad: (input: DispatchFields) => Promise<void>
   /** Step D — the tracking tab. Each answers with the bundle, which is swapped in here. */
   tracking: TrackingActionHandlers
@@ -116,7 +123,7 @@ export function useShipmentActions(
       }))
     },
     submit: async (carrierRepId) => {
-      await call('Submit order', () => submitOrder({ shipmentId, expectedUpdatedAt, carrierRepId }))
+      await call('Submit shipment', () => submitOrder({ shipmentId, expectedUpdatedAt, carrierRepId }))
     },
     stopAction: async (input) => {
       await call('Update stop', () => updateStop({
@@ -143,6 +150,15 @@ export function useShipmentActions(
     },
     voidRateCon: async (input) => {
       await call('Void rate con', () => voidRateCon(input))
+    },
+    onSetRevTag: async (input) => {
+      await call('Set division tag', () => setRevTag({ shipmentId, ...input }))
+    },
+    onClearRevTag: async () => {
+      await call('Back to rules', () => clearRevTag({ shipmentId }))
+    },
+    onSetSalesRep: async (repId) => {
+      await call('Sales rep', () => setSalesRep({ shipmentId, repId }))
     },
     dispatchLoad: async (input) => {
       const { sendTrackingLink: alsoSendLink, ...fields } = input
@@ -202,12 +218,9 @@ export function useShipmentActions(
       onSetStatus: async (status, reason) => {
         await call('Status change', () => setShipmentStatus({ shipmentId, expectedUpdatedAt, status, reason }))
       },
-      onDelete: async () => {
-        await call('Delete', () => deleteShipment({ shipmentId, expectedUpdatedAt }))
-      },
-      onRestore: async () => {
-        await call('Restore', () => restoreShipment({ shipmentId }))
-      },
+      // The void dialog owns the call (it collects the reason and holds the error);
+      // all that is left here is to swap the voided bundle in. There is no un-void.
+      onVoid: (next) => { onBundle(next) },
       onTenderRespond: async (decision, reason) => {
         await call('Tender response', () => tenderRespond({ shipmentId, expectedUpdatedAt, decision, reason }))
       },

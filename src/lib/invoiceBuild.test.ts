@@ -90,7 +90,6 @@ function readinessInput(overrides: Partial<InvoiceReadinessInput> = {}): Invoice
       arStatus: 'UNBILLED',
       revenueCents: 120000,
       references: [PO],
-      docsOverrideAt: null,
     },
     shipment: { number: 'B-1042', status: 'DELIVERED', deletedAt: null },
     customer: { requiredReferences: [{ code: 'PO', label: 'PO number', level: 'ORDER', display: true, countOnNewOrder: 1 }] },
@@ -259,21 +258,11 @@ describe('invoiceReadiness', () => {
     ])
   })
 
-  it('refuses a missing document', () => {
+  it('refuses a missing document, with no way to override it', () => {
     const { reasons } = invoiceReadiness(readinessInput({ gate: { missing: ['POD'] } }))
     expect(reasons).toEqual([
-      'Required documents are missing: Proof of delivery. Attach them or override the document gate.',
+      'Required documents are missing: Proof of delivery. Attach them before invoicing.',
     ])
-  })
-
-  it('accepts a missing document once the gate has been overridden', () => {
-    const base = readinessInput()
-    const result = invoiceReadiness({
-      ...base,
-      order: { ...base.order, docsOverrideAt: '2026-03-11T00:00:00.000Z' },
-      gate: { missing: ['POD'] },
-    })
-    expect(result).toEqual({ ready: true, reasons: [] })
   })
 })
 

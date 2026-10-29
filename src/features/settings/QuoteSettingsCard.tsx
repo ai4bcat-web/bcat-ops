@@ -21,11 +21,7 @@
 import { useEffect, useState } from 'react'
 import { FileSpreadsheet, Save } from 'lucide-react'
 import { toast } from 'sonner'
-import { Button } from '@/components/ui/button'
-import { Checkbox } from '@/components/ui/checkbox'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
+import { TmsButton, TmsField, TmsInput, TmsTextarea } from '@/features/tms/kit'
 import { getTmsSettings, saveQuoteSettings } from '@/lib/apiClient'
 import {
   DEFAULT_HOURS_TO_QUOTE, DEFAULT_OFFER_EXPIRY_HOURS, DEFAULT_QUOTE_NUMBER_FORMAT,
@@ -36,6 +32,7 @@ import {
   DEFAULT_QUOTE_EMAIL_TEMPLATE, quoteTemplateError,
 } from '@/lib/quoteNotices'
 import type { TmsSettings } from '@/types/tms'
+import { CheckRow, ErrorText, Hint, Loading, SettingsCard, Stack } from './settingsKit'
 
 /** An hours box: blank means "the house default", anything else must be a whole number ≥ 1. */
 function hoursError(raw: string, what: string): string | null {
@@ -44,11 +41,6 @@ function hoursError(raw: string, what: string): string | null {
   const n = Number(text)
   if (!Number.isInteger(n) || n < 1) return `${what} must be a whole number of hours, at least 1`
   return null
-}
-
-function hoursValue(raw: string): number | null {
-  const text = raw.trim()
-  return text ? Number(text) : null
 }
 
 export function QuoteSettingsCard() {
@@ -114,8 +106,8 @@ export function QuoteSettingsCard() {
     setSaving(true)
     try {
       await saveQuoteSettings({
-        hoursToQuote: hoursValue(hoursToQuote),
-        offerExpiryHours: hoursValue(offerExpiryHours),
+        hoursToQuote: hoursToQuote.trim() ? Number(hoursToQuote.trim()) : null,
+        offerExpiryHours: offerExpiryHours.trim() ? Number(offerExpiryHours.trim()) : null,
         // A blank box is "the house default", not an empty format.
         quoteNumberFormat: numberFormat.trim() || null,
         nextQuoteNumber: nextNumber.trim() ? nextN : null,
@@ -134,162 +126,142 @@ export function QuoteSettingsCard() {
   }
 
   return (
-    <div style={{ border: '1px solid var(--ds-border)', borderRadius: 12, background: 'var(--ds-surface)', padding: 16, boxShadow: 'var(--sh-sm)', display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <div className="flex items-center gap-2.5">
-        <FileSpreadsheet size={16} style={{ color: 'var(--ds-t3)' }} />
-        <div>
-          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)' }}>Quotes &amp; offers</div>
-          <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 2 }}>
-            How long a quote stands, how quotes are numbered, what the e-mails say, and who may send one below margin.
-          </div>
-        </div>
-      </div>
-
-      {loading ? <div className="text-sm text-muted-foreground">Loading…</div> : (
-        <div className="space-y-3">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Hours to quote</Label>
-              <Input
+    <SettingsCard
+      icon={FileSpreadsheet}
+      title="Quotes & offers"
+      description="How long a quote stands, how quotes are numbered, what the e-mails say, and who may send one below margin."
+    >
+      {loading ? <Loading /> : (
+        <Stack>
+          <div className="tms-grid tms-grid-2">
+            <TmsField
+              label="Hours to quote"
+              hint={`How long a customer has to answer. A customer's own quoting default beats this one; blank means ${DEFAULT_HOURS_TO_QUOTE} hours.`}
+            >
+              <TmsInput
                 aria-label="Hours to quote"
                 inputMode="numeric"
                 value={hoursToQuote}
                 onChange={(e) => setHoursToQuote(e.target.value)}
                 placeholder={String(DEFAULT_HOURS_TO_QUOTE)}
-                className="h-9 text-sm"
               />
-              <p className="mt-1 text-xs text-muted-foreground">
-                How long a customer has to answer. A customer&rsquo;s own quoting default beats this one; blank means {DEFAULT_HOURS_TO_QUOTE} hours.
-              </p>
-            </div>
-            <div>
-              <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Offer expiry hours</Label>
-              <Input
+            </TmsField>
+            <TmsField
+              label="Offer expiry hours"
+              hint="How long a carrier has to answer an offer. Capped at the first pickup appointment, and never under an hour."
+            >
+              <TmsInput
                 aria-label="Offer expiry hours"
                 inputMode="numeric"
                 value={offerExpiryHours}
                 onChange={(e) => setOfferExpiryHours(e.target.value)}
                 placeholder={String(DEFAULT_OFFER_EXPIRY_HOURS)}
-                className="h-9 text-sm"
               />
-              <p className="mt-1 text-xs text-muted-foreground">
-                How long a carrier has to answer an offer. Capped at the first pickup appointment, and never under an hour.
-              </p>
-            </div>
+            </TmsField>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Quote number format</Label>
-              <Input
+          <div className="tms-grid tms-grid-2">
+            <TmsField
+              label="Quote number format"
+              hint={
+                <>
+                  {'{yyyy}'} is the year, {'{n}'} or {'{n:6}'} the counter.{' '}
+                  {formatError
+                    ? <span className="tms-field-error">{formatError}.</span>
+                    : example && <>Next quote: <strong data-testid="quote-number-example">{example}</strong></>}
+                </>
+              }
+            >
+              <TmsInput
                 aria-label="Quote number format"
                 value={numberFormat}
                 onChange={(e) => setNumberFormat(e.target.value)}
                 placeholder={DEFAULT_QUOTE_NUMBER_FORMAT}
-                className="h-9 text-sm"
               />
-              <p className="mt-1 text-xs text-muted-foreground">
-                {'{yyyy}'} is the year, {'{n}'} or {'{n:6}'} the counter.{' '}
-                {formatError
-                  ? <span className="text-destructive">{formatError}.</span>
-                  : example && <>Next quote: <span className="font-medium text-foreground" data-testid="quote-number-example">{example}</span></>}
-              </p>
-            </div>
-            <div>
-              <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Next number</Label>
-              <Input
+            </TmsField>
+            <TmsField
+              label="Next number"
+              hint="The quote number is the quote's id. Setting this back over a number already used is refused when the quote is minted."
+            >
+              <TmsInput
                 aria-label="Next quote number"
                 inputMode="numeric"
                 value={nextNumber}
                 onChange={(e) => setNextNumber(e.target.value)}
                 placeholder="1"
-                className="h-9 text-sm"
               />
-              <p className="mt-1 text-xs text-muted-foreground">
-                The quote number is the quote&rsquo;s id. Setting this back over a number already used is refused when the quote is minted.
-              </p>
-            </div>
+            </TmsField>
           </div>
 
-          <div>
-            <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Quote e-mail</Label>
-            <Textarea
+          <TmsField label="Quote e-mail">
+            <TmsTextarea
               aria-label="Quote email template"
               rows={3}
               value={quoteTemplate}
               onChange={(e) => setQuoteTemplate(e.target.value)}
               placeholder={DEFAULT_QUOTE_EMAIL_TEMPLATE}
-              className="text-sm"
             />
-          </div>
+          </TmsField>
 
-          <div>
-            <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Counter e-mail</Label>
-            <Textarea
+          <TmsField label="Counter e-mail">
+            <TmsTextarea
               aria-label="Counter email template"
               rows={3}
               value={counterTemplate}
               onChange={(e) => setCounterTemplate(e.target.value)}
               placeholder={DEFAULT_COUNTER_EMAIL_TEMPLATE}
-              className="text-sm"
             />
-          </div>
+          </TmsField>
 
-          <div>
-            <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Carrier offer request</Label>
-            <Textarea
+          <TmsField
+            label="Carrier offer request"
+            hint={<>{'{number}'}, {'{lane}'}, {'{amount}'} and {'{pickup}'} are filled in. {'{link}'} is required in all three — without it there is nothing to accept.</>}
+          >
+            <TmsTextarea
               aria-label="Offer request email template"
               rows={3}
               value={offerTemplate}
               onChange={(e) => setOfferTemplate(e.target.value)}
               placeholder={DEFAULT_OFFER_REQUEST_EMAIL_TEMPLATE}
-              className="text-sm"
             />
-            <p className="mt-1 text-xs text-muted-foreground">
-              {'{number}'}, {'{lane}'}, {'{amount}'} and {'{pickup}'} are filled in. {'{link}'} is required in all three — without it there is nothing to accept.
-            </p>
-          </div>
+          </TmsField>
 
-          <div>
-            <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Quote terms</Label>
-            <Textarea
+          <TmsField label="Quote terms">
+            <TmsTextarea
               aria-label="Quote terms"
               rows={3}
               value={terms}
               onChange={(e) => setTerms(e.target.value)}
               placeholder="Shown at the foot of every quote link and e-mail."
-              className="text-sm"
             />
-          </div>
+          </TmsField>
 
-          <div className="space-y-2">
-            <label className="flex items-start gap-2.5 text-sm" style={{ color: 'var(--ds-t2)' }}>
-              <Checkbox
-                aria-label="Below margin admin only"
-                checked={belowMarginAdminOnly}
-                onCheckedChange={(v) => setBelowMarginAdminOnly(v === true)}
-              />
-              Only an admin may send a quote below the customer&rsquo;s minimum margin
-            </label>
-            <label className="flex items-start gap-2.5 text-sm" style={{ color: 'var(--ds-t2)' }}>
-              <Checkbox
-                aria-label="Carrier sees book now rate"
-                checked={carrierSeesBookNow}
-                onCheckedChange={(v) => setCarrierSeesBookNow(v === true)}
-              />
-              A carrier&rsquo;s offer link shows the book-now rate
-            </label>
-            <p className="text-xs text-muted-foreground">
-              A carrier who accepts the book-now rate still books nothing: a dispatcher accepts the offer here.
-            </p>
-          </div>
+          <Stack gap={8}>
+            <CheckRow
+              ariaLabel="Below margin admin only"
+              align="start"
+              label={<>Only an admin may send a quote below the customer&rsquo;s minimum margin</>}
+              checked={belowMarginAdminOnly}
+              onChange={setBelowMarginAdminOnly}
+            />
+            <CheckRow
+              ariaLabel="Carrier sees book now rate"
+              align="start"
+              label={<>A carrier&rsquo;s offer link shows the book-now rate</>}
+              checked={carrierSeesBookNow}
+              onChange={setCarrierSeesBookNow}
+            />
+            <Hint>A carrier who accepts the book-now rate still books nothing: a dispatcher accepts the offer here.</Hint>
+          </Stack>
 
-          {error && <p className="text-xs text-destructive">{error}</p>}
-          <Button type="button" size="sm" className="h-8 gap-1" onClick={save} disabled={saving}>
-            <Save className="size-3.5" /> Save quote settings
-          </Button>
-        </div>
+          {error && <ErrorText>{error}</ErrorText>}
+          <div>
+            <TmsButton variant="primary" size="sm" onClick={save} disabled={saving}>
+              <Save size={14} /> Save quote settings
+            </TmsButton>
+          </div>
+        </Stack>
       )}
-    </div>
+    </SettingsCard>
   )
 }

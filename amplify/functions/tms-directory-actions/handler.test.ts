@@ -34,6 +34,10 @@ const send = vi.hoisted(() => {
   process.env.MERGE_JOB_TABLE_NAME = 'DirectoryMergeJob-test'
   process.env.LOAD_TABLE_NAME = 'Load-test'
   process.env.USER_PROFILE_TABLE_NAME = 'UserProfile-test'
+  process.env.OWNERSHIP_DIVISION_TABLE_NAME = 'OwnershipDivision-test'
+  process.env.OWNERSHIP_RULE_TABLE_NAME = 'OwnershipRule-test'
+  process.env.SHIPMENT_VIEW_TABLE_NAME = 'ShipmentView-test'
+  process.env.AUDIT_LOG_TABLE_NAME = 'AuditLog-test'
   process.env.GEOCODE_TOKEN_SECRET = 'test-geocode-secret'
   return vi.fn()
 })
@@ -116,6 +120,8 @@ vi.mock('@aws-amplify/backend-function/runtime', () => {
 import { handler, parseInput } from './handler'
 // The real signer: the token the geocode Lambda mints must verify here, byte for byte.
 import { signGeocodePayload } from '../tms-geocode/handler'
+import { SEED_DIVISIONS, SEED_RULES } from '../../../src/lib/ownership'
+import { SEED_VIEWS } from '../../../src/lib/shipmentViewDefs'
 
 // ── Mock types ────────────────────────────────────────────────────────────────
 
@@ -130,6 +136,8 @@ interface MockPutCommand {
     TableName?: string
     Item?: Record<string, AttributeValue>
     ConditionExpression?: string
+    ExpressionAttributeNames?: Record<string, string>
+    ExpressionAttributeValues?: Record<string, AttributeValue>
   }
 }
 
@@ -1403,5 +1411,294 @@ describe('DynamoDB write shape (sandbox regressions)', () => {
     expect(put?.ConditionExpression).toBe('attribute_not_exists(#key)')
     expect((put as { ExpressionAttributeNames?: Record<string, string> } | undefined)?.ExpressionAttributeNames).toEqual({ '#key': 'key' })
     expect(put?.ConditionExpression ?? '').not.toMatch(DYNAMO_RESERVED_BARE)
+  })
+})
+
+// ── Step R: ownership taxonomy and department views ──────────────────────────
+//
+// These three tables decide who earns every shipment and what each department sees,
+// so the tests are about the refusals: a tree that loops, a code saved twice, a
+// division archived out from under its children or its rules, a rule dropped from
+// the list (deactivated, never deleted), and a caller who only has a page group.
+
+const ADMIN_CALLER = identity({ groups: ['ADMIN'] })
+const PAGE_CUSTOMER_CALLER = identity({ groups: ['page-customers'] })
+
+function conditionFailed(): Error {
+  const err = new Error('ConditionalCheckFailedException: the conditional request failed')
+  err.name = 'ConditionalCheckFailedException'
+  return err
+}
+
+/**
+ * An in-memory stand-in for the three tables that honours the two conditions this
+ * handler writes with — `attribute_not_exists(id)` and the `version` CAS — so an
+ * idempotent seed and a stale save behave here the way they do on DynamoDB.
+ */
+function ownershipTables(seed: Record<string, Record<string, unknown>[]> = {}) {
+  const tables = new Map<string, Map<string, Record<string, unknown>>>()
+  const tableOf = (name: string): Map<string, Record<string, unknown>> => {
+    const found = tables.get(name)
+    if (found) return found
+    const created = new Map<string, Record<string, unknown>>()
+    tables.set(name, created)
+    return created
+  }
+  for (const [name, rows] of Object.entries(seed)) {
+    for (const row of rows) tableOf(name).set(String(row.id), row)
+  }
+
+  send.mockImplementation((cmd: MockCommand) => {
+    const table = tableOf(String(cmd.input.TableName ?? ''))
+    // Only the two conditions this handler writes with are honoured; anything else
+    // would be a condition the production table would not enforce either.
+    const versionMatches = (
+      existing: Record<string, unknown> | undefined,
+      values: Record<string, AttributeValue>,
+    ): boolean => existing != null && Number(existing.version ?? 0) === Number(values[':expectedVersion']?.N)
+
+    if (cmd.__type === 'Scan') {
+      return Promise.resolve({ Items: [...table.values()].map((row) => makeDynamoItem(row)), LastEvaluatedKey: undefined })
+    }
+    if (cmd.__type === 'Get') {
+      const row = table.get(String(cmd.input.Key?.id?.S ?? ''))
+      return Promise.resolve({ Item: row ? makeDynamoItem(row) : undefined })
+    }
+    if (cmd.__type === 'Put') {
+      const condition = cmd.input.ConditionExpression ?? ''
+      const item = unmarshall(cmd.input.Item ?? {})
+      const existing = table.get(String(item.id))
+      if (condition.includes('attribute_not_exists(id)') && existing) return Promise.reject(conditionFailed())
+      if (condition.includes('#version = :expectedVersion') && !versionMatches(existing, cmd.input.ExpressionAttributeValues ?? {})) {
+        return Promise.reject(conditionFailed())
+      }
+      table.set(String(item.id), item)
+      return Promise.resolve({})
+    }
+    const values = cmd.input.ExpressionAttributeValues ?? {}
+    const id = String(cmd.input.Key?.id?.S ?? '')
+    const existing = table.get(id)
+    if ((cmd.input.ConditionExpression ?? '').includes('#version = :expectedVersion') && !versionMatches(existing, values)) {
+      return Promise.reject(conditionFailed())
+    }
+    const next = {
+      ...(existing ?? { id }),
+      active: values[':active']?.BOOL ?? false,
+      updatedAt: values[':updatedAt']?.S,
+      updatedBy: values[':updatedBy']?.S,
+      version: Number(values[':version']?.N ?? 1),
+    }
+    table.set(id, next)
+    return Promise.resolve({ Attributes: makeDynamoItem(next) })
+  })
+
+  return {
+    divisions: tableOf('OwnershipDivision-test'),
+    rules: tableOf('OwnershipRule-test'),
+    views: tableOf('ShipmentView-test'),
+    audit: tableOf('AuditLog-test'),
+  }
+}
+
+const division = (over: Record<string, unknown>): Record<string, unknown> => ({
+  id: over.code, code: over.code, name: `Division ${String(over.code)}`, parentId: null,
+  sortOrder: 10, active: true, owners: null, flows: null,
+  createdBy: 'seed', updatedBy: 'seed', version: 1,
+  createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
+  ...over,
+})
+
+const ownershipRule = (over: Record<string, unknown>): Record<string, unknown> => ({
+  name: 'A rule', sortOrder: 0, active: true,
+  condition: { kind: 'ALWAYS', value: null }, divisionCode: 'BROKERAGE',
+  createdBy: 'seed', updatedBy: 'seed', version: 1,
+  createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
+  ...over,
+})
+
+describe('ENSURE_OWNERSHIP_SEED', () => {
+  it('writes every seed row once and reports zeros on the second call', async () => {
+    const tables = ownershipTables()
+
+    const first = await handler(event('ENSURE_OWNERSHIP_SEED', {}, ADMIN_CALLER)) as Record<string, number>
+    expect(first).toMatchObject({
+      divisionsCreated: SEED_DIVISIONS.length,
+      rulesCreated: SEED_RULES.length,
+      viewsCreated: SEED_VIEWS.length,
+    })
+
+    const second = await handler(event('ENSURE_OWNERSHIP_SEED', {}, ADMIN_CALLER)) as Record<string, number>
+    expect(second).toMatchObject({ divisionsCreated: 0, rulesCreated: 0, viewsCreated: 0 })
+
+    expect(tables.divisions.size).toBe(SEED_DIVISIONS.length)
+    expect(tables.rules.size).toBe(SEED_RULES.length)
+    expect(tables.views.size).toBe(SEED_VIEWS.length)
+    expect(tables.divisions.get('ASSETS')).toMatchObject({ createdBy: 'seed', updatedBy: 'seed', version: 1 })
+  })
+
+  it('leaves an edited seed row exactly as the admin left it', async () => {
+    const tables = ownershipTables({
+      'OwnershipDivision-test': [division({ code: 'ASSETS', name: 'Ivan Cartage LLC', active: false, version: 4 })],
+    })
+    await handler(event('ENSURE_OWNERSHIP_SEED', {}, ADMIN_CALLER))
+    expect(tables.divisions.get('ASSETS')).toMatchObject({ name: 'Ivan Cartage LLC', active: false, version: 4 })
+  })
+})
+
+describe('SAVE_OWNERSHIP_DIVISION', () => {
+  it('refuses a parent chain that loops', async () => {
+    ownershipTables({
+      'OwnershipDivision-test': [division({ code: 'ASSETS' }), division({ code: 'BOX_TRUCK', parentId: 'ASSETS' })],
+    })
+    await expect(
+      handler(event('SAVE_OWNERSHIP_DIVISION', { id: 'ASSETS', code: 'ASSETS', name: 'Ivan Cartage', parentId: 'BOX_TRUCK' }, ADMIN_CALLER)),
+    ).rejects.toThrow(/its own ancestor/)
+  })
+
+  it('refuses a code that is already a division', async () => {
+    const tables = ownershipTables({ 'OwnershipDivision-test': [division({ code: 'ASSETS' })] })
+    await expect(
+      handler(event('SAVE_OWNERSHIP_DIVISION', { code: 'ASSETS', name: 'Something else' }, ADMIN_CALLER)),
+    ).rejects.toThrow(/already exists/)
+    expect(tables.divisions.get('ASSETS')).toMatchObject({ name: 'Division ASSETS' })
+  })
+
+  it('refuses to rename a code and keeps the row the shipments are tagged with', async () => {
+    ownershipTables({ 'OwnershipDivision-test': [division({ code: 'ASSETS' })] })
+    await expect(
+      handler(event('SAVE_OWNERSHIP_DIVISION', { id: 'ASSETS', code: 'FLEET', name: 'Ivan Cartage' }, ADMIN_CALLER)),
+    ).rejects.toThrow(/code cannot be changed/)
+  })
+
+  it('creates a subsidiary and bumps the version on the next save', async () => {
+    const tables = ownershipTables({ 'OwnershipDivision-test': [division({ code: 'ASSETS' })] })
+    await handler(event('SAVE_OWNERSHIP_DIVISION', { code: 'LOCAL', name: 'Local Drivers', parentId: 'ASSETS' }, ADMIN_CALLER))
+    expect(tables.divisions.get('LOCAL')).toMatchObject({ parentId: 'ASSETS', version: 1, active: true })
+
+    await handler(event('SAVE_OWNERSHIP_DIVISION', { id: 'LOCAL', code: 'LOCAL', name: 'Local drivers', parentId: 'ASSETS' }, ADMIN_CALLER))
+    expect(tables.divisions.get('LOCAL')).toMatchObject({ name: 'Local drivers', version: 2 })
+  })
+})
+
+describe('ARCHIVE_OWNERSHIP_DIVISION', () => {
+  it('refuses while an active subsidiary hangs off it', async () => {
+    const tables = ownershipTables({
+      'OwnershipDivision-test': [division({ code: 'ASSETS' }), division({ code: 'BOX_TRUCK', parentId: 'ASSETS' })],
+    })
+    await expect(handler(event('ARCHIVE_OWNERSHIP_DIVISION', { id: 'ASSETS' }, ADMIN_CALLER)))
+      .rejects.toThrow(/active subsidiary/)
+    expect(tables.divisions.get('ASSETS')).toMatchObject({ active: true })
+  })
+
+  it('refuses while an active rule still tags shipments with it', async () => {
+    ownershipTables({
+      'OwnershipDivision-test': [division({ code: 'CAR_SHIPPING' })],
+      'OwnershipRule-test': [ownershipRule({ id: 'rule-1', name: 'Vehicle transport', divisionCode: 'CAR_SHIPPING' })],
+    })
+    await expect(handler(event('ARCHIVE_OWNERSHIP_DIVISION', { id: 'CAR_SHIPPING' }, ADMIN_CALLER)))
+      .rejects.toThrow(/Vehicle transport/)
+  })
+
+  it('archives rather than deletes once nothing points at it', async () => {
+    const tables = ownershipTables({
+      'OwnershipDivision-test': [division({ code: 'CAR_SHIPPING' })],
+      'OwnershipRule-test': [ownershipRule({ id: 'rule-1', divisionCode: 'CAR_SHIPPING', active: false })],
+    })
+    await handler(event('ARCHIVE_OWNERSHIP_DIVISION', { id: 'CAR_SHIPPING' }, ADMIN_CALLER))
+    expect(tables.divisions.get('CAR_SHIPPING')).toMatchObject({ active: false, version: 2 })
+  })
+})
+
+describe('SAVE_OWNERSHIP_RULES', () => {
+  it('orders by array index and deactivates the rules left out, deleting none', async () => {
+    const tables = ownershipTables({
+      'OwnershipDivision-test': [division({ code: 'BROKERAGE' }), division({ code: 'ASSETS' })],
+      'OwnershipRule-test': [
+        ownershipRule({ id: 'rule-1', name: 'Own fleet', divisionCode: 'ASSETS', sortOrder: 0 }),
+        ownershipRule({ id: 'rule-2', name: 'Everything else', divisionCode: 'BROKERAGE', sortOrder: 10 }),
+      ],
+    })
+
+    const saved = await handler(event('SAVE_OWNERSHIP_RULES', {
+      rules: [
+        { id: 'rule-2', name: 'Everything else', divisionCode: 'BROKERAGE', condition: { kind: 'ALWAYS', value: null } },
+        { name: 'Own trucks', divisionCode: 'ASSETS', condition: { kind: 'CARRIER_IS', value: 'OWN_FLEET' } },
+      ],
+    }, ADMIN_CALLER)) as unknown as Record<string, unknown>[]
+
+    expect(saved.map((r) => [r.id, r.sortOrder])).toEqual([['rule-2', 0], [saved[1].id, 10]])
+    expect(String(saved[1].id)).toMatch(/^rule-/)
+    // The dropped rule is deactivated and still readable, never removed.
+    expect(tables.rules.size).toBe(3)
+    expect(tables.rules.get('rule-1')).toMatchObject({ active: false, name: 'Own fleet' })
+    expect(tables.rules.get('rule-2')).toMatchObject({ sortOrder: 0, version: 2 })
+  })
+
+  it('refuses a rule pointing at a division that is not there', async () => {
+    ownershipTables({ 'OwnershipDivision-test': [division({ code: 'BROKERAGE' })] })
+    await expect(handler(event('SAVE_OWNERSHIP_RULES', {
+      rules: [{ name: 'Ghost', divisionCode: 'NOPE', condition: { kind: 'ALWAYS', value: null } }],
+    }, ADMIN_CALLER))).rejects.toThrow(/unknown division "NOPE"/)
+  })
+})
+
+describe('SAVE_SHIPMENT_VIEW', () => {
+  it('slugs a new name into the id the URL carries', async () => {
+    const tables = ownershipTables()
+    const view = await handler(event('SAVE_SHIPMENT_VIEW', {
+      name: 'POD collection', department: 'Documents', filters: { statuses: ['DELIVERED'], docsState: 'POD_MISSING' },
+    }, ADMIN_CALLER)) as Record<string, unknown>
+    expect(view).toMatchObject({ id: 'pod-collection', slug: 'pod-collection', version: 1 })
+    expect(tables.views.get('pod-collection')).toMatchObject({ name: 'POD collection' })
+  })
+
+  it('rejects a filter key that is not a shipment filter', async () => {
+    const tables = ownershipTables()
+    await expect(handler(event('SAVE_SHIPMENT_VIEW', {
+      name: 'Typo', filters: { divisons: ['BROKERAGE'] },
+    }, ADMIN_CALLER))).rejects.toThrow('"divisons" is not a shipment filter.')
+    expect(tables.views.size).toBe(0)
+  })
+
+  it('rejects a status that is not a shipment status', async () => {
+    ownershipTables()
+    await expect(handler(event('SAVE_SHIPMENT_VIEW', {
+      name: 'Bad status', filters: { statuses: ['SHIPPED'] },
+    }, ADMIN_CALLER))).rejects.toThrow(/not a shipment status/)
+  })
+
+  it('archives a view without removing it', async () => {
+    const tables = ownershipTables()
+    await handler(event('SAVE_SHIPMENT_VIEW', { name: 'Sales' }, ADMIN_CALLER))
+    await handler(event('ARCHIVE_SHIPMENT_VIEW', { id: 'sales' }, ADMIN_CALLER))
+    expect(tables.views.get('sales')).toMatchObject({ active: false, version: 2 })
+  })
+})
+
+describe('ownership authorization', () => {
+  it('refuses every taxonomy action for a page-customers caller', async () => {
+    ownershipTables()
+    const actions = [
+      'SAVE_OWNERSHIP_DIVISION',
+      'ARCHIVE_OWNERSHIP_DIVISION',
+      'SAVE_OWNERSHIP_RULES',
+      'SAVE_SHIPMENT_VIEW',
+      'ARCHIVE_SHIPMENT_VIEW',
+      'ENSURE_OWNERSHIP_SEED',
+    ]
+    for (const action of actions) {
+      await expect(handler(event(action, { id: 'x', code: 'X', name: 'X', rules: [] }, PAGE_CUSTOMER_CALLER)))
+        .rejects.toThrow(`Forbidden: ${action} requires owner or ADMIN`)
+    }
+  })
+
+  it('lets a page-tms caller create the customer a shipment needs', async () => {
+    send.mockImplementation(withSettingsGet((cmd: MockCommand) => {
+      if (cmd.__type === 'Scan') return Promise.resolve({ Items: [], LastEvaluatedKey: undefined })
+      if (cmd.__type === 'Put') return Promise.resolve({})
+      throw new Error('unexpected')
+    }))
+    await expect(handler(event('UPSERT_CUSTOMER', { name: 'Shipments Inc' }, identity({ groups: ['page-tms'] }))))
+      .resolves.toMatchObject({ name: 'Shipments Inc' })
   })
 })

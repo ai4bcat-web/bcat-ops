@@ -12,7 +12,7 @@ const MAPS_MAP_ID = import.meta.env.VITE_GOOGLE_MAPS_MAP_ID as string | undefine
 
 /**
  * Everything the directory knows about one facility beyond its form fields: the pin
- * (only a real Google map on real, unexpired coordinates), and the loads that were
+ * (only a real Google map on real, unexpired coordinates), and the shipments that were
  * booked here. Dwell is shown only from recorded arrival/departure events; an
  * appointment time is never turned into a dwell figure.
  */
@@ -33,8 +33,8 @@ export function LocationDetail({ location }: { location: LocationRecord }) {
   // Unwrapped at the client, but a string must never reach .map here.
   const driverNotes = Array.isArray(location.driverNotes) ? location.driverNotes : []
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 12, marginTop: 10 }}>
-      <div style={{ minHeight: 180, borderRadius: 8, overflow: 'hidden', border: '1px solid var(--ds-border, #e5e7eb)' }}>
+    <div className="tms-grid tms-grid-2" style={{ marginTop: 10 }}>
+      <div style={{ minHeight: 180, borderRadius: 'var(--tms-radius)', overflow: 'hidden', border: '1px solid var(--tms-border)' }}>
         {!hasPin ? (
           <Note>No geocoded pin yet — search the address in the location form to geocode it.</Note>
         ) : !pinFresh ? (
@@ -58,60 +58,55 @@ export function LocationDetail({ location }: { location: LocationRecord }) {
       </div>
       <div>
         {/* What drivers said, newest first. Written from the driver app; read here. */}
-        <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--ds-t2)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-          Driver comments · {driverNotes.length}
-        </div>
+        <div className="tms-field-label">Driver comments · {driverNotes.length}</div>
         {driverNotes.length === 0 ? (
           <Note>No driver has left a note about this place yet. They can, from a stop in the driver app.</Note>
         ) : (
           <ul style={{ margin: '6px 0 12px', padding: 0, listStyle: 'none', fontSize: 12 }}>
             {[...driverNotes].reverse().map((n, i) => (
-              <li key={i} style={{ padding: '4px 0', borderTop: '1px solid var(--ds-border, #e5e7eb)', color: 'var(--ds-t2)' }}>
-                <span style={{ fontWeight: 600, color: 'var(--ds-t1)' }}>{n.by}</span>
-                <span style={{ color: 'var(--ds-t3)' }}> · {formatDateTime(n.at)}</span>
+              <li key={i} className="tms-muted" style={{ padding: '4px 0', borderTop: '1px solid var(--tms-border)' }}>
+                <span style={{ fontWeight: 600, color: 'var(--tms-text)' }}>{n.by}</span>
+                <span> · {formatDateTime(n.at)}</span>
                 <div>{n.text}</div>
               </li>
             ))}
           </ul>
         )}
-        <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--ds-t2)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-          Load history · {history.length}
-        </div>
+        <div className="tms-field-label">Shipment history · {history.length}</div>
         {history.length === 0 ? (
-          <Note>No loads have a stop linked to this location yet.</Note>
+          <Note>No shipments have a stop linked to this location yet.</Note>
         ) : (
-          <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse', marginTop: 6 }}>
-            <thead>
-              <tr style={{ color: 'var(--ds-t3)', textAlign: 'left' }}>
-                <th style={th}>Pro #</th><th style={th}>Customer</th><th style={th}>Stop</th><th style={th}>Appt</th><th style={th}>Dwell</th>
-              </tr>
-            </thead>
-            <tbody>
-              {history.slice(0, 50).map(({ load, stop }) => {
-                const dwell = dwellMinutes(stop)
-                return (
-                  <tr key={`${load.id}:${stop.id}`} style={{ borderTop: '1px solid var(--ds-border, #e5e7eb)' }}>
-                    <td style={td}>{load.aljexId}</td>
-                    <td style={td}>{load.customer ?? '—'}</td>
-                    <td style={td}>{stop.type === 'pickup' ? 'PU' : 'DEL'}</td>
-                    <td style={td}>{stop.appt ? formatDateTime(stop.appt) : '—'}</td>
-                    <td style={td} title={dwell === null ? 'Dwell needs recorded arrival and departure times' : undefined}>
-                      {dwell === null ? '—' : `${Math.round(dwell)} min`}
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
+          <div className="tms-table-wrap" style={{ marginTop: 6 }}>
+            <table className="tms-table">
+              <thead>
+                <tr>
+                  <th scope="col">PRO #</th><th scope="col">Customer</th><th scope="col">Stop</th><th scope="col">Appt</th><th scope="col">Dwell</th>
+                </tr>
+              </thead>
+              <tbody>
+                {history.slice(0, 50).map(({ load, stop }) => {
+                  const dwell = dwellMinutes(stop)
+                  return (
+                    <tr key={`${load.id}:${stop.id}`}>
+                      <td>{load.aljexId}</td>
+                      <td>{load.customer ?? '—'}</td>
+                      <td>{stop.type === 'pickup' ? 'PU' : 'DEL'}</td>
+                      <td>{stop.appt ? formatDateTime(stop.appt) : '—'}</td>
+                      <td title={dwell === null ? 'Dwell needs recorded arrival and departure times' : undefined}>
+                        {dwell === null ? '—' : `${Math.round(dwell)} min`}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     </div>
   )
 }
 
-const th: React.CSSProperties = { padding: '4px 6px', fontWeight: 600 }
-const td: React.CSSProperties = { padding: '4px 6px', color: 'var(--ds-t2)' }
-
 function Note({ children }: { children: React.ReactNode }) {
-  return <div style={{ padding: 12, fontSize: 12, color: 'var(--ds-t3)' }}>{children}</div>
+  return <div className="tms-muted" style={{ padding: 12, fontSize: 12 }}>{children}</div>
 }

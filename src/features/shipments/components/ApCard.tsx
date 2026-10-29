@@ -19,8 +19,8 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Ban, Banknote, CheckCircle2, FileText, Pencil, Truck } from 'lucide-react'
 import { toast } from 'sonner'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
+import { useDrivers } from '@/hooks/useDrivers'
+import { TmsBadge, TmsButton, TmsCard } from '@/features/tms/kit'
 import { getCarrier, getCarrierBill, voidBill } from '@/lib/apiClient'
 import { billData, billLinesFor, billReadiness } from '@/lib/carrierBill'
 import { AGING_BUCKET_LABEL, type AgingBucket } from '@/lib/arAging'
@@ -32,6 +32,7 @@ import { RecordBillDialog } from '@/features/ap/components/RecordBillDialog'
 import { ApproveBillDialog } from '@/features/ap/components/ApproveBillDialog'
 import { UpdateCarrierChargesDialog } from '@/features/ap/components/UpdateCarrierChargesDialog'
 import { PayCarrierDialog } from '@/features/ap/components/PayCarrierDialog'
+import { settlementPathFor } from './ownFleet'
 import type {
   ApStatus, CarrierBillRecord, CarrierRecord, LoadCarrierRecord, ShipmentBundle, ShipmentLoad,
 } from '@/types/tms'
@@ -45,12 +46,12 @@ const RUNGS = [
 ] as const satisfies readonly { key: ApStatus; label: string }[]
 
 /** Late money gets a loud chip; everything inside terms is quiet. */
-const BUCKET_TONE: Record<AgingBucket, string> = {
-  CURRENT: 'border-border text-muted-foreground',
-  D1_30: 'border-amber-500/40 text-amber-700',
-  D31_60: 'border-amber-500/40 text-amber-700',
-  D61_90: 'border-destructive/40 text-destructive',
-  D91_PLUS: 'border-destructive/40 text-destructive',
+const BUCKET_TONE: Record<AgingBucket, 'gray' | 'orange' | 'red'> = {
+  CURRENT: 'gray',
+  D1_30: 'orange',
+  D31_60: 'orange',
+  D61_90: 'red',
+  D91_PLUS: 'red',
 }
 
 type ApDialog = { kind: 'record' } | { kind: 'charges' } | { kind: 'approve' } | { kind: 'pay' } | { kind: 'void' } | null
@@ -190,73 +191,74 @@ function AssignmentCard({ bundle, loadCarrier, bill, carrier, directoryRead, onR
     : null
 
   return (
-    <div className="space-y-3 rounded-lg border border-border p-3" data-testid="ap-card" data-assignment={loadCarrier.id}>
-      <div className="flex flex-wrap items-center gap-2">
-        <p className="text-xs uppercase tracking-wider text-muted-foreground">Accounts payable</p>
-        <span className="text-xs text-muted-foreground">
-          {legName} · {loadCarrier.carrierName ?? 'Carrier'}
-        </span>
-        {loadCarrier.status === 'TONU' && (
-          <Badge variant="outline" className="text-[10px]" data-testid="ap-tonu">TONU — owed anyway</Badge>
-        )}
-        <ol className="ml-auto flex flex-wrap items-center gap-1" data-testid="ap-ladder">
-          {RUNGS.map((rung) => {
-            const lit = rung.key === apStatus
-            return (
-              <li
-                key={rung.key}
-                data-testid={`ap-rung-${rung.key}`}
-                aria-current={lit ? 'step' : undefined}
-                className={cn(
-                  'rounded-full border px-2 py-0.5 text-[11px]',
-                  lit ? 'border-primary bg-primary/10 font-medium text-foreground' : 'border-border text-muted-foreground',
-                )}
-              >
-                {rung.label}
-              </li>
-            )
-          })}
-        </ol>
-      </div>
+    <TmsCard
+      title={<span>Accounts payable · {legName} · {loadCarrier.carrierName ?? 'Carrier'}</span>}
+      actions={
+        <>
+          {loadCarrier.status === 'TONU' && <TmsBadge tone="orange" data-testid="ap-tonu">TONU — owed anyway</TmsBadge>}
+          <ol className="flex flex-wrap items-center gap-1" data-testid="ap-ladder">
+            {RUNGS.map((rung) => {
+              const lit = rung.key === apStatus
+              return (
+                <li
+                  key={rung.key}
+                  data-testid={`ap-rung-${rung.key}`}
+                  aria-current={lit ? 'step' : undefined}
+                  className={cn(
+                    'rounded-full border px-2 py-0.5 text-[11px]',
+                    lit
+                      ? 'border-[color:var(--tms-primary)] font-medium text-[color:var(--tms-text)]'
+                      : 'border-[color:var(--tms-border)] text-[color:var(--tms-muted)]',
+                  )}
+                >
+                  {rung.label}
+                </li>
+              )
+            })}
+          </ol>
+        </>
+      }
+    >
+      <div className="space-y-3" data-testid="ap-card" data-assignment={loadCarrier.id}>
 
       {view ? (
-        <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm sm:grid-cols-4">
+        <dl className="tms-grid tms-grid-4 text-sm">
           <div>
-            <dt className="text-xs uppercase tracking-wider text-muted-foreground">Bill</dt>
+            <dt className="tms-field-label">Bill</dt>
             <dd>
-              <Link to={`/ap/bills/${view.id}`} className="underline underline-offset-2">
+              <Link to={`/tms/invoicing/payable/bills/${view.id}`} className="underline underline-offset-2">
                 {view.billNumber ?? view.id}
               </Link>
-              {voided && <Badge variant="outline" className="ml-1 text-[10px]">void</Badge>}
+              {voided && <TmsBadge tone="red">void</TmsBadge>}
             </dd>
           </div>
           <div>
-            <dt className="text-xs uppercase tracking-wider text-muted-foreground">Net</dt>
+            <dt className="tms-field-label">Net</dt>
             <dd className="tabular-nums">{formatCents(view.totals.netCents)}</dd>
           </div>
           <div>
-            <dt className="text-xs uppercase tracking-wider text-muted-foreground">Balance</dt>
+            <dt className="tms-field-label">Balance</dt>
             <dd className="tabular-nums">{formatCents(view.totals.balanceCents)}</dd>
           </div>
           <div>
-            <dt className="text-xs uppercase tracking-wider text-muted-foreground">Due</dt>
+            <dt className="tms-field-label">Due</dt>
             <dd className="flex flex-wrap items-center gap-1">
               {view.aging.dueAt}
               {view.aging.open && (
-                <Badge variant="outline" className={cn('text-[10px]', BUCKET_TONE[view.aging.bucket])}>
+                <TmsBadge tone={BUCKET_TONE[view.aging.bucket]}>
                   {view.aging.bucket === 'CURRENT'
                     ? AGING_BUCKET_LABEL[view.aging.bucket]
                     : `${AGING_BUCKET_LABEL[view.aging.bucket]} days late`}
-                </Badge>
+                </TmsBadge>
               )}
             </dd>
           </div>
-          <div className="col-span-2 sm:col-span-4">
-            <dt className="text-xs uppercase tracking-wider text-muted-foreground">Paid to</dt>
+          <div className="col-span-4">
+            <dt className="tms-field-label">Paid to</dt>
             <dd data-testid="ap-payee">
               {payee || '—'}
               {view.totals.quickPayFeeCents > 0 && (
-                <span className="ml-1 text-xs text-muted-foreground">
+                <span className="tms-muted ml-1 text-xs">
                   quick pay · {formatCents(view.totals.quickPayFeeCents)} deducted
                 </span>
               )}
@@ -265,12 +267,12 @@ function AssignmentCard({ bundle, loadCarrier, bill, carrier, directoryRead, onR
         </dl>
       ) : (
         <div className="space-y-1 text-sm" data-testid="ap-readiness">
-          <p className="text-muted-foreground">
+          <p className="tms-muted">
             Carrier charges {formatCents(grossCents)} · no bill recorded yet.
           </p>
-          {!directoryRead && <p className="text-xs text-muted-foreground">Checking the carrier directory…</p>}
+          {!directoryRead && <p className="tms-muted text-xs">Checking the carrier directory…</p>}
           {directoryRead && readiness && !readiness.ready && (
-            <ul className="list-disc space-y-0.5 pl-4 text-xs text-muted-foreground">
+            <ul className="tms-muted list-disc space-y-0.5 pl-4 text-xs">
               {readiness.reasons.map((reason) => <li key={reason}>{reason}</li>)}
             </ul>
           )}
@@ -280,41 +282,41 @@ function AssignmentCard({ bundle, loadCarrier, bill, carrier, directoryRead, onR
       <div className="flex flex-wrap gap-2">
         {!bill && (
           <>
-            <Button
+            <TmsButton
+              variant="primary"
               size="sm"
-              className="h-8"
               disabled={busy || !directoryRead || !readiness?.ready}
               onClick={() => setDialog({ kind: 'record' })}
             >
               <FileText size={13} className="mr-1" />Record bill
-            </Button>
-            <Button size="sm" variant="outline" className="h-8" disabled={busy} onClick={() => setDialog({ kind: 'charges' })}>
+            </TmsButton>
+            <TmsButton size="sm" disabled={busy} onClick={() => setDialog({ kind: 'charges' })}>
               <Pencil size={13} className="mr-1" />Edit carrier charges
-            </Button>
+            </TmsButton>
           </>
         )}
         {view && !voided && (
           <>
             {view.status === 'IN_REVIEW' && (
-              <Button size="sm" className="h-8" disabled={busy} onClick={() => setDialog({ kind: 'approve' })}>
+              <TmsButton variant="primary" size="sm" disabled={busy} onClick={() => setDialog({ kind: 'approve' })}>
                 <CheckCircle2 size={13} className="mr-1" />Approve
-              </Button>
+              </TmsButton>
             )}
             {(view.status === 'TO_BE_PAID' || view.status === 'PARTIAL') && view.totals.balanceCents > 0 && (
-              <Button size="sm" variant="outline" className="h-8" disabled={busy} onClick={() => setDialog({ kind: 'pay' })}>
+              <TmsButton size="sm" disabled={busy} onClick={() => setDialog({ kind: 'pay' })}>
                 <Banknote size={13} className="mr-1" />Pay carrier
-              </Button>
+              </TmsButton>
             )}
             {view.status !== 'PAID' && (
-              <Button size="sm" variant="ghost" className="h-8 text-destructive" disabled={busy} onClick={() => setDialog({ kind: 'void' })}>
+              <TmsButton variant="destructive" size="sm" disabled={busy} onClick={() => setDialog({ kind: 'void' })}>
                 <Ban size={13} className="mr-1" />Void
-              </Button>
+              </TmsButton>
             )}
           </>
         )}
       </div>
 
-      {error && <p className="text-xs text-destructive">{error}</p>}
+      {error && <p className="tms-field-error">{error}</p>}
 
       {dialog?.kind === 'record' && (
         <RecordBillDialog
@@ -363,7 +365,8 @@ function AssignmentCard({ bundle, loadCarrier, bill, carrier, directoryRead, onR
           }}
         />
       )}
-    </div>
+      </div>
+    </TmsCard>
   )
 }
 
@@ -377,32 +380,35 @@ function OwnAssetCard({ loadCarrier, load, legName }: {
   load: ShipmentLoad | null
   legName: string | undefined
 }) {
+  const { drivers } = useDrivers()
+  const driver = loadCarrier.driverId ? drivers.find((d) => d.id === loadCarrier.driverId) ?? null : null
   const settledOn = load?.deliveredAt ?? load?.deliveryAppt ?? load?.pickupAppt ?? loadCarrier.bookedAt ?? null
   const week = settledOn ? weekStartOfISO(settledOn.slice(0, 10)) : null
   const query = new URLSearchParams()
   if (week) query.set('week', week)
   if (loadCarrier.driverId) query.set('driver', loadCarrier.driverId)
   const search = query.toString()
-  const href = search ? `/driver-pay?${search}` : '/driver-pay'
+  // Each fleet group settles on its own page, so the link lands where this driver's
+  // money actually is rather than on the one page that happens to be called driver pay.
+  const base = settlementPathFor(driver?.fleetGroup)
+  const href = search ? `${base}?${search}` : base
 
   return (
-    <div className="space-y-2 rounded-lg border border-border p-3" data-testid="ap-card" data-assignment={loadCarrier.id}>
-      <div className="flex flex-wrap items-center gap-2">
-        <p className="text-xs uppercase tracking-wider text-muted-foreground">Accounts payable</p>
-        <span className="text-xs text-muted-foreground">
-          {legName} · {loadCarrier.driverName ?? 'Own asset'}
-        </span>
-        <Badge variant="outline" className="ml-auto text-[10px]" data-testid="ap-own-asset">
-          <Truck size={11} className="mr-1" />Settled through driver pay
-        </Badge>
-      </div>
-      <p className="text-xs text-muted-foreground">
+    <TmsCard
+      title={<span>Accounts payable · {legName} · {loadCarrier.driverName ?? 'Own asset'}</span>}
+      actions={
+        <TmsBadge tone="turquoise" data-testid="ap-own-asset" className="inline-flex items-center gap-1">
+          <Truck size={11} />Settled through driver pay
+        </TmsBadge>
+      }
+    >
+      <p className="tms-muted text-xs" data-testid="ap-card" data-assignment={loadCarrier.id}>
         An own-fleet leg never enters AP — there is no carrier bill to record and nothing to approve.{' '}
         <Link to={href} className="underline underline-offset-2" data-testid="ap-settlement-link">
           {week ? `Pay week ${weekLabel(week)}` : 'Driver pay'}
         </Link>
         {loadCarrier.driverName ? ` is where ${loadCarrier.driverName} is paid for it.` : ' is where the driver is paid for it.'}
       </p>
-    </div>
+    </TmsCard>
   )
 }

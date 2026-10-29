@@ -45,6 +45,7 @@ import {
   optionalString,
   type Caller,
 } from '../_shared/actionInputs'
+import { isVoided } from './voided'
 
 import { laneKey3For, laneKeyFor } from '../../../src/lib/laneKey'
 import {
@@ -144,8 +145,12 @@ export interface QuoteDeps {
   saveOrderForm: (input: Row, caller: Caller) => Promise<{ bundle: Bundle; totals: { revenueCents: number } }>
   submitOrder: (input: Row, caller: Caller) => Promise<Row>
   bookCarrier: (input: Row, caller: Caller, extra?: BookCarrierExtra) => Promise<Row>
-  /** The DELETE_SHIPMENT marker write without its admin gate: a rollback is ours. */
-  softDeleteShipment: (shipmentId: string, caller: Caller) => Promise<void>
+  /**
+   * Step R. The rollback a quote may perform. Not a delete — there is no delete:
+   * the shipment keeps its PRO and is stamped voided with the reason. Owner/ADMIN is
+   * enforced on REVERT_TO_QUOTE in the router's `authorize`, because this is a void.
+   */
+  voidShipmentForQuote: (shipmentId: string, caller: Caller, reason: string) => Promise<void>
   assertNoInvoicedOrders: (shipmentId: string, verb: string) => Promise<void>
 }
 
@@ -1321,7 +1326,8 @@ async function assertKnownDivision(deps: QuoteDeps, divisionKey: string): Promis
  * path — `CREATE_SHIPMENT`, `SAVE_ORDER_FORM`, `SUBMIT_ORDER` — so a converted quote
  * is indistinguishable from an order somebody typed, down to the charge lines. If
  * the shipment prices to anything other than the quote's number, or anything at all
- * fails, the half-made shipment is soft-deleted and the quote is left where it was.
+ * fails, the half-made shipment is voided — never deleted, its PRO was already
+ * taken — and the quote is left where it was.
  *
  * `divisionKey` and `customerRepId` are the two things the convert dialog lets an
  * operator change on the way through: the order is written under the rep given and
@@ -1395,8 +1401,11 @@ export async function convertQuote(deps: QuoteDeps, input: Row, caller: Caller):
     }
     await deps.submitOrder({ ...form }, caller)
   } catch (err) {
-    await deps.softDeleteShipment(shipmentId, caller).catch((cleanupErr) =>
-      console.error('[tms-shipment-actions] convert rollback failed:', String(cleanupErr)))
+    await deps.voidShipmentForQuote(
+      shipmentId,
+      caller,
+      `Quote conversion failed: ${err instanceof Error ? err.message : String(err)}`,
+    ).catch((cleanupErr) => console.error('[tms-shipment-actions] convert rollback failed:', String(cleanupErr)))
     throw err
   }
 
@@ -1467,8 +1476,11 @@ export async function convertQuote(deps: QuoteDeps, input: Row, caller: Caller):
       'quote conversion',
     )
   } catch (err) {
-    await deps.softDeleteShipment(shipmentId, caller).catch((cleanupErr) =>
-      console.error('[tms-shipment-actions] convert rollback failed:', String(cleanupErr)))
+    await deps.voidShipmentForQuote(
+      shipmentId,
+      caller,
+      `Quote conversion failed: ${err instanceof Error ? err.message : String(err)}`,
+    ).catch((cleanupErr) => console.error('[tms-shipment-actions] convert rollback failed:', String(cleanupErr)))
     if (isConflict(err)) throw conflictError('quote', err)
     throw err
   }
@@ -1483,10 +1495,13 @@ export async function convertQuote(deps: QuoteDeps, input: Row, caller: Caller):
 // ── REVERT_TO_QUOTE ──────────────────────────────────────────────────────────
 
 /**
- * The only way back out of a conversion: the shipment is soft-deleted and the quote
+ * The only way back out of a conversion: the shipment is voided and the quote
  * returns to RECEIVED_REPLY — "they accepted, we have not built it". Refused on
  * anything that has moved: a second leg, a carrier on the truck, a bill or an
  * invoice. Those are facts about freight, and freight cannot become a quote again.
+ *
+ * It voids a shipment, so it is owner/ADMIN only (`QUOTE_ADMIN_ONLY_ACTIONS`); the
+ * PRO survives the revert and is never handed to the next quote.
  *
  * Either id identifies the pair — the quote page holds the quote, the shipment page
  * holds the shipment — and the two must agree when both are given.
@@ -1502,7 +1517,7 @@ export async function revertToQuote(deps: QuoteDeps, input: Row, caller: Caller)
   if (!shipmentId) throw new Error(`Quote ${String(askedQuoteId)} has no shipment to revert`)
 
   const bundle = await deps.readBundle(shipmentId)
-  if (bundle.shipment.deletedAt) throw new Error('That shipment is already deleted')
+  if (isVoided(bundle.shipment)) throw new Error('That shipment is already voided')
   if (bundle.orders.length !== 1 || bundle.loads.length !== 1) {
     throw new Error('Only a single-order, single-load shipment can go back to being a quote')
   }
@@ -1546,7 +1561,7 @@ export async function revertToQuote(deps: QuoteDeps, input: Row, caller: Caller)
       remove: ['shipmentId', 'orderId', 'loadId'],
     }),
   ])
-  await deps.softDeleteShipment(shipmentId, caller)
+  await deps.voidShipmentForQuote(shipmentId, caller, `Reverted to quote ${quoteId}: ${reason}`)
   await deps.writeAudit('QUOTE', quoteId, 'REVERT_TO_QUOTE', caller, { shipmentId, reason })
   await deps.writeAudit('SHIPMENT', shipmentId, 'REVERT_TO_QUOTE', caller, { quoteId, reason })
   return { quote: await loadQuote(deps, quoteId) } as unknown as Row

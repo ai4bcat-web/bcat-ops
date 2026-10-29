@@ -11,7 +11,7 @@ related: [commissions, quotes-and-lane-rates, ar-invoicing-and-payments]
 
 The numbers the office is allowed to quote. This article covers what the profit table is actually counting — one row per delivered, priced load — and therefore why a load you are looking for is not in it, why our own trucks are in the revenue but not in the margin, each of the six panels and what it answers, the exports, and where own-fleet profitability actually lives.
 
-Reports live on the **Reports** page (`/reports`, Finance → Reports, page key `reports`, which the Manager, Customer rep, Carrier rep and AR/AP roles all grant). One period governs the whole page: a **From** and a **To** month at the top right, opening on this month and the two before it. A **Refresh** drops everything the page has cached and reads the window again.
+Reports live on the **Reports** page (`/tms/brokerage/reports`, page key `reports`, which the Manager, Customer rep, Carrier rep and AR/AP roles all grant). One period governs the whole page: a **From** and a **To** month at the top right, opening on this month and the two before it. A **Refresh** drops everything the page has cached and reads the window again.
 
 It is not a chart builder. Each panel answers one question an office actually asks, and every figure on it comes out of the same libraries the boards and the ledgers use — nothing here does arithmetic of its own.
 
@@ -69,13 +69,13 @@ The sell-side funnel over the window: sent, won, lost, still out, the **win rate
 
 ### Commissions
 
-What each rep is owed over the window: rows, gross, net, how much is still unapproved and how much has been paid, with a total line. **A cancelled row is in neither the count nor the money.** The approval board itself is on `/commissions`, which this panel links to.
+What each rep is owed over the window: rows, gross, net, how much is still unapproved and how much has been paid, with a total line. **A cancelled row is in neither the count nor the money.** The approval board itself is on `/tms/brokerage/commissions`, which this panel links to.
 
 ## The exports
 
 - **Profit → CSV** — the table exactly as it is cut and filtered, totals on the last line, saved as `profit-<group>-<from>-<to>.csv`. Every field is quoted, so a customer name with a comma in it cannot shift the money columns.
 - **AP → CSV** — the per-carrier aging table, as of today.
-- The AR and AP boards carry their own aging CSVs, and `/commissions` → **History** exports the month's commission rows.
+- The AR and AP boards carry their own aging CSVs, and `/tms/brokerage/commissions` → **History** exports the month's commission rows.
 
 ## Reading the window
 
@@ -92,6 +92,6 @@ Everything else is said the same way. A panel with nothing in it says so — *"N
 - **The totals changed since yesterday and no load moved** — a re-price, a corrected carrier charge or a recorded bill refreshes that load's sample. The table is the money as it stands, not as it stood.
 - **A canceled load is still in the count** — it is not; it is reported as excluded under the figures. The sample is kept so the history remembers it.
 - **Pipeline does not match the period** — it is not meant to. It is the board as it stands right now.
-- **The AR total here and the one on `/ar` differ** — they should not; both come from the same library as of the same day. If they do, one of them was read before a payment posted. Refresh.
+- **The AR total here and the one on `/tms/invoicing` differ** — they should not; both come from the same library as of the same day. If they do, one of them was read before a payment posted. Refresh.
 - **"Those months could not be read"** — the page names the month and the refusal. Refresh, or narrow the window and try again.
 - **Commission figures look short** — cancelled rows are in no total, and a row is only in the window its **trigger** falls in, which is the invoice (or the payment) date, not the delivery.

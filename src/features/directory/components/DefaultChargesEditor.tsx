@@ -1,7 +1,5 @@
 import { Plus, Trash2 } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
+import { TmsButton, TmsField, TmsInput, TmsSelect } from '@/features/tms/kit'
 import { MoneyField } from './MoneyField'
 import type { DefaultCharge, ChargeCodeDef } from '@/types/tms'
 
@@ -25,48 +23,41 @@ export function DefaultChargesEditor({ charges, catalog, onChange, disabled }: D
   const remove = (idx: number) => onChange(charges.filter((_, i) => i !== idx))
 
   return (
-    <div className="space-y-3">
-      {charges.length === 0 && <p className="text-xs text-muted-foreground">No default charges.</p>}
+    <div style={{ display: 'grid', gap: 12 }}>
+      {charges.length === 0 && <p className="tms-muted" style={{ fontSize: 12 }}>No default charges.</p>}
       {charges.map((c, idx) => (
-        <div key={idx} className="grid grid-cols-12 items-end gap-2 rounded-lg border border-border bg-card p-3">
-          <div className="col-span-4">
-            <Label className="text-xs uppercase tracking-wider text-muted-foreground">Charge code</Label>
-            <select
-              value={c.code}
-              onChange={(e) => update(idx, { code: e.target.value })}
-              disabled={disabled}
-              className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
-            >
-              <option value="">— select —</option>
-              {catalog.map((cc) => (
-                <option key={cc.code} value={cc.code}>{cc.label} ({cc.code})</option>
-              ))}
-            </select>
-          </div>
-          <div className="col-span-3">
+        <div key={idx} className="tms-card">
+          <div className="tms-card-body tms-grid tms-grid-4" style={{ alignItems: 'flex-end' }}>
+            <TmsField label="Charge code">
+              <TmsSelect
+                value={c.code}
+                onChange={(e) => update(idx, { code: e.target.value })}
+                disabled={disabled}
+                placeholder="— select —"
+                options={catalog.map((cc) => ({ value: cc.code, label: `${cc.label} (${cc.code})` }))}
+              />
+            </TmsField>
             <MoneyField label="Amount" value={c.amountCents} onChange={(cents) => update(idx, { amountCents: cents ?? 0 })} disabled={disabled} />
-          </div>
-          <div className="col-span-3">
-            <Label className="text-xs uppercase tracking-wider text-muted-foreground">Count</Label>
-            <Input
-              type="number"
-              min={1}
-              value={c.count ?? 1}
-              onChange={(e) => update(idx, { count: Math.max(1, Number(e.target.value)) })}
-              disabled={disabled}
-              className="h-9 text-sm"
-            />
-          </div>
-          <div className="col-span-2 flex justify-end">
-            <Button type="button" variant="ghost" size="icon" className="h-7 w-7" onClick={() => remove(idx)} disabled={disabled}>
-              <Trash2 size={14} />
-            </Button>
+            <TmsField label="Count">
+              <TmsInput
+                type="number"
+                min={1}
+                value={c.count ?? 1}
+                onChange={(e) => update(idx, { count: Math.max(1, Number(e.target.value)) })}
+                disabled={disabled}
+              />
+            </TmsField>
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <TmsButton variant="ghost" size="sm" aria-label="Remove charge" onClick={() => remove(idx)} disabled={disabled}>
+                <Trash2 size={14} />
+              </TmsButton>
+            </div>
           </div>
         </div>
       ))}
-      <Button type="button" variant="outline" size="sm" onClick={add} disabled={disabled}>
-        <Plus size={14} className="mr-1" /> Add default charge
-      </Button>
+      <TmsButton size="sm" onClick={add} disabled={disabled}>
+        <Plus size={14} /> Add default charge
+      </TmsButton>
     </div>
   )
 }

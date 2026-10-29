@@ -43,6 +43,13 @@ import {
   DEFAULT_INVOICE_EMAIL_TEMPLATE,
   renderInvoiceEmail,
 } from '../../../src/lib/shipmentNotices'
+import {
+  evaluateReleaseGate,
+  releaseGateError,
+  releaseGateOf,
+  type ReleaseGateResult,
+} from '../../../src/lib/releaseGate'
+import { loadReleaseGateInput } from '../_shared/releaseGateInput'
 import { canEmailTo, evaluateDocGate, gateLoadIds } from '../../../src/lib/shipmentDocuments'
 import type {
   BillToParty,
@@ -93,6 +100,7 @@ import {
   putPdf,
   putTx,
   queryIndex,
+  releaseGateDeps,
   s3Bytes,
   ses,
   signedDownload,
@@ -102,6 +110,7 @@ import {
   writeAudit,
   type Row,
 } from './store'
+
 import { commissionVoidWrites, runCommissionsAfter } from './commissions'
 
 const MAX_NOTE = 2000
@@ -183,6 +192,29 @@ function docGateFor(context: OrderContext): DocGateResult {
     customer: context.customer,
     settings: context.settings,
   })
+}
+
+/**
+ * Ryne's release rule, re-run here from rows this Lambda read itself. The order
+ * sitting at UNBILLED is not enough: a POD can be voided, a leg bounced or an
+ * exception opened between READY_TO_INVOICE and the press of Generate, and the
+ * invoice is the point of no return.
+ */
+async function releaseGateFor(context: OrderContext): Promise<ReleaseGateResult> {
+  return evaluateReleaseGate(
+    await loadReleaseGateInput(releaseGateDeps, {
+      shipmentId: context.shipment.id,
+      orderId: context.order.id,
+      shipment: context.shipment as unknown as Row,
+      order: context.order as unknown as Row,
+      orders: context.orders as unknown as Row[],
+      loads: context.loads as unknown as Row[],
+      loadCarriers: context.loadCarriers as unknown as Row[],
+      documents: context.documents as unknown as Row[],
+      customer: (context.customer ?? null) as unknown as Row | null,
+      settings: context.settings as unknown as Row,
+    }),
+  )
 }
 
 /** Only what the customer may see goes on their bill. */
@@ -270,6 +302,7 @@ export async function previewInvoice(input: Row, caller: Caller): Promise<Row> {
 
   const context = await readOrderContext(orderId)
   const gate = docGateFor(context)
+  const releaseGate = await releaseGateFor(context)
   const readiness = invoiceReadiness({
     order: context.order,
     shipment: context.shipment,
@@ -289,6 +322,7 @@ export async function previewInvoice(input: Row, caller: Caller): Promise<Row> {
 
   return {
     readiness,
+    releaseGate,
     gate,
     snapshot: invoice as unknown as Row,
     recipients: { to, cc },
@@ -328,7 +362,13 @@ export async function generateInvoice(input: Row, caller: Caller): Promise<Row> 
     charges: context.charges,
     gate,
   })
+  // Which rung the order is on, and whether its money adds up, first — those are
+  // about this bill. Then the release gate, which is about the shipment and is the
+  // rule nothing may pass: the order sitting at UNBILLED is not enough, because a
+  // POD can be voided or a leg bounced between READY_TO_INVOICE and this press.
   if (!readiness.ready) throw new Error(readiness.reasons.join(' '))
+  const releaseGate = await releaseGateFor(context)
+  if (!releaseGate.ok) throw releaseGateError(releaseGate.missing)
 
   if (attachDocumentIds) {
     for (const id of attachDocumentIds) {
@@ -464,7 +504,9 @@ export async function renderInvoicePdf(input: Row, caller: Caller): Promise<Row>
  * One invoice per order, in sequence.
  *
  * Never one transaction across orders: forty orders would blow the item limit, and a
- * single bad row would refuse the other thirty-nine. Each result stands alone.
+ * single bad row would refuse the other thirty-nine. Each result stands alone — and
+ * each runs the release gate on its own, so a batch is not a way around it. An order
+ * the gate refused carries its reasons back, not only the sentence.
  */
 export async function batchGenerate(input: Row, caller: Caller): Promise<Row> {
   const orderIds = assertArrayOf<string>(input.orderIds, 'orderIds', (item, index) =>
@@ -478,7 +520,12 @@ export async function batchGenerate(input: Row, caller: Caller): Promise<Row> {
       const invoice = done.invoice as unknown as InvoiceRecord
       results.push({ orderId, invoiceId: invoice.id, number: invoice.number, totalCents: invoice.totalCents })
     } catch (err) {
-      results.push({ orderId, error: err instanceof Error ? err.message : String(err) })
+      const refused = releaseGateOf(err)
+      results.push({
+        orderId,
+        error: err instanceof Error ? err.message : String(err),
+        ...(refused ? { releaseGate: refused } : {}),
+      })
     }
   }
   return { results }

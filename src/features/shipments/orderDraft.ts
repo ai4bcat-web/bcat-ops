@@ -1,5 +1,5 @@
 /**
- * What the draft order editor refuses to submit, as pure functions.
+ * What the draft shipment editor refuses to submit, as pure functions.
  *
  * These are the same rules `SAVE_ORDER_FORM` / `SUBMIT_ORDER` enforce in the Lambda —
  * duplicated here only so the user sees the problem beside the field instead of as a
@@ -69,7 +69,7 @@ export function validateOrderDraft(
   }
 
   if (TRUCKLOAD_MODES.includes(draft.mode) && !draft.equipmentType?.trim()) {
-    issues.push({ section: 'equipment', message: 'Truckload orders need an equipment type.' })
+    issues.push({ section: 'equipment', message: 'Truckload shipments need an equipment type.' })
   }
 
   // One weight unit for the whole order: mixed IN/CM dimensions silently break class and

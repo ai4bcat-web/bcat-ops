@@ -16,12 +16,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, CheckCircle2, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Checkbox } from '@/components/ui/checkbox'
-import { Textarea } from '@/components/ui/textarea'
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { TmsButton, TmsDialog, TmsField, TmsInput, TmsSelect, TmsTextarea } from '@/features/tms/kit'
 import {
   generateInvoice,
   getShipmentBundle,
@@ -157,147 +152,152 @@ export function GenerateInvoiceDialog({ orderId, busy, onClose, onDone }: {
   }
 
   return (
-    <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
-      <DialogContent className="max-w-5xl">
-        <DialogHeader><DialogTitle>Generate invoice</DialogTitle></DialogHeader>
-
-        {loading && (
-          <p className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 size={14} className="animate-spin" /> Reading the order…
+    <TmsDialog
+      open
+      onOpenChange={(open) => { if (!open) onClose() }}
+      title="Generate invoice"
+      className="tms-dialog-xl"
+      footer={
+        <>
+          <p className="mr-auto text-xs tms-muted">
+            Generate — moves the shipment to Unpaid and freezes its charges
           </p>
-        )}
+          <TmsButton variant="ghost" onClick={onClose} disabled={posting}>Cancel</TmsButton>
+          <TmsButton variant="primary" onClick={submit} disabled={disabled || !ready}>
+            {posting ? 'Generating…' : 'Generate'}
+          </TmsButton>
+        </>
+      }
+    >
+      {loading && (
+        <p className="flex items-center gap-2 tms-muted">
+          <Loader2 size={14} className="animate-spin" /> Reading the shipment…
+        </p>
+      )}
 
-        {!loading && preview && (
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="space-y-4">
-              {ready ? (
-                <p className="flex items-start gap-2 rounded-lg border border-border bg-muted/30 p-2 text-xs">
-                  <CheckCircle2 size={14} className="mt-0.5 shrink-0 text-emerald-600" />
-                  This order is ready to bill for {total}.
+      {!loading && preview && (
+        <div className="tms-grid tms-grid-2">
+          <div className="flex flex-col gap-4">
+            {ready ? (
+              <p
+                className="flex items-start gap-2 p-2 text-xs"
+                style={{ border: '1px solid var(--tms-border)', borderRadius: 'var(--tms-radius)' }}
+              >
+                <CheckCircle2 size={14} className="mt-0.5 shrink-0" style={{ color: 'var(--tms-badge-green)' }} />
+                This shipment is ready to bill for {total}.
+              </p>
+            ) : (
+              <div
+                className="p-2 text-xs"
+                style={{ border: '1px solid var(--tms-border)', borderRadius: 'var(--tms-radius)' }}
+              >
+                <p className="flex items-center gap-2 font-medium">
+                  <AlertTriangle size={14} className="shrink-0" style={{ color: 'var(--tms-badge-orange)' }} />
+                  This shipment cannot be billed yet:
                 </p>
-              ) : (
-                <div className="rounded-lg border border-border bg-muted/30 p-2 text-xs">
-                  <p className="flex items-center gap-2 font-medium">
-                    <AlertTriangle size={14} className="shrink-0 text-amber-600" />
-                    This order cannot be billed yet:
-                  </p>
-                  <ul className="mt-1 list-disc space-y-0.5 pl-6">
-                    {reasons.map((reason) => <li key={reason}>{reason}</li>)}
-                  </ul>
-                </div>
-              )}
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <Label className="text-xs uppercase tracking-wider text-muted-foreground">Invoice date</Label>
-                  <Input
-                    aria-label="Invoice date"
-                    type="date"
-                    value={invoiceDate}
-                    disabled={disabled}
-                    onChange={(e) => setInvoiceDate(e.target.value)}
-                    onBlur={(e) => { if (e.target.value !== preview.snapshot.invoiceDate) reload(e.target.value, billToId) }}
-                    className="h-9 text-sm"
-                  />
-                </div>
-                <div>
-                  <Label className="text-xs uppercase tracking-wider text-muted-foreground">
-                    Due {preview.snapshot.termsDays ? `(net ${preview.snapshot.termsDays})` : ''}
-                  </Label>
-                  <Input
-                    aria-label="Invoice due date"
-                    type="date"
-                    value={dueAt}
-                    disabled={disabled}
-                    onChange={(e) => setDueAt(e.target.value)}
-                    className="h-9 text-sm"
-                  />
-                </div>
-                <div className="col-span-2">
-                  <Label className="text-xs uppercase tracking-wider text-muted-foreground">Bill to</Label>
-                  <select
-                    aria-label="Bill to party"
-                    value={billToId}
-                    disabled={disabled}
-                    onChange={(e) => { setBillToId(e.target.value); reload(invoiceDate, e.target.value) }}
-                    className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
-                  >
-                    <option value="">— the customer —</option>
-                    {billToParties.map((party) => (
-                      <option key={party.id} value={party.id}>{party.name}</option>
-                    ))}
-                  </select>
-                </div>
+                <ul className="mt-1 list-disc pl-6">
+                  {reasons.map((reason) => <li key={reason}>{reason}</li>)}
+                </ul>
               </div>
+            )}
 
-              <div>
-                <Label className="text-xs uppercase tracking-wider text-muted-foreground">Attachments</Label>
-                {preview.attachments.length === 0 ? (
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    No documents will go out with this invoice.
-                    {missingDocs.length > 0 && ` Missing: ${missingDocs.map((type) => DOCUMENT_TYPE_LABELS[type] ?? type).join(', ')}.`}
-                  </p>
-                ) : (
-                  <ul className="mt-1 space-y-1">
-                    {preview.attachments.map((doc) => (
-                      <li key={doc.id}>
-                        <label className="flex items-center gap-2 text-sm">
-                          <Checkbox
-                            aria-label={`Attach ${doc.name}`}
-                            checked={attachIds.includes(doc.id)}
-                            disabled={disabled}
-                            onCheckedChange={(v) => setAttachIds((prev) => (
-                              v === true ? [...prev, doc.id] : prev.filter((id) => id !== doc.id)
-                            ))}
-                          />
-                          <span className="truncate">{DOCUMENT_TYPE_LABELS[doc.type as keyof typeof DOCUMENT_TYPE_LABELS] ?? doc.type} — {doc.name}</span>
-                        </label>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-
-              <div>
-                <Label className="text-xs uppercase tracking-wider text-muted-foreground">Note</Label>
-                <Textarea
-                  aria-label="Invoice note"
-                  rows={2}
-                  value={note}
+            <div className="tms-grid tms-grid-2">
+              <TmsField label="Invoice date">
+                <TmsInput
+                  aria-label="Invoice date"
+                  type="date"
+                  value={invoiceDate}
                   disabled={disabled}
-                  onChange={(e) => setNote(e.target.value)}
-                  className="text-sm"
+                  onChange={(e) => setInvoiceDate(e.target.value)}
+                  onBlur={(e) => { if (e.target.value !== preview.snapshot.invoiceDate) reload(e.target.value, billToId) }}
                 />
-              </div>
-
-              {error && <p className="text-xs text-destructive">{error}</p>}
+              </TmsField>
+              <TmsField label={`Due ${preview.snapshot.termsDays ? `(net ${preview.snapshot.termsDays})` : ''}`}>
+                <TmsInput
+                  aria-label="Invoice due date"
+                  type="date"
+                  value={dueAt}
+                  disabled={disabled}
+                  onChange={(e) => setDueAt(e.target.value)}
+                />
+              </TmsField>
             </div>
 
-            <div className="min-h-[28rem]">
-              <Label className="text-xs uppercase tracking-wider text-muted-foreground">Preview</Label>
-              {pdfUrl ? (
-                <iframe title="Invoice preview" src={pdfUrl} className="mt-1 h-[28rem] w-full rounded-lg border border-border" />
-              ) : (
-                <p className="mt-1 flex items-center gap-2 text-sm text-muted-foreground">
-                  <Loader2 size={14} className="animate-spin" /> Rendering the bill…
+            <TmsField label="Bill to">
+              <TmsSelect
+                aria-label="Bill to party"
+                value={billToId}
+                disabled={disabled}
+                onChange={(e) => { setBillToId(e.target.value); reload(invoiceDate, e.target.value) }}
+              >
+                <option value="">— the customer —</option>
+                {billToParties.map((party) => (
+                  <option key={party.id} value={party.id}>{party.name}</option>
+                ))}
+              </TmsSelect>
+            </TmsField>
+
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wider tms-muted">Attachments</p>
+              {preview.attachments.length === 0 ? (
+                <p className="mt-1 text-xs tms-muted">
+                  No documents will go out with this invoice.
+                  {missingDocs.length > 0 && ` Missing: ${missingDocs.map((type) => DOCUMENT_TYPE_LABELS[type] ?? type).join(', ')}.`}
                 </p>
+              ) : (
+                <ul className="mt-1 flex flex-col gap-1">
+                  {preview.attachments.map((doc) => (
+                    <li key={doc.id}>
+                      <label className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          aria-label={`Attach ${doc.name}`}
+                          checked={attachIds.includes(doc.id)}
+                          disabled={disabled}
+                          onChange={(e) => setAttachIds((prev) => (
+                            e.target.checked ? [...prev, doc.id] : prev.filter((id) => id !== doc.id)
+                          ))}
+                        />
+                        <span className="truncate">
+                          {DOCUMENT_TYPE_LABELS[doc.type as keyof typeof DOCUMENT_TYPE_LABELS] ?? doc.type} — {doc.name}
+                        </span>
+                      </label>
+                    </li>
+                  ))}
+                </ul>
               )}
             </div>
-          </div>
-        )}
 
-        <DialogFooter className="flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-xs text-muted-foreground">
-            Generate — moves the order to Unpaid and freezes its charges
-          </p>
-          <div className="flex gap-2">
-            <Button variant="ghost" onClick={onClose} disabled={posting}>Cancel</Button>
-            <Button onClick={submit} disabled={disabled || !ready}>
-              {posting ? 'Generating…' : 'Generate'}
-            </Button>
+            <TmsField label="Note">
+              <TmsTextarea
+                aria-label="Invoice note"
+                rows={2}
+                value={note}
+                disabled={disabled}
+                onChange={(e) => setNote(e.target.value)}
+              />
+            </TmsField>
+
+            {error && <p className="text-xs" style={{ color: 'var(--tms-badge-red)' }}>{error}</p>}
           </div>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+
+          <div className="min-h-[28rem]">
+            <p className="text-[11px] font-semibold uppercase tracking-wider tms-muted">Preview</p>
+            {pdfUrl ? (
+              <iframe
+                title="Invoice preview"
+                src={pdfUrl}
+                className="mt-1 h-[28rem] w-full"
+                style={{ border: '1px solid var(--tms-border)', borderRadius: 'var(--tms-radius)' }}
+              />
+            ) : (
+              <p className="mt-1 flex items-center gap-2 tms-muted">
+                <Loader2 size={14} className="animate-spin" /> Rendering the bill…
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+    </TmsDialog>
   )
 }

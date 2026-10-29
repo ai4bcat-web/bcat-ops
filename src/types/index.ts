@@ -384,6 +384,17 @@ export interface Load extends ShipmentLoadFields {
   hot?: boolean | null        // urgent/"hot" load — flagged with 🔥 in schedule
   unscheduled?: boolean | null // true = orphan (no firm date) → calendar's Unscheduled lane
   stops?: Stop[] | null       // canonical multi-stop array; legacy pickup*/delivery* are derived mirrors
+  // ── Revenue ownership (Step R) ───────────────────────────────────────────
+  // Mirrored from the shipment so settlements, the fleet dashboards and the
+  // driver app can be grouped by business without joining. Codes from
+  // `OwnershipDivision`; written only by tmsShipmentActions.
+  revDivision?: string | null
+  revSubdivision?: string | null
+  /** 'HAND' | 'RULE' — a hand tag beats the rules. */
+  revTagSource?: string | null
+  revRuleId?: string | null
+  /** Cognito username of the rep who sold it. */
+  salesRepId?: string | null
   createdAt: string
   updatedAt: string
   createdBy: string

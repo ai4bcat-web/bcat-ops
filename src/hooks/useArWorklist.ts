@@ -40,9 +40,8 @@ export interface ArWorklistRow {
   revenueCents: number
   docsRequired: string[]
   docsMissing: string[]
-  /** Nothing missing, or an admin signed an override. */
+  /** Nothing the customer's invoice settings ask for is missing. */
   docsReady: boolean
-  docsOverride: boolean
   invoiceNumber: string | null
   invoicedAt: string | null
   arBalanceCents: number | null
@@ -96,8 +95,7 @@ export function useArWorklist(tab: ArWorklistTab): ArWorklist {
       const shipment = byId.get(order.shipmentId) ?? null
       const docsRequired = order.docsRequired ?? []
       const docsMissing = order.docsMissing ?? []
-      const docsOverride = !!order.docsOverrideAt
-      const docsReady = docsMissing.length === 0 || docsOverride
+      const docsReady = docsMissing.length === 0
       const revenueCents = order.revenueCents ?? 0
 
       const reasons: string[] = []
@@ -105,7 +103,7 @@ export function useArWorklist(tab: ArWorklistTab): ArWorklist {
       if (revenueCents <= 0) reasons.push('No customer charges')
       if (shipment?.deletedAt) reasons.push('Shipment deleted')
       else if (shipment?.status === 'CANCELED') reasons.push('Shipment canceled')
-      else if (!shipment?.deliveredAt && !order.invoiceEarly) reasons.push('Not delivered')
+      else if (!shipment?.deliveredAt) reasons.push('Not delivered')
 
       return {
         order,
@@ -122,7 +120,6 @@ export function useArWorklist(tab: ArWorklistTab): ArWorklist {
         docsRequired,
         docsMissing,
         docsReady,
-        docsOverride,
         invoiceNumber: order.invoiceNumber ?? null,
         invoicedAt: order.invoicedAt ?? null,
         arBalanceCents: order.arBalanceCents ?? null,

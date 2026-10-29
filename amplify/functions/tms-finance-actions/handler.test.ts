@@ -533,11 +533,90 @@ function seed(over: { order?: Row; customer?: Row; settings?: Row } = {}): void 
     sortOrder: 1,
     createdBy: 'a@b.c',
   })
+  // Step R's release gate: an order only reaches accounting when the shipment has
+  // delivered, the paperwork the customer bills on is in hand and somebody's cost is
+  // recorded. That is the state every billing test starts from; the gate tests bend
+  // exactly one of those facts.
+  table(TABLES.loadCarrier).set(LOAD_CARRIER_ID, {
+    id: LOAD_CARRIER_ID,
+    loadId: LOAD_ID,
+    shipmentId: SHIPMENT_ID,
+    kind: 'CARRIER',
+    status: 'ACTIVE',
+    carrierId: CARRIER_ID,
+    carrierName: 'Wheeler Trucking',
+    rateConStatus: 'SIGNED',
+    chargesFinalizedAt: '2026-10-21T12:00:00.000Z',
+    apStatus: 'IN_REVIEW',
+    invoiceId: null,
+    costCents: 180_000,
+    createdBy: 'a@b.c',
+    updatedBy: 'a@b.c',
+  })
+  for (const [id, type] of [['doc-seed-bol', 'BOL'], ['doc-seed-pod', 'POD']]) {
+    table(TABLES.document).set(id, {
+      id,
+      shipmentId: SHIPMENT_ID,
+      orderId: ORDER_ID,
+      loadId: LOAD_ID,
+      type,
+      name: `${type.toLowerCase()}-seed.pdf`,
+      s3Key: `shipment-docs/${SHIPMENT_ID}/${id}.pdf`,
+      contentType: 'application/pdf',
+      sizeBytes: 1024,
+      status: 'ACTIVE',
+      reviewStatus: 'ACCEPTED',
+      audience: 'ALL',
+      uploadedAt: '2026-10-21T10:00:00.000Z',
+    })
+  }
 }
 
 async function generate(identity: unknown = ADMIN): Promise<{ invoiceId: string; number: string }> {
   const result = (await call('GENERATE_INVOICE', { orderId: ORDER_ID }, identity)) as { invoice: Row }
   return { invoiceId: String(result.invoice.id), number: String(result.invoice.number) }
+}
+
+/**
+ * A second billable order on the same shipment, with the load, leg and paperwork
+ * that make it releasable. The gate scopes everything by the loads an order owns,
+ * so an order cloned without its own load is an order nothing was hauled for.
+ */
+function seedSecondOrder(orderId: string, over: Row = {}): void {
+  const suffix = orderId.replace(/[^a-z0-9]/gi, '')
+  const loadId = `lod-${suffix}`
+  table(TABLES.order).set(orderId, {
+    ...table(TABLES.order).get(ORDER_ID)!,
+    id: orderId,
+    arStatus: 'UNBILLED',
+    invoiceId: null,
+    invoiceNumber: null,
+    factoringItemId: null,
+    ...over,
+  })
+  table(TABLES.load).set(loadId, { ...table(TABLES.load).get(LOAD_ID)!, id: loadId, orderId })
+  table(TABLES.financials).set(loadId, { ...table(TABLES.financials).get(LOAD_ID)!, id: loadId, loadId, orderId })
+  table(TABLES.charge).set(`chg-${suffix}`, {
+    ...table(TABLES.charge).get('chg-1')!,
+    id: `chg-${suffix}`,
+    orderId,
+    loadId,
+  })
+  table(TABLES.loadCarrier).set(`lc-${suffix}`, {
+    ...table(TABLES.loadCarrier).get(LOAD_CARRIER_ID)!,
+    id: `lc-${suffix}`,
+    loadId,
+  })
+  for (const type of ['BOL', 'POD']) {
+    const id = `doc-${suffix}-${type.toLowerCase()}`
+    table(TABLES.document).set(id, {
+      ...table(TABLES.document).get(`doc-seed-${type.toLowerCase()}`)!,
+      id,
+      orderId,
+      loadId,
+      s3Key: `shipment-docs/${SHIPMENT_ID}/${id}.pdf`,
+    })
+  }
 }
 
 beforeEach(() => {
@@ -563,6 +642,14 @@ describe('authorization', () => {
 
   it('refuses a dispatcher who only holds page-loads', async () => {
     await expect(call('PREVIEW_INVOICE', { orderId: ORDER_ID }, DISPATCHER)).rejects.toThrow(/page-invoicing/)
+  })
+
+  it('lets a page-tms caller open AR, and keeps posting admin-only', async () => {
+    // Step R: Invoicing is a BROKERAGE page, so the one TMS grant opens the AR door
+    // `page-invoicing` opens — and no further: posting is still owner/ADMIN.
+    const TMS_USER = { sub: 'sub-tms', username: 'tms', claims: { email: 'broker@bcatcorp.com', 'cognito:groups': ['page-tms'] } }
+    await expect(call('PREVIEW_INVOICE', { orderId: ORDER_ID }, TMS_USER)).resolves.toBeDefined()
+    await expect(call('SAVE_AR_SETTINGS', { invoiceTerms: 'Net 30' }, TMS_USER)).rejects.toThrow(/requires owner or ADMIN/)
   })
 
   it('lets page-invoicing issue a bill but not post money against it', async () => {
@@ -691,6 +778,136 @@ describe('GENERATE_INVOICE', () => {
     const out = (await call('BATCH_GENERATE', { orderIds: [ORDER_ID, 'ord-2'] })) as { results: Row[] }
     expect(out.results[0]).toMatchObject({ orderId: ORDER_ID, number: 'INV-000001' })
     expect(String(out.results[1].error)).toMatch(/UNBILLED/i)
+  })
+})
+
+// ── the release gate (Step R) ───────────────────────────────────────────────
+
+/**
+ * Ryne's rule: a shipment reaches accounting only when it has delivered with its
+ * paperwork, its references and its cost recorded, and nothing may bypass it —
+ * not a batch, not the factor, not an admin. The order's AR status is a cached
+ * verdict; these tests move the facts under it and watch the server refuse.
+ */
+describe('release to accounting', () => {
+  it('refuses an UNBILLED order whose POD was voided after it was released', async () => {
+    table(TABLES.document).set('doc-seed-pod', {
+      ...table(TABLES.document).get('doc-seed-pod')!,
+      status: 'VOID',
+      voidedAt: '2026-10-22T09:00:00.000Z',
+    })
+    await expect(call('GENERATE_INVOICE', { orderId: ORDER_ID })).rejects.toThrow(
+      'Not ready for accounting: Missing document: POD',
+    )
+    expect(table(TABLES.invoice).size).toBe(0)
+    expect(table(TABLES.order).get(ORDER_ID)!.arStatus).toBe('UNBILLED')
+  })
+
+  it('refuses a document the carrier sent but nobody has accepted', async () => {
+    table(TABLES.document).set('doc-seed-pod', {
+      ...table(TABLES.document).get('doc-seed-pod')!,
+      source: 'CARRIER_PORTAL',
+      reviewStatus: 'PENDING',
+    })
+    await expect(call('GENERATE_INVOICE', { orderId: ORDER_ID })).rejects.toThrow(/Missing document: POD/)
+  })
+
+  it('refuses an outside carrier whose bill is not recorded, and names them', async () => {
+    const leg = table(TABLES.loadCarrier).get(LOAD_CARRIER_ID)!
+    delete leg.chargesFinalizedAt
+    table(TABLES.loadCarrier).set(LOAD_CARRIER_ID, leg)
+    await expect(call('GENERATE_INVOICE', { orderId: ORDER_ID })).rejects.toThrow(
+      'Not ready for accounting: Carrier charges not settled: Wheeler Trucking — record the carrier bill first',
+    )
+    expect(table(TABLES.invoice).size).toBe(0)
+  })
+
+  it('refuses while an exception is still open on the load', async () => {
+    table(TABLES.load).set(LOAD_ID, { ...table(TABLES.load).get(LOAD_ID)!, openIncidentCount: 2 })
+    await expect(call('GENERATE_INVOICE', { orderId: ORDER_ID })).rejects.toThrow(
+      'Not ready for accounting: 2 open exceptions',
+    )
+  })
+
+  it('no longer lets an admin override admit a missing document', async () => {
+    table(TABLES.document).delete('doc-seed-pod')
+    table(TABLES.order).set(ORDER_ID, {
+      ...table(TABLES.order).get(ORDER_ID)!,
+      docsOverrideAt: '2026-10-22T09:00:00.000Z',
+      docsOverrideBy: 'admin@bcatcorp.com',
+      docsOverrideNote: 'bills on the BOL',
+    })
+    await expect(call('GENERATE_INVOICE', { orderId: ORDER_ID }, ADMIN)).rejects.toThrow(/Missing document: POD/)
+    expect(table(TABLES.invoice).size).toBe(0)
+  })
+
+  it('bills the orders that pass in a batch and reports the one that does not', async () => {
+    seedSecondOrder('ord-2')
+    seedSecondOrder('ord-3')
+    table(TABLES.document).delete('doc-ord3-pod')
+
+    const out = (await call('BATCH_GENERATE', { orderIds: [ORDER_ID, 'ord-2', 'ord-3'] })) as { results: Row[] }
+    expect(out.results.map((r) => r.orderId)).toEqual([ORDER_ID, 'ord-2', 'ord-3'])
+    expect(out.results[0].number).toBe('INV-000001')
+    expect(out.results[1].number).toBe('INV-000002')
+    expect(String(out.results[2].error)).toBe('Not ready for accounting: Missing document: POD')
+    expect(out.results[2].releaseGate).toMatchObject({
+      ok: false,
+      missing: [{ code: 'DOC_MISSING', detail: 'POD', message: 'Missing document: POD' }],
+    })
+    expect(table(TABLES.invoice).size).toBe(2)
+    expect(table(TABLES.order).get('ord-3')!.arStatus).toBe('UNBILLED')
+  })
+
+  it('refuses Send to Factor once the carrier bill behind the invoice is undone', async () => {
+    const { invoiceId } = await generate()
+    const leg = table(TABLES.loadCarrier).get(LOAD_CARRIER_ID)!
+    delete leg.chargesFinalizedAt
+    table(TABLES.loadCarrier).set(LOAD_CARRIER_ID, leg)
+
+    await expect(call('SEND_TO_FACTOR', { invoiceId })).rejects.toThrow(
+      /Not ready for accounting: Carrier charges not settled: Wheeler Trucking/,
+    )
+    expect(table(TABLES.factoring).size).toBe(0)
+    expect(table(TABLES.invoice).get(invoiceId)!.factored).toBe(false)
+  })
+
+  it('refuses Send to Factor on a voided shipment, and says so in the preview', async () => {
+    const { invoiceId } = await generate()
+    table(TABLES.shipment).set(SHIPMENT_ID, {
+      ...table(TABLES.shipment).get(SHIPMENT_ID)!,
+      voidedAt: '2026-10-23T00:00:00.000Z',
+      voidedBy: 'admin@bcatcorp.com',
+    })
+
+    const preview = (await call('PREVIEW_FACTOR', { invoiceId })) as { ready: boolean; refusal: string }
+    expect(preview.ready).toBe(false)
+    expect(preview.refusal).toBe('Not ready for accounting: Voided shipment')
+    await expect(call('SEND_TO_FACTOR', { invoiceId })).rejects.toThrow('Not ready for accounting: Voided shipment')
+    expect(table(TABLES.factoring).size).toBe(0)
+  })
+
+  it('hands the preview the same list the refusal would carry', async () => {
+    table(TABLES.document).delete('doc-seed-bol')
+    const preview = (await call('PREVIEW_INVOICE', { orderId: ORDER_ID })) as {
+      releaseGate: { ok: boolean; missing: { code: string; message: string }[] }
+    }
+    expect(preview.releaseGate).toEqual({
+      ok: false,
+      missing: [{ code: 'DOC_MISSING', detail: 'BOL', message: 'Missing document: BOL' }],
+    })
+    // A preview writes nothing, whatever it finds.
+    expect(table(TABLES.invoice).size).toBe(0)
+  })
+
+  it('still issues exactly one invoice when two presses race', async () => {
+    const results = await Promise.allSettled([
+      call('GENERATE_INVOICE', { orderId: ORDER_ID }),
+      call('GENERATE_INVOICE', { orderId: ORDER_ID }),
+    ])
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1)
+    expect(table(TABLES.invoice).size).toBe(1)
+    expect(table(TABLES.order).get(ORDER_ID)).toMatchObject({ arStatus: 'UNPAID' })
   })
 })
 
@@ -1181,11 +1398,7 @@ describe('review regressions', () => {
     const { invoiceId } = await generate()
     await call('SEND_TO_FACTOR', { invoiceId })
     // A second order on the same shipment resolves to the same PRO.
-    table(TABLES.order).set('ord-2', {
-      ...table(TABLES.order).get(ORDER_ID)!,
-      id: 'ord-2', arStatus: 'UNBILLED', invoiceId: null, invoiceNumber: null, factoringItemId: null,
-    })
-    table(TABLES.charge).set('chg-3', { ...table(TABLES.charge).get('chg-1')!, id: 'chg-3', orderId: 'ord-2' })
+    seedSecondOrder('ord-2')
     const second = (await call('GENERATE_INVOICE', { orderId: 'ord-2' })) as { invoice: Row }
     await expect(call('SEND_TO_FACTOR', { invoiceId: String(second.invoice.id) }))
       .rejects.toThrow(/already on the factoring queue for invoice/)

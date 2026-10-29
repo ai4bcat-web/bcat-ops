@@ -130,10 +130,10 @@ describe('DirectoryPages', () => {
     expect(screen.getByText('Pending Co')).toBeTruthy()
     expect(screen.getByText('Legacy Active')).toBeTruthy()
 
-    fireEvent.click(screen.getByText('leads'))
+    fireEvent.click(screen.getByText('Leads'))
     await waitFor(() => expect(screen.getByText('Lead Co')).toBeTruthy())
 
-    fireEvent.click(screen.getByText('inactive'))
+    fireEvent.click(screen.getByText('Inactive'))
     await waitFor(() => {
       expect(screen.getByText('Blocked Co')).toBeTruthy()
       expect(screen.getByText('Legacy Archived')).toBeTruthy()
@@ -145,11 +145,11 @@ describe('DirectoryPages', () => {
     await waitFor(() => expect(screen.getByText('Active Co')).toBeTruthy())
     expect(screen.queryByText('Lead Co')).toBeNull()
 
-    fireEvent.click(screen.getByText('leads'))
+    fireEvent.click(screen.getByText('Leads'))
     await waitFor(() => expect(screen.getByText('Lead Co')).toBeTruthy())
     expect(screen.queryByText('Active Co')).toBeNull()
 
-    fireEvent.click(screen.getByText('inactive'))
+    fireEvent.click(screen.getByText('Inactive'))
     await waitFor(() => {
       expect(screen.getByText('Blocked Co')).toBeTruthy()
       expect(screen.getByText('Legacy Archived')).toBeTruthy()

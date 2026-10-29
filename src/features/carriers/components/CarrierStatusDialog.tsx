@@ -5,10 +5,7 @@
  * list; Confirm stays disabled until there is one.
  */
 import { useState } from 'react'
-import { Button } from '@/components/ui/button'
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
+import { TmsButton, TmsDialog, TmsField, TmsInput, TmsSelect } from '@/features/tms/kit'
 import {
   CARRIER_STATUS_LABELS,
   CARRIER_STATUS_REASON_LABELS,
@@ -56,83 +53,77 @@ export function CarrierStatusDialog({ carrier, isAdmin, onClose, onConfirm }: Ca
   }
 
   return (
-    <Dialog open onOpenChange={(v) => { if (!v) onClose() }}>
-      <DialogContent className="max-w-md">
-        <DialogHeader><DialogTitle>Change carrier status</DialogTitle></DialogHeader>
-        <div className="space-y-4">
-          <p className="text-sm text-muted-foreground">
-            {carrier.name} · currently{' '}
-            <span className="font-medium text-foreground">{CARRIER_STATUS_LABELS[carrier.status]}</span>
-          </p>
-
-          {targets.length === 0 ? (
-            <p className="text-sm text-destructive">
-              Only an admin can move a carrier out of Do not use.
-            </p>
-          ) : (
-            <>
-              <div>
-                <Label htmlFor="carrier-status" className="text-xs uppercase tracking-wider text-muted-foreground">
-                  New status
-                </Label>
-                <select
-                  id="carrier-status"
-                  value={status}
-                  onChange={(e) => { setStatus(e.target.value as CarrierStatus); setReason('') }}
-                  className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
-                >
-                  {targets.map((s) => <option key={s} value={s}>{CARRIER_STATUS_LABELS[s]}</option>)}
-                </select>
-              </div>
-
-              {needsReason && (
-                <div>
-                  <Label htmlFor="carrier-status-reason" className="text-xs uppercase tracking-wider text-muted-foreground">
-                    Reason *
-                  </Label>
-                  <select
-                    id="carrier-status-reason"
-                    value={reason}
-                    onChange={(e) => setReason(e.target.value as CarrierStatusReason)}
-                    className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
-                  >
-                    <option value="">— select —</option>
-                    {reasons.map((r) => <option key={r} value={r}>{CARRIER_STATUS_REASON_LABELS[r]}</option>)}
-                  </select>
-                </div>
-              )}
-
-              <div>
-                <Label htmlFor="carrier-status-note" className="text-xs uppercase tracking-wider text-muted-foreground">
-                  Note
-                </Label>
-                <Input
-                  id="carrier-status-note"
-                  value={note}
-                  onChange={(e) => setNote(e.target.value)}
-                  maxLength={250}
-                  className="h-9 text-sm"
-                />
-              </div>
-
-              <p className="text-xs text-muted-foreground">
-                Loads this carrier is already booked on keep their assignment — they are flagged, never bounced.
-              </p>
-            </>
-          )}
-
-          {error && <p className="text-xs text-destructive">{error}</p>}
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose} disabled={busy}>Cancel</Button>
-          <Button
+    <TmsDialog
+      open
+      onOpenChange={(v) => { if (!v) onClose() }}
+      title="Change carrier status"
+      footer={
+        <>
+          <TmsButton variant="ghost" onClick={onClose} disabled={busy}>Cancel</TmsButton>
+          <TmsButton
+            variant="primary"
             onClick={confirm}
             disabled={busy || targets.length === 0 || !status || (needsReason && !reason)}
           >
             {busy ? 'Saving…' : 'Change status'}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          </TmsButton>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-4">
+        <p className="tms-muted">
+          {carrier.name} · currently{' '}
+          <span className="font-medium" style={{ color: 'var(--tms-text)' }}>
+            {CARRIER_STATUS_LABELS[carrier.status]}
+          </span>
+        </p>
+
+        {targets.length === 0 ? (
+          <p style={{ color: 'var(--tms-badge-red)' }}>
+            Only an admin can move a carrier out of Do not use.
+          </p>
+        ) : (
+          <>
+            <TmsField label="New status" htmlFor="carrier-status">
+              <TmsSelect
+                id="carrier-status"
+                value={status}
+                onChange={(e) => { setStatus(e.target.value as CarrierStatus); setReason('') }}
+              >
+                {targets.map((s) => <option key={s} value={s}>{CARRIER_STATUS_LABELS[s]}</option>)}
+              </TmsSelect>
+            </TmsField>
+
+            {needsReason && (
+              <TmsField label="Reason *" htmlFor="carrier-status-reason">
+                <TmsSelect
+                  id="carrier-status-reason"
+                  value={reason}
+                  onChange={(e) => setReason(e.target.value as CarrierStatusReason)}
+                >
+                  <option value="">— select —</option>
+                  {reasons.map((r) => <option key={r} value={r}>{CARRIER_STATUS_REASON_LABELS[r]}</option>)}
+                </TmsSelect>
+              </TmsField>
+            )}
+
+            <TmsField label="Note" htmlFor="carrier-status-note">
+              <TmsInput
+                id="carrier-status-note"
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                maxLength={250}
+              />
+            </TmsField>
+
+            <p className="text-xs tms-muted">
+              Shipments this carrier is already booked on keep their assignment — they are flagged, never bounced.
+            </p>
+          </>
+        )}
+
+        {error && <p className="text-xs" style={{ color: 'var(--tms-badge-red)' }}>{error}</p>}
+      </div>
+    </TmsDialog>
   )
 }

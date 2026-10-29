@@ -8,20 +8,24 @@
  * "is this the right document, the right way up, all the pages?" — which needs the document
  * on screen and a way to replace it when the answer is no.
  *
- * Deliberately one component for the Loads drawer, the factoring queue and the settlement
- * rows: the same document is reached from all three, and three different previews would
- * drift until they disagreed about what is on file.
+ * Deliberately one component for the shipment Documents tab, the calendar paperwork cell,
+ * the factoring queue and the settlement rows: the same document is reached from all of
+ * them, and separate previews would drift until they disagreed about what is on file.
+ *
+ * It renders in place rather than through a portal, so it inherits whichever theme its
+ * host page defines: inside `.tms-shell` the `--tms-*` tokens resolve and it is dark;
+ * on the existing BCAT Ops pages those tokens are undefined and the `--ds-*` fallbacks
+ * keep it exactly as it was.
  */
 import { useRef, useState } from 'react'
 import { Download, Loader2, RefreshCw, Trash2, X, FileText, ExternalLink } from 'lucide-react'
 import { toast } from 'sonner'
-import { Button } from '@/components/ui/button'
 import { downloadPodAsPdf } from '@/lib/podDownload'
 
 export interface DocumentPreviewProps {
   open: boolean
   onClose: () => void
-  /** "POD · PRO 14559" — says which document, on which load. */
+  /** "POD · PRO 14559" — says which document, on which shipment. */
   title: string
   /** Presigned, already pointing at the enhanced copy where one exists. Null while it loads. */
   url: string | null
@@ -37,9 +41,24 @@ export interface DocumentPreviewProps {
   accept?: string
 }
 
+/** Theme-following tokens: the TMS shell's value, else the app's own. */
+const SURFACE = 'var(--tms-card, var(--ds-surface))'
+const BORDER = 'var(--tms-border, var(--ds-border))'
+const BG = 'var(--tms-bg, var(--ds-bg))'
+const TEXT = 'var(--tms-text, var(--ds-t1))'
+const MUTED = 'var(--tms-muted, var(--ds-t2))'
+const FAINT = 'var(--tms-muted, var(--ds-t3))'
+const DANGER = 'var(--tms-badge-red, #dc2626)'
+
+const buttonStyle: React.CSSProperties = {
+  display: 'inline-flex', alignItems: 'center', gap: 6,
+  height: 32, padding: '0 12px', borderRadius: 4, fontSize: 13, fontWeight: 500,
+  border: `1px solid ${BORDER}`, background: BG, color: TEXT,
+  cursor: 'pointer', fontFamily: 'inherit',
+}
+
 function isPdf(contentType: string | null | undefined, url: string | null): boolean {
-  if (contentType) return /pdf/i.test(contentType)
-  return !!url && /\.pdf(\?|$)/i.test(url)
+  return /pdf/i.test(contentType ?? '') || /\.pdf(\?|$)/i.test(url ?? '')
 }
 
 function isImage(contentType: string | null | undefined): boolean {
@@ -77,7 +96,7 @@ export function DocumentPreview({
       onClick={onClose}
       style={{
         position: 'fixed', inset: 0, zIndex: 60,
-        background: 'rgba(15,23,42,0.55)',
+        background: 'rgba(8,8,8,0.62)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         padding: 16,
       }}
@@ -87,21 +106,22 @@ export function DocumentPreview({
         style={{
           display: 'flex', flexDirection: 'column',
           width: 'min(900px, 100%)', maxHeight: '92vh',
-          borderRadius: 12, overflow: 'hidden',
-          background: 'var(--ds-surface)', border: '1px solid var(--ds-border)',
-          boxShadow: '0 24px 60px rgba(15,23,42,0.35)',
+          borderRadius: 6, overflow: 'hidden',
+          background: SURFACE, border: `1px solid ${BORDER}`,
+          boxShadow: '0 24px 60px rgba(0,0,0,0.45)',
+          color: TEXT,
         }}
       >
         <header
           style={{
             display: 'flex', alignItems: 'flex-start', gap: 12,
-            padding: '12px 14px', borderBottom: '1px solid var(--ds-border)',
+            padding: '12px 14px', borderBottom: `1px solid ${BORDER}`,
           }}
         >
           <div style={{ minWidth: 0, flex: 1 }}>
-            <p style={{ margin: 0, fontSize: 14, fontWeight: 700, color: 'var(--ds-t1)' }}>{title}</p>
+            <p style={{ margin: 0, fontSize: 14, fontWeight: 700, color: TEXT }}>{title}</p>
             {subtitle && (
-              <p style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--ds-t2)' }}>{subtitle}</p>
+              <p style={{ margin: '2px 0 0', fontSize: 12, color: MUTED }}>{subtitle}</p>
             )}
           </div>
           <button
@@ -111,17 +131,17 @@ export function DocumentPreview({
             style={{
               display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
               width: 28, height: 28, borderRadius: 6, cursor: 'pointer',
-              border: '1px solid var(--ds-border)', background: 'var(--ds-bg)',
-              color: 'var(--ds-t2)',
+              border: `1px solid ${BORDER}`, background: BG,
+              color: MUTED,
             }}
           >
             <X size={15} />
           </button>
         </header>
 
-        <div style={{ flex: 1, minHeight: 320, overflow: 'auto', background: 'var(--ds-bg)' }}>
+        <div style={{ flex: 1, minHeight: 320, overflow: 'auto', background: BG }}>
           {!url ? (
-            <div style={{ display: 'grid', placeItems: 'center', height: 360, gap: 8, color: 'var(--ds-t2)' }}>
+            <div style={{ display: 'grid', placeItems: 'center', height: 360, gap: 8, color: MUTED }}>
               <Loader2 className="animate-spin" size={20} />
               <span style={{ fontSize: 13 }}>Opening the document…</span>
             </div>
@@ -144,8 +164,8 @@ export function DocumentPreview({
              * a broken upload.
              */
             <div style={{ display: 'grid', placeItems: 'center', height: 360, gap: 10, padding: 24, textAlign: 'center' }}>
-              <FileText size={28} style={{ color: 'var(--ds-t3)' }} />
-              <p style={{ margin: 0, fontSize: 13, color: 'var(--ds-t2)', maxWidth: 420 }}>
+              <FileText size={28} style={{ color: FAINT }} />
+              <p style={{ margin: 0, fontSize: 13, color: MUTED, maxWidth: 420 }}>
                 This file type cannot be shown in the browser. Download it to check it, or
                 replace it with a photo or PDF.
               </p>
@@ -164,37 +184,36 @@ export function DocumentPreview({
         <footer
           style={{
             display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center',
-            padding: '10px 14px', borderTop: '1px solid var(--ds-border)',
+            padding: '10px 14px', borderTop: `1px solid ${BORDER}`,
           }}
         >
-          <Button
-            size="sm"
-            variant="outline"
+          <button
+            type="button"
+            style={buttonStyle}
             disabled={!url || busy !== null}
             onClick={() => void run('download', () => downloadPodAsPdf(url!, downloadName))}
           >
-            {busy === 'download' ? <Loader2 className="size-3.5 animate-spin" /> : <Download className="size-3.5" />}
+            {busy === 'download' ? <Loader2 className="animate-spin" size={14} /> : <Download size={14} />}
             Download PDF
-          </Button>
+          </button>
 
           {onReplace && (
-            <Button
-              size="sm"
-              variant="outline"
+            <button
+              type="button"
+              style={buttonStyle}
               disabled={busy !== null}
               onClick={() => input.current?.click()}
             >
-              {busy === 'replace' ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
+              {busy === 'replace' ? <Loader2 className="animate-spin" size={14} /> : <RefreshCw size={14} />}
               Replace
-            </Button>
+            </button>
           )}
 
           {onRemove && (
-            <Button
-              size="sm"
-              variant="outline"
+            <button
+              type="button"
+              style={{ ...buttonStyle, color: DANGER }}
               disabled={busy !== null}
-              className="text-red-600 hover:text-red-700"
               onClick={() => {
                 // A POD holds the driver's pay and the invoice. Taking one off is never
                 // a slip of the mouse.
@@ -205,9 +224,9 @@ export function DocumentPreview({
                 })
               }}
             >
-              {busy === 'remove' ? <Loader2 className="size-3.5 animate-spin" /> : <Trash2 className="size-3.5" />}
+              {busy === 'remove' ? <Loader2 className="animate-spin" size={14} /> : <Trash2 size={14} />}
               Remove
-            </Button>
+            </button>
           )}
 
           <input

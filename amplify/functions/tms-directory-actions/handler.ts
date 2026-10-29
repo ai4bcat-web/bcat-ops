@@ -24,10 +24,19 @@ import {
 } from '@aws-sdk/client-dynamodb'
 import { AdminGetUserCommand, CognitoIdentityProviderClient } from '@aws-sdk/client-cognito-identity-provider'
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb'
-import { createHmac, timingSafeEqual } from 'crypto'
+import { createHmac, randomUUID, timingSafeEqual } from 'crypto'
 import { validateCommissionPlans, validatePaySchedule } from '../../../src/lib/commission'
 import { teamMembership, validateTeams } from '../../../src/lib/teams'
-import type { CommissionTrigger, Team } from '../../../src/types/tms'
+import { SEED_DIVISIONS, SEED_RULES, validateDivisions, validateRules } from '../../../src/lib/ownership'
+import { SEED_VIEWS, slugify, validateView } from '../../../src/lib/shipmentViewDefs'
+import type {
+  CommissionTrigger,
+  OwnershipDivisionRecord,
+  OwnershipRuleRecord,
+  ShipmentViewFilters,
+  ShipmentViewRecord,
+  Team,
+} from '../../../src/types/tms'
 
 const dynamo = new DynamoDBClient({})
 const cognito = new CognitoIdentityProviderClient({})
@@ -40,11 +49,19 @@ const SETTINGS_TABLE_NAME = process.env.SETTINGS_TABLE_NAME ?? TABLE_NAME
 const MERGE_JOB_TABLE_NAME = process.env.MERGE_JOB_TABLE_NAME ?? TABLE_NAME
 const LOAD_TABLE_NAME = process.env.LOAD_TABLE_NAME ?? ''
 const USER_PROFILE_TABLE_NAME = process.env.USER_PROFILE_TABLE_NAME ?? ''
+// Step R — the self-serve revenue taxonomy and the saved department views. This
+// Lambda is their only writer; the client reads the three tables directly.
+const OWNERSHIP_DIVISION_TABLE_NAME = process.env.OWNERSHIP_DIVISION_TABLE_NAME ?? ''
+const OWNERSHIP_RULE_TABLE_NAME = process.env.OWNERSHIP_RULE_TABLE_NAME ?? ''
+const SHIPMENT_VIEW_TABLE_NAME = process.env.SHIPMENT_VIEW_TABLE_NAME ?? ''
+const AUDIT_LOG_TABLE_NAME = process.env.AUDIT_LOG_TABLE_NAME ?? ''
 const GEOCODE_TOKEN_SECRET = process.env.GEOCODE_TOKEN_SECRET ?? ''
 const USER_POOL_ID = process.env.USER_POOL_ID ?? 'us-east-1_IbPKPNJC9'
 
 const OWNER_EMAIL = 'ryne@bcatcorp.com'
 const ADMIN_GROUP = 'ADMIN'
+/** Step R: the one BROKERAGE grant. The Shipments page is where loads are built now. */
+const TMS_PAGE_GROUP = 'page-tms'
 
 // ── AppSync data client (used only for Load update during merge) ─────────────
 
@@ -85,6 +102,12 @@ type Action =
   | 'PREVIEW_MERGE_LOCATIONS'
   | 'MERGE_LOCATIONS'
   | 'RESUME_MERGE'
+  | 'SAVE_OWNERSHIP_DIVISION'
+  | 'ARCHIVE_OWNERSHIP_DIVISION'
+  | 'SAVE_OWNERSHIP_RULES'
+  | 'SAVE_SHIPMENT_VIEW'
+  | 'ARCHIVE_SHIPMENT_VIEW'
+  | 'ENSURE_OWNERSHIP_SEED'
 
 interface AppSyncIdentity {
   sub: string
@@ -147,7 +170,18 @@ async function authorize(action: Action, identity?: AppSyncIdentity | null): Pro
     UPSERT_LOCATION: true,
     ARCHIVE_LOCATION: true,
   }
-  const settingsActions: Partial<Record<Action, true>> = { SAVE_DIVISION: true, SAVE_SETTINGS: true }
+  // Divisions, rules, views and the seed decide who earns every shipment and what
+  // each department sees: shared configuration, owner/ADMIN only, like TMS settings.
+  const settingsActions: Partial<Record<Action, true>> = {
+    SAVE_DIVISION: true,
+    SAVE_SETTINGS: true,
+    SAVE_OWNERSHIP_DIVISION: true,
+    ARCHIVE_OWNERSHIP_DIVISION: true,
+    SAVE_OWNERSHIP_RULES: true,
+    SAVE_SHIPMENT_VIEW: true,
+    ARCHIVE_SHIPMENT_VIEW: true,
+    ENSURE_OWNERSHIP_SEED: true,
+  }
   const mergeActions: Partial<Record<Action, true>> = {
     PREVIEW_MERGE_LOCATIONS: true,
     MERGE_LOCATIONS: true,
@@ -155,9 +189,18 @@ async function authorize(action: Action, identity?: AppSyncIdentity | null): Pro
   }
 
   if (directoryActions[action]) {
-    // Anyone who builds loads can create the customer/facility the load needs (inline create).
-    const ok = isOwner || isAdmin || groups.includes('page-customers') || groups.includes('page-locations') || groups.includes('page-loads')
-    if (!ok) throw new Error(`Forbidden: ${action} requires owner, ADMIN, page-customers, page-locations, or page-loads`)
+    // Anyone who builds loads can create the customer/facility the load needs (inline
+    // create) — and from Step R the one Shipments page is where loads are built, so
+    // `page-tms` opens the same door `page-loads` always did.
+    const ok =
+      isOwner || isAdmin ||
+      groups.includes('page-customers') || groups.includes('page-locations') ||
+      groups.includes('page-loads') || groups.includes(TMS_PAGE_GROUP)
+    if (!ok) {
+      throw new Error(
+        `Forbidden: ${action} requires owner, ADMIN, page-customers, page-locations, page-loads, or ${TMS_PAGE_GROUP}`,
+      )
+    }
   } else if (settingsActions[action] || mergeActions[action]) {
     // Divisions, TMS settings and merges rewrite shared configuration/history: ADMIN only.
     if (!isOwner && !isAdmin) throw new Error(`Forbidden: ${action} requires owner or ADMIN`)
@@ -1826,6 +1869,509 @@ async function resumeMerge(input: Record<string, unknown>, caller: Caller): Prom
   return executeMergeJob(job, caller)
 }
 
+// ── Step R: revenue ownership taxonomy and department views ───────────────────
+//
+// `OwnershipDivision`, `OwnershipRule` and `ShipmentView` are data an admin edits —
+// the three businesses, Ivan's subsidiaries and the department slices are SEED ROWS,
+// not constants. This Lambda is their only writer. The rules decide which division
+// earns a shipment, so a broken tree (a cycle, a rule pointing at nothing) would
+// silently untag the board: every save is validated against the WHOLE resulting set
+// by the same pure functions the client and `tmsShipmentActions` resolve with.
+//
+// Nothing here deletes. Archiving sets `active false`, so a shipment already tagged
+// with a division stays resolvable and a rule that was retired can still be read in
+// the history.
+
+/** One audit row per write. Best effort: history must not refuse a saved division. */
+async function writeAudit(
+  entityType: string,
+  entityId: string,
+  action: string,
+  caller: Caller,
+  changes: Record<string, unknown>,
+): Promise<void> {
+  if (!AUDIT_LOG_TABLE_NAME) return
+  const now = nowIso()
+  try {
+    await dynamo.send(
+      new PutItemCommand({
+        TableName: AUDIT_LOG_TABLE_NAME,
+        Item: marshall(
+          {
+            id: randomUUID(),
+            __typename: 'AuditLog',
+            entityType,
+            entityId,
+            action,
+            user: caller.email,
+            changes: JSON.stringify(changes),
+            createdAt: now,
+            updatedAt: now,
+          },
+          { removeUndefinedValues: true },
+        ),
+      }),
+    )
+  } catch (err) {
+    console.warn('[tms-directory-actions] audit log write failed:', String(err))
+  }
+}
+
+function isConditionalCheckFailed(err: unknown): boolean {
+  const name = err instanceof Error ? err.name : ''
+  const msg = err instanceof Error ? err.message : String(err)
+  return name === 'ConditionalCheckFailedException' || msg.includes('ConditionalCheckFailed')
+}
+
+async function scanTable(tableName: string): Promise<Record<string, unknown>[]> {
+  if (!tableName) throw new Error('Table is not configured on this function')
+  const items: Record<string, unknown>[] = []
+  let startKey: Record<string, AttributeValue> | undefined
+  do {
+    const page: { Items?: Record<string, AttributeValue>[]; LastEvaluatedKey?: Record<string, AttributeValue> } =
+      await dynamo.send(new ScanCommand({ TableName: tableName, ExclusiveStartKey: startKey }))
+    for (const item of page.Items ?? []) items.push(unmarshall(item))
+    startKey = page.LastEvaluatedKey
+  } while (startKey)
+  return items
+}
+
+/**
+ * An `a.json()` column is an AWSJSON string through AppSync but a map when it was
+ * written with the raw SDK, and both shapes are on the table. Read either.
+ */
+function asJson<T>(value: unknown): T | null {
+  if (value == null) return null
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    if (!trimmed) return null
+    try {
+      return JSON.parse(trimmed) as T
+    } catch {
+      return null
+    }
+  }
+  return value as T
+}
+
+async function listDivisionRows(): Promise<OwnershipDivisionRecord[]> {
+  const rows = await scanTable(OWNERSHIP_DIVISION_TABLE_NAME)
+  return rows.map((row) => ({
+    ...(row as unknown as OwnershipDivisionRecord),
+    owners: asJson(row.owners),
+    flows: asJson(row.flows),
+  }))
+}
+
+async function listRuleRows(): Promise<OwnershipRuleRecord[]> {
+  const rows = await scanTable(OWNERSHIP_RULE_TABLE_NAME)
+  return rows.map((row) => ({
+    ...(row as unknown as OwnershipRuleRecord),
+    condition: asJson(row.condition) ?? { kind: 'ALWAYS', value: null },
+  }))
+}
+
+async function listViewRows(): Promise<ShipmentViewRecord[]> {
+  const rows = await scanTable(SHIPMENT_VIEW_TABLE_NAME)
+  return rows.map((row) => ({
+    ...(row as unknown as ShipmentViewRecord),
+    filters: asJson(row.filters) ?? {},
+    sort: asJson(row.sort),
+    audience: asJson(row.audience),
+  }))
+}
+
+/** The next free slot at the end of a list, so a new row never lands in the middle. */
+function nextSortOrder(rows: { sortOrder?: number | null }[], step: number): number {
+  let max = 0
+  for (const row of rows) {
+    const value = typeof row.sortOrder === 'number' && Number.isFinite(row.sortOrder) ? row.sortOrder : 0
+    if (value > max) max = value
+  }
+  return max + step
+}
+
+/**
+ * Write a whole row back under its version. There is no `expectedUpdatedAt` on these
+ * three tables' client inputs, so the CAS token is the `version` this call just read:
+ * a second editor who saved in between bumps it and this write is refused.
+ */
+async function putVersioned(
+  tableName: string,
+  item: Record<string, unknown>,
+  expectedVersion: number | null,
+  label: string,
+): Promise<Record<string, unknown>> {
+  try {
+    await dynamo.send(
+      new PutItemCommand({
+        TableName: tableName,
+        Item: marshall(item, { removeUndefinedValues: true }),
+        ConditionExpression: expectedVersion == null ? 'attribute_not_exists(id)' : '#version = :expectedVersion',
+        ExpressionAttributeNames: expectedVersion == null ? undefined : { '#version': 'version' },
+        ExpressionAttributeValues:
+          expectedVersion == null ? undefined : { ':expectedVersion': { N: String(expectedVersion) } },
+      }),
+    )
+    return item
+  } catch (err: unknown) {
+    if (isConditionalCheckFailed(err)) throw conflictError(label, err)
+    throw err
+  }
+}
+
+/** `active false`, version bumped, nothing removed. The only retirement there is. */
+async function archiveVersioned(
+  tableName: string,
+  id: string,
+  existing: { version?: number | null },
+  caller: Caller,
+  label: string,
+): Promise<Record<string, unknown>> {
+  const values: Record<string, AttributeValue> = {
+    ':active': { BOOL: false },
+    ':updatedAt': { S: nowIso() },
+    ':updatedBy': { S: caller.email },
+    ':version': { N: String((existing.version ?? 0) + 1) },
+    ':expectedVersion': { N: String(existing.version ?? 0) },
+  }
+  try {
+    const result = await dynamo.send(
+      new UpdateItemCommand({
+        TableName: tableName,
+        Key: marshall({ id }),
+        ConditionExpression: '#version = :expectedVersion',
+        UpdateExpression: 'SET active = :active, updatedAt = :updatedAt, updatedBy = :updatedBy, #version = :version',
+        ExpressionAttributeNames: { '#version': 'version' },
+        ExpressionAttributeValues: values,
+        ReturnValues: 'ALL_NEW',
+      }),
+    )
+    if (!result.Attributes) throw new Error(`${label} archive failed`)
+    return unmarshall(result.Attributes)
+  } catch (err: unknown) {
+    if (isConditionalCheckFailed(err)) throw conflictError(label, err)
+    throw err
+  }
+}
+
+async function saveOwnershipDivision(
+  input: Record<string, unknown>,
+  caller: Caller,
+): Promise<Record<string, unknown>> {
+  const code = assertString(input.code, 'code')
+  const name = assertString(input.name, 'name')
+  const givenId = optionalString(input.id, 64)
+  // The id IS the code, so a rename never orphans a shipment already tagged with it.
+  if (givenId != null && givenId !== code) {
+    throw new Error("A division's code cannot be changed — archive this one and add the new code.")
+  }
+
+  const divisions = await listDivisionRows()
+  const existing = divisions.find((d) => d.id === code) ?? null
+  if (existing == null && givenId != null) {
+    throw new Error(`Division not found: ${givenId}`)
+  }
+  if (existing != null && givenId == null) {
+    throw new Error(`Division code "${code}" already exists — open it to edit it.`)
+  }
+
+  const now = nowIso()
+  const item: Record<string, unknown> = {
+    id: code,
+    __typename: 'OwnershipDivision',
+    code,
+    name,
+    brand: optionalString(input.brand, 120),
+    parentId: optionalString(input.parentId, 64),
+    color: optionalString(input.color, 32),
+    sortOrder:
+      optionalInteger(input.sortOrder, { min: 0, max: 1_000_000 }) ??
+      existing?.sortOrder ??
+      nextSortOrder(divisions, 10),
+    active: optionalBoolean(input.active) ?? existing?.active ?? true,
+    owners: optionalJsonObject(input.owners),
+    flows: optionalJsonObject(input.flows),
+    createdBy: existing?.createdBy ?? caller.email,
+    updatedBy: caller.email,
+    version: (existing?.version ?? 0) + 1,
+    createdAt: existing?.createdAt ?? now,
+    updatedAt: now,
+  }
+
+  // Validated over the resulting SET, not over this row: a parent that closes a cycle
+  // is only visible from the whole tree.
+  const next = divisions
+    .filter((d) => d.id !== code)
+    .concat(item as unknown as OwnershipDivisionRecord)
+  const errors = validateDivisions(next)
+  if (errors.length > 0) throw new Error(errors.join(' '))
+
+  await putVersioned(OWNERSHIP_DIVISION_TABLE_NAME, item, existing ? existing.version ?? 0 : null, 'division')
+  await writeAudit('OwnershipDivision', code, 'SAVE_OWNERSHIP_DIVISION', caller, {
+    created: existing == null,
+    name,
+    parentId: item.parentId,
+    active: item.active,
+  })
+  return item
+}
+
+async function archiveOwnershipDivision(
+  input: Record<string, unknown>,
+  caller: Caller,
+): Promise<Record<string, unknown>> {
+  const id = assertString(input.id, 'id')
+  const divisions = await listDivisionRows()
+  const existing = divisions.find((d) => d.id === id) ?? null
+  if (!existing) throw new Error(`Division not found: ${id}`)
+
+  const child = divisions.find((d) => d.id !== id && d.active && d.parentId === existing.code)
+  if (child) {
+    throw new Error(
+      `"${existing.name}" still has an active subsidiary ("${child.name}") — archive the subsidiary first.`,
+    )
+  }
+  const rules = await listRuleRows()
+  const rule = rules.find((r) => r.active && r.divisionCode === existing.code)
+  if (rule) {
+    throw new Error(
+      `An active rule ("${rule.name ?? rule.id}") still tags shipments as "${existing.name}" — change or deactivate it first.`,
+    )
+  }
+
+  const archived = await archiveVersioned(OWNERSHIP_DIVISION_TABLE_NAME, id, existing, caller, 'division')
+  await writeAudit('OwnershipDivision', id, 'ARCHIVE_OWNERSHIP_DIVISION', caller, { name: existing.name })
+  return archived
+}
+
+/**
+ * The whole ordered list, every time. Order IS the rule ("first match wins"), so
+ * `sortOrder` is the array index × 10 and a rule left out of the list is deactivated
+ * rather than deleted — the history of what tagged a shipment has to stay readable.
+ */
+async function saveOwnershipRules(
+  input: Record<string, unknown>,
+  caller: Caller,
+): Promise<Record<string, unknown>[]> {
+  const rules = optionalJsonArray(input.rules)
+  if (rules == null) throw new Error('rules is required')
+  if (rules.length > 200) throw new Error('rules cannot hold more than 200 entries')
+
+  const divisions = await listDivisionRows()
+  const existingRules = await listRuleRows()
+  const priorById = new Map(existingRules.map((r) => [r.id, r]))
+  const now = nowIso()
+  const seenIds = new Set<string>()
+
+  const items = rules.map((raw, index) => {
+    const row = assertRecord(raw, index, 'rules')
+    const id = optionalString(row.id, 64) ?? `rule-${randomUUID()}`
+    if (seenIds.has(id)) throw new Error(`rules[${index}] repeats the rule id "${id}"`)
+    seenIds.add(id)
+    const prior = priorById.get(id) ?? null
+    const condition = optionalJsonObject(row.condition)
+    if (!condition) throw new Error(`rules[${index}].condition is required`)
+    return {
+      id,
+      __typename: 'OwnershipRule',
+      name: optionalString(row.name, 120),
+      sortOrder: index * 10,
+      active: optionalBoolean(row.active) ?? true,
+      condition: {
+        kind: assertString(condition.kind, `rules[${index}].condition.kind`),
+        value: optionalString(condition.value, 400),
+      },
+      divisionCode: assertString(row.divisionCode, `rules[${index}].divisionCode`),
+      createdBy: prior?.createdBy ?? caller.email,
+      updatedBy: caller.email,
+      version: (prior?.version ?? 0) + 1,
+      createdAt: prior?.createdAt ?? now,
+      updatedAt: now,
+    } as Record<string, unknown>
+  })
+
+  const errors = validateRules(items as unknown as OwnershipRuleRecord[], divisions)
+  if (errors.length > 0) throw new Error(errors.join(' '))
+
+  for (const item of items) {
+    const prior = priorById.get(item.id as string) ?? null
+    await putVersioned(OWNERSHIP_RULE_TABLE_NAME, item, prior ? prior.version ?? 0 : null, 'ownership rule')
+  }
+
+  const deactivated: string[] = []
+  for (const prior of existingRules) {
+    if (seenIds.has(prior.id) || !prior.active) continue
+    await archiveVersioned(OWNERSHIP_RULE_TABLE_NAME, prior.id, prior, caller, 'ownership rule')
+    deactivated.push(prior.id)
+  }
+
+  await writeAudit('OwnershipRule', 'list', 'SAVE_OWNERSHIP_RULES', caller, {
+    saved: items.map((r) => r.id),
+    deactivated,
+  })
+  return items
+}
+
+/** Every clause a saved view may carry. An unknown key is a typo that would filter nothing. */
+const SHIPMENT_VIEW_FILTER_KEYS: Record<keyof ShipmentViewFilters, 'list' | 'text' | 'flag'> = {
+  divisions: 'list',
+  subdivisions: 'list',
+  statuses: 'list',
+  carrierType: 'text',
+  repId: 'text',
+  pickupWindow: 'text',
+  docsState: 'text',
+  trackingState: 'text',
+  arStatuses: 'list',
+  apStatuses: 'list',
+  quoteToBooked: 'flag',
+  search: 'text',
+}
+
+function validateViewFilters(value: unknown): ShipmentViewFilters {
+  const raw = optionalJsonObject(value) ?? {}
+  const out: Record<string, unknown> = {}
+  for (const [key, entry] of Object.entries(raw)) {
+    if (entry == null) continue
+    const kind = SHIPMENT_VIEW_FILTER_KEYS[key as keyof ShipmentViewFilters]
+    if (!kind) throw new Error(`"${key}" is not a shipment filter.`)
+    if (kind === 'list') out[key] = optionalStringArray(entry, 64)
+    else if (kind === 'flag') out[key] = optionalBoolean(entry)
+    else out[key] = optionalString(entry, 200)
+  }
+  return out as ShipmentViewFilters
+}
+
+async function saveShipmentView(
+  input: Record<string, unknown>,
+  caller: Caller,
+): Promise<Record<string, unknown>> {
+  const name = assertString(input.name, 'name')
+  // The slug IS the id and the URL. A new view gets it from its name; an existing one
+  // keeps the one its links already carry.
+  const slug = optionalString(input.id, 80) ?? optionalString(input.slug, 80) ?? slugify(name)
+  if (!slug) throw new Error('The view needs a name with letters or numbers.')
+
+  const views = await listViewRows()
+  const existing = views.find((v) => v.id === slug) ?? null
+  const now = nowIso()
+  const item: Record<string, unknown> = {
+    id: slug,
+    __typename: 'ShipmentView',
+    slug,
+    name,
+    department: optionalString(input.department, 80),
+    description: optionalString(input.description, 400),
+    filters: validateViewFilters(input.filters),
+    columns: optionalStringArray(input.columns, 64),
+    sort: optionalJsonObject(input.sort),
+    isDefault: optionalBoolean(input.isDefault) ?? existing?.isDefault ?? false,
+    audience: optionalJsonObject(input.audience),
+    sortOrder:
+      optionalInteger(input.sortOrder, { min: 0, max: 1_000_000 }) ??
+      existing?.sortOrder ??
+      nextSortOrder(views, 10),
+    active: optionalBoolean(input.active) ?? existing?.active ?? true,
+    createdBy: existing?.createdBy ?? caller.email,
+    updatedBy: caller.email,
+    version: (existing?.version ?? 0) + 1,
+    createdAt: existing?.createdAt ?? now,
+    updatedAt: now,
+  }
+
+  const errors = validateView(item as unknown as ShipmentViewRecord)
+  if (errors.length > 0) throw new Error(errors.join(' '))
+
+  await putVersioned(SHIPMENT_VIEW_TABLE_NAME, item, existing ? existing.version ?? 0 : null, 'shipment view')
+  await writeAudit('ShipmentView', slug, 'SAVE_SHIPMENT_VIEW', caller, {
+    created: existing == null,
+    name,
+    filters: item.filters,
+  })
+  return item
+}
+
+async function archiveShipmentView(
+  input: Record<string, unknown>,
+  caller: Caller,
+): Promise<Record<string, unknown>> {
+  const id = assertString(input.id, 'id')
+  const existing = await getById(SHIPMENT_VIEW_TABLE_NAME, id)
+  if (!existing) throw new Error(`Shipment view not found: ${id}`)
+  const archived = await archiveVersioned(
+    SHIPMENT_VIEW_TABLE_NAME,
+    id,
+    existing as { version?: number | null },
+    caller,
+    'shipment view',
+  )
+  await writeAudit('ShipmentView', id, 'ARCHIVE_SHIPMENT_VIEW', caller, { name: existing.name ?? null })
+  return archived
+}
+
+/**
+ * The three businesses, Ivan's subsidiaries, the seed rules and the ten department
+ * views, written once. `attribute_not_exists(id)` per row makes it idempotent AND
+ * safe: a row an admin has since edited or archived is never put back.
+ */
+async function ensureOwnershipSeed(caller: Caller): Promise<Record<string, unknown>> {
+  const now = nowIso()
+  const stamp = (row: Record<string, unknown>, typename: string): Record<string, unknown> => ({
+    ...row,
+    __typename: typename,
+    createdBy: 'seed',
+    updatedBy: 'seed',
+    version: 1,
+    createdAt: now,
+    updatedAt: now,
+  })
+
+  const putIfAbsent = async (tableName: string, item: Record<string, unknown>): Promise<boolean> => {
+    try {
+      await dynamo.send(
+        new PutItemCommand({
+          TableName: tableName,
+          Item: marshall(item, { removeUndefinedValues: true }),
+          ConditionExpression: 'attribute_not_exists(id)',
+        }),
+      )
+      return true
+    } catch (err: unknown) {
+      if (isConditionalCheckFailed(err)) return false
+      throw err
+    }
+  }
+
+  let divisionsCreated = 0
+  for (const division of SEED_DIVISIONS) {
+    if (await putIfAbsent(OWNERSHIP_DIVISION_TABLE_NAME, stamp({ ...division }, 'OwnershipDivision'))) {
+      divisionsCreated += 1
+    }
+  }
+  let rulesCreated = 0
+  for (const rule of SEED_RULES) {
+    if (await putIfAbsent(OWNERSHIP_RULE_TABLE_NAME, stamp({ ...rule }, 'OwnershipRule'))) rulesCreated += 1
+  }
+  let viewsCreated = 0
+  for (const view of SEED_VIEWS) {
+    if (await putIfAbsent(SHIPMENT_VIEW_TABLE_NAME, stamp({ ...view }, 'ShipmentView'))) viewsCreated += 1
+  }
+
+  const report = {
+    divisionsCreated,
+    rulesCreated,
+    viewsCreated,
+    divisionsPresent: SEED_DIVISIONS.length,
+    rulesPresent: SEED_RULES.length,
+    viewsPresent: SEED_VIEWS.length,
+  }
+  if (divisionsCreated + rulesCreated + viewsCreated > 0) {
+    await writeAudit('OwnershipDivision', 'seed', 'ENSURE_OWNERSHIP_SEED', caller, report)
+  }
+  return report
+}
+
 // ── Main handler ───────────────────────────────────────────────────────────────
 
 export const handler = async (event: AppSyncEvent): Promise<Record<string, unknown>> => {
@@ -1854,6 +2400,23 @@ export const handler = async (event: AppSyncEvent): Promise<Record<string, unkno
       return mergeLocations(input, caller)
     case 'RESUME_MERGE':
       return resumeMerge(input, caller)
+    case 'SAVE_OWNERSHIP_DIVISION':
+      return saveOwnershipDivision(input, caller)
+    case 'ARCHIVE_OWNERSHIP_DIVISION':
+      return archiveOwnershipDivision(input, caller)
+    case 'SAVE_OWNERSHIP_RULES': {
+      // The one action whose payload is a list: order IS the rule, so the whole
+      // ordered array goes back. AWSJSON carries an array as happily as an object
+      // and `saveOwnershipRules` in apiClient.ts is typed to receive one.
+      const rules = await saveOwnershipRules(input, caller)
+      return rules as unknown as Record<string, unknown>
+    }
+    case 'SAVE_SHIPMENT_VIEW':
+      return saveShipmentView(input, caller)
+    case 'ARCHIVE_SHIPMENT_VIEW':
+      return archiveShipmentView(input, caller)
+    case 'ENSURE_OWNERSHIP_SEED':
+      return ensureOwnershipSeed(caller)
     default:
       throw new Error(`Unknown action: ${action}`)
   }

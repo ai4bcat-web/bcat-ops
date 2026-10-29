@@ -11,10 +11,8 @@
  */
 import { useMemo, useState } from 'react'
 import { Plus, Trash2, AlertTriangle } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import { TmsBadge, TmsButton, TmsCard, TmsInput, TmsSelect } from '@/features/tms/kit'
 import { Label } from '@/components/ui/label'
-import { Badge } from '@/components/ui/badge'
 import { MoneyField } from '@/features/directory/components/MoneyField'
 import { computeFinancials, isRateCode } from '@/lib/shipmentCharges'
 import type { ChargeContext, FinancialTotals } from '@/lib/shipmentCharges'
@@ -126,23 +124,23 @@ export function FinancialLines({ charges, catalog, context, pricing, marginFloor
       <TotalsBox totals={totals} overTopSpend={overTopSpend} />
 
       {SIDES.map(({ side, title }) => (
-        <section key={side} className="space-y-2">
-          <div className="flex items-center justify-between">
-            <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{title}</h4>
-            {!readOnly && (
-              <Button type="button" variant="outline" size="sm" onClick={() => addLine(side)}>
-                <Plus size={14} className="mr-1" /> Add line
-              </Button>
-            )}
-          </div>
+        <TmsCard
+          key={side}
+          title={title}
+          actions={!readOnly ? (
+            <TmsButton type="button" size="sm" onClick={() => addLine(side)}>
+              <Plus size={14} className="mr-1" /> Add line
+            </TmsButton>
+          ) : undefined}
+        >
           {sideRows(lines, side).length === 0 && (
-            <p className="text-xs text-muted-foreground">No {side.toLowerCase()} charges.</p>
+            <p className="text-xs tms-muted">No {side.toLowerCase()} charges.</p>
           )}
           {sideRows(lines, side).map(({ line, index }, position) => (
-            <div key={index} className="grid grid-cols-12 items-end gap-2 rounded-lg border border-border bg-card p-2">
+            <div key={index} className="grid grid-cols-12 items-end gap-2 rounded-[var(--tms-radius)] border border-[color:var(--tms-border)] bg-[color:var(--tms-card)] p-2">
               <div className="col-span-3">
-                <Label className="text-xs uppercase tracking-wider text-muted-foreground">Code</Label>
-                <select
+                <Label className="tms-field-label">Code</Label>
+                <TmsSelect
                   aria-label={`${side} charge code ${position + 1}`}
                   value={line.code}
                   disabled={readOnly}
@@ -155,23 +153,23 @@ export function FinancialLines({ charges, catalog, context, pricing, marginFloor
                       isRate: isRateCode(e.target.value),
                     })
                   }}
-                  className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                  className="mt-1 h-9 w-full rounded-md border border-[color:var(--tms-input-border)] bg-[color:var(--tms-input)] px-2 text-sm"
                 >
                   <option value="">— select —</option>
                   {catalog.map((c) => <option key={c.code} value={c.code}>{c.label} ({c.code})</option>)}
-                </select>
+                </TmsSelect>
               </div>
               <div className="col-span-2">
-                <Label className="text-xs uppercase tracking-wider text-muted-foreground">Calculated by</Label>
-                <select
+                <Label className="tms-field-label">Calculated by</Label>
+                <TmsSelect
                   aria-label={`${side} calculated by ${position + 1}`}
                   value={line.calculatedBy}
                   disabled={readOnly}
                   onChange={(e) => update(index, { calculatedBy: e.target.value as ChargeCalc })}
-                  className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                  className="mt-1 h-9 w-full rounded-md border border-[color:var(--tms-input-border)] bg-[color:var(--tms-input)] px-2 text-sm"
                 >
                   {CALC_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                </select>
+                </TmsSelect>
               </div>
               <div className="col-span-2">
                 <MoneyField
@@ -182,8 +180,8 @@ export function FinancialLines({ charges, catalog, context, pricing, marginFloor
                 />
               </div>
               <div className="col-span-2">
-                <Label className="text-xs uppercase tracking-wider text-muted-foreground">Count</Label>
-                <Input
+                <Label className="tms-field-label">Count</Label>
+                <TmsInput
                   aria-label={`${side} count ${position + 1}`}
                   type="number"
                   min={0}
@@ -195,33 +193,33 @@ export function FinancialLines({ charges, catalog, context, pricing, marginFloor
               </div>
               <div className="col-span-2 pb-2 text-right text-sm tabular-nums">
                 ${formatCents(totals.lines[index]?.amountCents ?? 0)}
-                {line.isRate && <Badge variant="outline" className="ml-2 text-[10px]">RATE</Badge>}
+                {line.isRate && <TmsBadge tone="gray" className="ml-2 text-[10px]">RATE</TmsBadge>}
               </div>
               <div className="col-span-1 flex justify-end pb-1">
                 {!readOnly && (
-                  <Button
-                    type="button" variant="ghost" size="icon" className="h-7 w-7"
+                  <TmsButton variant="ghost"
+                    type="button" size="sm" className="h-7 w-7"
                     aria-label={`Remove ${side} line ${position + 1}`}
                     onClick={() => setDraft(lines.filter((_, i) => i !== index))}
                   >
                     <Trash2 size={14} />
-                  </Button>
+                  </TmsButton>
                 )}
               </div>
             </div>
           ))}
-        </section>
+        </TmsCard>
       ))}
 
-      {error && <p className="text-xs text-destructive">{error}</p>}
+      {error && <p className="text-xs text-[color:var(--tms-badge-red)]">{error}</p>}
       {!readOnly && (
         <div className="flex items-center gap-2">
-          <Button type="button" onClick={save} disabled={!dirty || saving}>
+          <TmsButton variant="primary" type="button" onClick={save} disabled={!dirty || saving}>
             {saving ? 'Saving…' : 'Save charges'}
-          </Button>
-          <Button type="button" variant="ghost" onClick={() => { setDraft(null); setError(null) }} disabled={!dirty || saving}>
+          </TmsButton>
+          <TmsButton variant="ghost" type="button" onClick={() => { setDraft(null); setError(null) }} disabled={!dirty || saving}>
             Discard
-          </Button>
+          </TmsButton>
         </div>
       )}
     </div>
@@ -240,17 +238,17 @@ function TotalsBox({ totals, overTopSpend }: { totals: FinancialTotals; overTopS
     { label: 'Target buy', value: totals.targetBuyCents != null ? `$${formatCents(totals.targetBuyCents)}` : '—' },
   ]
   return (
-    <div data-testid="financial-totals" className="rounded-lg border border-border bg-muted/30 p-3">
+    <div data-testid="financial-totals" className="rounded-[var(--tms-radius)] border border-[color:var(--tms-border)] bg-[color:var(--tms-card)] p-3">
       <dl className="grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-4">
         {cells.map((c) => (
           <div key={c.label}>
-            <dt className="text-[10px] uppercase tracking-wider text-muted-foreground">{c.label}</dt>
+            <dt className="text-[10px] uppercase tracking-wider tms-muted">{c.label}</dt>
             <dd className="text-sm font-medium tabular-nums">{c.value}</dd>
           </div>
         ))}
       </dl>
       {overTopSpend && (
-        <p className="mt-2 flex items-center gap-1 text-xs text-amber-600">
+        <p className="mt-2 flex items-center gap-1 text-xs text-[color:var(--tms-badge-orange)]">
           <AlertTriangle size={12} /> Carrier cost exceeds top spend — booking will warn.
         </p>
       )}

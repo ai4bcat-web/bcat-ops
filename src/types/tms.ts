@@ -694,6 +694,25 @@ export interface ShipmentRecord {
   deliveredAt?: string | null
   lastNoticeAt?: string | null
   lastNoticeStatus?: string | null
+  // Step R — revenue ownership, Void and the DAT board
+  /** Top-level `OwnershipDivision` code this shipment's revenue belongs to. */
+  revDivision?: string | null
+  /** The matched descendant division, when the rule resolved deeper than the top. */
+  revSubdivision?: string | null
+  /** `HAND` beats the rules and survives a carrier or driver change. */
+  revTagSource?: RevTagSource | null
+  /** The `OwnershipRule` that resolved the tag, when `revTagSource` is `RULE`. */
+  revRuleId?: string | null
+  /** Who set a `HAND` tag; null while the rules decide. */
+  revTaggedBy?: string | null
+  /** Cognito username of the rep who sold it. */
+  salesRepId?: string | null
+  /** Void is the only exit: the PRO, the history and the documents all stay. */
+  voidedAt?: string | null
+  voidedBy?: string | null
+  voidReason?: string | null
+  /** When the load was posted to the DAT board (written in step J). */
+  datPostedAt?: string | null
   createdBy: string
   updatedBy: string
   version?: number | null
@@ -2174,6 +2193,20 @@ export interface LaneRateSampleRecord {
   invoiceId?: string | null
   /** `'YYYY-MM'` of the order's `invoicedAt`. */
   invoiceMonth?: string | null
+  // Step R — the Brokerage dashboard's grouping and its tracking / POD history
+  revDivision?: string | null
+  revSubdivision?: string | null
+  salesRepId?: string | null
+  deliveredAt?: string | null
+  /** When the POD document landed; with `deliveredAt` this is POD collection time. */
+  podReceivedAt?: string | null
+  trackingProvider?: string | null
+  /** First position report of any kind, for "time to first ping". */
+  firstPingAt?: string | null
+  datPostedAt?: string | null
+  /** Check calls the schedule asked for, and how many landed — compliance share. */
+  checkCallsDue?: number | null
+  checkCallsMet?: number | null
   createdAt?: string
   updatedAt?: string
 }
@@ -2623,4 +2656,181 @@ export interface ProfitReport {
   totals: ReportRow
   /** Samples skipped because they were canceled or TONU'd. */
   excluded: number
+}
+
+// ── Revenue ownership & department views (Step R) ─────────────────────────────
+/*
+ * Who owns a shipment is data, not code: an admin edits the division tree and the
+ * ordered rules that tag a shipment, so BCAT can add a business or a subsidiary —
+ * or another company can define its own parties — without a deploy.
+ */
+
+/** A hand tag beats every rule and survives a carrier, driver or customer change. */
+export type RevTagSource = 'HAND' | 'RULE'
+
+/** Which party owns each part of a division's work. Null = inherit from the parent. */
+export interface OwnershipOwners {
+  building?: string | null
+  booking?: string | null
+  tracking?: string | null
+  invoicing?: string | null
+  carrierPay?: string | null
+  settlements?: string | null
+}
+
+/** Which existing views a division's shipments flow into. */
+export interface OwnershipFlows {
+  calendar?: boolean
+  dispatch?: boolean
+  driverApp?: boolean
+  driverPay?: boolean
+  fleetDashboards?: boolean
+  carShipping?: boolean
+}
+
+/** One business or subsidiary. `id` is the code, so a rename never orphans a shipment. */
+export interface OwnershipDivisionRecord {
+  id: string
+  code: string
+  name: string
+  /** Shown in brackets beside the section name in the sidebar. */
+  brand: string | null
+  /** Null = a top-level business; set = a subsidiary, at any depth. */
+  parentId: string | null
+  color: string | null
+  sortOrder: number
+  active: boolean
+  owners: OwnershipOwners | null
+  flows: OwnershipFlows | null
+  createdBy: string
+  updatedBy: string
+  version: number
+  createdAt: string
+  updatedAt: string
+}
+
+export type OwnershipConditionKind =
+  | 'ALWAYS'
+  | 'CARRIER_IS'
+  | 'DRIVER_FLEET_GROUP_IS'
+  | 'DRIVER_TYPE_IS'
+  | 'DRIVER_PROGRAM_IS'
+  | 'CUSTOMER_IS'
+  | 'EQUIPMENT_IS'
+  | 'MODE_IS'
+  | 'LOAD_SOURCE_IS'
+  | 'REFERENCE_MATCHES'
+
+/**
+ * `CARRIER_IS`: a Carrier id, or the reserved `OWN_FLEET` (there is no Carrier row
+ * for the own fleet — it is `LoadCarrier.kind === 'OWN_ASSET'`).
+ * `CUSTOMER_IS`: a customer id. `REFERENCE_MATCHES`: a regex source, matched
+ * case-insensitively against every order reference value. `ALWAYS`: value null.
+ */
+export interface OwnershipCondition {
+  kind: OwnershipConditionKind
+  value: string | null
+}
+
+/** An ordered rule. First active rule whose condition matches wins. */
+export interface OwnershipRuleRecord {
+  id: string
+  name: string | null
+  sortOrder: number
+  active: boolean
+  condition: OwnershipCondition
+  divisionCode: string
+  createdBy: string
+  updatedBy: string
+  version: number
+  createdAt: string
+  updatedAt: string
+}
+
+export type ShipmentViewPickupWindow =
+  | 'today'
+  | 'tomorrow'
+  | 'today_tomorrow'
+  | 'this_week'
+  | 'this_month'
+  | 'last_30_days'
+
+export type ShipmentViewCarrierType = 'OWN_FLEET' | 'CARRIER' | 'NEED_TO_COVER'
+
+export type ShipmentViewDocsState = 'POD_MISSING' | 'DOCS_NEEDED' | 'COMPLETE'
+
+export type ShipmentViewTrackingState = 'TRACKED' | 'UNTRACKED' | 'OVERDUE'
+
+/** Every clause is optional; an absent clause filters nothing. */
+export interface ShipmentViewFilters {
+  divisions?: string[]
+  subdivisions?: string[]
+  statuses?: ShipmentStatus[]
+  carrierType?: ShipmentViewCarrierType | null
+  repId?: string | null
+  pickupWindow?: ShipmentViewPickupWindow | null
+  docsState?: ShipmentViewDocsState | null
+  trackingState?: ShipmentViewTrackingState | null
+  arStatuses?: ArStatus[]
+  apStatuses?: ApStatus[]
+  quoteToBooked?: boolean
+  search?: string | null
+}
+
+/** Null or empty means everyone who can open Shipments. */
+export interface ShipmentViewAudience {
+  groups?: string[]
+  roles?: string[]
+  /** Informational: it groups the view in the sidebar, it never hides it. */
+  divisions?: string[]
+}
+
+export interface ShipmentViewSort {
+  key: string
+  dir: 'asc' | 'desc'
+}
+
+/** A saved slice of the Shipments page. `id` is the slug. */
+export interface ShipmentViewRecord {
+  id: string
+  slug: string
+  name: string
+  department: string | null
+  description: string | null
+  filters: ShipmentViewFilters
+  columns: string[] | null
+  sort: ShipmentViewSort | null
+  isDefault: boolean
+  audience: ShipmentViewAudience | null
+  sortOrder: number
+  active: boolean
+  createdBy: string
+  updatedBy: string
+  version: number
+  createdAt: string
+  updatedAt: string
+}
+
+/**
+ * The row shape a view's filters read. The Shipments page maps its own rows onto
+ * it, so the filter code never has to know how the board assembles a row.
+ */
+export interface ShipmentViewRow {
+  id: string
+  status: ShipmentStatus
+  revDivision: string | null
+  revSubdivision: string | null
+  assignmentType: AssignmentType | null
+  salesRepId: string | null
+  customerRepId: string | null
+  pickupAppt: string | null
+  docsMissing: string[]
+  arStatus: ArStatus | 'LEGACY' | null
+  apStatus: ApStatus | null
+  trackingProvider: string | null
+  nextCheckCallAt: string | null
+  lastCheckCallAt: string | null
+  quoteId: string | null
+  searchKey: string | null
+  voidedAt: string | null
 }

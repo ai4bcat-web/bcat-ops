@@ -1,6 +1,4 @@
-import { Label } from '@/components/ui/label'
-import { Input } from '@/components/ui/input'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { TmsField, TmsInput, TmsSelect } from '@/features/tms/kit'
 import { MoneyField } from './MoneyField'
 import type { PricingDefaults, PricingMode, ChargeCodeDef } from '@/types/tms'
 
@@ -17,56 +15,52 @@ export function PricingDefaultsForm({ value, onChange, catalog, disabled }: Pric
   const update = (patch: Partial<PricingDefaults>) => onChange({ ...value, ...patch })
 
   return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-3 gap-3">
+    <div style={{ display: 'grid', gap: 12 }}>
+      <div className="tms-grid tms-grid-3">
+        <TmsField label="Pricing mode">
+          <TmsSelect
+            value={value.mode}
+            onChange={(e) => update({ mode: e.target.value as PricingMode })}
+            disabled={disabled}
+            options={MODES.map((m) => ({ value: m, label: m }))}
+          />
+        </TmsField>
         <div>
-          <Label className="text-xs uppercase tracking-wider text-muted-foreground">Pricing mode</Label>
-          <Select value={value.mode} onValueChange={(v) => update({ mode: v as PricingMode })} disabled={disabled}>
-            <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {MODES.map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </div>
-        <div>
-          <Label className="text-xs uppercase tracking-wider text-muted-foreground">Default {value.mode === 'PROFIT' ? 'profit ($)' : 'basis points'}</Label>
           {value.mode === 'PROFIT' ? (
-            <MoneyField value={value.defaultProfitCents} onChange={(cents) => update({ defaultProfitCents: cents })} disabled={disabled} />
+            <MoneyField label="Default profit ($)" value={value.defaultProfitCents} onChange={(cents) => update({ defaultProfitCents: cents })} disabled={disabled} />
           ) : (
-            <Input
-              type="number"
-              min={0}
-              max={10000}
-              value={value.defaultBps ?? ''}
-              onChange={(e) => update({ defaultBps: e.target.value ? Number(e.target.value) : null })}
-              disabled={disabled}
-              className="h-9 text-sm"
-            />
+            <TmsField label="Default basis points">
+              <TmsInput
+                type="number"
+                min={0}
+                max={10000}
+                value={value.defaultBps ?? ''}
+                onChange={(e) => update({ defaultBps: e.target.value ? Number(e.target.value) : null })}
+                disabled={disabled}
+              />
+            </TmsField>
           )}
         </div>
-        <div>
-          <Label className="text-xs uppercase tracking-wider text-muted-foreground">Single charge code</Label>
-          <Select value={value.singleChargeCode ?? '__UNSET__'} onValueChange={(v) => update({ singleChargeCode: v === '__UNSET__' ? null : v })} disabled={disabled}>
-            <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__UNSET__">— unset —</SelectItem>
-              {catalog.map((c) => <SelectItem key={c.code} value={c.code}>{c.label}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </div>
+        <TmsField label="Single charge code">
+          <TmsSelect
+            value={value.singleChargeCode ?? ''}
+            onChange={(e) => update({ singleChargeCode: e.target.value || null })}
+            disabled={disabled}
+            placeholder="— unset —"
+            options={catalog.map((c) => ({ value: c.code, label: c.label }))}
+          />
+        </TmsField>
       </div>
-      <div className="grid grid-cols-3 gap-3">
+      <div className="tms-grid tms-grid-3">
         <MoneyField label="Min profit ($)" value={value.minProfitCents} onChange={(cents) => update({ minProfitCents: cents })} disabled={disabled} />
         <MoneyField label="Max profit ($)" value={value.maxProfitCents} onChange={(cents) => update({ maxProfitCents: cents })} disabled={disabled} />
-        <div>
-          <Label className="text-xs uppercase tracking-wider text-muted-foreground">Distribution</Label>
-          <Input
+        <TmsField label="Distribution">
+          <TmsInput
             value={value.distribution ?? ''}
             onChange={(e) => update({ distribution: e.target.value || null })}
             disabled={disabled}
-            className="h-9 text-sm"
           />
-        </div>
+        </TmsField>
       </div>
     </div>
   )

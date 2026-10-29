@@ -1,9 +1,6 @@
 import { useState } from 'react'
 import { Plus, Trash2 } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Switch } from '@/components/ui/switch'
+import { TmsButton, TmsField, TmsInput } from '@/features/tms/kit'
 import type { BillToParty } from '@/types/tms'
 
 function emptyParty(): BillToParty {
@@ -36,97 +33,90 @@ export function BillToEditor({ parties, onChange, disabled }: BillToEditorProps)
   const remove = (id: string) => onChange(parties.filter((p) => p.id !== id))
 
   return (
-    <div className="space-y-3">
-      {parties.length === 0 && <p className="text-xs text-muted-foreground">No bill-to parties yet.</p>}
+    <div style={{ display: 'grid', gap: 12 }}>
+      {parties.length === 0 && <p className="tms-muted" style={{ fontSize: 12 }}>No bill-to parties yet.</p>}
       {parties.map((p) => {
         const open = expanded[p.id] ?? true
         return (
-          <div key={p.id} className="rounded-lg border border-border bg-card p-3">
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setExpanded((prev) => ({ ...prev, [p.id]: !open }))}
-                className="flex-1 text-left text-sm font-medium"
-              >
-                {p.name || 'New bill-to'}
-                {p.isDefault && <span className="ml-2 text-xs text-primary">default</span>}
-              </button>
-              <Label className="text-xs text-muted-foreground flex items-center gap-1.5">
-                <Switch checked={p.isDefault} onCheckedChange={() => setDefault(p.id)} disabled={disabled} />
-                Default
-              </Label>
-              <Button type="button" variant="ghost" size="icon" className="h-7 w-7" onClick={() => remove(p.id)} disabled={disabled}>
-                <Trash2 size={14} />
-              </Button>
-            </div>
-            {open && (
-              <div className="mt-3 grid gap-3">
-                <div>
-                  <Label className="text-xs uppercase tracking-wider text-muted-foreground">Name</Label>
-                  <Input value={p.name} onChange={(e) => update(p.id, { name: e.target.value })} disabled={disabled} className="h-9 text-sm" />
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <Label className="text-xs uppercase tracking-wider text-muted-foreground">Email</Label>
-                    <Input value={p.email ?? ''} onChange={(e) => update(p.id, { email: e.target.value })} disabled={disabled} className="h-9 text-sm" />
-                  </div>
-                  <div>
-                    <Label className="text-xs uppercase tracking-wider text-muted-foreground">Phone</Label>
-                    <Input value={p.phone ?? ''} onChange={(e) => update(p.id, { phone: e.target.value })} disabled={disabled} className="h-9 text-sm" />
-                  </div>
-                </div>
-                <div>
-                  <Label className="text-xs uppercase tracking-wider text-muted-foreground">Payment terms (days)</Label>
-                  <Input
-                    type="number"
-                    min={0}
-                    value={p.paymentTermsDays ?? ''}
-                    onChange={(e) => update(p.id, { paymentTermsDays: e.target.value ? Number(e.target.value) : null })}
-                    disabled={disabled}
-                    className="h-9 text-sm"
-                  />
-                </div>
-                <div>
-                  <Label className="text-xs uppercase tracking-wider text-muted-foreground">Address</Label>
-                  <div className="mt-1 grid grid-cols-2 gap-3">
-                    <Input
-                      value={p.address?.street ?? ''}
-                      onChange={(e) => update(p.id, { address: { ...p.address, street: e.target.value || null } })}
-                      placeholder="Street"
-                      disabled={disabled}
-                      className="h-9 text-sm"
-                    />
-                    <Input
-                      value={p.address?.city ?? ''}
-                      onChange={(e) => update(p.id, { address: { ...p.address, city: e.target.value || null } })}
-                      placeholder="City"
-                      disabled={disabled}
-                      className="h-9 text-sm"
-                    />
-                    <Input
-                      value={p.address?.state ?? ''}
-                      onChange={(e) => update(p.id, { address: { ...p.address, state: e.target.value || null } })}
-                      placeholder="State"
-                      disabled={disabled}
-                      className="h-9 text-sm"
-                    />
-                    <Input
-                      value={p.address?.zip ?? ''}
-                      onChange={(e) => update(p.id, { address: { ...p.address, zip: e.target.value || null } })}
-                      placeholder="ZIP"
-                      disabled={disabled}
-                      className="h-9 text-sm"
-                    />
-                  </div>
-                </div>
+          <div key={p.id} className="tms-card">
+            <div className="tms-card-body" style={{ display: 'grid', gap: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <button
+                  type="button"
+                  onClick={() => setExpanded((prev) => ({ ...prev, [p.id]: !open }))}
+                  style={{ flex: 1, textAlign: 'left', background: 'none', border: 'none', color: 'inherit', font: 'inherit', fontWeight: 600, cursor: 'pointer', padding: 0 }}
+                >
+                  {p.name || 'New bill-to'}
+                  {p.isDefault && <span style={{ marginLeft: 8, fontSize: 12, color: 'var(--tms-primary)' }}>default</span>}
+                </button>
+                <label className="tms-muted" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+                  <input type="checkbox" checked={p.isDefault} onChange={() => setDefault(p.id)} disabled={disabled} />
+                  Default
+                </label>
+                <TmsButton variant="ghost" size="sm" aria-label="Remove bill-to" onClick={() => remove(p.id)} disabled={disabled}>
+                  <Trash2 size={14} />
+                </TmsButton>
               </div>
-            )}
+              {open && (
+                <div style={{ display: 'grid', gap: 12 }}>
+                  <TmsField label="Name">
+                    <TmsInput value={p.name} onChange={(e) => update(p.id, { name: e.target.value })} disabled={disabled} />
+                  </TmsField>
+                  <div className="tms-grid tms-grid-2">
+                    <TmsField label="Email">
+                      <TmsInput value={p.email ?? ''} onChange={(e) => update(p.id, { email: e.target.value })} disabled={disabled} />
+                    </TmsField>
+                    <TmsField label="Phone">
+                      <TmsInput value={p.phone ?? ''} onChange={(e) => update(p.id, { phone: e.target.value })} disabled={disabled} />
+                    </TmsField>
+                  </div>
+                  <TmsField label="Payment terms (days)">
+                    <TmsInput
+                      type="number"
+                      min={0}
+                      value={p.paymentTermsDays ?? ''}
+                      onChange={(e) => update(p.id, { paymentTermsDays: e.target.value ? Number(e.target.value) : null })}
+                      disabled={disabled}
+                    />
+                  </TmsField>
+                  <div>
+                    <div className="tms-field-label" style={{ marginBottom: 6 }}>Address</div>
+                    <div className="tms-grid tms-grid-2">
+                      <TmsInput
+                        value={p.address?.street ?? ''}
+                        onChange={(e) => update(p.id, { address: { ...p.address, street: e.target.value || null } })}
+                        placeholder="Street"
+                        disabled={disabled}
+                      />
+                      <TmsInput
+                        value={p.address?.city ?? ''}
+                        onChange={(e) => update(p.id, { address: { ...p.address, city: e.target.value || null } })}
+                        placeholder="City"
+                        disabled={disabled}
+                      />
+                      <TmsInput
+                        value={p.address?.state ?? ''}
+                        onChange={(e) => update(p.id, { address: { ...p.address, state: e.target.value || null } })}
+                        placeholder="State"
+                        disabled={disabled}
+                      />
+                      <TmsInput
+                        value={p.address?.zip ?? ''}
+                        onChange={(e) => update(p.id, { address: { ...p.address, zip: e.target.value || null } })}
+                        placeholder="ZIP"
+                        disabled={disabled}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         )
       })}
-      <Button type="button" variant="outline" size="sm" onClick={add} disabled={disabled}>
-        <Plus size={14} className="mr-1" /> Add bill-to
-      </Button>
+      <TmsButton size="sm" onClick={add} disabled={disabled}>
+        <Plus size={14} /> Add bill-to
+      </TmsButton>
     </div>
   )
 }

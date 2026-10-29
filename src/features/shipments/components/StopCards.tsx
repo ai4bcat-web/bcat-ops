@@ -7,15 +7,11 @@
  */
 import { useState } from 'react'
 import { MoreHorizontal, MapPin, Plus, ArrowUpDown, Trash2, Clock, CalendarClock, Tag } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import { TmsBadge, TmsButton, TmsCard, TmsDialog, TmsInput, TmsSelect, TmsTextarea } from '@/features/tms/kit'
 import { Label } from '@/components/ui/label'
-import { Badge } from '@/components/ui/badge'
-import { Textarea } from '@/components/ui/textarea'
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { formatDateTime, formatDateTimeInput, fromDateTimeInput } from '@/lib/date'
 import type { Stop, StopType } from '@/types'
 import type { LocationRecord } from '@/types/tms'
@@ -61,56 +57,54 @@ function StopCard({ stop, index, total, readOnly, onOpen, onSwap, onRemove }: {
     : null
 
   return (
-    <div
-      data-testid={`stop-card-${stop.id}`}
-      className="rounded-lg border border-border bg-card p-3"
-    >
+    <TmsCard>
+      <div data-testid={`stop-card-${stop.id}`}>
       <div className="flex items-start gap-3">
-        <Badge className={isPickup ? 'bg-sky-100 text-sky-700' : 'bg-emerald-100 text-emerald-700'}>
+        <TmsBadge tone="blue" className={isPickup ? ' text-[color:var(--tms-badge-blue)]' : ' text-[color:var(--tms-badge-green)]'}>
           {isPickup ? 'PU' : 'DEL'} {index + 1}
-        </Badge>
+        </TmsBadge>
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-medium">{stop.name || 'Unnamed stop'}</p>
-          <p className="flex items-center gap-1 truncate text-xs text-muted-foreground">
+          <p className="flex items-center gap-1 truncate text-xs tms-muted">
             <MapPin size={12} /> {stop.city || 'No city'}
           </p>
           <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
             <div>
-              <dt className="text-muted-foreground">Appointment</dt>
+              <dt className="tms-muted">Appointment</dt>
               <dd>{stop.appt ? formatDateTime(stop.appt) : '—'}{stop.apptType && stop.apptType !== 'exact' ? ` (${stop.apptType.toUpperCase()})` : ''}</dd>
             </div>
             <div>
-              <dt className="text-muted-foreground">Requested</dt>
+              <dt className="tms-muted">Requested</dt>
               <dd>{requested ?? '—'}{stop.apptRequestedBy ? ` · by ${stop.apptRequestedBy.toLowerCase()}` : ''}</dd>
             </div>
             <div>
-              <dt className="text-muted-foreground">In</dt>
+              <dt className="tms-muted">In</dt>
               <dd>{stop.arrivedAt ? formatDateTime(stop.arrivedAt) : '—'}</dd>
             </div>
             <div>
-              <dt className="text-muted-foreground">Out</dt>
+              <dt className="tms-muted">Out</dt>
               <dd>{stop.departedAt ? formatDateTime(stop.departedAt) : '—'}</dd>
             </div>
           </dl>
           {stop.refs && stop.refs.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-1">
               {stop.refs.map((r, i) => (
-                <Badge key={`${r.code}-${i}`} variant="outline" className="text-[10px]">
+                <TmsBadge tone="gray" key={`${r.code}-${i}`} className="text-[10px]">
                   {r.label || r.code}: {r.value}
-                </Badge>
+                </TmsBadge>
               ))}
             </div>
           )}
-          {stop.apptNote && <p className="mt-2 text-xs text-muted-foreground">Appt: {stop.apptNote}</p>}
-          {stop.stopNotes && <p className="mt-1 text-xs text-muted-foreground">{stop.stopNotes}</p>}
+          {stop.apptNote && <p className="mt-2 text-xs tms-muted">Appt: {stop.apptNote}</p>}
+          {stop.stopNotes && <p className="mt-1 text-xs tms-muted">{stop.stopNotes}</p>}
         </div>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon" className="h-7 w-7" aria-label={`Stop ${index + 1} actions`} disabled={readOnly}>
+            <TmsButton variant="ghost" size="sm" className="h-7 w-7" aria-label={`Stop ${index + 1} actions`} disabled={readOnly}>
               <MoreHorizontal size={14} />
-            </Button>
+            </TmsButton>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-60">
+          <DropdownMenuContent align="end" className="tms-portal w-60">
             <DropdownMenuItem onSelect={() => onOpen('SET_APPT', stop)}>
               <CalendarClock size={14} className="mr-2" />{stop.appt ? 'Change appointment' : 'Schedule appointment'}
             </DropdownMenuItem>
@@ -138,13 +132,14 @@ function StopCard({ stop, index, total, readOnly, onOpen, onSwap, onRemove }: {
               <ArrowUpDown size={14} className="mr-2" />Swap with next
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem className="text-destructive" onSelect={() => onRemove(stop)}>
+            <DropdownMenuItem className="text-[color:var(--tms-badge-red)]" onSelect={() => onRemove(stop)}>
               <Trash2 size={14} className="mr-2" />Delete stop
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
-    </div>
+      </div>
+    </TmsCard>
   )
 }
 
@@ -169,7 +164,7 @@ export function StopCards({ stops, locations, readOnly, onAction }: StopCardsPro
 
   return (
     <div className="space-y-3">
-      {ordered.length === 0 && <p className="text-xs text-muted-foreground">No stops on this load.</p>}
+      {ordered.length === 0 && <p className="text-xs tms-muted">No stops on this load.</p>}
       {ordered.map((stop, i) => (
         <StopCard
           key={stop.id}
@@ -185,9 +180,9 @@ export function StopCards({ stops, locations, readOnly, onAction }: StopCardsPro
           onRemove={(s) => run({ op: 'REMOVE', stopId: s.id, patch: {} })}
         />
       ))}
-      <Button type="button" variant="outline" size="sm" disabled={readOnly} onClick={() => setDialog({ op: 'ADD' })}>
+      <TmsButton type="button" size="sm" disabled={readOnly} onClick={() => setDialog({ op: 'ADD' })}>
         <Plus size={14} className="mr-1" /> Additional stop
-      </Button>
+      </TmsButton>
 
       {dialog && (
         <StopDialog
@@ -302,109 +297,112 @@ function StopDialog({ state, locations, busy, onClose, onSubmit }: {
   const needsType = op === 'ADD' || op === 'SET_TYPE'
 
   return (
-    <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
-      <DialogContent className="max-w-md">
-        <DialogHeader><DialogTitle>{titles[op]}</DialogTitle></DialogHeader>
+    <TmsDialog
+      open
+      onOpenChange={(open) => { if (!open) onClose() }}
+      title={titles[op]}
+      footer={
+        <>
+          <TmsButton variant="ghost" onClick={onClose} disabled={busy}>Cancel</TmsButton>
+          <TmsButton variant="primary" onClick={submit} disabled={busy}>{busy ? 'Saving…' : 'Save'}</TmsButton>
+        </>
+      }
+    >
         <div className="space-y-3">
           {needsType && (
             <div>
-              <Label className="text-xs uppercase tracking-wider text-muted-foreground">Stop type</Label>
-              <select
+              <Label className="tms-field-label">Stop type</Label>
+              <TmsSelect
                 aria-label="Stop type"
                 value={stopType}
                 onChange={(e) => setStopType(e.target.value as StopType)}
-                className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                className="mt-1 h-9 w-full rounded-md border border-[color:var(--tms-input-border)] bg-[color:var(--tms-input)] px-2 text-sm"
               >
                 <option value="pickup">Pick-up</option>
                 <option value="delivery">Delivery</option>
-              </select>
+              </TmsSelect>
             </div>
           )}
           {needsLocation && (
             <div>
-              <Label className="text-xs uppercase tracking-wider text-muted-foreground">Location</Label>
-              <select
+              <Label className="tms-field-label">Location</Label>
+              <TmsSelect
                 aria-label="Location"
                 value={locationId}
                 onChange={(e) => setLocationId(e.target.value)}
-                className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                className="mt-1 h-9 w-full rounded-md border border-[color:var(--tms-input-border)] bg-[color:var(--tms-input)] px-2 text-sm"
               >
                 <option value="">— select —</option>
                 {locations.map((l) => (
                   <option key={l.id} value={l.id}>{l.name} — {l.city}, {l.state}</option>
                 ))}
-              </select>
+              </TmsSelect>
             </div>
           )}
           {(op === 'SET_APPT' || op === 'ADD') && (
             <div>
-              <Label className="text-xs uppercase tracking-wider text-muted-foreground">Appointment</Label>
-              <Input aria-label="Appointment" type="datetime-local" value={appt} onChange={(e) => setAppt(e.target.value)} className="h-9 text-sm" />
+              <Label className="tms-field-label">Appointment</Label>
+              <TmsInput aria-label="Appointment" type="datetime-local" value={appt} onChange={(e) => setAppt(e.target.value)} className="h-9 text-sm" />
             </div>
           )}
           {(op === 'SET_REQUESTED') && (
             <div className="grid grid-cols-2 gap-2">
               <div>
-                <Label className="text-xs uppercase tracking-wider text-muted-foreground">Requested from</Label>
-                <Input aria-label="Requested from" type="datetime-local" value={requestedStart} onChange={(e) => setRequestedStart(e.target.value)} className="h-9 text-sm" />
+                <Label className="tms-field-label">Requested from</Label>
+                <TmsInput aria-label="Requested from" type="datetime-local" value={requestedStart} onChange={(e) => setRequestedStart(e.target.value)} className="h-9 text-sm" />
               </div>
               <div>
-                <Label className="text-xs uppercase tracking-wider text-muted-foreground">Requested to</Label>
-                <Input aria-label="Requested to" type="datetime-local" value={requestedEnd} onChange={(e) => setRequestedEnd(e.target.value)} className="h-9 text-sm" />
+                <Label className="tms-field-label">Requested to</Label>
+                <TmsInput aria-label="Requested to" type="datetime-local" value={requestedEnd} onChange={(e) => setRequestedEnd(e.target.value)} className="h-9 text-sm" />
               </div>
             </div>
           )}
           {(op === 'SET_APPT' || op === 'SET_REQUESTED') && (
             <div>
-              <Label className="text-xs uppercase tracking-wider text-muted-foreground">Requested by</Label>
-              <select
+              <Label className="tms-field-label">Requested by</Label>
+              <TmsSelect
                 aria-label="Requested by"
                 value={requestedBy}
                 onChange={(e) => setRequestedBy(e.target.value as typeof requestedBy)}
-                className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                className="mt-1 h-9 w-full rounded-md border border-[color:var(--tms-input-border)] bg-[color:var(--tms-input)] px-2 text-sm"
               >
                 <option value="">— not stated —</option>
                 {APPT_REQUESTED_BY.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-              </select>
+              </TmsSelect>
             </div>
           )}
           {op === 'SET_TIMES' && (
             <div className="grid grid-cols-2 gap-2">
               <div>
-                <Label className="text-xs uppercase tracking-wider text-muted-foreground">In</Label>
-                <Input aria-label="In time" type="datetime-local" value={arrivedAt} onChange={(e) => setArrivedAt(e.target.value)} className="h-9 text-sm" />
+                <Label className="tms-field-label">In</Label>
+                <TmsInput aria-label="In time" type="datetime-local" value={arrivedAt} onChange={(e) => setArrivedAt(e.target.value)} className="h-9 text-sm" />
               </div>
               <div>
-                <Label className="text-xs uppercase tracking-wider text-muted-foreground">Out</Label>
-                <Input aria-label="Out time" type="datetime-local" value={departedAt} onChange={(e) => setDepartedAt(e.target.value)} className="h-9 text-sm" />
+                <Label className="tms-field-label">Out</Label>
+                <TmsInput aria-label="Out time" type="datetime-local" value={departedAt} onChange={(e) => setDepartedAt(e.target.value)} className="h-9 text-sm" />
               </div>
             </div>
           )}
           {op === 'SET_REFS' && (
             <div>
-              <Label className="text-xs uppercase tracking-wider text-muted-foreground">References — one CODE=value per line</Label>
-              <Textarea aria-label="References" rows={4} value={refsText} onChange={(e) => setRefsText(e.target.value)} className="text-sm" />
+              <Label className="tms-field-label">References — one CODE=value per line</Label>
+              <TmsTextarea aria-label="References" rows={4} value={refsText} onChange={(e) => setRefsText(e.target.value)} className="text-sm" />
             </div>
           )}
           {(op === 'SET_APPT' || op === 'SET_REQUESTED') && (
             <div>
-              <Label className="text-xs uppercase tracking-wider text-muted-foreground">Appointment note</Label>
-              <Textarea aria-label="Appointment note" rows={2} value={apptNote} onChange={(e) => setApptNote(e.target.value)} className="text-sm" />
+              <Label className="tms-field-label">Appointment note</Label>
+              <TmsTextarea aria-label="Appointment note" rows={2} value={apptNote} onChange={(e) => setApptNote(e.target.value)} className="text-sm" />
             </div>
           )}
           {op === 'SET_REFS' && (
             <div>
-              <Label className="text-xs uppercase tracking-wider text-muted-foreground">Stop notes</Label>
-              <Textarea aria-label="Stop notes" rows={2} value={stopNotes} onChange={(e) => setStopNotes(e.target.value)} className="text-sm" />
+              <Label className="tms-field-label">Stop notes</Label>
+              <TmsTextarea aria-label="Stop notes" rows={2} value={stopNotes} onChange={(e) => setStopNotes(e.target.value)} className="text-sm" />
             </div>
           )}
-          {error && <p className="text-xs text-destructive">{error}</p>}
+          {error && <p className="text-xs text-[color:var(--tms-badge-red)]">{error}</p>}
         </div>
-        <DialogFooter>
-          <Button variant="ghost" onClick={onClose} disabled={busy}>Cancel</Button>
-          <Button onClick={submit} disabled={busy}>{busy ? 'Saving…' : 'Save'}</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    </TmsDialog>
   )
 }

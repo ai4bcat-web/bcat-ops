@@ -14,9 +14,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, FileText, Save } from 'lucide-react'
 import { toast } from 'sonner'
-import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { TmsBadge, TmsButton, TmsDialog } from '@/features/tms/kit'
 import { getTmsSettings, listCheckCallsByLoad, listDivisions, saveGeneratedDocument } from '@/lib/apiClient'
 import { bolData, loadSummaryData } from '@/lib/documentData'
 import { buildBolPdf, bolFilename } from '@/lib/bolPdf'
@@ -228,21 +226,36 @@ export function GeneratedDocumentDialog({
   }
 
   return (
-    <Dialog open onOpenChange={(open) => { if (!open && !saving) onClose() }}>
-      <DialogContent className="max-w-3xl">
-        <DialogHeader><DialogTitle>{TITLES[kind]}</DialogTitle></DialogHeader>
-
+    <TmsDialog
+      open
+      onOpenChange={(open) => { if (!open && !saving) onClose() }}
+      title={TITLES[kind]}
+      className="tms-dialog-xl"
+      footer={
+        <>
+          <p className="mr-auto text-xs tms-muted">
+            {version > 1
+              ? `Save as v${version} — v${version - 1} becomes superseded`
+              : 'Save as v1 — the first version of this document'}
+          </p>
+          <TmsButton variant="ghost" onClick={onClose} disabled={saving}>Cancel</TmsButton>
+          <TmsButton variant="primary" onClick={() => { void save() }} disabled={saving || building || !base64}>
+            <Save size={14} className="mr-1" />{saving ? 'Saving…' : `Save as v${version}`}
+          </TmsButton>
+        </>
+      }
+    >
         <div className="flex flex-wrap items-center gap-2 text-sm">
-          <Badge variant="outline" className="text-[10px]">{DOCUMENT_TYPE_LABELS[kind]}</Badge>
-          <span className="text-muted-foreground">{filename}</span>
+          <TmsBadge tone="gray" className="text-[10px]">{DOCUMENT_TYPE_LABELS[kind]}</TmsBadge>
+          <span className="tms-muted">{filename}</span>
           {kind === 'LOAD_SUMMARY' && (
-            <Badge variant="outline" className="text-[10px]">Internal — never e-mailed out</Badge>
+            <TmsBadge tone="gray" className="text-[10px]">Internal — never e-mailed out</TmsBadge>
           )}
         </div>
 
-        <div className="h-[55vh] overflow-hidden rounded-lg border border-border bg-muted/30">
+        <div className="h-[55vh] overflow-hidden rounded-[var(--tms-radius)] border border-[color:var(--tms-border)] bg-[color:var(--tms-card)]">
           {building && (
-            <p className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">
+            <p className="flex h-full items-center justify-center gap-2 text-sm tms-muted">
               <FileText size={14} />Building the document…
             </p>
           )}
@@ -250,30 +263,19 @@ export function GeneratedDocumentDialog({
             <iframe src={previewUrl} title={`${DOCUMENT_TYPE_LABELS[kind]} preview`} className="h-full w-full" />
           )}
           {!building && !previewUrl && (
-            <p className="flex h-full items-center justify-center text-sm text-muted-foreground">
+            <p className="flex h-full items-center justify-center text-sm tms-muted">
               Nothing to preview.
             </p>
           )}
         </div>
 
         {error && (
-          <p className="flex items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/5 p-2 text-xs text-destructive">
+          <p className="flex items-start gap-2 rounded-[var(--tms-radius)] border border-[color:var(--tms-badge-red)]  p-2 text-xs text-[color:var(--tms-badge-red)]">
             <AlertTriangle size={14} className="mt-0.5 shrink-0" />{error}
           </p>
         )}
 
-        <DialogFooter className="items-center">
-          <p className="mr-auto text-xs text-muted-foreground">
-            {version > 1
-              ? `Save as v${version} — v${version - 1} becomes superseded`
-              : 'Save as v1 — the first version of this document'}
-          </p>
-          <Button variant="ghost" onClick={onClose} disabled={saving}>Cancel</Button>
-          <Button onClick={() => { void save() }} disabled={saving || building || !base64}>
-            <Save size={14} className="mr-1" />{saving ? 'Saving…' : `Save as v${version}`}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+
+    </TmsDialog>
   )
 }

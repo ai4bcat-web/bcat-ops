@@ -29,9 +29,12 @@ import type {
   LaneRateSampleRecord, OrderReference, RateType,
   UserProfileRecord, RoleKey, CommissionRecord, CommissionPayPeriodRecord,
   CommissionSettings, ShipmentSettings,
+  OwnershipDivisionRecord, OwnershipRuleRecord, ShipmentViewRecord, RevTagSource,
 } from '@/types/tms'
 import type { CreditSummary } from '@/lib/customerCredit'
 import type { QuotePricingResult } from '@/lib/quotes'
+import type { ResolveContext, Resolution } from '@/lib/ownership'
+import type { ReleaseGateResult } from '@/lib/releaseGate'
 import { isActiveDirectoryRecord } from '@/lib/tmsDirectory'
 
 // Untyped client — our own types from src/types handle type safety
@@ -82,6 +85,11 @@ const LOAD_SHIPMENT_FIELDS = `
   lastKnownLat lastKnownLng lastKnownSource openIncidentCount deliveredAt
   checkCallDueNotifiedAt checkCallOverdueNotifiedAt
 `
+// Step R's revenue tags, mirrored from the shipment so the fleet pages can group by
+// business without joining. Their own flag: they land one deploy after the shipment
+// group above, and one unhandled throw here blanks every load in the app.
+let loadsHaveRevTag = true
+const LOAD_REV_FIELDS = ' revDivision revSubdivision revTagSource revRuleId salesRepId'
 const loadFields = () => {
   let f = LOAD_FIELDS
   if (loadsHaveHot) f += ' hot unscheduled'
@@ -95,6 +103,7 @@ const loadFields = () => {
   if (loadsHavePodNotes) f += ' podNotes'
   if (loadsHaveCargoValue) f += ' cargoValueCents'
   if (loadsHaveShipment) f += LOAD_SHIPMENT_FIELDS
+  if (loadsHaveRevTag) f += LOAD_REV_FIELDS
   return f
 }
 
@@ -163,7 +172,7 @@ const AUDIT_FIELDS = `
 
 // Which newer fields the backend is rejecting (not deployed yet). Used to clear the
 // corresponding flag and retry.
-function undefinedLoadFields(err: unknown): { hot: boolean; stops: boolean; sortOrder: boolean; customerId: boolean; eldReview: boolean; paperworkLocation: boolean; trailer: boolean; freight: boolean; cargoValue: boolean; podNotes: boolean; shipment: boolean } {
+function undefinedLoadFields(err: unknown): { hot: boolean; stops: boolean; sortOrder: boolean; customerId: boolean; eldReview: boolean; paperworkLocation: boolean; trailer: boolean; freight: boolean; cargoValue: boolean; podNotes: boolean; shipment: boolean; revTag: boolean } {
   const errs = (err as { errors?: { message?: string }[] })?.errors
   const msg = Array.isArray(errs) ? errs.map((e) => e?.message ?? '').join(' ') : ''
   return {
@@ -178,6 +187,7 @@ function undefinedLoadFields(err: unknown): { hot: boolean; stops: boolean; sort
     cargoValue: /'cargoValueCents'/i.test(msg),
     podNotes: /'podNotes'/i.test(msg),
     shipment: /'(shipmentId|orderId|loadNumber|leg|status|statusChangedAt|statusChangedBy|statusSource|carrierRepId|assignmentType|activeLoadCarrierId|carrierName|equipmentType|divisionKey|trackingProvider|nextCheckCallAt|nextCheckCallNote|checkCallOpen|pickupMonth|lastCheckCallAt|lastCheckCallType|lastKnownAt|lastKnownCity|lastKnownState|lastKnownLat|lastKnownLng|lastKnownSource|openIncidentCount|deliveredAt|checkCallDueNotifiedAt|checkCallOverdueNotifiedAt)'/i.test(msg),
+    revTag: /'(revDivision|revSubdivision|revTagSource|revRuleId|salesRepId)'/i.test(msg),
   }
 }
 
@@ -253,6 +263,10 @@ export async function listLoads(): Promise<Load[]> {
         console.warn('[apiClient] backend has no shipment fields on Load yet — querying loads without them until deploy')
         loadsHaveShipment = false; changed = true
       }
+      if (loadsHaveRevTag && u.revTag) {
+        console.warn('[apiClient] backend has no revenue tags on Load yet — querying loads without them until deploy')
+        loadsHaveRevTag = false; changed = true
+      }
       if (!changed) throw err
     }
   }
@@ -276,6 +290,15 @@ function serializeLoadInput<T extends { stops?: unknown; sortOrder?: unknown; cu
   }
   if (!loadsHaveCustomerId && 'customerId' in (out as object)) {
     const { customerId: _drop, ...rest } = out as T & { customerId?: unknown }
+    out = rest as T
+  }
+  if (!loadsHaveRevTag) {
+    const {
+      revDivision: _rd, revSubdivision: _rs, revTagSource: _rt, revRuleId: _rr, salesRepId: _sr, ...rest
+    } = out as T & {
+      revDivision?: unknown; revSubdivision?: unknown; revTagSource?: unknown
+      revRuleId?: unknown; salesRepId?: unknown
+    }
     out = rest as T
   }
   if (!loadsHaveStops) {
@@ -310,12 +333,9 @@ export async function updateLoad(
   return resolveRateConfirmUrl(withCustomerPolicy(result.data.updateLoad))
 }
 
-export async function deleteLoad(id: string): Promise<void> {
-  await client.graphql({
-    query: `mutation DeleteLoad($input: DeleteLoadInput!) { deleteLoad(input: $input) { id } }`,
-    variables: { input: { id } },
-  })
-}
+// There is no deleteLoad: Ryne, 2026-10-28 — a PRO number is permanent, so the
+// `delete` and `onDelete` operations are disabled on the Load model itself and no
+// token can erase a load. The only exit is Void on the shipment.
 
 // ── Real-time subscriptions ───────────────────────────────────────────────────
 
@@ -327,7 +347,6 @@ interface Subscribable<T> {
 export function subscribeToLoadChanges(callbacks: {
   onCreate?: (load: Load) => void
   onUpdate?: (load: Load) => void
-  onDelete?: (id: string) => void
 }): () => void {
   const handles: SubscriptionHandle[] = []
 
@@ -354,13 +373,7 @@ export function subscribeToLoadChanges(callbacks: {
       (d) => { if (d.onUpdateLoad) cb(normalizeLoadStops(withCustomerPolicy(d.onUpdateLoad))) },
     )
   }
-  if (callbacks.onDelete) {
-    const cb = callbacks.onDelete
-    wire<{ onDeleteLoad: { id: string } }>(
-      `subscription OnDeleteLoad { onDeleteLoad { id } }`,
-      (d) => { if (d.onDeleteLoad?.id) cb(d.onDeleteLoad.id) },
-    )
-  }
+  // No onDelete: the subscription does not exist on the model any more.
 
   return () => handles.forEach((h) => h.unsubscribe())
 }
@@ -1409,13 +1422,30 @@ const SHIPMENT_FIELDS = `
 // throw on a pre-deploy backend empties the whole board.
 const SHIPMENT_DELIVERY_FIELDS = ['deliveredAt', 'lastNoticeAt', 'lastNoticeStatus']
 let shipmentsHaveDelivery = true
+// Step R's revenue tags, the Void stamp and the DAT post. One group, one flag, one
+// deploy — and the same reason as every generation above it: an unhandled throw on a
+// backend that predates them empties the whole board.
+const SHIPMENT_REV_FIELDS = [
+  'revDivision', 'revSubdivision', 'revTagSource', 'revRuleId', 'revTaggedBy', 'salesRepId',
+  'voidedAt', 'voidedBy', 'voidReason', 'datPostedAt',
+]
+let shipmentsHaveRevTag = true
 
-/** Every Shipment read, with step E's group dropped and retried if the backend predates it. */
+/** Every Shipment read, with each newer group dropped and retried if the backend predates it. */
 async function readShipments<T>(run: (fields: string) => Promise<T>): Promise<T> {
   for (;;) {
     try {
-      return await run(shipmentsHaveDelivery ? `${SHIPMENT_FIELDS} ${SHIPMENT_DELIVERY_FIELDS.join(' ')}` : SHIPMENT_FIELDS)
+      return await run([
+        SHIPMENT_FIELDS,
+        shipmentsHaveDelivery ? SHIPMENT_DELIVERY_FIELDS.join(' ') : '',
+        shipmentsHaveRevTag ? SHIPMENT_REV_FIELDS.join(' ') : '',
+      ].filter(Boolean).join(' '))
     } catch (err) {
+      if (shipmentsHaveRevTag && fieldNamed(SHIPMENT_REV_FIELDS, err)) {
+        console.warn('[apiClient] backend has no revenue tags on Shipment yet — querying without them until deploy')
+        shipmentsHaveRevTag = false
+        continue
+      }
       if (!shipmentsHaveDelivery || !fieldNamed(SHIPMENT_DELIVERY_FIELDS, err)) throw err
       console.warn('[apiClient] backend has no delivery fields on Shipment yet — querying without them until deploy')
       shipmentsHaveDelivery = false
@@ -1651,11 +1681,173 @@ export async function setLoadStatus(input: SetLoadStatusInput): Promise<Shipment
   return shipmentAction<ShipmentBundle>('SET_LOAD_STATUS', input)
 }
 
-export async function deleteShipment(input: { shipmentId: string; expectedUpdatedAt: string }): Promise<ShipmentBundle> {
-  return shipmentAction<ShipmentBundle>('DELETE_SHIPMENT', input)
+/**
+ * Void — the ONLY way a shipment leaves the working set (Ryne, 2026-10-28).
+ *
+ * There is no delete and no restore: the row, its PRO number, its history and its
+ * documents all stay, the number is never reused, and a voided shipment can never
+ * be invoiced. Who may void is decided in the Lambda from the caller's identity,
+ * never from the UI.
+ */
+export async function voidShipment(input: { shipmentId: string; reason: string; expectedUpdatedAt?: string }): Promise<ShipmentBundle> {
+  return shipmentAction<ShipmentBundle>('VOID_SHIPMENT', input)
 }
-export async function restoreShipment(input: { shipmentId: string; expectedUpdatedAt?: string }): Promise<ShipmentBundle> {
-  return shipmentAction<ShipmentBundle>('RESTORE_SHIPMENT', input)
+
+// ── Revenue tags (tmsShipmentActions) ────────────────────────────────────────
+
+/** Tag by hand. A hand tag beats the rules and survives a carrier or driver change. */
+export async function setRevTag(input: { shipmentId: string; divisionCode: string; subdivisionCode?: string }): Promise<ShipmentBundle> {
+  return shipmentAction<ShipmentBundle>('SET_REV_TAG', input)
+}
+/** Drop the hand tag and let the rules answer again. */
+export async function clearRevTag(input: { shipmentId: string }): Promise<ShipmentBundle> {
+  return shipmentAction<ShipmentBundle>('CLEAR_REV_TAG', input)
+}
+/** `repId` is a Cognito username, or null to clear the rep. */
+export async function setSalesRep(input: { shipmentId: string; repId: string | null }): Promise<ShipmentBundle> {
+  return shipmentAction<ShipmentBundle>('SET_SALES_REP', input)
+}
+
+/** What a re-tag did, or would do: `dryRun` writes nothing and reports the same counts. */
+export interface RetagReport {
+  dryRun: boolean
+  scanned: number
+  changed: number
+  byDivision: Record<string, number>
+  bySubdivision: Record<string, number>
+  /** Left alone because somebody tagged them by hand. */
+  handTagged: number
+}
+/** Re-run the rules over every rule-tagged shipment. Admin only, server-side. */
+export async function retagShipments(input: { dryRun: boolean }): Promise<RetagReport> {
+  return shipmentAction<RetagReport>('RETAG_SHIPMENTS', input)
+}
+
+/** The rule editor's "test a shipment": what the rules say, and what the row holds now. */
+export interface OwnershipRuleTest {
+  context: ResolveContext
+  resolution: Resolution
+  current: { revDivision: string | null; revSubdivision: string | null; revTagSource: RevTagSource | null }
+}
+export async function testOwnershipRules(input: { shipmentId: string }): Promise<OwnershipRuleTest> {
+  return shipmentAction<OwnershipRuleTest>('TEST_OWNERSHIP_RULES', input)
+}
+
+// ── Revenue ownership & department views (Step R) ────────────────────────────
+/*
+ * Three small tables the whole app reads and only tmsDirectoryActions writes: the
+ * division tree (the sidebar's sections, the dashboard's grouping), the ordered
+ * rules that tag a shipment, and the saved Shipments views. Tens of rows each, so
+ * `list` is the read and there is no index.
+ *
+ * They all arrive with step R's deploy. Until then AppSync has no such query at
+ * all and the error names the QUERY, not a field, so the field-level self-heal
+ * cannot see it — the same bargain the quote models struck: degrade to "nothing
+ * configured" and let the caller fall back to the seed, rather than throwing on
+ * every page that renders a sidebar.
+ */
+const OWNERSHIP_DIVISION_FIELDS = `
+  id code name brand parentId color sortOrder active owners flows
+  createdBy updatedBy version createdAt updatedAt
+`
+const OWNERSHIP_RULE_FIELDS = `
+  id name sortOrder active condition divisionCode
+  createdBy updatedBy version createdAt updatedAt
+`
+const SHIPMENT_VIEW_FIELDS = `
+  id slug name department description filters columns sort isDefault audience
+  sortOrder active createdBy updatedBy version createdAt updatedAt
+`
+
+let ownershipModelsAvailable = true
+const isMissingOwnershipModel = (err: unknown) =>
+  /[\\'"](get|list)(OwnershipDivision|OwnershipRule|ShipmentView)\w*[\\'"]|Unknown type [\\'"]+(OwnershipDivision|OwnershipRule|ShipmentView)/i
+    .test(safeStringify(err))
+
+/** False once a read proved the backend predates the ownership models. */
+export const ownershipModelsDeployed = () => ownershipModelsAvailable
+
+function forgetOwnershipModels(err: unknown): void {
+  if (!isMissingOwnershipModel(err)) throw err
+  console.warn('[apiClient] backend has no ownership models yet — using the seed taxonomy until deploy')
+  ownershipModelsAvailable = false
+}
+
+/** The division tree, active and archived. Empty = not configured (or not deployed). */
+export async function listOwnershipDivisions(): Promise<OwnershipDivisionRecord[]> {
+  if (!ownershipModelsAvailable) return []
+  try {
+    const rows = await listAll<OwnershipDivisionRecord>('listOwnershipDivisions', OWNERSHIP_DIVISION_FIELDS, 200)
+    return rows.map((d) => unwrapJsonFields(d, ['owners', 'flows']))
+  } catch (err) {
+    forgetOwnershipModels(err)
+    return []
+  }
+}
+
+/** Every rule, in whatever order DynamoDB answers; `resolveDivision` sorts them. */
+export async function listOwnershipRules(): Promise<OwnershipRuleRecord[]> {
+  if (!ownershipModelsAvailable) return []
+  try {
+    const rows = await listAll<OwnershipRuleRecord>('listOwnershipRules', OWNERSHIP_RULE_FIELDS, 200)
+    return rows.map((r) => unwrapJsonFields(r, ['condition']))
+  } catch (err) {
+    forgetOwnershipModels(err)
+    return []
+  }
+}
+
+/** Every saved view; `viewsVisibleTo` decides which of them this caller may open. */
+export async function listShipmentViews(): Promise<ShipmentViewRecord[]> {
+  if (!ownershipModelsAvailable) return []
+  try {
+    const rows = await listAll<ShipmentViewRecord>('listShipmentViews', SHIPMENT_VIEW_FIELDS, 200)
+    return rows.map((v) => unwrapJsonFields(v, ['filters', 'sort', 'audience']))
+  } catch (err) {
+    forgetOwnershipModels(err)
+    return []
+  }
+}
+
+export type OwnershipDivisionInput =
+  Partial<Omit<OwnershipDivisionRecord, 'createdBy' | 'updatedBy' | 'version' | 'createdAt' | 'updatedAt'>>
+  & { code: string; name: string }
+
+export async function saveOwnershipDivision(input: OwnershipDivisionInput): Promise<OwnershipDivisionRecord> {
+  return directoryAction<OwnershipDivisionRecord>('SAVE_OWNERSHIP_DIVISION', input)
+}
+/** Archive, never delete: a division a shipment is tagged with has to stay resolvable. */
+export async function archiveOwnershipDivision(input: { id: string }): Promise<OwnershipDivisionRecord> {
+  return directoryAction<OwnershipDivisionRecord>('ARCHIVE_OWNERSHIP_DIVISION', input)
+}
+
+export type OwnershipRuleInput =
+  Omit<OwnershipRuleRecord, 'id' | 'createdBy' | 'updatedBy' | 'version' | 'createdAt' | 'updatedAt'>
+  & { id?: string }
+
+/**
+ * The whole ordered list, every time. Order IS the rule ("first match wins"), so it
+ * is saved as one array and the server assigns `sortOrder` from the array index —
+ * two editors cannot interleave their drags into a list nobody meant.
+ */
+export async function saveOwnershipRules(input: { rules: OwnershipRuleInput[] }): Promise<OwnershipRuleRecord[]> {
+  return directoryAction<OwnershipRuleRecord[]>('SAVE_OWNERSHIP_RULES', input)
+}
+
+export type ShipmentViewInput =
+  Partial<Omit<ShipmentViewRecord, 'createdBy' | 'updatedBy' | 'version' | 'createdAt' | 'updatedAt'>>
+  & { name: string }
+
+export async function saveShipmentView(input: ShipmentViewInput): Promise<ShipmentViewRecord> {
+  return directoryAction<ShipmentViewRecord>('SAVE_SHIPMENT_VIEW', input)
+}
+export async function archiveShipmentView(input: { id: string }): Promise<ShipmentViewRecord> {
+  return directoryAction<ShipmentViewRecord>('ARCHIVE_SHIPMENT_VIEW', input)
+}
+
+/** Idempotent: writes the seed divisions, rules and views that are not there yet. */
+export async function ensureOwnershipSeed(): Promise<{ divisionsCreated: number; rulesCreated: number; viewsCreated: number }> {
+  return directoryAction('ENSURE_OWNERSHIP_SEED', {})
 }
 
 export interface TenderRespondInput {
@@ -1855,7 +2047,16 @@ export async function getLoadFinancials(loadId: string): Promise<LoadFinancialsR
   return r.data.getLoadFinancials
 }
 
-/** Just enough of every load to colour a board row: no stops, no rate-con URLs. */
+/**
+ * Just enough of every load to colour a board row: no stops detail beyond the stop
+ * list the STOPS column counts, no rate-con URLs.
+ *
+ * Step R widened it: the MVMNT shipments board shows CARRIER / DRIVER / TRUCK /
+ * STOPS / DIVISION, and the department views filter on tracking, so the summary
+ * carries the active assignment, the own-fleet driver and truck ids, the stop list
+ * and the mirrored revenue tags. Each newer group rides the flag it deploys with,
+ * so a frontend ahead of the backend still fills the board.
+ */
 export interface LoadBoardSummary {
   id: string
   shipmentId?: string | null
@@ -1870,21 +2071,68 @@ export interface LoadBoardSummary {
   nextCheckCallAt?: string | null
   checkCallOpen?: 'OPEN' | null
   openIncidentCount?: number | null
+  // Step R — the MVMNT board's columns and the department views' tracking clause.
+  activeLoadCarrierId?: string | null
+  carrierName?: string | null
+  trackingProvider?: string | null
+  deliveredAt?: string | null
+  pickupAppt?: string | null
+  deliveryAppt?: string | null
+  pickupDriverId?: string | null
+  deliveryDriverId?: string | null
+  truckId?: string | null
+  stops?: Stop[] | null
+  customerId?: string | null
+  revDivision?: string | null
+  revSubdivision?: string | null
+  revTagSource?: string | null
+  revRuleId?: string | null
+  salesRepId?: string | null
 }
 const LOAD_SUMMARY_FIELDS = `
   id shipmentId orderId status assignmentType
   lastKnownAt lastKnownCity lastKnownState lastCheckCallAt
   nextCheckCallAt checkCallOpen openIncidentCount
+  activeLoadCarrierId carrierName trackingProvider deliveredAt
+  pickupAppt deliveryAppt pickupDriverId deliveryDriverId truckId
 `
 export async function listLoadSummaries(): Promise<LoadBoardSummary[]> {
   if (!loadsHaveShipment) return []
-  try {
-    return await listAll<LoadBoardSummary>('listLoads', LOAD_SUMMARY_FIELDS, 10000)
-  } catch (err) {
-    if (!undefinedLoadFields(err).shipment) throw err
-    console.warn('[apiClient] backend has no shipment fields on Load yet — board facets stay empty until deploy')
-    loadsHaveShipment = false
-    return []
+  // Up to three attempts: `stops`, `customerId` and the revenue tags each deploy on
+  // their own, and a board that drops one of them is better than a board with none.
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const fields = [
+        LOAD_SUMMARY_FIELDS,
+        loadsHaveStops ? 'stops' : '',
+        loadsHaveCustomerId ? 'customerId' : '',
+        loadsHaveRevTag ? LOAD_REV_FIELDS : '',
+      ].filter(Boolean).join(' ')
+      const rows = await listAll<LoadBoardSummary>('listLoads', fields, 10000)
+      return rows.map((l) => unwrapJsonFields(l, ['stops']))
+    } catch (err) {
+      const u = undefinedLoadFields(err)
+      if (u.shipment) {
+        console.warn('[apiClient] backend has no shipment fields on Load yet — board facets stay empty until deploy')
+        loadsHaveShipment = false
+        return []
+      }
+      if (attempt >= 2) throw err
+      let changed = false
+      if (loadsHaveStops && u.stops) {
+        console.warn("[apiClient] backend has no 'stops' field yet — the board's STOPS column stays empty until deploy")
+        loadsHaveStops = false; changed = true
+      }
+      if (loadsHaveCustomerId && u.customerId) {
+        console.warn("[apiClient] backend has no 'customerId' on Load yet — querying load summaries without it until deploy")
+        loadsHaveCustomerId = false; changed = true
+      }
+      if (loadsHaveRevTag && u.revTag) {
+        console.warn('[apiClient] backend has no revenue tags on Load yet — querying load summaries without them until deploy')
+        loadsHaveRevTag = false; changed = true
+      }
+      if (!changed) throw err
+    }
   }
 }
 
@@ -2516,6 +2764,16 @@ export async function listLoadCarriersByLoad(loadId: string): Promise<LoadCarrie
   return listLoadCarriersByIndex('listLoadCarrierByLoadId', { loadId })
 }
 
+/**
+ * Every assignment in the book. The shipments board reads the ACTIVE leg of each load
+ * for its CARRIER / DRIVER / TRUCK / AP columns, and the Brokerage dashboard groups by
+ * carrier; both need the whole table rather than one load's legs, and the bounced and
+ * TONU rows come with it because "who hauled it before" is part of that history.
+ */
+export async function listLoadCarriers(): Promise<LoadCarrierRecord[]> {
+  return readLoadCarriers((fields) => listAll<LoadCarrierRecord>('listLoadCarriers', fields, 10000))
+}
+
 // ── Documents & delivery (tmsShipmentActions · tmsTrackingActions) ───────────
 //
 // Step E. ShipmentDocument is the shipment's index of every file it has, wherever the
@@ -2738,14 +2996,18 @@ export interface ReadyToInvoiceInput {
   orderId: string
   /** The Order's `updatedAt` as the page read it. */
   expectedUpdatedAt: string
-  /** ADMIN/owner may bill past a missing document; the note is then required. */
-  override?: boolean
-  overrideNote?: string
+  // No override: Ryne, 2026-10-28 — nothing may bypass the release gate, not an
+  // admin with a note, not batch invoicing, not the factoring hand-off.
 }
-/** `gate` is what the required-document check decided, missing documents included. */
+/**
+ * `gate` is what the required-document check decided; `releaseGate` is the whole
+ * release-to-accounting verdict, with the exact sentence to show for each thing
+ * that is missing.
+ */
 export interface ReadyToInvoiceResult {
   bundle: ShipmentBundle
   gate: DocGateResult
+  releaseGate: ReleaseGateResult
 }
 export async function readyToInvoice(input: ReadyToInvoiceInput): Promise<ReadyToInvoiceResult> {
   return shipmentAction<ReadyToInvoiceResult>('READY_TO_INVOICE', input)
@@ -5119,6 +5381,8 @@ export async function getInvoicePdfUrl(key: string): Promise<string> {
 export interface InvoicePreview {
   readiness: { ready: boolean; reasons: string[] }
   gate: DocGateResult
+  /** The release-to-accounting verdict, with the sentence to show per blocker. */
+  releaseGate: ReleaseGateResult
   /** The invoice as it would be issued — never persisted. */
   snapshot: InvoiceRecord
   recipients: { to: string[]; cc: string[] }
@@ -5148,7 +5412,7 @@ export async function generateInvoice(input: {
 export async function batchGenerateInvoices(input: {
   orderIds: string[]
   invoiceDate?: string
-}): Promise<{ results: { orderId: string; invoiceId?: string; number?: string; totalCents?: number; error?: string }[] }> {
+}): Promise<{ results: { orderId: string; invoiceId?: string; number?: string; totalCents?: number; error?: string; releaseGate?: ReleaseGateResult }[] }> {
   return financeAction('BATCH_GENERATE', input)
 }
 
@@ -5254,6 +5518,7 @@ export async function reversePayment(input: { paymentId: string; reason: string 
 export async function previewFactor(input: { invoiceId: string }): Promise<{
   ready: boolean
   refusal: string | null
+  releaseGate: ReleaseGateResult
   proNumber?: string
   fields?: Record<string, string>
   existing?: { id: string; status: string } | null
@@ -5787,6 +6052,23 @@ export async function listOpenQuotes(): Promise<QuoteRecord[]> {
   }
 }
 
+/**
+ * Every quote ever priced, both sides. The shipments board needs it to know which
+ * shipments were sold off a quote (the Sales department view), and the Brokerage
+ * dashboard counts quotes by customer; neither can ride an index, because both ask
+ * about the whole book rather than one customer, lane or month.
+ */
+export async function listQuotes(): Promise<QuoteRecord[]> {
+  if (!quoteModelsAvailable) return []
+  try {
+    const rows = await listAll<QuoteRecord>('listQuotes', QUOTE_FIELDS, 2000)
+    return rows.map((q) => parseArJson(q, QUOTE_JSON_FIELDS))
+  } catch (err) {
+    forgetQuoteModels(err)
+    return []
+  }
+}
+
 /** Everything quoted in one 'YYYY-MM', newest first — the Won / Lost tab's window. */
 export async function listQuotesByMonth(month: string): Promise<QuoteRecord[]> {
   if (!quoteModelsAvailable) return []
@@ -6238,26 +6520,47 @@ export async function listPayPeriods(): Promise<CommissionPayPeriodRecord[]> {
   }
 }
 
+// Step I's six reporting columns, and step R's division/tracking/POD facts. Both
+// ride only on the month read — the lane panel does not need them — and step R's
+// group has its own flag so a dashboard opened before the deploy still charts the
+// money, just not the new series.
+const LANE_SAMPLE_REPORT_FIELDS = 'sampleMonth customerRepId carrierRepId teamKey invoiceId invoiceMonth'
+const LANE_SAMPLE_REV_FIELDS = [
+  'revDivision', 'revSubdivision', 'salesRepId', 'deliveredAt', 'podReceivedAt',
+  'trackingProvider', 'firstPingAt', 'datPostedAt', 'checkCallsDue', 'checkCallsMet',
+]
+let laneSamplesHaveRevTag = true
+
 /**
  * Every delivered sample stamped with one 'YYYY-MM' — a report period is read month by
  * month off the `sampleMonth` index rather than the whole lane history filtered here.
- * The six step I columns ride along; they are on the same model, so they drop with it.
  */
 export async function listLaneSamplesByMonth(ym: string): Promise<LaneRateSampleRecord[]> {
   if (!quoteModelsAvailable || !ym) return []
-  try {
-    return await listTrackingIndex<LaneRateSampleRecord>({
-      name: 'listLaneRateSampleBySampleMonthAndDate',
-      decls: '$sampleMonth: String!',
-      args: 'sampleMonth: $sampleMonth',
-      variables: { sampleMonth: ym },
-      fields: `${LANE_SAMPLE_FIELDS} sampleMonth customerRepId carrierRepId teamKey invoiceId invoiceMonth`,
-      limit: 1000,
-      sortDirection: 'ASC',
-    })
-  } catch (err) {
-    forgetQuoteModels(err)
-    return []
+  for (;;) {
+    try {
+      return await listTrackingIndex<LaneRateSampleRecord>({
+        name: 'listLaneRateSampleBySampleMonthAndDate',
+        decls: '$sampleMonth: String!',
+        args: 'sampleMonth: $sampleMonth',
+        variables: { sampleMonth: ym },
+        fields: [
+          LANE_SAMPLE_FIELDS,
+          LANE_SAMPLE_REPORT_FIELDS,
+          laneSamplesHaveRevTag ? LANE_SAMPLE_REV_FIELDS.join(' ') : '',
+        ].filter(Boolean).join(' '),
+        limit: 1000,
+        sortDirection: 'ASC',
+      })
+    } catch (err) {
+      if (laneSamplesHaveRevTag && fieldNamed(LANE_SAMPLE_REV_FIELDS, err)) {
+        console.warn('[apiClient] backend has no division facts on LaneRateSample yet — charting without them until deploy')
+        laneSamplesHaveRevTag = false
+        continue
+      }
+      forgetQuoteModels(err)
+      return []
+    }
   }
 }
 

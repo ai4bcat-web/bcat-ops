@@ -8,10 +8,7 @@
  */
 import { useState } from 'react'
 import { Plus, Trash2 } from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
+import { TmsBadge, TmsButton, TmsField, TmsIconButton, TmsInput } from '@/features/tms/kit'
 import type { CarrierContactRecord, CarrierContactType } from '@/types/tms'
 
 const CONTACT_TYPES: CarrierContactType[] = [
@@ -41,9 +38,9 @@ export function CarrierContactsEditor({ contacts, onSave, onArchive, disabled }:
   const active = contacts.filter((c) => c.active !== false)
 
   return (
-    <div className="space-y-3">
+    <div className="flex flex-col gap-3">
       {active.length === 0 && !adding && (
-        <p className="text-sm text-muted-foreground">No contacts yet. Add the dispatcher you book through.</p>
+        <p className="tms-muted">No contacts yet. Add the dispatcher you book through.</p>
       )}
 
       {active.map((contact) => (
@@ -66,9 +63,11 @@ export function CarrierContactsEditor({ contacts, onSave, onArchive, disabled }:
       )}
 
       {!adding && (
-        <Button variant="outline" size="sm" disabled={disabled} onClick={() => setAdding(true)}>
-          <Plus size={14} className="mr-1" /> Add contact
-        </Button>
+        <div>
+          <TmsButton size="sm" disabled={disabled} onClick={() => setAdding(true)}>
+            <Plus size={14} /> Add contact
+          </TmsButton>
+        </div>
       )}
     </div>
   )
@@ -114,20 +113,17 @@ function ContactRow({ contact, disabled, onSave, onArchive, onCancel }: {
   }
 
   return (
-    <div className="rounded-lg border border-border p-3">
-      <div className="grid grid-cols-3 gap-3">
-        <div>
-          <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">Name</Label>
-          <Input aria-label="Contact name" value={name} disabled={disabled} onChange={(e) => setName(e.target.value)} className="h-8 text-sm" />
-        </div>
-        <div>
-          <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">Email</Label>
-          <Input aria-label="Contact email" value={email} disabled={disabled} onChange={(e) => setEmail(e.target.value)} className="h-8 text-sm" />
-        </div>
-        <div>
-          <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">Phone</Label>
-          <Input aria-label="Contact phone" value={phone} disabled={disabled} onChange={(e) => setPhone(e.target.value)} className="h-8 text-sm" />
-        </div>
+    <div className="p-3" style={{ border: '1px solid var(--tms-border)', borderRadius: 'var(--tms-radius)' }}>
+      <div className="tms-grid tms-grid-3">
+        <TmsField label="Name">
+          <TmsInput aria-label="Contact name" value={name} disabled={disabled} onChange={(e) => setName(e.target.value)} />
+        </TmsField>
+        <TmsField label="Email">
+          <TmsInput aria-label="Contact email" value={email} disabled={disabled} onChange={(e) => setEmail(e.target.value)} />
+        </TmsField>
+        <TmsField label="Phone">
+          <TmsInput aria-label="Contact phone" value={phone} disabled={disabled} onChange={(e) => setPhone(e.target.value)} />
+        </TmsField>
       </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-3">
@@ -154,27 +150,24 @@ function ContactRow({ contact, disabled, onSave, onArchive, onCancel }: {
           <input type="checkbox" aria-label="Rate con recipient" checked={rateConRecipient} disabled={disabled} onChange={(e) => setRateConRecipient(e.target.checked)} />
           Rate con recipient
         </label>
-        {contact?.isPrimary && <Badge variant="outline" className="text-[10px]">primary on file</Badge>}
+        {contact?.isPrimary && <TmsBadge tone="gray">primary on file</TmsBadge>}
 
         <div className="ml-auto flex items-center gap-2">
-          {onCancel && <Button variant="ghost" size="sm" onClick={onCancel} disabled={busy}>Cancel</Button>}
-          <Button size="sm" onClick={save} disabled={busy || disabled}>{busy ? 'Saving…' : 'Save'}</Button>
+          {onCancel && <TmsButton variant="ghost" size="sm" onClick={onCancel} disabled={busy}>Cancel</TmsButton>}
+          <TmsButton variant="primary" size="sm" onClick={save} disabled={busy || disabled}>{busy ? 'Saving…' : 'Save'}</TmsButton>
           {onArchive && (
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8"
+            <TmsIconButton
               aria-label={`Archive ${contact?.name ?? 'contact'}`}
               disabled={busy || disabled}
               onClick={() => { setBusy(true); onArchive().finally(() => setBusy(false)) }}
             >
               <Trash2 size={14} />
-            </Button>
+            </TmsIconButton>
           )}
         </div>
       </div>
 
-      {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
+      {error && <p className="mt-2 text-xs" style={{ color: 'var(--tms-badge-red)' }}>{error}</p>}
     </div>
   )
 }

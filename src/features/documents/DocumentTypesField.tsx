@@ -14,7 +14,6 @@
  */
 import { useMemo } from 'react'
 import { X } from 'lucide-react'
-import { Label } from '@/components/ui/label'
 import { DOCUMENT_TYPE_LABELS, SHIPMENT_DOCUMENT_TYPES, normalizeRequiredDocTypes } from '@/lib/shipmentDocuments'
 import type { ShipmentDocumentType } from '@/types/tms'
 
@@ -44,10 +43,10 @@ export function DocumentTypesField({
 
   return (
     <div>
-      <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">{label}</Label>
-      <div className="mt-1 grid grid-cols-2 gap-x-4 gap-y-1 sm:grid-cols-3">
+      <div className="tms-field-label">{label}</div>
+      <div className="tms-grid tms-grid-3" style={{ marginTop: 4, gap: 6 }}>
         {options.map((type) => (
-          <label key={type} className="flex items-center gap-2 text-sm" style={{ color: 'var(--ds-t2)' }}>
+          <label key={type} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
             <input
               type="checkbox"
               aria-label={DOCUMENT_TYPE_LABELS[type]}
@@ -61,33 +60,30 @@ export function DocumentTypesField({
       </div>
 
       {unrecognised.length > 0 && (
-        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+        <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6 }}>
           {unrecognised.map((entry) => (
-            <span
-              key={entry}
-              className="inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-50 px-2 py-0.5 text-xs text-amber-800"
-            >
+            <span key={entry} className="tms-badge tms-badge-orange" style={{ gap: 4 }}>
               {entry}
-              <span className="text-[10px] uppercase tracking-wider opacity-70">not recognised</span>
+              <span style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.04em', opacity: 0.75 }}>not recognised</span>
               <button
                 type="button"
                 aria-label={`Remove ${entry}`}
                 disabled={disabled}
                 onClick={() => onChange([...types, ...unrecognised.filter((u) => u !== entry)])}
-                className="opacity-70 hover:opacity-100"
+                style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', padding: 0, display: 'inline-flex' }}
               >
                 <X size={11} />
               </button>
             </span>
           ))}
-          <p className="w-full text-xs text-muted-foreground">
+          <p className="tms-muted" style={{ width: '100%', fontSize: 12 }}>
             Kept from before these lists had a vocabulary. They are shown to whoever works the
             shipment but cannot gate anything — pick the matching type above, then remove the chip.
           </p>
         </div>
       )}
 
-      {help && <p className="mt-1 text-xs text-muted-foreground">{help}</p>}
+      {help && <p className="tms-muted" style={{ marginTop: 4, fontSize: 12 }}>{help}</p>}
     </div>
   )
 }

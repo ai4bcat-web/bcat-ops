@@ -188,6 +188,8 @@ const COMMISSION_ACTIONS: Record<string, true> = {
 }
 
 const COMMISSIONS_PAGE_GROUP = 'page-commissions'
+/** Step R: the one BROKERAGE grant. Invoicing and carrier pay are BROKERAGE pages. */
+const TMS_PAGE_GROUP = 'page-tms'
 
 interface AppSyncEvent {
   arguments: {
@@ -219,8 +221,11 @@ async function authorize(action: Action, identity?: AppSyncIdentity | null): Pro
 
   const isAp = AP_ACTIONS[action] === true
   const pageGroup = isAp ? CARRIER_PAY_PAGE_GROUP : INVOICING_PAGE_GROUP
-  if (!isAdmin && !groups.includes(pageGroup)) {
-    throw new Error(`Forbidden: ${action} requires owner, ADMIN, or ${pageGroup}`)
+  // Step R: Invoicing and carrier pay are BROKERAGE pages, so the one TMS grant
+  // opens the same AR/AP door its page group does. The commission desk above keeps
+  // its own door, and the posting gate below is unchanged.
+  if (!isAdmin && !groups.includes(pageGroup) && !groups.includes(TMS_PAGE_GROUP)) {
+    throw new Error(`Forbidden: ${action} requires owner, ADMIN, ${pageGroup}, or ${TMS_PAGE_GROUP}`)
   }
   if (ADMIN_ONLY_ACTIONS[action] && !isAdmin) {
     throw new Error(`Forbidden: ${action} requires owner or ADMIN`)

@@ -14,7 +14,8 @@ import { useDocumentReviewQueue } from '@/hooks/useDocumentReviewQueue'
 import { useArToInvoiceCount } from '@/hooks/useArToInvoiceCount'
 import { useApToReviewCount } from '@/hooks/useApToReviewCount'
 import { useQuotesToReplyCount } from '@/hooks/useQuotesToReplyCount'
-import { NAV_GROUPS } from '@/lib/navItems'
+import { buildNavSections } from '@/lib/navSections'
+import { useOwnershipDivisions } from '@/features/tms/useShipmentViews'
 
 const BADGE_TONE: Record<string, { bg: string; color: string }> = {
   loads:       { bg: 'rgba(15,23,42,0.06)',       color: 'var(--ds-t3)' },
@@ -53,6 +54,9 @@ export function NavBar({
   onToggleCollapse?: () => void
 } = {}) {
   const { user, logout, isOwner, isAdmin, hasPageAccess } = useAuth()
+  // The three businesses the rail groups by. Null until they load: `buildNavSections`
+  // renders the seed divisions then, so the rail never flashes empty.
+  const { divisions } = useOwnershipDivisions()
   const loads = useAppStore(s => s.loads)
   const maintenanceTasks = useAppStore(s => s.maintenanceTasks)
   const { items: intakeItems } = useIntakeItems()
@@ -133,7 +137,7 @@ export function NavBar({
       {hasPageAccess('loads') && (
         <div style={{ padding: collapsed ? '12px 10px 8px' : '14px 14px 10px' }}>
           <NavLink
-            to="/loads"
+            to="/tms/shipments"
             onClick={onClose}
             title={collapsed ? 'Quick Add' : undefined}
             style={{
@@ -150,21 +154,21 @@ export function NavBar({
 
       {/* Nav */}
       <nav style={{ flex: 1, overflowY: 'auto', padding: '4px 10px 16px' }}>
-        {NAV_GROUPS.map((group, gi) => {
-          const items = group.items.filter(({ pageKey }) => hasPageAccess(pageKey))
+        {buildNavSections({ divisions, hasPageAccess, isOwner, isAdmin }).map((section, gi) => {
+          const items = section.items
           if (items.length === 0) return null
           return (
-            <div key={gi} style={{ marginTop: gi > 0 ? 14 : 4 }}>
-              {/* Section header — a thin divider stands in for the label when collapsed */}
+            <div key={section.key} style={{ marginTop: gi > 0 ? 14 : 4 }}>
+              {/* Section header — the division code, with the business it trades as. */}
               {collapsed ? (
                 gi > 0 && <div style={{ height: 1, background: 'var(--ds-border)', margin: '4px 8px 8px' }} />
               ) : (
                 <div style={{ padding: '0 10px 4px', fontSize: 10, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--ds-t3)' }}>
-                  {group.title}
+                  {section.name}{section.brand ? ` [${section.brand}]` : ''}
                 </div>
               )}
-              {items.map(({ to, label, icon: Icon, badgeKey }) => {
-                const badge = getBadgeCount(badgeKey)
+              {items.map(({ to, label, icon: Icon, badgeKey, badge }) => {
+                const count = getBadgeCount(badgeKey)
                 return (
                   <NavLink
                     key={to}
@@ -175,7 +179,10 @@ export function NavBar({
                   >
                     <Icon size={16} style={{ flexShrink: 0 }} />
                     {!collapsed && <span style={{ flex: 1 }}>{label}</span>}
-                    {!collapsed && badge != null && <NavBadge count={badge} toneKey={badgeKey!} />}
+                    {!collapsed && count != null && <NavBadge count={count} toneKey={badgeKey!} />}
+                    {!collapsed && count == null && badge
+                      ? <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.06em', color: 'var(--ds-t3)' }}>{badge}</span>
+                      : null}
                   </NavLink>
                 )
               })}
@@ -188,7 +195,7 @@ export function NavBar({
           <>
             <div style={{ height: 1, background: 'var(--ds-border)', margin: '8px 6px' }} />
             <NavLink
-              to="/users"
+              to="/tms/brokerage/users"
               onClick={onClose}
               title={collapsed ? 'Users' : undefined}
               className={({ isActive }) => `sidebar-link${isActive ? ' active' : ''}`}

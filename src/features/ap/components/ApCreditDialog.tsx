@@ -13,11 +13,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { TmsButton, TmsDialog, TmsField, TmsInput, TmsSelect, TmsTextarea } from '@/features/tms/kit'
 import { createApCredit, graphqlErrorText, listBillsByCarrier } from '@/lib/apiClient'
 import { formatCents } from '@/lib/invoiceBuild'
 import { formatDateInput } from '@/lib/date'
@@ -87,107 +83,95 @@ export function ApCreditDialog({ carrierId, loadCarrierId, open, onOpenChange, o
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-xl">
-        <DialogHeader>
-          <DialogTitle>
-            Hold a credit{bills[0]?.carrierName ? ` — ${bills[0].carrierName}` : ''}
-          </DialogTitle>
-        </DialogHeader>
-
-        {loading && (
-          <p className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 size={14} className="animate-spin" /> Reading this carrier…
-          </p>
-        )}
-
-        {!loading && (
-          <div className="space-y-3">
-            <p className="text-sm text-muted-foreground">
-              Nothing is deducted now. The credit sits against this carrier until a payment
-              spends it, and the pay run decides which bill it comes off.
-            </p>
-
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
-              <div>
-                <Label className="text-xs uppercase tracking-wider text-muted-foreground">Memo date</Label>
-                <Input
-                  aria-label="Credit memo date"
-                  type="date"
-                  value={memoDate}
-                  disabled={disabled}
-                  onChange={(e) => setMemoDate(e.target.value)}
-                  className="h-9 text-sm"
-                />
-              </div>
-              <div>
-                <Label className="text-xs uppercase tracking-wider text-muted-foreground">Reference</Label>
-                <Input
-                  aria-label="Credit reference"
-                  value={reference}
-                  disabled={disabled}
-                  placeholder="claim or TONU #"
-                  onChange={(e) => setReference(e.target.value)}
-                  className="h-9 text-sm"
-                />
-              </div>
-              <div>
-                <Label className="text-xs uppercase tracking-wider text-muted-foreground">Amount</Label>
-                <Input
-                  aria-label="Credit amount"
-                  inputMode="decimal"
-                  value={amount}
-                  disabled={disabled}
-                  placeholder="0.00"
-                  onChange={(e) => setAmount(e.target.value)}
-                  className="h-9 text-sm"
-                />
-              </div>
-            </div>
-
-            <div>
-              <Label className="text-xs uppercase tracking-wider text-muted-foreground">Against a leg</Label>
-              <select
-                aria-label="Credit assignment"
-                value={assignment}
-                disabled={disabled}
-                onChange={(e) => setAssignment(e.target.value)}
-                className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
-              >
-                <option value="">The account — no particular leg</option>
-                {bills.map((row) => (
-                  <option key={row.id} value={row.loadCarrierId}>
-                    {row.billNumber ?? row.id} · {row.loadNumber ?? row.shipmentNumber ?? row.shipmentId}
-                    {' '}· {formatCents(row.netCents)}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <Label className="text-xs uppercase tracking-wider text-muted-foreground">Why</Label>
-              <Textarea
-                aria-label="Credit reason"
-                rows={2}
-                value={reason}
-                disabled={disabled}
-                placeholder="what this credit is for — the carrier will ask"
-                onChange={(e) => setReason(e.target.value)}
-                className="text-sm"
-              />
-            </div>
-
-            {error && <p className="text-xs text-destructive">{error}</p>}
-          </div>
-        )}
-
-        <DialogFooter>
-          <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={saving}>Cancel</Button>
-          <Button onClick={submit} disabled={disabled || !ready}>
+    <TmsDialog
+      open={open}
+      onOpenChange={onOpenChange}
+      title={`Hold a credit${bills[0]?.carrierName ? ` — ${bills[0].carrierName}` : ''}`}
+      className="tms-dialog-wide"
+      footer={
+        <>
+          <TmsButton variant="ghost" onClick={() => onOpenChange(false)} disabled={saving}>Cancel</TmsButton>
+          <TmsButton variant="primary" onClick={submit} disabled={disabled || !ready}>
             {saving ? 'Saving…' : 'Hold credit'}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          </TmsButton>
+        </>
+      }
+    >
+      {loading && (
+        <p className="flex items-center gap-2 tms-muted">
+          <Loader2 size={14} className="animate-spin" /> Reading this carrier…
+        </p>
+      )}
+
+      {!loading && (
+        <div className="flex flex-col gap-3">
+          <p className="tms-muted">
+            Nothing is deducted now. The credit sits against this carrier until a payment
+            spends it, and the pay run decides which bill it comes off.
+          </p>
+
+          <div className="tms-grid tms-grid-3">
+            <TmsField label="Memo date">
+              <TmsInput
+                aria-label="Credit memo date"
+                type="date"
+                value={memoDate}
+                disabled={disabled}
+                onChange={(e) => setMemoDate(e.target.value)}
+              />
+            </TmsField>
+            <TmsField label="Reference">
+              <TmsInput
+                aria-label="Credit reference"
+                value={reference}
+                disabled={disabled}
+                placeholder="claim or TONU #"
+                onChange={(e) => setReference(e.target.value)}
+              />
+            </TmsField>
+            <TmsField label="Amount">
+              <TmsInput
+                aria-label="Credit amount"
+                inputMode="decimal"
+                value={amount}
+                disabled={disabled}
+                placeholder="0.00"
+                onChange={(e) => setAmount(e.target.value)}
+              />
+            </TmsField>
+          </div>
+
+          <TmsField label="Against a leg">
+            <TmsSelect
+              aria-label="Credit assignment"
+              value={assignment}
+              disabled={disabled}
+              onChange={(e) => setAssignment(e.target.value)}
+            >
+              <option value="">The account — no particular leg</option>
+              {bills.map((row) => (
+                <option key={row.id} value={row.loadCarrierId}>
+                  {row.billNumber ?? row.id} · {row.loadNumber ?? row.shipmentNumber ?? row.shipmentId}
+                  {' '}· {formatCents(row.netCents)}
+                </option>
+              ))}
+            </TmsSelect>
+          </TmsField>
+
+          <TmsField label="Why">
+            <TmsTextarea
+              aria-label="Credit reason"
+              rows={2}
+              value={reason}
+              disabled={disabled}
+              placeholder="what this credit is for — the carrier will ask"
+              onChange={(e) => setReason(e.target.value)}
+            />
+          </TmsField>
+
+          {error && <p className="text-xs" style={{ color: 'var(--tms-badge-red)' }}>{error}</p>}
+        </div>
+      )}
+    </TmsDialog>
   )
 }

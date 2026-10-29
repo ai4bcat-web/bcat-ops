@@ -17,7 +17,8 @@
  *
  * The router owns authorization and the clients; this module is handed both.
  */
-import type { TransactWriteItem } from '@aws-sdk/client-dynamodb'
+import { UpdateItemCommand, type TransactWriteItem } from '@aws-sdk/client-dynamodb'
+import { marshall } from '@aws-sdk/util-dynamodb'
 import { HeadObjectCommand, PutObjectCommand, type S3Client } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { randomUUID } from 'crypto'
@@ -40,7 +41,6 @@ import {
   assertEnum,
   assertExpectedUpdatedAt,
   assertString,
-  optionalBoolean,
   optionalEnum,
   optionalInteger,
   optionalString,
@@ -50,7 +50,6 @@ import {
   ACCEPTED_CONTENT_TYPES,
   CARRIER_UPLOADABLE_TYPES,
   DEFAULT_AUDIENCE,
-  DOCUMENT_TYPE_LABELS,
   DRIVER_ATTACHABLE_TYPES,
   GENERATED_DOCUMENT_TYPES,
   MAX_DOCUMENT_BYTES,
@@ -68,6 +67,9 @@ import {
   nextVersion,
   supersede,
 } from '../../../src/lib/shipmentDocuments'
+import { loadReleaseGateInput } from '../_shared/releaseGateInput'
+import { evaluateReleaseGate, releaseGateError } from '../../../src/lib/releaseGate'
+import { isVoided } from './voided'
 import type {
   CustomerRecord,
   DocGateResult,
@@ -75,7 +77,6 @@ import type {
   LoadWorkflowStatus,
   ShipmentDocumentAudience,
   ShipmentDocumentRecord,
-  ShipmentDocumentType,
   TmsSettings,
 } from '../../../src/types/tms'
 
@@ -102,6 +103,19 @@ export interface DocumentDeps {
 }
 
 const SETTINGS_ID = 'default'
+/**
+ * The exceptions queue, for the release gate's open-incident count. Read straight
+ * from the environment rather than through `DocumentDeps`: the router already
+ * holds this grant, and the gate is not something a caller may decline to supply.
+ */
+const LOAD_CHECK_CALL_TABLE_NAME = process.env.LOAD_CHECK_CALL_TABLE_NAME ?? ''
+/**
+ * Step R. The lane fact table, for one fact only: when the POD actually arrived.
+ * The POD-collection-timing card on the Brokerage dashboard is the median and 90th
+ * percentile of delivery → this stamp, by carrier, and nothing else on the shipment
+ * records it. Read from the environment for the same reason as the line above.
+ */
+const LANE_RATE_SAMPLE_TABLE_NAME = process.env.LANE_RATE_SAMPLE_TABLE_NAME ?? ''
 /** Long enough for a browser to PUT a 25 MB scan, short enough that a leaked URL dies. */
 const UPLOAD_EXPIRY_SECONDS = 300
 const AUDIENCES = ['CUSTOMER', 'CARRIER', 'ALL', 'INTERNAL'] as const satisfies readonly ShipmentDocumentAudience[]
@@ -111,6 +125,36 @@ const MAX_DOCUMENT_NAME = 200
 const MAX_NOTE = 500
 /** The two statuses at or past delivery; INVOICING is DELIVERED plus a bill in review. */
 const RATEABLE_LOAD_STATUSES: readonly LoadWorkflowStatus[] = ['DELIVERED', 'INVOICING']
+
+/**
+ * Stamp the load's lane sample with the moment its POD landed.
+ *
+ * Conditional on the sample existing and on the field still being empty: the first
+ * POD is the one the timing is measured from, and a load that has not delivered yet
+ * has no sample to stamp — both are the ordinary case, not a failure. Never fails
+ * the document action; a statistics row is not a reason to refuse somebody's POD.
+ */
+async function stampPodReceived(deps: DocumentDeps, doc: Row): Promise<void> {
+  if (!LANE_RATE_SAMPLE_TABLE_NAME) return
+  if (doc.type !== 'POD' || doc.status !== 'ACTIVE') return
+  // A portal upload nobody has looked at yet is not a POD we have; the release gate
+  // does not count it either.
+  if (doc.reviewStatus === 'PENDING' || doc.reviewStatus === 'REJECTED') return
+  const loadId = optionalString(doc.loadId, 100)
+  if (!loadId) return
+  const at = optionalString(doc.uploadedAt, 64) ?? optionalString(doc.createdAt, 64) ?? nowIso()
+  try {
+    await deps.store.db.send(new UpdateItemCommand({
+      TableName: LANE_RATE_SAMPLE_TABLE_NAME,
+      Key: marshall({ id: `lrs:${loadId}` }),
+      UpdateExpression: 'SET podReceivedAt = :at, updatedAt = :now',
+      ConditionExpression: 'attribute_exists(id) AND attribute_not_exists(podReceivedAt)',
+      ExpressionAttributeValues: { ':at': { S: at }, ':now': { S: nowIso() } },
+    }))
+  } catch (err) {
+    console.warn('[tms-shipment-actions] POD sample stamp skipped:', String(err))
+  }
+}
 
 // ── Input ────────────────────────────────────────────────────────────────────
 
@@ -157,8 +201,8 @@ async function getSettings(deps: DocumentDeps): Promise<Row | null> {
 
 async function liveBundle(deps: DocumentDeps, shipmentId: string): Promise<Bundle> {
   const bundle = await readBundle(deps.store, shipmentId)
-  if (bundle.shipment.deletedAt) {
-    throw new Error('That shipment is deleted; restore it before changing its documents')
+  if (isVoided(bundle.shipment)) {
+    throw new Error(`Shipment ${String(bundle.shipment.number ?? shipmentId)} is voided`)
   }
   return bundle
 }
@@ -301,7 +345,7 @@ export async function prepareDocumentUpload(deps: DocumentDeps, input: Row): Pro
   const shipmentId = assertString(input.shipmentId, 'shipmentId')
   const shipment = await getById(deps.store.db, deps.store.tables.shipment, shipmentId)
   if (!shipment) throw new Error(`Shipment not found: ${shipmentId}`)
-  if (shipment.deletedAt) throw new Error('That shipment is deleted; restore it before attaching documents')
+  if (isVoided(shipment)) throw new Error(`Shipment ${String(shipment.number ?? shipmentId)} is voided`)
 
   assertEnum(input.type, SHIPMENT_DOCUMENT_TYPES, 'type')
   const name = assertDocumentName(input.name)
@@ -409,6 +453,8 @@ export async function commitDocument(deps: DocumentDeps, input: Row, caller: Cal
   await deps.writeAudit('SHIPMENT_DOCUMENT', documentId, 'COMMIT_DOCUMENT', caller, {
     shipmentId, type, name, s3Key, orderId, loadId, loadCarrierId,
   })
+  // Step R. A POD is the one document the dashboard times; stamp the lane sample.
+  await stampPodReceived(deps, row)
   return documentResult(deps, shipmentId, row)
 }
 
@@ -601,6 +647,7 @@ export async function attachDriverDoc(deps: DocumentDeps, input: Row, caller: Ca
   await deps.writeAudit('SHIPMENT_DOCUMENT', documentId, 'ATTACH_DRIVER_DOC', caller, {
     shipmentId, loadId, submissionDocId, submissionId, type, s3Key,
   })
+  await stampPodReceived(deps, row)
   return documentResult(deps, shipmentId, row)
 }
 
@@ -653,6 +700,9 @@ export async function reviewDocument(deps: DocumentDeps, input: Row, caller: Cal
   await deps.writeAudit('SHIPMENT_DOCUMENT', documentId, 'REVIEW_DOCUMENT', caller, {
     shipmentId, decision, type: patch.type ?? doc.type, note,
   })
+  // An accepted POD is the moment the paperwork is ours, so the timing starts here
+  // for anything that arrived through the carrier portal and waited for review.
+  await stampPodReceived(deps, next)
   return documentResult(deps, shipmentId, next)
 }
 
@@ -764,16 +814,19 @@ export async function voidDocument(deps: DocumentDeps, input: Row, caller: Calle
 // ── READY_TO_INVOICE ─────────────────────────────────────────────────────────
 
 /**
- * The AR gate: move an order from DOCS_NEEDED to UNBILLED once the paperwork the
- * customer bills on is actually in hand. SET_AR_STATUS's delivery rule is
- * repeated here rather than shared, so that action stays exactly as step B wrote
- * it and this one can refuse for a reason step B never knew about.
+ * The release gate: move an order from DOCS_NEEDED to UNBILLED once the shipment
+ * has actually delivered, the paperwork the customer bills on is in hand, the
+ * references they pay against are filled, the cost of the move is recorded and
+ * nothing is still open on it. `evaluateReleaseGate` is the whole rule, shared
+ * with every finance path, and there is no override: an admin flag that admits a
+ * missing POD is a gate that does not exist.
+ *
+ * The cached `docsRequired` / `docsMissing` are still written here, because the
+ * board column and the Documents tab read them.
  */
 export async function readyToInvoice(deps: DocumentDeps, input: Row, caller: Caller): Promise<Row> {
   const orderId = assertString(input.orderId, 'orderId')
   const expectedUpdatedAt = assertExpectedUpdatedAt(input)
-  const override = optionalBoolean(input.override) === true
-  const overrideNote = optionalString(input.overrideNote, MAX_NOTE)
 
   const order = await getById(deps.store.db, deps.store.tables.order, orderId)
   if (!order) throw new Error(`Order not found: ${orderId}`)
@@ -783,28 +836,41 @@ export async function readyToInvoice(deps: DocumentDeps, input: Row, caller: Cal
   if (order.arStatus !== 'DOCS_NEEDED') {
     throw new Error(`That order is already ${String(order.arStatus ?? 'unset')}, not waiting on documents`)
   }
-  if (bundle.shipment.status !== 'DELIVERED' && order.invoiceEarly !== true) {
-    throw new Error('An order is only ready to bill once it is delivered, or when it is marked to invoice early')
-  }
 
   const settings = await getSettings(deps)
   const customerId = String(order.customerId ?? '')
   const customer = customerId && deps.customerTable
     ? await getById(deps.store.db, deps.customerTable, customerId)
     : null
+
+  const release = evaluateReleaseGate(
+    await loadReleaseGateInput(
+      {
+        db: deps.store.db,
+        tables: {
+          ...deps.store.tables,
+          customer: deps.customerTable,
+          settings: deps.settingsTable,
+          loadCheckCall: LOAD_CHECK_CALL_TABLE_NAME,
+        },
+      },
+      {
+        shipmentId,
+        orderId,
+        shipment: bundle.shipment,
+        order,
+        orders: bundle.orders,
+        loads: bundle.loads,
+        loadCarriers: bundle.loadCarriers,
+        documents: bundle.documents,
+        customer,
+        settings,
+      },
+    ),
+  )
+  if (!release.ok) throw releaseGateError(release.missing)
+
   const gate = customerDocGate({ bundle, documents: bundle.documents, order, customer, settings })
-
-  if (gate.missing.length > 0) {
-    const labels = gate.missing.map((t) => DOCUMENT_TYPE_LABELS[t as ShipmentDocumentType] ?? t).join(', ')
-    if (!override) {
-      throw new Error(`This order still needs ${labels}. Attach the missing paperwork, or override with a note.`)
-    }
-    if (!caller.isAdmin) {
-      throw new Error('Forbidden: overriding a missing document requires owner or ADMIN')
-    }
-    if (!overrideNote) throw new Error('An override needs a note saying why the document is not coming')
-  }
-
   const now = nowIso()
   const patch: Row = {
     arStatus: 'UNBILLED',
@@ -817,22 +883,14 @@ export async function readyToInvoice(deps: DocumentDeps, input: Row, caller: Cal
     updatedAt: now,
     version: (numberOrNull(order.version) ?? 1) + 1,
   }
-  if (override && gate.missing.length > 0) {
-    patch.docsOverrideAt = now
-    patch.docsOverrideBy = caller.email
-    patch.docsOverrideNote = overrideNote
-  }
 
   await transact(
     deps.store.db,
     [updateItemTx(deps.store.tables.order, orderId, patch, expectedUpdatedAt)],
     'order',
   )
-  await deps.writeAudit('ORDER', orderId, 'READY_TO_INVOICE', caller, {
-    missing: gate.missing,
-    override: override && gate.missing.length > 0,
-  })
-  return { bundle: await readBundle(deps.store, shipmentId), gate }
+  await deps.writeAudit('ORDER', orderId, 'READY_TO_INVOICE', caller, { missing: gate.missing })
+  return { bundle: await readBundle(deps.store, shipmentId), gate, releaseGate: release }
 }
 
 // ── RATE_CARRIER ─────────────────────────────────────────────────────────────

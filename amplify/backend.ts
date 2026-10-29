@@ -1723,6 +1723,9 @@ const directoryLocationTable = backend.data.resources.tables['Location']
 const directoryDivisionTable = backend.data.resources.tables['Division']
 const directorySettingsTable = backend.data.resources.tables['TmsSettings']
 const directoryMergeJobTable = backend.data.resources.tables['DirectoryMergeJob']
+const directoryOwnershipDivisionTable = backend.data.resources.tables['OwnershipDivision']
+const directoryOwnershipRuleTable     = backend.data.resources.tables['OwnershipRule']
+const directoryShipmentViewTable      = backend.data.resources.tables['ShipmentView']
 const directoryLoadTable = backend.data.resources.tables['Load']
 
 const directoryTableArns = [
@@ -1735,6 +1738,14 @@ const directoryTableArns = [
   // Step I: saving teams mirrors the membership onto each UserProfile.teamKeys,
   // so the one save keeps the settings row and the staff rows in step.
   backend.data.resources.tables['UserProfile'].tableArn,
+  // Step R: the self-serve revenue taxonomy and the saved department views.
+  // tmsDirectoryActions is their only writer — the client reads the three
+  // tables directly and never writes them.
+  directoryOwnershipDivisionTable.tableArn,
+  directoryOwnershipRuleTable.tableArn,
+  directoryShipmentViewTable.tableArn,
+  // Step R: the taxonomy and view edits are audited like every other settings write.
+  backend.data.resources.tables['AuditLog'].tableArn,
 ]
 
 directoryActionsFn.addToRolePolicy(
@@ -1751,6 +1762,10 @@ directoryActionsFn.addEnvironment('DIVISION_TABLE_NAME',           directoryDivi
 directoryActionsFn.addEnvironment('SETTINGS_TABLE_NAME',           directorySettingsTable.tableName)
 directoryActionsFn.addEnvironment('MERGE_JOB_TABLE_NAME',          directoryMergeJobTable.tableName)
 directoryActionsFn.addEnvironment('LOAD_TABLE_NAME',               directoryLoadTable.tableName)
+directoryActionsFn.addEnvironment('OWNERSHIP_DIVISION_TABLE_NAME',  directoryOwnershipDivisionTable.tableName)
+directoryActionsFn.addEnvironment('OWNERSHIP_RULE_TABLE_NAME',      directoryOwnershipRuleTable.tableName)
+directoryActionsFn.addEnvironment('SHIPMENT_VIEW_TABLE_NAME',       directoryShipmentViewTable.tableName)
+directoryActionsFn.addEnvironment('AUDIT_LOG_TABLE_NAME',           backend.data.resources.tables['AuditLog'].tableName)
 directoryActionsFn.addEnvironment(
   'USER_PROFILE_TABLE_NAME',
   backend.data.resources.tables['UserProfile'].tableName,
@@ -1800,6 +1815,11 @@ const shipmentDivisionTable  = backend.data.resources.tables['Division']
 const shipmentCarrierContactTable = backend.data.resources.tables['CarrierContact']
 const shipmentQuoteTable     = backend.data.resources.tables['Quote']
 const shipmentLaneSampleTable = backend.data.resources.tables['LaneRateSample']
+// Step R: the ownership taxonomy. Read-only here — the rules resolve a
+// shipment's revenue division on every booking, driver change and re-tag;
+// tmsDirectoryActions stays their only writer.
+const shipmentOwnershipDivisionTable = backend.data.resources.tables['OwnershipDivision']
+const shipmentOwnershipRuleTable     = backend.data.resources.tables['OwnershipRule']
 
 shipmentActionsFn.addToRolePolicy(
   new PolicyStatement({
@@ -1843,6 +1863,9 @@ shipmentActionsFn.addToRolePolicy(
       shipmentQuoteTable.tableArn,
       shipmentLaneSampleTable.tableArn,
       shipmentNoticeTable.tableArn,
+      // Step R: read-only — the division tree and the rules that tag a shipment.
+      shipmentOwnershipDivisionTable.tableArn,
+      shipmentOwnershipRuleTable.tableArn,
     ],
   }),
 )
@@ -1882,6 +1905,8 @@ shipmentActionsFn.addEnvironment('DRIVER_TABLE_NAME',          shipmentDriverTab
 shipmentActionsFn.addEnvironment('LOAD_CHECK_CALL_TABLE_NAME', backend.data.resources.tables['LoadCheckCall'].tableName)
 shipmentActionsFn.addEnvironment('TRACKING_LINK_TABLE_NAME',   backend.data.resources.tables['TrackingLink'].tableName)
 shipmentActionsFn.addEnvironment('SHIPMENT_NOTICE_TABLE_NAME', shipmentNoticeTable.tableName)
+shipmentActionsFn.addEnvironment('OWNERSHIP_DIVISION_TABLE_NAME', shipmentOwnershipDivisionTable.tableName)
+shipmentActionsFn.addEnvironment('OWNERSHIP_RULE_TABLE_NAME',     shipmentOwnershipRuleTable.tableName)
 shipmentActionsFn.addEnvironment('USER_POOL_ID',               backend.auth.resources.userPool.userPoolId)
 shipmentActionsFn.addToRolePolicy(
   new PolicyStatement({

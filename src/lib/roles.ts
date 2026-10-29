@@ -96,7 +96,8 @@ export const CLAIM_LABELS: Record<ClaimKey, string> = {
   AR_CHARGES: 'Edit customer charges',
   AP_CHARGES: 'Edit carrier charges',
   CARRIER_INSURANCE_EDIT: 'Edit carrier insurance',
-  NO_AR_INVOICE: 'Mark an order as not invoiced',
+  // One record, one word: the user sees "Shipment" (Step R). The claim key is unchanged.
+  NO_AR_INVOICE: 'Mark a shipment as not invoiced',
 }
 
 /**

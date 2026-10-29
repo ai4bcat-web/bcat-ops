@@ -92,7 +92,7 @@ describe('DraftOrderEditor', () => {
 
   it('submits a complete draft', async () => {
     const { onSaveForm, onSubmit } = renderEditor()
-    fireEvent.click(screen.getByRole('button', { name: 'Submit order' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Submit shipment' }))
 
     await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(undefined))
     // Submit re-saves first so the server never scores a stale draft.
@@ -104,9 +104,9 @@ describe('DraftOrderEditor', () => {
     const { onSubmit } = renderEditor({ bundle: onlyPickup })
 
     expect(screen.getByText('Add at least one delivery stop.')).toBeTruthy()
-    expect((screen.getByRole('button', { name: 'Submit order' }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: 'Submit shipment' }) as HTMLButtonElement).disabled).toBe(true)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Submit order' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Submit shipment' }))
     await waitFor(() => expect(onSubmit).not.toHaveBeenCalled())
   })
 
@@ -115,21 +115,21 @@ describe('DraftOrderEditor', () => {
     renderEditor({ requiredReferences: required })
 
     expect(screen.getByText('PO number: 1 value required, 0 entered.')).toBeTruthy()
-    expect((screen.getByRole('button', { name: 'Submit order' }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: 'Submit shipment' }) as HTMLButtonElement).disabled).toBe(true)
 
     fireEvent.click(screen.getByRole('button', { name: 'Add reference' }))
     fireEvent.change(screen.getByLabelText('Reference code 1'), { target: { value: 'PO' } })
     fireEvent.change(screen.getByLabelText('Reference value 1'), { target: { value: '4471' } })
 
-    await waitFor(() => expect((screen.getByRole('button', { name: 'Submit order' }) as HTMLButtonElement).disabled).toBe(false))
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Submit shipment' }) as HTMLButtonElement).disabled).toBe(false))
   })
 
   it('blocks submit when the truckload equipment type is cleared', async () => {
     renderEditor()
     fireEvent.change(screen.getByLabelText('Equipment type'), { target: { value: '' } })
 
-    await waitFor(() => expect(screen.getByText('Truckload orders need an equipment type.')).toBeTruthy())
-    expect((screen.getByRole('button', { name: 'Submit order' }) as HTMLButtonElement).disabled).toBe(true)
+    await waitFor(() => expect(screen.getByText('Truckload shipments need an equipment type.')).toBeTruthy())
+    expect((screen.getByRole('button', { name: 'Submit shipment' }) as HTMLButtonElement).disabled).toBe(true)
   })
 
   it('autosaves the draft when a field loses focus', async () => {
@@ -163,7 +163,7 @@ describe('DraftOrderEditor', () => {
     await waitFor(() => expect(onSubmit).toHaveBeenCalledWith('legacy.rep@nowhere.test'))
   })
 
-  it('warns when the order is larger than the available credit', () => {
+  it('warns when the shipment is larger than the available credit', () => {
     const short: CreditSummary = { ...credit, availableCents: 10000 }
     renderEditor({
       bundle: bundle({
@@ -175,6 +175,11 @@ describe('DraftOrderEditor', () => {
       }),
       credit: short,
     })
-    expect(screen.getByText('Order exceeds available credit — submit will be refused.')).toBeTruthy()
+    expect(screen.getByText('Shipment exceeds available credit — submit will be refused.')).toBeTruthy()
+  })
+
+  it('never shows the user the word Order', () => {
+    renderEditor()
+    expect(screen.queryByText(/\bOrder\b/)).toBeNull()
   })
 })

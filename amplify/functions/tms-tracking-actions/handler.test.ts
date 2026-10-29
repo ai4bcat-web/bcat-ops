@@ -738,6 +738,27 @@ describe('REVOKE_TRACKING_LINK', () => {
   })
 })
 
+// ── Step R: the one BROKERAGE grant ──────────────────────────────────────────
+
+describe('page-tms authorization', () => {
+  it('lets a page-tms caller work a load exactly as page-loads does', async () => {
+    seed()
+    const tmsUser = { sub: 'sub-tms', username: 'tms', claims: { email: 'broker@bcatcorp.com', 'cognito:groups': ['page-tms'] } }
+
+    const sent = await call('SEND_TRACKING_LINK', { loadCarrierId: 'lc-1', via: 'COPY' }, tmsUser)
+
+    expect((sent.link as Row).id).toBeTruthy()
+  })
+
+  it('still refuses a caller holding neither grant', async () => {
+    seed()
+    const outsider = { sub: 'sub-out', username: 'out', claims: { email: 'driveradmin@bcatcorp.com', 'cognito:groups': ['page-drivers'] } }
+
+    await expect(call('SEND_TRACKING_LINK', { loadCarrierId: 'lc-1', via: 'COPY' }, outsider))
+      .rejects.toThrow('Forbidden: SEND_TRACKING_LINK requires owner, ADMIN, page-loads, or page-tms')
+  })
+})
+
 // ── SEND_CUSTOMER_LINK ───────────────────────────────────────────────────────
 
 describe('SEND_CUSTOMER_LINK', () => {

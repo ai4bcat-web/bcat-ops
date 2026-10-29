@@ -12,7 +12,7 @@ export interface AgingStripLabels {
   late: string
   /** Money that has moved and nobody has billed. */
   pending: string
-  /** Singular noun behind the pending count: `order`, `assignment`. */
+  /** Singular noun behind the pending count: `shipment`, `assignment`. */
   pendingUnit: string
   /** Delivery → bill. AP has none: we do not raise the carrier's invoice. */
   lag: string | null
@@ -24,7 +24,7 @@ export const AR_STRIP_LABELS: AgingStripLabels = {
   total: 'Open AR',
   late: 'Late',
   pending: 'Delivered, not invoiced',
-  pendingUnit: 'order',
+  pendingUnit: 'shipment',
   lag: 'Avg days to invoice',
   pay: 'Avg days to pay',
 }

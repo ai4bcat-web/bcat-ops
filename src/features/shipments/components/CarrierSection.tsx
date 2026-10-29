@@ -1,31 +1,32 @@
 /**
- * The Carrier tab of a shipment: who is hauling it, what they are being paid, where the
- * rate confirmation got to, and the three things that end a booking — dispatch, bounce,
- * TONU (spec §6.2).
+ * The Carrier/Driver tab of a shipment: who is hauling it, what they are being paid,
+ * where the rate confirmation got to, and the three things that end a booking —
+ * dispatch, bounce, TONU (spec §6.2).
  *
  * Own-fleet assignments land here too, but with none of the carrier paperwork: a driver
- * on our payroll has no rate con to sign and no quick-pay fee to deduct.
+ * on our payroll has no rate con to sign and no quick-pay fee to deduct. What they do
+ * have is the rest of BCAT Ops — booking Ivan Cartage puts the shipment on the calendar,
+ * in dispatch and in that driver's settlement — so the card says so and links there.
  *
- * The AP card sits under the quick-pay block, one per assignment this load has had, so
- * what the carrier is owed is read beside what they were booked at.
+ * What the leg costs is on the Carrier Pay tab; this tab is the booking, not the bill.
  *
  * The offers card sits above all of it, because asking carriers comes before booking one:
  * it is the only thing on this tab a load with nobody on it still has.
  */
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { Building2, Send, Truck, UserMinus } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
-import { Label } from '@/components/ui/label'
 import { RateConPanel } from '@/features/carriers/components/RateConPanel'
 import { CarrierOffersCard } from '@/features/quotes/components/CarrierOffersCard'
 import { getCarrierBundle, getTmsSettings } from '@/lib/apiClient'
+import { useDrivers } from '@/hooks/useDrivers'
 import { netPayable, quickPayFee, quickPayTiersOf, tierFor } from '@/lib/quickPay'
 import { formatCents } from '@/lib/tmsDirectory'
 import { formatDateTime } from '@/lib/date'
-import { ApCard } from './ApCard'
+import { TmsBadge, TmsButton, TmsCard, TmsField, TmsSelect } from '@/features/tms/kit'
 import { DispatchDialog } from './DispatchDialog'
 import { RemoveCarrierDialog } from './StatusActions'
+import { OWN_FLEET_CALENDAR_PATH, OWN_FLEET_DISPATCH_PATH, settlementPathFor } from './ownFleet'
 import type { ShipmentActions } from '../useShipmentActions'
 import type { CarrierBundle, ShipmentBundle, TmsSettings } from '@/types/tms'
 
@@ -38,6 +39,7 @@ export function CarrierSection({ bundle, actions }: {
   const [settings, setSettings] = useState<TmsSettings | null>(null)
   const [carrierBundle, setCarrierBundle] = useState<CarrierBundle | null>(null)
   const [dialog, setDialog] = useState<CarrierDialog>(null)
+  const { drivers } = useDrivers()
 
   const load = bundle.loads[0]
   const loadCarrier = bundle.loadCarriers.find((c) => c.status === 'ACTIVE') ?? null
@@ -65,12 +67,13 @@ export function CarrierSection({ bundle, actions }: {
     return (
       <div className="space-y-4">
         {offers}
-        <p className="text-sm text-muted-foreground">Nobody is on this load yet. Book a carrier from the Details tab.</p>
+        <p className="tms-muted text-sm">Nobody is on this load yet. Book a carrier from the Overview tab.</p>
       </div>
     )
   }
 
   const isOwnAsset = loadCarrier.kind === 'OWN_ASSET'
+  const driver = loadCarrier.driverId ? drivers.find((d) => d.id === loadCarrier.driverId) ?? null : null
   const tiers = quickPayTiersOf(settings)
   const rateCents = loadCarrier.carrierRateCents ?? 0
   const tier = loadCarrier.quickPayDays ? tierFor(loadCarrier.quickPayDays, tiers) : null
@@ -80,39 +83,51 @@ export function CarrierSection({ bundle, actions }: {
     <div className="space-y-4">
       {offers}
 
-      <div className="space-y-2 rounded-lg border border-border p-3">
-        <div className="flex items-center gap-2">
-          {isOwnAsset ? <Truck size={14} className="text-muted-foreground" /> : <Building2 size={14} className="text-muted-foreground" />}
-          <p className="text-sm font-medium">
+      <TmsCard
+        title={
+          <span className="flex items-center gap-2">
+            {isOwnAsset ? <Truck size={14} /> : <Building2 size={14} />}
             {isOwnAsset ? loadCarrier.driverName ?? 'Own asset' : loadCarrier.carrierName ?? 'Carrier'}
-          </p>
-          {loadCarrier.carrierMc && <Badge variant="outline" className="text-[10px]">MC {loadCarrier.carrierMc}</Badge>}
-          {loadCarrier.dispatchedAt && <Badge variant="outline" className="text-[10px]">Dispatched</Badge>}
-        </div>
-        <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm sm:grid-cols-3">
+          </span>
+        }
+        actions={
+          <>
+            {loadCarrier.carrierMc && <TmsBadge tone="gray">MC {loadCarrier.carrierMc}</TmsBadge>}
+            {loadCarrier.dispatchedAt && <TmsBadge tone="blue">Dispatched</TmsBadge>}
+          </>
+        }
+      >
+        <dl className="tms-grid tms-grid-3 text-sm">
           <Fact label="Rate" value={`$${formatCents(rateCents)}`} />
           <Fact label="Terms" value={loadCarrier.paymentTermsDays != null ? `${loadCarrier.paymentTermsDays} days` : '—'} />
           <Fact label="Booked" value={loadCarrier.bookedAt ? formatDateTime(loadCarrier.bookedAt) : '—'} />
           <Fact label="Dispatcher" value={loadCarrier.dispatcherName ?? '—'} />
           <Fact label="Driver" value={[loadCarrier.driverName, loadCarrier.driverPhone].filter(Boolean).join(' · ') || '—'} />
-          <Fact label="Truck / trailer" value={[loadCarrier.truckNumber, loadCarrier.trailerNumber].filter(Boolean).join(' / ') || '—'} />
+          <Fact label="Truck" value={loadCarrier.truckNumber || '—'} />
+          <Fact label="Trailer" value={loadCarrier.trailerNumber || '—'} />
         </dl>
         {(loadCarrier.bookingWarnings?.length ?? 0) > 0 && (
-          <div className="flex flex-wrap gap-1">
-            {loadCarrier.bookingWarnings?.map((w) => (
-              <Badge key={w} variant="outline" className="text-[10px]">{w}</Badge>
-            ))}
+          <div className="mt-2 flex flex-wrap gap-1">
+            {loadCarrier.bookingWarnings?.map((w) => <TmsBadge key={w} tone="orange">{w}</TmsBadge>)}
           </div>
         )}
-      </div>
+        {isOwnAsset && (
+          <p className="mt-3 text-sm" data-testid="own-fleet-links">
+            On the <Link to={OWN_FLEET_CALENDAR_PATH} className="underline underline-offset-2">calendar</Link>
+            {' · '}in <Link to={OWN_FLEET_DISPATCH_PATH} className="underline underline-offset-2">Dispatch</Link>
+            {' · '}pays through{' '}
+            <Link to={settlementPathFor(driver?.fleetGroup)} className="underline underline-offset-2" data-testid="own-fleet-settlement">
+              driver settlements
+            </Link>
+          </p>
+        )}
+      </TmsCard>
 
       {!isOwnAsset && (
-        <div className="space-y-2 rounded-lg border border-border p-3">
-          <p className="text-xs uppercase tracking-wider text-muted-foreground">Quick pay</p>
+        <TmsCard title="Quick pay">
           <div className="flex flex-wrap items-end gap-3">
-            <div className="min-w-48">
-              <Label className="text-xs uppercase tracking-wider text-muted-foreground">Term</Label>
-              <select
+            <TmsField label="Term" className="min-w-48">
+              <TmsSelect
                 aria-label="Quick pay term"
                 value={loadCarrier.quickPayDays != null ? String(loadCarrier.quickPayDays) : ''}
                 onChange={(e) => {
@@ -122,24 +137,21 @@ export function CarrierSection({ bundle, actions }: {
                   }).catch(() => { /* already reported */ })
                 }}
                 disabled={actions.busy}
-                className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
               >
                 <option value="">— standard terms —</option>
                 {tiers.map((t) => (
                   <option key={t.days} value={String(t.days)}>{t.days} day · {(t.feeBps / 100).toFixed(2)}%</option>
                 ))}
-              </select>
-            </div>
+              </TmsSelect>
+            </TmsField>
             {feeCents != null && (
-              <p className="text-sm text-muted-foreground">
+              <p className="tms-muted text-sm">
                 Fee ${formatCents(feeCents)} · net payable ${formatCents(netPayable(rateCents, feeCents))}
               </p>
             )}
           </div>
-        </div>
+        </TmsCard>
       )}
-
-      <ApCard bundle={bundle} onReload={actions.reload} />
 
       {!isOwnAsset && (
         <RateConPanel
@@ -156,16 +168,16 @@ export function CarrierSection({ bundle, actions }: {
 
       <div className="flex flex-wrap gap-2">
         {load?.status === 'BOOKED' && (
-          <Button size="sm" onClick={() => setDialog({ kind: 'dispatch' })} disabled={actions.busy}>
+          <TmsButton variant="primary" size="sm" onClick={() => setDialog({ kind: 'dispatch' })} disabled={actions.busy}>
             <Send size={14} className="mr-1" />Dispatch
-          </Button>
+          </TmsButton>
         )}
-        <Button variant="outline" size="sm" onClick={() => setDialog({ kind: 'remove', outcome: 'BOUNCED' })} disabled={actions.busy}>
+        <TmsButton size="sm" onClick={() => setDialog({ kind: 'remove', outcome: 'BOUNCED' })} disabled={actions.busy}>
           <UserMinus size={14} className="mr-1" />Bounce
-        </Button>
-        <Button variant="outline" size="sm" onClick={() => setDialog({ kind: 'remove', outcome: 'TONU' })} disabled={actions.busy}>
+        </TmsButton>
+        <TmsButton size="sm" onClick={() => setDialog({ kind: 'remove', outcome: 'TONU' })} disabled={actions.busy}>
           <UserMinus size={14} className="mr-1" />TONU
-        </Button>
+        </TmsButton>
       </div>
 
       {dialog?.kind === 'dispatch' && (
@@ -196,7 +208,7 @@ export function CarrierSection({ bundle, actions }: {
 function Fact({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <dt className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</dt>
+      <dt className="tms-field-label">{label}</dt>
       <dd className="truncate">{value}</dd>
     </div>
   )

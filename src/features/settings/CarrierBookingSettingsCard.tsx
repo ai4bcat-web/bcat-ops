@@ -1,15 +1,12 @@
 import { useEffect, useState } from 'react'
 import { Save, Truck } from 'lucide-react'
 import { toast } from 'sonner'
-import { Button } from '@/components/ui/button'
-import { Checkbox } from '@/components/ui/checkbox'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
+import { TmsButton, TmsField, TmsInput, TmsTextarea } from '@/features/tms/kit'
 import { getTmsSettings, saveCarrierSettings } from '@/lib/apiClient'
 import { CARRIER_STATUSES, CARRIER_STATUS_LABELS } from '@/lib/carrierStatus'
 import { normalizeQuickPayTiers, quickPayTiersOf } from '@/lib/quickPay'
 import type { BookingRequiredField, CarrierDocumentType, CarrierStatus, RateConRequiredField, TmsSettings } from '@/types/tms'
+import { CheckRow, ErrorText, GroupLabel, Hint, Loading, SettingsCard, Stack } from './settingsKit'
 
 // The document types a broker can demand before a carrier is bookable.
 const CARRIER_DOC_TYPES: readonly CarrierDocumentType[] = [
@@ -115,19 +112,15 @@ export function CarrierBookingSettingsCard() {
   }
 
   return (
-    <div style={{ border: '1px solid var(--ds-border)', borderRadius: 12, background: 'var(--ds-surface)', padding: 16, boxShadow: 'var(--sh-sm)', display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <div className="flex items-center gap-2.5">
-        <Truck size={16} style={{ color: 'var(--ds-t3)' }} />
-        <div>
-          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)' }}>Carrier booking</div>
-          <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 2 }}>Which carriers may be booked, what paperwork is required, quick-pay tiers and rate confirmation rules. Leave a group empty to use the house default.</div>
-        </div>
-      </div>
-
-      {loading ? <div className="text-sm text-muted-foreground">Loading…</div> : (
-        <div className="space-y-3">
-          <div>
-            <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Bookable carrier statuses</Label>
+    <SettingsCard
+      icon={Truck}
+      title="Carrier booking"
+      description="Which carriers may be booked, what paperwork is required, quick-pay tiers and rate confirmation rules. Leave a group empty to use the house default."
+    >
+      {loading ? <Loading /> : (
+        <Stack>
+          <Stack gap={6}>
+            <GroupLabel>Bookable carrier statuses</GroupLabel>
             <CheckGroup
               name="carrier-status"
               options={CARRIER_STATUSES}
@@ -135,18 +128,19 @@ export function CarrierBookingSettingsCard() {
               selected={allowedCarrierStatuses}
               onToggle={(s) => setAllowedCarrierStatuses((prev) => toggle(prev, s))}
             />
-          </div>
+          </Stack>
 
-          <div>
-            <label className="flex items-center gap-2.5 text-sm" style={{ color: 'var(--ds-t2)' }}>
-              <Checkbox checked={requireCarrierApproval} onCheckedChange={(v) => setRequireCarrierApproval(v === true)} />
-              Require approval before a new carrier is active
-            </label>
-            <p className="mt-1 text-xs text-muted-foreground">On — and until this card is saved — a carrier anyone else adds lands pending review; only an admin may create one already active. Off, anyone with carrier access may.</p>
-          </div>
+          <Stack gap={6}>
+            <CheckRow
+              label="Require approval before a new carrier is active"
+              checked={requireCarrierApproval}
+              onChange={setRequireCarrierApproval}
+            />
+            <Hint>On — and until this card is saved — a carrier anyone else adds lands pending review; only an admin may create one already active. Off, anyone with carrier access may.</Hint>
+          </Stack>
 
-          <div>
-            <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Required carrier documents</Label>
+          <Stack gap={6}>
+            <GroupLabel>Required carrier documents</GroupLabel>
             <CheckGroup
               name="carrier-doc"
               options={CARRIER_DOC_TYPES}
@@ -154,10 +148,10 @@ export function CarrierBookingSettingsCard() {
               selected={requiredCarrierDocs}
               onToggle={(d) => setRequiredCarrierDocs((prev) => toggle(prev, d))}
             />
-          </div>
+          </Stack>
 
-          <div>
-            <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Load details required to book</Label>
+          <Stack gap={6}>
+            <GroupLabel>Load details required to book</GroupLabel>
             <CheckGroup
               name="booking-field"
               options={BOOKING_FIELDS}
@@ -165,10 +159,10 @@ export function CarrierBookingSettingsCard() {
               selected={bookingRequiredFields}
               onToggle={(f) => setBookingRequiredFields((prev) => toggle(prev, f))}
             />
-          </div>
+          </Stack>
 
-          <div>
-            <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Details the carrier must enter when signing</Label>
+          <Stack gap={6}>
+            <GroupLabel>Details the carrier must enter when signing</GroupLabel>
             <CheckGroup
               name="rate-con-field"
               options={RATE_CON_FIELDS}
@@ -176,36 +170,36 @@ export function CarrierBookingSettingsCard() {
               selected={rateConRequiredFields}
               onToggle={(f) => setRateConRequiredFields((prev) => toggle(prev, f))}
             />
+          </Stack>
+
+          <div className="tms-grid tms-grid-3">
+            <TmsField label="Carrier terms (days)">
+              <TmsInput value={defaultCarrierTermsDays} onChange={(e) => setDefaultCarrierTermsDays(e.target.value)} placeholder="e.g. 30" />
+            </TmsField>
+            <TmsField label="Rate con expiry (hours)">
+              <TmsInput value={rateConExpiryHours} onChange={(e) => setRateConExpiryHours(e.target.value)} placeholder="e.g. 48" />
+            </TmsField>
+            <TmsField label="Insurance warning (days)">
+              <TmsInput value={insuranceWarnDays} onChange={(e) => setInsuranceWarnDays(e.target.value)} placeholder="e.g. 30" />
+            </TmsField>
           </div>
 
-          <div className="grid grid-cols-3 gap-3">
-            <div>
-              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Carrier terms (days)</Label>
-              <Input value={defaultCarrierTermsDays} onChange={(e) => setDefaultCarrierTermsDays(e.target.value)} placeholder="e.g. 30" className="h-9 text-sm" />
-            </div>
-            <div>
-              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Rate con expiry (hours)</Label>
-              <Input value={rateConExpiryHours} onChange={(e) => setRateConExpiryHours(e.target.value)} placeholder="e.g. 48" className="h-9 text-sm" />
-            </div>
-            <div>
-              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Insurance warning (days)</Label>
-              <Input value={insuranceWarnDays} onChange={(e) => setInsuranceWarnDays(e.target.value)} placeholder="e.g. 30" className="h-9 text-sm" />
-            </div>
-          </div>
+          <TmsField
+            label="Quick-pay tiers (one days:feeBps per line)"
+            hint="Basis points off the carrier rate — 150 bps is 1.5%. A longer wait may never cost the carrier more."
+          >
+            <TmsTextarea value={quickPayTiers} onChange={(e) => setQuickPayTiers(e.target.value)} placeholder="21:150&#10;15:200&#10;7:250&#10;1:300" rows={4} />
+          </TmsField>
 
+          {error && <ErrorText>{error}</ErrorText>}
           <div>
-            <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Quick-pay tiers (one days:feeBps per line)</Label>
-            <Textarea value={quickPayTiers} onChange={(e) => setQuickPayTiers(e.target.value)} placeholder="21:150&#10;15:200&#10;7:250&#10;1:300" rows={4} className="text-sm" />
-            <p className="mt-1 text-xs text-muted-foreground">Basis points off the carrier rate — 150 bps is 1.5%. A longer wait may never cost the carrier more.</p>
+            <TmsButton variant="primary" size="sm" onClick={save} disabled={saving}>
+              <Save size={14} /> Save carrier settings
+            </TmsButton>
           </div>
-
-          {error && <p className="text-xs text-destructive">{error}</p>}
-          <Button type="button" size="sm" className="h-8 gap-1" onClick={save} disabled={saving}>
-            <Save className="size-3.5" /> Save carrier settings
-          </Button>
-        </div>
+        </Stack>
       )}
-    </div>
+    </SettingsCard>
   )
 }
 
@@ -217,12 +211,15 @@ function CheckGroup<T extends string>({ name, options, label, selected, onToggle
   onToggle: (value: T) => void
 }) {
   return (
-    <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-2">
+    <div style={{ display: 'flex', flexWrap: 'wrap', columnGap: 16, rowGap: 8 }}>
       {options.map((option) => (
-        <label key={option} htmlFor={`${name}-${option}`} className="flex items-center gap-2 text-sm" style={{ color: 'var(--ds-t2)', cursor: 'pointer' }}>
-          <Checkbox id={`${name}-${option}`} checked={selected.includes(option)} onCheckedChange={() => onToggle(option)} />
-          {label(option)}
-        </label>
+        <CheckRow
+          key={`${name}-${option}`}
+          label={label(option)}
+          ariaLabel={label(option)}
+          checked={selected.includes(option)}
+          onChange={() => onToggle(option)}
+        />
       ))}
     </div>
   )

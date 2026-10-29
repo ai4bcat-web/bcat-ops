@@ -24,15 +24,11 @@ import {
   Mail, Pencil, Plus, RotateCw, Send, Smartphone, StopCircle, Upload, Wand2, X,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import { TmsBadge, TmsButton, TmsCard, TmsDialog, TmsInput, TmsSelect, TmsTextarea } from '@/features/tms/kit'
 import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { DocumentPreview } from '@/features/documents/DocumentPreview'
 import { LoadDriverDocs } from '@/features/loads/LoadDriverDocs'
 import {
@@ -196,21 +192,21 @@ export function DocumentsSection({
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
         {docs.pendingCount > 0 && (
-          <Badge variant="outline" className="border-amber-500/40 text-[10px] text-amber-700">
+          <TmsBadge tone="gray" className="border-[color:var(--tms-badge-orange)] text-[10px] text-[color:var(--tms-badge-orange)]">
             {docs.pendingCount} upload{docs.pendingCount === 1 ? '' : 's'} to review
-          </Badge>
+          </TmsBadge>
         )}
         <div className="ml-auto flex flex-wrap gap-2">
-          <Button size="sm" onClick={() => setDialog({ kind: 'upload' })}>
+          <TmsButton variant="primary" size="sm" onClick={() => setDialog({ kind: 'upload' })}>
             <Plus size={14} className="mr-1" />Upload
-          </Button>
+          </TmsButton>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm">
+              <TmsButton size="sm">
                 <Wand2 size={14} className="mr-1" />Generate <ChevronDown size={14} className="ml-1" />
-              </Button>
+              </TmsButton>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
+            <DropdownMenuContent align="end" className="tms-portal">
               <DropdownMenuItem onSelect={() => setDialog({ kind: 'generate', which: 'BOL' })}>
                 <FileText size={14} className="mr-2" />Bill of lading
               </DropdownMenuItem>
@@ -222,19 +218,19 @@ export function DocumentsSection({
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-          <Button variant="outline" size="sm" onClick={() => setDialog({ kind: 'email' })}>
+          <TmsButton size="sm" onClick={() => setDialog({ kind: 'email' })}>
             <Mail size={14} className="mr-1" />Send docs
-          </Button>
+          </TmsButton>
         </div>
       </div>
 
       {docs.error && (
-        <p className="flex items-start gap-2 rounded-lg border border-border bg-muted/30 p-2 text-xs">
-          <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-600" />{docs.error}
+        <p className="flex items-start gap-2 rounded-[var(--tms-radius)] border border-[color:var(--tms-border)] bg-[color:var(--tms-card)] p-2 text-xs">
+          <AlertTriangle size={14} className="mt-0.5 shrink-0 text-[color:var(--tms-badge-orange)]" />{docs.error}
         </p>
       )}
       {error && (
-        <p className="flex items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/5 p-2 text-xs text-destructive">
+        <p className="flex items-start gap-2 rounded-[var(--tms-radius)] border border-[color:var(--tms-badge-red)]  p-2 text-xs text-[color:var(--tms-badge-red)]">
           <AlertTriangle size={14} className="mt-0.5 shrink-0" />{error}
         </p>
       )}
@@ -244,22 +240,16 @@ export function DocumentsSection({
           gate={docs.orderGates[order.id]}
           documents={docs.documents}
           arStatus={order.arStatus ?? null}
-          isAdmin={isAdmin}
-          onReady={async (override, note) => {
+          onReady={async () => {
             setError(null)
             try {
-              await readyToInvoice({
-                orderId: order.id,
-                expectedUpdatedAt: order.updatedAt,
-                override: override || undefined,
-                overrideNote: override ? note : undefined,
-              })
+              await readyToInvoice({ orderId: order.id, expectedUpdatedAt: order.updatedAt })
               await refreshAll()
               toast.success('Ready to invoice')
             } catch (err) {
               // The Lambda's message lists the documents that are missing, which is
               // exactly what the user needs to read.
-              setError(err instanceof Error ? err.message : 'The order could not be moved to Ready to invoice')
+              setError(err instanceof Error ? err.message : 'The shipment could not be moved to Ready to invoice')
             }
           }}
         />
@@ -277,9 +267,9 @@ export function DocumentsSection({
       </Section>
 
       <div className="space-y-3" data-testid="documents-carrier">
-        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Carrier</p>
+        <p className="text-xs font-semibold uppercase tracking-wider tms-muted">Carrier</p>
         {assignments.length === 0 && (
-          <p className="text-sm text-muted-foreground">Nobody is on this load yet.</p>
+          <p className="text-sm tms-muted">Nobody is on this load yet.</p>
         )}
         {assignments.map((assignment) => (
           <CarrierBlock
@@ -304,7 +294,7 @@ export function DocumentsSection({
       </Section>
 
       <div className="space-y-2">
-        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">From the driver app</p>
+        <p className="text-xs font-semibold uppercase tracking-wider tms-muted">From the driver app</p>
         <LoadDriverDocs loadId={load?.id} proNumber={load?.aljexId} kind="RATECON" />
         <LoadDriverDocs loadId={load?.id} proNumber={load?.aljexId} kind="POD" />
         <LoadDriverDocs loadId={load?.id} proNumber={load?.aljexId} kind="MISC" />
@@ -391,15 +381,14 @@ function Section({ title, count, lead, children }: {
   children: ReactNode
 }) {
   return (
-    <div className="space-y-2" data-testid={`documents-${title.toLowerCase()}`}>
-      <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-        {title} <span className="font-normal normal-case tracking-normal">({count})</span>
-      </p>
-      {lead}
-      {count === 0 && !lead
-        ? <p className="text-sm text-muted-foreground">Nothing here yet.</p>
-        : children}
-    </div>
+    <TmsCard title={<>{title} <span className="font-normal tms-muted">({count})</span></>}>
+      <div className="space-y-2" data-testid={`documents-${title.toLowerCase()}`}>
+        {lead}
+        {count === 0 && !lead
+          ? <p className="text-sm tms-muted">Nothing here yet.</p>
+          : children}
+      </div>
+    </TmsCard>
   )
 }
 
@@ -409,26 +398,25 @@ function Section({ title, count, lead, children }: {
  * A free-text entry nobody could map to a type is shown as what it is: an instruction
  * that cannot be checked automatically. It never blocks, because refusing to invoice
  * over a string nobody can evaluate would be worse than the risk it describes.
+ *
+ * There is no override. Step R made the release to accounting a server rule with no
+ * bypass, so a button offering one here would be a lie: the Lambda re-runs the whole
+ * gate and answers with the list of what is still missing.
  */
-function RequiredStrip({ gate, documents, arStatus, isAdmin, onReady }: {
+function RequiredStrip({ gate, documents, arStatus, onReady }: {
   gate: DocGateResult | undefined
   documents: ShipmentDocumentRecord[]
   arStatus: string | null
-  isAdmin: boolean
-  onReady: (override: boolean, note: string) => Promise<void>
+  onReady: () => Promise<void>
 }) {
-  const [overriding, setOverriding] = useState(false)
-  const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
 
   if (!gate) return null
 
-  const run = async (override: boolean) => {
+  const run = async () => {
     setBusy(true)
     try {
-      await onReady(override, note.trim())
-      setOverriding(false)
-      setNote('')
+      await onReady()
     } finally {
       setBusy(false)
     }
@@ -438,29 +426,24 @@ function RequiredStrip({ gate, documents, arStatus, isAdmin, onReady }: {
     documents.find((d) => d.type === type && countsAsPresent(d))?.name ?? null
 
   return (
-    <div className="space-y-2 rounded-lg border border-border p-3" data-testid="required-documents">
+    <div className="space-y-2 rounded-[var(--tms-radius)] border border-[color:var(--tms-border)] p-3" data-testid="required-documents">
       <div className="flex flex-wrap items-center gap-2">
-        <p className="text-xs uppercase tracking-wider text-muted-foreground">Required documents</p>
-        {arStatus && <Badge variant="outline" className="text-[10px]">AR {arStatus.replace(/_/g, ' ').toLowerCase()}</Badge>}
+        <p className="text-xs uppercase tracking-wider tms-muted">Required documents</p>
+        {arStatus && <TmsBadge tone="gray" className="text-[10px]">AR {arStatus.replace(/_/g, ' ').toLowerCase()}</TmsBadge>}
         <div className="ml-auto flex flex-wrap items-center gap-2">
-          {isAdmin && !gate.ready && (
-            <Button variant="outline" size="sm" onClick={() => setOverriding((on) => !on)} disabled={busy}>
-              Override with note
-            </Button>
-          )}
-          <Button
+          <TmsButton variant="primary"
             size="sm"
             disabled={!gate.ready || busy}
             title={gate.ready ? undefined : `Missing: ${gate.missing.map((t) => DOCUMENT_TYPE_LABELS[t]).join(', ')}`}
-            onClick={() => { void run(false) }}
+            onClick={() => { void run() }}
           >
             {busy ? 'Working…' : 'Ready to invoice'}
-          </Button>
+          </TmsButton>
         </div>
       </div>
 
       {gate.required.length === 0 && (
-        <p className="text-sm text-muted-foreground">
+        <p className="text-sm tms-muted">
           This customer asks for no documents before invoicing.
         </p>
       )}
@@ -471,10 +454,10 @@ function RequiredStrip({ gate, documents, arStatus, isAdmin, onReady }: {
           return (
             <li key={type} className="flex items-center gap-2 text-sm">
               {present
-                ? <Check size={14} className="shrink-0 text-emerald-600" />
-                : <X size={14} className="shrink-0 text-destructive" />}
+                ? <Check size={14} className="shrink-0 text-[color:var(--tms-badge-green)]" />
+                : <X size={14} className="shrink-0 text-[color:var(--tms-badge-red)]" />}
               <span className={present ? '' : 'font-medium'}>{DOCUMENT_TYPE_LABELS[type]}</span>
-              <span className="min-w-0 truncate text-xs text-muted-foreground">
+              <span className="min-w-0 truncate text-xs tms-muted">
                 {present ? name ?? 'on file' : 'missing'}
               </span>
             </li>
@@ -485,33 +468,17 @@ function RequiredStrip({ gate, documents, arStatus, isAdmin, onReady }: {
       {gate.unrecognised.length > 0 && (
         <div className="flex flex-wrap items-center gap-1">
           {gate.unrecognised.map((text) => (
-            <Badge key={text} variant="outline" className="text-[10px]" title="Cannot be checked automatically">
+            <TmsBadge tone="gray" key={text} className="text-[10px]" title="Cannot be checked automatically">
               {text} — cannot be checked automatically
-            </Badge>
+            </TmsBadge>
           ))}
         </div>
       )}
 
       {!gate.ready && (
-        <p className="text-xs text-muted-foreground">
+        <p className="text-xs tms-muted">
           {gate.missing.length} still missing: {gate.missing.map((t) => DOCUMENT_TYPE_LABELS[t]).join(', ')}
         </p>
-      )}
-
-      {overriding && (
-        <div className="space-y-2 rounded-lg border border-amber-500/40 bg-amber-500/5 p-2">
-          <Label className="text-xs uppercase tracking-wider text-muted-foreground">Why bill without it</Label>
-          <Textarea
-            aria-label="Override note"
-            rows={2}
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            className="text-sm"
-          />
-          <Button size="sm" disabled={busy || note.trim().length === 0} onClick={() => { void run(true) }}>
-            {busy ? 'Working…' : 'Bill it anyway'}
-          </Button>
-        </div>
       )}
     </div>
   )
@@ -531,21 +498,21 @@ function DocumentRow({ doc, onPreview, onDownload, onRetype, onVoid }: { doc: Sh
   const spent = doc.status === 'SUPERSEDED' || doc.status === 'VOID'
 
   const tone = pending
-    ? 'border-amber-500/40 bg-amber-500/5'
+    ? 'border-[color:var(--tms-badge-orange)] 0/5'
     : rejected
-      ? 'border-destructive/40 bg-destructive/5'
+      ? 'border-[color:var(--tms-badge-red)] '
       : spent
-        ? 'border-border bg-muted/30 text-muted-foreground'
-        : 'border-border'
+        ? 'border-[color:var(--tms-border)] bg-[color:var(--tms-card)] tms-muted'
+        : 'border-[color:var(--tms-border)]'
 
   return (
-    <div className={`flex flex-wrap items-center gap-2 rounded-lg border p-2 text-sm ${tone}`}>
-      <Badge variant="outline" className="text-[10px]">{DOCUMENT_TYPE_LABELS[doc.type]}</Badge>
+    <div className={`flex flex-wrap items-center gap-2 rounded-[var(--tms-radius)] border p-2 text-sm ${tone}`}>
+      <TmsBadge tone="gray" className="text-[10px]">{DOCUMENT_TYPE_LABELS[doc.type]}</TmsBadge>
       <span className={`min-w-0 flex-1 truncate ${spent ? 'line-through' : ''}`}>{doc.name}</span>
-      <span className="text-[10px] uppercase tracking-wider text-muted-foreground">v{doc.version}</span>
-      <SourceIcon size={13} className="text-muted-foreground" aria-label={SOURCE_LABELS[doc.source]} />
-      <Badge variant="outline" className="text-[10px]">{doc.audience.toLowerCase()}</Badge>
-      <span className="text-[11px] text-muted-foreground">
+      <span className="text-[10px] uppercase tracking-wider tms-muted">v{doc.version}</span>
+      <SourceIcon size={13} className="tms-muted" aria-label={SOURCE_LABELS[doc.source]} />
+      <TmsBadge tone="gray" className="text-[10px]">{doc.audience.toLowerCase()}</TmsBadge>
+      <span className="text-[11px] tms-muted">
         {doc.uploadedBy} · {formatDateTime(doc.uploadedAt)}
         {pending ? ' · waiting on review' : ''}
         {rejected ? ` · rejected${doc.reviewNote ? ` — ${doc.reviewNote}` : ''}` : ''}
@@ -553,24 +520,23 @@ function DocumentRow({ doc, onPreview, onDownload, onRetype, onVoid }: { doc: Sh
         {doc.status === 'VOID' ? ` · void${doc.voidReason ? ` — ${doc.voidReason}` : ''}` : ''}
       </span>
       <div className="flex flex-wrap gap-1">
-        <Button variant="outline" size="sm" className="h-7" onClick={() => onPreview(doc)}>
+        <TmsButton size="sm" className="h-7" onClick={() => onPreview(doc)}>
           <Eye size={13} className="mr-1" />Preview
-        </Button>
-        <Button variant="outline" size="sm" className="h-7" onClick={() => onDownload(doc)}>
+        </TmsButton>
+        <TmsButton size="sm" className="h-7" onClick={() => onDownload(doc)}>
           <Download size={13} className="mr-1" />Download
-        </Button>
-        <Button
-          variant="outline" size="sm" className="h-7"
+        </TmsButton>
+        <TmsButton size="sm" className="h-7"
           disabled={isPointerDocument(doc) || doc.status !== 'ACTIVE'}
           title={isPointerDocument(doc) ? 'This row points at a file in another store; rename it there.' : undefined}
           onClick={() => onRetype(doc)}
         >
           <Pencil size={13} className="mr-1" />Retype
-        </Button>
+        </TmsButton>
         {onVoid && doc.status === 'ACTIVE' && (
-          <Button variant="outline" size="sm" className="h-7" onClick={() => onVoid(doc)}>
+          <TmsButton size="sm" className="h-7" onClick={() => onVoid(doc)}>
             <Ban size={13} className="mr-1" />Void
-          </Button>
+          </TmsButton>
         )}
       </div>
     </div>
@@ -599,20 +565,20 @@ function CarrierBlock({ assignment, documents, gate, link, deliveredAt, rowActio
     : assignment.carrierName ?? 'Carrier'
 
   return (
-    <div className="space-y-2 rounded-lg border border-border p-3">
+    <div className="space-y-2 rounded-[var(--tms-radius)] border border-[color:var(--tms-border)] p-3">
       <button
         type="button"
         onClick={() => setOpen((on) => !on)}
         className="flex w-full flex-wrap items-center gap-2 text-left"
       >
         <span className="text-sm font-medium">{name}</span>
-        <Badge variant="outline" className="text-[10px]">{assignment.status.toLowerCase()}</Badge>
-        {assignment.kind === 'OWN_ASSET' && <Badge variant="outline" className="text-[10px]">own asset</Badge>}
-        <span className="text-xs text-muted-foreground">
+        <TmsBadge tone="gray" className="text-[10px]">{assignment.status.toLowerCase()}</TmsBadge>
+        {assignment.kind === 'OWN_ASSET' && <TmsBadge tone="gray" className="text-[10px]">own asset</TmsBadge>}
+        <span className="text-xs tms-muted">
           {documents.length} document{documents.length === 1 ? '' : 's'}
           {gate && gate.missing.length > 0 ? ` · ${gate.missing.length} outstanding` : ''}
         </span>
-        <ChevronDown size={14} className={`ml-auto text-muted-foreground ${open ? 'rotate-180' : ''}`} />
+        <ChevronDown size={14} className={`ml-auto tms-muted ${open ? 'rotate-180' : ''}`} />
       </button>
 
       {open && (
@@ -622,10 +588,10 @@ function CarrierBlock({ assignment, documents, gate, link, deliveredAt, rowActio
             <DocumentRow key={doc.id} doc={doc} {...rowActions} />
           ))}
           {documents.length === 0 && (
-            <p className="text-sm text-muted-foreground">Nothing from this carrier yet.</p>
+            <p className="text-sm tms-muted">Nothing from this carrier yet.</p>
           )}
           {gate && gate.missing.length > 0 && (
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs tms-muted">
               Still wanted: {gate.missing.map((t) => DOCUMENT_TYPE_LABELS[t]).join(', ')}
             </p>
           )}
@@ -658,19 +624,19 @@ function RateConLine({ assignment }: { assignment: LoadCarrierRecord }) {
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border p-2 text-sm">
-      <Badge variant="outline" className="text-[10px]">Rate confirmation</Badge>
+    <div className="flex flex-wrap items-center gap-2 rounded-[var(--tms-radius)] border border-[color:var(--tms-border)] p-2 text-sm">
+      <TmsBadge tone="gray" className="text-[10px]">Rate confirmation</TmsBadge>
       <span className="min-w-0 flex-1 truncate">
         {status.replace(/_/g, ' ').toLowerCase()}
         {assignment.rateConVersion ? ` · v${assignment.rateConVersion}` : ''}
         {assignment.rateConSignedAt ? ` · signed ${formatDateTime(assignment.rateConSignedAt)}` : ''}
       </span>
       {assignment.rateConDocumentId && (
-        <Badge variant="outline" className="text-[10px]">saved on the shipment</Badge>
+        <TmsBadge tone="gray" className="text-[10px]">saved on the shipment</TmsBadge>
       )}
-      <Button variant="outline" size="sm" className="h-7" disabled={!key} onClick={() => { void open() }}>
+      <TmsButton size="sm" className="h-7" disabled={!key} onClick={() => { void open() }}>
         <Eye size={13} className="mr-1" />{key ? 'Open' : 'No file yet'}
-      </Button>
+      </TmsButton>
     </div>
   )
 }
@@ -708,20 +674,20 @@ function InvoiceLine({ invoiceId }: { invoiceId: string }) {
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border p-2 text-sm" data-testid="invoice-line">
-      <Badge variant="outline" className="text-[10px]">Invoice</Badge>
+    <div className="flex flex-wrap items-center gap-2 rounded-[var(--tms-radius)] border border-[color:var(--tms-border)] p-2 text-sm" data-testid="invoice-line">
+      <TmsBadge tone="gray" className="text-[10px]">Invoice</TmsBadge>
       <span className="min-w-0 flex-1 truncate">
         {invoice?.number ?? invoiceId}
         {invoice?.pdfVersion ? ` · v${invoice.pdfVersion}` : ''}
         {invoice?.issuedAt ? ` · issued ${formatDateTime(invoice.issuedAt)}` : ''}
         {invoice?.status === 'VOID' ? ' · void' : ''}
       </span>
-      <Button variant="outline" size="sm" className="h-7" disabled={!key} onClick={() => { void open(false) }}>
+      <TmsButton size="sm" className="h-7" disabled={!key} onClick={() => { void open(false) }}>
         <Eye size={13} className="mr-1" />{key ? 'Preview' : 'No PDF yet'}
-      </Button>
-      <Button variant="outline" size="sm" className="h-7" disabled={!key} onClick={() => { void open(true) }}>
+      </TmsButton>
+      <TmsButton size="sm" className="h-7" disabled={!key} onClick={() => { void open(true) }}>
         <Download size={13} className="mr-1" />Download
-      </Button>
+      </TmsButton>
     </div>
   )
 }
@@ -787,18 +753,18 @@ function UploadLinkCard({ assignment, link, deliveredAt, onChanged }: {
   }
 
   return (
-    <div className="space-y-2 rounded-lg border border-border bg-muted/30 p-2" data-testid="carrier-upload-link">
+    <div className="space-y-2 rounded-[var(--tms-radius)] border border-[color:var(--tms-border)] bg-[color:var(--tms-card)] p-2" data-testid="carrier-upload-link">
       <div className="flex flex-wrap items-center gap-2">
-        <Link2 size={14} className="text-muted-foreground" />
+        <Link2 size={14} className="tms-muted" />
         <p className="text-sm font-medium">Carrier upload link</p>
         {link ? (
-          <Badge variant="outline" className="text-[10px]">{link.status.toLowerCase()}</Badge>
+          <TmsBadge tone="gray" className="text-[10px]">{link.status.toLowerCase()}</TmsBadge>
         ) : (
-          <Badge variant="outline" className="text-[10px]">not sent</Badge>
+          <TmsBadge tone="gray" className="text-[10px]">not sent</TmsBadge>
         )}
       </div>
       {link && (
-        <p className="text-xs text-muted-foreground">
+        <p className="text-xs tms-muted">
           {link.sentTo ? `Sent to ${link.sentTo}` : 'Not e-mailed yet'}
           {' · '}opened {link.openCount ?? 0}×
           {' · '}{link.uploadCount ?? 0} upload{(link.uploadCount ?? 0) === 1 ? '' : 's'}
@@ -808,48 +774,48 @@ function UploadLinkCard({ assignment, link, deliveredAt, onChanged }: {
 
       <div className="flex flex-wrap items-end gap-2">
         <div className="min-w-56 flex-1">
-          <Label className="text-xs uppercase tracking-wider text-muted-foreground">Dispatcher e-mail</Label>
-          <Input
+          <Label className="tms-field-label">Dispatcher e-mail</Label>
+          <TmsInput
             aria-label="Upload link recipient"
             value={to}
             onChange={(e) => setTo(e.target.value)}
             className="h-9 text-sm"
           />
         </div>
-        <Button size="sm" disabled={busy || !to.trim()} onClick={() => { void send('EMAIL') }}>
+        <TmsButton variant="primary" size="sm" disabled={busy || !to.trim()} onClick={() => { void send('EMAIL') }}>
           <Send size={13} className="mr-1" />{busy ? 'Working…' : 'Send'}
-        </Button>
-        <Button variant="outline" size="sm" disabled={busy} onClick={() => { void send('COPY') }}>
+        </TmsButton>
+        <TmsButton size="sm" disabled={busy} onClick={() => { void send('COPY') }}>
           <Copy size={13} className="mr-1" />Copy
-        </Button>
-        <Button variant="outline" size="sm" disabled={busy} onClick={() => { void send('EMAIL', true) }}>
+        </TmsButton>
+        <TmsButton size="sm" disabled={busy} onClick={() => { void send('EMAIL', true) }}>
           <RotateCw size={13} className="mr-1" />Regenerate
-        </Button>
+        </TmsButton>
         {link && (
-          <Button variant="outline" size="sm" disabled={busy} onClick={() => { void revoke() }}>
+          <TmsButton size="sm" disabled={busy} onClick={() => { void revoke() }}>
             <StopCircle size={13} className="mr-1" />Revoke
-          </Button>
+          </TmsButton>
         )}
       </div>
 
       {notSent && (
         <p className="flex items-start gap-2 text-xs">
-          <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-600" />
+          <AlertTriangle size={14} className="mt-0.5 shrink-0 text-[color:var(--tms-badge-orange)]" />
           {notSent} Send it by hand with the Copy button.
         </p>
       )}
       {liveUrl && (
         <div className="flex items-center gap-2">
-          <Input aria-label="Upload link URL" readOnly value={liveUrl} className="h-9 text-xs" />
-          <Button
-            type="button" variant="outline" size="sm"
+          <TmsInput aria-label="Upload link URL" readOnly value={liveUrl} className="h-9 text-xs" />
+          <TmsButton
+            type="button" size="sm"
             onClick={() => { void navigator.clipboard?.writeText(liveUrl); toast.success('Link copied') }}
           >
             <Copy size={14} className="mr-1" />Copy
-          </Button>
+          </TmsButton>
         </div>
       )}
-      {error && <p className="text-xs text-destructive">{error}</p>}
+      {error && <p className="text-xs text-[color:var(--tms-badge-red)]">{error}</p>}
     </div>
   )
 }
@@ -910,22 +876,21 @@ function DriverDocAttachments({ shipmentId, loadId, proNumber, documents, onAtta
         // this file is already listed — whichever copy the merge settled on.
         const attached = documents.some((d) => d.source === 'DRIVER_APP' && d.s3Key === doc.s3Key)
         return (
-          <li key={doc.id} className="flex flex-wrap items-center gap-2 rounded-md border border-border p-2 text-sm">
-            <Smartphone size={13} className="text-muted-foreground" />
+          <li key={doc.id} className="flex flex-wrap items-center gap-2 rounded-md border border-[color:var(--tms-border)] p-2 text-sm">
+            <Smartphone size={13} className="tms-muted" />
             <span className="min-w-0 flex-1 truncate">{doc.fileName?.trim() || `${doc.kind} page ${doc.pageNumber ?? 1}`}</span>
-            <span className="text-[11px] text-muted-foreground">{doc.driverName}</span>
+            <span className="text-[11px] tms-muted">{doc.driverName}</span>
             {attached ? (
-              <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
-                <Check size={13} className="text-emerald-600" />on the shipment
+              <span className="flex items-center gap-1 text-[11px] tms-muted">
+                <Check size={13} className="text-[color:var(--tms-badge-green)]" />on the shipment
               </span>
             ) : (
-              <Button
-                variant="outline" size="sm" className="h-7"
+              <TmsButton size="sm" className="h-7"
                 disabled={busy !== null}
                 onClick={() => { void attach(doc, kind) }}
               >
                 <Plus size={13} className="mr-1" />{busy === doc.id ? 'Attaching…' : 'Attach to shipment'}
-              </Button>
+              </TmsButton>
             )}
           </li>
         )
@@ -962,52 +927,55 @@ function RetypeDialog({ doc, onClose, onSaved }: {
   }
 
   return (
-    <Dialog open onOpenChange={(open) => { if (!open && !busy) onClose() }}>
-      <DialogContent className="max-w-md">
-        <DialogHeader><DialogTitle>Rename or retype</DialogTitle></DialogHeader>
+    <TmsDialog
+      open
+      onOpenChange={(open) => { if (!open && !busy) onClose() }}
+      title="Rename or retype"
+      footer={
+        <>
+          <TmsButton variant="ghost" onClick={onClose} disabled={busy}>Cancel</TmsButton>
+          <TmsButton variant="primary" onClick={() => { void save() }} disabled={busy || name.trim().length === 0}>
+            {busy ? 'Saving…' : 'Save'}
+          </TmsButton>
+        </>
+      }
+    >
         <div className="space-y-3">
           <div>
-            <Label className="text-xs uppercase tracking-wider text-muted-foreground">Name</Label>
-            <Input aria-label="Document name" value={name} onChange={(e) => setName(e.target.value)} className="h-9 text-sm" />
+            <Label className="tms-field-label">Name</Label>
+            <TmsInput aria-label="Document name" value={name} onChange={(e) => setName(e.target.value)} className="h-9 text-sm" />
           </div>
           <div>
-            <Label className="text-xs uppercase tracking-wider text-muted-foreground">Type</Label>
-            <select
+            <Label className="tms-field-label">Type</Label>
+            <TmsSelect
               aria-label="Document type"
               value={type}
               onChange={(e) => setType(e.target.value as ShipmentDocumentType)}
               disabled={busy}
-              className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+              className="mt-1 h-9 w-full rounded-md border border-[color:var(--tms-input-border)] bg-[color:var(--tms-input)] px-2 text-sm"
             >
               {SHIPMENT_DOCUMENT_TYPES.map((t) => (
                 <option key={t} value={t}>{DOCUMENT_TYPE_LABELS[t]}</option>
               ))}
-            </select>
+            </TmsSelect>
           </div>
           <div>
-            <Label className="text-xs uppercase tracking-wider text-muted-foreground">Who may receive it</Label>
-            <select
+            <Label className="tms-field-label">Who may receive it</Label>
+            <TmsSelect
               aria-label="Document audience"
               value={audience}
               onChange={(e) => setAudience(e.target.value as ShipmentDocumentAudience)}
               disabled={busy}
-              className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+              className="mt-1 h-9 w-full rounded-md border border-[color:var(--tms-input-border)] bg-[color:var(--tms-input)] px-2 text-sm"
             >
               {AUDIENCES.map((a) => (
                 <option key={a} value={a}>{a.toLowerCase()}</option>
               ))}
-            </select>
+            </TmsSelect>
           </div>
-          {error && <p className="text-xs text-destructive">{error}</p>}
+          {error && <p className="text-xs text-[color:var(--tms-badge-red)]">{error}</p>}
         </div>
-        <DialogFooter>
-          <Button variant="ghost" onClick={onClose} disabled={busy}>Cancel</Button>
-          <Button onClick={() => { void save() }} disabled={busy || name.trim().length === 0}>
-            {busy ? 'Saving…' : 'Save'}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    </TmsDialog>
   )
 }
 
@@ -1037,15 +1005,25 @@ function VoidDialog({ doc, onClose, onVoided }: {
   }
 
   return (
-    <Dialog open onOpenChange={(open) => { if (!open && !busy) onClose() }}>
-      <DialogContent className="max-w-md">
-        <DialogHeader><DialogTitle>Void {doc.name}</DialogTitle></DialogHeader>
-        <p className="text-sm text-muted-foreground">
+    <TmsDialog
+      open
+      onOpenChange={(open) => { if (!open && !busy) onClose() }}
+      title="Void {doc.name}"
+      footer={
+        <>
+          <TmsButton variant="ghost" onClick={onClose} disabled={busy}>Cancel</TmsButton>
+          <TmsButton variant="primary" onClick={() => { void run() }} disabled={busy || reason.trim().length === 0}>
+            {busy ? 'Voiding…' : 'Void it'}
+          </TmsButton>
+        </>
+      }
+    >
+        <p className="text-sm tms-muted">
           The file stays where it is. The row stops counting towards anything and shows as void.
         </p>
         <div>
-          <Label className="text-xs uppercase tracking-wider text-muted-foreground">Reason</Label>
-          <Textarea
+          <Label className="tms-field-label">Reason</Label>
+          <TmsTextarea
             aria-label="Void reason"
             rows={2}
             value={reason}
@@ -1053,14 +1031,7 @@ function VoidDialog({ doc, onClose, onVoided }: {
             className="text-sm"
           />
         </div>
-        {error && <p className="text-xs text-destructive">{error}</p>}
-        <DialogFooter>
-          <Button variant="ghost" onClick={onClose} disabled={busy}>Cancel</Button>
-          <Button onClick={() => { void run() }} disabled={busy || reason.trim().length === 0}>
-            {busy ? 'Voiding…' : 'Void it'}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        {error && <p className="text-xs text-[color:var(--tms-badge-red)]">{error}</p>}
+    </TmsDialog>
   )
 }

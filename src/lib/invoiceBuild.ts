@@ -202,7 +202,7 @@ export function formatCents(cents: number): string {
 }
 
 export interface InvoiceReadinessInput {
-  order: Pick<OrderRecord, 'id' | 'arStatus' | 'revenueCents' | 'references' | 'docsOverrideAt'>
+  order: Pick<OrderRecord, 'id' | 'arStatus' | 'revenueCents' | 'references'>
   shipment: Pick<ShipmentRecord, 'number' | 'status' | 'deletedAt'> | null | undefined
   customer: Pick<CustomerRecord, 'requiredReferences' | 'factored' | 'name'> | null | undefined
   settings: Pick<TmsSettings, 'defaultRequiredReferences' | 'factorRemitTo'> | null | undefined
@@ -252,10 +252,13 @@ export function invoiceReadiness(input: InvoiceReadinessInput): InvoiceReadiness
     reasons.push(`${label} is a required reference and this order does not have one.`)
   }
 
+  // The document gate itself is enforced by `evaluateReleaseGate` in the routers;
+  // this repeats what it would refuse so the preview lists it with the rest. There
+  // is no override: step R took the admin bypass out of every path.
   const missingDocs = gate?.missing ?? []
-  if (missingDocs.length > 0 && !order.docsOverrideAt) {
+  if (missingDocs.length > 0) {
     const labels = missingDocs.map((type) => DOCUMENT_TYPE_LABELS[type] ?? type).join(', ')
-    reasons.push(`Required documents are missing: ${labels}. Attach them or override the document gate.`)
+    reasons.push(`Required documents are missing: ${labels}. Attach them before invoicing.`)
   }
 
   // A factored customer's bill has to tell them to pay the factor. With no factor

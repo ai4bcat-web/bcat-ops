@@ -13,6 +13,13 @@
  */
 import { assertString, optionalString, type Caller } from '../_shared/actionInputs'
 import { factoringRowFor, whyNotFactorable } from '../../../src/lib/factorHandoff'
+import {
+  RELEASE_GATE_ERROR_PREFIX,
+  evaluateReleaseGate,
+  releaseGateError,
+  type ReleaseGateResult,
+} from '../../../src/lib/releaseGate'
+import { loadReleaseGateInput } from '../_shared/releaseGateInput'
 import type { FactoringItem, Stop } from '../../../src/types'
 import type {
   CustomerRecord,
@@ -36,6 +43,7 @@ import {
   numberOrNull,
   putTx,
   queryIndex,
+  releaseGateDeps,
   transact,
   unsetCondition,
   updateTx,
@@ -55,6 +63,27 @@ async function configuredFactorRemitToName(): Promise<string | null> {
   if (!remitTo || typeof remitTo !== 'object' || !('name' in remitTo)) return null
   const name = remitTo.name
   return typeof name === 'string' && name.trim() ? name.trim() : null
+}
+
+/**
+ * The release gate, for the one path that could otherwise walk around it: handing
+ * a bill to the factor is handing it to somebody who will advance money on it.
+ * A voided shipment, a missing POD or an unsettled carrier bill stops here too.
+ */
+async function factorReleaseGate(
+  invoice: InvoiceRecord,
+  rows: { shipment: Row; order: Row; customer: Row; loads: Row[] },
+): Promise<ReleaseGateResult> {
+  return evaluateReleaseGate(
+    await loadReleaseGateInput(releaseGateDeps, {
+      shipmentId: invoice.shipmentId,
+      orderId: invoice.orderId,
+      shipment: rows.shipment,
+      order: rows.order,
+      loads: rows.loads,
+      customer: rows.customer,
+    }),
+  )
 }
 
 export async function sendToFactor(input: Row, caller: Caller): Promise<Row> {
@@ -87,6 +116,14 @@ export async function sendToFactor(input: Row, caller: Caller): Promise<Row> {
   const factorRemitToName = await configuredFactorRemitToName()
   const refusal = whyNotFactorable({ invoice, order, shipment, customer, load, existingRow, factorRemitToName })
   if (refusal) throw new Error(refusal)
+  const release = await factorReleaseGate(invoice, {
+    shipment: shipmentRow,
+    order: orderRow,
+    customer: customerRow,
+    loads: loadRows,
+  })
+  if (!release.ok) throw releaseGateError(release.missing)
+
   if (!load) throw new Error('That shipment has no load to factor')
 
   const stops: Stop[] = []
@@ -187,11 +224,27 @@ export async function previewFactor(input: Row): Promise<Row> {
     ? ((await getById(FACTORING_ITEM_TABLE_NAME, String(load.aljexId).trim())) as unknown as FactoringItem | null)
     : null
 
+  const release = await factorReleaseGate(invoice, {
+    shipment: shipmentRow,
+    order: orderRow,
+    customer: customerRow,
+    loads: loadRows,
+  })
   const refusal = whyNotFactorable({
     invoice, order, shipment, customer, load, existingRow,
     factorRemitToName: await configuredFactorRemitToName(),
   })
-  if (refusal || !load) return { ready: false, refusal: refusal ?? 'That shipment has no load to factor', note }
+  if (!release.ok) {
+    return {
+      ready: false,
+      refusal: `${RELEASE_GATE_ERROR_PREFIX}: ${release.missing.map((item) => item.message).join('; ')}`,
+      releaseGate: release,
+      note,
+    }
+  }
+  if (refusal || !load) {
+    return { ready: false, refusal: refusal ?? 'That shipment has no load to factor', releaseGate: release, note }
+  }
 
   const stops: Stop[] = []
   for (const row of loads) {
@@ -202,6 +255,7 @@ export async function previewFactor(input: Row): Promise<Row> {
   return {
     ready: true,
     refusal: null,
+    releaseGate: release,
     proNumber: queueRow.proNumber,
     fields: queueRow.otrManualFields ?? {},
     existing: existingRow ? { id: existingRow.id, status: existingRow.status } : null,

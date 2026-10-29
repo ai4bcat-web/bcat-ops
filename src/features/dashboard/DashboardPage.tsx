@@ -396,7 +396,7 @@ export function DashboardPage() {
             <IconBtn label="Refresh"><RefreshCw size={13} /> Refresh</IconBtn>
             {hasPageAccess('loads') && (
               <button
-                onClick={() => navigate('/loads')}
+                onClick={() => navigate('/tms/shipments')}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 5, padding: '5px 12px', borderRadius: 7,
                   background: 'var(--ds-blue)', color: '#fff', border: 'none', cursor: 'pointer',
@@ -430,10 +430,10 @@ export function DashboardPage() {
           <FactoringCard
             totals={factoringTotalsValue}
             loading={factoringLoading}
-            onOpen={() => navigate('/factoring')}
+            onOpen={() => navigate('/tms/factors')}
           />
           {/* What we owe vendors, beside what we are owed. */}
-          <VendorApCard onOpen={() => navigate('/vendor-ap')} />
+          <VendorApCard onOpen={() => navigate('/tms/vendors')} />
           <KpiCard
             label="Batory Appts to Book"
             value={metrics.needsAppt}

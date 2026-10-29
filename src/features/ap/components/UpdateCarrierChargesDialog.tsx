@@ -16,8 +16,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
-import { Button } from '@/components/ui/button'
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { TmsButton, TmsDialog } from '@/features/tms/kit'
 import { FinancialLines } from '@/features/shipments/components/FinancialLines'
 import {
   getShipmentBundle, getTmsSettings, graphqlErrorText, listCustomers, updateCarrierCharges,
@@ -79,59 +78,53 @@ export function UpdateCarrierChargesDialog({ loadCarrierId, shipmentId, open, on
   const billed = assignment?.invoiceId != null || assignment?.chargesFinalizedAt != null
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl">
-        <DialogHeader>
-          <DialogTitle>
-            Carrier charges{assignment?.carrierName ? ` — ${assignment.carrierName}` : ''}
-          </DialogTitle>
-        </DialogHeader>
+    <TmsDialog
+      open={open}
+      onOpenChange={onOpenChange}
+      title={`Carrier charges${assignment?.carrierName ? ` — ${assignment.carrierName}` : ''}`}
+      className="tms-dialog-xl"
+      footer={<TmsButton variant="ghost" onClick={() => onOpenChange(false)}>Close</TmsButton>}
+    >
+      {loading && (
+        <p className="flex items-center gap-2 tms-muted">
+          <Loader2 size={14} className="animate-spin" /> Reading the shipment…
+        </p>
+      )}
 
-        {loading && (
-          <p className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 size={14} className="animate-spin" /> Reading the shipment…
-          </p>
-        )}
+      {!loading && !assignment && (
+        <p style={{ color: 'var(--tms-badge-red)' }}>
+          {error ?? 'That assignment is no longer on this shipment.'}
+        </p>
+      )}
 
-        {!loading && !assignment && (
-          <p className="text-sm text-destructive">
-            {error ?? 'That assignment is no longer on this shipment.'}
-          </p>
-        )}
+      {!loading && assignment && assignment.kind !== 'CARRIER' && (
+        <p className="tms-muted">
+          This leg runs on our own equipment. It is settled through driver pay, not through AP,
+          and has no carrier charges to edit.
+        </p>
+      )}
 
-        {!loading && assignment && assignment.kind !== 'CARRIER' && (
-          <p className="text-sm text-muted-foreground">
-            This leg runs on our own equipment. It is settled through driver pay, not through AP,
-            and has no carrier charges to edit.
-          </p>
-        )}
+      {!loading && assignment && assignment.kind === 'CARRIER' && billed && (
+        <p className="tms-muted">
+          A bill is already recorded against this assignment, so its charges are final —
+          a bill names an exact amount and somebody is about to pay it. Void the bill first,
+          then fix the lines and record it again.
+        </p>
+      )}
 
-        {!loading && assignment && assignment.kind === 'CARRIER' && billed && (
-          <p className="text-sm text-muted-foreground">
-            A bill is already recorded against this assignment, so its charges are final —
-            a bill names an exact amount and somebody is about to pay it. Void the bill first,
-            then fix the lines and record it again.
-          </p>
-        )}
-
-        {!loading && assignment && assignment.kind === 'CARRIER' && !billed && (
-          <div className="max-h-[70vh] overflow-auto">
-            <FinancialLines
-              charges={ours}
-              catalog={settings?.chargeCodes ?? []}
-              context={{ miles: leg?.miles ?? null }}
-              pricing={pricing}
-              marginFloorBps={settings?.marginFloorBps ?? null}
-              onSave={save}
-            />
-            {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
-          </div>
-        )}
-
-        <DialogFooter>
-          <Button variant="ghost" onClick={() => onOpenChange(false)}>Close</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      {!loading && assignment && assignment.kind === 'CARRIER' && !billed && (
+        <div className="max-h-[70vh] overflow-auto">
+          <FinancialLines
+            charges={ours}
+            catalog={settings?.chargeCodes ?? []}
+            context={{ miles: leg?.miles ?? null }}
+            pricing={pricing}
+            marginFloorBps={settings?.marginFloorBps ?? null}
+            onSave={save}
+          />
+          {error && <p className="mt-2 text-xs" style={{ color: 'var(--tms-badge-red)' }}>{error}</p>}
+        </div>
+      )}
+    </TmsDialog>
   )
 }

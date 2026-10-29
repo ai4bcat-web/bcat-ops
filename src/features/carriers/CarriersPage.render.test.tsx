@@ -101,7 +101,8 @@ describe('CarriersPage', () => {
     fireEvent.click(tab('Pending/Review'))
     await waitFor(() => expect(screen.getByText('Alpha Trucking')).toBeTruthy())
 
-    fireEvent.change(screen.getByLabelText('Search carriers'), { target: { value: '222222' } })
+    // The kit's list page labels its search box "Search"; the placeholder names the fields.
+    fireEvent.change(screen.getByLabelText('Search'), { target: { value: '222222' } })
     await waitFor(() => expect(screen.queryByText('Alpha Trucking')).toBeNull())
     expect(screen.getByText('Bravo Lines')).toBeTruthy()
   })
@@ -122,7 +123,7 @@ describe('CarriersPage', () => {
     renderBoard()
     await waitFor(() => expect(screen.getByText('Charlie Freight')).toBeTruthy())
 
-    fireEvent.change(screen.getByLabelText('Search carriers'), { target: { value: 'nobody' } })
+    fireEvent.change(screen.getByLabelText('Search'), { target: { value: 'nobody' } })
     await waitFor(() => expect(screen.getByText('No carriers in this view.')).toBeTruthy())
   })
 

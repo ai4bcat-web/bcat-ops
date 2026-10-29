@@ -1,6 +1,6 @@
 /**
- * `/ap/bills/:id` — one carrier bill, everything that has happened to it, and the three
- * actions that can still happen.
+ * `/tms/invoicing/payable/bills/:id` — one carrier bill, everything that has happened to
+ * it, and the three actions that can still happen.
  *
  * A bill is a snapshot: the lines, the quick-pay fee, the terms and the remit-to were
  * frozen when it was recorded, and nothing on this page edits them. A mistake is voided
@@ -19,8 +19,7 @@ import { useState, type ReactNode } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { ChevronLeft, ShieldAlert } from 'lucide-react'
 import { toast } from 'sonner'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
+import { TmsBadge, TmsButton, TmsCard, TmsPage, TmsTabs } from '@/features/tms/kit'
 import { useCarrierBill } from '@/hooks/useCarrierBill'
 import { graphqlErrorText, unapproveBill, voidBill } from '@/lib/apiClient'
 import { APPROVAL_WARNING_KEYS, billData } from '@/lib/carrierBill'
@@ -31,47 +30,56 @@ import { ReasonDialog } from '@/features/ar/components/ReasonDialog'
 import { AP_PAYEE_KIND_LABEL, AP_PAYMENT_KIND_LABEL, BILL_STATUS_LABEL, paymentsForBill } from './apViews'
 import { ApproveBillDialog } from './components/ApproveBillDialog'
 import type { CarrierBillStatus } from '@/types/tms'
+import type { TmsTone } from '@/features/tms/kit'
 
 type DetailDialog = { kind: 'approve' } | { kind: 'unapprove' } | { kind: 'void' }
 
-const STATUS_TONE: Record<CarrierBillStatus, 'default' | 'secondary' | 'destructive' | 'outline'> = {
-  IN_REVIEW: 'secondary',
-  TO_BE_PAID: 'default',
-  PARTIAL: 'default',
-  PAID: 'outline',
-  VOID: 'destructive',
+const STATUS_TONE: Record<CarrierBillStatus, TmsTone> = {
+  IN_REVIEW: 'purple',
+  TO_BE_PAID: 'blue',
+  PARTIAL: 'orange',
+  PAID: 'green',
+  VOID: 'red',
 }
 
 /** The ladder a bill climbs. VOID is not a rung — it is leaving the ladder. */
 const RUNGS: CarrierBillStatus[] = ['IN_REVIEW', 'TO_BE_PAID', 'PARTIAL', 'PAID']
 
-/** Why a warning was raised, for the trail that records it was acknowledged. */
+/**
+ * Why a warning was raised, for the trail that records it was acknowledged. The keys are
+ * the three `approvalReadiness` raises; anything else falls back to the raw key.
+ */
 const WARNING_LABEL: Record<string, string> = {
-  [APPROVAL_WARNING_KEYS.rateConUnsigned]: 'The rate confirmation was not signed',
-  [APPROVAL_WARNING_KEYS.carrierDoNotUse]: 'The carrier was marked DO NOT USE',
-  [APPROVAL_WARNING_KEYS.recordedEarly]: 'The bill was recorded before the load delivered',
+  [APPROVAL_WARNING_KEYS.rateConUnsigned]: 'no signed rate confirmation',
+  [APPROVAL_WARNING_KEYS.carrierDoNotUse]: 'the carrier is marked do not use',
+  [APPROVAL_WARNING_KEYS.recordedEarly]: 'the load had not delivered',
 }
 
-const CARD = 'rounded-md border border-border bg-card p-4'
-const TH = 'px-2 py-1.5 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground'
-const TD = 'px-2 py-1.5 align-top'
-const MONEY = 'px-2 py-1.5 text-right tabular-nums align-top'
+const TABS = [
+  { key: 'summary', label: 'Summary' },
+  { key: 'payee', label: 'Paid to' },
+  { key: 'approval', label: 'Approval' },
+  { key: 'payments', label: 'Payments' },
+]
+
+const RED = { color: 'var(--tms-badge-red)' }
 
 export function BillDetail() {
   const { id } = useParams<{ id: string }>()
   const { bill, bundle, payments, loading, error, refresh } = useCarrierBill(id ?? null)
 
+  const [tab, setTab] = useState('summary')
   const [dialog, setDialog] = useState<DetailDialog | null>(null)
   const [busy, setBusy] = useState(false)
   const [asOf] = useState(() => chicagoDateStr(new Date()))
 
-  if (!id) return <p className="p-6 text-sm text-muted-foreground">No bill selected.</p>
+  if (!id) return <p className="tms-muted">No bill selected.</p>
   if (!bill) {
     return (
-      <div className="p-6 text-sm">
-        {loading ? <span className="text-muted-foreground">Loading bill…</span> : null}
-        {!loading && <span className="text-destructive">{error ?? 'Bill not found.'}</span>}
-      </div>
+      <p>
+        {loading ? <span className="tms-muted">Loading bill…</span> : null}
+        {!loading && <span style={RED}>{error ?? 'Bill not found.'}</span>}
+      </p>
     )
   }
 
@@ -118,155 +126,157 @@ export function BillDetail() {
   }
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="border-b border-border px-6 py-2">
-        <Button asChild variant="ghost" size="sm">
-          <Link to="/ap" aria-label="Back to AP"><ChevronLeft size={14} className="mr-1" /> AP</Link>
-        </Button>
-      </div>
+    <TmsPage
+      title={
+        <span className="flex items-center gap-2">
+          <Link
+            className="tms-icon-btn tms-icon-btn-plain"
+            to="/tms/invoicing/payable"
+            aria-label="Back to Payable"
+          >
+            <ChevronLeft size={16} />
+          </Link>
+          {label}
+          <TmsBadge tone={STATUS_TONE[view.status]}>{BILL_STATUS_LABEL[view.status]}</TmsBadge>
+          {view.aging.open && <TmsBadge tone={chip.late ? 'red' : 'gray'}>{chip.label}</TmsBadge>}
+        </span>
+      }
+      actions={
+        <>
+          <TmsButton
+            variant="primary"
+            aria-label="Approve bill"
+            disabled={busy || view.status !== 'IN_REVIEW'}
+            onClick={() => setDialog({ kind: 'approve' })}
+          >
+            Approve
+          </TmsButton>
+          <TmsButton
+            aria-label="Unapprove bill"
+            disabled={busy || view.status !== 'TO_BE_PAID'}
+            onClick={() => setDialog({ kind: 'unapprove' })}
+          >
+            Unapprove
+          </TmsButton>
+          <TmsButton
+            variant="destructive"
+            aria-label="Void bill"
+            // The server refuses a void once any money has touched the bill —
+            // cash or credit alike; that payment is reversed first.
+            disabled={busy || view.status === 'VOID' || settledCents > 0}
+            onClick={() => setDialog({ kind: 'void' })}
+          >
+            Void
+          </TmsButton>
+        </>
+      }
+    >
+      <TmsCard>
+        {view.status !== 'VOID' && (
+          <ol className="mb-3 flex flex-wrap items-center gap-1 text-xs" aria-label="Bill status">
+            {RUNGS.map((rung) => {
+              const reached = RUNGS.indexOf(rung) <= RUNGS.indexOf(view.status)
+              const current = rung === view.status
+              return (
+                <li
+                  key={rung}
+                  aria-current={current ? 'step' : undefined}
+                  className="rounded-full px-2 py-0.5"
+                  style={{
+                    border: `1px ${reached ? 'solid' : 'dashed'} ${current ? 'var(--tms-primary)' : 'var(--tms-border)'}`,
+                    color: current ? 'var(--tms-text)' : 'var(--tms-muted)',
+                    fontWeight: current ? 600 : 400,
+                  }}
+                >
+                  {BILL_STATUS_LABEL[rung]}
+                </li>
+              )
+            })}
+          </ol>
+        )}
 
-      <div className="flex-1 space-y-4 overflow-auto px-6 py-4">
-        <header className={CARD}>
-          <div className="flex flex-wrap items-center gap-2">
-            <h1 className="text-lg font-semibold">{label}</h1>
-            <Badge variant={STATUS_TONE[view.status]}>{BILL_STATUS_LABEL[view.status]}</Badge>
-            {view.aging.open && (
-              <Badge variant={chip.late ? 'destructive' : 'outline'} className="text-[10px]">{chip.label}</Badge>
-            )}
-            <div className="ml-auto flex flex-wrap gap-2">
-              <Button
-                size="sm"
-                aria-label="Approve bill"
-                disabled={busy || view.status !== 'IN_REVIEW'}
-                onClick={() => setDialog({ kind: 'approve' })}
-              >
-                Approve
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                aria-label="Unapprove bill"
-                disabled={busy || view.status !== 'TO_BE_PAID'}
-                onClick={() => setDialog({ kind: 'unapprove' })}
-              >
-                Unapprove
-              </Button>
-              <Button
-                size="sm"
-                variant="destructive"
-                aria-label="Void bill"
-                // The server refuses a void once any money has touched the bill —
-                // cash or credit alike; that payment is reversed first.
-                disabled={busy || view.status === 'VOID' || settledCents > 0}
-                onClick={() => setDialog({ kind: 'void' })}
-              >
-                Void
-              </Button>
-            </div>
+        <dl className="tms-grid tms-grid-4">
+          <Field label="Carrier" value={view.carrier.name || bill.carrierId} />
+          <Field
+            label="Shipment"
+            value={<Link to={`/tms/shipments/${view.shipmentId}`}>{view.shipmentNumber ?? view.shipmentId}</Link>}
+          />
+          <Field label="Load" value={view.loadNumber ?? '—'} />
+          <Field label="Terms" value={view.quickPay ? `Quick pay, net ${view.termsDays}` : `Net ${view.termsDays}`} />
+          <Field label="Bill date" value={formatDay(view.billDate)} />
+          <Field label="Due" value={formatDay(view.dueAt)} />
+          <Field label="Recorded" value={`${formatDateTime(view.recordedAt)} by ${view.recordedBy}`} />
+          <Field label="Balance" value={<span className="font-semibold">{formatCents(view.totals.balanceCents)}</span>} />
+          {view.recordedEarly && <Field label="Recorded early" value="Before the load delivered" />}
+          {view.status === 'VOID' && <Field label="Voided" value={view.voidReason ?? 'No reason recorded'} />}
+        </dl>
+      </TmsCard>
+
+      <TmsTabs tabs={TABS} active={tab} onSelect={setTab} />
+
+      {tab === 'summary' && (
+        <TmsCard title="Lines" flush>
+          <div className="tms-table-wrap">
+            <table className="tms-table">
+              <thead>
+                <tr>
+                  <th scope="col">CODE</th>
+                  <th scope="col">DESCRIPTION</th>
+                  <th scope="col">RATE</th>
+                  <th scope="col">COUNT</th>
+                  <th scope="col">AMOUNT</th>
+                </tr>
+              </thead>
+              <tbody>
+                {view.lines.length === 0 && (
+                  <tr><td colSpan={5} className="tms-muted">This bill has no lines.</td></tr>
+                )}
+                {view.lines.map((line) => (
+                  <tr key={line.chargeId}>
+                    <td>{line.code}</td>
+                    <td>{line.label ?? line.code}</td>
+                    <td className="text-right tabular-nums">{formatCents(line.rateCents)}</td>
+                    <td className="text-right tabular-nums">{line.count}</td>
+                    <td className="text-right tabular-nums">{formatCents(line.amountCents)}</td>
+                  </tr>
+                ))}
+                <tr>
+                  <td colSpan={4}>Gross</td>
+                  <td className="text-right tabular-nums" aria-label="Gross">{formatCents(view.totals.grossCents)}</td>
+                </tr>
+                {view.totals.quickPayFeeCents > 0 && (
+                  <tr>
+                    <td colSpan={4}>Quick-pay fee</td>
+                    <td className="text-right tabular-nums" aria-label="Quick-pay fee">−{formatCents(view.totals.quickPayFeeCents)}</td>
+                  </tr>
+                )}
+                <tr>
+                  <td colSpan={4} className="font-semibold">Net — what we pay</td>
+                  <td className="text-right font-semibold tabular-nums" aria-label="Net">{formatCents(view.totals.netCents)}</td>
+                </tr>
+                <tr>
+                  <td colSpan={4}>Their invoice says</td>
+                  <td className="text-right tabular-nums" aria-label="Billed">{formatCents(view.totals.billedCents)}</td>
+                </tr>
+                {view.totals.varianceCents !== 0 && (
+                  <tr>
+                    <td colSpan={4} style={RED}>Variance</td>
+                    <td className="text-right tabular-nums" style={RED} aria-label="Variance">
+                      {formatCents(view.totals.varianceCents)}
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
           </div>
+          {view.note && <p className="p-3 text-xs tms-muted">{view.note}</p>}
+        </TmsCard>
+      )}
 
-          {view.status !== 'VOID' && (
-            <ol className="mt-3 flex flex-wrap items-center gap-1 text-xs" aria-label="Bill status">
-              {RUNGS.map((rung) => {
-                const reached = RUNGS.indexOf(rung) <= RUNGS.indexOf(view.status)
-                return (
-                  <li
-                    key={rung}
-                    aria-current={rung === view.status ? 'step' : undefined}
-                    className={`rounded-full border px-2 py-0.5 ${
-                      rung === view.status
-                        ? 'border-primary bg-primary/10 font-medium'
-                        : reached ? 'border-border text-muted-foreground' : 'border-dashed border-border text-muted-foreground/60'
-                    }`}
-                  >
-                    {BILL_STATUS_LABEL[rung]}
-                  </li>
-                )
-              })}
-            </ol>
-          )}
-
-          <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-sm sm:grid-cols-4">
-            <Field label="Carrier" value={view.carrier.name || bill.carrierId} />
-            <Field
-              label="Shipment"
-              value={
-                <Link className="text-primary hover:underline" to={`/shipments/${view.shipmentId}`}>
-                  {view.shipmentNumber ?? view.shipmentId}
-                </Link>
-              }
-            />
-            <Field label="Load" value={view.loadNumber ?? '—'} />
-            <Field label="Terms" value={view.quickPay ? `Quick pay, net ${view.termsDays}` : `Net ${view.termsDays}`} />
-            <Field label="Bill date" value={formatDay(view.billDate)} />
-            <Field label="Due" value={formatDay(view.dueAt)} />
-            <Field label="Recorded" value={`${formatDateTime(view.recordedAt)} by ${view.recordedBy}`} />
-            <Field label="Balance" value={<span className="font-semibold">{formatCents(view.totals.balanceCents)}</span>} />
-            {view.recordedEarly && <Field label="Recorded early" value="Before the load delivered" />}
-            {view.status === 'VOID' && <Field label="Voided" value={view.voidReason ?? 'No reason recorded'} />}
-          </dl>
-        </header>
-
-        <section className={CARD}>
-          <h2 className="mb-2 text-sm font-semibold">Lines</h2>
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border">
-                <th className={TH} scope="col">Code</th>
-                <th className={TH} scope="col">Description</th>
-                <th className={`${TH} text-right`} scope="col">Rate</th>
-                <th className={`${TH} text-right`} scope="col">Count</th>
-                <th className={`${TH} text-right`} scope="col">Amount</th>
-              </tr>
-            </thead>
-            <tbody>
-              {view.lines.length === 0 && (
-                <tr><td colSpan={5} className="py-4 text-center text-sm text-muted-foreground">This bill has no lines.</td></tr>
-              )}
-              {view.lines.map((line) => (
-                <tr key={line.chargeId} className="border-b border-border/60">
-                  <td className={TD}>{line.code}</td>
-                  <td className={TD}>{line.label ?? line.code}</td>
-                  <td className={MONEY}>{formatCents(line.rateCents)}</td>
-                  <td className={MONEY}>{line.count}</td>
-                  <td className={MONEY}>{formatCents(line.amountCents)}</td>
-                </tr>
-              ))}
-              <tr>
-                <td className={TD} colSpan={4}>Gross</td>
-                <td className={MONEY} aria-label="Gross">{formatCents(view.totals.grossCents)}</td>
-              </tr>
-              {view.totals.quickPayFeeCents > 0 && (
-                <tr>
-                  <td className={TD} colSpan={4}>Quick-pay fee</td>
-                  <td className={MONEY} aria-label="Quick-pay fee">−{formatCents(view.totals.quickPayFeeCents)}</td>
-                </tr>
-              )}
-              <tr>
-                <td className={`${TD} font-semibold`} colSpan={4}>Net — what we pay</td>
-                <td className={`${MONEY} font-semibold`} aria-label="Net">{formatCents(view.totals.netCents)}</td>
-              </tr>
-              <tr>
-                <td className={TD} colSpan={4}>Their invoice says</td>
-                <td className={MONEY} aria-label="Billed">{formatCents(view.totals.billedCents)}</td>
-              </tr>
-              {view.totals.varianceCents !== 0 && (
-                <tr>
-                  <td className={`${TD} text-destructive`} colSpan={4}>Variance</td>
-                  <td className={`${MONEY} text-destructive`} aria-label="Variance">
-                    {formatCents(view.totals.varianceCents)}
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-          {view.note && <p className="mt-2 text-xs text-muted-foreground">{view.note}</p>}
-        </section>
-
-        <div className="grid gap-4 lg:grid-cols-2">
-          <section className={CARD}>
-            <h2 className="mb-2 text-sm font-semibold">Paid to</h2>
-            <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+      {tab === 'payee' && (
+        <div className="tms-grid tms-grid-2">
+          <TmsCard title="Paid to">
+            <dl className="tms-grid tms-grid-2">
               <Field label="Payee" value={`${view.payee.name} (${AP_PAYEE_KIND_LABEL[view.payee.kind]})`} />
               {view.payee.factorName && <Field label="Factor" value={view.payee.factorName} />}
               <Field label="Method" value={view.payee.method ?? 'Not set'} />
@@ -281,101 +291,99 @@ export function BillDetail() {
               )}
             </dl>
             {!view.payee.method && (
-              <p className="mt-2 text-xs text-amber-600">
+              <p className="mt-2 text-xs" style={{ color: 'var(--tms-badge-orange)' }}>
                 This bill has no payment method on it. Set one on the carrier before approving.
               </p>
             )}
-          </section>
+          </TmsCard>
 
-          <section className={CARD}>
-            <h2 className="mb-2 text-sm font-semibold">Their invoice</h2>
-            {!view.documentId && (
-              <p className="text-sm text-muted-foreground">
-                No carrier invoice is linked to this bill.
-              </p>
-            )}
+          <TmsCard title="Their invoice">
+            {!view.documentId && <p className="tms-muted">No carrier invoice is linked to this bill.</p>}
             {view.documentId && !document && (
-              <p className="text-sm text-muted-foreground">
+              <p className="tms-muted">
                 A document is linked ({view.documentId}) but is not on the shipment any more.
               </p>
             )}
             {document && (
-              <p className="flex items-center gap-2 text-sm">
-                <span className="text-muted-foreground">{document.type}</span>
+              <p className="flex items-center gap-2">
+                <span className="tms-muted">{document.type}</span>
                 <span>{document.name}</span>
-                <span className="text-xs text-muted-foreground">{Math.round(document.sizeBytes / 1024)} KB</span>
+                <span className="text-xs tms-muted">{Math.round(document.sizeBytes / 1024)} KB</span>
               </p>
             )}
-          </section>
+          </TmsCard>
         </div>
+      )}
 
-        <section className={CARD}>
-          <h2 className="mb-2 text-sm font-semibold">Approval</h2>
+      {tab === 'approval' && (
+        <TmsCard title="Approval">
           {!view.approvedAt && view.status !== 'VOID' && (
-            <p className="text-sm text-muted-foreground">
+            <p className="tms-muted">
               Not approved yet. Approving moves it to To be paid and puts it in the pay run.
             </p>
           )}
           {view.approvedAt && (
-            <p className="text-sm">
-              Approved {formatDateTime(view.approvedAt)} by {view.approvedBy ?? 'unknown'}.
-            </p>
+            <p>Approved {formatDateTime(view.approvedAt)} by {view.approvedBy ?? 'unknown'}.</p>
           )}
           {acknowledged.length > 0 && (
-            <ul className="mt-2 space-y-1 text-xs text-muted-foreground">
+            <ul className="mt-2 flex flex-col gap-1 text-xs tms-muted">
               {acknowledged.map((key) => (
                 <li key={key} className="flex items-start gap-2">
-                  <ShieldAlert size={13} className="mt-0.5 shrink-0 text-amber-600" />
+                  <ShieldAlert size={13} className="mt-0.5 shrink-0" style={{ color: 'var(--tms-badge-orange)' }} />
                   Acknowledged: {WARNING_LABEL[key] ?? key}
                 </li>
               ))}
             </ul>
           )}
           {bill.docsOverrideAt && (
-            <p className="mt-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-2 text-xs">
+            <p
+              className="mt-2 p-2 text-xs"
+              style={{ border: '1px solid var(--tms-badge-orange)', borderRadius: 'var(--tms-radius)' }}
+            >
               Paperwork gate overridden {formatDateTime(bill.docsOverrideAt)} by {bill.docsOverrideBy ?? 'unknown'}
               {bill.docsOverrideNote ? ` — ${bill.docsOverrideNote}` : ' with no note'}.
             </p>
           )}
-        </section>
+        </TmsCard>
+      )}
 
-        <section className={CARD}>
-          <h2 className="mb-2 text-sm font-semibold">Payments applied</h2>
-          {applied.length === 0 && (
-            <p className="text-sm text-muted-foreground">Nothing has gone against this bill.</p>
-          )}
+      {tab === 'payments' && (
+        <TmsCard title="Payments applied" flush={applied.length > 0}>
+          {applied.length === 0 && <p className="tms-muted">Nothing has gone against this bill.</p>}
           {applied.length > 0 && (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border">
-                  <th className={TH} scope="col">Kind</th>
-                  <th className={TH} scope="col">Paid</th>
-                  <th className={TH} scope="col">Reference</th>
-                  <th className={`${TH} text-right`} scope="col">Applied here</th>
-                </tr>
-              </thead>
-              <tbody>
-                {applied.map((row) => (
-                  <tr key={row.payment.id} className="border-b border-border/60">
-                    <td className={TD}>{AP_PAYMENT_KIND_LABEL[row.payment.kind]}</td>
-                    <td className={TD}>{formatDay(row.payment.paidAt.slice(0, 10))}</td>
-                    <td className={TD}>{row.payment.reference || '—'}</td>
-                    <td className={MONEY}>{formatCents(row.amountCents)}</td>
+            <div className="tms-table-wrap">
+              <table className="tms-table">
+                <thead>
+                  <tr>
+                    <th scope="col">KIND</th>
+                    <th scope="col">PAID</th>
+                    <th scope="col">REFERENCE</th>
+                    <th scope="col">APPLIED HERE</th>
                   </tr>
-                ))}
-                <tr>
-                  <td className={TD} colSpan={3}>Credited</td>
-                  <td className={MONEY}>{formatCents(view.totals.creditedCents)}</td>
-                </tr>
-                <tr>
-                  <td className={`${TD} font-semibold`} colSpan={3}>Still owed</td>
-                  <td className={`${MONEY} font-semibold`}>{formatCents(view.totals.balanceCents)}</td>
-                </tr>
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {applied.map((row) => (
+                    <tr key={row.payment.id}>
+                      <td>{AP_PAYMENT_KIND_LABEL[row.payment.kind]}</td>
+                      <td>{formatDay(row.payment.paidAt.slice(0, 10))}</td>
+                      <td>{row.payment.reference || '—'}</td>
+                      <td className="text-right tabular-nums">{formatCents(row.amountCents)}</td>
+                    </tr>
+                  ))}
+                  <tr>
+                    <td colSpan={3}>Credited</td>
+                    <td className="text-right tabular-nums">{formatCents(view.totals.creditedCents)}</td>
+                  </tr>
+                  <tr>
+                    <td colSpan={3} className="font-semibold">Still owed</td>
+                    <td className="text-right font-semibold tabular-nums">{formatCents(view.totals.balanceCents)}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           )}
-        </section>
-      </div>
+        </TmsCard>
+      )}
 
       {dialog?.kind === 'approve' && (
         <ApproveBillDialog
@@ -408,14 +416,14 @@ export function BillDetail() {
           onConfirm={runVoid}
         />
       )}
-    </div>
+    </TmsPage>
   )
 }
 
 function Field({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div>
-      <dt className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</dt>
+      <dt className="text-[11px] font-semibold uppercase tracking-wider tms-muted">{label}</dt>
       <dd>{value}</dd>
     </div>
   )

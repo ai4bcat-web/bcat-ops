@@ -41,7 +41,7 @@ beforeEach(() => {
 describe('SettingsPage', () => {
   it('renders admin-only division and TMS settings sections', async () => {
     render(<MemoryRouter><SettingsPage /></MemoryRouter>)
-    expect(screen.getAllByText('Divisions').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Legacy division keys').length).toBeGreaterThan(0)
     expect(screen.getAllByText('TMS defaults').length).toBeGreaterThan(0)
     expect(screen.getAllByText('Quotes & offers').length).toBeGreaterThan(0)
   })

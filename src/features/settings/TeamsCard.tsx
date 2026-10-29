@@ -12,16 +12,15 @@
  * every `UserProfile.teamKeys`.
  */
 import { useEffect, useState } from 'react'
+import type { CSSProperties } from 'react'
 import { Plus, Save, Trash2, Users, X } from 'lucide-react'
 import { toast } from 'sonner'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Switch } from '@/components/ui/switch'
+import { TmsButton, TmsField, TmsIconButton, TmsInput, TmsSelect } from '@/features/tms/kit'
 import { useStaff } from '@/hooks/useStaff'
 import { getTmsSettings, saveTmsSettings } from '@/lib/apiClient'
 import { TEAM_SENDER_LABELS, TEAM_SENDER_SLOTS, validateTeams, type TeamSenderSlot } from '@/lib/teams'
 import type { Team, TmsSettings } from '@/types/tms'
+import { CheckRow, ErrorText, Hint, Loading, Panel, SettingsCard, Stack } from './settingsKit'
 
 /** A team as it is edited: every sender slot present, blank for "not set". */
 interface TeamRow {
@@ -34,6 +33,12 @@ interface TeamRow {
 }
 
 const BLANK_SENDERS = Object.fromEntries(TEAM_SENDER_SLOTS.map((slot) => [slot, ''])) as Record<TeamSenderSlot, string>
+
+/** A member chip: the person, and the cross that takes them off the desk. */
+const CHIP: CSSProperties = {
+  display: 'inline-flex', alignItems: 'center', gap: 4,
+  border: '1px solid var(--tms-border)', borderRadius: 999, padding: '2px 8px', fontSize: 12,
+}
 
 export function TeamsCard() {
   const { staff, nameOf } = useStaff()
@@ -101,147 +106,125 @@ export function TeamsCard() {
   }
 
   return (
-    <div style={{ border: '1px solid var(--ds-border)', borderRadius: 12, background: 'var(--ds-surface)', padding: 16, boxShadow: 'var(--sh-sm)', display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <div className="flex items-center gap-2.5">
-        <Users size={16} style={{ color: 'var(--ds-t3)' }} />
-        <div>
-          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)' }}>Teams</div>
-          <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 2 }}>
-            Who sits with whom, which addresses the desk sends from, and whose number the public tracking page prints.
-          </div>
-        </div>
-      </div>
-
-      {loading ? <div className="text-sm text-muted-foreground">Loading…</div> : (
-        <div className="space-y-3">
-          {teams.length === 0 && <p className="text-xs text-muted-foreground">No teams yet.</p>}
+    <SettingsCard
+      icon={Users}
+      title="Teams"
+      description="Who sits with whom, which addresses the desk sends from, and whose number the public tracking page prints."
+    >
+      {loading ? <Loading /> : (
+        <Stack>
+          {teams.length === 0 && <Hint>No teams yet.</Hint>}
 
           {teams.map((team, i) => (
-            <div key={i} className="space-y-3 rounded-lg border border-border p-3">
-              <div className="grid grid-cols-[8rem_1fr_auto] items-end gap-3">
-                <div>
-                  <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Key</Label>
-                  <Input
+            <Panel key={i}>
+              <div className="tms-grid" style={{ gridTemplateColumns: '8rem minmax(0, 1fr) auto', alignItems: 'flex-end' }}>
+                <TmsField label="Key">
+                  <TmsInput
                     aria-label={`Team ${i + 1} key`}
                     value={team.key}
                     onChange={(e) => update(i, { key: e.target.value.toUpperCase() })}
                     placeholder="SALES"
-                    className="h-9 text-sm"
                   />
-                </div>
-                <div>
-                  <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Name</Label>
-                  <Input
+                </TmsField>
+                <TmsField label="Name">
+                  <TmsInput
                     aria-label={`Team ${i + 1} name`}
                     value={team.name}
                     onChange={(e) => update(i, { name: e.target.value })}
                     placeholder="Sales desk"
-                    className="h-9 text-sm"
                   />
-                </div>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8"
+                </TmsField>
+                <TmsIconButton
+                  shape="plain"
                   aria-label={`Remove team ${i + 1}`}
                   onClick={() => setTeams((prev) => prev.filter((_, j) => j !== i))}
                 >
                   <Trash2 size={14} />
-                </Button>
+                </TmsIconButton>
               </div>
 
-              <div>
-                <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Members</Label>
-                <div className="mt-1 flex flex-wrap items-center gap-1.5">
+              <TmsField label="Members">
+                <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6 }}>
                   {team.memberIds.map((id) => (
-                    <span key={id} className="inline-flex items-center gap-1 rounded-full border border-border bg-background px-2 py-0.5 text-xs">
+                    <span key={id} style={CHIP}>
                       {nameOf(id)}
-                      <button
-                        type="button"
+                      <TmsIconButton
+                        shape="plain"
                         aria-label={`Remove ${id} from team ${i + 1}`}
                         onClick={() => update(i, { memberIds: team.memberIds.filter((m) => m !== id) })}
-                        className="text-muted-foreground hover:text-foreground"
                       >
                         <X size={11} />
-                      </button>
+                      </TmsIconButton>
                     </span>
                   ))}
-                  <select
+                  <TmsSelect
                     aria-label={`Add member to team ${i + 1}`}
                     value=""
                     onChange={(e) => {
                       const id = e.target.value
                       if (id && !team.memberIds.includes(id)) update(i, { memberIds: [...team.memberIds, id] })
                     }}
-                    className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+                    style={{ width: 'auto' }}
                   >
                     <option value="">— add member —</option>
                     {staff.filter((p) => !team.memberIds.includes(p.id)).map((p) => (
                       <option key={p.id} value={p.id}>{nameOf(p.id)}</option>
                     ))}
-                  </select>
+                  </TmsSelect>
                 </div>
-              </div>
+              </TmsField>
 
-              <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+              <div className="tms-grid tms-grid-3">
                 {TEAM_SENDER_SLOTS.map((slot) => (
-                  <div key={slot}>
-                    <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">{TEAM_SENDER_LABELS[slot]}</Label>
-                    <Input
+                  <TmsField key={slot} label={TEAM_SENDER_LABELS[slot]}>
+                    <TmsInput
                       aria-label={`Team ${i + 1} ${TEAM_SENDER_LABELS[slot]}`}
                       value={team.senders[slot]}
                       onChange={(e) => update(i, { senders: { ...team.senders, [slot]: e.target.value } })}
                       placeholder="desk@bcatcorp.com"
-                      className="h-9 text-sm"
                     />
-                  </div>
+                  </TmsField>
                 ))}
               </div>
 
-              <div className="flex flex-wrap items-center gap-5">
-                <label className="flex items-center gap-2 text-sm" style={{ color: 'var(--ds-t2)' }}>
-                  <Switch
-                    aria-label={`Team ${i + 1} shows contact on tracking`}
-                    checked={team.showContactOnTracking}
-                    onCheckedChange={(v) => update(i, { showContactOnTracking: v })}
-                  />
-                  Print this desk&rsquo;s contact on the tracking page
-                </label>
-                <label className="flex items-center gap-2 text-sm" style={{ color: 'var(--ds-t2)' }}>
-                  <Switch
-                    aria-label={`Team ${i + 1} active`}
-                    checked={team.active}
-                    onCheckedChange={(v) => update(i, { active: v })}
-                  />
-                  Active
-                </label>
+              <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 20 }}>
+                <CheckRow
+                  ariaLabel={`Team ${i + 1} shows contact on tracking`}
+                  label={<>Print this desk&rsquo;s contact on the tracking page</>}
+                  checked={team.showContactOnTracking}
+                  onChange={(v) => update(i, { showContactOnTracking: v })}
+                />
+                <CheckRow
+                  ariaLabel={`Team ${i + 1} active`}
+                  label="Active"
+                  checked={team.active}
+                  onChange={(v) => update(i, { active: v })}
+                />
               </div>
-            </div>
+            </Panel>
           ))}
 
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="h-8 gap-1"
-            onClick={() => setTeams((prev) => [...prev, {
-              key: '', name: '', memberIds: [], senders: { ...BLANK_SENDERS }, showContactOnTracking: false, active: true,
-            }])}
-          >
-            <Plus size={14} /> Add team
-          </Button>
+          <div>
+            <TmsButton
+              size="sm"
+              onClick={() => setTeams((prev) => [...prev, {
+                key: '', name: '', memberIds: [], senders: { ...BLANK_SENDERS }, showContactOnTracking: false, active: true,
+              }])}
+            >
+              <Plus size={14} /> Add team
+            </TmsButton>
+          </div>
 
-          <p className="text-xs text-muted-foreground">
-            Sender addresses are stored now and used once e-mail sending is wired — the dev account&rsquo;s SES denies sending.
-          </p>
+          <Hint>Sender addresses are stored now and used once e-mail sending is wired — the dev account&rsquo;s SES denies sending.</Hint>
 
-          {error && <p className="text-xs text-destructive">{error}</p>}
-          <Button type="button" size="sm" className="h-8 gap-1" onClick={save} disabled={saving}>
-            <Save className="size-3.5" /> Save teams
-          </Button>
-        </div>
+          {error && <ErrorText>{error}</ErrorText>}
+          <div>
+            <TmsButton variant="primary" size="sm" onClick={save} disabled={saving}>
+              <Save size={14} /> Save teams
+            </TmsButton>
+          </div>
+        </Stack>
       )}
-    </div>
+    </SettingsCard>
   )
 }

@@ -65,6 +65,8 @@ const USER_POOL_ID = process.env.USER_POOL_ID ?? 'us-east-1_IbPKPNJC9'
 const OWNER_EMAIL = 'ryne@bcatcorp.com'
 const ADMIN_GROUP = 'ADMIN'
 const CARRIER_PAGE_GROUP = 'page-carriers'
+/** Step R: Carriers is a BROKERAGE page, so the one TMS grant opens it too. */
+const TMS_PAGE_GROUP = 'page-tms'
 const SETTINGS_ID = 'default'
 
 // Amplify derives GSI names from the plural model name and the key fields.
@@ -187,10 +189,10 @@ async function authorize(action: Action, identity?: AppSyncIdentity | null): Pro
 
   if (adminActions[action]) {
     if (!isAdmin) throw new Error(`Forbidden: ${action} requires owner or ADMIN`)
-  } else if (!isAdmin && !groups.includes(CARRIER_PAGE_GROUP)) {
+  } else if (!isAdmin && !groups.includes(CARRIER_PAGE_GROUP) && !groups.includes(TMS_PAGE_GROUP)) {
     // DELETE_DOCUMENT narrows further inside the action: a page-carriers user may
     // only delete a document they uploaded themselves.
-    throw new Error(`Forbidden: ${action} requires owner, ADMIN, or ${CARRIER_PAGE_GROUP}`)
+    throw new Error(`Forbidden: ${action} requires owner, ADMIN, ${CARRIER_PAGE_GROUP}, or ${TMS_PAGE_GROUP}`)
   }
 
   return { email, sub: identity.sub, groups, isAdmin }

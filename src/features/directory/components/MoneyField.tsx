@@ -1,6 +1,5 @@
 import { useState } from 'react'
-import { Label } from '@/components/ui/label'
-import { Input } from '@/components/ui/input'
+import { TmsField, TmsInput } from '@/features/tms/kit'
 import { parseCents, formatCents } from '@/lib/tmsDirectory'
 
 export function MoneyField({
@@ -41,27 +40,34 @@ export function MoneyField({
 
   const display = draft || (value != null ? formatCents(value) : '')
 
-  return (
-    <div className="space-y-1.5">
-      <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{label}</Label>
-      <div className="relative">
-        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground pointer-events-none">$</span>
-        <Input
-          type="text"
-          inputMode="decimal"
-          aria-label={label}
-          value={display}
-          placeholder={placeholder}
-          onFocus={() => {
-            if (!draft && value != null) setDraft(formatCents(value))
-          }}
-          onBlur={() => { commit() }}
-          onChange={(e) => setDraft(e.target.value)}
-          disabled={disabled}
-          className="h-9 pl-7 text-sm"
-        />
+  const field = (
+    <TmsInput
+      type="text"
+      inputMode="decimal"
+      aria-label={label ? undefined : 'Amount'}
+      value={display}
+      placeholder={placeholder}
+      onFocus={() => {
+        if (!draft && value != null) setDraft(formatCents(value))
+      }}
+      onBlur={() => { commit() }}
+      onChange={(e) => setDraft(e.target.value)}
+      disabled={disabled}
+    />
+  )
+
+  if (!label) {
+    return (
+      <div className="tms-field">
+        {field}
+        {(error || localError) && <span className="tms-field-error">{error || localError}</span>}
       </div>
-      {(error || localError) && <p className="text-xs text-destructive">{error || localError}</p>}
-    </div>
+    )
+  }
+
+  return (
+    <TmsField label={label} error={error || localError || undefined}>
+      {field}
+    </TmsField>
   )
 }

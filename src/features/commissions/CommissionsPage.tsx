@@ -1,5 +1,5 @@
 /**
- * `/commissions` — what each person is owed, who still has to agree to it, and the
+ * Commissions — what each person is owed, who still has to agree to it, and the
  * periods those agreed numbers were handed to payroll in.
  *
  * Three things this board deliberately does not do. It never decides the approval
@@ -9,17 +9,19 @@
  * It never re-computes a number: `netCents` is what the ledger says is owed, and the
  * page prints it. And paying a period moves no money; it records that payroll, which
  * lives somewhere else entirely, has happened.
+ *
+ * Step R re-skinned it onto the MVMNT kit as the Commissions tab of My Brokerage, so
+ * the page is a body: `BrokeragePage` owns the h1.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import type { CSSProperties, ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { Coins, Download, RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import {
+  TmsBadge, TmsButton, TmsDialog, TmsField, TmsInput, TmsSelect, TmsTabs, TmsTextarea,
+} from '@/features/tms/kit'
+import type { TmsTone } from '@/features/tms/kit'
 import { useAuth } from '@/hooks/useAuth'
 import {
   acceptCommissionCounter, approveCommission, approvePayPeriod, cancelCommission,
@@ -33,7 +35,6 @@ import { chicagoDateStr, formatDateTime } from '@/lib/date'
 import { saveBlob } from '@/lib/download'
 import { formatCents } from '@/lib/invoiceBuild'
 import { parseCents } from '@/lib/tmsDirectory'
-import { cn } from '@/lib/utils'
 import {
   COMMISSION_KINDS, COMMISSION_STATUSES, COMMISSION_TABS, commissionCsv, filterForCaller,
   kindLabel, monthLabel, monthOptions, needsReviewReason, rateLabel, roleLabel, sortForApproval,
@@ -50,11 +51,22 @@ type CommissionDialog =
   | { kind: 'cancel'; row: CommissionRecord }
   | { kind: 'pay'; period: CommissionPayPeriodRecord }
 
-const CARD = 'rounded-md border border-border bg-card p-4'
-const TH = 'px-2 py-2 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground'
-const TD = 'px-2 py-2 align-top'
-const MONEY = 'px-2 py-2 text-right tabular-nums align-top'
-const SELECT = 'h-8 rounded-md border border-input bg-background px-2 text-sm'
+const PANEL: CSSProperties = {
+  border: '1px solid var(--tms-border)', borderRadius: 'var(--tms-radius)',
+  background: 'var(--tms-card)', padding: 14,
+  display: 'flex', flexDirection: 'column', gap: 8,
+}
+const STACK: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 12 }
+const NUM: CSSProperties = { textAlign: 'right', fontVariantNumeric: 'tabular-nums' }
+const LIST: CSSProperties = { listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 8 }
+
+/** The board's own tone vocabulary onto the seven MVMNT badge colours. */
+const BADGE_TONES: Record<string, TmsTone> = {
+  default: 'green',
+  secondary: 'purple',
+  destructive: 'red',
+  outline: 'gray',
+}
 
 /**
  * Dollars typed by a person → integer cents, sign included.
@@ -68,6 +80,14 @@ function centsFromDollars(text: string): number {
   const value = parseCents(negative ? trimmed.slice(1) : trimmed)
   if (value == null) throw new Error('Enter an amount')
   return negative ? -value : value
+}
+
+function Table({ children }: { children: ReactNode }) {
+  return (
+    <div className="tms-table-wrap">
+      <table className="tms-table">{children}</table>
+    </div>
+  )
 }
 
 export function CommissionsPage() {
@@ -185,101 +205,83 @@ export function CommissionsPage() {
   }
 
   return (
-    <div className="flex h-full flex-col">
-      <header className="flex flex-wrap items-center gap-2 border-b border-border px-5 py-3">
-        <Coins size={18} />
-        <h1 className="text-lg font-semibold">Commissions</h1>
+    <div style={STACK}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
         {tab !== 'pay-periods' && (
-          <select
+          <TmsSelect
             aria-label="Commission month"
-            className={cn(SELECT, 'ml-2')}
             value={month}
             onChange={(e) => setMonth(e.target.value)}
+            style={{ width: 'auto' }}
           >
             {months.map((ym) => <option key={ym} value={ym}>{monthLabel(ym)}</option>)}
-          </select>
+          </TmsSelect>
         )}
-        <Button
-          variant="ghost"
-          size="icon"
-          className="ml-auto h-9 w-9"
+        <TmsButton
+          size="sm"
+          style={{ marginLeft: 'auto' }}
           aria-label="Refresh commissions"
+          disabled={loading}
           onClick={() => void load()}
         >
-          <RefreshCw size={14} className={loading ? 'animate-spin' : undefined} />
-        </Button>
-      </header>
-
-      <nav role="tablist" aria-label="Commission views" className="flex gap-1 overflow-x-auto border-b border-border px-5">
-        {COMMISSION_TABS.map((t) => (
-          <button
-            key={t.key}
-            role="tab"
-            type="button"
-            aria-selected={tab === t.key}
-            aria-label={t.label}
-            onClick={() => setTab(t.key)}
-            className={cn(
-              'flex items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-2 text-sm',
-              tab === t.key ? 'border-primary font-medium text-foreground' : 'border-transparent text-muted-foreground',
-            )}
-          >
-            {t.label}
-            <Badge variant="outline" className="text-[10px]">{counts[t.key]}</Badge>
-          </button>
-        ))}
-      </nav>
-
-      <div className="flex-1 space-y-3 overflow-auto px-5 py-3">
-        {tab === 'mine' && (
-          <MineTab
-            rows={mine}
-            caller={caller}
-            busy={busy}
-            month={month}
-            onCounter={(row) => setDialog({ kind: 'counter', row })}
-            onAccept={(row) => act('Counter accepted', () => acceptCommissionCounter({ commissionId: row.id }))}
-          />
-        )}
-
-        {tab === 'to-approve' && (
-          <ApproveTab
-            rows={toApprove}
-            caller={caller}
-            busy={busy}
-            month={month}
-            onApprove={(row) => act('Approved', () => approveCommission({ commissionId: row.id }))}
-            onAccept={(row) => act('Counter accepted', () => acceptCommissionCounter({ commissionId: row.id }))}
-            onCounter={(row) => setDialog({ kind: 'counter', row })}
-            onOverride={(row) => setDialog({ kind: 'override', row })}
-            onCancel={(row) => setDialog({ kind: 'cancel', row })}
-          />
-        )}
-
-        {tab === 'pay-periods' && (
-          <PayPeriodsTab
-            periods={periods}
-            busy={busy}
-            onOpen={() => act('Pay period opened', () => openPayPeriod({}))}
-            onSubmit={(p) => act('Pay period submitted', () => submitPayPeriod({ payPeriodId: p.id }))}
-            onApprove={(p) => act('Pay period approved', () => approvePayPeriod({ payPeriodId: p.id }))}
-            onPay={(p) => setDialog({ kind: 'pay', period: p })}
-            onStatement={openStatement}
-          />
-        )}
-
-        {tab === 'history' && (
-          <HistoryTab
-            rows={history}
-            month={month}
-            statusFacet={statusFacet}
-            kindFacet={kindFacet}
-            onStatus={setStatusFacet}
-            onKind={setKindFacet}
-            onCsv={exportCsv}
-          />
-        )}
+          <RefreshCw size={14} />
+        </TmsButton>
       </div>
+
+      <TmsTabs
+        tabs={COMMISSION_TABS.map((t) => ({ key: t.key, label: t.label, count: counts[t.key] }))}
+        active={tab}
+        onSelect={(key) => setTab(key as CommissionTabKey)}
+      />
+
+      {tab === 'mine' && (
+        <MineTab
+          rows={mine}
+          caller={caller}
+          busy={busy}
+          month={month}
+          onCounter={(row) => setDialog({ kind: 'counter', row })}
+          onAccept={(row) => act('Counter accepted', () => acceptCommissionCounter({ commissionId: row.id }))}
+        />
+      )}
+
+      {tab === 'to-approve' && (
+        <ApproveTab
+          rows={toApprove}
+          caller={caller}
+          busy={busy}
+          month={month}
+          onApprove={(row) => act('Approved', () => approveCommission({ commissionId: row.id }))}
+          onAccept={(row) => act('Counter accepted', () => acceptCommissionCounter({ commissionId: row.id }))}
+          onCounter={(row) => setDialog({ kind: 'counter', row })}
+          onOverride={(row) => setDialog({ kind: 'override', row })}
+          onCancel={(row) => setDialog({ kind: 'cancel', row })}
+        />
+      )}
+
+      {tab === 'pay-periods' && (
+        <PayPeriodsTab
+          periods={periods}
+          busy={busy}
+          onOpen={() => act('Pay period opened', () => openPayPeriod({}))}
+          onSubmit={(p) => act('Pay period submitted', () => submitPayPeriod({ payPeriodId: p.id }))}
+          onApprove={(p) => act('Pay period approved', () => approvePayPeriod({ payPeriodId: p.id }))}
+          onPay={(p) => setDialog({ kind: 'pay', period: p })}
+          onStatement={openStatement}
+        />
+      )}
+
+      {tab === 'history' && (
+        <HistoryTab
+          rows={history}
+          month={month}
+          statusFacet={statusFacet}
+          kindFacet={kindFacet}
+          onStatus={setStatusFacet}
+          onKind={setKindFacet}
+          onCsv={exportCsv}
+        />
+      )}
 
       {dialog?.kind === 'counter' && (
         <AmountNoteDialog
@@ -342,18 +344,18 @@ export function CommissionsPage() {
 
 function SwitchedOff({ isAdmin, deployed }: { isAdmin: boolean; deployed: boolean }) {
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
-      <Coins size={28} className="text-muted-foreground" />
-      <h1 className="text-lg font-semibold">Commissions are switched off</h1>
-      <p className="max-w-md text-sm text-muted-foreground">
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '64px 24px', textAlign: 'center' }}>
+      <Coins size={28} className="tms-muted" />
+      <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>Commissions are switched off</h2>
+      <p className="tms-muted" style={{ maxWidth: 440, margin: 0, fontSize: 14 }}>
         {deployed
           ? 'Nothing is computed, written or shown until an admin turns them on and saves a plan.'
           : 'This backend predates the commission tables, so there is nothing to read yet.'}
       </p>
       {isAdmin && deployed && (
-        <Button asChild size="sm" variant="outline" className="mt-2">
-          <Link to="/settings" aria-label="Open commission settings">Open Settings</Link>
-        </Button>
+        <Link to="/tms/brokerage" aria-label="Open commission settings" className="tms-btn tms-btn-secondary tms-btn-sm">
+          Open Settings
+        </Link>
       )}
     </div>
   )
@@ -382,21 +384,22 @@ function CommissionRow({
   const state = commissionState(row, caller)
   const reason = showReview ? needsReviewReason(row) : null
   const events = row.events ?? []
+  const flagged = row.needsReview === true && showReview === true
 
   return (
-    <li className={cn(CARD, 'space-y-2', row.needsReview && showReview && 'border-amber-500/60')}>
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="font-medium">{row.shipmentNumber ?? row.invoiceNumber ?? row.orderId}</span>
-        <span className="text-sm text-muted-foreground">{row.customerName ?? '—'}</span>
-        <Badge variant="outline" className="text-[10px]">{roleLabel(row)}</Badge>
-        {row.kind && row.kind !== 'EARNED' && (
-          <Badge variant="secondary" className="text-[10px]">{kindLabel(row.kind)}</Badge>
-        )}
-        <Badge variant={statusTone(row.status)}>{statusLabel(row.status)}</Badge>
-        <span className="ml-auto text-base font-semibold tabular-nums">{formatCents(row.netCents)}</span>
+    <li style={flagged ? { ...PANEL, borderColor: 'var(--tms-badge-orange)' } : PANEL}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
+        <span style={{ fontWeight: 500 }}>{row.shipmentNumber ?? row.invoiceNumber ?? row.orderId}</span>
+        <span className="tms-muted" style={{ fontSize: 14 }}>{row.customerName ?? '—'}</span>
+        <TmsBadge tone="gray">{roleLabel(row)}</TmsBadge>
+        {row.kind && row.kind !== 'EARNED' && <TmsBadge tone="purple">{kindLabel(row.kind)}</TmsBadge>}
+        <TmsBadge tone={BADGE_TONES[statusTone(row.status)] ?? 'gray'}>{statusLabel(row.status)}</TmsBadge>
+        <span style={{ marginLeft: 'auto', fontSize: 16, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
+          {formatCents(row.netCents)}
+        </span>
       </div>
 
-      <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs sm:grid-cols-4">
+      <dl className="tms-grid tms-grid-4" style={{ margin: 0, fontSize: 12, gap: 8 }}>
         <Field label="Rep" value={row.repName ?? row.repId} />
         <Field label="Basis" value={`${row.basis ?? '—'} · ${formatCents(row.basisCents)}`} />
         <Field label="Rate" value={rateLabel(row)} />
@@ -404,27 +407,29 @@ function CommissionRow({
       </dl>
 
       {reason && (
-        <p className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs">
+        <p style={{ margin: 0, border: '1px solid var(--tms-badge-orange)', borderRadius: 4, padding: '4px 8px', fontSize: 12 }}>
           Needs a look: this one {reason}.
         </p>
       )}
 
       {row.counterCents != null && (
-        <p className="text-xs text-muted-foreground">
+        <p className="tms-field-hint" style={{ margin: 0 }}>
           Countered at {formatCents(row.counterCents)} by {row.counterBy ?? 'unknown'}
           {row.counterNote ? ` — ${row.counterNote}` : ''}
         </p>
       )}
       {row.overrideCents != null && (
-        <p className="text-xs text-muted-foreground">
+        <p className="tms-field-hint" style={{ margin: 0 }}>
           Overridden to {formatCents(row.overrideCents)} by {row.overrideBy ?? 'unknown'}
           {row.overrideNote ? ` — ${row.overrideNote}` : ''}
         </p>
       )}
-      {row.cancelReason && <p className="text-xs text-destructive">Cancelled: {row.cancelReason}</p>}
+      {row.cancelReason && (
+        <p style={{ margin: 0, fontSize: 12, color: 'var(--tms-badge-red)' }}>Cancelled: {row.cancelReason}</p>
+      )}
 
       {events.length > 0 && (
-        <ul className="space-y-0.5 text-xs text-muted-foreground">
+        <ul className="tms-muted" style={{ ...LIST, gap: 2, fontSize: 12 }}>
           {events.map((event, i) => (
             <li key={`${event.at}:${i}`}>
               {formatDateTime(event.at)} · {event.action} · {event.by}
@@ -435,31 +440,31 @@ function CommissionRow({
         </ul>
       )}
 
-      <div className="flex flex-wrap gap-2">
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
         {onApprove && state.canApprove && (
-          <Button size="sm" aria-label={`Approve ${row.id}`} disabled={busy} onClick={() => onApprove(row)}>
+          <TmsButton variant="primary" size="sm" aria-label={`Approve ${row.id}`} disabled={busy} onClick={() => onApprove(row)}>
             Approve
-          </Button>
+          </TmsButton>
         )}
         {onAccept && state.canAcceptCounter && (
-          <Button size="sm" aria-label={`Accept counter on ${row.id}`} disabled={busy} onClick={() => onAccept(row)}>
+          <TmsButton variant="primary" size="sm" aria-label={`Accept counter on ${row.id}`} disabled={busy} onClick={() => onAccept(row)}>
             Accept
-          </Button>
+          </TmsButton>
         )}
         {onCounter && state.canCounter && (
-          <Button size="sm" variant="outline" aria-label={`Counter ${row.id}`} disabled={busy} onClick={() => onCounter(row)}>
+          <TmsButton size="sm" aria-label={`Counter ${row.id}`} disabled={busy} onClick={() => onCounter(row)}>
             Counter
-          </Button>
+          </TmsButton>
         )}
         {onOverride && state.canOverride && (
-          <Button size="sm" variant="outline" aria-label={`Override ${row.id}`} disabled={busy} onClick={() => onOverride(row)}>
+          <TmsButton size="sm" aria-label={`Override ${row.id}`} disabled={busy} onClick={() => onOverride(row)}>
             Override
-          </Button>
+          </TmsButton>
         )}
         {onCancel && state.canCancel && (
-          <Button size="sm" variant="destructive" aria-label={`Cancel ${row.id}`} disabled={busy} onClick={() => onCancel(row)}>
+          <TmsButton size="sm" variant="destructive" aria-label={`Cancel ${row.id}`} disabled={busy} onClick={() => onCancel(row)}>
             Cancel
-          </Button>
+          </TmsButton>
         )}
       </div>
     </li>
@@ -478,13 +483,13 @@ function MineTab({ rows, caller, busy, month, onCounter, onAccept }: {
 }) {
   const total = rows.reduce((sum, r) => (r.status === 'CANCELLED' ? sum : sum + r.netCents), 0)
   return (
-    <div className="space-y-3">
-      <p className="text-sm text-muted-foreground">
+    <div style={STACK}>
+      <p className="tms-muted" style={{ margin: 0, fontSize: 14 }}>
         {rows.length === 0
           ? `Nothing was earned in ${monthLabel(month)}.`
           : `${rows.length} row${rows.length === 1 ? '' : 's'} · ${formatCents(total)} in ${monthLabel(month)}.`}
       </p>
-      <ul className="space-y-2">
+      <ul style={LIST}>
         {rows.map((row) => (
           <CommissionRow
             key={row.id}
@@ -517,13 +522,13 @@ function ApproveTab({
 }) {
   const review = rows.filter((r) => r.needsReview).length
   return (
-    <div className="space-y-3">
-      <p className="text-sm text-muted-foreground">
+    <div style={STACK}>
+      <p className="tms-muted" style={{ margin: 0, fontSize: 14 }}>
         {rows.length === 0
           ? `Nothing is waiting on you in ${monthLabel(month)}.`
           : `${rows.length} waiting${review > 0 ? ` · ${review} need a look first` : ''}.`}
       </p>
-      <ul className="space-y-2">
+      <ul style={LIST}>
         {rows.map((row) => (
           <CommissionRow
             key={row.id}
@@ -555,57 +560,57 @@ function PayPeriodsTab({ periods, busy, onOpen, onSubmit, onApprove, onPay, onSt
   onStatement: (payPeriodId: string, repId: string) => void
 }) {
   return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <Button size="sm" aria-label="Open a pay period" disabled={busy} onClick={onOpen}>
+    <div style={STACK}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
+        <TmsButton variant="primary" size="sm" aria-label="Open a pay period" disabled={busy} onClick={onOpen}>
           Open a period
-        </Button>
-        <p className="text-sm text-muted-foreground">
+        </TmsButton>
+        <p className="tms-muted" style={{ margin: 0, fontSize: 14 }}>
           Paying a period <strong>records that payroll happened elsewhere</strong>. No money moves from here.
         </p>
       </div>
 
       {periods.length === 0 && (
-        <p className={cn(CARD, 'text-sm text-muted-foreground')}>No pay period has been opened yet.</p>
+        <p className="tms-muted" style={{ ...PANEL, margin: 0, fontSize: 14 }}>No pay period has been opened yet.</p>
       )}
 
-      <ul className="space-y-3">
+      <ul style={{ ...LIST, gap: 12 }}>
         {periods.map((period) => {
           const status = period.status ?? 'OPEN'
           return (
-            <li key={period.id} className={cn(CARD, 'space-y-2')}>
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="font-medium">{period.periodStart} → {period.periodEnd}</span>
-                <Badge variant={status === 'PAID' ? 'default' : 'outline'}>{status}</Badge>
-                <span className="text-sm text-muted-foreground">pays {period.payDate}</span>
-                <span className="ml-auto text-base font-semibold tabular-nums">
+            <li key={period.id} style={PANEL}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontWeight: 500 }}>{period.periodStart} → {period.periodEnd}</span>
+                <TmsBadge tone={status === 'PAID' ? 'green' : 'gray'}>{status}</TmsBadge>
+                <span className="tms-muted" style={{ fontSize: 14 }}>pays {period.payDate}</span>
+                <span style={{ marginLeft: 'auto', fontSize: 16, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
                   {formatCents(period.totalCents ?? 0)}
                 </span>
               </div>
-              <p className="text-xs text-muted-foreground">
+              <p className="tms-field-hint" style={{ margin: 0 }}>
                 {period.commissionCount ?? 0} commission{(period.commissionCount ?? 0) === 1 ? '' : 's'}
                 {period.paidAt ? ` · paid ${period.paidAt}` : ''}
                 {period.paymentRef ? ` · ref ${period.paymentRef}` : ''}
               </p>
 
               {(period.byRep ?? []).length > 0 && (
-                <table className="w-full text-sm">
+                <Table>
                   <thead>
-                    <tr className="border-b border-border">
-                      <th className={TH} scope="col">Rep</th>
-                      <th className={cn(TH, 'text-right')} scope="col">Rows</th>
-                      <th className={cn(TH, 'text-right')} scope="col">Owed</th>
-                      <th className={TH} scope="col"><span className="sr-only">Statement</span></th>
+                    <tr>
+                      <th scope="col">Rep</th>
+                      <th scope="col" style={NUM}>Rows</th>
+                      <th scope="col" style={NUM}>Owed</th>
+                      <th scope="col" aria-label="Statement" />
                     </tr>
                   </thead>
                   <tbody>
                     {(period.byRep ?? []).map((rep) => (
-                      <tr key={rep.repId} className="border-b border-border/60">
-                        <td className={TD}>{rep.repName ?? rep.repId}</td>
-                        <td className={MONEY}>{rep.count}</td>
-                        <td className={MONEY}>{formatCents(rep.amountCents)}</td>
-                        <td className={cn(TD, 'text-right')}>
-                          <Button
+                      <tr key={rep.repId}>
+                        <td>{rep.repName ?? rep.repId}</td>
+                        <td style={NUM}>{rep.count}</td>
+                        <td style={NUM}>{formatCents(rep.amountCents)}</td>
+                        <td style={{ textAlign: 'right' }}>
+                          <TmsButton
                             size="sm"
                             variant="ghost"
                             aria-label={`Statement for ${rep.repName ?? rep.repId}`}
@@ -613,29 +618,29 @@ function PayPeriodsTab({ periods, busy, onOpen, onSubmit, onApprove, onPay, onSt
                             onClick={() => onStatement(period.id, rep.repId)}
                           >
                             Statement
-                          </Button>
+                          </TmsButton>
                         </td>
                       </tr>
                     ))}
                   </tbody>
-                </table>
+                </Table>
               )}
 
-              <div className="flex flex-wrap gap-2">
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                 {status === 'OPEN' && (
-                  <Button size="sm" variant="outline" aria-label={`Submit ${period.id}`} disabled={busy} onClick={() => onSubmit(period)}>
+                  <TmsButton size="sm" aria-label={`Submit ${period.id}`} disabled={busy} onClick={() => onSubmit(period)}>
                     Submit
-                  </Button>
+                  </TmsButton>
                 )}
                 {status === 'PENDING_APPROVAL' && (
-                  <Button size="sm" aria-label={`Approve ${period.id}`} disabled={busy} onClick={() => onApprove(period)}>
+                  <TmsButton variant="primary" size="sm" aria-label={`Approve ${period.id}`} disabled={busy} onClick={() => onApprove(period)}>
                     Approve
-                  </Button>
+                  </TmsButton>
                 )}
                 {status === 'APPROVED' && (
-                  <Button size="sm" aria-label={`Pay ${period.id}`} disabled={busy} onClick={() => onPay(period)}>
+                  <TmsButton variant="primary" size="sm" aria-label={`Pay ${period.id}`} disabled={busy} onClick={() => onPay(period)}>
                     Pay
-                  </Button>
+                  </TmsButton>
                 )}
               </div>
             </li>
@@ -658,68 +663,70 @@ function HistoryTab({ rows, month, statusFacet, kindFacet, onStatus, onKind, onC
   onCsv: () => void
 }) {
   return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">Status</Label>
-        <select
-          aria-label="Status"
-          className={SELECT}
-          value={statusFacet}
-          onChange={(e) => onStatus(e.target.value as CommissionStatus | '')}
-        >
-          <option value="">Every status</option>
-          {COMMISSION_STATUSES.map((s) => <option key={s} value={s}>{statusLabel(s)}</option>)}
-        </select>
+    <div style={STACK}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-end', gap: 8 }}>
+        <TmsField label="Status">
+          <TmsSelect
+            aria-label="Status"
+            value={statusFacet}
+            onChange={(e) => onStatus(e.target.value as CommissionStatus | '')}
+            style={{ width: 'auto' }}
+          >
+            <option value="">Every status</option>
+            {COMMISSION_STATUSES.map((s) => <option key={s} value={s}>{statusLabel(s)}</option>)}
+          </TmsSelect>
+        </TmsField>
 
-        <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">Kind</Label>
-        <select
-          aria-label="Kind"
-          className={SELECT}
-          value={kindFacet}
-          onChange={(e) => onKind(e.target.value as CommissionKind | '')}
-        >
-          <option value="">Every kind</option>
-          {COMMISSION_KINDS.map((k) => <option key={k} value={k}>{kindLabel(k)}</option>)}
-        </select>
+        <TmsField label="Kind">
+          <TmsSelect
+            aria-label="Kind"
+            value={kindFacet}
+            onChange={(e) => onKind(e.target.value as CommissionKind | '')}
+            style={{ width: 'auto' }}
+          >
+            <option value="">Every kind</option>
+            {COMMISSION_KINDS.map((k) => <option key={k} value={k}>{kindLabel(k)}</option>)}
+          </TmsSelect>
+        </TmsField>
 
-        <Button size="sm" variant="outline" className="ml-auto" aria-label="Export commissions CSV" onClick={onCsv}>
-          <Download size={14} className="mr-1" /> CSV
-        </Button>
+        <TmsButton size="sm" style={{ marginLeft: 'auto' }} aria-label="Export commissions CSV" onClick={onCsv}>
+          <Download size={14} /> CSV
+        </TmsButton>
       </div>
 
-      <table className="w-full text-sm">
+      <Table>
         <thead>
-          <tr className="border-b border-border">
-            <th className={TH} scope="col">Shipment</th>
-            <th className={TH} scope="col">Customer</th>
-            <th className={TH} scope="col">Rep</th>
-            <th className={TH} scope="col">Role</th>
-            <th className={TH} scope="col">Kind</th>
-            <th className={TH} scope="col">Status</th>
-            <th className={cn(TH, 'text-right')} scope="col">Net</th>
+          <tr>
+            <th scope="col">Shipment</th>
+            <th scope="col">Customer</th>
+            <th scope="col">Rep</th>
+            <th scope="col">Role</th>
+            <th scope="col">Kind</th>
+            <th scope="col">Status</th>
+            <th scope="col" style={NUM}>Net</th>
           </tr>
         </thead>
         <tbody>
           {rows.length === 0 && (
             <tr>
-              <td colSpan={7} className="py-8 text-center text-sm text-muted-foreground">
+              <td colSpan={7} className="tms-muted" style={{ padding: '32px 0', textAlign: 'center' }}>
                 Nothing matches in {monthLabel(month)}.
               </td>
             </tr>
           )}
           {rows.map((row) => (
-            <tr key={row.id} className="border-b border-border/60">
-              <td className={TD}>{row.shipmentNumber ?? row.orderId}</td>
-              <td className={TD}>{row.customerName ?? '—'}</td>
-              <td className={TD}>{row.repName ?? row.repId}</td>
-              <td className={TD}>{roleLabel(row)}</td>
-              <td className={TD}>{kindLabel(row.kind)}</td>
-              <td className={TD}>{statusLabel(row.status)}</td>
-              <td className={MONEY}>{formatCents(row.netCents)}</td>
+            <tr key={row.id}>
+              <td>{row.shipmentNumber ?? row.orderId}</td>
+              <td>{row.customerName ?? '—'}</td>
+              <td>{row.repName ?? row.repId}</td>
+              <td>{roleLabel(row)}</td>
+              <td>{kindLabel(row.kind)}</td>
+              <td>{statusLabel(row.status)}</td>
+              <td style={NUM}>{formatCents(row.netCents)}</td>
             </tr>
           ))}
         </tbody>
-      </table>
+      </Table>
     </div>
   )
 }
@@ -792,62 +799,60 @@ export function InvoiceCommissionCard({
   }
 
   return (
-    <section className={CARD}>
-      <div className="mb-2 flex items-center gap-2">
-        <h2 className="text-sm font-semibold">Commissions</h2>
-        <Button asChild size="sm" variant="ghost">
-          <Link to="/commissions" aria-label="Open the commission desk">Commission desk</Link>
-        </Button>
+    <section style={PANEL}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>Commissions</h3>
+        <Link to="/tms/brokerage/commissions" aria-label="Open the commission desk" className="tms-btn tms-btn-ghost tms-btn-sm">
+          Commission desk
+        </Link>
         {mayAct && (
-          <div className="ml-auto flex gap-2">
-            <Button size="sm" variant="outline" aria-label="Preview commissions" disabled={busy} onClick={runPreview}>
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+            <TmsButton size="sm" aria-label="Preview commissions" disabled={busy} onClick={runPreview}>
               Preview
-            </Button>
-            <Button size="sm" variant="outline" aria-label="Recompute commissions" disabled={busy} onClick={runRecompute}>
-              <RefreshCw size={14} className="mr-1" /> Recompute
-            </Button>
+            </TmsButton>
+            <TmsButton size="sm" aria-label="Recompute commissions" disabled={busy} onClick={runRecompute}>
+              <RefreshCw size={14} /> Recompute
+            </TmsButton>
           </div>
         )}
       </div>
 
       {rows.length === 0 && (
-        <p className="text-sm text-muted-foreground">No commission has been written against this invoice.</p>
+        <p className="tms-muted" style={{ margin: 0, fontSize: 14 }}>No commission has been written against this invoice.</p>
       )}
       {rows.length > 0 && (
-        <table className="w-full text-sm">
+        <Table>
           <thead>
-            <tr className="border-b border-border">
-              <th className={TH} scope="col">Rep</th>
-              <th className={TH} scope="col">Role</th>
-              <th className={TH} scope="col">Status</th>
-              <th className={cn(TH, 'text-right')} scope="col">Amount</th>
+            <tr>
+              <th scope="col">Rep</th>
+              <th scope="col">Role</th>
+              <th scope="col">Status</th>
+              <th scope="col" style={NUM}>Amount</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((row) => (
-              <tr key={row.id} className="border-b border-border/60">
-                <td className={TD}>{row.repName ?? row.repId}</td>
-                <td className={TD}>{roleLabel(row)}</td>
-                <td className={TD}>
-                  <Badge variant={statusTone(row.status)} className="text-[10px]">{statusLabel(row.status)}</Badge>
-                </td>
-                <td className={MONEY}>{formatCents(row.netCents)}</td>
+              <tr key={row.id}>
+                <td>{row.repName ?? row.repId}</td>
+                <td>{roleLabel(row)}</td>
+                <td><TmsBadge tone={BADGE_TONES[statusTone(row.status)] ?? 'gray'}>{statusLabel(row.status)}</TmsBadge></td>
+                <td style={NUM}>{formatCents(row.netCents)}</td>
               </tr>
             ))}
           </tbody>
-        </table>
+        </Table>
       )}
 
       {preview && (
-        <div className="mt-3 rounded border border-dashed border-border p-2">
-          <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+        <div style={{ border: '1px dashed var(--tms-border)', borderRadius: 4, padding: 8 }}>
+          <p className="tms-field-label" style={{ margin: 0, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.04em' }}>
             What the plans say today — computed, not written
           </p>
-          {previewNote && <p className="mt-1 text-xs text-muted-foreground">{previewNote}</p>}
+          {previewNote && <p className="tms-field-hint" style={{ margin: '4px 0 0' }}>{previewNote}</p>}
           {preview.length === 0 && !previewNote && (
-            <p className="mt-1 text-xs text-muted-foreground">The plans pay nothing on this order.</p>
+            <p className="tms-field-hint" style={{ margin: '4px 0 0' }}>The plans pay nothing on this shipment.</p>
           )}
-          <ul className="mt-1 space-y-0.5 text-xs">
+          <ul style={{ ...LIST, gap: 2, marginTop: 4, fontSize: 12 }}>
             {preview.map((row) => (
               <li key={row.id}>
                 {row.repName ?? row.repId} · {roleLabel(row)} · {formatCents(row.netCents)}
@@ -893,49 +898,47 @@ function AmountNoteDialog({
   }
 
   return (
-    <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader><DialogTitle>{title}</DialogTitle></DialogHeader>
-        <p className="text-sm text-muted-foreground">{description}</p>
-        <div>
-          <Label htmlFor="commission-amount" className="text-xs uppercase tracking-wider text-muted-foreground">
-            Amount (dollars)
-          </Label>
-          <Input
-            id="commission-amount"
-            aria-label="Amount in dollars"
-            inputMode="decimal"
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-            className="mt-1"
-          />
-        </div>
-        <div>
-          <Label htmlFor="commission-note" className="text-xs uppercase tracking-wider text-muted-foreground">
-            {noteLabel}
-          </Label>
-          <Textarea
-            id="commission-note"
-            aria-label={noteLabel}
-            rows={3}
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            className="mt-1"
-          />
-        </div>
-        {error && <p className="text-sm text-destructive">{error}</p>}
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose} disabled={busy} aria-label="Cancel">Cancel</Button>
-          <Button
+    <TmsDialog
+      open
+      onOpenChange={(open) => { if (!open) onClose() }}
+      title={title}
+      description={description}
+      footer={
+        <>
+          <TmsButton onClick={onClose} disabled={busy} aria-label="Cancel">Cancel</TmsButton>
+          <TmsButton
+            variant="primary"
             aria-label={confirmLabel}
             disabled={busy || amount.trim().length === 0 || (noteRequired && note.trim().length === 0)}
             onClick={confirm}
           >
             {confirmLabel}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          </TmsButton>
+        </>
+      }
+    >
+      <div style={STACK}>
+        <TmsField label="Amount (dollars)" htmlFor="commission-amount">
+          <TmsInput
+            id="commission-amount"
+            aria-label="Amount in dollars"
+            inputMode="decimal"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+          />
+        </TmsField>
+        <TmsField label={noteLabel} htmlFor="commission-note">
+          <TmsTextarea
+            id="commission-note"
+            aria-label={noteLabel}
+            rows={3}
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+          />
+        </TmsField>
+        {error && <p style={{ margin: 0, fontSize: 14, color: 'var(--tms-badge-red)' }}>{error}</p>}
+      </div>
+    </TmsDialog>
   )
 }
 
@@ -950,36 +953,35 @@ function ReasonPrompt({ title, description, label, confirmLabel, busy, onClose, 
 }) {
   const [reason, setReason] = useState('')
   return (
-    <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader><DialogTitle>{title}</DialogTitle></DialogHeader>
-        <p className="text-sm text-muted-foreground">{description}</p>
-        <div>
-          <Label htmlFor="commission-reason" className="text-xs uppercase tracking-wider text-muted-foreground">
-            {label}
-          </Label>
-          <Textarea
-            id="commission-reason"
-            aria-label={label}
-            rows={3}
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-            className="mt-1"
-          />
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose} disabled={busy} aria-label="Cancel">Cancel</Button>
-          <Button
+    <TmsDialog
+      open
+      onOpenChange={(open) => { if (!open) onClose() }}
+      title={title}
+      description={description}
+      footer={
+        <>
+          <TmsButton onClick={onClose} disabled={busy} aria-label="Cancel">Cancel</TmsButton>
+          <TmsButton
             variant="destructive"
             aria-label={confirmLabel}
             disabled={busy || reason.trim().length === 0}
             onClick={() => onConfirm(reason.trim())}
           >
             {confirmLabel}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          </TmsButton>
+        </>
+      }
+    >
+      <TmsField label={label} htmlFor="commission-reason">
+        <TmsTextarea
+          id="commission-reason"
+          aria-label={label}
+          rows={3}
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+        />
+      </TmsField>
+    </TmsDialog>
   )
 }
 
@@ -994,58 +996,53 @@ function PayPeriodDialog({ period, today, busy, onClose, onConfirm }: {
   const [reference, setReference] = useState('')
 
   return (
-    <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader><DialogTitle>Record {period.periodStart} → {period.periodEnd} as paid</DialogTitle></DialogHeader>
-        <p className="text-sm text-muted-foreground">
-          This records that payroll has already paid {formatCents(period.totalCents ?? 0)} elsewhere. No money moves
-          from here, so the payroll reference is what ties the two records together.
-        </p>
-        <div>
-          <Label htmlFor="period-paid-at" className="text-xs uppercase tracking-wider text-muted-foreground">
-            Paid date
-          </Label>
-          <Input
-            id="period-paid-at"
-            type="date"
-            aria-label="Paid date"
-            value={paidAt}
-            onChange={(e) => setPaidAt(e.target.value)}
-            className="mt-1"
-          />
-        </div>
-        <div>
-          <Label htmlFor="period-reference" className="text-xs uppercase tracking-wider text-muted-foreground">
-            Payroll reference
-          </Label>
-          <Input
-            id="period-reference"
-            aria-label="Payroll reference"
-            value={reference}
-            onChange={(e) => setReference(e.target.value)}
-            className="mt-1"
-          />
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose} disabled={busy} aria-label="Cancel">Cancel</Button>
-          <Button
+    <TmsDialog
+      open
+      onOpenChange={(open) => { if (!open) onClose() }}
+      title={`Record ${period.periodStart} → ${period.periodEnd} as paid`}
+      description={`This records that payroll has already paid ${formatCents(period.totalCents ?? 0)} elsewhere. No money moves from here, so the payroll reference is what ties the two records together.`}
+      footer={
+        <>
+          <TmsButton onClick={onClose} disabled={busy} aria-label="Cancel">Cancel</TmsButton>
+          <TmsButton
+            variant="primary"
             aria-label="Record as paid"
             disabled={busy || reference.trim().length === 0 || paidAt.trim().length === 0}
             onClick={() => onConfirm(paidAt, reference.trim())}
           >
             Record as paid
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          </TmsButton>
+        </>
+      }
+    >
+      <div style={STACK}>
+        <TmsField label="Paid date" htmlFor="period-paid-at">
+          <TmsInput
+            id="period-paid-at"
+            type="date"
+            aria-label="Paid date"
+            value={paidAt}
+            onChange={(e) => setPaidAt(e.target.value)}
+          />
+        </TmsField>
+        <TmsField label="Payroll reference" htmlFor="period-reference">
+          <TmsInput
+            id="period-reference"
+            aria-label="Payroll reference"
+            value={reference}
+            onChange={(e) => setReference(e.target.value)}
+          />
+        </TmsField>
+      </div>
+    </TmsDialog>
   )
 }
 
 function Field({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <dt className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</dt>
-      <dd>{value}</dd>
+      <dt className="tms-field-label" style={{ textTransform: 'uppercase', letterSpacing: '.04em' }}>{label}</dt>
+      <dd style={{ margin: 0 }}>{value}</dd>
     </div>
   )
 }

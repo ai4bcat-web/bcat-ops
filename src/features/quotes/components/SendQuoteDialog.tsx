@@ -16,12 +16,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, Copy, Link2, Loader2, Send } from 'lucide-react'
 import { toast } from 'sonner'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Checkbox } from '@/components/ui/checkbox'
-import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { TmsBadge, TmsButton, TmsDialog, TmsField, TmsTextarea } from '@/features/tms/kit'
 import {
   counterQuote, getTmsSettings, graphqlErrorText, listCustomers, listDivisions, sendQuote,
   type QuoteSendResult,
@@ -33,6 +28,23 @@ import { quoteLinkUrl } from '../quoteViews'
 import type { CustomerRecord, Division, QuoteRecord, TmsSettings } from '@/types/tms'
 
 const LINK_PLACEHOLDER = 'https://…/quote/<the link is minted when you send>'
+
+const PRE_STYLE: React.CSSProperties = {
+  maxHeight: 224, overflow: 'auto', whiteSpace: 'pre-wrap', fontSize: 12, margin: 0,
+  borderRadius: 'var(--tms-radius)', border: '1px solid var(--tms-border)',
+  background: 'var(--tms-card)', padding: 8,
+}
+
+const CODE_STYLE: React.CSSProperties = {
+  flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12,
+  borderRadius: 'var(--tms-radius)', border: '1px solid var(--tms-border)',
+  background: 'var(--tms-card)', padding: '4px 8px',
+}
+
+const WARN_BOX: React.CSSProperties = {
+  display: 'grid', gap: 8, borderRadius: 'var(--tms-radius)',
+  border: '1px solid var(--tms-badge-orange)', background: 'rgba(255,136,10,0.12)', padding: 8,
+}
 
 export function SendQuoteDialog({ quote, open, onOpenChange, onDone }: {
   quote: QuoteRecord
@@ -105,9 +117,9 @@ export function SendQuoteDialog({ quote, open, onOpenChange, onDone }: {
     return countering ? renderCounterEmail(input) : renderQuoteEmail(input)
   }, [quote, brokerName, countering, settings])
 
-  const unacknowledged = warnings.filter((warning) => !acked.includes(warning.key))
+  const unacknowledged = warnings.filter((warning) => acked.includes(warning.key) === false)
   const disabled = sending || loading
-  const blocked = recipients.length === 0 || unacknowledged.length > 0 || !state.canSend
+  const blocked = recipients.length === 0 || unacknowledged.length > 0 || state.canSend === false
 
   const run = (via: 'EMAIL' | 'COPY') => {
     setSending(true)
@@ -141,164 +153,143 @@ export function SendQuoteDialog({ quote, open, onOpenChange, onDone }: {
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>
-            {countering ? 'Counter' : 'Send'} quote {quote.id} — {formatCents(quote.amountCents)}
-          </DialogTitle>
-        </DialogHeader>
+    <TmsDialog
+      open={open}
+      onOpenChange={onOpenChange}
+      className="tms-dialog-wide"
+      title={`${countering ? 'Counter' : 'Send'} quote ${quote.id} — ${formatCents(quote.amountCents)}`}
+      footer={
+        result ? (
+          <TmsButton variant="primary" onClick={onDone}>Done</TmsButton>
+        ) : (
+          <>
+            <TmsButton variant="ghost" onClick={() => onOpenChange(false)} disabled={sending}>Cancel</TmsButton>
+            <TmsButton
+              aria-label="Mint a link without e-mailing"
+              disabled={disabled || state.canSend === false}
+              onClick={() => run('COPY')}
+            >
+              <Link2 size={14} /> Link only
+            </TmsButton>
+            <TmsButton variant="primary" aria-label="Send the quote" disabled={disabled || blocked} onClick={() => run('EMAIL')}>
+              <Send size={14} /> {sending ? 'Sending…' : 'Send'}
+            </TmsButton>
+          </>
+        )
+      }
+    >
+      {loading && (
+        <p className="tms-muted" style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
+          <Loader2 size={14} /> Reading the customer and the templates…
+        </p>
+      )}
 
-        {loading && (
-          <p className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 size={14} className="animate-spin" /> Reading the customer and the templates…
-          </p>
-        )}
-
-        {!loading && !result && (
-          <div className="space-y-3">
-            <div>
-              <Label className="text-xs uppercase tracking-wider text-muted-foreground">Going to</Label>
-              <p className="text-sm">
-                {recipients.length > 0
-                  ? recipients.map((email) => <Badge key={email} variant="outline" className="mr-1">{email}</Badge>)
-                  : <span className="text-destructive">Nobody — this quote has no contact e-mail and the customer has no sales contact.</span>}
-              </p>
-            </div>
-
-            <div>
-              <Label className="text-xs uppercase tracking-wider text-muted-foreground" htmlFor="send-quote-message">
-                A line of your own (optional)
-              </Label>
-              <Textarea
-                id="send-quote-message"
-                rows={2}
-                value={message}
-                disabled={disabled}
-                placeholder="anything the template does not already say"
-                onChange={(e) => setMessage(e.target.value)}
-                className="text-sm"
-              />
-            </div>
-
-            <div>
-              <Label className="text-xs uppercase tracking-wider text-muted-foreground">
-                What they will read — {preview.subject}
-              </Label>
-              <pre className="max-h-56 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-muted/40 p-2 text-xs">
-                {preview.body}
-              </pre>
-              <p className="mt-1 text-xs text-muted-foreground">
-                The link above is minted by the send itself; this preview shows where it lands.
-              </p>
-            </div>
-
-            {warnings.length > 0 && (
-              <div className="space-y-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-2">
-                <p className="flex items-start gap-2 text-xs font-medium">
-                  <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-600" />
-                  Read these before the number goes out; the acknowledgement is kept on the quote.
-                </p>
-                {warnings.map((warning) => (
-                  <label key={warning.key} className="flex items-start gap-2 text-xs">
-                    <Checkbox
-                      aria-label={`Acknowledge ${warning.key}`}
-                      checked={acked.includes(warning.key)}
-                      disabled={disabled}
-                      onCheckedChange={(v) => setAcked((prev) => (
-                        v === true ? [...prev, warning.key] : prev.filter((key) => key !== warning.key)
-                      ))}
-                      className="mt-0.5"
-                    />
-                    <span>
-                      {warning.message}
-                      {warning.adminOnly && <Badge variant="outline" className="ml-1 text-[10px]">owner / admin</Badge>}
-                    </span>
-                  </label>
-                ))}
-              </div>
-            )}
-
-            {!state.canSend && (
-              <p className="text-xs text-destructive">
-                This quote is not on a rung that can be sent — it is {quote.status.toLowerCase().replace('_', ' ')}.
-              </p>
-            )}
-
-            {error && <p className="text-xs text-destructive">{error}</p>}
+      {loading === false && result === null && (
+        <div style={{ display: 'grid', gap: 12 }}>
+          <div>
+            <div className="tms-field-label">Going to</div>
+            <p style={{ fontSize: 13, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+              {recipients.length > 0
+                ? recipients.map((email) => <TmsBadge key={email} tone="blue">{email}</TmsBadge>)
+                : <span className="tms-field-error">Nobody — this quote has no contact e-mail and the customer has no sales contact.</span>}
+            </p>
           </div>
-        )}
 
-        {result && (
-          <div className="space-y-3">
-            {result.sent ? (
-              <p className="text-sm">
-                Sent to {recipients.join(', ')}. The link is live until the quote expires.
-              </p>
-            ) : (
-              <div className="space-y-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-2">
-                <p className="flex items-start gap-2 text-sm font-medium">
-                  <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-600" />
-                  Nothing was e-mailed. The quote is sent and the link is live — send it by hand.
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  This is the dev path: outbound mail is denied outside production, so the copy below is the
-                  delivery. The quote row already says it went out, because the link works.
-                </p>
-              </div>
-            )}
+          <TmsField label="A line of your own (optional)" htmlFor="send-quote-message">
+            <TmsTextarea
+              id="send-quote-message"
+              rows={2}
+              value={message}
+              disabled={disabled}
+              placeholder="anything the template does not already say"
+              onChange={(e) => setMessage(e.target.value)}
+            />
+          </TmsField>
 
-            {result.link && (
-              <div>
-                <Label className="text-xs uppercase tracking-wider text-muted-foreground">The link</Label>
-                <div className="flex items-center gap-2">
-                  <code className="flex-1 truncate rounded-md border border-border bg-muted/40 px-2 py-1 text-xs">{result.link}</code>
-                  <Button size="sm" variant="outline" aria-label="Copy quote link" onClick={() => copy(result.link ?? '', 'Link')}>
-                    <Link2 size={13} /> Copy
-                  </Button>
-                </div>
-              </div>
-            )}
-
-            <div>
-              <Label className="text-xs uppercase tracking-wider text-muted-foreground">{result.subject}</Label>
-              <pre className="max-h-56 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-muted/40 p-2 text-xs">
-                {result.body}
-              </pre>
-              <Button
-                size="sm"
-                variant="outline"
-                className="mt-1"
-                aria-label="Copy e-mail body"
-                onClick={() => copy(result.body, 'E-mail body')}
-              >
-                <Copy size={13} /> Copy the body
-              </Button>
-            </div>
+          <div>
+            <div className="tms-field-label">What they will read — {preview.subject}</div>
+            <pre style={PRE_STYLE}>{preview.body}</pre>
+            <p className="tms-muted" style={{ marginTop: 4, fontSize: 12 }}>
+              The link above is minted by the send itself; this preview shows where it lands.
+            </p>
           </div>
-        )}
 
-        <DialogFooter>
-          {result ? (
-            <Button onClick={onDone}>Done</Button>
-          ) : (
-            <>
-              <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={sending}>Cancel</Button>
-              <Button
-                variant="outline"
-                aria-label="Mint a link without e-mailing"
-                disabled={disabled || !state.canSend}
-                onClick={() => run('COPY')}
-              >
-                <Link2 size={14} /> Link only
-              </Button>
-              <Button aria-label="Send the quote" disabled={disabled || blocked} onClick={() => run('EMAIL')}>
-                <Send size={14} /> {sending ? 'Sending…' : 'Send'}
-              </Button>
-            </>
+          {warnings.length > 0 && (
+            <div style={WARN_BOX}>
+              <p style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 12, fontWeight: 600, margin: 0 }}>
+                <AlertTriangle size={14} style={{ marginTop: 2, flexShrink: 0, color: 'var(--tms-badge-orange)' }} />
+                Read these before the number goes out; the acknowledgement is kept on the quote.
+              </p>
+              {warnings.map((warning) => (
+                <label key={warning.key} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 12 }}>
+                  <input
+                    type="checkbox"
+                    aria-label={`Acknowledge ${warning.key}`}
+                    checked={acked.includes(warning.key)}
+                    disabled={disabled}
+                    onChange={(e) => setAcked((prev) => (
+                      e.target.checked ? [...prev, warning.key] : prev.filter((key) => key !== warning.key)
+                    ))}
+                  />
+                  <span>
+                    {warning.message}
+                    {warning.adminOnly && <TmsBadge tone="gray">owner / admin</TmsBadge>}
+                  </span>
+                </label>
+              ))}
+            </div>
           )}
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+
+          {state.canSend === false && (
+            <p className="tms-field-error">
+              This quote is not on a rung that can be sent — it is {quote.status.toLowerCase().replace('_', ' ')}.
+            </p>
+          )}
+
+          {error && <p className="tms-field-error">{error}</p>}
+        </div>
+      )}
+
+      {result && (
+        <div style={{ display: 'grid', gap: 12 }}>
+          {result.sent ? (
+            <p style={{ fontSize: 13 }}>
+              Sent to {recipients.join(', ')}. The link is live until the quote expires.
+            </p>
+          ) : (
+            <div style={WARN_BOX}>
+              <p style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 13, fontWeight: 600, margin: 0 }}>
+                <AlertTriangle size={14} style={{ marginTop: 2, flexShrink: 0, color: 'var(--tms-badge-orange)' }} />
+                Nothing was e-mailed. The quote is sent and the link is live — send it by hand.
+              </p>
+              <p className="tms-muted" style={{ fontSize: 12, margin: 0 }}>
+                This is the dev path: outbound mail is denied outside production, so the copy below is the
+                delivery. The quote row already says it went out, because the link works.
+              </p>
+            </div>
+          )}
+
+          {result.link && (
+            <div>
+              <div className="tms-field-label">The link</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <code style={CODE_STYLE}>{result.link}</code>
+                <TmsButton size="sm" aria-label="Copy quote link" onClick={() => copy(result.link ?? '', 'Link')}>
+                  <Link2 size={13} /> Copy
+                </TmsButton>
+              </div>
+            </div>
+          )}
+
+          <div>
+            <div className="tms-field-label">{result.subject}</div>
+            <pre style={PRE_STYLE}>{result.body}</pre>
+            <TmsButton size="sm" style={{ marginTop: 4 }} aria-label="Copy e-mail body" onClick={() => copy(result.body, 'E-mail body')}>
+              <Copy size={13} /> Copy the body
+            </TmsButton>
+          </div>
+        </div>
+      )}
+    </TmsDialog>
   )
 }

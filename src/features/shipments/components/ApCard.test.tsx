@@ -134,7 +134,7 @@ describe('ApCard', () => {
     renderCard([assignment({ apStatus: 'TO_BE_PAID', invoiceId: 'cb:lc-1:1' })])
 
     await waitFor(() => expect(screen.getByRole('link', { name: 'PT-7781' })).toBeTruthy())
-    expect(screen.getByRole('link', { name: 'PT-7781' }).getAttribute('href')).toBe('/ap/bills/cb:lc-1:1')
+    expect(screen.getByRole('link', { name: 'PT-7781' }).getAttribute('href')).toBe('/tms/invoicing/payable/bills/cb:lc-1:1')
     expect(screen.getByText('$2,000.00')).toBeTruthy()
     expect(screen.getByText('$1,500.00')).toBeTruthy()
     expect(screen.getByText('2026-05-01')).toBeTruthy()

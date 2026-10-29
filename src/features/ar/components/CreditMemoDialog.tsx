@@ -12,11 +12,7 @@
  */
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { TmsButton, TmsDialog, TmsField, TmsInput, TmsTextarea } from '@/features/tms/kit'
 import { createCredit, graphqlErrorText } from '@/lib/apiClient'
 import { formatCents } from '@/lib/invoiceBuild'
 import { formatDateInput } from '@/lib/date'
@@ -68,79 +64,68 @@ export function CreditMemoDialog({ customerId, customerName, busy, onClose, onDo
   }
 
   return (
-    <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
-      <DialogContent className="max-w-lg">
-        <DialogHeader>
-          <DialogTitle>Credit memo{customerName ? ` — ${customerName}` : ''}</DialogTitle>
-        </DialogHeader>
-
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <Label className="text-xs uppercase tracking-wider text-muted-foreground">Memo date</Label>
-            <Input
-              aria-label="Credit memo date"
-              type="date"
-              value={memoDate}
-              disabled={disabled}
-              onChange={(e) => setMemoDate(e.target.value)}
-              className="h-9 text-sm"
-            />
-          </div>
-          <div>
-            <Label className="text-xs uppercase tracking-wider text-muted-foreground">Amount</Label>
-            <Input
-              aria-label="Credit memo amount"
-              inputMode="decimal"
-              value={amount}
-              disabled={disabled}
-              placeholder="0.00"
-              onChange={(e) => setAmount(e.target.value)}
-              className="h-9 text-sm"
-            />
-          </div>
-          <div className="col-span-2">
-            <Label className="text-xs uppercase tracking-wider text-muted-foreground">Reference</Label>
-            <Input
-              aria-label="Credit memo reference"
-              value={reference}
-              disabled={disabled}
-              placeholder="optional — claim or memo #"
-              onChange={(e) => setReference(e.target.value)}
-              className="h-9 text-sm"
-            />
-          </div>
-          <div className="col-span-2">
-            <Label className="text-xs uppercase tracking-wider text-muted-foreground">Reason</Label>
-            <Textarea
-              aria-label="Credit memo reason"
-              rows={3}
-              value={note}
-              disabled={disabled}
-              placeholder="why this customer is owed money"
-              onChange={(e) => setNote(e.target.value)}
-              className="text-sm"
-            />
-          </div>
-          {amount.trim() && amountCents === null && (
-            <p className="col-span-2 text-xs text-destructive">
-              Enter a nonnegative amount with at most two decimal places.
-            </p>
-          )}
-          {error && <p className="col-span-2 text-xs text-destructive">{error}</p>}
-        </div>
-
-        <DialogFooter className="flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-xs text-muted-foreground">
+    <TmsDialog
+      open
+      onOpenChange={(open) => { if (!open) onClose() }}
+      title={`Credit memo${customerName ? ` — ${customerName}` : ''}`}
+      footer={
+        <>
+          <p className="mr-auto text-xs tms-muted">
             Issued unapplied — spend it on an invoice through Receive payment.
           </p>
-          <div className="flex gap-2">
-            <Button variant="ghost" onClick={onClose} disabled={posting}>Cancel</Button>
-            <Button onClick={submit} disabled={disabled || !ready}>
-              {posting ? 'Issuing…' : 'Issue credit'}
-            </Button>
-          </div>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          <TmsButton variant="ghost" onClick={onClose} disabled={posting}>Cancel</TmsButton>
+          <TmsButton variant="primary" onClick={submit} disabled={disabled || !ready}>
+            {posting ? 'Issuing…' : 'Issue credit'}
+          </TmsButton>
+        </>
+      }
+    >
+      <div className="tms-grid tms-grid-2">
+        <TmsField label="Memo date">
+          <TmsInput
+            aria-label="Credit memo date"
+            type="date"
+            value={memoDate}
+            disabled={disabled}
+            onChange={(e) => setMemoDate(e.target.value)}
+          />
+        </TmsField>
+        <TmsField label="Amount">
+          <TmsInput
+            aria-label="Credit memo amount"
+            inputMode="decimal"
+            value={amount}
+            disabled={disabled}
+            placeholder="0.00"
+            onChange={(e) => setAmount(e.target.value)}
+          />
+        </TmsField>
+      </div>
+      <TmsField label="Reference">
+        <TmsInput
+          aria-label="Credit memo reference"
+          value={reference}
+          disabled={disabled}
+          placeholder="optional — claim or memo #"
+          onChange={(e) => setReference(e.target.value)}
+        />
+      </TmsField>
+      <TmsField label="Reason">
+        <TmsTextarea
+          aria-label="Credit memo reason"
+          rows={3}
+          value={note}
+          disabled={disabled}
+          placeholder="why this customer is owed money"
+          onChange={(e) => setNote(e.target.value)}
+        />
+      </TmsField>
+      {amount.trim() && amountCents === null && (
+        <p className="text-xs" style={{ color: 'var(--tms-badge-red)' }}>
+          Enter a nonnegative amount with at most two decimal places.
+        </p>
+      )}
+      {error && <p className="text-xs" style={{ color: 'var(--tms-badge-red)' }}>{error}</p>}
+    </TmsDialog>
   )
 }

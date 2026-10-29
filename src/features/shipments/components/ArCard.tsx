@@ -22,9 +22,10 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Ban, Banknote, FileText, Mail, Send } from 'lucide-react'
 import { toast } from 'sonner'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
+import { TmsBadge, TmsButton, TmsCard } from '@/features/tms/kit'
+import { ReleaseGateList } from './ReleaseGateCard'
+import { releaseGateMessages } from './releaseGateView'
 import { getInvoice, readyToInvoice, saveOrderForm, voidInvoice, getInvoicePdfUrl } from '@/lib/apiClient'
 import { formatCents } from '@/lib/invoiceBuild'
 import { AGING_BUCKET_LABEL, agingBucket, daysLate, type AgingBucket } from '@/lib/arAging'
@@ -52,12 +53,12 @@ const FLAT_LABEL: Record<'LEGACY' | 'INVOICE_NOT_NEEDED', string> = {
 }
 
 /** Late money gets a loud chip; everything inside terms is quiet. */
-const BUCKET_TONE: Record<AgingBucket, string> = {
-  CURRENT: 'border-border text-muted-foreground',
-  D1_30: 'border-amber-500/40 text-amber-700',
-  D31_60: 'border-amber-500/40 text-amber-700',
-  D61_90: 'border-destructive/40 text-destructive',
-  D91_PLUS: 'border-destructive/40 text-destructive',
+const BUCKET_TONE: Record<AgingBucket, 'gray' | 'orange' | 'red'> = {
+  CURRENT: 'gray',
+  D1_30: 'orange',
+  D31_60: 'orange',
+  D61_90: 'red',
+  D91_PLUS: 'red',
 }
 
 type ArDialog = { kind: 'generate' } | { kind: 'email' } | { kind: 'payment' } | { kind: 'factor' } | { kind: 'void' } | null
@@ -115,10 +116,10 @@ export function ArCard({ bundle, onReload }: ArCardProps) {
   }
 
   /**
-   * Unbilled is the required-document gate, not a status somebody types. The Lambda
-   * refuses with the list of documents still missing, which is the message worth
-   * reading — so it is surfaced as written rather than as "AR status failed". The
-   * Documents tab is where the gate and the admin override live.
+   * Unbilled is the release gate, not a status somebody types. The Lambda re-runs the
+   * whole rule — delivered, paperwork, references, carrier cost, open exceptions — and
+   * refuses with `Not ready for accounting: …` listing what is still missing, which is
+   * the message worth reading, so it is surfaced as written. There is no override.
    */
   const onReady = () => run('Ready to invoice', () => readyToInvoice({
     orderId: order.id,
@@ -126,7 +127,7 @@ export function ArCard({ bundle, onReload }: ArCardProps) {
   }))
 
   const onInvoiceEarly = (next: boolean) => run(
-    next ? 'This order can be billed before delivery' : 'This order bills after delivery',
+    next ? 'This shipment can be billed before delivery' : 'This shipment bills after delivery',
     () => saveOrderForm({
       shipmentId: shipment.id,
       expectedUpdatedAt: shipment.updatedAt,
@@ -150,35 +151,37 @@ export function ArCard({ bundle, onReload }: ArCardProps) {
   const bucket = invoice && !voided && invoice.balanceCents > 0
     ? agingBucket(invoice.dueAt, new Date().toISOString())
     : null
+  const gateMessages = error ? releaseGateMessages(error) : null
 
   return (
-    <div className="space-y-3 rounded-lg border border-border p-3" data-testid="ar-card">
-      <div className="flex flex-wrap items-center gap-2">
-        <p className="text-xs uppercase tracking-wider text-muted-foreground">Accounts receivable</p>
-        {flat ? (
-          <Badge variant="outline" className="text-[10px]" data-testid="ar-flat">{FLAT_LABEL[flat]}</Badge>
-        ) : (
-          <ol className="flex flex-wrap items-center gap-1" data-testid="ar-ladder">
-            {RUNGS.map((rung) => {
-              const lit = rung.key === arStatus
-              return (
-                <li
-                  key={rung.key}
-                  data-testid={`ar-rung-${rung.key}`}
-                  aria-current={lit ? 'step' : undefined}
-                  className={cn(
-                    'rounded-full border px-2 py-0.5 text-[11px]',
-                    lit ? 'border-primary bg-primary/10 font-medium text-foreground' : 'border-border text-muted-foreground',
-                  )}
-                >
-                  {rung.label}
-                </li>
-              )
-            })}
-          </ol>
-        )}
-      </div>
-
+    <TmsCard
+      title="Accounts receivable"
+      actions={flat ? (
+        <TmsBadge tone="gray" data-testid="ar-flat">{FLAT_LABEL[flat]}</TmsBadge>
+      ) : (
+        <ol className="flex flex-wrap items-center gap-1" data-testid="ar-ladder">
+          {RUNGS.map((rung) => {
+            const lit = rung.key === arStatus
+            return (
+              <li
+                key={rung.key}
+                data-testid={`ar-rung-${rung.key}`}
+                aria-current={lit ? 'step' : undefined}
+                className={cn(
+                  'rounded-full border px-2 py-0.5 text-[11px]',
+                  lit
+                    ? 'border-[color:var(--tms-primary)] font-medium text-[color:var(--tms-text)]'
+                    : 'border-[color:var(--tms-border)] text-[color:var(--tms-muted)]',
+                )}
+              >
+                {rung.label}
+              </li>
+            )
+          })}
+        </ol>
+      )}
+    >
+      <div className="space-y-3" data-testid="ar-card">
       {!invoiceId && !flat && (
         <div className="flex flex-wrap items-center gap-3">
           <label className="flex items-center gap-2 text-sm">
@@ -190,37 +193,37 @@ export function ArCard({ bundle, onReload }: ArCardProps) {
             />
             Invoice early
           </label>
-          <span className="text-xs text-muted-foreground">Bills on pickup instead of waiting for delivery.</span>
+          <span className="tms-muted text-xs">Bills on pickup instead of waiting for delivery.</span>
         </div>
       )}
 
       {number && (
-        <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm sm:grid-cols-4">
+        <dl className="tms-grid tms-grid-4 text-sm">
           <div>
-            <dt className="text-xs uppercase tracking-wider text-muted-foreground">Invoice</dt>
+            <dt className="tms-field-label">Invoice</dt>
             <dd>
-              <Link to={`/ar/invoices/${invoiceId}`} className="underline underline-offset-2">{number}</Link>
-              {voided && <Badge variant="outline" className="ml-1 text-[10px]">void</Badge>}
+              <Link to={`/tms/invoicing/invoices/${invoiceId}`} className="underline underline-offset-2">{number}</Link>
+              {voided && <TmsBadge tone="red">void</TmsBadge>}
             </dd>
           </div>
           <div>
-            <dt className="text-xs uppercase tracking-wider text-muted-foreground">Total</dt>
+            <dt className="tms-field-label">Total</dt>
             <dd>{invoice ? formatCents(invoice.totalCents) : '—'}</dd>
           </div>
           <div>
-            <dt className="text-xs uppercase tracking-wider text-muted-foreground">Balance</dt>
+            <dt className="tms-field-label">Balance</dt>
             <dd>{balanceCents != null ? formatCents(balanceCents) : '—'}</dd>
           </div>
           <div>
-            <dt className="text-xs uppercase tracking-wider text-muted-foreground">Due</dt>
+            <dt className="tms-field-label">Due</dt>
             <dd className="flex flex-wrap items-center gap-1">
               {invoice?.dueAt ?? '—'}
               {bucket && (
-                <Badge variant="outline" className={cn('text-[10px]', BUCKET_TONE[bucket])}>
+                <TmsBadge tone={BUCKET_TONE[bucket]}>
                   {bucket === 'CURRENT'
                     ? AGING_BUCKET_LABEL[bucket]
                     : `${AGING_BUCKET_LABEL[bucket]} days late`}
-                </Badge>
+                </TmsBadge>
               )}
             </dd>
           </div>
@@ -231,45 +234,53 @@ export function ArCard({ bundle, onReload }: ArCardProps) {
 
       <div className="flex flex-wrap gap-2">
         {arStatus === 'DOCS_NEEDED' && (
-          <Button size="sm" variant="outline" className="h-8" disabled={busy} onClick={() => { void onReady() }}>
+          <TmsButton variant="primary" size="sm" disabled={busy} onClick={() => { void onReady() }}>
             Ready to invoice
-          </Button>
+          </TmsButton>
         )}
         {arStatus === 'UNBILLED' && !invoiceId && (
-          <Button size="sm" className="h-8" disabled={busy} onClick={() => setDialog({ kind: 'generate' })}>
+          <TmsButton variant="primary" size="sm" disabled={busy} onClick={() => setDialog({ kind: 'generate' })}>
             Generate invoice
-          </Button>
+          </TmsButton>
         )}
         {invoiceId && !voided && (
           <>
-            <Button size="sm" variant="outline" className="h-8" disabled={!invoice?.pdfKey} onClick={() => { void openPdf() }}>
+            <TmsButton size="sm" disabled={!invoice?.pdfKey} onClick={() => { void openPdf() }}>
               <FileText size={13} className="mr-1" />PDF
-            </Button>
-            <Button size="sm" variant="outline" className="h-8" onClick={() => setDialog({ kind: 'email' })}>
+            </TmsButton>
+            <TmsButton size="sm" onClick={() => setDialog({ kind: 'email' })}>
               <Mail size={13} className="mr-1" />E-mail
-            </Button>
+            </TmsButton>
             {(invoice?.balanceCents ?? 0) > 0 && (
-              <Button size="sm" variant="outline" className="h-8" onClick={() => setDialog({ kind: 'payment' })}>
+              <TmsButton size="sm" onClick={() => setDialog({ kind: 'payment' })}>
                 <Banknote size={13} className="mr-1" />Receive payment
-              </Button>
+              </TmsButton>
             )}
             {order.factoringItemId || invoice?.factoringItemId ? (
-              <Badge variant="outline" className="h-8 items-center text-[10px]" data-testid="ar-factor-status">
+              <TmsBadge tone="purple" data-testid="ar-factor-status">
                 On the factoring queue — submit to OTR there
-              </Badge>
+              </TmsBadge>
             ) : (
-              <Button size="sm" variant="outline" className="h-8" onClick={() => setDialog({ kind: 'factor' })}>
+              <TmsButton size="sm" onClick={() => setDialog({ kind: 'factor' })}>
                 <Send size={13} className="mr-1" />Send to Factor
-              </Button>
+              </TmsButton>
             )}
-            <Button size="sm" variant="ghost" className="h-8 text-destructive" onClick={() => setDialog({ kind: 'void' })}>
+            <TmsButton variant="destructive" size="sm" onClick={() => setDialog({ kind: 'void' })}>
               <Ban size={13} className="mr-1" />Void
-            </Button>
+            </TmsButton>
           </>
         )}
       </div>
 
-      {error && <p className="text-xs text-destructive">{error}</p>}
+      {/*
+        * Ready to invoice is refused with the whole release-gate list. Printing it as a
+        * checklist — the same one the Invoicing tab draws — is what makes it actionable;
+        * any other failure is shown as written.
+        */}
+      {error && (gateMessages
+        ? <ReleaseGateList messages={gateMessages} testId="ar-release-gate-missing" />
+        : <p className="tms-field-error">{error}</p>
+      )}
 
       {dialog?.kind === 'generate' && (
         <GenerateInvoiceDialog
@@ -308,7 +319,7 @@ export function ArCard({ bundle, onReload }: ArCardProps) {
       {dialog?.kind === 'void' && invoiceId && (
         <ReasonDialog
           title={`Void invoice ${number ?? invoiceId}`}
-          description="The order goes back to Unbilled and its charges unfreeze. The number is never reused."
+          description="The shipment goes back to Unbilled and its charges unfreeze. The number is never reused."
           label="Reason"
           confirmLabel="Void invoice"
           busy={busy}
@@ -318,7 +329,8 @@ export function ArCard({ bundle, onReload }: ArCardProps) {
           }}
         />
       )}
-    </div>
+      </div>
+    </TmsCard>
   )
 }
 
@@ -332,7 +344,7 @@ function EmailStatus({ invoice }: { invoice: InvoiceRecord }) {
     ? daysLate(invoice.dueAt, new Date().toISOString())
     : 0
   return (
-    <p className="text-xs text-muted-foreground" data-testid="ar-email-status">
+    <p className="text-xs tms-muted" data-testid="ar-email-status">
       {invoice.sentAt
         ? `E-mailed ${formatDateTime(invoice.sentAt)}${invoice.sentTo ? ` to ${invoice.sentTo}` : ''}${(invoice.sentCount ?? 0) > 1 ? ` · ${invoice.sentCount} times` : ''}`
         : invoice.markedSentAt

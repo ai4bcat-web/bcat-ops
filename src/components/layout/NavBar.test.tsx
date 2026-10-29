@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 /**
  * The sidebar is the only place a page announces itself, and a page nobody can reach is
- * a page nobody uses. This covers the two things that silently break: a nav item shown
- * to somebody who has not been granted its page, and a badge key wired into `navItems`
- * that `getBadgeCount` never answers — which renders as no badge at all, forever.
+ * a page nobody uses. This covers the three things that silently break: a nav item shown
+ * to somebody who has not been granted its page, a badge key wired into the nav config
+ * that `getBadgeCount` never answers — which renders as no badge at all, forever — and
+ * the division grouping, which is what decides whether a broker sees the fleet's pages.
  */
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
@@ -32,7 +33,13 @@ vi.mock('@/hooks/useDocumentReviewQueue', () => ({ useDocumentReviewQueue: () =>
 vi.mock('@/hooks/useArToInvoiceCount', () => ({ useArToInvoiceCount: () => 0 }))
 vi.mock('@/hooks/useApToReviewCount', () => ({ useApToReviewCount: () => 0 }))
 vi.mock('@/hooks/useQuotesToReplyCount', () => ({ useQuotesToReplyCount: () => 3 }))
+// The divisions poll: `null` is the pre-load state, where the seeds supply the sections.
+vi.mock('@/features/tms/useShipmentViews', () => ({
+  useOwnershipDivisions: () => ({ divisions: null, loading: false, error: null, refresh: vi.fn() }),
+}))
 
+// Imported after the mocks above are registered, so the sidebar's data hooks resolve to
+// them rather than to Amplify clients this test has no configuration for.
 const { NavBar } = await import('./NavBar')
 
 function renderNav() {
@@ -40,19 +47,36 @@ function renderNav() {
 }
 
 describe('NavBar', () => {
-  it('shows the quotes pages and the to-reply badge to a granted user', () => {
+  it('shows the Brokerage pages a grant opens, with the to-reply badge', () => {
     access.pages = ['loads', 'quotes']
     renderNav()
-    expect(screen.getByText('Quotes')).toBeTruthy()
-    expect(screen.getByText('Lane Rates')).toBeTruthy()
+    expect(screen.getByText('BROKERAGE [BCAT Logistics]')).toBeTruthy()
+    expect(screen.getByText('Shipments')).toBeTruthy()
+    expect(screen.getByText('Rates').closest('a')?.getAttribute('href')).toBe('/tms/rates')
     expect(screen.getByText('3')).toBeTruthy()
   })
 
-  it('hides both quotes pages from a user without the grant', () => {
+  it('hides the rates page from a user without the quotes grant', () => {
     access.pages = ['loads']
     renderNav()
-    expect(screen.queryByText('Quotes')).toBeNull()
-    expect(screen.queryByText('Lane Rates')).toBeNull()
+    expect(screen.queryByText('Rates')).toBeNull()
     expect(screen.queryByText('3')).toBeNull()
+  })
+
+  it('opens the whole Brokerage section on the one `tms` grant, and no fleet section', () => {
+    access.pages = ['tms']
+    renderNav()
+    expect(screen.getByText('BROKERAGE [BCAT Logistics]')).toBeTruthy()
+    expect(screen.getByText('Academy')).toBeTruthy()
+    expect(screen.getByText('My Brokerage')).toBeTruthy()
+    expect(screen.queryByText('ASSETS [Ivan Cartage]')).toBeNull()
+  })
+
+  it('groups a fleet user under the asset business instead', () => {
+    access.pages = ['calendar', 'trucks']
+    renderNav()
+    expect(screen.getByText('ASSETS [Ivan Cartage]')).toBeTruthy()
+    expect(screen.queryByText('BROKERAGE [BCAT Logistics]')).toBeNull()
+    expect(screen.getByText('Calendar')).toBeTruthy()
   })
 })

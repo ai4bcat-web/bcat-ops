@@ -1,21 +1,25 @@
+/**
+ * `/tms/vendors` — the vendor AP queue, on the MVMNT list anatomy.
+ *
+ * One row per bill a vendor sent us, from the mailbox or from a maintenance invoice,
+ * with what is still owed opening first. Nothing about the data or the write path
+ * changed with the re-skin: the same `useVendorPayables` hook, the same confirmations,
+ * the same admin-only delete of a queue row (which never touches the source invoice).
+ */
 import { useMemo, useState, useCallback, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  RefreshCw, Search, Inbox, Loader2, AlertCircle, Trash2, Check, RotateCcw,
+  Loader2, AlertCircle, Trash2, Check, RotateCcw,
   Mail, Wrench, FileText, ExternalLink, CreditCard, Pencil,
 } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
-} from '@/components/ui/dialog'
+  TmsBadge, TmsButton, TmsDialog, TmsField, TmsIconButton, TmsInput, TmsListPage,
+} from '@/features/tms/kit'
+import type { ColumnDef } from '@/features/tms/kit'
 import { useVendorPayables } from '@/hooks/useVendorPayables'
 import { findVendorApDuplicates } from '@/lib/vendorApDuplicates'
 import { useAuth } from '@/hooks/useAuth'
-import { useIsMobile } from '@/hooks/useIsMobile'
 import { useAppStore } from '@/store/useAppStore'
-import { cn } from '@/lib/utils'
 import { toLocalDateString } from '@/lib/payPeriod'
 import { toast } from 'sonner'
 import { formatCents } from '@/features/maintenance/maintenanceUi'
@@ -72,15 +76,15 @@ function formatAmount(cents?: number | null): string {
 
 function parseDollars(value: string): number | null | 'invalid' {
   const trimmed = value.trim()
-  if (!trimmed) return null
+  if (trimmed.length === 0) return null
   const cleaned = trimmed.replace(/[$,]/g, '')
   const n = Number(cleaned)
-  if (!Number.isFinite(n) || n < 0) return 'invalid'
+  if (Number.isFinite(n) === false || n < 0) return 'invalid'
   return Math.round(n * 100)
 }
 
 function matchesSearch(item: VendorPayable, query: string): boolean {
-  if (!query.trim()) return true
+  if (query.trim().length === 0) return true
   const q = query.toLowerCase().trim()
   return (
     (item.vendor ?? '').toLowerCase().includes(q) ||
@@ -94,47 +98,25 @@ function matchesSearch(item: VendorPayable, query: string): boolean {
 // ── Status / source badges ───────────────────────────────────────────────────
 
 function StatusBadge({ status }: { status: VendorPayable['status'] }) {
-  const isDone = status === 'DONE'
   return (
-    <span
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 6,
-        padding: '4px 10px',
-        borderRadius: 999,
-        fontSize: 11,
-        fontWeight: 700,
-        textTransform: 'uppercase',
-        letterSpacing: '0.04em',
-        background: isDone ? 'rgba(34,197,94,0.12)' : 'rgba(245,158,11,0.12)',
-        color: isDone ? '#15803d' : '#b45309',
-        border: `1px solid ${isDone ? 'rgba(34,197,94,0.25)' : 'rgba(245,158,11,0.25)'}`,
-      }}
-    >
-      <span
-        style={{
-          width: 6,
-          height: 6,
-          borderRadius: '50%',
-          background: isDone ? '#22c55e' : '#f59e0b',
-        }}
-      />
-      {STATUS_LABEL[status]}
-    </span>
+    <TmsBadge tone={status === 'DONE' ? 'green' : 'orange'}>{STATUS_LABEL[status]}</TmsBadge>
   )
 }
 
 /** The due date, red once it has passed on an unpaid row, with days to go while it has not. */
 function DueCell({ item, today }: { item: VendorPayable; today: string }) {
-  if (!item.dueDate) return <span className="text-muted-foreground">—</span>
+  if (!item.dueDate) return <span className="tms-muted">—</span>
   const days = Math.round((Date.parse(`${item.dueDate}T12:00:00Z`) - Date.parse(`${today}T12:00:00Z`)) / 86_400_000)
   const open = item.status !== 'DONE'
   const overdue = open && days < 0
   return (
     <div>
-      <div className={overdue ? 'font-semibold text-red-600' : 'text-foreground'}>{item.dueDate}</div>
-      {open ? <div className={`text-[11px] ${overdue ? 'text-red-600' : 'text-muted-foreground'}`}>{overdue ? `${-days} day${days === -1 ? '' : 's'} overdue` : days === 0 ? 'due today' : `in ${days} day${days === 1 ? '' : 's'}`}</div> : null}
+      <div style={{ fontWeight: overdue ? 600 : undefined, color: overdue ? 'var(--tms-badge-red)' : undefined }}>{item.dueDate}</div>
+      {open ? (
+        <div style={{ fontSize: 11, color: overdue ? 'var(--tms-badge-red)' : 'var(--tms-muted)' }}>
+          {overdue ? `${-days} day${days === -1 ? '' : 's'} overdue` : days === 0 ? 'due today' : `in ${days} day${days === 1 ? '' : 's'}`}
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -142,23 +124,10 @@ function DueCell({ item, today }: { item: VendorPayable; today: string }) {
 function SourceBadge({ source }: { source: VendorPayable['source'] }) {
   const isMaintenance = source === 'MAINTENANCE'
   return (
-    <span
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 5,
-        padding: '3px 8px',
-        borderRadius: 6,
-        fontSize: 11,
-        fontWeight: 600,
-        background: isMaintenance ? 'rgba(59,130,246,0.10)' : 'rgba(100,116,139,0.10)',
-        color: isMaintenance ? '#2563eb' : '#475569',
-        border: `1px solid ${isMaintenance ? 'rgba(59,130,246,0.20)' : 'rgba(100,116,139,0.20)'}`,
-      }}
-    >
-      {isMaintenance ? <Wrench className="size-3" /> : <Mail className="size-3" />}
+    <TmsBadge tone={isMaintenance ? 'blue' : 'gray'}>
+      {isMaintenance ? <Wrench size={11} /> : <Mail size={11} />}
       {SOURCE_LABEL[source]}
-    </span>
+    </TmsBadge>
   )
 }
 
@@ -169,39 +138,35 @@ function LinkedInvoiceDetails({ invoiceId, canSeeInvoices }: { invoiceId: string
   const equipment = useAppStore((s) => s.equipment.find((e) => e.id === invoice?.equipmentId))
 
   if (!invoice) {
-    return <p style={{ fontSize: 13, color: 'var(--ds-t3)' }}>Linked maintenance invoice not found.</p>
+    return <p className="tms-muted" style={{ fontSize: 13 }}>Linked maintenance invoice not found.</p>
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+    <div style={{ display: 'grid', gap: 10 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-        <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--ds-t1)' }}>
-          {invoice.vendor || 'Unknown vendor'}
-        </span>
+        <span style={{ fontSize: 13, fontWeight: 600 }}>{invoice.vendor || 'Unknown vendor'}</span>
         {canSeeInvoices && (
-          <Link to="/invoices">
-            <Button variant="ghost" size="sm" className="h-7 gap-1.5 text-xs">
-              <ExternalLink className="size-3" />
-              Open in Invoices
-            </Button>
+          <Link to="/invoices" className="tms-btn tms-btn-ghost tms-btn-sm">
+            <ExternalLink size={12} />
+            Open in Invoices
           </Link>
         )}
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }}>
+      <div className="tms-grid tms-grid-2">
         <Field label="Equipment" value={equipment ? `#${equipment.unitNumber}${equipment.nickname ? ` · ${equipment.nickname}` : ''}` : invoice.equipmentId} />
         <Field label="Invoice date" value={invoice.date || '—'} />
         <Field label="Amount" value={formatCents(invoice.amount)} />
         <Field label="Invoice #" value={invoice.invoiceNumber || '—'} />
       </div>
       {invoice.description && (
-        <div style={{ fontSize: 12, color: 'var(--ds-t3)', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>
+        <div className="tms-muted" style={{ fontSize: 12, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>
           {invoice.description}
         </div>
       )}
       {(invoice.paymentMethod || invoice.paymentDate) && (
-        <div style={{ fontSize: 12, color: 'var(--ds-t2)' }}>
+        <div className="tms-muted" style={{ fontSize: 12 }}>
           Recorded payment: {invoice.paymentMethod || '—'}
-          {invoice.paymentDate && <span style={{ color: 'var(--ds-t3)', marginLeft: 6 }}>{invoice.paymentDate}</span>}
+          {invoice.paymentDate && <span style={{ marginLeft: 6 }}>{invoice.paymentDate}</span>}
         </div>
       )}
     </div>
@@ -211,10 +176,8 @@ function LinkedInvoiceDetails({ invoiceId, canSeeInvoices }: { invoiceId: string
 function Field({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>
-        {label}
-      </div>
-      <div style={{ fontSize: 13, color: 'var(--ds-t1)', fontWeight: 500 }}>{value}</div>
+      <div className="tms-field-label">{label}</div>
+      <div style={{ fontSize: 13, fontWeight: 500 }}>{value}</div>
     </div>
   )
 }
@@ -254,38 +217,15 @@ function AttachmentList({
   if (attachments.length === 0) return null
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-        Attachments
-      </div>
+    <div style={{ display: 'grid', gap: 6 }}>
+      <div className="tms-field-label">Attachments</div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
         {attachments.map((att) => (
-          <button
-            key={att.key}
-            type="button"
-            onClick={() => open(att)}
-            disabled={loadingKey === att.key}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 6,
-              padding: '6px 10px',
-              borderRadius: 8,
-              border: '1px solid var(--ds-border)',
-              background: 'var(--ds-surface)',
-              fontSize: 12,
-              color: 'var(--ds-t2)',
-              cursor: 'pointer',
-            }}
-          >
-            {loadingKey === att.key ? (
-              <Loader2 className="size-3.5 animate-spin" />
-            ) : (
-              <FileText className="size-3.5" />
-            )}
-            <span className="max-w-[200px] truncate">{att.name}</span>
-            <span style={{ color: 'var(--ds-t3)' }}>({(att.size / 1024).toFixed(1)} KB)</span>
-          </button>
+          <TmsButton key={att.key} size="sm" onClick={() => open(att)} disabled={loadingKey === att.key}>
+            {loadingKey === att.key ? <Loader2 size={13} /> : <FileText size={13} />}
+            <span style={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{att.name}</span>
+            <span className="tms-muted">({(att.size / 1024).toFixed(1)} KB)</span>
+          </TmsButton>
         ))}
       </div>
     </div>
@@ -323,7 +263,7 @@ function DetailsDialog({
 }) {
   const isEmail = item.source === 'EMAIL'
   const isPending = pendingIds.has(item.id)
-  const fullLoaded = !loading && !error
+  const fullLoaded = loading === false && error === null
 
   const [vendor, setVendor] = useState(item.vendor ?? '')
   const [invoiceNumber, setInvoiceNumber] = useState(item.invoiceNumber ?? '')
@@ -333,6 +273,8 @@ function DetailsDialog({
   const [vendorEmail, setVendorEmail] = useState(item.vendorEmail ?? '')
   const [description, setDescription] = useState(item.description ?? '')
   const [saving, setSaving] = useState(false)
+
+  const locked = fullLoaded === false || isPending || saving
 
   const submitDetails = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -358,177 +300,161 @@ function DetailsDialog({
   }
 
   return (
-    <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-2xl">
-        <DialogHeader>
-          <DialogTitle className="text-base">{item.subject || '(no subject)'}</DialogTitle>
-          <DialogDescription>
-            {item.source} · {formatReceivedAt(item.receivedAt)} · from {item.fromEmail || 'unknown sender'}
-          </DialogDescription>
-        </DialogHeader>
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 20, marginTop: 8 }}>
-          {item.source === 'MAINTENANCE' && item.sourceInvoiceId && (
-            <Section title="Source invoice">
-              <LinkedInvoiceDetails invoiceId={item.sourceInvoiceId} canSeeInvoices={canSeeInvoices} />
-            </Section>
-          )}
-
-          {isEmail ? (
-            <Section title="Invoice details">
-              <form id="details-form" onSubmit={submitDetails} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 14 }}>
-                  <div>
-                    <Label htmlFor="ap-vendor" className="text-xs">Vendor</Label>
-                    <Input id="ap-vendor" value={vendor} onChange={(e) => setVendor(e.target.value)} disabled={!fullLoaded || isPending || saving} className="mt-1" />
-                  </div>
-                  <div>
-                    <Label htmlFor="ap-invoice" className="text-xs">Invoice #</Label>
-                    <Input id="ap-invoice" value={invoiceNumber} onChange={(e) => setInvoiceNumber(e.target.value)} disabled={!fullLoaded || isPending || saving} className="mt-1" />
-                  </div>
-                  <div>
-                    <Label htmlFor="ap-amount" className="text-xs">Amount ($)</Label>
-                    <Input
-                      id="ap-amount"
-                      inputMode="decimal"
-                      placeholder="Leave blank if unknown"
-                      value={amount}
-                      onChange={(e) => setAmount(e.target.value)}
-                      disabled={!fullLoaded || isPending || saving}
-                      className="mt-1"
-                    />
-                  </div>
-                  <div>
-                    <Label htmlFor="ap-date" className="text-xs">Invoice date</Label>
-                    <Input id="ap-date" type="date" value={invoiceDate} onChange={(e) => setInvoiceDate(e.target.value)} disabled={!fullLoaded || isPending || saving} className="mt-1" />
-                  </div>
-                  <div>
-                    <Label htmlFor="ap-due">Due date</Label>
-                    <Input id="ap-due" type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} disabled={!fullLoaded || isPending || saving} className="mt-1" />
-                  </div>
-                  <div>
-                    <Label htmlFor="ap-vendor-email">Vendor email (payment confirmations)</Label>
-                    <Input id="ap-vendor-email" type="email" placeholder={item.fromEmail ?? 'ap@vendor.com'} value={vendorEmail} onChange={(e) => setVendorEmail(e.target.value)} disabled={!fullLoaded || isPending || saving} className="mt-1" />
-                  </div>
-                </div>
-                <div>
-                  <Label htmlFor="ap-description" className="text-xs">Description</Label>
-                  <Input id="ap-description" value={description} onChange={(e) => setDescription(e.target.value)} disabled={!fullLoaded || isPending || saving} className="mt-1" />
-                </div>
-              </form>
-            </Section>
-          ) : (
-            <Section title="Invoice details">
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 14 }}>
-                <Field label="Vendor" value={item.vendor || '—'} />
-                <Field label="Invoice #" value={item.invoiceNumber || '—'} />
-                <Field label="Amount" value={formatAmount(item.amount)} />
-                <Field label="Invoice date" value={item.invoiceDate || '—'} />
-                <Field label="Due date" value={item.dueDate || '—'} />
-                <Field label="Vendor email" value={item.vendorEmail || item.fromEmail || '—'} />
-                {item.confirmationSentAt ? <Field label="Confirmation" value={`Emailed to ${item.confirmationSentTo} · ${formatReceivedAt(item.confirmationSentAt)}`} /> : null}
-              </div>
-              {item.description && <div style={{ fontSize: 13, color: 'var(--ds-t2)', marginTop: 8, whiteSpace: 'pre-wrap' }}>{item.description}</div>}
-            </Section>
-          )}
-
-          <Section title="Original message">
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <div style={{ fontSize: 12, color: 'var(--ds-t3)' }}>
-                From: {item.fromEmail || '—'} · Received: {formatReceivedAt(item.receivedAt)}
-              </div>
-              {loading ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 12, color: 'var(--ds-t3)', fontSize: 13 }}>
-                  <Loader2 className="size-4 animate-spin" />
-                  Loading full message…
-                </div>
-              ) : error ? (
-                <div style={{ padding: 12, borderRadius: 8, background: 'var(--ds-red-bg, #fee2e2)', border: '1px solid var(--ds-red-border, #fecaca)', color: 'var(--ds-red-text, #991b1b)', fontSize: 13 }}>
-                  {error}
-                </div>
-              ) : item.emailBody ? (
-                <pre
-                  style={{
-                    fontFamily: 'inherit',
-                    whiteSpace: 'pre-wrap',
-                    wordBreak: 'break-word',
-                    fontSize: 13,
-                    lineHeight: 1.5,
-                    color: 'var(--ds-t2)',
-                    background: 'var(--ds-bg)',
-                    padding: 12,
-                    borderRadius: 8,
-                    border: '1px solid var(--ds-border)',
-                    margin: 0,
-                    maxHeight: 240,
-                    overflowY: 'auto',
-                  }}
-                >
-                  {item.emailBody}
-                </pre>
-              ) : (
-                <p style={{ fontSize: 13, color: 'var(--ds-t3)' }}>No message body available.</p>
-              )}
-            </div>
-          </Section>
-
-          <AttachmentList attachments={item.attachments} getAttachmentUrl={getAttachmentUrl} />
-        </div>
-
-        <DialogFooter className="mt-4">
-          {isEmail ? (
-            <Button
-              type="submit"
-              form="details-form"
-              disabled={!fullLoaded || isPending || saving}
-              className="gap-1.5"
-            >
-              {saving && <Loader2 className="size-3.5 animate-spin" />}
+    <TmsDialog
+      open
+      onOpenChange={(open) => { if (!open) onClose() }}
+      className="tms-dialog-wide"
+      title={item.subject || '(no subject)'}
+      description={`${item.source} · ${formatReceivedAt(item.receivedAt)} · from ${item.fromEmail || 'unknown sender'}`}
+      footer={
+        <>
+          {isEmail && (
+            <TmsButton type="submit" form="details-form" variant="primary" disabled={locked} style={{ marginRight: 'auto' }}>
+              {saving && <Loader2 size={13} />}
               Save details
-            </Button>
-          ) : (
-            <span />
+            </TmsButton>
           )}
-          <div style={{ display: 'flex', gap: 8 }}>
-            {item.status === 'NEED_TO_PAY' ? (
-              <Button onClick={onPay} disabled={isPending} className="gap-1.5">
-                <CreditCard className="size-4" />
-                Mark done
-              </Button>
+          {item.status === 'NEED_TO_PAY' ? (
+            <TmsButton variant="primary" onClick={onPay} disabled={isPending}>
+              <CreditCard size={14} />
+              Mark done
+            </TmsButton>
+          ) : (
+            <>
+              <TmsButton variant="primary" onClick={onPay} disabled={isPending}>
+                <Pencil size={14} />
+                Edit payment
+              </TmsButton>
+              <TmsButton onClick={onReopen} disabled={isPending}>
+                <RotateCcw size={14} />
+                Reopen
+              </TmsButton>
+            </>
+          )}
+          {canDelete && (
+            <TmsButton variant="destructive" onClick={onDelete} disabled={isPending}>
+              <Trash2 size={14} />
+              Delete
+            </TmsButton>
+          )}
+          <TmsButton variant="ghost" onClick={onClose}>Close</TmsButton>
+        </>
+      }
+    >
+      <div style={{ display: 'grid', gap: 20 }}>
+        {item.source === 'MAINTENANCE' && item.sourceInvoiceId && (
+          <Section title="Source invoice">
+            <LinkedInvoiceDetails invoiceId={item.sourceInvoiceId} canSeeInvoices={canSeeInvoices} />
+          </Section>
+        )}
+
+        {isEmail ? (
+          <Section title="Invoice details">
+            <form id="details-form" onSubmit={submitDetails} style={{ display: 'grid', gap: 14 }}>
+              <div className="tms-grid tms-grid-2">
+                <TmsField label="Vendor" htmlFor="ap-vendor">
+                  <TmsInput id="ap-vendor" value={vendor} onChange={(e) => setVendor(e.target.value)} disabled={locked} />
+                </TmsField>
+                <TmsField label="Invoice #" htmlFor="ap-invoice">
+                  <TmsInput id="ap-invoice" value={invoiceNumber} onChange={(e) => setInvoiceNumber(e.target.value)} disabled={locked} />
+                </TmsField>
+                <TmsField label="Amount ($)" htmlFor="ap-amount">
+                  <TmsInput
+                    id="ap-amount"
+                    inputMode="decimal"
+                    placeholder="Leave blank if unknown"
+                    value={amount}
+                    onChange={(e) => setAmount(e.target.value)}
+                    disabled={locked}
+                  />
+                </TmsField>
+                <TmsField label="Invoice date" htmlFor="ap-date">
+                  <TmsInput id="ap-date" type="date" value={invoiceDate} onChange={(e) => setInvoiceDate(e.target.value)} disabled={locked} />
+                </TmsField>
+                <TmsField label="Due date" htmlFor="ap-due">
+                  <TmsInput id="ap-due" type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} disabled={locked} />
+                </TmsField>
+                <TmsField label="Vendor email (payment confirmations)" htmlFor="ap-vendor-email">
+                  <TmsInput
+                    id="ap-vendor-email"
+                    type="email"
+                    placeholder={item.fromEmail ?? 'ap@vendor.com'}
+                    value={vendorEmail}
+                    onChange={(e) => setVendorEmail(e.target.value)}
+                    disabled={locked}
+                  />
+                </TmsField>
+              </div>
+              <TmsField label="Description" htmlFor="ap-description">
+                <TmsInput id="ap-description" value={description} onChange={(e) => setDescription(e.target.value)} disabled={locked} />
+              </TmsField>
+            </form>
+          </Section>
+        ) : (
+          <Section title="Invoice details">
+            <div className="tms-grid tms-grid-2">
+              <Field label="Vendor" value={item.vendor || '—'} />
+              <Field label="Invoice #" value={item.invoiceNumber || '—'} />
+              <Field label="Amount" value={formatAmount(item.amount)} />
+              <Field label="Invoice date" value={item.invoiceDate || '—'} />
+              <Field label="Due date" value={item.dueDate || '—'} />
+              <Field label="Vendor email" value={item.vendorEmail || item.fromEmail || '—'} />
+              {item.confirmationSentAt ? <Field label="Confirmation" value={`Emailed to ${item.confirmationSentTo} · ${formatReceivedAt(item.confirmationSentAt)}`} /> : null}
+            </div>
+            {item.description && <div className="tms-muted" style={{ fontSize: 13, marginTop: 8, whiteSpace: 'pre-wrap' }}>{item.description}</div>}
+          </Section>
+        )}
+
+        <Section title="Original message">
+          <div style={{ display: 'grid', gap: 6 }}>
+            <div className="tms-muted" style={{ fontSize: 12 }}>
+              From: {item.fromEmail || '—'} · Received: {formatReceivedAt(item.receivedAt)}
+            </div>
+            {loading ? (
+              <div className="tms-muted" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 12, fontSize: 13 }}>
+                <Loader2 size={16} />
+                Loading full message…
+              </div>
+            ) : error ? (
+              <div style={{ padding: 12, borderRadius: 'var(--tms-radius)', background: 'rgba(237,90,118,0.14)', border: '1px solid var(--tms-badge-red)', color: 'var(--tms-badge-red)', fontSize: 13 }}>
+                {error}
+              </div>
+            ) : item.emailBody ? (
+              <pre
+                style={{
+                  fontFamily: 'inherit',
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                  fontSize: 13,
+                  lineHeight: 1.5,
+                  color: 'var(--tms-muted)',
+                  background: 'var(--tms-card)',
+                  padding: 12,
+                  borderRadius: 'var(--tms-radius)',
+                  border: '1px solid var(--tms-border)',
+                  margin: 0,
+                  maxHeight: 240,
+                  overflowY: 'auto',
+                }}
+              >
+                {item.emailBody}
+              </pre>
             ) : (
-              <>
-                <Button onClick={onPay} disabled={isPending} className="gap-1.5">
-                  <Pencil className="size-4" />
-                  Edit payment
-                </Button>
-                <Button variant="outline" onClick={onReopen} disabled={isPending} className="gap-1.5">
-                  <RotateCcw className="size-4" />
-                  Reopen
-                </Button>
-              </>
+              <p className="tms-muted" style={{ fontSize: 13 }}>No message body available.</p>
             )}
-            {canDelete && (
-              <Button variant="outline" onClick={onDelete} disabled={isPending} className="gap-1.5 text-red-600 hover:text-red-700 hover:bg-red-50">
-                <Trash2 className="size-4" />
-                Delete
-              </Button>
-            )}
-            <Button variant="ghost" onClick={onClose}>
-              Close
-            </Button>
           </div>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </Section>
+
+        <AttachmentList attachments={item.attachments} getAttachmentUrl={getAttachmentUrl} />
+      </div>
+    </TmsDialog>
   )
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-        {title}
-      </div>
+    <div style={{ display: 'grid', gap: 10 }}>
+      <div className="tms-field-label">{title}</div>
       {children}
     </div>
   )
@@ -564,7 +490,7 @@ function PaymentDialog({
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     const trimmedMethod = method.trim()
-    if (!trimmedMethod) {
+    if (trimmedMethod.length === 0) {
       toast.error('Pick how it was paid')
       return
     }
@@ -575,7 +501,7 @@ function PaymentDialog({
         // A new payment is stamped with today by the server; a correction keeps its date.
         ...(isCorrection ? { paymentDate: date } : {}),
         paymentReference: reference.trim() || null,
-        notifyVendor: notify && !!vendorEmail && !isCorrection,
+        notifyVendor: notify && vendorEmail.length > 0 && isCorrection === false,
       })
       onClose()
     } finally {
@@ -584,60 +510,59 @@ function PaymentDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle className="text-base">{isCorrection ? 'Edit payment' : 'Record payment'}</DialogTitle>
-          <DialogDescription>
-            {item.vendor || 'Unknown vendor'} · {item.invoiceNumber || 'No invoice #'} · {formatAmount(item.amount)}
-          </DialogDescription>
-        </DialogHeader>
-        <form id="payment-form" onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 8 }}>
-          <div>
-            <Label className="text-xs">Payment method</Label>
-            <div className="mt-1 grid grid-cols-3 gap-2">
-              {VENDOR_PAYMENT_METHODS.map((m) => (
-                <button key={m} type="button" onClick={() => setMethod(m)} disabled={isPending || submitting}
-                  className={cn('h-10 rounded-md border text-sm font-medium', method === m ? 'border-primary bg-primary/10 text-foreground' : 'border-input text-muted-foreground hover:text-foreground')}>
-                  {m}
-                </button>
-              ))}
-            </div>
-          </div>
-          {isCorrection ? (
-            <div>
-              <Label htmlFor="pay-date" className="text-xs">Payment date</Label>
-              <Input id="pay-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} disabled={isPending || submitting} className="mt-1" />
-            </div>
-          ) : (
-            <p className="text-xs text-muted-foreground">Stamped with today's date and the time you save it.</p>
-          )}
-          <div>
-            <Label htmlFor="pay-reference" className="text-xs">Reference / check #</Label>
-            <Input id="pay-reference" placeholder="Optional" value={reference} onChange={(e) => setReference(e.target.value)} disabled={isPending || submitting} className="mt-1" />
-          </div>
-          {!isCorrection ? (
-            vendorEmail ? (
-              <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" id="pay-notify" checked={notify} onChange={(e) => setNotify(e.target.checked)} disabled={isPending || submitting} />
-                <span>Email a payment confirmation to <span className="font-medium">{vendorEmail}</span></span>
-              </label>
-            ) : (
-              <p className="text-xs text-muted-foreground">No vendor email on file, so no confirmation will be sent. Add one under Edit details.</p>
-            )
-          ) : null}
-        </form>
-        <DialogFooter className="mt-4">
-          <Button variant="outline" onClick={onClose} disabled={submitting}>
-            Cancel
-          </Button>
-          <Button type="submit" form="payment-form" disabled={isPending || submitting} className="gap-1.5">
-            {submitting && <Loader2 className="size-3.5 animate-spin" />}
+    <TmsDialog
+      open={open}
+      onOpenChange={(v) => { if (!v) onClose() }}
+      title={isCorrection ? 'Edit payment' : 'Record payment'}
+      description={`${item.vendor || 'Unknown vendor'} · ${item.invoiceNumber || 'No invoice #'} · ${formatAmount(item.amount)}`}
+      footer={
+        <>
+          <TmsButton onClick={onClose} disabled={submitting}>Cancel</TmsButton>
+          <TmsButton type="submit" form="payment-form" variant="primary" disabled={isPending || submitting}>
+            {submitting && <Loader2 size={13} />}
             {isCorrection ? 'Save changes' : 'Save payment'}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          </TmsButton>
+        </>
+      }
+    >
+      <form id="payment-form" onSubmit={submit} style={{ display: 'grid', gap: 14 }}>
+        <div>
+          <div className="tms-field-label">Payment method</div>
+          <div className="tms-grid tms-grid-3" style={{ marginTop: 4 }}>
+            {VENDOR_PAYMENT_METHODS.map((m) => (
+              <TmsButton
+                key={m}
+                variant={method === m ? 'primary' : 'secondary'}
+                onClick={() => setMethod(m)}
+                disabled={isPending || submitting}
+              >
+                {m}
+              </TmsButton>
+            ))}
+          </div>
+        </div>
+        {isCorrection ? (
+          <TmsField label="Payment date" htmlFor="pay-date">
+            <TmsInput id="pay-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} disabled={isPending || submitting} />
+          </TmsField>
+        ) : (
+          <p className="tms-muted" style={{ fontSize: 12 }}>Stamped with today's date and the time you save it.</p>
+        )}
+        <TmsField label="Reference / check #" htmlFor="pay-reference">
+          <TmsInput id="pay-reference" placeholder="Optional" value={reference} onChange={(e) => setReference(e.target.value)} disabled={isPending || submitting} />
+        </TmsField>
+        {isCorrection === false ? (
+          vendorEmail ? (
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
+              <input type="checkbox" id="pay-notify" checked={notify} onChange={(e) => setNotify(e.target.checked)} disabled={isPending || submitting} />
+              <span>Email a payment confirmation to <span style={{ fontWeight: 600 }}>{vendorEmail}</span></span>
+            </label>
+          ) : (
+            <p className="tms-muted" style={{ fontSize: 12 }}>No vendor email on file, so no confirmation will be sent. Add one under Edit details.</p>
+          )
+        ) : null}
+      </form>
+    </TmsDialog>
   )
 }
 
@@ -660,54 +585,49 @@ function RowActions({
 }) {
   const isPending = pendingIds.has(item.id)
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4 }}>
       {item.status === 'NEED_TO_PAY' ? (
-        <Button
+        <TmsButton
           variant="ghost"
           size="sm"
-          className="h-8 gap-1.5 text-xs"
           disabled={isPending}
           onClick={(e) => { e.stopPropagation(); onPay(item) }}
         >
-          <Check className="size-3.5" />
+          <Check size={13} />
           Mark done
-        </Button>
+        </TmsButton>
       ) : (
         <>
-          <Button
+          <TmsButton
             variant="ghost"
             size="sm"
-            className="h-8 gap-1.5 text-xs"
             disabled={isPending}
             onClick={(e) => { e.stopPropagation(); onPay(item) }}
           >
-            <Pencil className="size-3.5" />
+            <Pencil size={13} />
             Edit payment
-          </Button>
-          <Button
+          </TmsButton>
+          <TmsButton
             variant="ghost"
             size="sm"
-            className="h-8 gap-1.5 text-xs"
             disabled={isPending}
             onClick={(e) => { e.stopPropagation(); onReopen(item) }}
           >
-            <RotateCcw className="size-3.5" />
+            <RotateCcw size={13} />
             Reopen
-          </Button>
+          </TmsButton>
         </>
       )}
       {canDelete && (
-        <Button
-          variant="ghost"
-          size="icon"
-          className="size-8 text-muted-foreground hover:text-red-600"
+        <TmsIconButton
+          shape="plain"
           disabled={isPending}
           onClick={(e) => { e.stopPropagation(); onDelete(item) }}
           aria-label={`Delete queue row for ${item.vendor || item.subject}`}
           title="Delete queue row"
         >
-          <Trash2 className="size-4" />
-        </Button>
+          <Trash2 size={14} />
+        </TmsIconButton>
       )}
     </div>
   )
@@ -730,7 +650,6 @@ export function VendorApPage() {
     getAttachmentUrl,
   } = useVendorPayables()
   const { user, hasPageAccess } = useAuth()
-  const isMobile = useIsMobile()
 
   const [search, setSearch] = useState('')
   // Opens on what is still owed: a paid row leaves this view, which is what "mark done" should look like.
@@ -741,6 +660,7 @@ export function VendorApPage() {
   const [detailError, setDetailError] = useState<string | null>(null)
   const detailIdRef = useRef<string | null>(null)
   const [paymentItem, setPaymentItem] = useState<VendorPayable | null>(null)
+  const [pageSize, setPageSize] = useState(50)
 
   const canDelete = user?.groups.includes('ADMIN') ?? false
   const canSeeInvoices = hasPageAccess('invoices')
@@ -805,7 +725,6 @@ export function VendorApPage() {
   }), [items])
 
   // The same bill twice: later copies go red so an admin can delete them.
-
   const duplicates = useMemo(() => findVendorApDuplicates(items), [items])
 
   const filtered = useMemo(() => {
@@ -814,6 +733,8 @@ export function VendorApPage() {
       .filter((item) => matchesSearch(item, search))
       .sort((a, b) => new Date(b.receivedAt).getTime() - new Date(a.receivedAt).getTime())
   }, [items, activeTab, search])
+
+  const pageRows = useMemo(() => filtered.slice(0, pageSize), [filtered, pageSize])
 
   const handleSaveDetails = useCallback(
     async (patch: VendorPayableDetails) => {
@@ -853,10 +774,10 @@ export function VendorApPage() {
   const handleReopen = useCallback(
     async (item: VendorPayable) => {
       if (
-        !window.confirm(
+        window.confirm(
           'Reopen this payable?\n\n' +
             'This clears the recorded payment date and method in the linked maintenance invoice and returns the row to Need to pay.',
-        )
+        ) === false
       ) {
         return
       }
@@ -873,13 +794,13 @@ export function VendorApPage() {
 
   const handleDelete = useCallback(
     async (item: VendorPayable) => {
-      if (!canDelete) return
+      if (canDelete === false) return
       const label = [item.vendor, item.invoiceNumber].filter(Boolean).join(' · ') || item.subject || 'this payable'
       if (
-        !window.confirm(
+        window.confirm(
           `Delete queue row for ${label}?\n\n` +
             'The original email/invoice source and any payment record are retained; only this queue row is removed.',
-        )
+        ) === false
       ) {
         return
       }
@@ -894,241 +815,125 @@ export function VendorApPage() {
     [canDelete, closeDetails, removePayable],
   )
 
-  const padX = isMobile ? 16 : 32
+  const today = todayIso()
 
-  const header = (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: `${isMobile ? 12 : 16}px ${padX}px`, borderBottom: '1px solid var(--ds-border)', background: 'var(--ds-surface)', flexShrink: 0 }}>
-      <div>
-        <h1 style={{ fontSize: 20, fontWeight: 600, color: 'var(--ds-t1)', letterSpacing: '-0.01em', margin: 0 }}>Vendor AP Queue</h1>
-        <p style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 2 }}>
-          Email invoices to vendorpayments@bcatcorp.com. Maintenance invoices are linked from the Invoices page.
-        </p>
-      </div>
-      <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={async () => { await refresh(); reloadDetails() }} disabled={loading}>
-        <RefreshCw className={cn('size-3.5', loading && 'animate-spin')} />
-        Refresh
-      </Button>
-    </div>
-  )
-
-  const filters = (
-    <div style={{ padding: `${isMobile ? 12 : 16}px ${padX}px`, borderBottom: '1px solid var(--ds-border)', background: 'var(--ds-surface)', flexShrink: 0 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          {TABS.map(({ key, label }) => {
-            const isActive = activeTab === key
-            const count = counts[key]
-            return (
-              <button
-                key={key}
-                onClick={() => setActiveTab(key)}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 6,
-                  padding: '7px 12px', fontSize: 12, fontWeight: 600,
-                  borderRadius: 7, border: '1px solid transparent',
-                  background: isActive ? 'var(--ds-blue)' : 'transparent',
-                  color: isActive ? '#fff' : 'var(--ds-t2)',
-                  borderColor: isActive ? 'var(--ds-blue)' : 'var(--ds-border)',
-                  cursor: 'pointer', transition: 'all 0.15s',
-                }}
-              >
-                {label}
-                {count > 0 && (
-                  <span style={{
-                    fontSize: 10, fontWeight: 700, borderRadius: 999,
-                    padding: '1px 6px', minWidth: 16, height: 16,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    background: isActive ? 'rgba(255,255,255,0.25)' : 'var(--ds-border)',
-                    color: isActive ? '#fff' : 'var(--ds-t2)',
-                  }}>
-                    {count}
-                  </span>
-                )}
-              </button>
-            )
-          })}
-        </div>
-        <div style={{ position: 'relative', flex: 1, minWidth: 220, maxWidth: 360 }}>
-          <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--ds-t3)', pointerEvents: 'none' }} />
-          <Input
-            placeholder="Search vendor, invoice #, subject, or sender…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            aria-label="Search vendor AP queue"
-            className="h-8 text-xs"
-            style={{ paddingLeft: 36 }}
-          />
-        </div>
-      </div>
-    </div>
-  )
-
-  const emptyState = (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '64px 0', gap: 10, color: 'var(--ds-t3)' }}>
-      <Inbox className="size-10 opacity-20" />
-      <p className="text-sm">
-        {error ? 'Couldn’t load queue. Try refreshing.' : 'No items match the current filters.'}
-      </p>
-    </div>
-  )
-
-  const renderTable = () => (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead>
-          <tr style={{ borderBottom: '1px solid var(--ds-border)', background: 'var(--ds-bg)' }}>
-            {['Vendor', 'Invoice #', 'Amount', 'Due', 'Source', 'Received', 'Status', 'Payment method', 'Date', 'Actions'].map((col) => (
-              <th
-                key={col}
-                style={{
-                  padding: '10px 16px', textAlign: 'left',
-                  fontSize: 11, fontWeight: 600, color: 'var(--ds-t3)',
-                  textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap',
-                }}
-              >
-                {col}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {filtered.map((item) => (
-            <tr
-              key={item.id}
-              style={{ borderBottom: '1px solid var(--ds-border)', cursor: 'pointer', background: duplicates.has(item.id) ? 'var(--ds-red-bg)' : undefined, boxShadow: duplicates.has(item.id) ? 'inset 3px 0 0 var(--ds-red)' : undefined }}
-              className="hover:bg-[var(--ds-bg)] transition-colors"
-              onClick={() => openDetails(item)}
+  const columns: Array<ColumnDef<VendorPayable>> = [
+    {
+      key: 'vendor',
+      header: 'VENDOR',
+      width: 200,
+      render: (item) => (
+        <div>
+          <div style={{ fontWeight: 600 }}>{item.vendor || '—'}</div>
+          {duplicates.has(item.id) ? (
+            <div
+              style={{ fontSize: 11, fontWeight: 600, color: 'var(--tms-badge-red)' }}
+              title={`Same ${duplicates.get(item.id)!.reason} as an earlier row. Delete this one.`}
             >
-              <td style={{ padding: '14px 16px', maxWidth: 200 }}>
-                <div className="truncate font-medium text-foreground">{item.vendor || '—'}</div>
-                {duplicates.has(item.id) ? (
-                  <div className="text-[11px] font-semibold text-red-600" title={`Same ${duplicates.get(item.id)!.reason} as an earlier row. Delete this one.`}>
-                    Duplicate · same {duplicates.get(item.id)!.reason}
-                  </div>
-                ) : null}
-              </td>
-              <td style={{ padding: '14px 16px', maxWidth: 160 }}>
-                <div className="truncate text-muted-foreground">{item.invoiceNumber || '—'}</div>
-              </td>
-              <td style={{ padding: '14px 16px', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
-                {formatAmount(item.amount)}
-                {item.amount == null && item.extractedAt ? <div className="text-[11px] text-muted-foreground" title={item.extractionNote ?? undefined}>not on invoice</div> : null}
-              </td>
-              <td style={{ padding: '14px 16px', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
-                <DueCell item={item} today={todayIso()} />
-              </td>
-              <td style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>
-                <SourceBadge source={item.source} />
-              </td>
-              <td style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>
-                <div className="text-sm text-muted-foreground" title={formatReceivedAt(item.receivedAt)}>
-                  {relativeReceived(item.receivedAt)}
-                </div>
-              </td>
-              <td style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <StatusBadge status={item.status} />
-                  {pendingIds.has(item.id) && <Loader2 className="size-3.5 animate-spin text-muted-foreground" />}
-                </div>
-              </td>
-              <td style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>
-                <span className="text-sm text-muted-foreground">{item.paymentMethod || '—'}</span>
-              </td>
-              <td style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>
-                <span className="text-sm text-muted-foreground" title={item.paidAt ? formatReceivedAt(item.paidAt) : undefined}>{item.paidAt ? formatReceivedAt(item.paidAt) : item.paymentDate || '—'}</span>
-                {item.confirmationSentAt ? <div className="text-[11px] text-muted-foreground">✉ confirmed</div> : null}
-              </td>
-              <td style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>
-                <RowActions
-                  item={item}
-                  pendingIds={pendingIds}
-                  canDelete={canDelete}
-                  onPay={openPayment}
-                  onReopen={handleReopen}
-                  onDelete={handleDelete}
-                />
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  )
-
-  const renderCards = () => (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-      {filtered.map((item) => (
-        <div
-          key={item.id}
-          onClick={() => openDetails(item)}
-          style={{
-            background: 'var(--ds-surface)',
-            border: '1px solid var(--ds-border)',
-            borderRadius: 12,
-            padding: 14,
-            cursor: 'pointer',
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 10 }}>
-            <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)', marginBottom: 2 }} className="truncate">
-                {item.vendor || 'Unknown vendor'}
-              </div>
-              <div style={{ fontSize: 12, color: 'var(--ds-t3)' }}>
-                {item.invoiceNumber || 'No invoice #'} · {formatAmount(item.amount)}
-              </div>
+              Duplicate · same {duplicates.get(item.id)!.reason}
             </div>
-            <StatusBadge status={item.status} />
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '8px 12px', marginBottom: 12, fontSize: 12, color: 'var(--ds-t2)' }}>
-            <div><span style={{ color: 'var(--ds-t3)' }}>Source:</span> <SourceBadge source={item.source} /></div>
-            <div><span style={{ color: 'var(--ds-t3)' }}>Received:</span> {relativeReceived(item.receivedAt)}</div>
-            <div><span style={{ color: 'var(--ds-t3)' }}>Method:</span> {item.paymentMethod || '—'}</div>
-            <div><span style={{ color: 'var(--ds-t3)' }}>Date:</span> {item.paymentDate || '—'}</div>
-          </div>
-          <div onClick={(e) => e.stopPropagation()}>
-            <RowActions
-              item={item}
-              pendingIds={pendingIds}
-              canDelete={canDelete}
-              onPay={openPayment}
-              onReopen={handleReopen}
-              onDelete={handleDelete}
-            />
-          </div>
+          ) : null}
         </div>
-      ))}
-    </div>
-  )
+      ),
+    },
+    { key: 'invoice', header: 'INVOICE #', width: 160, render: (item) => <span className="tms-muted">{item.invoiceNumber || '—'}</span> },
+    {
+      key: 'amount',
+      header: 'AMOUNT',
+      width: 130,
+      render: (item) => (
+        <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+          {formatAmount(item.amount)}
+          {item.amount == null && item.extractedAt ? (
+            <span className="tms-muted" style={{ display: 'block', fontSize: 11 }} title={item.extractionNote ?? undefined}>not on invoice</span>
+          ) : null}
+        </span>
+      ),
+    },
+    { key: 'due', header: 'DUE', width: 140, render: (item) => <DueCell item={item} today={today} /> },
+    { key: 'source', header: 'SOURCE', width: 130, render: (item) => <SourceBadge source={item.source} /> },
+    {
+      key: 'received',
+      header: 'RECEIVED',
+      width: 120,
+      render: (item) => <span className="tms-muted" title={formatReceivedAt(item.receivedAt)}>{relativeReceived(item.receivedAt)}</span>,
+    },
+    {
+      key: 'status',
+      header: 'STATUS',
+      width: 150,
+      render: (item) => (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+          <StatusBadge status={item.status} />
+          {pendingIds.has(item.id) && <Loader2 size={13} className="tms-muted" />}
+        </span>
+      ),
+    },
+    { key: 'method', header: 'PAYMENT METHOD', width: 150, render: (item) => <span className="tms-muted">{item.paymentMethod || '—'}</span> },
+    {
+      key: 'date',
+      header: 'DATE',
+      width: 150,
+      render: (item) => (
+        <span className="tms-muted" title={item.paidAt ? formatReceivedAt(item.paidAt) : undefined}>
+          {item.paidAt ? formatReceivedAt(item.paidAt) : item.paymentDate || '—'}
+          {item.confirmationSentAt ? <span style={{ display: 'block', fontSize: 11 }}>✉ confirmed</span> : null}
+        </span>
+      ),
+    },
+    {
+      key: 'actions',
+      header: '',
+      width: 300,
+      render: (item) => (
+        <RowActions
+          item={item}
+          pendingIds={pendingIds}
+          canDelete={canDelete}
+          onPay={openPayment}
+          onReopen={handleReopen}
+          onDelete={handleDelete}
+        />
+      ),
+    },
+  ]
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', background: 'var(--ds-bg)' }}>
-      {header}
-      {filters}
-
-      {error && (
-        <div style={{ margin: '16px 32px 0', padding: '10px 14px', borderRadius: 8, background: 'var(--ds-red-bg, #fee2e2)', border: '1px solid var(--ds-red-border, #fecaca)', color: 'var(--ds-red-text, #991b1b)', display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
-          <AlertCircle className="size-4 shrink-0" />
-          {error}
-        </div>
-      )}
-
-      <div className="flex-1 overflow-y-auto px-8 py-6">
-        <div style={{ background: 'var(--ds-surface)', borderRadius: 12, border: '1px solid var(--ds-border)', overflow: 'hidden', boxShadow: 'var(--sh-sm)' }}>
-          {loading && items.length === 0 ? (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '64px 0', gap: 10, color: 'var(--ds-t3)' }}>
-              <Loader2 className="size-6 animate-spin opacity-50" />
-              <p className="text-sm">Loading vendor AP queue…</p>
-            </div>
-          ) : filtered.length === 0 ? (
-            emptyState
-          ) : isMobile ? (
-            <div style={{ padding: 16 }}>{renderCards()}</div>
-          ) : (
-            renderTable()
-          )}
-        </div>
-      </div>
+    <>
+      <TmsListPage<VendorPayable>
+        title="Vendors"
+        search={{ value: search, onChange: setSearch, placeholder: 'Search vendor, invoice #, subject, or sender…' }}
+        onRefresh={() => { void (async () => { await refresh(); reloadDetails() })() }}
+        quickTabs={{
+          tabs: TABS.map(({ key, label }) => ({ key, label, count: counts[key] })),
+          active: activeTab,
+          onSelect: (key) => setActiveTab(key as 'ALL' | 'NEED_TO_PAY' | 'DONE'),
+        }}
+        banner={
+          <p className="tms-muted" style={{ fontSize: 12 }}>
+            Email invoices to vendorpayments@bcatcorp.com. Maintenance invoices are linked from the Invoices page.
+            {error ? (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginLeft: 8, color: 'var(--tms-badge-red)' }}>
+                <AlertCircle size={14} />
+                {error}
+              </span>
+            ) : null}
+          </p>
+        }
+        columns={columns}
+        rows={pageRows}
+        rowKey={(item) => item.id}
+        onRowClick={openDetails}
+        page={{ from: pageRows.length === 0 ? 0 : 1, to: pageRows.length, total: filtered.length, pageSize, onPageSize: setPageSize }}
+        emptyText={
+          error
+            ? 'Couldn’t load queue. Try refreshing.'
+            : loading
+              ? 'Loading vendor AP queue…'
+              : 'No items match the current filters.'
+        }
+        onClearFilters={() => { setSearch(''); setActiveTab('ALL') }}
+      />
 
       {detailItem && (
         <DetailsDialog
@@ -1158,6 +963,6 @@ export function VendorApPage() {
         onClose={() => setPaymentItem(null)}
         onSubmit={handlePaymentSubmit}
       />
-    </div>
+    </>
   )
 }

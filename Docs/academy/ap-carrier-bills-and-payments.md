@@ -4,14 +4,14 @@ slug: ap-carrier-bills-and-payments
 type: HOW_TO
 category: Billing
 productAreas: [TMS, Billing, Carriers]
-related: [ar-invoicing-and-payments, carriers-and-booking, documents-and-delivery]
+related: [ar-invoicing-and-payments, release-to-accounting, carriers-and-booking, documents-and-delivery]
 ---
 
 # AP — Carrier Bills and Payments
 
 The same freight, the other side of the ledger. [AR](ar-invoicing-and-payments.md) is what the customer owes us; AP is what we owe the truck that hauled it. This article covers the AP ladder and who moves each rung, recording a carrier's bill and why it freezes the charges, the approval gate, quick pay, paying a carrier — allocations, credits, partials and reversals — paying a factor, the remittance advice, the aging, and the one-off migration that opened the board.
 
-AP lives on the **Accounts Payable** page (`/ap`, Operations → Accounts Payable, directly after Accounts Receivable), on each bill's own page at `/ap/bills/<id>`, on the **AP card** in a shipment's **Carrier** tab, and on a carrier's **AP** tab in the directory.
+AP lives on the **Invoicing — payable** page (`/tms/invoicing/payable`), on each bill's own page at `/tms/invoicing/payable/bills/<id>`, on the **AP card** in a shipment's **Carrier** tab, and on a carrier's **AP** tab in the directory.
 
 ## The AP ladder
 
@@ -117,7 +117,7 @@ An admin can approve past missing paperwork by writing a **note** saying why. Th
 
 ### Who may do what
 
-Every AP action needs owner, ADMIN or the **`page-carrierPay`** grant. Holding `page-invoicing` is not enough and never falls through: billing a customer and paying a carrier are different jobs with different consequences. On top of that, and switchable on the **Carrier bills & AP** card in Settings:
+Every AP action needs owner, ADMIN or the **`page-carrierPay`** grant. Holding `page-invoicing` is not enough and never falls through: billing a customer and paying a carrier are different jobs with different consequences. On top of that, and switchable on the **Carrier bills & AP** card in My Brokerage:
 
 - *"Only an admin may approve a bill for payment"* — **Approve** and **Unapprove**;
 - *"Only an admin may pay, credit, reverse or void"* — the money itself;
@@ -223,9 +223,9 @@ There is no "average days to invoice" on this strip, deliberately: we do not rai
 
 ## The Vendor AP Queue is a different thing
 
-`/vendor-ap` is unchanged and is not this. It is the queue for **office and vendor bills** — rows pushed from a maintenance invoice, or mail forwarded to vendorpayments@bcatcorp.com — on a two-rung ladder, **Need to pay → Done**, with one amount, a payment method and a date.
+`/tms/vendors` (the Vendor AP Queue) is unchanged and is not this. It is the queue for **office and vendor bills** — rows pushed from a maintenance invoice, or mail forwarded to vendorpayments@bcatcorp.com — on a two-rung ladder, **Need to pay → Done**, with one amount, a payment method and a date.
 
-It has no payee entity, no allocations, no partial payment, no credit, no reversal and no remittance, and marking a row done writes the payment fields in place. That is fine for a shop bill and wrong for carrier pay, which is why carrier bills were not bolted onto it. Use the Vendor AP Queue for what we buy; use `/ap` for the trucks that hauled the freight.
+It has no payee entity, no allocations, no partial payment, no credit, no reversal and no remittance, and marking a row done writes the payment fields in place. That is fine for a shop bill and wrong for carrier pay, which is why carrier bills were not bolted onto it. Use the Vendor AP Queue for what we buy; use `/tms/invoicing/payable` for the trucks that hauled the freight.
 
 ## The one-off migration
 

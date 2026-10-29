@@ -4,7 +4,7 @@
  *
  * Nothing a carrier uploads satisfies a required-document gate until somebody accepts
  * it here, so this page is the only thing standing between "the carrier says they sent
- * the POD" and an order that is clear to invoice. The carrier also chose the type from
+ * the POD" and a shipment that is clear to invoice. The carrier also chose the type from
  * a dropdown on a phone at a dock, which is why accepting asks for the type again: a
  * lumper receipt filed as a POD would satisfy the wrong gate, and retyping on the way
  * in is cheaper than finding it later.
@@ -16,13 +16,18 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Check, ExternalLink, Eye, FileCheck2, RefreshCw, X } from 'lucide-react'
+import { Check, ExternalLink, Eye, X } from 'lucide-react'
 import { toast } from 'sonner'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import {
+  TmsBadge,
+  TmsButton,
+  TmsDialog,
+  TmsField,
+  TmsListPage,
+  TmsSelect,
+  TmsTextarea,
+} from '@/features/tms/kit'
+import type { ColumnDef } from '@/features/tms/kit'
 import { getShipmentBundle, getShipmentDocumentUrl, reviewDocument } from '@/lib/apiClient'
 import { CARRIER_UPLOADABLE_TYPES, DOCUMENT_TYPE_LABELS } from '@/lib/shipmentDocuments'
 import { formatDateTime } from '@/lib/date'
@@ -70,6 +75,10 @@ export function DocumentReviewPage() {
   const [rejecting, setRejecting] = useState<ShipmentDocumentRecord | null>(null)
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
+  const [query, setQuery] = useState('')
+  const [typeFilter, setTypeFilter] = useState<'' | ShipmentDocumentType>('')
+  const [filtersOpen, setFiltersOpen] = useState(false)
+  const [pageSize, setPageSize] = useState(50)
 
   // A primitive the effect can depend on; the document array is rebuilt by every poll.
   const shipmentIds = useMemo(
@@ -128,88 +137,107 @@ export function DocumentReviewPage() {
     }
   }
 
+  const nameFor = (doc: ShipmentDocumentRecord) => {
+    const ctx = context[doc.shipmentId]
+    const loadNumber = doc.loadId ? ctx?.loadNumbers[doc.loadId] : undefined
+    const carrier = (doc.loadCarrierId ? ctx?.loadCarrierNames[doc.loadCarrierId] : undefined)
+      ?? (doc.loadId ? ctx?.carrierNames[doc.loadId] : undefined)
+    return { shipment: loadNumber ?? ctx?.number ?? doc.shipmentId, carrier }
+  }
+
+  const rows = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    return queue.documents
+      .filter((doc) => (typeFilter ? doc.type === typeFilter : true))
+      .filter((doc) => {
+        if (!q) return true
+        const { shipment, carrier } = nameFor(doc)
+        return [doc.name, shipment, carrier, DOCUMENT_TYPE_LABELS[doc.type]].some((v) => (v ?? '').toLowerCase().includes(q))
+      })
+    // `context` feeds the search text, so a bundle arriving re-filters the rows.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queue.documents, query, typeFilter, context])
+
+  const pageRows = useMemo(() => rows.slice(0, pageSize), [rows, pageSize])
+
+  const columns: Array<ColumnDef<ShipmentDocumentRecord>> = [
+    { key: 'received', header: 'RECEIVED', width: 170, render: (doc) => formatDateTime(doc.uploadedAt) },
+    {
+      key: 'shipment',
+      header: 'SHIPMENT · LOAD',
+      width: 170,
+      render: (doc) => <span style={{ fontWeight: 600 }}>{nameFor(doc).shipment}</span>,
+    },
+    { key: 'carrier', header: 'CARRIER', width: 180, render: (doc) => nameFor(doc).carrier ?? '—' },
+    { key: 'type', header: 'CLAIMED TYPE', width: 160, render: (doc) => <TmsBadge tone="purple">{DOCUMENT_TYPE_LABELS[doc.type]}</TmsBadge> },
+    { key: 'file', header: 'FILE', width: 220, render: (doc) => doc.name },
+    { key: 'size', header: 'SIZE', width: 90, render: (doc) => <span className="tms-muted" style={{ fontVariantNumeric: 'tabular-nums' }}>{formatSize(doc.sizeBytes)}</span> },
+    {
+      key: 'actions',
+      header: '',
+      width: 300,
+      render: (doc) => (
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 4 }}>
+          <TmsButton size="sm" onClick={() => openPreview(doc)}><Eye size={13} />Preview</TmsButton>
+          <TmsButton variant="primary" size="sm" disabled={busy} onClick={() => startAccept(doc)}><Check size={13} />Accept</TmsButton>
+          <TmsButton size="sm" disabled={busy} onClick={() => { setNote(''); setRejecting(doc) }}><X size={13} />Reject</TmsButton>
+          <TmsButton variant="ghost" size="sm" aria-label="Open shipment" onClick={() => navigate(`/tms/shipments/${doc.shipmentId}`)}>
+            <ExternalLink size={13} />
+          </TmsButton>
+        </div>
+      ),
+    },
+  ]
+
   return (
-    <div className="flex h-full flex-col">
-      <header className="flex flex-wrap items-center gap-2 border-b border-border px-5 py-3">
-        <FileCheck2 size={18} />
-        <h1 className="text-lg font-semibold">Documents</h1>
-        <Badge variant="outline">{queue.pendingCount}</Badge>
-        <Button
-          variant="ghost" size="icon" className="ml-auto h-9 w-9" aria-label="Refresh"
-          onClick={() => { void queue.refresh() }}
-        >
-          <RefreshCw size={14} className={queue.loading ? 'animate-spin' : undefined} />
-        </Button>
-      </header>
+    <>
+      <TmsListPage<ShipmentDocumentRecord>
+        title="Documents"
+        search={{ value: query, onChange: setQuery, placeholder: 'Search files, shipments, carriers' }}
+        onRefresh={() => { void queue.refresh() }}
+        filterChips={[
+          { key: 'type', label: 'Claimed type is', value: typeFilter ? DOCUMENT_TYPE_LABELS[typeFilter] : null, onClick: () => setFiltersOpen(true) },
+        ]}
+        onAddFilter={() => setFiltersOpen(true)}
+        quickTabs={{
+          tabs: [{ key: 'pending', label: 'Waiting on review', count: queue.pendingCount }],
+          active: 'pending',
+          onSelect: () => {},
+        }}
+        columns={columns}
+        rows={pageRows}
+        rowKey={(doc) => doc.id}
+        page={{ from: pageRows.length === 0 ? 0 : 1, to: pageRows.length, total: rows.length, pageSize, onPageSize: setPageSize }}
+        emptyText={
+          queue.error
+            ? queue.error
+            : queue.loading
+              ? 'Loading the review queue…'
+              : 'Nothing is waiting on review. Files carriers send through an upload link land here; nothing counts towards a required document until it is accepted.'
+        }
+        onClearFilters={() => { setQuery(''); setTypeFilter('') }}
+      />
 
-      <p className="border-b border-border px-5 py-2 text-xs text-muted-foreground">
-        Files carriers sent through an upload link. Nothing here counts towards a required
-        document until it is accepted, and accepting is where the type is confirmed.
-      </p>
-
-      {queue.error && <p className="px-5 py-3 text-sm text-destructive">{queue.error}</p>}
-
-      <div className="flex-1 overflow-auto px-5 py-3">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-border text-left text-xs uppercase tracking-wider text-muted-foreground">
-              <th className="px-2 py-2">Received</th>
-              <th className="px-2 py-2">Shipment · load</th>
-              <th className="px-2 py-2">Carrier</th>
-              <th className="px-2 py-2">Claimed type</th>
-              <th className="px-2 py-2">File</th>
-              <th className="px-2 py-2">Size</th>
-              <th className="w-72" />
-            </tr>
-          </thead>
-          <tbody>
-            {queue.documents.length === 0 && !queue.loading && (
-              <tr><td colSpan={7} className="py-8 text-center text-sm text-muted-foreground">Nothing is waiting on review.</td></tr>
-            )}
-            {queue.documents.map((doc) => {
-              const ctx = context[doc.shipmentId]
-              const loadNumber = doc.loadId ? ctx?.loadNumbers[doc.loadId] : undefined
-              const carrier = (doc.loadCarrierId ? ctx?.loadCarrierNames[doc.loadCarrierId] : undefined)
-                ?? (doc.loadId ? ctx?.carrierNames[doc.loadId] : undefined)
-              return (
-                <tr key={doc.id} className="border-b border-border/60">
-                  <td className="px-2 py-2 whitespace-nowrap">{formatDateTime(doc.uploadedAt)}</td>
-                  <td className="px-2 py-2 font-medium">{loadNumber ?? ctx?.number ?? doc.shipmentId}</td>
-                  <td className="px-2 py-2">{carrier ?? '—'}</td>
-                  <td className="px-2 py-2">
-                    <Badge variant="outline" className="text-[10px]">{DOCUMENT_TYPE_LABELS[doc.type]}</Badge>
-                  </td>
-                  <td className="max-w-xs truncate px-2 py-2">{doc.name}</td>
-                  <td className="px-2 py-2 tabular-nums text-muted-foreground">{formatSize(doc.sizeBytes)}</td>
-                  <td className="px-1 py-2">
-                    <div className="flex justify-end gap-1">
-                      <Button variant="outline" size="sm" className="h-7" onClick={() => openPreview(doc)}>
-                        <Eye size={13} className="mr-1" />Preview
-                      </Button>
-                      <Button size="sm" className="h-7" disabled={busy} onClick={() => startAccept(doc)}>
-                        <Check size={13} className="mr-1" />Accept
-                      </Button>
-                      <Button
-                        variant="outline" size="sm" className="h-7"
-                        disabled={busy}
-                        onClick={() => { setNote(''); setRejecting(doc) }}
-                      >
-                        <X size={13} className="mr-1" />Reject
-                      </Button>
-                      <Button
-                        variant="ghost" size="sm" className="h-7" aria-label="Open shipment"
-                        onClick={() => navigate(`/shipments/${doc.shipmentId}`)}
-                      >
-                        <ExternalLink size={13} />
-                      </Button>
-                    </div>
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      </div>
+      <TmsDialog
+        open={filtersOpen}
+        onOpenChange={setFiltersOpen}
+        title="Filter documents"
+        footer={
+          <>
+            <TmsButton onClick={() => setTypeFilter('')}>Clear</TmsButton>
+            <TmsButton variant="primary" onClick={() => setFiltersOpen(false)}>Done</TmsButton>
+          </>
+        }
+      >
+        <TmsField label="Claimed type is">
+          <TmsSelect
+            value={typeFilter}
+            onChange={(e) => setTypeFilter(e.target.value as '' | ShipmentDocumentType)}
+            placeholder="Any"
+            options={CARRIER_UPLOADABLE_TYPES.map((t) => ({ value: t, label: DOCUMENT_TYPE_LABELS[t] }))}
+          />
+        </TmsField>
+      </TmsDialog>
 
       {preview && (
         <DocumentPreview
@@ -224,29 +252,15 @@ export function DocumentReviewPage() {
       )}
 
       {accepting && (
-        <Dialog open onOpenChange={(open) => { if (!open && !busy) setAccepting(null) }}>
-          <DialogContent className="max-w-md">
-            <DialogHeader><DialogTitle>Accept this document</DialogTitle></DialogHeader>
-            <p className="text-sm text-muted-foreground">
-              {accepting.name} — the carrier filed this as {DOCUMENT_TYPE_LABELS[accepting.type]}. Confirm
-              what it actually is; that is the type the shipment keeps.
-            </p>
-            <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-              Document type
-              <select
-                aria-label="Confirmed document type"
-                value={acceptType}
-                onChange={(e) => setAcceptType(e.target.value as ShipmentDocumentType)}
-                className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
-              >
-                {CARRIER_UPLOADABLE_TYPES.map((t) => (
-                  <option key={t} value={t}>{DOCUMENT_TYPE_LABELS[t]}</option>
-                ))}
-              </select>
-            </Label>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setAccepting(null)} disabled={busy}>Cancel</Button>
-              <Button
+        <TmsDialog
+          open
+          onOpenChange={(open) => { if (!open && !busy) setAccepting(null) }}
+          title="Accept this document"
+          footer={
+            <>
+              <TmsButton onClick={() => setAccepting(null)} disabled={busy}>Cancel</TmsButton>
+              <TmsButton
+                variant="primary"
                 disabled={busy}
                 onClick={() => {
                   void decide(
@@ -256,34 +270,36 @@ export function DocumentReviewPage() {
                 }}
               >
                 {busy ? 'Saving…' : 'Accept'}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+              </TmsButton>
+            </>
+          }
+        >
+          <div style={{ display: 'grid', gap: 14 }}>
+            <p className="tms-muted" style={{ fontSize: 13 }}>
+              {accepting.name} — the carrier filed this as {DOCUMENT_TYPE_LABELS[accepting.type]}. Confirm
+              what it actually is; that is the type the shipment keeps.
+            </p>
+            <TmsField label="Document type">
+              <TmsSelect
+                aria-label="Confirmed document type"
+                value={acceptType}
+                onChange={(e) => setAcceptType(e.target.value as ShipmentDocumentType)}
+                options={CARRIER_UPLOADABLE_TYPES.map((t) => ({ value: t, label: DOCUMENT_TYPE_LABELS[t] }))}
+              />
+            </TmsField>
+          </div>
+        </TmsDialog>
       )}
 
       {rejecting && (
-        <Dialog open onOpenChange={(open) => { if (!open && !busy) { setRejecting(null); setNote('') } }}>
-          <DialogContent className="max-w-md">
-            <DialogHeader><DialogTitle>Reject this document</DialogTitle></DialogHeader>
-            <p className="text-sm text-muted-foreground">
-              {rejecting.name} — the note is what the carrier is told, so say what is wrong
-              with it and what to send instead.
-            </p>
-            <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-              Why it is being rejected
-              <Textarea
-                aria-label="Rejection note"
-                rows={3}
-                value={note}
-                onChange={(e) => setNote(e.target.value)}
-                placeholder="Page 2 is cut off — please re-send the whole POD"
-                className="mt-1 text-sm"
-              />
-            </Label>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => { setRejecting(null); setNote('') }} disabled={busy}>Cancel</Button>
-              <Button
+        <TmsDialog
+          open
+          onOpenChange={(open) => { if (!open && !busy) { setRejecting(null); setNote('') } }}
+          title="Reject this document"
+          footer={
+            <>
+              <TmsButton onClick={() => { setRejecting(null); setNote('') }} disabled={busy}>Cancel</TmsButton>
+              <TmsButton
                 variant="destructive"
                 disabled={busy || !note.trim()}
                 onClick={() => {
@@ -294,12 +310,28 @@ export function DocumentReviewPage() {
                 }}
               >
                 {busy ? 'Saving…' : 'Reject'}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+              </TmsButton>
+            </>
+          }
+        >
+          <div style={{ display: 'grid', gap: 14 }}>
+            <p className="tms-muted" style={{ fontSize: 13 }}>
+              {rejecting.name} — the note is what the carrier is told, so say what is wrong
+              with it and what to send instead.
+            </p>
+            <TmsField label="Why it is being rejected">
+              <TmsTextarea
+                aria-label="Rejection note"
+                rows={3}
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                placeholder="Page 2 is cut off — please re-send the whole POD"
+              />
+            </TmsField>
+          </div>
+        </TmsDialog>
       )}
-    </div>
+    </>
   )
 }
 

@@ -33,6 +33,7 @@ import {
   type Row,
 } from '../_shared/shipmentStore'
 import type { Caller } from '../_shared/actionInputs'
+import type { ReleaseGateDeps } from '../_shared/releaseGateInput'
 import { DEFAULT_INVOICE_NUMBER_FORMAT, formatInvoiceNumber } from '../../../src/lib/invoiceBuild'
 
 export const dynamo = new DynamoDBClient({})
@@ -125,6 +126,24 @@ export function queryIndex(tableName: string, indexName: string, keyName: string
 
 export function transact(items: TransactWriteItem[], label: string): Promise<void> {
   return storeTransact(dynamo, items, label)
+}
+
+/**
+ * The tables the release gate reads, bound to this Lambda's client. The check-call
+ * table is not among them: finance holds no grant on it, so the open-exception
+ * count comes from `Load.openIncidentCount`, which the tracking router keeps honest.
+ */
+export const releaseGateDeps: ReleaseGateDeps = {
+  db: dynamo,
+  tables: {
+    shipment: SHIPMENT_TABLE_NAME,
+    order: ORDER_TABLE_NAME,
+    load: LOAD_TABLE_NAME,
+    loadCarrier: LOAD_CARRIER_TABLE_NAME,
+    shipmentDocument: SHIPMENT_DOCUMENT_TABLE_NAME,
+    customer: CUSTOMER_TABLE_NAME,
+    settings: SETTINGS_TABLE_NAME,
+  },
 }
 
 

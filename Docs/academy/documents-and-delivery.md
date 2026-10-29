@@ -4,14 +4,14 @@ slug: documents-and-delivery
 type: HOW_TO
 category: Operations
 productAreas: [TMS, Dispatch, Billing, Carriers, Driver App]
-related: [shipments-orders-loads, carriers-and-booking, tracking-and-check-calls]
+related: [shipments-orders-loads, carriers-and-booking, tracking-and-check-calls, release-to-accounting]
 ---
 
 # Documents and Delivery
 
 A load that has delivered is not a load that can be billed. This article covers the paperwork end of a shipment: the **Documents** tab and its three sections, where each file comes from, generating a BOL or a load summary, the required-document strip and **Ready to invoice**, reviewing what a carrier sends us, the carrier's upload link, the e-mails that go out when a shipment moves, and rating the carrier afterwards.
 
-Documents live on the shipment's **Documents** tab (after Tracking), the delivery card on the **Summary** tab, and **Operations → Documents** for the review queue.
+Documents live on the shipment's **Documents** tab (after Tracking), the delivery card on the **Summary** tab, and **Documents** (`/tms/documents`) for the review queue.
 
 ## The three sections
 
@@ -71,7 +71,7 @@ Versions count **per type, per load**, so a two-leg shipment has two BOLs that a
 
 The top of the Documents tab is a strip of the types this shipment has to have before it can be billed. Each one reads ✓ with what satisfies it, or ✗ missing.
 
-The list comes from the customer first: **the customer's own required-documents list replaces the org default when it is set**, rather than adding to it. "This one bills on the BOL alone" is a real arrangement, and a union would make it impossible to ask for less than the org asks for. Only when the customer's list is empty does the org default in **Settings → Documents & delivery** apply.
+The list comes from the customer first: **the customer's own required-documents list replaces the org default when it is set**, rather than adding to it. "This one bills on the BOL alone" is a real arrangement, and a union would make it impossible to ask for less than the org asks for. Only when the customer's list is empty does the org default in **My Brokerage → Documents & delivery** apply.
 
 Both lists used to be free text, so anything already typed into them is read through a vocabulary — "Proof of delivery" and "signed POD" both mean POD, "rate con" means rate confirmation, "scale ticket" means weight ticket. Anything nobody could map to a type is **kept verbatim and flagged** on the strip, and it never blocks: we will not refuse to bill a shipment over a phrase we cannot interpret.
 
@@ -84,7 +84,7 @@ What counts as present:
 
 **Ready to invoice** sits at the end of the strip and moves the order's AR status from `DOCS_NEEDED` to `UNBILLED`. It refuses when the shipment has not delivered (unless the customer is set up to invoice early), when the AR status is not `DOCS_NEEDED`, and when anything is missing — the error names what is missing.
 
-An **admin may override** a missing document, and a note is required. The override is stored on the order with who did it and when, so "we billed this without the lumper receipt because the customer waived it" is on the record rather than in somebody's memory. Nobody below admin sees the override; they see the missing list.
+There is no override — not even an admin may bill past a missing document. This same list is the **release gate** the finance router enforces before an invoice may be raised, a bill sent to the factor or a batch run; see [Release to Accounting](release-to-accounting.md).
 
 The gate gates billing, never delivery. A truck delivers when it delivers; paperwork is a fact about the invoice.
 
@@ -94,7 +94,7 @@ A file that arrives through the carrier's upload link lands **pending**, and a p
 
 That is not bureaucracy for its own sake. The person uploading is outside the company, nobody checked that the file is the POD rather than the wrong load's BOL, and a pending row that could satisfy the gate would mean an anonymous link could decide that an invoice may go out.
 
-**Operations → Documents** is the queue: when it arrived, which shipment and load, which carrier, what they said it was, the file and its size. Preview it, then:
+**Documents** (`/tms/documents`) is the queue: when it arrived, which shipment and load, which carrier, what they said it was, the file and its size. Preview it, then:
 
 - **Accept** — confirm or correct the type (within what a carrier may send), and the row counts from that moment.
 - **Reject** — with a note. The row stays on the shipment, visibly refused, and satisfies nothing.
@@ -107,7 +107,7 @@ The nav badge counts what is waiting. The carrier is not told the difference: th
 
 One link per assignment. Re-sending mails the same URL; **Regenerate** kills the old one and mints a new one; **Revoke** ends it.
 
-The link expires **30 days after delivery** by default (1 to 180 days in Settings), and never sooner than 24 hours from now — a link minted for a load that delivered three weeks ago still has to work for the person reading the e-mail it arrived in.
+The link expires **30 days after delivery** by default (1 to 180 days in My Brokerage), and never sooner than 24 hours from now — a link minted for a load that delivered three weeks ago still has to work for the person reading the e-mail it arrived in.
 
 What the carrier sees is only this: our name, the load number, their own name, the stops with their appointments, a **"we still need"** checklist, a file picker, the list of what they have already sent through this link, when the link stops working, and a dispatch phone number.
 
@@ -126,13 +126,13 @@ One nuance worth knowing when a carrier calls: their checklist ticks a line as s
 
 Six load movements can be told to the customer: **loading, picked up, in transit, out for delivery, unloading, delivered**. Sourcing, booked and dispatched are our problem, not theirs.
 
-**Nothing goes out until a customer is switched on.** A milestone e-mail is sent only when that customer's `milestoneEmails` visibility preference is on *and* an active contact with an e-mail address subscribed to that milestone. An empty recipient list is not an error — it is the normal state of a customer nobody has configured. There is also a master switch in Settings over the top of that.
+**Nothing goes out until a customer is switched on.** A milestone e-mail is sent only when that customer's `milestoneEmails` visibility preference is on *and* an active contact with an e-mail address subscribed to that milestone. An empty recipient list is not an error — it is the normal state of a customer nobody has configured. There is also a master switch in My Brokerage over the top of that.
 
 The **delivered** notice waits for the whole shipment: a two-leg move sends it when the last leg delivers, not when the first one does. Each shipment sends each milestone exactly once, whatever the stream does behind the scenes.
 
 The body is plain text and carries the milestone, the pickup and delivery with their appointments, the customer-visible references, the customer tracking link, and the delivery time on the delivered notice. It carries no money and no margin, and it names the carrier only when the customer link is already set to show the carrier.
 
-When a load delivers, the carrier gets a different e-mail: a **paperwork request** to their dispatch address with an upload link and a list of what we still need — by default the **POD and the carrier invoice**. Own-fleet legs get nothing. This can be turned off in Settings.
+When a load delivers, the carrier gets a different e-mail: a **paperwork request** to their dispatch address with an upload link and a list of what we still need — by default the **POD and the carrier invoice**. Own-fleet legs get nothing. This can be turned off in My Brokerage.
 
 ### Where to read what was actually sent
 
@@ -154,7 +154,7 @@ The rating sits on the assignment, so it is a rating of how this carrier did on 
 
 ## Common issues
 
-- **Ready to invoice is greyed out and the POD is right there** — look at the row. A carrier-portal upload is pending until somebody accepts it, and a pending row satisfies nothing. Accept it from **Operations → Documents**.
+- **Ready to invoice is greyed out and the POD is right there** — look at the row. A carrier-portal upload is pending until somebody accepts it, and a pending row satisfies nothing. Accept it from **Documents** (`/tms/documents`).
 - **The strip wants a document the customer never asks for** — the customer's own list replaces the org default only when it is set. Set it on the customer profile; leaving it empty means the org default applies.
 - **The strip flags a phrase in grey** — somebody typed a required document we cannot map to a type. It never blocks. Edit the customer's list to the typed equivalent.
 - **I regenerated the BOL and lost the old one** — you did not. v1 is still there, marked superseded, with its bytes untouched. Only the current version counts for the gate.
