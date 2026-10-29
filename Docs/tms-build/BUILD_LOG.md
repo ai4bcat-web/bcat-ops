@@ -2,6 +2,101 @@
 
 One entry per unit of work (newest first). Decisions needed from Ryne go under **Decision needed**.
 
+## 2026-10-29 — Step R2 follow-up on dev: the board a user customizes, three workstations, one dashboard
+
+One commit — `80d8cde` — Amplify dev job **66 SUCCEED**, pushed with the branch idle
+(job 65 SUCCEED) and announced first. Gates before the commit: `npm run typecheck` (both
+projects clean), `npm run lint` (0 errors; the same 2 pre-existing warnings as R2),
+`npm run test` — **443 files / 5,976 tests**, up from 433/5,856 after R2. Live proof on
+dev: `node scripts/devVerifyR2Followup.mjs` → **13 PASS / 0 FAIL**, summary
+`{"pass":13,"fail":0}`, and a second run reports `viewsDeactivated: 0` — the sweep
+converges. Plan: `Docs/tms-build/R2-followup-plan.md`.
+
+### What shipped
+
+- **Duplicate through the normal path.** New PRO claimed in the copy's own transaction,
+  status **Open**, and the customer, lane, stops, equipment, commodity, references, rates
+  and division carried over. No carrier leg, no documents, no invoice: `sameCarrier` is
+  gone from the action, the dialog and every caller. The copy of an invoiced shipment no
+  longer inherits `invoiceNumber`, `invoicedAt`, `paidAt`, `arBalanceCents`,
+  `factoringItemId` or the doc-gate cache — a live bug the rewrite turned up — and the
+  shipment no longer inherits `customerLinkId`, `deliveredAt`, `lastNotice*`,
+  `datPostedAt` or `workflowRunId`. Each copy gets its own audit row naming its source.
+- **Batch tasks run on the server.** `BATCH_SHIPMENT_TASK` takes the checked rows and one
+  task — Release to billing (through the Step F gate), Change sales rep, Change revenue
+  division/subdivision, Change carrier rep/team, Set status — runs each row through the
+  same function the single-row action uses, writes one audit row per shipment plus one for
+  the batch, and answers per row **in input order**. Proved on dev: four ids in, four
+  answers out, the missing id reported rather than skipped, and a refusal carrying the
+  gate's own words (*"That order is already LEGACY, not waiting on documents"*). The batch
+  grants nothing the single action would not: a user with no TMS page is refused with
+  `Forbidden: SET_REV_TAG requires owner, ADMIN, page-loads, or page-tms`. `SET_STATUS`
+  sends each row the version token read in that same loop, so a batch cannot overwrite a
+  change somebody made between the click and the call. New: `ASSIGN_CARRIER_REP`, with
+  `Shipment.carrierRepId` / `carrierTeamKey` mirrored onto every leg.
+- **Type-ahead tags, not listboxes.** Every Details facet is a tag picker: type, pick,
+  it becomes a tag with an ×, several tags OR, Exclude inverts the facet, recently used
+  values come first per user, and the text also matches MC, SCAC and state codes. The
+  `<select multiple>` of every value (Ryne's screenshot) is deleted.
+- **The column catalog** is every field the brief listed — 187 keys in seven groups
+  (Shipment · Order · Load · Carrier leg · Customer · Carrier · Computed) — money in
+  dollars, timestamps in **Central**, ids resolved to names, an absent source blank rather
+  than zero. The Columns picker groups them with a search box, drag to reorder, pin left
+  and a width; it saves as the column template, which now carries `widths` **and**
+  `pinned`. Proved on dev: both round-trip, and a pin outside the template is refused.
+- **The sidebar** reads Company Dashboard, then Shipments with Active Shipments, Dispatch,
+  Tracking, Documents and a **Views** group beneath it; the three businesses and Company
+  follow. Accounting and Sales left the Shipments menu, and the five seeded views that
+  became pages or moved are **deactivated, never deleted** — dev now lists exactly
+  `active-shipments, box-trucks, brokerage-board, car-shipping-board, local-drivers,
+  owner-operators`.
+- **Three workstations**, each its own UI over the shared `useBoardFilters` panel:
+  **Dispatch** (coverage state per shipment, posting state, carriers ranked by this lane's
+  history with their authority, insurance, MyCarrierPackets/Highway/RMIS standing, and
+  Assign carrier / Send rate con), **Tracking** (the Chaine layout on the tracking data
+  that exists: status pills with the next event, tracking link, last known and how long
+  ago, Motion from the last two pings, next check call, table and map) and **Documents**
+  (the required/present matrix with each document's source, the release gate's own answer,
+  and Release to billing through the gate).
+- **The board** lost its tab strip: the view is chosen and saved in the panel
+  (`View: Active Shipments ▾`, Save / Save as view). The board, the three workstations and
+  the saved views now share one filter engine.
+- **One dashboard.** `/tms/dashboard` opens company-wide with a KPI strip per top-level
+  division built from the ownership taxonomy (so an admin-added business appears without a
+  code change), Assets listing its subsidiaries, and the division chip narrowing the strips
+  and the charts together. The 17 Classic + 9 brokerage charts, the picker and the saved
+  views are untouched; the Ivan ops dashboard at `/dashboard` is untouched; no new page.
+- **Re-pointing an invoiced customer no longer refuses a paid invoice.** The credit memo is
+  the invoice's **whole total**: it applies to the open balance and the remainder — exactly
+  what the old customer paid — stays as **unapplied credit on their account**, which the AR
+  ledger already models and which can be spent or refunded. The original invoice's number,
+  totals and lines are never touched, the order goes back through the gate, and a
+  money-touched re-point needs an explicit acknowledgement. A **write-off** is still refused
+  ("reverse the write-off first" — crediting a forgiven balance would hand back money nobody
+  paid) and a **factored** invoice is now refused too, because the factor advanced cash
+  against that receivable. The arithmetic is one pure function the Lambda and the dialog
+  both import, so the numbers on screen are the numbers that post.
+
+### What is Step P, and says so
+
+The parsed e-mail/SMS carrier offers and Send setup packet on Dispatch, the per-shipment
+thread and the tracking agent on Tracking, and automatic classification of inbound
+attachments on Documents are each one honest line on the page — no disabled control
+pretending to be a feature.
+
+### Not done here
+
+No browser screenshots this round: the live proof is the API script above, run against the
+deployed dev stack. The three workstation pages and the dashboard strips have been proved
+by their own render tests and by the deployed build, not by a captured screen.
+
+### Dev data left as found
+
+The verification's column template is deleted, the two temporary identities (an ADMIN and a
+user with no page grant) are removed in a `finally` with passwords that are never printed,
+and no shipment, order or invoice was written — the batch it ran was a release that every
+row refused at the gate. No production table was read or written.
+
 ## 2026-10-29 — Step R follow-up and Step R2 done on dev: Ryne's seven answers, and the Aljex-style Shipments board
 
 Five commits — `a7ceb2b` (the step), `7127220` (the Status cell and the live verification
