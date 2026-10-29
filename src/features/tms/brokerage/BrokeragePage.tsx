@@ -1,7 +1,7 @@
 /**
  * My Brokerage — the settings of the business and the desks run from it.
  *
- * One page, seven tabs, each its own URL under `/tms/brokerage/*` so a tab can be
+ * One page, eight tabs, each its own URL under `/tms/brokerage/*` so a tab can be
  * linked and bookmarked. The h1 and the tab strip live here; every tab body is just a
  * body (no title row of its own), which is why `SettingsPage`, `UsersPage`,
  * `CommissionsPage`, `ReportsPage` and `AuditPage` render no heading.
@@ -20,6 +20,7 @@ import { ReportsPage } from '@/features/reports/ReportsPage'
 import { SettingsPage } from '@/features/settings/SettingsPage'
 import DivisionsPage from '@/features/tms/settings/DivisionsPage'
 import ShipmentViewsPage from '@/features/tms/settings/ShipmentViewsPage'
+import { IntegrationsTab } from '@/features/tms/integrations/IntegrationsTab'
 import { UsersPage } from '@/features/users/UsersPage'
 import { useAuth } from '@/hooks/useAuth'
 import { TMS_PAGE_KEY } from '@/lib/navSections'
@@ -48,6 +49,7 @@ const TABS: BrokerageTab[] = [
   { key: 'audit', label: 'Audit', path: 'audit', pages: ['audit', TMS_PAGE_KEY] },
   { key: 'divisions', label: 'Divisions & ownership', path: 'divisions', pages: [] },
   { key: 'views', label: 'Shipment views', path: 'views', pages: [] },
+  { key: 'integrations', label: 'Integrations', path: 'integrations', pages: [] },
 ]
 
 /** The deepest tab whose path the URL is on — '' only matches the bare root. */
@@ -85,6 +87,9 @@ export function BrokeragePage() {
         <Route path="audit" element={<RequirePage page={['audit', TMS_PAGE_KEY]}><AuditPage /></RequirePage>} />
         <Route path="divisions" element={<RequireAdmin><DivisionsPage /></RequireAdmin>} />
         <Route path="views" element={<RequireAdmin><ShipmentViewsPage /></RequireAdmin>} />
+        {/* The tab owns its own index and `:provider` routes, so the strip stays lit
+            on a deep link; the guard is here, where a typed URL still meets it. */}
+        <Route path="integrations/*" element={<RequireAdmin><IntegrationsTab /></RequireAdmin>} />
         {/* An unknown tab is a stale link, not a dead end: Settings is the page's home. */}
         <Route path="*" element={<Navigate to={ROOT} replace />} />
       </Routes>

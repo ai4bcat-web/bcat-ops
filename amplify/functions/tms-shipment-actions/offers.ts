@@ -37,7 +37,8 @@ import {
   type Caller,
 } from '../_shared/actionInputs'
 
-import { laneKey3For, laneKeyFor } from '../../../src/lib/laneKey'
+import { laneKey3For, laneKeyFor, type LaneAliasMap } from '../../../src/lib/laneKey'
+import { aliasMap } from '../../../src/lib/integrations/postalAliases'
 import { LOST_REASONS, isOpenQuoteStatus, quoteExpiry } from '../../../src/lib/quotes'
 import { renderOfferRequestEmail } from '../../../src/lib/quoteNotices'
 import { MOVEMENT_RANK } from '../../../src/lib/shipmentStatus'
@@ -158,6 +159,8 @@ function offerRow(args: {
   now: string
   message: string | null
   event: string
+  /** The org's postal-code aliases, so one facility keeps one lane key. */
+  aliases: LaneAliasMap | null
 }): Row {
   const { leg, carrier, caller, now } = args
   const quoteDate = now.slice(0, 10)
@@ -180,7 +183,7 @@ function offerRow(args: {
     divisionKey: optionalString(leg.load.divisionKey, 100),
     equipmentType: optionalString(leg.load.equipmentType, 80),
     stops: leg.stops,
-    laneKey: laneKeyFor(leg.stops),
+    laneKey: laneKeyFor(leg.stops, args.aliases),
     laneKey3: laneKey3For(leg.stops),
     pickupAppt: leg.pickupAppt,
     deliveryAppt: optionalString(leg.load.deliveryAppt, 60),
@@ -259,6 +262,7 @@ export async function requestOffers(deps: QuoteDeps, input: Row, caller: Caller)
       now,
       message,
       event: 'REQUESTED',
+      aliases: aliasMap(settings?.postalCodeAliases as Parameters<typeof aliasMap>[0]),
     })
     row.linkToken = token
     row.linkVersion = 1
@@ -330,6 +334,7 @@ export async function logOffer(deps: QuoteDeps, input: Row, caller: Caller): Pro
   const carrier = await deps.getById(deps.tables.carrier, carrierId)
   if (!carrier) throw new Error(`Carrier not found: ${carrierId}`)
 
+  const settings = await deps.getSettings()
   const now = nowIso()
   const id = await nextQuoteNumber(deps, caller, now.slice(0, 10))
   const row = offerRow({
@@ -348,6 +353,7 @@ export async function logOffer(deps: QuoteDeps, input: Row, caller: Caller): Pro
     now,
     message: optionalString(input.note, MAX_MESSAGE),
     event: 'LOGGED',
+    aliases: aliasMap(settings?.postalCodeAliases as Parameters<typeof aliasMap>[0]),
   })
   row.contactName = optionalString(input.contactName, 120)
   row.acceptedVia = 'PHONE'

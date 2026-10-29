@@ -29,6 +29,7 @@ import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
 import { DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand, ScanCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb'
 import { HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
+import { SSMClient } from '@aws-sdk/client-ssm'
 import { currentLoadForDriver, laneLabel } from '../../../src/lib/driverJourney'
 import { quotePublicView } from '../../../src/lib/quotes'
 import { MAX_UPLOADS_PER_LINK, documentKey, documentPrefix } from '../../../src/lib/shipmentDocuments'
@@ -37,6 +38,7 @@ import { carrierView, customerView, isLinkToken } from '../../../src/lib/trackin
 import { buildTimeline, lastKnownPosition, thinPositions, trackingWindow, type TrackPosition } from '../../../src/lib/trackingTimeline'
 import { carrierUploadView, portalUploadAllowed, uploadLinkUsable } from '../../../src/lib/uploadPortal'
 import { liveLinkStatuses, planResponse } from './quotes'
+import { shipmentRoute, tokenRoute, webhookRoute, type ApiDeps } from './api'
 import type { Load, Stop } from '../../../src/types'
 import type {
   Division,
@@ -58,6 +60,7 @@ import type {
 // the item rather than refused outright, as a bare document client would.
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}), { marshallOptions: { removeUndefinedValues: true } })
 const s3 = new S3Client({})
+const ssm = new SSMClient({})
 const EQUIPMENT_TABLE = process.env.EQUIPMENT_TABLE_NAME!
 const TRUCK_LOCATION_TABLE = process.env.TRUCK_LOCATION_TABLE_NAME!
 const DRIVER_TABLE = process.env.DRIVER_TABLE_NAME!
@@ -76,6 +79,22 @@ const SHIPMENT_DOCUMENT_TABLE = process.env.SHIPMENT_DOCUMENT_TABLE_NAME!
 const DOCUMENT_BUCKET = process.env.BUCKET_NAME!
 // Step H
 const QUOTE_TABLE = process.env.QUOTE_TABLE_NAME!
+// Step J — the public API and the inbound webhook receipt (see ./api.ts).
+const INTEGRATION_TABLE = process.env.INTEGRATION_TABLE_NAME!
+const OPENAPI_PARAM_NAME = process.env.OPENAPI_PARAM_NAME!
+const INTEGRATION_PARAM_PATH = process.env.INTEGRATION_PARAM_PATH!
+
+/** Everything the Step J routes are allowed to touch, handed over once. */
+const apiDeps: ApiDeps = {
+  ddb,
+  ssm,
+  integrationTable: INTEGRATION_TABLE,
+  shipmentTable: SHIPMENT_TABLE,
+  loadTable: LOAD_TABLE,
+  orderTable: ORDER_TABLE,
+  openApiParamName: OPENAPI_PARAM_NAME,
+  integrationParamPath: INTEGRATION_PARAM_PATH,
+}
 
 const IDX_ORDERS_BY_SHIPMENT = 'ordersByShipmentId'
 const IDX_LOADS_BY_SHIPMENT = 'loadsByShipmentId'
@@ -129,6 +148,8 @@ interface FnUrlEvent {
   rawPath?: string
   body?: string
   isBase64Encoded?: boolean
+  /** Lower-cased by the Function URL; the Step J routes read `authorization` and `x-bcat-signature`. */
+  headers?: Record<string, string | undefined>
   requestContext?: { http?: { method?: string; sourceIp?: string } }
 }
 
@@ -1021,6 +1042,12 @@ const UPLOAD_COMMIT_PATH = /^\/u\/([A-Za-z0-9_-]+)\/commit\/?$/
 // Step H: the public quote link.
 const QUOTE_PATH = /^\/q\/([A-Za-z0-9_-]+)\/?$/
 const QUOTE_RESPOND_PATH = /^\/q\/([A-Za-z0-9_-]+)\/respond\/?$/
+// Step J: BCAT's own API, and the inbound webhook receipt. A shipment number is a
+// PRO, not a token, so it keeps its own character class; a provider arrives
+// lower-cased and is upper-cased into its `Integration` row key by the route.
+const API_TOKEN_PATH = /^\/api\/token\/?$/
+const API_SHIPMENT_PATH = /^\/api\/v1\/shipments\/([A-Za-z0-9][A-Za-z0-9._-]{0,63})\/?$/
+const API_WEBHOOK_PATH = /^\/api\/webhooks\/([a-z0-9_]{2,40})\/?$/
 
 export const handler = async (event: FnUrlEvent) => {
   const method = event.requestContext?.http?.method ?? 'GET'
@@ -1038,6 +1065,11 @@ export const handler = async (event: FnUrlEvent) => {
     if (upload) return uploadViewRoute(upload[1])
     const quote = QUOTE_PATH.exec(path)
     if (quote) return quoteViewRoute(quote[1])
+    const shipment = API_SHIPMENT_PATH.exec(path)
+    if (shipment) {
+      const answer = await shipmentRoute(apiDeps, shipment[1], event, new Date().toISOString())
+      return reply(answer.status, answer.body)
+    }
     return reply(404, { error: 'Not found' })
   }
 
@@ -1050,6 +1082,16 @@ export const handler = async (event: FnUrlEvent) => {
     if (commit) return uploadCommitRoute(commit[1], event)
     const respond = QUOTE_RESPOND_PATH.exec(path)
     if (respond) return quoteRespondRoute(respond[1], event)
+    const apiToken = API_TOKEN_PATH.exec(path)
+    if (apiToken) {
+      const answer = await tokenRoute(apiDeps, event, new Date().toISOString())
+      return reply(answer.status, answer.body)
+    }
+    const webhook = API_WEBHOOK_PATH.exec(path)
+    if (webhook) {
+      const answer = await webhookRoute(apiDeps, webhook[1], event, new Date().toISOString())
+      return reply(answer.status, answer.body)
+    }
     return reply(404, { error: 'Not found' })
   }
 

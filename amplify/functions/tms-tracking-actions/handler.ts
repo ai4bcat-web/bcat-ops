@@ -163,6 +163,15 @@ const MIN_LINK_EXPIRY_HOURS = 1
 const MAX_LINK_EXPIRY_HOURS = 720
 const MIN_CUSTOMER_LINK_DAYS = 1
 const MAX_CUSTOMER_LINK_DAYS = 90
+/**
+ * Step J's shared tracking toggles. Stored and shown only: nothing reads them until a
+ * tracking provider is live, so the bounds are the ones a provider would accept — a
+ * five-minute floor on the ping and two weeks of tracking as the ceiling.
+ */
+const MIN_TRACKING_INTERVAL_MIN = 5
+const MAX_TRACKING_INTERVAL_MIN = 240
+const MIN_TRACKING_DURATION_HOURS = 1
+const MAX_TRACKING_DURATION_HOURS = 336
 
 /** A carrier is only chased for paperwork once their load is off the truck. */
 const DELIVERED_LOAD_STATUSES: readonly string[] = ['DELIVERED', 'INVOICING']
@@ -1194,6 +1203,24 @@ function trackingSettingsPatch(input: Row): Row {
   }
   if ('customerLinkShowsPosition' in input) {
     patch.customerLinkShowsPosition = assertBoolean(input.customerLinkShowsPosition, 'customerLinkShowsPosition')
+  }
+  // Step J's org-level tracking defaults: stored here, read by a tracking provider once
+  // one is live. Nothing in the app consumes them yet, and the settings card says so.
+  if ('trackByDefault' in input) {
+    patch.trackByDefault = assertBoolean(input.trackByDefault, 'trackByDefault')
+  }
+  if ('autoStatusFromGeofence' in input) {
+    patch.autoStatusFromGeofence = assertBoolean(input.autoStatusFromGeofence, 'autoStatusFromGeofence')
+  }
+  if ('trackingIntervalMin' in input) {
+    patch.trackingIntervalMin = input.trackingIntervalMin == null
+      ? null
+      : assertInteger(input.trackingIntervalMin, 'trackingIntervalMin', MIN_TRACKING_INTERVAL_MIN, MAX_TRACKING_INTERVAL_MIN)
+  }
+  if ('trackingDurationHours' in input) {
+    patch.trackingDurationHours = input.trackingDurationHours == null
+      ? null
+      : assertInteger(input.trackingDurationHours, 'trackingDurationHours', MIN_TRACKING_DURATION_HOURS, MAX_TRACKING_DURATION_HOURS)
   }
   if ('trackingSmsTemplate' in input) {
     const template = optionalString(input.trackingSmsTemplate, MAX_SMS_BODY)

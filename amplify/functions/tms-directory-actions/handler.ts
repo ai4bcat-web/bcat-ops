@@ -37,6 +37,12 @@ import type {
   ShipmentViewRecord,
   Team,
 } from '../../../src/types/tms'
+import {
+  INTEGRATION_ACTIONS,
+  runIntegrationAction,
+  type IntegrationActionName,
+  type IntegrationDeps,
+} from './integrations'
 
 const dynamo = new DynamoDBClient({})
 const cognito = new CognitoIdentityProviderClient({})
@@ -55,6 +61,9 @@ const OWNERSHIP_DIVISION_TABLE_NAME = process.env.OWNERSHIP_DIVISION_TABLE_NAME 
 const OWNERSHIP_RULE_TABLE_NAME = process.env.OWNERSHIP_RULE_TABLE_NAME ?? ''
 const SHIPMENT_VIEW_TABLE_NAME = process.env.SHIPMENT_VIEW_TABLE_NAME ?? ''
 const AUDIT_LOG_TABLE_NAME = process.env.AUDIT_LOG_TABLE_NAME ?? ''
+// Step J — one row per integration provider, API client and webhook receipt.
+// This Lambda is its only writer apart from tracking-api's `lastUsedAt` stamp.
+const INTEGRATION_TABLE_NAME = process.env.INTEGRATION_TABLE_NAME ?? ''
 const GEOCODE_TOKEN_SECRET = process.env.GEOCODE_TOKEN_SECRET ?? ''
 const USER_POOL_ID = process.env.USER_POOL_ID ?? 'us-east-1_IbPKPNJC9'
 
@@ -108,6 +117,8 @@ type Action =
   | 'SAVE_SHIPMENT_VIEW'
   | 'ARCHIVE_SHIPMENT_VIEW'
   | 'ENSURE_OWNERSHIP_SEED'
+  // Step J — the integration framework. Owner/ADMIN only, every one of them.
+  | IntegrationActionName
 
 interface AppSyncIdentity {
   sub: string
@@ -153,6 +164,10 @@ function getGroups(identity?: AppSyncIdentity | null): string[] {
   if (Array.isArray(raw)) return raw.filter((g): g is string => typeof g === 'string')
   if (typeof raw === 'string') return raw.split(',').map((s) => s.trim()).filter(Boolean)
   return []
+}
+
+function isIntegrationAction(action: Action): action is IntegrationActionName {
+  return Object.prototype.hasOwnProperty.call(INTEGRATION_ACTIONS, action)
 }
 
 async function authorize(action: Action, identity?: AppSyncIdentity | null): Promise<Caller> {
@@ -201,6 +216,10 @@ async function authorize(action: Action, identity?: AppSyncIdentity | null): Pro
         `Forbidden: ${action} requires owner, ADMIN, page-customers, page-locations, page-loads, or ${TMS_PAGE_GROUP}`,
       )
     }
+  } else if (isIntegrationAction(action)) {
+    // Credentials for every outside system the brokerage holds: owner/ADMIN only,
+    // and not grantable through a page claim (spec §8.1's "Broker Admin only").
+    if (!isOwner && !isAdmin) throw new Error(`Forbidden: ${action} requires owner or ADMIN`)
   } else if (settingsActions[action] || mergeActions[action]) {
     // Divisions, TMS settings and merges rewrite shared configuration/history: ADMIN only.
     if (!isOwner && !isAdmin) throw new Error(`Forbidden: ${action} requires owner or ADMIN`)
@@ -937,6 +956,13 @@ async function upsertCustomer(input: Record<string, unknown>, caller: Caller): P
     teamKey: optionalString(input.teamKey, 100),
     operatedById: optionalString(input.operatedById, 100),
     accountOwnerIds: optionalStringArray(input.accountOwnerIds, 100),
+
+    // Step J — the ids this customer is known by in an outside system. Stored
+    // now; the syncs that read them are stubs until those providers are live.
+    project44CustomerId: optionalString(input.project44CustomerId, 100),
+    hubspotId: optionalString(input.hubspotId, 100),
+    haulpayDebtorId: optionalString(input.haulpayDebtorId, 100),
+    ediSettings: optionalJsonObject(input.ediSettings),
 
     createdBy: isCreate ? caller.email : (existing?.createdBy as string) ?? caller.email,
     updatedBy: caller.email,
@@ -2391,12 +2417,29 @@ async function ensureOwnershipSeed(caller: Caller): Promise<Record<string, unkno
   return report
 }
 
+// ── Step J: the integration framework ──────────────────────────────────────────
+// `integrations.ts` takes the DynamoDB client and the audit writer rather than
+// building its own, so there is one client, one audit shape and no import cycle.
+const integrationDeps: IntegrationDeps = {
+  dynamo,
+  integrationTableName: INTEGRATION_TABLE_NAME,
+  writeAudit: (entityType, entityId, auditAction, caller, changes) =>
+    writeAudit(entityType, entityId, auditAction, caller, changes),
+}
+
 // ── Main handler ───────────────────────────────────────────────────────────────
 
 export const handler = async (event: AppSyncEvent): Promise<Record<string, unknown>> => {
   const action = event.arguments.action as Action
   const caller = await authorize(action, event.identity)
   const input = parseInput(event.arguments.input)
+
+  if (isIntegrationAction(action)) {
+    // LIST_INTEGRATIONS answers an array and RUN_STUB a two-part result; both ride
+    // the same AWSJSON return as SAVE_OWNERSHIP_RULES already does.
+    const result = await runIntegrationAction(action, input, caller, integrationDeps)
+    return result as Record<string, unknown>
+  }
 
   switch (action) {
     case 'UPSERT_CUSTOMER':

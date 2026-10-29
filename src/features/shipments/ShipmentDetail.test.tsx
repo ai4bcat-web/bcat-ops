@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { ShipmentDetail } from './components/ShipmentDetail'
 import { normalizeDetailTab } from './components/detailTabs'
@@ -20,6 +20,9 @@ const listOwnershipDivisions = vi.hoisted(() => vi.fn())
 const listOwnershipRules = vi.hoisted(() => vi.fn())
 const previewInvoice = vi.hoisted(() => vi.fn())
 const listAuditLogs = vi.hoisted(() => vi.fn())
+// Step J — the Overview Integrations card reads the rows and runs a stub through these.
+const listIntegrations = vi.hoisted(() => vi.fn())
+const runIntegrationStub = vi.hoisted(() => vi.fn())
 
 vi.mock('@/hooks/useDrivers', () => ({ useDrivers: () => ({ drivers: [] }) }))
 vi.mock('@/hooks/useTrucks', () => ({ useTrucks: () => ({ equipment: [] }) }))
@@ -63,6 +66,8 @@ vi.mock('@/lib/apiClient', () => ({
   voidInvoice: vi.fn(),
   saveOrderForm: vi.fn(),
   getInvoicePdfUrl: vi.fn(async () => ''),
+  listIntegrations,
+  runIntegrationStub,
 }))
 vi.mock('@/lib/driverSubmissionsClient', () => ({
   getDriverDocUrl: vi.fn(async () => ''),
@@ -180,6 +185,7 @@ beforeEach(() => {
   listOwnershipDivisions.mockResolvedValue([])
   listOwnershipRules.mockResolvedValue([])
   listAuditLogs.mockResolvedValue([])
+  listIntegrations.mockResolvedValue([])
 })
 
 function renderDetail(
@@ -458,5 +464,92 @@ describe('own fleet on the Carrier/Driver tab', () => {
     expect(links.querySelector('a[href="/dispatch"]')).toBeTruthy()
     // No driver profile in the store, so the generic weekly settlement page.
     expect(screen.getByTestId('own-fleet-settlement').getAttribute('href')).toBe('/driver-pay')
+  })
+})
+
+describe('the Overview Integrations card', () => {
+  const otrRow = {
+    id: 'OTR', provider: 'OTR', kind: 'PROVIDER' as const, mode: 'LIVE' as const,
+    credentialSource: 'STACK' as const, status: 'CONNECTED' as const, health: 'OK' as const,
+  }
+
+  it('is hidden on a voided shipment', async () => {
+    listIntegrations.mockResolvedValue([otrRow])
+    const voided = { ...bundle('DELIVERED').shipment, voidedAt: '2026-02-01T00:00:00.000Z' }
+    renderDetail('DELIVERED', { isAdmin: true }, { shipment: voided })
+
+    await waitFor(() => expect(screen.getByText('Shipment')).toBeTruthy())
+    expect(screen.queryByText('Integrations')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Expand integrations' })).toBeNull()
+  })
+
+  it('is not rendered — and the list is never asked for — for a non-admin viewer', async () => {
+    renderDetail('BOOKED', { isAdmin: false })
+
+    await waitFor(() => expect(screen.getByText('Shipment')).toBeTruthy())
+    expect(screen.queryByText('Integrations')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Expand integrations' })).toBeNull()
+    // LIST_INTEGRATIONS is owner/ADMIN only; a rep must not fire a refused call at all.
+    expect(listIntegrations).not.toHaveBeenCalled()
+  })
+
+  it('offers a live link only for a connected live provider, and a stub run for the rest', async () => {
+    listIntegrations.mockResolvedValue([otrRow])
+    renderDetail('BOOKED', { isAdmin: true })
+
+    const toggle = await screen.findByRole('button', { name: 'Expand integrations' })
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    fireEvent.click(toggle)
+
+    // OTR is connected and live: the one factoring action that already exists, as a link
+    // to where it lives. Step J adds no live action of its own.
+    const otr = (await screen.findByText('OTR Solutions')).closest('li')
+    expect(otr).toBeTruthy()
+    expect(within(otr as HTMLElement).getByText('Connected')).toBeTruthy()
+    expect(within(otr as HTMLElement).getByText('Send to Factor').getAttribute('href')).toBe('/tms/invoicing')
+    expect(within(otr as HTMLElement).queryByText('Run stub')).toBeNull()
+
+    // DAT has no row at all, so it is NOT_CONNECTED: a stub run and nothing live. It is
+    // listed under Posting and again under Rating; Posting is the first section.
+    const dat = screen.getAllByText('DAT')[0].closest('li')
+    expect(dat).toBeTruthy()
+    expect(within(dat as HTMLElement).getByText('Not connected')).toBeTruthy()
+    expect(within(dat as HTMLElement).getByText('Run stub')).toBeTruthy()
+    expect(within(dat as HTMLElement).queryByRole('link')).toBeNull()
+    expect(within(dat as HTMLElement).queryByText('Open tracking')).toBeNull()
+  })
+
+  it('shows no live control for a connected provider whose check has not passed', async () => {
+    listIntegrations.mockResolvedValue([{
+      id: 'TRUCKER_TOOLS', provider: 'TRUCKER_TOOLS', kind: 'PROVIDER' as const, mode: 'LIVE' as const,
+      credentialSource: 'PAGE' as const, status: 'CONNECTED' as const, health: 'UNABLE_TO_VERIFY' as const,
+    }])
+    renderDetail('BOOKED', { isAdmin: true })
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Expand integrations' }))
+
+    // Entered credentials are not a live integration: nothing in this repo tracks a load
+    // through Trucker Tools, so the row offers the stub and says it is unverified.
+    const row = screen.getByText('Trucker Tools').closest('li') as HTMLElement
+    expect(within(row).getByText('Unable to verify')).toBeTruthy()
+    expect(within(row).queryByText('Open tracking')).toBeNull()
+    expect(within(row).getByText('Run stub')).toBeTruthy()
+  })
+
+  it('runs a stub without touching the shipment', async () => {
+    listIntegrations.mockResolvedValue([])
+    runIntegrationStub.mockResolvedValue({
+      row: {}, result: { mode: 'STUB', ok: true, message: 'STUB — DAT post was not sent', externalId: 'stub:1' },
+    })
+    renderDetail('BOOKED', { isAdmin: true })
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Expand integrations' }))
+    const dat = screen.getAllByText('DAT')[0].closest('li') as HTMLElement
+    fireEvent.click(within(dat).getByText('Run stub'))
+
+    await waitFor(() => expect(screen.getByText('STUB — DAT post was not sent')).toBeTruthy())
+    expect(runIntegrationStub).toHaveBeenCalledWith('DAT', 'post')
+    expect(actions.reload).not.toHaveBeenCalled()
+    expect(actions.load.onSetLoadStatus).not.toHaveBeenCalled()
   })
 })

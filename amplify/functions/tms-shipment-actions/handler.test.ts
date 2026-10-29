@@ -4459,6 +4459,23 @@ async function sourcingLoad(): Promise<{ shipmentId: string; loadId: string; ord
 }
 
 describe('SAVE_QUOTE', () => {
+  it('keys the lane through the org postal-code aliases (Step J)', async () => {
+    // One facility, two names: the dock at 60632 is filed by one system as Chicago and
+    // by another as Bedford Park, which splits its lane history in two. The alias the
+    // admin entered decides, and it decides on the way in — stored samples never move.
+    seedSettings({ postalCodeAliases: [{ zip: '60632', city: 'Bedford Park', state: 'IL' }] })
+    const aliased = await newQuote({
+      stops: [{ ...PICKUP, address: { zip: '60632' } }, DELIVERY],
+    })
+    expect(aliased.laneKey).toBe('BEDFORD PARK|IL>KANSAS CITY|MO')
+
+    // A ZIP nobody aliased is still keyed from the typed city.
+    const plain = await newQuote({
+      stops: [{ ...PICKUP, address: { zip: '60601' } }, DELIVERY],
+    })
+    expect(plain.laneKey).toBe('CHICAGO|IL>KANSAS CITY|MO')
+  })
+
   it('mints the number once on create and the next one on the next quote', async () => {
     const first = await newQuote()
     expect(first.id).toBe('Q000001')

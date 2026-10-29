@@ -9,6 +9,8 @@
  * with no "Order" heading between them.
  */
 import { useContext, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
+import { ChevronDown, ChevronRight } from 'lucide-react'
 import { AuthContext } from '@/hooks/useAuth'
 import { formatCents } from '@/lib/tmsDirectory'
 import { effectiveCustomerStatus } from '@/lib/customerCredit'
@@ -22,7 +24,12 @@ import { SHIPMENT_STATUS_LABELS, LOAD_WORKFLOW_STATUS_LABELS } from '@/lib/shipm
 import { useDrivers } from '@/hooks/useDrivers'
 import { useTrucks } from '@/hooks/useTrucks'
 import { LaneHistoryPanel } from '@/features/quotes/components/LaneHistoryPanel'
-import { TmsBadge, TmsButton, TmsCard, TmsField, TmsSelect, TmsTabs } from '@/features/tms/kit'
+import { TmsBadge, TmsButton, TmsCard, TmsField, TmsIconButton, TmsSelect, TmsTabs } from '@/features/tms/kit'
+import { useIntegrations } from '@/hooks/useIntegrations'
+import { runIntegrationStub } from '@/lib/apiClient'
+import { PROVIDERS, isApplicable, liveCapabilitiesOf } from '@/lib/integrations/registry'
+import { badgeOf } from '@/lib/integrations/health'
+import type { Capability, IntegrationRecord, ProviderDescriptor } from '@/lib/integrations/types'
 import type { CreditSummary } from '@/lib/customerCredit'
 import { StopCards } from './StopCards'
 import { FinancialLines } from './FinancialLines'
@@ -77,6 +84,10 @@ export function ShipmentDetail(props: ShipmentDetailProps) {
   // tests that do not always sit under AuthProvider, and the router is the real gate.
   const auth = useContext(AuthContext)
   const canTag = isAdmin || (auth?.isOwner ?? false) || (auth?.hasPageAccess('tms') ?? false)
+  // LIST_INTEGRATIONS is owner/ADMIN only, the same gate the Integrations tab carries.
+  // Anyone else must not even mount the hook: the refused list would read as "every
+  // provider is not connected", which is a lie, and would retry every five minutes.
+  const canSeeIntegrations = isAdmin || (auth?.isOwner ?? false)
 
   const shipment = bundle.shipment
   const order = bundle.orders[0]
@@ -242,6 +253,15 @@ export function ShipmentDetail(props: ShipmentDetailProps) {
             onClearRevTag={actions.onClearRevTag}
             onSetSalesRep={actions.onSetSalesRep}
           />
+
+          {/*
+           * Which providers could touch freight like this one, and what state each is in.
+           * Owner/ADMIN only, because the list behind it is; hidden on a voided shipment,
+           * where there is nothing left to post, track or factor.
+           */}
+          {canSeeIntegrations && !voided && (
+            <ShipmentIntegrationsCard onOpenTracking={() => setTab('tracking')} />
+          )}
         </div>
       )}
 
@@ -305,6 +325,145 @@ export function ShipmentDetail(props: ShipmentDetailProps) {
 
       {tab === 'history' && <HistorySection bundle={bundle} />}
     </div>
+  )
+}
+
+/** The capabilities a shipment can be on the receiving end of, in the order they happen. */
+const SHIPMENT_CAPABILITIES: { key: Capability; label: string }[] = [
+  { key: 'post', label: 'Posting' },
+  { key: 'quote', label: 'Rating' },
+  { key: 'track', label: 'Tracking' },
+  { key: 'factor', label: 'Factoring' },
+]
+
+/**
+ * What every provider could do for freight like this one, and what state it is in.
+ *
+ * Step J adds no live per-shipment action: a button appears only for a CONNECTED live
+ * provider and only where the action already exists elsewhere in the app — Send to
+ * Factor on the invoicing page, tracking on this shipment's own Tracking tab. Everything
+ * else is a stub, and a stub run goes to `RUN_STUB`, which takes no shipment at all: it
+ * reads the descriptor's sample, writes one audit row and touches no business record.
+ * The card is collapsed by default, and the caller hides it on a voided shipment.
+ */
+function ShipmentIntegrationsCard({ onOpenTracking }: { onOpenTracking: () => void }) {
+  const { byKey, loading } = useIntegrations()
+  const [open, setOpen] = useState(false)
+  const [busy, setBusy] = useState<string | null>(null)
+  const [results, setResults] = useState<Record<string, string>>({})
+
+  const sections = useMemo(
+    () => SHIPMENT_CAPABILITIES.map((cap) => ({
+      ...cap,
+      providers: PROVIDERS.filter((d) => isApplicable(d) && d.capabilities.includes(cap.key)),
+    })).filter((s) => s.providers.length > 0),
+    [],
+  )
+
+  const runStub = async (descriptor: ProviderDescriptor, capability: Capability) => {
+    const id = `${descriptor.key}:${capability}`
+    setBusy(id)
+    try {
+      const { result } = await runIntegrationStub(descriptor.key, capability)
+      setResults((prev) => ({ ...prev, [id]: result.message }))
+    } catch (e) {
+      setResults((prev) => ({ ...prev, [id]: e instanceof Error ? e.message : 'The stub run was refused' }))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  return (
+    <TmsCard
+      title="Integrations"
+      actions={(
+        <TmsIconButton
+          shape="plain"
+          aria-label={open ? 'Collapse integrations' : 'Expand integrations'}
+          aria-expanded={open}
+          onClick={() => setOpen(!open)}
+        >
+          {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+        </TmsIconButton>
+      )}
+    >
+      {!open ? (
+        <p className="tms-muted text-xs">Which providers could post, rate, track or factor this shipment, and the state each is in.</p>
+      ) : loading ? (
+        <p className="tms-muted text-xs">Loading…</p>
+      ) : (
+        <div className="space-y-3">
+          {sections.map((section) => (
+            <div key={section.key}>
+              <p className="tms-field-label">{section.label}</p>
+              <ul className="mt-1 space-y-1 text-sm">
+                {section.providers.map((d) => (
+                  <ProviderRow
+                    key={d.key}
+                    descriptor={d}
+                    capability={section.key}
+                    row={byKey[d.key] ?? null}
+                    busy={busy === `${d.key}:${section.key}`}
+                    result={results[`${d.key}:${section.key}`] ?? null}
+                    onRunStub={() => runStub(d, section.key)}
+                    onOpenTracking={onOpenTracking}
+                  />
+                ))}
+              </ul>
+            </div>
+          ))}
+          <p className="tms-muted text-xs">
+            A stub run makes no call and changes nothing on this shipment — it records that the button was pressed.
+          </p>
+        </div>
+      )}
+    </TmsCard>
+  )
+}
+
+function ProviderRow({ descriptor, capability, row, busy, result, onRunStub, onOpenTracking }: {
+  descriptor: ProviderDescriptor
+  capability: Capability
+  row: IntegrationRecord | null
+  busy: boolean
+  result: string | null
+  onRunStub: () => void
+  onOpenTracking: () => void
+}) {
+  const badge = badgeOf({
+    status: row?.status ?? 'NOT_CONNECTED',
+    health: row?.health ?? 'UNKNOWN',
+    healthReason: row?.healthReason ?? null,
+    mode: row?.mode ?? 'STUB',
+  })
+  /*
+   * Three things have to be true before a live control appears, and "the credentials
+   * are entered" is only one of them: the capability has to have a real implementation
+   * in this repo (`liveCapabilitiesOf` — a Trucker Tools key buys a stub, not tracking),
+   * the row has to be connected, and its last check has to have passed. Anything else
+   * falls through to Run stub, which is honest about making no call.
+   */
+  const live = liveCapabilitiesOf(descriptor).includes(capability)
+    && row?.status === 'CONNECTED'
+    && row.health === 'OK'
+
+  return (
+    <li className="flex flex-wrap items-center gap-2">
+      <span className="font-medium">{descriptor.label}</span>
+      <TmsBadge tone={badge.tone}>{badge.label}</TmsBadge>
+      {live && capability === 'track' && (
+        <TmsButton size="sm" onClick={onOpenTracking}>Open tracking</TmsButton>
+      )}
+      {live && capability !== 'track' && descriptor.liveLink && (
+        <Link className="text-xs underline underline-offset-2" to={descriptor.liveLink.to}>{descriptor.liveLink.label}</Link>
+      )}
+      {!live && (
+        <TmsButton size="sm" disabled={busy} onClick={onRunStub}>
+          {busy ? 'Running…' : 'Run stub'}
+        </TmsButton>
+      )}
+      {result && <span className="tms-muted text-xs">{result}</span>}
+    </li>
   )
 }
 

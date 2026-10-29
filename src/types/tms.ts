@@ -1,6 +1,27 @@
 // `Stop` lives in ./index, which imports Address and the step-B stop fields from
 // here. Type-only in both directions, so the cycle never reaches runtime.
 import type { Stop, StopType } from './index'
+import type { PostalAlias } from '../lib/integrations/postalAliases'
+
+// ── Integrations (Step J) ────────────────────────────────────────────────────
+// The integration contract lives in `src/lib/integrations/types`, which the Lambdas
+// bundle by relative path; it is re-exported here so feature code imports the TMS
+// vocabulary from one place, as it does for every other step.
+export type { PostalAlias }
+export type {
+  CredentialMaskEntry,
+  CredentialSource,
+  IntegrationBadge,
+  IntegrationCategory,
+  IntegrationEvent,
+  IntegrationHealthReason,
+  IntegrationHealthStatus,
+  IntegrationMode,
+  IntegrationRecord,
+  IntegrationStatus,
+  ProviderDescriptor,
+  ProviderKey,
+} from '../lib/integrations/types'
 
 export interface Address {
   street?: string | null
@@ -204,6 +225,21 @@ export interface CustomerRecord {
   teamKey?: string | null
   operatedById?: string | null
   accountOwnerIds?: string[] | null
+
+  // ── Integrations (Step J) ──────────────────────────────────────────────────
+  /** The customer's own project44 account id, for outbound status. */
+  project44CustomerId?: string | null
+  hubspotId?: string | null
+  /** Per-customer EDI identifiers and the three Orderful behaviour toggles. */
+  ediSettings?: {
+    isaId?: string | null
+    gsId?: string | null
+    autoAccept?: boolean | null
+    skip210?: boolean | null
+    skip997?: boolean | null
+  } | null
+  /** Stored for a future HaulPay factor; null until BCAT factors outside OTR. */
+  haulpayDebtorId?: string | null
 
   createdAt: string
   updatedAt: string
@@ -431,6 +467,19 @@ export interface TmsSettings {
   commissionApprovalAdminOnly?: boolean | null
   /** True — only owner/ADMIN submit, approve or pay a period. */
   commissionPayAdminOnly?: boolean | null
+
+  // ── Integrations (Step J) ──────────────────────────────────────────────────
+  /** Shared tracking toggles. Stored now; read once a tracking provider is live. */
+  trackByDefault?: boolean | null
+  autoStatusFromGeofence?: boolean | null
+  /** MacroPoint-shaped defaults for whichever tracking provider connects first. */
+  trackingIntervalMin?: number | null
+  trackingDurationHours?: number | null
+  /** ZIP → city/state the brokerage prefers, applied by `laneKeyFor`. */
+  postalCodeAliases?: PostalAlias[] | null
+  hubspotPortalId?: string | null
+  /** Slack channel for integration health changes. Stored by J, used by K. */
+  integrationsNotifyChannel?: string | null
 
   createdAt?: string
   updatedAt?: string
@@ -2368,6 +2417,9 @@ export interface UserProfileRecord {
   title?: string | null
   phone?: string | null
   datEmail?: string | null
+  hubspotId?: string | null
+  /** When this rep last authorised Truckstop; null until a live OAuth exists. */
+  truckstopAuthorizedAt?: string | null
   invitedAt?: string | null
   invitedBy?: string | null
   lastRoleChangeAt?: string | null

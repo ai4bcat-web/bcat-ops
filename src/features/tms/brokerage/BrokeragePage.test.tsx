@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /**
- * My Brokerage is seven desks behind one tab strip, and the only thing that can go
+ * My Brokerage is eight desks behind one tab strip, and the only thing that can go
  * quietly wrong is access: a tab drawn for somebody who may not open it, or a tab
  * missing for somebody who may. The guard behind each route is the boundary — these
  * assertions are about the strip agreeing with it, and about a tab actually routing.
@@ -30,6 +30,7 @@ vi.mock('@/features/reports/ReportsPage', () => ({ ReportsPage: () => <p>reports
 vi.mock('@/features/audit/AuditPage', () => ({ AuditPage: () => <p>audit body</p> }))
 vi.mock('@/features/tms/settings/DivisionsPage', () => ({ default: () => <p>divisions body</p> }))
 vi.mock('@/features/tms/settings/ShipmentViewsPage', () => ({ default: () => <p>views body</p> }))
+vi.mock('@/features/tms/integrations/IntegrationsTab', () => ({ IntegrationsTab: () => <p>integrations body</p> }))
 
 import { BrokeragePage } from './BrokeragePage'
 
@@ -58,6 +59,7 @@ describe('BrokeragePage', () => {
 
     expect(tabNames()).toEqual([
       'Settings', 'Users', 'Commissions', 'Reports', 'Audit', 'Divisions & ownership', 'Shipment views',
+      'Integrations',
     ])
     expect(screen.getByText('settings body')).toBeInTheDocument()
   })
@@ -67,6 +69,28 @@ describe('BrokeragePage', () => {
     draw()
 
     expect(tabNames()).toEqual(['Settings', 'Commissions', 'Reports', 'Audit'])
+  })
+
+  it('never draws Integrations for a broker holding only the tms grant', () => {
+    auth.grants = ['tms']
+    draw()
+
+    expect(tabNames()).not.toContain('Integrations')
+  })
+
+  it('refuses a typed /integrations URL from a tms-grant user', () => {
+    auth.grants = ['tms']
+    draw('/tms/brokerage/integrations')
+
+    expect(screen.queryByText('integrations body')).toBeNull()
+  })
+
+  it('opens Integrations for an admin, deep link included', () => {
+    auth.isAdmin = true
+    draw('/tms/brokerage/integrations/dat')
+
+    expect(screen.getByText('integrations body')).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Integrations' })).toHaveAttribute('aria-selected', 'true')
   })
 
   it('shows a reports-only user the one desk their grant opens', () => {

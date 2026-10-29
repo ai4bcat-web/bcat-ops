@@ -225,6 +225,23 @@ export function CustomerForm({
               />
             </div>
           </div>
+          {/* The ids this customer has in another system; each is read by its own integration. */}
+          <div className="tms-grid tms-grid-2">
+            <TmsField label="project44 customer id" hint="Used when outbound status goes to this customer's project44 account.">
+              <TmsInput
+                aria-label="project44 customer id"
+                value={value.project44CustomerId}
+                onChange={(e) => set('project44CustomerId', e.target.value)}
+              />
+            </TmsField>
+            <TmsField label="HubSpot id" hint="The HubSpot company record this customer is.">
+              <TmsInput
+                aria-label="HubSpot id"
+                value={value.hubspotId}
+                onChange={(e) => set('hubspotId', e.target.value)}
+              />
+            </TmsField>
+          </div>
           <div style={{ display: 'grid', gap: 8 }}>
             <span className="tms-field-label">Visibility preferences</span>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>

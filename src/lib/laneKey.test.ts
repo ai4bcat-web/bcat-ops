@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { laneKeyFor, laneKey3For, laneLabelFor, laneSampleFor, type LaneSampleInput } from './laneKey'
 import type { Stop } from '../types'
+import { aliasMap } from './integrations/postalAliases'
 
 const stop = (over: Partial<Stop> & Pick<Stop, 'type' | 'sequence'>): Stop => ({
   id: `s${over.sequence}`,
@@ -68,6 +69,27 @@ describe('laneKeyFor', () => {
     expect(laneKeyFor([chicago])).toBeNull()
     expect(laneKeyFor([])).toBeNull()
     expect(laneKeyFor(null)).toBeNull()
+  })
+
+  it('spells a stop the way the org’s postal alias does', () => {
+    const route = [
+      stop({ type: 'pickup', sequence: 0, city: 'Bensenville, IL', address: { zip: '60106-1234' } }),
+      danville,
+    ]
+    expect(laneKeyFor(route)).toBe('BENSENVILLE|IL>DANVILLE|IL')
+    expect(laneKeyFor(route, aliasMap([{ zip: '60106', city: 'Chicago', state: 'IL' }]))).toBe(
+      'CHICAGO|IL>DANVILLE|IL',
+    )
+  })
+
+  it('leaves a stop whose ZIP nobody aliased exactly where it was', () => {
+    const route = [
+      stop({ type: 'pickup', sequence: 0, city: 'Bensenville, IL', address: { zip: '60107' } }),
+      danville,
+    ]
+    expect(laneKeyFor(route, aliasMap([{ zip: '60106', city: 'Chicago', state: 'IL' }]))).toBe(
+      'BENSENVILLE|IL>DANVILLE|IL',
+    )
   })
 })
 

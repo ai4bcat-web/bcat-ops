@@ -908,6 +908,14 @@ const schema = a.schema({
       teamKey: a.string(),
       operatedById: a.string(),                  // Cognito username
       accountOwnerIds: a.string().array(),       // [0] is primary owner
+
+      // ── Integrations (Step J) ──────────────────────────────────────────────
+      // External ids this customer is known by. Stored now; the outbound syncs that
+      // read them are stubs until the providers are live.
+      project44CustomerId: a.string(),
+      hubspotId:           a.string(),
+      haulpayDebtorId:     a.string(),
+      ediSettings:         a.json(),           // { isaId, gsId, autoAccept, skip210, skip997 }
     })
     .secondaryIndexes((index) => [index('normalizedName')])
     // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
@@ -1111,10 +1119,94 @@ const schema = a.schema({
       commissionPaySchedule:    a.json(),        // { frequency, payDay, daysUntilPay }
       commissionApprovalAdminOnly: a.boolean(),  // false — managers approve
       commissionPayAdminOnly:   a.boolean(),     // true — only owner/ADMIN pay a period
+
+      // ── Integrations (Step J) ──────────────────────────────────────────────
+      // The shared tracking toggles row J asks for. Stored and shown now; read by
+      // nothing until a carrier-tracking provider is live (TMS_DESIGN §4.16).
+      trackByDefault:           a.boolean(),     // true
+      autoStatusFromGeofence:   a.boolean(),     // false
+      trackingIntervalMin:      a.integer(),     // 30
+      trackingDurationHours:    a.integer(),     // 72
+      // [{ zip, city, state }] — a ZIP whose carrier-facing city differs from the
+      // postal one, applied when a lane key is built.
+      postalCodeAliases:        a.json(),
+      hubspotPortalId:          a.string(),
+      // Slack channel health changes are posted to. Stored by J, used by K.
+      integrationsNotifyChannel: a.string(),
     })
     // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
     // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
     .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  /*
+   * Step J — one row per integration provider, plus one per BCAT API client and
+   * one per received webhook event.
+   *
+   * `id` is the provider key ('DAT'), `api:<clientId>` for an issued API client,
+   * or `evt:<PROVIDER>:<eventId>` for a webhook receipt — so a conditional put on
+   * `attribute_not_exists(id)` is both the first-list seed and the idempotency
+   * guard, and no index is needed: `list` is the only read.
+   *
+   * No credential value is ever stored here. `credentialRef` is a pointer (the SSM
+   * parameter name, or the comma-joined Amplify secret names) and `credentialMask`
+   * is `[{ key, last4 }]` — the only part of a secret that leaves SSM.
+   *
+   * Written only by tmsDirectoryActions, and by trackingApi for an API client's
+   * `lastUsedAt` and a webhook receipt. There is no delete: a provider is
+   * DISCONNECTED and an API client carries `revokedAt`.
+   */
+  Integration: a
+    .model({
+      provider:         a.string().required(),
+      kind:             a.enum(['PROVIDER', 'API_CLIENT', 'WEBHOOK_EVENT']),
+      category:         a.string(),
+      mode:             a.enum(['STUB', 'LIVE']),
+      credentialSource: a.enum(['NONE', 'STACK', 'PAGE', 'BRIDGE', 'SCRIPT', 'OWN']),
+      credentialRef:    a.string(),            // parameter name or secret names — pointers only
+      credentialMask:   a.json(),              // CredentialMaskEntry[] — [{ key, last4 }]
+      status:           a.enum(['NOT_CONNECTED', 'CONNECTED', 'DISCONNECTED']),
+      health:           a.enum(['UNKNOWN', 'OK', 'INVALID_CREDENTIALS', 'UNABLE_TO_VERIFY']),
+      healthReason:     a.string(),
+      healthDetail:     a.string(),            // redacted before it is written
+      lastCheckAt:      a.datetime(),
+      lastOkAt:         a.datetime(),
+      lastCheckBy:      a.string(),
+      settings:         a.json(),              // the behaviour card, validated against the descriptor
+      capabilities:     a.string().array(),
+      lastStubAt:       a.datetime(),
+      stubCount:        a.integer(),
+      connectedAt:      a.datetime(),
+      disconnectedAt:   a.datetime(),
+      connectedBy:      a.string(),
+      disconnectedBy:   a.string(),
+      // API clients (kind API_CLIENT). The secret itself is never here: only its
+      // SHA-256 hash, which lives in the OPENAPI parameter.
+      name:             a.string(),
+      scopes:           a.string().array(),
+      lastUsedAt:       a.datetime(),
+      expiresAt:        a.datetime(),
+      revokedAt:        a.datetime(),
+      // Inbound webhooks: the receipt row's stamp, and the counter on the provider row.
+      lastWebhookAt:    a.datetime(),
+      webhookCount:     a.integer(),
+      // DynamoDB TTL on a WEBHOOK_EVENT receipt: epoch SECONDS, ≈10 minutes out.
+      // `expiresAt` above cannot serve — it is an ISO datetime an API client uses,
+      // and TTL only reads a Number. Ten rather than five minutes because a
+      // redelivery is accepted anywhere in the ±300 s signature window, so a
+      // duplicate of a delivery first accepted at the far edge can land a full
+      // window later and must still find its receipt.
+      ttlEpoch:         a.integer(),
+      events:           a.json(),              // IntegrationEvent[], newest first, capped at 50
+      createdBy:        a.string(),
+      updatedBy:        a.string(),
+      version:          a.integer(),
+    })
+    // No GSI: ≤ 40 providers and a handful of clients, and `list` is the only read.
+    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
+    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    // `delete` is dropped too — nothing in step J removes an integration row.
+    .disableOperations(['subscriptions', 'delete'])
     .authorization((allow) => [allow.authenticated().to(['read'])]),
 
   // Long-running (but synchronous in pieces) location merge job. Lambdas move it through.
@@ -2246,7 +2338,11 @@ const schema = a.schema({
       status:       a.enum(['PENDING', 'ACTIVE', 'INACTIVE']),
       title:        a.string(),
       phone:        a.string(),
-      datEmail:     a.string(),             // stored now, used by J
+      datEmail:     a.string(),             // the rep's own DAT login, listed on the DAT page
+      // ── Integrations (Step J) ──────────────────────────────────────────────
+      hubspotId:    a.string(),
+      // Per-user Truckstop OAuth. Null until Truckstop is live; stamped by nothing yet.
+      truckstopAuthorizedAt: a.datetime(),
       invitedAt:    a.string(),
       invitedBy:    a.string(),
       lastRoleChangeAt: a.string(),
@@ -3696,6 +3792,12 @@ const schema = a.schema({
   // Actions: UPSERT_CUSTOMER, UPSERT_LOCATION, ARCHIVE_CUSTOMER, ARCHIVE_LOCATION,
   // SAVE_DIVISION, SAVE_SETTINGS, PREVIEW_MERGE_LOCATIONS, MERGE_LOCATIONS, RESUME_MERGE.
   // Loads stay on the generated mutations; the merge repoint is the only Load write here.
+  // Step J adds the integration framework: LIST_INTEGRATIONS, CONNECT_INTEGRATION,
+  // VALIDATE_INTEGRATION, SAVE_INTEGRATION_SETTINGS, DISCONNECT_INTEGRATION, RUN_STUB,
+  // CONNECT_QUICKBOOKS, REFRESH_QUICKBOOKS, PREVIEW_QBO_SYNC, ISSUE_API_CLIENT,
+  // REVOKE_API_CLIENT — owner/ADMIN only. They write the Integration table and SSM
+  // under /bcat/integrations/<poolId>/; this Lambda holds no grant on Shipment,
+  // Order, Load, Invoice or FactoringItem, so no integration can reach AR.
   tmsDirectoryActions: a
     .mutation()
     .arguments({

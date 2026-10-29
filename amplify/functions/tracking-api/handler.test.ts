@@ -2,6 +2,9 @@
 // has to happen after beforeAll sets them — a genuine module-loading boundary.
 import { vi, describe, it, expect, beforeAll, beforeEach } from 'vitest'
 import type * as HandlerModule from './handler'
+import type * as ApiModule from './api'
+import { signWebhookBody } from '../_shared/webhook'
+import { mintClient, tokenFor, verifyToken } from '../_shared/openApi'
 
 const mockSend = vi.hoisted(() => vi.fn())
 
@@ -29,11 +32,22 @@ vi.mock('@aws-sdk/client-s3', () => ({
 
 vi.mock('@aws-sdk/s3-request-presigner', () => ({ getSignedUrl: mockGetSignedUrl }))
 
+const mockSsmSend = vi.hoisted(() => vi.fn())
+
+vi.mock('@aws-sdk/client-ssm', () => ({
+  SSMClient: vi.fn(function () { return { send: mockSsmSend } }),
+  GetParameterCommand: vi.fn(function (params: unknown) { return { __cmd: 'GetParameter', ...(params as object) } }),
+}))
+
 let handler: typeof HandlerModule.handler
+let resetParamCache: typeof ApiModule.resetParamCache
 
 const TOKEN = 'Hq3Zn7Lp0vWx9TbKcRdYu1Ms4Ae6Gi2J'   // 32 base64url chars
 const BAD_TOKEN = 'too-short'
 const BUCKET = 'test-bcat-docs'
+/** Step J — the dev pool's own SSM paths. */
+const OPENAPI_PARAM = '/bcat/integrations/us-east-1_TEST/OPENAPI'
+const INTEGRATION_PARAM_PATH = '/bcat/integrations/us-east-1_TEST'
 
 const TABLES = {
   link: 'test-TrackingLink',
@@ -50,6 +64,7 @@ const TABLES = {
   truckLocation: 'test-TruckLocation',
   driver: 'test-Driver',
   quote: 'test-Quote',
+  integration: 'test-Integration',
 }
 
 beforeAll(async () => {
@@ -68,7 +83,12 @@ beforeAll(async () => {
   process.env.SHIPMENT_DOCUMENT_TABLE_NAME = TABLES.document
   process.env.BUCKET_NAME = BUCKET
   process.env.QUOTE_TABLE_NAME = TABLES.quote
+  // Step J
+  process.env.INTEGRATION_TABLE_NAME = TABLES.integration
+  process.env.OPENAPI_PARAM_NAME = OPENAPI_PARAM
+  process.env.INTEGRATION_PARAM_PATH = INTEGRATION_PARAM_PATH
   handler = (await import('./handler')).handler
+  resetParamCache = (await import('./api')).resetParamCache
 })
 
 class ConditionalCheckFailedException extends Error {
@@ -145,11 +165,15 @@ function route(by: {
   division?: unknown
   quotes?: unknown[]
   settings?: unknown
+  /** Step J: the `Integration` row a GetItem by id finds, and the Shipment index's answer. */
+  integration?: unknown
+  shipments?: unknown[]
   onUpdate?: (cmd: Cmd) => void
+  onPut?: (cmd: Cmd) => void
 }) {
   mockSend.mockImplementation(async (cmd: Cmd) => {
     if (cmd.__cmd === 'Update') { by.onUpdate?.(cmd); return {} }
-    if (cmd.__cmd === 'Put') return {}
+    if (cmd.__cmd === 'Put') { by.onPut?.(cmd); return {} }
     if (cmd.__cmd === 'Get') {
       if (cmd.TableName === TABLES.link) return { Item: by.link ?? undefined }
       if (cmd.TableName === TABLES.shipment) return { Item: by.shipment ?? undefined }
@@ -158,6 +182,7 @@ function route(by: {
       if (cmd.TableName === TABLES.settings) return { Item: by.settings ?? undefined }
       if (cmd.TableName === TABLES.loadCarrier) return { Item: by.carrier ?? undefined }
       if (cmd.TableName === TABLES.document) return { Item: by.document ?? undefined }
+      if (cmd.TableName === TABLES.integration) return { Item: by.integration ?? undefined }
       return { Item: undefined }
     }
     if (cmd.__cmd === 'Query') {
@@ -168,6 +193,7 @@ function route(by: {
       if (cmd.TableName === TABLES.history) return { Items: by.positions ?? [] }
       if (cmd.TableName === TABLES.document) return { Items: by.documents ?? [] }
       if (cmd.TableName === TABLES.quote) return { Items: by.quotes ?? [] }
+      if (cmd.TableName === TABLES.shipment) return { Items: by.shipments ?? [] }
       return { Items: [] }
     }
     return { Items: [] }
@@ -185,6 +211,8 @@ beforeEach(() => {
   mockS3Send.mockReset()
   mockGetSignedUrl.mockReset()
   mockGetSignedUrl.mockResolvedValue('https://s3.example/signed-put')
+  mockSsmSend.mockReset()
+  resetParamCache()
 })
 
 describe('tracking-api routing', () => {
@@ -1170,5 +1198,272 @@ describe('POST /q/<token>/respond', () => {
         TOKEN,
       ]) expect(res.body).not.toContain(secret)
     }
+  })
+})
+
+// ── Step J: BCAT's own API, and the inbound webhook receipt ─────────────────
+
+const CLIENT = mintClient('Acme TMS', ['READ'])
+const SIGNING_KEY = 'test-public-api-signing-key'
+const WEBHOOK_SECRET = 'whsec-mycarrierpackets-dev'
+/** The signing secret has a parameter of its own; the provider's own credentials are unreadable here. */
+const MCP_WEBHOOK_PARAM = `${INTEGRATION_PARAM_PATH}/MYCARRIERPACKETS/webhook`
+
+const openApiParam = (clients: Record<string, { hash: string }> = { [CLIENT.clientId]: { hash: CLIENT.hash } }) =>
+  JSON.stringify({ signingKey: SIGNING_KEY, clients })
+
+const clientRow = (over: Record<string, unknown> = {}) => ({
+  id: `api:${CLIENT.clientId}`,
+  provider: 'OPENAPI',
+  kind: 'API_CLIENT',
+  name: 'Acme TMS',
+  scopes: ['READ'],
+  ...over,
+})
+
+const providerRow = (over: Record<string, unknown> = {}) => ({
+  id: 'MYCARRIERPACKETS',
+  provider: 'MYCARRIERPACKETS',
+  kind: 'PROVIDER',
+  status: 'CONNECTED',
+  mode: 'STUB',
+  ...over,
+})
+
+/** The parameter store, by name. A name mapped to null is one nobody has written. */
+function params(by: Record<string, string | null>) {
+  mockSsmSend.mockImplementation(async (cmd: { Name?: string }) => {
+    const value = by[cmd.Name ?? '']
+    if (value == null) throw Object.assign(new Error('not found'), { name: 'ParameterNotFound' })
+    return { Parameter: { Value: value } }
+  })
+}
+
+const postRaw = (path: string, body: string, headers: Record<string, string> = {}) =>
+  handler({ rawPath: path, body, headers, requestContext: { http: { method: 'POST' } } })
+const getWith = (path: string, headers: Record<string, string> = {}) =>
+  handler({ rawPath: path, headers, requestContext: { http: { method: 'GET' } } })
+
+const readToken = (scopes: string[] = ['READ'], issuedAtMs: number = Date.now()) =>
+  tokenFor(CLIENT.clientId, scopes, SIGNING_KEY, new Date(issuedAtMs).toISOString())
+
+describe('POST /api/token', () => {
+  it('answers a good client with a bearer token the API will accept', async () => {
+    params({ [OPENAPI_PARAM]: openApiParam() })
+    const updates: Cmd[] = []
+    route({ integration: clientRow(), onUpdate: (cmd) => updates.push(cmd) })
+
+    const res = await postRaw('/api/token', JSON.stringify({
+      grant_type: 'client_credentials',
+      client_id: CLIENT.clientId,
+      client_secret: CLIENT.secret,
+    }))
+
+    expect(res.statusCode).toBe(200)
+    const body = json(res)
+    expect(body).toMatchObject({ token_type: 'Bearer', expires_in: 3600, scope: 'READ' })
+    const check = verifyToken(String(body.access_token), SIGNING_KEY, new Date().toISOString())
+    expect(check).toMatchObject({ ok: true, clientId: CLIENT.clientId, scopes: ['READ'] })
+    // The secret never comes back out, and the call is stamped on the client's row.
+    expect(res.body).not.toContain(CLIENT.secret)
+    expect(res.body).not.toContain(CLIENT.hash)
+    expect(updates[0].UpdateExpression).toContain('ADD requestCount :one')
+    expect(updates[0].ConditionExpression).toContain('requestCount < :max')
+  })
+
+  it('takes the same credentials from a Basic header', async () => {
+    params({ [OPENAPI_PARAM]: openApiParam() })
+    route({ integration: clientRow() })
+    const basic = Buffer.from(`${CLIENT.clientId}:${CLIENT.secret}`).toString('base64')
+    const res = await postRaw('/api/token', JSON.stringify({ grant_type: 'client_credentials' }), {
+      authorization: `Basic ${basic}`,
+    })
+    expect(res.statusCode).toBe(200)
+    expect(json(res).token_type).toBe('Bearer')
+  })
+
+  it('answers a wrong secret, an unknown client and a revoked one with one wording', async () => {
+    const refusals: { statusCode: number; body: string }[] = []
+
+    params({ [OPENAPI_PARAM]: openApiParam() })
+    route({ integration: clientRow() })
+    refusals.push(await postRaw('/api/token', JSON.stringify({ client_id: CLIENT.clientId, client_secret: 'not-it' })))
+
+    route({ integration: undefined })
+    refusals.push(await postRaw('/api/token', JSON.stringify({ client_id: 'nobody', client_secret: CLIENT.secret })))
+
+    route({ integration: clientRow({ revokedAt: '2026-10-28T00:00:00.000Z' }) })
+    refusals.push(await postRaw('/api/token', JSON.stringify({ client_id: CLIENT.clientId, client_secret: CLIENT.secret })))
+
+    route({ integration: clientRow({ expiresAt: '2020-01-01T00:00:00.000Z' }) })
+    refusals.push(await postRaw('/api/token', JSON.stringify({ client_id: CLIENT.clientId, client_secret: CLIENT.secret })))
+
+    for (const res of refusals) {
+      expect(res.statusCode).toBe(401)
+      expect(json(res)).toEqual({ error: 'Invalid client credentials' })
+    }
+    // Nothing was stamped on a row for a call that did not authenticate.
+    expect(writes()).toHaveLength(0)
+  })
+
+  it('503s when the OPENAPI parameter has never been written', async () => {
+    params({})
+    route({ integration: clientRow() })
+    const res = await postRaw('/api/token', JSON.stringify({ client_id: CLIENT.clientId, client_secret: CLIENT.secret }))
+    expect(res.statusCode).toBe(503)
+    expect(json(res)).toEqual({ error: 'The public API is not configured' })
+  })
+})
+
+describe('GET /api/v1/shipments/<number>', () => {
+  const ORDER = { id: 'ord-1', shipmentId: 'shp-1', references: JSON.stringify([{ code: 'PO', value: '99-12', visibility: 'CUSTOMER' }]) }
+
+  it('answers a READ token with the public shipment view', async () => {
+    params({ [OPENAPI_PARAM]: openApiParam() })
+    route({ integration: clientRow(), shipments: [SHIPMENT], loads: [LOAD], orders: [ORDER] })
+
+    const res = await getWith('/api/v1/shipments/S-1001', { authorization: `Bearer ${readToken()}` })
+    expect(res.statusCode).toBe(200)
+    const view = json(res)
+    expect(view).toMatchObject({ number: 'S-1001', status: 'IN_TRANSIT', mode: 'TL' })
+    expect((view.stops as { city: string }[]).map((s) => s.city)).toEqual(['Joliet', 'Dallas'])
+    expect(view.references).toEqual([{ code: 'PO', label: null, value: '99-12' }])
+    // Nothing financial, and no Order, can ride out on the public shape.
+    expect(res.body).not.toMatch(/Cents/)
+    expect(res.body).not.toMatch(/"order/)
+    expect(res.body).not.toContain('shp-1')
+  })
+
+  it('refuses no token, a forged one, an expired one and a token with no READ scope', async () => {
+    params({ [OPENAPI_PARAM]: openApiParam() })
+    route({ integration: clientRow(), shipments: [SHIPMENT], loads: [LOAD] })
+
+    expect((await getWith('/api/v1/shipments/S-1001')).statusCode).toBe(401)
+    expect((await getWith('/api/v1/shipments/S-1001', { authorization: 'Bearer nonsense' })).statusCode).toBe(401)
+
+    const expired = readToken(['READ'], Date.now() - 7200_000)
+    const stale = await getWith('/api/v1/shipments/S-1001', { authorization: `Bearer ${expired}` })
+    expect(stale.statusCode).toBe(401)
+    expect(json(stale)).toEqual({ error: 'Invalid or expired access token' })
+
+    const other = tokenFor(CLIENT.clientId, ['READ'], 'another-stacks-key', new Date().toISOString())
+    expect((await getWith('/api/v1/shipments/S-1001', { authorization: `Bearer ${other}` })).statusCode).toBe(401)
+
+    const scopeless = await getWith('/api/v1/shipments/S-1001', { authorization: `Bearer ${readToken([])}` })
+    expect(scopeless.statusCode).toBe(403)
+
+    // A revoked client's unexpired token dies against the row, not the clock.
+    route({ integration: clientRow({ revokedAt: '2026-10-28T00:00:00.000Z' }), shipments: [SHIPMENT] })
+    expect((await getWith('/api/v1/shipments/S-1001', { authorization: `Bearer ${readToken()}` })).statusCode).toBe(401)
+  })
+
+  it('answers a voided shipment 200 VOIDED — a PRO is permanent', async () => {
+    params({ [OPENAPI_PARAM]: openApiParam() })
+    route({
+      integration: clientRow(),
+      shipments: [{ ...SHIPMENT, number: 'S-1002', voidedAt: '2026-10-26T00:00:00.000Z' }],
+      loads: [LOAD],
+    })
+    const res = await getWith('/api/v1/shipments/S-1002', { authorization: `Bearer ${readToken()}` })
+    expect(res.statusCode).toBe(200)
+    expect(json(res)).toMatchObject({ number: 'S-1002', status: 'VOIDED' })
+  })
+
+  it('404s a number nobody holds, and one two rows answer to', async () => {
+    params({ [OPENAPI_PARAM]: openApiParam() })
+    route({ integration: clientRow(), shipments: [] })
+    const missing = await getWith('/api/v1/shipments/S-9999', { authorization: `Bearer ${readToken()}` })
+    expect(missing.statusCode).toBe(404)
+    expect(json(missing)).toEqual({ error: 'No shipment with that number' })
+
+    route({ integration: clientRow(), shipments: [SHIPMENT, { ...SHIPMENT, id: 'shp-2' }] })
+    expect((await getWith('/api/v1/shipments/S-1001', { authorization: `Bearer ${readToken()}` })).statusCode).toBe(404)
+  })
+})
+
+describe('POST /api/webhooks/<provider>', () => {
+  const BODY = JSON.stringify({ id: 'evt_7781', type: 'carrier.updated', carrierMc: 'MC-9981' })
+  const signed = (body = BODY, secret = WEBHOOK_SECRET, atSeconds = Math.floor(Date.now() / 1000)) =>
+    ({ 'x-bcat-signature': signWebhookBody(body, secret, atSeconds) })
+
+  const configured = () => params({
+    [OPENAPI_PARAM]: openApiParam(),
+    [MCP_WEBHOOK_PARAM]: JSON.stringify({ webhookSigningSecret: WEBHOOK_SECRET }),
+  })
+
+  it('receipts a signed delivery once, and touches no table but Integration', async () => {
+    configured()
+    const updates: Cmd[] = []
+    const puts: Cmd[] = []
+    route({ integration: providerRow(), onUpdate: (c) => updates.push(c), onPut: (c) => puts.push(c) })
+
+    const res = await postRaw('/api/webhooks/mycarrierpackets', BODY, signed())
+    expect(res.statusCode).toBe(200)
+    expect(json(res)).toMatchObject({ ok: true, duplicate: false, eventId: 'evt_7781' })
+
+    expect(puts).toHaveLength(1)
+    expect(puts[0].Item).toMatchObject({ id: 'evt:MYCARRIERPACKETS:evt_7781', kind: 'WEBHOOK_EVENT', provider: 'MYCARRIERPACKETS' })
+    // The receipt sweeps itself once no redelivery of it can still be in flight.
+    const ttl = Number(puts[0].Item?.ttlEpoch)
+    expect(ttl).toBeGreaterThan(Math.floor(Date.now() / 1000) + 300)
+    expect(ttl).toBeLessThanOrEqual(Math.floor(Date.now() / 1000) + 600)
+    expect(puts[0].ConditionExpression).toBe('attribute_not_exists(id)')
+    expect(updates).toHaveLength(1)
+    expect(updates[0].UpdateExpression).toContain('ADD webhookCount :one')
+    expect(updates[0].UpdateExpression).toContain('lastWebhookAt')
+    // Step J receipts; it never consumes. No shipment, load, order or carrier moves.
+    expect(sent().map((c) => c.TableName)).toEqual([TABLES.integration, TABLES.integration, TABLES.integration])
+  })
+
+  it('answers a redelivery 200 duplicate and writes nothing further', async () => {
+    configured()
+    const updates: Cmd[] = []
+    route({
+      integration: providerRow(),
+      onUpdate: (c) => updates.push(c),
+      onPut: () => { throw new ConditionalCheckFailedException() },
+    })
+
+    const res = await postRaw('/api/webhooks/mycarrierpackets', BODY, signed())
+    expect(res.statusCode).toBe(200)
+    expect(json(res)).toMatchObject({ ok: true, duplicate: true, eventId: 'evt_7781' })
+    expect(updates).toHaveLength(0)
+  })
+
+  it('401s a tampered body, a wrong secret, a stale stamp and a missing header, all alike', async () => {
+    configured()
+    const puts: Cmd[] = []
+    route({ integration: providerRow(), onPut: (c) => puts.push(c) })
+
+    const tampered = await postRaw('/api/webhooks/mycarrierpackets', BODY.replace('MC-9981', 'MC-0001'), signed())
+    const wrongSecret = await postRaw('/api/webhooks/mycarrierpackets', BODY, signed(BODY, 'somebody-elses'))
+    const stale = await postRaw('/api/webhooks/mycarrierpackets', BODY, signed(BODY, WEBHOOK_SECRET, Math.floor(Date.now() / 1000) - 3600))
+    const bare = await postRaw('/api/webhooks/mycarrierpackets', BODY)
+
+    for (const res of [tampered, wrongSecret, stale, bare]) {
+      expect(res.statusCode).toBe(401)
+      expect(json(res)).toEqual({ error: 'That delivery could not be verified' })
+    }
+    expect(puts).toHaveLength(0)
+    expect(writes()).toHaveLength(0)
+  })
+
+  it('404s an unknown provider, a disconnected one and one with no webhook secret, all alike', async () => {
+    configured()
+    route({ integration: undefined })
+    const unknown = await postRaw('/api/webhooks/not_a_provider', BODY, signed())
+
+    route({ integration: providerRow({ status: 'NOT_CONNECTED' }) })
+    const disconnected = await postRaw('/api/webhooks/mycarrierpackets', BODY, signed())
+
+    params({ [MCP_WEBHOOK_PARAM]: JSON.stringify({ username: 'bcat' }) })
+    route({ integration: providerRow() })
+    const secretless = await postRaw('/api/webhooks/mycarrierpackets', BODY, signed())
+
+    for (const res of [unknown, disconnected, secretless]) {
+      expect(res.statusCode).toBe(404)
+      expect(json(res)).toEqual({ error: 'No webhook endpoint for that provider' })
+    }
+    expect(writes()).toHaveLength(0)
   })
 })

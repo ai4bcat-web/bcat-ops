@@ -10,7 +10,16 @@ import {
   DEFAULT_CUSTOMER_LINK_EXPIRY_DAYS, DEFAULT_TRACKING_LINK_EXPIRY_HOURS, DEFAULT_TRACKING_SMS_TEMPLATE,
 } from '@/lib/trackingLink'
 import type { CheckCallNotifyChannel, TmsSettings, TrackingContact } from '@/types/tms'
-import { CheckRow, ErrorText, Hint, Loading, SettingsCard, Stack } from './settingsKit'
+import { CheckRow, ErrorText, GroupLabel, Hint, Loading, SettingsCard, Stack } from './settingsKit'
+
+/**
+ * Step J's org-level tracking defaults. They are stored and shown only: nothing in the
+ * app reads them until a tracking provider is live, and every control here says so.
+ */
+const DEFAULT_TRACK_BY_DEFAULT = true
+const DEFAULT_TRACKING_INTERVAL_MIN = 30
+const DEFAULT_TRACKING_DURATION_HOURS = 72
+const PROVIDER_NOTE = 'Stored now, used once a tracking provider is live.'
 
 const NOTIFY_CHANNELS: readonly CheckCallNotifyChannel[] = ['IN_APP', 'SLACK', 'BOTH']
 const NOTIFY_LABELS: Record<CheckCallNotifyChannel, string> = {
@@ -46,6 +55,10 @@ export function TrackingSettingsCard() {
   const [contactEmail, setContactEmail] = useState('')
   const [contactPhone, setContactPhone] = useState('')
   const [smsTemplate, setSmsTemplate] = useState('')
+  const [trackByDefault, setTrackByDefault] = useState(DEFAULT_TRACK_BY_DEFAULT)
+  const [autoStatusFromGeofence, setAutoStatusFromGeofence] = useState(false)
+  const [trackingIntervalMin, setTrackingIntervalMin] = useState('')
+  const [trackingDurationHours, setTrackingDurationHours] = useState('')
   const [error, setError] = useState<string | null>(null)
 
   // State is written only inside the promise chain (react-hooks/set-state-in-effect).
@@ -67,6 +80,11 @@ export function TrackingSettingsCard() {
         setContactEmail(s?.trackingContact?.email ?? '')
         setContactPhone(s?.trackingContact?.phone ?? '')
         setSmsTemplate(s?.trackingSmsTemplate ?? '')
+        // Unset means the house default, which is to ask a provider to track.
+        setTrackByDefault(s?.trackByDefault !== false)
+        setAutoStatusFromGeofence(s?.autoStatusFromGeofence === true)
+        setTrackingIntervalMin(s?.trackingIntervalMin != null ? String(s.trackingIntervalMin) : '')
+        setTrackingDurationHours(s?.trackingDurationHours != null ? String(s.trackingDurationHours) : '')
       })
       .catch((e) => setError(e instanceof Error ? e.message : 'Could not load settings'))
       .finally(() => setLoading(false))
@@ -94,6 +112,10 @@ export function TrackingSettingsCard() {
           ? { mode: 'FIXED', name: contactName.trim() || null, email: contactEmail.trim() || null, phone: contactPhone.trim() || null }
           : { mode: 'CUSTOMER_REP' },
         trackingSmsTemplate: template || null,
+        trackByDefault,
+        autoStatusFromGeofence,
+        trackingIntervalMin: parseWhole(trackingIntervalMin, 'Tracking ping interval', 5, 240),
+        trackingDurationHours: parseWhole(trackingDurationHours, 'Tracking duration', 1, 336),
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Those settings are not valid')
@@ -187,6 +209,41 @@ export function TrackingSettingsCard() {
               onChange={setShowsPosition}
             />
             <Hint>Each link keeps whatever these said when it was minted, so turning one off never widens or narrows a link already sent.</Hint>
+          </Stack>
+
+          <Stack gap={8}>
+            <GroupLabel>Shared tracking defaults</GroupLabel>
+            <CheckRow
+              ariaLabel="Track every shipment by default"
+              label={`Ask the tracking provider to track every shipment by default — ${PROVIDER_NOTE.toLowerCase()}`}
+              checked={trackByDefault}
+              onChange={setTrackByDefault}
+            />
+            <CheckRow
+              ariaLabel="Set status from geofence"
+              label={`Move the load status automatically when a geofence is crossed — ${PROVIDER_NOTE.toLowerCase()}`}
+              checked={autoStatusFromGeofence}
+              onChange={setAutoStatusFromGeofence}
+            />
+            <div className="tms-grid tms-grid-2">
+              <TmsField label="Ping interval (minutes)" hint={PROVIDER_NOTE}>
+                <TmsInput
+                  aria-label="Tracking ping interval minutes"
+                  value={trackingIntervalMin}
+                  onChange={(e) => setTrackingIntervalMin(e.target.value)}
+                  placeholder={String(DEFAULT_TRACKING_INTERVAL_MIN)}
+                />
+              </TmsField>
+              <TmsField label="Track for (hours)" hint={PROVIDER_NOTE}>
+                <TmsInput
+                  aria-label="Tracking duration hours"
+                  value={trackingDurationHours}
+                  onChange={(e) => setTrackingDurationHours(e.target.value)}
+                  placeholder={String(DEFAULT_TRACKING_DURATION_HOURS)}
+                />
+              </TmsField>
+            </div>
+            <Hint>{PROVIDER_NOTE} No carrier tracking provider is connected yet, so nothing in BCAT reads these four settings — they are kept here so the connection has them the day it is made.</Hint>
           </Stack>
 
           <Stack gap={8}>

@@ -47,7 +47,8 @@ import {
 } from '../_shared/actionInputs'
 import { isVoided } from '../_shared/voided'
 
-import { laneKey3For, laneKeyFor } from '../../../src/lib/laneKey'
+import { laneKey3For, laneKeyFor, type LaneAliasMap } from '../../../src/lib/laneKey'
+import { aliasMap } from '../../../src/lib/integrations/postalAliases'
 import {
   LOST_REASONS,
   QUOTE_STATUSES,
@@ -621,7 +622,14 @@ interface QuoteFormFields {
 }
 
 /** Everything the quote form may set, validated once for both create and edit. */
-function readForm(deps: QuoteDeps, input: Row, existing: Row | null, rules: QuoteChargeRules): QuoteFormFields {
+function readForm(
+  deps: QuoteDeps,
+  input: Row,
+  existing: Row | null,
+  rules: QuoteChargeRules,
+  /** The org's postal-code aliases, so one facility keeps one lane key. */
+  aliases: LaneAliasMap | null,
+): QuoteFormFields {
   const stops = input.stops == null
     ? quoteStops(existing ?? {})
     : (assertArrayOf(input.stops, 'stops', deps.validateStop) as unknown as Stop[])
@@ -644,7 +652,7 @@ function readForm(deps: QuoteDeps, input: Row, existing: Row | null, rules: Quot
     lines,
     miles,
     weightLbs,
-    laneKey: laneKeyFor(stops),
+    laneKey: laneKeyFor(stops, aliases),
     laneKey3: laneKey3For(stops),
     pickupAppt: optionalIso(input.pickupAppt, 'pickupAppt')
       ?? firstPickupAppt(stops, optionalString(existing?.pickupAppt, 60)),
@@ -724,7 +732,7 @@ export async function saveQuote(deps: QuoteDeps, input: Row, caller: Caller): Pr
   const customerId = optionalString(input.customerId, 100) ?? optionalString(existing?.customerId, 100)
   const customer = customerId ? await getQuotableCustomer(deps, customerId) : null
   const rules = deps.chargeCodeRules(settings, customer)
-  const form = readForm(deps, input, existing, rules)
+  const form = readForm(deps, input, existing, rules, aliasMap(settings?.postalCodeAliases as Parameters<typeof aliasMap>[0]))
   const priced = priceQuote(deps, form.lines, { miles: form.miles, weightLbs: form.weightLbs }, customer, settings)
 
   const now = nowIso()

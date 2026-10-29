@@ -95,6 +95,9 @@ export interface CustomerFormValue {
   teamKey: string
   operatedById: string
   accountOwnerIdsText: string
+  /** The ids this customer carries in another system; stored for the integration that uses them. */
+  project44CustomerId: string
+  hubspotId: string
 
   contacts: CustomerContact[]
   billToParties: BillToParty[]
@@ -160,6 +163,8 @@ function emptyCustomerForm(initial?: CustomerRecord | null): CustomerFormValue {
     teamKey: initial?.teamKey ?? '',
     operatedById: initial?.operatedById ?? '',
     accountOwnerIdsText: arrayToLines(initial?.accountOwnerIds),
+    project44CustomerId: initial?.project44CustomerId ?? '',
+    hubspotId: initial?.hubspotId ?? '',
 
     contacts: initial?.contacts ?? [],
     billToParties: initial?.billToParties ?? [],
@@ -268,6 +273,8 @@ export function useCustomerForm(initial?: CustomerRecord | null) {
     teamKey: value.teamKey.trim() || null,
     operatedById: value.operatedById.trim() || null,
     accountOwnerIds: linesToArray(value.accountOwnerIdsText),
+    project44CustomerId: value.project44CustomerId.trim() || null,
+    hubspotId: value.hubspotId.trim() || null,
 
     contacts: value.contacts.length ? value.contacts : null,
     billToParties: value.billToParties.length ? value.billToParties : null,

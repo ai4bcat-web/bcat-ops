@@ -6,7 +6,7 @@
  */
 
 import type { AttributeValue } from '@aws-sdk/client-dynamodb'
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest'
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb'
 
 // ── Cognito mock ──────────────────────────────────────────────────────────────
@@ -39,6 +39,10 @@ const send = vi.hoisted(() => {
   process.env.SHIPMENT_VIEW_TABLE_NAME = 'ShipmentView-test'
   process.env.AUDIT_LOG_TABLE_NAME = 'AuditLog-test'
   process.env.GEOCODE_TOKEN_SECRET = 'test-geocode-secret'
+  // Step J — the integration framework's table and its SSM path.
+  process.env.INTEGRATION_TABLE_NAME = 'Integration-test'
+  process.env.INTEGRATION_PARAM_PATH = '/bcat/integrations/us-east-1_TEST'
+  process.env.DISPATCH_PARAM_PATH = '/bcat/dispatch/us-east-1_TEST'
   return vi.fn()
 })
 
@@ -91,6 +95,43 @@ vi.mock('@aws-sdk/client-dynamodb', () => {
   }
 })
 
+// ── SSM mock (Step J credential store) ───────────────────────────────────────
+const ssmSend = vi.hoisted(() => vi.fn())
+vi.mock('@aws-sdk/client-ssm', () => {
+  class SSMClient {
+    send = ssmSend
+  }
+  class GetParameterCommand {
+    input: unknown
+    __type = 'GetParameter'
+    constructor(input: unknown) {
+      this.input = input
+    }
+  }
+  class PutParameterCommand {
+    input: unknown
+    __type = 'PutParameter'
+    constructor(input: unknown) {
+      this.input = input
+    }
+  }
+  class DeleteParameterCommand {
+    input: unknown
+    __type = 'DeleteParameter'
+    constructor(input: unknown) {
+      this.input = input
+    }
+  }
+  class GetParametersByPathCommand {
+    input: unknown
+    __type = 'GetParametersByPath'
+    constructor(input: unknown) {
+      this.input = input
+    }
+  }
+  return { SSMClient, GetParameterCommand, PutParameterCommand, DeleteParameterCommand, GetParametersByPathCommand }
+})
+
 // ── Amplify data client mock (not exercised in SDK-path tests) ─────────────
 vi.hoisted(() => {
   process.env.AMPLIFY_DATA_DEFAULT_NAME = 'amplifyData'
@@ -122,6 +163,8 @@ import { handler, parseInput } from './handler'
 import { signGeocodePayload } from '../tms-geocode/handler'
 import { SEED_DIVISIONS, SEED_RULES } from '../../../src/lib/ownership'
 import { SEED_VIEWS } from '../../../src/lib/shipmentViewDefs'
+import { PROVIDERS } from '../../../src/lib/integrations/registry'
+import { resetIntegrationSecretsCache } from '../_shared/integrationSecrets'
 
 // ── Mock types ────────────────────────────────────────────────────────────────
 
@@ -219,6 +262,9 @@ beforeEach(() => {
   send.mockReset()
   cognitoSend.mockReset()
   cognitoSend.mockRejectedValue(new Error('UserNotFoundException'))
+  ssmSend.mockReset()
+  // The credential store caches a parameter for 60 s; each case reads its own stub.
+  resetIntegrationSecretsCache()
 })
 
 // ── Authorization ─────────────────────────────────────────────────────────────
@@ -1729,5 +1775,581 @@ describe('ownership authorization', () => {
     }))
     await expect(handler(event('UPSERT_CUSTOMER', { name: 'Shipments Inc' }, identity({ groups: ['page-tms'] }))))
       .resolves.toMatchObject({ name: 'Shipments Inc' })
+  })
+})
+
+// ── Step J: the integration framework ─────────────────────────────────────────
+
+interface SsmCommand {
+  __type: 'GetParameter' | 'PutParameter' | 'DeleteParameter' | 'GetParametersByPath'
+  input: { Name?: string; Value?: string; Type?: string; Overwrite?: boolean; Path?: string; WithDecryption?: boolean }
+}
+
+const INTEGRATION_PATH = '/bcat/integrations/us-east-1_TEST'
+
+/** An in-memory Parameter Store that answers ParameterNotFound like the real one. */
+function ssmStore(seed: Record<string, string> = {}) {
+  const params = new Map<string, string>(Object.entries(seed))
+  const puts: SsmCommand[] = []
+  const deletes: string[] = []
+  ssmSend.mockImplementation((cmd: SsmCommand) => {
+    if (cmd.__type === 'GetParameter') {
+      const value = params.get(String(cmd.input.Name ?? ''))
+      if (value == null) {
+        const err = new Error('ParameterNotFound')
+        err.name = 'ParameterNotFound'
+        return Promise.reject(err)
+      }
+      return Promise.resolve({ Parameter: { Name: cmd.input.Name, Value: value } })
+    }
+    if (cmd.__type === 'PutParameter') {
+      puts.push(cmd)
+      params.set(String(cmd.input.Name ?? ''), String(cmd.input.Value ?? ''))
+      return Promise.resolve({})
+    }
+    if (cmd.__type === 'DeleteParameter') {
+      deletes.push(String(cmd.input.Name ?? ''))
+      params.delete(String(cmd.input.Name ?? ''))
+      return Promise.resolve({})
+    }
+    const prefix = String(cmd.input.Path ?? '')
+    const found = [...params.entries()].filter(([name]) => name.startsWith(prefix))
+    return Promise.resolve({ Parameters: found.map(([Name, Value]) => ({ Name, Value })) })
+  })
+  return { params, puts, deletes }
+}
+
+interface IntegrationMockUpdate {
+  __type: 'Update'
+  input: {
+    TableName?: string
+    Key?: Record<string, AttributeValue>
+    UpdateExpression?: string
+    ExpressionAttributeValues?: Record<string, AttributeValue>
+  }
+}
+
+/**
+ * The Integration + AuditLog tables, honouring `attribute_not_exists(id)` and the
+ * `version` CAS, plus the one `SET … ADD …` update RUN_STUB issues. Every command
+ * the handler sent is kept so a test can assert over the WHOLE set of tables
+ * touched — which is how "a stub writes nothing else" is proved.
+ */
+function integrationTables(seed: Record<string, Record<string, unknown>[]> = {}) {
+  const tables = new Map<string, Map<string, Record<string, unknown>>>()
+  const seen: MockCommand[] = []
+  const tableOf = (name: string): Map<string, Record<string, unknown>> => {
+    const found = tables.get(name)
+    if (found) return found
+    const created = new Map<string, Record<string, unknown>>()
+    tables.set(name, created)
+    return created
+  }
+  for (const [name, rows] of Object.entries(seed)) {
+    for (const row of rows) tableOf(name).set(String(row.id), row)
+  }
+
+  send.mockImplementation((cmd: MockCommand) => {
+    seen.push(cmd)
+    const table = tableOf(String(cmd.input.TableName ?? ''))
+    if (cmd.__type === 'Scan') {
+      return Promise.resolve({ Items: [...table.values()].map((row) => makeDynamoItem(row)), LastEvaluatedKey: undefined })
+    }
+    if (cmd.__type === 'Get') {
+      const row = table.get(String(cmd.input.Key?.id?.S ?? ''))
+      return Promise.resolve({ Item: row ? makeDynamoItem(row) : undefined })
+    }
+    if (cmd.__type === 'Put') {
+      const condition = cmd.input.ConditionExpression ?? ''
+      const item = unmarshall(cmd.input.Item ?? {})
+      const existing = table.get(String(item.id))
+      if (condition.includes('attribute_not_exists(id)') && existing) {
+        return Promise.reject(conditionFailed())
+      }
+      if (condition.includes('#version = :expectedVersion')) {
+        const expected = Number(cmd.input.ExpressionAttributeValues?.[':expectedVersion']?.N)
+        if (!existing || Number(existing.version ?? 0) !== expected) return Promise.reject(conditionFailed())
+      }
+      table.set(String(item.id), item)
+      return Promise.resolve({})
+    }
+    const update = cmd as unknown as IntegrationMockUpdate
+    const id = String(update.input.Key?.id?.S ?? '')
+    const existing = table.get(id) ?? { id }
+    const values = update.input.ExpressionAttributeValues ?? {}
+    const next: Record<string, unknown> = {
+      ...existing,
+      lastStubAt: values[':at']?.S,
+      updatedAt: values[':at']?.S,
+      updatedBy: values[':by']?.S,
+      stubCount: Number(existing.stubCount ?? 0) + Number(values[':one']?.N ?? 0),
+      version: Number(existing.version ?? 0) + Number(values[':one']?.N ?? 0),
+    }
+    table.set(id, next)
+    return Promise.resolve({ Attributes: makeDynamoItem(next) })
+  })
+
+  return {
+    integrations: tableOf('Integration-test'),
+    audit: tableOf('AuditLog-test'),
+    seen,
+    tableNames: (): string[] => [...new Set(seen.map((cmd) => String(cmd.input.TableName ?? '')))].sort(),
+  }
+}
+
+function auditRows(audit: Map<string, Record<string, unknown>>): Record<string, unknown>[] {
+  return [...audit.values()]
+}
+
+/** Replace global fetch for one test and hand back the spy. */
+function mockFetch(answer: { status: number; body: string }): Mock<() => Promise<Response>> {
+  const spy = vi.fn(async () => new Response(answer.body, { status: answer.status }))
+  globalThis.fetch = spy as unknown as typeof fetch
+  return spy
+}
+
+describe('LIST_INTEGRATIONS', () => {
+  it('creates every registry row once and writes nothing on a second call', async () => {
+    const tables = integrationTables()
+    const first = (await handler(event('LIST_INTEGRATIONS', {}, ADMIN_CALLER))) as unknown as Record<string, unknown>[]
+
+    expect(first).toHaveLength(PROVIDERS.length)
+    // Spec §8.1 order, which is what the index page's category tabs print.
+    expect(first.map((r) => r.provider)).toEqual(PROVIDERS.map((p) => p.key))
+    expect(tables.integrations.size).toBe(PROVIDERS.length)
+    expect([...tables.integrations.keys()].sort()).toEqual(PROVIDERS.map((p) => p.key).sort())
+    for (const row of tables.integrations.values()) {
+      expect(row).toMatchObject({ kind: 'PROVIDER', status: 'NOT_CONNECTED', health: 'UNKNOWN', version: 1 })
+    }
+
+    const putsAfterSeed = tables.seen.filter((cmd) => cmd.__type === 'Put').length
+    const second = (await handler(event('LIST_INTEGRATIONS', {}, ADMIN_CALLER))) as unknown as Record<string, unknown>[]
+    expect(second).toHaveLength(PROVIDERS.length)
+    expect(tables.seen.filter((cmd) => cmd.__type === 'Put').length).toBe(putsAfterSeed)
+  })
+
+  it('names the stack secrets a STACK provider is missing, and none when it holds them', async () => {
+    integrationTables()
+    delete process.env.MOTIVE_API_KEY
+    process.env.ANTHROPIC_API_KEY = 'sk-ant-real'
+    const rows = (await handler(event('LIST_INTEGRATIONS', {}, ADMIN_CALLER))) as unknown as Record<string, unknown>[]
+    const motive = rows.find((r) => r.provider === 'MOTIVE')
+    const anthropic = rows.find((r) => r.provider === 'ANTHROPIC')
+    expect(motive?.missingCredentials).toEqual(['MOTIVE_API_KEY'])
+    expect(motive?.credentialRef).toBe('MOTIVE_API_KEY')
+    expect(anthropic?.missingCredentials).toEqual([])
+    delete process.env.ANTHROPIC_API_KEY
+  })
+})
+
+describe('CONNECT_INTEGRATION', () => {
+  it('writes one SecureString at the pool path and never a value into the table or the audit row', async () => {
+    const tables = integrationTables()
+    const store = ssmStore()
+    const fetchSpy = mockFetch({ status: 200, body: '{}' })
+
+    const row = (await handler(
+      event(
+        'CONNECT_INTEGRATION',
+        {
+          provider: 'DAT',
+          credentials: {
+            serviceAccountEmail: 'ops@bcatcorp.com',
+            serviceAccountPassword: 'hunter2-super-secret',
+            rateViewTier: 'Combo Premium',
+          },
+        },
+        ADMIN_CALLER,
+      ),
+    )) as Record<string, unknown>
+
+    expect(store.puts).toHaveLength(1)
+    expect(store.puts[0].input).toMatchObject({ Name: `${INTEGRATION_PATH}/DAT`, Type: 'SecureString', Overwrite: true })
+
+    expect(row).toMatchObject({ status: 'CONNECTED', credentialRef: `${INTEGRATION_PATH}/DAT` })
+    expect(row.credentialMask).toEqual([
+      { key: 'serviceAccountEmail', last4: '.com' },
+      { key: 'serviceAccountPassword', last4: 'cret' },
+      { key: 'rateViewTier', last4: 'mium' },
+    ])
+
+    // The whole serialised state of every table this action touched, and the audit
+    // row's whole `changes` blob: the password must appear in neither.
+    const everything = JSON.stringify([...tables.integrations.values(), ...auditRows(tables.audit)])
+    expect(everything).not.toContain('hunter2-super-secret')
+    const connectAudit = auditRows(tables.audit).find((a) => a.action === 'CONNECT_INTEGRATION')
+    expect(String(connectAudit?.changes)).not.toContain('hunter2-super-secret')
+    expect(JSON.parse(String(connectAudit?.changes)) as Record<string, unknown>).toMatchObject({
+      provider: 'DAT',
+      fields: ['rateViewTier', 'serviceAccountEmail', 'serviceAccountPassword'],
+    })
+    // DAT has no read call to prove the credential with, so nothing was called.
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it('accepts a one-field re-entry and keeps the fields that were not typed', async () => {
+    integrationTables()
+    const store = ssmStore({
+      [`${INTEGRATION_PATH}/DAT`]: JSON.stringify({
+        serviceAccountEmail: 'ops@bcatcorp.com',
+        serviceAccountPassword: 'old-password-value',
+        rateViewTier: 'Combo Pro',
+      }),
+    })
+    mockFetch({ status: 200, body: '{}' })
+
+    // The page sends ONLY what was typed: a masked field it did not touch has no
+    // value to send. Rotating the password must not answer "the e-mail is required".
+    const row = (await handler(
+      event(
+        'CONNECT_INTEGRATION',
+        { provider: 'DAT', credentials: { serviceAccountPassword: 'new-password-value' } },
+        ADMIN_CALLER,
+      ),
+    )) as Record<string, unknown>
+
+    expect(row).toMatchObject({ status: 'CONNECTED' })
+    const stored = JSON.parse(String(store.params.get(`${INTEGRATION_PATH}/DAT`))) as Record<string, string>
+    expect(stored).toEqual({
+      serviceAccountEmail: 'ops@bcatcorp.com',
+      serviceAccountPassword: 'new-password-value',
+      rateViewTier: 'Combo Pro',
+    })
+    // The mask still covers all three, so the page knows nothing was lost.
+    expect(row.credentialMask).toHaveLength(3)
+  })
+
+  it('keeps the webhook signing secret in a parameter of its own', async () => {
+    integrationTables()
+    const store = ssmStore()
+    mockFetch({ status: 200, body: '{}' })
+
+    const row = (await handler(
+      event(
+        'CONNECT_INTEGRATION',
+        {
+          provider: 'MYCARRIERPACKETS',
+          credentials: { username: 'bcat', password: 'mcp-password', webhookSigningSecret: 'whsec-abcdef' },
+        },
+        ADMIN_CALLER,
+      ),
+    )) as Record<string, unknown>
+
+    // The public tracking Lambda may read `<PROVIDER>/webhook` and nothing else,
+    // so the password must not be in the parameter it can decrypt.
+    const main = String(store.params.get(`${INTEGRATION_PATH}/MYCARRIERPACKETS`))
+    const webhook = String(store.params.get(`${INTEGRATION_PATH}/MYCARRIERPACKETS/webhook`))
+    expect(JSON.parse(webhook) as Record<string, string>).toEqual({ webhookSigningSecret: 'whsec-abcdef' })
+    expect(main).not.toContain('whsec-abcdef')
+    expect(webhook).not.toContain('mcp-password')
+    // The page still sees one object: all three fields are masked on the row.
+    expect(row.credentialMask).toHaveLength(3)
+  })
+
+  it('refuses a DAT service account with a plus address', async () => {
+    integrationTables()
+    ssmStore()
+    await expect(
+      handler(
+        event(
+          'CONNECT_INTEGRATION',
+          {
+            provider: 'DAT',
+            credentials: { serviceAccountEmail: 'ops+dat@bcatcorp.com', serviceAccountPassword: 'x', rateViewTier: 'Combo Pro' },
+          },
+          ADMIN_CALLER,
+        ),
+      ),
+    ).rejects.toThrow(/without a "\+"/)
+  })
+
+  it('refuses a STACK provider with the rotation command', async () => {
+    integrationTables()
+    ssmStore()
+    await expect(
+      handler(event('CONNECT_INTEGRATION', { provider: 'MOTIVE', credentials: { key: 'x' } }, ADMIN_CALLER)),
+    ).rejects.toThrow('managed by the stack — rotate with `npx ampx secret set MOTIVE_API_KEY`')
+  })
+})
+
+describe('DISCONNECT_INTEGRATION', () => {
+  it('deletes the parameter, keeps the settings and the row', async () => {
+    const tables = integrationTables({
+      'Integration-test': [
+        {
+          id: 'DAT',
+          provider: 'DAT',
+          kind: 'PROVIDER',
+          credentialSource: 'PAGE',
+          status: 'CONNECTED',
+          mode: 'LIVE',
+          health: 'OK',
+          settings: { refreshIntervalMin: 20 },
+          credentialMask: [{ key: 'serviceAccountPassword', last4: 'cret' }],
+          version: 3,
+        },
+      ],
+    })
+    const store = ssmStore({ [`${INTEGRATION_PATH}/DAT`]: JSON.stringify({ serviceAccountPassword: 'x' }) })
+
+    const row = (await handler(event('DISCONNECT_INTEGRATION', { provider: 'DAT' }, ADMIN_CALLER))) as Record<string, unknown>
+
+    // Both: leaving the webhook secret behind would let a disconnected provider
+    // keep posting to the public receiver.
+    expect(store.deletes).toEqual([`${INTEGRATION_PATH}/DAT`, `${INTEGRATION_PATH}/DAT/webhook`])
+    expect(row).toMatchObject({ status: 'DISCONNECTED', mode: 'STUB', credentialMask: null, version: 4 })
+    expect(row.settings).toEqual({ refreshIntervalMin: 20 })
+    expect(tables.integrations.get('DAT')).toBeDefined()
+  })
+
+  it('refuses a STACK provider', async () => {
+    integrationTables({ 'Integration-test': [{ id: 'MOTIVE', provider: 'MOTIVE', kind: 'PROVIDER', version: 1 }] })
+    ssmStore()
+    await expect(handler(event('DISCONNECT_INTEGRATION', { provider: 'MOTIVE' }, ADMIN_CALLER)))
+      .rejects.toThrow('managed by the stack — rotate with `npx ampx secret set MOTIVE_API_KEY`')
+  })
+})
+
+describe('VALIDATE_INTEGRATION', () => {
+  it('answers NEUTERED_ON_DEV for a disabled-on-dev secret without calling the provider', async () => {
+    const tables = integrationTables()
+    ssmStore()
+    const fetchSpy = mockFetch({ status: 200, body: '{}' })
+    process.env.MOTIVE_API_KEY = 'disabled-on-dev'
+
+    const row = (await handler(event('VALIDATE_INTEGRATION', { provider: 'MOTIVE' }, ADMIN_CALLER))) as Record<string, unknown>
+
+    expect(fetchSpy).not.toHaveBeenCalled()
+    expect(row).toMatchObject({ health: 'UNABLE_TO_VERIFY', healthReason: 'NEUTERED_ON_DEV', mode: 'STUB' })
+    expect(row.health).not.toBe('OK')
+    expect(row.lastOkAt ?? null).toBeNull()
+    expect(auditRows(tables.audit).filter((a) => a.action === 'VALIDATE_INTEGRATION')).toHaveLength(1)
+    delete process.env.MOTIVE_API_KEY
+  })
+
+  it('connects a STACK provider that answers, and keeps its 2xx body out of the row', async () => {
+    const tables = integrationTables()
+    ssmStore()
+    // Motive's /users/me answers with the account holder. A successful check must
+    // say that it worked, not who it worked as — nothing of this body is stored.
+    mockFetch({ status: 200, body: '{"user":{"email":"ryne@bcatcorp.com","phone":"630-555-0100"}}' })
+    process.env.MOTIVE_API_KEY = 'motive-live-key'
+
+    const row = (await handler(event('VALIDATE_INTEGRATION', { provider: 'MOTIVE' }, ADMIN_CALLER))) as Record<string, unknown>
+
+    // A STACK secret is never "connected" by a page action; a working key is what
+    // connects it, or the badge would read Not connected for a key that just worked.
+    expect(row).toMatchObject({ status: 'CONNECTED', health: 'OK', healthReason: 'OK' })
+    expect(row.lastOkAt).toBeTruthy()
+    expect(row.healthDetail ?? null).toBeNull()
+    const everything = JSON.stringify([...tables.integrations.values(), ...auditRows(tables.audit)])
+    expect(everything).not.toContain('630-555-0100')
+    expect(everything).not.toContain('ryne@bcatcorp.com')
+    delete process.env.MOTIVE_API_KEY
+  })
+
+  it('maps a 401 to INVALID_CREDENTIALS and records the check', async () => {
+    integrationTables()
+    ssmStore()
+    const fetchSpy = mockFetch({ status: 401, body: '{"error":"unauthorized"}' })
+    process.env.MOTIVE_API_KEY = 'motive-live-key'
+
+    const row = (await handler(event('VALIDATE_INTEGRATION', { provider: 'MOTIVE' }, ADMIN_CALLER))) as Record<string, unknown>
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+    expect(row).toMatchObject({ health: 'INVALID_CREDENTIALS', healthReason: 'INVALID_CREDENTIALS' })
+    expect(String(row.healthDetail)).toContain('HTTP 401')
+    expect(row.lastCheckBy).toBe('dennis@bcatcorp.com')
+    const events = row.events as Array<Record<string, unknown>>
+    expect(events[0]).toMatchObject({ action: 'VALIDATE', outcome: 'INVALID_CREDENTIALS' })
+    delete process.env.MOTIVE_API_KEY
+  })
+
+  it('never leaks the key into the stored detail', async () => {
+    const tables = integrationTables()
+    ssmStore()
+    mockFetch({ status: 403, body: '{"message":"bad key motive-live-key"}' })
+    process.env.MOTIVE_API_KEY = 'motive-live-key'
+
+    await handler(event('VALIDATE_INTEGRATION', { provider: 'MOTIVE' }, ADMIN_CALLER))
+    const everything = JSON.stringify([...tables.integrations.values(), ...auditRows(tables.audit)])
+    expect(everything).not.toContain('motive-live-key')
+    delete process.env.MOTIVE_API_KEY
+  })
+})
+
+describe('RUN_STUB', () => {
+  it('writes exactly one AuditLog row and touches no other table', async () => {
+    const tables = integrationTables({
+      'Integration-test': [
+        { id: 'DAT', provider: 'DAT', kind: 'PROVIDER', mode: 'STUB', status: 'NOT_CONNECTED', settings: {}, version: 1 },
+      ],
+    })
+    ssmStore()
+
+    const result = (await handler(event('RUN_STUB', { provider: 'DAT', capability: 'post' }, ADMIN_CALLER))) as {
+      row: Record<string, unknown>
+      result: Record<string, unknown>
+    }
+
+    expect(result.result).toMatchObject({ mode: 'STUB', ok: true })
+    expect(String(result.result.message)).toMatch(/^STUB — /)
+    expect(String(result.result.externalId)).toMatch(/^stub:/)
+    expect(result.row).toMatchObject({ stubCount: 1 })
+
+    // Every table this action reached, Load / Shipment / Order / Invoice included.
+    expect(tables.tableNames()).toEqual(['AuditLog-test', 'Integration-test'])
+    const rows = auditRows(tables.audit)
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ entityType: 'INTEGRATION', entityId: 'DAT', action: 'STUB_POST' })
+    expect(JSON.parse(String(rows[0].changes)) as Record<string, unknown>).toMatchObject({ stub: true, provider: 'DAT' })
+  })
+
+  it('refuses a capability the provider does not declare', async () => {
+    integrationTables({ 'Integration-test': [{ id: 'DAT', provider: 'DAT', kind: 'PROVIDER', mode: 'STUB', version: 1 }] })
+    ssmStore()
+    await expect(handler(event('RUN_STUB', { provider: 'DAT', capability: 'factor' }, ADMIN_CALLER)))
+      .rejects.toThrow('DAT does not declare the factor capability.')
+  })
+
+  it('refuses a capability that has a real implementation, whatever the row says', async () => {
+    // OTR's `factor` IS implemented — it is F's gated SEND_TO_FACTOR — so a stub
+    // of it would be a second door into AR dressed up as a demo (invariant 1).
+    integrationTables({ 'Integration-test': [{ id: 'OTR', provider: 'OTR', kind: 'PROVIDER', mode: 'STUB', version: 1 }] })
+    ssmStore()
+    await expect(handler(event('RUN_STUB', { provider: 'OTR', capability: 'factor' }, ADMIN_CALLER)))
+      .rejects.toThrow(/is live for factor/)
+  })
+})
+
+describe('SAVE_INTEGRATION_SETTINGS', () => {
+  it('validates the behaviour card and CASes on version', async () => {
+    const tables = integrationTables({
+      'Integration-test': [{ id: 'DAT', provider: 'DAT', kind: 'PROVIDER', mode: 'STUB', settings: {}, version: 2 }],
+    })
+    ssmStore()
+
+    await expect(
+      handler(event('SAVE_INTEGRATION_SETTINGS', { provider: 'DAT', settings: { refreshIntervalMin: 17 } }, ADMIN_CALLER)),
+    ).rejects.toThrow(/refresh/i)
+
+    const row = (await handler(
+      event('SAVE_INTEGRATION_SETTINGS', { provider: 'DAT', settings: { refreshIntervalMin: 20 }, expectedVersion: 2 }, ADMIN_CALLER),
+    )) as Record<string, unknown>
+    expect(row.version).toBe(3)
+    expect((row.settings as Record<string, unknown>).refreshIntervalMin).toBe(20)
+
+    await expect(
+      handler(event('SAVE_INTEGRATION_SETTINGS', { provider: 'DAT', settings: { refreshIntervalMin: 25 }, expectedVersion: 2 }, ADMIN_CALLER)),
+    ).rejects.toThrow(/changed by someone else/)
+    expect(tables.integrations.get('DAT')).toMatchObject({ version: 3 })
+  })
+})
+
+describe('ISSUE_API_CLIENT', () => {
+  it('returns the secret once and stores only its hash', async () => {
+    const tables = integrationTables()
+    const store = ssmStore()
+
+    const issued = (await handler(event('ISSUE_API_CLIENT', { name: 'Batory portal', scopes: ['READ'] }, ADMIN_CALLER))) as {
+      row: Record<string, unknown>
+      clientId: string
+      secret: string
+    }
+
+    expect(issued.secret).toMatch(/^[A-Za-z0-9_-]{20,}$/)
+    expect(issued.row).toMatchObject({ id: `api:${issued.clientId}`, kind: 'API_CLIENT', scopes: ['READ'] })
+
+    const parameter = JSON.parse(String(store.params.get(`${INTEGRATION_PATH}/OPENAPI`))) as {
+      signingKey: string
+      clients: Record<string, { hash: string }>
+    }
+    expect(parameter.signingKey).toMatch(/^[0-9a-f]{64}$/)
+    expect(parameter.clients[issued.clientId].hash).toMatch(/^[0-9a-f]{64}$/)
+    expect(JSON.stringify(parameter)).not.toContain(issued.secret)
+
+    const everything = JSON.stringify([...tables.integrations.values(), ...auditRows(tables.audit)])
+    expect(everything).not.toContain(issued.secret)
+
+    const revoked = (await handler(event('REVOKE_API_CLIENT', { clientId: issued.clientId }, ADMIN_CALLER))) as Record<string, unknown>
+    expect(revoked).toMatchObject({ status: 'DISCONNECTED' })
+    expect(revoked.revokedAt).toBeTruthy()
+    expect(tables.integrations.get(`api:${issued.clientId}`)).toBeDefined()
+  })
+})
+
+describe('PREVIEW_QBO_SYNC', () => {
+  it('returns the payload and sends nothing', async () => {
+    integrationTables()
+    ssmStore()
+    const fetchSpy = mockFetch({ status: 200, body: '{}' })
+    const preview = (await handler(
+      event(
+        'PREVIEW_QBO_SYNC',
+        {
+          kind: 'INVOICE',
+          record: {
+            number: 'INV-1',
+            invoiceDate: '2026-03-04',
+            dueAt: '2026-04-03',
+            customerId: 'c1',
+            lines: [{ code: 'LINEHAUL', label: 'Linehaul', amountCents: 125000 }],
+            totalCents: 125000,
+          },
+          mappings: { arAccountRef: '84', chargeCodeItems: { LINEHAUL: '1' }, customerRefs: { c1: '58' } },
+        },
+        ADMIN_CALLER,
+      ),
+    )) as { payload: Record<string, unknown>; mode: string }
+    expect(preview.mode).toBe('STUB')
+    expect(preview.payload).toMatchObject({ DocNumber: 'INV-1', TotalAmt: '1250.00' })
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+})
+
+describe('integration authorization and the no-delete rule', () => {
+  const J_ACTIONS: Array<[string, Record<string, unknown>]> = [
+    ['LIST_INTEGRATIONS', {}],
+    ['CONNECT_INTEGRATION', { provider: 'DAT', credentials: { serviceAccountEmail: 'a@b.com' } }],
+    ['VALIDATE_INTEGRATION', { provider: 'DAT' }],
+    ['SAVE_INTEGRATION_SETTINGS', { provider: 'DAT', settings: {} }],
+    ['DISCONNECT_INTEGRATION', { provider: 'DAT' }],
+    ['RUN_STUB', { provider: 'DAT', capability: 'post' }],
+    ['CONNECT_QUICKBOOKS', { code: 'c', realmId: 'r', redirectUri: 'https://x' }],
+    ['REFRESH_QUICKBOOKS', {}],
+    ['PREVIEW_QBO_SYNC', { kind: 'INVOICE', record: {} }],
+    ['ISSUE_API_CLIENT', { name: 'x', scopes: ['READ'] }],
+    ['REVOKE_API_CLIENT', { clientId: 'x' }],
+  ]
+
+  it('refuses a page-tms caller on every J action', async () => {
+    integrationTables()
+    ssmStore()
+    const pageTms = identity({ groups: ['page-tms', 'page-customers'] })
+    for (const [action, input] of J_ACTIONS) {
+      await expect(handler(event(action, input, pageTms))).rejects.toThrow(
+        `Forbidden: ${action} requires owner or ADMIN`,
+      )
+    }
+  })
+
+  it('issues no DynamoDB Delete anywhere in the framework', async () => {
+    const tables = integrationTables({
+      'Integration-test': [
+        { id: 'DAT', provider: 'DAT', kind: 'PROVIDER', credentialSource: 'PAGE', mode: 'STUB', settings: {}, status: 'CONNECTED', version: 1 },
+      ],
+    })
+    ssmStore({ [`${INTEGRATION_PATH}/DAT`]: JSON.stringify({ serviceAccountPassword: 'x' }) })
+    mockFetch({ status: 200, body: '{}' })
+
+    await handler(event('LIST_INTEGRATIONS', {}, ADMIN_CALLER))
+    await handler(event('RUN_STUB', { provider: 'DAT', capability: 'post' }, ADMIN_CALLER))
+    await handler(event('VALIDATE_INTEGRATION', { provider: 'DAT' }, ADMIN_CALLER))
+    await handler(event('DISCONNECT_INTEGRATION', { provider: 'DAT' }, ADMIN_CALLER))
+
+    const kinds = [...new Set(tables.seen.map((cmd) => cmd.__type))].sort()
+    expect(kinds).not.toContain('Delete')
+    expect(kinds).not.toContain('Transact')
+    expect(tables.tableNames()).toEqual(['AuditLog-test', 'Integration-test'])
   })
 })

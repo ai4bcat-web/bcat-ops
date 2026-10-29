@@ -20,6 +20,7 @@ Markdown knowledge base for the in-app Help/Academy module and Ask assistant.
 - [Users, Roles and Teams](users-roles-and-teams.md) — the six roles and the pages each opens, why a role change lands at the next sign-in and how to force it, extra page grants, which claims are enforced and which are only recorded, who may manage people, the lock-out guards, teams and their five sender addresses, and why the two "start on Mine" switches are a filter and not a boundary.
 - [Commissions](commissions.md) — switching commissions on, the trigger and why Ready-to-invoice is not offered, plans, rates, splits and tier ladders, which plan a load falls under, what the basis is and how it rounds, the own-fleet row that pays zero, recompute vs adjustment vs reversal, the approval ladder and countering, and pay periods — which record that payroll ran and pay nobody from here.
 - [Reports](reports.md) — what a lane sample is and exactly when a load becomes one, why own-fleet loads carry revenue but no margin, the six panels (profit, pipeline, AR, AP, quotes, commissions), the CSV exports, and the link to Finances for own-fleet profitability.
+- [Integrations](integrations.md) — the provider pages under My Brokerage, who may open them, the five state badges, stub mode and what a stub never touches, where credentials live and why only the last four characters are ever shown, the dev-neutered rule, connecting QuickBooks Online, issuing and revoking an API client, why a voided shipment still answers `VOIDED`, and which providers are not applicable.
 
 ## Article front-matter
 

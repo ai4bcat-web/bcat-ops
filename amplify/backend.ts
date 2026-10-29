@@ -1389,6 +1389,14 @@ new CfnOutput(disputePortalApiFn.stack, 'DisputePortalApiFunctionUrl', {
   description: 'Public driver dispute portal API URL',
 })
 
+// ── Step J: where a page-entered integration credential lives ──────────────
+// One SecureString per provider under this path (the /bcat/pods/<pool>/connection
+// precedent), scoped to the user pool id so the dev stack's parameters are dev's
+// by construction. Two Lambdas touch it: tmsDirectoryActions reads and writes,
+// trackingApi only reads. Amplify's own /amplify/* secret paths are never written
+// from the app — those are rotated with `npx ampx secret set`.
+const integrationParamPath = `/bcat/integrations/${backend.auth.resources.userPool.userPoolId}`
+
 // ── trackingApi Lambda (public truck tracking page) ────────────────────────
 const trackingApiFn = backend.trackingApi.resources.lambda as LambdaFunction
 backend.trackingApi.resources.lambda.addToRolePolicy(
@@ -1499,6 +1507,48 @@ trackingApiFn.addEnvironment('LOAD_TABLE_NAME', backend.data.resources.tables['L
     actions:   ['s3:PutObject', 's3:GetObject'],
     resources: [`${backend.storage.resources.bucket.bucketArn}/shipment-docs/*`],
   }))
+  // ── Step J: BCAT's own read API and the webhook receiver ──────────────────
+  // POST /api/token mints a 1-hour bearer for an issued client; GET
+  // /api/v1/shipments/<number> answers it from the identity table (a voided PRO
+  // answers status VOIDED, never 404). POST /api/webhooks/<provider> verifies a
+  // provider signature and files one idempotency receipt.
+  //
+  // The client secret's hash and the token signing key live in the OPENAPI
+  // parameter; a provider's webhookSigningSecret lives in a parameter of its own,
+  // `<path>/<PROVIDER>/webhook`, specifically so this grant can be written. The
+  // provider's OTHER credentials — the DAT password, the HubSpot token, the
+  // QuickBooks refresh token — sit in `<path>/<PROVIDER>`, which is deliberately
+  // NOT readable here: this is the one Internet-facing Lambda in the stack.
+  //
+  // It writes the Integration row's lastUsedAt / webhook counters and holds
+  // NOTHING on Invoice, FactoringItem or Order — a public endpoint must not be
+  // able to see money, let alone move it.
+  const integrationParamArnFor = (suffix: string): string =>
+    Stack.of(trackingApiFn).formatArn({
+      service: 'ssm',
+      resource: 'parameter',
+      // For hierarchical SSM parameter ARNs the leading slash is part of the resource id.
+      resourceName: `${integrationParamPath.replace(/^\//, '')}/${suffix}`,
+    })
+  trackingApiFn.addToRolePolicy(new PolicyStatement({
+    actions:   ['ssm:GetParameter'],
+    resources: [integrationParamArnFor('*/webhook'), integrationParamArnFor('OPENAPI')],
+  }))
+  const trackIntegrationTable = backend.data.resources.tables['Integration']
+  trackingApiFn.addToRolePolicy(new PolicyStatement({
+    // GetItem reads the client row, UpdateItem stamps lastUsedAt, PutItem files
+    // the webhook receipt with attribute_not_exists(id) — which IS the replay guard.
+    actions:   ['dynamodb:GetItem', 'dynamodb:UpdateItem', 'dynamodb:PutItem'],
+    resources: [trackIntegrationTable.tableArn],
+  }))
+  // The public shipment read finds the PRO through the Shipment table's own index.
+  trackingApiFn.addToRolePolicy(new PolicyStatement({
+    actions:   ['dynamodb:Query'],
+    resources: [`${trackShipmentTable.tableArn}/index/*`],
+  }))
+  trackingApiFn.addEnvironment('INTEGRATION_TABLE_NAME', trackIntegrationTable.tableName)
+  trackingApiFn.addEnvironment('INTEGRATION_PARAM_PATH', integrationParamPath)
+  trackingApiFn.addEnvironment('OPENAPI_PARAM_NAME',     `${integrationParamPath}/OPENAPI`)
 }
 const trackingApiUrl = new FunctionUrl(trackingApiFn.stack, 'TrackingApiUrl', {
   function: trackingApiFn,
@@ -1727,6 +1777,8 @@ const directoryOwnershipDivisionTable = backend.data.resources.tables['Ownership
 const directoryOwnershipRuleTable     = backend.data.resources.tables['OwnershipRule']
 const directoryShipmentViewTable      = backend.data.resources.tables['ShipmentView']
 const directoryLoadTable = backend.data.resources.tables['Load']
+// Step J: one row per integration provider, API client and webhook receipt.
+const directoryIntegrationTable = backend.data.resources.tables['Integration']
 
 const directoryTableArns = [
   directoryCustomerTable.tableArn,
@@ -1746,6 +1798,10 @@ const directoryTableArns = [
   directoryShipmentViewTable.tableArn,
   // Step R: the taxonomy and view edits are audited like every other settings write.
   backend.data.resources.tables['AuditLog'].tableArn,
+  // Step J: the integration framework's only table. Note what is NOT here —
+  // Shipment, Order, Invoice and FactoringItem are deliberately absent, so no
+  // integration action can reach AR or create a factoring row even by mistake.
+  directoryIntegrationTable.tableArn,
 ]
 
 directoryActionsFn.addToRolePolicy(
@@ -1777,6 +1833,46 @@ directoryActionsFn.addToRolePolicy(
     resources: [backend.auth.resources.userPool.userPoolArn],
   }),
 )
+
+// ── Step J: the integration framework on tmsDirectoryActions ────────────────
+// Reads and writes the page-entered credentials under `integrationParamPath`
+// (declared above the trackingApi block, which reads the same path).
+const integrationParamArn = Stack.of(directoryActionsFn).formatArn({
+  service: 'ssm',
+  resource: 'parameter',
+  // For hierarchical SSM parameter ARNs the leading slash is part of the resource id.
+  resourceName: `${integrationParamPath.replace(/^\//, '')}/*`,
+})
+directoryActionsFn.addEnvironment('INTEGRATION_TABLE_NAME', directoryIntegrationTable.tableName)
+directoryActionsFn.addEnvironment('INTEGRATION_PARAM_PATH', integrationParamPath)
+directoryActionsFn.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['ssm:GetParameter', 'ssm:PutParameter', 'ssm:DeleteParameter'],
+    resources: [integrationParamArn],
+  }),
+)
+// Twilio is provisioned by scripts/dispatchTwilioSetup.mjs, not from the app. The
+// Integrations page needs to say whether that has been run for this pool, which is
+// a read of the parameter NAMES under the path — never a value (WithDecryption is
+// off in readTwilioStatus, and no Put or Delete is granted here).
+directoryActionsFn.addEnvironment('DISPATCH_PARAM_PATH', dispatchParamPath)
+directoryActionsFn.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['ssm:GetParametersByPath'],
+    resources: [dispatchParamArn],
+  }),
+)
+// A webhook receipt (`evt:<PROVIDER>:<eventId>`, kind WEBHOOK_EVENT) exists only to
+// refuse a replay, so DynamoDB expires it rather than anything sweeping the table.
+// `ttlEpoch` is epoch seconds ≈10 minutes out, written by tracking-api: twice the
+// ±300 s signature window, so a duplicate of a delivery accepted at the far edge
+// still finds its receipt. Provider and API-client rows carry no `ttlEpoch` and are
+// never touched by TTL. `defineData` provisions AMPLIFY_TABLE, so the wrapper is
+// the supported way to set this.
+backend.data.resources.cfnResources.amplifyDynamoDbTables['Integration'].timeToLiveAttribute = {
+  attributeName: 'ttlEpoch',
+  enabled: true,
+}
 
 // ── Step E tables, declared once for the four Lambdas that share them ───────
 const shipmentDocumentTable  = backend.data.resources.tables['ShipmentDocument']

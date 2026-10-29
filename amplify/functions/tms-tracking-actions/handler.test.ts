@@ -1017,6 +1017,41 @@ describe('SAVE_TRACKING_SETTINGS', () => {
     })
   })
 
+  it('saves the step J shared tracking toggles and ignores a key outside the whitelist', async () => {
+    const saved = await call('SAVE_TRACKING_SETTINGS', {
+      id: 'default',
+      trackByDefault: true,
+      autoStatusFromGeofence: false,
+      trackingIntervalMin: 30,
+      trackingDurationHours: 72,
+      marginFloorBps: 9999,
+    }, ADMIN)
+
+    expect(saved).toMatchObject({
+      trackByDefault: true,
+      autoStatusFromGeofence: false,
+      trackingIntervalMin: 30,
+      trackingDurationHours: 72,
+    })
+    expect(saved.marginFloorBps).toBeUndefined()
+  })
+
+  it('refuses a tracking interval or duration outside its range', async () => {
+    await expect(
+      call('SAVE_TRACKING_SETTINGS', { id: 'default', trackingIntervalMin: 4 }, ADMIN),
+    ).rejects.toThrow(/between 5 and 240/)
+    await expect(
+      call('SAVE_TRACKING_SETTINGS', { id: 'default', trackingIntervalMin: 241 }, ADMIN),
+    ).rejects.toThrow(/between 5 and 240/)
+    await expect(
+      call('SAVE_TRACKING_SETTINGS', { id: 'default', trackingDurationHours: 0 }, ADMIN),
+    ).rejects.toThrow(/between 1 and 336/)
+    await expect(
+      call('SAVE_TRACKING_SETTINGS', { id: 'default', trackingDurationHours: 337 }, ADMIN),
+    ).rejects.toThrow(/between 1 and 336/)
+    expect(table(TABLES.settings).size).toBe(0)
+  })
+
   it('refuses a stale expectedUpdatedAt', async () => {
     table(TABLES.settings).set('default', {
       id: 'default', __typename: 'TmsSettings', updatedAt: '2026-01-02T00:00:00.000Z',

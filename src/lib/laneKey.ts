@@ -43,11 +43,29 @@ function stateCode(value: string | null | undefined): string | null {
   return /^[A-Z]{2}$/.test(text) ? text : null
 }
 
+/** The org's postal-code aliases, keyed by five-digit ZIP. */
+export type LaneAliasMap = Record<string, { city: string; state: string }>
+
+/** `'60106-1234'` → `'60106'`; anything else is not a ZIP this file will key on. */
+function zip5Of(stop: Stop): string | null {
+  const match = (stop.address?.zip ?? '').trim().match(/^(\d{5})(?:-?\d{4})?$/)
+  return match ? match[1] : null
+}
+
 /**
- * Where a stop is, as the lane key spells it. The booked address snapshot wins; the
- * `city` display string ("Chicago, IL") is parsed only for what the snapshot lacks.
+ * Where a stop is, as the lane key spells it. An org alias for the stop's ZIP wins —
+ * it exists precisely because the brokerage disagrees with the address on file. Then
+ * the booked address snapshot; the `city` display string ("Chicago, IL") is parsed
+ * only for what the snapshot lacks.
  */
-function placeOf(stop: Stop): { city: string; state: string } | null {
+function placeOf(stop: Stop, aliases?: LaneAliasMap | null): { city: string; state: string } | null {
+  const zip = aliases ? zip5Of(stop) : null
+  const alias = zip ? aliases?.[zip] : undefined
+  if (alias) {
+    const city = normalizeText(alias.city)
+    const state = stateCode(alias.state)
+    if (city && state) return { city, state }
+  }
   const parsed = splitCityState(stop.city)
   const city = normalizeText(stop.address?.city) || normalizeText(parsed.city)
   const state = stateCode(stop.address?.state) ?? stateCode(parsed.state)
@@ -80,21 +98,23 @@ function endpointsOf(stops: Stop[] | null | undefined): { pickup: Stop; delivery
 /**
  * `'CHICAGO|IL>DANVILLE|IL'`, or null when either end has no city and two-letter state.
  * Intermediate stops are ignored: a Chicago → Joliet → Danville run is a Chicago lane.
+ *
+ * `aliases` is the org's postal-code alias map (`aliasMap(settings.postalCodeAliases)`).
+ * Without it the key is exactly what it always was, so no stored sample moves.
  */
-export function laneKeyFor(stops: Stop[] | null | undefined): string | null {
+export function laneKeyFor(stops: Stop[] | null | undefined, aliases?: LaneAliasMap | null): string | null {
   const ends = endpointsOf(stops)
   if (!ends) return null
-  const from = placeOf(ends.pickup)
-  const to = placeOf(ends.delivery)
+  const from = placeOf(ends.pickup, aliases)
+  const to = placeOf(ends.delivery, aliases)
   if (!from || !to) return null
   return `${from.city}|${from.state}>${to.city}|${to.state}`
 }
 
 /** The first three digits of a five-digit ZIP; ZIP+4 is accepted, anything else is not. */
 function zip3Of(stop: Stop): string | null {
-  const raw = (stop.address?.zip ?? '').trim()
-  const match = raw.match(/^(\d{5})(?:-?\d{4})?$/)
-  return match ? match[1].slice(0, 3) : null
+  const zip = zip5Of(stop)
+  return zip ? zip.slice(0, 3) : null
 }
 
 /** `'606>618'` from the two ends' ZIPs; null when either ZIP is missing or malformed. */

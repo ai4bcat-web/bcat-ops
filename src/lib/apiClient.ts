@@ -35,6 +35,7 @@ import type { CreditSummary } from '@/lib/customerCredit'
 import type { QuotePricingResult } from '@/lib/quotes'
 import type { ResolveContext, Resolution } from '@/lib/ownership'
 import type { ReleaseGateResult } from '@/lib/releaseGate'
+import type { AdapterResult, Capability, IntegrationRecord } from '@/lib/integrations/types'
 import { isActiveDirectoryRecord } from '@/lib/tmsDirectory'
 
 // Untyped client — our own types from src/types handle type safety
@@ -1134,13 +1135,17 @@ const CUSTOMER_V2_FIELDS = [
   'rateConTerms', 'teamKey', 'operatedById', 'accountOwnerIds',
   'invoiceFrequency', 'visibilityPrefs', 'gpSplitBps',
 ]
-const CUSTOMER_JSON_FIELDS: (keyof CustomerRecord)[] = ['billingAddress', 'contacts', 'billToParties', 'requiredReferences', 'chargeCodeOverrides', 'defaultCharges', 'pricingDefaults', 'quotingDefaults', 'visibilityPrefs']
+// Step J's per-customer integration pointers. Its own flag, like the settings
+// generations above: a backend without them keeps serving every v2 field.
+const CUSTOMER_V3_FIELDS = ['project44CustomerId', 'hubspotId', 'ediSettings', 'haulpayDebtorId']
+const CUSTOMER_JSON_FIELDS: (keyof CustomerRecord)[] = ['billingAddress', 'contacts', 'billToParties', 'requiredReferences', 'chargeCodeOverrides', 'defaultCharges', 'pricingDefaults', 'quotingDefaults', 'visibilityPrefs', 'ediSettings']
 let customersHaveV2 = true
-const customerFields = () => customersHaveV2 ? `${CUSTOMER_FIELDS_BASE} ${CUSTOMER_V2_FIELDS.join(' ')}` : CUSTOMER_FIELDS_BASE
-function customerFieldUndefined(err: unknown): boolean {
-  const msg = safeStringify(err)
-  return CUSTOMER_V2_FIELDS.some((f) => new RegExp(`['"]${f}['"]`).test(msg))
-}
+let customersHaveV3 = true
+const customerFields = () => [
+  CUSTOMER_FIELDS_BASE,
+  customersHaveV2 ? CUSTOMER_V2_FIELDS.join(' ') : '',
+  customersHaveV3 ? CUSTOMER_V3_FIELDS.join(' ') : '',
+].filter(Boolean).join(' ')
 
 const LOCATION_FIELDS = `
   id name city customerName apptContactName apptContactEmail apptContactPhone notes
@@ -1204,7 +1209,14 @@ const TMS_SETTINGS_V10_FIELDS = [
   'commissionsEnabled', 'commissionTrigger', 'commissionPlans', 'commissionPaySchedule',
   'commissionApprovalAdminOnly', 'commissionPayAdminOnly',
 ]
-const TMS_SETTINGS_JSON_FIELDS: (keyof TmsSettings)[] = ['accessorialCodes', 'loadStatusRules', 'defaultRequiredReferences', 'chargeCodes', 'quickPayTiers', 'trackingContact', 'factorRemitTo', 'teams', 'commissionPlans', 'commissionPaySchedule']
+// Step J's integration settings: the shared tracking toggles nothing reads until a
+// tracking provider is live, the postal-code aliases the lane key consults, and the two
+// pointers the integration pages store. Its own flag again, for the same reason.
+const TMS_SETTINGS_V11_FIELDS = [
+  'trackByDefault', 'autoStatusFromGeofence', 'trackingIntervalMin', 'trackingDurationHours',
+  'postalCodeAliases', 'hubspotPortalId', 'integrationsNotifyChannel',
+]
+const TMS_SETTINGS_JSON_FIELDS: (keyof TmsSettings)[] = ['accessorialCodes', 'loadStatusRules', 'defaultRequiredReferences', 'chargeCodes', 'quickPayTiers', 'trackingContact', 'factorRemitTo', 'teams', 'commissionPlans', 'commissionPaySchedule', 'postalCodeAliases']
 let settingsHaveV2 = true
 let settingsHaveV3 = true
 let settingsHaveV4 = true
@@ -1214,6 +1226,7 @@ let settingsHaveV7 = true
 let settingsHaveV8 = true
 let settingsHaveV9 = true
 let settingsHaveV10 = true
+let settingsHaveV11 = true
 const tmsSettingsFields = () => [
   TMS_SETTINGS_FIELDS_BASE,
   settingsHaveV2 ? TMS_SETTINGS_V2_FIELDS.join(' ') : '',
@@ -1225,6 +1238,7 @@ const tmsSettingsFields = () => [
   settingsHaveV8 ? TMS_SETTINGS_V8_FIELDS.join(' ') : '',
   settingsHaveV9 ? TMS_SETTINGS_V9_FIELDS.join(' ') : '',
   settingsHaveV10 ? TMS_SETTINGS_V10_FIELDS.join(' ') : '',
+  settingsHaveV11 ? TMS_SETTINGS_V11_FIELDS.join(' ') : '',
 ].filter(Boolean).join(' ')
 const fieldNamed = (names: string[], err: unknown) => {
   const msg = safeStringify(err)
@@ -1294,9 +1308,18 @@ export async function listCustomers(opts?: { includeArchived?: boolean }): Promi
       const rows = await run()
       return opts?.includeArchived ? rows : rows.filter(isActiveDirectoryRecord)
     } catch (err) {
-      if (attempt >= 2 || !customersHaveV2 || !customerFieldUndefined(err)) throw err
-      console.warn('[apiClient] backend has no Customer v2 fields yet — querying without them until deploy')
-      customersHaveV2 = false
+      if (attempt >= 3) throw err
+      if (customersHaveV3 && fieldNamed(CUSTOMER_V3_FIELDS, err)) {
+        console.warn('[apiClient] backend has no Customer integration fields yet — querying without them until deploy')
+        customersHaveV3 = false
+        continue
+      }
+      if (customersHaveV2 && fieldNamed(CUSTOMER_V2_FIELDS, err)) {
+        console.warn('[apiClient] backend has no Customer v2 fields yet — querying without them until deploy')
+        customersHaveV2 = false
+        continue
+      }
+      throw err
     }
   }
 }
@@ -1375,7 +1398,12 @@ export async function getTmsSettings(): Promise<TmsSettings | null> {
     try {
       return await run()
     } catch (err) {
-      if (attempt >= 9) throw err
+      if (attempt >= 10) throw err
+      if (settingsHaveV11 && fieldNamed(TMS_SETTINGS_V11_FIELDS, err)) {
+        console.warn('[apiClient] backend has no TmsSettings integration fields yet — querying without them until deploy')
+        settingsHaveV11 = false
+        continue
+      }
       if (settingsHaveV10 && fieldNamed(TMS_SETTINGS_V10_FIELDS, err)) {
         console.warn('[apiClient] backend has no TmsSettings commission fields yet — querying without them until deploy')
         settingsHaveV10 = false
@@ -1427,6 +1455,71 @@ export async function getTmsSettings(): Promise<TmsSettings | null> {
 }
 export async function saveTmsSettings(patch: Partial<Omit<TmsSettings, 'id' | 'createdAt' | 'updatedAt'>>, expectedUpdatedAt?: string): Promise<TmsSettings> {
   return directoryAction<TmsSettings>('SAVE_SETTINGS', { id: 'default', expectedUpdatedAt, ...patch })
+}
+
+// ── Integrations (tmsDirectoryActions, owner/ADMIN) ──────────────────────────
+//
+// Every call is the same router the directory writes go through, so there is no new
+// Lambda and no new permission: the handler's `authorize` refuses anybody but the
+// owner and an ADMIN. No credential value ever comes back — a row carries last-4
+// masks and nothing else — and no action here can reach a Shipment, an Invoice or a
+// factoring row, which is what keeps the release gate the only door into AR.
+
+/** Every provider row, created from the registry on the first call. */
+export async function listIntegrations(): Promise<IntegrationRecord[]> {
+  return directoryAction<IntegrationRecord[]>('LIST_INTEGRATIONS', {})
+}
+/** PAGE providers only: the values go to SSM, the row gets the masks. */
+export async function connectIntegration(provider: string, credentials: Record<string, string>): Promise<IntegrationRecord> {
+  return directoryAction<IntegrationRecord>('CONNECT_INTEGRATION', { provider, credentials })
+}
+/** The one read call the descriptor declares; the answer is the row's health. */
+export async function validateIntegration(provider: string): Promise<IntegrationRecord> {
+  return directoryAction<IntegrationRecord>('VALIDATE_INTEGRATION', { provider })
+}
+export async function saveIntegrationSettings(
+  provider: string,
+  settings: Record<string, unknown>,
+  expectedVersion?: number,
+): Promise<IntegrationRecord> {
+  return directoryAction<IntegrationRecord>('SAVE_INTEGRATION_SETTINGS', { provider, settings, expectedVersion })
+}
+/** Deletes the stored credential. The row, its settings and its history are kept. */
+export async function disconnectIntegration(provider: string): Promise<IntegrationRecord> {
+  return directoryAction<IntegrationRecord>('DISCONNECT_INTEGRATION', { provider })
+}
+/**
+ * A stub run: the descriptor's sample in, a `STUB —` result out, one audit row written
+ * and no business record touched anywhere. There is no shipment argument on purpose.
+ */
+export async function runIntegrationStub(
+  provider: string,
+  capability: Capability,
+  sample?: Record<string, unknown>,
+): Promise<{ row: IntegrationRecord; result: AdapterResult }> {
+  return directoryAction<{ row: IntegrationRecord; result: AdapterResult }>('RUN_STUB', { provider, capability, sample })
+}
+/** Finishes Intuit's authorization-code redirect; the refresh token never leaves SSM. */
+export async function connectQuickBooks(input: { code: string; realmId: string; redirectUri: string }): Promise<IntegrationRecord> {
+  return directoryAction<IntegrationRecord>('CONNECT_QUICKBOOKS', input)
+}
+export async function refreshQuickBooks(): Promise<IntegrationRecord> {
+  return directoryAction<IntegrationRecord>('REFRESH_QUICKBOOKS', {})
+}
+/** Builds the QuickBooks payload and sends nothing — the answer is always `STUB`. */
+export async function previewQboSync(input: {
+  kind: 'INVOICE' | 'BILL' | 'PAYMENT'
+  record: Record<string, unknown>
+  mappings?: Record<string, unknown>
+}): Promise<{ payload: unknown; mode: 'STUB' }> {
+  return directoryAction<{ payload: unknown; mode: 'STUB' }>('PREVIEW_QBO_SYNC', input)
+}
+/** The secret is returned once and stored nowhere; only its hash is kept. */
+export async function issueApiClient(name: string, scopes: string[]): Promise<{ row: IntegrationRecord; clientId: string; secret: string }> {
+  return directoryAction<{ row: IntegrationRecord; clientId: string; secret: string }>('ISSUE_API_CLIENT', { name, scopes })
+}
+export async function revokeApiClient(clientId: string): Promise<IntegrationRecord> {
+  return directoryAction<IntegrationRecord>('REVOKE_API_CLIENT', { clientId })
 }
 
 // ── Shipments · Orders · Load money (tmsShipmentActions) ─────────────────────
@@ -2771,7 +2864,7 @@ export async function textDriver(input: { loadCarrierId: string; body: string })
   )
 }
 
-/** The ten tracking fields on TmsSettings. Admin only, validated server-side. */
+/** The fourteen tracking fields on TmsSettings. Admin only, validated server-side. */
 export interface TrackingSettingsPatch {
   checkCallDefaultIntervalHours?: number | null
   checkCallGraceMinutes?: number | null
@@ -2783,6 +2876,15 @@ export interface TrackingSettingsPatch {
   customerLinkShowsPosition?: boolean | null
   trackingContact?: TrackingContact | null
   trackingSmsTemplate?: string | null
+  /**
+   * Step J's shared tracking defaults. Stored and shown now, read by nothing until a
+   * tracking provider is live — the provider pages say so rather than implying a
+   * setting is in force.
+   */
+  trackByDefault?: boolean | null
+  autoStatusFromGeofence?: boolean | null
+  trackingIntervalMin?: number | null
+  trackingDurationHours?: number | null
 }
 export async function saveTrackingSettings(patch: TrackingSettingsPatch, expectedUpdatedAt?: string): Promise<TmsSettings> {
   return trackingAction<TmsSettings>('SAVE_TRACKING_SETTINGS', { id: 'default', expectedUpdatedAt, ...patch })

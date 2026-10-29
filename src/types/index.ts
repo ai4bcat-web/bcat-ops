@@ -426,6 +426,7 @@ export type EntityType =
   | 'UserProfile'
   | 'Commission'
   | 'CommissionPayPeriod'
+  | 'Integration'
 export type AuditAction = 'create' | 'update' | 'delete'
 
 export interface AuditLogEntry {

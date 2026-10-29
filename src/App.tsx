@@ -320,6 +320,10 @@ export default function App() {
               <Route path="/disputes" element={<RequirePage page="disputes"><DisputesPage /></RequirePage>} />
               <Route path="/files" element={<RequirePage page="files"><FilesPage /></RequirePage>} />
               <Route path="/settings" element={<ParamRedirect to="/tms/brokerage" />} />
+              {/* Integrations was written down under /settings before it became the
+                  eighth My Brokerage tab; both shapes of that link still land. */}
+              <Route path="/settings/integrations" element={<ParamRedirect to="/tms/brokerage/integrations" />} />
+              <Route path="/settings/integrations/:provider" element={<ParamRedirect to="/tms/brokerage/integrations/:provider" />} />
               <Route path="/audit-log" element={<ParamRedirect to="/tms/brokerage/audit" />} />
               <Route path="/intake"   element={<RequirePage page="intake"><IntakePage /></RequirePage>} />
               <Route path="/pods"     element={<RequirePage page="pods"><PodsPage /></RequirePage>} />

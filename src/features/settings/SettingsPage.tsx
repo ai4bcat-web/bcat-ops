@@ -17,6 +17,7 @@ import { DivisionCard } from './DivisionCard'
 import { TmsSettingsCard } from './TmsSettingsCard'
 import { CarrierBookingSettingsCard } from './CarrierBookingSettingsCard'
 import { TrackingSettingsCard } from './TrackingSettingsCard'
+import { PostalCodeAliasesCard } from './PostalCodeAliasesCard'
 import { DocumentSettingsCard } from './DocumentSettingsCard'
 import { ArSettingsCard } from './ArSettingsCard'
 import { ApSettingsCard } from './ApSettingsCard'
@@ -47,6 +48,7 @@ export function SettingsPage() {
           <TmsSettingsCard />
           <CarrierBookingSettingsCard />
           <TrackingSettingsCard />
+          <PostalCodeAliasesCard />
           <DocumentSettingsCard />
           <ArSettingsCard />
           <ApSettingsCard />
