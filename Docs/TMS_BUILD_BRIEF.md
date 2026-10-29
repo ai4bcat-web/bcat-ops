@@ -180,8 +180,18 @@ Ryne reviewed dev and gave four corrections. They apply to every TMS page alread
      tracked, tracking source, check-call compliance, time to first ping).
    - Loads that need PODs; POD collection timing by carrier (median and 90th-percentile
      hours from delivery to POD, by carrier, with the slowest listed).
-   Everything above is Brokerage-specific. Ivan Cartage keeps its current dashboard in the
-   ASSETS section; Car Shipping gets no new dashboard in this step.
+   **Revised (Ryne, 2026-10-29 13:30): ONE dashboard, not several.** `/tms/dashboard` is
+   a single high-level dashboard, the **first item in the sidebar, above Shipments**. It
+   opens on a company-wide view with a KPI strip per business — **Brokerage (BCAT
+   Logistics), Assets (Ivan Cartage, with its subsidiaries), Car Shipping (Best Care Auto
+   Transport)** — each showing the same headline numbers (shipments by status, revenue,
+   profit, margin, outstanding AR, outstanding AP, loads being tracked, PODs needed) side by
+   side, then the chart grid. The division filter chip narrows everything to one business
+   (so "Brokerage" filtered is the dashboard described above; "Assets" shows the Ivan
+   fleet numbers that today's ops dashboard shows; "Car Shipping" the auto-shipper numbers),
+   and the chart picker adds or removes MVMNT's 17 charts and Ryne's brokerage charts. The
+   current Ivan ops dashboard remains available under ASSETS as it is today, but no other
+   new dashboards are built: one page, filtered, is the dashboard.
 
 Models for Step R (Ryne's instruction): run Step R with **Fable** on the orchestrator, plan
 and reviewer regardless of the daily share; when R is logged done, the normal Fable budget
@@ -303,6 +313,42 @@ Keep the TMS shell (dark theme, MVMNT chrome); change the Shipments page's own l
   × and the Exclude toggle inverts the whole set. Never render every record as a scrolling
   list box. Recently used values show first; the free text also matches codes (MC, SCAC,
   state abbreviations).
+- **The Shipments sub-pages are two different kinds of thing (Ryne, 2026-10-29 13:20;
+  current sidebar in `Docs/tms-build/mvmnt-ui/shipments-sidebar-current.png`).**
+  1. **Workstation pages — each has its own purpose-built UI, on top of its own filter
+     panel (same type-ahead-tag filter panel as the board, same saved filter sets):**
+     - **Dispatch**: filter the shipments a dispatcher cares about, then *find coverage*:
+       per shipment the posting state (DAT / Truckstop), the offer queue (parsed e-mail
+       and text responses with carrier MC, rate, vetting status), the matched-carrier
+       suggestions (lane history, MyCarrierPackets rating/insurance), and one-click
+       "Send setup packet" / "Assign carrier + send rate con". The P3–P6 flow lives here.
+     - **Tracking**: the Chaine-style page already specified (P8-UI): filter, then the
+       tracking list with motion/status, last known, next check call, the per-shipment
+       thread (SMS + e-mail), tracking link, exceptions, and the tracking agent's actions.
+     - **Documents** (replaces "POD collection" in the sidebar): document *collection*
+       for the filtered shipments — per shipment what is required (customer's docs
+       rules), what is present (POD, rate con, BOL, lumper, scale, photos), where it came
+       from, and legibility/page-count review. It **works with Tracking**: any attachment
+       that arrives on a shipment's e-mail or text thread (dispatchers, drivers) is pulled
+       in, classified (POD / BOL / receipt / other), attached to the shipment, and shown
+       here for review; one click marks the shipment ready for billing (P9).
+     **Accounting and Sales are removed from the Shipments menu for now (Ryne, 2026-10-29
+     13:25).** The release gate, AR/AP queues and the quotes/tenders flow keep their
+     existing homes (Accounting pages under BROKERAGE / My Brokerage, Sales queue in P1–P2);
+     no sidebar entries under Shipments for them.
+  **No view tabs across the top of Active Shipments (Ryne, 2026-10-29 14:00).** The row of
+  department/view tabs above the board (BoardViewTabs: Dispatch, Tracking, PODs, Accounting,
+  the boards…) is removed: those are sidebar entries now, so the tabs are redundant. The
+  board keeps only the saved-view selector inside the left filter panel ("View: Active
+  Shipments ▾", with Save / Save as view). Active Shipments is the board with no view
+  applied beyond the default.
+  2. **Board views — plain saved views of the Active Shipments board, nothing more than a
+     filter and a column template:** Brokerage Board (revDivision = BROKERAGE), Car
+     Shipping Board (revDivision = CAR_SHIPPING), Owner Operators, Box Trucks, Local Drivers
+     (revDivision = ASSETS with the matching revSubdivision). They render the same board
+     component with the view pre-applied, are editable like any saved view, and new ones
+     can be added from the board's "Save as view". In the sidebar they sit as a group
+     under Shipments below the workstation pages, visually distinct (e.g. a "Views" label).
 - Department views (Step R) and saved filter sets are the same thing: saving a filter set
   creates/updates a view; seed the Aljex-style "Active Shipments" view as the default.
 Done means: the board renders inside the shell with the panel, grid, colours and footer

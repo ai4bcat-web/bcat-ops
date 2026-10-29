@@ -8,7 +8,7 @@
  * A single pane handles the normal view. Split Screen renders two independent panes,
  * each with its own view, filters and selection.
  */
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   AlertTriangle,
@@ -470,6 +470,23 @@ function BoardPane({
   const [columnTemplateId, setColumnTemplateId] = useState<string | null>(null)
   const [dialogShipment, setDialogShipment] = useState<ShipmentRow | null>(null)
   const [dialogKind, setDialogKind] = useState<'unvoid' | 'repoint' | null>(null)
+
+  // Hydrate working filters/columns/sort from the active view whenever the
+  // view identity changes. The lazy useState initializers may have captured an
+  // empty stub while views were still loading, and the pane's React key does
+  // not always change when the same view resolves, so this effect is the
+  // backstop. We intentionally ignore changes to the same view (e.g. polls) so
+  // we do not clobber edits in progress.
+  const lastHydratedViewIdRef = useRef<string | null>(null)
+  useEffect(() => {
+    const nextId = activeView?.id ?? null
+    if (nextId === lastHydratedViewIdRef.current) return
+    lastHydratedViewIdRef.current = nextId
+    setFilters(savedFilters)
+    setColumnKeys(savedColumns)
+    setSort(activeView?.sort ? { key: activeView.sort.key, dir: activeView.sort.dir } : DEFAULT_SORT)
+    setColumnTemplateId(null)
+  }, [activeView, savedFilters, savedColumns])
 
   const [collapsed, setCollapsed] = useState(() => {
     if (typeof window === 'undefined') return false

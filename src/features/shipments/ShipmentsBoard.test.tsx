@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, within, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, within, fireEvent, waitFor, act } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
+import { useState } from 'react'
 import { ShipmentsBoard } from './ShipmentsBoard'
 import type { ShipmentRow } from './shipmentViews'
 import type { ShipmentViewRecord, OrderRecord } from '@/types/tms'
@@ -102,6 +103,38 @@ const views: ShipmentViewRecord[] = [
   },
 ]
 
+const statusOnlyView: ShipmentViewRecord = {
+  id: 'status-only',
+  slug: 'status-only',
+  name: 'Status Only',
+  department: 'Shipments',
+  description: null,
+  filters: { board: { statuses: ['OPEN'], details: {}, dates: {} } },
+  columns: ['status'],
+  sort: null,
+  isDefault: false,
+  audience: null,
+  sortOrder: 20,
+  active: true,
+  createdBy: 'a@b.c',
+  updatedBy: 'a@b.c',
+  version: 1,
+  createdAt: '2026-01-01T00:00:00.000Z',
+  updatedAt: '2026-01-01T00:00:00.000Z',
+}
+
+let __views: ShipmentViewRecord[] = views
+let __loading = false
+let __setViews: React.Dispatch<React.SetStateAction<ShipmentViewRecord[]>> | null = null
+let __setLoading: React.Dispatch<React.SetStateAction<boolean>> | null = null
+
+function setMockViews(next: ShipmentViewRecord[], loading = false) {
+  __views = next
+  __loading = loading
+  __setViews?.(next)
+  __setLoading?.(loading)
+}
+
 const { auth } = vi.hoisted(() => ({ auth: { isAdmin: true, isOwner: false } }))
 
 const {
@@ -180,7 +213,13 @@ vi.mock('@/hooks/useStaff', () => ({
 }))
 
 vi.mock('@/features/tms/useShipmentViews', () => ({
-  useShipmentViews: () => ({ views, loading: false, error: null, refresh: vi.fn() }),
+  useShipmentViews: () => {
+    const [v, setV] = useState(__views)
+    const [loading, setLoading] = useState(__loading)
+    __setViews = setV
+    __setLoading = setLoading
+    return { views: v, loading, error: null, refresh: vi.fn() }
+  },
   useOwnershipDivisions: () => ({
     divisions: [
       { code: 'ASSETS', name: 'Ivan Cartage', color: '#1ba774' },
@@ -234,6 +273,8 @@ describe('ShipmentsBoard', () => {
     vi.clearAllMocks()
     auth.isAdmin = true
     auth.isOwner = false
+    __views = views
+    __loading = false
   })
 
   it('lands on the Active Shipments default view', async () => {
@@ -725,5 +766,125 @@ describe('ShipmentsBoard', () => {
       shipmentId: 'S001',
       decision: 'RESET',
     })))
+  })
+
+  it('hydrates saved board filters after views arrive asynchronously', async () => {
+    const shipments = [row('S001', { status: 'OPEN' }), deliveredRow('S002')]
+    setMockViews([], true)
+    renderBoard('/tms/shipments/view/active-shipments', shipments)
+
+    act(() => {
+      setMockViews(views, false)
+    })
+
+    await waitFor(() => {
+      expect(screen.getByRole('checkbox', { name: /Open\s+1/i })).toBeChecked()
+      expect(screen.getByRole('checkbox', { name: /Covered/i })).toBeChecked()
+      expect(screen.getByRole('checkbox', { name: /Dispatched/i })).toBeChecked()
+      expect(screen.getByRole('checkbox', { name: /Arrived/i })).toBeChecked()
+      expect(screen.getByRole('checkbox', { name: /Departed/i })).toBeChecked()
+      expect(screen.getByRole('checkbox', { name: /Delivered\s+1/i })).toBeChecked()
+      expect(screen.getByRole('checkbox', { name: /Hold/i })).not.toBeChecked()
+      expect(screen.getByRole('checkbox', { name: /Reserved/i })).not.toBeChecked()
+      expect(screen.getByRole('checkbox', { name: /Voided/i })).not.toBeChecked()
+    })
+
+    expect(screen.queryByText('Unsaved changes')).toBeNull()
+  })
+
+  it('shows Unsaved changes after a hydrated filter is edited', async () => {
+    const shipments = [row('S001', { status: 'OPEN' })]
+    setMockViews([], true)
+    renderBoard('/tms/shipments/view/active-shipments', shipments)
+
+    act(() => {
+      setMockViews(views, false)
+    })
+
+    await waitFor(() => {
+      expect(screen.getByRole('checkbox', { name: /Open\s+1/i })).toBeChecked()
+    })
+
+    expect(screen.queryByText('Unsaved changes')).toBeNull()
+
+    fireEvent.click(screen.getByRole('checkbox', { name: /Open\s+1/i }))
+
+    await waitFor(() => {
+      expect(screen.getByText('Unsaved changes')).toBeTruthy()
+    })
+  })
+
+  it('Revert restores the saved filter set and clears Unsaved changes', async () => {
+    const shipments = [row('S001', { status: 'OPEN' }), deliveredRow('S002')]
+    setMockViews([], true)
+    renderBoard('/tms/shipments/view/active-shipments', shipments)
+
+    act(() => {
+      setMockViews(views, false)
+    })
+
+    await waitFor(() => {
+      expect(screen.getByRole('checkbox', { name: /Open\s+1/i })).toBeChecked()
+      expect(screen.getByRole('checkbox', { name: /Delivered\s+1/i })).toBeChecked()
+    })
+
+    fireEvent.click(screen.getByRole('checkbox', { name: /Open\s+1/i }))
+    await waitFor(() => {
+      expect(screen.getByRole('checkbox', { name: /Open\s+1/i })).not.toBeChecked()
+      expect(screen.getByText('Unsaved changes')).toBeTruthy()
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: /Revert/i }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('checkbox', { name: /Open\s+1/i })).toBeChecked()
+      expect(screen.getByRole('checkbox', { name: /Delivered\s+1/i })).toBeChecked()
+      expect(screen.queryByText('Unsaved changes')).toBeNull()
+    })
+  })
+
+  it('re-hydrates filters when switching to another view', async () => {
+    const shipments = [row('S001', { status: 'OPEN' }), deliveredRow('S002')]
+    renderBoard('/tms/shipments/view/active-shipments', shipments)
+
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: /Active Shipments/i, selected: true })).toBeTruthy()
+    })
+
+    expect(screen.getByRole('checkbox', { name: /Open\s+1/i })).toBeChecked()
+    expect(screen.getByRole('checkbox', { name: /Delivered\s+1/i })).toBeChecked()
+
+    fireEvent.click(screen.getByRole('tab', { name: /All Shipments/ }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: /All Shipments/, selected: true })).toBeTruthy()
+      expect(screen.getByRole('checkbox', { name: /Open\s+1/i })).not.toBeChecked()
+      expect(screen.getByRole('checkbox', { name: /Delivered\s+1/i })).not.toBeChecked()
+      expect(screen.queryByText('Unsaved changes')).toBeNull()
+    })
+
+    fireEvent.click(screen.getByRole('tab', { name: /Active Shipments/i }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: /Active Shipments/i, selected: true })).toBeTruthy()
+      expect(screen.getByRole('checkbox', { name: /Open\s+1/i })).toBeChecked()
+      expect(screen.getByRole('checkbox', { name: /Delivered\s+1/i })).toBeChecked()
+      expect(screen.queryByText('Unsaved changes')).toBeNull()
+    })
+  })
+
+  it('hydrates the saved column selection after a fresh load', async () => {
+    setMockViews([], true)
+    renderBoard('/tms/shipments/view/status-only', [row('S001')])
+
+    act(() => {
+      setMockViews([...views, statusOnlyView], false)
+    })
+
+    await waitFor(() => {
+      const headers = screen.getAllByRole('columnheader')
+      expect(headers.some((h) => h.textContent?.includes('Status'))).toBe(true)
+      expect(headers.some((h) => h.textContent?.includes('PRO #'))).toBe(false)
+    })
   })
 })
