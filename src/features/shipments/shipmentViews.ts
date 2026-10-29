@@ -117,13 +117,29 @@ export function isVoided(row: ShipmentRow): boolean {
 
 // ── R2 board status, tone and stop progress ─────────────────────────────────
 
-/** Delivered stops over total stops; total is zero when the backend sent no stops. */
+/**
+ * Departed stops over total stops, the "2/2" Aljex prints beside the status.
+ *
+ * A stop counts once the truck has left it. Legacy freight carries a stop array with
+ * no departure stamps at all — the move happened before anybody recorded stops — and
+ * printing `0/2` beside DELIVERED would assert that nothing has happened yet, which
+ * is a worse answer than saying nothing. So a shipment that demonstrably moved with
+ * no stop evidence reports a total of zero, and the cell shows the status alone.
+ */
 export function stopProgressOf(row: ShipmentRow): { done: number; total: number } {
   const stops = row.stops
   if (!Array.isArray(stops) || stops.length === 0) return { done: 0, total: 0 }
   const total = stops.length
   const done = stops.filter((s) => s.departedAt != null).length
+  if (done === 0 && MOVED_STATUSES[boardStatusOf(row)]) return { done: 0, total: 0 }
   return { done, total }
+}
+
+/** The board statuses that mean the truck has already left the first stop. */
+const MOVED_STATUSES: Partial<Record<BoardStatusKey | 'CANCELED', true>> = {
+  DEPARTED: true,
+  ARRIVED: true,
+  DELIVERED: true,
 }
 
 export type BoardRowTone =
@@ -334,9 +350,16 @@ export function statusLabel(row: ShipmentRow): string {
   return SHIPMENT_STATUS_LABELS[row.status]
 }
 
-/** Status cell text: "DELIVERED 2/2". A row with no stops shows the status alone. */
+/**
+ * The Status cell: `DELIVERED 2/2`, `DEPARTED 1/2`, `COVERED`.
+ *
+ * It speaks the board's own eight-status vocabulary — the same words the status
+ * checkboxes use — rather than MVMNT's abbreviations, because a row that reads
+ * `DEL` while the checkbox beside it says `Delivered` is two names for one fact.
+ * A row with no stop evidence shows the status alone.
+ */
 function statusWithProgress(row: ShipmentRow): string {
-  const label = statusLabel(row)
+  const label = isVoided(row) ? 'VOIDED' : boardStatusOf(row)
   const { done, total } = stopProgressOf(row)
   if (total === 0) return label
   return `${label} ${done}/${total}`

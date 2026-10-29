@@ -180,6 +180,28 @@ describe('stop progress', () => {
     expect(cols[0]!.value(done)).toMatch(/2\/2$/)
     expect(cols[0]!.value(noStops)).not.toMatch(/\d\/\d/)
   })
+
+  it('says nothing rather than 0/2 when freight that moved carries no departures', () => {
+    const legacy = row('legacy', { status: 'DELIVERED', stops: [
+      { id: 's1', type: 'PICKUP' as const, appt: '2026-01-01T12:00:00.000Z', sequence: 0, driverId: null },
+      { id: 's2', type: 'DELIVERY' as const, appt: '2026-01-02T12:00:00.000Z', sequence: 1, driverId: null },
+    ] })
+    expect(stopProgressOf(legacy)).toEqual({ done: 0, total: 0 })
+    expect(visibleColumns(['status'])[0]!.value(legacy)).toBe('DELIVERED')
+  })
+
+  it('still shows 0/2 for freight that has not moved yet', () => {
+    const open = row('open', { status: 'OPEN', stops: [
+      { id: 's1', type: 'PICKUP' as const, appt: '2026-01-01T12:00:00.000Z', sequence: 0, driverId: null },
+      { id: 's2', type: 'DELIVERY' as const, appt: '2026-01-02T12:00:00.000Z', sequence: 1, driverId: null },
+    ] })
+    expect(visibleColumns(['status'])[0]!.value(open)).toBe('OPEN 0/2')
+  })
+
+  it('prints the board vocabulary, not the MVMNT abbreviation', () => {
+    const booked = row('b', { status: 'BOOKED', assignmentType: 'CARRIER', stops: [] })
+    expect(visibleColumns(['status'])[0]!.value(booked)).toBe('COVERED')
+  })
 })
 
 describe('row tone', () => {
