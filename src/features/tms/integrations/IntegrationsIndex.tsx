@@ -76,7 +76,7 @@ export function IntegrationsIndex() {
       return {
         descriptor,
         row,
-        badge: badgeOf({ ...UNSEEN, ...row }),
+        badge: badgeOf({ ...UNSEEN, ...row, applicability: descriptor.applicability }),
         mode: modeLabelOf(descriptor, row),
         missing: missingFor(descriptor, row),
       }

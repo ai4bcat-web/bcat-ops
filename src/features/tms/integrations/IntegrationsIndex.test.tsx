@@ -6,7 +6,7 @@
  * nobody is told about, and a row that is not a provider at all rendering as one.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import type { IntegrationRecord } from '@/lib/integrations/types'
@@ -87,6 +87,18 @@ describe('IntegrationsIndex', () => {
 
     await waitFor(() => expect(screen.getByText('Connected')).toBeInTheDocument())
     expect(screen.getAllByText('Never').length).toBeGreaterThan(0)
+  })
+
+  it('reads a provider nobody can ever connect to as "Not applicable", never "Not connected"', async () => {
+    draw()
+
+    // Sage 50 has no row at all here: a never-checked retired provider must not invite
+    // an operator to go and connect something that cannot be connected.
+    await waitFor(() => expect(screen.getAllByText('Sage 50').length).toBeGreaterThan(0))
+    const row = screen.getAllByText('Sage 50')[0].closest('tr')
+    expect(row).not.toBeNull()
+    expect(within(row as HTMLElement).getByText('Not applicable', { selector: '.tms-badge' })).toBeInTheDocument()
+    expect(within(row as HTMLElement).queryByText('Not connected')).toBeNull()
   })
 
   it('opens a provider page on a row click', async () => {

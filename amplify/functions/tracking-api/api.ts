@@ -116,6 +116,29 @@ async function readParameter(deps: ApiDeps, name: string): Promise<string | null
   return value
 }
 
+/**
+ * The floor under a re-read. A comparison that fails against a *cached* parameter
+ * is the one case worth a second look — an operator who issues a client, copies
+ * the secret and calls the API straight away must not be refused for the rest of
+ * the minute, and neither must a provider whose signing secret was just rotated.
+ * Five seconds is as often as a guesser can make us pay for one.
+ */
+const MIN_REFRESH_MS = 5_000
+
+/**
+ * Throw away one cached parameter and read it again, unless it was read within the
+ * last `MIN_REFRESH_MS` — in which case the value in hand is as fresh as a new read
+ * would be, and the caller's refusal stands. Says whether it actually re-read, so
+ * the caller only redoes the comparison when there is something new to compare.
+ */
+async function reReadParameter(deps: ApiDeps, name: string): Promise<boolean> {
+  const cached = paramCache.get(name)
+  if (cached && Date.now() - cached.readAt < MIN_REFRESH_MS) return false
+  paramCache.delete(name)
+  await readParameter(deps, name)
+  return true
+}
+
 /** What the OPENAPI parameter holds: the token signing key, and one hash per client. */
 interface OpenApiConfig {
   signingKey: string
@@ -138,6 +161,18 @@ async function openApiConfig(deps: ApiDeps): Promise<OpenApiConfig | null> {
     signingKey,
     clients: (clients && typeof clients === 'object' ? clients : {}) as OpenApiConfig['clients'],
   }
+}
+
+/**
+ * The one field a `<PROVIDER>/webhook` parameter carries. Read in three places —
+ * the first look, the re-read when a provider was connected inside the cache
+ * window, and the re-read after a rotation — and all three must agree about what
+ * counts as "no secret".
+ */
+function signingSecretIn(raw: string | null): string {
+  if (!raw) return ''
+  const value = parseJson<Record<string, unknown>>(raw)?.webhookSigningSecret
+  return typeof value === 'string' ? value : ''
 }
 
 async function getRow(deps: ApiDeps, table: string, key: Row): Promise<Row | null> {
@@ -253,7 +288,7 @@ function readCredentials(event: FnUrlRequest): ClientCredentials | null {
 }
 
 export async function tokenRoute(deps: ApiDeps, event: FnUrlRequest, nowIso: string): Promise<ApiReply> {
-  const config = await openApiConfig(deps)
+  let config = await openApiConfig(deps)
   if (!config) return { status: 503, body: { error: NOT_CONFIGURED } }
 
   const credentials = readCredentials(event)
@@ -263,11 +298,19 @@ export async function tokenRoute(deps: ApiDeps, event: FnUrlRequest, nowIso: str
   }
 
   // The row says whether this client may still call; the parameter holds the hash.
-  // A client that is unknown to either answers exactly like a wrong secret.
+  // A client that is unknown to either answers exactly like a wrong secret — and a
+  // client the row knows but the cached parameter does not is the just-issued one,
+  // so that comparison is worth one re-read before it is refused.
   const row = usableClient(await getRow(deps, deps.integrationTable, { id: `api:${credentials.clientId}` }), nowIso)
-  const hash = config.clients[credentials.clientId]?.hash ?? ''
-  if (!row || !clientSecretMatches(credentials.clientSecret, hash)) {
-    return { status: 401, body: { error: BAD_CLIENT } }
+  if (!row) return { status: 401, body: { error: BAD_CLIENT } }
+  let hash = config.clients[credentials.clientId]?.hash ?? ''
+  if (!clientSecretMatches(credentials.clientSecret, hash)) {
+    if (!(await reReadParameter(deps, deps.openApiParamName))) return { status: 401, body: { error: BAD_CLIENT } }
+    const fresh = await openApiConfig(deps)
+    if (!fresh) return { status: 401, body: { error: BAD_CLIENT } }
+    config = fresh
+    hash = config.clients[credentials.clientId]?.hash ?? ''
+    if (!clientSecretMatches(credentials.clientSecret, hash)) return { status: 401, body: { error: BAD_CLIENT } }
   }
 
   const scopes = Array.isArray(row.scopes) ? (row.scopes as unknown[]).filter((s): s is string => typeof s === 'string') : []
@@ -391,22 +434,26 @@ export async function webhookRoute(deps: ApiDeps, provider: string, event: FnUrl
   // so this public Lambda can decrypt what verifies a delivery and nothing else:
   // the DAT password, the HubSpot token and the QBO refresh token stay in
   // `<PROVIDER>`, which it has no grant to read.
-  const raw = await readParameter(deps, `${deps.integrationParamPath}/${key}/webhook`)
-  let secret = ''
-  if (raw) {
-    const parsed = parseJson<Record<string, unknown>>(raw)
-    const value = parsed?.webhookSigningSecret
-    if (typeof value === 'string') secret = value
+  const paramName = `${deps.integrationParamPath}/${key}/webhook`
+  let secret = signingSecretIn(await readParameter(deps, paramName))
+  if (!secret) {
+    // The row says CONNECTED and that read is never stale; an empty parameter here
+    // is a provider connected within the cache window, so it gets one re-read.
+    if (await reReadParameter(deps, paramName)) secret = signingSecretIn(await readParameter(deps, paramName))
+    if (!secret) return { status: 404, body: { error: NO_WEBHOOK } }
   }
-  if (!secret) return { status: 404, body: { error: NO_WEBHOOK } }
 
   const rawBody = rawBodyOf(event)
-  const verified = verifyWebhookSignature({
-    header: headerOf(event, 'x-bcat-signature'),
-    rawBody,
-    secret,
-    nowIso,
-  })
+  const header = headerOf(event, 'x-bcat-signature')
+  let verified = verifyWebhookSignature({ header, rawBody, secret, nowIso })
+  // Only a digest that failed against a *cached* secret is worth a re-read: a
+  // rotation lands mid-minute and the provider is already signing with the new
+  // one. A malformed header or a stale stamp never reached a comparison and buys
+  // the sender no SSM call at all.
+  if (!verified.ok && verified.reason === 'BAD_SIGNATURE' && await reReadParameter(deps, paramName)) {
+    const rotated = signingSecretIn(await readParameter(deps, paramName))
+    if (rotated && rotated !== secret) verified = verifyWebhookSignature({ header, rawBody, secret: rotated, nowIso })
+  }
   if (!verified.ok) return { status: 401, body: { error: BAD_DELIVERY } }
 
   const eventId = webhookEventId(rawBody)

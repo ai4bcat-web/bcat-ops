@@ -10,6 +10,7 @@
  */
 import { liveCapabilitiesOf } from './registry'
 import type {
+  Applicability,
   Health,
   IntegrationBadge,
   IntegrationHealthReason,
@@ -78,16 +79,21 @@ export function healthFrom(outcome: ValidateOutcome, now: string): Health {
 
 /**
  * The state badge: `status` × `health`, in the kit's own tones and nothing else.
- * Health outranks status: a row that answered 200 a second ago is connected whatever
- * the stored status says (a STACK provider is never "connected" by a credential form),
- * and a connected row whose key stopped working must not keep showing green.
+ * A provider nothing can connect to is "Not applicable" whatever the row says — the
+ * row still exists, so without this it would read "Not connected", which invites a
+ * reader to go and connect it. Then health outranks status: a row that answered 200 a
+ * second ago is connected whatever the stored status says (a STACK provider is never
+ * "connected" by a credential form), and a connected row whose key stopped working
+ * must not keep showing green.
  */
 export function badgeOf(row: {
   status: IntegrationStatus
   health: IntegrationHealthStatus
   healthReason?: IntegrationHealthReason | null
   mode: IntegrationMode
+  applicability?: Applicability
 }): IntegrationBadge {
+  if (row.applicability === 'NOT_APPLICABLE') return { label: 'Not applicable', tone: 'orange' }
   if (row.status === 'DISCONNECTED') return { label: 'Disconnected', tone: 'gray' }
   if (row.health === 'OK') return { label: 'Connected', tone: 'green' }
   if (row.health === 'INVALID_CREDENTIALS') return { label: 'Invalid credentials', tone: 'red' }

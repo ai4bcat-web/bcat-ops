@@ -1,6 +1,6 @@
 // The handler reads its table names from process.env at module scope, so the import
 // has to happen after beforeAll sets them — a genuine module-loading boundary.
-import { vi, describe, it, expect, beforeAll, beforeEach } from 'vitest'
+import { vi, describe, it, expect, beforeAll, beforeEach, afterEach } from 'vitest'
 import type * as HandlerModule from './handler'
 import type * as ApiModule from './api'
 import { signWebhookBody } from '../_shared/webhook'
@@ -1465,5 +1465,111 @@ describe('POST /api/webhooks/<provider>', () => {
       expect(json(res)).toEqual({ error: 'No webhook endpoint for that provider' })
     }
     expect(writes()).toHaveLength(0)
+  })
+})
+
+describe('Step J — a warm container re-reads one parameter when a comparison fails', () => {
+  // The cache only hurts across requests: an operator issues a client, copies the
+  // secret and calls the API while a warm container still holds the old parameter.
+  // These tests are the only place the clock has to move, so the Date is faked and
+  // nothing else is.
+  const T0 = Date.parse('2026-10-29T12:00:00.000Z')
+  const BODY = JSON.stringify({ id: 'evt_9001', type: 'carrier.updated' })
+  const ROTATED = 'whsec-mycarrierpackets-rotated'
+
+  const ssmReadsOf = (name: string) =>
+    mockSsmSend.mock.calls.filter(([cmd]) => {
+      const command: { Name?: string } = cmd
+      return command.Name === name
+    }).length
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(T0)
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('authenticates a client whose hash only lands in the second read', async () => {
+    // The warm container's copy of the parameter predates ISSUE_API_CLIENT.
+    params({ [OPENAPI_PARAM]: openApiParam({}) })
+    route({ integration: clientRow() })
+    const credentials = JSON.stringify({ client_id: CLIENT.clientId, client_secret: CLIENT.secret })
+
+    const cold = await postRaw('/api/token', credentials)
+    expect(cold.statusCode).toBe(401)
+    // The read it just made is as fresh as a new one: no second call for it.
+    expect(ssmReadsOf(OPENAPI_PARAM)).toBe(1)
+
+    vi.setSystemTime(T0 + 10_000)
+    params({ [OPENAPI_PARAM]: openApiParam() })
+    const warm = await postRaw('/api/token', credentials)
+
+    expect(warm.statusCode).toBe(200)
+    expect(json(warm).token_type).toBe('Bearer')
+    expect(verifyToken(String(json(warm).access_token), SIGNING_KEY, new Date().toISOString()).ok).toBe(true)
+    expect(ssmReadsOf(OPENAPI_PARAM)).toBe(2)
+  })
+
+  it('still refuses a wrong secret, and pays for at most one re-read per request', async () => {
+    params({ [OPENAPI_PARAM]: openApiParam() })
+    route({ integration: clientRow() })
+    const wrong = JSON.stringify({ client_id: CLIENT.clientId, client_secret: 'not-it' })
+
+    expect((await postRaw('/api/token', JSON.stringify({ client_id: CLIENT.clientId, client_secret: CLIENT.secret }))).statusCode).toBe(200)
+    expect(ssmReadsOf(OPENAPI_PARAM)).toBe(1)
+
+    vi.setSystemTime(T0 + 10_000)
+    const first = await postRaw('/api/token', wrong)
+    expect(first.statusCode).toBe(401)
+    expect(json(first)).toEqual({ error: 'Invalid client credentials' })
+    expect(ssmReadsOf(OPENAPI_PARAM)).toBe(2)
+
+    // A guesser hammering it buys nothing: the re-read it just caused is the floor.
+    const second = await postRaw('/api/token', wrong)
+    const third = await postRaw('/api/token', wrong)
+    expect([second.statusCode, third.statusCode]).toEqual([401, 401])
+    expect(ssmReadsOf(OPENAPI_PARAM)).toBe(2)
+  })
+
+  it('accepts a delivery signed with a secret rotated after the cache was filled', async () => {
+    params({ [MCP_WEBHOOK_PARAM]: JSON.stringify({ webhookSigningSecret: WEBHOOK_SECRET }) })
+    route({ integration: providerRow() })
+
+    const warmUp = { 'x-bcat-signature': signWebhookBody(BODY, WEBHOOK_SECRET, Math.floor(Date.now() / 1000)) }
+    expect((await postRaw('/api/webhooks/mycarrierpackets', BODY, warmUp)).statusCode).toBe(200)
+    expect(ssmReadsOf(MCP_WEBHOOK_PARAM)).toBe(1)
+
+    vi.setSystemTime(T0 + 10_000)
+    params({ [MCP_WEBHOOK_PARAM]: JSON.stringify({ webhookSigningSecret: ROTATED }) })
+    const after = { 'x-bcat-signature': signWebhookBody(BODY, ROTATED, Math.floor(Date.now() / 1000)) }
+    const res = await postRaw('/api/webhooks/mycarrierpackets', BODY, after)
+
+    expect(res.statusCode).toBe(200)
+    expect(json(res)).toMatchObject({ ok: true, eventId: 'evt_9001' })
+    expect(ssmReadsOf(MCP_WEBHOOK_PARAM)).toBe(2)
+  })
+
+  it('reads nothing extra for a stale stamp or a malformed header — those never reached a comparison', async () => {
+    params({ [MCP_WEBHOOK_PARAM]: JSON.stringify({ webhookSigningSecret: WEBHOOK_SECRET }) })
+    route({ integration: providerRow() })
+
+    const warmUp = { 'x-bcat-signature': signWebhookBody(BODY, WEBHOOK_SECRET, Math.floor(Date.now() / 1000)) }
+    expect((await postRaw('/api/webhooks/mycarrierpackets', BODY, warmUp)).statusCode).toBe(200)
+    expect(ssmReadsOf(MCP_WEBHOOK_PARAM)).toBe(1)
+
+    vi.setSystemTime(T0 + 10_000)
+    const stale = { 'x-bcat-signature': signWebhookBody(BODY, WEBHOOK_SECRET, Math.floor(Date.now() / 1000) - 3600) }
+    expect((await postRaw('/api/webhooks/mycarrierpackets', BODY, stale)).statusCode).toBe(401)
+    expect((await postRaw('/api/webhooks/mycarrierpackets', BODY, { 'x-bcat-signature': 'nonsense' })).statusCode).toBe(401)
+    expect((await postRaw('/api/webhooks/mycarrierpackets', BODY)).statusCode).toBe(401)
+    expect(ssmReadsOf(MCP_WEBHOOK_PARAM)).toBe(1)
+
+    // A wrong digest is a comparison, so that one does pay for its single re-read.
+    const forged = { 'x-bcat-signature': signWebhookBody(BODY, 'somebody-elses', Math.floor(Date.now() / 1000)) }
+    expect((await postRaw('/api/webhooks/mycarrierpackets', BODY, forged)).statusCode).toBe(401)
+    expect(ssmReadsOf(MCP_WEBHOOK_PARAM)).toBe(2)
   })
 })

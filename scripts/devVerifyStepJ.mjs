@@ -427,6 +427,9 @@ async function main() {
     })
     const nowSec = Math.floor(Date.now() / 1000)
     const integrationsBefore = await scanCount('Integration')
+    // The provider row is never deleted, so its counter carries across runs: the
+    // claim is that ONE verified delivery moves it by one, not what it starts at.
+    const webhooksBefore = Number((await getRow('Integration', 'MYCARRIERPACKETS'))?.webhookCount ?? 0)
     const first1 = await hook(payload, sign(nowSec, payload))
     equals('POST /api/webhooks: a signed delivery is accepted', first1.status, 200)
     const replay = await hook(payload, sign(nowSec, payload))
@@ -441,7 +444,8 @@ async function main() {
     const stale = await hook(stalePayload, sign(nowSec - 3600, stalePayload))
     equals('POST /api/webhooks: a stale timestamp is refused', stale.status, 401)
     const mcpRow = await getRow('Integration', 'MYCARRIERPACKETS')
-    equals('POST /api/webhooks: the provider row records receipt', Number(mcpRow?.webhookCount ?? 0), 1)
+    equals('POST /api/webhooks: one verified delivery, one receipt',
+      Number(mcpRow?.webhookCount ?? 0) - webhooksBefore, 1)
     truthy('POST /api/webhooks: the receipt row exists exactly once',
       (await scanCount('Integration')) === integrationsBefore + 1,
       `${await scanCount('Integration')} rows`)
@@ -459,7 +463,14 @@ async function main() {
     equals('DISCONNECT: the mask is cleared',
       JSON.stringify(hubspotAfter?.credentialMask ?? []), JSON.stringify([]))
   } finally {
-    for (const name of touchedParams) await deleteParam(name)
+    // The MyCarrierPackets fixture is a real connection while the run lasts; leave the
+    // dev row in the state an operator would see after a disconnect, not CONNECTED
+    // against a parameter this script is about to delete.
+    await dir('DISCONNECT_INTEGRATION', { provider: 'MYCARRIERPACKETS' }).catch(() => {})
+    for (const name of touchedParams) {
+      await deleteParam(name)
+      await deleteParam(`${name}/webhook`)
+    }
     if (issuedClientId) {
       const { DeleteCommand } = await import('@aws-sdk/lib-dynamodb')
       const c = await doc()

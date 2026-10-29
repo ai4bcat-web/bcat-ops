@@ -97,6 +97,15 @@ describe('badgeOf', () => {
     ).toEqual({ label: 'Not applicable', tone: 'orange' })
   })
 
+  it('never invites anyone to connect a provider that cannot be connected', () => {
+    expect(
+      badgeOf({ ...base, status: 'NOT_CONNECTED', health: 'UNKNOWN', applicability: 'NOT_APPLICABLE' }),
+    ).toEqual({ label: 'Not applicable', tone: 'orange' })
+    expect(
+      badgeOf({ ...base, status: 'NOT_CONNECTED', health: 'UNKNOWN', applicability: 'LIVE_CAPABLE' }),
+    ).toEqual({ label: 'Not connected', tone: 'gray' })
+  })
+
   it('never shows green on a status × health the page can hold', () => {
     const statuses: IntegrationStatus[] = ['NOT_CONNECTED', 'CONNECTED', 'DISCONNECTED']
     const healths: IntegrationHealthStatus[] = ['UNKNOWN', 'OK', 'INVALID_CREDENTIALS', 'UNABLE_TO_VERIFY']

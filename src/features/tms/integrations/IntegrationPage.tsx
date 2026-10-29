@@ -564,7 +564,7 @@ export function IntegrationPage() {
   }
 
   const row = byKey[descriptor.key]
-  const badge = badgeOf({ ...UNSEEN, ...row })
+  const badge = badgeOf({ ...UNSEEN, ...row, applicability: descriptor.applicability })
   const mode = modeLabelOf(descriptor, row)
   const events = row?.events ?? []
   const notApplicable = descriptor.applicability === 'NOT_APPLICABLE'
