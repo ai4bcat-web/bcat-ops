@@ -9,10 +9,11 @@
  *
  * One pass over the Cognito user pool, writing one `UserProfile` per user:
  *
- *   - `id` is the Cognito username, which for every account created through the
- *     Users page is the e-mail. That is the same value `Order.customerRepId`,
- *     `Load.carrierRepId` and `Customer.accountOwnerIds` already hold, so a
- *     picker resolves a name with a GetItem and no index.
+ *   - `id` is the Cognito username: the generated id the pool names a person by
+ *     (they sign in by e-mail). That is the value RepPicker stores on
+ *     `Order.customerRepId`, `Load.carrierRepId` and `Customer.accountOwnerIds`,
+ *     so a picker resolves a name with a GetItem and no index; a rep typed before
+ *     there were profiles is an e-mail and is shown as typed.
  *   - `role` is **ADMIN for members of the ADMIN group and NONE for everybody
  *     else**. No role is inferred from a page grant: `page-invoicing` might mean
  *     AR_AP or might mean a manager who also bills, and a guessed role would

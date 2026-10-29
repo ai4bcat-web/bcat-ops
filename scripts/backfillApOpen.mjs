@@ -40,9 +40,11 @@
  *     `apOpen` and a stamp — the board is driven by `apOpen`, and where in the AP
  *     flow such a leg sits is a person's call, not a migration's. A row with no
  *     timestamp to stamp is reported and left alone;
- *   - it changes nothing on a PAID or BOUNCED row, and nothing on a CARRIER row that
- *     already carries an `invoiceId`. Before Step G runs there should be no such
- *     invoiceId at all, so any that exist are LISTED for a person to look at.
+ *   - it changes nothing on a PAID or BOUNCED row, nothing on a leg whose shipment has
+ *     been deleted (DELETE_SHIPMENT took the marker off on purpose and RESTORE_SHIPMENT
+ *     puts it back), and nothing on a CARRIER row that already carries an `invoiceId`.
+ *     Before Step G runs there should be no such invoiceId at all, so any that exist
+ *     are LISTED for a person to look at.
  *
  * Dry run is the default and writes NOTHING to AWS: it prints the counts per pass and
  * writes a plan file when `--plan` is given. `--apply` replays that reviewed plan
@@ -79,7 +81,7 @@ export const OPEN_STATUSES = ['ACTIVE', 'TONU'];
 /** Settled. Pass (b) steps over it rather than re-opening a payable somebody closed. */
 export const PAID_AP_STATUS = 'PAID';
 
-const MODELS = ['LoadCarrier'];
+const MODELS = ['LoadCarrier', 'Shipment'];
 
 const USAGE = `
 Usage: node scripts/backfillApOpen.mjs [options]
@@ -151,13 +153,15 @@ export function stampFor(row) {
  * Both passes, over the carrier legs as they are now.
  *
  * @param {any[]} rows
+ * @param {any[]} [shipments] Shipment rows, read for `deletedAt` only.
  * @returns {{
  *   clears: any[], opens: any[], invoiced: any[], unexpectedOpen: any[], unstampable: any[],
  *   byKind: Record<string, number>, byApStatus: Record<string, number>,
- *   ownAlreadyClear: number, alreadyOpen: number, skippedPaid: number, skippedBounced: number
+ *   ownAlreadyClear: number, alreadyOpen: number, skippedPaid: number, skippedBounced: number,
+ *   skippedShipmentDeleted: number
  * }}
  */
-export function planCarrierLegs(rows) {
+export function planCarrierLegs(rows, shipments = []) {
   const clears = [];
   const opens = [];
   const invoiced = [];
@@ -169,6 +173,10 @@ export function planCarrierLegs(rows) {
   let alreadyOpen = 0;
   let skippedPaid = 0;
   let skippedBounced = 0;
+  let skippedShipmentDeleted = 0;
+  const deletedShipments = new Set(
+    shipments.filter((s) => text(s.deletedAt)).map((s) => String(s.id)),
+  );
 
   const ordered = [...rows].sort((a, b) => String(a.id).localeCompare(String(b.id)));
   for (const row of ordered) {
@@ -225,6 +233,17 @@ export function planCarrierLegs(rows) {
       }
       continue;
     }
+    const shipmentId = text(row.shipmentId);
+    if (shipmentId && deletedShipments.has(shipmentId)) {
+      // DELETE_SHIPMENT took the marker off on purpose: a leg of a shipment nobody can
+      // open is work nobody can do, and RESTORE_SHIPMENT puts it back if the shipment
+      // comes back. Re-opening it here would undo that every time this ran.
+      skippedShipmentDeleted += 1;
+      if (apOpen) {
+        unexpectedOpen.push({ loadCarrierId: id, kind, status, apStatus, apOpen, reason: 'DELETED_SHIPMENT_ON_AP_BOARD' });
+      }
+      continue;
+    }
     if (apStatus === PAID_AP_STATUS) {
       skippedPaid += 1;
       if (apOpen) {
@@ -260,7 +279,7 @@ export function planCarrierLegs(rows) {
 
   return {
     clears, opens, invoiced, unexpectedOpen, unstampable,
-    byKind, byApStatus, ownAlreadyClear, alreadyOpen, skippedPaid, skippedBounced,
+    byKind, byApStatus, ownAlreadyClear, alreadyOpen, skippedPaid, skippedBounced, skippedShipmentDeleted,
   };
 }
 
@@ -273,7 +292,8 @@ export function planCarrierLegs(rows) {
  */
 export function sourceRowsOf(source) {
   const FIELDS = {
-    LoadCarrier: ['loadId', 'kind', 'status', 'apStatus', 'apOpen', 'apStatusChangedAt', 'invoiceId', 'bookedAt', 'createdAt'],
+    LoadCarrier: ['loadId', 'shipmentId', 'kind', 'status', 'apStatus', 'apOpen', 'apStatusChangedAt', 'invoiceId', 'bookedAt', 'createdAt'],
+    Shipment: ['deletedAt'],
   };
   const rows = [];
   for (const [model, fields] of Object.entries(FIELDS)) {
@@ -294,7 +314,7 @@ export function sourceRowsOf(source) {
  */
 export function buildApOpenPlan({ source, environment, suffix }) {
   const legs = source.LoadCarrier ?? [];
-  const planned = planCarrierLegs(legs);
+  const planned = planCarrierLegs(legs, source.Shipment ?? []);
 
   return createPlan({
     environment,
@@ -327,6 +347,7 @@ export function buildApOpenPlan({ source, environment, suffix }) {
         alreadyOpen: planned.alreadyOpen,
         skippedPaid: planned.skippedPaid,
         skippedNotOpenStatus: planned.skippedBounced,
+        skippedShipmentDeleted: planned.skippedShipmentDeleted,
         byApStatus: planned.byApStatus,
       },
       carrierLegsWithBill: planned.invoiced.length,
@@ -363,6 +384,7 @@ export function reviewText(plan) {
     `  already open:                ${s.passB.alreadyOpen}`,
     `  skipped, ${PAID_AP_STATUS}:               ${s.passB.skippedPaid}`,
     `  skipped, not ${OPEN_STATUSES.join('/')}:    ${s.passB.skippedNotOpenStatus}`,
+    `  skipped, shipment deleted:   ${s.passB.skippedShipmentDeleted}`,
     '  prior AP status on carrier legs:'
   );
   const prior = Object.entries(s.passB.byApStatus).sort(([a], [b]) => a.localeCompare(b));

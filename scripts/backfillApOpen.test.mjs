@@ -61,6 +61,25 @@ describe('backfillApOpen — which legs the AP board opens on', () => {
     expect(plan.skippedBounced).toBe(1);
   });
 
+  it('leaves a leg of a deleted shipment off the board, however it looks on its own', () => {
+    // DELETE_SHIPMENT took the marker off; the leg still reads ACTIVE / AWAITING_INVOICE
+    // with the stamp the Lambda wrote, which is exactly what pass (b) would open.
+    const rows = [
+      ...legs(),
+      { id: 'carrier-of-deleted', shipmentId: 'shp-gone', kind: 'CARRIER', status: 'ACTIVE', apStatus: 'AWAITING_INVOICE', apStatusChangedAt: '2026-02-07T00:00:00.000Z', bookedAt: '2026-02-07T00:00:00.000Z' },
+      { id: 'carrier-of-live', shipmentId: 'shp-live', kind: 'CARRIER', status: 'ACTIVE', apStatus: 'AWAITING_INVOICE', bookedAt: '2026-02-08T00:00:00.000Z' },
+    ];
+    const shipments = [
+      { id: 'shp-gone', deletedAt: '2026-02-09T00:00:00.000Z' },
+      { id: 'shp-live' },
+    ];
+    const plan = planCarrierLegs(rows, shipments);
+    expect(plan.opens.map((o) => o.id)).not.toContain('carrier-of-deleted');
+    expect(plan.opens.map((o) => o.id)).toContain('carrier-of-live');
+    expect(plan.skippedShipmentDeleted).toBe(1);
+    expect(planCarrierLegs(rows).opens.map((o) => o.id)).toContain('carrier-of-deleted');
+  });
+
   it('stamps when we took the leg on, not when the migration ran', () => {
     const plan = planCarrierLegs(legs());
     const stamps = Object.fromEntries(plan.opens.map((o) => [o.id, o.apStatusChangedAt]));

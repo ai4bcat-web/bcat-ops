@@ -275,6 +275,7 @@ function buildComputeContext(context: CommissionContext, caller: string, now: st
  * rep can see is the button the Lambda will honour.
  */
 export function commissionCallerOf(caller: Caller, settings: TmsSettings): {
+  id: string | null
   email: string
   isAdmin: boolean
   isManager: boolean
@@ -284,6 +285,8 @@ export function commissionCallerOf(caller: Caller, settings: TmsSettings): {
   const isAdmin = caller.isAdmin === true || groups.includes(ADMIN_GROUP)
   const isManager = groups.includes(MANAGER_GROUP)
   return {
+    // The username: what a rep picked from a profile is stored as.
+    id: caller.sub ?? null,
     email: caller.email,
     isAdmin,
     isManager,

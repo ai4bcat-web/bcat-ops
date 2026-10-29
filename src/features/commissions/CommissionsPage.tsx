@@ -72,6 +72,7 @@ function centsFromDollars(text: string): number {
 
 export function CommissionsPage() {
   const { user, isAdmin } = useAuth()
+  const userId = user?.userId ?? ''
   const email = user?.email ?? ''
   const groups = useMemo(() => user?.groups ?? [], [user?.groups])
 
@@ -109,8 +110,11 @@ export function CommissionsPage() {
     // Nothing to read, and nothing to spin: a switched-off desk renders `SwitchedOff`
     // rather than the board, so `loading` is never looked at on this path.
     if (!enabled) return Promise.resolve()
+    // A rep picked from a profile is stored by username; a rep typed before there were
+    // profiles is an e-mail. Mine is both.
+    const myIds = userId && email && userId !== email ? [userId, email] : [userId || email]
     return Promise.all([
-      listCommissionsByRep(email, month),
+      Promise.all(myIds.map((id) => listCommissionsByRep(id, month))).then((lists) => lists.flat()),
       listCommissionsByMonth(month),
       listPayPeriods(),
     ])
@@ -121,15 +125,16 @@ export function CommissionsPage() {
       })
       .catch((e: unknown) => toast.error(graphqlErrorText(e) || 'Could not load commissions'))
       .finally(() => setLoading(false))
-  }, [enabled, email, month])
+  }, [enabled, userId, email, month])
   useEffect(() => { load() }, [load])
 
   const caller: CommissionCaller = useMemo(() => ({
+    id: userId,
     email,
     isAdmin,
     isManager: groups.includes('role-MANAGER'),
     mayApprove: isAdmin || settings?.commissionApprovalAdminOnly !== true,
-  }), [email, isAdmin, groups, settings?.commissionApprovalAdminOnly])
+  }), [userId, email, isAdmin, groups, settings?.commissionApprovalAdminOnly])
 
   const mine = useMemo(() => sortNewestFirst(mineRows), [mineRows])
   const toApprove = useMemo(

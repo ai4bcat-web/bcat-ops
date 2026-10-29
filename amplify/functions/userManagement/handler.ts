@@ -549,7 +549,7 @@ export const handler = async (event: { arguments: Args; identity?: AppSyncIdenti
       if (role === 'ADMIN' && !isOwner) throw new Error(FORBIDDEN_GRANT_ADMIN)
       const teamKeys = stringList(input.teamKeys)
 
-      await cognito.send(new AdminCreateUserCommand({
+      const created = await cognito.send(new AdminCreateUserCommand({
         UserPoolId: USER_POOL_ID,
         Username: email,
         UserAttributes: [
@@ -558,20 +558,24 @@ export const handler = async (event: { arguments: Args; identity?: AppSyncIdenti
         ],
         DesiredDeliveryMediums: ['EMAIL'],
       }))
+      // The pool signs people in by e-mail but names them by a generated id, and that
+      // id is what `list` joins profiles on and what the Users page sends back. A
+      // profile keyed by the e-mail would be a row nobody ever reads.
+      const target = created.User?.Username ?? email
       // Auto-assign the default group for internal grouping/role bookkeeping.
       // Page access is controlled exclusively by page-* groups; this default group
       // does not grant any menu or page access.
       await ensureGroup(DEFAULT_GROUP)
       try {
         await cognito.send(new AdminAddUserToGroupCommand({
-          UserPoolId: USER_POOL_ID, Username: email, GroupName: DEFAULT_GROUP,
+          UserPoolId: USER_POOL_ID, Username: target, GroupName: DEFAULT_GROUP,
         }))
       } catch (e: unknown) {
         console.warn('[create] could not add to default group:', String(e))
       }
 
       const now = nowIso()
-      const profile = await saveProfile(email, email, {
+      const profile = await saveProfile(target, email, {
         role: role ?? undefined,
         teamKeys: teamKeys ?? undefined,
         status: 'PENDING',
@@ -579,9 +583,9 @@ export const handler = async (event: { arguments: Args; identity?: AppSyncIdenti
         invitedBy: callerEmail,
       }, callerEmail)
       const synced = role
-        ? await syncGroups(email, { role, claims: null, extraPages: null }, KEEP_GROUPS)
+        ? await syncGroups(target, { role, claims: null, extraPages: null }, KEEP_GROUPS)
         : { added: [], removed: [] }
-      await writeAudit('UserProfile', email, 'CREATE_USER', callerEmail, {
+      await writeAudit('UserProfile', target, 'CREATE_USER', callerEmail, {
         email, role, teamKeys, added: synced.added,
       })
       return JSON.stringify({ success: true, profile, added: synced.added, removed: synced.removed })

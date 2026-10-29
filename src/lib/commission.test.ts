@@ -482,6 +482,15 @@ describe('commissionState', () => {
     expect(commissionState(row(), rep).canApprove).toBe(false)
   })
 
+  it('knows a row stored under the username is the signed-in rep\'s own', () => {
+    // The picker stores the Cognito username; the pool signs people in by e-mail.
+    const signedIn = { id: 'a4786438-50e1-70cd', email: 'owner@bcatcorp.com', isAdmin: false, isManager: true, mayApprove: true }
+    const byUsername = row({ repId: 'a4786438-50e1-70cd' })
+    expect(commissionState(byUsername, signedIn)).toMatchObject({ isOwnRow: true, canCounter: true, canApprove: false })
+    expect(commissionState(row({ repId: 'owner@bcatcorp.com' }), signedIn).isOwnRow).toBe(true)
+    expect(commissionState(byUsername, { ...signedIn, id: 'somebody-else' }).canApprove).toBe(true)
+  })
+
   it('lets a manager approve, counter, override and cancel an open row', () => {
     const state = commissionState(row(), manager)
     expect(state).toMatchObject({ canApprove: true, canCounter: true, canOverride: true, canCancel: true })

@@ -234,7 +234,11 @@ function groupsOf(username: string): Set<string> {
 function runCognito(cmd: MockCommand): unknown {
   const input = cmd.input
   pool.calls.push({ type: cmd.__type, input })
-  const username = String(input.Username ?? '')
+  const asked = String(input.Username ?? '')
+  // An e-mail is an alias the pool resolves to the generated username.
+  const username = pool.users.has(asked)
+    ? asked
+    : ([...pool.users.values()].find((u) => u.email === asked)?.username ?? asked)
   switch (cmd.__type) {
     case 'CreateGroup': {
       const group = String(input.GroupName)
@@ -271,19 +275,23 @@ function runCognito(cmd: MockCommand): unknown {
         if (!pool.users.has(username)) throw notFound()
         return { User: { Username: username } }
       }
-      if (pool.users.has(username)) {
+      const email = String(input.Username ?? '')
+      if ([...pool.users.values()].some((u) => u.email === email)) {
         const err = new Error('User account already exists')
         err.name = 'UsernameExistsException'
         throw err
       }
-      pool.users.set(username, {
-        username,
-        email: username,
+      // Like the real pool: people sign in by e-mail, the pool names them by a
+      // generated id, and that id is the Username every later call sees.
+      const minted = `sub-${pool.users.size + 1}`
+      pool.users.set(minted, {
+        username: minted,
+        email,
         enabled: true,
         status: 'FORCE_CHANGE_PASSWORD',
         createdAt: new Date('2026-01-01T00:00:00.000Z'),
       })
-      return { User: { Username: username } }
+      return { User: { Username: minted } }
     }
     case 'AdminListGroupsForUser':
       return { Groups: [...groupsOf(username)].map((g) => ({ GroupName: g })) }
@@ -473,10 +481,14 @@ describe('create and setRole', () => {
     })
 
     expect(created.success).toBe(true)
-    expect(pool.users.has('newrep@bcatcorp.com')).toBe(true)
+    const minted = [...pool.users.values()].find((u) => u.email === 'newrep@bcatcorp.com')?.username
+    expect(minted).toBeDefined()
+    expect(minted).not.toBe('newrep@bcatcorp.com')
 
-    const profile = profileOf('newrep@bcatcorp.com')
+    // The profile is keyed by the username the pool assigned, so `list` finds it.
+    const profile = profileOf(minted!)
     expect(profile).toMatchObject({
+      email: 'newrep@bcatcorp.com',
       role: 'CUSTOMER_REP',
       status: 'PENDING',
       teamKeys: ['east'],
@@ -485,8 +497,11 @@ describe('create and setRole', () => {
       version: 1,
     })
     expect(profile?.invitedAt).toEqual(expect.any(String))
+    expect(profileOf('newrep@bcatcorp.com')).toBeUndefined()
+    const listed = (await call({ action: 'list' })) as unknown as { email?: string; profile: Row | null }[]
+    expect(listed.find((u) => u.email === 'newrep@bcatcorp.com')?.profile).toMatchObject({ role: 'CUSTOMER_REP' })
 
-    const groups = [...(pool.membership.get('newrep@bcatcorp.com') ?? [])]
+    const groups = [...(pool.membership.get(minted!) ?? [])]
     expect(groups).toContain('DISPATCHER')
     expect(groups).toEqual(expect.arrayContaining(groupsForProfile({ role: 'CUSTOMER_REP' })))
 

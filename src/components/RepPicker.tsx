@@ -1,8 +1,8 @@
 /**
  * The one picker every rep field uses.
  *
- * A rep field holds a Cognito username — which is the e-mail for everyone invited
- * through the Users page — so that is what `value` is and what `onChange` returns.
+ * A rep field holds a Cognito username — the generated id the pool names a person by;
+ * they sign in by e-mail — so that is what `value` is and what `onChange` returns.
  * The legacy fields hold free text typed before there were profiles, so a value that
  * matches nobody is still printed, flagged "not a user", and never silently rewritten:
  * the picker shows what the record says, not what it wishes the record said.

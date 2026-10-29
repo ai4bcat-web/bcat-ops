@@ -209,12 +209,25 @@ async function main() {
     // path under test — then given a password straight in the dev pool, since the
     // Lambda's invite goes to a mailbox that does not exist and the challenge password
     // in it is nobody's to read.
-    await manageUsers({ action: 'create', email: repEmail, role: 'CUSTOMER_REP' })
+    const repCreated = await manageUsers({ action: 'create', email: repEmail, role: 'CUSTOMER_REP' })
     createdUsers.push(repEmail)
     await setPoolPassword(repEmail, repPassword)
-    await manageUsers({ action: 'create', email: noneEmail, role: 'NONE' })
+    const noneCreated = await manageUsers({ action: 'create', email: noneEmail, role: 'NONE' })
     createdUsers.push(noneEmail)
     await setPoolPassword(noneEmail, nonePassword)
+    // The pool names people by a generated id and signs them in by e-mail. The profile
+    // is keyed by that id, `list` joins on it, and RepPicker stores it on orders and
+    // customers — so that is the id the fixtures below name the reps by.
+    const repId = repCreated.profile?.id
+    const noneId = noneCreated.profile?.id
+    if (repId && repId !== repEmail) {
+      ok('an invited profile is keyed by the pool username, the id the Users page joins on', repId)
+    } else {
+      bad('an invited profile is keyed by the pool username', JSON.stringify(repCreated).slice(0, 160))
+    }
+    const listed = await manageUsers({ action: 'list' })
+    const listedRep = (Array.isArray(listed) ? listed : []).find((u) => (u.email ?? '').toLowerCase() === repEmail)
+    equals('the Users list shows the invited rep with their role', listedRep?.profile?.role, 'CUSTOMER_REP')
 
     const repGroups = await manageUsers({ action: 'getGroups', username: repEmail })
     const repGroupNames = Array.isArray(repGroups) ? repGroups : repGroups?.groups ?? []
@@ -300,7 +313,7 @@ async function main() {
       billingEmail: 'commission-verification@example.invalid',
       creditLimitCents: 100000000,
       paymentTermsDays: 30,
-      accountOwnerIds: [repEmail, noneEmail],
+      accountOwnerIds: [repId ?? repEmail, noneId ?? noneEmail],
       teamKey: 'VERIFY',
       notes: 'Dev-only Step I verification fixture. Safe to delete.',
     }).then((r) => r.customer ?? r)
@@ -329,7 +342,7 @@ async function main() {
       b = await shipAction('SAVE_ORDER_FORM', {
         shipmentId: id,
         expectedUpdatedAt: b.shipment.updatedAt,
-        order: { mode: 'FTL', equipmentType: 'Dry Van', customerRepId: repEmail },
+        order: { mode: 'FTL', equipmentType: 'Dry Van', customerRepId: repId ?? repEmail },
         stops: [
           { type: 'pickup', name: 'Verify Shipper', city: 'Chicago, IL', address: { city: 'Chicago', state: 'IL', zip: '60601' }, appt: `${today}T13:00:00.000Z` },
           { type: 'delivery', name: 'Verify Receiver', city: 'Dallas, TX', address: { city: 'Dallas', state: 'TX', zip: '75201' }, appt: `${today}T23:00:00.000Z` },
@@ -395,7 +408,7 @@ async function main() {
     equals('the secondary owner earns half the role rate', secondary?.amountCents, 3500, dollars(3500))
     equals('the basis is the profit on the frozen money', primary?.profitCents, 70000, dollars(70000))
     equals('the row opens unapproved', primary?.status, 'UN_APPROVED')
-    equals('the rows are attributed to the people on the customer', primary?.repId, repEmail)
+    equals('the rows are attributed to the people on the customer, by username', primary?.repId, repId ?? repEmail)
 
     // ── 2. a rerun over the same facts writes nothing ───────────────────────
     const rerun = await finAction('RUN_COMMISSIONS', { invoiceId: mainInvoice.id })

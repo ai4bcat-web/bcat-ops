@@ -959,6 +959,11 @@ export function reverseFor(
 // ── Approval ladder ──────────────────────────────────────────────────────────
 
 export interface CommissionCaller {
+  /**
+   * The Cognito username — the pool names people by a generated id and signs them in
+   * by e-mail, and `UserProfile.id` and every rep picked from a profile hold the id.
+   */
+  id?: string | null
   email: string
   isAdmin: boolean
   isManager: boolean
@@ -990,7 +995,8 @@ export function commissionState(
   caller: CommissionCaller,
 ): CommissionAbilities {
   const status = row.status ?? 'UN_APPROVED'
-  const isOwnRow = sameId(row.repId, caller.email)
+  // A rep field names the caller by username, or by the e-mail somebody typed.
+  const isOwnRow = sameId(row.repId, caller.id) || sameId(row.repId, caller.email)
   const approver =
     !isOwnRow && (caller.isAdmin || (caller.isManager && caller.mayApprove !== false))
   const settled = status === 'PAID' || status === 'CANCELLED'
