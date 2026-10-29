@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  BOARD_TABS, DEFAULT_COLUMN_KEYS, EMPTY_FILTERS, UNLINKED_LOAD_LABEL, applyBoard, carrierLabel,
+  BOARD_TABS, DEFAULT_COLUMN_KEYS, EMPTY_FILTERS, applyBoard, carrierLabel,
   divisionCodeOfViewSlug, divisionLabel, filtersToViewFilters, statusLabel, tabCounts, toCsv, toViewRow,
   type ShipmentRow,
 } from './shipmentViews'
@@ -231,55 +231,41 @@ describe('department views', () => {
 })
 
 /*
- * Step R merged /loads into this list, and a Load whose customer never matched a
- * customer record never got a Shipment — it was on no list at all. It is on this one
- * now, and the rule it rides under is that it must never pass for a shipment: it has no
- * shipment status, so no status tab and no status chip may claim it.
+ * Step R: a shipment may carry nothing but the operator's typed customer text. It is an
+ * ordinary row with its real status — nothing quarantines it the way the deleted
+ * "Unlinked load" row was — and the Customer column says out loud that no record is
+ * linked rather than leaving the cell blank. That text is a label, never an identity:
+ * no Customer chip may claim such a row, whatever name it happens to carry.
  */
-describe('unlinked loads', () => {
-  const unlinked = (id: string, patch: Partial<ShipmentRow> = {}): ShipmentRow =>
-    row(id, {
-      unlinkedLoadId: id,
-      number: '14865',
-      customerName: 'DIRECT DRIVE LOGISTICS',
-      customerId: '',
-      status: 'DRAFT',
-      loadRateCents: 75000,
-      ...patch,
-    })
+describe('a shipment with no customer record', () => {
+  const unresolved = (id: string, patch: Partial<ShipmentRow> = {}): ShipmentRow =>
+    row(id, { customerId: null, customerName: 'DIRECT DRIVE LOGISTICS', status: 'DELIVERED', ...patch })
 
   const board = (rows: ShipmentRow[], patch: Partial<Parameters<typeof applyBoard>[1]> = {}) =>
     applyBoard(rows, {
       tab: 'all', query: '', filters: EMPTY_FILTERS, sortKey: 'number', sortDir: 'asc', nowMs: NOW, ...patch,
     }).map((r) => r.id)
 
-  it('shows on All and on no status tab, whatever placeholder status the row carries', () => {
-    const rows = [row('shp', { status: 'DRAFT' }), unlinked('lod')]
+  it('rides the tab its own status puts it on, with that status in the cell', () => {
+    const rows = [row('shp', { status: 'DELIVERED' }), unresolved('unres')]
     const counts = tabCounts(rows, NOW)
 
+    expect(counts.delivered).toBe(2)
     expect(counts.all).toBe(2)
-    expect(counts.draft).toBe(1)
-    for (const tab of BOARD_TABS) {
-      if (tab.key === 'all') continue
-      expect(board(rows, { tab: tab.key })).not.toContain('lod')
-    }
+    expect(board(rows, { tab: 'delivered' })).toEqual(['shp', 'unres'])
+    expect(statusLabel(unresolved('unres'))).toBe(statusLabel(row('shp', { status: 'DELIVERED' })))
   })
 
-  it('is excluded by any chip asking a question it cannot answer', () => {
-    const rows = [row('shp', { status: 'DRAFT' }), unlinked('lod')]
-    expect(board(rows, { filters: { ...EMPTY_FILTERS, status: 'DRAFT' } })).toEqual(['shp'])
-    expect(board(rows, { filters: { ...EMPTY_FILTERS, mode: 'FTL' } })).toEqual(['shp'])
+  it('names the operator’s text, or says the customer is not linked, and never a blank', () => {
+    const csv = toCsv([unresolved('typed'), unresolved('blank', { customerName: null })], ['customerName'])
+    expect(csv.split('\n')).toEqual(['Customer', 'DIRECT DRIVE LOGISTICS', 'Customer not linked'])
+  })
+
+  it('is never claimed by a Customer chip, whatever name it carries', () => {
+    const rows = [row('shp'), unresolved('unres', { customerName: 'Acme Freight' })]
     expect(board(rows, { filters: { ...EMPTY_FILTERS, customerId: 'cust-1' } })).toEqual(['shp'])
-  })
-
-  it('says what it is in the status cell, and exports as itself', () => {
-    const r = unlinked('lod', { originCity: 'Chicago, IL' })
-    expect(statusLabel(r)).toBe(UNLINKED_LOAD_LABEL)
-
-    const csv = toCsv([r], ['number', 'status', 'customerName', 'mode', 'loadRate'])
-    expect(csv.split('\n')).toEqual([
-      'Shipment ID,Status,Customer,Mode,Load rate',
-      '14865,Unlinked load,DIRECT DRIVE LOGISTICS,,$750.00',
-    ])
+    // Blank and whitespace are not ids either; a chip carrying one must still match nothing.
+    expect(board([unresolved('a', { customerId: '' }), unresolved('b', { customerId: '  ' })],
+      { filters: { ...EMPTY_FILTERS, customerId: '  ' } })).toEqual([])
   })
 })

@@ -49,6 +49,8 @@ export function useShipmentContext(
 
   const actions = useShipmentActions(bundle, onBundle)
 
+  // An unresolved shipment carries no `customerId`, so this never matches and the credit
+  // effect below never fires for one: there is no customer to ask about yet.
   const customer = options.customers.find((c) => c.id === bundle?.shipment.customerId) ?? null
   const customerId = customer?.id ?? null
   const isDraft = bundle?.shipment.status === 'DRAFT'
@@ -82,6 +84,7 @@ export function useShipmentContext(
       // `bundle` is non-null wherever detailProps is rendered; the callers gate on it.
       bundle: bundle as ShipmentBundle,
       customer,
+      customers: options.customers,
       locations: options.locations,
       catalog,
       pricing,

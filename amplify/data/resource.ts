@@ -26,9 +26,15 @@ import { tmsFinanceActions } from '../functions/tms-finance-actions/resource'
 const schema = a.schema({
   Load: a
     .model({
-      aljexId:         a.string().required(),
-      tmsId:           a.string().required(),
-      pickupNumber:    a.string().required(),
+      // Step R cutover. The PRO and the two identity columns beside it are read-only
+      // to a signed-in client, the `voidedAt` precedent below. A PRO is permanent and
+      // is claimed forever by a ProClaim row; left client-writable, `updateLoad` would
+      // let any token rename an existing leg onto a voided or duplicate PRO, so the
+      // rule would hold on create and nowhere else. CREATE_SHIPMENT writes them, and
+      // SET_LOAD_PRO is the only way one ever changes.
+      aljexId:         a.string().required().authorization((allow) => [allow.authenticated().to(['read'])]),
+      tmsId:           a.string().required().authorization((allow) => [allow.authenticated().to(['read'])]),
+      pickupNumber:    a.string().required().authorization((allow) => [allow.authenticated().to(['read'])]),
       originName:      a.string(),
       originCity:      a.string(),
       destinationName: a.string(),
@@ -178,9 +184,45 @@ const schema = a.schema({
     // calendar subscribes to them.
     .disableOperations(['delete', 'onDelete'])
     .authorization((allow) => [
-      // Phase 1: Load remains userPool-editable; merge repoints use schema-level IAM auth.
-      allow.authenticated(),
+      // Step R cutover. A Load is born only inside tmsShipmentActions, beneath the
+      // Shipment it belongs to, with its PRO claimed in the same transaction. Dropping
+      // `create` here closes the last client door: there is no longer any way for a
+      // browser token to mint freight that belongs to no record. The Lambda still
+      // creates legs through the schema-level `allow.resource(tmsShipmentActions)`
+      // grant, and onCreate — which the calendar subscribes to — still fires.
+      allow.authenticated().to(['read', 'update']),
     ]),
+
+  /**
+   * Step R cutover. One row per PRO number ever issued, and the rule that a PRO is
+   * never reused.
+   *
+   * `id` is the NORMALIZED PRO — trimmed, inner whitespace collapsed, upper-cased.
+   * Normalization is the point: the live Load table stores PROs padded ('14547  ')
+   * and every resolver trims before comparing, so a raw equality check would miss
+   * them and hand the number out twice.
+   *
+   * The claim is written with a conditional `attribute_not_exists(id)` put inside
+   * the same transaction that writes the Shipment, so two dispatchers creating the
+   * same PRO in the same second cannot both win — a read-then-write across two
+   * Lambda invocations has no mutual exclusion and an index read is eventually
+   * consistent besides.
+   *
+   * A claim is NEVER released: not when a create rolls back, not when the shipment
+   * is voided. A voided PRO stays claimed forever, which is exactly Ryne's rule.
+   * Hence no delete operation, and writes only through the schema-level
+   * `allow.resource(tmsShipmentActions)` grant.
+   */
+  ProClaim: a
+    .model({
+      loadId:     a.string().required(),
+      shipmentId: a.string(),
+      claimedAt:  a.datetime().required(),
+      claimedBy:  a.string().required(),
+      origin:     a.enum(['CREATE', 'DUPLICATE', 'BACKFILL', 'SET_LOAD_PRO', 'LEGACY']),
+    })
+    .disableOperations(['delete', 'onDelete', 'subscriptions'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
 
   Driver: a
     .model({
@@ -1121,7 +1163,14 @@ const schema = a.schema({
       // Soft delete: a deleted shipment keeps its row so the number is never reused.
       deletedAt:       a.datetime(),
       deletedBy:       a.string(),
-      customerId:      a.string().required(),
+      // Step R cutover. Optional: a shipment may exist with its customer not yet
+      // resolved to a record — a legacy entrypoint often has only typed text, and
+      // inventing a Customer is worse than saying so. The attribute is OMITTED on
+      // such a row (never '' and never NULL, either of which a sparse GSI hash key
+      // refuses), so the row is simply absent from the index below. Readiness is
+      // derived from this being null, never from status. SET_SHIPMENT_CUSTOMER is
+      // the only writer of customer identity.
+      customerId:      a.string(),
       customerName:    a.string(),           // booked-name snapshot
       mode: a.enum([
         'FTL', 'PTL', 'BULK', 'DRAYAGE', 'INTERMODAL', 'RLTL', 'LTL', 'AIR', 'OCEAN', 'RAIL',
@@ -1138,7 +1187,7 @@ const schema = a.schema({
       // Lower-cased number · customer · cities · reference values, so the board can
       // answer "find me 12345" without scanning five tables.
       searchKey:       a.string(),
-      source:          a.enum(['MANUAL', 'TENDER', 'DUPLICATE', 'BACKFILL']),
+      source:          a.enum(['MANUAL', 'TENDER', 'DUPLICATE', 'BACKFILL', 'FACTORING']),
       // ── Tracking & check calls (Step D) ─────────────────────────────────
       // The one ACTIVE CUSTOMER_VIEW TrackingLink for this shipment. Stable
       // across re-sends; Regenerate revokes it and mints a new token.
@@ -1188,7 +1237,11 @@ const schema = a.schema({
   Order: a
     .model({
       shipmentId:      a.string().required(),
-      customerId:      a.string().required(),
+      // Step R cutover. Optional for the same reason as Shipment.customerId above,
+      // and it has to move with it: an Order is written beside every Shipment, and a
+      // null in a `String!` field makes AppSync null out the whole row — the order
+      // card, the AR worklist and the credit math would lose it entirely.
+      customerId:      a.string(),
       customerName:    a.string(),
       customerContactId: a.string(),
       customerRepId:   a.string(),           // Cognito username

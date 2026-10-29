@@ -1,6 +1,7 @@
 // Relative, not `@/` — the tmsFinanceActions Lambda bundles this file by path for the AR
 // summary it returns, and the alias does not exist in the function build.
 import type { InvoiceRecord, OrderRecord, ShipmentRecord } from '../types/tms'
+import { customerDisplayName } from './customerResolution'
 import { isShipmentVoided } from './shipmentVoid'
 
 /**
@@ -80,7 +81,8 @@ export interface DeliveredNotInvoicedRow {
   orderId: string
   shipmentId: string
   shipmentNumber: string
-  customerId: string
+  /** Null when no Customer record is linked yet; such an order cannot be invoiced at all. */
+  customerId: string | null
   customerName: string
   deliveredAt: string
   /** Whole days from delivery to `asOf`. */
@@ -334,7 +336,7 @@ export function deliveredNotInvoiced(
       shipmentId: shipment.id,
       shipmentNumber: shipment.number,
       customerId: o.customerId,
-      customerName: o.customerName ?? shipment.customerName ?? '',
+      customerName: customerDisplayName({ customerId: o.customerId, customerName: o.customerName ?? shipment.customerName }),
       deliveredAt,
       daysWaiting: dayDiff(deliveredAt, asOf) ?? 0,
       revenueCents: o.revenueCents ?? 0,

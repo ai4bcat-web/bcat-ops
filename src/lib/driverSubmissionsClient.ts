@@ -6,7 +6,7 @@
 
 import { generateClient } from 'aws-amplify/data'
 import { queueDriverDocScan } from './podsClient'
-import { normalizePro } from './podPresence'
+import { normalizePro } from './proNumber'
 import { uploadData, getUrl } from 'aws-amplify/storage'
 
 const client = generateClient()

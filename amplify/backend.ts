@@ -1820,6 +1820,7 @@ const shipmentLaneSampleTable = backend.data.resources.tables['LaneRateSample']
 // tmsDirectoryActions stays their only writer.
 const shipmentOwnershipDivisionTable = backend.data.resources.tables['OwnershipDivision']
 const shipmentOwnershipRuleTable     = backend.data.resources.tables['OwnershipRule']
+const shipmentProClaimTable          = backend.data.resources.tables['ProClaim']
 
 shipmentActionsFn.addToRolePolicy(
   new PolicyStatement({
@@ -1866,6 +1867,10 @@ shipmentActionsFn.addToRolePolicy(
       // Step R: read-only — the division tree and the rules that tag a shipment.
       shipmentOwnershipDivisionTable.tableArn,
       shipmentOwnershipRuleTable.tableArn,
+      // Step R cutover: the PRO claim table. Written with a conditional put inside
+      // the shipment transaction and never deleted — a PRO, once issued, is taken
+      // forever, voided or not.
+      shipmentProClaimTable.tableArn,
     ],
   }),
 )
@@ -1907,6 +1912,7 @@ shipmentActionsFn.addEnvironment('TRACKING_LINK_TABLE_NAME',   backend.data.reso
 shipmentActionsFn.addEnvironment('SHIPMENT_NOTICE_TABLE_NAME', shipmentNoticeTable.tableName)
 shipmentActionsFn.addEnvironment('OWNERSHIP_DIVISION_TABLE_NAME', shipmentOwnershipDivisionTable.tableName)
 shipmentActionsFn.addEnvironment('OWNERSHIP_RULE_TABLE_NAME',     shipmentOwnershipRuleTable.tableName)
+shipmentActionsFn.addEnvironment('PRO_CLAIM_TABLE_NAME',       shipmentProClaimTable.tableName)
 shipmentActionsFn.addEnvironment('USER_POOL_ID',               backend.auth.resources.userPool.userPoolId)
 shipmentActionsFn.addToRolePolicy(
   new PolicyStatement({

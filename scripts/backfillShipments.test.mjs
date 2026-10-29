@@ -13,18 +13,41 @@ import {
   selectLoadsToBackfill,
   tallyPlanned,
 } from './backfillShipments.mjs';
+import { normalizePro } from '../src/lib/proNumber.ts';
 
 /**
  * A stand-in for the deployed router. The mapping itself is the Lambda's and is
  * tested there; what this fake has to be faithful about is the contract the script
  * depends on — skip an already-linked load, report ids it could not find, and
  * actually link what it applies so a second run has nothing left to do.
+ *
+ * Since the Step R cutover a load whose customer text matches no record is no longer
+ * skipped: it becomes a real shipment carrying that text with no `customerId` at all.
+ * The fake writes the Shipment and Order rows it would write, because "nothing is
+ * invented and nothing is lost" is a claim about those two rows and about nothing else.
  */
-function fakeClient(loads) {
+function fakeClient(loads, customers = []) {
   const data = new Map(loads.map((l) => [l.id, { ...l }]));
+  const shipments = new Map();
+  const orders = new Map();
+  const proClaims = new Map();
   const calls = [];
+  /**
+   * The router matches the load's typed customer text against the directory. Exactly
+   * one match resolves; none and more-than-one both resolve to NOTHING, and neither
+   * picks a candidate — an ambiguous name is two customers' credit, not one.
+   */
+  const resolveCustomer = (load) => {
+    if (load.customerId) return load.customerId;
+    const typed = String(load.customer ?? '').trim().toUpperCase();
+    if (!typed) return null;
+    const hits = customers.filter((c) => c.name.trim().toUpperCase() === typed);
+    return hits.length === 1 ? hits[0].id : null;
+  };
   return {
     _data: data,
+    _shipments: shipments,
+    _orders: orders,
     calls,
     listLoads: async () => [...data.values()].map((l) => ({ ...l })),
     tmsShipmentActions: async (action, input) => {
@@ -42,6 +65,14 @@ function fakeClient(loads) {
           continue;
         }
         const delivered = load.readyToInvoice === true;
+        const customerId = resolveCustomer(load);
+        const customerName = String(load.customer ?? '').trim() || null;
+        const pro = normalizePro(load.aljexId);
+        // A PRO is claimed forever, so an import may not take one another load holds.
+        const claimedElsewhere = pro != null && proClaims.has(pro) && proClaims.get(pro) !== id;
+        const reason = load.shipmentId
+          ? 'ALREADY_LINKED'
+          : claimedElsewhere ? 'PRO_CLAIMED_BY_OTHER_LOAD' : null;
         planned.push({
           loadId: id,
           shipmentId: `shp-${id}`,
@@ -51,20 +82,23 @@ function fakeClient(loads) {
           shipmentStatus: delivered ? 'DELIVERED' : 'OPEN',
           arStatus: 'DOCS_NEEDED',
           assignmentType: load.pickupDriverId ? 'OWN_ASSET' : 'NEED_TO_COVER',
-          customerId: load.customerId ?? null,
-          skipped: load.shipmentId ? 'ALREADY_LINKED' : load.customerId ? null : 'NO_CUSTOMER_MATCH',
+          customerId,
+          customerName,
+          pro,
+          skipped: reason,
         });
-        if (load.shipmentId) {
-          skipped.push({ loadId: id, reason: 'ALREADY_LINKED' });
-          continue;
-        }
-        // The router will not invent a customer id: a load whose customer name
-        // matches no record is reported, never written.
-        if (!load.customerId) {
-          skipped.push({ loadId: id, reason: 'NO_CUSTOMER_MATCH' });
+        if (reason) {
+          skipped.push({ loadId: id, reason });
           continue;
         }
         if (input.dryRun === false) {
+          // Unresolved is a first-class state: the typed text is kept verbatim and the
+          // attribute is OMITTED rather than written null, which is what keeps the row
+          // out of the customerId index it does not belong in.
+          const linked = customerId ? { customerId } : {};
+          shipments.set(`shp-${id}`, { id: `shp-${id}`, customerName, ...linked });
+          orders.set(`ord-${id}`, { id: `ord-${id}`, shipmentId: `shp-${id}`, customerName, ...linked });
+          if (pro) proClaims.set(pro, id);
           data.set(id, { ...load, shipmentId: `shp-${id}`, orderId: `ord-${id}` });
           applied++;
         }
@@ -199,7 +233,7 @@ describe('apply', () => {
     expect(replay.applied).toBe(0);
   });
 
-  it('reports a load the router could not match to a customer and applies the rest', async () => {
+  it('gives a load whose customer text matches nothing a real shipment, carrying that text', async () => {
     const client = fakeClient([legacyLoad('l1'), legacyLoad('l2', { customerId: null, customer: 'NOBODY WE KNOW' })]);
     const plan = await buildShipmentPlan({ client, env: 'test', endpoint: 'memory://' });
     const report = await applyShipmentPlan({
@@ -208,8 +242,47 @@ describe('apply', () => {
       env: 'test',
       endpoint: 'memory://',
     });
+    // No match is no longer a skip: the orphan is migrated, not labelled.
+    expect(report.applied).toBe(2);
+    expect(report.skipped).toEqual([]);
+    expect(client._data.get('l2').shipmentId).toBe('shp-l2');
+    // Nothing invented, nothing lost: the typed text verbatim and NO customerId, on
+    // the Order as well as the Shipment — the AR worklist and credit math read both.
+    expect(client._shipments.get('shp-l2')).toEqual({ id: 'shp-l2', customerName: 'NOBODY WE KNOW' });
+    expect(client._orders.get('ord-l2')).toEqual({ id: 'ord-l2', shipmentId: 'shp-l2', customerName: 'NOBODY WE KNOW' });
+  });
+
+  it('writes neither candidate id when the customer name is ambiguous', async () => {
+    const client = fakeClient(
+      [legacyLoad('l1', { customerId: null, customer: 'ACME LOGISTICS' })],
+      [{ id: 'cus-acme-east', name: 'ACME LOGISTICS' }, { id: 'cus-acme-west', name: 'Acme Logistics' }],
+    );
+    const plan = await buildShipmentPlan({ client, env: 'test', endpoint: 'memory://' });
+    const report = await applyShipmentPlan({
+      client,
+      planPath: planToPath(plan, tmpDir),
+      env: 'test',
+      endpoint: 'memory://',
+    });
     expect(report.applied).toBe(1);
-    expect(report.skipped).toEqual([{ loadId: 'l2', reason: 'NO_CUSTOMER_MATCH' }]);
+    // Two customers' credit is not one customer's: picking either would be a guess.
+    expect(client._shipments.get('shp-l1')).toEqual({ id: 'shp-l1', customerName: 'ACME LOGISTICS' });
+    expect(client._orders.get('ord-l1')).toEqual({ id: 'ord-l1', shipmentId: 'shp-l1', customerName: 'ACME LOGISTICS' });
+  });
+
+  it('reports a load whose PRO another load already claimed and applies the rest', async () => {
+    // A PRO is claimed forever, so the second load carrying it cannot be imported under
+    // it. The import says so and keeps going rather than abandoning the batch.
+    const client = fakeClient([legacyLoad('l1', { aljexId: '14547  ' }), legacyLoad('l2', { aljexId: 'pro #14547' })]);
+    const plan = await buildShipmentPlan({ client, env: 'test', endpoint: 'memory://', batchSize: 1 });
+    const report = await applyShipmentPlan({
+      client,
+      planPath: planToPath(plan, tmpDir),
+      env: 'test',
+      endpoint: 'memory://',
+    });
+    expect(report.applied).toBe(1);
+    expect(report.skipped).toEqual([{ loadId: 'l2', reason: 'PRO_CLAIMED_BY_OTHER_LOAD' }]);
     expect(report.conflicts).toEqual([]);
     expect(client._data.get('l2').shipmentId).toBeUndefined();
   });

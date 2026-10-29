@@ -1,3 +1,4 @@
+import { isCustomerUnresolved } from './customerResolution'
 import { loadStatus } from './loadStatus'
 import { normalizeName } from './tmsDirectory'
 import type { LoadStatusId } from './loadStatus'
@@ -181,9 +182,11 @@ const MOVEMENT_BUCKET: Record<ShipmentStatus, CreditBucket | null> = {
 
 /**
  * One exposure item per order that still owes this customer's credit something.
- * Orders always carry a real `customerId`, so there is no name matching here — an
- * order whose shipment is missing from `shipments` is skipped rather than guessed
- * at, because its status is what decides the bucket.
+ * An order's `customerId` is the only thing that attributes it, and step R lets it be
+ * null — a shipment may exist on the operator's typed customer text alone. There is no
+ * name matching here, so such an order belongs to nobody's exposure until a record is
+ * linked. An order whose shipment is missing from `shipments` is skipped rather than
+ * guessed at, because its status is what decides the bucket.
  *
  * An invoiced order is exposed for what is still owed on it, not for what it was
  * worth: a half-paid invoice carries only its balance, and a PAID one carries
@@ -230,10 +233,20 @@ export function creditExposure(
 ): CreditExposureItem[] {
   const orders = data.orders ?? []
   const items = creditExposureForOrders(c, orders, data.shipments ?? [])
-  const legacyOrderIds = new Set(
-    orders.filter((o) => o.arStatus === 'LEGACY').map((o) => o.id),
-  )
-  const legacy = (data.loads ?? []).filter((l) => !l.orderId || legacyOrderIds.has(l.orderId))
+  const legacyOrderIds = new Set<string>()
+  const unresolvedOrderIds = new Set<string>()
+  for (const o of orders) {
+    if (o.arStatus === 'LEGACY') legacyOrderIds.add(o.id)
+    // A step-R order can carry typed customer text and no record, and its loads mirror
+    // that text. Letting them into the name-matched path below would attribute the
+    // freight to whichever customer happens to share the name — the guess the cutover
+    // exists to stop. Factoring makes this reachable: it writes `arStatus: 'LEGACY'`.
+    if (isCustomerUnresolved(o)) unresolvedOrderIds.add(o.id)
+  }
+  const legacy = (data.loads ?? []).filter((l) => {
+    if (!l.orderId) return true
+    return legacyOrderIds.has(l.orderId) && !unresolvedOrderIds.has(l.orderId)
+  })
   return [...items, ...creditExposureForCustomer(c, legacy)]
 }
 

@@ -11,6 +11,10 @@
 import { useContext, useMemo, useState } from 'react'
 import { AuthContext } from '@/hooks/useAuth'
 import { formatCents } from '@/lib/tmsDirectory'
+import { effectiveCustomerStatus } from '@/lib/customerCredit'
+import {
+  UNRESOLVED_CUSTOMER_LABEL, customerDisplayName, isCustomerUnresolved, unresolvedCustomerMessage,
+} from '@/lib/customerResolution'
 import { formatDateTime } from '@/lib/date'
 import { computeFinancials } from '@/lib/shipmentCharges'
 import { laneKey3For, laneKeyFor } from '@/lib/laneKey'
@@ -18,7 +22,7 @@ import { SHIPMENT_STATUS_LABELS, LOAD_WORKFLOW_STATUS_LABELS } from '@/lib/shipm
 import { useDrivers } from '@/hooks/useDrivers'
 import { useTrucks } from '@/hooks/useTrucks'
 import { LaneHistoryPanel } from '@/features/quotes/components/LaneHistoryPanel'
-import { TmsBadge, TmsCard, TmsTabs } from '@/features/tms/kit'
+import { TmsBadge, TmsButton, TmsCard, TmsField, TmsSelect, TmsTabs } from '@/features/tms/kit'
 import type { CreditSummary } from '@/lib/customerCredit'
 import { StopCards } from './StopCards'
 import { FinancialLines } from './FinancialLines'
@@ -37,11 +41,14 @@ import { DETAIL_TABS, type DetailTabKey } from './detailTabs'
 import type { ShipmentActions } from '../useShipmentActions'
 import type {
   ChargeCodeDef, CustomerRecord, LocationRecord, PricingDefaults, RequiredReference, ShipmentBundle,
+  ShipmentRecord,
 } from '@/types/tms'
 
 export interface ShipmentDetailProps {
   bundle: ShipmentBundle
   customer: CustomerRecord | null
+  /** The directory, so a shipment carrying only typed customer text can be linked to a record. */
+  customers: CustomerRecord[]
   locations: LocationRecord[]
   catalog: ChargeCodeDef[]
   pricing: PricingDefaults | null
@@ -57,8 +64,8 @@ export interface ShipmentDetailProps {
 
 export function ShipmentDetail(props: ShipmentDetailProps) {
   const {
-    bundle, customer, locations, catalog, pricing, marginFloorBps, requiredReferences, credit, currentUser,
-    isAdmin, initialTab, actions,
+    bundle, customer, customers, locations, catalog, pricing, marginFloorBps, requiredReferences, credit,
+    currentUser, isAdmin, initialTab, actions,
   } = props
   const [tab, setTab] = useState<DetailTabKey>(initialTab ?? 'overview')
   const { drivers } = useDrivers()
@@ -86,28 +93,47 @@ export function ShipmentDetail(props: ShipmentDetailProps) {
   // shipment is frozen for the same reason: the router refuses every write on it.
   const chargesFrozen = voided || bundle.financials.some((f) => f.frozenAt)
 
+  /*
+   * A shipment can exist on nothing but the operator's typed customer text — the legacy
+   * entrypoints often have nothing else and nothing invents a Customer record. The gates
+   * refuse such a shipment outright, so the card says so and carries the only fix, above
+   * the draft editor as well as above the tabs: a DRAFT is exactly where it is commonest.
+   */
+  const unresolvedCustomer = isCustomerUnresolved(shipment) ? (
+    <UnresolvedCustomerCard
+      shipment={shipment}
+      customers={customers}
+      frozen={voided}
+      onLink={actions.setCustomer}
+    />
+  ) : null
+
   if (shipment.status === 'DRAFT') {
     return (
-      <DraftOrderEditor
-        bundle={bundle}
-        customer={customer}
-        requiredReferences={requiredReferences}
-        catalog={catalog}
-        pricing={pricing}
-        marginFloorBps={marginFloorBps}
-        locations={locations}
-        credit={credit}
-        currentUser={currentUser}
-        onSaveForm={actions.saveForm}
-        onSubmit={actions.submit}
-        onStopAction={actions.stopAction}
-        onSaveCharges={actions.saveCharges}
-      />
+      <div className="space-y-4">
+        {unresolvedCustomer}
+        <DraftOrderEditor
+          bundle={bundle}
+          customer={customer}
+          requiredReferences={requiredReferences}
+          catalog={catalog}
+          pricing={pricing}
+          marginFloorBps={marginFloorBps}
+          locations={locations}
+          credit={credit}
+          currentUser={currentUser}
+          onSaveForm={actions.saveForm}
+          onSubmit={actions.submit}
+          onStopAction={actions.stopAction}
+          onSaveCharges={actions.saveCharges}
+        />
+      </div>
     )
   }
 
   return (
     <div className="space-y-4">
+      {unresolvedCustomer}
       <TmsTabs tabs={DETAIL_TABS.map((t) => ({ key: t.key, label: t.label }))} active={tab} onSelect={(key) => setTab(key as DetailTabKey)} />
 
       {tab === 'overview' && (
@@ -133,7 +159,7 @@ export function ShipmentDetail(props: ShipmentDetailProps) {
           >
             <dl className="tms-grid tms-grid-3 text-sm">
               <Field label="Status" value={SHIPMENT_STATUS_LABELS[shipment.status]} />
-              <Field label="Customer" value={shipment.customerName ?? '—'} />
+              <Field label="Customer" value={customerDisplayName(shipment)} />
               <Field label="Mode" value={shipment.mode} />
               <Field label="Origin" value={shipment.originCity ?? '—'} />
               <Field label="Destination" value={shipment.destinationCity ?? '—'} />
@@ -279,6 +305,76 @@ export function ShipmentDetail(props: ShipmentDetailProps) {
 
       {tab === 'history' && <HistorySection bundle={bundle} />}
     </div>
+  )
+}
+
+/**
+ * The one record carrying only typed customer text, and the one move that resolves it.
+ *
+ * Readiness is `customerId == null` and never status: the backfill sets status from the
+ * stop clock, so one of these can arrive already DELIVERED and would otherwise reach AR
+ * and die on a customer id that was never there. The copy is `unresolvedCustomerMessage`
+ * so the screen says exactly what the Lambda says when it refuses the submit, the
+ * invoice or the factoring.
+ */
+function UnresolvedCustomerCard({ shipment, customers, frozen, onLink }: {
+  shipment: ShipmentRecord
+  customers: CustomerRecord[]
+  /** A voided shipment is refused every write, so it is told, not asked. */
+  frozen: boolean
+  onLink: (customerId: string) => Promise<void>
+}) {
+  const [customerId, setCustomerId] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  // SET_SHIPMENT_CUSTOMER runs the same ACTIVE check CREATE_SHIPMENT runs, and dormant
+  // is an automatic "no shipment in 90 days" label new freight clears. The server
+  // re-checks; this list exists so nobody is offered a name it is going to refuse.
+  const now = new Date().toISOString()
+  const shippable = customers.filter((c) => {
+    const status = effectiveCustomerStatus(c, null, now)
+    return status === 'ACTIVE' || status === 'DORMANT'
+  })
+
+  return (
+    <TmsCard title={UNRESOLVED_CUSTOMER_LABEL}>
+      <p className="text-sm" data-testid="unresolved-customer-note">
+        {unresolvedCustomerMessage(shipment, 'submitting, invoicing or factoring it')}
+      </p>
+      {!frozen && (
+        <div className="mt-3 flex items-end gap-2">
+          <TmsField label="Customer" error={error}>
+            <TmsSelect
+              aria-label="Customer to link"
+              value={customerId}
+              onChange={(e) => { setCustomerId(e.target.value); setError(null) }}
+            >
+              <option value="">— select —</option>
+              {shippable.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </TmsSelect>
+          </TmsField>
+          <TmsButton
+            variant="primary"
+            disabled={busy}
+            onClick={async () => {
+              if (!customerId) { setError('Pick a customer.'); return }
+              setBusy(true)
+              try {
+                await onLink(customerId)
+              } catch {
+                // `useShipmentActions` already toasted the Lambda's own refusal.
+                setError('Could not link that customer.')
+              } finally {
+                setBusy(false)
+              }
+            }}
+          >
+            {busy ? 'Linking…' : 'Link customer'}
+          </TmsButton>
+        </div>
+      )}
+    </TmsCard>
   )
 }
 

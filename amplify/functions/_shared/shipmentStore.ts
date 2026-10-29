@@ -258,7 +258,37 @@ export function conditionCheckUpdatedAtTx(tableName: string, id: string, expecte
   }
 }
 
-export async function transact(db: DynamoDBClient, items: TransactWriteItem[], label: string): Promise<void> {
+/**
+ * What to say when one particular item in the transaction is the one that was
+ * refused, indexed exactly like `items`.
+ *
+ * A conditional put inside a transaction carries a rule — the PRO claim's
+ * `attribute_not_exists(id)` is "this PRO has already been issued" — and the
+ * generic "changed by someone else" sentence tells the operator to reload and
+ * retry, which is the one thing that will never work. DynamoDB reports which
+ * index failed in `CancellationReasons`; this is how a caller reads it.
+ */
+export interface TransactOptions {
+  refusals?: (string | null | undefined)[]
+}
+
+/** The refusal the caller wrote for whichever item DynamoDB says failed its check. */
+function refusalFor(err: unknown, refusals: (string | null | undefined)[] | undefined): string | null {
+  if (!refusals) return null
+  const reasons = (err as { CancellationReasons?: { Code?: string }[] } | null)?.CancellationReasons
+  if (!Array.isArray(reasons)) return null
+  for (let i = 0; i < reasons.length; i++) {
+    if (reasons[i]?.Code === 'ConditionalCheckFailed' && refusals[i]) return String(refusals[i])
+  }
+  return null
+}
+
+export async function transact(
+  db: DynamoDBClient,
+  items: TransactWriteItem[],
+  label: string,
+  options: TransactOptions = {},
+): Promise<void> {
   if (items.length === 0) return
   if (items.length > MAX_TRANSACT_ITEMS) {
     throw new Error(`${label} needs ${items.length} writes; the transaction limit is ${MAX_TRANSACT_ITEMS}`)
@@ -266,6 +296,16 @@ export async function transact(db: DynamoDBClient, items: TransactWriteItem[], l
   try {
     await db.send(new TransactWriteItemsCommand({ TransactItems: items }))
   } catch (err) {
+    const refused = refusalFor(err, options.refusals)
+    // The sentence the caller wrote is what the operator reads; the DynamoDB
+    // cancellation stays attached as the cause so the log still says which item failed.
+    // ES2020 lib lacks the ErrorOptions constructor, so the cause is attached explicitly
+    // — the same shape `conflictError` above uses.
+    if (refused) {
+      const err2 = new Error(refused)
+      ;(err2 as Error & { cause?: unknown }).cause = err
+      throw err2
+    }
     if (isConflict(err)) throw conflictError(label, err)
     throw err
   }

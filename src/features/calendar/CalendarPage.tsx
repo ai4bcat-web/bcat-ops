@@ -7,6 +7,7 @@ import { CalendarToolbar } from './CalendarToolbar'
 import { PlannerView } from './PlannerView'
 import { GridCalendarView } from './GridCalendarView'
 import { LoadDrawer } from '@/features/loads/LoadDrawer'
+import { NewShipmentDialog } from '@/features/shipments/components/NewShipmentDialog'
 import { CalendarErrorBoundary } from './CalendarErrorBoundary'
 import { CalendarPaperworkProvider } from './CalendarPaperwork'
 import { DriverAvailabilityModal } from './DriverAvailabilityModal'
@@ -33,6 +34,8 @@ const STATUS_LEGEND = [
 export function CalendarPage() {
   const searchQuery = useAppStore((s) => s.searchQuery)
   const filters     = useAppStore((s) => s.filters)
+  const newShipmentPrefill = useAppStore((s) => s.newShipmentPrefill)
+  const closeNewShipment   = useAppStore((s) => s.closeNewShipment)
 
   const { loads }   = useLoads()
   const { drivers } = useDrivers()
@@ -125,7 +128,7 @@ export function CalendarPage() {
     const handler = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement).tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
-      if (e.key === 'n' || e.key === 'N') { e.preventDefault(); useAppStore.getState().setSelectedLoad(null, 'create') }
+      if (e.key === 'n' || e.key === 'N') { e.preventDefault(); useAppStore.getState().openNewShipment() }
       if (e.key === 'ArrowLeft')  { e.preventDefault(); setStartDate((d) => addDays(d, -navDays)) }
       if (e.key === 'ArrowRight') { e.preventDefault(); setStartDate((d) => addDays(d, navDays))  }
       if (e.key === 'Escape')     { useAppStore.getState().setFilterDriver(null) }
@@ -270,6 +273,18 @@ export function CalendarPage() {
       </div>
 
       <LoadDrawer />
+
+      {/*
+        Every "+" on this page — the toolbar button, the day columns, the 'n' key and the
+        scheduler's drag-create — raises this form. It writes nothing until Save, which is
+        the point: a shipment number is permanent and can only be voided.
+      */}
+      <NewShipmentDialog
+        open={newShipmentPrefill !== null}
+        prefill={newShipmentPrefill}
+        onClose={closeNewShipment}
+        onCreated={closeNewShipment}
+      />
 
       {showAvailModal && (
         <DriverAvailabilityModal

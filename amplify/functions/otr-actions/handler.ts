@@ -36,7 +36,7 @@ import { normalizeName } from '../../../src/lib/tmsDirectory'
 import { isManualStepId, manualProgress, withManualStep } from '../../../src/lib/manualInvoice'
 import type { ManualInvoiceSteps } from '../../../src/types'
 import { localStatusFor } from '../../../src/lib/otrInvoiceStatus'
-import { normalizePro } from '../../../src/lib/podPresence'
+import { normalizePro } from '../../../src/lib/proNumber'
 import {
   OtrClient,
   OtrError,

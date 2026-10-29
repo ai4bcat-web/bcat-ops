@@ -60,6 +60,13 @@ const shipments: ShipmentRow[] = [
     voidedBy: 'ryne@bcatcorp.com',
     voidReason: 'Billed twice by mistake',
   }),
+  // Step R — a shipment that carries only the operator's typed customer text.
+  row('S000007', {
+    status: 'PLANNED',
+    searchKey: 's000007 direct drive logistics',
+    customerId: null,
+    customerName: 'DIRECT DRIVE LOGISTICS',
+  }),
 ]
 
 const views: ShipmentViewRecord[] = [{
@@ -114,7 +121,6 @@ vi.mock('@/features/tms/useShipmentViews', () => ({
 const { setShipmentStatus } = vi.hoisted(() => ({ setShipmentStatus: vi.fn(async () => ({})) }))
 vi.mock('@/lib/apiClient', () => ({
   getTmsSettings: vi.fn(async () => null),
-  createShipment: vi.fn(),
   duplicateShipment: vi.fn(),
   saveShipmentView: vi.fn(),
   setShipmentStatus,
@@ -124,9 +130,9 @@ vi.mock('@/lib/apiClient', () => ({
   listDocumentReviewQueue: vi.fn(async () => []),
 }))
 vi.mock('./components/ShipmentDrawer', () => ({ ShipmentDrawer: () => null }))
-// The row that opens it is covered in ShipmentsBoard.unlinked.test.tsx; here it would
-// only drag the whole load-editing tree into a test about the board.
-vi.mock('@/features/loads/LoadDrawer', () => ({ LoadDrawer: () => null }))
+// Stubbed for its identity only: this test asks what the board lists, not what the
+// create form does with it.
+vi.mock('./components/NewShipmentDialog', () => ({ NewShipmentDialog: () => null }))
 
 function renderBoard(path = '/tms/shipments') {
   return render(
@@ -161,7 +167,7 @@ describe('ShipmentsBoard', () => {
     expect(within(tab('Unload')).getByText('1')).toBeTruthy()
     expect(within(tab('Del')).getByText('1')).toBeTruthy()
     // The voided shipment is in the book but out of every working tab.
-    expect(within(tab('All')).getByText('5')).toBeTruthy()
+    expect(within(tab('All')).getByText('6')).toBeTruthy()
     expect(within(tab('Voided')).getByText('1')).toBeTruthy()
   })
 
@@ -187,6 +193,23 @@ describe('ShipmentsBoard', () => {
     const badge = screen.getByText('VOIDED')
     expect(badge.getAttribute('title')).toContain('ryne@bcatcorp.com')
     expect(badge.getAttribute('title')).toContain('Billed twice by mistake')
+  })
+
+  it('lists a shipment with no customer record as an ordinary row, marked not linked', async () => {
+    renderBoard()
+    await waitFor(() => expect(screen.getByText('S000007')).toBeTruthy())
+
+    // Its own status puts it on a status tab; nothing quarantines it to All.
+    fireEvent.click(tab('Booked'))
+    await waitFor(() => expect(screen.queryByText('S000001')).toBeNull())
+
+    const rowEl = screen.getByText('S000007').closest('tr')
+    if (!rowEl) throw new Error('no row for S000007')
+    // The typed text is shown, and said to be text: no Customer record is linked to it.
+    expect(within(rowEl).getByText('DIRECT DRIVE LOGISTICS')).toBeTruthy()
+    expect(within(rowEl).getByTestId('board-customer-unresolved')).toBeTruthy()
+    // And it is a real shipment: the row menu acts on it like any other.
+    expect(within(rowEl).getByLabelText('Shipment actions')).toBeTruthy()
   })
 
   it('narrows the list from the search box', async () => {

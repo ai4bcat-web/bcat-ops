@@ -50,6 +50,7 @@ import {
   type ReleaseGateResult,
 } from '../../../src/lib/releaseGate'
 import { loadReleaseGateInput } from '../_shared/releaseGateInput'
+import { isCustomerUnresolved, unresolvedCustomerMessage } from '../../../src/lib/customerResolution'
 import { canEmailTo, evaluateDocGate, gateLoadIds } from '../../../src/lib/shipmentDocuments'
 import type {
   BillToParty,
@@ -174,6 +175,22 @@ async function readOrderContext(orderId: string): Promise<OrderContext> {
   }
 }
 
+/**
+ * Step R cutover. An order may legitimately carry no customer record — the board
+ * shows it as unresolved and the operator links one when they find out who it is.
+ * Invoicing is where that stops being acceptable: there is nobody to bill, no
+ * billing address and no terms, and `readOrderContext` hands back a null customer
+ * that the snapshot would quietly paper over with the typed text.
+ *
+ * Refused before the document gate and before the release gate, and never instead
+ * of either — both still run on their own afterwards.
+ */
+function assertCustomerResolved(context: OrderContext, what: string): void {
+  if (isCustomerUnresolved(context.order)) {
+    throw new Error(unresolvedCustomerMessage(context.order, what))
+  }
+}
+
 function billToOf(customer: CustomerRecord | null, billToId: string | null): BillToParty | null {
   if (!customer) return null
   const parties = customer.billToParties ?? []
@@ -238,6 +255,11 @@ function buildSnapshot(
   now: string,
 ): Snapshot {
   const { order, shipment, customer, division, settings } = context
+  // An invoice names the party it is owed by; a snapshot without one is not an
+  // invoice. Both callers refuse an unresolved order before they reach here, so this
+  // is the narrowing that says so rather than a second rule.
+  const customerId = order.customerId
+  if (!customerId) throw new Error(unresolvedCustomerMessage(order, 'invoicing it'))
   const billTo = billToOf(customer, args.billToId)
   const termsDays = invoiceTermsDays(customer, billTo, settings)
   const dueAt = args.dueAt ?? dueDateFor(args.invoiceDate, termsDays)
@@ -262,7 +284,7 @@ function buildSnapshot(
     orderId: order.id,
     shipmentId: order.shipmentId,
     shipmentNumber: shipment.number,
-    customerId: order.customerId,
+    customerId,
     customerName: customer?.name ?? order.customerName ?? null,
     billToId: billTo?.id ?? null,
     billTo: billToSnapshot,
@@ -301,6 +323,7 @@ export async function previewInvoice(input: Row, caller: Caller): Promise<Row> {
   const billToId = optionalString(input.billToId, 64)
 
   const context = await readOrderContext(orderId)
+  assertCustomerResolved(context, 'invoicing it')
   const gate = docGateFor(context)
   const releaseGate = await releaseGateFor(context)
   const readiness = invoiceReadiness({
@@ -353,6 +376,7 @@ export async function generateInvoice(input: Row, caller: Caller): Promise<Row> 
         assertString(item, `attachDocumentIds[${index}]`), 20)
 
   const context = await readOrderContext(orderId)
+  assertCustomerResolved(context, 'invoicing it')
   const gate = docGateFor(context)
   const readiness = invoiceReadiness({
     order: context.order,

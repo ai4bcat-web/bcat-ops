@@ -55,6 +55,7 @@ const TABLES = {
   carrierContact: 'CarrierContact-test',
   division: 'Division-test',
   notice: 'ShipmentNotice-test',
+  proClaim: 'ProClaim-test',
 }
 
 const store = vi.hoisted(() => {
@@ -80,6 +81,7 @@ const store = vi.hoisted(() => {
   process.env.CARRIER_CONTACT_TABLE_NAME = 'CarrierContact-test'
   process.env.DIVISION_TABLE_NAME = 'Division-test'
   process.env.SHIPMENT_NOTICE_TABLE_NAME = 'ShipmentNotice-test'
+  process.env.PRO_CLAIM_TABLE_NAME = 'ProClaim-test'
   process.env.BUCKET_NAME = 'bcat-test-bucket'
   process.env.PORTAL_ORIGIN = 'https://portal.test'
   process.env.AMPLIFY_DATA_DEFAULT_NAME = 'amplifyData'
@@ -133,9 +135,18 @@ class ConditionalCheckFailed extends Error {
   }
 }
 
+/**
+ * DynamoDB reports WHICH item of a transaction was refused, in `CancellationReasons`
+ * positionally. The handler reads that to turn a conditional put into the sentence
+ * the rule means — "PRO 14589 has already been issued" rather than "reload and try
+ * again" — so the mock has to report it the same way or the test cannot tell the two
+ * refusals apart.
+ */
 class TransactionCanceled extends Error {
-  constructor(message: string) {
+  CancellationReasons: { Code: string }[]
+  constructor(message: string, reasons: { Code: string }[]) {
     super(`TransactionCanceledException: ${message}`)
+    this.CancellationReasons = reasons
   }
 }
 
@@ -394,8 +405,10 @@ function runCommand(cmd: MockCommand): unknown {
       // All-or-nothing: stage against a copy of every touched table, then commit.
       const snapshot = new Map<string, Map<string, Row>>()
       for (const [name, t] of store) snapshot.set(name, new Map(t))
+      let failedAt = -1
       try {
-        for (const entry of items) {
+        for (const [index, entry] of items.entries()) {
+          failedAt = index
           if (entry.Put) {
             const put = entry.Put as { TableName: string; Item: Record<string, unknown>; ConditionExpression?: string }
             const item = unmarshall(put.Item as never) as Row
@@ -435,7 +448,13 @@ function runCommand(cmd: MockCommand): unknown {
       } catch (err) {
         store.clear()
         for (const [name, t] of snapshot) store.set(name, t)
-        throw new TransactionCanceled(err instanceof Error ? err.message : String(err))
+        const conditional = err instanceof ConditionalCheckFailed
+        throw new TransactionCanceled(
+          err instanceof Error ? err.message : String(err),
+          items.map((_, i) => ({
+            Code: i === failedAt && conditional ? 'ConditionalCheckFailed' : 'None',
+          })),
+        )
       }
       return {}
     }
@@ -708,6 +727,181 @@ describe('CREATE_SHIPMENT', () => {
       reason: expect.stringMatching(/Load create failed/),
     })
   })
+
+  it('records the typed customer text with no customerId attribute and invents no Customer', async () => {
+    const bundle = (await call('CREATE_SHIPMENT', { customerName: 'SOME SHIPPER WE NEVER ADDED' })) as {
+      shipment: Row
+    }
+
+    const shipment = table(TABLES.shipment).get(String(bundle.shipment.id))!
+    // Absent, not null: `customerId` is a sparse index hash key and DynamoDB refuses
+    // a NULL there. The row simply leaves the customer index.
+    expect('customerId' in shipment).toBe(false)
+    expect(shipment.customerName).toBe('SOME SHIPPER WE NEVER ADDED')
+
+    const order = [...table(TABLES.order).values()][0]
+    expect('customerId' in order).toBe(false)
+    expect(order.customerName).toBe('SOME SHIPPER WE NEVER ADDED')
+
+    // The one row `seedCustomer` put there, and nothing else: no name is ever
+    // invented and no Customer record is ever created on this path.
+    expect([...table(TABLES.customer).keys()]).toEqual(['cus-1'])
+  })
+
+  it('lets exactly one of two concurrent creates claim the same PRO', async () => {
+    const results = await Promise.allSettled([
+      call('CREATE_SHIPMENT', { customerId: 'cus-1', pro: '14589' }),
+      call('CREATE_SHIPMENT', { customerId: 'cus-1', pro: '14589' }),
+    ])
+
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1)
+    const refused = results.find((r) => r.status === 'rejected') as PromiseRejectedResult
+    expect(String(refused.reason)).toMatch(/PRO 14589 has already been issued/)
+    // The loser wrote nothing at all: the claim is in the same transaction as the
+    // shipment, so there is no half-built draft under the PRO it did not get.
+    expect(table(TABLES.shipment).size).toBe(1)
+    expect(table(TABLES.proClaim).get('14589')!.origin).toBe('CREATE')
+  })
+
+  it('never reissues the PRO of a shipment that was voided', async () => {
+    const bundle = (await call('CREATE_SHIPMENT', { customerId: 'cus-1', pro: '14590' })) as { shipment: Row }
+    const shipmentId = String(bundle.shipment.id)
+    await call('VOID_SHIPMENT', {
+      shipmentId,
+      reason: 'Customer cancelled',
+      expectedUpdatedAt: table(TABLES.shipment).get(shipmentId)!.updatedAt,
+    }, ADMIN)
+
+    await expect(call('CREATE_SHIPMENT', { customerId: 'cus-1', pro: '14590' }))
+      .rejects.toThrow(/PRO 14590 has already been issued/)
+  })
+
+  it('refuses a leg bag that carries readyToInvoice', async () => {
+    // `loadFromFactoringItem` sets it on every row it builds; honouring it would put
+    // brand-new freight past the release gate and into AR.
+    await expect(
+      call('CREATE_SHIPMENT', { customerName: 'ACME FOODS', load: { readyToInvoice: true } }),
+    ).rejects.toThrow(/load\.readyToInvoice/)
+  })
+
+  it('prices a leg bag rate as a CUSTOMER linehaul the order agrees with', async () => {
+    const bundle = (await call('CREATE_SHIPMENT', {
+      customerName: 'ACME FOODS',
+      load: { rateCents: 185_000 },
+    })) as { orders: Row[]; loads: Row[]; charges: Row[]; financials: Row[] }
+
+    expect(bundle.charges).toHaveLength(1)
+    expect(bundle.charges[0]).toMatchObject({ side: 'CUSTOMER', code: 'LINEHAUL', amountCents: 185_000, isRate: true })
+    // The money is on the shipment, not only on the leg: a bare `Load.rate` would
+    // leave a $0 order under a $1,850 load.
+    expect(bundle.orders[0].revenueCents).toBe(185_000)
+    expect(bundle.financials[0]).toMatchObject({ revenueCents: 185_000 })
+    expect(bundle.loads[0].rate).toBe(185_000)
+  })
+
+  it('books factoring freight on the LEGACY rung, not into the AR worklist', async () => {
+    const bundle = (await call('CREATE_SHIPMENT', {
+      customerName: 'ACME FOODS',
+      source: 'FACTORING',
+      pro: '14591',
+      load: { rateCents: 120_000, tmsId: 'PO-55812' },
+    })) as { shipment: Row; orders: Row[]; loads: Row[] }
+
+    expect(bundle.shipment.source).toBe('FACTORING')
+    // OTR already bought this bill; DOCS_NEEDED would put collected money back into
+    // the worklist and into the customer's credit exposure.
+    expect(bundle.orders[0].arStatus).toBe('LEGACY')
+    expect(bundle.loads[0].aljexId).toBe('14591')
+    // The PO the factoring row carried survives; only the blank falls back to the PRO.
+    expect(bundle.loads[0].tmsId).toBe('PO-55812')
+    expect(bundle.loads[0].pickupNumber).toBe('14591')
+  })
+
+  it('treats a leg bag rate as a total even when LINEHAUL is priced by the mile', async () => {
+    // The rate on a bag is money somebody already invoiced. A customer whose LINEHAUL
+    // default is PER_MILE would otherwise turn $2,500 into $2,500 a mile.
+    seedSettings({ chargeCodes: [{ code: 'LINEHAUL', label: 'Linehaul', calculatedBy: 'PER_MILE' }] })
+    seedCustomer({ chargeCodeOverrides: [{ code: 'LINEHAUL', calculatedBy: 'PER_MILE' }] })
+
+    const onDefault = (await call('CREATE_SHIPMENT', {
+      customerId: 'cus-1',
+      load: { rateCents: 250_000, miles: 500 },
+    })) as { orders: Row[]; charges: Row[]; loads: Row[] }
+
+    expect(onDefault.orders[0].revenueCents).toBe(250_000)
+    expect(onDefault.charges[0]).toMatchObject({ code: 'LINEHAUL', calculatedBy: 'FLAT', amountCents: 250_000, count: 1 })
+    expect(onDefault.loads[0].rate).toBe(250_000)
+
+    // The other branch: a typed customer has no default LINEHAUL, so the rate arrives
+    // as a line this path builds rather than one it overwrites.
+    const pushed = (await call('CREATE_SHIPMENT', {
+      customerName: 'ACME FOODS',
+      load: { rateCents: 250_000, miles: 500 },
+    })) as { orders: Row[]; charges: Row[] }
+
+    expect(pushed.orders[0].revenueCents).toBe(250_000)
+    expect(pushed.charges[0]).toMatchObject({ code: 'LINEHAUL', calculatedBy: 'FLAT', amountCents: 250_000 })
+  })
+
+  it('mirrors the leg bag stops onto the shipment and the order', async () => {
+    const bundle = (await call('CREATE_SHIPMENT', {
+      customerId: 'cus-1',
+      load: { stops: [PICKUP, DELIVERY] },
+    })) as { shipment: Row }
+
+    const shipment = table(TABLES.shipment).get(String(bundle.shipment.id))!
+    const order = [...table(TABLES.order).values()][0]
+    expect(shipment.pickupAppt).toBe(PICKUP.appt)
+    expect(shipment.deliveryAppt).toBe(DELIVERY.appt)
+    // The hash key of the month-sliced board index: without it the row is invisible.
+    expect(shipment.pickupMonth).toBe('2026-03')
+    expect(shipment.originCity).toBe('CHICAGO, IL')
+    expect(shipment.destinationCity).toBe('KANSAS CITY, MO')
+    expect(String(shipment.searchKey)).toContain('chicago, il')
+    expect(order.pickupAppt).toBe(PICKUP.appt)
+
+    // '' and NULL are both refused on an index key, so neither may ever be written.
+    for (const value of [
+      shipment.pickupAppt, shipment.deliveryAppt, shipment.pickupMonth,
+      shipment.originCity, shipment.destinationCity, order.pickupAppt,
+    ]) {
+      expect(value).not.toBe('')
+      expect(value).not.toBeNull()
+    }
+  })
+
+  it('mirrors a stopless bag from its loose dates and cities', async () => {
+    // What a factoring row carries: no stop list at all, only the flat columns.
+    const bundle = (await call('CREATE_SHIPMENT', {
+      customerName: 'ACME FOODS',
+      source: 'FACTORING',
+      pro: '14592',
+      load: {
+        pickupAppt: '2026-04-07T15:00:00.000Z',
+        deliveryAppt: '2026-04-09T15:00:00.000Z',
+        originCity: 'LAREDO, TX',
+        destinationCity: 'ATLANTA, GA',
+      },
+    })) as { shipment: Row }
+
+    const shipment = table(TABLES.shipment).get(String(bundle.shipment.id))!
+    expect(shipment.pickupAppt).toBe('2026-04-07T15:00:00.000Z')
+    expect(shipment.deliveryAppt).toBe('2026-04-09T15:00:00.000Z')
+    expect(shipment.pickupMonth).toBe('2026-04')
+    expect(shipment.originCity).toBe('LAREDO, TX')
+    expect(shipment.destinationCity).toBe('ATLANTA, GA')
+  })
+
+  it('refuses a typed PRO that normalizes to a derived one', async () => {
+    // Claims are keyed by the normalized PRO, so `S000123-1` is owned as `S0001231`.
+    // Typing any spelling of that key would pre-empt the counter and burn a number.
+    for (const pro of ['S0001231', 'S000123 - 1', 'S000123/1']) {
+      await expect(call('CREATE_SHIPMENT', { customerId: 'cus-1', pro }))
+        .rejects.toThrow(/shape this system issues on its own/)
+    }
+    // Nothing was built and no number was consumed by the refusals.
+    expect(table(TABLES.shipment).size).toBe(0)
+  })
 })
 
 // ── SAVE_ORDER_FORM ──────────────────────────────────────────────────────────
@@ -810,6 +1004,19 @@ describe('SAVE_ORDER_FORM', () => {
     })) as { financials: Row[] }
     // FSC is itself a rate code, so the base is the LINEHAUL alone: 15% of 200000.
     expect(bundle.financials[0].revenueCents).toBe(230_000)
+  })
+
+  it('edits a shipment whose customer was never matched to a record', async () => {
+    // The stop and order editor is where an operator writes down freight they were
+    // just handed; it cannot wait for somebody to work out which Customer row it is.
+    const bundle = (await call('CREATE_SHIPMENT', { customerName: 'ACME FOODS' })) as { shipment: Row }
+    const shipmentId = String(bundle.shipment.id)
+
+    const saved = (await saveForm(shipmentId)) as { shipment: Row; loads: Row[] }
+
+    expect(saved.shipment.pickupAppt).toBe(PICKUP.appt)
+    expect(saved.shipment.destinationCity).toBe('KANSAS CITY, MO')
+    expect('customerId' in table(TABLES.shipment).get(shipmentId)!).toBe(false)
   })
 })
 
@@ -3540,6 +3747,37 @@ describe('READY_TO_INVOICE', () => {
     await ready(ids.orderId)
     await expect(ready(ids.orderId)).rejects.toThrow(/already UNBILLED/)
   })
+
+  it('refuses an unresolved order even once it has delivered', async () => {
+    // The backfill case, and the reason readiness is keyed on the customer link and
+    // never on status: an imported load's status comes from its stop clock, so this
+    // row arrives DELIVERED and unresolved at the same time. A "DRAFT means
+    // unresolved" rule would wave it straight through to AR, where the customer
+    // lookup then dies on an id that was never there.
+    table(TABLES.driver).set('drv-1', { id: 'drv-1', name: 'Chad', type: 'owner_operator', active: true })
+    table(TABLES.load).set('lod-legacy', {
+      id: 'lod-legacy',
+      aljexId: '14777',
+      customer: 'SOME SHIPPER WE NEVER ADDED',
+      rate: 185_000,
+      pickupAppt: '2026-02-10T13:00:00.000Z',
+      deliveryAppt: '2026-02-11T13:00:00.000Z',
+      stops: JSON.stringify([
+        { ...PICKUP, appt: '2026-02-10T13:00:00.000Z', driverId: 'drv-1', departedAt: '2026-02-10T15:00:00.000Z' },
+        { ...DELIVERY, appt: '2026-02-11T13:00:00.000Z', driverId: 'drv-1', departedAt: '2026-02-11T14:00:00.000Z' },
+      ]),
+      createdAt: '2026-02-01T00:00:00.000Z',
+      updatedAt: '2026-02-01T00:00:00.000Z',
+    })
+    await call('BACKFILL_SHIPMENT', { loadIds: ['lod-legacy'], dryRun: false }, ADMIN)
+
+    const order = [...table(TABLES.order).values()][0]
+    expect(table(TABLES.load).get('lod-legacy')!.status).toBe('DELIVERED')
+    expect('customerId' in order).toBe(false)
+
+    await expect(ready(String(order.id))).rejects.toThrow(/This shipment has no customer record linked/)
+    expect(table(TABLES.order).get(String(order.id))!.arStatus).toBe('DOCS_NEEDED')
+  })
 })
 
 // ── DUPLICATE_SHIPMENT ───────────────────────────────────────────────────────
@@ -3595,6 +3833,165 @@ describe('DUPLICATE_SHIPMENT', () => {
     await expect(
       call('DUPLICATE_SHIPMENT', { shipmentId: ids.shipmentId, copies: new Array(21).fill({}) }),
     ).rejects.toThrow(/at most 20/)
+  })
+
+  it('keeps the driver and the truck on the copy when the dispatcher asks for it', async () => {
+    // An own-fleet dispatcher duplicating a row on the calendar is copying THAT
+    // truck's week. Stripping the driver lands the copy in the uncovered lane,
+    // away from the row they pressed Duplicate on.
+    const ids = await createDraft()
+    await saveForm(ids.shipmentId)
+    await call('SUBMIT_ORDER', {
+      shipmentId: ids.shipmentId,
+      expectedUpdatedAt: table(TABLES.shipment).get(ids.shipmentId)!.updatedAt,
+      order: { equipmentType: "53' VAN" },
+      stops: [PICKUP, DELIVERY],
+    })
+    await call('ASSIGN_ASSET', { loadId: ids.loadId, driverId: 'drv-1', truckId: 'trk-7' })
+
+    const result = (await call('DUPLICATE_SHIPMENT', {
+      shipmentId: ids.shipmentId,
+      keepDriver: true,
+      copies: [{ pickupAppt: '2026-03-09T13:00:00.000Z', deliveryAppt: '2026-03-10T13:00:00.000Z' }],
+    })) as { created: string[] }
+
+    const copiedLoad = [...table(TABLES.load).values()].find((l) => l.shipmentId === result.created[0])!
+    expect(copiedLoad.assignmentType).toBe('OWN_ASSET')
+    expect(copiedLoad.pickupDriverId).toBe('drv-1')
+    expect(copiedLoad.truckId).toBe('trk-7')
+    const stops = JSON.parse(String(copiedLoad.stops)) as Row[]
+    expect(stops.every((s) => s.driverId === 'drv-1')).toBe(true)
+    // The plan travels; what already happened does not.
+    expect(stops.every((s) => s.arrivedAt === null && s.departedAt === null)).toBe(true)
+  })
+
+  it('copies the leg it was given rather than leg 1', async () => {
+    const ids = await createDraft()
+    await saveForm(ids.shipmentId)
+    // A second leg under the same shipment, as a multi-leg movement has.
+    table(TABLES.load).set('lod-leg2', {
+      ...table(TABLES.load).get(ids.loadId)!,
+      id: 'lod-leg2',
+      leg: 2,
+      commodity: 'DRUMS OF GLYCERIN',
+      aljexId: `${table(TABLES.shipment).get(ids.shipmentId)!.number}-2`,
+    })
+
+    const result = (await call('DUPLICATE_SHIPMENT', {
+      shipmentId: ids.shipmentId,
+      loadId: 'lod-leg2',
+      copies: [{}],
+    })) as { created: string[] }
+
+    const copiedLoad = [...table(TABLES.load).values()].find((l) => l.shipmentId === result.created[0])!
+    expect(copiedLoad.commodity).toBe('DRUMS OF GLYCERIN')
+  })
+
+  it('refuses a loadId that is not a leg of that shipment', async () => {
+    const ids = await createDraft()
+    await saveForm(ids.shipmentId)
+    await expect(
+      call('DUPLICATE_SHIPMENT', { shipmentId: ids.shipmentId, loadId: 'lod-elsewhere', copies: [{}] }),
+    ).rejects.toThrow(/is not a leg of shipment/)
+  })
+})
+
+// ── SET_SHIPMENT_CUSTOMER ────────────────────────────────────────────────────
+
+describe('SET_SHIPMENT_CUSTOMER', () => {
+  async function unresolved(): Promise<{ shipmentId: string; orderId: string; loadId: string }> {
+    const bundle = (await call('CREATE_SHIPMENT', { customerName: 'BATORY' })) as {
+      shipment: Row
+      orders: Row[]
+      loads: Row[]
+    }
+    return {
+      shipmentId: String(bundle.shipment.id),
+      orderId: String(bundle.orders[0].id),
+      loadId: String(bundle.loads[0].id),
+    }
+  }
+
+  it('links the shipment, its order and its legs in one act, and re-tags', async () => {
+    seedCustomer({ defaultSalesRepId: 'usr-rep' })
+    const ids = await unresolved()
+    // A leg whose tag drifted: the re-resolve has to put it back, because an
+    // ownership rule may key on the customer that was just linked.
+    table(TABLES.load).set(ids.loadId, { ...table(TABLES.load).get(ids.loadId)!, revDivision: 'WRONG' })
+
+    await call('SET_SHIPMENT_CUSTOMER', { shipmentId: ids.shipmentId, customerId: 'cus-1' })
+
+    const shipment = table(TABLES.shipment).get(ids.shipmentId)!
+    expect(shipment.customerId).toBe('cus-1')
+    expect(shipment.customerName).toBe('BATORY FOODS')
+    expect(String(shipment.searchKey)).toContain('batory foods')
+    expect(shipment.salesRepId).toBe('usr-rep')
+
+    const order = table(TABLES.order).get(ids.orderId)!
+    expect(order).toMatchObject({ customerId: 'cus-1', customerName: 'BATORY FOODS', customerRepId: 'usr-rep' })
+
+    const load = table(TABLES.load).get(ids.loadId)!
+    expect(load).toMatchObject({ customerId: 'cus-1', customer: 'BATORY FOODS' })
+    expect(load.revDivision).toBe(shipment.revDivision)
+  })
+
+  it('refuses a shipment that is already linked', async () => {
+    const bundle = (await call('CREATE_SHIPMENT', { customerId: 'cus-1' })) as { shipment: Row }
+    await expect(
+      call('SET_SHIPMENT_CUSTOMER', { shipmentId: String(bundle.shipment.id), customerId: 'cus-1' }),
+    ).rejects.toThrow(/already linked to a customer/)
+  })
+
+  it('refuses a customer that is not ACTIVE', async () => {
+    const ids = await unresolved()
+    seedCustomer({ status: 'ARCHIVED' })
+    await expect(
+      call('SET_SHIPMENT_CUSTOMER', { shipmentId: ids.shipmentId, customerId: 'cus-1' }),
+    ).rejects.toThrow(/not an active customer/)
+  })
+})
+
+// ── SET_LOAD_PRO ─────────────────────────────────────────────────────────────
+
+describe('SET_LOAD_PRO', () => {
+  async function leg(): Promise<string> {
+    const bundle = (await call('CREATE_SHIPMENT', { customerId: 'cus-1' })) as { loads: Row[] }
+    return String(bundle.loads[0].id)
+  }
+
+  function setPro(loadId: string, pro: string): Promise<Row> {
+    return call('SET_LOAD_PRO', {
+      loadId,
+      pro,
+      expectedUpdatedAt: table(TABLES.load).get(loadId)!.updatedAt,
+    })
+  }
+
+  it('claims the new PRO and leaves the old claim standing', async () => {
+    const loadId = await leg()
+    // The derived PRO the create claimed, normalized the way a claim id is.
+    expect(table(TABLES.proClaim).get('S0000011')).toMatchObject({ loadId, origin: 'CREATE' })
+
+    await setPro(loadId, '14 600')
+
+    expect(table(TABLES.load).get(loadId)!.aljexId).toBe('14 600')
+    expect(table(TABLES.proClaim).get('14600')).toMatchObject({ loadId, origin: 'SET_LOAD_PRO' })
+    // Never released: the number this leg used to carry can never be handed out again.
+    expect(table(TABLES.proClaim).get('S0000011')).toBeTruthy()
+  })
+
+  it('refuses a PRO somebody else already has', async () => {
+    const first = await leg()
+    const second = await leg()
+    await setPro(first, '14600')
+
+    await expect(setPro(second, 'PRO 14600')).rejects.toThrow(/PRO 14600 has already been issued/)
+    expect(table(TABLES.proClaim).get('14600')!.loadId).toBe(first)
+  })
+
+  it('refuses a PRO nothing can be claimed under', async () => {
+    const loadId = await leg()
+    await expect(setPro(loadId, 'N/A')).rejects.toThrow(/is not a PRO number/)
   })
 })
 
@@ -3861,36 +4258,82 @@ describe('BACKFILL_SHIPMENT', () => {
     expect([...table(TABLES.shipment).values()][0].customerId).toBe('cus-midwest')
   })
 
-  it('skips a load whose customer name matches nobody instead of writing an empty key', async () => {
+  it('writes an unresolved shipment for a load whose customer matches nobody', async () => {
     seedCustomer({ id: 'cus-midwest', name: 'Midwest Grocers' })
     seedLegacyLoad('lod-nocust', { customerId: null, customer: 'SOME SHIPPER WE NEVER ADDED' })
     const report = (await call('BACKFILL_SHIPMENT', { loadIds: ['lod-nocust'], dryRun: false }, ADMIN)) as {
       applied: number
       skipped: { loadId: string; reason: string }[]
     }
-    expect(report.applied).toBe(0)
-    expect(report.skipped).toEqual([{ loadId: 'lod-nocust', reason: 'NO_CUSTOMER_MATCH' }])
-    expect(table(TABLES.shipment).size).toBe(0)
-    expect(table(TABLES.load).get('lod-nocust')!.shipmentId).toBeUndefined()
+
+    expect(report.applied).toBe(1)
+    expect(report.skipped).toEqual([])
+    const shipment = [...table(TABLES.shipment).values()][0]
+    // The typed text is kept verbatim and no customer key is written at all: the
+    // freight is real, the customer record is simply not known yet.
+    expect(shipment.customerName).toBe('SOME SHIPPER WE NEVER ADDED')
+    expect('customerId' in shipment).toBe(false)
+    expect('customerId' in [...table(TABLES.order).values()][0]).toBe(false)
+    expect(table(TABLES.load).get('lod-nocust')!.shipmentId).toBe(shipment.id)
+    // Nothing was invented to fill the gap.
+    expect([...table(TABLES.customer).keys()].sort()).toEqual(['cus-1', 'cus-midwest'])
   })
 
-  it('refuses to guess when two customers answer to the same name', async () => {
+  it('writes neither candidate when two customers answer to the same name', async () => {
     seedCustomer({ id: 'cus-a', name: 'Midwest Grocers' })
     seedCustomer({ id: 'cus-b', name: 'Midwest Grocers LLC' })
     seedLegacyLoad('lod-ambig', { customerId: null, customer: 'MIDWEST GROCERS' })
     const report = (await call('BACKFILL_SHIPMENT', { loadIds: ['lod-ambig'], dryRun: false }, ADMIN)) as {
-      skipped: { loadId: string; reason: string }[]
+      applied: number
     }
-    expect(report.skipped).toEqual([{ loadId: 'lod-ambig', reason: 'NO_CUSTOMER_MATCH' }])
+
+    expect(report.applied).toBe(1)
+    const shipment = [...table(TABLES.shipment).values()][0]
+    // Guessing either one would hang one customer's revenue on the other's ledger.
+    expect('customerId' in shipment).toBe(false)
+    expect(shipment.customerName).toBe('MIDWEST GROCERS')
   })
 
-  it('ignores an archived customer when matching by name', async () => {
+  it('leaves a load unresolved when its only match is archived', async () => {
     seedCustomer({ id: 'cus-dead', name: 'Midwest Grocers', status: 'ARCHIVED' })
     seedLegacyLoad('lod-archived', { customerId: null, customer: 'MIDWEST GROCERS' })
     const report = (await call('BACKFILL_SHIPMENT', { loadIds: ['lod-archived'], dryRun: false }, ADMIN)) as {
+      applied: number
+    }
+
+    expect(report.applied).toBe(1)
+    expect('customerId' in [...table(TABLES.shipment).values()][0]).toBe(false)
+  })
+
+  it('claims the backfilled load\'s own PRO, tolerating the claim it already holds', async () => {
+    seedLegacyLoad('lod-claimed')
+    await call('BACKFILL_SHIPMENT', { loadIds: ['lod-claimed'], dryRun: false }, ADMIN)
+    expect(table(TABLES.proClaim).get('14589')).toMatchObject({ loadId: 'lod-claimed', origin: 'BACKFILL' })
+
+    // The refresh case: the link on the load is gone, the claim this very load made
+    // is still there, and re-running must not trip over its own claim.
+    seedLegacyLoad('lod-claimed')
+    const again = (await call('BACKFILL_SHIPMENT', { loadIds: ['lod-claimed'], dryRun: false }, ADMIN)) as {
+      applied: number
       skipped: { loadId: string; reason: string }[]
     }
-    expect(report.skipped).toEqual([{ loadId: 'lod-archived', reason: 'NO_CUSTOMER_MATCH' }])
+    expect(again).toMatchObject({ applied: 1, skipped: [] })
+  })
+
+  it('skips a load whose PRO another load already holds', async () => {
+    seedLegacyLoad('lod-first')
+    await call('BACKFILL_SHIPMENT', { loadIds: ['lod-first'], dryRun: false }, ADMIN)
+    // Two Aljex rows under one number: the claim is what catches it, and an import
+    // does not get to paper over it.
+    seedLegacyLoad('lod-twin')
+
+    const report = (await call('BACKFILL_SHIPMENT', { loadIds: ['lod-twin'], dryRun: false }, ADMIN)) as {
+      applied: number
+      skipped: { loadId: string; reason: string }[]
+    }
+    expect(report.applied).toBe(0)
+    expect(report.skipped).toEqual([{ loadId: 'lod-twin', reason: 'PRO_CLAIMED_BY_OTHER_LOAD' }])
+    expect(table(TABLES.load).get('lod-twin')!.shipmentId).toBeUndefined()
   })
 
   it('omits the appointment keys entirely for an undated load', async () => {

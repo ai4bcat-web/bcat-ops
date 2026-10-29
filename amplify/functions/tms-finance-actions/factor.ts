@@ -20,6 +20,7 @@ import {
   type ReleaseGateResult,
 } from '../../../src/lib/releaseGate'
 import { loadReleaseGateInput } from '../_shared/releaseGateInput'
+import { isCustomerUnresolved, unresolvedCustomerMessage } from '../../../src/lib/customerResolution'
 import type { FactoringItem, Stop } from '../../../src/types'
 import type {
   CustomerRecord,
@@ -86,12 +87,29 @@ async function factorReleaseGate(
   )
 }
 
+/**
+ * Step R cutover. An invoice snapshots its order's customer, and an order may carry
+ * none: the board shows it unresolved until somebody links one. Factoring is where
+ * that has to stop — the factor advances money against a named debtor, and there is
+ * no name. Checked before the customer row is even read, because there is no id to
+ * read it by.
+ */
+function assertFactorCustomerResolved(invoice: InvoiceRecord, what: string): void {
+  if (isCustomerUnresolved(invoice)) throw new Error(unresolvedCustomerMessage(invoice, what))
+}
+
 export async function sendToFactor(input: Row, caller: Caller): Promise<Row> {
   const invoiceId = assertString(input.invoiceId, 'invoiceId')
 
   const invoiceRow = await getById(INVOICE_TABLE_NAME, invoiceId)
   if (!invoiceRow) throw new Error(`Invoice not found: ${invoiceId}`)
   const invoice = invoiceRow as unknown as InvoiceRecord
+
+  // Step R cutover. Refused before the customer is read, not after: an invoice whose
+  // order was never matched to a customer record carries no id to read, and handing
+  // a bill to somebody who will advance money on it is the last place to find that
+  // out. The release gate below still runs on its own; this never replaces it.
+  assertFactorCustomerResolved(invoice, 'sending it to the factor')
 
   const [orderRow, shipmentRow, customerRow, loadRows] = await Promise.all([
     getById(ORDER_TABLE_NAME, invoice.orderId),
@@ -206,6 +224,8 @@ export async function previewFactor(input: Row): Promise<Row> {
   const invoiceRow = await getById(INVOICE_TABLE_NAME, invoiceId)
   if (!invoiceRow) throw new Error(`Invoice not found: ${invoiceId}`)
   const invoice = invoiceRow as unknown as InvoiceRecord
+
+  assertFactorCustomerResolved(invoice, 'sending it to the factor')
 
   const [orderRow, shipmentRow, customerRow, loadRows] = await Promise.all([
     getById(ORDER_TABLE_NAME, invoice.orderId),

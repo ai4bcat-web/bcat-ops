@@ -44,7 +44,8 @@ import {
 } from './settlement'
 import { weekStartOfISO } from '../../../src/features/driver-pay/week'
 import { splitCityState, normalizeZip } from '../../../src/lib/otrInvoice'
-import { buildPodIndex, loadHasPod, normalizePro, type PodIndex } from '../../../src/lib/podPresence'
+import { buildPodIndex, loadHasPod, type PodIndex } from '../../../src/lib/podPresence'
+import { normalizePro } from '../../../src/lib/proNumber'
 import {
   currentLoadForDriver,
   driverIsOnLoad,
@@ -1417,7 +1418,7 @@ async function requestScanCleanup(
  * two half-PODs for one shipment and the app showed whichever it happened to find first.
  *
  * Matched on the PRO the driver typed, by the same rule the office matches on (normalizePro
- * in src/lib/podPresence.ts). Without a reference there is nothing to match on and a new
+ * in src/lib/proNumber.ts). Without a reference there is nothing to match on and a new
  * submission is the only honest answer — a loose POD belongs to whatever load staff assign
  * it to, not to the last one this driver happened to send.
  */

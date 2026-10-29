@@ -61,8 +61,7 @@ beforeEach(() => {
   updateLoadMock.mockClear()
   state = {
     loads: [load], drivers: [], equipment: [], selectedLoadId: 'l1', drawerMode: 'edit',
-    createPreFill: null, setSelectedLoad: vi.fn(), pendingIntakeItemId: null,
-    setPendingIntakeItem: vi.fn(), updateLoad: updateLoadMock, addLoad: vi.fn(),
+    setSelectedLoad: vi.fn(), updateLoad: updateLoadMock, refreshCalendarData: vi.fn(),
     maintenanceInvoices: [], intakeItems: [],
   }
 })

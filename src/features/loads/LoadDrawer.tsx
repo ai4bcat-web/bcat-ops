@@ -3,19 +3,21 @@ import { useLoadDriverDocs } from '@/hooks/useLoadDriverDocs'
 import { paperworkStatusLine } from '@/lib/paperworkLocation'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { errorMessage } from '@/lib/utils/errorMessage'
-import { useForm, Controller, useFieldArray, useWatch, type Control } from 'react-hook-form'
+import {
+  useForm, Controller,
+  type Control, type FieldErrors, type UseFormHandleSubmit, type UseFormRegister,
+  type UseFormSetValue, type UseFormWatch,
+} from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { CheckCircle2, Circle, Edit2, Trash2, Clock, CalendarRange, AlarmClock, HelpCircle, Upload, X, FileImage, ChevronDown, RotateCw, Plus, Truck, Package, Check, FileText } from 'lucide-react'
+import { CheckCircle2, Circle, Edit2, Upload, X, FileImage } from 'lucide-react'
 import { SidePanel } from '@/features/files/SidePanel'
 import { panelBtn } from '@/lib/ui/panel-btn'
-import { DirectoryPicker } from '@/components/directory-picker/DirectoryPicker'
 import { DirectoryCreateDialog } from '@/components/directory-picker/DirectoryCreateDialog'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
-import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { useAppStore } from '@/store/useAppStore'
 import { useLoads } from '@/hooks/useLoads'
 import { useDrivers } from '@/hooks/useDrivers'
@@ -24,705 +26,40 @@ import { LoadPods } from '@/features/pods/LoadPods'
 import { LoadDriverDocs } from './LoadDriverDocs'
 import { LoadPodNotes } from './LoadPodNotes'
 import { DriverDocUploadDialog } from '@/features/driver-docs'
-import { MoneyField } from '@/features/directory/components/MoneyField'
-import { updateIntakeItem, notifySlackStatusChange, uploadRateConfirm, createLocation } from '@/lib/apiClient'
+import { setLoadPro, uploadRateConfirm, createLocation } from '@/lib/apiClient'
 import { matchStopLocation, locationInputForStop } from '@/lib/locationAutoSave'
 import { uploadRateconAndApply } from '@/lib/rateconUpload'
-import { apptLadderAfterEdit } from '@/lib/apptStatus'
-import { freightSummary, hasFreight, PIECES_UNITS } from '@/lib/freight'
+import { freightSummary, hasFreight } from '@/lib/freight'
 import { staffUploadDriverDoc } from '@/lib/driverSubmissionsClient'
-import { loadSchemaFor, type LoadFormValues, type StopFormValue } from '@/lib/schemas'
-import { getStops, makeStop, deriveLegacyFields } from '@/lib/stops'
-import { apptTypeAfterEdit, requiresApptProofs } from '@/lib/apptQueue'
-import { locationAddress } from '@/lib/tmsDirectory'
+import { loadSchemaFor, type LoadFormValues } from '@/lib/schemas'
+import { getStops, deriveLegacyFields } from '@/lib/stops'
 import { apptNotices } from '@/lib/apptNotify'
 import { sendApptNotices } from '@/lib/sendApptNotices'
 import { useDirectory } from '@/hooks/useDirectory'
 import {
-  formatDateTime, formatDateTimeInput, fromDateTimeInput,
-  formatDateInput, fromDateInput, formatDateShort, apptHasTime, PENDING_LABEL,
+  formatDateTime, formatDateTimeInput,
+  formatDateShort, apptHasTime, PENDING_LABEL,
 } from '@/lib/date'
 import { toast } from 'sonner'
 import { proConflict } from '@/lib/proConflict'
 import { syncLoadRateToShipment } from '@/features/shipments/loadRateSync'
-import type { ApptType, Load, Stop } from '@/types'
-import type { CustomerRecord, LocationRecord } from '@/types/tms'
-import type { TenderPrefill } from '@/lib/intakeTender'
+import { customerDisplayName } from '@/lib/customerResolution'
+import {
+  Field, FreightFields, LegFlagToggles, LegStopsSection, NotesField, RateField, ReadonlyField,
+  SectionHeading, ToggleCard,
+} from './legForm'
+import { bookedAddressSnapshot, loadToStopForms, stopFormToStop } from './legFields'
+import type { Load, Stop } from '@/types'
+import type { LocationRecord } from '@/types/tms'
 
-// ── Stop ↔ form conversion ───────────────────────────────────────────────────
-// Form stores appt as a datetime-local / date string; the stored Stop uses ISO UTC.
-
-// A stored UTC-midnight value means no time was set — true for NEED without a desired
-// time, for FCFS, and now for an `exact` appt nobody has scheduled yet ("Pending").
-
-function stopToForm(stop: Stop): StopFormValue {
-  const isDateOnly =
-    stop.apptType === 'fcfs' ||
-    ((stop.apptType === 'tbd' || stop.apptType === 'exact' || !stop.apptType) && !apptHasTime(stop.appt))
-  return {
-    id: stop.id,
-    type: stop.type,
-    name: stop.name ?? '',
-    city: stop.city ?? '',
-    locationId: stop.locationId ?? null,
-    address: stop.address ?? null,
-    arrivedAt: stop.arrivedAt ?? null,
-    departedAt: stop.departedAt ?? null,
-    appt: stop.appt ? (isDateOnly ? formatDateInput(stop.appt) : formatDateTimeInput(stop.appt)) : '',
-    apptType: stop.apptType ?? 'exact',
-    apptEnd: stop.apptEnd ? formatDateTimeInput(stop.apptEnd) : '',
-    driverId: stop.driverId,
-    sequence: stop.sequence,
-  }
-}
-
-function loadToStopForms(load: Load): StopFormValue[] {
-  return getStops(load).map(stopToForm)
-}
-
-// Default stops for a brand-new load: one pickup + one delivery.
-function emptyStopForms(preDate?: string, driverId?: string | null): StopFormValue[] {
-  const pu = makeStop({ type: 'pickup', driverId: driverId ?? null }, 0)
-  const de = makeStop({ type: 'delivery', driverId: driverId ?? null }, 1)
-  // Date only — deliberately no default time. An 8:00/17:00 guess reads as a confirmed
-  // appointment nobody actually made; the stops show "Pending" until a real time is set.
-  return [
-    { ...stopToForm(pu), appt: preDate ?? '' },
-    { ...stopToForm(de), appt: preDate ?? '' },
-  ]
-}
+// ── Edit dialog ───────────────────────────────────────────────────────────────
 
 /**
- * Stop forms seeded from a parsed tender email.
- *
- * One form per stop the tender described, in the order it described them, so a multi-stop
- * route arrives as a multi-stop load. Falls back to the plain empty pair when the tender
- * turned out to carry no stops — a prefill that produced one lonely pickup would leave the
- * form invalid for a reason the dispatcher cannot see.
- *
- * `appt` takes the stop's own planned date, so pickup and delivery are not both stamped
- * with the pickup date. Date only, never a time, for the reason in emptyStopForms: an
- * invented time reads as an appointment somebody booked.
+ * The leg editor. It never brings a record into being: a load is created inside
+ * CREATE_SHIPMENT, with its PRO claimed in the same transaction, so there is no create
+ * mode here and no "Create Load" button to find.
  */
-/** The tender's facility instructions, labelled by which end they belong to. */
-function tenderNotes(tender: TenderPrefill | null | undefined): string {
-  if (!tender) return ''
-  const seen = new Set<string>()
-  return tender.stops
-    .filter((st) => st.instructions)
-    .map((st) => `${st.type === 'pickup' ? 'Pickup' : 'Delivery'}: ${st.instructions}`)
-    // The same instruction often repeats across stops of a multi-stop run; say it once.
-    .filter((line) => !seen.has(line) && seen.add(line))
-    .join('\n')
-}
-
-function tenderStopForms(
-  tender: TenderPrefill,
-  preDate?: string,
-  driverId?: string | null,
-  /*
-   * Batory appointments are never prefilled.
-   *
-   * Their loads go through the request-and-confirm ladder — a time is asked for, granted,
-   * and evidenced with screenshots — so a date carried over from the tender is a time
-   * nobody agreed, sitting in the very field the workflow exists to fill, and the load
-   * reads as booked. The rest of the stop — name, city, street, zip — still prefills, as
-   * it did before appointment prefill existed; only the appointment is left for a person.
-   */
-  skipAppointments = false,
-  /** The directory, so a facility seen before arrives already linked — hours, notes and all. */
-  locations: LocationRecord[] = [],
-): StopFormValue[] {
-  const ordered = [
-    ...tender.stops.filter((s) => s.type === 'pickup'),
-    ...tender.stops.filter((s) => s.type === 'delivery'),
-  ]
-  if (!ordered.some((s) => s.type === 'pickup') || !ordered.some((s) => s.type === 'delivery')) {
-    return emptyStopForms(preDate, driverId)
-  }
-  return ordered.map((st, i) => {
-    const base = stopToForm(makeStop({ type: st.type, driverId: driverId ?? null }, i))
-    const cityState = [st.city, st.state].filter(Boolean).join(', ')
-    /*
-     * A booked time makes this a real appointment; a date alone does not.
-     *
-     * The form's `appt` is a datetime-local string when there is a time and a plain date
-     * when there is not, which is the same distinction the stops themselves draw: a date at
-     * midnight means "this day, time still to be agreed" and must not read as 00:00 booked.
-     */
-    const when = skipAppointments ? '' : (st.dateStr ?? preDate ?? '')
-    const time = skipAppointments ? undefined : st.time
-    const address = {
-      ...base.address,
-      street: st.street ?? null,
-      city: st.city ?? null,
-      state: st.state ?? null,
-      zip: st.zip ?? null,
-    }
-    // A place we have filed before is linked at prefill, so the stop opens with the record
-    // the office already keeps — the point of filing it the first time.
-    const known = matchStopLocation({ type: st.type, name: st.name, city: cityState, address }, locations)
-    return {
-      ...base,
-      sequence: i,
-      appt: when && time ? `${when}T${time}` : when,
-      apptType: time ? ('exact' as const) : base.apptType,
-      ...(st.name ? { name: st.name } : {}),
-      ...(cityState ? { city: cityState } : {}),
-      address: known ? bookedAddressSnapshot(known) : address,
-      ...(known ? { locationId: known.id } : {}),
-    }
-  })
-}
-
-// "Split" = the delivery is run by a different driver than the pickup. A load is
-// split when any delivery stop has a driver assigned that differs from the first
-// pickup's driver. New / single-driver loads are not split.
-function deriveSplitFromStops(stops: StopFormValue[]): boolean {
-  const pickupDriver = stops.find((s) => s.type === 'pickup')?.driverId ?? null
-  return stops.some(
-    (s) => s.type === 'delivery' && (s.driverId ?? null) !== null && (s.driverId ?? null) !== pickupDriver,
-  )
-}
-
-// Form stop → stored Stop, with the Batory ladder reopened when the appointment changed
-// (see apptLadderAfterEdit): a confirmed stop given a new time is Dennis's work again.
-function stopFormToStop(s: StopFormValue, sequence: number, prev?: { type?: Stop['apptType']; value?: string }, was?: Stop): Stop {
-  const next = stopFormToStopRaw(s, sequence, prev, was)
-  return was ? { ...next, ...apptLadderAfterEdit(was, next) } : next
-}
-
-// Form stop → stored Stop (appt form string → ISO UTC, mirrors the legacy toIso()).
-function stopFormToStopRaw(
-  s: StopFormValue,
-  sequence: number,
-  prev?: { type?: Stop['apptType']; value?: string },
-  was?: Stop,
-): Stop {
-  // FCFS is always date-only. NEED and Exact are date-only until someone types a time —
-  // that's what makes an appointment read "Pending" instead of inventing midnight.
-  const dateOnly =
-    s.apptType === 'fcfs' || ((s.apptType === 'tbd' || s.apptType === 'exact') && s.appt.length <= 10)
-  return {
-    // Carry through everything the form doesn't edit — linked facility + booked snapshot,
-    // actual arrival/departure, booking-proof screenshots, Batory ladder state, etc.
-    ...(was ? {
-      colorKey: was.colorKey, apptThreadTs: was.apptThreadTs, apptProofs: was.apptProofs,
-      apptMoveRequested: was.apptMoveRequested, apptMoveTaskId: was.apptMoveTaskId,
-      apptStatus: was.apptStatus, apptChangeTo: was.apptChangeTo,
-      apptRequestedFor: was.apptRequestedFor, apptCleared: was.apptCleared,
-      arrivedAt: was.arrivedAt, departedAt: was.departedAt,
-    } : {}),
-    id: s.id,
-    type: s.type,
-    name: s.name?.trim() || undefined,
-    city: s.city?.trim() || undefined,
-    locationId: s.locationId?.trim() || (was?.locationId ?? null),
-    address: s.address ?? (was?.address ?? null),
-    appt: dateOnly ? fromDateInput(s.appt.slice(0, 10)) : fromDateTimeInput(s.appt),
-    // Same rule as the calendar and the Appts queue: the status saved is the status
-    // picked — a NEED stop with a time stays NEED until someone chooses Exact.
-    apptType: apptTypeAfterEdit(s.apptType, s.appt, prev),
-    apptEnd: s.apptType === 'range' && s.apptEnd ? fromDateTimeInput(s.apptEnd) : undefined,
-    driverId: s.driverId,
-    sequence,
-  }
-}
-
-// ── Miles calculator (Nominatim geocoding + OSRM routing) ────────────────────
-
-async function geocode(query: string): Promise<[number, number] | null> {
-  const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=1&countrycodes=us,ca`
-  const res = await fetch(url, { headers: { 'Accept-Language': 'en', 'User-Agent': 'bcat-ops/1.0' } })
-  if (!res.ok) return null
-  const data = await res.json() as Array<{ lat: string; lon: string }>
-  if (!data[0]) return null
-  return [parseFloat(data[0].lon), parseFloat(data[0].lat)]
-}
-
-async function calculateDrivingMiles(origin: string, destination: string): Promise<number> {
-  const [from, to] = await Promise.all([geocode(origin), geocode(destination)])
-  if (!from || !to) throw new Error('Could not find one or both locations')
-  const url = `https://router.project-osrm.org/route/v1/driving/${from[0]},${from[1]};${to[0]},${to[1]}?overview=false`
-  const res = await fetch(url)
-  if (!res.ok) throw new Error('Routing service unavailable')
-  const data = await res.json() as { routes?: Array<{ distance: number }> }
-  const meters = data.routes?.[0]?.distance
-  if (!meters) throw new Error('No route found')
-  return Math.round(meters * 0.000621371)
-}
-
-// ── Field wrappers ────────────────────────────────────────────────────────────
-
-function Field({ label, children, error, hint }: {
-  label: string; children: React.ReactNode; error?: string; hint?: string
-}) {
-  return (
-    <div className="space-y-1.5">
-      <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{label}</Label>
-      {children}
-      {hint && !error && <p className="text-xs text-muted-foreground">{hint}</p>}
-      {error && <p className="text-xs text-destructive">{error}</p>}
-    </div>
-  )
-}
-
-function ReadonlyField({ label, value }: { label: string; value?: string | null }) {
-  return (
-    <div className="flex justify-between items-start py-3 border-b border-border last:border-b-0">
-      <span className="text-xs text-muted-foreground uppercase tracking-wider font-medium">{label}</span>
-      <span className="text-sm font-medium text-foreground text-right max-w-[60%]">{value || '—'}</span>
-    </div>
-  )
-}
-
-// ── Section heading ───────────────────────────────────────────────────────────
-
-// Splits "YYYY-MM-DDTHH:mm" into date + time inputs so the time always
-// renders in 24-hour format regardless of browser locale.
-function DateTimeInput({
-  value, onChange, autoFocus, onKeyDown,
-}: {
-  value: string
-  onChange: (v: string) => void
-  autoFocus?: boolean
-  onKeyDown?: React.KeyboardEventHandler
-}) {
-  const date = value.slice(0, 10)
-  const time = value.slice(11, 16) || ''
-  const combine = (d: string, t: string) => (d && t ? `${d}T${t}` : d || '')
-  const inputCls = 'h-8 border border-input bg-background text-sm focus:outline-none focus:ring-1 focus:ring-ring px-2'
-  return (
-    <div className="flex" style={{ width: 'fit-content' }}>
-      <input
-        type="date"
-        autoFocus={autoFocus}
-        className={inputCls}
-        value={date}
-        onChange={(e) => onChange(combine(e.target.value, time))}
-        onKeyDown={onKeyDown}
-        style={{ width: 136, borderRadius: '6px 0 0 6px', borderRight: 'none' }}
-      />
-      <input
-        type="time"
-        placeholder="14:30"
-        className={inputCls}
-        value={time}
-        onChange={(e) => onChange(combine(date, e.target.value))}
-        onKeyDown={onKeyDown}
-        style={{ width: 58, borderRadius: '0 6px 6px 0', textAlign: 'center' }}
-      />
-    </div>
-  )
-}
-
-function SectionHeading({ children }: { children: React.ReactNode }) {
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-      <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--ds-t3)' }}>
-        {children}
-      </span>
-      <div style={{ flex: 1, height: 1, background: 'var(--ds-border)' }} />
-    </div>
-  )
-}
-
-// ── Appointment type group ────────────────────────────────────────────────────
-
-const APPT_TYPE_OPTIONS: { value: ApptType; label: string; icon: React.ElementType }[] = [
-  { value: 'exact', label: 'Exact',  icon: Clock        },
-  { value: 'range', label: 'Range',  icon: CalendarRange },
-  { value: 'fcfs',  label: 'FCFS',   icon: AlarmClock   },
-  { value: 'tbd',   label: 'NEED',   icon: HelpCircle   },
-]
-
-function ApptFields({
-  label,
-  typeField,
-  startField,
-  endField,
-  startError,
-  endError,
-}: {
-  label: string
-  typeField: { value: ApptType; onChange: (v: ApptType) => void }
-  startField: { value: string; onChange: (v: string) => void }
-  endField:   { value: string; onChange: (v: string) => void }
-  startError?: string
-  endError?: string
-}) {
-  const type = typeField.value
-
-  return (
-    <div className="space-y-3 rounded-md border border-border p-4 bg-muted/30">
-      <div className="flex items-center justify-between gap-3">
-        <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider shrink-0">{label}</Label>
-        <ToggleGroup
-          type="single"
-          value={type}
-          onValueChange={(v) => v && typeField.onChange(v as ApptType)}
-          className="shrink-0"
-        >
-          {APPT_TYPE_OPTIONS.map(({ value, label: l, icon: Icon }) => (
-            <ToggleGroupItem key={value} value={value} aria-label={l} className="gap-1">
-              <Icon className="size-3" />{l}
-            </ToggleGroupItem>
-          ))}
-        </ToggleGroup>
-      </div>
-
-      {type === 'exact' && (
-        <div>
-          {/* Date and time are separate so the time can be left blank — a load can be
-              scheduled for a day before anyone has confirmed the hour. */}
-          <div className="flex gap-2">
-            <Input
-              type="date"
-              className="h-9 text-sm"
-              style={{ flex: 1 }}
-              aria-label={`${label} date`}
-              value={startField.value.slice(0, 10)}
-              onChange={(e) => {
-                const t = startField.value.length > 10 ? startField.value.slice(11, 16) : ''
-                startField.onChange(e.target.value ? (t ? `${e.target.value}T${t}` : e.target.value) : '')
-              }}
-            />
-            <Input
-              type="time"
-              className="h-9 text-sm"
-              style={{ width: 120 }}
-              aria-label={`${label} time`}
-              value={startField.value.length > 10 ? startField.value.slice(11, 16) : ''}
-              onChange={(e) => {
-                const d = startField.value.slice(0, 10)
-                startField.onChange(d ? (e.target.value ? `${d}T${e.target.value}` : d) : '')
-              }}
-            />
-          </div>
-          <p className="text-xs text-muted-foreground mt-1.5">
-            Leave the time blank until it's confirmed — it shows as “Pending”.
-          </p>
-          {startError && <p className="text-xs text-destructive mt-1">{startError}</p>}
-        </div>
-      )}
-
-      {type === 'range' && (
-        <div className="grid grid-cols-2 gap-2">
-          <div>
-            <p className="text-xs text-muted-foreground mb-1">From</p>
-            <DateTimeInput
-  
-              value={startField.value}
-              onChange={startField.onChange}
-            />
-            {startError && <p className="text-xs text-destructive mt-1">{startError}</p>}
-          </div>
-          <div>
-            <p className="text-xs text-muted-foreground mb-1">To</p>
-            <DateTimeInput
-  
-              value={endField.value}
-              onChange={endField.onChange}
-            />
-            {endError && <p className="text-xs text-destructive mt-1">{endError}</p>}
-          </div>
-        </div>
-      )}
-
-      {type === 'fcfs' && (
-        <div>
-          <Input
-            type="date"
-            className="h-9 text-sm"
-            value={startField.value.slice(0, 10)}
-            onChange={(e) => startField.onChange(e.target.value)}
-          />
-          <p className="text-xs text-muted-foreground mt-1.5">
-            First Come First Serve — any arrival time on this date.
-          </p>
-          {startError && <p className="text-xs text-destructive mt-1">{startError}</p>}
-        </div>
-      )}
-
-      {type === 'tbd' && (
-        <div>
-          <div className="flex gap-2">
-            <Input
-              type="date"
-              className="h-9 text-sm"
-              style={{ flex: 1 }}
-              value={startField.value.slice(0, 10)}
-              onChange={(e) => {
-                const t = startField.value.length > 10 ? startField.value.slice(11, 16) : ''
-                startField.onChange(e.target.value ? (t ? `${e.target.value}T${t}` : e.target.value) : '')
-              }}
-            />
-            <Input
-              type="time"
-              className="h-9 text-sm"
-              style={{ width: 120 }}
-              value={startField.value.length > 10 ? startField.value.slice(11, 16) : ''}
-              onChange={(e) => {
-                const d = startField.value.slice(0, 10)
-                startField.onChange(d ? (e.target.value ? `${d}T${e.target.value}` : d) : '')
-              }}
-            />
-          </div>
-          <p className="text-xs text-muted-foreground mt-1.5">
-            No firm appointment yet — pick the date, and optionally the time you want (shows as “NEED HH:MM”).
-          </p>
-          {startError && <p className="text-xs text-destructive mt-1">{startError}</p>}
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ── Driver picker ─────────────────────────────────────────────────────────────
-
-function DriverPicker({
-  value,
-  onChange,
-  drivers,
-  placeholder = 'Unassigned',
-  disabled = false,
-}: {
-  value: string | null
-  onChange: (v: string | null) => void
-  drivers: Array<{ id: string; name: string }>
-  placeholder?: string
-  disabled?: boolean
-}) {
-  const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
-  const selected = value ? drivers.find((d) => d.id === value) : null
-
-  useEffect(() => {
-    if (!open) return
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [open])
-
-  return (
-    <div ref={ref} style={{ position: 'relative' }}>
-      <button
-        type="button"
-        disabled={disabled}
-        onClick={() => { if (!disabled) setOpen((o) => !o) }}
-        style={{
-          width: '100%', height: 36, display: 'flex', alignItems: 'center',
-          justifyContent: 'space-between', padding: '0 10px',
-          border: '1px solid var(--ds-border)', borderRadius: 6,
-          background: disabled ? 'var(--ds-bg)' : 'var(--ds-surface)',
-          cursor: disabled ? 'not-allowed' : 'pointer',
-          opacity: disabled ? 0.7 : 1,
-          fontSize: 14, color: selected ? 'var(--ds-t1)' : 'var(--ds-t3)',
-        }}
-      >
-        <span>{selected?.name ?? placeholder}</span>
-        <ChevronDown style={{ width: 14, height: 14, opacity: 0.5 }} />
-      </button>
-      {open && !disabled && (
-        <div style={{
-          position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, zIndex: 60,
-          background: 'var(--ds-surface)', border: '1px solid var(--ds-border)',
-          borderRadius: 8, boxShadow: 'var(--sh-lg)', overflow: 'hidden',
-        }}>
-          <button
-            type="button"
-            onClick={() => { onChange(null); setOpen(false) }}
-            style={{
-              width: '100%', padding: '8px 12px', textAlign: 'left',
-              fontSize: 13, color: 'var(--ds-t2)', background: 'transparent',
-              cursor: 'pointer', border: 'none',
-              borderBottom: '1px solid var(--ds-border)',
-            }}
-          >
-            Unassigned
-          </button>
-          {drivers.map((d) => (
-            <button
-              key={d.id}
-              type="button"
-              onClick={() => { onChange(d.id); setOpen(false) }}
-              style={{
-                width: '100%', padding: '8px 12px', textAlign: 'left',
-                fontSize: 13, cursor: 'pointer', border: 'none',
-                background: value === d.id ? 'var(--ds-blue-bg)' : 'transparent',
-                color: value === d.id ? 'var(--ds-blue)' : 'var(--ds-t1)',
-                fontWeight: value === d.id ? 500 : 400,
-              }}
-            >
-              {d.name}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ── Stop card (one pickup or delivery in the stops editor) ────────────────────
-
-/**
- * Booked snapshot: what the facility's address was when this stop was booked. A later
- * directory edit does not rewrite history on the load. Coordinates ride along only while
- * Google's result is still fresh; an expired pin is not frozen into the stop.
- */
-function bookedAddressSnapshot(loc: LocationRecord): NonNullable<Stop['address']> {
-  const fresh = !!loc.geocodeExpiresAt && Date.parse(loc.geocodeExpiresAt) > Date.now()
-  return {
-    ...locationAddress(loc),
-    ...(fresh ? { lat: loc.lat ?? null, lng: loc.lng ?? null, timezone: loc.timezone ?? null, geocodeExpiresAt: loc.geocodeExpiresAt ?? null } : {}),
-  }
-}
-
-function StopCard({
-  index, control, register, errors, drivers, onRemove, canRemove, onCityBlur,
-  stopType, split, onPickupDriverChange, locations, onAutoFillCity, setValue, onCreateLocation,
-}: {
-  index: number
-  control: Control<LoadFormValues>
-  register: ReturnType<typeof useForm<LoadFormValues>>['register']
-  errors: ReturnType<typeof useForm<LoadFormValues>>['formState']['errors']
-  drivers: Array<{ id: string; name: string }>
-  onRemove: () => void
-  canRemove: boolean
-  onCityBlur: () => void
-  stopType: 'pickup' | 'delivery'
-  split: boolean
-  // Called after a pickup stop's driver changes so deliveries can mirror it (non-split).
-  onPickupDriverChange: (value: string | null) => void
-  /** Directory locations for the linked-location picker. */
-  locations: LocationRecord[]
-  setValue: ReturnType<typeof useForm<LoadFormValues>>['setValue']
-  onAutoFillCity: (city: string) => void
-  /** Inline "+": open the location create dialog prefilled for this stop. */
-  onCreateLocation: (initial: { name?: string; city?: string }) => void
-}) {
-  const stopErr = errors.stops?.[index]
-  const stopName = useWatch({ control, name: `stops.${index}.name` })
-  const stopCity = useWatch({ control, name: `stops.${index}.city` })
-  // Link a directory location to this stop: id + booked snapshot, and fill blank name/city.
-  const linkStop = (loc: LocationRecord | null) => {
-    setValue(`stops.${index}.locationId`, loc?.id ?? null, { shouldDirty: true })
-    setValue(`stops.${index}.address`, loc ? bookedAddressSnapshot(loc) : null, { shouldDirty: true })
-    if (loc && !stopName) setValue(`stops.${index}.name`, loc.name, { shouldDirty: true })
-    if (loc && !stopCity && loc.city) setValue(`stops.${index}.city`, [loc.city, loc.state].filter(Boolean).join(', '), { shouldDirty: true })
-  }
-  return (
-    <div style={{ border: '1px solid var(--ds-border)', borderRadius: 10, padding: 14, marginBottom: 12, background: 'var(--ds-surface)' }}>
-      {/* Header: type toggle + remove */}
-      <div className="flex items-center justify-between gap-2" style={{ marginBottom: 12 }}>
-        <Controller
-          name={`stops.${index}.type`}
-          control={control}
-          render={({ field }) => (
-            <ToggleGroup type="single" value={field.value} onValueChange={(v) => v && field.onChange(v)}>
-              <ToggleGroupItem value="pickup" className="gap-1.5"><Truck className="size-3.5" /> Pickup</ToggleGroupItem>
-              <ToggleGroupItem value="delivery" className="gap-1.5"><Package className="size-3.5" /> Delivery</ToggleGroupItem>
-            </ToggleGroup>
-          )}
-        />
-        <Button type="button" variant="ghost" size="sm" className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive" disabled={!canRemove} onClick={onRemove} title={canRemove ? 'Remove stop' : 'A load needs at least one pickup and one delivery'}>
-          <Trash2 className="size-4" />
-        </Button>
-      </div>
-
-      {/* Name + city */}
-      <div className="grid grid-cols-2 gap-3" style={{ marginBottom: 12 }}>
-        <Field label="Facility / Name">
-          <Input {...register(`stops.${index}.name`)} placeholder="Shipper / Consignee" className="h-9"
-            onBlur={(e) => {
-              register(`stops.${index}.name`).onBlur(e)
-              const hit = locations.find((l) => l.name.toLowerCase() === e.target.value.trim().toLowerCase())
-              if (hit?.city) onAutoFillCity(hit.city)
-            }} />
-        </Field>
-        <Field label="City">
-          <Input
-            {...register(`stops.${index}.city`)}
-            placeholder="Chicago, IL"
-            className="h-9"
-            onBlur={(e) => { register(`stops.${index}.city`).onBlur(e); onCityBlur() }}
-          />
-        </Field>
-      </div>
-
-      {/* Directory-linked location */}
-      <div style={{ marginBottom: 12 }}>
-        <Controller
-          name={`stops.${index}.locationId`}
-          control={control}
-          render={({ field }) => (
-            <Field label="Directory location">
-              <DirectoryPicker
-                type="location"
-                value={field.value}
-                customers={[]}
-                locations={locations}
-                placeholder="Link to directory location…"
-                onChange={(id, record) => linkStop(record && 'name' in record && id ? (record as LocationRecord) : null)}
-                onCreateNew={(initial) => onCreateLocation({ name: initial.name || stopName || undefined, city: stopCity || undefined })}
-              />
-            </Field>
-          )}
-        />
-      </div>
-
-      {/* Appointment */}
-      <Controller
-        name={`stops.${index}.apptType`}
-        control={control}
-        render={({ field: tf }) => (
-          <Controller name={`stops.${index}.appt`} control={control} render={({ field: sf }) => (
-            <Controller name={`stops.${index}.apptEnd`} control={control} render={({ field: ef }) => (
-              <ApptFields
-                label="Appointment"
-                typeField={{ value: tf.value as ApptType, onChange: (v) => { tf.onChange(v); ef.onChange('') } }}
-                startField={{ value: sf.value ?? '', onChange: sf.onChange }}
-                endField={{ value: ef.value ?? '', onChange: ef.onChange }}
-                startError={stopErr?.appt?.message}
-                endError={stopErr?.apptEnd?.message}
-              />
-            )} />
-          )} />
-        )}
-      />
-
-      {/* Driver — non-split deliveries mirror the pickup driver (read-only). */}
-      <div style={{ marginTop: 12 }}>
-        <Field
-          label="Driver"
-          hint={!split && stopType === 'delivery' ? 'Same as pickup — enable Split to assign separately' : undefined}
-        >
-          <Controller
-            name={`stops.${index}.driverId`}
-            control={control}
-            render={({ field }) => (
-              <DriverPicker
-                value={field.value}
-                onChange={(v) => {
-                  field.onChange(v)
-                  if (!split && stopType === 'pickup') onPickupDriverChange(v)
-                }}
-                drivers={drivers}
-                disabled={!split && stopType === 'delivery'}
-              />
-            )}
-          />
-        </Field>
-      </div>
-    </div>
-  )
-}
-
-// ── New Load Dialog (create mode) ─────────────────────────────────────────────
-
-function NewLoadDialog({
+function EditLoadDialog({
   isOpen,
   onClose,
   handleSubmit,
@@ -733,137 +70,30 @@ function NewLoadDialog({
   register,
   watch,
   setValue,
-  mode = 'create',
   saving = false,
-  aljexId,
+  load,
+  onEditPro,
   // No onDelete: a load carries a PRO number, and a PRO number is permanent.
-  tender,
-  isBatory = false,
 }: {
   isOpen: boolean
   onClose: () => void
-  handleSubmit: ReturnType<typeof useForm<LoadFormValues>>['handleSubmit']
+  handleSubmit: UseFormHandleSubmit<LoadFormValues>
   activeDrivers: Array<{ id: string; name: string }>
   onSubmit: (values: LoadFormValues) => Promise<void>
-  errors: ReturnType<typeof useForm<LoadFormValues>>['formState']['errors']
-  control: ReturnType<typeof useForm<LoadFormValues>>['control']
-  register: ReturnType<typeof useForm<LoadFormValues>>['register']
-  watch: ReturnType<typeof useForm<LoadFormValues>>['watch']
-  setValue: ReturnType<typeof useForm<LoadFormValues>>['setValue']
-  mode?: 'create' | 'edit'
-  /** A save is in flight: the button goes dead so a double-click cannot create twice. */
+  errors: FieldErrors<LoadFormValues>
+  control: Control<LoadFormValues>
+  register: UseFormRegister<LoadFormValues>
+  watch: UseFormWatch<LoadFormValues>
+  setValue: UseFormSetValue<LoadFormValues>
+  /** A save is in flight: the button goes dead so a double-click cannot save twice. */
   saving?: boolean
-  aljexId?: string
-  /** What intake parsed off the tender, including any document it carried. */
-  tender?: TenderPrefill | null
-  /** Batory loads take their appointments from the request ladder, never from a tender. */
-  isBatory?: boolean
+  load?: Load
+  /** Pro # moves through SET_LOAD_PRO, never through a load write. */
+  onEditPro: () => void
 }) {
-  // The reusable address book: customer + facility names suggest as you type.
+  // The reusable address book: facility names suggest as you type.
   const directory = useDirectory()
-  const [milesLoading, setMilesLoading] = useState(false)
-  const [createDirectory, setCreateDirectory] = useState<{ type: 'customer' | 'location'; initial?: { name?: string; city?: string }; stopIndex?: number } | null>(null)
-
-  const { fields: stopFields, append, remove } = useFieldArray({ control, name: 'stops' })
-
-  // Split = pickup & delivery run by different drivers. When off, the delivery
-  // driver mirrors the pickup driver (assigning a pickup driver defaults the
-  // delivery to the same). Turning split on clears deliveries so they default
-  // back to "Unassigned" for separate assignment.
-  const [split, setSplit] = useState(false)
-
-  // Initialise the split toggle from the loaded form values whenever the dialog opens
-  // (state adjusted during render on the open transition — no effect needed).
-  const [wasOpen, setWasOpen] = useState(isOpen)
-  if (isOpen !== wasOpen) {
-    setWasOpen(isOpen)
-    if (isOpen) setSplit(deriveSplitFromStops(watch('stops') ?? []))
-  }
-
-  // Batory defaults: when a new load's customer runs the Batory ladder (the linked
-  // customer's apptWorkflow, else the name), the pickup defaults to NEED with 12:00 PM
-  // and the delivery defaults to NEED. Only applies in create mode and only when the
-  // stops are still at their vanilla defaults (no names, no times) — never overwrites
-  // deliberate edits.
-  const watchedCustomerId = watch('customerId')
-  const linkedCustomer = directory.customers.find((c) => c.id === watchedCustomerId) ?? null
-  useEffect(() => {
-    if (mode !== 'create') return
-    const customer = watch('customer')
-    if (!requiresApptProofs({ customer, customerApptWorkflow: linkedCustomer?.apptWorkflow ?? null })) return
-
-    const stops = watch('stops') ?? []
-    if (stops.length === 0) return
-
-    // Only apply when stops are untouched — no facility names, no times set.
-    const isVanilla = stops.every((s) =>
-      !s.name && !s.city &&
-      (s.apptType === 'exact') &&
-      (!s.appt || s.appt.length <= 10), // date-only, no time chosen yet
-    )
-    if (!isVanilla) return
-
-    // Apply Batory defaults: pickup → NEED with noon, delivery → NEED.
-    stops.forEach((s, i) => {
-      if (s.type === 'pickup') {
-        const date = s.appt?.slice(0, 10) || ''
-        const apptWithTime = date ? `${date}T12:00` : ''
-        setValue(`stops.${i}.apptType`, 'tbd', { shouldDirty: true })
-        if (apptWithTime) setValue(`stops.${i}.appt`, apptWithTime, { shouldDirty: true })
-      }
-      if (s.type === 'delivery') {
-        setValue(`stops.${i}.apptType`, 'tbd', { shouldDirty: true })
-      }
-    })
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [watch('customer'), linkedCustomer?.apptWorkflow])
-
-  // Mirror a chosen pickup driver onto every delivery stop (non-split loads).
-  const syncDeliveriesToDriver = (value: string | null) => {
-    const stops = watch('stops') ?? []
-    stops.forEach((s, j) => {
-      if (s.type === 'delivery') setValue(`stops.${j}.driverId`, value, { shouldDirty: true })
-    })
-  }
-
-  const handleSplitToggle = (next: boolean) => {
-    setSplit(next)
-    if (next) {
-      // Choosing split → deliveries default to "Assign driver" (Unassigned).
-      syncDeliveriesToDriver(null)
-    } else {
-      // Back to single driver → deliveries mirror the first pickup's driver.
-      const stops = watch('stops') ?? []
-      syncDeliveriesToDriver(stops.find((s) => s.type === 'pickup')?.driverId ?? null)
-    }
-  }
-
-  // Miles = driving distance from the first pickup's city to the last delivery's city.
-  async function calcMiles() {
-    const stops = watch('stops') ?? []
-    const o = (stops.find((s) => s.type === 'pickup')?.city ?? '').trim()
-    const d = ([...stops].reverse().find((s) => s.type === 'delivery')?.city ?? '').trim()
-    if (!o || !d) return
-    setMilesLoading(true)
-    try {
-      const miles = await calculateDrivingMiles(o, d)
-      setValue('miles', miles, { shouldDirty: true })
-    } catch (err) {
-      toast.error(`Miles calculation failed: ${err instanceof Error ? err.message : 'unknown error'}`)
-    } finally {
-      setMilesLoading(false)
-    }
-  }
-
-  const addStop = (type: 'pickup' | 'delivery') => {
-    const stops = watch('stops') ?? []
-    const prevDriver = stopFields.length > 0 ? watch(`stops.${stopFields.length - 1}.driverId`) : null
-    // Non-split deliveries mirror the pickup driver; everything else carries the previous stop's driver.
-    const driverId = type === 'delivery' && !split
-      ? (stops.find((s) => s.type === 'pickup')?.driverId ?? null)
-      : (prevDriver ?? null)
-    append(stopToForm(makeStop({ type, driverId }, stopFields.length)))
-  }
+  const [createLocationFor, setCreateLocationFor] = useState<{ initial?: { name?: string; city?: string }; stopIndex: number } | null>(null)
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => { if (!open) onClose() }}>
@@ -879,7 +109,7 @@ function NewLoadDialog({
           flexShrink: 0,
         }}>
           <h2 style={{ fontSize: 16, fontWeight: 600, color: 'var(--ds-t1)', margin: 0 }}>
-            {mode === 'edit' ? `Edit — ${aljexId ?? 'Load'}` : 'New Load'}
+            {`Edit — ${load?.aljexId ?? 'Load'}`}
           </h2>
         </div>
 
@@ -887,259 +117,69 @@ function NewLoadDialog({
         <div style={{ flex: 1, overflowY: 'auto', padding: '24px 24px 8px' }}>
           <form id="new-load-form" onSubmit={handleSubmit(onSubmit)}>
 
-            {/*
-              What the tender brought with it.
-              Building a load from intake attaches the rate confirmation that arrived on the
-              Slack message, but it happens on save — so without saying so here, somebody
-              fills the form with no idea whether the document is coming, and uploads a
-              second copy to be sure. It also says plainly when the tender had NO document,
-              which is the more common case and the one worth knowing before you look for it.
-            */}
-            {mode === 'create' && tender && (
-              <div
-                style={{
-                  display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 16,
-                  padding: '10px 12px', borderRadius: 8, fontSize: 12.5,
-                  background: tender.rateConKey ? '#ecfdf5' : 'var(--ds-bg)',
-                  border: `1px solid ${tender.rateConKey ? '#86efac' : 'var(--ds-border)'}`,
-                  color: tender.rateConKey ? '#15803d' : 'var(--ds-t3)',
-                }}
-              >
-                {tender.rateConKey ? <Check size={14} style={{ marginTop: 1, flexShrink: 0 }} />
-                  : <FileText size={14} style={{ marginTop: 1, flexShrink: 0 }} />}
-                <span>
-                  {/*
-                    Said here because a blank appointment on a Batory load otherwise reads
-                    as a prefill that failed, and somebody goes looking for the date in the
-                    email instead of starting the request.
-                  */}
-                  {isBatory && (
-                    <span style={{ display: 'block', marginBottom: 4 }}>
-                      <b>Batory load</b> — appointments are left blank on purpose; request
-                      them through the appointments page.
-                    </span>
-                  )}
-                  {tender.rateConKey ? (
-                    <>
-                      <b>Rate confirmation attached</b> from the tender — it goes on the load
-                      when you save, and the factoring queue reads it from there.
-                    </>
-                  ) : (
-                    <>
-                      This tender arrived with <b>no rate confirmation</b> attached. Upload one
-                      on the load or in the factoring queue once you have it.
-                    </>
-                  )}
-                </span>
-              </div>
-            )}
-
             {/* ── Section 1: Identifiers ─────────────────────────────── */}
             <div style={{ marginBottom: 24 }}>
               <SectionHeading>Identifiers</SectionHeading>
+              {/*
+                Pro #, TMS ID and Pickup # are read-only to a signed-in client: a PRO is
+                claimed atomically and never released, and the other two fall back to it,
+                so the server owns all three. Moving a PRO is its own action — it claims
+                the new number and keeps the old one claimed forever.
+              */}
               <div className="grid grid-cols-3 gap-3" style={{ marginBottom: 12 }}>
-                <Field label="Pro #" error={errors.aljexId?.message}>
-                  <Input {...register('aljexId')} placeholder="A-2847391" className="h-9" />
+                <Field label="Pro #" hint="Changing a Pro # claims the new number and never releases the old one.">
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <Input value={load?.aljexId ?? ''} readOnly disabled className="h-9" />
+                    <Button type="button" variant="outline" size="sm" className="h-9 px-3 shrink-0" aria-label="Change Pro #" onClick={onEditPro}>
+                      Change
+                    </Button>
+                  </div>
                 </Field>
-                <Field label="TMS ID / PO" error={errors.tmsId?.message}>
-                  <Input {...register('tmsId')} placeholder="TMS-44201" className="h-9" />
+                <Field label="TMS ID / PO">
+                  <Input value={load?.tmsId ?? ''} readOnly disabled className="h-9" />
                 </Field>
-                <Field label="Pickup #" error={errors.pickupNumber?.message}>
-                  <Input {...register('pickupNumber')} placeholder="PU-8812" className="h-9" />
+                <Field label="Pickup #">
+                  <Input value={load?.pickupNumber ?? ''} readOnly disabled className="h-9" />
                 </Field>
                 <Field label="Trailer" hint="named by the driver as they leave the pickup">
                   <Input {...register('trailerNumber')} placeholder="5302" className="h-9" />
                 </Field>
               </div>
-              {/* What is on the truck — read off the rate con when one is uploaded, editable here. */}
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-[2fr_1fr_1fr_1fr_1.4fr]">
-                <Field label="Commodity" error={errors.commodity?.message}>
-                  <Input {...register('commodity')} placeholder="Paper goods" className="h-9" />
-                </Field>
-                <Field label="Weight (lbs)" error={errors.weight?.message}>
-                  <Input type="number" min={0} step={1} {...register('weight', { valueAsNumber: true })} placeholder="41000" className="h-9" />
-                </Field>
-                <Field label="Qty" error={errors.pieces?.message}>
-                  <Input type="number" min={0} step={1} {...register('pieces', { valueAsNumber: true })} placeholder="22" className="h-9" />
-                </Field>
-                <Field label="Unit">
-                  <select
-                    {...register('piecesUnit')}
-                    className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground"
-                    aria-label="Quantity unit"
-                  >
-                    <option value="">pieces</option>
-                    {PIECES_UNITS.filter((u) => u !== 'pieces').map((u) => <option key={u} value={u}>{u}</option>)}
-                  </select>
-                </Field>
-                {/* Declared value of the freight — the carrier booking insurance check reads it. */}
-                <Controller
-                  name="cargoValueCents"
-                  control={control}
-                  render={({ field }) => (
-                    <MoneyField
-                      label="Cargo value"
-                      value={field.value}
-                      onChange={field.onChange}
-                      placeholder="25000.00"
-                      error={errors.cargoValueCents?.message}
-                    />
-                  )}
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <Controller
-                  name="customerId"
-                  control={control}
-                  render={({ field }) => (
-                    <Field label="Customer">
-                      <DirectoryPicker
-                        type="customer"
-                        value={field.value}
-                        customers={directory.customers}
-                        locations={directory.locations}
-                        placeholder="Select customer…"
-                        onChange={(id, record) => {
-                          field.onChange(id ?? '')
-                          setValue('customer', record?.name ?? '', { shouldDirty: true })
-                        }}
-                        onCreateNew={(initial) => setCreateDirectory({ type: 'customer', initial })}
-                      />
-                    </Field>
-                  )}
-                />
-                <Field label="Customer / Broker text" hint="Editable display name">
-                  <Input {...register('customer')} placeholder="Arrive Logistics, Echo Global…" className="h-9" />
+              <FreightFields control={control} register={register} errors={errors} />
+              {/*
+                The customer belongs to the SHIPMENT, not to this leg.
+
+                Writing `customer`/`customerId` from here set Load.customerId while the
+                Shipment and the Order stayed unresolved, so the release gate and the AR
+                worklist disagreed with what the calendar showed. SET_SHIPMENT_CUSTOMER on
+                the shipment detail writes all three together, which is why the link lives
+                there and not here.
+              */}
+              <div style={{ marginTop: 12 }}>
+                <Field label="Customer" hint="Link or change the customer on the shipment detail.">
+                  <Input value={customerDisplayName({ customerId: load?.customerId, customerName: load?.customer })} readOnly disabled className="h-9" />
                 </Field>
               </div>
             </div>
 
             {/* ── Section 2: Stops (multi-pickup / multi-delivery) ───── */}
-            <div style={{ marginBottom: 24 }}>
-              <SectionHeading>Stops</SectionHeading>
-
-              {/* Split assignment toggle — when off, the delivery driver mirrors the pickup driver. */}
-              <label
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14,
-                  fontSize: 12.5, color: 'var(--ds-t2)', cursor: 'pointer', userSelect: 'none',
-                }}
-              >
-                <input
-                  type="checkbox"
-                  checked={split}
-                  onChange={(e) => handleSplitToggle(e.target.checked)}
-                  style={{ width: 15, height: 15, cursor: 'pointer' }}
-                />
-                Split assignment — different driver for delivery
-              </label>
-
-              {stopFields.map((f, i) => (
-                <StopCard
-                  locations={directory.locations}
-                  onAutoFillCity={(city) => setValue(`stops.${i}.city`, city, { shouldDirty: true })}
-                  onCreateLocation={(initial) => setCreateDirectory({ type: 'location', initial, stopIndex: i })}
-                  key={f.id}
-                  index={i}
-                  control={control}
-                  register={register}
-                  errors={errors}
-                  drivers={activeDrivers}
-                  canRemove={stopFields.length > 2}
-                  onRemove={() => remove(i)}
-                  onCityBlur={calcMiles}
-                  stopType={(watch(`stops.${i}.type`) ?? 'pickup') as 'pickup' | 'delivery'}
-                  split={split}
-                  onPickupDriverChange={syncDeliveriesToDriver}
-                  setValue={setValue}
-                />
-              ))}
-
-              {typeof errors.stops?.message === 'string' && (
-                <p className="text-xs text-destructive" style={{ marginBottom: 8 }}>{errors.stops.message}</p>
-              )}
-
-              <div className="flex items-center gap-2" style={{ marginBottom: 14 }}>
-                <Button type="button" variant="outline" size="sm" className="h-8 gap-1.5" onClick={() => addStop('pickup')}>
-                  <Plus className="size-3.5" /> Add Pickup
-                </Button>
-                <Button type="button" variant="outline" size="sm" className="h-8 gap-1.5" onClick={() => addStop('delivery')}>
-                  <Plus className="size-3.5" /> Add Delivery
-                </Button>
-              </div>
-
-              {/* Miles (first pickup → last delivery) */}
-              <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, maxWidth: 240 }}>
-                <div style={{ flex: 1 }}>
-                  <Field label="Miles">
-                    <Input
-                      type="number"
-                      min={0}
-                      step={1}
-                      {...register('miles', { valueAsNumber: true })}
-                      placeholder="Auto-calculated"
-                      className="h-9"
-                      disabled={milesLoading}
-                    />
-                  </Field>
-                </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-9 px-3 shrink-0"
-                  disabled={milesLoading}
-                  title="Recalculate miles (first pickup → last delivery)"
-                  onClick={() => calcMiles()}
-                >
-                  <RotateCw className={`size-3.5 ${milesLoading ? 'animate-spin' : ''}`} />
-                </Button>
-              </div>
-            </div>
-
+            <LegStopsSection
+              isOpen={isOpen}
+              control={control}
+              register={register}
+              errors={errors}
+              watch={watch}
+              setValue={setValue}
+              drivers={activeDrivers}
+              locations={directory.locations}
+              onCreateLocation={(initial, stopIndex) => setCreateLocationFor({ initial, stopIndex })}
+            />
 
             {/* ── Section 5: Financials ──────────────────────────────── */}
             <div style={{ marginBottom: 16 }}>
               <SectionHeading>Financials</SectionHeading>
-
-              {/* Rate */}
-              <div style={{ maxWidth: 200, marginBottom: 16 }}>
-                <Field label="Rate ($)">
-                  <div style={{ position: 'relative' }}>
-                    <span style={{
-                      position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)',
-                      fontSize: 14, color: 'var(--ds-t3)', pointerEvents: 'none',
-                    }}>$</span>
-                    {/* Emptying the box must mean "no rate", not NaN: the schema rejects
-                        NaN, so a cleared field refused the save with no message on it. */}
-                    <Input
-                      type="number"
-                      min={0}
-                      step={0.01}
-                      {...register('rate', { setValueAs: (v) => (v === '' || v == null ? null : Number(v)) })}
-                      placeholder="0.00"
-                      className="h-9"
-                      style={{ paddingLeft: 22 }}
-                    />
-                  </div>
-                </Field>
-              </div>
-
-              {/* Notes */}
-              <Field label="Notes">
-                <textarea
-                  {...register('notes')}
-                  placeholder="Any relevant notes…"
-                  rows={2}
-                  style={{
-                    width: '100%', padding: '8px 10px', fontSize: 14,
-                    border: '1px solid var(--ds-border)', borderRadius: 6,
-                    background: 'var(--ds-surface)', color: 'var(--ds-t1)',
-                    resize: 'vertical', fontFamily: 'inherit',
-                    outline: 'none', boxSizing: 'border-box',
-                  }}
-                />
-              </Field>
+              <RateField register={register} />
+              <NotesField register={register} />
 
               {/* RTI toggle card */}
               <div style={{ marginTop: 16 }}>
@@ -1147,102 +187,22 @@ function NewLoadDialog({
                   name="readyToInvoice"
                   control={control}
                   render={({ field }) => (
-                    <button
-                      type="button"
-                      onClick={() => field.onChange(!field.value)}
-                      style={{
-                        width: '100%', padding: '14px 16px',
-                        borderRadius: 8, cursor: 'pointer', textAlign: 'left',
-                        border: field.value ? '2px solid #34d399' : '2px solid var(--ds-border)',
-                        background: field.value ? '#f0fdf4' : 'var(--ds-surface)',
-                        display: 'flex', alignItems: 'center', gap: 12,
-                        transition: 'border-color 0.15s, background 0.15s',
-                      }}
-                    >
-                      {field.value
-                        ? <CheckCircle2 style={{ width: 20, height: 20, color: '#16a34a', flexShrink: 0 }} />
-                        : <Circle style={{ width: 20, height: 20, color: 'var(--ds-t3)', flexShrink: 0 }} />
-                      }
-                      <div>
-                        <div style={{ fontSize: 14, fontWeight: 600, color: field.value ? '#15803d' : 'var(--ds-t1)' }}>
-                          {field.value ? 'Ready to Invoice' : 'Mark as Ready to Invoice'}
-                        </div>
-                        <div style={{ fontSize: 12, color: field.value ? '#16a34a' : 'var(--ds-t3)', marginTop: 2 }}>
-                          {field.value ? 'Click to undo' : 'All paperwork received and load is invoiceable'}
-                        </div>
-                      </div>
-                    </button>
+                    <ToggleCard
+                      active={!!field.value}
+                      onToggle={() => field.onChange(!field.value)}
+                      accent="#15803d"
+                      tint="#f0fdf4"
+                      icon={field.value ? <CheckCircle2 style={{ width: 20, height: 20, color: '#16a34a' }} /> : <Circle style={{ width: 20, height: 20, color: 'var(--ds-t3)' }} />}
+                      titleActive="Ready to Invoice"
+                      titleIdle="Mark as Ready to Invoice"
+                      hintActive="Click to undo"
+                      hintIdle="All paperwork received and load is invoiceable"
+                    />
                   )}
                 />
               </div>
 
-              {/* Hot load toggle card */}
-              <div style={{ marginTop: 12 }}>
-                <Controller
-                  name="hot"
-                  control={control}
-                  render={({ field }) => (
-                    <button
-                      type="button"
-                      onClick={() => field.onChange(!field.value)}
-                      style={{
-                        width: '100%', padding: '14px 16px',
-                        borderRadius: 8, cursor: 'pointer', textAlign: 'left',
-                        border: field.value ? '2px solid #f87171' : '2px solid var(--ds-border)',
-                        background: field.value ? '#fef2f2' : 'var(--ds-surface)',
-                        display: 'flex', alignItems: 'center', gap: 12,
-                        transition: 'border-color 0.15s, background 0.15s',
-                      }}
-                    >
-                      <span style={{ fontSize: 20, lineHeight: 1, flexShrink: 0, filter: field.value ? 'none' : 'grayscale(1)', opacity: field.value ? 1 : 0.5 }}>
-                        🔥
-                      </span>
-                      <div>
-                        <div style={{ fontSize: 14, fontWeight: 600, color: field.value ? '#b91c1c' : 'var(--ds-t1)' }}>
-                          {field.value ? 'Hot Load' : 'Mark as Hot Load'}
-                        </div>
-                        <div style={{ fontSize: 12, color: field.value ? '#dc2626' : 'var(--ds-t3)', marginTop: 2 }}>
-                          {field.value ? 'Click to undo — shows 🔥 in the schedule' : 'Urgent load — flag it with 🔥 in the schedule'}
-                        </div>
-                      </div>
-                    </button>
-                  )}
-                />
-              </div>
-
-              {/* Unscheduled (orphan) toggle card */}
-              <div style={{ marginTop: 12 }}>
-                <Controller
-                  name="unscheduled"
-                  control={control}
-                  render={({ field }) => (
-                    <button
-                      type="button"
-                      onClick={() => field.onChange(!field.value)}
-                      style={{
-                        width: '100%', padding: '14px 16px',
-                        borderRadius: 8, cursor: 'pointer', textAlign: 'left',
-                        border: field.value ? '2px solid #f59e0b' : '2px solid var(--ds-border)',
-                        background: field.value ? '#fffbeb' : 'var(--ds-surface)',
-                        display: 'flex', alignItems: 'center', gap: 12,
-                        transition: 'border-color 0.15s, background 0.15s',
-                      }}
-                    >
-                      <span style={{ fontSize: 20, lineHeight: 1, flexShrink: 0, filter: field.value ? 'none' : 'grayscale(1)', opacity: field.value ? 1 : 0.5 }}>
-                        🗓️
-                      </span>
-                      <div>
-                        <div style={{ fontSize: 14, fontWeight: 600, color: field.value ? '#b45309' : 'var(--ds-t1)' }}>
-                          {field.value ? 'Unscheduled' : 'Mark as Unscheduled'}
-                        </div>
-                        <div style={{ fontSize: 12, color: field.value ? '#d97706' : 'var(--ds-t3)', marginTop: 2 }}>
-                          {field.value ? 'No firm date — parked in the calendar’s Unscheduled lane' : 'No firm date yet — park it in the Unscheduled lane'}
-                        </div>
-                      </div>
-                    </button>
-                  )}
-                />
-              </div>
+              <LegFlagToggles control={control} />
             </div>
 
           </form>
@@ -1265,37 +225,29 @@ function NewLoadDialog({
               Cancel
             </Button>
             <Button type="submit" form="new-load-form" className="h-9 px-5" disabled={saving}>
-              {saving ? 'Saving…' : mode === 'edit' ? 'Save Changes' : 'Create Load'}
+              {saving ? 'Saving…' : 'Save Changes'}
             </Button>
           </div>
         </div>
       </DialogContent>
 
-      {createDirectory && (
+      {createLocationFor && (
         <DirectoryCreateDialog
-          type={createDirectory.type}
+          type="location"
           open
-          initial={createDirectory.initial}
+          initial={createLocationFor.initial}
           customers={directory.customers}
           divisions={[]} // load form does not need division defaults
-          onClose={() => setCreateDirectory(null)}
+          onClose={() => setCreateLocationFor(null)}
           onSave={async (record, geocodeToken) => {
-            if ('mcNumber' in record) {
-              const c = await directory.addCustomer(record as Omit<CustomerRecord, 'id' | 'createdAt' | 'updatedAt'>)
-              setValue('customerId', c.id, { shouldDirty: true })
-              setValue('customer', c.name, { shouldDirty: true })
-            } else {
-              const { id: _id, createdAt: _c, updatedAt: _u, ...input } = record as LocationRecord
-              const loc = await directory.addLocation({ ...input, ...(geocodeToken ? { geocodeToken } : {}) })
-              const i = createDirectory.stopIndex
-              if (i != null) {
-                // Link the new facility to the stop the "+" was pressed on.
-                setValue(`stops.${i}.locationId`, loc.id, { shouldDirty: true })
-                setValue(`stops.${i}.address`, bookedAddressSnapshot(loc), { shouldDirty: true })
-                if (!watch(`stops.${i}.name`)) setValue(`stops.${i}.name`, loc.name, { shouldDirty: true })
-                if (!watch(`stops.${i}.city`) && loc.city) setValue(`stops.${i}.city`, [loc.city, loc.state].filter(Boolean).join(', '), { shouldDirty: true })
-              }
-            }
+            const { id: _id, createdAt: _c, updatedAt: _u, ...input } = record as LocationRecord
+            const loc = await directory.addLocation({ ...input, ...(geocodeToken ? { geocodeToken } : {}) })
+            // Link the new facility to the stop the "+" was pressed on.
+            const i = createLocationFor.stopIndex
+            setValue(`stops.${i}.locationId`, loc.id, { shouldDirty: true })
+            setValue(`stops.${i}.address`, bookedAddressSnapshot(loc), { shouldDirty: true })
+            if (!watch(`stops.${i}.name`)) setValue(`stops.${i}.name`, loc.name, { shouldDirty: true })
+            if (!watch(`stops.${i}.city`) && loc.city) setValue(`stops.${i}.city`, [loc.city, loc.state].filter(Boolean).join(', '), { shouldDirty: true })
           }}
         />
       )}
@@ -1308,15 +260,14 @@ function NewLoadDialog({
 export function LoadDrawer() {
   const selectedLoadId        = useAppStore((s) => s.selectedLoadId)
   const drawerMode            = useAppStore((s) => s.drawerMode)
-  const createPreFill         = useAppStore((s) => s.createPreFill)
   const setSelectedLoad       = useAppStore((s) => s.setSelectedLoad)
-  const pendingIntakeItemId   = useAppStore((s) => s.pendingIntakeItemId)
-  const setPendingIntakeItem  = useAppStore((s) => s.setPendingIntakeItem)
+  // SET_LOAD_PRO writes the Load server-side, so the store's copy has to be re-pulled.
+  const refreshCalendarData   = useAppStore((s) => s.refreshCalendarData)
   // The identity table, not the live working set. Two reasons: `proConflict` below is the
   // only Pro #-uniqueness check in the app and a voided load keeps its Pro # forever, so
   // hiding voided rows here would let a dead Pro # be reissued; and the drawer opens on a
   // load id, which the Voided tab hands it, so the record has to still be findable.
-  const { allLoads: loads, addLoad, updateLoad } = useLoads()
+  const { allLoads: loads, updateLoad } = useLoads()
   const { drivers } = useDrivers()
   // What the driver app recorded at each stop, plus when the POD came in. Looked up by the
   // selected load id so the hook runs on every render, ahead of the mode-based early returns.
@@ -1327,8 +278,6 @@ export function LoadDrawer() {
 
   const load         = loads.find((l) => l.id === selectedLoadId)
   const isOpen       = drawerMode !== null
-  const isCreate     = drawerMode === 'create'
-  const isEdit       = drawerMode === 'edit' || isCreate
   const activeDrivers = drivers.filter((d) => d.active)
 
   /*
@@ -1337,22 +286,6 @@ export function LoadDrawer() {
    * never block a booking.
    */
   const formDirectory = useDirectory()
-
-  /*
-   * Is the load being built a Batory one? Same rule the appointments queue uses, so the two
-   * cannot disagree about whose loads go through the request ladder.
-   */
-  const createPreFillIsBatory = useMemo(() => {
-    const t = createPreFill?.tender
-    if (!t) return false
-    const linked = t.customerId
-      ? formDirectory.customers.find((c) => c.id === t.customerId)
-      : undefined
-    return requiresApptProofs({
-      customer: t.customer ?? '',
-      customerApptWorkflow: linked?.apptWorkflow ?? null,
-    })
-  }, [createPreFill?.tender, formDirectory.customers])
 
   const factoredAwareSchema = useMemo(() => {
     const factored = new Set(
@@ -1371,14 +304,14 @@ export function LoadDrawer() {
     const firstPickup = stops.find((st) => st.type === 'pickup')
     const lastDelivery = [...stops].reverse().find((st) => st.type === 'delivery')
     return loadSchemaFor((id) => !!id && factored.has(id), {
-      isNew: isCreate,
+      isNew: false,
       had: {
         customerId: !!(load?.customerId ?? '').trim(),
         originZip: ((firstPickup?.address?.zip ?? '').trim()).length >= 3,
         destinationZip: ((lastDelivery?.address?.zip ?? '').trim()).length >= 3,
       },
     })
-  }, [formDirectory.customers, load, isCreate])
+  }, [formDirectory.customers, load])
 
   const {
     register, control, handleSubmit, reset, watch, setValue,
@@ -1393,83 +326,35 @@ export function LoadDrawer() {
     defaultValues: {
       aljexId: '', tmsId: '', pickupNumber: '', trailerNumber: '',
       commodity: '', weight: null, pieces: null, piecesUnit: '', cargoValueCents: null,
-      stops: emptyStopForms(), readyToInvoice: false,
+      stops: [], readyToInvoice: false,
       customer: '', customerId: '', miles: null, rate: null, notes: '', hot: false, unscheduled: false,
     },
   })
 
   useEffect(() => {
-    if (!isOpen) return
-    if (load && !isCreate) {
-      reset({
-        aljexId: load.aljexId,
-        tmsId: load.tmsId,
-        pickupNumber: load.pickupNumber,
-        trailerNumber: load.trailerNumber ?? '',
-        commodity: load.commodity ?? '',
-        weight: load.weight ?? null,
-        pieces: load.pieces ?? null,
-        piecesUnit: load.piecesUnit ?? '',
-        cargoValueCents: load.cargoValueCents ?? null,
-        stops: loadToStopForms(load),
-        readyToInvoice:   load.readyToInvoice,
-        customer: load.customer ?? '',
-        customerId: load.customerId ?? '',
-        miles: load.miles ?? null,
-        rate: load.rate != null ? load.rate / 100 : null,
-        notes: load.notes ?? '',
-        hot: load.hot ?? false,
-        unscheduled: load.unscheduled ?? false,
-      })
-    } else {
-      const preDate = createPreFill?.dateStr
-      const tender = createPreFill?.tender
-      // Batory loads keep the prefill they already had and skip what this round added:
-      // appointment times and facility instructions, both of which their request ladder
-      // establishes by hand. Everything else about the tender still carries over.
-      const tenderIsBatory = createPreFillIsBatory
-      reset({
-        /*
-         * The Pro# is NOT prefilled, deliberately.
-         *
-         * A PRO is assigned by Aljex when the load is built there, so its presence on a
-         * BCAT Ops load is the fact that the load exists in Aljex. The tender email carries
-         * the BROKER's reference — a TMS ID like 208663813 — which is a different number
-         * entirely, and putting it here would have made every intake-built load claim an
-         * Aljex PRO it never had. That reference belongs in TMS ID, where it is correct.
-         */
-        aljexId: '', tmsId: tender?.reference ?? '',
-        pickupNumber: tender?.pickupNumber ?? '',
-        trailerNumber: '',
-        // The tender email states the weight; the commodity, count and declared value wait
-        // for the rate con.
-        commodity: '', weight: tender?.weightLb ?? null, pieces: null, piecesUnit: '', cargoValueCents: null,
-        stops: tender
-          ? tenderStopForms(tender, preDate, createPreFill?.driverId ?? null, tenderIsBatory, formDirectory.locations)
-          : emptyStopForms(preDate, createPreFill?.driverId ?? null),
-        readyToInvoice: false,
-        /*
-         * Both come from the directory record or neither comes at all.
-         *
-         * A customer is only ever bound by matching a record we already hold — the name
-         * that lands here is that record's own, never free text read off an email, and the
-         * id is what carries its MC through to the factoring queue. An unrecognised broker
-         * leaves both blank so a human picks one.
-         */
-        customer: tender?.customerId ? (tender.customer ?? '') : '',
-        customerId: tender?.customerId ?? '',
-        /*
-         * Facility instructions off the tender — "Appointments required", "48 Hour Notice",
-         * "must be locked or sealed". 162 of the 166 tenders on file carry one, and it is
-         * exactly what a dispatcher otherwise reads off the email and retypes. Labelled by
-         * stop, because a delivery's notice period is not the shipper's sealing rule.
-         */
-        notes: tenderIsBatory ? '' : tenderNotes(tender),
-        miles: null, rate: null, hot: false, unscheduled: false,
-      })
-    }
+    if (!isOpen || !load) return
+    reset({
+      aljexId: load.aljexId,
+      tmsId: load.tmsId,
+      pickupNumber: load.pickupNumber,
+      trailerNumber: load.trailerNumber ?? '',
+      commodity: load.commodity ?? '',
+      weight: load.weight ?? null,
+      pieces: load.pieces ?? null,
+      piecesUnit: load.piecesUnit ?? '',
+      cargoValueCents: load.cargoValueCents ?? null,
+      stops: loadToStopForms(load),
+      readyToInvoice:   load.readyToInvoice,
+      customer: load.customer ?? '',
+      customerId: load.customerId ?? '',
+      miles: load.miles ?? null,
+      rate: load.rate != null ? load.rate / 100 : null,
+      notes: load.notes ?? '',
+      hot: load.hot ?? false,
+      unscheduled: load.unscheduled ?? false,
+    })
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, load?.id, isCreate, drawerMode])
+  }, [isOpen, load?.id, drawerMode])
 
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [showUploadPod, setShowUploadPod] = useState(false)
@@ -1589,22 +474,46 @@ export function LoadDrawer() {
     return out
   }
 
-  const saveLoad = async (values: LoadFormValues) => {
-    const conflict = proConflict(loads, values.aljexId, isCreate ? null : load)
+  /*
+   * Moving a Pro #.
+   *
+   * `aljexId` is field-level read-only to clients, so this cannot ride along on the save:
+   * a PRO is claimed atomically and the claim is never released, voided rows included, and
+   * SET_LOAD_PRO is the only writer that takes a new claim. `proConflict` is still the
+   * fast answer in the browser against the identity table, but the server's refusal is the
+   * rule and is surfaced verbatim.
+   */
+  const [proDraft, setProDraft] = useState<string | null>(null)
+  const [proSaving, setProSaving] = useState(false)
+
+  const commitPro = async () => {
+    if (!load || proDraft == null) return
+    const next = proDraft.trim()
+    if (!next || next === (load.aljexId ?? '').trim()) { setProDraft(null); return }
+    const conflict = proConflict(loads, next, load)
     if (conflict.kind === 'block') {
-      toast.error(`Pro # ${values.aljexId} is already used on another load`)
+      toast.error(`Pro # ${next} is already used on another load`)
       return
     }
-    if (conflict.kind === 'warn') {
-      // Pre-existing duplicate: never lock the load over it, but make sure somebody knows.
-      toast.warning(`Two loads share Pro # ${values.aljexId}`, {
-        description: 'Saved anyway. One of them should be deleted so paperwork lands on the right one.',
-      })
+    setProSaving(true)
+    try {
+      await setLoadPro({ loadId: load.id, pro: next, expectedUpdatedAt: load.updatedAt })
+      await refreshCalendarData()
+      toast.success(`Pro # is now ${next}`)
+      setProDraft(null)
+    } catch (err) {
+      toast.error(errorMessage(err))
+    } finally {
+      setProSaving(false)
     }
+  }
+
+  const saveLoad = async (values: LoadFormValues) => {
+    if (!load) return
     const userEmail = user?.email ?? 'dispatch'
     // Build the canonical stops array; the store derives the legacy pickup/delivery
     // mirror fields (withDerivedLegacy) — the form never sets them directly.
-    const prevStops = load && !isCreate ? getStops(load) : []
+    const prevStops = getStops(load)
     const prevById = new Map(prevStops.map((st) => [st.id, st]))
     const stops = await linkStopsToDirectory(values.stops.map((s, i) => {
       const was = prevById.get(s.id)
@@ -1618,11 +527,16 @@ export function LoadDrawer() {
     // so the shipment layer rewrites both and the mirror with it. A cleared field is a
     // deliberate zero — leaving the old linehaul standing would contradict the form.
     const rateCents = values.rate != null && !isNaN(values.rate) ? Math.round(values.rate * 100) : undefined
-    const shipmentId = !isCreate ? load?.shipmentId ?? null : null
+    const shipmentId = load.shipmentId ?? null
+    /*
+     * What a client may change on a leg, and nothing else.
+     *
+     * `aljexId`, `tmsId` and `pickupNumber` are field-level read-only — the PRO claim owns
+     * them — and `customer`/`customerId` belong to the shipment: writing them here left
+     * the Shipment and the Order unresolved while the calendar looked linked.
+     */
     const payload = {
-      aljexId: values.aljexId,
-      tmsId: values.tmsId,
-      pickupNumber: values.pickupNumber,
+      trailerNumber: values.trailerNumber?.trim() || undefined,
       stops,
       ...deriveLegacyFields(stops), // pickupAppt/deliveryAppt/origin*/dest*/drivers (store re-derives; idempotent)
       readyToInvoice: values.readyToInvoice,
@@ -1633,79 +547,29 @@ export function LoadDrawer() {
       pieces: values.pieces != null && !isNaN(values.pieces) ? Math.round(values.pieces) : undefined,
       piecesUnit: values.pieces != null && !isNaN(values.pieces) ? (values.piecesUnit || 'pieces') : undefined,
       cargoValueCents: values.cargoValueCents != null && !isNaN(values.cargoValueCents) ? Math.round(values.cargoValueCents) : undefined,
-      customer: values.customer || undefined,
-      customerId: values.customerId?.trim() || undefined,
       notes: values.notes || undefined,
       hot: values.hot,
       unscheduled: values.unscheduled,
-      createdBy: userEmail,
       updatedBy: userEmail,
     }
-    let createdId: string | undefined
     try {
-      if (isCreate) {
-        const newLoad = await addLoad(payload)
-        createdId = newLoad.id
-        if (pendingIntakeItemId) {
-          setPendingIntakeItem(null)
-          try {
-            /*
-             * DONE, not BUILT. Building the load in BCAT Ops IS the work the intake item
-             * was asking for, so a separate "Mark as done" click was pure bookkeeping —
-             * and an item left at BUILT reads as outstanding on a page whose whole job is
-             * showing what still needs doing. The Pro# is the one the load was built with,
-             * which is exactly what the Mark-as-done prompt used to ask for.
-             */
-            /*
-             * Attach the tender's own document, when it came with one.
-             *
-             * The key is pointed at rather than copied: it is already in the same bucket and
-             * readable, and duplicating the bytes would leave two copies to keep in step.
-             * Only the first PDF — a tender carries one rate confirmation, and guessing
-             * which of several is "the" one would be worse than attaching none.
-             */
-            const tenderPdf = createPreFill?.tender?.rateConKey
-            if (tenderPdf) {
-              await updateLoad(newLoad.id, { rateConfirmKey: tenderPdf } as never)
-            }
-
-            await updateIntakeItem(pendingIntakeItemId, {
-              builtLoadId: newLoad.id,
-              status: 'DONE',
-              ...(newLoad.aljexId ? { proNumber: newLoad.aljexId } : {}),
-            })
-            notifySlackStatusChange({
-              intakeItemId: pendingIntakeItemId,
-              oldStatus:    'IN_PROGRESS',
-              newStatus:    'DONE',
-              actorName:    userEmail,
-              proNumber:    newLoad.aljexId || null,
-            })
-          } catch (linkErr) {
-            console.error('[LoadDrawer] failed to link intake item', linkErr)
-          }
+      // The rate goes first: RECALC_CHARGES rewrites the `rate` mirror server-side, so
+      // a sync that fails after the load was written would leave the drawer's number
+      // saved and the shipment's money untouched.
+      if (shipmentId) {
+        const nextRateCents = rateCents ?? 0
+        if (nextRateCents !== (load.rate ?? 0)) {
+          await syncLoadRateToShipment(shipmentId, load.id, nextRateCents)
         }
-        toast.success('Load created')
-      } else if (load) {
-        // The rate goes first: RECALC_CHARGES rewrites the `rate` mirror server-side, so
-        // a sync that fails after the load was written would leave the drawer's number
-        // saved and the shipment's money untouched.
-        if (shipmentId) {
-          const nextRateCents = rateCents ?? 0
-          if (nextRateCents !== (load.rate ?? 0)) {
-            await syncLoadRateToShipment(shipmentId, load.id, nextRateCents)
-          }
-        }
-        await updateLoad(load.id, payload)
-        toast.success('Load updated')
       }
+      await updateLoad(load.id, payload)
+      toast.success('Load updated')
 
       // Fire-and-forget, after the save succeeded — never post about a load that failed
       // to save, and never let a Slack outage block the drawer from closing.
-      const savedId = isCreate ? createdId : load?.id
-      if (savedId && notices.length > 0) {
+      if (notices.length > 0) {
         void sendApptNotices({
-          load: { ...(load as Load), id: savedId, ...payload } as Load,
+          load: { ...load, ...payload } as Load,
           next: stops,
           prev: prevStops,
           actorName: userEmail,
@@ -1734,26 +598,55 @@ export function LoadDrawer() {
     return formatDateTime(appt)
   }
 
-  // ── Create / Edit mode → centered Dialog ─────────────────────────────────
-  if (isCreate || drawerMode === 'edit') {
+  const proDialog = proDraft !== null && load && (
+    <Dialog open onOpenChange={(open) => { if (!open) setProDraft(null) }}>
+      <DialogContent style={{ maxWidth: 420 }}>
+        <h2 style={{ fontSize: 16, fontWeight: 600, color: 'var(--ds-t1)', margin: 0 }}>Change Pro #</h2>
+        <p style={{ fontSize: 12.5, color: 'var(--ds-t3)', margin: '6px 0 0' }}>
+          The new number is claimed for good. {load.aljexId || 'The old one'} stays claimed too —
+          a Pro # is never reissued, so nothing can land on it again.
+        </p>
+        <Input
+          autoFocus
+          aria-label="New Pro #"
+          value={proDraft}
+          onChange={(e) => setProDraft(e.target.value)}
+          className="h-9"
+          style={{ marginTop: 12 }}
+        />
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 16 }}>
+          <Button variant="outline" className="h-9 px-5" type="button" onClick={() => setProDraft(null)} disabled={proSaving}>
+            Cancel
+          </Button>
+          <Button className="h-9 px-5" type="button" onClick={commitPro} disabled={proSaving}>
+            {proSaving ? 'Claiming…' : 'Claim it'}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+
+  // ── Edit mode → centered Dialog ──────────────────────────────────────────
+  if (drawerMode === 'edit') {
     return (
-      <NewLoadDialog
-        isOpen={isOpen}
-        onClose={onClose}
-        handleSubmit={handleSubmit}
-        activeDrivers={activeDrivers}
-        onSubmit={onSubmit}
-        errors={errors}
-        control={control}
-        register={register}
-        watch={watch}
-        setValue={setValue}
-        mode={isCreate ? 'create' : 'edit'}
-        saving={isSubmitting}
-        aljexId={load?.aljexId}
-        tender={createPreFill?.tender ?? null}
-        isBatory={createPreFillIsBatory}
-      />
+      <>
+        <EditLoadDialog
+          isOpen={isOpen}
+          onClose={onClose}
+          handleSubmit={handleSubmit}
+          activeDrivers={activeDrivers}
+          onSubmit={onSubmit}
+          errors={errors}
+          control={control}
+          register={register}
+          watch={watch}
+          setValue={setValue}
+          saving={isSubmitting}
+          load={load}
+          onEditPro={() => setProDraft(load?.aljexId ?? '')}
+        />
+        {proDialog}
+      </>
     )
   }
 
@@ -1761,7 +654,7 @@ export function LoadDrawer() {
   // drawer renders as soon as it mounts and covers the loads list.
   if (!isOpen) return null
 
-  // ── View / edit mode → shared SidePanel ────────────────────────────────────
+  // ── View mode → shared SidePanel ───────────────────────────────────────────
   // Was a Radix Sheet with its own chrome: bg-white and border-slate-200 hardcoded, a
   // 540px width and px-8/py-5 header. Every other drawer in the app is the SidePanel
   // shell on --ds-surface / --ds-border, so this one ignored the theme and read as a
@@ -1779,10 +672,10 @@ export function LoadDrawer() {
   return (
     <>
       <SidePanel
-        title={isEdit ? `Edit — ${load?.aljexId ?? ''}` : (load?.aljexId ?? 'Load Detail')}
-        subtitle={isEdit ? 'Edit load' : (load?.customer || undefined)}
+        title={load?.aljexId ?? 'Load Detail'}
+        subtitle={customerDisplayName({ customerId: load?.customerId, customerName: load?.customer })}
         onClose={onClose}
-        actions={!isEdit && load ? (
+        actions={load ? (
           load.readyToInvoice ? (
             <Badge variant="green" className="gap-1 text-xs">
               <CheckCircle2 className="size-3" /> Ready to Invoice
@@ -1801,7 +694,7 @@ export function LoadDrawer() {
               <ReadonlyField label="Pro #"       value={load.aljexId} />
               <ReadonlyField label="TMS / PO"   value={load.tmsId} />
               <ReadonlyField label="PU #"       value={load.pickupNumber} />
-              {load.customer && <ReadonlyField label="Customer" value={load.customer} />}
+              <ReadonlyField label="Customer" value={customerDisplayName({ customerId: load.customerId, customerName: load.customer })} />
               {/* Stops — each pickup/delivery with its appointment + driver */}
               {(() => {
                 const stops = getStops(load)

@@ -11,8 +11,8 @@ import { toast } from 'sonner'
 import {
   assignAsset, assignCarrier, bookCarrier, clearRevTag, dispatchLoad, duplicateShipment, getShipmentBundle,
   logCheckCall, recalcCharges, removeLoadCarrier, resolveIncident, saveOrderForm, sendRateCon,
-  setArStatus, setEta, setLoadStatus, setNextCheckCall, setQuickPay, setRevTag, setSalesRep, setShipmentStatus,
-  sendTrackingLink, submitOrder, tenderRespond, updateStop, voidRateCon,
+  setArStatus, setEta, setLoadStatus, setNextCheckCall, setQuickPay, setRevTag, setSalesRep, setShipmentCustomer,
+  setShipmentStatus, sendTrackingLink, submitOrder, tenderRespond, updateStop, voidRateCon,
 } from '@/lib/apiClient'
 import type { LoadChargeInput, ShipmentBundle } from '@/types/tms'
 import type { BookCarrierFields } from '@/features/carriers/components/BookCarrierDialog'
@@ -41,6 +41,12 @@ export interface ShipmentActions {
   onSetRevTag: (input: { divisionCode: string; subdivisionCode?: string }) => Promise<void>
   onClearRevTag: () => Promise<void>
   onSetSalesRep: (repId: string | null) => Promise<void>
+  /**
+   * Step R — the one writer of customer identity. A shipment can exist on nothing but
+   * the operator's typed text; until a Customer record is linked the gates refuse it,
+   * so this is the move that unblocks submitting, invoicing and factoring.
+   */
+  setCustomer: (customerId: string) => Promise<void>
   dispatchLoad: (input: DispatchFields) => Promise<void>
   /** Step D — the tracking tab. Each answers with the bundle, which is swapped in here. */
   tracking: TrackingActionHandlers
@@ -159,6 +165,9 @@ export function useShipmentActions(
     },
     onSetSalesRep: async (repId) => {
       await call('Sales rep', () => setSalesRep({ shipmentId, repId }))
+    },
+    setCustomer: async (customerId) => {
+      await call('Link customer', () => setShipmentCustomer({ shipmentId, customerId }))
     },
     dispatchLoad: async (input) => {
       const { sendTrackingLink: alsoSendLink, ...fields } = input

@@ -88,7 +88,6 @@ vi.mock('@/features/tms/useShipmentViews', () => ({
 }))
 vi.mock('@/lib/apiClient', () => ({
   getTmsSettings: vi.fn(async () => null),
-  createShipment: vi.fn(),
   duplicateShipment: vi.fn(),
   saveShipmentView: vi.fn(),
   setShipmentStatus: vi.fn(),
@@ -98,7 +97,7 @@ vi.mock('@/lib/apiClient', () => ({
   listDocumentReviewQueue: vi.fn(async () => []),
 }))
 vi.mock('./components/ShipmentDrawer', () => ({ ShipmentDrawer: () => null }))
-vi.mock('@/features/loads/LoadDrawer', () => ({ LoadDrawer: () => null }))
+vi.mock('./components/NewShipmentDialog', () => ({ NewShipmentDialog: () => null }))
 
 function renderBoard() {
   return render(

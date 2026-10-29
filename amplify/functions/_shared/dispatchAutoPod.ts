@@ -13,7 +13,7 @@ import type { DispatchMedia } from '../../../src/lib/dispatch'
 import { getStops } from '../../../src/lib/stops'
 import { driverIsOnLoad } from '../../../src/lib/driverJourney'
 import { stopDay } from '../../../src/lib/driverSchedule'
-import { normalizePro } from '../../../src/lib/podPresence'
+import { normalizePro } from '../../../src/lib/proNumber'
 import { chicagoDateStr } from '../../../src/lib/date'
 import { stopsAfterPod } from '../../../src/lib/stopEvents'
 

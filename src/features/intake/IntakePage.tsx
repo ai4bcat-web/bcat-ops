@@ -9,6 +9,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from '@/components/ui/dialog'
 import { LoadDrawer } from '@/features/loads/LoadDrawer'
+import { NewShipmentDialog } from '@/features/shipments/components/NewShipmentDialog'
 import { useIntakeItems } from '@/hooks/useIntakeItems'
 import { useAppStore } from '@/store/useAppStore'
 import { useAuth } from '@/hooks/useAuth'
@@ -562,7 +563,9 @@ export function IntakePage() {
   const { items, loading, refresh, updateItem } = useIntakeItems()
   const { user } = useAuth()
   const setSelectedLoad      = useAppStore((s) => s.setSelectedLoad)
-  const setPendingIntakeItem = useAppStore((s) => s.setPendingIntakeItem)
+  const openNewShipment      = useAppStore((s) => s.openNewShipment)
+  const newShipmentPrefill   = useAppStore((s) => s.newShipmentPrefill)
+  const closeNewShipment     = useAppStore((s) => s.closeNewShipment)
   // The identity table on purpose: a tender is matched by Pro #, and a voided load still
   // owns its Pro # forever, so the match has to be able to land on one.
   const loads                = useAppStore((s) => s.loads)
@@ -621,7 +624,6 @@ export function IntakePage() {
     if (item.status === 'NEW') {
       updateItem(item.id, { status: 'IN_PROGRESS' }, { actorName: actorEmail }).catch(() => {})
     }
-    setPendingIntakeItem(item.id)
     const tender = parseTender(item.subject, item.bodyText)
     /*
      * Bind the customer when the tender names one we already hold.
@@ -642,9 +644,14 @@ export function IntakePage() {
     // Carried even when nothing could be parsed: a tender with an unreadable body may still
     // have brought its rate con, and that document is the most useful thing in the email.
     const prefill = { ...tender, ...(rateConKey ? { rateConKey } : {}) }
-    setSelectedLoad(null, 'create', {
+    openNewShipment({
+      // The item travels with the form rather than through the store, so the shipment it
+      // creates is linked and marked DONE by the save that created it.
+      intakeItemId: item.id,
       driverId: null,
       dateStr: tender.stops.find((s) => s.type === 'pickup')?.dateStr ?? '',
+      ...(customer ? { customerId: customer.id } : {}),
+      ...(tender.customer ? { customerName: tender.customer } : {}),
       ...(tender.format || rateConKey
         ? { tender: customer ? { ...prefill, customer: customer.name, customerId: customer.id } : prefill }
         : {}),
@@ -878,8 +885,16 @@ export function IntakePage() {
         />
       )}
 
-      {/* LoadDrawer — must be present for "Build Load" to work */}
+      {/* LoadDrawer — opened by "Update load" on an item that already built one. */}
       <LoadDrawer />
+
+      {/* "Build Load" raises this. Nothing is written until Save. */}
+      <NewShipmentDialog
+        open={newShipmentPrefill !== null}
+        prefill={newShipmentPrefill}
+        onClose={closeNewShipment}
+        onCreated={() => { closeNewShipment(); void refresh() }}
+      />
     </div>
   )
 }

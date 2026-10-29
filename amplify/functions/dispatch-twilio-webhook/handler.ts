@@ -19,7 +19,7 @@ import { autoFilePod, type AutoPodStore } from '../_shared/dispatchAutoPod'
 import { DynamoDBDocumentClient, ScanCommand as DocScanCommand, PutCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb'
 import { randomUUID } from 'node:crypto'
 import { getStops } from '../../../src/lib/stops'
-import { normalizePro } from '../../../src/lib/podPresence'
+import { normalizePro } from '../../../src/lib/proNumber'
 import type { Load, Stop } from '../../../src/types'
 import { matchDriverByPhone, conversationTitle, callPlan, type DispatchMedia, type DispatchDriver, type DispatchConversation, type DispatchMessage } from '../../../src/lib/dispatch'
 

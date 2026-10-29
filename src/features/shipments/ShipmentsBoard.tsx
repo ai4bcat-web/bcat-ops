@@ -19,7 +19,6 @@ import { toast } from 'sonner'
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { LoadDrawer } from '@/features/loads/LoadDrawer'
 import {
   TmsBadge, TmsButton, TmsDialog, TmsField, TmsIconButton, TmsInput, TmsListPage, TmsSelect, statusTone,
 } from '@/features/tms/kit'
@@ -31,28 +30,27 @@ import { useDocumentReviewQueue } from '@/hooks/useDocumentReviewQueue'
 import { useShipments } from '@/hooks/useShipments'
 import { useStaff } from '@/hooks/useStaff'
 import {
-  createShipment, duplicateShipment, getTmsSettings, graphqlErrorText, saveShipmentView,
-  setShipmentStatus, tenderRespond,
+  duplicateShipment, getTmsSettings, graphqlErrorText, saveShipmentView, setShipmentStatus, tenderRespond,
 } from '@/lib/apiClient'
 import { checkCallState } from '@/lib/checkCalls'
-import { effectiveCustomerStatus } from '@/lib/customerCredit'
+import { isCustomerUnresolved } from '@/lib/customerResolution'
 import { SEED_DIVISIONS } from '@/lib/ownership'
 import { ROLES, ROLE_LABELS } from '@/lib/roles'
 import { SHIPMENT_STATUSES } from '@/lib/shipmentStatus'
 import { applyViewFilters, slugify, viewCallerOf, viewsVisibleTo } from '@/lib/shipmentViewDefs'
 import { cn } from '@/lib/utils'
-import { useAppStore } from '@/store/useAppStore'
+import { NewShipmentDialog } from './components/NewShipmentDialog'
 import { ShipmentDrawer } from './components/ShipmentDrawer'
 import { ShipmentRowActions, type ShipmentActionHandlers } from './components/StatusActions'
 import { MODE_OPTIONS } from './orderDraft'
 import {
-  BOARD_COLUMNS, BOARD_TABS, DEFAULT_COLUMN_KEYS, EMPTY_FILTERS, UNLINKED_LOAD_NOTE, activeFilterCount,
-  applyBoard, carrierLabel, divisionCodeOfViewSlug, filtersToViewFilters, isBoardTabKey, isSortKey,
-  isUnlinkedLoad, statusLabel, tabCounts, toCsv, toViewRow, visibleColumns, voidedAtOf,
+  BOARD_COLUMNS, BOARD_TABS, DEFAULT_COLUMN_KEYS, EMPTY_FILTERS, activeFilterCount, applyBoard, carrierLabel,
+  divisionCodeOfViewSlug, filtersToViewFilters, isBoardTabKey, isSortKey, statusLabel, tabCounts, toCsv,
+  toViewRow, visibleColumns, voidedAtOf,
   type BoardFilters, type BoardTabKey, type ShipmentRow, type SortDir, type SortKey,
 } from './shipmentViews'
 import type {
-  ApStatus, ArStatus, AssignmentType, CustomerRecord, ShipmentMode, ShipmentStatus, ShipmentViewRecord,
+  ApStatus, ArStatus, AssignmentType, ShipmentMode, ShipmentStatus, ShipmentViewRecord,
   TmsSettings,
 } from '@/types/tms'
 
@@ -88,9 +86,6 @@ export function ShipmentsBoard() {
   const { isAdmin, isOwner, user } = useAuth()
   const email = user?.email ?? ''
   const { shipments, loading, error, refresh } = useShipments()
-  // A row that is a load and not a shipment opens the legacy load drawer, the same way
-  // the calendar and the factoring queue open a load: there is no shipment to open.
-  const setSelectedLoad = useAppStore((s) => s.setSelectedLoad)
   const { customers, locations } = useDirectory()
   const { nameOf, me } = useStaff(email)
   const { views, refresh: refreshViews } = useShipmentViews()
@@ -173,9 +168,7 @@ export function ShipmentsBoard() {
   const viewRows = useMemo(() => {
     if (!viewFilters || tab === 'voided') return allRows
     const allowed = new Set(applyViewFilters(viewFilters, allRows.map(toViewRow), new Date(nowMs)).map((r) => r.id))
-    // An unlinked load is in no division, no department and no status group, so it
-    // belongs to the unfiltered board and to no saved view, whatever the view asks for.
-    return allRows.filter((r) => !isUnlinkedLoad(r) && allowed.has(r.id))
+    return allRows.filter((r) => allowed.has(r.id))
   }, [allRows, viewFilters, tab, nowMs])
 
   const counts = useMemo(() => tabCounts(viewRows, nowMs), [viewRows, nowMs])
@@ -198,10 +191,6 @@ export function ShipmentsBoard() {
   const pageRows = rows.slice(currentPage * pageSize, currentPage * pageSize + pageSize)
 
   const clearFilters = () => { setPage(0); setFilters(EMPTY_FILTERS); setQuery(''); setOpenChip(null) }
-  // One line of copy, carried only while the list actually holds one of these rows.
-  const unlinkedNote = rows.some(isUnlinkedLoad)
-    ? <p className="tms-muted px-3 pb-2 text-xs">{UNLINKED_LOAD_NOTE}</p>
-    : null
 
   const exportCsv = () => {
     const csv = toCsv(rows, columnKeys)
@@ -241,14 +230,14 @@ export function ShipmentsBoard() {
     key: 'actions',
     header: '',
     width: 44,
-    render: (row) => (isUnlinkedLoad(row) ? null : (
+    render: (row) => (
       <ShipmentRowActions
         shipment={row}
         isAdmin={isAdmin}
         cancelDeleteAdminOnly={settings?.cancelDeleteAdminOnly ?? false}
         handlers={rowHandlers(row, refresh)}
       />
-    )),
+    ),
   })
 
   return (
@@ -330,16 +319,8 @@ export function ShipmentsBoard() {
             ? { key, dir: sort.dir === 'asc' ? 'desc' : 'asc' }
             : { key, dir: 'asc' })
         }}
-        onRowClick={(row) => {
-          if (row.unlinkedLoadId) setSelectedLoad(row.unlinkedLoadId, 'view')
-          else setOpenId(row.id)
-        }}
-        onRowDoubleClick={(row) => {
-          // An unlinked load has no `/tms/shipments/:id` page to open: the record it
-          // has is the load, and the load drawer is the whole of it.
-          if (row.unlinkedLoadId) setSelectedLoad(row.unlinkedLoadId, 'view')
-          else navigate(`/tms/shipments/${row.id}`)
-        }}
+        onRowClick={(row) => setOpenId(row.id)}
+        onRowDoubleClick={(row) => navigate(`/tms/shipments/${row.id}`)}
         page={{
           from: rows.length === 0 ? 0 : currentPage * pageSize + 1,
           to: Math.min(rows.length, currentPage * pageSize + pageSize),
@@ -360,7 +341,7 @@ export function ShipmentsBoard() {
             onChange={(next) => { setPage(0); setFilters(next) }}
             onClose={() => setOpenChip(null)}
           />
-        ) : unlinkedNote}
+        ) : null}
         footerExtra={
           rows.length > pageSize ? (
             <span className="tms-footer-count">
@@ -391,9 +372,6 @@ export function ShipmentsBoard() {
         currentUser={email}
       />
 
-      {/* What an unlinked load's row opens — the same drawer the calendar opens. */}
-      <LoadDrawer />
-
       <FieldsDialog
         open={fieldsOpen}
         keys={columnKeys}
@@ -422,14 +400,14 @@ export function ShipmentsBoard() {
         />
       )}
 
-      {newShipmentOpen && (
-        <NewShipmentDialog
-          customers={customers}
-          defaultMode={(settings?.defaultMode as ShipmentMode | undefined) ?? 'FTL'}
-          onClose={() => setNewShipmentOpen(false)}
-          onCreated={(id) => { setNewShipmentOpen(false); refresh(); setOpenId(id) }}
-        />
-      )}
+      <NewShipmentDialog
+        open={newShipmentOpen}
+        defaultMode={(settings?.defaultMode as ShipmentMode | undefined) ?? 'FTL'}
+        // The dialog opens the new shipment's drawer itself; the board only has to
+        // re-list, and opening a second drawer here would stack one over the other.
+        onClose={() => setNewShipmentOpen(false)}
+        onCreated={() => { setNewShipmentOpen(false); refresh() }}
+      />
     </>
   )
 }
@@ -463,13 +441,22 @@ function BoardCell({ columnKey, text, row, nowMs, repName, divisionName, divisio
     const voidedAt = voidedAtOf(row)
     const label = statusLabel(row)
     // The badge is one or two words; the hover is where the row says what it means.
-    let title: string | undefined
-    if (voidedAt) {
-      title = `Voided ${new Date(voidedAt).toLocaleString()} by ${row.voidedBy ?? 'unknown'}${row.voidReason ? ` — ${row.voidReason}` : ''}`
-    } else if (isUnlinkedLoad(row)) {
-      title = UNLINKED_LOAD_NOTE
-    }
+    const title = voidedAt
+      ? `Voided ${new Date(voidedAt).toLocaleString()} by ${row.voidedBy ?? 'unknown'}${row.voidReason ? ` — ${row.voidReason}` : ''}`
+      : undefined
     return <TmsBadge tone={statusTone(label)} title={title}>{label}</TmsBadge>
+  }
+  if (columnKey === 'customerName') {
+    // A shipment can exist on nothing but the operator's typed customer text, and that
+    // text is not an identity: the row cannot be submitted, invoiced or factored until a
+    // Customer record is linked. Printing the name alone would read as a linked customer.
+    if (!isCustomerUnresolved(row)) return <>{text}</>
+    return (
+      <span className="flex items-center gap-1">
+        <span className="tms-muted">{text}</span>
+        <TmsBadge tone="orange"><span data-testid="board-customer-unresolved">Not linked</span></TmsBadge>
+      </span>
+    )
   }
   if (columnKey === 'division') {
     if (!row.revDivision) return null
@@ -880,72 +867,6 @@ function SaveViewDialog({ open, onClose, onSave }: {
         <input type="checkbox" checked={isDefault} onChange={(e) => setIsDefault(e.target.checked)} />
         Open this view by default
       </label>
-    </TmsDialog>
-  )
-}
-
-/** "+ Shipment" — active customers only, exactly as MVMNT gates it (spec §6.4). */
-function NewShipmentDialog({ customers, defaultMode, onClose, onCreated }: {
-  customers: CustomerRecord[]
-  defaultMode: ShipmentMode
-  onClose: () => void
-  onCreated: (shipmentId: string) => void
-}) {
-  const [customerId, setCustomerId] = useState('')
-  const [mode, setMode] = useState<ShipmentMode>(defaultMode)
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  // Dormant is an automatic "no shipment in 90 days" label that new freight clears, so a
-  // dormant customer is still shippable; only the lead stages, Pending and Blocked are
-  // refused. The Lambda re-checks — this list exists so the user is not offered a name
-  // the server will reject.
-  const now = new Date().toISOString()
-  const active = customers.filter((c) => {
-    const status = effectiveCustomerStatus(c, null, now)
-    return status === 'ACTIVE' || status === 'DORMANT'
-  })
-
-  return (
-    <TmsDialog
-      open
-      onOpenChange={(next) => { if (!next) onClose() }}
-      title="New shipment"
-      footer={
-        <>
-          <TmsButton variant="ghost" onClick={onClose} disabled={busy}>Cancel</TmsButton>
-          <TmsButton
-            variant="primary"
-            disabled={busy}
-            onClick={async () => {
-              if (!customerId) { setError('Pick a customer.'); return }
-              setBusy(true)
-              try {
-                const bundle = await createShipment({ customerId, mode })
-                onCreated(bundle.shipment.id)
-              } catch (err) {
-                setError(graphqlErrorText(err) || (err instanceof Error ? err.message : 'Create failed'))
-              } finally {
-                setBusy(false)
-              }
-            }}
-          >
-            {busy ? 'Creating…' : 'Create draft'}
-          </TmsButton>
-        </>
-      }
-    >
-      <TmsField label="Customer" hint="Only active customers can be shipped." error={error}>
-        <TmsSelect aria-label="Customer" value={customerId} onChange={(e) => setCustomerId(e.target.value)}>
-          <option value="">— select —</option>
-          {active.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-        </TmsSelect>
-      </TmsField>
-      <TmsField label="Mode">
-        <TmsSelect aria-label="Mode" value={mode} onChange={(e) => setMode(e.target.value as ShipmentMode)}>
-          {MODE_OPTIONS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
-        </TmsSelect>
-      </TmsField>
     </TmsDialog>
   )
 }

@@ -9,9 +9,8 @@ import type { AmazonDispute } from '@/types/dispute'
 import { getMondayOf } from '@/lib/date'
 import * as api from '@/lib/apiClient'
 import { withDerivedLegacy, withStopsFromLegacy } from '@/lib/stops'
-import { requiresApptProofs } from '@/lib/apptQueue'
 import { errorMessage } from '@/lib/utils/errorMessage'
-import type { TenderPrefill } from '@/lib/intakeTender'
+import type { NewShipmentPrefill } from '@/features/shipments/components/NewShipmentDialog'
 
 // ── Equipment seed data (imported from bcat-command-center PostgreSQL) ─────────
 const SEED_EQUIPMENT: Equipment[] = [
@@ -362,17 +361,23 @@ interface AppState {
   viewMode: ViewMode
   weekStart: string
   selectedLoadId: string | null
-  drawerMode: 'view' | 'edit' | 'create' | null
   /*
-   * Seed values for the next load the drawer opens in create mode.
+   * The leg drawer is an EDITOR, never a creator. A load comes into being inside
+   * CREATE_SHIPMENT and nowhere else, so there is no 'create' here any more: the New
+   * Shipment form below is what every "+" opens.
+   */
+  drawerMode: 'view' | 'edit' | null
+  /*
+   * Seed values for the next shipment the New Shipment form opens with, and the fact that
+   * it is open at all — non-null means open.
    *
    * `driverId`/`dateStr` come from clicking an empty calendar cell. `tender` is everything
-   * intake could read out of the tender email, so a load built from an intake item starts
-   * with its references, both addresses and the planned dates already filled in instead of
-   * being re-typed off the email (see src/lib/intakeTender.ts).
+   * intake could read out of the tender email, so a shipment built from an intake item
+   * starts with its references, both addresses and the planned dates already filled in
+   * instead of being re-typed off the email (see src/lib/intakeTender.ts), and
+   * `intakeItemId` is the item that gets linked and marked DONE once the shipment exists.
    */
-  createPreFill: { driverId: string | null; dateStr: string; tender?: TenderPrefill } | null
-  pendingIntakeItemId: string | null
+  newShipmentPrefill: NewShipmentPrefill | null
   filterDriverId: string | null
   searchQuery: string
   filters: { readyToInvoice: boolean; notReadyToInvoice: boolean; split: boolean; unassigned: boolean; needsAppt: boolean }
@@ -393,7 +398,9 @@ interface AppState {
   assignTruckToDriver: (equipmentId: string, driverId: string | null) => Promise<void>
 
   // ── Load actions ───────────────────────────────────────────────────────────
-  addLoad: (l: Omit<Load, 'id' | 'createdAt' | 'updatedAt'>) => Promise<Load>
+  // No addLoad: Load's model auth grants the client `read` and `update` only, and a leg
+  // comes into being inside CREATE_SHIPMENT so its PRO is claimed in the same transaction
+  // as the shipment number.
   updateLoad: (id: string, patch: Partial<Omit<Load, 'id' | 'createdAt'>>) => Promise<void>
   // No deleteLoad: a PRO number is permanent (Ryne, 2026-10-28). The Load model has
   // no delete operation at all; a shipment leaves the working set by being voided.
@@ -428,12 +435,10 @@ interface AppState {
   // ── UI actions ─────────────────────────────────────────────────────────────
   setViewMode: (m: ViewMode) => void
   setWeekStart: (d: string) => void
-  setSelectedLoad: (
-    id: string | null,
-    mode?: 'view' | 'edit' | 'create',
-    preFill?: { driverId: string | null; dateStr: string; tender?: TenderPrefill }
-  ) => void
-  setPendingIntakeItem: (id: string | null) => void
+  setSelectedLoad: (id: string | null, mode?: 'view' | 'edit') => void
+  /** Raise the New Shipment form. Nothing is written until Save — see NewShipmentDialog. */
+  openNewShipment: (prefill?: NewShipmentPrefill) => void
+  closeNewShipment: () => void
   setFilterDriver: (id: string | null) => void
   setSearchQuery: (q: string) => void
   toggleFilter: (f: keyof AppState['filters']) => void
@@ -485,8 +490,7 @@ export const useAppStore = create<AppState>()(
       weekStart: initWeekStart(),
       selectedLoadId: null,
       drawerMode: null,
-      createPreFill: null,
-      pendingIntakeItemId: null,
+      newShipmentPrefill: null,
       filterDriverId: null,
       searchQuery: '',
       filters: { readyToInvoice: false, notReadyToInvoice: false, split: false, unassigned: false, needsAppt: false },
@@ -637,45 +641,6 @@ export const useAppStore = create<AppState>()(
       },
 
       // ── Loads ──────────────────────────────────────────────────────────────
-      addLoad: async (l) => {
-        // New BATORY loads enter the appointment ladder immediately: pickup NEED TO
-        // DENNIS (standing 12pm rule) and delivery NEED RUBEN (Ruben picks
-        // the time). Statuses ride the stops; the two tasks are created after the save.
-        l = api.withCustomerPolicy(l)
-        const isBatory = requiresApptProofs(l)
-        if (isBatory && Array.isArray(l.stops)) {
-          l = { ...l, stops: l.stops.map((s) => ({
-            ...s,
-            apptStatus: s.apptStatus ?? (s.type === 'delivery' ? 'need_book' : 'need_request'),
-          })) }
-        }
-        // If stops are set, derive the legacy pickup/delivery mirror fields (single
-        // source of derivation). No-op for loads created without stops.
-        const load = await api.createLoad(withDerivedLegacy(l))
-        set((s) => ({ loads: [...s.loads, load] }))
-        writeAudit(get().currentUserEmail, 'Load', load.id, 'create', {
-          _snapshot: { from: null, to: load },
-        })
-        if (isBatory) {
-          // Fire-and-forget — a task hiccup must not fail the load save.
-          const ref = [load.aljexId ? `Pro# ${load.aljexId}` : null, load.customer].filter(Boolean).join(' · ')
-          const puDate = load.pickupAppt ? load.pickupAppt.slice(0, 10) : 'the pickup date'
-          void api.createApptTask({
-            loadId: load.id, kind: 'request_pickup', assignee: 'dennis@bcatcorp.com',
-            subject: `Request pickup appt for 12:00 PM — ${ref || 'Batory load'}`,
-            bodyText: `New Batory load built. Email the pickup facility to request a 12:00 PM appointment for ${puDate}, then upload the request-email screenshot to move it to REQUESTED.`,
-            aljexId: load.aljexId ?? null,
-          }).catch((err) => console.error('[addLoad] pickup task failed', err))
-          void api.createApptTask({
-            loadId: load.id, kind: 'pick_delivery_time', assignee: 'ruben@bcatcorp.com',
-            subject: `Pick delivery appt time — ${ref || 'Batory load'}`,
-            bodyText: `New Batory load built. Choose the delivery time you want booked (set it on the delivery stop); Dennis is then tasked to book it.`,
-            aljexId: load.aljexId ?? null,
-          }).catch((err) => console.error('[addLoad] delivery task failed', err))
-        }
-        return load
-      },
-
       updateLoad: async (id, patch) => {
         const before = get().loads.find((l) => l.id === id)
         if (!before) return
@@ -853,13 +818,10 @@ export const useAppStore = create<AppState>()(
       // ── UI ─────────────────────────────────────────────────────────────────
       setViewMode: (m) => set({ viewMode: m }),
       setWeekStart: (d) => set({ weekStart: d }),
-      setSelectedLoad: (id, mode = 'view', preFill) =>
-        set({
-          selectedLoadId: id,
-          drawerMode: id === null && mode !== 'create' ? null : mode,
-          createPreFill: preFill ?? null,
-        }),
-      setPendingIntakeItem: (id) => set({ pendingIntakeItemId: id }),
+      setSelectedLoad: (id, mode = 'view') =>
+        set({ selectedLoadId: id, drawerMode: id === null ? null : mode }),
+      openNewShipment: (prefill) => set({ newShipmentPrefill: prefill ?? {} }),
+      closeNewShipment: () => set({ newShipmentPrefill: null }),
       setFilterDriver: (id) => set({ filterDriverId: id }),
       setSearchQuery: (q) => set({ searchQuery: q }),
       toggleFilter: (f) =>

@@ -6,7 +6,8 @@ import { ShipmentDetail } from './components/ShipmentDetail'
 import { normalizeDetailTab } from './components/detailTabs'
 import type { ShipmentActions } from './useShipmentActions'
 import type {
-  LoadCarrierRecord, LoadChargeRecord, OrderRecord, ShipmentBundle, ShipmentLoad, ShipmentRecord, ShipmentStatus,
+  CustomerRecord, LoadCarrierRecord, LoadChargeRecord, OrderRecord, ShipmentBundle, ShipmentLoad, ShipmentRecord,
+  ShipmentStatus,
 } from '@/types/tms'
 import type { Stop } from '@/types'
 
@@ -157,6 +158,7 @@ function makeActions(): ShipmentActions {
     onSetRevTag: vi.fn(async () => {}),
     onClearRevTag: vi.fn(async () => {}),
     onSetSalesRep: vi.fn(async () => {}),
+    setCustomer: vi.fn(async () => {}),
     dispatchLoad: vi.fn(async () => {}),
     load: {
       onSetLoadStatus: vi.fn(async () => {}), onAssignAsset: vi.fn(async () => {}), onAssignCarrier: vi.fn(async () => {}),
@@ -190,6 +192,7 @@ function renderDetail(
       <ShipmentDetail
         bundle={bundle(status, bundleOver)}
         customer={null}
+        customers={[]}
         locations={[]}
         catalog={[]}
         pricing={null}
@@ -204,6 +207,47 @@ function renderDetail(
     </MemoryRouter>,
   )
 }
+
+/*
+ * Step R — a shipment can exist on nothing but the operator's typed customer text. The
+ * gates refuse it before the release gate ever runs, so the detail has to say why and
+ * carry the only fix: linking a Customer record.
+ */
+describe('a shipment with no customer record', () => {
+  const directDrive = {
+    id: 'cust-9', name: 'Direct Drive Logistics', status: 'ACTIVE', active: true,
+    createdBy: 'a@b.c', updatedBy: 'a@b.c', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
+  } as CustomerRecord
+
+  function renderUnresolved(status: ShipmentStatus = 'BOOKED') {
+    const base = bundle(status)
+    renderDetail(status, { customers: [directDrive] }, {
+      shipment: { ...base.shipment, customerId: null, customerName: 'DIRECT DRIVE LOGISTICS' },
+    })
+  }
+
+  it('says what is blocked, and links a customer record when one is picked', async () => {
+    renderUnresolved()
+    const note = screen.getByTestId('unresolved-customer-note').textContent ?? ''
+    expect(note).toContain('DIRECT DRIVE LOGISTICS')
+    expect(note).toContain('Link a customer before submitting, invoicing or factoring it')
+
+    fireEvent.change(screen.getByLabelText('Customer to link'), { target: { value: 'cust-9' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Link customer' }))
+    await waitFor(() => expect(actions.setCustomer).toHaveBeenCalledWith('cust-9'))
+  })
+
+  it('offers the same link above the draft editor, where it is commonest', () => {
+    renderUnresolved('DRAFT')
+    expect(screen.getByTestId('unresolved-customer-note')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Link customer' })).toBeTruthy()
+  })
+
+  it('says nothing of the sort once a customer is linked', () => {
+    renderDetail('BOOKED', { customers: [directDrive] })
+    expect(screen.queryByTestId('unresolved-customer-note')).toBeNull()
+  })
+})
 
 describe('ShipmentDetail tabs', () => {
   it('opens on Overview with the facts the old Summary and Details tabs both held', () => {

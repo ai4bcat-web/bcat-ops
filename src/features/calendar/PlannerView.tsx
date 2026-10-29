@@ -1220,8 +1220,8 @@ export function PlannerView({ loads: allLoads, drivers, weekStart, numDays = 7, 
               <button
                 className="ml-auto flex items-center justify-center size-4 rounded text-white transition-colors"
                 style={{ background: 'var(--ds-blue)', border: 'none', cursor: 'pointer' }}
-                title={`Add load for ${weekday}`}
-                onClick={() => useAppStore.getState().setSelectedLoad(null, 'create', { driverId: null, dateStr: dayStr! })}
+                title={`Add a shipment for ${weekday}`}
+                onClick={() => useAppStore.getState().openNewShipment({ driverId: null, dateStr: dayStr! })}
               >
                 <Plus className="size-3" />
               </button>

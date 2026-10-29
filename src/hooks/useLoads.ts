@@ -20,8 +20,7 @@ import { useAppStore } from '@/store/useAppStore'
  */
 export function useLoads() {
   const allLoads = useAppStore((s) => s.loads)
-  const addLoad = useAppStore((s) => s.addLoad)
   const updateLoad = useAppStore((s) => s.updateLoad)
   const loads = useMemo(() => allLoads.filter((l) => !isLoadVoided(l)), [allLoads])
-  return { loads, allLoads, addLoad, updateLoad }
+  return { loads, allLoads, updateLoad }
 }

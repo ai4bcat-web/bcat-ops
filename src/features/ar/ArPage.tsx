@@ -496,7 +496,7 @@ function toInvoiceView({
     {
       key: 'billTo',
       header: 'BILL-TO',
-      render: (row) => billToLabel(customersById.get(row.customerId), row.billToId),
+      render: (row) => billToLabel(row.customerId ? customersById.get(row.customerId) : undefined, row.billToId),
     },
     {
       key: 'delivered',

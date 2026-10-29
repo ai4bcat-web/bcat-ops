@@ -298,10 +298,15 @@ export function ArCard({ bundle, onReload }: ArCardProps) {
           onDone={() => { setDialog(null); void refresh() }}
         />
       )}
-      {dialog?.kind === 'payment' && (
+      {/*
+        * The payment is applied to the invoice's customer, not to whatever the order
+        * carries now: an order may have no Customer record linked at all, and only an
+        * invoice — which cannot be generated without one — proves there is money owed.
+        */}
+      {dialog?.kind === 'payment' && invoice && (
         <ReceivePaymentDialog
-          customerId={order.customerId}
-          customerName={shipment.customerName ?? undefined}
+          customerId={invoice.customerId}
+          customerName={invoice.customerName ?? shipment.customerName ?? undefined}
           invoiceId={invoiceId ?? undefined}
           busy={busy}
           onClose={() => setDialog(null)}

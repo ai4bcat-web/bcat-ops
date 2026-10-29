@@ -648,8 +648,8 @@ function DayColumn({
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             marginLeft: loadCount > 0 ? 0 : 'auto', flexShrink: 0,
           }}
-          title={`Add load on ${weekday} ${date}`}
-          onClick={() => useAppStore.getState().setSelectedLoad(null, 'create', { driverId: null, dateStr: dayStr })}
+          title={`Add a shipment on ${weekday} ${date}`}
+          onClick={() => useAppStore.getState().openNewShipment({ driverId: null, dateStr: dayStr })}
         >
           <Plus style={{ width: 11, height: 11 }} />
         </button>

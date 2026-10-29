@@ -17,6 +17,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { listOrdersByArStatus, listShipments } from '@/lib/apiClient'
+import { customerDisplayName, isCustomerUnresolved } from '@/lib/customerResolution'
 import { isShipmentVoided } from '@/lib/shipmentVoid'
 import type { OrderRecord, ShipmentRecord } from '@/types/tms'
 
@@ -32,7 +33,8 @@ export interface ArWorklistRow {
   orderId: string
   shipmentId: string
   shipmentNumber: string | null
-  customerId: string
+  /** Null until a Customer record is linked; such an order can never be invoiced. */
+  customerId: string | null
   customerName: string
   /** `Customer.billToParties[].id`; resolving it to a name needs the customer record. */
   billToId: string | null
@@ -108,6 +110,10 @@ export function useArWorklist(tab: ArWorklistTab): ArWorklist {
         if (revenueCents <= 0) reasons.push('No customer charges')
         if (shipment?.status === 'CANCELED') reasons.push('Shipment canceled')
         else if (!shipment?.deliveredAt) reasons.push('Not delivered')
+        // READY_TO_INVOICE and GENERATE_INVOICE both refuse a shipment with no Customer
+        // record, before the release gate ever runs, so the row says so rather than
+        // leaving the biller to discover it at the refusal.
+        if (isCustomerUnresolved(order)) reasons.push('No customer linked')
 
         return {
           order,
@@ -116,7 +122,10 @@ export function useArWorklist(tab: ArWorklistTab): ArWorklist {
           shipmentId: order.shipmentId,
           shipmentNumber: shipment?.number ?? null,
           customerId: order.customerId,
-          customerName: order.customerName ?? shipment?.customerName ?? '',
+          customerName: customerDisplayName({
+            customerId: order.customerId,
+            customerName: order.customerName ?? shipment?.customerName,
+          }),
           billToId: order.billToId ?? null,
           deliveredAt: shipment?.deliveredAt ?? null,
           arStatusChangedAt: order.arStatusChangedAt ?? null,

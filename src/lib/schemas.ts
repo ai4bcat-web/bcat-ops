@@ -89,9 +89,20 @@ export const stopsSchema = z
 // fields are no longer edited directly — they're derived from `stops` by the store on
 // save (see withDerivedLegacy). The form edits the canonical stops array.
 export const loadSchema = z.object({
-  aljexId: z.string().min(1, 'Pro # is required'),
-  tmsId: z.string().min(1, 'TMS ID / PO is required'),
-  pickupNumber: z.string().min(1, 'PU# is required'),
+  /*
+   * The three identity fields are the server's, not the form's.
+   *
+   * `aljexId` is field-level read-only to clients — a PRO is claimed atomically inside
+   * CREATE_SHIPMENT and the claim is never released, so only SET_LOAD_PRO may move one —
+   * and `tmsId`/`pickupNumber` joined it because they fall back to the PRO when blank. A
+   * blank PRO on a new shipment is the normal case: the leg takes the derived
+   * `<shipmentNumber>-<leg>`. Requiring them here refused a brand-new shipment that had
+   * done nothing wrong, and on an edit — where all three now render read-only — it made a
+   * load that arrived with a blank TMS ID permanently unsaveable.
+   */
+  aljexId: z.string().optional(),
+  tmsId: z.string().optional(),
+  pickupNumber: z.string().optional(),
   trailerNumber: z.string().optional(),
   commodity: z.string().optional().nullable(),
   weight: z.number().min(0).optional().nullable(),

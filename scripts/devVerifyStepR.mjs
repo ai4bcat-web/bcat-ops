@@ -20,6 +20,14 @@
  *     missing list (documents, references, open exceptions, unsettled carrier charges),
  *     `override` no longer exists, and two concurrent GENERATE_INVOICE calls issue one
  *     invoice.
+ *   - the cutover to one record: a client token can neither create a Load nor rename one
+ *     onto another PRO, a shipment can be created from typed customer text without a
+ *     Customer record being invented, that unresolved shipment is refused by the gates
+ *     until SET_SHIPMENT_CUSTOMER links one, a PRO is claimed forever (a voided one is
+ *     never reissued, two concurrent creates on one PRO yield one shipment, and
+ *     SET_LOAD_PRO never releases the old number), DUPLICATE_SHIPMENT keeps the driver,
+ *     and a factoring create lands on the LEGACY AR rung because that money is already
+ *     collected.
  *
  * Fixtures are retired by VOID (never deleted); the temporary identity is created with
  * a randomised password that is never printed and removed in a `finally`. It refuses
@@ -27,7 +35,7 @@
  *
  *   BCAT_EMAIL=… BCAT_PASSWORD=… node scripts/devVerifyStepR.mjs
  */
-import { randomBytes } from 'node:crypto'
+import { randomBytes, randomUUID } from 'node:crypto'
 import { authenticateTmsUser } from './lib/tmsAuth.mjs'
 
 const DEV_API = 'https://f5iqzdpidzalvjys7yxijn5ave.appsync-api.us-east-1.amazonaws.com/graphql'
@@ -117,6 +125,38 @@ async function deleteFromPool(username, profileId) {
   })).catch(() => {})
   await client.send(new sdk.AdminDeleteUserCommand({ UserPoolId: DEV_POOL, Username: username })).catch(() => {})
 }
+
+// ── a legacy load, seeded the only way left ──────────────────────────────────
+/**
+ * Write a pre-Step-R Load straight into DynamoDB.
+ *
+ * The cutover closed the last client door: Load grants a signed-in token `read` and
+ * `update` and nothing else, so `createLoad` can no longer mint the orphan this script
+ * needs to prove BACKFILL_SHIPMENT on — which is exactly the rule check 1 of section 7c
+ * asserts. The fixture is therefore written the way every TMS migration writes one, a
+ * PutItem under the IAM credentials this script already uses for the temporary identity.
+ * Nothing about the row is special: it is a legacy load, with no shipmentId and no claim
+ * on its PRO, which is what the dev table was full of before Step R.
+ */
+let docClient = null
+async function seedLegacyLoad(fields) {
+  const [{ DynamoDBClient }, { DynamoDBDocumentClient, PutCommand }] =
+    await Promise.all([import('@aws-sdk/client-dynamodb'), import('@aws-sdk/lib-dynamodb')])
+  docClient ??= DynamoDBDocumentClient.from(new DynamoDBClient({ region }), {
+    marshallOptions: { removeUndefinedValues: true },
+  })
+  const now = new Date().toISOString()
+  const id = randomUUID()
+  await docClient.send(new PutCommand({
+    TableName: `Load-${DEV_TABLE_SUFFIX}`,
+    Item: {
+      id, __typename: 'Load', createdAt: now, updatedAt: now,
+      createdBy: 'script:devVerifyStepR', updatedBy: 'script:devVerifyStepR',
+      ...fields,
+    },
+  }))
+  return { id }
+}
 let amplifyAuth = null
 async function authModule() {
   if (!amplifyAuth) {
@@ -159,7 +199,7 @@ async function attachDocument(shipmentId, orderId, loadId, type) {
   })
 }
 const loadRow = async (id) => (await gql(
-  `query L($id: ID!) { getLoad(id: $id) { id status assignmentType carrierName pickupDriverId deliveryDriverId truckId trailerNumber stops readyToInvoice revDivision revSubdivision revTagSource salesRepId voidedAt updatedAt } }`,
+  `query L($id: ID!) { getLoad(id: $id) { id aljexId tmsId pickupNumber customer customerId status assignmentType carrierName pickupDriverId deliveryDriverId truckId trailerNumber stops readyToInvoice revDivision revSubdivision revTagSource salesRepId voidedAt updatedAt } }`,
   { id },
 )).getLoad
 const stopsOf = (load) => { try { return JSON.parse(load.stops ?? '[]') } catch { return [] } }
@@ -421,16 +461,12 @@ async function main() {
     // work was done — but that flag is a checkbox on the old calendar, not the
     // release gate, and Ryne's rule is that nothing reaches AR without the gate. The
     // imported order must land on DOCS_NEEDED however the flag was left.
-    const legacyLoad = (await gql(
-      `mutation C($input: CreateLoadInput!) { createLoad(input: $input) { id } }`,
-      { input: {
-        aljexId: `VR${stamp}`, tmsId: '', pickupNumber: `VR${stamp}`,
-        customer: customer.name, customerId: customer.id,
-        pickupAppt: `${today}T13:00:00.000Z`, deliveryAppt: `${today}T20:00:00.000Z`,
-        readyToInvoice: true, rate: 125000,
-        createdBy: 'script:devVerifyStepR', updatedBy: 'script:devVerifyStepR',
-      } },
-    )).createLoad
+    const legacyLoad = await seedLegacyLoad({
+      aljexId: `VR${stamp}`, tmsId: '', pickupNumber: `VR${stamp}`,
+      customer: customer.name, customerId: customer.id,
+      pickupAppt: `${today}T13:00:00.000Z`, deliveryAppt: `${today}T20:00:00.000Z`,
+      readyToInvoice: true, rate: 125000,
+    })
     const imported = await shipAction('BACKFILL_SHIPMENT', { loadIds: [legacyLoad.id], dryRun: false })
     equals('BACKFILL_SHIPMENT applied the one legacy load', imported.applied, 1)
     equals('the import reads the flag as delivered', imported.planned?.[0]?.loadStatus, 'DELIVERED')
@@ -441,6 +477,119 @@ async function main() {
     equals('and the written order says so', importedBundle.orders[0].arStatus, 'DOCS_NEEDED')
     await refuses('the imported order still has to pass the gate', /Not ready for accounting/i, () =>
       shipAction('READY_TO_INVOICE', { orderId: importedBundle.orders[0].id, expectedUpdatedAt: importedBundle.orders[0].updatedAt }))
+
+    // ── 7c. one record, one creation door, one PRO ────────────────────────
+    // Both client doors are shut, not aliased. Load grants a signed-in token `read`
+    // and `update` and nothing else, and aljexId / tmsId / pickupNumber are field-level
+    // read-only beside voidedAt — so a browser can neither bring freight into being nor
+    // rename an existing leg onto a voided or duplicate PRO. Were `update` left open on
+    // the PRO, the claim rule would hold on create and nowhere else.
+    await refuses('a client token can no longer create a Load at all', /Unauthorized|Not Authorized|FieldUndefined|Validation/i, () =>
+      gql(`mutation C($input: CreateLoadInput!) { createLoad(input: $input) { id } }`, { input: {
+        aljexId: `VRX${stamp}`, tmsId: '', pickupNumber: `VRX${stamp}`,
+        pickupAppt: `${today}T13:00:00.000Z`, deliveryAppt: `${today}T20:00:00.000Z`,
+        readyToInvoice: false, createdBy: 'script:devVerifyStepR', updatedBy: 'script:devVerifyStepR',
+      } }))
+    await refuses('a client token cannot write aljexId — SET_LOAD_PRO is the only way a PRO moves', /Unauthorized on \[aljexId\]|Unauthorized|not authorized/i, () =>
+      gql(`mutation U($id: ID!, $pro: String!) { updateLoad(input: { id: $id, aljexId: $pro }) { id aljexId } }`,
+        { id: legacyLoad.id, pro: `VRY${stamp}` }))
+
+    // An operator holding only typed customer text can still record the freight. No
+    // Customer record is invented and none is created: the text is kept verbatim and
+    // the shipment simply carries no customerId until somebody links one.
+    const typedCustomer = `ZZ Not A Customer Record ${stamp}`
+    const uBundle = await shipAction('CREATE_SHIPMENT', { customerName: typedCustomer, source: 'MANUAL' })
+    const uId = uBundle.shipment.id
+    fixtures.shipmentIds.push(uId)
+    console.log(`fixture shipment U (unresolved customer): ${uBundle.shipment.number} (${uId})`)
+    equals('CREATE_SHIPMENT from typed text leaves customerId absent', uBundle.shipment.customerId ?? null, null)
+    equals('and keeps the operator\'s text verbatim', uBundle.shipment.customerName, typedCustomer)
+    equals('the Order beside it is unresolved too (the AR worklist and credit math read it)', uBundle.orders[0].customerId ?? null, null)
+    const invented = (await gql(
+      `query C($name: String!) { listCustomers(filter: { name: { eq: $name } }, limit: 5) { items { id name } } }`,
+      { name: typedCustomer },
+    )).listCustomers.items
+    equals('no Customer record is invented for typed text', invented.length, 0)
+
+    // Refused by name, so the operator knows the next move is to link a customer.
+    const uOrder = uBundle.orders[0]
+    await refuses('READY_TO_INVOICE refuses an unresolved customer and names it', /^This shipment has no customer record linked/, () =>
+      shipAction('READY_TO_INVOICE', { orderId: uOrder.id, expectedUpdatedAt: uOrder.updatedAt }))
+
+    await shipAction('SET_SHIPMENT_CUSTOMER', { shipmentId: uId, customerId: customer.id })
+    const u = await reload(uId)
+    equals('SET_SHIPMENT_CUSTOMER links the record on the Shipment', u.shipment.customerId, customer.id)
+    equals('and on the Order', u.orders[0].customerId, customer.id)
+    equals('and on the Load, which dispatch and the driver app read', (await loadRow(u.loads[0].id)).customerId, customer.id)
+    // The customer is checked BEFORE the gate, never instead of it: with one linked the
+    // same call is refused again — now by the gate, naming its own missing list.
+    await refuses('with the customer linked the release gate still speaks for itself', /Not ready for accounting/i, () =>
+      shipAction('READY_TO_INVOICE', { orderId: u.orders[0].id, expectedUpdatedAt: u.orders[0].updatedAt }))
+
+    // A claim is never released — not on a void. The number a voided shipment carried
+    // can never be handed to another one, which is Ryne's rule where it cannot be
+    // bypassed rather than a check the duplicate and factoring paths used to skip.
+    const voidedPro = `VRV${stamp}`
+    const vBundle = await shipAction('CREATE_SHIPMENT', { customerId: customer.id, pro: voidedPro })
+    fixtures.shipmentIds.push(vBundle.shipment.id)
+    equals('a supplied PRO becomes the leg\'s aljexId', (await loadRow(vBundle.loads[0].id)).aljexId, voidedPro)
+    const vFresh = await reload(vBundle.shipment.id)
+    await shipAction('VOID_SHIPMENT', { shipmentId: vBundle.shipment.id, reason: 'Dev verification fixture — Step R proof', expectedUpdatedAt: vFresh.shipment.updatedAt })
+    await refuses('a voided PRO is never reissued', /has already been issued\. A PRO is never reused/, () =>
+      shipAction('CREATE_SHIPMENT', { customerId: customer.id, pro: voidedPro }))
+
+    // Mutual exclusion, not a read-then-write: the claim is a conditional put inside
+    // the shipment transaction, so two dispatchers in the same second cannot both win.
+    const racePro = `VRR${stamp}`
+    const raceCreates = await Promise.allSettled([
+      shipAction('CREATE_SHIPMENT', { customerId: customer.id, pro: racePro }),
+      shipAction('CREATE_SHIPMENT', { customerId: customer.id, pro: racePro }),
+    ])
+    for (const r of raceCreates) if (r.status === 'fulfilled') fixtures.shipmentIds.push(r.value.shipment.id)
+    equals(
+      'two concurrent CREATE_SHIPMENT calls on one PRO create exactly one shipment',
+      raceCreates.filter((r) => r.status === 'fulfilled').length, 1,
+      raceCreates.map((r) => (r.status === 'rejected' ? String(r.reason.message).slice(0, 80) : 'ok')).join(' / '),
+    )
+
+    // Editing a PRO claims the new number and keeps the old one claimed: a leg that
+    // moves off a number does not hand it back to the pool.
+    const firstPro = `VRP${stamp}`
+    const secondPro = `VRQ${stamp}`
+    const pBundle = await shipAction('CREATE_SHIPMENT', { customerId: customer.id, pro: firstPro })
+    fixtures.shipmentIds.push(pBundle.shipment.id)
+    await shipAction('SET_LOAD_PRO', { loadId: pBundle.loads[0].id, pro: secondPro, expectedUpdatedAt: pBundle.loads[0].updatedAt })
+    equals('SET_LOAD_PRO moves the leg onto the new PRO', (await loadRow(pBundle.loads[0].id)).aljexId, secondPro)
+    await refuses('the PRO it moved off is still claimed', /has already been issued\. A PRO is never reused/, () =>
+      shipAction('CREATE_SHIPMENT', { customerId: customer.id, pro: firstPro }))
+
+    // The scheduler's duplicate: `shiftStops` clears the driver and `buildLoadInput`
+    // writes NEED_TO_COVER, which would land an own-fleet dispatcher's copy off the
+    // driver lane it was made from.
+    const duplicated = await shipAction('DUPLICATE_SHIPMENT', {
+      shipmentId: aId, loadId: aLoadId, keepDriver: true,
+      copies: [{ pickupAppt: `${today}T13:00:00.000Z`, deliveryAppt: `${today}T21:00:00.000Z` }],
+    })
+    // The answer is the SOURCE bundle — the board re-reads itself off it — plus the
+    // ids it created, which is the only way to reach the copy.
+    const copyId = (duplicated.created ?? [])[0]
+    equals('DUPLICATE_SHIPMENT names the shipment it created', Boolean(copyId), true, String(copyId))
+    if (copyId) {
+      fixtures.shipmentIds.push(copyId)
+      const copy = await shipAction('GET_SHIPMENT_BUNDLE', { shipmentId: copyId })
+      equals('DUPLICATE_SHIPMENT with keepDriver leaves the copy on the driver\'s lane', (await loadRow(copy.loads[0].id)).pickupDriverId, ivanDriver.id)
+    }
+
+    // Factoring is money OTR has already bought: the Aljex invoice went out before the
+    // PRO was ever typed here. DOCS_NEEDED would put it in the AR worklist and into the
+    // customer's credit exposure; LEGACY is the rung that exists for exactly this.
+    const factored = await shipAction('CREATE_SHIPMENT', {
+      customerId: customer.id, source: 'FACTORING', pro: `VRF${stamp}`,
+      load: { tmsId: `PO-${stamp}`, rateCents: 125000 },
+    })
+    fixtures.shipmentIds.push(factored.shipment.id)
+    equals('a factoring create lands on the LEGACY AR rung, not in the worklist', factored.orders[0].arStatus, 'LEGACY')
+    equals('and keeps the factoring PO in tmsId instead of overwriting it with the PRO', (await loadRow(factored.loads[0].id)).tmsId, `PO-${stamp}`)
 
     // ── 8. RETAG dry run writes nothing ───────────────────────────────────
     const before = (await reload(aId)).shipment.updatedAt

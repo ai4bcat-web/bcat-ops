@@ -669,7 +669,14 @@ export interface ShipmentRecord {
   tenderRejectReason?: string | null
   deletedAt?: string | null
   deletedBy?: string | null
-  customerId: string
+  /**
+   * Step R cutover. Null means the customer is not resolved to a record yet — the
+   * shipment was created from typed text and nobody has matched it. `customerName`
+   * carries that text verbatim; no name is ever invented. Readiness is derived from
+   * this being null, never from status, because a backfilled row can be DELIVERED
+   * and still unresolved. SET_SHIPMENT_CUSTOMER is the only writer.
+   */
+  customerId: string | null
   customerName?: string | null
   mode: ShipmentMode
   /** Consolidation parent. Always null in step B. */
@@ -723,7 +730,8 @@ export interface ShipmentRecord {
 export interface OrderRecord {
   id: string
   shipmentId: string
-  customerId: string
+  /** Null for the same reason as `ShipmentRecord.customerId`; the two move together. */
+  customerId: string | null
   customerName?: string | null
   customerContactId?: string | null
   customerRepId?: string | null

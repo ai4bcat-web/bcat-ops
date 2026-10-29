@@ -69,6 +69,11 @@ import {
 } from '../../../src/lib/shipmentDocuments'
 import { loadReleaseGateInput } from '../_shared/releaseGateInput'
 import { evaluateReleaseGate, releaseGateError } from '../../../src/lib/releaseGate'
+import {
+  isCustomerUnresolved,
+  unresolvedCustomerMessage,
+  type CustomerResolvable,
+} from '../../../src/lib/customerResolution'
 import { isVoided } from '../_shared/voided'
 import type {
   CustomerRecord,
@@ -830,6 +835,14 @@ export async function readyToInvoice(deps: DocumentDeps, input: Row, caller: Cal
 
   const order = await getById(deps.store.db, deps.store.tables.order, orderId)
   if (!order) throw new Error(`Order not found: ${orderId}`)
+  // Step R cutover. Refused before anything else, and keyed on the customer link
+  // alone — never on status. The backfill sets a shipment's status from its stop
+  // clock, so an unresolved order can arrive already DELIVERED and would otherwise
+  // sail through to AR, where the customer lookup dies on an id that was never
+  // there. This is checked BEFORE the release gate and never instead of it.
+  if (isCustomerUnresolved(order as unknown as CustomerResolvable)) {
+    throw new Error(unresolvedCustomerMessage(order as unknown as CustomerResolvable, 'releasing it to accounting'))
+  }
   const shipmentId = String(order.shipmentId)
   const bundle = await readBundle(deps.store, shipmentId)
 

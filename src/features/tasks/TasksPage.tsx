@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import { RefreshCw, Inbox, Loader2, Users } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { LoadDrawer } from '@/features/loads/LoadDrawer'
+import { NewShipmentDialog } from '@/features/shipments/components/NewShipmentDialog'
 import { TEAM_MEMBERS, ACTIVE_STATUSES, assigneeLabel } from '@/lib/intake'
 import { ProNumberModal, QueueCard } from '@/features/intake/IntakePage'
 import { useAppStore } from '@/store/useAppStore'
@@ -46,7 +47,9 @@ function taskToIntakeShape(t: CommandCenterTask): IntakeItem {
 export function TasksPage() {
   const { user } = useAuth()
   const setSelectedLoad      = useAppStore((s) => s.setSelectedLoad)
-  const setPendingIntakeItem = useAppStore((s) => s.setPendingIntakeItem)
+  const openNewShipment      = useAppStore((s) => s.openNewShipment)
+  const newShipmentPrefill   = useAppStore((s) => s.newShipmentPrefill)
+  const closeNewShipment     = useAppStore((s) => s.closeNewShipment)
 
   const [searchParams] = useSearchParams()
   const filterAssignee = searchParams.get('assignee') ?? 'ALL'
@@ -135,8 +138,8 @@ export function TasksPage() {
         .then((updated) => applyLocalPatch(item.id, updated))
         .catch(() => {})
     }
-    setPendingIntakeItem(item.id)
-    setSelectedLoad(null, 'create')
+    // The item travels with the form, so the shipment it creates links and closes it.
+    openNewShipment({ intakeItemId: item.id })
   }
 
   const handleUpdateLoad = (item: IntakeItem) => {
@@ -274,7 +277,16 @@ export function TasksPage() {
         />
       )}
 
+      {/* LoadDrawer — opened by "Update load" on a task that already built one. */}
       <LoadDrawer />
+
+      {/* "Build Load" raises this. Nothing is written until Save. */}
+      <NewShipmentDialog
+        open={newShipmentPrefill !== null}
+        prefill={newShipmentPrefill}
+        onClose={closeNewShipment}
+        onCreated={() => { closeNewShipment(); void refresh() }}
+      />
     </div>
   )
 }

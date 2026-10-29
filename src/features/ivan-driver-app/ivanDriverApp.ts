@@ -9,6 +9,7 @@
 import { driverGroupOf } from '@/lib/driverFilter'
 import { driverProgramOf } from '@/lib/driverProgram'
 import { loadDriverIds } from '@/lib/driverFilter'
+import { normalizePro } from '@/lib/proNumber'
 import { weekStartOfISO } from '@/features/driver-pay/week'
 import type { Driver, Load } from '@/types'
 
@@ -48,13 +49,6 @@ export interface IvanDriverRow {
    * the fleet rather than wondering why the invite led to the wrong page.
    */
   unclassified: boolean
-}
-
-function normalizePro(value: string | null | undefined): string | null {
-  const raw = (value ?? '').trim()
-  if (!raw || raw.toUpperCase() === 'N/A') return null
-  const key = raw.replace(/^\s*pro\s*#?\s*/i, '').replace(/[^A-Za-z0-9]/g, '').toUpperCase()
-  return key.length >= 3 ? key : null
 }
 
 /** Worst page wins — a POD is only as readable as its least readable sheet. */

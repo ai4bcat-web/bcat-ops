@@ -1,4 +1,4 @@
-import { useMemo, useState, useCallback } from 'react'
+import { useEffect, useMemo, useState, useCallback } from 'react'
 import { Loader2, Trash2, FilePlus2 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import {
@@ -7,9 +7,13 @@ import {
 } from '@/features/tms/kit'
 import { OtrPanel } from './OtrPanel'
 import { LoadDrawer } from '@/features/loads/LoadDrawer'
+import { ShipmentDrawer } from '@/features/shipments/components/ShipmentDrawer'
 import { useAppStore } from '@/store/useAppStore'
 import { useFactoringItems } from '@/hooks/useFactoringItems'
 import { useAuth } from '@/hooks/useAuth'
+import { useDirectory } from '@/hooks/useDirectory'
+import { createShipment, getTmsSettings } from '@/lib/apiClient'
+import { errorMessage } from '@/lib/utils/errorMessage'
 import { canDeleteFactoringItem } from '@/lib/auth/admin'
 import { toast } from 'sonner'
 import { FactoringRowFields } from './FactoringRowFields'
@@ -18,6 +22,7 @@ import { invoiceAmountOf, totalsByStatus, money } from './factoringTotals'
 import { FactoringDocCell } from './FactoringDocCell'
 import type { OtrReadiness } from '@/lib/otrInvoice'
 import type { FactoringItem, FactoringItemStatus } from '@/types'
+import type { TmsSettings } from '@/types/tms'
 import { otrStatusMeta } from '@/lib/otrInvoiceStatus'
 import { otrDocsIncomplete, otrDocsErrorMessage } from '@/lib/otrSubmitOutcome'
 import { uploadOtrDocs, resolveLoad, assembleInvoice } from '@/lib/otrClient'
@@ -384,7 +389,7 @@ function OtrStatusFlag({ item }: { item: FactoringItem }) {
 
 export function FactoringPage() {
   const { items, loading, error, pendingIds, refresh, removeItem } = useFactoringItems()
-  const { user } = useAuth()
+  const { user, isAdmin } = useAuth()
   const [search, setSearch] = useState('')
   const [activeTab, setActiveTab] = useState<FilterKey>('NEED_TO_FACTOR')
   /** On the Pending tab: one of OTR's own labels (or OTR_UNREPORTED) to narrow to, or null for all. */
@@ -400,9 +405,13 @@ export function FactoringPage() {
   // limited to the two people who run factoring rather than every admin.
   const canDelete = canDeleteFactoringItem(user?.email)
   const staffEmail = user?.email ?? ''
-  // "Create load" on a row whose PRO was never entered in BCAT Ops.
-  const addLoad = useAppStore((s) => s.addLoad)
+  // "Create shipment" on a row whose PRO was never entered in BCAT Ops.
   const [creatingLoadFor, setCreatingLoadFor] = useState<string | null>(null)
+  // Where it lands afterwards: the shipment's own detail.
+  const [openShipmentId, setOpenShipmentId] = useState<string | null>(null)
+  const { customers, locations } = useDirectory()
+  const [settings, setSettings] = useState<TmsSettings | null>(null)
+  useEffect(() => { getTmsSettings().then(setSettings).catch(() => setSettings(null)) }, [])
 
   const counts = useMemo(() => ({
     ALL: items.filter((i) => i.status !== 'ARCHIVED').length,
@@ -572,23 +581,46 @@ export function FactoringPage() {
             <TmsButton
               size="sm"
               disabled={creatingLoadFor === item.id}
-              title={`No load for PRO ${item.proNumber} in BCAT Ops. Create one from this invoice so the POD and rate confirmation can be attached and the row submitted.`}
+              title={`No shipment for PRO ${item.proNumber} in BCAT Ops. Create one from this invoice so the POD and rate confirmation can be attached and the row submitted.`}
               onClick={async () => {
+                const readiness = readinessOf(item)
+                /*
+                 * The customer record when the row resolved to one, the row's own typed
+                 * text when it did not. Never a guess: an invented name on money OTR has
+                 * already bought is worse than a shipment that says it is not linked yet.
+                 */
+                const typed = readiness?.customerName?.trim() ?? ''
+                if (!item.customerId && !typed) {
+                  toast.error('This row names no customer at all — fill the customer on the row first.')
+                  return
+                }
                 setCreatingLoadFor(item.id)
                 try {
-                  const created = await addLoad(loadFromFactoringItem(item, readinessOf(item), staffEmail, new Date().toISOString()))
+                  /*
+                   * `source: 'FACTORING'` is what files the order as AR status LEGACY. The
+                   * Aljex invoice for this PRO already went out and OTR already bought it,
+                   * so putting it in the AR worklist would double-count collected money
+                   * and inflate the customer's credit exposure.
+                   */
+                  const bundle = await createShipment({
+                    ...(item.customerId ? { customerId: item.customerId } : { customerName: typed }),
+                    pro: item.proNumber,
+                    source: 'FACTORING',
+                    load: loadFromFactoringItem(item, readiness, new Date().toISOString()),
+                  })
                   await resolveLoad(item.id)
                   await assembleInvoice(item.id).catch(() => undefined)
                   await refresh()
-                  toast.success(`Load ${created.aljexId} created and linked — upload the POD and rate confirmation now`)
+                  toast.success(`Shipment ${bundle.shipment.number} created and linked — upload the POD and rate confirmation now`)
+                  setOpenShipmentId(bundle.shipment.id)
                 } catch (err) {
-                  toast.error(err instanceof Error ? err.message : 'Could not create the load')
+                  toast.error(errorMessage(err))
                 } finally {
                   setCreatingLoadFor(null)
                 }
               }}
             >
-              <FilePlus2 size={12} /> {creatingLoadFor === item.id ? 'Creating…' : 'Create load'}
+              <FilePlus2 size={12} /> {creatingLoadFor === item.id ? 'Creating…' : 'Create shipment'}
             </TmsButton>
           )}
           <FactoringDocCell
@@ -773,8 +805,20 @@ export function FactoringPage() {
         </TmsDialog>
       )}
 
-      {/* Opened by the PRO column. */}
+      {/* Opened by the PRO column — the leg editor, for the documents on it. */}
       <LoadDrawer />
+
+      {/* Where "Create shipment" lands. */}
+      <ShipmentDrawer
+        shipmentId={openShipmentId}
+        onClose={() => setOpenShipmentId(null)}
+        onChanged={refresh}
+        customers={customers}
+        locations={locations}
+        settings={settings}
+        isAdmin={isAdmin}
+        currentUser={staffEmail}
+      />
     </>
   )
 }

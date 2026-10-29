@@ -73,6 +73,7 @@ import {
   type Bundle,
   type Row,
   type StopShape,
+  type TransactOptions,
 } from '../_shared/shipmentStore'
 import {
   assertArrayOf,
@@ -176,7 +177,13 @@ import {
   uncoveredLoadPatch,
   type MirrorStop,
 } from '../../../src/lib/loadMirror'
+import {
+  isCustomerUnresolved,
+  unresolvedCustomerMessage,
+  type CustomerResolvable,
+} from '../../../src/lib/customerResolution'
 import { topLevelOf } from '../../../src/lib/ownership'
+import { normalizePro } from '../../../src/lib/proNumber'
 import { evaluateReleaseGate, releaseGateError } from '../../../src/lib/releaseGate'
 import { loadReleaseGateInput } from '../_shared/releaseGateInput'
 import type { Load as LoadForCredit } from '../../../src/types'
@@ -255,6 +262,9 @@ const SHIPMENT_NOTICE_TABLE_NAME = process.env.SHIPMENT_NOTICE_TABLE_NAME ?? ''
 // them and falls back to the seed rows while the tables are still empty.
 const OWNERSHIP_DIVISION_TABLE_NAME = process.env.OWNERSHIP_DIVISION_TABLE_NAME ?? ''
 const OWNERSHIP_RULE_TABLE_NAME = process.env.OWNERSHIP_RULE_TABLE_NAME ?? ''
+// Step R cutover. One row per PRO ever issued, keyed by the normalized PRO. This
+// Lambda is the only writer; a claim is never deleted, so a voided PRO stays issued.
+const PRO_CLAIM_TABLE_NAME = process.env.PRO_CLAIM_TABLE_NAME ?? ''
 
 const OWNER_EMAIL = 'ryne@bcatcorp.com'
 const ADMIN_GROUP = 'ADMIN'
@@ -284,7 +294,8 @@ const getById = (tableName: string, id: string) => storeGetById(dynamo, tableNam
 const queryIndex = (tableName: string, indexName: string, keyName: string, keyValue: string) =>
   storeQueryIndex(dynamo, tableName, indexName, keyName, keyValue)
 const batchGetByIds = (tableName: string, ids: string[]) => storeBatchGetByIds(dynamo, tableName, ids)
-const transact = (items: TransactWriteItem[], label: string) => storeTransact(dynamo, items, label)
+const transact = (items: TransactWriteItem[], label: string, options?: TransactOptions) =>
+  storeTransact(dynamo, items, label, options)
 const readBundle = (shipmentId: string) => storeReadBundle(store, shipmentId)
 const rederiveShipmentStatus = (shipmentId: string, caller: Caller) => storeRederiveShipmentStatus(store, shipmentId, caller)
 
@@ -428,6 +439,11 @@ type Action =
   | 'SUBMIT_ORDER'
   | 'SET_SHIPMENT_STATUS'
   | 'SET_LOAD_STATUS'
+  // Step R cutover. The two writes the one-record vocabulary needs: the customer a
+  // shipment was never matched to, and the PRO a leg carries — `aljexId` is read-only
+  // to every client token now, so this is the only way one ever changes.
+  | 'SET_SHIPMENT_CUSTOMER'
+  | 'SET_LOAD_PRO'
   // Step R. Void is the only exit a shipment has; DELETE_SHIPMENT and
   // RESTORE_SHIPMENT are gone, and nothing replaces them. A PRO is permanent.
   | 'VOID_SHIPMENT'
@@ -1035,6 +1051,45 @@ async function getActiveCustomer(customerId: string): Promise<Row> {
   return customer
 }
 
+/**
+ * Step R cutover. A shipment or order may legitimately point at no customer record
+ * at all, so every read of one takes an explicit branch.
+ *
+ * `String(shipment.customerId)` on an unresolved row is the literal 'null' or
+ * 'undefined', and that string used to reach the customer table and come back
+ * `Customer not found: undefined` — the failure this whole cutover exists to remove.
+ * `isCustomerUnresolved` is the one predicate the board, the detail header and every
+ * gate share, so the answer here is the answer the operator was already looking at.
+ */
+async function customerOf(row: Row): Promise<Row | null> {
+  const id = optionalString(row.customerId, 100)
+  return id ? getById(CUSTOMER_TABLE_NAME, id) : null
+}
+
+/** The same, through the ACTIVE check, for the paths that price against a customer. */
+async function activeCustomerOf(row: Row): Promise<Row | null> {
+  const id = optionalString(row.customerId, 100)
+  return id ? getActiveCustomer(id) : null
+}
+
+/**
+ * The refusal an action owes the operator when it needs a customer record and the
+ * shipment has none. Run BEFORE every other check in the actions that cannot
+ * proceed without one — and never instead of the release gate, which still runs on
+ * its own afterwards.
+ */
+function assertCustomerResolved(row: Row, what: string): void {
+  if (isCustomerUnresolved(row as unknown as CustomerResolvable)) {
+    throw new Error(unresolvedCustomerMessage(row as unknown as CustomerResolvable, what))
+  }
+}
+
+/** The customer record behind a row, refusing first when there is none to find. */
+async function requireCustomer(row: Row, what: string): Promise<Row> {
+  assertCustomerResolved(row, what)
+  return getActiveCustomer(String(row.customerId))
+}
+
 function marginFloorBpsOf(settings: Row | null): number {
   return numberOrNull(settings?.marginFloorBps) ?? 0
 }
@@ -1065,10 +1120,91 @@ async function nextShipmentNumber(caller: Caller): Promise<string> {
   )
   const settings = result.Attributes ? unmarshall(result.Attributes) : null
   const counter = numberOrNull(settings?.nextShipmentNumber) ?? 1
-  const prefix = typeof settings?.shipmentPrefix === 'string' && settings.shipmentPrefix.trim()
-    ? settings.shipmentPrefix.trim()
-    : 'S'
-  return `${prefix}${String(counter).padStart(6, '0')}`
+  return `${shipmentPrefixOf(settings)}${String(counter).padStart(6, '0')}`
+}
+
+// ── The PRO claim (step R cutover) ───────────────────────────────────────────
+
+/**
+ * A PRO is permanent and is never issued twice. The rule lives in a `ProClaim`
+ * row whose id IS the normalized PRO, claimed with a conditional put inside the
+ * very transaction that writes the Shipment — a read-then-write across two Lambda
+ * invocations has no mutual exclusion, and a GSI on `Load.aljexId` could not answer
+ * the question anyway: the live table stores PROs padded ('14547  ') and an index
+ * read is eventually consistent besides.
+ *
+ * A claim is NEVER released. Not when a create rolls back, not when the shipment is
+ * voided. That is the whole of Ryne's rule, enforced where it cannot be bypassed.
+ */
+type ProClaimOrigin = 'CREATE' | 'DUPLICATE' | 'BACKFILL' | 'SET_LOAD_PRO'
+
+/**
+ * The PRO as a claim key, or a refusal. `normalizePro` answers null for blank,
+ * 'N/A' and anything under three characters: a PRO nobody can claim is a PRO
+ * nobody may be issued, because the next person to type the same non-answer would
+ * collide with it silently.
+ */
+function proClaimKey(pro: string): string {
+  const key = normalizePro(pro)
+  if (!key) {
+    throw new Error(`“${pro.trim()}” is not a PRO number — it needs at least three letters or digits`)
+  }
+  return key
+}
+
+function proClaimPut(
+  pro: string,
+  spec: { loadId: string; shipmentId?: string | null; claimedBy: string; origin: ProClaimOrigin },
+): TransactWriteItem {
+  const now = nowIso()
+  return putItem(PRO_CLAIM_TABLE_NAME, {
+    id: proClaimKey(pro),
+    __typename: 'ProClaim',
+    loadId: spec.loadId,
+    shipmentId: spec.shipmentId ?? undefined,
+    claimedAt: now,
+    claimedBy: spec.claimedBy,
+    origin: spec.origin,
+    createdAt: now,
+    updatedAt: now,
+  })
+}
+
+/** What the conditional put means when it fails: somebody already owns this PRO. */
+function proAlreadyIssuedMessage(pro: string): string {
+  return `PRO ${normalizePro(pro) ?? pro.trim()} has already been issued. A PRO is never reused — voiding the shipment it is on does not release it.`
+}
+
+const DEFAULT_SHIPMENT_PREFIX = 'S'
+
+function shipmentPrefixOf(settings: Row | null): string {
+  const prefix = typeof settings?.shipmentPrefix === 'string' ? settings.shipmentPrefix.trim() : ''
+  return prefix || DEFAULT_SHIPMENT_PREFIX
+}
+
+/**
+ * A typed PRO that looks like one the counter hands out — `S000123-1` — is refused.
+ * Claiming it would pre-empt the counter: the create that eventually reaches that
+ * number would fail at Load create, and the number it burned is gone for good.
+ *
+ * Both spellings are tested, because the claim key is the NORMALIZED PRO: the derived
+ * `S000123-1` is owned under `S0001231`, so typing `S0001231`, `S000123 - 1` or
+ * `S000123/1` would claim exactly the key the counter is walking toward. Only the raw
+ * shape can name the dashed form in the message, so it is kept as well.
+ */
+function assertNotDerivedPro(pro: string, settings: Row | null): void {
+  const escapeRe = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const prefix = escapeRe(shipmentPrefixOf(settings))
+  // The claim key keeps only alphanumerics, so the prefix is reduced the same way
+  // before it is matched against one: a dashed prefix never appears in a key.
+  const keyPrefix = escapeRe(shipmentPrefixOf(settings).replace(/[^A-Za-z0-9]/g, '').toUpperCase())
+  const normalized = normalizePro(pro)
+  const derived =
+    new RegExp(`^${prefix}\\d{6}-\\d+$`, 'i').test(pro.trim())
+    || (normalized != null && new RegExp(`^${keyPrefix}\\d{7,}$`).test(normalized))
+  if (derived) {
+    throw new Error(`${pro.trim()} is the shape this system issues on its own; pick a different PRO or let it derive one`)
+  }
 }
 
 /**
@@ -1133,8 +1269,19 @@ interface NewLoadSpec {
   orderId: string
   shipmentNumber: string
   leg: number
-  customerId: string
+  /**
+   * Absent when the shipment's customer is not resolved to a record yet. The key is
+   * then left off the row entirely rather than written null: `customerId` is the hash
+   * key of Load's customer index, and a NULL there is a write DynamoDB refuses — which
+   * would strand the shipment transaction that already committed a moment earlier.
+   */
+  customerId?: string
   customerName: string | null
+  /** The PRO this leg is issued under. Absent derives `<shipmentNumber>-<leg>`. */
+  pro?: string | null
+  /** The PO the legacy entrypoint already carries; falls back to the PRO when blank. */
+  tmsId?: string | null
+  pickupNumber?: string | null
   stops: StopShape[]
   rateCents: number
   equipmentType: string | null
@@ -1147,16 +1294,20 @@ function buildLoadInput(spec: NewLoadSpec, caller: Caller): Row {
   const loadNumber = `${spec.shipmentNumber}-${spec.leg}`
   const legacy = deriveLegacyFields(spec.stops)
   const now = nowIso()
+  // The legacy identity columns are required and are read all over the own-fleet
+  // pages. A shipment-born leg names itself after itself; one born from a PRO the
+  // office already says out loud keeps that PRO, and keeps whatever PO the bag
+  // carried — the factoring builder puts it in `tmsId` and the driver app reports
+  // it as `pickupNumber`, so overwriting either with the PRO loses the PO.
+  const aljexId = (spec.pro ?? '').trim() || loadNumber
   return {
     id: spec.id,
-    // The legacy identity columns are required and are read all over the own-fleet
-    // pages; a shipment-born load names itself after its leg.
-    aljexId: loadNumber,
-    tmsId: loadNumber,
-    pickupNumber: loadNumber,
+    aljexId,
+    tmsId: (spec.tmsId ?? '').trim() || aljexId,
+    pickupNumber: (spec.pickupNumber ?? '').trim() || aljexId,
     readyToInvoice: false,
     customer: spec.customerName,
-    customerId: spec.customerId,
+    ...(spec.customerId ? { customerId: spec.customerId } : {}),
     rate: spec.rateCents,
     stops: JSON.stringify(spec.stops),
     pickupAppt: (legacy.pickupAppt as string) ?? '',
@@ -1294,19 +1445,181 @@ function priceFor(
 
 // ── CREATE_SHIPMENT ──────────────────────────────────────────────────────────
 
-async function createShipment(input: Row, caller: Caller): Promise<Row> {
-  const customerId = assertString(input.customerId, 'customerId')
-  const customer = await getActiveCustomer(customerId)
-  const settings = await getSettings()
+/** Where a shipment came from. `Shipment.source` in `resource.ts`, minus TENDER. */
+const CREATE_SOURCES = ['MANUAL', 'DUPLICATE', 'FACTORING', 'BACKFILL'] as const
 
-  // A customer who may not ship on open credit needs an approved limit before
-  // anybody starts building, not at the moment they try to submit.
-  const policy = resolveCreditPolicy(customer as unknown as CustomerRecord, settings as unknown as TmsSettingsRecord | null)
-  if (policy.freeCreditRequired && policy.creditLimitCents == null) {
-    throw new Error(`${String(customer.name ?? customerId)} requires an approved credit limit before an order can be built`)
+/**
+ * The rate code a customer's linehaul is carried on, everywhere in this router:
+ * the carrier side of BOOK_CARRIER, the backfill's imported money, and the
+ * customer's own default charges all name it.
+ */
+const LINEHAUL_CODE = 'LINEHAUL'
+
+/**
+ * Keys a leg bag may never carry, because none of them describe freight — they are
+ * the shipment's own state, decided here or by the gate.
+ *
+ * `loadFromFactoringItem` sets `readyToInvoice: true` on every row it builds
+ * (`src/features/factoring/loadFromInvoice.ts:37`), and honouring that would walk a
+ * brand-new leg straight past `evaluateReleaseGate` into AR. They are refused rather
+ * than dropped quietly: a caller that sent one believes it took effect.
+ */
+const LOAD_BAG_REFUSED: readonly string[] = [
+  'readyToInvoice', 'status', 'shipmentId', 'orderId', 'leg', 'loadNumber', 'voidedAt',
+  'revDivision', 'revSubdivision',
+]
+
+interface LoadBag {
+  stops: StopShape[]
+  /** The customer's money for this leg, priced as a charge line and never as `Load.rate`. */
+  rateCents: number | null
+  /** The PO the entrypoint already owns; blank falls back to the PRO on the row. */
+  tmsId: string | null
+  pickupNumber: string | null
+  equipmentType: string | null
+  miles: number | null
+  weightLbs: number | null
+  /** The whitelisted Load columns the caller actually named, validated and nothing else. */
+  columns: Row
+}
+
+/**
+ * The leg bag as a strict whitelist. A key that is neither accepted nor refused is
+ * ignored: the legacy builders carry rows shaped like the whole Load model, and most
+ * of that model is state this router owns.
+ */
+function validateLoadBag(raw: unknown): LoadBag {
+  const bag = assertRecord(raw ?? {}, 'load')
+  for (const key of LOAD_BAG_REFUSED) {
+    if (key in bag) {
+      throw new Error(`load.${key} belongs to the shipment's own state and cannot be set when it is created`)
+    }
+  }
+  // A leg can be raised half-planned — the calendar opens one with a pickup and no
+  // delivery all day — so only the order of the stops that are there is checked.
+  const stops = bag.stops == null ? [] : resequence(assertArrayOf(bag.stops, 'load.stops', validateStop))
+  assertStopShape(stops, false)
+
+  const miles = optionalInteger(bag.miles, { min: 0, label: 'load.miles' })
+  const weightLbs = optionalInteger(bag.weight, { min: 0, label: 'load.weight' })
+  const columns: Row = {}
+  const take = (key: string, value: unknown): void => {
+    if (key in bag) columns[key] = value
+  }
+  take('pickupAppt', optionalIso(bag.pickupAppt, 'load.pickupAppt') ?? '')
+  take('pickupApptEnd', optionalIso(bag.pickupApptEnd, 'load.pickupApptEnd'))
+  take('pickupApptType', optionalString(bag.pickupApptType, 40))
+  take('deliveryAppt', optionalIso(bag.deliveryAppt, 'load.deliveryAppt') ?? '')
+  take('deliveryApptEnd', optionalIso(bag.deliveryApptEnd, 'load.deliveryApptEnd'))
+  take('deliveryApptType', optionalString(bag.deliveryApptType, 40))
+  take('originName', optionalString(bag.originName, 200))
+  take('originCity', optionalString(bag.originCity, 120))
+  take('destinationName', optionalString(bag.destinationName, 200))
+  take('destinationCity', optionalString(bag.destinationCity, 120))
+  take('pickupDriverId', optionalString(bag.pickupDriverId, 100))
+  take('deliveryDriverId', optionalString(bag.deliveryDriverId, 100))
+  take('truckId', optionalString(bag.truckId, 100))
+  take('commodity', optionalString(bag.commodity, 200))
+  take('weight', weightLbs)
+  take('pieces', optionalInteger(bag.pieces, { min: 0, label: 'load.pieces' }))
+  take('piecesUnit', optionalString(bag.piecesUnit, 40))
+  take('cargoValueCents', optionalInteger(bag.cargoValueCents, { min: 0, label: 'load.cargoValueCents' }))
+  take('miles', miles)
+  take('notes', optionalString(bag.notes, 8000))
+  take('hot', optionalBoolean(bag.hot))
+  take('unscheduled', optionalBoolean(bag.unscheduled))
+  // Stops outrank the flat mirrors whenever there are any: `deriveLegacyFields` is
+  // what every other write in this router derives them with, and a bag that carries
+  // both a stop list and a loose `pickupAppt` is one record disagreeing with itself.
+  Object.assign(columns, deriveLegacyFields(stops))
+
+  return {
+    stops,
+    rateCents: optionalInteger(bag.rateCents, { min: 0, label: 'load.rateCents' }),
+    tmsId: optionalString(bag.tmsId, 120),
+    pickupNumber: optionalString(bag.pickupNumber, 120),
+    equipmentType: optionalString(bag.equipmentType, 80),
+    miles,
+    weightLbs,
+    columns,
+  }
+}
+
+/**
+ * The leg's money as a CUSTOMER linehaul line.
+ *
+ * Never as a raw `Load.rate`: `buildLoadInput` derives `rate` from the priced totals
+ * and the drawer itself documents that writing `rate` on a shipment-born load desyncs
+ * `Order.revenueCents` and `LoadFinancials` (`LoadDrawer.tsx:1612`). Applied literally
+ * the factoring amount would vanish from the shipment, leaving a $0 order under a $X
+ * load. So it goes through the same `priceFor` every other charge does — overwriting
+ * the customer's own default linehaul when they have one rather than adding a second.
+ */
+function withCustomerRate(
+  charges: ChargeInput[],
+  rateCents: number | null,
+  rules: Record<string, ChargeCodeRules>,
+): ChargeInput[] {
+  if (rateCents == null) return charges
+  const existing = charges.findIndex((c) => c.side === 'CUSTOMER' && c.code === LINEHAUL_CODE)
+  // FLAT whichever branch runs, and never the customer's default basis. The rate on
+  // the bag is a total somebody already invoiced — a $2,500 factoring amount — and a
+  // customer whose LINEHAUL default is PER_MILE would turn it into $2,500 a mile on
+  // the order, the financials and the `Load.rate` mirror. The drawer's own bridge
+  // forces the same thing for the same reason (`loadRateSync.ts:41`).
+  if (existing >= 0) {
+    return charges.map((c, i) => (i === existing ? { ...c, calculatedBy: 'FLAT', rateCents, count: 1 } : c))
+  }
+  return [
+    ...charges,
+    {
+      id: null,
+      side: 'CUSTOMER',
+      code: LINEHAUL_CODE,
+      label: rules[LINEHAUL_CODE]?.label ?? 'Linehaul',
+      calculatedBy: 'FLAT',
+      rateCents,
+      count: 1,
+      isRate: true,
+      release: null,
+      sortOrder: charges.length,
+      note: null,
+      loadId: null,
+      loadCarrierId: null,
+    },
+  ]
+}
+
+/**
+ * The one door freight comes in through.
+ *
+ * A caller names either the customer RECORD it sells to or the customer TEXT an
+ * operator typed, never both and never neither. The text path asks no customer
+ * table and runs no credit check: there is no record to ask, and refusing to record
+ * the freight at all is the hole this cutover closes. No Customer is ever created
+ * and no name is ever invented.
+ */
+async function createShipment(input: Row, caller: Caller): Promise<Row> {
+  const customerId = optionalString(input.customerId, 100)
+  const typedCustomerName = optionalString(input.customerName, 200)
+  if ((customerId == null) === (typedCustomerName == null)) {
+    throw new Error(
+      'A shipment needs exactly one of customerId — the customer record it sells to — or customerName, the text that was typed',
+    )
   }
 
-  const quoting = customer.quotingDefaults
+  const settings = await getSettings()
+  const customer = customerId ? await getActiveCustomer(customerId) : null
+  if (customer) {
+    // A customer who may not ship on open credit needs an approved limit before
+    // anybody starts building, not at the moment they try to submit.
+    const policy = resolveCreditPolicy(customer as unknown as CustomerRecord, settings as unknown as TmsSettingsRecord | null)
+    if (policy.freeCreditRequired && policy.creditLimitCents == null) {
+      throw new Error(`${String(customer.name ?? customerId)} requires an approved credit limit before an order can be built`)
+    }
+  }
+
+  const quoting = customer?.quotingDefaults
   const customerMode =
     quoting != null && typeof quoting === 'object' && 'defaultMode' in quoting ? quoting.defaultMode : null
   const mode =
@@ -1314,18 +1627,61 @@ async function createShipment(input: Row, caller: Caller): Promise<Row> {
     optionalEnum(customerMode, SHIPMENT_MODES, 'customer.quotingDefaults.defaultMode') ??
     optionalEnum(settings?.defaultMode, SHIPMENT_MODES, 'settings.defaultMode') ??
     'FTL'
+  const source = optionalEnum(input.source, CREATE_SOURCES, 'source') ?? 'MANUAL'
+  const bag = validateLoadBag(input.load)
+
+  const suppliedPro = optionalString(input.pro, 120)
+  if (suppliedPro) {
+    assertNotDerivedPro(suppliedPro, settings)
+    // A courtesy read, not the rule: the conditional put below is what actually
+    // decides. Without it a dispatcher who retypes an issued PRO burns a shipment
+    // number on every attempt, because the counter moves before the transaction runs.
+    if (await getById(PRO_CLAIM_TABLE_NAME, proClaimKey(suppliedPro))) {
+      throw new Error(proAlreadyIssuedMessage(suppliedPro))
+    }
+  }
 
   const number = await nextShipmentNumber(caller)
   const shipmentId = `shp-${randomUUID()}`
   const orderId = `ord-${randomUUID()}`
   const loadId = `lod-${randomUUID()}`
   const now = nowIso()
+  // Both kinds of PRO are claimed. A typed one can never collide with a future
+  // derived one, and a derived one can never be retyped onto another leg later.
+  const pro = suppliedPro ?? `${number}-1`
 
   const rules = chargeCodeRules(settings, customer)
-  const charges = defaultChargesFor(customer, rules)
-  const { amounts, totals } = priceFor(charges, {}, pricingDefaultsOf(customer), marginFloorBpsOf(settings))
+  const charges = withCustomerRate(defaultChargesFor(customer, rules), bag.rateCents, rules)
+  const { amounts, totals } = priceFor(
+    charges,
+    { miles: bag.miles, weightLbs: bag.weightLbs },
+    pricingDefaultsOf(customer),
+    marginFloorBpsOf(settings),
+  )
 
-  const customerName = optionalString(customer.name, 200)
+  // Step R. The board reads one row per shipment, so the leg's dates and cities are
+  // mirrored up here the way `duplicateShipment` and the backfill mirror theirs.
+  // Without them the row misses the pickupMonth index the month-sliced views query,
+  // and the pickup, delivery, origin and destination columns come back blank — which
+  // the 'Unlinked load' row this create replaced did not do.
+  const leg: Row = { stops: JSON.stringify(bag.stops) }
+  const stopMirrors: Row = bag.stops.length > 0 ? shipmentMirrors([leg]) : {}
+  // `?? undefined` and never '' or null: `pickupMonth` is a GSI hash key and
+  // `deriveLegacyFields` writes '' for an undated stop, which DynamoDB refuses — it
+  // would take the whole transaction down. An undated leg simply leaves the index.
+  const pickupAppt = optionalString(stopMirrors.pickupAppt, 64) ?? optionalString(bag.columns.pickupAppt, 64) ?? undefined
+  const deliveryAppt = optionalString(stopMirrors.deliveryAppt, 64) ?? optionalString(bag.columns.deliveryAppt, 64) ?? undefined
+  const mirrors: Row = {
+    pickupAppt,
+    deliveryAppt,
+    pickupMonth: monthOf(pickupAppt) ?? undefined,
+    originCity: optionalString(stopMirrors.originCity, 120) ?? optionalString(bag.columns.originCity, 120) ?? undefined,
+    destinationCity:
+      optionalString(stopMirrors.destinationCity, 120) ?? optionalString(bag.columns.destinationCity, 120) ?? undefined,
+  }
+
+  const customerName = customer ? optionalString(customer.name, 200) : typedCustomerName
+  const salesRepId = optionalString(customer?.defaultSalesRepId, 100)
   const shipment: Row = {
     id: shipmentId,
     __typename: 'Shipment',
@@ -1334,17 +1690,21 @@ async function createShipment(input: Row, caller: Caller): Promise<Row> {
     previousStatus: null,
     statusChangedAt: now,
     statusChangedBy: caller.email,
-    customerId,
+    // Written `?? undefined` and never null: `customerId` is the hash key of a sparse
+    // index, and `marshallRow` keeps a null as a DynamoDB NULL, which the index
+    // refuses outright (the `apOpen` precedent below). An unresolved shipment simply
+    // leaves the customer index, which is right for a row that belongs to no customer.
+    customerId: customerId ?? undefined,
     customerName,
     mode,
     parentShipmentId: null,
     orderIds: [orderId],
     loadIds: [loadId],
-    searchKey: [number, customerName].filter(Boolean).join(' ').toLowerCase(),
-    source: 'MANUAL',
+    ...mirrors,
+    source,
     // Step R. The rep who sells the freight, mirrored onto the Load below and kept
     // in step by SET_SALES_REP. The order carries the same id as `customerRepId`.
-    salesRepId: optionalString(customer.defaultSalesRepId, 100),
+    salesRepId,
     createdBy: caller.email,
     updatedBy: caller.email,
     version: 1,
@@ -1356,16 +1716,16 @@ async function createShipment(input: Row, caller: Caller): Promise<Row> {
     id: orderId,
     __typename: 'Order',
     shipmentId,
-    customerId,
+    customerId: customerId ?? undefined,
     customerName,
     customerContactId: null,
-    customerRepId: optionalString(customer.defaultSalesRepId, 100),
+    customerRepId: salesRepId,
     billToId: null,
     costCenter: null,
     mode,
     rateType: 'SPOT',
     references: [],
-    equipmentType: null,
+    equipmentType: bag.equipmentType,
     equipmentLengthFt: null,
     specialRequirements: null,
     freight: [],
@@ -1373,11 +1733,17 @@ async function createShipment(input: Row, caller: Caller): Promise<Row> {
     internalNotes: null,
     customerRateCents: totals.customerRateCents,
     revenueCents: totals.revenueCents,
-    arStatus: 'DOCS_NEEDED',
+    // Factoring is money OTR has already bought: the Aljex invoice went out before
+    // the PRO was ever entered here. LEGACY is the rung that exists for exactly that
+    // (`resource.ts` Order.arStatus); DOCS_NEEDED would put a collected bill back
+    // into the AR worklist and into the customer's credit exposure.
+    arStatus: source === 'FACTORING' ? 'LEGACY' : 'DOCS_NEEDED',
     arStatusChangedAt: now,
     invoiceId: null,
     invoiceEarly: false,
     readyToInvoiceAt: null,
+    // The order carries the pickup the AR views sort and age by, same as duplicate's.
+    pickupAppt,
     createdBy: caller.email,
     updatedBy: caller.email,
     version: 1,
@@ -1385,45 +1751,59 @@ async function createShipment(input: Row, caller: Caller): Promise<Row> {
     updatedAt: now,
   }
 
+  // Built once both rows exist, so the cities and every reference on them are in it,
+  // which is what the board's one search box queries.
+  shipment.searchKey = buildSearchKey(shipment, [order], [leg])
+
   const chargeRows = charges.map((c, i) =>
     chargeRow(c, amounts[i], { shipmentId, orderId, loadId }, caller),
   )
 
   await transact(
     [
+      // The claim is first so the cancellation reason maps back to it by index, and
+      // it is in THIS transaction so two dispatchers creating the same PRO in the
+      // same second cannot both win.
+      proClaimPut(pro, { loadId, shipmentId, claimedBy: caller.email, origin: 'CREATE' }),
       putItem(SHIPMENT_TABLE_NAME, shipment),
       putItem(ORDER_TABLE_NAME, order),
       putItem(LOAD_FINANCIALS_TABLE_NAME, financialsRow(loadId, shipmentId, orderId, totals, 1, caller, null)),
       ...chargeRows.map((row) => putItem(LOAD_CHARGE_TABLE_NAME, row)),
     ],
     'shipment',
+    { refusals: [proAlreadyIssuedMessage(pro)] },
   )
 
   const client = await getDataClient()
+  const loadInput: Row = {
+    ...buildLoadInput(
+      {
+        id: loadId,
+        shipmentId,
+        orderId,
+        shipmentNumber: number,
+        leg: 1,
+        customerId: customerId ?? undefined,
+        customerName,
+        pro,
+        tmsId: bag.tmsId,
+        pickupNumber: bag.pickupNumber,
+        stops: bag.stops,
+        rateCents: totals.revenueCents,
+        equipmentType: bag.equipmentType,
+        divisionKey: optionalString(customer?.defaultDivisionKey, 100),
+        carrierRepId: null,
+        status: 'SOURCING',
+      },
+      caller,
+    ),
+    ...bag.columns,
+  }
+  // The month the calendar buckets by, re-derived after the bag has had its say: a
+  // factoring row carries a loose `pickupAppt` and no stops at all.
+  loadInput.pickupMonth = monthOf(optionalString(loadInput.pickupAppt, 64))
   try {
-    assertLoadWriteOk(
-      await client.models.Load.create(
-        buildLoadInput(
-          {
-            id: loadId,
-            shipmentId,
-            orderId,
-            shipmentNumber: number,
-            leg: 1,
-            customerId,
-            customerName,
-            stops: [],
-            rateCents: totals.revenueCents,
-            equipmentType: null,
-            divisionKey: optionalString(customer.defaultDivisionKey, 100),
-            carrierRepId: null,
-            status: 'SOURCING',
-          },
-          caller,
-        ),
-      ),
-      'Load create',
-    )
+    assertLoadWriteOk(await client.models.Load.create(loadInput), 'Load create')
   } catch (err) {
     // Step R. The shipment has a PRO, and a PRO is permanent even when the leg under
     // it never got written: the number was already taken from the counter and must
@@ -1431,6 +1811,9 @@ async function createShipment(input: Row, caller: Caller): Promise<Row> {
     // and the charge lines — which are money, not a record of anything that happened
     // — come off it. The order and the financials stay beside the shipment they
     // describe, exactly as they do on any other void.
+    //
+    // The ProClaim row is NOT removed here, and must never be: a claim is released by
+    // nothing, so the PRO this attempt consumed can never be issued to anything else.
     const now = nowIso()
     const reason = `Load create failed: ${err instanceof Error ? err.message : String(err)}`
       .slice(0, MAX_VOID_REASON)
@@ -1468,7 +1851,9 @@ async function createShipment(input: Row, caller: Caller): Promise<Row> {
   // catch-all rule's answer — but it is written now rather than left blank, so the
   // board and the dashboard never show an untagged row.
   await applyTagToLoads(shipmentId, caller)
-  await writeAudit('SHIPMENT', shipmentId, 'CREATE_SHIPMENT', caller, { number, customerId, mode })
+  await writeAudit('SHIPMENT', shipmentId, 'CREATE_SHIPMENT', caller, {
+    number, customerId, customerName, mode, source, pro,
+  })
   return readBundle(shipmentId) as unknown as Row
 }
 
@@ -1548,8 +1933,10 @@ function assertWeightUnitsAgree(freight: Row[]): void {
   if (units.size > 1) throw new Error('All freight lines must use the same weight unit')
 }
 
-function assertRequiredReferences(customer: Row, references: Row[]): void {
-  const required = Array.isArray(customer.requiredReferences) ? (customer.requiredReferences as Row[]) : []
+function assertRequiredReferences(customer: Row | null, references: Row[]): void {
+  // Nothing to require: an unresolved shipment has no customer record to ask, and
+  // the reference rules come back into force the moment one is linked.
+  const required = Array.isArray(customer?.requiredReferences) ? (customer?.requiredReferences as Row[]) : []
   for (const req of required) {
     const code = typeof req?.code === 'string' ? req.code : null
     if (!code) continue
@@ -1557,7 +1944,7 @@ function assertRequiredReferences(customer: Row, references: Row[]): void {
     if (need <= 0) continue
     const have = references.filter((r) => String(r.code) === code && String(r.value ?? '').trim()).length
     if (have < need) {
-      throw new Error(`${String(customer.name ?? 'This customer')} requires ${need} ${code} reference${need === 1 ? '' : 's'}`)
+      throw new Error(`${String(customer?.name ?? 'This customer')} requires ${need} ${code} reference${need === 1 ? '' : 's'}`)
     }
   }
 }
@@ -1584,7 +1971,10 @@ async function saveOrderForm(input: Row, caller: Caller): Promise<SavedForm> {
   const load = bundle.loads[0]
   if (!load) throw new Error(`Shipment ${shipmentId} has no load`)
 
-  const customer = await getActiveCustomer(String(shipment.customerId))
+  // The stop and order editor has to work before a customer record is linked: that
+  // is where an operator fills in the freight they were just handed. The pricing
+  // helpers below all take a null customer, so the form prices off org defaults.
+  const customer = await activeCustomerOf(shipment)
   const settings = await getSettings()
 
   const orderInput = assertRecord(input.order ?? {}, 'order')
@@ -1751,6 +2141,11 @@ async function submitOrder(input: Row, caller: Caller): Promise<Row> {
   const currentShipment = await getById(SHIPMENT_TABLE_NAME, shipmentId)
   if (!currentShipment) throw new Error(`Shipment not found: ${shipmentId}`)
   assertNotVoided(currentShipment)
+  // Step R cutover. Refused first, before the route and before the re-save: a
+  // submitted order is one we will bill, and there is nobody to bill. Keyed on the
+  // customer link alone and never on status — the backfill sets status from the stop
+  // clock, so an unresolved row can arrive already DELIVERED.
+  assertCustomerResolved(currentShipment, 'submitting the order')
   // Submit requires a complete route; drafts can be saved with partial stops.
   const firstLoadId = String((currentShipment.loadIds as string[] | undefined)?.[0] ?? '')
   const submitStops = input.stops != null
@@ -1765,7 +2160,7 @@ async function submitOrder(input: Row, caller: Caller): Promise<Row> {
     throw new Error(`${mode} shipments cannot be submitted yet — only truckload modes are built out`)
   }
 
-  const customer = await getActiveCustomer(String(shipment.customerId))
+  const customer = await requireCustomer(shipment, 'submitting the order')
   const settings = await getSettings()
   const summary = await creditSummary(customer, settings, saved.totals.revenueCents)
   assertCreditClear(summary, String(customer.name ?? shipment.customerId))
@@ -2534,8 +2929,11 @@ async function tenderRespond(input: Row, caller: Caller): Promise<Row> {
   }
 
   if (decision === 'ACCEPT') {
+    // Refused ahead of everything else: accepting a tender is undertaking to bill
+    // it, and an unresolved shipment has nobody to bill.
+    assertCustomerResolved(shipment, 'accepting the tender')
     if (current !== 'TENDER_PENDING') throw new Error('Only a pending tender can be accepted')
-    const customer = await getActiveCustomer(String(shipment.customerId))
+    const customer = await requireCustomer(shipment, 'accepting the tender')
     const settings = await getSettings()
     const revenue = bundle.orders.reduce((sum, o) => sum + (numberOrNull(o.revenueCents) ?? 0), 0)
     assertCreditClear(await creditSummary(customer, settings, revenue), String(customer.name ?? shipment.customerId))
@@ -2579,17 +2977,25 @@ async function tenderRespond(input: Row, caller: Caller): Promise<Row> {
 
 // ── DUPLICATE_SHIPMENT ───────────────────────────────────────────────────────
 
-function shiftStops(stops: StopShape[], pickupAppt: string | null, deliveryAppt: string | null): StopShape[] {
+/**
+ * The plan, moved onto new dates. The facility events never travel — a copy has not
+ * happened yet — but the driver does when the dispatcher asks for it: an own-fleet
+ * calendar copy with the driver stripped lands in the unassigned lane, which is not
+ * where the person who pressed Duplicate was looking.
+ */
+function shiftStops(
+  stops: StopShape[],
+  pickupAppt: string | null,
+  deliveryAppt: string | null,
+  keepDriver: boolean,
+): StopShape[] {
   return stops.map((s) => {
     const next: StopShape = {
       ...s,
       id: `stp-${randomUUID()}`,
-      // A copy has not happened yet: the facility events and the driver do not
-      // travel with it, only the plan does.
       arrivedAt: null,
       departedAt: null,
-      driverId: null,
-      truckId: null,
+      ...(keepDriver ? {} : { driverId: null, truckId: null }),
     }
     if (s.type === 'pickup' && pickupAppt) next.appt = pickupAppt
     if (s.type === 'delivery' && deliveryAppt) next.appt = deliveryAppt
@@ -2600,6 +3006,11 @@ function shiftStops(stops: StopShape[], pickupAppt: string | null, deliveryAppt:
 async function duplicateShipment(input: Row, caller: Caller): Promise<Row> {
   const shipmentId = assertString(input.shipmentId, 'shipmentId')
   const sameCarrier = optionalBoolean(input.sameCarrier) ?? false
+  // Which leg is being copied, and whether the driver comes with it. Both answer the
+  // scheduler's Duplicate, which is pressed on one leg of a multi-leg shipment and by
+  // a dispatcher looking at their own fleet's lane.
+  const sourceLoadId = optionalString(input.loadId, 100)
+  const keepDriver = optionalBoolean(input.keepDriver) ?? false
   const copies = assertArrayOf(input.copies, 'copies', (item, i) => {
     const c = assertRecord(item, `copies[${i}]`)
     return {
@@ -2611,18 +3022,27 @@ async function duplicateShipment(input: Row, caller: Caller): Promise<Row> {
 
   const source = await readBundle(shipmentId)
   assertNotVoided(source.shipment)
-  const customer = await getActiveCustomer(String(source.shipment.customerId))
+  // A copy of an unresolved shipment carries the same typed customer text forward and
+  // stays unresolved; it does not get to invent a record the source never had.
+  const customer = await activeCustomerOf(source.shipment)
   const settings = await getSettings()
 
   const sourceRevenue = source.orders.reduce((sum, o) => sum + (numberOrNull(o.revenueCents) ?? 0), 0)
-  const summary = await creditSummary(customer, settings, sourceRevenue * copies.length)
-  assertCreditClear(summary, String(customer.name ?? source.shipment.customerId))
+  if (customer) {
+    const summary = await creditSummary(customer, settings, sourceRevenue * copies.length)
+    assertCreditClear(summary, String(customer.name ?? source.shipment.customerId))
+  }
 
   const sourceOrder = source.orders[0]
-  const sourceLoad = source.loads[0]
+  const sourceLoad = sourceLoadId
+    ? source.loads.find((l) => String(l.id) === sourceLoadId)
+    : source.loads[0]
+  if (sourceLoadId && !sourceLoad) throw new Error(`Load ${sourceLoadId} is not a leg of shipment ${shipmentId}`)
   if (!sourceOrder || !sourceLoad) throw new Error('That shipment cannot be duplicated: it has no order or load')
   const sourceCarrier = source.loadCarriers.find((c) => c.loadId === sourceLoad.id && c.status === 'ACTIVE') ?? null
   const sourceCharges = source.charges.map(chargeRowToInput)
+  const sourceCustomerId = optionalString(source.shipment.customerId, 100)
+  const sourceCustomerName = optionalString(source.shipment.customerName, 200)
   const client = await getDataClient()
   const created: string[] = []
 
@@ -2632,7 +3052,7 @@ async function duplicateShipment(input: Row, caller: Caller): Promise<Row> {
     const newOrderId = `ord-${randomUUID()}`
     const newLoadId = `lod-${randomUUID()}`
     const newCarrierId = `lcr-${randomUUID()}`
-    const stops = shiftStops(readStops(sourceLoad), copy.pickupAppt, copy.deliveryAppt)
+    const stops = shiftStops(readStops(sourceLoad), copy.pickupAppt, copy.deliveryAppt, keepDriver)
     const now = nowIso()
 
     const charges = sourceCharges.map((c) => ({
@@ -2650,6 +3070,17 @@ async function duplicateShipment(input: Row, caller: Caller): Promise<Row> {
     )
     const legacy = deriveLegacyFields(stops)
     const mirrors = shipmentMirrors([{ stops: JSON.stringify(stops) }])
+    // An own-fleet copy that kept its driver is already covered by our own asset;
+    // leaving it NEED_TO_COVER would file it in the uncovered lane, away from the
+    // calendar row the dispatcher pressed Duplicate on.
+    const keptDriver = keepDriver && (
+      optionalString(legacy.pickupDriverId, 100) != null
+      || optionalString(legacy.deliveryDriverId, 100) != null
+      || optionalString(sourceLoad.truckId, 100) != null
+    )
+    // The copy's PRO is derived from its own number and claimed like any other.
+    // There is no `-copy` PRO any more: the second duplicate would collide with it.
+    const pro = `${number}-1`
 
     const shipmentRow: Row = {
       ...source.shipment,
@@ -2744,7 +3175,13 @@ async function duplicateShipment(input: Row, caller: Caller): Promise<Row> {
         updatedAt: now,
       }))
     }
-    await transact(writes, 'shipment')
+    writes.unshift(proClaimPut(pro, {
+      loadId: newLoadId,
+      shipmentId: newShipmentId,
+      claimedBy: caller.email,
+      origin: 'DUPLICATE',
+    }))
+    await transact(writes, 'shipment', { refusals: [proAlreadyIssuedMessage(pro)] })
 
     assertLoadWriteOk(
       await client.models.Load.create({
@@ -2755,8 +3192,8 @@ async function duplicateShipment(input: Row, caller: Caller): Promise<Row> {
             orderId: newOrderId,
             shipmentNumber: number,
             leg: 1,
-            customerId: String(source.shipment.customerId),
-            customerName: optionalString(source.shipment.customerName, 200),
+            customerId: sourceCustomerId ?? undefined,
+            customerName: sourceCustomerName,
             stops,
             rateCents: totals.revenueCents,
             equipmentType: optionalString(sourceOrder.equipmentType, 80),
@@ -2769,7 +3206,10 @@ async function duplicateShipment(input: Row, caller: Caller): Promise<Row> {
         miles: numberOrNull(sourceLoad.miles),
         weight: numberOrNull(sourceLoad.weight),
         commodity: optionalString(sourceLoad.commodity, 200),
-        assignmentType: sameCarrier && sourceCarrier ? sourceCarrier.kind : 'NEED_TO_COVER',
+        truckId: keptDriver ? optionalString(sourceLoad.truckId, 100) : null,
+        assignmentType: sameCarrier && sourceCarrier
+          ? sourceCarrier.kind
+          : keptDriver ? 'OWN_ASSET' : 'NEED_TO_COVER',
         activeLoadCarrierId: sameCarrier && sourceCarrier ? newCarrierId : null,
         carrierName: sameCarrier && sourceCarrier ? optionalString(sourceCarrier.carrierName, 200) : null,
         pickupMonth: monthOf(legacy.pickupAppt as string),
@@ -2784,8 +3224,152 @@ async function duplicateShipment(input: Row, caller: Caller): Promise<Row> {
 
   await writeAudit('SHIPMENT', shipmentId, 'DUPLICATE_SHIPMENT', caller, { copies: created.length, created })
   // Every action answers with the bundle of the shipment it was asked about; the
-  // board re-reads itself to pick up the new copies.
+  // board re-reads itself to pick up the new copies. `created` rides alongside it
+  // because the scheduler's Duplicate opens the drawer on the copy it just made,
+  // and the copy's id reaches nobody through the source's bundle.
+  return { ...(await readBundle(shipmentId)), created } as unknown as Row
+}
+
+// ── SET_SHIPMENT_CUSTOMER ────────────────────────────────────────────────────
+
+/**
+ * Step R cutover. The only writer of customer identity on freight that already
+ * exists, and the way an unresolved shipment stops being unresolved.
+ *
+ * It runs exactly the checks CREATE_SHIPMENT runs — ACTIVE, and an approved limit
+ * for a customer who may not ship on open credit — and then writes the link in one
+ * place each: the Shipment, every Order under it and every leg's mirror. Nothing
+ * here invents a customer; the id named has to be a record that already exists.
+ *
+ * Resolution happens once. Re-pointing freight that is already linked at a
+ * different customer moves somebody's revenue onto somebody else's ledger, and the
+ * invoice, the credit exposure and the commission behind it all moved with it; that
+ * is a correction somebody has to make deliberately, not a link action.
+ */
+async function setShipmentCustomer(input: Row, caller: Caller): Promise<Row> {
+  const shipmentId = assertString(input.shipmentId, 'shipmentId')
+  const customerId = assertString(input.customerId, 'customerId')
+
+  const bundle = await readBundle(shipmentId)
+  const { shipment } = bundle
+  assertNotVoided(shipment)
+  if (!isCustomerUnresolved(shipment as unknown as CustomerResolvable)) {
+    throw new Error(
+      `${String(shipment.number ?? shipmentId)} is already linked to a customer. Linking happens once — moving freight to a different customer is a correction, not a link, and is out of this action's scope.`,
+    )
+  }
+
+  const settings = await getSettings()
+  const customer = await getActiveCustomer(customerId)
+  const policy = resolveCreditPolicy(customer as unknown as CustomerRecord, settings as unknown as TmsSettingsRecord | null)
+  if (policy.freeCreditRequired && policy.creditLimitCents == null) {
+    throw new Error(`${String(customer.name ?? customerId)} requires an approved credit limit before an order can be built`)
+  }
+
+  const customerName = optionalString(customer.name, 200)
+  const defaultRepId = optionalString(customer.defaultSalesRepId, 100)
+  const now = nowIso()
+  const linked: Row = { ...shipment, customerId, customerName }
+  // The rep only ever fills a blank: a shipment somebody already assigned stays
+  // assigned, and the customer's default is a starting point, not an override.
+  const takesRep = defaultRepId != null && optionalString(shipment.salesRepId, 100) == null
+  await transact(
+    [
+      updateItemTx(SHIPMENT_TABLE_NAME, shipmentId, {
+        customerId,
+        customerName,
+        searchKey: buildSearchKey(linked, bundle.orders, bundle.loads),
+        ...(takesRep ? { salesRepId: defaultRepId } : {}),
+        updatedBy: caller.email,
+        updatedAt: now,
+        version: (numberOrNull(shipment.version) ?? 1) + 1,
+      }, null),
+      ...bundle.orders.map((order) => updateItemTx(ORDER_TABLE_NAME, String(order.id), {
+        customerId,
+        customerName,
+        ...(defaultRepId != null && optionalString(order.customerRepId, 100) == null
+          ? { customerRepId: defaultRepId }
+          : {}),
+        updatedBy: caller.email,
+        updatedAt: now,
+        version: (numberOrNull(order.version) ?? 1) + 1,
+      }, null)),
+    ],
+    'shipment customer',
+  )
+
+  // The legs carry the link and the booked-name snapshot the own-fleet pages read;
+  // they go through AppSync so the calendar's subscriptions see the change.
+  const client = await getDataClient()
+  for (const load of bundle.loads) {
+    assertLoadWriteOk(
+      await client.models.Load.update({
+        id: String(load.id),
+        customerId,
+        customer: customerName,
+        updatedBy: caller.email,
+      }),
+      'Load update',
+    )
+  }
+
+  // An ownership rule may key on the customer, so the tag is re-resolved from what
+  // the shipment says now rather than from what it said while it was unresolved.
+  await applyTagToLoads(shipmentId, caller)
+  await writeAudit('SHIPMENT', shipmentId, 'SET_SHIPMENT_CUSTOMER', caller, {
+    customerId,
+    customerName,
+    orders: bundle.orders.length,
+    loads: bundle.loads.length,
+  })
   return readBundle(shipmentId) as unknown as Row
+}
+
+// ── SET_LOAD_PRO ─────────────────────────────────────────────────────────────
+
+/**
+ * The only legal way a PRO ever changes, now that `aljexId` is read-only to every
+ * client token (`resource.ts`, the `voidedAt` precedent).
+ *
+ * The new PRO is claimed with the same conditional put a create uses, and the old
+ * claim is left exactly where it is: a PRO that was ever issued stays issued, so
+ * the number this leg used to carry can never be handed to anything else.
+ */
+async function setLoadPro(input: Row, caller: Caller): Promise<Row> {
+  const loadId = assertString(input.loadId, 'loadId')
+  const pro = assertString(input.pro, 'pro')
+  const expectedUpdatedAt = assertExpectedUpdatedAt(input)
+
+  const load = await getById(LOAD_TABLE_NAME, loadId)
+  if (!load) throw new Error(`Load not found: ${loadId}`)
+  if (String(load.updatedAt ?? '') !== expectedUpdatedAt) throw conflictError('load', null)
+  assertNotVoided(load)
+  const shipmentId = optionalString(load.shipmentId, 100)
+  if (shipmentId) await requireLiveShipment(shipmentId)
+
+  const settings = await getSettings()
+  assertNotDerivedPro(pro, settings)
+  const claimKey = proClaimKey(pro)
+  // The read is a courtesy so the common case reads well; the conditional put below
+  // is the rule, and it is what two dispatchers racing each other actually hit.
+  if (await getById(PRO_CLAIM_TABLE_NAME, claimKey)) throw new Error(proAlreadyIssuedMessage(pro))
+  await transact(
+    [proClaimPut(pro, { loadId, shipmentId, claimedBy: caller.email, origin: 'SET_LOAD_PRO' })],
+    'pro claim',
+    { refusals: [proAlreadyIssuedMessage(pro)] },
+  )
+
+  const previous = optionalString(load.aljexId, 120)
+  const client = await getDataClient()
+  assertLoadWriteOk(
+    await client.models.Load.update({ id: loadId, aljexId: pro.trim(), updatedBy: caller.email }),
+    'Load update',
+  )
+  await writeAudit('LOAD', loadId, 'SET_LOAD_PRO', caller, { from: previous, to: pro.trim(), shipmentId })
+  return {
+    bundle: shipmentId ? await readBundle(shipmentId) : null,
+    load: await getById(LOAD_TABLE_NAME, loadId),
+  } as unknown as Row
 }
 
 // ── UPDATE_STOP ──────────────────────────────────────────────────────────────
@@ -3479,7 +4063,7 @@ async function bookCarrier(input: Row, caller: Caller, extra?: BookCarrierExtra)
     }
   }
 
-  const customer = await getById(CUSTOMER_TABLE_NAME, String(shipment.customerId))
+  const customer = await customerOf(shipment)
   const rules = chargeCodeRules(settings, customer)
   const newCarrierId = `lcr-${randomUUID()}`
   const linehaul: ChargeInput = {
@@ -4170,7 +4754,7 @@ async function recalcCharges(input: Row, caller: Caller): Promise<Row> {
     throw new Error('This load\'s financials are frozen and can no longer be changed')
   }
 
-  const customer = await getById(CUSTOMER_TABLE_NAME, String(shipment.customerId))
+  const customer = await customerOf(shipment)
   const settings = await getSettings()
   const rules = chargeCodeRules(settings, customer)
   const charges = assertArrayOf(input.charges, 'charges', (item, i) => validateChargeInput(item, i, rules))
@@ -4237,7 +4821,7 @@ async function updateCarrierCharges(input: Row, caller: Caller): Promise<Row> {
   const currentVersion = numberOrNull(shipment.version) ?? 1
   if (currentVersion !== expectedVersion) throw conflictError('shipment', null)
 
-  const customer = await getById(CUSTOMER_TABLE_NAME, String(shipment.customerId))
+  const customer = await customerOf(shipment)
   const settings = await getSettings()
   const rules = chargeCodeRules(settings, customer)
   const theirs = (row: Row): boolean =>
@@ -4530,9 +5114,7 @@ async function logCheckCall(input: Row, caller: Caller): Promise<Row> {
   }
 
   const settings = chargeRequests.length > 0 ? await getSettings() : null
-  const customer = chargeRequests.length > 0
-    ? await getById(CUSTOMER_TABLE_NAME, String(bundle.shipment.customerId))
-    : null
+  const customer = chargeRequests.length > 0 ? await customerOf(bundle.shipment) : null
   const order = bundle.orders[0] ?? null
   // The lib refuses a carrier charge with nobody to pay and a negative one.
   const lines = chargeRequests.length === 0 ? [] : incidentChargeLines({
@@ -4833,6 +5415,10 @@ async function setArStatus(input: Row, caller: Caller): Promise<Row> {
 
   const revenue = numberOrNull(order.revenueCents) ?? 0
   if (requested === 'UNBILLED') {
+    // Refused before the gate, never instead of it: UNBILLED is the rung AR works
+    // from, and an order with no customer record dies there on a lookup that was
+    // never going to find anything.
+    assertCustomerResolved(order, 'releasing it to accounting')
     // Ryne's release-to-accounting rule, the same one READY_TO_INVOICE and every
     // finance path run: delivered, every required document and reference present,
     // the cost of the move recorded, nothing still open. `invoiceEarly` used to let
@@ -4946,9 +5532,14 @@ async function customerIdsByName(): Promise<Map<string, string | null>> {
 
 /**
  * The customer this legacy load sells to: the id it already carries, or the one
- * customer whose name or alias it names. Unmatched is reported, never invented —
- * `customerId` is the hash key of Shipment's and Order's customer index, and an
- * empty string there is a write DynamoDB rejects outright.
+ * customer whose name or alias it names.
+ *
+ * Null is a real answer, not a failure. A name that matches nobody, a name two
+ * customers both answer to, and a name whose only match is archived all come back
+ * null, and the load is backfilled as an UNRESOLVED shipment carrying its typed
+ * customer text. Nothing is invented and nothing is lost: for the ambiguous case in
+ * particular, writing either candidate would hang one customer's revenue on another
+ * customer's ledger, and the whole point is that neither id is written.
  */
 function resolveBackfillCustomerId(load: Row, byName: Map<string, string | null>): string | null {
   const direct = optionalString(load.customerId, 100)
@@ -4998,7 +5589,12 @@ interface BackfillPlan {
   shipmentId: string
   orderId: string
   number: string
+  /** Null when no customer record was matched — the row is written unresolved. */
   customerId: string | null
+  /** The operator's typed customer text, carried verbatim onto the new rows. */
+  customerName: string | null
+  /** The load's existing PRO, normalized. Null when there is nothing claimable. */
+  pro: string | null
   loadStatus: LoadWorkflowStatus
   shipmentStatus: ShipmentStatus
   arStatus: ArStatus
@@ -5031,12 +5627,20 @@ interface BackfillPlan {
  * the freight and loses the link a previous run wrote — that row is the record:
  * the load is pointed back at it and its customer, the number is the one it already
  * carries, and no customer match is asked for, because nothing is being created.
+ *
+ * A load whose customer text matches no record — or two records, or only an archived
+ * one — is no longer skipped. It gets a real Shipment carrying that text and no
+ * `customerId` attribute at all, which is the honest record of what is known. The
+ * 892 orders a previous run already linked are untouched: `ALREADY_LINKED` is still
+ * the first answer this gives.
  */
 function planBackfill(
   load: Row,
   brokerDriverIds: Set<string>,
   customerId: string | null,
   existing: Row | null,
+  /** The ProClaim already standing on this load's PRO, when there is one. */
+  claim: Row | null,
 ): BackfillPlan {
   const loadId = String(load.id)
   const stops = readStops(load)
@@ -5058,12 +5662,20 @@ function planBackfill(
   // the only thing keeping it out of them. That is a person's call, not an import's.
   const voidedTarget = relink && (optionalString(existing.voidedAt, 40) || optionalString(existing.deletedAt, 40)) != null
   const existingOrderId = relink && Array.isArray(existing.orderIds) ? optionalString(existing.orderIds[0], 100) : null
+  // A PRO claimed by THIS load is a previous run or `scripts/backfillProClaims.mjs`
+  // having got there first, and is simply nothing left to do. A PRO claimed by a
+  // DIFFERENT load is two pieces of freight under one number, which is the thing the
+  // claim exists to catch and is not something an import may paper over.
+  const pro = normalizePro(optionalString(load.aljexId, 120))
+  const claimedElsewhere = claim != null && String(claim.loadId ?? '') !== loadId
   return {
     loadId,
     shipmentId: stableId('shp', loadId),
     orderId: existingOrderId ?? stableId('ord', loadId),
     number: (relink ? optionalString(existing.number, 40) : null) ?? `L${String(load.aljexId ?? loadId)}`,
     customerId: (relink ? optionalString(existing.customerId, 100) : null) ?? customerId,
+    customerName: optionalString(load.customer, 200),
+    pro,
     loadStatus,
     shipmentStatus: loadStatus === 'SOURCING' ? 'OPEN' : (loadStatus as ShipmentStatus),
     arStatus: 'DOCS_NEEDED',
@@ -5076,7 +5688,9 @@ function planBackfill(
       ? 'ALREADY_LINKED'
       : voidedTarget
         ? 'SHIPMENT_VOIDED'
-        : (relink || customerId) ? null : 'NO_CUSTOMER_MATCH',
+        : claimedElsewhere
+          ? 'PRO_CLAIMED_BY_OTHER_LOAD'
+          : null,
   }
 }
 
@@ -5107,9 +5721,26 @@ async function backfillShipments(input: Row, caller: Caller): Promise<Row> {
       continue
     }
     const existing = load.shipmentId ? null : await getById(SHIPMENT_TABLE_NAME, stableId('shp', loadId))
-    const plan = planBackfill(load, brokerDriverIds, resolveBackfillCustomerId(load, customersByName), existing)
+    const existingPro = normalizePro(optionalString(load.aljexId, 120))
+    const claim = existingPro ? await getById(PRO_CLAIM_TABLE_NAME, existingPro) : null
+    const plan = planBackfill(load, brokerDriverIds, resolveBackfillCustomerId(load, customersByName), existing, claim)
     planned.push(plan)
     if (dryRun || plan.skipped) continue
+
+    // The load's PRO is claimed in the same write that gives it a shipment, unless
+    // this very load already holds the claim — `scripts/backfillProClaims.mjs` runs
+    // ahead of enforcement and may have got there first. A blank or unusable PRO is
+    // left unclaimed rather than refused: the freight is real and already in the
+    // table, and SET_LOAD_PRO is how it is given a number it can keep.
+    const claimWrites = plan.pro != null && claim == null
+      ? [proClaimPut(plan.pro, {
+        loadId: plan.loadId,
+        shipmentId: plan.shipmentId,
+        claimedBy: caller.email,
+        origin: 'BACKFILL',
+      })]
+      : []
+    const claimRefusals = claimWrites.length > 0 ? [proAlreadyIssuedMessage(String(plan.pro))] : []
 
     const now = nowIso()
     const customerName = optionalString(load.customer, 200)
@@ -5125,6 +5756,7 @@ async function backfillShipments(input: Row, caller: Caller): Promise<Row> {
     // it either way.
     if (!plan.relink) {
       const writes: TransactWriteItem[] = [
+        ...claimWrites,
         putItem(SHIPMENT_TABLE_NAME, {
           id: plan.shipmentId,
           __typename: 'Shipment',
@@ -5236,7 +5868,9 @@ async function backfillShipments(input: Row, caller: Caller): Promise<Row> {
           updatedAt: now,
         }))
       }
-      await transact(writes, 'backfill')
+      await transact(writes, 'backfill', { refusals: claimRefusals })
+    } else if (claimWrites.length > 0) {
+      await transact(claimWrites, 'pro claim', { refusals: claimRefusals })
     }
 
     // On a relink the leg that is really on the load wins over a fresh derivation:
@@ -5377,6 +6011,10 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return tenderRespond(input, caller)
     case 'DUPLICATE_SHIPMENT':
       return duplicateShipment(input, caller)
+    case 'SET_SHIPMENT_CUSTOMER':
+      return setShipmentCustomer(input, caller)
+    case 'SET_LOAD_PRO':
+      return setLoadPro(input, caller)
     case 'UPDATE_STOP':
       return updateStop(input, caller)
     case 'ASSIGN_ASSET':

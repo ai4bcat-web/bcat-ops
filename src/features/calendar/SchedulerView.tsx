@@ -8,10 +8,16 @@ import { toast } from 'sonner'
 import { UserCheck, Copy, X } from 'lucide-react'
 import { useLoads } from '@/hooks/useLoads'
 import { useAppStore } from '@/store/useAppStore'
+import { useAuth } from '@/hooks/useAuth'
+import { useDirectory } from '@/hooks/useDirectory'
+import { ShipmentDrawer } from '@/features/shipments/components/ShipmentDrawer'
+import { duplicateShipment, getTmsSettings } from '@/lib/apiClient'
+import { errorMessage } from '@/lib/utils/errorMessage'
 import { getColor, UNASSIGNED_COLOR } from '@/lib/driverColors'
 import { updateStop } from '@/lib/stops'
 import { EventCard } from './EventCard'
 import type { Load, Driver, ViewMode, Stop } from '@/types'
+import type { TmsSettings } from '@/types/tms'
 import { formatTime } from '@/lib/date'
 import { formatPhone } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -57,8 +63,15 @@ interface SchedulerViewProps {
 export function SchedulerView({
   calendarRef, loads, drivers, conflictIds, filterDriverId, viewMode, weekStart, onDatesSet,
 }: SchedulerViewProps) {
-  const { updateLoad, addLoad } = useLoads()
+  const { updateLoad } = useLoads()
   const setSelectedLoad = useAppStore((s) => s.setSelectedLoad)
+  const openNewShipment = useAppStore((s) => s.openNewShipment)
+  const directory = useDirectory()
+  const { user, isAdmin } = useAuth()
+  // Where a duplicate lands: the copy's own shipment detail, never a load drawer.
+  const [openShipmentId, setOpenShipmentId] = useState<string | null>(null)
+  const [settings, setSettings] = useState<TmsSettings | null>(null)
+  useEffect(() => { getTmsSettings().then(setSettings).catch(() => setSettings(null)) }, [])
 
   const dragModifierRef = useRef<'none' | 'shift' | 'alt'>('none')
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
@@ -329,8 +342,8 @@ export function SchedulerView({
           alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0,
           fontSize: '14px', lineHeight: 1, padding: 0,
         }}
-        onClick={(e) => { e.stopPropagation(); setSelectedLoad(null, 'create', { driverId: null, dateStr }) }}
-        title={`Add load for ${dateStr}`}
+        onClick={(e) => { e.stopPropagation(); openNewShipment({ driverId: null, dateStr }) }}
+        title={`Add a shipment for ${dateStr}`}
       >+</button>
     )
 
@@ -354,17 +367,17 @@ export function SchedulerView({
         {plusBtn(dateStr)}
       </div>
     )
-  }, [viewMode, setSelectedLoad])
+  }, [viewMode, openNewShipment])
 
-  // ── Date click (add load) ─────────────────────────────────────────────────
+  // ── Date click (add a shipment on the dragged day and lane) ───────────────
 
   const handleDateClick = useCallback((info: { resource?: { id: string }; dateStr: string }) => {
     const driverId = info.resource
       ? (info.resource.id === 'unassigned' ? null : info.resource.id)
       : null
     const dateStr = info.dateStr.slice(0, 10)
-    setSelectedLoad(null, 'create', { driverId, dateStr })
-  }, [setSelectedLoad])
+    openNewShipment({ driverId, dateStr })
+  }, [openNewShipment])
 
   // ── Bulk actions ──────────────────────────────────────────────────────────
 
@@ -390,16 +403,40 @@ export function SchedulerView({
     setContextMenu(null)
   }
 
-  const ctxDuplicate = () => {
+  /*
+   * Duplicate the shipment this leg belongs to, not the row.
+   *
+   * The old version spread the whole Load — `shipmentId` included — and wrote a bare
+   * create, so a shipment-born leg duplicated here became a phantom extra leg under the
+   * SOURCE shipment rather than a shipment of its own. The `-copy` PRO is gone with it: a
+   * PRO is claimed for good, so `X-copy` would collide on the second duplicate, and the
+   * server derives the copy's own number. `keepDriver` is what keeps the copy in the lane
+   * it was dragged from — the stop shift otherwise clears the driver and writes
+   * NEED_TO_COVER.
+   */
+  const ctxDuplicate = async () => {
     if (!ctxLoad) return
-    // id/createdAt/updatedAt are server-managed: the copy must arrive without them.
-    const duplicate: Partial<Load> = { ...ctxLoad, aljexId: `${ctxLoad.aljexId}-copy` }
-    delete duplicate.id
-    delete duplicate.createdAt
-    delete duplicate.updatedAt
-    addLoad(duplicate as Omit<Load, 'id' | 'createdAt' | 'updatedAt'>)
-    toast(`Duplicated ${ctxLoad.aljexId}`)
     setContextMenu(null)
+    if (!ctxLoad.shipmentId) {
+      toast.error('This load has no shipment yet, so there is nothing to duplicate.')
+      return
+    }
+    try {
+      const result = await duplicateShipment({
+        shipmentId: ctxLoad.shipmentId,
+        loadId: ctxLoad.id,
+        keepDriver: true,
+        copies: [{
+          pickupAppt: ctxLoad.pickupAppt,
+          deliveryAppt: ctxLoad.deliveryAppt,
+        }],
+      })
+      toast.success(`Duplicated ${ctxLoad.aljexId}`)
+      const copy = result.created[0]
+      if (copy) setOpenShipmentId(copy)
+    } catch (err) {
+      toast.error(errorMessage(err))
+    }
   }
 
   // Close context menu on outside click
@@ -534,6 +571,18 @@ export function SchedulerView({
           </button>
         </div>
       )}
+
+      {/* Where a duplicate lands. One record, one detail surface. */}
+      <ShipmentDrawer
+        shipmentId={openShipmentId}
+        onClose={() => setOpenShipmentId(null)}
+        onChanged={() => {}}
+        customers={directory.customers}
+        locations={directory.locations}
+        settings={settings}
+        isAdmin={isAdmin}
+        currentUser={user?.email ?? ''}
+      />
     </div>
   )
 }

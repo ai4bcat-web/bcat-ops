@@ -459,9 +459,7 @@ function FilterSelect({ label, value, options, onChange }: {
 
 function PipelinePanel() {
   const { shipments, loading, error } = useShipments()
-  // A load that never became a shipment is on the board but on no rung of the pipeline:
-  // the status its row carries is a placeholder the record type demands, not a rung.
-  const counts = useMemo(() => pipelineCounts(shipments.filter((s) => s.unlinkedLoadId == null)), [shipments])
+  const counts = useMemo(() => pipelineCounts(shipments), [shipments])
 
   return (
     <TmsCard title="Pipeline">
@@ -538,6 +536,9 @@ function ArPanel({ period, asOf, periodLabel, refreshKey }: {
   const exposure = useMemo(() => {
     const ordersByCustomer = new Map<string, OrderRecord[]>()
     for (const order of orders) {
+      // An order with no Customer record linked is nobody's exposure. Keying it under
+      // a blank would invent a customer the report would then have to name.
+      if (!order.customerId) continue
       const bucket = ordersByCustomer.get(order.customerId)
       if (bucket) bucket.push(order)
       else ordersByCustomer.set(order.customerId, [order])

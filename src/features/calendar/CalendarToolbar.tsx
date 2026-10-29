@@ -40,7 +40,7 @@ export function CalendarToolbar({
   const filters          = useAppStore((s) => s.filters)
   const setSearchQuery   = useAppStore((s) => s.setSearchQuery)
   const toggleFilter     = useAppStore((s) => s.toggleFilter)
-  const setSelectedLoad  = useAppStore((s) => s.setSelectedLoad)
+  const openNewShipment  = useAppStore((s) => s.openNewShipment)
 
   return (
     <div style={{
@@ -173,16 +173,16 @@ export function CalendarToolbar({
         )}
       </div>
 
-      {/* ── New Load ─────────────────────────────────────────────────────── */}
+      {/* ── New shipment ─────────────────────────────────────────────────── */}
       <button
-        onClick={() => setSelectedLoad(null, 'create')}
+        onClick={() => openNewShipment()}
         style={{
           display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px', borderRadius: 8,
           background: 'var(--ds-blue)', color: '#fff', border: 'none', cursor: 'pointer',
           fontSize: 13, fontWeight: 600, fontFamily: 'inherit', flexShrink: 0,
         }}
       >
-        <Plus size={14} /> New Load
+        <Plus size={14} /> New Shipment
       </button>
     </div>
   )

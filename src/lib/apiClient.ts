@@ -1,6 +1,6 @@
 import { generateClient } from 'aws-amplify/data'
 import { uploadData, getUrl, remove } from 'aws-amplify/storage'
-import type { Load, Stop, Driver, AuditLogEntry, EntityType, AuditAction, FactoringItem, FactoringItemStatus, TimeClockEntry } from '@/types'
+import type { Load, Stop, ApptType, Driver, AuditLogEntry, EntityType, AuditAction, FactoringItem, FactoringItemStatus, TimeClockEntry } from '@/types'
 import type { RateConExtract, RateConFreight } from '@/lib/otrInvoice'
 import type { Equipment, MaintenanceTask, MaintenanceInvoice } from '@/types/equipment'
 import { fuelDedupKey } from '@/lib/driverFuel'
@@ -327,6 +327,19 @@ function serializeLoadInput<T extends { stops?: unknown; sortOrder?: unknown; cu
     const { voidedAt: _drop, ...rest } = out as T & { voidedAt?: unknown }
     out = rest as T
   }
+  // The same rule, for the same reason, on the three identity fields. A PRO is claimed
+  // atomically and never released, so `aljexId` — and the `tmsId`/`pickupNumber` that
+  // fall back to it — became field-level read-only to clients when the claim landed; only
+  // SET_LOAD_PRO may move one. The drawer and the calendar both save a whole payload that
+  // still carries all three, and AppSync refuses the entire mutation with
+  // "Unauthorized on [aljexId]" when one is present, so every unrelated load save would
+  // fail. Dropping them here keeps the write to what the client may actually change.
+  for (const field of ['aljexId', 'tmsId', 'pickupNumber'] as const) {
+    if (field in (out as object)) {
+      const { [field]: _drop, ...rest } = out as T & Record<typeof field, unknown>
+      out = rest as unknown as T
+    }
+  }
   if (!loadsHaveStops) {
     const { stops: _drop, ...rest } = out as T & { stops?: unknown }
     return rest as T
@@ -335,18 +348,10 @@ function serializeLoadInput<T extends { stops?: unknown; sortOrder?: unknown; cu
   return { ...out, stops: JSON.stringify(out.stops) }
 }
 
+// There is no createLoad: Load's model auth grants the client `read` and `update` only.
+// Legs come into being inside CREATE_SHIPMENT, where the PRO claim is taken in the same
+// transaction as the shipment number.
 // `customerApptWorkflow` is resolved from the Customer at read time and never written.
-export async function createLoad(
-  input: Omit<Load, 'id' | 'createdAt' | 'updatedAt'>
-): Promise<Load> {
-  const { rateConfirmUrl: _skip, customerApptWorkflow: _policy, ...rest } = input as Load & { rateConfirmUrl?: string }
-  const result = await client.graphql({
-    query: `mutation CreateLoad($input: CreateLoadInput!) { createLoad(input: $input) { ${loadFields()} } }`,
-    variables: { input: serializeLoadInput(rest) },
-  }) as { data: { createLoad: Load } }
-  return normalizeLoadStops(withCustomerPolicy(result.data.createLoad))
-}
-
 export async function updateLoad(
   id: string,
   patch: Partial<Omit<Load, 'id' | 'createdAt'>>
@@ -1648,12 +1653,86 @@ export async function shipmentAction<T>(action: string, input: unknown): Promise
 // record as the caller last saw it. It is optional only on the actions whose target
 // row the board does not hold a copy of.
 
+/**
+ * The one door freight comes in through.
+ *
+ * Exactly one of `customerId` / `customerName` is required. A resolved `customerId` runs
+ * the ACTIVE and free-credit checks exactly as it always has; `customerName` is the
+ * operator's typed text for a broker no directory record matched, and the shipment then
+ * carries no `customerId` at all until SET_SHIPMENT_CUSTOMER links one. No Customer
+ * record is ever created from here and no name is ever invented.
+ *
+ * `pro` is the PRO a legacy entrypoint already owns; absent, the leg takes the derived
+ * `<shipmentNumber>-<leg>`. Either way the server claims it, atomically and forever.
+ *
+ * `load` is a whitelisted leg bag — the server refuses anything outside it (notably
+ * `readyToInvoice`, which would walk straight past the release gate). `rateCents` becomes
+ * a CUSTOMER LINEHAUL charge priced through the shipment, never a raw `Load.rate`.
+ */
+export interface CreateShipmentLoadBag {
+  stops?: Stop[]
+  pickupAppt?: string
+  pickupApptEnd?: string
+  pickupApptType?: ApptType
+  deliveryAppt?: string
+  deliveryApptEnd?: string
+  deliveryApptType?: ApptType
+  originName?: string
+  originCity?: string
+  destinationName?: string
+  destinationCity?: string
+  pickupDriverId?: string | null
+  deliveryDriverId?: string | null
+  truckId?: string | null
+  tmsId?: string
+  pickupNumber?: string
+  commodity?: string
+  weight?: number
+  pieces?: number
+  piecesUnit?: string
+  cargoValueCents?: number
+  miles?: number
+  notes?: string
+  hot?: boolean
+  unscheduled?: boolean
+  equipmentType?: string
+  rateCents?: number
+}
 export interface CreateShipmentInput {
-  customerId: string
+  customerId?: string
+  customerName?: string
   mode?: ShipmentMode
+  pro?: string
+  source?: 'MANUAL' | 'DUPLICATE' | 'FACTORING' | 'BACKFILL'
+  load?: CreateShipmentLoadBag
 }
 export async function createShipment(input: CreateShipmentInput): Promise<ShipmentBundle> {
   return shipmentAction<ShipmentBundle>('CREATE_SHIPMENT', input)
+}
+
+/**
+ * The only writer of customer identity on a shipment that was recorded with typed text.
+ *
+ * Runs the same ACTIVE and free-credit checks CREATE_SHIPMENT runs, then writes the
+ * Shipment, the Order and every Load together — the alternative, editing `Load.customer`
+ * in the leg drawer, left the shipment and the order unresolved while the calendar looked
+ * linked, and the gates then disagreed with what was on screen.
+ */
+export async function setShipmentCustomer(input: { shipmentId: string; customerId: string }): Promise<ShipmentBundle> {
+  return shipmentAction<ShipmentBundle>('SET_SHIPMENT_CUSTOMER', input)
+}
+
+/**
+ * Move a leg's PRO. `aljexId` is field-level read-only to clients, so this is the only
+ * route: it claims the new PRO and never releases the old one, which is what makes a PRO
+ * permanent on edit as well as on create.
+ */
+export interface SetLoadProResult {
+  bundle: ShipmentBundle
+  load: Load
+}
+export async function setLoadPro(input: { loadId: string; pro: string; expectedUpdatedAt?: string }): Promise<SetLoadProResult> {
+  return shipmentAction<SetLoadProResult>('SET_LOAD_PRO', input)
 }
 
 export interface SaveOrderFormInput {
@@ -1895,10 +1974,27 @@ export interface DuplicateShipmentInput {
   copies: DuplicateShipmentCopy[]
   /** Carry the source shipment's carrier assignment onto every copy. */
   sameCarrier?: boolean
+  /**
+   * Which leg to copy. Without it the server takes the shipment's first load, which is
+   * wrong when the operator right-clicked the second leg of a multi-leg shipment.
+   */
+  loadId?: string
+  /**
+   * Keep the source leg's driver and truck. `shiftStops` clears both and the copy is then
+   * written NEED_TO_COVER, which lands an own-fleet dispatcher's duplicate off the driver
+   * lane it was copied from.
+   */
+  keepDriver?: boolean
 }
-/** Returns the SOURCE shipment's bundle; the copies are new rows the board picks up. */
-export async function duplicateShipment(input: DuplicateShipmentInput): Promise<ShipmentBundle> {
-  return shipmentAction<ShipmentBundle>('DUPLICATE_SHIPMENT', input)
+/**
+ * Returns the SOURCE shipment's bundle plus `created`, the new shipment ids in the order
+ * `copies` asked for them — `created[0]` is what a caller opens the detail on.
+ */
+export interface DuplicateShipmentResult extends ShipmentBundle {
+  created: string[]
+}
+export async function duplicateShipment(input: DuplicateShipmentInput): Promise<DuplicateShipmentResult> {
+  return shipmentAction<DuplicateShipmentResult>('DUPLICATE_SHIPMENT', input)
 }
 
 export type StopOp =

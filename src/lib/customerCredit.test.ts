@@ -568,6 +568,21 @@ describe('creditExposure', () => {
     expect(items.reduce((sum, i) => sum + i.amountCents, 0)).toBe(500_000)
     expect(items).toHaveLength(2)
   })
+
+  /*
+   * Step R lets an order exist with the operator's typed customer text and no record.
+   * Its loads mirror that text, and factoring files one as `arStatus: 'LEGACY'` — which
+   * is exactly the rung that sends loads back into the name-matched path. Counting one
+   * there would charge a customer for freight nobody ever said was theirs.
+   */
+  it('leaves an order with no customer record out of the number, name or no name', () => {
+    const items = creditExposure(c, {
+      orders: [makeOrder({ id: 'o-unres', customerId: null, arStatus: 'LEGACY', revenueCents: 400_000 })],
+      shipments: [makeShipment()],
+      loads: [makeLoad({ id: 'l-unres', customerId: null, customer: 'Batory Foods', orderId: 'o-unres', rate: 400_000 })],
+    })
+    expect(items).toEqual([])
+  })
 })
 
 describe('creditSummaryForCustomer', () => {
