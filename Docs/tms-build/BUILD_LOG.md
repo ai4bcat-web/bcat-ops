@@ -2,6 +2,128 @@
 
 One entry per unit of work (newest first). Decisions needed from Ryne go under **Decision needed**.
 
+## 2026-10-29 — Step J done on dev: the integration framework and every provider page
+
+Three commits — `71dc8a5` (the step), `16b155d` (Motive validates with the read its sync
+already makes), `f6d3143` (a warm API container re-reads one parameter before refusing;
+a provider nobody can connect says so) — Amplify dev jobs **54, 55, 56 SUCCEED**, each
+pushed only with the branch idle. Gates before every commit: `npm run typecheck`,
+`npm run lint` (the same 2 pre-existing warnings), `npm run test` — **407 files /
+5,541 tests**, up from 396/5,354 after Step R. Data stack **763,846 bytes**, 236,154
+under the 1,000,000 cap (+14,421 for the model, the fields and two Lambdas' wiring;
+measured with `scripts/measureDataTemplate.mjs` before the first schema change and
+after the last). Live proof on dev: `node scripts/devVerifyStepJ.mjs` → **75/75**.
+
+- **One registry, 39 providers, no per-provider page.** `src/lib/integrations/registry.ts`
+  holds one `ProviderDescriptor` per row of spec §8.1 plus the nine the stack already runs
+  (OTR, Motive, Blue Ink Tech, Google Maps, Anthropic, Slack, Twilio, Paychex, JobsDone).
+  `IntegrationsIndex` and `IntegrationPage` are driven entirely from it, so a new provider
+  is one object and no UI change. The index is the eighth My Brokerage tab, owner/ADMIN
+  only, with a copyable **Missing credentials** strip — the same list this entry carries.
+- **A credential never lands in the database.** A page-entered credential is one
+  SecureString at `/bcat/integrations/<userPoolId>/<PROVIDER>`; the row keeps a pointer and
+  the last four characters and nothing else, proven on dev by searching the whole row and
+  every audit row for the value. Amplify secrets are shown by name with their
+  `npx ampx secret set` command and are never written from the app. A webhook signing
+  secret lives in its **own** parameter (`…/<PROVIDER>/webhook`) so the one Internet-facing
+  Lambda is authorised to decrypt that value and nothing else — the review caught that one
+  parameter would otherwise have handed it the DAT password and the QBO refresh token.
+- **Stub mode is honest by construction**, and the review found the one place it was not:
+  entering a DAT key used to flip the provider to "Live … runs on its own schedule" when
+  nothing in BCAT calls DAT. `liveCapabilities` now names, per provider, the capabilities
+  this repo actually implements; everything else stays a stub however many credentials are
+  stored. A stub result is `mode STUB`, `STUB — …`, `externalId stub:<uuid>`, writes exactly
+  one `AuditLog` row and touches no business record — asserted on dev against the live
+  tables: shipment count, load count and the named shipment byte-for-byte unchanged,
+  `datPostedAt` still null.
+- **Health is what the provider said.** 401/403 → invalid credentials; anything else that is
+  not a 2xx → unable to verify with the code; `disabled-on-dev` → "Live on main · neutered
+  on dev", never OK and never invalid. A 2xx body is deliberately **not** stored: Motive's
+  reply carries driver names and positions and HubSpot's a real contact.
+- **The public API.** `POST /api/token` (client credentials, one-hour token, the secret shown
+  once and stored only as a SHA-256 hash) and `GET /api/v1/shipments/<number>` — a
+  purpose-built view with no `*Cents` key and nothing named `order`. A voided PRO answers
+  **200 `VOIDED`**, never 404. Wrong secret, unknown client and revoked client all answer one
+  401 wording.
+- **Inbound webhooks, verified.** `POST /api/webhooks/<provider>`: HMAC-SHA256 over
+  `t.body` with a ±300 s replay window, and a conditional `evt:<PROVIDER>:<eventId>` receipt
+  row that makes a redelivery a 200 no-op. **Receipt only in J** — no business record is
+  written; consumption is Step K. Receipts carry `ttlEpoch` and DynamoDB TTL is enabled on
+  the table, and `LIST_INTEGRATIONS` filters them out of its scan.
+- **Postal-code aliases are real, narrowly.** `laneKeyFor(stops, aliases)` is fed from
+  `aliasMap(settings.postalCodeAliases)` in the two writers that mint lane keys — `saveQuote`
+  and the carrier-offer row. Stored lane history is not rewritten and `laneKey3` is ZIP-based
+  and unaffected. The four shared tracking toggles are stored and say on screen that nothing
+  reads them until a tracking provider is live.
+- **Step R's invariants are untouched.** Nothing in J creates a `Load`, reaches AR, or offers
+  a second factoring path: the only factor affordance anywhere is a link to F's gated
+  `SEND_TO_FACTOR`. `tmsDirectoryActions` gained no grant on Shipment, Order, Load, Invoice
+  or FactoringItem, and no J action issues a DynamoDB `Delete`.
+
+**What the live run proved on dev** (75 checks): all 39 rows created once and never
+recreated; Motive and Anthropic validate **OK** against the stack's real keys; OTR, Slack and
+Blue Ink answer **NEUTERED_ON_DEV**; Twilio is **NOT_CONNECTED** (dev's pool has no dispatch
+config, as planned); Convoy answers **NOT_APPLICABLE**; a page credential round-trips through
+SSM as a SecureString with only a last-4 mask on the row; the DAT refresh rule refuses 17 and
+accepts 20 and a stale version is refused; a `page-tms` token is refused on all eight actions;
+a stack-managed provider refuses connect and disconnect with its rotation command; the token
+endpoint, the shipment read, the voided answer, the revoked client, the signature, the replay
+and the idempotent redelivery all behave; disconnect deletes the parameter and keeps the row
+and its settings. Browser pass on `https://dev.d3dejqzs77khq6.amplifyapp.com`: the index with
+its 39 rows and category counts, the DAT page running a stub inline under the orange **Stub**
+badge with "No call was made to DAT.", the Motive page showing a secret **name** and its
+events, issuing an API client (secret shown once) and revoking it, and the shipment's
+collapsed **Integrations** card grouped by capability. Both temporary dev identities and every
+parameter the run wrote were removed afterwards.
+
+**Two real gaps the step surfaced** (neither is a J defect):
+
+1. **The dev stack's `GOOGLE_MAPS_API_KEY` is rejected by Google server-side.** The page badges
+   it **Invalid credentials**, and the existing `tms-geocode` Lambda fails identically on dev
+   ("The provided API key is invalid"), so address geocoding is already broken on the dev
+   stack. Production is unaffected by anything here, but the dev key needs replacing or
+   un-restricting.
+2. **`/v1/users/me` is not a Motive org-API-key route** — it answers 400 "id is invalid". The
+   check now uses `GET /v1/vehicle_locations?per_page=1`, the same read the hourly location
+   sync makes.
+
+**Deviations from the J plan, each deliberate:** three categories beyond the plan's sixteen
+(EMAIL, PAYROLL, DOCUMENTS — forcing Paychex into ACCOUNTING or Gmail into MESSAGING would have
+made a page lie about what it is); `liveCapabilities` added to the descriptor after the review
+(the plan's `mode` alone could not tell "credentialled" from "implemented"); the webhook
+receiver added on Ryne's explicit requirement for signature/replay/idempotency, which the plan
+had deferred; JobsDone listed as externally managed and linked to `/pods` rather than given a
+second credential form; WEX EFS kept as one PAGE row with both halves explained, because a
+BRIDGE row could not take the money-code credential it needs; and the template grew 14,421
+bytes against a planned 12,000 ceiling — with 236,154 still free and K's `WorkflowRun`
+(≈ 5 KB) and M's assistant (≈ 12 KB) costed, the drop order was not worth paying.
+
+**Decision needed (Ryne) — the credentials J is waiting on.** 26 providers cannot leave stub
+mode until these arrive, entered on each provider's own page (they are written encrypted to
+`/bcat/integrations/us-east-1_UKhMNVAG1/<PROVIDER>` on dev and never shown again):
+DAT `{serviceAccountEmail (no `+` address), serviceAccountPassword, rateViewTier}` plus each
+rep's own DAT e-mail · Truckstop `{clientId, clientSecret}` · Parade `{apiKey}` (+ webhook
+signing secret) · Trucker Tools `{apiKey}` · MacroPoint `{partnerId, apiPassword}` · Load
+Market `{clientKey}` · project44 `{clientId, clientSecret}` + per-customer p44 ids · Highway
+`{apiKey}` (ask Highway — no self-service) · MyCarrierPackets `{username, password,
+webhookSigningSecret}` · RMIS `{clientId, clientPassword}` · LoadBoardNetwork `{customerKey}` ·
+Greenscreens `{clientId, clientSecret}` · HaulPay `{apiKey}` · Denim `{apiKey}` · ArtisPay
+`{identityToken, password}` (only if BCAT ever factors outside OTR) · QuickBooks Online
+`{clientId, clientSecret}` from an Intuit developer app plus Ryne's consent click · WEX EFS
+`{apiUsername, apiPassword}` (a data-sharing request; fuel **usage** already arrives through
+the e-mailed report bridge) · Loadsure `{apiKey}` · 7L Freight `{username, password}` · SMC3
+per-LTL-carrier `{username, password, licenseKey}` · EDI/Orderful `{apiKey}` + trading-partner
+setup · Outlook `{tenantId, clientId, clientSecret}` (only if BCAT uses Microsoft 365) ·
+HubSpot `{privateAppToken}`. Rotated in the Amplify console, not here: `OTR_USERNAME`,
+`OTR_PASSWORD`, `OTR_SUBSCRIPTION_KEY`, `BLUE_INK_TECH_API_KEY`, `SLACK_BOT_TOKEN`,
+`PAYCHEX_CLIENT_ID`, `PAYCHEX_CLIENT_SECRET` (all neutered on dev by design) and
+`GOOGLE_MAPS_API_KEY` (gap 1 above). Decisions still open: whether to buy a Twilio number for
+the dev pool or leave dev texting inert (the badge says inert today); whether BCAT uses
+Microsoft 365 at all; and whether JobsDone should be configured on the dev pool.
+
+Next: Step K — Workflows (Errors + AI Agents), `WorkflowRun`, the four e-mail agent inbox
+roles, org/party AI memory. Plan: `Docs/tms-build/K-plan.md`.
+
 ## 2026-10-29 — Step R cutover: one record is a Shipment, and a PRO is claimed forever
 
 The previous entry closed Step R's acceptance gaps but left the real one open: three
