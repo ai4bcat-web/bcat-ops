@@ -12,3 +12,16 @@ export function isShipmentVoided(
 ): boolean {
   return Boolean(s?.voidedAt || s?.deletedAt)
 }
+
+/**
+ * The same question asked of a load.
+ *
+ * The calendar, dispatch, the appointment queue, the settlements and the pay
+ * hooks all read the Load table and never join a shipment, so Step R mirrors the
+ * void onto the load itself. A load whose shipment was voided is not live work:
+ * it is out of every working set, and only the Voided tab, the shipment's
+ * History tab and the audit log still show it.
+ */
+export function isLoadVoided(l: { voidedAt?: string | null } | null | undefined): boolean {
+  return Boolean(l?.voidedAt)
+}

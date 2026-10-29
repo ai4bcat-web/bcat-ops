@@ -141,3 +141,29 @@ describe('PlannerView and a load the Shipment page created', () => {
     expect(screen.getByText('S000070-1')).toBeTruthy()
   })
 })
+
+describe('PlannerView and a voided shipment', () => {
+  const weekStart = new Date('2026-08-17T00:00:00-05:00')
+  const drivers = [{ id: 'd1', name: 'Zak Pace' }] as never
+
+  it('leaves a voided load out of the Unscheduled strip and off its count', () => {
+    const live = batoryLoad({ id: 'l1', aljexId: 'LIVE-1', unscheduled: true } as unknown as Partial<Load>)
+    const voided = batoryLoad({
+      id: 'l2', aljexId: 'VOIDED-1', unscheduled: true, voidedAt: '2026-10-29T12:00:00.000Z',
+    } as unknown as Partial<Load>)
+    render(<PlannerView loads={[live, voided]} drivers={drivers} weekStart={weekStart} numDays={7} />)
+
+    expect(screen.getByText('LIVE-1')).toBeTruthy()
+    expect(screen.queryByText('VOIDED-1')).toBeNull()
+    // The strip's own count is what a dispatcher reads as "work with no date".
+    expect(screen.getByText('· 1 load with no firm date')).toBeTruthy()
+  })
+
+  it('leaves a voided load off its appointment day too', () => {
+    const voided = batoryLoad({
+      id: 'l3', aljexId: 'VOIDED-2', voidedAt: '2026-10-29T12:00:00.000Z',
+    } as unknown as Partial<Load>)
+    render(<PlannerView loads={[voided]} drivers={drivers} weekStart={weekStart} numDays={7} />)
+    expect(screen.queryByText('VOIDED-2')).toBeNull()
+  })
+})

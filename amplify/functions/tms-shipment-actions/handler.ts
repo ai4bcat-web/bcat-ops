@@ -2045,11 +2045,15 @@ async function applyVoid(
       await writeCheckCallSchedule({ loadId, nextCheckCallAt: null, note: null, caller, expectedUpdatedAt: null })
     }
     // Our own-fleet readers — the calendar, dispatch, box-truck and owner-operator
-    // pay, employee stats, the driver schedule — never look at `Load.status`: they
-    // key on `stops[].driverId` and the `pickupDriverId`/`deliveryDriverId` mirrors.
-    // A voided shipment that kept them would still pay a driver for freight that
-    // never ran. `uncoveredLoadPatch` is the same clear a bounce writes; who held
-    // the load stays readable on `assignmentType`, `carrierName` and the LoadCarrier
+    // pay, employee stats, the driver schedule — read the Load table and never
+    // join a shipment, so the void is mirrored onto the load itself: `voidedAt`
+    // is what takes this freight out of every live working set at once, and the
+    // row, its PRO and its history stay readable behind the Voided tab.
+    // The driver marks come off too — they key on `stops[].driverId` and the
+    // `pickupDriverId`/`deliveryDriverId` mirrors, and a voided shipment that
+    // kept them would still pay a driver for freight that never ran.
+    // `uncoveredLoadPatch` is the same clear a bounce writes; who held the load
+    // stays readable on `assignmentType`, `carrierName` and the LoadCarrier
     // legs, which is the record, so those are deliberately not touched here.
     const { assignmentType: _type, carrierName: _name, ...cleared } = uncoveredLoadPatch(readStops(load) as MirrorStop[])
     const canceling = load.status !== 'CANCELED'
@@ -2058,6 +2062,7 @@ async function applyVoid(
         id: loadId,
         ...cleared,
         stops: JSON.stringify(cleared.stops),
+        voidedAt: now,
         // Nothing about a voided shipment is ready to bill.
         readyToInvoice: false,
         ...(canceling
@@ -5010,8 +5015,17 @@ interface BackfillPlan {
  * Map one legacy load onto a Shipment/Order/Load trio.
  *
  * Nothing here invents history: the number keeps the Aljex id the office already
- * says out loud, the status comes from the stop clock, and AR never goes past
- * UNBILLED because no invoice has been recorded for any of these loads.
+ * says out loud, and the status comes from the stop clock.
+ *
+ * An imported order starts on DOCS_NEEDED and nowhere else. The legacy
+ * `readyToInvoice` flag is a dispatcher in Aljex saying the work was done — it is
+ * evidence of delivery, which is why `backfillLoadStatus` still reads it, but it
+ * is not the release gate. Ryne's rule is that nothing reaches AR without the
+ * gate (`src/lib/releaseGate.ts`), and an import carries none of what the gate
+ * asks for: no documents, no references, no settled carrier charges. Letting the
+ * flag mint UNBILLED would hand imported freight the one rung the gate exists to
+ * guard. Where these Aljex-era bills really belong is the LEGACY rung, and
+ * `scripts/backfillLegacyAr.mjs` is what moves them there, invoice-safe.
  *
  * When the Shipment already exists — a Load table refreshed from production keeps
  * the freight and loses the link a previous run wrote — that row is the record:
@@ -5047,7 +5061,7 @@ function planBackfill(
     customerId: (relink ? optionalString(existing.customerId, 100) : null) ?? customerId,
     loadStatus,
     shipmentStatus: loadStatus === 'SOURCING' ? 'OPEN' : (loadStatus as ShipmentStatus),
-    arStatus: loadStatus !== 'DELIVERED' ? 'DOCS_NEEDED' : (load.readyToInvoice === true ? 'UNBILLED' : 'DOCS_NEEDED'),
+    arStatus: 'DOCS_NEEDED',
     assignmentType: ownAsset ? 'OWN_ASSET' : 'NEED_TO_COVER',
     loadCarrierId: ownAsset ? stableId('lcr', loadId) : null,
     driverId: realDriverId,

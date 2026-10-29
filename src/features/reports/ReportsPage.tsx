@@ -459,7 +459,9 @@ function FilterSelect({ label, value, options, onChange }: {
 
 function PipelinePanel() {
   const { shipments, loading, error } = useShipments()
-  const counts = useMemo(() => pipelineCounts(shipments), [shipments])
+  // A load that never became a shipment is on the board but on no rung of the pipeline:
+  // the status its row carries is a placeholder the record type demands, not a rung.
+  const counts = useMemo(() => pipelineCounts(shipments.filter((s) => s.unlinkedLoadId == null)), [shipments])
 
   return (
     <TmsCard title="Pipeline">

@@ -19,6 +19,7 @@ import { toast } from 'sonner'
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { LoadDrawer } from '@/features/loads/LoadDrawer'
 import {
   TmsBadge, TmsButton, TmsDialog, TmsField, TmsIconButton, TmsInput, TmsListPage, TmsSelect, statusTone,
 } from '@/features/tms/kit'
@@ -38,15 +39,16 @@ import { effectiveCustomerStatus } from '@/lib/customerCredit'
 import { SEED_DIVISIONS } from '@/lib/ownership'
 import { ROLES, ROLE_LABELS } from '@/lib/roles'
 import { SHIPMENT_STATUSES } from '@/lib/shipmentStatus'
-import { applyViewFilters, slugify, viewsVisibleTo } from '@/lib/shipmentViewDefs'
+import { applyViewFilters, slugify, viewCallerOf, viewsVisibleTo } from '@/lib/shipmentViewDefs'
 import { cn } from '@/lib/utils'
+import { useAppStore } from '@/store/useAppStore'
 import { ShipmentDrawer } from './components/ShipmentDrawer'
 import { ShipmentRowActions, type ShipmentActionHandlers } from './components/StatusActions'
 import { MODE_OPTIONS } from './orderDraft'
 import {
-  BOARD_COLUMNS, BOARD_TABS, DEFAULT_COLUMN_KEYS, EMPTY_FILTERS, activeFilterCount, applyBoard,
-  carrierLabel, divisionCodeOfViewSlug, filtersToViewFilters, isBoardTabKey, isSortKey,
-  statusLabel, tabCounts, toCsv, toViewRow, visibleColumns, voidedAtOf,
+  BOARD_COLUMNS, BOARD_TABS, DEFAULT_COLUMN_KEYS, EMPTY_FILTERS, UNLINKED_LOAD_NOTE, activeFilterCount,
+  applyBoard, carrierLabel, divisionCodeOfViewSlug, filtersToViewFilters, isBoardTabKey, isSortKey,
+  isUnlinkedLoad, statusLabel, tabCounts, toCsv, toViewRow, visibleColumns, voidedAtOf,
   type BoardFilters, type BoardTabKey, type ShipmentRow, type SortDir, type SortKey,
 } from './shipmentViews'
 import type {
@@ -86,8 +88,11 @@ export function ShipmentsBoard() {
   const { isAdmin, isOwner, user } = useAuth()
   const email = user?.email ?? ''
   const { shipments, loading, error, refresh } = useShipments()
+  // A row that is a load and not a shipment opens the legacy load drawer, the same way
+  // the calendar and the factoring queue open a load: there is no shipment to open.
+  const setSelectedLoad = useAppStore((s) => s.setSelectedLoad)
   const { customers, locations } = useDirectory()
-  const { nameOf } = useStaff()
+  const { nameOf, me } = useStaff(email)
   const { views, refresh: refreshViews } = useShipmentViews()
   const { divisions } = useOwnershipDivisions()
   const docReview = useDocumentReviewQueue()
@@ -128,12 +133,8 @@ export function ShipmentsBoard() {
   }, [])
 
   const caller = useMemo(
-    () => {
-      const groups = user?.groups ?? []
-      const roleGroup = groups.find((g) => g.startsWith('role-'))
-      return { groups, role: roleGroup ? roleGroup.slice('role-'.length) : null, isOwner, isAdmin }
-    },
-    [user?.groups, isOwner, isAdmin],
+    () => viewCallerOf({ groups: user?.groups, divisions: me?.divisions, isOwner, isAdmin }),
+    [user?.groups, me?.divisions, isOwner, isAdmin],
   )
   const myViews = useMemo(() => viewsVisibleTo(views, caller), [views, caller])
 
@@ -172,7 +173,9 @@ export function ShipmentsBoard() {
   const viewRows = useMemo(() => {
     if (!viewFilters || tab === 'voided') return allRows
     const allowed = new Set(applyViewFilters(viewFilters, allRows.map(toViewRow), new Date(nowMs)).map((r) => r.id))
-    return allRows.filter((r) => allowed.has(r.id))
+    // An unlinked load is in no division, no department and no status group, so it
+    // belongs to the unfiltered board and to no saved view, whatever the view asks for.
+    return allRows.filter((r) => !isUnlinkedLoad(r) && allowed.has(r.id))
   }, [allRows, viewFilters, tab, nowMs])
 
   const counts = useMemo(() => tabCounts(viewRows, nowMs), [viewRows, nowMs])
@@ -195,6 +198,10 @@ export function ShipmentsBoard() {
   const pageRows = rows.slice(currentPage * pageSize, currentPage * pageSize + pageSize)
 
   const clearFilters = () => { setPage(0); setFilters(EMPTY_FILTERS); setQuery(''); setOpenChip(null) }
+  // One line of copy, carried only while the list actually holds one of these rows.
+  const unlinkedNote = rows.some(isUnlinkedLoad)
+    ? <p className="tms-muted px-3 pb-2 text-xs">{UNLINKED_LOAD_NOTE}</p>
+    : null
 
   const exportCsv = () => {
     const csv = toCsv(rows, columnKeys)
@@ -234,14 +241,14 @@ export function ShipmentsBoard() {
     key: 'actions',
     header: '',
     width: 44,
-    render: (row) => (
+    render: (row) => (isUnlinkedLoad(row) ? null : (
       <ShipmentRowActions
         shipment={row}
         isAdmin={isAdmin}
         cancelDeleteAdminOnly={settings?.cancelDeleteAdminOnly ?? false}
         handlers={rowHandlers(row, refresh)}
       />
-    ),
+    )),
   })
 
   return (
@@ -323,8 +330,16 @@ export function ShipmentsBoard() {
             ? { key, dir: sort.dir === 'asc' ? 'desc' : 'asc' }
             : { key, dir: 'asc' })
         }}
-        onRowClick={(row) => setOpenId(row.id)}
-        onRowDoubleClick={(row) => navigate(`/tms/shipments/${row.id}`)}
+        onRowClick={(row) => {
+          if (row.unlinkedLoadId) setSelectedLoad(row.unlinkedLoadId, 'view')
+          else setOpenId(row.id)
+        }}
+        onRowDoubleClick={(row) => {
+          // An unlinked load has no `/tms/shipments/:id` page to open: the record it
+          // has is the load, and the load drawer is the whole of it.
+          if (row.unlinkedLoadId) setSelectedLoad(row.unlinkedLoadId, 'view')
+          else navigate(`/tms/shipments/${row.id}`)
+        }}
         page={{
           from: rows.length === 0 ? 0 : currentPage * pageSize + 1,
           to: Math.min(rows.length, currentPage * pageSize + pageSize),
@@ -345,7 +360,7 @@ export function ShipmentsBoard() {
             onChange={(next) => { setPage(0); setFilters(next) }}
             onClose={() => setOpenChip(null)}
           />
-        ) : null}
+        ) : unlinkedNote}
         footerExtra={
           rows.length > pageSize ? (
             <span className="tms-footer-count">
@@ -375,6 +390,9 @@ export function ShipmentsBoard() {
         isAdmin={isAdmin}
         currentUser={email}
       />
+
+      {/* What an unlinked load's row opens — the same drawer the calendar opens. */}
+      <LoadDrawer />
 
       <FieldsDialog
         open={fieldsOpen}
@@ -444,16 +462,14 @@ function BoardCell({ columnKey, text, row, nowMs, repName, divisionName, divisio
   if (columnKey === 'status') {
     const voidedAt = voidedAtOf(row)
     const label = statusLabel(row)
-    return (
-      <TmsBadge
-        tone={statusTone(label)}
-        title={voidedAt
-          ? `Voided ${new Date(voidedAt).toLocaleString()} by ${row.voidedBy ?? 'unknown'}${row.voidReason ? ` — ${row.voidReason}` : ''}`
-          : undefined}
-      >
-        {label}
-      </TmsBadge>
-    )
+    // The badge is one or two words; the hover is where the row says what it means.
+    let title: string | undefined
+    if (voidedAt) {
+      title = `Voided ${new Date(voidedAt).toLocaleString()} by ${row.voidedBy ?? 'unknown'}${row.voidReason ? ` — ${row.voidReason}` : ''}`
+    } else if (isUnlinkedLoad(row)) {
+      title = UNLINKED_LOAD_NOTE
+    }
+    return <TmsBadge tone={statusTone(label)} title={title}>{label}</TmsBadge>
   }
   if (columnKey === 'division') {
     if (!row.revDivision) return null

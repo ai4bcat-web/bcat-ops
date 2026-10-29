@@ -129,10 +129,13 @@ function ChartBody({ def, series, numbers }: { def: ChartDef; series: ChartSerie
   const chartData = series.rows.map((row) => ({ label: row.label, ...row.values }))
   const showTable = numbers || kind === 'table' || kind === 'kpis'
 
+  // The tiles are data. A card that answered with numbers is not empty, so the
+  // empty state belongs only to a card that said nothing at all (line 115) —
+  // never underneath a strip of real KPI figures.
   return (
     <div className="tms-chart-inner">
       {tiles}
-      {!hasRows ? empty : showTable ? (
+      {!hasRows ? null : showTable ? (
         <SeriesTable series={series} />
       ) : (
         <ResponsiveContainer width="100%" height="100%">

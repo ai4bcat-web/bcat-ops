@@ -138,4 +138,68 @@ describe('useShipments projection', () => {
     expect(row.openIncidentCount).toBe(3)
     expect(row.trackingProvider).toBe('MOTIVE')
   })
+
+  /*
+   * Step R's hole: a Load with no `shipmentId` was on no list at all. The projection
+   * has to put it on this one as itself — its own PRO and the customer text somebody
+   * typed — without inventing the shipment facts it does not have.
+   */
+  it('gives a load with no shipment a row of its own, carrying the load’s PRO and customer', async () => {
+    data.shipments = [shipment('shp-1')]
+    data.orders = []
+    data.loads = [
+      { id: 'lod-1', shipmentId: 'shp-1' },
+      {
+        id: 'lod-orphan', shipmentId: null, aljexId: '14865  ', customer: 'DIRECT DRIVE LOGISTICS',
+        rate: 75000, originCity: 'Chicago, IL', destinationCity: 'Dallas, TX',
+        pickupAppt: '2026-10-28T14:00:00.000Z',
+      },
+    ] as LoadBoardSummary[]
+    data.loadCarriers = []
+    data.quotes = []
+
+    const rows = await rowsFor()
+    const unlinked = rows.filter((r) => r.unlinkedLoadId != null)
+    expect(unlinked).toHaveLength(1)
+    expect(unlinked[0].unlinkedLoadId).toBe('lod-orphan')
+    // The live table stores PROs with trailing spaces; the row shows the PRO, not the blanks.
+    expect(unlinked[0].number).toBe('14865')
+    expect(unlinked[0].customerName).toBe('DIRECT DRIVE LOGISTICS')
+    expect(unlinked[0].loadRateCents).toBe(75000)
+    expect(unlinked[0].originCity).toBe('Chicago, IL')
+    expect(unlinked[0].pickupAppt).toBe('2026-10-28T14:00:00.000Z')
+    // Nothing it does not have is invented: no customer record, no division, no AR rung.
+    expect(unlinked[0].customerId).toBe('')
+    expect(unlinked[0].revDivision).toBeUndefined()
+    expect(unlinked[0].arStatus).toBeNull()
+  })
+
+  it('falls back to the leg number, then to the load id, when a load has no PRO', async () => {
+    data.shipments = []
+    data.orders = []
+    data.loads = [
+      { id: 'lod-a', aljexId: '   ', loadNumber: 'S000012-1' },
+      { id: 'abcdef0123456789', aljexId: null, loadNumber: null },
+    ] as LoadBoardSummary[]
+    data.loadCarriers = []
+    data.quotes = []
+
+    const rows = await rowsFor()
+    expect(rows.map((r) => r.number)).toEqual(['S000012-1', 'Load abcdef01'])
+  })
+
+  it('carries a voided load’s void stamp, so the board keeps it out of the live tabs', async () => {
+    data.shipments = []
+    data.orders = []
+    data.loads = [
+      { id: 'lod-live', aljexId: '14864' },
+      { id: 'lod-void', aljexId: '14863', voidedAt: '2026-10-29T00:00:00.000Z' },
+    ] as LoadBoardSummary[]
+    data.loadCarriers = []
+    data.quotes = []
+
+    const rows = await rowsFor()
+    expect(rows.find((r) => r.id === 'lod-live')?.voidedAt).toBeNull()
+    expect(rows.find((r) => r.id === 'lod-void')?.voidedAt).toBe('2026-10-29T00:00:00.000Z')
+  })
 })

@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { useAppStore } from '@/store/useAppStore'
 import type { Load, Driver } from '@/types'
+import { isLoadVoided } from '@/lib/shipmentVoid'
 
 /**
  * Mobile replacement for the resource-timeline calendar: a day-grouped agenda list
@@ -25,7 +26,10 @@ function statusOf(l: Load): { label: string; color: string } {
   return { label: 'Unassigned', color: '#f59e0b' }
 }
 
-export function MobileLoadAgenda({ loads, drivers }: { loads: Load[]; drivers: Driver[] }) {
+export function MobileLoadAgenda({ loads: allLoads, drivers }: { loads: Load[]; drivers: Driver[] }) {
+  // Same working-set rule the desktop calendar follows: a voided shipment's load
+  // is history, and history does not open the day's agenda.
+  const loads = useMemo(() => allLoads.filter((l) => !isLoadVoided(l)), [allLoads])
   const driverName = useMemo(() => new Map(drivers.map((d) => [d.id, d.name])), [drivers])
 
   const groups = useMemo(() => {

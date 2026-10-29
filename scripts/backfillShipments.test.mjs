@@ -49,7 +49,7 @@ function fakeClient(loads) {
           number: `L${load.aljexId}`,
           loadStatus: delivered ? 'DELIVERED' : 'SOURCING',
           shipmentStatus: delivered ? 'DELIVERED' : 'OPEN',
-          arStatus: delivered ? 'UNBILLED' : 'DOCS_NEEDED',
+          arStatus: 'DOCS_NEEDED',
           assignmentType: load.pickupDriverId ? 'OWN_ASSET' : 'NEED_TO_COVER',
           customerId: load.customerId ?? null,
           skipped: load.shipmentId ? 'ALREADY_LINKED' : load.customerId ? null : 'NO_CUSTOMER_MATCH',
@@ -142,7 +142,7 @@ describe('dry run', () => {
     expect(plan.summary.totalLoads).toBe(3);
     expect(plan.summary.toBackfill).toBe(2);
     expect(plan.summary.alreadyLinked).toBe(1);
-    expect(plan.summary.byArStatus).toEqual({ DOCS_NEEDED: 1, UNBILLED: 1 });
+    expect(plan.summary.byArStatus).toEqual({ DOCS_NEEDED: 2 });
     expect(client.calls.every((c) => c.input.dryRun === true)).toBe(true);
     expect([...client._data.values()].filter((l) => l.shipmentId)).toHaveLength(1);
   });

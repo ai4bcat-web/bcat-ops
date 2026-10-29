@@ -28,6 +28,7 @@ import type { Load, Driver, ColorKey, Stop } from '@/types'
 import type { DriverAvailability } from '@/lib/apiClient'
 import { apptWorkflowStatus, endStatus, statusLabel, STATUS_META, STATUS_TONE_COLORS, canSetChangeNeeded, type EffectiveApptStatus } from '@/lib/apptStatus'
 import { requiresApptProofs } from '@/lib/apptQueue'
+import { isLoadVoided } from '@/lib/shipmentVoid'
 import { PodMark } from './CalendarPaperwork'
 
 // ── Column widths ─────────────────────────────────────────────────────────────
@@ -848,7 +849,12 @@ interface PlannerViewProps {
   availabilities?: DriverAvailability[]
 }
 
-export function PlannerView({ loads, drivers, weekStart, numDays = 7, days: daysProp, availabilities = [] }: PlannerViewProps) {
+export function PlannerView({ loads: allLoads, drivers, weekStart, numDays = 7, days: daysProp, availabilities = [] }: PlannerViewProps) {
+  // Void is the only way a shipment leaves the working set (Ryne), and the
+  // calendar is a working set: a voided shipment's load has no lane here, not a
+  // dated one and not the Unscheduled strip. It stays readable on the Shipments
+  // board's Voided tab and in the shipment's own history.
+  const loads = useMemo(() => allLoads.filter((l) => !isLoadVoided(l)), [allLoads])
   const days = useMemo(
     () => daysProp ?? Array.from({ length: numDays }, (_, i) => addDays(weekStart, i)),
     [daysProp, weekStart, numDays],

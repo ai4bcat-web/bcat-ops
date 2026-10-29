@@ -25,6 +25,7 @@ import type {
   ShipmentViewRow,
 } from '@/types/tms'
 import { checkCallState } from '@/lib/checkCalls'
+import { formatCents } from '@/lib/invoiceBuild'
 import { SHIPMENT_STATUS_LABELS } from '@/lib/shipmentStatus'
 
 /**
@@ -66,6 +67,13 @@ export type ShipmentRow = ShipmentRecord & {
   customerRepId?: string | null
   /** The quote this shipment was sold off, when it came from one. */
   quoteId?: string | null
+  /**
+   * Set only on a row that is a Load no Shipment ever claimed: the load's own id, which
+   * is what such a row opens. Null or absent on every row that really is a shipment.
+   */
+  unlinkedLoadId?: string | null
+  /** An unlinked load's own `rate`, in cents. A shipment's money lives on its order. */
+  loadRateCents?: number | null
 }
 
 // ── Quick tabs ───────────────────────────────────────────────────────────────
@@ -124,6 +132,24 @@ export function isVoided(row: ShipmentRow): boolean {
   return voidedAtOf(row) != null
 }
 
+/**
+ * A Load that has no Shipment: created by the new-load form, the scheduler's duplicate
+ * or "create load from factoring item" with no customer record matched, so nothing ever
+ * minted a shipment for it. It is on this list because this list is the one list, but it
+ * answers none of the questions the status tabs and the status, mode and customer chips
+ * ask, and every one of them has to let it alone rather than let it pass for a shipment.
+ */
+export function isUnlinkedLoad(row: ShipmentRow): boolean {
+  return row.unlinkedLoadId != null
+}
+
+/** What the Status column says about such a row, in the user's words. */
+export const UNLINKED_LOAD_LABEL = 'Unlinked load'
+
+/** The one line the board shows so the label is not a riddle. */
+export const UNLINKED_LOAD_NOTE =
+  'Unlinked load: no customer record is matched to it, so it has no shipment yet. Open it and set its customer.'
+
 /** Local calendar day of an ISO instant, as `YYYY-MM-DD`. */
 function localDay(at: Date): string {
   const month = `${at.getMonth() + 1}`.padStart(2, '0')
@@ -142,6 +168,9 @@ export function matchesTab(row: ShipmentRow, key: BoardTabKey, nowMs: number = D
   const tab = tabFor(key)
   if (tab.voided) return isVoided(row)
   if (isVoided(row)) return false
+  // An unlinked load has no shipment status, so it satisfies no status tab's meaning.
+  // All is the one tab that asks nothing of a row, and the one list Ryne's rule promises.
+  if (isUnlinkedLoad(row)) return key === 'all'
   if (tab.statuses.length > 0 && !tab.statuses.includes(row.status)) return false
   if (tab.pickupToday && !isToday(row.pickupAppt, nowMs)) return false
   return true
@@ -230,8 +259,10 @@ function inDateWindow(iso: string | null | undefined, from: string | null, to: s
 
 export function matchesFilters(row: ShipmentRow, f: BoardFilters, nowMs: number = Date.now()): boolean {
   if (f.customerId && row.customerId !== f.customerId) return false
-  if (f.status && row.status !== f.status) return false
-  if (f.mode && row.mode !== f.mode) return false
+  // The status and the mode an unlinked load's row carries are placeholders the record
+  // type demands, not answers; a chip that asks for either excludes such a row outright.
+  if (f.status && (isUnlinkedLoad(row) || row.status !== f.status)) return false
+  if (f.mode && (isUnlinkedLoad(row) || row.mode !== f.mode)) return false
   if (f.arStatus && (row.arStatus ?? null) !== f.arStatus) return false
   if (f.apStatus && (row.apStatus ?? null) !== f.apStatus) return false
   if (f.assignmentType && (row.assignmentType ?? null) !== f.assignmentType) return false
@@ -344,7 +375,9 @@ export function divisionLabel(row: ShipmentRow, nameOf?: (code: string) => strin
 }
 
 export function statusLabel(row: ShipmentRow): string {
-  return isVoided(row) ? 'VOIDED' : SHIPMENT_STATUS_LABELS[row.status]
+  if (isVoided(row)) return 'VOIDED'
+  if (isUnlinkedLoad(row)) return UNLINKED_LOAD_LABEL
+  return SHIPMENT_STATUS_LABELS[row.status]
 }
 
 const titleCase = (value: string): string =>
@@ -381,7 +414,13 @@ export const BOARD_COLUMNS: BoardColumn[] = [
     value: (r) => ((r.openIncidentCount ?? 0) > 0 ? String(r.openIncidentCount) : ''),
     width: 110,
   },
-  { key: 'mode', label: 'Mode', value: (r) => r.mode, width: 90 },
+  { key: 'mode', label: 'Mode', value: (r) => (isUnlinkedLoad(r) ? '' : r.mode), width: 90 },
+  /*
+   * The only rows that carry money on the row itself are the unlinked loads — a
+   * shipment's revenue lives on its order, which this list does not read — so the
+   * column is offered in the field picker and is not one of the thirteen defaults.
+   */
+  { key: 'loadRate', label: 'Load rate', value: (r) => (r.loadRateCents == null ? '' : formatCents(r.loadRateCents)), width: 110 },
   /*
    * Three states, and the CSV says which in words: nothing at all when the gate has
    * never run for this shipment, "Complete" when it has and found everything, and the

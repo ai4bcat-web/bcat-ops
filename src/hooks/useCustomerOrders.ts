@@ -28,7 +28,9 @@ export function useCustomerOrders(customerId: string, customer?: CustomerRecord)
 
   const load = useCallback(() =>
     Promise.all([
-      listLoads(),
+      // A customer's profile is history, not a working set: a voided shipment's
+      // load still belongs in what this customer shipped with us.
+      listLoads({ includeVoided: true }),
       listOrdersByCustomer(customerId),
       listShipmentsByCustomer(customerId),
       customer

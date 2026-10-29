@@ -158,9 +158,8 @@ async function attachDocument(shipmentId, orderId, loadId, type) {
     ...(type === 'BOL' || type === 'POD' ? { loadId } : { orderId }),
   })
 }
-
 const loadRow = async (id) => (await gql(
-  `query L($id: ID!) { getLoad(id: $id) { id status assignmentType carrierName pickupDriverId deliveryDriverId truckId trailerNumber stops readyToInvoice revDivision revSubdivision revTagSource salesRepId updatedAt } }`,
+  `query L($id: ID!) { getLoad(id: $id) { id status assignmentType carrierName pickupDriverId deliveryDriverId truckId trailerNumber stops readyToInvoice revDivision revSubdivision revTagSource salesRepId voidedAt updatedAt } }`,
   { id },
 )).getLoad
 const stopsOf = (load) => { try { return JSON.parse(load.stops ?? '[]') } catch { return [] } }
@@ -379,6 +378,16 @@ async function main() {
       shipAction('READY_TO_INVOICE', { orderId: bOrderId, expectedUpdatedAt: b.orders[0].updatedAt }))
     await refuses('SEND_TO_FACTOR needs an issued invoice, which only the gate produces', /Not ready for accounting|invoice/i, () =>
       finAction('SEND_TO_FACTOR', { orderId: bOrderId, shipmentId: bId }))
+    const previewFactor = await finAction('PREVIEW_FACTOR', { orderId: bOrderId, shipmentId: bId })
+      .catch((err) => ({ error: String(err.message) }))
+    equals(
+      'PREVIEW_FACTOR runs the same gate and names what is missing',
+      previewFactor.error
+        ? /Not ready for accounting|invoice|RATE_CON|Carrier charges/i.test(previewFactor.error)
+        : (previewFactor.releaseGate?.missing ?? []).length > 0,
+      true,
+      previewFactor.error ?? JSON.stringify(previewFactor.releaseGate),
+    )
 
     // void, from a real admin token
     const voided = await shipAction('VOID_SHIPMENT', { shipmentId: bId, reason: 'Dev verification fixture — Step R proof', expectedUpdatedAt: b.shipment.updatedAt })
@@ -393,6 +402,7 @@ async function main() {
     bLoad = await loadRow(bLoadId)
     equals('the mirrored Load is CANCELED', bLoad.status, 'CANCELED')
     equals('the voided Load pays nobody (deliveryDriverId cleared)', bLoad.deliveryDriverId, null)
+    equals('the void is mirrored onto the Load (it leaves every fleet working set)', bLoad.voidedAt, vs.voidedAt)
     await refuses('a voided shipment refuses a second void', /voided/i, () => shipAction('VOID_SHIPMENT', { shipmentId: bId, reason: 'again', expectedUpdatedAt: b.shipment.updatedAt }))
     await refuses('a voided shipment refuses edits', /voided/i, () =>
       shipAction('SAVE_ORDER_FORM', { shipmentId: bId, expectedUpdatedAt: b.shipment.updatedAt, order: { customerNotes: 'x' } }))
@@ -403,6 +413,32 @@ async function main() {
     const previewB = await finAction('PREVIEW_INVOICE', { orderId: bOrderId }).catch((err) => ({ error: String(err.message) }))
     equals('PREVIEW_INVOICE on a voided shipment says VOIDED', previewB.error ? /void/i.test(previewB.error) : previewB.releaseGate?.missing?.[0]?.code === 'VOIDED', true, previewB.error ?? JSON.stringify(previewB.releaseGate))
     await refuses('a voided shipment cannot be invoiced', /void|UNBILLED/i, () => finAction('GENERATE_INVOICE', { orderId: bOrderId }))
+
+    // ── 7b. the legacy import does not hand freight to AR ─────────────────
+    // `BACKFILL_SHIPMENT` reads a legacy load's `readyToInvoice` as evidence that the
+    // work was done — but that flag is a checkbox on the old calendar, not the
+    // release gate, and Ryne's rule is that nothing reaches AR without the gate. The
+    // imported order must land on DOCS_NEEDED however the flag was left.
+    const legacyLoad = (await gql(
+      `mutation C($input: CreateLoadInput!) { createLoad(input: $input) { id } }`,
+      { input: {
+        aljexId: `VR${stamp}`, tmsId: '', pickupNumber: `VR${stamp}`,
+        customer: customer.name, customerId: customer.id,
+        pickupAppt: `${today}T13:00:00.000Z`, deliveryAppt: `${today}T20:00:00.000Z`,
+        readyToInvoice: true, rate: 125000,
+        createdBy: 'script:devVerifyStepR', updatedBy: 'script:devVerifyStepR',
+      } },
+    )).createLoad
+    const imported = await shipAction('BACKFILL_SHIPMENT', { loadIds: [legacyLoad.id], dryRun: false })
+    equals('BACKFILL_SHIPMENT applied the one legacy load', imported.applied, 1)
+    equals('the import reads the flag as delivered', imported.planned?.[0]?.loadStatus, 'DELIVERED')
+    equals('the import never grants AR readiness — the gate owns that rung', imported.planned?.[0]?.arStatus, 'DOCS_NEEDED')
+    const importedShipmentId = imported.planned[0].shipmentId
+    fixtures.shipmentIds.push(importedShipmentId)
+    const importedBundle = await shipAction('GET_SHIPMENT_BUNDLE', { shipmentId: importedShipmentId })
+    equals('and the written order says so', importedBundle.orders[0].arStatus, 'DOCS_NEEDED')
+    await refuses('the imported order still has to pass the gate', /Not ready for accounting/i, () =>
+      shipAction('READY_TO_INVOICE', { orderId: importedBundle.orders[0].id, expectedUpdatedAt: importedBundle.orders[0].updatedAt }))
 
     // ── 8. RETAG dry run writes nothing ───────────────────────────────────
     const before = (await reload(aId)).shipment.updatedAt

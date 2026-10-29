@@ -1137,10 +1137,13 @@ describe('VOID_SHIPMENT', () => {
     expect(table(TABLES.carrier).get('lcr-open')!.updatedAt).toBe('2026-10-01T00:00:00.000Z')
     // A settled leg was never on the board and does not change either.
     expect(table(TABLES.carrier).get('lcr-paid')!.apOpen).toBeUndefined()
-    // The mirrored load leaves the calendar and the check-call worklist.
+    // The mirrored load leaves the calendar and the check-call worklist. The void
+    // itself is stamped on the load because every fleet reader — calendar,
+    // dispatch, settlements — reads the Load table and never joins a shipment.
     const load = table(TABLES.load).get(loadId)!
     expect(load.status).toBe('CANCELED')
     expect(load.statusSource).toBe('SYSTEM')
+    expect(load.voidedAt).toBe(bundle.shipment.voidedAt)
     expect(load.checkCallOpen).toBeUndefined()
     expect(load.nextCheckCallAt).toBeUndefined()
   })
@@ -3767,11 +3770,12 @@ describe('BACKFILL_SHIPMENT', () => {
     expect([...table(TABLES.shipment).values()][0].status).toBe('IN_TRANSIT')
   })
 
-  it('marks a ready-to-invoice load delivered and unbilled, never paid', async () => {
+  it('reads a ready-to-invoice legacy load as delivered but never lets it reach AR', async () => {
     seedLegacyLoad('lod-ready', { readyToInvoice: true })
     await call('BACKFILL_SHIPMENT', { loadIds: ['lod-ready'], dryRun: false }, ADMIN)
     expect(table(TABLES.load).get('lod-ready')!.status).toBe('DELIVERED')
-    expect([...table(TABLES.order).values()][0].arStatus).toBe('UNBILLED')
+    // The import is evidence the work was done; it is not the release gate.
+    expect([...table(TABLES.order).values()][0].arStatus).toBe('DOCS_NEEDED')
   })
 
   it('marks a delivered load that nobody cleared as still needing docs', async () => {

@@ -15,6 +15,7 @@ import { ApptEditPopover } from '@/components/ApptEditPopover'
 import { computeMoveDates, computeStopMove } from '@/lib/calendarMoves'
 import { compareByOrder, persistDragOrder } from '@/lib/calendarOrder'
 import { requiresApptProofs } from '@/lib/apptQueue'
+import { isLoadVoided } from '@/lib/shipmentVoid'
 import { PodMark } from './CalendarPaperwork'
 import type { Load, Driver, ViewMode, Stop } from '@/types'
 import type { DriverAvailability } from '@/lib/apiClient'
@@ -778,7 +779,10 @@ interface GridCalendarViewProps {
   availabilities: DriverAvailability[]
 }
 
-export function GridCalendarView({ loads, drivers, startDate, viewMode, availabilities }: GridCalendarViewProps) {
+export function GridCalendarView({ loads: allLoads, drivers, startDate, viewMode, availabilities }: GridCalendarViewProps) {
+  // A voided shipment has left the working set, so its load gets no cell here and
+  // no row in the Unscheduled column. The record stays on the Voided tab.
+  const loads = useMemo(() => allLoads.filter((l) => !isLoadVoided(l)), [allLoads])
   const { updateLoad } = useLoads()
 
   const [selectedIds, setSelectedIds] = useState<string[]>([])

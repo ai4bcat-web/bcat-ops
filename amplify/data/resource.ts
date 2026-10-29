@@ -144,6 +144,14 @@ const schema = a.schema({
       revTagSource:    a.string(),   // 'HAND' | 'RULE' — a hand tag beats the rules
       revRuleId:       a.string(),   // the OwnershipRule that resolved it
       salesRepId:      a.string(),   // Cognito username of the rep who sold it
+
+      // ── Void, mirrored (Step R) ──────────────────────────────────────────
+      // Void lives on the Shipment, but the fleet reads the Load table: the
+      // calendar, dispatch, appointments, settlements and the pay hooks never
+      // join a shipment. Stamping the void here is what takes voided freight
+      // out of the live working set everywhere at once; the row, its PRO and
+      // its history stay, so the Voided tab and the History tab still read it.
+      voidedAt:        a.datetime(),
       createdBy:       a.string().required(),
       updatedBy:       a.string().required(),
     })
@@ -2167,6 +2175,11 @@ const schema = a.schema({
         'ADMIN', 'MANAGER', 'CUSTOMER_REP', 'CARRIER_REP', 'AR_AP', 'COMPLIANCE', 'NONE',
       ]),
       teamKeys:     a.string().array(),
+      // Which businesses this person works in (OwnershipDivision codes). A saved
+      // Shipment view can name the divisions that see it, and this is what that
+      // audience is matched against; empty means the division facet never admits
+      // them, the same way an unlisted group does not.
+      divisions:    a.string().array(),
       managerId:    a.string(),
       claims:       a.string().array(),     // UserClaim keys; only a few are enforced
       extraPages:   a.string().array(),     // page keys granted beyond the role

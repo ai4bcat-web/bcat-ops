@@ -16,6 +16,15 @@ const POLL_MS = 300_000
 export interface Staff {
   staff: UserProfileRecord[]
   byId: Record<string, UserProfileRecord>
+  /**
+   * The row of the e-mail passed in, or null when none was passed or the list has not
+   * landed. The signed-in user's own profile carries settings a page needs about the
+   * person at the keyboard — the divisions a saved Shipment view is matched against —
+   * and this hook already holds every row, so there is nothing to fetch for it. The
+   * e-mail is an argument rather than a context read because the pickers that built
+   * this hook render in places that have no auth context at all.
+   */
+  me: UserProfileRecord | null
   /** The name to print for a rep id, falling back to the id's own e-mail rule. */
   nameOf: (id: string | null | undefined) => string
   loading: boolean
@@ -23,7 +32,7 @@ export interface Staff {
   refresh: () => Promise<void>
 }
 
-export function useStaff(): Staff {
+export function useStaff(myEmail?: string | null): Staff {
   const [staff, setStaff] = useState<UserProfileRecord[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -56,6 +65,15 @@ export function useStaff(): Staff {
     return map
   }, [staff])
 
+  // The row id IS the Cognito username, which is the e-mail for everybody invited
+  // through the Users page — but a login created before that is matched on its e-mail
+  // too, and case never decides whether somebody finds their own profile.
+  const myKey = (myEmail ?? '').trim().toLowerCase()
+  const me = useMemo(() => {
+    if (myKey === '') return null
+    return staff.find((p) => p.id.toLowerCase() === myKey || (p.email ?? '').toLowerCase() === myKey) ?? null
+  }, [staff, myKey])
+
   // A rep field may hold a username nobody has a profile for (a free-text value typed
   // before step I, or a deleted login): print the e-mail rule rather than nothing.
   const nameOf = useCallback(
@@ -65,5 +83,5 @@ export function useStaff(): Staff {
 
   const refresh = useCallback(async () => { setLoading(true); await load() }, [load])
 
-  return { staff, byId, nameOf, loading, error, refresh }
+  return { staff, byId, me, nameOf, loading, error, refresh }
 }

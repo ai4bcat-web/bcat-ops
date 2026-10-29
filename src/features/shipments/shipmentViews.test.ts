@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import {
-  BOARD_TABS, DEFAULT_COLUMN_KEYS, EMPTY_FILTERS, applyBoard, carrierLabel, divisionCodeOfViewSlug,
-  divisionLabel, filtersToViewFilters, tabCounts, toCsv, toViewRow, type ShipmentRow,
+  BOARD_TABS, DEFAULT_COLUMN_KEYS, EMPTY_FILTERS, UNLINKED_LOAD_LABEL, applyBoard, carrierLabel,
+  divisionCodeOfViewSlug, divisionLabel, filtersToViewFilters, statusLabel, tabCounts, toCsv, toViewRow,
+  type ShipmentRow,
 } from './shipmentViews'
 import { applyViewFilters } from '@/lib/shipmentViewDefs'
 
@@ -226,5 +227,59 @@ describe('department views', () => {
       arStatuses: ['UNBILLED'],
       search: 'acme',
     })
+  })
+})
+
+/*
+ * Step R merged /loads into this list, and a Load whose customer never matched a
+ * customer record never got a Shipment — it was on no list at all. It is on this one
+ * now, and the rule it rides under is that it must never pass for a shipment: it has no
+ * shipment status, so no status tab and no status chip may claim it.
+ */
+describe('unlinked loads', () => {
+  const unlinked = (id: string, patch: Partial<ShipmentRow> = {}): ShipmentRow =>
+    row(id, {
+      unlinkedLoadId: id,
+      number: '14865',
+      customerName: 'DIRECT DRIVE LOGISTICS',
+      customerId: '',
+      status: 'DRAFT',
+      loadRateCents: 75000,
+      ...patch,
+    })
+
+  const board = (rows: ShipmentRow[], patch: Partial<Parameters<typeof applyBoard>[1]> = {}) =>
+    applyBoard(rows, {
+      tab: 'all', query: '', filters: EMPTY_FILTERS, sortKey: 'number', sortDir: 'asc', nowMs: NOW, ...patch,
+    }).map((r) => r.id)
+
+  it('shows on All and on no status tab, whatever placeholder status the row carries', () => {
+    const rows = [row('shp', { status: 'DRAFT' }), unlinked('lod')]
+    const counts = tabCounts(rows, NOW)
+
+    expect(counts.all).toBe(2)
+    expect(counts.draft).toBe(1)
+    for (const tab of BOARD_TABS) {
+      if (tab.key === 'all') continue
+      expect(board(rows, { tab: tab.key })).not.toContain('lod')
+    }
+  })
+
+  it('is excluded by any chip asking a question it cannot answer', () => {
+    const rows = [row('shp', { status: 'DRAFT' }), unlinked('lod')]
+    expect(board(rows, { filters: { ...EMPTY_FILTERS, status: 'DRAFT' } })).toEqual(['shp'])
+    expect(board(rows, { filters: { ...EMPTY_FILTERS, mode: 'FTL' } })).toEqual(['shp'])
+    expect(board(rows, { filters: { ...EMPTY_FILTERS, customerId: 'cust-1' } })).toEqual(['shp'])
+  })
+
+  it('says what it is in the status cell, and exports as itself', () => {
+    const r = unlinked('lod', { originCity: 'Chicago, IL' })
+    expect(statusLabel(r)).toBe(UNLINKED_LOAD_LABEL)
+
+    const csv = toCsv([r], ['number', 'status', 'customerName', 'mode', 'loadRate'])
+    expect(csv.split('\n')).toEqual([
+      'Shipment ID,Status,Customer,Mode,Load rate',
+      '14865,Unlinked load,DIRECT DRIVE LOGISTICS,,$750.00',
+    ])
   })
 })

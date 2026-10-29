@@ -8,7 +8,7 @@
  * sidebar sections, the Shipments views and the whole Brokerage dashboard group by
  * those four fields, so a shipment without them is invisible to every chart.
  *
- * Five passes, in this order, because each one depends on the last:
+ * Six passes, in this order, because each one depends on the last:
  *
  *   1. SEED      — `ENSURE_OWNERSHIP_SEED` through `tmsDirectoryActions`. Idempotent:
  *                  it writes only the division, rule and view rows that do not exist,
@@ -38,7 +38,14 @@
  *                  canceled in the same apply step and PRINTED IN THE PLAN REVIEW, so
  *                  a person sees which drivers' calendars and settlements move.
  *                  Nothing is deleted and no PRO is released.
- *   5. REPORT    — the resulting counts per division and per subdivision over EVERY
+ *   5. MIRROR    — the void, written onto the loads that mirror it. Void lives on the
+ *                  Shipment, but the calendar, dispatch, the appointment queue, the
+ *                  schedule, the settlements and the pay hooks read the Load table and
+ *                  never join a shipment, which is how voided freight kept turning up
+ *                  in the calendar's Unscheduled strip. Every load of a voided shipment
+ *                  takes that shipment's `voidedAt`, under `attribute_not_exists` so a
+ *                  void the router wrote is never overwritten. Nothing else moves.
+ *   6. REPORT    — the resulting counts per division and per subdivision over EVERY
  *                  shipment, and the loads that carry no shipment at all. Those loads
  *                  are reported, never invented: a load with no customer match was
  *                  left unlinked by the Step B backfill on purpose.
@@ -111,6 +118,11 @@ VOIDS:     a Shipment with deletedAt and no voidedAt becomes a void that says
            cleared and CANCELED with it, exactly as the shipment router's own void
            does. Each such load is named in the plan review. Nothing is deleted; no
            PRO is released.
+MIRROR:    every Load whose Shipment is voided takes that shipment's voidedAt. The
+           calendar, dispatch, the appointment queue, the schedule and the driver-pay
+           hooks read the Load table and never join a shipment, so this is the field
+           that takes voided freight out of them. A load that already carries a void
+           is left alone, and the Voided tab and the shipment's History still read it.
 
 Dry run reads the tables, asks both Lambdas to plan, prints everything and writes
 nothing to AWS. Apply re-reads the same tables, refuses a plan whose sources have
@@ -337,6 +349,56 @@ export function planLegacyVoids(shipments, loads = []) {
   return actions;
 }
 
+/**
+ * The void, written onto the loads that mirror it.
+ *
+ * Void lives on the Shipment, but the calendar, dispatch, the appointment queue, the
+ * schedule, the settlements and the pay hooks all read the Load table and never join
+ * a shipment — which is why voided freight kept turning up in the calendar's
+ * Unscheduled strip. Step R mirrors `voidedAt` onto the load so one field takes it
+ * out of every working set at once. The row, the PRO, the legs and the history all
+ * stay: the Shipments board's Voided tab and the shipment's History tab still read
+ * them.
+ *
+ * The time written is the shipment's own: `voidedAt` when it has one, otherwise the
+ * `deletedAt` the legacy-void pass above is about to promote, so both passes in one
+ * run agree to the millisecond. A load that already carries a void is left alone.
+ *
+ * @param {Array<Record<string, any>>} shipments
+ * @param {Array<Record<string, any>>} [loads]
+ * @returns {any[]}
+ */
+export function planVoidMirror(shipments, loads = []) {
+  const voidedAtByShipment = new Map();
+  const numberByShipment = new Map();
+  for (const shipment of shipments ?? []) {
+    const at = text(shipment.voidedAt) ?? text(shipment.deletedAt);
+    if (!at) continue;
+    voidedAtByShipment.set(String(shipment.id), at);
+    numberByShipment.set(String(shipment.id), text(shipment.number));
+  }
+
+  const actions = [];
+  for (const load of [...(loads ?? [])].sort((a, b) => String(a.id).localeCompare(String(b.id)))) {
+    const shipmentId = text(load.shipmentId);
+    if (!shipmentId) continue;
+    const voidedAt = voidedAtByShipment.get(shipmentId);
+    if (!voidedAt) continue;
+    if (text(load.voidedAt)) continue;
+    actions.push({
+      action: 'MIRROR_VOID_ON_LOAD',
+      purpose: 'The shipment is voided; its load leaves the calendar, dispatch and the pay hooks',
+      shipmentId,
+      shipmentNumber: numberByShipment.get(shipmentId) ?? null,
+      loadId: String(load.id),
+      loadNumber: text(load.loadNumber),
+      status: text(load.status),
+      voidedAt,
+    });
+  }
+  return actions;
+}
+
 // ── The report ───────────────────────────────────────────────────────────────
 
 /**
@@ -400,8 +462,9 @@ export function sourceRowsOf(source) {
     Shipment: ['number', 'salesRepId', 'revDivision', 'revSubdivision', 'revTagSource', 'deletedAt', 'deletedBy', 'voidedAt', 'version'],
     Order: ['shipmentId', 'customerRepId'],
     // The driver marks a void clears are read off the Load, so a dispatcher who
-    // reassigns one between plan and apply invalidates the plan.
-    Load: ['shipmentId', 'loadNumber', 'customer', 'status', 'stops', 'pickupDriverId', 'deliveryDriverId', 'truckId', 'readyToInvoice'],
+    // reassigns one between plan and apply invalidates the plan. `voidedAt` is the
+    // mirror pass's own input and is fingerprinted for the same reason.
+    Load: ['shipmentId', 'loadNumber', 'customer', 'status', 'stops', 'pickupDriverId', 'deliveryDriverId', 'truckId', 'readyToInvoice', 'voidedAt'],
     UserProfile: ['email'],
   };
   const rows = [];
@@ -430,6 +493,7 @@ export function buildRevDivisionPlan({ source, retag, environment, suffix }) {
     profiles: source.UserProfile ?? [],
   });
   const voids = planLegacyVoids(shipments, source.Load ?? []);
+  const voidMirror = planVoidMirror(shipments, source.Load ?? []);
   const orphanLoads = loadsWithoutShipment(source.Load ?? []);
 
   const actions = [
@@ -438,6 +502,9 @@ export function buildRevDivisionPlan({ source, retag, environment, suffix }) {
     { action: 'RETAG_SHIPMENTS', purpose: 'Re-resolve every shipment that is not hand-tagged', input: { dryRun: false } },
     ...reps.actions,
     ...voids,
+    // After the voids: a legacy soft delete becomes a void in the same run, and the
+    // mirror is written with the time that void carries.
+    ...voidMirror,
   ];
 
   return createPlan({
@@ -475,6 +542,9 @@ export function buildRevDivisionPlan({ source, retag, environment, suffix }) {
       legacyVoidLoads: voids.flatMap((entry) =>
         entry.loads.map((load) => ({ ...load, shipmentId: entry.shipmentId, shipmentNumber: entry.shipmentNumber }))
       ),
+      voidMirror: voidMirror.map(({ loadId, loadNumber, status, shipmentId, shipmentNumber, voidedAt }) => ({
+        loadId, loadNumber, status, shipmentId, shipmentNumber, voidedAt,
+      })),
       tagsNow: countTags(shipments),
       loadsWithoutShipment: orphanLoads,
       rowsDeleted: 0,
@@ -549,6 +619,22 @@ export function reviewText(plan) {
       `        ${load.loadId}${load.loadNumber ? ` (${load.loadNumber})` : ''} on ` +
       `${load.shipmentNumber ?? load.shipmentId} — ${marks}` +
       `${load.canceling ? '' : ' (already CANCELED)'}`
+    );
+  }
+
+  const mirror = s.voidMirror ?? [];
+  lines.push(
+    '',
+    `Voids to mirror onto their loads: ${mirror.length} — the calendar, dispatch, the`,
+    '    appointment queue, the schedule and the pay hooks read the Load table and never',
+    '    join a shipment, so this one field is what takes voided freight out of them.',
+    '    Nothing else on the load moves, and the Voided tab still reads it:'
+  );
+  if (mirror.length === 0) lines.push('        (none — every voided shipment\'s load already carries its void)');
+  for (const load of mirror) {
+    lines.push(
+      `        ${load.loadId}${load.loadNumber ? ` (${load.loadNumber})` : ''} on ` +
+      `${load.shipmentNumber ?? load.shipmentId} — ${load.status ?? 'no status'} → voidedAt ${load.voidedAt}`
     );
   }
 
@@ -732,6 +818,8 @@ export async function applyRevDivisionPlan({ client, doc, plan, suffix }) {
     voidsWritten: 0,
     voidsAlready: 0,
     loadsCleared: 0,
+    voidsMirrored: 0,
+    voidsMirrorAlready: 0,
     failures: [],
   };
 
@@ -748,6 +836,28 @@ export async function applyRevDivisionPlan({ client, doc, plan, suffix }) {
       if (entry.action === 'SET_SALES_REP') {
         await client.tmsShipmentActions('SET_SALES_REP', { shipmentId: entry.shipmentId, repId: entry.repId });
         report.salesRepsWritten += 1;
+        continue;
+      }
+      if (entry.action === 'MIRROR_VOID_ON_LOAD') {
+        try {
+          await doc.send(new UpdateCommand({
+            TableName: loadTable,
+            Key: { id: entry.loadId },
+            // A void already on the load is the router's own and wins; this pass only
+            // fills the ones written before the load carried the field.
+            ConditionExpression: 'attribute_not_exists(voidedAt)',
+            UpdateExpression: 'SET voidedAt = :voidedAt, updatedAt = :updatedAt, updatedBy = :updatedBy',
+            ExpressionAttributeValues: {
+              ':voidedAt': entry.voidedAt,
+              ':updatedAt': new Date().toISOString(),
+              ':updatedBy': MIGRATION_USER,
+            },
+          }));
+          report.voidsMirrored += 1;
+        } catch (err) {
+          if (err?.name !== 'ConditionalCheckFailedException') throw err;
+          report.voidsMirrorAlready += 1;
+        }
         continue;
       }
       if (entry.action === 'VOID_LEGACY_SOFT_DELETE') {

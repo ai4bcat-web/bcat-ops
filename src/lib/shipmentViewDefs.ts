@@ -36,8 +36,36 @@ export type ShipmentViewSeed = Omit<
 export interface ViewCaller {
   groups: string[]
   role: string | null
+  /** The OwnershipDivision codes this person works in, off their `UserProfile`. */
+  divisions: string[]
   isOwner: boolean
   isAdmin: boolean
+}
+
+/** A role is data on the profile, projected onto exactly one `role-<ROLE>` group. */
+const ROLE_GROUP_PREFIX = 'role-'
+
+/**
+ * The caller an audience is matched against, built from the signed-in token and the
+ * profile. The role is read off the Cognito groups rather than the profile row because
+ * the token is the only thing a gate may trust, and it is derived here — once — so the
+ * sidebar and the Shipments page can never disagree about which views exist.
+ */
+export function viewCallerOf(input: {
+  groups?: string[] | null
+  divisions?: string[] | null
+  isOwner: boolean
+  isAdmin: boolean
+}): ViewCaller {
+  const groups = input.groups ?? []
+  const roleGroup = groups.find((g) => g.startsWith(ROLE_GROUP_PREFIX))
+  return {
+    groups,
+    role: roleGroup ? roleGroup.slice(ROLE_GROUP_PREFIX.length) : null,
+    divisions: input.divisions ?? [],
+    isOwner: input.isOwner,
+    isAdmin: input.isAdmin,
+  }
 }
 
 const SHIPMENT_STATUSES: Record<string, boolean> = {
@@ -151,12 +179,21 @@ export function applyViewFilters(
   })
 }
 
+/**
+ * The facets have two different jobs, and the order below is the precedence.
+ * `divisions` NARROWS: a view that names divisions belongs to those businesses, so it
+ * is hidden from anybody who works in none of them even if a group or a role would
+ * otherwise let them in. `groups` and `roles` ADMIT: within what the divisions leave,
+ * either one matching is enough. Naming neither groups nor roles admits everyone the
+ * divisions allowed, and an audience that names nothing at all is for everyone who can
+ * open Shipments. Owner and ADMIN never reach here — `viewsVisibleTo` lets them past.
+ */
 function audienceAllows(audience: ShipmentViewAudience | null, caller: ViewCaller): boolean {
   if (!audience) return true
   const groups = audience.groups ?? []
   const roles = audience.roles ?? []
-  // No groups and no roles named: the view is for everyone who can open Shipments.
-  // `audience.divisions` only groups the view in the sidebar — it never hides it.
+  const divisions = audience.divisions ?? []
+  if (divisions.length > 0 && !divisions.some((code) => caller.divisions.includes(code))) return false
   if (groups.length === 0 && roles.length === 0) return true
   if (groups.some((g) => caller.groups.includes(g))) return true
   return caller.role != null && roles.includes(caller.role)

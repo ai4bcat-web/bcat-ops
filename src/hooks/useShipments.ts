@@ -54,6 +54,19 @@ export interface ShipmentListRow extends ShipmentRecord {
   customerRepId: string | null
   /** The customer quote this shipment was sold off, when it came from one. */
   quoteId: string | null
+  /**
+   * Step R merged the old /loads page into this board on the rule that a load IS a
+   * shipment, but a Load whose customer never matched a customer record never got a
+   * Shipment and so belonged to no list at all. Such a load rides the board as its own
+   * row, and this is the load id that row opens. Null on every row that really is a
+   * shipment, which is how every reader tells the two apart.
+   */
+  unlinkedLoadId: string | null
+  /**
+   * The legacy `Load.rate`, in cents. Only an unlinked load carries money on the row
+   * itself; a shipment's revenue lives on its order, which this list does not read.
+   */
+  loadRateCents: number | null
 }
 
 const DEFAULT_VIEW: ShipmentsView = { kind: 'all' }
@@ -71,6 +84,72 @@ function fetchShipments(kind: ShipmentsView['kind'], arg: string): Promise<Shipm
   if (kind === 'customer') return listShipmentsByCustomer(arg)
   if (kind === 'month') return listShipmentsByMonth(arg)
   return listShipments()
+}
+
+/**
+ * A Load that no Shipment ever claimed, as a board row.
+ *
+ * The new-load form, the scheduler's duplicate and "create load from factoring item"
+ * all still mint a Load with no customer match and therefore no Shipment, so this is a
+ * live hole and not only the two rows the backfill left behind. The row says what the
+ * load is and nothing more: its own PRO, the customer text somebody typed, its own
+ * appointments, cities and rate. No shipment number, no division, no customer record
+ * link and no AR rung are invented for it.
+ */
+function unlinkedLoadRow(l: LoadBoardSummary): ShipmentListRow {
+  // The live table stores Aljex PROs with trailing spaces, hence the trim.
+  const pro = (l.aljexId ?? '').trim() || (l.loadNumber ?? '').trim()
+  const update = l.lastKnownAt ?? l.lastCheckCallAt ?? null
+  return {
+    id: l.id,
+    unlinkedLoadId: l.id,
+    number: pro || `Load ${l.id.slice(0, 8)}`,
+    /*
+     * `ShipmentRecord` requires a status and a mode this load does not have. The two
+     * values here are placeholders no screen reads: the quick tabs, the status chip,
+     * the Mode column and the status and mode filters all branch on `unlinkedLoadId`
+     * before they look at either field.
+     */
+    status: 'DRAFT',
+    mode: 'FTL',
+    // Empty rather than invented: no customer record matched is the whole reason this
+    // load never became a shipment, and the Customer filter must not claim otherwise.
+    customerId: '',
+    customerName: (l.customer ?? '').trim() || null,
+    source: 'MANUAL',
+    pickupAppt: l.pickupAppt ?? null,
+    deliveryAppt: l.deliveryAppt ?? null,
+    originCity: l.originCity ?? null,
+    destinationCity: l.destinationCity ?? null,
+    // A voided load leaves the working set exactly like a voided shipment does.
+    voidedAt: l.voidedAt ?? null,
+    loadRateCents: l.rate ?? null,
+    createdBy: '',
+    updatedBy: '',
+    createdAt: l.createdAt ?? '',
+    // The summary read does not carry `updatedAt`, and nothing may compare-and-swap
+    // against an unlinked row anyway — the row menu is not offered on one.
+    updatedAt: '',
+    arStatus: null,
+    apStatus: null,
+    docsMissing: null,
+    assignmentType: l.assignmentType ?? null,
+    loadStatus: l.status ?? null,
+    lastUpdateAt: update,
+    lastUpdatePlace: update ? [l.lastKnownCity, l.lastKnownState].filter(Boolean).join(', ') || null : null,
+    nextCheckCallAt: l.nextCheckCallAt ?? null,
+    lastCheckCallAt: l.lastCheckCallAt ?? null,
+    checkCallOpen: l.checkCallOpen ?? null,
+    openIncidentCount: l.openIncidentCount ?? null,
+    trackingProvider: l.trackingProvider ?? null,
+    stopCount: l.stops ? l.stops.length : null,
+    reference: null,
+    carrierName: l.carrierName ?? null,
+    driverName: null,
+    truckNumber: null,
+    customerRepId: null,
+    quoteId: null,
+  }
 }
 
 /**
@@ -186,7 +265,7 @@ export function useShipments(view: ShipmentsView = DEFAULT_VIEW) {
       t.openIncidentCount += l.openIncidentCount ?? 0
     }
 
-    return shipments.map((s) => {
+    const linked = shipments.map((s) => {
       const active = activeByShipment[s.id]
       const tracking = trackingByShipment[s.id]
       return {
@@ -210,9 +289,17 @@ export function useShipments(view: ShipmentsView = DEFAULT_VIEW) {
         truckNumber: active?.truckNumber ?? null,
         customerRepId: repByShipment[s.id] ?? null,
         quoteId: quoteByShipment[s.id] ?? null,
+        unlinkedLoadId: null,
+        loadRateCents: null,
       }
     })
-  }, [shipments, orders, loads, loadCarriers, quotes])
+
+    // The loads nothing claimed. Only the `all` slice carries them: the status, customer
+    // and month slices are GSI cuts of Shipment, and a load that is not a shipment yet
+    // answers none of those three questions.
+    if (kind !== 'all') return linked
+    return [...linked, ...loads.filter((l) => !l.shipmentId).map(unlinkedLoadRow)]
+  }, [shipments, orders, loads, loadCarriers, quotes, kind])
 
   return { shipments: rows, loading, error, refresh }
 }

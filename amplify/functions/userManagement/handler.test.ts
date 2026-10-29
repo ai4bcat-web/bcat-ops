@@ -648,6 +648,23 @@ describe('setTeams', () => {
   })
 })
 
+describe('setDivisions', () => {
+  it('writes the division codes and changes no group', async () => {
+    seedUser('sam@bcatcorp.com', ['DISPATCHER', 'role-CUSTOMER_REP'])
+    seedProfile('sam@bcatcorp.com', { role: 'CUSTOMER_REP' })
+
+    await call({
+      action: 'setDivisions',
+      username: 'sam@bcatcorp.com',
+      input: JSON.stringify({ divisions: ['ASSETS', 'BROKERAGE', 'ASSETS'] }),
+    })
+
+    // Duplicates collapse the way every other list on the profile does.
+    expect(profileOf('sam@bcatcorp.com')?.divisions).toEqual(['ASSETS', 'BROKERAGE'])
+    expect([...(pool.membership.get('sam@bcatcorp.com') ?? [])].sort()).toEqual(['DISPATCHER', 'role-CUSTOMER_REP'])
+  })
+})
+
 describe('setClaims', () => {
   it('mints the claim-* groups', async () => {
     seedUser('sam@bcatcorp.com', ['DISPATCHER', 'role-AR_AP'])

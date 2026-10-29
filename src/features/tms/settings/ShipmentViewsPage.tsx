@@ -197,7 +197,7 @@ function ViewDialog({
           />
         </TmsField>
         <CheckList
-          legend="Divisions (sidebar grouping only)"
+          legend="Divisions (only people who work in one see the view)"
           options={divisionChoices}
           selected={draft.audienceDivisions}
           onChange={(audienceDivisions) => onChange({ ...draft, audienceDivisions })}
@@ -417,7 +417,11 @@ export function ShipmentViewsPage() {
       ...(view.audience?.roles ?? []).map((role) => ROLE_LABELS[role as keyof typeof ROLE_LABELS] ?? role),
       ...(view.audience?.groups ?? []),
     ]
-    return parts.length ? parts.join(', ') : 'Everyone'
+    const who = parts.length ? parts.join(', ') : 'Everyone'
+    // Divisions narrow whoever the roles and groups admit, so the column reads as a
+    // sentence: "Everyone in ASSETS" is a smaller audience than "Everyone".
+    const divisions = view.audience?.divisions ?? []
+    return divisions.length ? `${who} in ${divisions.join(', ')}` : who
   }
 
   return (

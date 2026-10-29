@@ -98,6 +98,7 @@ vi.mock('@/lib/apiClient', () => ({
   listDocumentReviewQueue: vi.fn(async () => []),
 }))
 vi.mock('./components/ShipmentDrawer', () => ({ ShipmentDrawer: () => null }))
+vi.mock('@/features/loads/LoadDrawer', () => ({ LoadDrawer: () => null }))
 
 function renderBoard() {
   return render(

@@ -84,7 +84,7 @@ interface Args {
   action:
     | 'list' | 'create' | 'disable' | 'enable' | 'delete' | 'getGroups' | 'setPageGroups'
     | 'resetPassword' | 'setAdmin'
-    | 'setRole' | 'setTeams' | 'setClaims' | 'updateProfile' | 'reinvite' | 'forceSignOut'
+    | 'setRole' | 'setTeams' | 'setDivisions' | 'setClaims' | 'updateProfile' | 'reinvite' | 'forceSignOut'
   email?: string
   username?: string
   pages?: string    // JSON string: string[]
@@ -718,6 +718,18 @@ export const handler = async (event: { arguments: Args; identity?: AppSyncIdenti
       // Teams carry no page access of their own, so no group changes.
       const profile = await saveProfile(target, '', { teamKeys }, callerEmail)
       await writeAudit('UserProfile', target, 'SET_TEAMS', callerEmail, { teamKeys })
+      return JSON.stringify({ success: true, profile })
+    }
+    case 'setDivisions': {
+      const target = requireUsername(username ?? stringOrNull(input.username))
+      // The codes are the OwnershipDivision ids the Divisions page owns; this Lambda
+      // does not read that table, so it validates the shape the way `setTeams` does and
+      // lets a stale code simply match nothing. A division carries no page access, so
+      // there are no group changes either — it decides which saved Shipment views the
+      // person is offered, nothing more.
+      const divisions = stringList(input.divisions) ?? []
+      const profile = await saveProfile(target, '', { divisions }, callerEmail)
+      await writeAudit('UserProfile', target, 'SET_DIVISIONS', callerEmail, { divisions })
       return JSON.stringify({ success: true, profile })
     }
     case 'setClaims': {

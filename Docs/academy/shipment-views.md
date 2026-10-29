@@ -53,3 +53,7 @@ Editing and archiving views happens in **My Brokerage → Shipment views**: chan
 ## Audience
 
 A view's audience is the roles, groups or divisions that may open it. It is a filter on what the sidebar and the view tabs offer — the same way the "start on Mine" switches are a filter, not a read boundary. Anyone who can open Shipments can still read every shipment; the audience decides which saved slice they are offered.
+
+The three facets do not work the same way. **Roles** and **groups** admit: name either one and anybody who matches is offered the view. **Divisions** narrow: name one or more businesses and the view is offered only to people whose profile works in one of them, even if their role or group matches. Name nothing at all and the view is for everyone who can open Shipments; owner and ADMIN are offered every active view regardless.
+
+Which businesses somebody works in is set per person on **My Brokerage → Users**, in the Divisions row of their card.

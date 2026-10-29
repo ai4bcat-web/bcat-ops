@@ -395,6 +395,12 @@ export interface Load extends ShipmentLoadFields {
   revRuleId?: string | null
   /** Cognito username of the rep who sold it. */
   salesRepId?: string | null
+  /**
+   * The shipment's void, mirrored (Step R). Set = the shipment left the working
+   * set, so `listLoads` does not return this row unless a history view asks.
+   * Written only by tmsShipmentActions.
+   */
+  voidedAt?: string | null
   createdAt: string
   updatedAt: string
   createdBy: string

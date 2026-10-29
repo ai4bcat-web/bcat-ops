@@ -2350,6 +2350,8 @@ export interface UserProfileRecord {
   name?: string | null
   role?: RoleKey | null
   teamKeys?: string[] | null
+  /** OwnershipDivision codes — the businesses this person works in. */
+  divisions?: string[] | null
   managerId?: string | null
   claims?: string[] | null
   /** Page keys granted on top of the role — the mirror of the `page-*` groups. */
@@ -2781,7 +2783,10 @@ export interface ShipmentViewFilters {
 export interface ShipmentViewAudience {
   groups?: string[]
   roles?: string[]
-  /** Informational: it groups the view in the sidebar, it never hides it. */
+  /**
+   * The businesses the view belongs to. Unlike the other two facets this one narrows:
+   * naming divisions hides the view from anybody whose profile works in none of them.
+   */
   divisions?: string[]
 }
 

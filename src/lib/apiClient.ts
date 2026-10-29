@@ -90,6 +90,9 @@ const LOAD_SHIPMENT_FIELDS = `
 // group above, and one unhandled throw here blanks every load in the app.
 let loadsHaveRevTag = true
 const LOAD_REV_FIELDS = ' revDivision revSubdivision revTagSource revRuleId salesRepId'
+// The shipment's void, mirrored onto the load (Step R). Its own flag for the same
+// reason as the group above: it lands one deploy later than the code that reads it.
+let loadsHaveVoided = true
 const loadFields = () => {
   let f = LOAD_FIELDS
   if (loadsHaveHot) f += ' hot unscheduled'
@@ -104,6 +107,7 @@ const loadFields = () => {
   if (loadsHaveCargoValue) f += ' cargoValueCents'
   if (loadsHaveShipment) f += LOAD_SHIPMENT_FIELDS
   if (loadsHaveRevTag) f += LOAD_REV_FIELDS
+  if (loadsHaveVoided) f += ' voidedAt'
   return f
 }
 
@@ -172,7 +176,7 @@ const AUDIT_FIELDS = `
 
 // Which newer fields the backend is rejecting (not deployed yet). Used to clear the
 // corresponding flag and retry.
-function undefinedLoadFields(err: unknown): { hot: boolean; stops: boolean; sortOrder: boolean; customerId: boolean; eldReview: boolean; paperworkLocation: boolean; trailer: boolean; freight: boolean; cargoValue: boolean; podNotes: boolean; shipment: boolean; revTag: boolean } {
+function undefinedLoadFields(err: unknown): { hot: boolean; stops: boolean; sortOrder: boolean; customerId: boolean; eldReview: boolean; paperworkLocation: boolean; trailer: boolean; freight: boolean; cargoValue: boolean; podNotes: boolean; shipment: boolean; revTag: boolean; voided: boolean } {
   const errs = (err as { errors?: { message?: string }[] })?.errors
   const msg = Array.isArray(errs) ? errs.map((e) => e?.message ?? '').join(' ') : ''
   return {
@@ -188,10 +192,19 @@ function undefinedLoadFields(err: unknown): { hot: boolean; stops: boolean; sort
     podNotes: /'podNotes'/i.test(msg),
     shipment: /'(shipmentId|orderId|loadNumber|leg|status|statusChangedAt|statusChangedBy|statusSource|carrierRepId|assignmentType|activeLoadCarrierId|carrierName|equipmentType|divisionKey|trackingProvider|nextCheckCallAt|nextCheckCallNote|checkCallOpen|pickupMonth|lastCheckCallAt|lastCheckCallType|lastKnownAt|lastKnownCity|lastKnownState|lastKnownLat|lastKnownLng|lastKnownSource|openIncidentCount|deliveredAt|checkCallDueNotifiedAt|checkCallOverdueNotifiedAt)'/i.test(msg),
     revTag: /'(revDivision|revSubdivision|revTagSource|revRuleId|salesRepId)'/i.test(msg),
+    voided: /'voidedAt'/i.test(msg),
   }
 }
 
-export async function listLoads(): Promise<Load[]> {
+/**
+ * Every load-plane page reads this: the calendar, dispatch, appointments, the
+ * schedule, the pay and profitability hooks. A voided shipment has left the
+ * working set by Ryne's rule, so its loads do not come back from here — the
+ * record is still readable through the Shipments board's Voided tab, the
+ * shipment's History tab and the audit log, and `includeVoided` is how a
+ * history view asks for them explicitly.
+ */
+export async function listLoads(opts?: { includeVoided?: boolean }): Promise<Load[]> {
   // Every page: one DynamoDB scan stops at 1 MB whatever the limit, and the Load table
   // passed that in Oct 2026 — the loads past the first page silently vanished app-wide.
   type LoadPage = { items: (Load & { rateConfirmKey?: string })[]; nextToken?: string | null }
@@ -267,11 +280,16 @@ export async function listLoads(): Promise<Load[]> {
         console.warn('[apiClient] backend has no revenue tags on Load yet — querying loads without them until deploy')
         loadsHaveRevTag = false; changed = true
       }
+      if (loadsHaveVoided && u.voided) {
+        console.warn('[apiClient] backend has no voidedAt on Load yet — querying loads without it until deploy')
+        loadsHaveVoided = false; changed = true
+      }
       if (!changed) throw err
     }
   }
   await customersReady
-  const items = result.data.listLoads.items ?? []
+  const all = result.data.listLoads.items ?? []
+  const items = opts?.includeVoided ? all : all.filter((l) => !l.voidedAt)
   return Promise.all(items.map((l) => resolveRateConfirmUrl(withCustomerPolicy(l))))
 }
 
@@ -299,6 +317,10 @@ function serializeLoadInput<T extends { stops?: unknown; sortOrder?: unknown; cu
       revDivision?: unknown; revSubdivision?: unknown; revTagSource?: unknown
       revRuleId?: unknown; salesRepId?: unknown
     }
+    out = rest as T
+  }
+  if (!loadsHaveVoided && 'voidedAt' in (out as object)) {
+    const { voidedAt: _drop, ...rest } = out as T & { voidedAt?: unknown }
     out = rest as T
   }
   if (!loadsHaveStops) {
@@ -2088,6 +2110,16 @@ export interface LoadBoardSummary {
   revTagSource?: string | null
   revRuleId?: string | null
   salesRepId?: string | null
+  // A load with no `shipmentId` is still a row on the one Shipments list, so the
+  // board reads its own identifiers and facts off the load itself.
+  aljexId?: string | null
+  loadNumber?: string | null
+  customer?: string | null
+  rate?: number | null
+  originCity?: string | null
+  destinationCity?: string | null
+  createdAt?: string | null
+  voidedAt?: string | null
 }
 const LOAD_SUMMARY_FIELDS = `
   id shipmentId orderId status assignmentType
@@ -2095,11 +2127,13 @@ const LOAD_SUMMARY_FIELDS = `
   nextCheckCallAt checkCallOpen openIncidentCount
   activeLoadCarrierId carrierName trackingProvider deliveredAt
   pickupAppt deliveryAppt pickupDriverId deliveryDriverId truckId
+  loadNumber aljexId customer rate originCity destinationCity createdAt
 `
 export async function listLoadSummaries(): Promise<LoadBoardSummary[]> {
   if (!loadsHaveShipment) return []
-  // Up to three attempts: `stops`, `customerId` and the revenue tags each deploy on
-  // their own, and a board that drops one of them is better than a board with none.
+  // Up to four attempts: `stops`, `customerId`, the revenue tags and the mirrored
+  // void each deploy on their own, and a board that drops one of them is better
+  // than a board with none.
   for (let attempt = 0; ; attempt++) {
     try {
       const fields = [
@@ -2107,6 +2141,7 @@ export async function listLoadSummaries(): Promise<LoadBoardSummary[]> {
         loadsHaveStops ? 'stops' : '',
         loadsHaveCustomerId ? 'customerId' : '',
         loadsHaveRevTag ? LOAD_REV_FIELDS : '',
+        loadsHaveVoided ? 'voidedAt' : '',
       ].filter(Boolean).join(' ')
       const rows = await listAll<LoadBoardSummary>('listLoads', fields, 10000)
       return rows.map((l) => unwrapJsonFields(l, ['stops']))
@@ -2117,7 +2152,7 @@ export async function listLoadSummaries(): Promise<LoadBoardSummary[]> {
         loadsHaveShipment = false
         return []
       }
-      if (attempt >= 2) throw err
+      if (attempt >= 3) throw err
       let changed = false
       if (loadsHaveStops && u.stops) {
         console.warn("[apiClient] backend has no 'stops' field yet — the board's STOPS column stays empty until deploy")
@@ -2130,6 +2165,10 @@ export async function listLoadSummaries(): Promise<LoadBoardSummary[]> {
       if (loadsHaveRevTag && u.revTag) {
         console.warn('[apiClient] backend has no revenue tags on Load yet — querying load summaries without them until deploy')
         loadsHaveRevTag = false; changed = true
+      }
+      if (loadsHaveVoided && u.voided) {
+        console.warn('[apiClient] backend has no voidedAt on Load yet — querying load summaries without it until deploy')
+        loadsHaveVoided = false; changed = true
       }
       if (!changed) throw err
     }
@@ -3500,7 +3539,7 @@ export async function setUserAdmin(username: string, isAdmin: boolean): Promise<
 export type { UserProfileRecord, RoleKey, ClaimKey, UserStatus, Team, TeamSenderAddresses } from '@/types/tms'
 
 const USER_PROFILE_FIELDS = `
-  id email name role teamKeys managerId claims extraPages status
+  id email name role teamKeys divisions managerId claims extraPages status
   title phone datEmail invitedAt invitedBy lastRoleChangeAt lastRoleChangeBy
   createdBy updatedBy version createdAt updatedAt
 `
@@ -3542,6 +3581,14 @@ export async function setUserTeams(username: string, teamKeys: string[]): Promis
   await client.graphql({
     query: `query ManageUsers($action: String!, $username: String, $input: String) { manageUsers(action: $action, username: $username, input: $input) }`,
     variables: { action: 'setTeams', username, input: JSON.stringify({ teamKeys }) },
+  })
+}
+
+/** Which businesses this person works in; a division-scoped Shipment view is matched against it. */
+export async function setUserDivisions(username: string, divisions: string[]): Promise<void> {
+  await client.graphql({
+    query: `query ManageUsers($action: String!, $username: String, $input: String) { manageUsers(action: $action, username: $username, input: $input) }`,
+    variables: { action: 'setDivisions', username, input: JSON.stringify({ divisions }) },
   })
 }
 

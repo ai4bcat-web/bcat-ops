@@ -128,6 +128,15 @@ describe('the Brokerage dashboard', () => {
     expect(within(card).getByText('20.0%')).toBeInTheDocument()
   })
 
+  it('does not call a card with real tiles empty', async () => {
+    render(<DashboardPage />)
+    await waitFor(() => expect(titles().length).toBe(ALL.length))
+    const card = screen.getByText('Basic KPIs').closest('.tms-chart-card') as HTMLElement
+    // Basic KPIs is a tiles-only card: it has no series rows by design, and the
+    // figures above are the answer. "No data" underneath them is a lie.
+    expect(within(card).queryByText('No data for these filters.')).toBeNull()
+  })
+
   it('hides a chart from the picker and counts what is left', async () => {
     render(<DashboardPage />)
     await waitFor(() => expect(titles().length).toBe(ALL.length))

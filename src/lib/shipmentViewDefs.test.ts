@@ -4,6 +4,7 @@ import {
   applyViewFilters,
   slugify,
   validateView,
+  viewCallerOf,
   viewsVisibleTo,
 } from './shipmentViewDefs'
 import type { ShipmentViewRecord, ShipmentViewRow } from '../types/tms'
@@ -163,35 +164,73 @@ describe('viewsVisibleTo', () => {
     updatedAt: '2026-01-01T00:00:00Z',
   })
   const everyone = record('everyone', null)
-  const blankAudience = record('blank', { groups: [], roles: [], divisions: ['ASSETS'] })
+  const blankAudience = record('blank', { groups: [], roles: [] })
   const accountingOnly = record('accounting-only', { groups: ['page-invoicing'] })
   const managersOnly = record('managers-only', { roles: ['MANAGER'] })
+  const assetsOnly = record('assets-only', { divisions: ['ASSETS'] })
+  const assetsBilling = record('assets-billing', { groups: ['page-invoicing'], divisions: ['ASSETS'] })
   const archived = record('archived', null, false)
-  const all = [everyone, blankAudience, accountingOnly, managersOnly, archived]
+  const all = [everyone, blankAudience, accountingOnly, managersOnly, assetsOnly, assetsBilling, archived]
 
-  it('shows the owner and an admin every active view', () => {
-    const owner = { groups: [], role: null, isOwner: true, isAdmin: false }
-    const admin = { groups: [], role: null, isOwner: false, isAdmin: true }
-    expect(viewsVisibleTo(all, owner).map((v) => v.slug)).toEqual(['accounting-only', 'blank', 'everyone', 'managers-only'])
-    expect(viewsVisibleTo(all, admin)).toHaveLength(4)
+  const slugs = (caller: Parameters<typeof viewsVisibleTo>[1]) => viewsVisibleTo(all, caller).map((v) => v.slug)
+
+  it('shows the owner and an admin every active view, division-scoped ones included', () => {
+    const owner = viewCallerOf({ groups: [], divisions: [], isOwner: true, isAdmin: false })
+    const admin = viewCallerOf({ groups: [], divisions: [], isOwner: false, isAdmin: true })
+    expect(slugs(owner)).toEqual([
+      'accounting-only', 'assets-billing', 'assets-only', 'blank', 'everyone', 'managers-only',
+    ])
+    expect(slugs(admin)).toHaveLength(6)
   })
 
-  it('treats an empty audience as everyone and a division list as grouping only', () => {
-    const dispatcher = { groups: ['page-loads'], role: 'CUSTOMER_REP', isOwner: false, isAdmin: false }
-    expect(viewsVisibleTo(all, dispatcher).map((v) => v.slug)).toEqual(['blank', 'everyone'])
+  it('shows a view with no audience facets to everyone', () => {
+    const dispatcher = viewCallerOf({ groups: ['page-loads'], divisions: [], isOwner: false, isAdmin: false })
+    expect(slugs(dispatcher)).toEqual(['blank', 'everyone'])
   })
 
   it('matches on a group or on a role', () => {
-    const biller = { groups: ['page-invoicing'], role: null, isOwner: false, isAdmin: false }
-    const manager = { groups: [], role: 'MANAGER', isOwner: false, isAdmin: false }
-    expect(viewsVisibleTo(all, biller).map((v) => v.slug)).toContain('accounting-only')
-    expect(viewsVisibleTo(all, biller).map((v) => v.slug)).not.toContain('managers-only')
-    expect(viewsVisibleTo(all, manager).map((v) => v.slug)).toContain('managers-only')
+    const biller = viewCallerOf({ groups: ['page-invoicing'], divisions: [], isOwner: false, isAdmin: false })
+    expect(slugs(biller)).toContain('accounting-only')
+    expect(slugs(biller)).not.toContain('managers-only')
+  })
+
+  it('reads the role off the one role- group the token carries', () => {
+    const manager = viewCallerOf({ groups: ['role-MANAGER', 'page-loads'], divisions: [], isOwner: false, isAdmin: false })
+    expect(manager.role).toBe('MANAGER')
+    expect(slugs(manager)).toContain('managers-only')
+
+    const roleless = viewCallerOf({ groups: ['page-loads'], divisions: [], isOwner: false, isAdmin: false })
+    expect(roleless.role).toBeNull()
+    expect(slugs(roleless)).not.toContain('managers-only')
+  })
+
+  it('hides a division-scoped view from somebody who works in another division', () => {
+    const brokerage = viewCallerOf({ groups: ['page-loads'], divisions: ['BROKERAGE'], isOwner: false, isAdmin: false })
+    expect(slugs(brokerage)).not.toContain('assets-only')
+  })
+
+  it('shows a division-scoped view to somebody who works in that division', () => {
+    const assets = viewCallerOf({ groups: ['page-loads'], divisions: ['BROKERAGE', 'ASSETS'], isOwner: false, isAdmin: false })
+    expect(slugs(assets)).toContain('assets-only')
+  })
+
+  it('lets the division narrow a view a group would otherwise admit', () => {
+    const biller = viewCallerOf({ groups: ['page-invoicing'], divisions: ['BROKERAGE'], isOwner: false, isAdmin: false })
+    expect(slugs(biller)).toContain('accounting-only')
+    expect(slugs(biller)).not.toContain('assets-billing')
+
+    const assetsBiller = viewCallerOf({ groups: ['page-invoicing'], divisions: ['ASSETS'], isOwner: false, isAdmin: false })
+    expect(slugs(assetsBiller)).toContain('assets-billing')
+  })
+
+  it('still refuses a division member a view whose group and role both miss', () => {
+    const assets = viewCallerOf({ groups: ['page-loads'], divisions: ['ASSETS'], isOwner: false, isAdmin: false })
+    expect(slugs(assets)).not.toContain('assets-billing')
   })
 
   it('never shows an archived view', () => {
-    const owner = { groups: [], role: null, isOwner: true, isAdmin: true }
-    expect(viewsVisibleTo(all, owner).map((v) => v.slug)).not.toContain('archived')
+    const owner = viewCallerOf({ groups: [], divisions: [], isOwner: true, isAdmin: true })
+    expect(slugs(owner)).not.toContain('archived')
   })
 })
 

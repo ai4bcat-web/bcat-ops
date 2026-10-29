@@ -22,6 +22,8 @@ const mocks = vi.hoisted(() => ({
   reinviteUser: vi.fn(),
   forceSignOut: vi.fn(),
   getTmsSettings: vi.fn(),
+  listOwnershipDivisions: vi.fn(),
+  setUserDivisions: vi.fn(),
   disableCognitoUser: vi.fn(),
   enableCognitoUser: vi.fn(),
   deleteCognitoUser: vi.fn(),
@@ -68,6 +70,7 @@ beforeEach(() => {
   auth.loading = false
   mocks.listUserProfiles.mockResolvedValue([])
   mocks.getTmsSettings.mockResolvedValue({ id: 'default', teams: [] })
+  mocks.listOwnershipDivisions.mockResolvedValue([])
 })
 
 describe('UsersPage', () => {
@@ -134,6 +137,29 @@ describe('UsersPage', () => {
 
     await waitFor(() => expect(mocks.setUserRole).toHaveBeenCalledWith('u-1', 'MANAGER'))
     expect(await screen.findByText(/apply the next time they sign in/i)).toBeInTheDocument()
+  })
+
+  it('writes the division codes a profile works in, offering only the live businesses', async () => {
+    mocks.listCognitoUsers.mockResolvedValue([
+      { ...sampleUser(), groups: [], profile: profile({ id: 'u-1', email: 'test@example.com', divisions: ['BROKERAGE'] }) },
+    ])
+    mocks.listOwnershipDivisions.mockResolvedValue([
+      { id: 'ASSETS', code: 'ASSETS', name: 'Assets', sortOrder: 1, active: true },
+      { id: 'BROKERAGE', code: 'BROKERAGE', name: 'Brokerage', sortOrder: 2, active: true },
+      { id: 'OLD', code: 'OLD', name: 'Retired', sortOrder: 3, active: false },
+    ])
+    mocks.setUserDivisions.mockResolvedValue(undefined)
+
+    renderPage()
+    await waitFor(() => expect(screen.getByText(/test@example\.com/)).toBeInTheDocument())
+    fireEvent.click(screen.getByLabelText('Toggle permissions'))
+
+    const assets = await screen.findByRole('button', { name: 'Assets' })
+    expect(screen.getByRole('button', { name: 'Brokerage' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.queryByRole('button', { name: 'Retired' })).not.toBeInTheDocument()
+
+    fireEvent.click(assets)
+    await waitFor(() => expect(mocks.setUserDivisions).toHaveBeenCalledWith('u-1', ['BROKERAGE', 'ASSETS']))
   })
 
   it('shows the Lambda refusal word for word', async () => {

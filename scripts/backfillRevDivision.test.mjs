@@ -8,6 +8,7 @@ import {
   countTags,
   loadsWithoutShipment,
   planLegacyVoids,
+  planVoidMirror,
   planSalesReps,
   resolveTarget,
   reviewText,
@@ -207,6 +208,40 @@ describe('backfillRevDivision — legacy soft deletes become voids', () => {
   });
 });
 
+describe('backfillRevDivision — the void, mirrored onto its loads', () => {
+  it('stamps every load of a voided shipment, legacy delete or real void', () => {
+    const source = baseSource();
+    // shp-6 is a real void and its load has to leave the calendar too.
+    source.Load.push({ id: 'lod-6', shipmentId: 'shp-6', loadNumber: '1006', status: 'DELIVERED' });
+    const actions = planVoidMirror(source.Shipment, source.Load);
+
+    expect(actions.map((a) => a.loadId)).toEqual(['lod-4', 'lod-4b', 'lod-5', 'lod-6']);
+    // The legacy pass is about to promote deletedAt, so the mirror uses the same stamp.
+    expect(actions[0]).toMatchObject({ shipmentId: 'shp-4', voidedAt: '2026-05-01T10:00:00.000Z' });
+    // A real void outranks the delete it also carries.
+    expect(actions[3]).toMatchObject({ shipmentId: 'shp-6', voidedAt: '2026-05-04T10:00:00.000Z' });
+  });
+
+  it('leaves live freight and unlinked loads alone', () => {
+    const source = baseSource();
+    const touched = planVoidMirror(source.Shipment, source.Load).map((a) => a.loadId);
+    // lod-1 belongs to a live shipment; the two DIRECT DRIVE loads belong to none.
+    expect(touched).not.toContain('lod-1');
+    expect(touched).not.toContain('lod-direct-1');
+    expect(touched).not.toContain('lod-direct-2');
+  });
+
+  it('writes nothing on a second pass', () => {
+    const source = baseSource();
+    const first = planVoidMirror(source.Shipment, source.Load);
+    const after = source.Load.map((l) => {
+      const action = first.find((a) => a.loadId === l.id);
+      return action ? { ...l, voidedAt: action.voidedAt } : l;
+    });
+    expect(planVoidMirror(source.Shipment, after)).toHaveLength(0);
+  });
+});
+
 describe('backfillRevDivision — what it reports', () => {
   it('counts the tags over every shipment and leaves voided rows out of them', () => {
     const counts = countTags(baseSource().Shipment);
@@ -284,8 +319,14 @@ describe('backfillRevDivision — the plan protocol', () => {
       };
     });
 
+    // The mirror pass applied too: every voided shipment's load now carries the void.
+    const mirrored = source.Load.map((l) => {
+      const action = first.actions.find((a) => a.action === 'MIRROR_VOID_ON_LOAD' && a.loadId === l.id);
+      return action ? { ...l, voidedAt: action.voidedAt } : l;
+    });
+
     const second = buildRevDivisionPlan({
-      source: { ...source, Shipment: applied },
+      source: { ...source, Shipment: applied, Load: mirrored },
       retag: { ...RETAG, changed: 0 },
       environment: 'dev',
       suffix: DEV_TABLE_SUFFIX,
@@ -294,6 +335,7 @@ describe('backfillRevDivision — the plan protocol', () => {
     expect(second.actions.map((a) => a.action)).toEqual(['ENSURE_OWNERSHIP_SEED', 'RETAG_SHIPMENTS']);
     expect(second.summary.salesReps.toWrite).toBe(0);
     expect(second.summary.legacyVoids).toBe(0);
+    expect(second.summary.voidMirror).toEqual([]);
     expect(second.summary.retag.changed).toBe(0);
   });
 });
@@ -382,8 +424,11 @@ describe('backfillRevDivision — apply', () => {
     const already = calls.dynamo.find((c) => c.input.Key?.id === 'lod-5');
     expect(already.input.UpdateExpression).toContain('pickupDriverId = :null');
     expect(already.input.UpdateExpression).not.toContain('#status');
-    // Nothing is written for the leg that carried no driver and nothing to bill.
-    expect(calls.dynamo.some((c) => c.input.Key?.id === 'lod-4b')).toBe(false);
+    // The leg that carried no driver and nothing to bill is never cleared — the only
+    // thing written for it is the void the mirror pass stamps.
+    const untouched = calls.dynamo.filter((c) => c.input.Key?.id === 'lod-4b');
+    expect(untouched).toHaveLength(1);
+    expect(untouched[0].input.UpdateExpression).toBe('SET voidedAt = :voidedAt, updatedAt = :updatedAt, updatedBy = :updatedBy');
 
     // The audit names the loads, so a person can check those drivers' calendars.
     const audit = calls.dynamo.find((c) => c.input.Item?.action === 'VOID_SHIPMENT' && c.input.Item.entityId === 'shp-4');

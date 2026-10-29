@@ -29,8 +29,8 @@ import {
   disableCognitoUser, enableCognitoUser,
   resetCognitoPassword, setUserAdmin,
   getUserGroups, setUserPageGroups,
-  setUserRole, setUserTeams, setUserClaims, updateUserProfile,
-  reinviteUser, forceSignOut, getTmsSettings,
+  setUserRole, setUserTeams, setUserDivisions, setUserClaims, updateUserProfile,
+  reinviteUser, forceSignOut, getTmsSettings, listOwnershipDivisions,
   type CognitoUser, deleteCognitoUser,
 } from '@/lib/apiClient'
 import { pageOptions } from '@/lib/navItems'
@@ -38,7 +38,7 @@ import {
   ROLES, ROLE_LABELS, ROLE_DESCRIPTIONS, rolePagesFor,
   CLAIMS, CLAIM_LABELS, isEnforcedClaim, isRoleKey, displayName,
 } from '@/lib/roles'
-import type { ClaimKey, RoleKey, Team, UserProfileRecord, UserStatus } from '@/types/tms'
+import type { ClaimKey, OwnershipDivisionRecord, RoleKey, Team, UserProfileRecord, UserStatus } from '@/types/tms'
 import { toast } from 'sonner'
 
 const PAGE_OPTIONS = pageOptions()
@@ -157,10 +157,12 @@ function SectionLabel({ children }: { children: ReactNode }) {
 interface UserCardProps {
   user: UserRow
   teams: Team[]
+  divisions: OwnershipDivisionRecord[]
   callerIsOwner: boolean
   roleChangedHere: boolean
   onRole: (u: UserRow, role: RoleKey) => void
   onToggleTeam: (u: UserRow, teamKey: string) => void
+  onToggleDivision: (u: UserRow, code: string) => void
   onManager: (u: UserRow, managerId: string) => void
   onToggleClaim: (u: UserRow, claim: ClaimKey) => void
   onTogglePage: (u: UserRow, pageKey: string) => void
@@ -177,8 +179,8 @@ interface UserCardProps {
 }
 
 function UserCard({
-  user, teams, callerIsOwner, roleChangedHere,
-  onRole, onToggleTeam, onManager, onToggleClaim, onTogglePage, onToggleAdmin,
+  user, teams, divisions, callerIsOwner, roleChangedHere,
+  onRole, onToggleTeam, onToggleDivision, onManager, onToggleClaim, onTogglePage, onToggleAdmin,
   onReset, onReinvite, onSignOut, onToggleEnabled, onDelete,
   busyAdminId, resettingId, togglingId, savingPermissions,
 }: UserCardProps) {
@@ -191,6 +193,7 @@ function UserCard({
   const extraPages = extraPagesOf(user, role)
   const claims = claimsOf(user)
   const teamKeys = user.profile?.teamKeys ?? []
+  const divisionCodes = user.profile?.divisions ?? []
   const isTargetOwner = user.email?.toLowerCase().trim() === OWNER_EMAIL
   const openPages = isTargetOwner || admin
   const grantedCount = rolePages.length + extraPages.length
@@ -314,6 +317,36 @@ function UserCard({
                       style={on ? PILL_ON : PILL}
                     >
                       {on && <Check size={12} />}{team.name}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Divisions */}
+          <div>
+            <SectionLabel>Divisions</SectionLabel>
+            <p className="tms-field-hint" style={{ margin: '0 0 8px' }}>
+              The businesses this person works in. A saved Shipment view that names divisions is
+              offered only to the people who work in one of them.
+            </p>
+            {divisions.length === 0 ? (
+              <p className="tms-field-hint" style={{ margin: 0 }}>No divisions yet — add them in My Brokerage → Divisions.</p>
+            ) : (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {divisions.map((division) => {
+                  const on = divisionCodes.includes(division.code)
+                  return (
+                    <button
+                      key={division.code}
+                      type="button"
+                      aria-pressed={on}
+                      disabled={savingPermissions}
+                      onClick={() => onToggleDivision(user, division.code)}
+                      style={on ? PILL_ON : PILL}
+                    >
+                      {on && <Check size={12} />}{division.name}
                     </button>
                   )
                 })}
@@ -466,6 +499,7 @@ export function UsersPage() {
   const { loading: authLoading, isOwner } = useAuth()
   const [users, setUsers] = useState<UserRow[]>([])
   const [teams, setTeams] = useState<Team[]>([])
+  const [divisions, setDivisions] = useState<OwnershipDivisionRecord[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [newEmail, setNewEmail] = useState('')
@@ -523,6 +557,19 @@ export function UsersPage() {
     return () => { canceled = true }
   }, [])
 
+  // The same taxonomy the Divisions page writes; only the live ones can be assigned, and
+  // an archived business already on a profile is left alone rather than silently dropped.
+  useEffect(() => {
+    let canceled = false
+    listOwnershipDivisions()
+      .then((rows) => {
+        if (canceled) return
+        setDivisions(rows.filter((d) => d.active).sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name)))
+      })
+      .catch((err: unknown) => { console.warn('[users] divisions unavailable', err) })
+    return () => { canceled = true }
+  }, [])
+
   const patchRow = (username: string, patch: (row: UserRow) => UserRow) =>
     setUsers((prev) => prev.map((x) => (x.username === username ? patch(x) : x)))
 
@@ -563,6 +610,13 @@ export function UsersPage() {
     const teamKeys = current.includes(teamKey) ? current.filter((k) => k !== teamKey) : [...current, teamKey]
     const next: UserRow = { ...u, profile: { ...profileOf(u), teamKeys } }
     void save(u, next, () => setUserTeams(u.username, teamKeys), `Teams updated for ${u.email}`)
+  }
+
+  const handleToggleDivision = (u: UserRow, code: string) => {
+    const current = u.profile?.divisions ?? []
+    const codes = current.includes(code) ? current.filter((c) => c !== code) : [...current, code]
+    const next: UserRow = { ...u, profile: { ...profileOf(u), divisions: codes } }
+    void save(u, next, () => setUserDivisions(u.username, codes), `Divisions updated for ${u.email}`)
   }
 
   const handleManager = (u: UserRow, managerId: string) => {
@@ -836,10 +890,12 @@ export function UsersPage() {
                 key={u.username}
                 user={u}
                 teams={teams}
+                divisions={divisions}
                 callerIsOwner={isOwner}
                 roleChangedHere={roleChanged.includes(u.username)}
                 onRole={handleRole}
                 onToggleTeam={handleToggleTeam}
+                onToggleDivision={handleToggleDivision}
                 onManager={handleManager}
                 onToggleClaim={handleToggleClaim}
                 onTogglePage={handleTogglePage}

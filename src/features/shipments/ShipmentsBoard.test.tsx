@@ -124,6 +124,9 @@ vi.mock('@/lib/apiClient', () => ({
   listDocumentReviewQueue: vi.fn(async () => []),
 }))
 vi.mock('./components/ShipmentDrawer', () => ({ ShipmentDrawer: () => null }))
+// The row that opens it is covered in ShipmentsBoard.unlinked.test.tsx; here it would
+// only drag the whole load-editing tree into a test about the board.
+vi.mock('@/features/loads/LoadDrawer', () => ({ LoadDrawer: () => null }))
 
 function renderBoard(path = '/tms/shipments') {
   return render(
