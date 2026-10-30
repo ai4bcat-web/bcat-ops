@@ -1,5 +1,23 @@
 # TMS build log
 
+## 2026-10-30 — Step M deployed: Academy Ask assistant
+
+**Committed and deployed on dev.** Plan: Step M adds the in-app Ask assistant to the Academy page.
+
+- Commit: `3925a4c` (Ask assistant: `ASK_ACADEMY` Lambda action, `askAcademy` client helper, AcademyPage UI, tests).
+- Amplify dev job `87` for `3925a4c` **SUCCEEDED** at 2026-10-30 01:16:00 UTC-5. Docs-only job `86` was cancelled because a later Step M commit superseded it.
+- `npm run test` on the working tree: **471 files / 6,390 tests PASS**.
+- `npx eslint .` — 0 errors, 3 pre-existing warnings.
+
+### What shipped
+
+- **Lambda action** `ASK_ACADEMY` in `tms-directory-actions`: receives the user's question and the bundled Academy articles, calls Anthropic `claude-sonnet-5` with a JSON-schema answer, and returns a cited answer. Available to owner, ADMIN, and anyone with the `tms` page grant.
+- **Client API** `askAcademy(question, articles)` in `src/lib/apiClient.ts`.
+- **UI** `AcademyPage` now shows an Ask panel above the article list: a question textarea, Ask button, and a rendered answer with clickable citation links to the source articles.
+- **Academy article** `Docs/academy/my-brokerage-settings.md` added for Step L and linked from the Academy README.
+
+One entry per unit of work (newest first). Decisions needed from Ryne go under **Decision needed**.
+
 ## 2026-10-30 — Step L deployed: My Brokerage settings pages
 
 **Committed and deployed on dev.** Plan: `Docs/tms-build/L-plan.md`. Academy: `Docs/academy/README.md`.
