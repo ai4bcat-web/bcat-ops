@@ -2671,6 +2671,39 @@ describe('carrier booking', () => {
     expect(raw).toContain(`Reply-To: ai4bcat+tracking.${shipmentId}@gmail.com`)
   })
 
+  it('marks the rate-con message NOT_SENT and logs the raw email when SES is denied on dev', async () => {
+    sesSend.mockRejectedValueOnce(new Error('AccessDenied'))
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined)
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const { shipmentId, loadId } = await bookableLoad()
+    seedCarrier()
+    seedCarrierDocs()
+    await book(loadId)
+    const loadCarrierId = String(activeCarrier().id)
+
+    await call('SEND_RATE_CON', { loadCarrierId, pdfBase64: PDF_BASE64, to: ['dispatch@swift.com'] })
+
+    const message = [...table(TABLES.message).values()][0]
+    expect(message).toMatchObject({
+      shipmentId,
+      direction: 'OUT',
+      channel: 'EMAIL',
+      kind: 'RATE_CON',
+      status: 'NOT_SENT',
+      error: 'AccessDenied',
+    })
+
+    const rawLog = logSpy.mock.calls.find((c) => typeof c[0] === 'string' && c[0].includes('rate con email would have sent'))
+    expect(rawLog).toBeTruthy()
+    const raw = String(rawLog?.[1] ?? '')
+    expect(raw).toContain('To: dispatch@swift.com')
+    expect(raw).toContain('Cc: ai4bcat+tracking@gmail.com')
+    expect(raw).toContain('Rate confirmation')
+
+    logSpy.mockRestore()
+    errorSpy.mockRestore()
+  })
+
   it('voids the open link without touching the assignment', async () => {
     const { loadId } = await bookableLoad()
     seedCarrier()

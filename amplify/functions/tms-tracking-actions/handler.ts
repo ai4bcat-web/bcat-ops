@@ -39,7 +39,7 @@ import {
 } from '@aws-sdk/client-dynamodb'
 import { AdminGetUserCommand, CognitoIdentityProviderClient } from '@aws-sdk/client-cognito-identity-provider'
 import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2'
-import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3'
+import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb'
 import { randomBytes, randomUUID } from 'crypto'
@@ -79,7 +79,12 @@ import {
   MIN_UPLOAD_LINK_EXPIRY_DAYS,
   canEmailTo,
   normalizeRequiredDocTypes,
+  ACCEPTED_CONTENT_TYPES,
+  DEFAULT_AUDIENCE,
+  MAX_DOCUMENT_BYTES,
 } from '../../../src/lib/shipmentDocuments'
+import { recacheDocGates } from '../tms-shipment-actions/documents'
+import type { DocumentDeps } from '../tms-shipment-actions/documents'
 import {
   MAX_NOTICE_BODY_CHARS,
   milestoneRecipients,
@@ -260,12 +265,13 @@ type Action =
   | 'SEND_MILESTONE_NOTICE'
   | 'EMAIL_DOCUMENTS'
   | 'SAVE_DOCUMENT_SETTINGS'
+  | 'INGEST_ATTACHMENT'
 
 /**
  * What an audit row is about. `AuditLog.entityType` is an open string in the schema,
  * so the union lives with the router that writes it; step D adds TRACKING_LINK.
  */
-type AuditEntityType = 'TRACKING_LINK' | 'LOAD_CARRIER' | 'SHIPMENT' | 'TMS_SETTINGS'
+type AuditEntityType = 'TRACKING_LINK' | 'LOAD_CARRIER' | 'SHIPMENT' | 'TMS_SETTINGS' | 'SHIPMENT_DOCUMENT'
 
 interface AppSyncIdentity {
   sub: string
@@ -1878,6 +1884,150 @@ async function emailDocuments(input: Row, caller: Caller): Promise<Row> {
   return { notice: delivered.notice, emailStatus, emailError: delivered.error, downloads }
 }
 
+// ── Inbound e-mail attachments ───────────────────────────────────────────────
+
+/**
+ * Guess the document type from an attachment filename. Drivers and dispatchers
+ * name PODs inconsistently, so the match is broad. A wrong guess is not fatal:
+ * the row lands as `OTHER` and a person can retype it on the Documents tab.
+ */
+function inferAttachmentType(filename: string): ShipmentDocumentType {
+  const lower = filename.toLowerCase()
+  // Treat underscores, dashes and dots the same as word boundaries.
+  const normalized = lower.replace(/[_\-.]/g, ' ')
+  if (/\b(pod|proof|delivery|delivered|signed)\b/.test(normalized)) return 'POD'
+  if (/\b(bol|bill of lading)\b/.test(normalized)) return 'BOL'
+  if (/\b(rate con|rate confirmation)\b/.test(normalized)) return 'RATE_CON'
+  if (/\b(lumper)\b/.test(normalized)) return 'LUMPER_RECEIPT'
+  if (/\b(weight|scale)\b/.test(normalized)) return 'WEIGHT_TICKET'
+  if (/\b(temp)\b/.test(normalized)) return 'TEMP_LOG'
+  if (/\b(inspection)\b/.test(normalized)) return 'INSPECTION_REPORT'
+  if (/\b(customs)\b/.test(normalized)) return 'CUSTOMS'
+  if (/\b(packing)\b/.test(normalized)) return 'PACKING_LIST'
+  if (/\b(invoice)\b/.test(normalized)) return 'INVOICE'
+  if (/\.(jpg|jpeg|png|gif|webp)$/.test(lower)) return 'PHOTO'
+  return 'OTHER'
+}
+
+/**
+ * Turn the attachments on an inbound message into ShipmentDocument rows. Each
+ * file is saved under `shipment-docs/<shipmentId>/inbound/<messageId>/` so it
+ * lives in the shipment's own prefix and can be previewed on the Documents tab.
+ *
+ * The transaction that writes the row also re-caches `Order.docsMissing` and
+    * `LoadCarrier.docsMissing`, so a POD that arrives by e-mail immediately
+ * counts toward the release gate. If the inferred type is POD, the app runs
+ * the same reviewer used for portal uploads; a good POD is accepted and the
+ * shipment can move to Ready to invoice.
+ */
+async function ingestAttachments(
+  deps: PodReviewDeps,
+  message: Row,
+  attachments: unknown[],
+  caller: Caller,
+): Promise<Row[]> {
+  if (!BUCKET_NAME) throw new Error('Document storage is not configured')
+  const shipmentId = String(message.shipmentId)
+  const messageIdForKey = String(message.id ?? message.messageId ?? 'unknown')
+  const loadRows = await queryIndex(LOAD_TABLE_NAME, IDX_LOADS_BY_SHIPMENT, 'shipmentId', shipmentId)
+  const load = loadRows[0] ?? null
+  const loadId = load ? String(load.id) : null
+  const bundle = await storeReadBundle(stepPStore, shipmentId)
+  const now = nowIso()
+
+  const documentDeps: DocumentDeps = {
+    store: stepPStore,
+    s3,
+    bucket: BUCKET_NAME,
+    customerTable: CUSTOMER_TABLE_NAME,
+    settingsTable: TMS_SETTINGS_TABLE_NAME,
+    driverSubmissionTable: '',
+    driverSubmissionDocTable: '',
+    writeAudit: (entityType, entityId, action, actor, changes) =>
+      writeAudit(entityType as AuditEntityType, entityId, action as Action, actor, changes),
+  }
+
+  const docs: Row[] = []
+  for (const raw of attachments) {
+    if (raw == null || typeof raw !== 'object') continue
+    const att = raw as Record<string, unknown>
+    const name = optionalString(att.name, 200)
+    if (!name) throw new Error('Attachment missing name')
+    const rawContentType = optionalString(att.contentType, 100) ?? 'application/octet-stream'
+    const contentType = rawContentType.toLowerCase() === 'image/jpg' ? 'image/jpeg' : rawContentType.toLowerCase()
+    if (!(ACCEPTED_CONTENT_TYPES as readonly string[]).includes(contentType)) {
+      throw new Error(`Unsupported attachment type: ${contentType}`)
+    }
+    const base64 = assertString(att.base64, 'base64')
+    const bytes = Buffer.from(base64, 'base64')
+    if (bytes.length === 0) throw new Error('Attachment has no content')
+    if (bytes.length > MAX_DOCUMENT_BYTES) {
+      throw new Error(`Attachment ${name} exceeds the ${MAX_DOCUMENT_BYTES / (1024 * 1024)} MB limit`)
+    }
+
+    const type = inferAttachmentType(name)
+    const documentId = `sdoc-${randomUUID()}`
+    const s3Key = `shipment-docs/${shipmentId}/inbound/${messageIdForKey}/${documentId}-${name}`
+
+    await s3.send(new PutObjectCommand({
+      Bucket: BUCKET_NAME,
+      Key: s3Key,
+      Body: bytes,
+      ContentType: contentType,
+    }))
+
+    const row: Row = {
+      id: documentId,
+      __typename: 'ShipmentDocument',
+      shipmentId,
+      orderId: null,
+      loadId,
+      loadCarrierId: null,
+      type,
+      name,
+      s3Key,
+      contentType,
+      sizeBytes: bytes.length,
+      source: 'CARRIER_PORTAL',
+      audience: DEFAULT_AUDIENCE[type],
+      status: 'ACTIVE',
+      version: 1,
+      supersedesId: null,
+      reviewStatus: 'PENDING',
+      uploadedBy: caller.email,
+      uploadedAt: now,
+      createdBy: caller.email,
+      createdAt: now,
+      updatedAt: now,
+    }
+
+    const nextDocs = [...bundle.documents.filter((d) => d.id !== row.id), row]
+    await transact(
+      [
+        putItem(SHIPMENT_DOCUMENT_TABLE_NAME, row),
+        ...(await recacheDocGates(documentDeps, bundle, nextDocs, now)),
+      ],
+      'document',
+    )
+    bundle.documents = nextDocs
+
+    await writeAudit('SHIPMENT_DOCUMENT', documentId, 'INGEST_ATTACHMENT', caller, {
+      shipmentId, loadId, type, s3Key, messageId: message.id, messageIdHeader: message.messageId,
+    })
+    docs.push(row)
+
+    if (type === 'POD') {
+      try {
+        await reviewShipmentPod(deps, { shipmentId, documentId }, caller)
+      } catch (err) {
+        console.warn('[tms-tracking-actions] auto-review of inbound POD failed', err)
+      }
+    }
+  }
+
+  return docs
+}
+
 
 // ── Step P deps ──────────────────────────────────────────────────────────────
 
@@ -2125,8 +2275,14 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return openShipmentThread(threadDeps, assertString(input.shipmentId, 'shipmentId'), caller)
     case 'SEND_SHIPMENT_MESSAGE':
       return sendShipmentMessage(threadDeps, input, caller)
-    case 'INGEST_SHIPMENT_MESSAGE':
-      return ingestShipmentMessage(threadDeps, input, caller)
+    case 'INGEST_SHIPMENT_MESSAGE': {
+      const ingestResult = await ingestShipmentMessage(threadDeps, input, caller)
+      if (ingestResult.routed && Array.isArray(input.attachments) && input.attachments.length > 0) {
+        const documents = await ingestAttachments(podReviewDeps, ingestResult.message as Row, input.attachments as unknown[], caller)
+        return { ...ingestResult, documents }
+      }
+      return ingestResult
+    }
     case 'LIST_SHIPMENT_THREAD':
       return listThread(threadDeps, input)
     case 'RUN_CHECK_CALL_PLAN':

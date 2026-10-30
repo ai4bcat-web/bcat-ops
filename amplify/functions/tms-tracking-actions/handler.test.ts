@@ -40,6 +40,8 @@ const TABLES = {
   order: 'Order-test',
   load: 'Load-test',
   loadCarrier: 'LoadCarrier-test',
+  loadCharge: 'LoadCharge-test',
+  loadFinancials: 'LoadFinancials-test',
   settings: 'TmsSettings-test',
   audit: 'AuditLog-test',
   division: 'Division-test',
@@ -57,6 +59,8 @@ const store = vi.hoisted(() => {
   process.env.ORDER_TABLE_NAME = 'Order-test'
   process.env.LOAD_TABLE_NAME = 'Load-test'
   process.env.LOAD_CARRIER_TABLE_NAME = 'LoadCarrier-test'
+  process.env.LOAD_CHARGE_TABLE_NAME = 'LoadCharge-test'
+  process.env.LOAD_FINANCIALS_TABLE_NAME = 'LoadFinancials-test'
   process.env.TMS_SETTINGS_TABLE_NAME = 'TmsSettings-test'
   process.env.AUDIT_LOG_TABLE_NAME = 'AuditLog-test'
   process.env.DIVISION_TABLE_NAME = 'Division-test'
@@ -66,6 +70,7 @@ const store = vi.hoisted(() => {
   process.env.DRIVER_TABLE_NAME = 'Driver-test'
   process.env.SHIPMENT_DOCUMENT_TABLE_NAME = 'ShipmentDocument-test'
   process.env.SHIPMENT_NOTICE_TABLE_NAME = 'ShipmentNotice-test'
+  process.env.SHIPMENT_MESSAGE_TABLE_NAME = 'ShipmentMessage-test'
   process.env.CUSTOMER_TABLE_NAME = 'Customer-test'
   process.env.BUCKET_NAME = 'bcat-test-bucket'
   process.env.FROM_ADDRESS = 'ai4bcat@gmail.com'
@@ -98,9 +103,15 @@ const INDEXES: Record<string, Record<string, readonly string[]>> = {
   [TABLES.order]: { ordersByShipmentId: ['shipmentId'] },
   [TABLES.load]: { loadsByShipmentId: ['shipmentId'] },
   [TABLES.loadCarrier]: { loadCarriersByShipmentId: ['shipmentId'] },
+  [TABLES.loadCharge]: { loadChargesByShipmentIdAndSortOrder: ['shipmentId', 'sortOrder'] },
   [TABLES.checkCall]: { loadCheckCallsByLoadIdAndAt: ['loadId', 'at'] },
   [TABLES.conversation]: { dispatchConversationsByPhone: ['phone'] },
   [TABLES.message]: { dispatchMessagesByConversationIdAndAt: ['conversationId', 'at'] },
+  'ShipmentMessage-test': {
+    shipmentMessagesByMessageId: ['messageId'],
+    shipmentMessagesByShipmentIdAndAt: ['shipmentId', 'at'],
+  },
+  'ShipmentDocument-test': { shipmentDocumentsByShipmentIdAndUploadedAt: ['shipmentId', 'uploadedAt'] },
 }
 
 /** The rows a query sees through `indexName` — the sparse ones are not there. */
@@ -253,7 +264,13 @@ vi.mock('@aws-sdk/client-s3', () => {
       this.input = input
     }
   }
-  return { S3Client, GetObjectCommand }
+  class PutObjectCommand {
+    input: unknown
+    constructor(input: unknown) {
+      this.input = input
+    }
+  }
+  return { S3Client, GetObjectCommand, PutObjectCommand }
 })
 
 const getSignedUrl = vi.hoisted(() => vi.fn())
@@ -294,6 +311,7 @@ import { handler } from './handler'
 interface MockCommand {
   __type: string
   input: Record<string, unknown>
+  constructor: { name: string }
 }
 
 function runCommand(cmd: MockCommand): unknown {
@@ -317,6 +335,17 @@ function runCommand(cmd: MockCommand): unknown {
     case 'Scan': {
       const items = [...table(String(input.TableName)).values()]
       return { Items: items.map((i) => marshall(i, { removeUndefinedValues: true })) }
+    }
+    case 'BatchGet': {
+      const requestItems = input.RequestItems as Record<string, { Keys: Record<string, unknown>[] }>
+      const responses: Record<string, Row[]> = {}
+      for (const [tableName, req] of Object.entries(requestItems)) {
+        const t = table(tableName)
+        responses[tableName] = (req.Keys ?? [])
+          .map((key) => t.get(primaryKey(key)))
+          .filter((item): item is Row => item != null)
+      }
+      return { Responses: Object.fromEntries(Object.entries(responses).map(([k, v]) => [k, v.map((i) => marshall(i, { removeUndefinedValues: true }))])) }
     }
     case 'Put':
       applyPut(
@@ -538,9 +567,12 @@ beforeEach(() => {
   // Dev: Twilio is unconfigured and SES is denied.
   dispatchConfig.mockResolvedValue(null)
   sesSend.mockRejectedValue(new Error('AccessDeniedException: not authorized to perform ses:SendEmail'))
-  s3Send.mockImplementation(async () => ({
-    Body: { transformToByteArray: async () => new Uint8Array([0x25, 0x50, 0x44, 0x46]) },
-  }))
+  s3Send.mockImplementation(async (cmd: MockCommand) => {
+    if (cmd.constructor.name === 'PutObjectCommand') return undefined
+    return {
+      Body: { transformToByteArray: async () => new Uint8Array([0x25, 0x50, 0x44, 0x46]) },
+    }
+  })
   getSignedUrl.mockImplementation(async (_client: unknown, command: { input: { Key: string } }) =>
     `https://s3.test/${command.input.Key}?signed`)
 })
@@ -1381,6 +1413,26 @@ describe('EMAIL_DOCUMENTS', () => {
     expect(notices()[0]).toMatchObject({ status: 'NOT_SENT', body: expect.stringContaining('Proof of delivery') })
   })
 
+  it('attaches a generated BOL and records what went out to the customer', async () => {
+    seed()
+    seedDocument({ id: 'sdoc-bol', type: 'BOL', name: 'bol-BC1001.pdf', audience: 'ALL' })
+    sesSend.mockResolvedValue({ MessageId: 'ses-bol' })
+
+    const result = await call('EMAIL_DOCUMENTS', {
+      shipmentId: 'shp-1', documentIds: ['sdoc-bol'], to: ['ops@acme.test'], recipientKind: 'CUSTOMER', message: 'BOL attached.',
+    })
+
+    expect(result).toMatchObject({ emailStatus: 'SENT', downloads: [] })
+    const raw = new TextDecoder().decode(sesSend.mock.calls[0][0].input.Content.Raw.Data)
+    expect(raw).toContain('filename="bol-BC1001.pdf"')
+    expect(notices()[0]).toMatchObject({
+      kind: 'DOCUMENTS',
+      status: 'SENT',
+      to: 'ops@acme.test',
+      attachments: [{ documentId: 'sdoc-bol', name: 'bol-BC1001.pdf' }],
+    })
+  })
+
   it('refuses more than ten megabytes of attachments', async () => {
     seed()
     seedDocument({ id: 'sdoc-big', name: 'photos.pdf', sizeBytes: 11 * 1024 * 1024 })
@@ -1391,6 +1443,83 @@ describe('EMAIL_DOCUMENTS', () => {
       }),
     ).rejects.toThrow(/at most 10 MB/)
     expect(s3Send).not.toHaveBeenCalled()
+  })
+})
+
+// ── INGEST_SHIPMENT_MESSAGE ─────────────────────────────────────────────────
+
+describe('INGEST_SHIPMENT_MESSAGE with attachments', () => {
+  const PDF_BASE64 = Buffer.from('%PDF-1.4 fake pod', 'utf-8').toString('base64')
+
+  it('saves a POD attachment to S3 and creates a ShipmentDocument row', async () => {
+    seed({ shipment: { status: 'DELIVERED' }, load: { status: 'DELIVERED' } })
+    seedCustomer()
+
+    const result = await call('INGEST_SHIPMENT_MESSAGE', {
+      messageId: '<driver-pod@example.com>',
+      to: 'ai4bcat+tracking.shp-1@gmail.com',
+      from: 'driver@example.com',
+      subject: 'POD for BC1001',
+      body: 'Here is the POD',
+      attachments: [{ name: 'POD_BC1001.pdf', contentType: 'application/pdf', base64: PDF_BASE64 }],
+    })
+
+    expect(result.routed).toBe(true)
+
+    const docs = [...table(TABLES.document).values()]
+    expect(docs).toHaveLength(1)
+    expect(docs[0]).toMatchObject({
+      shipmentId: 'shp-1',
+      type: 'POD',
+      name: 'POD_BC1001.pdf',
+      source: 'CARRIER_PORTAL',
+      reviewStatus: 'PENDING',
+      status: 'ACTIVE',
+      contentType: 'application/pdf',
+    })
+    expect(String(docs[0].s3Key)).toMatch(/shipment-docs\/shp-1\/inbound\/msg:/)
+
+    const putCall = s3Send.mock.calls.find((c) => (c[0] as MockCommand).constructor.name === 'PutObjectCommand')
+    expect(putCall).toBeTruthy()
+    expect((putCall![0] as MockCommand).input.Key).toMatch(/shipment-docs\/shp-1\/inbound\/msg:.*\/sdoc-.*-POD_BC1001\.pdf/)
+
+    // The document gate was re-cached in the same transaction.
+    const order = table(TABLES.order).get('ord-1')!
+    expect(order.docsCheckedAt).toBeTruthy()
+  })
+
+  it('classifies a non-POD attachment as OTHER', async () => {
+    seed({ shipment: { status: 'DELIVERED' }, load: { status: 'DELIVERED' } })
+    seedCustomer()
+
+    const result = await call('INGEST_SHIPMENT_MESSAGE', {
+      messageId: '<driver-misc@example.com>',
+      to: 'ai4bcat+tracking.shp-1@gmail.com',
+      from: 'driver@example.com',
+      subject: 'Re: BC1001',
+      body: 'See attached',
+      attachments: [{ name: 'misc.jpg', contentType: 'image/jpeg', base64: PDF_BASE64 }],
+    })
+
+    expect(result.routed).toBe(true)
+    const docs = [...table(TABLES.document).values()]
+    expect(docs[0]?.type).toBe('PHOTO')
+  })
+
+  it('rejects an oversized attachment', async () => {
+    seed({ shipment: { status: 'DELIVERED' }, load: { status: 'DELIVERED' } })
+    seedCustomer()
+
+    await expect(
+      call('INGEST_SHIPMENT_MESSAGE', {
+        messageId: '<driver-big@example.com>',
+        to: 'ai4bcat+tracking.shp-1@gmail.com',
+        from: 'driver@example.com',
+        subject: 'Big file',
+        body: 'too big',
+        attachments: [{ name: 'big.pdf', contentType: 'application/pdf', base64: 'a'.repeat(36 * 1024 * 1024) }],
+      }),
+    ).rejects.toThrow(/exceeds/)
   })
 })
 

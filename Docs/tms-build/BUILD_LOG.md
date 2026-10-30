@@ -1,11 +1,52 @@
 # TMS build log
 
-## 2026-10-30 — Step N2 — MyCarrierPackets vetting + continuous sync (PENDING DEPLOY)
+## 2026-10-30 — Step N3/N4 — Rate-con/BOL email coverage and per-shipment tracking thread (PENDING DEPLOY)
 
-**Committed on dev, deploy in progress.** Plan: `Docs/tms-build/N2-plan.md`.
+**Committed on dev, deploy in progress.** Plan: `Docs/tms-build/N3N4-plan.md`.
 
-- Commit: `<commit-hash>` (shared MCP adapter, tms-directory-actions MCP actions, tms-shipment-actions setup packet, tracking-api MCP webhook processing, mcp-sync scheduled Lambda, CarrierProfile setup packet UI, coverage MCP gate, tests).
+- Commit: `<commit-hash>` (rate-con dev logging, BOL email test, POD attachment ingestion, shipment-email-intake Lambda + tests, backend wiring + permissions).
 - Amplify dev job `<job-id>` for `<commit-hash>` status `<status>`.
+- `npm run test` on the working tree: **475 files / 6,459 tests PASS**.
+- `npx eslint .` — **0 errors, 3 pre-existing warnings** (unrelated to N3/N4 changes).
+- `npx tsc --noEmit -p amplify/tsconfig.json` — clean; `npx tsc --noEmit -p tsconfig.app.json` — clean.
+
+### What shipped
+
+- **Rate-con dev logging.** `SEND_RATE_CON` now records the `ShipmentMessage` row with status
+  `NOT_SENT` when SES fails on dev, and logs the complete raw email (headers + body) to
+  CloudWatch so the exact message is visible for proof.
+- **BOL email coverage.** Added an `EMAIL_DOCUMENTS` test that emails a generated BOL to a
+  customer and asserts the attachment is present and the notice row records what went out.
+- **POD attachment ingestion.** `INGEST_SHIPMENT_MESSAGE` now accepts an `attachments` array:
+  each attachment is saved to S3 under `shipment-docs/<shipmentId>/inbound/<messageId>/<filename>`
+  and a `ShipmentDocument` row is created. POD-looking filenames trigger `reviewShipmentPod` so
+  the POD requirement can be satisfied automatically when review passes.
+- **Inbound email intake Lambda.** New `shipment-email-intake` Function URL receives Gmail/SES
+  payloads for `tracking+<shipmentId>@` reply addresses, verifies a shared secret, routes by
+  plus-address (or by Message-ID fallback), and invokes `tms-tracking-actions` with
+  `INGEST_SHIPMENT_MESSAGE`. On dev, when the downstream function is unset, it logs the parsed
+  inbound message as proof.
+- **Backend wiring.** `backend.ts` defines the Lambda, table query permission, invoke grant from
+  the intake function to `tms-tracking-actions`, environment variables, and `CfnOutput` for the
+  Function URL.
+
+### Verification
+- Rate-con SES refusal on dev leaves a `NOT_SENT` `ShipmentMessage` row and prints the raw MIME.
+- BOL attachment appears in the outgoing customer email and the notice audit row.
+- Inbound POD attachment creates a `ShipmentDocument` row and recalculates `Order.docsMissing`.
+- `shipment-email-intake` routes plus-address and Message-ID payloads to the correct shipment.
+
+### Blockers / next
+- `<status>` to be updated once Amplify dev deploy finishes.
+
+---
+
+## 2026-10-30 — Step N2 — MyCarrierPackets vetting + continuous sync (deployed)
+
+**Committed and deployed on dev.** Plan: `Docs/tms-build/N2-plan.md`.
+
+- Commit: `4bd552f` (shared MCP adapter, tms-directory-actions MCP actions, tms-shipment-actions setup packet, tracking-api MCP webhook processing, mcp-sync scheduled Lambda, CarrierProfile setup packet UI, coverage MCP gate, tests).
+- Amplify dev job `96` for `4bd552f` status **SUCCEEDED**.
 - `npm run test` on the working tree: **474 files / 6,448 tests PASS**.
 - `npx eslint .` — **0 errors, 3 pre-existing warnings**.
 - `npx tsc --noEmit -p amplify/tsconfig.json` — clean; `npx tsc --noEmit -p tsconfig.app.json` — clean.

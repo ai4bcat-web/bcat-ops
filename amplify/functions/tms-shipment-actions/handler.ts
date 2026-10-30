@@ -4674,7 +4674,7 @@ async function sendRateConEmail(args: {
   pdfBase64: string
   messageId: string
   replyTo: string
-}): Promise<void> {
+}): Promise<{ status: 'SENT' | 'NOT_SENT' | 'FAILED'; error: string | null; raw: string }> {
   const boundary = `=_bcatratecon_${Date.now().toString(36)}`
   const raw =
     `From: ${FROM_ADDRESS}\r\n` +
@@ -4700,11 +4700,17 @@ async function sendRateConEmail(args: {
     `${wrap76(args.pdfBase64)}\r\n` +
     `--${boundary}--\r\n`
 
-  await ses.send(new SendEmailCommand({
-    FromEmailAddress: FROM_ADDRESS,
-    Destination: { ToAddresses: args.to, CcAddresses: args.cc.length > 0 ? args.cc : undefined },
-    Content: { Raw: { Data: new TextEncoder().encode(raw) } },
-  }))
+  try {
+    await ses.send(new SendEmailCommand({
+      FromEmailAddress: FROM_ADDRESS,
+      Destination: { ToAddresses: args.to, CcAddresses: args.cc.length > 0 ? args.cc : undefined },
+      Content: { Raw: { Data: new TextEncoder().encode(raw) } },
+    }))
+    return { status: 'SENT', error: null, raw }
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err)
+    return { status: 'NOT_SENT', error, raw }
+  }
 }
 
 const RATE_CON_SEND_FIELDS: Record<string, { column: string; label: string }> = {
@@ -4898,32 +4904,46 @@ async function sendRateCon(input: Row, caller: Caller): Promise<Row> {
 
   await transact(transactionItems, 'rate confirmation')
 
-  try {
-    await sendRateConEmail({
-      to,
-      cc,
-      subject: `Rate confirmation — load ${loadNumber}`,
-      body,
-      filename,
-      pdfBase64,
-      messageId,
-      replyTo: threadReplyAddress(shipmentId),
-    })
-  } catch (err) {
-    console.error('[tms-shipment-actions] rate con email failed', err)
+  const emailOutcome = await sendRateConEmail({
+    to,
+    cc,
+    subject: `Rate confirmation — load ${loadNumber}`,
+    body,
+    filename,
+    pdfBase64,
+    messageId,
+    replyTo: threadReplyAddress(shipmentId),
+  })
+
+  if (emailOutcome.status !== 'SENT') {
+    console.error('[tms-shipment-actions] rate con email failed', emailOutcome.error)
+    // Keep the exact message that would have been sent in CloudWatch so dev
+    // stacks (where SES is denied) can prove the email body and headers.
+    console.log('[tms-shipment-actions] rate con email would have sent:\n', emailOutcome.raw)
     if (process.env.BCAT_DEV_STACK === 'true') {
-      // Dev stacks deny SES to keep notifications inert. The row, message and
-      // token are real; the email itself is logged but not delivered.
-      console.log('[tms-shipment-actions] dev stack: suppressing rate con email failure')
+      // Dev stacks deny SES to keep notifications inert. Patch the row to the
+      // real outcome so the thread does not pretend an email was delivered.
+      await dynamo.send(new UpdateItemCommand({
+        TableName: SHIPMENT_MESSAGE_TABLE_NAME,
+        Key: marshall({ id: message.id }),
+        UpdateExpression: 'SET #status = :status, #error = :error, #updatedAt = :updatedAt',
+        ExpressionAttributeNames: { '#status': 'status', '#error': 'error', '#updatedAt': 'updatedAt' },
+        ExpressionAttributeValues: marshall({
+          ':status': 'NOT_SENT',
+          ':error': emailOutcome.error,
+          ':updatedAt': nowIso(),
+        }),
+      }))
+      console.log('[tms-shipment-actions] dev stack: rate con email failure suppressed; message row marked NOT_SENT')
     } else {
-      const failure = new Error(`The rate confirmation was saved but the email could not be sent: ${String(err)}`)
-      ;(failure as Error & { cause?: unknown }).cause = err
+      const failure = new Error(`The rate confirmation was saved but the email could not be sent: ${emailOutcome.error}`)
+      ;(failure as Error & { cause?: unknown }).cause = emailOutcome.error
       throw failure
     }
   }
 
   await writeAudit('LOAD_CARRIER', loadCarrierId, 'SEND_RATE_CON', caller, {
-    loadId, version, to, cc, expiresAt, documentId, s3Key, threadKey,
+    loadId, version, to, cc, expiresAt, documentId, s3Key, threadKey, emailStatus: emailOutcome.status,
   })
   return readBundle(shipmentId) as unknown as Row
 }

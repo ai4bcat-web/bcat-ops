@@ -19,6 +19,7 @@ import { storage } from './storage/resource'
 import { userManagement } from './functions/userManagement/resource'
 import { slackIntakeWebhook } from './functions/slack-intake-webhook/resource'
 import { gmailTaskIntake } from './functions/gmail-task-intake/resource'
+import { shipmentEmailIntake } from './functions/shipment-email-intake/resource'
 import { twofaIntake } from './functions/twofa-intake/resource'
 import { factoringIntake } from './functions/factoring-intake/resource'
 import { vendorApActions } from './functions/vendor-ap-actions/resource'
@@ -116,6 +117,7 @@ const backend = defineBackend({
   userManagement,
   slackIntakeWebhook,
   gmailTaskIntake,
+  shipmentEmailIntake,
   twofaIntake,
   factoringIntake,
   vendorApActions,
@@ -697,6 +699,35 @@ const gmailTaskUrl = new FunctionUrl(gmailTaskFn.stack, 'GmailTaskIntakeUrl', {
 new CfnOutput(gmailTaskFn.stack, 'GmailTaskIntakeFunctionUrl', {
   value:       gmailTaskUrl.url,
   description: 'POST tasks@ emails here from the Apps Script (JSON with the shared secret)',
+})
+
+// ── shipmentEmailIntake Lambda (inbound replies to tracking+<shipmentId>@) ───
+const shipmentEmailIntakeFn = backend.shipmentEmailIntake.resources.lambda as LambdaFunction
+const shipmentEmailIntakeMessageTable = backend.data.resources.tables['ShipmentMessage']
+
+backend.shipmentEmailIntake.resources.lambda.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['dynamodb:Query'],
+    resources: [shipmentEmailIntakeMessageTable.tableArn, `${shipmentEmailIntakeMessageTable.tableArn}/index/*`],
+  })
+)
+
+shipmentEmailIntakeFn.addEnvironment('SHIPMENT_MESSAGE_TABLE_NAME', shipmentEmailIntakeMessageTable.tableName)
+shipmentEmailIntakeFn.addEnvironment('TMS_TRACKING_ACTIONS_FUNCTION_NAME', backend.tmsTrackingActions.resources.lambda.functionName)
+
+backend.tmsTrackingActions.resources.lambda.addPermission('ShipmentEmailIntakeInvoke', {
+  principal: shipmentEmailIntakeFn.grantPrincipal,
+  action: 'lambda:InvokeFunction',
+  sourceArn: shipmentEmailIntakeFn.functionArn,
+})
+
+const shipmentEmailIntakeUrl = new FunctionUrl(shipmentEmailIntakeFn.stack, 'ShipmentEmailIntakeUrl', {
+  function: shipmentEmailIntakeFn,
+  authType: FunctionUrlAuthType.NONE,
+})
+new CfnOutput(shipmentEmailIntakeFn.stack, 'ShipmentEmailIntakeFunctionUrl', {
+  value:       shipmentEmailIntakeUrl.url,
+  description: 'POST tracking+<shipmentId>@ replies here from the Gmail bridge (JSON with the shared secret)',
 })
 
 // ── twofaIntake Lambda (Google Voice text forwards → Slack #2fa) ───────────
