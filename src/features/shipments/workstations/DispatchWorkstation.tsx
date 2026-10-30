@@ -3,20 +3,17 @@
  *
  * Left: the shared board filter panel narrowed to freight that still needs or just
  * got coverage (OPEN and COVERED). Right: the coverage queue, and for the selected
- * shipment a "Find coverage" panel that shows what is covering it now, carriers that
- * have run this lane before with their vetting flags, and the assign / rate-con
- * actions from the existing shipment page. Parsed e-mail/SMS carrier offers are
- * explicitly left to Step P.
+ * shipment a "Find coverage" panel that shows posting state, parsed carrier offers,
+ * what is covering it now, and carriers that have run this lane before.
  *
  * Routing lives in the sidebar agent; this module only renders `/tms/dispatch`.
  */
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { formatDistanceToNow } from 'date-fns'
 import { Truck } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { BoardFilterPanel } from '@/features/shipments/board/BoardFilterPanel'
-import { useBoardFilters } from '@/features/shipments/board/useBoardFilters'
+import { teamRepIdsFor, useBoardFilters } from '@/features/shipments/board/useBoardFilters'
 import { TmsBadge, TmsButton, TmsCard, TmsEmptyState } from '@/features/tms/kit'
 import type { TmsTone } from '@/features/tms/kit'
 import { useShipmentActions, type ShipmentActions } from '@/features/shipments/useShipmentActions'
@@ -29,15 +26,23 @@ import {
   getCarrierBundle,
   getShipmentBundle,
   getTmsSettings,
+  listActivePostings,
   listCarriers,
+  listCarrierOffers,
   listDivisions,
   listLoadCarriers,
+  listShipmentPostings,
 } from '@/lib/apiClient'
-import { buildRateConPdf, rateConPdfBase64, type RateConInput } from '@/lib/carrierRateCon'
 import { formatDateTime } from '@/lib/date'
-import { quickPayTiersOf, tierFor } from '@/lib/quickPay'
 import { viewCallerOf, viewsVisibleTo } from '@/lib/shipmentViewDefs'
 import { formatCents } from '@/lib/tmsDirectory'
+import { descriptorOf } from '@/lib/integrations/registry'
+import {
+  buildRateConInput,
+  buildRateConPdf,
+  rateConPdfBase64,
+  rateConRecipients,
+} from './dispatch/rateCon'
 import {
   coverageStateOf,
   suggestCarriers,
@@ -46,21 +51,24 @@ import {
   type LaneHistoryEntry,
   type SuggestedCarrier,
 } from './coverage'
+import { PostingPanel } from './dispatch/PostingPanel'
+import { OfferQueue } from './dispatch/OfferQueue'
 import {
   EMPTY_BOARD_FILTER_SET,
   type BoardStatusKey,
   type ShipmentRow,
 } from '../shipmentViews'
 import type {
-  CarrierContactRecord,
   CarrierRecord,
   CustomerRecord,
   Division,
   LoadCarrierRecord,
-  RateConRequiredField,
+  QuoteRecord,
   ShipmentBundle,
+  ShipmentPostingRecord,
   TmsSettings,
 } from '@/types/tms'
+import type { CarrierOfferVetting } from '@/lib/apiClient'
 
 const BASE_FILTERS = { ...EMPTY_BOARD_FILTER_SET, statuses: ['OPEN', 'COVERED'] as BoardStatusKey[] }
 
@@ -78,98 +86,17 @@ const COVERAGE_LABEL: Record<CoverageState, string> = {
   DISPATCHED: 'Dispatched',
 }
 
-const DEFAULT_REQUIRED_FIELDS: RateConRequiredField[] = ['DRIVER_NAME', 'DRIVER_PHONE', 'TRUCK_NUMBER']
-
 function laneLabel(row: ShipmentRow): string {
   const origin = [row.originCity, row.fromState].filter(Boolean).join(', ') || '—'
   const dest = [row.destinationCity, row.toState].filter(Boolean).join(', ') || '—'
   return `${origin} → ${dest}`
 }
 
-function postedLabel(datPostedAt: string | null | undefined): string {
-  if (!datPostedAt) return 'Not posted'
-  const then = new Date(datPostedAt)
-  if (Number.isNaN(then.getTime())) return 'Posted to DAT'
-  return `Posted to DAT ${formatDistanceToNow(then, { addSuffix: true })}`
-}
-
-function buildRateConInput(
-  bundle: ShipmentBundle,
-  loadCarrier: LoadCarrierRecord,
-  carrier: CarrierRecord,
-  settings: TmsSettings | null,
-  divisions: Division[],
-): RateConInput {
-  const load = bundle.loads[0]
-  const division = divisions.find((d) => d.key === load?.divisionKey) ?? null
-
-  const charges = bundle.charges
-    .filter(
-      (c) =>
-        c.side === 'CARRIER' &&
-        (c.loadCarrierId == null || c.loadCarrierId === loadCarrier.id),
-    )
-    .map((c) => ({ label: c.label || c.code, amountCents: c.amountCents }))
-  const totalCents = charges.reduce((sum, c) => sum + c.amountCents, 0)
-
-  const tier =
-    loadCarrier.quickPayDays != null
-      ? tierFor(loadCarrier.quickPayDays, quickPayTiersOf(settings))
-      : null
-
-  return {
-    division,
-    carrier: {
-      name: carrier.name ?? loadCarrier.carrierName ?? 'Carrier',
-      mcNumber: carrier.mcNumber ?? loadCarrier.carrierMc ?? null,
-      dotNumber: carrier.dotNumber ?? null,
-      phone: carrier.phone ?? null,
-      email: carrier.email ?? null,
-    },
-    loadCarrier,
-    loadNumber: load?.loadNumber ?? load?.id ?? '',
-    equipmentType: load?.equipmentType ?? null,
-    commodity: load?.commodity ?? null,
-    weightLbs: load?.weight ?? null,
-    stops: (load?.stops ?? []).map((s) => {
-      const visibility = (s.refs ?? []).filter(
-        (r) => r.visibility === 'CARRIER' || r.visibility === 'ALL',
-      )
-      return {
-        kind: s.type === 'pickup' ? 'PICKUP' : 'DELIVERY',
-        name: s.name ?? null,
-        address: s.address?.street ?? null,
-        city: s.address?.city ?? s.city ?? null,
-        state: s.address?.state ?? null,
-        zip: s.address?.zip ?? null,
-        apptAt: s.appt ?? null,
-        apptEnd: s.apptEnd ?? null,
-        apptType: s.apptType ?? null,
-        references: visibility.map((r) => ({
-          label: r.label || r.code,
-          value: r.value,
-        })),
-        instructions: s.stopNotes ?? null,
-      }
-    }),
-    charges,
-    totalCents,
-    quickPay:
-      tier && loadCarrier.quickPayFeeCents != null
-        ? {
-            days: tier.days,
-            feeBps: tier.feeBps,
-            feeCents: loadCarrier.quickPayFeeCents,
-            netCents: (loadCarrier.carrierRateCents ?? totalCents) - loadCarrier.quickPayFeeCents,
-          }
-        : null,
-    paymentTermsDays:
-      loadCarrier.paymentTermsDays ?? settings?.defaultCarrierTermsDays ?? null,
-    terms: settings?.rateConTerms ?? '',
-    requiredFields:
-      (settings?.rateConRequiredFields as RateConRequiredField[] | null) ??
-      DEFAULT_REQUIRED_FIELDS,
-  }
+function postedBoardLabels(postings: ShipmentPostingRecord[]): string {
+  const boards = postings
+    .filter((p) => p.status === 'POSTED')
+    .map((p) => descriptorOf(p.provider)?.label ?? p.provider)
+  return boards.length > 0 ? boards.join(', ') : 'Not posted'
 }
 
 export function DispatchWorkstation() {
@@ -197,6 +124,11 @@ export function DispatchWorkstation() {
   const visibleViews = useMemo(
     () => viewsVisibleTo(viewsState.views, caller),
     [viewsState.views, caller],
+  )
+
+  const viewer = useMemo(
+    () => ({ userId: user?.userId ?? null, teamRepIds: teamRepIdsFor(staff.me, settings?.teams) }),
+    [user?.userId, staff.me, settings?.teams],
   )
 
   const loadSupport = useCallback(async () => {
@@ -240,6 +172,7 @@ export function DispatchWorkstation() {
     onSelectView: setViewSlug,
     storageKey: 'tms-dispatch',
     baseFilters: BASE_FILTERS,
+    viewer,
   })
 
   const refreshAll = useCallback(async () => {
@@ -315,9 +248,17 @@ export function DispatchBody({
 }: DispatchBodyProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [loadedBundle, setSelectedBundle] = useState<ShipmentBundle | null>(null)
-  const [loadingBundle, setLoadingBundle] = useState(false)
   const [bundleError, setBundleError] = useState<string | null>(null)
   const [divisions, setDivisions] = useState<Division[]>([])
+  const [activePostings, setActivePostings] = useState<ShipmentPostingRecord[]>([])
+  const [offersByShipment, setOffersByShipment] = useState<Record<string, (QuoteRecord & { vetting: CarrierOfferVetting })[]>>({})
+  const [shipmentPostings, setShipmentPostings] = useState<ShipmentPostingRecord[]>([])
+  // Neither fetch below sets state synchronously: each loading flag is derived
+  // from which inputs the last completed fetch belonged to.
+  const [coverageRows, setCoverageRows] = useState<ShipmentRow[] | null>(null)
+  const coverageLoading = coverageRows !== rows
+  const [bundleReadyFor, setBundleReadyFor] = useState<string | null>(null)
+  const loadingBundle = selectedId !== null && bundleReadyFor !== selectedId
   // A bundle from a previous selection must never be read as this one's.
   const selectedBundle = loadedBundle && loadedBundle.shipment.id === selectedId ? loadedBundle : null
 
@@ -326,16 +267,45 @@ export function DispatchBody({
     listDivisions().then((d) => { if (live) setDivisions(d) }).catch(() => {})
     return () => { live = false }
   }, [])
+
+  // Load the queue-level coverage signals once: where freight is live and how many
+  // offers each row has, so a dispatcher can see where the work is without clicking.
+  useEffect(() => {
+    let live = true
+    Promise.all([
+      listActivePostings(),
+      Promise.all(rows.map((r) => listCarrierOffers(r.id).catch(() => ({ offers: [] })))),
+    ])
+      .then(([postings, offersResults]) => {
+        if (!live) return
+        setActivePostings(postings)
+        const byShipment: Record<string, (QuoteRecord & { vetting: CarrierOfferVetting })[]> = {}
+        rows.forEach((row, i) => { byShipment[row.id] = offersResults[i].offers })
+        setOffersByShipment(byShipment)
+      })
+      .catch(() => {})
+      .finally(() => { if (live) setCoverageRows(rows) })
+    return () => { live = false }
+  }, [rows])
+
   // The fetch owns every state change: clearing the panel synchronously here would
   // re-render the whole queue on each selection for no visible gain. A bundle that
   // belongs to a different shipment is ignored at the point it is read, below.
   useEffect(() => {
     if (!selectedId) return
     let live = true
-    getShipmentBundle(selectedId)
-      .then((bundle) => { if (live) { setSelectedBundle(bundle); setBundleError(null) } })
+    Promise.all([
+      getShipmentBundle(selectedId),
+      listShipmentPostings(selectedId),
+    ])
+      .then(([bundle, postings]) => {
+        if (!live) return
+        setSelectedBundle(bundle)
+        setShipmentPostings(postings)
+        setBundleError(null)
+      })
       .catch((err) => { if (live) setBundleError(err instanceof Error ? err.message : 'Could not load shipment') })
-      .finally(() => { if (live) setLoadingBundle(false) })
+      .finally(() => { if (live) setBundleReadyFor(selectedId) })
     return () => { live = false }
   }, [selectedId])
 
@@ -389,6 +359,21 @@ export function DispatchBody({
     return selectedBundle.loadCarriers.find((lc) => lc.status === 'ACTIVE') ?? null
   }, [selectedBundle, selectedId, activeLegsByShipment])
 
+  const postingsFor = useCallback(
+    (shipmentId: string) => activePostings.filter((p) => p.shipmentId === shipmentId),
+    [activePostings],
+  )
+
+  const refreshPostings = useCallback(async () => {
+    if (!selectedId) return
+    const [postings, active] = await Promise.all([
+      listShipmentPostings(selectedId),
+      listActivePostings(),
+    ])
+    setShipmentPostings(postings)
+    setActivePostings(active)
+  }, [selectedId])
+
   return (
     <div className="flex flex-1 overflow-hidden">
       <div className="flex w-1/2 min-w-0 flex-col border-r">
@@ -408,8 +393,10 @@ export function DispatchBody({
                 row={row}
                 customers={customers}
                 activeLeg={activeLegsByShipment[row.id] ?? null}
+                postings={postingsFor(row.id)}
+                offers={offersByShipment[row.id] ?? []}
                 selected={selectedId === row.id}
-                onClick={() => { setSelectedId(row.id); setLoadingBundle(true); setBundleError(null) }}
+                onClick={() => { setSelectedId(row.id); setBundleError(null) }}
               />
             )))
           }
@@ -435,6 +422,21 @@ export function DispatchBody({
         ) : (
           <div className="flex-1 overflow-y-auto p-3 space-y-3">
             <ActiveLegCard leg={activeLegForSelected} />
+            <PostingPanel
+              shipmentId={selectedId}
+              postings={shipmentPostings}
+              loading={coverageLoading}
+              onChange={refreshPostings}
+            />
+            <OfferQueue
+              shipmentId={selectedId}
+              offers={offersByShipment[selectedId] ?? []}
+              selectedBundle={selectedBundle}
+              actions={actions}
+              settings={settings}
+              divisions={divisions}
+              refreshAll={refreshAll}
+            />
             <SuggestionsCard
               suggestions={suggestions}
               selectedBundle={selectedBundle}
@@ -444,7 +446,6 @@ export function DispatchBody({
               divisions={divisions}
               refreshAll={refreshAll}
             />
-            <StepPNotice />
           </div>
         )}
       </div>
@@ -456,11 +457,13 @@ interface CoverageQueueCardProps {
   row: ShipmentRow
   customers: CustomerRecord[]
   activeLeg: LoadCarrierRecord | null
+  postings: ShipmentPostingRecord[]
+  offers: (QuoteRecord & { vetting: CarrierOfferVetting })[]
   selected: boolean
   onClick: () => void
 }
 
-function CoverageQueueCard({ row, customers, activeLeg, selected, onClick }: CoverageQueueCardProps) {
+function CoverageQueueCard({ row, customers, activeLeg, postings, offers, selected, onClick }: CoverageQueueCardProps) {
   const customer = row.customerId ? customers.find((c) => c.id === row.customerId) : undefined
   const customerName = customer?.name ?? row.customerName ?? '—'
 
@@ -471,6 +474,8 @@ function CoverageQueueCard({ row, customers, activeLeg, selected, onClick }: Cov
     dispatchedAt: activeLeg?.dispatchedAt ?? null,
     rateConSignedAt: activeLeg?.rateConSignedAt ?? null,
   })
+
+  const posted = postedBoardLabels(postings)
 
   return (
     <button
@@ -500,8 +505,14 @@ function CoverageQueueCard({ row, customers, activeLeg, selected, onClick }: Cov
         <Fact label="Equipment" value={row.equipmentType ?? '—'} />
         <Fact label="Commodity" value={row.commodity ?? '—'} />
         <Fact label="Customer rate" value={row.revenueCents != null ? `$${formatCents(row.revenueCents)}` : '—'} />
-        <Fact label="Posted" value={postedLabel(row.datPostedAt)} />
+        <Fact label="Posted" value={posted} />
       </div>
+
+      {offers.length > 0 && (
+        <div className="mt-2 text-xs tms-muted" data-testid="offer-count">
+          Offers ({offers.length})
+        </div>
+      )}
     </button>
   )
 }
@@ -649,18 +660,6 @@ function SuggestionsCard({
   )
 }
 
-function rateConRecipients(
-  carrier: CarrierRecord,
-  contacts: CarrierContactRecord[],
-): string[] {
-  const fromContacts = contacts
-    .filter((c) => c.active !== false && c.email)
-    .filter((c) => c.rateConRecipient || c.types?.includes('DISPATCH'))
-    .map((c) => c.email as string)
-  const fallbacks = [carrier.dispatcherEmail, carrier.email].filter((e): e is string => Boolean(e))
-  return Array.from(new Set([...fromContacts, ...fallbacks]))
-}
-
 interface SuggestionRowProps {
   suggestion: SuggestedCarrier
   active: boolean
@@ -718,13 +717,5 @@ function SuggestionRow({ suggestion, active, busy, onAssign, onSendRateCon }: Su
         </TmsButton>
       </div>
     </div>
-  )
-}
-
-function StepPNotice() {
-  return (
-    <p className="px-1 text-sm tms-muted">
-      Carrier offers parsed from e-mail and text arrive with Step P.
-    </p>
   )
 }

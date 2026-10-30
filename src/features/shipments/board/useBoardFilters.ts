@@ -11,13 +11,13 @@
  * Nothing in here renders. Nothing in here fetches rows — the caller passes the rows it
  * already has, so a page never pays for a second read of the same list.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 import { toast } from 'sonner'
 
 import type { BoardFilterPanelProps } from './BoardFilterPanel'
 import type { BoardDateKey, BoardDetailDef } from './types'
 import { archiveShipmentView, saveShipmentView } from '@/lib/apiClient'
-import { slugify } from '@/lib/shipmentViewDefs'
+import { ME_SENTINEL, MY_TEAM_SENTINEL, slugify } from '@/lib/shipmentViewDefs'
 import {
   EMPTY_BOARD_FILTER_SET,
   boardFilterCount,
@@ -31,7 +31,7 @@ import {
   type BoardStatusKey,
   type ShipmentRow,
 } from '../shipmentViews'
-import type { CustomerRecord, ShipmentViewRecord } from '@/types/tms'
+import type { CustomerRecord, ShipmentViewRecord, Team, UserProfileRecord } from '@/types/tms'
 
 /** The fifteen Details facets, in the order Aljex lists them. */
 export const DETAIL_LABELS: Record<BoardDetailKey, string> = {
@@ -86,13 +86,20 @@ export interface UseBoardFiltersOptions {
    */
   query?: string
   onQueryChange?: (value: string) => void
+  /**
+   * Step P2. Who is looking, so the seeded My queue / Team queue views can mean
+   * "mine" without a view per rep. The sentinels are resolved only when the rows
+   * are matched — the saved filter set keeps `@me`, so it still round-trips and
+   * still means the same thing for the next person who opens it.
+   */
+  viewer?: { userId: string | null; teamRepIds: readonly string[] }
 }
 
 export interface UseBoardFiltersResult {
   query: string
   setQuery: (value: string) => void
   filters: BoardFilterSet
-  setFilters: (next: BoardFilterSet) => void
+  setFilters: Dispatch<SetStateAction<BoardFilterSet>>
   /** Rows after search only — what the status counts are drawn from. */
   queryRows: ShipmentRow[]
   /** Rows after search and filters: what the page renders. */
@@ -114,6 +121,55 @@ function readCollapsed(key: string): boolean {
   if (typeof window === 'undefined') return false
   return window.localStorage.getItem(`${key}:collapsed`) === 'true'
 }
+
+/**
+ * Turn the signed-in user's profile and the org's team roster into the ids that
+ * `@myteam` resolves to. A viewer on no team gets an empty list, so `@myteam`
+ * honestly matches nothing rather than silently widening to the whole board.
+ */
+export function teamRepIdsFor(
+  me: UserProfileRecord | null,
+  teams: readonly Team[] | null | undefined,
+): readonly string[] {
+  if (!me?.teamKeys?.length || !teams?.length) return []
+  const myTeamKeys = new Set(me.teamKeys)
+  const ids = new Set<string>()
+  for (const team of teams) {
+    if (myTeamKeys.has(team.key)) {
+      for (const id of team.memberIds) ids.add(id)
+    }
+  }
+  return [...ids]
+}
+
+export function resolveQueueSentinels(
+  filters: BoardFilterSet,
+  viewer: { userId: string | null; teamRepIds: readonly string[] } | undefined,
+): BoardFilterSet {
+  const details = filters.details ?? {}
+  let touched = false
+  const next: typeof details = { ...details }
+  for (const key of ['dispatcherAssigned', 'dispatcherActual'] as const) {
+    const facet = details[key]
+    if (!facet?.values?.some((v) => v === ME_SENTINEL || v === MY_TEAM_SENTINEL)) continue
+    touched = true
+    const expanded: string[] = []
+    for (const value of facet.values) {
+      if (value === ME_SENTINEL) {
+        if (viewer?.userId) expanded.push(viewer.userId)
+      } else if (value === MY_TEAM_SENTINEL) {
+        expanded.push(...(viewer?.teamRepIds ?? []))
+      } else {
+        expanded.push(value)
+      }
+    }
+    // `NO_MATCH` is not a Cognito username, so an unresolved queue shows nothing
+    // rather than quietly widening to the whole board.
+    next[key] = { ...facet, values: expanded.length ? [...new Set(expanded)] : ['\u0000NO_MATCH'] }
+  }
+  return touched ? { ...filters, details: next } : filters
+}
+
 
 export function useBoardFilters(options: UseBoardFiltersOptions): UseBoardFiltersResult {
   const {
@@ -172,8 +228,12 @@ export function useBoardFilters(options: UseBoardFiltersOptions): UseBoardFilter
 
   const rows = useMemo(() => {
     const now = new Date()
-    return queryRows.filter((r) => matchesBoardFilters(r, filters, now))
-  }, [queryRows, filters])
+    // Resolve `@me` / `@myteam` here rather than in `filters`: the panel, the dirty
+    // check and the save all keep the sentinel, so a shared queue view still means
+    // "mine" for whoever opens it next.
+    const applied = resolveQueueSentinels(filters, options.viewer)
+    return queryRows.filter((r) => matchesBoardFilters(r, applied, now))
+  }, [queryRows, filters, options.viewer])
 
   const statusCounts = useMemo(() => boardStatusCounts(queryRows), [queryRows])
 

@@ -86,7 +86,7 @@ const LOAD_SHIPMENT_FIELDS = `
   trackingProvider nextCheckCallAt nextCheckCallNote checkCallOpen pickupMonth
   lastCheckCallAt lastCheckCallType lastKnownAt lastKnownCity lastKnownState
   lastKnownLat lastKnownLng lastKnownSource openIncidentCount deliveredAt
-  checkCallDueNotifiedAt checkCallOverdueNotifiedAt
+  checkCallDueNotifiedAt checkCallOverdueNotifiedAt checkCallPlan checkCallPlanStartedAt checkCallAwaitingSince checkCallEscalatedAt checkCallFlaggedAt checkCallFlagReason
 `
 // Step R's revenue tags, mirrored from the shipment so the fleet pages can group by
 // business without joining. Their own flag: they land one deploy after the shipment
@@ -1143,15 +1143,24 @@ const CUSTOMER_V3_FIELDS = ['project44CustomerId', 'hubspotId', 'ediSettings', '
 // Step K's per-party AI memory. Its own flag again: a backend that predates the field
 // must keep serving every v3 field rather than losing the whole directory.
 const CUSTOMER_V4_FIELDS = ['aiMemory']
-const CUSTOMER_JSON_FIELDS: (keyof CustomerRecord)[] = ['billingAddress', 'contacts', 'billToParties', 'requiredReferences', 'chargeCodeOverrides', 'defaultCharges', 'pricingDefaults', 'quotingDefaults', 'visibilityPrefs', 'ediSettings', 'aiMemory']
+// Step P3's flow defaults: the carrier queue, the margin, the required-field list and
+// the check-call plan a new load for this customer inherits. Its own flag again, so a
+// backend that predates Step P keeps serving every v4 field.
+const CUSTOMER_V5_FIELDS = [
+  'defaultCarrierTeamKey', 'defaultCarrierRepId', 'marginTargetBps', 'marginFloorBps',
+  'quoteAutoReply', 'requiredLoadFields', 'checkCallPlan',
+]
+const CUSTOMER_JSON_FIELDS: (keyof CustomerRecord)[] = ['billingAddress', 'contacts', 'billToParties', 'requiredReferences', 'chargeCodeOverrides', 'defaultCharges', 'pricingDefaults', 'quotingDefaults', 'visibilityPrefs', 'ediSettings', 'aiMemory', 'checkCallPlan']
 let customersHaveV2 = true
 let customersHaveV3 = true
 let customersHaveV4 = true
+let customersHaveV5 = true
 const customerFields = () => [
   CUSTOMER_FIELDS_BASE,
   customersHaveV2 ? CUSTOMER_V2_FIELDS.join(' ') : '',
   customersHaveV3 ? CUSTOMER_V3_FIELDS.join(' ') : '',
   customersHaveV4 ? CUSTOMER_V4_FIELDS.join(' ') : '',
+  customersHaveV5 ? CUSTOMER_V5_FIELDS.join(' ') : '',
 ].filter(Boolean).join(' ')
 
 const LOCATION_FIELDS = `
@@ -1226,7 +1235,13 @@ const TMS_SETTINGS_V11_FIELDS = [
 // Step K's AI agent settings: the one human-edited blob the workflow agent reads and
 // never writes. Its own flag again, for the same reason.
 const TMS_SETTINGS_V12_FIELDS = ['aiAgents']
-const TMS_SETTINGS_JSON_FIELDS: (keyof TmsSettings)[] = ['accessorialCodes', 'loadStatusRules', 'defaultRequiredReferences', 'chargeCodes', 'quickPayTiers', 'trackingContact', 'factorRemitTo', 'teams', 'commissionPlans', 'commissionPaySchedule', 'postalCodeAliases', 'aiAgents']
+// Step P3's org defaults: the target margin (and its per-mode overrides), the required
+// fields a built load must carry, the org check-call plan and the demo seed's stamp.
+const TMS_SETTINGS_V13_FIELDS = [
+  'marginTargetBps', 'marginTargetBpsByMode', 'quoteAutoReplyDefault',
+  'defaultRequiredLoadFields', 'defaultCheckCallPlan', 'demoSeedVersion', 'demoSeededAt',
+]
+const TMS_SETTINGS_JSON_FIELDS: (keyof TmsSettings)[] = ['accessorialCodes', 'loadStatusRules', 'defaultRequiredReferences', 'chargeCodes', 'quickPayTiers', 'trackingContact', 'factorRemitTo', 'teams', 'commissionPlans', 'commissionPaySchedule', 'postalCodeAliases', 'aiAgents', 'marginTargetBpsByMode', 'defaultCheckCallPlan']
 let settingsHaveV2 = true
 let settingsHaveV3 = true
 let settingsHaveV4 = true
@@ -1238,6 +1253,7 @@ let settingsHaveV9 = true
 let settingsHaveV10 = true
 let settingsHaveV11 = true
 let settingsHaveV12 = true
+let settingsHaveV13 = true
 const tmsSettingsFields = () => [
   TMS_SETTINGS_FIELDS_BASE,
   settingsHaveV2 ? TMS_SETTINGS_V2_FIELDS.join(' ') : '',
@@ -1251,6 +1267,7 @@ const tmsSettingsFields = () => [
   settingsHaveV10 ? TMS_SETTINGS_V10_FIELDS.join(' ') : '',
   settingsHaveV11 ? TMS_SETTINGS_V11_FIELDS.join(' ') : '',
   settingsHaveV12 ? TMS_SETTINGS_V12_FIELDS.join(' ') : '',
+  settingsHaveV13 ? TMS_SETTINGS_V13_FIELDS.join(' ') : '',
 ].filter(Boolean).join(' ')
 const fieldNamed = (names: string[], err: unknown) => {
   const msg = safeStringify(err)
@@ -1321,6 +1338,11 @@ export async function listCustomers(opts?: { includeArchived?: boolean }): Promi
       return opts?.includeArchived ? rows : rows.filter(isActiveDirectoryRecord)
     } catch (err) {
       if (attempt >= 4) throw err
+      if (customersHaveV5 && fieldNamed(CUSTOMER_V5_FIELDS, err)) {
+        console.warn('[apiClient] backend has no Customer flow defaults yet — querying without them until deploy')
+        customersHaveV5 = false
+        continue
+      }
       if (customersHaveV4 && fieldNamed(CUSTOMER_V4_FIELDS, err)) {
         console.warn('[apiClient] backend has no Customer AI memory yet — querying without it until deploy')
         customersHaveV4 = false
@@ -1416,6 +1438,11 @@ export async function getTmsSettings(): Promise<TmsSettings | null> {
       return await run()
     } catch (err) {
       if (attempt >= 11) throw err
+      if (settingsHaveV13 && fieldNamed(TMS_SETTINGS_V13_FIELDS, err)) {
+        console.warn('[apiClient] backend has no Step P org defaults yet — querying without them until deploy')
+        settingsHaveV13 = false
+        continue
+      }
       if (settingsHaveV12 && fieldNamed(TMS_SETTINGS_V12_FIELDS, err)) {
         console.warn('[apiClient] backend has no TmsSettings AI agent fields yet — querying without them until deploy')
         settingsHaveV12 = false
@@ -6885,6 +6912,256 @@ export async function acceptOffer(input: AcceptOfferInput): Promise<{ quote: Quo
 /** ADMIN only. Templates must carry `{link}` and the number format `{n}`; the server checks. */
 export async function saveQuoteSettings(input: Partial<QuoteSettings> & { expectedUpdatedAt?: string }): Promise<{ settings: TmsSettings }> {
   return shipmentAction<{ settings: TmsSettings }>('SAVE_QUOTE_SETTINGS', input)
+}
+
+// ── Step P — the end-to-end demo flow ────────────────────────────────────────
+//
+// Every write below is an action on a Lambda that already owns the records it
+// touches: postings, the build gate, carrier offers, the demo seed and the market
+// rate go to `tmsShipmentActions`, which owns Shipment/Order/Load/Quote; the
+// shipment thread, the check-call agent and the POD review go to
+// `tmsTrackingActions`, which is the only Lambda wired to Twilio and SES for a
+// shipment. Nothing here writes a record from the browser.
+
+export type {
+  ShipmentPostingRecord, ShipmentMessageRecord, DemoRecordRow, ShipmentBuildState,
+  PostingStatus, ShipmentMessageChannel, ShipmentMessageKind, ShipmentMessageParty,
+  ShipmentMessageStatus, CheckCallPlan, CheckCallChannel, CheckCallMilestone, RateViewAnswer,
+} from '@/types/tms'
+import type {
+  ShipmentPostingRecord, ShipmentMessageRecord, DemoRecordRow, CheckCallPlan, RateViewAnswer,
+} from '@/types/tms'
+import type { DemoChecklistFacts } from '@/lib/demoFlow'
+export type { DemoChecklistFacts, DemoStepDef, DemoStepKey, DemoChecklistRow } from '@/lib/demoFlow'
+
+const POSTING_FIELDS = `
+  id shipmentId loadId provider status mode boardPostingId message
+  postedAt postedBy unpostedAt unpostedBy
+  originCity originState destinationCity destinationState pickupAppt
+  equipmentType lengthFt weightLbs rateCents contactEmail contactPhone note offerCount
+  createdBy updatedBy version createdAt updatedAt
+`
+
+const SHIPMENT_MESSAGE_FIELDS = `
+  id shipmentId threadKey loadId loadCarrierId direction channel kind party
+  to from cc subject body status error messageId inReplyTo providerRef
+  attachments documentIds trackingLinkId workflowRunId authorKind authorName at createdBy createdAt updatedAt
+`
+
+/** Every board this shipment is, or was, posted to — newest first. */
+export async function listShipmentPostings(shipmentId: string): Promise<ShipmentPostingRecord[]> {
+  const rows = await listAllByIndex<ShipmentPostingRecord>(
+    'listShipmentPostingByShipmentId', { shipmentId }, POSTING_FIELDS, 200,
+  )
+  return rows.sort((a, b) => String(b.postedAt ?? '').localeCompare(String(a.postedAt ?? '')))
+}
+
+/** Every live posting on the stack, for the Dispatch workstation's coverage column. */
+export async function listActivePostings(): Promise<ShipmentPostingRecord[]> {
+  return listAllByIndex<ShipmentPostingRecord>(
+    'listShipmentPostingByStatusAndPostedAt', { status: 'POSTED' }, POSTING_FIELDS, 200,
+  )
+}
+
+export interface PostLoadInput {
+  shipmentId: string
+  loadId?: string | null
+  providers: string[]
+  rateCents?: number | null
+  note?: string | null
+  contactEmail?: string | null
+  contactPhone?: string | null
+}
+
+/** Post to one or more boards. Refused while the shipment is still Building. */
+export async function postLoad(input: PostLoadInput): Promise<{ postings: ShipmentPostingRecord[] }> {
+  return shipmentAction<{ postings: ShipmentPostingRecord[] }>('POST_LOAD', input)
+}
+
+export async function unpostLoad(input: { shipmentId: string; providers: string[] }): Promise<{ postings: ShipmentPostingRecord[] }> {
+  return shipmentAction<{ postings: ShipmentPostingRecord[] }>('UNPOST_LOAD', input)
+}
+
+export interface BuildGateResult {
+  shipment: ShipmentRecord
+  missingFields: string[]
+  requiredFields: string[]
+}
+
+/** Recompute the Needs: list and flip BUILDING → BUILT when nothing is missing. */
+export async function completeBuild(input: { shipmentId: string; expectedUpdatedAt?: string }): Promise<BuildGateResult> {
+  return shipmentAction<BuildGateResult>('COMPLETE_BUILD', input)
+}
+
+/** What this shipment still needs, without writing anything. */
+export async function checkBuildGate(shipmentId: string): Promise<BuildGateResult> {
+  return shipmentAction<BuildGateResult>('CHECK_BUILD_GATE', { shipmentId })
+}
+
+export interface MarketRateResult {
+  answer: RateViewAnswer
+  targetBps: number
+  floorBps: number
+  autoReply: boolean
+  suggestedSellCents: number
+  belowFloor: boolean
+  floorSellCents: number
+  marginAtSuggested: number
+}
+
+/** Ask DAT (or the labelled stub) for this lane, and price it at the customer's margin. */
+export async function priceFromMarket(input: {
+  quoteId?: string | null
+  shipmentId?: string | null
+  customerId?: string | null
+  originCity: string
+  originState: string
+  destinationCity: string
+  destinationState: string
+  equipmentType: string
+  pickupDate?: string | null
+  miles?: number | null
+  mode?: string | null
+  save?: boolean
+  expectedUpdatedAt?: string
+}): Promise<MarketRateResult & { quote?: QuoteRecord }> {
+  return shipmentAction<MarketRateResult & { quote?: QuoteRecord }>('PRICE_FROM_MARKET', input)
+}
+
+/** Log a carrier's answer to a posting as a BUY-side offer on the shipment. */
+export async function recordCarrierOffer(input: {
+  shipmentId: string
+  carrierName: string
+  carrierMc?: string | null
+  carrierEmail?: string | null
+  contactName?: string | null
+  contactPhone?: string | null
+  amountCents: number
+  equipmentType?: string | null
+  availableAt?: string | null
+  source: 'EMAIL' | 'PHONE' | 'BOARD' | 'MANUAL'
+  postingId?: string | null
+  messageRef?: string | null
+  notes?: string | null
+}): Promise<{ quote: QuoteRecord; carrierId: string | null; vetting: CarrierOfferVetting }> {
+  return shipmentAction<{ quote: QuoteRecord; carrierId: string | null; vetting: CarrierOfferVetting }>(
+    'RECORD_CARRIER_OFFER', input,
+  )
+}
+
+export interface CarrierOfferVetting {
+  known: boolean
+  bookable: boolean
+  /** Why the carrier cannot be booked right now, in the gate's own words. */
+  blockers: string[]
+  warnings: string[]
+  status: string | null
+  mcpStatus: string | null
+}
+
+/** The offers on a shipment, with each carrier's standing resolved. */
+export async function listCarrierOffers(shipmentId: string): Promise<{
+  offers: (QuoteRecord & { vetting: CarrierOfferVetting })[]
+}> {
+  return shipmentAction<{ offers: (QuoteRecord & { vetting: CarrierOfferVetting })[] }>(
+    'LIST_CARRIER_OFFERS', { shipmentId },
+  )
+}
+
+/** MyCarrierPackets setup packet for an unknown or unvetted carrier (Step J adapter). */
+export async function sendSetupPacket(input: {
+  shipmentId: string
+  quoteId: string
+  email: string
+}): Promise<{ sent: boolean; mode: 'STUB' | 'LIVE'; message: string }> {
+  return shipmentAction<{ sent: boolean; mode: 'STUB' | 'LIVE'; message: string }>('SEND_SETUP_PACKET', input)
+}
+
+// ── The shipment thread, the tracking agent and the POD (tmsTrackingActions) ──
+
+export async function listShipmentMessages(shipmentId: string): Promise<ShipmentMessageRecord[]> {
+  const rows = await listAllByIndex<ShipmentMessageRecord>(
+    'listShipmentMessageByShipmentIdAndAt', { shipmentId }, SHIPMENT_MESSAGE_FIELDS, 200,
+  )
+  return rows.sort((a, b) => String(a.at).localeCompare(String(b.at)))
+}
+
+export async function sendShipmentMessage(input: {
+  shipmentId: string
+  channel: 'EMAIL' | 'SMS'
+  kind?: string
+  to?: string | null
+  subject?: string | null
+  body: string
+  inReplyTo?: string | null
+}): Promise<{ message: ShipmentMessageRecord }> {
+  return trackingAction<{ message: ShipmentMessageRecord }>('SEND_SHIPMENT_MESSAGE', input)
+}
+
+/** Run the check-call plan for one shipment now, and say what it did. */
+export async function runCheckCallPlan(input: { shipmentId: string }): Promise<{
+  action: string
+  reason: string
+  messages: ShipmentMessageRecord[]
+  nextDueAt: string | null
+}> {
+  return trackingAction<{ action: string; reason: string; messages: ShipmentMessageRecord[]; nextDueAt: string | null }>(
+    'RUN_CHECK_CALL_PLAN', input,
+  )
+}
+
+/** Save the cadence and channels for one load, overriding the customer's plan. Pass null to clear the override and fall back to inheritance. */
+export async function saveLoadCheckCallPlan(input: {
+  loadId: string
+  plan: CheckCallPlan | null
+  expectedUpdatedAt?: string
+}): Promise<{ plan: CheckCallPlan | null }> {
+  return trackingAction<{ plan: CheckCallPlan | null }>('SAVE_CHECK_CALL_PLAN', input)
+}
+
+export async function requestPod(input: { shipmentId: string }): Promise<{ messages: ShipmentMessageRecord[] }> {
+  return trackingAction<{ messages: ShipmentMessageRecord[] }>('REQUEST_POD', input)
+}
+
+export interface PodReviewOutcome {
+  verdict: 'PASS' | 'FAIL'
+  reasons: string[]
+  attempt: number
+  /** True when the app has now asked twice and handed it to a person. */
+  flaggedForHuman: boolean
+  readyForBilling: boolean
+}
+
+/** Review a POD already on the shipment: legibility, page count, signature and date. */
+export async function reviewShipmentPod(input: {
+  shipmentId: string
+  documentId: string
+}): Promise<PodReviewOutcome> {
+  return trackingAction<PodReviewOutcome>('REVIEW_SHIPMENT_POD', input)
+}
+
+// ── The demo seed and the Demo page (tmsShipmentActions) ─────────────────────
+
+export interface DemoState {
+  seedVersion: string | null
+  seededAt: string | null
+  devStack: boolean
+  records: DemoRecordRow[]
+  facts: DemoChecklistFacts
+}
+
+export async function getDemoState(): Promise<DemoState> {
+  return shipmentAction<DemoState>('GET_DEMO_STATE', {})
+}
+
+/** owner/ADMIN, dev stack only. Puts every seeded record back the way it started. */
+export async function resetDemoData(): Promise<{ counts: Record<string, number>; seedVersion: string }> {
+  return shipmentAction<{ counts: Record<string, number>; seedVersion: string }>('RESET_DEMO_DATA', {})
+}
+
+/** owner/ADMIN, dev stack only. Mints the P1 seed through the normal actions. */
+export async function seedDemoData(input: { reset?: boolean } = {}): Promise<{ counts: Record<string, number>; seedVersion: string }> {
+  return shipmentAction<{ counts: Record<string, number>; seedVersion: string }>('SEED_DEMO_DATA', input)
 }
 
 // ── Commissions (tmsFinanceActions, Step I) ──────────────────────────────────

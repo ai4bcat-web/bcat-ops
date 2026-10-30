@@ -10,15 +10,70 @@ import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { TmsShell } from '@/features/tms/TmsShell'
 import { useOwnershipDivisions, useShipmentViews } from '@/features/tms/useShipmentViews'
 import { buildNavSections, tmsPageTitle } from '@/lib/navSections'
-import { viewCallerOf, viewsVisibleTo } from '@/lib/shipmentViewDefs'
+import { boardStatusOf, viewCallerOf, viewsVisibleTo } from '@/lib/shipmentViewDefs'
 import { useAuth } from '@/hooks/useAuth'
+import { useShipments, type ShipmentListRow } from '@/hooks/useShipments'
 import { useStaff } from '@/hooks/useStaff'
+import type { UserProfileRecord } from '@/types/tms'
+
+/** The board status facets that mean a load is still in a rep's working queue. */
+const WORKING_BOARD_STATUSES = ['OPEN', 'COVERED', 'DISPATCHED', 'ARRIVED', 'DEPARTED']
+
+function isWorking(row: ShipmentListRow): boolean {
+  return WORKING_BOARD_STATUSES.includes(boardStatusOf({ status: row.status, voidedAt: row.voidedAt }))
+}
+
+function profileForRep(
+  repId: string,
+  staffById: Record<string, UserProfileRecord>,
+  staff: UserProfileRecord[],
+): UserProfileRecord | undefined {
+  return staffById[repId] ?? staff.find((p) => p.email === repId)
+}
+
+/**
+ * Sidebar badge counts for the TMS rail.
+ *
+ * The legacy `NavBar` has its own resolver wired to the old BCAT Ops chrome; this one
+ * lives here so the MVMNT rail can count the same records without being coupled to the
+ * legacy badge machinery. That lets Step P ship the My queue / Team queue counts under
+ * `/tms/*` while the rest of the app keeps its existing rail untouched.
+ */
+function useTmsBadgeCounts(
+  shipments: ShipmentListRow[],
+  userId: string,
+  staffById: Record<string, UserProfileRecord>,
+  staff: UserProfileRecord[],
+  myTeamKeys: string[],
+): Record<string, number> {
+  return useMemo(() => {
+    const myTeam = new Set(myTeamKeys)
+    let myQueue = 0
+    let teamQueue = 0
+    for (const row of shipments) {
+      if (!isWorking(row)) continue
+      const repId = row.dispatcherAssignedId
+      if (!repId) continue
+      const profile = profileForRep(repId, staffById, staff)
+      const repTeamKeys = profile?.teamKeys ?? []
+      if (repId === userId || profile?.id === userId || profile?.email === userId) {
+        myQueue++
+      }
+      if (repTeamKeys.some((k) => myTeam.has(k))) {
+        teamQueue++
+      }
+    }
+    return { myQueue, teamQueue }
+  }, [shipments, userId, staffById, staff, myTeamKeys])
+}
 
 export function TmsLayout() {
   const { user, isOwner, isAdmin, hasPageAccess } = useAuth()
   const { divisions } = useOwnershipDivisions()
   const { views } = useShipmentViews()
-  const { me } = useStaff(user?.email)
+  const { shipments } = useShipments({ kind: 'all' })
+  const staff = useStaff(user?.email)
+  const { me, byId } = staff
   const location = useLocation()
   const navigate = useNavigate()
 
@@ -45,6 +100,15 @@ export function TmsLayout() {
     [views, user?.groups, me?.divisions, isOwner, isAdmin],
   )
 
+  const userId = user?.email ?? user?.userId ?? ''
+  const badgeCounts = useTmsBadgeCounts(
+    shipments,
+    userId,
+    byId,
+    staff.staff,
+    me?.teamKeys ?? [],
+  )
+
   const email = user?.email ?? ''
   return (
     <TmsShell
@@ -54,6 +118,7 @@ export function TmsLayout() {
       pageTitle={tmsPageTitle(location.pathname)}
       user={{ initial: (email.trim()[0] ?? 'U').toUpperCase(), email }}
       shipmentViews={shipmentViews}
+      badgeCounts={badgeCounts}
       onSearch={(q) => navigate(`/tms/shipments?q=${encodeURIComponent(q)}`)}
     >
       <Outlet />

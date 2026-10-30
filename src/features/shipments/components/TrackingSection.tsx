@@ -27,6 +27,7 @@ import type {
 import { CustomerLinkDialog } from './CustomerLinkDialog'
 import { LogCheckCallDialog, type CheckCallFormValues } from './LogCheckCallDialog'
 import { TrackingLinkDialog } from './TrackingLinkDialog'
+import { ShipmentThreadPanel } from './ShipmentThreadPanel'
 import type { ShipmentActions } from '../useShipmentActions'
 
 const HOUR_MS = 3_600_000
@@ -173,6 +174,12 @@ export function TrackingSection({ bundle, customer, catalog, actions }: {
         ) : (
           <p className="mt-0.5 tms-muted">Nobody has reported a position on this load yet.</p>
         )}
+        {loadCarrier?.deliveryEtaAt && (
+          <p className="mt-1" data-testid="delivery-eta">
+            <Clock size={13} className="mr-1 inline tms-muted" />
+            ETA to delivery {formatDateTime(loadCarrier.deliveryEtaAt)}
+          </p>
+        )}
         </div>
       </TmsCard>
 
@@ -317,6 +324,19 @@ export function TrackingSection({ bundle, customer, catalog, actions }: {
           onChanged={() => { void actions.reload(); void tracking.refresh() }}
         />
       )}
+
+      <ShipmentThreadPanel
+        shipmentId={shipment.id}
+        shipmentNumber={shipment.number}
+        lane={[shipment.originCity, shipment.destinationCity].filter(Boolean).join(' → ')}
+        load={load}
+        loadCarrier={loadCarrier}
+        customer={customer}
+        settings={settings}
+        trackingFlaggedAt={shipment.trackingFlaggedAt}
+        trackingFlagReason={shipment.trackingFlagReason}
+        onReload={actions.reload}
+      />
     </div>
   )
 }

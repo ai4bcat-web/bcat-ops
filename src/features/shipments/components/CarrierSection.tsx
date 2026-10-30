@@ -25,6 +25,8 @@ import { formatCents } from '@/lib/tmsDirectory'
 import { formatDateTime } from '@/lib/date'
 import { TmsBadge, TmsButton, TmsCard, TmsField, TmsSelect } from '@/features/tms/kit'
 import { DispatchDialog } from './DispatchDialog'
+import { PostingsSection } from './PostingsSection'
+import { CarrierOffersSection } from './CarrierOffersSection'
 import { RemoveCarrierDialog } from './StatusActions'
 import { OWN_FLEET_CALENDAR_PATH, OWN_FLEET_DISPATCH_PATH, settlementPathFor } from './ownFleet'
 import type { ShipmentActions } from '../useShipmentActions'
@@ -63,9 +65,14 @@ export function CarrierSection({ bundle, actions }: {
   // happens in, and a load with nobody on it is exactly when the buy side matters.
   const offers = <CarrierOffersCard bundle={bundle} onReload={actions.reload} />
 
+  const shipmentId = bundle.shipment.id
+  const buildState = bundle.shipment.buildState
+
   if (!loadCarrier) {
     return (
       <div className="space-y-4">
+        <CarrierOffersSection shipmentId={shipmentId} bundle={bundle} onReload={actions.reload} />
+        <PostingsSection shipmentId={shipmentId} loadId={load?.id} buildState={buildState} onReload={actions.reload} />
         {offers}
         <p className="tms-muted text-sm">Nobody is on this load yet. Book a carrier from the Overview tab.</p>
       </div>
@@ -81,6 +88,8 @@ export function CarrierSection({ bundle, actions }: {
 
   return (
     <div className="space-y-4">
+      <CarrierOffersSection shipmentId={shipmentId} bundle={bundle} onReload={actions.reload} />
+      <PostingsSection shipmentId={shipmentId} loadId={load?.id} buildState={buildState} onReload={actions.reload} />
       {offers}
 
       <TmsCard

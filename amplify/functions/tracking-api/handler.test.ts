@@ -143,8 +143,8 @@ const LOAD = {
   leg: 1,
   divisionKey: 'BCAT_LOGISTICS',
   stops: JSON.stringify([
-    { id: 'st-1', type: 'pickup', sequence: 1, name: 'Shipper', address: { city: 'Joliet', state: 'IL' }, appt: '2026-10-20T14:00:00.000Z', arrivedAt: '2026-10-20T13:50:00.000Z', departedAt: '2026-10-20T15:10:00.000Z' },
-    { id: 'st-2', type: 'delivery', sequence: 2, name: 'Consignee', address: { city: 'Dallas', state: 'TX' }, appt: '2026-10-22T09:00:00.000Z' },
+    { id: 'st-1', type: 'pickup', sequence: 1, name: 'Shipper', address: { city: 'Joliet', state: 'IL', lat: 41.525, lng: -88.082 }, appt: '2026-10-20T14:00:00.000Z', arrivedAt: '2026-10-20T13:50:00.000Z', departedAt: '2026-10-20T15:10:00.000Z' },
+    { id: 'st-2', type: 'delivery', sequence: 2, name: 'Consignee', address: { city: 'Dallas', state: 'TX', lat: 32.7767, lng: -96.797 }, appt: '2026-10-22T09:00:00.000Z' },
   ]),
 }
 
@@ -264,7 +264,7 @@ describe('GET /s/<token>', () => {
     const res = await get(`/s/${TOKEN}`)
     expect(res.statusCode).toBe(200)
     const view = json(res)
-    expect(view).toMatchObject({ number: 'S-1001', statusLabel: 'In transit', broker: { name: 'BCAT Logistics' } })
+    expect(view).toMatchObject({ number: 'S-1001', statusLabel: 'In transit', broker: { name: 'BCAT Logistics' }, eta: '2026-10-22T08:30:00.000Z' })
     expect((view.stops as unknown[]).length).toBe(2)
     expect(view.position).toMatchObject({ lat: 38.4, lng: -92.1 })
     // showCarrier is false on this link, so the carrier is absent from the shape.
@@ -312,6 +312,7 @@ describe('GET /l/<token>', () => {
     route({
       link: carrierLink(),
       load: LOAD,
+      carrier: { id: 'lc-1', loadId: 'ld-1', shipmentId: 'shp-1', status: 'ACTIVE', deliveryEtaAt: '2026-10-22T08:30:00.000Z' },
       checkCalls: [],
       settings: { id: 'default', trackingContact: JSON.stringify({ mode: 'FIXED', phone: '(224) 875-6477' }) },
     })
@@ -321,6 +322,7 @@ describe('GET /l/<token>', () => {
       loadNumber: 'S-1001-1',
       contactPhone: '(224) 875-6477',
       nextStop: { id: 'st-2', city: 'Dallas' },
+      eta: '2026-10-22T08:30:00.000Z',
     })
   })
 
@@ -333,11 +335,17 @@ describe('GET /l/<token>', () => {
 describe('POST /l/<token>/ping', () => {
   const fix = { lat: 38.4, lng: -92.1, accuracyM: 12 }
 
-  it('writes one check call and the link counters, and never touches Load', async () => {
-    route({ link: carrierLink() })
+  it('writes one check call and the link counters, and stores the ETA on the carrier assignment', async () => {
+    route({
+      link: carrierLink(),
+      load: LOAD,
+      carrier: { id: 'lc-1', loadId: 'ld-1', shipmentId: 'shp-1', status: 'ACTIVE' },
+    })
     const res = await post(`/l/${TOKEN}/ping`, fix)
     expect(res.statusCode).toBe(200)
-    expect(json(res).ok).toBe(true)
+    const body = json(res)
+    expect(body.ok).toBe(true)
+    expect(body.eta).toMatchObject({ at: expect.stringMatching(/^\d{4}-/), miles: expect.any(Number), driveMinutes: expect.any(Number) })
 
     const puts = sent().filter((c) => c.__cmd === 'Put')
     expect(puts).toHaveLength(1)
@@ -354,9 +362,12 @@ describe('POST /l/<token>/ping', () => {
       createdBy: `link:${TOKEN.slice(0, 8)}`,
     })
 
-    const update = sent().find((c) => c.__cmd === 'Update')
-    expect(update?.TableName).toBe(TABLES.link)
-    expect(update?.UpdateExpression).toContain('ADD pingCount :one')
+    const updates = sent().filter((c) => c.__cmd === 'Update')
+    const linkUpdate = updates.find((c) => c.TableName === TABLES.link)
+    expect(linkUpdate?.TableName).toBe(TABLES.link)
+    expect(linkUpdate?.UpdateExpression).toContain('ADD pingCount :one')
+    const carrierUpdate = updates.find((c) => c.TableName === TABLES.loadCarrier)
+    expect(carrierUpdate?.UpdateExpression).toContain('deliveryEtaAt')
     // The public role has no Load write; nothing here may try one.
     expect(writes().some((c) => c.TableName === TABLES.load)).toBe(false)
   })

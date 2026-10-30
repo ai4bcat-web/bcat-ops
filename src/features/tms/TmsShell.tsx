@@ -22,6 +22,7 @@ import './theme.css'
 export interface TmsNavChild {
   to: string
   label: string
+  badgeKey?: string
 }
 
 export interface TmsNavChildGroup {
@@ -34,6 +35,7 @@ export interface TmsNavItem {
   label: string
   icon: LucideIcon
   badge?: string | null
+  badgeKey?: string
   /** Explicit sub-items. The Shipments item computes its own children plus groups. */
   children?: TmsNavChild[]
   childGroups?: TmsNavChildGroup[]
@@ -54,6 +56,9 @@ export interface TmsShellProps {
   pageTitle: string
   user: { initial: string; email: string }
   shipmentViews: Array<{ slug: string; name: string }>
+  /** Numeric counts for `badgeKey` items. The legacy NavBar has its own resolver —
+   *  this map is for the TMS rail only, so a count can ship without touching BCAT Ops chrome. */
+  badgeCounts?: Record<string, number>
   onSearch?: (q: string) => void
   children?: ReactNode
 }
@@ -90,14 +95,18 @@ function childrenFor(item: TmsNavItem, shipmentViews: TmsShellProps['shipmentVie
   }
   const items: TmsNavChild[] = [
     { to: SHIPMENTS_PATH, label: 'Active Shipments' },
+    ...(item.children ?? []),
     { to: '/tms/dispatch', label: 'Dispatch' },
     { to: '/tms/tracking', label: 'Tracking' },
     { to: '/tms/documents', label: 'Documents' },
   ]
+  const queuedSlugs = new Set((item.children ?? []).map((c) => c.to.replace(`${SHIPMENTS_PATH}/view/`, '')))
   const groups: TmsNavChildGroup[] = shipmentViews.length
     ? [{
         label: 'Views',
-        children: shipmentViews.map((v) => ({ to: `${SHIPMENTS_PATH}/view/${v.slug}`, label: v.name })),
+        children: shipmentViews
+          .filter((v) => !queuedSlugs.has(v.slug))
+          .map((v) => ({ to: `${SHIPMENTS_PATH}/view/${v.slug}`, label: v.name })),
       }]
     : []
   return { items, groups }
@@ -107,10 +116,12 @@ function NavRow({
   item,
   activePath,
   shipmentViews,
+  badgeCounts,
 }: {
   item: TmsNavItem
   activePath: string
   shipmentViews: TmsShellProps['shipmentViews']
+  badgeCounts?: Record<string, number>
 }) {
   const { items, groups } = useMemo(() => childrenFor(item, shipmentViews), [item, shipmentViews])
   const parentActive = isPathActive(activePath, item.to)
@@ -118,7 +129,7 @@ function NavRow({
     () =>
       items.some((c) => isChildActive(activePath, c)) ||
       groups.some((g) => g.children.some((c) => isChildActive(activePath, c))),
-    [activePath, items, groups]
+    [activePath, items, groups],
   )
   // Landing under the item opens it; a caret click afterwards is remembered for that
   // path only, so the next navigation under the item opens it again.
@@ -128,6 +139,8 @@ function NavRow({
 
   const Icon = item.icon
   const hasKids = items.length > 0 || groups.length > 0
+  const count = item.badgeKey != null ? (badgeCounts?.[item.badgeKey] ?? 0) : 0
+  const showBadge = item.badge != null || count > 0
 
   return (
     <div className={`tms-nav-rowwrap${hasKids ? ' tms-has-children' : ''}`}>
@@ -139,7 +152,9 @@ function NavRow({
       >
         <Icon className="tms-nav-icon" size={20} aria-hidden="true" />
         <span className="tms-nav-label">{item.label}</span>
-        {item.badge ? <span className="tms-nav-badge">{item.badge}</span> : null}
+        {showBadge ? (
+          <span className="tms-nav-badge">{count > 0 ? count : item.badge}</span>
+        ) : null}
       </NavLink>
       {hasKids ? (
         <button
@@ -154,31 +169,39 @@ function NavRow({
       ) : null}
       {hasKids && open ? (
         <div className="tms-nav-children">
-          {items.map((child) => (
-            <NavLink
-              key={child.to}
-              to={child.to}
-              className={`tms-nav-child${isChildActive(activePath, child) ? ' tms-active' : ''}`}
-              title={child.label}
-            >
-              {child.label}
-            </NavLink>
-          ))}
+          {items.map((child) => {
+            const childCount = child.badgeKey != null ? (badgeCounts?.[child.badgeKey] ?? 0) : 0
+            return (
+              <NavLink
+                key={child.to}
+                to={child.to}
+                className={`tms-nav-child${isChildActive(activePath, child) ? ' tms-active' : ''}`}
+                title={child.label}
+              >
+                <span className="tms-nav-child-label">{child.label}</span>
+                {childCount > 0 ? <span className="tms-nav-badge tms-nav-child-badge">{childCount}</span> : null}
+              </NavLink>
+            )
+          })}
           {groups.map((group) => (
             <div key={group.label}>
               <div className="tms-nav-childgroup" aria-hidden="true">
                 {group.label}
               </div>
-              {group.children.map((child) => (
-                <NavLink
-                  key={child.to}
-                  to={child.to}
-                  className={`tms-nav-child${isChildActive(activePath, child) ? ' tms-active' : ''}`}
-                  title={child.label}
-                >
-                  {child.label}
-                </NavLink>
-              ))}
+              {group.children.map((child) => {
+                const childCount = child.badgeKey != null ? (badgeCounts?.[child.badgeKey] ?? 0) : 0
+                return (
+                  <NavLink
+                    key={child.to}
+                    to={child.to}
+                    className={`tms-nav-child${isChildActive(activePath, child) ? ' tms-active' : ''}`}
+                    title={child.label}
+                  >
+                    <span className="tms-nav-child-label">{child.label}</span>
+                    {childCount > 0 ? <span className="tms-nav-badge tms-nav-child-badge">{childCount}</span> : null}
+                  </NavLink>
+                )
+              })}
             </div>
           ))}
         </div>
@@ -194,6 +217,7 @@ export function TmsShell({
   pageTitle,
   user,
   shipmentViews,
+  badgeCounts,
   onSearch,
   children,
 }: TmsShellProps) {
@@ -250,7 +274,7 @@ export function TmsShell({
           {pinned.length > 0 && (
             <div className="tms-pinned">
               {pinned.map((item) => (
-                <NavRow key={item.to} item={item} activePath={activePath} shipmentViews={shipmentViews} />
+                <NavRow key={item.to} item={item} activePath={activePath} shipmentViews={shipmentViews} badgeCounts={badgeCounts} />
               ))}
             </div>
           )}
@@ -261,7 +285,7 @@ export function TmsShell({
                 {section.brand ? <span className="tms-section-brand"> [{section.brand}]</span> : null}
               </div>
               {section.items.map((item) => (
-                <NavRow key={item.to} item={item} activePath={activePath} shipmentViews={shipmentViews} />
+                <NavRow key={item.to} item={item} activePath={activePath} shipmentViews={shipmentViews} badgeCounts={badgeCounts} />
               ))}
             </div>
           ))}

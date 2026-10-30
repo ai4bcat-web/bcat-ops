@@ -76,6 +76,12 @@ import {
   type TransactOptions,
 } from '../_shared/shipmentStore'
 import {
+  THREAD_MAILBOX,
+  newMessageId,
+  threadKeyFor,
+  threadReplyAddress,
+} from '../../../src/lib/shipmentThread'
+import {
   assertArrayOf,
   assertEnum,
   assertExpectedUpdatedAt,
@@ -104,6 +110,7 @@ import {
   type DocumentDeps,
 } from './documents'
 import {
+  nextQuoteNumber,
   acceptCounter,
   cancelQuote,
   convertQuote,
@@ -148,6 +155,42 @@ import {
 } from './ownershipResolve'
 import { assertNotVoided, isVoided } from '../_shared/voided'
 import { batchShipmentTask, BATCH_TASK_ACTIONS } from './batch'
+// ── Step P ──────────────────────────────────────────────────────────────────
+// The demo flow's four shipment-side modules. Same bargain as the quote and
+// document modules above: they are handed this file's clients, tables and
+// bodies, so a posting, a build gate and a carrier offer all go through the
+// same transaction, the same CAS and the same audit as everything else here.
+import {
+  checkBuildGate,
+  completeBuild,
+  type BuildGateDeps,
+} from './buildGate'
+import {
+  listPostings,
+  postLoad,
+  unpostLoad,
+  type PostingDeps,
+} from './postings'
+import { priceFromMarket, type MarketRateDeps } from './marketRate'
+import {
+  listCarrierOffers,
+  recordCarrierOffer,
+  sendSetupPacket,
+  type CarrierOfferDeps,
+} from './carrierOffers'
+import {
+  getDemoState,
+  resetDemoData,
+  seedDemoData,
+  type DemoDeps,
+} from './demo'
+// Step J decides stub-vs-live for a board and for RateView. The registry is plain
+// data the Lambda bundles; the credentials are read from SSM and never stored here.
+import { adapterFor } from '../../../src/lib/integrations/adapter'
+import { descriptorOf } from '../../../src/lib/integrations/registry'
+import { modeOf } from '../../../src/lib/integrations/health'
+import type { ProviderKey } from '../../../src/lib/integrations/types'
+import { readPageCredentials } from '../_shared/integrationSecrets'
 
 import {
   computeFinancials,
@@ -246,6 +289,7 @@ const TRACKING_LINK_TABLE_NAME = process.env.TRACKING_LINK_TABLE_NAME ?? ''
 // Step E tables. The shipment's document index is written here and by the public
 // upload portal; the two driver-app tables are read only, to point a shipment row
 // at a POD whose bytes stay where the driver app put them.
+const SHIPMENT_DOCUMENT_TABLE_NAME = process.env.SHIPMENT_DOCUMENT_TABLE_NAME ?? ''
 const DRIVER_SUBMISSION_TABLE_NAME = process.env.DRIVER_SUBMISSION_TABLE_NAME ?? ''
 const DRIVER_SUBMISSION_DOC_TABLE_NAME = process.env.DRIVER_SUBMISSION_DOC_TABLE_NAME ?? ''
 // Step H tables. Quotes and lane samples are written here — this Lambda already
@@ -269,10 +313,20 @@ const OWNERSHIP_RULE_TABLE_NAME = process.env.OWNERSHIP_RULE_TABLE_NAME ?? ''
 // Step R cutover. One row per PRO ever issued, keyed by the normalized PRO. This
 // Lambda is the only writer; a claim is never deleted, so a voided PRO stays issued.
 const PRO_CLAIM_TABLE_NAME = process.env.PRO_CLAIM_TABLE_NAME ?? ''
+// Step P tables. ShipmentPosting is written only here (POST_LOAD / UNPOST_LOAD).
+// Integration is read to decide stub-vs-live for a board or RateView.
+const SHIPMENT_POSTING_TABLE_NAME = process.env.SHIPMENT_POSTING_TABLE_NAME ?? ''
+const INTEGRATION_TABLE_NAME = process.env.INTEGRATION_TABLE_NAME ?? ''
+// Step P1/P11. DemoRecord is the seed's own index; ShipmentMessage is read only,
+// for the demo checklist's thread count.
+const DEMO_RECORD_TABLE_NAME = process.env.DEMO_RECORD_TABLE_NAME ?? ''
+const SHIPMENT_MESSAGE_TABLE_NAME = process.env.SHIPMENT_MESSAGE_TABLE_NAME ?? ''
 
 const OWNER_EMAIL = 'ryne@bcatcorp.com'
 const ADMIN_GROUP = 'ADMIN'
 const SETTINGS_ID = 'default'
+/** BCAT_DEV_STACK=true marks the long-lived dev branch stack. */
+const IS_DEV_STACK = process.env.BCAT_DEV_STACK === 'true'
 
 // Amplify derives GSI names from the plural model name and the key fields.
 // The four the shipment bundle reads come from `_shared/shipmentStore`.
@@ -515,6 +569,21 @@ type Action =
   // Step I — the shipment half of the org defaults. Not quote work and not the
   // loads page's either: org defaults are an admin act in every router here.
   | 'SAVE_SHIPMENT_SETTINGS'
+  // ── Step P — the end-to-end demo flow ──────────────────────────────────────
+  // P5: the required-fields gate. P6: the load boards. P4: the market rate a
+  // quote is priced from. P7: a carrier's answer to a posting. P1/P11: the seed.
+  | 'CHECK_BUILD_GATE'
+  | 'COMPLETE_BUILD'
+  | 'POST_LOAD'
+  | 'UNPOST_LOAD'
+  | 'LIST_POSTINGS'
+  | 'PRICE_FROM_MARKET'
+  | 'RECORD_CARRIER_OFFER'
+  | 'LIST_CARRIER_OFFERS'
+  | 'SEND_SETUP_PACKET'
+  | 'GET_DEMO_STATE'
+  | 'SEED_DEMO_DATA'
+  | 'RESET_DEMO_DATA'
 
 /**
  * Step H. Quoting is its own desk: a rep who prices freight all day has no business
@@ -550,6 +619,14 @@ const OFFER_ACTIONS: Record<string, true> = {
   LOG_OFFER: true,
   COUNTER_OFFER: true,
   REJECT_OFFER: true,
+  // Step P7. A carrier's answer to a posting is a BUY-side quote like any other,
+  // and the two desks that shop a lane are the two that may record one.
+  RECORD_CARRIER_OFFER: true,
+  LIST_CARRIER_OFFERS: true,
+  SEND_SETUP_PACKET: true,
+  // Step P4. Asking what the lane pays is quoting work and dispatch work alike;
+  // it writes a price onto a quote only when that quote is still unsent.
+  PRICE_FROM_MARKET: true,
 }
 
 /**
@@ -579,6 +656,11 @@ const ADMIN_ONLY_ACTIONS: Record<string, true> = {
   REPOINT_SHIPMENT_CUSTOMER: true,
   RESOLVE_REV_TAG: true,
   RETAG_SHIPMENTS: true,
+  // Step P11. Seeding and resetting the demo mints and voids freight wholesale.
+  // Ryne's rule for the Reset button is owner/ADMIN and dev only; the second half
+  // is enforced below, from the stack's own flag rather than from the token.
+  SEED_DEMO_DATA: true,
+  RESET_DEMO_DATA: true,
 }
 
 const QUOTES_PAGE_GROUP = 'page-quotes'
@@ -4576,21 +4658,25 @@ async function sendRateConEmail(args: {
   body: string
   filename: string
   pdfBase64: string
+  messageId: string
+  replyTo: string
 }): Promise<void> {
   const boundary = `=_bcatratecon_${Date.now().toString(36)}`
   const raw =
     `From: ${FROM_ADDRESS}\r\n` +
     `To: ${args.to.join(', ')}\r\n` +
     (args.cc.length > 0 ? `Cc: ${args.cc.join(', ')}\r\n` : '') +
+    `Reply-To: ${args.replyTo}\r\n` +
+    `Message-ID: ${args.messageId}\r\n` +
     `Subject: ${args.subject}\r\n` +
     `MIME-Version: 1.0\r\n` +
     `Content-Type: multipart/mixed; boundary="${boundary}"\r\n` +
     `\r\n` +
     `--${boundary}\r\n` +
     `Content-Type: text/plain; charset=UTF-8\r\n` +
-    `Content-Transfer-Encoding: 7bit\r\n` +
+    `Content-Transfer-Encoding: base64\r\n` +
     `\r\n` +
-    `${args.body}\r\n` +
+    `${wrap76(Buffer.from(args.body, 'utf8').toString('base64'))}\r\n` +
     `\r\n` +
     `--${boundary}\r\n` +
     `Content-Type: application/pdf; name="${args.filename}"\r\n` +
@@ -4607,6 +4693,41 @@ async function sendRateConEmail(args: {
   }))
 }
 
+const RATE_CON_SEND_FIELDS: Record<string, { column: string; label: string }> = {
+  DRIVER_NAME: { column: 'driverName', label: 'driver name' },
+  DRIVER_PHONE: { column: 'driverPhone', label: 'driver phone' },
+  DISPATCHER_EMAIL: { column: 'dispatcherEmail', label: 'dispatcher email' },
+}
+
+function missingRateConSendFields(carrier: Row, required: readonly string[]): string[] {
+  const missing: string[] = []
+  for (const key of required) {
+    const field = RATE_CON_SEND_FIELDS[key]
+    if (!field) continue
+    const value = carrier[field.column]
+    if (typeof value !== 'string' || !value.trim()) missing.push(field.label)
+  }
+  return missing
+}
+
+function formatMissingFields(fields: string[]): string {
+  if (fields.length === 1) return fields[0]
+  if (fields.length === 2) return `${fields[0]} and ${fields[1]}`
+  return `${fields.slice(0, -1).join(', ')} and ${fields[fields.length - 1]}`
+}
+
+function firstNameFromEmail(email: string): string {
+  const local = email.split('@')[0] ?? ''
+  const name = local.split(/[._-]/)[0] ?? ''
+  if (!name) return 'BCAT'
+  return name.charAt(0).toUpperCase() + name.slice(1)
+}
+
+function trackingMailbox(): string {
+  const [local, domain] = THREAD_MAILBOX.split('@')
+  return `${local}+tracking@${domain}`
+}
+
 /**
  * Send the rate confirmation the browser built.
  *
@@ -4619,7 +4740,7 @@ async function sendRateCon(input: Row, caller: Caller): Promise<Row> {
   const pdfBase64 = assertString(input.pdfBase64, 'pdfBase64')
   const to = assertArrayOf(input.to, 'to', (v, i) => assertEmail(v, `to[${i}]`), 20)
   if (to.length === 0) throw new Error('A rate confirmation needs at least one recipient')
-  const cc = input.cc == null ? [] : assertArrayOf(input.cc, 'cc', (v, i) => assertEmail(v, `cc[${i}]`), 20)
+  const inputCc = input.cc == null ? [] : assertArrayOf(input.cc, 'cc', (v, i) => assertEmail(v, `cc[${i}]`), 20)
   const expiresHours = optionalInteger(input.expiresHours, { min: 1, max: 720, label: 'expiresHours' })
 
   const carrier = await getById(LOAD_CARRIER_TABLE_NAME, loadCarrierId)
@@ -4634,13 +4755,26 @@ async function sendRateCon(input: Row, caller: Caller): Promise<Row> {
   await requireLiveShipment(shipmentId)
   const load = await getById(LOAD_TABLE_NAME, loadId)
   if (!load) throw new Error(`Load not found: ${loadId}`)
+  const shipment = await getById(SHIPMENT_TABLE_NAME, shipmentId)
+  if (!shipment) throw new Error(`Shipment not found: ${shipmentId}`)
   if (!BUCKET_NAME) throw new Error('Document storage is not configured')
+
+  const settings = await getSettings()
+  const requiredKeys: string[] = Object.keys(RATE_CON_SEND_FIELDS)
+  if (Array.isArray(settings?.rateConRequiredFields)) {
+    for (const key of settings.rateConRequiredFields as string[]) {
+      if (!requiredKeys.includes(key)) requiredKeys.push(key)
+    }
+  }
+  const missing = missingRateConSendFields(carrier, requiredKeys)
+  if (missing.length) {
+    throw new Error(`Add the ${formatMissingFields(missing)} before sending the rate confirmation.`)
+  }
 
   const bytes = Buffer.from(pdfBase64, 'base64')
   if (bytes.length === 0) throw new Error('pdfBase64 is not a readable document')
   if (bytes.length > MAX_RATE_CON_BYTES) throw new Error('That rate confirmation is too large to send')
 
-  const settings = await getSettings()
   const version = (numberOrNull(carrier.rateConVersion) ?? 0) + 1
   const loadNumber = optionalString(load.loadNumber, 60) ?? loadId
   const s3Key = `rate-confirms/carrier/${loadId}/${loadCarrierId}-v${version}.pdf`
@@ -4657,49 +4791,99 @@ async function sendRateCon(input: Row, caller: Caller): Promise<Row> {
   const token = randomBytes(32).toString('base64url')
   const documentId = `cdoc-${randomUUID()}`
   const filename = `rate-con-${loadNumber}-v${version}.pdf`
-
-  await transact(
-    [
-      putItem(CARRIER_DOCUMENT_TABLE_NAME, {
-        id: documentId,
-        __typename: 'CarrierDocument',
-        carrierId,
-        type: 'RATE_CON',
-        name: filename,
-        s3Key,
-        contentType: 'application/pdf',
-        sizeBytes: bytes.length,
-        expiresAt: null,
-        loadCarrierId,
-        source: 'GENERATED',
-        uploadedBy: caller.email,
-        createdAt: now,
-        updatedAt: now,
-      }),
-      updateItemTx(LOAD_CARRIER_TABLE_NAME, loadCarrierId, {
-        rateConStatus: 'SENT',
-        rateConToken: token,
-        rateConSentAt: now,
-        rateConSentTo: to.join(', '),
-        rateConExpiresAt: expiresAt,
-        rateConDocumentId: documentId,
-        rateConVersion: version,
-        // The signing API's per-token rate limit counts from zero for each new link.
-        rateConRequestCount: 0,
-        updatedBy: caller.email,
-        updatedAt: now,
-      }, null),
-    ],
-    'rate confirmation',
-  )
+  const messageId = newMessageId(shipmentId, version)
+  const trackingCc = trackingMailbox()
+  const cc = [trackingCc, ...inputCc]
+  const threadKey = String(shipment.threadKey ?? threadKeyFor(shipmentId))
+  const firstName = firstNameFromEmail(caller.email)
 
   const signUrl = PORTAL_ORIGIN
     ? `${PORTAL_ORIGIN.replace(/\/+$/, '')}/sign/rate-con/${token}`
     : ''
-  const body =
+  const bodyBase =
     `Attached is the rate confirmation for load ${loadNumber}.\r\n\r\n` +
     (signUrl ? `Review and sign it here: ${signUrl}\r\n\r\n` : '') +
-    `This link expires ${expiresAt}.\r\n\r\n— Ivan Cartage`
+    `This link expires ${expiresAt}.`
+  const body = `${bodyBase}\r\n\r\n— ${firstName}, BCAT Tracking`
+
+  const message: Row = {
+    id: `msg:${shipmentId}:${randomUUID()}`,
+    __typename: 'ShipmentMessage',
+    shipmentId,
+    threadKey,
+    loadId,
+    loadCarrierId,
+    direction: 'OUT',
+    channel: 'EMAIL',
+    kind: 'RATE_CON',
+    party: 'CARRIER',
+    to: to.join(', '),
+    cc: cc.join(', '),
+    from: FROM_ADDRESS,
+    subject: `Rate confirmation — load ${loadNumber}`,
+    body,
+    status: 'SENT',
+    error: null,
+    authorKind: 'PERSON',
+    authorName: firstName,
+    messageId,
+    inReplyTo: null,
+    providerRef: null,
+    attachments: null,
+    documentIds: [documentId],
+    trackingLinkId: null,
+    workflowRunId: null,
+    at: now,
+    createdBy: caller.email,
+    createdAt: now,
+    updatedAt: now,
+  }
+
+  const transactionItems: TransactWriteItem[] = [
+    putItem(CARRIER_DOCUMENT_TABLE_NAME, {
+      id: documentId,
+      __typename: 'CarrierDocument',
+      carrierId,
+      type: 'RATE_CON',
+      name: filename,
+      s3Key,
+      contentType: 'application/pdf',
+      sizeBytes: bytes.length,
+      expiresAt: null,
+      loadCarrierId,
+      source: 'GENERATED',
+      uploadedBy: caller.email,
+      createdAt: now,
+      updatedAt: now,
+    }),
+    updateItemTx(LOAD_CARRIER_TABLE_NAME, loadCarrierId, {
+      rateConStatus: 'SENT',
+      rateConToken: token,
+      rateConSentAt: now,
+      rateConSentTo: to.join(', '),
+      rateConExpiresAt: expiresAt,
+      rateConDocumentId: documentId,
+      rateConVersion: version,
+      // The signing API's per-token rate limit counts from zero for each new link.
+      rateConRequestCount: 0,
+      updatedBy: caller.email,
+      updatedAt: now,
+    }, null),
+    putItem(SHIPMENT_MESSAGE_TABLE_NAME, message),
+  ]
+  if (!shipment.threadKey) {
+    transactionItems.push(
+      updateItemTx(SHIPMENT_TABLE_NAME, shipmentId, {
+        threadKey,
+        threadOpenedAt: now,
+        updatedAt: now,
+        updatedBy: caller.email,
+      }, String(shipment.updatedAt ?? '')),
+    )
+  }
+
+  await transact(transactionItems, 'rate confirmation')
+
   try {
     await sendRateConEmail({
       to,
@@ -4708,6 +4892,8 @@ async function sendRateCon(input: Row, caller: Caller): Promise<Row> {
       body,
       filename,
       pdfBase64,
+      messageId,
+      replyTo: threadReplyAddress(shipmentId),
     })
   } catch (err) {
     console.error('[tms-shipment-actions] rate con email failed', err)
@@ -4718,7 +4904,7 @@ async function sendRateCon(input: Row, caller: Caller): Promise<Row> {
   }
 
   await writeAudit('LOAD_CARRIER', loadCarrierId, 'SEND_RATE_CON', caller, {
-    loadId, version, to, cc, expiresAt, documentId, s3Key,
+    loadId, version, to, cc, expiresAt, documentId, s3Key, threadKey,
   })
   return readBundle(shipmentId) as unknown as Row
 }
@@ -6228,6 +6414,230 @@ const quoteDeps: QuoteDeps = {
   assertNoInvoicedOrders,
 }
 
+// ── Step P deps ──────────────────────────────────────────────────────────────
+
+/**
+ * Step J's answer for a provider, read the way the Integrations page reads it.
+ *
+ * Credentials live in SSM and never anywhere else; this role may read them and
+ * may not write one. An unconnected provider answers `{}`, which `modeOf` turns
+ * into STUB — so a board posting or a RateView lookup degrades to a labelled
+ * stub rather than to a silent failure.
+ */
+/**
+ * The settings singleton, or an empty row.
+ *
+ * The Step P modules take `Promise<Row>` rather than `Promise<Row | null>`: an
+ * absent settings row means "every org default", which each resolver already
+ * answers for, so there is nothing for them to branch on.
+ */
+async function settingsRowOrEmpty(): Promise<Row> {
+  return (await getSettings()) ?? {}
+}
+
+async function providerCredentials(provider: string): Promise<Record<string, string>> {
+  try {
+    return (await readPageCredentials(provider)) ?? {}
+  } catch (err) {
+    console.warn(`[tms-shipment-actions] could not read ${provider} credentials:`, String(err))
+    return {}
+  }
+}
+
+/**
+ * A load board, as this router may use one.
+ *
+ * No live board adapter is registered yet — Ryne has no DAT or Truckstop
+ * credentials — so `adapterFor` hands back the stub, and the stub's own
+ * `mode: 'STUB'` is what lands on the posting row. The day a live adapter exists
+ * it is passed as the third argument here and nothing else changes.
+ */
+async function boardAdapterFor(provider: string) {
+  const descriptor = descriptorOf(provider as ProviderKey)
+  if (!descriptor) throw new Error(`${provider} is not a provider this build knows`)
+  const credentials = await providerCredentials(provider)
+  const adapter = adapterFor(descriptor, credentials)
+  const ctx = { provider: descriptor.key, credentials, settings: {}, now: nowIso() }
+  return {
+    mode: modeOf(descriptor, credentials),
+    post: async (input: Record<string, unknown>) => {
+      if (!adapter.post) throw new Error(`${descriptor.label} does not offer posting`)
+      return adapter.post(ctx, input)
+    },
+    // The stub adapter has no `unpost` capability of its own — no provider
+    // declares one — so the honest answer is written here rather than faked by
+    // calling `post` with a flag and calling the result a take-down.
+    unpost: async (input: Record<string, unknown>) => ({
+      mode: 'STUB' as const,
+      ok: true,
+      message: `STUB — no ${descriptor.label} call was made. A live ${descriptor.label} `
+        + 'connection would have removed this posting from the board.',
+      detail: { provider: descriptor.key, capability: 'unpost', sample: input },
+    }),
+  }
+}
+
+const buildGateDeps: BuildGateDeps = {
+  tables: {
+    shipment: SHIPMENT_TABLE_NAME,
+    order: ORDER_TABLE_NAME,
+    load: LOAD_TABLE_NAME,
+    customer: CUSTOMER_TABLE_NAME,
+    settings: SETTINGS_TABLE_NAME,
+  },
+  getById,
+  queryIndex,
+  transact: (items) => transact(items, 'buildGate'),
+  readBundle: (shipmentId) => readBundle(shipmentId) as unknown as Promise<Row>,
+  getSettings: settingsRowOrEmpty,
+  writeAudit,
+  now: nowIso,
+}
+
+const postingDeps: PostingDeps = {
+  tables: {
+    posting: SHIPMENT_POSTING_TABLE_NAME,
+    shipment: SHIPMENT_TABLE_NAME,
+    load: LOAD_TABLE_NAME,
+    order: ORDER_TABLE_NAME,
+    integration: INTEGRATION_TABLE_NAME,
+  },
+  getById,
+  queryIndex,
+  transact: (items) => transact(items, 'posting'),
+  readBundle,
+  writeAudit,
+  adapterFor: boardAdapterFor,
+  now: nowIso,
+}
+
+const marketRateDeps: MarketRateDeps = {
+  tables: {
+    quote: QUOTE_TABLE_NAME,
+    customer: CUSTOMER_TABLE_NAME,
+    settings: SETTINGS_TABLE_NAME,
+    integration: INTEGRATION_TABLE_NAME,
+  },
+  getById,
+  transact: (items) => transact(items, 'marketRate'),
+  writeAudit,
+  getSettings: settingsRowOrEmpty,
+  credentialsFor: providerCredentials,
+  fetchImpl: fetch,
+  now: nowIso,
+}
+
+const carrierOfferDeps: CarrierOfferDeps = {
+  tables: {
+    quote: QUOTE_TABLE_NAME,
+    carrier: CARRIER_TABLE_NAME,
+    carrierDocument: CARRIER_DOCUMENT_TABLE_NAME,
+    shipment: SHIPMENT_TABLE_NAME,
+    load: LOAD_TABLE_NAME,
+    posting: SHIPMENT_POSTING_TABLE_NAME,
+    settings: SETTINGS_TABLE_NAME,
+  },
+  getById,
+  queryIndex: (tableName, indexName, keyName, keyValue) =>
+    queryIndex(tableName, indexName, keyName, String(keyValue)),
+  transact: (items) => transact(items, 'carrierOffer'),
+  getSettings: settingsRowOrEmpty,
+  writeAudit,
+  // One rule for whether a carrier may haul: the same `evaluateCarrierBooking`
+  // BOOK_CARRIER runs, asked without a load so it answers about the carrier alone.
+  carrierStanding: (carrier, settings) => {
+    if (!carrier) {
+      return {
+        known: false,
+        bookable: false,
+        blockers: ['That MC is not in the carrier directory yet'],
+        warnings: [],
+        status: '',
+        mcpStatus: null,
+      }
+    }
+    // `evaluateCarrierBooking` answers about a carrier ON a load. An offer has no
+    // load yet, so it is asked with an empty leg: the carrier-side findings
+    // (authority, insurance, status, paperwork) are exactly the ones that decide
+    // whether this offer is worth acting on, and the load-side ones cannot fire
+    // without a load to fire about.
+    const verdict = evaluateCarrierBooking({
+      carrier: carrier as unknown as Parameters<typeof evaluateCarrierBooking>[0]['carrier'],
+      documents: [],
+      settings: settings as unknown as Parameters<typeof evaluateCarrierBooking>[0]['settings'],
+      load: { id: '' },
+      financials: null,
+      carrierRateCents: 0,
+      otherActiveLoadCarriers: [],
+      isAdmin: false,
+      now: new Date(),
+    })
+    return {
+      known: true,
+      bookable: verdict.blocks.length === 0,
+      blockers: verdict.blocks.map((b) => b.detail),
+      warnings: verdict.warnings.map((w) => w.detail),
+      status: String(carrier.status ?? ''),
+      mcpStatus: carrier.mcpStatus == null ? null : String(carrier.mcpStatus),
+    }
+  },
+  setupPacketAdapter: async () => {
+    const descriptor = descriptorOf('MYCARRIERPACKETS')
+    if (!descriptor) throw new Error('MyCarrierPackets is not a provider this build knows')
+    const credentials = await providerCredentials('MYCARRIERPACKETS')
+    const adapter = adapterFor(descriptor, credentials)
+    const ctx = { provider: descriptor.key, credentials, settings: {}, now: nowIso() }
+    return {
+      mode: modeOf(descriptor, credentials),
+      send: async (input: Record<string, unknown>) => {
+        if (!adapter.sync) throw new Error('MyCarrierPackets does not offer a setup packet')
+        return adapter.sync(ctx, input)
+      },
+    }
+  },
+  // One counter for every quote, buy side and sell side alike.
+  nextQuoteNumber: () => nextQuoteNumber(quoteDeps, { email: 'system', sub: 'system', groups: [], isAdmin: true }, nowIso()),
+  now: nowIso,
+}
+
+const demoDeps: DemoDeps = {
+  tables: {
+    demo: DEMO_RECORD_TABLE_NAME,
+    shipment: SHIPMENT_TABLE_NAME,
+    order: ORDER_TABLE_NAME,
+    load: LOAD_TABLE_NAME,
+    loadCarrier: LOAD_CARRIER_TABLE_NAME,
+    customer: CUSTOMER_TABLE_NAME,
+    carrier: CARRIER_TABLE_NAME,
+    carrierDocument: CARRIER_DOCUMENT_TABLE_NAME,
+    quote: QUOTE_TABLE_NAME,
+    posting: SHIPMENT_POSTING_TABLE_NAME,
+    message: SHIPMENT_MESSAGE_TABLE_NAME,
+    document: SHIPMENT_DOCUMENT_TABLE_NAME,
+    checkCall: LOAD_CHECK_CALL_TABLE_NAME,
+    settings: SETTINGS_TABLE_NAME,
+  },
+  getById,
+  queryIndex: (tableName, indexName, keyName, keyValue) =>
+    queryIndex(tableName, indexName, keyName, String(keyValue)),
+  scanTable,
+  transact: (items) => transact(items, 'demo'),
+  getSettings: settingsRowOrEmpty,
+  writeAudit,
+  isDevStack: IS_DEV_STACK,
+  actions: {
+    createShipment,
+    saveOrderForm: async (input: Row, caller: Caller) => ({ bundle: (await saveOrderForm(input, caller)).bundle as unknown as Row }),
+    submitOrder,
+    setShipmentStatus,
+    assignCarrierRep,
+    bookCarrier,
+    voidShipment,
+  },
+  now: nowIso,
+  randomId: randomUUID,
+}
+
 // ── Main handler ─────────────────────────────────────────────────────────────
 
 export const handler = async (event: AppSyncEvent): Promise<Row> => {
@@ -6388,6 +6798,32 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return rejectOffer(quoteDeps, input, caller)
     case 'ACCEPT_OFFER':
       return acceptOffer(quoteDeps, input, caller)
+
+    // ── Step P ──────────────────────────────────────────────────────────────
+    case 'CHECK_BUILD_GATE':
+      return checkBuildGate(buildGateDeps, input)
+    case 'COMPLETE_BUILD':
+      return completeBuild(buildGateDeps, input, caller)
+    case 'POST_LOAD':
+      return postLoad(postingDeps, input, caller)
+    case 'UNPOST_LOAD':
+      return unpostLoad(postingDeps, input, caller)
+    case 'LIST_POSTINGS':
+      return listPostings(postingDeps, input)
+    case 'PRICE_FROM_MARKET':
+      return priceFromMarket(marketRateDeps, input, caller)
+    case 'RECORD_CARRIER_OFFER':
+      return recordCarrierOffer(carrierOfferDeps, input, caller)
+    case 'LIST_CARRIER_OFFERS':
+      return listCarrierOffers(carrierOfferDeps, input)
+    case 'SEND_SETUP_PACKET':
+      return sendSetupPacket(carrierOfferDeps, input, caller)
+    case 'GET_DEMO_STATE':
+      return getDemoState(demoDeps)
+    case 'SEED_DEMO_DATA':
+      return seedDemoData(demoDeps, input, caller)
+    case 'RESET_DEMO_DATA':
+      return resetDemoData(demoDeps, input, caller)
     default:
       throw new Error(`Unknown action: ${action}`)
   }

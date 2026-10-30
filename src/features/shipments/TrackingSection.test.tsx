@@ -8,6 +8,7 @@ import type {
   LoadCarrierRecord, LoadCheckCallRecord, ShipmentBundle, ShipmentLoad, ShipmentRecord, TrackingLinkRecord,
 } from '@/types/tms'
 import type { Stop } from '@/types'
+import type * as ApiClient from '@/lib/apiClient'
 
 class ResizeObserverStub { observe() {} unobserve() {} disconnect() {} }
 globalThis.ResizeObserver ??= ResizeObserverStub as unknown as typeof ResizeObserver
@@ -44,18 +45,22 @@ const links: TrackingLinkRecord[] = [{
   sentTo: '+13125550101', sentVia: 'SMS', openCount: 2, createdBy: 'rep@bcatcorp.com',
 }]
 
-vi.mock('@/lib/apiClient', () => ({
-  getTmsSettings: vi.fn(async () => null),
-  listDivisions: vi.fn(async () => []),
-  listCheckCallsByLoad: vi.fn(async () => events),
-  listTrackingLinksByShipment: vi.fn(async () => links),
-  listTruckPositions: vi.fn(async () => []),
-  textDriver: vi.fn(async () => ({ messageId: null, smsStatus: 'NOT_CONFIGURED', smsError: null })),
-  sendTrackingLink: vi.fn(),
-  revokeTrackingLink: vi.fn(),
-  sendCustomerLink: vi.fn(),
-  revokeCustomerLink: vi.fn(),
-}))
+// Use importOriginal (recommended) so every export the component tree reaches is
+// defined, and only the calls we actually need to control are overridden.
+vi.mock('@/lib/apiClient', async (importOriginal) => {
+  const actual = await importOriginal<typeof ApiClient>()
+  return {
+    ...actual,
+    listCheckCallsByLoad: vi.fn(async () => events),
+    listTrackingLinksByShipment: vi.fn(async () => links),
+    listTruckPositions: vi.fn(async () => []),
+    textDriver: vi.fn(async () => ({ messageId: null, smsStatus: 'NOT_CONFIGURED', smsError: null })),
+    sendTrackingLink: vi.fn(),
+    revokeTrackingLink: vi.fn(),
+    sendCustomerLink: vi.fn(),
+    revokeCustomerLink: vi.fn(),
+  }
+})
 
 const stops: Stop[] = [
   { id: 's1', type: 'pickup', sequence: 0, appt: '2026-03-02T12:00:00.000Z', driverId: null, city: 'Chicago, IL' },

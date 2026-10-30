@@ -28,8 +28,9 @@ import { useDirectory } from '@/hooks/useDirectory'
 import { useQuote } from '@/hooks/useQuote'
 import {
   acceptCounter, cancelQuote, getTmsSettings, getWorkflowRun, graphqlErrorText, linkWorkflowRun,
-  restoreQuote, saveQuote,
+  priceFromMarket, restoreQuote, saveQuote,
 } from '@/lib/apiClient'
+import type { MarketRateResult } from '@/lib/apiClient'
 import { formatDateTime } from '@/lib/date'
 import { formatCents } from '@/lib/invoiceBuild'
 import { humanChargeCode, priceQuoteLines, quoteState } from '@/lib/quotes'
@@ -467,6 +468,72 @@ export function QuoteDetail() {
     void refresh()
   }
 
+  const [marketResult, setMarketResult] = useState<MarketRateResult | null>(null)
+  const [marketLoading, setMarketLoading] = useState(false)
+  const [marketError, setMarketError] = useState<string | null>(null)
+
+  const marketInputFromQuote = useCallback((q: QuoteRecord) => {
+    const stops = q.stops ?? []
+    const pickup = stops.find((s) => s.type === 'pickup') ?? stops[0]
+    const delivery = stops.find((s) => s.type === 'delivery') ?? stops[stops.length - 1]
+    if (!pickup || !delivery) return null
+    const parseCityState = (stop: typeof pickup) => {
+      const addr = stop.address
+      if (addr?.city && addr?.state) return { city: addr.city, state: addr.state }
+      const parts = (stop.city ?? '').split(',')
+      return { city: parts[0]?.trim() ?? '', state: parts[1]?.trim() ?? '' }
+    }
+    const origin = parseCityState(pickup)
+    const dest = parseCityState(delivery)
+    if (!origin.city || !origin.state || !dest.city || !dest.state) return null
+    return {
+      quoteId: q.id,
+      customerId: q.customerId,
+      originCity: origin.city,
+      originState: origin.state,
+      destinationCity: dest.city,
+      destinationState: dest.state,
+      equipmentType: q.equipmentType ?? '',
+      miles: q.miles,
+      mode: q.mode,
+    }
+  }, [])
+
+  const runPriceFromMarket = useCallback(async () => {
+    if (!quote) return
+    const input = marketInputFromQuote(quote)
+    if (!input) {
+      setMarketError('This quote has no lane to price.')
+      return
+    }
+    setMarketLoading(true)
+    setMarketError(null)
+    try {
+      const result = await priceFromMarket(input)
+      setMarketResult(result)
+    } catch (e: unknown) {
+      setMarketError(graphqlErrorText(e))
+    } finally {
+      setMarketLoading(false)
+    }
+  }, [quote, marketInputFromQuote])
+
+  const sendSuggested = async () => {
+    if (!quote || !marketResult || marketResult.belowFloor) return
+    const input = marketInputFromQuote(quote)
+    if (!input) return
+    setBusy(true)
+    try {
+      await priceFromMarket({ ...input, save: true, expectedUpdatedAt: quote.updatedAt })
+      await refresh()
+      setDialog({ kind: 'send' })
+    } catch (e: unknown) {
+      toast.error(graphqlErrorText(e) || 'Could not fill the suggested rate')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   if (quoteId && quote == null) {
     return (
       <TmsPage title="Quote">
@@ -515,6 +582,16 @@ export function QuoteDetail() {
             Send…
           </TmsButton>
         )}
+        {quote?.side === 'SELL' && (quote == null || state?.canSend) && (
+          <TmsButton
+            aria-label="Price this lane from the market"
+            disabled={busy || marketLoading}
+            onClick={runPriceFromMarket}
+          >
+            {marketLoading ? <Loader2 size={13} className="animate-spin" /> : null}
+            Price from market
+          </TmsButton>
+        )}
         {state?.canCounter && (
           <TmsButton aria-label="Counter the quote" disabled={busy} onClick={() => setDialog({ kind: 'counter' })}>Counter…</TmsButton>
         )}
@@ -548,6 +625,35 @@ export function QuoteDetail() {
       </div>
 
       {seedNote && <p className="tms-muted" style={{ fontSize: 12 }}>{seedNote}</p>}
+
+      {marketResult && (
+        <div className="tms-card" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 12, padding: 12 }}>
+          <span className="tms-muted" style={{ fontSize: 12 }}>Market rate</span>
+          <span style={{ fontWeight: 600 }}>{formatCents(marketResult.answer.averageCents)}</span>
+          {marketResult.answer.stub && <TmsBadge tone="gray">STUB</TmsBadge>}
+          <span className="tms-muted" style={{ fontSize: 12 }}>
+            target {(marketResult.targetBps / 100).toFixed(2)}% / floor {(marketResult.floorBps / 100).toFixed(2)}%
+          </span>
+          <span style={{ fontWeight: 600 }}>suggested {formatCents(marketResult.suggestedSellCents)}</span>
+          {!marketResult.belowFloor && (
+            <TmsButton
+              variant="primary"
+              aria-label="Send the suggested rate"
+              disabled={busy}
+              onClick={sendSuggested}
+            >
+              Send suggested
+            </TmsButton>
+          )}
+          {marketResult.belowFloor && (
+            <span className="tms-field-error" style={{ fontSize: 12 }}>
+              Below floor — send only after raising the rate above {formatCents(marketResult.floorSellCents)}
+            </span>
+          )}
+        </div>
+      )}
+
+      {marketError && <p className="tms-field-error" style={{ fontSize: 12 }}>{marketError}</p>}
 
       {seed && (
         <TmsCard

@@ -140,6 +140,18 @@ const schema = a.schema({
       // Rescheduling moves nextCheckCallAt past them and re-arms both.
       checkCallDueNotifiedAt:     a.datetime(),
       checkCallOverdueNotifiedAt: a.datetime(),
+      // ── The check-call plan this leg runs on (Step P8) ───────────────────
+      // The customer's plan, copied onto the load when the carrier is assigned, so
+      // a dispatcher may change the cadence for one load without touching the
+      // customer. The tracking agent reads only this field.
+      checkCallPlan:              a.json(),      // CheckCallPlan
+      checkCallPlanStartedAt:     a.datetime(),  // when the agent took the leg
+      // The reply clock behind the 30-minute escalation: set when a request goes
+      // out, cleared by any inbound reply or ping.
+      checkCallAwaitingSince:     a.datetime(),
+      checkCallEscalatedAt:       a.datetime(),
+      checkCallFlaggedAt:         a.datetime(),  // the Tracking-page flag
+      checkCallFlagReason:        a.string(),
 
       // ── Revenue ownership (Step R) ───────────────────────────────────────
       // Mirrored from the Shipment so everything that already reads Load —
@@ -926,6 +938,18 @@ const schema = a.schema({
       hubspotId:           a.string(),
       haulpayDebtorId:     a.string(),
       ediSettings:         a.json(),           // { isaId, gsId, autoAccept, skip210, skip997 }
+
+      // ── Flow defaults (Step P3) ───────────────────────────────────────────
+      // What a new load for this customer inherits, and what the quoting and
+      // tracking agents read before they act. Each is an override of the org
+      // default in TmsSettings; null means "use the org's answer".
+      defaultCarrierTeamKey: a.string(),       // Step I team key — new loads land in its queue
+      defaultCarrierRepId:   a.string(),       // optional rep inside that team (Cognito username)
+      marginTargetBps:       a.integer(),      // target margin, basis points (org default 2000)
+      marginFloorBps:        a.integer(),      // refuse-below margin, basis points
+      quoteAutoReply:        a.boolean(),      // true = the agent sends; false = a human presses Send
+      requiredLoadFields:    a.string().array(), // adds to TmsSettings.defaultRequiredLoadFields
+      checkCallPlan:         a.json(),         // CheckCallPlan — cadence + channels, overridable per load
     })
     .secondaryIndexes((index) => [index('normalizedName')])
     // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
@@ -1148,6 +1172,20 @@ const schema = a.schema({
       // { general: Memory, dailyRunCap, QUOTE|TENDER|AP|CAPACITY: AgentSettings }
       // Human-edited; the agent reads it and never writes it.
       aiAgents:                 a.json(),
+
+      // ── The demo flow's org defaults (Step P3) ────────────────────────────
+      // Ryne, 2026-10-29: target margin 20%, configurable by mode (FTL vs LTL),
+      // overridable per customer. Floor falls back to `marginFloorBps` above.
+      marginTargetBps:          a.integer(),     // 2000 — the org default for every mode
+      marginTargetBpsByMode:    a.json(),        // { FTL: 2000, LTL: 2500, … } — overrides per mode
+      quoteAutoReplyDefault:    a.boolean(),     // false — a human presses Send unless a customer says otherwise
+      // Ryne: pickup address, delivery address, bill-to, sales rep, revenue division.
+      defaultRequiredLoadFields: a.string().array(),
+      // { intervalHours: 4, channels: ['SMS','EMAIL'], milestones: [...], escalateAfterMinutes: 30 }
+      defaultCheckCallPlan:     a.json(),
+      // The P1 seed's version stamp, so the Demo page can say what it is looking at.
+      demoSeedVersion:          a.string(),
+      demoSeededAt:             a.datetime(),
     })
     // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
     // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
@@ -1425,6 +1463,27 @@ const schema = a.schema({
       // The WorkflowRun a person applied to create this shipment. Read-only to a
       // client (the `voidedAt` pattern above): CREATE_SHIPMENT writes it, nothing else.
       workflowRunId:   a.string().authorization((allow) => [allow.authenticated().to(['read'])]),
+
+      // ── The demo flow (Step P) ──────────────────────────────────────────
+      // P5. A shipment the automation built from an e-mail is BUILDING until every
+      // required field the customer asks for is filled; nothing downstream —
+      // posting, dispatch, release to billing — accepts one that is still BUILDING.
+      buildState:      a.enum(['BUILDING', 'BUILT']),
+      missingFields:   a.string().array(),   // the "Needs: …" list, recomputed on every write
+      // P6. Which load boards this shipment is live on right now, so the board row
+      // can say "Posted" without reading every ShipmentPosting.
+      postedBoards:    a.string().array(),
+      // P8. The per-shipment e-mail thread opened by the rate confirmation.
+      threadKey:       a.string(),           // `tracking+<shipmentId>` local part
+      threadOpenedAt:  a.datetime(),
+      // P7. Sparse marker: literal 'OPEN' while a carrier offer is waiting on a human.
+      carrierOfferOpen: a.string(),
+      // P9. A human was asked to look at a POD the app refused twice.
+      podFlaggedAt:    a.datetime(),
+      podFlagReason:   a.string(),
+      // P8. The tracking agent raised a flag the Tracking page shows.
+      trackingFlaggedAt: a.datetime(),
+      trackingFlagReason: a.string(),
       createdBy:       a.string().required(),
       updatedBy:       a.string().required(),
       version:         a.integer(),
@@ -2134,6 +2193,141 @@ const schema = a.schema({
     .disableOperations(['subscriptions'])
     .authorization((allow) => [allow.authenticated().to(['read'])]),
 
+  // ── Postings, threads and the demo seed (Step P) ───────────────────────────
+  /*
+   * Step P6 — one row per board a shipment is (or was) posted to.
+   *
+   * `id` is `post:<shipmentId>:<PROVIDER>`, so posting the same shipment to the
+   * same board twice updates one row instead of growing a history of duplicates,
+   * and un-posting is a status change rather than a delete — "where has this been
+   * offered?" is a question the Postings section has to answer after the fact.
+   *
+   * `mode` is the Step J adapter's own answer: a STUB posting is labelled STUB
+   * everywhere it is shown, because a board id of `stub:…` is not a board id.
+   */
+  ShipmentPosting: a
+    .model({
+      shipmentId:    a.string().required(),
+      loadId:        a.string(),
+      provider:      a.string().required(),      // 'DAT' | 'TRUCKSTOP' | any Step J board key
+      status:        a.enum(['POSTED', 'UNPOSTED', 'FAILED']),
+      mode:          a.enum(['STUB', 'LIVE']),
+      boardPostingId: a.string(),                // the provider's own id, `stub:…` on a stub
+      message:       a.string(),                 // the provider's own answer, verbatim
+      postedAt:      a.datetime(),
+      postedBy:      a.string(),
+      unpostedAt:    a.datetime(),
+      unpostedBy:    a.string(),
+      // The snapshot that was offered — a posting is a statement about a lane at a
+      // price, and the lane may move underneath it.
+      originCity:    a.string(),
+      originState:   a.string(),
+      destinationCity:  a.string(),
+      destinationState: a.string(),
+      pickupAppt:    a.datetime(),
+      equipmentType: a.string(),
+      lengthFt:      a.integer(),
+      weightLbs:     a.integer(),
+      rateCents:     a.integer(),                // what we offered to pay
+      contactEmail:  a.string(),
+      contactPhone:  a.string(),
+      note:          a.string(),
+      offerCount:    a.integer(),                // carrier answers that quoted this posting
+      createdBy:     a.string().required(),
+      updatedBy:     a.string().required(),
+      version:       a.integer(),
+    })
+    .secondaryIndexes((index) => [
+      index('shipmentId'),
+      index('status').sortKeys(['postedAt']),
+    ])
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  /*
+   * Step P8 / N4 — one e-mail or text per row on a shipment's thread.
+   *
+   * The rate confirmation opens the thread; every later message carries the same
+   * `threadKey` (`tracking+<shipmentId>`) so an inbound reply can be matched to a
+   * shipment by its reply address alone. `messageId` / `inReplyTo` are the real
+   * RFC-5322 headers, so a mail client threads our messages the way it threads
+   * anybody's.
+   *
+   * `channel` carries VOICE deliberately: Ryne's answer defers voice, and the UI
+   * shows the leg greyed out rather than pretending it is not part of the plan.
+   * Nothing writes a VOICE row today.
+   */
+  ShipmentMessage: a
+    .model({
+      shipmentId:  a.string().required(),
+      threadKey:   a.string().required(),
+      loadId:      a.string(),
+      loadCarrierId: a.string(),
+      direction:   a.enum(['IN', 'OUT']),
+      channel:     a.enum(['EMAIL', 'SMS', 'VOICE']),
+      kind:        a.enum([
+        'RATE_CON', 'CHECK_CALL', 'CHECK_CALL_REPLY', 'POD_REQUEST', 'POD_REPLY',
+        'ESCALATION', 'CARRIER_OFFER', 'QUOTE', 'TENDER', 'NOTE', 'OTHER',
+      ]),
+      party:       a.enum(['DRIVER', 'DISPATCHER', 'CARRIER', 'CUSTOMER', 'INTERNAL']),
+      to:          a.string(),
+      from:        a.string(),
+      cc:          a.string(),
+      subject:     a.string(),
+      body:        a.string(),
+      // What actually happened. On dev SES is denied and Twilio is unset, so a send
+      // lands NOT_SENT with the exact message it would have sent kept in `body`.
+      status:      a.enum(['SENT', 'NOT_SENT', 'FAILED', 'RECEIVED']),
+      error:       a.string(),
+      messageId:   a.string(),
+      inReplyTo:   a.string(),
+      providerRef: a.string(),                 // Twilio SID / SES message id
+      attachments: a.json(),                   // [{ name, contentType, sizeBytes, s3Key }]
+      documentIds: a.string().array(),         // ShipmentDocument rows this message produced
+      trackingLinkId: a.string(),
+      workflowRunId: a.string(),
+      // Ryne, 2026-10-29 18:30: the receiver must always be able to tell whether a
+      // person or the agent wrote to them, and so must the thread. The signature is
+      // appended server-side from these two fields, never typed by the sender.
+      authorKind:  a.enum(['AGENT', 'PERSON']),
+      authorName:  a.string(),
+      at:          a.datetime().required(),
+      createdBy:   a.string().required(),
+    })
+    .secondaryIndexes((index) => [
+      index('shipmentId').sortKeys(['at']),
+      index('threadKey').sortKeys(['at']),
+      index('messageId'),
+    ])
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  /*
+   * Step P1/P11 — the demo seed's own index.
+   *
+   * `id` is `demo:<kind>:<key>`, which is how the seed stays idempotent without
+   * inventing ids for records the normal actions mint: the seed asks this table
+   * what it already made before it makes anything. Reset reads the same rows to
+   * find exactly what it owns, so a reset can never touch a record a person made.
+   *
+   * Dev only. The seed refuses to run against a production table suffix and the
+   * reset action refuses unless the stack is the dev stack.
+   */
+  DemoRecord: a
+    .model({
+      kind:        a.string().required(),    // 'SHIPMENT' | 'CUSTOMER' | 'CARRIER' | 'QUOTE' | 'USER' | …
+      demoKey:     a.string().required(),    // the seed's stable name for this record
+      recordId:    a.string().required(),    // the real row's id
+      seedVersion: a.string().required(),
+      step:        a.string(),               // which demo step opens on it ('P4', 'P9', …)
+      label:       a.string(),               // what the Demo page calls it
+      detail:      a.json(),
+      createdBy:   a.string().required(),
+    })
+    .secondaryIndexes((index) => [index('kind').sortKeys(['demoKey'])])
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
   // ── Quotes & rates (Step H) ────────────────────────────────────────────────
   /*
    * One priced thing, on either side of the deal: `side` SELL is a customer
@@ -2245,6 +2439,29 @@ const schema = a.schema({
       // The WorkflowRun a person applied to create this quote. Read-only to a
       // client (the `voidedAt` pattern): SAVE_QUOTE writes it, nothing else.
       workflowRunId:   a.string().authorization((allow) => [allow.authenticated().to(['read'])]),
+
+      // ── Step P4: what the market said, and whether it was real ────────────
+      // The DAT RateView answer the sell rate was built from. `marketStub` is true
+      // when the adapter ran in stub mode, and the quote says so wherever it shows
+      // the number — a stub price must never read like a quoted one.
+      marketRateCents: a.integer(),
+      marketSource:    a.string(),              // 'DAT_RATEVIEW' | 'LANE_HISTORY' | 'MANUAL'
+      marketStub:      a.boolean(),
+      marketAt:        a.datetime(),
+      marketDetail:    a.json(),                // { low, high, average, fuel, days, reports }
+      marginTargetBps: a.integer(),             // the margin the sell rate was built with
+      autoReplied:     a.boolean(),             // true when the agent sent it without a human
+
+      // ── Step P7: a carrier's answer to a posting ──────────────────────────
+      // A BUY-side quote that came in from a posting rather than from our asking.
+      // PHONE exists in the model and in the UI as a manually-logged call today;
+      // it is what the deferred voice agent will write later.
+      offerSource:       a.enum(['EMAIL', 'PHONE', 'BOARD', 'MANUAL']),
+      offerContactName:  a.string(),
+      offerContactPhone: a.string(),
+      offerAvailableAt:  a.datetime(),
+      offerPostingId:    a.string(),            // the ShipmentPosting it answered
+      offerMessageRef:   a.string(),            // the ShipmentMessage / e-mail it came from
       createdBy:       a.string().required(),
       updatedBy:       a.string().required(),
       version:         a.integer().required(),

@@ -417,6 +417,35 @@ P8. **Assign carrier → rate con → the tracking thread and the tracking agent
     geolocation), and free-text replies ("in Dallas") are geocoded, so the shipment's map and
     the **Tracking page** (all in-transit shipments, last location, next check call, overdue
     flags) stay current. Check-call plan editable per load.
+    **P8 detail (Ryne, 2026-10-29 18:30) — the tracking loop, exactly:**
+    1. **Driver phone before the rate con.** The Assign-carrier / Send-rate-con step
+       requires the driver's name and mobile number (and the dispatcher's e-mail) before
+       the rate con can go out; stored on the LoadCarrier leg.
+    2. **The AI agent joins the thread.** The rate-con e-mail goes to the carrier with the
+       tracking agent's own mailbox (ai4bcat+tracking@…, per P8's Gmail decision) in **cc**,
+       so every reply lands in the shipment's thread and the agent can write into it.
+    3. **Periodic texts to the driver** on the cadence: each SMS carries the tracking link;
+       tapping it posts the phone's location; the ETA to the delivery stop is computed from
+       that location (distance and drive time to the consignee, against the delivery
+       appointment) and shown on the shipment, the Tracking page and the customer's public
+       tracking link.
+    4. **No reaction → e-mail the dispatcher.** If the driver does not tap or reply within
+       the grace period, the agent e-mails the dispatcher in the shipment's thread asking
+       for the location; still nothing → escalates to the tracking team (exception on the
+       Tracking page).
+    5. **Cadence has a default and is adjustable**: company default (SMS every 4 h in
+       transit, grace 30 min, milestone pings at pickup and delivery), overridable per
+       customer and per shipment, editable on the Tracking page and on the customer profile.
+    6. **One conversation thread per shipment** on the shipment's Tracking tab and on the
+       Tracking page's detail pane: every SMS and e-mail in and out, in order, with the
+       sender shown. The tracking team can **text or e-mail the driver or dispatcher
+       manually from that thread**; a message from a person carries that person's name in
+       the signature ("— Maria, BCAT Tracking"), a message from the agent is signed as the
+       agent ("— BCAT Tracking Assistant"), so the receiver can always tell which it was,
+       and the thread marks each message as agent or person.
+    7. **Layout** follows the Chaine reference (P8-UI): list on the left with motion/status
+       and last-known, detail on the right with the map, the ETA, the cadence controls and
+       the conversation thread.
 P9. **Delivery → POD request → POD review → ready for billing.** When the dispatcher or
     driver confirms delivery (reply, SMS, or status), the agent asks for the POD in the
     thread and by SMS. A received POD is **reviewed by the app** (legibility; if a corner says

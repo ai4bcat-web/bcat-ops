@@ -36,6 +36,7 @@ import type { Capability, IntegrationRecord, ProviderDescriptor } from '@/lib/in
 import type { CreditSummary } from '@/lib/customerCredit'
 import { StopCards } from './StopCards'
 import { FinancialLines } from './FinancialLines'
+import { BuildingBanner } from './BuildingBanner'
 import { CarrierSection } from './CarrierSection'
 import { TrackingSection } from './TrackingSection'
 import { DocumentsSection } from './DocumentsSection'
@@ -193,6 +194,7 @@ export function ShipmentDetail(props: ShipmentDetailProps) {
   return (
     <div className="space-y-4" ref={rootRef} data-testid="shipment-detail">
       {unresolvedCustomer}
+      <BuildingBanner shipment={shipment} onReload={actions.reload} />
       <div className="flex items-center gap-2">
         <TmsTabs
           tabs={visibleTabs.map((t) => ({ key: t.key, label: t.label }))}

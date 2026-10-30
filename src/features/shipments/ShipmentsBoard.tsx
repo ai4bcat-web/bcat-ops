@@ -21,7 +21,7 @@ import {
 import { toast } from 'sonner'
 
 import { BoardFilterPanel } from './board/BoardFilterPanel'
-import { useBoardFilters } from './board/useBoardFilters'
+import { teamRepIdsFor, useBoardFilters } from './board/useBoardFilters'
 import { BoardGrid, type BoardGridColumn, type BoardGridSort } from './board/BoardGrid'
 import { BoardFooterBar } from './board/BoardFooterBar'
 import { IconKeyDialog, type BoardToneKey, type BoardExceptionKey } from './board/IconKeyDialog'
@@ -325,6 +325,7 @@ export function ShipmentsBoard() {
           isOwner={isOwner}
           isAdmin={isAdmin}
           currentUser={email}
+          currentUserId={user?.userId ?? email}
           email={email}
           onSplit={() => setSplit((s) => !s)}
         />
@@ -348,6 +349,7 @@ export function ShipmentsBoard() {
             isOwner={isOwner}
             isAdmin={isAdmin}
             currentUser={email}
+            currentUserId={user?.userId ?? email}
             email={email}
             onSplit={() => setSplit((s) => !s)}
           />
@@ -387,6 +389,7 @@ interface BoardPaneProps {
   isOwner: boolean
   isAdmin: boolean
   currentUser: string
+  currentUserId: string
   email: string
   onSplit: () => void
 }
@@ -407,16 +410,22 @@ function BoardPane({
   isOwner,
   isAdmin,
   currentUser,
+  currentUserId,
   email,
   onSplit,
 }: BoardPaneProps) {
-  const { staff: staffProfiles, nameOf: staffNameOf } = staff
+  const { staff: staffProfiles, me: staffMe, nameOf: staffNameOf } = staff
   const divisions = useOwnershipDivisions().divisions ?? SEED_DIVISIONS
   // Step I teams are a property of the people, so the batch offers exactly the teams
   // somebody is actually on rather than a list nobody maintains.
   const teamKeys = useMemo(
     () => [...new Set(staffProfiles.flatMap((u) => u.teamKeys ?? []))].sort(),
     [staffProfiles],
+  )
+
+  const viewer = useMemo(
+    () => ({ userId: currentUserId, teamRepIds: teamRepIdsFor(staffMe, settings?.teams) }),
+    [currentUserId, staffMe, settings?.teams],
   )
   const navigate = useNavigate()
   const [params, setParams] = useSearchParams()
@@ -496,6 +505,7 @@ function BoardPane({
     baseFilters: savedFilters,
     query,
     onQueryChange: setQuery,
+    viewer,
   })
 
   // Columns and sort hydrate with the view the same way the filters do inside the

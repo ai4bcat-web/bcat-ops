@@ -67,6 +67,8 @@ export type ShipmentRow = ShipmentRecord & {
   checkCallOpen?: 'OPEN' | null
   openIncidentCount?: number | null
   trackingProvider?: string | null
+  /** The active CARRIER_PING TrackingLink, while one is out. */
+  trackingLinkId?: string | null
   /**
    * Step E. `[]` means every required document is in hand, a non-empty array names what
    * is still missing, and `null` means the gate has never run for this shipment — three

@@ -56,6 +56,9 @@ const TABLES = {
   division: 'Division-test',
   notice: 'ShipmentNotice-test',
   proClaim: 'ProClaim-test',
+  demo: 'DemoRecord-test',
+  posting: 'ShipmentPosting-test',
+  message: 'ShipmentMessage-test',
 }
 
 const store = vi.hoisted(() => {
@@ -83,6 +86,10 @@ const store = vi.hoisted(() => {
   process.env.SHIPMENT_NOTICE_TABLE_NAME = 'ShipmentNotice-test'
   process.env.PRO_CLAIM_TABLE_NAME = 'ProClaim-test'
   process.env.BUCKET_NAME = 'bcat-test-bucket'
+  process.env.DEMO_RECORD_TABLE_NAME = 'DemoRecord-test'
+  process.env.SHIPMENT_MESSAGE_TABLE_NAME = 'ShipmentMessage-test'
+  process.env.SHIPMENT_POSTING_TABLE_NAME = 'ShipmentPosting-test'
+  process.env.BCAT_DEV_STACK = 'true'
   process.env.USER_PROFILE_TABLE_NAME = 'UserProfile-test'
   process.env.PORTAL_ORIGIN = 'https://portal.test'
   process.env.AMPLIFY_DATA_DEFAULT_NAME = 'amplifyData'
@@ -2338,6 +2345,7 @@ describe('carrier booking', () => {
       authorityStatus: 'ACTIVE',
       mcNumber: '123456',
       dotNumber: '77',
+      dispatcherEmail: 'dispatch@swift.com',
       paymentTermsDays: 30,
       insurancePolicies: [
         { id: 'ins-1', type: 'AUTO_LIABILITY', limitCents: 100_000_00, expiresAt: '2030-01-01T00:00:00.000Z' },
@@ -2378,6 +2386,8 @@ describe('carrier booking', () => {
       expectedUpdatedAt: table(TABLES.load).get(loadId)!.updatedAt,
       carrierId: 'car-1',
       carrierRateCents: 180_000,
+      driverName: 'Yuri',
+      driverPhone: '+12245550137',
       ...input,
     })
   }
@@ -2603,6 +2613,62 @@ describe('carrier booking', () => {
     await expect(
       call('SEND_RATE_CON', { loadCarrierId, pdfBase64: PDF_BASE64, to: ['dispatch@swift.com\r\nBcc: x@y.com'] }),
     ).rejects.toThrow(/email address/)
+  })
+
+  it('refuses to send the rate con when driver or dispatcher fields are missing', async () => {
+    const { loadId } = await bookableLoad()
+    seedCarrier()
+    seedCarrierDocs()
+
+    const _noDriverName = await book(loadId, { driverName: null })
+    const id1 = String(activeCarrier().id)
+    await expect(call('SEND_RATE_CON', { loadCarrierId: id1, pdfBase64: PDF_BASE64, to: ['dispatch@swift.com'] })).rejects.toThrow(/driver name/)
+    await call('REMOVE_LOAD_CARRIER', { loadCarrierId: id1, outcome: 'BOUNCED', reason: 'OTHER', note: 'test' })
+
+    await book(loadId, { driverPhone: null })
+    const id2 = String(activeCarrier().id)
+    await expect(call('SEND_RATE_CON', { loadCarrierId: id2, pdfBase64: PDF_BASE64, to: ['dispatch@swift.com'] })).rejects.toThrow(/driver phone/)
+    await call('REMOVE_LOAD_CARRIER', { loadCarrierId: id2, outcome: 'BOUNCED', reason: 'OTHER', note: 'test' })
+
+    table(TABLES.carrierDirectory).get('car-1')!.dispatcherEmail = null
+    await book(loadId)
+    const id3 = String(activeCarrier().id)
+    await expect(call('SEND_RATE_CON', { loadCarrierId: id3, pdfBase64: PDF_BASE64, to: ['dispatch@swift.com'] })).rejects.toThrow(/dispatcher email/)
+  })
+
+  it('opens the thread and records the rate-con email as its first message', async () => {
+    const { shipmentId, loadId } = await bookableLoad()
+    seedCarrier()
+    seedCarrierDocs()
+    await book(loadId)
+    const loadCarrierId = String(activeCarrier().id)
+
+    await call('SEND_RATE_CON', { loadCarrierId, pdfBase64: PDF_BASE64, to: ['dispatch@swift.com'] })
+
+    const shipment = table(TABLES.shipment).get(shipmentId)!
+    expect(shipment.threadKey).toMatch(/^tracking\+/)
+    expect(shipment.threadOpenedAt).toBeTruthy()
+
+    const message = [...table(TABLES.message).values()][0]
+    expect(message).toMatchObject({
+      shipmentId,
+      threadKey: shipment.threadKey,
+      direction: 'OUT',
+      channel: 'EMAIL',
+      kind: 'RATE_CON',
+      party: 'CARRIER',
+      to: 'dispatch@swift.com',
+      authorKind: 'PERSON',
+      authorName: 'Dispatch',
+    })
+    expect(String(message.cc)).toContain('ai4bcat+tracking@gmail.com')
+    expect(String(message.body)).toMatch(/— Dispatch, BCAT Tracking/)
+    expect(message.documentIds).toEqual(expect.arrayContaining([expect.any(String)]))
+
+    const sesCall = sesSend.mock.calls[0][0] as { input: { Content: { Raw: { Data: Uint8Array } } } }
+    const raw = new TextDecoder().decode(sesCall.input.Content.Raw.Data)
+    expect(raw).toContain('Cc: ai4bcat+tracking@gmail.com')
+    expect(raw).toContain(`Reply-To: ai4bcat+tracking.${shipmentId}@gmail.com`)
   })
 
   it('voids the open link without touching the assignment', async () => {
@@ -6176,6 +6242,40 @@ describe('SAVE_SHIPMENT_SETTINGS', () => {
     await expect(
       call('SAVE_SHIPMENT_SETTINGS', { shipmentPrefix: 'BCATCORP1' }, ADMIN),
     ).rejects.toThrow('A shipment prefix is up to 8 letters, numbers or dashes')
+  })
+})
+
+describe('Step P demo actions', () => {
+  it('GET_DEMO_STATE reports the dev stack and current seed state', async () => {
+    const state = await call('GET_DEMO_STATE', {}, OWNER)
+    expect(state.devStack).toBe(true)
+    expect(state.seedVersion).toBeNull()
+  })
+
+  it('SEED_DEMO_DATA wires through the handler as an admin-only action', async () => {
+    seedCustomer()
+    seedSettings()
+    table('UserProfile-test').set('sub-owner', { id: 'sub-owner', role: 'CARRIER_REP' })
+    const result = await call('SEED_DEMO_DATA', {}, OWNER)
+
+    expect(result.seedVersion).toBe('p1.1')
+    expect(result.created).toBeGreaterThan(0)
+    expect(table(TABLES.demo).size).toBeGreaterThan(0)
+    expect(table(TABLES.customer).size).toBeGreaterThan(0)
+  })
+
+  it('RESET_DEMO_DATA wires through the handler and re-seeds from a blank index', async () => {
+    seedCustomer()
+    seedSettings()
+    table('UserProfile-test').set('sub-owner', { id: 'sub-owner', role: 'CARRIER_REP' })
+    await call('SEED_DEMO_DATA', {}, OWNER)
+    const shipmentCount = table(TABLES.shipment).size
+
+    const result = await call('RESET_DEMO_DATA', {}, OWNER)
+
+    expect(result.seedVersion).toBe('p1.1')
+    expect(table(TABLES.shipment).size).toBeGreaterThanOrEqual(shipmentCount)
+    expect(table(TABLES.shipment).size).toBeGreaterThan(0)
   })
 })
 

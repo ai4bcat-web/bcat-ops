@@ -35,6 +35,7 @@ import { QuotingDefaultsForm } from './QuotingDefaultsForm'
 import { CreditLimitCard } from './CreditLimitCard'
 import { CustomerArTab } from './CustomerArTab'
 import { StatusActionDialog } from './StatusActionDialog'
+import { FlowDefaultsCard } from './FlowDefaultsCard'
 import type {
   AiAgentKey,
   CustomerRecord,
@@ -380,6 +381,19 @@ export function CustomerProfile({
                 </label>
               </div>
             </div>
+            <FlowDefaultsCard
+              settings={settings}
+              value={{
+                defaultCarrierTeamKey: value.defaultCarrierTeamKey,
+                defaultCarrierRepId: value.defaultCarrierRepId,
+                marginTargetBps: value.marginTargetBps,
+                marginFloorBps: value.marginFloorBps,
+                quoteAutoReply: value.quoteAutoReply,
+                requiredLoadFields: value.requiredLoadFields,
+                checkCallPlan: value.checkCallPlan,
+              }}
+              onChange={(patch) => setPartial(patch)}
+            />
           </div>
         )}
 

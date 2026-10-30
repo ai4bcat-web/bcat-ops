@@ -19,7 +19,7 @@ import {
 import { NAV_ITEMS } from '@/lib/navItems'
 import { SEED_DIVISIONS, topLevelOf } from '@/lib/ownership'
 import type { OwnershipDivisionRecord } from '@/types/tms'
-import type { TmsNavItem, TmsNavSection } from '@/features/tms/TmsShell'
+import type { TmsNavChild, TmsNavItem, TmsNavSection } from '@/features/tms/TmsShell'
 
 /** The single grant that opens the whole Brokerage section. */
 export const TMS_PAGE_KEY = 'tms'
@@ -42,6 +42,8 @@ export interface NavItemDef {
   badgeKey?: string
   /** A fixed label badge, e.g. Academy's BETA tag. */
   badge?: string | null
+  /** Sub-items rendered under this row in the MVMNT rail. */
+  children?: TmsNavChild[]
 }
 
 /** A built item: a `TmsNavItem` plus what the legacy rail needs to gate and count it. */
@@ -66,7 +68,19 @@ export interface NavSectionsResult {
  */
 export const PINNED_ITEMS: NavItemDef[] = [
   { to: '/tms/dashboard', label: 'Company Dashboard', icon: LayoutDashboard, pageKey: 'tms', section: BROKERAGE, tms: true },
-  { to: '/tms/shipments', label: 'Shipments', icon: Package, pageKey: 'loads', section: BROKERAGE, tms: true, badgeKey: 'checkCalls' },
+  {
+    to: '/tms/shipments',
+    label: 'Shipments',
+    icon: Package,
+    pageKey: 'loads',
+    section: BROKERAGE,
+    tms: true,
+    badgeKey: 'checkCalls',
+    children: [
+      { to: '/tms/shipments/view/my-queue', label: 'My queue', badgeKey: 'myQueue' },
+      { to: '/tms/shipments/view/team-queue', label: 'Team queue', badgeKey: 'teamQueue' },
+    ],
+  },
 ]
 
 /**
@@ -143,6 +157,7 @@ export function buildNavSections({
     badge: def.badge ?? null,
     pageKey: def.pageKey,
     badgeKey: def.badgeKey,
+    children: def.children,
   }))
 
   // An item tagged with a subdivision (Owner Operators, Box Trucks…) belongs to the

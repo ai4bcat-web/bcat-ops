@@ -8,6 +8,7 @@
 import type { AttributeValue } from '@aws-sdk/client-dynamodb'
 import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest'
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb'
+import { DEFAULT_CHECK_CALL_PLAN, type CheckCallPlan } from '../../../src/lib/checkCallPlan'
 
 // ── Cognito mock ──────────────────────────────────────────────────────────────
 const cognitoSend = vi.hoisted(() => vi.fn())
@@ -637,6 +638,111 @@ describe('UPSERT_CUSTOMER', () => {
       handler(event('UPSERT_CUSTOMER', { name: 'Acme', invoiceFrequency: 'YEARLY' })),
     ).rejects.toThrow('invoiceFrequency must be one of DAILY, TWICE_WEEKLY, WEEKLY, MONTHLY')
   })
+
+  // ── Step P3: flow defaults ─────────────────────────────────────────────────
+  it('stores Step P3 flow defaults on a customer', async () => {
+    send.mockImplementation(withSettingsGet((cmd: MockCommand) => {
+      if (cmd.__type === 'Scan') return Promise.resolve({ Items: [], LastEvaluatedKey: undefined })
+      if (cmd.__type === 'Put') return Promise.resolve({})
+      throw new Error('unexpected')
+    }))
+    const result = await handler(event('UPSERT_CUSTOMER', {
+      name: 'Acme',
+      defaultCarrierTeamKey: 'DESK_A',
+      defaultCarrierRepId: 'rep-1',
+      marginTargetBps: 2500,
+      marginFloorBps: 800,
+      quoteAutoReply: true,
+      requiredLoadFields: ['poNumber', 'equipmentType'],
+      checkCallPlan: {
+        intervalHours: 6,
+        channels: ['SMS', 'EMAIL'],
+        milestones: ['DISPATCHED', 'DELIVERED'],
+        escalateAfterMinutes: 45,
+        emailDispatcher: true,
+        requestPodOnDelivery: false,
+      },
+    }))
+    expect(result.defaultCarrierTeamKey).toBe('DESK_A')
+    expect(result.defaultCarrierRepId).toBe('rep-1')
+    expect(result.marginTargetBps).toBe(2500)
+    expect(result.marginFloorBps).toBe(800)
+    expect(result.quoteAutoReply).toBe(true)
+    expect(result.requiredLoadFields).toEqual(['poNumber', 'equipmentType'])
+    expect(result.checkCallPlan).toMatchObject({ intervalHours: 6, escalateAfterMinutes: 45 })
+  })
+
+  it('refuses a margin floor above the target', async () => {
+    send.mockImplementation(withSettingsGet((cmd: MockCommand) => {
+      if (cmd.__type === 'Scan') return Promise.resolve({ Items: [], LastEvaluatedKey: undefined })
+      throw new Error('unexpected')
+    }))
+    await expect(
+      handler(event('UPSERT_CUSTOMER', { name: 'Acme', marginTargetBps: 1500, marginFloorBps: 2000 })),
+    ).rejects.toThrow('marginFloorBps cannot be above marginTargetBps')
+  })
+
+  it('refuses required-load fields not in the catalog', async () => {
+    send.mockImplementation(withSettingsGet((cmd: MockCommand) => {
+      if (cmd.__type === 'Scan') return Promise.resolve({ Items: [], LastEvaluatedKey: undefined })
+      throw new Error('unexpected')
+    }))
+    await expect(
+      handler(event('UPSERT_CUSTOMER', { name: 'Acme', requiredLoadFields: ['madeUpField'] })),
+    ).rejects.toThrow('Unknown required-load field: madeUpField')
+  })
+
+  it('refuses a check-call interval outside 1–24 hours', async () => {
+    send.mockImplementation(withSettingsGet((cmd: MockCommand) => {
+      if (cmd.__type === 'Scan') return Promise.resolve({ Items: [], LastEvaluatedKey: undefined })
+      throw new Error('unexpected')
+    }))
+    await expect(
+      handler(event('UPSERT_CUSTOMER', { name: 'Acme', checkCallPlan: { intervalHours: 25, escalateAfterMinutes: 30 } })),
+    ).rejects.toThrow('checkCallPlan.intervalHours must be 1–24')
+  })
+
+  it('falls back to the default plan when channels and milestones are both cleared', async () => {
+    let put: MockPutCommand['input'] | undefined
+    send.mockImplementation(withSettingsGet((cmd: MockCommand) => {
+      if (cmd.__type === 'Scan') return Promise.resolve({ Items: [], LastEvaluatedKey: undefined })
+      if (cmd.__type === 'Put') { put = cmd.input; return Promise.resolve({}) }
+      throw new Error('unexpected')
+    }))
+    const result = await handler(event('UPSERT_CUSTOMER', {
+      name: 'Acme',
+      checkCallPlan: {
+        intervalHours: 6,
+        escalateAfterMinutes: 45,
+        channels: [],
+        milestones: [],
+        emailDispatcher: false,
+        requestPodOnDelivery: false,
+      },
+    }))
+    const plan = result.checkCallPlan as CheckCallPlan
+    expect(plan).toMatchObject({
+      intervalHours: 6,
+      escalateAfterMinutes: 45,
+      emailDispatcher: false,
+      requestPodOnDelivery: false,
+    })
+    expect(plan.channels).toEqual(DEFAULT_CHECK_CALL_PLAN.channels)
+    expect(plan.milestones).toEqual(DEFAULT_CHECK_CALL_PLAN.milestones)
+    expect(plan.channels).not.toContain('VOICE')
+    expect(plan.milestones).not.toContain('IN_TRANSIT')
+    expect(put?.Item).toBeDefined()
+  })
+
+  it('refuses an escalation timeout outside 5–1440 minutes', async () => {
+    send.mockImplementation(withSettingsGet((cmd: MockCommand) => {
+      if (cmd.__type === 'Scan') return Promise.resolve({ Items: [], LastEvaluatedKey: undefined })
+      throw new Error('unexpected')
+    }))
+    await expect(
+      handler(event('UPSERT_CUSTOMER', { name: 'Acme', checkCallPlan: { intervalHours: 4, escalateAfterMinutes: 3 } })),
+    ).rejects.toThrow('checkCallPlan.escalateAfterMinutes must be 5–1440')
+  })
 })
 
 // ── SET_CUSTOMER_STATUS ───────────────────────────────────────────────────────
@@ -1143,6 +1249,56 @@ describe('SAVE_SETTINGS', () => {
         defaultRequiredReferences: [{ code: 'PO', level: 'ORDER', countOnNewOrder: 11 }],
       }, identity({ groups: ['ADMIN'] }))),
     ).rejects.toThrow('Value must be at most 10')
+  })
+
+  // ── Step P3: org flow defaults ─────────────────────────────────────────────
+  it('stores Step P3 org defaults including per-mode margin and check-call plan', async () => {
+    send.mockImplementation((cmd: MockCommand) => {
+      if (cmd.__type === 'Get') return Promise.resolve({ Item: undefined })
+      if (cmd.__type === 'Put') { return Promise.resolve({}) }
+      throw new Error('unexpected')
+    })
+    const result = await handler(event('SAVE_SETTINGS', {
+      marginTargetBps: 2000,
+      marginTargetBpsByMode: { FTL: 2200, LTL: 2500 },
+      marginFloorBps: 500,
+      quoteAutoReplyDefault: true,
+      defaultRequiredLoadFields: ['pickupAddress', 'deliveryAddress'],
+      defaultCheckCallPlan: {
+        intervalHours: 4,
+        channels: ['SMS', 'EMAIL'],
+        milestones: ['AT_PICKUP', 'DELIVERED'],
+        escalateAfterMinutes: 30,
+        emailDispatcher: true,
+        requestPodOnDelivery: true,
+      },
+    }, identity({ groups: ['ADMIN'] })))
+    expect(result.marginTargetBps).toBe(2000)
+    expect(result.marginTargetBpsByMode).toEqual({ FTL: 2200, LTL: 2500 })
+    expect(result.marginFloorBps).toBe(500)
+    expect(result.quoteAutoReplyDefault).toBe(true)
+    expect(result.defaultRequiredLoadFields).toEqual(['pickupAddress', 'deliveryAddress'])
+    expect(result.defaultCheckCallPlan).toMatchObject({ intervalHours: 4, escalateAfterMinutes: 30 })
+  })
+
+  it('refuses an org floor above the org target', async () => {
+    send.mockImplementation((cmd: MockCommand) => {
+      if (cmd.__type === 'Get') return Promise.resolve({ Item: undefined })
+      throw new Error('unexpected')
+    })
+    await expect(
+      handler(event('SAVE_SETTINGS', { marginTargetBps: 1500, marginFloorBps: 2000 }, identity({ groups: ['ADMIN'] }))),
+    ).rejects.toThrow('marginFloorBps cannot be above marginTargetBps')
+  })
+
+  it('refuses an out-of-range basis point value', async () => {
+    send.mockImplementation((cmd: MockCommand) => {
+      if (cmd.__type === 'Get') return Promise.resolve({ Item: undefined })
+      throw new Error('unexpected')
+    })
+    await expect(
+      handler(event('SAVE_SETTINGS', { marginTargetBps: 15000 }, identity({ groups: ['ADMIN'] }))),
+    ).rejects.toThrow('marginTargetBps must be 0–9999 basis points')
   })
 
   it('stores the teams and mirrors membership onto the staff rows that moved', async () => {

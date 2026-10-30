@@ -83,9 +83,10 @@ const view = (slug: string) => {
 const apply = (slug: string) => ids(applyViewFilters(view(slug).filters, ROWS, NOW))
 
 describe('the seed views over a fixture board', () => {
-  it('ships the default view plus the five business/subsidiary boards', () => {
+  it('ships the default view, the two Step P queues and the five business boards', () => {
     expect(SEED_VIEWS.map((v) => v.slug)).toEqual([
-      'active-shipments', 'brokerage-board', 'car-shipping-board', 'owner-operators', 'box-trucks', 'local-drivers',
+      'active-shipments', 'my-queue', 'team-queue',
+      'brokerage-board', 'car-shipping-board', 'owner-operators', 'box-trucks', 'local-drivers',
     ])
     expect(SEED_VIEWS.filter((v) => v.isDefault)).toHaveLength(1)
     expect(RETIRED_SEED_VIEWS).toEqual(['dispatch', 'tracking', 'pod-collection', 'accounting', 'sales'])

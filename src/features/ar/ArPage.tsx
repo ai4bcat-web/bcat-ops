@@ -38,9 +38,10 @@ import { chicagoDateStr } from '@/lib/date'
 import { saveBlob } from '@/lib/download'
 import { formatCents } from '@/lib/invoiceBuild'
 import { otrStatusLabel } from '@/lib/otrInvoiceStatus'
+import { ReleaseGateList } from '@/features/shipments/components/ReleaseGateCard'
 import { AgingStrip } from './AgingStrip'
 import {
-  AR_PAYMENT_KIND_LABEL, AR_PAYMENT_METHOD_LABEL, AR_TABS, BATCH_GENERATE_LIMIT, EMPTY_UNPAID_FILTERS,
+  AR_PAYMENT_KIND_LABEL, AR_PAYMENT_METHOD_LABEL, BATCH_GENERATE_LIMIT, EMPTY_UNPAID_FILTERS,
   agingChipFor, applyUnpaidFilters, billToLabel, formatDay, invoiceCustomerOptions, lastThreeMonths, monthLabel,
   type ArTabKey, type UnpaidFilters,
 } from './arViews'
@@ -50,6 +51,10 @@ import { GenerateInvoiceDialog } from './components/GenerateInvoiceDialog'
 import { ReasonDialog } from './components/ReasonDialog'
 import { ReceivePaymentDialog } from './components/ReceivePaymentDialog'
 import { SendToFactorDialog } from './components/SendToFactorDialog'
+import { useReadyForBilling, type ReadyRow } from './components/useReadyForBilling'
+import { ReadyForBillingShipmentCell } from './components/ReadyForBillingShipmentCell'
+import { ReadyForBillingGateCell } from './components/ReadyForBillingGateCell'
+import { ReadyForBillingReleaseCell } from './components/ReadyForBillingReleaseCell'
 import type { FactoringItem } from '@/types'
 import type { ArPaymentRecord, CustomerRecord, InvoiceRecord, ShipmentRecord } from '@/types/tms'
 
@@ -87,12 +92,14 @@ function view<T>(config: Omit<TmsListPageProps<T>, 'title' | 'viewTabs' | 'quick
   return config as unknown as ListView
 }
 
+type ExtendedArTabKey = ArTabKey | 'ready-for-billing'
+
 export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   // One clock for the whole page: the chips, the buckets and the CSV all answer as of the
   // same day, so a row cannot read "Current" next to a 1–30 column it was counted in.
   const [asOf] = useState(() => chicagoDateStr(new Date()))
 
-  const [tab, setTab] = useState<ArTabKey>('to-invoice')
+  const [tab, setTab] = useState<ExtendedArTabKey>('to-invoice')
   const [dialog, setDialog] = useState<ArDialog | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -158,6 +165,17 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     () => docsNeeded.rows.filter((r) => r.deliveredAt || r.shipment?.status === 'DELIVERED' || r.order.invoiceEarly),
     [docsNeeded.rows],
   )
+
+  /**
+   * P10 — shipments whose paperwork is in but which have not been released to billing yet.
+   * They live between Docs needed and Unbilled because that is the actual AR ladder;
+   * once released they move to UNBILLED and show up on the next tab.
+   */
+  const readyRows = useMemo(
+    () => docsNeeded.rows.filter((r) => r.docsReady && !r.shipment?.podFlaggedAt),
+    [docsNeeded.rows],
+  )
+  const readyBilling = useReadyForBilling(readyRows)
 
   const uninvoiced = useMemo(() => {
     const rows = [...unbilled.rows, ...docsNeeded.rows]
@@ -254,14 +272,25 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     saveBlob(new Blob([agingCsv(open.aging.byCustomer)], { type: 'text/csv' }), `ar-aging-${asOf}.csv`)
   }
 
-  const counts: Record<ArTabKey, number> = {
-    'to-invoice': unbilled.rows.length,
+  const counts: Record<ExtendedArTabKey, number> = {
     'docs-needed': docsNeededRows.length,
+    'ready-for-billing': readyRows.length,
+    'to-invoice': unbilled.rows.length,
     unpaid: open.invoices.length,
     paid: paidInvoices.filter((inv) => inv.status === 'PAID').length,
     payments: customerAr.payments.length,
     aging: open.aging.byCustomer.length,
   }
+
+  const AR_TABS_EXTENDED: { key: ExtendedArTabKey; label: string }[] = [
+    { key: 'docs-needed', label: 'Docs needed' },
+    { key: 'ready-for-billing', label: 'Ready for billing' },
+    { key: 'to-invoice', label: 'Unbilled' },
+    { key: 'unpaid', label: 'Unpaid' },
+    { key: 'paid', label: 'Paid' },
+    { key: 'payments', label: 'Payments & credits' },
+    { key: 'aging', label: 'Aging' },
+  ]
 
   const error = unbilled.error ?? docsNeeded.error ?? open.error ?? customerAr.error
 
@@ -269,9 +298,9 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     title: 'Invoicing',
     viewTabs,
     quickTabs: {
-      tabs: AR_TABS.map((t) => ({ key: t.key, label: t.label, count: counts[t.key] })),
+      tabs: AR_TABS_EXTENDED.map((t) => ({ key: t.key, label: t.label, count: counts[t.key] })),
       active: tab,
-      onSelect: (key: string) => setTab(key as ArTabKey),
+      onSelect: (key: string) => setTab(key as ExtendedArTabKey),
     },
     onRefresh: () => void refreshAll(),
   }
@@ -298,6 +327,11 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       onBatchEmail: runBatchEmail,
     })
     : tab === 'docs-needed' ? docsNeededView({ banner: errorBanner, rows: docsNeededRows })
+    : tab === 'ready-for-billing' ? readyForBillingView({
+      banner: errorBanner,
+      ...readyBilling,
+      onReleased: closeAndRefresh,
+    })
     : tab === 'unpaid' ? unpaidView({
       errorBanner,
       invoices: unpaidRows,
@@ -619,6 +653,83 @@ function docsNeededView({ banner, rows }: { banner: ReactNode; rows: ArWorklistR
     rowKey: (row) => row.orderId,
     page: wholeList(rows.length),
     emptyText: 'No shipment is waiting on paperwork.',
+  })
+}
+
+/* ── Ready for billing (P10) ─────────────────────────────────────────────── */
+
+function readyForBillingView({
+  banner,
+  rows,
+  loading,
+  releasingId,
+  refusal,
+  release,
+  clearRefusal,
+  onReleased,
+}: {
+  banner: ReactNode
+  rows: ReadyRow[]
+  loading: boolean
+  releasingId: string | null
+  refusal: { orderId: string; message: string } | null
+  release: (row: ArWorklistRow, onDone: () => void) => Promise<void>
+  clearRefusal: () => void
+  onReleased: () => void
+}): ListView {
+  const refusalMessages = refusal
+    ? refusal.message.startsWith('Not ready for accounting')
+      ? refusal.message
+          .replace(/^Not ready for accounting[:\s]+/, '')
+          .split(';')
+          .map((part) => part.trim())
+          .filter(Boolean)
+      : [refusal.message]
+    : null
+
+  const columns: ColumnDef<ReadyRow>[] = [
+    {
+      key: 'shipment',
+      header: 'SHIPMENT',
+      render: (row) => <ReadyForBillingShipmentCell row={row} />,
+    },
+    {
+      key: 'gate',
+      header: 'GATE',
+      render: (row) => <ReadyForBillingGateCell row={row} />,
+    },
+    {
+      key: 'release',
+      header: '',
+      render: (row) => (
+        <ReadyForBillingReleaseCell
+          row={row}
+          releasing={releasingId === row.orderId}
+          onRelease={() => {
+            clearRefusal()
+            void release(row, onReleased)
+          }}
+        />
+      ),
+    },
+  ]
+
+  return view<ReadyRow>({
+    banner: (
+      <>
+        {banner}
+        {refusalMessages && (
+          <TmsCard title="Release refused" className="tms-ready-refusal">
+            <ReleaseGateList messages={refusalMessages} testId="ready-release-refusal" />
+          </TmsCard>
+        )}
+      </>
+    ),
+    columns,
+    rows,
+    rowKey: (row) => row.orderId,
+    page: wholeList(rows.length),
+    emptyText: loading ? 'Checking the release gate…' : 'No shipments are ready for billing.',
   })
 }
 

@@ -529,6 +529,16 @@ const seed = (
  */
 export const RETIRED_SEED_VIEWS = ['dispatch', 'tracking', 'pod-collection', 'accounting', 'sales'] as const
 
+/**
+ * Step P2. The two placeholders a shared queue view carries on the
+ * `dispatcherAssigned` facet. `useBoardFilters` swaps them for the signed-in
+ * user's Cognito username and their team's reps before the facet is applied; a
+ * view that still carries one after resolution matches nothing, which is the
+ * honest answer for a user who is on no team.
+ */
+export const ME_SENTINEL = '@me'
+export const MY_TEAM_SENTINEL = '@myteam'
+
 export const SEED_VIEWS: ShipmentViewSeed[] = [
   seed('active-shipments', 'Active Shipments', 'Shipments',
     'The default Aljex-style board: open, covered, in transit and delivered (Hold and Reserved off).', 0,
@@ -540,6 +550,31 @@ export const SEED_VIEWS: ShipmentViewSeed[] = [
       },
     },
     { columns: ALJEX_COLUMN_KEYS, isDefault: true }),
+  // Step P2. The queue IS the board: a rep's work is a filter set on
+  // `dispatcherAssigned`, not a second list that can disagree with the board.
+  // `@me` and `@myteam` are resolved to the signed-in user by `useBoardFilters`
+  // — a seeded view is one row for everybody, so the sentinel is the only way a
+  // shared view can mean "mine" without minting a view per rep.
+  seed('my-queue', 'My queue', 'Shipments',
+    'Everything assigned to you to cover, from Open through Delivered.', 10,
+    {
+      board: {
+        statuses: ['OPEN', 'COVERED', 'DISPATCHED', 'ARRIVED', 'DEPARTED'],
+        details: { dispatcherAssigned: { values: [ME_SENTINEL], exclude: false } },
+        dates: {},
+      },
+    },
+    { columns: ALJEX_COLUMN_KEYS }),
+  seed('team-queue', 'Team queue', 'Shipments',
+    "Everything assigned to your carrier team, however it is split between you.", 20,
+    {
+      board: {
+        statuses: ['OPEN', 'COVERED', 'DISPATCHED', 'ARRIVED', 'DEPARTED'],
+        details: { dispatcherAssigned: { values: [MY_TEAM_SENTINEL], exclude: false } },
+        dates: {},
+      },
+    },
+    { columns: ALJEX_COLUMN_KEYS }),
   // Dispatch, Tracking and Documents are workstation pages now, each with its own UI
   // (R2 follow-up); Accounting and Sales left the Shipments menu for the AR/AP queues
   // and the quote flow that already own them. The seed sweep deactivates them.

@@ -5,7 +5,10 @@ import '@testing-library/jest-dom/vitest'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import { useState } from 'react'
 import { ShipmentsBoard } from './ShipmentsBoard'
+import * as useBoardFiltersModule from './board/useBoardFilters'
+import type { UseBoardFiltersOptions } from './board/useBoardFilters'
 import type { ShipmentRow } from './shipmentViews'
+import * as useStaffModule from '@/hooks/useStaff'
 import type { ShipmentViewRecord, OrderRecord } from '@/types/tms'
 import type { Load } from '@/types'
 
@@ -940,5 +943,35 @@ describe('ShipmentsBoard', () => {
       expect(headers.some((h) => h.textContent?.includes('Status'))).toBe(true)
       expect(headers.some((h) => h.textContent?.includes('PRO #'))).toBe(false)
     })
+  })
+
+  it('passes the signed-in viewer to useBoardFilters', async () => {
+    const calls: UseBoardFiltersOptions[] = []
+    const actual = useBoardFiltersModule.useBoardFilters
+    const spy = vi.spyOn(useBoardFiltersModule, 'useBoardFilters').mockImplementation((options: UseBoardFiltersOptions) => {
+      calls.push(options)
+      return actual(options)
+    })
+
+    const me = { id: 'ryne@bcatcorp.com', email: 'ryne@bcatcorp.com', teamKeys: ['dispatchers'] }
+    const team = { key: 'dispatchers', name: 'Dispatch', memberIds: ['ryne@bcatcorp.com', 'dana@bcatcorp.com'] }
+    vi.spyOn(useStaffModule, 'useStaff').mockReturnValue({
+      staff: [me],
+      byId: { 'ryne@bcatcorp.com': me },
+      loading: false,
+      error: null,
+      refresh: vi.fn(),
+      nameOf: (id: string | null) => (id ? String(id).split('@')[0] : '—'),
+      me,
+    })
+    getTmsSettings.mockResolvedValue({ teams: [team] })
+
+    renderBoard('/tms/shipments/view/my-queue', [row('S001', { dispatcherAssignedId: 'ryne@bcatcorp.com' })])
+    await waitFor(() => {
+      expect(calls.at(-1)?.viewer?.userId).toBe('ryne')
+      expect(calls.at(-1)?.viewer?.teamRepIds).toContain('dana@bcatcorp.com')
+    })
+
+    spy.mockRestore()
   })
 })

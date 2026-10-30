@@ -2,6 +2,118 @@
 
 One entry per unit of work (newest first). Decisions needed from Ryne go under **Decision needed**.
 
+## 2026-10-29 — Step P built: quote → tender → cover → track → POD → billing
+
+**Not yet committed or deployed.** Everything below is in the working tree with the
+gates run against it; the commit, the dev deploy and the live proof run are the next
+unit of work. Plan: `Docs/tms-build/P-plan.md`. Academy: `Docs/academy/the-demo-flow.md`.
+
+### Gates
+
+`npx tsc --noEmit -p amplify/tsconfig.json` and `-p tsconfig.app.json` — both clean.
+`npm run test` — **465 files / 6,286 tests**, up from 443/5,976 after the R2 follow-up:
+**+22 files, +310 tests**. `npx eslint .` — 0 errors, 3 warnings (the baseline's 2
+pre-existing plus one `exhaustive-deps` in the new accounting hook).
+
+### What shipped
+
+- **Schema.** Three new models — `ShipmentPosting` (`post:<shipmentId>:<PROVIDER>`, so a
+  re-post updates one row rather than growing duplicates), `ShipmentMessage` (the
+  per-shipment thread, with `VOICE` declared in the channel enum and never written) and
+  `DemoRecord` (the seed's own index, which is the only thing a reset may touch).
+  Plus flow-default fields on `Customer`, org defaults on `TmsSettings`, `buildState` /
+  `missingFields` / `postedBoards` / `threadKey` / the two flags on `Shipment`, the
+  check-call plan and its clock on `Load`, and market-rate + offer provenance on `Quote`.
+- **P1 — the seed.** `SEED_DEMO_DATA` mints ~40 shipments across every status and all
+  three divisions **through the normal actions** — `CREATE_SHIPMENT`, `BOOK_CARRIER`,
+  `SET_SHIPMENT_STATUS` — so the seed cannot reach a state the app itself could not.
+  Directory rows and flat fixtures are written directly, and say so. Idempotent by
+  `DemoRecord`: a second run creates nothing. `scripts/seedDemo.mjs` is the CLI door and
+  owns the six Cognito demo staff (passwords randomised and never printed).
+- **P2 — queues.** `my-queue` and `team-queue` are seeded filter sets on
+  `dispatcherAssigned` carrying `@me` / `@myteam`, resolved to the signed-in user at
+  match time only — so the saved view still means "mine" for whoever opens it next. The
+  queue *is* the board. Numeric counts now render on the MVMNT rail, which previously
+  ignored `badgeKey` entirely.
+- **P3 — flow defaults.** Margin target/floor, auto-vs-manual replies, the required-field
+  list and the check-call plan, each an override of an org default. An unset override
+  **inherits**; the card shows the inherited number as the placeholder.
+- **P4 — market rate.** DAT RateView live when credentials exist, a deterministic,
+  realistic stub otherwise, labelled `STUB — no DAT call was made.` A live lookup that
+  fails falls back to the stub **and says it fell back**; it never invents a live number.
+  The suggested sell rate is a margin, not a markup, and a suggestion below the
+  customer's floor can never auto-send.
+- **P5 — the build gate.** A shipment the automation built is `BUILDING` with a
+  `Needs: …` list until every required field is filled. Posting, booking and release to
+  billing all refuse one, each naming the missing fields. A shipment with no `buildState`
+  predates Step P and is treated as built — the gate never reaches backwards.
+- **P6 — postings.** Post/Unpost to DAT and Truckstop through the Step J adapters, one
+  row per board, STUB labelled on the row and in the UI. Unposting is a status change,
+  never a delete; a provider that refuses the take-down leaves its row Posted.
+- **P7 — carrier offers.** A carrier's answer to a posting is a BUY-side `Quote` with
+  posting/phone provenance — reusing Step H rather than inventing a table. The booking
+  gate's own verdict rides on each offer; `PHONE` is the manually-logged call today and
+  the field the deferred voice agent will write later.
+- **P8 — the thread and the tracking agent.** The rate con requires the driver's name and
+  mobile and the dispatcher's e-mail before it goes out, ccs the tracking mailbox so every
+  reply lands in the thread, and opens the thread as its first message. The agent texts the
+  driver on the cadence with the Step D link; a tap stores the position and the ETA to the
+  delivery stop (`src/lib/trackingEta.ts`, one function the shipment page, the Tracking
+  page and the public link all read). Silence escalates: dispatcher e-mail, then a
+  Tracking-page exception — each rung once per silence. Every message is signed by the
+  server and marked agent or person.
+- **P8-UI — `/tms/tracking`.** Inbox · Tracking · Booking inside the TMS shell, built from
+  the R2 board components: list left, detail right with the map, the ETA, the cadence
+  controls and the conversation thread, plus the manual composer for the driver or the
+  dispatcher.
+- **P9/P10 — POD and release.** The app reviews a POD for legibility, signature and
+  "page X of Y", re-asks **twice** with the reason, then flags a human. The attempt count
+  is read from the rejected documents, not from a counter that can drift. Release to
+  billing goes through the Step F gate — the POD reviewer reaches `READY_TO_INVOICE`
+  through an injected dependency and never writes `arStatus` itself.
+- **P11 — the Demo page.** Eleven steps, each opening the exact seeded record on the right
+  screen and tab. The ticks are counted from the records, not asserted by a script. Reset
+  is owner/ADMIN **and** dev-stack only, enforced server-side, and it **voids** the seeded
+  shipments rather than deleting them: a PRO is permanent.
+
+### What the Fable review caught before it shipped
+
+Sixteen findings, six of them deploy blockers that every test suite was green through —
+because the in-memory fakes did not model DynamoDB's own rules. All six fixed, and the
+fakes hardened so the tests can now see this class of bug:
+
+- The three demo actions were in the `Action` union and the permission table but never
+  imported or dispatched, so the Demo page, both buttons and `seedDemo.mjs` would have hit
+  `Unknown action` — and the dev-stack gate did not exist in the deployed artifact at all.
+- `POST_LOAD` / `UNPOST_LOAD` put `id` inside the update patch, which DynamoDB refuses on a
+  key attribute: both would have failed 100% of the time.
+- A FAILED posting wrote `postedAt: null` into a GSI sort key, and every SMS wrote
+  `messageId: null` into a GSI hash key — the same `Type mismatch for Index Key` failure
+  this project already hit in Steps C and D. Both now omit the attribute.
+- The POD re-request queried an index name Amplify does not generate, so the
+  "rejected twice → flag a human" rung could never have fired.
+- Nothing opened a shipment's thread, so every P8/P9 entry point would have refused on a
+  real shipment. Sending the rate con now opens it.
+- `RESET_DEMO_DATA` sent ~120 deletes in one transaction (limit 100) with a duplicated
+  key, so it could not succeed — and because the voids ran first it would have left the
+  dev stack voided and uncleaned. Now de-duplicated and batched.
+- Also fixed: the two P2 queue views were dead on arrival because no caller passed the
+  viewer; `isDuplicate` collapsed two different carriers bidding the same rate into one
+  offer; the check-call clock was stamped before the send, arming an escalation off a
+  message that never existed; and an emptied channel list silently persisted VOICE.
+
+One bug the margin tests caught on the way: `Number(null)` is 0, so an unset per-customer
+margin override priced at **0%** instead of inheriting the org's 20%. That would have
+reached every quote for every customer who had not set one.
+
+### Not done here
+
+No commit, no dev deploy, no live proof run against the deployed stack, and no browser
+screenshots. `scripts/devVerifyP.mjs` is not written. The DAT RateView **live** path is
+implemented against DAT's published contract and **has never been run** — no credentials
+exist on this stack — so only the stub path is proved.
+
+
 ## 2026-10-29 — Step R2 follow-up on dev: the board a user customizes, three workstations, one dashboard
 
 One commit — `80d8cde` — Amplify dev job **66 SUCCEED**, pushed with the branch idle

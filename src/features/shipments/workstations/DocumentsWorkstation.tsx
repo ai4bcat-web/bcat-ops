@@ -20,7 +20,7 @@ import { Eye, FileCheck2, Inbox, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { TmsBadge, TmsButton, TmsCard, TmsDialog, TmsField, TmsInput } from '@/features/tms/kit'
 import { BoardFilterPanel } from '../board/BoardFilterPanel'
-import { useBoardFilters } from '../board/useBoardFilters'
+import { teamRepIdsFor, useBoardFilters } from '../board/useBoardFilters'
 import { BoardCheckbox } from '../board/parts'
 import { ReleaseGateCard, ReleaseGateList } from '../components/ReleaseGateCard'
 import { releaseGateMessages } from '../components/releaseGateView'
@@ -37,16 +37,22 @@ import {
   getShipmentBundle,
   getShipmentDocumentUrl,
   getTmsSettings,
+  listShipmentMessages,
   readyToInvoice,
   previewInvoice,
+  requestPod,
+  reviewShipmentPod,
 } from '@/lib/apiClient'
 import { formatDateTime } from '@/lib/date'
 import { EMPTY_BOARD_FILTER_SET } from '../shipmentViews'
+import { PodReviewCard } from './documents/PodReviewCard'
+import type { PodReviewOutcome } from '@/lib/apiClient'
 import type {
   CustomerRecord,
   BoardFilterSet,
   ShipmentBundle,
   ShipmentDocumentRecord,
+  ShipmentMessageRecord,
   TmsSettings,
 } from '@/types/tms'
 
@@ -76,6 +82,8 @@ export function DocumentsWorkstation() {
   const [readyIds, setReadyIds] = useState<Record<string, boolean>>({})
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [preview, setPreview] = useState<{ doc: ShipmentDocumentRecord; url: string | null } | null>(null)
+  const [messages, setMessages] = useState<Record<string, ShipmentMessageRecord[]>>({})
+  const [requestingPod, setRequestingPod] = useState(false)
   const [saveOpen, setSaveOpen] = useState(false)
   const [viewName, setViewName] = useState('')
   const [viewShared, setViewShared] = useState(false)
@@ -95,6 +103,11 @@ export function DocumentsWorkstation() {
   )
   const visibleViews = useMemo(() => viewsVisibleTo(viewsState.views, caller), [viewsState.views, caller])
 
+  const viewer = useMemo(
+    () => ({ userId: user?.userId ?? null, teamRepIds: teamRepIdsFor(staff.me, settings?.teams) }),
+    [user?.userId, staff.me, settings?.teams],
+  )
+
   const board = useBoardFilters({
     rows: rawRows,
     customers,
@@ -106,6 +119,7 @@ export function DocumentsWorkstation() {
     onCreateView: () => { setViewName(''); setViewShared(false); setSaveOpen(true) },
     storageKey: 'tms-documents',
     baseFilters: COLLECTION_QUEUE,
+    viewer,
   })
   const { rows } = board
 
@@ -137,6 +151,22 @@ export function DocumentsWorkstation() {
       if (!asked.current.has(id)) void reloadBundle(id)
     }
   }, [rowIds, reloadBundle])
+
+  // The thread is where POD requests and replies live; load it when a row is selected
+  // so the panel can say whether a request went out and which attachment it produced.
+  useEffect(() => {
+    if (!selectedId) return
+    let live = true
+    listShipmentMessages(selectedId)
+      .then((rows) => {
+        if (!live) return
+        setMessages((prev) => ({ ...prev, [selectedId]: rows }))
+      })
+      .catch(() => {})
+    return () => {
+      live = false
+    }
+  }, [selectedId])
 
   const customerById = useMemo<Record<string, CustomerRecord>>(() => {
     const map: Record<string, CustomerRecord> = {}
@@ -177,6 +207,29 @@ export function DocumentsWorkstation() {
         toast.error(err instanceof Error ? err.message : 'Could not open that file')
         setPreview((prev) => (prev?.doc.id === doc.id ? null : prev))
       })
+  }
+
+  const requestPodForSelected = async () => {
+    if (!selected) return
+    setRequestingPod(true)
+    try {
+      await requestPod({ shipmentId: selected.id })
+      toast.success('POD requested')
+      const rows = await listShipmentMessages(selected.id)
+      setMessages((prev) => ({ ...prev, [selected.id]: rows }))
+      await reloadBundle(selected.id)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'POD request failed')
+    } finally {
+      setRequestingPod(false)
+    }
+  }
+
+  const reviewPod = async (documentId: string): Promise<PodReviewOutcome> => {
+    if (!selected) throw new Error('No shipment selected')
+    const outcome = await reviewShipmentPod({ shipmentId: selected.id, documentId })
+    await reloadBundle(selected.id)
+    return outcome
   }
 
   const release = async () => {
@@ -345,6 +398,15 @@ export function DocumentsWorkstation() {
               <>
                 <ReleaseGateCard shipment={selectedBundle.shipment} order={selectedOrder} />
 
+                <PodReviewCard
+                  shipment={selectedBundle.shipment}
+                  documents={selectedBundle.documents}
+                  messages={messages[selected.id] ?? []}
+                  requesting={requestingPod}
+                  onRequestPod={requestPodForSelected}
+                  onReviewPod={reviewPod}
+                />
+
                 <TmsCard title="Documents on this shipment">
                   {selectedBundle.documents.length === 0 ? (
                     <p className="tms-muted text-sm">No documents are filed on this shipment yet.</p>
@@ -415,10 +477,6 @@ export function DocumentsWorkstation() {
                     </div>
                   )}
                 </TmsCard>
-
-                <p className="tms-muted px-1 text-xs">
-                  Legibility and page-count review, plus automatic classification of inbound attachments, arrive with Step P (P9).
-                </p>
               </>
             )}
           </aside>

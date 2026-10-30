@@ -31,6 +31,14 @@ import { teamMembership, validateTeams } from '../../../src/lib/teams'
 import { SEED_DIVISIONS, SEED_RULES, validateDivisions, validateRules } from '../../../src/lib/ownership'
 import { RETIRED_SEED_VIEWS, SEED_VIEWS, slugify, validateView, BOARD_COLUMN_KEYS } from '../../../src/lib/shipmentViewDefs'
 import { validateAiAgents, validatePartyMemory } from '../../../src/lib/workflows/memory'
+import {
+  CHECK_CALL_CHANNELS,
+  CHECK_CALL_MILESTONES,
+  DEFAULT_CHECK_CALL_PLAN,
+  type CheckCallChannel,
+  type CheckCallMilestone,
+} from '../../../src/lib/checkCallPlan'
+import { REQUIRED_FIELD_CATALOG } from '../../../src/lib/flowDefaults'
 import type {
   CommissionTrigger,
   OwnershipDivisionRecord,
@@ -558,6 +566,80 @@ function validateVisibilityPrefs(value: unknown): Record<string, unknown> | null
   }
 }
 
+const ALLOWED_FIELD_KEYS: Record<string, true> = Object.fromEntries(
+  REQUIRED_FIELD_CATALOG.map((f) => [f.key, true]),
+)
+
+function validateRequiredLoadFields(value: unknown): string[] | null {
+  const arr = optionalStringArray(value, 50)
+  if (arr == null) return null
+  for (const key of arr) {
+    if (!ALLOWED_FIELD_KEYS[key]) throw new Error(`Unknown required-load field: ${key}`)
+  }
+  return arr
+}
+
+function assertFlowInt(value: unknown, label: string, min: number, max: number): number {
+  const n = typeof value === 'number' ? value : Number(value)
+  if (value === undefined || value === null || !Number.isFinite(n) || n < min || n > max) {
+    throw new Error(`${label} must be ${min}–${max}`)
+  }
+  return Math.round(n)
+}
+
+function validateCheckCallPlan(value: unknown): Record<string, unknown> | null {
+  const obj = optionalJsonObject(value)
+  if (obj == null) return null
+  const interval = assertFlowInt(obj.intervalHours, 'checkCallPlan.intervalHours', 1, 24)
+  const escalate = assertFlowInt(obj.escalateAfterMinutes, 'checkCallPlan.escalateAfterMinutes', 5, 1440)
+  const channels = optionalStringArray(obj.channels, 10)
+  const milestones = optionalStringArray(obj.milestones, 20)
+  for (const ch of channels ?? []) {
+    if (!CHECK_CALL_CHANNELS.includes(ch as CheckCallChannel)) {
+      throw new Error(`Unknown check-call channel: ${ch}`)
+    }
+  }
+  for (const ms of milestones ?? []) {
+    if (!CHECK_CALL_MILESTONES.includes(ms as CheckCallMilestone)) {
+      throw new Error(`Unknown check-call milestone: ${ms}`)
+    }
+  }
+  return {
+    intervalHours: interval,
+    escalateAfterMinutes: escalate,
+    channels: channels?.length ? channels : [...DEFAULT_CHECK_CALL_PLAN.channels],
+    milestones: milestones?.length ? milestones : [...DEFAULT_CHECK_CALL_PLAN.milestones],
+    emailDispatcher: optionalBoolean(obj.emailDispatcher) ?? true,
+    requestPodOnDelivery: optionalBoolean(obj.requestPodOnDelivery) ?? true,
+  }
+}
+
+function assertBasisPoints(value: unknown, label: string): number | null {
+  if (value === undefined || value === null) return null
+  const n = Number(value)
+  if (!Number.isFinite(n) || n < 0 || n > 9999) {
+    throw new Error(`${label} must be 0–9999 basis points`)
+  }
+  return Math.round(n)
+}
+
+function validateMarginTargetBpsByMode(value: unknown): Record<string, number> | null {
+  const obj = optionalJsonObject(value)
+  if (obj == null) return null
+  const out: Record<string, number> = {}
+  for (const [mode, raw] of Object.entries(obj)) {
+    const n = assertBasisPoints(raw, `marginTargetBpsByMode.${mode}`)
+    if (n != null) out[mode.toUpperCase()] = n
+  }
+  return Object.keys(out).length ? out : null
+}
+
+function throwIfFloorAboveTarget(target: number | null, floor: number | null, labels: { target: string; floor: string }): void {
+  if (target != null && floor != null && floor > target) {
+    throw new Error(`${labels.floor} cannot be above ${labels.target}`)
+  }
+}
+
 function nowIso(): string {
   return new Date().toISOString()
 }
@@ -864,6 +946,13 @@ async function upsertCustomer(input: Record<string, unknown>, caller: Caller): P
   const quotingDefaults = validateQuotingDefaults(input.quotingDefaults)
   const visibilityPrefs = validateVisibilityPrefs(input.visibilityPrefs)
 
+  // ── Step P3 — flow defaults ────────────────────────────────────────────────
+  const marginTargetBps = assertBasisPoints(input.marginTargetBps, 'marginTargetBps')
+  const marginFloorBps = assertBasisPoints(input.marginFloorBps, 'marginFloorBps')
+  throwIfFloorAboveTarget(marginTargetBps, marginFloorBps, { target: 'marginTargetBps', floor: 'marginFloorBps' })
+  const requiredLoadFields = validateRequiredLoadFields(input.requiredLoadFields)
+  const checkCallPlan = validateCheckCallPlan(input.checkCallPlan)
+
   // ── Admin-only credit fields ───────────────────────────────────────────────
   const isAdmin = caller.email === OWNER_EMAIL || (caller.groups ?? []).includes(ADMIN_GROUP)
   const creditFields = ['creditLimitCents', 'creditHoldFlag', 'freeCreditRequired', 'creditUsageWarningBps', 'maxDaysLate'] as const
@@ -974,6 +1063,15 @@ async function upsertCustomer(input: Record<string, unknown>, caller: Caller): P
     haulpayDebtorId: optionalString(input.haulpayDebtorId, 100),
     ediSettings: optionalJsonObject(input.ediSettings),
     aiMemory,
+
+    // Step P3 — flow defaults (customer override of TmsSettings).
+    defaultCarrierTeamKey: optionalString(input.defaultCarrierTeamKey, 100),
+    defaultCarrierRepId: optionalString(input.defaultCarrierRepId, 100),
+    marginTargetBps,
+    marginFloorBps,
+    quoteAutoReply: optionalBoolean(input.quoteAutoReply),
+    requiredLoadFields,
+    checkCallPlan,
 
     createdBy: isCreate ? caller.email : (existing?.createdBy as string) ?? caller.email,
     updatedBy: caller.email,
@@ -1559,6 +1657,13 @@ async function saveSettings(input: Record<string, unknown>, caller: Caller): Pro
     chargeCodes: keep(input.chargeCodes, (v) => validateChargeCodes(v), 'chargeCodes'),
     rateConTerms: keep(input.rateConTerms, (v) => optionalString(v, 8000), 'rateConTerms'),
 
+    // Step P3 — flow defaults (org level; customer may override).
+    marginTargetBps: keep(input.marginTargetBps, (v) => assertBasisPoints(v, 'marginTargetBps'), 'marginTargetBps'),
+    marginTargetBpsByMode: keep(input.marginTargetBpsByMode, validateMarginTargetBpsByMode, 'marginTargetBpsByMode'),
+    quoteAutoReplyDefault: keep(input.quoteAutoReplyDefault, (v) => (typeof v === 'boolean' ? v : undefined), 'quoteAutoReplyDefault'),
+    defaultRequiredLoadFields: keep(input.defaultRequiredLoadFields, validateRequiredLoadFields, 'defaultRequiredLoadFields'),
+    defaultCheckCallPlan: keep(input.defaultCheckCallPlan, validateCheckCallPlan, 'defaultCheckCallPlan'),
+
     // Step I — teams, the two rep-scoped view limits and the commission defaults.
     teams: keep(input.teams, validateTeams, 'teams'),
     limitCustomerRepView: keep(input.limitCustomerRepView, (v) => (typeof v === 'boolean' ? v : undefined), 'limitCustomerRepView'),
@@ -1585,6 +1690,12 @@ async function saveSettings(input: Record<string, unknown>, caller: Caller): Pro
     createdAt: isCreate ? now : (existing?.createdAt as string) ?? now,
     updatedAt: now,
   }
+
+  throwIfFloorAboveTarget(
+    (item.marginTargetBps as number | undefined) ?? null,
+    (item.marginFloorBps as number | undefined) ?? null,
+    { target: 'marginTargetBps', floor: 'marginFloorBps' },
+  )
 
   if (isCreate) {
     await dynamo.send(

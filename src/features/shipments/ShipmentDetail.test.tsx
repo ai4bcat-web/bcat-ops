@@ -10,6 +10,7 @@ import type {
   ShipmentStatus, WorkflowRunRecord,
 } from '@/types/tms'
 import type { Stop } from '@/types'
+import type * as ApiClient from '@/lib/apiClient'
 
 class ResizeObserverStub { observe() {} unobserve() {} disconnect() {} }
 globalThis.ResizeObserver ??= ResizeObserverStub as unknown as typeof ResizeObserver
@@ -31,47 +32,60 @@ vi.mock('@/hooks/useTrucks', () => ({ useTrucks: () => ({ equipment: [] }) }))
 vi.mock('@/features/loads/LoadDriverDocs', () => ({
   LoadDriverDocs: ({ kind }: { kind: string }) => <div>docs:{kind}</div>,
 }))
-vi.mock('@/lib/apiClient', () => ({
-  getTmsSettings: vi.fn(async () => null),
-  getCarrierBundle: vi.fn(async () => null),
-  listDivisions: vi.fn(async () => []),
-  getRateConfirmUrl: vi.fn(async () => ''),
-  // Step E — the Documents tab and the delivery card read through these.
-  listShipmentDocuments: vi.fn(async () => []),
-  listShipmentNotices: vi.fn(async () => []),
-  listTrackingLinksByShipment: vi.fn(async () => []),
-  listCheckCallsByLoad: vi.fn(async () => []),
-  getShipmentDocumentUrl: vi.fn(async () => ''),
-  readyToInvoice: vi.fn(),
-  updateDocument: vi.fn(),
-  voidDocument: vi.fn(),
-  attachDriverDoc: vi.fn(),
-  sendUploadLink: vi.fn(),
-  revokeUploadLink: vi.fn(),
-  sendMilestoneNotice: vi.fn(),
-  emailDocuments: vi.fn(),
-  rateCarrier: vi.fn(),
-  prepareDocumentUpload: vi.fn(),
-  commitDocument: vi.fn(),
-  saveGeneratedDocument: vi.fn(),
-  putPresignedFile: vi.fn(),
-  // Step R — the Overview division card, the Invoicing gate and the History tab.
-  listOwnershipDivisions,
-  listOwnershipRules,
-  previewInvoice,
-  listAuditLogs,
-  listUserProfiles: vi.fn(async () => []),
-  getInvoice: vi.fn(async () => null),
-  getCarrier: vi.fn(async () => null),
-  getCarrierBill: vi.fn(async () => null),
-  voidBill: vi.fn(),
-  voidInvoice: vi.fn(),
-  saveOrderForm: vi.fn(),
-  getInvoicePdfUrl: vi.fn(async () => ''),
-  listIntegrations,
-  runIntegrationStub,
-  listWorkflowRunsForShipment,
-}))
+// Use importOriginal so every export the full component tree reaches is defined,
+// and override only the calls this test actually needs to control.
+vi.mock('@/lib/apiClient', async (importOriginal) => {
+  const actual = await importOriginal<typeof ApiClient>()
+  return {
+    ...actual,
+    getTmsSettings: vi.fn(async () => null),
+    getCarrierBundle: vi.fn(async () => null),
+    listDivisions: vi.fn(async () => []),
+    getRateConfirmUrl: vi.fn(async () => ''),
+    // Step E — the Documents tab and the delivery card read through these.
+    listShipmentDocuments: vi.fn(async () => []),
+    listShipmentNotices: vi.fn(async () => []),
+    listTrackingLinksByShipment: vi.fn(async () => []),
+    listCheckCallsByLoad: vi.fn(async () => []),
+    getShipmentDocumentUrl: vi.fn(async () => ''),
+    readyToInvoice: vi.fn(),
+    updateDocument: vi.fn(),
+    voidDocument: vi.fn(),
+    attachDriverDoc: vi.fn(),
+    sendUploadLink: vi.fn(),
+    revokeUploadLink: vi.fn(),
+    sendMilestoneNotice: vi.fn(),
+    emailDocuments: vi.fn(),
+    rateCarrier: vi.fn(),
+    prepareDocumentUpload: vi.fn(),
+    commitDocument: vi.fn(),
+    saveGeneratedDocument: vi.fn(),
+    putPresignedFile: vi.fn(),
+    // Step R — the Overview division card, the Invoicing gate and the History tab.
+    listOwnershipDivisions,
+    listOwnershipRules,
+    previewInvoice,
+    listAuditLogs,
+    listUserProfiles: vi.fn(async () => []),
+    getInvoice: vi.fn(async () => null),
+    getCarrier: vi.fn(async () => null),
+    getCarrierBill: vi.fn(async () => null),
+    voidBill: vi.fn(),
+    voidInvoice: vi.fn(),
+    saveOrderForm: vi.fn(),
+    getInvoicePdfUrl: vi.fn(async () => ''),
+    listIntegrations,
+    runIntegrationStub,
+    listWorkflowRunsForShipment,
+    // Step P — the Carrier/Postings tabs read through these; keep them inert.
+    listCarrierOffers: vi.fn(async () => ({ offers: [] })),
+    recordCarrierOffer: vi.fn(),
+    sendSetupPacket: vi.fn(async () => ({ message: '' })),
+    listShipmentPostings: vi.fn(async () => []),
+    postLoad: vi.fn(),
+    unpostLoad: vi.fn(),
+  }
+})
 vi.mock('@/lib/driverSubmissionsClient', () => ({
   getDriverDocUrl: vi.fn(async () => ''),
   attachDocs: vi.fn(async () => []),

@@ -1,14 +1,7 @@
 // @vitest-environment jsdom
-/**
- * The AR desk's job is to be believed.
- *
- * Three of these four assertions are about honesty rather than layout: a row that cannot
- * legally be billed says why and refuses the Generate button; an e-mail SES refused reads
- * "Not sent", never "Sent"; and the aging strip's figures are the lib's, not a second
- * arithmetic written in the page. The fourth pins the six tabs, because the page is the
- * only route to four of them.
- */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+/** The AR desk's job is to be believed. */
+import '@testing-library/jest-dom/vitest'
+import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest'
 import { render, screen, fireEvent, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import type { ArWorklistRow } from '@/hooks/useArWorklist'
@@ -18,6 +11,8 @@ import type {
 import { ageInvoices } from '@/lib/arAging'
 import { ArPage } from './ArPage'
 import { InvoiceDetail } from './InvoiceDetail'
+import * as apiClient from '@/lib/apiClient'
+import { releaseGateError } from '@/lib/releaseGate'
 
 const worklistMock = vi.hoisted(() => vi.fn())
 const openInvoicesMock = vi.hoisted(() => vi.fn())
@@ -43,6 +38,8 @@ vi.mock('@/lib/apiClient', () => ({
   renderInvoicePdf: vi.fn(),
   markInvoiceSent: vi.fn(),
   getInvoicePdfUrl: vi.fn().mockResolvedValue('blob:pdf'),
+  previewInvoice: vi.fn(),
+  readyToInvoice: vi.fn(),
   // The invoice detail now carries a Commission card; it reads settings before it reads
   // anything else, and commissions are off here, so the card renders nothing.
   commissionModelsDeployed: () => true,
@@ -196,12 +193,16 @@ function setup(rowsByTab: Partial<Record<string, ArWorklistRow[]>> = {}) {
   return render(<MemoryRouter><ArPage /></MemoryRouter>)
 }
 
-beforeEach(() => vi.clearAllMocks())
+beforeEach(() => {
+  vi.clearAllMocks()
+  ;(apiClient.previewInvoice as Mock).mockResolvedValue({ releaseGate: { ok: true, missing: [] } })
+  ;(apiClient.readyToInvoice as Mock).mockResolvedValue({ bundle: {}, releaseGate: { ok: true, missing: [] } })
+})
 
 describe('the AR board', () => {
   it('offers every view of the money, and each one renders', () => {
     setup({ UNBILLED: [worklistRow()], DOCS_NEEDED: [worklistRow({ docsMissing: ['POD'], docsReady: false })] })
-    for (const label of ['Unbilled', 'Docs needed', 'Unpaid', 'Paid', 'Payments & credits', 'Aging']) {
+    for (const label of ['Docs needed', 'Ready for billing', 'Unbilled', 'Unpaid', 'Paid', 'Payments & credits', 'Aging']) {
       const tab = screen.getByRole('tab', { name: new RegExp(`^${label}`) })
       fireEvent.click(tab)
       expect(tab.getAttribute('aria-selected')).toBe('true')
@@ -247,6 +248,42 @@ describe('the AR board', () => {
     expect((generate as HTMLButtonElement).disabled).toBe(true)
     const select = screen.getByRole('checkbox', { name: 'Select S-1001' })
     expect((select as HTMLInputElement).disabled).toBe(true)
+  })
+
+  it('shows the release gate verdict on the Ready for billing tab', async () => {
+    ;(apiClient.previewInvoice as Mock).mockResolvedValue({
+      releaseGate: {
+        ok: false,
+        missing: [{ code: 'CARRIER_CHARGES_UNSETTLED', message: 'Carrier charges not settled: Acme Trucking — record the carrier bill first' }],
+      },
+    })
+    setup({
+      DOCS_NEEDED: [worklistRow({ arStatus: 'DOCS_NEEDED', docsReady: true, docsMissing: [] })],
+    })
+    fireEvent.click(screen.getByRole('tab', { name: /^Ready for billing/ }))
+    expect(await screen.findByTestId('ready-gate-o1')).toHaveTextContent('Carrier charges not settled: Acme Trucking — record the carrier bill first')
+  })
+
+  it('releases a shipment to billing through readyToInvoice', async () => {
+    setup({
+      DOCS_NEEDED: [worklistRow({ arStatus: 'DOCS_NEEDED', docsReady: true, docsMissing: [] })],
+    })
+    fireEvent.click(screen.getByRole('tab', { name: /^Ready for billing/ }))
+    const button = await screen.findByRole('button', { name: 'Release to billing S-1001' })
+    fireEvent.click(button)
+    expect(apiClient.readyToInvoice).toHaveBeenCalledWith({ orderId: 'o1', expectedUpdatedAt: '2026-10-20T12:00:00.000Z' })
+  })
+
+  it('shows the gate exact sentence when release to billing is refused', async () => {
+    ;(apiClient.readyToInvoice as Mock).mockRejectedValue(
+      releaseGateError([{ code: 'REFERENCE_MISSING', detail: 'PO', message: 'Missing reference: PO number' }]),
+    )
+    setup({
+      DOCS_NEEDED: [worklistRow({ arStatus: 'DOCS_NEEDED', docsReady: true, docsMissing: [] })],
+    })
+    fireEvent.click(screen.getByRole('tab', { name: /^Ready for billing/ }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Release to billing S-1001' }))
+    expect(await screen.findByTestId('ready-release-refusal')).toHaveTextContent('Missing reference: PO number')
   })
 })
 

@@ -35,6 +35,7 @@ import { quotePublicView } from '../../../src/lib/quotes'
 import { MAX_UPLOADS_PER_LINK, documentKey, documentPrefix } from '../../../src/lib/shipmentDocuments'
 import { pendingDeliveryEta } from '../../../src/lib/stopEvents'
 import { carrierView, customerView, isLinkToken } from '../../../src/lib/trackingLink'
+import { etaToStop } from '../../../src/lib/trackingEta'
 import { buildTimeline, lastKnownPosition, thinPositions, trackingWindow, type TrackPosition } from '../../../src/lib/trackingTimeline'
 import { carrierUploadView, portalUploadAllowed, uploadLinkUsable } from '../../../src/lib/uploadPortal'
 import { liveLinkStatuses, planResponse } from './quotes'
@@ -482,14 +483,20 @@ async function carrierRoute(token: string) {
   const loadRow = await getRow(LOAD_TABLE, { id: link.loadId })
   if (!loadRow) return reply(404, { error: LINK_GONE })
 
-  const [events, settingsRow] = await Promise.all([pingsForLink(link), settings().catch(() => null)])
-  return reply(200, carrierView({
+  const [events, settingsRow, carrierRow] = await Promise.all([
+    pingsForLink(link),
+    settings().catch(() => null),
+    link.loadCarrierId ? getRow(LOAD_CARRIER_TABLE, { id: link.loadCarrierId }) : Promise.resolve(null),
+  ])
+  const view = carrierView({
     load: toLoad(loadRow),
     events,
     link,
     contactPhone: settingsRow?.trackingContact?.phone?.trim() || null,
     nowIso: new Date().toISOString(),
-  }))
+  }) as unknown as Record<string, unknown>
+  view.eta = (carrierRow as { deliveryEtaAt?: string | null } | null)?.deliveryEtaAt ?? null
+  return reply(200, view)
 }
 
 interface PingFix {
@@ -580,7 +587,40 @@ async function pingRoute(token: string, event: FnUrlEvent) {
     },
   }))
 
-  return reply(200, { ok: true, at: nowIso })
+  let eta: { at: string; miles: number; driveMinutes: number; lateBy: number | null } | null = null
+  if (link.loadCarrierId) {
+    const [loadRow, carrierRow] = await Promise.all([
+      getRow(LOAD_TABLE, { id: link.loadId }),
+      getRow(LOAD_CARRIER_TABLE, { id: link.loadCarrierId }),
+    ])
+    if (loadRow && carrierRow) {
+      const stops = parseJson<Stop[]>(loadRow.stops) ?? []
+      const delivery = [...stops].reverse().find((s) => s.type === 'delivery')
+      const stopLat = delivery?.address?.lat ?? null
+      const stopLng = delivery?.address?.lng ?? null
+      if (delivery?.appt && typeof stopLat === 'number' && typeof stopLng === 'number') {
+        const computed = etaToStop(
+          { lat: fix.lat, lng: fix.lng },
+          { lat: stopLat, lng: stopLng, appt: delivery.appt },
+          nowIso,
+        )
+        eta = {
+          at: computed.etaAt,
+          miles: computed.miles,
+          driveMinutes: computed.driveMinutes,
+          lateBy: computed.lateBy,
+        }
+        await ddb.send(new UpdateCommand({
+          TableName: LOAD_CARRIER_TABLE,
+          Key: { id: link.loadCarrierId },
+          UpdateExpression: 'SET deliveryEtaAt = :eta, updatedAt = :now',
+          ExpressionAttributeValues: { ':eta': computed.etaAt, ':now': nowIso },
+        }))
+      }
+    }
+  }
+
+  return reply(200, { ok: true, at: nowIso, eta })
 }
 
 // ── Step E: the carrier upload portal ───────────────────────────────────────

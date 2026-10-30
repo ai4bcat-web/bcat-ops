@@ -2255,6 +2255,59 @@ shipmentActionsFn.addEnvironment('DRIVER_SUBMISSION_TABLE_NAME',     driverSubmi
 shipmentActionsFn.addEnvironment('DRIVER_SUBMISSION_DOC_TABLE_NAME', driverSubmissionDocTable.tableName)
 backend.storage.resources.bucket.grantReadWrite(shipmentActionsFn, 'shipment-docs/*')
 
+// ── Step P: postings, carrier offers and the demo seed ──────────────────────
+// POST_LOAD / UNPOST_LOAD own ShipmentPosting outright. The demo seed owns
+// DemoRecord — its own index of what it made, which is the only thing a reset is
+// ever allowed to touch — and reads ShipmentMessage to count the thread for the
+// Demo page's checklist. The seed writes Customer and Carrier directly (their
+// routers are a different Lambda) and mints every piece of freight through this
+// file's own CREATE_SHIPMENT / BOOK_CARRIER, so it cannot reach a state the app
+// could not; both tables are already on the big grant above.
+const shipmentPostingTable = backend.data.resources.tables['ShipmentPosting']
+const shipmentDemoTable    = backend.data.resources.tables['DemoRecord']
+const shipmentMessageTable = backend.data.resources.tables['ShipmentMessage']
+shipmentActionsFn.addToRolePolicy(
+  new PolicyStatement({
+    actions: [
+      'dynamodb:GetItem',
+      'dynamodb:BatchGetItem',
+      'dynamodb:PutItem',
+      'dynamodb:UpdateItem',
+      'dynamodb:DeleteItem',
+      'dynamodb:Query',
+      'dynamodb:Scan',
+      'dynamodb:ConditionCheckItem',
+    ],
+    resources: [
+      shipmentPostingTable.tableArn,
+      `${shipmentPostingTable.tableArn}/index/*`,
+      shipmentDemoTable.tableArn,
+      `${shipmentDemoTable.tableArn}/index/*`,
+      // Written by the seed only; read by the Demo page's checklist.
+      shipmentMessageTable.tableArn,
+      `${shipmentMessageTable.tableArn}/index/*`,
+    ],
+  }),
+)
+shipmentActionsFn.addEnvironment('SHIPMENT_POSTING_TABLE_NAME', shipmentPostingTable.tableName)
+shipmentActionsFn.addEnvironment('DEMO_RECORD_TABLE_NAME',      shipmentDemoTable.tableName)
+shipmentActionsFn.addEnvironment('SHIPMENT_MESSAGE_TABLE_NAME', shipmentMessageTable.tableName)
+// Step J: the market rate behind a quote and the board adapters read the
+// Integration row to decide stub vs live, and the credential pointer it carries.
+shipmentActionsFn.addToRolePolicy(new PolicyStatement({
+  actions:   ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem', 'dynamodb:Query'],
+  resources: [backend.data.resources.tables['Integration'].tableArn],
+}))
+shipmentActionsFn.addEnvironment('INTEGRATION_TABLE_NAME', backend.data.resources.tables['Integration'].tableName)
+// The credentials themselves stay in SSM. Read-only, and scoped to the same
+// per-pool integration path tmsDirectoryActions writes — a board posting and a
+// RateView lookup need DAT's key, and nothing on this role may write one.
+shipmentActionsFn.addEnvironment('INTEGRATION_PARAM_PATH', integrationParamPath)
+shipmentActionsFn.addToRolePolicy(new PolicyStatement({
+  actions:   ['ssm:GetParameter'],
+  resources: [integrationParamArn],
+}))
+
 // ── tmsCarrierActions Lambda (Step C) ───────────────────────────────────────
 // The carrier directory's single writer: Carrier, CarrierContact,
 // CarrierPaymentMethod and CarrierDocument are written with the raw SDK, the
@@ -2423,6 +2476,49 @@ trackingActionsFn.addEnvironment('SHIPMENT_DOCUMENT_TABLE_NAME', shipmentDocumen
 backend.storage.resources.bucket.grantRead(trackingActionsFn, 'shipment-docs/*')
 backend.storage.resources.bucket.grantRead(trackingActionsFn, 'driver-docs/*')
 backend.storage.resources.bucket.grantRead(trackingActionsFn, 'rate-confirms/*')
+
+// ── Step P8/P9: the shipment thread, the tracking agent and the POD review ───
+// tmsTrackingActions is the only Lambda wired to both Twilio and SES for a
+// shipment, so the per-shipment e-mail/SMS thread and the check-call agent live
+// here rather than beside the shipment writer. It owns ShipmentMessage outright;
+// ShipmentDocument stays read-mostly (above) plus the one review stamp a POD
+// verdict writes, which is why the document grant gains UpdateItem.
+const trackingMessageTbl = backend.data.resources.tables['ShipmentMessage']
+trackingActionsFn.addToRolePolicy(new PolicyStatement({
+  actions:   ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem', 'dynamodb:Query'],
+  resources: [trackingMessageTbl.tableArn, `${trackingMessageTbl.tableArn}/index/*`],
+}))
+trackingActionsFn.addToRolePolicy(new PolicyStatement({
+  actions:   ['dynamodb:UpdateItem'],
+  resources: [shipmentDocumentTable.tableArn],
+}))
+// A POD verdict is a transaction across the document, the shipment and the order,
+// so the tracking router needs the same transactional guards the shipment one has.
+trackingActionsFn.addToRolePolicy(new PolicyStatement({
+  actions:   ['dynamodb:ConditionCheckItem'],
+  resources: [
+    trackingShipmentTbl.tableArn,
+    trackingOrderTbl.tableArn,
+    trackingLoadTbl.tableArn,
+    shipmentDocumentTable.tableArn,
+  ],
+}))
+// The order's AR status is what "ready for billing" means, and the release goes
+// through the Step F gate inside this Lambda rather than around it.
+trackingActionsFn.addToRolePolicy(new PolicyStatement({
+  actions:   ['dynamodb:UpdateItem'],
+  resources: [trackingOrderTbl.tableArn, trackingLoadTbl.tableArn],
+}))
+trackingActionsFn.addEnvironment('SHIPMENT_MESSAGE_TABLE_NAME', trackingMessageTbl.tableName)
+// The release gate reads the order's documents and charges before it answers.
+trackingActionsFn.addEnvironment('LOAD_CHARGE_TABLE_NAME', loadChargeTable.tableName)
+trackingActionsFn.addToRolePolicy(new PolicyStatement({
+  actions:   ['dynamodb:GetItem', 'dynamodb:Query'],
+  resources: [loadChargeTable.tableArn, `${loadChargeTable.tableArn}/index/*`],
+}))
+// `GOOGLE_MAPS_API_KEY` and `ANTHROPIC_API_KEY` reach this function as Amplify
+// secrets declared on its own resource, the way tms-geocode and pod-actions hold
+// theirs: a key is never an environment variable this file can print.
 
 // ── tmsFinanceActions Lambda (Step F) ───────────────────────────────────────
 // Owns Invoice and ArPayment: the only writer of UNPAID, PAID and every cash row.

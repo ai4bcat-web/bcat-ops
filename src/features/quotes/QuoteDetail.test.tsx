@@ -17,9 +17,11 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import '@testing-library/jest-dom/vitest'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { QuoteDetail } from './QuoteDetail'
-import { getWorkflowRun, linkWorkflowRun, saveQuote } from '@/lib/apiClient'
+import { getWorkflowRun, linkWorkflowRun, priceFromMarket, saveQuote } from '@/lib/apiClient'
+import type { MarketRateResult } from '@/lib/apiClient'
 import { toast } from 'sonner'
 import type { QuotePricingResult } from '@/lib/quotes'
 import type { CustomerRecord, QuoteRecord, WorkflowRunRecord } from '@/types/tms'
@@ -37,6 +39,7 @@ vi.mock('@/lib/apiClient', () => ({
   getWorkflowRun: vi.fn().mockResolvedValue(null),
   graphqlErrorText: (e: unknown) => String(e),
   linkWorkflowRun: vi.fn().mockResolvedValue({}),
+  priceFromMarket: vi.fn(),
   restoreQuote: vi.fn().mockResolvedValue({}),
   saveQuote: vi.fn().mockResolvedValue({}),
 }))
@@ -231,5 +234,92 @@ describe('a quote seeded from a QUOTE run', () => {
     expect(toast.success).toHaveBeenCalledWith(expect.stringContaining('Q000007 saved'))
     // The row exists, so the page moves on to it rather than offering to save again.
     expect(await screen.findByTestId('saved-quote')).toBeTruthy()
+  })
+})
+
+describe('market-rate panel', () => {
+  const marketQuote = quote({
+    id: 'Q-MKT',
+    side: 'SELL',
+    status: 'DRAFT',
+    customerId: 'CUST-1',
+    equipmentType: 'VAN',
+    miles: 900,
+    mode: 'FTL',
+    stops: [
+      { id: 'pu', type: 'pickup', city: 'Joliet, IL', address: { city: 'Joliet', state: 'IL' }, appt: '', driverId: null, sequence: 0 },
+      { id: 'de', type: 'delivery', city: 'Dallas, TX', address: { city: 'Dallas', state: 'TX' }, appt: '', driverId: null, sequence: 1 },
+    ],
+  } as Partial<QuoteRecord> & { id: string })
+
+  function marketAnswer(stub: boolean): MarketRateResult {
+    return {
+      answer: {
+        averageCents: 180_000,
+        lowCents: 170_000,
+        highCents: 200_000,
+        fuelCents: 18_000,
+        perMileCents: 200,
+        miles: 900,
+        reports: 42,
+        days: 1,
+        stub,
+        source: 'DAT_RATEVIEW',
+        message: stub ? 'DAT stub' : 'DAT live',
+      },
+      targetBps: 2500,
+      floorBps: 1200,
+      autoReply: false,
+      suggestedSellCents: 225_000,
+      belowFloor: false,
+      floorSellCents: 202_000,
+      marginAtSuggested: 2500,
+    }
+  }
+
+  it('renders the market number, STUB badge, margins, suggested rate and Send suggested', async () => {
+    vi.mocked(priceFromMarket).mockResolvedValue(marketAnswer(true))
+    setup('/quotes/Q-MKT', '/quotes/:id', marketQuote)
+
+    fireEvent.click(await screen.findByLabelText('Price this lane from the market'))
+    await waitFor(() => expect(screen.getByText('$1,800.00')).toBeVisible())
+    expect(screen.getByText('STUB')).toBeVisible()
+    expect(screen.getByText(/target 25\.00%/)).toBeVisible()
+    expect(screen.getByText(/floor 12\.00%/)).toBeVisible()
+    expect(screen.getByText('suggested $2,250.00')).toBeVisible()
+    expect(screen.getByLabelText('Send the suggested rate')).toBeEnabled()
+  })
+
+  it('refuses to auto-send a rate that is below the floor', async () => {
+    const below = marketAnswer(false)
+    below.belowFloor = true
+    below.suggestedSellCents = 190_000
+    below.floorSellCents = 202_000
+    vi.mocked(priceFromMarket).mockResolvedValue(below)
+    setup('/quotes/Q-MKT', '/quotes/:id', marketQuote)
+
+    fireEvent.click(await screen.findByLabelText('Price this lane from the market'))
+    await waitFor(() => expect(screen.getByText('suggested $1,900.00')).toBeVisible())
+    expect(screen.queryByLabelText('Send the suggested rate')).toBeNull()
+    expect(screen.getByText(/Below floor/)).toBeVisible()
+    expect(screen.getByText(/raising the rate above \$2,020\.00/)).toBeVisible()
+  })
+
+  it('fills the existing send flow when Send suggested is clicked', async () => {
+    const answer = marketAnswer(true)
+    vi.mocked(priceFromMarket)
+      .mockResolvedValueOnce(answer)
+      .mockResolvedValueOnce({ ...answer, quote: { ...marketQuote, amountCents: 225_000 } })
+    setup('/quotes/Q-MKT', '/quotes/:id', marketQuote)
+
+    fireEvent.click(await screen.findByLabelText('Price this lane from the market'))
+    await waitFor(() => expect(screen.getByText('suggested $2,250.00')).toBeVisible())
+    fireEvent.click(screen.getByLabelText('Send the suggested rate'))
+
+    await waitFor(() => expect(priceFromMarket).toHaveBeenCalledTimes(2))
+    const saveCall = vi.mocked(priceFromMarket).mock.calls[1]?.[0]
+    expect(saveCall).toMatchObject({ save: true, expectedUpdatedAt: marketQuote.updatedAt })
+    // Refreshing re-renders the page; the send dialog mock is present so the route is stable.
+    expect(saveCall).toMatchObject({ quoteId: 'Q-MKT' })
   })
 })

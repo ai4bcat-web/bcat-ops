@@ -5,6 +5,12 @@ import type { PostalAlias } from '../lib/integrations/postalAliases'
 // `TenderPrefill` is the shape a tender proposal carries. Type-only, so the cycle
 // through `../lib/intakeTender` (which reads `CustomerRecord` from here) never runs.
 import type { TenderPrefill } from '../lib/intakeTender'
+// The check-call plan is the shape the customer, the load and the org default all
+// store. It lives beside the ladder that reads it, and is re-exported here so
+// feature code keeps importing the TMS vocabulary from one place.
+import type { CheckCallPlan } from '../lib/checkCallPlan'
+export type { CheckCallChannel, CheckCallMilestone, CheckCallPlan } from '../lib/checkCallPlan'
+export type { RateViewAnswer } from '../lib/integrations/rateView'
 
 // ── Integrations (Step J) ────────────────────────────────────────────────────
 // The integration contract lives in `src/lib/integrations/types`, which the Lambdas
@@ -247,6 +253,25 @@ export interface CustomerRecord {
   // ── Workflows & AI agents (Step K) ─────────────────────────────────────────
   /** Human-edited notes the agents read for this customer. Never agent-written. */
   aiMemory?: PartyAiMemory | null
+
+  // ── Flow defaults (Step P3) ────────────────────────────────────────────────
+  // Each is an override of the org default in TmsSettings; null means "use the
+  // org's answer". `resolveMargin` / `resolveRequiredFields` / `resolveCheckCallPlan`
+  // in src/lib/flowDefaults.ts are the only readers that matter.
+  /** Step I team key: new loads for this customer land in that team's queue. */
+  defaultCarrierTeamKey?: string | null
+  /** Optional rep inside that team (Cognito username). */
+  defaultCarrierRepId?: string | null
+  /** Target margin, basis points. Org default 2000 (20%). */
+  marginTargetBps?: number | null
+  /** Refuse-below margin, basis points. Never above the target. */
+  marginFloorBps?: number | null
+  /** true = the quoting agent sends the reply; false = a human presses Send. */
+  quoteAutoReply?: boolean | null
+  /** Adds to the org's required-field list; it can never take one away. */
+  requiredLoadFields?: string[] | null
+  /** Cadence and channels for this customer's loads, overridable per load. */
+  checkCallPlan?: CheckCallPlan | null
 
   createdAt: string
   updatedAt: string
@@ -492,6 +517,21 @@ export interface TmsSettings {
   /** Human-edited agent configuration. The agent reads it and never writes it. */
   aiAgents?: AiAgentsSettings | null
 
+  // ── Flow defaults (Step P3) ────────────────────────────────────────────────
+  /** Target margin for every mode, basis points. Ryne's org default is 2000. */
+  marginTargetBps?: number | null
+  /** Per-mode overrides, e.g. `{ FTL: 2000, LTL: 2500 }`. */
+  marginTargetBpsByMode?: Record<string, number> | null
+  /** Whether a customer with no opinion gets automatic quote replies. */
+  quoteAutoReplyDefault?: boolean | null
+  /** Pickup address, delivery address, bill-to, sales rep, revenue division. */
+  defaultRequiredLoadFields?: string[] | null
+  /** The org's check-call cadence and channels. */
+  defaultCheckCallPlan?: CheckCallPlan | null
+  /** The P1 seed's version stamp, so the Demo page can say what it is looking at. */
+  demoSeedVersion?: string | null
+  demoSeededAt?: string | null
+
   createdAt?: string
   updatedAt?: string
 }
@@ -715,6 +755,113 @@ export interface StopDocumentContact {
   email?: string | null
 }
 
+/** P5. A shipment the automation built is BUILDING until every required field is filled. */
+export type ShipmentBuildState = 'BUILDING' | 'BUILT'
+
+export type PostingStatus = 'POSTED' | 'UNPOSTED' | 'FAILED'
+
+/**
+ * P6. One row per board a shipment is — or was — posted to.
+ *
+ * `mode` is the Step J adapter's own answer. A STUB posting is labelled STUB
+ * everywhere it is shown, because `stub:…` is not a board id.
+ */
+export interface ShipmentPostingRecord {
+  id: string
+  shipmentId: string
+  loadId?: string | null
+  provider: string
+  status: PostingStatus
+  mode: 'STUB' | 'LIVE'
+  boardPostingId?: string | null
+  /** The provider's own answer, verbatim. */
+  message?: string | null
+  postedAt?: string | null
+  postedBy?: string | null
+  unpostedAt?: string | null
+  unpostedBy?: string | null
+  originCity?: string | null
+  originState?: string | null
+  destinationCity?: string | null
+  destinationState?: string | null
+  pickupAppt?: string | null
+  equipmentType?: string | null
+  lengthFt?: number | null
+  weightLbs?: number | null
+  rateCents?: number | null
+  contactEmail?: string | null
+  contactPhone?: string | null
+  note?: string | null
+  offerCount?: number | null
+  createdBy: string
+  updatedBy: string
+  version?: number | null
+  createdAt: string
+  updatedAt: string
+}
+
+export type ShipmentMessageChannel = 'EMAIL' | 'SMS' | 'VOICE'
+export type ShipmentMessageKind =
+  | 'RATE_CON' | 'CHECK_CALL' | 'CHECK_CALL_REPLY' | 'POD_REQUEST' | 'POD_REPLY'
+  | 'ESCALATION' | 'CARRIER_OFFER' | 'QUOTE' | 'TENDER' | 'NOTE' | 'OTHER'
+export type ShipmentMessageParty = 'DRIVER' | 'DISPATCHER' | 'CARRIER' | 'CUSTOMER' | 'INTERNAL'
+export type ShipmentMessageStatus = 'SENT' | 'NOT_SENT' | 'FAILED' | 'RECEIVED'
+
+/**
+ * P8 / N4. One e-mail or text on a shipment's thread.
+ *
+ * On dev SES is denied and Twilio is unset, so an outbound row lands `NOT_SENT`
+ * carrying the exact message it would have sent. `VOICE` exists in the channel
+ * vocabulary and nothing writes it: voice is deferred, declared and disabled.
+ */
+export interface ShipmentMessageRecord {
+  id: string
+  shipmentId: string
+  threadKey: string
+  loadId?: string | null
+  loadCarrierId?: string | null
+  direction: 'IN' | 'OUT'
+  channel: ShipmentMessageChannel
+  kind: ShipmentMessageKind
+  party?: ShipmentMessageParty | null
+  to?: string | null
+  from?: string | null
+  cc?: string | null
+  subject?: string | null
+  body?: string | null
+  status: ShipmentMessageStatus
+  error?: string | null
+  messageId?: string | null
+  inReplyTo?: string | null
+  providerRef?: string | null
+  attachments?: { name: string; contentType?: string | null; sizeBytes?: number | null; s3Key?: string | null }[] | null
+  documentIds?: string[] | null
+  trackingLinkId?: string | null
+  workflowRunId?: string | null
+  /** Whether a person or the agent wrote it; the signature is appended from this. */
+  authorKind?: 'AGENT' | 'PERSON' | null
+  authorName?: string | null
+  at: string
+  createdBy: string
+  createdAt: string
+  updatedAt: string
+}
+
+/** P1/P11. The seed's own index, so a reset can only ever touch what the seed made. */
+export interface DemoRecordRow {
+  id: string
+  kind: string
+  demoKey: string
+  recordId: string
+  seedVersion: string
+  step?: string | null
+  label?: string | null
+  detail?: Record<string, unknown> | null
+  createdBy: string
+  createdAt: string
+  updatedAt: string
+}
+
 export interface ShipmentRecord {
   id: string
   /** `shipmentPrefix` + padded counter; backfilled rows keep `L<aljexId>`. */
@@ -789,6 +936,29 @@ export interface ShipmentRecord {
    * (the `voidedAt` pattern): CREATE_SHIPMENT writes it, nothing else.
    */
   workflowRunId?: string | null
+
+  // ── The demo flow (Step P) ─────────────────────────────────────────────────
+  /**
+   * P5. BUILDING while a required field the customer asks for is still empty.
+   * Nothing downstream — posting, dispatch, release to billing — accepts a
+   * shipment that is still BUILDING.
+   */
+  buildState?: ShipmentBuildState | null
+  /** The "Needs: …" list, recomputed on every write that could fill one. */
+  missingFields?: string[] | null
+  /** P6. Boards this shipment is live on right now. */
+  postedBoards?: string[] | null
+  /** P8. `tracking+<shipmentId>` — the key every message on the thread carries. */
+  threadKey?: string | null
+  threadOpenedAt?: string | null
+  /** P7. Literal 'OPEN' while a carrier offer is waiting on a human. */
+  carrierOfferOpen?: string | null
+  /** P9. The app refused a POD twice and asked for a person. */
+  podFlaggedAt?: string | null
+  podFlagReason?: string | null
+  /** P8. The tracking agent's own flag, shown on the Tracking page. */
+  trackingFlaggedAt?: string | null
+  trackingFlagReason?: string | null
   createdBy: string
   updatedBy: string
   version?: number | null
@@ -1085,6 +1255,20 @@ export interface ShipmentLoadFields {
   /** When the notice for the CURRENT `nextCheckCallAt` went out; a reschedule re-arms both. */
   checkCallDueNotifiedAt?: string | null
   checkCallOverdueNotifiedAt?: string | null
+  // ── The check-call plan this leg runs on (Step P8) ─────────────────────────
+  /**
+   * The customer's plan copied onto the load when the carrier is assigned, so a
+   * dispatcher may change the cadence for one load without touching the customer.
+   * The tracking agent reads only this field.
+   */
+  checkCallPlan?: CheckCallPlan | null
+  checkCallPlanStartedAt?: string | null
+  /** The reply clock behind the 30-minute escalation; cleared by any inbound reply. */
+  checkCallAwaitingSince?: string | null
+  checkCallEscalatedAt?: string | null
+  /** The Tracking-page flag the deferred voice ladder falls through to. */
+  checkCallFlaggedAt?: string | null
+  checkCallFlagReason?: string | null
 }
 
 /**
@@ -2236,6 +2420,30 @@ export interface QuoteRecord {
   events?: QuoteEvent[] | null
   /** The WorkflowRun a person applied to save this quote. SAVE_QUOTE writes it. */
   workflowRunId?: string | null
+
+  // ── Step P4: what the market said, and whether it was real ─────────────────
+  /** The RateView answer the sell rate was built from. */
+  marketRateCents?: number | null
+  marketSource?: string | null
+  /** True when the adapter ran in stub mode. Printed beside the number, always. */
+  marketStub?: boolean | null
+  marketAt?: string | null
+  marketDetail?: Record<string, unknown> | null
+  /** The margin the sell rate was built with. */
+  marginTargetBps?: number | null
+  /** True when the agent sent the reply without a human pressing Send. */
+  autoReplied?: boolean | null
+
+  // ── Step P7: a carrier's answer to a posting ───────────────────────────────
+  /** PHONE exists in the model and in the UI as a manually-logged call today. */
+  offerSource?: 'EMAIL' | 'PHONE' | 'BOARD' | 'MANUAL' | null
+  offerContactName?: string | null
+  offerContactPhone?: string | null
+  offerAvailableAt?: string | null
+  /** The `ShipmentPosting` this answered. */
+  offerPostingId?: string | null
+  /** The `ShipmentMessage` it came from. */
+  offerMessageRef?: string | null
   createdBy: string
   updatedBy: string
   version: number

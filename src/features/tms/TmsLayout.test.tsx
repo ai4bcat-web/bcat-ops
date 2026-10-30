@@ -25,7 +25,18 @@ vi.mock('@/features/tms/useShipmentViews', () => ({
   useShipmentViews: () => ({ views: data.views, loading: false, error: null, refresh: vi.fn() }),
   useOwnershipDivisions: () => ({ divisions: [], loading: false, error: null, refresh: vi.fn() }),
 }))
-vi.mock('@/lib/apiClient', () => ({ listUserProfiles: vi.fn(async () => data.profiles) }))
+vi.mock('@/lib/apiClient', () => ({
+  listUserProfiles: vi.fn(async () => data.profiles),
+  listShipments: vi.fn(async () => []),
+  listOrders: vi.fn(async () => []),
+  listLoadSummaries: vi.fn(async () => []),
+  listLoadCarriers: vi.fn(async () => []),
+  listQuotes: vi.fn(async () => []),
+  listLoadFinancials: vi.fn(async () => []),
+  listCustomers: vi.fn(async () => []),
+  listCarriers: vi.fn(async () => []),
+  listDrivers: vi.fn(async () => []),
+}))
 
 import { TmsLayout } from './TmsLayout'
 

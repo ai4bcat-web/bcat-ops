@@ -11,6 +11,7 @@ import type {
   InvoiceFrequency,
   VisibilityPrefs,
   CustomerStatus,
+  CheckCallPlan,
 } from '@/types/tms'
 
 function linesToArray(value: string): string[] {
@@ -106,6 +107,15 @@ export interface CustomerFormValue {
   defaultCharges: DefaultCharge[]
   pricingDefaults: PricingDefaults
   quotingDefaults: QuotingDefaults
+
+  // Step P3 — flow defaults overriding TmsSettings.
+  defaultCarrierTeamKey: string
+  defaultCarrierRepId: string
+  marginTargetBps: number | null
+  marginFloorBps: number | null
+  quoteAutoReply: boolean | null
+  requiredLoadFields: string[]
+  checkCallPlan: CheckCallPlan | null
 }
 
 const APPT_WORKFLOW_OPTIONS: { value: 'UNSET' | 'NONE' | 'BATORY'; label: string }[] = [
@@ -173,6 +183,14 @@ function emptyCustomerForm(initial?: CustomerRecord | null): CustomerFormValue {
     defaultCharges: initial?.defaultCharges ?? [],
     pricingDefaults: emptyPricingDefaults(initial?.pricingDefaults),
     quotingDefaults: emptyQuotingDefaults(initial?.quotingDefaults),
+
+    defaultCarrierTeamKey: initial?.defaultCarrierTeamKey ?? '',
+    defaultCarrierRepId: initial?.defaultCarrierRepId ?? '',
+    marginTargetBps: initial?.marginTargetBps ?? null,
+    marginFloorBps: initial?.marginFloorBps ?? null,
+    quoteAutoReply: initial?.quoteAutoReply ?? null,
+    requiredLoadFields: initial?.requiredLoadFields ?? [],
+    checkCallPlan: initial?.checkCallPlan ?? null,
   }
 }
 
@@ -212,6 +230,18 @@ function validateCustomerForm(v: CustomerFormValue): Record<string, string> {
   }
   if (pricing.minProfitCents != null && pricing.maxProfitCents != null && pricing.minProfitCents > pricing.maxProfitCents) {
     errors.pricingDefaultsProfitRange = 'Min profit must be ≤ max profit'
+  }
+
+  const targetBps = v.marginTargetBps
+  if (targetBps != null && (targetBps < 0 || targetBps > 9999)) {
+    errors.marginTargetBps = 'Enter 0–9999 basis points'
+  }
+  const floorBps = v.marginFloorBps
+  if (floorBps != null && (floorBps < 0 || floorBps > 9999)) {
+    errors.marginFloorBps = 'Enter 0–9999 basis points'
+  }
+  if (targetBps != null && floorBps != null && floorBps > targetBps) {
+    errors.marginFloorBps = 'Floor cannot be above the target margin'
   }
   return errors
 }
@@ -283,6 +313,14 @@ export function useCustomerForm(initial?: CustomerRecord | null) {
     defaultCharges: value.defaultCharges.length ? value.defaultCharges : null,
     pricingDefaults: value.pricingDefaults,
     quotingDefaults: value.quotingDefaults,
+
+    defaultCarrierTeamKey: value.defaultCarrierTeamKey.trim() || null,
+    defaultCarrierRepId: value.defaultCarrierRepId.trim() || null,
+    marginTargetBps: parseOptionalBps(value.marginTargetBps),
+    marginFloorBps: parseOptionalBps(value.marginFloorBps),
+    quoteAutoReply: value.quoteAutoReply,
+    requiredLoadFields: value.requiredLoadFields.length ? value.requiredLoadFields : null,
+    checkCallPlan: value.checkCallPlan,
   })
 
   const errors = useMemo(() => validateCustomerForm(value), [value])

@@ -23,6 +23,7 @@ import AiAgentsPage from '@/features/tms/settings/AiAgentsPage'
 import ShipmentViewsPage from '@/features/tms/settings/ShipmentViewsPage'
 import { IntegrationsTab } from '@/features/tms/integrations/IntegrationsTab'
 import { UsersPage } from '@/features/users/UsersPage'
+import { DemoPage } from './DemoPage'
 import { useAuth } from '@/hooks/useAuth'
 import { TMS_PAGE_KEY } from '@/lib/navSections'
 
@@ -52,6 +53,7 @@ const TABS: BrokerageTab[] = [
   { key: 'views', label: 'Shipment views', path: 'views', pages: [] },
   { key: 'integrations', label: 'Integrations', path: 'integrations', pages: [] },
   { key: 'ai-agents', label: 'AI Agents', path: 'ai-agents', pages: [] },
+  { key: 'demo', label: 'Demo', path: 'demo', pages: [] },
 ]
 
 /** The deepest tab whose path the URL is on — '' only matches the bare root. */
@@ -95,6 +97,7 @@ export function BrokeragePage() {
         {/* The page carries its own inner tab strip under one path, so the route is a
             wildcard for the same reason Integrations is. */}
         <Route path="ai-agents/*" element={<RequireAdmin><AiAgentsPage /></RequireAdmin>} />
+        <Route path="demo" element={<RequirePage page={[TMS_PAGE_KEY]}><DemoPage /></RequirePage>} />
         {/* An unknown tab is a stale link, not a dead end: Settings is the page's home. */}
         <Route path="*" element={<Navigate to={ROOT} replace />} />
       </Routes>

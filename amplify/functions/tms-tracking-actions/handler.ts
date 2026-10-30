@@ -57,7 +57,9 @@ import {
   numberOrNull,
   putItem,
   queryIndex as storeQueryIndex,
+  readBundle as storeReadBundle,
   readStops,
+  shipmentStoreFromEnv,
   transact as storeTransact,
   updateItemTx,
   type Row,
@@ -118,6 +120,10 @@ const AUDIT_LOG_TABLE_NAME = process.env.AUDIT_LOG_TABLE_NAME ?? ''
 const SHIPMENT_DOCUMENT_TABLE_NAME = process.env.SHIPMENT_DOCUMENT_TABLE_NAME ?? ''
 const SHIPMENT_NOTICE_TABLE_NAME = process.env.SHIPMENT_NOTICE_TABLE_NAME ?? ''
 const CUSTOMER_TABLE_NAME = process.env.CUSTOMER_TABLE_NAME ?? ''
+/** Step P8. The shipment's own e-mail/SMS thread. This router is its only writer. */
+const SHIPMENT_MESSAGE_TABLE_NAME = process.env.SHIPMENT_MESSAGE_TABLE_NAME ?? ''
+/** Same server key tms-geocode holds; unset means a free-text reply stays a note. */
+const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY ?? ''
 const BUCKET_NAME = process.env.BUCKET_NAME ?? ''
 const USER_POOL_ID = process.env.USER_POOL_ID ?? 'us-east-1_IbPKPNJC9'
 const PORTAL_ORIGIN = process.env.PORTAL_ORIGIN ?? ''
@@ -205,6 +211,31 @@ const EMAILABLE_KEY_PREFIXES: readonly string[] = [
   'rate-confirms/',
 ]
 
+// ── Step P8/P9 ───────────────────────────────────────────────────────────────
+// The per-shipment thread, the check-call agent and the POD review. They are
+// handed this router's clients, tables and senders rather than building their
+// own: a check-call text goes out through the same dispatch conversation a
+// tracking link does, and a POD verdict reaches accounting only through the
+// Step F gate, which is injected rather than reimplemented.
+import {
+  ingestShipmentMessage,
+  listThread,
+  openShipmentThread,
+  sendShipmentMessage,
+  type ThreadDeps,
+} from './thread'
+import {
+  runCheckCallPlan,
+  saveCheckCallPlan,
+  sweepCheckCallPlans,
+  type CheckCallDeps,
+} from './checkCallAgent'
+import {
+  requestPod,
+  reviewShipmentPod,
+  type PodReviewDeps,
+} from './podReview'
+
 // ── Types ────────────────────────────────────────────────────────────────────
 
 type Action =
@@ -214,6 +245,16 @@ type Action =
   | 'REVOKE_CUSTOMER_LINK'
   | 'TEXT_DRIVER'
   | 'SAVE_TRACKING_SETTINGS'
+  // ── Step P8/P9 — the shipment thread, the tracking agent and the POD ───────
+  | 'OPEN_SHIPMENT_THREAD'
+  | 'SEND_SHIPMENT_MESSAGE'
+  | 'INGEST_SHIPMENT_MESSAGE'
+  | 'LIST_SHIPMENT_THREAD'
+  | 'RUN_CHECK_CALL_PLAN'
+  | 'SWEEP_CHECK_CALL_PLANS'
+  | 'SAVE_CHECK_CALL_PLAN'
+  | 'REQUEST_POD'
+  | 'REVIEW_SHIPMENT_POD'
   | 'SEND_UPLOAD_LINK'
   | 'REVOKE_UPLOAD_LINK'
   | 'SEND_MILESTONE_NOTICE'
@@ -1837,6 +1878,196 @@ async function emailDocuments(input: Row, caller: Caller): Promise<Row> {
   return { notice: delivered.notice, emailStatus, emailError: delivered.error, downloads }
 }
 
+
+// ── Step P deps ──────────────────────────────────────────────────────────────
+
+/**
+ * The thread, the agent and the POD review all read the same cluster, so they
+ * share one deps object. Each module narrows it to what it actually uses.
+ */
+const stepPStore = shipmentStoreFromEnv(dynamo)
+
+const STEP_P_TABLES = {
+  message: SHIPMENT_MESSAGE_TABLE_NAME,
+  shipment: SHIPMENT_TABLE_NAME,
+  order: ORDER_TABLE_NAME,
+  load: LOAD_TABLE_NAME,
+  loadCarrier: LOAD_CARRIER_TABLE_NAME,
+  customer: CUSTOMER_TABLE_NAME,
+  settings: TMS_SETTINGS_TABLE_NAME,
+  document: SHIPMENT_DOCUMENT_TABLE_NAME,
+  checkCall: LOAD_CHECK_CALL_TABLE_NAME,
+  trackingLink: TRACKING_LINK_TABLE_NAME,
+}
+
+/**
+ * One outbound e-mail on a shipment's thread.
+ *
+ * Says what actually happened rather than what was asked for: SES is denied to
+ * every Lambda on the dev stack, so this resolves NOT_SENT and the caller keeps
+ * the exact message it would have sent on the row.
+ */
+async function sendThreadEmail(input: {
+  to: string
+  cc?: string | null
+  subject: string
+  body: string
+  messageId: string
+  inReplyTo?: string | null
+  replyTo: string
+}): Promise<{ status: 'SENT' | 'NOT_SENT' | 'FAILED'; providerRef: string | null; error: string | null }> {
+  const headers =
+    `From: ${FROM_ADDRESS}\r\n` +
+    `To: ${input.to}\r\n` +
+    (input.cc ? `Cc: ${input.cc}\r\n` : '') +
+    `Reply-To: ${input.replyTo}\r\n` +
+    `Message-ID: ${input.messageId}\r\n` +
+    (input.inReplyTo ? `In-Reply-To: ${input.inReplyTo}\r\nReferences: ${input.inReplyTo}\r\n` : '') +
+    `Subject: ${input.subject.replace(/[\r\n]+/g, ' ').trim()}\r\n` +
+    `MIME-Version: 1.0\r\n` +
+    `Content-Type: text/plain; charset=UTF-8\r\n` +
+    `Content-Transfer-Encoding: base64\r\n` +
+    `\r\n` +
+    `${wrap76(Buffer.from(input.body, 'utf8').toString('base64'))}\r\n`
+  try {
+    const sent = await ses.send(new SendEmailCommand({
+      FromEmailAddress: FROM_ADDRESS,
+      Destination: { ToAddresses: [input.to], CcAddresses: input.cc ? [input.cc] : undefined },
+      Content: { Raw: { Data: new TextEncoder().encode(headers) } },
+    }))
+    return { status: 'SENT', providerRef: sent.MessageId ?? null, error: null }
+  } catch (err) {
+    const why = err instanceof Error ? err.message : String(err)
+    console.warn('[tms-tracking-actions] thread e-mail not sent:', why)
+    return { status: 'NOT_SENT', providerRef: null, error: why }
+  }
+}
+
+/**
+ * Geocode a driver's free-text reply ("in Dallas").
+ *
+ * Returns null — never a guess — when the key is unset or Google does not
+ * recognise the text, so a reply the app cannot place is kept as a plain note
+ * instead of being given an invented position.
+ */
+async function geocodeReply(text: string): Promise<{ city: string; state: string; lat: number; lng: number } | null> {
+  const trimmed = text.trim()
+  if (!GOOGLE_MAPS_API_KEY || trimmed.length < 3) return null
+  try {
+    const url = new URL('https://maps.googleapis.com/maps/api/geocode/json')
+    url.searchParams.set('address', trimmed)
+    url.searchParams.set('components', 'country:US')
+    url.searchParams.set('key', GOOGLE_MAPS_API_KEY)
+    const res = await fetch(url)
+    if (!res.ok) return null
+    const body = await res.json() as {
+      status?: string
+      results?: { geometry?: { location?: { lat: number; lng: number } }; address_components?: { long_name: string; short_name: string; types: string[] }[] }[]
+    }
+    const hit = body.status === 'OK' ? body.results?.[0] : null
+    const loc = hit?.geometry?.location
+    if (!loc) return null
+    const parts = hit?.address_components ?? []
+    const city = parts.find((p) => p.types.includes('locality'))?.long_name
+      ?? parts.find((p) => p.types.includes('administrative_area_level_3'))?.long_name
+      ?? ''
+    const state = parts.find((p) => p.types.includes('administrative_area_level_1'))?.short_name ?? ''
+    if (!city && !state) return null
+    return { city, state, lat: loc.lat, lng: loc.lng }
+  } catch (err) {
+    console.warn('[tms-tracking-actions] geocode failed:', String(err))
+    return null
+  }
+}
+
+const threadDeps: ThreadDeps = {
+  tables: STEP_P_TABLES,
+  getById,
+  queryIndex,
+  transact: (items) => transact(items, 'shipmentThread'),
+  readBundle: (shipmentId) => storeReadBundle(stepPStore, shipmentId) as unknown as Promise<Row>,
+  // The settings singleton; absent means "every org default", which each
+  // resolver in src/lib already answers for.
+  getSettings: async () => (await getSettings()) ?? {},
+  writeAudit: (entityType, entityId, action, caller, changes) =>
+    writeAudit(entityType as AuditEntityType, entityId, action as Action, caller, changes),
+  sendEmail: sendThreadEmail,
+  sendSms: async (input) => {
+    const label = input.label as { carrierName?: string | null; driverName?: string | null; driverId?: string | null }
+    const outcome = await textInto(input.to, input.body, 'tracking-agent', {
+      carrierName: label.carrierName ?? null,
+      driverName: label.driverName ?? null,
+      driverId: label.driverId ?? null,
+    })
+    return {
+      // Twilio is unset on dev, so NOT_CONFIGURED is the normal answer and it is
+      // recorded as NOT_SENT with the exact text that would have gone out.
+      status: outcome.status === 'SENT' ? 'SENT' : outcome.status === 'FAILED' ? 'FAILED' : 'NOT_SENT',
+      providerRef: outcome.messageId,
+      error: outcome.error,
+    }
+  },
+  geocode: geocodeReply,
+  now: nowIso,
+  randomId: randomUUID,
+}
+
+const checkCallDeps: CheckCallDeps = {
+  ...threadDeps,
+  trackingUrl: (token) => `${PORTAL_ORIGIN}/l/${token}`,
+}
+
+/** The bytes of one stored document, for the POD reviewer. */
+async function readObjectBytes(key: string): Promise<Uint8Array> {
+  const out = await s3.send(new GetObjectCommand({ Bucket: BUCKET_NAME, Key: key }))
+  return out.Body ? new Uint8Array(await out.Body.transformToByteArray()) : new Uint8Array()
+}
+
+const podReviewDeps: PodReviewDeps = {
+  ...threadDeps,
+  // The app-side POD reviewer pod-actions already owns: legibility, the
+  // "page X of Y" count and the signature. One reviewer, two callers.
+  checkPod: async (input) => {
+    const [{ checkPod }, bytes] = await Promise.all([
+      import('../pod-actions/podCheck'),
+      readObjectBytes(input.s3Key),
+    ])
+    return checkPod({
+      apiKey: process.env.ANTHROPIC_API_KEY ?? '',
+      podPdf: bytes,
+      rateConPdf: null,
+      stops: input.stops as Array<Record<string, unknown>>,
+      pro: '',
+    }) as never
+  },
+  // The Step F gate, never around it: the shipment router owns READY_TO_INVOICE
+  // and this delegates to it rather than writing arStatus itself.
+  readyForBilling: async (shipmentId, caller) => {
+    const orders = await queryIndex(ORDER_TABLE_NAME, IDX_ORDERS_BY_SHIPMENT, 'shipmentId', shipmentId)
+    const order = orders[0]
+    if (!order) throw new Error(`Shipment ${shipmentId} has no order to release`)
+    // The real READY_TO_INVOICE, imported rather than reimplemented: it runs
+    // `evaluateReleaseGate` and refuses in the gate's own words. A POD that
+    // passes review does not buy its way past paperwork that is still missing.
+    const { readyToInvoice } = await import('../tms-shipment-actions/documents')
+    return readyToInvoice(
+      {
+        store: stepPStore,
+        s3,
+        bucket: BUCKET_NAME,
+        customerTable: CUSTOMER_TABLE_NAME,
+        settingsTable: TMS_SETTINGS_TABLE_NAME,
+        driverSubmissionTable: '',
+        driverSubmissionDocTable: '',
+        writeAudit: (entityType, entityId, action, actor, changes) =>
+          writeAudit(entityType as AuditEntityType, entityId, action as Action, actor, changes),
+      },
+      { orderId: String(order.id), expectedUpdatedAt: String(order.updatedAt ?? '') },
+      caller,
+    )
+  },
+}
+
 // ── Main handler ─────────────────────────────────────────────────────────────
 
 export const handler = async (event: AppSyncEvent): Promise<Row> => {
@@ -1867,6 +2098,26 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return emailDocuments(input, caller)
     case 'SAVE_DOCUMENT_SETTINGS':
       return saveSettings(input, caller, action, documentSettingsPatch(input))
+
+    // ── Step P8/P9 ─────────────────────────────────────────────────────────
+    case 'OPEN_SHIPMENT_THREAD':
+      return openShipmentThread(threadDeps, assertString(input.shipmentId, 'shipmentId'), caller)
+    case 'SEND_SHIPMENT_MESSAGE':
+      return sendShipmentMessage(threadDeps, input, caller)
+    case 'INGEST_SHIPMENT_MESSAGE':
+      return ingestShipmentMessage(threadDeps, input, caller)
+    case 'LIST_SHIPMENT_THREAD':
+      return listThread(threadDeps, input)
+    case 'RUN_CHECK_CALL_PLAN':
+      return runCheckCallPlan(checkCallDeps, input, caller)
+    case 'SWEEP_CHECK_CALL_PLANS':
+      return sweepCheckCallPlans(checkCallDeps, caller)
+    case 'SAVE_CHECK_CALL_PLAN':
+      return saveCheckCallPlan(checkCallDeps, input, caller)
+    case 'REQUEST_POD':
+      return requestPod(podReviewDeps, input, caller)
+    case 'REVIEW_SHIPMENT_POD':
+      return reviewShipmentPod(podReviewDeps, input, caller)
     default:
       throw new Error(`Unknown action: ${action}`)
   }

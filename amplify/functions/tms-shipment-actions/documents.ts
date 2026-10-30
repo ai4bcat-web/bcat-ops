@@ -75,6 +75,8 @@ import {
   type CustomerResolvable,
 } from '../../../src/lib/customerResolution'
 import { isVoided } from '../_shared/voided'
+// Step P5. The one build-state refusal every downstream action shares.
+import { assertBuilt } from './buildGate'
 import type {
   CustomerRecord,
   DocGateResult,
@@ -845,6 +847,11 @@ export async function readyToInvoice(deps: DocumentDeps, input: Row, caller: Cal
   }
   const shipmentId = String(order.shipmentId)
   const bundle = await readBundle(deps.store, shipmentId)
+
+  // Step P5. Nothing downstream accepts a shipment that is still Building — a
+  // load missing its bill-to or its revenue division has no business reaching
+  // accounting, and the Needs: list says exactly what is missing.
+  assertBuilt(bundle.shipment)
 
   if (order.arStatus !== 'DOCS_NEEDED') {
     throw new Error(`That order is already ${String(order.arStatus ?? 'unset')}, not waiting on documents`)

@@ -5,17 +5,27 @@ import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { DocumentsWorkstation } from './DocumentsWorkstation'
+import * as useBoardFiltersModule from '../board/useBoardFilters'
+import type { UseBoardFiltersOptions } from '../board/useBoardFilters'
+import * as useStaffModule from '@/hooks/useStaff'
 import { evaluateReleaseGate, releaseGateError } from '@/lib/releaseGate'
 import type { ShipmentBundle, ShipmentDocumentRecord, CustomerRecord } from '@/types/tms'
 import type { ShipmentRow } from '../shipmentViews'
 
 const api = vi.hoisted(() => ({
   getShipmentBundle: vi.fn(), getShipmentDocumentUrl: vi.fn(), getTmsSettings: vi.fn(),
+  listShipmentMessages: vi.fn(), requestPod: vi.fn(), reviewShipmentPod: vi.fn(),
   readyToInvoice: vi.fn(), previewInvoice: vi.fn(),
   saveShipmentView: vi.fn(), archiveShipmentView: vi.fn(),
 }))
 vi.mock('@/lib/apiClient', () => api)
-vi.mock('@/hooks/useAuth', () => ({ useAuth: () => ({ isAdmin: true, isOwner: false, user: { email: 'ops@test.com', groups: ['ADMIN'] } }) }))
+vi.mock('@/hooks/useAuth', () => ({
+  useAuth: () => ({
+    isAdmin: true,
+    isOwner: false,
+    user: { email: 'ops@test.com', userId: 'ops@test.com', groups: ['ADMIN'] },
+  }),
+}))
 vi.mock('@/hooks/useDirectory', () => ({ useDirectory: () => ({ customers }) }))
 vi.mock('@/hooks/useShipments', () => ({ useShipments: () => ({ shipments: rows, loading: false, error: null, refresh: vi.fn() }) }))
 vi.mock('@/hooks/useStaff', () => ({ useStaff: () => ({ me: null, nameOf: () => 'Staff' }) }))
@@ -58,6 +68,9 @@ beforeEach(() => {
   api.getTmsSettings.mockResolvedValue({ defaultRequiredDocs: ['TEMP_LOG'] })
   api.previewInvoice.mockImplementation(async () => ({ releaseGate: gate() }))
   api.getShipmentDocumentUrl.mockResolvedValue('https://example.test/BOL.pdf')
+  api.listShipmentMessages.mockResolvedValue([])
+  api.requestPod.mockResolvedValue({ messages: [] })
+  api.reviewShipmentPod.mockResolvedValue({ verdict: 'PASS', reasons: [], attempt: 1, flaggedForHuman: false, readyForBilling: true })
   api.readyToInvoice.mockImplementation(async () => {
     const result = gate()
     if (!result.ok) throw releaseGateError(result.missing)
@@ -66,6 +79,38 @@ beforeEach(() => {
   })
 })
 afterEach(cleanup)
+
+describe('DocumentsWorkstation board filter viewer', () => {
+  it('passes the signed-in viewer to useBoardFilters', async () => {
+    const calls: UseBoardFiltersOptions[] = []
+    const actual = useBoardFiltersModule.useBoardFilters
+    const spy = vi.spyOn(useBoardFiltersModule, 'useBoardFilters').mockImplementation((options: UseBoardFiltersOptions) => {
+      calls.push(options)
+      return actual(options)
+    })
+
+    const me = { id: 'ops@test.com', email: 'ops@test.com', teamKeys: ['docs'] }
+    const team = { key: 'docs', name: 'Docs', memberIds: ['ops@test.com', 'renee@test.com'] }
+    vi.spyOn(useStaffModule, 'useStaff').mockReturnValue({
+      staff: [me],
+      byId: { 'ops@test.com': me },
+      loading: false,
+      error: null,
+      refresh: vi.fn(),
+      nameOf: (id: string | null) => (id ? String(id).split('@')[0] : '—'),
+      me,
+    })
+    api.getTmsSettings.mockResolvedValue({ teams: [team] })
+
+    showPage()
+    await waitFor(() => {
+      expect(calls.at(-1)?.viewer?.userId).toBe('ops@test.com')
+      expect(calls.at(-1)?.viewer?.teamRepIds).toContain('renee@test.com')
+    })
+
+    spy.mockRestore()
+  })
+})
 
 describe('DocumentsWorkstation', () => {
   it('shows an outline POD and reports the gate refusal when release is attempted', async () => {
@@ -140,5 +185,60 @@ describe('DocumentsWorkstation', () => {
     expect(chip).toHaveAttribute('data-present', 'true')
     expect(chip).toHaveTextContent('uploaded by staff')
     expect(chip).not.toHaveTextContent('sent by the carrier')
+  })
+
+  it('flags a shipment that needs a person after repeated POD refusals', async () => {
+    bundle.shipment = { ...bundle.shipment, podFlaggedAt: '2026-10-01T17:00:00Z', podFlagReason: 'POD rejected twice — hand to a dispatcher' }
+    showPage()
+    fireEvent.click(screen.getByTestId('doc-row-S1'))
+    const banner = await screen.findByTestId('pod-needs-person')
+    expect(banner).toHaveTextContent('Needs a person')
+    expect(banner).toHaveTextContent('POD rejected twice — hand to a dispatcher')
+  })
+
+  it('shows when a POD was requested and can request another', async () => {
+    api.listShipmentMessages.mockResolvedValue([
+      { id: 'm1', shipmentId: 'S1', threadKey: 't1', direction: 'OUT', channel: 'EMAIL', kind: 'POD_REQUEST', status: 'SENT', at: '2026-10-01T15:30:00Z', createdBy: 'ops@test.com', createdAt: '2026-10-01T15:30:00Z', updatedAt: '2026-10-01T15:30:00Z' },
+    ])
+    api.requestPod.mockResolvedValue({ messages: [] })
+    showPage()
+    fireEvent.click(screen.getByTestId('doc-row-S1'))
+    const requestLine = await screen.findByTestId('pod-request-sent')
+    expect(requestLine).toHaveTextContent('Requested')
+    expect(requestLine).toHaveTextContent('via email')
+    fireEvent.click(screen.getByRole('button', { name: 'Request POD' }))
+    await waitFor(() => expect(api.requestPod).toHaveBeenCalledWith({ shipmentId: 'S1' }))
+  })
+
+  it('shows a rejected POD with the reason the app gave', async () => {
+    bundle.documents.push(document('POD', { reviewStatus: 'REJECTED', reviewNote: 'Illegible photo — cannot read the BOL number' }))
+    showPage()
+    fireEvent.click(screen.getByTestId('doc-row-S1'))
+    expect(await screen.findByTestId('pod-reject-reason-POD')).toHaveTextContent('Illegible photo — cannot read the BOL number')
+  })
+
+  it('shows the document source so a dispatcher knows it arrived by e-mail', async () => {
+    bundle.documents.push(document('POD', { source: 'CARRIER_PORTAL' }))
+    showPage()
+    fireEvent.click(screen.getByTestId('doc-row-S1'))
+    expect(await screen.findByTestId('pod-doc-source-POD')).toHaveTextContent('sent by the carrier')
+  })
+
+  it('reviews a POD and shows the attempt count and page-count verdict', async () => {
+    api.reviewShipmentPod.mockResolvedValue({
+      verdict: 'FAIL',
+      reasons: ['Expected 3 pages, found 2'],
+      attempt: 2,
+      flaggedForHuman: false,
+      readyForBilling: false,
+    })
+    bundle.documents.push(document('POD', { id: 'POD' }))
+    showPage()
+    fireEvent.click(screen.getByTestId('doc-row-S1'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Review POD POD.pdf' }))
+    const outcome = await screen.findByTestId('pod-outcome-POD')
+    expect(outcome).toHaveTextContent('Attempt 2')
+    expect(outcome).toHaveTextContent('Expected 3 pages, found 2')
+    expect(api.reviewShipmentPod).toHaveBeenCalledWith({ shipmentId: 'S1', documentId: 'POD' })
   })
 })
