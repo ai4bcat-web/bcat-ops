@@ -194,6 +194,35 @@ function formatDate(value: string | undefined): string | undefined {
   return d.toISOString().slice(0, 10)
 }
 
+/** Map a Shipment status onto the narrower Load status enum. */
+function mapLoadStatus(shipmentStatus: string | undefined): string {
+  switch (shipmentStatus) {
+    case 'OPEN':
+    case 'ON_HOLD':
+      return 'SOURCING'
+    case 'BOOKED':
+      return 'BOOKED'
+    case 'DISPATCHED':
+      return 'DISPATCHED'
+    case 'LOADING':
+      return 'LOADING'
+    case 'PICKED_UP':
+      return 'PICKED_UP'
+    case 'IN_TRANSIT':
+      return 'IN_TRANSIT'
+    case 'OUT_FOR_DELIVERY':
+      return 'OUT_FOR_DELIVERY'
+    case 'UNLOADING':
+      return 'UNLOADING'
+    case 'DELIVERED':
+      return 'DELIVERED'
+    case 'CANCELED':
+      return 'CANCELED'
+    default:
+      return 'SOURCING'
+  }
+}
+
 // ── Row processing ──────────────────────────────────────────────────────────
 
 function buildStops(row: AljexRow, originId?: string, destinationId?: string): Row[] {
@@ -523,7 +552,7 @@ async function processRow(
     orderId,
     loadNumber,
     leg: 1,
-    status: row.status ?? 'OPEN',
+    status: mapLoadStatus(row.status),
     statusChangedAt: now,
     statusChangedBy: callerEmail,
     statusSource: 'BACKFILL',
@@ -716,7 +745,7 @@ async function processRow(
       shipmentId,
       shipmentNumber,
       loadNumber,
-      carrierId: '',
+      carrierId: `imported-${(row.carrierMc ?? row.carrierName ?? 'unknown').trim() || 'unknown'}`,
       carrierName: row.carrierName ?? null,
       carrierMc: row.carrierMc ?? null,
       payeeKind: 'CARRIER',
@@ -774,7 +803,7 @@ async function processRow(
       removedAt: null,
       removedBy: null,
       sequence: 1,
-      carrierId: null,
+      carrierId: undefined,
       carrierName: row.carrierName ?? null,
       carrierMc: row.carrierMc ?? null,
       carrierRepId: null,
