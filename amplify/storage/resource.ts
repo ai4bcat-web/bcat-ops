@@ -162,5 +162,17 @@ export const storage = defineStorage({
       allow.authenticated.to(['read']),
       allow.groups(STAFF_GROUPS).to(['read']),
     ],
+    // Brand assets (Step L): logos for square, wide, and document headers.
+    // Staff upload through presigned PUTs; authenticated users read for preview.
+    'brand/*': [
+      allow.authenticated.to(['read']),
+      allow.groups(STAFF_GROUPS).to(['read', 'write', 'delete']),
+    ],
+    // Spreadsheet imports (Step L): uploaded sheets and per-row error CSVs.
+    // Staff upload and manage; authenticated users can read their own jobs' files.
+    'imports/*': [
+      allow.authenticated.to(['read']),
+      allow.groups(STAFF_GROUPS).to(['read', 'write', 'delete']),
+    ],
   })
 })

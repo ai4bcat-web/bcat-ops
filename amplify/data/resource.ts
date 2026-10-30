@@ -1024,6 +1024,19 @@ const schema = a.schema({
       invoicePrefix:  a.string(),
       fleetGroup:     a.enum(['LOCAL', 'AMAZON', 'BOX_TRUCK']),
       active:         a.boolean().required(),
+
+      // ── My Brokerage billing entity fields (Step L) ───────────────────────
+      taxId:             a.string(),   // EIN / tax id
+      phone:             a.string(),
+      physicalAddress:   a.json(),     // Address (distinct from remitTo)
+      primaryContact:    a.json(),     // { name, title, email, phone }
+      billingContact:    a.json(),     // { name, title, email, phone }
+      payablesContact:   a.json(),     // { name, title, email, phone }
+      termsUrl:          a.string(),   // T&C URL printed on every invoice
+      paymentInstructions: a.json(),   // { US: {...}, CA: {...}, MX: {...} }
+      invoiceVerbiage:   a.string(),   // printed under the instructions
+      logoKey:           a.string(),   // S3 key under brand/
+      isPrimary:         a.boolean(),  // exactly one Division should be primary
     })
     .identifier(['key'])
     // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
@@ -1173,6 +1186,31 @@ const schema = a.schema({
       // Human-edited; the agent reads it and never writes it.
       aiAgents:                 a.json(),
 
+      // ── My Brokerage (Step L) ─────────────────────────────────────────────
+      // Branding
+      brandLogoSquareKey:    a.string(),   // S3 key under brand/
+      brandLogoWideKey:      a.string(),   // S3 key under brand/
+      brandLogoDocumentKey:  a.string(),   // S3 key under brand/
+      brandAccent:           a.string(),   // YELLOW | BLUE | TEAL | RED | PURPLE | ORANGE
+      brandTheme:            a.string(),   // DARK | LIGHT | SYSTEM
+      brandSenders:          a.json(),     // { shipment?, rateCon?, quoteReply?, customerInvoice?, remittance? }
+      emailSignatureTemplate: a.string(),  // HTML/markdown template for outbound e-mail
+      whiteLabel:            a.json(),     // { domain, status, records, checkedAt }
+      // Customer settings
+      customerPortalDefaults: a.json(),    // { ltlQuoting, portalDispatchMode, portalStatusMask[], blockedLtlCarrierIds[], defaultQuoteNotes }
+      customerTags:          a.json(),     // [{ key, label, color }]
+      // Carrier documents
+      rateConTemplate:       a.json(),     // { overrideDefaultTerms, extraTerms[], termsHtml, hideRep, legalPageBreak, requiredDocs[], requiredFields[] }
+      carrierAgreementTemplate: a.json(),  // { bodyMarkdown, requiredDocs[], signatureBlock, version, updatedAt, updatedBy }
+      // Consolidation
+      consolidationRules:    a.json(),     // { rules[], hazmatMode, onHold }
+      // Notifications
+      notificationSubscriptions: a.json(), // [{ event, channel, audience, enabled }]
+      notificationWebhooks:  a.json(),     // [{ id, url, events[], secretRef, secretLast4, active, ... }]
+      notificationDefaults:  a.json(),     // { pauseAll, ... }
+      // Billing
+      paymentTerms:          a.json(),     // [{ key, name, days, description, quickPayFeeBps, apOnly, doNotUse }]
+
       // ── The demo flow's org defaults (Step P3) ────────────────────────────
       // Ryne, 2026-10-29: target margin 20%, configurable by mode (FTL vs LTL),
       // overridable per customer. Floor falls back to `marginFloorBps` above.
@@ -1259,6 +1297,45 @@ const schema = a.schema({
     // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
     // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
     // `delete` is dropped too — nothing in step J removes an integration row.
+    .disableOperations(['subscriptions', 'delete'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  /*
+   * Step L. One row per spreadsheet import job: mapping, validation, dry run,
+   * and applied execution.
+   *
+   * `id` is `imp:<sha20(fileHash)>:<entity>` — a deterministic hash of the
+   * uploaded bytes plus the entity, so a conditional put on `id` makes re-running
+   * the same file against the same entity a no-op that returns the first job.
+   * `fileHash` is the sha256 of the uploaded bytes and serves as the idempotency
+   * key together with `entity`.
+   *
+   * No delete: a job is superseded by a later run, never removed.
+   */
+  ImportJob: a
+    .model({
+      id:        a.id(),
+      entity:    a.enum([
+        'CUSTOMER', 'LOCATION', 'CARRIER', 'CARRIER_FACTOR', 'CHARGE_CODE',
+        'PAYMENT_TERM', 'VENDOR_CONTACT',
+      ]),
+      status:    a.enum(['DRAFT', 'VALIDATED', 'DRY_RUN', 'APPLIED', 'FAILED']),
+      fileName:  a.string(),
+      fileHash:  a.string(),   // sha256 of uploaded bytes; part of idempotency key
+      mapping:   a.json(),     // { sheetHeader: fieldName }
+      rowCount:  a.integer(),
+      counts:    a.json(),     // { created, updated, skipped, errored }
+      errorKey:  a.string(),   // S3 key of per-row error CSV under imports/
+      dryRun:    a.boolean(),
+      note:      a.string(),
+      createdBy: a.string().required(),
+      appliedAt: a.datetime(),
+      appliedBy: a.string(),
+    })
+    // No GSI: list by createdAt is a scan of a small table; reads are by id.
+    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
+    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    // `delete` is dropped — an import job is never removed.
     .disableOperations(['subscriptions', 'delete'])
     .authorization((allow) => [allow.authenticated().to(['read'])]),
 

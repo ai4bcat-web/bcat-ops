@@ -341,6 +341,20 @@ export interface Division {
   invoicePrefix?: string | null
   fleetGroup?: 'LOCAL' | 'AMAZON' | 'BOX_TRUCK' | null
   active: boolean
+
+  // ── My Brokerage billing entity fields (Step L)
+  taxId?: string | null
+  phone?: string | null
+  physicalAddress?: Address | null
+  primaryContact?: DivisionContact | null
+  billingContact?: DivisionContact | null
+  payablesContact?: DivisionContact | null
+  termsUrl?: string | null
+  paymentInstructions?: PaymentInstructions | null
+  invoiceVerbiage?: string | null
+  logoKey?: string | null
+  isPrimary?: boolean | null
+
   createdAt: string
   updatedAt: string
 }
@@ -517,6 +531,25 @@ export interface TmsSettings {
   /** Human-edited agent configuration. The agent reads it and never writes it. */
   aiAgents?: AiAgentsSettings | null
 
+  // ── My Brokerage (Step L) ──────────────────────────────────────────────────
+  brandLogoSquareKey?: string | null
+  brandLogoWideKey?: string | null
+  brandLogoDocumentKey?: string | null
+  brandAccent?: BrandAccent | null
+  brandTheme?: BrandTheme | null
+  brandSenders?: BrandSenders | null
+  emailSignatureTemplate?: string | null
+  whiteLabel?: WhiteLabelConfig | null
+  customerPortalDefaults?: CustomerPortalDefaults | null
+  customerTags?: CustomerTag[] | null
+  rateConTemplate?: RateConTemplate | null
+  carrierAgreementTemplate?: CarrierAgreementTemplate | null
+  consolidationRules?: ConsolidationRules | null
+  notificationSubscriptions?: NotificationSubscription[] | null
+  notificationWebhooks?: NotificationWebhook[] | null
+  notificationDefaults?: NotificationDefaults | null
+  paymentTerms?: PaymentTerm[] | null
+
   // ── Flow defaults (Step P3) ────────────────────────────────────────────────
   /** Target margin for every mode, basis points. Ryne's org default is 2000. */
   marginTargetBps?: number | null
@@ -532,6 +565,179 @@ export interface TmsSettings {
   demoSeedVersion?: string | null
   demoSeededAt?: string | null
 
+  createdAt?: string
+  updatedAt?: string
+}
+
+// ── My Brokerage (Step L) ───────────────────────────────────────────────────
+
+export type BrandAccent = 'YELLOW' | 'BLUE' | 'TEAL' | 'RED' | 'PURPLE' | 'ORANGE'
+export type BrandTheme = 'DARK' | 'LIGHT' | 'SYSTEM'
+
+export interface BrandSenders {
+  shipment?: string | null
+  rateCon?: string | null
+  quoteReply?: string | null
+  customerInvoice?: string | null
+  remittance?: string | null
+}
+
+export interface WhiteLabelConfig {
+  domain: string
+  status: 'PENDING' | 'VERIFIED' | 'FAILED'
+  records: WhiteLabelDnsRecord[]
+  checkedAt?: string | null
+}
+
+export interface WhiteLabelDnsRecord {
+  type: 'CNAME' | 'TXT'
+  host: string
+  value: string
+  purpose: string
+}
+
+export interface CustomerPortalDefaults {
+  ltlQuoting?: 'OFF' | 'RATE_CARD' | 'SMC3' | null
+  portalDispatchMode?: 'OFF' | 'QUOTE_ONLY' | 'FULL' | null
+  portalStatusMask?: string[] | null
+  blockedLtlCarrierIds?: string[] | null
+  defaultQuoteNotes?: string | null
+}
+
+export interface CustomerTag {
+  key: string
+  label: string
+  color: string
+}
+
+export interface RateConTemplate {
+  overrideDefaultTerms?: boolean | null
+  extraTerms?: Array<{ title: string; text: string }> | null
+  termsHtml?: string | null
+  hideRep?: boolean | null
+  legalPageBreak?: boolean | null
+  requiredDocs?: string[] | null
+  requiredFields?: string[] | null
+}
+
+export interface CarrierAgreementTemplate {
+  bodyMarkdown?: string | null
+  requiredDocs?: string[] | null
+  signatureBlock?: string | null
+  version?: number | null
+  updatedAt?: string | null
+  updatedBy?: string | null
+}
+
+export type ConsolidationSeverity = 'BLOCK' | 'WARN' | 'OFF'
+export type ConsolidationHazmatMode = 'NEVER' | 'SAME_CLASS' | 'ALLOW'
+export type ConsolidationOnHold = 'BLOCK' | 'WARN'
+export type ConsolidationCategory =
+  | 'CUSTOMER_MISMATCH'
+  | 'TEMPERATURE'
+  | 'WEIGHT_TOTAL'
+  | 'STOP_COUNT'
+  | 'PICKUP_WINDOW_DAYS'
+  | 'EQUIPMENT_MISMATCH'
+  | 'HAZMAT'
+  | 'ON_HOLD'
+
+export interface ConsolidationRule {
+  category: ConsolidationCategory
+  severity: ConsolidationSeverity
+  threshold?: number | null
+  unit?: string | null
+}
+
+export interface ConsolidationRules {
+  rules: ConsolidationRule[]
+  hazmatMode: ConsolidationHazmatMode
+  onHold: ConsolidationOnHold
+}
+
+export interface ConsolidationResult {
+  ok: boolean
+  reasons: string[]
+}
+
+export type NotificationChannel = 'EMAIL' | 'IN_APP' | 'WEBHOOK'
+export type NotificationAudienceKind = 'ROLE' | 'TEAM' | 'USER'
+
+export interface NotificationAudience {
+  kind: NotificationAudienceKind
+  value: string
+}
+
+export interface NotificationSubscription {
+  event: string
+  channel: NotificationChannel
+  audience: NotificationAudience
+  enabled: boolean
+}
+
+export interface NotificationWebhook {
+  id: string
+  url: string
+  events: string[]
+  secretRef?: string | null
+  secretLast4?: string | null
+  active: boolean
+  createdAt: string
+  createdBy: string
+  lastDeliveryAt?: string | null
+  lastStatus?: string | null
+  failureCount: number
+}
+
+export interface NotificationDefaults {
+  pauseAll?: boolean | null
+}
+
+export interface PaymentTerm {
+  key: string
+  name: string
+  days: number
+  description?: string | null
+  quickPayFeeBps?: number | null
+  apOnly?: boolean | null
+  doNotUse?: boolean | null
+}
+
+export interface DivisionContact {
+  name?: string | null
+  title?: string | null
+  email?: string | null
+  phone?: string | null
+}
+
+export interface PaymentInstructions {
+  US?: { ach?: string | null; wire?: string | null; check?: string | null }
+  CA?: { eft?: string | null; check?: string | null }
+  MX?: { spei?: string | null; check?: string | null }
+}
+
+export interface ImportJob {
+  id: string
+  entity:
+    | 'CUSTOMER'
+    | 'LOCATION'
+    | 'CARRIER'
+    | 'CARRIER_FACTOR'
+    | 'CHARGE_CODE'
+    | 'PAYMENT_TERM'
+    | 'VENDOR_CONTACT'
+  status: 'DRAFT' | 'VALIDATED' | 'DRY_RUN' | 'APPLIED' | 'FAILED'
+  fileName?: string | null
+  fileHash?: string | null
+  mapping?: Record<string, string> | null
+  rowCount?: number | null
+  counts?: { created: number; updated: number; skipped: number; errored: number } | null
+  errorKey?: string | null
+  dryRun?: boolean | null
+  note?: string | null
+  createdBy: string
+  appliedAt?: string | null
+  appliedBy?: string | null
   createdAt?: string
   updatedAt?: string
 }
