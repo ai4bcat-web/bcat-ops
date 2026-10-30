@@ -250,10 +250,6 @@ async function seedCustomers(deps: DemoDeps, caller: Caller, counts: Record<stri
   }
 
   await deps.transact(writes)
-  const verifyCustomer = await deps.getById(deps.tables.customer, customers[0].id as string)
-  if (!verifyCustomer) {
-    throw new Error(`seedCustomers failed: first customer ${customers[0].id} not found after write to ${deps.tables.customer}`)
-  }
   for (const c of customers) {
     await recordDemo(deps, 'CUSTOMER', `customer:${String(c.id)}`, String(c.id), caller, { label: String(c.name) })
   }

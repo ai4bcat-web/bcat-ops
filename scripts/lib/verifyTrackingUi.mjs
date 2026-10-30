@@ -71,10 +71,8 @@ export async function verifyTrackingUi({ storage, shipmentIds, origin = DEV_ORIG
         const request = pending.get(message.id)
         if (!request) return
         pending.delete(message.id)
-        if (message.error) {
-          console.error('[CDP] error response', { id: message.id, method: request.method, error: message.error })
-          request.reject(new Error(String(message.error.message ?? message.error)))
-        } else request.resolve(message.result)
+        if (message.error) request.reject(new Error(String(message.error.message ?? message.error)))
+        else request.resolve(message.result)
       } catch (err) {
         console.error('[CDP] resolver error:', err?.message)
       }
@@ -129,7 +127,6 @@ export async function verifyTrackingUi({ storage, shipmentIds, origin = DEV_ORIG
     } catch (err) {
       const snapshot = await evaluate(`(() => ({ url: location.href, body: document.body?.innerText?.slice(0, 4000) ?? '' }))()`)
       console.error('INBOX ROW SNAPSHOT:', JSON.stringify(snapshot, null, 2))
-      console.error('INBOX BROWSER LOGS:\n', logs.join('\n'))
       await capture('P8-UI-inbox-failed.png')
       throw err
     }
@@ -138,7 +135,8 @@ export async function verifyTrackingUi({ storage, shipmentIds, origin = DEV_ORIG
     await command('Page.navigate', { url: `${origin}/tms/tracking?tab=inbox&shipment=${selectedInbox}` })
     await poll(() => evaluate(`(() => {
       const chat = document.querySelector('[data-testid="inbox-conversation"]');
-      return chat && /Agent|Person|No messages/.test(chat.innerText) && document.querySelector('[data-testid="inbox-composer"]');
+      const composer = document.querySelector('[data-testid="inbox-composer"]');
+      return !!(chat && /Agent|Person|No messages/.test(chat.innerText) && composer);
     })()`), 'Inbox tracking conversation and composer')
     await capture('P8-UI-inbox-conversation.png')
     await evaluate(`document.querySelector('[data-testid="inbox-thread-row"][data-shipment-id="${secondInbox}"]').click()`)
