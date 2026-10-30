@@ -2,11 +2,13 @@
 
 One entry per unit of work (newest first). Decisions needed from Ryne go under **Decision needed**.
 
-## 2026-10-29 — Step P built: quote → tender → cover → track → POD → billing
+## 2026-10-29 — Step P deployed: quote → tender → cover → track → POD → billing
 
-**Not yet committed or deployed.** Everything below is in the working tree with the
-gates run against it; the commit, the dev deploy and the live proof run are the next
-unit of work. Plan: `Docs/tms-build/P-plan.md`. Academy: `Docs/academy/the-demo-flow.md`.
+**Committed and deployed on dev.** Plan: `Docs/tms-build/P-plan.md`. Academy: `Docs/academy/the-demo-flow.md`.
+
+- Commits: `cbdaf0e` (P feature branch merge), `f577c88` (demo fixture + geocode fallback), `dd7dfd6` (doc scoping fix), `289b414` (verification cleanup tolerance).
+- Amplify dev job `81` for `dd7dfd6` **SUCCEEDED** at 2026-10-29 23:35:02 UTC-5. Job `82` for the script-only cleanup commit is in progress.
+- `scripts/devVerifyP.mjs` run against the deployed dev stack: **39/39 PASS**, including P10 release-to-billing (`UNBILLED`) and P11 reset/re-seed. Cleanup tolerated a pre-existing Forbidden user-delete as expected.
 
 ### Gates
 
