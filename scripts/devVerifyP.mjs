@@ -164,7 +164,14 @@ async function removeDemoStaffMember({ member }) {
   } catch (err) {
     const name = err?.name ?? ''
     const message = String(err?.message ?? err)
-    if (name === 'UserNotFoundException' || /user.*not found/i.test(message)) return { id: member.id, removed: false }
+    if (
+      name === 'UserNotFoundException' ||
+      name === 'ForbiddenException' ||
+      /user.*not found/i.test(message) ||
+      /only the owner may delete/i.test(message)
+    ) {
+      return { id: member.id, removed: false }
+    }
     throw err
   }
 }
