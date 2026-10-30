@@ -428,13 +428,14 @@ function buildShipmentPlans(count: number): ShipmentPlan[] {
   const statuses: Array<{ status: string; loadStatus: string }> = [
     { status: 'OPEN', loadStatus: 'SOURCING' },
     { status: 'OPEN', loadStatus: 'BOOKED' },
-    { status: 'DISPATCHED', loadStatus: 'DISPATCHED' },
-    { status: 'DISPATCHED', loadStatus: 'IN_TRANSIT' },
-    { status: 'OPEN', loadStatus: 'LOADING' },
-    { status: 'DELIVERED', loadStatus: 'DELIVERED' },
+    { status: 'OPEN', loadStatus: 'SOURCING' },
+    { status: 'OPEN', loadStatus: 'SOURCING' },
+    { status: 'OPEN', loadStatus: 'SOURCING' },
+    { status: 'OPEN', loadStatus: 'SOURCING' },
+    { status: 'OPEN', loadStatus: 'SOURCING' },
+    { status: 'OPEN', loadStatus: 'SOURCING' },
     { status: 'ON_HOLD', loadStatus: 'SOURCING' },
     { status: 'TENDER_PENDING', loadStatus: 'SOURCING' },
-    { status: 'OPEN', loadStatus: 'BOOKED' },
     { status: 'CANCELED', loadStatus: 'CANCELED' },
   ]
 
@@ -552,7 +553,7 @@ export async function seedDemoData(deps: DemoDeps, input: Row, caller: Caller): 
   const repId = staff.find((s) => s.role === 'carrier-rep')?.id ?? caller.sub
   const salesRepId = staff.find((s) => s.role === 'sales-rep')?.id ?? caller.sub
 
-  const plans = buildShipmentPlans(20)
+  const plans = buildShipmentPlans(11)
   let bookedDemoCarrier = false
   const createdShipments: Array<{ shipment: Row; order: Row; load: Row }> = []
   const tagTxs: TransactWriteItem[] = []

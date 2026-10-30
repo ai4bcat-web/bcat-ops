@@ -235,7 +235,7 @@ async function main() {
     equals('demo stack is dev', state.devStack, true)
     equals('demo seed version present', Boolean(state.seedVersion), true)
     equals('demo staff seeded', state.facts?.staffCount, DEMO_STAFF.length)
-    equals('demo shipments seeded', state.facts?.shipmentCount >= 15, true)
+    equals('demo shipments seeded', state.facts?.shipmentCount >= 8, true)
     equals('demo checklist: open assigned', Boolean(findDemoRecord(state, 'SHIPMENT', 'shipment.open.assigned')), true)
     equals('demo checklist: customer auto', Boolean(findDemoRecord(state, 'CUSTOMER', 'customer.auto')), true)
     equals('demo checklist: quote inbound', Boolean(findDemoRecord(state, 'QUOTE', 'quote.inbound')), true)
