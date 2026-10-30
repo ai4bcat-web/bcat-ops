@@ -284,6 +284,15 @@ async function main() {
       expectedUpdatedAt: buildingBundleFresh.shipment.updatedAt,
       order: {
         billToId: 'demo-billto-brokerage',
+        freight: [
+          {
+            handlingUnit: 'PALLET',
+            qty: 1,
+            description: 'Demo electronics',
+            weightLbs: 1500,
+            weightUnit: 'LB',
+          },
+        ],
         references: [
           { code: 'PO', label: 'PO number', value: 'PO-P-DEMO-001', level: 'ORDER', visibility: 'INTERNAL' },
         ],
