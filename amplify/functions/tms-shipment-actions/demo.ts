@@ -543,6 +543,9 @@ async function createBaseShipment(
   const shipment = bundle.shipment as Row
   const order = (bundle.orders as Row[])[0]
   const load = (bundle.loads as Row[])[0]
+  if (!shipment || !shipment.id) {
+    throw new Error(`createBaseShipment: missing shipment. result keys=${Object.keys(result as Row).join(',')} bundle keys=${Object.keys(bundle).join(',')} shipment=${JSON.stringify(shipment)}`)
+  }
   return { shipment, order, load }
 }
 
