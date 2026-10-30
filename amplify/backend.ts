@@ -2159,6 +2159,7 @@ const shipmentNoticeTable    = backend.data.resources.tables['ShipmentNotice']
 // so the calendar's subscriptions still fire. Customer/TmsSettings are read-only
 // here — their writes stay with tmsDirectoryActions.
 const shipmentActionsFn = backend.tmsShipmentActions.resources.lambda as LambdaFunction
+;(shipmentActionsFn.node.defaultChild as CfnFunction).timeout = 120
 const shipmentTable          = backend.data.resources.tables['Shipment']
 const orderTable             = backend.data.resources.tables['Order']
 const loadCarrierTable       = backend.data.resources.tables['LoadCarrier']
