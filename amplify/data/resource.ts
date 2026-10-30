@@ -20,6 +20,7 @@ import { tmsCarrierActions } from '../functions/tms-carrier-actions/resource'
 import { tmsTrackingActions } from '../functions/tms-tracking-actions/resource'
 import { tmsFinanceActions } from '../functions/tms-finance-actions/resource'
 import { workflowAgent } from '../functions/workflow-agent/resource'
+import { tmsAljexImport } from '../functions/tms-aljex-import/resource'
 
 // ExpenseCategory and ExpenseEntryMethod enums are defined inline on each
 // model field — Amplify Gen 2 does not require top-level enum declarations.
@@ -1336,6 +1337,29 @@ const schema = a.schema({
     // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
     // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
     // `delete` is dropped — an import job is never removed.
+    .disableOperations(['subscriptions', 'delete'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  /*
+   * Step N1. One row per uploaded Aljex CSV file. Idempotency key is the file
+   * hash: `id = aljex:{fileHash}`. Re-running the same file returns the first job.
+   */
+  AljexImportJob: a
+    .model({
+      id:          a.id(),
+      status:      a.enum(['DRY_RUN', 'APPLIED', 'FAILED']),
+      fileName:    a.string(),
+      fileHash:    a.string(),
+      mapping:     a.json(),     // { sheetHeader: fieldName }
+      rowCount:    a.integer(),
+      counts:      a.json(),     // AljexImportCounts
+      errorKey:    a.string(),   // S3 key of per-row error CSV under imports/errors/
+      dryRun:      a.boolean(),
+      note:        a.string(),
+      createdBy:   a.string().required(),
+      appliedAt:   a.datetime(),
+      appliedBy:   a.string(),
+    })
     .disableOperations(['subscriptions', 'delete'])
     .authorization((allow) => [allow.authenticated().to(['read'])]),
 
@@ -4427,6 +4451,18 @@ const schema = a.schema({
     .disableOperations(['subscriptions'])
     .authorization((allow) => [allow.authenticated().to(['read'])]),
 
+  // Step N1: bulk import from Aljex CSV. Owner/ADMIN only. Idempotent by file hash;
+  // dry-run preview; per-row error CSV uploaded to S3.
+  tmsAljexImport: a
+    .mutation()
+    .arguments({
+      action: a.string().required(),
+      input:  a.json(),
+    })
+    .returns(a.json())
+    .authorization((allow) => [allow.authenticated()])
+    .handler(a.handler.function(tmsAljexImport)),
+
   // Dispatch router: send, start, markRead, assign, link, archive, reopen, note,
   // mediaUrl, status, getSettings, saveSettings. Requires the page-dispatch group.
   manageDispatch: a
@@ -4454,6 +4490,9 @@ const schema = a.schema({
   // Step F: tmsFinanceActions owns Invoice and ArPayment through the SDK and reads
   // Order/Shipment/Load/LoadCharge/Customer/Division over IAM.
   allow.resource(tmsFinanceActions).to(['query', 'mutate']),
+  // Step N1: tmsAljexImport writes Shipment/Order/Load/LoadFinancials/LoadCharge
+  // and reads Customer/Location/Division/TmsSettings over IAM.
+  allow.resource(tmsAljexImport).to(['query', 'mutate']),
   // Step K: workflowAgent deliberately holds NO schema grant — it reads its tables
   // directly over DynamoDB, so an appsync:GraphQL grant on every Query field (Invoice
   // and FactoringItem reads included) would be authority nothing exercises.

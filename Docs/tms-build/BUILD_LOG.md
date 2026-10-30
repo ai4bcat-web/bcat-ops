@@ -1,5 +1,15 @@
 # TMS build log
 
+## 2026-10-30 — Step N1 — Aljex bulk import (PENDING DEPLOY — template)
+
+**Not yet deployed.** Plan: `Docs/tms-build/N1-plan.md`. Fill in the placeholders when the deploy lands; keep this entry newest-first once it is real.
+
+- Commit: `<commit-hash>` (tms-aljex-import Lambda, `AljexImportJob` model, shared parser/mapper `src/lib/aljexImport.ts`, apiClient helpers, Aljex import page under My Brokerage → Company, fixture + tests).
+- Amplify dev job `<job-id>` for `<commit-hash>` status `<status>`.
+- `npm run test` on the working tree: `<files / tests result>`.
+- `npx eslint .` — `<result>`.
+- Verification on dev: upload `scripts/fixtures/aljex-sample.csv` (5 rows — new customer ACME PRODUCE CO with new locations, existing customer BATORY FOODS, delivered + paid invoice INV-5001, delivered + carrier bill CB-7001, duplicate PRO 90001) → preview counts `<counts>` → apply counts `<counts>` → job history shows the run; second apply of the same file is a no-op and the duplicate PRO reports as a conflict.
+
 ## 2026-10-30 — Step M deployed: Academy Ask assistant
 
 **Committed and deployed on dev.** Plan: Step M adds the in-app Ask assistant to the Academy page.

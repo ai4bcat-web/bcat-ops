@@ -13,6 +13,7 @@ import { BrandingPage } from './BrandingPage'
 import { CompanyPage } from './CompanyPage'
 import { NotificationsPage } from './NotificationsPage'
 import { ImportPage } from './ImportPage'
+import { AljexImportPage } from './AljexImportPage'
 import { AccountPage } from './AccountPage'
 
 const ROOT = '/tms/brokerage/company'
@@ -23,6 +24,7 @@ const TABS = [
   { key: 'branding', label: 'Branding' },
   { key: 'notifications', label: 'Notifications' },
   { key: 'import', label: 'Import' },
+  { key: 'aljex-import', label: 'Aljex import' },
   { key: 'account', label: 'Account' },
 ] as const
 
@@ -55,6 +57,7 @@ export function CompanyTab() {
           <Route path="branding" element={<BrandingPage />} />
           <Route path="notifications" element={<NotificationsPage />} />
           <Route path="import" element={<ImportPage />} />
+          <Route path="aljex-import" element={<AljexImportPage />} />
           <Route path="account" element={<AccountPage />} />
           <Route path="*" element={<Navigate to={`${ROOT}/company`} replace />} />
         </Routes>

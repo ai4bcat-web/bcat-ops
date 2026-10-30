@@ -12,6 +12,7 @@ import type { VendorPayable, VendorApAttachment, VendorPayableDetails, VendorPay
 import type {
   CustomerRecord, LocationRecord, Division, TmsSettings, GeocodeResult, AutocompleteSuggestion,
   LocationMergePreview, LocationMergeJob, ImportJob,
+  AljexImportInput, AljexImportJob,
   ShipmentRecord, OrderRecord, LoadCarrierRecord, LoadFinancialsRecord, LoadChargeRecord,
   LoadChargeInput, ShipmentBundle, ShipmentLoadFields, ShipmentStatus, ShipmentMode,
   LoadWorkflowStatus, AssignmentType,
@@ -1311,6 +1312,22 @@ async function directoryAction<T>(action: string, input: unknown): Promise<T> {
   return v as T
 }
 
+// Step N1: Aljex bulk import. Same error-rethrow contract as directoryAction.
+async function aljexImportAction<T>(action: string, input: unknown): Promise<T> {
+  let r: { data: { tmsAljexImport: unknown } }
+  try {
+    r = await client.graphql({
+      query: `mutation TmsAljexImport($action: String!, $input: AWSJSON!) { tmsAljexImport(action: $action, input: $input) }`,
+      variables: { action, input: JSON.stringify(input) },
+    }) as { data: { tmsAljexImport: unknown } }
+  } catch (err) {
+    throw new Error(graphqlErrorText(err) || `${action} failed`, { cause: err })
+  }
+  const v = unwrapJson(r.data.tmsAljexImport)
+  if (v == null) throw new Error(`${action} returned no result`)
+  return v as T
+}
+
 /** AWSJSON columns arrive as strings through the generated list queries. */
 function unwrapJsonFields<T extends object>(row: T, keys: (keyof T)[]): T {
   const out = { ...row }
@@ -1589,6 +1606,20 @@ export async function listImportJobs(entity?: ImportEntity): Promise<ImportJob[]
   const rows = await listAll<ImportJob>('listImportJobs', IMPORT_JOB_FIELDS, 1000)
   const unwrapped = rows.map((j) => unwrapJsonFields(j, IMPORT_JOB_JSON_FIELDS))
   return entity ? unwrapped.filter((j) => j.entity === entity) : unwrapped
+}
+
+// Step N1: Aljex bulk import.
+export async function previewAljexImport(input: AljexImportInput): Promise<AljexImportJob> {
+  return aljexImportAction<AljexImportJob>('ALJEX_IMPORT_PREVIEW', input)
+}
+
+export async function applyAljexImport(input: AljexImportInput): Promise<AljexImportJob> {
+  return aljexImportAction<AljexImportJob>('ALJEX_IMPORT_APPLY', input)
+}
+
+export async function listAljexImportJobs(): Promise<AljexImportJob[]> {
+  const result = await aljexImportAction<{ jobs: AljexImportJob[] }>('LIST_ALJEX_IMPORT_JOBS', {})
+  return result.jobs ?? []
 }
 
 export async function uploadBrandAsset(file: File, keyPrefix?: string): Promise<{ key: string; url: string }> {

@@ -61,6 +61,7 @@ import { tmsShipmentActions } from './functions/tms-shipment-actions/resource'
 import { tmsCarrierActions } from './functions/tms-carrier-actions/resource'
 import { tmsTrackingActions } from './functions/tms-tracking-actions/resource'
 import { tmsFinanceActions } from './functions/tms-finance-actions/resource'
+import { tmsAljexImport } from './functions/tms-aljex-import/resource'
 import { loadTrackingProjector } from './functions/load-tracking-projector/resource'
 import { shipmentNotifier } from './functions/shipment-notifier/resource'
 import { checkCallNotifier } from './functions/check-call-notifier/resource'
@@ -151,6 +152,7 @@ const backend = defineBackend({
   tmsCarrierActions,
   tmsTrackingActions,
   tmsFinanceActions,
+  tmsAljexImport,
   loadTrackingProjector,
   checkCallNotifier,
   shipmentNotifier,
@@ -2666,6 +2668,98 @@ backend.storage.resources.bucket.grantRead(financeActionsFn, 'rate-confirms/*')
 // …and the commission statements a pay period renders per rep.
 backend.storage.resources.bucket.grantReadWrite(financeActionsFn, 'commissions/*')
 
+// ── tmsAljexImport Lambda (Step N1) ─────────────────────────────────────────
+// Bulk import from Aljex CSV. Owner/ADMIN only. Writes Shipment, Order, Load,
+// LoadFinancials, LoadCharge, LoadCarrier, Customer, Location, Invoice,
+// CarrierBill, ProClaim and AuditLog directly; reads TmsSettings for counters.
+const aljexImportFn         = backend.tmsAljexImport.resources.lambda as LambdaFunction
+const aljexImportJobTable   = backend.data.resources.tables['AljexImportJob']
+const aljexShipmentTable    = backend.data.resources.tables['Shipment']
+const aljexOrderTable       = backend.data.resources.tables['Order']
+const aljexLoadTable        = backend.data.resources.tables['Load']
+const aljexLoadCarrierTable = backend.data.resources.tables['LoadCarrier']
+const aljexFinancialsTable  = backend.data.resources.tables['LoadFinancials']
+const aljexChargeTable      = backend.data.resources.tables['LoadCharge']
+const aljexCustomerTable    = backend.data.resources.tables['Customer']
+const aljexLocationTable    = backend.data.resources.tables['Location']
+const aljexDivisionTable    = backend.data.resources.tables['Division']
+const aljexSettingsTable    = backend.data.resources.tables['TmsSettings']
+const aljexInvoiceTable     = backend.data.resources.tables['Invoice']
+const aljexCarrierBillTable = backend.data.resources.tables['CarrierBill']
+const aljexProClaimTable    = backend.data.resources.tables['ProClaim']
+const aljexAuditLogTable    = backend.data.resources.tables['AuditLog']
+
+aljexImportFn.addToRolePolicy(
+  new PolicyStatement({
+    actions: [
+      'dynamodb:GetItem',
+      'dynamodb:PutItem',
+      'dynamodb:UpdateItem',
+      'dynamodb:Scan',
+      'dynamodb:ConditionCheckItem',
+      'dynamodb:TransactWriteItems',
+    ],
+    resources: [
+      aljexImportJobTable.tableArn,
+      aljexShipmentTable.tableArn,
+      aljexOrderTable.tableArn,
+      aljexLoadTable.tableArn,
+      aljexLoadCarrierTable.tableArn,
+      aljexFinancialsTable.tableArn,
+      aljexChargeTable.tableArn,
+      aljexCustomerTable.tableArn,
+      aljexLocationTable.tableArn,
+      aljexDivisionTable.tableArn,
+      aljexSettingsTable.tableArn,
+      aljexInvoiceTable.tableArn,
+      aljexCarrierBillTable.tableArn,
+      aljexProClaimTable.tableArn,
+      aljexAuditLogTable.tableArn,
+    ],
+  })
+)
+// GSI queries for listing jobs and reading shipment-related indexes.
+aljexImportFn.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['dynamodb:Query'],
+    resources: [
+      `${aljexImportJobTable.tableArn}/index/*`,
+      `${aljexOrderTable.tableArn}/index/*`,
+      `${aljexLoadTable.tableArn}/index/*`,
+      `${aljexLoadCarrierTable.tableArn}/index/*`,
+      `${aljexChargeTable.tableArn}/index/*`,
+      `${aljexCustomerTable.tableArn}/index/*`,
+      `${aljexLocationTable.tableArn}/index/*`,
+    ],
+  })
+)
+aljexImportFn.addEnvironment('ALJEX_IMPORT_JOB_TABLE_NAME', aljexImportJobTable.tableName)
+aljexImportFn.addEnvironment('SHIPMENT_TABLE_NAME',         aljexShipmentTable.tableName)
+aljexImportFn.addEnvironment('ORDER_TABLE_NAME',            aljexOrderTable.tableName)
+aljexImportFn.addEnvironment('LOAD_TABLE_NAME',             aljexLoadTable.tableName)
+aljexImportFn.addEnvironment('LOAD_CARRIER_TABLE_NAME',     aljexLoadCarrierTable.tableName)
+aljexImportFn.addEnvironment('LOAD_FINANCIALS_TABLE_NAME',  aljexFinancialsTable.tableName)
+aljexImportFn.addEnvironment('LOAD_CHARGE_TABLE_NAME',      aljexChargeTable.tableName)
+aljexImportFn.addEnvironment('CUSTOMER_TABLE_NAME',         aljexCustomerTable.tableName)
+aljexImportFn.addEnvironment('LOCATION_TABLE_NAME',         aljexLocationTable.tableName)
+aljexImportFn.addEnvironment('DIVISION_TABLE_NAME',         aljexDivisionTable.tableName)
+aljexImportFn.addEnvironment('SETTINGS_TABLE_NAME',         aljexSettingsTable.tableName)
+aljexImportFn.addEnvironment('INVOICE_TABLE_NAME',          aljexInvoiceTable.tableName)
+aljexImportFn.addEnvironment('CARRIER_BILL_TABLE_NAME',     aljexCarrierBillTable.tableName)
+aljexImportFn.addEnvironment('PRO_CLAIM_TABLE_NAME',        aljexProClaimTable.tableName)
+aljexImportFn.addEnvironment('AUDIT_LOG_TABLE_NAME',        aljexAuditLogTable.tableName)
+aljexImportFn.addEnvironment('BUCKET_NAME',                 backend.storage.resources.bucket.bucketName)
+aljexImportFn.addEnvironment('USER_POOL_ID',                backend.auth.resources.userPool.userPoolId)
+aljexImportFn.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['cognito-idp:AdminGetUser'],
+    resources: [backend.auth.resources.userPool.userPoolArn],
+  })
+)
+// Reads uploaded CSVs and writes per-row error CSVs.
+backend.storage.resources.bucket.grantRead(aljexImportFn, 'imports/*')
+backend.storage.resources.bucket.grantPut(aljexImportFn, 'imports/errors/*')
+
 // ── brokerLoadAlert Lambda (Load stream → broker task + global Slack ping) ──
 // Fires when a load is assigned to the "Broker Need to Cover" driver: creates an
 // IntakeItem task for Arcie and posts to the BCAT global Slack channel.
@@ -3062,7 +3156,7 @@ if (process.env.BCAT_ISOLATED_PREVIEW === 'true') {
     (rule.node.defaultChild as CfnRule).state = 'DISABLED'
   }
 
-  const previewCallable = new Set(['userManagement', 'vendorApActions', 'tmsDirectoryActions', 'tmsShipmentActions', 'tmsCarrierActions', 'tmsTrackingActions', 'tmsFinanceActions', 'tmsGeocode', 'podActions'])
+  const previewCallable = new Set(['userManagement', 'vendorApActions', 'tmsDirectoryActions', 'tmsShipmentActions', 'tmsCarrierActions', 'tmsTrackingActions', 'tmsFinanceActions', 'tmsAljexImport', 'tmsGeocode', 'podActions'])
   for (const [name, construct] of Object.entries(backend)) {
     if (previewCallable.has(name)) continue
     const lambda = (construct as { resources?: { lambda?: LambdaFunction } }).resources?.lambda

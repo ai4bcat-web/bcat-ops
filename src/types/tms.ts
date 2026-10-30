@@ -745,6 +745,42 @@ export interface ImportJob {
   updatedAt?: string
 }
 
+export interface AljexImportCounts {
+  shipmentsCreated: number
+  customersCreated: number
+  locationsCreated: number
+  invoicesCreated: number
+  billsCreated: number
+  skipped: number
+  conflicts: number
+  errored: number
+}
+
+export interface AljexImportInput {
+  s3Key: string
+  fileName: string
+  fileHash: string
+  mapping?: Record<string, string> | null
+}
+
+export interface AljexImportJob {
+  id: string
+  status: 'DRY_RUN' | 'APPLIED' | 'FAILED'
+  fileName?: string | null
+  fileHash?: string | null
+  mapping?: Record<string, string> | null
+  rowCount?: number | null
+  counts?: AljexImportCounts | null
+  errorKey?: string | null
+  dryRun?: boolean | null
+  note?: string | null
+  createdBy: string
+  appliedAt?: string | null
+  appliedBy?: string | null
+  createdAt?: string
+  updatedAt?: string
+}
+
 export interface GeocodeResult extends Address {
   lat: number
   lng: number
