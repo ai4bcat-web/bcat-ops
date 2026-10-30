@@ -594,14 +594,14 @@ describe('demo seed', () => {
     await expect(resetDemoData(deps, {}, caller)).rejects.toThrow('The demo seed only runs on the dev stack')
   })
 
-  it('creates at least 40 shipments and every named demo key on first seed', async () => {
+  it('creates at least 20 shipments and every named demo key on first seed', async () => {
     const deps = makeDeps(true)
     const result = (await seedDemoData(deps, {}, caller)) as unknown as SeedResult
 
     expect(result.seedVersion).toBe(SEED_VERSION)
     expect(result.created).toBeGreaterThan(0)
     expect(result.skipped).toBe(0)
-    expect(result.counts.SHIPMENT).toBeGreaterThanOrEqual(40)
+    expect(result.counts.SHIPMENT).toBeGreaterThanOrEqual(20)
 
     const demos = await scanTable(TABLES.demo)
     const demoKeys = new Set(demos.map((d) => d.demoKey))
@@ -656,7 +656,7 @@ describe('demo seed', () => {
     const state = (await getDemoState(deps)) as unknown as DemoStateResult
     expect(state.devStack).toBe(true)
     expect(state.seedVersion).toBe(SEED_VERSION)
-    expect(state.facts.shipmentCount).toBeGreaterThanOrEqual(40)
+    expect(state.facts.shipmentCount).toBeGreaterThanOrEqual(20)
     expect(state.facts.staffCount).toBe(6)
     expect(state.facts.assignedCount).toBeGreaterThan(0)
     expect(state.facts.customersWithFlowDefaults).toBeGreaterThan(0)

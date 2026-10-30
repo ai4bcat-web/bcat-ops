@@ -552,7 +552,7 @@ export async function seedDemoData(deps: DemoDeps, input: Row, caller: Caller): 
   const repId = staff.find((s) => s.role === 'carrier-rep')?.id ?? caller.sub
   const salesRepId = staff.find((s) => s.role === 'sales-rep')?.id ?? caller.sub
 
-  const plans = buildShipmentPlans(40)
+  const plans = buildShipmentPlans(20)
   let bookedDemoCarrier = false
   const createdShipments: Array<{ shipment: Row; order: Row; load: Row }> = []
 
@@ -623,11 +623,9 @@ export async function seedDemoData(deps: DemoDeps, input: Row, caller: Caller): 
   }
 
   // Refresh shipment rows after actions moved them forward.
-  let seededShipments: Row[] = []
-  for (const { shipment } of createdShipments) {
-    const refreshed = await deps.getById(deps.tables.shipment, String(shipment.id))
-    if (refreshed) seededShipments.push(refreshed)
-  }
+  let seededShipments: Row[] = (await Promise.all(
+    createdShipments.map(({ shipment }) => deps.getById(deps.tables.shipment, String(shipment.id))),
+  )).filter((r): r is Row => Boolean(r))
   counts.SHIPMENT = seededShipments.length
 
   // Stage a subset of shipments into the later rungs of the tracking ladder so
@@ -635,11 +633,9 @@ export async function seedDemoData(deps: DemoDeps, input: Row, caller: Caller): 
   await stageTrackingStates(deps, seededShipments.slice(2, 7), caller)
 
   // Re-read so the named fixtures pick up the staged statuses.
-  seededShipments = []
-  for (const { shipment } of createdShipments) {
-    const refreshed = await deps.getById(deps.tables.shipment, String(shipment.id))
-    if (refreshed) seededShipments.push(refreshed)
-  }
+  seededShipments = (await Promise.all(
+    createdShipments.map(({ shipment }) => deps.getById(deps.tables.shipment, String(shipment.id))),
+  )).filter((r): r is Row => Boolean(r))
 
   const openShipment = seededShipments.find((s) => String(s.status) === 'OPEN' && !s.voidedAt)
   if (openShipment) {
@@ -657,11 +653,9 @@ export async function seedDemoData(deps: DemoDeps, input: Row, caller: Caller): 
 
   // assignCarrierRep touched the shipment it assigned, so the named fixtures
   // below need a fresh read before their own CAS updates.
-  seededShipments = []
-  for (const { shipment } of createdShipments) {
-    const refreshed = await deps.getById(deps.tables.shipment, String(shipment.id))
-    if (refreshed) seededShipments.push(refreshed)
-  }
+  seededShipments = (await Promise.all(
+    createdShipments.map(({ shipment }) => deps.getById(deps.tables.shipment, String(shipment.id))),
+  )).filter((r): r is Row => Boolean(r))
 
   const buildingShipment = seededShipments[0]
   if (buildingShipment) {
