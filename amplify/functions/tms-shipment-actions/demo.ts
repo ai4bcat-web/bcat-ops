@@ -11,6 +11,7 @@
 
 import type { Caller } from '../_shared/actionInputs'
 import { marshallRow, updateItemTx, type Row } from '../_shared/shipmentStore'
+import { isVoided } from '../_shared/voided'
 import type { TransactWriteItem } from '@aws-sdk/client-dynamodb'
 import { DEFAULT_CHECK_CALL_PLAN } from '../../../src/lib/checkCallPlan'
 import { DEFAULT_MARGIN_TARGET_BPS, DEFAULT_REQUIRED_LOAD_FIELDS } from '../../../src/lib/flowDefaults'
@@ -1047,7 +1048,7 @@ export async function resetDemoData(deps: DemoDeps, input: Row, caller: Caller):
     while (attempts < 5) {
       attempts++
       const shipment = await deps.getById(deps.tables.shipment, shipmentId)
-      if (!shipment || shipment.voidedAt) break
+      if (!shipment || isVoided(shipment)) break
       console.log('[RESET] void', { shipmentId, status: shipment.status, attempt: attempts })
       try {
         await deps.actions.voidShipment(
