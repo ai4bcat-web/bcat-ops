@@ -1,11 +1,11 @@
 # TMS build log
 
-## 2026-10-30 — Step N3/N4 — Rate-con/BOL email coverage and per-shipment tracking thread (PENDING DEPLOY)
+## 2026-10-30 — Step N3/N4 — Rate-con/BOL email coverage and per-shipment tracking thread (deployed)
 
-**Committed on dev, deploy in progress.** Plan: `Docs/tms-build/N3N4-plan.md`.
+**Committed and deployed on dev.** Plan: `Docs/tms-build/N3N4-plan.md`.
 
-- Commit: `<commit-hash>` (rate-con dev logging, BOL email test, POD attachment ingestion, shipment-email-intake Lambda + tests, backend wiring + permissions).
-- Amplify dev job `<job-id>` for `<commit-hash>` status `<status>`.
+- Commit: `197b4b7` (rate-con dev logging, BOL email test, POD attachment ingestion, shipment-email-intake Lambda + tests, backend wiring + permissions).
+- Amplify dev job `97` for `197b4b7` status **SUCCEEDED**.
 - `npm run test` on the working tree: **475 files / 6,459 tests PASS**.
 - `npx eslint .` — **0 errors, 3 pre-existing warnings** (unrelated to N3/N4 changes).
 - `npx tsc --noEmit -p amplify/tsconfig.json` — clean; `npx tsc --noEmit -p tsconfig.app.json` — clean.
@@ -35,9 +35,6 @@
 - BOL attachment appears in the outgoing customer email and the notice audit row.
 - Inbound POD attachment creates a `ShipmentDocument` row and recalculates `Order.docsMissing`.
 - `shipment-email-intake` routes plus-address and Message-ID payloads to the correct shipment.
-
-### Blockers / next
-- `<status>` to be updated once Amplify dev deploy finishes.
 
 ---
 
