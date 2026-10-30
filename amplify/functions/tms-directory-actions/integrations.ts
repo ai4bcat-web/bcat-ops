@@ -37,6 +37,11 @@ import {
 } from '../../../src/lib/integrations/registry'
 import { stubAdapter } from '../../../src/lib/integrations/adapter'
 import { healthFrom, modeOf } from '../../../src/lib/integrations/health'
+import {
+  mcpAdapter,
+  mergeInsurancePolicies,
+  type McpInsurance,
+} from '../../../src/lib/integrations/mcpAdapter'
 import { maskOf, redactSecrets, validateCredentials } from '../../../src/lib/integrations/secrets'
 import { defaultSettingsOf, validateProviderSettings } from '../../../src/lib/integrations/settings'
 import { mintClient } from '../_shared/openApi'
@@ -56,6 +61,8 @@ import type {
   Capability,
   CredentialMaskEntry,
   IntegrationEvent,
+  IntegrationHealthReason,
+  IntegrationHealthStatus,
   ProviderDescriptor,
 } from '../../../src/lib/integrations/types'
 import {
@@ -81,6 +88,7 @@ export interface IntegrationCaller {
 export interface IntegrationDeps {
   dynamo: DynamoDBClient
   integrationTableName: string
+  carrierTableName: string
   writeAudit: (
     entityType: string,
     entityId: string,
@@ -105,6 +113,9 @@ export const INTEGRATION_ACTIONS = {
   PREVIEW_QBO_SYNC: true,
   ISSUE_API_CLIENT: true,
   REVOKE_API_CLIENT: true,
+  MYCARRIERPACKETS_VALIDATE: true,
+  MYCARRIERPACKETS_SYNC_CARRIER: true,
+  MYCARRIERPACKETS_SYNC_ALL: true,
 } as const
 
 export type IntegrationActionName = keyof typeof INTEGRATION_ACTIONS
@@ -1053,6 +1064,261 @@ async function revokeApiClient(
   return present(written)
 }
 
+// ── MyCarrierPackets (Step N2) ───────────────────────────────────────────────
+
+const MCP_PROVIDER = 'MYCARRIERPACKETS'
+
+function mcpDescriptor(): ProviderDescriptor {
+  return descriptorOrThrow(MCP_PROVIDER)
+}
+
+async function mcpCredentials(): Promise<Record<string, string | null>> {
+  return credentialsFor(mcpDescriptor())
+}
+
+async function getCarrierById(deps: IntegrationDeps, id: string): Promise<Record<string, unknown> | null> {
+  const result = await deps.dynamo.send(
+    new GetItemCommand({ TableName: deps.carrierTableName, Key: marshall({ id }), ConsistentRead: true }),
+  )
+  return result.Item ? unmarshall(result.Item) : null
+}
+
+async function queryCarriersByMc(deps: IntegrationDeps, mcNumber: string): Promise<Record<string, unknown>[]> {
+  const items: Record<string, unknown>[] = []
+  let startKey: Record<string, AttributeValue> | undefined
+  do {
+    const page = await deps.dynamo.send(
+      new ScanCommand({
+        TableName: deps.carrierTableName,
+        FilterExpression: 'attribute_exists(mcNumber) AND mcNumber = :mc',
+        ExpressionAttributeValues: { ':mc': { S: mcNumber } },
+        ExclusiveStartKey: startKey,
+      }),
+    )
+    for (const item of page.Items ?? []) {
+      items.push(unmarshall(item))
+    }
+    startKey = page.LastEvaluatedKey
+  } while (startKey)
+  return items
+}
+
+/**
+ * Apply one MCP carrier payload to the matching Carrier row(s). Looks up by
+ * mcNumber and writes mcpStatus, safetyRating, insurancePolicies and review
+ * fields without touching the directory status.
+ */
+async function updateCarrierFromMcp(
+  deps: IntegrationDeps,
+  mcp: Record<string, unknown>,
+): Promise<Record<string, unknown> | null> {
+  const mcNumber = typeof mcp.mcNumber === 'string' ? mcp.mcNumber.trim() : ''
+  if (!mcNumber) return null
+  const carriers = await queryCarriersByMc(deps, mcNumber)
+  if (carriers.length === 0) return null
+  const now = nowIso()
+  const patch: Record<string, unknown> = {}
+  if (typeof mcp.status === 'string') patch.mcpStatus = mcp.status
+  if (typeof mcp.safetyRating === 'string') patch.safetyRating = mcp.safetyRating
+  if (typeof mcp.reviewStatus === 'string') patch.mcpReviewStatus = mcp.reviewStatus
+  if (typeof mcp.riskAssessmentPoints === 'number') patch.mcpRiskScore = mcp.riskAssessmentPoints
+  if (typeof mcp.packetCompletedAt === 'string') patch.mcpPacketCompletedAt = mcp.packetCompletedAt
+  // Insurance is merged into the existing list, preserving other policies.
+  if (mcp.insurance && typeof mcp.insurance === 'object') {
+    const existing = carriers[0].insurancePolicies
+    const merged = mergeInsurancePolicies(
+      existing as Array<Record<string, unknown>> | null | undefined,
+      mcp.insurance as unknown as McpInsurance,
+    )
+    patch.insurancePolicies = merged
+  }
+  const updated: Record<string, unknown>[] = []
+  for (const carrier of carriers) {
+    const next = { ...carrier, ...patch, updatedAt: now }
+    await deps.dynamo.send(
+      new PutItemCommand({
+        TableName: deps.carrierTableName,
+        Item: marshall(next, { removeUndefinedValues: true }),
+      }),
+    )
+    updated.push(next)
+  }
+  return updated[0] ?? null
+}
+
+/** Validate MCP credentials against the live token endpoint. */
+export async function mcpValidate(
+  deps: IntegrationDeps,
+  _input: Record<string, unknown>,
+  caller: IntegrationCaller,
+): Promise<Record<string, unknown>> {
+  const descriptor = mcpDescriptor()
+  const row = await requireRow(deps, descriptor.key)
+  const creds = await mcpCredentials()
+  const presentCreds = Object.fromEntries(Object.entries(creds).map(([k, v]) => [k, v ?? ''])) as Record<string, string>
+  const mode = modeOf(descriptor, presentCreds)
+  const now = nowIso()
+
+  let healthStatus: IntegrationHealthStatus
+  let healthReason: IntegrationHealthReason
+  if (mode === 'STUB') {
+    healthStatus = 'UNABLE_TO_VERIFY'
+    healthReason = 'NO_CREDENTIALS'
+  } else {
+    const adapter = mcpAdapter(presentCreds, deps.fetchImpl)
+    const ctx: AdapterContext = {
+      provider: MCP_PROVIDER,
+      credentials: presentCreds,
+      settings: (row.settings ?? {}) as Record<string, unknown>,
+      now,
+    }
+    const health = await adapter.validate!(ctx)
+    healthStatus = health.status
+    healthReason = health.reason ?? 'OK'
+  }
+
+  const event: IntegrationEvent = {
+    at: now,
+    action: 'VALIDATE',
+    by: caller.email,
+    outcome: healthStatus,
+  }
+  const next: IntegrationRow = {
+    ...row,
+    status: healthStatus === 'OK' && row.status !== 'DISCONNECTED' ? 'CONNECTED' : row.status,
+    mode,
+    health: healthStatus,
+    healthReason,
+    healthDetail: null,
+    lastCheckAt: now,
+    lastCheckBy: caller.email,
+    lastOkAt: healthStatus === 'OK' ? now : (row.lastOkAt ?? null),
+    events: appendEvent(row, event),
+    updatedBy: caller.email,
+    updatedAt: now,
+  }
+  const written = await putRow(deps, next, row.version ?? 0, 'integration')
+  await deps.writeAudit('INTEGRATION', descriptor.key, 'MYCARRIERPACKETS_VALIDATE', caller, {
+    provider: descriptor.key,
+    health: healthStatus,
+    reason: healthReason,
+  })
+  return present(written)
+}
+
+/** Sync one carrier from MCP, identified by mcNumber or carrierId. */
+export async function mcpSyncCarrier(
+  deps: IntegrationDeps,
+  input: Record<string, unknown>,
+  caller: IntegrationCaller,
+): Promise<Record<string, unknown>> {
+  const descriptor = mcpDescriptor()
+  const creds = await mcpCredentials()
+  const mcNumber = typeof input.mcNumber === 'string' ? input.mcNumber.trim() : ''
+  const carrierId = typeof input.carrierId === 'string' ? input.carrierId.trim() : ''
+  if (!mcNumber && !carrierId) throw new Error('mcNumber or carrierId is required')
+
+  let resolvedMc = mcNumber
+  if (!resolvedMc && carrierId) {
+    const carrier = await getCarrierById(deps, carrierId)
+    if (!carrier) throw new Error(`Carrier not found: ${carrierId}`)
+    resolvedMc = typeof carrier.mcNumber === 'string' ? carrier.mcNumber.trim() : ''
+    if (!resolvedMc) throw new Error(`Carrier ${carrierId} has no mcNumber`)
+  }
+
+  const presentCreds = Object.fromEntries(Object.entries(creds).map(([k, v]) => [k, v ?? ''])) as Record<string, string>
+  const mode = modeOf(descriptor, presentCreds)
+  let result: AdapterResult
+  if (mode === 'STUB') {
+    result = {
+      mode: 'STUB',
+      ok: true,
+      message: 'STUB — MyCarrierPackets username/password are not configured; no sync was made.',
+      detail: { provider: MCP_PROVIDER, capability: 'sync', sample: { mcNumber: resolvedMc } },
+    }
+  } else {
+    const adapter = mcpAdapter(presentCreds, deps.fetchImpl)
+    result = await adapter.sync!({
+      provider: MCP_PROVIDER,
+      credentials: presentCreds,
+      settings: {},
+      now: nowIso(),
+    }, { mcNumber: resolvedMc })
+  }
+
+  const detail = result.detail ?? {}
+  const mcp = (detail.carrier ?? detail) as Record<string, unknown>
+  const updated = mode === 'LIVE' ? await updateCarrierFromMcp(deps, mcp) : null
+
+  await deps.writeAudit('INTEGRATION', descriptor.key, 'MYCARRIERPACKETS_SYNC_CARRIER', caller, {
+    mcNumber: resolvedMc,
+    carrierId: carrierId || null,
+    ok: result.ok,
+    mode: result.mode,
+    updatedCarrierId: updated ? String(updated.id ?? '') : null,
+  })
+
+  return { result: { mode: result.mode, ok: result.ok, message: result.message }, carrier: updated }
+}
+
+/** Sync every carrier with an mcNumber from MCP. */
+export async function mcpSyncAll(
+  deps: IntegrationDeps,
+  _input: Record<string, unknown>,
+  caller: IntegrationCaller,
+): Promise<Record<string, unknown>> {
+  const descriptor = mcpDescriptor()
+  const creds = await mcpCredentials()
+  const all: Record<string, unknown>[] = []
+  let startKey: Record<string, AttributeValue> | undefined
+  const now = nowIso()
+  const credentials = Object.fromEntries(Object.entries(creds).map(([k, v]) => [k, v ?? ''])) as Record<string, string>
+  const mode = modeOf(descriptor, credentials)
+  const adapter = mode === 'LIVE' ? mcpAdapter(credentials, deps.fetchImpl) : null
+
+  do {
+    const page = await deps.dynamo.send(
+      new ScanCommand({
+        TableName: deps.carrierTableName,
+        FilterExpression: 'attribute_exists(mcNumber) AND NOT begins_with(mcNumber, :empty)',
+        ExpressionAttributeValues: { ':empty': { S: '' } },
+        ExclusiveStartKey: startKey,
+      }),
+    )
+    for (const item of page.Items ?? []) {
+      const carrier = unmarshall(item)
+      const mcNumber = typeof carrier.mcNumber === 'string' ? carrier.mcNumber.trim() : ''
+      if (!mcNumber) continue
+      try {
+        if (mode === 'STUB') {
+          all.push({ mcNumber, ok: true, mode: 'STUB', carrierId: null })
+          continue
+        }
+        const result = await adapter!.sync!({
+          provider: MCP_PROVIDER,
+          credentials,
+          settings: {},
+          now,
+        }, { mcNumber })
+        const detail = result.detail ?? {}
+        const mcp = (detail.carrier ?? detail) as Record<string, unknown>
+        const updated = await updateCarrierFromMcp(deps, mcp)
+        all.push({ mcNumber, ok: result.ok, mode: result.mode, carrierId: updated ? String(updated.id ?? '') : null })
+      } catch (err) {
+        all.push({ mcNumber, ok: false, error: err instanceof Error ? err.message : String(err) })
+      }
+    }
+    startKey = page.LastEvaluatedKey
+  } while (startKey)
+
+  await deps.writeAudit('INTEGRATION', descriptor.key, 'MYCARRIERPACKETS_SYNC_ALL', caller, {
+    count: all.length,
+    ok: all.filter((r) => r.ok).length,
+  })
+
+  return { count: all.length, ok: all.filter((r) => r.ok).length, results: all }
+}
+
 // ── Dispatch ─────────────────────────────────────────────────────────────────
 
 export async function runIntegrationAction(
@@ -1084,6 +1350,12 @@ export async function runIntegrationAction(
       return issueApiClient(deps, input, caller)
     case 'REVOKE_API_CLIENT':
       return revokeApiClient(deps, input, caller)
+    case 'MYCARRIERPACKETS_VALIDATE':
+      return mcpValidate(deps, input, caller)
+    case 'MYCARRIERPACKETS_SYNC_CARRIER':
+      return mcpSyncCarrier(deps, input, caller)
+    case 'MYCARRIERPACKETS_SYNC_ALL':
+      return mcpSyncAll(deps, input, caller)
     default:
       throw new Error(`Unknown integration action: ${String(action)}`)
   }

@@ -57,6 +57,7 @@ import { apptReport } from './functions/appt-report/resource'
 import { cashCheckinReminder } from './functions/cash-checkin-reminder/resource'
 import { apptRequestEmailer } from './functions/appt-request-emailer/resource'
 import { tmsDirectoryActions } from './functions/tms-directory-actions/resource'
+import { mcpSync } from './functions/mcp-sync/resource'
 import { tmsShipmentActions } from './functions/tms-shipment-actions/resource'
 import { tmsCarrierActions } from './functions/tms-carrier-actions/resource'
 import { tmsTrackingActions } from './functions/tms-tracking-actions/resource'
@@ -148,6 +149,7 @@ const backend = defineBackend({
   trackingApi,
   tripScreenshotParser,
   tmsDirectoryActions,
+  mcpSync,
   tmsShipmentActions,
   tmsCarrierActions,
   tmsTrackingActions,
@@ -1531,11 +1533,17 @@ trackingApiFn.addEnvironment('LOAD_TABLE_NAME', backend.data.resources.tables['L
     resources: [integrationParamArnFor('*/webhook'), integrationParamArnFor('OPENAPI')],
   }))
   const trackIntegrationTable = backend.data.resources.tables['Integration']
+  const trackCarrierTable = backend.data.resources.tables['Carrier']
   trackingApiFn.addToRolePolicy(new PolicyStatement({
     // GetItem reads the client row, UpdateItem stamps lastUsedAt, PutItem files
     // the webhook receipt with attribute_not_exists(id) — which IS the replay guard.
     actions:   ['dynamodb:GetItem', 'dynamodb:UpdateItem', 'dynamodb:PutItem'],
     resources: [trackIntegrationTable.tableArn],
+  }))
+  // Step N2: MCP carrier.updated webhooks update Carrier rows by mcNumber.
+  trackingApiFn.addToRolePolicy(new PolicyStatement({
+    actions:   ['dynamodb:GetItem', 'dynamodb:UpdateItem', 'dynamodb:PutItem', 'dynamodb:Scan'],
+    resources: [trackCarrierTable.tableArn],
   }))
   // The public shipment read finds the PRO through the Shipment table's own index.
   trackingApiFn.addToRolePolicy(new PolicyStatement({
@@ -1543,6 +1551,7 @@ trackingApiFn.addEnvironment('LOAD_TABLE_NAME', backend.data.resources.tables['L
     resources: [`${trackShipmentTable.tableArn}/index/*`],
   }))
   trackingApiFn.addEnvironment('INTEGRATION_TABLE_NAME', trackIntegrationTable.tableName)
+  trackingApiFn.addEnvironment('CARRIER_TABLE_NAME', trackCarrierTable.tableName)
   trackingApiFn.addEnvironment('INTEGRATION_PARAM_PATH', integrationParamPath)
   trackingApiFn.addEnvironment('OPENAPI_PARAM_NAME',     `${integrationParamPath}/OPENAPI`)
 }
@@ -1958,6 +1967,8 @@ const directoryShipmentColumnTemplateTable = backend.data.resources.tables['Ship
 const directoryLoadTable = backend.data.resources.tables['Load']
 // Step J: one row per integration provider, API client and webhook receipt.
 const directoryIntegrationTable = backend.data.resources.tables['Integration']
+// Step N2: MyCarrierPackets sync writes compliance data onto Carrier rows.
+const directoryCarrierTable = backend.data.resources.tables['Carrier']
 
 const directoryTableArns = [
   directoryCustomerTable.tableArn,
@@ -1983,6 +1994,9 @@ const directoryTableArns = [
   // Shipment, Order, Invoice and FactoringItem are deliberately absent, so no
   // integration action can reach AR or create a factoring row even by mistake.
   directoryIntegrationTable.tableArn,
+  // Step N2: Carrier is here for the MyCarrierPackets sync — mcpStatus,
+  // safetyRating, insurancePolicies and review fields only, never status.
+  directoryCarrierTable.tableArn,
 ]
 
 directoryActionsFn.addToRolePolicy(
@@ -2000,6 +2014,7 @@ directoryActionsFn.addEnvironment('SETTINGS_TABLE_NAME',           directorySett
 directoryActionsFn.addEnvironment('MERGE_JOB_TABLE_NAME',          directoryMergeJobTable.tableName)
 directoryActionsFn.addEnvironment('IMPORT_JOB_TABLE_NAME',         directoryImportJobTable.tableName)
 directoryActionsFn.addEnvironment('LOAD_TABLE_NAME',               directoryLoadTable.tableName)
+directoryActionsFn.addEnvironment('CARRIER_TABLE_NAME',             directoryCarrierTable.tableName)
 directoryActionsFn.addEnvironment('OWNERSHIP_DIVISION_TABLE_NAME',  directoryOwnershipDivisionTable.tableName)
 directoryActionsFn.addEnvironment('OWNERSHIP_RULE_TABLE_NAME',      directoryOwnershipRuleTable.tableName)
 directoryActionsFn.addEnvironment('SHIPMENT_VIEW_TABLE_NAME',       directoryShipmentViewTable.tableName)
@@ -2048,14 +2063,38 @@ directoryActionsFn.addToRolePolicy(
 // A webhook receipt (`evt:<PROVIDER>:<eventId>`, kind WEBHOOK_EVENT) exists only to
 // refuse a replay, so DynamoDB expires it rather than anything sweeping the table.
 // `ttlEpoch` is epoch seconds ≈10 minutes out, written by tracking-api: twice the
-// ±300 s signature window, so a duplicate of a delivery accepted at the far edge
-// still finds its receipt. Provider and API-client rows carry no `ttlEpoch` and are
+// ±300 s signature window, so a duplicate of a delivery at the far edge still
+// finds its receipt. Provider and API-client rows carry no `ttlEpoch` and are
 // never touched by TTL. `defineData` provisions AMPLIFY_TABLE, so the wrapper is
 // the supported way to set this.
 backend.data.resources.cfnResources.amplifyDynamoDbTables['Integration'].timeToLiveAttribute = {
   attributeName: 'ttlEpoch',
   enabled: true,
 }
+
+// ── Step N2: MyCarrierPackets scheduled sync ───────────────────────────────
+const mcpSyncFn = backend.mcpSync.resources.lambda as LambdaFunction
+const mcpSyncCarrierTable = backend.data.resources.tables['Carrier']
+mcpSyncFn.addEnvironment('CARRIER_TABLE_NAME', mcpSyncCarrierTable.tableName)
+mcpSyncFn.addEnvironment('INTEGRATION_PARAM_PATH', integrationParamPath)
+mcpSyncFn.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['dynamodb:Scan', 'dynamodb:PutItem', 'dynamodb:GetItem'],
+    resources: [mcpSyncCarrierTable.tableArn],
+  }),
+)
+mcpSyncFn.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['ssm:GetParameter'],
+    resources: [integrationParamArn],
+  }),
+)
+// The rule is created enabled. The dev-stack guard later disables schedules, so
+// dev still deploys but does not poll MCP by itself.
+const mcpSyncRule = new Rule(mcpSyncFn.stack, 'McpSyncRule', {
+  schedule: Schedule.rate(Duration.minutes(30)),
+})
+mcpSyncRule.addTarget(new EventsLambdaTarget(mcpSyncFn))
 
 // ── Step E tables, declared once for the four Lambdas that share them ───────
 const shipmentDocumentTable  = backend.data.resources.tables['ShipmentDocument']

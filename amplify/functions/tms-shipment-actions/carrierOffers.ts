@@ -330,3 +330,31 @@ export async function sendSetupPacket(deps: CarrierOfferDeps, input: Row, caller
 
   return { sent: result.ok, mode: result.mode, message: result.message }
 }
+
+/**
+ * Send a MyCarrierPackets setup packet to a carrier from their profile. The carrier
+ * must exist in the directory; email is the one the packet is addressed to.
+ */
+export async function sendCarrierSetupPacket(deps: CarrierOfferDeps, input: Row, caller: Caller): Promise<Row> {
+  const carrierId = assertString(input.carrierId, 'carrierId')
+  const email = assertString(input.email, 'email')
+
+  const carrier = await deps.getById(deps.tables.carrier, carrierId)
+  if (!carrier) throw new Error(`Carrier not found: ${carrierId}`)
+
+  const adapter = await deps.setupPacketAdapter()
+  const result = await adapter.send({
+    email,
+    carrierName: carrier.name,
+    carrierMc: carrier.mcNumber,
+  })
+
+  await deps.writeAudit('CARRIER', carrierId, 'SEND_CARRIER_SETUP_PACKET', caller, {
+    email,
+    mode: result.mode,
+    ok: result.ok,
+    message: result.message,
+  })
+
+  return { sent: result.ok, mode: result.mode, message: result.message }
+}

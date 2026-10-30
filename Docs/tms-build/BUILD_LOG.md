@@ -1,5 +1,50 @@
 # TMS build log
 
+## 2026-10-30 — Step N2 — MyCarrierPackets vetting + continuous sync (PENDING DEPLOY)
+
+**Committed on dev, deploy in progress.** Plan: `Docs/tms-build/N2-plan.md`.
+
+- Commit: `<commit-hash>` (shared MCP adapter, tms-directory-actions MCP actions, tms-shipment-actions setup packet, tracking-api MCP webhook processing, mcp-sync scheduled Lambda, CarrierProfile setup packet UI, coverage MCP gate, tests).
+- Amplify dev job `<job-id>` for `<commit-hash>` status `<status>`.
+- `npm run test` on the working tree: **474 files / 6,448 tests PASS**.
+- `npx eslint .` — **0 errors, 3 pre-existing warnings**.
+- `npx tsc --noEmit -p amplify/tsconfig.json` — clean; `npx tsc --noEmit -p tsconfig.app.json` — clean.
+
+### What shipped
+
+- **Shared MCP adapter.** `src/lib/integrations/mcpAdapter.ts` exports a live `Adapter`
+  (`connect`, `validate`, `sync`, `setupPacket`) plus helpers. Stub mode remains fully
+  functional when credentials are missing.
+- **Types.** `Adapter` interface gained the optional `setupPacket` method; `CarrierRecord`
+  gained `mcpRiskScore`.
+- **Registry.** `MYCARRIERPACKETS` now declares `liveCapabilities: ['connect', 'validate', 'sync']`
+  so a complete set of credentials moves the badge from STUB to LIVE.
+- **Directory actions.** `tms-directory-actions` gained `MYCARRIERPACKETS_VALIDATE`,
+  `MYCARRIERPACKETS_SYNC_CARRIER`, and `MYCARRIERPACKETS_SYNC_ALL`.
+- **Shipment actions.** `tms-shipment-actions` wires the real MCP adapter for setup packets
+  and exposes `SEND_CARRIER_SETUP_PACKET({ carrierId, email })`.
+- **Tracking API webhooks.** MCP `carrier.updated` events are parsed after signature
+  verification and applied to Carrier rows by `mcNumber`.
+- **Scheduled sync.** New `mcp-sync` Lambda polls every carrier with an `mcNumber` every
+  30 minutes (rule disabled on isolated dev stacks).
+- **Carrier profile UI.** `CarrierProfile.tsx` has a *Send setup packet* button that calls
+  `sendCarrierSetupPacket`.
+- **Coverage gate.** `coverage.ts` blocks carriers whose MCP status is `UNACCEPTABLE`,
+  `UNACCEPTABLE_REVIEW`, or `MODERATE` at/above the configured risk threshold, and keeps
+  the missing-insurance check.
+- **Grants.** `backend.ts` grants `Carrier` table access and wires the EventBridge schedule.
+
+### Verification
+- Stub path: Validate connection without credentials returns honest STUB/UNABLE_TO_VERIFY.
+- Setup packet from carrier profile or offer UI returns `{ sent, mode, message }`.
+- Webhook or scheduled sync updates `mcpStatus`/`insurancePolicies` on a Carrier row.
+- Book carrier gate refuses carrier with `mcpStatus: 'UNACCEPTABLE'`.
+
+### Blockers / next
+- Exact MCP base URL, token endpoint and setup-packet path to be confirmed once live
+  credentials are available; current implementation uses the documented shapes and stub
+  fallback when credentials are absent.
+
 ## 2026-10-30 — Step N1 — Aljex bulk import (deployed)
 
 **Committed and deployed on dev.** Plan: `Docs/tms-build/N1-plan.md`.

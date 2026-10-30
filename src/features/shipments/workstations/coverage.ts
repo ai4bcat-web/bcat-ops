@@ -56,12 +56,18 @@ export interface SuggestedCarrier {
   clean: boolean
 }
 
+export interface CarrierFlagsOptions {
+  /** MyCarrierPackets risk-point ceiling. MODERATE carriers at or above this are blocked. */
+  mcpRiskThreshold?: number
+}
+
 export interface SuggestCarriersOptions {
   originState: string
   destinationState: string
   carriers: readonly CarrierRecord[]
   history: readonly LaneHistoryEntry[]
   now?: Date
+  mcpRiskThreshold?: number
 }
 
 const DO_NOT_USE_LABELS: Record<CarrierDoNotUseReason, string> = {
@@ -99,7 +105,10 @@ function insuranceFlag(policy: InsurancePolicy | undefined, typeLabel: string, n
   return null
 }
 
-export function carrierFlags(carrier: CarrierRecord, now = new Date()): string[] {
+/** Default MCP risk ceiling from the MyCarrierPackets provider settings. */
+const DEFAULT_MCP_RISK_THRESHOLD = 10000
+
+export function carrierFlags(carrier: CarrierRecord, now = new Date(), options: CarrierFlagsOptions = {}): string[] {
   const flags: string[] = []
 
   if (carrier.status === 'DO_NOT_USE') {
@@ -139,8 +148,16 @@ export function carrierFlags(carrier: CarrierRecord, now = new Date()): string[]
   if (carrier.highwayStatus === 'INCOMPLETE') flags.push('Highway incomplete')
   if (carrier.rmisStatus === 'FAIL') flags.push('RMIS failed')
   if (carrier.rmisStatus === 'INCOMPLETE') flags.push('RMIS incomplete')
-  if (carrier.mcpStatus && carrier.mcpStatus !== 'PASS' && carrier.mcpStatus !== 'ACTIVE') {
-    flags.push(`MyCarrierPackets ${carrier.mcpStatus.toLowerCase()}`)
+
+  const mcpStatus = carrier.mcpStatus?.toUpperCase()
+  if (mcpStatus === 'UNACCEPTABLE') flags.push('MyCarrierPackets unacceptable')
+  if (mcpStatus === 'UNACCEPTABLE_REVIEW') flags.push('MyCarrierPackets unacceptable review')
+  if (mcpStatus === 'MODERATE') {
+    const threshold = options.mcpRiskThreshold ?? DEFAULT_MCP_RISK_THRESHOLD
+    const score = carrier.mcpRiskScore
+    if (score == null || score >= threshold) {
+      flags.push('MyCarrierPackets moderate risk')
+    }
   }
 
   return flags
@@ -152,6 +169,7 @@ export function suggestCarriers({
   carriers,
   history,
   now = new Date(),
+  mcpRiskThreshold,
 }: SuggestCarriersOptions): SuggestedCarrier[] {
   const targetKey = laneKey(originState, destinationState)
   const byCarrier: Record<string, LaneHistoryEntry[]> = {}
@@ -173,7 +191,7 @@ export function suggestCarriers({
     const loadsOnLane = sorted.length
     const lastRateCents = sorted[0].rateCents ?? null
     const lastLoadAt = sorted[0].bookedAt ?? null
-    const flags = carrierFlags(carrier, now)
+    const flags = carrierFlags(carrier, now, { mcpRiskThreshold })
     const clean = flags.length === 0 && carrier.status === 'ACTIVE'
 
     suggestions.push({ carrier, loadsOnLane, lastRateCents, lastLoadAt, flags, clean })

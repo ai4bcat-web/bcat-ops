@@ -1690,6 +1690,8 @@ export interface CarrierRecord {
   highwayStatus?: ComplianceCheckStatus | null
   rmisStatus?: ComplianceCheckStatus | null
   mcpStatus?: string | null
+  /** Numeric MCP risk assessment points; used with maxRiskAssessmentPoints to block MODERATE carriers. */
+  mcpRiskScore?: number | null
   accountOwnerIds?: string[] | null
   teamKey?: string | null
   internalNotes?: string | null

@@ -45,6 +45,7 @@ const send = vi.hoisted(() => {
   process.env.ANTHROPIC_API_KEY = 'test-anthropic-key'
   // Step J — the integration framework's table and its SSM path.
   process.env.INTEGRATION_TABLE_NAME = 'Integration-test'
+  process.env.CARRIER_TABLE_NAME = 'Carrier-test'
   process.env.INTEGRATION_PARAM_PATH = '/bcat/integrations/us-east-1_TEST'
   process.env.DISPATCH_PARAM_PATH = '/bcat/dispatch/us-east-1_TEST'
   return vi.fn()
@@ -2853,6 +2854,121 @@ describe('VALIDATE_INTEGRATION', () => {
     const everything = JSON.stringify([...tables.integrations.values(), ...auditRows(tables.audit)])
     expect(everything).not.toContain('motive-live-key')
     delete process.env.MOTIVE_API_KEY
+  })
+})
+
+describe('MyCarrierPackets (Step N2)', () => {
+  it('MYCARRIERPACKETS_SYNC_CARRIER updates the matching Carrier row', async () => {
+    const tables = integrationTables({
+      'Integration-test': [{
+        id: 'MYCARRIERPACKETS',
+        provider: 'MYCARRIERPACKETS',
+        kind: 'PROVIDER',
+        status: 'CONNECTED',
+        mode: 'LIVE',
+        version: 1,
+        settings: { maxRiskAssessmentPoints: 50 },
+        capabilities: ['connect', 'validate', 'sync'],
+      }],
+      'Carrier-test': [{
+        id: 'car-1',
+        mcNumber: 'MC-123',
+        name: 'Haul Bros',
+        mcpStatus: 'INVITED',
+        insurancePolicies: [{ id: 'existing', type: 'CARGO', expiresAt: '2024-01-01T00:00:00.000Z', active: true }],
+        version: 1,
+      }],
+    })
+    ssmStore({
+      [`${process.env.INTEGRATION_PARAM_PATH}/MYCARRIERPACKETS`]: JSON.stringify({ username: 'u', password: 'p' }),
+      [`${process.env.INTEGRATION_PARAM_PATH}/MYCARRIERPACKETS/webhook`]: JSON.stringify({ webhookSigningSecret: 'whsec-test' }),
+    })
+    const fetchSpy = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes('/token')) return new Response(JSON.stringify({ access_token: 'tok-123' }), { status: 200 })
+      return new Response(JSON.stringify({
+        mcNumber: 'MC-123',
+        status: 'ACCEPTABLE',
+        safetyRating: 'SATISFACTORY',
+        reviewStatus: 'ACCEPTABLE',
+        riskAssessmentPoints: 10,
+        insurance: {
+          cargo: { expiresAt: '2099-12-31T00:00:00.000Z', active: true, limitCents: 100_000_00 },
+          liability: { expiresAt: '2099-06-30T00:00:00.000Z', active: true },
+        },
+      }), { status: 200 })
+    })
+    globalThis.fetch = fetchSpy as unknown as typeof fetch
+
+    const result = (await handler(event('MYCARRIERPACKETS_SYNC_CARRIER', { mcNumber: 'MC-123' }, ADMIN_CALLER))) as Record<string, unknown>
+
+    expect(result.result).toMatchObject({ ok: true, mode: 'LIVE' })
+    expect(result.carrier).toMatchObject({ mcNumber: 'MC-123' })
+    const carrierPut = tables.seen.find(
+      (cmd): cmd is MockPutCommand =>
+        cmd.__type === 'Put' &&
+        String(cmd.input.TableName) === 'Carrier-test' &&
+        String(cmd.input.Item?.id?.S) === 'car-1',
+    )
+    expect(carrierPut).toBeDefined()
+    const carrier = unmarshall(carrierPut!.input.Item ?? {}) as Record<string, unknown>
+    expect(carrier.mcpStatus).toBe('ACCEPTABLE')
+    expect(carrier.safetyRating).toBe('SATISFACTORY')
+    expect(carrier.mcpReviewStatus).toBe('ACCEPTABLE')
+    expect(carrier.mcpRiskScore).toBe(10)
+  })
+
+  it('MYCARRIERPACKETS_SYNC_ALL processes every carrier with an mcNumber', async () => {
+    const _tables = integrationTables({
+      'Integration-test': [{
+        id: 'MYCARRIERPACKETS',
+        provider: 'MYCARRIERPACKETS',
+        kind: 'PROVIDER',
+        status: 'CONNECTED',
+        mode: 'LIVE',
+        version: 1,
+        capabilities: ['connect', 'validate', 'sync'],
+      }],
+      'Carrier-test': [
+        { id: 'car-1', mcNumber: 'MC-111', name: 'One', version: 1 },
+        { id: 'car-2', mcNumber: 'MC-222', name: 'Two', version: 1 },
+        { id: 'car-3', name: 'No MC', version: 1 },
+      ],
+    })
+    ssmStore({
+      [`${process.env.INTEGRATION_PARAM_PATH}/MYCARRIERPACKETS`]: JSON.stringify({ username: 'u', password: 'p' }),
+      [`${process.env.INTEGRATION_PARAM_PATH}/MYCARRIERPACKETS/webhook`]: JSON.stringify({ webhookSigningSecret: 'whsec-test' }),
+    })
+    // The mock fetch returns a token first, then the carrier body for each lookup.
+    const fetchSpy = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes('/token')) return new Response(JSON.stringify({ access_token: 'tok-123' }), { status: 200 })
+      return new Response(JSON.stringify({ mcNumber: 'MC-111', status: 'ACCEPTABLE' }), { status: 200 })
+    })
+    globalThis.fetch = fetchSpy as unknown as typeof fetch
+
+    const result = (await handler(event('MYCARRIERPACKETS_SYNC_ALL', {}, ADMIN_CALLER))) as Record<string, unknown>
+
+    expect(result.count).toBe(2)
+    expect(result.ok).toBe(2)
+  })
+
+  it('MYCARRIERPACKETS_VALIDATE marks missing credentials STUB', async () => {
+    const _tables = integrationTables({
+      'Integration-test': [{
+        id: 'MYCARRIERPACKETS',
+        provider: 'MYCARRIERPACKETS',
+        kind: 'PROVIDER',
+        status: 'NOT_CONNECTED',
+        mode: 'STUB',
+        version: 1,
+        capabilities: ['connect', 'validate', 'sync'],
+      }],
+    })
+    ssmStore()
+
+    const row = (await handler(event('MYCARRIERPACKETS_VALIDATE', {}, ADMIN_CALLER))) as Record<string, unknown>
+
+    expect(row.mode).toBe('STUB')
+    expect(row.health).toBe('UNABLE_TO_VERIFY')
   })
 })
 

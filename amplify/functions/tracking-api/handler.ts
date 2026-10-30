@@ -82,6 +82,7 @@ const DOCUMENT_BUCKET = process.env.BUCKET_NAME!
 const QUOTE_TABLE = process.env.QUOTE_TABLE_NAME!
 // Step J — the public API and the inbound webhook receipt (see ./api.ts).
 const INTEGRATION_TABLE = process.env.INTEGRATION_TABLE_NAME!
+const CARRIER_TABLE = process.env.CARRIER_TABLE_NAME!
 const OPENAPI_PARAM_NAME = process.env.OPENAPI_PARAM_NAME!
 const INTEGRATION_PARAM_PATH = process.env.INTEGRATION_PARAM_PATH!
 
@@ -90,6 +91,7 @@ const apiDeps: ApiDeps = {
   ddb,
   ssm,
   integrationTable: INTEGRATION_TABLE,
+  carrierTable: CARRIER_TABLE,
   shipmentTable: SHIPMENT_TABLE,
   loadTable: LOAD_TABLE,
   orderTable: ORDER_TABLE,

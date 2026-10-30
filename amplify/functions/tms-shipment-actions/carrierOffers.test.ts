@@ -14,6 +14,7 @@ import type { AdapterResult } from '../../../src/lib/integrations/types'
 import {
   recordCarrierOffer,
   listCarrierOffers,
+  sendCarrierSetupPacket,
   sendSetupPacket,
   type CarrierOfferDeps,
   type CarrierOfferVetting,
@@ -509,5 +510,30 @@ describe('sendSetupPacket', () => {
     await expect(
       sendSetupPacket(deps, { shipmentId: 'ship-1', quoteId: 'Q999999', email: 'dispatch@example.com' }, CALLER),
     ).rejects.toThrow(/Offer not found/)
+  })
+})
+
+describe('sendCarrierSetupPacket', () => {
+  it('sends a setup packet from a carrier profile in STUB mode', async () => {
+    const store = memoryStore()
+    seedCarrier(store, 'car-1', { name: 'Haul Bros', mcNumber: 'MC-123' })
+    const deps = fakeDeps(store)
+
+    const result = (await sendCarrierSetupPacket(deps, { carrierId: 'car-1', email: 'dispatch@haulbros.com' }, CALLER)) as {
+      sent: boolean
+      mode: string
+      message: string
+    }
+
+    expect(result.sent).toBe(true)
+    expect(result.mode).toBe('STUB')
+  })
+
+  it('rejects a setup packet for a missing carrier', async () => {
+    const store = memoryStore()
+    const deps = fakeDeps(store)
+    await expect(
+      sendCarrierSetupPacket(deps, { carrierId: 'car-missing', email: 'dispatch@example.com' }, CALLER),
+    ).rejects.toThrow(/Carrier not found/)
   })
 })

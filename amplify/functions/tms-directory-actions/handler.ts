@@ -112,6 +112,8 @@ const AUDIT_LOG_TABLE_NAME = process.env.AUDIT_LOG_TABLE_NAME ?? ''
 const INTEGRATION_TABLE_NAME = process.env.INTEGRATION_TABLE_NAME ?? ''
 // Step L — spreadsheet import jobs. Small table; list action scans.
 const IMPORT_JOB_TABLE_NAME = process.env.IMPORT_JOB_TABLE_NAME ?? ''
+// Step N2: MyCarrierPackets sync writes compliance data back onto Carrier rows.
+const CARRIER_TABLE_NAME = process.env.CARRIER_TABLE_NAME ?? ''
 const GEOCODE_TOKEN_SECRET = process.env.GEOCODE_TOKEN_SECRET ?? ''
 const USER_POOL_ID = process.env.USER_POOL_ID ?? 'us-east-1_IbPKPNJC9'
 
@@ -3237,6 +3239,7 @@ async function ensureOwnershipSeed(caller: Caller): Promise<Record<string, unkno
 const integrationDeps: IntegrationDeps = {
   dynamo,
   integrationTableName: INTEGRATION_TABLE_NAME,
+  carrierTableName: CARRIER_TABLE_NAME,
   writeAudit: (entityType, entityId, auditAction, caller, changes) =>
     writeAudit(entityType, entityId, auditAction, caller, changes),
 }

@@ -260,6 +260,8 @@ export interface Adapter {
   factor?(ctx: AdapterContext, sample: Record<string, unknown>): Promise<AdapterResult>
   sync?(ctx: AdapterContext, input: Record<string, unknown>): Promise<AdapterResult>
   connect?(ctx: AdapterContext, input: Record<string, unknown>): Promise<AdapterResult>
+  /** Step N2. MyCarrierPackets' setup packet — a carrier-scoped capability, not a generic sync. */
+  setupPacket?(ctx: AdapterContext, input: Record<string, unknown>): Promise<AdapterResult>
 }
 
 /** Last four characters of a stored secret field — the only part that ever leaves SSM. */

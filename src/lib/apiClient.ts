@@ -2766,6 +2766,9 @@ const CARRIER_FIELDS_BASE = `
 // that predates the field must keep serving every other carrier field.
 const CARRIER_V2_FIELDS = ['aiMemory']
 let carriersHaveV2 = true
+// Step N2's MCP risk score. Dropped and retried if the backend predates the field.
+const CARRIER_V3_FIELDS = ['mcpRiskScore']
+let carriersHaveV3 = true
 const CARRIER_JSON_FIELDS: (keyof CarrierRecord)[] = ['insurancePolicies', 'address', 'aiMemory']
 const CARRIER_CONTACT_FIELDS = `
   id carrierId name types email phone isPrimary rateConRecipient active
@@ -2789,8 +2792,14 @@ async function readCarriers<T>(run: (fields: string) => Promise<T>): Promise<T> 
       return await run([
         CARRIER_FIELDS_BASE,
         carriersHaveV2 ? CARRIER_V2_FIELDS.join(' ') : '',
+        carriersHaveV3 ? CARRIER_V3_FIELDS.join(' ') : '',
       ].filter(Boolean).join(' '))
     } catch (err) {
+      if (carriersHaveV3 && fieldNamed(CARRIER_V3_FIELDS, err)) {
+        console.warn('[apiClient] backend has no Carrier MCP risk score yet — querying without it until deploy')
+        carriersHaveV3 = false
+        continue
+      }
       if (!carriersHaveV2 || !fieldNamed(CARRIER_V2_FIELDS, err)) throw err
       console.warn('[apiClient] backend has no Carrier AI memory yet — querying without it until deploy')
       carriersHaveV2 = false
@@ -7219,6 +7228,14 @@ export async function sendSetupPacket(input: {
   email: string
 }): Promise<{ sent: boolean; mode: 'STUB' | 'LIVE'; message: string }> {
   return shipmentAction<{ sent: boolean; mode: 'STUB' | 'LIVE'; message: string }>('SEND_SETUP_PACKET', input)
+}
+
+/** MyCarrierPackets setup packet sent directly from a carrier profile (Step N2). */
+export async function sendCarrierSetupPacket(input: {
+  carrierId: string
+  email: string
+}): Promise<{ sent: boolean; mode: 'STUB' | 'LIVE'; message: string }> {
+  return shipmentAction<{ sent: boolean; mode: 'STUB' | 'LIVE'; message: string }>('SEND_CARRIER_SETUP_PACKET', input)
 }
 
 // ── The shipment thread, the tracking agent and the POD (tmsTrackingActions) ──

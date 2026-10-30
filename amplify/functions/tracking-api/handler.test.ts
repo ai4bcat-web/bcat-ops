@@ -65,6 +65,7 @@ const TABLES = {
   driver: 'test-Driver',
   quote: 'test-Quote',
   integration: 'test-Integration',
+  carrier: 'test-Carrier',
 }
 
 beforeAll(async () => {
@@ -85,6 +86,7 @@ beforeAll(async () => {
   process.env.QUOTE_TABLE_NAME = TABLES.quote
   // Step J
   process.env.INTEGRATION_TABLE_NAME = TABLES.integration
+  process.env.CARRIER_TABLE_NAME = TABLES.carrier
   process.env.OPENAPI_PARAM_NAME = OPENAPI_PARAM
   process.env.INTEGRATION_PARAM_PATH = INTEGRATION_PARAM_PATH
   handler = (await import('./handler')).handler
@@ -168,6 +170,8 @@ function route(by: {
   /** Step J: the `Integration` row a GetItem by id finds, and the Shipment index's answer. */
   integration?: unknown
   shipments?: unknown[]
+  /** Step N2: Carrier rows returned by a Scan for the MCP webhook processor. */
+  carrierRows?: unknown[]
   onUpdate?: (cmd: Cmd) => void
   onPut?: (cmd: Cmd) => void
 }) {
@@ -195,6 +199,9 @@ function route(by: {
       if (cmd.TableName === TABLES.quote) return { Items: by.quotes ?? [] }
       if (cmd.TableName === TABLES.shipment) return { Items: by.shipments ?? [] }
       return { Items: [] }
+    }
+    if (cmd.__cmd === 'Scan' && cmd.TableName === TABLES.carrier) {
+      return { Items: by.carrierRows ?? [] }
     }
     return { Items: [] }
   })
@@ -1476,6 +1483,59 @@ describe('POST /api/webhooks/<provider>', () => {
       expect(json(res)).toEqual({ error: 'No webhook endpoint for that provider' })
     }
     expect(writes()).toHaveLength(0)
+  })
+
+  it('Step N2: applies a carrier.updated event to the matching Carrier rows', async () => {
+    const carrier: Record<string, unknown> = {
+      id: 'car-123',
+      mcNumber: 'MC-9981',
+      name: 'Quick Haul Inc',
+      mcpStatus: 'INVITED',
+      insurancePolicies: [{ id: 'existing', type: 'CARGO', expiresAt: '2024-01-01T00:00:00.000Z', active: true }],
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    }
+    const body = JSON.stringify({
+      id: 'evt_7782',
+      eventType: 'carrier.updated',
+      carrier: {
+        mcNumber: 'MC-9981',
+        status: 'ACCEPTABLE',
+        safetyRating: 'SATISFACTORY',
+        reviewStatus: 'ACCEPTABLE',
+        riskAssessmentPoints: 10,
+        insurance: {
+          cargo: { expiresAt: '2099-12-31T00:00:00.000Z', active: true, limitCents: 100_000_00 },
+          liability: { expiresAt: '2099-06-30T00:00:00.000Z', active: true },
+        },
+      },
+    })
+    configured()
+    const puts: Cmd[] = []
+    route({ integration: providerRow(), carrierRows: [carrier], onPut: (c) => puts.push(c) })
+
+    const res = await postRaw('/api/webhooks/mycarrierpackets', body, signed(body))
+    expect(res.statusCode).toBe(200)
+    const bodyJson = json(res)
+    expect(bodyJson).toMatchObject({ ok: true, duplicate: false, eventType: 'carrier.updated', updated: 1 })
+
+    const carrierPut = puts.find((c) => c.__cmd === 'Put' && c.TableName === TABLES.carrier)
+    expect(carrierPut).toBeDefined()
+    expect(carrierPut!.Item).toMatchObject({
+      id: 'car-123',
+      mcpStatus: 'ACCEPTABLE',
+      safetyRating: 'SATISFACTORY',
+      mcpReviewStatus: 'ACCEPTABLE',
+      mcpRiskScore: 10,
+    })
+    const policies = carrierPut!.Item?.insurancePolicies as Array<Record<string, unknown>>
+    expect(policies).toHaveLength(2)
+    expect(policies.find((p) => p.type === 'CARGO')).toMatchObject({
+      id: 'existing',
+      expiresAt: '2099-12-31T00:00:00.000Z',
+      limitCents: 100_000_00,
+      active: true,
+    })
+    expect(policies.find((p) => p.type === 'AUTO_LIABILITY')).toBeDefined()
   })
 })
 

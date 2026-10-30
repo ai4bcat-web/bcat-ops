@@ -175,6 +175,7 @@ import { priceFromMarket, type MarketRateDeps } from './marketRate'
 import {
   listCarrierOffers,
   recordCarrierOffer,
+  sendCarrierSetupPacket,
   sendSetupPacket,
   type CarrierOfferDeps,
 } from './carrierOffers'
@@ -187,6 +188,7 @@ import {
 // Step J decides stub-vs-live for a board and for RateView. The registry is plain
 // data the Lambda bundles; the credentials are read from SSM and never stored here.
 import { adapterFor } from '../../../src/lib/integrations/adapter'
+import { mcpAdapter } from '../../../src/lib/integrations/mcpAdapter'
 import { descriptorOf } from '../../../src/lib/integrations/registry'
 import { modeOf } from '../../../src/lib/integrations/health'
 import type { ProviderKey } from '../../../src/lib/integrations/types'
@@ -581,6 +583,7 @@ type Action =
   | 'RECORD_CARRIER_OFFER'
   | 'LIST_CARRIER_OFFERS'
   | 'SEND_SETUP_PACKET'
+  | 'SEND_CARRIER_SETUP_PACKET'
   | 'GET_DEMO_STATE'
   | 'SEED_DEMO_DATA'
   | 'RESET_DEMO_DATA'
@@ -625,6 +628,7 @@ const OFFER_ACTIONS: Record<string, true> = {
   RECORD_CARRIER_OFFER: true,
   LIST_CARRIER_OFFERS: true,
   SEND_SETUP_PACKET: true,
+  SEND_CARRIER_SETUP_PACKET: true,
   // Step P4. Asking what the lane pays is quoting work and dispatch work alike;
   // it writes a price onto a quote only when that quote is still unsent.
   PRICE_FROM_MARKET: true,
@@ -6600,13 +6604,16 @@ const carrierOfferDeps: CarrierOfferDeps = {
     const descriptor = descriptorOf('MYCARRIERPACKETS')
     if (!descriptor) throw new Error('MyCarrierPackets is not a provider this build knows')
     const credentials = await providerCredentials('MYCARRIERPACKETS')
-    const adapter = adapterFor(descriptor, credentials)
+    const mode = modeOf(descriptor, credentials)
+    const adapter = mode === 'LIVE' ? mcpAdapter(credentials) : adapterFor(descriptor, credentials)
     const ctx = { provider: descriptor.key, credentials, settings: {}, now: nowIso() }
     return {
-      mode: modeOf(descriptor, credentials),
+      mode,
       send: async (input: Record<string, unknown>) => {
-        if (!adapter.sync) throw new Error('MyCarrierPackets does not offer a setup packet')
-        return adapter.sync(ctx, input)
+        if (adapter.setupPacket) return adapter.setupPacket(ctx, input)
+        // Fallback for the stub adapter: the existing sync capability echoes back.
+        if (adapter.sync) return adapter.sync(ctx, input)
+        throw new Error('MyCarrierPackets does not offer a setup packet')
       },
     }
   },
@@ -6833,6 +6840,8 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return listCarrierOffers(carrierOfferDeps, input)
     case 'SEND_SETUP_PACKET':
       return sendSetupPacket(carrierOfferDeps, input, caller)
+    case 'SEND_CARRIER_SETUP_PACKET':
+      return sendCarrierSetupPacket(carrierOfferDeps, input, caller)
     case 'GET_DEMO_STATE':
       return getDemoState(demoDeps)
     case 'SEED_DEMO_DATA':

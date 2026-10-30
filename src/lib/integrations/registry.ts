@@ -285,6 +285,7 @@ export const PROVIDERS: ProviderDescriptor[] = [
       { key: 'webhookVinVerification', label: 'Webhook: VIN verification', type: 'boolean', defaultValue: false },
     ],
     capabilities: ['connect', 'validate', 'sync'],
+    liveCapabilities: ['connect', 'validate', 'sync'],
     validateHow: { describe: 'POST https://api.mycarrierpackets.com/token with the username and password.' },
     applicability: 'LIVE_CAPABLE',
     loadsRead: 'NONE',

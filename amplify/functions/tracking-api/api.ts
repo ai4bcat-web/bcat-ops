@@ -24,7 +24,7 @@
  * Imports are relative: the public tracking Lambda bundles `src/lib` by path.
  */
 import type { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb'
-import { GetCommand, PutCommand, QueryCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb'
+import { GetCommand, PutCommand, QueryCommand, ScanCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb'
 import type { SSMClient } from '@aws-sdk/client-ssm'
 import { GetParameterCommand } from '@aws-sdk/client-ssm'
 import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
@@ -40,6 +40,7 @@ import {
   type ApiStopInput,
 } from '../_shared/openApi'
 import { WEBHOOK_TOLERANCE_SECONDS, verifyWebhookSignature, webhookEventId } from '../_shared/webhook'
+import { mergeInsurancePolicies, applyMcpUpdate, type McpInsurance } from '../../../src/lib/integrations/mcpAdapter'
 
 type Row = Record<string, unknown>
 
@@ -53,6 +54,7 @@ export interface ApiDeps {
   ddb: DynamoDBDocumentClient
   ssm: SSMClient
   integrationTable: string
+  carrierTable: string
   shipmentTable: string
   loadTable: string
   orderTable: string
@@ -428,6 +430,94 @@ export async function shipmentRoute(deps: ApiDeps, number: string, event: FnUrlR
   }
 }
 
+// ── MCP webhook processing (Step N2) ───────────────────────────────────────
+
+/**
+ * Import from the shared adapter: the carrier.updated payload is the same shape as
+ * the sync response, so the same mapping produces the same Carrier row patch.
+ */
+
+const MCP_PROVIDER_KEY = 'MYCARRIERPACKETS'
+
+function normalizeMc(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null
+  const trimmed = raw.trim().toUpperCase()
+  return trimmed.length > 0 ? trimmed : null
+}
+
+/**
+ * Find every Carrier with this MC number. A Scan is acceptable here because a
+ * public webhook can never call a Scan on a table it was not explicitly granted,
+ * and the largest realistic result is a handful of rows.
+ */
+async function findCarriersByMc(deps: ApiDeps, mcNumber: string): Promise<Row[]> {
+  const out: Row[] = []
+  let token: Row | undefined
+  do {
+    const page = await deps.ddb.send(new ScanCommand({
+      TableName: deps.carrierTable,
+      FilterExpression: 'attribute_exists(mcNumber) AND mcNumber = :mc',
+      ExpressionAttributeValues: { ':mc': mcNumber },
+      ExclusiveStartKey: token as Record<string, never> | undefined,
+    })) as { Items?: Row[]; LastEvaluatedKey?: Row }
+    out.push(...(page.Items ?? []))
+    token = page.LastEvaluatedKey
+  } while (token)
+  return out
+}
+
+/**
+ * Update the matching Carrier rows with the MCP carrier snapshot. Only compliance
+ * fields are written; directory status is left alone.
+ */
+async function updateCarriersFromMcp(deps: ApiDeps, mcp: Record<string, unknown>): Promise<number> {
+  const mcNumber = normalizeMc(mcp.mcNumber)
+  if (!mcNumber) return 0
+  const carriers = await findCarriersByMc(deps, mcNumber)
+  if (carriers.length === 0) return 0
+  const patch = applyMcpUpdate(mcp as never)
+  // applyMcpUpdate returns an object whose string keys are safe for DynamoDB
+  // expression names, but McNumber itself is not a field we write.
+  const { mcNumber: _dropMc, ...rest } = patch as Record<string, unknown> & { mcNumber: unknown }
+  void _dropMc
+  if (mcp.insurance && typeof mcp.insurance === 'object') {
+    const existing = carriers[0]!.insurancePolicies
+    rest.insurancePolicies = mergeInsurancePolicies(
+      existing as Array<Record<string, unknown>> | null | undefined,
+      mcp.insurance as unknown as McpInsurance,
+    )
+  }
+  const now = new Date().toISOString()
+  for (const carrier of carriers) {
+    const next = { ...carrier, ...rest, updatedAt: now }
+    await deps.ddb.send(new PutCommand({
+      TableName: deps.carrierTable,
+      Item: next,
+    }))
+  }
+  return carriers.length
+}
+
+/**
+ * Parse and consume a MyCarrierPackets webhook body after signature verification.
+ * Returns the number of Carrier rows updated or null when no carrier data was
+ * present.
+ */
+async function processMcpWebhookBody(deps: ApiDeps, rawBody: string): Promise<{ updated: number; eventType: string | null }> {
+  let parsed: Record<string, unknown>
+  try {
+    parsed = JSON.parse(rawBody) as Record<string, unknown>
+  } catch {
+    return { updated: 0, eventType: null }
+  }
+  const eventType = typeof parsed.eventType === 'string' ? parsed.eventType : null
+  if (eventType !== 'carrier.updated') return { updated: 0, eventType }
+  const carrier = parsed.carrier && typeof parsed.carrier === 'object' ? (parsed.carrier as Record<string, unknown>) : null
+  if (!carrier) return { updated: 0, eventType }
+  const updated = await updateCarriersFromMcp(deps, carrier)
+  return { updated, eventType }
+}
+
 // ── POST /api/webhooks/<provider> ───────────────────────────────────────────
 
 /**
@@ -438,6 +528,11 @@ export async function shipmentRoute(deps: ApiDeps, number: string, event: FnUrlR
  * The dedupe row and the two counters on the provider's own row are the *only*
  * writes — consuming what the provider said (a status, a document, a rate) is step
  * K, through the actions that already own those records.
+ *
+ * Step N2 extends this for MyCarrierPackets: a verified carrier.updated event is
+ * applied directly to the Carrier row(s) matched by mcNumber. The update is best
+ * effort after the receipt is committed; a failure here does not make the provider
+ * redeliver.
  */
 export async function webhookRoute(deps: ApiDeps, provider: string, event: FnUrlRequest, nowIso: string): Promise<ApiReply> {
   const key = provider.toUpperCase()
@@ -509,6 +604,19 @@ export async function webhookRoute(deps: ApiDeps, provider: string, event: FnUrl
     ExpressionAttributeValues: { ':now': nowIso, ':one': 1 },
   }))
 
+  // Step N2. MyCarrierPackets carrier.updated events write compliance data onto
+  // the matching Carrier row(s) by mcNumber. This is best-effort after the
+  // receipt is committed; a failure here still answers 200 so MCP does not
+  // redeliver over a transient write problem.
+  let mcpResult: { eventType: string | null; updated: number } = { eventType: null, updated: 0 }
+  if (key === MCP_PROVIDER_KEY) {
+    try {
+      mcpResult = await processMcpWebhookBody(deps, rawBody)
+    } catch (err) {
+      console.warn('[tracking-api] MCP carrier update failed', String(err))
+    }
+  }
+
   // Step K. The delivery is receipted; now it is handed to the workflow agent, which
   // reads the raw body back out of S3 rather than taking it from an event payload.
   // Both halves are best-effort by design: this route's answer is the receipt, and a
@@ -542,5 +650,5 @@ export async function webhookRoute(deps: ApiDeps, provider: string, event: FnUrl
     }
   }
 
-  return { status: 200, body: { ok: true, duplicate: false, eventId } }
+  return { status: 200, body: { ok: true, duplicate: false, eventId, ...mcpResult } }
 }

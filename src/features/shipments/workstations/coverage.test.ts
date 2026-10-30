@@ -182,3 +182,46 @@ describe('suggestCarriers', () => {
     expect(flags.some((f) => f.includes('No-buy'))).toBe(true)
   })
 })
+
+describe('carrierFlags MCP gating', () => {
+  it('blocks UNACCEPTABLE carriers', () => {
+    const flags = carrierFlags(carrier({ mcpStatus: 'UNACCEPTABLE' }))
+    expect(flags).toContain('MyCarrierPackets unacceptable')
+  })
+
+  it('blocks UNACCEPTABLE_REVIEW carriers', () => {
+    const flags = carrierFlags(carrier({ mcpStatus: 'UNACCEPTABLE_REVIEW' }))
+    expect(flags).toContain('MyCarrierPackets unacceptable review')
+  })
+
+  it('blocks MODERATE carriers above the risk threshold', () => {
+    const flags = carrierFlags(carrier({ mcpStatus: 'MODERATE', mcpRiskScore: 12000 }))
+    expect(flags).toContain('MyCarrierPackets moderate risk')
+  })
+
+  it('blocks MODERATE carriers when no risk score is present', () => {
+    const flags = carrierFlags(carrier({ mcpStatus: 'MODERATE' }))
+    expect(flags).toContain('MyCarrierPackets moderate risk')
+  })
+
+  it('allows MODERATE carriers below the risk threshold', () => {
+    const flags = carrierFlags(carrier({ mcpStatus: 'MODERATE', mcpRiskScore: 5000 }))
+    expect(flags).not.toContain('MyCarrierPackets moderate risk')
+  })
+
+  it('uses a custom risk threshold when provided', () => {
+    const blocked = carrierFlags(
+      carrier({ mcpStatus: 'MODERATE', mcpRiskScore: 8000 }),
+      new Date(),
+      { mcpRiskThreshold: 7000 },
+    )
+    expect(blocked).toContain('MyCarrierPackets moderate risk')
+
+    const allowed = carrierFlags(
+      carrier({ mcpStatus: 'MODERATE', mcpRiskScore: 6000 }),
+      new Date(),
+      { mcpRiskThreshold: 7000 },
+    )
+    expect(allowed).not.toContain('MyCarrierPackets moderate risk')
+  })
+})

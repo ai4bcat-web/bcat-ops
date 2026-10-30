@@ -9,18 +9,19 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  Banknote, Bot, Building2, ExternalLink, FileText, History, Phone, Shield, Truck, Wallet, X,
+  Banknote, Bot, Building2, ExternalLink, FileText, History, Phone, Send, Shield, Truck, Wallet, X,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { TmsBadge, TmsButton, TmsCard, TmsIconButton, TmsTabs } from '@/features/tms/kit'
+import { TmsBadge, TmsButton, TmsCard, TmsDialog, TmsField, TmsIconButton, TmsInput, TmsTabs } from '@/features/tms/kit'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
 import * as DialogPrimitive from '@radix-ui/react-dialog'
 import { useCarrier } from '@/hooks/useCarrier'
 import { useCarrierAp } from '@/hooks/useCarrierAp'
 import {
   archiveCarrierContact, archiveCarrierPaymentMethod, commitCarrierDocument, deleteCarrierDocument,
-  getCarrierDocumentUrl, graphqlErrorText, listAuditLogs, prepareCarrierDocument, setCarrierStatus,
-  upsertCarrier, upsertCarrierContact, upsertCarrierPaymentMethod, uploadCarrierDocumentFile,
+  getCarrierDocumentUrl, graphqlErrorText, listAuditLogs, prepareCarrierDocument,
+  sendCarrierSetupPacket, setCarrierStatus, upsertCarrier, upsertCarrierContact,
+  upsertCarrierPaymentMethod, uploadCarrierDocumentFile,
 } from '@/lib/apiClient'
 import type { UpsertCarrierInput } from '@/lib/apiClient'
 import { insuranceState, oosBps } from '@/lib/carrierEligibility'
@@ -91,6 +92,9 @@ export function CarrierProfile({ carrierId, isAdmin, settings, onClose, onChange
   const { bundle, loading, error, refresh, replaceCarrier } = useCarrier(carrierId)
   const [tab, setTab] = useState('profile')
   const [statusOpen, setStatusOpen] = useState(false)
+  const [setupOpen, setSetupOpen] = useState(false)
+  const [setupEmail, setSetupEmail] = useState('')
+  const [setupBusy, setSetupBusy] = useState(false)
   const [logs, setLogs] = useState<AuditLogEntry[] | null>(null)
   const [logsError, setLogsError] = useState<string | null>(null)
   const ap = useCarrierAp(carrierId)
@@ -165,6 +169,27 @@ export function CarrierProfile({ carrierId, isAdmin, settings, onClose, onChange
     toast.error(graphqlErrorText(e) || (e instanceof Error ? e.message : fallback))
   }
 
+  const openSetupPacket = () => {
+    if (!carrier) return
+    setSetupEmail(carrier.email ?? '')
+    setSetupOpen(true)
+  }
+
+  const handleSendSetupPacket = async () => {
+    if (!carrier || !setupEmail.trim()) return
+    setSetupBusy(true)
+    try {
+      const result = await sendCarrierSetupPacket({ carrierId: carrier.id, email: setupEmail.trim() })
+      toast.success(result.message)
+      setSetupOpen(false)
+      setSetupEmail('')
+    } catch (e) {
+      reportFailure(e, 'Setup packet failed')
+    } finally {
+      setSetupBusy(false)
+    }
+  }
+
   const uploadDocument = async (file: File, type: CarrierDocumentType, expiresAt: string | null) => {
     if (!carrier) return
     const prepared = await prepareCarrierDocument({
@@ -213,6 +238,12 @@ export function CarrierProfile({ carrierId, isAdmin, settings, onClose, onChange
               )}
             </div>
             <div className="flex items-center gap-2">
+              {carrier && (
+                <TmsButton size="sm" onClick={openSetupPacket}>
+                  <Send size={14} />
+                  Send setup packet
+                </TmsButton>
+              )}
               {carrier && <TmsButton size="sm" onClick={() => setStatusOpen(true)}>Change status</TmsButton>}
               <TmsIconButton shape="plain" aria-label="Close" onClick={onClose}><X size={16} /></TmsIconButton>
             </div>
@@ -423,6 +454,37 @@ export function CarrierProfile({ carrierId, isAdmin, settings, onClose, onChange
             </>
           )}
         </div>
+
+        {setupOpen && carrier && (
+          <TmsDialog
+            open
+            onOpenChange={(v) => { if (!v) { setSetupOpen(false); setSetupEmail('') } }}
+            title={`Send setup packet — ${carrier.name}`}
+            footer={
+              <>
+                <TmsButton variant="ghost" size="sm" onClick={() => { setSetupOpen(false); setSetupEmail('') }} disabled={setupBusy}>Cancel</TmsButton>
+                <TmsButton variant="primary" size="sm" onClick={handleSendSetupPacket} disabled={setupBusy || !setupEmail.trim()}>
+                  {setupBusy ? 'Sending…' : 'Send'}
+                </TmsButton>
+              </>
+            }
+          >
+            <div className="flex flex-col gap-4">
+              <p className="tms-muted text-sm">
+                Sends a MyCarrierPackets setup packet to {carrier.name}.
+              </p>
+              <TmsField label="E-mail" htmlFor="setup-packet-email">
+                <TmsInput
+                  id="setup-packet-email"
+                  type="email"
+                  value={setupEmail}
+                  onChange={(e) => setSetupEmail(e.target.value)}
+                  placeholder="dispatch@carrier.com"
+                />
+              </TmsField>
+            </div>
+          </TmsDialog>
+        )}
 
         {statusOpen && carrier && (
           <CarrierStatusDialog
