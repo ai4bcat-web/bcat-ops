@@ -368,12 +368,9 @@ async function main() {
     equals('P8 thread opened by rate con', typeof rateConBundle.shipment?.threadKey, 'string')
 
     // ── P8: tracking link tap and geocoded reply ──────────────────────────────
-    const transitRec = findDemoRecord(state, 'SHIPMENT', 'shipment.intransit')
-    const transitBundle = await getBundle(adminToken, transitRec.recordId)
-    const transitCarrier = transitBundle.loadCarriers?.find((c) => c.status === 'ACTIVE')
-    if (!transitCarrier) { bad('P8 in-transit carrier', 'no active load carrier'); return }
-
-    const linkOut = await track('SEND_TRACKING_LINK', { loadCarrierId: transitCarrier.id, via: 'COPY' })
+    // The in-transit demo shipment was staged directly through stop statuses and
+    // has no active LoadCarrier; use the carrier we just booked for the live link.
+    const linkOut = await track('SEND_TRACKING_LINK', { loadCarrierId: bookedCarrier.id, via: 'COPY' })
     const linkToken = linkOut.trackingLinkId ?? linkOut.link?.id
     if (!linkToken) { bad('P8 tracking link created', 'no token'); return }
     const page = await publicGet(`/l/${linkToken}`)
@@ -382,7 +379,7 @@ async function main() {
     equals('P8 tracking link ping accepted', ping.status, 200)
 
     const ingest = await track('INGEST_SHIPMENT_MESSAGE', {
-      shipmentId: transitRec.recordId,
+      shipmentId: postedRec.recordId,
       messageId: `sms-${Date.now()}@demo`,
       channel: 'SMS',
       kind: 'CHECK_CALL_REPLY',
@@ -391,13 +388,14 @@ async function main() {
       body: 'in Dallas, TX',
     })
     equals('P8 geocoded SMS reply routed', ingest.routed, true)
-    const transitAfterReply = await getBundle(adminToken, transitRec.recordId)
-    const transitLoadAfterReply = transitAfterReply.loads?.[0]
-    equals('P8 geocoded reply set last known city', transitLoadAfterReply?.lastKnownCity, 'Dallas')
+    const postedAfterReply = await getBundle(adminToken, postedRec.recordId)
+    const postedLoadAfterReply = postedAfterReply.loads?.[0]
+    equals('P8 geocoded reply set last known city', postedLoadAfterReply?.lastKnownCity, 'Dallas')
 
     // ── P8: silence escalation ────────────────────────────────────────────────
     const sweep = await track('SWEEP_CHECK_CALL_PLANS', {})
     equals('P8 check-call sweep ran', typeof sweep.acted, 'number')
+    const transitRec = findDemoRecord(state, 'SHIPMENT', 'shipment.intransit')
     const transitMessages = await track('LIST_SHIPMENT_THREAD', { shipmentId: transitRec.recordId })
     const hasEscalation = transitMessages.messages?.some((m) => m.kind === 'ESCALATION')
     equals('P8 escalation message present in thread', hasEscalation, true)
