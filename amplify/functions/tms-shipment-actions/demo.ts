@@ -999,13 +999,17 @@ export async function seedDemoData(deps: DemoDeps, input: Row, caller: Caller): 
 
 export async function resetDemoData(deps: DemoDeps, input: Row, caller: Caller): Promise<Row> {
   assertDevStack(deps.isDevStack)
+  console.log('[RESET] start', { caller: caller.email, staffCount: Array.isArray(input.staff) ? input.staff.length : 0 })
 
   const allRecords = await allDemoRecords(deps)
+  console.log('[RESET] records', { count: allRecords.length, kinds: countByKind(allRecords) })
   const shipmentRecordIds = allRecords
     .filter((r) => r.kind === 'SHIPMENT')
     .map((r) => String(r.recordId))
   const shipmentIds = [...new Set(shipmentRecordIds)]
+  console.log('[RESET] shipments', { count: shipmentIds.length })
   const orders = await ordersOfShipments(deps, shipmentIds)
+  console.log('[RESET] orders', { count: orders.length })
 
   // Seeding writes representative UNPAID/PAID orders directly for the AR bucket
   // demo; the real void action refuses to void a shipment with an invoice. On the
@@ -1015,9 +1019,11 @@ export async function resetDemoData(deps: DemoDeps, input: Row, caller: Caller):
     (o) => typeof o.invoiceNumber === 'string' || ['UNPAID', 'PAID'].includes(String(o.arStatus ?? '')),
   )
   if (invoicedOrders.length) {
+    console.log('[RESET] invoicedOrders', { count: invoicedOrders.length, ids: invoicedOrders.map((o) => o.id) })
     const freshOrders = (await Promise.all(
       invoicedOrders.map((o) => deps.getById(deps.tables.order, String(o.id))),
     )).filter((o): o is Row => Boolean(o))
+    console.log('[RESET] freshOrders', { count: freshOrders.length })
     await deps.transact(
       freshOrders.filter(Boolean).map((o) =>
         updateTx(
@@ -1033,9 +1039,11 @@ export async function resetDemoData(deps: DemoDeps, input: Row, caller: Caller):
 
   // Void every seeded shipment through the normal action, never by deleting it.
   // Skip shipments that are already voided so an interrupted reset can be retried.
+  console.log('[RESET] voiding', { count: shipmentIds.length })
   for (const shipmentId of shipmentIds) {
     const shipment = await deps.getById(deps.tables.shipment, shipmentId)
     if (!shipment || shipment.voidedAt) continue
+    console.log('[RESET] void', { shipmentId, status: shipment.status })
     await deps.actions.voidShipment(
       {
         shipmentId,
@@ -1050,6 +1058,7 @@ export async function resetDemoData(deps: DemoDeps, input: Row, caller: Caller):
   // Reset retires the demo carrier's active assignments so the next seed can book
   // the same demo carrier without a DOUBLE_BOOKED warning.
   const demoCarrierIds = [...new Set(allRecords.filter((r) => r.kind === 'CARRIER').map((r) => String(r.recordId)))]
+  console.log('[RESET] retireCarriers', { count: demoCarrierIds.length })
   const retireAssignments: TransactWriteItem[] = []
   for (const carrierId of demoCarrierIds) {
     const active = await deps.queryIndex(deps.tables.loadCarrier, 'loadCarriersByCarrierId', 'carrierId', carrierId)
@@ -1059,6 +1068,7 @@ export async function resetDemoData(deps: DemoDeps, input: Row, caller: Caller):
       )
     }
   }
+  console.log('[RESET] retireAssignments', { count: retireAssignments.length })
   if (retireAssignments.length) await deps.transact(retireAssignments)
 
   // Delete only the seed's own flat fixtures; anything not tagged with a DemoRecord
@@ -1081,6 +1091,7 @@ export async function resetDemoData(deps: DemoDeps, input: Row, caller: Caller):
   // DynamoDB accepts at most 100 items in one TransactWriteItems request, and
   // never two operations on one item. The dedup guard above prevents duplicate
   // deletes from the same recordId; this batches the rest.
+  console.log('[RESET] deletes', { count: deletes.length })
   const MAX_TX = 100
   for (let i = 0; i < deletes.length; i += MAX_TX) {
     const chunk = deletes.slice(i, i + MAX_TX)
@@ -1088,6 +1099,7 @@ export async function resetDemoData(deps: DemoDeps, input: Row, caller: Caller):
   }
 
   // Re-seed from a blank demo index.
+  console.log('[RESET] seeding')
   return seedDemoData(deps, input, caller)
 }
 
