@@ -555,6 +555,8 @@ export async function seedDemoData(deps: DemoDeps, input: Row, caller: Caller): 
   const plans = buildShipmentPlans(20)
   let bookedDemoCarrier = false
   const createdShipments: Array<{ shipment: Row; order: Row; load: Row }> = []
+  const tagTxs: TransactWriteItem[] = []
+  const demoRows: Row[] = []
 
   for (const plan of plans) {
     const customer = customers[plan.customerIndex]
@@ -571,14 +573,34 @@ export async function seedDemoData(deps: DemoDeps, input: Row, caller: Caller): 
       revTaggedBy: caller.email,
       salesRepId,
     }
-    await deps.transact([
+    tagTxs.push(
       updateTx(deps.tables.shipment, String(shipment.id), stampedPatch(deps, caller, divisionPatch), String(shipment.updatedAt ?? '')),
       updateTx(deps.tables.load, String(load.id), stampedPatch(deps, caller, divisionPatch), String(load.updatedAt ?? '')),
       updateTx(deps.tables.order, String(order.id), stampedPatch(deps, caller, { customerRepId: salesRepId }), String(order.updatedAt ?? '')),
-    ])
-    await recordDemo(deps, 'SHIPMENT', `shipment:${createdShipments.length - 1}`, String(shipment.id), caller, {
+    )
+    const recordNow = deps.now()
+    demoRows.push({
+      id: demoRecordId('SHIPMENT', `shipment:${createdShipments.length - 1}`),
+      kind: 'SHIPMENT',
+      demoKey: `shipment:${createdShipments.length - 1}`,
+      recordId: String(shipment.id),
+      seedVersion: SEED_VERSION,
+      step: null,
       label: `Demo shipment ${String(shipment.number)}`,
+      detail: null,
+      createdBy: caller.email,
+      createdAt: recordNow,
+      updatedAt: recordNow,
     })
+  }
+
+  // One transaction for all ownership tags and one for all demo index rows.
+  await deps.transact(tagTxs)
+  await deps.transact(demoRows.map((row) => putTx(deps.tables.demo, row)))
+
+  for (let i = 0; i < plans.length; i++) {
+    const plan = plans[i]
+    const { shipment, load } = createdShipments[i]
 
     // Move the shipment through the states the plan asks for. TENDER_PENDING is
     // the one state createShipment already produces; do not submit it.
