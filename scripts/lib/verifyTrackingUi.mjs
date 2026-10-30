@@ -71,8 +71,10 @@ export async function verifyTrackingUi({ storage, shipmentIds, origin = DEV_ORIG
         const request = pending.get(message.id)
         if (!request) return
         pending.delete(message.id)
-        if (message.error) request.reject(new Error(String(message.error.message ?? message.error)))
-        else request.resolve(message.result)
+        if (message.error) {
+          console.error('[CDP] error response', { id: message.id, method: request.method, error: message.error })
+          request.reject(new Error(String(message.error.message ?? message.error)))
+        } else request.resolve(message.result)
       } catch (err) {
         console.error('[CDP] resolver error:', err?.message)
       }
