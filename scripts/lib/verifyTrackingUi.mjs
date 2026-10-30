@@ -60,6 +60,19 @@ export async function verifyTrackingUi({ storage, shipmentIds, origin = DEV_ORIG
     const [port, endpoint] = portFile.trim().split('\n')
     socket = new WebSocket(`ws://127.0.0.1:${port}${endpoint}`)
     await new Promise((resolve, reject) => { socket.once('open', resolve); socket.once('error', reject) })
+    socket.on('message', (raw) => {
+      let message
+      try {
+        message = JSON.parse(typeof raw === 'string' ? raw : raw.toString())
+      } catch {
+        return
+      }
+      const request = pending.get(message.id)
+      if (!request) return
+      pending.delete(message.id)
+      if (message.error) request.reject(new Error(message.error.message))
+      else request.resolve(message.result)
+    })
     const { targetId } = await command('Target.createTarget', { url: 'about:blank' })
     ;({ sessionId } = await command('Target.attachToTarget', { targetId, flatten: true }))
     await command('Page.enable')
@@ -89,7 +102,7 @@ export async function verifyTrackingUi({ storage, shipmentIds, origin = DEV_ORIG
     socket.on('message', (raw) => {
       let message
       try {
-        message = JSON.parse(String(raw))
+        message = JSON.parse(typeof raw === 'string' ? raw : raw.toString())
       } catch (err) {
         console.error('[CDP] failed to parse message:', err?.message)
         return

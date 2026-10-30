@@ -1096,7 +1096,10 @@ export async function resetDemoData(deps: DemoDeps, input: Row, caller: Caller):
     }
   }
   console.log('[RESET] retireAssignments', { count: retireAssignments.length })
-  if (retireAssignments.length) await deps.transact(retireAssignments)
+  const BATCH_SIZE = 50
+  for (let i = 0; i < retireAssignments.length; i += BATCH_SIZE) {
+    await deps.transact(retireAssignments.slice(i, i + BATCH_SIZE))
+  }
 
   // Delete only the seed's own flat fixtures; anything not tagged with a DemoRecord
   // (including non-demo shipments) is left untouched.
