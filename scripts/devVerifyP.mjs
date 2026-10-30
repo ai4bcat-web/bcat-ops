@@ -170,7 +170,7 @@ async function main() {
     writeFileSync(applyPlanPath, JSON.stringify(buildDemoPlan({ env: 'test', endpoint: DEV_API, reset: true, removeStaff: false })))
     writeFileSync(removePlanPath, JSON.stringify(buildDemoPlan({ env: 'test', endpoint: DEV_API, reset: false, removeStaff: true })))
 
-    runSeedDemo(['--outputs', outputsPath, '--plan', applyPlanPath, '--env', 'test', '--apply'], adminEmail, adminPassword)
+    runSeedDemo(['--outputs', outputsPath, '--plan', applyPlanPath, '--env', 'test', '--apply', '--reset'], adminEmail, adminPassword)
 
     // ── P11: demo state and checklist ticks ───────────────────────────────────
     const state = await ship('GET_DEMO_STATE', {})

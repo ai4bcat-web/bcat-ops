@@ -2238,6 +2238,7 @@ shipmentActionsFn.addToRolePolicy(
       'dynamodb:PutItem',
       'dynamodb:UpdateItem',
       'dynamodb:Query',
+      'dynamodb:Scan',
       'dynamodb:ConditionCheckItem',
     ],
     resources: [
