@@ -8,29 +8,34 @@
  * Every write goes through the shipment or tracking Lambda with the CAS token the tab
  * last read, and the bundle on screen is replaced by what the action answers with.
  */
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useContext, useEffect, useState } from 'react'
 import {
   AlertTriangle, Check, Clock, Cog, Link2, MapPin, PhoneCall, Send, Smartphone, Truck, Users,
 } from 'lucide-react'
 import { TmsBadge, TmsButton, TmsCard, TmsInput } from '@/features/tms/kit'
 import { Label } from '@/components/ui/label'
-import { FleetMiniMap } from '@/features/dashboard/FleetMiniMap'
-import { getTmsSettings, listDivisions, textDriver, type TruckLocation } from '@/lib/apiClient'
+import { AuthContext } from '@/hooks/useAuth'
+import {
+  getTmsSettings, listDivisions, listShipmentMessages, saveLoadCheckCallPlan, sendShipmentMessage, textDriver,
+} from '@/lib/apiClient'
 import { checkCallState, CHECK_CALL_TYPE_LABELS, INCIDENT_TYPE_LABELS } from '@/lib/checkCalls'
 import { LOAD_WORKFLOW_STATUS_LABELS } from '@/lib/shipmentStatus'
 import { formatDateTime, formatDateTimeInput, fromDateTimeInput } from '@/lib/date'
 import { useLoadTracking } from '@/hooks/useLoadTracking'
 import type { TimelineItem } from '@/lib/trackingTimeline'
 import type {
-  ChargeCodeDef, CheckCallSource, CustomerRecord, ShipmentBundle, TmsSettings, TrackingLinkRecord,
+  ChargeCodeDef, CheckCallSource, CustomerRecord, ShipmentBundle, ShipmentMessageRecord,
+  TmsSettings, TrackingLinkRecord,
 } from '@/types/tms'
 import { CustomerLinkDialog } from './CustomerLinkDialog'
 import { LogCheckCallDialog, type CheckCallFormValues } from './LogCheckCallDialog'
 import { TrackingLinkDialog } from './TrackingLinkDialog'
-import { ShipmentThreadPanel } from './ShipmentThreadPanel'
+import { TrackingDetailPanel } from '../workstations/tracking/TrackingDetailPanel'
 import type { ShipmentActions } from '../useShipmentActions'
 
 const HOUR_MS = 3_600_000
+const MAPS_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string | undefined
+const MAPS_MAP_ID = import.meta.env.VITE_GOOGLE_MAPS_MAP_ID as string | undefined
 
 /** "14 min ago" below an hour, then hours, then days: an order of magnitude is enough. */
 function ago(iso: string, now: number): string {
@@ -45,20 +50,6 @@ const SOURCE_ICON: Record<CheckCallSource, typeof PhoneCall> = {
   DRIVER_APP: Smartphone,
   LINK: Link2,
   SYSTEM: Cog,
-}
-
-/**
- * A map pin in the shape `FleetMiniMap` reads. The map takes fleet rows, and a tracking
- * pin is not one — it has no odometer, no sync and often no unit number — so the fields
- * it does not have are filled in rather than faked with plausible values.
- */
-function pin(id: string, label: string, lat: number, lon: number, at: string): TruckLocation {
-  return {
-    truckId: id, unitNumber: label, lat, lon,
-    bearing: null, speed: null, locatedAt: at, description: null,
-    motion: null, motionSince: null, odometer: null,
-    source: 'TRACKING', syncedAt: at, createdAt: at, updatedAt: at,
-  }
 }
 
 type TrackingDialog = { kind: 'check_call' } | { kind: 'carrier_link' } | { kind: 'customer_link' } | null
@@ -94,6 +85,27 @@ export function TrackingSection({ bundle, customer, catalog, actions }: {
     return () => { live = false }
   }, [divisionKey])
 
+  // The thread reads and writes itself so the shared detail pane stays presentational;
+  // the first read is the only one driven by an effect, later ones follow a send.
+  const [messages, setMessages] = useState<ShipmentMessageRecord[]>([])
+  const reloadMessages = useCallback(async () => {
+    try {
+      setMessages(await listShipmentMessages(shipment.id))
+    } catch {
+      // Keep the last good thread: a failed re-read must not erase what was on screen.
+    }
+  }, [shipment.id])
+
+  useEffect(() => {
+    let live = true
+    listShipmentMessages(shipment.id)
+      .then((rows) => { if (live) setMessages(rows) })
+      .catch(() => { /* keep whatever the thread last showed */ })
+    return () => { live = false }
+  }, [shipment.id])
+
+  const auth = useContext(AuthContext)
+
   const tracking = useLoadTracking({
     loadId: load?.id,
     shipmentId: shipment.id,
@@ -108,18 +120,6 @@ export function TrackingSection({ bundle, customer, catalog, actions }: {
   const state = checkCallState(load ?? {}, now, settings?.checkCallGraceMinutes)
   const carrierLink = tracking.links.find((l) => l.kind === 'CARRIER_PING' && l.status === 'ACTIVE') ?? null
   const customerLink = tracking.links.find((l) => l.kind === 'CUSTOMER_VIEW' && l.status === 'ACTIVE') ?? null
-
-  const pins = useMemo(() => {
-    const out: TruckLocation[] = []
-    const fix = tracking.lastKnown
-    if (fix) out.push(pin('last-known', 'Last known', fix.lat, fix.lng, fix.at))
-    for (const item of tracking.timeline) {
-      if (item.kind === 'check_call' && item.row.type === 'TRACKING_PING' && item.row.lat != null && item.row.lng != null) {
-        out.push(pin(`ping-${item.row.id}`, 'Driver ping', item.row.lat, item.row.lng, item.at))
-      }
-    }
-    return out
-  }, [tracking.lastKnown, tracking.timeline])
 
   if (!load) {
     return <p className="text-sm tms-muted">This shipment has no load to track yet.</p>
@@ -267,7 +267,28 @@ export function TrackingSection({ bundle, customer, catalog, actions }: {
         </div>
       )}
 
-      <FleetMiniMap locations={pins} />
+      {/* The same pane the tracking desk mounts: header, map, computed ETA, cadence
+          and thread. It reads the load, so the tab and the page never drift. */}
+      <TrackingDetailPanel
+        row={shipment}
+        bundle={bundle}
+        messages={messages}
+        loading={false}
+        customers={customer ? [customer] : []}
+        settings={settings}
+        userName={auth?.user?.email ?? null}
+        mapsKey={MAPS_KEY}
+        mapsMapId={MAPS_MAP_ID}
+        onSendMessage={async (input) => {
+          await sendShipmentMessage({ shipmentId: shipment.id, ...input })
+        }}
+        onSavePlan={async (loadId, plan, expectedUpdatedAt) => {
+          await saveLoadCheckCallPlan({ loadId, plan, expectedUpdatedAt })
+        }}
+        onRefresh={async () => {
+          await Promise.all([reloadMessages(), actions.reload()])
+        }}
+      />
 
       <div className="space-y-2">
         <p className="text-xs uppercase tracking-wider tms-muted">Timeline</p>
@@ -325,18 +346,6 @@ export function TrackingSection({ bundle, customer, catalog, actions }: {
         />
       )}
 
-      <ShipmentThreadPanel
-        shipmentId={shipment.id}
-        shipmentNumber={shipment.number}
-        lane={[shipment.originCity, shipment.destinationCity].filter(Boolean).join(' → ')}
-        load={load}
-        loadCarrier={loadCarrier}
-        customer={customer}
-        settings={settings}
-        trackingFlaggedAt={shipment.trackingFlaggedAt}
-        trackingFlagReason={shipment.trackingFlagReason}
-        onReload={actions.reload}
-      />
     </div>
   )
 }

@@ -62,6 +62,9 @@ export type ShipmentRow = ShipmentRecord & {
   /** Step D — the load's tracking clock, projected onto the shipment. */
   lastUpdateAt?: string | null
   lastUpdatePlace?: string | null
+  /** Step P8 — prior ping so the tracking board can prove Moving/Stopped from two fixes. */
+  previousUpdateAt?: string | null
+  previousUpdatePlace?: string | null
   nextCheckCallAt?: string | null
   lastCheckCallAt?: string | null
   checkCallOpen?: 'OPEN' | null

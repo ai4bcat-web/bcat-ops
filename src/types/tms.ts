@@ -1493,6 +1493,12 @@ export interface ShipmentLoadFields {
   lastKnownState?: string | null
   lastKnownLat?: number | null
   lastKnownLng?: number | null
+  // Step P8 — prior ping, additive.
+  lastKnownPreviousAt?: string | null
+  lastKnownPreviousCity?: string | null
+  lastKnownPreviousState?: string | null
+  lastKnownPreviousLat?: number | null
+  lastKnownPreviousLng?: number | null
   lastKnownSource?: LastKnownSource | null
   /** Unresolved INCIDENT check calls on this load. */
   openIncidentCount?: number | null
@@ -1897,6 +1903,9 @@ export interface TrackingLinkRecord {
   id: string
   kind: TrackingLinkKind
   shipmentId: string
+  customerId?: string | null
+  url?: string | null
+  notes?: string | null
   loadId?: string | null
   loadCarrierId?: string | null
   status: TrackingLinkStatus

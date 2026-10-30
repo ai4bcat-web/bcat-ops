@@ -1,14 +1,14 @@
 // @vitest-environment jsdom
-/** P8-UI: the tracking workstation renders real data across Inbox, Tracking and Booking tabs. */
+/** P8-UI rebuild: Inbox · Tracking tabs — Chaine table on Tracking, conversations on Inbox. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { TrackingWorkstation } from './TrackingWorkstation'
 import * as useBoardFiltersModule from '../board/useBoardFilters'
 import type { UseBoardFiltersOptions } from '../board/useBoardFilters'
 import type { ShipmentRow } from '../shipmentViews'
-import type { ShipmentBundle, ShipmentMessageRecord, ShipmentPostingRecord, ShipmentViewRecord, TrackingLinkRecord, CustomerRecord } from '@/types/tms'
+import type { ShipmentBundle, ShipmentMessageRecord, ShipmentViewRecord, CustomerRecord } from '@/types/tms'
 import * as useStaffModule from '@/hooks/useStaff'
 
 const now = Date.parse('2026-10-29T12:00:00Z')
@@ -16,23 +16,13 @@ const mocks = vi.hoisted(() => ({ customers: [] as CustomerRecord[] }))
 const api = vi.hoisted(() => ({
   getShipmentBundle: vi.fn(),
   getTmsSettings: vi.fn(),
-  listCarrierPingLinks: vi.fn(),
   listTrackingLinksByShipment: vi.fn(),
   listShipmentMessages: vi.fn(),
-  listCarrierOffers: vi.fn(),
-  listActivePostings: vi.fn(),
-  assignCarrier: vi.fn(),
-  sendSetupPacket: vi.fn(),
-  logCheckCall: vi.fn(),
-  textDriver: vi.fn(),
   saveShipmentView: vi.fn(),
   archiveShipmentView: vi.fn(),
-  sendTrackingLink: vi.fn(),
-  revokeTrackingLink: vi.fn(),
   sendCustomerLink: vi.fn(),
   revokeCustomerLink: vi.fn(),
   sendShipmentMessage: vi.fn(),
-  saveLoadCheckCallPlan: vi.fn(),
 }))
 vi.mock('@/lib/apiClient', () => api)
 const refresh = vi.fn(async () => {})
@@ -80,16 +70,32 @@ const active = row('S001', {
   trackingProvider: 'LINK',
   nextCheckCallAt: '2026-10-29T09:00:00Z',
   dispatcherAssignedId: 'rep-1',
+  carrierName: 'Pronto Trucking',
+  carrierMc: '123456',
+  carrierDot: '998877',
+  dispatcherAssignedName: 'Dana Carr',
+  salesRepName: 'Ryne',
+  customerRepName: 'Maria',
 })
 
 const moving = row('S-MOVING', {
+  status: 'IN_TRANSIT',
   lastUpdateAt: '2026-10-29T11:55:00Z',
   lastUpdatePlace: 'Waco, TX',
   previousUpdateAt: '2026-10-29T11:30:00Z',
   previousUpdatePlace: 'Hillsboro, TX',
+  carrierName: 'Pronto Trucking',
+  carrierMc: '123456',
+  stops: [
+    { id: 'pu', type: 'pickup', appt: '2026-10-29T14:00:00Z', address: { city: 'Austin', state: 'TX', lat: 30.2672, lng: -97.7431 } },
+    { id: 'de', type: 'delivery', appt: '2026-10-30T10:00:00Z', address: { city: 'Dallas', state: 'TX', lat: 32.7767, lng: -96.797 } },
+  ],
+  // Ping coordinates land with the data projection; cast until ShipmentRow types them.
+  ...({ lastKnownLat: 31.5493, lastKnownLng: -97.1467 } as Partial<ShipmentRow>),
 })
 
 const stopped = row('S-STOPPED', {
+  status: 'IN_TRANSIT',
   lastUpdateAt: '2026-10-29T11:55:00Z',
   lastUpdatePlace: 'Waco, TX',
   previousUpdateAt: '2026-10-29T11:30:00Z',
@@ -97,25 +103,18 @@ const stopped = row('S-STOPPED', {
 })
 
 const noSignal = row('S-NOSIGNAL', {
+  status: 'IN_TRANSIT',
   lastUpdateAt: '2026-10-29T06:00:00Z',
   lastUpdatePlace: 'Waco, TX',
 })
 
 const flagged = row('S-FLAGGED', {
+  status: 'IN_TRANSIT',
   trackingFlaggedAt: '2026-10-29T11:00:00Z',
   trackingFlagReason: 'Driver did not reply to escalation SMS',
 })
 
 const delivered = row('S002', { status: 'DELIVERED', deliveredAt: '2026-10-29T10:00:00Z' })
-const liveLink = {
-  id: 'link-1',
-  shipmentId: active.id,
-  kind: 'CARRIER_PING',
-  status: 'ACTIVE',
-  expiresAt: '2026-10-30T12:00:00Z',
-  loadId: 'load-1',
-  loadCarrierId: 'carrier-1',
-} as TrackingLinkRecord
 
 const bundle: ShipmentBundle = {
   shipment: active,
@@ -163,42 +162,44 @@ const message = (id: string, over: Partial<ShipmentMessageRecord> = {}): Shipmen
   ...over,
 })
 
-const note = (id: string): ShipmentMessageRecord => message(id, { kind: 'NOTE', channel: 'EMAIL', party: 'INTERNAL', body: 'Internal note' })
-
-const offer = (id: string, over: Record<string, unknown> = {}) => ({
-  id,
-  side: 'BUY',
-  status: 'OPEN',
-  quoteDate: '2026-10-29',
-  quoteMonth: '2026-10',
-  shipmentId: active.id,
-  shipmentNumber: active.number,
-  carrierName: 'Pronto Trucking',
-  carrierMc: '123456',
-  carrierEmail: 'dispatch@pronto.test',
-  amountCents: 120000,
-  equipmentType: 'Van',
-  commodity: 'Widgets',
-  pickupAppt: '2026-10-29T14:00:00Z',
-  rounds: 1,
-  vetting: { known: true, bookable: true, blockers: [], warnings: [], status: 'Active', mcpStatus: null },
-  ...over,
-})
-
 function Destination() {
   const location = useLocation()
   return <p>{location.pathname}{location.search}</p>
 }
 
-function renderPage() {
+function Probe() {
+  const location = useLocation()
+  const navigate = useNavigate()
+  return (
+    <>
+      <output data-testid="location">{location.pathname}{location.search}</output>
+      <button type="button" data-testid="go-back" onClick={() => navigate(-1)}>back</button>
+    </>
+  )
+}
+
+function renderPage(initial = '/tms/tracking') {
   return render(
-    <MemoryRouter initialEntries={['/tms/tracking']}>
+    <MemoryRouter initialEntries={[initial]}>
       <Routes>
-        <Route path="/tms/tracking" element={<TrackingWorkstation />} />
+        <Route path="/tms/tracking" element={<><TrackingWorkstation /><Probe /></>} />
+        <Route path="/tms/tracking/links" element={<Destination />} />
         <Route path="/tms/shipments/:id" element={<Destination />} />
       </Routes>
     </MemoryRouter>,
   )
+}
+
+function trackingRow(id: string): HTMLElement {
+  const el = document.querySelector(`[data-testid="tracking-row"][data-shipment-id="${id}"]`)
+  if (!el) throw new Error(`tracking row ${id} not rendered`)
+  return el as HTMLElement
+}
+
+function inboxRow(id: string): HTMLElement {
+  const el = document.querySelector(`[data-testid="inbox-thread-row"][data-shipment-id="${id}"]`)
+  if (!el) throw new Error(`inbox conversation ${id} not rendered`)
+  return el as HTMLElement
 }
 
 beforeEach(() => {
@@ -208,39 +209,53 @@ beforeEach(() => {
   mocks.customers = []
   shipments = [active, moving, stopped, noSignal, flagged, delivered]
   api.getTmsSettings.mockResolvedValue(null)
-  api.listCarrierPingLinks.mockResolvedValue([liveLink])
-  api.listTrackingLinksByShipment.mockResolvedValue([liveLink])
+  api.listTrackingLinksByShipment.mockResolvedValue([])
   api.getShipmentBundle.mockResolvedValue(bundle)
-  api.listShipmentMessages.mockResolvedValue([message('m1'), message('m2', { direction: 'IN', body: 'In Dallas' }), note('n1')])
-  api.listCarrierOffers.mockResolvedValue({ offers: [offer('o1')] })
-  api.listActivePostings.mockResolvedValue([{ id: 'post-1', shipmentId: active.id, provider: 'DAT', status: 'POSTED', postedAt: '2026-10-29T10:00:00Z' }] as ShipmentPostingRecord[])
-  api.assignCarrier.mockResolvedValue(bundle)
-  api.sendSetupPacket.mockResolvedValue({})
+  api.listShipmentMessages.mockResolvedValue([message('m1'), message('m2', { direction: 'IN', body: 'In Dallas' })])
   api.saveShipmentView.mockResolvedValue({ slug: 'evening-desk' })
   api.sendShipmentMessage.mockResolvedValue({ message: message('sent') })
-  api.saveLoadCheckCallPlan.mockResolvedValue({ plan: { intervalHours: 4, channels: ['SMS', 'EMAIL'], milestones: ['DISPATCHED', 'AT_PICKUP', 'DEPARTED_PICKUP', 'AT_DELIVERY', 'DELIVERED'], escalateAfterMinutes: 30, emailDispatcher: true, requestPodOnDelivery: true } })
 })
 afterEach(() => { cleanup(); vi.useRealTimers() })
 
 describe('TrackingWorkstation tabs', () => {
-  it('switches between Inbox, Tracking and Booking tabs', async () => {
+  it('keeps Inbox · Tracking tabs and drops Booking', async () => {
     renderPage()
     await waitFor(() => expect(screen.getByRole('button', { name: 'S001' })).toBeVisible())
+    expect(screen.getByRole('tab', { name: 'Inbox' })).toBeVisible()
+    expect(screen.getByRole('tab', { name: 'Tracking' })).toBeVisible()
+    expect(screen.queryByRole('tab', { name: 'Booking' })).not.toBeInTheDocument()
+  })
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Inbox' }))
-    await waitFor(() => expect(api.listShipmentMessages).toHaveBeenCalled())
-    expect(screen.getByText('All messages')).toBeVisible()
+  it('opens the Inbox from ?tab=inbox and the table from ?tab=tracking', async () => {
+    renderPage('/tms/tracking?tab=inbox')
+    await waitFor(() => expect(screen.getByTestId('inbox-thread-row')).toBeInTheDocument())
+    cleanup()
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Booking' }))
-    await waitFor(() => expect(api.listCarrierOffers).toHaveBeenCalled())
-    expect(screen.getByText('Carrier offers')).toBeVisible()
-
-    fireEvent.click(screen.getByRole('tab', { name: 'Tracking' }))
-    expect(screen.getByRole('button', { name: 'S001' })).toBeVisible()
+    renderPage('/tms/tracking?tab=tracking')
+    await waitFor(() => expect(screen.getAllByTestId('tracking-row').length).toBeGreaterThan(0))
   })
 })
 
-describe('TrackingWorkstation board', () => {
+describe('TrackingWorkstation table', () => {
+  it('renders Chaine columns with stable verification attributes', async () => {
+    renderPage()
+    await waitFor(() => expect(screen.getByRole('button', { name: 'S001' })).toBeVisible())
+
+    for (const header of ['Shipment #', 'Origin', 'Destination', 'Status', 'Tracking & Last Location', 'Motion', 'Next Stop', 'Team Members', 'Carrier DOT/MC']) {
+      expect(screen.getByRole('columnheader', { name: header })).toBeVisible()
+    }
+    const rows = document.querySelectorAll('[data-testid="tracking-row"]')
+    // The delivered row is Closed; the Active set shows the other five.
+    expect(rows).toHaveLength(5)
+    rows.forEach((el) => {
+      expect(el).toHaveAttribute('data-status')
+      expect(el).toHaveAttribute('data-shipment-id')
+    })
+    // In-transit statuses surface as DEPARTED for verification.
+    const departed = document.querySelectorAll('[data-testid="tracking-row"][data-status="DEPARTED"]')
+    expect(departed.length).toBeGreaterThanOrEqual(4)
+  })
+
   it('toggles Active and Closed row sets', async () => {
     renderPage()
     await waitFor(() => expect(screen.getByRole('button', { name: 'S001' })).toBeVisible())
@@ -272,28 +287,93 @@ describe('TrackingWorkstation board', () => {
     await waitFor(() => expect(screen.getByText('Tracking flag')).toBeVisible())
   })
 
-  it('selects a shipment and opens its detail pane on row click', async () => {
+  it('projects next-stop miles and ETA from the last ping', async () => {
     renderPage()
     await waitFor(() => expect(screen.getByRole('button', { name: 'S001' })).toBeVisible())
-    await waitFor(() => expect(screen.getByTestId('tracking-detail')).toBeInTheDocument())
+    const cell = within(trackingRow(moving.id)).getByText(/mi · ETA/)
+    expect(cell).toBeVisible()
+  })
 
-    fireEvent.click(screen.getByText('S-MOVING').closest('tr')!)
-    await waitFor(() => expect(api.getShipmentBundle).toHaveBeenCalledWith(moving.id))
-    await waitFor(() => expect(screen.getByTestId('tracking-detail')).toBeInTheDocument())
+  it('shows team members and carrier DOT/MC', async () => {
+    renderPage()
+    await waitFor(() => expect(screen.getByRole('button', { name: 'S001' })).toBeVisible())
+    const s001 = within(trackingRow('S001'))
+    expect(s001.getByText('Dana Carr · Ryne · Maria')).toBeInTheDocument()
+    expect(s001.getByText('Pronto Trucking')).toBeInTheDocument()
+    expect(s001.getByText(/DOT 998877 · MC 123456/)).toBeInTheDocument()
+  })
+
+  it('sorts by a column header', async () => {
+    renderPage()
+    await waitFor(() => expect(screen.getByRole('button', { name: 'S001' })).toBeVisible())
+    fireEvent.click(screen.getByRole('columnheader', { name: 'Shipment #' }))
+    // Ascending: letters collate before digits, so S-FLAGGED leads.
+    expect(document.querySelectorAll('[data-testid="tracking-row"]')[0]).toHaveAttribute('data-shipment-id', 'S-FLAGGED')
+    fireEvent.click(screen.getByRole('columnheader', { name: 'Shipment #' }))
+    // Descending reverses the set.
+    expect(document.querySelectorAll('[data-testid="tracking-row"]')[0]).toHaveAttribute('data-shipment-id', 'S001')
+  })
+
+  it('opens the shipment Tracking tab on row click', async () => {
+    renderPage()
+    await waitFor(() => expect(screen.getByRole('button', { name: 'S001' })).toBeVisible())
+    fireEvent.click(trackingRow(moving.id))
+    await waitFor(() => expect(screen.getByText(`/tms/shipments/${moving.id}?tab=tracking`)).toBeInTheDocument())
+  })
+
+  it('navigates Manage links to the Customer Links page', async () => {
+    renderPage()
+    await waitFor(() => expect(screen.getByRole('button', { name: 'S001' })).toBeVisible())
+    fireEvent.click(screen.getByRole('button', { name: /Manage links/i }))
+    await waitFor(() => expect(screen.getByText('/tms/tracking/links')).toBeInTheDocument())
   })
 })
 
 describe('TrackingWorkstation inbox', () => {
-  it('lists thread messages for the selected shipment', async () => {
-    renderPage()
-    fireEvent.click(screen.getByRole('tab', { name: 'Inbox' }))
-    await waitFor(() => expect(api.listShipmentMessages).toHaveBeenCalledWith(active.id))
-    await waitFor(() => expect(screen.getByText('Where are you?')).toBeVisible())
-    expect(screen.getByText('In Dallas')).toBeVisible()
+  it('lists conversations with shipment ids, previews and counts', async () => {
+    renderPage('/tms/tracking?tab=inbox')
+    await waitFor(() => expect(screen.getAllByTestId('inbox-thread-row').length).toBe(5))
+    const s001 = inboxRow('S001')
+    expect(within(s001).getByText('Acme Freight')).toBeInTheDocument()
+    expect(within(s001).getByText('In Dallas')).toBeInTheDocument()
+    expect(within(s001).getByText('2')).toBeInTheDocument()
+  })
 
-    fireEvent.click(screen.getByRole('button', { name: 'Team notes' }))
-    await waitFor(() => expect(screen.getByText('Internal note')).toBeVisible())
-    expect(screen.queryByText('Where are you?')).not.toBeInTheDocument()
+  it('selects a conversation into ?shipment= and frames the shared thread', async () => {
+    renderPage('/tms/tracking?tab=inbox')
+    await waitFor(() => expect(screen.getAllByTestId('inbox-thread-row').length).toBe(5))
+    // Landing without a deep link falls back to the first conversation in the URL.
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('?tab=inbox&shipment=S001'))
+
+    fireEvent.click(inboxRow(moving.id))
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(`?tab=inbox&shipment=${moving.id}`))
+    expect(inboxRow(moving.id)).toHaveClass('tms-active')
+    await waitFor(() => expect(screen.getByTestId('inbox-conversation')).toBeInTheDocument())
+    expect(screen.getByText('Where are you?')).toBeVisible()
+  })
+
+  it('honours the ?tab=inbox&shipment= deep link', async () => {
+    renderPage(`/tms/tracking?tab=inbox&shipment=${stopped.id}`)
+    await waitFor(() => expect(screen.getAllByTestId('inbox-thread-row').length).toBe(5))
+    expect(inboxRow(stopped.id)).toHaveClass('tms-active')
+    await waitFor(() => expect(api.getShipmentBundle).toHaveBeenCalledWith(stopped.id))
+  })
+
+  it('sends a manual SMS to the driver from the composer', async () => {
+    renderPage('/tms/tracking?tab=inbox')
+    await waitFor(() => expect(screen.getByTestId('inbox-composer')).toBeInTheDocument())
+
+    fireEvent.change(screen.getByLabelText('Message body'), { target: { value: 'Where are you?' } })
+    fireEvent.click(screen.getByRole('button', { name: /Send/i }))
+
+    await waitFor(() => expect(api.sendShipmentMessage).toHaveBeenCalledWith(expect.objectContaining({
+      shipmentId: active.id,
+      channel: 'SMS',
+      to: '+1-555-0101',
+      subject: null,
+      body: 'Where are you?',
+      party: 'DRIVER',
+    })))
   })
 })
 
@@ -326,126 +406,5 @@ describe('TrackingWorkstation board filter viewer', () => {
     })
 
     spy.mockRestore()
-  })
-})
-
-describe('TrackingWorkstation booking', () => {
-  it('lists offers with their vetting state', async () => {
-    renderPage()
-    fireEvent.click(screen.getByRole('tab', { name: 'Booking' }))
-    await waitFor(() => expect(api.listCarrierOffers).toHaveBeenCalledWith(active.id))
-    expect(screen.getByText('Pronto Trucking')).toBeVisible()
-    expect(screen.getByText('Bookable')).toBeVisible()
-    expect(screen.getByText('MC 123456')).toBeVisible()
-  })
-})
-
-describe('TrackingWorkstation detail pane', () => {
-  it('renders the detail pane for the selected row with map, ETA, cadence and thread', async () => {
-    renderPage()
-    await waitFor(() => expect(screen.getByTestId('tracking-detail')).toBeInTheDocument())
-    await waitFor(() => expect(api.getShipmentBundle).toHaveBeenCalledWith(active.id))
-    await waitFor(() => expect(api.listShipmentMessages).toHaveBeenCalledWith(active.id))
-
-    expect(screen.getByText('Map & ETA')).toBeVisible()
-    expect(screen.getByText(/Map not configured/i)).toBeInTheDocument()
-    expect(screen.getByText('Check-call plan')).toBeVisible()
-    expect(screen.getByText('Thread — S001')).toBeVisible()
-    expect(screen.getByTestId('detail-thread')).toBeInTheDocument()
-  })
-
-  it('shows the delivery ETA from the stored value', async () => {
-    const etaBundle = {
-      ...bundle,
-      loadCarriers: [{ ...bundle.loadCarriers[0], deliveryEtaAt: '2026-10-30T09:30:00Z' }],
-    }
-    api.getShipmentBundle.mockResolvedValue(etaBundle)
-
-    renderPage()
-    await waitFor(() => expect(screen.getByTestId('detail-eta')).toHaveTextContent('Oct 30, 2026'))
-  })
-
-  it('labels a thread row as agent vs person with the person name', async () => {
-    api.listShipmentMessages.mockResolvedValue([
-      message('m-agent', { authorKind: 'AGENT', body: 'Auto check call' }),
-      message('m-person', { authorKind: 'PERSON', authorName: 'Maria Lopez', body: 'Driver called me' }),
-    ])
-
-    renderPage()
-    await waitFor(() => expect(screen.getByTestId('detail-thread')).toBeInTheDocument())
-    const authors = screen.getAllByTestId('thread-author')
-    expect(authors[0]).toHaveTextContent('Agent')
-    expect(authors[1]).toHaveTextContent('Person — Maria')
-  })
-
-  it('sends a manual SMS to the driver', async () => {
-    renderPage()
-    await waitFor(() => expect(screen.getByTestId('thread-composer')).toBeInTheDocument())
-
-    fireEvent.change(screen.getByLabelText('Message body'), { target: { value: 'Where are you?' } })
-    fireEvent.click(screen.getByRole('button', { name: /Send/i }))
-
-    await waitFor(() => expect(api.sendShipmentMessage).toHaveBeenCalledWith({
-      shipmentId: active.id,
-      channel: 'SMS',
-      to: '+1-555-0101',
-      subject: null,
-      body: 'Where are you?',
-    }))
-  })
-
-  it('sends a manual e-mail to the dispatcher', async () => {
-    renderPage()
-    await waitFor(() => expect(screen.getByTestId('thread-composer')).toBeInTheDocument())
-
-    fireEvent.change(screen.getByLabelText('Recipient'), { target: { value: 'dispatcher' } })
-    fireEvent.change(screen.getByLabelText('Channel'), { target: { value: 'EMAIL' } })
-    fireEvent.change(screen.getByLabelText('Subject'), { target: { value: 'Update needed' } })
-    fireEvent.change(screen.getByLabelText('Message body'), { target: { value: 'Please send location' } })
-    fireEvent.click(screen.getByRole('button', { name: /Send/i }))
-
-    await waitFor(() => expect(api.sendShipmentMessage).toHaveBeenCalledWith({
-      shipmentId: active.id,
-      channel: 'EMAIL',
-      to: 'dispatch@pronto.test',
-      subject: 'Update needed',
-      body: 'Please send location',
-    }))
-  })
-
-  it('greys out VOICE with the deferred reason', async () => {
-    renderPage()
-    await waitFor(() => expect(screen.getByLabelText('Channel')).toBeInTheDocument())
-    const voice = screen.getByRole('option', { name: /voice is not switched on yet/i })
-    expect(voice).toBeDisabled()
-  })
-
-  it('shows the exception banner for a flagged shipment in both panes', async () => {
-    renderPage()
-    await waitFor(() => expect(screen.getByText('Tracking flag')).toBeVisible())
-
-    fireEvent.click(screen.getByText(flagged.number).closest('tr')!)
-    await waitFor(() => expect(api.getShipmentBundle).toHaveBeenCalledWith(flagged.id))
-    await waitFor(() => expect(screen.getByTestId('detail-flag')).toBeInTheDocument())
-    expect(screen.getByTestId('detail-flag')).toHaveTextContent('Driver did not reply to escalation SMS')
-  })
-
-  it('saves the cadence and shows its inheritance source', async () => {
-    mocks.customers = [{
-      id: active.customerId,
-      name: 'Acme Freight',
-      checkCallPlan: { intervalHours: 2, channels: ['SMS'], milestones: ['DISPATCHED'], escalateAfterMinutes: 15, emailDispatcher: false, requestPodOnDelivery: false },
-    } as CustomerRecord]
-
-    renderPage()
-    await waitFor(() => expect(screen.getByTestId('plan-source')).toHaveTextContent('Inherited from Acme Freight'))
-
-    fireEvent.change(screen.getByLabelText('Interval (hours)'), { target: { value: '6' } })
-    fireEvent.click(screen.getByRole('button', { name: /Save plan/i }))
-
-    await waitFor(() => expect(api.saveLoadCheckCallPlan).toHaveBeenCalledWith(expect.objectContaining({
-      loadId: 'load-1',
-      plan: expect.objectContaining({ intervalHours: 6 }),
-    })))
   })
 })

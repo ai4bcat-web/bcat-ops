@@ -20,6 +20,10 @@ export interface BoardGridProps<T> {
   toneOf: (row: T) => string
   onToggle: (id: string) => void
   onToggleAll: () => void
+  /** False hides the selection-checkbox column entirely (default true). */
+  selectable?: boolean
+  /** Extra data-* attributes stamped on each <tr> (verification hooks). */
+  rowDataAttrs?: (row: T) => Record<string, string>
   sort?: BoardGridSort | null
   onSort?: (key: string) => void
   onRowClick?: (row: T) => void
@@ -42,6 +46,8 @@ export function BoardGrid<T>({
   toneOf,
   onToggle,
   onToggleAll,
+  selectable = true,
+  rowDataAttrs,
   sort,
   onSort,
   onRowClick,
@@ -50,31 +56,35 @@ export function BoardGrid<T>({
 }: BoardGridProps<T>) {
   const allSelected = rows.length > 0 && rows.every((row) => selectedIds.includes(rowKey(row)))
   const someSelected = rows.some((row) => selectedIds.includes(rowKey(row)))
+  // Without the checkbox column the sticky columns shift one slot left.
+  const stickyOffset = selectable ? 1 : 0
 
   return (
     <div className="tms-board-grid-wrap">
       <table className="tms-board-grid">
         <thead>
           <tr>
-            <th scope="col" className="tms-board-sticky tms-board-sticky-0 tms-board-col-check">
-              <input
-                type="checkbox"
-                className="tms-board-check-input"
-                aria-label="Select all rows"
-                checked={allSelected}
-                ref={(el) => {
-                  if (el) el.indeterminate = someSelected && !allSelected
-                }}
-                onChange={onToggleAll}
-              />
-            </th>
+            {selectable && (
+              <th scope="col" className="tms-board-sticky tms-board-sticky-0 tms-board-col-check">
+                <input
+                  type="checkbox"
+                  className="tms-board-check-input"
+                  aria-label="Select all rows"
+                  checked={allSelected}
+                  ref={(el) => {
+                    if (el) el.indeterminate = someSelected && !allSelected
+                  }}
+                  onChange={onToggleAll}
+                />
+              </th>
+            )}
             {columns.map((col, index) => (
               <th
                 key={col.key}
                 scope="col"
                 className={
-                  STICKY_INDEX[index + 1]
-                    ? `tms-board-sticky tms-board-sticky-${index + 1}`
+                  STICKY_INDEX[index + stickyOffset]
+                    ? `tms-board-sticky tms-board-sticky-${index + stickyOffset}`
                     : undefined
                 }
                 style={col.width ? { width: col.width, minWidth: col.width } : undefined}
@@ -85,7 +95,7 @@ export function BoardGrid<T>({
                   {col.header}
                   {sort?.key === col.key ? (
                     <span className="tms-board-sort-dir" aria-hidden="true">
-                      {sort.dir === 'asc' ? '\u2191' : '\u2193'}
+                      {sort.dir === 'asc' ? '↑' : '↓'}
                     </span>
                   ) : null}
                 </span>
@@ -102,25 +112,28 @@ export function BoardGrid<T>({
                 key={id}
                 data-tone={toneOf(row)}
                 data-selected={selected}
+                {...(rowDataAttrs ? rowDataAttrs(row) : undefined)}
                 className={onRowClick ? 'tms-board-clickable' : undefined}
                 onClick={onRowClick ? () => onRowClick(row) : undefined}
                 onDoubleClick={onRowDoubleClick ? () => onRowDoubleClick(row) : undefined}
               >
-                <td className="tms-board-sticky tms-board-sticky-0 tms-board-col-check">
-                  <input
-                    type="checkbox"
-                    className="tms-board-check-input"
-                    aria-label={`Select row ${id}`}
-                    checked={selected}
-                    onChange={() => onToggle(id)}
-                  />
-                </td>
+                {selectable && (
+                  <td className="tms-board-sticky tms-board-sticky-0 tms-board-col-check">
+                    <input
+                      type="checkbox"
+                      className="tms-board-check-input"
+                      aria-label={`Select row ${id}`}
+                      checked={selected}
+                      onChange={() => onToggle(id)}
+                    />
+                  </td>
+                )}
                 {columns.map((col, index) => (
                   <td
                     key={col.key}
                     className={
-                      STICKY_INDEX[index + 1]
-                        ? `tms-board-sticky tms-board-sticky-${index + 1}`
+                      STICKY_INDEX[index + stickyOffset]
+                        ? `tms-board-sticky tms-board-sticky-${index + stickyOffset}`
                         : undefined
                     }
                   >

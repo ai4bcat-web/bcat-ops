@@ -81,6 +81,11 @@ function isChildActive(activePath: string, child: TmsNavChild): boolean {
   if (child.to === SHIPMENTS_PATH) {
     return activePath === SHIPMENTS_PATH || activePath.startsWith(`${SHIPMENTS_PATH}/view/`)
   }
+  // The Tracking workstation has a child Manage page under /tms/tracking/links;
+  // the parent /tms/tracking stays highlighted while on that page.
+  if (child.to === '/tms/tracking') {
+    return activePath === child.to || activePath.startsWith(`${child.to}/`)
+  }
   return activePath === child.to
 }
 

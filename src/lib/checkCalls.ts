@@ -302,6 +302,13 @@ export interface LoadTrackingPatch {
   lastKnownState?: string | null
   lastKnownLat?: number | null
   lastKnownLng?: number | null
+  // Step P8 — prior ping, additive. Carried forward from the load's current known
+  // location before it is overwritten by a newer fix.
+  lastKnownPreviousAt?: string | null
+  lastKnownPreviousCity?: string | null
+  lastKnownPreviousState?: string | null
+  lastKnownPreviousLat?: number | null
+  lastKnownPreviousLng?: number | null
   lastKnownSource?: LastKnownSource
 }
 
@@ -310,9 +317,20 @@ export interface LoadTrackingPatch {
  *
  * Every event refreshes `lastCheckCall*`; only one that actually carries a place
  * touches `lastKnown*`, and when it does it replaces the lot — a ping with
- * coordinates must not leave yesterday's city sitting beside it.
+ * coordinates must not leave yesterday's city sitting beside it. The load's
+ * current known location is shifted to `lastKnownPrevious*` before the new fix
+ * is written, so the board can prove movement (or a stop) from two fixes.
  */
-export function lastKnownPatch(event: CheckCallFact): LoadTrackingPatch {
+export function lastKnownPatch(
+  event: CheckCallFact,
+  current?: {
+    lastKnownAt?: string | null
+    lastKnownCity?: string | null
+    lastKnownState?: string | null
+    lastKnownLat?: number | null
+    lastKnownLng?: number | null
+  } | null,
+): LoadTrackingPatch {
   const patch: LoadTrackingPatch = {
     lastCheckCallAt: event.at,
     lastCheckCallType: event.type,
@@ -322,6 +340,17 @@ export function lastKnownPatch(event: CheckCallFact): LoadTrackingPatch {
   const lat = typeof event.lat === 'number' && Number.isFinite(event.lat) ? event.lat : null
   const lng = typeof event.lng === 'number' && Number.isFinite(event.lng) ? event.lng : null
   if (city == null && state == null && (lat == null || lng == null)) return patch
+
+  // Shift the existing fix to the previous slot before overwriting it.
+  if (current?.lastKnownAt) {
+    patch.lastKnownPreviousAt = current.lastKnownAt
+    patch.lastKnownPreviousCity = current.lastKnownCity ?? null
+    patch.lastKnownPreviousState = current.lastKnownState ?? null
+    if (current.lastKnownLat != null && current.lastKnownLng != null) {
+      patch.lastKnownPreviousLat = current.lastKnownLat
+      patch.lastKnownPreviousLng = current.lastKnownLng
+    }
+  }
 
   patch.lastKnownAt = event.at
   patch.lastKnownCity = city

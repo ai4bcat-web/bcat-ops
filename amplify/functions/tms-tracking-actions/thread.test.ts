@@ -45,6 +45,7 @@ function makeDeps(store: MemoryStore, overrides: Partial<ThreadDeps> = {}): Thre
     sendEmail: overrides.sendEmail ?? sentEmails,
     sendSms: overrides.sendSms ?? sentSms,
     geocode: overrides.geocode ?? vi.fn(async () => null),
+    readDocumentBytes: overrides.readDocumentBytes ?? vi.fn(async () => new Uint8Array(0)),
     now: () => '2026-02-02T12:00:00.000Z',
     randomId: () => `r${Math.random().toString(36).slice(2)}`,
   }
@@ -337,10 +338,22 @@ describe('sendShipmentMessage', () => {
     expect(call.messageId).toMatch(/^<s\.shp-1\./)
   })
 
-  it('preserves attachments on an outbound email', async () => {
+  it('resolves documentIds into attachment metadata on an outbound email', async () => {
     const store = new MemoryStore()
     seedShipment(store, { threadKey: threadKeyFor('shp-1') })
-    const deps = makeDeps(store)
+    store.seed({
+      id: 'doc-1',
+      __typename: 'ShipmentDocument',
+      shipmentId: 'shp-1',
+      name: 'rate.pdf',
+      contentType: 'application/pdf',
+      sizeBytes: 1000,
+      s3Key: 'shipment-docs/shp-1/doc-1/rate.pdf',
+      audience: 'CARRIER',
+    })
+    const deps = makeDeps(store, {
+      readDocumentBytes: vi.fn(async () => new Uint8Array([1, 2, 3])),
+    })
 
     const result = await sendShipmentMessage(
       deps,
@@ -351,7 +364,7 @@ describe('sendShipmentMessage', () => {
         to: 'dispatch@swift.test',
         subject: 'Rate',
         body: 'See attached',
-        attachments: [{ name: 'rate.pdf', contentType: 'application/pdf', sizeBytes: 1000, s3Key: 'rate.pdf' }],
+        documentIds: ['doc-1'],
       },
       CALLER,
     )

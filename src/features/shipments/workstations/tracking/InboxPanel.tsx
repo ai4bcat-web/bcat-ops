@@ -1,125 +1,149 @@
+/**
+ * The Inbox tab — Chaine-style tracking conversations.
+ *
+ * Left: one row per shipment with traffic (rate-con follow-ups, check calls,
+ * location replies, dispatcher e-mails, POD requests and manual messages), newest
+ * activity first, searchable by PRO or customer. Right: the shared
+ * TrackingConversation, framed here but owned by one module so the Inbox and the
+ * shipment's Tracking tab never drift.
+ *
+ * Selection is presentational: the workstation owns the effective conversation
+ * (and the `?shipment=` deep link); this panel only renders it.
+ */
 import { useMemo, useState } from 'react'
-import { Mail, MessageSquare, Phone, StickyNote } from 'lucide-react'
-import { TmsBadge, TmsButton, TmsEmptyState } from '@/features/tms/kit'
-import { formatDateTime } from '@/lib/date'
+import { Search } from 'lucide-react'
+import { TmsBadge, TmsEmptyState, TmsInput } from '@/features/tms/kit'
 import type { ShipmentMessageRecord } from '@/types/tms'
+import type { ShipmentRow } from '../../shipmentViews'
+import { relativeTime } from '../motion'
 import type { InboxPanelProps } from './types'
 
-type InboxSubtab = 'all' | 'chats' | 'notes'
-
-const SUBTAB_ICONS: Record<InboxSubtab, typeof Mail> = {
-  all: Mail,
-  chats: MessageSquare,
-  notes: StickyNote,
+function latestAt(messages: ShipmentMessageRecord[]): number {
+  let latest = 0
+  for (const m of messages) {
+    const at = Date.parse(m.at)
+    if (Number.isFinite(at) && at > latest) latest = at
+  }
+  return latest
 }
 
-function partyLabel(m: ShipmentMessageRecord): string {
-  if (m.party) return m.party.toLowerCase()
-  if (m.direction === 'IN') return 'inbound'
-  return 'outbound'
+function latestMessage(messages: ShipmentMessageRecord[]): ShipmentMessageRecord | null {
+  let latest: ShipmentMessageRecord | null = null
+  let latestMs = 0
+  for (const m of messages) {
+    const at = Date.parse(m.at)
+    if (Number.isFinite(at) && at >= latestMs) {
+      latestMs = at
+      latest = m
+    }
+  }
+  return latest
 }
 
-function matchesSubtab(m: ShipmentMessageRecord, subtab: InboxSubtab): boolean {
-  if (subtab === 'all') return true
-  if (subtab === 'notes') return m.kind === 'NOTE' || m.party === 'INTERNAL'
-  return m.kind !== 'NOTE' && m.party !== 'INTERNAL'
-}
+export function InboxPanel({ rows, messagesByShipment, loading, selectedId, onSelect, children }: InboxPanelProps) {
+  const [query, setQuery] = useState('')
 
-export function InboxPanel({ rows, messagesByShipment, loading, selectedId, onSelect }: InboxPanelProps) {
-  const [subtab, setSubtab] = useState<InboxSubtab>('all')
-
-  const shipmentsWithMessages = useMemo(
-    () => rows.filter((r) => (messagesByShipment[r.id] ?? []).length > 0),
-    [rows, messagesByShipment],
-  )
-
-  const selectedShipment = useMemo(
-    () => rows.find((r) => r.id === selectedId) ?? shipmentsWithMessages[0] ?? null,
-    [rows, selectedId, shipmentsWithMessages],
-  )
-
-  const selectedMessages = useMemo(() => {
-    if (!selectedShipment) return []
-    return (messagesByShipment[selectedShipment.id] ?? []).filter((m) => matchesSubtab(m, subtab))
-  }, [selectedShipment, messagesByShipment, subtab])
+  const conversations = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    return rows
+      .map((row) => ({ row, messages: messagesByShipment[row.id] ?? [] }))
+      // The open conversation stays listed even before its first message.
+      .filter(({ row, messages }) => messages.length > 0 || row.id === selectedId)
+      .filter(({ row }) => {
+        if (!q) return true
+        return [row.number, row.customerName, row.originCity, row.destinationCity]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase()
+          .includes(q)
+      })
+      .sort((a, b) => latestAt(b.messages) - latestAt(a.messages))
+  }, [rows, messagesByShipment, query, selectedId])
 
   return (
-    <div className="tms-tracking-inbox">
-      <div className="tms-tracking-inbox-head">
-        {(['all', 'chats', 'notes'] as InboxSubtab[]).map((key) => {
-          const Icon = SUBTAB_ICONS[key]
-          return (
-            <TmsButton
-              key={key}
-              size="sm"
-              variant={subtab === key ? 'primary' : 'secondary'}
-              onClick={() => setSubtab(key)}
-              aria-pressed={subtab === key}
-            >
-              <Icon size={14} />
-              {key === 'all' ? 'All messages' : key === 'chats' ? 'Shipment chats' : 'Team notes'}
-            </TmsButton>
-          )
-        })}
+    <div className="tms-inbox">
+      <div className="tms-inbox-list">
+        <div className="tms-inbox-list-head">
+          <Search size={14} className="tms-tracking-toolbar-icon" />
+          <TmsInput
+            placeholder="Search conversations..."
+            aria-label="Search conversations"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        </div>
+        <div className="tms-inbox-items">
+          {loading && conversations.length === 0 ? (
+            <p className="tms-tracking-empty">Loading conversations…</p>
+          ) : conversations.length === 0 ? (
+            <p className="tms-tracking-empty">
+              {query ? 'No conversations match the search.' : 'No tracking conversations yet.'}
+            </p>
+          ) : (
+            conversations.map(({ row, messages }) => (
+              <ConversationRow
+                key={row.id}
+                row={row}
+                messages={messages}
+                selected={row.id === selectedId}
+                onSelect={() => onSelect(row.id)}
+              />
+            ))
+          )}
+        </div>
       </div>
-      <div className="tms-tracking-inbox-body">
-        <div className="tms-tracking-inbox-list">
-          {loading && !shipmentsWithMessages.length ? (
-            <p className="tms-tracking-empty">Loading messages…</p>
-          ) : shipmentsWithMessages.length === 0 ? (
-            <TmsEmptyState title="No messages" message="Shipment threads appear here once e-mail or SMS traffic exists." />
-          ) : (
-            shipmentsWithMessages.map((r) => {
-              const count = (messagesByShipment[r.id] ?? []).filter((m) => matchesSubtab(m, subtab)).length
-              return (
-                <button
-                  key={r.id}
-                  type="button"
-                  className={`tms-tracking-inbox-item${selectedShipment?.id === r.id ? ' tms-active' : ''}`}
-                  onClick={() => onSelect(r.id)}
-                >
-                  <span className="tms-tracking-inbox-pro">{r.number}</span>
-                  <span className="tms-tracking-inbox-customer">{r.customerName ?? 'Unknown customer'}</span>
-                  {count > 0 && <TmsBadge tone="blue">{count}</TmsBadge>}
-                </button>
-              )
-            })
-          )}
-        </div>
-        <div className="tms-tracking-inbox-thread">
-          {!selectedShipment ? (
-            <TmsEmptyState title="Select a shipment" message="Pick a shipment from the list to read its thread." />
-          ) : selectedMessages.length === 0 ? (
-            <TmsEmptyState
-              title="No thread messages"
-              message={`${selectedShipment.number} has no messages in this view.`}
-            />
-          ) : (
-            <div className="tms-tracking-messages">
-              <div className="tms-tracking-thread-head">
-                <span className="tms-tracking-thread-pro">{selectedShipment.number}</span>
-                <span className="tms-tracking-thread-route">
-                  {selectedShipment.originCity ?? '—'} → {selectedShipment.destinationCity ?? '—'}
-                </span>
-              </div>
-              {selectedMessages.map((m) => (
-                <div key={m.id} className={`tms-tracking-message tms-tracking-message-${m.direction.toLowerCase()}`}>
-                  <div className="tms-tracking-message-meta">
-                    <TmsBadge tone={m.channel === 'SMS' ? 'turquoise' : m.channel === 'VOICE' ? 'gray' : 'blue'}>
-                      {m.channel === 'VOICE' ? <Phone size={10} /> : null}
-                      {m.channel}
-                    </TmsBadge>
-                    <span className="tms-tracking-message-party">{partyLabel(m)}</span>
-                    <span className="tms-tracking-message-time">{formatDateTime(m.at)}</span>
-                  </div>
-                  {m.subject && <p className="tms-tracking-message-subject">{m.subject}</p>}
-                  <p className="tms-tracking-message-body">{m.body ?? '(no body)'}</p>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+      <div className="tms-inbox-chat">
+        {selectedId ? (
+          children
+        ) : (
+          <TmsEmptyState
+            title="Select a conversation"
+            message="Pick a shipment on the left to read its thread and reply."
+          />
+        )}
       </div>
     </div>
+  )
+}
+
+function ConversationRow({
+  row,
+  messages,
+  selected,
+  onSelect,
+}: {
+  row: ShipmentRow
+  messages: ShipmentMessageRecord[]
+  selected: boolean
+  onSelect: () => void
+}) {
+  const latest = latestMessage(messages)
+  const when = relativeTime(latest?.at, Date.now())
+  return (
+    <button
+      type="button"
+      className={`tms-inbox-item${selected ? ' tms-active' : ''}`}
+      data-testid="inbox-thread-row"
+      data-shipment-id={row.id}
+      aria-pressed={selected}
+      onClick={onSelect}
+    >
+      <span className="tms-inbox-item-top">
+        <span className="tms-inbox-item-pro">{row.number}</span>
+        {when && <span className="tms-inbox-item-time">{when}</span>}
+      </span>
+      <span className="tms-inbox-item-customer">{row.customerName ?? 'Unknown customer'}</span>
+      <span className="tms-inbox-item-lane">
+        {row.originCity ?? '—'} → {row.destinationCity ?? '—'}
+      </span>
+      <span className="tms-inbox-item-preview">
+        {latest ? latest.body ?? latest.subject ?? '(no body)' : 'No messages yet — start the thread.'}
+      </span>
+      {messages.length > 0 && (
+        <span className="tms-inbox-item-count">
+          <TmsBadge tone="blue">{messages.length}</TmsBadge>
+        </span>
+      )}
+    </button>
   )
 }

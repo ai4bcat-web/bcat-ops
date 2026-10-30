@@ -15,7 +15,7 @@ import type { TransactWriteItem } from '@aws-sdk/client-dynamodb'
 import { DEFAULT_CHECK_CALL_PLAN } from '../../../src/lib/checkCallPlan'
 import { DEFAULT_MARGIN_TARGET_BPS, DEFAULT_REQUIRED_LOAD_FIELDS } from '../../../src/lib/flowDefaults'
 
-export const SEED_VERSION = 'p1.1'
+export const SEED_VERSION = 'p8.1'
 
 export interface DemoDeps {
   tables: {
@@ -65,6 +65,10 @@ const DEMO_KEYS = {
   BUILDING: 'shipment.building',
   POSTED: 'shipment.posted',
   IN_TRANSIT: 'shipment.intransit',
+  IN_TRANSIT_1: 'shipment.intransit.1',
+  IN_TRANSIT_2: 'shipment.intransit.2',
+  IN_TRANSIT_3: 'shipment.intransit.3',
+  IN_TRANSIT_4: 'shipment.intransit.4',
   POD_FLAGGED: 'shipment.podflagged',
   READY_TO_BILL: 'shipment.readytobill',
 } as const
@@ -83,24 +87,28 @@ const STAFF_ROLES = [
 interface DemoLane {
   originCity: string
   originState: string
+  originLat: number
+  originLng: number
   destinationCity: string
   destinationState: string
+  destinationLat: number
+  destinationLng: number
   miles: number
 }
 
 const LANES: DemoLane[] = [
-  { originCity: 'Chicago', originState: 'IL', destinationCity: 'Indianapolis', destinationState: 'IN', miles: 185 },
-  { originCity: 'Dallas', originState: 'TX', destinationCity: 'Houston', destinationState: 'TX', miles: 240 },
-  { originCity: 'Atlanta', originState: 'GA', destinationCity: 'Charlotte', destinationState: 'NC', miles: 245 },
-  { originCity: 'Los Angeles', originState: 'CA', destinationCity: 'Phoenix', destinationState: 'AZ', miles: 375 },
-  { originCity: 'Denver', originState: 'CO', destinationCity: 'Salt Lake City', destinationState: 'UT', miles: 525 },
-  { originCity: 'Seattle', originState: 'WA', destinationCity: 'Portland', destinationState: 'OR', miles: 175 },
-  { originCity: 'Detroit', originState: 'MI', destinationCity: 'Cleveland', destinationState: 'OH', miles: 170 },
-  { originCity: 'Memphis', originState: 'TN', destinationCity: 'Nashville', destinationState: 'TN', miles: 210 },
-  { originCity: 'Miami', originState: 'FL', destinationCity: 'Orlando', destinationState: 'FL', miles: 235 },
-  { originCity: 'Philadelphia', originState: 'PA', destinationCity: 'Baltimore', destinationState: 'MD', miles: 105 },
-  { originCity: 'Kansas City', originState: 'MO', destinationCity: 'St. Louis', destinationState: 'MO', miles: 250 },
-  { originCity: 'Boston', originState: 'MA', destinationCity: 'New York', destinationState: 'NY', miles: 215 },
+  { originCity: 'Chicago', originState: 'IL', originLat: 41.8781, originLng: -87.6298, destinationCity: 'Indianapolis', destinationState: 'IN', destinationLat: 39.7684, destinationLng: -86.1581, miles: 185 },
+  { originCity: 'Dallas', originState: 'TX', originLat: 32.7767, originLng: -96.797, destinationCity: 'Houston', destinationState: 'TX', destinationLat: 29.7604, destinationLng: -95.3698, miles: 240 },
+  { originCity: 'Atlanta', originState: 'GA', originLat: 33.749, originLng: -84.388, destinationCity: 'Charlotte', destinationState: 'NC', destinationLat: 35.2271, destinationLng: -80.8431, miles: 245 },
+  { originCity: 'Los Angeles', originState: 'CA', originLat: 34.0522, originLng: -118.2437, destinationCity: 'Phoenix', destinationState: 'AZ', destinationLat: 33.4484, destinationLng: -112.074, miles: 375 },
+  { originCity: 'Denver', originState: 'CO', originLat: 39.7392, originLng: -104.9903, destinationCity: 'Salt Lake City', destinationState: 'UT', destinationLat: 40.7608, destinationLng: -111.891, miles: 525 },
+  { originCity: 'Seattle', originState: 'WA', originLat: 47.6062, originLng: -122.3321, destinationCity: 'Portland', destinationState: 'OR', destinationLat: 45.5152, destinationLng: -122.6784, miles: 175 },
+  { originCity: 'Detroit', originState: 'MI', originLat: 42.3314, originLng: -83.0458, destinationCity: 'Cleveland', destinationState: 'OH', destinationLat: 41.4993, destinationLng: -81.6944, miles: 170 },
+  { originCity: 'Memphis', originState: 'TN', originLat: 35.1495, originLng: -90.049, destinationCity: 'Nashville', destinationState: 'TN', destinationLat: 36.1627, destinationLng: -86.7816, miles: 210 },
+  { originCity: 'Miami', originState: 'FL', originLat: 25.7617, originLng: -80.1918, destinationCity: 'Orlando', destinationState: 'FL', destinationLat: 28.5383, destinationLng: -81.3792, miles: 235 },
+  { originCity: 'Philadelphia', originState: 'PA', originLat: 39.9526, originLng: -75.1652, destinationCity: 'Baltimore', destinationState: 'MD', destinationLat: 39.2904, destinationLng: -76.6122, miles: 105 },
+  { originCity: 'Kansas City', originState: 'MO', originLat: 39.0997, originLng: -94.5786, destinationCity: 'St. Louis', destinationState: 'MO', destinationLat: 38.627, destinationLng: -90.1994, miles: 250 },
+  { originCity: 'Boston', originState: 'MA', originLat: 42.3601, originLng: -71.0589, destinationCity: 'New York', destinationState: 'NY', destinationLat: 40.7128, destinationLng: -74.006, miles: 215 },
 ]
 
 const CUSTOMER_NAMES = [
@@ -258,6 +266,7 @@ async function seedCarriers(deps: DemoDeps, caller: Caller, counts: Record<strin
       status: 'ACTIVE',
       authorityStatus: 'ACTIVE',
       mcNumber: 'MC-123456',
+      dotNumber: '2345678',
       dispatcherName: 'Dispatch',
       dispatcherEmail: 'dispatch@vetted.example',
       dispatcherPhone: '555-0101',
@@ -470,7 +479,14 @@ function makeStops(lane: DemoLane, now: string): Row[] {
       name: `${lane.originCity} Shipper`,
       city: lane.originCity,
       state: lane.originState,
-      address: { street: '100 Industrial Blvd', city: lane.originCity, state: lane.originState, zip: '00000' },
+      address: {
+        street: '100 Industrial Blvd',
+        city: lane.originCity,
+        state: lane.originState,
+        zip: '00000',
+        lat: lane.originLat,
+        lng: lane.originLng,
+      },
       appt: pickupAppt.toISOString(),
       arrivedAt: null,
       departedAt: null,
@@ -482,7 +498,14 @@ function makeStops(lane: DemoLane, now: string): Row[] {
       name: `${lane.destinationCity} Receiver`,
       city: lane.destinationCity,
       state: lane.destinationState,
-      address: { street: '200 Commerce Pkwy', city: lane.destinationCity, state: lane.destinationState, zip: '00000' },
+      address: {
+        street: '200 Commerce Pkwy',
+        city: lane.destinationCity,
+        state: lane.destinationState,
+        zip: '00000',
+        lat: lane.destinationLat,
+        lng: lane.destinationLng,
+      },
       appt: deliveryAppt.toISOString(),
       arrivedAt: null,
       departedAt: null,
@@ -553,7 +576,7 @@ export async function seedDemoData(deps: DemoDeps, input: Row, caller: Caller): 
   const repId = staff.find((s) => s.role === 'carrier-rep')?.id ?? caller.sub
   const salesRepId = staff.find((s) => s.role === 'sales-rep')?.id ?? caller.sub
 
-  const plans = buildShipmentPlans(11)
+  const plans = buildShipmentPlans(16)
   let bookedDemoCarrier = false
   const createdShipments: Array<{ shipment: Row; order: Row; load: Row }> = []
   const tagTxs: TransactWriteItem[] = []
@@ -652,8 +675,8 @@ export async function seedDemoData(deps: DemoDeps, input: Row, caller: Caller): 
   counts.SHIPMENT = seededShipments.length
 
   // Stage a subset of shipments into the later rungs of the tracking ladder so
-  // the demo has real Delivered, Dispatched, Arrived and Departed rows.
-  await stageTrackingStates(deps, seededShipments.slice(2, 7), caller)
+  // the demo has 5 real in-transit rows plus 2 delivered rows for POD/billing fixtures.
+  await stageTrackingStates(deps, [...seededShipments.slice(11, 16), ...seededShipments.slice(2, 6)], caller)
 
   // Re-read so the named fixtures pick up the staged statuses.
   seededShipments = (await Promise.all(
@@ -758,42 +781,94 @@ export async function seedDemoData(deps: DemoDeps, input: Row, caller: Caller): 
     createdIds.QUOTE = offers.map((q) => String(q.id))
   }
 
-  const inTransitShipment = seededShipments.find((s) => String(s.status) === 'DISPATCHED')
-  if (inTransitShipment) {
+  const inTransitShipments = seededShipments.filter((s) => String(s.status) === 'IN_TRANSIT')
+  const inTransitKeys = [DEMO_KEYS.IN_TRANSIT, DEMO_KEYS.IN_TRANSIT_1, DEMO_KEYS.IN_TRANSIT_2, DEMO_KEYS.IN_TRANSIT_3, DEMO_KEYS.IN_TRANSIT_4]
+  for (let i = 0; i < inTransitShipments.length && i < inTransitKeys.length; i++) {
+    const inTransitShipment = inTransitShipments[i]
     const tKey = threadKey(String(inTransitShipment.id))
     const now = deps.now()
     const loadRow = await loadOfShipment(deps, String(inTransitShipment.id))
+    if (!loadRow) continue
+
+    const contacts = trackingFixtureContacts(i)
+    const carrierLeg = makeDemoCarrierLeg(deps, caller, inTransitShipment, loadRow, vettedCarrier)
+    const currentCity = String(loadRow.lastKnownCity ?? '')
+    const currentState = String(loadRow.lastKnownState ?? '')
+    const prevCity = String(loadRow.lastKnownPreviousCity ?? '')
+    const prevState = String(loadRow.lastKnownPreviousState ?? '')
+    const currentPlace = [currentCity, currentState].filter(Boolean).join(', ') || 'en route'
+    const prevPlace = [prevCity, prevState].filter(Boolean).join(', ') || 'origin'
+    const previousAt = String(loadRow.lastKnownPreviousAt ?? now)
+    const currentAt = String(loadRow.lastKnownAt ?? now)
+
     const messages: Row[] = [
       makeMessage(deps, caller, inTransitShipment, loadRow, {
-        channel: 'EMAIL', kind: 'RATE_CON', direction: 'OUT', subject: 'Rate confirmation', body: 'Rate con attached.',
+        channel: 'EMAIL', kind: 'RATE_CON', direction: 'OUT', subject: 'Rate confirmation', body: 'Rate con attached. Please confirm pickup window.',
+        authorKind: 'AGENT', authorName: 'BCAT Tracking Assistant', status: 'SENT',
       }),
       makeMessage(deps, caller, inTransitShipment, loadRow, {
-        channel: 'SMS', kind: 'CHECK_CALL', direction: 'OUT', body: 'Where are you? Reply with city.',
+        channel: 'SMS', kind: 'CHECK_CALL', direction: 'OUT', body: `Hi ${contacts.driverName}, can you share your current city?`,
+        authorKind: 'AGENT', authorName: 'BCAT Tracking Assistant', status: 'SENT',
       }),
       makeMessage(deps, caller, inTransitShipment, loadRow, {
-        channel: 'SMS', kind: 'CHECK_CALL_REPLY', direction: 'IN', body: 'In Dallas, TX', party: 'DRIVER',
+        channel: 'SMS', kind: 'CHECK_CALL_REPLY', direction: 'IN', body: `In ${prevPlace}`, party: 'DRIVER',
+        authorKind: 'PERSON', authorName: contacts.driverName,
+      }),
+      makeMessage(deps, caller, inTransitShipment, loadRow, {
+        channel: 'SMS', kind: 'CHECK_CALL_REPLY', direction: 'IN', body: `Just passed ${currentPlace}`, party: 'DRIVER',
+        authorKind: 'PERSON', authorName: contacts.driverName,
+      }),
+      makeMessage(deps, caller, inTransitShipment, loadRow, {
+        channel: 'SMS', kind: 'POD_REQUEST', direction: 'OUT', body: 'Please send POD photos at delivery.',
+        authorKind: 'AGENT', authorName: 'BCAT Tracking Assistant', status: 'SENT',
       }),
       makeMessage(deps, caller, inTransitShipment, loadRow, {
         channel: 'SMS', kind: 'ESCALATION', direction: 'OUT', body: 'No reply in 30 min — repeat check call.',
+        authorKind: 'AGENT', authorName: 'BCAT Tracking Assistant', status: 'SENT',
       }),
     ]
     const checkCalls: Row[] = [
       makeCheckCall(deps, caller, inTransitShipment, loadRow, { type: 'DISPATCH', at: now }),
-      makeCheckCall(deps, caller, inTransitShipment, loadRow, { type: 'LOCATION_UPDATE', at: now, city: 'Dallas', state: 'TX' }),
+      makeCheckCall(deps, caller, inTransitShipment, loadRow, {
+        type: 'LOCATION_UPDATE', at: previousAt, city: prevCity, state: prevState,
+        lat: Number(loadRow.lastKnownPreviousLat ?? 0) || null,
+        lng: Number(loadRow.lastKnownPreviousLng ?? 0) || null,
+      }),
+      makeCheckCall(deps, caller, inTransitShipment, loadRow, {
+        type: 'LOCATION_UPDATE', at: currentAt, city: currentCity, state: currentState,
+        lat: Number(loadRow.lastKnownLat ?? 0) || null,
+        lng: Number(loadRow.lastKnownLng ?? 0) || null,
+      }),
     ]
+
+    // Patch the seeded carrier leg with varied, realistic contacts.
+    carrierLeg.driverName = contacts.driverName
+    carrierLeg.driverPhone = contacts.driverPhone
+    carrierLeg.dispatcherName = contacts.dispatcherName
+    carrierLeg.dispatcherEmail = contacts.dispatcherEmail
+    carrierLeg.dispatcherPhone = contacts.dispatcherPhone
+
     await deps.transact([
       updateTx(deps.tables.shipment, String(inTransitShipment.id), stampedPatch(deps, caller, { threadKey: tKey, threadOpenedAt: now }), String(inTransitShipment.updatedAt ?? '')),
+      putTx(deps.tables.loadCarrier, carrierLeg),
+      updateTx(deps.tables.load, String(loadRow.id), stampedPatch(deps, caller, {
+        activeLoadCarrierId: carrierLeg.id, carrierName: vettedCarrier.name, assignmentType: 'CARRIER',
+        carrierRepId: repId, trackingProvider: 'MANUAL', checkCallPlan: DEFAULT_CHECK_CALL_PLAN,
+        checkCallPlanStartedAt: previousAt,
+      }), String(loadRow.updatedAt ?? '')),
       ...messages.map((m) => putTx(deps.tables.message, m)),
       ...checkCalls.map((c) => putTx(deps.tables.checkCall, c)),
     ])
-    await recordDemo(deps, 'SHIPMENT', DEMO_KEYS.IN_TRANSIT, String(inTransitShipment.id), caller, {
+    await recordDemo(deps, 'SHIPMENT', inTransitKeys[i], String(inTransitShipment.id), caller, {
       step: 'P8',
-      label: 'In-transit shipment with thread',
+      label: `In-transit shipment ${i + 1} with thread`,
     })
-    await recordRows(deps, 'MESSAGE', 'message', messages, caller)
-    await recordRows(deps, 'CHECK_CALL', 'checkcall', checkCalls, caller)
-    createdIds.MESSAGE = messages.map((m) => String(m.id))
-    createdIds.CHECK_CALL = checkCalls.map((c) => String(c.id))
+    await recordRows(deps, 'MESSAGE', `message:intransit:${i}`, messages, caller)
+    await recordRows(deps, 'CHECK_CALL', `checkcall:intransit:${i}`, checkCalls, caller)
+    await recordRows(deps, 'LOAD_CARRIER', `loadcarrier:intransit:${i}`, [carrierLeg], caller)
+    createdIds.MESSAGE = [...(createdIds.MESSAGE ?? []), ...messages.map((m) => String(m.id))]
+    createdIds.CHECK_CALL = [...(createdIds.CHECK_CALL ?? []), ...checkCalls.map((c) => String(c.id))]
+    createdIds.LOAD_CARRIER = [...(createdIds.LOAD_CARRIER ?? []), String(carrierLeg.id)]
   }
 
   const deliveredForPod = seededShipments.filter((s) => String(s.status) === 'DELIVERED')
@@ -1090,7 +1165,10 @@ export async function getDemoState(deps: DemoDeps): Promise<Row> {
 async function stageTrackingStates(deps: DemoDeps, shipments: Row[], caller: Caller): Promise<void> {
   const now = deps.now()
   const writes: TransactWriteItem[] = []
-  const transitions = ['DISPATCHED', 'DELIVERED', 'DELIVERED', 'LOADING', 'IN_TRANSIT']
+  // Stage 5 in-transit rows (board status DEPARTED) plus 2 delivered rows for the
+  // POD / billing fixtures. Order matters: delivered rows must land at the end so
+  // the DELIVERED filter below picks them consistently.
+  const transitions = ['IN_TRANSIT', 'IN_TRANSIT', 'IN_TRANSIT', 'IN_TRANSIT', 'IN_TRANSIT', 'DELIVERED', 'DELIVERED', 'DISPATCHED', 'LOADING']
 
   for (let i = 0; i < shipments.length; i++) {
     const seedShipment = shipments[i]
@@ -1103,22 +1181,38 @@ async function stageTrackingStates(deps: DemoDeps, shipments: Row[], caller: Cal
     const stops = parseStops(load)
     const pickup = stops.find((s) => s.type === 'pickup')
     const delivery = stops.find((s) => s.type === 'delivery')
+    // Stagger timestamps so the board has a clear newest-first ordering.
     const stopAt = new Date(now)
     stopAt.setMinutes(stopAt.getMinutes() - (shipments.length - i) * 10)
 
-    if (transition === 'DISPATCHED') {
-      writes.push(updateTx(deps.tables.shipment, String(shipment.id), stampedPatch(deps, caller, { status: 'DISPATCHED' }), String(shipment.updatedAt ?? '')))
-      writes.push(updateTx(deps.tables.load, String(load.id), stampedPatch(deps, caller, { status: 'DISPATCHED' }), String(load.updatedAt ?? '')))
-    } else if (transition === 'LOADING' && pickup && delivery) {
-      pickup.departedAt = stopAt.toISOString()
-      delivery.arrivedAt = new Date(stopAt.getTime() + 60 * 60 * 1000).toISOString()
-      writes.push(updateTx(deps.tables.shipment, String(shipment.id), stampedPatch(deps, caller, { status: 'DISPATCHED' }), String(shipment.updatedAt ?? '')))
-      writes.push(updateTx(deps.tables.load, String(load.id), stampedPatch(deps, caller, { status: 'LOADING', stops: JSON.stringify(stops) }), String(load.updatedAt ?? '')))
-    } else if (transition === 'IN_TRANSIT' && pickup) {
-      pickup.departedAt = stopAt.toISOString()
-      writes.push(updateTx(deps.tables.shipment, String(shipment.id), stampedPatch(deps, caller, { status: 'DISPATCHED' }), String(shipment.updatedAt ?? '')))
-      writes.push(updateTx(deps.tables.load, String(load.id), stampedPatch(deps, caller, { status: 'IN_TRANSIT', stops: JSON.stringify(stops) }), String(load.updatedAt ?? '')))
+    if (transition === 'IN_TRANSIT' && pickup && delivery) {
+      stopAt.setTime(Date.parse(now) - (5 + i * 2) * 60_000)
+      const prevAt = new Date(stopAt.getTime() - 90 * 60_000)
+      const [previous, current] = TRACKING_FIXES[i]
+      pickup.appt = new Date(Date.parse(now) - 4 * 3_600_000).toISOString()
+      pickup.arrivedAt = pickup.appt
+      pickup.departedAt = new Date(Date.parse(now) - 3 * 3_600_000).toISOString()
+      delivery.appt = new Date(Date.parse(now) + (3 + i) * 3_600_000).toISOString()
+      writes.push(updateTx(deps.tables.shipment, String(shipment.id), stampedPatch(deps, caller, {
+        status: 'IN_TRANSIT', pickupAppt: pickup.appt, deliveryAppt: delivery.appt,
+      }), String(shipment.updatedAt ?? '')))
+      writes.push(updateTx(deps.tables.load, String(load.id), stampedPatch(deps, caller, {
+        status: 'IN_TRANSIT', pickupAppt: pickup.appt, deliveryAppt: delivery.appt,
+        stops: JSON.stringify(stops),
+        lastKnownAt: stopAt.toISOString(),
+        lastKnownCity: current.city,
+        lastKnownState: current.state,
+        lastKnownLat: current.lat,
+        lastKnownLng: current.lng,
+        lastKnownPreviousAt: prevAt.toISOString(),
+        lastKnownPreviousCity: previous.city,
+        lastKnownPreviousState: previous.state,
+        lastKnownPreviousLat: previous.lat,
+        lastKnownPreviousLng: previous.lng,
+        lastKnownSource: 'MANUAL',
+      }), String(load.updatedAt ?? '')))
     } else if (transition === 'DELIVERED' && pickup && delivery) {
+      stopAt.setTime(Date.parse(now) - 4 * 3_600_000)
       pickup.departedAt = stopAt.toISOString()
       delivery.arrivedAt = new Date(stopAt.getTime() + 60 * 60 * 1000).toISOString()
       delivery.departedAt = new Date(stopAt.getTime() + 2 * 60 * 60 * 1000).toISOString()
@@ -1127,11 +1221,28 @@ async function stageTrackingStates(deps: DemoDeps, shipments: Row[], caller: Cal
       if (order) {
         writes.push(updateTx(deps.tables.order, String(order.id), stampedPatch(deps, caller, { readyToInvoiceAt: delivery.departedAt }), String(order.updatedAt ?? '')))
       }
+    } else if (transition === 'DISPATCHED') {
+      writes.push(updateTx(deps.tables.shipment, String(shipment.id), stampedPatch(deps, caller, { status: 'DISPATCHED' }), String(shipment.updatedAt ?? '')))
+      writes.push(updateTx(deps.tables.load, String(load.id), stampedPatch(deps, caller, { status: 'DISPATCHED' }), String(load.updatedAt ?? '')))
+    } else if (transition === 'LOADING' && pickup && delivery) {
+      pickup.departedAt = stopAt.toISOString()
+      delivery.arrivedAt = new Date(stopAt.getTime() + 60 * 60 * 1000).toISOString()
+      writes.push(updateTx(deps.tables.shipment, String(shipment.id), stampedPatch(deps, caller, { status: 'DISPATCHED' }), String(shipment.updatedAt ?? '')))
+      writes.push(updateTx(deps.tables.load, String(load.id), stampedPatch(deps, caller, { status: 'LOADING', stops: JSON.stringify(stops) }), String(load.updatedAt ?? '')))
     }
   }
 
   if (writes.length) await deps.transact(writes)
 }
+
+// Named fixes on the five seeded routes; city labels and map coordinates agree.
+const TRACKING_FIXES = [
+  [{ city: 'Hartford', state: 'CT', lat: 41.7658, lng: -72.6734 }, { city: 'New Haven', state: 'CT', lat: 41.3083, lng: -72.9279 }],
+  [{ city: 'Lafayette', state: 'IN', lat: 40.4167, lng: -86.8753 }, { city: 'Lebanon', state: 'IN', lat: 40.0484, lng: -86.4692 }],
+  [{ city: 'Huntsville', state: 'TX', lat: 30.7235, lng: -95.5508 }, { city: 'Conroe', state: 'TX', lat: 30.3119, lng: -95.4561 }],
+  [{ city: 'Greenville', state: 'SC', lat: 34.8526, lng: -82.394 }, { city: 'Spartanburg', state: 'SC', lat: 34.9496, lng: -81.932 }],
+  [{ city: 'Blythe', state: 'CA', lat: 33.6178, lng: -114.5883 }, { city: 'Buckeye', state: 'AZ', lat: 33.3703, lng: -112.5838 }],
+] as const
 
 function parseStops(load: Row): Row[] {
   const raw = load.stops ?? '[]'
@@ -1218,6 +1329,9 @@ function makeMessage(
     subject?: string
     body: string
     party?: string
+    authorKind?: string
+    authorName?: string
+    status?: string
   },
 ): Row {
   return {
@@ -1232,7 +1346,9 @@ function makeMessage(
     party: opts.party ?? 'DISPATCHER',
     subject: opts.subject ?? null,
     body: opts.body,
-    status: opts.direction === 'OUT' ? 'NOT_SENT' : 'RECEIVED',
+    status: opts.status ?? (opts.direction === 'OUT' ? 'NOT_SENT' : 'RECEIVED'),
+    authorKind: opts.authorKind ?? (opts.direction === 'OUT' ? 'AGENT' : 'PERSON'),
+    authorName: opts.authorName ?? null,
     at: deps.now(),
     createdBy: caller.email,
   }
@@ -1243,7 +1359,7 @@ function makeCheckCall(
   caller: Caller,
   shipment: Row,
   load: Row | null,
-  opts: { type: string; at: string; city?: string; state?: string },
+  opts: { type: string; at: string; city?: string; state?: string; lat?: number | null; lng?: number | null },
 ): Row {
   return {
     id: deps.randomId(),
@@ -1255,6 +1371,8 @@ function makeCheckCall(
     source: 'SYSTEM',
     city: opts.city ?? null,
     state: opts.state ?? null,
+    lat: opts.lat ?? null,
+    lng: opts.lng ?? null,
     createdBy: caller.email,
   }
 }
@@ -1319,6 +1437,15 @@ function makeBolDocument(deps: DemoDeps, caller: Caller, shipment: Row, opts?: {
     createdBy: caller.email,
     createdAt: now,
     updatedAt: now,
+  }
+}
+
+function trackingFixtureContacts(index: number) {
+  const drivers = ['Michael Torres', 'Sarah Chen', 'James Wilson', 'Maria Garcia', 'Robert Lee']
+  return {
+    driverName: drivers[index], driverPhone: '+1224555010' + index,
+    dispatcherName: 'Rachel Brooks', dispatcherPhone: '+12245550120',
+    dispatcherEmail: 'dispatch@vetted.example',
   }
 }
 

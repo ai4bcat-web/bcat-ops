@@ -248,6 +248,7 @@ type Action =
   | 'REVOKE_TRACKING_LINK'
   | 'SEND_CUSTOMER_LINK'
   | 'REVOKE_CUSTOMER_LINK'
+  | 'EXTEND_CUSTOMER_LINK'
   | 'TEXT_DRIVER'
   | 'SAVE_TRACKING_SETTINGS'
   // ── Step P8/P9 — the shipment thread, the tracking agent and the POD ───────
@@ -1056,13 +1057,21 @@ async function sendCustomerLink(input: Row, caller: Caller): Promise<Row> {
   const existing = await activeCustomerLink(shipmentId)
   const reuse = existing != null && !regenerate
   const token = reuse ? String(existing!.id) : randomBytes(TOKEN_BYTES).toString('base64url')
-  const expiresAt = linkExpiry('CUSTOMER_VIEW', null, linkSettings(settings), now)
+  const expiresAt = input.expiresAt == null
+    ? linkExpiry('CUSTOMER_VIEW', null, linkSettings(settings), now)
+    : customerLinkExpiry(input.expiresAt, now)
+  const customerId = input.customerId === undefined ? existing?.customerId ?? null : optionalString(input.customerId, 100)
+  if (customerId && !(await getById(CUSTOMER_TABLE_NAME, String(customerId)))) throw new Error('Customer not found')
+  const notes = input.notes === undefined ? existing?.notes ?? null : optionalString(input.notes, MAX_MESSAGE)
   const url = publicUrl('s', token)
 
   // Re-sending refreshes the clock and the snapshot on the token the customer already
   // has; `regenerate` is the only thing that invalidates a link already in their inbox.
   const patch: Row = {
     expiresAt,
+    customerId,
+    notes,
+    url,
     sentTo: to.join(', ') || null,
     sentVia: via,
     contactName: contact.name ?? null,
@@ -1140,6 +1149,26 @@ async function sendCustomerLink(input: Row, caller: Caller): Promise<Row> {
   return { link, url, emailStatus, emailError, shipment: saved }
 }
 
+function customerLinkExpiry(value: unknown, now: string): string {
+  const ms = typeof value === 'string' ? Date.parse(value) : NaN
+  if (!Number.isFinite(ms) || ms <= Date.parse(now)) throw new Error('Expiry must be a future date')
+  return new Date(ms).toISOString()
+}
+
+async function extendCustomerLink(input: Row, caller: Caller): Promise<Row> {
+  const id = assertString(input.trackingLinkId, 'trackingLinkId')
+  const link = await getById(TRACKING_LINK_TABLE_NAME, id)
+  if (!link || link.kind !== 'CUSTOMER_VIEW') throw new Error('Customer link not found')
+  if (link.status === 'REVOKED' || link.revokedAt) throw new Error('A revoked link cannot be extended; create a replacement')
+  const now = nowIso()
+  const expiresAt = customerLinkExpiry(input.expiresAt, now)
+  if (Date.parse(expiresAt) <= Date.parse(String(link.expiresAt))) throw new Error('New expiry must be later than the current expiry')
+  const patch = { expiresAt, status: 'ACTIVE', updatedAt: now }
+  await transact([updateItemTx(TRACKING_LINK_TABLE_NAME, id, patch, String(link.updatedAt ?? ''))], 'customer link')
+  await writeAudit('TRACKING_LINK', id, 'EXTEND_CUSTOMER_LINK', caller, { expiresAt })
+  return { link: { ...link, ...patch }, url: link.url ?? publicUrl('s', id) }
+}
+
 // ── REVOKE_CUSTOMER_LINK ─────────────────────────────────────────────────────
 
 async function revokeCustomerLink(input: Row, caller: Caller): Promise<Row> {
@@ -1147,7 +1176,7 @@ async function revokeCustomerLink(input: Row, caller: Caller): Promise<Row> {
   const link = await getById(TRACKING_LINK_TABLE_NAME, trackingLinkId)
   if (!link) throw new Error('That tracking link no longer exists')
   if (link.kind !== 'CUSTOMER_VIEW') throw new Error('That is a carrier link; revoke it with REVOKE_TRACKING_LINK')
-  if (link.status !== 'ACTIVE') return { link }
+  if (link.status === 'REVOKED') return { link }
 
   const now = nowIso()
   const shipmentId = String(link.shipmentId)
@@ -2065,25 +2094,57 @@ async function sendThreadEmail(input: {
   messageId: string
   inReplyTo?: string | null
   replyTo: string
+  attachments?: { filename: string; contentType: string; bytes: Uint8Array }[]
 }): Promise<{ status: 'SENT' | 'NOT_SENT' | 'FAILED'; providerRef: string | null; error: string | null }> {
-  const headers =
+  const cc = input.cc ?? null
+  const attachments = input.attachments ?? []
+  const subject = input.subject.replace(/[\r\n]+/g, ' ').trim()
+  const bodyB64 = wrap76(Buffer.from(input.body, 'utf8').toString('base64'))
+
+  let raw =
     `From: ${FROM_ADDRESS}\r\n` +
     `To: ${input.to}\r\n` +
-    (input.cc ? `Cc: ${input.cc}\r\n` : '') +
+    (cc ? `Cc: ${cc}\r\n` : '') +
     `Reply-To: ${input.replyTo}\r\n` +
     `Message-ID: ${input.messageId}\r\n` +
     (input.inReplyTo ? `In-Reply-To: ${input.inReplyTo}\r\nReferences: ${input.inReplyTo}\r\n` : '') +
-    `Subject: ${input.subject.replace(/[\r\n]+/g, ' ').trim()}\r\n` +
-    `MIME-Version: 1.0\r\n` +
-    `Content-Type: text/plain; charset=UTF-8\r\n` +
-    `Content-Transfer-Encoding: base64\r\n` +
-    `\r\n` +
-    `${wrap76(Buffer.from(input.body, 'utf8').toString('base64'))}\r\n`
+    `Subject: ${subject}\r\n` +
+    `MIME-Version: 1.0\r\n`
+
+  if (attachments.length === 0) {
+    raw +=
+      `Content-Type: text/plain; charset=UTF-8\r\n` +
+      `Content-Transfer-Encoding: base64\r\n` +
+      `\r\n` +
+      `${bodyB64}\r\n`
+  } else {
+    const boundary = `bcat-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+    raw +=
+      `Content-Type: multipart/mixed; boundary="${boundary}"\r\n` +
+      `\r\n` +
+      `--${boundary}\r\n` +
+      `Content-Type: text/plain; charset=UTF-8\r\n` +
+      `Content-Transfer-Encoding: base64\r\n` +
+      `\r\n` +
+      `${bodyB64}\r\n`
+    for (const file of attachments) {
+      const safe = file.filename.replace(/["\\\r\n]/g, '_')
+      raw +=
+        `--${boundary}\r\n` +
+        `Content-Type: ${file.contentType}; name="${safe}"\r\n` +
+        `Content-Transfer-Encoding: base64\r\n` +
+        `Content-Disposition: attachment; filename="${safe}"\r\n` +
+        `\r\n` +
+        `${wrap76(Buffer.from(file.bytes).toString('base64'))}\r\n`
+    }
+    raw += `--${boundary}--\r\n`
+  }
+
   try {
     const sent = await ses.send(new SendEmailCommand({
       FromEmailAddress: FROM_ADDRESS,
       Destination: { ToAddresses: [input.to], CcAddresses: input.cc ? [input.cc] : undefined },
-      Content: { Raw: { Data: new TextEncoder().encode(headers) } },
+      Content: { Raw: { Data: new TextEncoder().encode(raw) } },
     }))
     return { status: 'SENT', providerRef: sent.MessageId ?? null, error: null }
   } catch (err) {
@@ -2179,6 +2240,12 @@ const threadDeps: ThreadDeps = {
     }
   },
   geocode: geocodeReply,
+  readDocumentBytes: async (s3Key) => {
+    const out = await s3.send(new GetObjectCommand({ Bucket: BUCKET_NAME, Key: s3Key }))
+    const body = out.Body as { transformToByteArray?: () => Promise<Uint8Array> } | undefined
+    if (!body?.transformToByteArray) throw new Error(`Could not read ${s3Key} out of storage`)
+    return body.transformToByteArray()
+  },
   now: nowIso,
   randomId: randomUUID,
 }
@@ -2255,6 +2322,8 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return sendCustomerLink(input, caller)
     case 'REVOKE_CUSTOMER_LINK':
       return revokeCustomerLink(input, caller)
+    case 'EXTEND_CUSTOMER_LINK':
+      return extendCustomerLink(input, caller)
     case 'TEXT_DRIVER':
       return textDriver(input, caller)
     case 'SAVE_TRACKING_SETTINGS':

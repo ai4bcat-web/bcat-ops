@@ -1,0 +1,252 @@
+/**
+ * TrackingConversation component styles — the Chaine-style right pane:
+ * bubbles, structured cards, inline status pills, formatting toolbar and the
+ * attachment / mention composer actions.
+ *
+ * Imported by TrackingConversation.tsx; does not touch theme.css.
+ */
+
+/* ── Root ──────────────────────────────────────────────────────────────────── */
+
+.tms-convo-root {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+/* ── Inbox header ──────────────────────────────────────────────────────────── */
+
+.tms-convo-inbox-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--tms-border, #e2e8f0);
+  flex-shrink: 0;
+}
+
+.tms-convo-inbox-pro {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--tms-text, #1e293b);
+}
+
+.tms-convo-inbox-activity {
+  font-size: 12px;
+  color: var(--tms-muted, #94a3b8);
+}
+
+/* ── Structured cards inside the thread ────────────────────────────────────── */
+
+.tms-shell .tms-convo-card {
+  margin: 4px 0;
+  padding: 12px;
+}
+
+.tms-convo-card-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--tms-text, #1e293b);
+  margin-bottom: 8px;
+}
+
+.tms-convo-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+}
+
+.tms-convo-card-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.tms-convo-card-label {
+  font-size: 11px;
+  color: var(--tms-muted, #94a3b8);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  min-width: 60px;
+}
+
+.tms-convo-card-value {
+  font-size: 13px;
+  color: var(--tms-text, #1e293b);
+  text-align: right;
+}
+
+.tms-convo-card-value a {
+  color: var(--tms-link, #2563eb);
+  text-decoration: none;
+}
+
+.tms-convo-card-value a:hover {
+  text-decoration: underline;
+}
+
+.tms-convo-card-time {
+  font-size: 11px;
+  color: var(--tms-muted, #94a3b8);
+}
+
+.tms-convo-card-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.tms-convo-card-file {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--tms-muted, #94a3b8);
+  background: var(--tms-card, #fff);
+  border: 1px solid var(--tms-border, #e2e8f0);
+  border-radius: 4px;
+  padding: 2px 6px;
+}
+
+/* ── Kind pills (inline between message groups) ────────────────────────────── */
+
+.tms-convo-kind-pill {
+  display: flex;
+  justify-content: center;
+  padding: 4px 0;
+  margin: 0;
+}
+
+/* ── Bubble file chips ─────────────────────────────────────────────────────── */
+
+.tms-convo-bubble-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--tms-border, #e2e8f0);
+}
+
+.tms-convo-file-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--tms-muted, #94a3b8);
+  background: var(--tms-bg, #f8fafc);
+  border: 1px solid var(--tms-border, #e2e8f0);
+  border-radius: 4px;
+  padding: 2px 7px;
+  white-space: nowrap;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tms-convo-attach-bar .tms-convo-file-error {
+  color: var(--tms-badge-red, #ef4444);
+  border-color: var(--tms-badge-red, #ef4444);
+  background: rgba(239, 68, 68, 0.06);
+}
+
+.tms-convo-file-uploaded {
+  color: var(--tms-badge-green, #22c55e);
+  border-color: var(--tms-badge-green, #22c55e);
+}
+
+.tms-convo-file-x {
+  cursor: pointer;
+  opacity: 0.7;
+}
+
+.tms-convo-file-x:hover {
+  opacity: 1;
+}
+
+.tms-convo-file-err-text {
+  color: var(--tms-badge-red, #ef4444);
+  font-size: 10px;
+}
+
+/* ── Formatting toolbar ────────────────────────────────────────────────────── */
+
+.tms-shell .tms-convo-toolbar {
+  display: flex;
+  gap: 2px;
+  padding: 2px 4px;
+  background: var(--tms-bg-2, #f1f5f9);
+  border-radius: var(--tms-radius, 6px);
+  align-self: flex-start;
+}
+
+/* ── Composer action buttons ───────────────────────────────────────────────── */
+
+.tms-shell .tms-convo-composer-actions {
+  display: flex;
+  gap: 2px;
+  align-items: center;
+  position: relative;
+}
+
+.tms-shell .tms-convo-attach-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* ── Markdown rendered inside messages ─────────────────────────────────────── */
+
+.tms-convo-md-li {
+  display: list-item;
+  margin-left: 1em;
+}
+
+/* ── Mention dropdown ──────────────────────────────────────────────────────── */
+
+.tms-convo-mention-dropdown {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  margin-bottom: 4px;
+  min-width: 180px;
+  max-height: 200px;
+  overflow-y: auto;
+  background: var(--tms-card, #fff);
+  border: 1px solid var(--tms-border, #e2e8f0);
+  border-radius: var(--tms-radius, 6px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  z-index: 50;
+}
+
+.tms-convo-mention-item {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  font-size: 13px;
+  color: var(--tms-text, #1e293b);
+  text-align: left;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.tms-convo-mention-item:hover,
+.tms-convo-mention-item:focus-visible {
+  background: var(--tms-bg-2, #f1f5f9);
+  outline: none;
+}
+
+.tms-convo-mention-empty {
+  display: block;
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--tms-muted, #94a3b8);
+}

@@ -1,22 +1,15 @@
-import type { CustomerRecord, QuoteRecord, ShipmentBundle, ShipmentMessageRecord, ShipmentPostingRecord, ShipmentRecord, TmsSettings } from '@/types/tms'
-import type { CarrierOfferVetting } from '@/lib/apiClient'
-import type { CheckCallPlan } from '@/lib/checkCallPlan'
+import type { ReactNode } from 'react'
+import type { ShipmentMessageRecord } from '@/types/tms'
 import type { BoardFilterPanelProps } from '../../board/BoardFilterPanel'
 import type { ShipmentRow } from '../../shipmentViews'
 import type { RecentShipment } from './useRecentlyViewed'
 
-export type TrackingTab = 'inbox' | 'tracking' | 'booking'
-
-export interface OfferWithShipment {
-  shipment: ShipmentRecord
-  offer: QuoteRecord & { vetting: CarrierOfferVetting }
-}
-
-export interface PostingWithShipment {
-  posting: ShipmentPostingRecord
-  shipment: ShipmentRecord | null
-}
-
+/**
+ * The tracking board is the Chaine-style table of the filtered shipment set:
+ * one row per shipment, a toolbar (search, filters, sort, views, links), the
+ * recently-viewed chips and a Table/Map toggle. Row clicks open the shipment's
+ * own Tracking tab — the board itself has no detail pane.
+ */
 export interface TrackingBoardProps {
   rows: ShipmentRow[]
   loading: boolean
@@ -28,52 +21,31 @@ export interface TrackingBoardProps {
   setQuery: (value: string) => void
   activeOnly: boolean
   setActiveOnly: (value: boolean) => void
-  mapVisible: boolean
-  setMapVisible: (value: boolean) => void
   favorites: Set<string>
   onToggleFavorite: (id: string) => void
   onOpenShipment: (id: string) => void
   onCreateShipment: () => void
   onManageLinks: () => void
-  onCreateCustomerUrl: () => void
+  onCreateCustomerUrl: (row: ShipmentRow) => void
   onSaveView: () => void
   panelProps: BoardFilterPanelProps
   recent: RecentShipment[]
   onOpenRecent: (id: string) => void
   onRemoveRecent: (id: string) => void
-  selectedId: string | null
-  onSelect: (id: string) => void
-  selectedBundle: ShipmentBundle | null
-  selectedMessages: ShipmentMessageRecord[]
-  detailLoading: boolean
-  customers: CustomerRecord[]
-  settings: TmsSettings | null
-  userName?: string | null
-  onSendMessage: (input: {
-    channel: 'EMAIL' | 'SMS'
-    to: string | null
-    subject: string | null
-    body: string
-  }) => Promise<void>
-  onSavePlan: (loadId: string, plan: CheckCallPlan, expectedUpdatedAt?: string) => Promise<void>
-  onRefreshDetail: () => void | Promise<void>
 }
 
+/**
+ * The Inbox tab: a Chaine-style conversation list on the left (one row per
+ * shipment with traffic), the shared TrackingConversation framed on the right.
+ * The workstation composes the right pane so the conversation component stays
+ * owned by one module.
+ */
 export interface InboxPanelProps {
   rows: ShipmentRow[]
   messagesByShipment: Record<string, ShipmentMessageRecord[]>
   loading: boolean
   selectedId: string | null
   onSelect: (id: string) => void
-}
-
-export interface BookingPanelProps {
-  rows: ShipmentRow[]
-  offersByShipment: Record<string, (QuoteRecord & { vetting: CarrierOfferVetting })[]>
-  postings: ShipmentPostingRecord[]
-  loading: boolean
-  selectedId: string | null
-  onSelect: (id: string) => void
-  onAssign: (shipmentId: string, offerId: string) => void
-  onSendSetupPacket: (shipmentId: string, offerId: string) => void
+  /** The framed conversation for the selected shipment. */
+  children?: ReactNode
 }

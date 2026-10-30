@@ -5703,7 +5703,16 @@ async function logCheckCall(input: Row, caller: Caller): Promise<Row> {
           ? { status: statusAfter, statusChangedAt: now, statusChangedBy: caller.email, statusSource: 'CHECK_CALL' }
           : {}),
         ...(statusAfter === 'DELIVERED' ? { deliveredAt: at } : {}),
-        ...lastKnownPatch({ at, type, source: 'MANUAL', city, state, lat, lng }),
+        ...lastKnownPatch(
+          { at, type, source: 'MANUAL', city, state, lat, lng },
+          {
+            lastKnownAt: load.lastKnownAt as string | null | undefined,
+            lastKnownCity: load.lastKnownCity as string | null | undefined,
+            lastKnownState: load.lastKnownState as string | null | undefined,
+            lastKnownLat: load.lastKnownLat as number | null | undefined,
+            lastKnownLng: load.lastKnownLng as number | null | undefined,
+          },
+        ),
         ...(type === 'INCIDENT'
           ? { openIncidentCount: (numberOrNull(load.openIncidentCount) ?? 0) + 1 }
           : {}),

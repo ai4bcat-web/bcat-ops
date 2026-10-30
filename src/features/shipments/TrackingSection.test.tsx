@@ -135,10 +135,8 @@ describe('TrackingSection', () => {
     expect(typeof setNextCheckCall.mock.calls[0][0]).toBe('string')
   })
 
-  it('drops the position pins it knows onto the map', async () => {
-    render(<TrackingSection bundle={bundle} customer={null} catalog={[]} actions={actions} />)
-    await waitFor(() => expect(screen.getByTestId('mini-map').textContent).toContain('ping-cc-3'))
-  })
+  // Map coverage is in TrackingDetailPanel.test.tsx and TrackingSection mount-of-shared-sections test above.
+  // The FleetMiniMap was replaced with TrackingDetailPanel which uses tracking-detail-map testid.
 
   // Twilio is unconfigured on dev and SES is denied there, so a link is routinely
   // created and copied rather than sent. The timeline must not claim otherwise.

@@ -45,6 +45,12 @@ export interface SendSmsOutcome {
   error: string | null
 }
 
+export interface EmailAttachment {
+  filename: string
+  contentType: string
+  bytes: Uint8Array
+}
+
 export interface ThreadDeps {
   tables: {
     message: string
@@ -78,10 +84,13 @@ export interface ThreadDeps {
     messageId: string
     inReplyTo?: string | null
     replyTo: string
+    attachments?: EmailAttachment[]
   }): Promise<SendEmailOutcome>
   sendSms(input: { to: string; body: string; label: Row }): Promise<SendSmsOutcome>
   /** Geocode a free-text driver reply. Null means the text named no place. */
   geocode(text: string): Promise<{ city: string; state: string; lat: number; lng: number } | null>
+  /** Fetch a document's bytes out of storage (caller already validated the s3Key). */
+  readDocumentBytes(s3Key: string): Promise<Uint8Array>
   now(): string
   randomId(): string
 }
@@ -186,6 +195,45 @@ export async function sendShipmentMessage(deps: ThreadDeps, input: Row, caller: 
         ? firstNameFromEmail(caller.email)
         : 'BCAT Tracking Assistant'
   const rfcMessageId = isEmail ? newMessageId(shipmentId, Number(input.seq ?? 0)) : null
+
+  // Resolve validated document ids into attachment metadata + bytes.
+  const sendAttachmentMeta: { name: string; contentType: string; sizeBytes?: number | null; s3Key?: string | null }[] = []
+  const sendAttachmentBytes: EmailAttachment[] = []
+  const documentIds = Array.isArray(input.documentIds)
+    ? [...new Set(input.documentIds.map((v) => optionalString(v, 100)).filter(Boolean))]
+    : []
+  if (documentIds.length > 0 && !isEmail) {
+    throw new Error('Attachments are e-mail only — switch the channel to E-mail')
+  }
+  if (documentIds.length > 0) {
+    for (const rawId of documentIds) {
+      const documentId = String(rawId)
+      const doc = await deps.getById(deps.tables.document, documentId)
+      if (!doc) throw new Error(`Attachment document not found: ${documentId}`)
+      if (String(doc.shipmentId) !== shipmentId) {
+        throw new Error(`${String(doc.name)} belongs to another shipment`)
+      }
+      const audience = String(doc.audience ?? 'ALL')
+      if (audience === 'INTERNAL') {
+        throw new Error(`${String(doc.name)} is internal only`)
+      }
+      if (audience === 'CUSTOMER') {
+        throw new Error(`${String(doc.name)} is for the customer only`)
+      }
+      const s3Key = String(doc.s3Key ?? '')
+      const attachablePrefixes = ['shipment-docs/', 'driver-docs/', 'rate-confirms/']
+      if (!attachablePrefixes.some((p) => s3Key.startsWith(p))) {
+        throw new Error(`${String(doc.name)} is not stored where the thread can read it`)
+      }
+      const name = String(doc.name ?? 'attachment')
+      const contentType = String(doc.contentType ?? 'application/octet-stream')
+      const sizeBytes = typeof doc.sizeBytes === 'number' ? doc.sizeBytes : null
+      sendAttachmentMeta.push({ name, contentType, sizeBytes, s3Key })
+      const bytes = await deps.readDocumentBytes(s3Key)
+      sendAttachmentBytes.push({ filename: name, contentType, bytes })
+    }
+  }
+
   const signedBody = body ? `${body}\n\n${signatureFor(authorKind, authorName)}` : signatureFor(authorKind, authorName)
 
   const message: Row = {
@@ -211,8 +259,8 @@ export async function sendShipmentMessage(deps: ThreadDeps, input: Row, caller: 
     ...(rfcMessageId ? { messageId: rfcMessageId } : {}),
     inReplyTo: inReplyTo ?? null,
     providerRef: null,
-    attachments: input.attachments ?? null,
-    documentIds: Array.isArray(input.documentIds) ? input.documentIds : null,
+    attachments: sendAttachmentMeta.length > 0 ? sendAttachmentMeta : null,
+    documentIds: documentIds.length > 0 ? documentIds : null,
     trackingLinkId: optionalString(input.trackingLinkId, 100),
     workflowRunId: optionalString(input.workflowRunId, 100),
     at: now,
@@ -236,6 +284,7 @@ export async function sendShipmentMessage(deps: ThreadDeps, input: Row, caller: 
       messageId: rfcMessageId as string,
       inReplyTo: inReplyTo ?? null,
       replyTo: threadReplyAddress(shipmentId),
+      ...(sendAttachmentBytes.length > 0 ? { attachments: sendAttachmentBytes } : {}),
     })
   } else {
     if (!to) throw new Error('SMS requires a recipient number')
@@ -387,6 +436,17 @@ export async function ingestShipmentMessage(deps: ThreadDeps, input: Row, caller
             lastKnownState: geo.state,
             lastKnownLat: geo.lat,
             lastKnownLng: geo.lng,
+            // Step P8 — shift the existing fix to the previous slot before overwriting.
+            ...(firstLoad.lastKnownAt
+              ? {
+                  lastKnownPreviousAt: firstLoad.lastKnownAt,
+                  lastKnownPreviousCity: firstLoad.lastKnownCity ?? null,
+                  lastKnownPreviousState: firstLoad.lastKnownState ?? null,
+                  ...(firstLoad.lastKnownLat != null && firstLoad.lastKnownLng != null
+                    ? { lastKnownPreviousLat: firstLoad.lastKnownLat, lastKnownPreviousLng: firstLoad.lastKnownLng }
+                    : {}),
+                }
+              : {}),
             lastKnownSource: 'MANUAL',
             updatedAt: now,
             updatedBy: caller.email,

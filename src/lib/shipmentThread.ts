@@ -94,3 +94,22 @@ export function threadSubject(shipmentNumber: string, lane: string | null | unde
 export function replySubject(subject: string): string {
   return /^re:/i.test(subject.trim()) ? subject.trim() : `Re: ${subject.trim()}`
 }
+
+/**
+ * Step P8 — filter a shipment's full message history down to the tracking-only
+ * conversation. Hides offers, quotes and tender messages; starts at the first
+ * rate confirmation. The raw list (sorted oldest‑first) is what the server
+ * returns; what goes home is the tracking thread.
+ */
+const TRACKING_HIDDEN_KINDS = new Set(['CARRIER_OFFER', 'QUOTE', 'TENDER'])
+
+export function trackingThreadMessages<T extends { kind: string; at: string }>(messages: readonly T[]): T[] {
+  const sorted = [...messages].sort((a, b) => String(a.at).localeCompare(String(b.at)))
+  // Drop the offer/quote/tender kinds.
+  const visible = sorted.filter((m) => !TRACKING_HIDDEN_KINDS.has(m.kind))
+  // Start at the first rate confirmation, if one exists.
+  const firstRateIdx = visible.findIndex((m) => m.kind === 'RATE_CON')
+  if (firstRateIdx >= 0) return visible.slice(firstRateIdx)
+  // No rate confirmation yet: show everything that remains.
+  return visible
+}

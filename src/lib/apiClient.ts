@@ -87,7 +87,8 @@ const LOAD_SHIPMENT_FIELDS = `
   carrierRepId assignmentType activeLoadCarrierId carrierName equipmentType divisionKey
   trackingProvider nextCheckCallAt nextCheckCallNote checkCallOpen pickupMonth
   lastCheckCallAt lastCheckCallType lastKnownAt lastKnownCity lastKnownState
-  lastKnownLat lastKnownLng lastKnownSource openIncidentCount deliveredAt
+  lastKnownLat lastKnownLng lastKnownPreviousAt lastKnownPreviousCity lastKnownPreviousState
+  lastKnownPreviousLat lastKnownPreviousLng lastKnownSource openIncidentCount deliveredAt
   checkCallDueNotifiedAt checkCallOverdueNotifiedAt checkCallPlan checkCallPlanStartedAt checkCallAwaitingSince checkCallEscalatedAt checkCallFlaggedAt checkCallFlagReason
 `
 // Step R's revenue tags, mirrored from the shipment so the fleet pages can group by
@@ -195,7 +196,7 @@ function undefinedLoadFields(err: unknown): { hot: boolean; stops: boolean; sort
     freight: /'(commodity|weight|pieces|piecesUnit)'/i.test(msg),
     cargoValue: /'cargoValueCents'/i.test(msg),
     podNotes: /'podNotes'/i.test(msg),
-    shipment: /'(shipmentId|orderId|loadNumber|leg|status|statusChangedAt|statusChangedBy|statusSource|carrierRepId|assignmentType|activeLoadCarrierId|carrierName|equipmentType|divisionKey|trackingProvider|nextCheckCallAt|nextCheckCallNote|checkCallOpen|pickupMonth|lastCheckCallAt|lastCheckCallType|lastKnownAt|lastKnownCity|lastKnownState|lastKnownLat|lastKnownLng|lastKnownSource|openIncidentCount|deliveredAt|checkCallDueNotifiedAt|checkCallOverdueNotifiedAt)'/i.test(msg),
+    shipment: /'(shipmentId|orderId|loadNumber|leg|status|statusChangedAt|statusChangedBy|statusSource|carrierRepId|assignmentType|activeLoadCarrierId|carrierName|equipmentType|divisionKey|trackingProvider|nextCheckCallAt|nextCheckCallNote|checkCallOpen|pickupMonth|lastCheckCallAt|lastCheckCallType|lastKnownAt|lastKnownCity|lastKnownState|lastKnownLat|lastKnownLng|lastKnownPreviousAt|lastKnownPreviousCity|lastKnownPreviousState|lastKnownPreviousLat|lastKnownPreviousLng|lastKnownSource|openIncidentCount|deliveredAt|checkCallDueNotifiedAt|checkCallOverdueNotifiedAt)'/i.test(msg),
     revTag: /'(revDivision|revSubdivision|revTagSource|revRuleId|salesRepId)'/i.test(msg),
     voided: /'voidedAt'/i.test(msg),
   }
@@ -2611,6 +2612,14 @@ export interface LoadBoardSummary {
   lastKnownAt?: string | null
   lastKnownCity?: string | null
   lastKnownState?: string | null
+  lastKnownLat?: number | null
+  lastKnownLng?: number | null
+  // Step P8 — prior ping for two-fix motion evidence on the tracking board.
+  lastKnownPreviousAt?: string | null
+  lastKnownPreviousCity?: string | null
+  lastKnownPreviousState?: string | null
+  lastKnownPreviousLat?: number | null
+  lastKnownPreviousLng?: number | null
   lastCheckCallAt?: string | null
   nextCheckCallAt?: string | null
   checkCallOpen?: 'OPEN' | null
@@ -2677,7 +2686,9 @@ export interface LoadBoardSummary {
 }
 const LOAD_SUMMARY_FIELDS = `
   id shipmentId orderId status assignmentType
-  lastKnownAt lastKnownCity lastKnownState lastCheckCallAt
+  lastKnownAt lastKnownCity lastKnownState lastKnownLat lastKnownLng
+  lastKnownPreviousAt lastKnownPreviousCity lastKnownPreviousState lastKnownPreviousLat lastKnownPreviousLng
+  lastCheckCallAt
   nextCheckCallAt checkCallOpen openIncidentCount
   activeLoadCarrierId carrierName trackingProvider deliveredAt
   pickupAppt deliveryAppt pickupDriverId deliveryDriverId truckId
@@ -3102,7 +3113,7 @@ const LOAD_CHECK_CALL_FIELDS = `
 const LOAD_CHECK_CALL_JSON_FIELDS: (keyof LoadCheckCallRecord)[] = ['charges']
 
 const TRACKING_LINK_FIELDS = `
-  id kind shipmentId loadId loadCarrierId status expiresAt
+  id kind shipmentId customerId url notes loadId loadCarrierId status expiresAt
   sentTo sentVia sentAt smsMessageId contactName contactEmail contactPhone
   showCarrier showPosition openCount lastOpenedAt requestCount
   pingCount lastPingAt lastPingLat lastPingLng lastPingAccuracyM
@@ -3235,6 +3246,9 @@ export interface SendCustomerLinkResult {
 export async function sendCustomerLink(input: {
   shipmentId: string
   expectedVersion: number
+  expiresAt?: string
+  customerId?: string | null
+  notes?: string | null
   to: string[]
   cc?: string[]
   message?: string | null
@@ -3246,6 +3260,20 @@ export async function sendCustomerLink(input: {
 
 export async function revokeCustomerLink(input: { trackingLinkId: string }): Promise<{ link: TrackingLinkRecord }> {
   return trackingAction<{ link: TrackingLinkRecord }>('REVOKE_CUSTOMER_LINK', input)
+}
+export async function extendCustomerLink(input: { trackingLinkId: string; expiresAt: string }): Promise<{ link: TrackingLinkRecord; url: string }> {
+  return trackingAction('EXTEND_CUSTOMER_LINK', input)
+}
+
+export async function listCustomerLinks(): Promise<TrackingLinkRecord[]> {
+  return listTrackingIndex<TrackingLinkRecord>({
+    name: 'listTrackingLinks',
+    decls: '$filter: ModelTrackingLinkFilterInput',
+    args: 'filter: $filter',
+    variables: { filter: { kind: { eq: 'CUSTOMER_VIEW' } } },
+    fields: TRACKING_LINK_FIELDS,
+    limit: 200,
+  })
 }
 
 /** The check-call dialog's "text this to the driver". Never undoes the check call. */
@@ -7250,6 +7278,8 @@ export async function listShipmentMessages(shipmentId: string): Promise<Shipment
 export async function sendShipmentMessage(input: {
   shipmentId: string
   channel: 'EMAIL' | 'SMS'
+  documentIds?: string[]
+  party?: 'DRIVER' | 'DISPATCHER'
   kind?: string
   to?: string | null
   subject?: string | null

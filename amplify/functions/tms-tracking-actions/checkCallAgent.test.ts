@@ -36,9 +36,11 @@ function makeDeps(store: MemoryStore, overrides: Partial<CheckCallDeps> = {}): C
     sendEmail: overrides.sendEmail ?? sentEmail,
     sendSms: overrides.sendSms ?? sentSms,
     geocode: overrides.geocode ?? vi.fn(async () => null),
+    readDocumentBytes: overrides.readDocumentBytes ?? vi.fn(async () => new Uint8Array(0)),
     trackingUrl: (token) => `https://track.test/l/${token}`,
     now: () => currentTime,
     randomId: () => `r${Math.random().toString(36).slice(2)}`,
+    ...overrides,
   }
 }
 

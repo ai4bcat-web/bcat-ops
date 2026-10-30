@@ -446,6 +446,49 @@ P8. **Assign carrier → rate con → the tracking thread and the tracking agent
     7. **Layout** follows the Chaine reference (P8-UI): list on the left with motion/status
        and last-known, detail on the right with the map, the ETA, the cadence controls and
        the conversation thread.
+    **P8-UI REBUILD — SUPERSEDED SPEC (Ryne, 2026-10-30 09:05, with two Chaine screenshots:
+    `Docs/tms-build/mvmnt-ui/chaine-inbox-conversations.png` and
+    `Docs/tms-build/mvmnt-ui/chaine-tracking-table.png`). "It should look more like this.
+    Don't need all the features but we specifically need the tracking conversations and the
+    customer links."** The Tracking workstation KEEPS the Chaine top tabs **Inbox · Tracking ·
+    Booking** (do not remove them). What must change:
+    1. **Inbox tab = the tracking conversations, Chaine style.** LEFT: a conversation list,
+       one card per shipment thread — shipment #, lane (origin → destination), date, the
+       latest message preview, a status chip (e.g. "Offer in review", "Delivered") and a kind
+       chip ("Load offer", "Check call") — with search and a filter icon; sub-filters All /
+       Shipment chats / Team member chats. RIGHT: the chat for the selected shipment — header
+       with the shipment # and "last activity"; message bubbles in order, ours on the right,
+       theirs on the left, each marked **agent or person** and signed; structured cards inside
+       the stream where it makes sense (the load card with DOT/MC, rate, pick and drop stops;
+       a "Tracking link sent" card; a POD-received card); inline status pills ("Offer in
+       review") between messages; a composer at the bottom with a formatting toolbar, channel
+       selector (SMS / e-mail), recipient (driver / dispatcher), attachment and @mention,
+       the sender's signature appended. Threads update live.
+    2. **Tracking tab = the Chaine table.** Columns, in this order: Shipment # (+ favourite
+       star, customer/team under it), Origin (city, appt date-time), Destination, Status (status
+       pill + next-event pill such as "Delivery starts in 7 hours"), Tracking & Last Location
+       ("Tracking" chip with link icon, last place, "6 mins ago", and a note like "Latest ping
+       came from the driver link"), Motion (Moving / Stopped), Next stop (which stop, miles
+       away, ETA), Team Members (avatars), Carrier (name, DOT, MC). Toolbar: search, + Filter,
+       Sort, Views ▾, Save view, My Favorites, Manage links, Create Customer URL, Create
+       Shipment, Active / Closed. "Recently viewed loads" chips under the toolbar. Table View /
+       Map View toggle. Row click opens the shipment's Tracking tab (the existing one).
+    3. **Customer links (must-have).** **Create Customer URL** on the toolbar and in the row
+       menu: creates the public tracking link for one shipment (or for a customer across
+       their active shipments), with expiry, and offers Copy / Send by e-mail / Send by SMS.
+       **Manage links**: a page listing every customer link — shipment, customer, URL,
+       created by, expires, last opened, opens count — with Revoke and Extend. The link opens
+       the existing public tracking page (TrackPage: no load details, position + ETA only).
+    4. **Data**: fix the empty table; seed ≥5 in-transit shipments with pings and threads so
+       the Inbox and Tracking tabs look like the screenshots on first open.
+    5. Proof: devVerifyP extended; fresh screenshots of Inbox (list + chat) and Tracking
+       (table) in `Docs/tms-build/screenshots/`; ONE deploy.
+    6. **Scope cut (Ryne, 2026-10-30 09:10): no offers or negotiation here.** The Inbox is a
+       tracking element only: a thread exists for a shipment from the moment its rate
+       confirmation is sent, and carries check calls, location replies, dispatcher e-mails,
+       POD requests and manual messages. No "Load offer" cards, no "Offer in review" pills,
+       no bid/counter flow in this page (carrier offers stay in the Dispatch workstation).
+       Drop the Booking tab if it only held offers; keep Inbox · Tracking.
 P9. **Delivery → POD request → POD review → ready for billing.** When the dispatcher or
     driver confirms delivery (reply, SMS, or status), the agent asks for the POD in the
     thread and by SMS. A received POD is **reviewed by the app** (legibility; if a corner says
@@ -532,6 +575,70 @@ values from the P8 pings, and the same rows open the shipment's Tracking tab.
 ## Step N — Aljex import, carrier vetting, rate cons and BOLs by email, tracking threads (Ryne, 2026-10-29)
 
 Added after M. Four requirements; some build on what C, E, J and K already shipped.
+
+S. **UI redesign — "the green admin" (Ryne, 2026-10-30 09:20).** Full spec and tokens in
+   `Docs/tms-build/REDESIGN_UI_REFERENCE.md`, references in `Docs/tms-build/redesign-ui/`.
+   Light theme by default, white rounded cards on a soft grey-green canvas, green primary,
+   sidebar with green active pill and company switcher, breadcrumb top bar with a notification
+   bell, KPI cards with deltas and D/W/M toggles, approval cards, pill tables, document preview
+   split, profile overview with timeline, segmented/gauge/pill-bar charts, receipt-detail modal.
+   Applied to EVERY page on dev (TMS and legacy ops) with functionality unchanged, plus the six
+   added features the reference makes obvious (Compliance document overview with Approve/Reject,
+   User management with registration approvals, Financial operations, Expenses with receipt
+   detail, Platform health, Notifications). Stages S1 (kit + shell + dashboard, **gated on
+   Ryne's screenshot review**) → S2 TMS pages → S3 legacy pages → S4 added features. Runs AFTER
+   the P8-UI tracking rebuild lands.
+
+T. **Carrier Sales — first line of negotiation (Ryne, 2026-10-30 10:05).** A new workstation
+   page under Shipments, **Carrier Sales**, between Dispatch and Tracking. It is where inbound
+   carrier bids arrive and get qualified before a rep ever touches them; Dispatch keeps posting
+   and coverage, Tracking keeps the post-rate-con thread. Everything below lands on the load.
+   1. **Inbound bids by e-mail, per load.** Every posted load gets its own distribution address
+      (Gmail plus-address on the existing bridge: `bids+<PRO>@…`, shown on the DAT/Truckstop
+      posting as the contact e-mail and on the load). Mail to it is parsed by the e-mail agent:
+      carrier name, MC/DOT, contact, equipment, availability, **offered rate**, and tied to the
+      load by the address (fallback: PRO in subject/body). The carrier is vetted on arrival
+      (MyCarrierPackets/FMCSA status from N2) and the bid is recorded on the load.
+   2. **Threshold.** Each load carries a **max buy** = customer rate − margin target (20% default,
+      by mode FTL/LTL, per-customer override — the P4 settings) plus an optional manual override
+      and a **route band** (default: within 5% above max buy). Rules per business/division.
+   3. **First-line negotiation by e-mail.** Bid ≤ max buy → route to rep immediately. Bid inside
+      the route band → route to rep. Bid above the band → the agent replies **once** with the
+      target rate ("we're at $X on this lane, can you do it?"), logs the counter, and routes
+      only if the carrier comes back inside the band; otherwise the bid stays on the load as
+      "declined by rate" (still visible, still assignable by a human). Auto-counter policy is
+      configurable (off / one counter / counter N times) in Carrier Sales settings.
+   4. **Route to rep = an e-mail.** To the load's carrier rep (or the customer's default carrier
+      team, round-robin), with the bid summary, the carrier's vetting, the load card and a link
+      to the load's Carrier Sales thread; the rep replies from the thread with the agent's
+      mailbox in cc, so the whole exchange stays on the load. Optional Slack ping to the team
+      channel. Rep actions on the thread: Counter, Route to another rep, **Assign carrier →
+      send rate con** (hands off to P8/Tracking).
+   5. **Inbound calls through the voice agent.** Reuse the Cowtown inbound carrier agent (Aiden:
+      Railway service + Twilio; see memory `cowtown-voice-agent`) as **BCAT's carrier-sales
+      line**: a dedicated number (not the dispatch number 224-875-6477). The agent greets, asks
+      for the load ID / PRO (or lane + date), reads the load back, collects MC and the carrier's
+      rate, checks the same threshold, and **warm-transfers** to the load's rep (fallback: team
+      queue, then voicemail/callback outside hours) when the rate is in band; otherwise states
+      the target rate once and offers a callback. Every call is recorded and transcribed; the
+      summary (carrier, MC, rate, outcome, recording link, transcript) is logged on the load.
+      On dev the voice provider is stubbed with a **"Simulate inbound call"** dev action that
+      produces the same records.
+   6. **One history per load, both channels.** The Carrier Sales page: LEFT a list of loads with
+      open negotiations (PRO, lane, pickup, max buy, best bid, bid count, e-mail/phone icons,
+      status Posted · Bids in · Routed to rep · Covered); RIGHT the selected load: threshold card
+      (customer rate, margin target, max buy, override), **bids table** (carrier, MC, vetting
+      pill, rate, channel, time, outcome, actions), and the **unified timeline** of every e-mail
+      and call in order with bodies/transcripts/recordings. The same panel is a **Carrier Sales
+      tab** on the shipment. Settings: thresholds by mode/division, route band, auto-counter
+      policy, rep/team routing, business hours, the number and the distribution-address pattern.
+   7. Seed demo bids (e-mail and simulated calls) on the P demo loads; proof via devVerify +
+      screenshots. Needs from Ryne for live: a voice number and provider credits (the Cowtown
+      agent is blocked on OpenAI credits and Twilio A2P); the Gmail plus-address bridge already
+      exists. **PRIORITY (Ryne, 2026-10-30 10:10): BACKBURNER.** Order of work is now
+      (1) Shipments functionality so the full demo runs end to end, tracking included —
+      the P8-UI rebuild and anything the demo flow P1–P11 still needs; (2) the UI redesign
+      (Step S); (3) only then new features such as this one. Do not start T until Ryne says so.
 
 N1. **Aljex bulk import.** Ryne will do one big export from Aljex to load this platform.
     Build My Brokerage → Settings → **Import from Aljex**: upload the Aljex export files

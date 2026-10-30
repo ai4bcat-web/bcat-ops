@@ -12,6 +12,9 @@
  *
  *   node scripts/devVerifyP.mjs
  *
+ * Requires Chrome (set CHROME_BIN if it is not installed at the platform default).
+ * The final P8-UI check launches an isolated headless profile, verifies the real
+ * tracking page and saves screenshots under Docs/tms-build/screenshots/.
  * The script refuses to run against any endpoint other than the dev AppSync URL.
  */
 import { randomBytes } from 'node:crypto'
@@ -26,6 +29,7 @@ import {
 } from '@aws-sdk/client-cognito-identity-provider'
 import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda'
 import { DEMO_STAFF } from './seedDemo.mjs'
+import { verifyTrackingUi } from './lib/verifyTrackingUi.mjs'
 
 const DEV_API = 'https://f5iqzdpidzalvjys7yxijn5ave.appsync-api.us-east-1.amazonaws.com/graphql'
 const DEV_POOL = 'us-east-1_UKhMNVAG1'
@@ -124,7 +128,19 @@ async function mintIdentity(email, groups) {
   await signOut().catch(() => {})
   await signIn({ username: email, password })
   const session = await fetchAuthSession({ forceRefresh: true })
-  return { token: session.tokens.idToken.toString(), password }
+  const username = session.tokens.idToken.payload['cognito:username']
+  const prefix = `CognitoIdentityServiceProvider.${DEV_CLIENT}`
+  const { defaultStorage } = await import('aws-amplify/utils')
+  const refreshToken = await defaultStorage.getItem(`${prefix}.${username}.refreshToken`)
+  if (!refreshToken) throw new Error('Temporary dev login did not yield a refresh token')
+  const storage = {
+    [`${prefix}.${username}.refreshToken`]: refreshToken,
+    [`${prefix}.LastAuthUser`]: username,
+    [`${prefix}.${username}.idToken`]: session.tokens.idToken.toString(),
+    [`${prefix}.${username}.accessToken`]: session.tokens.accessToken.toString(),
+    [`${prefix}.${username}.clockDrift`]: '0',
+  }
+  return { token: session.tokens.idToken.toString(), password, storage }
 }
 
 async function manageUsers(token, action, input) {
@@ -215,11 +231,13 @@ async function main() {
   const adminEmail = `zz-p-admin-${Date.now()}@example.invalid`
   let adminToken
   let adminPassword
+  let browserStorage
   try {
     const minted = await mintIdentity(adminEmail, ['ADMIN', 'page-tms'])
     adminToken = minted.token
     adminPassword = minted.password
     adminTokenGlobal = adminToken
+    browserStorage = minted.storage
   } catch (err) {
     bad('mint admin identity', String(err))
     throw err
@@ -426,6 +444,47 @@ async function main() {
     equals('P11 reset re-seeded', reset.counts?.SHIPMENT >= 1, true)
     const stateAfterReset = await ship('GET_DEMO_STATE', {})
     equals('P11 demo state present after reset', stateAfterReset.facts?.shipmentCount >= 1, true)
+
+    // Customer URL lifecycle uses the seeded transit shipment and the public API.
+    const linkShipmentId = findDemoRecord(stateAfterReset, 'SHIPMENT', 'shipment.intransit')?.recordId
+    if (!linkShipmentId) throw new Error('Missing seeded in-transit shipment for customer-link proof')
+    const linkBundle = await getBundle(adminToken, linkShipmentId)
+    const expiresAt = new Date(Date.now() + 7 * 86400_000).toISOString()
+    const customerLink = await track('SEND_CUSTOMER_LINK', {
+      shipmentId: linkShipmentId, expectedVersion: linkBundle.shipment.version ?? 0,
+      via: 'COPY', to: [], cc: [], expiresAt, notes: 'P8-UI live verification',
+    })
+    equals('P8-UI customer link expiry', customerLink.link.expiresAt, expiresAt)
+    const customerUrlResolved = customerLink.url.startsWith('http') ? new URL(customerLink.url) : new URL(customerLink.url, 'https://dev.d3dejqzs77khq6.amplifyapp.com')
+    equals('P8-UI customer link uses dev origin', customerUrlResolved.origin, 'https://dev.d3dejqzs77khq6.amplifyapp.com')
+    const customerPage = await publicGet(`/track/s/${customerLink.link.id}`)
+    equals('P8-UI public customer link reachable', customerPage.status, 200)
+    const publicText = JSON.stringify(customerPage.body)
+    equals('P8-UI public customer link hides private fields', /"(?:rateCents|buyCents|sellCents|driverPhone|dispatcherPhone|financialLines)"/.test(publicText), false)
+    const opened = await gql(adminToken, 'query($id:ID!){getTrackingLink(id:$id){openCount lastOpenedAt}}', { id: customerLink.link.id })
+    equals('P8-UI public customer link records opens', opened.getTrackingLink.openCount >= 1 && Boolean(opened.getTrackingLink.lastOpenedAt), true)
+    const extendedExpiry = new Date(Date.now() + 14 * 86400_000).toISOString()
+    const extended = await track('EXTEND_CUSTOMER_LINK', { trackingLinkId: customerLink.link.id, expiresAt: extendedExpiry })
+    equals('P8-UI customer link extends', extended.link.expiresAt, extendedExpiry)
+    await track('REVOKE_CUSTOMER_LINK', { trackingLinkId: customerLink.link.id })
+    const revokedPage = await publicGet(`/track/s/${customerLink.link.id}`)
+    equals('P8-UI revoked customer link rejected', [403, 404, 410].includes(revokedPage.status), true)
+    const deadPublicText = String(revokedPage.text ?? revokedPage.body ?? '')
+    equals('P8-UI revoked public page explains inactive link', /no longer active|no longer valid|expired|revoked/i.test(deadPublicText) || revokedPage.status === 404, true)
+    const refreshedBundle = await getBundle(adminToken, linkShipmentId)
+    await track('SEND_CUSTOMER_LINK', {
+      shipmentId: linkShipmentId, expectedVersion: refreshedBundle.shipment.version ?? 0,
+      via: 'COPY', to: [], cc: [], expiresAt: extendedExpiry,
+    })
+
+    // P8-UI: exercise the deployed workstation, not only the underlying APIs.
+    const ui = await verifyTrackingUi({
+      storage: browserStorage,
+      shipmentIds: stateAfterReset.records.filter((record) => record.kind === 'SHIPMENT' && /^shipment\.intransit(?:\.[1-4])?$/.test(record.demoKey)).map((record) => record.recordId),
+      origin: process.env.DEV_VERIFY_UI_URL,
+      screenshots: resolve('Docs/tms-build/screenshots'),
+    })
+    ok('P8-UI tracking list, detail, ETA, thread and deep link', JSON.stringify(ui))
 
     // Remove demo staff identities.
     for (const member of DEMO_STAFF) {

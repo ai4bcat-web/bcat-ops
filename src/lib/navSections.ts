@@ -14,7 +14,7 @@
  */
 import {
   LayoutDashboard, Package, LineChart, FileSpreadsheet, Truck, Banknote, Building2,
-  MapPin, Receipt, Workflow, GraduationCap, Building, type LucideIcon,
+  MapPin, Receipt, Workflow, GraduationCap, Building, Link2, type LucideIcon,
 } from 'lucide-react'
 import { NAV_ITEMS } from '@/lib/navItems'
 import { SEED_DIVISIONS, topLevelOf } from '@/lib/ownership'
@@ -98,6 +98,7 @@ export const TMS_ITEMS: NavItemDef[] = [
   { to: '/tms/vendors',    label: 'Vendors',      icon: Receipt,         pageKey: 'vendorAp',  section: BROKERAGE, tms: true },
   { to: '/tms/workflows',  label: 'Workflows',    icon: Workflow,        pageKey: 'tms',       section: BROKERAGE, tms: true },
   { to: '/tms/academy',    label: 'Academy',      icon: GraduationCap,   pageKey: 'tms',       section: BROKERAGE, tms: true, badge: 'BETA' },
+  { to: '/tms/tracking/links',  label: 'Manage Customer Links', icon: Link2, pageKey: 'tms', section: BROKERAGE, tms: true },
   { to: '/tms/brokerage',  label: 'My Brokerage', icon: Building,        pageKey: 'settings',  section: BROKERAGE, tms: true },
 ]
 

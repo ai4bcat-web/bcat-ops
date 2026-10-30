@@ -1762,23 +1762,20 @@
   color: var(--tms-muted);
 }
 
+/* Tracking table cells (P8-UI rebuild). */
+.tms-shell .tms-tracking-table-pane {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
 .tms-shell .tms-tracking-shipment-cell {
   display: flex;
   align-items: center;
   gap: 10px;
-}
-
-.tms-shell .tms-tracking-avatar {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 30px;
-  border-radius: 6px;
-  background: var(--tms-badge-blue);
-  color: #0a1a2a;
-  font-size: 11px;
-  font-weight: 700;
 }
 
 .tms-shell .tms-tracking-pro {
@@ -1797,8 +1794,11 @@
 }
 
 .tms-shell .tms-tracking-favorited {
+  background: none;
+  border: 0;
+  padding: 0;
   color: var(--tms-primary);
-  fill: currentColor;
+  cursor: pointer;
 }
 
 .tms-shell .tms-tracking-cell-muted {
@@ -1830,24 +1830,182 @@
   font-size: 12px;
 }
 
-/* Two-pane tracking desk: list on the left, detail on the right. */
-.tms-shell .tms-tracking-list-pane {
+.tms-shell .tms-tracking-team-cell {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 200px;
+}
+
+/* Per-row hover menu (open shipment, customer URL). */
+.tms-shell .tms-tracking-rowmenu {
+  position: relative;
+  display: inline-flex;
+}
+
+.tms-shell .tms-tracking-rowmenu-menu {
+  display: none;
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 30;
+  min-width: 180px;
+  background: var(--tms-card);
+  border: 1px solid var(--tms-border);
+  border-radius: 6px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+}
+
+.tms-shell .tms-tracking-rowmenu:hover .tms-tracking-rowmenu-menu,
+.tms-shell .tms-tracking-rowmenu:focus-within .tms-tracking-rowmenu-menu {
+  display: block;
+}
+
+.tms-shell .tms-tracking-rowmenu-item {
+  display: block;
+  width: 100%;
+  padding: 8px 12px;
+  background: none;
+  border: 0;
+  color: var(--tms-text);
+  text-align: left;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.tms-shell .tms-tracking-rowmenu-item:hover {
+  background: #1d1d1d;
+}
+
+/* ── Inbox: Chaine conversations ──────────────────────────────────────────── */
+
+.tms-shell .tms-inbox {
   display: flex;
-  flex-direction: column;
   flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
 }
 
-.tms-shell .tms-tracking-detail-pane {
-  width: 420px;
+.tms-shell .tms-inbox-list {
+  width: 340px;
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
-  border-left: 1px solid var(--tms-border);
-  background: var(--tms-bg);
+  min-height: 0;
+  border-right: 1px solid var(--tms-border);
+}
+
+.tms-shell .tms-inbox-list-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--tms-border);
+}
+
+.tms-shell .tms-inbox-items {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.tms-shell .tms-inbox-item {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 10px 12px 10px 14px;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--tms-border);
+  border-left: 3px solid transparent;
+  color: var(--tms-text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.tms-shell .tms-inbox-item:hover {
+  background: var(--tms-surface-hover);
+}
+
+.tms-shell .tms-inbox-item.tms-active {
+  background: var(--tms-surface-selected);
+  border-left-color: var(--tms-primary);
+}
+
+.tms-shell .tms-inbox-item-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.tms-shell .tms-inbox-item-pro {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.tms-shell .tms-inbox-item-time {
+  color: var(--tms-muted);
+  font-size: 12px;
+  flex: 0 0 auto;
+}
+
+.tms-shell .tms-inbox-item-customer {
+  font-size: 12px;
+  color: var(--tms-text);
   overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tms-shell .tms-inbox-item-lane {
+  font-size: 12px;
+  color: var(--tms-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tms-shell .tms-inbox-item-preview {
+  font-size: 12px;
+  color: var(--tms-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tms-shell .tms-inbox-item-count {
+  position: absolute;
+  right: 12px;
+  bottom: 10px;
+}
+
+.tms-shell .tms-inbox-chat {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px;
+}
+
+@media (max-width: 1100px) {
+  .tms-shell .tms-inbox {
+    flex-direction: column;
+  }
+
+  .tms-shell .tms-inbox-list {
+    width: auto;
+    flex: 0 0 auto;
+    max-height: 40%;
+    border-right: 0;
+    border-bottom: 1px solid var(--tms-border);
+  }
 }
 
 .tms-shell .tms-tracking-detail {
@@ -1926,373 +2084,6 @@
   color: var(--tms-badge-red);
   font-size: 12px;
 }
-
-.tms-shell .tms-tracking-footer-actions {
-  display: flex;
-  gap: 8px;
-  margin-left: auto;
-}
-
-/* ── Inbox panel ──────────────────────────────────────────────────────────── */
-
-.tms-shell .tms-tracking-inbox {
-  display: flex;
-  flex-direction: column;
-  flex: 1 1 auto;
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.tms-shell .tms-tracking-inbox-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--tms-border);
-}
-
-.tms-shell .tms-tracking-inbox-body {
-  display: flex;
-  flex: 1 1 auto;
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.tms-shell .tms-tracking-inbox-list {
-  width: 260px;
-  flex: 0 0 auto;
-  overflow-y: auto;
-  border-right: 1px solid var(--tms-border);
-}
-
-.tms-shell .tms-tracking-inbox-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 10px 12px;
-  background: none;
-  border: 0;
-  border-bottom: 1px solid var(--tms-border);
-  color: var(--tms-text);
-  text-align: left;
-  cursor: pointer;
-}
-
-.tms-shell .tms-tracking-inbox-item:hover,
-.tms-shell .tms-tracking-inbox-item.tms-active {
-  background: #1d1d1d;
-}
-
-.tms-shell .tms-tracking-inbox-pro {
-  font-weight: 600;
-  font-size: 13px;
-}
-
-.tms-shell .tms-tracking-inbox-customer {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 12px;
-  color: var(--tms-muted);
-}
-
-.tms-shell .tms-tracking-inbox-thread {
-  flex: 1 1 auto;
-  min-width: 0;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 12px;
-}
-
-.tms-shell .tms-tracking-thread-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 12px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--tms-border);
-}
-
-.tms-shell .tms-tracking-thread-pro {
-  font-weight: 600;
-  color: var(--tms-text);
-}
-
-.tms-shell .tms-tracking-thread-route {
-  color: var(--tms-muted);
-  font-size: 12px;
-}
-
-.tms-shell .tms-tracking-messages {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.tms-shell .tms-tracking-message {
-  padding: 10px 12px;
-  border-radius: 6px;
-  background: var(--tms-card);
-  border: 1px solid var(--tms-border);
-}
-
-.tms-shell .tms-tracking-message-in {
-  border-left: 3px solid var(--tms-badge-blue);
-}
-
-.tms-shell .tms-tracking-message-out {
-  border-left: 3px solid var(--tms-primary);
-}
-
-.tms-shell .tms-tracking-message-meta {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 6px;
-}
-
-.tms-shell .tms-tracking-message-party {
-  color: var(--tms-muted);
-  font-size: 12px;
-  text-transform: capitalize;
-}
-
-.tms-shell .tms-tracking-message-time {
-  margin-left: auto;
-  color: var(--tms-muted);
-  font-size: 12px;
-}
-
-.tms-shell .tms-tracking-message-subject {
-  margin: 0 0 4px;
-  font-weight: 600;
-  font-size: 13px;
-}
-
-.tms-shell .tms-tracking-message-body {
-  margin: 0;
-  color: var(--tms-text);
-  font-size: 13px;
-  white-space: pre-wrap;
-}
-
-/* ── Booking panel ────────────────────────────────────────────────────────── */
-
-.tms-shell .tms-tracking-booking {
-  display: flex;
-  flex-direction: column;
-  flex: 1 1 auto;
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.tms-shell .tms-tracking-booking-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--tms-border);
-}
-
-.tms-shell .tms-tracking-booking-body {
-  display: flex;
-  flex: 1 1 auto;
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.tms-shell .tms-tracking-booking-list {
-  width: 260px;
-  flex: 0 0 auto;
-  overflow-y: auto;
-  border-right: 1px solid var(--tms-border);
-}
-
-.tms-shell .tms-tracking-booking-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 10px 12px;
-  background: none;
-  border: 0;
-  border-bottom: 1px solid var(--tms-border);
-  color: var(--tms-text);
-  text-align: left;
-  cursor: pointer;
-}
-
-.tms-shell .tms-tracking-booking-item:hover,
-.tms-shell .tms-tracking-booking-item.tms-active {
-  background: #1d1d1d;
-}
-
-.tms-shell .tms-tracking-booking-pro {
-  font-weight: 600;
-  font-size: 13px;
-}
-
-.tms-shell .tms-tracking-booking-route {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 12px;
-  color: var(--tms-muted);
-}
-
-.tms-shell .tms-tracking-booking-detail {
-  flex: 1 1 auto;
-  min-width: 0;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 12px;
-}
-
-.tms-shell .tms-tracking-offers {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.tms-shell .tms-tracking-offer-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 12px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--tms-border);
-}
-
-.tms-shell .tms-tracking-offer-pro {
-  font-weight: 600;
-  color: var(--tms-text);
-}
-
-.tms-shell .tms-tracking-offer-route {
-  color: var(--tms-muted);
-  font-size: 12px;
-}
-
-.tms-shell .tms-tracking-offer-card {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 12px;
-  background: var(--tms-card);
-  border: 1px solid var(--tms-border);
-  border-radius: 6px;
-}
-
-.tms-shell .tms-tracking-offer-main {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-.tms-shell .tms-tracking-offer-carrier {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-weight: 600;
-}
-
-.tms-shell .tms-tracking-offer-mc {
-  color: var(--tms-muted);
-  font-size: 12px;
-  font-weight: 400;
-}
-
-.tms-shell .tms-tracking-offer-facts {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 12px;
-  font-size: 13px;
-}
-
-.tms-shell .tms-tracking-offer-rate {
-  font-weight: 600;
-}
-
-.tms-shell .tms-tracking-offer-summary,
-.tms-shell .tms-tracking-offer-availability {
-  color: var(--tms-muted);
-}
-
-.tms-shell .tms-tracking-offer-vetting {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-}
-
-.tms-shell .tms-tracking-offer-blockers {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  color: var(--tms-badge-orange);
-  font-size: 12px;
-}
-
-.tms-shell .tms-tracking-offer-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  flex: 0 0 auto;
-}
-
-.tms-shell .tms-tracking-postings {
-  flex: 1 1 auto;
-  min-width: 0;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.tms-shell .tms-tracking-posting {
-  padding: 10px 12px;
-  background: var(--tms-card);
-  border: 1px solid var(--tms-border);
-  border-radius: 6px;
-}
-
-.tms-shell .tms-tracking-posting-line {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 4px;
-}
-
-.tms-shell .tms-tracking-posting-pro {
-  font-weight: 600;
-}
-
-.tms-shell .tms-tracking-posting-status {
-  color: var(--tms-muted);
-  font-size: 12px;
-  text-transform: capitalize;
-}
-
-.tms-shell .tms-tracking-posting-meta {
-  color: var(--tms-muted);
-  font-size: 12px;
-}
-
 
 .tms-portal .tms-board-batch { display: flex; flex-direction: column; gap: 14px; }
 .tms-portal .tms-board-batch-results { display: flex; flex-direction: column; gap: 6px; max-height: 240px; overflow-y: auto; }

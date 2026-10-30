@@ -6291,7 +6291,7 @@ describe('Step P demo actions', () => {
     table('UserProfile-test').set('sub-owner', { id: 'sub-owner', role: 'CARRIER_REP' })
     const result = await call('SEED_DEMO_DATA', {}, OWNER)
 
-    expect(result.seedVersion).toBe('p1.1')
+    expect(result.seedVersion).toBe('p8.1')
     expect(result.created).toBeGreaterThan(0)
     expect(table(TABLES.demo).size).toBeGreaterThan(0)
     expect(table(TABLES.customer).size).toBeGreaterThan(0)
@@ -6306,7 +6306,7 @@ describe('Step P demo actions', () => {
 
     const result = await call('RESET_DEMO_DATA', {}, OWNER)
 
-    expect(result.seedVersion).toBe('p1.1')
+    expect(result.seedVersion).toBe('p8.1')
     expect(table(TABLES.shipment).size).toBeGreaterThanOrEqual(shipmentCount)
     expect(table(TABLES.shipment).size).toBeGreaterThan(0)
   })

@@ -319,13 +319,22 @@ async function projectRecord(record: StreamRecord, deps: ProjectorDeps): Promise
     statusChangedAt: now,
     statusChangedBy: createdBy,
     statusSource,
-    ...lastKnownPatch({
-      at: latest.at,
-      type: latest.event,
-      source,
-      city: latest.city,
-      state: latest.state,
-    }),
+    ...lastKnownPatch(
+      {
+        at: latest.at,
+        type: latest.event,
+        source,
+        city: latest.city,
+        state: latest.state,
+      },
+      {
+        lastKnownAt: load.lastKnownAt as string | null | undefined,
+        lastKnownCity: load.lastKnownCity as string | null | undefined,
+        lastKnownState: load.lastKnownState as string | null | undefined,
+        lastKnownLat: load.lastKnownLat as number | null | undefined,
+        lastKnownLng: load.lastKnownLng as number | null | undefined,
+      },
+    ),
     updatedAt: now,
     updatedBy: PROJECTOR_ACTOR,
   }

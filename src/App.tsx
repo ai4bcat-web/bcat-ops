@@ -37,6 +37,7 @@ import { DocumentReviewPage } from '@/features/documents/DocumentReviewPage'
 import { DispatchWorkstation } from '@/features/shipments/workstations/DispatchWorkstation'
 import { TrackingWorkstation } from '@/features/shipments/workstations/TrackingWorkstation'
 import { DocumentsWorkstation } from '@/features/shipments/workstations/DocumentsWorkstation'
+import CustomerLinksPage from '@/features/shipments/workstations/CustomerLinksPage'
 import { InsurancePage } from '@/features/insurance/InsurancePage'
 import { SchedulePage } from '@/features/schedule/SchedulePage'
 import { TimeOffPage } from '@/features/time-off/TimeOffPage'
@@ -252,6 +253,7 @@ export default function App() {
                   <Route path="shipments/:id" element={<RequirePage page={['loads', 'tms']}><ShipmentPage /></RequirePage>} />
                   <Route path="dispatch" element={<RequirePage page={['loads', 'tms']}><DispatchWorkstation /></RequirePage>} />
                   <Route path="tracking" element={<RequirePage page={['loads', 'tms']}><TrackingWorkstation /></RequirePage>} />
+                  <Route path="tracking/links" element={<RequirePage page={['loads', 'tms']}><CustomerLinksPage /></RequirePage>} />
                   <Route path="documents/review" element={<RequirePage page={['loads', 'tms']}><DocumentReviewPage /></RequirePage>} />
                   <Route path="documents/view/:slug" element={<RequirePage page={['loads', 'tms']}><DocumentsWorkstation /></RequirePage>} />
                   <Route path="documents" element={<RequirePage page={['loads', 'tms']}><DocumentsWorkstation /></RequirePage>} />

@@ -32,6 +32,7 @@ function makePodDeps(
     sendEmail: vi.fn(async () => ({ status: 'SENT' as const, providerRef: 'ses', error: null })),
     sendSms: vi.fn(async () => ({ status: 'SENT' as const, providerRef: 'tw', error: null })),
     geocode: vi.fn(async () => null),
+    readDocumentBytes: vi.fn(async () => new Uint8Array(0)),
     now: () => currentTime,
     randomId: () => `r${Math.random().toString(36).slice(2)}`,
     checkPod: overrides.checkPod ?? vi.fn(async () => passResult()),

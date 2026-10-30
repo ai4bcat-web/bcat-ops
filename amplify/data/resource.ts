@@ -133,6 +133,14 @@ const schema = a.schema({
       lastKnownState:    a.string(),
       lastKnownLat:      a.float(),
       lastKnownLng:      a.float(),
+      // Step P8 — the prior ping so the board can prove movement (or a stop) from
+      // two fixes without reading the whole check-call log. Additive: null when
+      // only one ping has ever been recorded.
+      lastKnownPreviousAt:    a.datetime(),
+      lastKnownPreviousCity:  a.string(),
+      lastKnownPreviousState: a.string(),
+      lastKnownPreviousLat:   a.float(),
+      lastKnownPreviousLng:   a.float(),
       lastKnownSource:   a.enum(['MANUAL', 'DRIVER_APP', 'LINK', 'MOTIVE', 'SYSTEM']),
       // Open INCIDENT rows on this load. F reads it; D only keeps it honest.
       openIncidentCount: a.integer(),
@@ -2160,6 +2168,9 @@ const schema = a.schema({
     .model({
       kind:          a.enum(['CARRIER_PING', 'CUSTOMER_VIEW', 'CARRIER_UPLOAD']),
       shipmentId:    a.string().required(),
+      customerId:    a.string(),
+      url:           a.string(),
+      notes:         a.string(),
       loadId:        a.string(),
       loadCarrierId: a.string(),
       status:        a.enum(['ACTIVE', 'REVOKED', 'EXPIRED']),

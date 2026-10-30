@@ -40,6 +40,9 @@ export interface ShipmentListRow extends ShipmentRecord {
   /** Step D — the load's tracking clock, for the board's Last update / Next check call / Exceptions. */
   lastUpdateAt: string | null
   lastUpdatePlace: string | null
+  /** Step P8 — the prior ping, so the tracking board can prove Moving/Stopped from two fixes. */
+  previousUpdateAt: string | null
+  previousUpdatePlace: string | null
   nextCheckCallAt: string | null
   lastCheckCallAt: string | null
   checkCallOpen: 'OPEN' | null
@@ -370,6 +373,8 @@ export function useShipments(view: ShipmentsView = DEFAULT_VIEW) {
     const trackingByShipment: Record<string, {
       lastUpdateAt: string | null
       lastUpdatePlace: string | null
+      previousUpdateAt: string | null
+      previousUpdatePlace: string | null
       nextCheckCallAt: string | null
       nextCheckCallNote: string | null
       lastCheckCallAt: string | null
@@ -389,7 +394,8 @@ export function useShipments(view: ShipmentsView = DEFAULT_VIEW) {
       if (l.assignmentType) assignmentByShipment[l.shipmentId] = l.assignmentType
       if (l.status) statusByShipment[l.shipmentId] = l.status
       const t = trackingByShipment[l.shipmentId] ??= {
-        lastUpdateAt: null, lastUpdatePlace: null, nextCheckCallAt: null, nextCheckCallNote: null,
+        lastUpdateAt: null, lastUpdatePlace: null, previousUpdateAt: null, previousUpdatePlace: null,
+        nextCheckCallAt: null, nextCheckCallNote: null,
         lastCheckCallAt: null, lastCheckCallType: null, checkCallOpen: null, openIncidentCount: 0,
         trackingProvider: null, lastKnownAt: null, lastKnownCity: null, lastKnownState: null,
         lastKnownSource: null, stopCount: null,
@@ -398,6 +404,15 @@ export function useShipments(view: ShipmentsView = DEFAULT_VIEW) {
       if (update && (!t.lastUpdateAt || update > t.lastUpdateAt)) {
         t.lastUpdateAt = update
         t.lastUpdatePlace = [l.lastKnownCity, l.lastKnownState].filter(Boolean).join(', ') || null
+        // The previous ping rides with the current ping; when the newest update is
+        // not a ping the row honestly carries no prior place.
+        if (l.lastKnownAt === update) {
+          t.previousUpdateAt = l.lastKnownPreviousAt ?? null
+          t.previousUpdatePlace = [l.lastKnownPreviousCity, l.lastKnownPreviousState].filter(Boolean).join(', ') || null
+        } else {
+          t.previousUpdateAt = null
+          t.previousUpdatePlace = null
+        }
       }
       // The newest "last known" across the legs keeps its place and its source together.
       if (l.lastKnownAt && (!t.lastKnownAt || l.lastKnownAt > t.lastKnownAt)) {
@@ -565,6 +580,8 @@ export function useShipments(view: ShipmentsView = DEFAULT_VIEW) {
         loadStatus: statusByShipment[s.id] ?? null,
         lastUpdateAt: tracking?.lastUpdateAt ?? null,
         lastUpdatePlace: tracking?.lastUpdatePlace ?? null,
+        previousUpdateAt: tracking?.previousUpdateAt ?? null,
+        previousUpdatePlace: tracking?.previousUpdatePlace ?? null,
         nextCheckCallAt: tracking?.nextCheckCallAt ?? null,
         lastCheckCallAt: tracking?.lastCheckCallAt ?? null,
         checkCallOpen: tracking?.checkCallOpen ?? null,
