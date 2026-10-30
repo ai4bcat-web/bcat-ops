@@ -4369,7 +4369,15 @@ async function bookCarrier(input: Row, caller: Caller, extra?: BookCarrierExtra)
   const otherRows = (await queryIndex(LOAD_CARRIER_TABLE_NAME, IDX_CARRIERS_BY_CARRIER_ID, 'carrierId', carrierId))
     .filter((c) => c.status === 'ACTIVE' && String(c.loadId) !== loadId)
   const otherLoads = await batchGetByIds(LOAD_TABLE_NAME, otherRows.map((c) => String(c.loadId)))
-  const pickupByLoad = new Map(otherLoads.map((l) => [String(l.id), optionalString(l.pickupAppt, 60)]))
+  const activeOtherLoads = new Map(
+    otherLoads
+      .filter((l) => !l.voidedAt && l.status !== 'CANCELED')
+      .map((l) => [String(l.id), l] as const),
+  )
+  const activeOtherRows = otherRows.filter((c) => activeOtherLoads.has(String(c.loadId)))
+  const pickupByLoad = new Map(
+    activeOtherRows.map((c) => [String(c.loadId), optionalString(activeOtherLoads.get(String(c.loadId))?.pickupAppt, 60)]),
+  )
 
   const { blocks, warnings } = evaluateCarrierBooking({
     carrier: carrier as unknown as CarrierRecord,
@@ -4386,7 +4394,7 @@ async function bookCarrier(input: Row, caller: Caller, extra?: BookCarrierExtra)
     },
     financials: existingFinancials ? { topSpendCents: numberOrNull(existingFinancials.topSpendCents) } : null,
     carrierRateCents,
-    otherActiveLoadCarriers: otherRows.map((c) => ({
+    otherActiveLoadCarriers: activeOtherRows.map((c) => ({
       loadId: String(c.loadId),
       pickupAppt: pickupByLoad.get(String(c.loadId)) ?? null,
     })),

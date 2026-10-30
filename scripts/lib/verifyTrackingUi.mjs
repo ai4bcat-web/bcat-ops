@@ -60,14 +60,6 @@ export async function verifyTrackingUi({ storage, shipmentIds, origin = DEV_ORIG
     const [port, endpoint] = portFile.trim().split('\n')
     socket = new WebSocket(`ws://127.0.0.1:${port}${endpoint}`)
     await new Promise((resolve, reject) => { socket.once('open', resolve); socket.once('error', reject) })
-    socket.on('message', (raw) => {
-      const message = JSON.parse(String(raw))
-      const request = pending.get(message.id)
-      if (!request) return
-      pending.delete(message.id)
-      if (message.error) request.reject(new Error(message.error.message))
-      else request.resolve(message.result)
-    })
     const { targetId } = await command('Target.createTarget', { url: 'about:blank' })
     ;({ sessionId } = await command('Target.attachToTarget', { targetId, flatten: true }))
     await command('Page.enable')
@@ -75,21 +67,49 @@ export async function verifyTrackingUi({ storage, shipmentIds, origin = DEV_ORIG
     await command('Network.enable')
     const logs = []
     function logEvent(type, text, detail) {
-      const line = `[${type}] ${text}${detail ? ` | ${JSON.stringify(detail).slice(0, 500)}` : ''}`
+      let detailText = ''
+      if (detail) {
+        try {
+          const seen = new WeakSet()
+          detailText = JSON.stringify(detail, (key, value) => {
+            if (typeof value === 'object' && value !== null) {
+              if (seen.has(value)) return '[circular]'
+              seen.add(value)
+            }
+            return value
+          }).slice(0, 500)
+        } catch {
+          detailText = '[unserializable]'
+        }
+      }
+      const line = `[${type}] ${text}${detailText ? ` | ${detailText}` : ''}`
       logs.push(line)
       console.error(line)
     }
     socket.on('message', (raw) => {
-      const message = JSON.parse(String(raw))
-      if (message.method === 'Runtime.consoleAPICalled') {
-        const text = message.params.args?.map((a) => a.value ?? a.description ?? '').join(' ') ?? ''
-        logEvent('CONSOLE', `${message.params.type}: ${text}`, { level: message.params.type })
+      let message
+      try {
+        message = JSON.parse(String(raw))
+      } catch (err) {
+        console.error('[CDP] failed to parse message:', err?.message)
+        return
       }
-      if (message.method === 'Runtime.exceptionThrown') {
-        logEvent('EXCEPTION', message.params.exceptionDetails.exception?.description ?? message.params.exceptionDetails.text, message.params.exceptionDetails)
-      }
-      if (message.method === 'Network.responseReceived' && message.params.response?.status >= 400) {
-        logEvent('NETWORK', `${message.params.response.status} ${message.params.response.url}`, { status: message.params.response.status, url: message.params.response.url })
+      try {
+        if (message.method === 'Runtime.consoleAPICalled') {
+          const text = message.params.args?.map((a) => a.value ?? a.description ?? '').join(' ') ?? ''
+          logEvent('CONSOLE', `${message.params.type}: ${text}`, { level: message.params.type })
+        }
+        if (message.method === 'Runtime.exceptionThrown') {
+          const text = message.params.exceptionDetails?.exception?.description
+            ?? message.params.exceptionDetails?.text
+            ?? 'unknown exception'
+          logEvent('EXCEPTION', text, { level: 'error' })
+        }
+        if (message.method === 'Network.responseReceived' && message.params.response?.status >= 400) {
+          logEvent('NETWORK', `${message.params.response.status} ${message.params.response.url}`, { status: message.params.response.status, url: message.params.response.url })
+        }
+      } catch (err) {
+        console.error('[CDP] logging error:', err?.message)
       }
       const request = pending.get(message.id)
       if (!request) return
