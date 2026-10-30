@@ -1089,7 +1089,7 @@ export async function resetDemoData(deps: DemoDeps, input: Row, caller: Caller):
   const retireAssignments: TransactWriteItem[] = []
   for (const carrierId of demoCarrierIds) {
     const active = await deps.queryIndex(deps.tables.loadCarrier, 'loadCarriersByCarrierId', 'carrierId', carrierId)
-    for (const lc of active) {
+    for (const lc of active.filter((row) => row.status === 'ACTIVE')) {
       retireAssignments.push(
         updateTx(deps.tables.loadCarrier, String(lc.id), stampedPatch(deps, caller, { status: 'BOUNCED' }), String(lc.updatedAt ?? '')),
       )

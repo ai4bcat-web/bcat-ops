@@ -60,49 +60,16 @@ export async function verifyTrackingUi({ storage, shipmentIds, origin = DEV_ORIG
     const [port, endpoint] = portFile.trim().split('\n')
     socket = new WebSocket(`ws://127.0.0.1:${port}${endpoint}`)
     await new Promise((resolve, reject) => { socket.once('open', resolve); socket.once('error', reject) })
-    socket.on('message', (raw) => {
-      let message
-      try {
-        message = JSON.parse(typeof raw === 'string' ? raw : raw.toString())
-      } catch {
-        return
-      }
-      const request = pending.get(message.id)
-      if (!request) return
-      pending.delete(message.id)
-      if (message.error) request.reject(new Error(message.error.message))
-      else request.resolve(message.result)
-    })
-    const { targetId } = await command('Target.createTarget', { url: 'about:blank' })
-    ;({ sessionId } = await command('Target.attachToTarget', { targetId, flatten: true }))
-    await command('Page.enable')
-    await command('Runtime.enable')
-    await command('Network.enable')
     const logs = []
-    function logEvent(type, text, detail) {
-      let detailText = ''
-      if (detail) {
-        try {
-          const seen = new WeakSet()
-          detailText = JSON.stringify(detail, (key, value) => {
-            if (typeof value === 'object' && value !== null) {
-              if (seen.has(value)) return '[circular]'
-              seen.add(value)
-            }
-            return value
-          }).slice(0, 500)
-        } catch {
-          detailText = '[unserializable]'
-        }
-      }
-      const line = `[${type}] ${text}${detailText ? ` | ${detailText}` : ''}`
+    function logEvent(type, text) {
+      const line = `[${type}] ${String(text).slice(0, 1000)}`
       logs.push(line)
       console.error(line)
     }
     socket.on('message', (raw) => {
       let message
       try {
-        message = JSON.parse(typeof raw === 'string' ? raw : raw.toString())
+        message = JSON.parse(String(raw))
       } catch (err) {
         console.error('[CDP] failed to parse message:', err?.message)
         return
@@ -110,16 +77,16 @@ export async function verifyTrackingUi({ storage, shipmentIds, origin = DEV_ORIG
       try {
         if (message.method === 'Runtime.consoleAPICalled') {
           const text = message.params.args?.map((a) => a.value ?? a.description ?? '').join(' ') ?? ''
-          logEvent('CONSOLE', `${message.params.type}: ${text}`, { level: message.params.type })
+          logEvent('CONSOLE', `${message.params.type}: ${text}`)
         }
         if (message.method === 'Runtime.exceptionThrown') {
           const text = message.params.exceptionDetails?.exception?.description
             ?? message.params.exceptionDetails?.text
             ?? 'unknown exception'
-          logEvent('EXCEPTION', text, { level: 'error' })
+          logEvent('EXCEPTION', text)
         }
         if (message.method === 'Network.responseReceived' && message.params.response?.status >= 400) {
-          logEvent('NETWORK', `${message.params.response.status} ${message.params.response.url}`, { status: message.params.response.status, url: message.params.response.url })
+          logEvent('NETWORK', `${message.params.response.status} ${message.params.response.url}`)
         }
       } catch (err) {
         console.error('[CDP] logging error:', err?.message)
