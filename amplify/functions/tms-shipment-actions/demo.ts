@@ -546,6 +546,12 @@ async function createBaseShipment(
   if (!shipment || !shipment.id) {
     throw new Error(`createBaseShipment: missing shipment. result keys=${Object.keys(result as Row).join(',')} bundle keys=${Object.keys(bundle).join(',')} shipment=${JSON.stringify(shipment)}`)
   }
+  if (!order || !order.id) {
+    throw new Error(`createBaseShipment: missing order for shipment ${shipment.id}. bundle orders=${JSON.stringify(bundle.orders)}`)
+  }
+  if (!load || !load.id) {
+    throw new Error(`createBaseShipment: missing load for shipment ${shipment.id}. bundle loads=${JSON.stringify(bundle.loads)}`)
+  }
   return { shipment, order, load }
 }
 
@@ -1214,6 +1220,9 @@ async function stageTrackingStates(deps: DemoDeps, shipments: Row[], caller: Cal
 
   for (let i = 0; i < shipments.length; i++) {
     const seedShipment = shipments[i]
+    if (!seedShipment || !seedShipment.id) {
+      throw new Error(`stageTrackingStates: undefined shipment at index ${i} of ${shipments.length}`)
+    }
     const shipment = (await deps.getById(deps.tables.shipment, String(seedShipment.id))) ?? seedShipment
     const load = await loadOfShipment(deps, String(shipment.id))
     const order = await orderOfShipment(deps, String(shipment.id))
@@ -1230,7 +1239,7 @@ async function stageTrackingStates(deps: DemoDeps, shipments: Row[], caller: Cal
     if (transition === 'IN_TRANSIT' && pickup && delivery) {
       stopAt.setTime(Date.parse(now) - (5 + i * 2) * 60_000)
       const prevAt = new Date(stopAt.getTime() - 90 * 60_000)
-      const [previous, current] = TRACKING_FIXES[i]
+      const [previous, current] = TRACKING_FIXES[i % TRACKING_FIXES.length]
       pickup.appt = new Date(Date.parse(now) - 4 * 3_600_000).toISOString()
       pickup.arrivedAt = pickup.appt
       pickup.departedAt = new Date(Date.parse(now) - 3 * 3_600_000).toISOString()

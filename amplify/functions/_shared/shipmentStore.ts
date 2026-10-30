@@ -388,13 +388,23 @@ export async function readBundle(deps: ShipmentStoreDeps, shipmentId: string): P
   const { db, tables } = deps
   const shipment = await getById(db, tables.shipment, shipmentId)
   if (!shipment) throw new Error(`Shipment not found: ${shipmentId}`)
-  const [orders, loads, loadCarriers, charges, documents] = await Promise.all([
+  const loadIds = Array.isArray(shipment.loadIds)
+    ? (shipment.loadIds as unknown[]).filter(Boolean).map(String)
+    : []
+  const [orders, loadsByIndex, loadCarriers, charges, documents] = await Promise.all([
     queryIndex(db, tables.order, IDX_ORDERS_BY_SHIPMENT, 'shipmentId', shipmentId),
-    queryIndex(db, tables.load, IDX_LOADS_BY_SHIPMENT, 'shipmentId', shipmentId),
+    loadIds.length > 0 ? batchGetByIds(db, tables.load, loadIds) : queryIndex(db, tables.load, IDX_LOADS_BY_SHIPMENT, 'shipmentId', shipmentId),
     queryIndex(db, tables.loadCarrier, IDX_CARRIERS_BY_SHIPMENT, 'shipmentId', shipmentId),
     queryIndex(db, tables.loadCharge, IDX_CHARGES_BY_SHIPMENT, 'shipmentId', shipmentId),
     queryShipmentDocuments(db, tables.shipmentDocument, shipmentId),
   ])
+  const loads = loadIds.length > 0 ? loadsByIndex : loadsByIndex as Row[]
+  if (loadIds.length > 0 && loads.length !== loadIds.length) {
+    // GSI fallback for any load ids that did not come back from the strongly-consistent batch get.
+    const gsiLoads = await queryIndex(db, tables.load, IDX_LOADS_BY_SHIPMENT, 'shipmentId', shipmentId)
+    const found = new Set(loads.map((l) => String(l.id)))
+    loads.push(...gsiLoads.filter((l) => !found.has(String(l.id))))
+  }
   // LoadFinancials.id IS the load id, so the totals come back in one BatchGet.
   const financials = await batchGetByIds(db, tables.loadFinancials, loads.map((l) => String(l.id)))
   loads.sort((a, b) => Number(a.leg ?? 0) - Number(b.leg ?? 0))
