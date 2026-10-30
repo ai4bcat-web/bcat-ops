@@ -272,6 +272,29 @@ driverPool.addTrigger(
   backend.driverSignupGate.resources.lambda,
 )
 
+// Allowed portal origins. The prod domain is set via the PORTAL_PROD_ORIGIN env var
+// in the Amplify Console (e.g. https://ops.bcatcorp.com); localhost is for dev.
+// On the dev stack ops-dev.bcatcorp.com is in the domain association but does not
+// resolve in DNS, so public links and CORS must fall back to the reachable branch URL.
+const AWS_BRANCH_NAME = process.env.AWS_BRANCH ?? ''
+const AWS_APP_ID = process.env.AWS_APP_ID ?? 'd3dejqzs77khq6'
+const AMPLIFY_BRANCH_ORIGIN = AWS_BRANCH_NAME && AWS_APP_ID
+  ? `https://${AWS_BRANCH_NAME}.${AWS_APP_ID}.amplifyapp.com`
+  : null
+const PORTAL_PROD_ORIGIN = process.env.PORTAL_PROD_ORIGIN ?? 'https://ops.bcatcorp.com'
+const PORTAL_ORIGIN = process.env.PORTAL_ORIGIN
+  ?? (process.env.BCAT_DEV_STACK === 'true' ? AMPLIFY_BRANCH_ORIGIN : null)
+  ?? PORTAL_PROD_ORIGIN
+const PORTAL_ORIGINS = [
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+  PORTAL_PROD_ORIGIN,
+  PORTAL_ORIGIN,
+  // Keep the legacy explicit branch URL as a fallback for older browser caches or
+  // hard-coded references until DNS for ops-dev.bcatcorp.com is live.
+  ...(process.env.BCAT_DEV_STACK === 'true' ? ['https://dev.d3dejqzs77khq6.amplifyapp.com'] : []),
+]
+
 // Welcome email once a driver sets their password. Attached here, beside the
 // PRE_SIGN_UP trigger, for the same intra-stack reason documented above.
 const driverWelcomeFn = backend.driverWelcome.resources.lambda as LambdaFunction
@@ -279,7 +302,7 @@ driverPool.addTrigger(UserPoolOperation.POST_CONFIRMATION, driverWelcomeFn)
 
 driverWelcomeFn.addEnvironment('DRIVER_TABLE_NAME', backend.data.resources.tables['Driver'].tableName)
 driverWelcomeFn.addEnvironment('FROM_ADDRESS', 'onboarding@bcatcorp.com')
-driverWelcomeFn.addEnvironment('PORTAL_ORIGIN', process.env.PORTAL_PROD_ORIGIN ?? 'https://ops.bcatcorp.com')
+driverWelcomeFn.addEnvironment('PORTAL_ORIGIN', PORTAL_ORIGIN)
 driverWelcomeFn.addToRolePolicy(
   new PolicyStatement({
     actions:   ['dynamodb:Scan'],
@@ -365,20 +388,6 @@ backend.driverSignupGate.resources.lambda.addToRolePolicy(
   'DRIVER_PAY_SETTING_TABLE_NAME',
   signupDriverPaySettingTable.tableName,
 )
-
-// Allowed portal origins. The prod domain is set via the PORTAL_PROD_ORIGIN env var
-// in the Amplify Console (e.g. https://ops.bcatcorp.com); localhost is for dev.
-const PORTAL_PROD_ORIGIN = process.env.PORTAL_PROD_ORIGIN ?? 'https://ops.bcatcorp.com'
-const PORTAL_ORIGINS = [
-  'http://localhost:5173',
-  'http://127.0.0.1:5173',
-  PORTAL_PROD_ORIGIN,
-  // The dev stack's branch domain (ops-dev.bcatcorp.com) is not in DNS yet, so the
-  // only reachable dev origin is Amplify's default branch URL. Without it every
-  // public page — the truck link, the rate-con signing page, the customer tracking
-  // link — is blocked by CORS on dev and cannot be used or verified there.
-  ...(process.env.BCAT_DEV_STACK === 'true' ? ['https://dev.d3dejqzs77khq6.amplifyapp.com'] : []),
-]
 
 // ── driver-app-api Lambda (driver PWA HTTP API) ────────────────────────────
 
@@ -1888,7 +1897,7 @@ emailerFn.addEnvironment('SETTINGS_TABLE_NAME', complianceSettingsTable.tableNam
 // Invite links must point at the deployed app, not the caller's browser origin (which is
 // localhost when an admin kicks off an invite from `npm run dev`). Same prod origin the
 // scanner uses. Overrides the client-supplied portalBaseUrl in the handler.
-emailerFn.addEnvironment('PORTAL_BASE_URL',     PORTAL_PROD_ORIGIN)
+emailerFn.addEnvironment('PORTAL_BASE_URL',     PORTAL_ORIGIN)
 
 // ── driverPayEmailer Lambda (SES raw — PDF statement attachment) ────────────
 
@@ -1983,7 +1992,7 @@ complianceScannerFn.addEnvironment('SETTINGS_TABLE_NAME', complianceSettingsTabl
 complianceScannerFn.addEnvironment('INVITE_TABLE_NAME',   onboardingInviteTable.tableName)
 complianceScannerFn.addEnvironment('AUDIT_TABLE_NAME',    auditLogTable.tableName)
 complianceScannerFn.addEnvironment('FROM_ADDRESS',        'onboarding@bcatcorp.com')
-complianceScannerFn.addEnvironment('PORTAL_BASE_URL',     PORTAL_PROD_ORIGIN)
+complianceScannerFn.addEnvironment('PORTAL_BASE_URL',     PORTAL_ORIGIN)
 
 // ── tmsDirectoryActions Lambda ──────────────────────────────────────────────
 // Directory, config, and merge writes. Customer/Location/Division/Settings/MergeJob
@@ -2297,7 +2306,7 @@ shipmentActionsFn.addEnvironment('LANE_RATE_SAMPLE_TABLE_NAME', shipmentLaneSamp
 shipmentActionsFn.addEnvironment('BUCKET_NAME',                 backend.storage.resources.bucket.bucketName)
 shipmentActionsFn.addEnvironment('FROM_ADDRESS',                'ai4bcat@gmail.com')
 // The signing link in the email points at the app, not at the Function URL.
-shipmentActionsFn.addEnvironment('PORTAL_ORIGIN',               PORTAL_PROD_ORIGIN)
+shipmentActionsFn.addEnvironment('PORTAL_ORIGIN',               PORTAL_ORIGIN)
 // The rate con is sent as raw MIME with the PDF attached (SESv2 Content.Raw
 // maps to ses:SendRawEmail), the same way the driver-pay statement goes out.
 shipmentActionsFn.addToRolePolicy(
@@ -2530,7 +2539,7 @@ trackingActionsFn.addEnvironment('TMS_SETTINGS_TABLE_NAME',     trackingSettings
 trackingActionsFn.addEnvironment('AUDIT_LOG_TABLE_NAME',        trackingAuditLogTbl.tableName)
 trackingActionsFn.addEnvironment('DIVISION_TABLE_NAME',         trackingDivisionTbl.tableName)
 trackingActionsFn.addEnvironment('USER_POOL_ID',                backend.auth.resources.userPool.userPoolId)
-trackingActionsFn.addEnvironment('PORTAL_ORIGIN',               PORTAL_PROD_ORIGIN)
+trackingActionsFn.addEnvironment('PORTAL_ORIGIN',               PORTAL_ORIGIN)
 trackingActionsFn.addEnvironment('FROM_ADDRESS',                'ai4bcat@gmail.com')
 trackingActionsFn.addToRolePolicy(
   new PolicyStatement({
@@ -2722,7 +2731,7 @@ financeActionsFn.addEnvironment('COMMISSION_PAY_PERIOD_TABLE_NAME', commissionPe
 financeActionsFn.addEnvironment('USER_PROFILE_TABLE_NAME',        financeUserProfileTbl.tableName)
 financeActionsFn.addEnvironment('BUCKET_NAME',                   backend.storage.resources.bucket.bucketName)
 financeActionsFn.addEnvironment('USER_POOL_ID',                  backend.auth.resources.userPool.userPoolId)
-financeActionsFn.addEnvironment('PORTAL_ORIGIN',                 PORTAL_PROD_ORIGIN)
+financeActionsFn.addEnvironment('PORTAL_ORIGIN',                 PORTAL_ORIGIN)
 financeActionsFn.addEnvironment('FROM_ADDRESS',                  'ai4bcat@gmail.com')
 financeActionsFn.addToRolePolicy(
   new PolicyStatement({
@@ -3014,7 +3023,7 @@ new EventSourceMapping(Stack.of(brokerAlertFn), 'BrokerLoadStreamMapping', {
   notifyFn.addEnvironment('TRACKING_LINK_TABLE_NAME',    trackingLinkTbl.tableName)
   notifyFn.addEnvironment('SHIPMENT_NOTICE_TABLE_NAME',  shipmentNoticeTable.tableName)
   notifyFn.addEnvironment('SHIPMENT_DOCUMENT_TABLE_NAME', shipmentDocumentTable.tableName)
-  notifyFn.addEnvironment('PORTAL_ORIGIN',               PORTAL_PROD_ORIGIN)
+  notifyFn.addEnvironment('PORTAL_ORIGIN',               PORTAL_ORIGIN)
   notifyFn.addEnvironment('FROM_ADDRESS',                'ai4bcat@gmail.com')
   notifyFn.addToRolePolicy(
     new PolicyStatement({ actions: ['ses:SendEmail', 'ses:SendRawEmail'], resources: ['*'] })
