@@ -819,30 +819,45 @@ export async function seedDemoData(deps: DemoDeps, input: Row, caller: Caller): 
   }
 
   if (readyToBillShipment) {
+    const now = deps.now()
     const cleanPod = makePodDocument(deps, caller, readyToBillShipment, {
       name: 'POD clean',
       pages: 3,
       reviewStatus: 'ACCEPTED',
       reviewNote: 'clean',
     })
+    const bolDoc = makeBolDocument(deps, caller, readyToBillShipment)
     const order = await orderOfShipment(deps, String(readyToBillShipment.id))
+    const readyToBillLoad = await loadOfShipment(deps, String(readyToBillShipment.id))
+    const carrierLeg = readyToBillLoad
+      ? makeDemoCarrierLeg(deps, caller, readyToBillShipment, readyToBillLoad, vettedCarrier)
+      : null
     const readyToBillOrder = order ?? { updatedAt: '' }
+    const references = Array.isArray(order?.references) ? (order.references as Row[]) : []
+    const hasPo = references.some((r) => String(r.code ?? '').toUpperCase() === 'PO')
+    const patchedReferences = hasPo
+      ? references
+      : [...references, { code: 'PO', label: 'PO number', value: 'PO-P-DEMO-002', level: 'ORDER', visibility: 'INTERNAL' }]
     await deps.transact([
       putTx(deps.tables.document, cleanPod),
+      putTx(deps.tables.document, bolDoc),
       ...(readyToBillOrder.id
         ? [updateTx(deps.tables.order, String(readyToBillOrder.id), stampedPatch(deps, caller, {
             arStatus: 'DOCS_NEEDED',
             docsMissing: [],
             docsRequired: ['POD'],
+            references: patchedReferences,
           }), String(readyToBillOrder.updatedAt ?? ''))]
         : []),
+      ...(carrierLeg ? [putTx(deps.tables.loadCarrier, carrierLeg)] : []),
     ])
     await recordDemo(deps, 'SHIPMENT', DEMO_KEYS.READY_TO_BILL, String(readyToBillShipment.id), caller, {
       step: 'P10',
       label: 'Ready-to-bill shipment with clean POD',
     })
-    await recordRows(deps, 'DOCUMENT', 'document', [cleanPod], caller)
-    createdIds.DOCUMENT = [...(createdIds.DOCUMENT ?? []), String(cleanPod.id)]
+    await recordRows(deps, 'DOCUMENT', 'document', [cleanPod, bolDoc], caller)
+    if (carrierLeg) await recordRows(deps, 'LOAD_CARRIER', 'loadcarrier', [carrierLeg], caller)
+    createdIds.DOCUMENT = [...(createdIds.DOCUMENT ?? []), String(cleanPod.id), String(bolDoc.id)]
   }
 
   // ── P4: the inbound quote priced from a (stub) market rate ─────────────────
@@ -1273,6 +1288,71 @@ function makePodDocument(
     createdBy: caller.email,
     createdAt: now,
     updatedAt: now,
+  }
+}
+
+function makeBolDocument(deps: DemoDeps, caller: Caller, shipment: Row): Row {
+  const now = deps.now()
+  return {
+    id: deps.randomId(),
+    __typename: 'ShipmentDocument',
+    shipmentId: shipment.id,
+    type: 'BOL',
+    name: 'BOL clean',
+    s3Key: `shipment-docs/${shipment.id}/bol-clean.pdf`,
+    contentType: 'application/pdf',
+    sizeBytes: 1024,
+    pages: 2,
+    source: 'UPLOAD',
+    audience: 'ALL',
+    status: 'ACTIVE',
+    reviewStatus: 'ACCEPTED',
+    reviewedAt: now,
+    reviewedBy: caller.email,
+    reviewNote: 'clean',
+    uploadedBy: caller.email,
+    uploadedAt: now,
+    createdBy: caller.email,
+    createdAt: now,
+    updatedAt: now,
+  }
+}
+
+function makeDemoCarrierLeg(
+  deps: DemoDeps,
+  caller: Caller,
+  shipment: Row,
+  load: Row,
+  carrier: Row,
+): Row {
+  const now = deps.now()
+  return {
+    id: `lcr-demo-${String(shipment.id).slice(-8)}`,
+    __typename: 'LoadCarrier',
+    loadId: load.id,
+    shipmentId: shipment.id,
+    kind: 'CARRIER',
+    status: 'ACTIVE',
+    sequence: 1,
+    carrierId: carrier.id,
+    carrierName: carrier.name,
+    carrierMc: carrier.mcNumber ?? 'MC-DEMO',
+    dispatcherName: 'Demo Dispatcher',
+    dispatcherPhone: '+12245550137',
+    dispatcherEmail: 'dispatch@vetted.example',
+    driverName: 'Demo Driver',
+    driverPhone: '+12245550137',
+    truckNumber: 'DEMO123',
+    rateConStatus: 'SIGNED',
+    rateConSignedAt: now,
+    chargesFinalizedAt: now,
+    carrierRateCents: Math.round((Number(load.rate) || 0) * 0.75),
+    costCents: Math.round((Number(load.rate) || 0) * 0.75),
+    createdBy: caller.email,
+    createdAt: now,
+    updatedBy: caller.email,
+    updatedAt: now,
+    version: 1,
   }
 }
 
