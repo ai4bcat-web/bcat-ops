@@ -1,5 +1,125 @@
 # TMS build log
 
+## 2026-10-30 — Build complete — Steps A–N on dev
+
+All planned TMS build steps **A through N** are now committed, deployed, and verified on the
+`dev` branch. No feature work remains before a merge-to-main decision. Steps **R, R2, and P**
+were also delivered as part of this build; their detailed entries follow below.
+
+### Proof-by-step (Amplify dev app `d3dejqzs77khq6`, branch `dev`)
+
+| Step | Final commit(s) | Proof job | Status |
+|---|---|---|---|
+| A Customer v2 | `36858b9` | job `7` | SUCCEED |
+| B Shipment/Order/Load | `ee5b2cd` | job `11` | SUCCEED |
+| C Carriers & booking | `b570b86` + fixes | job `15` | SUCCEED |
+| D Tracking & check calls | `a2b4b10` | job `17` | SUCCEED |
+| E Documents & delivery | `eef2fae` + `661b21f` | job `20` | SUCCEED |
+| F Accounts receivable | `3d50186` + fixes | job `24` | SUCCEED |
+| G Accounts payable | `1684273` + follow-up | job `35` | SUCCEED |
+| H Quotes & rates | `49bbaa5` + fixes | job `38` | SUCCEED |
+| I Settings/roles/teams/commissions | `50787c3`, `3da9683` | job `42` | SUCCEED |
+| J Integration framework | `71dc8a5` + `16b155d` + `f6d3143` | job `56` | SUCCEED |
+| K Workflows & AI agents | `9ae0a09` + `361a859` | job `59` | SUCCEED |
+| L My Brokerage settings | `f6817f2` | job `85` | SUCCEED |
+| M Academy Ask assistant | `3925a4c` | job `87` | SUCCEED |
+| N1 Aljex bulk import | `0e941ac` (final cleanup) | job `95` | SUCCEED |
+| N2 MyCarrierPackets sync | `4bd552f` | job `96` | SUCCEED |
+| N3/N4 Rate-con/BOL e-mail + tracking thread | `197b4b7` | job `97` | SUCCEED |
+
+Latest full-suite gate: **475 files / 6,459 tests PASS**, `npx eslint .` **0 errors**
+(3 pre-existing warnings), both `npx tsc --noEmit` clean.
+
+### Known stubs and what Ryne must supply for each
+
+| Capability | Where it lives | What Ryne supplies | Current behavior |
+|---|---|---|---|
+| **DAT load posting / RateView** | `Integrations → DAT` | Service-account e-mail, password, rate-view tier; per-rep DAT e-mails | Stub returns deterministic realistic rates labelled `STUB — no DAT call was made.` |
+| **Truckstop posting** | `Integrations → Truckstop` | `clientId`, `clientSecret` | Stub labelled on row and UI |
+| **MyCarrierPackets vetting + sync** | `Integrations → MyCarrierPackets` and carrier profile | `username`, `password`, `webhookSigningSecret` | Live adapter runs in stub mode; Validate/Test button reports `STUB/UNABLE_TO_VERIFY` honestly |
+| **Google Maps server APIs** | Geocode Lambda, Places Autocomplete, Distance Matrix | An **unrestricted server key** for `GOOGLE_MAPS_API_KEY` (the browser referrer key is rejected server-side) | Dev key returns `Invalid credentials`; address geocoding is broken on dev |
+| **Voice agent / VOICE channel** | `ShipmentMessage.channel` enum, workflow agent | Decision whether to build voice at all; if yes, provider + phone numbers | `VOICE` is declared but never written; deferred |
+
+These are the only items called out in the brief as intentionally stubbed pending credentials
+or a decision. All other providers in the integration registry (39 total) are similarly wired
+for live-or-stub; their credential list is in the Step J entry below.
+
+### MERGE-TO-MAIN CHECKLIST
+
+**Before the merge**
+
+- [ ] **Schema / table diff review.** `amplify/data/resource.ts` adds **24 new models**
+  (`Shipment`, `Order`, `LoadCarrier`, `LoadFinancials`, `LoadCharge`, `Carrier`,
+  `CarrierContact`, `CarrierPaymentMethod`, `CarrierDocument`, `LoadCheckCall`, `TrackingLink`,
+  `ShipmentDocument`, `ShipmentNotice`, `Invoice`, `ArPayment`, `CarrierBill`, `ApPayment`,
+  `Quote`, `LaneRateSample`, `UserProfile`, `Commission`, `CommissionPayPeriod`, `Integration`,
+  `WorkflowRun`, `ImportJob`, `AljexImportJob`) and extends ~10 existing models
+  (`Load`, `Customer`, `TmsSettings`, `Division`, `FactoringItem`). All changes are additive;
+  no field is renamed/removed/retyped. Verify against the production table suffix
+  (`5ucwdyvwivelbo4k4jomvrwel4-NONE`).
+- [ ] **Data-stack size.** Latest measured template is ~785 KB, leaving ~215 KB under the
+  1 MB CloudFormation hard cap (`scripts/measureDataTemplate.mjs`).
+- [ ] **Build-time env vars.** Confirm these are set for `main`:
+  `CDK_CONTEXT_JSON`, `PORTAL_PROD_ORIGIN`, `BCAT_DEV_STACK=false`, `BCAT_ISOLATED_PREVIEW=false`,
+  `INTAKE_IVAN_CHANNEL_ID`, `LOADS_EMAIL_TO`, `INTAKE_PODS_CHANNEL_ID`, `SES_FROM_ADDRESS`,
+  `SLACK_GLOBAL_CHANNEL_ID`, `APPT_REQUEST_FROM_ADDRESS`, `APPTS_IVAN_CHANNEL_ID`,
+  `TWO_FA_SLACK_CHANNEL`, `GOOGLE_PLACES_API_KEY`, `GOOGLE_PLACE_ID`, `GOOGLE_PLACE_QUERY`,
+  `GOOGLE_REVIEWS_URL`, `DRIVER_PAY_FROM_ADDRESS`, `QUOTE_FROM_ADDRESS`, `QUOTE_CC_ADDRESS`,
+  `QUOTE_BCC_ADDRESS`, `PAYCHEX_COMPANY_ID`, `BROKER_DRIVER_NAME`, `BROKER_DRIVER_ID`.
+- [ ] **Amplify secrets.** Rotate/review: `OTR_USERNAME`, `OTR_PASSWORD`, `OTR_SUBSCRIPTION_KEY`,
+  `MOTIVE_API_KEY`, `BLUE_INK_TECH_API_KEY`, `GOOGLE_MAPS_API_KEY`, `GEOCODE_TOKEN_SECRET`,
+  `ANTHROPIC_API_KEY`, `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET`, `SLACK_CHANNEL_MAPPING`,
+  `PAYCHEX_CLIENT_ID`, `PAYCHEX_CLIENT_SECRET`, and the shared `INTAKE_WEBHOOK_SECRET` family.
+- [ ] **SSM provider credentials.** For each live provider, enter credentials via the
+  `Integrations` page; they are stored as `/bcat/integrations/<userPoolId>/<PROVIDER>` SecureStrings.
+- [ ] **DNS / SES sender.** Verify `bcatcorp.com` SES identity and add DKIM CNAMEs, SPF TXT, and
+  DMARC TXT records as documented in `Docs/SES-ONBOARDING-DNS.md`. Note: the identity is managed
+  out-of-band, not by CloudFormation; read DKIM tokens from the SES console, not stack outputs.
+  Request SES production access if not already granted.
+- [ ] **Amplify domain.** Production `https://ops.bcatcorp.com` association must exist; dev is
+  already at `https://ops-dev.bcatcorp.com`. No Wix/Route53 changes are required.
+- [ ] **Cognito.** Staff pool is vanilla with `ADMIN`/`DISPATCHER` groups. Driver pool is custom
+  (`bcat-driver-pool`) with `PRE_SIGN_UP` → `driver-signup-gate` and `POST_CONFIRMATION` →
+  `driver-welcome` triggers; verify production SES sender `noreply@bcatcorp.com`.
+
+**After the merge / deploy to production**
+
+Run these backfills **in order** against the production tables:
+
+1. `scripts/seedDivisions.mjs`
+2. `scripts/backfillCustomers.mjs`
+3. `scripts/backfillLocations.mjs`
+4. `scripts/backfillShipments.mjs`
+5. `scripts/backfillShipmentDocuments.mjs`
+6. `scripts/backfillLegacyAr.mjs`
+7. `scripts/backfillApOpen.mjs`
+8. `scripts/backfillLaneSamples.mjs`
+9. `scripts/backfillProClaims.mjs`
+10. `scripts/backfillRevDivision.mjs`
+11. `scripts/backfillUserProfiles.mjs`
+12. `scripts/importCarriers.mjs --apply --env production --outputs <file> BCAT_CUTOVER_CONFIRM=<fingerprint>`
+    (production cutover only; never point at dev).
+
+**Operational follow-ups after prod deploy**
+
+- [ ] Enable EventBridge rules on production (they are disabled on dev by `BCAT_DEV_STACK`):
+  appointment report, cash check-in, recurring expenses, Motive/Blue Ink syncs, compliance
+  scanner, intake reconcile, workflow stalled-sweep, MCP 30-min sync, Paychex weekly.
+- [ ] Paste Function URLs into external bridges: `ShipmentEmailIntakeFunctionUrl` into the Gmail
+  Apps Script project, `WorkflowAgentFunctionUrl` into `scripts/agentEmailBridge.gs`, and the
+  dispatch Twilio webhook into Twilio.
+- [ ] Replace the neutered dev keys with production credentials for OTR, Slack, Paychex,
+  Blue Ink Tech, Motive, and MyCarrierPackets.
+- [ ] Verify Google Maps server key works for geocoding/Places/Distance Matrix.
+- [ ] Confirm `backfillDriverDocScans.mjs` is **not** run accidentally: it defaults to the
+  production table suffix and has no production guard.
+- [ ] Run `scripts/devVerifyP.mjs` against prod in read-only mode before announcing cut-over.
+
+**Decision:** Do not merge `dev` → `main` or push to `main` from this session. Awaiting Ryne's
+go/no-go.
+
+---
+
 ## 2026-10-30 — Step N3/N4 — Rate-con/BOL email coverage and per-shipment tracking thread (deployed)
 
 **Committed and deployed on dev.** Plan: `Docs/tms-build/N3N4-plan.md`.
@@ -1037,6 +1157,7 @@ pushed one at a time with no job running:
 
 ## 2026-10-28 — Step I proved live on dev (47/47); every backfill rerun on the refreshed data; R next
 
+- **Step I done.** Amplify dev jobs `41` and `42` both **SUCCEEDED**.
 - **Deployed.** `50787c3` → job **41 SUCCEED**, `3da9683` → job **42 SUCCEED**, `edf1f43` (the
   proof script) with this entry. Each commit passed `npm run typecheck`, `npm run lint` (3
   pre-existing warnings) and `npm run test` (**365 files / 4,895 tests**, up from 4,890). Deploys
@@ -1231,7 +1352,8 @@ pushed one at a time with no job running:
 
 ## 2026-10-28 — Step H is live on dev, verified end to end; I planned
 
-- **Deployed.** Commit `49bbaa5` pushed to `origin dev`; Amplify job `37` SUCCEED —
+- **Step H done.** Amplify dev job `37` **SUCCEEDED**.
+- **Deployed.** Commit `49bbaa5` pushed to `origin dev`; Amplify dev job `37` SUCCEED —
   BUILD, DEPLOY and VERIFY. This entry's own commit carries the three money and layout
   fixes the browser pass turned up, and is job `38`. Both `Quote` and `LaneRateSample` are
   ACTIVE on dev with exactly the five and two indexes the plan named —
@@ -1373,6 +1495,7 @@ pushed one at a time with no job running:
 
 ## 2026-10-28 — Step G is live on dev, verified end to end; H planned
 
+- **Step G done.** Amplify dev jobs `34` and `35` both **SUCCEEDED**.
 - **Deployed.** Job `34` (`1684273`) SUCCEED — BUILD, DEPLOY and VERIFY — the first dev
   deploy since job `25`. The data stack template published at **709,127 bytes** under a
   new asset key `bfe5c4ce…`, 290,873 bytes under the cap. Job `35` (`122a874`) SUCCEED
