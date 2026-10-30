@@ -1,5 +1,32 @@
 # TMS build log
 
+## 2026-10-30 — devVerifyP stability fixes deployed on dev
+
+**Committed and deployed on dev.** Follow-up to the Step P verification harness.
+
+- Commit: `8fb3baf`.
+- Amplify dev job (pending) for `8fb3baf`.
+- `scripts/devVerifyP.mjs` run against the deployed dev stack: **48/48 PASS** (includes P8-UI
+  browser verification with refreshed screenshots).
+- `npm run test` on the working tree: **562 files / 8,286 tests PASS**.
+- `npx eslint amplify/functions/tms-shipment-actions/demo.ts scripts/lib/verifyTrackingUi.mjs` — clean.
+
+### What changed
+
+- `scripts/lib/verifyTrackingUi.mjs`: removed a redundant first CDP `socket.on('message')`
+  handler that could resolve/reject a pending request before the main handler had registered
+  the response, and hardened the P8 inbox-composer existence check.
+- `amplify/functions/tms-shipment-actions/demo.ts`: removed a temporary debug check added
+  while diagnosing a `Customer not found` failure; the root cause was a concurrent
+  `devVerifyP.mjs` run resetting the stack mid-test, not the seed logic.
+- Refreshed `Docs/tms-build/screenshots/P8-UI-*.png` artifacts.
+
+### Note
+
+Two concurrent `node scripts/devVerifyP.mjs` processes were observed racing and voiding each
+other's seeded shipments. The surviving process passed 48/48. Only one devVerifyP run should
+be active at a time.
+
 ## 2026-10-30 — Build complete — Steps A–N on dev
 
 All planned TMS build steps **A through N** are now committed, deployed, and verified on the
