@@ -584,6 +584,7 @@ type Action =
   | 'GET_DEMO_STATE'
   | 'SEED_DEMO_DATA'
   | 'RESET_DEMO_DATA'
+  | 'LIST_LOAD_CARRIERS_BY_CARRIER'
 
 /**
  * Step H. Quoting is its own desk: a rep who prices freight all day has no business
@@ -4245,6 +4246,15 @@ async function removeLoadCarrier(input: Row, caller: Caller): Promise<Row> {
   return rederiveShipmentStatus(shipmentId, caller)
 }
 
+async function listLoadCarriersByCarrier(input: Row, caller: Caller): Promise<Row> {
+  if (!caller.isAdmin && !caller.groups.includes('page-tms')) {
+    throw new Error('Forbidden: LIST_LOAD_CARRIERS_BY_CARRIER requires admin or page-tms')
+  }
+  const carrierId = assertString(input.carrierId, 'carrierId')
+  const rows = await queryIndex(LOAD_CARRIER_TABLE_NAME, IDX_CARRIERS_BY_CARRIER_ID, 'carrierId', carrierId)
+  return { loadCarriers: rows }
+}
+
 // ── Carrier booking (step C) ─────────────────────────────────────────────────
 
 /** A recipient line in an email header; a comma or a newline in one is an attack. */
@@ -6824,6 +6834,8 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return seedDemoData(demoDeps, input, caller)
     case 'RESET_DEMO_DATA':
       return resetDemoData(demoDeps, input, caller)
+    case 'LIST_LOAD_CARRIERS_BY_CARRIER':
+      return listLoadCarriersByCarrier(input, caller)
     default:
       throw new Error(`Unknown action: ${action}`)
   }
