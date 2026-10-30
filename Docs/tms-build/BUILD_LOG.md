@@ -5,7 +5,7 @@
 **Committed and deployed on dev.** Plan: `Docs/tms-build/N1-plan.md`.
 
 - Commits: `0e941ac` (clean debug logging + BUILD_LOG), `e2a321c` (fix: GSI key validation and Load status mapping), `a5346ec` (fix: stringify AWSJSON fields), `bcd7b26` (feature: tms-aljex-import Lambda, `AljexImportJob` model, shared parser/mapper `src/lib/aljexImport.ts`, apiClient helpers, Aljex import page under My Brokerage → Company, fixture + tests).
-- Amplify dev jobs `89`, `90`, `91`, `92`, `93` all **SUCCEEDED** (job 93 is the final cleanup deploy).
+- Amplify dev jobs `89`, `90`, `91`, `92`, `93`, `94` all **SUCCEEDED** (job 94 is the final BUILD_LOG deploy).
 - `npm run test` on the working tree: **472 files / 6,423 tests PASS**.
 - `npx eslint .` — **0 errors, 3 pre-existing warnings**.
 - Dev verification (Lambda invoke, `ryne@bcatcorp.com` identity): preview counts `4 shipments, 3 customers, 8 locations, 1 invoice, 1 bill, 1 skipped, 0 errors`; apply counts `1 shipment, 1 bill, 4 skipped, 0 errors` after the initial rows had already been imported; re-apply of the same file returns the same job with identical counts (idempotent); `LIST_ALJEX_IMPORT_JOBS` returns the preview and apply jobs. A browser smoke test was not run because the dev login requires a live Cognito account.
