@@ -2,19 +2,19 @@
 /**
  * Step P live verification against the DEV stack.
  *
- * Runs the full end-to-end demo flow that Ryne sees on the Demo page, but through
- * the deployed Lambdas with real tokens so every gate is exercised against real
- * DynamoDB tables. A throwaway ADMIN identity is created at the start and deleted
- * in a `finally`; demo staff are created and removed via `scripts/seedDemo.mjs`;
- * passwords are generated and never printed.
+ * Runs the full end-to-end demo flow that Ryne sees on the Demo page, through
+ * the deployed Lambdas with real Cognito tokens. SEED_DEMO_DATA and
+ * RESET_DEMO_DATA are invoked directly against the tmsShipmentActions Lambda
+ * so the ~20-shipment seed can use the full 60-second Lambda window instead of
+ * the AppSync resolver's 30-second ceiling. A throwaway ADMIN identity is
+ * created at the start and deleted in a `finally`; demo staff are created and
+ * removed inline; passwords are generated and never printed.
  *
  *   node scripts/devVerifyP.mjs
  *
  * The script refuses to run against any endpoint other than the dev AppSync URL.
  */
 import { randomBytes } from 'node:crypto'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import {
@@ -24,12 +24,14 @@ import {
   AdminAddUserToGroupCommand,
   AdminDeleteUserCommand,
 } from '@aws-sdk/client-cognito-identity-provider'
-import { DEMO_STAFF, buildDemoPlan } from './seedDemo.mjs'
+import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda'
+import { DEMO_STAFF } from './seedDemo.mjs'
 
 const DEV_API = 'https://f5iqzdpidzalvjys7yxijn5ave.appsync-api.us-east-1.amazonaws.com/graphql'
 const DEV_POOL = 'us-east-1_UKhMNVAG1'
 const DEV_CLIENT = '59284j3vm69gqg49cinjrr4dci'
 const PUBLIC_API = 'https://jk65s5nfkj2sfnnoang4huvbvq0bsruo.lambda-url.us-east-1.on.aws'
+const SHIPMENT_ACTIONS_LAMBDA = 'amplify-d3dejqzs77khq6-de-tmsshipmentactionslambda-x2KeBv2mM6Mk'
 const region = 'us-east-1'
 
 const outputs = {
@@ -62,6 +64,7 @@ async function refuses(name, pattern, run) {
 }
 
 const cognito = new CognitoIdentityProviderClient({ region })
+const lambda = new LambdaClient({ region })
 
 async function gql(token, query, variables) {
   const res = await fetch(DEV_API, {
@@ -124,12 +127,72 @@ async function mintIdentity(email, groups) {
   return { token: session.tokens.idToken.toString(), password }
 }
 
-function runSeedDemo(args, email, password) {
-  const result = spawnSync(process.execPath, [resolve('scripts/seedDemo.mjs'), ...args], {
-    stdio: ['ignore', 'inherit', 'inherit'],
-    env: { ...process.env, BCAT_EMAIL: email, BCAT_PASSWORD: password },
-  })
-  if (result.status !== 0) throw new Error(`seedDemo.mjs exited ${result.status}`)
+async function manageUsers(token, action, input) {
+  const data = await gql(
+    token,
+    `query M($action: String!, $username: String, $role: String) {
+      manageUsers(action: $action, username: $username, role: $role)
+    }`,
+    { action, username: input?.username, role: input?.role },
+  )
+  const raw = data?.manageUsers
+  return typeof raw === 'string' ? JSON.parse(raw) : raw ?? null
+}
+
+async function createDemoStaffMember({ member, adminToken }) {
+  const password = `Aa1!${randomBytes(18).toString('base64url')}`
+  let username
+  try {
+    const result = await cognito.send(new AdminCreateUserCommand({
+      UserPoolId: DEV_POOL, Username: member.email, MessageAction: 'SUPPRESS',
+      UserAttributes: [{ Name: 'email', Value: member.email }, { Name: 'email_verified', Value: 'true' }],
+    }))
+    username = result.User?.Username ?? member.email
+    await cognito.send(new AdminSetUserPasswordCommand({ UserPoolId: DEV_POOL, Username: username, Password: password, Permanent: true }))
+  } catch (err) {
+    if (err?.name !== 'UsernameExistsException') throw err
+    username = member.email
+  }
+  await manageUsers(adminToken, 'setRole', { username, role: member.role })
+  return { id: member.id, email: member.email, name: member.name, role: member.role }
+}
+
+async function removeDemoStaffMember({ member }) {
+  try {
+    await manageUsers(adminTokenGlobal, 'delete', { username: member.email })
+    return { id: member.id, removed: true }
+  } catch (err) {
+    const name = err?.name ?? ''
+    const message = String(err?.message ?? err)
+    if (name === 'UserNotFoundException' || /user.*not found/i.test(message)) return { id: member.id, removed: false }
+    throw err
+  }
+}
+
+let adminTokenGlobal = ''
+
+async function invokeShipmentAction(action, input, callerEmail) {
+  const payload = {
+    arguments: { action, input: JSON.stringify(input ?? {}) },
+    identity: {
+      sub: 'dev-verify-p',
+      username: callerEmail,
+      claims: {
+        email: callerEmail,
+        'cognito:groups': 'ADMIN,page-tms',
+      },
+    },
+  }
+  const res = await lambda.send(new InvokeCommand({
+    FunctionName: SHIPMENT_ACTIONS_LAMBDA,
+    InvocationType: 'RequestResponse',
+    Payload: Buffer.from(JSON.stringify(payload)),
+  }))
+  const body = JSON.parse(Buffer.from(res.Payload).toString())
+  if (body.errorMessage || body.errorType) {
+    throw new Error(body.errorMessage || `${body.errorType}: ${JSON.stringify(body)}`)
+  }
+  return body
 }
 
 function findDemoRecord(state, kind, demoKey) {
@@ -141,8 +204,6 @@ async function getBundle(token, shipmentId) {
   return ship('GET_SHIPMENT_BUNDLE', { shipmentId })
 }
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
-
 async function main() {
   const adminEmail = `zz-p-admin-${Date.now()}@example.invalid`
   let adminToken
@@ -151,26 +212,23 @@ async function main() {
     const minted = await mintIdentity(adminEmail, ['ADMIN', 'page-tms'])
     adminToken = minted.token
     adminPassword = minted.password
+    adminTokenGlobal = adminToken
   } catch (err) {
     bad('mint admin identity', String(err))
     throw err
   }
 
-  const tmpDir = mkdtempSync(resolve(tmpdir(), 'p-verify-'))
   const ship = routerAs(adminToken, 'tmsShipmentActions')
   const track = routerAs(adminToken, 'tmsTrackingActions')
   const dir = routerAs(adminToken, 'tmsDirectoryActions')
 
   try {
-    // ── P1: seed demo staff and data ──────────────────────────────────────────
-    const outputsPath = resolve(tmpDir, 'amplify_outputs.json')
-    writeFileSync(outputsPath, JSON.stringify(outputs))
-    const applyPlanPath = resolve(tmpDir, 'apply-plan.json')
-    const removePlanPath = resolve(tmpDir, 'remove-plan.json')
-    writeFileSync(applyPlanPath, JSON.stringify(buildDemoPlan({ env: 'test', endpoint: DEV_API, reset: true, removeStaff: false })))
-    writeFileSync(removePlanPath, JSON.stringify(buildDemoPlan({ env: 'test', endpoint: DEV_API, reset: false, removeStaff: true })))
-
-    runSeedDemo(['--outputs', outputsPath, '--plan', applyPlanPath, '--env', 'test', '--apply', '--reset'], adminEmail, adminPassword)
+    // ── P1: create demo staff identities and seed demo data ───────────────────
+    for (const member of DEMO_STAFF) {
+      await createDemoStaffMember({ member, adminToken })
+    }
+    const staffSourceRows = DEMO_STAFF.map(({ id, name, role }) => ({ id, name, role }))
+    await invokeShipmentAction('RESET_DEMO_DATA', { staff: staffSourceRows }, adminEmail)
 
     // ── P11: demo state and checklist ticks ───────────────────────────────────
     const state = await ship('GET_DEMO_STATE', {})
@@ -201,7 +259,7 @@ async function main() {
 
     // ── P4: quote in → market rate → suggested sell rate ──────────────────────
     const quoteRec = findDemoRecord(state, 'QUOTE', 'quote.inbound')
-    const quote = quoteRec ? await gql(adminToken, `query Q($id:ID!){ getQuote(id:$id){ id amountCents marketRateCents marketRateMode customerRateCents status } }`, { id: quoteRec.recordId }).then(d => d.getQuote) : null
+    const quote = quoteRec ? await gql(adminToken, `query Q($id:ID!){ getQuote(id:$id){ id amountCents marketRateCents marketRateMode customerRateCents status updatedAt } }`, { id: quoteRec.recordId }).then(d => d.getQuote) : null
     if (!quote) bad('P4 inbound quote found', 'missing')
     const price = await ship('PRICE_FROM_MARKET', {
       quoteId: quoteRec.recordId,
@@ -217,13 +275,10 @@ async function main() {
     // ── P5: building gate, fill required fields, complete build ───────────────
     const buildingRec = findDemoRecord(state, 'SHIPMENT', 'shipment.building')
     const buildingBundle = await getBundle(adminToken, buildingRec.recordId)
-    const buildingLoad = buildingBundle.loads?.[0]
-    const buildingOrder = buildingBundle.orders?.[0]
     const gate = await ship('CHECK_BUILD_GATE', { shipmentId: buildingRec.recordId })
     equals('P5 building gate reports missing fields', gate.buildState, 'BUILDING')
     equals('P5 missing fields include salesRep/billTo/poNumber', gate.missingFields?.length >= 1, true)
 
-    // Fill the missing fields through normal actions.
     await ship('SET_SALES_REP', { shipmentId: buildingRec.recordId, repId: 'demo-sales-rep@example.invalid' })
     await ship('SET_REV_TAG', { shipmentId: buildingRec.recordId, divisionCode: 'BROKERAGE' })
     await ship('SAVE_ORDER_FORM', {
@@ -252,6 +307,7 @@ async function main() {
     const datAfterRepost = postingsAfterRepost.postings?.find((p) => p.provider === 'DAT')
     equals('P6 DAT re-post is POSTED', datAfterRepost?.status, 'POSTED')
     equals('P6 DAT post mode is labelled STUB', datAfterRepost?.mode, 'STUB')
+
     // ── P7: carrier offer → setup packet for unknown carrier ──────────────────
     const postedBundle = await getBundle(adminToken, postedRec.recordId)
     const postedLoad = postedBundle.loads?.[0]
@@ -286,7 +342,6 @@ async function main() {
     const bookedCarrier = bookedBundle.loadCarriers?.find((c) => c.status === 'ACTIVE')
     if (!bookedCarrier) { bad('P8 booked carrier', 'no active load carrier'); return }
 
-    // Rate con refuses without driver/dispatcher; here they are present.
     const pdfBase64 = Buffer.from('fake pdf content for rate con test').toString('base64')
     const rateConBundle = await ship('SEND_RATE_CON', {
       loadCarrierId: bookedCarrier.id,
@@ -298,17 +353,12 @@ async function main() {
     equals('P8 thread opened by rate con', typeof rateConBundle.shipment?.threadKey, 'string')
 
     // ── P8: tracking link tap and geocoded reply ──────────────────────────────
-    // Use the in-transit shipment; its load carrier is the seeded vetted carrier.
     const transitRec = findDemoRecord(state, 'SHIPMENT', 'shipment.intransit')
     const transitBundle = await getBundle(adminToken, transitRec.recordId)
-    const transitLoad = transitBundle.loads?.[0]
     const transitCarrier = transitBundle.loadCarriers?.find((c) => c.status === 'ACTIVE')
     if (!transitCarrier) { bad('P8 in-transit carrier', 'no active load carrier'); return }
 
-    const linkOut = await track('SEND_TRACKING_LINK', {
-      loadCarrierId: transitCarrier.id,
-      via: 'COPY',
-    })
+    const linkOut = await track('SEND_TRACKING_LINK', { loadCarrierId: transitCarrier.id, via: 'COPY' })
     const linkToken = linkOut.trackingLinkId ?? linkOut.link?.id
     if (!linkToken) { bad('P8 tracking link created', 'no token'); return }
     const page = await publicGet(`/l/${linkToken}`)
@@ -333,7 +383,6 @@ async function main() {
     // ── P8: silence escalation ────────────────────────────────────────────────
     const sweep = await track('SWEEP_CHECK_CALL_PLANS', {})
     equals('P8 check-call sweep ran', typeof sweep.acted, 'number')
-    // The seeded in-transit shipment already carries an escalation message; assert it is still present.
     const transitMessages = await track('LIST_SHIPMENT_THREAD', { shipmentId: transitRec.recordId })
     const hasEscalation = transitMessages.messages?.some((m) => m.kind === 'ESCALATION')
     equals('P8 escalation message present in thread', hasEscalation, true)
@@ -353,15 +402,16 @@ async function main() {
     equals('P10 release to billing succeeds', release.bundle?.orders?.[0]?.arStatus, 'UNBILLED')
 
     // ── P11: reset demo data ──────────────────────────────────────────────────
-    const reset = await ship('RESET_DEMO_DATA', {})
+    const reset = await invokeShipmentAction('RESET_DEMO_DATA', { staff: staffSourceRows }, adminEmail)
     equals('P11 reset re-seeded', reset.counts?.SHIPMENT >= 1, true)
     const stateAfterReset = await ship('GET_DEMO_STATE', {})
     equals('P11 demo state present after reset', stateAfterReset.facts?.shipmentCount >= 1, true)
 
     // Remove demo staff identities.
-    runSeedDemo(['--outputs', outputsPath, '--plan', removePlanPath, '--env', 'test', '--apply', '--remove-staff'], adminEmail, adminPassword)
+    for (const member of DEMO_STAFF) {
+      await removeDemoStaffMember({ member })
+    }
   } finally {
-    rmSync(tmpDir, { recursive: true, force: true })
     await cognito.send(new AdminDeleteUserCommand({ UserPoolId: DEV_POOL, Username: adminEmail })).catch(() => {})
     console.log(`cleanup: removed temporary admin identity ${adminEmail}`)
   }
