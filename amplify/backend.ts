@@ -285,14 +285,18 @@ const PORTAL_PROD_ORIGIN = process.env.PORTAL_PROD_ORIGIN ?? 'https://ops.bcatco
 const PORTAL_ORIGIN = process.env.PORTAL_ORIGIN
   ?? (process.env.BCAT_DEV_STACK === 'true' ? AMPLIFY_BRANCH_ORIGIN : null)
   ?? PORTAL_PROD_ORIGIN
+const EXPLICIT_DEV_BRANCH_ORIGIN = 'https://dev.d3dejqzs77khq6.amplifyapp.com'
 const PORTAL_ORIGINS = [
   'http://localhost:5173',
   'http://127.0.0.1:5173',
   PORTAL_PROD_ORIGIN,
-  PORTAL_ORIGIN,
-  // Keep the legacy explicit branch URL as a fallback for older browser caches or
-  // hard-coded references until DNS for ops-dev.bcatcorp.com is live.
-  ...(process.env.BCAT_DEV_STACK === 'true' ? ['https://dev.d3dejqzs77khq6.amplifyapp.com'] : []),
+  ...(PORTAL_ORIGIN !== PORTAL_PROD_ORIGIN ? [PORTAL_ORIGIN] : []),
+  // Keep the legacy explicit branch URL as a fallback when env vars don't yield it.
+  ...(process.env.BCAT_DEV_STACK === 'true'
+    && PORTAL_ORIGIN !== EXPLICIT_DEV_BRANCH_ORIGIN
+    && PORTAL_PROD_ORIGIN !== EXPLICIT_DEV_BRANCH_ORIGIN
+      ? [EXPLICIT_DEV_BRANCH_ORIGIN]
+      : []),
 ]
 
 // Welcome email once a driver sets their password. Attached here, beside the
