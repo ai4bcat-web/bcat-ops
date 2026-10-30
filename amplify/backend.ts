@@ -1522,6 +1522,12 @@ trackingApiFn.addEnvironment('LOAD_TABLE_NAME', backend.data.resources.tables['L
     actions:   ['dynamodb:GetItem'],
     resources: [trackLoadCarrier.tableArn, backend.data.resources.tables['Load'].tableArn],
   }))
+  // A ping writes the computed delivery ETA back to the assignment so the board
+  // can show it without recomputing on every load.
+  trackingApiFn.addToRolePolicy(new PolicyStatement({
+    actions:   ['dynamodb:UpdateItem'],
+    resources: [trackLoadCarrier.tableArn],
+  }))
   trackingApiFn.addEnvironment('SHIPMENT_DOCUMENT_TABLE_NAME', trackShipmentDocTable.tableName)
   trackingApiFn.addEnvironment('BUCKET_NAME', backend.storage.resources.bucket.bucketName)
   // The upload is a presigned PUT this Lambda signs, pinned to the content type

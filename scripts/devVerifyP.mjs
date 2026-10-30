@@ -456,8 +456,11 @@ async function main() {
     })
     equals('P8-UI customer link expiry', customerLink.link.expiresAt, expiresAt)
     const customerUrlResolved = customerLink.url.startsWith('http') ? new URL(customerLink.url) : new URL(customerLink.url, 'https://dev.d3dejqzs77khq6.amplifyapp.com')
-    equals('P8-UI customer link uses dev origin', customerUrlResolved.origin, 'https://dev.d3dejqzs77khq6.amplifyapp.com')
-    const customerPage = await publicGet(`/track/s/${customerLink.link.id}`)
+    equals('P8-UI customer link URL contains token path', customerUrlResolved.pathname, `/track/s/${customerLink.link.id}`)
+    // The public page is served by the React app, but the data comes from the public
+    // tracking API Lambda, which exposes `/s/<token>` (not `/track/s/<token>`).
+    const customerApiPath = `/s/${customerLink.link.id}`
+    const customerPage = await publicGet(customerApiPath)
     equals('P8-UI public customer link reachable', customerPage.status, 200)
     const publicText = JSON.stringify(customerPage.body)
     equals('P8-UI public customer link hides private fields', /"(?:rateCents|buyCents|sellCents|driverPhone|dispatcherPhone|financialLines)"/.test(publicText), false)
@@ -467,7 +470,7 @@ async function main() {
     const extended = await track('EXTEND_CUSTOMER_LINK', { trackingLinkId: customerLink.link.id, expiresAt: extendedExpiry })
     equals('P8-UI customer link extends', extended.link.expiresAt, extendedExpiry)
     await track('REVOKE_CUSTOMER_LINK', { trackingLinkId: customerLink.link.id })
-    const revokedPage = await publicGet(`/track/s/${customerLink.link.id}`)
+    const revokedPage = await publicGet(customerApiPath)
     equals('P8-UI revoked customer link rejected', [403, 404, 410].includes(revokedPage.status), true)
     const deadPublicText = String(revokedPage.text ?? revokedPage.body ?? '')
     equals('P8-UI revoked public page explains inactive link', /no longer active|no longer valid|expired|revoked/i.test(deadPublicText) || revokedPage.status === 404, true)
