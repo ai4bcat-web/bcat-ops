@@ -848,7 +848,19 @@ async function processRow(
     state.counts.billsCreated++
   }
 
-  await deps.transactItems(writes, `aljex row ${rowIndex}`)
+  try {
+    await deps.transactItems(writes, `aljex row ${rowIndex}`)
+  } catch (err) {
+    console.error(`[tms-aljex-import] row ${rowIndex} transaction failed:`, String(err))
+    console.error(`[tms-aljex-import] row ${rowIndex} writes count:`, writes.length)
+    for (let i = 0; i < writes.length; i++) {
+      const w = writes[i]
+      const table = w.Put?.TableName ?? w.Update?.TableName ?? w.ConditionCheck?.TableName ?? w.Delete?.TableName ?? 'unknown'
+      const item = w.Put?.Item ?? w.Update?.Key ?? w.ConditionCheck?.Key ?? w.Delete?.Key
+      console.error(`[tms-aljex-import] row ${rowIndex} write[${i}] table=${table}`, JSON.stringify(item).slice(0, 500))
+    }
+    throw err
+  }
   state.claims.add(proKey)
   state.counts.shipmentsCreated++
   state.rowResults.push({ rowIndex, ok: true, message: row.note })
