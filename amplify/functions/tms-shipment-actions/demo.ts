@@ -1032,18 +1032,18 @@ export async function resetDemoData(deps: DemoDeps, input: Row, caller: Caller):
   }
 
   // Void every seeded shipment through the normal action, never by deleting it.
+  // Skip shipments that are already voided so an interrupted reset can be retried.
   for (const shipmentId of shipmentIds) {
     const shipment = await deps.getById(deps.tables.shipment, shipmentId)
-    if (shipment && !shipment.voidedAt) {
-      await deps.actions.voidShipment(
-        {
-          shipmentId,
-          reason: 'demo reset',
-          expectedUpdatedAt: String(shipment.updatedAt ?? ''),
-        },
-        caller,
-      )
-    }
+    if (!shipment || shipment.voidedAt) continue
+    await deps.actions.voidShipment(
+      {
+        shipmentId,
+        reason: 'demo reset',
+        expectedUpdatedAt: String(shipment.updatedAt ?? ''),
+      },
+      caller,
+    )
   }
 
   // The real void keeps LoadCarrier legs readable, so their status stays ACTIVE.
