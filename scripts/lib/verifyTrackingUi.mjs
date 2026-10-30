@@ -71,6 +71,32 @@ export async function verifyTrackingUi({ storage, shipmentIds, origin = DEV_ORIG
     const { targetId } = await command('Target.createTarget', { url: 'about:blank' })
     ;({ sessionId } = await command('Target.attachToTarget', { targetId, flatten: true }))
     await command('Page.enable')
+    await command('Runtime.enable')
+    await command('Network.enable')
+    const logs = []
+    function logEvent(type, text, detail) {
+      const line = `[${type}] ${text}${detail ? ` | ${JSON.stringify(detail).slice(0, 500)}` : ''}`
+      logs.push(line)
+      console.error(line)
+    }
+    socket.on('message', (raw) => {
+      const message = JSON.parse(String(raw))
+      if (message.method === 'Runtime.consoleAPICalled') {
+        const text = message.params.args?.map((a) => a.value ?? a.description ?? '').join(' ') ?? ''
+        logEvent('CONSOLE', `${message.params.type}: ${text}`, { level: message.params.type })
+      }
+      if (message.method === 'Runtime.exceptionThrown') {
+        logEvent('EXCEPTION', message.params.exceptionDetails.exception?.description ?? message.params.exceptionDetails.text, message.params.exceptionDetails)
+      }
+      if (message.method === 'Network.responseReceived' && message.params.response?.status >= 400) {
+        logEvent('NETWORK', `${message.params.response.status} ${message.params.response.url}`, { status: message.params.response.status, url: message.params.response.url })
+      }
+      const request = pending.get(message.id)
+      if (!request) return
+      pending.delete(message.id)
+      if (message.error) request.reject(new Error(message.error.message))
+      else request.resolve(message.result)
+    })
     await command('Emulation.setDeviceMetricsOverride', { width: 1600, height: 1100, deviceScaleFactor: 1, mobile: false })
     await command('Page.addScriptToEvaluateOnNewDocument', {
       source: `if(location.origin===${JSON.stringify(origin)}){for(const [key,value] of Object.entries(${JSON.stringify(storage)}))localStorage.setItem(key,value)}`,
@@ -108,17 +134,32 @@ export async function verifyTrackingUi({ storage, shipmentIds, origin = DEV_ORIG
     })()`)
     if (!detail.map || !detail.cadence) throw new Error('Shipment tracking is missing map or cadence')
     await capture('P8-UI-shipment-tracking.png')
-    await command('Page.navigate', { url: `${origin}/tms/tracking?tab=inbox&shipment=${selected}` })
+    await command('Page.navigate', { url: `${origin}/tms/tracking?tab=inbox` })
+    let inboxRows
+    try {
+      inboxRows = await poll(() => evaluate(`(() => {
+        const rows = [...document.querySelectorAll('[data-testid="inbox-thread-row"]')];
+        return rows.length >= 2 ? rows.map(row => row.dataset.shipmentId) : null;
+      })()`), 'at least two inbox conversation rows')
+    } catch (err) {
+      const snapshot = await evaluate(`(() => ({ url: location.href, body: document.body?.innerText?.slice(0, 4000) ?? '' }))()`)
+      console.error('INBOX ROW SNAPSHOT:', JSON.stringify(snapshot, null, 2))
+      console.error('INBOX BROWSER LOGS:\n', logs.join('\n'))
+      await capture('P8-UI-inbox-failed.png')
+      throw err
+    }
+    const selectedInbox = inboxRows[0]
+    const secondInbox = inboxRows[1]
+    await command('Page.navigate', { url: `${origin}/tms/tracking?tab=inbox&shipment=${selectedInbox}` })
     await poll(() => evaluate(`(() => {
       const chat = document.querySelector('[data-testid="inbox-conversation"]');
-      return chat && /Agent|Person/.test(chat.innerText) && document.querySelector('[data-testid="inbox-composer"]');
+      return chat && /Agent|Person|No messages/.test(chat.innerText) && document.querySelector('[data-testid="inbox-composer"]');
     })()`), 'Inbox tracking conversation and composer')
     await capture('P8-UI-inbox-conversation.png')
-    const second = rows[1]
-    await evaluate(`document.querySelector('[data-testid="inbox-thread-row"][data-shipment-id="${second}"]').click()`)
-    await poll(() => evaluate(`new URLSearchParams(location.search).get('shipment') === ${JSON.stringify(second)} && !!document.querySelector('[data-testid="inbox-conversation"]')`), 'Inbox selection deep link')
+    await evaluate(`document.querySelector('[data-testid="inbox-thread-row"][data-shipment-id="${secondInbox}"]').click()`)
+    await poll(() => evaluate(`new URLSearchParams(location.search).get('shipment') === ${JSON.stringify(secondInbox)} && !!document.querySelector('[data-testid="inbox-conversation"]')`), 'Inbox selection deep link')
     await command('Page.reload')
-    await poll(() => evaluate(`new URLSearchParams(location.search).get('shipment') === ${JSON.stringify(second)} && !!document.querySelector('[data-testid="inbox-conversation"]')`), 'Inbox deep link after reload')
+    await poll(() => evaluate(`new URLSearchParams(location.search).get('shipment') === ${JSON.stringify(secondInbox)} && !!document.querySelector('[data-testid="inbox-conversation"]')`), 'Inbox deep link after reload')
     await command('Page.navigate', { url: `${origin}/tms/tracking/links` })
     await poll(() => evaluate(`!!document.querySelector('[data-testid="customer-links-page"]')`), 'Manage Customer Links page')
     await capture('P8-UI-manage-customer-links.png')

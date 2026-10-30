@@ -1380,6 +1380,9 @@ function makeMessage(
     authorName: opts.authorName ?? null,
     at: deps.now(),
     createdBy: caller.email,
+    updatedBy: caller.email,
+    createdAt: deps.now(),
+    updatedAt: deps.now(),
   }
 }
 

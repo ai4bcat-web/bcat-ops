@@ -68,7 +68,7 @@ async function refuses(name, pattern, run) {
 }
 
 const cognito = new CognitoIdentityProviderClient({ region })
-const lambda = new LambdaClient({ region })
+const lambda = new LambdaClient({ region, maxAttempts: 1 })
 
 async function gql(token, query, variables) {
   const res = await fetch(DEV_API, {
