@@ -5,7 +5,7 @@
 **Committed and deployed on dev.** Follow-up to the Step P verification harness.
 
 - Commit: `8fb3baf`.
-- Amplify dev job (pending) for `8fb3baf`.
+- Amplify dev job `122` for `092a751` (build-log update atop `8fb3baf`) **SUCCEEDED** at 2026-10-30 16:17:09 UTC-5.
 - `scripts/devVerifyP.mjs` run against the deployed dev stack: **48/48 PASS** (includes P8-UI
   browser verification with refreshed screenshots).
 - `npm run test` on the working tree: **562 files / 8,286 tests PASS**.
