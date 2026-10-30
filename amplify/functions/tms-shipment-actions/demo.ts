@@ -1039,19 +1039,35 @@ export async function resetDemoData(deps: DemoDeps, input: Row, caller: Caller):
 
   // Void every seeded shipment through the normal action, never by deleting it.
   // Skip shipments that are already voided so an interrupted reset can be retried.
+  // Demo shipments can be touched by background sweeps between the read and the
+  // void, so retry a few times on a conditional-check failure.
   console.log('[RESET] voiding', { count: shipmentIds.length })
   for (const shipmentId of shipmentIds) {
-    const shipment = await deps.getById(deps.tables.shipment, shipmentId)
-    if (!shipment || shipment.voidedAt) continue
-    console.log('[RESET] void', { shipmentId, status: shipment.status })
-    await deps.actions.voidShipment(
-      {
-        shipmentId,
-        reason: 'demo reset',
-        expectedUpdatedAt: String(shipment.updatedAt ?? ''),
-      },
-      caller,
-    )
+    let attempts = 0
+    while (attempts < 5) {
+      attempts++
+      const shipment = await deps.getById(deps.tables.shipment, shipmentId)
+      if (!shipment || shipment.voidedAt) break
+      console.log('[RESET] void', { shipmentId, status: shipment.status, attempt: attempts })
+      try {
+        await deps.actions.voidShipment(
+          {
+            shipmentId,
+            reason: 'demo reset',
+            expectedUpdatedAt: String(shipment.updatedAt ?? ''),
+          },
+          caller,
+        )
+        break
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        if (message.includes('changed by someone else') && attempts < 5) {
+          console.log('[RESET] void conflict, retrying', { shipmentId, message })
+          continue
+        }
+        throw err
+      }
+    }
   }
 
   // The real void keeps LoadCarrier legs readable, so their status stays ACTIVE.
