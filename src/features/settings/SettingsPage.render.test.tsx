@@ -42,26 +42,18 @@ beforeEach(() => {
 })
 
 describe('SettingsPage', () => {
-  it('renders admin-only division and TMS settings sections', async () => {
+  it('renders admin-only cards', async () => {
     render(<MemoryRouter><SettingsPage /></MemoryRouter>)
-    expect(screen.getAllByText('Legacy division keys').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('TMS defaults').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('Quotes & offers').length).toBeGreaterThan(0)
-  })
-
-  it('renders the step I cards for an admin', async () => {
-    render(<MemoryRouter><SettingsPage /></MemoryRouter>)
-    for (const heading of ['Shipments', 'Charge codes', 'Teams', 'Roles & pages', 'Commissions']) {
+    for (const heading of ['TMS defaults', 'Customer settings', 'Carrier documents', 'Consolidation', 'Quotes & offers']) {
       expect(screen.getAllByText(heading).length).toBeGreaterThan(0)
     }
   })
 
-  it('Add division opens the create form', async () => {
+  it('renders the step I cards for an admin', async () => {
     render(<MemoryRouter><SettingsPage /></MemoryRouter>)
-    await waitFor(() => expect(screen.getByText('Add division')).toBeTruthy())
-    expect(screen.queryByText('Key *')).toBeNull()
-    fireEvent.click(screen.getByText('Add division'))
-    expect(screen.getByText('Key *')).toBeTruthy()
+    for (const heading of ['Shipments', 'Consolidation', 'Customer settings', 'Carrier documents', 'Charge codes', 'Teams', 'Roles & pages', 'Commissions']) {
+      expect(screen.getAllByText(heading).length).toBeGreaterThan(0)
+    }
   })
 })
 

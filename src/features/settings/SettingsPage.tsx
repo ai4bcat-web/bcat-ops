@@ -13,7 +13,6 @@ import { EscalationRulesCard } from '@/features/compliance/EscalationRulesCard'
 import { PrivateDocsModal } from '@/features/files/PrivateDocsModal'
 import { TmsButton } from '@/features/tms/kit'
 import { useAuth } from '@/hooks/useAuth'
-import { DivisionCard } from './DivisionCard'
 import { TmsSettingsCard } from './TmsSettingsCard'
 import { CarrierBookingSettingsCard } from './CarrierBookingSettingsCard'
 import { TrackingSettingsCard } from './TrackingSettingsCard'
@@ -24,6 +23,9 @@ import { ApSettingsCard } from './ApSettingsCard'
 import { QuoteSettingsCard } from './QuoteSettingsCard'
 import { ShipmentSettingsCard } from './ShipmentSettingsCard'
 import { ChargeCodesCard } from './ChargeCodesCard'
+import { CustomerSettingsCard } from './CustomerSettingsCard'
+import { CarrierDocumentsCard } from './CarrierDocumentsCard'
+import { ConsolidationCard } from './ConsolidationCard'
 import { TeamsCard } from './TeamsCard'
 import { UsersRolesCard } from './UsersRolesCard'
 import { CommissionSettingsCard } from './CommissionSettingsCard'
@@ -45,8 +47,11 @@ export function SettingsPage() {
           />
 
           <ShipmentSettingsCard />
+          <ConsolidationCard />
           <TmsSettingsCard />
+          <CustomerSettingsCard />
           <CarrierBookingSettingsCard />
+          <CarrierDocumentsCard />
           <TrackingSettingsCard />
           <PostalCodeAliasesCard />
           <DocumentSettingsCard />
@@ -57,7 +62,6 @@ export function SettingsPage() {
           <CommissionSettingsCard />
           <ChargeCodesCard />
           <UsersRolesCard />
-          <DivisionCard />
         </>
       )}
 

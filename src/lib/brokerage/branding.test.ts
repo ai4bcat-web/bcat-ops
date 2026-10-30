@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
   BRAND_ACCENTS,
-  BRAND_THEMES,
   SIGNATURE_TOKENS,
   brandKey,
   logoKeyOk,

@@ -7,42 +7,16 @@ import { CARRIER_STATUSES, CARRIER_STATUS_LABELS } from '@/lib/carrierStatus'
 import { normalizeQuickPayTiers, quickPayTiersOf } from '@/lib/quickPay'
 import type { BookingRequiredField, CarrierDocumentType, CarrierStatus, RateConRequiredField, TmsSettings } from '@/types/tms'
 import { CheckRow, ErrorText, GroupLabel, Hint, Loading, SettingsCard, Stack } from './settingsKit'
-
-// The document types a broker can demand before a carrier is bookable.
-const CARRIER_DOC_TYPES: readonly CarrierDocumentType[] = [
-  'COI_CARGO', 'COI_AUTO', 'COI_GENERAL', 'W9', 'CARRIER_AGREEMENT', 'AUTHORITY', 'FACTOR_NOA', 'CDL', 'OTHER',
-]
-const CARRIER_DOC_LABELS: Record<CarrierDocumentType, string> = {
-  AUTHORITY: 'Authority letter',
-  COI_AUTO: 'COI — auto liability',
-  COI_CARGO: 'COI — cargo',
-  COI_GENERAL: 'COI — general liability',
-  W9: 'W-9',
-  CARRIER_AGREEMENT: 'Carrier agreement',
-  FACTOR_NOA: 'Factor NOA',
-  CDL: 'CDL',
-  RATE_CON: 'Rate confirmation',
-  OTHER: 'Other',
-}
-const BOOKING_FIELDS: readonly BookingRequiredField[] = ['COMMODITY', 'DESCRIPTION', 'VALUE', 'WEIGHT']
-const BOOKING_FIELD_LABELS: Record<BookingRequiredField, string> = {
-  COMMODITY: 'Commodity',
-  DESCRIPTION: 'Freight description',
-  VALUE: 'Cargo value',
-  WEIGHT: 'Weight',
-}
-const RATE_CON_FIELDS: readonly RateConRequiredField[] = [
-  'DRIVER_NAME', 'DRIVER_PHONE', 'TRUCK_NUMBER', 'TRAILER_NUMBER', 'PICKUP_ETA', 'PLATES', 'VIN',
-]
-const RATE_CON_FIELD_LABELS: Record<RateConRequiredField, string> = {
-  DRIVER_NAME: 'Driver name',
-  DRIVER_PHONE: 'Driver phone',
-  TRUCK_NUMBER: 'Truck number',
-  TRAILER_NUMBER: 'Trailer number',
-  PICKUP_ETA: 'Pickup ETA',
-  PLATES: 'Plates',
-  VIN: 'VIN',
-}
+import { CheckGroup } from './checkGroupUtils'
+import { pick, toggle } from './settingsUtils'
+import {
+  BOOKING_FIELDS,
+  BOOKING_FIELD_LABELS,
+  CARRIER_DOC_LABELS,
+  CARRIER_DOC_TYPES,
+  RATE_CON_FIELDS,
+  RATE_CON_FIELD_LABELS,
+} from './carrierSettingsConstants'
 
 export function CarrierBookingSettingsCard() {
   const [settings, setSettings] = useState<TmsSettings | null>(null)
@@ -201,39 +175,6 @@ export function CarrierBookingSettingsCard() {
       )}
     </SettingsCard>
   )
-}
-
-function CheckGroup<T extends string>({ name, options, label, selected, onToggle }: {
-  name: string
-  options: readonly T[]
-  label: (value: T) => string
-  selected: T[]
-  onToggle: (value: T) => void
-}) {
-  return (
-    <div style={{ display: 'flex', flexWrap: 'wrap', columnGap: 16, rowGap: 8 }}>
-      {options.map((option) => (
-        <CheckRow
-          key={`${name}-${option}`}
-          label={label(option)}
-          ariaLabel={label(option)}
-          checked={selected.includes(option)}
-          onChange={() => onToggle(option)}
-        />
-      ))}
-    </div>
-  )
-}
-
-/** Keep only the stored values this build still understands — a settings row written by a
- *  newer deploy must not silently drop into an unchecked box and get saved away. */
-function pick<T extends string>(stored: unknown, options: readonly T[]): T[] {
-  if (!Array.isArray(stored)) return []
-  return options.filter((option) => stored.includes(option))
-}
-
-function toggle<T extends string>(selected: T[], value: T): T[] {
-  return selected.includes(value) ? selected.filter((v) => v !== value) : [...selected, value]
 }
 
 function parseDays(text: string, label: string): number | null {

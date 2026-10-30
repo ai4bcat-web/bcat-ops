@@ -33,6 +33,7 @@ vi.mock('@/features/tms/settings/ShipmentViewsPage', () => ({ default: () => <p>
 vi.mock('@/features/tms/integrations/IntegrationsTab', () => ({ IntegrationsTab: () => <p>integrations body</p> }))
 vi.mock('@/features/tms/settings/AiAgentsPage', () => ({ default: () => <p>ai agents body</p> }))
 vi.mock('./DemoPage', () => ({ DemoPage: () => <p>demo body</p> }))
+vi.mock('./company/CompanyTab', () => ({ default: () => <p>company body</p>, CompanyTab: () => <p>company body</p> }))
 
 import { BrokeragePage } from './BrokeragePage'
 
@@ -61,7 +62,7 @@ describe('BrokeragePage', () => {
 
     expect(tabNames()).toEqual([
       'Settings', 'Users', 'Commissions', 'Reports', 'Audit', 'Divisions & ownership', 'Shipment views',
-      'Integrations', 'AI Agents', 'Demo',
+      'Integrations', 'AI Agents', 'Company', 'Demo',
     ])
     expect(screen.getByText('settings body')).toBeInTheDocument()
   })
@@ -70,7 +71,7 @@ describe('BrokeragePage', () => {
     auth.grants = ['tms']
     draw()
 
-    expect(tabNames()).toEqual(['Settings', 'Commissions', 'Reports', 'Audit'])
+    expect(tabNames()).toEqual(['Settings', 'Commissions', 'Reports', 'Audit', 'Demo'])
   })
 
   it('never draws Integrations for a broker holding only the tms grant', () => {

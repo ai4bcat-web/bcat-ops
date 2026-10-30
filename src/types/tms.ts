@@ -108,6 +108,8 @@ export interface RequiredReference {
 
 export type ChargeCalc = 'FLAT' | 'PER_MILE' | 'PER_CWT' | 'PERCENT'
 
+export type ChargeCodeVisibility = 'INTERNAL' | 'CUSTOMER' | 'CARRIER'
+
 /** Org catalog entry. Stored on TmsSettings.chargeCodes. */
 export interface ChargeCodeDef {
   code: string
@@ -115,6 +117,7 @@ export interface ChargeCodeDef {
   category?: string | null
   calculatedBy: ChargeCalc
   defaultAmountCents?: number | null
+  visibility?: ChargeCodeVisibility | null
 }
 
 export interface ChargeCodeOverride {

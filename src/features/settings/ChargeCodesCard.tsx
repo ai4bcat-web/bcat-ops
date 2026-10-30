@@ -19,7 +19,7 @@ import { TmsButton, TmsIconButton, TmsInput, TmsSelect } from '@/features/tms/ki
 import { getTmsSettings, saveTmsSettings } from '@/lib/apiClient'
 import { formatCents } from '@/lib/invoiceBuild'
 import { formatCents as dollarsOf, parseCents } from '@/lib/tmsDirectory'
-import type { ChargeCalc, ChargeCodeDef, TmsSettings } from '@/types/tms'
+import type { ChargeCalc, ChargeCodeDef, ChargeCodeVisibility, TmsSettings } from '@/types/tms'
 import { ErrorText, Hint, Loading, SettingsCard, Stack } from './settingsKit'
 
 /** The same four the directory Lambda validates `calculatedBy` against. */
@@ -32,8 +32,16 @@ const CALC_LABELS: Record<ChargeCalc, string> = {
   PERCENT: 'Percent of linehaul',
 }
 
-/** The six columns of a code row, header and body alike. */
-const ROW_COLUMNS = { gridTemplateColumns: '7rem minmax(0, 1fr) 8rem 9rem 7rem 2rem', alignItems: 'center' } as const
+const VISIBILITIES: ChargeCodeVisibility[] = ['INTERNAL', 'CUSTOMER', 'CARRIER']
+
+const VISIBILITY_LABELS: Record<ChargeCodeVisibility, string> = {
+  INTERNAL: 'Internal',
+  CUSTOMER: 'Customer',
+  CARRIER: 'Carrier',
+}
+
+/** The seven columns of a code row, header and body alike. */
+const ROW_COLUMNS = { gridTemplateColumns: '7rem minmax(0, 1fr) 8rem 9rem 7rem 7rem 2rem', alignItems: 'center' } as const
 
 /** A row as it is edited: the amount stays the text that was typed until it is saved. */
 interface CodeRow {
@@ -42,6 +50,7 @@ interface CodeRow {
   category: string
   calculatedBy: ChargeCalc
   amount: string
+  visibility: ChargeCodeVisibility
 }
 
 /** The typed amount as cents, or null while the box holds something that is not one. */
@@ -71,6 +80,7 @@ export function ChargeCodesCard() {
           category: c.category ?? '',
           calculatedBy: c.calculatedBy,
           amount: c.defaultAmountCents != null ? dollarsOf(c.defaultAmountCents) : '',
+          visibility: c.visibility ?? 'INTERNAL',
         })))
       })
       .catch((e) => setError(e instanceof Error ? e.message : 'Could not load settings'))
@@ -102,6 +112,7 @@ export function ChargeCodesCard() {
         category: row.category.trim() || null,
         calculatedBy: row.calculatedBy,
         defaultAmountCents,
+        visibility: row.visibility,
       })
     }
 
@@ -133,6 +144,7 @@ export function ChargeCodesCard() {
               <div>Category</div>
               <div>Calculated by</div>
               <div>Default $</div>
+              <div>Visibility</div>
               <div />
             </div>
           )}
@@ -173,6 +185,13 @@ export function ChargeCodesCard() {
                   />
                   {cents != null && <span className="tms-field-hint">{formatCents(cents)}</span>}
                 </div>
+                <TmsSelect
+                  aria-label={`Charge code ${i + 1} visibility`}
+                  value={row.visibility}
+                  onChange={(e) => update(i, { visibility: e.target.value as ChargeCodeVisibility })}
+                >
+                  {VISIBILITIES.map((v) => <option key={v} value={v}>{VISIBILITY_LABELS[v]}</option>)}
+                </TmsSelect>
                 <TmsIconButton
                   shape="plain"
                   aria-label={`Remove charge code ${i + 1}`}
@@ -187,7 +206,7 @@ export function ChargeCodesCard() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <TmsButton
               size="sm"
-              onClick={() => setRows((prev) => [...prev, { code: '', label: '', category: '', calculatedBy: 'FLAT', amount: '' }])}
+              onClick={() => setRows((prev) => [...prev, { code: '', label: '', category: '', calculatedBy: 'FLAT', amount: '', visibility: 'INTERNAL' }])}
             >
               <Plus size={14} /> Add charge code
             </TmsButton>

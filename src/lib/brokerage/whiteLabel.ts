@@ -65,7 +65,7 @@ export function normalizeDomain(raw: unknown): string {
   // Manual parsing for scheme-less inputs.
   value = value.replace(/^[a-z][a-z0-9+.-]*:\/\//, '')
   value = value.replace(/^[^@]*@/, '')
-  value = value.replace(/:[0-9]+(?=[\/]?|$)/, '')
+  value = value.replace(/:[0-9]+(?=[/]?|$)/, '')
   value = value.split('/')[0]
   value = value.replace(/\.$/, '')
 

@@ -1921,7 +1921,7 @@ function importJobId(entity: ImportEntity, fileHash: string): string {
 }
 
 async function loadDirectoryByKey(entity: ImportEntity): Promise<Record<string, Record<string, unknown>>> {
-  let rows: Record<string, unknown>[] = []
+  let rows: Record<string, unknown>[]
   if (entity === 'CUSTOMER') rows = await scanActiveCustomers()
   else if (entity === 'LOCATION') rows = await scanActiveLocations()
   else rows = []
@@ -2027,7 +2027,7 @@ async function runImport(input: Record<string, unknown>, caller: Caller): Promis
   const jobId = importJobId(entity, meta.fileHash)
   let created = 0
   let updated = 0
-  let skipped = plan.skip.length
+  const skipped = plan.skip.length
 
   for (const row of plan.create) {
     if (entity === 'CUSTOMER') {
