@@ -1,13 +1,14 @@
 /**
- * The Academy: `Docs/academy/*.md` rendered in the app.
+ * The Academy: `Docs/academy/*.md` rendered in the app, plus the Ask assistant.
  *
  * The articles are bundled at build time (`import.meta.glob`), so the knowledge base ships
- * with the code it documents and cannot drift behind a deploy. The Ask assistant that
- * answers questions over these articles is Step M; this is the reading room.
+ * with the code it documents and cannot drift behind a deploy. Ask sends the bundled
+ * articles to the `ASK_ACADEMY` Lambda action and returns a cited answer grounded in them.
  */
-import { Fragment } from 'react'
+import { Fragment, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { TmsBadge, TmsCard, TmsEmptyState, TmsPage } from '@/features/tms/kit'
+import { TmsBadge, TmsButton, TmsCard, TmsEmptyState, TmsField, TmsPage, TmsTextarea } from '@/features/tms/kit'
+import { askAcademy, type AcademyAnswer, type AcademyArticleRef } from '@/lib/apiClient'
 import { articleTitle, parseFrontMatter, parseMarkdown, type MdBlock, type MdSpan } from './academyMarkdown'
 
 const FILES = import.meta.glob('../../../../Docs/academy/*.md', {
@@ -114,6 +115,80 @@ function Blocks({ blocks }: { blocks: MdBlock[] }) {
   )
 }
 
+function buildArticleRefs(): AcademyArticleRef[] {
+  const refs: AcademyArticleRef[] = []
+  for (const [path, source] of Object.entries(FILES)) {
+    const file = path.slice(path.lastIndexOf('/') + 1).replace(/\.md$/, '')
+    if (file.toLowerCase() === 'readme') continue
+    const { data } = parseFrontMatter(source)
+    refs.push({ slug: data.slug || file, title: data.title || file, content: source })
+  }
+  return refs
+}
+
+function AskPanel() {
+  const [question, setQuestion] = useState('')
+  const [answer, setAnswer] = useState<AcademyAnswer | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const canAsk = question.trim().length > 0 && !loading
+
+  const submit = async () => {
+    if (!canAsk) return
+    setLoading(true)
+    setError(null)
+    setAnswer(null)
+    try {
+      const result = await askAcademy(question.trim(), buildArticleRefs())
+      setAnswer(result)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not reach the assistant')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <TmsCard title="Ask the Academy">
+      <p style={{ color: 'var(--tms-muted)', marginBottom: 12 }}>
+        Ask a question about BCAT Ops and the TMS. The assistant answers only from the
+        Academy articles shown below and cites the ones it used.
+      </p>
+      <TmsField label="Your question">
+        <TmsTextarea
+          value={question}
+          onChange={(e) => setQuestion(e.target.value)}
+          placeholder="e.g. How do I release a shipment to accounting?"
+          rows={3}
+          style={{ width: '100%' }}
+        />
+      </TmsField>
+      <div style={{ marginTop: 12 }}>
+        <TmsButton onClick={submit} disabled={!canAsk}>
+          Ask
+        </TmsButton>
+      </div>
+      {error ? <p style={{ color: 'var(--ds-red)', marginTop: 12 }}>{error}</p> : null}
+      {answer ? (
+        <div style={{ marginTop: 16, padding: 12, background: 'var(--tms-card)', borderRadius: 'var(--tms-radius)' }}>
+          <p style={{ margin: 0, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{answer.answer}</p>
+          {answer.citations.length > 0 ? (
+            <div style={{ marginTop: 10, fontSize: 12, color: 'var(--tms-muted)' }}>
+              Cited: {answer.citations.map((slug, i) => (
+                <span key={slug}>
+                  {i > 0 ? ', ' : ''}
+                  <Link to={`/tms/academy/${slug}`}>{slug}</Link>
+                </span>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </TmsCard>
+  )
+}
+
 export function AcademyPage() {
   const { slug } = useParams<{ slug: string }>()
 
@@ -144,24 +219,25 @@ export function AcademyPage() {
 
   return (
     <TmsPage title={<>Academy <TmsBadge tone="purple">BETA</TmsBadge></>}>
-      <TmsCard title={`${ARTICLES.length} articles`}>
-        <p style={{ color: 'var(--tms-muted)', marginBottom: 14 }}>
-          How this TMS works, written against the build you are running. Ask — the assistant
-          that answers questions out of these articles — arrives in Step M; until then this
-          is the reading room.
-        </p>
-        <ul style={{ listStyle: 'none', display: 'grid', gap: 10 }}>
-          {ARTICLES.map((article) => (
-            <li key={article.slug}>
-              <Link to={`/tms/academy/${article.slug}`} style={{ fontWeight: 600 }}>{article.title}</Link>
-              {article.category ? <span style={{ color: 'var(--tms-muted)', marginLeft: 8, fontSize: 12 }}>{article.category}</span> : null}
-              {article.summary ? (
-                <div style={{ color: 'var(--tms-muted)', marginTop: 2, lineHeight: 1.5 }}>{article.summary}</div>
-              ) : null}
-            </li>
-          ))}
-        </ul>
-      </TmsCard>
+      <div style={{ display: 'grid', gap: 16 }}>
+        <AskPanel />
+        <TmsCard title={`${ARTICLES.length} articles`}>
+          <p style={{ color: 'var(--tms-muted)', marginBottom: 14 }}>
+            How this TMS works, written against the build you are running.
+          </p>
+          <ul style={{ listStyle: 'none', display: 'grid', gap: 10 }}>
+            {ARTICLES.map((article) => (
+              <li key={article.slug}>
+                <Link to={`/tms/academy/${article.slug}`} style={{ fontWeight: 600 }}>{article.title}</Link>
+                {article.category ? <span style={{ color: 'var(--tms-muted)', marginLeft: 8, fontSize: 12 }}>{article.category}</span> : null}
+                {article.summary ? (
+                  <div style={{ color: 'var(--tms-muted)', marginTop: 2, lineHeight: 1.5 }}>{article.summary}</div>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </TmsCard>
+      </div>
     </TmsPage>
   )
 }

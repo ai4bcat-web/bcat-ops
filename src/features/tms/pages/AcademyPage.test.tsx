@@ -4,10 +4,18 @@
  * that the bundle picks those files up at all: an index with no articles, or an article
  * route that cannot find its slug, is how this page fails in production.
  */
-import { describe, it, expect } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { describe, it, expect, vi } from 'vitest'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { AcademyPage } from './AcademyPage'
+
+import type * as ApiClient from '@/lib/apiClient'
+
+const askAcademy = vi.hoisted(() => vi.fn())
+vi.mock('@/lib/apiClient', async () => {
+  const actual = await vi.importActual<typeof ApiClient>('@/lib/apiClient')
+  return { ...actual, askAcademy }
+})
 
 function at(path: string) {
   render(
@@ -31,9 +39,22 @@ describe('AcademyPage', () => {
     expect(screen.queryByRole('link', { name: /BCAT Ops Academy/i })).toBeNull()
   })
 
-  it('says the assistant is still to come rather than offering a dead Ask box', () => {
+  it('renders the Ask assistant panel', () => {
     at('/tms/academy')
-    expect(screen.getByText(/arrives in Step M/i)).toBeTruthy()
+    expect(screen.getByText('Ask the Academy')).toBeTruthy()
+    expect(screen.getByRole('textbox')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Ask' })).toBeTruthy()
+    expect(screen.queryByText(/arrives in Step M/i)).toBeNull()
+  })
+
+  it('asks a question and renders the cited answer', async () => {
+    askAcademy.mockResolvedValue({ answer: 'Use the release gate.', citations: ['release-to-accounting'] })
+    at('/tms/academy')
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'How do I invoice a load?' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Ask' }))
+    await waitFor(() => expect(screen.getByText('Use the release gate.')).toBeTruthy())
+    const citation = screen.getByRole('link', { name: 'release-to-accounting' })
+    expect(citation.getAttribute('href')).toBe('/tms/academy/release-to-accounting')
   })
 
   it('renders one article from its slug', () => {

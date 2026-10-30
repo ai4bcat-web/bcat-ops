@@ -1562,6 +1562,21 @@ export async function rotateWebhookSecret(webhookId: string): Promise<{ webhookI
   return directoryAction<{ webhookId: string; secret: string }>('ROTATE_WEBHOOK_SECRET', { webhookId })
 }
 
+export interface AcademyArticleRef {
+  slug: string
+  title: string
+  content: string
+}
+
+export interface AcademyAnswer {
+  answer: string
+  citations: string[]
+}
+
+export async function askAcademy(question: string, articles: AcademyArticleRef[]): Promise<AcademyAnswer> {
+  return directoryAction<AcademyAnswer>('ASK_ACADEMY', { question, articles })
+}
+
 export async function previewImport(input: PreviewImportInput): Promise<ImportJob> {
   return directoryAction<ImportJob>('PREVIEW_IMPORT', input)
 }

@@ -1,5 +1,23 @@
 # TMS build log
 
+## 2026-10-30 — Step L deployed: My Brokerage settings pages
+
+**Committed and deployed on dev.** Plan: `Docs/tms-build/L-plan.md`. Academy: `Docs/academy/README.md`.
+
+- Commits: `15ea92f` (Wave 1: schema, storage, types, brokerage validation libs), `b90135d` (Wave 2: directory actions, API client, backend wiring), `f6817f2` (Wave 3: My Brokerage settings UI and lint cleanup).
+- Amplify dev job `85` for `f6817f2` **SUCCEEDED** at 2026-10-30 00:48:32 UTC-5.
+- `npm run test` on the working tree: **471 files / 6,386 tests PASS**.
+- `npx eslint .` — 0 errors, 3 pre-existing warnings.
+
+### What shipped
+
+- **Schema & storage.** Added 17 Step L `TmsSettings` fields, 11 `Division` fields, and `ImportJob` model plus storage prefixes (`brandLogosSquare`, `brandLogosWide`, `brandDocuments`, `companyLogos`) to `amplify/data/resource.ts` and `amplify/storage/resource.ts`.
+- **Pure validation libs.** `src/lib/brokerage/*` — branding, whiteLabel, paymentTerms, notifications, consolidation, import — with unit tests.
+- **Lambda.** `tms-directory-actions` handler updated with `saveSettings` V14 fields, `saveDivision` new fields and `isPrimary` uniqueness guard, new actions `ROTATE_WEBHOOK_SECRET`, `PREVIEW_IMPORT`, `RUN_IMPORT`, `LIST_IMPORT_JOBS`, and `getAccountInfo`.
+- **Client API.** `src/lib/apiClient.ts` wired with `TMS_SETTINGS_V14_FIELDS`, `DIVISION_FIELDS`, `IMPORT_JOB_FIELDS`, and helpers `listDivisions`, `saveDivision`, `uploadBrandAsset`, `rotateWebhookSecret`, `previewImport`, `runImport`, `listImportJobs`, `getAccountInfo`.
+- **UI.** New My Brokerage `Company` tab with inner pages (Company, Billing, Branding, Notifications, Import, Account). Updated Settings tab with new cards (`CustomerSettingsCard`, `CarrierDocumentsCard`, `ConsolidationCard`) and extended `ChargeCodesCard` with visibility column; removed `DivisionCard` from Settings (moved to Company tab).
+- **Runtime verification prepared:** full typecheck clean, full test suite green, Amplify dev deploy succeeded.
+
 One entry per unit of work (newest first). Decisions needed from Ryne go under **Decision needed**.
 
 ## 2026-10-29 — Step P deployed: quote → tender → cover → track → POD → billing

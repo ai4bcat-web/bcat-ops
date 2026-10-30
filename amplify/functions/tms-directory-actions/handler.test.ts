@@ -42,6 +42,7 @@ const send = vi.hoisted(() => {
   process.env.SHIPMENT_COLUMN_TEMPLATE_TABLE_NAME = 'ShipmentColumnTemplate-test'
   process.env.AUDIT_LOG_TABLE_NAME = 'AuditLog-test'
   process.env.GEOCODE_TOKEN_SECRET = 'test-geocode-secret'
+  process.env.ANTHROPIC_API_KEY = 'test-anthropic-key'
   // Step J — the integration framework's table and its SSM path.
   process.env.INTEGRATION_TABLE_NAME = 'Integration-test'
   process.env.INTEGRATION_PARAM_PATH = '/bcat/integrations/us-east-1_TEST'
@@ -167,6 +168,17 @@ vi.mock('@aws-amplify/backend-function/runtime', () => {
       libraryOptions: { Auth: { credentialsProvider: { getCredentialsAndIdentityId: async () => ({ credentials: { accessKeyId: 'k', secretAccessKey: 's', sessionToken: 't' } }), clearCredentialsAndIdentityId: () => {} } } },
     })),
   }
+})
+
+// ── Anthropic mock (Step M Ask assistant) ────────────────────────────────────
+const finalMessage = vi.hoisted(() => vi.fn())
+vi.mock('@anthropic-ai/sdk', () => {
+  class Anthropic {
+    messages = {
+      stream: vi.fn(() => ({ finalMessage })),
+    }
+  }
+  return { default: Anthropic }
 })
 
 import { handler, parseInput, resolveViewColumns } from './handler'
@@ -3017,5 +3029,37 @@ describe('integration authorization and the no-delete rule', () => {
     expect(kinds).not.toContain('Delete')
     expect(kinds).not.toContain('Transact')
     expect(tables.tableNames()).toEqual(['AuditLog-test', 'Integration-test'])
+  })
+})
+
+describe('ASK_ACADEMY', () => {
+  const event = (input: Record<string, unknown>) => ({
+    arguments: { action: 'ASK_ACADEMY', input: JSON.stringify(input) },
+    identity: ADMIN_CALLER,
+  })
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    process.env.ANTHROPIC_API_KEY = 'test-anthropic-key'
+    finalMessage.mockResolvedValue({
+      content: [{ type: 'text', text: JSON.stringify({ answer: 'Use the release gate.', citations: ['release-to-accounting'] }) }],
+      usage: { input_tokens: 1000, output_tokens: 50 },
+    })
+  })
+
+  it('answers a question with cited Academy articles', async () => {
+    const result = await handler(event({
+      question: 'How do I invoice a load?',
+      articles: [{ slug: 'release-to-accounting', title: 'Release to Accounting', content: '# Release\nDelivered loads need documents.' }],
+    }))
+    expect(result).toEqual({ answer: 'Use the release gate.', citations: ['release-to-accounting'] })
+  })
+
+  it('rejects a missing question', async () => {
+    await expect(handler(event({ articles: [] }))).rejects.toThrow('question must be a string')
+  })
+
+  it('rejects empty articles', async () => {
+    await expect(handler(event({ question: 'What?' }))).rejects.toThrow('At least one Academy article is required')
   })
 })

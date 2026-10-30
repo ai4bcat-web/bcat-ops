@@ -26,6 +26,7 @@ import {
 import { AdminGetUserCommand, CognitoIdentityProviderClient } from '@aws-sdk/client-cognito-identity-provider'
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb'
 import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'crypto'
+import Anthropic from '@anthropic-ai/sdk'
 import { validateCommissionPlans, validatePaySchedule } from '../../../src/lib/commission'
 import { teamMembership, validateTeams } from '../../../src/lib/teams'
 import { SEED_DIVISIONS, SEED_RULES, validateDivisions, validateRules } from '../../../src/lib/ownership'
@@ -171,6 +172,8 @@ type Action =
   | 'PREVIEW_IMPORT'
   | 'RUN_IMPORT'
   | 'LIST_IMPORT_JOBS'
+  // Step M — Academy Ask assistant.
+  | 'ASK_ACADEMY'
   // Step J — the integration framework. Owner/ADMIN only, every one of them.
   | IntegrationActionName
 
@@ -262,6 +265,10 @@ async function authorize(action: Action, identity?: AppSyncIdentity | null): Pro
     MERGE_LOCATIONS: true,
     RESUME_MERGE: true,
   }
+  // The Academy Ask assistant answers questions from any user who can open the Academy.
+  const assistantActions: Partial<Record<Action, true>> = {
+    ASK_ACADEMY: true,
+  }
 
   if (directoryActions[action]) {
     // Anyone who builds loads can create the customer/facility the load needs (inline
@@ -280,6 +287,9 @@ async function authorize(action: Action, identity?: AppSyncIdentity | null): Pro
     // Credentials for every outside system the brokerage holds: owner/ADMIN only,
     // and not grantable through a page claim (spec §8.1's "Broker Admin only").
     if (!isOwner && !isAdmin) throw new Error(`Forbidden: ${action} requires owner or ADMIN`)
+  } else if (assistantActions[action]) {
+    const ok = isOwner || isAdmin || groups.includes(TMS_PAGE_GROUP)
+    if (!ok) throw new Error(`Forbidden: ${action} requires owner, ADMIN, or ${TMS_PAGE_GROUP}`)
   } else if (settingsActions[action] || mergeActions[action]) {
     // Divisions, TMS settings and merges rewrite shared configuration/history: ADMIN only.
     if (!isOwner && !isAdmin) throw new Error(`Forbidden: ${action} requires owner or ADMIN`)
@@ -1884,6 +1894,64 @@ async function saveSettings(input: Record<string, unknown>, caller: Caller): Pro
   }
 }
 
+// ── Step M: Academy Ask assistant ───────────────────────────────────────────
+
+const ASK_MODEL = 'claude-sonnet-5'
+const ASK_MAX_TOKENS = 1500
+
+const ASK_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['answer', 'citations'],
+  properties: {
+    answer: { type: 'string', description: 'Concise answer to the question, based only on the provided Academy articles.' },
+    citations: { type: 'array', items: { type: 'string' }, description: 'Slugs of the Academy articles used to answer the question.' },
+  },
+} as const
+
+function anthropicClient(): Anthropic {
+  const apiKey = process.env.ANTHROPIC_API_KEY
+  if (!apiKey) throw new Error('ANTHROPIC_API_KEY is not set')
+  return new Anthropic({ apiKey })
+}
+
+function assertArticle(value: unknown, index: number): { slug: string; title: string; content: string } {
+  if (!value || typeof value !== 'object') throw new Error(`articles[${index}] must be an object`)
+  const row = value as Record<string, unknown>
+  return {
+    slug: assertString(row.slug, `articles[${index}].slug`),
+    title: assertString(row.title, `articles[${index}].title`),
+    content: assertString(row.content, `articles[${index}].content`),
+  }
+}
+
+async function askAcademy(input: Record<string, unknown>, caller: Caller): Promise<Record<string, unknown>> {
+  const question = assertString(input.question, 'question')
+  const rawArticles = Array.isArray(input.articles) ? input.articles : []
+  if (rawArticles.length === 0) throw new Error('At least one Academy article is required')
+  const articles = rawArticles.map((a, i) => assertArticle(a, i))
+
+  const context = articles
+    .map((a) => `### ${a.slug}: ${a.title}\n\n${a.content}`)
+    .join('\n\n---\n\n')
+
+  const system = `You are the BCAT Ops Academy assistant. Answer the user's question using ONLY the provided Academy articles. Be concise and factual. Cite the article slugs you used in the "citations" array. If the articles do not contain the answer, say so and set citations to an empty array.`
+  const user = `Articles:\n${context}\n\nQuestion: ${question}`
+
+  const response = await anthropicClient().messages.stream({
+    model: ASK_MODEL,
+    max_tokens: ASK_MAX_TOKENS,
+    output_config: { effort: 'low', format: { type: 'json_schema', schema: ASK_SCHEMA } },
+    system,
+    messages: [{ role: 'user', content: user }],
+  })
+  const final = await response.finalMessage()
+  const body = final.content.map((block) => (block.type === 'text' ? block.text : '')).join('')
+  const parsed = JSON.parse(body) as { answer: string; citations: string[] }
+  await writeAudit('TmsSettings', 'default', 'ACADEMY_QUESTION_ASKED', caller, { question, citations: parsed.citations })
+  return parsed
+}
+
 // ── Step L: My Brokerage settings helpers ───────────────────────────────────
 
 async function rotateWebhookSecret(input: Record<string, unknown>, caller: Caller): Promise<Record<string, unknown>> {
@@ -3204,6 +3272,8 @@ export const handler = async (event: AppSyncEvent): Promise<Record<string, unkno
       return saveSettings(input, caller)
     case 'ROTATE_WEBHOOK_SECRET':
       return rotateWebhookSecret(input, caller)
+    case 'ASK_ACADEMY':
+      return askAcademy(input, caller)
     case 'PREVIEW_IMPORT':
       return previewImport(input, caller)
     case 'RUN_IMPORT':
