@@ -925,8 +925,11 @@ export async function resetDemoData(deps: DemoDeps, input: Row, caller: Caller):
     (o) => typeof o.invoiceNumber === 'string' || ['UNPAID', 'PAID'].includes(String(o.arStatus ?? '')),
   )
   if (invoicedOrders.length) {
+    const freshOrders = (await Promise.all(
+      invoicedOrders.map((o) => deps.getById(deps.tables.order, String(o.id))),
+    )).filter((o): o is Row => Boolean(o))
     await deps.transact(
-      invoicedOrders.map((o) =>
+      freshOrders.filter(Boolean).map((o) =>
         updateTx(
           deps.tables.order,
           String(o.id),

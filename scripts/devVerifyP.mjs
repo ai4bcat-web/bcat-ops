@@ -259,14 +259,13 @@ async function main() {
 
     // ── P4: quote in → market rate → suggested sell rate ──────────────────────
     const quoteRec = findDemoRecord(state, 'QUOTE', 'quote.inbound')
-    const quote = quoteRec ? await gql(adminToken, `query Q($id:ID!){ getQuote(id:$id){ id amountCents marketRateCents marketRateMode customerRateCents status updatedAt } }`, { id: quoteRec.recordId }).then(d => d.getQuote) : null
+    const quote = quoteRec ? await gql(adminToken, `query Q($id:ID!){ getQuote(id:$id){ id amountCents marketRateCents customerRateCents status } }`, { id: quoteRec.recordId }).then(d => d.getQuote) : null
     if (!quote) bad('P4 inbound quote found', 'missing')
     const price = await ship('PRICE_FROM_MARKET', {
       quoteId: quoteRec.recordId,
       originCity: 'Chicago', originState: 'IL',
       destinationCity: 'Dallas', destinationState: 'TX',
       equipmentType: 'DRY_VAN', miles: 920, mode: 'FTL', save: true,
-      expectedUpdatedAt: quote.updatedAt,
     })
     equals('P4 market rate answered', typeof price.answer?.averageCents, 'number')
     equals('P4 suggested sell rate > 0', price.suggestedSellCents > 0, true)
