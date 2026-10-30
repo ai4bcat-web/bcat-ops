@@ -149,6 +149,17 @@ export function TrackingWorkstation() {
     })
   }, [filteredRows, activeOnly])
 
+  // The Inbox is a communication hub, not a saved board view: show every active
+  // (or closed) shipment with traffic, regardless of which board filter the
+  // Tracking tab is using. Its own search box handles PRO/customer filtering.
+  const inboxRows = useMemo(() => {
+    return shipments.filter((r) => {
+      const status = boardStatusOf(r)
+      const closed = status === 'DELIVERED' || status === 'VOIDED'
+      return activeOnly ? !closed : closed
+    })
+  }, [shipments, activeOnly])
+
   // ── URL-owned tab + conversation selection ────────────────────────────────
   const tab: TabKey = searchParams.get('tab') === 'inbox' ? 'inbox' : 'tracking'
   const setTab = useCallback(
@@ -167,10 +178,10 @@ export function TrackingWorkstation() {
   // A deep-linked shipment keeps its (possibly still empty) conversation; without a
   // link, fall back to the busiest conversation, then the first row.
   const selectedConversationId = useMemo(() => {
-    if (requestedId && displayRows.some((r) => r.id === requestedId)) return requestedId
-    const busiest = displayRows.find((r) => (messagesByShipment[r.id] ?? []).length > 0)
-    return busiest?.id ?? displayRows[0]?.id ?? null
-  }, [displayRows, requestedId, messagesByShipment])
+    if (requestedId && inboxRows.some((r) => r.id === requestedId)) return requestedId
+    const busiest = inboxRows.find((r) => (messagesByShipment[r.id] ?? []).length > 0)
+    return busiest?.id ?? inboxRows[0]?.id ?? null
+  }, [inboxRows, requestedId, messagesByShipment])
 
   const selectConversation = useCallback(
     (id: string) => {
@@ -198,7 +209,7 @@ export function TrackingWorkstation() {
   const conversationIdRef = useRef<string | null>(null)
   conversationIdRef.current = selectedConversationId
 
-  const displayKey = useMemo(() => displayRows.map((r) => r.id).sort().join(','), [displayRows])
+  const displayKey = useMemo(() => inboxRows.map((r) => r.id).sort().join(','), [inboxRows])
   const messagesLoading = tab === 'inbox' && messagesReadyKey !== displayKey
   const bundleLoading = selectedConversationId != null && bundleReadyKey !== selectedConversationId
 
@@ -356,7 +367,7 @@ export function TrackingWorkstation() {
           />
         ) : (
           <InboxPanel
-            rows={displayRows}
+            rows={inboxRows}
             messagesByShipment={messagesByShipment}
             loading={messagesLoading}
             selectedId={selectedConversationId}
