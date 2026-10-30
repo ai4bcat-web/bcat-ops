@@ -819,20 +819,20 @@ export async function seedDemoData(deps: DemoDeps, input: Row, caller: Caller): 
   }
 
   if (readyToBillShipment) {
-    const now = deps.now()
+    const order = await orderOfShipment(deps, String(readyToBillShipment.id))
+    const readyToBillLoad = await loadOfShipment(deps, String(readyToBillShipment.id))
+    const readyToBillOrder = order ?? { updatedAt: '' }
     const cleanPod = makePodDocument(deps, caller, readyToBillShipment, {
       name: 'POD clean',
       pages: 3,
       reviewStatus: 'ACCEPTED',
       reviewNote: 'clean',
+      orderId: readyToBillOrder.id as string | undefined,
     })
-    const bolDoc = makeBolDocument(deps, caller, readyToBillShipment)
-    const order = await orderOfShipment(deps, String(readyToBillShipment.id))
-    const readyToBillLoad = await loadOfShipment(deps, String(readyToBillShipment.id))
+    const bolDoc = makeBolDocument(deps, caller, readyToBillShipment, { orderId: readyToBillOrder.id as string | undefined })
     const carrierLeg = readyToBillLoad
       ? makeDemoCarrierLeg(deps, caller, readyToBillShipment, readyToBillLoad, vettedCarrier)
       : null
-    const readyToBillOrder = order ?? { updatedAt: '' }
     const references = Array.isArray(order?.references) ? (order.references as Row[]) : []
     const hasPo = references.some((r) => String(r.code ?? '').toUpperCase() === 'PO')
     const patchedReferences = hasPo
@@ -1263,13 +1263,15 @@ function makePodDocument(
   deps: DemoDeps,
   caller: Caller,
   shipment: Row,
-  opts: { name: string; pages: number; reviewStatus: string; reviewNote: string },
+  opts: { name: string; pages: number; reviewStatus: string; reviewNote: string; orderId?: string; loadId?: string },
 ): Row {
   const now = deps.now()
   return {
     id: deps.randomId(),
     __typename: 'ShipmentDocument',
     shipmentId: shipment.id,
+    orderId: opts.orderId ?? null,
+    loadId: opts.loadId ?? null,
     type: 'POD',
     name: opts.name,
     s3Key: `shipment-docs/${shipment.id}/${opts.name.replace(/\s+/g, '-').toLowerCase()}.pdf`,
@@ -1291,12 +1293,14 @@ function makePodDocument(
   }
 }
 
-function makeBolDocument(deps: DemoDeps, caller: Caller, shipment: Row): Row {
+function makeBolDocument(deps: DemoDeps, caller: Caller, shipment: Row, opts?: { orderId?: string; loadId?: string }): Row {
   const now = deps.now()
   return {
     id: deps.randomId(),
     __typename: 'ShipmentDocument',
     shipmentId: shipment.id,
+    orderId: opts?.orderId ?? null,
+    loadId: opts?.loadId ?? null,
     type: 'BOL',
     name: 'BOL clean',
     s3Key: `shipment-docs/${shipment.id}/bol-clean.pdf`,
