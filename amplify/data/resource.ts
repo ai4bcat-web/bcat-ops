@@ -3000,6 +3000,7 @@ const schema = a.schema({
       highwayStatus: a.enum(['PASS', 'FAIL', 'INCOMPLETE', 'PARTIAL', 'NONE']),
       rmisStatus:    a.enum(['PASS', 'FAIL', 'INCOMPLETE', 'PARTIAL', 'NONE']),
       mcpStatus:     a.string(),
+      mcpRiskScore:  a.integer(),   // Step N2 — MyCarrierPackets risk assessment points
 
       accountOwnerIds: a.string().array(),   // [0] is primary owner
       teamKey:         a.string(),
