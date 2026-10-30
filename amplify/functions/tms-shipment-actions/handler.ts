@@ -4907,10 +4907,15 @@ async function sendRateCon(input: Row, caller: Caller): Promise<Row> {
     })
   } catch (err) {
     console.error('[tms-shipment-actions] rate con email failed', err)
-    // ES2020 lib lacks the ErrorOptions constructor; attach the cause explicitly.
-    const failure = new Error(`The rate confirmation was saved but the email could not be sent: ${String(err)}`)
-    ;(failure as Error & { cause?: unknown }).cause = err
-    throw failure
+    if (process.env.BCAT_DEV_STACK === 'true') {
+      // Dev stacks deny SES to keep notifications inert. The row, message and
+      // token are real; the email itself is logged but not delivered.
+      console.log('[tms-shipment-actions] dev stack: suppressing rate con email failure')
+    } else {
+      const failure = new Error(`The rate confirmation was saved but the email could not be sent: ${String(err)}`)
+      ;(failure as Error & { cause?: unknown }).cause = err
+      throw failure
+    }
   }
 
   await writeAudit('LOAD_CARRIER', loadCarrierId, 'SEND_RATE_CON', caller, {
