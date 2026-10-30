@@ -669,6 +669,13 @@ export async function seedDemoData(deps: DemoDeps, input: Row, caller: Caller): 
         },
         caller,
       )
+      const bookedLoad = await deps.getById(deps.tables.load, String(load.id))
+      if (bookedLoad?.activeLoadCarrierId) {
+        await recordDemo(deps, 'LOAD_CARRIER', `loadcarrier:booked`, String(bookedLoad.activeLoadCarrierId), caller, {
+          step: 'P2',
+          label: 'Booked demo carrier leg',
+        })
+      }
     }
   }
 
@@ -1082,7 +1089,7 @@ export async function resetDemoData(deps: DemoDeps, input: Row, caller: Caller):
   const retireAssignments: TransactWriteItem[] = []
   for (const carrierId of demoCarrierIds) {
     const active = await deps.queryIndex(deps.tables.loadCarrier, 'loadCarriersByCarrierId', 'carrierId', carrierId)
-    for (const lc of active.filter((row) => row.status === 'ACTIVE')) {
+    for (const lc of active) {
       retireAssignments.push(
         updateTx(deps.tables.loadCarrier, String(lc.id), stampedPatch(deps, caller, { status: 'BOUNCED' }), String(lc.updatedAt ?? '')),
       )
