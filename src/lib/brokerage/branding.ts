@@ -115,7 +115,7 @@ export function brandKey(value: unknown): string | null {
   return key
 }
 
-function validateBrandSenders(value: unknown): BrandSenders | null {
+export function validateBrandSenders(value: unknown): BrandSenders | null {
   if (value === null || value === undefined) return null
   const row = asRecord(value)
   if (!row) throw new Error('Sender defaults must be an object.')

@@ -25,7 +25,7 @@ import {
 } from '@aws-sdk/client-dynamodb'
 import { AdminGetUserCommand, CognitoIdentityProviderClient } from '@aws-sdk/client-cognito-identity-provider'
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb'
-import { createHmac, randomUUID, timingSafeEqual } from 'crypto'
+import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'crypto'
 import { validateCommissionPlans, validatePaySchedule } from '../../../src/lib/commission'
 import { teamMembership, validateTeams } from '../../../src/lib/teams'
 import { SEED_DIVISIONS, SEED_RULES, validateDivisions, validateRules } from '../../../src/lib/ownership'
@@ -39,8 +39,42 @@ import {
   type CheckCallMilestone,
 } from '../../../src/lib/checkCallPlan'
 import { REQUIRED_FIELD_CATALOG } from '../../../src/lib/flowDefaults'
+import {
+  BRAND_ACCENTS,
+  BRAND_THEMES,
+  SIGNATURE_TOKENS,
+  brandKey,
+  logoKeyOk,
+  validateBrandSenders,
+} from '../../../src/lib/brokerage/branding'
+import {
+  validateCustomerPortalDefaults,
+  validateCustomerTags,
+} from '../../../src/lib/brokerage/customerSettings'
+import {
+  validateRateConTemplate,
+  validateCarrierAgreementTemplate,
+} from '../../../src/lib/brokerage/carrierDocuments'
+import { validateConsolidationRules } from '../../../src/lib/brokerage/consolidation'
+import {
+  validateNotificationDefaults,
+  validateNotificationSubscriptions,
+  validateNotificationWebhooks,
+} from '../../../src/lib/brokerage/notifications'
+import { validatePaymentTerms } from '../../../src/lib/brokerage/paymentTerms'
+import {
+  IMPORT_ENTITIES,
+  type ImportEntity,
+  planImport,
+  validateImportJob,
+  validateRows,
+} from '../../../src/lib/brokerage/import'
+import { validateWhiteLabel, type WhiteLabel } from '../../../src/lib/brokerage/whiteLabel'
+import { writeRawParameter, parameterNameFor } from '../_shared/integrationSecrets'
 import type {
+  CarrierAgreementTemplate,
   CommissionTrigger,
+  NotificationWebhook,
   OwnershipDivisionRecord,
   OwnershipRuleRecord,
   ShipmentViewFilters,
@@ -75,6 +109,8 @@ const AUDIT_LOG_TABLE_NAME = process.env.AUDIT_LOG_TABLE_NAME ?? ''
 // Step J — one row per integration provider, API client and webhook receipt.
 // This Lambda is its only writer apart from tracking-api's `lastUsedAt` stamp.
 const INTEGRATION_TABLE_NAME = process.env.INTEGRATION_TABLE_NAME ?? ''
+// Step L — spreadsheet import jobs. Small table; list action scans.
+const IMPORT_JOB_TABLE_NAME = process.env.IMPORT_JOB_TABLE_NAME ?? ''
 const GEOCODE_TOKEN_SECRET = process.env.GEOCODE_TOKEN_SECRET ?? ''
 const USER_POOL_ID = process.env.USER_POOL_ID ?? 'us-east-1_IbPKPNJC9'
 
@@ -130,6 +166,11 @@ type Action =
   | 'SAVE_COLUMN_TEMPLATE'
   | 'DELETE_COLUMN_TEMPLATE'
   | 'ENSURE_OWNERSHIP_SEED'
+  // Step L — My Brokerage settings, divisions, webhook secrets and import jobs.
+  | 'ROTATE_WEBHOOK_SECRET'
+  | 'PREVIEW_IMPORT'
+  | 'RUN_IMPORT'
+  | 'LIST_IMPORT_JOBS'
   // Step J — the integration framework. Owner/ADMIN only, every one of them.
   | IntegrationActionName
 
@@ -211,6 +252,10 @@ async function authorize(action: Action, identity?: AppSyncIdentity | null): Pro
     SAVE_SHIPMENT_VIEW: true,
     ARCHIVE_SHIPMENT_VIEW: true,
     ENSURE_OWNERSHIP_SEED: true,
+    ROTATE_WEBHOOK_SECRET: true,
+    PREVIEW_IMPORT: true,
+    RUN_IMPORT: true,
+    LIST_IMPORT_JOBS: true,
   }
   const mergeActions: Partial<Record<Action, true>> = {
     PREVIEW_MERGE_LOCATIONS: true,
@@ -279,6 +324,25 @@ function optionalEnum<T extends string>(value: unknown, allowed: readonly T[], f
   return v as T
 }
 
+/** Validate a template string, refusing tokens outside the allowed set. */
+function templateString(value: unknown, maxLen: number, allowedTokens: readonly string[]): string | null {
+  const v = optionalString(value, maxLen)
+  if (v == null) return null
+  const allowed: Record<string, true> = Object.fromEntries(allowedTokens.map((t) => [t, true]))
+  const bad: string[] = []
+  const seen: Record<string, true> = {}
+  for (const match of v.matchAll(/\{([a-zA-Z0-9_]+)\}/g)) {
+    const token = match[1]
+    if (seen[token] || allowed[token]) continue
+    seen[token] = true
+    bad.push(token)
+  }
+  if (bad.length) {
+    throw new Error(`Unknown template token${bad.length > 1 ? 's' : ''}: ${bad.join(', ')}.`)
+  }
+  return v
+}
+
 function optionalString(value: unknown, maxLen?: number): string | null {
   if (value == null) return null
   if (typeof value !== 'string') return null
@@ -345,6 +409,24 @@ function validateAwsIntegerCents(value: unknown, label: string): number | null {
   if (num == null) return null
   if (num < -2_147_483_648 || num > 2_147_483_647) throw new Error(`${label} exceeds GraphQL integer range`)
   return num
+}
+
+/** Division logo keys live under brand/ so they are not mistaken for documents. */
+function divisionLogoKey(value: unknown): string | null {
+  const key = optionalString(value, 300)
+  if (key && !logoKeyOk(key)) {
+    throw new Error('Division logo keys must start with "brand/".')
+  }
+  return key
+}
+
+/** Terms & Conditions URL printed on every invoice must be https. */
+function divisionTermsUrl(value: unknown): string | null {
+  const url = optionalString(value, 300)
+  if (url && !url.startsWith('https://')) {
+    throw new Error('Terms & Conditions URL must use https.')
+  }
+  return url
 }
 
 // ── Customer v2 validators ───────────────────────────────────────────────────
@@ -1521,11 +1603,34 @@ async function saveDivision(input: Record<string, unknown>, caller: Caller): Pro
     remitToEmail: optionalString(input.remitToEmail, 254),
     invoicePrefix: optionalString(input.invoicePrefix, 10),
     fleetGroup: optionalEnum(input.fleetGroup, ['LOCAL', 'AMAZON', 'BOX_TRUCK'] as const, 'fleetGroup'),
+
+    // Step L — billing entity identity, contacts, payment instructions and invoice footer.
+    taxId: optionalString(input.taxId, 32),
+    phone: optionalString(input.phone, 32),
+    physicalAddress: optionalJsonObject(input.physicalAddress),
+    primaryContact: optionalJsonObject(input.primaryContact),
+    billingContact: optionalJsonObject(input.billingContact),
+    payablesContact: optionalJsonObject(input.payablesContact),
+    termsUrl: divisionTermsUrl(input.termsUrl),
+    paymentInstructions: optionalJsonObject(input.paymentInstructions),
+    invoiceVerbiage: optionalString(input.invoiceVerbiage, 2000),
+    logoKey: divisionLogoKey(input.logoKey),
+    isPrimary: optionalBoolean(input.isPrimary),
+
     active: optionalBoolean(input.active) ?? true,
     createdBy: isCreate ? caller.email : (existing?.createdBy as string) ?? caller.email,
     updatedBy: caller.email,
     createdAt: isCreate ? now : (existing?.createdAt as string) ?? now,
     updatedAt: now,
+  }
+
+  // Step L — enforce exactly one primary billing entity.
+  if (item.isPrimary === true && (isCreate || existing?.isPrimary !== true)) {
+    const others = await scanTable(DIVISION_TABLE_NAME)
+    const alreadyPrimary = others.find((d) => d.key !== key && d.isPrimary === true)
+    if (alreadyPrimary) {
+      throw new Error(`Another division is already primary: ${alreadyPrimary.name ?? alreadyPrimary.key}. Clear it first.`)
+    }
   }
 
   if (isCreate) {
@@ -1637,10 +1742,12 @@ async function saveSettings(input: Record<string, unknown>, caller: Caller): Pro
   const keep = <T,>(raw: unknown, parse: (v: unknown) => T, field: string): T | undefined =>
     raw === undefined ? (existing?.[field] as T | undefined) : parse(raw)
 
+  const defaultPaymentTermsDays = keep(input.defaultPaymentTermsDays, (v) => optionalInteger(v, { min: 0 }), 'defaultPaymentTermsDays')
+
   const item: Record<string, unknown> = {
     id,
     marginFloorBps: keep(input.marginFloorBps, (v) => optionalInteger(v, { min: 0 }), 'marginFloorBps'),
-    defaultPaymentTermsDays: keep(input.defaultPaymentTermsDays, (v) => optionalInteger(v, { min: 0 }), 'defaultPaymentTermsDays'),
+    defaultPaymentTermsDays,
     accessorialCodes: keep(input.accessorialCodes, optionalJsonArray, 'accessorialCodes'),
     loadStatusRules: keep(input.loadStatusRules, optionalJsonObject, 'loadStatusRules'),
     invoiceNumberFormat: keep(input.invoiceNumberFormat, (v) => optionalString(v, 50), 'invoiceNumberFormat'),
@@ -1685,6 +1792,32 @@ async function saveSettings(input: Record<string, unknown>, caller: Caller): Pro
     // validator bumps a memory revision only when the markdown actually changed, so
     // re-saving the settings card does not invent a new revision every time.
     aiAgents: keep(input.aiAgents, (v) => validateAiAgents(v, existing?.aiAgents, caller.email, now), 'aiAgents'),
+
+    // Step L — My Brokerage: branding, customer settings, carrier documents,
+    // consolidation, notifications and payment terms.
+    brandLogoSquareKey: keep(input.brandLogoSquareKey, brandKey, 'brandLogoSquareKey'),
+    brandLogoWideKey: keep(input.brandLogoWideKey, brandKey, 'brandLogoWideKey'),
+    brandLogoDocumentKey: keep(input.brandLogoDocumentKey, brandKey, 'brandLogoDocumentKey'),
+    brandAccent: keep(input.brandAccent, (v) => optionalEnum(v, BRAND_ACCENTS, 'brandAccent'), 'brandAccent'),
+    brandTheme: keep(input.brandTheme, (v) => {
+      const theme = optionalEnum(v, BRAND_THEMES, 'brandTheme')
+      if (theme && theme !== 'DARK') {
+        throw new Error('Only the dark theme is built; LIGHT and SYSTEM will be available when a second stylesheet exists.')
+      }
+      return theme
+    }, 'brandTheme'),
+    brandSenders: keep(input.brandSenders, validateBrandSenders, 'brandSenders'),
+    emailSignatureTemplate: keep(input.emailSignatureTemplate, (v) => templateString(v, 4000, SIGNATURE_TOKENS), 'emailSignatureTemplate'),
+    whiteLabel: keep(input.whiteLabel, (v) => validateWhiteLabel(v, existing?.whiteLabel as WhiteLabel | null | undefined, caller.email, now), 'whiteLabel'),
+    customerPortalDefaults: keep(input.customerPortalDefaults, validateCustomerPortalDefaults, 'customerPortalDefaults'),
+    customerTags: keep(input.customerTags, validateCustomerTags, 'customerTags'),
+    rateConTemplate: keep(input.rateConTemplate, validateRateConTemplate, 'rateConTemplate'),
+    carrierAgreementTemplate: keep(input.carrierAgreementTemplate, (v) => validateCarrierAgreementTemplate(v, existing?.carrierAgreementTemplate as CarrierAgreementTemplate | null | undefined, caller.email, now), 'carrierAgreementTemplate'),
+    consolidationRules: keep(input.consolidationRules, validateConsolidationRules, 'consolidationRules'),
+    notificationSubscriptions: keep(input.notificationSubscriptions, (v) => validateNotificationSubscriptions(v, { teams: item.teams as Team[] | undefined }), 'notificationSubscriptions'),
+    notificationWebhooks: keep(input.notificationWebhooks, (v) => validateNotificationWebhooks(v, existing?.notificationWebhooks as NotificationWebhook[] | undefined), 'notificationWebhooks'),
+    notificationDefaults: keep(input.notificationDefaults, validateNotificationDefaults, 'notificationDefaults'),
+    paymentTerms: keep(input.paymentTerms, (v) => validatePaymentTerms(v, { defaultPaymentTermsDays: defaultPaymentTermsDays as number | undefined }), 'paymentTerms'),
 
     updatedBy: caller.email,
     createdAt: isCreate ? now : (existing?.createdAt as string) ?? now,
@@ -1748,6 +1881,218 @@ async function saveSettings(input: Record<string, unknown>, caller: Caller): Pro
       throw conflictError('settings', err)
     }
     throw err
+  }
+}
+
+// ── Step L: My Brokerage settings helpers ───────────────────────────────────
+
+async function rotateWebhookSecret(input: Record<string, unknown>, caller: Caller): Promise<Record<string, unknown>> {
+  const webhookId = assertString(input.webhookId, 'webhookId')
+  const existing = await getSettings()
+  const webhooks = Array.isArray(existing?.notificationWebhooks) ? (existing.notificationWebhooks as Record<string, unknown>[]) : []
+  const target = webhooks.find((w) => w.id === webhookId)
+  if (!target) throw new Error(`Webhook not found: ${webhookId}`)
+
+  const secret = randomBytes(32).toString('base64url')
+  await writeRawParameter(`WEBHOOK:${webhookId}`, { secret })
+
+  const secretLast4 = secret.slice(-4)
+  const now = nowIso()
+  const updated = webhooks.map((w) =>
+    w.id === webhookId
+      ? { ...w, secretRef: parameterNameFor(`WEBHOOK:${webhookId}`), secretLast4 }
+      : w,
+  )
+
+  await dynamo.send(
+    new UpdateItemCommand({
+      TableName: SETTINGS_TABLE_NAME,
+      Key: marshall({ id: 'default' }),
+      UpdateExpression: 'SET notificationWebhooks = :webhooks, updatedAt = :now, updatedBy = :by',
+      ExpressionAttributeValues: marshall({ ':webhooks': updated, ':now': now, ':by': caller.email }),
+    }),
+  )
+  await writeAudit('TmsSettings', 'default', 'WEBHOOK_SECRET_ROTATED', caller, { webhookId })
+  return { webhookId, secret }
+}
+
+function importJobId(entity: ImportEntity, fileHash: string): string {
+  return `imp:${fileHash.slice(0, 20)}:${entity}`
+}
+
+async function loadDirectoryByKey(entity: ImportEntity): Promise<Record<string, Record<string, unknown>>> {
+  let rows: Record<string, unknown>[] = []
+  if (entity === 'CUSTOMER') rows = await scanActiveCustomers()
+  else if (entity === 'LOCATION') rows = await scanActiveLocations()
+  else rows = []
+  const byKey: Record<string, Record<string, unknown>> = {}
+  for (const row of rows) {
+    const key = entity === 'CUSTOMER' || entity === 'CARRIER_FACTOR' || entity === 'LOCATION'
+      ? normalizeName(String(row.name ?? ''))
+      : entity === 'CARRIER'
+        ? (String(row.mcNumber ?? '').trim() ? `mc:${String(row.mcNumber).trim().toLowerCase()}` : normalizeName(String(row.name ?? '')))
+        : entity === 'CHARGE_CODE'
+          ? String(row.code ?? '').trim().toUpperCase()
+          : entity === 'PAYMENT_TERM'
+            ? String(row.key ?? '').trim().toLowerCase()
+            : entity === 'VENDOR_CONTACT'
+              ? String(row.email ?? '').trim().toLowerCase()
+              : null
+    if (key) byKey[key] = row
+  }
+  return byKey
+}
+
+async function previewImport(input: Record<string, unknown>, caller: Caller): Promise<Record<string, unknown>> {
+  const rows = Array.isArray(input.rows) ? (input.rows as Record<string, unknown>[]) : []
+  if (rows.length > 500) throw new Error('At most 500 rows may be previewed at once.')
+
+  const meta = validateImportJob({ ...input, createdBy: caller.email })
+  const entity = meta.entity
+  const { ok, errors } = validateRows(rows, meta.mapping, entity)
+  const existingByKey = await loadDirectoryByKey(entity)
+  const plan = planImport(ok, existingByKey, entity)
+
+  const counts = {
+    created: plan.create.length,
+    updated: plan.update.length,
+    skipped: plan.skip.length,
+    errored: errors.length,
+  }
+
+  const now = nowIso()
+  const jobId = importJobId(entity, meta.fileHash)
+  const jobItem: Record<string, unknown> = {
+    id: jobId,
+    entity,
+    status: errors.length === 0 ? 'VALIDATED' : 'DRAFT',
+    fileName: meta.fileName,
+    fileHash: meta.fileHash,
+    mapping: meta.mapping,
+    rowCount: rows.length,
+    counts,
+    errorKey: null,
+    dryRun: true,
+    note: meta.note,
+    createdBy: caller.email,
+    appliedAt: null,
+    appliedBy: null,
+    createdAt: now,
+    updatedAt: now,
+  }
+
+  try {
+    await dynamo.send(
+      new PutItemCommand({
+        TableName: IMPORT_JOB_TABLE_NAME,
+        Item: marshall(jobItem, { removeUndefinedValues: true }),
+        ConditionExpression: 'attribute_not_exists(id)',
+      }),
+    )
+  } catch (err: unknown) {
+    if (isConditionalCheckFailed(err)) {
+      // Return the first job idempotently; the caller already has the same plan.
+      return { jobId, existed: true, counts, errors: errors.slice(0, 50), changes: plan.update.slice(0, 20).map((u) => u.changes) }
+    }
+    throw err
+  }
+
+  return {
+    jobId,
+    existed: false,
+    counts,
+    errors: errors.slice(0, 50),
+    changes: plan.update.slice(0, 20).map((u) => u.changes),
+  }
+}
+
+async function runImport(input: Record<string, unknown>, caller: Caller): Promise<Record<string, unknown>> {
+  const rows = Array.isArray(input.rows) ? (input.rows as Record<string, unknown>[]) : []
+  if (rows.length > 500) throw new Error('At most 500 rows may be imported at once.')
+
+  const meta = validateImportJob({ ...input, createdBy: caller.email })
+  const entity = meta.entity
+  if (entity !== 'CUSTOMER' && entity !== 'LOCATION') {
+    throw new Error(`Import apply is not yet supported for ${entity}. Use preview to validate the file.`)
+  }
+
+  const { ok, errors } = validateRows(rows, meta.mapping, entity)
+  if (errors.length > 0) {
+    throw new Error(`Cannot apply: ${errors.length} row(s) failed validation. Preview first.`)
+  }
+  const existingByKey = await loadDirectoryByKey(entity)
+  const plan = planImport(ok, existingByKey, entity)
+
+  const now = nowIso()
+  const jobId = importJobId(entity, meta.fileHash)
+  let created = 0
+  let updated = 0
+  let skipped = plan.skip.length
+
+  for (const row of plan.create) {
+    if (entity === 'CUSTOMER') {
+      await upsertCustomer(row, caller)
+    } else if (entity === 'LOCATION') {
+      await upsertLocation(row, caller)
+    }
+    created += 1
+  }
+
+  for (const { existing, changes } of plan.update) {
+    if (entity === 'CUSTOMER') {
+      await upsertCustomer({ id: existing.id, ...changes, expectedUpdatedAt: existing.updatedAt ?? '' }, caller)
+    } else if (entity === 'LOCATION') {
+      await upsertLocation({ id: existing.id, ...changes, expectedUpdatedAt: existing.updatedAt ?? '' }, caller)
+    }
+    updated += 1
+  }
+
+  const jobItem: Record<string, unknown> = {
+    id: jobId,
+    entity,
+    status: 'APPLIED',
+    fileName: meta.fileName,
+    fileHash: meta.fileHash,
+    mapping: meta.mapping,
+    rowCount: rows.length,
+    counts: { created, updated, skipped, errored: 0 },
+    errorKey: null,
+    dryRun: false,
+    note: meta.note,
+    createdBy: caller.email,
+    appliedAt: now,
+    appliedBy: caller.email,
+    createdAt: now,
+    updatedAt: now,
+  }
+
+  try {
+    await dynamo.send(
+      new PutItemCommand({
+        TableName: IMPORT_JOB_TABLE_NAME,
+        Item: marshall(jobItem, { removeUndefinedValues: true }),
+        ConditionExpression: 'attribute_not_exists(id)',
+      }),
+    )
+  } catch (err: unknown) {
+    if (isConditionalCheckFailed(err)) {
+      return { jobId, existed: true, counts: jobItem.counts }
+    }
+    throw err
+  }
+
+  return { jobId, existed: false, counts: jobItem.counts }
+}
+
+async function listImportJobs(input: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const entity = typeof input.entity === 'string' ? (input.entity.trim().toUpperCase() as ImportEntity) : null
+  if (entity && !IMPORT_ENTITIES.includes(entity)) throw new Error(`"${entity}" is not an importable entity.`)
+  const rows = await scanTable(IMPORT_JOB_TABLE_NAME)
+  const filtered = entity ? rows.filter((r) => r.entity === entity) : rows
+  return {
+    jobs: (filtered as Record<string, unknown>[])
+      .map((r) => ({ ...r, mapping: asJson(r.mapping), counts: asJson(r.counts) } as Record<string, unknown>))
+      .sort((a, b) => String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? ''))),
   }
 }
 
@@ -2857,6 +3202,14 @@ export const handler = async (event: AppSyncEvent): Promise<Record<string, unkno
       return saveDivision(input, caller)
     case 'SAVE_SETTINGS':
       return saveSettings(input, caller)
+    case 'ROTATE_WEBHOOK_SECRET':
+      return rotateWebhookSecret(input, caller)
+    case 'PREVIEW_IMPORT':
+      return previewImport(input, caller)
+    case 'RUN_IMPORT':
+      return runImport(input, caller)
+    case 'LIST_IMPORT_JOBS':
+      return listImportJobs(input)
     case 'PREVIEW_MERGE_LOCATIONS':
       return previewMergeLocations(input)
     case 'MERGE_LOCATIONS':

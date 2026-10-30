@@ -1,5 +1,6 @@
 import { generateClient } from 'aws-amplify/data'
 import { uploadData, getUrl, remove } from 'aws-amplify/storage'
+import outputs from '../../amplify_outputs.json'
 import type { Load, Stop, ApptType, Driver, AuditLogEntry, EntityType, AuditAction, FactoringItem, FactoringItemStatus, TimeClockEntry } from '@/types'
 import type { RateConExtract, RateConFreight } from '@/lib/otrInvoice'
 import type { Equipment, MaintenanceTask, MaintenanceInvoice } from '@/types/equipment'
@@ -10,7 +11,7 @@ import type { DispatchConversation, DispatchMessage } from './dispatch'
 import type { VendorPayable, VendorApAttachment, VendorPayableDetails, VendorPayment } from '@/types/vendorAp'
 import type {
   CustomerRecord, LocationRecord, Division, TmsSettings, GeocodeResult, AutocompleteSuggestion,
-  LocationMergePreview, LocationMergeJob,
+  LocationMergePreview, LocationMergeJob, ImportJob,
   ShipmentRecord, OrderRecord, LoadCarrierRecord, LoadFinancialsRecord, LoadChargeRecord,
   LoadChargeInput, ShipmentBundle, ShipmentLoadFields, ShipmentStatus, ShipmentMode,
   LoadWorkflowStatus, AssignmentType,
@@ -1172,8 +1173,12 @@ const LOCATION_FIELDS = `
 `
 const DIVISION_FIELDS = `
   id key name legalName mcNumber dotNumber scac remitToName remitToAddress remitToEmail
-  invoicePrefix fleetGroup active createdAt updatedAt
+  invoicePrefix fleetGroup active
+  taxId phone physicalAddress primaryContact billingContact payablesContact
+  termsUrl paymentInstructions invoiceVerbiage logoKey isPrimary
+  createdAt updatedAt
 `
+const DIVISION_JSON_FIELDS: (keyof Division)[] = ['remitToAddress', 'physicalAddress', 'primaryContact', 'billingContact', 'payablesContact', 'paymentInstructions']
 
 const TMS_SETTINGS_FIELDS_BASE = `id marginFloorBps defaultPaymentTermsDays accessorialCodes loadStatusRules invoiceNumberFormat autoClearPastAppts createdAt updatedAt`
 const TMS_SETTINGS_V2_FIELDS = [
@@ -1241,7 +1246,15 @@ const TMS_SETTINGS_V13_FIELDS = [
   'marginTargetBps', 'marginTargetBpsByMode', 'quoteAutoReplyDefault',
   'defaultRequiredLoadFields', 'defaultCheckCallPlan', 'demoSeedVersion', 'demoSeededAt',
 ]
-const TMS_SETTINGS_JSON_FIELDS: (keyof TmsSettings)[] = ['accessorialCodes', 'loadStatusRules', 'defaultRequiredReferences', 'chargeCodes', 'quickPayTiers', 'trackingContact', 'factorRemitTo', 'teams', 'commissionPlans', 'commissionPaySchedule', 'postalCodeAliases', 'aiAgents', 'marginTargetBpsByMode', 'defaultCheckCallPlan']
+// My Brokerage (Step L): branding, customer settings, carrier documents,
+// consolidation, notifications, and org payment terms.
+const TMS_SETTINGS_V14_FIELDS = [
+  'brandLogoSquareKey', 'brandLogoWideKey', 'brandLogoDocumentKey', 'brandAccent', 'brandTheme',
+  'brandSenders', 'emailSignatureTemplate', 'whiteLabel', 'customerPortalDefaults', 'customerTags',
+  'rateConTemplate', 'carrierAgreementTemplate', 'consolidationRules', 'notificationSubscriptions',
+  'notificationWebhooks', 'notificationDefaults', 'paymentTerms',
+]
+const TMS_SETTINGS_JSON_FIELDS: (keyof TmsSettings)[] = ['accessorialCodes', 'loadStatusRules', 'defaultRequiredReferences', 'chargeCodes', 'quickPayTiers', 'trackingContact', 'factorRemitTo', 'teams', 'commissionPlans', 'commissionPaySchedule', 'postalCodeAliases', 'aiAgents', 'marginTargetBpsByMode', 'defaultCheckCallPlan', 'brandSenders', 'whiteLabel', 'customerPortalDefaults', 'customerTags', 'rateConTemplate', 'carrierAgreementTemplate', 'consolidationRules', 'notificationSubscriptions', 'notificationWebhooks', 'notificationDefaults', 'paymentTerms']
 let settingsHaveV2 = true
 let settingsHaveV3 = true
 let settingsHaveV4 = true
@@ -1254,6 +1267,7 @@ let settingsHaveV10 = true
 let settingsHaveV11 = true
 let settingsHaveV12 = true
 let settingsHaveV13 = true
+let settingsHaveV14 = true
 const tmsSettingsFields = () => [
   TMS_SETTINGS_FIELDS_BASE,
   settingsHaveV2 ? TMS_SETTINGS_V2_FIELDS.join(' ') : '',
@@ -1268,12 +1282,17 @@ const tmsSettingsFields = () => [
   settingsHaveV11 ? TMS_SETTINGS_V11_FIELDS.join(' ') : '',
   settingsHaveV12 ? TMS_SETTINGS_V12_FIELDS.join(' ') : '',
   settingsHaveV13 ? TMS_SETTINGS_V13_FIELDS.join(' ') : '',
+  settingsHaveV14 ? TMS_SETTINGS_V14_FIELDS.join(' ') : '',
 ].filter(Boolean).join(' ')
 const fieldNamed = (names: string[], err: unknown) => {
   const msg = safeStringify(err)
   return names.some((f) => new RegExp(`['"]${f}['"]`).test(msg))
 }
 const MERGE_JOB_FIELDS = `id sourceId targetId status processedCount remainingCount error createdAt updatedAt`
+const IMPORT_JOB_FIELDS = `
+  id entity status fileName fileHash rowCount errorKey dryRun note createdBy appliedAt appliedBy createdAt updatedAt
+`
+const IMPORT_JOB_JSON_FIELDS: (keyof ImportJob)[] = ['mapping', 'counts']
 
 // Both custom-op wrappers rethrow AppSync's `{errors:[…]}` payload as an Error carrying
 // the Lambda's message, so every caller's toast shows the real reason, not `[object Object]`.
@@ -1418,7 +1437,7 @@ export async function listLocationMergeJobs(): Promise<LocationMergeJob[]> {
 
 // ── Divisions & TMS settings (ADMIN writes; nothing is seeded with guessed values) ──
 export async function listDivisions(): Promise<Division[]> {
-  return (await listAll<Division>('listDivisions', DIVISION_FIELDS, 1000)).map((d) => unwrapJsonFields(d, ['remitToAddress']))
+  return (await listAll<Division>('listDivisions', DIVISION_FIELDS, 1000)).map((d) => unwrapJsonFields(d, DIVISION_JSON_FIELDS))
 }
 export async function saveDivision(input: Omit<Division, 'id' | 'createdAt' | 'updatedAt'> & { id?: string }, expectedUpdatedAt?: string): Promise<Division> {
   return directoryAction<Division>('SAVE_DIVISION', { expectedUpdatedAt, ...input })
@@ -1437,7 +1456,12 @@ export async function getTmsSettings(): Promise<TmsSettings | null> {
     try {
       return await run()
     } catch (err) {
-      if (attempt >= 11) throw err
+      if (attempt >= 12) throw err
+      if (settingsHaveV14 && fieldNamed(TMS_SETTINGS_V14_FIELDS, err)) {
+        console.warn('[apiClient] backend has no Step L My Brokerage fields yet — querying without them until deploy')
+        settingsHaveV14 = false
+        continue
+      }
       if (settingsHaveV13 && fieldNamed(TMS_SETTINGS_V13_FIELDS, err)) {
         console.warn('[apiClient] backend has no Step P org defaults yet — querying without them until deploy')
         settingsHaveV13 = false
@@ -1504,6 +1528,80 @@ export async function getTmsSettings(): Promise<TmsSettings | null> {
 }
 export async function saveTmsSettings(patch: Partial<Omit<TmsSettings, 'id' | 'createdAt' | 'updatedAt'>>, expectedUpdatedAt?: string): Promise<TmsSettings> {
   return directoryAction<TmsSettings>('SAVE_SETTINGS', { id: 'default', expectedUpdatedAt, ...patch })
+}
+
+// ── My Brokerage (Step L) ───────────────────────────────────────────────────
+
+export type ImportEntity = 'CUSTOMER' | 'LOCATION' | 'CARRIER' | 'CARRIER_FACTOR' | 'CHARGE_CODE' | 'PAYMENT_TERM' | 'VENDOR_CONTACT'
+
+export interface PreviewImportInput {
+  entity: ImportEntity
+  fileName: string
+  fileHash: string
+  mapping: Record<string, string>
+  rows: unknown[]
+}
+
+export interface RunImportInput {
+  jobId: string
+  rows: unknown[]
+  page?: number
+}
+
+export interface AccountInfo {
+  stack: {
+    userPoolId: string
+    appSyncUrl: string
+    region: string
+    storageBucket: string
+  }
+  integrations: IntegrationRecord[]
+}
+
+export async function rotateWebhookSecret(webhookId: string): Promise<{ webhookId: string; secret: string }> {
+  return directoryAction<{ webhookId: string; secret: string }>('ROTATE_WEBHOOK_SECRET', { webhookId })
+}
+
+export async function previewImport(input: PreviewImportInput): Promise<ImportJob> {
+  return directoryAction<ImportJob>('PREVIEW_IMPORT', input)
+}
+
+export async function runImport(input: RunImportInput): Promise<ImportJob> {
+  return directoryAction<ImportJob>('RUN_IMPORT', input)
+}
+
+export async function listImportJobs(entity?: ImportEntity): Promise<ImportJob[]> {
+  const rows = await listAll<ImportJob>('listImportJobs', IMPORT_JOB_FIELDS, 1000)
+  const unwrapped = rows.map((j) => unwrapJsonFields(j, IMPORT_JOB_JSON_FIELDS))
+  return entity ? unwrapped.filter((j) => j.entity === entity) : unwrapped
+}
+
+export async function uploadBrandAsset(file: File, keyPrefix?: string): Promise<{ key: string; url: string }> {
+  let prefix = keyPrefix || 'brand/logos'
+  if (!prefix.startsWith('brand/')) prefix = `brand/${prefix}`
+  prefix = prefix.replace(/\/+$/, '')
+  const safeName = file.name.replace(/[^\w.-]+/g, '_').slice(-80) || 'asset'
+  const ext = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg'
+  const key = `${prefix}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${safeName}.${ext}`
+  await uploadData({ path: key, data: file, options: { contentType: file.type || 'application/octet-stream' } }).result
+  const result = await getUrl({ path: key, options: { expiresIn: 3600 } })
+  return { key, url: result.url.toString() }
+}
+
+export async function getAccountInfo(): Promise<AccountInfo> {
+  const rawOutputs = outputs as {
+    auth?: { user_pool_id?: string }
+    data?: { url?: string }
+    storage?: { aws_region?: string; bucket_name?: string }
+  }
+  const stack = {
+    userPoolId: rawOutputs.auth?.user_pool_id ?? '',
+    appSyncUrl: rawOutputs.data?.url ?? '',
+    region: rawOutputs.storage?.aws_region ?? '',
+    storageBucket: rawOutputs.storage?.bucket_name ?? '',
+  }
+  const integrations = await listIntegrations()
+  return { stack, integrations }
 }
 
 // ── Integrations (tmsDirectoryActions, owner/ADMIN) ──────────────────────────

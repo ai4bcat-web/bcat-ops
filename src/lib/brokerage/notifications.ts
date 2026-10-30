@@ -46,6 +46,10 @@ export interface EventCatalogEntry {
   channels: NotificationChannel[]
 }
 
+export interface NotificationDefaults {
+  pauseAll: boolean
+}
+
 /** Events the app can produce today. Only the channels listed are offered. */
 export const EVENT_CATALOG: readonly EventCatalogEntry[] = [
   { event: 'SHIPMENT_MILESTONE', label: 'Shipment milestone reached', producer: 'amplify/functions/shipment-notifier/handler.ts', channels: ['EMAIL', 'IN_APP', 'WEBHOOK'] },
@@ -243,6 +247,19 @@ export function validateNotificationWebhooks(
     })
   }
   return out
+}
+
+/**
+ * Default notification behaviour: global pause switch and fallback channel
+ * preferences. Kept small so the page can extend it without a migration.
+ */
+export function validateNotificationDefaults(value: unknown): NotificationDefaults | null {
+  if (value === null || value === undefined) return null
+  const row = asRecord(value)
+  if (!row) throw new Error('Notification defaults must be an object.')
+  return {
+    pauseAll: typeof row.pauseAll === 'boolean' ? row.pauseAll : false,
+  }
 }
 
 /**

@@ -33,6 +33,7 @@ const send = vi.hoisted(() => {
   process.env.DIVISION_TABLE_NAME = 'Division-test'
   process.env.SETTINGS_TABLE_NAME = 'TmsSettings-test'
   process.env.MERGE_JOB_TABLE_NAME = 'DirectoryMergeJob-test'
+  process.env.IMPORT_JOB_TABLE_NAME = 'ImportJob-test'
   process.env.LOAD_TABLE_NAME = 'Load-test'
   process.env.USER_PROFILE_TABLE_NAME = 'UserProfile-test'
   process.env.OWNERSHIP_DIVISION_TABLE_NAME = 'OwnershipDivision-test'
@@ -1362,6 +1363,175 @@ describe('SAVE_SETTINGS', () => {
         }],
       }, identity({ groups: ['ADMIN'] }))),
     ).rejects.toThrow('commissionPlans[0].roles[0].roleName "DISPATCHER" is not a commission role')
+  })
+})
+
+// ── Step L: My Brokerage settings, divisions, webhook secrets and import ─────
+
+describe('Step L settings fields', () => {
+  it('stores branding, signature, payment terms and notification defaults', async () => {
+    send.mockImplementation((cmd: MockCommand) => {
+      if (cmd.__type === 'Get') return Promise.resolve({ Item: undefined })
+      if (cmd.__type === 'Put') return Promise.resolve({})
+      throw new Error('unexpected')
+    })
+    const result = await handler(
+      event('SAVE_SETTINGS', {
+        brandAccent: 'BLUE',
+        brandTheme: 'DARK',
+        brandSenders: { shipment: 'ship@bcatcorp.com' },
+        emailSignatureTemplate: 'Best, {name} at {company}',
+        customerPortalDefaults: { ltlQuoting: 'RATE_CARD', portalStatusMask: ['DRAFT'] },
+        customerTags: [{ key: 'VIP', label: 'VIP', color: 'blue' }],
+        paymentTerms: [{ name: 'Net 30', days: 30 }],
+        notificationDefaults: { pauseAll: true },
+      }, identity({ groups: ['ADMIN'] })),
+    )
+    expect(result.brandAccent).toBe('BLUE')
+    expect(result.brandTheme).toBe('DARK')
+    expect(result.emailSignatureTemplate).toBe('Best, {name} at {company}')
+    expect((result.customerPortalDefaults as Record<string, unknown>)?.ltlQuoting).toBe('RATE_CARD')
+    expect((result.customerTags as unknown[])[0]).toMatchObject({ key: 'VIP' })
+    expect((result.paymentTerms as unknown[])[0]).toMatchObject({ key: 'net-30' })
+    expect((result.notificationDefaults as Record<string, unknown>)?.pauseAll).toBe(true)
+  })
+
+  it('refuses a signature token outside the allowed set', async () => {
+    send.mockImplementation((cmd: MockCommand) => {
+      if (cmd.__type === 'Get') return Promise.resolve({ Item: undefined })
+      throw new Error('unexpected')
+    })
+    await expect(
+      handler(event('SAVE_SETTINGS', { emailSignatureTemplate: '{bogus}' }, identity({ groups: ['ADMIN'] }))),
+    ).rejects.toThrow('Unknown template token')
+  })
+
+  it('refuses a logo key outside brand/', async () => {
+    send.mockImplementation((cmd: MockCommand) => {
+      if (cmd.__type === 'Get') return Promise.resolve({ Item: undefined })
+      throw new Error('unexpected')
+    })
+    await expect(
+      handler(event('SAVE_SETTINGS', { brandLogoSquareKey: 'invoices/logo.pdf' }, identity({ groups: ['ADMIN'] }))),
+    ).rejects.toThrow('brand/')
+  })
+
+  it('refuses LIGHT theme until a second stylesheet exists', async () => {
+    send.mockImplementation((cmd: MockCommand) => {
+      if (cmd.__type === 'Get') return Promise.resolve({ Item: undefined })
+      throw new Error('unexpected')
+    })
+    await expect(
+      handler(event('SAVE_SETTINGS', { brandTheme: 'LIGHT' }, identity({ groups: ['ADMIN'] }))),
+    ).rejects.toThrow('dark theme is built')
+  })
+})
+
+describe('Step L divisions', () => {
+  it('stores the new billing-entity fields', async () => {
+    send.mockImplementation((cmd: MockCommand) => {
+      if (cmd.__type === 'Get') return Promise.resolve({ Item: undefined })
+      if (cmd.__type === 'Scan') return Promise.resolve({ Items: [], LastEvaluatedKey: undefined })
+      if (cmd.__type === 'Put') return Promise.resolve({})
+      throw new Error('unexpected')
+    })
+    const result = await handler(
+      event('SAVE_DIVISION', {
+        key: 'BCAT_LOGISTICS',
+        name: 'BCAT Logistics',
+        taxId: '12-3456789',
+        termsUrl: 'https://bcatcorp.com/terms',
+        isPrimary: true,
+      }, identity({ groups: ['ADMIN'] })),
+    )
+    expect(result.taxId).toBe('12-3456789')
+    expect(result.termsUrl).toBe('https://bcatcorp.com/terms')
+    expect(result.isPrimary).toBe(true)
+  })
+
+  it('refuses a second primary division', async () => {
+    const existingPrimary = makeDynamoItem({
+      key: 'OTHER', id: 'OTHER', name: 'Other Entity', isPrimary: true, active: true, updatedAt: '2025-01-02',
+    })
+    send.mockImplementation((cmd: MockCommand) => {
+      if (cmd.__type === 'Get') return Promise.resolve({ Item: undefined })
+      if (cmd.__type === 'Scan') return Promise.resolve({ Items: [existingPrimary], LastEvaluatedKey: undefined })
+      throw new Error('unexpected')
+    })
+    await expect(
+      handler(event('SAVE_DIVISION', { key: 'BCAT_LOGISTICS', name: 'BCAT', isPrimary: true }, identity({ groups: ['ADMIN'] }))),
+    ).rejects.toThrow('already primary')
+  })
+})
+
+describe('Step L webhook secret rotation', () => {
+  it('stores the secret in SSM and updates the webhook row', async () => {
+    const existing = makeDynamoItem({
+      id: 'default',
+      notificationWebhooks: [{ id: 'wh-1', url: 'https://example.com/hook', events: ['SHIPMENT_MILESTONE'], active: true }],
+      updatedAt: '2025-01-02',
+    })
+    let updatedWebhooks: unknown
+    ssmSend.mockImplementation(() => Promise.resolve({}))
+    send.mockImplementation((cmd: MockCommand) => {
+      if (cmd.__type === 'Get') return Promise.resolve({ Item: existing })
+      if (cmd.__type === 'Update') {
+        const vals = (cmd.input.ExpressionAttributeValues ?? {}) as Record<string, AttributeValue>
+        updatedWebhooks = unmarshall({ webhooks: vals[':webhooks'] }).webhooks
+        return Promise.resolve({ Attributes: existing })
+      }
+      throw new Error('unexpected')
+    })
+    const result = await handler(
+      event('ROTATE_WEBHOOK_SECRET', { webhookId: 'wh-1' }, identity({ groups: ['ADMIN'] })),
+    )
+    expect((result as Record<string, unknown>).webhookId).toBe('wh-1')
+    const secret = String((result as Record<string, unknown>).secret)
+    expect(secret).toBeTruthy()
+    const row = (updatedWebhooks as unknown[])[0] as Record<string, unknown>
+    expect(row.secretRef).toContain('WEBHOOK:WH-1')
+    expect(row.secretLast4).toBe(secret.slice(-4))
+    expect(ssmSend).toHaveBeenCalled()
+  })
+})
+
+describe('Step L import preview', () => {
+  it('validates, plans and writes an ImportJob row', async () => {
+    send.mockImplementation((cmd: MockCommand) => {
+      if (cmd.__type === 'Scan') return Promise.resolve({ Items: [], LastEvaluatedKey: undefined })
+      if (cmd.__type === 'Put') return Promise.resolve({})
+      throw new Error('unexpected')
+    })
+    const result = await handler(
+      event('PREVIEW_IMPORT', {
+        entity: 'CUSTOMER',
+        fileName: 'customers.csv',
+        fileHash: 'abc123',
+        mapping: { Company: 'name', 'MC #': 'mcNumber' },
+        rows: [{ Company: 'Acme Inc', 'MC #': '12345' }],
+      }, identity({ groups: ['ADMIN'] })),
+    )
+    expect((result as Record<string, unknown>).jobId).toMatch(/^imp:abc123:CUSTOMER$/)
+    expect(((result as Record<string, unknown>).counts as Record<string, number>).created).toBe(1)
+    expect((result as Record<string, unknown>).errors).toEqual([])
+  })
+
+  it('lists import jobs by entity', async () => {
+    const job = makeDynamoItem({
+      id: 'imp:hash:CUSTOMER', entity: 'CUSTOMER', status: 'VALIDATED', fileName: 'c.csv', fileHash: 'hash',
+      mapping: JSON.stringify({ Company: 'name' }), counts: JSON.stringify({ created: 1, updated: 0, skipped: 0, errored: 0 }),
+      createdBy: 'admin@bcatcorp.com', createdAt: '2025-01-02T00:00:00.000Z', updatedAt: '2025-01-02T00:00:00.000Z',
+    })
+    send.mockImplementation((cmd: MockCommand) => {
+      if (cmd.__type === 'Scan') return Promise.resolve({ Items: [job], LastEvaluatedKey: undefined })
+      throw new Error('unexpected')
+    })
+    const result = await handler(
+      event('LIST_IMPORT_JOBS', { entity: 'CUSTOMER' }, identity({ groups: ['ADMIN'] })),
+    )
+    const jobs = (result as Record<string, unknown>).jobs as unknown[]
+    expect(jobs).toHaveLength(1)
+    expect((jobs[0] as Record<string, unknown>).entity).toBe('CUSTOMER')
   })
 })
 

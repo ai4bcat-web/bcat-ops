@@ -1947,6 +1947,8 @@ const directoryLocationTable = backend.data.resources.tables['Location']
 const directoryDivisionTable = backend.data.resources.tables['Division']
 const directorySettingsTable = backend.data.resources.tables['TmsSettings']
 const directoryMergeJobTable = backend.data.resources.tables['DirectoryMergeJob']
+// Step L — spreadsheet import jobs.
+const directoryImportJobTable = backend.data.resources.tables['ImportJob']
 const directoryOwnershipDivisionTable = backend.data.resources.tables['OwnershipDivision']
 const directoryOwnershipRuleTable     = backend.data.resources.tables['OwnershipRule']
 const directoryShipmentViewTable      = backend.data.resources.tables['ShipmentView']
@@ -1961,6 +1963,7 @@ const directoryTableArns = [
   directoryDivisionTable.tableArn,
   directorySettingsTable.tableArn,
   directoryMergeJobTable.tableArn,
+  directoryImportJobTable.tableArn,
   directoryLoadTable.tableArn,
   // Step I: saving teams mirrors the membership onto each UserProfile.teamKeys,
   // so the one save keeps the settings row and the staff rows in step.
@@ -1993,6 +1996,7 @@ directoryActionsFn.addEnvironment('LOCATION_TABLE_NAME',           directoryLoca
 directoryActionsFn.addEnvironment('DIVISION_TABLE_NAME',           directoryDivisionTable.tableName)
 directoryActionsFn.addEnvironment('SETTINGS_TABLE_NAME',           directorySettingsTable.tableName)
 directoryActionsFn.addEnvironment('MERGE_JOB_TABLE_NAME',          directoryMergeJobTable.tableName)
+directoryActionsFn.addEnvironment('IMPORT_JOB_TABLE_NAME',         directoryImportJobTable.tableName)
 directoryActionsFn.addEnvironment('LOAD_TABLE_NAME',               directoryLoadTable.tableName)
 directoryActionsFn.addEnvironment('OWNERSHIP_DIVISION_TABLE_NAME',  directoryOwnershipDivisionTable.tableName)
 directoryActionsFn.addEnvironment('OWNERSHIP_RULE_TABLE_NAME',      directoryOwnershipRuleTable.tableName)
