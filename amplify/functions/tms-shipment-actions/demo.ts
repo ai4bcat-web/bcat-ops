@@ -1119,8 +1119,10 @@ async function stageTrackingStates(deps: DemoDeps, shipments: Row[], caller: Cal
 }
 
 function parseStops(load: Row): Row[] {
+  const raw = load.stops ?? '[]'
+  if (Array.isArray(raw)) return raw as Row[]
   try {
-    return JSON.parse(String(load.stops ?? '[]')) as Row[]
+    return JSON.parse(String(raw)) as Row[]
   } catch {
     return []
   }

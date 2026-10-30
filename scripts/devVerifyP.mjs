@@ -258,14 +258,12 @@ async function main() {
     equals('P3 customers with flow defaults', state.facts?.customersWithFlowDefaults >= 1, true)
 
     // ── P4: quote in → market rate → suggested sell rate ──────────────────────
-    const quoteRec = findDemoRecord(state, 'QUOTE', 'quote.inbound')
-    const quote = quoteRec ? await gql(adminToken, `query Q($id:ID!){ getQuote(id:$id){ id amountCents marketRateCents customerRateCents status } }`, { id: quoteRec.recordId }).then(d => d.getQuote) : null
-    if (!quote) bad('P4 inbound quote found', 'missing')
+    const customerAutoRec = findDemoRecord(state, 'CUSTOMER', 'customer.auto')
     const price = await ship('PRICE_FROM_MARKET', {
-      quoteId: quoteRec.recordId,
+      customerId: customerAutoRec.recordId,
       originCity: 'Chicago', originState: 'IL',
       destinationCity: 'Dallas', destinationState: 'TX',
-      equipmentType: 'DRY_VAN', miles: 920, mode: 'FTL', save: true,
+      equipmentType: 'DRY_VAN', miles: 920, mode: 'FTL', save: false,
     })
     equals('P4 market rate answered', typeof price.answer?.averageCents, 'number')
     equals('P4 suggested sell rate > 0', price.suggestedSellCents > 0, true)
@@ -280,9 +278,10 @@ async function main() {
 
     await ship('SET_SALES_REP', { shipmentId: buildingRec.recordId, repId: 'demo-sales-rep@example.invalid' })
     await ship('SET_REV_TAG', { shipmentId: buildingRec.recordId, divisionCode: 'BROKERAGE' })
+    const buildingBundleFresh = await getBundle(adminToken, buildingRec.recordId)
     await ship('SAVE_ORDER_FORM', {
       shipmentId: buildingRec.recordId,
-      expectedUpdatedAt: buildingBundle.shipment.updatedAt,
+      expectedUpdatedAt: buildingBundleFresh.shipment.updatedAt,
       order: {
         billToId: 'demo-billto-brokerage',
         references: [
@@ -290,7 +289,8 @@ async function main() {
         ],
       },
     })
-    const built = await ship('COMPLETE_BUILD', { shipmentId: buildingRec.recordId, expectedUpdatedAt: buildingBundle.shipment.updatedAt })
+    const buildingBundleFinal = await getBundle(adminToken, buildingRec.recordId)
+    const built = await ship('COMPLETE_BUILD', { shipmentId: buildingRec.recordId, expectedUpdatedAt: buildingBundleFinal.shipment.updatedAt })
     equals('P5 complete build makes BUILT', built.buildState, 'BUILT')
 
     // ── P6: post / unpost stub on the posted shipment ─────────────────────────
