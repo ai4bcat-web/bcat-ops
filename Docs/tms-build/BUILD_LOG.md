@@ -117,6 +117,17 @@ dev: invoice, bill, workflow run; plus harness triggers 14a-send and the P3/P4 t
 Everything stays on dev. No main merge or merge-to-main prep is planned or done. Order: (1) big data import on dev,
 (2) one demo shipment start to finish, then Ryne decides about main. Findings are from a read-only recon of the repo.
 
+**Addendum after Steps U and V (the demo shipment must exercise them):** the full-shipment run now starts with an e-mail
+tender: a ZZ tender e-mail staged for a division's intake address (through the staging path, since inbound mail is not live on
+dev) -> Intake tab -> review/correct -> Move to active (shipment lands `TENDER_PENDING`, appears in Active) -> Accept + credit
+check -> price -> post -> cover -> rate con (the carrier must have a completed MCP packet) -> the shipment inherits the customer's
+default tracker (check it appears in Tracking under that person; reassign once) -> Tracking by assignee -> automation Run now
+(NOT_SENT check-call rows in the thread with the exact text; quiet hours; one slot only) -> Delivered -> automatic POD request
+(once per leg per channel) -> POD upload + review -> Release (shipment leaves Active, stays in All) -> invoice -> collect -> carrier
+bill -> pay. The big import must also provide a `trackerId`/default-tracker mapping or leave trackers unassigned, route each row to
+a division (so Intake and Active make sense), and must not require an intake e-mail on existing divisions. Needs from Ryne
+(unchanged): the source system and a sample file, volumes, whether documents come along, whether legacy PROs must be kept.
+
 ### Test 1 — big data import on dev
 **What exists today (none of it takes a large external dataset):**
 - `node scripts/devStack.mjs copy-data|copy-files`: prod → dev copy (read-only on prod, overwrite by key, 4 table workers,
