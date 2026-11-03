@@ -5,7 +5,7 @@
  *
  *   node scripts/devVerifyU.mjs [--inventory] [--only=<substring>] [--no-dark]
  *   DEV_VERIFY_UI_URL=http://localhost:5173 node scripts/devVerifyU.mjs
- *   INTAKE_WEBHOOK_SECRET=… [WORKFLOW_AGENT_URL=…] node scripts/devVerifyU.mjs      (the ingest steps)
+ *   [WORKFLOW_AGENT_URL=…] node scripts/devVerifyU.mjs   (ingest steps: INTAKE_WEBHOOK_SECRET from the env, else dev SSM)
  *
  *   --inventory  no network, no browser: completeness gates 1, 3 and 4 only (App.tsx / nav / src imports).
  *   --only=      run only the steps whose id contains the substring (seeds are still created).
@@ -29,7 +29,7 @@ import { launchBrowser, ALLOWED_ORIGINS, DEV_ORIGIN, pause } from './lib/cdpBrow
 import { DEV_API, DEV_POOL, mintIdentity, deleteIdentity, gql, routerAs } from './lib/devIdentity.mjs'
 import { createWalk, SHELL_FACTS, TOKEN_PROBE, shellFailures } from './lib/uiWalk.mjs'
 import {
-  U_ROUTES, U_KEPT, U_REDIRECTS, U_GONE, SIDEBAR_BANNED, uNavGaps, uGoneGaps, uViewHookGaps,
+  U_ROUTES, U_KEPT, U_REDIRECTS, U_GONE, SIDEBAR_BANNED, SIDEBAR_BANNED_HREFS, uNavGaps, uGoneGaps, uViewHookGaps,
 } from './lib/uRoutes.mjs'
 
 const DEV_APPSYNC = /^https:\/\/f5iqzdpidzalvjys7yxijn5ave\.appsync-api\.us-east-1\.amazonaws\.com\/graphql$/
@@ -213,12 +213,37 @@ const slotFor = (role, messageId) => {
   const sourceKey = `${prefix}/message.json`
   return { prefix, sourceKey, runId: `wf:${role}:${sha20(sourceKey)}` }
 }
+// The workflow-agent's INBOX_SECRET is the Amplify secret INTAKE_WEBHOOK_SECRET. The harness takes it from the
+// environment, else reads it from this app's dev-branch SSM path, else (how the dev branch actually resolves an
+// unset branch secret) the app-shared path. Only those two exact names for the dev app are ever read; the value
+// is held in this variable and is never printed or written.
+const DEV_APP_ID = 'd3dejqzs77khq6'
+const SECRET_PATHS = [
+  `/amplify/${DEV_APP_ID}/dev/INTAKE_WEBHOOK_SECRET`,
+  `/amplify/shared/${DEV_APP_ID}/INTAKE_WEBHOOK_SECRET`,
+]
+let intakeSecret = null
+async function resolveIntakeSecret() {
+  if (intakeSecret) return intakeSecret
+  if (process.env.INTAKE_WEBHOOK_SECRET) return (intakeSecret = process.env.INTAKE_WEBHOOK_SECRET)
+  const { SSMClient, GetParameterCommand } = await import('@aws-sdk/client-ssm')
+  const ssm = new SSMClient({ region: REGION })
+  for (const Name of SECRET_PATHS) {
+    try {
+      const r = await ssm.send(new GetParameterCommand({ Name, WithDecryption: true }))
+      if (r.Parameter?.Value) return (intakeSecret = r.Parameter.Value)
+    } catch (err) {
+      if (err?.name !== 'ParameterNotFound') throw err
+    }
+  }
+  throw new Error(`INTAKE_WEBHOOK_SECRET not in the environment or at ${SECRET_PATHS.join(' / ')}`)
+}
 async function postInbox(action, fixture) {
   const { url } = await workflowAgent()
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ secret: process.env.INTAKE_WEBHOOK_SECRET, action, attachments: [], ...fixture }),
+    body: JSON.stringify({ secret: await resolveIntakeSecret(), action, attachments: [], ...fixture }),
   })
   return { status: res.status, body: await res.json().catch(() => ({})) }
 }
@@ -289,12 +314,13 @@ async function shipmentsFlow(b, ctx, theme) {
     await step(`U01-${list}-${theme}`, async () => {
       await b.navigate(list === 'all' ? '/tms/shipments?list=all' : '/tms/shipments')
       await waitLoaded(b)
-      await b.poll(async () => footerTotal(await mainText(b)) != null, 'footer total', 30_000)
+      const expected = (await expectedListCounts(ctx.token))[list]
+      // the footer reads "0" until the list query returns (≈1,100 rows), so wait for it to settle on the real count
+      await b.poll(async () => footerTotal(await mainText(b)) === expected, `footer total ${expected}`, 60_000).catch(() => {})
       const selected = await b.evaluate(`[...document.querySelectorAll('.tms-main [role="tab"][aria-selected="true"]')].map((t) => t.textContent.trim()).join('|')`)
       if (!new RegExp(`^${list}`, 'i').test(selected.split('|').find((t) => /^(active|all)/i.test(t)) ?? '')) throw new Error(`selected tabs: ${selected}`)
       const text = await mainText(b)
       const total = footerTotal(text)
-      const expected = (await expectedListCounts(ctx.token))[list]
       // the board refreshes on a timer; a row created or released mid-run can move the count by the rows that changed
       if (total !== expected) throw new Error(`${list}: footer total ${total}, independent count ${expected}`)
       if (/Save as view/i.test(text) || /\bViews\b/.test(await sidebarText(b))) throw new Error('a saved-view control is still rendered')
@@ -311,6 +337,7 @@ async function shipmentsFlow(b, ctx, theme) {
   })
   await step('U01-batch-bar', async () => {
     await b.navigate('/tms/shipments'); await waitLoaded(b)
+    await b.poll(() => b.evaluate(`document.querySelectorAll('.tms-main tbody input[type="checkbox"]').length >= 2`), 'selectable rows', 60_000).catch(() => {})
     const boxes = await b.evaluate(`document.querySelectorAll('.tms-main tbody input[type="checkbox"]').length`)
     if (boxes < 2) throw new Error(`only ${boxes} selectable rows`)
     await b.evaluate(`(() => { const c = [...document.querySelectorAll('.tms-main tbody input[type="checkbox"]')].slice(0, 2); c.forEach((x) => x.click()); })()`)
@@ -346,6 +373,9 @@ async function removalFlow(b) {
     const side = await sidebarText(b)
     const banned = SIDEBAR_BANNED.filter((w) => new RegExp(`\\b${w}\\b`).test(side))
     if (banned.length) throw new Error(`sidebar still names: ${banned.join(', ')}`)
+    const hrefs = await b.evaluate(`[...document.querySelectorAll('.tms-sidebar a[href]')].map((a) => new URL(a.href, location.origin).pathname.replace(/\\/$/, ''))`)
+    const bannedHrefs = SIDEBAR_BANNED_HREFS.filter((h) => hrefs.includes(h))
+    if (bannedHrefs.length) throw new Error(`sidebar still links: ${bannedHrefs.join(', ')}`)
     return `${U_GONE.length} removed pages land elsewhere with no old markers; sidebar clean`
   })
   await step('U02-kept', async () => {
@@ -374,8 +404,10 @@ async function divisionFlow(b, ctx, theme) {
     await b.poll(async () => (await dialogCount(b)) > 0, 'division dialog', 20_000)
     const text = await dialogText(b)
     if (!/Intake e-mail/i.test(text)) throw new Error('the dialog has no Intake e-mail field')
-    const save = await b.evaluate(`(() => { const el = [...document.querySelector('[role="dialog"]').querySelectorAll('button')].find((n) => /^Save/i.test(n.textContent.trim())); return el ? (el.disabled ? 'disabled' : 'enabled') : 'absent' })()`)
-    if (save !== 'disabled') throw new Error(`Save is ${save} with no intake e-mail`)
+    // Save stays clickable (DivisionsPage.test.tsx pins this): the required-address problem is the answer to the click.
+    await clickIn(b, 'dialog', '^Save')
+    await b.poll(async () => /needs an intake e-mail address/i.test(await dialogText(b)), 'required-address message', 10_000).catch(() => { throw new Error('Save with no intake e-mail did not say the address is required') })
+    if ((await dialogCount(b)) < 1) throw new Error('the dialog closed on Save with no intake e-mail')
     await setValue(b, '[role="dialog"] input[type="email"]', 'not-an-email')
     await pause(300)
     const errors = await b.evaluate(`document.querySelectorAll('[role="dialog"] .tms-field-error').length`)
@@ -442,7 +474,10 @@ async function ingestFlow(ctx) {
     role: 'TENDER', messageId: `zzu-${key}-${stamp}-${randomUUID()}`, receivedAt: new Date().toISOString(),
     fromName: 'ZZ U Sender', ...over,
   })
-  const m1 = fixture('m1', { subject: `Load tender ZZU-${stamp} Dallas TX to Atlanta GA`, fromEmail: ctx.senderEmail, bodyText: tenderBody(`ZZU-${stamp}`), toAddresses: [ctx.addressA] })
+  // The deterministic reader (src/lib/intakeTender.ts parseSubject) only takes a 5-12 digit reference after a label
+  // (`Tender TMS ID n: CITY, ST to CITY, ST`); M1 uses that shape so the reference is provably PARSER-sourced.
+  const m1Ref = String(stamp).slice(-10)
+  const m1 = fixture('m1', { subject: `Tender TMS ID ${m1Ref}: Dallas, TX to Atlanta, GA`, fromEmail: ctx.senderEmail, bodyText: tenderBody(m1Ref), toAddresses: [ctx.addressA] })
   const m2 = fixture('m2', { subject: `ZZ U sparse tender ${stamp}`, fromEmail: `zz-u-stranger-${stamp}@example.invalid`, bodyText: 'Can you cover a load for us?', toAddresses: [ctx.addressA] })
   const m3 = fixture('m3', { subject: `ZZ U nowhere tender ${stamp}`, fromEmail: ctx.senderEmail, bodyText: tenderBody(`ZZU-NW-${stamp}`), toAddresses: [`zz-u-nowhere-${stamp}@example.invalid`] })
   const m4 = fixture('m4', { subject: `ZZ U rate request ${stamp}`, fromEmail: ctx.senderEmail, bodyText: `Rate request: Dallas TX to Atlanta GA, dry van. ZZ-U-${stamp}`, toAddresses: [ctx.addressA] })
@@ -743,7 +778,7 @@ async function main() {
     try { await gql(admin.token, 'query { listIntakeLoads(limit: 1) { items { id } } }', {}); ctx.backend = true } catch { ctx.backend = false }
     console.log(`backend: Step U ${ctx.backend ? 'deployed' : 'NOT deployed — backend-dependent steps will be SKIPPED (allowed)'}`)
 
-    if (ctx.backend && !process.env.INTAKE_WEBHOOK_SECRET) throw new Error('INTAKE_WEBHOOK_SECRET is required for the ingest steps (Amplify Console → Secrets)')
+    if (ctx.backend) await resolveIntakeSecret()
     ctx.b0 = { poll: async (fn, label, ms) => { const end = Date.now() + ms; while (Date.now() < end) { if (await fn()) return true; await pause(3000) } throw new Error(`timed out: ${label}`) } }
 
     if (ctx.backend) {
@@ -780,8 +815,13 @@ async function main() {
       await phonePass(b, ctx)
     } finally { await b.close() }
 
-    for (const theme of flag('no-dark') ? ['light'] : ['light', 'dark']) {
+    // The light reviewer pass MOVES M1 and DISMISSES M3, so every read of those rows (both viewer passes, the dark
+    // reviewer pass) has to happen first: viewers, then the reviewer dark (read-only) and finally light (mutating).
+    const themes = flag('no-dark') ? ['light'] : ['light', 'dark']
+    for (const theme of themes) {
       await openInIdentity(ctx, view.storage, 'bcat-u-view-', theme, (vb) => intakeAreaFlow(vb, ctx, theme, { viewer: true })).catch((err) => line('FAIL', `U05-viewer-${theme}`, String(err?.message ?? err).slice(0, 200)))
+    }
+    for (const theme of [...themes].reverse()) {
       await openInIdentity(ctx, rev.storage, 'bcat-u-rev-', theme, (rb) => reviewFlow(rb, ctx, theme)).catch((err) => line('FAIL', `U06-reviewer-${theme}`, String(err?.message ?? err).slice(0, 200)))
     }
   } finally {

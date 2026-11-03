@@ -1462,6 +1462,9 @@ function makeSellQuote(deps: DemoDeps, caller: Caller, customer: Row, opts: { st
     marketDetail: { low: marketCents - 5000, high: marketCents + 5000, average: marketCents },
     marginTargetBps: DEFAULT_MARGIN_TARGET_BPS,
     rounds: 1,
+    // createdAt/updatedAt are required in the schema: a Quote without them nulls the whole listQuotes page for every user.
+    createdAt: now,
+    updatedAt: now,
     createdBy: caller.email,
     updatedBy: caller.email,
     version: 1,

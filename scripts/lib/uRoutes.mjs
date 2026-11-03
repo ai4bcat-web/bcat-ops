@@ -52,8 +52,15 @@ export const U_GONE = [
   { path: '/tms/brokerage/views', routePath: null, component: 'ShipmentViewsPage', target: null, markers: ['Shipment views'] },
 ]
 
-/** Sidebar words that must no longer appear (whole words). */
-export const SIDEBAR_BANNED = ['Dispatch', 'Academy', 'Workflows', 'My queue', 'Team queue', 'Views']
+/**
+ * Sidebar words that must no longer appear (whole words). `Dispatch` is deliberately absent: the fleet-messaging page
+ * (/dispatch, ASSETS group, src/lib/navItems.ts) is a different product from the removed /tms/dispatch board and stays;
+ * the board's absence is asserted by SIDEBAR_BANNED_HREFS instead.
+ */
+export const SIDEBAR_BANNED = ['Academy', 'Workflows', 'My queue', 'Team queue', 'Views']
+
+/** Sidebar link targets (exact paths) that must no longer exist. */
+export const SIDEBAR_BANNED_HREFS = ['/tms/dispatch', '/tms/academy', '/tms/brokerage/views']
 
 /** Nav targets U added to src/lib/navSections.ts. */
 export const U_NAV_TARGETS = ['/tms/shipments/intake']

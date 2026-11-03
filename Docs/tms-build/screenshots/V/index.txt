@@ -1,0 +1,6 @@
+Docs/tms-build/screenshots/V/V10-shipment-tracker-card-light.png
+Docs/tms-build/screenshots/V/V10-customer-default-tracker-light.png
+Docs/tms-build/screenshots/V/V10-settings-automation-defaults-light.png
+Docs/tms-build/screenshots/V/V10-settings-automation-divisions-light.png
+Docs/tms-build/screenshots/V/V10-settings-automation-customers-light.png
+Docs/tms-build/screenshots/V/V10-mobile-tracking-M.png

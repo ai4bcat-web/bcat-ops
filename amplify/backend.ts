@@ -2348,11 +2348,13 @@ shipmentActionsFn.addEnvironment('PRO_CLAIM_TABLE_NAME',       shipmentProClaimT
 shipmentActionsFn.addEnvironment('USER_PROFILE_TABLE_NAME',    shipmentUserProfileTable.tableName)
 shipmentActionsFn.addEnvironment('USER_POOL_ID',               backend.auth.resources.userPool.userPoolId)
 // Step U: the intake review queue. Edit, promote and dismiss are this function's; staging
-// (the Put) belongs to workflow-agent.
+// (the Put) belongs to workflow-agent. Scan + DeleteItem: the demo seed counts the open
+// rows (GET_DEMO_STATE) and a reset removes the one it staged; ConditionCheckItem for the
+// promote transaction's guards.
 const shipmentIntakeLoadTable = backend.data.resources.tables['IntakeLoad']
 shipmentActionsFn.addEnvironment('INTAKE_LOAD_TABLE_NAME', shipmentIntakeLoadTable.tableName)
 shipmentActionsFn.addToRolePolicy(new PolicyStatement({
-  actions:   ['dynamodb:GetItem', 'dynamodb:Query', 'dynamodb:UpdateItem', 'dynamodb:PutItem'],
+  actions:   ['dynamodb:GetItem', 'dynamodb:Query', 'dynamodb:Scan', 'dynamodb:UpdateItem', 'dynamodb:PutItem', 'dynamodb:DeleteItem', 'dynamodb:ConditionCheckItem'],
   resources: [shipmentIntakeLoadTable.tableArn, `${shipmentIntakeLoadTable.tableArn}/index/*`],
 }))
 shipmentActionsFn.addToRolePolicy(

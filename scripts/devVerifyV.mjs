@@ -190,7 +190,7 @@ async function auditNow(b, theme, ref, { wideOk = true } = {}) {
 async function openPage(b, path, ready) {
   await b.navigate(path)
   await waitLoaded(b)
-  if (ready) await b.poll(ready, `${path} ready`, 90_000)
+  if (ready) await b.poll(ready, `${path} ready`, 90_000).catch(async (err) => { throw new Error(`${err.message} (${await pageDiagnostics(b)})`) })
 }
 
 // ───────────────────────────── safety + discovery ─────────────────────────────
@@ -326,8 +326,11 @@ async function attachSentLeg(ctx, bundle, label) {
     id, loadId: load.id, shipmentId: bundle.shipment.id, kind: 'CARRIER', status: 'ACTIVE', sequence: 1,
     carrierName: 'ZZ V Carrier', dispatcherName: 'ZZ V Dispatcher', dispatcherEmail: 'zz-v@example.invalid',
     driverName: 'ZZ V Driver', driverPhone: '+15555550100',
-    rateConStatus: 'SENT', rateConSentAt: at, createdAt: at, updatedAt: at,
+    // createdBy/updatedBy are `required()` in the schema: a row without them makes AppSync null the whole
+    // listLoadCarriers page for every user (the Shipments/Tracking boards then read "failed to load").
+    rateConStatus: 'SENT', rateConSentAt: at, createdBy: 'zz-v', updatedBy: 'zz-v', createdAt: at, updatedAt: at,
   })
+  ctx.legIds.add(id)
   return id
 }
 
@@ -398,7 +401,16 @@ async function buildFixtures(ctx) {
   F.legs = {}
   for (const [key, label] of [['sA', 'a'], ['sB', 'b'], ['sM', 'm'], ['sP', 'p'], ['sD', 'd']]) F.legs[key] = await attachSentLeg(ctx, F[key], label)
   F.notes = {}
-  for (const key of ['sA', 'sB', 'sM']) F.notes[key] = await driveLoad(ctx, F[key], 'IN_TRANSIT')
+  for (const key of ['sA', 'sB', 'sM']) {
+    F.notes[key] = await driveLoad(ctx, F[key], 'IN_TRANSIT')
+    // A rate-con-sent, moving load is a booked shipment. A DRAFT one opens the draft order editor, which has no Tracker card
+    // (ShipmentDetail renders it only past DRAFT), so V10 would be looking at a state a tracked load can never be in.
+    const shipment = await getRow(ctx.token, 'Shipment', F[key].shipment.id, 'status')
+    if (shipment.status === 'DRAFT') {
+      await sdkUpdate(ctx, 'Shipment', F[key].shipment.id, { status: 'IN_TRANSIT' }, {}, {})
+      F.notes[key] += '; shipment status written by SDK (was DRAFT)'
+    }
+  }
   for (const key of ['sP', 'sD']) F.notes[key] = await driveLoad(ctx, F[key], 'DELIVERED')
   await ctx.ship('ASSIGN_TRACKER', { shipmentIds: [F.sM.shipment.id], trackerId: ctx.adminUsername })
   for (const key of ['sA', 'sB', 'sP', 'sD']) await ctx.trk('OPEN_SHIPMENT_THREAD', { shipmentId: F[key].shipment.id })
@@ -413,7 +425,7 @@ async function auditChanges(token, entityId, action) {
   do {
     const r = await gql(token, `query($f: ModelAuditLogFilterInput, $n: String) { listAuditLogs(filter: $f, limit: 1000, nextToken: $n) { items { id entityId action user changes } nextToken } }`, { f: { entityId: { eq: entityId }, action: { eq: action } }, n: next })
     const rows = r.listAuditLogs.items
-    if (rows.length) return rows.map((x) => ({ ...x, changes: asJson(x.changes) }))
+    if (rows.length) return rows.map((x) => ({ ...x, changes: asJson(asJson(x.changes)) }))
     next = r.listAuditLogs.nextToken
   } while (next)
   return []
@@ -681,11 +693,19 @@ const trackingSnapshot = (b) => b.evaluate(`(() => {
 })()`)
 const groupCount = (g) => Number(/—\s*(\d+)\s+shipment/.exec(g.label)?.[1] ?? NaN)
 
+/** What the page itself says when it never reached the state a step waits for: the failures a bare timeout hides. */
+async function pageDiagnostics(b) {
+  const p = b.problems()
+  const text = await b.evaluate(`(document.querySelector('.tms-main')?.innerText ?? document.body.innerText).replace(/\\s+/g, ' ').slice(0, 240)`).catch(() => '')
+  const clip = (list) => list.slice(0, 3).map((x) => String(x).slice(0, 160)).join(' // ')
+  return `page: ${JSON.stringify(text)} | console: ${clip(p.consoleErrors) || '-'} | http: ${clip(p.httpErrors) || '-'} | failed: ${clip(p.failedRequests) || '-'} | exceptions: ${clip(p.exceptions) || '-'}`
+}
+
 async function waitTracking(b, ids) {
   await b.poll(async () => {
     const s = await trackingSnapshot(b)
     return ids.every((id) => s.rows.some((r) => r.id === id))
-  }, `tracking rows ${ids.length}`, 120_000)
+  }, `tracking rows ${ids.length}`, 120_000).catch(async (err) => { throw new Error(`${err.message} (${await pageDiagnostics(b)})`) })
 }
 
 async function v03Table(b, ctx, theme, ref) {
@@ -783,7 +803,7 @@ async function v10Walk(b, ctx, theme, ref) {
     await b.evaluate(`[...document.querySelectorAll('.tms-main tbody tr')].find((r) => r.textContent.includes(${JSON.stringify(F.custA.name)})).click()`)
     await b.poll(() => b.evaluate(`[...document.querySelectorAll('[role="tab"]')].some((t) => t.textContent.trim() === 'Settings')`), 'profile tabs', 30_000)
     await clickText(b, 'body', '[role="tab"]', '^Settings$')
-    await b.poll(async () => /Default tracker/.test(await bodyText(b)), 'Default tracker field', 20_000)
+    await b.poll(async () => /Default tracker/.test(await bodyText(b)), 'Default tracker field', 20_000).catch(async (err) => { throw new Error(`${err.message} (${await pageDiagnostics(b)})`) })
     expect(await b.evaluate(`!!document.querySelector('[data-testid="automation-editor-customer"]')`), 'the customer automation editor is not rendered')
     await auditNow(b, theme, null)
     await snap(b, 'V10', 'customer-default-tracker', theme)
@@ -918,6 +938,13 @@ async function cleanup(ctx) {
     return
   }
   await restoreSettings(ctx).catch((err) => say(`TmsSettings restore failed: ${String(err?.message ?? err).slice(0, 100)}`, false))
+  // the SDK-written carrier legs belong to voided shipments and would linger as orphans
+  const legT = devTable('LoadCarrier', ctx.suffix)
+  for (const id of ctx.legIds) {
+    await doc.send(new DeleteCommand({ TableName: legT, Key: { id } })).catch(() => {})
+    const left = (await doc.send(new GetCommand({ TableName: legT, Key: { id } })).catch(() => ({ Item: {} }))).Item
+    say(`LoadCarrier ${id} ${left ? 'NOT confirmed deleted' : 'deleted and confirmed gone'}`, !left)
+  }
   const profileT = devTable('UserProfile', ctx.suffix)
   for (const id of ctx.profileIds) {
     await doc.send(new DeleteCommand({ TableName: profileT, Key: { id } })).catch(() => {})
@@ -953,7 +980,7 @@ async function main() {
   const made = []
   const ctx = {
     ts, origin, emails, runStart: nowIso(), suffix: null, f: {},
-    shipmentIds: new Set(), customerIds: new Set(), profileIds: new Set(), trackedEmails: new Set(Object.values(emails)),
+    shipmentIds: new Set(), legIds: new Set(), customerIds: new Set(), profileIds: new Set(), trackedEmails: new Set(Object.values(emails)),
     settingsBefore: null,
   }
   ctx.owned = makeOwned(ctx)

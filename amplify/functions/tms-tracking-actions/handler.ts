@@ -751,6 +751,9 @@ async function conversationFor(
   })
 }
 
+/** What a NOT_SENT thread row says when dispatch texting has no Twilio connection (nothing was attempted). */
+const SMS_NOT_CONFIGURED_REASON = 'Dispatch texting is not connected to Twilio; nothing was texted'
+
 interface TextOutcome {
   status: SmsStatus
   messageId: string | null
@@ -2324,7 +2327,7 @@ const threadDeps: ThreadDeps = {
       // recorded as NOT_SENT with the exact text that would have gone out.
       status: outcome.status === 'SENT' ? 'SENT' : outcome.status === 'FAILED' ? 'FAILED' : 'NOT_SENT',
       providerRef: outcome.messageId,
-      error: outcome.error,
+      error: outcome.error ?? (outcome.status === 'NOT_CONFIGURED' ? SMS_NOT_CONFIGURED_REASON : null),
     }
   },
   geocode: geocodeReply,

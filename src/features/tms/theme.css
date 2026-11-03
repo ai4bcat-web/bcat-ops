@@ -544,16 +544,23 @@
 
 .tms-shell .tms-page-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 12px;
+  gap: 8px 12px;
   min-height: 40px;
 }
 
+/* The action cluster wraps under the title on a phone instead of pushing the page wider than the
+   viewport (the dashboard's four controls measure 516px). */
 .tms-shell .tms-page-actions {
   margin-left: auto;
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   align-items: center;
   gap: 8px;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .tms-shell .tms-views-btn {
