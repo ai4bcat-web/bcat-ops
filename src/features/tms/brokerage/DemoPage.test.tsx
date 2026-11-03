@@ -14,14 +14,14 @@ const DEMO_STATE_SEEDED = {
   seededAt: '2026-10-29T00:00:00Z',
   devStack: true,
   records: [
-    { id: 'rec-1', kind: 'shipment', demoKey: 'shipment.open.assigned', recordId: 'shp-open', seedVersion: 'p1-2026-10-29', createdBy: 'seed', createdAt: '', updatedAt: '' },
-    { id: 'rec-2', kind: 'customer', demoKey: 'customer.auto', recordId: 'cust-auto', seedVersion: 'p1-2026-10-29', createdBy: 'seed', createdAt: '', updatedAt: '' },
-    { id: 'rec-3', kind: 'quote', demoKey: 'quote.inbound', recordId: 'quote-in', seedVersion: 'p1-2026-10-29', createdBy: 'seed', createdAt: '', updatedAt: '' },
-    { id: 'rec-4', kind: 'shipment', demoKey: 'shipment.building', recordId: 'shp-build', seedVersion: 'p1-2026-10-29', createdBy: 'seed', createdAt: '', updatedAt: '' },
-    { id: 'rec-5', kind: 'shipment', demoKey: 'shipment.posted', recordId: 'shp-post', seedVersion: 'p1-2026-10-29', createdBy: 'seed', createdAt: '', updatedAt: '' },
-    { id: 'rec-6', kind: 'shipment', demoKey: 'shipment.intransit', recordId: 'shp-track', seedVersion: 'p1-2026-10-29', createdBy: 'seed', createdAt: '', updatedAt: '' },
-    { id: 'rec-7', kind: 'shipment', demoKey: 'shipment.podflagged', recordId: 'shp-pod', seedVersion: 'p1-2026-10-29', createdBy: 'seed', createdAt: '', updatedAt: '' },
-    { id: 'rec-8', kind: 'shipment', demoKey: 'shipment.readytobill', recordId: 'shp-bill', seedVersion: 'p1-2026-10-29', createdBy: 'seed', createdAt: '', updatedAt: '' },
+    { id: 'rec-1', kind: 'SHIPMENT', demoKey: 'shipment.open.assigned', recordId: 'shp-open', seedVersion: 'p1-2026-10-29', createdBy: 'seed', createdAt: '', updatedAt: '' },
+    { id: 'rec-2', kind: 'CUSTOMER', demoKey: 'customer.auto', recordId: 'cust-auto', seedVersion: 'p1-2026-10-29', createdBy: 'seed', createdAt: '', updatedAt: '' },
+    { id: 'rec-3', kind: 'QUOTE', demoKey: 'quote.inbound', recordId: 'quote-in', seedVersion: 'p1-2026-10-29', createdBy: 'seed', createdAt: '', updatedAt: '' },
+    { id: 'rec-4', kind: 'SHIPMENT', demoKey: 'shipment.building', recordId: 'shp-build', seedVersion: 'p1-2026-10-29', createdBy: 'seed', createdAt: '', updatedAt: '' },
+    { id: 'rec-5', kind: 'SHIPMENT', demoKey: 'shipment.posted', recordId: 'shp-post', seedVersion: 'p1-2026-10-29', createdBy: 'seed', createdAt: '', updatedAt: '' },
+    { id: 'rec-6', kind: 'SHIPMENT', demoKey: 'shipment.intransit', recordId: 'shp-track', seedVersion: 'p1-2026-10-29', createdBy: 'seed', createdAt: '', updatedAt: '' },
+    { id: 'rec-7', kind: 'SHIPMENT', demoKey: 'shipment.podflagged', recordId: 'shp-pod', seedVersion: 'p1-2026-10-29', createdBy: 'seed', createdAt: '', updatedAt: '' },
+    { id: 'rec-8', kind: 'SHIPMENT', demoKey: 'shipment.readytobill', recordId: 'shp-bill', seedVersion: 'p1-2026-10-29', createdBy: 'seed', createdAt: '', updatedAt: '' },
   ],
   facts: {
     shipmentCount: 42,
@@ -137,6 +137,18 @@ describe('DemoPage', () => {
     const btn = within(p2).getByRole('button', { name: /open/i })
     expect(btn).toBeDisabled()
     expect(within(p2).getByText(/seeded record not found/i)).toBeInTheDocument()
+  })
+
+  it('opens the seeded record on the right screen when the backend kind is upper-cased', async () => {
+    vi.spyOn(apiClient, 'getDemoState').mockResolvedValue(DEMO_STATE_SEEDED)
+    renderDemo()
+    await waitFor(() => expect(screen.getByText('Rate con, thread and tracking')).toBeInTheDocument())
+    expect(screen.queryByText(/seeded record not found/i)).not.toBeInTheDocument()
+    const p8 = screen.getByText('Rate con, thread and tracking').closest('.tms-demo-step') as HTMLElement
+    const btn = within(p8).getByRole('button', { name: /open/i })
+    expect(btn).toBeEnabled()
+    fireEvent.click(btn)
+    expect(window.location.pathname + window.location.search).toBe('/tms/shipments/shp-track?tab=tracking')
   })
 
   it('shows Reset for an owner on dev and confirms before resetting', async () => {

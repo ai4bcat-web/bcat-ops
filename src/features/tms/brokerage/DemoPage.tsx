@@ -208,8 +208,9 @@ export function DemoPage() {
       ) : (
         <div className="tms-demo-list">
           {DEMO_STEPS.map((step, i) => {
+            // demoKey already carries the kind prefix; the backend stores kind upper-cased.
             const record = step.opensOn
-              ? state.records.find((r) => r.kind === step.opensOn!.split('.')[0] && r.demoKey === step.opensOn)
+              ? state.records.find((r) => r.demoKey === step.opensOn)
               : undefined
             const checklist = rows[i]
             return (
