@@ -186,20 +186,33 @@ export async function launchBrowser({
       async waitFor(selector, timeout = 30_000) {
         return poll(() => evaluate(`!!document.querySelector(${JSON.stringify(selector)})`), selector, timeout)
       },
-      /** click(cssSelector) or click({ text, selector = 'button' }) — text is an exact trimmed match, or a RegExp source via { pattern }. */
+      /** click(cssSelector) or click({ text, selector = 'button' }) — text is an exact trimmed match, or a RegExp source via { pattern }; { label } matches aria-label (RegExp source); { real: true } sends a genuine mouse press (pointerdown) instead of el.click(). */
       async click(target) {
         const spec = typeof target === 'string' ? { selector: target } : target
         const clicked = await evaluate(`(() => {
           const spec = ${JSON.stringify(spec)};
           const nodes = [...document.querySelectorAll(spec.selector ?? 'button')];
           const re = spec.pattern ? new RegExp(spec.pattern, spec.flags ?? 'i') : null;
-          const el = nodes.find((n) => spec.text == null && !re ? true : re ? re.test(n.textContent.trim()) : n.textContent.trim() === spec.text);
+          const labelRe = spec.label ? new RegExp(spec.label, spec.flags ?? 'i') : null;
+          const el = nodes.find((n) => {
+            if (labelRe && !labelRe.test(n.getAttribute('aria-label') ?? '')) return false;
+            if (spec.text == null && !re) return true;
+            return re ? re.test(n.textContent.trim()) : n.textContent.trim() === spec.text;
+          });
           if (!el || el.disabled) return false;
           el.scrollIntoView({ block: 'center' });
+          // real: Radix menus open on pointerdown, which a synthetic el.click() never fires
+          if (spec.real) { const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; }
           el.click();
           return true;
         })()`)
         if (!clicked) throw new Error(`Nothing clickable for ${JSON.stringify(spec)}`)
+        if (clicked.x != null) {
+          const base = { x: clicked.x, y: clicked.y, button: 'left', clickCount: 1, pointerType: 'mouse' }
+          await command('Input.dispatchMouseEvent', { type: 'mouseMoved', x: clicked.x, y: clicked.y })
+          await command('Input.dispatchMouseEvent', { type: 'mousePressed', ...base })
+          await command('Input.dispatchMouseEvent', { type: 'mouseReleased', ...base })
+        }
       },
       /** Press and release a named key (e.g. 'Escape', 'Enter'). */
       async press(key) {

@@ -546,6 +546,7 @@ export function DivisionsPage() {
             >
               <span
                 aria-hidden="true"
+                data-user-color
                 style={{
                   width: 12,
                   height: 12,

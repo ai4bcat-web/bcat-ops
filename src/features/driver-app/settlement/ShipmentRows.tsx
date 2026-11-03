@@ -89,9 +89,9 @@ function DocCell({
       <span
         className={`inline-flex min-h-9 items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold ${
           present
-            ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+            ? 'border-[color:var(--tms-badge-green)] bg-[color:var(--tms-badge-green-tint)] text-[color:var(--tms-badge-green)]'
             : required
-              ? 'border-amber-400 bg-amber-50 text-amber-800'
+              ? 'border-[color:var(--tms-badge-orange)] bg-[color:var(--tms-badge-orange-tint)] text-[color:var(--tms-badge-orange)]'
               : 'border-border bg-muted/50 text-muted-foreground'
         }`}
         aria-label={`${label} ${present ? 'on file' : 'not on file'} for ${shipment}`}
@@ -106,7 +106,7 @@ function DocCell({
     if (!onPreview) {
       return (
         <span
-          className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-xs font-semibold text-emerald-700"
+          className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-[color:var(--tms-badge-green)] bg-[color:var(--tms-badge-green-tint)] px-2.5 py-1.5 text-xs font-semibold text-[color:var(--tms-badge-green)]"
           aria-label={`${label} on file for ${shipment}`}
         >
           <Check className="h-3.5 w-3.5" /> {short} in{count}
@@ -118,7 +118,7 @@ function DocCell({
         type="button"
         onClick={onPreview}
         aria-label={`Check the ${label} you sent for ${shipment}`}
-        className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-xs font-semibold text-emerald-700"
+        className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-[color:var(--tms-badge-green)] bg-[color:var(--tms-badge-green-tint)] px-2.5 py-1.5 text-xs font-semibold text-[color:var(--tms-badge-green)]"
       >
         <Eye className="h-3.5 w-3.5" /> {short} in{count}
       </button>
@@ -131,7 +131,7 @@ function DocCell({
       aria-label={`Send the ${label} for ${shipment}`}
       className={`inline-flex min-h-9 items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold ${
         required
-          ? 'border-amber-400 bg-amber-50 text-amber-800'
+          ? 'border-[color:var(--tms-badge-orange)] bg-[color:var(--tms-badge-orange-tint)] text-[color:var(--tms-badge-orange)]'
           : 'border-border bg-muted/50 text-muted-foreground'
       }`}
     >
@@ -213,7 +213,7 @@ export function ShipmentRows({
           <div
             key={trip.id}
             role="row"
-            className={`border-b border-border/60 px-3 py-2.5 ${held ? 'bg-amber-500/10' : ''}`}
+            className={`border-b border-border/60 px-3 py-2.5 ${held ? 'bg-[color:var(--tms-badge-orange)]' : ''}`}
           >
             <div className="grid grid-cols-[1fr_auto_auto] items-start gap-3">
             <div role="cell" className="min-w-0">
@@ -225,7 +225,7 @@ export function ShipmentRows({
                   : ''}
               </p>
               {held && (
-                <p className="mt-0.5 flex items-center gap-1 text-xs font-medium text-amber-300">
+                <p className="mt-0.5 flex items-center gap-1 text-xs font-medium text-[color:var(--tms-badge-orange)]">
                   <AlertTriangle className="h-3 w-3" />
                   {trip.heldReason === 'NOT_DELIVERED'
                     ? 'Not delivered yet — pays on a later check'
@@ -259,7 +259,7 @@ export function ShipmentRows({
                 {money(trip.amount)}
               </span>
               {held && trip.heldLabel && (
-                <span className="block text-[10px] font-bold uppercase tracking-wide text-amber-300">
+                <span className="block text-[10px] font-bold uppercase tracking-wide text-[color:var(--tms-badge-orange)]">
                   {trip.heldLabel}
                 </span>
               )}
@@ -311,7 +311,7 @@ export function ShipmentRows({
               Freight total / driver share{payPercent != null ? ` (${Math.round(payPercent * 100)}%)` : ''}
             </span>
             {!!heldFreight && heldFreight > 0 && (
-              <span className="block text-xs font-semibold text-amber-300">
+              <span className="block text-xs font-semibold text-[color:var(--tms-badge-orange)]">
                 excludes {money(heldFreight)} held for POD
               </span>
             )}

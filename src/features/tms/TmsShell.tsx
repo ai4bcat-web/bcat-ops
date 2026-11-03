@@ -11,6 +11,7 @@ import {
   CircleHelp,
   LayoutGrid,
   LogOut,
+  Menu,
   Moon,
   Search,
   Sun,
@@ -81,8 +82,7 @@ export interface TmsShellProps {
   breadcrumb: TmsBreadcrumbItem[]
   user: { initial: string; email: string; name?: string | null }
   shipmentViews: Array<{ slug: string; name: string }>
-  /** Numeric counts for `badgeKey` items. The legacy NavBar has its own resolver —
-   *  this map is for the TMS rail only, so a count can ship without touching BCAT Ops chrome.
+  /** Numeric counts for `badgeKey` items (see `useShellBadgeCounts`; absent or 0 renders no badge).
    *  `tracking` carries the shipments currently moving. */
   badgeCounts?: Record<string, number>
   /** The businesses the switcher offers. Fewer than two means a static org card, no menu. */
@@ -94,6 +94,13 @@ export interface TmsShellProps {
   /** The Log out button renders only when this is provided. */
   onLogout?: () => void
   onSearch?: (q: string) => void
+  /**
+   * Legacy pages: the content area becomes a fixed-height host (`height:100%` pages keep their
+   * own scroll container) instead of page scroll.
+   */
+  fill?: boolean
+  /** A column to the right of the page (the dispatch drawer on legacy routes); `fill` only. */
+  aside?: ReactNode
   children?: ReactNode
 }
 
@@ -451,9 +458,16 @@ export function TmsShell({
   trackedLoads = [],
   onLogout,
   onSearch,
+  fill = false,
+  aside,
   children,
 }: TmsShellProps) {
   const [collapsed, setCollapsed] = useState(readCollapsed)
+  // The phone drawer is open for one path only: navigating anywhere closes it without an effect.
+  const [navOpenFor, setNavOpenFor] = useState<string | null>(null)
+  const navOpen = navOpenFor === activePath
+  const setNavOpen = useCallback((open: boolean) => setNavOpenFor(open ? activePath : null), [activePath])
+  const menuBtnRef = useRef<HTMLButtonElement>(null)
   const [query, setQuery] = useState('')
   const searchRef = useRef<HTMLInputElement>(null)
   const { theme, toggleTheme } = useTmsTheme()
@@ -480,6 +494,19 @@ export function TmsShell({
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
+  // Phone drawer: Escape closes it and hands focus back to the hamburger.
+  useEffect(() => {
+    if (!navOpen) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setNavOpen(false)
+        menuBtnRef.current?.focus()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [navOpen, setNavOpen])
+
   const handleQuery = useCallback(
     (value: string) => {
       setQuery(value)
@@ -494,8 +521,16 @@ export function TmsShell({
   const rowProps = { activePath, shipmentViews, badgeCounts, trackedLoads }
 
   return (
-    <div className={`tms-shell${collapsed ? ' tms-is-collapsed' : ''}`}>
-      <aside className="tms-sidebar">
+    <div className={`tms-shell${collapsed ? ' tms-is-collapsed' : ''}${fill ? ' tms-fill' : ''}${navOpen ? ' tms-nav-open' : ''}`}>
+      <aside
+        className="tms-sidebar"
+        onClick={(e) => {
+          if ((e.target as HTMLElement).closest('a')) {
+            setNavOpen(false)
+            menuBtnRef.current?.focus()
+          }
+        }}
+      >
         <div className="tms-sidebar-head">
           <CompanySwitcher companies={companies} company={company} collapsed={collapsed} onSelect={setCompany} />
           <button
@@ -541,6 +576,16 @@ export function TmsShell({
 
       <div className="tms-content">
         <header className="tms-topbar">
+          <button
+            ref={menuBtnRef}
+            type="button"
+            className="tms-icon-btn tms-icon-btn-sq tms-menu-btn"
+            aria-label="Open menu"
+            aria-expanded={navOpen}
+            onClick={() => setNavOpen(!navOpen)}
+          >
+            <Menu size={16} aria-hidden="true" />
+          </button>
           <nav aria-label="Breadcrumb">
             <ol className="tms-breadcrumb">
               <li className="tms-crumb">
@@ -604,8 +649,12 @@ export function TmsShell({
           </div>
         </header>
 
-        <main className="tms-main">{children}</main>
+        <main className="tms-main">
+          {children}
+          {fill ? aside : null}
+        </main>
       </div>
+      {navOpen ? <div className="tms-nav-backdrop" onClick={() => setNavOpen(false)} aria-hidden="true" /> : null}
     </div>
   )
 }

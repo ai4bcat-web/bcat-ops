@@ -17,6 +17,9 @@ import '../styles/detail.css'
 import '../styles/money.css'
 import '../styles/admin.css'
 
+export { TmsScrollPage } from './TmsScrollPage'
+export type { TmsScrollPageProps } from './TmsScrollPage'
+
 export { TmsPage } from './TmsPage'
 export type { TmsPageProps } from './TmsPage'
 

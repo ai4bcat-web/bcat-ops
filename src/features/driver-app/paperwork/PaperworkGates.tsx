@@ -66,7 +66,7 @@ export function EndOfDayPaperworkDialog({ items, truckUnit, onClose, onDone }: W
     const on = choices[loadId]?.kind === kind
     return (
       <button type="button" disabled={busy} onClick={() => pick(loadId, kind)} aria-pressed={on}
-        className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-semibold ${on ? 'border-primary bg-primary/15 text-foreground' : 'border-border bg-card text-muted-foreground'}`}>
+        className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-semibold ${on ? 'border-primary bg-[color:var(--tms-primary-tint)] text-foreground' : 'border-border bg-card text-muted-foreground'}`}>
         {icon} {label}
       </button>
     )

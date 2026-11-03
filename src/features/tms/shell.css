@@ -23,8 +23,10 @@
   overflow: hidden;
 }
 
-.tms-shell.tms-is-collapsed .tms-sidebar {
-  width: var(--tms-sidebar-collapsed-w);
+@media (min-width: 901px) {
+  .tms-shell.tms-is-collapsed .tms-sidebar {
+    width: var(--tms-sidebar-collapsed-w);
+  }
 }
 
 .tms-shell .tms-sidebar-head {
@@ -35,9 +37,11 @@
   flex: 0 0 auto;
 }
 
-.tms-shell.tms-is-collapsed .tms-sidebar-head {
-  flex-direction: column;
-  padding: 12px 8px;
+@media (min-width: 901px) {
+  .tms-shell.tms-is-collapsed .tms-sidebar-head {
+    flex-direction: column;
+    padding: 12px 8px;
+  }
 }
 
 .tms-shell .tms-collapse-btn {
@@ -122,9 +126,11 @@
   color: var(--tms-muted);
 }
 
-.tms-shell.tms-is-collapsed .tms-company-card {
-  justify-content: center;
-  padding: 4px;
+@media (min-width: 901px) {
+  .tms-shell.tms-is-collapsed .tms-company-card {
+    justify-content: center;
+    padding: 4px;
+  }
 }
 
 .tms-shell .tms-company-menu {
@@ -471,34 +477,44 @@
 
 /* Collapsed rail: icons only. */
 
-.tms-shell.tms-is-collapsed .tms-nav-label,
-.tms-shell.tms-is-collapsed .tms-nav-badge,
-.tms-shell.tms-is-collapsed .tms-nav-caret,
-.tms-shell.tms-is-collapsed .tms-nav-children,
-.tms-shell.tms-is-collapsed .tms-section-head,
-.tms-shell.tms-is-collapsed .tms-user-text,
-.tms-shell.tms-is-collapsed .tms-logout-label {
-  display: none;
+@media (min-width: 901px) {
+  .tms-shell.tms-is-collapsed .tms-nav-label,
+  .tms-shell.tms-is-collapsed .tms-nav-badge,
+  .tms-shell.tms-is-collapsed .tms-nav-caret,
+  .tms-shell.tms-is-collapsed .tms-nav-children,
+  .tms-shell.tms-is-collapsed .tms-section-head,
+  .tms-shell.tms-is-collapsed .tms-user-text,
+  .tms-shell.tms-is-collapsed .tms-logout-label {
+    display: none;
+  }
 }
 
-.tms-shell.tms-is-collapsed .tms-sidebar-scroll {
-  padding: 4px 8px 12px;
+@media (min-width: 901px) {
+  .tms-shell.tms-is-collapsed .tms-sidebar-scroll {
+    padding: 4px 8px 12px;
+  }
 }
 
-.tms-shell.tms-is-collapsed .tms-nav-row {
-  justify-content: center;
-  padding: 0;
+@media (min-width: 901px) {
+  .tms-shell.tms-is-collapsed .tms-nav-row {
+    justify-content: center;
+    padding: 0;
+  }
 }
 
-.tms-shell.tms-is-collapsed .tms-sidebar-foot {
-  margin: 0 8px 8px;
-  padding: 6px;
-  align-items: center;
+@media (min-width: 901px) {
+  .tms-shell.tms-is-collapsed .tms-sidebar-foot {
+    margin: 0 8px 8px;
+    padding: 6px;
+    align-items: center;
+  }
 }
 
-.tms-shell.tms-is-collapsed .tms-logout {
-  width: 32px;
-  padding: 0;
+@media (min-width: 901px) {
+  .tms-shell.tms-is-collapsed .tms-logout {
+    width: 32px;
+    padding: 0;
+  }
 }
 
 /* ── Content column + top-bar card ────────────────────────────────────────── */
@@ -646,49 +662,116 @@
   right: -6px;
 }
 
-/* ── Narrow screens: the rail stays, collapsed ────────────────────────────── */
+/* ── Fill mode: legacy pages that own a fixed-height scroll container ───────── */
+
+.tms-shell.tms-fill {
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.tms-shell.tms-fill .tms-content {
+  height: 100dvh;
+  padding-bottom: var(--tms-shell-gap);
+}
+
+.tms-shell.tms-fill .tms-main {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: var(--tms-shell-gap) 0 0;
+  display: flex;
+  gap: var(--tms-gap);
+}
+
+/* Same contract as the old `.page-content`: `height:100%` pages keep working. */
+.tms-shell .tms-legacy-host {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  font-variant-numeric: tabular-nums;
+}
+
+.tms-shell .tms-aside {
+  flex: 0 0 400px;
+  min-height: 0;
+  background: var(--tms-card);
+  border: 1px solid var(--tms-border);
+  border-radius: var(--tms-radius-card);
+  overflow: hidden;
+}
+
+/* The hamburger and its backdrop exist only on phones. */
+.tms-shell .tms-menu-btn {
+  display: none;
+}
+
+/* ── Narrow screens: off-canvas drawer ────────────────────────────────────── */
 
 @media (max-width: 900px) {
-  .tms-shell .tms-sidebar {
-    width: var(--tms-sidebar-collapsed-w);
+  .tms-shell .tms-sidebar,
+  .tms-shell.tms-is-collapsed .tms-sidebar {
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: min(84vw, 300px);
+    border-radius: 0 var(--tms-radius-card) var(--tms-radius-card) 0;
+    transform: translateX(-110%);
+    transition: transform 0.2s ease;
+    z-index: 90;
+  }
+
+  .tms-shell.tms-nav-open .tms-sidebar {
+    transform: none;
+  }
+
+  .tms-shell .tms-nav-backdrop {
+    position: fixed;
+    inset: 0;
+    background: var(--tms-overlay);
+    z-index: 80;
   }
 
   .tms-shell .tms-content,
   .tms-shell.tms-is-collapsed .tms-content {
-    margin-left: calc(var(--tms-sidebar-collapsed-w) + 2 * var(--tms-shell-gap));
+    margin-left: 0;
+    padding-left: var(--tms-shell-gap);
   }
 
-  .tms-shell .tms-nav-label,
-  .tms-shell .tms-nav-badge,
-  .tms-shell .tms-nav-caret,
-  .tms-shell .tms-nav-children,
-  .tms-shell .tms-section-head,
-  .tms-shell .tms-user-text,
-  .tms-shell .tms-logout-label,
-  .tms-shell .tms-company-name,
-  .tms-shell .tms-company-card > svg {
+  .tms-shell .tms-menu-btn {
+    display: inline-flex;
+  }
+
+  /* The collapsed-rail preference is ignored on phones: the drawer always shows labels. */
+  .tms-shell .tms-collapse-btn {
     display: none;
-  }
-
-  .tms-shell .tms-nav-row {
-    justify-content: center;
-    padding: 0;
-  }
-
-  .tms-shell .tms-company-card {
-    justify-content: center;
-    padding: 4px;
-  }
-
-  .tms-shell .tms-search {
-    width: 140px;
   }
 
   .tms-shell .tms-topbar {
     gap: 8px;
   }
 
+  .tms-shell .tms-search {
+    width: 140px;
+  }
+
   .tms-shell .tms-breadcrumb .tms-crumb:not(.tms-crumb-current):not(:first-child) {
+    display: none;
+  }
+
+  .tms-shell .tms-legacy-host {
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* The dispatch column is a desktop affordance. */
+  .tms-shell .tms-aside {
+    display: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .tms-shell .tms-search {
     display: none;
   }
 }

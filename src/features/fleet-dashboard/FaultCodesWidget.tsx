@@ -103,13 +103,13 @@ export function FaultCodesWidget() {
   const faultCount = trucks.reduce((count, truck) => count + truck.codes.length, 0)
 
   return (
-    <div style={{ background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 12, boxShadow: 'var(--sh-sm)', overflow: 'hidden' }}>
-      <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--ds-border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+    <div style={{ background: 'var(--tms-card)', border: '1px solid var(--tms-border)', borderRadius: 12, boxShadow: 'var(--tms-shadow)', overflow: 'hidden' }}>
+      <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--tms-border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <AlertTriangle size={16} style={{ color: faultCount > 0 ? '#dc2626' : 'var(--ds-t3)' }} />
+          <AlertTriangle size={16} style={{ color: faultCount > 0 ? 'var(--tms-badge-red)' : 'var(--tms-muted)' }} />
           <div>
-            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)' }}>Active Fault Codes · Motive</div>
-            <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 1 }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--tms-text)' }}>Active Fault Codes · Motive</div>
+            <div style={{ fontSize: 12, color: 'var(--tms-muted)', marginTop: 1 }}>
               {loading
                 ? 'Loading engine diagnostics…'
                 : faultCount === 0
@@ -120,12 +120,12 @@ export function FaultCodesWidget() {
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
           {/* The other fleets are one click away, never silently gone. */}
-          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--ds-t3)', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--tms-muted)', cursor: 'pointer', whiteSpace: 'nowrap' }}>
             <input type="checkbox" checked={ivanOnly} onChange={(e) => setIvanOnly(e.target.checked)} />
             Ivan trucks only
           </label>
           {hasPageAccess('maintenance') && (
-            <Link to="/maintenance" style={{ fontSize: 12, color: 'var(--ds-blue)', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
+            <Link to="/maintenance" style={{ fontSize: 12, color: 'var(--tms-primary)', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
               Maintenance <ChevronRight size={13} />
             </Link>
           )}
@@ -133,27 +133,27 @@ export function FaultCodesWidget() {
       </div>
 
       {trucks.length === 0 ? (
-        <div style={{ padding: '28px 20px', textAlign: 'center', color: 'var(--ds-t3)', fontSize: 13, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+        <div style={{ padding: '28px 20px', textAlign: 'center', color: 'var(--tms-muted)', fontSize: 13, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
           {loading
             ? <span style={{ opacity: 0.7 }}>Checking Motive…</span>
-            : <><CheckCircle2 size={22} style={{ opacity: 0.35, color: '#15803d' }} />
+            : <><CheckCircle2 size={22} style={{ opacity: 0.35, color: 'var(--tms-badge-green)' }} />
                 {ivanOnly ? 'All Ivan trucks are clear.' : 'All active vehicles are clear.'}</>}
         </div>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 12, padding: 16 }}>
           {trucks.map((t) => (
-            <div key={t.truckId} style={{ border: '1px solid var(--ds-border)', borderRadius: 10, padding: '12px 14px', background: 'var(--ds-bg)' }}>
+            <div key={t.truckId} style={{ border: '1px solid var(--tms-border)', borderRadius: 10, padding: '12px 14px', background: 'var(--tms-bg)' }}>
               <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
-                <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--ds-t1)' }}>#{t.unitNumber}</div>
-                <div style={{ fontSize: 11.5, fontWeight: 600, color: '#dc2626' }}>
+                <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--tms-text)' }}>#{t.unitNumber}</div>
+                <div style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--tms-badge-red)' }}>
                   {t.codes.length} code{t.codes.length === 1 ? '' : 's'}
                 </div>
               </div>
               {t.vehicle && (
-                <div style={{ fontSize: 11, color: 'var(--ds-t3)', marginTop: 1 }}>{t.vehicle}</div>
+                <div style={{ fontSize: 11, color: 'var(--tms-muted)', marginTop: 1 }}>{t.vehicle}</div>
               )}
               {t.unmatched && (
-                <div style={{ fontSize: 11, color: '#b45309', marginTop: 3 }}>
+                <div style={{ fontSize: 11, color: 'var(--tms-badge-orange)', marginTop: 3 }}>
                   Motive vehicle {t.unitNumber} — no matching truck in Fleet
                 </div>
               )}
@@ -162,20 +162,20 @@ export function FaultCodesWidget() {
                 {t.codes.map((c) => {
                   const age = daysSince(c.firstObservedAt)
                   return (
-                    <div key={c.faultId} style={{ borderTop: '1px solid var(--ds-border)', paddingTop: 8 }}>
+                    <div key={c.faultId} style={{ borderTop: '1px solid var(--tms-border)', paddingTop: 8 }}>
                       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11.5, fontWeight: 700, color: '#b45309' }}>{c.code}</span>
+                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11.5, fontWeight: 700, color: 'var(--tms-badge-orange)' }}>{c.code}</span>
                         {c.sourceLabel && (
-                          <span style={{ fontSize: 11, color: 'var(--ds-t3)' }}>{c.sourceLabel}</span>
+                          <span style={{ fontSize: 11, color: 'var(--tms-muted)' }}>{c.sourceLabel}</span>
                         )}
                       </div>
-                      <div style={{ fontSize: 12, color: 'var(--ds-t2)', marginTop: 2, lineHeight: 1.4 }}>
+                      <div style={{ fontSize: 12, color: 'var(--tms-text-2)', marginTop: 2, lineHeight: 1.4 }}>
                         {c.description || 'No description from Motive'}
                       </div>
                       {c.fmiDescription && (
-                        <div style={{ fontSize: 11, color: 'var(--ds-t3)', marginTop: 2, lineHeight: 1.4 }}>{c.fmiDescription}</div>
+                        <div style={{ fontSize: 11, color: 'var(--tms-muted)', marginTop: 2, lineHeight: 1.4 }}>{c.fmiDescription}</div>
                       )}
-                      <div style={{ fontSize: 11, color: 'var(--ds-t3)', marginTop: 3 }}>
+                      <div style={{ fontSize: 11, color: 'var(--tms-muted)', marginTop: 3 }}>
                         Last seen {shortStamp(c.lastObservedAt)}
                         {age != null ? ` · open ${age} day${age === 1 ? '' : 's'}` : ''}
                         {c.occurrenceCount ? ` · ${c.occurrenceCount}×` : ''}

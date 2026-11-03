@@ -56,3 +56,11 @@ describe('DriverDisputesPage evidence chips', () => {
     })
   })
 })
+
+describe('DriverDisputesPage frame', () => {
+  it('is a public page: tms-public root, no staff shell', () => {
+    const { container } = renderIn(<DriverDisputesPage />)
+    expect(container.querySelector('.tms-public')).toBeTruthy()
+    expect(container.querySelector('.tms-shell')).toBeNull()
+  })
+})

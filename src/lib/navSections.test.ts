@@ -228,8 +228,16 @@ describe('tmsBreadcrumb', () => {
     expect(tmsBreadcrumb('/tms/shipments')).toEqual([{ label: 'Shipments' }])
   })
 
-  it('falls back to TMS for an unknown path', () => {
+  it('falls back to TMS for an unknown /tms path', () => {
     expect(labels('/tms/nothing')).toEqual(['TMS'])
+  })
+
+  it('names legacy pages by their nav item or an explicit trail, never TMS', () => {
+    expect(labels('/trucks')).toEqual(['Fleet'])
+    expect(labels('/driver-pay')).toEqual(['Amazon Settlements'])
+    expect(labels('/finances/review')).toEqual(['Finances', 'Profit review'])
+    expect(labels('/driver-view/abc')).toEqual(['Owner operator pay', 'Driver app'])
+    expect(labels('/some-new-page/x')).toEqual(['Some new page'])
   })
 })
 

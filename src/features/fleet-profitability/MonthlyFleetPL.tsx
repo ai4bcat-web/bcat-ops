@@ -20,23 +20,23 @@ function money(n: number): string {
 
 const navBtn: React.CSSProperties = {
   width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center',
-  background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 7,
-  cursor: 'pointer', color: 'var(--ds-t2)',
+  background: 'var(--tms-card)', border: '1px solid var(--tms-border)', borderRadius: 7,
+  cursor: 'pointer', color: 'var(--tms-text-2)',
 }
 
 function netColor(n: number): string {
-  return n > 0 ? '#15803d' : n < 0 ? '#dc2626' : 'var(--ds-t2)'
+  return n > 0 ? 'var(--tms-badge-green)' : n < 0 ? 'var(--tms-badge-red)' : 'var(--tms-text-2)'
 }
 
 /** A computed "− $X" cost line; muted "(none)" when zero. */
 function CostRow({ label, value, hint }: { label: string; value: number; hint?: string }) {
   const empty = value === 0
   return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '9px 0', borderTop: '1px solid var(--ds-border)' }}>
-      <span style={{ fontSize: 13, color: 'var(--ds-t2)', paddingLeft: 14 }}>
-        {label}{hint && <span style={{ fontSize: 11, color: 'var(--ds-t3)', marginLeft: 6 }}>{hint}</span>}
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '9px 0', borderTop: '1px solid var(--tms-border)' }}>
+      <span style={{ fontSize: 13, color: 'var(--tms-text-2)', paddingLeft: 14 }}>
+        {label}{hint && <span style={{ fontSize: 11, color: 'var(--tms-muted)', marginLeft: 6 }}>{hint}</span>}
       </span>
-      <span style={{ fontSize: 13, fontVariantNumeric: 'tabular-nums', color: empty ? 'var(--ds-muted-soft)' : 'var(--ds-t1)' }}>
+      <span style={{ fontSize: 13, fontVariantNumeric: 'tabular-nums', color: empty ? 'var(--tms-disabled)' : 'var(--tms-text)' }}>
         {empty ? '(none)' : `− ${money(value)}`}
       </span>
     </div>
@@ -54,14 +54,14 @@ function EditableCostRow({ label, amount, onCommit }: { label: string; amount: n
     if (n !== amount) onCommit(n)
   }
   return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '9px 0', borderTop: '1px solid var(--ds-border)' }}>
-      <span style={{ fontSize: 13, color: 'var(--ds-t2)', paddingLeft: 14, display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-        {label}<Pencil size={10} style={{ color: 'var(--ds-muted-soft)' }} />
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '9px 0', borderTop: '1px solid var(--tms-border)' }}>
+      <span style={{ fontSize: 13, color: 'var(--tms-text-2)', paddingLeft: 14, display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+        {label}<Pencil size={10} style={{ color: 'var(--tms-disabled)' }} />
       </span>
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 13, color: 'var(--ds-t1)' }}>
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 13, color: 'var(--tms-text)' }}>
         −
         <span style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
-          <span style={{ position: 'absolute', left: 8, color: 'var(--ds-t3)', fontSize: 12.5, pointerEvents: 'none' }}>$</span>
+          <span style={{ position: 'absolute', left: 8, color: 'var(--tms-muted)', fontSize: 12.5, pointerEvents: 'none' }}>$</span>
           <input
             type="number" min="0" step="1" inputMode="decimal"
             value={value}
@@ -71,11 +71,11 @@ function EditableCostRow({ label, amount, onCommit }: { label: string; amount: n
             onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
             aria-label={`${label} monthly amount`}
             style={{ width: 96, height: 28, padding: '0 8px 0 18px', textAlign: 'right', borderRadius: 7,
-              border: '1px solid var(--ds-border)', background: 'var(--ds-bg)', color: 'var(--ds-t1)',
+              border: '1px solid var(--tms-border)', background: 'var(--tms-bg)', color: 'var(--tms-text)',
               fontSize: 13, fontVariantNumeric: 'tabular-nums', fontFamily: 'inherit', outline: 'none' }}
           />
         </span>
-        <span style={{ fontSize: 11, color: 'var(--ds-t3)' }}>/mo</span>
+        <span style={{ fontSize: 11, color: 'var(--tms-muted)' }}>/mo</span>
       </span>
     </div>
   )
@@ -137,43 +137,43 @@ export function MonthlyFleetPL() {
   const margin = lines && r && r.revenue > 0 ? (lines.net / r.revenue) * 100 : null
 
   return (
-    <div style={{ background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 12, boxShadow: 'var(--sh-sm)', overflow: 'hidden' }}>
+    <div style={{ background: 'var(--tms-card)', border: '1px solid var(--tms-border)', borderRadius: 12, boxShadow: 'var(--tms-shadow)', overflow: 'hidden' }}>
       {/* Header */}
-      <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--ds-border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+      <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--tms-border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <Scale size={16} style={{ color: 'var(--ds-blue)' }} />
+          <Scale size={16} style={{ color: 'var(--tms-primary)' }} />
           <div>
-            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)' }}>Monthly Profit &amp; Loss</div>
-            <div style={{ fontSize: 12, color: 'var(--ds-t3)' }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--tms-text)' }}>Monthly Profit &amp; Loss</div>
+            <div style={{ fontSize: 12, color: 'var(--tms-muted)' }}>
               {isAmazon ? `${amzDrivers} driver${amzDrivers === 1 ? '' : 's'} · Amazon (profit)` : isOwnerOperator ? `${ownerOpDrivers} driver${ownerOpDrivers === 1 ? '' : 's'} · Owner operators` : `${members.length} truck${members.length === 1 ? '' : 's'}`} · {monthLabel(range)}
             </div>
           </div>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', gap: 2, background: 'var(--ds-bg)', borderRadius: 8, padding: 2 }}>
+          <div style={{ display: 'flex', gap: 2, background: 'var(--tms-bg)', borderRadius: 8, padding: 2 }}>
             {FLEET_GROUPS.map((g) => {
               const active = g === group
               return (
                 <button key={g} onClick={() => setGroup(g)}
                   style={{ padding: '5px 12px', borderRadius: 6, border: 'none', fontSize: 12, fontWeight: 600, cursor: 'pointer',
-                    background: active ? 'var(--ds-surface)' : 'transparent', color: active ? 'var(--ds-t1)' : 'var(--ds-t2)',
-                    boxShadow: active ? 'var(--sh-sm)' : 'none' }}>
+                    background: active ? 'var(--tms-card)' : 'transparent', color: active ? 'var(--tms-text)' : 'var(--tms-text-2)',
+                    boxShadow: active ? 'var(--tms-shadow)' : 'none' }}>
                   {FLEET_GROUP_LABELS[g]}
                 </button>
               )
             })}
             <button onClick={() => setGroup('OWNER_OPERATOR')}
               style={{ padding: '5px 12px', borderRadius: 6, border: 'none', fontSize: 12, fontWeight: 600, cursor: 'pointer',
-                background: isOwnerOperator ? 'var(--ds-surface)' : 'transparent', color: isOwnerOperator ? 'var(--ds-t1)' : 'var(--ds-t2)',
-                boxShadow: isOwnerOperator ? 'var(--sh-sm)' : 'none' }}>
+                background: isOwnerOperator ? 'var(--tms-card)' : 'transparent', color: isOwnerOperator ? 'var(--tms-text)' : 'var(--tms-text-2)',
+                boxShadow: isOwnerOperator ? 'var(--tms-shadow)' : 'none' }}>
               Owner operators
             </button>
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
             <button onClick={() => setMonthOffset((o) => o + 1)} style={navBtn} aria-label="Previous month"><ChevronLeft size={15} /></button>
-            <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ds-t2)', minWidth: 120, textAlign: 'center' }}>
+            <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--tms-text-2)', minWidth: 120, textAlign: 'center' }}>
               {monthOffset === 0 ? 'This month' : monthLabel(range)}
             </span>
             <button onClick={() => setMonthOffset((o) => Math.max(0, o - 1))} disabled={monthOffset === 0}
@@ -188,25 +188,25 @@ export function MonthlyFleetPL() {
       <div style={{ padding: '16px 20px' }}>
         {isOwnerOperator ? (
           ownerOpLoading && ownerOpAgg.rows.length === 0 ? (
-            <div style={{ padding: '28px 0', textAlign: 'center', fontSize: 13, color: 'var(--ds-t3)' }}>Loading…</div>
+            <div style={{ padding: '28px 0', textAlign: 'center', fontSize: 13, color: 'var(--tms-muted)' }}>Loading…</div>
           ) : ownerOpAgg.rows.length === 0 ? (
-            <div style={{ padding: '28px 0', textAlign: 'center', fontSize: 13, color: 'var(--ds-t3)' }}>No owner-operator pay this month.</div>
+            <div style={{ padding: '28px 0', textAlign: 'center', fontSize: 13, color: 'var(--tms-muted)' }}>No owner-operator pay this month.</div>
           ) : (
             <div style={{ maxWidth: 520 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 0 12px' }}>
-                <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--ds-t1)' }}>Revenue <span style={{ fontSize: 11.5, fontWeight: 500, color: 'var(--ds-t3)' }}>(gross billed)</span></span>
-                <span style={{ fontSize: 15, fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: 'var(--ds-t1)' }}>{money(ownerOpAgg.revenue)}</span>
+                <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--tms-text)' }}>Revenue <span style={{ fontSize: 11.5, fontWeight: 500, color: 'var(--tms-muted)' }}>(gross billed)</span></span>
+                <span style={{ fontSize: 15, fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: 'var(--tms-text)' }}>{money(ownerOpAgg.revenue)}</span>
               </div>
               <CostRow label="Driver pay" value={ownerOpAgg.driverPay} />
               <CostRow label="Operating expenses" value={ownerOpAgg.expenses} hint="fuel + fixed" />
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 6, paddingTop: 9, borderTop: '1px solid var(--ds-border)' }}>
-                <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ds-t2)' }}>Total expenses</span>
-                <span style={{ fontSize: 13, fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: 'var(--ds-t1)' }}>− {money(ownerOpAgg.driverPay + ownerOpAgg.expenses)}</span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 6, paddingTop: 9, borderTop: '1px solid var(--tms-border)' }}>
+                <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--tms-text-2)' }}>Total expenses</span>
+                <span style={{ fontSize: 13, fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: 'var(--tms-text)' }}>− {money(ownerOpAgg.driverPay + ownerOpAgg.expenses)}</span>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8, paddingTop: 11, borderTop: '2px solid var(--ds-border)' }}>
-                <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--ds-t1)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8, paddingTop: 11, borderTop: '2px solid var(--tms-border)' }}>
+                <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--tms-text)' }}>
                   Profit to company
-                  {ownerOpAgg.revenue > 0 && <span style={{ fontSize: 11.5, fontWeight: 500, color: 'var(--ds-t3)', marginLeft: 8 }}>{((ownerOpAgg.profit / ownerOpAgg.revenue) * 100).toFixed(0)}% margin</span>}
+                  {ownerOpAgg.revenue > 0 && <span style={{ fontSize: 11.5, fontWeight: 500, color: 'var(--tms-muted)', marginLeft: 8 }}>{((ownerOpAgg.profit / ownerOpAgg.revenue) * 100).toFixed(0)}% margin</span>}
                 </span>
                 <span style={{ fontSize: 18, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: netColor(ownerOpAgg.profit) }}>{money(ownerOpAgg.profit)}</span>
               </div>
@@ -214,40 +214,40 @@ export function MonthlyFleetPL() {
           )
         ) : isAmazon ? (
           amzLoading && amzAgg.rows.length === 0 ? (
-            <div style={{ padding: '28px 0', textAlign: 'center', fontSize: 13, color: 'var(--ds-t3)' }}>Loading…</div>
+            <div style={{ padding: '28px 0', textAlign: 'center', fontSize: 13, color: 'var(--tms-muted)' }}>Loading…</div>
           ) : amzAgg.rows.length === 0 ? (
-            <div style={{ padding: '28px 0', textAlign: 'center', fontSize: 13, color: 'var(--ds-t3)' }}>No Amazon driver pay this month.</div>
+            <div style={{ padding: '28px 0', textAlign: 'center', fontSize: 13, color: 'var(--tms-muted)' }}>No Amazon driver pay this month.</div>
           ) : (
             <div style={{ maxWidth: 520 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 0 12px' }}>
-                <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--ds-t1)' }}>Revenue <span style={{ fontSize: 11.5, fontWeight: 500, color: 'var(--ds-t3)' }}>(gross billed)</span></span>
-                <span style={{ fontSize: 15, fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: 'var(--ds-t1)' }}>{money(amzAgg.revenue)}</span>
+                <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--tms-text)' }}>Revenue <span style={{ fontSize: 11.5, fontWeight: 500, color: 'var(--tms-muted)' }}>(gross billed)</span></span>
+                <span style={{ fontSize: 15, fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: 'var(--tms-text)' }}>{money(amzAgg.revenue)}</span>
               </div>
               <CostRow label="Driver pay" value={amzAgg.driverPay} />
               <CostRow label="Operating expenses" value={amzAgg.expenses} hint="fuel + fixed" />
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 6, paddingTop: 9, borderTop: '1px solid var(--ds-border)' }}>
-                <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ds-t2)' }}>Total expenses</span>
-                <span style={{ fontSize: 13, fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: 'var(--ds-t1)' }}>− {money(amzAgg.driverPay + amzAgg.expenses)}</span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 6, paddingTop: 9, borderTop: '1px solid var(--tms-border)' }}>
+                <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--tms-text-2)' }}>Total expenses</span>
+                <span style={{ fontSize: 13, fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: 'var(--tms-text)' }}>− {money(amzAgg.driverPay + amzAgg.expenses)}</span>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8, paddingTop: 11, borderTop: '2px solid var(--ds-border)' }}>
-                <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--ds-t1)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8, paddingTop: 11, borderTop: '2px solid var(--tms-border)' }}>
+                <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--tms-text)' }}>
                   Profit to company
-                  {amzAgg.revenue > 0 && <span style={{ fontSize: 11.5, fontWeight: 500, color: 'var(--ds-t3)', marginLeft: 8 }}>{((amzAgg.profit / amzAgg.revenue) * 100).toFixed(0)}% margin</span>}
+                  {amzAgg.revenue > 0 && <span style={{ fontSize: 11.5, fontWeight: 500, color: 'var(--tms-muted)', marginLeft: 8 }}>{((amzAgg.profit / amzAgg.revenue) * 100).toFixed(0)}% margin</span>}
                 </span>
                 <span style={{ fontSize: 18, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: netColor(amzAgg.profit) }}>{money(amzAgg.profit)}</span>
               </div>
             </div>
           )
         ) : loading && !r ? (
-          <div style={{ padding: '28px 0', textAlign: 'center', fontSize: 13, color: 'var(--ds-t3)' }}>Loading…</div>
+          <div style={{ padding: '28px 0', textAlign: 'center', fontSize: 13, color: 'var(--tms-muted)' }}>Loading…</div>
         ) : !r || !lines ? (
-          <div style={{ padding: '28px 0', textAlign: 'center', fontSize: 13, color: 'var(--ds-t3)' }}>No data for this fleet.</div>
+          <div style={{ padding: '28px 0', textAlign: 'center', fontSize: 13, color: 'var(--tms-muted)' }}>No data for this fleet.</div>
         ) : (
           <div style={{ maxWidth: 520 }}>
             {/* Revenue */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 0 6px' }}>
-              <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--ds-t1)' }}>Revenue</span>
-              <span style={{ fontSize: 15, fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: 'var(--ds-t1)' }}>{money(r.revenue)}</span>
+              <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--tms-text)' }}>Revenue</span>
+              <span style={{ fontSize: 15, fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: 'var(--tms-text)' }}>{money(r.revenue)}</span>
             </div>
             <RevenueAuditPanel range={range} group={group as FleetGroup} expectedRevenue={r.revenue} />
             <div style={{ height: 12 }} />
@@ -267,19 +267,19 @@ export function MonthlyFleetPL() {
             <CostRow label="Other" value={lines.other} />
 
             {/* Total + Net */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 6, paddingTop: 9, borderTop: '1px solid var(--ds-border)' }}>
-              <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ds-t2)' }}>Total expenses</span>
-              <span style={{ fontSize: 13, fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: 'var(--ds-t1)' }}>− {money(lines.totalExpenses)}</span>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 6, paddingTop: 9, borderTop: '1px solid var(--tms-border)' }}>
+              <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--tms-text-2)' }}>Total expenses</span>
+              <span style={{ fontSize: 13, fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: 'var(--tms-text)' }}>− {money(lines.totalExpenses)}</span>
             </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8, paddingTop: 11, borderTop: '2px solid var(--ds-border)' }}>
-              <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--ds-t1)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8, paddingTop: 11, borderTop: '2px solid var(--tms-border)' }}>
+              <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--tms-text)' }}>
                 Net profit
-                {margin != null && <span style={{ fontSize: 11.5, fontWeight: 500, color: 'var(--ds-t3)', marginLeft: 8 }}>{margin.toFixed(0)}% margin</span>}
+                {margin != null && <span style={{ fontSize: 11.5, fontWeight: 500, color: 'var(--tms-muted)', marginLeft: 8 }}>{margin.toFixed(0)}% margin</span>}
               </span>
               <span style={{ fontSize: 18, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: netColor(lines.net) }}>{money(lines.net)}</span>
             </div>
 
-            <div style={{ marginTop: 14, fontSize: 11.5, color: 'var(--ds-t3)', lineHeight: 1.5 }}>
+            <div style={{ marginTop: 14, fontSize: 11.5, color: 'var(--tms-muted)', lineHeight: 1.5 }}>
               Loan-trailers, trailer-lease and yard-rent are fixed monthly amounts — edit them above. Loan-trucks pulls from each truck's loan (Fleet → Operating Costs); maintenance is logged invoices for Ivan trucks + all trailers.
             </div>
           </div>

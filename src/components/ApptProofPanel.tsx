@@ -7,7 +7,8 @@ import { useDirectory } from '@/hooks/useDirectory'
 import { formatDateShort, apptTimeLabel } from '@/lib/date'
 import { BATORY_PICKUP_REQUEST_TIME, defaultRequestedFor } from '@/lib/apptStatus'
 import { Mail } from 'lucide-react'
-import { apptWorkflowStatus, canMarkRequested, canMarkConfirmed, STATUS_META, statusLabel } from '@/lib/apptStatus'
+import { TmsDialog } from '@/features/tms/kit/TmsDialog'
+import { apptWorkflowStatus, canMarkRequested, canMarkConfirmed, STATUS_META, STATUS_TONE_COLORS, statusLabel } from '@/lib/apptStatus'
 import type { Load, Stop } from '@/types'
 
 /**
@@ -55,27 +56,27 @@ function ProofSlot({ label, s3Key, onUpload, onRemove }: {
   }
 
   const box: React.CSSProperties = {
-    border: '1px dashed var(--ds-border)', borderRadius: 8, minHeight: 74,
+    border: '1px dashed var(--tms-border)', borderRadius: 8, minHeight: 74,
     display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-    padding: 8, background: 'var(--ds-surface)',
+    padding: 8, background: 'var(--tms-card)',
   }
 
   return (
     <div style={{ flex: 1, minWidth: 180 }}>
-      <div style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>{label}</div>
+      <div style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--tms-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>{label}</div>
       {s3Key ? (
         <div style={{ ...box, borderStyle: 'solid', justifyContent: 'flex-start' }}>
           {url
             ? <a href={url} target="_blank" rel="noreferrer" title="Open full size">
                 <img src={url} alt={`${label} screenshot`} style={{ maxHeight: 58, maxWidth: 120, borderRadius: 5, display: 'block' }} />
               </a>
-            : <span style={{ fontSize: 11.5, color: 'var(--ds-t3)' }}>loading…</span>}
+            : <span style={{ fontSize: 11.5, color: 'var(--tms-muted)' }}>loading…</span>}
           <div style={{ flex: 1 }} />
-          {url && <a href={url} target="_blank" rel="noreferrer" title="Open full size" style={{ color: 'var(--ds-t3)' }}><ExternalLink size={13} /></a>}
+          {url && <a href={url} target="_blank" rel="noreferrer" title="Open full size" style={{ color: 'var(--tms-muted)' }}><ExternalLink size={13} /></a>}
           <button
             onClick={async () => { if (window.confirm(`Remove the ${label} screenshot?`)) { setBusy(true); try { await onRemove() } finally { setBusy(false) } } }}
             disabled={busy} title="Remove screenshot"
-            style={{ background: 'none', border: 'none', color: 'var(--ds-t3)', cursor: 'pointer', padding: 2 }}
+            style={{ background: 'none', border: 'none', color: 'var(--tms-muted)', cursor: 'pointer', padding: 2 }}
           ><Trash2 size={13} /></button>
         </div>
       ) : (
@@ -90,9 +91,9 @@ function ProofSlot({ label, s3Key, onUpload, onRemove }: {
           onClick={(e) => (e.currentTarget as HTMLElement).focus()}
           onKeyDown={(e) => { if (e.key === 'Enter') fileRef.current?.click() }}
         >
-          <ImagePlus size={16} style={{ color: 'var(--ds-t3)' }} />
-          <span style={{ fontSize: 11, color: 'var(--ds-t3)', textAlign: 'center' }}>
-            {busy ? 'Uploading…' : <>Click + paste screenshot<br />or <button onClick={(e) => { e.stopPropagation(); fileRef.current?.click() }} style={{ background: 'none', border: 'none', padding: 0, color: 'var(--ds-blue)', cursor: 'pointer', font: 'inherit', display: 'inline-flex', alignItems: 'center', gap: 3 }}><Upload size={10} /> browse JPG/PNG</button></>}
+          <ImagePlus size={16} style={{ color: 'var(--tms-muted)' }} />
+          <span style={{ fontSize: 11, color: 'var(--tms-muted)', textAlign: 'center' }}>
+            {busy ? 'Uploading…' : <>Click + paste screenshot<br />or <button onClick={(e) => { e.stopPropagation(); fileRef.current?.click() }} style={{ background: 'none', border: 'none', padding: 0, color: 'var(--tms-primary)', cursor: 'pointer', font: 'inherit', display: 'inline-flex', alignItems: 'center', gap: 3 }}><Upload size={10} /> browse JPG/PNG</button></>}
           </span>
           <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp" style={{ display: 'none' }}
             onChange={(e) => { void handle(e.target.files?.[0]); e.target.value = '' }} />
@@ -155,8 +156,8 @@ export function ApptProofPanel({ load, updateLoad }: {
   const renderEnd = (title: string, stop?: Stop) => {
     if (!stop) return (
       <div style={{ flex: 1, minWidth: 240 }}>
-        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--ds-t2)', marginBottom: 6 }}>{title}</div>
-        <div style={{ fontSize: 12, color: 'var(--ds-t3)' }}>No {title.toLowerCase()} stop on this load.</div>
+        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--tms-text-2)', marginBottom: 6 }}>{title}</div>
+        <div style={{ fontSize: 12, color: 'var(--tms-muted)' }}>No {title.toLowerCase()} stop on this load.</div>
       </div>
     )
     const st = apptWorkflowStatus(stop, load)
@@ -164,12 +165,11 @@ export function ApptProofPanel({ load, updateLoad }: {
     return (
       <div style={{ flex: 1, minWidth: 260 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-          <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--ds-t2)' }}>{title}</span>
+          <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--tms-text-2)' }}>{title}</span>
           <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 5,
-            background: meta.tone === 'green' ? 'var(--ds-green-bg)' : meta.tone === 'amber' ? 'var(--ds-amber-soft)' : meta.tone === 'blue' ? 'var(--ds-blue-soft, #eff6ff)' : 'var(--ds-red-soft)',
-            color: meta.tone === 'green' ? '#15803d' : meta.tone === 'amber' ? '#b45309' : meta.tone === 'blue' ? '#0369a1' : '#dc2626' }}>{statusLabel(st, stop.type)}</span>
+            background: STATUS_TONE_COLORS[meta.tone].bg, color: STATUS_TONE_COLORS[meta.tone].fg }}>{statusLabel(st, stop.type)}</span>
           {stop.apptChangeTo && st === 'change_needed' && (
-            <span style={{ fontSize: 10.5, color: '#b45309' }}>→ wants {new Date(stop.apptChangeTo).toLocaleString('en-US', { timeZone: 'America/Chicago', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>
+            <span style={{ fontSize: 10.5, color: 'var(--tms-badge-orange)' }}>→ wants {new Date(stop.apptChangeTo).toLocaleString('en-US', { timeZone: 'America/Chicago', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>
           )}
         </div>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
@@ -184,7 +184,7 @@ export function ApptProofPanel({ load, updateLoad }: {
               onClick={() => setEmailFor(stop)}
               title="Email the appointment request to this facility's appt contact (from the Locations directory) — sending marks it REQUESTED"
               style={{ height: 26, padding: '0 10px', borderRadius: 7, fontSize: 11.5, fontWeight: 600, fontFamily: 'inherit',
-                cursor: 'pointer', border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', color: '#0369a1',
+                cursor: 'pointer', border: '1px solid var(--tms-border)', background: 'var(--tms-card)', color: 'var(--tms-primary-ink)',
                 display: 'inline-flex', alignItems: 'center', gap: 5 }}>
               <Mail size={12} /> Email appt request
             </button>
@@ -195,7 +195,7 @@ export function ApptProofPanel({ load, updateLoad }: {
                 title={canMarkRequested(stop) ? 'Move to REQUESTED' : 'Upload the Request-email screenshot first'}
                 style={{ height: 26, padding: '0 10px', borderRadius: 7, fontSize: 11.5, fontWeight: 600, fontFamily: 'inherit',
                   cursor: canMarkRequested(stop) ? 'pointer' : 'not-allowed', opacity: canMarkRequested(stop) ? 1 : 0.5,
-                  border: '1px solid #fcd34d', background: 'var(--ds-surface)', color: '#b45309' }}>
+                  border: '1px solid var(--tms-badge-orange)', background: 'var(--tms-card)', color: 'var(--tms-badge-orange)' }}>
                 Mark REQUESTED
               </button>
             )}
@@ -206,7 +206,7 @@ export function ApptProofPanel({ load, updateLoad }: {
                 title={canMarkConfirmed(stop) ? 'Move to CONFIRMED' : 'Upload the Confirmed-email AND E2Open screenshots first'}
                 style={{ height: 26, padding: '0 10px', borderRadius: 7, fontSize: 11.5, fontWeight: 600, fontFamily: 'inherit',
                   cursor: canMarkConfirmed(stop) ? 'pointer' : 'not-allowed', opacity: canMarkConfirmed(stop) ? 1 : 0.5,
-                  border: '1px solid #86efac', background: 'var(--ds-surface)', color: '#15803d' }}>
+                  border: '1px solid var(--tms-badge-green)', background: 'var(--tms-card)', color: 'var(--tms-badge-green)' }}>
                 Mark CONFIRMED
               </button>
             )}
@@ -282,7 +282,7 @@ function ApptRequestEmailModal({ load, stop, locations, onSent, onClose }: {
   ].filter((l) => l !== null).join('\n'))
   const [sending, setSending] = useState(false)
 
-  const inp: React.CSSProperties = { height: 32, width: '100%', borderRadius: 8, border: '1px solid var(--ds-border)', padding: '0 10px', fontSize: 12.5, background: 'var(--ds-surface)', color: 'var(--ds-t1)', boxSizing: 'border-box' }
+  const inp: React.CSSProperties = { height: 32, width: '100%', borderRadius: 8, border: '1px solid var(--tms-border)', padding: '0 10px', fontSize: 12.5, background: 'var(--tms-card)', color: 'var(--tms-text)', boxSizing: 'border-box' }
 
   const send = async () => {
     if (!to.trim()) { toast.error('No appointment email — add one to this facility on the Locations page, or type it here.'); return }
@@ -296,33 +296,39 @@ function ApptRequestEmailModal({ load, stop, locations, onSent, onClose }: {
   }
 
   return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 70, background: 'rgba(15,23,42,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }} onMouseDown={onClose}>
-      <div style={{ width: 560, maxWidth: '100%', maxHeight: '92vh', overflowY: 'auto', background: 'var(--ds-surface)', borderRadius: 14, padding: 20 }} onMouseDown={(e) => e.stopPropagation()}>
-        <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--ds-t1)' }}>Email appointment request</div>
-        <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 2, marginBottom: 12 }}>
-          Sends from dennis@bcatcorp.com — the facility's reply lands with Dennis. Sending marks this {kind} REQUESTED.
-          {loc?.apptContactPhone && <> · Phone: <b>{loc.apptContactPhone}</b></>}
-          {!loc && <> · <span style={{ color: '#b45309' }}>Facility not found in the Locations directory — add it there to prefill this next time.</span></>}
-        </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
-          <div><div style={{ fontSize: 11, fontWeight: 600, color: 'var(--ds-t3)', marginBottom: 3 }}>To *</div>
-            <input style={inp} value={to} onChange={(e) => setTo(e.target.value)} placeholder="appointments@facility.com" aria-label="Request to" /></div>
-          <div><div style={{ fontSize: 11, fontWeight: 600, color: 'var(--ds-t3)', marginBottom: 3 }}>Cc</div>
-            <input style={inp} value={cc} onChange={(e) => setCc(e.target.value)} placeholder="optional" /></div>
-        </div>
-        <div style={{ marginBottom: 10 }}><div style={{ fontSize: 11, fontWeight: 600, color: 'var(--ds-t3)', marginBottom: 3 }}>Subject</div>
-          <input style={inp} value={subject} onChange={(e) => setSubject(e.target.value)} /></div>
-        <div><div style={{ fontSize: 11, fontWeight: 600, color: 'var(--ds-t3)', marginBottom: 3 }}>Message</div>
-          <textarea value={body} onChange={(e) => setBody(e.target.value)} rows={10}
-            style={{ ...inp, height: 'auto', padding: 10, fontFamily: 'inherit', resize: 'vertical' }} aria-label="Request body" /></div>
-        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 14 }}>
-          <button onClick={onClose} style={{ height: 32, padding: '0 14px', borderRadius: 8, border: '1px solid var(--ds-border)', background: 'var(--ds-bg)', color: 'var(--ds-t2)', fontSize: 12.5, cursor: 'pointer', fontFamily: 'inherit' }}>Cancel</button>
-          <button onClick={send} disabled={sending}
-            style={{ height: 32, padding: '0 16px', borderRadius: 8, border: 'none', background: 'var(--ds-blue, #2563eb)', color: '#fff', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', opacity: sending ? 0.6 : 1, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-            <Mail size={13} /> {sending ? 'Sending…' : 'Send request'}
-          </button>
-        </div>
-      </div>
+    <TmsDialog
+      open
+      onOpenChange={(o) => { if (!o) onClose() }}
+      title="Email appointment request"
+      className="tms-dialog-wide"
+      description={(
+        <>
+      Sends from dennis@bcatcorp.com — the facility's reply lands with Dennis. Sending marks this {kind} REQUESTED.
+      {loc?.apptContactPhone && <> · Phone: <b>{loc.apptContactPhone}</b></>}
+      {!loc && <> · <span style={{ color: 'var(--tms-badge-orange)' }}>Facility not found in the Locations directory — add it there to prefill this next time.</span></>}
+        </>
+      )}
+      footer={(
+        <>
+      <button onClick={onClose} style={{ height: 32, padding: '0 14px', borderRadius: 8, border: '1px solid var(--tms-border)', background: 'var(--tms-bg)', color: 'var(--tms-text-2)', fontSize: 12.5, cursor: 'pointer', fontFamily: 'inherit' }}>Cancel</button>
+      <button onClick={send} disabled={sending}
+        style={{ height: 32, padding: '0 16px', borderRadius: 8, border: 'none', background: 'var(--tms-primary)', color: 'var(--tms-on-primary)', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', opacity: sending ? 0.6 : 1, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+        <Mail size={13} /> {sending ? 'Sending…' : 'Send request'}
+      </button>
+        </>
+      )}
+    >
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+      <div><div style={{ fontSize: 11, fontWeight: 600, color: 'var(--tms-muted)', marginBottom: 3 }}>To *</div>
+        <input style={inp} value={to} onChange={(e) => setTo(e.target.value)} placeholder="appointments@facility.com" aria-label="Request to" /></div>
+      <div><div style={{ fontSize: 11, fontWeight: 600, color: 'var(--tms-muted)', marginBottom: 3 }}>Cc</div>
+        <input style={inp} value={cc} onChange={(e) => setCc(e.target.value)} placeholder="optional" /></div>
     </div>
+    <div style={{ marginBottom: 10 }}><div style={{ fontSize: 11, fontWeight: 600, color: 'var(--tms-muted)', marginBottom: 3 }}>Subject</div>
+      <input style={inp} value={subject} onChange={(e) => setSubject(e.target.value)} /></div>
+    <div><div style={{ fontSize: 11, fontWeight: 600, color: 'var(--tms-muted)', marginBottom: 3 }}>Message</div>
+      <textarea value={body} onChange={(e) => setBody(e.target.value)} rows={10}
+        style={{ ...inp, height: 'auto', padding: 10, fontFamily: 'inherit', resize: 'vertical' }} aria-label="Request body" /></div>
+    </TmsDialog>
   )
 }

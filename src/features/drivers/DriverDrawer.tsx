@@ -58,9 +58,9 @@ interface DriverDrawerProps {
 function ReadOnly({ label, value, from }: { label: string; value: string; from: string }) {
   return (
     <div>
-      <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>{label}</div>
-      <div style={{ fontSize: 13, color: value === '—' ? 'var(--ds-t3)' : 'var(--ds-t1)' }}>{value}</div>
-      <div style={{ fontSize: 10.5, color: 'var(--ds-t3)', marginTop: 2 }}>{from}</div>
+      <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--tms-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>{label}</div>
+      <div style={{ fontSize: 13, color: value === '—' ? 'var(--tms-muted)' : 'var(--tms-text)' }}>{value}</div>
+      <div style={{ fontSize: 10.5, color: 'var(--tms-muted)', marginTop: 2 }}>{from}</div>
     </div>
   )
 }
@@ -243,7 +243,7 @@ export function DriverDrawer({ open, driver: driverProp, onClose }: DriverDrawer
           )}
           <div style={{ flex: 1 }} />
           {Object.keys(errors).length > 0 && (
-            <span style={{ fontSize: 11.5, color: '#b91c1c', marginRight: 8 }}>Fix the errors above before saving.</span>
+            <span style={{ fontSize: 11.5, color: 'var(--tms-badge-red)', marginRight: 8 }}>Fix the errors above before saving.</span>
           )}
           <button type="button" onClick={onClose} style={panelBtn.secondary}>Cancel</button>
           <button type="submit" form="driver-form" disabled={isSubmitting}
@@ -277,8 +277,8 @@ export function DriverDrawer({ open, driver: driverProp, onClose }: DriverDrawer
                           {getInitials(watchName || driver?.name || '?') || '?'}
                         </div>
                       )}
-                      <div className="absolute inset-0 rounded-full flex items-center justify-center bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <Camera className="size-6 text-white" />
+                      <div className="absolute inset-0 rounded-full flex items-center justify-center bg-[color:var(--tms-overlay)] opacity-0 group-hover:opacity-100 transition-opacity">
+                        <Camera className="size-6 text-[color:var(--tms-on-primary)]" />
                       </div>
                     </div>
                     <Button type="button" variant="outline" size="sm" className="h-7 gap-1.5 text-xs px-2.5" onClick={() => photoInputRef.current?.click()}>
@@ -310,7 +310,7 @@ export function DriverDrawer({ open, driver: driverProp, onClose }: DriverDrawer
                     name="fleetGroup"
                     control={control}
                     render={({ field }) => (
-                      <select value={field.value ?? ''} onChange={(e) => field.onChange(e.target.value || null)} className="h-9 w-full rounded-md border border-input bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20">
+                      <select value={field.value ?? ''} onChange={(e) => field.onChange(e.target.value || null)} className="h-9 w-full rounded-md border border-input bg-card px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20">
                         <option value="">— Unclassified —</option>
                         {DRIVER_FLEETS.map((g) => <option key={g} value={g}>{DRIVER_FLEET_LABELS[g]}</option>)}
                       </select>
@@ -341,7 +341,7 @@ export function DriverDrawer({ open, driver: driverProp, onClose }: DriverDrawer
                       name="assignedTrailerId"
                       control={control}
                       render={({ field }) => (
-                        <select value={field.value ?? ''} onChange={(e) => field.onChange(e.target.value || null)} className="h-9 w-full rounded-md border border-input bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20">
+                        <select value={field.value ?? ''} onChange={(e) => field.onChange(e.target.value || null)} className="h-9 w-full rounded-md border border-input bg-card px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20">
                           <option value="">— TBD, not assigned —</option>
                           {trailers.map((t) => (
                             <option key={t.id} value={t.id}>#{t.unitNumber}{t.nickname ? ` · ${t.nickname}` : ''}</option>
@@ -355,7 +355,7 @@ export function DriverDrawer({ open, driver: driverProp, onClose }: DriverDrawer
                       name="assignedTruckId"
                       control={control}
                       render={({ field }) => (
-                        <select value={field.value ?? ''} onChange={(e) => field.onChange(e.target.value || null)} className="h-9 w-full rounded-md border border-input bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20">
+                        <select value={field.value ?? ''} onChange={(e) => field.onChange(e.target.value || null)} className="h-9 w-full rounded-md border border-input bg-card px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20">
                           <option value="">— No truck assigned —</option>
                           {trucks.map((t) => (
                             <option key={t.id} value={t.id}>#{t.unitNumber}{t.nickname ? ` · ${t.nickname}` : ''}{(t.make || t.model) ? ` — ${[t.make, t.model].filter(Boolean).join(' ')}` : ''}</option>
@@ -378,7 +378,7 @@ export function DriverDrawer({ open, driver: driverProp, onClose }: DriverDrawer
                           value={field.value ?? ''}
                           onChange={(e) => field.onChange(e.target.value === '' ? null : Number(e.target.value))}
                           placeholder="e.g. 3580563"
-                          className="h-9 w-full rounded-md border border-input bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
+                          className="h-9 w-full rounded-md border border-input bg-card px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
                         />
                       )}
                     />
@@ -437,8 +437,8 @@ export function DriverDrawer({ open, driver: driverProp, onClose }: DriverDrawer
                       .map(([key, c]) => (
                         <button key={key} type="button" title={key} onClick={() => setValue('colorKey', key, { shouldDirty: true })}
                           className="relative size-7 rounded-full transition-transform hover:scale-110 focus:outline-none"
-                          style={{ background: c.border, boxShadow: watchColorKey === key ? `0 0 0 3px #fff, 0 0 0 5px ${c.border}` : undefined }}>
-                          {watchColorKey === key && <Check className="absolute inset-0 m-auto size-3.5 text-white" strokeWidth={3} />}
+                          style={{ background: c.border, boxShadow: watchColorKey === key ? `0 0 0 3px var(--tms-card), 0 0 0 5px ${c.border}` : undefined }}>
+                          {watchColorKey === key && <Check className="absolute inset-0 m-auto size-3.5 text-[color:var(--tms-on-primary)]" strokeWidth={3} />}
                         </button>
                       ))}
                   </div>
@@ -460,7 +460,7 @@ export function DriverDrawer({ open, driver: driverProp, onClose }: DriverDrawer
                     the document, so the two could disagree — and the classification field
                     was mislabelled "CDL Class" while actually setting company vs
                     owner-operator, which the fleet now decides. */}
-                <div style={{ marginTop: 14, borderTop: '1px solid var(--ds-border)', paddingTop: 12, display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 14 }}>
+                <div style={{ marginTop: 14, borderTop: '1px solid var(--tms-border)', paddingTop: 12, display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 14 }}>
                   <ReadOnly label="Classification"
                     value={watchFleet ? (classificationForFleet(watchFleet) === 'OWNER_OPERATOR' ? 'Owner operator' : 'Company driver') : '—'}
                     from={watchFleet ? 'from the fleet above' : 'set a fleet above'} />
@@ -478,10 +478,10 @@ export function DriverDrawer({ open, driver: driverProp, onClose }: DriverDrawer
                 control={control}
                 render={({ field }) => (
                   <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '12px 14px', borderRadius: 10, cursor: 'pointer',
-                    border: `1.5px solid ${field.value ? '#86efac' : 'var(--ds-border)'}`, background: field.value ? '#f0fdf4' : 'var(--ds-surface)' }}>
+                    border: `1.5px solid ${field.value ? 'var(--tms-badge-green)' : 'var(--tms-border)'}`, background: field.value ? 'var(--tms-badge-green-tint)' : 'var(--tms-card)' }}>
                     <div>
-                      <div style={{ fontSize: 13.5, fontWeight: 600, color: field.value ? '#15803d' : 'var(--ds-t1)' }}>Active driver</div>
-                      <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 1 }}>Inactive drivers won't appear on the calendar</div>
+                      <div style={{ fontSize: 13.5, fontWeight: 600, color: field.value ? 'var(--tms-badge-green)' : 'var(--tms-text)' }}>Active driver</div>
+                      <div style={{ fontSize: 12, color: 'var(--tms-muted)', marginTop: 1 }}>Inactive drivers won't appear on the calendar</div>
                     </div>
                     <Switch checked={field.value} onCheckedChange={field.onChange} />
                   </label>

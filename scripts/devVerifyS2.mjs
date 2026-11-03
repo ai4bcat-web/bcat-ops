@@ -30,18 +30,34 @@ const DEV_APPSYNC = /^https:\/\/f5iqzdpidzalvjys7yxijn5ave\.appsync-api\.us-east
 
 const SHOTS = resolve('Docs/tms-build/screenshots/S2')
 
-/** Console / network problems that are tolerated. Each entry: { pattern: RegExp, reason }. Starts empty. */
-const ALLOW_PROBLEMS = []
+/** Console / network problems that are tolerated. Each entry: { pattern: RegExp, reason }. */
+const ALLOW_PROBLEMS = [
+  // `vite` dev server only: the PWA manifest is generated at build time, so localhost serves index.html for it.
+  { pattern: /Manifest: Line: 1, column: 1, Syntax error\. http:\/\/(127\.0\.0\.1|localhost):5173\/manifest\.webmanifest$/, reason: 'vite dev server has no built manifest' },
+]
 
 /** Routes/states that may legitimately be SKIPPED when dev has no data for them. */
 const SKIP_ALLOWED = {
   '23-run': 'no workflow run may exist on dev',
   '31b-provider': 'no integration provider link may be listed on dev',
   '35-toast': 'no active customer link may exist to copy',
+  '15a-invoice-detail': 'dev has no invoice yet (every order has invoiceId=null; Receivable lists none); generating one would mutate dev data',
+  '15a-tabs': 'dev has no invoice yet',
+  '16a-bill-detail': 'dev has no carrier bill yet (Payable lists none)',
+  '16a-tabs': 'dev has no carrier bill yet',
+  '14a-counter': 'Counter is only offered on a quote the customer has countered; none on dev',
+  '18-expand': 'the dev factoring queue is empty (no row to expand)',
 }
 
-/** tms-* classes that are hooks only (never styled). */
-const HOOK_CLASSES = ['tms-overdue', 'tms-due']
+/**
+ * tms-* classes that are hooks only (never styled): they carry no rules of their own.
+ *  - tms-overdue / tms-due: state hooks
+ *  - tms-theme-toggle: e2e/selector hook on a button already styled by tms-icon-btn
+ *  - tms-dash: page hook on TmsPage (layout comes from TmsPage + the tms-dash-* descendants)
+ *  - tms-probe-field: hook on a TmsField inside the Divisions probe row (TmsField styles it)
+ *  - tms-public-head / tms-public-brand-name: structural wrappers inside TmsPublicFrame; they inherit from the frame
+ */
+const HOOK_CLASSES = ['tms-overdue', 'tms-due', 'tms-theme-toggle', 'tms-dash', 'tms-probe-field', 'tms-public-head', 'tms-public-brand-name']
 
 // ───────────────────────────── route table ─────────────────────────────
 // path placeholders: {shipment} {quote} {invoice} {bill} {carrier} {run} {academy} {provider} {view} {docview}
@@ -112,13 +128,12 @@ const OVERLAY = '[role="dialog"], [role="menu"], [role="alertdialog"], [data-rad
 const FIRST_ROW = 'tbody tr, [role="row"][data-id], [data-shipment-id], [data-testid$="-row"]'
 const NEW_BTN = { pattern: '^(\\+\\s*)?(New|Add|Create)\\b' }
 export const STATES = [
-  { id: '02a-menu', nn: '02a', slug: 'board-row-menu', path: '/tms/shipments', dark: true, steps: [{ click: { selector: 'tbody button[aria-haspopup="menu"], [role="row"] button[aria-haspopup="menu"]' } }], probe: 'menu' },
-  { id: '02a-columns', nn: '02a', slug: 'board-columns', path: '/tms/shipments', dark: true, steps: [{ click: { text: 'Columns' } }] },
+  { id: '02a-menu', nn: '02a', slug: 'board-row-menu', path: '/tms/shipments', dark: true, steps: [{ click: { selector: 'tbody button[aria-label="Shipment actions"]', real: true } }], probe: 'menu' },
+  { id: '02a-columns', nn: '02a', slug: 'board-columns', path: '/tms/shipments', dark: true, steps: [{ click: { label: '^Manage column templates' } }] },
   { id: '02a-iconkey', nn: '02a', slug: 'board-icon-key', path: '/tms/shipments', steps: [{ click: { pattern: '^Icon key' } }] },
-  { id: '02a-filterset', nn: '02a', slug: 'board-filter-set', path: '/tms/shipments', steps: [{ click: { pattern: 'Filter set|Save filter' } }] },
+  { id: '02a-filterset', nn: '02a', slug: 'board-filter-set', path: '/tms/shipments', steps: [{ click: { label: '^Save as view' } }] },
   { id: '05-drawer', nn: '05', slug: 'board-drawer', path: '/tms/shipments', dark: true, steps: [{ click: { selector: FIRST_ROW } }] },
-  { id: '06-new', nn: '06', slug: 'new-shipment', path: '/tms/shipments', dark: true, steps: [{ click: { pattern: '^(\\+\\s*)?New shipment' } }] },
-  { id: '06-create', nn: '06', slug: 'create-shipment', path: '/tms/shipments', steps: [{ click: { pattern: '^Create shipment' } }] },
+  { id: '06-new', nn: '06', slug: 'new-shipment', path: '/tms/shipments', dark: true, steps: [{ click: { pattern: '^(\\+\\s*)?Create shipment' } }] },
   { id: '12-tabs', nn: '12', slug: 'check-calls-tabs', path: '/tms/check-calls', tabs: true },
   { id: '08-tabs', nn: '08', slug: 'tracking-tabs', path: '/tms/tracking?tab=tracking', tabs: true },
   { id: '15-tabs', nn: '15', slug: 'invoicing-tabs', path: '/tms/invoicing', tabs: true, dark: true },
@@ -126,14 +141,14 @@ export const STATES = [
   { id: '15a-tabs', nn: '15a', slug: 'invoice-tabs', path: '/tms/invoicing/invoices/{invoice}', tabs: true },
   { id: '16a-tabs', nn: '16a', slug: 'bill-tabs', path: '/tms/invoicing/payable/bills/{bill}', tabs: true },
   { id: '17-tabs', nn: '17', slug: 'carrier-drawer-tabs', path: '/tms/carriers/{carrier}', tabs: true },
-  { id: '17a-add', nn: '17a', slug: 'add-carrier', path: '/tms/carriers', steps: [{ click: { pattern: '^(\\+\\s*)?Add carrier' } }] },
-  { id: '18-row', nn: '18', slug: 'factor-dialog', path: '/tms/factors', dark: true, steps: [{ click: { selector: FIRST_ROW } }] },
+  { id: '17a-add', nn: '17a', slug: 'add-carrier', path: '/tms/carriers', steps: [{ click: { pattern: '^(\\+\\s*)?(Add )?Carrier$' } }] },
+  // The factoring queue has no row dialog: a row expands in place via its aria-expanded button.
+  { id: '18-expand', nn: '18', slug: 'factor-row-expanded', path: '/tms/factors', dark: true, steps: [{ click: { selector: 'tbody button[aria-expanded="false"]' } }], expect: 'tbody button[aria-expanded="true"]' },
   { id: '19-profile', nn: '19', slug: 'customer-profile', path: '/tms/customers', steps: [{ click: { selector: FIRST_ROW } }], tabsInOverlay: true },
   { id: '20-detail', nn: '20', slug: 'location-dialog', path: '/tms/locations', steps: [{ click: { selector: FIRST_ROW } }] },
   { id: '21-detail', nn: '21', slug: 'vendor-dialog', path: '/tms/vendors', steps: [{ click: { selector: FIRST_ROW } }] },
-  { id: '14a-send', nn: '14a', slug: 'quote-send', path: '/tms/rates/{quote}', steps: [{ click: { pattern: '^Send' } }] },
-  { id: '14a-counter', nn: '14a', slug: 'quote-counter', path: '/tms/rates/{quote}', steps: [{ click: { pattern: '^Counter' } }] },
-  { id: '27-dialog', nn: '27', slug: 'commissions-dialog', path: '/tms/brokerage/commissions', steps: [{ click: NEW_BTN }] },
+  { id: '14a-send', nn: '14a', slug: 'quote-send', path: '/tms/rates/{quote}', steps: [{ click: { label: '^Send the quote' } }] },
+  { id: '14a-counter', nn: '14a', slug: 'quote-counter', path: '/tms/rates/{quote}', steps: [{ click: { label: '^Counter the quote' } }] },
   { id: '30-dialog', nn: '30', slug: 'divisions-dialog', path: '/tms/brokerage/divisions', steps: [{ click: NEW_BTN }] },
   { id: '28-tabs', nn: '28', slug: 'reports-tabs', path: '/tms/brokerage/reports', tabs: true, dark: true },
   { id: '32-tabs', nn: '32', slug: 'ai-agents-tabs', path: '/tms/brokerage/ai-agents', tabs: true },
@@ -190,7 +205,8 @@ export function auditInPage(opts) {
   ])
   const BANNED_SURFACE = new Set(['rgb(244, 247, 251)', 'rgb(244, 246, 248)'])
   const BANNED_BORDER = new Set(['rgb(226, 232, 240)'])
-  const EXCLUDE = '.gm-style, iframe, [data-tms-paper], .tms-chart-tip, [data-sonner-toast] [role="tooltip"], .tms-count-badge'
+  // gm-style/iframe: third-party; recharts_measurement_span: library text-measuring node; [data-user-color]: user-chosen data colour swatch (not chrome)
+  const EXCLUDE = '.gm-style, iframe, [data-tms-paper], .tms-chart-tip, [data-sonner-toast] [role="tooltip"], .tms-count-badge, #recharts_measurement_span, [data-user-color]'
   const parse = (s) => {
     const m = /rgba?\(([^)]+)\)/.exec(s || '')
     if (!m) return null
@@ -211,11 +227,12 @@ export function auditInPage(opts) {
   const push = (list, item) => { if (list.length < 3) list.push(item) }
 
   // token probes
+  // Tokens are declared on .tms-shell / .tms-portal (never :root), so the probe must live inside one.
+  const scope = document.querySelector('.tms-shell, .tms-portal') ?? document.body
   const probe = document.createElement('div')
-  document.body.appendChild(probe)
+  scope.appendChild(probe)
   probe.style.cssText = 'position:fixed;left:-9999px;top:0;width:1px;height:1px;background:var(--tms-bg)'
   const tokenBg = parse(getComputedStyle(probe).backgroundColor)
-  probe.style.background = 'var(--tms-bg-elevated)'
   probe.remove()
 
   const all = [...document.body.querySelectorAll('*')]
@@ -291,7 +308,9 @@ export function auditInPage(opts) {
 
   // layout
   const html = document.documentElement
-  if (html.getAttribute('data-tms-theme') !== opts.theme) out.layout.push(`html[data-tms-theme]=${html.getAttribute('data-tms-theme')} expected ${opts.theme}`)
+  // light is the absence of the attribute (tmsTheme.apply removes it); only dark sets it
+  const attr = html.getAttribute('data-tms-theme')
+  if ((attr === 'dark' ? 'dark' : 'light') !== opts.theme || (attr != null && attr !== 'dark')) out.layout.push(`html[data-tms-theme]=${attr} expected ${opts.theme === 'dark' ? 'dark' : 'absent'}`)
   const main = document.querySelector('.tms-main')
   if (!main) out.layout.push('.tms-main missing')
   else if (!opts.wideOk && main.scrollWidth > main.clientWidth + 2) out.layout.push(`.tms-main overflows horizontally (${main.scrollWidth} > ${main.clientWidth})`)
@@ -312,17 +331,22 @@ export function auditFailures(a) {
   return f
 }
 
-/** Legacy-colour check for public pages (no .tms-main shell). */
-export function publicAuditInPage(opts) {
+/**
+ * Legacy-colour check for public pages (no .tms-main shell). Injected into the page by source,
+ * so it receives auditInPage as a parameter (page-side functions cannot see this module's scope).
+ */
+export function publicAuditInPage(opts, auditInPage) {
   const a = auditInPage({ ...opts, theme: 'light' })
   const root = document.querySelector('.tms-public')
-  const bodyBg = getComputedStyle(document.body).backgroundColor
+  const rootBg = root ? getComputedStyle(root).backgroundColor : ''
+  const card = document.querySelector('.tms-public-card')
+  const cardBg = card ? getComputedStyle(card).backgroundColor : ''
   const probe = document.createElement('div')
   probe.style.cssText = 'position:fixed;left:-9999px;background:var(--tms-bg)'
-  document.body.appendChild(probe)
+  ;(root ?? document.body).appendChild(probe)
   const token = getComputedStyle(probe).backgroundColor
   probe.remove()
-  return { ...a, layout: [], publicRoot: !!root, bodyBg, tokenBg: token, signIn: /\/login|\/sign-?in/.test(location.pathname) }
+  return { ...a, layout: [], publicRoot: !!root, rootBg, cardBg, tokenBg: token, signIn: /\/login|\/sign-?in/.test(location.pathname) }
 }
 
 // ───────────────────────────── runner ─────────────────────────────
@@ -407,6 +431,9 @@ async function discoverData(b, ship) {
   data.shipment = (rec('SHIPMENT', 'shipment.open.assigned') ?? rec('SHIPMENT'))?.recordId
   data.transit = (rec('SHIPMENT', 'shipment.intransit') ?? rec('SHIPMENT'))?.recordId
   data.quote = rec('QUOTE')?.recordId
+  // Carrier detail is keyed by carrierId, which the demo load-carrier on the in-transit shipment carries.
+  const transitBundle = data.transit ? await ship('GET_SHIPMENT_BUNDLE', { shipmentId: data.transit }).catch(() => null) : null
+  data.carrier = transitBundle?.loadCarriers?.find((c) => c.carrierId)?.carrierId ?? rec('CARRIER')?.recordId
   const list = [
     ['shipment', '/tms/shipments', '^/tms/shipments/(?!view/)([^/?#]+)'],
     ['view', '/tms/shipments', '^/tms/shipments/view/([^/?#]+)'],
@@ -414,7 +441,6 @@ async function discoverData(b, ship) {
     ['quote', '/tms/rates', '^/tms/rates/(?!lanes|new)([^/?#]+)'],
     ['invoice', '/tms/invoicing', '^/tms/invoicing/invoices/([^/?#]+)'],
     ['bill', '/tms/invoicing/payable', '^/tms/invoicing/payable/bills/([^/?#]+)'],
-    ['carrier', '/tms/carriers', '^/tms/carriers/([^/?#]+)'],
     ['run', '/tms/workflows', '^/tms/workflows/runs/([^/?#]+)'],
     ['academy', '/tms/academy', '^/tms/academy/([^/?#]+)'],
     ['provider', '/tms/brokerage/integrations', '^/tms/brokerage/integrations/([^/?#]+)'],
@@ -423,15 +449,16 @@ async function discoverData(b, ship) {
     if (data[key]) continue
     data[key] = await discover(b, path, regex).catch(() => null)
   }
+  data.docview ??= data.view // saved views are shared by the board and documents workstations
   return { data, state, rec }
 }
 
 async function setTheme(b, theme) {
-  const current = await b.evaluate(`document.documentElement.getAttribute('data-tms-theme')`)
+  const current = await b.evaluate(`document.documentElement.getAttribute('data-tms-theme') === 'dark' ? 'dark' : 'light'`)
   if (current === theme) return
   const label = theme === 'dark' ? 'Switch to dark theme' : 'Switch to light theme'
   await b.click({ selector: `[aria-label="${label}"]` })
-  await b.poll(() => b.evaluate(`document.documentElement.getAttribute('data-tms-theme') === ${JSON.stringify(theme)}`), `theme ${theme}`, 10_000)
+  await b.poll(() => b.evaluate(`(document.documentElement.getAttribute('data-tms-theme') === 'dark' ? 'dark' : 'light') === ${JSON.stringify(theme)}`), `theme ${theme}`, 10_000)
 }
 
 async function runRoute(b, route, data, theme) {
@@ -453,6 +480,9 @@ async function runRoute(b, route, data, theme) {
 
 const INBOX_TESTIDS = ['inbox-chat-header', 'inbox-quick-actions', 'inbox-info-panel', 'inbox-status-timeline', 'inbox-driver-card']
 async function inboxAsserts(b) {
+  // Conversations arrive after the list (one message read per shipment): wait for the framed thread.
+  await b.waitFor('[data-testid="inbox-chat-header"]', 45_000).catch(() => {})
+  await pause(500)
   const missing = await b.evaluate(`${JSON.stringify(INBOX_TESTIDS)}.filter((t) => !document.querySelector('[data-testid="' + t + '"]'))`)
   return missing.length ? [`inbox elements missing: ${missing.join(', ')}`] : []
 }
@@ -488,14 +518,15 @@ async function runState(b, st, data, theme) {
   }
   try {
     for (const step of st.steps) {
-      if (step.key) await b.press(step.key)
-      else await b.click(step.click)
+      if (step.key) { await b.press(step.key); continue }
+      // The trigger (row, menu, button) often renders after the page's first content: retry for a while.
+      await b.poll(() => b.click(step.click).then(() => true, () => false), `trigger ${JSON.stringify(step.click)}`, 20_000)
     }
   } catch {
     skipLine(st.id, theme, 'trigger not found')
     return
   }
-  const opened = await b.poll(() => b.evaluate(`!!document.querySelector(${JSON.stringify(OVERLAY)})`), `${st.id} overlay`, 8000).catch(() => false)
+  const opened = await b.poll(() => b.evaluate(`!!document.querySelector(${JSON.stringify(st.expect ?? OVERLAY)})`), `${st.id} overlay`, 8000).catch(() => false)
   if (!opened) { line('FAIL', `${st.id} ${theme}`, 'trigger clicked but nothing opened'); return }
   await pause(700)
   b.mark()
@@ -519,7 +550,7 @@ async function runState(b, st, data, theme) {
 async function menuProbe(b) {
   return b.evaluate(`(() => {
     const out = [];
-    const probe = (v) => { const d = document.createElement('div'); d.style.cssText = 'position:fixed;left:-9999px;background:var(' + v + ')'; document.body.appendChild(d); const c = getComputedStyle(d).backgroundColor; d.remove(); return c; };
+    const scope = (document.querySelector('[role="menu"]')?.closest('.tms-portal, .tms-shell')) ?? document.querySelector('.tms-shell, .tms-portal') ?? document.body; const probe = (v) => { const d = document.createElement('div'); d.style.cssText = 'position:fixed;left:-9999px;background:var(' + v + ')'; scope.appendChild(d); const c = getComputedStyle(d).backgroundColor; d.remove(); return c; };
     const menu = document.querySelector('[role="menu"]');
     if (menu && getComputedStyle(menu).backgroundColor !== probe('--tms-bg-elevated')) out.push('menu background ' + getComputedStyle(menu).backgroundColor + ' != --tms-bg-elevated ' + probe('--tms-bg-elevated'));
     const checked = document.querySelector('[role="checkbox"][data-state="checked"], [role="switch"][data-state="checked"]');
@@ -534,7 +565,7 @@ async function inboxPanelPersistence(b, data) {
   if (!data.shipment) { skipLine(id, 'light', 'shipment'); return }
   await b.navigate(`/tms/tracking?tab=inbox&shipment=${data.shipment}`)
   try { await waitLoaded(b) } catch (e) { line('FAIL', `${id} light`, e.message); return }
-  await pause(1000)
+  await b.waitFor('[data-testid="inbox-info-panel"]', 45_000).catch(() => {})
   const hasPanel = await b.evaluate(`!!document.querySelector('[data-testid="inbox-info-panel"]')`)
   if (!hasPanel) { line('FAIL', `${id} light`, 'inbox-info-panel absent'); return }
   try { await b.click({ selector: '[data-testid="inbox-info-panel"] button[aria-label^="Close"], [data-testid="inbox-info-panel"] button[aria-label="×"]' }) } catch {
@@ -566,7 +597,7 @@ async function toastProbe(b, theme) {
   if (!shown) { line('FAIL', `${id} ${theme}`, 'no [data-sonner-toast] after Copy'); return }
   const result = await b.evaluate(`(() => {
     const t = document.querySelector('[data-sonner-toast]');
-    const d = document.createElement('div'); d.style.cssText = 'position:fixed;left:-9999px;background:var(--tms-card)'; document.body.appendChild(d);
+    const d = document.createElement('div'); d.style.cssText = 'position:fixed;left:-9999px;background:var(--tms-card)'; (t.closest('.tms-portal') ?? document.body).appendChild(d);
     const card = getComputedStyle(d).backgroundColor; d.remove();
     return { bg: getComputedStyle(t).backgroundColor, card, portal: !!t.closest('.tms-portal') };
   })()`)
@@ -579,7 +610,8 @@ async function toastProbe(b, theme) {
 }
 
 async function themePass(b) {
-  const pre = 'window.__s2Theme=null;new MutationObserver(function(_,o){var v=document.documentElement.getAttribute("data-tms-theme");if(v&&!window.__s2Theme){window.__s2Theme={value:v,readyState:document.readyState};o.disconnect()}}).observe(document.documentElement,{attributes:true,attributeFilter:["data-tms-theme"]});'
+  // Observe `document` (subtree): at new-document time <html> does not exist yet, so observing documentElement throws.
+  const pre = 'window.__s2Theme=null;new MutationObserver(function(_,o){var v=document.documentElement.getAttribute("data-tms-theme");if(v&&!window.__s2Theme){window.__s2Theme={value:v,readyState:document.readyState};o.disconnect()}}).observe(document,{attributes:true,subtree:true,attributeFilter:["data-tms-theme"]});'
   await b.addInitScript(pre)
   await setTheme(b, 'dark')
   await b.navigate('/tms/dashboard')
@@ -615,11 +647,12 @@ async function publicPages(origin, tokens) {
         await pause(1500)
         b.mark()
         await pause(300)
-        const res = await b.evaluate(`(${publicAuditInPage})(${JSON.stringify({ wideOk: true, hookClasses: HOOK_CLASSES })})`)
+        const res = await b.evaluate(`((auditInPage) => (${publicAuditInPage})(${JSON.stringify({ wideOk: true, hookClasses: HOOK_CLASSES })}, auditInPage))(${auditInPage})`)
         const fails = []
         if (!res.publicRoot) fails.push('root .tms-public missing')
         if (res.signIn) fails.push('redirected to sign-in')
-        if (res.bodyBg !== res.tokenBg) fails.push(`body background ${res.bodyBg} != --tms-bg ${res.tokenBg}`)
+        if (res.rootBg !== res.tokenBg) fails.push(`.tms-public background ${res.rootBg} != --tms-bg ${res.tokenBg}`)
+        if (res.cardBg === 'rgba(0, 0, 0, 0)') fails.push('.tms-public-card has no surface background (frame rules not matching)')
         fails.push(...auditFailures({ ...res, unstyled: res.unstyled }).filter((f) => !f.startsWith('layout')))
         const problems = b.problems()
         fails.push(...[

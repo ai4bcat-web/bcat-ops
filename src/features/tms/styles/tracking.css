@@ -216,6 +216,13 @@
   font-size: 12px;
 }
 
+.tms-shell .tms-tracking-nextstop-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
 .tms-shell .tms-tracking-status-cell {
   display: flex;
   flex-direction: column;

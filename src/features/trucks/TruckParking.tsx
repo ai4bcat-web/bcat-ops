@@ -157,10 +157,10 @@ export function HoldingArea(props: {
 
   const monthlyTotal = props.held.reduce((s, h) => s + h.monthlyAmount, 0)
   return (
-    <div style={{ border: '1px solid var(--ds-border)', borderRadius: 12, background: 'var(--ds-surface)', marginBottom: 16 }}>
-      <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--ds-border)', display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
-        <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)' }}>Holding area</span>
-        <span style={{ fontSize: 12.5, color: 'var(--ds-t3)' }}>
+    <div style={{ border: '1px solid var(--tms-border)', borderRadius: 12, background: 'var(--tms-card)', marginBottom: 16 }}>
+      <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--tms-border)', display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--tms-text)' }}>Holding area</span>
+        <span style={{ fontSize: 12.5, color: 'var(--tms-muted)' }}>
           Plates and ELD still being paid for on inactive trucks · {money(monthlyTotal)}/mo, still counted in expenses
         </span>
       </div>

@@ -19,9 +19,9 @@ describe('TmsToaster', () => {
     expect(toasterProps.last?.richColors).toBe(false)
   })
 
-  it('leaves the driver PWA toaster untouched on /driver routes', () => {
+  it('uses the same themed card look in the driver PWA', () => {
     render(<MemoryRouter initialEntries={['/driver/home']}><TmsToaster /></MemoryRouter>)
-    expect(toasterProps.last?.className).toBeUndefined()
-    expect(toasterProps.last?.richColors).toBe(true)
+    expect(toasterProps.last?.className).toContain('tms-portal')
+    expect(toasterProps.last?.richColors).toBe(false)
   })
 })

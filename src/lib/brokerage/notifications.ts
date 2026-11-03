@@ -4,11 +4,9 @@
  * The event catalog is code, not data: it lists only events the app can actually
  * produce today. Subscriptions (who gets which channel) and webhooks are stored.
  *
- * Pure: no store, no clock, no network except for signPayload's crypto. Imports
+ * Pure: no store, no clock, no network. Imports
  * are relative because the tmsDirectoryActions Lambda bundles this file by path.
  */
-/// <reference types="node" />
-import { createHmac } from 'crypto'
 import { isRoleKey } from '../roles'
 
 export type NotificationChannel = 'EMAIL' | 'IN_APP' | 'WEBHOOK' | 'SMS' | 'PUSH'
@@ -310,12 +308,4 @@ export function recipientsFor(
   }
 
   return Object.keys(emails).sort()
-}
-
-/** Sign a webhook payload using the repo's shared HMAC-SHA256 convention. */
-export function signPayload(secret: string, body: string, timestamp: number | string): string {
-  const ts = String(timestamp)
-  const base = `v0:${ts}:${body}`
-  const hmac = createHmac('sha256', secret).update(base).digest('hex')
-  return `v0=${hmac}`
 }

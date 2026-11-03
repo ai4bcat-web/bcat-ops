@@ -348,13 +348,13 @@ export default function ScanPage() {
 
         {loadingSubmissions && (
           <div className="flex flex-col items-center justify-center py-12">
-            <Loader2 className="h-8 w-8 animate-spin text-slate-500" aria-hidden="true" />
-            <p className="mt-3 text-sm text-slate-500">Loading your loads…</p>
+            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" aria-hidden="true" />
+            <p className="mt-3 text-sm text-muted-foreground">Loading your loads…</p>
           </div>
         )}
 
         {submissionsError && (
-          <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-red-700">
+          <div className="rounded-xl border border-[color:var(--tms-badge-red)]/30 bg-[color:var(--tms-badge-red-tint)] p-4 text-[color:var(--tms-badge-red)]">
             <p>{submissionsError}</p>
             <Button
               variant="outline"
@@ -374,8 +374,8 @@ export default function ScanPage() {
           <div className="space-y-4">
             {!submissionsError && submissions?.length === 0 && (
               <div className="py-8 text-center">
-                <p className="text-sm text-slate-500">You do not have any loads listed yet.</p>
-                <p className="mt-1 text-sm text-slate-500">
+                <p className="text-sm text-muted-foreground">You do not have any loads listed yet.</p>
+                <p className="mt-1 text-sm text-muted-foreground">
                   Send the POD anyway — the office will attach it once the load is built.
                 </p>
               </div>
@@ -391,12 +391,12 @@ export default function ScanPage() {
                       setSelectedSubmissionId(submission.id)
                       setPhase('capture')
                     }}
-                    className="w-full rounded-xl border border-slate-200 bg-white p-4 text-left shadow-sm transition-colors active:bg-slate-50"
+                    className="w-full rounded-xl border border-border bg-card p-4 text-left shadow-sm transition-colors active:bg-muted"
                   >
-                    <p className="font-medium text-slate-900">
+                    <p className="font-medium text-foreground">
                       {submission.referenceNumber || `Load ${submission.id.slice(-6)}`}
                     </p>
-                    <p className="mt-1 text-xs text-slate-500">
+                    <p className="mt-1 text-xs text-muted-foreground">
                       {new Date(submission.createdAt).toLocaleDateString()}
                     </p>
                   </button>
@@ -407,9 +407,9 @@ export default function ScanPage() {
             {/* Always available, and never blocked: a driver whose load list is empty, or
                 whose load has not been built yet, still has to be able to send the POD
                 they are holding. The load number is optional. */}
-            <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-              <p className="text-sm font-medium text-slate-900">Do not see your load?</p>
-              <p className="mt-1 text-sm text-slate-500">
+            <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
+              <p className="text-sm font-medium text-foreground">Do not see your load?</p>
+              <p className="mt-1 text-sm text-muted-foreground">
                 {currentPro
                   ? `This is PRO ${currentPro}, the load you are on. Change it if this POD is for a different load.`
                   : 'Put the load number in if you have it. If you do not, send the POD anyway and the office will attach it to the right load.'}
@@ -527,7 +527,7 @@ export default function ScanPage() {
           )}
 
           {kind === 'POD' && selectedSubmission && (
-            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
+            <div className="rounded-lg border border-border bg-muted p-3 text-sm">
               <span className="font-medium">Load:</span>{' '}
               {selectedSubmission.referenceNumber || selectedSubmission.id.slice(-6)}
             </div>
@@ -563,7 +563,7 @@ export default function ScanPage() {
           </div>
 
           {resumeFromId && (
-            <p className="text-sm text-amber-300">
+            <p className="text-sm text-[color:var(--tms-badge-orange)]">
               Retrying a previous upload. We will not create a second submission.
             </p>
           )}
@@ -596,7 +596,7 @@ export default function ScanPage() {
       <div className="flex min-h-full flex-col items-center justify-center p-6 text-center">
         <Loader2 className="h-12 w-12 animate-spin text-primary" aria-hidden="true" />
         <p className="mt-4 text-lg font-medium">Uploading {pages.length} page(s)…</p>
-        <p className="mt-2 text-sm text-slate-500">Please keep this screen open.</p>
+        <p className="mt-2 text-sm text-muted-foreground">Please keep this screen open.</p>
       </div>
     )
   }
@@ -604,9 +604,9 @@ export default function ScanPage() {
   if (phase === 'success') {
     return (
       <div className="flex min-h-full flex-col items-center justify-center p-6 text-center">
-        <CheckCircle2 className="h-16 w-16 text-emerald-500" aria-hidden="true" />
+        <CheckCircle2 className="h-16 w-16 text-[color:var(--tms-badge-green)]" aria-hidden="true" />
         <h2 className="mt-4 text-2xl font-bold">Sent!</h2>
-        <p className="mt-2 max-w-xs text-slate-600">
+        <p className="mt-2 max-w-xs text-muted-foreground">
           {kind === 'MISC'
             ? 'The office can see your photos on the load.'
             : sentUnattached
@@ -628,16 +628,16 @@ export default function ScanPage() {
   // phase === 'error'
   return (
     <div className="flex min-h-full flex-col items-center justify-center p-6 text-center">
-      <AlertCircle className="h-16 w-16 text-red-500" aria-hidden="true" />
+      <AlertCircle className="h-16 w-16 text-[color:var(--tms-badge-red)]" aria-hidden="true" />
       <h2 className="mt-4 text-xl font-bold">Could not send</h2>
-      <p className="mt-2 text-sm text-slate-600">
+      <p className="mt-2 text-sm text-muted-foreground">
         {error ?? 'Something went wrong while uploading.'}
       </p>
-      <p className="mt-4 px-4 text-sm text-slate-500">
+      <p className="mt-4 px-4 text-sm text-muted-foreground">
         Your photos are still here — you do not need to re-shoot them.
       </p>
       {resumeFromId && (
-        <p className="mt-2 text-sm text-amber-300">
+        <p className="mt-2 text-sm text-[color:var(--tms-badge-orange)]">
           We will retry the same submission so nothing is duplicated.
         </p>
       )}
@@ -667,19 +667,19 @@ function PagePreview({ page, index }: { page: PendingPage; index: number }) {
 
   if (page.contentType === 'application/pdf') {
     return (
-      <div className="flex aspect-[3/4] flex-col items-center justify-center rounded-lg border border-slate-200 bg-slate-50 p-2">
-        <FileText className="h-8 w-8 text-slate-400" aria-hidden="true" />
-        <span className="mt-1 truncate text-center text-xs text-slate-500">PDF</span>
+      <div className="flex aspect-[3/4] flex-col items-center justify-center rounded-lg border border-border bg-muted p-2">
+        <FileText className="h-8 w-8 text-muted-foreground" aria-hidden="true" />
+        <span className="mt-1 truncate text-center text-xs text-muted-foreground">PDF</span>
       </div>
     )
   }
 
   return (
-    <div className="flex aspect-[3/4] flex-col items-center justify-center overflow-hidden rounded-lg border border-slate-200 bg-slate-50 p-1">
+    <div className="flex aspect-[3/4] flex-col items-center justify-center overflow-hidden rounded-lg border border-border bg-muted p-1">
       {url ? (
         <img src={url} alt={`Page ${index + 1}`} className="h-full w-full rounded object-cover" />
       ) : (
-        <FileText className="h-8 w-8 text-slate-400" aria-hidden="true" />
+        <FileText className="h-8 w-8 text-muted-foreground" aria-hidden="true" />
       )}
     </div>
   )

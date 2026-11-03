@@ -20,10 +20,10 @@ export function MoneyCell({ value, cents, className }: { value: number | null | 
 
 /** Colored rounded tile holding an icon or initials — the leading visual of an identity cell. */
 export function CellTile({ color, tone = 'solid', children, className }: { color?: string; tone?: 'solid' | 'soft'; children: ReactNode; className?: string }) {
-  const c = color ?? 'var(--ds-blue)'
+  const c = color ?? 'var(--tms-primary)'
   const style = tone === 'soft'
-    ? { background: `color-mix(in srgb, ${c} 14%, white)`, color: c }
-    : { background: c, color: '#fff' }
+    ? { background: `color-mix(in srgb, ${c} 14%, var(--tms-card))`, color: c }
+    : { background: c, color: 'var(--tms-on-primary)' }
   return (
     <span className={cn('inline-flex size-9 shrink-0 items-center justify-center rounded-lg', className)} style={style} aria-hidden>
       {children}
@@ -49,12 +49,12 @@ export function IdentityCell({ tile, primary, subtitle }: { tile?: ReactNode; pr
 export type ChipTone = 'ok' | 'warn' | 'bad' | 'blue' | 'violet' | 'neutral'
 
 const CHIP_TONES: Record<ChipTone, string> = {
-  ok:      'bg-[var(--ds-green-bg)] text-[var(--ds-green)]',
-  warn:    'bg-[var(--ds-amber-bg)] text-[var(--ds-amber)]',
-  bad:     'bg-[var(--ds-red-bg)] text-[var(--ds-red)]',
-  blue:    'bg-[var(--ds-blue-bg)] text-[var(--ds-blue-dark)]',
-  violet:  'bg-[var(--ds-violet-bg)] text-[var(--ds-violet)]',
-  neutral: 'bg-slate-100 text-slate-600',
+  ok:      'bg-[color:var(--tms-badge-green-tint)] text-[color:var(--tms-badge-green)]',
+  warn:    'bg-[color:var(--tms-badge-orange-tint)] text-[color:var(--tms-badge-orange)]',
+  bad:     'bg-[color:var(--tms-badge-red-tint)] text-[color:var(--tms-badge-red)]',
+  blue:    'bg-[color:var(--tms-badge-blue-tint)] text-[color:var(--tms-badge-blue)]',
+  violet:  'bg-[color:var(--tms-badge-purple-tint)] text-[color:var(--tms-badge-purple)]',
+  neutral: 'bg-muted text-muted-foreground',
 }
 
 /** Small status pill with optional leading dot. */

@@ -162,18 +162,18 @@ export function TimeClockPage() {
       {/* The button, and the only thing most visits are for. The card itself says which
           state the driver is in — green while on the clock — so it reads from across the
           cab before a single word does. */}
-      <div className={`mb-5 rounded-xl border p-4 ${openShift ? 'border-emerald-400/50 bg-emerald-500/15' : 'border-border bg-card'}`}>
-        <p className={`flex items-center gap-2 text-base font-semibold ${openShift ? 'text-emerald-200' : 'text-foreground'}`}>
+      <div className={`mb-5 rounded-xl border p-4 ${openShift ? 'border-[color:var(--tms-badge-green)]/30 bg-[color:var(--tms-badge-green-tint)]' : 'border-border bg-card'}`}>
+        <p className={`flex items-center gap-2 text-base font-semibold ${openShift ? 'text-[color:var(--tms-badge-green)]' : 'text-foreground'}`}>
           {openShift && (
             <span className="relative flex h-2.5 w-2.5" aria-hidden="true">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
-              <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-400" />
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[color:var(--tms-badge-green)] opacity-75" />
+              <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-[color:var(--tms-badge-green)]" />
             </span>
           )}
           {openShift ? `On the clock since ${clockLabel(openShift.clockInAt)}` : 'Not clocked in'}
         </p>
         <Button
-          className={`mt-3 h-16 w-full text-lg font-bold ${openShift ? 'border-emerald-400/60 bg-background text-foreground hover:bg-emerald-500/10' : ''}`}
+          className={`mt-3 h-16 w-full text-lg font-bold ${openShift ? 'border-[color:var(--tms-badge-green)]/60 bg-background text-foreground hover:bg-[color:var(--tms-badge-green-tint)]' : ''}`}
           variant={openShift ? 'outline' : 'default'}
           disabled={busy || readOnly}
           title={readOnly ? 'You are viewing this driver\u2019s app; only they can punch their clock' : undefined}
@@ -198,7 +198,7 @@ export function TimeClockPage() {
            * not left wondering why today still reads 0h while they are standing there
            * working. See rowMinutes in src/lib/timeClock.ts.
            */
-          <p className="mt-2 text-sm text-emerald-100/80">
+          <p className="mt-2 text-sm text-[color:var(--tms-badge-green)]">
             Today&rsquo;s hours are counted once you clock out.
           </p>
         )}
@@ -257,29 +257,29 @@ export function TimeClockPage() {
         difference. Scoped to the same Monday-to-Sunday week as the card above it.
       */}
       {data.overnight && data.overnight.loads.length > 0 && (
-        <section className="mb-4 rounded-xl border border-indigo-400/40 bg-indigo-500/15 p-4">
+        <section className="mb-4 rounded-xl border border-[color:var(--tms-badge-blue)]/30 bg-[color:var(--tms-badge-blue-tint)] p-4">
           <div className="flex items-baseline justify-between">
-            <h2 className="flex items-center gap-1.5 text-sm font-semibold text-indigo-100">
+            <h2 className="flex items-center gap-1.5 text-sm font-semibold text-[color:var(--tms-badge-blue)]">
               <Moon className="h-4 w-4" aria-hidden="true" /> Overnight loads
             </h2>
-            <p className="text-lg font-bold tabular-nums text-indigo-100">
+            <p className="text-lg font-bold tabular-nums text-[color:var(--tms-badge-blue)]">
               {money(data.overnight.grossCents)}
             </p>
           </div>
-          <p className="mt-0.5 text-xs text-indigo-200/80">
+          <p className="mt-0.5 text-xs text-[color:var(--tms-text-2)]">
             {data.overnight.loads.length} run{data.overnight.loads.length === 1 ? '' : 's'} this
             period &middot; gross
           </p>
           <ul className="mt-2.5 flex flex-col gap-1.5">
             {data.overnight.loads.map((l) => (
               <li key={l.id} className="flex items-baseline justify-between gap-2 text-sm">
-                <span className="min-w-0 flex-1 truncate text-indigo-100">
+                <span className="min-w-0 flex-1 truncate text-foreground">
                   <span className="font-semibold">{l.reference}</span>
                   {l.origin || l.destination
                     ? ` · ${[l.origin, l.destination].filter(Boolean).join(' → ')}`
                     : ''}
                 </span>
-                <span className="shrink-0 font-semibold tabular-nums text-indigo-100">
+                <span className="shrink-0 font-semibold tabular-nums text-foreground">
                   {l.rateCents != null ? money(l.rateCents) : '—'}
                 </span>
               </li>
@@ -297,7 +297,7 @@ export function TimeClockPage() {
           return (
           <li
             key={d.date}
-            className={`rounded-lg border p-3 ${isToday ? 'border-primary/70 bg-primary/10' : 'border-border bg-card'}`}
+            className={`rounded-lg border p-3 ${isToday ? 'border-primary/70 bg-[color:var(--tms-primary-tint)]' : 'border-border bg-card'}`}
           >
             <div className="flex items-baseline justify-between">
               <p className="text-base font-semibold text-foreground">
@@ -305,7 +305,7 @@ export function TimeClockPage() {
                 {isToday && <span className="ml-2 text-xs font-semibold uppercase tracking-wide text-primary">Today</span>}
               </p>
               {d.open ? (
-                <span className="rounded-full bg-emerald-500/20 px-2.5 py-0.5 text-sm font-bold text-emerald-200">
+                <span className="rounded-full bg-[color:var(--tms-badge-green-tint)] px-2.5 py-0.5 text-sm font-bold text-[color:var(--tms-badge-green)]">
                   On the clock
                 </span>
               ) : (

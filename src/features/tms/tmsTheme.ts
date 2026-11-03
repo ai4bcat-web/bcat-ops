@@ -1,4 +1,5 @@
 import { useCallback, useLayoutEffect, useState } from 'react'
+import { readTmsToken } from './tmsTokens'
 
 export type TmsTheme = 'light' | 'dark'
 
@@ -22,23 +23,35 @@ function persist(theme: TmsTheme) {
   }
 }
 
+/** Browser / installed-app chrome follows the top bar, so the toggle recolours it too. */
+function syncThemeColor() {
+  const color = readTmsToken('--tms-topbar', document.documentElement)
+  if (color) document.querySelector('meta[name="theme-color"]')?.setAttribute('content', color)
+}
+
 function apply(theme: TmsTheme) {
   const root = document.documentElement
   if (theme === 'dark') root.setAttribute(ATTRIBUTE, 'dark')
   else root.removeAttribute(ATTRIBUTE)
+  syncThemeColor()
+}
+
+function clear() {
+  document.documentElement.removeAttribute(ATTRIBUTE)
+  syncThemeColor()
 }
 
 /**
- * Theme preference for the /tms/* shell. The attribute lives on <html> so portalled
- * content (dialogs, menus) follows it; it is removed on unmount so legacy pages never
- * inherit it. Only TmsShell calls this.
+ * Theme preference for every themed surface (the staff shell, sign-in, the driver app). The
+ * attribute lives on <html> so portalled content (dialogs, menus) follows it; it is removed
+ * on unmount so a surface that does not call this hook (a public page) never inherits dark.
  */
 export function useTmsTheme(): { theme: TmsTheme; setTheme: (t: TmsTheme) => void; toggleTheme: () => void } {
   const [theme, setThemeState] = useState<TmsTheme>(readTmsTheme)
 
   useLayoutEffect(() => {
     apply(theme)
-    return () => document.documentElement.removeAttribute(ATTRIBUTE)
+    return clear
   }, [theme])
 
   const setTheme = useCallback((next: TmsTheme) => {

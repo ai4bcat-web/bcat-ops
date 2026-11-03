@@ -32,17 +32,17 @@ export function InstallHintSection() {
   const isUnsupportedIOSBrowser = detectInstallPlatform(typeof navigator !== 'undefined' ? navigator.userAgent : '') === 'ios-chrome'
 
   return (
-    <section className="mt-6 rounded-2xl border border-slate-700 bg-slate-900/60 p-4 text-slate-200" aria-label="Install this app">
-      <h3 className="mb-2 text-sm font-semibold text-white">{hint.title}</h3>
+    <section className="mt-6 rounded-2xl border border-[color:var(--tms-border)] bg-card p-4 text-card-foreground shadow-sm" aria-label="Install this app">
+      <h3 className="mb-2 text-sm font-semibold text-foreground">{hint.title}</h3>
 
       {isUnsupportedIOSBrowser ? (
-        <div className="space-y-2 text-sm leading-relaxed text-slate-300">
+        <div className="space-y-2 text-sm leading-relaxed text-[color:var(--tms-text-2)]">
           {hint.steps.map((step, i) => (
             <p key={i}>{step}</p>
           ))}
         </div>
       ) : (
-        <ol className="list-decimal space-y-1.5 pl-4 text-sm leading-relaxed text-slate-300">
+        <ol className="list-decimal space-y-1.5 pl-4 text-sm leading-relaxed text-[color:var(--tms-text-2)]">
           {hint.steps.map((step, i) => (
             <li key={i}>{step}</li>
           ))}
@@ -59,7 +59,7 @@ export function InstallHintSection() {
               // Ignore a failed prompt; the written steps remain visible.
             }
           }}
-          className="mt-4 h-11 w-full rounded-xl bg-gradient-to-b from-[#3bb5f5] to-[#1ea8f3] text-base font-semibold text-white shadow-sm hover:from-[#1ea8f3] hover:to-[#0d8fd9]"
+          className="mt-4 h-11 w-full rounded-xl text-base font-semibold"
         >
           <Download className="mr-2 h-5 w-5" />
           Install app

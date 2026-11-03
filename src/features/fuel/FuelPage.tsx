@@ -2,7 +2,11 @@ import { useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { startOfWeek, endOfWeek, startOfMonth, endOfMonth, subWeeks, subMonths } from 'date-fns'
-import { Fuel, Upload, TrendingUp, TrendingDown, Truck as TruckIcon, AlertTriangle, ShieldCheck } from 'lucide-react'
+import { Fuel, Upload, Truck as TruckIcon, AlertTriangle, ShieldCheck } from 'lucide-react'
+import { TmsAlert } from '@/features/tms/kit/TmsAlert'
+import { TmsButton } from '@/features/tms/kit/TmsButton'
+import { TmsScrollPage } from '@/features/tms/kit/TmsScrollPage'
+import { TmsStatRow } from '@/features/tms/kit/TmsStatRow'
 import { useAppStore } from '@/store/useAppStore'
 import { TruckMpgTable } from './TruckMpgTable'
 import { useFuelTransactions, type FuelTransaction } from '@/hooks/useFuelTransactions'
@@ -240,88 +244,77 @@ export function FuelPage() {
   }
 
   return (
-    <div className="h-full overflow-y-auto">
-      <div style={{ maxWidth: 1400, margin: '0 auto', padding: isMobile ? '16px 12px' : '24px 32px', display: 'flex', flexDirection: 'column', gap: 16 }}>
-
-        {/* Header */}
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
-          <div>
-            <h1 style={{ fontSize: 20, fontWeight: 600, letterSpacing: '-0.01em', color: 'var(--ds-t1)', margin: 0, display: 'flex', alignItems: 'center', gap: 9 }}>
-              <Fuel size={19} style={{ color: 'var(--ds-t3)' }} /> Fuel
-            </h1>
-            <p style={{ fontSize: 12.5, color: 'var(--ds-t3)', marginTop: 3 }}>Fuel spend, diesel pricing &amp; per-mile — by truck and driver</p>
+    <TmsScrollPage
+      title="Fuel"
+      subtitle="Fuel spend, diesel pricing & per-mile — by truck and driver"
+      actions={
+        <>
+          <div style={{ display: 'flex', gap: 4, background: 'var(--tms-bg)', border: '1px solid var(--tms-border)', borderRadius: 9, padding: 3 }}>
+            {RANGES.map((r) => (
+              <button
+                key={r.key}
+                onClick={() => setRange(r.key)}
+                style={{
+                  padding: '4px 12px', borderRadius: 7, border: 'none', cursor: 'pointer', fontSize: 12.5,
+                  fontWeight: rangeKey === r.key ? 600 : 500, fontFamily: 'inherit',
+                  background: rangeKey === r.key ? 'var(--tms-card)' : 'transparent',
+                  color: rangeKey === r.key ? 'var(--tms-text)' : 'var(--tms-muted)',
+                  boxShadow: rangeKey === r.key ? 'var(--tms-shadow)' : 'none',
+                }}
+              >
+                {r.label}
+              </button>
+            ))}
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <div style={{ display: 'flex', gap: 4, background: 'var(--ds-bg)', border: '1px solid var(--ds-border)', borderRadius: 9, padding: 3 }}>
-              {RANGES.map((r) => (
-                <button
-                  key={r.key}
-                  onClick={() => setRange(r.key)}
-                  style={{
-                    padding: '4px 12px', borderRadius: 7, border: 'none', cursor: 'pointer', fontSize: 12.5,
-                    fontWeight: rangeKey === r.key ? 600 : 500, fontFamily: 'inherit',
-                    background: rangeKey === r.key ? '#fff' : 'transparent',
-                    color: rangeKey === r.key ? 'var(--ds-t1)' : 'var(--ds-t3)',
-                    boxShadow: rangeKey === r.key ? 'var(--sh-sm)' : 'none',
-                  }}
-                >
-                  {r.label}
-                </button>
-              ))}
-            </div>
-            <button
-              onClick={() => setUploadOpen(true)}
-              style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '6px 13px', borderRadius: 8, background: 'var(--ds-blue)', color: '#fff', border: 'none', cursor: 'pointer', fontSize: 12.5, fontWeight: 600, fontFamily: 'inherit' }}
-            >
-              <Upload size={14} /> Upload EFS
-            </button>
-          </div>
-        </div>
+          <TmsButton variant="primary" onClick={() => setUploadOpen(true)}>
+            <Upload size={14} /> Upload EFS
+          </TmsButton>
+        </>
+      }
+    >
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
         {/* KPI strip */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: isMobile ? 10 : 16 }}>
-          <StatCard label="Fuel Spend" value={loading ? '—' : money(spend)} accent="#f59e0b"
-            right={spendDelta != null && (
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 12, fontWeight: 600, color: spendDelta > 0 ? '#dc2626' : '#16a34a' }}>
-                {spendDelta > 0 ? <TrendingUp size={12} /> : <TrendingDown size={12} />}{Math.abs(spendDelta)}%
-              </span>
-            )}
-            sub={prev ? 'vs previous period' : 'all recorded fuel'} />
-          <StatCard label="Gallons" value={loading ? '—' : gal(gallons)} accent="#1ea8f3" sub={`${current.length} transactions`} />
-          <StatCard label="Avg $/gal" value={loading ? '—' : money2(avgPerGal)} accent="#16a34a" sub="blended, this period" />
-          <StatCard label="Trucks Fueled" value={loading ? '—' : `${trucksFueled} / ${trucks.length}`} accent="#6366f1" sub="fueled this period" />
-        </div>
+        <TmsStatRow
+          columns={4}
+          items={[
+            { label: 'Fuel Spend', value: loading ? null : money(spend), delta: spendDelta != null ? { pct: spendDelta, label: 'vs previous period' } : null, positiveIsGood: false, sub: prev ? 'vs previous period' : 'all recorded fuel', icon: Fuel },
+            { label: 'Gallons', value: loading ? null : gal(gallons), sub: `${current.length} transactions` },
+            { label: 'Avg $/gal', value: loading ? null : money2(avgPerGal), sub: 'blended, this period' },
+            { label: 'Trucks Fueled', value: loading ? null : `${trucksFueled} / ${trucks.length}`, sub: 'fueled this period' },
+          ]}
+        />
 
         {/* Diesel price (fuel-only; revenue & rev/mile stay on the dashboard) */}
         <DieselPriceWidget />
 
         {/* Amazon vs Ivan fleet — spend & pricing */}
-        <div style={{ background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 12, boxShadow: 'var(--sh-sm)', overflow: 'hidden' }}>
-          <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--ds-border)', display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Fuel size={15} style={{ color: 'var(--ds-t3)' }} />
-            <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)' }}>Fuel by Fleet</span>
-            <span style={{ fontSize: 12, color: 'var(--ds-t3)' }}>· Amazon vs Ivan</span>
+        <div style={{ background: 'var(--tms-card)', border: '1px solid var(--tms-border)', borderRadius: 12, boxShadow: 'var(--tms-shadow)', overflow: 'hidden' }}>
+          <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--tms-border)', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Fuel size={15} style={{ color: 'var(--tms-muted)' }} />
+            <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--tms-text)' }}>Fuel by Fleet</span>
+            <span style={{ fontSize: 12, color: 'var(--tms-muted)' }}>· Amazon vs Ivan</span>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : `repeat(${byFleet.UNKNOWN.spend > 0 ? 3 : 2}, 1fr)`, gap: 1, background: 'var(--ds-border)' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : `repeat(${byFleet.UNKNOWN.spend > 0 ? 3 : 2}, 1fr)`, gap: 1, background: 'var(--tms-border)' }}>
             {([
-              { key: 'AMAZON', label: 'Amazon',       color: '#6366f1', agg: byFleet.AMAZON },
-              { key: 'LOCAL',  label: 'Ivan (Local)', color: '#f59e0b', agg: byFleet.LOCAL },
-              ...(byFleet.UNKNOWN.spend > 0 ? [{ key: 'UNKNOWN', label: 'Unassigned truck', color: '#94a3b8', agg: byFleet.UNKNOWN }] : []),
+              { key: 'AMAZON', label: 'Amazon',       color: 'var(--tms-chart-6)', agg: byFleet.AMAZON },
+              { key: 'LOCAL',  label: 'Ivan (Local)', color: 'var(--tms-chart-4)', agg: byFleet.LOCAL },
+              ...(byFleet.UNKNOWN.spend > 0 ? [{ key: 'UNKNOWN', label: 'Unassigned truck', color: 'var(--tms-chart-9)', agg: byFleet.UNKNOWN }] : []),
             ] as const).map((f) => {
               const perGal = f.agg.gallons > 0 ? f.agg.spend / f.agg.gallons : 0
               return (
-                <div key={f.key} style={{ background: 'var(--ds-surface)', padding: '16px 20px' }}>
+                <div key={f.key} style={{ background: 'var(--tms-card)', padding: '16px 20px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 10 }}>
                     <span style={{ width: 9, height: 9, borderRadius: 2, background: f.color, display: 'inline-block' }} />
-                    <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--ds-t1)' }}>{f.label}</span>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--tms-text)' }}>{f.label}</span>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-                    <span style={{ fontSize: 24, fontWeight: 700, color: 'var(--ds-t1)', fontVariantNumeric: 'tabular-nums' }}>{loading ? '—' : money2(perGal)}</span>
-                    <span style={{ fontSize: 12, color: 'var(--ds-t3)' }}>/ gal avg</span>
+                    <span style={{ fontSize: 24, fontWeight: 700, color: 'var(--tms-text)', fontVariantNumeric: 'tabular-nums' }}>{loading ? '—' : money2(perGal)}</span>
+                    <span style={{ fontSize: 12, color: 'var(--tms-muted)' }}>/ gal avg</span>
                   </div>
-                  <div style={{ marginTop: 8, display: 'flex', gap: 16, fontSize: 12, color: 'var(--ds-t2)', flexWrap: 'wrap' }}>
-                    <span><span style={{ color: 'var(--ds-t3)' }}>Spend</span> <b style={{ fontVariantNumeric: 'tabular-nums' }}>{money(f.agg.spend)}</b></span>
-                    <span><span style={{ color: 'var(--ds-t3)' }}>Gallons</span> <b style={{ fontVariantNumeric: 'tabular-nums' }}>{gal(f.agg.gallons)}</b></span>
+                  <div style={{ marginTop: 8, display: 'flex', gap: 16, fontSize: 12, color: 'var(--tms-text-2)', flexWrap: 'wrap' }}>
+                    <span><span style={{ color: 'var(--tms-muted)' }}>Spend</span> <b style={{ fontVariantNumeric: 'tabular-nums' }}>{money(f.agg.spend)}</b></span>
+                    <span><span style={{ color: 'var(--tms-muted)' }}>Gallons</span> <b style={{ fontVariantNumeric: 'tabular-nums' }}>{gal(f.agg.gallons)}</b></span>
                   </div>
                 </div>
               )
@@ -331,15 +324,15 @@ export function FuelPage() {
 
         {/* ── Fuel Anomalies ────────────────────────────────────────────────────── */}
         {anomalyResult && (
-          <div style={{ background: 'var(--ds-surface)', border: `1px solid ${anomalyResult.anomalies.length ? '#fde68a' : 'var(--ds-border)'}`, borderRadius: 12, boxShadow: 'var(--sh-sm)', overflow: 'hidden' }}>
-            <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--ds-border)', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ background: 'var(--tms-card)', border: `1px solid ${anomalyResult.anomalies.length ? 'var(--tms-badge-orange)' : 'var(--tms-border)'}`, borderRadius: 12, boxShadow: 'var(--tms-shadow)', overflow: 'hidden' }}>
+            <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--tms-border)', display: 'flex', alignItems: 'center', gap: 8 }}>
               {anomalyResult.anomalies.length ? (
-                <AlertTriangle size={15} style={{ color: '#b45309' }} />
+                <AlertTriangle size={15} style={{ color: 'var(--tms-badge-orange)' }} />
               ) : (
-                <ShieldCheck size={15} style={{ color: '#16a34a' }} />
+                <ShieldCheck size={15} style={{ color: 'var(--tms-badge-green)' }} />
               )}
-              <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)' }}>Fuel Price Anomalies</span>
-              <span style={{ fontSize: 12, color: 'var(--ds-t3)' }}>
+              <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--tms-text)' }}>Fuel Price Anomalies</span>
+              <span style={{ fontSize: 12, color: 'var(--tms-muted)' }}>
                 · {anomalyResult.anomalies.length
                   ? `${anomalyResult.anomalies.length} overpay transaction(s) >${anomalyResult.thresholdPct}% above fleet average`
                   : `No overpay transactions >${anomalyResult.thresholdPct}% above fleet average`}
@@ -347,15 +340,15 @@ export function FuelPage() {
             </div>
 
             {/* Fleet Averages */}
-            <div style={{ padding: '12px 20px', borderBottom: anomalyResult.anomalies.length ? '1px solid var(--ds-border)' : 'none', display: 'flex', gap: 24, flexWrap: 'wrap' }}>
+            <div style={{ padding: '12px 20px', borderBottom: anomalyResult.anomalies.length ? '1px solid var(--tms-border)' : 'none', display: 'flex', gap: 24, flexWrap: 'wrap' }}>
               {anomalyResult.fleetAverages.map((fa) => (
-                <div key={fa.fuelType} style={{ fontSize: 12.5, color: 'var(--ds-t2)' }}>
-                  <span style={{ fontWeight: 600, color: 'var(--ds-t1)', fontFamily: 'var(--font-mono)' }}>{fa.fuelType}</span>
+                <div key={fa.fuelType} style={{ fontSize: 12.5, color: 'var(--tms-text-2)' }}>
+                  <span style={{ fontWeight: 600, color: 'var(--tms-text)', fontFamily: 'var(--font-mono)' }}>{fa.fuelType}</span>
                   {' '}
-                  <span style={{ color: 'var(--ds-t3)' }}>avg</span>{' '}
-                  <b style={{ fontFamily: 'var(--font-mono)', color: 'var(--ds-t1)' }}>{money2(fa.avgPricePerGallon)}</b>
-                  <span style={{ color: 'var(--ds-t3)' }}>/gal</span>{' '}
-                  <span style={{ fontSize: 11.5, color: 'var(--ds-t3)' }}>({fa.count} txns, {gal(fa.totalGallons)})</span>
+                  <span style={{ color: 'var(--tms-muted)' }}>avg</span>{' '}
+                  <b style={{ fontFamily: 'var(--font-mono)', color: 'var(--tms-text)' }}>{money2(fa.avgPricePerGallon)}</b>
+                  <span style={{ color: 'var(--tms-muted)' }}>/gal</span>{' '}
+                  <span style={{ fontSize: 11.5, color: 'var(--tms-muted)' }}>({fa.count} txns, {gal(fa.totalGallons)})</span>
                 </div>
               ))}
             </div>
@@ -365,25 +358,25 @@ export function FuelPage() {
               <div style={{ overflowX: 'auto' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 800 }}>
                   <thead>
-                    <tr style={{ borderBottom: '1px solid var(--ds-border)' }}>
+                    <tr style={{ borderBottom: '1px solid var(--tms-border)' }}>
                       {['Date', 'Truck', 'Driver', 'Location', 'Type', '$/gal', 'Fleet Avg', 'Overpay %', 'Overpay $', 'Gallons'].map((h, i) => (
-                        <th key={h} style={{ padding: '8px 16px', textAlign: i >= 5 ? 'right' : 'left', fontSize: 11, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.04em', whiteSpace: 'nowrap' }}>{h}</th>
+                        <th key={h} style={{ padding: '8px 16px', textAlign: i >= 5 ? 'right' : 'left', fontSize: 11, fontWeight: 600, color: 'var(--tms-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', whiteSpace: 'nowrap' }}>{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
                     {anomalyResult.anomalies.map((a) => (
-                      <tr key={a.id} style={{ borderBottom: '1px solid var(--ds-border)' }}>
-                        <td style={{ padding: '9px 16px', fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--ds-t1)' }}>{a.transactionDate}</td>
-                        <td style={{ padding: '9px 16px', fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--ds-t1)' }}>{a.truckUnit}</td>
-                        <td style={{ padding: '9px 16px', color: a.driver ? 'var(--ds-t2)' : '#b45309', fontWeight: a.driver ? 400 : 600 }}>{a.driver || '—'}</td>
-                        <td style={{ padding: '9px 16px', color: 'var(--ds-t2)', fontSize: 12 }}>{a.location || '—'}</td>
-                        <td style={{ padding: '9px 16px', fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--ds-t2)' }}>{a.fuelType}</td>
-                        <td style={{ padding: '9px 16px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 600, color: '#dc2626' }}>{money2(a.pricePerGallon)}</td>
-                        <td style={{ padding: '9px 16px', textAlign: 'right', fontFamily: 'var(--font-mono)', color: 'var(--ds-t2)' }}>{money2(a.fleetAverage)}</td>
-                        <td style={{ padding: '9px 16px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 600, color: '#dc2626' }}>+{a.overpayPct}%</td>
-                        <td style={{ padding: '9px 16px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 600, color: '#dc2626' }}>{money2(a.overpayAmount)}</td>
-                        <td style={{ padding: '9px 16px', textAlign: 'right', fontFamily: 'var(--font-mono)', color: 'var(--ds-t3)' }}>{gal(a.gallons)}</td>
+                      <tr key={a.id} style={{ borderBottom: '1px solid var(--tms-border)' }}>
+                        <td style={{ padding: '9px 16px', fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--tms-text)' }}>{a.transactionDate}</td>
+                        <td style={{ padding: '9px 16px', fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--tms-text)' }}>{a.truckUnit}</td>
+                        <td style={{ padding: '9px 16px', color: a.driver ? 'var(--tms-text-2)' : 'var(--tms-badge-orange)', fontWeight: a.driver ? 400 : 600 }}>{a.driver || '—'}</td>
+                        <td style={{ padding: '9px 16px', color: 'var(--tms-text-2)', fontSize: 12 }}>{a.location || '—'}</td>
+                        <td style={{ padding: '9px 16px', fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--tms-text-2)' }}>{a.fuelType}</td>
+                        <td style={{ padding: '9px 16px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--tms-badge-red)' }}>{money2(a.pricePerGallon)}</td>
+                        <td style={{ padding: '9px 16px', textAlign: 'right', fontFamily: 'var(--font-mono)', color: 'var(--tms-text-2)' }}>{money2(a.fleetAverage)}</td>
+                        <td style={{ padding: '9px 16px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--tms-badge-red)' }}>+{a.overpayPct}%</td>
+                        <td style={{ padding: '9px 16px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--tms-badge-red)' }}>{money2(a.overpayAmount)}</td>
+                        <td style={{ padding: '9px 16px', textAlign: 'right', fontFamily: 'var(--font-mono)', color: 'var(--tms-muted)' }}>{gal(a.gallons)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -395,13 +388,12 @@ export function FuelPage() {
 
         {/* Trucks missing a driver — their fuel lands in "Unassigned" */}
         {trucksNoDriver.length > 0 && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, color: '#92400e', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 10, padding: '10px 14px' }}>
-            <AlertTriangle size={15} style={{ color: '#b45309', flexShrink: 0 }} />
+          <TmsAlert tone="orange" icon={false}>
             <span>
               <b>{trucksNoDriver.length}</b> {trucksNoDriver.length === 1 ? 'truck has' : 'trucks have'} no driver assigned
               ({trucksNoDriver.map((t) => `#${t.unitNumber}`).join(', ')}) — their fuel shows under “Unassigned”. Assign drivers on the Drivers page.
             </span>
-          </div>
+          </TmsAlert>
         )}
 
         {/* Fuel by truck — what the cards were charged. */}
@@ -416,37 +408,37 @@ export function FuelPage() {
 
         {/* Unmapped fuel cards — not attached to any truck (all time) */}
         {(unmappedCards.length > 0 || ignoredCards.length > 0) && (
-          <div style={{ background: 'var(--ds-surface)', border: '1px solid #fde68a', borderRadius: 12, boxShadow: 'var(--sh-sm)', overflow: 'hidden' }}>
-            <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--ds-border)', display: 'flex', alignItems: 'center', gap: 8 }}>
-              <AlertTriangle size={15} style={{ color: '#b45309' }} />
-              <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)' }}>Unmapped fuel cards</span>
-              <span style={{ fontSize: 12, color: 'var(--ds-t3)' }}>· {unmappedCards.length} not attached to a truck (all time)</span>
+          <div style={{ background: 'var(--tms-card)', border: '1px solid var(--tms-badge-orange)', borderRadius: 12, boxShadow: 'var(--tms-shadow)', overflow: 'hidden' }}>
+            <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--tms-border)', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <AlertTriangle size={15} style={{ color: 'var(--tms-badge-orange)' }} />
+              <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--tms-text)' }}>Unmapped fuel cards</span>
+              <span style={{ fontSize: 12, color: 'var(--tms-muted)' }}>· {unmappedCards.length} not attached to a truck (all time)</span>
             </div>
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 760 }}>
                 <thead>
-                  <tr style={{ borderBottom: '1px solid var(--ds-border)' }}>
+                  <tr style={{ borderBottom: '1px solid var(--tms-border)' }}>
                     {['Card #', 'EFS unit', 'EFS driver', 'Spend', 'Gallons', 'Last seen', 'Assign to truck'].map((h, i) => (
-                      <th key={h} style={{ padding: '8px 16px', textAlign: i >= 3 && i <= 4 ? 'right' : 'left', fontSize: 11, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.04em', whiteSpace: 'nowrap' }}>{h}</th>
+                      <th key={h} style={{ padding: '8px 16px', textAlign: i >= 3 && i <= 4 ? 'right' : 'left', fontSize: 11, fontWeight: 600, color: 'var(--tms-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', whiteSpace: 'nowrap' }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {unmappedCards.map((c) => (
-                    <tr key={c.card} style={{ borderBottom: '1px solid var(--ds-border)' }}>
-                      <td style={{ padding: '9px 16px', fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--ds-t1)' }}>{c.card}</td>
-                      <td style={{ padding: '9px 16px', color: 'var(--ds-t2)' }}>{c.unit ? `#${c.unit}` : '—'}</td>
-                      <td style={{ padding: '9px 16px', color: 'var(--ds-t2)' }}>{c.driver ?? '—'}</td>
+                    <tr key={c.card} style={{ borderBottom: '1px solid var(--tms-border)' }}>
+                      <td style={{ padding: '9px 16px', fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--tms-text)' }}>{c.card}</td>
+                      <td style={{ padding: '9px 16px', color: 'var(--tms-text-2)' }}>{c.unit ? `#${c.unit}` : '—'}</td>
+                      <td style={{ padding: '9px 16px', color: 'var(--tms-text-2)' }}>{c.driver ?? '—'}</td>
                       <td style={{ padding: '9px 16px', textAlign: 'right', fontWeight: 600, fontFamily: 'var(--font-mono)' }}>{money(c.spend)}</td>
-                      <td style={{ padding: '9px 16px', textAlign: 'right', color: 'var(--ds-t3)', fontFamily: 'var(--font-mono)' }}>{gal(c.gallons)}</td>
-                      <td style={{ padding: '9px 16px', color: 'var(--ds-t3)', fontFamily: 'var(--font-mono)', fontSize: 12 }}>{c.lastDate ?? '—'}</td>
+                      <td style={{ padding: '9px 16px', textAlign: 'right', color: 'var(--tms-muted)', fontFamily: 'var(--font-mono)' }}>{gal(c.gallons)}</td>
+                      <td style={{ padding: '9px 16px', color: 'var(--tms-muted)', fontFamily: 'var(--font-mono)', fontSize: 12 }}>{c.lastDate ?? '—'}</td>
                       <td style={{ padding: '9px 16px' }}>
                         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                           <select
                             value={assignSel[c.card] ?? ''}
                             onChange={(e) => setAssignSel((prev) => ({ ...prev, [c.card]: e.target.value }))}
                             disabled={c.card === '(no card #)'}
-                            style={{ height: 30, padding: '0 8px', borderRadius: 6, border: '1px solid var(--ds-border)', background: 'var(--ds-bg)', color: 'var(--ds-t1)', fontSize: 12.5, fontFamily: 'inherit', maxWidth: 150 }}
+                            style={{ height: 30, padding: '0 8px', borderRadius: 6, border: '1px solid var(--tms-border)', background: 'var(--tms-bg)', color: 'var(--tms-text)', fontSize: 12.5, fontFamily: 'inherit', maxWidth: 150 }}
                           >
                             <option value="">Select truck…</option>
                             {trucks.filter((t) => t.active !== false).map((t) => (
@@ -456,7 +448,7 @@ export function FuelPage() {
                           <button
                             onClick={() => assignSel[c.card] && assignCard(c.card, assignSel[c.card])}
                             disabled={!assignSel[c.card] || c.card === '(no card #)'}
-                            style={{ height: 30, padding: '0 12px', borderRadius: 6, border: 'none', background: 'var(--ds-blue)', color: '#fff', fontWeight: 600, fontSize: 12.5, fontFamily: 'inherit', cursor: assignSel[c.card] ? 'pointer' : 'default', opacity: assignSel[c.card] ? 1 : 0.5 }}
+                            style={{ height: 30, padding: '0 12px', borderRadius: 6, border: 'none', background: 'var(--tms-primary)', color: 'var(--tms-on-primary)', fontWeight: 600, fontSize: 12.5, fontFamily: 'inherit', cursor: assignSel[c.card] ? 'pointer' : 'default', opacity: assignSel[c.card] ? 1 : 0.5 }}
                           >
                             Assign
                           </button>
@@ -464,7 +456,7 @@ export function FuelPage() {
                             <button
                               onClick={() => persistIgnored([...new Set([...ignoredCards, c.card])])}
                               title="Hide this card — it’s a typo or phantom, not a real card"
-                              style={{ height: 30, padding: '0 10px', borderRadius: 6, border: '1px solid var(--ds-border)', background: 'var(--ds-bg)', color: 'var(--ds-t3)', fontWeight: 600, fontSize: 12.5, fontFamily: 'inherit', cursor: 'pointer' }}
+                              style={{ height: 30, padding: '0 10px', borderRadius: 6, border: '1px solid var(--tms-border)', background: 'var(--tms-bg)', color: 'var(--tms-muted)', fontWeight: 600, fontSize: 12.5, fontFamily: 'inherit', cursor: 'pointer' }}
                             >
                               Ignore
                             </button>
@@ -474,15 +466,15 @@ export function FuelPage() {
                     </tr>
                   ))}
                   {unmappedCards.length === 0 && (
-                    <tr><td colSpan={7} style={{ padding: 24, textAlign: 'center', color: 'var(--ds-t3)', fontSize: 13 }}>No unmapped cards — all fuel is attached to a truck.</td></tr>
+                    <tr><td colSpan={7} style={{ padding: 24, textAlign: 'center', color: 'var(--tms-muted)', fontSize: 13 }}>No unmapped cards — all fuel is attached to a truck.</td></tr>
                   )}
                 </tbody>
               </table>
             </div>
-            <div style={{ padding: '10px 20px', borderTop: '1px solid var(--ds-border)', fontSize: 11.5, color: 'var(--ds-t3)', display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+            <div style={{ padding: '10px 20px', borderTop: '1px solid var(--tms-border)', fontSize: 11.5, color: 'var(--tms-muted)', display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
               <span>Pick a truck and hit Assign — the card re-maps to that truck &amp; driver instantly. Use Ignore for typo/phantom cards. If a truck isn’t listed, create it on the Fleet page first.</span>
               {ignoredCards.length > 0 && (
-                <button onClick={() => persistIgnored([])} style={{ background: 'none', border: 'none', padding: 0, color: 'var(--ds-blue)', fontSize: 11.5, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                <button onClick={() => persistIgnored([])} style={{ background: 'none', border: 'none', padding: 0, color: 'var(--tms-primary)', fontSize: 11.5, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer', whiteSpace: 'nowrap' }}>
                   {ignoredCards.length} hidden · Show all
                 </button>
               )}
@@ -499,25 +491,11 @@ export function FuelPage() {
           onClose={() => setUploadOpen(false)}
         />
       )}
-    </div>
+    </TmsScrollPage>
   )
 }
 
 // ── Bits ────────────────────────────────────────────────────────────────────────
-
-function StatCard({ label, value, sub, accent, right }: { label: string; value: string; sub?: string; accent: string; right?: React.ReactNode }) {
-  return (
-    <div style={{ background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 12, boxShadow: 'var(--sh-sm)', padding: '16px 18px', position: 'relative', overflow: 'hidden' }}>
-      <div style={{ position: 'absolute', top: -40, right: -40, width: 130, height: 130, borderRadius: '50%', background: accent, filter: 'blur(60px)', opacity: 0.16, pointerEvents: 'none' }} />
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-        <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--ds-t3)' }}>{label}</div>
-        {right}
-      </div>
-      <div style={{ fontSize: 26, fontWeight: 600, letterSpacing: '-0.02em', color: 'var(--ds-t1)', fontVariantNumeric: 'tabular-nums', lineHeight: 1.1 }}>{value}</div>
-      {sub && <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 4 }}>{sub}</div>}
-    </div>
-  )
-}
 
 interface TruckFuelRow {
   label: string; driver?: string; noDriver: boolean
@@ -525,18 +503,18 @@ interface TruckFuelRow {
 }
 
 function FuelByTruckTable({ rows, loading }: { rows: TruckFuelRow[]; loading: boolean }) {
-  const th: React.CSSProperties = { padding: '8px 16px', fontSize: 11, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.04em', whiteSpace: 'nowrap' }
+  const th: React.CSSProperties = { padding: '8px 16px', fontSize: 11, fontWeight: 600, color: 'var(--tms-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', whiteSpace: 'nowrap' }
   const td: React.CSSProperties = { padding: '9px 16px', textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontFamily: 'var(--font-mono)', whiteSpace: 'nowrap' }
   return (
-    <div style={{ background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 12, boxShadow: 'var(--sh-sm)', overflow: 'hidden' }}>
-      <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--ds-border)', display: 'flex', alignItems: 'center', gap: 8 }}>
-        <TruckIcon size={15} style={{ color: 'var(--ds-t3)' }} />
-        <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)' }}>Fuel by Truck</span>
+    <div style={{ background: 'var(--tms-card)', border: '1px solid var(--tms-border)', borderRadius: 12, boxShadow: 'var(--tms-shadow)', overflow: 'hidden' }}>
+      <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--tms-border)', display: 'flex', alignItems: 'center', gap: 8 }}>
+        <TruckIcon size={15} style={{ color: 'var(--tms-muted)' }} />
+        <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--tms-text)' }}>Fuel by Truck</span>
       </div>
       <div style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 520 }}>
           <thead>
-            <tr style={{ borderBottom: '1px solid var(--ds-border)' }}>
+            <tr style={{ borderBottom: '1px solid var(--tms-border)' }}>
               <th style={{ ...th, textAlign: 'left' }}>Truck</th>
               <th style={{ ...th, textAlign: 'left' }}>Driver</th>
               <th style={{ ...th, textAlign: 'right' }}>Fuel $</th>
@@ -545,15 +523,15 @@ function FuelByTruckTable({ rows, loading }: { rows: TruckFuelRow[]; loading: bo
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={4} style={{ padding: 28, textAlign: 'center', color: 'var(--ds-t3)' }}>Loading…</td></tr>
+              <tr><td colSpan={4} style={{ padding: 28, textAlign: 'center', color: 'var(--tms-muted)' }}>Loading…</td></tr>
             ) : rows.length === 0 ? (
-              <tr><td colSpan={4} style={{ padding: 28, textAlign: 'center', color: 'var(--ds-t3)' }}>No trucks</td></tr>
+              <tr><td colSpan={4} style={{ padding: 28, textAlign: 'center', color: 'var(--tms-muted)' }}>No trucks</td></tr>
             ) : rows.map((r) => (
-              <tr key={r.label} style={{ borderBottom: '1px solid var(--ds-border)' }}>
-                <td style={{ padding: '9px 16px', fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--ds-t1)' }}>{r.label}</td>
-                <td style={{ padding: '9px 16px', color: r.noDriver ? '#b45309' : 'var(--ds-t2)', fontWeight: r.noDriver ? 600 : 400 }}>{r.driver ?? '—'}</td>
-                <td style={{ ...td, fontWeight: 600, color: 'var(--ds-t1)' }}>{money(r.spend)}</td>
-                <td style={{ ...td, color: 'var(--ds-t2)' }}>{r.gallons > 0 ? gal(r.gallons) : '—'}</td>
+              <tr key={r.label} style={{ borderBottom: '1px solid var(--tms-border)' }}>
+                <td style={{ padding: '9px 16px', fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--tms-text)' }}>{r.label}</td>
+                <td style={{ padding: '9px 16px', color: r.noDriver ? 'var(--tms-badge-orange)' : 'var(--tms-text-2)', fontWeight: r.noDriver ? 600 : 400 }}>{r.driver ?? '—'}</td>
+                <td style={{ ...td, fontWeight: 600, color: 'var(--tms-text)' }}>{money(r.spend)}</td>
+                <td style={{ ...td, color: 'var(--tms-text-2)' }}>{r.gallons > 0 ? gal(r.gallons) : '—'}</td>
               </tr>
             ))}
           </tbody>

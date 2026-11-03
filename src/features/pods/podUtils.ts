@@ -5,6 +5,7 @@ import {
 import { getPodAssets } from '@/lib/podsClient'
 import { graphqlErrorText } from '@/lib/apiClient'
 import type { Load } from '@/types'
+import type { TmsTone } from '@/features/tms/kit/TmsBadge'
 import type { PodAssets, PodDocument } from '@/types/pods'
 
 export function usePodAssets(doc: PodDocument) {
@@ -32,16 +33,16 @@ export function statusBadge(doc: PodDocument) {
   switch (doc.processingStatus) {
     case 'READY':
       return doc.scanReviewReason
-        ? { label: 'Review scan', color: '#b45309', bg: '#fffbeb', icon: AlertCircle }
-        : { label: 'Enhanced', color: '#15803d', bg: '#f0fdf4', icon: CheckCircle2 }
+        ? { label: 'Review scan', tone: 'orange' as TmsTone, icon: AlertCircle }
+        : { label: 'Enhanced', tone: 'green' as TmsTone, icon: CheckCircle2 }
     case 'ORIGINAL_ONLY':
-      return { label: 'Original only', color: '#0369a1', bg: '#f0f9ff', icon: ImageIcon }
+      return { label: 'Original only', tone: 'blue' as TmsTone, icon: ImageIcon }
     case 'PENDING':
-      return { label: 'Processing…', color: '#b45309', bg: '#fffbeb', icon: Loader2 }
+      return { label: 'Processing…', tone: 'orange' as TmsTone, icon: Loader2 }
     case 'FAILED':
-      return { label: 'Failed', color: '#b91c1c', bg: '#fef2f2', icon: AlertCircle }
+      return { label: 'Failed', tone: 'red' as TmsTone, icon: AlertCircle }
     default:
-      return { label: doc.processingStatus, color: 'var(--ds-t3)', bg: 'var(--ds-bg)', icon: AlertCircle }
+      return { label: doc.processingStatus, tone: 'gray' as TmsTone, icon: AlertCircle }
   }
 }
 

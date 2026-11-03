@@ -45,7 +45,7 @@ export function CurrentLoadCard() {
 
   if (loading) {
     return (
-      <div className="flex items-center gap-2 rounded-xl border border-[var(--ds-border)] p-4 text-sm text-muted-foreground">
+      <div className="flex items-center gap-2 rounded-xl border border-[var(--tms-border)] p-4 text-sm text-muted-foreground">
         <Loader2 className="size-4 animate-spin" />
         Checking your current load…
       </div>
@@ -54,8 +54,8 @@ export function CurrentLoadCard() {
 
   if (error) {
     return (
-      <div className="flex items-start gap-2 rounded-xl border border-[var(--ds-border)] p-4 text-sm">
-        <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-300" />
+      <div className="flex items-start gap-2 rounded-xl border border-[var(--tms-border)] p-4 text-sm">
+        <AlertTriangle className="mt-0.5 size-4 shrink-0 text-[color:var(--tms-badge-orange)]" />
         <div className="flex-1">
           <p className="text-foreground">{error}</p>
           {/* Accessible name is specific: this card sits above the submissions
@@ -78,7 +78,7 @@ export function CurrentLoadCard() {
   // Rest state: nothing assigned is normal, not a failure.
   if (!load) {
     return (
-      <div className="rounded-xl border border-dashed border-[var(--ds-border)] p-5 text-center">
+      <div className="rounded-xl border border-dashed border-[var(--tms-border)] p-5 text-center">
         <Truck className="mx-auto size-6 text-muted-foreground" />
         <p className="mt-2 text-sm font-medium text-foreground">No load running</p>
         <p className="text-xs text-muted-foreground">
@@ -100,7 +100,7 @@ export function CurrentLoadCard() {
   const podIn = load.hasPod
 
   return (
-    <div className="rounded-xl border border-[var(--ds-border)] bg-[var(--ds-surface)] p-4 shadow-sm">
+    <div className="rounded-xl border border-[var(--tms-border)] bg-[var(--tms-card)] p-4 shadow-sm">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="font-mono text-xs text-muted-foreground">PRO {load.proNumber || '—'}</p>
@@ -124,12 +124,12 @@ export function CurrentLoadCard() {
 
       {/* The one thing the driver owes, and what happens if it is missing. */}
       {podIn ? (
-        <p className="mt-3 flex items-center gap-1.5 text-xs text-emerald-300">
+        <p className="mt-3 flex items-center gap-1.5 text-xs text-[color:var(--tms-badge-green)]">
           <CheckCircle2 className="size-3.5" />
           POD is in. Nothing else needed from you.
         </p>
       ) : (
-        <div className="mt-3 flex items-start gap-1.5 rounded-lg bg-amber-50 p-2.5 text-xs text-amber-800">
+        <div className="mt-3 flex items-start gap-1.5 rounded-lg bg-[color:var(--tms-badge-orange-tint)] p-2.5 text-xs text-[color:var(--tms-badge-orange)]">
           <FileText className="mt-0.5 size-3.5 shrink-0" />
           <span>
             Send the POD for this load from the Scan tab. It is not paid until the POD is in.

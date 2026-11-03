@@ -40,28 +40,28 @@ const BLANK_EMPLOYMENT = {
 
 // ── Design-system token styles (match the admin app) ────────────────────────────
 const inputStyle: CSSProperties = {
-  width: '100%', borderRadius: 8, border: '1px solid var(--ds-border)', padding: '10px 12px',
-  fontSize: 16, background: 'var(--ds-surface)', color: 'var(--ds-t1)', outline: 'none',
+  width: '100%', borderRadius: 8, border: '1px solid var(--tms-border)', padding: '10px 12px',
+  fontSize: 16, background: 'var(--tms-card)', color: 'var(--tms-text)', outline: 'none',
 }
-const labelStyle: CSSProperties = { display: 'block', fontSize: 14, fontWeight: 500, color: 'var(--ds-t2)', marginBottom: 4 }
-const subCard: CSSProperties = { border: '1px solid var(--ds-border)', borderRadius: 10, background: 'var(--ds-surface)', padding: 12 }
+const labelStyle: CSSProperties = { display: 'block', fontSize: 14, fontWeight: 500, color: 'var(--tms-text-2)', marginBottom: 4 }
+const subCard: CSSProperties = { border: '1px solid var(--tms-border)', borderRadius: 10, background: 'var(--tms-card)', padding: 12 }
 const btnPrimary: CSSProperties = {
   display: 'inline-flex', alignItems: 'center', gap: 6, borderRadius: 8, padding: '9px 20px',
-  fontSize: 14, fontWeight: 600, background: 'var(--ds-blue)', color: '#fff', border: 'none', cursor: 'pointer',
+  fontSize: 14, fontWeight: 600, background: 'var(--tms-primary)', color: 'var(--tms-on-primary)', border: 'none', cursor: 'pointer',
 }
-const btnSuccess: CSSProperties = { ...btnPrimary, background: 'var(--ds-green)' }
+const btnSuccess: CSSProperties = { ...btnPrimary, background: 'var(--tms-badge-green)' }
 const btnGhost: CSSProperties = {
   display: 'inline-flex', alignItems: 'center', gap: 6, borderRadius: 8, padding: '9px 16px',
-  fontSize: 14, fontWeight: 500, background: 'var(--ds-surface)', color: 'var(--ds-t2)',
-  border: '1px solid var(--ds-border)', cursor: 'pointer',
+  fontSize: 14, fontWeight: 500, background: 'var(--tms-card)', color: 'var(--tms-text-2)',
+  border: '1px solid var(--tms-border)', cursor: 'pointer',
 }
 const linkBtn: CSSProperties = {
   display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 14,
-  color: 'var(--ds-blue-dark)', background: 'none', border: 'none', cursor: 'pointer', padding: 0,
+  color: 'var(--tms-primary-ink)', background: 'none', border: 'none', cursor: 'pointer', padding: 0,
 }
-const removeBtn: CSSProperties = { ...linkBtn, color: 'var(--ds-red)' }
+const removeBtn: CSSProperties = { ...linkBtn, color: 'var(--tms-badge-red)' }
 
-function Req() { return <span style={{ color: 'var(--ds-red)', marginLeft: 3 }} title="Required">*</span> }
+function Req() { return <span style={{ color: 'var(--tms-badge-red)', marginLeft: 3 }} title="Required">*</span> }
 
 // Derive the required `currentAddress` string from the current residence in address
 // history (the entry with no move-out date, else the most recent), so we don't ask twice.
@@ -170,17 +170,17 @@ export function ApplicationForm({ driverId, initial, onSaveDraft, onSubmit, onEx
       {/* Stepper */}
       <div className="mb-5 flex items-center gap-1">
         {STEPS.map((s, i) => (
-          <div key={s} title={s} style={{ height: 6, flex: 1, borderRadius: 999, background: i <= step ? 'var(--ds-blue)' : 'var(--ds-bg-3)' }} />
+          <div key={s} title={s} style={{ height: 6, flex: 1, borderRadius: 999, background: i <= step ? 'var(--tms-primary)' : 'var(--tms-surface-hover)' }} />
         ))}
       </div>
-      <h2 className="mb-1 text-xl font-semibold" style={{ color: 'var(--ds-t1)' }}>{STEPS[step]}</h2>
-      <p className="mb-3 text-sm" style={{ color: 'var(--ds-t3)' }}>Step {step + 1} of {STEPS.length}</p>
+      <h2 className="mb-1 text-xl font-semibold" style={{ color: 'var(--tms-text)' }}>{STEPS[step]}</h2>
+      <p className="mb-3 text-sm" style={{ color: 'var(--tms-muted)' }}>Step {step + 1} of {STEPS.length}</p>
 
       {/* Per-step required guidance */}
       <div className="mb-4 flex items-start gap-2 rounded-lg px-3 py-2.5 text-sm"
-        style={{ background: 'var(--ds-blue-bg)', border: '1px solid var(--ds-border)', color: 'var(--ds-t2)' }}>
-        <Info size={15} style={{ color: 'var(--ds-blue-dark)', flexShrink: 0, marginTop: 1 }} />
-        <span>{stepNote} <span style={{ color: 'var(--ds-t3)' }}>Fields marked <Req /> are required.</span></span>
+        style={{ background: 'var(--tms-primary-tint)', border: '1px solid var(--tms-border)', color: 'var(--tms-text-2)' }}>
+        <Info size={15} style={{ color: 'var(--tms-primary-ink)', flexShrink: 0, marginTop: 1 }} />
+        <span>{stepNote} <span style={{ color: 'var(--tms-muted)' }}>Fields marked <Req /> are required.</span></span>
       </div>
 
       {step === 0 && (
@@ -212,7 +212,7 @@ export function ApplicationForm({ driverId, initial, onSaveDraft, onSubmit, onEx
             </div>
           ))}
           <button onClick={() => addItem('addressHistory', { ...BLANK_ADDRESS })} style={linkBtn}><Plus size={14} /> Add another residence</button>
-          <div className="text-sm" style={{ color: addressCovered ? 'var(--ds-green)' : 'var(--ds-amber)' }}>{addressCovered ? '✓ 3-year coverage met' : 'Add residences back to 3 years'}</div>
+          <div className="text-sm" style={{ color: addressCovered ? 'var(--tms-badge-green)' : 'var(--tms-badge-orange)' }}>{addressCovered ? '✓ 3-year coverage met' : 'Add residences back to 3 years'}</div>
         </div>
       )}
 
@@ -226,7 +226,7 @@ export function ApplicationForm({ driverId, initial, onSaveDraft, onSubmit, onEx
           <Labeled label="Expiration" required><input type="date" style={inputStyle} value={data.cdlExpiration ?? ''} onChange={(e) => set('cdlExpiration', e.target.value)} /></Labeled>
 
           <div>
-            <label style={labelStyle}>Endorsements <span style={{ color: 'var(--ds-t3)', fontWeight: 400 }}>(tap any you hold — optional)</span></label>
+            <label style={labelStyle}>Endorsements <span style={{ color: 'var(--tms-muted)', fontWeight: 400 }}>(tap any you hold — optional)</span></label>
             <div className="flex flex-wrap gap-2">
               {ENDORSEMENTS.map(({ code, label }) => {
                 const on = endorsements.includes(code)
@@ -238,9 +238,9 @@ export function ApplicationForm({ driverId, initial, onSaveDraft, onSubmit, onEx
                     style={{
                       display: 'inline-flex', alignItems: 'center', gap: 6, borderRadius: 999,
                       padding: '6px 12px', fontSize: 13, fontWeight: 500, cursor: 'pointer',
-                      border: `1px solid ${on ? 'var(--ds-blue)' : 'var(--ds-border)'}`,
-                      background: on ? 'var(--ds-blue)' : 'var(--ds-surface)',
-                      color: on ? '#fff' : 'var(--ds-t2)',
+                      border: `1px solid ${on ? 'var(--tms-primary)' : 'var(--tms-border)'}`,
+                      background: on ? 'var(--tms-primary)' : 'var(--tms-card)',
+                      color: on ? 'var(--tms-on-primary)' : 'var(--tms-text-2)',
                     }}
                   >
                     {on && <Check size={13} />}<strong>{code}</strong> · {label}
@@ -250,7 +250,7 @@ export function ApplicationForm({ driverId, initial, onSaveDraft, onSubmit, onEx
             </div>
           </div>
 
-          <label className="flex items-center gap-2 text-sm" style={{ color: 'var(--ds-t2)' }}>
+          <label className="flex items-center gap-2 text-sm" style={{ color: 'var(--tms-text-2)' }}>
             <input type="checkbox" checked={!!data.cdlIssuedAfterFeb2022} onChange={(e) => set('cdlIssuedAfterFeb2022', e.target.checked)} />
             My CDL was issued after February 7, 2022
           </label>
@@ -275,13 +275,13 @@ export function ApplicationForm({ driverId, initial, onSaveDraft, onSubmit, onEx
                 <Labeled label="To (blank = present)"><input type="date" style={inputStyle} value={e.toDate ?? ''} onChange={(ev) => updateItem('employmentHistory', i, { toDate: ev.target.value })} /></Labeled>
               </div>
               <Labeled label="Reason for leaving"><input style={inputStyle} placeholder="Optional" value={e.reasonForLeaving ?? ''} onChange={(ev) => updateItem('employmentHistory', i, { reasonForLeaving: ev.target.value })} /></Labeled>
-              <div className="flex gap-4 text-sm" style={{ color: 'var(--ds-t2)' }}>
+              <div className="flex gap-4 text-sm" style={{ color: 'var(--tms-text-2)' }}>
                 <label className="flex items-center gap-1.5"><input type="checkbox" checked={!!e.subjectToFMCSR} onChange={(ev) => updateItem('employmentHistory', i, { subjectToFMCSR: ev.target.checked })} /> Subject to FMCSR</label>
                 <label className="flex items-center gap-1.5"><input type="checkbox" checked={!!e.safetySensitive} onChange={(ev) => updateItem('employmentHistory', i, { safetySensitive: ev.target.checked })} /> Safety-sensitive</label>
               </div>
               {gaps[i] && (
-                <div className="rounded-md p-2" style={{ background: 'var(--ds-amber-bg)' }}>
-                  <div className="text-xs font-medium" style={{ color: 'var(--ds-amber)' }}>Gap of {gaps[i].days} days before this job — please explain<Req /></div>
+                <div className="rounded-md p-2" style={{ background: 'var(--tms-badge-orange-tint)' }}>
+                  <div className="text-xs font-medium" style={{ color: 'var(--tms-badge-orange)' }}>Gap of {gaps[i].days} days before this job — please explain<Req /></div>
                   <input style={{ ...inputStyle, marginTop: 4 }} placeholder="What were you doing during this gap?" value={e.gapExplanation ?? ''} onChange={(ev) => updateItem('employmentHistory', i, { gapExplanation: ev.target.value })} />
                 </div>
               )}
@@ -291,15 +291,15 @@ export function ApplicationForm({ driverId, initial, onSaveDraft, onSubmit, onEx
             </div>
           ))}
           <button onClick={() => addItem('employmentHistory', { ...BLANK_EMPLOYMENT })} style={linkBtn}><Plus size={14} /> Add another employer</button>
-          <div className="text-sm" style={{ color: employmentCovered ? 'var(--ds-green)' : 'var(--ds-amber)' }}>{employmentCovered ? `✓ ${requiredYears}-year coverage met` : `Add history back to ${requiredYears} years`}</div>
-          {unexplainedGaps.length > 0 && <div className="text-sm" style={{ color: 'var(--ds-amber)' }}>{unexplainedGaps.length} gap(s) need an explanation before you can submit.</div>}
+          <div className="text-sm" style={{ color: employmentCovered ? 'var(--tms-badge-green)' : 'var(--tms-badge-orange)' }}>{employmentCovered ? `✓ ${requiredYears}-year coverage met` : `Add history back to ${requiredYears} years`}</div>
+          {unexplainedGaps.length > 0 && <div className="text-sm" style={{ color: 'var(--tms-badge-orange)' }}>{unexplainedGaps.length} gap(s) need an explanation before you can submit.</div>}
         </div>
       )}
 
       {step === 4 && (
         <div className="space-y-4">
           <div>
-            <div className="mb-2 text-sm font-medium" style={{ color: 'var(--ds-t2)' }}>Accidents in the last 3 years</div>
+            <div className="mb-2 text-sm font-medium" style={{ color: 'var(--tms-text-2)' }}>Accidents in the last 3 years</div>
             {(data.accidents ?? []).map((a, i) => (
               <div key={i} className="mb-2 space-y-2" style={subCard}>
                 <Labeled label="Date" required><input type="date" style={inputStyle} value={a.date ?? ''} onChange={(e) => updateItem('accidents', i, { date: e.target.value })} /></Labeled>
@@ -310,7 +310,7 @@ export function ApplicationForm({ driverId, initial, onSaveDraft, onSubmit, onEx
             <button onClick={() => addItem('accidents', { date: '', nature: '', fatalities: 0, injuries: 0, hazmatSpill: false })} style={linkBtn}><Plus size={14} /> Add accident</button>
           </div>
           <div>
-            <div className="mb-2 text-sm font-medium" style={{ color: 'var(--ds-t2)' }}>Traffic violations in the last 3 years</div>
+            <div className="mb-2 text-sm font-medium" style={{ color: 'var(--tms-text-2)' }}>Traffic violations in the last 3 years</div>
             {(data.violations ?? []).map((v, i) => (
               <div key={i} className="mb-2 space-y-2" style={subCard}>
                 <Labeled label="Date" required><input type="date" style={inputStyle} value={v.date ?? ''} onChange={(e) => updateItem('violations', i, { date: e.target.value })} /></Labeled>
@@ -325,17 +325,17 @@ export function ApplicationForm({ driverId, initial, onSaveDraft, onSubmit, onEx
 
       {step === 5 && (
         <div className="space-y-4">
-          <div className="rounded-lg p-4 text-sm" style={{ background: 'var(--ds-bg-2)', border: '1px solid var(--ds-border)', color: 'var(--ds-t2)' }}>
+          <div className="rounded-lg p-4 text-sm" style={{ background: 'var(--tms-surface)', border: '1px solid var(--tms-border)', color: 'var(--tms-text-2)' }}>
             By typing your name below you certify that all information in this application is true and complete to the
             best of your knowledge (FMCSA electronic signature).
           </div>
           <Labeled label="Type your full legal name to sign" required><input style={inputStyle} value={data.signatureName ?? ''} onChange={(e) => set('signatureName', e.target.value)} /></Labeled>
-          <label className="flex items-start gap-2 text-sm" style={{ color: 'var(--ds-t2)' }}>
+          <label className="flex items-start gap-2 text-sm" style={{ color: 'var(--tms-text-2)' }}>
             <input type="checkbox" className="mt-1" checked={!!data.attestation} onChange={(e) => set('attestation', e.target.checked)} />
             <span>I attest that the information provided is true and complete.<Req /></span>
           </label>
           {errors.length > 0 && (
-            <ul className="rounded-md p-3 text-sm list-disc list-inside" style={{ background: 'var(--ds-red-bg)', color: 'var(--ds-red)' }}>
+            <ul className="rounded-md p-3 text-sm list-disc list-inside" style={{ background: 'var(--tms-badge-red-tint)', color: 'var(--tms-badge-red)' }}>
               {errors.map((e, i) => <li key={i}>{e}</li>)}
             </ul>
           )}

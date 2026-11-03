@@ -24,17 +24,17 @@ export function FormSection({
   const Header = (
     <>
       {icon && (
-        <span style={{ width: 30, height: 30, borderRadius: 8, background: 'var(--ds-bg)', border: '1px solid var(--ds-border)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ds-blue)', flexShrink: 0 }}>
+        <span style={{ width: 30, height: 30, borderRadius: 8, background: 'var(--tms-bg)', border: '1px solid var(--tms-border)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--tms-primary)', flexShrink: 0 }}>
           {icon}
         </span>
       )}
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--ds-t1)' }}>{title}</div>
-        {subtitle && <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 1 }}>{subtitle}</div>}
+        <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--tms-text)' }}>{title}</div>
+        {subtitle && <div style={{ fontSize: 12, color: 'var(--tms-muted)', marginTop: 1 }}>{subtitle}</div>}
       </div>
       {right}
       {collapsible && (
-        <ChevronDown size={16} style={{ color: 'var(--ds-t3)', transform: isOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s', flexShrink: 0 }} />
+        <ChevronDown size={16} style={{ color: 'var(--tms-muted)', transform: isOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s', flexShrink: 0 }} />
       )}
     </>
   )
@@ -79,11 +79,11 @@ export function Field({
       {(label || hint) && (
         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
           {label && (
-            <label htmlFor={htmlFor} style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ds-t3)' }}>
+            <label htmlFor={htmlFor} style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--tms-muted)' }}>
               {label}
             </label>
           )}
-          {hint && <span style={{ fontSize: 11, color: 'var(--ds-t3)' }}>{hint}</span>}
+          {hint && <span style={{ fontSize: 11, color: 'var(--tms-muted)' }}>{hint}</span>}
         </div>
       )}
       {children}

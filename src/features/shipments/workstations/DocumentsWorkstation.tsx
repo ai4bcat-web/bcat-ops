@@ -66,6 +66,9 @@ const COLLECTION_QUEUE: BoardFilterSet = {
   flags: { docsMissing: true },
 }
 
+/** Concurrent shipment-bundle reads for the visible queue. */
+const MAX_BUNDLE_READS = 6
+
 export function DocumentsWorkstation() {
   const navigate = useNavigate()
   const { slug } = useParams<{ slug?: string }>()
@@ -146,11 +149,29 @@ export function DocumentsWorkstation() {
       setBundleErrors((prev) => ({ ...prev, [id]: err instanceof Error ? err.message : 'Could not read the documents' }))
     }
   }, [])
+  // Reads are queued and run a few at a time: a long collection queue used to fire every
+  // bundle + invoice preview at once, which exhausts the browser's connection/socket budget
+  // (net::ERR_INSUFFICIENT_RESOURCES) and starves the rest of the page.
+  const queue = useRef<string[]>([])
+  const active = useRef(0)
+  const pump = useCallback(function run() {
+    while (active.current < MAX_BUNDLE_READS && queue.current.length > 0) {
+      const id = queue.current.shift() as string
+      active.current += 1
+      void reloadBundle(id).finally(() => {
+        active.current -= 1
+        run()
+      })
+    }
+  }, [reloadBundle])
   useEffect(() => {
     for (const id of rowIds ? rowIds.split(',') : []) {
-      if (!asked.current.has(id)) void reloadBundle(id)
+      if (asked.current.has(id)) continue
+      asked.current.add(id)
+      queue.current.push(id)
     }
-  }, [rowIds, reloadBundle])
+    pump()
+  }, [rowIds, pump])
 
   // The thread is where POD requests and replies live; load it when a row is selected
   // so the panel can say whether a request went out and which attachment it produced.

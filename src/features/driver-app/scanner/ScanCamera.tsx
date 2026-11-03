@@ -22,6 +22,7 @@ import { Camera, X, RotateCcw, Check, Loader2, AlertTriangle, Plus, Maximize2, Z
 import { torchSupported, setTorch, frameBrightness, autoTorchWants, nextTorchMode, type TorchMode } from '@/lib/docScan/torch'
 import { Button } from '@/components/ui/button'
 import { scanFrameColor, toGray, assessReadability, enhanceForReading, type Readability } from '@/lib/docScan/capture'
+import { readTmsToken } from '@/features/tms/tmsTokens'
 import { preparePage } from './imagePrep'
 import type { PendingPage } from '../driverApi'
 
@@ -239,9 +240,13 @@ export function ScanCamera({ onCapture, onClose, remaining, captured = 0, onDone
       octx.lineTo(q.bottomRight.x * fx, q.bottomRight.y * fy)
       octx.lineTo(q.bottomLeft.x * fx, q.bottomLeft.y * fy)
       octx.closePath()
-      octx.fillStyle = 'rgba(34,197,94,0.14)'
+      // Canvas cannot use var(); read the live token (the overlay sits inside .tms-driver).
+      const outline = readTmsToken('--tms-primary', overlay) || 'white'
+      octx.fillStyle = outline
+      octx.globalAlpha = 0.14
       octx.fill()
-      octx.strokeStyle = '#22c55e'
+      octx.globalAlpha = 1
+      octx.strokeStyle = outline
       octx.lineWidth = 3
       octx.stroke()
     }
@@ -342,7 +347,7 @@ export function ScanCamera({ onCapture, onClose, remaining, captured = 0, onDone
   if (error) {
     return (
       <div className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-background p-6 text-center">
-        <AlertTriangle className="h-8 w-8 text-amber-300" />
+        <AlertTriangle className="h-8 w-8 text-[color:var(--tms-badge-orange)]" />
         <p className="text-base">{error}</p>
         <Button type="button" size="lg" onClick={onClose}>Back</Button>
       </div>
@@ -352,7 +357,8 @@ export function ScanCamera({ onCapture, onClose, remaining, captured = 0, onDone
   // ── Review ────────────────────────────────────────────────────────────────
   if (shot) {
     return (
-      <div className="fixed inset-0 z-50 flex flex-col bg-black">
+      // eslint-disable-next-line no-restricted-syntax -- camera: the review matte is black in both themes
+      <div data-camera className="fixed inset-0 z-50 flex flex-col bg-black">
         <div className="flex min-h-0 flex-1 items-center justify-center p-3">
           <img src={shot.previewUrl} alt="The scan you just took" className="max-h-full max-w-full object-contain" />
         </div>
@@ -366,7 +372,7 @@ export function ScanCamera({ onCapture, onClose, remaining, captured = 0, onDone
           */}
           {strict && shot.readability.problem ? (
             <>
-              <div className="flex items-start gap-2 rounded-xl border border-red-400/60 bg-red-500/15 p-3 text-sm text-red-100">
+              <div className="flex items-start gap-2 rounded-xl border border-[color:var(--tms-badge-red)]/30 bg-[color:var(--tms-badge-red-tint)] p-3 text-sm text-[color:var(--tms-badge-red)]">
                 <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
                 <p>
                   <span className="block text-base font-bold">This page can’t be read — please retake it.</span>
@@ -385,7 +391,7 @@ export function ScanCamera({ onCapture, onClose, remaining, captured = 0, onDone
           ) : null}
           {/* Usable but not great: say so, and let the driver decide. */}
           {strict && !shot.readability.problem && shot.readability.hint ? (
-            <div className="flex items-start gap-2 rounded-xl border border-amber-400/60 bg-amber-500/15 p-3 text-sm text-amber-100">
+            <div className="flex items-start gap-2 rounded-xl border border-[color:var(--tms-badge-orange)]/30 bg-[color:var(--tms-badge-orange-tint)] p-3 text-sm text-[color:var(--tms-badge-orange)]">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
               <p>{shot.readability.hint}</p>
             </div>
@@ -446,8 +452,9 @@ export function ScanCamera({ onCapture, onClose, remaining, captured = 0, onDone
   }
 
   // ── Viewfinder ────────────────────────────────────────────────────────────
+  /* eslint-disable no-restricted-syntax -- camera: the live viewfinder is black with white controls in both themes */
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-black">
+    <div data-camera className="fixed inset-0 z-50 flex flex-col bg-black">
       <div className="flex items-center justify-between p-3" style={{ paddingTop: 'max(env(safe-area-inset-top), 0.75rem)' }}>
         <span className="text-sm font-medium text-white/90">
           {!hasFrame ? 'Starting the camera…' : found ? 'Page found — hold still' : 'Line the page up'}
@@ -514,6 +521,7 @@ export function ScanCamera({ onCapture, onClose, remaining, captured = 0, onDone
       </div>
     </div>
   )
+  /* eslint-enable no-restricted-syntax */
 }
 
 export default ScanCamera

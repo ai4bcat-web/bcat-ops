@@ -28,7 +28,7 @@ interface Props {
   onFileAsPod?: (media: DispatchMedia) => void
 }
 
-const TONE_COLOR: Record<string, string> = { ok: 'var(--ds-green)', bad: 'var(--ds-red)', pending: 'var(--ds-t3)', muted: 'var(--ds-t3)' }
+const TONE_COLOR: Record<string, string> = { ok: 'var(--tms-badge-green)', bad: 'var(--tms-badge-red)', pending: 'var(--tms-muted)', muted: 'var(--tms-muted)' }
 
 function CallRow({ m }: { m: DispatchMessage }) {
   const missed = m.status === 'missed' || m.status === 'voicemail'
@@ -39,7 +39,7 @@ function CallRow({ m }: { m: DispatchMessage }) {
     : 'Incoming call'
   return (
     <div style={{ display: 'flex', justifyContent: 'center', margin: '6px 0' }}>
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: missed ? 'var(--ds-red)' : 'var(--ds-t2)', background: 'var(--ds-bg-2)', borderRadius: 999, padding: '4px 10px' }}>
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: missed ? 'var(--tms-badge-red)' : 'var(--tms-text-2)', background: 'var(--tms-surface)', borderRadius: 999, padding: '4px 10px' }}>
         <Icon className="size-3.5" /> {text} · {bubbleTime(m.at)}
       </span>
     </div>
@@ -50,8 +50,8 @@ function CallRow({ m }: { m: DispatchMessage }) {
 function StatusRow({ m }: { m: DispatchMessage }) {
   return (
     <div style={{ display: 'flex', justifyContent: 'center', margin: '6px 0' }}>
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--ds-t2)', background: 'var(--ds-green-bg)', border: '1px solid var(--ds-green)', borderRadius: 999, padding: '4px 10px', maxWidth: '90%' }}>
-        <MapPin className="size-3.5 shrink-0" style={{ color: 'var(--ds-green)' }} /> <span style={{ fontWeight: 700, color: 'var(--ds-green)' }}>App update</span> <span>{m.body}</span> <span style={{ color: 'var(--ds-t3)' }}>· {bubbleTime(m.at)} · not a text</span>
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--tms-text-2)', background: 'var(--tms-badge-green-tint)', border: '1px solid var(--tms-badge-green)', borderRadius: 999, padding: '4px 10px', maxWidth: '90%' }}>
+        <MapPin className="size-3.5 shrink-0" style={{ color: 'var(--tms-badge-green)' }} /> <span style={{ fontWeight: 700, color: 'var(--tms-badge-green)' }}>App update</span> <span>{m.body}</span> <span style={{ color: 'var(--tms-muted)' }}>· {bubbleTime(m.at)} · not a text</span>
       </span>
     </div>
   )
@@ -71,22 +71,22 @@ function Bubble({ m, me, from, accent, getUrl, onFileAsPod }: { m: DispatchMessa
         style={{
           maxWidth: 'min(78%, 520px)', padding: '8px 12px', borderRadius: 14,
           borderBottomRightRadius: mine ? 4 : 14, borderBottomLeftRadius: mine ? 14 : 4,
-          background: note ? 'var(--ds-amber-bg)' : failed ? 'var(--ds-red-bg)' : mine ? 'var(--ds-blue)' : (accent?.bg ?? 'var(--ds-bg-2)'),
-          color: note || failed ? 'var(--ds-t1)' : mine ? '#fff' : 'var(--ds-t1)',
-          border: note ? '1px dashed var(--ds-amber)' : failed ? '1px solid var(--ds-red)' : (!mine && accent ? `1px solid ${accent.border}` : 'none'),
+          background: note ? 'var(--tms-badge-orange-tint)' : failed ? 'var(--tms-badge-red-tint)' : mine ? 'var(--tms-primary)' : (accent?.bg ?? 'var(--tms-surface-hover)'),
+          color: note || failed ? 'var(--tms-text)' : mine ? 'var(--tms-on-primary)' : 'var(--tms-text)',
+          border: note ? '1px dashed var(--tms-badge-orange)' : failed ? '1px solid var(--tms-badge-red)' : (!mine && accent ? `1px solid ${accent.border}` : 'none'),
           fontSize: 14, lineHeight: 1.4, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
         }}
       >
-        {note ? <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700, color: 'var(--ds-amber)', marginBottom: 2 }}><StickyNote className="size-3" /> Internal note · not sent to driver · {sender ?? staffName(m.sentBy)}</div>
-          : failed ? <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--ds-red)', marginBottom: 2 }}>Not sent to driver · {sender}</div>
+        {note ? <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700, color: 'var(--tms-badge-orange)', marginBottom: 2 }}><StickyNote className="size-3" /> Internal note · not sent to driver · {sender ?? staffName(m.sentBy)}</div>
+          : failed ? <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--tms-badge-red)', marginBottom: 2 }}>Not sent to driver · {sender}</div>
           : mine ? <div style={{ fontSize: 11, fontWeight: 600, opacity: 0.85, marginBottom: 2 }}>Text · {sender}</div>
           : vm ? null
-          : <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--ds-t3)', marginBottom: 2 }}>Text from {from}</div>}
+          : <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--tms-muted)', marginBottom: 2 }}>Text from {from}</div>}
         {vm ? (
           <div style={{ display: 'grid', gap: 6 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--ds-t2)' }}><Voicemail className="size-3.5" /> Voicemail · {formatDuration(m.callDurationSec)}</div>
-            {m.recordingKey ? <VoicemailPlayer recordingKey={m.recordingKey} getUrl={getUrl} /> : <span style={{ fontSize: 12, color: 'var(--ds-t3)' }}>Recording unavailable</span>}
-            {m.transcript ? <div style={{ fontSize: 13, fontStyle: 'italic', color: 'var(--ds-t2)' }}>“{m.transcript}”</div> : <div style={{ fontSize: 12, color: 'var(--ds-t3)' }}>Transcript on its way…</div>}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--tms-text-2)' }}><Voicemail className="size-3.5" /> Voicemail · {formatDuration(m.callDurationSec)}</div>
+            {m.recordingKey ? <VoicemailPlayer recordingKey={m.recordingKey} getUrl={getUrl} /> : <span style={{ fontSize: 12, color: 'var(--tms-muted)' }}>Recording unavailable</span>}
+            {m.transcript ? <div style={{ fontSize: 13, fontStyle: 'italic', color: 'var(--tms-text-2)' }}>“{m.transcript}”</div> : <div style={{ fontSize: 12, color: 'var(--tms-muted)' }}>Transcript on its way…</div>}
           </div>
         ) : null}
         {!vm && m.body ? <div>{m.body}</div> : null}
@@ -97,7 +97,7 @@ function Bubble({ m, me, from, accent, getUrl, onFileAsPod }: { m: DispatchMessa
                 <MediaThumb media={md} getUrl={getUrl} />
                 {/* A POD texted in is still a POD: one click files it on the load. */}
                 {m.direction === 'IN' && onFileAsPod && (md.contentType.startsWith('image/') || md.contentType === 'application/pdf') ? (
-                  <button type="button" onClick={() => onFileAsPod(md)} style={{ marginTop: 4, fontSize: 11, fontWeight: 600, color: 'var(--ds-blue)', background: 'none', border: '1px solid var(--ds-border)', borderRadius: 6, padding: '2px 8px', cursor: 'pointer' }}>
+                  <button type="button" onClick={() => onFileAsPod(md)} style={{ marginTop: 4, fontSize: 11, fontWeight: 600, color: 'var(--tms-primary)', background: 'none', border: '1px solid var(--tms-border)', borderRadius: 6, padding: '2px 8px', cursor: 'pointer' }}>
                     File as POD…
                   </button>
                 ) : null}
@@ -106,7 +106,7 @@ function Bubble({ m, me, from, accent, getUrl, onFileAsPod }: { m: DispatchMessa
           </div>
         ) : null}
       </div>
-      <div style={{ fontSize: 11, color: 'var(--ds-t3)', marginTop: 2, display: 'flex', gap: 6, alignItems: 'center' }}>
+      <div style={{ fontSize: 11, color: 'var(--tms-muted)', marginTop: 2, display: 'flex', gap: 6, alignItems: 'center' }}>
         <span>{bubbleTime(m.at)}</span>
         {delivery ? <span style={{ color: TONE_COLOR[delivery.tone] }}>· {delivery.text}</span> : null}
       </div>
@@ -183,17 +183,17 @@ export function Thread({ conversation, messages, loading, now, canSend, me, acce
     <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0, flex: 1 }}>
       <div ref={scroller} style={{ flex: 1, overflowY: 'auto', padding: '12px 16px' }}>
         {messages.length > 0 ? (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, justifyContent: 'center', fontSize: 11, color: 'var(--ds-t3)', marginBottom: 6 }}>
-            <span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 3, background: 'var(--ds-blue)', verticalAlign: '-1px', marginRight: 4 }} />Texts to the driver</span>
-            <span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 3, background: 'var(--ds-amber-bg)', border: '1px dashed var(--ds-amber)', verticalAlign: '-1px', marginRight: 4 }} />Internal notes (not sent)</span>
-            <span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 3, background: 'var(--ds-green-bg)', border: '1px solid var(--ds-green)', verticalAlign: '-1px', marginRight: 4 }} />Driver app updates</span>
-            <span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 3, background: 'var(--ds-red-bg)', border: '1px solid var(--ds-red)', verticalAlign: '-1px', marginRight: 4 }} />Not delivered</span>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, justifyContent: 'center', fontSize: 11, color: 'var(--tms-muted)', marginBottom: 6 }}>
+            <span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 3, background: 'var(--tms-primary)', verticalAlign: '-1px', marginRight: 4 }} />Texts to the driver</span>
+            <span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 3, background: 'var(--tms-badge-orange-tint)', border: '1px dashed var(--tms-badge-orange)', verticalAlign: '-1px', marginRight: 4 }} />Internal notes (not sent)</span>
+            <span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 3, background: 'var(--tms-badge-green-tint)', border: '1px solid var(--tms-badge-green)', verticalAlign: '-1px', marginRight: 4 }} />Driver app updates</span>
+            <span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 3, background: 'var(--tms-badge-red-tint)', border: '1px solid var(--tms-badge-red)', verticalAlign: '-1px', marginRight: 4 }} />Not delivered</span>
           </div>
         ) : null}
         {loading && messages.length === 0 ? (
-          <div style={{ display: 'flex', justifyContent: 'center', padding: 32, color: 'var(--ds-t3)' }}><Loader2 className="size-5 animate-spin" /></div>
+          <div style={{ display: 'flex', justifyContent: 'center', padding: 32, color: 'var(--tms-muted)' }}><Loader2 className="size-5 animate-spin" /></div>
         ) : messages.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: 32, fontSize: 13, color: 'var(--ds-t3)', display: 'grid', gap: 10, justifyItems: 'center' }}>
+          <div style={{ textAlign: 'center', padding: 32, fontSize: 13, color: 'var(--tms-muted)', display: 'grid', gap: 10, justifyItems: 'center' }}>
             <span>No messages yet.</span>
             {onIntro && canSend ? (
               <Button size="sm" variant="outline" className="gap-1.5" disabled={sending} onClick={() => { setSending(true); onIntro().catch((err) => toast.error(err instanceof Error ? err.message : 'The intro did not send')).finally(() => setSending(false)) }}>
@@ -204,14 +204,14 @@ export function Thread({ conversation, messages, loading, now, canSend, me, acce
         ) : groups.map((g) => (
           <div key={g.key}>
             <div style={{ display: 'flex', justifyContent: 'center', margin: '10px 0 6px' }}>
-              <span style={{ fontSize: 11, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--ds-t3)' }}>{g.label}</span>
+              <span style={{ fontSize: 11, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--tms-muted)' }}>{g.label}</span>
             </div>
             {g.messages.map((m) => m.kind === 'CALL' ? <CallRow key={m.id} m={m} /> : m.kind === 'STATUS' ? <StatusRow key={m.id} m={m} /> : <Bubble key={m.id} m={m} me={me} from={conversationTitle(conversation)} accent={accent} getUrl={getUrl} onFileAsPod={onFileAsPod} />)}
           </div>
         ))}
       </div>
 
-      <form onDrop={onDrop} onDragOver={(e) => { if (e.dataTransfer?.types.includes('Files')) e.preventDefault() }} onSubmit={submit} style={{ borderTop: '1px solid var(--ds-border)', padding: '10px 12px', background: 'var(--ds-surface)' }}>
+      <form onDrop={onDrop} onDragOver={(e) => { if (e.dataTransfer?.types.includes('Files')) e.preventDefault() }} onSubmit={submit} style={{ borderTop: '1px solid var(--tms-border)', padding: '10px 12px', background: 'var(--tms-card)' }}>
         {files.length ? (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
             {files.map((f, i) => <PendingFilePreview key={`${f.name}-${f.size}-${i}`} file={f} onRemove={() => setFiles((x) => x.filter((_, j) => j !== i))} />)}
@@ -221,12 +221,12 @@ export function Thread({ conversation, messages, loading, now, canSend, me, acce
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             <button type="button" onClick={() => setMode(mode === 'text' ? 'note' : 'text')} title={mode === 'text' ? 'Switch to an internal note' : 'Switch back to texting'}
               className={cn('inline-flex items-center justify-center rounded-md border size-9')}
-              style={{ borderColor: mode === 'note' ? 'var(--ds-amber)' : 'var(--ds-border)', background: mode === 'note' ? 'var(--ds-amber-bg)' : 'transparent', color: mode === 'note' ? 'var(--ds-amber)' : 'var(--ds-t2)' }}>
+              style={{ borderColor: mode === 'note' ? 'var(--tms-badge-orange)' : 'var(--tms-border)', background: mode === 'note' ? 'var(--tms-badge-orange-tint)' : 'transparent', color: mode === 'note' ? 'var(--tms-badge-orange)' : 'var(--tms-text-2)' }}>
               <StickyNote className="size-4" />
             </button>
             {mode === 'text' ? (
               <button type="button" onClick={() => fileInput.current?.click()} title="Attach a picture or PDF" disabled={!canSend}
-                className="inline-flex items-center justify-center rounded-md border size-9" style={{ borderColor: 'var(--ds-border)', color: 'var(--ds-t2)', opacity: canSend ? 1 : 0.5 }}>
+                className="inline-flex items-center justify-center rounded-md border size-9" style={{ borderColor: 'var(--tms-border)', color: 'var(--tms-text-2)', opacity: canSend ? 1 : 0.5 }}>
                 <Paperclip className="size-4" />
               </button>
             ) : null}
@@ -241,16 +241,16 @@ export function Thread({ conversation, messages, loading, now, canSend, me, acce
             placeholder={mode === 'note' ? 'Internal note (the driver never sees this)' : canSend ? `Text ${conversation.driverName ?? 'this number'}…` : 'Dispatch is not connected to Twilio yet'}
             disabled={mode === 'text' && !canSend}
             rows={2}
-            style={{ flex: 1, resize: 'none', minHeight: 44, maxHeight: 160, background: mode === 'note' ? 'var(--ds-amber-bg)' : undefined }}
+            style={{ flex: 1, resize: 'none', minHeight: 44, maxHeight: 160, background: mode === 'note' ? 'var(--tms-badge-orange-tint)' : undefined }}
           />
           <Button type="submit" size="sm" className="h-9 gap-1.5" disabled={sending || (mode === 'text' && !canSend) || (!body.trim() && files.length === 0)}>
             {sending ? <Loader2 className="size-4 animate-spin" /> : mode === 'note' ? <StickyNote className="size-4" /> : <Send className="size-4" />}
             {mode === 'note' ? 'Save note' : 'Send'}
           </Button>
         </div>
-        <div style={{ fontSize: 11, color: 'var(--ds-t3)', marginTop: 4, display: 'flex', justifyContent: 'space-between' }}>
+        <div style={{ fontSize: 11, color: 'var(--tms-muted)', marginTop: 4, display: 'flex', justifyContent: 'space-between' }}>
           <span>{mode === 'note' ? 'Notes stay in BCAT Ops.' : 'Enter sends · Shift+Enter for a new line · paste or drop a picture to attach it'}</span>
-          {mode === 'text' && body.length > 140 ? <span style={{ color: body.length > MAX_SMS_BODY ? 'var(--ds-red)' : undefined }}>{body.length}/{MAX_SMS_BODY}</span> : null}
+          {mode === 'text' && body.length > 140 ? <span style={{ color: body.length > MAX_SMS_BODY ? 'var(--tms-badge-red)' : undefined }}>{body.length}/{MAX_SMS_BODY}</span> : null}
         </div>
       </form>
     </div>

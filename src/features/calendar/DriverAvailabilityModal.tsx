@@ -1,4 +1,6 @@
 import { useState } from 'react'
+import { TmsDialog } from '@/features/tms/kit/TmsDialog'
+import { TmsButton } from '@/features/tms/kit/TmsButton'
 import { useAuth } from '@/hooks/useAuth'
 import type { Driver } from '@/types'
 import type { DriverAvailability } from '@/lib/apiClient'
@@ -64,31 +66,19 @@ export function DriverAvailabilityModal({ drivers, availabilities, onClose, onCr
 
   const inputStyle: React.CSSProperties = {
     height: 32, padding: '0 8px', borderRadius: 6,
-    border: '1px solid var(--ds-border)', background: 'var(--ds-bg)',
-    color: 'var(--ds-t1)', fontSize: 13,
+    border: '1px solid var(--tms-border)', background: 'var(--tms-bg)',
+    color: 'var(--tms-text)', fontSize: 13,
   }
   const labelStyle: React.CSSProperties = {
-    fontSize: 11, fontWeight: 600, color: 'var(--ds-t2)',
+    fontSize: 11, fontWeight: 600, color: 'var(--tms-text-2)',
     textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 4,
   }
 
   return (
-    <div
-      style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.45)' }}
-      onMouseDown={onClose}
-    >
-      <div
-        style={{ background: 'var(--ds-surface)', borderRadius: 10, border: '1px solid var(--ds-border)', boxShadow: '0 8px 32px rgba(0,0,0,0.22)', width: 600, maxHeight: '85vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
-        onMouseDown={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--ds-border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
-          <span style={{ fontSize: 15, fontWeight: 600, color: 'var(--ds-t1)' }}>Driver Availability</span>
-          <button onClick={onClose} style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: 18, color: 'var(--ds-t3)', lineHeight: 1, padding: '0 2px' }}>✕</button>
-        </div>
-
+    <TmsDialog open onOpenChange={(o) => { if (!o) onClose() }} title="Driver Availability">
+      <div style={{ margin: 'calc(var(--tms-pad) * -1)', display: 'flex', flexDirection: 'column' }}>
         {/* Add form */}
-        <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--ds-border)', flexShrink: 0 }}>
+        <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--tms-border)', flexShrink: 0 }}>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 10 }}>
             <div>
               <label style={labelStyle}>Driver</label>
@@ -125,40 +115,41 @@ export function DriverAvailabilityModal({ drivers, availabilities, onClose, onCr
               <label style={labelStyle}>Note (optional)</label>
               <input type="text" placeholder="e.g. Doctor appointment" value={note} onChange={(e) => setNote(e.target.value)} style={{ ...inputStyle, width: '100%' }} />
             </div>
-            <button
+            <TmsButton
+              variant="primary"
               onClick={handleAdd}
               disabled={saving || !canSubmit}
-              style={{ height: 32, padding: '0 18px', borderRadius: 6, border: 'none', cursor: canSubmit ? 'pointer' : 'default', background: 'var(--ds-blue)', color: '#fff', fontWeight: 600, fontSize: 13, flexShrink: 0, opacity: (!canSubmit || saving) ? 0.5 : 1 }}
+              style={{ flexShrink: 0 }}
             >
               {saving ? 'Saving…' : 'Add'}
-            </button>
+            </TmsButton>
           </div>
         </div>
 
         {/* List */}
         <div style={{ flex: 1, overflowY: 'auto' }}>
           {sorted.length === 0 ? (
-            <div style={{ padding: 24, textAlign: 'center', color: 'var(--ds-t3)', fontSize: 13 }}>No availability entries yet.</div>
+            <div style={{ padding: 24, textAlign: 'center', color: 'var(--tms-muted)', fontSize: 13 }}>No availability entries yet.</div>
           ) : (
             sorted.map((a) => {
               const driver = drivers.find((d) => d.id === a.driverId)
               const isOff  = a.type === 'FULL_DAY_OFF'
               const rangeStr = a.startDate === a.endDate ? a.startDate : `${a.startDate} → ${a.endDate}`
               return (
-                <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 20px', borderBottom: '1px solid var(--ds-border)' }}>
-                  <span style={{ padding: '2px 8px', borderRadius: 4, fontSize: 11, fontWeight: 700, background: isOff ? '#fef2f2' : '#fffbeb', color: isOff ? '#dc2626' : '#b45309', flexShrink: 0 }}>
+                <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 20px', borderBottom: '1px solid var(--tms-border)' }}>
+                  <span style={{ padding: '2px 8px', borderRadius: 4, fontSize: 11, fontWeight: 700, background: isOff ? 'var(--tms-badge-red-tint)' : 'var(--tms-badge-orange-tint)', color: isOff ? 'var(--tms-badge-red)' : 'var(--tms-badge-orange)', flexShrink: 0 }}>
                     {TYPE_LABELS[a.type]}
                   </span>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--ds-t1)', flexShrink: 0 }}>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--tms-text)', flexShrink: 0 }}>
                     {driver?.name ?? 'Unknown'}
                   </span>
-                  <span style={{ fontSize: 12, color: 'var(--ds-t3)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <span style={{ fontSize: 12, color: 'var(--tms-muted)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {rangeStr}{a.time ? ` · ${a.time}` : ''}{a.note ? ` · ${a.note}` : ''}
                   </span>
                   <button
                     onClick={() => handleDelete(a.id)}
                     disabled={deleting === a.id}
-                    style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'var(--ds-t3)', fontSize: 15, flexShrink: 0, padding: '2px 4px', borderRadius: 3, opacity: deleting === a.id ? 0.4 : 1 }}
+                    style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'var(--tms-muted)', fontSize: 15, flexShrink: 0, padding: '2px 4px', borderRadius: 3, opacity: deleting === a.id ? 0.4 : 1 }}
                     title="Remove"
                   >
                     ✕
@@ -169,6 +160,6 @@ export function DriverAvailabilityModal({ drivers, availabilities, onClose, onCr
           )}
         </div>
       </div>
-    </div>
+    </TmsDialog>
   )
 }

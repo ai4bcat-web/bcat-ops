@@ -53,13 +53,13 @@ export function NewMessageDialog({ onClose, onStart }: NewProps) {
           <div>
             <Label htmlFor="dispatch-new-driver">Driver</Label>
             <Input id="dispatch-new-driver" placeholder="Search by name or number" value={query} onChange={(e) => setQuery(e.target.value)} autoFocus />
-            <ul style={{ listStyle: 'none', margin: '6px 0 0', padding: 0, maxHeight: 220, overflowY: 'auto', border: '1px solid var(--ds-border)', borderRadius: 8 }}>
-              {matches.length === 0 ? <li style={{ padding: 10, fontSize: 13, color: 'var(--ds-t3)' }}>No drivers match.</li> : matches.map((d) => (
+            <ul style={{ listStyle: 'none', margin: '6px 0 0', padding: 0, maxHeight: 220, overflowY: 'auto', border: '1px solid var(--tms-border)', borderRadius: 8 }}>
+              {matches.length === 0 ? <li style={{ padding: 10, fontSize: 13, color: 'var(--tms-muted)' }}>No drivers match.</li> : matches.map((d) => (
                 <li key={d.id}>
                   <button type="button" disabled={busy} onClick={() => void go({ driverId: d.id })}
-                    style={{ width: '100%', textAlign: 'left', display: 'flex', justifyContent: 'space-between', gap: 8, padding: '8px 10px', background: 'none', border: 'none', borderBottom: '1px solid var(--ds-border-soft)', cursor: 'pointer', fontSize: 13 }}>
-                    <span style={{ color: d.active ? 'var(--ds-t1)' : 'var(--ds-t3)' }}>{d.name}{d.active ? '' : ' (inactive)'}</span>
-                    <span style={{ color: 'var(--ds-t3)', fontVariantNumeric: 'tabular-nums' }}>{prettyPhone(d.phone)}</span>
+                    style={{ width: '100%', textAlign: 'left', display: 'flex', justifyContent: 'space-between', gap: 8, padding: '8px 10px', background: 'none', border: 'none', borderBottom: '1px solid var(--tms-border)', cursor: 'pointer', fontSize: 13 }}>
+                    <span style={{ color: d.active ? 'var(--tms-text)' : 'var(--tms-muted)' }}>{d.name}{d.active ? '' : ' (inactive)'}</span>
+                    <span style={{ color: 'var(--tms-muted)', fontVariantNumeric: 'tabular-nums' }}>{prettyPhone(d.phone)}</span>
                   </button>
                 </li>
               ))}
@@ -117,12 +117,12 @@ export function LinkNumberDialog({ conversation, onClose, onLink }: LinkProps) {
           <div>
             <Label htmlFor="dispatch-link-driver">Driver</Label>
             <Input id="dispatch-link-driver" placeholder="Search drivers" value={query} onChange={(e) => setQuery(e.target.value)} autoFocus />
-            <ul style={{ listStyle: 'none', margin: '6px 0 0', padding: 0, maxHeight: 200, overflowY: 'auto', border: '1px solid var(--ds-border)', borderRadius: 8 }}>
+            <ul style={{ listStyle: 'none', margin: '6px 0 0', padding: 0, maxHeight: 200, overflowY: 'auto', border: '1px solid var(--tms-border)', borderRadius: 8 }}>
               {matches.map((d) => (
                 <li key={d.id}>
                   <button type="button" disabled={busy} onClick={() => void go({ driverId: d.id })}
-                    style={{ width: '100%', textAlign: 'left', display: 'flex', justifyContent: 'space-between', padding: '8px 10px', background: 'none', border: 'none', borderBottom: '1px solid var(--ds-border-soft)', cursor: 'pointer', fontSize: 13 }}>
-                    <span>{d.name}</span><span style={{ color: 'var(--ds-t3)' }}>{prettyPhone(d.phone)}</span>
+                    style={{ width: '100%', textAlign: 'left', display: 'flex', justifyContent: 'space-between', padding: '8px 10px', background: 'none', border: 'none', borderBottom: '1px solid var(--tms-border)', cursor: 'pointer', fontSize: 13 }}>
+                    <span>{d.name}</span><span style={{ color: 'var(--tms-muted)' }}>{prettyPhone(d.phone)}</span>
                   </button>
                 </li>
               ))}
@@ -210,7 +210,7 @@ export function DispatchSettingsDialog({ onClose, dispatchNumber, load, save }: 
             <section style={{ display: 'grid', gap: 8 }}>
               <div>
                 <div style={{ fontSize: 13, fontWeight: 600 }}>When a driver calls, ring these phones</div>
-                <div style={{ fontSize: 12, color: 'var(--ds-t3)' }}>All at once. Whoever presses a key first takes the call; the rest stop ringing. The call shows as coming from the dispatch number.</div>
+                <div style={{ fontSize: 12, color: 'var(--tms-muted)' }}>All at once. Whoever presses a key first takes the call; the rest stop ringing. The call shows as coming from the dispatch number.</div>
               </div>
               {forwards.map((f, i) => (
                 <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: 6 }}>
@@ -223,7 +223,7 @@ export function DispatchSettingsDialog({ onClose, dispatchNumber, load, save }: 
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <Label htmlFor="dispatch-ring">Ring for</Label>
                 <Input id="dispatch-ring" type="number" min={MIN_RING_SECONDS} max={MAX_RING_SECONDS} value={ring} onChange={(e) => setRing(Number(e.target.value))} style={{ width: 80 }} />
-                <span style={{ fontSize: 12, color: 'var(--ds-t3)' }}>seconds before voicemail</span>
+                <span style={{ fontSize: 12, color: 'var(--tms-muted)' }}>seconds before voicemail</span>
               </div>
             </section>
             <section style={{ display: 'grid', gap: 8 }}>
@@ -231,35 +231,35 @@ export function DispatchSettingsDialog({ onClose, dispatchNumber, load, save }: 
                 <input type="checkbox" id="dispatch-vm" checked={voicemail} onChange={(e) => setVoicemail(e.target.checked)} /> Take a voicemail when nobody picks up
               </label>
               <Textarea id="dispatch-greeting" rows={3} placeholder={DEFAULT_GREETING} value={greeting} onChange={(e) => setGreeting(e.target.value)} disabled={!voicemail} />
-              <div style={{ fontSize: 12, color: 'var(--ds-t3)' }}>Voicemails land in the thread with a transcript. Leave blank for the standard greeting.</div>
+              <div style={{ fontSize: 12, color: 'var(--tms-muted)' }}>Voicemails land in the thread with a transcript. Leave blank for the standard greeting.</div>
             </section>
             <section style={{ display: 'grid', gap: 6 }}>
               <Label htmlFor="dispatch-intro">Intro text (the Intro button; {'{name}'} and {'{number}'} are filled in)</Label>
               <Textarea id="dispatch-intro" rows={3} placeholder={DEFAULT_INTRO_TEXT} value={introText} onChange={(e) => setIntroText(e.target.value)} />
-              <div style={{ fontSize: 12, color: 'var(--ds-t3)' }}>Sent with a contact card so the driver can save the number in one tap. Leave blank for the standard text.</div>
+              <div style={{ fontSize: 12, color: 'var(--tms-muted)' }}>Sent with a contact card so the driver can save the number in one tap. Leave blank for the standard text.</div>
             </section>
             <section style={{ display: 'grid', gap: 6 }}>
               <Label htmlFor="dispatch-contacts">Dispatcher contacts — shown in a driver's app as their dispatcher</Label>
               <Textarea id="dispatch-contacts" rows={3} placeholder={'arcie@bcatcorp.com, Arcie, (224) 555-0100'} value={contactsText} onChange={(e) => setContactsText(e.target.value)} />
-              <div style={{ fontSize: 12, color: 'var(--ds-t3)' }}>One per line: login email, name the driver sees, phone. A driver whose dispatcher (Drivers page) is listed here gets that person's Call and Text buttons above the main dispatch line.</div>
+              <div style={{ fontSize: 12, color: 'var(--tms-muted)' }}>One per line: login email, name the driver sees, phone. A driver whose dispatcher (Drivers page) is listed here gets that person's Call and Text buttons above the main dispatch line.</div>
             </section>
             <section style={{ display: 'grid', gap: 6 }}>
               <Label htmlFor="dispatch-autoreply">First-text auto-reply (optional)</Label>
               <Input id="dispatch-autoreply" placeholder="Got it. BCAT dispatch will reply shortly." value={autoReply} onChange={(e) => setAutoReply(e.target.value)} />
-              <div style={{ fontSize: 12, color: 'var(--ds-t3)' }}>Sent once, the first time a new number texts in.</div>
+              <div style={{ fontSize: 12, color: 'var(--tms-muted)' }}>Sent once, the first time a new number texts in.</div>
             </section>
             <section style={{ display: 'grid', gap: 8 }}>
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 600 }}>
                 <input type="checkbox" id="dispatch-slack-mirror" checked={slackMirror} onChange={(e) => setSlackMirror(e.target.checked)} /> One Slack channel per driver, mirrored both ways
               </label>
-              <div style={{ fontSize: 12, color: 'var(--ds-t3)' }}>Channels are created from the conversation (Create Slack channel) so you pick the name and who is in it. Texts typed in the channel go to the driver.</div>
+              <div style={{ fontSize: 12, color: 'var(--tms-muted)' }}>Channels are created from the conversation (Create Slack channel) so you pick the name and who is in it. Texts typed in the channel go to the driver.</div>
               <Label htmlFor="dispatch-slack-invites">Invite these people to every driver channel by default</Label>
               <Input id="dispatch-slack-invites" placeholder="ryne@bcatcorp.com, dennis@bcatcorp.com" value={slackInvites} onChange={(e) => setSlackInvites(e.target.value)} disabled={!slackMirror} />
             </section>
             <section style={{ display: 'grid', gap: 6 }}>
               <Label htmlFor="dispatch-slack">Slack channel ID for a ping on every inbound text (optional)</Label>
               <Input id="dispatch-slack" placeholder="C0123ABCDEF" value={slack} onChange={(e) => setSlack(e.target.value)} />
-              <div style={{ fontSize: 12, color: 'var(--ds-t3)' }}>Channel details → copy channel ID. The BCAT bot must be in the channel.</div>
+              <div style={{ fontSize: 12, color: 'var(--tms-muted)' }}>Channel details → copy channel ID. The BCAT bot must be in the channel.</div>
             </section>
           </div>
         )}
@@ -326,19 +326,19 @@ export function SlackChannelWizard({ conversation, defaultInvites, onClose, onCr
           <div style={{ display: 'grid', gap: 6 }}>
             <Label htmlFor="dispatch-slack-name">Channel name</Label>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span style={{ color: 'var(--ds-t3)' }}>#</span>
+              <span style={{ color: 'var(--tms-muted)' }}>#</span>
               <Input id="dispatch-slack-name" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
             </div>
-            {cleaned !== name.trim().toLowerCase().replace(/^#/, '') ? <div style={{ fontSize: 12, color: 'var(--ds-t3)' }}>Will be created as #{cleaned || '…'}</div> : null}
+            {cleaned !== name.trim().toLowerCase().replace(/^#/, '') ? <div style={{ fontSize: 12, color: 'var(--tms-muted)' }}>Will be created as #{cleaned || '…'}</div> : null}
           </div>
           <div style={{ display: 'grid', gap: 6 }}>
             <Label>Invite</Label>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-              {invites.length === 0 ? <span style={{ fontSize: 12, color: 'var(--ds-t3)' }}>Nobody yet. Add emails below, or set defaults in Dispatch settings.</span> : null}
+              {invites.length === 0 ? <span style={{ fontSize: 12, color: 'var(--tms-muted)' }}>Nobody yet. Add emails below, or set defaults in Dispatch settings.</span> : null}
               {invites.map((e) => (
-                <span key={e} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, background: 'var(--ds-bg-2)', borderRadius: 999, padding: '3px 8px 3px 10px' }}>
+                <span key={e} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, background: 'var(--tms-surface)', borderRadius: 999, padding: '3px 8px 3px 10px' }}>
                   {e}
-                  <button type="button" aria-label={`Remove ${e}`} onClick={() => setInvites((x) => x.filter((y) => y !== e))} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--ds-t3)', padding: 0, lineHeight: 1 }}>×</button>
+                  <button type="button" aria-label={`Remove ${e}`} onClick={() => setInvites((x) => x.filter((y) => y !== e))} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--tms-muted)', padding: 0, lineHeight: 1 }}>×</button>
                 </span>
               ))}
             </div>
@@ -346,7 +346,7 @@ export function SlackChannelWizard({ conversation, defaultInvites, onClose, onCr
               <Input id="dispatch-slack-extra" placeholder="someone@bcatcorp.com" value={extra} onChange={(e) => setExtra(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addExtra() } }} />
               <Button type="button" variant="outline" onClick={addExtra}><Plus className="size-4" /> Add</Button>
             </div>
-            <div style={{ fontSize: 12, color: 'var(--ds-t3)' }}>People are matched to Slack by their email. The BCAT bot joins automatically.</div>
+            <div style={{ fontSize: 12, color: 'var(--tms-muted)' }}>People are matched to Slack by their email. The BCAT bot joins automatically.</div>
           </div>
         </div>
         <DialogFooter>
@@ -394,7 +394,7 @@ export function AssignDialog({ conversation, fromDriver, loadStaff, onClose, onS
   const select = (id: string, value: string, onChange: (v: string) => void, label: string) => (
     <div style={{ display: 'grid', gap: 6 }}>
       <Label htmlFor={id}>{label}</Label>
-      <select id={id} value={value} onChange={(e) => onChange(e.target.value)} className="h-9 w-full rounded-md border border-input bg-white px-3 text-sm">
+      <select id={id} value={value} onChange={(e) => onChange(e.target.value)} className="h-9 w-full rounded-md border border-input bg-card px-3 text-sm">
         <option value="">Nobody</option>
         {options.map((e) => <option key={e} value={e}>{e}</option>)}
       </select>
@@ -412,7 +412,7 @@ export function AssignDialog({ conversation, fromDriver, loadStaff, onClose, onS
         <div style={{ display: 'grid', gap: 12 }}>
           {select('dispatch-assign-primary', primary, setPrimary, 'Primary dispatcher')}
           {select('dispatch-assign-backup', backup, setBackup, 'Backup dispatcher')}
-          {fromDriver.length ? <div style={{ fontSize: 12, color: 'var(--ds-t3)' }}>On the driver file: {fromDriver.join(', ')}</div> : null}
+          {fromDriver.length ? <div style={{ fontSize: 12, color: 'var(--tms-muted)' }}>On the driver file: {fromDriver.join(', ')}</div> : null}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={busy}>Cancel</Button>
@@ -455,15 +455,15 @@ export function FileAsPodDialog({ driverName, loads, attachment, onClose, onPick
           </DialogDescription>
         </DialogHeader>
         {loads.length === 0 ? (
-          <p style={{ fontSize: 13, color: 'var(--ds-t3)' }}>No loads on file for {driverName}. Put them on a load first, then file the POD from the load drawer.</p>
+          <p style={{ fontSize: 13, color: 'var(--tms-muted)' }}>No loads on file for {driverName}. Put them on a load first, then file the POD from the load drawer.</p>
         ) : (
-          <ul style={{ listStyle: 'none', margin: 0, padding: 0, maxHeight: 280, overflowY: 'auto', border: '1px solid var(--ds-border)', borderRadius: 8 }}>
+          <ul style={{ listStyle: 'none', margin: 0, padding: 0, maxHeight: 280, overflowY: 'auto', border: '1px solid var(--tms-border)', borderRadius: 8 }}>
             {loads.map((l) => (
               <li key={l.id}>
                 <button type="button" disabled={busy !== null} onClick={() => void go(l.id)}
-                  style={{ width: '100%', textAlign: 'left', display: 'flex', justifyContent: 'space-between', gap: 8, padding: '8px 10px', background: 'none', border: 'none', borderBottom: '1px solid var(--ds-border-soft)', cursor: 'pointer', fontSize: 13, color: l.delivered ? 'var(--ds-t3)' : 'var(--ds-t1)' }}>
+                  style={{ width: '100%', textAlign: 'left', display: 'flex', justifyContent: 'space-between', gap: 8, padding: '8px 10px', background: 'none', border: 'none', borderBottom: '1px solid var(--tms-border)', cursor: 'pointer', fontSize: 13, color: l.delivered ? 'var(--tms-muted)' : 'var(--tms-text)' }}>
                   <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}><strong>PRO {l.pro}</strong> {l.lane}{l.delivered ? ' · delivered' : ''}</span>
-                  <span style={{ color: 'var(--ds-t3)', whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', gap: 6 }}>{l.when ?? ''}{busy === l.id ? <Loader2 className="size-3.5 animate-spin" /> : null}</span>
+                  <span style={{ color: 'var(--tms-muted)', whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', gap: 6 }}>{l.when ?? ''}{busy === l.id ? <Loader2 className="size-3.5 animate-spin" /> : null}</span>
                 </button>
               </li>
             ))}

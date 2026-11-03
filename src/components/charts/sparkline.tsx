@@ -8,7 +8,7 @@ interface SparklineProps {
   fill?: boolean
 }
 
-export function Sparkline({ data, color = '#1ea8f3', width = 84, height = 28, fill = true }: SparklineProps) {
+export function Sparkline({ data, color = 'var(--tms-primary)', width = 84, height = 28, fill = true }: SparklineProps) {
   const gradId = useId()
 
   if (!data || data.length < 2) return null
@@ -26,13 +26,13 @@ export function Sparkline({ data, color = '#1ea8f3', width = 84, height = 28, fi
       {fill && (
         <defs>
           <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={color} stopOpacity="0.32" />
-            <stop offset="100%" stopColor={color} stopOpacity="0" />
+            <stop offset="0%" style={{ stopColor: color }} stopOpacity="0.32" />
+            <stop offset="100%" style={{ stopColor: color }} stopOpacity="0" />
           </linearGradient>
         </defs>
       )}
       {fill && <path d={areaPath} fill={`url(#${gradId})`} />}
-      <path d={path} fill="none" stroke={color} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+      <path d={path} fill="none" style={{ stroke: color }} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   )
 }

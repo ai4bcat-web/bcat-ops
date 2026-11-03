@@ -25,11 +25,11 @@ const VIEW_OPTIONS: { value: ViewMode; label: string }[] = [
 ]
 
 const FILTER_CHIPS = [
-  { key: 'readyToInvoice'    as const, label: 'Ready to Invoice',     Icon: CheckCircle2,          activeColor: '#16a34a', activeBg: 'var(--ds-green-bg)'  },
-  { key: 'notReadyToInvoice' as const, label: 'Not Ready to Invoice', Icon: CircleDashed,          activeColor: '#0891b2', activeBg: 'var(--ds-cyan-bg)'   },
-  { key: 'split'          as const, label: 'Split Assignment',  Icon: SplitSquareHorizontal, activeColor: '#7c3aed', activeBg: 'var(--ds-violet-bg)' },
-  { key: 'unassigned'     as const, label: 'Unassigned',        Icon: HelpCircle,            activeColor: '#b45309', activeBg: 'var(--ds-amber-bg)'  },
-  { key: 'needsAppt'      as const, label: 'Needs Appt',        Icon: AlertCircle,           activeColor: '#dc2626', activeBg: 'var(--ds-red-bg)'    },
+  { key: 'readyToInvoice'    as const, label: 'Ready to Invoice',     Icon: CheckCircle2,          activeColor: 'var(--tms-badge-green)', activeBg: 'var(--tms-badge-green-tint)'  },
+  { key: 'notReadyToInvoice' as const, label: 'Not Ready to Invoice', Icon: CircleDashed,          activeColor: 'var(--tms-badge-turquoise)', activeBg: 'var(--tms-badge-turquoise-tint)'   },
+  { key: 'split'          as const, label: 'Split Assignment',  Icon: SplitSquareHorizontal, activeColor: 'var(--tms-badge-purple)', activeBg: 'var(--tms-badge-purple-tint)' },
+  { key: 'unassigned'     as const, label: 'Unassigned',        Icon: HelpCircle,            activeColor: 'var(--tms-badge-orange)', activeBg: 'var(--tms-badge-orange-tint)'  },
+  { key: 'needsAppt'      as const, label: 'Needs Appt',        Icon: AlertCircle,           activeColor: 'var(--tms-badge-red)', activeBg: 'var(--tms-badge-red-tint)'    },
 ] as const
 
 export function CalendarToolbar({
@@ -46,7 +46,7 @@ export function CalendarToolbar({
     <div style={{
       display: 'flex', alignItems: 'center', gap: 8,
       height: 56, padding: '0 20px',
-      background: 'var(--ds-surface)', borderBottom: '1px solid var(--ds-border)',
+      background: 'var(--tms-card)', borderBottom: '1px solid var(--tms-border)',
       flexShrink: 0, flexWrap: 'nowrap', overflowX: 'auto',
     }}>
 
@@ -56,7 +56,7 @@ export function CalendarToolbar({
       </button>
 
       {/* ── View tabs ────────────────────────────────────────────────────── */}
-      <div style={{ display: 'flex', gap: 2, background: 'var(--ds-bg)', border: '1px solid var(--ds-border)', borderRadius: 9, padding: 3, flexShrink: 0 }}>
+      <div style={{ display: 'flex', gap: 2, background: 'var(--tms-bg)', border: '1px solid var(--tms-border)', borderRadius: 9, padding: 3, flexShrink: 0 }}>
         {VIEW_OPTIONS.map(({ value, label }) => {
           const active = currentView === value
           return (
@@ -66,9 +66,9 @@ export function CalendarToolbar({
               style={{
                 padding: '4px 12px', borderRadius: 7, border: 'none', cursor: 'pointer',
                 fontSize: 12.5, fontWeight: active ? 600 : 500, fontFamily: 'inherit',
-                background: active ? '#fff' : 'transparent',
-                color: active ? 'var(--ds-t1)' : 'var(--ds-t3)',
-                boxShadow: active ? 'var(--sh-sm)' : 'none',
+                background: active ? 'var(--tms-card)' : 'transparent',
+                color: active ? 'var(--tms-text)' : 'var(--tms-muted)',
+                boxShadow: active ? 'var(--tms-shadow)' : 'none',
                 whiteSpace: 'nowrap',
               }}
             >
@@ -100,11 +100,11 @@ export function CalendarToolbar({
       </div>
 
       {/* ── Date label ───────────────────────────────────────────────────── */}
-      <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--ds-t1)', whiteSpace: 'nowrap', minWidth: 160, flexShrink: 0 }} aria-live="polite">
+      <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--tms-text)', whiteSpace: 'nowrap', minWidth: 160, flexShrink: 0 }} aria-live="polite">
         {dateLabel}
       </span>
 
-      <div style={{ width: 1, height: 24, background: 'var(--ds-border)', flexShrink: 0 }} />
+      <div style={{ width: 1, height: 24, background: 'var(--tms-border)', flexShrink: 0 }} />
 
       {/* ── Filter chips ─────────────────────────────────────────────────── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1, overflow: 'hidden', minWidth: 0 }}>
@@ -127,16 +127,16 @@ export function CalendarToolbar({
                 height: 30, padding: '0 10px', borderRadius: 20, border: '1px solid',
                 fontSize: 12, fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit',
                 whiteSpace: 'nowrap', flexShrink: 0,
-                background: on ? activeBg : 'var(--ds-bg)',
-                borderColor: on ? activeColor : 'var(--ds-border)',
-                color: on ? activeColor : 'var(--ds-t2)',
+                background: on ? activeBg : 'var(--tms-bg)',
+                borderColor: on ? activeColor : 'var(--tms-border)',
+                color: on ? activeColor : 'var(--tms-text-2)',
               }}
             >
               <Icon size={12} />
               {label}
               {on && (
                 <span
-                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 16, height: 16, borderRadius: '50%', background: 'rgba(0,0,0,0.12)', marginLeft: 2 }}
+                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 16, height: 16, borderRadius: '50%', background: 'color-mix(in srgb, var(--tms-text) 12%, transparent)', marginLeft: 2 }}
                   onClick={(e) => { e.stopPropagation(); toggleFilter(key) }}
                 >
                   <X size={9} />
@@ -149,14 +149,14 @@ export function CalendarToolbar({
 
       {/* ── Search ───────────────────────────────────────────────────────── */}
       <div style={{ position: 'relative', width: 240, flexShrink: 0 }}>
-        <Search size={13} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--ds-t3)', pointerEvents: 'none' }} />
+        <Search size={13} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--tms-muted)', pointerEvents: 'none' }} />
         <input
           type="text"
           placeholder="Search loads — Pro#, TMS, PU#, driver, city, customer…"
           style={{
             width: '100%', height: 34, paddingLeft: 30, paddingRight: searchQuery ? 28 : 10,
-            background: 'var(--ds-bg)', border: '1px solid var(--ds-border)', borderRadius: 7,
-            fontSize: 12.5, color: 'var(--ds-t1)', fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box',
+            background: 'var(--tms-bg)', border: '1px solid var(--tms-border)', borderRadius: 7,
+            fontSize: 12.5, color: 'var(--tms-text)', fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box',
           }}
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
@@ -164,7 +164,7 @@ export function CalendarToolbar({
         />
         {searchQuery && (
           <button
-            style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--ds-t3)', display: 'flex', alignItems: 'center' }}
+            style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--tms-muted)', display: 'flex', alignItems: 'center' }}
             onClick={() => setSearchQuery('')}
             aria-label="Clear search"
           >
@@ -178,7 +178,7 @@ export function CalendarToolbar({
         onClick={() => openNewShipment()}
         style={{
           display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px', borderRadius: 8,
-          background: 'var(--ds-blue)', color: '#fff', border: 'none', cursor: 'pointer',
+          background: 'var(--tms-primary)', color: 'var(--tms-on-primary)', border: 'none', cursor: 'pointer',
           fontSize: 13, fontWeight: 600, fontFamily: 'inherit', flexShrink: 0,
         }}
       >
@@ -191,6 +191,6 @@ export function CalendarToolbar({
 const navBtnStyle: React.CSSProperties = {
   display: 'flex', alignItems: 'center', justifyContent: 'center',
   width: 30, height: 30, borderRadius: 7,
-  background: 'var(--ds-bg)', border: '1px solid var(--ds-border)',
-  color: 'var(--ds-t2)', cursor: 'pointer',
+  background: 'var(--tms-bg)', border: '1px solid var(--tms-border)',
+  color: 'var(--tms-text-2)', cursor: 'pointer',
 }

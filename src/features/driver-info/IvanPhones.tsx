@@ -5,15 +5,15 @@ import { useDrivers } from '@/hooks/useDrivers'
 import { graphqlErrorText, listCompanyPhones, updateCompanyPhone, type CompanyPhone } from '@/lib/apiClient'
 import { phoneAssignmentWrites, phoneOf } from '@/lib/companyPhones'
 
-const TH: React.CSSProperties = { textAlign: 'left', fontSize: 11, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.04em', padding: '8px 14px', borderBottom: '1px solid var(--ds-border)', whiteSpace: 'nowrap' }
-const TD: React.CSSProperties = { fontSize: 13, color: 'var(--ds-t1)', padding: '9px 14px', borderBottom: '1px solid var(--ds-border)', whiteSpace: 'nowrap' }
-const INPUT: React.CSSProperties = { height: 30, borderRadius: 6, border: '1px solid var(--ds-border)', padding: '0 8px', fontSize: 13, background: 'var(--ds-surface)', color: 'var(--ds-t1)', fontFamily: 'inherit' }
+const TH: React.CSSProperties = { textAlign: 'left', fontSize: 11, fontWeight: 600, color: 'var(--tms-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', padding: '8px 14px', borderBottom: '1px solid var(--tms-border)', whiteSpace: 'nowrap' }
+const TD: React.CSSProperties = { fontSize: 13, color: 'var(--tms-text)', padding: '9px 14px', borderBottom: '1px solid var(--tms-border)', whiteSpace: 'nowrap' }
+const INPUT: React.CSSProperties = { height: 30, borderRadius: 6, border: '1px solid var(--tms-border)', padding: '0 8px', fontSize: 13, background: 'var(--tms-card)', color: 'var(--tms-text)', fontFamily: 'inherit' }
 
 const telHref = (n: string) => `tel:${n.replace(/[^\d+]/g, '')}`
 
 function Num({ value }: { value?: string | null }) {
-  if (!value?.trim()) return <span style={{ color: 'var(--ds-t3)' }}>—</span>
-  return <a href={telHref(value)} style={{ color: 'var(--ds-t1)', textDecoration: 'none', fontVariantNumeric: 'tabular-nums' }}>{value}</a>
+  if (!value?.trim()) return <span style={{ color: 'var(--tms-muted)' }}>—</span>
+  return <a href={telHref(value)} style={{ color: 'var(--tms-text)', textDecoration: 'none', fontVariantNumeric: 'tabular-nums' }}>{value}</a>
 }
 
 /**
@@ -72,12 +72,12 @@ export function IvanPhones() {
   }
 
   return (
-    <div style={{ border: '1px solid var(--ds-border)', borderRadius: 12, background: 'var(--ds-surface)', overflow: 'hidden' }}>
-      <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--ds-border)', display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)' }}>
-          <Smartphone size={15} style={{ color: 'var(--ds-t3)' }} /> Ivan local driver phones
+    <div style={{ border: '1px solid var(--tms-border)', borderRadius: 12, background: 'var(--tms-card)', overflow: 'hidden' }}>
+      <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--tms-border)', display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 14, fontWeight: 600, color: 'var(--tms-text)' }}>
+          <Smartphone size={15} style={{ color: 'var(--tms-muted)' }} /> Ivan local driver phones
         </span>
-        <span style={{ fontSize: 12.5, color: 'var(--ds-t3)' }}>Their own number and the company phone they carry</span>
+        <span style={{ fontSize: 12.5, color: 'var(--tms-muted)' }}>Their own number and the company phone they carry</span>
       </div>
 
       <div style={{ overflowX: 'auto' }}>
@@ -106,20 +106,20 @@ export function IvanPhones() {
                 </tr>
               )
             })}
-            {locals.length === 0 && <tr><td colSpan={4} style={{ ...TD, textAlign: 'center', color: 'var(--ds-t3)' }}>No active local drivers.</td></tr>}
+            {locals.length === 0 && <tr><td colSpan={4} style={{ ...TD, textAlign: 'center', color: 'var(--tms-muted)' }}>No active local drivers.</td></tr>}
           </tbody>
         </table>
       </div>
 
       {phones && phones.length > 0 && (
-        <div style={{ padding: '12px 16px', borderTop: '1px solid var(--ds-border)', background: 'var(--ds-bg)' }}>
-          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 8 }}>Company phones</div>
+        <div style={{ padding: '12px 16px', borderTop: '1px solid var(--tms-border)', background: 'var(--tms-bg)' }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--tms-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 8 }}>Company phones</div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px 20px' }}>
             {phones.map((p) => (
               <label key={p.label} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
-                <span style={{ fontWeight: 600, color: 'var(--ds-t1)', whiteSpace: 'nowrap' }}>{p.label}</span>
+                <span style={{ fontWeight: 600, color: 'var(--tms-text)', whiteSpace: 'nowrap' }}>{p.label}</span>
                 <input aria-label={`${p.label} number`} defaultValue={p.number ?? ''} placeholder="(000) 000-0000" onBlur={(e) => saveNumber(p.label, e.target.value)} style={{ ...INPUT, width: 140 }} />
-                <span style={{ fontSize: 12, color: 'var(--ds-t3)', whiteSpace: 'nowrap' }}>{p.assignedDriverId ? nameOf.get(p.assignedDriverId) ?? 'Assigned' : 'In the office'}</span>
+                <span style={{ fontSize: 12, color: 'var(--tms-muted)', whiteSpace: 'nowrap' }}>{p.assignedDriverId ? nameOf.get(p.assignedDriverId) ?? 'Assigned' : 'In the office'}</span>
               </label>
             ))}
           </div>

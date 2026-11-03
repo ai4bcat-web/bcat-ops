@@ -7,6 +7,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { FLEET_GROUPS, FLEET_GROUP_LABELS } from '@/lib/fleetGroups'
 import { isPosted } from '@/lib/invoiceStatus'
 import type { FleetGroup } from '@/types/equipment'
+import { useTmsTokens } from '@/features/tms/tmsTokens'
 
 function money(cents: number): string {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(cents / 100)
@@ -30,12 +31,11 @@ const indexYm = (idx: number) => `${Math.floor(idx / 12)}-${String((idx % 12) + 
 const currentYm = () => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}` }
 
 const inputStyle: React.CSSProperties = {
-  height: 32, borderRadius: 8, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)',
-  color: 'var(--ds-t1)', fontSize: 12.5, padding: '0 8px', fontFamily: 'inherit',
+  height: 32, borderRadius: 8, border: '1px solid var(--tms-border)', background: 'var(--tms-card)',
+  color: 'var(--tms-text)', fontSize: 12.5, padding: '0 8px', fontFamily: 'inherit',
 }
-const labelStyle: React.CSSProperties = { fontSize: 10.5, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.04em' }
+const labelStyle: React.CSSProperties = { fontSize: 10.5, fontWeight: 600, color: 'var(--tms-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }
 
-const FLEET_COLOR: Record<'all' | FleetGroup, string> = { all: '#1ea8f3', LOCAL: '#1ea8f3', AMAZON: '#f59e0b', BOX_TRUCK: '#8b5cf6' }
 
 // Cap the timeline so an all-time range stays readable.
 const MAX_BARS = 24
@@ -50,6 +50,7 @@ export function RepairSpendWidget() {
   const canInvoices = hasPageAccess('invoices')
   const invoices = useAppStore((s) => s.maintenanceInvoices)
   const equipment = useAppStore((s) => s.equipment)
+  const tk = useTmsTokens(['--tms-chart-1', '--tms-chart-4', '--tms-chart-6', '--tms-chart-axis', '--tms-chart-grid', '--tms-surface-hover'] as const)
 
   const [fleet, setFleet] = useState<'all' | FleetGroup>('all')
   const [equipId, setEquipId] = useState<string>('all')
@@ -118,33 +119,34 @@ export function RepairSpendWidget() {
   }, [filtered, from, to])
 
   const hasFilter = fleet !== 'all' || equipId !== 'all' || !!from || !!to
-  const barColor = FLEET_COLOR[fleet]
+  const fleetColor = { all: 'var(--tms-chart-1)', LOCAL: 'var(--tms-chart-1)', AMAZON: 'var(--tms-chart-4)', BOX_TRUCK: 'var(--tms-chart-6)' }
+  const barColor = { all: tk['--tms-chart-1'], LOCAL: tk['--tms-chart-1'], AMAZON: tk['--tms-chart-4'], BOX_TRUCK: tk['--tms-chart-6'] }[fleet]
 
   return (
-    <div style={{ background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 12, boxShadow: 'var(--sh-sm)', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-      <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--ds-border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+    <div style={{ background: 'var(--tms-card)', border: '1px solid var(--tms-border)', borderRadius: 12, boxShadow: 'var(--tms-shadow)', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+      <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--tms-border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <DollarSign size={16} style={{ color: 'var(--ds-t3)' }} />
+          <DollarSign size={16} style={{ color: 'var(--tms-muted)' }} />
           <div>
-            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)' }}>Repair Spend by Month</div>
-            <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 1 }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--tms-text)' }}>Repair Spend by Month</div>
+            <div style={{ fontSize: 12, color: 'var(--tms-muted)', marginTop: 1 }}>
               {money(total)} total{hasFilter ? ' · filtered' : ''} · {filtered.length} {filtered.length === 1 ? 'invoice' : 'invoices'}
             </div>
           </div>
         </div>
         {canInvoices && (
-          <Link to="/invoices" style={{ fontSize: 12, color: 'var(--ds-blue)', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
+          <Link to="/invoices" style={{ fontSize: 12, color: 'var(--tms-primary)', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
             Invoices <ChevronRight size={13} />
           </Link>
         )}
       </div>
 
       {/* Filters */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-end', gap: 8, padding: '12px 20px', borderBottom: '1px solid var(--ds-border)', background: 'var(--ds-bg)' }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-end', gap: 8, padding: '12px 20px', borderBottom: '1px solid var(--tms-border)', background: 'var(--tms-bg)' }}>
         {/* Fleet segmented control */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
           <span style={labelStyle}>Fleet</span>
-          <div style={{ display: 'flex', gap: 2, background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 8, padding: 2 }}>
+          <div style={{ display: 'flex', gap: 2, background: 'var(--tms-card)', border: '1px solid var(--tms-border)', borderRadius: 8, padding: 2 }}>
             {([['all', 'All'], ...FLEET_GROUPS.map((g) => [g, FLEET_GROUP_LABELS[g].replace(' (Ivan)', '').replace('Local', 'Ivan')] as [string, string])] as [string, string][]).map(([key, lbl]) => {
               const active = fleet === key
               return (
@@ -152,8 +154,8 @@ export function RepairSpendWidget() {
                   key={key}
                   onClick={() => changeFleet(key as 'all' | FleetGroup)}
                   style={{ padding: '4px 11px', height: 24, borderRadius: 6, border: 'none', fontSize: 12, fontWeight: 600, cursor: 'pointer',
-                    background: active ? (key === 'all' ? 'var(--ds-blue)' : FLEET_COLOR[key as FleetGroup]) : 'transparent',
-                    color: active ? '#fff' : 'var(--ds-t2)' }}
+                    background: active ? (key === 'all' ? 'var(--tms-primary)' : fleetColor[key as 'all' | FleetGroup]) : 'transparent',
+                    color: active ? 'var(--tms-on-primary)' : 'var(--tms-text-2)' }}
                 >
                   {lbl}
                 </button>
@@ -182,7 +184,7 @@ export function RepairSpendWidget() {
         {hasFilter && (
           <button
             onClick={() => { setFleet('all'); setEquipId('all'); setFrom(''); setTo('') }}
-            style={{ height: 32, padding: '0 10px', borderRadius: 8, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', color: 'var(--ds-t2)', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit' }}
+            style={{ height: 32, padding: '0 10px', borderRadius: 8, border: '1px solid var(--tms-border)', background: 'var(--tms-card)', color: 'var(--tms-text-2)', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit' }}
           >
             Clear
           </button>
@@ -192,22 +194,22 @@ export function RepairSpendWidget() {
       {/* Bar chart */}
       <div style={{ padding: '14px 12px 8px' }}>
         {data.length === 0 ? (
-          <div style={{ height: 220, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ds-t3)', fontSize: 13 }}>
+          <div style={{ height: 220, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--tms-muted)', fontSize: 13 }}>
             No repair spend for this selection.
           </div>
         ) : (
           <ResponsiveContainer width="100%" height={240}>
             <BarChart data={data} margin={{ top: 8, right: 12, bottom: 4, left: 4 }}>
-              <CartesianGrid stroke="rgba(15,23,42,0.05)" strokeDasharray="3 4" vertical={false} />
-              <XAxis dataKey="label" tick={{ fill: '#6b7588', fontSize: 11 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
-              <YAxis tickFormatter={(v) => moneyShort(Number(v))} tick={{ fill: '#6b7588', fontSize: 11 }} axisLine={false} tickLine={false} width={52} />
+              <CartesianGrid stroke={tk['--tms-chart-grid']} strokeDasharray="3 4" vertical={false} />
+              <XAxis dataKey="label" tick={{ fill: tk['--tms-chart-axis'], fontSize: 11 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
+              <YAxis tickFormatter={(v) => moneyShort(Number(v))} tick={{ fill: tk['--tms-chart-axis'], fontSize: 11 }} axisLine={false} tickLine={false} width={52} />
               <Tooltip
-                cursor={{ fill: 'rgba(15,23,42,0.04)' }}
+                cursor={{ fill: tk['--tms-surface-hover'] }}
                 formatter={(v, _n, item) => {
                   const count = (item as { payload?: { count?: number } })?.payload?.count ?? 0
                   return [`${money(Number(v))} · ${count} ${count === 1 ? 'invoice' : 'invoices'}`, 'Repair spend']
                 }}
-                contentStyle={{ background: 'white', border: '1px solid #e2e8f0', borderRadius: 8, fontSize: 12, boxShadow: 'var(--sh-md)' }}
+                contentStyle={{ background: 'var(--tms-card)', color: 'var(--tms-text)', border: '1px solid var(--tms-border)', borderRadius: 8, fontSize: 12, boxShadow: 'var(--tms-shadow-pop)' }}
               />
               <Bar dataKey="total" radius={[4, 4, 0, 0]} maxBarSize={54}>
                 {data.map((d) => <Cell key={d.ym} fill={barColor} />)}

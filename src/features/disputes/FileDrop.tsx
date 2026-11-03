@@ -39,10 +39,10 @@ export function FileDrop({
 
   return (
     <div>
-      <label htmlFor={id} className="flex items-center gap-1.5 text-sm font-medium" style={{ color: 'var(--ds-t1)', marginBottom: 4 }}>
+      <label htmlFor={id} className="flex items-center gap-1.5 text-sm font-medium" style={{ color: 'var(--tms-text)', marginBottom: 4 }}>
         <Upload size={16} /> {label}
       </label>
-      <p className="text-xs" style={{ color: 'var(--ds-t3)', marginBottom: 8 }}>
+      <p className="text-xs" style={{ color: 'var(--tms-muted)', marginBottom: 8 }}>
         {hint}
       </p>
       <div
@@ -68,12 +68,12 @@ export function FileDrop({
         }}
         className="flex flex-col items-center justify-center gap-2 rounded-lg text-center"
         style={{
-          border: `2px dashed ${dragging ? 'var(--ds-blue)' : 'var(--ds-border)'}`,
+          border: `2px dashed ${dragging ? 'var(--tms-primary)' : 'var(--tms-input-border)'}`,
           paddingLeft: 16,
           paddingRight: 16,
           paddingTop: 20,
           paddingBottom: 20,
-          background: dragging ? 'var(--ds-blue-bg)' : 'var(--ds-surface)',
+          background: dragging ? 'var(--tms-primary-tint)' : 'var(--tms-card)',
           cursor: disabled ? 'not-allowed' : 'pointer',
           opacity: disabled ? 0.6 : 1,
           transition: 'border-color 120ms, background 120ms',
@@ -95,17 +95,17 @@ export function FileDrop({
         />
         <div
           className="flex h-10 w-10 items-center justify-center rounded-full"
-          style={{ background: 'var(--ds-blue-bg)', color: 'var(--ds-blue-dark)' }}
+          style={{ background: 'var(--tms-primary-tint)', color: 'var(--tms-primary-ink)' }}
         >
           <Upload size={18} />
         </div>
         <span
           className="inline-flex items-center rounded-md text-sm font-semibold"
-          style={{ background: 'var(--ds-blue)', color: '#fff', pointerEvents: 'none', paddingLeft: 16, paddingRight: 16, paddingTop: 8, paddingBottom: 8 }}
+          style={{ background: 'var(--tms-primary)', color: 'var(--tms-on-primary)', pointerEvents: 'none', paddingLeft: 16, paddingRight: 16, paddingTop: 8, paddingBottom: 8 }}
         >
           {browseLabel}
         </span>
-        <span className="text-xs" style={{ color: 'var(--ds-t3)' }}>
+        <span className="text-xs" style={{ color: 'var(--tms-muted)' }}>
           {disabled ? 'Maximum reached' : 'or drag and drop here'}
         </span>
       </div>
@@ -115,26 +115,26 @@ export function FileDrop({
             <li
               key={`${file.name}-${file.size}-${i}`}
               className="flex items-center gap-2 rounded-md border text-xs"
-              style={{ borderColor: 'var(--ds-border)', background: 'var(--ds-surface)', paddingLeft: 8, paddingRight: 8, paddingTop: 4, paddingBottom: 4 }}
+              style={{ borderColor: 'var(--tms-border)', background: 'var(--tms-card)', paddingLeft: 8, paddingRight: 8, paddingTop: 4, paddingBottom: 4 }}
             >
               <PhotoPreview file={file} />
               <span className="max-w-[160px] truncate">{file.name}</span>
               {markFirstAsConfirmation && i === 0 && (
                 <span
                   className="rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
-                  style={{ background: 'var(--ds-blue)', color: '#fff' }}
+                  style={{ background: 'var(--tms-primary)', color: 'var(--tms-on-primary)' }}
                 >
                   Trip confirmation
                 </span>
               )}
-              <span className="font-mono" style={{ color: 'var(--ds-t3)' }}>
+              <span className="font-mono" style={{ color: 'var(--tms-muted)' }}>
                 {(file.size / 1024 / 1024).toFixed(2)} MB
               </span>
               <button
                 type="button"
                 onClick={() => onRemove(i)}
                 className="rounded font-medium"
-                style={{ background: 'var(--ds-red-bg)', color: 'var(--ds-red)', paddingLeft: 6, paddingRight: 6, paddingTop: 2, paddingBottom: 2 }}
+                style={{ background: 'var(--tms-badge-red-tint)', color: 'var(--tms-badge-red)', paddingLeft: 6, paddingRight: 6, paddingTop: 2, paddingBottom: 2 }}
                 aria-label={`Remove ${file.name}`}
               >
                 Remove
@@ -153,7 +153,7 @@ export function PhotoPreview({ file }: { file: File }) {
     fileContentType(file).startsWith('image/') ? URL.createObjectURL(file) : null,
   )
   useEffect(() => () => { if (url) URL.revokeObjectURL(url) }, [url])
-  if (!url) return <FileText size={14} style={{ color: 'var(--ds-t3)' }} />
+  if (!url) return <FileText size={14} style={{ color: 'var(--tms-muted)' }} />
   return (
     <img
       src={url}

@@ -14,6 +14,11 @@ import { holdingArea } from '@/lib/truckInactive'
 import { todayChicago } from '@/lib/recurringRevision'
 import { MarkInactiveDialog, HoldingArea } from './TruckParking'
 import { toast } from 'sonner'
+import { TmsButton } from '@/features/tms/kit/TmsButton'
+import { TmsDialog } from '@/features/tms/kit/TmsDialog'
+import { TmsScrollPage } from '@/features/tms/kit/TmsScrollPage'
+import { TmsStatRow } from '@/features/tms/kit/TmsStatRow'
+import type { TmsStat } from '@/features/tms/kit/TmsStatRow'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -24,7 +29,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetBody, SheetFooter, S
 import { FormSection, Field } from '@/components/ui/form-section'
 import {
   Truck, Container, Plus, Pencil, Trash2, ChevronDown, ChevronUp, ArrowUp, ArrowDown, PauseCircle, PlayCircle,
-  CheckCircle2, AlertTriangle, Clock, Wrench, FileText, X, Search, ShieldCheck, Gauge, DollarSign,
+  CheckCircle2, AlertTriangle, Clock, Wrench, FileText, Search, ShieldCheck, Gauge, DollarSign,
 } from 'lucide-react'
 import { thBase, tdBase } from '@/features/maintenance/maintenanceUi'
 import { cn, formatVin } from '@/lib/utils'
@@ -57,11 +62,11 @@ function dotInspectionState(dateStr?: string): ExpiryState {
 
 function ExpiryBadge({ date, label, stateFn = expiryState }: { date?: string; label: string; stateFn?: (d?: string) => ExpiryState }) {
   const state = stateFn(date)
-  if (state === 'none') return <span className="text-xs text-slate-400">—</span>
+  if (state === 'none') return <span className="text-xs text-muted-foreground">—</span>
   const styles: Record<ExpiryState, string> = {
-    overdue:  'bg-red-50 text-red-700 border-red-200',
-    expiring: 'bg-amber-50 text-amber-700 border-amber-200',
-    ok:       'bg-emerald-50 text-emerald-700 border-emerald-200',
+    overdue:  'bg-[color:var(--tms-badge-red-tint)] text-[color:var(--tms-badge-red)] border-[color:var(--tms-badge-red)]',
+    expiring: 'bg-[color:var(--tms-badge-orange-tint)] text-[color:var(--tms-badge-orange)] border-[color:var(--tms-badge-orange)]',
+    ok:       'bg-[color:var(--tms-badge-green-tint)] text-[color:var(--tms-badge-green)] border-[color:var(--tms-badge-green)]',
     none:     '',
   }
   const icon: Record<ExpiryState, React.ReactNode> = {
@@ -119,16 +124,16 @@ function ComplianceCell({ equip, isTruck, dates }: { equip: Equipment; isTruck: 
   const worst = chips.reduce<ExpiryState>((w, c) => (SEVERITY_ORDER[c.state] > SEVERITY_ORDER[w] ? c.state : w), 'none')
 
   const pill =
-    worst === 'overdue'  ? { cls: 'bg-red-50 text-red-700 border-red-200',            label: 'Action needed', icon: <AlertTriangle className="size-3" /> } :
-    worst === 'expiring' ? { cls: 'bg-amber-50 text-amber-700 border-amber-200',      label: 'Renewal soon',  icon: <Clock className="size-3" /> } :
-    worst === 'ok'       ? { cls: 'bg-emerald-50 text-emerald-700 border-emerald-200', label: 'All current',   icon: <CheckCircle2 className="size-3" /> } :
-                           { cls: 'bg-slate-50 text-slate-400 border-slate-200',       label: 'No dates',      icon: null }
+    worst === 'overdue'  ? { cls: 'bg-[color:var(--tms-badge-red-tint)] text-[color:var(--tms-badge-red)] border-[color:var(--tms-badge-red)]',            label: 'Action needed', icon: <AlertTriangle className="size-3" /> } :
+    worst === 'expiring' ? { cls: 'bg-[color:var(--tms-badge-orange-tint)] text-[color:var(--tms-badge-orange)] border-[color:var(--tms-badge-orange)]',      label: 'Renewal soon',  icon: <Clock className="size-3" /> } :
+    worst === 'ok'       ? { cls: 'bg-[color:var(--tms-badge-green-tint)] text-[color:var(--tms-badge-green)] border-[color:var(--tms-badge-green)]', label: 'All current',   icon: <CheckCircle2 className="size-3" /> } :
+                           { cls: 'bg-muted text-muted-foreground border-border',       label: 'No dates',      icon: null }
 
   const chipCls: Record<ExpiryState, string> = {
-    overdue:  'bg-red-50 text-red-700 border-red-200',
-    expiring: 'bg-amber-50 text-amber-700 border-amber-200',
-    ok:       'bg-slate-50 text-slate-500 border-slate-200',
-    none:     'bg-slate-50 text-slate-300 border-slate-100',
+    overdue:  'bg-[color:var(--tms-badge-red-tint)] text-[color:var(--tms-badge-red)] border-[color:var(--tms-badge-red)]',
+    expiring: 'bg-[color:var(--tms-badge-orange-tint)] text-[color:var(--tms-badge-orange)] border-[color:var(--tms-badge-orange)]',
+    ok:       'bg-muted text-muted-foreground border-border',
+    none:     'bg-muted text-[color:var(--tms-disabled)] border-border',
   }
 
   return (
@@ -152,9 +157,9 @@ function ComplianceCell({ equip, isTruck, dates }: { equip: Equipment; isTruck: 
 }
 
 function priorityColor(p: TaskPriority) {
-  return p === 'high' ? 'bg-red-50 text-red-700 border-red-200'
-       : p === 'med'  ? 'bg-amber-50 text-amber-700 border-amber-200'
-       :                'bg-slate-50 text-slate-600 border-slate-200'
+  return p === 'high' ? 'bg-[color:var(--tms-badge-red-tint)] text-[color:var(--tms-badge-red)] border-[color:var(--tms-badge-red)]'
+       : p === 'med'  ? 'bg-[color:var(--tms-badge-orange-tint)] text-[color:var(--tms-badge-orange)] border-[color:var(--tms-badge-orange)]'
+       :                'bg-muted text-muted-foreground border-border'
 }
 
 function formatCents(cents: number) {
@@ -316,7 +321,7 @@ function EquipmentForm({ initial, onSave, onClose, onDelete, initialCosts }: Equ
               <FormSection icon={<Gauge size={15} />} title="Ownership & Telematics" subtitle="Owner, fleet manager & ELD">
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 14 }}>
                   <Field label="Ownership">
-                    <select className="h-9 w-full rounded-md border border-input px-3 text-sm bg-white" value={form.ownership} onChange={(e) => set('ownership', e.target.value)}>
+                    <select className="h-9 w-full rounded-md border border-input px-3 text-sm bg-card" value={form.ownership} onChange={(e) => set('ownership', e.target.value)}>
                       <option value="owned">Owned</option>
                       <option value="leased">Leased</option>
                       <option value="rented">Rented</option>
@@ -324,7 +329,7 @@ function EquipmentForm({ initial, onSave, onClose, onDelete, initialCosts }: Equ
                     </select>
                   </Field>
                   <Field label="Fleet Manager">
-                    <select className="h-9 w-full rounded-md border border-input px-3 text-sm bg-white" value={form.fleetManagerAssignee} onChange={(e) => set('fleetManagerAssignee', e.target.value)}>
+                    <select className="h-9 w-full rounded-md border border-input px-3 text-sm bg-card" value={form.fleetManagerAssignee} onChange={(e) => set('fleetManagerAssignee', e.target.value)}>
                       <option value="">— None —</option>
                       <option value="jason">Jason</option>
                       <option value="ryne">Ryne</option>
@@ -335,7 +340,7 @@ function EquipmentForm({ initial, onSave, onClose, onDelete, initialCosts }: Equ
                   <>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 14 }}>
                       <Field label="Fleet Group">
-                        <select className="h-9 w-full rounded-md border border-input px-3 text-sm bg-white" value={form.fleetGroup} onChange={(e) => set('fleetGroup', e.target.value)}>
+                        <select className="h-9 w-full rounded-md border border-input px-3 text-sm bg-card" value={form.fleetGroup} onChange={(e) => set('fleetGroup', e.target.value)}>
                           <option value="">— Unassigned —</option>
                           <option value="LOCAL">Local (Ivan)</option>
                           <option value="AMAZON">Amazon</option>
@@ -345,7 +350,7 @@ function EquipmentForm({ initial, onSave, onClose, onDelete, initialCosts }: Equ
                         <Input value={form.fuelCard} onChange={(e) => set('fuelCard', e.target.value)} placeholder="e.g. 00023" className="h-9" />
                       </Field>
                     </div>
-                    <div style={{ fontSize: 11.5, color: 'var(--ds-t3)', marginTop: -6 }}>
+                    <div style={{ fontSize: 11.5, color: 'var(--tms-muted)', marginTop: -6 }}>
                       Fleet Group drives the profitability view. The fuel card prefix maps EFS fuel imports to this truck — no code change needed. Separate multiple cards with commas.
                     </div>
                     <Field label="ELD / Telematics">
@@ -356,14 +361,14 @@ function EquipmentForm({ initial, onSave, onClose, onDelete, initialCosts }: Equ
                       </ToggleGroup>
                       {form.eldSource === 'motive' && (
                         <>
-                          <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 7, padding: '8px 10px', borderRadius: 8, background: 'var(--ds-blue-soft, #eff6ff)', color: '#0369a1', fontSize: 12 }}>
+                          <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 7, padding: '8px 10px', borderRadius: 8, background: 'var(--tms-primary-tint)', color: 'var(--tms-primary-ink)', fontSize: 12 }}>
                             <CheckCircle2 size={13} style={{ flexShrink: 0 }} /> Mileage &amp; location auto-sync from Motive, matched on the unit number above{form.motiveVehicleNumber.trim() ? ` — overridden to Motive vehicle #${form.motiveVehicleNumber.trim()}` : ''}.
                           </div>
                           <Input value={form.motiveVehicleNumber} onChange={(e) => set('motiveVehicleNumber', e.target.value)} placeholder="Motive vehicle # if different (e.g. ELD moved from a retired truck)" className="h-9 mt-2" />
                         </>
                       )}
                       {form.eldSource === 'blueink' && (
-                        <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 7, padding: '8px 10px', borderRadius: 8, background: 'var(--ds-blue-soft, #eff6ff)', color: '#0369a1', fontSize: 12 }}>
+                        <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 7, padding: '8px 10px', borderRadius: 8, background: 'var(--tms-primary-tint)', color: 'var(--tms-primary-ink)', fontSize: 12 }}>
                           <CheckCircle2 size={13} style={{ flexShrink: 0 }} /> Mileage &amp; location auto-sync from Blue Ink Tech, matched on the unit number above.
                         </div>
                       )}
@@ -398,7 +403,7 @@ function EquipmentForm({ initial, onSave, onClose, onDelete, initialCosts }: Equ
                   <Field label="Other cost label">
                     <Input value={form.otherLabel} onChange={(e) => set('otherLabel', e.target.value)} placeholder="e.g. ELD subscription, parking" className="h-9" />
                   </Field>
-                  <div style={{ fontSize: 11.5, color: 'var(--ds-t3)' }}>
+                  <div style={{ fontSize: 11.5, color: 'var(--tms-muted)' }}>
                     Annual amounts are spread to a monthly recurring cost and prorated per week in Profitability. {initial?.id ? 'Clearing a field stops that recurring cost.' : 'Leave any blank to skip.'} You can also manage these in Expenses → Manage.
                   </div>
                 </FormSection>
@@ -417,7 +422,7 @@ function EquipmentForm({ initial, onSave, onClose, onDelete, initialCosts }: Equ
                     </>
                   )}
                 </div>
-                <p style={{ fontSize: 11.5, color: 'var(--ds-t3)', marginTop: 10 }}>
+                <p style={{ fontSize: 11.5, color: 'var(--tms-muted)', marginTop: 10 }}>
                   Insurance, IFTA and IRP dates from a certificate uploaded on Asset Documents take
                   precedence over what is typed here — these fields are the fallback when nothing is on file.
                 </p>
@@ -433,7 +438,7 @@ function EquipmentForm({ initial, onSave, onClose, onDelete, initialCosts }: Equ
                     return (
                       <button key={key} type="button" onClick={() => set(key, !on)}
                         style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 999, fontSize: 12.5, fontWeight: 500, cursor: 'pointer',
-                          border: `1.5px solid ${on ? '#86efac' : 'var(--ds-border)'}`, background: on ? '#f0fdf4' : 'var(--ds-surface)', color: on ? '#15803d' : 'var(--ds-t3)' }}>
+                          border: `1.5px solid ${on ? 'var(--tms-badge-green)' : 'var(--tms-border)'}`, background: on ? 'var(--tms-badge-green-tint)' : 'var(--tms-card)', color: on ? 'var(--tms-badge-green)' : 'var(--tms-muted)' }}>
                         {on && <CheckCircle2 size={13} />} {label}
                       </button>
                     )
@@ -486,13 +491,8 @@ function TaskForm({ equipmentId, initial, onSave, onClose }: TaskFormProps) {
   const set = (k: string, v: unknown) => setForm((f) => ({ ...f, [k]: v }))
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md">
-        <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-slate-100">
-          <h2 className="text-base font-semibold">{initial?.id ? 'Edit Task' : 'Add Maintenance Task'}</h2>
-          <button aria-label="Close" onClick={onClose} className="text-slate-400 hover:text-slate-600"><X className="size-4" /></button>
-        </div>
-        <form onSubmit={(e) => { e.preventDefault(); onSave({ equipmentId, title: form.title.trim(), dueDate: form.dueDate || undefined, priority: form.priority, status: form.status, notes: form.notes.trim() || undefined, autoDot: form.autoDot, assignee: form.assignee || undefined }) }} className="px-6 py-5 space-y-4">
+    <TmsDialog open onOpenChange={(o) => { if (!o) onClose() }} title={initial?.id ? 'Edit Task' : 'Add Maintenance Task'}>
+        <form onSubmit={(e) => { e.preventDefault(); onSave({ equipmentId, title: form.title.trim(), dueDate: form.dueDate || undefined, priority: form.priority, status: form.status, notes: form.notes.trim() || undefined, autoDot: form.autoDot, assignee: form.assignee || undefined }) }} className="space-y-4">
           <div className="space-y-1.5">
             <Label className="text-xs text-muted-foreground uppercase tracking-wider">Task *</Label>
             <Input value={form.title} onChange={(e) => set('title', e.target.value)} placeholder="e.g. Oil change" required className="h-9" />
@@ -504,7 +504,7 @@ function TaskForm({ equipmentId, initial, onSave, onClose }: TaskFormProps) {
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs text-muted-foreground uppercase tracking-wider">Priority</Label>
-              <select className="h-9 w-full rounded-md border border-slate-200 px-3 text-sm bg-white" value={form.priority} onChange={(e) => set('priority', e.target.value)}>
+              <select className="h-9 w-full rounded-md border border-border px-3 text-sm bg-card" value={form.priority} onChange={(e) => set('priority', e.target.value)}>
                 <option value="high">High</option>
                 <option value="med">Medium</option>
                 <option value="low">Low</option>
@@ -514,14 +514,14 @@ function TaskForm({ equipmentId, initial, onSave, onClose }: TaskFormProps) {
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1.5">
               <Label className="text-xs text-muted-foreground uppercase tracking-wider">Status</Label>
-              <select className="h-9 w-full rounded-md border border-slate-200 px-3 text-sm bg-white" value={form.status} onChange={(e) => set('status', e.target.value)}>
+              <select className="h-9 w-full rounded-md border border-border px-3 text-sm bg-card" value={form.status} onChange={(e) => set('status', e.target.value)}>
                 <option value="upcoming">Upcoming</option>
                 <option value="complete">Complete</option>
               </select>
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs text-muted-foreground uppercase tracking-wider">Assignee</Label>
-              <select className="h-9 w-full rounded-md border border-slate-200 px-3 text-sm bg-white" value={form.assignee} onChange={(e) => set('assignee', e.target.value)}>
+              <select className="h-9 w-full rounded-md border border-border px-3 text-sm bg-card" value={form.assignee} onChange={(e) => set('assignee', e.target.value)}>
                 <option value="">— None —</option>
                 <option value="jason">Jason</option>
                 <option value="ryne">Ryne</option>
@@ -534,15 +534,14 @@ function TaskForm({ equipmentId, initial, onSave, onClose }: TaskFormProps) {
           </label>
           <div className="space-y-1.5">
             <Label className="text-xs text-muted-foreground uppercase tracking-wider">Notes</Label>
-            <textarea value={form.notes} onChange={(e) => set('notes', e.target.value)} rows={2} className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-primary" />
+            <textarea value={form.notes} onChange={(e) => set('notes', e.target.value)} rows={2} className="w-full rounded-md border border-border px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-primary" />
           </div>
           <div className="flex justify-end gap-3 pt-4">
             <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
             <Button type="submit">Save</Button>
           </div>
         </form>
-      </div>
-    </div>
+    </TmsDialog>
   )
 }
 
@@ -569,13 +568,8 @@ function InvoiceForm({ equipmentId, initial, onSave, onClose }: InvoiceFormProps
   const set = (k: string, v: unknown) => setForm((f) => ({ ...f, [k]: v }))
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg">
-        <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-slate-100">
-          <h2 className="text-base font-semibold">{initial?.id ? 'Edit Invoice' : 'Add Invoice'}</h2>
-          <button aria-label="Close" onClick={onClose} className="text-slate-400 hover:text-slate-600"><X className="size-4" /></button>
-        </div>
-        <form onSubmit={(e) => { e.preventDefault(); onSave({ equipmentId, date: form.date || undefined, vendor: form.vendor.trim() || undefined, description: form.description.trim() || undefined, amount: Math.round(parseFloat(form.amount || '0') * 100), invoiceNumber: form.invoiceNumber.trim() || undefined, paymentMethod: form.paymentMethod || undefined, paymentDate: form.paymentDate || undefined, assignee: form.assignee || undefined }) }} className="px-6 py-5 space-y-4">
+    <TmsDialog open onOpenChange={(o) => { if (!o) onClose() }} title={initial?.id ? 'Edit Invoice' : 'Add Invoice'}>
+        <form onSubmit={(e) => { e.preventDefault(); onSave({ equipmentId, date: form.date || undefined, vendor: form.vendor.trim() || undefined, description: form.description.trim() || undefined, amount: Math.round(parseFloat(form.amount || '0') * 100), invoiceNumber: form.invoiceNumber.trim() || undefined, paymentMethod: form.paymentMethod || undefined, paymentDate: form.paymentDate || undefined, assignee: form.assignee || undefined }) }} className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1.5">
               <Label className="text-xs text-muted-foreground uppercase tracking-wider">Date</Label>
@@ -601,7 +595,7 @@ function InvoiceForm({ equipmentId, initial, onSave, onClose }: InvoiceFormProps
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs text-muted-foreground uppercase tracking-wider">Payment Method</Label>
-              <select className="h-9 w-full rounded-md border border-slate-200 px-3 text-sm bg-white" value={form.paymentMethod} onChange={(e) => set('paymentMethod', e.target.value)}>
+              <select className="h-9 w-full rounded-md border border-border px-3 text-sm bg-card" value={form.paymentMethod} onChange={(e) => set('paymentMethod', e.target.value)}>
                 <option value="">— None —</option>
                 <option value="check">Check</option>
                 <option value="card">Card</option>
@@ -617,7 +611,7 @@ function InvoiceForm({ equipmentId, initial, onSave, onClose }: InvoiceFormProps
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs text-muted-foreground uppercase tracking-wider">Assignee</Label>
-              <select className="h-9 w-full rounded-md border border-slate-200 px-3 text-sm bg-white" value={form.assignee} onChange={(e) => set('assignee', e.target.value)}>
+              <select className="h-9 w-full rounded-md border border-border px-3 text-sm bg-card" value={form.assignee} onChange={(e) => set('assignee', e.target.value)}>
                 <option value="">— None —</option>
                 <option value="jason">Jason</option>
                 <option value="ryne">Ryne</option>
@@ -629,8 +623,7 @@ function InvoiceForm({ equipmentId, initial, onSave, onClose }: InvoiceFormProps
             <Button type="submit">Save</Button>
           </div>
         </form>
-      </div>
-    </div>
+    </TmsDialog>
   )
 }
 
@@ -660,7 +653,7 @@ function DetailPanel({ equip, dates, tasks, invoices, driverName }: DetailPanelP
   const isTruck = equip.type === 'truck'
 
   return (
-    <div className="bg-slate-50/60 border-t border-slate-100 px-6 py-5 space-y-5">
+    <div className="bg-muted border-t border-border px-6 py-5 space-y-5">
 
       {/* Compliance */}
       <div>
@@ -673,7 +666,7 @@ function DetailPanel({ equip, dates, tasks, invoices, driverName }: DetailPanelP
           <ExpiryBadge date={equip.bobtailInsuranceDate}    label="Bobtail" />
         </div>
         {!equip.dotInspectionDate && !dates.ins && (
-          <p className="text-xs text-slate-400 mt-1">No compliance dates entered.</p>
+          <p className="text-xs text-muted-foreground mt-1">No compliance dates entered.</p>
         )}
       </div>
 
@@ -695,7 +688,7 @@ function DetailPanel({ equip, dates, tasks, invoices, driverName }: DetailPanelP
       </div>
 
       {equip.notes && (
-        <p className="text-sm text-muted-foreground bg-white/80 rounded-lg px-4 py-3 border border-slate-100">{equip.notes}</p>
+        <p className="text-sm text-muted-foreground bg-card rounded-lg px-4 py-3 border border-border">{equip.notes}</p>
       )}
 
       <Separator />
@@ -710,12 +703,12 @@ function DetailPanel({ equip, dates, tasks, invoices, driverName }: DetailPanelP
         </div>
 
         {upcoming.length === 0 && complete.length === 0 ? (
-          <p className="text-xs text-slate-400">No tasks yet.</p>
+          <p className="text-xs text-muted-foreground">No tasks yet.</p>
         ) : (
           <div className="space-y-1.5">
             {upcoming.map((t) => (
-              <div key={t.id} className="flex items-center gap-3 bg-white rounded-lg px-3 py-2 border border-slate-100">
-                <button onClick={() => { updateMaintenanceTask(t.id, { status: 'complete' }); toast.success('Task marked complete') }} className="shrink-0 text-slate-300 hover:text-emerald-500 transition-colors">
+              <div key={t.id} className="flex items-center gap-3 bg-card rounded-lg px-3 py-2 border border-border">
+                <button onClick={() => { updateMaintenanceTask(t.id, { status: 'complete' }); toast.success('Task marked complete') }} className="shrink-0 text-[color:var(--tms-disabled)] hover:text-[color:var(--tms-badge-green)] transition-colors">
                   <CheckCircle2 className="size-4" />
                 </button>
                 <div className="flex-1 min-w-0">
@@ -725,12 +718,12 @@ function DetailPanel({ equip, dates, tasks, invoices, driverName }: DetailPanelP
                 <span className={cn('text-xs font-semibold px-2 py-0.5 rounded-full border', priorityColor(t.priority))}>
                   {t.priority === 'high' ? 'High' : t.priority === 'med' ? 'Med' : 'Low'}
                 </span>
-                <button aria-label="Edit task" onClick={() => setTaskModal(t)} className="text-slate-400 hover:text-slate-600"><Pencil className="size-3.5" /></button>
-                <button aria-label="Delete task" onClick={() => { deleteMaintenanceTask(t.id); toast.success('Task deleted') }} className="text-slate-400 hover:text-red-500"><Trash2 className="size-3.5" /></button>
+                <button aria-label="Edit task" onClick={() => setTaskModal(t)} className="text-muted-foreground hover:text-muted-foreground"><Pencil className="size-3.5" /></button>
+                <button aria-label="Delete task" onClick={() => { deleteMaintenanceTask(t.id); toast.success('Task deleted') }} className="text-muted-foreground hover:text-[color:var(--tms-badge-red)]"><Trash2 className="size-3.5" /></button>
               </div>
             ))}
             {complete.length > 0 && (
-              <p className="text-xs text-slate-400 pt-1">{complete.length} completed task{complete.length !== 1 ? 's' : ''}</p>
+              <p className="text-xs text-muted-foreground pt-1">{complete.length} completed task{complete.length !== 1 ? 's' : ''}</p>
             )}
           </div>
         )}
@@ -755,19 +748,19 @@ function DetailPanel({ equip, dates, tasks, invoices, driverName }: DetailPanelP
         </div>
 
         {invoices.length === 0 ? (
-          <p className="text-xs text-slate-400">No invoices yet.</p>
+          <p className="text-xs text-muted-foreground">No invoices yet.</p>
         ) : (
           <div className="space-y-1.5">
             {[...invoices].sort((a, b) => (b.date ?? '') < (a.date ?? '') ? -1 : 1).map((inv) => (
-              <div key={inv.id} className="flex items-center gap-3 bg-white rounded-lg px-3 py-2 border border-slate-100">
-                <FileText className="size-4 text-slate-400 shrink-0" />
+              <div key={inv.id} className="flex items-center gap-3 bg-card rounded-lg px-3 py-2 border border-border">
+                <FileText className="size-4 text-muted-foreground shrink-0" />
                 <div className="flex-1 min-w-0">
                   <span className="text-sm font-medium text-foreground">{inv.vendor || 'Unknown vendor'}</span>
                   {inv.description && <span className="text-xs text-muted-foreground ml-2">{inv.description}</span>}
-                  {inv.date && <span className="text-xs text-slate-400 ml-2">{inv.date}</span>}
+                  {inv.date && <span className="text-xs text-muted-foreground ml-2">{inv.date}</span>}
                 </div>
                 <span className="text-sm font-semibold text-foreground">{formatCents(inv.amount)}</span>
-                <button aria-label="Delete invoice" onClick={() => { deleteMaintenanceInvoice(inv.id); toast.success('Invoice deleted') }} className="text-slate-400 hover:text-red-500"><Trash2 className="size-3.5" /></button>
+                <button aria-label="Delete invoice" onClick={() => { deleteMaintenanceInvoice(inv.id); toast.success('Invoice deleted') }} className="text-muted-foreground hover:text-[color:var(--tms-badge-red)]"><Trash2 className="size-3.5" /></button>
               </div>
             ))}
           </div>
@@ -837,12 +830,12 @@ function OwnershipBadge({
   const next: TruckOwnership = type ? OWNER_NEXT[type] : 'COMPANY'
   const label = type ? OWNER_LABEL[type] : '?'
   const cls = type === 'COMPANY'
-    ? 'bg-sky-50 text-sky-700 border-sky-200 hover:bg-sky-100'
+    ? 'bg-[color:var(--tms-primary-tint)] text-[color:var(--tms-primary-ink)] border-[color:var(--tms-primary)] hover:bg-[color:var(--tms-primary-tint)]'
     : type === 'OWNER_OPERATOR'
-      ? 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'
+      ? 'bg-[color:var(--tms-badge-orange-tint)] text-[color:var(--tms-badge-orange)] border-[color:var(--tms-badge-orange)] hover:bg-[color:var(--tms-badge-orange-tint)]'
       : type === 'LEASED'
-        ? 'bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-100'
-        : 'bg-slate-50 text-slate-400 border-slate-200 hover:bg-slate-100'
+        ? 'bg-[color:var(--tms-badge-purple-tint)] text-[color:var(--tms-badge-purple)] border-[color:var(--tms-badge-purple)] hover:bg-[color:var(--tms-badge-purple-tint)]'
+        : 'bg-muted text-muted-foreground border-border hover:bg-muted'
   return (
     <button
       onClick={(e) => { e.stopPropagation(); onClick(next) }}
@@ -869,7 +862,7 @@ function EquipRow({ equip, dates, tasks, invoices, driverName, colSpan, ownershi
     <>
       <tr
         className="maint-row"
-        style={{ cursor: 'pointer', opacity: !equip.active ? 0.55 : 1, background: expanded ? 'var(--ds-bg-2)' : undefined }}
+        style={{ cursor: 'pointer', opacity: !equip.active ? 0.55 : 1, background: expanded ? 'var(--tms-surface)' : undefined }}
         onClick={() => setExpanded((v) => !v)}
       >
         {/* Equipment — icon box + unit# (+ ownership) + year · make/model subtitle */}
@@ -879,8 +872,8 @@ function EquipRow({ equip, dates, tasks, invoices, driverName, colSpan, ownershi
               className="flex items-center justify-center shrink-0"
               style={{
                 width: 36, height: 36, borderRadius: 8,
-                background: isTruck ? 'var(--ds-blue-bg)' : 'var(--ds-violet-bg)',
-                color: isTruck ? 'var(--ds-blue-dark)' : '#7c3aed',
+                background: isTruck ? 'var(--tms-badge-blue-tint)' : 'var(--tms-badge-purple-tint)',
+                color: isTruck ? 'var(--tms-badge-blue)' : 'var(--tms-badge-purple)',
               }}
             >
               {isTruck ? <Truck className="size-4" /> : <Container className="size-4" />}
@@ -899,8 +892,8 @@ function EquipRow({ equip, dates, tasks, invoices, driverName, colSpan, ownershi
         </td>
 
         {/* Plate */}
-        <td style={{ ...tdBase, fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--ds-t1)' }}>
-          {equip.plate || <span style={{ color: 'var(--ds-muted-soft)' }}>—</span>}
+        <td style={{ ...tdBase, fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--tms-text)' }}>
+          {equip.plate || <span style={{ color: 'var(--tms-disabled)' }}>—</span>}
         </td>
 
         {/* Compliance — worst-of pill + DOT/IFTA/IRP/INS chips */}
@@ -929,17 +922,17 @@ function EquipRow({ equip, dates, tasks, invoices, driverName, colSpan, ownershi
           {upcomingTasks.length === 0
             ? <span className="text-xs text-muted-foreground/40">None</span>
             : highTasks.length > 0
-              ? <span className="inline-flex items-center gap-1 text-xs font-semibold text-red-600">
+              ? <span className="inline-flex items-center gap-1 text-xs font-semibold text-[color:var(--tms-badge-red)]">
                   <AlertTriangle className="size-3" />{highTasks.length} high{upcomingTasks.length > highTasks.length ? ` · ${upcomingTasks.length - highTasks.length} other` : ''}
                 </span>
-              : <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-600">
+              : <span className="inline-flex items-center gap-1 text-xs font-medium text-[color:var(--tms-badge-orange)]">
                   <Wrench className="size-3" />{upcomingTasks.length} open
                 </span>}
         </td>
 
         {/* Repair Spend */}
-        <td style={{ ...tdBase, fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 600, color: 'var(--ds-t1)', textAlign: 'right' }}>
-          {repairSpend > 0 ? formatCents(repairSpend) : <span style={{ color: 'var(--ds-muted-soft)' }}>—</span>}
+        <td style={{ ...tdBase, fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 600, color: 'var(--tms-text)', textAlign: 'right' }}>
+          {repairSpend > 0 ? formatCents(repairSpend) : <span style={{ color: 'var(--tms-disabled)' }}>—</span>}
         </td>
 
         {/* Actions */}
@@ -990,7 +983,7 @@ function EquipRow({ equip, dates, tasks, invoices, driverName, colSpan, ownershi
 
       {expanded && (
         <tr>
-          <td colSpan={colSpan} style={{ padding: 0, borderBottom: '1px solid var(--ds-border)', background: 'var(--ds-bg)' }}>
+          <td colSpan={colSpan} style={{ padding: 0, borderBottom: '1px solid var(--tms-border)', background: 'var(--tms-bg)' }}>
             <DetailPanel equip={equip} dates={dates} tasks={tasks} invoices={invoices} driverName={driverName} />
           </td>
         </tr>
@@ -1003,7 +996,6 @@ function EquipRow({ equip, dates, tasks, invoices, driverName, colSpan, ownershi
 
 export function TrucksPage() {
   const isMobile            = useIsMobile()
-  const padX                = isMobile ? 14 : 32
   const navigate            = useNavigate()
   const { hasPageAccess }   = useAuth()
   const canTruckDocs        = hasPageAccess('truckDocs')
@@ -1110,12 +1102,12 @@ export function TrucksPage() {
   }).length
   const openTaskCount = maintenanceTasks.filter((t) => t.status === 'upcoming').length
 
-  const FLEET_KPIS: { label: string; value: number; color: string; icon: React.ReactNode; to?: string }[] = [
-    { label: 'Total Units',       value: equipment.length, color: '#1ea8f3', icon: <Truck size={14} /> },
-    { label: 'Trucks',            value: trucks.length,    color: '#0369a1', icon: <Truck size={14} /> },
-    { label: 'Trailers',          value: trailers.length,  color: '#a78bfa', icon: <Container size={14} /> },
-    { label: 'Compliance Alerts', value: alertCount,       color: '#ef4444', icon: <AlertTriangle size={14} />, to: canTruckDocs ? '/truck-docs' : undefined },
-    { label: 'Open Tasks',        value: openTaskCount,    color: '#f59e0b', icon: <Wrench size={14} />, to: canMaintenance ? '/maintenance' : undefined },
+  const FLEET_KPIS: TmsStat[] = [
+    { label: 'Total Units',       value: String(equipment.length), icon: Truck },
+    { label: 'Trucks',            value: String(trucks.length),    icon: Truck },
+    { label: 'Trailers',          value: String(trailers.length),  icon: Container },
+    { label: 'Compliance Alerts', value: String(alertCount),       icon: AlertTriangle, tone: alertCount > 0 ? 'bad' : 'default', onClick: canTruckDocs ? () => navigate('/truck-docs') : undefined, ariaLabel: canTruckDocs ? 'View compliance alerts' : undefined },
+    { label: 'Open Tasks',        value: String(openTaskCount),    icon: Wrench, tone: openTaskCount > 0 ? 'warn' : 'default', onClick: canMaintenance ? () => navigate('/maintenance') : undefined, ariaLabel: canMaintenance ? 'View open tasks' : undefined },
   ]
 
   const TABS = [
@@ -1187,52 +1179,27 @@ export function TrucksPage() {
   }
 
   return (
-    <div style={{ height: '100%', overflowY: 'auto', background: 'var(--ds-bg)' }}>
+    <TmsScrollPage
+      title="Fleet"
+      subtitle="Equipment, compliance & maintenance"
+      stickyHead
+      actions={
+        <>
+          <TmsButton variant="secondary">Export</TmsButton>
+          <TmsButton variant="primary" onClick={() => setShowForm('new')}>
+            <Plus size={14} /> Add Equipment
+          </TmsButton>
+        </>
+      }
+    >
+      <TmsStatRow items={FLEET_KPIS} columns={5} />
 
-      {/* ── Page header ──────────────────────────────────────────────────── */}
-      <div style={{ position: 'sticky', top: 0, zIndex: 10, background: 'var(--ds-surface)', borderBottom: '1px solid var(--ds-border)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', padding: `${isMobile ? 16 : 20}px ${padX}px 12px` }}>
-          <div>
-            <h1 style={{ fontSize: 20, fontWeight: 600, letterSpacing: '-0.01em', color: 'var(--ds-t1)', margin: 0 }}>Fleet</h1>
-            <p style={{ fontSize: 12.5, color: 'var(--ds-t3)', marginTop: 2 }}>Equipment, compliance &amp; maintenance</p>
-          </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button style={{ display: 'flex', alignItems: 'center', gap: 6, height: 34, padding: '0 14px', background: 'var(--ds-bg)', border: '1px solid var(--ds-border)', borderRadius: 8, fontSize: 13, fontWeight: 500, color: 'var(--ds-t2)', cursor: 'pointer', fontFamily: 'inherit' }}>
-              Export
-            </button>
-            <button onClick={() => setShowForm('new')} style={{ display: 'flex', alignItems: 'center', gap: 6, height: 34, padding: '0 14px', background: 'var(--ds-blue)', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, color: '#fff', cursor: 'pointer', fontFamily: 'inherit' }}>
-              <Plus size={14} /> Add Equipment
-            </button>
-          </div>
-        </div>
-
-        {/* KPI strip — icon cards (Compliance Alerts / Open Tasks link out) */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: isMobile ? 10 : 12, padding: `0 ${padX}px 16px` }}>
-          {FLEET_KPIS.map((k) => (
-            <div
-              key={k.label}
-              onClick={k.to ? () => navigate(k.to!) : undefined}
-              title={k.to ? `View ${k.label.toLowerCase()}` : undefined}
-              style={{ display: 'flex', alignItems: 'center', gap: 12, background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 10, padding: '12px 16px', cursor: k.to ? 'pointer' : 'default' }}
-            >
-              <div style={{ width: 36, height: 36, borderRadius: 8, background: 'var(--ds-bg)', color: k.color, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                {k.icon}
-              </div>
-              <div>
-                <div style={{ fontSize: 11, fontWeight: 500, color: 'var(--ds-t3)', letterSpacing: '0.03em', textTransform: 'uppercase' }}>{k.label}</div>
-                <div style={{ fontSize: 22, fontWeight: 600, color: k.color, letterSpacing: '-0.02em', marginTop: 2, fontVariantNumeric: 'tabular-nums' }}>{k.value}</div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div style={{ padding: isMobile ? '16px 12px' : '24px 32px' }}>
+      <div style={{ marginTop: 16 }}>
         <HoldingArea held={held} activeTrucks={activeTrucks} onChanged={() => expenseData.refresh()} />
 
         {/* Toolbar */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', background: 'var(--ds-bg)', border: '1px solid var(--ds-border)', borderRadius: 9, padding: 3, gap: 2 }}>
+          <div style={{ display: 'flex', background: 'var(--tms-bg)', border: '1px solid var(--tms-border)', borderRadius: 9, padding: 3, gap: 2 }}>
             {TABS.map(({ key, label }) => {
               const active = typeFilter === key
               return (
@@ -1242,9 +1209,9 @@ export function TrucksPage() {
                   style={{
                     padding: '4px 12px', borderRadius: 7, border: 'none', cursor: 'pointer',
                     fontSize: 12.5, fontWeight: active ? 600 : 500, fontFamily: 'inherit',
-                    background: active ? '#fff' : 'transparent',
-                    color: active ? 'var(--ds-t1)' : 'var(--ds-t3)',
-                    boxShadow: active ? 'var(--sh-sm)' : 'none',
+                    background: active ? 'var(--tms-card)' : 'transparent',
+                    color: active ? 'var(--tms-text)' : 'var(--tms-muted)',
+                    boxShadow: active ? 'var(--tms-shadow)' : 'none',
                     whiteSpace: 'nowrap',
                   }}
                 >
@@ -1254,7 +1221,7 @@ export function TrucksPage() {
             })}
           </div>
           <div style={{ position: 'relative' }}>
-            <Search size={13} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--ds-t3)', pointerEvents: 'none' }} />
+            <Search size={13} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--tms-muted)', pointerEvents: 'none' }} />
             <input
               type="text"
               placeholder="Search equipment…"
@@ -1262,15 +1229,15 @@ export function TrucksPage() {
               onChange={(e) => setSearch(e.target.value)}
               style={{
                 width: 240, height: 34, paddingLeft: 30, paddingRight: 10, boxSizing: 'border-box',
-                background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 7,
-                fontSize: 12.5, color: 'var(--ds-t1)', fontFamily: 'inherit', outline: 'none',
+                background: 'var(--tms-card)', border: '1px solid var(--tms-border)', borderRadius: 7,
+                fontSize: 12.5, color: 'var(--tms-text)', fontFamily: 'inherit', outline: 'none',
               }}
             />
           </div>
         </div>
 
         {/* Equipment table */}
-        <div style={{ borderRadius: 12, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', boxShadow: 'var(--sh-sm)', overflow: 'hidden' }}>
+        <div style={{ borderRadius: 12, border: '1px solid var(--tms-border)', background: 'var(--tms-card)', boxShadow: 'var(--tms-shadow)', overflow: 'hidden' }}>
           {filtered.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 gap-2 text-muted-foreground">
               <Truck className="size-8 opacity-20" />
@@ -1286,18 +1253,18 @@ export function TrucksPage() {
                   <button
                     key={e.id}
                     onClick={() => setShowForm(e)}
-                    style={{ display: 'block', width: '100%', textAlign: 'left', background: 'var(--ds-surface)', border: 'none', borderBottom: '1px solid var(--ds-border)', padding: '12px 16px', cursor: 'pointer' }}
+                    style={{ display: 'block', width: '100%', textAlign: 'left', background: 'var(--tms-card)', border: 'none', borderBottom: '1px solid var(--tms-border)', padding: '12px 16px', cursor: 'pointer' }}
                   >
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span style={{ fontWeight: 700, fontFamily: 'var(--font-mono)', fontSize: 14, color: 'var(--ds-t1)' }}>#{e.unitNumber}</span>
-                      <span style={{ fontSize: 11, color: 'var(--ds-t3)', textTransform: 'capitalize' }}>{e.type}</span>
-                      {!e.active && <span style={{ fontSize: 11, color: 'var(--ds-t3)' }}>· inactive{e.inactiveSince ? ` from ${e.inactiveSince}` : ''}</span>}
-                      {taskCount > 0 && <span style={{ marginLeft: 'auto', fontSize: 11, color: '#dc2626' }}>{taskCount} task{taskCount !== 1 ? 's' : ''}</span>}
+                      <span style={{ fontWeight: 700, fontFamily: 'var(--font-mono)', fontSize: 14, color: 'var(--tms-text)' }}>#{e.unitNumber}</span>
+                      <span style={{ fontSize: 11, color: 'var(--tms-muted)', textTransform: 'capitalize' }}>{e.type}</span>
+                      {!e.active && <span style={{ fontSize: 11, color: 'var(--tms-muted)' }}>· inactive{e.inactiveSince ? ` from ${e.inactiveSince}` : ''}</span>}
+                      {taskCount > 0 && <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--tms-badge-red)' }}>{taskCount} task{taskCount !== 1 ? 's' : ''}</span>}
                     </div>
-                    <div style={{ fontSize: 13, color: 'var(--ds-t2)', marginTop: 3 }}>
+                    <div style={{ fontSize: 13, color: 'var(--tms-text-2)', marginTop: 3 }}>
                       {[e.year, e.make, e.model].filter(Boolean).join(' ') || '—'}
                     </div>
-                    <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 2, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                    <div style={{ fontSize: 12, color: 'var(--tms-muted)', marginTop: 2, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                       {e.plate && <span>{e.plate}</span>}
                       {driver?.name && <span>· {driver.name}</span>}
                       {repair > 0 && <span>· ${repair.toFixed(0)} repairs</span>}
@@ -1331,7 +1298,7 @@ export function TrucksPage() {
                           onClick={() => toggleSort(k)}
                           style={{ ...thBase, textAlign: i === 5 ? 'right' : 'left', cursor: 'pointer', userSelect: 'none' }}
                         >
-                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: active ? 'var(--ds-t1)' : undefined }}>
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: active ? 'var(--tms-text)' : undefined }}>
                             {label}
                             {active && (sortDir === 'asc' ? <ArrowUp size={11} /> : <ArrowDown size={11} />)}
                           </span>
@@ -1390,6 +1357,6 @@ export function TrucksPage() {
           onDelete={showForm !== 'new' && showForm.id ? () => { handleDelete(showForm.id); setShowForm(null) } : undefined}
         />
       )}
-    </div>
+    </TmsScrollPage>
   )
 }

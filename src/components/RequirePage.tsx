@@ -44,23 +44,22 @@ function preferredLandingPath(hasPageAccess: (k: string) => boolean): string | n
 
 /**
  * Shown only to a user who may open nothing at all. It renders under the TMS shell and
- * on the existing BCAT Ops routes alike, so every colour reads the shell's `--tms-*`
- * token where there is one and the app's own `--ds-*` token where there is not.
+ * on the legacy BCAT Ops routes alike, so every colour is a `--tms-*` token.
  */
 function NoAccess() {
   const { logout, user } = useAuth()
-  const surface = 'var(--tms-card, var(--ds-surface))'
-  const border = 'var(--tms-border, var(--ds-border))'
+  const surface = 'var(--tms-card)'
+  const border = 'var(--tms-border)'
   return (
-    <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--tms-bg, var(--ds-bg))', padding: 24 }}>
-      <div style={{ maxWidth: 380, textAlign: 'center', background: surface, border: `1px solid ${border}`, borderRadius: 'var(--tms-radius-card, 6px)', boxShadow: 'var(--tms-shadow-pop, none)', padding: '32px 28px' }}>
-        <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--tms-text, var(--ds-t1))' }}>No page access</div>
-        <p style={{ fontSize: 13, color: 'var(--tms-muted, var(--ds-t3))', marginTop: 8, lineHeight: 1.5 }}>
+    <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--tms-bg)', padding: 24 }}>
+      <div style={{ maxWidth: 380, textAlign: 'center', background: surface, border: `1px solid ${border}`, borderRadius: 'var(--tms-radius-card)', boxShadow: 'var(--tms-shadow-pop)', padding: '32px 28px' }}>
+        <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--tms-text)' }}>No page access</div>
+        <p style={{ fontSize: 13, color: 'var(--tms-muted)', marginTop: 8, lineHeight: 1.5 }}>
           {user?.email ? `${user.email} isn't` : "You aren't"} granted access to any pages yet. Ask an admin to grant access on the Users page.
         </p>
         <button
           onClick={() => logout()}
-          style={{ marginTop: 18, height: 34, padding: '0 16px', borderRadius: 4, border: `1px solid ${border}`, background: surface, color: 'var(--tms-text, var(--ds-t1))', fontSize: 13, fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit' }}
+          style={{ marginTop: 18, height: 34, padding: '0 16px', borderRadius: 4, border: `1px solid ${border}`, background: surface, color: 'var(--tms-text)', fontSize: 13, fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit' }}
         >
           Sign out
         </button>

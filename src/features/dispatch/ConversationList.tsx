@@ -24,23 +24,23 @@ function KindIcon({ kind }: { kind: string | null | undefined }) {
   if (kind === 'VOICEMAIL') return <Voicemail className={cls} />
   if (kind === 'MMS') return <ImageIcon className={cls} />
   if (kind === 'NOTE') return <StickyNote className={cls} />
-  if (kind === 'STATUS') return <MapPin className={cls} style={{ color: 'var(--ds-green)' }} />
+  if (kind === 'STATUS') return <MapPin className={cls} style={{ color: 'var(--tms-badge-green)' }} />
   return null
 }
 
 export function ConversationList({ rows, selectedId, onSelect, now, subline, statusOf }: Props) {
   const { drivers } = useDrivers()
   if (rows.length === 0) {
-    return <div style={{ padding: 24, fontSize: 13, color: 'var(--ds-t3)', textAlign: 'center' }}>No conversations here.</div>
+    return <div style={{ padding: 24, fontSize: 13, color: 'var(--tms-muted)', textAlign: 'center' }}>No conversations here.</div>
   }
   const sections = groupByFleet(rows, drivers)
   return (
     <div>
       {sections.map((section) => (
         <section key={section.key} aria-label={section.label}>
-          <div style={{ position: 'sticky', top: 0, zIndex: 1, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 12px', fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--ds-t3)', background: 'var(--ds-bg-2)', borderBottom: '1px solid var(--ds-border-soft)' }}>
+          <div style={{ position: 'sticky', top: 0, zIndex: 1, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 12px', fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--tms-muted)', background: 'var(--tms-surface)', borderBottom: '1px solid var(--tms-border)' }}>
             <span>{section.label} <span style={{ fontWeight: 500 }}>· {section.rows.length}</span></span>
-            {section.unread ? <span style={{ color: 'var(--ds-blue)' }}>{section.unread} unread</span> : null}
+            {section.unread ? <span style={{ color: 'var(--tms-primary)' }}>{section.unread} unread</span> : null}
           </div>
     <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
       {section.rows.map((c) => {
@@ -55,35 +55,35 @@ export function ConversationList({ rows, selectedId, onSelect, now, subline, sta
               type="button"
               onClick={() => onSelect(c.id)}
               aria-current={active ? 'true' : undefined}
-              className={cn('w-full text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-blue)]')}
+              className={cn('w-full text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--tms-primary)]')}
               style={{
                 display: 'grid', gridTemplateColumns: 'auto 1fr auto', gridTemplateRows: 'auto auto', gap: '2px 10px', padding: '10px 12px 10px 10px',
-                background: active ? color.bg : unread ? 'var(--ds-blue-bg)' : 'transparent',
-                borderBottom: '1px solid var(--ds-border-soft)', borderLeft: `4px solid ${color.border}`,
+                background: active ? color.bg : unread ? 'var(--tms-primary-tint)' : 'transparent',
+                borderBottom: '1px solid var(--tms-border)', borderLeft: `4px solid ${color.border}`,
                 cursor: 'pointer',
               }}
             >
-              <span aria-hidden="true" style={{ gridRow: '1 / span 2', alignSelf: 'center', width: 34, height: 34, borderRadius: 17, background: color.avatarBg, color: '#fff', fontSize: 12, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', boxShadow: unread ? `0 0 0 2px ${color.border}` : 'none' }}>{initialsOf(title)}</span>
+              <span aria-hidden="true" style={{ gridRow: '1 / span 2', alignSelf: 'center', width: 34, height: 34, borderRadius: 17, background: color.avatarBg, color: 'var(--tms-on-primary)', fontSize: 12, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', boxShadow: unread ? `0 0 0 2px ${color.border}` : 'none' }}>{initialsOf(title)}</span>
               <span style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
                 <span style={{ fontSize: 14, fontWeight: unread ? 700 : 600, color: color.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</span>
-                {unread ? <span aria-label={`${c.unreadCount} unread`} style={{ fontSize: 10, fontWeight: 800, letterSpacing: '0.06em', background: 'var(--ds-blue)', color: '#fff', borderRadius: 4, padding: '1px 5px', flexShrink: 0 }}>NEW</span> : null}
-                {isDriver ? <span style={{ fontSize: 11, color: 'var(--ds-t3)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{prettyPhone(c.phone)}</span> : null}
-                {isDriver ? (() => { const k = unitTypeOf(drivers.find((d) => d.id === c.driverId)); return <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: k ? 'var(--ds-t2)' : 'var(--ds-amber)', background: 'var(--ds-bg-2)', borderRadius: 4, padding: '1px 5px', whiteSpace: 'nowrap' }}>{unitKindLabel(k)}</span> })() : null}
-                {c.status === 'ARCHIVED' ? <span style={{ fontSize: 10, color: 'var(--ds-t3)', border: '1px solid var(--ds-border)', borderRadius: 4, padding: '0 4px' }}>Archived</span> : null}
+                {unread ? <span aria-label={`${c.unreadCount} unread`} style={{ fontSize: 10, fontWeight: 800, letterSpacing: '0.06em', background: 'var(--tms-primary)', color: 'var(--tms-on-primary)', borderRadius: 4, padding: '1px 5px', flexShrink: 0 }}>NEW</span> : null}
+                {isDriver ? <span style={{ fontSize: 11, color: 'var(--tms-muted)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{prettyPhone(c.phone)}</span> : null}
+                {isDriver ? (() => { const k = unitTypeOf(drivers.find((d) => d.id === c.driverId)); return <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: k ? 'var(--tms-text-2)' : 'var(--tms-badge-orange)', background: 'var(--tms-surface)', borderRadius: 4, padding: '1px 5px', whiteSpace: 'nowrap' }}>{unitKindLabel(k)}</span> })() : null}
+                {c.status === 'ARCHIVED' ? <span style={{ fontSize: 10, color: 'var(--tms-muted)', border: '1px solid var(--tms-border)', borderRadius: 4, padding: '0 4px' }}>Archived</span> : null}
               </span>
-              <span style={{ fontSize: 11, color: unread ? color.border : 'var(--ds-t3)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{listTime(c.lastMessageAt, now)}</span>
-              <span style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0, fontSize: 12, color: unread ? 'var(--ds-t1)' : 'var(--ds-t3)' }}>
+              <span style={{ fontSize: 11, color: unread ? color.border : 'var(--tms-muted)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{listTime(c.lastMessageAt, now)}</span>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0, fontSize: 12, color: unread ? 'var(--tms-text)' : 'var(--tms-muted)' }}>
                 <KindIcon kind={c.lastKind} />
                 <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {c.lastDirection === 'OUT' && c.lastKind !== 'NOTE' ? `${staffName(c.lastSentBy) || 'Sent'}: ` : ''}{c.lastPreview ?? (isDriver ? prettyPhone(c.phone) : 'New conversation')}
                 </span>
               </span>
-              {statusOf?.(c) ? <span style={{ gridColumn: '2 / span 2', fontSize: 11, color: 'var(--ds-t2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title="Last status update from the driver app"><MapPin className="size-3 inline-block align-[-2px]" style={{ color: 'var(--ds-green)' }} /> {statusOf(c)}</span> : null}
-              {subline?.(c) ? <span style={{ gridColumn: '2 / span 2', fontSize: 11, color: 'var(--ds-green)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>📍 {subline(c)}</span> : null}
+              {statusOf?.(c) ? <span style={{ gridColumn: '2 / span 2', fontSize: 11, color: 'var(--tms-text-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title="Last status update from the driver app"><MapPin className="size-3 inline-block align-[-2px]" style={{ color: 'var(--tms-badge-green)' }} /> {statusOf(c)}</span> : null}
+              {subline?.(c) ? <span style={{ gridColumn: '2 / span 2', fontSize: 11, color: 'var(--tms-badge-green)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>📍 {subline(c)}</span> : null}
               {/* Pinned beside the preview: left to auto-placement it fell under the avatar once the status and location lines were on the row. */}
               <span style={{ gridColumn: 3, gridRow: 2, display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end', alignSelf: 'center' }}>
-                {c.assignedTo ? <span title={`Dispatcher: ${c.assignedTo}`} style={{ fontSize: 10, color: 'var(--ds-t3)', background: 'var(--ds-bg-2)', borderRadius: 4, padding: '1px 5px', whiteSpace: 'nowrap', maxWidth: 72, overflow: 'hidden', textOverflow: 'ellipsis' }}>{signatureName(c.assignedTo) ?? staffName(c.assignedTo)}</span> : null}
-                {unread ? <span style={{ minWidth: 18, height: 18, borderRadius: 9, background: color.border, color: '#fff', fontSize: 11, fontWeight: 600, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' }}>{c.unreadCount}</span> : null}
+                {c.assignedTo ? <span title={`Dispatcher: ${c.assignedTo}`} style={{ fontSize: 10, color: 'var(--tms-muted)', background: 'var(--tms-surface)', borderRadius: 4, padding: '1px 5px', whiteSpace: 'nowrap', maxWidth: 72, overflow: 'hidden', textOverflow: 'ellipsis' }}>{signatureName(c.assignedTo) ?? staffName(c.assignedTo)}</span> : null}
+                {unread ? <span style={{ minWidth: 18, height: 18, borderRadius: 9, background: color.border, color: 'var(--tms-on-primary)', fontSize: 11, fontWeight: 600, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' }}>{c.unreadCount}</span> : null}
               </span>
             </button>
           </li>

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
-import { FolderOpen, Search, Users, Truck as TruckIcon, Container, FileStack, UserPlus, EyeOff } from 'lucide-react'
+import { Search, Users, Truck as TruckIcon, Container, FileStack, UserPlus, EyeOff } from 'lucide-react'
 import { useAppStore } from '@/store/useAppStore'
 import { useAuth } from '@/hooks/useAuth'
 import { useFileHub } from '@/hooks/useFileHub'
@@ -18,6 +18,12 @@ import { onboardingProgress, driverStatus, DRIVER_STATUS_LABELS, resolveDriverEm
 import type { OnboardingTask } from '@/types'
 import { EntityFilePanel } from './EntityFilePanel'
 import { DriverDrawer } from '@/features/drivers/DriverDrawer'
+import { TmsAlert } from '@/features/tms/kit/TmsAlert'
+import { TmsBadge, type TmsTone } from '@/features/tms/kit/TmsBadge'
+import { TmsButton } from '@/features/tms/kit/TmsButton'
+import { TmsEmptyState } from '@/features/tms/kit/TmsEmptyState'
+import { TmsInput } from '@/features/tms/kit/TmsInput'
+import { TmsScrollPage } from '@/features/tms/kit/TmsScrollPage'
 import { PrivateDocsModal } from './PrivateDocsModal'
 import { InviteDriverModal } from './InviteDriverModal'
 import { IvanPhones } from '@/features/driver-info/IvanPhones'
@@ -37,14 +43,14 @@ const getInitials = (name: string) =>
   name.trim().split(/\s+/).slice(0, 2).map((p) => p[0] ?? '').join('').toUpperCase() || '?'
 
 const TH: React.CSSProperties = {
-  fontSize: 10, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase',
+  fontSize: 10, fontWeight: 600, color: 'var(--tms-muted)', textTransform: 'uppercase',
   letterSpacing: '0.04em', padding: '8px 10px', textAlign: 'left', whiteSpace: 'nowrap',
 }
-const TD: React.CSSProperties = { fontSize: 13, color: 'var(--ds-t1)', padding: '9px 10px', textAlign: 'left' }
+const TD: React.CSSProperties = { fontSize: 13, color: 'var(--tms-text)', padding: '9px 10px', textAlign: 'left' }
 
 /** ●●●○○ — filled per required slot on file, amber when something needs attention. */
 function ReadyDots({ score }: { score: ReadyScore }) {
-  const color = score.missing > 0 ? 'var(--ds-t3)' : score.attention > 0 ? '#b45309' : '#15803d'
+  const color = score.missing > 0 ? 'var(--tms-muted)' : score.attention > 0 ? 'var(--tms-badge-orange)' : 'var(--tms-badge-green)'
   return (
     <span title={`${score.onFile} of ${score.required} on file${score.attention ? ` · ${score.attention} need attention` : ''}`}
       style={{ display: 'inline-flex', gap: 3, alignItems: 'center' }}>
@@ -52,23 +58,23 @@ function ReadyDots({ score }: { score: ReadyScore }) {
         <span key={i} style={{
           width: 7, height: 7, borderRadius: '50%',
           background: i < score.onFile ? color : 'transparent',
-          border: i < score.onFile ? 'none' : '1px solid var(--ds-border)',
+          border: i < score.onFile ? 'none' : '1px solid var(--tms-border)',
         }} />
       ))}
-      <span style={{ fontSize: 11.5, color: 'var(--ds-t3)', marginLeft: 4, fontVariantNumeric: 'tabular-nums' }}>
+      <span style={{ fontSize: 11.5, color: 'var(--tms-muted)', marginLeft: 4, fontVariantNumeric: 'tabular-nums' }}>
         {score.onFile}/{score.required}
       </span>
     </span>
   )
 }
 
-const EXPIRY_STYLE: Record<SlotState, { bg: string; fg: string }> = {
-  VALID:         { bg: '#f0fdf4', fg: '#15803d' },
-  EXPIRING_SOON: { bg: '#fffbeb', fg: '#b45309' },
-  EXPIRED:       { bg: '#fef2f2', fg: '#b91c1c' },
-  MISSING:       { bg: 'var(--ds-bg)', fg: 'var(--ds-t3)' },
-  WAIVED:        { bg: 'var(--ds-bg)', fg: 'var(--ds-t3)' },
-  PENDING_REVIEW:{ bg: '#fffbeb', fg: '#b45309' },
+const EXPIRY_TONE: Record<SlotState, TmsTone> = {
+  VALID: 'green',
+  EXPIRING_SOON: 'orange',
+  EXPIRED: 'red',
+  MISSING: 'gray',
+  WAIVED: 'gray',
+  PENDING_REVIEW: 'orange',
 }
 
 const shortDate = (d: string) =>
@@ -76,30 +82,28 @@ const shortDate = (d: string) =>
 
 /** The same expiry chip, sized to sit under a value rather than in its own column. */
 function ExpiryInline({ info }: { info: ExpiryInfo }) {
-  if (!info.date) return <div style={{ fontSize: 11, color: 'var(--ds-t3)' }}>no expiry</div>
-  const style = EXPIRY_STYLE[info.state]
+  if (!info.date) return <div style={{ fontSize: 11, color: 'var(--tms-muted)' }}>no expiry</div>
   return (
-    <div style={{ fontSize: 11, color: style.fg, fontVariantNumeric: 'tabular-nums' }}>
-      {shortDate(info.date)}{info.conflict && ' ⚠'}
+    <div style={{ fontSize: 11, fontVariantNumeric: 'tabular-nums' }}>
+      <TmsBadge tone={EXPIRY_TONE[info.state]}>{shortDate(info.date)}{info.conflict && ' ⚠'}</TmsBadge>
     </div>
   )
 }
 
 /** A driver's CDL / med-card expiry, colour-coded, flagging a record-vs-document mismatch. */
 function ExpiryCell({ info }: { info: ExpiryInfo }) {
-  const style = EXPIRY_STYLE[info.state]
   if (!info.date) {
-    return <td style={{ ...TD, color: 'var(--ds-t3)' }}>—</td>
+    return <td style={{ ...TD, color: 'var(--tms-muted)' }}>—</td>
   }
   return (
     <td style={{ ...TD, whiteSpace: 'nowrap' }}>
-      <span style={{ fontSize: 11.5, fontWeight: 600, color: style.fg, background: style.bg, padding: '2px 7px', borderRadius: 999, fontVariantNumeric: 'tabular-nums' }}>
+      <TmsBadge tone={EXPIRY_TONE[info.state]} style={{ fontVariantNumeric: 'tabular-nums' }}>
         {shortDate(info.date)}
-      </span>
+      </TmsBadge>
       {info.conflict && (
         <span
           title={`The driver record says ${info.recordDate} but the uploaded document says ${info.documentDate}. Showing the driver record — fix whichever is wrong.`}
-          style={{ marginLeft: 5, fontSize: 11, color: '#b45309', cursor: 'help' }}>⚠</span>
+          style={{ marginLeft: 5, fontSize: 11, color: 'var(--tms-badge-orange)', cursor: 'help' }}>⚠</span>
       )}
     </td>
   )
@@ -270,77 +274,60 @@ export function FilesPage() {
     <button onClick={() => { setTab(t); setOpenId(null) }}
       style={{
         display: 'flex', alignItems: 'center', gap: 6, height: 32, padding: '0 14px', borderRadius: 8,
-        border: `1px solid ${tab === t ? 'var(--ds-blue)' : 'var(--ds-border)'}`,
-        background: tab === t ? 'var(--ds-blue-soft, #eff6ff)' : 'var(--ds-surface)',
-        color: tab === t ? 'var(--ds-blue)' : 'var(--ds-t2)',
+        border: `1px solid ${tab === t ? 'var(--tms-primary)' : 'var(--tms-border)'}`,
+        background: tab === t ? 'var(--tms-primary-tint)' : 'var(--tms-card)',
+        color: tab === t ? 'var(--tms-primary)' : 'var(--tms-text-2)',
         fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
       }}>
       <Icon size={14} /> {label}
-      <span style={{ fontSize: 11.5, color: 'var(--ds-t3)', fontWeight: 500 }}>{count}</span>
+      <span style={{ fontSize: 11.5, color: 'var(--tms-muted)', fontWeight: 500 }}>{count}</span>
     </button>
   )
 
   return (
-    <div style={{ height: '100%', overflowY: 'auto', background: 'var(--ds-bg)' }}>
-      <div style={{ position: 'sticky', top: 0, zIndex: 10, background: 'var(--ds-surface)', borderBottom: '1px solid var(--ds-border)' }}>
-        <div style={{ padding: '20px 32px 12px' }}>
-          <h1 style={{ fontSize: 20, fontWeight: 600, letterSpacing: '-0.01em', color: 'var(--ds-t1)', margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <FolderOpen size={20} /> Files
-          </h1>
-          <p style={{ fontSize: 12.5, color: 'var(--ds-t3)', marginTop: 2 }}>
-            Every document and detail on file for each driver and truck — view, download or upload what's missing.
-            Shares one store with Compliance, Onboarding and Asset Documents, so nothing is uploaded twice.
-          </p>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 14, flexWrap: 'wrap' }}>
-            {tabBtn('TRUCK', 'Trucks', TruckIcon, trucks.length)}
-            {tabBtn('TRAILER', 'Trailers', Container, activeTrailers.length)}
-            {tabBtn('DRIVER', 'Drivers', Users, activeDrivers.length)}
-            {isAdmin && (
-              <button onClick={() => setPrivateDocsOpen(true)} title="Choose which documents are hidden from everyone else"
-                style={{ display: 'flex', alignItems: 'center', gap: 6, height: 32, padding: '0 12px', borderRadius: 8, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', color: 'var(--ds-t2)', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
-                <EyeOff size={14} /> Private docs
-              </button>
-            )}
-            {tab === 'DRIVER' && (
-              // Drivers are never created by hand — they're invited, and their own
-              // application fills in the record.
-              <button onClick={() => setInviteOpen(true)}
-                title="Send someone an application to fill in"
-                style={{ display: 'flex', alignItems: 'center', gap: 6, height: 32, padding: '0 12px', borderRadius: 8, border: 'none', background: 'var(--ds-blue)', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
-                <UserPlus size={14} /> Invite driver
-              </button>
-            )}
-            <div style={{ position: 'relative', flex: 1, minWidth: 200, maxWidth: 320 }}>
-              <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--ds-t3)' }} />
-              <input value={query} onChange={(e) => setQuery(e.target.value)}
-                placeholder={tab === 'DRIVER' ? 'Search name, phone, CDL, truck #' : 'Search unit #, VIN, plate, make'}
-                style={{
-                  height: 32, width: '100%', borderRadius: 8, border: '1px solid var(--ds-border)',
-                  padding: '0 10px 0 30px', fontSize: 13, background: 'var(--ds-surface)', color: 'var(--ds-t1)',
-                  boxSizing: 'border-box', fontFamily: 'inherit',
-                }} />
-            </div>
+    <TmsScrollPage
+      title="Files"
+      subtitle="Every document and detail on file for each driver and truck — view, download or upload what's missing. Shares one store with Compliance, Onboarding and Asset Documents, so nothing is uploaded twice."
+      stickyHead
+      toolbar={(
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          {tabBtn('TRUCK', 'Trucks', TruckIcon, trucks.length)}
+          {tabBtn('TRAILER', 'Trailers', Container, activeTrailers.length)}
+          {tabBtn('DRIVER', 'Drivers', Users, activeDrivers.length)}
+          {isAdmin && (
+            <TmsButton onClick={() => setPrivateDocsOpen(true)} title="Choose which documents are hidden from everyone else">
+              <EyeOff size={14} /> Private docs
+            </TmsButton>
+          )}
+          {tab === 'DRIVER' && (
+            // Drivers are never created by hand — they're invited, and their own
+            // application fills in the record.
+            <TmsButton variant="primary" onClick={() => setInviteOpen(true)} title="Send someone an application to fill in">
+              <UserPlus size={14} /> Invite driver
+            </TmsButton>
+          )}
+          <div style={{ position: 'relative', flex: 1, minWidth: 200, maxWidth: 320 }}>
+            <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--tms-muted)' }} />
+            <TmsInput value={query} onChange={(e) => setQuery(e.target.value)}
+              placeholder={tab === 'DRIVER' ? 'Search name, phone, CDL, truck #' : 'Search unit #, VIN, plate, make'}
+              style={{ paddingLeft: 30 }} />
           </div>
         </div>
-      </div>
-
-      <div style={{ padding: '20px 32px 40px', maxWidth: 1400, margin: '0 auto' }}>
+      )}
+    >
+      <div>
         {storeError && (
-          <div style={{ color: '#dc2626', fontSize: 13, padding: 12, border: '1px solid #fecaca', borderRadius: 8, background: '#fef2f2', marginBottom: 14 }}>
-            Couldn't load drivers and loads: {storeError}
-          </div>
+          <TmsAlert tone="red" className="mb-3">Couldn't load drivers and loads: {storeError}</TmsAlert>
         )}
         {hub.error && (
-          <div style={{ color: '#dc2626', fontSize: 13, padding: 12, border: '1px solid #fecaca', borderRadius: 8, background: '#fef2f2', marginBottom: 14 }}>
-            Couldn't load documents: {hub.error}
-          </div>
+          <TmsAlert tone="red" className="mb-3">Couldn't load documents: {hub.error}</TmsAlert>
         )}
 
         {/* overflow-x so a narrow window scrolls the table instead of clipping columns. */}
-        <div style={{ borderRadius: 12, border: '1px solid var(--ds-border)', overflowX: 'auto', background: 'var(--ds-surface)', boxShadow: 'var(--sh-sm)' }}>
+        <div style={{ borderRadius: 12, border: '1px solid var(--tms-border)', overflowX: 'auto', background: 'var(--tms-card)', boxShadow: 'var(--tms-shadow)' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
-              <tr style={{ borderBottom: '1px solid var(--ds-border)' }}>
+              <tr style={{ borderBottom: '1px solid var(--tms-border)' }}>
                 {tab === 'DRIVER' ? (
                   <>
                     <th style={TH}>Driver</th><th style={TH}>Type</th><th style={TH}>Contact</th>
@@ -358,17 +345,17 @@ export function FilesPage() {
             </thead>
             <tbody>
               {tab === 'DRIVER' && shownDrivers.length === 0 && (
-                <tr><td colSpan={8} style={{ ...TD, textAlign: 'center', color: 'var(--ds-t3)', padding: 24 }}>
-                  {activeDrivers.length === 0
+                <tr><td colSpan={8} style={TD}>
+                  <TmsEmptyState compact message={null} title={activeDrivers.length === 0
                     ? (storeLoading ? 'Loading drivers…' : 'No drivers loaded. If the roster is empty everywhere, the drivers query failed — check the console.')
-                    : `No drivers match "${query}".`}
+                    : `No drivers match "${query}".`} />
                 </td></tr>
               )}
               {tab !== 'DRIVER' && shownTrucks.length === 0 && (
-                <tr><td colSpan={7} style={{ ...TD, textAlign: 'center', color: 'var(--ds-t3)', padding: 24 }}>
-                  {trucks.length === 0
+                <tr><td colSpan={7} style={TD}>
+                  <TmsEmptyState compact message={null} title={trucks.length === 0
                     ? (storeLoading ? 'Loading…' : `No active ${tab === 'TRAILER' ? 'trailers' : 'trucks'}.`)
-                    : `No trucks match "${query}".`}
+                    : `No trucks match "${query}".`} />
                 </td></tr>
               )}
 
@@ -377,37 +364,37 @@ export function FilesPage() {
                 const trailer = trailers.find((t) => t.id === d.assignedTrailerId)
                 return (
                   <tr key={d.id} onClick={() => setOpenId(d.id)}
-                    style={{ borderBottom: '1px solid var(--ds-border)', cursor: 'pointer', background: openId === d.id ? 'var(--ds-bg)' : undefined }}>
+                    style={{ borderBottom: '1px solid var(--tms-border)', cursor: 'pointer', background: openId === d.id ? 'var(--tms-bg)' : undefined }}>
                     <td style={TD}>
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                        <Avatar src={d.photoUrl} initials={getInitials(d.name)} size="xs" style={{ background: getColor(d.colorKey).avatarBg, color: '#fff' }} />
+                        <Avatar src={d.photoUrl} initials={getInitials(d.name)} size="xs" style={{ background: getColor(d.colorKey).avatarBg, color: 'var(--tms-on-primary)' }} />
                         <b style={{ fontWeight: 600 }}>{d.name}</b>
                       </span>
                     </td>
                     <td style={{ ...TD }}>
                       {d.fleetGroup
-                        ? <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--ds-t2)', background: 'var(--ds-bg)', border: '1px solid var(--ds-border)', padding: '2px 7px', borderRadius: 999, whiteSpace: 'nowrap' }}>{DRIVER_FLEET_LABELS[d.fleetGroup]}</span>
-                        : <span style={{ color: 'var(--ds-t3)', fontSize: 12 }}>Unclassified</span>}
+                        ? <TmsBadge tone="gray" style={{ whiteSpace: 'nowrap' }}>{DRIVER_FLEET_LABELS[d.fleetGroup]}</TmsBadge>
+                        : <span style={{ color: 'var(--tms-muted)', fontSize: 12 }}>Unclassified</span>}
                     </td>
                     <td style={{ ...TD, maxWidth: 210 }}
                       title={emailOf(d) || 'No email — an application can’t be sent without one'}>
-                      <div style={{ color: 'var(--ds-t2)', whiteSpace: 'nowrap' }}>{d.phone ? formatPhone(d.phone) : '—'}</div>
-                      <div style={{ fontSize: 11.5, color: emailOf(d) ? 'var(--ds-t3)' : '#b45309', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <div style={{ color: 'var(--tms-text-2)', whiteSpace: 'nowrap' }}>{d.phone ? formatPhone(d.phone) : '—'}</div>
+                      <div style={{ fontSize: 11.5, color: emailOf(d) ? 'var(--tms-muted)' : 'var(--tms-badge-orange)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {emailOf(d) || 'no email'}
                       </div>
                     </td>
                     <td style={{ ...TD, maxWidth: 190 }}>
-                      <div style={{ color: 'var(--ds-t2)', fontFamily: 'var(--font-mono, monospace)', fontSize: 11.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <div style={{ color: 'var(--tms-text-2)', fontFamily: 'var(--font-mono, monospace)', fontSize: 11.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {d.cdl || '—'}
                       </div>
                       <ExpiryInline info={driverExpiry(d.cdlExpiration, hub.docFor('DRIVER', d.id, 'cdl_copy'))} />
                     </td>
                     <ExpiryCell info={driverExpiry(d.medCardExpiration, hub.docFor('DRIVER', d.id, 'medical_card'))} />
                     <td style={{ ...TD, whiteSpace: 'nowrap' }}>
-                      <span style={{ color: 'var(--ds-t2)' }}>{truck?.unitNumber ?? '—'}</span>
-                      <span style={{ color: 'var(--ds-t3)' }}> / {trailer?.unitNumber ?? 'TBD'}</span>
+                      <span style={{ color: 'var(--tms-text-2)' }}>{truck?.unitNumber ?? '—'}</span>
+                      <span style={{ color: 'var(--tms-muted)' }}> / {trailer?.unitNumber ?? 'TBD'}</span>
                     </td>
-                    <td style={{ ...TD, whiteSpace: 'nowrap', color: d.hireDate ? 'var(--ds-t2)' : 'var(--ds-t3)', fontVariantNumeric: 'tabular-nums' }}>
+                    <td style={{ ...TD, whiteSpace: 'nowrap', color: d.hireDate ? 'var(--tms-text-2)' : 'var(--tms-muted)', fontVariantNumeric: 'tabular-nums' }}>
                       {d.hireDate ? shortDate(d.hireDate.slice(0, 10)) : '—'}
                     </td>
                     <td style={{ ...TD, textAlign: 'right' }}><ReadyDots score={scoreFor('DRIVER', d.id)} /></td>
@@ -419,26 +406,22 @@ export function FilesPage() {
                 const driver = driverForTruck(t, drivers)
                 return (
                   <tr key={t.id} onClick={() => setOpenId(t.id)}
-                    style={{ borderBottom: '1px solid var(--ds-border)', cursor: 'pointer', background: openId === t.id ? 'var(--ds-bg)' : undefined }}>
+                    style={{ borderBottom: '1px solid var(--tms-border)', cursor: 'pointer', background: openId === t.id ? 'var(--tms-bg)' : undefined }}>
                     <td style={{ ...TD, fontWeight: 600 }}>{t.unitNumber}</td>
-                    <td style={{ ...TD, color: 'var(--ds-t2)', fontFamily: 'var(--font-mono, monospace)', fontSize: 11.5 }}>{formatVin(t.vin) || '—'}</td>
-                    <td style={{ ...TD, color: 'var(--ds-t2)' }}>{t.plate || '—'}</td>
-                    <td style={{ ...TD, color: 'var(--ds-t2)', whiteSpace: 'nowrap' }}>{[t.year, t.make, t.model].filter(Boolean).join(' ') || '—'}</td>
-                    <td style={{ ...TD, color: 'var(--ds-t2)' }}>{driver?.name ?? '—'}</td>
+                    <td style={{ ...TD, color: 'var(--tms-text-2)', fontFamily: 'var(--font-mono, monospace)', fontSize: 11.5 }}>{formatVin(t.vin) || '—'}</td>
+                    <td style={{ ...TD, color: 'var(--tms-text-2)' }}>{t.plate || '—'}</td>
+                    <td style={{ ...TD, color: 'var(--tms-text-2)', whiteSpace: 'nowrap' }}>{[t.year, t.make, t.model].filter(Boolean).join(' ') || '—'}</td>
+                    <td style={{ ...TD, color: 'var(--tms-text-2)' }}>{driver?.name ?? '—'}</td>
                     <td style={{ ...TD, textAlign: 'right' }}><ReadyDots score={scoreFor('TRUCK', t.id)} /></td>
                     <td style={{ ...TD, textAlign: 'right', padding: '6px 10px' }}>
-                      <button
+                      <TmsButton
+                        size="sm"
                         onClick={(e) => { e.stopPropagation(); downloadPacket({ kind: 'TRUCK', truck: t }, t.id) }}
                         disabled={packetBusyId === t.id}
                         title="Download every document for this truck as one PDF"
-                        style={{
-                          display: 'inline-flex', alignItems: 'center', gap: 5, height: 28, padding: '0 10px',
-                          borderRadius: 7, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)',
-                          color: 'var(--ds-blue)', fontSize: 12, fontWeight: 600,
-                          cursor: packetBusyId === t.id ? 'wait' : 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap',
-                        }}>
+                        style={{ whiteSpace: 'nowrap' }}>
                         <FileStack size={13} /> {packetBusyId === t.id ? 'Building…' : 'Download full PDF'}
-                      </button>
+                      </TmsButton>
                     </td>
                   </tr>
                 )
@@ -456,13 +439,13 @@ export function FilesPage() {
                 <button key={key} onClick={() => setStatusFilter(key)}
                   style={{
                     display: 'flex', alignItems: 'center', gap: 6, height: 28, padding: '0 12px', borderRadius: 8,
-                    border: `1px solid ${on ? 'var(--ds-blue)' : 'var(--ds-border)'}`,
-                    background: on ? 'var(--ds-blue-soft, #eff6ff)' : 'var(--ds-surface)',
-                    color: on ? 'var(--ds-blue)' : 'var(--ds-t2)',
+                    border: `1px solid ${on ? 'var(--tms-primary)' : 'var(--tms-border)'}`,
+                    background: on ? 'var(--tms-primary-tint)' : 'var(--tms-card)',
+                    color: on ? 'var(--tms-primary)' : 'var(--tms-text-2)',
                     fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
                   }}>
                   {label}
-                  <span style={{ fontSize: 11.5, color: 'var(--ds-t3)', fontWeight: 500 }}>{statusCounts[key]}</span>
+                  <span style={{ fontSize: 11.5, color: 'var(--tms-muted)', fontWeight: 500 }}>{statusCounts[key]}</span>
                 </button>
               )
             })}
@@ -471,7 +454,7 @@ export function FilesPage() {
 
         {tab === 'DRIVER' && <div style={{ marginTop: 16 }}><IvanPhones /></div>}
 
-        {hub.loading && <div style={{ color: 'var(--ds-t3)', fontSize: 12.5, padding: '10px 2px' }}>Loading documents…</div>}
+        {hub.loading && <div style={{ color: 'var(--tms-muted)', fontSize: 12.5, padding: '10px 2px' }}>Loading documents…</div>}
       </div>
 
       {openEntity && (
@@ -501,6 +484,6 @@ export function FilesPage() {
           if (returnToDriverId) { setOpenId(returnToDriverId); setReturnToDriverId(null) }
         }}
       />
-    </div>
+    </TmsScrollPage>
   )
 }

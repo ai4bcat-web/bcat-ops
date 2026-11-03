@@ -117,7 +117,7 @@ export function LoadDriverDocs({
 
   if (error) {
     return (
-      <p className="flex items-center gap-1.5 text-[11px] text-amber-700">
+      <p className="flex items-center gap-1.5 text-[11px] text-[color:var(--tms-badge-orange)]">
         <AlertTriangle className="size-3" /> {error}
       </p>
     )
@@ -158,8 +158,8 @@ export function LoadDriverDocs({
                           doc.cleaning
                             ? 'text-muted-foreground'
                             : doc.enhanced
-                              ? 'text-emerald-600'
-                              : 'text-amber-700'
+                              ? 'text-[color:var(--tms-badge-green)]'
+                              : 'text-[color:var(--tms-badge-orange)]'
                         }
                       >
                         {' '}· {note}

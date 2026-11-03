@@ -112,6 +112,26 @@ describe('DocumentsWorkstation board filter viewer', () => {
   })
 })
 
+describe('DocumentsWorkstation bundle reads', () => {
+  it('reads a long queue a few shipments at a time, but reads every one', async () => {
+    rows = Array.from({ length: 20 }, (_, i) => ({ ...rows[0], id: `S${i}`, number: `PRO-${i}` }))
+    let inFlight = 0
+    let peak = 0
+    api.getShipmentBundle.mockImplementation(async (id: string) => {
+      inFlight += 1
+      peak = Math.max(peak, inFlight)
+      await new Promise((resolve) => setTimeout(resolve, 5))
+      inFlight -= 1
+      return { ...bundle, shipment: rows.find((r) => r.id === id) }
+    })
+    showPage()
+    await waitFor(() => expect(api.getShipmentBundle).toHaveBeenCalledTimes(20))
+    await waitFor(() => expect(inFlight).toBe(0))
+    expect(peak).toBeGreaterThan(1)
+    expect(peak).toBeLessThanOrEqual(6)
+  })
+})
+
 describe('DocumentsWorkstation', () => {
   it('shows an outline POD and reports the gate refusal when release is attempted', async () => {
     showPage()

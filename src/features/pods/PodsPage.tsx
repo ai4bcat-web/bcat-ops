@@ -9,9 +9,15 @@
  * This page used to be the JobsDone inbox (texted images imported from app.jobsdone.io).
  * That connection is gone; PODs already imported from it stay on their loads.
  */
+import { TmsAlert } from '@/features/tms/kit/TmsAlert'
+import { TmsBadge } from '@/features/tms/kit/TmsBadge'
+import { TmsButton } from '@/features/tms/kit/TmsButton'
+import { TmsEmptyState } from '@/features/tms/kit/TmsEmptyState'
+import { TmsInput } from '@/features/tms/kit/TmsInput'
+import { TmsScrollPage } from '@/features/tms/kit/TmsScrollPage'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
-import { PackageCheck, Search, RefreshCw, Loader2, Upload, X, CheckCircle2, AlertTriangle, HelpCircle, Clock } from 'lucide-react'
+import { Search, RefreshCw, Loader2, Upload, X, CheckCircle2, AlertTriangle, HelpCircle, Clock } from 'lucide-react'
 import { useAppStore } from '@/store/useAppStore'
 import { useAuth } from '@/hooks/useAuth'
 import { LoadDrawer } from '@/features/loads/LoadDrawer'
@@ -45,19 +51,13 @@ const TABS: { key: Tab; label: string }[] = [
 ]
 
 function Dot({ v, label }: { v: CheckVerdict | null | undefined; label: string }) {
-  const color = v === 'PASS' ? '#15803d' : v === 'FAIL' ? '#b91c1c' : '#b45309'
+  const color = v === 'PASS' ? 'var(--tms-badge-green)' : v === 'FAIL' ? 'var(--tms-badge-red)' : 'var(--tms-badge-orange)'
   const Icon = v === 'PASS' ? CheckCircle2 : v === 'FAIL' ? AlertTriangle : HelpCircle
   return (
     <span title={`${label}: ${v === 'PASS' ? 'looks right' : v === 'FAIL' ? 'problem' : 'can’t tell'}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color, fontSize: 11.5, fontWeight: 600 }}>
       <Icon size={12} /> {label}
     </span>
   )
-}
-
-const btn: React.CSSProperties = {
-  display: 'inline-flex', alignItems: 'center', gap: 6, height: 32, padding: '0 12px', borderRadius: 8,
-  border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', color: 'var(--ds-t2)',
-  fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
 }
 
 export function PodsPage() {
@@ -137,65 +137,59 @@ export function PodsPage() {
   const open = openId ? queue.find((s) => s.id === openId) ?? null : null
 
   return (
-    <div style={{ height: '100%', overflowY: 'auto', background: 'var(--ds-bg)' }}>
-      <div style={{ position: 'sticky', top: 0, zIndex: 10, background: 'var(--ds-surface)', borderBottom: '1px solid var(--ds-border)' }}>
-        <div style={{ padding: '20px 32px 14px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-            <PackageCheck size={22} style={{ color: 'var(--ds-blue)' }} />
-            <h1 style={{ fontSize: 20, fontWeight: 700, color: 'var(--ds-t1)', margin: 0 }}>POD review</h1>
-            <span style={{ fontSize: 12.5, color: 'var(--ds-t3)' }}>From the Ivan driver app and the owner operator app</span>
-            <div style={{ flex: 1 }} />
-            <button onClick={refresh} disabled={loading} style={btn}>
-              {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Refresh
-            </button>
-            <button onClick={() => setShowUploadPod(true)} style={btn}><Upload size={14} /> Upload POD</button>
-          </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 14, flexWrap: 'wrap' }}>
-            {TABS.map(({ key, label }) => {
-              const active = tab === key
-              return (
-                <button key={key} onClick={() => setTab(key)} style={{
-                  ...btn, height: 30,
-                  border: active ? '1px solid var(--ds-blue)' : '1px solid var(--ds-border)',
-                  background: active ? 'var(--ds-blue-soft, #eff6ff)' : 'var(--ds-surface)',
-                  color: active ? 'var(--ds-blue)' : 'var(--ds-t2)',
-                }}>
-                  {label} <span style={{ fontSize: 11.5, color: 'var(--ds-t3)', fontWeight: 500 }}>{counts[key]}</span>
-                </button>
-              )
-            })}
-            <select value={app} onChange={(e) => setApp(e.target.value as typeof app)} style={{ ...btn, height: 30, padding: '0 8px' }} aria-label="App">
-              <option value="ALL">Both apps</option>
-              <option value="IVAN">Ivan driver app</option>
-              <option value="OO">Owner operator app</option>
-            </select>
-            <div style={{ position: 'relative', flex: 1, minWidth: 220, maxWidth: 360 }}>
-              <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--ds-t3)' }} />
-              <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search PRO, driver, customer…"
-                style={{ height: 32, width: '100%', borderRadius: 8, border: '1px solid var(--ds-border)', padding: '0 10px 0 30px', fontSize: 13, background: 'var(--ds-surface)', color: 'var(--ds-t1)', boxSizing: 'border-box', fontFamily: 'inherit' }} />
-              {query && (
-                <button onClick={() => setQuery('')} aria-label="Clear search" style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', color: 'var(--ds-t3)', background: 'none', border: 'none', cursor: 'pointer', padding: 2 }}>
-                  <X size={12} />
-                </button>
-              )}
-            </div>
+    <TmsScrollPage
+      title="POD review"
+      subtitle="From the Ivan driver app and the owner operator app"
+      stickyHead
+      actions={(
+        <>
+          <TmsButton onClick={refresh} disabled={loading}>
+            {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Refresh
+          </TmsButton>
+          <TmsButton onClick={() => setShowUploadPod(true)}><Upload size={14} /> Upload POD</TmsButton>
+        </>
+      )}
+      toolbar={(
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          {TABS.map(({ key, label }) => {
+            const active = tab === key
+            return (
+              <TmsButton key={key} size="sm" variant={active ? 'primary' : 'secondary'} onClick={() => setTab(key)}>
+                {label} <span style={{ fontSize: 11.5, opacity: 0.8, fontWeight: 500 }}>{counts[key]}</span>
+              </TmsButton>
+            )
+          })}
+          <select value={app} onChange={(e) => setApp(e.target.value as typeof app)} className="tms-select" style={{ width: 'auto' }} aria-label="App">
+            <option value="ALL">Both apps</option>
+            <option value="IVAN">Ivan driver app</option>
+            <option value="OO">Owner operator app</option>
+          </select>
+          <div style={{ position: 'relative', flex: 1, minWidth: 220, maxWidth: 360 }}>
+            <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--tms-muted)' }} />
+            <TmsInput value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search PRO, driver, customer…"
+              style={{ paddingLeft: 30 }} />
+            {query && (
+              <button onClick={() => setQuery('')} aria-label="Clear search" style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', color: 'var(--tms-muted)', background: 'none', border: 'none', cursor: 'pointer', padding: 2 }}>
+                <X size={12} />
+              </button>
+            )}
           </div>
         </div>
-      </div>
-
-      <div style={{ padding: '20px 32px 40px', maxWidth: 1400, margin: '0 auto' }}>
-        {error && <div className="mb-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2">{error}</div>}
+      )}
+    >
+      <div>
+        {error && <TmsAlert tone="red" className="mb-3">{error}</TmsAlert>}
         {subs == null && !error && (
           <div className="text-sm text-muted-foreground flex items-center gap-2 py-4"><Loader2 size={14} className="animate-spin" /> Loading PODs…</div>
         )}
         {subs != null && rows.length === 0 && (
-          <div style={{ border: '1px dashed var(--ds-border)', borderRadius: 12, background: 'var(--ds-surface)', padding: 40, textAlign: 'center', color: 'var(--ds-t3)' }}>
-            {tab === 'PENDING' ? 'Nothing to review. New PODs from the driver apps appear here.' : 'No PODs match.'}
-          </div>
+          <TmsEmptyState
+            title={tab === 'PENDING' ? 'Nothing to review. New PODs from the driver apps appear here.' : 'No PODs match.'}
+            message={null}
+          />
         )}
         {rows.length > 0 && (
-          <div style={{ border: '1px solid var(--ds-border)', borderRadius: 12, background: 'var(--ds-surface)', overflowX: 'auto' }}>
+          <div style={{ border: '1px solid var(--tms-border)', borderRadius: 12, background: 'var(--tms-card)', overflowX: 'auto' }}>
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left text-xs text-muted-foreground border-b">
@@ -240,12 +234,12 @@ export function PodsPage() {
                         )}
                       </td>
                       <td className="px-4 py-2.5 whitespace-nowrap">
-                        {status === 'APPROVED' && <span className="text-green-700 text-xs font-semibold inline-flex items-center gap-1"><CheckCircle2 size={12} /> Approved</span>}
-                        {status === 'PENDING' && <span className="text-amber-700 text-xs font-semibold inline-flex items-center gap-1"><Clock size={12} /> To review</span>}
+                        {status === 'APPROVED' && <TmsBadge tone="green"><CheckCircle2 size={12} /> Approved</TmsBadge>}
+                        {status === 'PENDING' && <TmsBadge tone="orange"><Clock size={12} /> To review</TmsBadge>}
                         {status === 'NEEDS_REPLACEMENT' && (
-                          <span className="text-red-700 text-xs font-semibold">
+                          <TmsBadge tone="red">
                             {newer ? 'Driver resent — review the new one' : `New POD requested${s.podReplacementRequestedAt ? ` ${formatDateTime(s.podReplacementRequestedAt)}` : ''}`}
-                          </span>
+                          </TmsBadge>
                         )}
                       </td>
                     </tr>
@@ -280,6 +274,6 @@ export function PodsPage() {
         onSubmitted={() => toast.success("POD uploaded on the driver's behalf")}
       />
       <LoadDrawer />
-    </div>
+    </TmsScrollPage>
   )
 }

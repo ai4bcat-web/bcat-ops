@@ -248,7 +248,9 @@
 
 /* ── Detail split ─ */
 .tms-shell .tms-split,
-.tms-portal .tms-split { display: grid; gap: var(--tms-gap); align-items: start; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
+.tms-portal .tms-split,
+.tms-shell .tms-split-2-1,
+.tms-portal .tms-split-2-1 { display: grid; gap: var(--tms-gap); align-items: start; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
 .tms-shell .tms-split-7-5,
 .tms-portal .tms-split-7-5 { grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); }
 .tms-shell .tms-split-6-6,
@@ -462,25 +464,87 @@
 
 /* ── Public frame ─ */
 .tms-portal.tms-public { min-height: 100vh; display: flex; justify-content: center; align-items: flex-start; padding: 32px 16px; background: var(--tms-bg); color: var(--tms-text); }
-.tms-shell .tms-portal .tms-public-card,
-.tms-portal .tms-portal .tms-public-card { width: 100%; display: flex; flex-direction: column; gap: 16px; padding: 24px; background: var(--tms-card); border: 1px solid var(--tms-border); border-radius: var(--tms-radius-card); box-shadow: var(--tms-shadow); }
-.tms-shell .tms-portal .tms-public-sm,
-.tms-portal .tms-portal .tms-public-sm { max-width: 440px; }
-.tms-shell .tms-portal .tms-public-md,
-.tms-portal .tms-portal .tms-public-md { max-width: 640px; }
-.tms-shell .tms-portal .tms-public-lg,
-.tms-portal .tms-portal .tms-public-lg { max-width: 920px; }
-.tms-shell .tms-portal .tms-public-brand,
-.tms-portal .tms-portal .tms-public-brand { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 14px; }
-.tms-shell .tms-portal .tms-public-mark,
-.tms-portal .tms-portal .tms-public-mark { width: 22px; height: 22px; border-radius: 6px; background: var(--tms-primary); }
-.tms-shell .tms-portal .tms-public-title,
-.tms-portal .tms-portal .tms-public-title { margin: 0; font-size: 22px; font-weight: 600; }
-.tms-shell .tms-portal .tms-public-subtitle,
-.tms-portal .tms-portal .tms-public-subtitle { margin-top: 2px; color: var(--tms-muted); font-size: 14px; }
-.tms-shell .tms-portal .tms-public-body,
-.tms-portal .tms-portal .tms-public-body { display: flex; flex-direction: column; gap: 16px; }
-.tms-shell .tms-portal .tms-public-foot,
-.tms-portal .tms-portal .tms-public-foot { padding-top: 12px; border-top: 1px solid var(--tms-border); color: var(--tms-muted); font-size: 12px; }
-.tms-shell .tms-portal .tms-public-cta,
-.tms-portal .tms-portal .tms-public-cta { width: 100%; justify-content: center; height: 44px; }
+.tms-portal .tms-public-card { width: 100%; display: flex; flex-direction: column; gap: 16px; padding: 24px; background: var(--tms-card); border: 1px solid var(--tms-border); border-radius: var(--tms-radius-card); box-shadow: var(--tms-shadow); }
+.tms-portal .tms-public-sm { max-width: 440px; }
+.tms-portal .tms-public-md { max-width: 640px; }
+.tms-portal .tms-public-lg { max-width: 920px; }
+.tms-portal .tms-public-brand { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 14px; }
+.tms-portal .tms-public-mark { width: 22px; height: 22px; border-radius: 6px; background: var(--tms-primary); }
+.tms-portal .tms-public-title { margin: 0; font-size: 22px; font-weight: 600; }
+.tms-portal .tms-public-subtitle { margin-top: 2px; color: var(--tms-muted); font-size: 14px; }
+.tms-portal .tms-public-body { display: flex; flex-direction: column; gap: 16px; }
+.tms-portal .tms-public-foot { padding-top: 12px; border-top: 1px solid var(--tms-border); color: var(--tms-muted); font-size: 12px; }
+.tms-portal .tms-public-cta { width: 100%; justify-content: center; height: 44px; }
+
+/* ── Scroll page: the legacy-host sibling of TmsPage ──────────────────────── */
+
+.tms-shell .tms-scroll-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--tms-gap);
+  height: 100%;
+  min-width: 0;
+  overflow-y: auto;
+  padding-bottom: var(--tms-gutter);
+}
+
+.tms-shell .tms-scroll-page-fill {
+  overflow: hidden;
+  padding-bottom: 0;
+}
+
+.tms-shell .tms-scroll-top,
+.tms-shell .tms-scroll-body {
+  width: 100%;
+  max-width: 1400px;
+  margin-inline: auto;
+  min-width: 0;
+}
+
+.tms-shell .tms-scroll-page-full .tms-scroll-top,
+.tms-shell .tms-scroll-page-full .tms-scroll-body {
+  max-width: none;
+}
+
+.tms-shell .tms-scroll-top {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.tms-shell .tms-scroll-page-sticky .tms-scroll-top {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  padding-bottom: 8px;
+  background: var(--tms-bg);
+}
+
+.tms-shell .tms-scroll-titles {
+  min-width: 0;
+}
+
+.tms-shell .tms-scroll-subtitle {
+  margin: 2px 0 0;
+  color: var(--tms-muted);
+  font-size: 13px;
+}
+
+.tms-shell .tms-scroll-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.tms-shell .tms-scroll-body {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--tms-gap);
+}
+
+.tms-shell .tms-scroll-page-fill .tms-scroll-body {
+  min-height: 0;
+}

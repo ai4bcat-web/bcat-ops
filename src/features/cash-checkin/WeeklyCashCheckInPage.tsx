@@ -67,24 +67,24 @@ import { useCashCheckIn, type UseCashCheckIn } from '@/hooks/useCashCheckIn'
 
 // ── Shared token styles ──────────────────────────────────────────────────────
 
-const CARD: React.CSSProperties = { background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 12, boxShadow: 'var(--sh-sm)', overflow: 'hidden' }
-const CARD_HEADER: React.CSSProperties = { padding: '16px 20px', borderBottom: '1px solid var(--ds-border)', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }
+const CARD: React.CSSProperties = { background: 'var(--tms-card)', border: '1px solid var(--tms-border)', borderRadius: 12, boxShadow: 'var(--tms-shadow)', overflow: 'hidden' }
+const CARD_HEADER: React.CSSProperties = { padding: '16px 20px', borderBottom: '1px solid var(--tms-border)', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }
 const CARD_BODY: React.CSSProperties = { padding: '14px 20px 20px' }
 
-const INPUT: React.CSSProperties = { width: 130, height: 30, padding: '0 8px', textAlign: 'right', borderRadius: 7, border: '1px solid var(--ds-border)', background: 'var(--ds-bg)', color: 'var(--ds-t1)', fontSize: 13, fontVariantNumeric: 'tabular-nums', fontFamily: 'inherit', outline: 'none' }
+const INPUT: React.CSSProperties = { width: 130, height: 30, padding: '0 8px', textAlign: 'right', borderRadius: 7, border: '1px solid var(--tms-border)', background: 'var(--tms-bg)', color: 'var(--tms-text)', fontSize: 13, fontVariantNumeric: 'tabular-nums', fontFamily: 'inherit', outline: 'none' }
 const TEXT_INPUT: React.CSSProperties = { ...INPUT, textAlign: 'left' }
 const DATE_INPUT: React.CSSProperties = { ...INPUT, textAlign: 'left', width: 148 }
 
-const FIELD_ROW: React.CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '9px 0', borderTop: '1px solid var(--ds-border)' }
+const FIELD_ROW: React.CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '9px 0', borderTop: '1px solid var(--tms-border)' }
 
-const BTN_PRIMARY: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 6, height: 32, padding: '0 14px', borderRadius: 8, border: '1px solid var(--ds-blue)', background: 'var(--ds-blue)', color: '#fff', fontSize: 12.5, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer' }
-const BTN_SECONDARY: React.CSSProperties = { ...BTN_PRIMARY, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', color: 'var(--ds-t2)' }
-const BTN_DANGER: React.CSSProperties = { ...BTN_PRIMARY, border: '1px solid var(--ds-red)', background: 'var(--ds-red)', color: '#fff' }
-const BTN_ICON: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 26, height: 26, borderRadius: 6, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', color: 'var(--ds-t2)', cursor: 'pointer' }
+const BTN_PRIMARY: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 6, height: 32, padding: '0 14px', borderRadius: 8, border: '1px solid var(--tms-primary)', background: 'var(--tms-primary)', color: 'var(--tms-on-primary)', fontSize: 12.5, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer' }
+const BTN_SECONDARY: React.CSSProperties = { ...BTN_PRIMARY, border: '1px solid var(--tms-border)', background: 'var(--tms-card)', color: 'var(--tms-text-2)' }
+const BTN_DANGER: React.CSSProperties = { ...BTN_PRIMARY, border: '1px solid var(--tms-badge-red)', background: 'var(--tms-badge-red)', color: 'var(--tms-on-primary)' }
+const BTN_ICON: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 26, height: 26, borderRadius: 6, border: '1px solid var(--tms-border)', background: 'var(--tms-card)', color: 'var(--tms-text-2)', cursor: 'pointer' }
 
 const PILL: React.CSSProperties = { fontSize: 11, fontWeight: 600, textTransform: 'uppercase', padding: '2px 7px', borderRadius: 4, letterSpacing: '0.04em' }
-const TH: React.CSSProperties = { padding: '9px 12px', fontSize: 11.5, fontWeight: 600, color: 'var(--ds-t3)', textAlign: 'right', whiteSpace: 'nowrap', borderBottom: '1px solid var(--ds-border)' }
-const TD: React.CSSProperties = { padding: '9px 12px', fontSize: 12.5, textAlign: 'right', whiteSpace: 'nowrap', color: 'var(--ds-t1)', fontVariantNumeric: 'tabular-nums', borderTop: '1px solid var(--ds-border)' }
+const TH: React.CSSProperties = { padding: '9px 12px', fontSize: 11.5, fontWeight: 600, color: 'var(--tms-muted)', textAlign: 'right', whiteSpace: 'nowrap', borderBottom: '1px solid var(--tms-border)' }
+const TD: React.CSSProperties = { padding: '9px 12px', fontSize: 12.5, textAlign: 'right', whiteSpace: 'nowrap', color: 'var(--tms-text)', fontVariantNumeric: 'tabular-nums', borderTop: '1px solid var(--tms-border)' }
 
 
 // ── Formatting ───────────────────────────────────────────────────────────────
@@ -101,9 +101,9 @@ function signedMoney(n: number): string {
 }
 
 function statusPill(status: CashOutlookRow['status']): { text: string; style: React.CSSProperties } {
-  if (status === 'short') return { text: 'Short', style: { ...PILL, color: 'var(--ds-red)', background: 'var(--ds-red-bg)' } }
-  if (status === 'low') return { text: 'Below floor', style: { ...PILL, color: 'var(--ds-amber)', background: 'var(--ds-amber-bg)' } }
-  return { text: 'Covered', style: { ...PILL, color: 'var(--ds-green)', background: 'var(--ds-green-bg)' } }
+  if (status === 'short') return { text: 'Short', style: { ...PILL, color: 'var(--tms-badge-red)', background: 'var(--tms-badge-red-tint)' } }
+  if (status === 'low') return { text: 'Below floor', style: { ...PILL, color: 'var(--tms-badge-orange)', background: 'var(--tms-badge-orange-tint)' } }
+  return { text: 'Covered', style: { ...PILL, color: 'var(--tms-badge-green)', background: 'var(--tms-badge-green-tint)' } }
 }
 
 
@@ -228,7 +228,7 @@ function TextDraftInput({ value, onChange, validate, ...props }: TextDraftInputP
 
 
 function Banner({ tone, children }: { tone: 'warn' | 'error'; children: ReactNode }) {
-  const color = tone === 'error' ? 'var(--ds-red)' : 'var(--ds-amber)'
+  const color = tone === 'error' ? 'var(--tms-badge-red)' : 'var(--tms-badge-orange)'
   return (
     <div style={{ display: 'flex', gap: 9, alignItems: 'flex-start', padding: '11px 14px', borderRadius: 10, border: `1px solid ${color}33`, background: `${color}0f` }}>
       <AlertTriangle size={15} style={{ color, flexShrink: 0, marginTop: 1 }} />
@@ -287,29 +287,29 @@ export function WeeklyCashCheckInView({ data }: { data: UseCashCheckIn }) {
 
 function HeaderSection({ data }: { data: UseCashCheckIn }) {
   const { text, color } = useMemo(() => {
-    if (data.backendMissing) return { text: 'Backend not ready · settings unavailable', color: 'var(--ds-amber)' }
-    if (data.error) return { text: `Error: ${data.error}`, color: 'var(--ds-red)' }
-    if (data.loading) return { text: 'Loading…', color: 'var(--ds-amber)' }
-    if (data.saving || data.settingsSaving) return { text: 'Saving…', color: 'var(--ds-amber)' }
-    if (!data.canWrite) return { text: 'Read-only · admin access required', color: 'var(--ds-amber)' }
-    return { text: 'Saved · ready', color: 'var(--ds-green)' }
+    if (data.backendMissing) return { text: 'Backend not ready · settings unavailable', color: 'var(--tms-badge-orange)' }
+    if (data.error) return { text: `Error: ${data.error}`, color: 'var(--tms-badge-red)' }
+    if (data.loading) return { text: 'Loading…', color: 'var(--tms-badge-orange)' }
+    if (data.saving || data.settingsSaving) return { text: 'Saving…', color: 'var(--tms-badge-orange)' }
+    if (!data.canWrite) return { text: 'Read-only · admin access required', color: 'var(--tms-badge-orange)' }
+    return { text: 'Saved · ready', color: 'var(--tms-badge-green)' }
   }, [data.backendMissing, data.error, data.loading, data.saving, data.settingsSaving, data.canWrite])
 
   return (
-    <header style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-end', justifyContent: 'space-between', gap: 16, paddingBottom: 16, borderBottom: '1px solid var(--ds-border)' }}>
+    <header style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-end', justifyContent: 'space-between', gap: 16, paddingBottom: 16, borderBottom: '1px solid var(--tms-border)' }}>
       <div style={{ minWidth: 0 }}>
-        <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--ds-t3)' }}>
+        <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--tms-muted)' }}>
           BCAT Corp · weekly review
         </div>
-        <h1 style={{ fontSize: 20, fontWeight: 600, letterSpacing: '-0.01em', color: 'var(--ds-t1)', margin: '6px 0 0' }}>
+        <h1 style={{ fontSize: 20, fontWeight: 600, letterSpacing: '-0.01em', color: 'var(--tms-text)', margin: '6px 0 0' }}>
           BCAT Weekly Cash Check-in
         </h1>
-        <p style={{ fontSize: 12.5, color: 'var(--ds-t3)', marginTop: 4, maxWidth: '42rem', lineHeight: 1.5 }}>
+        <p style={{ fontSize: 12.5, color: 'var(--tms-muted)', marginTop: 4, maxWidth: '42rem', lineHeight: 1.5 }}>
           Every Friday: log cash, receivables, payables, and each center's profit for the month so far. The
           configurable outlook re-bases from the latest check-in.
         </p>
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--ds-t3)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--tms-muted)' }}>
         <span style={{ width: 8, height: 8, borderRadius: '50%', background: color }} />
         <span>{text}</span>
       </div>
@@ -415,10 +415,10 @@ function SummaryTile({
   valueColor?: 'green' | 'red'
 }) {
   return (
-    <div style={{ background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 12, padding: '14px 16px', boxShadow: 'var(--sh-sm)' }}>
-      <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--ds-t3)' }}>{label}</div>
-      <div style={{ marginTop: 6, fontSize: 26, fontWeight: 600, letterSpacing: '-0.01em', color: valueColor === 'green' ? 'var(--ds-green)' : valueColor === 'red' ? 'var(--ds-red)' : 'var(--ds-t1)', fontVariantNumeric: 'tabular-nums' }}>{value}</div>
-      <div style={{ marginTop: 3, fontSize: 12, color: 'var(--ds-t3)' }}>{sub}</div>
+    <div style={{ background: 'var(--tms-card)', border: '1px solid var(--tms-border)', borderRadius: 12, padding: '14px 16px', boxShadow: 'var(--tms-shadow)' }}>
+      <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--tms-muted)' }}>{label}</div>
+      <div style={{ marginTop: 6, fontSize: 26, fontWeight: 600, letterSpacing: '-0.01em', color: valueColor === 'green' ? 'var(--tms-badge-green)' : valueColor === 'red' ? 'var(--tms-badge-red)' : 'var(--tms-text)', fontVariantNumeric: 'tabular-nums' }}>{value}</div>
+      <div style={{ marginTop: 3, fontSize: 12, color: 'var(--tms-muted)' }}>{sub}</div>
     </div>
   )
 }
@@ -560,10 +560,10 @@ function CheckInFormSection({
             </Field>
           </div>
 
-          <div style={{ marginTop: 18, paddingTop: 16, borderTop: '1px solid var(--ds-border)' }}>
+          <div style={{ marginTop: 18, paddingTop: 16, borderTop: '1px solid var(--tms-border)' }}>
             <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, marginBottom: 12, flexWrap: 'wrap' }}>
-              <h3 style={{ fontSize: 13, fontWeight: 600, color: 'var(--ds-t1)' }}>Profit this month so far</h3>
-              <span style={{ fontSize: 12, color: 'var(--ds-t3)' }}>revenue − all expenses, month-to-date</span>
+              <h3 style={{ fontSize: 13, fontWeight: 600, color: 'var(--tms-text)' }}>Profit this month so far</h3>
+              <span style={{ fontSize: 12, color: 'var(--tms-muted)' }}>revenue − all expenses, month-to-date</span>
             </div>
             <div style={{ display: 'grid', gap: 16, gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
               {CENTERS.map((c) => (
@@ -580,7 +580,7 @@ function CheckInFormSection({
             </div>
           </div>
 
-          <div style={{ marginTop: 18, paddingTop: 16, borderTop: '1px solid var(--ds-border)' }}>
+          <div style={{ marginTop: 18, paddingTop: 16, borderTop: '1px solid var(--tms-border)' }}>
             <div style={{ display: 'grid', gap: 16, gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
               <Field label="Note" htmlFor="ci-note">
                 <TextDraftInput
@@ -621,7 +621,7 @@ function CheckInFormSection({
               </button>
             )}
             {message && (
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, color: message.tone === 'success' ? 'var(--ds-green)' : 'var(--ds-red)' }}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, color: message.tone === 'success' ? 'var(--tms-badge-green)' : 'var(--tms-badge-red)' }}>
                 {message.tone === 'success' ? <CheckCircle2 size={14} /> : <AlertCircle size={14} />}
                 {message.text}
               </span>
@@ -643,16 +643,16 @@ function OutlookSection({ data, rows }: { data: UseCashCheckIn; rows: CashOutloo
     <section>
       <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-end', justifyContent: 'space-between', gap: 12, marginBottom: 8 }}>
         <SectionHeader title="Cash outlook" />
-        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 16, fontSize: 12, color: 'var(--ds-t3)' }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 16, fontSize: 12, color: 'var(--tms-muted)' }}>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ width: 12, height: 12, borderRadius: 2, background: 'var(--ds-amber)' }} /> Logged
+            <span style={{ width: 12, height: 12, borderRadius: 2, background: 'var(--tms-badge-orange)' }} /> Logged
           </span>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ width: 12, height: 12, borderRadius: 2, background: 'var(--ds-blue)' }} /> Projected
+            <span style={{ width: 12, height: 12, borderRadius: 2, background: 'var(--tms-primary)' }} /> Projected
           </span>
           {showFx && (
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-              <span style={{ width: 16, height: 0, borderTop: '2px dashed var(--ds-t1)' }} /> With factoring
+              <span style={{ width: 16, height: 0, borderTop: '2px dashed var(--tms-text)' }} /> With factoring
             </span>
           )}
         </div>
@@ -706,7 +706,7 @@ function OutlookChart({ data, rows }: { data: UseCashCheckIn; rows: CashOutlookR
 
   if (bars.length === 0) {
     return (
-      <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, color: 'var(--ds-t3)' }}>
+      <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, color: 'var(--tms-muted)' }}>
         Save a check-in to build the outlook chart.
       </div>
     )
@@ -715,11 +715,11 @@ function OutlookChart({ data, rows }: { data: UseCashCheckIn; rows: CashOutlookR
   return (
     <ResponsiveContainer width="100%" height="100%">
       <ComposedChart data={bars} margin={{ top: 24, right: 16, bottom: 48, left: 8 }}>
-        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--ds-border)" />
+        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--tms-border)" />
         <XAxis
           dataKey="name"
-          tick={{ fontSize: 11, fill: 'var(--ds-t3)' }}
-          axisLine={{ stroke: 'var(--ds-border)' }}
+          tick={{ fontSize: 11, fill: 'var(--tms-muted)' }}
+          axisLine={{ stroke: 'var(--tms-border)' }}
           tickLine={false}
           angle={-45}
           textAnchor="end"
@@ -728,36 +728,36 @@ function OutlookChart({ data, rows }: { data: UseCashCheckIn; rows: CashOutlookR
         />
         <YAxis
           tickFormatter={(v: number) => cashK(v)}
-          tick={{ fontSize: 11, fill: 'var(--ds-t3)' }}
+          tick={{ fontSize: 11, fill: 'var(--tms-muted)' }}
           axisLine={false}
           tickLine={false}
           domain={yDomain}
         />
         <RechartsTooltip
           formatter={(value, name) => [typeof value === 'number' ? cashMoney(value) : String(value ?? ''), String(name ?? '')]}
-          labelStyle={{ color: 'var(--ds-t1)' }}
-          contentStyle={{ background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 8, fontSize: 12 }}
+          labelStyle={{ color: 'var(--tms-text)' }}
+          contentStyle={{ background: 'var(--tms-card)', border: '1px solid var(--tms-border)', borderRadius: 8, fontSize: 12 }}
         />
         <ReferenceLine
           y={data.settings.floor}
-          stroke="var(--ds-amber)"
+          stroke="var(--tms-badge-orange)"
           strokeDasharray="4 4"
-          label={{ value: 'floor', position: 'insideTopLeft', fill: 'var(--ds-amber)', fontSize: 11 }}
+          label={{ value: 'floor', position: 'insideTopLeft', fill: 'var(--tms-badge-orange)', fontSize: 11 }}
         />
         <Bar dataKey="cash" isAnimationActive={false}>
           <LabelList dataKey="cash" position="top" formatter={(v) => (typeof v === 'number' ? cashK(v) : '')} fontSize={11} />
           {bars.map((entry, index) => (
-            <Cell key={`cell-${index}`} fill={entry.hist ? 'var(--ds-amber)' : 'var(--ds-blue)'} />
+            <Cell key={`cell-${index}`} fill={entry.hist ? 'var(--tms-badge-orange)' : 'var(--tms-primary)'} />
           ))}
         </Bar>
         {data.settings.factoring.on && (
           <Line
             type="monotone"
             dataKey="fxCash"
-            stroke="var(--ds-t1)"
+            stroke="var(--tms-text)"
             strokeWidth={2}
             strokeDasharray="5 4"
-            dot={{ r: 3.5, stroke: 'var(--ds-surface)', strokeWidth: 2 }}
+            dot={{ r: 3.5, stroke: 'var(--tms-card)', strokeWidth: 2 }}
             activeDot={{ r: 5 }}
             isAnimationActive={false}
           />
@@ -787,15 +787,15 @@ function OutlookTable({ rows, showFx }: { rows: CashOutlookRow[]; showFx: boolea
       <tbody>
         {rows.map((r) => {
           const pill = statusPill(r.status)
-          const rowBg = r.current ? { background: 'var(--ds-green-bg)' } : undefined
+          const rowBg = r.current ? { background: 'var(--tms-badge-green-tint)' } : undefined
           return (
             <tr key={r.ym} style={rowBg}>
               <td style={{ ...TD, textAlign: 'left', fontWeight: 600 }}>{cashMonthLabel(r.ym)}</td>
               {CENTERS.map((c) => (
-                <td key={c.key} style={{ ...TD, color: r.per[c.key] < 0 ? 'var(--ds-red)' : r.per[c.key] > 0 ? 'var(--ds-green)' : 'var(--ds-t1)' }}>
+                <td key={c.key} style={{ ...TD, color: r.per[c.key] < 0 ? 'var(--tms-badge-red)' : r.per[c.key] > 0 ? 'var(--tms-badge-green)' : 'var(--tms-text)' }}>
                   {cashMoney(r.per[c.key])}
                   {r.current && r.estimated[c.key] && (
-                    <span style={{ marginLeft: 4, fontSize: 11, color: 'var(--ds-t3)' }}>est</span>
+                    <span style={{ marginLeft: 4, fontSize: 11, color: 'var(--tms-muted)' }}>est</span>
                   )}
                 </td>
               ))}
@@ -803,16 +803,16 @@ function OutlookTable({ rows, showFx }: { rows: CashOutlookRow[]; showFx: boolea
               <td style={{ ...TD, fontWeight: 600 }}>
                 {cashMoney(r.landing)}
                 {r.current && (
-                  <div style={{ fontSize: 11, color: 'var(--ds-t3)' }}>{cashMoney(r.netToCome)} still to come</div>
+                  <div style={{ fontSize: 11, color: 'var(--tms-muted)' }}>{cashMoney(r.netToCome)} still to come</div>
                 )}
               </td>
               <td style={TD}>
                 {r.items.length > 0 ? (
                   <div>
-                    <div style={{ color: r.itemsSum < 0 ? 'var(--ds-red)' : r.itemsSum > 0 ? 'var(--ds-green)' : 'var(--ds-t1)' }}>
+                    <div style={{ color: r.itemsSum < 0 ? 'var(--tms-badge-red)' : r.itemsSum > 0 ? 'var(--tms-badge-green)' : 'var(--tms-text)' }}>
                       {cashMoney(r.itemsSum)}
                     </div>
-                    <div style={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 11, color: 'var(--ds-t3)' }}>
+                    <div style={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 11, color: 'var(--tms-muted)' }}>
                       {r.items.map((i) => i.label || 'item').join(', ')}
                     </div>
                   </div>
@@ -821,7 +821,7 @@ function OutlookTable({ rows, showFx }: { rows: CashOutlookRow[]; showFx: boolea
                 )}
               </td>
               <td style={{ ...TD, fontWeight: 700 }}>
-                <span style={{ color: r.cash < 0 ? 'var(--ds-red)' : 'var(--ds-green)' }}>
+                <span style={{ color: r.cash < 0 ? 'var(--tms-badge-red)' : 'var(--tms-badge-green)' }}>
                   {cashMoney(r.cash)}
                 </span>
               </td>
@@ -829,7 +829,7 @@ function OutlookTable({ rows, showFx }: { rows: CashOutlookRow[]; showFx: boolea
                 <td style={{ ...TD, fontWeight: 700 }}>
                   {cashMoney(r.fxCash ?? r.cash)}
                   {r.fxDelta ? (
-                    <div style={{ fontSize: 11, color: 'var(--ds-t3)' }}>
+                    <div style={{ fontSize: 11, color: 'var(--tms-muted)' }}>
                       {`${r.fxDelta >= 0 ? '+' : ''}${cashK(r.fxDelta)}`}
                       {r.fxActive ? ' · fee in' : ''}
                     </div>
@@ -889,9 +889,9 @@ function RunRateCard({ data, center }: { data: UseCashCheckIn; center: (typeof C
 
   return (
     <div style={CARD}>
-      <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--ds-border)', display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12 }}>
-        <h3 style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)' }}>{center.name}</h3>
-        <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--ds-t3)' }}>{center.tag}</span>
+      <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--tms-border)', display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12 }}>
+        <h3 style={{ fontSize: 14, fontWeight: 600, color: 'var(--tms-text)' }}>{center.name}</h3>
+        <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--tms-muted)' }}>{center.tag}</span>
       </div>
       <div style={CARD_BODY}>
         <Field label="Fixed expenses / month">
@@ -903,9 +903,9 @@ function RunRateCard({ data, center }: { data: UseCashCheckIn; center: (typeof C
         <Field label="Cash lag (months)" hint="How long after profit is earned it lands in the bank. 30-day terms = 1.">
           <NumericInput value={r.lagMonths} onChange={(v) => patch('lagMonths', clampLagMonths(v ?? 0))} integer min={0} max={MAX_LAG_MONTHS} disabled={disabled} />
         </Field>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '10px 0 0', marginTop: 12, borderTop: '1px solid var(--ds-border)' }}>
-          <span style={{ fontSize: 12, color: 'var(--ds-t3)' }}>Break-even revenue</span>
-          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--ds-t1)', fontVariantNumeric: 'tabular-nums' }}>{cashMoney(breakEven)}</span>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '10px 0 0', marginTop: 12, borderTop: '1px solid var(--tms-border)' }}>
+          <span style={{ fontSize: 12, color: 'var(--tms-muted)' }}>Break-even revenue</span>
+          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--tms-text)', fontVariantNumeric: 'tabular-nums' }}>{cashMoney(breakEven)}</span>
         </div>
       </div>
     </div>
@@ -930,8 +930,8 @@ function GuardrailsCard({ data }: { data: UseCashCheckIn }) {
 
   return (
     <div style={CARD}>
-      <div style={{ ...CARD_HEADER, borderBottom: '1px solid var(--ds-border)' }}>
-        <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--ds-t3)' }}>Guardrails</span>
+      <div style={{ ...CARD_HEADER, borderBottom: '1px solid var(--tms-border)' }}>
+        <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--tms-muted)' }}>Guardrails</span>
       </div>
       <div style={CARD_BODY}>
         <Field label="Cash floor to hold">
@@ -961,10 +961,10 @@ function GuardrailsCard({ data }: { data: UseCashCheckIn }) {
             style={{ ...TEXT_INPUT, width: '100%' }}
           />
         </Field>
-        <p style={{ marginTop: 12, fontSize: 12, color: 'var(--ds-t3)', lineHeight: 1.5 }}>
+        <p style={{ marginTop: 12, fontSize: 12, color: 'var(--tms-muted)', lineHeight: 1.5 }}>
           Below the floor shows as a warning; below zero as short.
         </p>
-        <p style={{ marginTop: 8, fontSize: 11.5, color: 'var(--ds-t3)', lineHeight: 1.5 }}>
+        <p style={{ marginTop: 8, fontSize: 11.5, color: 'var(--tms-muted)', lineHeight: 1.5 }}>
           Every 14 days from the last payroll, the morning after, a Slack reminder asks for a check-in — unless one dated on or after that payroll is already logged.
         </p>
       </div>
@@ -995,17 +995,17 @@ function OneTimeItemsCard({ data }: { data: UseCashCheckIn }) {
 
   return (
     <div style={CARD}>
-      <div style={{ ...CARD_HEADER, borderBottom: '1px solid var(--ds-border)' }}>
-        <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--ds-t3)' }}>One-time items</span>
+      <div style={{ ...CARD_HEADER, borderBottom: '1px solid var(--tms-border)' }}>
+        <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--tms-muted)' }}>One-time items</span>
       </div>
       <div style={CARD_BODY}>
-        <p style={{ fontSize: 12, color: 'var(--ds-t3)', marginBottom: 12, lineHeight: 1.5 }}>
+        <p style={{ fontSize: 12, color: 'var(--tms-muted)', marginBottom: 12, lineHeight: 1.5 }}>
           Cash that lands in a specific month outside the run-rate: paying off the cards, a hire's first month, a
           truck payment, tax deposit, Danisco reprice kicking in. Positive = in, negative = out.
         </p>
 
         {data.settings.items.length === 0 ? (
-          <p style={{ fontSize: 13, color: 'var(--ds-t3)' }}>None yet.</p>
+          <p style={{ fontSize: 13, color: 'var(--tms-muted)' }}>None yet.</p>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {data.settings.items.map((it, i) => (
@@ -1052,8 +1052,8 @@ function Toggle({ id, checked, onChange, disabled }: { id?: string; checked: boo
         width: 40,
         height: 22,
         borderRadius: 11,
-        border: '1px solid ' + (checked ? 'var(--ds-blue)' : 'var(--ds-border)'),
-        background: checked ? 'var(--ds-blue)' : 'var(--ds-surface)',
+        border: '1px solid ' + (checked ? 'var(--tms-primary)' : 'var(--tms-border)'),
+        background: checked ? 'var(--tms-primary)' : 'var(--tms-card)',
         cursor: disabled ? 'default' : 'pointer',
         opacity: disabled ? 0.6 : 1,
         transition: 'background 0.15s, border-color 0.15s',
@@ -1068,8 +1068,8 @@ function Toggle({ id, checked, onChange, disabled }: { id?: string; checked: boo
           width: 18,
           height: 18,
           borderRadius: '50%',
-          background: '#fff',
-          boxShadow: '0 1px 2px rgba(15,23,42,0.15)',
+          background: 'var(--tms-card)',
+          boxShadow: 'var(--tms-shadow)',
           transform: checked ? 'translateX(18px)' : 'translateX(0)',
           transition: 'transform 0.15s',
         }}
@@ -1099,12 +1099,12 @@ function FactoringSection({ data, rows }: { data: UseCashCheckIn; rows: CashOutl
 
       <div style={{ display: 'grid', gap: 16, gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))' }}>
         <div style={CARD}>
-          <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--ds-border)' }}>
-            <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--ds-t3)' }}>Facility</span>
+          <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--tms-border)' }}>
+            <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--tms-muted)' }}>Facility</span>
           </div>
           <div style={CARD_BODY}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '8px 0', borderBottom: '1px solid var(--ds-border)' }}>
-              <label htmlFor="fx-on" style={{ fontSize: 13, color: 'var(--ds-t2)' }}>Include in outlook</label>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '8px 0', borderBottom: '1px solid var(--tms-border)' }}>
+              <label htmlFor="fx-on" style={{ fontSize: 13, color: 'var(--tms-text-2)' }}>Include in outlook</label>
               <Toggle id="fx-on" checked={f.on} onChange={(checked) => patchFactoring({ on: checked })} disabled={disabled} />
             </div>
             <Field label="Start month">
@@ -1113,15 +1113,15 @@ function FactoringSection({ data, rows }: { data: UseCashCheckIn; rows: CashOutl
             <Field label="Stop month (optional)">
               <TextDraftInput value={f.stop} onChange={(v) => patchFactoring({ stop: v })} validate={(v) => v === '' || /^\d{4}-\d{2}$/.test(v)} placeholder="leave blank" disabled={disabled} />
             </Field>
-            <p style={{ marginTop: 12, fontSize: 12, color: 'var(--ds-t3)', lineHeight: 1.5 }}>
+            <p style={{ marginTop: 12, fontSize: 12, color: 'var(--tms-muted)', lineHeight: 1.5 }}>
               Go-forward only: existing receivables collect on their own schedule.
             </p>
           </div>
         </div>
 
         <div style={CARD}>
-          <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--ds-border)' }}>
-            <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--ds-t3)' }}>Terms</span>
+          <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--tms-border)' }}>
+            <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--tms-muted)' }}>Terms</span>
           </div>
           <div style={CARD_BODY}>
             <Field label="Eligible invoicing / month">
@@ -1133,19 +1133,19 @@ function FactoringSection({ data, rows }: { data: UseCashCheckIn; rows: CashOutl
             <Field label="Advance %" hint="50 – 100">
               <NumericInput value={f.advance} onChange={(v) => patchFactoring({ advance: Math.max(50, Math.min(100, v ?? 90)) })} integer step={5} min={50} max={100} disabled={disabled} />
             </Field>
-            <p style={{ marginTop: 12, fontSize: 12, color: 'var(--ds-t3)', lineHeight: 1.5 }}>
+            <p style={{ marginTop: 12, fontSize: 12, color: 'var(--tms-muted)', lineHeight: 1.5 }}>
               Eligible = revenue from customers you're allowed to factor (everyone except Danisco, Royal, Batory, Denali).
             </p>
           </div>
         </div>
 
         <div style={CARD}>
-          <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--ds-border)' }}>
-            <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--ds-t3)' }}>What it does</span>
+          <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--tms-border)' }}>
+            <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--tms-muted)' }}>What it does</span>
           </div>
           <div style={CARD_BODY}>
             {f.on ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, fontSize: 13, color: 'var(--ds-t1)' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, fontSize: 13, color: 'var(--tms-text)' }}>
                 <div>
                   <span style={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{cashMoney(summary.stepUp)}</span> one-time step-up
                 </div>
@@ -1153,12 +1153,12 @@ function FactoringSection({ data, rows }: { data: UseCashCheckIn; rows: CashOutl
                   <span style={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{cashMoney(summary.advanceAmount)}</span> advance in the start month
                 </div>
                 <div>
-                  <span style={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: 'var(--ds-red)' }}>{cashMoney(summary.monthlyFee)}</span> / month in fees
+                  <span style={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: 'var(--tms-badge-red)' }}>{cashMoney(summary.monthlyFee)}</span> / month in fees
                 </div>
                 <div>
                   Ends at <span style={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{cashMoney(summary.endCash)}</span> vs {cashMoney(summary.baseEndCash)} without · fees paid {cashMoney(summary.totalFees)}
                 </div>
-                <div style={{ fontSize: 12, color: 'var(--ds-t3)' }}>
+                <div style={{ fontSize: 12, color: 'var(--tms-muted)' }}>
                   {summary.stopReadyMonth ? (
                     <>
                       Could stop from <b>{cashMonthLabel(summary.stopReadyMonth)}</b>: cash minus the step-up reversal still clears the cushion.
@@ -1169,7 +1169,7 @@ function FactoringSection({ data, rows }: { data: UseCashCheckIn; rows: CashOutl
                 </div>
               </div>
             ) : (
-              <p style={{ fontSize: 13, color: 'var(--ds-t3)' }}>Turn on "Include in outlook" to see the comparison.</p>
+              <p style={{ fontSize: 13, color: 'var(--tms-muted)' }}>Turn on "Include in outlook" to see the comparison.</p>
             )}
           </div>
         </div>
@@ -1272,9 +1272,9 @@ function HistorySection({
       {importMessage && (
         <div style={{
           display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12, padding: '8px 12px', borderRadius: 8, fontSize: 13,
-          border: `1px solid ${importMessage.tone === 'success' ? 'var(--ds-green)' : 'var(--ds-red)'}33`,
-          background: `${importMessage.tone === 'success' ? 'var(--ds-green)' : 'var(--ds-red)'}0f`,
-          color: importMessage.tone === 'success' ? 'var(--ds-green)' : 'var(--ds-red)',
+          border: `1px solid ${importMessage.tone === 'success' ? 'var(--tms-badge-green)' : 'var(--tms-badge-red)'}33`,
+          background: `${importMessage.tone === 'success' ? 'var(--tms-badge-green)' : 'var(--tms-badge-red)'}0f`,
+          color: importMessage.tone === 'success' ? 'var(--tms-badge-green)' : 'var(--tms-badge-red)',
         }}>
           {importMessage.tone === 'success' ? <CheckCircle2 size={14} /> : <XCircle size={14} />}
           {importMessage.text}
@@ -1302,7 +1302,7 @@ function HistorySection({
             <tbody>
               {sorted.length === 0 ? (
                 <tr>
-                  <td colSpan={data.canWrite ? 11 : 10} style={{ ...TD, textAlign: 'left', color: 'var(--ds-t3)' }}>
+                  <td colSpan={data.canWrite ? 11 : 10} style={{ ...TD, textAlign: 'left', color: 'var(--tms-muted)' }}>
                     No check-ins yet. Fill in the form above and save.
                   </td>
                 </tr>
@@ -1347,7 +1347,7 @@ function HistoryRow({
       <td style={TD}>{row.ar != null ? cashMoney(row.ar) : '—'}</td>
       <td style={TD}>{row.ap != null ? cashMoney(row.ap) : '—'}</td>
       <td style={TD}>{row.cards != null ? cashMoney(row.cards) : '—'}</td>
-      <td style={{ ...TD, fontWeight: 600, color: liq < 0 ? 'var(--ds-red)' : 'var(--ds-green)' }}>
+      <td style={{ ...TD, fontWeight: 600, color: liq < 0 ? 'var(--tms-badge-red)' : 'var(--tms-badge-green)' }}>
         {cashMoney(liq)}
       </td>
       {CENTERS.map((c) => (
@@ -1355,7 +1355,7 @@ function HistoryRow({
           {mtdFor(row, c.key) != null ? cashMoney(mtdFor(row, c.key)!) : '—'}
         </td>
       ))}
-      <td style={{ ...TD, maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'left', color: 'var(--ds-t3)' }}>
+      <td style={{ ...TD, maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'left', color: 'var(--tms-muted)' }}>
         {row.note || '—'}
       </td>
       {data.canWrite && (
@@ -1364,7 +1364,7 @@ function HistoryRow({
             <button onClick={() => onEdit(row)} disabled={data.saving} style={BTN_ICON} title="Edit">
               <Pencil size={13} />
             </button>
-            <button onClick={() => onDelete(row.id)} disabled={data.saving} style={{ ...BTN_ICON, color: 'var(--ds-red)' }} title="Delete">
+            <button onClick={() => onDelete(row.id)} disabled={data.saving} style={{ ...BTN_ICON, color: 'var(--tms-badge-red)' }} title="Delete">
               <Trash2 size={13} />
             </button>
           </div>
@@ -1393,10 +1393,10 @@ function DeleteDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent style={{ background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 12, padding: 20 }}>
+      <DialogContent style={{ background: 'var(--tms-card)', border: '1px solid var(--tms-border)', borderRadius: 12, padding: 20 }}>
         <DialogHeader>
-          <DialogTitle style={{ fontSize: 16, fontWeight: 600, color: 'var(--ds-t1)' }}>Delete check-in?</DialogTitle>
-          <DialogDescription style={{ fontSize: 13, color: 'var(--ds-t3)', lineHeight: 1.5, marginTop: 4 }}>
+          <DialogTitle style={{ fontSize: 16, fontWeight: 600, color: 'var(--tms-text)' }}>Delete check-in?</DialogTitle>
+          <DialogDescription style={{ fontSize: 13, color: 'var(--tms-muted)', lineHeight: 1.5, marginTop: 4 }}>
             This cannot be undone. The outlook will re-base from the remaining history.
           </DialogDescription>
         </DialogHeader>
@@ -1430,12 +1430,12 @@ function SectionHeader({
     <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginTop: 8, marginBottom: 12 }}>
       <div style={{ flex: 1, minWidth: 200 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <h2 style={{ fontSize: 12, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--ds-t3)', margin: 0, whiteSpace: 'nowrap' }}>
+          <h2 style={{ fontSize: 12, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--tms-muted)', margin: 0, whiteSpace: 'nowrap' }}>
             {title}
           </h2>
-          <div style={{ flex: 1, height: 1, background: 'var(--ds-border)' }} />
+          <div style={{ flex: 1, height: 1, background: 'var(--tms-border)' }} />
         </div>
-        {subtitle && <p style={{ fontSize: 12.5, color: 'var(--ds-t3)', marginTop: 4, maxWidth: '48rem', lineHeight: 1.5 }}>{subtitle}</p>}
+        {subtitle && <p style={{ fontSize: 12.5, color: 'var(--tms-muted)', marginTop: 4, maxWidth: '48rem', lineHeight: 1.5 }}>{subtitle}</p>}
       </div>
       {right && <div>{right}</div>}
     </div>
@@ -1455,9 +1455,9 @@ function Field({
 }) {
   return (
     <label htmlFor={htmlFor} style={FIELD_ROW}>
-      <span style={{ fontSize: 13, color: 'var(--ds-t2)' }}>
+      <span style={{ fontSize: 13, color: 'var(--tms-text-2)' }}>
         {label}
-        {hint && <span style={{ display: 'block', fontSize: 11, color: 'var(--ds-t3)', marginTop: 1 }}>{hint}</span>}
+        {hint && <span style={{ display: 'block', fontSize: 11, color: 'var(--tms-muted)', marginTop: 1 }}>{hint}</span>}
       </span>
       {children}
     </label>
@@ -1468,7 +1468,7 @@ function Field({
 function StackedField({ label, children }: { label: string; children: ReactNode }) {
   return (
     <label style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
-      <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--ds-t3)' }}>{label}</span>
+      <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--tms-muted)' }}>{label}</span>
       {children}
     </label>
   )
@@ -1476,14 +1476,14 @@ function StackedField({ label, children }: { label: string; children: ReactNode 
 
 function ExplanationNotes() {
   return (
-    <div style={{ ...CARD, borderLeft: '4px solid var(--ds-blue)', padding: '14px 16px' }}>
-      <p style={{ fontSize: 13, color: 'var(--ds-t2)', lineHeight: 1.6, marginBottom: 10 }}>
+    <div style={{ ...CARD, borderLeft: '4px solid var(--tms-primary)', padding: '14px 16px' }}>
+      <p style={{ fontSize: 13, color: 'var(--tms-text-2)', lineHeight: 1.6, marginBottom: 10 }}>
         <b>How the outlook is built.</b> The current month starts from the latest check-in's cash. Its profit is the
         month-to-date figures scaled to a full month by how far through the month the check-in date is (a $6K MTD on
         the 15th becomes ~$12K). Every later month uses the run-rate profit for each center, plus any one-time items
         you've placed in that month.
       </p>
-      <p style={{ fontSize: 13, color: 'var(--ds-t2)', lineHeight: 1.6 }}>
+      <p style={{ fontSize: 13, color: 'var(--tms-text-2)', lineHeight: 1.6 }}>
         Receivables and payables don't move the projection directly, because in a steady business they offset each
         other month to month. They feed true liquidity, which is the number that tells you whether a low bank balance
         is timing (liquidity high, cash low) or a real problem (both falling).

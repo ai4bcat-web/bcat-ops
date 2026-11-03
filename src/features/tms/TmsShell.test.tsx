@@ -245,4 +245,57 @@ describe('TmsShell', () => {
     expect(rail().getByRole('link', { name: /SHP-1/ })).toHaveAttribute('href', '/tms/shipments/a')
     expect(rail().getByRole('link', { name: /SHP-2/ })).toHaveAttribute('href', '/tms/shipments/b')
   })
+
+  it('renders a legacy badge key and omits zero or absent counts', () => {
+    renderShell('/tms/shipments', undefined, {
+      sections: [{
+        key: 'ASSETS', name: 'ASSETS', brand: null,
+        items: [
+          { to: '/intake', label: 'Intake', icon: Truck, badgeKey: 'intake' },
+          { to: '/pods', label: 'PODs', icon: Truck, badgeKey: 'pods' },
+          { to: '/fuel', label: 'Fuel', icon: Truck, badgeKey: 'fuel' },
+        ],
+      }],
+      badgeCounts: { intake: 4, pods: 0 },
+    })
+    expect(rail().getByRole('link', { name: /^Intake/ })).toHaveTextContent('4')
+    expect(rail().getByRole('link', { name: /^PODs/ })).not.toHaveTextContent('0')
+    expect(rail().getByRole('link', { name: /^Fuel/ })).toHaveTextContent(/^Fuel$/)
+  })
+
+  it('fill mode marks the shell and mounts the aside beside the page', () => {
+    const { container } = renderShell('/trucks', undefined, { fill: true, aside: <aside>dispatch</aside> })
+    expect(container.querySelector('.tms-shell')).toHaveClass('tms-fill')
+    expect(screen.getByText('dispatch')).toBeInTheDocument()
+  })
+
+  it('does not mount the aside outside fill mode', () => {
+    renderShell('/tms/shipments', undefined, { aside: <aside>dispatch</aside> })
+    expect(screen.queryByText('dispatch')).not.toBeInTheDocument()
+  })
+
+  describe('phone drawer', () => {
+    const hamburger = () => screen.getByRole('button', { name: 'Open menu' })
+
+    it('opens from the hamburger, closes on Escape and returns focus to it', () => {
+      const { container } = renderShell()
+      expect(hamburger()).toHaveAttribute('aria-expanded', 'false')
+      fireEvent.click(hamburger())
+      expect(hamburger()).toHaveAttribute('aria-expanded', 'true')
+      expect(container.querySelector('.tms-shell')).toHaveClass('tms-nav-open')
+      fireEvent.keyDown(window, { key: 'Escape' })
+      expect(container.querySelector('.tms-shell')).not.toHaveClass('tms-nav-open')
+      expect(hamburger()).toHaveFocus()
+    })
+
+    it('closes when a nav link is followed or the backdrop is tapped', () => {
+      const { container } = renderShell()
+      fireEvent.click(hamburger())
+      fireEvent.click(rail().getByRole('link', { name: 'Company Dashboard' }))
+      expect(container.querySelector('.tms-shell')).not.toHaveClass('tms-nav-open')
+      fireEvent.click(hamburger())
+      fireEvent.click(container.querySelector('.tms-nav-backdrop')!)
+      expect(container.querySelector('.tms-shell')).not.toHaveClass('tms-nav-open')
+    })
+  })
 })

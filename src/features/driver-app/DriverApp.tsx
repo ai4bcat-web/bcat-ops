@@ -3,6 +3,8 @@ import { Suspense, lazy } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
 import { Clock, LayoutDashboard, Loader2, UserCircle, Wallet } from 'lucide-react'
 import type { DriverProgram } from '@/lib/driverProgram'
+import { useTmsTheme } from '@/features/tms/tmsTheme'
+import type { DriverThemeContext } from './AccountPage'
 
 // lucide-react does not export a named icon type; this describes the props we use.
 type IconComponent = ComponentType<SVGProps<SVGSVGElement>>
@@ -36,7 +38,7 @@ function TabButton({
       to={to}
       className={({ isActive }) =>
         `group flex flex-1 flex-col items-center justify-center gap-1 rounded-xl py-2 transition-colors ${
-          isActive ? 'text-[#1ea8f3]' : 'text-slate-400 hover:text-slate-200'
+          isActive ? 'text-[color:var(--tms-primary-ink)]' : 'text-muted-foreground hover:text-foreground'
         }`
       }
     >
@@ -44,7 +46,7 @@ function TabButton({
         <>
           <div
             className={`flex h-10 w-10 items-center justify-center rounded-xl transition-colors ${
-              isActive ? 'bg-[#1ea8f3]/15' : 'group-hover:bg-slate-800'
+              isActive ? 'bg-[color:var(--tms-primary-tint)]' : 'group-hover:bg-[color:var(--tms-surface-hover)]'
             }`}
           >
             <Icon className="h-6 w-6" strokeWidth={isActive ? 2.5 : 2} />
@@ -63,8 +65,11 @@ export function DriverApp({ program = 'SETTLEMENT' }: { program?: DriverProgram 
   // clock". The server refuses punches from a driver without a clock either way.
   const profile = useDriverProfile()
   const timeClock = profile ? profile.timeClock === true : false
+  // The one theme instance for the signed-in driver app; Account flips it.
+  const { theme, toggleTheme } = useTmsTheme()
+  const themeContext: DriverThemeContext = { theme, toggleTheme }
   return (
-    <div className="dark flex h-dvh flex-col bg-background text-foreground">
+    <div className="tms-driver tms-driver-app flex flex-col">
       {/* Only Ivan's employees punch a clock, so only they can have one running. */}
       <OnTheClockBar enabled={timeClock} />
       {/* The dispatch number, one tap from anywhere on the route. */}
@@ -81,18 +86,18 @@ export function DriverApp({ program = 'SETTLEMENT' }: { program?: DriverProgram 
       <main className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
         <Suspense
           fallback={
-            <div className="flex h-full items-center justify-center text-slate-400">
-              <Loader2 className="h-8 w-8 animate-spin text-[#1ea8f3]" />
+            <div className="flex h-full items-center justify-center text-muted-foreground">
+              <Loader2 className="h-8 w-8 animate-spin text-[color:var(--tms-primary)]" />
             </div>
           }
         >
-          <Outlet />
+          <Outlet context={themeContext} />
         </Suspense>
       </main>
 
       <nav
         aria-label="Driver navigation"
-        className="flex h-20 shrink-0 items-stretch border-t border-slate-800 bg-[#0b1220]/95 px-2 pt-1 backdrop-blur-sm"
+        className="flex h-20 shrink-0 items-stretch border-t border-[color:var(--tms-border)] bg-[color:var(--tms-topbar)] px-2 pt-1"
         style={{ paddingBottom: 'max(env(safe-area-inset-bottom), 8px)' }}
       >
 {/* Two tabs, not four. Scanning is not a destination — it is something a driver

@@ -193,12 +193,12 @@ export function SchedulerView({
     if (isUnassigned) {
       return (
         <div className="flex items-center gap-2.5 px-3 py-2.5 w-full h-full">
-          <div className="size-9 rounded-full flex items-center justify-center shrink-0" style={{ backgroundColor: 'rgba(251,191,36,0.2)', border: '1px solid rgba(251,191,36,0.4)' }}>
-            <span className="text-sm font-bold" style={{ color: '#fbbf24' }}>?</span>
+          <div className="size-9 rounded-full flex items-center justify-center shrink-0" style={{ backgroundColor: 'color-mix(in srgb, var(--tms-badge-orange) 20%, transparent)', border: '1px solid color-mix(in srgb, var(--tms-badge-orange) 40%, transparent)' }}>
+            <span className="text-sm font-bold" style={{ color: 'var(--tms-badge-orange)' }}>?</span>
           </div>
           <div className="min-w-0">
-            <div className="text-sm font-semibold truncate" style={{ color: '#fbbf24' }}>Unassigned</div>
-            <div className="text-xs" style={{ color: '#94a3b8' }}>{loadCount} load{loadCount !== 1 ? 's' : ''}</div>
+            <div className="text-sm font-semibold truncate" style={{ color: 'var(--tms-badge-orange)' }}>Unassigned</div>
+            <div className="text-xs" style={{ color: 'var(--tms-muted)' }}>{loadCount} load{loadCount !== 1 ? 's' : ''}</div>
           </div>
         </div>
       )
@@ -213,7 +213,7 @@ export function SchedulerView({
       <button
         className="flex items-center gap-2.5 px-3 py-2.5 w-full h-full text-left transition-colors"
         style={{ background: 'transparent' }}
-        onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = 'rgba(74,142,239,0.06)' }}
+        onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = 'var(--tms-primary-tint)' }}
         onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}
         onClick={() => useAppStore.getState().setFilterDriver(
           useAppStore.getState().filterDriverId === driver.id ? null : driver.id
@@ -226,10 +226,10 @@ export function SchedulerView({
           {initials}
         </div>
         <div className="min-w-0">
-          <div className="text-sm font-semibold truncate text-white" title={driver.name}>{driver.name}</div>
-          <div className="text-xs" style={{ color: '#94a3b8' }}>
+          <div className="text-sm font-semibold truncate text-[color:var(--tms-on-primary)]" title={driver.name}>{driver.name}</div>
+          <div className="text-xs" style={{ color: 'var(--tms-muted)' }}>
             {isBroker ? (
-              <span className="font-medium uppercase tracking-wide text-[10px]" style={{ color: '#64748b' }}>Broker · {loadCount} load{loadCount !== 1 ? 's' : ''}</span>
+              <span className="font-medium uppercase tracking-wide text-[10px]" style={{ color: 'var(--tms-muted)' }}>Broker · {loadCount} load{loadCount !== 1 ? 's' : ''}</span>
             ) : (
               <span>{formatPhone(driver.phone)} · {loadCount}</span>
             )}
@@ -337,8 +337,8 @@ export function SchedulerView({
     const plusBtn = (dateStr: string) => (
       <button
         style={{
-          width: '18px', height: '18px', borderRadius: '4px', border: '1px solid rgba(74,142,239,0.4)',
-          background: 'rgba(74,142,239,0.12)', color: '#5b9bff', display: 'flex',
+          width: '18px', height: '18px', borderRadius: '4px', border: '1px solid color-mix(in srgb, var(--tms-primary) 40%, transparent)',
+          background: 'var(--tms-primary-tint)', color: 'var(--tms-primary)', display: 'flex',
           alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0,
           fontSize: '14px', lineHeight: 1, padding: 0,
         }}
@@ -551,20 +551,20 @@ export function SchedulerView({
 
       {/* Floating bulk action bar */}
       {selectedIds.size > 0 && (
-        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 bg-slate-900 text-white rounded-full px-4 py-2.5 shadow-2xl text-sm">
+        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 bg-[color:var(--tms-text)] text-[color:var(--tms-on-primary)] rounded-full px-4 py-2.5 shadow-2xl text-sm">
           <span className="font-semibold">{selectedIds.size} selected</span>
-          <div className="w-px h-4 bg-slate-600 mx-1" />
+          <div className="w-px h-4 bg-[color:var(--tms-muted)] mx-1" />
           <Button
             size="sm"
             variant="ghost"
-            className="h-7 px-2.5 text-white hover:bg-slate-700 hover:text-white text-xs gap-1"
+            className="h-7 px-2.5 text-[color:var(--tms-on-primary)] hover:bg-[color:var(--tms-text)] hover:text-[color:var(--tms-on-primary)] text-xs gap-1"
             onClick={bulkMarkRTI}
           >
             <UserCheck className="size-3.5" /> Mark RTI
           </Button>
 
           <button
-            className="ml-1 text-slate-400 hover:text-white"
+            className="ml-1 text-muted-foreground hover:text-[color:var(--tms-on-primary)]"
             onClick={() => setSelectedIds(new Set())}
           >
             <X className="size-4" />

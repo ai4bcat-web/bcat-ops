@@ -3,11 +3,11 @@ import {
   EVENT_CATALOG,
   isEvent,
   recipientsFor,
-  signPayload,
   validateNotificationSubscriptions,
   validateNotificationWebhooks,
   validateWebhookUrl,
 } from './notifications'
+import { signPayload } from './signPayload'
 
 describe('EVENT_CATALOG', () => {
   it('every entry names a producer file', () => {

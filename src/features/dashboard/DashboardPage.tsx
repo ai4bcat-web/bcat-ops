@@ -18,6 +18,8 @@ import { YearProfitWidget } from './YearProfitWidget'
 import { DieselPriceWidget } from './DieselPriceWidget'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import { useAuth } from '@/hooks/useAuth'
+import { useTmsTokens } from '@/features/tms/tmsTokens'
+import { TmsScrollPage } from '@/features/tms/kit/TmsScrollPage'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -28,7 +30,7 @@ function cents(n: number): string {
 // ── Internal primitives ───────────────────────────────────────────────────────
 
 function DualDeltaBadge({ delta, dir }: { delta: string; dir: 'up' | 'down' | 'neutral' }) {
-  const color = dir === 'up' ? '#16a34a' : dir === 'down' ? '#dc2626' : 'var(--ds-t2)'
+  const color = dir === 'up' ? 'var(--tms-badge-green)' : dir === 'down' ? 'var(--tms-badge-red)' : 'var(--tms-text-2)'
   return (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 11.5, color, fontWeight: 500, fontVariantNumeric: 'tabular-nums' }}>
       {dir === 'up' ? '▲' : dir === 'down' ? '▼' : ''} {delta}
@@ -36,33 +38,33 @@ function DualDeltaBadge({ delta, dir }: { delta: string; dir: 'up' | 'down' | 'n
   )
 }
 
-function BrokerCoveredCard({ count, countDelta, revenue, revenueDelta, sublabel, accent = '#6d28d9' }: {
+function BrokerCoveredCard({ count, countDelta, revenue, revenueDelta, sublabel, accent = 'var(--tms-badge-purple)' }: {
   count: number; countDelta: number; revenue: number; revenueDelta: number; sublabel: string; accent?: string
 }) {
   const dir = (n: number): 'up' | 'down' | 'neutral' => (n > 0 ? 'up' : n < 0 ? 'down' : 'neutral')
   const signed = (n: number, fmt: (v: number) => string) => `${n >= 0 ? '+' : '−'}${fmt(Math.abs(n))}`
   return (
-    <div style={{ background: 'var(--ds-surface)', borderRadius: 12, border: '1px solid var(--ds-border)', boxShadow: 'var(--sh-sm)', position: 'relative', overflow: 'hidden' }}>
+    <div className="tms-card" style={{ position: 'relative' }}>
       <div style={{ position: 'absolute', top: -40, right: -40, width: 140, height: 140, borderRadius: '50%', background: accent, filter: 'blur(60px)', opacity: 0.18, pointerEvents: 'none' }} />
       <div style={{ padding: '16px 18px', position: 'relative' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-          <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--ds-t3)' }}>Broker Covered</div>
-          <div style={{ width: 30, height: 30, borderRadius: 8, background: 'var(--ds-bg)', border: '1px solid var(--ds-border)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ds-t2)' }}>
+          <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--tms-muted)' }}>Broker Covered</div>
+          <div style={{ width: 30, height: 30, borderRadius: 8, background: 'var(--tms-bg)', border: '1px solid var(--tms-border)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--tms-text-2)' }}>
             <Handshake size={15} />
           </div>
         </div>
         {/* Load count */}
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 6 }}>
-          <div style={{ fontSize: 30, fontWeight: 600, letterSpacing: '-0.02em', lineHeight: 1.1, color: 'var(--ds-t1)', fontVariantNumeric: 'tabular-nums' }}>{count}</div>
-          <div style={{ fontSize: 12, color: 'var(--ds-t3)' }}>loads</div>
+          <div style={{ fontSize: 30, fontWeight: 600, letterSpacing: '-0.02em', lineHeight: 1.1, color: 'var(--tms-text)', fontVariantNumeric: 'tabular-nums' }}>{count}</div>
+          <div style={{ fontSize: 12, color: 'var(--tms-muted)' }}>loads</div>
           <DualDeltaBadge delta={signed(countDelta, (v) => String(v))} dir={dir(countDelta)} />
         </div>
         {/* Revenue */}
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 4 }}>
-          <div style={{ fontSize: 17, fontWeight: 600, color: 'var(--ds-t1)', fontVariantNumeric: 'tabular-nums' }}>{cents(revenue)}</div>
+          <div style={{ fontSize: 17, fontWeight: 600, color: 'var(--tms-text)', fontVariantNumeric: 'tabular-nums' }}>{cents(revenue)}</div>
           <DualDeltaBadge delta={signed(revenueDelta, cents)} dir={dir(revenueDelta)} />
         </div>
-        <div style={{ fontSize: 12, color: 'var(--ds-t3)' }}>{sublabel}</div>
+        <div style={{ fontSize: 12, color: 'var(--tms-muted)' }}>{sublabel}</div>
       </div>
     </div>
   )
@@ -84,12 +86,12 @@ function FactoringCard({ totals, loading, onOpen }: {
   loading: boolean
   onOpen: () => void
 }) {
-  const accent = totals.needToFactor.count > 0 ? '#dc2626' : '#22c55e'
+  const accent = totals.needToFactor.count > 0 ? 'var(--tms-badge-red)' : 'var(--tms-primary)'
   const rows: { label: string; bucket: FactoringTotals['needToFactor']; color: string }[] = [
-    { label: 'Need to factor', bucket: totals.needToFactor, color: '#b45309' },
-    { label: 'Pending with OTR', bucket: totals.pendingWithOtr, color: '#1d4ed8' },
-    { label: 'Invoice manually', bucket: totals.manualInvoice, color: '#be185d' },
-    { label: 'Factored', bucket: totals.factored, color: '#15803d' },
+    { label: 'Need to factor', bucket: totals.needToFactor, color: 'var(--tms-badge-orange)' },
+    { label: 'Pending with OTR', bucket: totals.pendingWithOtr, color: 'var(--tms-badge-blue)' },
+    { label: 'Invoice manually', bucket: totals.manualInvoice, color: 'var(--tms-badge-pink)' },
+    { label: 'Factored', bucket: totals.factored, color: 'var(--tms-badge-green)' },
   ]
   const unvalued = rows.reduce((n, r) => n + r.bucket.unvalued, 0)
 
@@ -99,18 +101,18 @@ function FactoringCard({ totals, loading, onOpen }: {
       role="button"
       tabIndex={0}
       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onOpen() }}
-      style={{ background: 'var(--ds-surface)', borderRadius: 12, border: '1px solid var(--ds-border)',
-        boxShadow: 'var(--sh-sm)', position: 'relative', overflow: 'hidden', cursor: 'pointer' }}
+      className="tms-card"
+      style={{ position: 'relative', cursor: 'pointer' }}
     >
       <div style={{ position: 'absolute', top: -40, right: -40, width: 140, height: 140, borderRadius: '50%',
         background: accent, filter: 'blur(60px)', opacity: 0.18, pointerEvents: 'none' }} />
       <div style={{ padding: '16px 18px', position: 'relative' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-          <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--ds-t3)' }}>
+          <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--tms-muted)' }}>
             Factoring
           </div>
-          <div style={{ width: 30, height: 30, borderRadius: 8, background: 'var(--ds-bg)', border: '1px solid var(--ds-border)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ds-t2)' }}>
+          <div style={{ width: 30, height: 30, borderRadius: 8, background: 'var(--tms-bg)', border: '1px solid var(--tms-border)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--tms-text-2)' }}>
             <AlertCircle size={15} />
           </div>
         </div>
@@ -118,23 +120,23 @@ function FactoringCard({ totals, loading, onOpen }: {
         {/* Still owed to us — the headline, because it is the question being asked. */}
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 2 }}>
           <div style={{ fontSize: 28, fontWeight: 600, letterSpacing: '-0.02em', lineHeight: 1.1,
-            color: 'var(--ds-t1)', fontVariantNumeric: 'tabular-nums' }}>
+            color: 'var(--tms-text)', fontVariantNumeric: 'tabular-nums' }}>
             {loading ? '—' : cents(totals.outstandingAmount)}
           </div>
         </div>
-        <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginBottom: 12 }}>
+        <div style={{ fontSize: 12, color: 'var(--tms-muted)', marginBottom: 12 }}>
           outstanding · {totals.outstandingCount} invoice{totals.outstandingCount === 1 ? '' : 's'}
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           {rows.map((r) => (
             <div key={r.label} style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--ds-t2)', whiteSpace: 'nowrap' }}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--tms-text-2)', whiteSpace: 'nowrap' }}>
                 <span aria-hidden style={{ width: 6, height: 6, borderRadius: '50%', background: r.color, flexShrink: 0 }} />
                 {r.label}
-                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--ds-t3)' }}>{r.bucket.count}</span>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--tms-muted)' }}>{r.bucket.count}</span>
               </span>
-              <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ds-t1)', fontVariantNumeric: 'tabular-nums' }}>
+              <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--tms-text)', fontVariantNumeric: 'tabular-nums' }}>
                 {cents(r.bucket.amount)}
               </span>
             </div>
@@ -142,7 +144,7 @@ function FactoringCard({ totals, loading, onOpen }: {
         </div>
 
         {unvalued > 0 && (
-          <div style={{ marginTop: 10, fontSize: 11, color: 'var(--ds-amber)' }}>
+          <div style={{ marginTop: 10, fontSize: 11, color: 'var(--tms-badge-orange)' }}>
             {unvalued} invoice{unvalued === 1 ? '' : 's'} with no rate on the load — not in these totals
           </div>
         )}
@@ -152,8 +154,8 @@ function FactoringCard({ totals, loading, onOpen }: {
 }
 
 const FLEET_COLORS: Record<string, string> = {
-  OWNER_OP: '#a78bfa', IVAN: '#1ea8f3', BOX_TRUCK: '#f59e0b',
-  BROKER: '#6d28d9', UNASSIGNED: '#94a3b8',
+  OWNER_OP: 'var(--tms-chart-6)', IVAN: 'var(--tms-chart-5)', BOX_TRUCK: 'var(--tms-chart-4)',
+  BROKER: 'var(--tms-badge-purple)', UNASSIGNED: 'var(--tms-chart-9)',
 }
 
 /**
@@ -176,24 +178,23 @@ function RevenueCard({ split, delta, deltaDir, sublabel, connected }: {
 }) {
   const shown = split.byBucket.filter((b) => b.revenue > 0)
   return (
-    <div style={{ background: 'var(--ds-surface)', borderRadius: 12, border: '1px solid var(--ds-border)',
-      boxShadow: 'var(--sh-sm)', position: 'relative', overflow: 'hidden' }}>
+    <div className="tms-card" style={{ position: 'relative' }}>
       <div style={{ position: 'absolute', top: -40, right: -40, width: 140, height: 140, borderRadius: '50%',
-        background: '#1ea8f3', filter: 'blur(60px)', opacity: 0.18, pointerEvents: 'none' }} />
+        background: 'var(--tms-primary)', filter: 'blur(60px)', opacity: 0.18, pointerEvents: 'none' }} />
       <div style={{ padding: '16px 18px', position: 'relative' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-          <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--ds-t3)' }}>
+          <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--tms-muted)' }}>
             Revenue
           </div>
-          <div style={{ width: 30, height: 30, borderRadius: 8, background: 'var(--ds-bg)', border: '1px solid var(--ds-border)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ds-t2)' }}>
+          <div style={{ width: 30, height: 30, borderRadius: 8, background: 'var(--tms-bg)', border: '1px solid var(--tms-border)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--tms-text-2)' }}>
             <DollarSign size={15} />
           </div>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 10 }}>
           <div style={{ fontSize: 28, fontWeight: 600, letterSpacing: '-0.02em', lineHeight: 1.1,
-            color: 'var(--ds-t1)', fontVariantNumeric: 'tabular-nums' }}>
+            color: 'var(--tms-text)', fontVariantNumeric: 'tabular-nums' }}>
             {connected ? cents(split.total) : '$0'}
           </div>
           {connected && delta && <DualDeltaBadge delta={delta} dir={deltaDir} />}
@@ -214,16 +215,16 @@ function RevenueCard({ split, delta, deltaDir, sublabel, connected }: {
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
           {shown.length === 0 && (
-            <div style={{ fontSize: 12, color: 'var(--ds-t3)' }}>{sublabel}</div>
+            <div style={{ fontSize: 12, color: 'var(--tms-muted)' }}>{sublabel}</div>
           )}
           {shown.map((b) => (
             <div key={b.bucket} style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--ds-t2)', whiteSpace: 'nowrap' }}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--tms-text-2)', whiteSpace: 'nowrap' }}>
                 <span aria-hidden style={{ width: 6, height: 6, borderRadius: '50%', background: FLEET_COLORS[b.bucket], flexShrink: 0 }} />
                 {b.label}
-                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--ds-t3)' }}>{b.loads}</span>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--tms-muted)' }}>{b.loads}</span>
               </span>
-              <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ds-t1)', fontVariantNumeric: 'tabular-nums' }}>
+              <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--tms-text)', fontVariantNumeric: 'tabular-nums' }}>
                 {cents(b.revenue)}
               </span>
             </div>
@@ -231,7 +232,7 @@ function RevenueCard({ split, delta, deltaDir, sublabel, connected }: {
         </div>
 
         {split.unrated > 0 && (
-          <div style={{ marginTop: 9, fontSize: 11, color: 'var(--ds-t3)' }}>
+          <div style={{ marginTop: 9, fontSize: 11, color: 'var(--tms-muted)' }}>
             {split.unrated} load{split.unrated === 1 ? '' : 's'} with no rate — not counted
           </div>
         )}
@@ -255,24 +256,23 @@ function LoadsCard({ split, delta, deltaDir, sublabel }: {
 }) {
   const shown = split.byBucket.filter((b) => b.loads > 0)
   return (
-    <div style={{ background: 'var(--ds-surface)', borderRadius: 12, border: '1px solid var(--ds-border)',
-      boxShadow: 'var(--sh-sm)', position: 'relative', overflow: 'hidden' }}>
+    <div className="tms-card" style={{ position: 'relative' }}>
       <div style={{ position: 'absolute', top: -40, right: -40, width: 140, height: 140, borderRadius: '50%',
-        background: '#1ea8f3', filter: 'blur(60px)', opacity: 0.18, pointerEvents: 'none' }} />
+        background: 'var(--tms-primary)', filter: 'blur(60px)', opacity: 0.18, pointerEvents: 'none' }} />
       <div style={{ padding: '16px 18px', position: 'relative' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-          <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--ds-t3)' }}>
+          <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--tms-muted)' }}>
             Total Loads
           </div>
-          <div style={{ width: 30, height: 30, borderRadius: 8, background: 'var(--ds-bg)', border: '1px solid var(--ds-border)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ds-t2)' }}>
+          <div style={{ width: 30, height: 30, borderRadius: 8, background: 'var(--tms-bg)', border: '1px solid var(--tms-border)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--tms-text-2)' }}>
             <Package size={15} />
           </div>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 10 }}>
           <div style={{ fontSize: 28, fontWeight: 600, letterSpacing: '-0.02em', lineHeight: 1.1,
-            color: 'var(--ds-t1)', fontVariantNumeric: 'tabular-nums' }}>
+            color: 'var(--tms-text)', fontVariantNumeric: 'tabular-nums' }}>
             {split.total}
           </div>
           <DualDeltaBadge delta={delta} dir={deltaDir} />
@@ -291,14 +291,14 @@ function LoadsCard({ split, delta, deltaDir, sublabel }: {
         )}
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-          {shown.length === 0 && <div style={{ fontSize: 12, color: 'var(--ds-t3)' }}>{sublabel}</div>}
+          {shown.length === 0 && <div style={{ fontSize: 12, color: 'var(--tms-muted)' }}>{sublabel}</div>}
           {shown.map((b) => (
             <div key={b.bucket} style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--ds-t2)', whiteSpace: 'nowrap' }}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--tms-text-2)', whiteSpace: 'nowrap' }}>
                 <span aria-hidden style={{ width: 6, height: 6, borderRadius: '50%', background: FLEET_COLORS[b.bucket], flexShrink: 0 }} />
                 {b.label}
               </span>
-              <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ds-t1)', fontVariantNumeric: 'tabular-nums' }}>
+              <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--tms-text)', fontVariantNumeric: 'tabular-nums' }}>
                 {b.loads}
               </span>
             </div>
@@ -313,8 +313,8 @@ function IconBtn({ children, label }: { children: React.ReactNode; label?: strin
   return (
     <button title={label} style={{
       display: 'flex', alignItems: 'center', gap: 5, padding: '5px 10px', borderRadius: 7,
-      background: 'var(--ds-bg)', border: '1px solid var(--ds-border)',
-      fontSize: 12.5, color: 'var(--ds-t2)', cursor: 'pointer', fontFamily: 'inherit', fontWeight: 500,
+      background: 'var(--tms-bg)', border: '1px solid var(--tms-border)',
+      fontSize: 12.5, color: 'var(--tms-text-2)', cursor: 'pointer', fontFamily: 'inherit', fontWeight: 500,
     }}>
       {children}
     </button>
@@ -356,59 +356,54 @@ export function DashboardPage() {
   const { hasPageAccess } = useAuth()
   const isMobile = useIsMobile()
   const col1 = isMobile ? '1fr' : undefined   // stack any multi-col row on mobile
+  // Sparkline paints an SVG stroke from a JS string, so the token is resolved to its value.
+  const { '--tms-badge-orange': orange } = useTmsTokens(['--tms-badge-orange'])
 
   const now = new Date()
   const dateLabel = now.toLocaleDateString('en-US', { weekday: 'short', month: 'long', day: 'numeric', year: 'numeric' })
 
   return (
-    <div className="h-full overflow-y-auto">
-      <div style={{ maxWidth: 1400, margin: '0 auto', padding: isMobile ? '16px 12px' : '24px 32px', display: 'flex', flexDirection: 'column', gap: 16 }}>
-
-        {/* ── Page header ──────────────────────────────────────────────────── */}
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
-          <div>
-            <h1 style={{ fontSize: 20, fontWeight: 600, letterSpacing: '-0.01em', color: 'var(--ds-t1)', margin: 0 }}>
-              Operations Dashboard
-            </h1>
-            <p style={{ fontSize: 12.5, color: 'var(--ds-t3)', marginTop: 3 }}>
-              Live snapshot · {dateLabel}
-            </p>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            {/* Range chips */}
-            <div style={{ display: 'flex', gap: 4, background: 'var(--ds-bg)', border: '1px solid var(--ds-border)', borderRadius: 9, padding: 3 }}>
-              {RANGES.map((r) => (
-                <button
-                  key={r.value}
-                  onClick={() => setRangeKey(r.value)}
-                  style={{
-                    padding: '4px 12px', borderRadius: 7, border: 'none', cursor: 'pointer',
-                    fontSize: 12.5, fontWeight: rangeKey === r.value ? 600 : 500,
-                    fontFamily: 'inherit',
-                    background: rangeKey === r.value ? '#fff' : 'transparent',
-                    color: rangeKey === r.value ? 'var(--ds-t1)' : 'var(--ds-t3)',
-                    boxShadow: rangeKey === r.value ? 'var(--sh-sm)' : 'none',
-                  }}
-                >
-                  {r.label}
-                </button>
-              ))}
-            </div>
-            <IconBtn label="Refresh"><RefreshCw size={13} /> Refresh</IconBtn>
-            {hasPageAccess('loads') && (
+    <TmsScrollPage
+      title="Operations Dashboard"
+      subtitle={`Live snapshot · ${dateLabel}`}
+      actions={(
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          {/* Range chips */}
+          <div style={{ display: 'flex', gap: 4, background: 'var(--tms-bg)', border: '1px solid var(--tms-border)', borderRadius: 9, padding: 3 }}>
+            {RANGES.map((r) => (
               <button
-                onClick={() => navigate('/tms/shipments')}
+                key={r.value}
+                onClick={() => setRangeKey(r.value)}
                 style={{
-                  display: 'flex', alignItems: 'center', gap: 5, padding: '5px 12px', borderRadius: 7,
-                  background: 'var(--ds-blue)', color: '#fff', border: 'none', cursor: 'pointer',
-                  fontSize: 12.5, fontWeight: 600, fontFamily: 'inherit',
+                  padding: '4px 12px', borderRadius: 7, border: 'none', cursor: 'pointer',
+                  fontSize: 12.5, fontWeight: rangeKey === r.value ? 600 : 500,
+                  fontFamily: 'inherit',
+                  background: rangeKey === r.value ? 'var(--tms-card)' : 'transparent',
+                  color: rangeKey === r.value ? 'var(--tms-text)' : 'var(--tms-muted)',
+                  boxShadow: rangeKey === r.value ? 'var(--tms-shadow)' : 'none',
                 }}
               >
-                <Plus size={13} /> New Load
+                {r.label}
               </button>
-            )}
+            ))}
           </div>
+          <IconBtn label="Refresh"><RefreshCw size={13} /> Refresh</IconBtn>
+          {hasPageAccess('loads') && (
+            <button
+              onClick={() => navigate('/tms/shipments')}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 5, padding: '5px 12px', borderRadius: 7,
+                background: 'var(--tms-primary)', color: 'var(--tms-on-primary)', border: 'none', cursor: 'pointer',
+                fontSize: 12.5, fontWeight: 600, fontFamily: 'inherit',
+              }}
+            >
+              <Plus size={13} /> New Load
+            </button>
+          )}
         </div>
+      )}
+    >
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
         {/* ── KPI strip ────────────────────────────────────────────────────── */}
         {/* Six cards, one row on desktop. */}
@@ -439,8 +434,8 @@ export function DashboardPage() {
             label="Batory Appts to Book"
             value={metrics.needsAppt}
             sublabel={metrics.needsAppt > 0 ? 'Stops still on the Batory ladder' : 'All booked'}
-            accent={metrics.needsAppt > 0 ? '#f59e0b' : undefined}
-            sparkColor="#f59e0b"
+            accent={metrics.needsAppt > 0 ? 'var(--tms-badge-orange)' : undefined}
+            sparkColor={orange}
             icon={<CalendarClock size={15} />}
           />
           <RevenueCard
@@ -474,6 +469,6 @@ export function DashboardPage() {
           <RepairInvoicesWidget />
         </div>
       </div>
-    </div>
+    </TmsScrollPage>
   )
 }

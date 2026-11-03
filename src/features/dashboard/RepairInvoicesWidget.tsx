@@ -66,14 +66,14 @@ export function RepairInvoicesWidget() {
   )
 
   return (
-    <div style={{ background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 12, boxShadow: 'var(--sh-sm)', padding: '20px 20px 16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+    <div className="tms-card" style={{ padding: '20px 20px 16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <Wrench size={16} style={{ color: 'var(--ds-t3)' }} />
-          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)' }}>Recent Repair Invoices</div>
+          <Wrench size={16} style={{ color: 'var(--tms-muted)' }} />
+          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--tms-text)' }}>Recent Repair Invoices</div>
         </div>
         {canMaintenance && (
-          <button onClick={() => navigate('/maintenance')} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: 'var(--ds-blue)', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', fontWeight: 500 }}>
+          <button onClick={() => navigate('/maintenance')} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: 'var(--tms-primary)', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', fontWeight: 500 }}>
             View all <ChevronRight size={12} />
           </button>
         )}
@@ -84,58 +84,58 @@ export function RepairInvoicesWidget() {
         canInvoices ? (
           <button
             onClick={() => navigate('/invoices?tab=queue')}
-            style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px', borderRadius: 8, background: 'var(--ds-amber-bg)', border: '1px solid var(--ds-amber)', cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left', width: '100%' }}
+            style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px', borderRadius: 8, background: 'var(--tms-badge-orange-tint)', border: '1px solid var(--tms-badge-orange)', cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left', width: '100%' }}
           >
-            <Inbox size={15} style={{ color: 'var(--ds-amber)', flexShrink: 0 }} />
-            <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ds-amber)' }}>{pendingCount} invoice{pendingCount === 1 ? '' : 's'} awaiting review</span>
-            <ChevronRight size={13} style={{ color: 'var(--ds-amber)', marginLeft: 'auto' }} />
+            <Inbox size={15} style={{ color: 'var(--tms-badge-orange)', flexShrink: 0 }} />
+            <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--tms-badge-orange)' }}>{pendingCount} invoice{pendingCount === 1 ? '' : 's'} awaiting review</span>
+            <ChevronRight size={13} style={{ color: 'var(--tms-badge-orange)', marginLeft: 'auto' }} />
           </button>
         ) : (
           <div
-            style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px', borderRadius: 8, background: 'var(--ds-amber-bg)', border: '1px solid var(--ds-amber)', fontFamily: 'inherit', textAlign: 'left', width: '100%' }}
+            style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px', borderRadius: 8, background: 'var(--tms-badge-orange-tint)', border: '1px solid var(--tms-badge-orange)', fontFamily: 'inherit', textAlign: 'left', width: '100%' }}
           >
-            <Inbox size={15} style={{ color: 'var(--ds-amber)', flexShrink: 0 }} />
-            <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ds-amber)' }}>{pendingCount} invoice{pendingCount === 1 ? '' : 's'} awaiting review</span>
+            <Inbox size={15} style={{ color: 'var(--tms-badge-orange)', flexShrink: 0 }} />
+            <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--tms-badge-orange)' }}>{pendingCount} invoice{pendingCount === 1 ? '' : 's'} awaiting review</span>
           </div>
         )
       )}
 
       {/* This-month summary */}
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, background: 'var(--ds-bg)', border: '1px solid var(--ds-border)', borderRadius: 8, padding: '10px 14px' }}>
-        <span style={{ fontSize: 22, fontWeight: 700, color: 'var(--ds-t1)', fontVariantNumeric: 'tabular-nums' }}>{money(monthSpend)}</span>
-        <span style={{ fontSize: 12, color: 'var(--ds-t3)' }}>this month · {monthCount} {monthCount === 1 ? 'invoice' : 'invoices'}</span>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, background: 'var(--tms-bg)', border: '1px solid var(--tms-border)', borderRadius: 8, padding: '10px 14px' }}>
+        <span style={{ fontSize: 22, fontWeight: 700, color: 'var(--tms-text)', fontVariantNumeric: 'tabular-nums' }}>{money(monthSpend)}</span>
+        <span style={{ fontSize: 12, color: 'var(--tms-muted)' }}>this month · {monthCount} {monthCount === 1 ? 'invoice' : 'invoices'}</span>
       </div>
 
       {/* Latest invoices */}
       <div style={{ display: 'flex', flexDirection: 'column' }}>
         {recent.length === 0 ? (
-          <div style={{ fontSize: 12.5, color: 'var(--ds-t3)', padding: '8px 0' }}>No repair invoices yet.</div>
+          <div style={{ fontSize: 12.5, color: 'var(--tms-muted)', padding: '8px 0' }}>No repair invoices yet.</div>
         ) : recent.map((inv) => {
           const body = (
             <>
               <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: 12.5, fontWeight: 500, color: 'var(--ds-t1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <div style={{ fontSize: 12.5, fontWeight: 500, color: 'var(--tms-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {inv.vendor || 'Unknown vendor'}
                 </div>
-                <div style={{ fontSize: 11.5, color: 'var(--ds-t3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <div style={{ fontSize: 11.5, color: 'var(--tms-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {unitOf(inv.equipmentId)} · {shortDate(inv.date)}{inv.invoiceNumber ? ` · #${inv.invoiceNumber}` : ''}
                 </div>
               </div>
-              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--ds-t1)', fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>{money2(inv.amount)}</span>
+              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--tms-text)', fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>{money2(inv.amount)}</span>
             </>
           )
           return canMaintenance ? (
             <button
               key={inv.id}
               onClick={() => navigate('/maintenance')}
-              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '8px 0', borderBottom: '1px solid var(--ds-border)', background: 'none', border: 'none', borderBottomStyle: 'solid', cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left', width: '100%' }}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '8px 0', borderBottom: '1px solid var(--tms-border)', background: 'none', border: 'none', borderBottomStyle: 'solid', cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left', width: '100%' }}
             >
               {body}
             </button>
           ) : (
             <div
               key={inv.id}
-              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '8px 0', borderBottom: '1px solid var(--ds-border)' }}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '8px 0', borderBottom: '1px solid var(--tms-border)' }}
             >
               {body}
             </div>

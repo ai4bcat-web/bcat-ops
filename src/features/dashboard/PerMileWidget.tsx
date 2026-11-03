@@ -21,14 +21,14 @@ const navBtn = (disabled: boolean): React.CSSProperties => ({
   display: 'flex', alignItems: 'center', justifyContent: 'center', width: 26, height: 26,
   borderRadius: 6, border: 'none', background: 'transparent', padding: 0,
   cursor: disabled ? 'default' : 'pointer',
-  color: disabled ? 'var(--ds-t3)' : 'var(--ds-t1)', opacity: disabled ? 0.4 : 1,
+  color: disabled ? 'var(--tms-muted)' : 'var(--tms-text)', opacity: disabled ? 0.4 : 1,
 })
 
-const COLORS = { rev: '#15803d', fuel: '#dc2626' }
+const COLORS = { rev: 'var(--tms-chart-1)', fuel: 'var(--tms-chart-7)' }
 // How many periods the trend graph plots, per period type.
 const TREND_WINDOW = { week: 12, month: 6 } as const
-const TH: React.CSSProperties = { fontSize: 10.5, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.05em', padding: '8px 12px', textAlign: 'right', whiteSpace: 'nowrap' }
-const TD: React.CSSProperties = { fontSize: 13, color: 'var(--ds-t1)', padding: '9px 12px', textAlign: 'right', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }
+const TH: React.CSSProperties = { fontSize: 10.5, fontWeight: 600, color: 'var(--tms-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', padding: '8px 12px', textAlign: 'right', whiteSpace: 'nowrap' }
+const TD: React.CSSProperties = { fontSize: 13, color: 'var(--tms-text)', padding: '9px 12px', textAlign: 'right', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }
 
 /**
  * Per-truck efficiency for the Ivan (LOCAL) fleet — revenue per mile and fuel cost
@@ -80,13 +80,13 @@ export function PerMileWidget() {
   }, [computeForRange, period, offset])
 
   return (
-    <div style={{ background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 12, boxShadow: 'var(--sh-sm)', overflow: 'hidden' }}>
-      <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--ds-border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+    <div className="tms-card">
+      <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--tms-border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <Gauge size={16} style={{ color: 'var(--ds-blue)' }} />
+          <Gauge size={16} style={{ color: 'var(--tms-primary)' }} />
           <div>
-            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)' }}>Revenue &amp; fuel per mile</div>
-            <div style={{ fontSize: 12, color: 'var(--ds-t3)' }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--tms-text)' }}>Revenue &amp; fuel per mile</div>
+            <div style={{ fontSize: 12, color: 'var(--tms-muted)' }}>
               Ivan fleet · {view === 'table'
                 ? `Ivan local vs box truck · ${rangeLabel}`
                 : `${period === 'week' ? 'Weekly' : 'Monthly'} trend · last ${TREND_WINDOW[period]} ${period}s${offset > 0 ? ` through ${rangeLabel}` : ''}`}
@@ -98,11 +98,11 @@ export function PerMileWidget() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             {offset > 0 && (
               <button onClick={() => setOffset(0)}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, color: 'var(--ds-blue)', fontFamily: 'inherit', padding: '0 2px' }}>
+                style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, color: 'var(--tms-primary)', fontFamily: 'inherit', padding: '0 2px' }}>
                 Now
               </button>
             )}
-            <div style={{ display: 'flex', gap: 2, background: 'var(--ds-bg)', borderRadius: 8, padding: 2 }}>
+            <div style={{ display: 'flex', gap: 2, background: 'var(--tms-bg)', borderRadius: 8, padding: 2 }}>
               <button onClick={() => setOffset((o) => o + 1)} aria-label="Previous period" style={navBtn(false)}>
                 <ChevronLeft size={15} />
               </button>
@@ -112,25 +112,25 @@ export function PerMileWidget() {
             </div>
           </div>
           {/* Week / month period — applies to both table and trend */}
-          <div style={{ display: 'flex', gap: 2, background: 'var(--ds-bg)', borderRadius: 8, padding: 2 }}>
+          <div style={{ display: 'flex', gap: 2, background: 'var(--tms-bg)', borderRadius: 8, padding: 2 }}>
             {(['week', 'month'] as const).map((p) => {
               const active = period === p
               return (
                 <button key={p} onClick={() => changePeriod(p)}
                   style={{ padding: '5px 10px', borderRadius: 6, border: 'none', fontSize: 12, fontWeight: 600, cursor: 'pointer', textTransform: 'capitalize',
-                    background: active ? 'var(--ds-surface)' : 'transparent', color: active ? 'var(--ds-t1)' : 'var(--ds-t2)', boxShadow: active ? 'var(--sh-sm)' : 'none' }}>
+                    background: active ? 'var(--tms-card)' : 'transparent', color: active ? 'var(--tms-text)' : 'var(--tms-text-2)', boxShadow: active ? 'var(--tms-shadow)' : 'none' }}>
                   {p}
                 </button>
               )
             })}
           </div>
-          <div style={{ display: 'flex', gap: 2, background: 'var(--ds-bg)', borderRadius: 8, padding: 2 }}>
+          <div style={{ display: 'flex', gap: 2, background: 'var(--tms-bg)', borderRadius: 8, padding: 2 }}>
             {([['table', Table2], ['graph', LineChartIcon]] as const).map(([v, Icon]) => {
               const active = view === v
               return (
                 <button key={v} onClick={() => setView(v)} aria-label={v === 'table' ? 'Table view' : 'Graph view'}
                   style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '5px 10px', borderRadius: 6, border: 'none', fontSize: 12, fontWeight: 600, cursor: 'pointer', textTransform: 'capitalize',
-                    background: active ? 'var(--ds-surface)' : 'transparent', color: active ? 'var(--ds-t1)' : 'var(--ds-t2)', boxShadow: active ? 'var(--sh-sm)' : 'none' }}>
+                    background: active ? 'var(--tms-card)' : 'transparent', color: active ? 'var(--tms-text)' : 'var(--tms-text-2)', boxShadow: active ? 'var(--tms-shadow)' : 'none' }}>
                   <Icon size={13} /> {v}
                 </button>
               )
@@ -143,11 +143,11 @@ export function PerMileWidget() {
         <div style={{ padding: '16px 12px 8px' }}>
           <ResponsiveContainer width="100%" height={260}>
             <LineChart data={trend} margin={{ top: 8, right: 24, bottom: 4, left: 8 }}>
-              <CartesianGrid stroke="rgba(15,23,42,0.05)" strokeDasharray="3 4" />
-              <XAxis dataKey="label" tick={{ fill: '#6b7588', fontSize: 11 }} axisLine={false} tickLine={false} />
-              <YAxis tickFormatter={(v) => money2(Number(v))} tick={{ fill: '#6b7588', fontSize: 11 }} axisLine={false} tickLine={false} width={56} />
+              <CartesianGrid stroke="var(--tms-chart-grid)" strokeDasharray="3 4" />
+              <XAxis dataKey="label" tick={{ fill: 'var(--tms-chart-axis)', fontSize: 11 }} axisLine={false} tickLine={false} />
+              <YAxis tickFormatter={(v) => money2(Number(v))} tick={{ fill: 'var(--tms-chart-axis)', fontSize: 11 }} axisLine={false} tickLine={false} width={56} />
               <Tooltip formatter={(value) => money2(Number(value))}
-                contentStyle={{ background: 'white', border: '1px solid #e2e8f0', borderRadius: 8, fontSize: 12, boxShadow: 'var(--sh-md)' }} />
+                contentStyle={{ background: 'var(--tms-card)', color: 'var(--tms-text)', border: '1px solid var(--tms-border)', borderRadius: 8, fontSize: 12, boxShadow: 'var(--tms-shadow-pop)' }} />
               <Legend wrapperStyle={{ fontSize: 12 }} iconType="plainline" />
               <Line type="monotone" dataKey="revPerMile"  name="Rev / mi"  stroke={COLORS.rev}  strokeWidth={2} dot={{ r: 3 }} connectNulls />
               <Line type="monotone" dataKey="fuelPerMile" name="Fuel / mi" stroke={COLORS.fuel} strokeWidth={2} dot={{ r: 3 }} connectNulls />
@@ -155,14 +155,14 @@ export function PerMileWidget() {
           </ResponsiveContainer>
         </div>
       ) : loading && trucks.length === 0 ? (
-        <div style={{ padding: '28px 0', textAlign: 'center', fontSize: 13, color: 'var(--ds-t3)' }}>Loading…</div>
+        <div style={{ padding: '28px 0', textAlign: 'center', fontSize: 13, color: 'var(--tms-muted)' }}>Loading…</div>
       ) : trucks.length === 0 ? (
-        <div style={{ padding: '28px 0', textAlign: 'center', fontSize: 13, color: 'var(--ds-t3)' }}>No truck activity recorded for this {period}.</div>
+        <div style={{ padding: '28px 0', textAlign: 'center', fontSize: 13, color: 'var(--tms-muted)' }}>No truck activity recorded for this {period}.</div>
       ) : (
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
-              <tr style={{ borderBottom: '1px solid var(--ds-border)' }}>
+              <tr style={{ borderBottom: '1px solid var(--tms-border)' }}>
                 <th style={{ ...TH, textAlign: 'left' }}>Group</th>
                 <th style={{ ...TH, textAlign: 'left' }}>Trucks</th>
                 <th style={TH}>Miles</th>
@@ -174,10 +174,10 @@ export function PerMileWidget() {
             </thead>
             <tbody>
               {groups.map((g) => (
-                <tr key={g.key} style={{ borderBottom: '1px solid var(--ds-border)' }}>
+                <tr key={g.key} style={{ borderBottom: '1px solid var(--tms-border)' }}>
                   <td style={{ ...TD, textAlign: 'left', fontWeight: 700 }}>{g.label}</td>
-                  <td style={{ ...TD, textAlign: 'left', color: 'var(--ds-t3)', fontFamily: 'monospace', fontSize: 12 }}>{g.units.map((u) => `#${u}`).join('  ')}</td>
-                  <td style={{ ...TD, color: g.miles ? 'var(--ds-t1)' : 'var(--ds-t3)' }}>{miles0(g.miles)}</td>
+                  <td style={{ ...TD, textAlign: 'left', color: 'var(--tms-muted)', fontFamily: 'monospace', fontSize: 12 }}>{g.units.map((u) => `#${u}`).join('  ')}</td>
+                  <td style={{ ...TD, color: g.miles ? 'var(--tms-text)' : 'var(--tms-muted)' }}>{miles0(g.miles)}</td>
                   <td style={{ ...TD, color: COLORS.rev, fontWeight: 600 }}>{money0(g.revenue)}</td>
                   <td style={{ ...TD, color: COLORS.fuel }}>{money0(g.fuel)}</td>
                   <td style={{ ...TD, color: COLORS.rev }}>{money2(g.revenuePerMile)}</td>
@@ -187,7 +187,7 @@ export function PerMileWidget() {
             </tbody>
             {fleet && (
               <tfoot>
-                <tr style={{ borderTop: '2px solid var(--ds-border)', background: 'var(--ds-bg)' }}>
+                <tr style={{ borderTop: '2px solid var(--tms-border)', background: 'var(--tms-bg)' }}>
                   <td style={{ ...TD, textAlign: 'left', fontWeight: 700 }} colSpan={2}>Fleet total / average</td>
                   <td style={{ ...TD, fontWeight: 700 }}>{miles0(fleet.miles)}</td>
                   <td style={{ ...TD, color: COLORS.rev, fontWeight: 700 }}>{money0(fleet.revenue)}</td>

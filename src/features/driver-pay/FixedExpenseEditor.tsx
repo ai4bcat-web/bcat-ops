@@ -26,24 +26,24 @@ type Mode = 'idle' | 'add' | 'change' | 'end'
 type Status = 'current' | 'scheduled' | 'ended'
 
 const label: React.CSSProperties = {
-  fontSize: 11, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.05em',
+  fontSize: 11, fontWeight: 600, color: 'var(--tms-muted)', textTransform: 'uppercase', letterSpacing: '0.05em',
 }
 const input: React.CSSProperties = {
-  height: 36, width: '100%', borderRadius: 8, border: '1px solid var(--ds-border)', padding: '0 10px',
-  fontSize: 13, background: 'var(--ds-surface)', color: 'var(--ds-t1)', boxSizing: 'border-box',
+  height: 36, width: '100%', borderRadius: 8, border: '1px solid var(--tms-border)', padding: '0 10px',
+  fontSize: 13, background: 'var(--tms-card)', color: 'var(--tms-text)', boxSizing: 'border-box',
 }
 const btnBase: React.CSSProperties = {
-  height: 32, padding: '0 12px', borderRadius: 8, border: '1px solid var(--ds-border)',
-  background: 'var(--ds-surface)', color: 'var(--ds-t2)', fontSize: 12, fontWeight: 600,
+  height: 32, padding: '0 12px', borderRadius: 8, border: '1px solid var(--tms-border)',
+  background: 'var(--tms-card)', color: 'var(--tms-text-2)', fontSize: 12, fontWeight: 600,
   cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6,
 }
-const primaryBtn: React.CSSProperties = { ...btnBase, border: 'none', background: 'var(--ds-blue)', color: '#fff' }
-const dangerBtn: React.CSSProperties = { ...btnBase, border: 'none', background: 'var(--ds-red, #dc2626)', color: '#fff' }
+const primaryBtn: React.CSSProperties = { ...btnBase, border: 'none', background: 'var(--tms-primary)', color: 'var(--tms-on-primary)' }
+const dangerBtn: React.CSSProperties = { ...btnBase, border: 'none', background: 'var(--tms-badge-red)', color: 'var(--tms-on-primary)' }
 
 const STATUS_STYLES: Record<Status, { color: string; background: string; label: string }> = {
-  current: { color: '#15803d', background: '#dcfce7', label: 'current' },
-  scheduled: { color: 'var(--ds-blue)', background: 'var(--ds-blue-soft, #eff6ff)', label: 'scheduled' },
-  ended: { color: 'var(--ds-t3)', background: 'var(--ds-surface)', label: 'ended' },
+  current: { color: 'var(--tms-badge-green)', background: 'var(--tms-badge-green-tint)', label: 'current' },
+  scheduled: { color: 'var(--tms-primary)', background: 'var(--tms-primary-tint)', label: 'scheduled' },
+  ended: { color: 'var(--tms-muted)', background: 'var(--tms-card)', label: 'ended' },
 }
 
 /** A revision ended on a future date still charges until then, so it stays current. */
@@ -283,9 +283,9 @@ export function FixedExpenseEditor({
         </button>
       </div>
 
-      <div style={{ fontSize: 11, color: 'var(--ds-t3)' }}>{hint ?? defaultHint}</div>
+      <div style={{ fontSize: 11, color: 'var(--tms-muted)' }}>{hint ?? defaultHint}</div>
 
-      {prepared.length === 0 && <div style={{ fontSize: 12.5, color: 'var(--ds-t3)' }}>No fixed expenses.</div>}
+      {prepared.length === 0 && <div style={{ fontSize: 12.5, color: 'var(--tms-muted)' }}>No fixed expenses.</div>}
 
       {grouped.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -293,13 +293,13 @@ export function FixedExpenseEditor({
             <div
               key={expenseId}
               style={{
-                border: '1px solid var(--ds-border)',
+                border: '1px solid var(--tms-border)',
                 borderRadius: 10,
                 padding: '10px 12px',
-                background: 'var(--ds-bg)',
+                background: 'var(--tms-bg)',
               }}
             >
-              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--ds-t3)', marginBottom: 6 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--tms-muted)', marginBottom: 6 }}>
                 {rows[0]?.label ?? 'Unknown expense'}
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -312,8 +312,8 @@ export function FixedExpenseEditor({
                       style={{
                         display: 'flex', alignItems: 'center', gap: 8,
                         padding: '6px 8px', borderRadius: 6, cursor: mode === 'idle' ? 'pointer' : 'default',
-                        background: status === 'current' ? 'var(--ds-surface)' : 'transparent',
-                        border: '1px solid var(--ds-border)',
+                        background: status === 'current' ? 'var(--tms-card)' : 'transparent',
+                        border: '1px solid var(--tms-border)',
                       }}
                     >
                       {mode === 'idle' && status !== 'ended' && (
@@ -325,7 +325,7 @@ export function FixedExpenseEditor({
                           disabled={disabled}
                         />
                       )}
-                      <span style={{ flex: 1, fontSize: 12.5, color: 'var(--ds-t1)' }}>
+                      <span style={{ flex: 1, fontSize: 12.5, color: 'var(--tms-text)' }}>
                         {row.mileage
                           ? `${formatMiles(row.mileage.miles)} miles × ${formatRate(row.mileage.costPerMile)}/mi = ${formatCurrency(row.amount)}`
                           : formatCurrency(row.amount)}
@@ -347,8 +347,8 @@ export function FixedExpenseEditor({
                           style={{
                             fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em',
                             padding: '2px 6px', borderRadius: 4,
-                            color: 'var(--ds-blue)',
-                            background: 'var(--ds-blue-soft, #eff6ff)',
+                            color: 'var(--tms-primary)',
+                            background: 'var(--tms-primary-tint)',
                           }}
                         >
                           after split
@@ -358,7 +358,7 @@ export function FixedExpenseEditor({
                   )
                 })}
               </div>
-              <div style={{ marginTop: 6, fontSize: 10.5, color: 'var(--ds-t3)' }}>
+              <div style={{ marginTop: 6, fontSize: 10.5, color: 'var(--tms-muted)' }}>
                 {rows.map((row, idx) => (
                   <span key={idx}>
                     {idx > 0 && ' · '}
@@ -391,16 +391,16 @@ export function FixedExpenseEditor({
       {mode !== 'idle' && (
         <div
           style={{
-            border: '1px solid var(--ds-border)',
+            border: '1px solid var(--tms-border)',
             borderRadius: 10,
             padding: 14,
-            background: 'var(--ds-surface)',
+            background: 'var(--tms-card)',
             display: 'flex',
             flexDirection: 'column',
             gap: 10,
           }}
         >
-          <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ds-t1)' }}>
+          <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--tms-text)' }}>
             {mode === 'add'
               ? 'Add new expense type'
               : mode === 'change'
@@ -461,16 +461,16 @@ export function FixedExpenseEditor({
                         disabled={disabled}
                         style={{
                           flex: 1, textAlign: 'left', padding: '8px 10px', borderRadius: 8, cursor: 'pointer',
-                          border: `1.5px solid ${amountType === opt.v ? 'var(--ds-blue)' : 'var(--ds-border)'}`,
-                          background: amountType === opt.v ? 'var(--ds-blue-soft, #eff6ff)' : 'var(--ds-surface)',
-                          fontSize: 12.5, fontWeight: 600, color: 'var(--ds-t1)',
+                          border: `1.5px solid ${amountType === opt.v ? 'var(--tms-primary)' : 'var(--tms-border)'}`,
+                          background: amountType === opt.v ? 'var(--tms-primary-tint)' : 'var(--tms-card)',
+                          fontSize: 12.5, fontWeight: 600, color: 'var(--tms-text)',
                         }}
                       >
                         {opt.t}
                       </button>
                     ))}
                   </div>
-                  <div style={{ fontSize: 11.5, color: 'var(--ds-t3)', marginTop: 6 }}>
+                  <div style={{ fontSize: 11.5, color: 'var(--tms-muted)', marginTop: 6 }}>
                     Shared through the split by default — an after-expenses driver bears only their pay % of it.
                     For a charge the driver owes outright, choose <b>Driver pays in full, after the split</b> below.
                   </div>
@@ -506,7 +506,7 @@ export function FixedExpenseEditor({
                       <label htmlFor={`${formId}-calculated-amount`} style={label}>Calculated amount</label>
                       <input
                         id={`${formId}-calculated-amount`}
-                        style={{ ...input, background: 'var(--ds-bg)' }}
+                        style={{ ...input, background: 'var(--tms-bg)' }}
                         value={(() => {
                           const costPerMile = parseStrictPositive(draftCostPerMile)
                           const miles = parseStrictPositive(draftMiles, 3)
@@ -522,7 +522,7 @@ export function FixedExpenseEditor({
                       />
                     </div>
                   </div>
-                  <div style={{ fontSize: 11, color: 'var(--ds-t3)' }}>
+                  <div style={{ fontSize: 11, color: 'var(--tms-muted)' }}>
                     Amount uses the miles you enter for this weekly expense. The existing effective-date and day proration still apply; this is not an automatic ELD download.
                   </div>
                 </>
@@ -541,9 +541,9 @@ export function FixedExpenseEditor({
                       disabled={disabled}
                       style={{
                         flex: 1, textAlign: 'left', padding: '8px 10px', borderRadius: 8, cursor: 'pointer',
-                        border: `1.5px solid ${chargeMode === opt.v ? 'var(--ds-blue)' : 'var(--ds-border)'}`,
-                        background: chargeMode === opt.v ? 'var(--ds-blue-soft, #eff6ff)' : 'var(--ds-surface)',
-                        fontSize: 12.5, fontWeight: 600, color: 'var(--ds-t1)',
+                        border: `1.5px solid ${chargeMode === opt.v ? 'var(--tms-primary)' : 'var(--tms-border)'}`,
+                        background: chargeMode === opt.v ? 'var(--tms-primary-tint)' : 'var(--tms-card)',
+                        fontSize: 12.5, fontWeight: 600, color: 'var(--tms-text)',
                       }}
                     >
                       {opt.t}
@@ -560,7 +560,7 @@ export function FixedExpenseEditor({
                     placeholder="0.00"
                     disabled={disabled}
                   />
-                  <div style={{ fontSize: 11, color: 'var(--ds-t3)' }}>
+                  <div style={{ fontSize: 11, color: 'var(--tms-muted)' }}>
                     Off the driver's statement; counted as a company cost in Finances.
                   </div>
                 </div>
@@ -580,14 +580,14 @@ export function FixedExpenseEditor({
               onChange={(e) => setDraftDate(e.target.value)}
               disabled={disabled}
             />
-            <div style={{ fontSize: 11, color: 'var(--ds-t3)' }}>
+            <div style={{ fontSize: 11, color: 'var(--tms-muted)' }}>
               {mode === 'end'
                 ? 'The expense stops on this date; a partial period is prorated by day.'
                 : 'The new amount/type starts on this date; a partial period is prorated by day.'}
             </div>
           </div>
 
-          {error && <div style={{ fontSize: 12, color: '#dc2626' }}>{error}</div>}
+          {error && <div style={{ fontSize: 12, color: 'var(--tms-badge-red)' }}>{error}</div>}
 
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
             <button type="button" onClick={reset} disabled={disabled} style={btnBase}>

@@ -1,3 +1,4 @@
+/* eslint-disable no-restricted-syntax -- data colour: per-driver identity palette */
 import type { ColorKey } from '@/types'
 
 export interface DriverColor {

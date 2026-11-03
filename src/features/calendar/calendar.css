@@ -4,16 +4,16 @@
 
 /* ── CSS variable overrides ──────────────────────────────────────────────── */
 .fc {
-  --fc-border-color:                #e2e8f0;
-  --fc-page-bg-color:               #f8fafc;
-  --fc-neutral-bg-color:            #f1f5f9;
-  --fc-neutral-text-color:          #0a0a0a;
-  --fc-today-bg-color:              rgba(30, 168, 243, 0.05);
-  --fc-highlight-color:             rgba(30, 168, 243, 0.08);
+  --fc-border-color:                var(--tms-border);
+  --fc-page-bg-color:               var(--tms-surface);
+  --fc-neutral-bg-color:            var(--tms-surface-hover);
+  --fc-neutral-text-color:          var(--tms-text);
+  --fc-today-bg-color:              var(--tms-primary-tint);
+  --fc-highlight-color:             var(--tms-primary-tint);
   --fc-event-bg-color:              transparent;
   --fc-event-border-color:          transparent;
   --fc-event-text-color:            inherit;
-  --fc-event-selected-overlay-color: rgba(0, 0, 0, 0.06);
+  --fc-event-selected-overlay-color: color-mix(in srgb, var(--tms-text) 6%, transparent);
   --fc-small-font-size:             0.75rem;
   font-family: Inter, system-ui, -apple-system, sans-serif;
   font-size: 0.875rem;
@@ -21,8 +21,8 @@
 
 /* ── Header / day labels ──────────────────────────────────────────────────── */
 .fc .fc-col-header-cell {
-  background: #f1f5f9;
-  border-color: #e2e8f0;
+  background: var(--tms-surface);
+  border-color: var(--tms-border);
   padding: 0;
 }
 
@@ -32,27 +32,27 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: #64748b;
+  color: var(--tms-muted);
   text-decoration: none !important;
 }
 
 .fc .fc-col-header-cell.fc-day-today .fc-col-header-cell-cushion {
-  color: #1ea8f3;
+  color: var(--tms-primary);
 }
 
 /* Slot (hour/day) labels on left of timeline */
 .fc .fc-timeline-slot-label {
   font-size: 0.7rem;
   font-weight: 600;
-  color: #64748b;
+  color: var(--tms-muted);
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
 
 /* ── Resource (driver) column ─────────────────────────────────────────────── */
 .fc .fc-datagrid-header {
-  background: #f1f5f9;
-  border-color: #e2e8f0;
+  background: var(--tms-surface);
+  border-color: var(--tms-border);
 }
 
 .fc .fc-datagrid-cell-frame {
@@ -60,37 +60,37 @@
   display: flex;
   align-items: center;
   padding: 0;
-  border-color: #e2e8f0;
-  background: #ffffff;
+  border-color: var(--tms-border);
+  background: var(--tms-card);
 }
 
 .fc .fc-datagrid-body .fc-scrollgrid-sync-table td {
-  border-color: #e2e8f0;
-  background: #ffffff;
+  border-color: var(--tms-border);
+  background: var(--tms-card);
 }
 
 /* ── Timeline lanes (rows) ────────────────────────────────────────────────── */
 .fc .fc-timeline-lane {
   min-height: 120px;
-  background: #ffffff;
+  background: var(--tms-card);
 }
 
 .fc .fc-timeline-lane-frame {
   min-height: 120px;
-  background: #ffffff;
+  background: var(--tms-card);
 }
 
 .fc .fc-timeline-body .fc-scrollgrid-sync-table td {
-  border-color: #e2e8f0;
-  background: #ffffff;
+  border-color: var(--tms-border);
+  background: var(--tms-card);
 }
 
 /* Alternating row shade */
 .fc .fc-resource:nth-child(even) .fc-timeline-lane {
-  background: #f8fafc;
+  background: var(--tms-surface);
 }
 .fc .fc-resource:nth-child(even) .fc-datagrid-cell-frame {
-  background: #f8fafc;
+  background: var(--tms-surface);
 }
 
 /* ── Event blocks ─────────────────────────────────────────────────────────── */
@@ -115,21 +115,21 @@
 
 /* ── Today column highlight ───────────────────────────────────────────────── */
 .fc .fc-day-today {
-  background-color: rgba(30, 168, 243, 0.04) !important;
+  background-color: var(--tms-primary-tint) !important;
 }
 
 /* ── Scrollgrid / borders ─────────────────────────────────────────────────── */
-.fc .fc-scrollgrid       { border-color: #e2e8f0; background: #ffffff; }
+.fc .fc-scrollgrid       { border-color: var(--tms-border); background: var(--tms-card); }
 .fc .fc-scrollgrid td,
-.fc .fc-scrollgrid th    { border-color: #e2e8f0; }
+.fc .fc-scrollgrid th    { border-color: var(--tms-border); }
 
 /* ── Now indicator ────────────────────────────────────────────────────────── */
 .fc .fc-timeline-now-indicator-line {
-  border-color: #1ea8f3;
+  border-color: var(--tms-primary);
   border-width: 2px;
 }
 .fc .fc-timeline-now-indicator-arrow {
-  border-top-color: #1ea8f3;
+  border-top-color: var(--tms-primary);
 }
 
 /* ── Resource area header label ───────────────────────────────────────────── */
@@ -137,10 +137,10 @@
   padding: 0 12px;
   font-size: 0.6rem;
   font-weight: 700;
-  color: #64748b;
+  color: var(--tms-muted);
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  background: #f1f5f9;
+  background: var(--tms-surface);
 }
 
 /* ── Remove FullCalendar button defaults ─────────────────────────────────── */
@@ -153,15 +153,15 @@
 /* ── Scrollbar ───────────────────────────────────────────────────────────── */
 .fc .fc-scroller {
   scrollbar-width: thin;
-  scrollbar-color: #cbd5e1 transparent;
+  scrollbar-color: var(--tms-scroll-thumb) transparent;
 }
 .fc .fc-scroller::-webkit-scrollbar { width: 5px; height: 5px; }
 .fc .fc-scroller::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
+  background: var(--tms-scroll-thumb);
   border-radius: 3px;
 }
 
 /* ── Borders ─────────────────────────────────────────────────────────────── */
 .fc-theme-standard td,
-.fc-theme-standard th { border-color: #e2e8f0; }
-.fc-theme-standard .fc-scrollgrid { border-color: #e2e8f0; }
+.fc-theme-standard th { border-color: var(--tms-border); }
+.fc-theme-standard .fc-scrollgrid { border-color: var(--tms-border); }

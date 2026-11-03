@@ -91,23 +91,23 @@ export function DriverAppViewPage() {
   )
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: 'var(--ds-bg)' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: 'var(--tms-bg)' }}>
       <div
         style={{
           display: 'flex', alignItems: 'center', gap: 12,
-          padding: '12px 16px', borderBottom: '1px solid var(--ds-border)',
-          background: 'var(--ds-surface)', flexShrink: 0,
+          padding: '12px 16px', borderBottom: '1px solid var(--tms-border)',
+          background: 'var(--tms-card)', flexShrink: 0,
         }}
       >
         <Button variant="outline" size="sm" onClick={() => navigate(backTo)}>
           <ArrowLeft className="size-3.5" /> Back
         </Button>
-        <Smartphone size={16} style={{ color: 'var(--ds-t2)' }} />
+        <Smartphone size={16} style={{ color: 'var(--tms-text-2)' }} />
         <div style={{ flex: 1, minWidth: 0 }}>
-          <p style={{ margin: 0, fontSize: 15, fontWeight: 600, color: 'var(--ds-t1)' }}>
+          <p style={{ margin: 0, fontSize: 15, fontWeight: 600, color: 'var(--tms-text)' }}>
             {driver?.name ?? 'Driver'} — their app, live
           </p>
-          <p style={{ margin: '1px 0 0', fontSize: 12, color: 'var(--ds-t3)' }}>
+          <p style={{ margin: '1px 0 0', fontSize: 12, color: 'var(--tms-muted)' }}>
             Served by the driver API as {driver?.name ?? 'this driver'}. Read only, and recorded.
           </p>
         </div>
@@ -117,8 +117,8 @@ export function DriverAppViewPage() {
       <div
         style={{
           display: 'flex', alignItems: 'center', gap: 8,
-          padding: '8px 16px', background: '#fffbeb',
-          borderBottom: '1px solid #fcd34d', color: '#b45309',
+          padding: '8px 16px', background: 'var(--tms-badge-orange-tint)',
+          borderBottom: '1px solid var(--tms-badge-orange)', color: 'var(--tms-badge-orange)',
           fontSize: 12.5, flexShrink: 0,
         }}
       >
@@ -133,8 +133,8 @@ export function DriverAppViewPage() {
         <div
           style={{
             width: PHONE_WIDTH, maxWidth: '100%', margin: '0 auto',
-            border: '1px solid var(--ds-border)', borderRadius: 14,
-            overflow: 'hidden', background: 'var(--ds-surface)', boxShadow: 'var(--sh-sm)',
+            border: '1px solid var(--tms-border)', borderRadius: 14,
+            overflow: 'hidden', background: 'var(--tms-card)', boxShadow: 'var(--tms-shadow-pop)',
           }}
         >
           {driverId && driver ? (
@@ -147,7 +147,7 @@ export function DriverAppViewPage() {
                * to look missing rather than untested. Staff see what the driver sees.
                */
               <>
-                <div style={{ display: 'flex', borderBottom: '1px solid var(--ds-border)' }}>
+                <div style={{ display: 'flex', borderBottom: '1px solid var(--tms-border)' }}>
                   {([['paperwork', 'Paperwork', ClipboardList], ['hours', 'Hours', Clock]] as const)
                     .map(([key, label, Icon]) => (
                       <button
@@ -158,9 +158,9 @@ export function DriverAppViewPage() {
                           gap: 6, padding: '10px 0', border: 'none', cursor: 'pointer',
                           fontFamily: 'inherit', fontSize: 13,
                           fontWeight: tab === key ? 600 : 500,
-                          background: tab === key ? 'var(--ds-surface)' : 'var(--ds-bg)',
-                          color: tab === key ? 'var(--ds-t1)' : 'var(--ds-t3)',
-                          borderBottom: tab === key ? '2px solid var(--ds-t1)' : '2px solid transparent',
+                          background: tab === key ? 'var(--tms-card)' : 'var(--tms-bg)',
+                          color: tab === key ? 'var(--tms-text)' : 'var(--tms-muted)',
+                          borderBottom: tab === key ? '2px solid var(--tms-text)' : '2px solid transparent',
                         }}
                       >
                         <Icon size={14} /> {label}
@@ -171,7 +171,7 @@ export function DriverAppViewPage() {
               </>
             ) : <SettlementPage />
           ) : (
-            <div style={{ display: 'grid', placeItems: 'center', height: 240, color: 'var(--ds-t3)' }}>
+            <div style={{ display: 'grid', placeItems: 'center', height: 240, color: 'var(--tms-muted)' }}>
               <Loader2 className="size-5 animate-spin" />
             </div>
           )}

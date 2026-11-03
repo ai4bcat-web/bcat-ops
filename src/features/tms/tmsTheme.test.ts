@@ -48,4 +48,21 @@ describe('tmsTheme', () => {
     unmount()
     expect(document.documentElement.hasAttribute('data-tms-theme')).toBe(false)
   })
+
+  it('keeps <meta name="theme-color"> on the top-bar token across a toggle', () => {
+    const meta = document.createElement('meta')
+    meta.setAttribute('name', 'theme-color')
+    meta.setAttribute('content', 'stale')
+    document.head.appendChild(meta)
+    const root = document.documentElement
+    root.style.setProperty('--tms-topbar', 'rgb(1, 2, 3)')
+    const { result, unmount } = renderHook(() => useTmsTheme())
+    expect(meta.getAttribute('content')).toBe('rgb(1, 2, 3)')
+    root.style.setProperty('--tms-topbar', 'rgb(9, 9, 9)')
+    act(() => result.current.toggleTheme())
+    expect(meta.getAttribute('content')).toBe('rgb(9, 9, 9)')
+    unmount()
+    root.style.removeProperty('--tms-topbar')
+    meta.remove()
+  })
 })

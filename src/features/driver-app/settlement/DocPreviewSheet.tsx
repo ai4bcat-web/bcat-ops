@@ -66,10 +66,10 @@ export function DocPreviewSheet({
   const quality = doc.document.enhanced ? 'cleaned up for the office' : 'as you sent it'
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-background">
+    <div className="fixed inset-0 z-50 flex flex-col bg-[color:var(--tms-card)] text-foreground">
       {/* Over the tab bar and under the status bar, so both insets are this sheet's to pay. */}
       <header
-        className="flex items-start gap-3 border-b border-border px-4 py-3"
+        className="flex items-start gap-3 border-b border-[color:var(--tms-border)] bg-[color:var(--tms-topbar)] px-4 py-3"
         style={{ paddingTop: 'max(env(safe-area-inset-top), 0.75rem)' }}
       >
         <div className="min-w-0 flex-1">
@@ -91,7 +91,7 @@ export function DocPreviewSheet({
       <div className="flex-1 overflow-auto bg-muted/40">
         {error ? (
           <div className="flex h-full flex-col items-center justify-center gap-2 p-8 text-center">
-            <AlertTriangle className="h-6 w-6 text-amber-300" />
+            <AlertTriangle className="h-6 w-6 text-[color:var(--tms-badge-orange)]" />
             <p className="text-sm text-foreground">{error}</p>
           </div>
         ) : !ready ? (
@@ -106,14 +106,14 @@ export function DocPreviewSheet({
                 {pageUrls.length > 1 && (
                   <p className="mb-1 text-center text-xs font-semibold uppercase tracking-wide text-muted-foreground">Page {i + 1} of {pageUrls.length}</p>
                 )}
-                <img src={u} alt={`${LABEL[kind]} for ${shipment}, page ${i + 1} of ${pageUrls.length}`} className="mx-auto block max-w-full bg-white" />
+                <img src={u} alt={`${LABEL[kind]} for ${shipment}, page ${i + 1} of ${pageUrls.length}`} data-tms-paper className="mx-auto block max-w-full bg-[color:var(--tms-paper)]" />
               </li>
             ))}
           </ol>
         ) : pdf ? (
-          <iframe src={url!} title={`${LABEL[kind]} for ${shipment}`} className="h-full w-full border-0 bg-white" />
+          <iframe src={url!} title={`${LABEL[kind]} for ${shipment}`} data-tms-paper className="h-full w-full border-0 bg-[color:var(--tms-paper)]" />
         ) : (
-          <img src={url!} alt={`${LABEL[kind]} for ${shipment}`} className="mx-auto block max-w-full bg-white" />
+          <img src={url!} alt={`${LABEL[kind]} for ${shipment}`} data-tms-paper className="mx-auto block max-w-full bg-[color:var(--tms-paper)]" />
         )}
       </div>
 
@@ -175,7 +175,7 @@ export function DocPreviewSheet({
           variant="outline"
           size="sm"
           disabled={busy !== null}
-          className="text-red-400"
+          className="text-[color:var(--tms-badge-red)]"
           onClick={() => {
             const warning =
               kind === 'POD'

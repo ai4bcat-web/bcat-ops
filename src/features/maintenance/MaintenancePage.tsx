@@ -1,6 +1,10 @@
 import { useState } from 'react'
 import { useAppStore } from '@/store/useAppStore'
-import { useIsMobile } from '@/hooks/useIsMobile'
+import { TmsButton } from '@/features/tms/kit/TmsButton'
+import { TmsEmptyState } from '@/features/tms/kit/TmsEmptyState'
+import { TmsScrollPage } from '@/features/tms/kit/TmsScrollPage'
+import { TmsStatRow } from '@/features/tms/kit/TmsStatRow'
+import type { TmsStat } from '@/features/tms/kit/TmsStatRow'
 import { Avatar } from '@/components/ui/avatar'
 import { AlertTriangle, Wrench, CheckCircle2, Trash2, Pencil, Plus, Search, ArrowUp, ArrowDown, RotateCcw } from 'lucide-react'
 import { toast } from 'sonner'
@@ -119,8 +123,6 @@ type Tab = 'tasks' | 'completed'
 type SortKey = 'title' | 'equipment' | 'dueDate' | 'completedDate' | 'createdAt' | 'priority' | 'status'
 
 export function MaintenancePage() {
-  const isMobile = useIsMobile()
-  const padX = isMobile ? 14 : 32
   const equipment            = useAppStore((s) => s.equipment)
   const maintenanceTasks     = useAppStore((s) => s.maintenanceTasks)
   const addMaintenanceTask       = useAppStore((s) => s.addMaintenanceTask)
@@ -190,11 +192,11 @@ export function MaintenancePage() {
   const highOpenCount  = maintenanceTasks.filter((t) => t.status !== 'complete' && t.priority === 'high').length
 
   // Each KPI applies the matching tab + filters when clicked.
-  const MAINT_KPIS = [
-    { label: 'Open Tasks',    value: String(upcomingCount),  color: '#1ea8f3', pulse: false,               onClick: () => { setTab('tasks'); setTimeFilter('all'); setPriority('all') } },
-    { label: 'Overdue',       value: String(overdueCount),   color: '#ef4444', pulse: overdueCount > 0,     onClick: () => { setTab('tasks'); setTimeFilter('overdue'); setPriority('all') } },
-    { label: 'Completed',     value: String(completedCount), color: '#22c55e', pulse: false,               onClick: () => { setTab('completed'); setPriority('all') } },
-    { label: 'High Priority', value: String(highOpenCount),  color: '#a78bfa', pulse: false,               onClick: () => { setTab('tasks'); setTimeFilter('all'); setPriority('high') } },
+  const MAINT_KPIS: TmsStat[] = [
+    { label: 'Open Tasks',    value: String(upcomingCount),  tone: 'default', ariaLabel: 'Filter to open tasks',    onClick: () => { setTab('tasks'); setTimeFilter('all'); setPriority('all') } },
+    { label: 'Overdue',       value: String(overdueCount),   tone: 'bad',     ariaLabel: 'Filter to overdue',       onClick: () => { setTab('tasks'); setTimeFilter('overdue'); setPriority('all') } },
+    { label: 'Completed',     value: String(completedCount), tone: 'good',    ariaLabel: 'Filter to completed',     onClick: () => { setTab('completed'); setPriority('all') } },
+    { label: 'High Priority', value: String(highOpenCount),  tone: 'warn',    ariaLabel: 'Filter to high priority', onClick: () => { setTab('tasks'); setTimeFilter('all'); setPriority('high') } },
   ]
 
   const TABS_LIST = [
@@ -203,9 +205,9 @@ export function MaintenancePage() {
   ]
 
   const selectStyle: React.CSSProperties = {
-    height: 34, padding: '0 10px', background: 'var(--ds-surface)',
-    border: '1px solid var(--ds-border)', borderRadius: 7,
-    fontSize: 12.5, color: 'var(--ds-t1)', fontFamily: 'inherit', outline: 'none',
+    height: 34, padding: '0 10px', background: 'var(--tms-card)',
+    border: '1px solid var(--tms-border)', borderRadius: 7,
+    fontSize: 12.5, color: 'var(--tms-text)', fontFamily: 'inherit', outline: 'none',
   }
 
   // Sortable header cell — plain render function (not a component) so it doesn't remount.
@@ -213,7 +215,7 @@ export function MaintenancePage() {
     const active = sortKey === k
     return (
       <th key={k} style={{ ...thBase, cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort(k)}>
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: active ? 'var(--ds-t1)' : undefined }}>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: active ? 'var(--tms-text)' : undefined }}>
           {label}
           {active && (sortDir === 'asc' ? <ArrowUp size={11} /> : <ArrowDown size={11} />)}
         </span>
@@ -222,46 +224,25 @@ export function MaintenancePage() {
   }
 
   return (
-    <div style={{ height: '100%', overflowY: 'auto', background: 'var(--ds-bg)' }}>
-
-      {/* ── Page header ──────────────────────────────────────────────────── */}
-      <div style={{ position: 'sticky', top: 0, zIndex: 10, background: 'var(--ds-surface)', borderBottom: '1px solid var(--ds-border)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', padding: `${isMobile ? 16 : 20}px ${padX}px 12px` }}>
-          <div>
-            <h1 style={{ fontSize: 20, fontWeight: 600, letterSpacing: '-0.01em', color: 'var(--ds-t1)', margin: 0 }}>Maintenance</h1>
-            <p style={{ fontSize: 12.5, color: 'var(--ds-t3)', marginTop: 2 }}>Fleet maintenance tasks</p>
-          </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button style={{ display: 'flex', alignItems: 'center', gap: 6, height: 34, padding: '0 14px', background: 'var(--ds-bg)', border: '1px solid var(--ds-border)', borderRadius: 8, fontSize: 13, fontWeight: 500, color: 'var(--ds-t2)', cursor: 'pointer', fontFamily: 'inherit' }}>
-              Export
-            </button>
-            <button
-              onClick={() => setNewTaskOpen(true)}
-              disabled={equipment.length === 0}
-              title={equipment.length === 0 ? 'Add equipment in Fleet first' : undefined}
-              style={{ display: 'flex', alignItems: 'center', gap: 6, height: 34, padding: '0 14px', background: 'var(--ds-blue)', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, color: '#fff', cursor: equipment.length === 0 ? 'not-allowed' : 'pointer', opacity: equipment.length === 0 ? 0.5 : 1, fontFamily: 'inherit' }}
-            >
-              <Plus size={14} /> New Task
-            </button>
-          </div>
-        </div>
-
-        {/* KPI strip — left-border accent */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: isMobile ? 10 : 12, padding: `0 ${padX}px 12px` }}>
-          {MAINT_KPIS.map((k) => (
-            <div key={k.label} onClick={k.onClick} title={`Filter to ${k.label.toLowerCase()}`} style={{ position: 'relative', overflow: 'hidden', background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 10, padding: '12px 16px', cursor: 'pointer' }}>
-              <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 3, background: k.color }} />
-              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 500, color: 'var(--ds-t3)', letterSpacing: '0.06em', textTransform: 'uppercase', marginLeft: 4 }}>
-                {k.label}
-                {k.pulse && <span className="dot-pulse" style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: k.color }} />}
-              </div>
-              <div style={{ fontSize: 28, fontWeight: 600, color: k.color, letterSpacing: '-0.02em', marginTop: 4, marginLeft: 4, fontVariantNumeric: 'tabular-nums' }}>{k.value}</div>
-            </div>
-          ))}
-        </div>
-
-        {/* Tab bar */}
-        <div style={{ display: 'flex', padding: `0 ${padX}px`, gap: 0 }}>
+    <TmsScrollPage
+      title="Maintenance"
+      subtitle="Fleet maintenance tasks"
+      stickyHead
+      actions={
+        <>
+          <TmsButton variant="secondary">Export</TmsButton>
+          <TmsButton
+            variant="primary"
+            onClick={() => setNewTaskOpen(true)}
+            disabled={equipment.length === 0}
+            title={equipment.length === 0 ? 'Add equipment in Fleet first' : undefined}
+          >
+            <Plus size={14} /> New Task
+          </TmsButton>
+        </>
+      }
+      toolbar={
+        <div style={{ display: 'flex', gap: 0 }}>
           {TABS_LIST.map(({ key, label, Icon }) => {
             const active = tab === key
             return (
@@ -272,8 +253,8 @@ export function MaintenancePage() {
                   display: 'flex', alignItems: 'center', gap: 6,
                   padding: '10px 16px', fontSize: 13, fontWeight: 500, cursor: 'pointer',
                   background: 'none', border: 'none', fontFamily: 'inherit',
-                  borderBottom: `2px solid ${active ? 'var(--ds-blue)' : 'transparent'}`,
-                  color: active ? 'var(--ds-blue)' : 'var(--ds-t3)',
+                  borderBottom: `2px solid ${active ? 'var(--tms-primary)' : 'transparent'}`,
+                  color: active ? 'var(--tms-primary)' : 'var(--tms-muted)',
                   marginBottom: -1,
                 }}
               >
@@ -282,13 +263,15 @@ export function MaintenancePage() {
             )
           })}
         </div>
-      </div>
+      }
+    >
+      <TmsStatRow items={MAINT_KPIS} columns={4} />
 
-      <div style={{ padding: isMobile ? '16px 12px' : '24px 32px', maxWidth: 1200 }}>
+      <div style={{ marginTop: 16 }}>
         {/* Filters */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 18, flexWrap: 'wrap' }}>
           <div style={{ position: 'relative' }}>
-            <Search size={13} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--ds-t3)', pointerEvents: 'none' }} />
+            <Search size={13} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--tms-muted)', pointerEvents: 'none' }} />
             <input
               type="text"
               placeholder="Search…"
@@ -296,8 +279,8 @@ export function MaintenancePage() {
               onChange={(e) => setSearch(e.target.value)}
               style={{
                 width: 220, height: 34, paddingLeft: 30, paddingRight: 10, boxSizing: 'border-box',
-                background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 7,
-                fontSize: 12.5, color: 'var(--ds-t1)', fontFamily: 'inherit', outline: 'none',
+                background: 'var(--tms-card)', border: '1px solid var(--tms-border)', borderRadius: 7,
+                fontSize: 12.5, color: 'var(--tms-text)', fontFamily: 'inherit', outline: 'none',
               }}
             />
           </div>
@@ -322,15 +305,13 @@ export function MaintenancePage() {
           </select>
         </div>
 
-        <div style={{ borderRadius: 12, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', boxShadow: 'var(--sh-sm)', overflow: 'hidden' }}>
+        <div style={{ borderRadius: 12, border: '1px solid var(--tms-border)', background: 'var(--tms-card)', boxShadow: 'var(--tms-shadow)', overflow: 'hidden' }}>
           {visibleTasks.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 gap-2 text-muted-foreground">
-              {isCompletedTab ? <CheckCircle2 className="size-8 opacity-20" /> : <Wrench className="size-8 opacity-20" />}
-              <p className="text-sm">{isCompletedTab ? 'No completed tasks yet.' : 'No tasks found.'}</p>
-              <p className="text-xs text-slate-400">
-                {isCompletedTab ? 'Tasks you mark complete show up here.' : 'Add a task with the New Task button, or from the Fleet page.'}
-              </p>
-            </div>
+            <TmsEmptyState
+              compact
+              title={isCompletedTab ? 'No completed tasks yet.' : 'No tasks found.'}
+              message={isCompletedTab ? 'Tasks you mark complete show up here.' : 'Add a task with the New Task button, or from the Fleet page.'}
+            />
           ) : (
             <div style={{ maxHeight: 'calc(100vh - 340px)', overflowY: 'auto', overflowX: 'auto' }}>
               <table style={{ width: '100%', tableLayout: 'fixed', borderCollapse: 'collapse', minWidth: isCompletedTab ? 1040 : 940 }}>
@@ -365,7 +346,7 @@ export function MaintenancePage() {
                 <tbody>
                   {visibleTasks.map((t) => {
                     const over = t.status !== 'complete' && isOverdue(t.dueDate)
-                    const accent = over ? 'var(--ds-red)' : t.priority === 'high' ? 'var(--ds-amber)' : 'transparent'
+                    const accent = over ? 'var(--tms-badge-red)' : t.priority === 'high' ? 'var(--tms-badge-orange)' : 'transparent'
                     const done = t.status === 'complete'
                     return (
                       <tr key={t.id} className="maint-row" style={{ opacity: done && !isCompletedTab ? 0.55 : 1 }}>
@@ -376,30 +357,30 @@ export function MaintenancePage() {
                             onChange={() => { const next = done ? 'upcoming' : 'complete'; updateMaintenanceTask(t.id, { status: next }); toast.success(next === 'complete' ? 'Task marked complete' : 'Task reopened') }}
                             aria-label={done ? 'Unmark — reopen task' : 'Mark task complete'}
                             title={done ? 'Unmark — reopen task' : 'Mark complete'}
-                            style={{ width: 16, height: 16, borderRadius: 4, accentColor: 'var(--ds-blue)', cursor: 'pointer', verticalAlign: 'middle' }}
+                            style={{ width: 16, height: 16, borderRadius: 4, accentColor: 'var(--tms-primary)', cursor: 'pointer', verticalAlign: 'middle' }}
                           />
                         </td>
                         <td style={tdBase}>
-                          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ds-t1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.title}</div>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--tms-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.title}</div>
                         </td>
-                        <td style={{ ...tdBase, fontSize: 12.5, color: 'var(--ds-t3)', lineHeight: 1.45 }}>
-                          {t.notes ? t.notes : <span style={{ color: 'var(--ds-muted-soft)' }}>—</span>}
+                        <td style={{ ...tdBase, fontSize: 12.5, color: 'var(--tms-muted)', lineHeight: 1.45 }}>
+                          {t.notes ? t.notes : <span style={{ color: 'var(--tms-disabled)' }}>—</span>}
                         </td>
                         <td style={tdBase}><span style={equipChipStyle}>{equipUnit(t.equipmentId)}</span></td>
-                        <td style={{ ...tdBase, fontFamily: 'var(--font-mono)', fontSize: 12.5, color: 'var(--ds-t3)', whiteSpace: 'nowrap' }}>
-                          {t.createdAt ? t.createdAt.slice(0, 10) : <span style={{ color: 'var(--ds-muted-soft)' }}>—</span>}
+                        <td style={{ ...tdBase, fontFamily: 'var(--font-mono)', fontSize: 12.5, color: 'var(--tms-muted)', whiteSpace: 'nowrap' }}>
+                          {t.createdAt ? t.createdAt.slice(0, 10) : <span style={{ color: 'var(--tms-disabled)' }}>—</span>}
                         </td>
-                        <td style={{ ...tdBase, fontFamily: 'var(--font-mono)', fontSize: 12.5, color: over ? 'var(--ds-red)' : 'var(--ds-t2)', fontWeight: over ? 600 : 400, whiteSpace: 'nowrap' }}>
+                        <td style={{ ...tdBase, fontFamily: 'var(--font-mono)', fontSize: 12.5, color: over ? 'var(--tms-badge-red)' : 'var(--tms-text-2)', fontWeight: over ? 600 : 400, whiteSpace: 'nowrap' }}>
                           {t.dueDate ? (
                             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                               {over && <AlertTriangle size={11} />}{t.dueDate}
                             </span>
-                          ) : <span style={{ color: 'var(--ds-muted-soft)' }}>—</span>}
+                          ) : <span style={{ color: 'var(--tms-disabled)' }}>—</span>}
                         </td>
                         {isCompletedTab && (
-                          <td style={{ ...tdBase, fontFamily: 'var(--font-mono)', fontSize: 12.5, color: 'var(--ds-green)', fontWeight: 500, whiteSpace: 'nowrap' }}>
+                          <td style={{ ...tdBase, fontFamily: 'var(--font-mono)', fontSize: 12.5, color: 'var(--tms-badge-green)', fontWeight: 500, whiteSpace: 'nowrap' }}>
                             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                              <CheckCircle2 size={11} />{t.completedDate ?? <span style={{ color: 'var(--ds-muted-soft)' }}>—</span>}
+                              <CheckCircle2 size={11} />{t.completedDate ?? <span style={{ color: 'var(--tms-disabled)' }}>—</span>}
                             </span>
                           </td>
                         )}
@@ -407,13 +388,13 @@ export function MaintenancePage() {
                         <td style={tdBase}>
                           {t.assignee ? (
                             <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-                              <Avatar initials={t.assignee[0].toUpperCase()} size="sm" style={{ background: '#f59e0b', color: '#fff' }} />
+                              <Avatar initials={t.assignee[0].toUpperCase()} size="sm" style={{ background: 'var(--tms-badge-orange)', color: 'var(--tms-on-primary)' }} />
                               <span style={{ fontSize: 12.5, textTransform: 'capitalize', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.assignee}</span>
                             </div>
                           ) : (
                             <button
                               onClick={() => setEditTask(t)}
-                              style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, color: 'var(--ds-t3)', border: '1px dashed var(--ds-border-strong)', borderRadius: 6, padding: '4px 9px', background: 'transparent', cursor: 'pointer', fontFamily: 'inherit' }}
+                              style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, color: 'var(--tms-muted)', border: '1px dashed var(--tms-input-border)', borderRadius: 6, padding: '4px 9px', background: 'transparent', cursor: 'pointer', fontFamily: 'inherit' }}
                             >
                               <Plus size={12} /> Assign
                             </button>
@@ -424,15 +405,15 @@ export function MaintenancePage() {
                             <button
                               onClick={() => { updateMaintenanceTask(t.id, { status: 'upcoming' }); toast.success('Task reopened') }}
                               title="Unmark — move back to open tasks"
-                              style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'var(--ds-green-bg)', color: 'var(--ds-green)', border: 'none', borderRadius: 999, padding: '3px 9px', fontSize: 11.5, fontWeight: 500, fontFamily: 'inherit', cursor: 'pointer' }}
+                              style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'var(--tms-badge-green-tint)', color: 'var(--tms-badge-green)', border: 'none', borderRadius: 999, padding: '3px 9px', fontSize: 11.5, fontWeight: 500, fontFamily: 'inherit', cursor: 'pointer' }}
                             >
                               Completed <RotateCcw size={11} />
                             </button>
                           ) : over ? <Pill tone="bad">Overdue</Pill> : <Pill tone="blue">Upcoming</Pill>}
                         </td>
                         <td style={{ ...tdBase, textAlign: 'right', whiteSpace: 'nowrap' }}>
-                          <button aria-label="Edit task" onClick={() => setEditTask(t)} style={{ ...iconBtnStyle, color: 'var(--ds-t3)' }}><Pencil size={13} /></button>
-                          <button aria-label="Delete task" onClick={() => { deleteMaintenanceTask(t.id); toast.success('Task deleted') }} style={{ ...iconBtnStyle, color: 'var(--ds-red)' }}><Trash2 size={13} /></button>
+                          <button aria-label="Edit task" onClick={() => setEditTask(t)} style={{ ...iconBtnStyle, color: 'var(--tms-muted)' }}><Pencil size={13} /></button>
+                          <button aria-label="Delete task" onClick={() => { deleteMaintenanceTask(t.id); toast.success('Task deleted') }} style={{ ...iconBtnStyle, color: 'var(--tms-badge-red)' }}><Trash2 size={13} /></button>
                         </td>
                       </tr>
                     )
@@ -461,6 +442,6 @@ export function MaintenancePage() {
           onClose={() => setNewTaskOpen(false)}
         />
       )}
-    </div>
+    </TmsScrollPage>
   )
 }

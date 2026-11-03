@@ -275,7 +275,7 @@ export function ApptEditPopover({ load, stop, apptField, typeField, onClose, cla
       {canFlagMove && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, cursor: 'pointer',
-            color: moveReq ? '#b45309' : 'var(--ds-t3)', fontWeight: moveReq ? 700 : 500 }}>
+            color: moveReq ? 'var(--tms-badge-orange)' : 'var(--tms-muted)', fontWeight: moveReq ? 700 : 500 }}>
             <input type="checkbox" checked={moveReq} onChange={(e) => setMoveReq(e.target.checked)}
               aria-label="Change needed" />
             CHANGE NEEDED{moveReq ? ' — task for Dennis, screenshots reset' : ''}
@@ -318,7 +318,7 @@ export function ApptEditPopover({ load, stop, apptField, typeField, onClose, cla
             />
           </div>
           {badWindow && (
-            <div className="text-[10px]" style={{ color: 'var(--ds-red)' }} role="alert">
+            <div className="text-[10px]" style={{ color: 'var(--tms-badge-red)' }} role="alert">
               The window has to end after it starts.
             </div>
           )}
@@ -326,7 +326,7 @@ export function ApptEditPopover({ load, stop, apptField, typeField, onClose, cla
       )}
 
       {error && (
-        <div className="text-[10px]" style={{ color: 'var(--ds-red)' }} role="alert">
+        <div className="text-[10px]" style={{ color: 'var(--tms-badge-red)' }} role="alert">
           {error}
         </div>
       )}

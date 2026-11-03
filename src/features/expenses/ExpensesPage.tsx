@@ -28,6 +28,7 @@ import {
 } from '@/lib/apiClient'
 import type { TruckConfig, TruckMileage } from '@/lib/apiClient'
 import type { Load } from '@/types'
+import { useTmsTokens } from '@/features/tms/tmsTokens'
 import { FuelUploadModal } from './FuelUploadModal'
 import { ExpenseManageView } from './ExpenseManageView'
 import type { FuelTransaction } from '@/hooks/useFuelTransactions'
@@ -81,11 +82,11 @@ function categoryLabel(tx: FuelTransaction): string {
   return tx.fuelType
 }
 
-const TRUCK_COLORS = [
-  '#1ea8f3', '#f59e0b', '#10b981', '#8b5cf6', '#ef4444',
-  '#06b6d4', '#f97316', '#84cc16', '#ec4899',
-]
-function truckColor(idx: number) { return TRUCK_COLORS[idx % TRUCK_COLORS.length] }
+const TRUCK_COLOR_TOKENS = [
+  '--tms-chart-1', '--tms-chart-2', '--tms-chart-3', '--tms-chart-4', '--tms-chart-5',
+  '--tms-chart-6', '--tms-chart-7', '--tms-chart-8', '--tms-chart-9',
+] as const
+function truckColor(idx: number) { return `var(${TRUCK_COLOR_TOKENS[idx % TRUCK_COLOR_TOKENS.length]})` }
 
 function fmtMoney(n: number) {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2 }).format(n)
@@ -100,24 +101,24 @@ function sumQty(txs: FuelTransaction[]) { return txs.reduce((s, t) => s + t.quan
 // ── Category display config ───────────────────────────────────────────────────
 
 const CATEGORIES: { key: keyof Omit<TruckExpenseSummary, 'total'>; label: string; color: string }[] = [
-  { key: 'fuel',        label: 'Fuel',        color: '#1ea8f3' },
-  { key: 'insurance',   label: 'Insurance',   color: '#8b5cf6' },
-  { key: 'financing',   label: 'Financing',   color: '#f59e0b' },
-  { key: 'lease',       label: 'Lease',       color: '#06b6d4' },
-  { key: 'maintenance', label: 'Maintenance', color: '#ef4444' },
-  { key: 'permits',     label: 'Permits',     color: '#10b981' },
-  { key: 'tolls',       label: 'Tolls',       color: '#f97316' },
-  { key: 'other',       label: 'Other',       color: '#84cc16' },
+  { key: 'fuel',        label: 'Fuel',        color: 'var(--tms-primary)' },
+  { key: 'insurance',   label: 'Insurance',   color: 'var(--tms-chart-4)' },
+  { key: 'financing',   label: 'Financing',   color: 'var(--tms-chart-2)' },
+  { key: 'lease',       label: 'Lease',       color: 'var(--tms-chart-6)' },
+  { key: 'maintenance', label: 'Maintenance', color: 'var(--tms-chart-5)' },
+  { key: 'permits',     label: 'Permits',     color: 'var(--tms-chart-3)' },
+  { key: 'tolls',       label: 'Tolls',       color: 'var(--tms-chart-7)' },
+  { key: 'other',       label: 'Other',       color: 'var(--tms-chart-8)' },
 ]
 
 // ── KPI card ──────────────────────────────────────────────────────────────────
 
 function KpiCard({ label, value, sub, title }: { label: string; value: string; sub?: string; title?: string }) {
   return (
-    <div style={{ background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 12, padding: '16px 20px', boxShadow: 'var(--sh-sm)' }} title={title}>
-      <div style={{ fontSize: 11, fontWeight: 500, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.03em', marginBottom: 4 }}>{label}</div>
-      <div style={{ fontSize: 22, fontWeight: 600, color: 'var(--ds-t1)', letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' }}>{value}</div>
-      {sub && <div style={{ fontSize: 11.5, color: 'var(--ds-t3)', marginTop: 3 }}>{sub}</div>}
+    <div style={{ background: 'var(--tms-card)', border: '1px solid var(--tms-border)', borderRadius: 12, padding: '16px 20px', boxShadow: 'var(--tms-shadow)' }} title={title}>
+      <div style={{ fontSize: 11, fontWeight: 500, color: 'var(--tms-muted)', textTransform: 'uppercase', letterSpacing: '0.03em', marginBottom: 4 }}>{label}</div>
+      <div style={{ fontSize: 22, fontWeight: 600, color: 'var(--tms-text)', letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' }}>{value}</div>
+      {sub && <div style={{ fontSize: 11.5, color: 'var(--tms-muted)', marginTop: 3 }}>{sub}</div>}
     </div>
   )
 }
@@ -143,9 +144,9 @@ function TxDetail({
           Unit #{truck.unitNumber} · {rangeLabel} · {txs.length} transaction{txs.length !== 1 ? 's' : ''}
         </span>
       </div>
-      <div style={{ borderRadius: 12, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', boxShadow: 'var(--sh-sm)', overflowX: 'auto' }}>
+      <div style={{ borderRadius: 12, border: '1px solid var(--tms-border)', background: 'var(--tms-card)', boxShadow: 'var(--tms-shadow)', overflowX: 'auto' }}>
         <table className="w-full text-xs">
-          <thead className="bg-slate-50">
+          <thead className="bg-muted">
             <tr>
               {['Date', 'Category', 'Location', 'City', 'St', 'Qty', '$/unit', 'Fees', 'Total', 'Driver', 'Odo'].map((h) => (
                 <th key={h} className="text-left px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">{h}</th>
@@ -156,16 +157,16 @@ function TxDetail({
             {sorted.map((tx) => {
               const fuel = isFuel(tx)
               return (
-                <tr key={tx.id} className="border-t border-slate-100 hover:bg-slate-50">
+                <tr key={tx.id} className="border-t border-border hover:bg-muted">
                   <td className="px-4 py-3 font-mono whitespace-nowrap">{tx.transactionDate}</td>
                   <td className="px-4 py-3">
                     <span className={cn(
                       'px-1.5 py-0.5 rounded text-[10px] font-medium whitespace-nowrap',
-                      fuel && tx.fuelType === 'ULSD' ? 'bg-sky-50 text-sky-700'
-                        : fuel ? 'bg-violet-50 text-violet-700'
-                        : tx.itemCategory === 'SCALE' ? 'bg-amber-50 text-amber-700'
-                        : tx.itemCategory === 'CASH_ADVANCE' ? 'bg-emerald-50 text-emerald-700'
-                        : 'bg-slate-100 text-slate-600',
+                      fuel && tx.fuelType === 'ULSD' ? 'bg-[color:var(--tms-primary-tint)] text-[color:var(--tms-primary-ink)]'
+                        : fuel ? 'bg-[color:var(--tms-badge-purple-tint)] text-[color:var(--tms-badge-purple)]'
+                        : tx.itemCategory === 'SCALE' ? 'bg-[color:var(--tms-badge-orange-tint)] text-[color:var(--tms-badge-orange)]'
+                        : tx.itemCategory === 'CASH_ADVANCE' ? 'bg-[color:var(--tms-badge-green-tint)] text-[color:var(--tms-badge-green)]'
+                        : 'bg-muted text-muted-foreground',
                     )}>
                       {tx.fuelType}
                     </span>
@@ -314,16 +315,16 @@ function OverviewTab({
       </div>
 
       {/* Matrix */}
-      <div style={{ borderRadius: 12, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', boxShadow: 'var(--sh-sm)' }}>
-        <div className="px-6 py-4 border-b border-slate-100">
+      <div style={{ borderRadius: 12, border: '1px solid var(--tms-border)', background: 'var(--tms-card)', boxShadow: 'var(--tms-shadow)' }}>
+        <div className="px-6 py-4 border-b border-border">
           <h2 className="text-sm font-semibold text-foreground">Per-Truck Cost Matrix</h2>
           <p className="text-xs text-muted-foreground mt-0.5">All expense categories · fuel from EFS · other from expense records</p>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
-            <thead className="bg-slate-50">
+            <thead className="bg-muted">
               <tr>
-                <th className="sticky left-0 bg-slate-50 z-20 text-left px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">Truck</th>
+                <th className="sticky left-0 bg-muted z-20 text-left px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">Truck</th>
                 {CATEGORIES.map(({ label, color }) => (
                   <th key={label} className="text-right px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">
                     <span className="inline-flex items-center gap-1.5">
@@ -332,7 +333,7 @@ function OverviewTab({
                     </span>
                   </th>
                 ))}
-                <th className="sticky right-0 bg-slate-50 z-20 text-right px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">Total</th>
+                <th className="sticky right-0 bg-muted z-20 text-right px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">Total</th>
               </tr>
             </thead>
             <tbody>
@@ -353,10 +354,10 @@ function OverviewTab({
                 matrixRows.map(({ truck, summary }) => {
                   const color = truckColor(allTrucks.findIndex((t) => t.id === truck.id))
                   return (
-                  <tr key={truck.id} className="border-t border-slate-100 hover:bg-slate-50/60 group">
-                    <td className="sticky left-0 bg-white group-hover:bg-slate-50/60 z-10 px-4 py-4 whitespace-nowrap">
+                  <tr key={truck.id} className="border-t border-border hover:bg-muted group">
+                    <td className="sticky left-0 bg-card group-hover:bg-muted z-10 px-4 py-4 whitespace-nowrap">
                       <div className="flex items-center gap-2.5">
-                        <div className="flex items-center justify-center shrink-0" style={{ width: 30, height: 30, borderRadius: 7, background: `${color}1a`, color }}>
+                        <div className="flex items-center justify-center shrink-0" style={{ width: 30, height: 30, borderRadius: 7, background: `color-mix(in srgb, ${color} 10%, transparent)`, color }}>
                           <Truck className="size-3.5" />
                         </div>
                         <span className="font-mono font-bold text-base" style={{ color }}>#{truck.unitNumber}</span>
@@ -367,21 +368,21 @@ function OverviewTab({
                         {summary[key] > 0 ? fmtMoney(summary[key]) : <span className="text-muted-foreground/25">—</span>}
                       </td>
                     ))}
-                    <td className="sticky right-0 bg-white group-hover:bg-slate-50/60 z-10 px-4 py-4 tabular-nums text-right font-bold text-foreground">{fmtMoney(summary.total)}</td>
+                    <td className="sticky right-0 bg-card group-hover:bg-muted z-10 px-4 py-4 tabular-nums text-right font-bold text-foreground">{fmtMoney(summary.total)}</td>
                   </tr>
                   )
                 })
               )}
 
               {hasData && (
-                <tr className="border-t-2 border-slate-200 bg-slate-50 font-bold">
-                  <td className="sticky left-0 bg-slate-50 z-10 px-4 py-4 text-xs text-muted-foreground uppercase tracking-wider">Total</td>
+                <tr className="border-t-2 border-border bg-muted font-bold">
+                  <td className="sticky left-0 bg-muted z-10 px-4 py-4 text-xs text-muted-foreground uppercase tracking-wider">Total</td>
                   {CATEGORIES.map(({ key }) => (
                     <td key={key} className="px-4 py-4 tabular-nums text-right text-foreground">
                       {(fleetTotals[key] ?? 0) > 0 ? fmtMoney(fleetTotals[key]) : <span className="text-muted-foreground/25">—</span>}
                     </td>
                   ))}
-                  <td className="sticky right-0 bg-slate-50 z-10 px-4 py-4 tabular-nums text-right text-base" style={{ color: 'var(--ds-blue-dark)' }}>{fmtMoney(fleetTotals.total || 0)}</td>
+                  <td className="sticky right-0 bg-muted z-10 px-4 py-4 tabular-nums text-right text-base" style={{ color: 'var(--tms-primary-ink)' }}>{fmtMoney(fleetTotals.total || 0)}</td>
                 </tr>
               )}
             </tbody>
@@ -483,6 +484,7 @@ function FuelTab({
   }, [fuelTxs, trucks, groupByWeek, chartMode])
 
   const truckLabels = useMemo(() => trucks.map((t) => `#${t.unitNumber}`), [trucks])
+  const chartTok = useTmsTokens(TRUCK_COLOR_TOKENS)
 
   const drillTxs = useMemo(() => {
     if (!drillTruck) return []
@@ -520,7 +522,7 @@ function FuelTab({
           <Button
             variant="outline"
             size="sm"
-            className="h-8 gap-1.5 text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200"
+            className="h-8 gap-1.5 text-[color:var(--tms-badge-red)] hover:text-[color:var(--tms-badge-red)] hover:bg-[color:var(--tms-badge-red-tint)] border-[color:var(--tms-badge-red)]"
             disabled={deduping}
             onClick={async () => {
               setDeduping(true)
@@ -555,16 +557,16 @@ function FuelTab({
       </div>
 
       {/* Weekly pivot */}
-      <div style={{ borderRadius: 12, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', boxShadow: 'var(--sh-sm)' }}>
-        <div className="px-6 py-4 border-b border-slate-100">
+      <div style={{ borderRadius: 12, border: '1px solid var(--tms-border)', background: 'var(--tms-card)', boxShadow: 'var(--tms-shadow)' }}>
+        <div className="px-6 py-4 border-b border-border">
           <h2 className="text-sm font-semibold text-foreground">Weekly Fuel Spend by Truck</h2>
           <p className="text-xs text-muted-foreground mt-0.5">Sunday–Saturday weeks · fuel only</p>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
-            <thead className="bg-slate-50">
+            <thead className="bg-muted">
               <tr>
-                <th className="sticky left-0 bg-slate-50 z-10 text-left px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">Truck</th>
+                <th className="sticky left-0 bg-muted z-10 text-left px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">Truck</th>
                 {weeks.map((w) => (
                   <th key={w.label} className="text-right px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">{w.label}</th>
                 ))}
@@ -586,9 +588,9 @@ function FuelTab({
                   </td>
                 </tr>
               ) : pivotRows.map((row, i) => (
-                <tr key={row.truck.id} className="border-t border-slate-100">
+                <tr key={row.truck.id} className="border-t border-border">
                   <td
-                    className="sticky left-0 bg-white z-10 px-4 py-3 font-bold whitespace-nowrap cursor-pointer hover:underline"
+                    className="sticky left-0 bg-card z-10 px-4 py-3 font-bold whitespace-nowrap cursor-pointer hover:underline"
                     style={{ color: truckColor(i) }}
                     onClick={() => { setDrillTruck(row.truck); setDrillWeek(null) }}
                   >
@@ -597,14 +599,14 @@ function FuelTab({
                   {row.weekAmts.map((amt, wi) => (
                     <td
                       key={wi}
-                      className={cn('px-4 py-3 tabular-nums text-right', amt > 0 ? 'cursor-pointer hover:bg-sky-50/60' : 'text-muted-foreground/30')}
+                      className={cn('px-4 py-3 tabular-nums text-right', amt > 0 ? 'cursor-pointer hover:bg-[color:var(--tms-primary-tint)]' : 'text-muted-foreground/30')}
                       onClick={() => { if (amt > 0) { setDrillTruck(row.truck); setDrillWeek(weeks[wi]) } }}
                     >
                       {amt > 0 ? fmtMoney(amt) : '—'}
                     </td>
                   ))}
                   <td
-                    className="px-4 py-3 tabular-nums text-right font-semibold cursor-pointer hover:bg-sky-50/60"
+                    className="px-4 py-3 tabular-nums text-right font-semibold cursor-pointer hover:bg-[color:var(--tms-primary-tint)]"
                     onClick={() => { setDrillTruck(row.truck); setDrillWeek(null) }}
                   >
                     {row.total > 0 ? fmtMoney(row.total) : '—'}
@@ -612,8 +614,8 @@ function FuelTab({
                 </tr>
               ))}
               {!loading && pivotRows.length > 0 && (
-                <tr className="border-t-2 border-slate-200 bg-slate-50 font-semibold">
-                  <td className="sticky left-0 bg-slate-50 z-10 px-4 py-3 text-xs text-muted-foreground uppercase tracking-wider">Total</td>
+                <tr className="border-t-2 border-border bg-muted font-semibold">
+                  <td className="sticky left-0 bg-muted z-10 px-4 py-3 text-xs text-muted-foreground uppercase tracking-wider">Total</td>
                   {weekTotals.map((v, wi) => (
                     <td key={wi} className="px-4 py-3 tabular-nums text-right">{v > 0 ? fmtMoney(v) : '—'}</td>
                   ))}
@@ -627,9 +629,9 @@ function FuelTab({
 
       {/* Fuel type breakdown */}
       {fuelBreakdown.length > 0 && (
-        <div style={{ borderRadius: 12, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', boxShadow: 'var(--sh-sm)' }}>
+        <div style={{ borderRadius: 12, border: '1px solid var(--tms-border)', background: 'var(--tms-card)', boxShadow: 'var(--tms-shadow)' }}>
           <button
-            className="w-full flex items-center gap-2 px-6 py-4 text-left hover:bg-slate-50/60 transition-colors"
+            className="w-full flex items-center gap-2 px-6 py-4 text-left hover:bg-muted transition-colors"
             onClick={() => setBreakdownOpen((o) => !o)}
           >
             {breakdownOpen ? <ChevronDown className="size-4 text-muted-foreground shrink-0" /> : <ChevronRight className="size-4 text-muted-foreground shrink-0" />}
@@ -637,19 +639,19 @@ function FuelTab({
             <span className="text-xs text-muted-foreground">(ULSD vs DEF per truck)</span>
           </button>
           {breakdownOpen && (
-            <div className="border-t border-slate-100 overflow-x-auto">
+            <div className="border-t border-border overflow-x-auto">
               <table className="w-full text-xs">
-                <thead className="bg-slate-50">
+                <thead className="bg-muted">
                   <tr>
                     <th className="text-left px-4 py-3 font-medium text-muted-foreground">Truck</th>
-                    <th className="text-right px-4 py-3 font-medium text-sky-600">ULSD $</th>
-                    <th className="text-right px-4 py-3 font-medium text-violet-600">DEF $</th>
+                    <th className="text-right px-4 py-3 font-medium text-[color:var(--tms-primary-ink)]">ULSD $</th>
+                    <th className="text-right px-4 py-3 font-medium text-[color:var(--tms-badge-purple)]">DEF $</th>
                     <th className="text-right px-4 py-3 font-medium text-muted-foreground">Total $</th>
                   </tr>
                 </thead>
                 <tbody>
                   {fuelBreakdown.map((r) => (
-                    <tr key={r.label} className="border-t border-slate-100">
+                    <tr key={r.label} className="border-t border-border">
                       <td className="px-4 py-3 font-medium">{r.label}</td>
                       <td className="px-4 py-3 tabular-nums text-right">{r.ulsd > 0 ? fmtMoney(r.ulsd) : <span className="text-muted-foreground/30">—</span>}</td>
                       <td className="px-4 py-3 tabular-nums text-right">{r.defd > 0 ? fmtMoney(r.defd) : <span className="text-muted-foreground/30">—</span>}</td>
@@ -665,10 +667,10 @@ function FuelTab({
 
       {/* Chart */}
       {chartData.length > 0 && (
-        <div style={{ borderRadius: 12, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', boxShadow: 'var(--sh-sm)', padding: 24 }}>
+        <div style={{ borderRadius: 12, border: '1px solid var(--tms-border)', background: 'var(--tms-card)', boxShadow: 'var(--tms-shadow)', padding: 24 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-            <h2 style={{ fontSize: 13, fontWeight: 600, color: 'var(--ds-t1)', margin: 0 }}>Fuel Over Time</h2>
-            <div style={{ display: 'flex', background: 'var(--ds-bg)', border: '1px solid var(--ds-border)', borderRadius: 9, padding: 3, gap: 2 }}>
+            <h2 style={{ fontSize: 13, fontWeight: 600, color: 'var(--tms-text)', margin: 0 }}>Fuel Over Time</h2>
+            <div style={{ display: 'flex', background: 'var(--tms-bg)', border: '1px solid var(--tms-border)', borderRadius: 9, padding: 3, gap: 2 }}>
               {(['$', 'gal'] as const).map((m) => {
                 const active = chartMode === m
                 return (
@@ -678,9 +680,9 @@ function FuelTab({
                     style={{
                       padding: '3px 10px', borderRadius: 7, border: 'none', cursor: 'pointer',
                       fontSize: 12, fontWeight: active ? 600 : 500, fontFamily: 'inherit',
-                      background: active ? '#fff' : 'transparent',
-                      color: active ? 'var(--ds-t1)' : 'var(--ds-t3)',
-                      boxShadow: active ? 'var(--sh-sm)' : 'none',
+                      background: active ? 'var(--tms-card)' : 'transparent',
+                      color: active ? 'var(--tms-text)' : 'var(--tms-muted)',
+                      boxShadow: active ? 'var(--tms-shadow)' : 'none',
                     }}
                   >
                     {m === '$' ? '$ Spend' : 'Gallons'}
@@ -699,7 +701,7 @@ function FuelTab({
               <RTooltip
                 content={({ active, payload, label }) =>
                   active && payload?.length ? (
-                    <div className="rounded-lg border border-slate-200 bg-white shadow-md px-3 py-2 text-xs space-y-1">
+                    <div className="rounded-lg border border-border bg-card shadow-md px-3 py-2 text-xs space-y-1">
                       <p className="font-medium">
                         {groupByWeek ? `Week of ${format(new Date(`${label}T12:00:00`), 'M/d/yyyy')}` : format(new Date(`${label}T12:00:00`), 'MMM d, yyyy')}
                       </p>
@@ -714,7 +716,7 @@ function FuelTab({
               />
               <Legend />
               {truckLabels.map((label, i) => (
-                <Line key={label} type="monotone" dataKey={label} stroke={truckColor(i)} strokeWidth={2} dot={{ r: 3 }} connectNulls />
+                <Line key={label} type="monotone" dataKey={label} stroke={chartTok[TRUCK_COLOR_TOKENS[i % TRUCK_COLOR_TOKENS.length]]} strokeWidth={2} dot={{ r: 3 }} connectNulls />
               ))}
             </LineChart>
           </ResponsiveContainer>
@@ -862,7 +864,7 @@ function EfficiencyTab({
 
   if (dataLoading) {
     return (
-      <div style={{ padding: '60px 0', textAlign: 'center', color: 'var(--ds-t3)', fontSize: 13 }}>
+      <div style={{ padding: '60px 0', textAlign: 'center', color: 'var(--tms-muted)', fontSize: 13 }}>
         Loading efficiency data…
       </div>
     )
@@ -870,41 +872,41 @@ function EfficiencyTab({
 
   if (companyTrucks.length === 0) {
     return (
-      <div style={{ padding: '60px 0', textAlign: 'center', color: 'var(--ds-t3)', fontSize: 13 }}>
+      <div style={{ padding: '60px 0', textAlign: 'center', color: 'var(--tms-muted)', fontSize: 13 }}>
         No COMPANY trucks configured. Go to <strong>Fleet</strong> and set ownership type on your trucks.
       </div>
     )
   }
 
   return (
-    <div style={{ borderRadius: 12, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', boxShadow: 'var(--sh-sm)', overflowX: 'auto' }}>
+    <div style={{ borderRadius: 12, border: '1px solid var(--tms-border)', background: 'var(--tms-card)', boxShadow: 'var(--tms-shadow)', overflowX: 'auto' }}>
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
         <thead>
-          <tr style={{ background: 'var(--ds-bg)', borderBottom: '1px solid var(--ds-border)' }}>
-            <th style={{ textAlign: 'left',  padding: '10px 16px', fontWeight: 600, color: 'var(--ds-t2)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Truck</th>
-            <th style={{ textAlign: 'right', padding: '10px 16px', fontWeight: 600, color: 'var(--ds-t2)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Miles</th>
-            <th style={{ textAlign: 'right', padding: '10px 16px', fontWeight: 600, color: 'var(--ds-t2)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Gallons</th>
-            <th style={{ textAlign: 'right', padding: '10px 16px', fontWeight: 600, color: 'var(--ds-t2)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em' }}>MPG</th>
-            <th style={{ textAlign: 'right', padding: '10px 16px', fontWeight: 600, color: 'var(--ds-t2)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Fuel $</th>
-            <th style={{ textAlign: 'right', padding: '10px 16px', fontWeight: 600, color: 'var(--ds-t2)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Revenue</th>
-            <th style={{ textAlign: 'right', padding: '10px 16px', fontWeight: 600, color: 'var(--ds-t2)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Rev/Mile</th>
-            <th style={{ textAlign: 'right', padding: '10px 16px', fontWeight: 600, color: 'var(--ds-t2)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Cost/Mile</th>
-            <th style={{ textAlign: 'right', padding: '10px 16px', fontWeight: 600, color: 'var(--ds-t2)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Profit/Mile</th>
+          <tr style={{ background: 'var(--tms-bg)', borderBottom: '1px solid var(--tms-border)' }}>
+            <th style={{ textAlign: 'left',  padding: '10px 16px', fontWeight: 600, color: 'var(--tms-text-2)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Truck</th>
+            <th style={{ textAlign: 'right', padding: '10px 16px', fontWeight: 600, color: 'var(--tms-text-2)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Miles</th>
+            <th style={{ textAlign: 'right', padding: '10px 16px', fontWeight: 600, color: 'var(--tms-text-2)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Gallons</th>
+            <th style={{ textAlign: 'right', padding: '10px 16px', fontWeight: 600, color: 'var(--tms-text-2)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em' }}>MPG</th>
+            <th style={{ textAlign: 'right', padding: '10px 16px', fontWeight: 600, color: 'var(--tms-text-2)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Fuel $</th>
+            <th style={{ textAlign: 'right', padding: '10px 16px', fontWeight: 600, color: 'var(--tms-text-2)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Revenue</th>
+            <th style={{ textAlign: 'right', padding: '10px 16px', fontWeight: 600, color: 'var(--tms-text-2)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Rev/Mile</th>
+            <th style={{ textAlign: 'right', padding: '10px 16px', fontWeight: 600, color: 'var(--tms-text-2)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Cost/Mile</th>
+            <th style={{ textAlign: 'right', padding: '10px 16px', fontWeight: 600, color: 'var(--tms-text-2)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Profit/Mile</th>
           </tr>
         </thead>
         <tbody>
           {rows.map((r, i) => (
-            <tr key={r.truckId} style={{ borderTop: i > 0 ? '1px solid var(--ds-border)' : undefined }}>
-              <td style={{ padding: '12px 16px', fontWeight: 700, color: 'var(--ds-t1)' }}>#{r.unitNumber}</td>
+            <tr key={r.truckId} style={{ borderTop: i > 0 ? '1px solid var(--tms-border)' : undefined }}>
+              <td style={{ padding: '12px 16px', fontWeight: 700, color: 'var(--tms-text)' }}>#{r.unitNumber}</td>
               <td style={{ padding: '12px 16px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{r.miles > 0 ? r.miles.toLocaleString('en-US', { maximumFractionDigits: 0 }) : '—'}</td>
               <td style={{ padding: '12px 16px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{r.gallons > 0 ? fmt(r.gallons, 0) : '—'}</td>
-              <td style={{ padding: '12px 16px', textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: r.mpg !== null ? 600 : 400, color: r.mpg !== null ? 'var(--ds-t1)' : 'var(--ds-t3)' }}>{dash(r.mpg, '', '', 2)}</td>
+              <td style={{ padding: '12px 16px', textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: r.mpg !== null ? 600 : 400, color: r.mpg !== null ? 'var(--tms-text)' : 'var(--tms-muted)' }}>{dash(r.mpg, '', '', 2)}</td>
               <td style={{ padding: '12px 16px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{r.fuelAmt > 0 ? `$${r.fuelAmt.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}</td>
               <td style={{ padding: '12px 16px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{r.revenue > 0 ? `$${r.revenue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}</td>
               <td style={{ padding: '12px 16px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{dash(r.revPerMile, '$', '', 2)}</td>
               <td style={{ padding: '12px 16px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{dash(r.costPerMile, '$', '', 2)}</td>
               <td style={{ padding: '12px 16px', textAlign: 'right', fontVariantNumeric: 'tabular-nums',
-                color: r.profitPerMile === null ? 'var(--ds-t3)' : r.profitPerMile >= 0 ? '#16a34a' : '#dc2626',
+                color: r.profitPerMile === null ? 'var(--tms-muted)' : r.profitPerMile >= 0 ? 'var(--tms-badge-green)' : 'var(--tms-badge-red)',
                 fontWeight: r.profitPerMile !== null ? 600 : 400,
               }}>{dash(r.profitPerMile, '$', '', 2)}</td>
             </tr>
@@ -921,8 +923,8 @@ function EfficiencyTab({
           const totProfMi  = totMiles > 0 ? (totRev - totFuel) / totMiles : null
           return (
             <tfoot>
-              <tr style={{ borderTop: '2px solid var(--ds-border)', background: 'var(--ds-bg)' }}>
-                <td style={{ padding: '10px 16px', fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--ds-t2)' }}>Fleet Total</td>
+              <tr style={{ borderTop: '2px solid var(--tms-border)', background: 'var(--tms-bg)' }}>
+                <td style={{ padding: '10px 16px', fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--tms-text-2)' }}>Fleet Total</td>
                 <td style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{totMiles > 0 ? totMiles.toLocaleString('en-US', { maximumFractionDigits: 0 }) : '—'}</td>
                 <td style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{totGal > 0 ? fmt(totGal, 0) : '—'}</td>
                 <td style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{dash(totMpg, '', '', 2)}</td>
@@ -931,7 +933,7 @@ function EfficiencyTab({
                 <td style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{dash(totRevMi, '$', '', 2)}</td>
                 <td style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{dash(totCostMi, '$', '', 2)}</td>
                 <td style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums',
-                  color: totProfMi === null ? 'var(--ds-t3)' : totProfMi >= 0 ? '#16a34a' : '#dc2626',
+                  color: totProfMi === null ? 'var(--tms-muted)' : totProfMi >= 0 ? 'var(--tms-badge-green)' : 'var(--tms-badge-red)',
                 }}>{dash(totProfMi, '$', '', 2)}</td>
               </tr>
             </tfoot>
@@ -1000,21 +1002,21 @@ export function ExpensesPage() {
   )
 
   return (
-    <div style={{ height: '100%', overflowY: 'auto', background: 'var(--ds-bg)' }}>
+    <div style={{ height: '100%', overflowY: 'auto', background: 'var(--tms-bg)' }}>
 
       {/* ── Page header ──────────────────────────────────────────────────── */}
-      <div style={{ position: 'sticky', top: 0, zIndex: 10, background: 'var(--ds-surface)', borderBottom: '1px solid var(--ds-border)' }}>
+      <div style={{ position: 'sticky', top: 0, zIndex: 10, background: 'var(--tms-card)', borderBottom: '1px solid var(--tms-border)' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px 32px 12px' }}>
           <div>
-            <h1 style={{ fontSize: 20, fontWeight: 600, letterSpacing: '-0.01em', color: 'var(--ds-t1)', margin: 0 }}>Expenses</h1>
-            <p style={{ fontSize: 12.5, color: 'var(--ds-t3)', marginTop: 2 }}>Fuel, insurance, financing, maintenance — per truck</p>
+            <h1 style={{ fontSize: 20, fontWeight: 600, letterSpacing: '-0.01em', color: 'var(--tms-text)', margin: 0 }}>Expenses</h1>
+            <p style={{ fontSize: 12.5, color: 'var(--tms-muted)', marginTop: 2 }}>Fuel, insurance, financing, maintenance — per truck</p>
           </div>
         </div>
 
         {/* Tab bar + range presets */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '0 32px 16px', flexWrap: 'wrap' }}>
           {/* Page tabs — pill group */}
-          <div style={{ display: 'flex', background: 'var(--ds-bg)', border: '1px solid var(--ds-border)', borderRadius: 9, padding: 3, gap: 2, flexShrink: 0 }}>
+          <div style={{ display: 'flex', background: 'var(--tms-bg)', border: '1px solid var(--tms-border)', borderRadius: 9, padding: 3, gap: 2, flexShrink: 0 }}>
             {PAGE_TABS.map((t) => {
               const active = tab === t.value
               return (
@@ -1024,9 +1026,9 @@ export function ExpensesPage() {
                   style={{
                     padding: '4px 14px', borderRadius: 7, border: 'none', cursor: 'pointer',
                     fontSize: 12.5, fontWeight: active ? 600 : 500, fontFamily: 'inherit',
-                    background: active ? '#fff' : 'transparent',
-                    color: active ? 'var(--ds-t1)' : 'var(--ds-t3)',
-                    boxShadow: active ? 'var(--sh-sm)' : 'none',
+                    background: active ? 'var(--tms-card)' : 'transparent',
+                    color: active ? 'var(--tms-text)' : 'var(--tms-muted)',
+                    boxShadow: active ? 'var(--tms-shadow)' : 'none',
                     whiteSpace: 'nowrap',
                   }}
                 >
@@ -1049,9 +1051,9 @@ export function ExpensesPage() {
                       style={{
                         height: 28, padding: '0 10px', borderRadius: 20, border: '1px solid',
                         fontSize: 11.5, fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit',
-                        background: active ? 'var(--ds-blue-bg)' : 'var(--ds-bg)',
-                        borderColor: active ? 'var(--ds-blue)' : 'var(--ds-border)',
-                        color: active ? 'var(--ds-blue)' : 'var(--ds-t3)',
+                        background: active ? 'var(--tms-primary-tint)' : 'var(--tms-bg)',
+                        borderColor: active ? 'var(--tms-primary)' : 'var(--tms-border)',
+                        color: active ? 'var(--tms-primary)' : 'var(--tms-muted)',
                         whiteSpace: 'nowrap',
                       }}
                     >
@@ -1065,15 +1067,15 @@ export function ExpensesPage() {
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <input type="date" value={format(customStart, 'yyyy-MM-dd')}
                     onChange={(e) => setCustomStart(new Date(e.target.value + 'T00:00:00'))}
-                    style={{ height: 32, borderRadius: 7, border: '1px solid var(--ds-border)', padding: '0 8px', fontSize: 12, background: 'var(--ds-surface)', outline: 'none' }} />
-                  <span style={{ fontSize: 12, color: 'var(--ds-t3)' }}>to</span>
+                    style={{ height: 32, borderRadius: 7, border: '1px solid var(--tms-border)', padding: '0 8px', fontSize: 12, background: 'var(--tms-card)', outline: 'none' }} />
+                  <span style={{ fontSize: 12, color: 'var(--tms-muted)' }}>to</span>
                   <input type="date" value={format(customEnd, 'yyyy-MM-dd')}
                     onChange={(e) => setCustomEnd(new Date(e.target.value + 'T00:00:00'))}
-                    style={{ height: 32, borderRadius: 7, border: '1px solid var(--ds-border)', padding: '0 8px', fontSize: 12, background: 'var(--ds-surface)', outline: 'none' }} />
+                    style={{ height: 32, borderRadius: 7, border: '1px solid var(--tms-border)', padding: '0 8px', fontSize: 12, background: 'var(--tms-card)', outline: 'none' }} />
                 </div>
               )}
 
-              <span style={{ fontSize: 12, color: 'var(--ds-t3)', whiteSpace: 'nowrap' }}>
+              <span style={{ fontSize: 12, color: 'var(--tms-muted)', whiteSpace: 'nowrap' }}>
                 {format(rangeStart, 'MMM d, yyyy')} – {format(rangeEnd, 'MMM d, yyyy')}
               </span>
             </>

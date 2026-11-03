@@ -32,8 +32,8 @@ export function FilterDialog({ value, conversations, onClose, onApply }: Props) 
         <div style={{ display: 'grid', gap: 14 }}>
           <section style={{ display: 'grid', gap: 6 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--ds-t3)' }}>Driver type</span>
-              <button type="button" onClick={() => setTypes(types.length === SECTION_ORDER.length ? [] : [...SECTION_ORDER])} style={{ all: 'unset', cursor: 'pointer', fontSize: 12, color: 'var(--ds-blue)' }}>{types.length === SECTION_ORDER.length ? 'None' : 'All'}</button>
+              <span style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--tms-muted)' }}>Driver type</span>
+              <button type="button" onClick={() => setTypes(types.length === SECTION_ORDER.length ? [] : [...SECTION_ORDER])} style={{ all: 'unset', cursor: 'pointer', fontSize: 12, color: 'var(--tms-primary)' }}>{types.length === SECTION_ORDER.length ? 'None' : 'All'}</button>
             </div>
             {SECTION_ORDER.map((k) => (
               <label key={k} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14 }}>
@@ -43,12 +43,12 @@ export function FilterDialog({ value, conversations, onClose, onApply }: Props) 
           </section>
           <section style={{ display: 'grid', gap: 6 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--ds-t3)' }}>Drivers</span>
-              <button type="button" onClick={() => setHidden(hidden.size ? new Set() : new Set(names.map((n) => n.toLowerCase())))} style={{ all: 'unset', cursor: 'pointer', fontSize: 12, color: 'var(--ds-blue)' }}>{hidden.size ? 'All' : 'None'}</button>
+              <span style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--tms-muted)' }}>Drivers</span>
+              <button type="button" onClick={() => setHidden(hidden.size ? new Set() : new Set(names.map((n) => n.toLowerCase())))} style={{ all: 'unset', cursor: 'pointer', fontSize: 12, color: 'var(--tms-primary)' }}>{hidden.size ? 'All' : 'None'}</button>
             </div>
             <Input id="dispatch-filter-search" placeholder="Find a driver" value={query} onChange={(e) => setQuery(e.target.value)} className="h-8" />
-            <div style={{ maxHeight: 220, overflowY: 'auto', border: '1px solid var(--ds-border)', borderRadius: 8, padding: '4px 8px' }}>
-              {shown.length === 0 ? <div style={{ fontSize: 12, color: 'var(--ds-t3)', padding: 6 }}>No drivers match.</div> : shown.map((n) => (
+            <div style={{ maxHeight: 220, overflowY: 'auto', border: '1px solid var(--tms-border)', borderRadius: 8, padding: '4px 8px' }}>
+              {shown.length === 0 ? <div style={{ fontSize: 12, color: 'var(--tms-muted)', padding: 6 }}>No drivers match.</div> : shown.map((n) => (
                 <label key={n} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, padding: '4px 0' }}>
                   <input type="checkbox" checked={!hidden.has(n.toLowerCase())} onChange={() => toggleName(n)} /> {n}
                 </label>

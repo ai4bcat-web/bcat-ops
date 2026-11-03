@@ -228,10 +228,10 @@ export function CarrierProfile({ carrierId, isAdmin, settings, onClose, onChange
                 {carrier?.highwayStatus && <TmsBadge tone="gray">Highway {carrier.highwayStatus}</TmsBadge>}
                 {carrier?.rmisStatus && <TmsBadge tone="gray">RMIS {carrier.rmisStatus}</TmsBadge>}
                 {carrier?.mcpStatus && <TmsBadge tone="gray">MCP {carrier.mcpStatus}</TmsBadge>}
-                {carrier && (carrier.insurancePolicies ?? []).map((policy) => {
+                {carrier && (carrier.insurancePolicies ?? []).map((policy, index) => {
                   const state = insuranceState(policy, now, warnDays)
                   return (
-                    <TmsBadge key={policy.id} tone={INSURANCE_STATE_TONE[state]}>
+                    <TmsBadge key={policy.id ?? `${policy.type}-${index}`} tone={INSURANCE_STATE_TONE[state]}>
                       {policy.type.replace(/_/g, ' ').toLowerCase()} · {state.toLowerCase()}
                     </TmsBadge>
                   )

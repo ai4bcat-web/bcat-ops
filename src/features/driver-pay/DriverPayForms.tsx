@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
-import { X, Upload, Image as ImageIcon } from 'lucide-react'
+import { Upload, Image as ImageIcon } from 'lucide-react'
+import { TmsDialog } from '@/features/tms/kit/TmsDialog'
 import type { Driver } from '@/types'
 import type { AmazonTrip, DriverPaySetting, DriverPayDeduction } from '@/hooks/useAmazonPay'
 import { parseRows, detectMultiLoadBlocks, type RawTripRow } from '@/lib/tripCsv'
@@ -17,24 +18,22 @@ import type { FixedExpenseInput } from '@/lib/driverPay'
 type TripInput = Omit<AmazonTrip, 'id' | 'createdAt' | 'updatedAt'>
 type SettingPatch = Omit<DriverPaySetting, 'id' | 'createdAt' | 'updatedAt' | 'driverId'>
 
-const label: React.CSSProperties = { fontSize: 11, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.05em' }
-const input: React.CSSProperties = { height: 36, width: '100%', borderRadius: 8, border: '1px solid var(--ds-border)', padding: '0 10px', fontSize: 13, background: 'var(--ds-surface)', color: 'var(--ds-t1)', boxSizing: 'border-box' }
+const label: React.CSSProperties = { fontSize: 11, fontWeight: 600, color: 'var(--tms-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }
+const input: React.CSSProperties = { height: 36, width: '100%', borderRadius: 8, border: '1px solid var(--tms-border)', padding: '0 10px', fontSize: 13, background: 'var(--tms-card)', color: 'var(--tms-text)', boxSizing: 'border-box' }
 const num = (s: string): number | null => { const n = parseFloat(s.replace(/[$,\s]/g, '')); return isFinite(n) ? n : null }
 
-function Modal({ title, sub, onClose, children, width = 520 }: { title: string; sub?: string; onClose: () => void; children: React.ReactNode; width?: number }) {
+/** The one pay-form dialog (driver-pay, box-trucks, owner-operator, fleet-profitability). */
+export function PayModal({ title, sub, onClose, children, width = 520 }: { title: string; sub?: string; onClose: () => void; children: React.ReactNode; width?: number }) {
   return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.4)', padding: 16 }}>
-      <div style={{ background: 'var(--ds-surface)', borderRadius: 16, boxShadow: 'var(--sh-lg, 0 10px 40px rgba(0,0,0,0.2))', width: '100%', maxWidth: width, maxHeight: '90vh', overflowY: 'auto' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 20px', borderBottom: '1px solid var(--ds-border)', position: 'sticky', top: 0, background: 'var(--ds-surface)' }}>
-          <div>
-            <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--ds-t1)' }}>{title}</div>
-            {sub && <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 2 }}>{sub}</div>}
-          </div>
-          <button onClick={onClose} style={{ color: 'var(--ds-t3)', background: 'none', border: 'none', cursor: 'pointer' }}><X size={18} /></button>
-        </div>
-        <div style={{ padding: 20 }}>{children}</div>
-      </div>
-    </div>
+    <TmsDialog
+      open
+      onOpenChange={(o) => { if (!o) onClose() }}
+      title={title}
+      description={sub}
+      className={width > 560 ? 'tms-dialog-wide' : undefined}
+    >
+      {children}
+    </TmsDialog>
   )
 }
 
@@ -42,8 +41,8 @@ function Field({ children, l, half }: { children: React.ReactNode; l: string; ha
   return <div style={{ display: 'flex', flexDirection: 'column', gap: 5, gridColumn: half ? 'span 1' : '1 / -1' }}><label style={label}>{l}</label>{children}</div>
 }
 
-const saveBtn: React.CSSProperties = { height: 36, padding: '0 16px', borderRadius: 8, border: 'none', background: 'var(--ds-blue)', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' }
-const cancelBtn: React.CSSProperties = { height: 36, padding: '0 16px', borderRadius: 8, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', color: 'var(--ds-t2)', fontSize: 13, fontWeight: 500, cursor: 'pointer' }
+const saveBtn: React.CSSProperties = { height: 36, padding: '0 16px', borderRadius: 8, border: 'none', background: 'var(--tms-primary)', color: 'var(--tms-on-primary)', fontSize: 13, fontWeight: 600, cursor: 'pointer' }
+const cancelBtn: React.CSSProperties = { height: 36, padding: '0 16px', borderRadius: 8, border: '1px solid var(--tms-border)', background: 'var(--tms-card)', color: 'var(--tms-text-2)', fontSize: 13, fontWeight: 500, cursor: 'pointer' }
 
 function Footer({ onClose, onSave, saving, disabled, label: lbl = 'Save' }: { onClose: () => void; onSave: () => void; saving?: boolean; disabled?: boolean; label?: string }) {
   return (
@@ -83,7 +82,7 @@ export function TripModal({ driverId, periodStart, initial, onSave, onClose }: {
   }
 
   return (
-    <Modal title={editing ? 'Edit trip' : 'Add trip'} sub="One freight load for this pay week" onClose={onClose}>
+    <PayModal title={editing ? 'Edit trip' : 'Add trip'} sub="One freight load for this pay week" onClose={onClose}>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
         <Field l="Load ID" half><input style={input} value={f.loadId} onChange={(e) => set('loadId', e.target.value)} placeholder="112CRP7T7" /></Field>
         <Field l="Equipment" half><input style={input} value={f.equipment} onChange={(e) => set('equipment', e.target.value)} placeholder="53' Trailer" /></Field>
@@ -99,9 +98,9 @@ export function TripModal({ driverId, periodStart, initial, onSave, onClose }: {
         </Field>
         <Field l="Dispatcher"><input style={input} value={f.dispatcher} onChange={(e) => set('dispatcher', e.target.value)} /></Field>
       </div>
-      {err && <div style={{ fontSize: 12.5, color: '#dc2626', marginTop: 10 }}>{err}</div>}
+      {err && <div style={{ fontSize: 12.5, color: 'var(--tms-badge-red)', marginTop: 10 }}>{err}</div>}
       <Footer onClose={onClose} onSave={save} saving={saving} label={editing ? 'Save trip' : 'Add trip'} />
-    </Modal>
+    </PayModal>
   )
 }
 
@@ -111,7 +110,7 @@ function BlockWarning({ rows }: { rows: RawTripRow[] }) {
   const { blockTripIds, legRows } = detectMultiLoadBlocks(rows)
   if (!blockTripIds.length) return null
   return (
-    <div style={{ marginTop: 8, padding: '10px 12px', borderRadius: 8, border: '1px solid #f59e0b', background: '#fffbeb', fontSize: 12, color: '#92400e', lineHeight: 1.5 }}>
+    <div style={{ marginTop: 8, padding: '10px 12px', borderRadius: 8, border: '1px solid var(--tms-badge-orange)', background: 'var(--tms-badge-orange-tint)', fontSize: 12, color: 'var(--tms-badge-orange)', lineHeight: 1.5 }}>
       ⚠ {blockTripIds.length} multi-load block{blockTripIds.length !== 1 ? 's' : ''} detected ({legRows} legs, e.g. {blockTripIds.slice(0, 3).join(', ')}{blockTripIds.length > 3 ? '…' : ''}).
       The Relay <b>“Trips”</b> export only carries each leg’s base <b>Estimated Cost</b> — it does <b>not</b> include the block’s negotiated pay, so importing it <b>understates the driver’s gross</b>.
       Import the <b>Payments / Settlement</b> export for accurate block freight, or correct these trips by hand.
@@ -132,7 +131,7 @@ function rowToTrip(r: RawTripRow, driverId: string, periodStart: string): TripIn
 /** Read a chosen .csv/.txt file into the textarea (passes the file name too). */
 function FilePick({ onText }: { onText: (t: string, fileName?: string) => void }) {
   return (
-    <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 32, padding: '0 12px', borderRadius: 8, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', color: 'var(--ds-t2)', cursor: 'pointer', fontSize: 12.5, fontWeight: 600 }}>
+    <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 32, padding: '0 12px', borderRadius: 8, border: '1px solid var(--tms-border)', background: 'var(--tms-card)', color: 'var(--tms-text-2)', cursor: 'pointer', fontSize: 12.5, fontWeight: 600 }}>
       <Upload size={14} /> Choose file…
       <input type="file" accept=".csv,.tsv,.txt,text/csv" style={{ display: 'none' }}
         onChange={(e) => { const f = e.target.files?.[0]; if (f) f.text().then((t) => onText(t, f.name)); e.currentTarget.value = '' }} />
@@ -140,12 +139,12 @@ function FilePick({ onText }: { onText: (t: string, fileName?: string) => void }
   )
 }
 
-const importTextarea: React.CSSProperties = { width: '100%', borderRadius: 8, border: '1px solid var(--ds-border)', padding: 10, fontSize: 12, fontFamily: 'monospace', background: 'var(--ds-surface)', color: 'var(--ds-t1)', resize: 'vertical', boxSizing: 'border-box' }
+const importTextarea: React.CSSProperties = { width: '100%', borderRadius: 8, border: '1px solid var(--tms-border)', padding: 10, fontSize: 12, fontFamily: 'monospace', background: 'var(--tms-card)', color: 'var(--tms-text)', resize: 'vertical', boxSizing: 'border-box' }
 
 /** Pick a screenshot of the Relay trips list; it's read server-side into trip rows. */
 function ScreenshotPick({ busy, onFile }: { busy: boolean; onFile: (f: File) => void }) {
   return (
-    <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 32, padding: '0 12px', borderRadius: 8, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', color: 'var(--ds-t2)', cursor: busy ? 'wait' : 'pointer', fontSize: 12.5, fontWeight: 600, opacity: busy ? 0.6 : 1 }}>
+    <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 32, padding: '0 12px', borderRadius: 8, border: '1px solid var(--tms-border)', background: 'var(--tms-card)', color: 'var(--tms-text-2)', cursor: busy ? 'wait' : 'pointer', fontSize: 12.5, fontWeight: 600, opacity: busy ? 0.6 : 1 }}>
       <ImageIcon size={14} /> {busy ? 'Reading…' : 'Screenshot…'}
       <input type="file" accept="image/*" style={{ display: 'none' }} disabled={busy}
         onChange={(e) => { const f = e.target.files?.[0]; if (f) onFile(f); e.currentTarget.value = '' }} />
@@ -189,10 +188,10 @@ export function ImportModal({ driverId, periodStart, existingTrips, onImport, on
   }
 
   return (
-    <Modal title="Import trips" sub="Upload a CSV, paste rows, or paste a screenshot of the Relay trips list" onClose={onClose} width={640}>
+    <PayModal title="Import trips" sub="Upload a CSV, paste rows, or paste a screenshot of the Relay trips list" onClose={onClose} width={640}>
       <div onPaste={(e) => { const f = imageFromClipboard(e); if (f) { e.preventDefault(); void readScreenshot(f) } }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 8 }}>
-          <div style={{ fontSize: 12, color: 'var(--ds-t3)', lineHeight: 1.5 }}>
+          <div style={{ fontSize: 12, color: 'var(--tms-muted)', lineHeight: 1.5 }}>
             Columns (header auto-detected, else this order):<br />
             <span style={{ fontFamily: 'monospace', fontSize: 11 }}>Load ID · Origin · Destination · Miles · Equipment · Freight · Rate/mi · Dispatcher · Status</span>
           </div>
@@ -204,23 +203,23 @@ export function ImportModal({ driverId, periodStart, existingTrips, onImport, on
         <textarea value={text} onChange={(e) => setText(e.target.value)} rows={10}
           placeholder={'Paste spreadsheet rows here — or paste a screenshot (⌘V) of the Relay trips list.\n\n112CRP7T7\tUPRR->ELP1\t\t40.73\t53\' Container\t$300.00\t\tLee Lara\tCompleted'}
           style={importTextarea} />
-        <div style={{ fontSize: 12.5, color: parsed.length ? '#15803d' : 'var(--ds-t3)', marginTop: 8 }}>
+        <div style={{ fontSize: 12.5, color: parsed.length ? 'var(--tms-badge-green)' : 'var(--tms-muted)', marginTop: 8 }}>
           {shotBusy ? 'Reading screenshot…' : parsed.length ? `${parsed.length} trip${parsed.length !== 1 ? 's' : ''} ready to import` : 'Upload, paste rows, or paste a screenshot to preview'}
           {!shotBusy && shotRows.length > 0 && (
-            <span style={{ color: 'var(--ds-t3)' }}>
+            <span style={{ color: 'var(--tms-muted)' }}>
               {' '}· {shotRows.length} from screenshot{shotRows.length !== 1 ? 's' : ''} (filed to {weekLabel(periodStart)})
-              {' '}<button type="button" onClick={() => setShotRows([])} style={{ border: 'none', background: 'none', color: 'var(--ds-blue)', cursor: 'pointer', fontSize: 12, padding: 0 }}>clear</button>
+              {' '}<button type="button" onClick={() => setShotRows([])} style={{ border: 'none', background: 'none', color: 'var(--tms-primary)', cursor: 'pointer', fontSize: 12, padding: 0 }}>clear</button>
             </span>
           )}
-          {detectedWeeks.length === 1 && <span style={{ color: 'var(--ds-t3)' }}> · pay week {weekLabel(detectedWeeks[0])}</span>}
-          {detectedWeeks.length > 1 && <span style={{ color: '#b45309' }}> · spans {detectedWeeks.length} weeks (filed per trip date)</span>}
+          {detectedWeeks.length === 1 && <span style={{ color: 'var(--tms-muted)' }}> · pay week {weekLabel(detectedWeeks[0])}</span>}
+          {detectedWeeks.length > 1 && <span style={{ color: 'var(--tms-badge-orange)' }}> · spans {detectedWeeks.length} weeks (filed per trip date)</span>}
           {parsed.length > 0 && (
-            <span style={{ color: partition.duplicates.length > 0 ? '#b45309' : 'var(--ds-t3)' }}>
+            <span style={{ color: partition.duplicates.length > 0 ? 'var(--tms-badge-orange)' : 'var(--tms-muted)' }}>
               {' '}· {partition.fresh.length} new, {partition.duplicates.length} already imported (skipped)
             </span>
           )}
         </div>
-        {shotError && <div style={{ fontSize: 12.5, color: '#dc2626', marginTop: 6 }}>{shotError}</div>}
+        {shotError && <div style={{ fontSize: 12.5, color: 'var(--tms-badge-red)', marginTop: 6 }}>{shotError}</div>}
         <BlockWarning rows={raw} />
         <Footer onClose={onClose} onSave={async () => {
           // Nothing parsed yet → keep the modal open instead of silently importing nothing.
@@ -229,7 +228,7 @@ export function ImportModal({ driverId, periodStart, existingTrips, onImport, on
           try { await onImport(partition.fresh); if (dominantWeek) onSetPeriod?.(dominantWeek) } catch { setSaving(false) }
         }} saving={saving} disabled={!parsed.length || !partition.fresh.length} label={`Import ${partition.fresh.length || ''}`.trim()} />
       </div>
-    </Modal>
+    </PayModal>
   )
 }
 
@@ -309,9 +308,9 @@ export function MasterImportModal({ periodStart, drivers, existingTrips, onImpor
   }
 
   return (
-    <Modal title="Upload master CSV" sub="One file with every driver's trips — routed to each driver for this week" onClose={onClose} width={680}>
+    <PayModal title="Upload master CSV" sub="One file with every driver's trips — routed to each driver for this week" onClose={onClose} width={680}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 8 }}>
-        <div style={{ fontSize: 12, color: 'var(--ds-t3)', lineHeight: 1.5 }}>
+        <div style={{ fontSize: 12, color: 'var(--tms-muted)', lineHeight: 1.5 }}>
           Upload the raw <b>Amazon Relay “Trips” CSV</b> (columns auto-detected: Driver Name,
           Estimated Cost, Estimate Distance, Facility Sequence, Equipment…). Each driver is matched below.
         </div>
@@ -320,28 +319,28 @@ export function MasterImportModal({ periodStart, drivers, existingTrips, onImpor
       <textarea value={text} onChange={(e) => { setText(e.target.value); setFileName('') }} rows={7}
         placeholder={'Load ID,Origin,Destination,Miles,Equipment,Freight,Rate/mi,Dispatcher,Status'}
         style={importTextarea} />
-      {fileName && <div style={{ fontSize: 11.5, color: 'var(--ds-t3)', marginTop: 4 }}>File: {fileName} — archived on import</div>}
+      {fileName && <div style={{ fontSize: 11.5, color: 'var(--tms-muted)', marginTop: 4 }}>File: {fileName} — archived on import</div>}
       <BlockWarning rows={rows} />
 
       {rows.length > 0 && (
-        <div style={{ marginTop: 10, padding: '10px 12px', borderRadius: 8, border: '1px solid var(--ds-border)', background: 'var(--ds-bg)' }}>
+        <div style={{ marginTop: 10, padding: '10px 12px', borderRadius: 8, border: '1px solid var(--tms-border)', background: 'var(--tms-bg)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>File all trips to pay week</span>
+            <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--tms-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>File all trips to pay week</span>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <button type="button" onClick={() => setWeekOverride(shiftWeek(targetWeek, -1))} aria-label="Previous week"
-                style={{ width: 26, height: 26, borderRadius: 7, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', color: 'var(--ds-t2)', cursor: 'pointer', lineHeight: 1 }}>‹</button>
-              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--ds-t1)', minWidth: 110, textAlign: 'center' }}>{weekLabel(targetWeek)}</span>
+                style={{ width: 26, height: 26, borderRadius: 7, border: '1px solid var(--tms-border)', background: 'var(--tms-card)', color: 'var(--tms-text-2)', cursor: 'pointer', lineHeight: 1 }}>‹</button>
+              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--tms-text)', minWidth: 110, textAlign: 'center' }}>{weekLabel(targetWeek)}</span>
               <button type="button" onClick={() => setWeekOverride(shiftWeek(targetWeek, 1))} aria-label="Next week"
-                style={{ width: 26, height: 26, borderRadius: 7, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', color: 'var(--ds-t2)', cursor: 'pointer', lineHeight: 1 }}>›</button>
+                style={{ width: 26, height: 26, borderRadius: 7, border: '1px solid var(--tms-border)', background: 'var(--tms-card)', color: 'var(--tms-text-2)', cursor: 'pointer', lineHeight: 1 }}>›</button>
             </div>
-            <span style={{ fontSize: 11.5, color: isManual ? '#b45309' : 'var(--ds-t3)' }}>
+            <span style={{ fontSize: 11.5, color: isManual ? 'var(--tms-badge-orange)' : 'var(--tms-muted)' }}>
               {isManual
-                ? <>manual — <button type="button" onClick={() => setWeekOverride(null)} style={{ color: 'var(--ds-blue)', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontSize: 11.5, textDecoration: 'underline' }}>reset to detected</button></>
+                ? <>manual — <button type="button" onClick={() => setWeekOverride(null)} style={{ color: 'var(--tms-primary)', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontSize: 11.5, textDecoration: 'underline' }}>reset to detected</button></>
                 : dominantWeek ? 'auto-detected from the trip dates' : 'no dates in file — set the week manually'}
             </span>
           </div>
           {detectedWeeks.length > 1 && (
-            <div style={{ fontSize: 11.5, color: '#b45309', marginTop: 6 }}>
+            <div style={{ fontSize: 11.5, color: 'var(--tms-badge-orange)', marginTop: 6 }}>
               Heads up: this file spans {detectedWeeks.length} weeks ({detectedWeeks.sort().map(weekLabel).join(', ')}). All trips will go to {weekLabel(targetWeek)}.
             </div>
           )}
@@ -350,7 +349,7 @@ export function MasterImportModal({ periodStart, drivers, existingTrips, onImpor
 
       {names.length > 0 && (
         <div style={{ marginTop: 12 }}>
-          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--tms-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>
             Map drivers ({rows.length} rows)
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 220, overflowY: 'auto' }}>
@@ -359,9 +358,9 @@ export function MasterImportModal({ periodStart, drivers, existingTrips, onImpor
               const sel = effMap(name)
               return (
                 <div key={name} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <span style={{ flex: 1, fontSize: 12.5, color: 'var(--ds-t1)' }}>{name} <span style={{ color: 'var(--ds-t3)' }}>· {count}</span></span>
+                  <span style={{ flex: 1, fontSize: 12.5, color: 'var(--tms-text)' }}>{name} <span style={{ color: 'var(--tms-muted)' }}>· {count}</span></span>
                   <select value={sel} onChange={(e) => setMapping((p) => ({ ...p, [name]: e.target.value }))}
-                    style={{ ...input, width: 220, height: 32, border: `1px solid ${sel ? 'var(--ds-border)' : '#f59e0b'}` }}>
+                    style={{ ...input, width: 220, height: 32, border: `1px solid ${sel ? 'var(--tms-border)' : 'var(--tms-badge-orange)'}` }}>
                     <option value="">— skip (no match) —</option>
                     {drivers.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
                   </select>
@@ -372,15 +371,15 @@ export function MasterImportModal({ periodStart, drivers, existingTrips, onImpor
         </div>
       )}
 
-      <div style={{ fontSize: 12.5, marginTop: 10, color: ready.length ? '#15803d' : 'var(--ds-t3)' }}>
+      <div style={{ fontSize: 12.5, marginTop: 10, color: ready.length ? 'var(--tms-badge-green)' : 'var(--tms-muted)' }}>
         {ready.length ? `${ready.length} of ${rows.length} rows ready` : 'Upload or paste a master CSV to preview'}
-        {unmatched.length > 0 && <span style={{ color: '#b45309' }}> · {unmatched.length} unmatched driver{unmatched.length !== 1 ? 's' : ''} will be skipped</span>}
+        {unmatched.length > 0 && <span style={{ color: 'var(--tms-badge-orange)' }}> · {unmatched.length} unmatched driver{unmatched.length !== 1 ? 's' : ''} will be skipped</span>}
         {trips.length > 0 && (
-          <span style={{ color: partition.duplicates.length > 0 ? '#b45309' : 'var(--ds-t3)' }}> · {partition.fresh.length} new, {partition.duplicates.length} already imported (skipped)</span>
+          <span style={{ color: partition.duplicates.length > 0 ? 'var(--tms-badge-orange)' : 'var(--tms-muted)' }}> · {partition.fresh.length} new, {partition.duplicates.length} already imported (skipped)</span>
         )}
       </div>
       <Footer onClose={onClose} onSave={doImport} saving={saving} disabled={!partition.fresh.length} label={`Import ${partition.fresh.length || ''}`.trim()} />
-    </Modal>
+    </PayModal>
   )
 }
 
@@ -431,7 +430,7 @@ export function EmailModal({ driverName, defaultTo, defaultCc, defaultSubject, d
   }
 
   return (
-    <Modal title={`Email ${driverName}'s statement`} sub="Review the draft and the attached PDF, then send" onClose={onClose} width={720}>
+    <PayModal title={`Email ${driverName}'s statement`} sub="Review the draft and the attached PDF, then send" onClose={onClose} width={720}>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
         <Field l="To" half><input style={input} value={to} onChange={(e) => setTo(e.target.value)} placeholder="driver@example.com" /></Field>
         <Field l="Cc" half><input style={input} value={cc} onChange={(e) => setCc(e.target.value)} placeholder="ryne@bcatcorp.com" /></Field>
@@ -446,22 +445,22 @@ export function EmailModal({ driverName, defaultTo, defaultCc, defaultSubject, d
       <div style={{ marginTop: 14 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
           <span style={label}>Attachment · {filename}</span>
-          {pdf && <a href={pdf.blobUrl} target="_blank" rel="noopener" style={{ fontSize: 11.5, color: 'var(--ds-blue)' }}>Open in new tab</a>}
+          {pdf && <a href={pdf.blobUrl} target="_blank" rel="noopener" style={{ fontSize: 11.5, color: 'var(--tms-primary)' }}>Open in new tab</a>}
         </div>
-        <div style={{ border: '1px solid var(--ds-border)', borderRadius: 8, overflow: 'hidden', background: 'var(--ds-bg)', height: 320 }}>
+        <div style={{ border: '1px solid var(--tms-border)', borderRadius: 8, overflow: 'hidden', background: 'var(--tms-bg)', height: 320 }}>
           {pdfErr ? (
-            <div style={{ padding: 20, fontSize: 12.5, color: '#dc2626' }}>Couldn't build the PDF: {pdfErr}</div>
+            <div style={{ padding: 20, fontSize: 12.5, color: 'var(--tms-badge-red)' }}>Couldn't build the PDF: {pdfErr}</div>
           ) : pdf ? (
             <iframe src={pdf.blobUrl} title="Statement preview" style={{ width: '100%', height: '100%', border: 'none' }} />
           ) : (
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 12.5, color: 'var(--ds-t3)' }}>Building preview…</div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 12.5, color: 'var(--tms-muted)' }}>Building preview…</div>
           )}
         </div>
       </div>
 
-      {err && <div style={{ fontSize: 12.5, color: '#dc2626', marginTop: 10 }}>{err}</div>}
+      {err && <div style={{ fontSize: 12.5, color: 'var(--tms-badge-red)', marginTop: 10 }}>{err}</div>}
       <Footer onClose={onClose} onSave={send} saving={sending} label={sending ? 'Sending…' : 'Send email'} />
-    </Modal>
+    </PayModal>
   )
 }
 
@@ -500,13 +499,13 @@ export function DeductionModal({ driverId, periodStart, onSave, onClose }: { dri
     catch (e) { setErr(e instanceof Error ? e.message : String(e)); setSaving(false) }
   }
 
-  const toggle: React.CSSProperties = { flex: 1, textAlign: 'left', padding: '8px 10px', borderRadius: 8, cursor: 'pointer', fontSize: 12.5, fontWeight: 600, color: 'var(--ds-t1)' }
+  const toggle: React.CSSProperties = { flex: 1, textAlign: 'left', padding: '8px 10px', borderRadius: 8, cursor: 'pointer', fontSize: 12.5, fontWeight: 600, color: 'var(--tms-text)' }
   return (
-    <Modal title="Add expense" sub="A one-off deduction for this week — a NEGATIVE amount refunds/waives a charge for this week only" onClose={onClose} width={480}>
+    <PayModal title="Add expense" sub="A one-off deduction for this week — a NEGATIVE amount refunds/waives a charge for this week only" onClose={onClose} width={480}>
       <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
         {([[false, 'Fixed amount'], [true, 'Miles × cost per mile']] as const).map(([v, t]) => (
           <button key={t} type="button" onClick={() => { setMileage(v); setErr(null) }}
-            style={{ ...toggle, border: `1.5px solid ${mileage === v ? 'var(--ds-blue)' : 'var(--ds-border)'}`, background: mileage === v ? 'var(--ds-blue-soft, #eff6ff)' : 'var(--ds-surface)' }}>
+            style={{ ...toggle, border: `1.5px solid ${mileage === v ? 'var(--tms-primary)' : 'var(--tms-border)'}`, background: mileage === v ? 'var(--tms-primary-tint)' : 'var(--tms-card)' }}>
             {t}
           </button>
         ))}
@@ -524,12 +523,12 @@ export function DeductionModal({ driverId, periodStart, onSave, onClose }: { dri
         )}
         <Field l="Date" half><input type="date" style={input} value={f.date} onChange={(e) => set('date', e.target.value)} /></Field>
       </div>
-      <div style={{ marginTop: 12, fontSize: 12, color: 'var(--ds-t3)' }}>
+      <div style={{ marginTop: 12, fontSize: 12, color: 'var(--tms-muted)' }}>
         Deducted before the pay split, this week only{computed != null ? <> — <b>{moneyFmt(computed)}</b> on this sheet</> : ''}.
       </div>
-      {err && <div style={{ fontSize: 12.5, color: '#dc2626', marginTop: 10 }}>{err}</div>}
+      {err && <div style={{ fontSize: 12.5, color: 'var(--tms-badge-red)', marginTop: 10 }}>{err}</div>}
       <Footer onClose={onClose} onSave={save} saving={saving} label="Add expense" />
-    </Modal>
+    </PayModal>
   )
 }
 
@@ -565,8 +564,8 @@ export function WeeklyMileageRow({ onAdd }: { onAdd: (miles: number, costPerMile
     <>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8, fontSize: 12.5 }}>
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
-          <span style={{ color: 'var(--ds-t2)' }}>Weekly mileage</span>
-          <span style={{ fontSize: 11, color: 'var(--ds-t3)' }}>Deducted before the split, this week only</span>
+          <span style={{ color: 'var(--tms-text-2)' }}>Weekly mileage</span>
+          <span style={{ fontSize: 11, color: 'var(--tms-muted)' }}>Deducted before the split, this week only</span>
         </div>
         <input
           aria-label="Mileage miles"
@@ -574,7 +573,7 @@ export function WeeklyMileageRow({ onAdd }: { onAdd: (miles: number, costPerMile
           value={miles}
           onChange={(e) => setMiles(e.target.value)}
           placeholder="Miles"
-          style={{ width: 74, height: 30, borderRadius: 8, border: '1px solid var(--ds-border)', padding: '0 8px', fontSize: 12.5, background: 'var(--ds-surface)', color: 'var(--ds-t1)', fontVariantNumeric: 'tabular-nums', boxSizing: 'border-box' }}
+          style={{ width: 74, height: 30, borderRadius: 8, border: '1px solid var(--tms-border)', padding: '0 8px', fontSize: 12.5, background: 'var(--tms-card)', color: 'var(--tms-text)', fontVariantNumeric: 'tabular-nums', boxSizing: 'border-box' }}
         />
         <input
           aria-label="Mileage cost per mile"
@@ -582,21 +581,21 @@ export function WeeklyMileageRow({ onAdd }: { onAdd: (miles: number, costPerMile
           value={costPerMile}
           onChange={(e) => setCostPerMile(e.target.value)}
           placeholder="$/mi"
-          style={{ width: 70, height: 30, borderRadius: 8, border: '1px solid var(--ds-border)', padding: '0 8px', fontSize: 12.5, background: 'var(--ds-surface)', color: 'var(--ds-t1)', fontVariantNumeric: 'tabular-nums', boxSizing: 'border-box' }}
+          style={{ width: 70, height: 30, borderRadius: 8, border: '1px solid var(--tms-border)', padding: '0 8px', fontSize: 12.5, background: 'var(--tms-card)', color: 'var(--tms-text)', fontVariantNumeric: 'tabular-nums', boxSizing: 'border-box' }}
         />
-        <span style={{ minWidth: 76, textAlign: 'right', color: '#dc2626', fontVariantNumeric: 'tabular-nums' }}>
+        <span style={{ minWidth: 76, textAlign: 'right', color: 'var(--tms-badge-red)', fontVariantNumeric: 'tabular-nums' }}>
           {line != null ? `= ${moneyFmt(line.amount)}` : ''}
         </span>
         <button
           onClick={add}
           aria-label="Add mileage deduction"
           disabled={saving || line == null}
-          style={{ height: 30, padding: '0 12px', borderRadius: 8, border: 'none', background: 'var(--ds-blue)', color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer', opacity: saving || line == null ? 0.6 : 1, fontFamily: 'inherit' }}
+          style={{ height: 30, padding: '0 12px', borderRadius: 8, border: 'none', background: 'var(--tms-primary)', color: 'var(--tms-on-primary)', fontSize: 12, fontWeight: 600, cursor: 'pointer', opacity: saving || line == null ? 0.6 : 1, fontFamily: 'inherit' }}
         >
           {saving ? 'Adding…' : 'Add'}
         </button>
       </div>
-      {err && <div style={{ fontSize: 12.5, color: '#dc2626', marginTop: 6 }}>{err}</div>}
+      {err && <div style={{ fontSize: 12.5, color: 'var(--tms-badge-red)', marginTop: 6 }}>{err}</div>}
     </>
   )
 }
@@ -627,7 +626,7 @@ export function SettingsModal({ driver, existing, onSave, onClose }: { driver: D
   }
 
   return (
-    <Modal title={`${driver.name} — pay settings`} sub="How this driver's weekly pay is calculated" onClose={onClose} width={560}>
+    <PayModal title={`${driver.name} — pay settings`} sub="How this driver's weekly pay is calculated" onClose={onClose} width={560}>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
         <Field l="Pay percent *" half><input style={input} value={percent} onChange={(e) => setPercent(e.target.value)} placeholder="42 or 88" /></Field>
         <Field l="Fuel card # (EFS)" half><input style={input} value={fuelCard} onChange={(e) => setFuelCard(e.target.value)} placeholder="00049" /></Field>
@@ -635,26 +634,26 @@ export function SettingsModal({ driver, existing, onSave, onClose }: { driver: D
       </div>
 
       {(existing?.fuelCardHistory?.length ?? 0) > 0 && (
-        <div style={{ marginTop: 12, padding: '8px 10px', borderRadius: 8, background: 'var(--ds-bg)', border: '1px solid var(--ds-border)' }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--ds-t3)', marginBottom: 4 }}>Pinned past fuel cards</div>
+        <div style={{ marginTop: 12, padding: '8px 10px', borderRadius: 8, background: 'var(--tms-bg)', border: '1px solid var(--tms-border)' }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--tms-muted)', marginBottom: 4 }}>Pinned past fuel cards</div>
           {existing!.fuelCardHistory!.map((w, i) => (
-            <div key={i} style={{ fontSize: 11.5, color: 'var(--ds-t2)' }}>
+            <div key={i} style={{ fontSize: 11.5, color: 'var(--tms-text-2)' }}>
               weeks {w.from === '1970-01-01' ? 'before' : `${w.from} →`} {w.until}: card {w.cardNumber}
             </div>
           ))}
-          <div style={{ fontSize: 10.5, color: 'var(--ds-t3)', marginTop: 4 }}>Those weeks keep matching their card — the field above only changes weeks outside the pinned windows.</div>
+          <div style={{ fontSize: 10.5, color: 'var(--tms-muted)', marginTop: 4 }}>Those weeks keep matching their card — the field above only changes weeks outside the pinned windows.</div>
         </div>
       )}
 
       {(existing?.rateHistory?.length ?? 0) > 0 && (
-        <div style={{ marginTop: 12, padding: '8px 10px', borderRadius: 8, background: 'var(--ds-bg)', border: '1px solid var(--ds-border)' }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--ds-t3)', marginBottom: 4 }}>Pinned past rate windows</div>
+        <div style={{ marginTop: 12, padding: '8px 10px', borderRadius: 8, background: 'var(--tms-bg)', border: '1px solid var(--tms-border)' }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--tms-muted)', marginBottom: 4 }}>Pinned past rate windows</div>
           {existing!.rateHistory!.map((w, i) => (
-            <div key={i} style={{ fontSize: 11.5, color: 'var(--ds-t2)' }}>
+            <div key={i} style={{ fontSize: 11.5, color: 'var(--tms-text-2)' }}>
               weeks {w.from} → {w.until}: {Math.round(w.payPercent * 100)}% {w.expensesBeforePercent ? 'after expenses' : 'of gross − expenses'}
             </div>
           ))}
-          <div style={{ fontSize: 10.5, color: 'var(--ds-t3)', marginTop: 4 }}>Those weeks keep their rate — the fields above only change weeks outside the pinned windows.</div>
+          <div style={{ fontSize: 10.5, color: 'var(--tms-muted)', marginTop: 4 }}>Those weeks keep their rate — the fields above only change weeks outside the pinned windows.</div>
         </div>
       )}
 
@@ -664,10 +663,10 @@ export function SettingsModal({ driver, existing, onSave, onClose }: { driver: D
           {[{ v: false, t: '% of gross, then − expenses', hint: 'Lee, Mike, Roy' }, { v: true, t: '% AFTER expenses', hint: 'Chad' }].map((opt) => (
             <button key={String(opt.v)} type="button" onClick={() => setAfterExp(opt.v)}
               style={{ flex: 1, textAlign: 'left', padding: '10px 12px', borderRadius: 10, cursor: 'pointer',
-                border: `1.5px solid ${afterExp === opt.v ? 'var(--ds-blue)' : 'var(--ds-border)'}`,
-                background: afterExp === opt.v ? 'var(--ds-blue-soft, #eff6ff)' : 'var(--ds-surface)' }}>
-              <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ds-t1)' }}>{opt.t}</div>
-              <div style={{ fontSize: 11, color: 'var(--ds-t3)', marginTop: 2 }}>e.g. {opt.hint}</div>
+                border: `1.5px solid ${afterExp === opt.v ? 'var(--tms-primary)' : 'var(--tms-border)'}`,
+                background: afterExp === opt.v ? 'var(--tms-primary-tint)' : 'var(--tms-card)' }}>
+              <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--tms-text)' }}>{opt.t}</div>
+              <div style={{ fontSize: 11, color: 'var(--tms-muted)', marginTop: 2 }}>e.g. {opt.hint}</div>
             </button>
           ))}
         </div>
@@ -685,14 +684,14 @@ export function SettingsModal({ driver, existing, onSave, onClose }: { driver: D
       </div>
 
       {fixedEditing && (
-        <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 8 }}>
+        <div style={{ fontSize: 12, color: 'var(--tms-muted)', marginTop: 8 }}>
           Finish or cancel the fixed-expense edit before saving settings.
         </div>
       )}
 
-      {err && <div style={{ fontSize: 12.5, color: '#dc2626', marginTop: 12 }}>{err}</div>}
+      {err && <div style={{ fontSize: 12.5, color: 'var(--tms-badge-red)', marginTop: 12 }}>{err}</div>}
       <Footer onClose={onClose} onSave={save} saving={saving} disabled={fixedEditing} label="Save settings" />
-    </Modal>
+    </PayModal>
   )
 }
 
@@ -822,7 +821,7 @@ export function CreditModal({ driverId, driverName, periodStart, periodLabel, in
   }
 
   return (
-    <Modal title={editing ? `Edit ${noun}` : `Add ${noun}`} sub={debit ? `Taken off ${driverName}'s ${periodLabel} check, after the net` : `Extra pay for ${driverName} on the ${periodLabel} check`} onClose={onClose} width={520}>
+    <PayModal title={editing ? `Edit ${noun}` : `Add ${noun}`} sub={debit ? `Taken off ${driverName}'s ${periodLabel} check, after the net` : `Extra pay for ${driverName} on the ${periodLabel} check`} onClose={onClose} width={520}>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
         <Field l="Reason code *" half>
           <select style={input} value={f.reasonCode} onChange={(e) => setReason(e.target.value)} aria-label="Reason code">
@@ -855,21 +854,21 @@ export function CreditModal({ driverId, driverName, periodStart, periodLabel, in
         <Field l="Internal note"><input style={input} value={f.notes} onChange={(e) => set('notes', e.target.value)} placeholder="Approved by…" aria-label="Internal note" /></Field>
       </div>
 
-      <div style={{ marginTop: 14, padding: '10px 12px', borderRadius: 8, background: 'var(--ds-bg)', border: '1px solid var(--ds-border)', fontSize: 12.5, color: 'var(--ds-t2)' }}>
+      <div style={{ marginTop: 14, padding: '10px 12px', borderRadius: 8, background: 'var(--tms-bg)', border: '1px solid var(--tms-border)', fontSize: 12.5, color: 'var(--tms-text-2)' }}>
         {debit
           ? <>Debits come off the check <b>in full, after the net</b> — the driver's pay percentage is not applied.</>
           : <>Credits are added to the check <b>in full</b> — the driver's pay percentage is not applied.</>}
-        {amount != null && amount > 0 && <> This check goes {debit ? 'down' : 'up'} by <b style={{ color: debit ? '#dc2626' : '#15803d' }}>{moneyFmt(amount)}</b>.</>}
+        {amount != null && amount > 0 && <> This check goes {debit ? 'down' : 'up'} by <b style={{ color: debit ? 'var(--tms-badge-red)' : 'var(--tms-badge-green)' }}>{moneyFmt(amount)}</b>.</>}
       </div>
 
       {isLeaseMileage && (
-        <div style={{ marginTop: 10, fontSize: 12, color: 'var(--ds-t3)' }}>
+        <div style={{ marginTop: 10, fontSize: 12, color: 'var(--tms-muted)' }}>
           This mileage charge applies only to the selected week ({periodLabel}).
         </div>
       )}
 
-      {err && <div style={{ fontSize: 12.5, color: '#dc2626', marginTop: 10 }}>{err}</div>}
+      {err && <div style={{ fontSize: 12.5, color: 'var(--tms-badge-red)', marginTop: 10 }}>{err}</div>}
       <Footer onClose={onClose} onSave={save} saving={saving} label={editing ? `Save ${noun}` : `Add ${noun}`} />
-    </Modal>
+    </PayModal>
   )
 }

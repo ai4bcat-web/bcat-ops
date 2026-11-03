@@ -5,12 +5,12 @@ export const badgeVariants = cva(
   {
     variants: {
       variant: {
-        default:     'border-sky-200 bg-sky-50 text-sky-700',
-        secondary:   'border-slate-200 bg-slate-100 text-slate-600',
-        destructive: 'border-red-200 bg-red-50 text-red-700',
-        outline:     'border-slate-200 text-slate-700',
-        green:       'border-emerald-200 bg-emerald-50 text-emerald-700',
-        orange:      'border-amber-200 bg-amber-50 text-amber-700',
+        default:     'border-[color:var(--tms-primary)] bg-[color:var(--tms-primary-tint)] text-[color:var(--tms-primary-ink)]',
+        secondary:   'border-border bg-muted text-muted-foreground',
+        destructive: 'border-[color:var(--tms-badge-red)] bg-[color:var(--tms-badge-red-tint)] text-[color:var(--tms-badge-red)]',
+        outline:     'border-border text-foreground',
+        green:       'border-[color:var(--tms-badge-green)] bg-[color:var(--tms-badge-green-tint)] text-[color:var(--tms-badge-green)]',
+        orange:      'border-[color:var(--tms-badge-orange)] bg-[color:var(--tms-badge-orange-tint)] text-[color:var(--tms-badge-orange)]',
       },
     },
     defaultVariants: { variant: 'default' },

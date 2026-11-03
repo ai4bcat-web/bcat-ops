@@ -1,10 +1,12 @@
 /*
- * Light green admin theme for the TMS section.
+ * Light green theme for the whole product.
  *
- * Every selector in the TMS stylesheets starts with `.tms-shell` or `.tms-portal`, or with
- * `:root[data-tms-theme='dark']` immediately followed by one of those — the existing
- * BCAT Ops pages must not change a pixel when these stylesheets load.
- * `src/features/tms/theme.scope.test.ts` enforces that mechanically.
+ * The two token blocks (light default, dark override) are also defined on `:root`, so every
+ * surface — staff shell, Radix portals, sonner, sign-in, public pages, the driver app — reads
+ * one set of `--tms-*` tokens. Every other selector in the TMS stylesheets starts with
+ * `.tms-shell` or `.tms-portal`, or with `:root[data-tms-theme='dark']` immediately followed
+ * by one of those. The exceptions are the token blocks, the shadcn bridge and the `*` border
+ * default. `src/features/tms/theme.scope.test.ts` enforces that mechanically.
  *
  * Colour literals live ONLY in the two token blocks below (light default, dark override);
  * everything else uses `var(--tms-*)`. The attribute is on <html> (see tmsTheme.ts) because
@@ -13,6 +15,7 @@
  * Sidebar / top bar rules live in shell.css; kit-only rules in kit/kit.css.
  */
 
+:root,
 .tms-shell,
 .tms-portal {
   color-scheme: light;
@@ -127,6 +130,7 @@
   --tms-chart-grid: var(--tms-border);
 }
 
+:root[data-tms-theme='dark'],
 :root[data-tms-theme='dark'] .tms-shell,
 :root[data-tms-theme='dark'] .tms-portal {
   color-scheme: dark;
@@ -223,12 +227,13 @@
 }
 
 /* ── shadcn bridge: ui/* utilities (bg-popover, text-muted-foreground, …) follow the TMS tokens ── */
-.tms-shell, .tms-portal { --background: var(--tms-card); --foreground: var(--tms-text); --card: var(--tms-card); --card-foreground: var(--tms-text); --popover: var(--tms-bg-elevated); --popover-foreground: var(--tms-text); --primary: var(--tms-primary); --primary-foreground: var(--tms-on-primary); --secondary: var(--tms-surface); --secondary-foreground: var(--tms-text); --muted: var(--tms-surface); --muted-foreground: var(--tms-muted); --accent: var(--tms-surface-hover); --accent-foreground: var(--tms-text); --destructive: var(--tms-destructive); --destructive-foreground: var(--tms-on-destructive); --border: var(--tms-border); --input: var(--tms-input-border); --ring: var(--tms-primary); --radius: var(--tms-radius); }
+:root, .tms-shell, .tms-portal { --background: var(--tms-card); --foreground: var(--tms-text); --card: var(--tms-card); --card-foreground: var(--tms-text); --popover: var(--tms-bg-elevated); --popover-foreground: var(--tms-text); --primary: var(--tms-primary); --primary-foreground: var(--tms-on-primary); --secondary: var(--tms-surface); --secondary-foreground: var(--tms-text); --muted: var(--tms-surface); --muted-foreground: var(--tms-muted); --accent: var(--tms-surface-hover); --accent-foreground: var(--tms-text); --destructive: var(--tms-destructive); --destructive-foreground: var(--tms-on-destructive); --border: var(--tms-border); --input: var(--tms-input-border); --ring: var(--tms-primary); --radius: var(--tms-radius); }
 
 /* Tailwind v4's bare `border` is currentColor. Layered, so explicit border-[color:…] utilities still win. */
 @layer base {
-  .tms-shell *,
-  .tms-portal * {
+  *,
+  ::before,
+  ::after {
     border-color: var(--tms-border);
   }
 }

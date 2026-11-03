@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react'
-import { X, Download, ExternalLink } from 'lucide-react'
+import { Download, ExternalLink } from 'lucide-react'
 import { toast } from 'sonner'
 import { isPdfKey, isImageKey, isUnembeddableKey } from '@/lib/filePacketPdf'
 import { downloadFromUrl } from '@/lib/download'
 import type { ComplianceDocument } from '@/types'
 import { errorText } from '@/lib/errorText'
+import { TmsButton } from '@/features/tms/kit/TmsButton'
+import { TmsDialog } from '@/features/tms/kit/TmsDialog'
 
 /**
  * Look at a document without leaving the file.
@@ -55,62 +57,46 @@ export function DocumentPreviewModal({
     }
   }
 
-  const btn: React.CSSProperties = {
-    display: 'flex', alignItems: 'center', gap: 6, height: 30, padding: '0 12px', borderRadius: 8,
-    border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', color: 'var(--ds-t2)',
-    fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
-  }
-
   return (
-    <div onClick={onClose}
-      style={{ position: 'fixed', inset: 0, zIndex: 80, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.6)', padding: 24 }}>
-      <div onClick={(e) => e.stopPropagation()}
-        style={{ background: 'var(--ds-surface)', borderRadius: 14, width: 900, maxWidth: '96vw', height: '90vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 16px', borderBottom: '1px solid var(--ds-border)' }}>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 14.5, fontWeight: 600, color: 'var(--ds-t1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {doc.title}
-            </div>
-            <div style={{ fontSize: 11.5, color: 'var(--ds-t3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {filename}{doc.expirationDate ? ` · expires ${doc.expirationDate.slice(0, 10)}` : ''}
-            </div>
-          </div>
-          <button onClick={() => void download()} disabled={!url || saving}
-            style={{ ...btn, opacity: url ? 1 : 0.5, cursor: saving ? 'wait' : 'pointer' }}>
-            <Download size={14} /> {saving ? 'Downloading…' : 'Download'}
-          </button>
+    <TmsDialog
+      open
+      onOpenChange={(o) => { if (!o) onClose() }}
+      className="tms-dialog-xl"
+      title={doc.title}
+      description={`${filename}${doc.expirationDate ? ` · expires ${doc.expirationDate.slice(0, 10)}` : ''}`}
+      footer={(
+        <>
           {url && (
-            <a href={url} target="_blank" rel="noopener noreferrer" style={{ ...btn, textDecoration: 'none' }}>
+            <a href={url} target="_blank" rel="noopener noreferrer" className="tms-btn tms-btn-secondary" style={{ textDecoration: 'none' }}>
               <ExternalLink size={14} /> New tab
             </a>
           )}
-          <button onClick={onClose} aria-label="Close" style={{ color: 'var(--ds-t3)', background: 'none', border: 'none', cursor: 'pointer' }}>
-            <X size={18} />
-          </button>
-        </div>
-
-        <div style={{ flex: 1, background: 'var(--ds-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'auto' }}>
-          {fetchError ? (
-            <div style={{ fontSize: 13, color: '#b91c1c', padding: 24, textAlign: 'center' }}>Couldn't open this document: {fetchError}</div>
-          ) : !url ? (
-            <div style={{ fontSize: 13, color: 'var(--ds-t3)' }}>Loading…</div>
-          ) : isUnembeddableKey(key) ? (
-            <div style={{ fontSize: 13, color: 'var(--ds-t2)', padding: 24, textAlign: 'center', lineHeight: 1.6 }}>
-              This is a HEIC photo, which browsers can't display.<br />
-              <span style={{ color: 'var(--ds-t3)' }}>Download it to view — it opens fine on a Mac or iPhone.</span>
-            </div>
-          ) : isImageKey(key) ? (
-            <img src={url} alt={doc.title} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
-          ) : canRender ? (
-            <iframe src={url} title={doc.title} style={{ width: '100%', height: '100%', border: 'none' }} />
-          ) : (
-            <div style={{ fontSize: 13, color: 'var(--ds-t2)', padding: 24, textAlign: 'center' }}>
-              This file type can't be previewed — download it to open.
-            </div>
-          )}
-        </div>
+          <TmsButton variant="primary" onClick={() => void download()} disabled={!url || saving} style={{ cursor: saving ? 'wait' : undefined }}>
+            <Download size={14} /> {saving ? 'Downloading…' : 'Download'}
+          </TmsButton>
+        </>
+      )}
+    >
+      <div style={{ height: '68vh', background: 'var(--tms-surface)', borderRadius: 'var(--tms-radius)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'auto' }}>
+        {fetchError ? (
+          <div style={{ fontSize: 13, color: 'var(--tms-badge-red)', padding: 24, textAlign: 'center' }}>Couldn't open this document: {fetchError}</div>
+        ) : !url ? (
+          <div style={{ fontSize: 13, color: 'var(--tms-muted)' }}>Loading…</div>
+        ) : isUnembeddableKey(key) ? (
+          <div style={{ fontSize: 13, color: 'var(--tms-text-2)', padding: 24, textAlign: 'center', lineHeight: 1.6 }}>
+            This is a HEIC photo, which browsers can't display.<br />
+            <span style={{ color: 'var(--tms-muted)' }}>Download it to view — it opens fine on a Mac or iPhone.</span>
+          </div>
+        ) : isImageKey(key) ? (
+          <img data-tms-paper src={url} alt={doc.title} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', background: 'var(--tms-paper)' }} />
+        ) : canRender ? (
+          <iframe data-tms-paper src={url} title={doc.title} style={{ width: '100%', height: '100%', border: 'none', background: 'var(--tms-paper)' }} />
+        ) : (
+          <div style={{ fontSize: 13, color: 'var(--tms-text-2)', padding: 24, textAlign: 'center' }}>
+            This file type can't be previewed — download it to open.
+          </div>
+        )}
       </div>
-    </div>
+    </TmsDialog>
   )
 }

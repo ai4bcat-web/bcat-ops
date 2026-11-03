@@ -2,8 +2,12 @@
 @import "tw-animate-css";
 @import "./features/calendar/calendar.css";
 
-@custom-variant dark (&:where(.dark, .dark *));
-
+/*
+ * Colour comes from the --tms-* tokens (src/features/tms/theme.css), defined on :root in the
+ * light and dark themes. The shadcn variables below are only a bridge for Tailwind
+ * utilities (bg-card, text-muted-foreground, border-border…): theme.css defines them once,
+ * as aliases of the tokens. Nothing in this file holds a colour literal.
+ */
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -28,134 +32,10 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
-  /* design system extended */
-  --color-blue: var(--ds-blue);
-  --color-blue-dark: var(--ds-blue-dark);
-  --color-blue-bg: var(--ds-blue-bg);
-  --color-success: var(--ds-green);
-  --color-warning: var(--ds-amber);
-  --color-danger: var(--ds-red);
-  --color-success-bg: var(--ds-green-bg);
-  --color-warning-bg: var(--ds-amber-bg);
-  --color-danger-bg: var(--ds-red-bg);
 }
 
-/* ── Design system tokens ─────────────────────────────────────────────────── */
 :root {
-  /* surfaces */
-  --ds-bg:            #f4f7fb;
-  --ds-bg-2:          #f1f4f9;
-  --ds-bg-3:          #e7ecf4;
-  --ds-card:          #ffffff;
-
-  /* borders */
-  --ds-border:        #e2e8f0;
-  --ds-border-strong: rgba(15, 23, 42, 0.14);
-  --ds-border-soft:   #f1f5f9;
-
-  /* text */
-  --ds-muted:         #4a5568;
-  --ds-muted-soft:    #94a3b8;
-
-  /* brand */
-  --ds-blue:          #1ea8f3;
-  --ds-blue-dark:     #0369a1;
-  --ds-blue-bg:       #e6f4fd;
-
-  /* status text */
-  --ds-green:         #15803d;
-  --ds-red:           #b91c1c;
-  --ds-amber:         #b45309;
-  --ds-violet:        #6d28d9;
-
-  /* status backgrounds */
-  --ds-green-bg:      #e7f7ec;
-  --ds-red-bg:        #fde8e8;
-  --ds-amber-bg:      #fef3e2;
-  --ds-violet-bg:     #efe7fd;
-  --ds-cyan-bg:       #e0f5f9;
-
-  /* shadows */
-  --sh-sm: 0 1px 2px rgba(15,23,42,0.04), 0 1px 1px rgba(15,23,42,0.02);
-  --sh-md: 0 1px 3px rgba(15,23,42,0.05), 0 4px 12px rgba(15,23,42,0.04);
-  --sh-lg: 0 4px 12px rgba(15,23,42,0.06), 0 12px 32px rgba(15,23,42,0.05);
-
-  /* text scale aliases */
-  --ds-t1:  #0b1220;
-  --ds-t2:  #4a5568;
-  --ds-t3:  #6b7588;
-
-  /* surface alias */
-  --ds-surface: #ffffff;
-
-  /* status bg aliases (soft variants) */
-  --ds-blue-soft:  var(--ds-blue-bg);
-  --ds-amber-soft: var(--ds-amber-bg);
-  --ds-red-soft:   var(--ds-red-bg);
-
-  /* typography */
   --font-mono: "Geist Mono", ui-monospace, monospace;
-
-  /* ── Tailwind / shadcn semantic tokens ──────────────────────────────────── */
-  --primary:              #1ea8f3;
-  --primary-foreground:   #ffffff;
-  --ring:                 #1ea8f3;
-
-  --background:           #f4f7fb;
-  --foreground:           #0b1220;
-  --card:                 #ffffff;
-  --card-foreground:      #0b1220;
-  --popover:              #ffffff;
-  --popover-foreground:   #0b1220;
-
-  --secondary:            #f1f4f9;
-  --secondary-foreground: #0b1220;
-  --muted:                #f1f4f9;
-  --muted-foreground:     #6b7588;
-  --accent:               #f1f4f9;
-  --accent-foreground:    #0b1220;
-
-  --destructive:             #b91c1c;
-  --destructive-foreground:  #ffffff;
-
-  --border: #e2e8f0;
-  --input:  #e2e8f0;
-  --radius: 0.375rem;
-}
-
-/* ── Dark token set — the driver app ────────────────────────────────────────
-   The driver PWA is a dark shell (#0b1220). Its pages are built from the same semantic
-   tokens as the staff app, which until 8 Oct 2026 only had LIGHT values: a driver got
-   #6b7588 "muted" text on a mid-grey card and white figures on a white card — Jason's
-   Hours screen was half invisible. One `dark` class on the shell resolves every token to
-   a value picked for that ground; the pages themselves do not change.
-   Contrast targets on #0b1220: foreground 15:1, muted-foreground 8:1. */
-.dark {
-  color-scheme: dark;
-
-  --primary:              #1ea8f3;
-  --primary-foreground:   #ffffff;
-  --ring:                 #1ea8f3;
-
-  --background:           #0b1220;
-  --foreground:           #f1f5f9;
-  --card:                 #141f36;
-  --card-foreground:      #f1f5f9;
-  --popover:              #141f36;
-  --popover-foreground:   #f1f5f9;
-
-  --secondary:            #1c2942;
-  --secondary-foreground: #f1f5f9;
-  --muted:                #1c2942;
-  --muted-foreground:     #aab7cb;
-  --accent:               #1c2942;
-  --accent-foreground:    #f1f5f9;
-
-  --destructive:             #ef4444;
-  --destructive-foreground:  #ffffff;
-
-  --border: #2e3d5b;
-  --input:  #3d4d6d;
 }
 
 /* Tailwind v4 puts utilities in @layer utilities; an UN-layered rule outranks every layer
@@ -166,11 +46,10 @@
 }
 
 body {
-  background-color: var(--ds-bg);
-  font-family: "Geist", ui-sans-serif, system-ui, sans-serif;
-  font-feature-settings: "ss01", "cv11";
+  background-color: var(--tms-bg);
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
   font-size: 14px;
-  color: var(--foreground);
+  color: var(--tms-text);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   font-variant-numeric: tabular-nums;
@@ -181,338 +60,9 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-/* ── KPI Tile ─────────────────────────────────────────────────────────────── */
-.ds-kpi {
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
-  border-radius: 6px;
-  padding: 18px 20px;
-  min-width: 0;
-  cursor: pointer;
-  transition: border-color .15s;
-}
-.ds-kpi:hover { border-color: #cbd5e1; }
-.ds-kpi.active {
-  border-color: #1ea8f3;
-  background: rgba(30, 168, 243, 0.04);
-}
-.ds-kpi-label {
-  color: #64748b;
-  font-size: 11px;
-  letter-spacing: .06em;
-  font-weight: 500;
-  text-transform: uppercase;
-  margin-bottom: 6px;
-  line-height: 1.2;
-  white-space: nowrap;
-}
-.ds-kpi-value {
-  color: #0a0a0a;
-  font-size: 24px;
-  font-weight: 700;
-  line-height: 1;
-  font-variant-numeric: tabular-nums;
-  letter-spacing: -.02em;
-}
-.ds-kpi-value.blue  { color: #1ea8f3; }
-.ds-kpi-value.green { color: #15803d; }
-.ds-kpi-value.red   { color: #b91c1c; }
-.ds-kpi-value.amber { color: #b45309; }
-.ds-kpi-sub {
-  font-size: 12px;
-  color: #64748b;
-  margin-top: 4px;
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
-}
-
-/* ── Dashboard Container ─────────────────────────────────────────────────── */
-.ds-dashboard {
-  background: #f1f5f9;
-  border: 1px solid #e2e8f0;
-  border-radius: 6px;
-  padding: 10px 12px 8px 12px;
-}
-.ds-dashboard-header {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid #e2e8f0;
-  margin-bottom: 8px;
-}
-.ds-logo-pill {
-  background: #0a0a0a;
-  padding: 4px 10px;
-  border-radius: 4px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  height: 22px;
-  flex-shrink: 0;
-}
-.ds-dashboard-title {
-  color: #0a0a0a;
-  font-size: 13px;
-  font-weight: 700;
-  flex: 1;
-}
-.ds-dashboard-sub {
-  color: #64748b;
-  font-size: 10px;
-  letter-spacing: 1.2px;
-  text-transform: uppercase;
-}
-
-/* ── Panel (inside dashboard) ────────────────────────────────────────────── */
-.ds-panel {
-  background: rgba(241, 245, 249, 0.7);
-  border: 1px solid #e2e8f0;
-  border-radius: 6px;
-  padding: 8px 10px;
-}
-.ds-panel h4 {
-  color: #0a0a0a;
-  font-size: 11px;
-  font-weight: 700;
-  margin-bottom: 2px;
-}
-.ds-panel .p-sub {
-  color: #64748b;
-  font-size: 10px;
-  margin-bottom: 6px;
-}
-
-/* ── Data List ───────────────────────────────────────────────────────────── */
-.ds-list { list-style: none; padding: 0; margin: 0; }
-.ds-list li {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 5px 0;
-  border-bottom: 1px solid rgba(226, 232, 240, 0.7);
-  font-size: 12px;
-  color: #64748b;
-}
-.ds-list li:last-child { border-bottom: none; }
-.ds-list .li-label { color: #0a0a0a; font-weight: 600; }
-.ds-list .li-val   { color: #1ea8f3; font-weight: 700; font-variant-numeric: tabular-nums; }
-.ds-list .li-val.good { color: #15803d; }
-.ds-list .li-val.bad  { color: #b91c1c; }
-.ds-list .li-val.warn { color: #b45309; }
-
-/* ── Pill / Badge ────────────────────────────────────────────────────────── */
-.ds-pill {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px 8px;
-  border-radius: 4px;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: .04em;
-  text-transform: uppercase;
-  white-space: nowrap;
-}
-.ds-pill.green { background: #15803d; color: #fff; }
-.ds-pill.red   { background: #b91c1c; color: #fff; }
-.ds-pill.blue  { background: #1ea8f3; color: #fff; }
-.ds-pill.amber { background: #b45309; color: #fff; }
-.ds-pill.muted { background: #e2e8f0; color: #64748b; }
-
-/* ── Horizontal bar ──────────────────────────────────────────────────────── */
-.ds-bar-h { display: flex; align-items: center; gap: 6px; padding: 2px 0; font-size: 11px; color: #64748b; }
-.ds-bar-h .bar-label { width: 56px; flex-shrink: 0; font-size: 10px; }
-.ds-bar-h .bar-track {
-  flex: 1; height: 6px;
-  background: #e2e8f0;
-  border-radius: 3px; overflow: hidden;
-}
-.ds-bar-h .bar-fill {
-  height: 100%;
-  background: #0a0a0a;
-  border-radius: 3px;
-}
-.ds-bar-h .bar-fill.green { background: linear-gradient(90deg, #15803d, #22c55e); }
-.ds-bar-h .bar-fill.red   { background: linear-gradient(90deg, #991b1b, #ef4444); }
-.ds-bar-h .bar-val { width: 32px; text-align: right; color: #0a0a0a; font-weight: 700; font-size: 11px; }
-
-/* ── Section label ───────────────────────────────────────────────────────── */
-.ds-section-label {
-  font-size: 9px;
-  color: #1ea8f3;
-  letter-spacing: 1.5px;
-  font-weight: 700;
-  text-transform: uppercase;
-}
-.ds-section-label.red   { color: #b91c1c; }
-.ds-section-label.green { color: #15803d; }
-
-/* ── App Layout ──────────────────────────────────────────────────────────── */
-.app { display: flex; height: 100vh; overflow: hidden; }
-.app-main { flex: 1; overflow: hidden; display: flex; flex-direction: column; min-width: 0; background: var(--ds-bg); }
-.page-content { flex: 1; overflow: hidden; min-height: 0; }
-
-/* ── Topbar ──────────────────────────────────────────────────────────────── */
-.topbar {
-  height: 64px; flex-shrink: 0;
-  display: flex; align-items: center; gap: 0;
-  padding: 0 24px;
-  background: #ffffff;
-  border-bottom: 1px solid var(--ds-border);
-  z-index: 20;
-}
-
-/* ── Sidebar (white with blue active state) ──────────────────────────────── */
-.sidebar {
-  width: 224px;
-  background: #ffffff;
-  border-right: 1px solid rgba(226, 232, 240, 0.7);
-  display: flex; flex-direction: column; flex-shrink: 0;
-  overflow: hidden;
-}
-.sidebar-brand {
-  padding: 20px 20px 18px;
-  display: flex; align-items: center; gap: 10px;
-  border-bottom: 1px solid var(--ds-border);
-  flex-shrink: 0;
-}
-.sidebar-logo {
-  width: 32px; height: 32px; border-radius: 9px;
-  background: linear-gradient(135deg, #1ea8f3 0%, #0b8fd9 100%);
-  display: flex; align-items: center; justify-content: center;
-  box-shadow: 0 0 0 1px rgba(30,168,243,0.3), 0 8px 24px -8px rgba(30,168,243,0.5);
-  flex-shrink: 0;
-}
-.sidebar-brand-text { display: flex; flex-direction: column; }
-.sidebar-brand-name { font-size: 14px; font-weight: 700; letter-spacing: -0.01em; color: var(--foreground); line-height: 1.2; }
-.sidebar-brand-name span { color: var(--ds-blue); }
-.sidebar-brand-sub { font-size: 10px; color: var(--muted-foreground); letter-spacing: 0.06em; text-transform: uppercase; margin-top: 1px; }
-.sidebar-quickadd { padding: 12px 12px 6px; flex-shrink: 0; }
-.sidebar-nav { flex: 1; padding: 6px 10px 10px; display: flex; flex-direction: column; overflow-y: auto; }
-.sidebar-link {
-  display: flex; align-items: center; gap: 10px;
-  padding: 7px 10px 7px 10px;
-  border-radius: 8px; margin-bottom: 1px;
-  color: var(--ds-muted); font-size: 13.5px; font-weight: 500;
-  text-decoration: none;
-  border-left: 3px solid transparent;
-  transition: background 0.1s, color 0.1s;
-  cursor: pointer;
-}
-.sidebar-link:hover { color: var(--foreground); background: var(--ds-bg-3); }
-.sidebar-link.active {
-  color: var(--ds-blue-dark);
-  background: var(--ds-blue-bg);
-  font-weight: 600;
-  border-left-color: var(--ds-blue);
-}
-.sidebar-divider { height: 1px; background: var(--ds-border); margin: 7px 4px; flex-shrink: 0; }
-.sidebar-badge {
-  margin-left: auto; font-size: 10px; padding: 1.5px 5px; border-radius: 5px;
-  font-family: "Geist Mono", ui-monospace, monospace; font-variant-numeric: tabular-nums;
-  background: rgba(15,23,42,0.06); color: var(--muted-foreground);
-}
-.sidebar-badge.blue   { background: var(--ds-blue-bg);   color: var(--ds-blue-dark); }
-.sidebar-badge.warn   { background: var(--ds-amber-bg);  color: var(--ds-amber); }
-.sidebar-badge.bad    { background: var(--ds-red-bg);    color: var(--ds-red); }
-.sidebar-footer {
-  padding: 12px 14px; border-top: 1px solid var(--ds-border);
-  display: flex; align-items: center; gap: 10px; flex-shrink: 0;
-}
-.sidebar-avatar {
-  width: 30px; height: 30px; border-radius: 50%;
-  background: var(--ds-blue); color: #fff;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 11.5px; font-weight: 600; flex-shrink: 0;
-}
-.sidebar-user-info { flex: 1; min-width: 0; }
-.sidebar-user-name { font-size: 12.5px; font-weight: 500; color: var(--foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sidebar-user-email { font-size: 11px; color: var(--muted-foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sidebar-logout {
-  padding: 5px; border-radius: 6px; border: none; background: none;
-  color: var(--ds-muted-soft); cursor: pointer;
-  display: flex; align-items: center; justify-content: center;
-  transition: background 0.1s, color 0.1s; flex-shrink: 0;
-}
-.sidebar-logout:hover { background: var(--ds-bg-3); color: var(--foreground); }
-
-/* Collapse toggle — full-width rail button above the user footer. */
-.sidebar-collapse-btn {
-  display: flex; align-items: center; gap: 8px;
-  margin: 4px 10px 6px; padding: 7px 10px;
-  border: 1px solid var(--ds-border); border-radius: 8px; background: none;
-  color: var(--ds-muted); font-size: 12px; font-weight: 500; font-family: inherit;
-  cursor: pointer; flex-shrink: 0; transition: background 0.1s, color 0.1s;
-}
-.sidebar-collapse-btn:hover { background: var(--ds-bg-3); color: var(--foreground); }
-
-/* ── Collapsed rail (desktop only) ───────────────────────────────────────── */
-@media (min-width: 901px) {
-  .sidebar { transition: width 0.18s ease; }
-  .sidebar.collapsed { width: 64px; }
-  .sidebar.collapsed .sidebar-link {
-    justify-content: center; gap: 0;
-    padding-left: 0; padding-right: 0;
-    border-left-color: transparent;
-  }
-  .sidebar.collapsed .sidebar-collapse-btn { justify-content: center; padding-left: 0; padding-right: 0; }
-}
-
-/* ── Mobile + tablet-portrait drawer + responsive shell (≤900px) ──────────── */
-
-/* Backdrop behind the drawer; only rendered on mobile when the menu is open. */
-.app-backdrop {
-  position: fixed; inset: 0; z-index: 90;
-  background: rgba(15, 23, 42, 0.45);
-}
-
-/* Hamburger button — hidden on desktop, shown on mobile via the media query. */
-.menu-btn {
-  display: none;
-  width: 38px; height: 38px; align-items: center; justify-content: center;
-  background: var(--ds-bg); border: 1px solid var(--ds-border); border-radius: 8px;
-  color: var(--ds-t2); cursor: pointer; flex-shrink: 0; margin-right: 10px;
-}
-
-.mobile-only { display: none; }
-
-/* Horizontal-scroll wrapper for tables that can't fully restructure on mobile. */
-.mobile-scroll-x { overflow-x: visible; }
+/* ── Phone layout for the legacy pages (≤900px) ───────────────────────────── */
 
 @media (max-width: 900px) {
-  .menu-btn { display: flex; }
-  .mobile-only { display: revert; }
-  .desktop-only { display: none !important; }
-
-  /* Sidebar becomes an off-canvas drawer that overlays content. */
-  .sidebar {
-    position: fixed; top: 0; bottom: 0; left: 0;
-    width: 270px; max-width: 84vw; z-index: 100;
-    transform: translateX(-100%);
-    transition: transform 0.22s ease;
-    box-shadow: 8px 0 28px rgba(0, 0, 0, 0.18);
-  }
-  .sidebar.open { transform: translateX(0); }
-
-  /* Collapse is a desktop affordance; the mobile drawer always shows full labels. */
-  .sidebar-collapse-btn { display: none; }
-
-  .topbar { height: 56px; padding: 0 12px; }
-
-  /*
-   * Let the page scroll, in both directions.
-   *
-   * .page-content is overflow:hidden on a desktop because each page manages its own
-   * scrolling inside a fixed-height shell. On a phone that meant anything wider than the
-   * screen — which is most of a settlement table — was simply clipped, with no way to
-   * reach it. An admin opening owner-operator settlements on their phone could see the
-   * first two columns of a nineteen-column table and nothing else.
-   */
-  .page-content { overflow: auto; -webkit-overflow-scrolling: touch; }
-
-  /* Let long tables scroll sideways instead of truncating. */
-  .mobile-scroll-x { overflow-x: auto; -webkit-overflow-scrolling: touch; }
-
   /*
    * A table is the one thing allowed to be wider than the phone, and only inside its own
    * scroller — so the page itself never scrolls sideways under a reader's thumb while
@@ -524,10 +74,10 @@ body {
    * Page chrome is laid out for a 1440px desktop in inline styles, which no stylesheet can
    * override. What it can do is stop that chrome forcing a minimum width on the phone.
    */
-  .app-main, .page-content > * { min-width: 0; }
+  .tms-legacy-host > * { min-width: 0; }
 
   /* Comfortable tap targets. */
-  button, .sidebar-link, a[role="button"] { min-height: 40px; }
+  .tms-legacy-host button, .tms-legacy-host a[role="button"] { min-height: 40px; }
 
   /*
    * ── Inline layout, made to fit a phone ──────────────────────────────────
@@ -596,7 +146,7 @@ body {
 }
 
 /* Maintenance tasks table — row hover + pulsing overdue KPI dot */
-.maint-row:hover td { background: rgba(15, 23, 42, 0.025); }
+.maint-row:hover td { background: var(--tms-surface-hover); }
 @keyframes ds-dot-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.45; }

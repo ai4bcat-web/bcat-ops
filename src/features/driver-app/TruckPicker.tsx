@@ -24,7 +24,7 @@ export function TruckPickerDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose() }}>
-      <DialogContent className="dark max-h-[85dvh] overflow-y-auto bg-background text-foreground sm:max-w-md">
+      <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Which truck are you in today?</DialogTitle>
         </DialogHeader>
@@ -90,7 +90,7 @@ function TruckList({ onClose, onPicked }: { onClose: () => void; onPicked?: () =
       <div className="flex flex-col gap-3">
         <p className="text-sm text-muted-foreground">Switch to this truck?</p>
         <p className="text-center text-5xl font-black tabular-nums text-foreground">{confirming.unitNumber}</p>
-        {confirming.holder && !confirming.yours && <p className="text-center text-sm text-amber-300">{confirming.holder} is in it now — they will be taken off it.</p>}
+        {confirming.holder && !confirming.yours && <p className="text-center text-sm text-[color:var(--tms-badge-orange)]">{confirming.holder} is in it now — they will be taken off it.</p>}
         <Button type="button" size="lg" className="h-14 w-full text-base font-bold" disabled={busy !== null} onClick={() => void pick(confirming)}>
           {busy === confirming.id ? <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" /> : `Yes, I'm in ${confirming.unitNumber}`}
         </Button>
@@ -124,7 +124,7 @@ function TruckList({ onClose, onPicked }: { onClose: () => void; onPicked?: () =
               onClick={() => setConfirming(t)}
               aria-label={`Truck ${t.unitNumber}${current ? ' (your current truck)' : ''}`}
               className={`flex w-full items-center gap-3 rounded-xl border p-3 text-left ${
-                current ? 'border-primary bg-primary/10' : 'border-border bg-card'
+                current ? 'border-primary bg-[color:var(--tms-primary-tint)]' : 'border-border bg-card'
               }`}
             >
               <Truck className="h-5 w-5 shrink-0 text-muted-foreground" aria-hidden="true" />
@@ -160,8 +160,8 @@ export function TruckLine() {
           <Button variant="outline" size="sm" className="h-9" onClick={() => setOpen(true)}>Change</Button>
         </div>
       ) : (
-        <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-amber-400/50 bg-amber-500/15 px-4 py-3">
-          <p className="text-sm font-semibold text-amber-100">Which truck are you in today?</p>
+        <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-[color:var(--tms-badge-orange)]/30 bg-[color:var(--tms-badge-orange-tint)] px-4 py-3">
+          <p className="text-sm font-semibold text-[color:var(--tms-badge-orange)]">Which truck are you in today?</p>
           <Button size="sm" className="h-9 font-bold" onClick={() => setOpen(true)}>Pick your truck</Button>
         </div>
       )}

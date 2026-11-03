@@ -13,7 +13,7 @@ import {
   type ApptNeedKind,
 } from '@/lib/apptQueue'
 import { apptHistory, type ApptHistoryEvent } from '@/lib/apptHistory'
-import { statusLabel, defaultRequestedFor, STATUS_META, canSetChangeNeeded, canMarkRequested, changeNeededPatch, type EffectiveApptStatus, type ApptWorkflowStatus } from '@/lib/apptStatus'
+import { statusLabel, defaultRequestedFor, STATUS_META, STATUS_TONE_COLORS, canSetChangeNeeded, canMarkRequested, changeNeededPatch, type EffectiveApptStatus, type ApptWorkflowStatus } from '@/lib/apptStatus'
 import { requiresApptProofs } from '@/lib/apptQueue'
 import { ApptProofPanel } from '@/components/ApptProofPanel'
 import { loadProofCount } from '@/lib/apptProofs'
@@ -27,7 +27,7 @@ import { uploadApptProof, type ApptProofSlot } from '@/lib/apiClient'
 import { formatDateShort, chicagoDateStr, apptTimeLabel, PENDING_LABEL, formatDayHeader, fromDateInput, formatDateTime, formatDateTimeInput, fromDateTimeInput, apptHasTime } from '@/lib/date'
 import type { AuditLogEntry, Load, Stop } from '@/types'
 
-const RED = '#dc2626'
+const RED = 'var(--tms-badge-red)'
 
 /*
  * Whether this page is showing Batory only is a working preference, not data: it lives in
@@ -56,16 +56,16 @@ function writeBatoryOnly(on: boolean): void {
     // Nothing to do: the toggle still works for this session.
   }
 }
-const AMBER = '#b45309'
-const GREEN = '#15803d'
+const AMBER = 'var(--tms-badge-orange)'
+const GREEN = 'var(--tms-badge-green)'
 
 const th: React.CSSProperties = {
-  padding: '9px 12px', fontSize: 11.5, fontWeight: 600, color: 'var(--ds-t3)',
-  textAlign: 'left', whiteSpace: 'nowrap', borderBottom: '1px solid var(--ds-border)',
+  padding: '9px 12px', fontSize: 11.5, fontWeight: 600, color: 'var(--tms-muted)',
+  textAlign: 'left', whiteSpace: 'nowrap', borderBottom: '1px solid var(--tms-border)',
 }
 const td: React.CSSProperties = {
-  padding: '10px 12px', fontSize: 13, textAlign: 'left', color: 'var(--ds-t1)',
-  borderTop: '1px solid var(--ds-border)',
+  padding: '10px 12px', fontSize: 13, textAlign: 'left', color: 'var(--tms-text)',
+  borderTop: '1px solid var(--tms-border)',
 }
 
 /** Days until the appointment date; negative means it has already passed. */
@@ -80,11 +80,11 @@ function daysOut(appt: string): number | null {
 /** "Overdue" / "Today" / "in 3d" — the reason a row deserves attention now. */
 function Urgency({ appt }: { appt: string }) {
   const d = daysOut(appt)
-  if (d == null) return <span style={{ fontSize: 11.5, color: 'var(--ds-t3)' }}>no date</span>
+  if (d == null) return <span style={{ fontSize: 11.5, color: 'var(--tms-muted)' }}>no date</span>
   if (d < 0) return <span style={{ fontSize: 11.5, fontWeight: 700, color: RED }}>{-d}d overdue</span>
   if (d === 0) return <span style={{ fontSize: 11.5, fontWeight: 700, color: RED }}>today</span>
   if (d <= 2) return <span style={{ fontSize: 11.5, fontWeight: 600, color: AMBER }}>in {d}d</span>
-  return <span style={{ fontSize: 11.5, color: 'var(--ds-t3)' }}>in {d}d</span>
+  return <span style={{ fontSize: 11.5, color: 'var(--tms-muted)' }}>in {d}d</span>
 }
 
 /** "Wed, Aug 19" — a dispatcher scans by weekday, so lead with it. */
@@ -102,12 +102,7 @@ const STATUS_LABEL: Record<ApptNeedKind, string> = { need: 'NEED', pending: 'Pen
  * label still says which flavour of not. Amber Pending read as "sort of fine" and got
  * skipped over.
  */
-const TONE_STYLE = {
-  red:   { bg: 'var(--ds-red-soft)',            fg: RED },
-  amber: { bg: 'var(--ds-amber-soft)',          fg: AMBER },
-  blue:  { bg: 'var(--ds-blue-soft, #eff6ff)',  fg: '#0369a1' },
-  green: { bg: 'var(--ds-green-bg)',            fg: GREEN },
-} as const
+const TONE_STYLE = STATUS_TONE_COLORS
 
 /**
  * The workflow chip. Batory rides the ladder (NEED DENNIS / NEED RUBEN /
@@ -140,7 +135,7 @@ function KindChip({ kind, status, stopType }: { kind: ApptNeedKind | null; statu
       </span>
     )
   }
-  if (!kind) return <span data-state="booked" style={{ fontSize: 10.5, color: 'var(--ds-t3)' }}>—</span>
+  if (!kind) return <span data-state="booked" style={{ fontSize: 10.5, color: 'var(--tms-muted)' }}>—</span>
   const move = kind === 'move'
   return (
     <span
@@ -148,7 +143,7 @@ function KindChip({ kind, status, stopType }: { kind: ApptNeedKind | null; statu
       style={{
         display: 'inline-flex', alignItems: 'center', gap: 4,
         fontSize: 10.5, fontWeight: 700, padding: '2px 6px', borderRadius: 5, whiteSpace: 'nowrap',
-        background: move ? 'var(--ds-amber-soft)' : 'var(--ds-red-soft)', color: move ? AMBER : RED,
+        background: move ? 'var(--tms-badge-orange-tint)' : 'var(--tms-badge-red-tint)', color: move ? AMBER : RED,
       }}
     >
       <CircleAlert size={11} />
@@ -164,23 +159,23 @@ function KindChip({ kind, status, stopType }: { kind: ApptNeedKind | null; statu
 function HistoryRow({ events, colSpan }: { events: ApptHistoryEvent[]; colSpan: number }) {
   return (
     <tr data-testid="appt-history">
-      <td colSpan={colSpan} style={{ ...td, padding: '8px 12px 12px 40px', background: 'var(--ds-bg)' }}>
+      <td colSpan={colSpan} style={{ ...td, padding: '8px 12px 12px 40px', background: 'var(--tms-bg)' }}>
         {events.length === 0 ? (
-          <div style={{ fontSize: 12, color: 'var(--ds-t3)' }}>No appointment changes on record for this shipment.</div>
+          <div style={{ fontSize: 12, color: 'var(--tms-muted)' }}>No appointment changes on record for this shipment.</div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--ds-t3)', marginBottom: 2 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--tms-muted)', marginBottom: 2 }}>
               <Clock size={11} style={{ verticalAlign: 'middle', marginRight: 4 }} />Appointment history
             </div>
             {events.map((ev, i) => (
               <div key={i} style={{ display: 'flex', gap: 10, fontSize: 12, alignItems: 'baseline', flexWrap: 'wrap' }}>
-                <span style={{ color: 'var(--ds-t3)', fontVariantNumeric: 'tabular-nums', minWidth: 170 }}>{formatDateTime(ev.at)}</span>
-                <span style={{ fontWeight: 600, color: 'var(--ds-t2)', minWidth: 52, textTransform: 'capitalize' }}>{ev.stopKind}</span>
+                <span style={{ color: 'var(--tms-muted)', fontVariantNumeric: 'tabular-nums', minWidth: 170 }}>{formatDateTime(ev.at)}</span>
+                <span style={{ fontWeight: 600, color: 'var(--tms-text-2)', minWidth: 52, textTransform: 'capitalize' }}>{ev.stopKind}</span>
                 {ev.kind === 'appt' && (
                   <>
-                    <span style={{ color: 'var(--ds-t3)', textDecoration: 'line-through' }}>{ev.from}</span>
-                    <span style={{ color: 'var(--ds-t3)' }}>→</span>
-                    <span style={{ fontWeight: 600, color: ev.booked ? GREEN : ev.changed ? AMBER : 'var(--ds-t1)' }}>{ev.to}</span>
+                    <span style={{ color: 'var(--tms-muted)', textDecoration: 'line-through' }}>{ev.from}</span>
+                    <span style={{ color: 'var(--tms-muted)' }}>→</span>
+                    <span style={{ fontWeight: 600, color: ev.booked ? GREEN : ev.changed ? AMBER : 'var(--tms-text)' }}>{ev.to}</span>
                     {ev.booked && <span style={{ fontSize: 10.5, fontWeight: 700, color: GREEN }}>booked</span>}
                     {ev.changed && <span style={{ fontSize: 10.5, fontWeight: 700, color: AMBER }}>changed after booking</span>}
                     {ev.resolvedMove && <span style={{ fontSize: 10.5, fontWeight: 700, color: GREEN }}>move request resolved</span>}
@@ -190,7 +185,7 @@ function HistoryRow({ events, colSpan }: { events: ApptHistoryEvent[]; colSpan: 
                   <span style={{ fontWeight: 700, color: AMBER }}>⚠ move requested — appt was {ev.from}</span>
                 )}
                 {ev.kind === 'move-withdrawn' && (
-                  <span style={{ fontWeight: 600, color: 'var(--ds-t2)' }}>move request withdrawn (no change made)</span>
+                  <span style={{ fontWeight: 600, color: 'var(--tms-text-2)' }}>move request withdrawn (no change made)</span>
                 )}
                 {ev.kind === 'proof-added' && (
                   <span style={{ fontWeight: 600, color: GREEN }}>📎 {ev.proofLabel} screenshot added</span>
@@ -198,7 +193,7 @@ function HistoryRow({ events, colSpan }: { events: ApptHistoryEvent[]; colSpan: 
                 {ev.kind === 'proof-removed' && (
                   <span style={{ fontWeight: 600, color: RED }}>📎 {ev.proofLabel} screenshot removed</span>
                 )}
-                <span style={{ color: 'var(--ds-t3)' }}>by {ev.user || '—'}</span>
+                <span style={{ color: 'var(--tms-muted)' }}>by {ev.user || '—'}</span>
               </div>
             ))}
           </div>
@@ -431,7 +426,7 @@ function ApptTimeCell({ load, refr, apptField, typeField, kind, status, updateLo
   return (
     <td style={{ ...td, position: 'relative' }} onClick={(e) => e.stopPropagation()}>
       {(stop?.apptStatus === 'change_needed' || stop?.apptMoveRequested) && (
-        <div role="alert" style={{ fontSize: 10, fontWeight: 700, color: AMBER, background: 'var(--ds-amber-soft)',
+        <div role="alert" style={{ fontSize: 10, fontWeight: 700, color: AMBER, background: 'var(--tms-badge-orange-tint)',
           borderRadius: 4, padding: '1px 5px', marginBottom: 3, display: 'inline-block', whiteSpace: 'nowrap' }}>
           ⚠ CHANGE NEEDED{stop?.apptChangeTo ? ` → ${formatDateShort(stop.apptChangeTo)} ${new Date(stop.apptChangeTo).toLocaleTimeString('en-US', { timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit' })}` : ''}
         </div>
@@ -455,15 +450,15 @@ function ApptTimeCell({ load, refr, apptField, typeField, kind, status, updateLo
             onClick={(e) => e.stopPropagation()}
           >
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <span style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--ds-t1)' }}>
+              <span style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--tms-text)' }}>
                 {pendingTarget ? `→ ${STATUS_META[pendingTarget].label}` : status ? STATUS_META[status].label : 'Change status'}
               </span>
               <button
                 onClick={() => { setToggling(false); setPendingTarget(null) }}
-                style={{ background: 'none', border: 'none', padding: 2, cursor: 'pointer', color: 'var(--ds-t3)', display: 'inline-flex' }}
+                style={{ background: 'none', border: 'none', padding: 2, cursor: 'pointer', color: 'var(--tms-muted)', display: 'inline-flex' }}
               ><X size={13} /></button>
             </div>
-            <div style={{ fontSize: 10.5, color: 'var(--ds-t3)' }}>
+            <div style={{ fontSize: 10.5, color: 'var(--tms-muted)' }}>
               {refr.appt ? formatDateShort(refr.appt) : 'no date'} · {stop?.type === 'delivery' ? 'Delivery' : 'Pickup'}
             </div>
 
@@ -488,9 +483,9 @@ function ApptTimeCell({ load, refr, apptField, typeField, kind, status, updateLo
                       onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f && /^image\//.test(f.type)) void uploadForSlot(slot, f) }}
                       onClick={() => uploadFileRef.current?.click()}
                       style={{
-                        border: `1px dashed ${done ? GREEN : 'var(--ds-border)'}`, borderRadius: 8, minHeight: 48,
+                        border: `1px dashed ${done ? GREEN : 'var(--tms-border)'}`, borderRadius: 8, minHeight: 48,
                         display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-                        padding: 8, background: done ? 'var(--ds-green-bg)' : 'var(--ds-surface)',
+                        padding: 8, background: done ? 'var(--tms-badge-green-tint)' : 'var(--tms-card)',
                         cursor: done ? 'default' : 'pointer', flexDirection: 'column',
                       }}
                     >
@@ -499,13 +494,13 @@ function ApptTimeCell({ load, refr, apptField, typeField, kind, status, updateLo
                           <CheckCircle2 size={12} /> {label} uploaded
                         </span>
                       ) : uploadBusy ? (
-                        <span style={{ fontSize: 11, color: 'var(--ds-t3)' }}>Uploading…</span>
+                        <span style={{ fontSize: 11, color: 'var(--tms-muted)' }}>Uploading…</span>
                       ) : (
                         <>
-                          <ImagePlus size={14} style={{ color: 'var(--ds-t3)' }} />
-                          <span style={{ fontSize: 10.5, color: 'var(--ds-t3)', textAlign: 'center' }}>
+                          <ImagePlus size={14} style={{ color: 'var(--tms-muted)' }} />
+                          <span style={{ fontSize: 10.5, color: 'var(--tms-muted)', textAlign: 'center' }}>
                             Click + paste screenshot for {label}<br />
-                            <span style={{ color: 'var(--ds-blue)' }}>or browse JPG/PNG</span>
+                            <span style={{ color: 'var(--tms-primary)' }}>or browse JPG/PNG</span>
                           </span>
                         </>
                       )}
@@ -529,8 +524,8 @@ function ApptTimeCell({ load, refr, apptField, typeField, kind, status, updateLo
                     style={{
                       height: 28, padding: '0 12px', borderRadius: 6, fontSize: 11, fontWeight: 600, fontFamily: 'inherit',
                       cursor: saving ? 'default' : 'pointer', opacity: saving ? 0.6 : 1,
-                      border: `1px solid ${pendingTarget === 'confirmed' ? '#86efac' : '#fcd34d'}`,
-                      background: 'var(--ds-surface)',
+                      border: `1px solid ${pendingTarget === 'confirmed' ? 'var(--tms-badge-green)' : 'var(--tms-badge-orange)'}`,
+                      background: 'var(--tms-card)',
                       color: pendingTarget === 'confirmed' ? GREEN : AMBER,
                       display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 4,
                     }}
@@ -551,18 +546,18 @@ function ApptTimeCell({ load, refr, apptField, typeField, kind, status, updateLo
                 onDragOver={(e) => e.preventDefault()}
                 onDrop={(e) => { e.preventDefault(); void handleRatecon(e.dataTransfer.files[0]) }}
                 onClick={() => rateconFileRef.current?.click()}
-                style={{ border: '1px dashed var(--ds-border)', borderRadius: 8, minHeight: 56,
+                style={{ border: '1px dashed var(--tms-border)', borderRadius: 8, minHeight: 56,
                   display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-                  padding: 8, background: 'var(--ds-surface)', cursor: 'pointer', flexDirection: 'column' }}
+                  padding: 8, background: 'var(--tms-card)', cursor: 'pointer', flexDirection: 'column' }}
               >
                 {uploadBusy ? (
-                  <span style={{ fontSize: 11, color: 'var(--ds-t3)' }}>Uploading…</span>
+                  <span style={{ fontSize: 11, color: 'var(--tms-muted)' }}>Uploading…</span>
                 ) : (
                   <>
-                    <ImagePlus size={14} style={{ color: 'var(--ds-t3)' }} />
-                    <span style={{ fontSize: 10.5, color: 'var(--ds-t3)', textAlign: 'center' }}>
+                    <ImagePlus size={14} style={{ color: 'var(--tms-muted)' }} />
+                    <span style={{ fontSize: 10.5, color: 'var(--tms-muted)', textAlign: 'center' }}>
                       Upload the RATECON — the one document this shipment needs<br />
-                      <span style={{ color: 'var(--ds-blue)' }}>paste a screenshot, or browse PDF / JPG / PNG</span>
+                      <span style={{ color: 'var(--tms-primary)' }}>paste a screenshot, or browse PDF / JPG / PNG</span>
                     </span>
                   </>
                 )}
@@ -599,9 +594,9 @@ function ApptTimeCell({ load, refr, apptField, typeField, kind, status, updateLo
                         height: chipHeight, padding: '0 8px', borderRadius: 6, fontSize: 10.5, fontWeight: 600, fontFamily: 'inherit',
                         cursor: isCurrent || saving ? 'default' : 'pointer',
                         opacity: isCurrent ? 0.5 : saving ? 0.6 : 1,
-                        border: `1px solid ${needsUpload ? 'var(--ds-amber-soft)' : 'var(--ds-blue)'}`,
-                        background: isCurrent ? 'var(--ds-bg)' : 'var(--ds-surface)',
-                        color: isCurrent ? 'var(--ds-t3)' : 'var(--ds-t1)',
+                        border: `1px solid ${needsUpload ? 'var(--tms-badge-orange-tint)' : 'var(--tms-primary)'}`,
+                        background: isCurrent ? 'var(--tms-bg)' : 'var(--tms-card)',
+                        color: isCurrent ? 'var(--tms-muted)' : 'var(--tms-text)',
                         display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 4,
                         width: '100%',
                       }}
@@ -626,22 +621,22 @@ function ApptTimeCell({ load, refr, apptField, typeField, kind, status, updateLo
       </div>
       {status === 'need_book' ? (
         <div style={{ textAlign: 'left' }}>
-          <div style={{ fontSize: 11, color: 'var(--ds-t3)' }}>
+          <div style={{ fontSize: 11, color: 'var(--tms-muted)' }}>
             {refr.appt ? formatDateShort(refr.appt) : ''}
           </div>
-          <div style={{ fontSize: 12, color: 'var(--ds-t1)' }}>{displayLabel}</div>
-          <div style={{ fontSize: 10, color: 'var(--ds-t3)', marginTop: 2 }}>Awaiting Calendar time</div>
+          <div style={{ fontSize: 12, color: 'var(--tms-text)' }}>{displayLabel}</div>
+          <div style={{ fontSize: 10, color: 'var(--tms-muted)', marginTop: 2 }}>Awaiting Calendar time</div>
         </div>
       ) : (
         <button
           onClick={() => setEditing(true)}
           title="Set this time — same as editing it on the calendar"
           style={{ background: 'none', border: 'none', padding: 0, font: 'inherit', cursor: 'pointer',
-            color: unset ? 'var(--ds-t3)' : 'var(--ds-t1)', textAlign: 'left',
+            color: unset ? 'var(--tms-muted)' : 'var(--tms-text)', textAlign: 'left',
             textDecoration: 'underline', textDecorationStyle: 'dotted',
-            textUnderlineOffset: 3, textDecorationColor: 'var(--ds-border)' }}
+            textUnderlineOffset: 3, textDecorationColor: 'var(--tms-border)' }}
         >
-          <div style={{ fontSize: 11, color: 'var(--ds-t3)' }}>
+          <div style={{ fontSize: 11, color: 'var(--tms-muted)' }}>
             {refr.appt ? formatDateShort(refr.appt) : ''}
           </div>
           {displayLabel}
@@ -673,7 +668,7 @@ function SortHeader({ label, active, dir, onClick }: {
         aria-sort={active ? (dir === 'asc' ? 'ascending' : 'descending') : 'none'}
         style={{ display: 'inline-flex', alignItems: 'center', gap: 3, background: 'none',
           border: 'none', padding: 0, cursor: 'pointer', font: 'inherit',
-          color: active ? 'var(--ds-t1)' : 'var(--ds-t3)', fontWeight: active ? 700 : 600 }}
+          color: active ? 'var(--tms-text)' : 'var(--tms-muted)', fontWeight: active ? 700 : 600 }}
       >
         {label}
         {active && (dir === 'asc' ? <ChevronUp size={12} /> : <ChevronDown size={12} />)}
@@ -724,15 +719,15 @@ function Section({ title, hint, rows, drivers, loadsById, auditLog, updateLoad, 
     setOpenProofs((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n })
 
   return (
-    <div style={{ background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 12, boxShadow: 'var(--sh-sm)', overflow: 'hidden' }}>
-      <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--ds-border)', display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+    <div style={{ background: 'var(--tms-card)', border: '1px solid var(--tms-border)', borderRadius: 12, boxShadow: 'var(--tms-shadow)', overflow: 'hidden' }}>
+      <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--tms-border)', display: 'flex', alignItems: 'flex-start', gap: 12 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)' }}>{title}</span>
-            <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--ds-t3)' }}>{rows.length}</span>
+            <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--tms-text)' }}>{title}</span>
+            <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--tms-muted)' }}>{rows.length}</span>
             {needCount > 0 && (
               <span style={{ fontSize: 10.5, fontWeight: 700, padding: '2px 6px', borderRadius: 5,
-                background: 'var(--ds-red-soft)', color: RED }}>{needCount} NEED</span>
+                background: 'var(--tms-badge-red-tint)', color: RED }}>{needCount} NEED</span>
             )}
             {openCount > 0 && (
               <span style={{ fontSize: 10.5, fontWeight: 700, color: RED }}>{openCount} open</span>
@@ -741,7 +736,7 @@ function Section({ title, hint, rows, drivers, loadsById, auditLog, updateLoad, 
               <span style={{ fontSize: 10.5, fontWeight: 700, color: GREEN }}>{bookedCount} booked</span>
             )}
           </div>
-          <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 2 }}>{hint}</div>
+          <div style={{ fontSize: 12, color: 'var(--tms-muted)', marginTop: 2 }}>{hint}</div>
         </div>
         {canClear && rows.length > 0 && (
           <button
@@ -749,8 +744,8 @@ function Section({ title, hint, rows, drivers, loadsById, auditLog, updateLoad, 
             disabled={clearing}
             title="Clear this whole day from the queue — Ryne/Ruben only. Rows move under the past/cleared toggle."
             style={{ display: 'inline-flex', alignItems: 'center', gap: 5, flexShrink: 0,
-              padding: '5px 10px', borderRadius: 7, border: '1px solid #fca5a5',
-              background: 'var(--ds-surface)', color: '#dc2626', fontSize: 12, cursor: 'pointer',
+              padding: '5px 10px', borderRadius: 7, border: '1px solid var(--tms-badge-red)',
+              background: 'var(--tms-card)', color: 'var(--tms-badge-red)', fontSize: 12, cursor: 'pointer',
               fontFamily: 'inherit', opacity: clearing ? 0.6 : 1 }}
           >
             <Trash2 size={12} /> {clearing ? 'Clearing…' : 'Clear day'}
@@ -760,8 +755,8 @@ function Section({ title, hint, rows, drivers, loadsById, auditLog, updateLoad, 
           onClick={onExport}
           title="Download this day as CSV"
           style={{ display: 'inline-flex', alignItems: 'center', gap: 5, flexShrink: 0,
-            padding: '5px 10px', borderRadius: 7, border: '1px solid var(--ds-border)',
-            background: 'var(--ds-bg)', color: 'var(--ds-t2)', fontSize: 12, cursor: 'pointer',
+            padding: '5px 10px', borderRadius: 7, border: '1px solid var(--tms-border)',
+            background: 'var(--tms-bg)', color: 'var(--tms-text-2)', fontSize: 12, cursor: 'pointer',
             fontFamily: 'inherit' }}
         >
           <Download size={12} /> Export CSV
@@ -769,7 +764,7 @@ function Section({ title, hint, rows, drivers, loadsById, auditLog, updateLoad, 
       </div>
 
       {rows.length === 0 ? (
-        <div style={{ padding: '24px 18px', textAlign: 'center', fontSize: 12.5, color: 'var(--ds-t3)' }}>
+        <div style={{ padding: '24px 18px', textAlign: 'center', fontSize: 12.5, color: 'var(--tms-muted)' }}>
           No shipments in this group.
         </div>
       ) : (
@@ -812,7 +807,7 @@ function Section({ title, hint, rows, drivers, loadsById, auditLog, updateLoad, 
                       aria-expanded={showHistory}
                       title="Appointment history — every time this shipment's times were set or changed"
                       style={{ background: 'none', border: 'none', padding: 2, cursor: 'pointer',
-                        color: showHistory ? 'var(--ds-t1)' : 'var(--ds-t3)', display: 'inline-flex' }}
+                        color: showHistory ? 'var(--tms-text)' : 'var(--tms-muted)', display: 'inline-flex' }}
                     >
                       <History size={13} />
                     </button>
@@ -823,7 +818,7 @@ function Section({ title, hint, rows, drivers, loadsById, auditLog, updateLoad, 
                       aria-expanded={showProofs}
                       title={`Batory booking screenshots — request email, E2Open update + email confirmation per stop (${proofs.have}/${proofs.want})`}
                       style={{ background: 'none', border: 'none', padding: 2, cursor: 'pointer',
-                        color: proofs.have >= proofs.want && proofs.want > 0 ? GREEN : showProofs ? 'var(--ds-t1)' : 'var(--ds-t3)',
+                        color: proofs.have >= proofs.want && proofs.want > 0 ? GREEN : showProofs ? 'var(--tms-text)' : 'var(--tms-muted)',
                         display: 'inline-flex', alignItems: 'center', gap: 2, fontSize: 10, fontWeight: 700, fontFamily: 'inherit' }}
                     >
                       <Camera size={13} />{proofs.have > 0 ? `${proofs.have}/${proofs.want}` : ''}
@@ -849,12 +844,12 @@ function Section({ title, hint, rows, drivers, loadsById, auditLog, updateLoad, 
                     updateLoad={updateLoad}
                   />
                   <td style={{ ...td, fontVariantNumeric: 'tabular-nums' }}>{r.aljexId || '—'}</td>
-                  <td style={{ ...td, color: 'var(--ds-t2)' }}>{r.pickupNumber || '—'}</td>
-                  <td style={{ ...td, color: 'var(--ds-t2)' }}>{r.customer || '—'}</td>
-                  <td style={{ ...td, color: 'var(--ds-t2)' }}>
+                  <td style={{ ...td, color: 'var(--tms-text-2)' }}>{r.pickupNumber || '—'}</td>
+                  <td style={{ ...td, color: 'var(--tms-text-2)' }}>{r.customer || '—'}</td>
+                  <td style={{ ...td, color: 'var(--tms-text-2)' }}>
                     <div>{r.location || '—'}</div>
                     {r.deliveryLocation && r.deliveryLocation !== r.location && (
-                      <div style={{ fontSize: 11, color: 'var(--ds-t3)', marginTop: 1 }}>
+                      <div style={{ fontSize: 11, color: 'var(--tms-muted)', marginTop: 1 }}>
                         <Truck size={10} style={{ verticalAlign: 'middle', marginRight: 2 }} />
                         {r.deliveryLocation}
                       </div>
@@ -864,15 +859,15 @@ function Section({ title, hint, rows, drivers, loadsById, auditLog, updateLoad, 
                     <div>{r.appt ? formatDateShort(r.appt) : '—'}</div>
                     <Urgency appt={r.appt} />
                   </td>
-                  <td style={{ ...td, color: 'var(--ds-t2)' }}>
+                  <td style={{ ...td, color: 'var(--tms-text-2)' }}>
                     <div>{driverName(r.driverId)}</div>
                     {r.deliveryDriverId && r.deliveryDriverId !== r.driverId && (
-                      <div style={{ fontSize: 11, color: 'var(--ds-t3)', marginTop: 1 }}>
+                      <div style={{ fontSize: 11, color: 'var(--tms-muted)', marginTop: 1 }}>
                         Del: {driverName(r.deliveryDriverId)}
                       </div>
                     )}
                   </td>
-                  <td style={{ ...td, color: 'var(--ds-t3)', fontSize: 12, maxWidth: 200, whiteSpace: 'normal' }} title={r.notes || undefined}>
+                  <td style={{ ...td, color: 'var(--tms-muted)', fontSize: 12, maxWidth: 200, whiteSpace: 'normal' }} title={r.notes || undefined}>
                     {r.notes
                       ? <span style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{r.notes}</span>
                       : '—'}
@@ -886,7 +881,7 @@ function Section({ title, hint, rows, drivers, loadsById, auditLog, updateLoad, 
                   reproduce the bug for anyone who did not think to click.
                 */}
                 {r.extraStops.map((extra) => (
-                  <tr key={extra.stopId} style={{ background: 'var(--ds-bg)' }}>
+                  <tr key={extra.stopId} style={{ background: 'var(--tms-bg)' }}>
                     <td style={{ ...td, padding: '6px 4px 6px 28px' }} />
                     <ApptTimeCell
                       load={loadRec}
@@ -899,12 +894,12 @@ function Section({ title, hint, rows, drivers, loadsById, auditLog, updateLoad, 
                     />
                     <td
                       colSpan={COLUMNS.length - 1}
-                      style={{ ...td, color: 'var(--ds-t2)', fontSize: 12 }}
+                      style={{ ...td, color: 'var(--tms-text-2)', fontSize: 12 }}
                     >
                       <span style={{
                         display: 'inline-block', marginRight: 8, padding: '1px 6px', borderRadius: 999,
-                        background: 'var(--ds-surface)', border: '1px solid var(--ds-border)',
-                        fontSize: 10, fontWeight: 700, letterSpacing: '0.04em', color: 'var(--ds-t3)',
+                        background: 'var(--tms-card)', border: '1px solid var(--tms-border)',
+                        fontSize: 10, fontWeight: 700, letterSpacing: '0.04em', color: 'var(--tms-muted)',
                       }}>
                         {extra.type === 'pickup' ? 'EXTRA PICKUP' : 'EXTRA DROP'}
                       </span>
@@ -914,7 +909,7 @@ function Section({ title, hint, rows, drivers, loadsById, auditLog, updateLoad, 
                 ))}
                 {showProofs && batory && loadRec && (
                   <tr>
-                    <td colSpan={1 + COLUMNS.length} style={{ ...td, padding: '10px 12px 14px 40px', background: 'var(--ds-bg)' }} onClick={(e) => e.stopPropagation()}>
+                    <td colSpan={1 + COLUMNS.length} style={{ ...td, padding: '10px 12px 14px 40px', background: 'var(--tms-bg)' }} onClick={(e) => e.stopPropagation()}>
                       <ApptProofPanel load={loadRec} updateLoad={updateLoad} />
                     </td>
                   </tr>
@@ -1070,10 +1065,10 @@ export function ApptsPage() {
       <div style={{ maxWidth: 1400, margin: '0 auto', padding: isMobile ? '16px 12px' : '24px 32px', display: 'flex', flexDirection: 'column', gap: 16 }}>
         <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
           <div>
-            <h1 style={{ fontSize: 20, fontWeight: 600, letterSpacing: '-0.01em', color: 'var(--ds-t1)', margin: 0 }}>
+            <h1 style={{ fontSize: 20, fontWeight: 600, letterSpacing: '-0.01em', color: 'var(--tms-text)', margin: 0 }}>
               Appts
             </h1>
-            <p style={{ fontSize: 12.5, color: 'var(--ds-t3)', marginTop: 3 }}>
+            <p style={{ fontSize: 12.5, color: 'var(--tms-muted)', marginTop: 3 }}>
               One row per shipment — green when both appointments are booked, red when one is still open. Click the clock for its booking history.
             </p>
           </div>
@@ -1082,9 +1077,9 @@ export function ApptsPage() {
             onClick={() => setOnlyOpen((v) => !v)}
             aria-pressed={onlyOpen}
             style={{ height: 34, padding: '0 12px', borderRadius: 8, fontSize: 12.5, fontFamily: 'inherit', cursor: 'pointer',
-              border: `1px solid ${onlyOpen ? RED : 'var(--ds-border)'}`,
-              background: onlyOpen ? 'var(--ds-red-soft)' : 'var(--ds-bg)',
-              color: onlyOpen ? RED : 'var(--ds-t2)', fontWeight: onlyOpen ? 700 : 500, whiteSpace: 'nowrap' }}
+              border: `1px solid ${onlyOpen ? RED : 'var(--tms-border)'}`,
+              background: onlyOpen ? 'var(--tms-badge-red-tint)' : 'var(--tms-bg)',
+              color: onlyOpen ? RED : 'var(--tms-text-2)', fontWeight: onlyOpen ? 700 : 500, whiteSpace: 'nowrap' }}
           >
             {onlyOpen ? `Open only (${openTotal})` : `All shipments · ${openTotal} open`}
           </button>
@@ -1101,9 +1096,9 @@ export function ApptsPage() {
               ? 'Showing Batory shipments only — the ones this page books. Click to include every other customer.'
               : 'Showing every customer. Click to go back to Batory only.'}
             style={{ height: 34, padding: '0 12px', borderRadius: 8, fontSize: 12.5, fontFamily: 'inherit', cursor: 'pointer',
-              border: `1px solid ${batoryOnly ? 'var(--ds-border)' : 'var(--ds-blue)'}`,
-              background: batoryOnly ? 'var(--ds-bg)' : 'var(--ds-blue-soft)',
-              color: batoryOnly ? 'var(--ds-t2)' : 'var(--ds-blue)',
+              border: `1px solid ${batoryOnly ? 'var(--tms-border)' : 'var(--tms-primary)'}`,
+              background: batoryOnly ? 'var(--tms-bg)' : 'var(--tms-primary-tint)',
+              color: batoryOnly ? 'var(--tms-text-2)' : 'var(--tms-primary)',
               fontWeight: batoryOnly ? 500 : 700, whiteSpace: 'nowrap' }}
           >
             {batoryOnly
@@ -1111,14 +1106,14 @@ export function ApptsPage() {
               : 'All customers'}
           </button>
           <div style={{ position: 'relative', minWidth: 240 }}>
-            <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--ds-t3)', pointerEvents: 'none' }} />
+            <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--tms-muted)', pointerEvents: 'none' }} />
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Pro #, PU #, customer, location…"
               aria-label="Filter appointments"
               style={{ width: '100%', height: 34, padding: '0 10px 0 30px', borderRadius: 8,
-                border: '1px solid var(--ds-border)', background: 'var(--ds-bg)', color: 'var(--ds-t1)',
+                border: '1px solid var(--tms-border)', background: 'var(--tms-bg)', color: 'var(--tms-text)',
                 fontSize: 13, fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box' }}
             />
           </div>
@@ -1145,9 +1140,9 @@ export function ApptsPage() {
         ))}
 
         {sections.length === 0 && query.trim() === '' && (
-          <div style={{ background: 'var(--ds-surface)', border: '1px solid var(--ds-border)',
-            borderRadius: 12, boxShadow: 'var(--sh-sm)', padding: '28px 18px',
-            textAlign: 'center', fontSize: 12.5, color: 'var(--ds-t3)' }}>
+          <div style={{ background: 'var(--tms-card)', border: '1px solid var(--tms-border)',
+            borderRadius: 12, boxShadow: 'var(--tms-shadow)', padding: '28px 18px',
+            textAlign: 'center', fontSize: 12.5, color: 'var(--tms-muted)' }}>
             {onlyOpen
               ? 'Nothing open — every shipment is booked.'
               : batoryOnly && hiddenCount > 0
@@ -1163,7 +1158,7 @@ export function ApptsPage() {
             onClick={() => setShowPast((v) => !v)}
             style={{ alignSelf: 'center', display: 'inline-flex', alignItems: 'center', gap: 6,
               background: 'none', border: 'none', padding: '2px 0', cursor: 'pointer',
-              font: 'inherit', fontSize: 12.5, color: 'var(--ds-t3)' }}
+              font: 'inherit', fontSize: 12.5, color: 'var(--tms-muted)' }}
           >
             <History size={13} />
             {showPast
@@ -1175,7 +1170,7 @@ export function ApptsPage() {
         {canClearDays && (
           <label
             style={{ alignSelf: 'center', display: 'inline-flex', alignItems: 'center', gap: 6,
-              fontSize: 12.5, color: 'var(--ds-t3)', cursor: autoClearPast === null || savingAutoClear ? 'default' : 'pointer' }}
+              fontSize: 12.5, color: 'var(--tms-muted)', cursor: autoClearPast === null || savingAutoClear ? 'default' : 'pointer' }}
             title="Applies to everyone. Past days move under the past/cleared toggle — nothing is deleted, and turning this off brings them all back."
           >
             <input
@@ -1189,7 +1184,7 @@ export function ApptsPage() {
         )}
 
         {rows.length === 0 && query.trim() !== '' && (
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'center', padding: '8px 0', fontSize: 12.5, color: 'var(--ds-t3)' }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'center', padding: '8px 0', fontSize: 12.5, color: 'var(--tms-muted)' }}>
             <HelpCircle size={14} /> Nothing matches "{query}".
           </div>
         )}

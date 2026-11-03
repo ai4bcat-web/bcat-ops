@@ -15,7 +15,7 @@ export class CalendarErrorBoundary extends Component<Props, State> {
     if (this.state.error) {
       return (
         <div className="flex-1 flex flex-col items-center justify-center gap-4 p-8 text-center">
-          <div className="text-red-600 font-semibold text-lg">Calendar failed to load</div>
+          <div className="text-[color:var(--tms-badge-red)] font-semibold text-lg">Calendar failed to load</div>
           <pre className="text-xs text-left bg-muted p-4 rounded-md max-w-2xl overflow-auto text-destructive whitespace-pre-wrap border border-border">
             {this.state.error.message}
             {'\n\n'}

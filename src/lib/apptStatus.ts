@@ -2,6 +2,7 @@ import { requiresApptProofs } from './apptQueue'
 import { apptHasTime, formatDateInput, fromDateTimeInput } from './date'
 import { getStops } from './stops'
 import type { Load, Stop, ApptWorkflowStatus } from '@/types'
+import type { TmsTone } from '@/features/tms/kit/statusTone'
 
 /**
  * The Batory appointment workflow ladder, and the non-Batory ratecon rule.
@@ -122,11 +123,11 @@ export function changeNeededPatch(changeTo: string): Partial<Stop> {
 /** Tone → colors, shared by the Appts page and both calendar views so the SAME
  *  status renders identically everywhere. */
 export const STATUS_TONE_COLORS = {
-  red:   { bg: 'var(--ds-red-soft)',           fg: '#dc2626' },
-  amber: { bg: 'var(--ds-amber-soft)',         fg: '#b45309' },
-  blue:  { bg: 'var(--ds-blue-soft, #eff6ff)', fg: '#0369a1' },
-  green: { bg: 'var(--ds-green-bg)',           fg: '#15803d' },
-} as const
+  red:    { bg: 'var(--tms-badge-red-tint)',    fg: 'var(--tms-badge-red)' },
+  orange: { bg: 'var(--tms-badge-orange-tint)', fg: 'var(--tms-badge-orange)' },
+  blue:   { bg: 'var(--tms-badge-blue-tint)',   fg: 'var(--tms-badge-blue)' },
+  green:  { bg: 'var(--tms-badge-green-tint)',  fg: 'var(--tms-badge-green)' },
+} as const satisfies Partial<Record<TmsTone, { bg: string; fg: string }>>
 
 /**
  * The workflow status for one END of a load (first pickup / last delivery) — the same
@@ -146,14 +147,14 @@ export function statusLabel(status: EffectiveApptStatus, _stopType?: 'pickup' | 
   return STATUS_META[status].label
 }
 
-export const STATUS_META: Record<EffectiveApptStatus, { label: string; tone: 'red' | 'amber' | 'blue' | 'green' }> = {
+export const STATUS_META: Record<EffectiveApptStatus, { label: string; tone: Extract<TmsTone, 'red' | 'orange' | 'blue' | 'green'> }> = {
   // Pickups (from load build, 12:00 PM target) and deliveries once Ruben has picked
   // the time both land here — Dennis books every appointment.
   need_request:   { label: 'NEED DENNIS', tone: 'red' },
   // Deliveries enter here — Ruben must input the wanted time before Dennis can book.
   need_book:      { label: 'NEED RUBEN',   tone: 'red' },
-  requested:      { label: 'REQUESTED',       tone: 'amber' },
-  change_needed:  { label: 'CHANGE NEEDED',   tone: 'amber' },
+  requested:      { label: 'REQUESTED',       tone: 'orange' },
+  change_needed:  { label: 'CHANGE NEEDED',   tone: 'orange' },
   confirmed:      { label: 'CONFIRMED',       tone: 'green' },
   ratecon_needed: { label: 'RATECON NEEDED',  tone: 'blue' },
 }

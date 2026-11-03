@@ -12,6 +12,8 @@ export interface TmsDrawerProps {
   footer?: ReactNode
   size?: 'md' | 'lg' | 'xl'
   onInteractOutside?: (event: Event) => void
+  /** Stacking order of overlay and drawer (stacked panels: a driver file over a load). */
+  zIndex?: number
   className?: string
   children: ReactNode
 }
@@ -29,6 +31,7 @@ export function TmsDrawer({
   footer,
   size = 'lg',
   onInteractOutside,
+  zIndex,
   className,
   children,
 }: TmsDrawerProps) {
@@ -38,9 +41,13 @@ export function TmsDrawer({
   return (
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
       <DialogPrimitive.Portal>
-        <DialogPrimitive.Overlay className="tms-portal tms-dialog-overlay" />
+        <DialogPrimitive.Overlay
+          className="tms-portal tms-dialog-overlay"
+          style={zIndex === undefined ? undefined : { zIndex }}
+        />
         <DialogPrimitive.Content
           className={`tms-portal tms-drawer tms-drawer-${size}${className ? ` ${className}` : ''}`}
+          style={zIndex === undefined ? undefined : { zIndex }}
           onInteractOutside={onInteractOutside}
           onOpenAutoFocus={() => {
             opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null

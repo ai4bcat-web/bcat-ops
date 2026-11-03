@@ -41,7 +41,7 @@ export function InitialsAvatar({ name, colorKey, size = 30 }: { name: string; co
   const initials =
     (name || '').split(/\s+/).filter(Boolean).slice(0, 2).map((s) => s[0]?.toUpperCase() ?? '').join('') || '?'
   return (
-    <div style={{ width: size, height: size, borderRadius: '50%', background: getColor(colorKey).avatarBg, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: Math.round(size * 0.38), fontWeight: 600, flexShrink: 0 }}>
+    <div style={{ width: size, height: size, borderRadius: '50%', background: getColor(colorKey).avatarBg, color: 'var(--tms-on-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: Math.round(size * 0.38), fontWeight: 600, flexShrink: 0 }}>
       {initials}
     </div>
   )
@@ -49,13 +49,13 @@ export function InitialsAvatar({ name, colorKey, size = 30 }: { name: string; co
 
 export function ProgressBar({ value, max }: { value: number; max: number }) {
   const pct = max > 0 ? Math.round((value / max) * 100) : 0
-  const color = pct === 100 ? '#22c55e' : pct >= 60 ? '#1ea8f3' : '#f59e0b'
+  const color = pct === 100 ? 'var(--tms-badge-green)' : pct >= 60 ? 'var(--tms-primary)' : 'var(--tms-badge-orange)'
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-      <div style={{ flex: 1, height: 8, background: 'var(--ds-bg)', borderRadius: 999, overflow: 'hidden', border: '1px solid var(--ds-border)' }}>
+      <div style={{ flex: 1, height: 8, background: 'var(--tms-bg)', borderRadius: 999, overflow: 'hidden', border: '1px solid var(--tms-border)' }}>
         <div style={{ width: `${pct}%`, height: '100%', background: color, transition: 'width 200ms' }} />
       </div>
-      <span style={{ fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--ds-t2)', whiteSpace: 'nowrap' }}>
+      <span style={{ fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--tms-text-2)', whiteSpace: 'nowrap' }}>
         {value} / {max}
       </span>
     </div>
@@ -72,11 +72,11 @@ interface CardProps {
 
 export function Card({ title, sub, right, children, noPad = false }: CardProps) {
   return (
-    <div style={{ background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 12, boxShadow: 'var(--sh-sm)', overflow: 'hidden' }}>
-      <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--ds-border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+    <div style={{ background: 'var(--tms-card)', border: '1px solid var(--tms-border)', borderRadius: 12, boxShadow: 'var(--tms-shadow)', overflow: 'hidden' }}>
+      <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--tms-border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
         <div>
-          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)' }}>{title}</div>
-          {sub && <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 2 }}>{sub}</div>}
+          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--tms-text)' }}>{title}</div>
+          {sub && <div style={{ fontSize: 12, color: 'var(--tms-muted)', marginTop: 2 }}>{sub}</div>}
         </div>
         {right && <div style={{ flexShrink: 0 }}>{right}</div>}
       </div>
@@ -102,8 +102,8 @@ export function DocumentPreview({ s3Key }: { s3Key: string }) {
   }, [s3Key])
 
   if (key !== s3Key || !url) {
-    if (key === s3Key && error) return <div style={{ padding: 24, color: 'var(--ds-t3)', fontSize: 13 }}>Could not load preview.</div>
-    return <div style={{ padding: 24, color: 'var(--ds-t3)', fontSize: 13 }}>Loading preview…</div>
+    if (key === s3Key && error) return <div style={{ padding: 24, color: 'var(--tms-muted)', fontSize: 13 }}>Could not load preview.</div>
+    return <div style={{ padding: 24, color: 'var(--tms-muted)', fontSize: 13 }}>Loading preview…</div>
   }
 
   const isPdf = /\.pdf($|\?)/i.test(s3Key)

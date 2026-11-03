@@ -6,8 +6,7 @@
  * itself. Those are `OwnershipDivision` rows, not a hardcoded list: the sections come from
  * whatever divisions exist, and a division somebody adds in settings shows up here.
  *
- * Two sidebars render this one function: the legacy BCAT Ops rail (`NavBar`) and the
- * MVMNT `TmsShell` rail on `/tms/*`. The BROKERAGE section is the MVMNT page set
+ * The one `TmsShell` rail renders this function, on `/tms/*` and on the legacy pages alike. The BROKERAGE section is the MVMNT page set
  * (`TMS_ITEMS`); every other section is the existing nav config grouped by its `section`
  * code. A BROKERAGE page opens for anybody granted `tms` OR that page's original key, so
  * a broker is granted one thing rather than fifteen.
@@ -39,7 +38,7 @@ export interface NavItemDef {
   section: SectionKey
   /** Set on the `/tms/*` pages: they also open on the `tms` grant. */
   tms?: boolean
-  /** Which sidebar count this item carries, if any (`NavBar` resolves it). */
+  /** Which sidebar count this item carries, if any (`useShellBadgeCounts` resolves it). */
   badgeKey?: string
   /** A fixed label badge, e.g. Academy's BETA tag. */
   badge?: string | null
@@ -118,6 +117,16 @@ const SHIPMENT_WORKSTATIONS: Record<string, string> = {
   '/tms/check-calls': 'Check calls',
 }
 
+/** Legacy pages that are not nav items of their own (or whose trail differs from their item). */
+const LEGACY_CRUMBS: Array<{ path: string; prefix?: boolean; crumbs: TmsBreadcrumbItem[] }> = [
+  { path: '/finances/review', crumbs: [{ label: 'Finances', to: '/finances' }, { label: 'Profit review' }] },
+  { path: '/finance/cash-checkin', crumbs: [{ label: 'Cash check-in' }] },
+  { path: '/driver-view', prefix: true, crumbs: [{ label: 'Owner operator pay', to: '/owner-operator-pay' }, { label: 'Driver app' }] },
+  { path: '/truck-docs', crumbs: [{ label: 'Truck documents' }] },
+  { path: '/ivan-driver-app', crumbs: [{ label: 'Ivan driver app' }] },
+  { path: '/invoices', crumbs: [{ label: 'Invoices' }] },
+]
+
 /** `my-queue` reads `My queue`. */
 function titleCase(slug: string): string {
   const words = slug.replace(/[-_]+/g, ' ').trim()
@@ -147,13 +156,25 @@ export function tmsBreadcrumb(
   }
   if (pathname.startsWith(`${SHIPMENTS_PATH}/`)) return [shipments, { label: 'Shipment' }]
 
+  // Legacy (non-/tms) pages: pages that are not nav items get an explicit trail, every nav
+  // item answers to its own label, and nothing ever reads "TMS".
+  const isTms = pathname === '/tms' || pathname.startsWith('/tms/')
+  if (!isTms) {
+    const explicit = LEGACY_CRUMBS.find((c) => pathname === c.path || (c.prefix && pathname.startsWith(`${c.path}/`)))
+    if (explicit) return explicit.crumbs
+  }
+
   let best: NavItemDef | null = null
-  for (const item of ALL_TMS_ITEMS) {
+  for (const item of isTms ? ALL_TMS_ITEMS : ITEM_POOL) {
     if (pathname === item.to || pathname.startsWith(`${item.to}/`)) {
       if (!best || item.to.length > best.to.length) best = item
     }
   }
-  if (!best) return [{ label: 'TMS' }]
+  if (!best) {
+    if (isTms) return [{ label: 'TMS' }]
+    const first = pathname.split('/').filter(Boolean)[0]
+    return [{ label: first ? titleCase(first) : 'Home' }]
+  }
   if (pathname === best.to) return [{ label: best.label }]
   const segment = pathname.slice(best.to.length + 1).split('/')[0]
   return [{ label: best.label, to: best.to }, { label: /\d/.test(segment) ? 'Details' : titleCase(segment) }]

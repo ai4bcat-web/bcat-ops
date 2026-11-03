@@ -49,7 +49,7 @@ export function ReportIssue() {
           <Wrench className="h-4 w-4 text-primary" aria-hidden="true" />
           Truck issues{taskTruck ? ` · ${taskTruck.unitNumber}` : ''}
           {openTasks.length > 0 && (
-            <span className="rounded-full bg-amber-500/20 px-2 py-0.5 text-xs font-bold text-amber-200">{openTasks.length} open</span>
+            <span className="rounded-full bg-[color:var(--tms-badge-orange-tint)] px-2 py-0.5 text-xs font-bold text-[color:var(--tms-badge-orange)]">{openTasks.length} open</span>
           )}
         </p>
         <Button size="sm" className="h-9 font-bold" onClick={() => setOpen(true)}>Report a problem</Button>
@@ -59,8 +59,8 @@ export function ReportIssue() {
           {mine.slice(0, 5).map((t) => (
             <li key={t.id} className="flex items-start gap-2 text-sm">
               {t.status === 'complete'
-                ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" aria-hidden="true" />
-                : <AlertTriangle className={`mt-0.5 h-4 w-4 shrink-0 ${t.priority === 'high' ? 'text-red-300' : 'text-amber-300'}`} aria-hidden="true" />}
+                ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-[color:var(--tms-badge-green)]" aria-hidden="true" />
+                : <AlertTriangle className={`mt-0.5 h-4 w-4 shrink-0 ${t.priority === 'high' ? 'text-[color:var(--tms-badge-red)]' : 'text-[color:var(--tms-badge-orange)]'}`} aria-hidden="true" />}
               <span className="min-w-0 flex-1">
                 <span className={`block ${t.status === 'complete' ? 'text-muted-foreground line-through' : 'text-foreground'}`}>{t.title}</span>
                 <span className="block text-xs text-muted-foreground">
@@ -79,7 +79,7 @@ export function ReportIssue() {
 export function ReportIssueDialog({ open, onClose, onReported }: { open: boolean; onClose: () => void; onReported?: () => void }) {
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose() }}>
-      <DialogContent className="dark max-h-[90dvh] overflow-y-auto bg-background text-foreground sm:max-w-md">
+      <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-md">
         <DialogHeader>
           <DialogTitle>What's wrong with the truck?</DialogTitle>
         </DialogHeader>
@@ -113,7 +113,7 @@ function ReportForm({ onClose, onReported }: { onClose: () => void; onReported?:
   return (
     <div className="flex flex-col gap-4">
       {!truck && (
-        <p className="rounded-lg border border-amber-400/50 bg-amber-500/15 p-3 text-sm text-amber-100">
+        <p className="rounded-lg border border-[color:var(--tms-badge-orange)]/30 bg-[color:var(--tms-badge-orange-tint)] p-3 text-sm text-[color:var(--tms-badge-orange)]">
           Pick your truck first so the shop knows which unit this is about.
         </p>
       )}
@@ -136,7 +136,7 @@ function ReportForm({ onClose, onReported }: { onClose: () => void; onReported?:
               type="button"
               onClick={() => setPriority(p.id)}
               aria-pressed={priority === p.id}
-              className={`rounded-lg border p-3 text-left ${priority === p.id ? 'border-primary bg-primary/10' : 'border-border bg-card'}`}
+              className={`rounded-lg border p-3 text-left ${priority === p.id ? 'border-primary bg-[color:var(--tms-primary-tint)]' : 'border-border bg-card'}`}
             >
               <span className="block text-sm font-semibold text-foreground">{p.label}</span>
               <span className="block text-xs text-muted-foreground">{p.hint}</span>

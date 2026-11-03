@@ -473,7 +473,7 @@ export function OtrPanel({ item, onChanged }: Props) {
           <TmsButton
             size="sm"
             variant="ghost"
-            className="text-pink-700"
+            className="text-[color:var(--tms-badge-pink)]"
             disabled={busy !== null}
             title="OTR will not buy this broker's paper: flag it No Buy and bill the broker directly"
             onClick={() => run('manual', () => markManualInvoice(item.id, { reason: 'NO_BUY' }), 'Flagged No Buy — moved to Invoice manually')}

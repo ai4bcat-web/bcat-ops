@@ -97,10 +97,10 @@ function DateTimeInput({
 export function SectionHeading({ children }: { children: React.ReactNode }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-      <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--ds-t3)' }}>
+      <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--tms-muted)' }}>
         {children}
       </span>
-      <div style={{ flex: 1, height: 1, background: 'var(--ds-border)' }} />
+      <div style={{ flex: 1, height: 1, background: 'var(--tms-border)' }} />
     </div>
   )
 }
@@ -291,11 +291,11 @@ function DriverPicker({
         style={{
           width: '100%', height: 36, display: 'flex', alignItems: 'center',
           justifyContent: 'space-between', padding: '0 10px',
-          border: '1px solid var(--ds-border)', borderRadius: 6,
-          background: disabled ? 'var(--ds-bg)' : 'var(--ds-surface)',
+          border: '1px solid var(--tms-border)', borderRadius: 6,
+          background: disabled ? 'var(--tms-bg)' : 'var(--tms-card)',
           cursor: disabled ? 'not-allowed' : 'pointer',
           opacity: disabled ? 0.7 : 1,
-          fontSize: 14, color: selected ? 'var(--ds-t1)' : 'var(--ds-t3)',
+          fontSize: 14, color: selected ? 'var(--tms-text)' : 'var(--tms-muted)',
         }}
       >
         <span>{selected?.name ?? placeholder}</span>
@@ -304,17 +304,17 @@ function DriverPicker({
       {open && !disabled && (
         <div style={{
           position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, zIndex: 60,
-          background: 'var(--ds-surface)', border: '1px solid var(--ds-border)',
-          borderRadius: 8, boxShadow: 'var(--sh-lg)', overflow: 'hidden',
+          background: 'var(--tms-card)', border: '1px solid var(--tms-border)',
+          borderRadius: 8, boxShadow: 'var(--tms-shadow-pop)', overflow: 'hidden',
         }}>
           <button
             type="button"
             onClick={() => { onChange(null); setOpen(false) }}
             style={{
               width: '100%', padding: '8px 12px', textAlign: 'left',
-              fontSize: 13, color: 'var(--ds-t2)', background: 'transparent',
+              fontSize: 13, color: 'var(--tms-text-2)', background: 'transparent',
               cursor: 'pointer', border: 'none',
-              borderBottom: '1px solid var(--ds-border)',
+              borderBottom: '1px solid var(--tms-border)',
             }}
           >
             Unassigned
@@ -327,8 +327,8 @@ function DriverPicker({
               style={{
                 width: '100%', padding: '8px 12px', textAlign: 'left',
                 fontSize: 13, cursor: 'pointer', border: 'none',
-                background: value === d.id ? 'var(--ds-blue-bg)' : 'transparent',
-                color: value === d.id ? 'var(--ds-blue)' : 'var(--ds-t1)',
+                background: value === d.id ? 'var(--tms-primary-tint)' : 'transparent',
+                color: value === d.id ? 'var(--tms-primary)' : 'var(--tms-text)',
                 fontWeight: value === d.id ? 500 : 400,
               }}
             >
@@ -375,7 +375,7 @@ function StopCard({
     if (loc && !stopCity && loc.city) setValue(`stops.${index}.city`, [loc.city, loc.state].filter(Boolean).join(', '), { shouldDirty: true })
   }
   return (
-    <div style={{ border: '1px solid var(--ds-border)', borderRadius: 10, padding: 14, marginBottom: 12, background: 'var(--ds-surface)' }}>
+    <div style={{ border: '1px solid var(--tms-border)', borderRadius: 10, padding: 14, marginBottom: 12, background: 'var(--tms-card)' }}>
       {/* Header: type toggle + remove */}
       <div className="flex items-center justify-between gap-2" style={{ marginBottom: 12 }}>
         <Controller
@@ -620,7 +620,7 @@ export function LegStopsSection({
       <label
         style={{
           display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14,
-          fontSize: 12.5, color: 'var(--ds-t2)', cursor: 'pointer', userSelect: 'none',
+          fontSize: 12.5, color: 'var(--tms-text-2)', cursor: 'pointer', userSelect: 'none',
         }}
       >
         <input
@@ -721,8 +721,8 @@ export function ToggleCard({ active, onToggle, accent, tint, titleActive, titleI
       style={{
         width: '100%', padding: '14px 16px',
         borderRadius: 8, cursor: 'pointer', textAlign: 'left',
-        border: active ? `2px solid ${accent}` : '2px solid var(--ds-border)',
-        background: active ? tint : 'var(--ds-surface)',
+        border: active ? `2px solid ${accent}` : '2px solid var(--tms-border)',
+        background: active ? tint : 'var(--tms-card)',
         display: 'flex', alignItems: 'center', gap: 12,
         transition: 'border-color 0.15s, background 0.15s',
       }}
@@ -731,10 +731,10 @@ export function ToggleCard({ active, onToggle, accent, tint, titleActive, titleI
         {icon}
       </span>
       <div>
-        <div style={{ fontSize: 14, fontWeight: 600, color: active ? accent : 'var(--ds-t1)' }}>
+        <div style={{ fontSize: 14, fontWeight: 600, color: active ? accent : 'var(--tms-text)' }}>
           {active ? titleActive : titleIdle}
         </div>
-        <div style={{ fontSize: 12, color: active ? accent : 'var(--ds-t3)', marginTop: 2 }}>
+        <div style={{ fontSize: 12, color: active ? accent : 'var(--tms-muted)', marginTop: 2 }}>
           {active ? hintActive : hintIdle}
         </div>
       </div>
@@ -754,8 +754,8 @@ export function LegFlagToggles({ control }: { control: Control<LoadFormValues> }
             <ToggleCard
               active={!!field.value}
               onToggle={() => field.onChange(!field.value)}
-              accent="#b91c1c"
-              tint="#fef2f2"
+              accent="var(--tms-badge-red)"
+              tint="var(--tms-badge-red-tint)"
               icon="🔥"
               titleActive="Hot Load"
               titleIdle="Mark as Hot Load"
@@ -773,8 +773,8 @@ export function LegFlagToggles({ control }: { control: Control<LoadFormValues> }
             <ToggleCard
               active={!!field.value}
               onToggle={() => field.onChange(!field.value)}
-              accent="#b45309"
-              tint="#fffbeb"
+              accent="var(--tms-badge-orange)"
+              tint="var(--tms-badge-orange-tint)"
               icon="🗓️"
               titleActive="Unscheduled"
               titleIdle="Mark as Unscheduled"
@@ -796,7 +796,7 @@ export function RateField({ register }: { register: UseFormRegister<LoadFormValu
         <div style={{ position: 'relative' }}>
           <span style={{
             position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)',
-            fontSize: 14, color: 'var(--ds-t3)', pointerEvents: 'none',
+            fontSize: 14, color: 'var(--tms-muted)', pointerEvents: 'none',
           }}>$</span>
           <Input
             type="number"
@@ -823,8 +823,8 @@ export function NotesField({ register }: { register: UseFormRegister<LoadFormVal
         rows={2}
         style={{
           width: '100%', padding: '8px 10px', fontSize: 14,
-          border: '1px solid var(--ds-border)', borderRadius: 6,
-          background: 'var(--ds-surface)', color: 'var(--ds-t1)',
+          border: '1px solid var(--tms-border)', borderRadius: 6,
+          background: 'var(--tms-card)', color: 'var(--tms-text)',
           resize: 'vertical', fontFamily: 'inherit',
           outline: 'none', boxSizing: 'border-box',
         }}

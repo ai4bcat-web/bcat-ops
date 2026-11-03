@@ -222,19 +222,19 @@ export function PaperworkPage() {
         <>
           {/* What the week still owes, so a missed POD from Tuesday is not lost by Friday. */}
           {week.podsMissing > 0 && (
-            <p className="mb-3 text-sm font-semibold text-amber-200">
+            <p className="mb-3 text-sm font-semibold text-[color:var(--tms-badge-orange)]">
               {week.podsMissing} load{week.podsMissing === 1 ? '' : 's'} this week still need{week.podsMissing === 1 ? 's' : ''} a POD
               {week.podsIllegible > 0 ? ` · ${week.podsIllegible} cannot be read` : ''}
             </p>
           )}
           {week.podsMissing === 0 && week.podsIllegible > 0 && (
-            <p className="mb-3 text-sm font-semibold text-red-200">
+            <p className="mb-3 text-sm font-semibold text-[color:var(--tms-badge-red)]">
               {week.podsIllegible} POD{week.podsIllegible === 1 ? '' : 's'} this week cannot be read — please resend
             </p>
           )}
 
           {pendingWeek && (
-            <button type="button" onClick={applyPending} className="mb-3 flex w-full items-center gap-3 rounded-xl border border-primary bg-primary/15 p-4 text-left">
+            <button type="button" onClick={applyPending} className="mb-3 flex w-full items-center gap-3 rounded-xl border border-primary bg-[color:var(--tms-primary-tint)] p-4 text-left">
               <RefreshCcw className="h-5 w-5 shrink-0 text-primary" aria-hidden="true" />
               <span className="flex-1">
                 <span className="block text-base font-bold text-foreground">Your schedule changed</span>

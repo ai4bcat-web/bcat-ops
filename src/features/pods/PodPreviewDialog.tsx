@@ -118,7 +118,7 @@ export function PodPreviewDialog({ doc, onClose }: { doc: PodDocument; onClose: 
                 <button
                   onClick={() => handleDownload('enhanced', doc.fileName)}
                   disabled={downloading}
-                  className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md border text-xs font-semibold bg-emerald-50 text-emerald-700 border-emerald-200"
+                  className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md border text-xs font-semibold bg-[color:var(--tms-badge-green-tint)] text-[color:var(--tms-badge-green)] border-[color:var(--tms-badge-green)]"
                 >
                   <Download size={13} /> Download enhanced
                 </button>
@@ -138,31 +138,31 @@ export function PodPreviewDialog({ doc, onClose }: { doc: PodDocument; onClose: 
           </div>
 
           {canEnhance && variant === 'original' && (
-            <div className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            <div className="flex items-center gap-2 rounded-md border border-[color:var(--tms-badge-orange)] bg-[color:var(--tms-badge-orange-tint)] px-3 py-2 text-xs text-[color:var(--tms-badge-orange)]">
               <FileText size={14} />
               This is the raw phone photo, kept as a record of what arrived. Send the enhanced
               copy instead — it is the readable one.
             </div>
           )}
           {originalOnlyNote && (
-            <div className="text-xs text-sky-700 bg-sky-50 border border-sky-200 rounded-md px-3 py-2 flex items-center gap-2">
+            <div className="text-xs text-[color:var(--tms-primary-ink)] bg-[color:var(--tms-primary-tint)] border border-[color:var(--tms-primary)] rounded-md px-3 py-2 flex items-center gap-2">
               <FileText size={14} /> {originalOnlyNote}
             </div>
           )}
           {doc.scanReviewReason && (
-            <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+            <div className="text-xs text-[color:var(--tms-badge-orange)] bg-[color:var(--tms-badge-orange-tint)] border border-[color:var(--tms-badge-orange)] rounded-md px-3 py-2">
               Review scan: {doc.scanReviewReason} The original is retained for comparison.
             </div>
           )}
 
           {doc.processingStatus === 'PENDING' && (
-            <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2 flex items-center gap-2">
+            <div className="text-xs text-[color:var(--tms-badge-orange)] bg-[color:var(--tms-badge-orange-tint)] border border-[color:var(--tms-badge-orange)] rounded-md px-3 py-2 flex items-center gap-2">
               <Loader2 size={14} className="animate-spin" /> The cleaned image is being generated on the server.
             </div>
           )}
 
           {doc.processingError && (
-            <div className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2 flex items-center gap-2">
+            <div className="text-xs text-[color:var(--tms-badge-red)] bg-[color:var(--tms-badge-red-tint)] border border-[color:var(--tms-badge-red)] rounded-md px-3 py-2 flex items-center gap-2">
               <AlertCircle size={14} /> {doc.processingError}
             </div>
           )}
@@ -176,7 +176,7 @@ export function PodPreviewDialog({ doc, onClose }: { doc: PodDocument; onClose: 
                 <Loader2 size={18} className="animate-spin" /> Loading…
               </div>
             ) : assetsError ? (
-              <div className="text-sm text-red-600 py-12">{assetsError}</div>
+              <div className="text-sm text-[color:var(--tms-badge-red)] py-12">{assetsError}</div>
             ) : activeUrl && (variant === 'enhanced' || isBrowserImage) ? (
               <img
                 src={activeUrl}

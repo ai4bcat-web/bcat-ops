@@ -26,9 +26,9 @@ import { recordReplacementRequest, saveReview } from '@/lib/podReviewClient'
 import type { Driver, Load } from '@/types'
 
 function Verdict({ v }: { v: CheckVerdict | null | undefined }) {
-  if (v === 'PASS') return <span className="inline-flex items-center gap-1 text-green-700 text-xs font-semibold"><CheckCircle2 size={13} /> Looks right</span>
-  if (v === 'FAIL') return <span className="inline-flex items-center gap-1 text-red-700 text-xs font-semibold"><AlertTriangle size={13} /> Problem</span>
-  return <span className="inline-flex items-center gap-1 text-amber-700 text-xs font-semibold"><HelpCircle size={13} /> Can't tell</span>
+  if (v === 'PASS') return <span className="inline-flex items-center gap-1 text-[color:var(--tms-badge-green)] text-xs font-semibold"><CheckCircle2 size={13} /> Looks right</span>
+  if (v === 'FAIL') return <span className="inline-flex items-center gap-1 text-[color:var(--tms-badge-red)] text-xs font-semibold"><AlertTriangle size={13} /> Problem</span>
+  return <span className="inline-flex items-center gap-1 text-[color:var(--tms-badge-orange)] text-xs font-semibold"><HelpCircle size={13} /> Can't tell</span>
 }
 
 function CheckRow(props: {
@@ -39,13 +39,13 @@ function CheckRow(props: {
   children?: React.ReactNode
 }) {
   return (
-    <div style={{ border: '1px solid var(--ds-border)', borderRadius: 10, padding: '10px 12px', background: 'var(--ds-surface)' }}>
+    <div style={{ border: '1px solid var(--tms-border)', borderRadius: 10, padding: '10px 12px', background: 'var(--tms-card)' }}>
       <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
         <input type="checkbox" checked={props.checked} onChange={(e) => props.onChange(e.target.checked)} style={{ width: 16, height: 16 }} />
-        <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--ds-t1)', flex: 1 }}>{props.label}</span>
+        <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--tms-text)', flex: 1 }}>{props.label}</span>
         {props.verdict !== undefined && <Verdict v={props.verdict} />}
       </label>
-      {props.children && <div style={{ marginTop: 6, marginLeft: 26, fontSize: 12.5, color: 'var(--ds-t2)', lineHeight: 1.45 }}>{props.children}</div>}
+      {props.children && <div style={{ marginTop: 6, marginLeft: 26, fontSize: 12.5, color: 'var(--tms-text-2)', lineHeight: 1.45 }}>{props.children}</div>}
     </div>
   )
 }
@@ -287,7 +287,7 @@ export function PodReviewPanel(props: {
               </div>
               {check?.pages.notes && <div className="mt-1">{check.pages.notes}</div>}
               {check?.pages.statedTotal && check.pages.received < check.pages.statedTotal && (
-                <div className="mt-1 text-red-700 font-semibold">Missing {check.pages.statedTotal - check.pages.received} page(s).</div>
+                <div className="mt-1 text-[color:var(--tms-badge-red)] font-semibold">Missing {check.pages.statedTotal - check.pages.received} page(s).</div>
               )}
             </CheckRow>
 
@@ -299,7 +299,7 @@ export function PodReviewPanel(props: {
                   {pageLegibility.notes ? ` — ${pageLegibility.notes}` : ''}
                 </div>
               )}
-              {check && check.signed !== 'PASS' && <div className="mt-1 text-amber-700">Receiver signature: {check.signed === 'FAIL' ? 'not signed' : 'can’t tell'}</div>}
+              {check && check.signed !== 'PASS' && <div className="mt-1 text-[color:var(--tms-badge-orange)]">Receiver signature: {check.signed === 'FAIL' ? 'not signed' : 'can’t tell'}</div>}
             </CheckRow>
 
             <div>
@@ -324,11 +324,11 @@ export function PodReviewPanel(props: {
             {!asking ? (
               <div className="flex flex-wrap gap-2 pt-1">
                 <button onClick={approve} disabled={saving !== null} title={blocker ?? undefined}
-                  className="inline-flex items-center gap-2 h-9 px-4 rounded-md bg-green-700 text-white text-sm font-semibold disabled:opacity-50">
+                  className="inline-flex items-center gap-2 h-9 px-4 rounded-md bg-[color:var(--tms-badge-green)] text-[color:var(--tms-on-primary)] text-sm font-semibold disabled:opacity-50">
                   {saving === 'approve' ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />} Approve
                 </button>
                 <button onClick={() => { setMessage(defaultMessage); setAsking(true) }} disabled={saving !== null}
-                  className="inline-flex items-center gap-2 h-9 px-4 rounded-md border border-red-300 text-red-700 text-sm font-semibold disabled:opacity-50">
+                  className="inline-flex items-center gap-2 h-9 px-4 rounded-md border border-[color:var(--tms-badge-red)] text-[color:var(--tms-badge-red)] text-sm font-semibold disabled:opacity-50">
                   <AlertTriangle size={14} /> Request new POD
                 </button>
                 <button onClick={saveNoteOnly} disabled={saving !== null} className="inline-flex items-center gap-2 h-9 px-3 rounded-md border text-sm font-semibold disabled:opacity-50">
@@ -347,7 +347,7 @@ export function PodReviewPanel(props: {
                 <textarea value={message} onChange={(e) => setMessage(e.target.value)} rows={5} className="w-full rounded-md border px-3 py-2 text-sm bg-background" aria-label="Suggested message for dispatch" />
                 <div className="flex gap-2 flex-wrap">
                   <button onClick={requestNew} disabled={saving !== null}
-                    className="inline-flex items-center gap-2 h-9 px-4 rounded-md bg-red-700 text-white text-sm font-semibold disabled:opacity-50">
+                    className="inline-flex items-center gap-2 h-9 px-4 rounded-md bg-[color:var(--tms-badge-red)] text-[color:var(--tms-on-primary)] text-sm font-semibold disabled:opacity-50">
                     {saving === 'request' ? <Loader2 size={14} className="animate-spin" /> : <AlertTriangle size={14} />} Mark as needing a new POD
                   </button>
                   <button onClick={copyMessage} className="inline-flex items-center gap-1 h-9 px-3 rounded-md border text-sm"><Copy size={13} /> Copy message</button>

@@ -17,8 +17,8 @@ export function MediaThumb({ media, getUrl }: { media: DispatchMedia; getUrl: (k
   }, [media.key, getUrl])
 
   const isImage = media.contentType.startsWith('image/')
-  if (failed) return <span style={{ fontSize: 12, color: 'var(--ds-red)' }}>Could not load attachment</span>
-  if (!url) return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--ds-t3)' }}><Loader2 className="size-3.5 animate-spin" /> Loading…</span>
+  if (failed) return <span style={{ fontSize: 12, color: 'var(--tms-badge-red)' }}>Could not load attachment</span>
+  if (!url) return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--tms-muted)' }}><Loader2 className="size-3.5 animate-spin" /> Loading…</span>
   if (isImage) {
     return (
       <a href={url} target="_blank" rel="noreferrer" style={{ display: 'block' }}>
@@ -29,9 +29,9 @@ export function MediaThumb({ media, getUrl }: { media: DispatchMedia; getUrl: (k
   if (media.contentType === 'application/pdf') {
     // A real first-page preview; the click opens the full document.
     return (
-      <a href={url} target="_blank" rel="noreferrer" title="Open PDF" style={{ display: 'block', width: 200, borderRadius: 8, overflow: 'hidden', border: '1px solid var(--ds-border)', background: '#fff' }}>
+      <a href={url} target="_blank" rel="noreferrer" title="Open PDF" style={{ display: 'block', width: 200, borderRadius: 8, overflow: 'hidden', border: '1px solid var(--tms-border)', background: 'var(--tms-card)' }}>
         <iframe src={`${url}#toolbar=0&navpanes=0&scrollbar=0&view=FitH`} title="PDF preview" style={{ width: 200, height: 240, border: 'none', pointerEvents: 'none', display: 'block' }} />
-        <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, padding: '4px 8px', color: 'var(--ds-t2)', borderTop: '1px solid var(--ds-border)' }}><FileText className="size-3.5" /> {media.name ?? 'PDF'} · open</span>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, padding: '4px 8px', color: 'var(--tms-text-2)', borderTop: '1px solid var(--tms-border)' }}><FileText className="size-3.5" /> {media.name ?? 'PDF'} · open</span>
       </a>
     )
   }
@@ -49,12 +49,12 @@ export function PendingFilePreview({ file, onRemove }: { file: File; onRemove: (
   useEffect(() => () => URL.revokeObjectURL(url), [url])
   const isImage = file.type.startsWith('image/')
   return (
-    <span style={{ position: 'relative', display: 'inline-block', borderRadius: 8, overflow: 'hidden', border: '1px solid var(--ds-border)', background: 'var(--ds-bg-2)' }}>
+    <span style={{ position: 'relative', display: 'inline-block', borderRadius: 8, overflow: 'hidden', border: '1px solid var(--tms-border)', background: 'var(--tms-surface)' }}>
       {url && isImage ? <img src={url} alt={file.name} style={{ width: 72, height: 72, objectFit: 'cover', display: 'block' }} />
-        : url && file.type === 'application/pdf' ? <iframe src={`${url}#toolbar=0&navpanes=0&scrollbar=0&view=FitH`} title={file.name} style={{ width: 72, height: 72, border: 'none', pointerEvents: 'none', display: 'block', background: '#fff' }} />
+        : url && file.type === 'application/pdf' ? <iframe src={`${url}#toolbar=0&navpanes=0&scrollbar=0&view=FitH`} title={file.name} style={{ width: 72, height: 72, border: 'none', pointerEvents: 'none', display: 'block', background: 'var(--tms-card)' }} />
         : <span style={{ width: 72, height: 72, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><FileText className="size-5" /></span>}
-      <span title={file.name} style={{ display: 'block', fontSize: 10, padding: '2px 4px', maxWidth: 72, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--ds-t3)' }}>{file.name}</span>
-      <button type="button" aria-label={`Remove ${file.name}`} onClick={onRemove} style={{ position: 'absolute', top: 2, right: 2, width: 18, height: 18, borderRadius: 9, border: 'none', background: 'rgba(0,0,0,0.6)', color: '#fff', cursor: 'pointer', fontSize: 11, lineHeight: '18px', padding: 0 }}>×</button>
+      <span title={file.name} style={{ display: 'block', fontSize: 10, padding: '2px 4px', maxWidth: 72, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--tms-muted)' }}>{file.name}</span>
+      <button type="button" aria-label={`Remove ${file.name}`} onClick={onRemove} style={{ position: 'absolute', top: 2, right: 2, width: 18, height: 18, borderRadius: 9, border: 'none', background: 'var(--tms-tooltip-bg)', color: 'var(--tms-tooltip-ink)', cursor: 'pointer', fontSize: 11, lineHeight: '18px', padding: 0 }}>×</button>
     </span>
   )
 }
@@ -69,6 +69,6 @@ export function VoicemailPlayer({ recordingKey, getUrl }: { recordingKey: string
     p.then((u) => { if (alive) setUrl(u) }).catch(() => { urlCache.delete(recordingKey) })
     return () => { alive = false }
   }, [recordingKey, getUrl])
-  if (!url) return <span style={{ fontSize: 12, color: 'var(--ds-t3)' }}>Loading voicemail…</span>
+  if (!url) return <span style={{ fontSize: 12, color: 'var(--tms-muted)' }}>Loading voicemail…</span>
   return <audio controls preload="none" src={url} style={{ width: '100%', maxWidth: 320, height: 36 }} />
 }

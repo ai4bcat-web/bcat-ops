@@ -26,9 +26,9 @@ const VIEW_CONFIG: Record<ViewMode, { navDays: number }> = {
 }
 
 const STATUS_LEGEND = [
-  { label: 'Ready',       color: '#22c55e' },
-  { label: 'In Progress', color: '#1ea8f3' },
-  { label: 'Needs Action',color: '#f59e0b' },
+  { label: 'Ready',       color: 'var(--tms-primary)' },
+  { label: 'In Progress', color: 'var(--tms-primary)' },
+  { label: 'Needs Action',color: 'var(--tms-badge-orange)' },
 ]
 
 export function CalendarPage() {
@@ -196,14 +196,14 @@ export function CalendarPage() {
       {/* ── Page header ────────────────────────────────────────────────────── */}
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '14px 24px', borderBottom: '1px solid var(--ds-border)',
-        background: 'var(--ds-surface)', flexShrink: 0, gap: 16, flexWrap: 'wrap',
+        padding: '14px 24px', borderBottom: '1px solid var(--tms-border)',
+        background: 'var(--tms-card)', flexShrink: 0, gap: 16, flexWrap: 'wrap',
       }}>
         <div>
-          <h1 style={{ fontSize: 18, fontWeight: 600, letterSpacing: '-0.01em', color: 'var(--ds-t1)', margin: 0 }}>
+          <h1 style={{ fontSize: 18, fontWeight: 600, letterSpacing: '-0.01em', color: 'var(--tms-text)', margin: 0 }}>
             Calendar
           </h1>
-          <p style={{ fontSize: 12.5, color: 'var(--ds-t3)', marginTop: 2 }}>
+          <p style={{ fontSize: 12.5, color: 'var(--tms-muted)', marginTop: 2 }}>
             {dateLabel} · BCAT freight movements
           </p>
         </div>
@@ -211,14 +211,14 @@ export function CalendarPage() {
         {/* Status legend + availability button */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
           {STATUS_LEGEND.map(({ label, color }) => (
-            <span key={label} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--ds-t3)' }}>
+            <span key={label} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--tms-muted)' }}>
               <span style={{ width: 8, height: 8, background: color, borderRadius: 2, display: 'inline-block', flexShrink: 0 }} />
               {label}
             </span>
           ))}
           <button
             onClick={() => setShowAvailModal(true)}
-            style={{ height: 30, padding: '0 12px', borderRadius: 6, border: '1px solid var(--ds-border)', background: 'var(--ds-bg)', color: 'var(--ds-t2)', fontSize: 12, fontWeight: 500, cursor: 'pointer', flexShrink: 0 }}
+            style={{ height: 30, padding: '0 12px', borderRadius: 6, border: '1px solid var(--tms-border)', background: 'var(--tms-bg)', color: 'var(--tms-text-2)', fontSize: 12, fontWeight: 500, cursor: 'pointer', flexShrink: 0 }}
           >
             Driver Availability
           </button>
@@ -243,9 +243,9 @@ export function CalendarPage() {
         flex: 1, overflow: 'hidden',
         margin: '12px 16px 16px',
         borderRadius: 12,
-        border: '1px solid var(--ds-border)',
-        boxShadow: 'var(--sh-sm)',
-        background: 'var(--ds-surface)',
+        border: '1px solid var(--tms-border)',
+        boxShadow: 'var(--tms-shadow)',
+        background: 'var(--tms-card)',
       }}>
         <CalendarErrorBoundary>
           {/* Mobile uses the SAME day/week/month views as desktop (they scroll

@@ -15,10 +15,10 @@ import { cn } from '@/lib/utils'
 // ── Appointment type badge ─────────────────────────────────────────────────────
 
 const APPT_TYPE_CONFIG: Record<string, { label: string; cls: string }> = {
-  exact: { label: 'APPT',  cls: 'bg-blue-50 text-blue-600 border-blue-200' },
-  fcfs:  { label: 'FCFS',  cls: 'bg-amber-50 text-amber-700 border-amber-200' },
-  tbd:   { label: 'NEED',  cls: 'bg-slate-100 text-slate-500 border-slate-200' },
-  range: { label: 'RANGE', cls: 'bg-violet-50 text-violet-600 border-violet-200' },
+  exact: { label: 'APPT',  cls: 'bg-[color:var(--tms-badge-blue-tint)] text-[color:var(--tms-badge-blue)] border-[color:var(--tms-badge-blue)]' },
+  fcfs:  { label: 'FCFS',  cls: 'bg-[color:var(--tms-badge-orange-tint)] text-[color:var(--tms-badge-orange)] border-[color:var(--tms-badge-orange)]' },
+  tbd:   { label: 'NEED',  cls: 'bg-muted text-muted-foreground border-border' },
+  range: { label: 'RANGE', cls: 'bg-[color:var(--tms-badge-purple-tint)] text-[color:var(--tms-badge-purple)] border-[color:var(--tms-badge-purple)]' },
 }
 
 function ApptBadge({ type }: { type?: string }) {
@@ -95,11 +95,11 @@ function CompactCard({ load, drivers, conflictIds, slotLabel, isContinuation, fr
   const color         = load.colorKey ? getColor(load.colorKey) : UNASSIGNED_COLOR
   const deliveryColor = deliveryDriver?.colorKey ? getColor(deliveryDriver.colorKey) : UNASSIGNED_COLOR
 
-  const borderColor = isConflict ? '#ef4444' : isRTI ? '#15803d' : color.border
+  const borderColor = isConflict ? 'var(--tms-badge-red)' : isRTI ? 'var(--tms-primary-ink)' : color.border
   const bgColor     = isContinuation
-    ? 'rgba(0,0,0,0.015)'
-    : isConflict ? 'rgba(239,68,68,0.06)' : isRTI ? '#22c55e' : color.bg
-  const textColor   = isRTI ? '#fff' : color.text
+    ? 'color-mix(in srgb, var(--tms-text) 2%, transparent)'
+    : isConflict ? 'var(--tms-badge-red-tint)' : isRTI ? 'var(--tms-primary)' : color.bg
+  const textColor   = isRTI ? 'var(--tms-on-primary)' : color.text
 
   const puApptIso = legMode ? fromStop!.appt : load.pickupAppt
   const deApptIso = legMode ? toStop!.appt   : load.deliveryAppt
@@ -111,8 +111,8 @@ function CompactCard({ load, drivers, conflictIds, slotLabel, isContinuation, fr
       className="h-full rounded border-2 border-l-2 px-1.5 py-1 cursor-pointer hover:brightness-105 hover:shadow-sm transition-all select-none flex flex-col justify-between"
       style={{
         borderColor:     isContinuation
-          ? 'rgba(0,0,0,0.07)'
-          : isConflict ? 'rgba(239,68,68,0.3)' : isRTI ? '#15803d' : '#111827',
+          ? 'color-mix(in srgb, var(--tms-text) 7%, transparent)'
+          : isConflict ? 'color-mix(in srgb, var(--tms-badge-red) 30%, transparent)' : isRTI ? 'var(--tms-primary-ink)' : 'var(--tms-text)',
         borderLeftColor: borderColor,
         backgroundColor: bgColor,
         opacity: isContinuation ? 0.72 : 1,
@@ -123,12 +123,12 @@ function CompactCard({ load, drivers, conflictIds, slotLabel, isContinuation, fr
       <div className="flex items-start gap-1 min-w-0">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1 min-w-0">
-            {isContinuation && <ArrowRight className="size-2.5 text-slate-300 shrink-0" />}
+            {isContinuation && <ArrowRight className="size-2.5 text-[color:var(--tms-disabled)] shrink-0" />}
             {load.hot && <span className="shrink-0 text-[10px] leading-none" title="Hot load">🔥</span>}
             <span className="flex-1 text-[11px] font-bold truncate leading-none" style={{ color: textColor }}>
-              {load.aljexId || <em className="text-amber-600 not-italic font-semibold">Build</em>}
+              {load.aljexId || <em className="text-[color:var(--tms-badge-orange)] not-italic font-semibold">Build</em>}
             </span>
-            {isRTI && <CheckCircle2 className="size-2.5 shrink-0" style={{ color: '#fff' }} />}
+            {isRTI && <CheckCircle2 className="size-2.5 shrink-0" style={{ color: 'var(--tms-on-primary)' }} />}
           </div>
         </div>
 
@@ -138,7 +138,7 @@ function CompactCard({ load, drivers, conflictIds, slotLabel, isContinuation, fr
             className="text-[9px] font-black rounded-full flex items-center justify-center leading-none"
             style={{
               background: borderColor,
-              color: '#fff',
+              color: 'var(--tms-on-primary)',
               minWidth: '14px',
               minHeight: '14px',
               padding: '0 2px',
@@ -160,7 +160,7 @@ function CompactCard({ load, drivers, conflictIds, slotLabel, isContinuation, fr
                   initials={initials(pickupDriverName)}
                   size="xs"
                   className="shrink-0"
-                  style={{ background: borderColor, color: '#fff' }}
+                  style={{ background: borderColor, color: 'var(--tms-on-primary)' }}
                 />
                 {isSplit && deliveryDriver && (
                   <Avatar
@@ -168,13 +168,13 @@ function CompactCard({ load, drivers, conflictIds, slotLabel, isContinuation, fr
                     initials={initials(deliveryDriverName)}
                     size="xs"
                     className="shrink-0 -ml-1"
-                    style={{ background: deliveryColor.border, color: '#fff' }}
+                    style={{ background: deliveryColor.border, color: 'var(--tms-on-primary)' }}
                   />
                 )}
               </div>
             ) : (
               <button
-                className="text-[9px] font-semibold text-amber-500 underline underline-offset-1 hover:text-amber-600 leading-none"
+                className="text-[9px] font-semibold text-[color:var(--tms-badge-orange)] underline underline-offset-1 hover:text-[color:var(--tms-badge-orange)] leading-none"
                 onClick={(e) => { e.stopPropagation(); setPickingDriver(true) }}
               >
                 Unassgnd
@@ -183,22 +183,22 @@ function CompactCard({ load, drivers, conflictIds, slotLabel, isContinuation, fr
 
             {/* Driver picker dropdown */}
             {pickingDriver && (
-              <div style={{ position: 'absolute', right: 0, top: '100%', marginTop: 4, zIndex: 50, background: 'var(--ds-surface)', borderRadius: 8, boxShadow: 'var(--sh-lg)', border: '1px solid var(--ds-border)', padding: '4px 0', minWidth: 150, maxHeight: 208, overflowY: 'auto' }}>
+              <div style={{ position: 'absolute', right: 0, top: '100%', marginTop: 4, zIndex: 50, background: 'var(--tms-card)', borderRadius: 8, boxShadow: 'var(--tms-shadow-pop)', border: '1px solid var(--tms-border)', padding: '4px 0', minWidth: 150, maxHeight: 208, overflowY: 'auto' }}>
                 <button
-                  className="w-full text-left px-3 py-1.5 text-[11px] text-slate-500 hover:bg-slate-50 flex items-center gap-2"
+                  className="w-full text-left px-3 py-1.5 text-[11px] text-muted-foreground hover:bg-muted flex items-center gap-2"
                   onClick={(e) => { e.stopPropagation(); assignDriver(null) }}
                 >
-                  <span className="size-5 rounded-full bg-amber-100 border border-amber-300 flex items-center justify-center text-[9px] font-bold text-amber-500 shrink-0">?</span>
+                  <span className="size-5 rounded-full bg-[color:var(--tms-badge-orange-tint)] border border-[color:var(--tms-badge-orange)] flex items-center justify-center text-[9px] font-bold text-[color:var(--tms-badge-orange)] shrink-0">?</span>
                   Unassigned
                 </button>
-                <div className="border-t border-slate-100 my-0.5" />
+                <div className="border-t border-border my-0.5" />
                 {activeDrivers.map((d) => {
                   const dc = d.colorKey ? getColor(d.colorKey) : UNASSIGNED_COLOR
                   const isCurrent = d.id === legDriverId
                   return (
                     <button
                       key={d.id}
-                      className={cn('w-full text-left px-3 py-1.5 text-[11px] hover:bg-slate-50 flex items-center gap-2', isCurrent && 'font-semibold')}
+                      className={cn('w-full text-left px-3 py-1.5 text-[11px] hover:bg-muted flex items-center gap-2', isCurrent && 'font-semibold')}
                       onClick={(e) => { e.stopPropagation(); assignDriver(d.id) }}
                     >
                       <span
@@ -208,7 +208,7 @@ function CompactCard({ load, drivers, conflictIds, slotLabel, isContinuation, fr
                         {initials(d.name)}
                       </span>
                       {d.name}
-                      {isCurrent && <span className="ml-auto text-slate-400">✓</span>}
+                      {isCurrent && <span className="ml-auto text-muted-foreground">✓</span>}
                     </button>
                   )
                 })}
@@ -222,17 +222,17 @@ function CompactCard({ load, drivers, conflictIds, slotLabel, isContinuation, fr
       <div className="flex items-center gap-0.5 min-w-0 mt-0.5 flex-wrap">
         {isContinuation ? (
           <>
-            <span className="text-[9px] text-slate-400 shrink-0 leading-none">DE:</span>
+            <span className="text-[9px] text-muted-foreground shrink-0 leading-none">DE:</span>
             <ApptBadge type={deApptType ?? 'exact'} />
-            <span className="text-[9px] tabular-nums text-slate-500 shrink-0 leading-none">{deTime}</span>
+            <span className="text-[9px] tabular-nums text-muted-foreground shrink-0 leading-none">{deTime}</span>
           </>
         ) : (
           <>
             <ApptBadge type={puApptType ?? 'exact'} />
-            <span className="text-[9px] tabular-nums text-slate-500 leading-none">{puTime}</span>
-            <ArrowRight className="size-2 shrink-0 text-slate-300" />
+            <span className="text-[9px] tabular-nums text-muted-foreground leading-none">{puTime}</span>
+            <ArrowRight className="size-2 shrink-0 text-[color:var(--tms-disabled)]" />
             <ApptBadge type={deApptType ?? 'exact'} />
-            <span className="text-[9px] tabular-nums text-slate-500 leading-none">{deTime}</span>
+            <span className="text-[9px] tabular-nums text-muted-foreground leading-none">{deTime}</span>
           </>
         )}
       </div>
@@ -240,9 +240,9 @@ function CompactCard({ load, drivers, conflictIds, slotLabel, isContinuation, fr
       {/* Row 3: origin → destination */}
       {(originCity || destCity) && (
         <div className="flex items-center gap-0.5 min-w-0 mt-0.5">
-          <span className="text-[9px] text-slate-400 truncate leading-none">{originCity || '—'}</span>
-          <ArrowRight className="size-2 shrink-0 text-slate-300" />
-          <span className="text-[9px] text-slate-400 truncate leading-none">{destCity || '—'}</span>
+          <span className="text-[9px] text-muted-foreground truncate leading-none">{originCity || '—'}</span>
+          <ArrowRight className="size-2 shrink-0 text-[color:var(--tms-disabled)]" />
+          <span className="text-[9px] text-muted-foreground truncate leading-none">{destCity || '—'}</span>
         </div>
       )}
     </div>
@@ -256,7 +256,7 @@ function CompactCard({ load, drivers, conflictIds, slotLabel, isContinuation, fr
         <div className="h-full">{card}</div>
       </TooltipTrigger>
       <TooltipContent side="bottom" className="max-w-[260px] text-xs p-3 space-y-1">
-        <div className="font-bold text-sm text-white">{load.aljexId || '(no ID)'}</div>
+        <div className="font-bold text-sm text-[color:var(--tms-on-primary)]">{load.aljexId || '(no ID)'}</div>
         <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs">
           <span className="text-muted-foreground">TMS/PO</span><span>{load.tmsId}</span>
           <span className="text-muted-foreground">PU#</span><span>{load.pickupNumber}</span>
@@ -284,7 +284,7 @@ function CompactCard({ load, drivers, conflictIds, slotLabel, isContinuation, fr
           {isRTI && (
             <>
               <span className="text-muted-foreground">RTI</span>
-              <span className="text-emerald-400 font-medium">Ready to Invoice</span>
+              <span className="text-[color:var(--tms-badge-green)] font-medium">Ready to Invoice</span>
             </>
           )}
         </div>
@@ -420,10 +420,10 @@ export function CompactWeekView({ loads, drivers, conflictIds, weekStart }: Comp
   const SLOT_HEIGHT = 72
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', background: 'var(--ds-surface)', borderRadius: 12 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', background: 'var(--tms-card)', borderRadius: 12 }}>
 
       {/* ── Sticky column headers ─────────────────────────────────────────── */}
-      <div className="grid shrink-0" style={{ gridTemplateColumns: 'repeat(7, 1fr)', borderBottom: '1px solid var(--ds-border)', position: 'sticky', top: 0, zIndex: 10 }}>
+      <div className="grid shrink-0" style={{ gridTemplateColumns: 'repeat(7, 1fr)', borderBottom: '1px solid var(--tms-border)', position: 'sticky', top: 0, zIndex: 10 }}>
         {days.map((day, colIdx) => {
           const { weekday, date } = formatDayHeader(day.toISOString())
           const isWeekend = colIdx >= 5
@@ -431,14 +431,14 @@ export function CompactWeekView({ loads, drivers, conflictIds, weekStart }: Comp
             <div
               key={colIdx}
               style={{
-                padding: '8px', borderRight: colIdx < 6 ? '1px solid var(--ds-border)' : 'none',
-                background: isWeekend ? 'var(--ds-bg)' : 'var(--ds-surface)',
+                padding: '8px', borderRight: colIdx < 6 ? '1px solid var(--tms-border)' : 'none',
+                background: isWeekend ? 'var(--tms-bg)' : 'var(--tms-card)',
               }}
             >
-              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--ds-t1)', textTransform: 'uppercase', letterSpacing: '0.05em', lineHeight: 1 }}>{weekday}</div>
-              <div style={{ fontSize: 10, color: 'var(--ds-t3)', fontVariantNumeric: 'tabular-nums', marginTop: 2 }}>{date}</div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--tms-text)', textTransform: 'uppercase', letterSpacing: '0.05em', lineHeight: 1 }}>{weekday}</div>
+              <div style={{ fontSize: 10, color: 'var(--tms-muted)', fontVariantNumeric: 'tabular-nums', marginTop: 2 }}>{date}</div>
               {primaryCounts[colIdx] > 0 && (
-                <div style={{ fontSize: 9, fontWeight: 600, color: 'var(--ds-t3)', marginTop: 2 }}>
+                <div style={{ fontSize: 9, fontWeight: 600, color: 'var(--tms-muted)', marginTop: 2 }}>
                   {primaryCounts[colIdx]} load{primaryCounts[colIdx] !== 1 ? 's' : ''}
                 </div>
               )}
@@ -450,7 +450,7 @@ export function CompactWeekView({ loads, drivers, conflictIds, weekStart }: Comp
       {/* ── Body grid ─────────────────────────────────────────────────────── */}
       <div className="flex-1 overflow-y-auto">
         {maxTrack < 0 ? (
-          <div className="text-center text-[10px] text-slate-300 pt-6 select-none">—</div>
+          <div className="text-center text-[10px] text-[color:var(--tms-disabled)] pt-6 select-none">—</div>
         ) : (
           <div
             className="relative grid"
@@ -466,8 +466,8 @@ export function CompactWeekView({ loads, drivers, conflictIds, weekStart }: Comp
                 style={{
                   gridColumn: colIdx + 1,
                   gridRow: `1 / ${maxTrack + 2}`,
-                  borderRight: colIdx < 6 ? '1px solid var(--ds-border)' : 'none',
-                  background: colIdx >= 5 ? 'var(--ds-bg)' : 'transparent',
+                  borderRight: colIdx < 6 ? '1px solid var(--tms-border)' : 'none',
+                  background: colIdx >= 5 ? 'var(--tms-bg)' : 'transparent',
                   opacity: colIdx >= 5 ? 0.6 : 1,
                 }}
               />

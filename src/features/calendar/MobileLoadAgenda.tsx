@@ -21,9 +21,9 @@ function dayKey(iso?: string): string {
 }
 
 function statusOf(l: Load): { label: string; color: string } {
-  if (l.readyToInvoice) return { label: 'Ready', color: '#22c55e' }
-  if (l.pickupDriverId) return { label: 'In progress', color: '#1ea8f3' }
-  return { label: 'Unassigned', color: '#f59e0b' }
+  if (l.readyToInvoice) return { label: 'Ready', color: 'var(--tms-primary)' }
+  if (l.pickupDriverId) return { label: 'In progress', color: 'var(--tms-primary)' }
+  return { label: 'Unassigned', color: 'var(--tms-badge-orange)' }
 }
 
 export function MobileLoadAgenda({ loads: allLoads, drivers }: { loads: Load[]; drivers: Driver[] }) {
@@ -48,14 +48,14 @@ export function MobileLoadAgenda({ loads: allLoads, drivers }: { loads: Load[]; 
   }, [loads])
 
   if (loads.length === 0) {
-    return <div style={{ padding: 24, textAlign: 'center', color: 'var(--ds-t3)', fontSize: 13 }}>No loads in this period.</div>
+    return <div style={{ padding: 24, textAlign: 'center', color: 'var(--tms-muted)', fontSize: 13 }}>No loads in this period.</div>
   }
 
   return (
     <div style={{ height: '100%', overflowY: 'auto' }}>
       {groups.map(([day, ls]) => (
         <div key={day}>
-          <div style={{ position: 'sticky', top: 0, zIndex: 1, background: 'var(--ds-bg)', padding: '8px 16px', fontSize: 12, fontWeight: 600, color: 'var(--ds-t2)', borderBottom: '1px solid var(--ds-border)' }}>
+          <div style={{ position: 'sticky', top: 0, zIndex: 1, background: 'var(--tms-bg)', padding: '8px 16px', fontSize: 12, fontWeight: 600, color: 'var(--tms-text-2)', borderBottom: '1px solid var(--tms-border)' }}>
             {day} · {ls.length}
           </div>
           {ls.map((l) => {
@@ -64,17 +64,17 @@ export function MobileLoadAgenda({ loads: allLoads, drivers }: { loads: Load[]; 
               <button
                 key={l.id}
                 onClick={() => useAppStore.getState().setSelectedLoad(l.id, 'view')}
-                style={{ display: 'block', width: '100%', textAlign: 'left', background: 'var(--ds-surface)', border: 'none', borderBottom: '1px solid var(--ds-border)', padding: '12px 16px', cursor: 'pointer' }}
+                style={{ display: 'block', width: '100%', textAlign: 'left', background: 'var(--tms-card)', border: 'none', borderBottom: '1px solid var(--tms-border)', padding: '12px 16px', cursor: 'pointer' }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <span style={{ width: 8, height: 8, borderRadius: 2, background: s.color, flexShrink: 0 }} />
-                  <span style={{ fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--ds-t3)' }}>{fmtTime(l.pickupAppt)}</span>
+                  <span style={{ fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--tms-muted)' }}>{fmtTime(l.pickupAppt)}</span>
                   <span style={{ marginLeft: 'auto', fontSize: 11, color: s.color }}>{s.label}</span>
                 </div>
-                <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)', marginTop: 4 }}>
+                <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--tms-text)', marginTop: 4 }}>
                   {l.originCity || l.originName || '—'} → {l.destinationCity || l.destinationName || '—'}
                 </div>
-                <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 2 }}>
+                <div style={{ fontSize: 12, color: 'var(--tms-muted)', marginTop: 2 }}>
                   {l.customer || ''}{l.pickupDriverId ? ` · ${driverName.get(l.pickupDriverId) ?? 'Driver'}` : ''}
                 </div>
               </button>

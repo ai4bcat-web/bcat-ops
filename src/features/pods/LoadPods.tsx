@@ -34,7 +34,7 @@ export function LoadPods({ loadId }: { loadId: string }) {
       </div>
 
       {error && (
-        <div className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2">
+        <div className="text-xs text-[color:var(--tms-badge-red)] bg-[color:var(--tms-badge-red-tint)] border border-[color:var(--tms-badge-red)] rounded-md px-3 py-2">
           {error}
         </div>
       )}

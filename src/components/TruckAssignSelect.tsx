@@ -42,7 +42,7 @@ export function TruckAssignSelect({ driverId, label = 'Truck', compact = false }
   const id = `truck-assign-${driverId}`
   return (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: compact ? 12 : 13 }}>
-      <label htmlFor={id} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--ds-t3)', fontWeight: 600 }}>
+      <label htmlFor={id} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--tms-muted)', fontWeight: 600 }}>
         <Truck size={compact ? 12 : 14} aria-hidden="true" /> {label}
       </label>
       <select
@@ -51,7 +51,7 @@ export function TruckAssignSelect({ driverId, label = 'Truck', compact = false }
         disabled={busy}
         onChange={(e) => { void onChange(e.target.value) }}
         title="Which truck this driver is in. Picking a truck another driver holds moves it to this driver."
-        style={{ fontSize: compact ? 12 : 13, fontWeight: 600, padding: compact ? '2px 6px' : '4px 8px', borderRadius: 6, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', color: 'var(--ds-t1)', fontVariantNumeric: 'tabular-nums', cursor: busy ? 'wait' : 'pointer' }}
+        style={{ fontSize: compact ? 12 : 13, fontWeight: 600, padding: compact ? '2px 6px' : '4px 8px', borderRadius: 6, border: '1px solid var(--tms-border)', background: 'var(--tms-card)', color: 'var(--tms-text)', fontVariantNumeric: 'tabular-nums', cursor: busy ? 'wait' : 'pointer' }}
       >
         <option value="">No truck</option>
         {trucks.map((t) => {
@@ -59,7 +59,7 @@ export function TruckAssignSelect({ driverId, label = 'Truck', compact = false }
           return <option key={t.id} value={t.id}>#{t.unitNumber}{holder ? ` · ${holder}` : ''}</option>
         })}
       </select>
-      {note && <span style={{ fontSize: 11.5, color: 'var(--ds-t3)' }}>{note}</span>}
+      {note && <span style={{ fontSize: 11.5, color: 'var(--tms-muted)' }}>{note}</span>}
     </span>
   )
 }

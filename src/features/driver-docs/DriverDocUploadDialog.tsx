@@ -243,7 +243,7 @@ export function DriverDocUploadDialog({
               </div>
             )}
             {files.length >= DRIVER_DOC_MAX_PAGES && (
-              <p className="flex items-center gap-1 text-xs text-amber-600">
+              <p className="flex items-center gap-1 text-xs text-[color:var(--tms-badge-orange)]">
                 <AlertCircle className="h-3 w-3" /> Maximum {DRIVER_DOC_MAX_PAGES} pages reached.
               </p>
             )}

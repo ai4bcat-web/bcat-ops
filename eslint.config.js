@@ -30,25 +30,50 @@ export default defineConfig([
     },
   },
   {
-    // TSX twin of the CSS literal guard in theme.scope.test.ts: TMS surfaces take colour
-    // from --tms-* tokens (or TmsAlert / TmsBadge), never a hex / rgb / hsl literal.
-    // Data colours and PDF mattes: `// eslint-disable-next-line no-restricted-syntax -- data colour`.
+    // TSX twin of the CSS literal guard in theme.scope.test.ts: every UI surface takes colour
+    // from --tms-* tokens (or TmsAlert / TmsBadge / a semantic utility), never a hex / rgb /
+    // hsl literal, palette class or retired --ds-/--sh- token.
+    // Intentional exceptions: `// eslint-disable-next-line no-restricted-syntax -- data colour | paper | camera | not a colour`.
     files: [
-      'src/features/{tms,shipments,carriers,directory,quotes,ar,ap,factoring,vendor-ap,workflows,tracking,documents,settings,users,commissions,reports,audit}/**/*.{ts,tsx}',
-      'src/components/{RepPicker,RequirePage}.tsx',
-      'src/components/directory-picker/**/*.{ts,tsx}',
+      'src/{features,components,pages}/**/*.{ts,tsx}',
+      'src/App.tsx',
+      'src/lib/ui/**/*.{ts,tsx}',
+      'src/lib/{driverColors,apptStatus}.ts',
     ],
-    // TrackPage (legacy truck tracking, /track/:code) is converted in S3; remove this exemption then.
-    ignores: ['**/*.test.{ts,tsx}', 'src/features/tracking/TrackPage.tsx'],
+    ignores: ['**/*.test.{ts,tsx}'],
     rules: {
       'no-restricted-syntax': ['error',
         {
-          selector: "Literal[value=/^\\s*(#[0-9a-fA-F]{3,8}|rgba?\\(|hsla?\\()/]",
-          message: 'Use a --tms-* token (or TmsAlert/TmsBadge).',
+          selector: "Literal[value=/(?:^|[^\\w&])#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6})(?![\\w-])|(?:^|[\\s:(,'\"])#[0-9a-fA-F]{3,4}(?![\\w-])|\\brgba?\\(|\\bhsla?\\(/]",
+          message: "Use a --tms-* token (or TmsAlert/TmsBadge).",
         },
         {
-          selector: "TemplateElement[value.raw=/^\\s*(#[0-9a-fA-F]{3,8}|rgba?\\(|hsla?\\()/]",
-          message: 'Use a --tms-* token (or TmsAlert/TmsBadge).',
+          selector: "TemplateElement[value.raw=/(?:^|[^\\w&])#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6})(?![\\w-])|(?:^|[\\s:(,'\"])#[0-9a-fA-F]{3,4}(?![\\w-])|\\brgba?\\(|\\bhsla?\\(/]",
+          message: "Use a --tms-* token (or TmsAlert/TmsBadge).",
+        },
+        {
+          selector: "Literal[value=/\\[#[0-9a-fA-F]{3,8}\\]/]",
+          message: "Arbitrary hex class - use [color:var(--tms-...)].",
+        },
+        {
+          selector: "TemplateElement[value.raw=/\\[#[0-9a-fA-F]{3,8}\\]/]",
+          message: "Arbitrary hex class - use [color:var(--tms-...)].",
+        },
+        {
+          selector: "Literal[value=/\\b(?:bg|text|border|ring|fill|stroke|from|via|to|divide|outline|decoration|shadow|accent|caret)-(?:slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-\\d{2,3}(?:\\/\\d+)?\\b|\\b(?:bg|border)-white\\b|\\bbg-black\\b/]",
+          message: "Palette class - use a semantic utility or a badge token.",
+        },
+        {
+          selector: "TemplateElement[value.raw=/\\b(?:bg|text|border|ring|fill|stroke|from|via|to|divide|outline|decoration|shadow|accent|caret)-(?:slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-\\d{2,3}(?:\\/\\d+)?\\b|\\b(?:bg|border)-white\\b|\\bbg-black\\b/]",
+          message: "Palette class - use a semantic utility or a badge token.",
+        },
+        {
+          selector: "Literal[value=/--(?:ds|sh)-[a-z]/]",
+          message: "Retired token - use --tms-*.",
+        },
+        {
+          selector: "TemplateElement[value.raw=/--(?:ds|sh)-[a-z]/]",
+          message: "Retired token - use --tms-*.",
         },
       ],
     },

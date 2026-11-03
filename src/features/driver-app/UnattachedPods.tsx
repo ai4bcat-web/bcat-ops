@@ -106,14 +106,14 @@ export function UnattachedPods({
   if (pods.length === 0) return null
 
   return (
-    <div className="rounded-xl border border-amber-300 bg-amber-50 p-4">
+    <div className="rounded-xl border border-[color:var(--tms-badge-orange)]/40 bg-[color:var(--tms-badge-orange-tint)] p-4">
       <div className="flex items-start gap-2">
-        <Link2 className="mt-0.5 size-4 shrink-0 text-amber-700" />
+        <Link2 className="mt-0.5 size-4 shrink-0 text-[color:var(--tms-badge-orange)]" />
         <div className="min-w-0">
-          <h2 className="text-sm font-semibold text-amber-900">
+          <h2 className="text-sm font-semibold text-[color:var(--tms-badge-orange)]">
             {pods.length === 1 ? '1 POD is not on a load yet' : `${pods.length} PODs are not on a load yet`}
           </h2>
-          <p className="text-xs text-amber-800">
+          <p className="text-xs text-[color:var(--tms-badge-orange)]">
             Pick the load each one belongs to. A POD only counts once it is on a load.
           </p>
         </div>
@@ -124,7 +124,7 @@ export function UnattachedPods({
           const open = picking === pod.id
           const pages = pod.docs.filter((d) => d.kind === 'POD').length
           return (
-            <li key={pod.id} className="rounded-lg border border-amber-200 bg-white p-3">
+            <li key={pod.id} className="rounded-lg border border-[color:var(--tms-badge-orange)]/40 bg-card p-3">
               <div className="flex items-center justify-between gap-2">
                 <div className="min-w-0 text-xs">
                   <p className="font-medium text-foreground">
@@ -149,7 +149,7 @@ export function UnattachedPods({
                 <div className="mt-3">
                   {loadsError ? (
                     <div className="text-xs">
-                      <p className="text-amber-800">{loadsError}</p>
+                      <p className="text-[color:var(--tms-badge-orange)]">{loadsError}</p>
                       <Button
                         variant="outline"
                         size="sm"
@@ -176,7 +176,7 @@ export function UnattachedPods({
                             type="button"
                             disabled={saving !== null}
                             onClick={() => void attach(pod.id, load)}
-                            className="flex w-full items-center gap-2 rounded-lg border border-[var(--ds-border)] px-3 py-2.5 text-left disabled:opacity-60"
+                            className="flex w-full items-center gap-2 rounded-lg border border-[var(--tms-border)] px-3 py-2.5 text-left disabled:opacity-60"
                           >
                             {saving === pod.id ? (
                               <Loader2 className="size-4 shrink-0 animate-spin" />

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { X } from 'lucide-react'
+import { PayModal } from '@/features/driver-pay/DriverPayForms'
 import { useDrivers } from '@/hooks/useDrivers'
 import { driverPaySchema } from '@/lib/schemas'
 import { combinedPayDriverId, FLEET_GROUP_LABELS } from '@/lib/fleetGroups'
@@ -17,8 +17,8 @@ interface Props {
   fleetGroup?: FleetGroup
 }
 
-const labelStyle: React.CSSProperties = { fontSize: 11, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.06em' }
-const inputStyle: React.CSSProperties = { height: 36, width: '100%', borderRadius: 8, border: '1px solid var(--ds-border)', padding: '0 10px', fontSize: 13, background: 'var(--ds-surface)', color: 'var(--ds-t1)' }
+const labelStyle: React.CSSProperties = { fontSize: 11, fontWeight: 600, color: 'var(--tms-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }
+const inputStyle: React.CSSProperties = { height: 36, width: '100%', borderRadius: 8, border: '1px solid var(--tms-border)', padding: '0 10px', fontSize: 13, background: 'var(--tms-card)', color: 'var(--tms-text)' }
 
 /** Manual biweekly driver-pay entry. `source` is fixed to MANUAL (Paychex is the seam). */
 export function DriverPayForm({ onSave, onClose, defaultStart, defaultEnd, fleetGroup = 'LOCAL' }: Props) {
@@ -69,17 +69,8 @@ export function DriverPayForm({ onSave, onClose, defaultStart, defaultEnd, fleet
   }
 
   return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.4)', padding: 16 }}>
-      <div style={{ background: 'var(--ds-surface)', borderRadius: 16, boxShadow: 'var(--sh-lg, 0 10px 40px rgba(0,0,0,0.2))', width: '100%', maxWidth: 460 }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '18px 20px', borderBottom: '1px solid var(--ds-border)' }}>
-          <div>
-            <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--ds-t1)' }}>Add driver pay</div>
-            <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 2 }}>Biweekly gross — spread across the weeks it covers</div>
-          </div>
-          <button aria-label="Close" onClick={onClose} style={{ color: 'var(--ds-t3)', background: 'none', border: 'none', cursor: 'pointer' }}><X size={18} /></button>
-        </div>
-
-        <form onSubmit={handleSubmit} style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 16 }}>
+    <PayModal title="Add driver pay" sub="Biweekly gross — spread across the weeks it covers" onClose={onClose}>
+        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             <label style={labelStyle}>Driver / fleet *</label>
             <select value={form.driverId} onChange={(e) => set('driverId', e.target.value)} style={inputStyle}>
@@ -112,14 +103,13 @@ export function DriverPayForm({ onSave, onClose, defaultStart, defaultEnd, fleet
             <input value={form.notes} onChange={(e) => set('notes', e.target.value)} placeholder="Optional" style={inputStyle} />
           </div>
 
-          {error && <div style={{ fontSize: 12.5, color: '#dc2626' }}>{error}</div>}
+          {error && <div style={{ fontSize: 12.5, color: 'var(--tms-badge-red)' }}>{error}</div>}
 
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, paddingTop: 4 }}>
-            <button type="button" onClick={onClose} style={{ height: 36, padding: '0 16px', borderRadius: 8, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', color: 'var(--ds-t2)', fontSize: 13, fontWeight: 500, cursor: 'pointer' }}>Cancel</button>
-            <button type="submit" disabled={saving} style={{ height: 36, padding: '0 16px', borderRadius: 8, border: 'none', background: 'var(--ds-blue)', color: '#fff', fontSize: 13, fontWeight: 600, cursor: saving ? 'default' : 'pointer', opacity: saving ? 0.6 : 1 }}>{saving ? 'Saving…' : 'Save pay'}</button>
+            <button type="button" onClick={onClose} style={{ height: 36, padding: '0 16px', borderRadius: 8, border: '1px solid var(--tms-border)', background: 'var(--tms-card)', color: 'var(--tms-text-2)', fontSize: 13, fontWeight: 500, cursor: 'pointer' }}>Cancel</button>
+            <button type="submit" disabled={saving} style={{ height: 36, padding: '0 16px', borderRadius: 8, border: 'none', background: 'var(--tms-primary)', color: 'var(--tms-on-primary)', fontSize: 13, fontWeight: 600, cursor: saving ? 'default' : 'pointer', opacity: saving ? 0.6 : 1 }}>{saving ? 'Saving…' : 'Save pay'}</button>
           </div>
         </form>
-      </div>
-    </div>
+    </PayModal>
   )
 }

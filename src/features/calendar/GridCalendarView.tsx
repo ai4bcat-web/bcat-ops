@@ -56,6 +56,7 @@ function hexBg(hex: string, alpha: number): string {
   const r = parseInt(hex.slice(1, 3), 16)
   const g = parseInt(hex.slice(3, 5), 16)
   const b = parseInt(hex.slice(5, 7), 16)
+  // eslint-disable-next-line no-restricted-syntax -- data colour (per-driver / highlight identity)
   return `rgba(${r},${g},${b},${alpha})`
 }
 
@@ -262,13 +263,16 @@ function LoadCard({
     ? `$${(load.rate / 100).toLocaleString('en-US', { minimumFractionDigits: 0 })}`
     : null
 
-  const borderHex   = rti ? '#16a34a' : (highlightHex ?? '#e2e8f0')
-  const borderAlpha = isDelivery ? 'aa' : ''
+  const borderLeftColor = rti
+    ? (isDelivery ? 'color-mix(in srgb, var(--tms-primary) 67%, transparent)' : 'var(--tms-primary)')
+    : highlightHex
+      ? `${highlightHex}${isDelivery ? 'aa' : ''}`
+      : 'var(--tms-border)'
   const bg = rti
-    ? hexBg('#16a34a', isDelivery ? 0.10 : 0.18)
+    ? (isDelivery ? 'color-mix(in srgb, var(--tms-primary) 10%, transparent)' : 'color-mix(in srgb, var(--tms-primary) 18%, transparent)')
     : highlightHex
       ? hexBg(highlightHex, selected ? 0.40 : isDelivery ? 0.14 : 0.26)
-      : selected ? 'rgba(139,92,246,0.12)' : undefined
+      : selected ? 'color-mix(in srgb, var(--tms-badge-purple) 12%, transparent)' : undefined
 
   const cardKey = entry.key
 
@@ -278,13 +282,13 @@ function LoadCard({
       className="group/card"
       style={{
         marginBottom: 4,
-        border: '2px solid #111827',
-        borderLeft: `3px solid ${borderHex}${borderAlpha}`,
+        border: '2px solid var(--tms-text)',
+        borderLeft: `3px solid ${borderLeftColor}`,
         background: bg,
         borderRadius: 4,
         padding: '8px 10px',
         cursor: dragging ? 'grabbing' : 'grab',
-        outline: dragOver ? '2px solid var(--ds-blue)' : selected ? '1px solid #8b5cf6' : undefined,
+        outline: dragOver ? '2px solid var(--tms-primary)' : selected ? '1px solid var(--tms-badge-purple)' : undefined,
         outlineOffset: -1,
         opacity: dragging ? 0.45 : 1,
         display: 'flex',
@@ -307,22 +311,22 @@ function LoadCard({
 
       {/* Row 1: grip + Pro# + TMS + PU# */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0 }}>
-        <GripVertical style={{ width: 10, height: 10, color: 'var(--ds-t3)', flexShrink: 0, opacity: 0.45 }} />
+        <GripVertical style={{ width: 10, height: 10, color: 'var(--tms-muted)', flexShrink: 0, opacity: 0.45 }} />
         {load.hot && <span title="Hot load" style={{ flexShrink: 0, fontSize: 11, lineHeight: 1 }}>🔥</span>}
         {/* Pro# — flexShrink:0 guarantees it's always fully visible */}
-        <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--ds-t1)', flexShrink: 0, whiteSpace: 'nowrap' }}>
+        <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--tms-text)', flexShrink: 0, whiteSpace: 'nowrap' }}>
           {load.aljexId || '—'}
         </span>
         {/* POD, on the delivery card: a tick to open it, a cross when it is still owed. */}
         {isFinalDest && <PodMark load={load} size={12} />}
         {/* Secondary IDs float right and truncate before touching the Pro# */}
         {load.tmsId && (
-          <span style={{ fontSize: 9.5, color: 'var(--ds-t3)', whiteSpace: 'nowrap', flexShrink: 1, overflow: 'hidden', textOverflow: 'ellipsis', marginLeft: 'auto' }}>
+          <span style={{ fontSize: 9.5, color: 'var(--tms-muted)', whiteSpace: 'nowrap', flexShrink: 1, overflow: 'hidden', textOverflow: 'ellipsis', marginLeft: 'auto' }}>
             {load.tmsId}
           </span>
         )}
         {load.pickupNumber && (
-          <span style={{ fontSize: 9.5, color: 'var(--ds-t3)', whiteSpace: 'nowrap', flexShrink: 1, overflow: 'hidden', textOverflow: 'ellipsis', marginLeft: load.tmsId ? 4 : 'auto' }}>
+          <span style={{ fontSize: 9.5, color: 'var(--tms-muted)', whiteSpace: 'nowrap', flexShrink: 1, overflow: 'hidden', textOverflow: 'ellipsis', marginLeft: load.tmsId ? 4 : 'auto' }}>
             #{load.pickupNumber}
           </span>
         )}
@@ -334,7 +338,7 @@ function LoadCard({
           fontSize:      14,
           fontWeight:    isFinalDest ? 800 : 500,
           letterSpacing: isFinalDest ? '-0.02em' : 0,
-          color:         isFinalDest ? 'var(--ds-t1)' : 'var(--ds-t2)',
+          color:         isFinalDest ? 'var(--tms-text)' : 'var(--tms-text-2)',
           lineHeight:    1.25,
           margin:        '2px 0',
           overflow:      'hidden',
@@ -348,12 +352,12 @@ function LoadCard({
       {/* Location names (facility / shipper names) — single stop name in multi-stop mode */}
       {stopMode ? (
         stop!.name && (
-          <div style={{ fontSize: 9.5, color: 'var(--ds-t3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <div style={{ fontSize: 9.5, color: 'var(--tms-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {stop!.name}
           </div>
         )
       ) : (load.originName || load.destinationName) && (
-        <div style={{ fontSize: 9.5, color: 'var(--ds-t3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <div style={{ fontSize: 9.5, color: 'var(--tms-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {[
             !isDelivery ? load.originName : null,
             !isDelivery && !puYard && load.destinationName ? '→' : null,
@@ -364,9 +368,9 @@ function LoadCard({
 
       {/* Row 4: PU appt */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-        <span style={{ fontSize: 9.5, fontWeight: 600, color: puYard ? 'var(--ds-t3)' : 'var(--ds-blue)', width: 18, flexShrink: 0 }}>PU</span>
-        {puDate && <span style={{ fontSize: 9.5, color: 'var(--ds-t3)' }}>{puDate}</span>}
-        <span style={{ fontSize: 10.5, fontWeight: puTime.startsWith('NEED') ? 700 : 500, color: puTime.startsWith('NEED') ? '#dc2626' : puYard ? 'var(--ds-t3)' : 'var(--ds-t1)' }}>
+        <span style={{ fontSize: 9.5, fontWeight: 600, color: puYard ? 'var(--tms-muted)' : 'var(--tms-badge-blue)', width: 18, flexShrink: 0 }}>PU</span>
+        {puDate && <span style={{ fontSize: 9.5, color: 'var(--tms-muted)' }}>{puDate}</span>}
+        <span style={{ fontSize: 10.5, fontWeight: puTime.startsWith('NEED') ? 700 : 500, color: puTime.startsWith('NEED') ? 'var(--tms-badge-red)' : puYard ? 'var(--tms-muted)' : 'var(--tms-text)' }}>
           {puTime}
         </span>
         {puStatus && (
@@ -376,9 +380,9 @@ function LoadCard({
 
       {/* Row 5: DE appt */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-        <span style={{ fontSize: 9.5, fontWeight: 600, color: deYard ? 'var(--ds-t3)' : '#7c3aed', width: 18, flexShrink: 0 }}>DE</span>
-        {deDate && <span style={{ fontSize: 9.5, color: 'var(--ds-t3)' }}>{deDate}</span>}
-        <span style={{ fontSize: 10.5, fontWeight: deTime.startsWith('NEED') ? 700 : 500, color: deTime.startsWith('NEED') ? '#dc2626' : deYard ? 'var(--ds-t3)' : 'var(--ds-t1)' }}>
+        <span style={{ fontSize: 9.5, fontWeight: 600, color: deYard ? 'var(--tms-muted)' : 'var(--tms-badge-purple)', width: 18, flexShrink: 0 }}>DE</span>
+        {deDate && <span style={{ fontSize: 9.5, color: 'var(--tms-muted)' }}>{deDate}</span>}
+        <span style={{ fontSize: 10.5, fontWeight: deTime.startsWith('NEED') ? 700 : 500, color: deTime.startsWith('NEED') ? 'var(--tms-badge-red)' : deYard ? 'var(--tms-muted)' : 'var(--tms-text)' }}>
           {deTime}
         </span>
         {deStatus && (
@@ -398,10 +402,10 @@ function LoadCard({
             value={slotDraft}
             style={{
               width: 20, height: 20, borderRadius: '50%',
-              border: '1.5px solid #94a3b8',
-              background: 'var(--ds-surface)',
+              border: '1.5px solid var(--tms-disabled)',
+              background: 'var(--tms-card)',
               textAlign: 'center', fontSize: 9, fontWeight: 700,
-              color: 'var(--ds-t1)', padding: 0, outline: 'none',
+              color: 'var(--tms-text)', padding: 0, outline: 'none',
               flexShrink: 0,
             }}
             onChange={(e) => setSlotDraft(e.target.value.replace(/\D/g, ''))}
@@ -420,9 +424,9 @@ function LoadCard({
           <span
             style={{
               width: 20, height: 20, borderRadius: '50%',
-              border: `1.5px solid ${load.daySlot != null ? '#64748b' : '#cbd5e1'}`,
+              border: `1.5px solid ${load.daySlot != null ? 'var(--tms-muted)' : 'var(--tms-input-border)'}`,
               display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 9, fontWeight: 700, color: 'var(--ds-t2)',
+              fontSize: 9, fontWeight: 700, color: 'var(--tms-text-2)',
               cursor: 'text', flexShrink: 0, background: 'transparent',
             }}
             title="Click to set slot number"
@@ -434,9 +438,9 @@ function LoadCard({
         {/* Driver avatar */}
         <span style={{
           width: 20, height: 20, borderRadius: '50%', flexShrink: 0,
-          background: driverId ? driverColor.avatarBg : '#e2e8f0',
+          background: driverId ? driverColor.avatarBg : 'var(--tms-border)',
           display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: 8, fontWeight: 700, color: '#fff', overflow: 'hidden',
+          fontSize: 8, fontWeight: 700, color: 'var(--tms-on-primary)', overflow: 'hidden',
         }}>
           {driver?.photoUrl
             ? <img src={driver.photoUrl} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt="" />
@@ -445,14 +449,14 @@ function LoadCard({
         </span>
         <span style={{
           fontSize: 12, flex: 1,
-          color: driverId ? 'var(--ds-t1)' : 'var(--ds-blue)',
+          color: driverId ? 'var(--tms-text)' : 'var(--tms-primary)',
           fontWeight: 600,
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
         }}>
           {driver?.name ?? 'Unassigned'}
         </span>
         {rateStr && (
-          <span style={{ fontSize: 10.5, fontWeight: 600, color: '#15803d', flexShrink: 0 }}>{rateStr}</span>
+          <span style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--tms-badge-green)', flexShrink: 0 }}>{rateStr}</span>
         )}
         {/* RTI toggle — only on final destination rows */}
         {isFinalDest && (
@@ -462,8 +466,8 @@ function LoadCard({
             onClick={(e) => { e.stopPropagation(); updateLoad(load.id, { readyToInvoice: !rti }) }}
           >
             {rti
-              ? <CheckCircle style={{ width: 13, height: 13, color: '#16a34a' }} />
-              : <Circle     style={{ width: 13, height: 13, color: '#cbd5e1' }} />}
+              ? <CheckCircle style={{ width: 13, height: 13, color: 'var(--tms-badge-green)' }} />
+              : <Circle     style={{ width: 13, height: 13, color: 'var(--tms-input-border)' }} />}
           </button>
         )}
         {/* Paint bucket — card highlight color picker */}
@@ -478,7 +482,7 @@ function LoadCard({
             setPickerOpen((o) => !o)
           }}
         >
-          <PaintBucket style={{ width: 11, height: 11, color: highlightHex ? '#000' : 'var(--ds-t3)', opacity: highlightHex ? 0.85 : 0.45 }} />
+          <PaintBucket style={{ width: 11, height: 11, color: highlightHex ? 'var(--tms-text)' : 'var(--tms-muted)', opacity: highlightHex ? 0.85 : 0.45 }} />
         </button>
       </div>
 
@@ -491,10 +495,10 @@ function LoadCard({
           value={notesDraft}
           style={{
             width: '100%', boxSizing: 'border-box',
-            border: '1px solid var(--ds-border)', borderRadius: 3,
-            background: 'var(--ds-surface)',
+            border: '1px solid var(--tms-border)', borderRadius: 3,
+            background: 'var(--tms-card)',
             fontSize: 9.5, padding: '2px 4px', outline: 'none',
-            color: 'var(--ds-t1)', fontFamily: 'inherit',
+            color: 'var(--tms-text)', fontFamily: 'inherit',
           }}
           onChange={(e) => setNotesDraft(e.target.value)}
           onBlur={() => {
@@ -513,7 +517,7 @@ function LoadCard({
           onClick={(e) => { e.stopPropagation(); setNotesDraft(load.notes ?? ''); setNotesEditing(true) }}
           style={{
             fontSize: 9.5, fontStyle: load.notes ? 'italic' : 'normal',
-            color: load.notes ? 'var(--ds-t3)' : 'var(--ds-t3)',
+            color: load.notes ? 'var(--tms-muted)' : 'var(--tms-muted)',
             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
             marginTop: 1, cursor: 'text', minHeight: 14,
             opacity: load.notes ? 1 : 0,
@@ -527,16 +531,17 @@ function LoadCard({
       {/* Color picker popup — fixed-position so it escapes overflow:hidden */}
       {pickerOpen && pickerPos && (
         <div
+          className="tms-portal"
           style={{
             position: 'fixed',
             top: pickerPos.top,
             left: pickerPos.left,
             zIndex: 9999,
-            background: 'var(--ds-surface)',
-            border: '1px solid var(--ds-border)',
+            background: 'var(--tms-card)',
+            border: '1px solid var(--tms-border)',
             borderRadius: 6,
             padding: 6,
-            boxShadow: '0 4px 16px rgba(0,0,0,0.18)',
+            boxShadow: 'var(--tms-shadow-pop)',
             display: 'flex',
             flexWrap: 'wrap',
             gap: 4,
@@ -548,9 +553,9 @@ function LoadCard({
           <button
             style={{
               width: 22, height: 22, borderRadius: 3, cursor: 'pointer',
-              background: '#f8fafc', border: cardColorKey == null ? '2px solid #64748b' : '1px dashed #cbd5e1',
+              background: 'var(--tms-surface)', border: cardColorKey == null ? '2px solid var(--tms-muted)' : '1px dashed var(--tms-input-border)',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 10, color: '#64748b', flexShrink: 0,
+              fontSize: 10, color: 'var(--tms-muted)', flexShrink: 0,
             }}
             title="Clear color"
             onClick={(e) => { e.stopPropagation(); setCardColor(null) }}
@@ -560,10 +565,11 @@ function LoadCard({
           {GRID_PALETTE.map(({ key, hex, label }) => (
             <button
               key={key}
+              data-user-color={hex}
               style={{
                 width: 22, height: 22, borderRadius: 3, cursor: 'pointer',
                 background: hex,
-                border: cardColorKey === key ? '2.5px solid rgba(0,0,0,0.55)' : '1px solid rgba(0,0,0,0.10)',
+                border: cardColorKey === key ? '2.5px solid color-mix(in srgb, var(--tms-text) 55%, transparent)' : '1px solid color-mix(in srgb, var(--tms-text) 10%, transparent)',
                 flexShrink: 0,
               }}
               title={label}
@@ -603,10 +609,10 @@ function DayColumn({
 
   return (
     <div
-      style={{ width: DAY_COL_W, flexShrink: 0, borderRight: '1px solid var(--ds-border)', display: 'flex', flexDirection: 'column',
-        outline: isDropTarget ? '2px solid var(--ds-blue)' : undefined,
+      style={{ width: DAY_COL_W, flexShrink: 0, borderRight: '1px solid var(--tms-border)', display: 'flex', flexDirection: 'column',
+        outline: isDropTarget ? '2px solid var(--tms-primary)' : undefined,
         outlineOffset: -2,
-        background: isDropTarget ? 'rgba(59,130,246,0.06)' : undefined,
+        background: isDropTarget ? 'color-mix(in srgb, var(--tms-primary) 8%, transparent)' : undefined,
         transition: 'background 0.1s',
       }}
       onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move' }}
@@ -620,31 +626,31 @@ function DayColumn({
         height: HEADER_H, position: 'sticky', top: 0, zIndex: 10,
         display: 'flex', alignItems: 'center', gap: 6,
         padding: `0 ${COL_PAD + 2}px`,
-        borderBottom: `2px solid ${isToday ? 'var(--ds-blue)' : 'var(--ds-border)'}`,
-        background: isToday ? 'var(--ds-blue-bg)' : 'var(--ds-surface)',
+        borderBottom: `2px solid ${isToday ? 'var(--tms-primary)' : 'var(--tms-border)'}`,
+        background: isToday ? 'var(--tms-primary-tint)' : 'var(--tms-card)',
         flexShrink: 0,
       }}>
         <span style={{
           fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em',
-          color: isToday ? 'var(--ds-blue)' : isCurrentMonth ? 'var(--ds-t2)' : 'var(--ds-t3)',
+          color: isToday ? 'var(--tms-primary)' : isCurrentMonth ? 'var(--tms-text-2)' : 'var(--tms-muted)',
         }}>
           {weekday}
         </span>
-        <span style={{ fontSize: 11, color: isToday ? 'var(--ds-blue)' : 'var(--ds-t3)', fontWeight: isToday ? 700 : 400 }}>
+        <span style={{ fontSize: 11, color: isToday ? 'var(--tms-primary)' : 'var(--tms-muted)', fontWeight: isToday ? 700 : 400 }}>
           {date}
         </span>
         {isToday && (
-          <span style={{ fontSize: 9, fontWeight: 700, background: 'var(--ds-blue)', color: '#fff', padding: '1px 5px', borderRadius: 3, flexShrink: 0 }}>
+          <span style={{ fontSize: 9, fontWeight: 700, background: 'var(--tms-primary)', color: 'var(--tms-on-primary)', padding: '1px 5px', borderRadius: 3, flexShrink: 0 }}>
             Today
           </span>
         )}
         {loadCount > 0 && (
-          <span style={{ fontSize: 10, color: 'var(--ds-t3)', marginLeft: 'auto' }}>{loadCount}</span>
+          <span style={{ fontSize: 10, color: 'var(--tms-muted)', marginLeft: 'auto' }}>{loadCount}</span>
         )}
         <button
           style={{
             width: 18, height: 18, borderRadius: 4, border: 'none', cursor: 'pointer',
-            background: 'var(--ds-blue)', color: '#fff',
+            background: 'var(--tms-primary)', color: 'var(--tms-on-primary)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             marginLeft: loadCount > 0 ? 0 : 'auto', flexShrink: 0,
           }}
@@ -657,17 +663,17 @@ function DayColumn({
 
       {/* Availability strips */}
       {availabilityStrips.length > 0 && (
-        <div style={{ padding: '3px 6px 4px', borderBottom: '1px solid var(--ds-border)', display: 'flex', flexDirection: 'column', gap: 2, flexShrink: 0 }}>
+        <div style={{ padding: '3px 6px 4px', borderBottom: '1px solid var(--tms-border)', display: 'flex', flexDirection: 'column', gap: 2, flexShrink: 0 }}>
           {availabilityStrips.map((strip, i) => {
             const isOff  = strip.type === 'FULL_DAY_OFF'
             const label  = isOff ? 'OFF' : strip.type === 'EARLY_START' ? `In by ${strip.time ?? ''}`.trim() : `Late ${strip.time ?? ''}`.trim()
             return (
-              <div key={`${strip.driverId}-${i}`} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '2px 5px', borderRadius: 3, background: isOff ? 'rgba(220,38,38,0.08)' : 'rgba(217,119,6,0.10)' }}>
-                <span style={{ width: 5, height: 5, borderRadius: '50%', background: isOff ? '#dc2626' : '#d97706', flexShrink: 0 }} />
-                <span style={{ fontSize: 10.5, fontWeight: 600, color: isOff ? '#dc2626' : '#b45309', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              <div key={`${strip.driverId}-${i}`} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '2px 5px', borderRadius: 3, background: isOff ? 'var(--tms-badge-red-tint)' : 'var(--tms-badge-orange-tint)' }}>
+                <span style={{ width: 5, height: 5, borderRadius: '50%', background: isOff ? 'var(--tms-badge-red)' : 'var(--tms-badge-orange)', flexShrink: 0 }} />
+                <span style={{ fontSize: 10.5, fontWeight: 600, color: isOff ? 'var(--tms-badge-red)' : 'var(--tms-badge-orange)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {strip.driverName}
                 </span>
-                <span style={{ fontSize: 10, color: '#6b7280', flexShrink: 0 }}>{label}</span>
+                <span style={{ fontSize: 10, color: 'var(--tms-muted)', flexShrink: 0 }}>{label}</span>
               </div>
             )
           })}
@@ -675,9 +681,9 @@ function DayColumn({
       )}
 
       {/* Cards */}
-      <div style={{ flex: 1, padding: `${COL_PAD}px ${COL_PAD}px 8px`, background: isToday ? 'rgba(59,130,246,0.03)' : undefined }}>
+      <div style={{ flex: 1, padding: `${COL_PAD}px ${COL_PAD}px 8px`, background: isToday ? 'color-mix(in srgb, var(--tms-primary) 5%, transparent)' : undefined }}>
         {entries.length === 0 ? (
-          <div style={{ fontSize: 10, color: 'var(--ds-t3)', fontStyle: 'italic', padding: '6px 2px' }}>No loads</div>
+          <div style={{ fontSize: 10, color: 'var(--tms-muted)', fontStyle: 'italic', padding: '6px 2px' }}>No loads</div>
         ) : (
           entries.map((entry) => {
             const cardKey = entry.key
@@ -727,22 +733,22 @@ function UnscheduledColumn({
   return (
     <div
       style={{ width: DAY_COL_W, flexShrink: 0, position: 'sticky', left: 0, zIndex: 20,
-        borderRight: '2px solid var(--ds-border)', display: 'flex', flexDirection: 'column',
-        background: isDropTarget ? 'rgba(245,158,11,0.10)' : 'var(--ds-bg)',
-        outline: isDropTarget ? '2px solid #f59e0b' : undefined, outlineOffset: -2, transition: 'background 0.1s',
+        borderRight: '2px solid var(--tms-border)', display: 'flex', flexDirection: 'column',
+        background: isDropTarget ? 'var(--tms-badge-orange-tint)' : 'var(--tms-bg)',
+        outline: isDropTarget ? '2px solid var(--tms-badge-orange)' : undefined, outlineOffset: -2, transition: 'background 0.1s',
       }}
       onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move' }}
       onDragEnter={() => onColumnDragEnter(ORPHAN_KEY)}
       onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) onColumnDragLeave(ORPHAN_KEY) }}
       onDrop={(e) => { e.preventDefault(); onColumnDrop(ORPHAN_KEY) }}
     >
-      <div style={{ height: HEADER_H, position: 'sticky', top: 0, zIndex: 10, display: 'flex', alignItems: 'center', gap: 6, padding: `0 ${COL_PAD + 2}px`, borderBottom: '2px solid #f59e0b', background: '#fef3c7', flexShrink: 0 }}>
-        <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: '#b45309' }}>Unscheduled</span>
-        {entries.length > 0 && <span style={{ fontSize: 10, color: '#b45309', marginLeft: 'auto' }}>{entries.length}</span>}
+      <div style={{ height: HEADER_H, position: 'sticky', top: 0, zIndex: 10, display: 'flex', alignItems: 'center', gap: 6, padding: `0 ${COL_PAD + 2}px`, borderBottom: '2px solid var(--tms-badge-orange)', background: 'var(--tms-badge-orange-tint)', flexShrink: 0 }}>
+        <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--tms-badge-orange)' }}>Unscheduled</span>
+        {entries.length > 0 && <span style={{ fontSize: 10, color: 'var(--tms-badge-orange)', marginLeft: 'auto' }}>{entries.length}</span>}
       </div>
       <div style={{ flex: 1, padding: `${COL_PAD}px ${COL_PAD}px 8px`, overflowY: 'auto' }}>
         {entries.length === 0 ? (
-          <div style={{ fontSize: 10, color: 'var(--ds-t3)', fontStyle: 'italic', padding: '6px 2px', lineHeight: 1.5 }}>
+          <div style={{ fontSize: 10, color: 'var(--tms-muted)', fontStyle: 'italic', padding: '6px 2px', lineHeight: 1.5 }}>
             Drag loads here when the date isn&apos;t set yet.
           </div>
         ) : (

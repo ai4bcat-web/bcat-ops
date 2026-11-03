@@ -10,8 +10,8 @@ import { startOfMonth, endOfMonth, format, getMonth } from 'date-fns'
 
 const money0 = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n)
 const moneyK = (n: number) => `${n < 0 ? '−' : ''}$${Math.round(Math.abs(n) / 1000)}k`
-const netColor = (n: number) => (n > 0 ? '#15803d' : n < 0 ? '#dc2626' : 'var(--ds-t2)')
-const COLORS = { ivan: '#2563eb', oo: '#7c3aed', amazon: '#f59e0b', total: '#111827' }
+const netColor = (n: number) => (n > 0 ? 'var(--tms-badge-green)' : n < 0 ? 'var(--tms-badge-red)' : 'var(--tms-text-2)')
+const COLORS = { ivan: 'var(--tms-chart-5)', oo: 'var(--tms-chart-6)', amazon: 'var(--tms-chart-4)', total: 'var(--tms-chart-3)' }
 
 /**
  * The year so far, month over month, each profit source on its own: Ivan local + box
@@ -45,25 +45,25 @@ export function YearProfitWidget() {
   const thisMonth = data[data.length - 1]
 
   return (
-    <div style={{ background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 12, boxShadow: 'var(--sh-sm)', overflow: 'hidden' }}>
+    <div className="tms-card">
       <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', alignItems: 'stretch' }}>
         {/* This month to date, by source; the year so far underneath */}
-        <div style={{ padding: '14px 20px', minWidth: isMobile ? undefined : 300, borderRight: isMobile ? 'none' : '1px solid var(--ds-border)', borderBottom: isMobile ? '1px solid var(--ds-border)' : 'none' }}>
+        <div style={{ padding: '14px 20px', minWidth: isMobile ? undefined : 300, borderRight: isMobile ? 'none' : '1px solid var(--tms-border)', borderBottom: isMobile ? '1px solid var(--tms-border)' : 'none' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Wallet size={15} style={{ color: 'var(--ds-blue)' }} />
-            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--ds-t1)' }}>Combined profit · {thisMonth ? `${thisMonth.month} ${now.getFullYear()}${thisMonth.partial ? ' to date' : ''}` : 'this month'}</span>
+            <Wallet size={15} style={{ color: 'var(--tms-primary)' }} />
+            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--tms-text)' }}>Combined profit · {thisMonth ? `${thisMonth.month} ${now.getFullYear()}${thisMonth.partial ? ' to date' : ''}` : 'this month'}</span>
           </div>
           <div style={{ fontSize: 30, fontWeight: 800, lineHeight: 1.1, marginTop: 6, color: netColor(thisMonth?.total ?? 0), fontVariantNumeric: 'tabular-nums', letterSpacing: '-0.02em' }}>{loading || !thisMonth ? '…' : money0(thisMonth.total)}</div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, auto)', gap: '6px 16px', marginTop: 10, fontSize: 11.5 }}>
             {([['Ivan + box truck', thisMonth?.ivan ?? 0, COLORS.ivan], ['Owner operators', thisMonth?.oo ?? 0, COLORS.oo], ['Amazon', thisMonth?.amazon ?? 0, COLORS.amazon]] as const).map(([label, v, color]) => (
               <div key={label}>
-                <div style={{ color: 'var(--ds-t3)', display: 'flex', alignItems: 'center', gap: 5 }}><span style={{ width: 8, height: 8, borderRadius: 2, background: color, display: 'inline-block' }} />{label}</div>
+                <div style={{ color: 'var(--tms-muted)', display: 'flex', alignItems: 'center', gap: 5 }}><span style={{ width: 8, height: 8, borderRadius: 2, background: color, display: 'inline-block' }} />{label}</div>
                 <div style={{ fontWeight: 700, color: netColor(v), fontVariantNumeric: 'tabular-nums' }}>{loading ? '…' : money0(v)}</div>
               </div>
             ))}
           </div>
           {!loading && data.length > 0 && (
-            <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid var(--ds-border)', fontSize: 11.5, color: 'var(--ds-t3)' }}>
+            <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid var(--tms-border)', fontSize: 11.5, color: 'var(--tms-muted)' }}>
               {data[0].month} {now.getFullYear()} to date: <span style={{ fontWeight: 700, color: netColor(ytd.total) }}>{money0(ytd.total)}</span>
               <span style={{ marginLeft: 8 }}>· Ivan {money0(ytd.ivan)} · OO {money0(ytd.oo)} · Amazon {money0(ytd.amazon)}</span>
             </div>
@@ -74,12 +74,12 @@ export function YearProfitWidget() {
         <div style={{ flex: 1, minWidth: 0, padding: '10px 12px 4px' }}>
           <ResponsiveContainer width="100%" height={isMobile ? 190 : 170}>
             <ComposedChart data={data} margin={{ top: 6, right: 12, bottom: 0, left: 0 }} barGap={2} barCategoryGap="28%">
-              <CartesianGrid stroke="rgba(15,23,42,0.06)" strokeDasharray="3 4" vertical={false} />
-              <XAxis dataKey="month" tick={{ fill: '#6b7588', fontSize: 11 }} axisLine={false} tickLine={false} />
-              <YAxis tickFormatter={(v) => moneyK(Number(v))} tick={{ fill: '#6b7588', fontSize: 11 }} axisLine={false} tickLine={false} width={48} />
-              <ReferenceLine y={0} stroke="#9ca3af" />
+              <CartesianGrid stroke="var(--tms-chart-grid)" strokeDasharray="3 4" vertical={false} />
+              <XAxis dataKey="month" tick={{ fill: 'var(--tms-chart-axis)', fontSize: 11 }} axisLine={false} tickLine={false} />
+              <YAxis tickFormatter={(v) => moneyK(Number(v))} tick={{ fill: 'var(--tms-chart-axis)', fontSize: 11 }} axisLine={false} tickLine={false} width={48} />
+              <ReferenceLine y={0} stroke="var(--tms-chart-9)" />
               <Tooltip formatter={(value, name) => [money0(Number(value)), String(name)]} labelFormatter={(l, p) => { const d = p?.[0]?.payload as { partial?: boolean } | undefined; return `${l}${d?.partial ? ' (to date)' : ''}` }}
-                contentStyle={{ background: 'white', border: '1px solid #e2e8f0', borderRadius: 8, fontSize: 12, boxShadow: 'var(--sh-md)' }} />
+                contentStyle={{ background: 'var(--tms-card)', color: 'var(--tms-text)', border: '1px solid var(--tms-border)', borderRadius: 8, fontSize: 12, boxShadow: 'var(--tms-shadow-pop)' }} />
               <Legend wrapperStyle={{ fontSize: 11 }} iconType="square" iconSize={8} />
               <Bar dataKey="ivan" name="Ivan + box truck" fill={COLORS.ivan} radius={[2, 2, 0, 0]} />
               <Bar dataKey="oo" name="Owner operators" fill={COLORS.oo} radius={[2, 2, 0, 0]} />

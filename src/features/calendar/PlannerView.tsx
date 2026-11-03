@@ -54,7 +54,7 @@ function StatusHandoff({ load, stop, kind, status }: {
 
   if (!status) {
     return (
-      <div className="shrink-0 flex items-center px-1 text-[11px] text-slate-300" style={{ width: COL.status }}>
+      <div className="shrink-0 flex items-center px-1 text-[11px] text-[color:var(--tms-disabled)]" style={{ width: COL.status }}>
         —
       </div>
     )
@@ -130,6 +130,7 @@ function hexBg(hex: string, alpha: number): string {
   const r = parseInt(hex.slice(1, 3), 16)
   const g = parseInt(hex.slice(3, 5), 16)
   const b = parseInt(hex.slice(5, 7), 16)
+  // eslint-disable-next-line no-restricted-syntax -- data colour (per-driver / highlight identity)
   return `rgba(${r},${g},${b},${alpha})`
 }
 
@@ -166,14 +167,14 @@ function ApptCell({ iso, type, apptEnd, colorCls, yard, city }: {
 
   if (yard) {
     return (
-      <div className="flex items-center px-1.5 gap-1 leading-tight text-slate-400" style={{ width: w }}>
+      <div className="flex items-center px-1.5 gap-1 leading-tight text-muted-foreground" style={{ width: w }}>
         <span className="text-[11px] font-medium shrink-0">Yard</span>
         {city && <span className="text-[10px] italic truncate">{city}</span>}
       </div>
     )
   }
 
-  if (!iso) return <div className="px-1.5 text-[11px] text-slate-300" style={{ width: w }}>—</div>
+  if (!iso) return <div className="px-1.5 text-[11px] text-[color:var(--tms-disabled)]" style={{ width: w }}>—</div>
 
   // An exact appt with no time is 'Pending' — treated as special so it renders as a
   // label rather than a misleading 12:00 AM.
@@ -183,7 +184,7 @@ function ApptCell({ iso, type, apptEnd, colorCls, yard, city }: {
   const specialLabel = type === 'tbd' ? needLabel(iso) : noTime ? PENDING_LABEL : (type ?? 'exact').toUpperCase()
   return (
     <div className={`flex flex-col justify-center px-1.5 leading-tight ${colorCls}`} style={{ width: w }}>
-      <span className="text-[10px] text-slate-400 truncate">{formatDateShort(iso)}</span>
+      <span className="text-[10px] text-muted-foreground truncate">{formatDateShort(iso)}</span>
       <span className="text-[11px] font-medium truncate">
         {isSpecial ? specialLabel : formatApptTime(iso, type, apptEnd)}
       </span>
@@ -214,30 +215,31 @@ function ColorPicker({
   const multiCount = (extraIds?.length ?? 0) + 1
   return (
     <div
-      className="absolute z-50 top-full left-0 mt-1 rounded-xl border border-slate-200 bg-white shadow-xl flex flex-col gap-2"
+      className="absolute z-50 top-full left-0 mt-1 rounded-xl border border-border bg-card shadow-xl flex flex-col gap-2"
       style={{ width: 196, padding: '10px 10px 8px' }}
       onMouseDown={(e) => e.stopPropagation()}
     >
       {multiCount > 1 && (
-        <div className="text-[10px] font-semibold text-slate-400">Apply to {multiCount} loads</div>
+        <div className="text-[10px] font-semibold text-muted-foreground">Apply to {multiCount} loads</div>
       )}
       <div className="flex flex-wrap gap-2">
         <button
-          className="rounded-lg border-2 border-dashed border-slate-300 flex items-center justify-center hover:bg-slate-50 transition-colors"
+          className="rounded-lg border-2 border-dashed border-input flex items-center justify-center hover:bg-muted transition-colors"
           style={{ width: 26, height: 26 }}
           title="Remove color"
           onClick={() => pick(null)}
         >
-          <X className="size-3 text-slate-400" />
+          <X className="size-3 text-muted-foreground" />
         </button>
         {LOAD_HIGHLIGHT_PALETTE.map(({ key, hex, label }) => (
           <button
             key={key}
             className={cn(
               'rounded-lg transition-transform hover:scale-110 hover:shadow-md',
-              key === current && 'ring-2 ring-offset-1 ring-slate-500 scale-110',
+              key === current && 'ring-2 ring-offset-1 ring-ring scale-110',
             )}
-            style={{ width: 26, height: 26, background: hex, border: '1px solid rgba(0,0,0,0.08)' }}
+            data-user-color={hex}
+            style={{ width: 26, height: 26, background: hex, border: '1px solid color-mix(in srgb, var(--tms-text) 8%, transparent)' }}
             title={label}
             onClick={() => pick(key)}
           />
@@ -292,22 +294,22 @@ function DriverPicker({ loadId, load, stop, role, currentId, field, drivers, onC
 
   return (
     <div
-      className="absolute z-50 top-full left-0 mt-1 w-52 rounded-lg border border-slate-200 bg-white shadow-xl"
+      className="absolute z-50 top-full left-0 mt-1 w-52 rounded-lg border border-border bg-card shadow-xl"
       onMouseDown={(e) => e.stopPropagation()}
     >
-      <div className="p-2 border-b border-slate-100">
+      <div className="p-2 border-b border-border">
         <input
           autoFocus
           type="text"
           placeholder="Search driver…"
-          className="w-full h-7 px-2 text-[12px] rounded border border-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-400"
+          className="w-full h-7 px-2 text-[12px] rounded border border-border focus:outline-none focus:ring-1 focus:ring-[color:var(--tms-primary)]"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
       </div>
       <div className="max-h-48 overflow-y-auto py-1">
         <button
-          className="flex w-full items-center gap-2 px-3 py-1.5 text-[11px] text-slate-400 hover:bg-slate-50"
+          className="flex w-full items-center gap-2 px-3 py-1.5 text-[11px] text-muted-foreground hover:bg-muted"
           onClick={() => pick(null)}
         >
           <X className="size-3" /> Unassigned
@@ -318,7 +320,7 @@ function DriverPicker({ loadId, load, stop, role, currentId, field, drivers, onC
             <button
               key={d.id}
               disabled={saving}
-              className={cn('flex w-full items-center gap-2 px-3 py-1.5 text-[11px] text-slate-700 hover:bg-slate-50', d.id === currentId && 'font-semibold')}
+              className={cn('flex w-full items-center gap-2 px-3 py-1.5 text-[11px] text-foreground hover:bg-muted', d.id === currentId && 'font-semibold')}
               onClick={() => pick(d.id)}
             >
               <span className="size-2 rounded-full shrink-0" style={{ background: c.border }} />
@@ -326,7 +328,7 @@ function DriverPicker({ loadId, load, stop, role, currentId, field, drivers, onC
             </button>
           )
         })}
-        {filtered.length === 0 && <div className="px-3 py-2 text-[11px] text-slate-400">No drivers found</div>}
+        {filtered.length === 0 && <div className="px-3 py-2 text-[11px] text-muted-foreground">No drivers found</div>}
       </div>
     </div>
   )
@@ -353,7 +355,7 @@ function EditableTextCell({ load, field, width }: {
         <input
           autoFocus
           type="text"
-          className="w-full h-5 px-1 text-[11px] rounded border border-blue-400 focus:outline-none"
+          className="w-full h-5 px-1 text-[11px] rounded border border-[color:var(--tms-primary)] focus:outline-none"
           value={val}
           onChange={(e) => setVal(e.target.value)}
           onBlur={commit}
@@ -366,12 +368,12 @@ function EditableTextCell({ load, field, width }: {
 
   return (
     <div
-      className={cn('group/cell shrink-0 flex items-center gap-0.5 px-1.5 cursor-pointer hover:bg-black/5 rounded text-slate-600')}
+      className={cn('group/cell shrink-0 flex items-center gap-0.5 px-1.5 cursor-pointer hover:bg-[color:var(--tms-overlay)] rounded text-muted-foreground')}
       style={{ width }}
       onClick={() => { setVal(current ?? ''); setEditing(true) }}
     >
       <span className="text-[11px] truncate flex-1">{current || '—'}</span>
-      <Pencil className="size-2 text-slate-300 opacity-0 group-hover/cell:opacity-100 shrink-0" />
+      <Pencil className="size-2 text-[color:var(--tms-disabled)] opacity-0 group-hover/cell:opacity-100 shrink-0" />
     </div>
   )
 }
@@ -394,7 +396,7 @@ function NotesCell({ load }: { load: Load }) {
         <input
           autoFocus
           type="text"
-          className="w-full h-5 px-1 text-[11px] rounded border border-blue-400 focus:outline-none"
+          className="w-full h-5 px-1 text-[11px] rounded border border-[color:var(--tms-primary)] focus:outline-none"
           value={val}
           onChange={(e) => setVal(e.target.value)}
           onBlur={commit}
@@ -407,12 +409,12 @@ function NotesCell({ load }: { load: Load }) {
 
   return (
     <div
-      className="group/notes shrink-0 flex items-center gap-0.5 px-1.5 cursor-pointer hover:bg-black/5 rounded"
+      className="group/notes shrink-0 flex items-center gap-0.5 px-1.5 cursor-pointer hover:bg-[color:var(--tms-overlay)] rounded"
       style={{ width: COL.notes }}
       onClick={() => { setVal(load.notes ?? ''); setEditing(true) }}
     >
-      <span className="text-[11px] text-slate-500 truncate flex-1 italic">{load.notes || ''}</span>
-      <Pencil className="size-2 text-slate-300 opacity-0 group-hover/notes:opacity-100 shrink-0" />
+      <span className="text-[11px] text-muted-foreground truncate flex-1 italic">{load.notes || ''}</span>
+      <Pencil className="size-2 text-[color:var(--tms-disabled)] opacity-0 group-hover/notes:opacity-100 shrink-0" />
     </div>
   )
 }
@@ -440,7 +442,7 @@ function RateCell({ load }: { load: Load }) {
         <input
           autoFocus
           type="text"
-          className="w-full h-5 px-1 text-[11px] rounded border border-blue-400 focus:outline-none"
+          className="w-full h-5 px-1 text-[11px] rounded border border-[color:var(--tms-primary)] focus:outline-none"
           value={val}
           onChange={(e) => setVal(e.target.value)}
           onBlur={commit}
@@ -453,8 +455,8 @@ function RateCell({ load }: { load: Load }) {
 
   return (
     <div
-      className="shrink-0 flex items-center px-1.5 text-[11px] cursor-pointer hover:bg-black/5 rounded truncate"
-      style={{ width: COL.rate, color: load.rate ? '#15803d' : '#2563eb' }}
+      className="shrink-0 flex items-center px-1.5 text-[11px] cursor-pointer hover:bg-[color:var(--tms-overlay)] rounded truncate"
+      style={{ width: COL.rate, color: load.rate ? 'var(--tms-badge-green)' : 'var(--tms-badge-blue)' }}
       onClick={() => { setVal(load.rate != null ? String(load.rate / 100) : ''); setEditing(true) }}
     >
       {load.rate != null ? display : <span className="underline underline-offset-2">Add Rate</span>}
@@ -483,8 +485,8 @@ function EditableSlotBadge({ load, hex, readOnly }: { load: Load; hex: string; r
         autoFocus
         type="text"
         inputMode="numeric"
-        className="text-[9px] font-black rounded-full text-center leading-none shrink-0 border border-blue-400 focus:outline-none"
-        style={{ background: hex, color: '#000', width: 18, height: 18, padding: 0 }}
+        className="text-[9px] font-black rounded-full text-center leading-none shrink-0 border border-[color:var(--tms-primary)] focus:outline-none"
+        style={{ background: hex, color: 'var(--tms-text)', width: 18, height: 18, padding: 0 }}
         value={val}
         onChange={(e) => setVal(e.target.value)}
         onBlur={commit}
@@ -497,7 +499,7 @@ function EditableSlotBadge({ load, hex, readOnly }: { load: Load; hex: string; r
   return (
     <span
       className="text-[9px] font-black rounded-full flex items-center justify-center leading-none shrink-0"
-      style={{ background: hex, color: '#000', minWidth: 14, minHeight: 14, padding: '0 2px', cursor: readOnly ? 'default' : 'pointer' }}
+      style={{ background: hex, color: 'var(--tms-text)', minWidth: 14, minHeight: 14, padding: '0 2px', cursor: readOnly ? 'default' : 'pointer' }}
       onClick={readOnly ? undefined : (e) => { e.stopPropagation(); setVal(load.daySlot != null ? String(load.daySlot) : ''); setEditing(true) }}
       title={readOnly ? undefined : 'Click to set slot number'}
     >
@@ -577,28 +579,28 @@ function PlannerRow({ entry, drivers, dragging, dragOver, selected, onDragStart,
   return (
     <div
       className={cn(
-        'group flex items-center border-b border-slate-100 transition-colors',
+        'group flex items-center border-b border-border transition-colors',
         dragging && 'opacity-40',
-        dragOver && 'ring-1 ring-inset ring-blue-400',
-        selected && 'ring-1 ring-inset ring-violet-400',
+        dragOver && 'ring-1 ring-inset ring-[color:var(--tms-badge-blue)]',
+        selected && 'ring-1 ring-inset ring-[color:var(--tms-badge-purple)]',
       )}
       style={{
         // minHeight, not height: the appt cells stack date + time + status chip, and a
         // clipped row was unreadable. Rows now grow to whatever their content needs.
         minHeight: ROW_H,
         background: load.readyToInvoice
-          ? (dragOver ? '#16a34a' : '#22c55e')
-          : dragOver    ? hexBg(highlightHex ?? '#94a3b8', 0.30)
-          : selected    ? hexBg(highlightHex ?? '#8b5cf6', 0.28)
+          ? (dragOver ? 'var(--tms-primary-hover)' : 'var(--tms-primary)')
+          : dragOver    ? (highlightHex ? hexBg(highlightHex, 0.30) : 'color-mix(in srgb, var(--tms-muted) 30%, transparent)')
+          : selected    ? (highlightHex ? hexBg(highlightHex, 0.28) : 'color-mix(in srgb, var(--tms-badge-purple) 28%, transparent)')
           : highlightHex
             ? hexBg(highlightHex, 0.28)
             : undefined,
         borderLeft: load.readyToInvoice
-          ? '3px solid #15803d'
+          ? '3px solid var(--tms-primary-ink)'
           : highlightHex
             ? `3px solid ${highlightHex}`
-            : '3px solid #e2e8f0',
-        borderRight: isNeed ? '3px solid #dc2626' : undefined,
+            : '3px solid var(--tms-border)',
+        borderRight: isNeed ? '3px solid var(--tms-badge-red)' : undefined,
       }}
       draggable
       onDragStart={() => onDragStart(entry.key)}
@@ -610,7 +612,7 @@ function PlannerRow({ entry, drivers, dragging, dragOver, selected, onDragStart,
 
       {/* Drag handle — first column */}
       <div className="flex items-center justify-center shrink-0 opacity-0 group-hover:opacity-40 cursor-grab active:cursor-grabbing" style={{ width: DRAG_HANDLE_W }}>
-        <GripVertical className="size-3 text-slate-400" />
+        <GripVertical className="size-3 text-muted-foreground" />
       </div>
 
       {/* Color swatch — always editable */}
@@ -622,8 +624,9 @@ function PlannerRow({ entry, drivers, dragging, dragOver, selected, onDragStart,
         onBlur={(e) => closeOnBlur(() => setShowColor(false))(e)}
       >
         <span
-          className="size-3 rounded transition-all cursor-pointer hover:ring-2 hover:ring-offset-1 hover:ring-slate-300"
-          style={{ background: highlightHex ?? '#e2e8f0', border: '1px solid rgba(0,0,0,0.1)' }}
+          className="size-3 rounded transition-all cursor-pointer hover:ring-2 hover:ring-offset-1 hover:ring-ring"
+          data-user-color={highlightHex ?? undefined}
+          style={{ background: highlightHex ?? 'var(--tms-border)', border: '1px solid color-mix(in srgb, var(--tms-text) 10%, transparent)' }}
         />
         {showColor && (
           <ColorPicker
@@ -652,7 +655,7 @@ function PlannerRow({ entry, drivers, dragging, dragOver, selected, onDragStart,
       <EditableTextCell load={load} field="pickupNumber" width={COL.pu} />
 
       {/* Trailer — named by the driver as they leave the pickup; rides with the load to delivery. */}
-      <div className="shrink-0 flex items-center px-1.5 font-mono tabular-nums" style={{ width: COL.trailer, fontSize: 12, color: load.trailerNumber ? 'var(--ds-t1)' : 'var(--ds-t3)' }} title={load.trailerNumber ? `Trailer ${load.trailerNumber}` : 'No trailer yet'}>
+      <div className="shrink-0 flex items-center px-1.5 font-mono tabular-nums" style={{ width: COL.trailer, fontSize: 12, color: load.trailerNumber ? 'var(--tms-text)' : 'var(--tms-muted)' }} title={load.trailerNumber ? `Trailer ${load.trailerNumber}` : 'No trailer yet'}>
         {load.trailerNumber || '—'}
       </div>
 
@@ -661,7 +664,7 @@ function PlannerRow({ entry, drivers, dragging, dragOver, selected, onDragStart,
         const short = paperworkShortLabel(load.paperworkLocation)
         const missing = short === 'Missing'
         return (
-          <div className="shrink-0 flex items-center px-1.5 truncate" style={{ width: COL.paperwork, fontSize: 11.5, color: missing ? 'var(--ds-red)' : short ? 'var(--ds-t1)' : 'var(--ds-t3)', fontWeight: missing ? 700 : 500 }} title={paperworkStatusLine(load.paperworkLocation) ?? 'Paperwork location not filed yet'}>
+          <div className="shrink-0 flex items-center px-1.5 truncate" style={{ width: COL.paperwork, fontSize: 11.5, color: missing ? 'var(--tms-badge-red)' : short ? 'var(--tms-text)' : 'var(--tms-muted)', fontWeight: missing ? 700 : 500 }} title={paperworkStatusLine(load.paperworkLocation) ?? 'Paperwork location not filed yet'}>
             {short ?? '—'}
           </div>
         )
@@ -670,21 +673,21 @@ function PlannerRow({ entry, drivers, dragging, dragOver, selected, onDragStart,
       {/* PU / DE location names — single stop name in multi-stop mode */}
       <div className="shrink-0 flex flex-col justify-center px-1.5 leading-tight" style={{ width: COL.locations }}>
         {stopMode ? (
-          stop!.name && <span className="text-[10px] text-slate-500 truncate" title={stop!.name}>{stop!.name}</span>
+          stop!.name && <span className="text-[10px] text-muted-foreground truncate" title={stop!.name}>{stop!.name}</span>
         ) : (
           <>
             {load.originName && (
-              <span className="text-[10px] text-slate-500 truncate" title={load.originName}>{load.originName}</span>
+              <span className="text-[10px] text-muted-foreground truncate" title={load.originName}>{load.originName}</span>
             )}
             {load.destinationName && (
-              <span className="text-[10px] text-slate-400 truncate" title={load.destinationName}>{load.destinationName}</span>
+              <span className="text-[10px] text-muted-foreground truncate" title={load.destinationName}>{load.destinationName}</span>
             )}
           </>
         )}
       </div>
 
       {/* Route — bold when this is the final destination day */}
-      <Cell width={COL.route} bold={isFinalDest} className={isFinalDest ? 'text-slate-800' : 'text-slate-500'}>{route}</Cell>
+      <Cell width={COL.route} bold={isFinalDest} className={isFinalDest ? 'text-foreground' : 'text-muted-foreground'}>{route}</Cell>
 
       {/* PU Appt */}
       <div className="relative group/appt shrink-0">
@@ -692,13 +695,13 @@ function PlannerRow({ entry, drivers, dragging, dragOver, selected, onDragStart,
           iso={puIso}
           type={puType}
           apptEnd={puEnd}
-          colorCls="text-blue-600"
+          colorCls="text-[color:var(--tms-primary-ink)]"
           yard={puYard}
           city={puYard ? load.destinationCity : undefined}
         />
         {(!stopMode || role === 'pickup') && (
           <button
-            className="absolute top-0.5 right-0.5 size-3.5 flex items-center justify-center rounded opacity-0 group-hover/appt:opacity-100 hover:bg-black/10 text-slate-400 transition-opacity"
+            className="absolute top-0.5 right-0.5 size-3.5 flex items-center justify-center rounded opacity-0 group-hover/appt:opacity-100 hover:bg-[color:var(--tms-overlay)] text-muted-foreground transition-opacity"
             onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => { e.stopPropagation(); setEditingAppt('pu') }}
           >
@@ -720,13 +723,13 @@ function PlannerRow({ entry, drivers, dragging, dragOver, selected, onDragStart,
           iso={deIso}
           type={deType}
           apptEnd={deEnd}
-          colorCls="text-violet-600"
+          colorCls="text-[color:var(--tms-badge-purple)]"
           yard={deYard}
           city={deYard ? load.destinationCity : undefined}
         />
         {(!stopMode || role === 'delivery') && (
           <button
-            className="absolute top-0.5 right-0.5 size-3.5 flex items-center justify-center rounded opacity-0 group-hover/appt:opacity-100 hover:bg-black/10 text-slate-400 transition-opacity"
+            className="absolute top-0.5 right-0.5 size-3.5 flex items-center justify-center rounded opacity-0 group-hover/appt:opacity-100 hover:bg-[color:var(--tms-overlay)] text-muted-foreground transition-opacity"
             onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => { e.stopPropagation(); setEditingAppt('de') }}
           >
@@ -751,13 +754,13 @@ function PlannerRow({ entry, drivers, dragging, dragOver, selected, onDragStart,
         onBlur={(e) => closeOnBlur(() => setShowDriver(false))(e)}
       >
         {/* Slot badge — manually set, editable on pickup/same-day row */}
-        <EditableSlotBadge load={load} hex={highlightHex ?? '#cbd5e1'} />
+        <EditableSlotBadge load={load} hex={highlightHex ?? 'var(--tms-input-border)'} />
 
         {/* Driver name */}
         <div className={cn(
-          'flex-1 h-full flex items-center text-[11px] font-medium truncate rounded cursor-pointer hover:bg-black/5',
-          !relevantDriverId ? 'text-blue-600' : isDeliveryDay ? 'text-slate-500' : 'text-slate-800',
-          showDriver && 'ring-1 ring-blue-400 bg-blue-50',
+          'flex-1 h-full flex items-center text-[11px] font-medium truncate rounded cursor-pointer hover:bg-[color:var(--tms-overlay)]',
+          !relevantDriverId ? 'text-[color:var(--tms-primary-ink)]' : isDeliveryDay ? 'text-muted-foreground' : 'text-foreground',
+          showDriver && 'ring-1 ring-[color:var(--tms-primary)] bg-[color:var(--tms-primary-tint)]',
         )}>
           {!relevantDriverId
             ? <span className="underline underline-offset-2">{isDeliveryDay ? 'DE Driver' : 'Assign Driver'}</span>
@@ -780,7 +783,7 @@ function PlannerRow({ entry, drivers, dragging, dragOver, selected, onDragStart,
       {/* NEED indicator icon */}
       {isNeed && (
         <div className="shrink-0 flex items-center justify-center" style={{ width: 16 }} title="Needs appointment">
-          <AlertCircle className="size-3 text-red-500" />
+          <AlertCircle className="size-3 text-[color:var(--tms-badge-red)]" />
         </div>
       )}
       {!isNeed && <div className="shrink-0" style={{ width: 16 }} />}
@@ -800,8 +803,8 @@ function PlannerRow({ entry, drivers, dragging, dragOver, selected, onDragStart,
           onClick={(e) => { e.stopPropagation(); updateLoad(load.id, { readyToInvoice: !load.readyToInvoice }) }}
         >
           {load.readyToInvoice
-            ? <CheckCircle className="size-4 text-green-600" />
-            : <Circle className="size-4 text-slate-300" />}
+            ? <CheckCircle className="size-4 text-[color:var(--tms-badge-green)]" />
+            : <Circle className="size-4 text-[color:var(--tms-disabled)]" />}
         </button>
       ) : (
         <div className="shrink-0 px-2" style={{ width: 32 }} />
@@ -818,7 +821,7 @@ function Cell({ children, width, flex, bold, className, onClick }: {
 }) {
   return (
     <div
-      className={cn('px-1.5 text-[11px] truncate', bold ? 'font-medium text-slate-800' : 'text-slate-600', onClick && 'cursor-pointer hover:underline', className)}
+      className={cn('px-1.5 text-[11px] truncate', bold ? 'font-medium text-foreground' : 'text-muted-foreground', onClick && 'cursor-pointer hover:underline', className)}
       style={flex ? { flex: 1, minWidth: 0 } : { width, flexShrink: 0 }}
       onClick={onClick}
     >
@@ -831,7 +834,7 @@ function Cell({ children, width, flex, bold, className, onClick }: {
 function ColHeader({ children, width, flex }: { children: React.ReactNode; width?: number; flex?: boolean }) {
   return (
     <div
-      className="px-1.5 text-[10px] font-semibold text-slate-400 uppercase tracking-wide truncate"
+      className="px-1.5 text-[10px] font-semibold text-muted-foreground uppercase tracking-wide truncate"
       style={flex ? { flex: 1, minWidth: 0 } : { width, flexShrink: 0 }}
     >
       {children}
@@ -1084,14 +1087,14 @@ export function PlannerView({ loads: allLoads, drivers, weekStart, numDays = 7, 
   const todayStr  = chicagoDateStr(new Date().toISOString())
 
   return (
-    <div className="flex flex-col h-full overflow-auto select-none" style={{ background: 'var(--ds-bg)' }}>
+    <div className="flex flex-col h-full overflow-auto select-none" style={{ background: 'var(--tms-bg)' }}>
 
       {/* Sticky column header */}
       <div
         className="flex items-center sticky top-0 z-20 shrink-0"
         // max-content: when the columns are wider than the window the header must grow
         // with them, or its background and the rows' end short of the last columns.
-        style={{ height: ROW_H, paddingLeft: headerPad, minWidth: 'max-content', background: 'var(--ds-surface)', borderBottom: '2px solid var(--ds-border-strong)' }}
+        style={{ height: ROW_H, paddingLeft: headerPad, minWidth: 'max-content', background: 'var(--tms-card)', borderBottom: '2px solid var(--tms-input-border)' }}
       >
         <ColHeader width={COL.aljex}>Pro #</ColHeader>
         <ColHeader width={COL.pod}>POD</ColHeader>
@@ -1118,9 +1121,9 @@ export function PlannerView({ loads: allLoads, drivers, weekStart, numDays = 7, 
         className="shrink-0"
         style={{
           minWidth: 'max-content',
-          borderBottom: '1px solid var(--ds-border)',
-          background: unschedDropOver ? 'rgba(245,158,11,0.10)' : undefined,
-          outline: unschedDropOver ? '2px solid #f59e0b' : undefined, outlineOffset: -2,
+          borderBottom: '1px solid var(--tms-border)',
+          background: unschedDropOver ? 'var(--tms-badge-orange-tint)' : undefined,
+          outline: unschedDropOver ? '2px solid var(--tms-badge-orange)' : undefined, outlineOffset: -2,
         }}
         onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move' }}
         onDragEnter={() => setUnschedDropOver(true)}
@@ -1134,10 +1137,10 @@ export function PlannerView({ loads: allLoads, drivers, weekStart, numDays = 7, 
       >
         <div
           className="flex items-center gap-2 px-2 sticky z-10"
-          style={{ top: ROW_H, height: 22, background: '#fef3c7', borderBottom: '1px solid var(--ds-border)' }}
+          style={{ top: ROW_H, height: 22, background: 'var(--tms-badge-orange-tint)', borderBottom: '1px solid var(--tms-border)' }}
         >
-          <span style={{ fontSize: 11, fontWeight: 600, color: '#b45309', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Unscheduled</span>
-          <span style={{ fontSize: 10, color: '#b45309' }}>
+          <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--tms-badge-orange)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Unscheduled</span>
+          <span style={{ fontSize: 10, color: 'var(--tms-badge-orange)' }}>
             {unscheduledEntries.length > 0
               ? `· ${unscheduledEntries.length} load${unscheduledEntries.length !== 1 ? 's' : ''} with no firm date`
               : '· drag a load here when the date isn’t set yet'}
@@ -1184,9 +1187,9 @@ export function PlannerView({ loads: allLoads, drivers, weekStart, numDays = 7, 
             className="shrink-0"
             style={{
               minWidth: 'max-content',
-              borderBottom: '1px solid var(--ds-border)',
-              background: dropDay === dayStr ? 'rgba(34,197,94,0.08)' : undefined,
-              outline: dropDay === dayStr ? '2px solid #22c55e' : undefined, outlineOffset: -2,
+              borderBottom: '1px solid var(--tms-border)',
+              background: dropDay === dayStr ? 'var(--tms-primary-tint)' : undefined,
+              outline: dropDay === dayStr ? '2px solid var(--tms-primary)' : undefined, outlineOffset: -2,
             }}
             onDragOver={(e) => handleDayDragOver(dayStr ?? '', e)}
             onDragLeave={handleDayDragLeave}
@@ -1196,31 +1199,31 @@ export function PlannerView({ loads: allLoads, drivers, weekStart, numDays = 7, 
               className="flex items-center gap-2 px-2 sticky z-10"
               style={{
                 top: ROW_H, height: 22,
-                background: isToday ? 'var(--ds-blue-bg)' : 'var(--ds-bg-2)',
-                borderBottom: '1px solid var(--ds-border)',
+                background: isToday ? 'var(--tms-primary-tint)' : 'var(--tms-surface)',
+                borderBottom: '1px solid var(--tms-border)',
               }}
             >
-              <span style={{ fontSize: 11, fontWeight: 600, color: isToday ? 'var(--ds-blue-dark)' : 'var(--ds-t2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>{weekday}</span>
-              <span style={{ fontSize: 11, color: 'var(--ds-t3)' }}>{date}</span>
+              <span style={{ fontSize: 11, fontWeight: 600, color: isToday ? 'var(--tms-primary-ink)' : 'var(--tms-text-2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>{weekday}</span>
+              <span style={{ fontSize: 11, color: 'var(--tms-muted)' }}>{date}</span>
               {isToday && (
-                <span style={{ fontSize: 10, fontWeight: 600, background: 'var(--ds-blue)', color: '#fff', padding: '1px 6px', borderRadius: 4 }}>Today</span>
+                <span style={{ fontSize: 10, fontWeight: 600, background: 'var(--tms-primary)', color: 'var(--tms-on-primary)', padding: '1px 6px', borderRadius: 4 }}>Today</span>
               )}
               {loadCount > 0 && (
-                <span style={{ fontSize: 10, color: 'var(--ds-t3)' }}>· {loadCount} load{loadCount !== 1 ? 's' : ''}</span>
+                <span style={{ fontSize: 10, color: 'var(--tms-muted)' }}>· {loadCount} load{loadCount !== 1 ? 's' : ''}</span>
               )}
               {tbdCount > 0 && (
-                <span style={{ fontSize: 10, fontWeight: 600, color: '#b45309', background: 'var(--ds-amber-bg)', border: '1px solid rgba(217,119,6,0.25)', borderRadius: 4, padding: '1px 6px', lineHeight: 1 }}>
+                <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--tms-badge-orange)', background: 'var(--tms-badge-orange-tint)', border: '1px solid color-mix(in srgb, var(--tms-badge-orange) 25%, transparent)', borderRadius: 4, padding: '1px 6px', lineHeight: 1 }}>
                   {tbdCount} NEED appt{tbdCount !== 1 ? 's' : ''}
                 </span>
               )}
               {needsInvoiceCount > 0 && (
-                <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--ds-red)', background: 'var(--ds-red-bg)', border: '1px solid rgba(185,28,28,0.2)', borderRadius: 4, padding: '1px 6px', lineHeight: 1 }}>
+                <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--tms-badge-red)', background: 'var(--tms-badge-red-tint)', border: '1px solid color-mix(in srgb, var(--tms-badge-red) 20%, transparent)', borderRadius: 4, padding: '1px 6px', lineHeight: 1 }}>
                   {needsInvoiceCount} uninvoiced
                 </span>
               )}
               <button
-                className="ml-auto flex items-center justify-center size-4 rounded text-white transition-colors"
-                style={{ background: 'var(--ds-blue)', border: 'none', cursor: 'pointer' }}
+                className="ml-auto flex items-center justify-center size-4 rounded text-[color:var(--tms-on-primary)] transition-colors"
+                style={{ background: 'var(--tms-primary)', border: 'none', cursor: 'pointer' }}
                 title={`Add a shipment for ${weekday}`}
                 onClick={() => useAppStore.getState().openNewShipment({ driverId: null, dateStr: dayStr! })}
               >
@@ -1230,15 +1233,15 @@ export function PlannerView({ loads: allLoads, drivers, weekStart, numDays = 7, 
 
             {/* Availability strips for this day */}
             {dayStrips.length > 0 && (
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, padding: '3px 8px 4px', borderBottom: '1px solid var(--ds-border)' }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, padding: '3px 8px 4px', borderBottom: '1px solid var(--tms-border)' }}>
                 {dayStrips.map((strip, i) => {
                   const isOff  = strip.type === 'FULL_DAY_OFF'
                   const label  = isOff ? 'OFF' : strip.type === 'EARLY_START' ? `In by ${strip.time ?? ''}`.trim() : `Late ${strip.time ?? ''}`.trim()
                   return (
-                    <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '1px 7px', borderRadius: 4, background: isOff ? 'rgba(220,38,38,0.08)' : 'rgba(217,119,6,0.10)', fontSize: 10.5 }}>
-                      <span style={{ width: 5, height: 5, borderRadius: '50%', background: isOff ? '#dc2626' : '#d97706', flexShrink: 0 }} />
-                      <span style={{ fontWeight: 600, color: isOff ? '#dc2626' : '#b45309' }}>{strip.driverName}</span>
-                      <span style={{ color: '#6b7280' }}>{label}</span>
+                    <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '1px 7px', borderRadius: 4, background: isOff ? 'var(--tms-badge-red-tint)' : 'var(--tms-badge-orange-tint)', fontSize: 10.5 }}>
+                      <span style={{ width: 5, height: 5, borderRadius: '50%', background: isOff ? 'var(--tms-badge-red)' : 'var(--tms-badge-orange)', flexShrink: 0 }} />
+                      <span style={{ fontWeight: 600, color: isOff ? 'var(--tms-badge-red)' : 'var(--tms-badge-orange)' }}>{strip.driverName}</span>
+                      <span style={{ color: 'var(--tms-muted)' }}>{label}</span>
                     </span>
                   )
                 })}
@@ -1246,7 +1249,7 @@ export function PlannerView({ loads: allLoads, drivers, weekStart, numDays = 7, 
             )}
 
             {entries.length === 0 ? (
-              <div className="flex items-center px-6 italic" style={{ height: ROW_H, fontSize: 11, color: 'var(--ds-t3)' }}>
+              <div className="flex items-center px-6 italic" style={{ height: ROW_H, fontSize: 11, color: 'var(--tms-muted)' }}>
                 No loads
               </div>
             ) : (

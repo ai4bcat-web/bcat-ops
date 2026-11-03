@@ -25,12 +25,12 @@ export function OnTheClockBar({ enabled }: { enabled: boolean }) {
       type="button"
       onClick={() => navigate('/driver/timeclock')}
       aria-label={`On the clock for ${elapsedLabel(seconds)}. Open your hours.`}
-      className="flex shrink-0 items-center justify-center gap-2 border-b border-emerald-500/30 bg-emerald-500/15 px-4 py-2 text-emerald-300"
+      className="flex shrink-0 items-center justify-center gap-2 border-b border-[color:var(--tms-badge-green)]/30 bg-[color:var(--tms-badge-green-tint)] px-4 py-2 text-[color:var(--tms-badge-green)]"
     >
       {/* A pulse, so a glance at a pocketed phone says "running" without reading it. */}
       <span className="relative flex h-2 w-2" aria-hidden="true">
-        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
-        <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-400" />
+        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[color:var(--tms-badge-green)] opacity-75" />
+        <span className="relative inline-flex h-2 w-2 rounded-full bg-[color:var(--tms-badge-green)]" />
       </span>
       <Clock className="h-4 w-4" aria-hidden="true" />
       <span className="text-sm font-semibold">On the clock</span>

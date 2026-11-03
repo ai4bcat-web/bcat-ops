@@ -94,8 +94,8 @@ export function SendDriverInvite({ driver, email }: Props) {
       style={{
         display: 'inline-flex', alignItems: 'center', gap: 5, marginTop: 4,
         height: 26, padding: '0 9px', borderRadius: 6, fontSize: 12, fontWeight: 600,
-        border: '1px solid var(--ds-border)', background: 'var(--ds-surface)',
-        color: sent ? '#15803d' : 'var(--ds-t1)', cursor: sending ? 'default' : 'pointer',
+        border: '1px solid var(--tms-border)', background: 'var(--tms-card)',
+        color: sent ? 'var(--tms-badge-green)' : 'var(--tms-text)', cursor: sending ? 'default' : 'pointer',
       }}
     >
       {sending ? (

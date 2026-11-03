@@ -35,8 +35,8 @@ export function UpdateBanner() {
         position: 'fixed', bottom: 16, left: '50%', transform: 'translateX(-50%)',
         zIndex: 60, display: 'flex', alignItems: 'center', gap: 12,
         padding: '10px 12px 10px 16px', borderRadius: 10,
-        background: 'var(--ds-t1)', color: 'var(--ds-surface)',
-        boxShadow: '0 8px 24px rgb(0 0 0 / 0.18)', fontSize: 13,
+        background: 'var(--tms-tooltip-bg)', color: 'var(--tms-tooltip-ink)',
+        boxShadow: 'var(--tms-shadow-pop)', fontSize: 13,
         maxWidth: 'calc(100vw - 32px)',
       }}
     >
@@ -46,7 +46,7 @@ export function UpdateBanner() {
         style={{
           display: 'inline-flex', alignItems: 'center', gap: 6,
           height: 30, padding: '0 12px', borderRadius: 7, border: 'none',
-          background: 'var(--ds-surface)', color: 'var(--ds-t1)',
+          background: 'var(--tms-card)', color: 'var(--tms-text)',
           fontSize: 12.5, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer',
         }}
       >
@@ -58,7 +58,7 @@ export function UpdateBanner() {
         style={{
           display: 'grid', placeItems: 'center', height: 26, width: 26,
           borderRadius: 6, border: 'none', background: 'transparent',
-          color: 'var(--ds-surface)', opacity: 0.7, cursor: 'pointer',
+          color: 'var(--tms-card)', opacity: 0.7, cursor: 'pointer',
         }}
       >
         <X size={14} />

@@ -58,14 +58,14 @@ function DetentionBox({ item, onChange }: { item: TodayStop; onChange: (next: To
     <label
       htmlFor={inputId}
       className={`mt-3 flex cursor-pointer items-start gap-3 rounded-lg border p-3 ${
-        flagged ? 'border-amber-400/60 bg-amber-500/15' : 'border-border bg-background/60'
+        flagged ? 'border-[color:var(--tms-badge-orange)]/30 bg-[color:var(--tms-badge-orange-tint)]' : 'border-border bg-background/60'
       }`}
     >
       <span className="relative mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center">
         <input
           id={inputId}
           type="checkbox"
-          className="peer h-6 w-6 cursor-pointer appearance-none rounded-md border-2 border-muted-foreground/70 bg-background checked:border-amber-400 checked:bg-amber-400 disabled:opacity-60"
+          className="peer h-6 w-6 cursor-pointer appearance-none rounded-md border-2 border-muted-foreground/70 bg-background checked:border-[color:var(--tms-badge-orange)] checked:bg-[color:var(--tms-badge-orange)] disabled:opacity-60"
           checked={flagged}
           disabled={saving}
           onChange={() => void toggle()}
@@ -75,7 +75,7 @@ function DetentionBox({ item, onChange }: { item: TodayStop; onChange: (next: To
           : <Check className="pointer-events-none absolute hidden h-4 w-4 text-background peer-checked:block" strokeWidth={3} aria-hidden="true" />}
       </span>
       <span className="min-w-0">
-        <span className={`block text-base font-semibold ${flagged ? 'text-amber-200' : 'text-foreground'}`}>
+        <span className={`block text-base font-semibold ${flagged ? 'text-[color:var(--tms-badge-orange)]' : 'text-foreground'}`}>
           Detention{flagged ? ' — flagged' : ''}
         </span>
         <span className="block text-sm text-muted-foreground">
@@ -95,7 +95,7 @@ function PodStatus({ load, doc, onView }: { load: PaperworkLoad; doc: TripDoc | 
   return (
     <div className="mt-3 flex flex-col gap-2">
       {bad ? (
-        <p className="flex items-start gap-2 rounded-lg bg-red-500/10 p-3 text-sm text-red-200">
+        <p className="flex items-start gap-2 rounded-lg bg-[color:var(--tms-badge-red-tint)] p-3 text-sm text-[color:var(--tms-badge-red)]">
           <FileWarning className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
           <span>
             <span className="font-semibold">{pod.legibility === 'UNREADABLE' ? 'POD unreadable' : 'POD hard to read'}</span>
@@ -103,7 +103,7 @@ function PodStatus({ load, doc, onView }: { load: PaperworkLoad; doc: TripDoc | 
           </span>
         </p>
       ) : (
-        <p className="flex items-center gap-2 text-sm text-emerald-200">
+        <p className="flex items-center gap-2 text-sm text-[color:var(--tms-badge-green)]">
           <Check className="h-4 w-4" aria-hidden="true" />
           POD on file{pod.pages > 1 ? ` · ${pod.pages} pages` : ''}
         </p>
@@ -231,8 +231,8 @@ function clock(iso: string | null): string {
 
 function StatusPill({ tone, children }: { tone: 'sky' | 'emerald' | 'slate'; children: React.ReactNode }) {
   const cls = tone === 'emerald'
-    ? 'bg-emerald-400/20 text-emerald-100'
-    : tone === 'sky' ? 'bg-sky-400/20 text-sky-100' : 'bg-muted text-muted-foreground'
+    ? 'bg-[color:var(--tms-badge-green-tint)] text-[color:var(--tms-badge-green)]'
+    : tone === 'sky' ? 'bg-[color:var(--tms-badge-blue-tint)] text-[color:var(--tms-badge-blue)]' : 'bg-muted text-muted-foreground'
   return <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-bold ${cls}`}>{children}</span>
 }
 
@@ -377,12 +377,12 @@ export function TodayStops({
         return (
           <li
             key={keyOf(item)}
-            className={`rounded-xl border p-4 ${delivery ? 'border-emerald-400/40 bg-emerald-500/10' : 'border-sky-400/40 bg-sky-500/10'}`}
+            className={`rounded-xl border p-4 ${delivery ? 'border-[color:var(--tms-badge-green)]/30 bg-[color:var(--tms-badge-green-tint)]' : 'border-[color:var(--tms-badge-blue)]/30 bg-[color:var(--tms-badge-blue-tint)]'}`}
           >
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-bold uppercase tracking-wide ${
-                  delivery ? 'bg-emerald-400/20 text-emerald-200' : 'bg-sky-400/20 text-sky-200'
+                  delivery ? 'bg-[color:var(--tms-badge-green-tint)] text-[color:var(--tms-badge-green)]' : 'bg-[color:var(--tms-badge-blue-tint)] text-[color:var(--tms-badge-blue)]'
                 }`}>
                   {delivery ? <PackageOpen className="h-3.5 w-3.5" aria-hidden="true" /> : <Truck className="h-3.5 w-3.5" aria-hidden="true" />}
                   {delivery ? 'Delivery' : 'Pickup'}
@@ -446,7 +446,7 @@ export function TodayStops({
 
             {showEta && (
               <p className="mt-3 flex items-center gap-2 rounded-lg bg-background/50 px-3 py-2 text-sm">
-                <Navigation className="h-4 w-4 shrink-0 text-emerald-300" aria-hidden="true" />
+                <Navigation className="h-4 w-4 shrink-0 text-[color:var(--tms-badge-green)]" aria-hidden="true" />
                 <span className="text-foreground">
                   <span className="font-bold">ETA {clock(stop.etaAt)}</span>
                   <span className="text-muted-foreground">
@@ -544,7 +544,7 @@ export function TodayStops({
     <>
     {route ? (
       <div className="mb-3 rounded-xl border border-border bg-card px-3 py-3">
-        <RouteStrip progress={route} title="Today's route" dark />
+        <RouteStrip progress={route} title="Today's route" />
       </div>
     ) : null}
     <ul className="flex flex-col gap-3">
@@ -553,7 +553,7 @@ export function TodayStops({
         <li className="mt-1">
           <button type="button" onClick={() => setShowDone((v) => !v)} aria-expanded={showDone}
             className="flex w-full items-center justify-between rounded-xl border border-border bg-card px-4 py-3 text-left">
-            <span className="flex items-center gap-2 text-sm font-bold text-foreground"><Check className="h-4 w-4 text-emerald-300" aria-hidden="true" /> Completed · {doneItems.length}</span>
+            <span className="flex items-center gap-2 text-sm font-bold text-foreground"><Check className="h-4 w-4 text-[color:var(--tms-badge-green)]" aria-hidden="true" /> Completed · {doneItems.length}</span>
             <span className="text-xs text-muted-foreground">{showDone ? 'Hide' : 'Show'} — open one to add a document, the trailer or where the paperwork is</span>
           </button>
         </li>

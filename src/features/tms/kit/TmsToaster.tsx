@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import type { CSSProperties } from 'react'
-import { useLocation } from 'react-router-dom'
 import { Toaster } from 'sonner'
 
 /** A phone-sized viewport, read once at mount (nobody resizes a phone). */
@@ -41,14 +40,11 @@ const VARS = {
 } as CSSProperties
 
 /**
- * App-wide toaster. Themed card toasts everywhere except `/driver/*` (the dark driver PWA
- * keeps sonner's own look until S3).
+ * App-wide toaster: the same themed card toast on every surface, driver PWA included.
  */
 export function TmsToaster() {
-  const { pathname } = useLocation()
   const theme = useHtmlTheme()
   const position = isPhone() ? 'top-center' : 'bottom-right'
-  if (pathname.startsWith('/driver')) return <Toaster position={position} richColors />
   return <Toaster className="tms-portal" position={position} richColors={false} theme={theme} style={VARS} />
 }
 

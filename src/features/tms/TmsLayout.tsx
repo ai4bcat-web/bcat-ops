@@ -1,73 +1,47 @@
 /**
- * The shell every `/tms/*` page renders inside.
+ * The one staff shell: every authenticated page renders inside it — `/tms/*` pages in page
+ * scroll, the legacy BCAT Ops pages in `fill` mode.
  *
- * The sidebar is the same `buildNavSections` the legacy rail uses, so a page appears in
- * both places or neither. The Shipments item lists the saved views this user is allowed
+ * The sidebar is `buildNavSections`, so a page appears in the rail or not at all. The Shipments item lists the saved views this user is allowed
  * to see; `TmsShell` turns them into `/tms/shipments/view/<slug>` links.
  */
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { TmsShell, type TmsLiveChild } from '@/features/tms/TmsShell'
 import { useOwnershipDivisions, useShipmentViews } from '@/features/tms/useShipmentViews'
 import { buildNavSections, companyOptions, TMS_PAGE_KEY, tmsBreadcrumb } from '@/lib/navSections'
-import { MOVEMENT_STATUSES } from '@/lib/brokerageCharts'
-import { boardStatusOf, viewCallerOf, viewsVisibleTo } from '@/lib/shipmentViewDefs'
+import { viewCallerOf, viewsVisibleTo } from '@/lib/shipmentViewDefs'
 import { useAuth } from '@/hooks/useAuth'
 import { useCheckCallWorklist } from '@/hooks/useCheckCallWorklist'
-import { useShipments, type ShipmentListRow } from '@/hooks/useShipments'
+import { useShipments } from '@/hooks/useShipments'
 import { useStaff } from '@/hooks/useStaff'
 import { personName } from '@/lib/roles'
-import type { UserProfileRecord } from '@/types/tms'
+import { useAppStore } from '@/store/useAppStore'
+import { DispatchDrawer } from '@/features/dispatch/DispatchDrawer'
+import { useShellBadgeCounts, movingShipments } from '@/features/tms/useShellBadgeCounts'
 
-/** The board status facets that mean a load is still in a rep's working queue. */
-const WORKING_BOARD_STATUSES = ['OPEN', 'COVERED', 'DISPATCHED', 'ARRIVED', 'DEPARTED']
-
-function isWorking(row: ShipmentListRow): boolean {
-  return WORKING_BOARD_STATUSES.includes(boardStatusOf({ status: row.status, voidedAt: row.voidedAt }))
+function LegacyRuntime() {
+  const { user } = useAuth()
+  const initializeData = useAppStore((s) => s.initializeData)
+  useEffect(() => {
+    if (user?.email) initializeData(user.email)
+  }, [user?.email, initializeData])
+  return null
 }
 
-function profileForRep(
-  repId: string,
-  staffById: Record<string, UserProfileRecord>,
-  staff: UserProfileRecord[],
-): UserProfileRecord | undefined {
-  return staffById[repId] ?? staff.find((p) => p.email === repId)
-}
-
-/**
- * Sidebar badge counts for the TMS rail.
- *
- * The legacy `NavBar` has its own resolver wired to the old BCAT Ops chrome; this one
- * lives here so the MVMNT rail can count the same records without being coupled to the
- * legacy badge machinery. That lets Step P ship the My queue / Team queue counts under
- * `/tms/*` while the rest of the app keeps its existing rail untouched.
- */
-function useTmsBadgeCounts(
-  shipments: ShipmentListRow[],
-  userId: string,
-  staffById: Record<string, UserProfileRecord>,
-  staff: UserProfileRecord[],
-  myTeamKeys: string[],
-): Record<string, number> {
-  return useMemo(() => {
-    const myTeam = new Set(myTeamKeys)
-    let myQueue = 0
-    let teamQueue = 0
-    for (const row of shipments) {
-      if (!isWorking(row)) continue
-      const repId = row.dispatcherAssignedId
-      if (!repId) continue
-      const profile = profileForRep(repId, staffById, staff)
-      const repTeamKeys = profile?.teamKeys ?? []
-      if (repId === userId || profile?.id === userId || profile?.email === userId) {
-        myQueue++
-      }
-      if (repTeamKeys.some((k) => myTeam.has(k))) {
-        teamQueue++
-      }
-    }
-    return { myQueue, teamQueue }
-  }, [shipments, userId, staffById, staff, myTeamKeys])
+/** Dispatch beside every legacy page, for those who can open it; hideable per person. */
+function LegacyAside() {
+  const { user } = useAuth()
+  const [isDesktop, setIsDesktop] = useState(
+    () => typeof window === 'undefined' || window.matchMedia('(min-width: 901px)').matches,
+  )
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 901px)')
+    const onChange = () => setIsDesktop(mq.matches)
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [])
+  return <DispatchDrawer key={user?.email ?? 'anon'} isDesktop={isDesktop} />
 }
 
 export function TmsLayout() {
@@ -104,27 +78,24 @@ export function TmsLayout() {
   )
 
   const userId = user?.email ?? user?.userId ?? ''
-  const teamCounts = useTmsBadgeCounts(
+  const badgeCounts = useShellBadgeCounts({
     shipments,
     userId,
-    byId,
-    staff.staff,
-    me?.teamKeys ?? [],
-  )
+    staffById: byId,
+    staff: staff.staff,
+    myTeamKeys: me?.teamKeys ?? [],
+  })
 
   // "Tracking" is the loads moving right now, the same definition the dashboard's Tracked
   // metric uses. The rail lists the six most recently updated ones.
-  const { trackedCount, trackedLoads } = useMemo(() => {
-    const moving = shipments.filter(
-      (row) => row.loadStatus != null && MOVEMENT_STATUSES.includes(row.loadStatus) && !row.voidedAt,
-    )
-    const live: TmsLiveChild[] = [...moving]
-      .sort((a, b) => (b.lastUpdateAt ?? '').localeCompare(a.lastUpdateAt ?? ''))
-      .slice(0, 6)
-      .map((row) => ({ id: row.id, label: row.number, sub: row.customerName ?? null, to: `/tms/shipments/${row.id}` }))
-    return { trackedCount: moving.length, trackedLoads: live }
-  }, [shipments])
-  const badgeCounts = useMemo(() => ({ ...teamCounts, tracking: trackedCount }), [teamCounts, trackedCount])
+  const trackedLoads = useMemo<TmsLiveChild[]>(
+    () =>
+      [...movingShipments(shipments)]
+        .sort((a, b) => (b.lastUpdateAt ?? '').localeCompare(a.lastUpdateAt ?? ''))
+        .slice(0, 6)
+        .map((row) => ({ id: row.id, label: row.number, sub: row.customerName ?? null, to: `/tms/shipments/${row.id}` })),
+    [shipments],
+  )
 
   // The bell's number is the check-call worklist's due count: one `checkCallState`
   // function behind the legacy rail, the Check calls page and the notifier.
@@ -134,6 +105,9 @@ export function TmsLayout() {
   const companies = useMemo(() => companyOptions(sections, divisions), [sections, divisions])
 
   const email = user?.email ?? ''
+  // Every route that is not under /tms is a legacy page: same shell, but the content area is
+  // a fixed-height host (the pages scroll themselves) with the dispatch column beside it.
+  const legacy = !location.pathname.startsWith('/tms')
   const initial = personName({ name: me?.name, email }, 'Team member').charAt(0).toUpperCase()
   return (
     <TmsShell
@@ -149,8 +123,19 @@ export function TmsLayout() {
       trackedLoads={trackedLoads}
       onLogout={() => { void logout() }}
       onSearch={(q) => navigate(`/tms/shipments?q=${encodeURIComponent(q)}`)}
+      fill={legacy}
+      aside={legacy ? <LegacyAside /> : undefined}
     >
-      <Outlet />
+      {legacy ? (
+        <>
+          <LegacyRuntime />
+          <div className="tms-legacy-host">
+            <Outlet />
+          </div>
+        </>
+      ) : (
+        <Outlet />
+      )}
     </TmsShell>
   )
 }

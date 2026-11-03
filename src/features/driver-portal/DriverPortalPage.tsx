@@ -6,6 +6,7 @@ import { ApplicationForm } from './ApplicationForm'
 import { getRequirement } from '@/lib/complianceRequirements'
 import { getOnboardingTemplate } from '@/lib/onboardingTemplates'
 import type { DriverApplicationDraft } from '@/lib/schemas'
+import { TmsPublicFrame } from '@/features/tms/kit/TmsPublicFrame'
 
 // Driver-facing contact info shown on the expired/error page.
 const CONTACT_PHONE = '(847) 450-0899'
@@ -15,21 +16,21 @@ const HELP_EMAIL = 'hr@bcatcorp.com'
 
 // ── Shared styles (design-system tokens, matching the admin app) ────────────────
 const cardStyle: CSSProperties = {
-  background: 'var(--ds-surface)',
-  border: '1px solid var(--ds-border)',
+  background: 'var(--tms-card)',
+  border: '1px solid var(--tms-border)',
   borderRadius: 12,
-  boxShadow: 'var(--sh-sm)',
+  boxShadow: 'var(--tms-shadow)',
   padding: 14,
 }
 const btnPrimary: CSSProperties = {
   display: 'inline-flex', alignItems: 'center', gap: 7,
   borderRadius: 9, padding: '11px 22px', fontSize: 14, fontWeight: 600,
-  background: 'var(--ds-blue)', color: '#fff', border: 'none', cursor: 'pointer',
+  background: 'var(--tms-primary)', color: 'var(--tms-on-primary)', border: 'none', cursor: 'pointer',
 }
-const btnSuccess: CSSProperties = { ...btnPrimary, background: 'var(--ds-green)' }
+const btnSuccess: CSSProperties = { ...btnPrimary, background: 'var(--tms-badge-green)' }
 const inputStyle: CSSProperties = {
-  borderRadius: 7, border: '1px solid var(--ds-border)', padding: '9px 12px',
-  fontSize: 14, background: 'var(--ds-surface)', color: 'var(--ds-t1)', outline: 'none',
+  borderRadius: 7, border: '1px solid var(--tms-border)', padding: '9px 12px',
+  fontSize: 14, background: 'var(--tms-card)', color: 'var(--tms-text)', outline: 'none',
 }
 // Centered content column — matches the redesign spec (720px, generous padding).
 const PORTAL_COL = 'mx-auto w-full px-6 py-8'
@@ -41,14 +42,14 @@ const chipBase: CSSProperties = {
 
 function statusChip(item: ChecklistItem) {
   if (item.status === 'COMPLETE' || item.status === 'WAIVED')
-    return <span style={{ ...chipBase, background: 'var(--ds-green-bg)', color: 'var(--ds-green)' }}><CheckCircle2 size={13} /> Approved</span>
+    return <span style={{ ...chipBase, background: 'var(--tms-badge-green-tint)', color: 'var(--tms-badge-green)' }}><CheckCircle2 size={13} /> Approved</span>
   if (item.status === 'PENDING_REVIEW')
-    return <span style={{ ...chipBase, background: 'var(--ds-blue-bg)', color: 'var(--ds-blue-dark)' }}><Clock size={13} /> Awaiting review</span>
+    return <span style={{ ...chipBase, background: 'var(--tms-badge-blue-tint)', color: 'var(--tms-badge-blue)' }}><Clock size={13} /> Awaiting review</span>
   if (item.rejectionReason)
-    return <span style={{ ...chipBase, background: 'var(--ds-amber-bg)', color: 'var(--ds-amber)' }}><AlertTriangle size={13} /> Needs attention</span>
+    return <span style={{ ...chipBase, background: 'var(--tms-badge-orange-tint)', color: 'var(--tms-badge-orange)' }}><AlertTriangle size={13} /> Needs attention</span>
   if (item.status === 'NOT_APPLICABLE')
-    return <span style={{ ...chipBase, background: 'var(--ds-bg-3)', color: 'var(--ds-t3)' }}>N/A</span>
-  return <span style={{ ...chipBase, background: 'var(--ds-bg-3)', color: 'var(--ds-t2)' }}>To do</span>
+    return <span style={{ ...chipBase, background: 'var(--tms-surface-hover)', color: 'var(--tms-muted)' }}>N/A</span>
+  return <span style={{ ...chipBase, background: 'var(--tms-surface-hover)', color: 'var(--tms-text-2)' }}>To do</span>
 }
 
 export function DriverPortalPage() {
@@ -96,11 +97,11 @@ export function DriverPortalPage() {
     return (
       <Shell>
         <div className="mx-auto max-w-md px-4 py-16 text-center">
-          <AlertTriangle className="mx-auto mb-4" size={40} style={{ color: 'var(--ds-amber)' }} />
-          <h1 className="mb-2 text-xl font-semibold" style={{ color: 'var(--ds-t1)' }}>{loadError}</h1>
-          <p style={{ color: 'var(--ds-t3)' }}>
+          <AlertTriangle className="mx-auto mb-4" size={40} style={{ color: 'var(--tms-badge-orange)' }} />
+          <h1 className="mb-2 text-xl font-semibold" style={{ color: 'var(--tms-text)' }}>{loadError}</h1>
+          <p style={{ color: 'var(--tms-muted)' }}>
             Please contact Ivan Cartage to get a new link:<br />
-            <span style={{ fontWeight: 600, color: 'var(--ds-t2)' }}>{CONTACT_PHONE}</span> · {CONTACT_EMAIL}
+            <span style={{ fontWeight: 600, color: 'var(--tms-text-2)' }}>{CONTACT_PHONE}</span> · {CONTACT_EMAIL}
           </p>
         </div>
       </Shell>
@@ -108,7 +109,7 @@ export function DriverPortalPage() {
   }
 
   if (loading || !state) {
-    return <Shell><div className="px-4 py-16 text-center" style={{ color: 'var(--ds-t3)' }}>Loading…</div></Shell>
+    return <Shell><div className="px-4 py-16 text-center" style={{ color: 'var(--tms-muted)' }}>Loading…</div></Shell>
   }
 
   if (view === 'application') {
@@ -152,35 +153,35 @@ export function DriverPortalPage() {
     <Shell driver={state.firstName}>
       <div className={PORTAL_COL} style={PORTAL_MAXW}>
         {usingMock && (
-          <div className="mb-3 rounded-lg px-3 py-2 text-xs" style={{ background: 'var(--ds-amber-bg)', color: 'var(--ds-amber)' }}>
+          <div className="mb-3 rounded-lg px-3 py-2 text-xs" style={{ background: 'var(--tms-badge-orange-tint)', color: 'var(--tms-badge-orange)' }}>
             Demo mode — running on local mock data (no backend configured).
           </div>
         )}
-        <h1 className="text-2xl font-bold" style={{ color: 'var(--ds-t1)' }}>Welcome {state.firstName} — let's get you on the road.</h1>
-        <p className="mt-1" style={{ color: 'var(--ds-t3)' }}>Complete the items below. Most drivers finish in about 20 minutes.</p>
+        <h1 className="text-2xl font-bold" style={{ color: 'var(--tms-text)' }}>Welcome {state.firstName} — let's get you on the road.</h1>
+        <p className="mt-1" style={{ color: 'var(--tms-muted)' }}>Complete the items below. Most drivers finish in about 20 minutes.</p>
 
         {/* Progress card */}
         <div className="mt-4 mb-6" style={{ ...cardStyle, padding: '16px 18px' }}>
           <div className="mb-2 flex items-baseline justify-between">
-            <span className="text-sm font-semibold" style={{ color: 'var(--ds-t1)' }}>Your progress</span>
-            <span style={{ fontSize: 13, color: 'var(--ds-t3)' }}>
-              {totalCount > 0 && <span style={{ color: 'var(--ds-t2)', fontWeight: 600 }}>{doneCount} of {totalCount}</span>}
+            <span className="text-sm font-semibold" style={{ color: 'var(--tms-text)' }}>Your progress</span>
+            <span style={{ fontSize: 13, color: 'var(--tms-muted)' }}>
+              {totalCount > 0 && <span style={{ color: 'var(--tms-text-2)', fontWeight: 600 }}>{doneCount} of {totalCount}</span>}
               {totalCount > 0 && ' · '}
-              <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--ds-t2)', fontWeight: 600 }}>{state.progressPct}%</span>
+              <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--tms-text-2)', fontWeight: 600 }}>{state.progressPct}%</span>
             </span>
           </div>
-          <div style={{ height: 10, overflow: 'hidden', borderRadius: 999, background: 'var(--ds-bg)', border: '1px solid var(--ds-border)' }}>
-            <div style={{ height: '100%', width: `${state.progressPct}%`, borderRadius: 999, background: state.progressPct === 100 ? 'var(--ds-green)' : 'linear-gradient(90deg, var(--ds-blue-dark), var(--ds-blue))', transition: 'width 250ms' }} />
+          <div style={{ height: 10, overflow: 'hidden', borderRadius: 999, background: 'var(--tms-bg)', border: '1px solid var(--tms-border)' }}>
+            <div style={{ height: '100%', width: `${state.progressPct}%`, borderRadius: 999, background: state.progressPct === 100 ? 'var(--tms-badge-green)' : 'linear-gradient(90deg, var(--tms-primary-ink), var(--tms-primary))', transition: 'width 250ms' }} />
           </div>
         </div>
 
         {state.checklist.length === 0 ? (
           <div style={{ ...cardStyle, textAlign: 'center' }}>
-            <AlertTriangle className="mx-auto mb-3" size={28} style={{ color: 'var(--ds-amber)' }} />
-            <div style={{ fontWeight: 600, color: 'var(--ds-t1)' }}>Your onboarding isn’t set up yet.</div>
-            <div className="mt-1 text-sm" style={{ color: 'var(--ds-t3)' }}>
+            <AlertTriangle className="mx-auto mb-3" size={28} style={{ color: 'var(--tms-badge-orange)' }} />
+            <div style={{ fontWeight: 600, color: 'var(--tms-text)' }}>Your onboarding isn’t set up yet.</div>
+            <div className="mt-1 text-sm" style={{ color: 'var(--tms-muted)' }}>
               Please contact Ivan Cartage so we can get you started:<br />
-              <span style={{ fontWeight: 600, color: 'var(--ds-t2)' }}>{CONTACT_PHONE}</span> · {CONTACT_EMAIL}
+              <span style={{ fontWeight: 600, color: 'var(--tms-text-2)' }}>{CONTACT_PHONE}</span> · {CONTACT_EMAIL}
             </div>
           </div>
         ) : (
@@ -192,15 +193,15 @@ export function DriverPortalPage() {
             return (
               <div key={g.phase} className="mb-5" style={{ opacity: locked ? 0.55 : 1 }}>
                 <div className="mb-2 flex items-center gap-2">
-                  <div className="text-xs font-bold uppercase" style={{ color: 'var(--ds-t3)', letterSpacing: '0.05em' }}>
+                  <div className="text-xs font-bold uppercase" style={{ color: 'var(--tms-muted)', letterSpacing: '0.05em' }}>
                     {isPhased ? `Phase ${g.phase} · ` : ''}{title}
                   </div>
-                  {locked && <span style={{ ...chipBase, background: 'var(--ds-bg-3)', color: 'var(--ds-t3)' }}><Lock size={12} /> Locked</span>}
-                  {isDonePhase && <span style={{ ...chipBase, background: 'var(--ds-green-bg)', color: 'var(--ds-green)' }}><CheckCircle2 size={12} /> Done</span>}
-                  {isCurrent && <span style={{ ...chipBase, background: 'var(--ds-blue-bg)', color: 'var(--ds-blue-dark)' }}>Current step</span>}
+                  {locked && <span style={{ ...chipBase, background: 'var(--tms-surface-hover)', color: 'var(--tms-muted)' }}><Lock size={12} /> Locked</span>}
+                  {isDonePhase && <span style={{ ...chipBase, background: 'var(--tms-badge-green-tint)', color: 'var(--tms-badge-green)' }}><CheckCircle2 size={12} /> Done</span>}
+                  {isCurrent && <span style={{ ...chipBase, background: 'var(--tms-primary-tint)', color: 'var(--tms-primary-ink)' }}>Current step</span>}
                 </div>
                 {locked && (
-                  <div className="mb-2 text-sm" style={{ color: 'var(--ds-t3)' }}>
+                  <div className="mb-2 text-sm" style={{ color: 'var(--tms-muted)' }}>
                     Unlocks once you upload everything in Phase {g.phase - 1}.
                   </div>
                 )}
@@ -216,14 +217,14 @@ export function DriverPortalPage() {
         )}
 
         {/* Footer help card */}
-        <div className="mt-8" style={{ ...cardStyle, padding: '16px 18px', background: 'var(--ds-bg)' }}>
-          <div className="text-sm font-semibold" style={{ color: 'var(--ds-t1)' }}>Need a hand?</div>
-          <div className="mt-1 text-sm" style={{ color: 'var(--ds-t3)' }}>
+        <div className="mt-8" style={{ ...cardStyle, padding: '16px 18px', background: 'var(--tms-bg)' }}>
+          <div className="text-sm font-semibold" style={{ color: 'var(--tms-text)' }}>Need a hand?</div>
+          <div className="mt-1 text-sm" style={{ color: 'var(--tms-muted)' }}>
             Our onboarding team is happy to help with any step.
           </div>
           <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-sm">
-            <a href={`mailto:${HELP_EMAIL}`} style={{ color: 'var(--ds-blue)', fontWeight: 600, textDecoration: 'none' }}>{HELP_EMAIL}</a>
-            <a href={`tel:${CONTACT_PHONE.replace(/[^\d+]/g, '')}`} style={{ color: 'var(--ds-t2)', fontWeight: 600, textDecoration: 'none' }}>{CONTACT_PHONE}</a>
+            <a href={`mailto:${HELP_EMAIL}`} style={{ color: 'var(--tms-primary)', fontWeight: 600, textDecoration: 'none' }}>{HELP_EMAIL}</a>
+            <a href={`tel:${CONTACT_PHONE.replace(/[^\d+]/g, '')}`} style={{ color: 'var(--tms-text-2)', fontWeight: 600, textDecoration: 'none' }}>{CONTACT_PHONE}</a>
           </div>
         </div>
       </div>
@@ -287,24 +288,24 @@ function ChecklistRow({ item, token, appStatus, locked: phaseLocked = false, onO
     <div style={cardStyle}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div style={{ fontWeight: 600, color: 'var(--ds-t1)' }}>
+          <div style={{ fontWeight: 600, color: 'var(--tms-text)' }}>
             {item.label}
-            {item.required && <span style={{ marginLeft: 6, fontSize: 12, color: 'var(--ds-red)' }}>required</span>}
+            {item.required && <span style={{ marginLeft: 6, fontSize: 12, color: 'var(--tms-badge-red)' }}>required</span>}
           </div>
-          {req?.helpText && <div className="mt-0.5 text-sm" style={{ color: 'var(--ds-t3)' }}>{req.helpText}</div>}
+          {req?.helpText && <div className="mt-0.5 text-sm" style={{ color: 'var(--tms-muted)' }}>{req.helpText}</div>}
           {links.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-2">
               {links.map((l) => (
                 <a key={l.url} href={l.url} target="_blank" rel="noopener noreferrer"
                   className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-sm font-medium"
-                  style={{ background: 'var(--ds-blue-bg)', color: 'var(--ds-blue-dark)', textDecoration: 'none' }}>
+                  style={{ background: 'var(--tms-primary-tint)', color: 'var(--tms-primary-ink)', textDecoration: 'none' }}>
                   <ExternalLink size={13} /> {l.label}
                 </a>
               ))}
             </div>
           )}
           {item.rejectionReason && (
-            <div className="mt-2 rounded-md px-2.5 py-1.5 text-sm" style={{ background: 'var(--ds-amber-bg)', color: 'var(--ds-amber)' }}>
+            <div className="mt-2 rounded-md px-2.5 py-1.5 text-sm" style={{ background: 'var(--tms-badge-orange-tint)', color: 'var(--tms-badge-orange)' }}>
               <span style={{ fontWeight: 600 }}>Needs attention:</span> {item.rejectionReason}
             </div>
           )}
@@ -320,7 +321,7 @@ function ChecklistRow({ item, token, appStatus, locked: phaseLocked = false, onO
       )}
 
       {inReview && (
-        <div className="mt-2 text-xs" style={{ color: 'var(--ds-t3)' }}>
+        <div className="mt-2 text-xs" style={{ color: 'var(--tms-muted)' }}>
           Submitted for review — you can still change it here until we review it.
         </div>
       )}
@@ -328,7 +329,7 @@ function ChecklistRow({ item, token, appStatus, locked: phaseLocked = false, onO
       {!isApplication && canUpload && editable && (
         <div className="mt-3 flex flex-wrap items-center gap-2">
           {item.requiresExpiration && (
-            <label className="text-sm inline-flex items-center gap-1.5" style={{ color: 'var(--ds-t2)' }}>
+            <label className="text-sm inline-flex items-center gap-1.5" style={{ color: 'var(--tms-text-2)' }}>
               Expiration <input type="date" value={expiration} onChange={(e) => setExpiration(e.target.value)} style={inputStyle} />
             </label>
           )}
@@ -356,7 +357,7 @@ function ChecklistRow({ item, token, appStatus, locked: phaseLocked = false, onO
 
       {!isApplication && needsDate && editable && (
         <div className="mt-3 flex flex-wrap items-center gap-2">
-          <label className="text-sm inline-flex items-center gap-1.5" style={{ color: 'var(--ds-t2)' }}>
+          <label className="text-sm inline-flex items-center gap-1.5" style={{ color: 'var(--tms-text-2)' }}>
             Date drug test completed
             <input type="date" value={completedDate} onChange={(e) => setCompletedDate(e.target.value)} style={inputStyle} />
           </label>
@@ -376,29 +377,13 @@ function initialsOf(name?: string): string {
 function Shell({ children, driver }: { children: React.ReactNode; driver?: string }) {
   const initials = initialsOf(driver)
   return (
-    <div style={{ minHeight: '100vh', background: 'var(--ds-bg)', display: 'flex', flexDirection: 'column' }}>
-      {/* Black sticky top bar — carrier identity, always visible while the driver scrolls. */}
-      <header style={{ position: 'sticky', top: 0, zIndex: 20, background: '#0e1116', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
-        <div className="mx-auto flex w-full items-center gap-3 px-6" style={{ ...PORTAL_MAXW, height: 60 }}>
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg" style={{ background: 'linear-gradient(135deg, var(--ds-blue) 0%, var(--ds-blue-dark) 100%)' }}>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M5 4h7a4 4 0 0 1 0 8H5z M5 12h8a4 4 0 0 1 0 8H5z" fill="white" /></svg>
-          </div>
-          <div>
-            <div className="text-sm font-bold" style={{ color: '#fff', letterSpacing: '0.02em' }}>IVAN <span style={{ color: 'var(--ds-blue)' }}>CARTAGE</span></div>
-            <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)', marginTop: 1 }}>Driver onboarding</div>
-          </div>
-          {initials && (
-            <div className="ml-auto flex items-center justify-center" style={{ width: 34, height: 34, borderRadius: '50%', background: 'rgba(255,255,255,0.12)', color: '#fff', fontSize: 13, fontWeight: 600 }} title={driver}>
-              {initials}
-            </div>
-          )}
+    <TmsPublicFrame brand="IVAN CARTAGE" subtitle="Driver onboarding" width="lg">
+      {initials && (
+        <div className="flex items-center justify-center" style={{ alignSelf: 'flex-end', width: 34, height: 34, borderRadius: '50%', background: 'var(--tms-primary-tint)', color: 'var(--tms-primary-ink)', fontSize: 13, fontWeight: 600 }} title={driver}>
+          {initials}
         </div>
-      </header>
-      {/* Center the content on the page — vertically + horizontally — and scroll when it's tall.
-          `margin: auto` in a flex column centers vertically without clipping the top on overflow. */}
-      <main style={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'flex-start' }}>
-        <div style={{ width: '100%', maxWidth: 720 }}>{children}</div>
-      </main>
-    </div>
+      )}
+      {children}
+    </TmsPublicFrame>
   )
 }

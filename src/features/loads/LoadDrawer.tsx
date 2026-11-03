@@ -105,10 +105,10 @@ function EditLoadDialog({
       >
         {/* Fixed header */}
         <div style={{
-          padding: '16px 52px 16px 24px', borderBottom: '1px solid var(--ds-border)',
+          padding: '16px 52px 16px 24px', borderBottom: '1px solid var(--tms-border)',
           flexShrink: 0,
         }}>
-          <h2 style={{ fontSize: 16, fontWeight: 600, color: 'var(--ds-t1)', margin: 0 }}>
+          <h2 style={{ fontSize: 16, fontWeight: 600, color: 'var(--tms-text)', margin: 0 }}>
             {`Edit — ${load?.aljexId ?? 'Load'}`}
           </h2>
         </div>
@@ -190,9 +190,9 @@ function EditLoadDialog({
                     <ToggleCard
                       active={!!field.value}
                       onToggle={() => field.onChange(!field.value)}
-                      accent="#15803d"
-                      tint="#f0fdf4"
-                      icon={field.value ? <CheckCircle2 style={{ width: 20, height: 20, color: '#16a34a' }} /> : <Circle style={{ width: 20, height: 20, color: 'var(--ds-t3)' }} />}
+                      accent="var(--tms-badge-green)"
+                      tint="var(--tms-badge-green-tint)"
+                      icon={field.value ? <CheckCircle2 style={{ width: 20, height: 20, color: 'var(--tms-badge-green)' }} /> : <Circle style={{ width: 20, height: 20, color: 'var(--tms-muted)' }} />}
                       titleActive="Ready to Invoice"
                       titleIdle="Mark as Ready to Invoice"
                       hintActive="Click to undo"
@@ -210,13 +210,13 @@ function EditLoadDialog({
 
         {/* Fixed footer */}
         <div style={{
-          padding: '12px 24px', borderTop: '1px solid var(--ds-border)',
+          padding: '12px 24px', borderTop: '1px solid var(--tms-border)',
           display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0,
-          background: 'var(--ds-surface)',
+          background: 'var(--tms-card)',
         }}>
           {/* A load is never deleted here: the PRO is permanent (Ryne, 2026-10-28). */}
           {Object.keys(errors).length > 0 && (
-            <span style={{ flex: 1, fontSize: 12, color: 'var(--ds-red, #dc2626)' }}>
+            <span style={{ flex: 1, fontSize: 12, color: 'var(--tms-badge-red)' }}>
               Please fill in the required fields above.
             </span>
           )}
@@ -601,8 +601,8 @@ export function LoadDrawer() {
   const proDialog = proDraft !== null && load && (
     <Dialog open onOpenChange={(open) => { if (!open) setProDraft(null) }}>
       <DialogContent className="tms-portal" style={{ maxWidth: 420 }}>
-        <h2 style={{ fontSize: 16, fontWeight: 600, color: 'var(--ds-t1)', margin: 0 }}>Change Pro #</h2>
-        <p style={{ fontSize: 12.5, color: 'var(--ds-t3)', margin: '6px 0 0' }}>
+        <h2 style={{ fontSize: 16, fontWeight: 600, color: 'var(--tms-text)', margin: 0 }}>Change Pro #</h2>
+        <p style={{ fontSize: 12.5, color: 'var(--tms-muted)', margin: '6px 0 0' }}>
           The new number is claimed for good. {load.aljexId || 'The old one'} stays claimed too —
           a Pro # is never reissued, so nothing can land on it again.
         </p>
@@ -655,9 +655,9 @@ export function LoadDrawer() {
   if (!isOpen) return null
 
   // ── View mode → shared SidePanel ───────────────────────────────────────────
-  // Was a Radix Sheet with its own chrome: bg-white and border-slate-200 hardcoded, a
+  // Was a Radix Sheet with its own chrome: bg-card and border-border hardcoded, a
   // 540px width and px-8/py-5 header. Every other drawer in the app is the SidePanel
-  // shell on --ds-surface / --ds-border, so this one ignored the theme and read as a
+  // shell on --tms-card / --tms-border, so this one ignored the theme and read as a
   // different component — which is what "doesn't match" was.
   // No Delete button: the PRO number on this load is permanent (Ryne, 2026-10-28).
   const panelFooter = (

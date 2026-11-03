@@ -1,14 +1,17 @@
 import { useMemo } from 'react'
 import { Link } from 'react-router-dom'
-import { FileText, ChevronRight, CheckCircle2 } from 'lucide-react'
+import { FileText, ChevronRight } from 'lucide-react'
+import { TmsBadge } from '@/features/tms/kit/TmsBadge'
+import type { TmsTone } from '@/features/tms/kit/TmsBadge'
+import { TmsEmptyState } from '@/features/tms/kit/TmsEmptyState'
 import { useAppStore } from '@/store/useAppStore'
 import { useAuth } from '@/hooks/useAuth'
 import { useAllComplianceDocuments } from '@/hooks/useAllComplianceDocuments'
 import { TRUCK_DOC_SPECS, evaluateTruckDoc } from '@/lib/truckDocs'
 
-const STATE_META: Record<'EXPIRED' | 'EXPIRING_SOON', { label: string; bg: string; fg: string; rank: number }> = {
-  EXPIRED:       { label: 'Expired',       bg: '#fef2f2', fg: '#b91c1c', rank: 0 },
-  EXPIRING_SOON: { label: 'Expiring soon', bg: '#fffbeb', fg: '#b45309', rank: 1 },
+const STATE_META: Record<'EXPIRED' | 'EXPIRING_SOON', { label: string; tone: TmsTone; rank: number }> = {
+  EXPIRED:       { label: 'Expired',       tone: 'red', rank: 0 },
+  EXPIRING_SOON: { label: 'Expiring soon', tone: 'orange', rank: 1 },
 }
 
 function shortDate(d?: string | null): string {
@@ -57,29 +60,26 @@ export function ExpiringTruckDocsWidget() {
   }, [docFor, equipment])
 
   return (
-    <div style={{ background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 12, boxShadow: 'var(--sh-sm)', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-      <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--ds-border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+    <div style={{ background: 'var(--tms-card)', border: '1px solid var(--tms-border)', borderRadius: 12, boxShadow: 'var(--tms-shadow)', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+      <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--tms-border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <FileText size={16} style={{ color: 'var(--ds-t3)' }} />
+          <FileText size={16} style={{ color: 'var(--tms-muted)' }} />
           <div>
-            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)' }}>Expiring Truck Documents</div>
-            <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 1 }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--tms-text)' }}>Expiring Truck Documents</div>
+            <div style={{ fontSize: 12, color: 'var(--tms-muted)', marginTop: 1 }}>
               {loading ? 'Loading…' : rows.length === 0 ? 'All current' : `${rows.length} need${rows.length === 1 ? 's' : ''} attention`}
             </div>
           </div>
         </div>
         {canTruckDocs && (
-          <Link to="/truck-docs" style={{ fontSize: 12, color: 'var(--ds-blue)', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
+          <Link to="/truck-docs" style={{ fontSize: 12, color: 'var(--tms-primary)', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
             View all <ChevronRight size={13} />
           </Link>
         )}
       </div>
 
       {rows.length === 0 ? (
-        <div style={{ padding: '32px 20px', textAlign: 'center', color: 'var(--ds-t3)', fontSize: 13, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
-          <CheckCircle2 size={22} style={{ color: '#15803d', opacity: 0.7 }} />
-          {loading ? 'Loading…' : 'No truck documents expiring'}
-        </div>
+        <TmsEmptyState compact title={loading ? 'Loading…' : 'No truck documents expiring'} message={null} />
       ) : (
         <div style={{ maxHeight: 320, overflowY: 'auto' }}>
           {rows.map((r, i) => {
@@ -87,28 +87,28 @@ export function ExpiringTruckDocsWidget() {
             const body = (
               <>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13.5, fontWeight: 500, color: 'var(--ds-t1)' }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 500, color: 'var(--tms-text)' }}>
                     <span style={{ fontFamily: 'var(--font-mono)' }}>{r.unit}</span> · {r.docLabel}
                   </div>
-                  <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 1 }}>
+                  <div style={{ fontSize: 12, color: 'var(--tms-muted)', marginTop: 1 }}>
                     {r.state === 'EXPIRED' ? 'Expired' : 'Due'} {shortDate(r.expiration)}
                   </div>
                 </div>
-                <span style={{ flexShrink: 0, fontSize: 11, fontWeight: 600, padding: '3px 9px', borderRadius: 999, background: meta.bg, color: meta.fg }}>{meta.label}</span>
+                <TmsBadge tone={meta.tone} style={{ flexShrink: 0 }}>{meta.label}</TmsBadge>
               </>
             )
             return canTruckDocs ? (
               <Link
                 key={`${r.truckId}-${r.docLabel}-${i}`}
                 to="/truck-docs"
-                style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 20px', borderBottom: '1px solid var(--ds-border)', textDecoration: 'none' }}
+                style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 20px', borderBottom: '1px solid var(--tms-border)', textDecoration: 'none' }}
               >
                 {body}
               </Link>
             ) : (
               <div
                 key={`${r.truckId}-${r.docLabel}-${i}`}
-                style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 20px', borderBottom: '1px solid var(--ds-border)' }}
+                style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 20px', borderBottom: '1px solid var(--tms-border)' }}
               >
                 {body}
               </div>

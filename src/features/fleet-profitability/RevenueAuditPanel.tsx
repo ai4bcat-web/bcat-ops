@@ -20,8 +20,8 @@ function shortDate(d: string): string {
 }
 
 const editSelect: React.CSSProperties = {
-  height: 26, maxWidth: 150, padding: '0 6px', borderRadius: 6, border: '1px solid var(--ds-border)',
-  background: 'var(--ds-surface)', color: 'var(--ds-t1)', fontSize: 12, fontFamily: 'inherit',
+  height: 26, maxWidth: 150, padding: '0 6px', borderRadius: 6, border: '1px solid var(--tms-border)',
+  background: 'var(--tms-card)', color: 'var(--tms-text)', fontSize: 12, fontFamily: 'inherit',
 }
 
 /** Inline editable rate ($). Commits cents on blur / Enter; Esc reverts. */
@@ -37,7 +37,7 @@ function RateCell({ cents, onCommit }: { cents: number; onCommit: (cents: number
   }
   return (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2, justifyContent: 'flex-end' }}>
-      <span style={{ color: 'var(--ds-t3)', fontSize: 12 }}>$</span>
+      <span style={{ color: 'var(--tms-muted)', fontSize: 12 }}>$</span>
       <input
         type="number" step="0.01" min="0"
         value={value}
@@ -45,7 +45,7 @@ function RateCell({ cents, onCommit }: { cents: number; onCommit: (cents: number
         onChange={(e) => setDraft(e.target.value)}
         onBlur={commit}
         onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') { setDraft(null); e.currentTarget.blur() } }}
-        style={{ width: 82, height: 26, textAlign: 'right', padding: '0 6px', borderRadius: 6, border: '1px solid var(--ds-border)', background: cents ? 'var(--ds-surface)' : '#fffbeb', color: 'var(--ds-t1)', fontSize: 12, fontFamily: 'var(--font-mono)', fontWeight: 600 }}
+        style={{ width: 82, height: 26, textAlign: 'right', padding: '0 6px', borderRadius: 6, border: '1px solid var(--tms-border)', background: cents ? 'var(--tms-card)' : 'var(--tms-badge-orange-tint)', color: 'var(--tms-text)', fontSize: 12, fontFamily: 'var(--font-mono)', fontWeight: 600 }}
       />
     </span>
   )
@@ -53,12 +53,12 @@ function RateCell({ cents, onCommit }: { cents: number; onCommit: (cents: number
 
 // Display order + labels/tones for each bucket.
 const BUCKETS: { key: AuditBucket; label: string; hint: string; tone: string; countsToward: boolean }[] = [
-  { key: 'counted',      label: 'Counted — on a fleet truck',     hint: 'Delivered this month on this fleet’s truck.',                          tone: '#15803d', countsToward: true },
-  { key: 'zeroRate',     label: 'On a fleet truck, but $0 rate',  hint: 'Would count, but the load has no rate entered.',                       tone: '#b45309', countsToward: true },
-  { key: 'noTruck',      label: 'Counted — our driver, no truck on file', hint: 'Delivered by one of this fleet’s drivers; counts as fleet revenue. No truck row gets it until a truck is on file (drivers change trucks and the truck of record gets cleared).', tone: '#15803d', countsToward: true },
-  { key: 'unattributed', label: 'Driver in no fleet, no truck',    hint: 'Delivered by a driver who is in no fleet and has no truck — set the fleet on the Drivers page.', tone: '#b45309', countsToward: false },
-  { key: 'otherFleet',   label: 'On another fleet / no driver',   hint: 'Delivered on a truck in a different fleet, or with no resolvable driver/truck.', tone: 'var(--ds-t3)', countsToward: false },
-  { key: 'broker',       label: 'Broker-covered (excluded)',      hint: 'Run by a broker / 3PL — intentionally excluded from truck revenue.',   tone: 'var(--ds-t3)', countsToward: false },
+  { key: 'counted',      label: 'Counted — on a fleet truck',     hint: 'Delivered this month on this fleet’s truck.',                          tone: 'var(--tms-badge-green)', countsToward: true },
+  { key: 'zeroRate',     label: 'On a fleet truck, but $0 rate',  hint: 'Would count, but the load has no rate entered.',                       tone: 'var(--tms-badge-orange)', countsToward: true },
+  { key: 'noTruck',      label: 'Counted — our driver, no truck on file', hint: 'Delivered by one of this fleet’s drivers; counts as fleet revenue. No truck row gets it until a truck is on file (drivers change trucks and the truck of record gets cleared).', tone: 'var(--tms-badge-green)', countsToward: true },
+  { key: 'unattributed', label: 'Driver in no fleet, no truck',    hint: 'Delivered by a driver who is in no fleet and has no truck — set the fleet on the Drivers page.', tone: 'var(--tms-badge-orange)', countsToward: false },
+  { key: 'otherFleet',   label: 'On another fleet / no driver',   hint: 'Delivered on a truck in a different fleet, or with no resolvable driver/truck.', tone: 'var(--tms-muted)', countsToward: false },
+  { key: 'broker',       label: 'Broker-covered (excluded)',      hint: 'Run by a broker / 3PL — intentionally excluded from truck revenue.',   tone: 'var(--tms-muted)', countsToward: false },
 ]
 
 export function RevenueAuditPanel({ range, group, expectedRevenue }: {
@@ -137,36 +137,36 @@ export function RevenueAuditPanel({ range, group, expectedRevenue }: {
   }
 
   return (
-    <div style={{ marginTop: 10, border: '1px solid var(--ds-border)', borderRadius: 10, overflow: 'hidden' }}>
+    <div style={{ marginTop: 10, border: '1px solid var(--tms-border)', borderRadius: 10, overflow: 'hidden' }}>
       {/* Toggle */}
       <button
         onClick={() => setOpen((v) => !v)}
-        style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', background: 'var(--ds-bg)', border: 'none', cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' }}
+        style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', background: 'var(--tms-bg)', border: 'none', cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' }}
       >
-        {open ? <ChevronDown size={14} style={{ color: 'var(--ds-t3)' }} /> : <ChevronRight size={14} style={{ color: 'var(--ds-t3)' }} />}
-        <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ds-t1)' }}>Revenue audit</span>
-        <span style={{ fontSize: 11.5, color: 'var(--ds-t3)' }}>· what’s in {FLEET_GROUP_LABELS[group]}’s {money(expectedRevenue)}</span>
+        {open ? <ChevronDown size={14} style={{ color: 'var(--tms-muted)' }} /> : <ChevronRight size={14} style={{ color: 'var(--tms-muted)' }} />}
+        <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--tms-text)' }}>Revenue audit</span>
+        <span style={{ fontSize: 11.5, color: 'var(--tms-muted)' }}>· what’s in {FLEET_GROUP_LABELS[group]}’s {money(expectedRevenue)}</span>
       </button>
 
       {open && (
-        <div style={{ borderTop: '1px solid var(--ds-border)', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div style={{ borderTop: '1px solid var(--tms-border)', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
           {/* Reconciliation + search */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 12, color: reconciles ? '#15803d' : '#b91c1c', fontWeight: 600 }}>
+            <span style={{ fontSize: 12, color: reconciles ? 'var(--tms-badge-green)' : 'var(--tms-badge-red)', fontWeight: 600 }}>
               {reconciles ? '✓ Reconciles with the Revenue line' : `⚠ Off by ${money(Math.abs(delta))} vs the Revenue line`}
             </span>
             <div style={{ position: 'relative', marginLeft: 'auto' }}>
-              <Search size={12} style={{ position: 'absolute', left: 9, top: '50%', transform: 'translateY(-50%)', color: 'var(--ds-t3)', pointerEvents: 'none' }} />
+              <Search size={12} style={{ position: 'absolute', left: 9, top: '50%', transform: 'translateY(-50%)', color: 'var(--tms-muted)', pointerEvents: 'none' }} />
               <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter loads…"
-                style={{ height: 28, width: 180, paddingLeft: 26, paddingRight: 8, boxSizing: 'border-box', background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 6, fontSize: 12, color: 'var(--ds-t1)', fontFamily: 'inherit', outline: 'none' }} />
+                style={{ height: 28, width: 180, paddingLeft: 26, paddingRight: 8, boxSizing: 'border-box', background: 'var(--tms-card)', border: '1px solid var(--tms-border)', borderRadius: 6, fontSize: 12, color: 'var(--tms-text)', fontFamily: 'inherit', outline: 'none' }} />
             </div>
           </div>
 
           {/* "Delivered next month" note */}
           {audit.pickedUpThisMonthDeliveredLater.count > 0 && (
-            <div style={{ fontSize: 11.5, color: 'var(--ds-t3)', background: 'var(--ds-bg)', borderRadius: 8, padding: '8px 10px' }}>
-              Heads up: <b style={{ color: 'var(--ds-t2)' }}>{audit.pickedUpThisMonthDeliveredLater.count}</b> load{audit.pickedUpThisMonthDeliveredLater.count === 1 ? '' : 's'} picked up this month deliver next month
-              (<b style={{ color: 'var(--ds-t2)' }}>{money(audit.pickedUpThisMonthDeliveredLater.total)}</b>) — revenue is booked on the <i>delivery</i> date, so it lands next month.
+            <div style={{ fontSize: 11.5, color: 'var(--tms-muted)', background: 'var(--tms-bg)', borderRadius: 8, padding: '8px 10px' }}>
+              Heads up: <b style={{ color: 'var(--tms-text-2)' }}>{audit.pickedUpThisMonthDeliveredLater.count}</b> load{audit.pickedUpThisMonthDeliveredLater.count === 1 ? '' : 's'} picked up this month deliver next month
+              (<b style={{ color: 'var(--tms-text-2)' }}>{money(audit.pickedUpThisMonthDeliveredLater.total)}</b>) — revenue is booked on the <i>delivery</i> date, so it lands next month.
             </div>
           )}
 
@@ -177,35 +177,35 @@ export function RevenueAuditPanel({ range, group, expectedRevenue }: {
             const isOpen = expanded.has(b.key)
             const rows = filterRows(bucket.rows)
             return (
-              <div key={b.key} style={{ border: '1px solid var(--ds-border)', borderRadius: 8, overflow: 'hidden' }}>
+              <div key={b.key} style={{ border: '1px solid var(--tms-border)', borderRadius: 8, overflow: 'hidden' }}>
                 <button
                   onClick={() => toggle(b.key)}
-                  style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', background: 'var(--ds-surface)', border: 'none', cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' }}
+                  style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', background: 'var(--tms-card)', border: 'none', cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' }}
                 >
-                  {isOpen ? <ChevronDown size={13} style={{ color: 'var(--ds-t3)' }} /> : <ChevronRight size={13} style={{ color: 'var(--ds-t3)' }} />}
+                  {isOpen ? <ChevronDown size={13} style={{ color: 'var(--tms-muted)' }} /> : <ChevronRight size={13} style={{ color: 'var(--tms-muted)' }} />}
                   <span style={{ width: 8, height: 8, borderRadius: 2, background: b.tone, flexShrink: 0 }} />
-                  <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ds-t1)' }}>{b.label}</span>
-                  <span style={{ fontSize: 11, color: 'var(--ds-t3)' }}>· {bucket.rows.length}</span>
-                  <span style={{ marginLeft: 'auto', fontSize: 13, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: b.countsToward ? 'var(--ds-t1)' : 'var(--ds-t3)' }}>{money2(bucket.total)}</span>
+                  <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--tms-text)' }}>{b.label}</span>
+                  <span style={{ fontSize: 11, color: 'var(--tms-muted)' }}>· {bucket.rows.length}</span>
+                  <span style={{ marginLeft: 'auto', fontSize: 13, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: b.countsToward ? 'var(--tms-text)' : 'var(--tms-muted)' }}>{money2(bucket.total)}</span>
                 </button>
                 {isOpen && (
-                  <div style={{ borderTop: '1px solid var(--ds-border)', overflowX: 'auto' }}>
-                    <div style={{ fontSize: 11, color: 'var(--ds-t3)', padding: '6px 12px', background: 'var(--ds-bg)' }}>{b.hint}</div>
+                  <div style={{ borderTop: '1px solid var(--tms-border)', overflowX: 'auto' }}>
+                    <div style={{ fontSize: 11, color: 'var(--tms-muted)', padding: '6px 12px', background: 'var(--tms-bg)' }}>{b.hint}</div>
 
                     {/* Inline fix: assign each unattributed driver a fleet truck → loads reattribute live. */}
                     {(b.key === 'unattributed' || b.key === 'noTruck') && unassignedDrivers.length > 0 && (
-                      <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--ds-border)', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--tms-border)', display: 'flex', flexDirection: 'column', gap: 8 }}>
                         {fleetTrucks.length === 0 ? (
-                          <div style={{ fontSize: 11.5, color: '#b45309' }}>No {FLEET_GROUP_LABELS[group]} trucks to assign — add or tag a truck to this fleet on the Fleet page first.</div>
+                          <div style={{ fontSize: 11.5, color: 'var(--tms-badge-orange)' }}>No {FLEET_GROUP_LABELS[group]} trucks to assign — add or tag a truck to this fleet on the Fleet page first.</div>
                         ) : unassignedDrivers.map((d) => (
                           <div key={d.driverId} style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                            <Wrench size={13} style={{ color: 'var(--ds-t3)', flexShrink: 0 }} />
-                            <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ds-t1)' }}>{d.name}</span>
-                            <span style={{ fontSize: 11.5, color: 'var(--ds-t3)' }}>{d.count} load{d.count === 1 ? '' : 's'} · {money2(d.total)}</span>
+                            <Wrench size={13} style={{ color: 'var(--tms-muted)', flexShrink: 0 }} />
+                            <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--tms-text)' }}>{d.name}</span>
+                            <span style={{ fontSize: 11.5, color: 'var(--tms-muted)' }}>{d.count} load{d.count === 1 ? '' : 's'} · {money2(d.total)}</span>
                             <select
                               defaultValue=""
                               onChange={(e) => { if (e.target.value) assign(d.driverId, e.target.value) }}
-                              style={{ marginLeft: 'auto', height: 28, padding: '0 8px', borderRadius: 6, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', color: 'var(--ds-t1)', fontSize: 12, fontFamily: 'inherit' }}
+                              style={{ marginLeft: 'auto', height: 28, padding: '0 8px', borderRadius: 6, border: '1px solid var(--tms-border)', background: 'var(--tms-card)', color: 'var(--tms-text)', fontSize: 12, fontFamily: 'inherit' }}
                             >
                               <option value="">Assign truck…</option>
                               {fleetTrucks.map((t) => (
@@ -221,7 +221,7 @@ export function RevenueAuditPanel({ range, group, expectedRevenue }: {
                       <thead>
                         <tr>
                           {['Ref', 'Route', 'Driver', 'Truck', 'Delivered', 'Rate'].map((h, i) => (
-                            <th key={h} style={{ textAlign: i === 5 ? 'right' : 'left', padding: '6px 12px', fontSize: 10.5, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.04em', whiteSpace: 'nowrap', borderBottom: '1px solid var(--ds-border)' }}>{h}</th>
+                            <th key={h} style={{ textAlign: i === 5 ? 'right' : 'left', padding: '6px 12px', fontSize: 10.5, fontWeight: 600, color: 'var(--tms-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', whiteSpace: 'nowrap', borderBottom: '1px solid var(--tms-border)' }}>{h}</th>
                           ))}
                         </tr>
                       </thead>
@@ -229,9 +229,9 @@ export function RevenueAuditPanel({ range, group, expectedRevenue }: {
                         {rows.map((r) => {
                           const load = loadById.get(r.id)
                           return (
-                          <tr key={r.id} style={{ borderBottom: '1px solid var(--ds-border)' }}>
-                            <td style={{ padding: '6px 12px', fontFamily: 'var(--font-mono)', color: 'var(--ds-t1)', whiteSpace: 'nowrap' }}>{r.ref}</td>
-                            <td style={{ padding: '6px 12px', color: 'var(--ds-t2)', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.route}</td>
+                          <tr key={r.id} style={{ borderBottom: '1px solid var(--tms-border)' }}>
+                            <td style={{ padding: '6px 12px', fontFamily: 'var(--font-mono)', color: 'var(--tms-text)', whiteSpace: 'nowrap' }}>{r.ref}</td>
+                            <td style={{ padding: '6px 12px', color: 'var(--tms-text-2)', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.route}</td>
                             {/* Driver — editable (fixes broker/no-driver misattribution) */}
                             <td style={{ padding: '5px 12px', whiteSpace: 'nowrap' }}>
                               <select
@@ -251,7 +251,7 @@ export function RevenueAuditPanel({ range, group, expectedRevenue }: {
                                 value={load?.truckId ?? ''}
                                 onChange={(e) => updateLoad(r.id, { truckId: e.target.value || null })}
                                 title={load?.truckId ? undefined : r.truckLabel ? `Inheriting ${r.truckLabel} from the driver` : undefined}
-                                style={{ ...editSelect, color: load?.truckId ? 'var(--ds-t1)' : 'var(--ds-t3)' }}
+                                style={{ ...editSelect, color: load?.truckId ? 'var(--tms-text)' : 'var(--tms-muted)' }}
                               >
                                 <option value="">{r.truckLabel ? `(driver's ${r.truckLabel})` : '— none —'}</option>
                                 {fleetTrucks.map((t) => (
@@ -259,7 +259,7 @@ export function RevenueAuditPanel({ range, group, expectedRevenue }: {
                                 ))}
                               </select>
                             </td>
-                            <td style={{ padding: '6px 12px', fontFamily: 'var(--font-mono)', color: 'var(--ds-t3)', whiteSpace: 'nowrap' }}>{shortDate(r.deliveryDate)}</td>
+                            <td style={{ padding: '6px 12px', fontFamily: 'var(--font-mono)', color: 'var(--tms-muted)', whiteSpace: 'nowrap' }}>{shortDate(r.deliveryDate)}</td>
                             {/* Rate — editable inline */}
                             <td style={{ padding: '5px 12px', textAlign: 'right', whiteSpace: 'nowrap' }}>
                               <RateCell cents={load?.rate ?? 0} onCommit={(c) => updateLoad(r.id, { rate: c })} />
@@ -268,7 +268,7 @@ export function RevenueAuditPanel({ range, group, expectedRevenue }: {
                           )
                         })}
                         {rows.length === 0 && (
-                          <tr><td colSpan={6} style={{ padding: '10px 12px', textAlign: 'center', color: 'var(--ds-t3)' }}>No loads match “{q}”.</td></tr>
+                          <tr><td colSpan={6} style={{ padding: '10px 12px', textAlign: 'center', color: 'var(--tms-muted)' }}>No loads match “{q}”.</td></tr>
                         )}
                       </tbody>
                     </table>

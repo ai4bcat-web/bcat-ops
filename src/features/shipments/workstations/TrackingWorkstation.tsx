@@ -40,6 +40,7 @@ import {
 } from '@/lib/apiClient'
 import { viewCallerOf, viewsVisibleTo } from '@/lib/shipmentViewDefs'
 import { displayName } from '@/lib/roles'
+import { mapLimit } from '@/lib/mapLimit'
 import { CreateShipmentDialog } from '../components/CreateShipmentDialog'
 import { CustomerLinkDialog } from '../components/CustomerLinkDialog'
 import { TrackingLinkDialog } from '../components/TrackingLinkDialog'
@@ -61,6 +62,8 @@ const ACTIVE_STATUSES: BoardStatusKey[] = ['OPEN', 'COVERED', 'DISPATCHED', 'ARR
 const CLOSED_STATUSES: BoardStatusKey[] = ['DELIVERED', 'VOIDED']
 const MAPS_KEY = (import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string | undefined) ?? ''
 const MAPS_MAP_ID = import.meta.env.VITE_GOOGLE_MAPS_MAP_ID as string | undefined
+/** Concurrent per-shipment message reads when the Inbox opens. */
+const MESSAGE_READS = 6
 
 type TabKey = 'inbox' | 'tracking'
 
@@ -237,10 +240,8 @@ export function TrackingWorkstation() {
     if (tab !== 'inbox') return
     let alive = true
     const ids = displayKey ? displayKey.split(',') : []
-    Promise.all(
-      ids.map((id) =>
-        listShipmentMessages(id).then((rows) => ({ id, rows })),
-      ),
+    mapLimit(ids, MESSAGE_READS, (id) =>
+      listShipmentMessages(id).then((rows) => ({ id, rows })),
     )
       .then((results) => {
         if (!alive) return

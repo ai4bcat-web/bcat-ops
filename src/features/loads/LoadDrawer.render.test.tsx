@@ -72,14 +72,13 @@ describe('LoadDrawer visibility', () => {
   })
 })
 
-describe('LoadDrawer uses the shared panel, not its own chrome', () => {
-  it('is themed with the design tokens rather than a hardcoded white sheet', () => {
+describe('LoadDrawer uses the shared panel', () => {
+  it('renders as a named dialog with a Close control', () => {
     state = baseState('view')
-    const { container } = render(<LoadDrawer />)
-    const html = container.innerHTML
-    // SidePanel paints --ds-surface; the old Sheet hardcoded bg-white / border-slate-200.
-    expect(html).toContain('var(--ds-surface)')
-    expect(html).not.toContain('border-slate-200')
+    render(<LoadDrawer />)
+    const dialog = screen.getByRole('dialog')
+    expect(dialog.getAttribute('aria-labelledby')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Close' })).toBeTruthy()
   })
 
   it('shows the invoice status badge as a header action', () => {

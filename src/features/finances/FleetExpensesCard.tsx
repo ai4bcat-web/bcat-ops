@@ -20,11 +20,11 @@ function EditableCostRow({ label, amount, onCommit }: { label: string; amount: n
     if (n !== amount) onCommit(n)
   }
   return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '11px 0', borderTop: '1px solid var(--ds-border)' }}>
-      <span style={{ fontSize: 13, color: 'var(--ds-t2)' }}>{label}</span>
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 13, color: 'var(--ds-t1)' }}>
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '11px 0', borderTop: '1px solid var(--tms-border)' }}>
+      <span style={{ fontSize: 13, color: 'var(--tms-text-2)' }}>{label}</span>
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 13, color: 'var(--tms-text)' }}>
         <span style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
-          <span style={{ position: 'absolute', left: 8, color: 'var(--ds-t3)', fontSize: 12.5, pointerEvents: 'none' }}>$</span>
+          <span style={{ position: 'absolute', left: 8, color: 'var(--tms-muted)', fontSize: 12.5, pointerEvents: 'none' }}>$</span>
           <input
             type="number" min="0" step="1" inputMode="decimal"
             value={value} placeholder="0"
@@ -33,11 +33,11 @@ function EditableCostRow({ label, amount, onCommit }: { label: string; amount: n
             onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
             aria-label={`${label} monthly amount`}
             style={{ width: 110, height: 30, padding: '0 8px 0 18px', textAlign: 'right', borderRadius: 7,
-              border: '1px solid var(--ds-border)', background: 'var(--ds-bg)', color: 'var(--ds-t1)',
+              border: '1px solid var(--tms-border)', background: 'var(--tms-bg)', color: 'var(--tms-text)',
               fontSize: 13, fontVariantNumeric: 'tabular-nums', fontFamily: 'inherit', outline: 'none' }}
           />
         </span>
-        <span style={{ fontSize: 11, color: 'var(--ds-t3)' }}>/mo</span>
+        <span style={{ fontSize: 11, color: 'var(--tms-muted)' }}>/mo</span>
       </span>
     </div>
   )
@@ -52,19 +52,19 @@ export function FleetExpensesCard() {
   const handleEdit = (key: FleetFixedCostKey) => (n: number) => { void setMonthlyAmount(key, n) }
 
   return (
-    <div style={{ background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 12, boxShadow: 'var(--sh-sm)', overflow: 'hidden' }}>
-      <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--ds-border)', display: 'flex', alignItems: 'center', gap: 10 }}>
-        <Receipt size={16} style={{ color: 'var(--ds-blue)' }} />
+    <div style={{ background: 'var(--tms-card)', border: '1px solid var(--tms-border)', borderRadius: 12, boxShadow: 'var(--tms-shadow)', overflow: 'hidden' }}>
+      <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--tms-border)', display: 'flex', alignItems: 'center', gap: 10 }}>
+        <Receipt size={16} style={{ color: 'var(--tms-primary)' }} />
         <div>
-          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)' }}>Monthly fixed costs</div>
-          <div style={{ fontSize: 12, color: 'var(--ds-t3)' }}>Edit once — carries forward to following months</div>
+          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--tms-text)' }}>Monthly fixed costs</div>
+          <div style={{ fontSize: 12, color: 'var(--tms-muted)' }}>Edit once — carries forward to following months</div>
         </div>
       </div>
       <div style={{ padding: '6px 20px 18px', maxWidth: 480 }}>
         {ROWS.map((row) => (
           <EditableCostRow key={row.key} label={row.label} amount={monthlyAmounts[row.key]} onCommit={handleEdit(row.key)} />
         ))}
-        <div style={{ marginTop: 14, fontSize: 11.5, color: 'var(--ds-t3)', lineHeight: 1.5 }}>
+        <div style={{ marginTop: 14, fontSize: 11.5, color: 'var(--tms-muted)', lineHeight: 1.5 }}>
           Loan-trucks and ELD are per-truck — set them in Fleet → Operating Costs. Fuel, driver pay,
           maintenance, insurance and permits flow in automatically from transactions.
         </div>

@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { join, relative } from 'node:path'
 
 const root = fileURLToPath(new URL('./', import.meta.url))
+const srcRoot = fileURLToPath(new URL('../../', import.meta.url))
 
 function cssFiles(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
@@ -13,10 +14,13 @@ function cssFiles(dir: string): string[] {
   })
 }
 
-const files = cssFiles(root).map((path) => ({
-  name: relative(root, path),
+/** Every stylesheet under src/ (index.css, calendar.css, the TMS sheets, driver.css …). */
+const allFiles = cssFiles(srcRoot).map((path) => ({
+  name: relative(srcRoot, path),
+  inTms: path.startsWith(root),
   source: readFileSync(path, 'utf8').replace(/\/\*[\s\S]*?\*\//g, ''),
 }))
+const files = allFiles.filter((f) => f.inTms).map((f) => ({ ...f, name: relative(root, join(srcRoot, f.name)) }))
 const theme = files.find((f) => f.name === 'theme.css')!.source
 
 const DARK_PREFIX = ":root[data-tms-theme='dark'] "
@@ -43,8 +47,12 @@ function blockBody(source: string, selectorList: string): string {
   return source.slice(open + 1, source.indexOf('}', open))
 }
 
-const LIGHT_SELECTOR = '.tms-shell,\n.tms-portal {'
-const DARK_SELECTOR = `${DARK_PREFIX}.tms-shell,\n${DARK_PREFIX}.tms-portal {`
+const LIGHT_SELECTOR = ':root,\n.tms-shell,\n.tms-portal {'
+const DARK_SELECTOR = `:root[data-tms-theme='dark'],\n${DARK_PREFIX}.tms-shell,\n${DARK_PREFIX}.tms-portal {`
+
+/** The only selectors in the TMS sheets allowed to reach outside the shell/portal scope:
+ *  the two token blocks + shadcn bridge (`:root`) and the layered `*` border default. */
+const GLOBAL_SELECTORS = new Set([':root', ":root[data-tms-theme='dark']", '*', '::before', '::after'])
 
 const light = blockBody(theme, LIGHT_SELECTOR.slice(0, -2))
 const dark = blockBody(theme, DARK_SELECTOR.slice(0, -2))
@@ -64,9 +72,10 @@ describe('tms stylesheets', () => {
     expect(dark).not.toBe('')
   })
 
-  it('scopes every rule to .tms-shell or .tms-portal so the rest of the app is untouched', () => {
+  it('scopes every rule to .tms-shell or .tms-portal, except the token blocks, the bridge and the border default', () => {
     const leaks = files.flatMap(({ name, source }) =>
       selectors(source)
+        .filter((sel) => !GLOBAL_SELECTORS.has(sel))
         .map((sel) => (sel.startsWith(DARK_PREFIX) ? sel.slice(DARK_PREFIX.length) : sel))
         .filter((sel) => !sel.startsWith('.tms-shell') && !sel.startsWith('.tms-portal'))
         .map((sel) => `${name}: ${sel}`),
@@ -84,8 +93,8 @@ describe('tms stylesheets', () => {
     expect(missing).toEqual([])
   })
 
-  it('keeps colour literals inside the two token blocks', () => {
-    const offenders = files.flatMap(({ name, source }) => {
+  it('keeps colour literals inside the two token blocks, in every stylesheet under src/', () => {
+    const offenders = allFiles.flatMap(({ name, source }) => {
       let body = source
       for (const block of [light, dark]) body = body.replace(block, '')
       return body
