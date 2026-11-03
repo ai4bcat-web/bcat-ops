@@ -1,5 +1,54 @@
 # TMS build log
 
+## 2026-11-02 — Step S1 (UI redesign: tokens + kit + shell + company dashboard) deployed on dev — AWAITING RYNE'S REVIEW
+
+**Committed and deployed on dev. Stopped at the review gate: S2 (TMS pages), S3 (legacy ops) and S4
+(added features) are NOT started.** Spec `Docs/tms-build/REDESIGN_UI_REFERENCE.md`; plan (Fable)
+`Docs/tms-build/S1-plan.md`; built as three disjoint-ownership slices.
+
+- Commit `b8daa47`; Amplify dev job `131` SUCCEED (2026-11-02 22:21 UTC-6).
+- **Tokens:** `--tms-*` names kept and re-valued — light is the default, dark is a persisted
+  variant (`data-tms-theme` on `<html>`, localStorage `tms-theme`; Radix portals render outside the
+  shell, hence `<html>`). Every existing TMS page therefore picks up the new look from one sheet;
+  S2 is verification + per-page polish. Green `#1DB36A` primary, white 14px cards, canvas `#F3F6F4`.
+- **Shell:** company switcher (scope preference only: collapses other businesses' sections and
+  presets the dashboard division filter — no navigation/permission/data change), filled-green active
+  pill, Tracking group with count badge, breadcrumb top bar, bell with live check-call-due count,
+  working theme toggle, user card + Log out.
+- **Kit:** `TmsKpiCard`, `TmsCountBadge`, `TmsChartCard` icon, `TmsPage` eyebrow, `TmsBadge` as Pill.
+  Deferred until a stage needs them: StatRow, SegmentedTabs, Timeline, KPI deltas (need a prior-window read).
+- **Company dashboard:** welcome header, 4-card KPI strip (Revenue, Profit, Open AR, Open AP), restyled
+  business strips and charts; views/filters/charts picker/export unchanged.
+- Gates: `tsc` clean, `eslint` 0 errors (3 pre-existing warnings), `npm run test` 478 files / 6498 tests pass
+  (`theme.scope.test.ts` token pins retargeted; 13 new behavioural tests across theme, company, kit).
+- Proof: authenticated dev browser, screenshots `Docs/tms-build/screenshots/S1-shell-dashboard-light.png`
+  and `...-dark.png` (toggle verified, persists). Temporary ADMIN identity deleted; no `zz-*` users remain.
+- Known nits for review: Ivan Cartage strip numbers clip at narrow card width; the welcome line shows
+  the e-mail local part for users without a staff profile (real staff show their name).
+
+Decision needed (Ryne): approve the look, or list changes, before S2 starts.
+
+## 2026-11-02 — Demo walk finished: tender → POD → release verified on dev
+
+**Committed and deployed on dev.** Walking the seeded demo in a real browser found one more
+bug: opening *Carrier answers the posting* showed `Cannot return null for non-nullable type:
+'AWSDateTime' within parent 'ShipmentPosting' (createdAt/updatedAt)`. The demo seed wrote
+`ShipmentPosting`, BUY `Quote` offers and `LoadCheckCall` rows without the Amplify-managed
+`createdAt`/`updatedAt`, which `putTx` does not add.
+
+- Commit `4a515a9` (`amplify/functions/tms-shipment-actions/demo.ts`): stamps `createdAt`/`updatedAt`
+  on postings, offers and check calls (`updatedBy` on check calls). Amplify dev job `130` SUCCEED.
+- Reseeded via `scripts/devVerifyP.mjs` (the UI Reset hits AppSync's 30 s ceiling and leaves the
+  seed half-written): **48/48 PASS**. Full `npm run test`: 474 files / 6458 tests pass.
+- Browser proof on dev (temporary ADMIN identity, deleted afterwards; no `zz-*` users remain):
+  Carrier tab shows 3 offers + DAT/TRUCKSTOP postings with no error; Tracking, POD (two refused
+  PODs, Ready-to-invoice disabled) and Release (gate satisfied, Ready-to-invoice enabled) open on
+  real records with no errors.
+- Removed 88 stale gitignored `amplify/**/*.test.js` tsc-emit duplicates that made local vitest
+  run old copies of tests (they were the source of the 4 "finance" failures after the clock pin).
+
+Next: Step S1 (tokens + kit + shell + company dashboard), then stop for Ryne's review.
+
 ## 2026-11-02 — Demo page Open buttons fixed on dev
 
 **Committed and deployed on dev.** The "Seeded record not found" rows on My Brokerage → Demo
