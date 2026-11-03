@@ -840,3 +840,69 @@ describe('updateProfile and reinvite', () => {
     expect(profileOf('sam@bcatcorp.com')).toMatchObject({ invitedBy: ADMIN_EMAIL })
   })
 })
+
+// ── listDriverPool ───────────────────────────────────────────────────────────
+
+describe('listDriverPool', () => {
+  it('refuses a non-admin: the driver roll call is not for staff', async () => {
+    process.env.DRIVER_USER_POOL_ID = 'us-east-1_DRIVER'
+    await expect(call({ action: 'listDriverPool' }, staff)).rejects.toThrow(
+      'Forbidden: managing users requires owner or ADMIN.',
+    )
+    expect(pool.calls.some((c) => c.input.UserPoolId === 'us-east-1_DRIVER')).toBe(false)
+  })
+
+  it('pages the driver pool and returns only the whitelisted fields', async () => {
+    process.env.DRIVER_USER_POOL_ID = 'us-east-1_DRIVER'
+    const user = (email: string, verified: boolean) => ({
+      Username: `sub-${email}`,
+      Attributes: [
+        { Name: 'email', Value: email },
+        { Name: 'email_verified', Value: String(verified) },
+        { Name: 'phone_number', Value: '+15555550100' },
+      ],
+      UserStatus: 'CONFIRMED',
+      Enabled: true,
+      UserCreateDate: new Date('2026-02-01T00:00:00.000Z'),
+      UserLastModifiedDate: new Date('2026-02-02T00:00:00.000Z'),
+    })
+    cognitoSend.mockImplementation((cmd: MockCommand) => {
+      if (cmd.__type === 'ListUsers' && cmd.input.UserPoolId === 'us-east-1_DRIVER') {
+        return Promise.resolve(
+          cmd.input.PaginationToken
+            ? { Users: [user('B@x.com', false)] }
+            : { Users: [user('a@x.com', true)], PaginationToken: 'next' },
+        )
+      }
+      return Promise.resolve(runCognito(cmd))
+    })
+
+    const result = await call({ action: 'listDriverPool' })
+
+    expect(result.users).toEqual([
+      {
+        email: 'a@x.com',
+        status: 'CONFIRMED',
+        enabled: true,
+        emailVerified: true,
+        createdAt: '2026-02-01T00:00:00.000Z',
+        lastModifiedAt: '2026-02-02T00:00:00.000Z',
+      },
+      {
+        email: 'b@x.com',
+        status: 'CONFIRMED',
+        enabled: true,
+        emailVerified: false,
+        createdAt: '2026-02-01T00:00:00.000Z',
+        lastModifiedAt: '2026-02-02T00:00:00.000Z',
+      },
+    ])
+  })
+
+  it('answers an empty list with a reason when the pool id is not configured', async () => {
+    delete process.env.DRIVER_USER_POOL_ID
+    const result = await call({ action: 'listDriverPool' })
+    expect(result.users).toEqual([])
+    expect(result.reason).toMatch(/DRIVER_USER_POOL_ID/)
+  })
+})

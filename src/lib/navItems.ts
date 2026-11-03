@@ -1,7 +1,7 @@
 import {
   LayoutDashboard, CalendarDays, Inbox,
   Truck, Wrench, Fuel, History, CalendarClock,
-  LineChart, Wallet, Boxes, CalendarOff, FileText, FileCheck2, Receipt, Car, CalendarCheck, Scale, Gauge, Umbrella, MessageSquare, FolderOpen, SlidersHorizontal, Building2, MapPin, TrendingUp, Banknote, PackageCheck, Package, PhoneCall, ClipboardList, Clock, FileSpreadsheet, CreditCard, BarChart3, UserCog, type LucideIcon,
+  LineChart, Wallet, Boxes, CalendarOff, FileText, FileCheck2, Receipt, Car, CalendarCheck, Scale, Gauge, Umbrella, MessageSquare, FolderOpen, SlidersHorizontal, Building2, MapPin, TrendingUp, Banknote, PackageCheck, Package, PhoneCall, ClipboardList, Clock, FileSpreadsheet, CreditCard, BarChart3, UserCog, ShieldCheck, CircleDollarSign, WalletCards, Activity, type LucideIcon,
 } from 'lucide-react'
 
 export interface NavItem {
@@ -68,6 +68,7 @@ export const NAV_ITEMS: NavItem[] = [
   { to: '/invoices',    label: 'Invoices',        icon: Receipt,  pageKey: 'invoices', section: 'ASSETS' },
   { to: '/truck-docs',  label: 'Asset Documents', icon: FileText, pageKey: 'truckDocs',  section: 'ASSETS', badgeKey: 'truckDocs' },
   { to: '/fuel',        label: 'Fuel',            icon: Fuel,     pageKey: 'fuel', section: 'ASSETS' },
+  { to: '/expenses',    label: 'Expenses',        icon: WalletCards, pageKey: 'finances', section: 'ASSETS' },
   { to: '/trucks',      label: 'Fleet',           icon: Truck,    pageKey: 'trucks', section: 'ASSETS' },
   { to: '/insurance',   label: 'Insurance',       icon: Umbrella, pageKey: 'insurance', section: 'ASSETS' },
 
@@ -114,12 +115,15 @@ export const NAV_ITEMS: NavItem[] = [
   { to: '/pricing-margin', label: 'Pricing Margin', icon: TrendingUp, pageKey: 'pricingMargin', section: 'CAR_SHIPPING' },
 
   // The company itself: its money, and the marketing run out of it.
+  { to: '/financial-operations', label: 'Financial operations', icon: CircleDollarSign, pageKey: 'finances', section: 'COMPANY' },
   { to: '/finances',  label: 'Finances',  icon: LineChart, pageKey: 'finances', section: 'COMPANY' },
   { to: '/finances/review', label: 'Profit Review', icon: ClipboardList, pageKey: 'finances', section: 'COMPANY' },
   { to: '/finance/cash-checkin', label: 'Weekly Cash Check-in', icon: Wallet, pageKey: 'cashCheckIn', section: 'COMPANY' },
+  { to: '/compliance', label: 'Compliance', icon: ShieldCheck, pageKey: 'compliance', section: 'COMPANY', badgeKey: 'review' },
   { to: '/reddit-queue', label: 'Reddit Queue', icon: MessageSquare, pageKey: 'redditQueue', section: 'COMPANY' },
   // Pages that serve the whole company rather than one business (the brief's Company
   // group). Both live under `/tms/brokerage`, which is where My Brokerage keeps them.
+  { to: '/platform-health', label: 'Platform health', icon: Activity, pageKey: 'platformHealth', section: 'COMPANY', adminOnly: true },
   { to: '/tms/brokerage/users', label: 'Users', icon: UserCog, pageKey: 'users', section: 'COMPANY', adminOnly: true },
   { to: '/tms/brokerage', label: 'Settings', icon: SlidersHorizontal, pageKey: 'settings', section: 'COMPANY' },
 ]

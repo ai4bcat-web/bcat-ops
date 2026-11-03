@@ -120,6 +120,7 @@ const SHIPMENT_WORKSTATIONS: Record<string, string> = {
 /** Legacy pages that are not nav items of their own (or whose trail differs from their item). */
 const LEGACY_CRUMBS: Array<{ path: string; prefix?: boolean; crumbs: TmsBreadcrumbItem[] }> = [
   { path: '/finances/review', crumbs: [{ label: 'Finances', to: '/finances' }, { label: 'Profit review' }] },
+  { path: '/compliance', crumbs: [{ label: 'Compliance', to: '/compliance' }, { label: 'Document overview' }] },
   { path: '/finance/cash-checkin', crumbs: [{ label: 'Cash check-in' }] },
   { path: '/driver-view', prefix: true, crumbs: [{ label: 'Owner operator pay', to: '/owner-operator-pay' }, { label: 'Driver app' }] },
   { path: '/truck-docs', crumbs: [{ label: 'Truck documents' }] },

@@ -7,13 +7,15 @@
  */
 import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm'
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
-import { DynamoDBDocumentClient, ScanCommand, PutCommand } from '@aws-sdk/lib-dynamodb'
+import { DynamoDBDocumentClient, ScanCommand, PutCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb'
+import { heartbeatUpdate, MCP_INTEGRATION_ID } from './heartbeat'
 import { mcpAdapter, applyMcpUpdate, mergeInsurancePolicies, type McpInsurance } from '../../../src/lib/integrations/mcpAdapter'
 
 const ssm = new SSMClient({})
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}), { marshallOptions: { removeUndefinedValues: true } })
 
 const CARRIER_TABLE_NAME = process.env.CARRIER_TABLE_NAME ?? ''
+const INTEGRATION_TABLE_NAME = process.env.INTEGRATION_TABLE_NAME ?? ''
 const INTEGRATION_PARAM_PATH = process.env.INTEGRATION_PARAM_PATH ?? ''
 
 /** The one key a webhook parameter carries. */
@@ -110,6 +112,27 @@ async function syncOne(mcNumber: string, credentials: Record<string, string>): P
   }
 }
 
+/**
+ * Stamp the Integration row so the app can show "last sync". Best-effort: a failed stamp
+ * must never fail an otherwise good sync run.
+ */
+async function writeHeartbeat(results: SyncResult[], now: string): Promise<void> {
+  const update = heartbeatUpdate(results, now)
+  if (!update || !INTEGRATION_TABLE_NAME) return
+  try {
+    await ddb.send(new UpdateCommand({
+      TableName: INTEGRATION_TABLE_NAME,
+      Key: { id: MCP_INTEGRATION_ID },
+      // Never create a partial row (it would break the Integration list): stamp only an existing one.
+      ConditionExpression: 'attribute_exists(id)',
+      UpdateExpression: 'SET lastCheckAt = :c, lastOkAt = :o, healthDetail = :d, updatedAt = :u',
+      ExpressionAttributeValues: { ':c': update.lastCheckAt, ':o': update.lastOkAt, ':d': update.healthDetail, ':u': now },
+    }))
+  } catch (err) {
+    console.error('[mcp-sync] heartbeat write failed', err instanceof Error ? err.message : String(err))
+  }
+}
+
 export const handler = async () => {
   const credentials = await readMcpCredentials()
   if (!credentials) {
@@ -137,5 +160,6 @@ export const handler = async () => {
 
   const ok = results.filter((r) => r.ok).length
   console.log(`[mcp-sync] Synced ${ok}/${results.length} carriers at ${now}`)
+  await writeHeartbeat(results, now)
   return { count: results.length, ok, skipped: results.length - ok, results }
 }

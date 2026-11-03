@@ -65,7 +65,7 @@ describe('groupsForProfile', () => {
       'page-vendorAp', 'role-AR_AP',
     ])
     expect(groupsForProfile({ role: 'COMPLIANCE' })).toEqual([
-      'page-carriers', 'page-customers', 'page-locations', 'role-COMPLIANCE',
+      'page-carriers', 'page-compliance', 'page-customers', 'page-locations', 'role-COMPLIANCE',
     ])
   })
 
@@ -83,7 +83,7 @@ describe('groupsForProfile', () => {
       }),
     ).toEqual([
       'claim-CARRIER_INSURANCE_EDIT', 'claim-CARRIER_STATUS_EDIT',
-      'page-carriers', 'page-customers', 'page-dispatch', 'page-locations',
+      'page-carriers', 'page-compliance', 'page-customers', 'page-dispatch', 'page-locations',
       'page-trucks', 'role-COMPLIANCE',
     ])
   })

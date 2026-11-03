@@ -71,7 +71,7 @@ export const ROLE_PAGES: Record<RoleKey, readonly string[]> = {
   CUSTOMER_REP: ['loads', 'customers', 'locations', 'quotes', 'invoicing', 'reports', 'commissions'],
   CARRIER_REP: ['loads', 'carriers', 'locations', 'quotes', 'carrierPay', 'reports', 'commissions'],
   AR_AP: ['invoicing', 'carrierPay', 'vendorAp', 'factoring', 'reports'],
-  COMPLIANCE: ['carriers', 'customers', 'locations'],
+  COMPLIANCE: ['carriers', 'customers', 'locations', 'compliance'],
   NONE: [],
 }
 

@@ -548,3 +548,93 @@
 .tms-shell .tms-scroll-page-fill .tms-scroll-body {
   min-height: 0;
 }
+
+/* ── S4 kit additions: period toggle, gauge, pill bars, document frame ───── */
+.tms-shell .tms-period-toggle,
+.tms-portal .tms-period-toggle {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--tms-radius-pill);
+  background: var(--tms-surface);
+}
+.tms-shell .tms-period-chip,
+.tms-portal .tms-period-chip {
+  min-width: 26px;
+  padding: 2px 8px;
+  border: 0;
+  border-radius: var(--tms-radius-pill);
+  background: transparent;
+  color: var(--tms-muted);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.tms-shell .tms-period-chip[aria-pressed='true'],
+.tms-portal .tms-period-chip[aria-pressed='true'] {
+  background: var(--tms-card);
+  color: var(--tms-text);
+  box-shadow: var(--tms-shadow);
+}
+.tms-shell .tms-kpi-card-period,
+.tms-portal .tms-kpi-card-period { margin-left: auto; }
+
+.tms-shell .tms-gauge,
+.tms-portal .tms-gauge { position: relative; display: inline-block; max-width: 100%; }
+.tms-shell .tms-gauge-center,
+.tms-portal .tms-gauge-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 0 24%;
+  text-align: center;
+}
+.tms-shell .tms-gauge-label,
+.tms-portal .tms-gauge-label { color: var(--tms-text); font-size: 28px; font-weight: 700; line-height: 1.1; }
+.tms-shell .tms-gauge-sub,
+.tms-portal .tms-gauge-sub { color: var(--tms-muted); font-size: 12px; }
+
+.tms-shell .tms-pillbar,
+.tms-portal .tms-pillbar { width: 100%; min-width: 0; }
+.tms-shell .tms-pillbar-empty,
+.tms-portal .tms-pillbar-empty { display: grid; place-items: center; color: var(--tms-muted); font-size: 13px; }
+.tms-shell .tms-pillbar .tms-sr-only,
+.tms-portal .tms-pillbar .tms-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.tms-shell .tms-docframe,
+.tms-portal .tms-docframe {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: auto;
+  border: 1px solid var(--tms-border);
+  border-radius: var(--tms-radius);
+  background: var(--tms-surface);
+}
+.tms-shell .tms-docframe-media,
+.tms-portal .tms-docframe-media { max-width: 100%; max-height: 100%; object-fit: contain; background: var(--tms-paper); }
+.tms-shell .tms-docframe-pdf,
+.tms-portal .tms-docframe-pdf { width: 100%; height: 100%; border: 0; }
+.tms-shell .tms-docframe-msg,
+.tms-portal .tms-docframe-msg { padding: 24px; color: var(--tms-text-2); font-size: 13px; line-height: 1.6; text-align: center; }
+.tms-shell .tms-docframe-error,
+.tms-portal .tms-docframe-error { color: var(--tms-badge-red); }
+.tms-shell .tms-docframe-muted,
+.tms-portal .tms-docframe-muted { color: var(--tms-muted); }
+.tms-shell .tms-docframe-download,
+.tms-portal .tms-docframe-download { position: absolute; top: 8px; right: 8px; }

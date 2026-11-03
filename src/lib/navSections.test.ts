@@ -11,6 +11,7 @@ import '@testing-library/jest-dom/vitest'
 import { MemoryRouter } from 'react-router-dom'
 import { createElement } from 'react'
 import { buildNavSections, companyOptions, PINNED_ITEMS, TMS_ITEMS, tmsBreadcrumb } from './navSections'
+import { PERMISSION_PAGES } from './navItems'
 import { TmsShell } from '@/features/tms/TmsShell'
 import type { OwnershipDivisionRecord } from '@/types/tms'
 
@@ -192,6 +193,28 @@ describe('buildNavSections', () => {
     expect(sections.find((s) => s.key === 'ASSETS')?.items.map((i) => i.label)).toContain('Owner Operator Settlements')
   })
 
+  describe('S4 pages', () => {
+    const labelsOf = (opts: Omit<Parameters<typeof buildNavSections>[0], 'divisions'>) =>
+      buildNavSections({ divisions: FOUR, ...opts }).sections.flatMap((s) => s.items.map((i) => i.label))
+
+    it('shows the four new pages to an admin', () => {
+      const all = labelsOf({ hasPageAccess: () => false, isAdmin: true })
+      expect(all).toEqual(expect.arrayContaining(['Compliance', 'Financial operations', 'Expenses', 'Platform health']))
+    })
+
+    it('never shows Platform health to a non-admin, whatever pages they are granted', () => {
+      const everyGrant = new Set(PERMISSION_PAGES.map((p) => p.key))
+      const all = labelsOf({ hasPageAccess: (k) => everyGrant.has(k) })
+      expect(all).toContain('Compliance')
+      expect(all).not.toContain('Platform health')
+    })
+
+    it('shows Compliance for the compliance grant but not for a files-only grant (that user reaches it by route)', () => {
+      expect(labelsOf({ hasPageAccess: grants('compliance') })).toContain('Compliance')
+      expect(labelsOf({ hasPageAccess: grants('files') })).not.toContain('Compliance')
+    })
+  })
+
   it('falls back to the seed divisions before the table has loaded', () => {
     const { sections } = buildNavSections({ divisions: null, hasPageAccess: () => true })
     expect(sections.map((s) => s.key)).toEqual(['BROKERAGE', 'ASSETS', 'CAR_SHIPPING', 'COMPANY'])
@@ -230,6 +253,10 @@ describe('tmsBreadcrumb', () => {
 
   it('falls back to TMS for an unknown /tms path', () => {
     expect(labels('/tms/nothing')).toEqual(['TMS'])
+  })
+
+  it('titles /compliance as the Document overview', () => {
+    expect(labels('/compliance')).toEqual(['Compliance', 'Document overview'])
   })
 
   it('names legacy pages by their nav item or an explicit trail, never TMS', () => {

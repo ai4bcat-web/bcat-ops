@@ -347,6 +347,19 @@ backend.userManagement.resources.lambda.addToRolePolicy(
   backend.auth.resources.userPool.userPoolId
 )
 
+// Step S4: read-only listing of the DRIVER pool (verified / confirmed state for the
+// user overview). A separate statement; the staff-pool grant above is unchanged.
+backend.userManagement.resources.lambda.addToRolePolicy(
+  new PolicyStatement({
+    actions: ['cognito-idp:ListUsers'],
+    resources: [driverPool.userPoolArn],
+  }),
+)
+;(backend.userManagement.resources.lambda as LambdaFunction).addEnvironment(
+  'DRIVER_USER_POOL_ID',
+  driverPool.userPoolId,
+)
+
 // Step I: the staff directory. The role lives here and is projected onto the
 // Cognito groups above; every change is stamped into the shared audit log.
 const userProfileTable = backend.data.resources.tables['UserProfile']
@@ -391,6 +404,19 @@ backend.driverSignupGate.resources.lambda.addToRolePolicy(
 ;(backend.driverSignupGate.resources.lambda as LambdaFunction).addEnvironment(
   'DRIVER_PAY_SETTING_TABLE_NAME',
   signupDriverPaySettingTable.tableName,
+)
+
+// Step S4: best-effort log of refused sign-ups into the existing AuditLog table.
+const signupAuditLogTable = backend.data.resources.tables['AuditLog']
+backend.driverSignupGate.resources.lambda.addToRolePolicy(
+  new PolicyStatement({
+    actions: ['dynamodb:PutItem'],
+    resources: [signupAuditLogTable.tableArn],
+  }),
+)
+;(backend.driverSignupGate.resources.lambda as LambdaFunction).addEnvironment(
+  'AUDIT_LOG_TABLE_NAME',
+  signupAuditLogTable.tableName,
 )
 
 // ── driver-app-api Lambda (driver PWA HTTP API) ────────────────────────────
@@ -2137,6 +2163,16 @@ mcpSyncFn.addToRolePolicy(
   new PolicyStatement({
     actions:   ['ssm:GetParameter'],
     resources: [integrationParamArn],
+  }),
+)
+// Step S4: heartbeat. A successful run stamps lastOkAt on the MYCARRIERPACKETS
+// Integration row so Platform health can show an honest "last sync".
+const mcpSyncIntegrationTable = backend.data.resources.tables['Integration']
+mcpSyncFn.addEnvironment('INTEGRATION_TABLE_NAME', mcpSyncIntegrationTable.tableName)
+mcpSyncFn.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['dynamodb:UpdateItem'],
+    resources: [mcpSyncIntegrationTable.tableArn],
   }),
 )
 // The rule is created enabled. The dev-stack guard later disables schedules, so

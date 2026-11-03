@@ -1,11 +1,14 @@
 // @vitest-environment jsdom
+import '@testing-library/jest-dom/vitest'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import type { ShipmentViewRecord } from '@/types/tms'
 
 interface ShellProps {
+  notificationCount?: number
+  onOpenNotifications?: () => void
   shipmentViews: { slug: string }[]
   fill?: boolean
   aside?: ReactNode
@@ -18,6 +21,14 @@ vi.mock('@/features/tms/TmsShell', () => ({
     shell.props = props
     return <div data-testid="shell">{props.children}{props.fill ? props.aside : null}</div>
   },
+}))
+
+const notifications = vi.hoisted(() => ({
+  groups: [] as unknown[],
+  count: 0,
+}))
+vi.mock('@/features/tms/notifications/useNotifications', () => ({
+  useNotifications: () => ({ groups: notifications.groups, count: notifications.count, loading: false }),
 }))
 
 const initializeData = vi.hoisted(() => vi.fn())
@@ -101,6 +112,8 @@ beforeEach(() => {
   // jsdom has no matchMedia; the legacy dispatch column asks whether this is a desktop.
   window.matchMedia = (() => ({ matches: true, addEventListener: () => {}, removeEventListener: () => {} })) as unknown as typeof window.matchMedia
   shell.props = null
+  notifications.groups = []
+  notifications.count = 0
   initializeData.mockClear()
   auth.user = { email: 'rep@bcatcorp.com', groups: [], userId: 'u1' }
   data.views = [view('everyone', null), view('managers', { roles: ['MANAGER'] }), view('assets', { divisions: ['ASSETS'] })]
@@ -141,5 +154,19 @@ describe('TmsLayout', () => {
   it('titles a legacy page that is not a nav item', () => {
     renderAt('/driver-view/x')
     expect(shell.props?.breadcrumb.map((c) => c.label)).toEqual(['Owner operator pay', 'Driver app'])
+  })
+
+  it('hands the shell the notification total and a bell that opens the drawer on the item list', async () => {
+    notifications.count = 3
+    notifications.groups = [{
+      kind: 'CHECK_CALLS', label: 'Check calls', total: 1, moreTo: '/tms/check-calls', moreLabel: 'Open worklist',
+      items: [{ id: 'cc:s1', kind: 'CHECK_CALLS', severity: 'critical', title: 'L-1 — check call overdue', detail: 'Acme', at: null, to: '/tms/shipments/s1?tab=tracking' }],
+    }]
+    renderAt('/tms/dashboard')
+    expect(shell.props?.notificationCount).toBe(3)
+    expect(screen.queryByRole('dialog')).toBeNull()
+    act(() => shell.props?.onOpenNotifications?.())
+    expect(await screen.findByRole('dialog')).toBeTruthy()
+    expect(screen.getByRole('link', { name: /L-1 — check call overdue/ })).toHaveAttribute('href', '/tms/shipments/s1?tab=tracking')
   })
 })

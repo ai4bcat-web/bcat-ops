@@ -96,6 +96,18 @@ export type { TmsApprovalCardProps } from './TmsApprovalCard'
 export { TmsAlert } from './TmsAlert'
 export type { TmsAlertProps } from './TmsAlert'
 
+export { TmsPeriodToggle } from './TmsPeriodToggle'
+export type { TmsPeriod, TmsPeriodToggleProps } from './TmsPeriodToggle'
+
+export { TmsGauge } from './TmsGauge'
+export type { TmsGaugeProps } from './TmsGauge'
+
+export { TmsPillBarChart } from './TmsPillBarChart'
+export type { PillBarSeries, PillBarDatum, TmsPillBarChartProps } from './TmsPillBarChart'
+
+export { TmsDocumentFrame } from './TmsDocumentFrame'
+export type { TmsDocumentFrameProps } from './TmsDocumentFrame'
+
 export { TmsSegmentedBar } from './TmsSegmentedBar'
 export type { TmsSegment, TmsSegmentedBarProps } from './TmsSegmentedBar'
 

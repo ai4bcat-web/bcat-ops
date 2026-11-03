@@ -87,8 +87,12 @@ export interface TmsShellProps {
   badgeCounts?: Record<string, number>
   /** The businesses the switcher offers. Fewer than two means a static org card, no menu. */
   companies?: TmsCompanyOption[]
-  /** Check calls due or overdue; the bell links to the Check calls page. */
+  /** Exceptions waiting on someone (the notification drawer's total); shown on the bell. */
   notificationCount?: number
+  /** The bell renders only when this is provided; it opens the notifications drawer. */
+  onOpenNotifications?: () => void
+  /** Whether the drawer is open (the bell's `aria-expanded`). */
+  notificationsOpen?: boolean
   /** Most recently updated moving shipments, newest first, already sliced. */
   trackedLoads?: TmsLiveChild[]
   /** The Log out button renders only when this is provided. */
@@ -455,6 +459,8 @@ export function TmsShell({
   badgeCounts,
   companies = [],
   notificationCount = 0,
+  onOpenNotifications,
+  notificationsOpen = false,
   trackedLoads = [],
   onLogout,
   onSearch,
@@ -627,14 +633,19 @@ export function TmsShell({
             />
           </form>
           <div className="tms-topbar-icons">
-            <Link
-              to="/tms/check-calls"
-              className="tms-icon-btn tms-icon-btn-sq tms-bell"
-              aria-label={notificationCount > 0 ? `Check calls due: ${notificationCount}` : 'Check calls'}
-            >
-              <Bell size={16} aria-hidden="true" />
-              <TmsCountBadge count={notificationCount} tone="amber" />
-            </Link>
+            {onOpenNotifications && (
+              <button
+                type="button"
+                className="tms-icon-btn tms-icon-btn-sq tms-bell"
+                aria-haspopup="dialog"
+                aria-expanded={notificationsOpen}
+                aria-label={notificationCount > 0 ? `Notifications: ${notificationCount}` : 'Notifications'}
+                onClick={onOpenNotifications}
+              >
+                <Bell size={16} aria-hidden="true" />
+                <TmsCountBadge count={notificationCount} tone="amber" />
+              </button>
+            )}
             <Link to="/tms/academy" className="tms-icon-btn tms-icon-btn-sq" aria-label="Help">
               <CircleHelp size={16} aria-hidden="true" />
             </Link>

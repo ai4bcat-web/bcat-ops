@@ -54,6 +54,10 @@ import { FleetManagerDashboardPage } from '@/features/fleet-dashboard/FleetManag
 import { DisputesPage } from '@/features/disputes/DisputesPage'
 import { DriverDisputesPage } from '@/features/disputes/DriverDisputesPage'
 import { FilesPage } from '@/features/files/FilesPage'
+import { ComplianceOverviewPage } from '@/features/compliance/overview/ComplianceOverviewPage'
+import { FinancialOperationsPage } from '@/features/financial-ops/FinancialOperationsPage'
+import { ExpensesOverviewPage } from '@/features/expenses/overview/ExpensesOverviewPage'
+import { PlatformHealthPage } from '@/features/platform-health/PlatformHealthPage'
 import { RedditQueuePage } from '@/features/reddit-queue/RedditQueuePage'
 import { PricingMarginPage } from '@/features/pricing-margin/PricingMarginPage'
 import { QuotesPage } from '@/features/quotes/QuotesPage'
@@ -68,7 +72,7 @@ import { HoursPage } from '@/features/hours/HoursPage'
 import { VendorApPage } from '@/features/vendor-ap/VendorApPage'
 import { DispatchPage } from '@/features/dispatch/DispatchPage'
 import { PodsPage } from '@/features/pods/PodsPage'
-import { RequirePage, LandingRedirect } from '@/components/RequirePage'
+import { RequirePage, RequireAdmin, LandingRedirect } from '@/components/RequirePage'
 import { BrokeragePage } from '@/features/tms/brokerage/BrokeragePage'
 import { DriverAuthProvider } from '@/features/driver-app/DriverAuthContext'
 
@@ -186,6 +190,9 @@ export default function App() {
               <Route path="/maintenance" element={<RequirePage page="maintenance"><MaintenancePage /></RequirePage>} />
               <Route path="/invoices" element={<RequirePage page="invoices"><InvoicesPage /></RequirePage>} />
               <Route path="/fuel" element={<RequirePage page="fuel"><FuelPage /></RequirePage>} />
+              <Route path="/financial-operations" element={<RequirePage page="finances"><FinancialOperationsPage /></RequirePage>} />
+              <Route path="/expenses" element={<RequirePage page="finances"><ExpensesOverviewPage /></RequirePage>} />
+              <Route path="/platform-health" element={<RequireAdmin><PlatformHealthPage /></RequireAdmin>} />
               <Route path="/finances" element={<RequirePage page="finances"><FinancesPage /></RequirePage>} />
               <Route path="/finances/review" element={<RequirePage page="finances"><ProfitReviewPage /></RequirePage>} />
               <Route path="/finance/cash-checkin" element={<RequirePage page="cashCheckIn"><WeeklyCashCheckInPage /></RequirePage>} />
@@ -227,12 +234,13 @@ export default function App() {
               <Route path="/users" element={<ParamRedirect to="/tms/brokerage/users" />} />
               <Route path="/vehicle-quote" element={<RequirePage page="vehicleQuote"><VehicleQuotePage /></RequirePage>} />
               <Route path="/vehicle-confirmation" element={<RequirePage page="vehicleConfirmation"><VehicleConfirmationPage /></RequirePage>} />
-              {/* Retired — compliance lives in the driver and truck files now, and the
-                  global settings moved to /settings. Redirected so bookmarks and old
-                  links land somewhere useful rather than 404ing. */}
-              <Route path="/compliance" element={<Navigate to="/files" replace />} />
+              {/* Retired — onboarding and the per-driver / per-truck compliance pages live in
+                  the Files hub now. Redirected so bookmarks and old links land somewhere
+                  useful rather than 404ing. (/compliance itself is the Document overview;
+                  /compliance/review lands on its review tab.) */}
+              <Route path="/compliance" element={<RequirePage page={['compliance', 'files']}><ComplianceOverviewPage /></RequirePage>} />
               <Route path="/compliance/onboarding" element={<Navigate to="/files" replace />} />
-              <Route path="/compliance/review" element={<Navigate to="/files" replace />} />
+              <Route path="/compliance/review" element={<Navigate to="/compliance?tab=review" replace />} />
               <Route path="/compliance/driver/:driverId" element={<Navigate to="/files" replace />} />
               <Route path="/compliance/truck/:truckId" element={<Navigate to="/files" replace />} />
               {/* Marketing */}
@@ -246,7 +254,6 @@ export default function App() {
               <Route path="/commissions" element={<ParamRedirect to="/tms/brokerage/commissions" />} />
               <Route path="/reports" element={<ParamRedirect to="/tms/brokerage/reports" />} />
               {/* legacy redirects */}
-              <Route path="/expenses" element={<Navigate to="/fuel" replace />} />
               <Route path="/grid" element={<Navigate to="/tms/shipments" replace />} />
               <Route path="/audit" element={<Navigate to="/tms/brokerage/audit" replace />} />
                 </Route>

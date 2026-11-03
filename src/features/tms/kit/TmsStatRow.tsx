@@ -12,6 +12,7 @@ export interface TmsStat {
   positiveIsGood?: boolean
   tone?: TmsKpiCardProps['tone']
   onClick?: () => void
+  period?: TmsKpiCardProps['period']
   testId?: string
   /** Accessible name for the tile when label + value alone are not enough. */
   ariaLabel?: string
@@ -45,6 +46,7 @@ export function TmsStatRow({ items, columns, compact, className, 'aria-label': a
           positiveIsGood={item.positiveIsGood}
           tone={item.tone}
           onClick={item.onClick}
+          period={item.period}
           testId={item.testId}
           ariaLabel={item.ariaLabel}
           compact={compact}

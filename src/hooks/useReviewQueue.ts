@@ -109,18 +109,20 @@ export function useReviewQueue() {
   /** Find the OnboardingTask linked to a document (by id or requirementKey). */
   // Shared with the driver file's review controls — see src/lib/documentReview.ts.
   const approveDocument = useCallback(
-    async (doc: ComplianceDocument) => {
-      await approveDoc(doc, user?.email)
+    async (doc: ComplianceDocument): Promise<ComplianceDocument> => {
+      const saved = await approveDoc(doc, user?.email)
       setDocuments((prev) => prev.filter((d) => d.id !== doc.id))
       if (doc.entityType === 'DRIVER') await maybeCompleteOnboarding(doc.entityId)
+      return saved
     },
     [maybeCompleteOnboarding, user?.email],
   )
 
   const rejectDocument = useCallback(
-    async (doc: ComplianceDocument, reason: string) => {
-      await rejectDoc(doc, reason, user?.email)
+    async (doc: ComplianceDocument, reason: string): Promise<ComplianceDocument> => {
+      const saved = await rejectDoc(doc, reason, user?.email)
       setDocuments((prev) => prev.filter((d) => d.id !== doc.id))
+      return saved
     },
     [user?.email],
   )

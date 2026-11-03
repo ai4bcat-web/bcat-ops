@@ -40,6 +40,7 @@ import {
 } from '@/lib/roles'
 import type { ClaimKey, OwnershipDivisionRecord, RoleKey, Team, UserProfileRecord, UserStatus } from '@/types/tms'
 import { toast } from 'sonner'
+import { UserOverview } from './overview/UserOverview'
 
 const PAGE_OPTIONS = pageOptions()
 const TOTAL_PAGES = PAGE_OPTIONS.length
@@ -803,6 +804,14 @@ export function UsersPage() {
             </div>
           </form>
         </TmsCard>
+
+        <UserOverview
+          users={users.map((u) => ({ username: u.username, email: u.email, role: roleOf(u), status: statusOf(u) }))}
+          onReinvite={async (username) => {
+            const target = users.find((u) => u.username === username)
+            if (target) await handleReinvite(target)
+          }}
+        />
 
         {/* User list */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>

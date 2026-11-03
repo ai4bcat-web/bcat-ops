@@ -209,15 +209,22 @@ describe('TmsShell', () => {
     expect(screen.queryByRole('button', { name: 'Log out' })).not.toBeInTheDocument()
   })
 
-  it('links the bell to the check calls page and shows the due count only when there is one', () => {
-    const { unmount } = renderShell('/tms/shipments', undefined, { notificationCount: 4 })
-    const bell = screen.getByRole('link', { name: 'Check calls due: 4' })
-    expect(bell).toHaveAttribute('href', '/tms/check-calls')
+  it('renders the bell as a button that opens notifications, with the count only when there is one, and none without a handler', () => {
+    const onOpenNotifications = vi.fn()
+    const { unmount } = renderShell('/tms/shipments', undefined, { notificationCount: 4, onOpenNotifications })
+    const bell = screen.getByRole('button', { name: 'Notifications: 4' })
     expect(bell).toHaveTextContent('4')
+    expect(bell).toHaveAttribute('aria-haspopup', 'dialog')
+    fireEvent.click(bell)
+    expect(onOpenNotifications).toHaveBeenCalledTimes(1)
     unmount()
 
+    const second = renderShell('/tms/shipments', undefined, { onOpenNotifications })
+    expect(screen.getByRole('button', { name: 'Notifications' })).not.toHaveTextContent(/\d/)
+    second.unmount()
+
     renderShell()
-    expect(screen.getByRole('link', { name: 'Check calls' })).not.toHaveTextContent(/\d/)
+    expect(screen.queryByRole('button', { name: /^Notifications/ })).not.toBeInTheDocument()
   })
 
   it('renders the breadcrumb with linked crumbs and the last one current', () => {

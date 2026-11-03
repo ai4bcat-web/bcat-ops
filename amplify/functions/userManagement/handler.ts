@@ -83,7 +83,7 @@ type Row = Record<string, unknown>
 interface Args {
   action:
     | 'list' | 'create' | 'disable' | 'enable' | 'delete' | 'getGroups' | 'setPageGroups'
-    | 'resetPassword' | 'setAdmin'
+    | 'resetPassword' | 'setAdmin' | 'listDriverPool'
     | 'setRole' | 'setTeams' | 'setDivisions' | 'setClaims' | 'updateProfile' | 'reinvite' | 'forceSignOut'
   email?: string
   username?: string
@@ -191,6 +191,43 @@ async function listGroups(username: string): Promise<string[]> {
     Username: username,
   }))
   return (result.Groups ?? []).map((g) => g.GroupName ?? '').filter(Boolean)
+}
+
+/** What the Users overview may learn about a driver-app login — nothing beyond this. */
+export interface DriverPoolUser {
+  email: string
+  status: string
+  enabled: boolean
+  emailVerified: boolean
+  createdAt: string | null
+  lastModifiedAt: string | null
+}
+
+/**
+ * Read-only roll call of the driver pool. A missing DRIVER_USER_POOL_ID (older or partial
+ * deploy) answers with an empty list and a reason instead of failing the Users page.
+ */
+async function listDriverPoolUsers(): Promise<{ users: DriverPoolUser[]; reason?: string }> {
+  const poolId = process.env.DRIVER_USER_POOL_ID
+  if (!poolId) return { users: [], reason: 'DRIVER_USER_POOL_ID is not configured' }
+  const users: DriverPoolUser[] = []
+  let token: string | undefined
+  do {
+    const page = await cognito.send(new ListUsersCommand({ UserPoolId: poolId, PaginationToken: token }))
+    for (const u of page.Users ?? []) {
+      const attr = (name: string) => u.Attributes?.find((a) => a.Name === name)?.Value
+      users.push({
+        email: (attr('email') ?? '').toLowerCase().trim(),
+        status: u.UserStatus ?? 'UNKNOWN',
+        enabled: u.Enabled !== false,
+        emailVerified: attr('email_verified') === 'true',
+        createdAt: u.UserCreateDate?.toISOString() ?? null,
+        lastModifiedAt: u.UserLastModifiedDate?.toISOString() ?? null,
+      })
+    }
+    token = page.PaginationToken
+  } while (token)
+  return { users }
 }
 
 async function applyGroupChanges(username: string, add: string[], remove: string[]): Promise<void> {
@@ -517,6 +554,8 @@ export const handler = async (event: { arguments: Args; identity?: AppSyncIdenti
   const input = parseInput(event.arguments.input)
 
   switch (action) {
+    case 'listDriverPool':
+      return JSON.stringify(await listDriverPoolUsers())
     case 'list': {
       const users = await listCognitoUsers()
       const rows = await scanProfiles()

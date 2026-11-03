@@ -1,5 +1,68 @@
 # TMS build log
 
+## 2026-11-03 — PLAN: the two dev-only tests after S4 (big import, then full demo shipment); main is Ryne's call afterwards
+
+Everything stays on dev. No main merge or merge-to-main prep is planned or done. Order: (1) big data import on dev,
+(2) one demo shipment start to finish, then Ryne decides about main. Findings are from a read-only recon of the repo.
+
+### Test 1 — big data import on dev
+**What exists today (none of it takes a large external dataset):**
+- `node scripts/devStack.mjs copy-data|copy-files`: prod → dev copy (read-only on prod, overwrite by key, 4 table workers,
+  BatchWrite 25, no Lambda/AppSync ceiling). `copy-files` is `aws s3 sync` and creates no `ShipmentDocument` rows.
+- Aljex CSV importer (`/tms/brokerage/company/aljex-import`, Lambda `tms-aljex-import`, owner/ADMIN): the ONLY path that
+  writes the new Shipment/Order/Load model from a file. UTF-8 CSV (BOM stripped) uploaded to S3, 31 target columns with header
+  aliases (Pro #, Customer, Customer MC, origin/destination name+city+state+zip, pickup/delivery date, equipment, weight,
+  miles, customer/carrier rate, carrier + MC, invoice #/date/paid date/amount, bill #/amount, status). One TransactWrite per
+  row (ProClaim, Shipment, Load, LoadFinancials, 2 LoadCharge, optional Invoice, optional LoadCarrier + CarrierBill).
+  Idempotent by file hash and PRO claim. Rows run serially inside a 30 s AppSync / 60 s Lambda window: about 150-400 rows per
+  call [INFERENCE], and the job row is written only at the end, so a timeout leaves no job record.
+- Directory CSV import (`/tms/brokerage/company/import`): max 500 rows per call, apply only for CUSTOMER and LOCATION.
+  Location natural key is the normalized name alone, so two same-named sites collapse into one.
+- `scripts/backfill*.mjs` re-link rows already in dev; `scripts/importCarriers.mjs` is production-cutover only (refuses dev by policy).
+
+**Gaps for a realistic large load (assume 50k shipments, 5k customers, 2k carriers, 20k locations, documents):**
+1. No bulk carrier path on dev (Aljex rows never create a Carrier; bills get a synthetic `imported-<mc|name>` id, no MCP status,
+   insurance or payment method). 2. No documents path: imported shipments sit at DOCS_NEEDED and the release gate can never pass.
+3. Throughput shape is wrong: serial rows, no resumable cursor, customer/location resolvers are linear scans (needs a Map index);
+   needs client-side chunking with an offset, an async worker, or an offline script writing to DynamoDB directly.
+4. Preview over-counts new customers/locations (they are not added to the preview state); a changed column mapping on the same
+   file is ignored (job cached by hash). 5. Importer-created customers/locations lack `normalizedName`/aliases/geocode, so they
+   later look unmatched or duplicate; Shipment `status` is hard-coded DRAFT; stops are pickup/delivery only, date at T00:00Z;
+   no division/rep/references/accessorials; invoices get Net 0 so aging is wrong. 6. Shipment numbers: every row consumes a
+   `nextShipmentNumber` (no collisions, but 50k imports burn 50k numbers ahead of live ones and it is one hot settings item);
+   there is no option to preserve legacy PROs, and a legacy PRO shaped like `S000123-1` could collide with the derived-PRO regex.
+   7. Shipments cannot be deleted (void only), so a bad import is permanent: tag fixtures (ZZ prefix or a `source` marker) and
+   rehearse on a throwaway dev table copy. 8. `devStack copy-data --to` is not validated against the production suffix
+   (add `to !== PROD_SUFFIX`); the Aljex and directory importers rely only on which deployment they run in.
+
+**Needs from Ryne:** the actual source and file format (Aljex export? MVMNT export? other TMS), a representative sample file with
+columns, expected volumes per entity, whether documents come with it, and whether legacy PRO numbers must be preserved.
+**Proposed build (after S4):** a streaming import script reusing the Aljex mapper that creates Carrier/Customer/Location (with
+normalized keys) through the Lambda actions in parallel batches, indexed resolvers, a document-stub strategy, a 1k-row timed
+dry run, then the full run on a dev table copy.
+
+### Test 2 — one demo shipment, create to invoice (and carrier bill/pay)
+**Steps and the actions behind them:** create (`CREATE_SHIPMENT`, `SAVE_ORDER_FORM`, `CHECK_CREDIT`) → submit (`SUBMIT_ORDER`,
+build gate) → price (`PRICE_FROM_MARKET`, DAT is a STUB) → post (`POST_LOAD`, STUB) → cover (`RECORD_CARRIER_OFFER`,
+`ACCEPT_OFFER`, `BOOK_CARRIER`) → rate con (`SEND_RATE_CON`) → track (`SEND_TRACKING_LINK`, `SAVE_CHECK_CALL_PLAN`,
+`INGEST_SHIPMENT_MESSAGE`) → POD (`REQUEST_POD`, upload, `REVIEW_SHIPMENT_POD`) → release (`READY_TO_INVOICE`) → invoice
+(`GENERATE_INVOICE`, `RENDER_INVOICE_PDF`) → collect (`RECORD_PAYMENT`) → carrier bill (`RECORD_BILL`, `APPROVE_BILL`) → pay
+(`RECORD_AP_PAYMENT`).
+**Already proved by scripts:** `devVerifyP` covers seed, price, build gate, post, offer, rate con, tracking, POD review and release
+(48/48); `devVerifyAr` and `devVerifyAp` cover invoice/payment/credit/factoring and bill/approve/pay, but on throwaway fixtures that are
+voided afterwards (that is why dev shows no invoices or bills). **No script or UI run chains one shipment through all steps.**
+**Blockers for a click-through today:** (1) email/SMS are not live on dev (SES rejects: message NOT_SENT with the MIME in CloudWatch;
+Twilio/OTR/Motive keys neutered), so rate-con signing links, invoice emails and remittances work by copy/download; the portal link
+works on the Amplify branch URL, not `ops-dev.bcatcorp.com`. (2) MyCarrierPackets/DAT/Truckstop/Maps are stubs, and rate con now
+requires a completed MCP packet: use the seeded `carr-demo-vetted` or set `mcpStatus` on a test carrier; a new carrier also needs
+insurance and a `CarrierPaymentMethod` to be bookable/payable. (3) Release gate and bill approval need BOL/POD/RATE_CON documents
+(upload through the Documents tab) and carrier paperwork or an admin override note. (4) Money steps need owner/ADMIN. (5) Customer
+needs a credit limit when free credit is required and a billing contact for the invoice email. (6) Shipments cannot be deleted: use
+ZZ-prefixed customer/carrier and void afterwards. (7) Older dev stacks need `RESET_DEMO` then `SEED_DEMO` for seed p8.2.
+**Proposed build (after S4):** `scripts/devVerifyFlow.mjs` that runs the 14 steps on ONE shipment with a temp ADMIN identity, ZZ
+fixtures and cleanup, plus a manual click-through checklist for the UI. **Needs from Ryne:** whether to keep email/SMS stubbed or
+turn on a real SES/Twilio sandbox for the run, and which customer/carrier to use for the demo.
+
 ## 2026-11-03 — Steps S2 + S3 + rate-con changes deployed on dev (Amplify jobs 133 and 134)
 
 **Committed and deployed on dev. Dev only; nothing near main.** Ryne approved S1; the S1 nits (welcome name,

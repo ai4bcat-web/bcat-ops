@@ -15,11 +15,13 @@ export interface TmsChartCardProps {
   onExpand?: () => void
   /** The "…" overflow control; supply the trigger (and its menu) to show it. */
   menu?: ReactNode
+  /** Right-aligned head content (the card-level "Download" button). */
+  action?: ReactNode
   children?: ReactNode
 }
 
 /** Dashboard chart card (reference §3): white card, 14/600 title with a leading icon, chart body. */
-export function TmsChartCard({ title, icon: Icon, className, onFilter, onNumbers, onTable, onExpand, menu, children }: TmsChartCardProps) {
+export function TmsChartCard({ title, icon: Icon, className, onFilter, onNumbers, onTable, onExpand, menu, action, children }: TmsChartCardProps) {
   return (
     <section className={`tms-chart-card${className ? ` ${className}` : ''}`}>
       <header className="tms-chart-head">
@@ -46,6 +48,7 @@ export function TmsChartCard({ title, icon: Icon, className, onFilter, onNumbers
               <Maximize2 size={14} />
             </button>
           ) : null}
+          {action}
           {menu}
         </div>
       </header>

@@ -9,10 +9,11 @@ import { useEffect, useMemo, useState } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { TmsShell, type TmsLiveChild } from '@/features/tms/TmsShell'
 import { useOwnershipDivisions, useShipmentViews } from '@/features/tms/useShipmentViews'
-import { buildNavSections, companyOptions, TMS_PAGE_KEY, tmsBreadcrumb } from '@/lib/navSections'
+import { buildNavSections, companyOptions, tmsBreadcrumb } from '@/lib/navSections'
 import { viewCallerOf, viewsVisibleTo } from '@/lib/shipmentViewDefs'
 import { useAuth } from '@/hooks/useAuth'
-import { useCheckCallWorklist } from '@/hooks/useCheckCallWorklist'
+import { NotificationsDrawer } from '@/features/tms/notifications/NotificationsDrawer'
+import { useNotifications } from '@/features/tms/notifications/useNotifications'
 import { useShipments } from '@/hooks/useShipments'
 import { useStaff } from '@/hooks/useStaff'
 import { personName } from '@/lib/roles'
@@ -97,11 +98,9 @@ export function TmsLayout() {
     [shipments],
   )
 
-  // The bell's number is the check-call worklist's due count: one `checkCallState`
-  // function behind the legacy rail, the Check calls page and the notifier.
-  const { dueCount } = useCheckCallWorklist({
-    enabled: isOwner || isAdmin || hasPageAccess('loads') || hasPageAccess(TMS_PAGE_KEY),
-  })
+  // The bell's number is everything the notification drawer lists for this person.
+  const { groups: notificationGroups, count: notificationCount } = useNotifications(shipments)
+  const [notificationsOpen, setNotificationsOpen] = useState(false)
   const companies = useMemo(() => companyOptions(sections, divisions), [sections, divisions])
 
   const email = user?.email ?? ''
@@ -119,7 +118,9 @@ export function TmsLayout() {
       shipmentViews={shipmentViews}
       badgeCounts={badgeCounts}
       companies={companies}
-      notificationCount={dueCount}
+      notificationCount={notificationCount}
+      onOpenNotifications={() => setNotificationsOpen(true)}
+      notificationsOpen={notificationsOpen}
       trackedLoads={trackedLoads}
       onLogout={() => { void logout() }}
       onSearch={(q) => navigate(`/tms/shipments?q=${encodeURIComponent(q)}`)}
@@ -136,6 +137,7 @@ export function TmsLayout() {
       ) : (
         <Outlet />
       )}
+      <NotificationsDrawer open={notificationsOpen} onOpenChange={setNotificationsOpen} groups={notificationGroups} />
     </TmsShell>
   )
 }

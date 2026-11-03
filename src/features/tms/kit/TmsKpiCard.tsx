@@ -1,5 +1,7 @@
 import { ArrowDownRight, ArrowRight, ArrowUpRight } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
+import { TmsPeriodToggle } from './TmsPeriodToggle'
+import type { TmsPeriodToggleProps } from './TmsPeriodToggle'
 
 export interface TmsKpiCardProps {
   label: string
@@ -19,6 +21,8 @@ export interface TmsKpiCardProps {
   compact?: boolean
   /** Renders the card as a button. */
   onClick?: () => void
+  /** Renders a D/W/M toggle top-right of the card. */
+  period?: Pick<TmsPeriodToggleProps, 'value' | 'onChange' | 'options'>
   testId?: string
   /** Accessible name for the whole card, when the label + value alone are not enough. */
   ariaLabel?: string
@@ -41,6 +45,7 @@ export function TmsKpiCard({
   tone: valueTone = 'default',
   compact,
   onClick,
+  period,
   testId,
   ariaLabel,
   className,
@@ -63,6 +68,11 @@ export function TmsKpiCard({
       <div className="tms-kpi-card-label">
         {Icon ? <Icon size={16} aria-hidden="true" /> : null}
         <span>{label}</span>
+        {period ? (
+          <span className="tms-kpi-card-period" onClick={(e) => e.stopPropagation()}>
+            <TmsPeriodToggle {...period} aria-label={`${label} period`} />
+          </span>
+        ) : null}
       </div>
       <strong className={`tms-kpi-card-value${valueTone === 'default' ? '' : ` tms-kpi-value-${valueTone}`}`}>{value ?? '—'}</strong>
       {showDelta ? (

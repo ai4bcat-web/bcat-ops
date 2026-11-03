@@ -5,6 +5,14 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { TmsStatRow } from './TmsStatRow'
 
 describe('TmsStatRow', () => {
+  it('passes a stat\'s period toggle through to its card', () => {
+    const onChange = vi.fn()
+    render(<TmsStatRow items={[{ label: 'Fuel', value: '$1', period: { value: 'D', onChange } }, { label: 'Other', value: '$2' }]} />)
+    expect(screen.getAllByRole('group', { name: /period/ })).toHaveLength(1)
+    fireEvent.click(screen.getByRole('button', { name: 'W' }))
+    expect(onChange).toHaveBeenCalledWith('W')
+  })
+
   it('renders a null value as an em dash, never $0.00', () => {
     render(<TmsStatRow items={[{ label: 'Revenue', value: null }]} />)
     expect(screen.getByText('—')).toBeInTheDocument()

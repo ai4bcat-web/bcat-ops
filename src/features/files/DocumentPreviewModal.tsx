@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react'
 import { Download, ExternalLink } from 'lucide-react'
 import { toast } from 'sonner'
-import { isPdfKey, isImageKey, isUnembeddableKey } from '@/lib/filePacketPdf'
 import { downloadFromUrl } from '@/lib/download'
 import type { ComplianceDocument } from '@/types'
 import { errorText } from '@/lib/errorText'
 import { TmsButton } from '@/features/tms/kit/TmsButton'
 import { TmsDialog } from '@/features/tms/kit/TmsDialog'
+import { TmsDocumentFrame } from '@/features/tms/kit/TmsDocumentFrame'
 
 /**
  * Look at a document without leaving the file.
@@ -35,11 +35,8 @@ export function DocumentPreviewModal({
     return () => { alive = false }
   }, [doc.s3Key, getUrl])
 
-  const fetchError = !doc.s3Key ? 'This item has no file attached.' : error
-
   const key = doc.s3Key ?? ''
   const filename = key.split('/').pop() ?? doc.title
-  const canRender = isPdfKey(key) || isImageKey(key)
 
   const [saving, setSaving] = useState(false)
 
@@ -77,26 +74,7 @@ export function DocumentPreviewModal({
         </>
       )}
     >
-      <div style={{ height: '68vh', background: 'var(--tms-surface)', borderRadius: 'var(--tms-radius)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'auto' }}>
-        {fetchError ? (
-          <div style={{ fontSize: 13, color: 'var(--tms-badge-red)', padding: 24, textAlign: 'center' }}>Couldn't open this document: {fetchError}</div>
-        ) : !url ? (
-          <div style={{ fontSize: 13, color: 'var(--tms-muted)' }}>Loading…</div>
-        ) : isUnembeddableKey(key) ? (
-          <div style={{ fontSize: 13, color: 'var(--tms-text-2)', padding: 24, textAlign: 'center', lineHeight: 1.6 }}>
-            This is a HEIC photo, which browsers can't display.<br />
-            <span style={{ color: 'var(--tms-muted)' }}>Download it to view — it opens fine on a Mac or iPhone.</span>
-          </div>
-        ) : isImageKey(key) ? (
-          <img data-tms-paper src={url} alt={doc.title} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', background: 'var(--tms-paper)' }} />
-        ) : canRender ? (
-          <iframe data-tms-paper src={url} title={doc.title} style={{ width: '100%', height: '100%', border: 'none', background: 'var(--tms-paper)' }} />
-        ) : (
-          <div style={{ fontSize: 13, color: 'var(--tms-text-2)', padding: 24, textAlign: 'center' }}>
-            This file type can't be previewed — download it to open.
-          </div>
-        )}
-      </div>
+      <TmsDocumentFrame url={url} fileKey={doc.s3Key ?? null} title={doc.title} error={error} height="68vh" />
     </TmsDialog>
   )
 }

@@ -11,6 +11,7 @@
  * printed as a zero standing in for "unknown".
  */
 import { applyFilters, indexOf, loadRow, pricedSamples, sampleRow } from '@/lib/dashboardCharts'
+import { isPodMissing } from '@/lib/podState'
 import { MOVEMENT_STATUSES } from '@/lib/brokerageCharts'
 import { divisionTree, topLevelOf } from '@/lib/ownership'
 import type { DataIndex } from '@/lib/dashboardCharts'
@@ -61,14 +62,13 @@ function countByStatus(shipments: { status: string }[]): Record<string, number> 
 type DivisionInput = Pick<OwnershipDivisionRecord, 'id' | 'code' | 'name' | 'brand' | 'parentId' | 'sortOrder' | 'active'>
 
 function podMissing(
+  status: string,
   shipmentId: string,
   sampleByShipmentId: Map<string, DashboardData['samples'][number]>,
   index: DataIndex,
 ): boolean {
   const sample = sampleByShipmentId.get(shipmentId)
-  if (sample) return !sample.podReceivedAt
-  const order = index.orderByShipmentId.get(shipmentId)
-  return (order?.docsMissing ?? []).includes('POD')
+  return isPodMissing(status, index.orderByShipmentId.get(shipmentId)?.docsMissing, sample ? !!sample.podReceivedAt : null)
 }
 
 function stripValues(
@@ -225,8 +225,7 @@ export function buildBusinessStrips(
 
   const podBuckets = new Map<string, { top: string | null; sub: string | null }>()
   for (const shipment of filtered.shipments) {
-    if (shipment.status !== 'DELIVERED') continue
-    if (!podMissing(shipment.id, sampleByShipmentId, index)) continue
+    if (!podMissing(shipment.status, shipment.id, sampleByShipmentId, index)) continue
     const bucket = shipmentBuckets.get(shipment.id)
     if (!bucket) continue
     podBuckets.set(shipment.id, bucket)
