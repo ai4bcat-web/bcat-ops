@@ -187,6 +187,8 @@ export type ShipmentRow = ShipmentRecord & {
   lastKnownCity?: string | null
   lastKnownState?: string | null
   lastKnownSource?: string | null
+  lastKnownLat?: number | null
+  lastKnownLng?: number | null
   loadDeliveredAt?: string | null
   cargoValueCents?: number | null
   loadNotes?: string | null

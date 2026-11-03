@@ -1903,7 +1903,9 @@ export interface TrackingLinkRecord {
   id: string
   kind: TrackingLinkKind
   shipmentId: string
+  shipmentNumber?: string | null
   customerId?: string | null
+  customerName?: string | null
   url?: string | null
   notes?: string | null
   loadId?: string | null

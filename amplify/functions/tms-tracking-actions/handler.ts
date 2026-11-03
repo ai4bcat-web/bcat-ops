@@ -1061,8 +1061,14 @@ async function sendCustomerLink(input: Row, caller: Caller): Promise<Row> {
     ? linkExpiry('CUSTOMER_VIEW', null, linkSettings(settings), now)
     : customerLinkExpiry(input.expiresAt, now)
   const customerId = input.customerId === undefined ? existing?.customerId ?? null : optionalString(input.customerId, 100)
-  if (customerId && !(await getById(CUSTOMER_TABLE_NAME, String(customerId)))) throw new Error('Customer not found')
+  let customerName: string | null = null
+  if (customerId) {
+    const customer = await getById(CUSTOMER_TABLE_NAME, String(customerId))
+    if (!customer) throw new Error('Customer not found')
+    customerName = String(customer.name ?? '')
+  }
   const notes = input.notes === undefined ? existing?.notes ?? null : optionalString(input.notes, MAX_MESSAGE)
+  const shipmentNumber = String(shipment.number ?? '')
   const url = publicUrl('s', token)
 
   // Re-sending refreshes the clock and the snapshot on the token the customer already
@@ -1070,6 +1076,8 @@ async function sendCustomerLink(input: Row, caller: Caller): Promise<Row> {
   const patch: Row = {
     expiresAt,
     customerId,
+    customerName,
+    shipmentNumber,
     notes,
     url,
     sentTo: to.join(', ') || null,

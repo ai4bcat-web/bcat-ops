@@ -6674,6 +6674,7 @@ const demoDeps: DemoDeps = {
     message: SHIPMENT_MESSAGE_TABLE_NAME,
     document: SHIPMENT_DOCUMENT_TABLE_NAME,
     checkCall: LOAD_CHECK_CALL_TABLE_NAME,
+    trackingLink: TRACKING_LINK_TABLE_NAME,
     settings: SETTINGS_TABLE_NAME,
   },
   getById,

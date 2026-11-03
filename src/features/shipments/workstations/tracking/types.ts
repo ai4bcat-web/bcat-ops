@@ -46,6 +46,7 @@ export interface InboxPanelProps {
   loading: boolean
   selectedId: string | null
   onSelect: (id: string) => void
+  nowMs: number
   /** The framed conversation for the selected shipment. */
   children?: ReactNode
 }

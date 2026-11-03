@@ -40,7 +40,7 @@ function latestMessage(messages: ShipmentMessageRecord[]): ShipmentMessageRecord
   return latest
 }
 
-export function InboxPanel({ rows, messagesByShipment, loading, selectedId, onSelect, children }: InboxPanelProps) {
+export function InboxPanel({ rows, messagesByShipment, loading, selectedId, onSelect, nowMs, children }: InboxPanelProps) {
   const [query, setQuery] = useState('')
 
   const conversations = useMemo(() => {
@@ -87,6 +87,7 @@ export function InboxPanel({ rows, messagesByShipment, loading, selectedId, onSe
                 messages={messages}
                 selected={row.id === selectedId}
                 onSelect={() => onSelect(row.id)}
+                nowMs={nowMs}
               />
             ))
           )}
@@ -111,14 +112,16 @@ function ConversationRow({
   messages,
   selected,
   onSelect,
+  nowMs,
 }: {
   row: ShipmentRow
   messages: ShipmentMessageRecord[]
   selected: boolean
   onSelect: () => void
+  nowMs: number
 }) {
   const latest = latestMessage(messages)
-  const when = relativeTime(latest?.at, Date.now())
+  const when = relativeTime(latest?.at, nowMs)
   return (
     <button
       type="button"

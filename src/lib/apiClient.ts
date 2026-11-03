@@ -3113,7 +3113,7 @@ const LOAD_CHECK_CALL_FIELDS = `
 const LOAD_CHECK_CALL_JSON_FIELDS: (keyof LoadCheckCallRecord)[] = ['charges']
 
 const TRACKING_LINK_FIELDS = `
-  id kind shipmentId customerId url notes loadId loadCarrierId status expiresAt
+  id kind shipmentId shipmentNumber customerId customerName url notes loadId loadCarrierId status expiresAt
   sentTo sentVia sentAt smsMessageId contactName contactEmail contactPhone
   showCarrier showPosition openCount lastOpenedAt requestCount
   pingCount lastPingAt lastPingLat lastPingLng lastPingAccuracyM
@@ -7285,6 +7285,7 @@ export async function sendShipmentMessage(input: {
   subject?: string | null
   body: string
   inReplyTo?: string | null
+  authorName?: string | null
 }): Promise<{ message: ShipmentMessageRecord }> {
   return trackingAction<{ message: ShipmentMessageRecord }>('SEND_SHIPMENT_MESSAGE', input)
 }

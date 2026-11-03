@@ -2166,10 +2166,12 @@ const schema = a.schema({
   // index anywhere and a guess has to hit a 192-bit primary key.
   TrackingLink: a
     .model({
-      kind:          a.enum(['CARRIER_PING', 'CUSTOMER_VIEW', 'CARRIER_UPLOAD']),
-      shipmentId:    a.string().required(),
-      customerId:    a.string(),
-      url:           a.string(),
+      kind:           a.enum(['CARRIER_PING', 'CUSTOMER_VIEW', 'CARRIER_UPLOAD']),
+      shipmentId:     a.string().required(),
+      shipmentNumber: a.string(),
+      customerId:     a.string(),
+      customerName:   a.string(),
+      url:            a.string(),
       notes:         a.string(),
       loadId:        a.string(),
       loadCarrierId: a.string(),

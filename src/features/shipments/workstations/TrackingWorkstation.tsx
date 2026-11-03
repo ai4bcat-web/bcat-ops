@@ -12,7 +12,7 @@
  * workstation (OfferQueue + PostingPanel). Customer links are one toolbar/row
  * callback here; the Manage Customer Links page owns listing, revoke and extend.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 
@@ -37,6 +37,7 @@ import {
   sendShipmentMessage,
 } from '@/lib/apiClient'
 import { viewCallerOf, viewsVisibleTo } from '@/lib/shipmentViewDefs'
+import { displayName } from '@/lib/roles'
 import { CreateShipmentDialog } from '../components/CreateShipmentDialog'
 import { CustomerLinkDialog } from '../components/CustomerLinkDialog'
 import { InboxPanel } from './tracking/InboxPanel'
@@ -67,6 +68,11 @@ export function TrackingWorkstation() {
   const { shipments, loading: shipmentsLoading, error: shipmentsError, refresh: refreshShipments } = useShipments()
   const { customers } = useDirectory()
   const staff = useStaff(user?.email)
+  const senderName = useMemo(() => {
+    if (staff.me) return displayName(staff.me)
+    return user?.email ?? null
+  }, [staff.me, user?.email])
+
   const viewsState = useShipmentViews()
   const [viewSlug, setViewSlug] = useState('')
   const [activeOnly, setActiveOnly] = useState(true)
@@ -204,11 +210,6 @@ export function TrackingWorkstation() {
     setSearchParams(next, { replace: true })
   }, [tab, requestedId, selectedConversationId, searchParams, setSearchParams])
 
-  // A fetch resolves after the user may have moved on; only the selection that
-  // asked may commit.
-  const conversationIdRef = useRef<string | null>(null)
-  conversationIdRef.current = selectedConversationId
-
   const displayKey = useMemo(() => inboxRows.map((r) => r.id).sort().join(','), [inboxRows])
   const messagesLoading = tab === 'inbox' && messagesReadyKey !== displayKey
   const bundleLoading = selectedConversationId != null && bundleReadyKey !== selectedConversationId
@@ -272,11 +273,11 @@ export function TrackingWorkstation() {
     documentIds?: string[]
     party?: 'DRIVER' | 'DISPATCHER'
   }) => {
-    const id = conversationIdRef.current
+    const id = selectedConversationId
     if (!id) return
-    await sendShipmentMessage({ shipmentId: id, ...input })
+    await sendShipmentMessage({ shipmentId: id, ...input, authorName: senderName ?? undefined })
     await refreshConversation()
-  }, [refreshConversation])
+  }, [refreshConversation, selectedConversationId, senderName])
 
   const activeLeg = useMemo(() => {
     const load = conversationBundle?.loads[0]
@@ -372,13 +373,14 @@ export function TrackingWorkstation() {
             loading={messagesLoading}
             selectedId={selectedConversationId}
             onSelect={selectConversation}
+            nowMs={nowMs}
           >
             <TrackingConversation
               variant="inbox"
               bundle={conversationBundle}
               messages={selectedConversationId ? messagesByShipment[selectedConversationId] ?? [] : []}
               loading={messagesLoading || bundleLoading}
-              userName={user?.email ?? null}
+              userName={senderName ?? null}
               driver={activeLeg ? { name: activeLeg.driverName, phone: activeLeg.driverPhone } : null}
               dispatcher={activeLeg ? { name: activeLeg.dispatcherName, phone: activeLeg.dispatcherPhone, email: activeLeg.dispatcherEmail } : null}
               conversationKey={selectedConversationId ?? ''}

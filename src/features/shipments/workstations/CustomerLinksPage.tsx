@@ -40,6 +40,7 @@ type StatusFilter = 'ALL' | 'ACTIVE' | 'REVOKED' | 'EXPIRED'
 interface LinkRow {
   link: TrackingLinkRecord
   shipment: ShipmentRow | null
+  shipmentNumber: string | null
   customerName: string | null
 }
 
@@ -47,6 +48,10 @@ function statusTone(status: string): 'green' | 'red' | 'gray' {
   if (status === 'ACTIVE') return 'green'
   if (status === 'REVOKED') return 'red'
   return 'gray'
+}
+
+function isVerificationUser(email: string): boolean {
+  return /^zz-p-admin-.*@example\.invalid$/.test(email) || /^tms-verify/.test(email)
 }
 
 export function CustomerLinksPage() {
@@ -77,8 +82,13 @@ export function CustomerLinksPage() {
   }, [])
 
   useEffect(() => {
-    refresh().catch(() => {})
-  }, [refresh])
+    let alive = true
+    listCustomerLinks()
+      .then((rows) => { if (alive) setLinks(rows) })
+      .catch((err) => { if (alive) setError(err instanceof Error ? err.message : 'Could not load customer links') })
+      .finally(() => { if (alive) setLoading(false) })
+    return () => { alive = false }
+  }, [])
 
   const shipmentById = useMemo(() => {
     const map = new Map<string, ShipmentRow>()
@@ -95,10 +105,12 @@ export function CustomerLinksPage() {
   const rows: LinkRow[] = useMemo(() => {
     return links.map((link) => {
       const shipment = shipmentById.get(link.shipmentId) ?? null
+      const shipmentNumber = link.shipmentNumber ?? shipment?.number ?? null
       const customerName =
+        link.customerName ??
         (link.customerId ? customerById.get(link.customerId) : null) ??
         shipment?.customerName ?? null
-      return { link, shipment, customerName }
+      return { link, shipment, shipmentNumber, customerName }
     })
   }, [links, shipmentById, customerById])
 
@@ -109,9 +121,11 @@ export function CustomerLinksPage() {
       if (statusFilter === 'ACTIVE' && r.link.status !== 'ACTIVE') return false
       if (statusFilter === 'REVOKED' && r.link.status !== 'REVOKED') return false
       if (statusFilter === 'EXPIRED' && r.link.status !== 'EXPIRED') return false
+      // Demo verification users leave links behind; keep them out of the management list.
+      if (isVerificationUser(r.link.createdBy)) return false
       if (q) {
         const needle = [
-          r.shipment?.number,
+          r.shipmentNumber,
           r.customerName,
           r.link.url,
           r.link.createdBy,
@@ -160,14 +174,14 @@ export function CustomerLinksPage() {
       header: 'SHIPMENT',
       width: 140,
       render: (row) =>
-        row.shipment ? (
+        row.shipmentNumber ? (
           <button
             type="button"
             className="tms-link"
-            onClick={() => navigate(`/tms/shipments/${row.shipment!.id}?tab=tracking`)}
+            onClick={() => navigate(`/tms/shipments/${row.link.shipmentId}?tab=tracking`)}
             style={{ fontWeight: 600, color: 'var(--tms-primary)', background: 'none', border: 'none', cursor: 'pointer', fontSize: 'inherit', padding: 0 }}
           >
-            {row.shipment.number}
+            {row.shipmentNumber}
           </button>
         ) : (
           <span className="tms-muted">—</span>

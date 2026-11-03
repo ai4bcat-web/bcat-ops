@@ -386,6 +386,8 @@ export function useShipments(view: ShipmentsView = DEFAULT_VIEW) {
       lastKnownCity: string | null
       lastKnownState: string | null
       lastKnownSource: string | null
+      lastKnownLat: number | null
+      lastKnownLng: number | null
       /** Null until a load answers with a stop list: "not sent" is not "no stops". */
       stopCount: number | null
     }> = {}
@@ -398,7 +400,7 @@ export function useShipments(view: ShipmentsView = DEFAULT_VIEW) {
         nextCheckCallAt: null, nextCheckCallNote: null,
         lastCheckCallAt: null, lastCheckCallType: null, checkCallOpen: null, openIncidentCount: 0,
         trackingProvider: null, lastKnownAt: null, lastKnownCity: null, lastKnownState: null,
-        lastKnownSource: null, stopCount: null,
+        lastKnownSource: null, lastKnownLat: null, lastKnownLng: null, stopCount: null,
       }
       const update = l.lastKnownAt ?? l.lastCheckCallAt ?? null
       if (update && (!t.lastUpdateAt || update > t.lastUpdateAt)) {
@@ -420,6 +422,8 @@ export function useShipments(view: ShipmentsView = DEFAULT_VIEW) {
         t.lastKnownCity = l.lastKnownCity ?? null
         t.lastKnownState = l.lastKnownState ?? null
         t.lastKnownSource = l.lastKnownSource ?? null
+        t.lastKnownLat = typeof l.lastKnownLat === 'number' ? l.lastKnownLat : null
+        t.lastKnownLng = typeof l.lastKnownLng === 'number' ? l.lastKnownLng : null
       }
       if (l.lastCheckCallAt && (!t.lastCheckCallAt || l.lastCheckCallAt > t.lastCheckCallAt)) {
         t.lastCheckCallAt = l.lastCheckCallAt
@@ -682,6 +686,8 @@ export function useShipments(view: ShipmentsView = DEFAULT_VIEW) {
         lastKnownCity: tracking?.lastKnownCity ?? null,
         lastKnownState: tracking?.lastKnownState ?? null,
         lastKnownSource: tracking?.lastKnownSource ?? null,
+        lastKnownLat: tracking?.lastKnownLat ?? null,
+        lastKnownLng: tracking?.lastKnownLng ?? null,
         loadDeliveredAt: shipmentLoads.map((l) => l.deliveredAt).filter((d): d is string => !!d).sort().pop() ?? null,
         cargoValueCents: sumOrNull(shipmentLoads.map((l) => l.cargoValueCents)),
         loadNotes: joinUnique(shipmentLoads.map((l) => l.notes), ' · '),

@@ -33,6 +33,7 @@ export interface DemoDeps {
     message: string
     document: string
     checkCall: string
+    trackingLink: string
     settings: string
   }
   getById(table: string, id: string): Promise<Row | null>
@@ -836,6 +837,15 @@ export async function seedDemoData(deps: DemoDeps, input: Row, caller: Caller): 
         authorKind: 'PERSON', authorName: contacts.driverName,
       }),
       makeMessage(deps, caller, inTransitShipment, loadRow, {
+        channel: 'EMAIL', kind: 'OTHER', direction: 'IN', body: 'Confirmed. Driver will be there by the scheduled window.', party: 'DISPATCHER',
+        subject: 'Re: Rate confirmation',
+        authorKind: 'PERSON', authorName: contacts.dispatcherName,
+      }),
+      makeMessage(deps, caller, inTransitShipment, loadRow, {
+        channel: 'SMS', kind: 'OTHER', direction: 'OUT', body: `Thanks ${contacts.driverName}, drive safe and keep us posted.`, party: 'DRIVER',
+        authorKind: 'PERSON', authorName: 'Jordan Patel',
+      }),
+      makeMessage(deps, caller, inTransitShipment, loadRow, {
         channel: 'SMS', kind: 'POD_REQUEST', direction: 'OUT', body: 'Please send POD photos at delivery.',
         authorKind: 'AGENT', authorName: 'BCAT Tracking Assistant', status: 'SENT',
       }),
@@ -1134,9 +1144,28 @@ export async function resetDemoData(deps: DemoDeps, input: Row, caller: Caller):
     await deps.transact(chunk)
   }
 
+  // Demo verification accounts mint customer links during automated checks; purge
+  // them so the Manage links page does not flood with test artifacts.
+  try {
+    const trackingLinks = await deps.scanTable(deps.tables.trackingLink)
+    const verificationLinkDeletes = trackingLinks
+      .filter((l) => typeof l.createdBy === 'string' && isVerificationUser(l.createdBy))
+      .map((l) => deleteTx(deps.tables.trackingLink, String(l.id)))
+    console.log('[RESET] verification link deletes', { count: verificationLinkDeletes.length })
+    for (let i = 0; i < verificationLinkDeletes.length; i += MAX_TX) {
+      await deps.transact(verificationLinkDeletes.slice(i, i + MAX_TX))
+    }
+  } catch (err) {
+    console.error('[RESET] failed to purge verification tracking links', err)
+  }
+
   // Re-seed from a blank demo index.
   console.log('[RESET] seeding')
   return seedDemoData(deps, input, caller)
+}
+
+function isVerificationUser(email: string): boolean {
+  return /^zz-p-admin-.*@example\.invalid$/.test(email) || /^tms-verify/.test(email)
 }
 
 function tableForKind(deps: DemoDeps, kind: string): string | null {

@@ -15,7 +15,8 @@ import type { CheckCallChannel, CheckCallMilestone, CheckCallPlan } from '@/lib/
 import type { Stop } from '@/types'
 import type { CustomerRecord, ShipmentBundle, ShipmentMessageRecord, TmsSettings } from '@/types/tms'
 import type { ShipmentRow } from '@/features/shipments/shipmentViews'
-import { TrackingDetailMap, googleMapsExtras } from './TrackingDetailMap'
+import { TrackingDetailMap } from './TrackingDetailMap'
+import { googleMapsExtras } from './googleMapsExtras'
 import { TrackingConversation } from './TrackingConversation'
 import { resolveCheckCallPlanWithSource } from './checkCallPlanSource'
 
@@ -57,8 +58,10 @@ function DetailSession({ row, bundle, messages, loading, customers, settings, us
   const [runResult, setRunResult] = useState<{ action: string; reason: string } | null>(null)
 
   const lastKnown = useMemo(() => {
-    if (load?.lastKnownLat == null || load.lastKnownLng == null) return null
-    return { lat: load.lastKnownLat, lng: load.lastKnownLng }
+    const lat = load?.lastKnownLat
+    const lng = load?.lastKnownLng
+    if (lat == null || lng == null) return null
+    return { lat, lng }
   }, [load?.lastKnownLat, load?.lastKnownLng])
   const deliveryStop = useMemo(() => {
     let final: Stop | null = null
@@ -76,7 +79,7 @@ function DetailSession({ row, bundle, messages, loading, customers, settings, us
     }
   }, [deliveryStop])
   const pingAt = load?.lastKnownAt ?? null
-  const now = useMemo(() => new Date().toISOString(), [pingAt])
+  const now = useMemo(() => new Date().toISOString(), [])
   const estimate = useMemo(() => {
     if (!lastKnown || !destination || !pingAt) return null
     try { return trackingEtaEstimate(lastKnown, destination, pingAt, now) } catch { return null }

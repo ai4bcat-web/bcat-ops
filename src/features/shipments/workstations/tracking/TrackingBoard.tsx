@@ -155,8 +155,18 @@ function sortRows(rows: ShipmentRow[], sort: BoardGridSort | null, nowMs: number
       }
       case 'motion': {
         const motionOrder: Record<string, number> = { Moving: 1, Stopped: 2, 'No signal': 3 }
-        av = motionOrder[motionText(a, nowMs)] ?? 99
-        bv = motionOrder[motionText(b, nowMs)] ?? 99
+        const am = motionOrder[motionText(a, nowMs)] ?? 99
+        const bm = motionOrder[motionText(b, nowMs)] ?? 99
+        if (am !== bm) {
+          av = am
+          bv = bm
+        } else {
+          // Within the same motion, newest ping first so the active board surface
+          // the shipments a dispatcher should look at right now.
+          const ad = new Date(a.lastUpdateAt ?? a.lastKnownAt ?? 0).getTime()
+          const bd = new Date(b.lastUpdateAt ?? b.lastKnownAt ?? 0).getTime()
+          return bd - ad
+        }
         break
       }
       default:
@@ -197,7 +207,7 @@ export function TrackingBoard(props: TrackingBoardProps) {
 
   const [favoritesOnly, setFavoritesOnly] = useState(false)
   const [mapVisible, setMapVisible] = useState(false)
-  const [sort, setSort] = useState<BoardGridSort | null>(null)
+  const [sort, setSort] = useState<BoardGridSort | null>({ key: 'motion', dir: 'asc' })
 
   const listRows = useMemo(() => {
     const sorted = sortRows(rows, sort, nowMs)
