@@ -4,11 +4,12 @@
  * override. Below GLOBAL every field has an "Inherit" toggle: on means the key is absent
  * from the emitted patch and the control shows the value coming from the layers above.
  */
-import { useRef, type ReactNode } from 'react'
+import { useMemo, useRef, type ReactNode } from 'react'
 import { TmsButton, TmsInput, TmsSelect, TmsTextarea } from '@/features/tms/kit'
 import { TZ } from '@/lib/date'
 import {
   AUTOMATION_CHANNELS,
+  normalizeAutomationPatch,
   renderTemplate,
   sampleVars,
   TEMPLATE_KEYS,
@@ -55,7 +56,10 @@ function toggle<T>(list: T[], item: T): T[] {
   return list.includes(item) ? list.filter((x) => x !== item) : [...list, item]
 }
 
-export function TrackingAutomationEditor({ scope, value, inherited, onChange, disabled }: TrackingAutomationEditorProps) {
+export function TrackingAutomationEditor({ scope, value: stored, inherited, onChange, disabled }: TrackingAutomationEditorProps) {
+  // Stored layers may be partial (a quiet-hours object with only `enabled`, written outside the editor);
+  // the engine normalizes the same way, so the form never sees a half-filled sub-object.
+  const value = useMemo(() => normalizeAutomationPatch(stored), [stored])
   const inheritable = scope !== 'GLOBAL'
   const refs = useRef<Partial<Record<TemplateKey, HTMLTextAreaElement | null>>>({})
 

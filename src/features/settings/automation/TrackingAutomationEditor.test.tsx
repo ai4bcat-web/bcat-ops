@@ -23,6 +23,12 @@ describe('TrackingAutomationEditor', () => {
     expect(onChange).toHaveBeenCalledWith({ podAuto: true })
   })
 
+  it('renders a stored layer whose quietHours object is partial (only `enabled`)', () => {
+    const stored = { checkCallsAuto: true, quietHours: { enabled: false } } as unknown as AutomationPolicyPatch
+    mount('CUSTOMER', stored)
+    expect(screen.getByLabelText('Quiet hours SMS')).toBeTruthy()
+  })
+
   it('locks an inheriting field to the inherited value and writes it when Inherit is cleared', () => {
     const onChange = mount('CUSTOMER', {})
     const auto = screen.getByLabelText('Send check calls on the plan\'s schedule without anyone clicking') as HTMLInputElement

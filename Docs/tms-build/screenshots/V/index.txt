@@ -1,6 +1,13 @@
+Docs/tms-build/screenshots/V/V03-tracking-by-assignee-all-light.png
+Docs/tms-build/screenshots/V/V03-tracking-my-loads-light.png
 Docs/tms-build/screenshots/V/V10-shipment-tracker-card-light.png
-Docs/tms-build/screenshots/V/V10-customer-default-tracker-light.png
 Docs/tms-build/screenshots/V/V10-settings-automation-defaults-light.png
 Docs/tms-build/screenshots/V/V10-settings-automation-divisions-light.png
 Docs/tms-build/screenshots/V/V10-settings-automation-customers-light.png
+Docs/tms-build/screenshots/V/V03-tracking-by-assignee-all-dark.png
+Docs/tms-build/screenshots/V/V03-tracking-my-loads-dark.png
+Docs/tms-build/screenshots/V/V10-shipment-tracker-card-dark.png
+Docs/tms-build/screenshots/V/V10-settings-automation-defaults-dark.png
+Docs/tms-build/screenshots/V/V10-settings-automation-divisions-dark.png
+Docs/tms-build/screenshots/V/V10-settings-automation-customers-dark.png
 Docs/tms-build/screenshots/V/V10-mobile-tracking-M.png

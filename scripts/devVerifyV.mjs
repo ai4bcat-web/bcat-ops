@@ -756,11 +756,17 @@ async function v03Table(b, ctx, theme, ref) {
   await step('V03-row-menu', async () => {
     await openPage(b, '/tms/tracking?assignee=all')
     await waitTracking(b, [shipmentOf(ctx, 'sM')])
-    const rect = await b.evaluate(`(() => { const row = document.querySelector('[data-testid="tracking-row"][data-shipment-id="${shipmentOf(ctx, 'sM')}"]'); const btn = row?.querySelector('button[aria-label="Row actions"]'); if (!btn) return null; btn.scrollIntoView({ block: 'center' }); const r = btn.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 } })()`)
-    expect(rect, 'the row has no Row actions button')
-    await b.command('Input.dispatchMouseEvent', { type: 'mouseMoved', x: rect.x, y: rect.y })
-    await pause(400)
-    const text = await b.evaluate(`(() => { const m = document.querySelector('[data-testid="tracking-row"][data-shipment-id="${shipmentOf(ctx, 'sM')}"] .tms-tracking-rowmenu-menu'); return m && getComputedStyle(m).display !== 'none' ? m.innerText : null })()`)
+    // The table re-lays out while staff names / groups settle, so re-measure until the pointer really lands on this row's button.
+    let text = null
+    for (let attempt = 0; attempt < 6 && !text; attempt += 1) {
+      const rect = await b.evaluate(`(() => { const row = document.querySelector('[data-testid="tracking-row"][data-shipment-id="${shipmentOf(ctx, 'sM')}"]'); const btn = row?.querySelector('button[aria-label="Row actions"]'); if (!btn) return null; btn.scrollIntoView({ block: 'center' }); const r = btn.getBoundingClientRect(); const x = r.x + r.width / 2, y = r.y + r.height / 2; return btn.closest('.tms-tracking-rowmenu')?.contains(document.elementFromPoint(x, y)) ? { x, y } : { covered: true } })()`)
+      expect(rect, 'the row has no Row actions button')
+      if (rect.covered) { await pause(500); continue }
+      await b.command('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 5, y: 5 })
+      await b.command('Input.dispatchMouseEvent', { type: 'mouseMoved', x: rect.x, y: rect.y })
+      await pause(400)
+      text = await b.evaluate(`(() => { const m = document.querySelector('[data-testid="tracking-row"][data-shipment-id="${shipmentOf(ctx, 'sM')}"] .tms-tracking-rowmenu-menu'); return m && getComputedStyle(m).display !== 'none' ? m.innerText : null })()`)
+    }
     expect(text, 'the row menu does not open on hover')
     for (const label of ['Request check call', 'Request POD', 'Assign tracker']) expect(text.includes(label), `row menu lacks "${label}"`)
     await snap(b, 'V03', 'tracking-row-menu', theme, false)
@@ -834,7 +840,7 @@ async function v10Walk(b, ctx, theme, ref) {
     await openPage(b, `/tms/shipments/${shipmentOf(ctx, 'sA')}?tab=tracking`, () => b.evaluate(`!!document.querySelector('[data-testid="tracking-thread"]')`))
     await b.poll(() => b.evaluate(`document.querySelectorAll('[data-testid="not-sent-body"]').length >= 1`), 'automated NOT_SENT entries', 60_000)
     const text = await b.evaluate(`document.querySelector('[data-testid="tracking-thread"]').innerText`)
-    expect(/not sent/i.test(text) && /Would have sent/i.test(text), 'the thread does not show the NOT_SENT badge / would-have-sent text')
+    expect(/not[_ ]sent/i.test(text) && /Would have sent/i.test(text), 'the thread does not show the NOT_SENT badge / would-have-sent text')
     expect(/ZZ /.test(text), 'the automated template text is not in the thread')
     await auditNow(b, theme, null)
     await snap(b, 'V10', 'shipment-thread-automation', theme)

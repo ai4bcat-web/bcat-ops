@@ -37,8 +37,14 @@ export async function verifyTrackingUi({ storage, shipmentIds, origin = DEV_ORIG
     await command('Page.navigate', { url: `${origin}/tms/tracking/links` })
     await poll(() => evaluate(`!!document.querySelector('[data-testid="customer-links-page"]')`), 'Manage Customer Links page')
     await capture('P8-UI-manage-customer-links.png')
-    await command('Page.navigate', { url: `${origin}/tms/tracking?tab=tracking&shipment=${selected}` })
-    await poll(() => evaluate(`(() => { const button = [...document.querySelectorAll('button')].find(button => button.textContent.trim() === 'Create Customer URL'); if (!button || button.disabled) return false; button.click(); return true; })()`), 'Create Customer URL action')
+    // `?shipment=` is a legacy Inbox bookmark that now redirects to the shipment page, so the
+    // action is driven from the table itself: the seeded row's own menu (and the toolbar button).
+    await command('Page.navigate', { url: `${origin}/tms/tracking?assignee=all` })
+    await poll(() => evaluate(`!!document.querySelector('[data-testid="tracking-row"][data-shipment-id="${selected}"]')`), 'seeded shipment row on the Tracking table')
+    const toolbarEnabled = await poll(() => evaluate(`(() => { const button = [...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Create Customer URL'); return button ? !button.disabled : false })()`), 'Create Customer URL toolbar button enabled')
+    if (!toolbarEnabled) throw new Error('Create Customer URL toolbar action is disabled although rows are listed')
+    // The row menu is hover-only CSS; the item stays in the DOM, so click it directly.
+    await poll(() => evaluate(`(() => { const item = [...document.querySelectorAll('[data-testid="tracking-row"][data-shipment-id="${selected}"] .tms-tracking-rowmenu-item')].find(b => b.textContent.trim() === 'Create customer URL'); if (!item || item.disabled) return false; item.click(); return true; })()`), 'Create customer URL row action')
     await poll(() => evaluate(`!!document.querySelector('[data-testid="customer-link-dialog"]')`), 'Create Customer URL dialog')
     await capture('P8-UI-create-customer-url.png')
     return { inTransitRows: rows.length, selected, eta: detail.eta }
