@@ -175,14 +175,14 @@ export function CustomerLinksPage() {
       width: 140,
       render: (row) =>
         row.shipmentNumber ? (
-          <button
-            type="button"
+          <TmsButton
+            variant="ghost"
+            size="sm"
             className="tms-link"
             onClick={() => navigate(`/tms/shipments/${row.link.shipmentId}?tab=tracking`)}
-            style={{ fontWeight: 600, color: 'var(--tms-primary)', background: 'none', border: 'none', cursor: 'pointer', fontSize: 'inherit', padding: 0 }}
           >
             {row.shipmentNumber}
-          </button>
+          </TmsButton>
         ) : (
           <span className="tms-muted">—</span>
         ),
@@ -205,7 +205,7 @@ export function CustomerLinksPage() {
             : row.link.url
         return (
           <span className="flex items-center gap-1">
-            <span className="text-xs" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 180 }}>
+            <span className="tms-board-ellipsis text-xs">
               {truncated}
             </span>
             <TmsButton

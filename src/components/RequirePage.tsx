@@ -53,7 +53,7 @@ function NoAccess() {
   const border = 'var(--tms-border, var(--ds-border))'
   return (
     <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--tms-bg, var(--ds-bg))', padding: 24 }}>
-      <div style={{ maxWidth: 380, textAlign: 'center', background: surface, border: `1px solid ${border}`, borderRadius: 6, boxShadow: '0 12px 30px rgba(0,0,0,0.25)', padding: '32px 28px' }}>
+      <div style={{ maxWidth: 380, textAlign: 'center', background: surface, border: `1px solid ${border}`, borderRadius: 'var(--tms-radius-card, 6px)', boxShadow: 'var(--tms-shadow-pop, none)', padding: '32px 28px' }}>
         <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--tms-text, var(--ds-t1))' }}>No page access</div>
         <p style={{ fontSize: 13, color: 'var(--tms-muted, var(--ds-t3))', marginTop: 8, lineHeight: 1.5 }}>
           {user?.email ? `${user.email} isn't` : "You aren't"} granted access to any pages yet. Ask an admin to grant access on the Users page.

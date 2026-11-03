@@ -7,7 +7,7 @@
  */
 import { useState } from 'react'
 import { MoreHorizontal, MapPin, Plus, ArrowUpDown, Trash2, Clock, CalendarClock, Tag } from 'lucide-react'
-import { TmsBadge, TmsButton, TmsCard, TmsDialog, TmsInput, TmsSelect, TmsTextarea } from '@/features/tms/kit'
+import { TmsBadge, TmsButton, TmsCard, TmsDialog, TmsInput, TmsMetaList, TmsSelect, TmsTextarea } from '@/features/tms/kit'
 import { Label } from '@/components/ui/label'
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
@@ -60,7 +60,7 @@ function StopCard({ stop, index, total, readOnly, onOpen, onSwap, onRemove }: {
     <TmsCard>
       <div data-testid={`stop-card-${stop.id}`}>
       <div className="flex items-start gap-3">
-        <TmsBadge tone="blue" className={isPickup ? ' text-[color:var(--tms-badge-blue)]' : ' text-[color:var(--tms-badge-green)]'}>
+        <TmsBadge tone={isPickup ? 'blue' : 'green'}>
           {isPickup ? 'PU' : 'DEL'} {index + 1}
         </TmsBadge>
         <div className="min-w-0 flex-1">
@@ -68,24 +68,26 @@ function StopCard({ stop, index, total, readOnly, onOpen, onSwap, onRemove }: {
           <p className="flex items-center gap-1 truncate text-xs tms-muted">
             <MapPin size={12} /> {stop.city || 'No city'}
           </p>
-          <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-            <div>
-              <dt className="tms-muted">Appointment</dt>
-              <dd>{stop.appt ? formatDateTime(stop.appt) : '—'}{stop.apptType && stop.apptType !== 'exact' ? ` (${stop.apptType.toUpperCase()})` : ''}</dd>
-            </div>
-            <div>
-              <dt className="tms-muted">Requested</dt>
-              <dd>{requested ?? '—'}{stop.apptRequestedBy ? ` · by ${stop.apptRequestedBy.toLowerCase()}` : ''}</dd>
-            </div>
-            <div>
-              <dt className="tms-muted">In</dt>
-              <dd>{stop.arrivedAt ? formatDateTime(stop.arrivedAt) : '—'}</dd>
-            </div>
-            <div>
-              <dt className="tms-muted">Out</dt>
-              <dd>{stop.departedAt ? formatDateTime(stop.departedAt) : '—'}</dd>
-            </div>
-          </dl>
+          <div className="mt-2">
+            <TmsMetaList
+              dense
+              columns={2}
+              items={[
+                {
+                  label: 'Appointment',
+                  value: stop.appt
+                    ? `${formatDateTime(stop.appt)}${stop.apptType && stop.apptType !== 'exact' ? ` (${stop.apptType.toUpperCase()})` : ''}`
+                    : null,
+                },
+                {
+                  label: 'Requested',
+                  value: requested ? `${requested}${stop.apptRequestedBy ? ` · by ${stop.apptRequestedBy.toLowerCase()}` : ''}` : null,
+                },
+                { label: 'In', value: stop.arrivedAt ? formatDateTime(stop.arrivedAt) : null },
+                { label: 'Out', value: stop.departedAt ? formatDateTime(stop.departedAt) : null },
+              ]}
+            />
+          </div>
           {stop.refs && stop.refs.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-1">
               {stop.refs.map((r, i) => (

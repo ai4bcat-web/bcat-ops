@@ -15,7 +15,7 @@
 import { useState } from 'react'
 import { AlertTriangle, Check, Copy, PackageCheck, RotateCw, Send, Star } from 'lucide-react'
 import { toast } from 'sonner'
-import { TmsBadge, TmsButton, TmsCard, TmsTextarea } from '@/features/tms/kit'
+import { TmsAlert, TmsBadge, TmsButton, TmsCard, TmsTextarea } from '@/features/tms/kit'
 import { Label } from '@/components/ui/label'
 import { rateCarrier, sendMilestoneNotice, sendUploadLink } from '@/lib/apiClient'
 import { MILESTONE_LABELS } from '@/lib/shipmentNotices'
@@ -196,7 +196,8 @@ export function DeliveryCard({ bundle, onReload }: {
               >
                 <Star
                   size={18}
-                  className={(stars ?? outside.ratingStars ?? 0) >= n ? 'fill-amber-400 text-[color:var(--tms-badge-orange)]' : ''}
+                  fill="currentColor"
+                  className={(stars ?? outside.ratingStars ?? 0) >= n ? 'text-[color:var(--tms-count-bg)]' : 'fill-transparent'}
                 />
               </button>
             ))}
@@ -222,11 +223,7 @@ export function DeliveryCard({ bundle, onReload }: {
         </div>
       )}
 
-      {error && (
-        <p className="flex items-start gap-2 rounded-[var(--tms-radius)] border border-[color:var(--tms-badge-red)]  p-2 text-xs text-[color:var(--tms-badge-red)]">
-          <AlertTriangle size={14} className="mt-0.5 shrink-0" />{error}
-        </p>
-      )}
+      {error && <TmsAlert tone="red">{error}</TmsAlert>}
       </div>
     </TmsCard>
   )

@@ -232,12 +232,12 @@ describe('the AP board', () => {
 
     const strip = within(screen.getByLabelText('AP totals'))
     // One open bill of $1,500.00, ten days past due.
-    expect(within(strip.getByText('Open AP').closest('div') as HTMLElement).getByText('$1,500.00')).toBeTruthy()
-    expect(within(strip.getByText('Late').closest('div') as HTMLElement).getByText('$1,500.00')).toBeTruthy()
+    expect(within(strip.getByText('Open AP').closest('.tms-kpi-card') as HTMLElement).getByText('$1,500.00')).toBeTruthy()
+    expect(within(strip.getByText('Late').closest('.tms-kpi-card') as HTMLElement).getByText('$1,500.00')).toBeTruthy()
     // The delivered assignment no carrier has invoiced, counted off the worklist rows.
-    expect(within(strip.getByText('Awaiting invoice').closest('div') as HTMLElement).getByText('1 assignment')).toBeTruthy()
+    expect(within(strip.getByText('Awaiting invoice').closest('.tms-kpi-card') as HTMLElement).getByText('1 assignment')).toBeTruthy()
     // Nothing has been settled this month, so the lag is unmeasured — not zero.
-    expect(within(strip.getByText('Avg days to pay').closest('div') as HTMLElement).getByText('—')).toBeTruthy()
+    expect(within(strip.getByText('Avg days to pay').closest('.tms-kpi-card') as HTMLElement).getByText('—')).toBeTruthy()
   })
 
   it('offers to record a bill against an assignment nobody has invoiced', () => {

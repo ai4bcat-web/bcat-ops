@@ -222,12 +222,12 @@ describe('the AR board', () => {
 
     // One open invoice of $2,500.00, eight days past a 2026-10-20 due date.
     const strip = within(screen.getByLabelText('AR totals'))
-    expect(within(strip.getByText('Open AR').closest('div') as HTMLElement).getByText('$2,500.00')).toBeTruthy()
-    expect(within(strip.getByText('Late').closest('div') as HTMLElement).getByText('$2,500.00')).toBeTruthy()
+    expect(within(strip.getByText('Open AR').closest('.tms-kpi-card') as HTMLElement).getByText('$2,500.00')).toBeTruthy()
+    expect(within(strip.getByText('Late').closest('.tms-kpi-card') as HTMLElement).getByText('$2,500.00')).toBeTruthy()
     // The delivered shipment nobody has billed, counted off the worklist rows.
-    expect(within(strip.getByText('Delivered, not invoiced').closest('div') as HTMLElement).getByText('1 shipment')).toBeTruthy()
+    expect(within(strip.getByText('Delivered, not invoiced').closest('.tms-kpi-card') as HTMLElement).getByText('1 shipment')).toBeTruthy()
     // Nothing has been collected, so the lag is unmeasured — not zero.
-    expect(within(strip.getByText('Avg days to pay').closest('div') as HTMLElement).getByText('—')).toBeTruthy()
+    expect(within(strip.getByText('Avg days to pay').closest('.tms-kpi-card') as HTMLElement).getByText('—')).toBeTruthy()
   })
 
   /**

@@ -1,0 +1,61 @@
+/*
+ * Ready for billing (P10).
+ * Moved verbatim out of theme.css (S2 slice A); owned by S2 slice D from here on.
+ * Tokens live in ../theme.css; every selector stays under .tms-shell / .tms-portal. No colour literals.
+ */
+
+/* ── Ready for billing (P10) ─────────────────────────────────────────────── */
+.tms-shell .tms-ready-refusal {
+  border-left: 3px solid var(--tms-badge-red);
+}
+
+.tms-shell .tms-ready-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tms-shell .tms-ready-row {
+  border: 1px solid var(--tms-border);
+  border-radius: 6px;
+  padding: 12px;
+}
+
+.tms-shell .tms-ready-shipment-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tms-shell .tms-ready-shipment-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.tms-shell .tms-ready-customer {
+  font-size: 13px;
+  color: var(--tms-text);
+}
+
+.tms-shell .tms-ready-charge {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.tms-shell .tms-ready-delivered {
+  font-size: 12px;
+  color: var(--tms-muted);
+}
+
+.tms-shell .tms-ready-docs,
+.tms-shell .tms-ready-refs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* Tinted notice box used inside AR/AP dialogs (a bordered box around richer content than TmsAlert's text). */
+.tms-portal .tms-tint { border: 1px solid var(--tms-border); border-radius: var(--tms-radius); }
+.tms-portal .tms-tint-orange { border-color: var(--tms-badge-orange); background: var(--tms-badge-orange-tint); }
+.tms-portal .tms-tint-red { border-color: var(--tms-badge-red); background: var(--tms-badge-red-tint); }

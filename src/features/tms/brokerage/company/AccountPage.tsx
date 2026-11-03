@@ -6,7 +6,7 @@
  */
 import { useEffect, useState } from 'react'
 import { Cloud } from 'lucide-react'
-import { TmsBadge, TmsCard } from '@/features/tms/kit'
+import { TmsBadge, TmsCard, TmsMetaList } from '@/features/tms/kit'
 import { getAccountInfo } from '@/lib/apiClient'
 import type { AccountInfo } from '@/lib/apiClient'
 import { ErrorText, GroupLabel, Loading, Panel, SettingsCard, Stack } from '@/features/settings/settingsKit'
@@ -73,7 +73,7 @@ export function AccountPage() {
   }
 
   return (
-    <div style={{ display: 'grid', gap: 16 }}>
+    <div className="tms-grid-stack">
       <SettingsCard
         icon={Cloud}
         title="Account"
@@ -84,24 +84,15 @@ export function AccountPage() {
 
           <Panel>
             <GroupLabel>Stack</GroupLabel>
-            <div className="tms-grid tms-grid-2">
-              <div>
-                <div className="tms-field-label">Region</div>
-                <div style={{ fontSize: 14 }}>{info.stack.region}</div>
-              </div>
-              <div>
-                <div className="tms-field-label">User pool</div>
-                <div style={{ fontSize: 14, wordBreak: 'break-all' }}>{info.stack.userPoolId}</div>
-              </div>
-              <div>
-                <div className="tms-field-label">AppSync URL</div>
-                <div style={{ fontSize: 14, wordBreak: 'break-all' }}>{info.stack.appSyncUrl}</div>
-              </div>
-              <div>
-                <div className="tms-field-label">Storage bucket</div>
-                <div style={{ fontSize: 14, wordBreak: 'break-all' }}>{info.stack.storageBucket}</div>
-              </div>
-            </div>
+            <TmsMetaList
+              columns={2}
+              items={[
+                { label: 'Region', value: info.stack.region },
+                { label: 'User pool', value: info.stack.userPoolId },
+                { label: 'AppSync URL', value: info.stack.appSyncUrl },
+                { label: 'Storage bucket', value: info.stack.storageBucket },
+              ]}
+            />
           </Panel>
         </Stack>
       </SettingsCard>

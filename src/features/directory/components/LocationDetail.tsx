@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { TmsTimeline } from '@/features/tms/kit'
 import { APIProvider, Map as GoogleMap, AdvancedMarker } from '@vis.gl/react-google-maps'
 import { useAppStore } from '@/store/useAppStore'
 import { isLoadVoided } from '@/lib/shipmentVoid'
@@ -66,15 +67,18 @@ export function LocationDetail({ location }: { location: LocationRecord }) {
         {driverNotes.length === 0 ? (
           <Note>No driver has left a note about this place yet. They can, from a stop in the driver app.</Note>
         ) : (
-          <ul style={{ margin: '6px 0 12px', padding: 0, listStyle: 'none', fontSize: 12 }}>
-            {[...driverNotes].reverse().map((n, i) => (
-              <li key={i} className="tms-muted" style={{ padding: '4px 0', borderTop: '1px solid var(--tms-border)' }}>
-                <span style={{ fontWeight: 600, color: 'var(--tms-text)' }}>{n.by}</span>
-                <span> · {formatDateTime(n.at)}</span>
-                <div>{n.text}</div>
-              </li>
-            ))}
-          </ul>
+          <TmsTimeline
+            compact
+            className="mb-3"
+            ariaLabel="Driver comments"
+            items={[...driverNotes].reverse().map((n, i) => ({
+              id: String(i),
+              title: n.by,
+              at: formatDateTime(n.at),
+              description: n.text,
+              tone: 'gray' as const,
+            }))}
+          />
         )}
         <div className="tms-field-label">Shipment history · {history.length}</div>
         {history.length === 0 ? (

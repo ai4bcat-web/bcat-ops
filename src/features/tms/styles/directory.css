@@ -1,0 +1,42 @@
+/* Records & rates (customers, carriers, factoring, vendors, quotes) — tokens only. */
+
+/* Factoring: OTR status filter chips are status-coloured TmsBadge pills with a count. */
+.tms-shell .tms-otr-chip {
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.tms-shell .tms-otr-chip.tms-active {
+  outline: 2px solid var(--tms-primary);
+  outline-offset: 1px;
+}
+
+.tms-shell .tms-otr-chip-unreported,
+.tms-shell .tms-otr-unreported {
+  background: transparent;
+  color: var(--tms-muted);
+  border: 1px dashed var(--tms-border);
+}
+
+/* Carrier drawer: a shipment row is a full-width button. */
+.tms-portal .tms-carrier-load-row {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  text-align: left;
+  color: inherit;
+  background: transparent;
+  border: 1px solid var(--tms-border);
+  border-radius: var(--tms-radius);
+  cursor: pointer;
+}
+
+.tms-portal .tms-carrier-load-row:hover {
+  box-shadow: inset 0 0 0 9999px color-mix(in srgb, var(--tms-text) 6%, transparent);
+}

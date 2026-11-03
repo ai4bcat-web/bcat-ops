@@ -6,17 +6,21 @@
  * chip rendering and pane selection with realistic row shapes.
  */
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import '@testing-library/jest-dom/vitest'
 
 import { DispatchBody, DispatchWorkstation } from './DispatchWorkstation'
 import * as useBoardFiltersModule from '../board/useBoardFilters'
 import type { UseBoardFiltersOptions } from '../board/useBoardFilters'
+
+vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() } }))
 import {
   getTmsSettings,
   listActivePostings,
   listCarrierOffers,
   listCarriers,
+  getCarrierBundle,
+  getShipmentBundle,
   listLoadCarriers,
   listShipmentPostings,
   postLoad,
@@ -33,6 +37,9 @@ import type {
   TmsSettings,
 } from '@/types/tms'
 import type { CarrierOfferVetting } from '@/lib/apiClient'
+import { RATE_CON_MCP_ERROR_PREFIX } from '@/lib/mcpPacket'
+import { useShipmentActions } from '@/features/shipments/useShipmentActions'
+import { toast } from 'sonner'
 
 class ResizeObserverStub {
   observe() {}
@@ -216,7 +223,7 @@ const baseOffers: (QuoteRecord & { vetting: CarrierOfferVetting })[] = [
     createdBy: 'test',
     updatedBy: 'test',
     version: 1,
-    vetting: { known: true, bookable: true, blockers: [], warnings: [], status: 'VETTED', mcpStatus: 'APPROVED' },
+    vetting: { known: true, bookable: true, blockers: [], warnings: [], status: 'VETTED', mcpStatus: 'ACCEPTABLE' },
   } as QuoteRecord & { vetting: CarrierOfferVetting },
 ]
 
@@ -503,7 +510,7 @@ describe('DispatchWorkstation body', () => {
                 carrierMc: 'MC111111',
                 carrierEmail: 'vetted@example.com',
                 quoteOpen: 'OPEN',
-                vetting: { known: true, bookable: true, blockers: [], warnings: [], status: 'VETTED', mcpStatus: 'APPROVED' },
+                vetting: { known: true, bookable: true, blockers: [], warnings: [], status: 'VETTED', mcpStatus: 'ACCEPTABLE' },
                 createdBy: 'test',
                 updatedBy: 'test',
                 version: 1,
@@ -584,5 +591,79 @@ describe('DispatchWorkstation body', () => {
       expect(cards[2]).toHaveTextContent('DAT')
       expect(screen.getAllByTestId('offer-count')[0]).toHaveTextContent('Offers (2)')
     })
+  })
+})
+
+describe('rate-con packet gate (dispatch one-click paths)', () => {
+  const lane = { fromState: 'TX', toState: 'AZ' }
+  const betaLeg = {
+    id: 'lc-beta', loadId: 'load-1', shipmentId: 'ship-1', kind: 'CARRIER', status: 'ACTIVE',
+    carrierId: 'carrier-2', carrierName: 'Beta Trucking', carrierRateCents: 175_000, rateConStatus: 'NOT_SENT',
+    createdBy: 'test', updatedBy: 'test', createdAt: '2026-10-28T12:00:00Z', updatedAt: '2026-10-28T12:00:00Z',
+  } as LoadCarrierRecord
+  // Beta has run this lane before (ship-2 re-pointed at TX→AZ), so it is suggested on ship-1.
+  const historyRows = rows.map((r) => (r.id === 'ship-2' ? ({ ...r, ...lane } as ShipmentRow) : r))
+  const betaOn = (mcpStatus?: string) => [
+    { id: 'carrier-2', name: 'Beta Trucking', type: 'TL', status: 'ACTIVE', mcpStatus, createdBy: 'test', updatedBy: 'test', createdAt: '', updatedAt: '' } as CarrierRecord,
+  ]
+
+  const defaultBundle = () => Promise.resolve({ carrier: {}, contacts: [], paymentMethods: [], documents: [], loadCarriers: [] } as never)
+  const defaultActions = () => ({ busy: false, bookCarrier: vi.fn(), sendRateCon: vi.fn(), reload: vi.fn() }) as never
+
+  afterEach(() => {
+    vi.mocked(listCarrierOffers).mockImplementation(() => Promise.resolve({ offers: baseOffers }))
+    vi.mocked(getShipmentBundle).mockImplementation(() => Promise.resolve(emptyBundle))
+    vi.mocked(getCarrierBundle).mockImplementation(defaultBundle)
+    vi.mocked(useShipmentActions).mockImplementation(defaultActions)
+    vi.mocked(toast.error).mockClear()
+  })
+
+  const openShip1 = async () => {
+    fireEvent.click(screen.getAllByTestId('coverage-card')[2])
+    await waitFor(() => expect(screen.getByText(/Carrier offers \(/)).toBeInTheDocument())
+  }
+
+  it('disables the assign button with the reason, and offers the setup packet, for a bookable carrier with no completed packet', async () => {
+    vi.mocked(listCarrierOffers).mockImplementation(async () => ({
+      offers: [{
+        ...baseOffers[0],
+        vetting: { known: true, bookable: true, blockers: [], warnings: [], status: 'VETTED', mcpStatus: null },
+      }],
+    }))
+    renderBody()
+    await openShip1()
+
+    expect(screen.getByTestId('assign-offer-button')).toBeDisabled()
+    expect(screen.getByTestId('offer-packet-reason')).toHaveTextContent('Vetted Carrier')
+    expect(screen.getByTestId('setup-packet-button')).toBeEnabled()
+  })
+
+  it('does not book a carrier whose packet is not complete even when the offer snapshot says it is', async () => {
+    const bookCarrier = vi.fn()
+    vi.mocked(useShipmentActions).mockReturnValue({ busy: false, bookCarrier, sendRateCon: vi.fn(), reload: vi.fn() } as never)
+    vi.mocked(getCarrierBundle).mockResolvedValue({
+      carrier: { id: 'carrier-1', name: 'Vetted Carrier', mcpStatus: 'INVITED' }, contacts: [],
+    } as never)
+    renderBody()
+    await openShip1()
+
+    fireEvent.click(screen.getByTestId('assign-offer-button'))
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(expect.stringContaining(RATE_CON_MCP_ERROR_PREFIX)))
+    expect(toast.error).toHaveBeenCalledWith(expect.stringContaining('Vetted Carrier'))
+    expect(bookCarrier).not.toHaveBeenCalled()
+  })
+
+  it('enables "Send rate con" for an assigned suggested carrier with a completed packet and disables it otherwise', async () => {
+    vi.mocked(getShipmentBundle).mockResolvedValue({ ...emptyBundle, loadCarriers: [betaLeg] })
+    const { unmount } = renderBody({ allRows: historyRows, carriers: betaOn('ACCEPTABLE') })
+    await openShip1()
+    await waitFor(() => expect(screen.getByText('Send rate con')).toBeEnabled())
+    unmount()
+
+    renderBody({ allRows: historyRows, carriers: betaOn(undefined) })
+    await openShip1()
+    await waitFor(() => expect(screen.getByText('Send rate con').closest('button')).toBeDisabled())
+    expect(screen.getByTestId('rate-con-blocked-reason')).toHaveTextContent('Beta Trucking')
   })
 })

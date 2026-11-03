@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 // jsPDF renders through a canvas/DOM shim, so these need a document.
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
+import type jsPDF from 'jspdf'
 import { PDFDocument } from 'pdf-lib'
 import { buildRateConPdf, rateConFilename, stampSignature } from './carrierRateCon'
 import type { RateConInput, RateConStop } from './carrierRateCon'
@@ -86,6 +87,56 @@ describe('buildRateConPdf', () => {
       quickPay: { days: 7, feeBps: 250, feeCents: 3938, netCents: 153562 },
     }))
     expect(doc.getNumberOfPages()).toBe(1)
+  })
+})
+
+describe('buildRateConPdf division logo', () => {
+  const PNG_1X1 =
+    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+  const withLogo = input({ division: { ...division, logoKey: 'brand/logos/bcat.png' } })
+  const text = (doc: jsPDF): string => doc.output()
+  const imageCount = (doc: jsPDF) => (text(doc).match(/\/Subtype \/Image/g) ?? []).length
+
+  it('embeds the logo and keeps the legal name and MC number', async () => {
+    const doc = await buildRateConPdf(withLogo, { loadLogo: async () => PNG_1X1 })
+    expect(imageCount(doc)).toBeGreaterThan(0)
+    expect(text(doc)).toContain('BCAT Logistics LLC')
+    expect(text(doc)).toContain('MC 123456')
+  })
+
+  it('falls back to the text header when the loader returns null', async () => {
+    const plain = await buildRateConPdf(input())
+    const doc = await buildRateConPdf(withLogo, { loadLogo: async () => null })
+    expect(imageCount(doc)).toBe(0)
+    expect(text(doc)).toContain('BCAT Logistics LLC')
+    expect(doc.getNumberOfPages()).toBe(plain.getNumberOfPages())
+  })
+
+  it('never fails the build when the loader throws', async () => {
+    const doc = await buildRateConPdf(withLogo, { loadLogo: async () => { throw new Error('S3 down') } })
+    expect(imageCount(doc)).toBe(0)
+  })
+
+  it('ignores an undecodable image', async () => {
+    const doc = await buildRateConPdf(withLogo, { loadLogo: async () => 'data:image/png;base64,AAAA' })
+    expect(imageCount(doc)).toBe(0)
+  })
+
+  it('does not call the loader for a division without a logoKey', async () => {
+    const loadLogo = vi.fn(async () => PNG_1X1)
+    await buildRateConPdf(input(), { loadLogo })
+    expect(loadLogo).not.toHaveBeenCalled()
+  })
+
+  it('embeds the logo once across a two-leg document', async () => {
+    const doc = await buildRateConPdf(
+      { ...withLogo, stops: [pickup('Chicago'), delivery('St Louis'), pickup('St Louis'), delivery('Dallas')] },
+      { loadLogo: async () => PNG_1X1 },
+    )
+    // One embedded logo (plus its alpha mask) however many pages draw the header.
+    const single = await buildRateConPdf(withLogo, { loadLogo: async () => PNG_1X1 })
+    expect(imageCount(doc)).toBe(imageCount(single))
+    expect(imageCount(single)).toBeGreaterThan(0)
   })
 })
 

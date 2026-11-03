@@ -9,12 +9,14 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  Banknote, Bot, Building2, ExternalLink, FileText, History, Phone, Send, Shield, Truck, Wallet, X,
+  Banknote, Bot, Building2, ExternalLink, FileText, History, Phone, Send, Shield, Truck, Wallet,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { TmsBadge, TmsButton, TmsCard, TmsDialog, TmsField, TmsIconButton, TmsInput, TmsTabs } from '@/features/tms/kit'
-import { Sheet, SheetContent } from '@/components/ui/sheet'
-import * as DialogPrimitive from '@radix-ui/react-dialog'
+import {
+  TmsAlert, TmsBadge, TmsButton, TmsCard, TmsDialog, TmsDrawer, TmsEmptyState, TmsField, TmsInput, TmsProfileHeader, TmsTabs,
+  TmsTimeline,
+} from '@/features/tms/kit'
+import '@/features/tms/styles/directory.css'
 import { useCarrier } from '@/hooks/useCarrier'
 import { useCarrierAp } from '@/hooks/useCarrierAp'
 import {
@@ -72,6 +74,11 @@ const STATUS_TONE: Record<CarrierStatus, TmsTone> = {
   ACTIVE: 'green',
   INACTIVE: 'gray',
   DO_NOT_USE: 'red',
+}
+
+function oosLabel(inspections: number | null | undefined, oos: number | null | undefined): string {
+  const bps = oosBps(inspections, oos)
+  return bps == null ? '—' : `${(bps / 100).toFixed(2)}%`
 }
 
 function saferUrl(dotNumber: string): string {
@@ -205,74 +212,88 @@ export function CarrierProfile({ carrierId, isAdmin, settings, onClose, onChange
   }
 
   return (
-    <Sheet open onOpenChange={(v) => { if (!v) onClose() }}>
-      <SheetContent className="tms-portal w-full sm:max-w-4xl flex flex-col p-0 bg-[var(--tms-bg)]">
-        <div className="flex flex-col gap-2 p-4" style={{ borderBottom: '1px solid var(--tms-border)' }}>
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <DialogPrimitive.Title className="flex items-center gap-2 text-base font-semibold">
-                {carrier?.name ?? (loading ? 'Loading…' : 'Carrier')}
+    <TmsDrawer open onOpenChange={(v) => { if (!v) onClose() }} title="Carrier profile" size="xl">
+        <div className="flex flex-col gap-3">
+          <TmsProfileHeader
+            name={carrier?.name ?? (loading ? 'Loading…' : 'Carrier')}
+            as="h3"
+            chips={
+              <>
                 {effective && (
                   <TmsBadge tone={STATUS_TONE[effective.status]}>
                     {CARRIER_STATUS_LABELS[effective.status]}
                   </TmsBadge>
                 )}
                 {effective?.derived && <span className="text-[10px] tms-muted">(derived)</span>}
-              </DialogPrimitive.Title>
-              {carrier && (
-                <p className="text-xs tms-muted">
-                  {carrier.type}
-                  {carrier.mcNumber && <> · MC {carrier.mcNumber}</>}
-                  {carrier.dotNumber && <> · DOT {carrier.dotNumber}</>}
-                  {carrier.dotNumber && (
-                    <a
-                      href={saferUrl(carrier.dotNumber)}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="ml-2 inline-flex items-center gap-1 underline"
-                    >
-                      SAFER <ExternalLink size={10} />
-                    </a>
-                  )}
-                </p>
-              )}
-            </div>
-            <div className="flex items-center gap-2">
-              {carrier && (
+                {carrier?.highwayStatus && <TmsBadge tone="gray">Highway {carrier.highwayStatus}</TmsBadge>}
+                {carrier?.rmisStatus && <TmsBadge tone="gray">RMIS {carrier.rmisStatus}</TmsBadge>}
+                {carrier?.mcpStatus && <TmsBadge tone="gray">MCP {carrier.mcpStatus}</TmsBadge>}
+                {carrier && (carrier.insurancePolicies ?? []).map((policy) => {
+                  const state = insuranceState(policy, now, warnDays)
+                  return (
+                    <TmsBadge key={policy.id} tone={INSURANCE_STATE_TONE[state]}>
+                      {policy.type.replace(/_/g, ' ').toLowerCase()} · {state.toLowerCase()}
+                    </TmsBadge>
+                  )
+                })}
+              </>
+            }
+            actions={carrier ? (
+              <>
                 <TmsButton size="sm" onClick={openSetupPacket}>
                   <Send size={14} />
                   Send setup packet
                 </TmsButton>
-              )}
-              {carrier && <TmsButton size="sm" onClick={() => setStatusOpen(true)}>Change status</TmsButton>}
-              <TmsIconButton shape="plain" aria-label="Close" onClick={onClose}><X size={16} /></TmsIconButton>
-            </div>
-          </div>
+                <TmsButton size="sm" onClick={() => setStatusOpen(true)}>Change status</TmsButton>
+              </>
+            ) : undefined}
+            columns={carrier ? [
+              {
+                title: 'Carrier',
+                rows: [
+                  { label: 'Type', value: carrier.type, hidden: !carrier.type },
+                  { label: 'MC', value: carrier.mcNumber, hidden: !carrier.mcNumber },
+                  {
+                    label: 'DOT',
+                    value: (
+                      <>
+                        {carrier.dotNumber}
+                        <a
+                          href={saferUrl(carrier.dotNumber ?? '')}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="ml-2 inline-flex items-center gap-1 underline"
+                        >
+                          SAFER <ExternalLink size={10} />
+                        </a>
+                      </>
+                    ),
+                    hidden: !carrier.dotNumber,
+                  },
+                ],
+              },
+              {
+                title: 'Contact',
+                rows: [
+                  { icon: Phone, value: carrier.phone, hidden: !carrier.phone },
+                  { value: carrier.email, hidden: !carrier.email },
+                ],
+              },
+              {
+                title: 'Safety',
+                rows: [
+                  { label: 'Driver OOS', value: oosLabel(carrier.driverInspections, carrier.driverOos), hidden: carrier.driverInspections == null },
+                  { label: 'Vehicle OOS', value: oosLabel(carrier.vehicleInspections, carrier.vehicleOos), hidden: carrier.vehicleInspections == null },
+                ],
+              },
+            ] : undefined}
+          />
 
           {effective && effective.reason && (
-            <p
-              className="p-2 text-xs"
-              style={{ border: '1px solid var(--tms-badge-red)', borderRadius: 'var(--tms-radius)' }}
-            >
+            <TmsAlert tone="red">
               {CARRIER_STATUS_REASON_LABELS[effective.reason]}
               {carrier?.statusNote && <> — {carrier.statusNote}</>}
-            </p>
-          )}
-
-          {carrier && (
-            <div className="flex flex-wrap gap-1">
-              {carrier.highwayStatus && <TmsBadge tone="gray">Highway {carrier.highwayStatus}</TmsBadge>}
-              {carrier.rmisStatus && <TmsBadge tone="gray">RMIS {carrier.rmisStatus}</TmsBadge>}
-              {carrier.mcpStatus && <TmsBadge tone="gray">MCP {carrier.mcpStatus}</TmsBadge>}
-              {(carrier.insurancePolicies ?? []).map((policy) => {
-                const state = insuranceState(policy, now, warnDays)
-                return (
-                  <TmsBadge key={policy.id} tone={INSURANCE_STATE_TONE[state]}>
-                    {policy.type.replace(/_/g, ' ').toLowerCase()} · {state.toLowerCase()}
-                  </TmsBadge>
-                )
-              })}
-            </div>
+            </TmsAlert>
           )}
 
           <TmsTabs
@@ -282,7 +303,7 @@ export function CarrierProfile({ carrierId, isAdmin, settings, onClose, onChange
           />
         </div>
 
-        <div className="flex flex-1 flex-col gap-3 overflow-auto p-4">
+        <div className="mt-3 flex flex-col gap-3">
           {error && <p style={{ color: 'var(--tms-badge-red)' }}>{error}</p>}
           {!bundle && loading && <p className="tms-muted">Loading…</p>}
 
@@ -392,21 +413,14 @@ export function CarrierProfile({ carrierId, isAdmin, settings, onClose, onChange
                 <TmsCard title="Shipments">
                   <div className="flex flex-col gap-2">
                     {bundle.loadCarriers.length === 0 && (
-                      <p className="tms-muted">This carrier has not been booked on a shipment yet.</p>
+                      <TmsEmptyState compact title="This carrier has not been booked on a shipment yet." message="" />
                     )}
                     {bundle.loadCarriers.map((row) => (
                       <button
                         key={row.id}
                         type="button"
                         onClick={() => navigate(`/tms/shipments/${row.shipmentId}`)}
-                        className="flex w-full items-center gap-3 px-3 py-2 text-left"
-                        style={{
-                          border: '1px solid var(--tms-border)',
-                          borderRadius: 'var(--tms-radius)',
-                          background: 'none',
-                          color: 'inherit',
-                          cursor: 'pointer',
-                        }}
+                        className="tms-carrier-load-row"
                       >
                         <TmsBadge tone="gray">{row.status}</TmsBadge>
                         <span className="font-medium">Shipment {row.shipmentId}</span>
@@ -429,25 +443,20 @@ export function CarrierProfile({ carrierId, isAdmin, settings, onClose, onChange
                   <div className="flex flex-col gap-2">
                     {logsError && <p style={{ color: 'var(--tms-badge-red)' }}>{logsError}</p>}
                     {!logs && !logsError && <p className="tms-muted">Loading activity…</p>}
-                    {logs && carrierLogs.length === 0 && <p className="tms-muted">No recorded changes yet.</p>}
-                    {carrierLogs.map((entry) => (
-                      <div
-                        key={entry.id}
-                        className="px-3 py-2"
-                        style={{ border: '1px solid var(--tms-border)', borderRadius: 'var(--tms-radius)' }}
-                      >
-                        <div className="flex items-center gap-2">
-                          <TmsBadge tone="gray">{entry.action}</TmsBadge>
-                          <span className="font-medium">{entry.entityType}</span>
-                          <span className="ml-auto text-xs tms-muted">
-                            {entry.user} · {new Date(entry.createdAt).toLocaleString()}
-                          </span>
-                        </div>
-                        <p className="mt-1 text-xs tms-muted">
-                          {Object.keys(entry.changes ?? {}).join(', ') || 'no field detail'}
-                        </p>
-                      </div>
-                    ))}
+                    {logs && (
+                      <TmsTimeline
+                        compact
+                        ariaLabel="Carrier activity"
+                        empty={<TmsEmptyState compact title="No recorded changes yet." message="" />}
+                        items={carrierLogs.map((entry) => ({
+                          id: entry.id,
+                          title: <><TmsBadge tone="gray">{entry.action}</TmsBadge> <span className="font-medium">{entry.entityType}</span></>,
+                          at: `${entry.user} · ${new Date(entry.createdAt).toLocaleString()}`,
+                          description: Object.keys(entry.changes ?? {}).join(', ') || 'no field detail',
+                          tone: 'gray' as const,
+                        }))}
+                      />
+                    )}
                   </div>
                 </TmsCard>
               )}
@@ -501,8 +510,7 @@ export function CarrierProfile({ carrierId, isAdmin, settings, onClose, onChange
             }}
           />
         )}
-      </SheetContent>
-    </Sheet>
+    </TmsDrawer>
   )
 }
 

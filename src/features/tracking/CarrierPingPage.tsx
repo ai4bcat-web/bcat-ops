@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { CheckCircle2, MapPin, Navigation, Phone, Truck } from 'lucide-react'
+import { Navigation, Phone } from 'lucide-react'
 import { fetchCarrierTracking, postTrackingPing, TrackingError, type CarrierTrackingView } from '@/lib/trackingClient'
+import { TmsAlert, TmsButton, TmsCard, TmsMetaList, TmsPublicFrame } from '@/features/tms/kit'
 
 const when = (iso: string) => new Date(iso).toLocaleString('en-US', { timeZone: 'America/Chicago', weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })
 
@@ -71,92 +72,69 @@ export function CarrierPingPage() {
   const nextStop = view?.nextStop ?? null
 
   return (
-    <div style={{ minHeight: '100vh', background: '#f4f6f8', color: '#15202b', fontFamily: 'system-ui, -apple-system, Segoe UI, sans-serif', padding: '24px 16px' }}>
-      <div style={{ maxWidth: 480, margin: '0 auto' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
-          <Truck size={22} style={{ color: '#1ea8f3' }} />
-          <div>
-            <div style={{ fontSize: 12, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#5c6b7a', fontWeight: 600 }}>BCAT Logistics · driver check-in</div>
-            <div style={{ fontSize: 22, fontWeight: 700 }}>{view ? `Load ${view.loadNumber}` : error ? 'Check-in' : 'Loading…'}</div>
-          </div>
+    <TmsPublicFrame
+      brand="BCAT Logistics"
+      subtitle="Driver check-in"
+      title={view ? `Load ${view.loadNumber}` : error ? 'Check-in' : 'Loading…'}
+      width="sm"
+      footer={
+        <span className="tms-public-footer-line">
+          <Phone size={14} />
+          {view?.contactPhone ? <a href={`tel:${view.contactPhone}`}>{view.contactPhone}</a> : 'Call BCAT dispatch at (224) 875-6477.'}
+        </span>
+      }
+    >
+      {error ? (
+        <TmsAlert tone="red">
+          {error.status === 404 ? 'This tracking link is no longer active. Call BCAT dispatch for a current one.' : error.message}
+        </TmsAlert>
+      ) : view ? (
+        <div className="tms-public-stack">
+          <TmsCard>
+            <TmsMetaList
+              items={[
+                { label: 'Status', value: view.statusLabel },
+                {
+                  label: 'Next stop',
+                  value: (
+                    <>
+                      {nextStop ? [nextStop.city, nextStop.state].filter(Boolean).join(', ') || nextStop.name || 'Next stop' : 'All stops complete'}
+                      {nextStop?.appt && <div className="tms-public-sub">Appointment {when(nextStop.appt)}</div>}
+                    </>
+                  ),
+                },
+              ]}
+            />
+          </TmsCard>
+
+          <TmsButton variant="primary" className="tms-public-cta" onClick={share} disabled={sending}>
+            <Navigation size={20} />
+            {sending ? 'Sending…' : 'Share my location'}
+          </TmsButton>
+
+          {pingError && <TmsAlert tone="red">{pingError}</TmsAlert>}
+
+          {sent && !pingError && (
+            <TmsAlert tone="green">Thanks — the office has your location as of {when(sent)}.</TmsAlert>
+          )}
+
+          {view.pings.length > 0 && (
+            <TmsCard title="Your recent check-ins">
+              <ul className="tms-public-list">
+                {view.pings.slice(0, 5).map((ping) => (
+                  <li key={ping.at}>
+                    {when(ping.at)}
+                    {ping.lat != null && ping.lng != null && (
+                      <span className="tms-muted"> · {ping.lat.toFixed(3)}, {ping.lng.toFixed(3)}</span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </TmsCard>
+          )}
         </div>
-
-        {error ? (
-          <div style={{ background: '#fff', border: '1px solid #e3e8ee', borderRadius: 12, padding: 20, fontSize: 15 }}>
-            {error.status === 404 ? 'This tracking link is no longer active. Call BCAT dispatch for a current one.' : error.message}
-          </div>
-        ) : view ? (
-          <div style={{ display: 'grid', gap: 12 }}>
-            <div style={{ background: '#fff', border: '1px solid #e3e8ee', borderRadius: 12, padding: '16px 18px', display: 'grid', gap: 10 }}>
-              <div>
-                <div style={{ fontSize: 11, letterSpacing: '0.06em', textTransform: 'uppercase', color: '#5c6b7a', fontWeight: 600 }}>Status</div>
-                <div style={{ fontSize: 15, fontWeight: 600 }}>{view.statusLabel}</div>
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '24px 1fr', gap: 10, alignItems: 'start' }}>
-                <span style={{ color: '#1ea8f3', marginTop: 2 }}><MapPin size={16} /></span>
-                <div>
-                  <div style={{ fontSize: 11, letterSpacing: '0.06em', textTransform: 'uppercase', color: '#5c6b7a', fontWeight: 600 }}>Next stop</div>
-                  <div style={{ fontSize: 15, fontWeight: 600 }}>
-                    {nextStop ? [nextStop.city, nextStop.state].filter(Boolean).join(', ') || nextStop.name || 'Next stop' : 'All stops complete'}
-                  </div>
-                  {nextStop?.appt && <div style={{ fontSize: 13, color: '#5c6b7a', marginTop: 2 }}>Appointment {when(nextStop.appt)}</div>}
-                </div>
-              </div>
-            </div>
-
-            <button
-              type="button"
-              onClick={share}
-              disabled={sending}
-              style={{
-                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
-                width: '100%', padding: '22px 18px', border: 'none', borderRadius: 12,
-                background: sending ? '#8ac9ef' : '#1ea8f3', color: '#fff',
-                fontSize: 19, fontWeight: 700, fontFamily: 'inherit',
-                cursor: sending ? 'default' : 'pointer',
-              }}
-            >
-              <Navigation size={20} />
-              {sending ? 'Sending…' : 'Share my location'}
-            </button>
-
-            {pingError && (
-              <div style={{ background: '#fff4f4', border: '1px solid #f3c4c4', borderRadius: 12, padding: '14px 16px', fontSize: 14, color: '#8a1f1f' }}>
-                {pingError}
-              </div>
-            )}
-
-            {sent && !pingError && (
-              <div style={{ background: '#f1fbf4', border: '1px solid #bfe6cc', borderRadius: 12, padding: '14px 16px', fontSize: 14, color: '#14612f', display: 'flex', gap: 8, alignItems: 'center' }}>
-                <CheckCircle2 size={16} />
-                Thanks — the office has your location as of {when(sent)}.
-              </div>
-            )}
-
-            {view.pings.length > 0 && (
-              <div style={{ background: '#fff', border: '1px solid #e3e8ee', borderRadius: 12, padding: '16px 18px' }}>
-                <div style={{ fontSize: 11, letterSpacing: '0.06em', textTransform: 'uppercase', color: '#5c6b7a', fontWeight: 600, marginBottom: 8 }}>Your recent check-ins</div>
-                <div style={{ display: 'grid', gap: 6 }}>
-                  {view.pings.slice(0, 5).map((ping) => (
-                    <div key={ping.at} style={{ fontSize: 14 }}>
-                      {when(ping.at)}
-                      {ping.lat != null && ping.lng != null && (
-                        <span style={{ color: '#5c6b7a' }}> · {ping.lat.toFixed(3)}, {ping.lng.toFixed(3)}</span>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            <div style={{ fontSize: 13, color: '#5c6b7a', textAlign: 'center', display: 'flex', gap: 6, justifyContent: 'center', alignItems: 'center' }}>
-              <Phone size={14} />
-              {view.contactPhone ? <a href={`tel:${view.contactPhone}`} style={{ color: '#1ea8f3' }}>{view.contactPhone}</a> : 'Call BCAT dispatch at (224) 875-6477.'}
-            </div>
-          </div>
-        ) : null}
-      </div>
-    </div>
+      ) : null}
+    </TmsPublicFrame>
   )
 }
 

@@ -98,8 +98,8 @@ describe('CarrierUploadPage', () => {
     // "Proof of delivery" is also one of the select's options, so the checklist is
     // read inside its own card.
     const checklist = screen.getByText('We still need').parentElement as HTMLElement
-    expect(within(checklist).getByText('Proof of delivery').style.textDecoration).toBe('none')
-    expect(within(checklist).getByText('Carrier invoice').style.textDecoration).toBe('line-through')
+    expect(within(checklist).getByText('Proof of delivery').closest('li')?.getAttribute('data-done')).toBe('false')
+    expect(within(checklist).getByText('Carrier invoice').closest('li')?.getAttribute('data-done')).toBe('true')
     expect(screen.getByRole('option', { name: 'Proof of delivery' })).toBeTruthy()
 
     expect(screen.getByText('Received — being reviewed')).toBeTruthy()

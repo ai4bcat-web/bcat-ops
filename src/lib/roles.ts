@@ -289,3 +289,27 @@ export function displayName(
   return words.join(' ') || username || '—'
 }
 
+/** A Cognito sub / UUID: an identifier, never something to greet a person with. */
+const OPAQUE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+export function isOpaqueId(value: string | null | undefined): boolean {
+  return OPAQUE_ID.test((value ?? '').trim())
+}
+
+/**
+ * The name shown for the signed-in person (welcome line, sidebar card, avatar initial):
+ * the staff profile's name, else the e-mail local part, else `fallback`. A raw id or
+ * Cognito sub is never returned, even when it is all the session carries.
+ */
+export function personName(
+  input: { name?: string | null; email?: string | null },
+  fallback = 'there',
+): string {
+  const name = (input.name ?? '').trim()
+  if (name && !isOpaqueId(name)) return name
+  const local = (input.email ?? '').trim().split('@')[0] ?? ''
+  if (!local || isOpaqueId(local)) return fallback
+  const words = displayName(local)
+  return words === '—' ? fallback : words
+}
+

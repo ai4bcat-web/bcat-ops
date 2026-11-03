@@ -68,7 +68,7 @@ export function PodReviewCard({
         <div className="tms-pod-flag" data-testid="pod-needs-person">
           <AlertTriangle size={16} className="shrink-0" />
           <div>
-            <div className="font-medium" style={{ color: 'var(--tms-badge-red)' }}>
+            <div className="tms-pod-flag-title font-medium">
               Needs a person
             </div>
             <p className="text-sm">{shipment.podFlagReason}</p>

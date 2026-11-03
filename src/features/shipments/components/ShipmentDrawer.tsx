@@ -7,13 +7,15 @@
  * header: VOIDED, by whom, when and why. That line is the record of why the number
  * stopped moving, and it is the only thing that replaces the delete that never existed.
  */
-import { ExternalLink } from 'lucide-react'
+import { ExternalLink, Truck } from 'lucide-react'
 import { Link } from 'react-router-dom'
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
-import { ScrollArea } from '@/components/ui/scroll-area'
 import { SHIPMENT_STATUS_LABELS } from '@/lib/shipmentStatus'
 import { formatDateTime } from '@/lib/date'
-import { TmsBadge, statusTone } from '@/features/tms/kit'
+import { customerDisplayName } from '@/lib/customerResolution'
+import {
+  TmsAlert, TmsBadge, TmsDrawer, TmsProfileHeader, statusTone,
+  type TmsProfileColumn,
+} from '@/features/tms/kit'
 import { ShipmentDetail } from './ShipmentDetail'
 import { type DetailTabKey } from './detailTabs'
 import { ShipmentRowActions } from './StatusActions'
@@ -31,11 +33,31 @@ interface ShipmentDrawerProps extends ShipmentContextOptions {
 export function VoidedBanner({ shipment }: { shipment: ShipmentRecord }) {
   if (!shipment.voidedAt) return null
   return (
-    <p className="text-sm text-[color:var(--tms-badge-red)]" data-testid="voided-note">
-      Voided by {shipment.voidedBy ?? 'unknown'} on {formatDateTime(shipment.voidedAt)}
-      {shipment.voidReason ? ` — ${shipment.voidReason}` : ''}
-    </p>
+    <div data-testid="voided-note">
+      <TmsAlert tone="red">
+        Voided by {shipment.voidedBy ?? 'unknown'} on {formatDateTime(shipment.voidedAt)}
+        {shipment.voidReason ? ` — ${shipment.voidReason}` : ''}
+      </TmsAlert>
+    </div>
   )
+}
+
+/** Customer / Lane / Appointments — the three columns under the page head. */
+function headerColumns(shipment: ShipmentRecord): TmsProfileColumn[] {
+  const lane = shipment.originCity || shipment.destinationCity
+    ? `${shipment.originCity ?? '—'} → ${shipment.destinationCity ?? '—'}`
+    : null
+  return [
+    { title: 'Customer', rows: [{ value: customerDisplayName(shipment) }] },
+    { title: 'Lane', rows: [{ value: lane ?? '—' }] },
+    {
+      title: 'Appointments',
+      rows: [
+        { label: 'Pickup', value: shipment.pickupAppt ? formatDateTime(shipment.pickupAppt) : '—' },
+        { label: 'Delivery', value: shipment.deliveryAppt ? formatDateTime(shipment.deliveryAppt) : '—' },
+      ],
+    },
+  ]
 }
 
 export function ShipmentDrawer({ shipmentId, onClose, onChanged, ...options }: ShipmentDrawerProps) {
@@ -43,40 +65,38 @@ export function ShipmentDrawer({ shipmentId, onClose, onChanged, ...options }: S
   const shipment = ctx.bundle?.shipment ?? null
 
   return (
-    <Sheet open={shipmentId != null} onOpenChange={(open) => { if (!open) onClose() }}>
-      <SheetContent side="right" className="tms-portal w-full max-w-3xl overflow-hidden p-0 sm:max-w-3xl">
-        <SheetHeader className="border-b border-[color:var(--tms-border)] px-5 py-3">
-          <div className="flex items-center gap-3">
-            <SheetTitle className="text-base">{shipment?.number ?? 'Shipment'}</SheetTitle>
-            {shipment && <TmsBadge tone={statusTone(shipment.status)}>{SHIPMENT_STATUS_LABELS[shipment.status]}</TmsBadge>}
-            {shipment?.voidedAt && <TmsBadge tone="red">VOIDED</TmsBadge>}
-            <div className="ml-auto flex items-center gap-1">
-              {shipmentId && (
-                <Link to={`/tms/shipments/${shipmentId}`} className="tms-icon-btn" aria-label="Open full page">
-                  <ExternalLink size={14} />
-                </Link>
-              )}
-              {shipment && (
-                <ShipmentRowActions
-                  shipment={shipment}
-                  isAdmin={options.isAdmin}
-                  cancelDeleteAdminOnly={ctx.cancelDeleteAdminOnly}
-                  handlers={ctx.actions.shipment}
-                />
-              )}
-            </div>
-          </div>
-          {shipment && <VoidedBanner shipment={shipment} />}
-        </SheetHeader>
-        <ScrollArea className="h-[calc(100vh-56px)]">
-          <div className="p-5">
-            {ctx.loading && <p className="tms-muted text-sm">Loading shipment…</p>}
-            {ctx.error && <p className="text-sm text-[color:var(--tms-badge-red)]">{ctx.error}</p>}
-            {ctx.bundle && <ShipmentDetail {...ctx.detailProps} />}
-          </div>
-        </ScrollArea>
-      </SheetContent>
-    </Sheet>
+    <TmsDrawer
+      open={shipmentId != null}
+      onOpenChange={(open) => { if (!open) onClose() }}
+      size="xl"
+      title={shipment?.number ?? 'Shipment'}
+      headerExtra={(
+        <>
+          {shipment && <TmsBadge tone={statusTone(shipment.status)}>{SHIPMENT_STATUS_LABELS[shipment.status]}</TmsBadge>}
+          {shipment?.voidedAt && <TmsBadge tone="red">VOIDED</TmsBadge>}
+          {shipmentId && (
+            <Link to={`/tms/shipments/${shipmentId}`} className="tms-icon-btn" aria-label="Open full page">
+              <ExternalLink size={14} />
+            </Link>
+          )}
+          {shipment && (
+            <ShipmentRowActions
+              shipment={shipment}
+              isAdmin={options.isAdmin}
+              cancelDeleteAdminOnly={ctx.cancelDeleteAdminOnly}
+              handlers={ctx.actions.shipment}
+            />
+          )}
+        </>
+      )}
+    >
+      <div className="space-y-4">
+        {shipment && <VoidedBanner shipment={shipment} />}
+        {ctx.loading && <p className="tms-muted text-sm">Loading shipment…</p>}
+        {ctx.error && <p className="text-sm text-[color:var(--tms-badge-red)]">{ctx.error}</p>}
+        {ctx.bundle && <ShipmentDetail {...ctx.detailProps} />}
+      </div>
+    </TmsDrawer>
   )
 }
 
@@ -97,19 +117,26 @@ export function ShipmentPageBody({ shipmentId, options, initialTab }: {
 
   return (
     <div className="tms-page">
-      <div className="tms-page-head">
-        <h1>{shipment.number}</h1>
-        <div className="tms-page-actions">
-          <TmsBadge tone={statusTone(shipment.status)}>{SHIPMENT_STATUS_LABELS[shipment.status]}</TmsBadge>
-          {shipment.voidedAt && <TmsBadge tone="red">VOIDED</TmsBadge>}
+      <TmsProfileHeader
+        as="h1"
+        icon={Truck}
+        name={shipment.number}
+        chips={(
+          <>
+            <TmsBadge tone={statusTone(shipment.status)}>{SHIPMENT_STATUS_LABELS[shipment.status]}</TmsBadge>
+            {shipment.voidedAt && <TmsBadge tone="red">VOIDED</TmsBadge>}
+          </>
+        )}
+        actions={(
           <ShipmentRowActions
             shipment={shipment}
             isAdmin={options.isAdmin}
             cancelDeleteAdminOnly={ctx.cancelDeleteAdminOnly}
             handlers={ctx.actions.shipment}
           />
-        </div>
-      </div>
+        )}
+        columns={headerColumns(shipment)}
+      />
       <div className="space-y-4">
         <VoidedBanner shipment={shipment} />
         <ShipmentDetail {...ctx.detailProps} initialTab={initialTab} />

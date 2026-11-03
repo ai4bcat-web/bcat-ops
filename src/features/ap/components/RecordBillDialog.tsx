@@ -136,7 +136,7 @@ export function RecordBillDialog({ loadCarrierId, open, onOpenChange, onDone }: 
       {!loading && preview && snapshot && (
         <div className="flex flex-col gap-4">
           {!ready && (
-            <div className="p-2" style={{ border: '1px solid var(--tms-badge-red)', borderRadius: 'var(--tms-radius)' }}>
+            <div className="p-2 tms-tint tms-tint-red">
               <p className="flex items-start gap-2 text-xs font-medium">
                 <AlertTriangle size={14} className="mt-0.5 shrink-0" style={RED} />
                 This assignment cannot be billed yet.
@@ -149,8 +149,7 @@ export function RecordBillDialog({ loadCarrierId, open, onOpenChange, onDone }: 
 
           {missing.length > 0 && (
             <p
-              className="p-2 text-xs"
-              style={{ border: '1px solid var(--tms-badge-orange)', borderRadius: 'var(--tms-radius)' }}
+              className="p-2 text-xs tms-tint tms-tint-orange"
             >
               Carrier paperwork still missing: {missing.join(', ')}. A bill can be recorded
               without it; approving it needs the paperwork or an admin's override.

@@ -20,7 +20,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { Link2 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
-  TmsBadge, TmsButton, TmsDialog, TmsField, TmsListPage, TmsSelect,
+  TmsBadge, TmsButton, TmsDialog, TmsField, TmsListPage, TmsSelect, TmsStatRow,
 } from '@/features/tms/kit'
 import type { ColumnDef, TmsTone } from '@/features/tms/kit'
 import { useQuoteWorklist } from '@/hooks/useQuoteWorklist'
@@ -505,24 +505,26 @@ export function QuotesPage() {
   }
 
   const banner = (
-    <section aria-label="Quote totals" className="tms-grid tms-grid-4">
-      <Totals label="Open quotes" value={formatCents(totals.openCents)} note={`${totals.openCount} live`} />
-      <Totals
-        label={`Won ${monthLabel(month)}`}
-        value={formatCents(totals.wonCents)}
-        note={`${totals.wonCount} quote${totals.wonCount === 1 ? '' : 's'}`}
-      />
-      <Totals
-        label="Win rate"
-        value={`${totals.winRatePct}%`}
-        note={`${totals.wonCount} won / ${totals.lostCount} lost`}
-      />
-      <Totals
-        label="Median hours to reply"
-        value={totals.medianReplyHours === null ? '—' : `${totals.medianReplyHours}h`}
-        note={totals.medianReplyHours === null ? 'nobody has answered yet' : 'from send to answer'}
-      />
-    </section>
+    <TmsStatRow
+      aria-label="Quote totals"
+      columns={4}
+      items={[
+        { key: 'open', label: 'Open quotes', value: formatCents(totals.openCents), sub: `${totals.openCount} live` },
+        {
+          key: 'won',
+          label: `Won ${monthLabel(month)}`,
+          value: formatCents(totals.wonCents),
+          sub: `${totals.wonCount} quote${totals.wonCount === 1 ? '' : 's'}`,
+        },
+        { key: 'rate', label: 'Win rate', value: `${totals.winRatePct}%`, sub: `${totals.wonCount} won / ${totals.lostCount} lost` },
+        {
+          key: 'reply',
+          label: 'Median hours to reply',
+          value: totals.medianReplyHours === null ? null : `${totals.medianReplyHours}h`,
+          sub: totals.medianReplyHours === null ? 'nobody has answered yet' : 'from send to answer',
+        },
+      ]}
+    />
   )
 
   const chips = tab === 'won-lost'
@@ -641,17 +643,5 @@ export function QuotesPage() {
         />
       )}
     </>
-  )
-}
-
-function Totals({ label, value, note }: { label: string; value: string; note: string }) {
-  return (
-    <div className="tms-card">
-      <div className="tms-card-body">
-        <div className="tms-field-label">{label}</div>
-        <div style={{ fontSize: 18, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{value}</div>
-        <div className="tms-muted" style={{ fontSize: 12 }}>{note}</div>
-      </div>
-    </div>
   )
 }

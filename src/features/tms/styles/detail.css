@@ -1,0 +1,48 @@
+/*
+ * Shipment detail additions: building banner, postings table, carrier offers.
+ * Moved verbatim out of theme.css (S2 slice A); owned by S2 slice D from here on.
+ * Tokens live in ../theme.css; every selector stays under .tms-shell / .tms-portal. No colour literals.
+ */
+
+/* ── Step P — shipment detail additions ───────────────────────────────────── */
+
+/* Building banner (P5) */
+.tms-shell .tms-building-banner { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--tms-badge-orange); border-radius: var(--tms-radius); background: var(--tms-badge-orange-tint); color: var(--tms-text); font-size: 13px; }
+.tms-shell .tms-building-banner-main { display: inline-flex; align-items: center; gap: 8px; }
+.tms-shell .tms-building-banner-needs { font-weight: 500; }
+.tms-shell .tms-building-banner-chips { display: flex; flex-wrap: wrap; gap: 6px; flex: 1 1 auto; }
+.tms-shell .tms-building-chip { font-size: 11px; }
+
+/* Postings section (P6) */
+.tms-shell .tms-postings-wrap { display: flex; flex-direction: column; gap: 12px; }
+.tms-shell .tms-postings-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.tms-shell .tms-postings-table th { text-align: left; padding: 8px 12px; background: var(--tms-surface-subtle); color: var(--tms-muted); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; border-bottom: 1px solid var(--tms-border); }
+.tms-shell .tms-postings-table td { padding: 10px 12px; border-bottom: 1px solid var(--tms-border); vertical-align: top; }
+.tms-shell .tms-postings-table tbody tr:last-child td { border-bottom: 0; }
+.tms-shell .tms-postings-table tbody tr:hover td { background: var(--tms-surface-hover); }
+.tms-shell .tms-postings-provider { font-weight: 500; }
+.tms-shell .tms-postings-board-id { display: inline-flex; align-items: center; gap: 6px; }
+.tms-shell .tms-postings-stub { font-size: 10px; }
+.tms-shell .tms-postings-message { color: var(--tms-muted); max-width: 260px; word-break: break-word; }
+.tms-shell .tms-postings-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* Carrier offers section (P7) */
+.tms-shell .tms-offers-list { display: flex; flex-direction: column; gap: 10px; }
+.tms-shell .tms-offer-row { display: flex; flex-wrap: wrap; gap: 10px; justify-content: space-between; padding: 10px; border: 1px solid var(--tms-border); border-radius: var(--tms-radius); }
+.tms-shell .tms-offer-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.tms-shell .tms-offer-carrier { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.tms-shell .tms-offer-name { font-weight: 500; }
+.tms-shell .tms-offer-source { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; }
+.tms-shell .tms-offer-details { display: flex; flex-wrap: wrap; gap: 12px; color: var(--tms-muted); font-size: 12px; }
+.tms-shell .tms-offer-vetting { display: flex; flex-direction: column; gap: 4px; }
+.tms-shell .tms-offer-blocker { color: var(--tms-badge-red); font-size: 12px; margin: 0; }
+.tms-shell .tms-offer-warning { color: var(--tms-badge-orange); font-size: 12px; margin: 0; }
+.tms-shell .tms-offer-actions { display: flex; align-items: flex-start; gap: 8px; }
+.tms-shell .tms-offer-message-link { color: var(--tms-primary-ink); font-size: 12px; text-decoration: underline; }
+
+/* New shipment dialog (shadcn Dialog carrying .tms-portal) */
+.tms-portal .tms-new-shipment-head { padding: 16px 52px 16px 24px; border-bottom: 1px solid var(--tms-border); flex-shrink: 0; }
+.tms-portal .tms-new-shipment-head h2 { margin: 0; font-size: 16px; font-weight: 600; color: var(--tms-text); }
+.tms-portal .tms-new-shipment-typed { border: 1px solid var(--tms-border); border-radius: var(--tms-radius); padding: 12px 14px; background: var(--tms-surface); margin-bottom: 12px; }
+.tms-portal .tms-new-shipment-typed-toggle { display: flex; align-items: center; gap: 8px; background: none; border: none; padding: 0; cursor: pointer; font-size: 13px; color: var(--tms-text); font-weight: 600; font-family: inherit; }
+.tms-portal .tms-new-shipment-foot { padding: 12px 24px; border-top: 1px solid var(--tms-border); display: flex; align-items: center; gap: 10px; flex-shrink: 0; background: var(--tms-surface-subtle); }

@@ -178,15 +178,13 @@ export function FactoringDocCell({
               ? `Replace the ${LABEL[kind]}`
               : `Upload the ${LABEL[kind]} — OTR will not take the invoice without it`
         }
+        className={`tms-badge ${present ? 'tms-badge-green' : 'tms-badge-red'}`}
         style={{
           display: 'inline-flex', alignItems: 'center', gap: 4,
           height: 24, padding: '0 7px', borderRadius: 6,
           fontSize: 11, fontWeight: 600, fontFamily: 'inherit',
           cursor: busy || noLoad ? 'default' : 'pointer',
           opacity: noLoad ? 0.5 : 1, whiteSpace: 'nowrap',
-          ...(present
-            ? { border: '1px solid #86efac', background: '#dcfce7', color: '#15803d' }
-            : { border: '1px solid #fca5a5', background: '#fee2e2', color: '#b91c1c' }),
         }}
       >
         {busy ? (

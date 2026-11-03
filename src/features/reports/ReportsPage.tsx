@@ -27,7 +27,7 @@ import { Link } from 'react-router-dom'
 import { Download, RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
 import { RepPicker } from '@/components/RepPicker'
-import { TmsBadge, TmsButton, TmsCard, TmsField, TmsSelect, TmsTabs } from '@/features/tms/kit'
+import { TmsBadge, TmsButton, TmsCard, TmsField, TmsSegmentedBar, TmsSelect, TmsStatRow, TmsTabs } from '@/features/tms/kit'
 import { useArWorklist } from '@/hooks/useArWorklist'
 import { useDirectory } from '@/hooks/useDirectory'
 import { useOpenBills } from '@/hooks/useOpenBills'
@@ -63,7 +63,7 @@ import type {
 /** Numbers read down a column, so they are right-aligned and tabular. */
 const NUM: CSSProperties = { textAlign: 'right', fontVariantNumeric: 'tabular-nums' }
 const STACK: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 16 }
-const TILE: CSSProperties = {
+const NOTE: CSSProperties = {
   border: '1px solid var(--tms-border)', borderRadius: 'var(--tms-radius)', padding: '8px 12px',
 }
 
@@ -80,15 +80,12 @@ const EMPTY_FILTERS: ReportFilters = {}
 /** One row of figures. A cell with no answer passes `—`; nothing here invents a zero. */
 function FigureStrip({ label, cells }: { label: string; cells: { label: string; value: string; hint?: string }[] }) {
   return (
-    <dl aria-label={label} className="tms-grid tms-grid-4" style={{ margin: 0 }}>
-      {cells.map((c) => (
-        <div key={c.label} style={TILE}>
-          <dt className="tms-field-label" style={{ textTransform: 'uppercase', letterSpacing: '.04em' }}>{c.label}</dt>
-          <dd style={{ margin: 0, fontSize: 16, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{c.value}</dd>
-          {c.hint && <p className="tms-field-hint" style={{ margin: 0 }}>{c.hint}</p>}
-        </div>
-      ))}
-    </dl>
+    <TmsStatRow
+      aria-label={label}
+      compact
+      columns={4}
+      items={cells.map((c) => ({ key: c.label, label: c.label, value: c.value, sub: c.hint }))}
+    />
   )
 }
 
@@ -349,7 +346,7 @@ function ProfitPanel({ period, staffNames, refreshKey }: {
             />
 
             {note && (
-              <p className="tms-muted" style={{ ...TILE, margin: 0, fontSize: 14 }}>
+              <p className="tms-muted" style={{ ...NOTE, margin: 0, fontSize: 14 }}>
                 {note}{' '}
                 <Link to="/finances">Own-fleet profitability lives on Finances.</Link>
               </p>
@@ -416,17 +413,16 @@ function ProfitPanel({ period, staffNames, refreshKey }: {
 
             <section aria-label="Profit by month" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <h2 className="tms-field-label" style={{ margin: 0, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.04em' }}>By month</h2>
-              <div className="tms-grid tms-grid-3">
-                {byMonth.rows.map((row) => (
-                  <div key={row.key} style={TILE}>
-                    <p className="tms-field-label" style={{ margin: 0, textTransform: 'uppercase', letterSpacing: '.04em' }}>{monthLabel(row.key)}</p>
-                    <p style={{ margin: 0, fontSize: 16, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{formatMoneyCents(row.profitCents)}</p>
-                    <p className="tms-field-hint" style={{ margin: 0 }}>
-                      {row.loads} load{row.loads === 1 ? '' : 's'} · {formatMarginBps(row.marginBps)}
-                    </p>
-                  </div>
-                ))}
-              </div>
+              <TmsStatRow
+                compact
+                columns={3}
+                items={byMonth.rows.map((row) => ({
+                  key: row.key,
+                  label: monthLabel(row.key),
+                  value: formatMoneyCents(row.profitCents),
+                  sub: `${row.loads} load${row.loads === 1 ? '' : 's'} · ${formatMarginBps(row.marginBps)}`,
+                }))}
+              />
             </section>
           </>
         )}
@@ -471,14 +467,11 @@ function PipelinePanel() {
         {loading && counts.length === 0 && <Loading />}
         {!loading && counts.length === 0 && <Empty>No shipments on the board.</Empty>}
         {counts.length > 0 && (
-          <div className="tms-grid tms-grid-4">
-            {counts.map((c) => (
-              <div key={c.status} style={TILE}>
-                <p className="tms-field-label" style={{ margin: 0, textTransform: 'uppercase', letterSpacing: '.04em' }}>{c.status || 'Unknown'}</p>
-                <p style={{ margin: 0, fontSize: 20, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{c.count}</p>
-              </div>
-            ))}
-          </div>
+          <TmsStatRow
+            compact
+            columns={4}
+            items={counts.map((c) => ({ key: c.status, label: c.status || 'Unknown', value: String(c.count) }))}
+          />
         )}
       </div>
     </TmsCard>
@@ -567,13 +560,16 @@ function ArPanel({ period, asOf, periodLabel, refreshKey }: {
           paidMonthLabel={periodLabel}
         />
 
-        <section aria-label="Aging buckets" className="tms-grid tms-grid-4">
-          {AGING_BUCKETS.map((b) => (
-            <div key={b} style={TILE}>
-              <p className="tms-field-label" style={{ margin: 0, textTransform: 'uppercase', letterSpacing: '.04em' }}>{AGING_BUCKET_LABEL[b]}</p>
-              <p style={{ margin: 0, fontSize: 16, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{formatMoneyCents(open.aging.byBucket[b])}</p>
-            </div>
-          ))}
+        <section aria-label="Aging buckets" className="tms-stack">
+          <TmsStatRow
+            compact
+            columns={5}
+            items={AGING_BUCKETS.map((b) => ({ key: b, label: AGING_BUCKET_LABEL[b], value: formatMoneyCents(open.aging.byBucket[b]) }))}
+          />
+          <TmsSegmentedBar
+            ariaLabel="Aging share by bucket"
+            segments={AGING_BUCKETS.map((b) => ({ key: b, label: AGING_BUCKET_LABEL[b], value: open.aging.byBucket[b] }))}
+          />
         </section>
         {open.aging.byCustomer.length === 0 && !open.loading && <Empty>Nothing is owed to us.</Empty>}
 
@@ -675,13 +671,16 @@ function ApPanel({ asOf, periodLabel }: { asOf: string; periodLabel: string }) {
           paidMonthLabel={periodLabel}
         />
 
-        <section aria-label="AP aging buckets" className="tms-grid tms-grid-4">
-          {AGING_BUCKETS.map((b) => (
-            <div key={b} style={TILE}>
-              <p className="tms-field-label" style={{ margin: 0, textTransform: 'uppercase', letterSpacing: '.04em' }}>{AGING_BUCKET_LABEL[b]}</p>
-              <p style={{ margin: 0, fontSize: 16, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{formatMoneyCents(aging.byBucket[b])}</p>
-            </div>
-          ))}
+        <section aria-label="AP aging buckets" className="tms-stack">
+          <TmsStatRow
+            compact
+            columns={5}
+            items={AGING_BUCKETS.map((b) => ({ key: b, label: AGING_BUCKET_LABEL[b], value: formatMoneyCents(aging.byBucket[b]) }))}
+          />
+          <TmsSegmentedBar
+            ariaLabel="AP aging share by bucket"
+            segments={AGING_BUCKETS.map((b) => ({ key: b, label: AGING_BUCKET_LABEL[b], value: aging.byBucket[b] }))}
+          />
         </section>
 
         {loading && aging.byParty.length === 0 && <Loading />}

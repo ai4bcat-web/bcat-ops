@@ -8,7 +8,7 @@
 import { useState } from 'react'
 import { CheckCircle2, Loader2, Mail, RotateCcw, ShieldOff } from 'lucide-react'
 import { toast } from 'sonner'
-import { TmsButton, TmsInput } from '@/features/tms/kit'
+import { TmsButton, TmsInput, TmsTimeline } from '@/features/tms/kit'
 import type { FactoringItem } from '@/types'
 import { MANUAL_STEPS, MANUAL_INVOICE_CC, manualProgress } from '@/lib/manualInvoice'
 import { returnToOtrQueue, setApEmail, setManualStep } from '@/lib/otrClient'
@@ -44,7 +44,7 @@ export function ManualInvoicePanel({ item, onChanged }: { item: FactoringItem; o
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="flex items-center gap-2 font-semibold">
-            <ShieldOff className="size-4" style={{ color: 'var(--tms-badge-pink)' }} aria-hidden="true" />
+            <ShieldOff className="size-4 text-[color:var(--tms-badge-pink)]" aria-hidden="true" />
             {item.manualReason === 'NO_BUY'
               ? `OTR will not buy from ${customer || `MC ${item.brokerMcChecked ?? ''}`.trim()} — invoice this one manually`
               : 'Invoicing this one manually'}
@@ -85,54 +85,56 @@ export function ManualInvoicePanel({ item, onChanged }: { item: FactoringItem; o
         </TmsButton>
       </div>
 
-      <ol className="mt-3 flex flex-col gap-2">
-        {MANUAL_STEPS.map((step, i) => {
+      <TmsTimeline
+        compact
+        className="mt-3"
+        ariaLabel="Manual invoice steps"
+        items={MANUAL_STEPS.map((step, i) => {
           const mark = steps?.[step.id] ?? null
           const id = `${item.id}-${step.id}`
-          return (
-            <li
-              key={step.id}
-              className="flex items-start gap-3 p-3"
-              style={{
-                border: `1px solid ${mark ? 'var(--tms-badge-green)' : 'var(--tms-border)'}`,
-                borderRadius: 'var(--tms-radius)',
-              }}
-            >
-              <input
-                id={id}
-                type="checkbox"
-                className="mt-0.5 size-5 cursor-pointer"
-                checked={!!mark}
-                disabled={busy !== null}
-                aria-label={`Step ${i + 1}: ${step.label}`}
-                onChange={(e) => run(step.id, () => setManualStep(item.id, step.id, e.target.checked), e.target.checked ? `Step ${i + 1} done` : `Step ${i + 1} reopened`)}
-              />
-              <label htmlFor={id} className="min-w-0 flex-1 cursor-pointer">
-                <span className="block font-semibold">{i + 1}. {step.label}</span>
-                <span className="block text-xs tms-muted">
+          return {
+            id: step.id,
+            state: mark ? 'done' : 'upcoming',
+            title: (
+              <span className="inline-flex items-center gap-2">
+                <input
+                  id={id}
+                  type="checkbox"
+                  className="size-4 cursor-pointer"
+                  checked={!!mark}
+                  disabled={busy !== null}
+                  aria-label={`Step ${i + 1}: ${step.label}`}
+                  onChange={(e) => run(step.id, () => setManualStep(item.id, step.id, e.target.checked), e.target.checked ? `Step ${i + 1} done` : `Step ${i + 1} reopened`)}
+                />
+                <label htmlFor={id} className="cursor-pointer font-semibold">{i + 1}. {step.label}</label>
+              </span>
+            ),
+            description: (
+              <>
+                <span className="block">
                   {step.id === 'emailed' && item.apEmail
-                    ? <>To <span className="font-medium" style={{ color: 'var(--tms-text)' }}>{item.apEmail}</span>, cc {MANUAL_INVOICE_CC}.</>
+                    ? <>To <span className="font-medium">{item.apEmail}</span>, cc {MANUAL_INVOICE_CC}.</>
                     : step.detail}
                 </span>
                 {mark && (
-                  <span className="mt-1 block text-[11px]" style={{ color: 'var(--tms-badge-green)' }}>
+                  <span className="mt-1 block text-[11px]">
                     <CheckCircle2 className="mr-1 inline size-3" aria-hidden="true" />
                     {mark.by} · {when(mark.at)}
                   </span>
                 )}
-              </label>
-              {step.id === 'emailed' && item.apEmail && !mark && (
-                <a
-                  className="shrink-0 text-xs font-semibold"
-                  href={`mailto:${encodeURIComponent(item.apEmail)}?cc=${encodeURIComponent(MANUAL_INVOICE_CC)}&subject=${encodeURIComponent(`Invoice ${item.proNumber} — Ivan Cartage`)}`}
-                >
-                  <Mail className="mr-1 inline size-3.5" aria-hidden="true" />Open email
-                </a>
-              )}
-            </li>
-          )
+                {step.id === 'emailed' && item.apEmail && !mark && (
+                  <a
+                    className="mt-1 inline-block text-xs font-semibold"
+                    href={`mailto:${encodeURIComponent(item.apEmail)}?cc=${encodeURIComponent(MANUAL_INVOICE_CC)}&subject=${encodeURIComponent(`Invoice ${item.proNumber} — Ivan Cartage`)}`}
+                  >
+                    <Mail className="mr-1 inline size-3.5" aria-hidden="true" />Open email
+                  </a>
+                )}
+              </>
+            ),
+          }
         })}
-      </ol>
+      />
     </div>
   )
 }

@@ -21,33 +21,16 @@ import { randomBytes } from 'node:crypto'
 import { resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import {
-  CognitoIdentityProviderClient,
   AdminCreateUserCommand,
   AdminSetUserPasswordCommand,
-  AdminAddUserToGroupCommand,
   AdminDeleteUserCommand,
 } from '@aws-sdk/client-cognito-identity-provider'
 import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda'
 import { DEMO_STAFF } from './seedDemo.mjs'
 import { verifyTrackingUi } from './lib/verifyTrackingUi.mjs'
+import { DEV_POOL, PUBLIC_API, region, cognito, gql, routerAs, mintIdentity } from './lib/devIdentity.mjs'
 
-const DEV_API = 'https://f5iqzdpidzalvjys7yxijn5ave.appsync-api.us-east-1.amazonaws.com/graphql'
-const DEV_POOL = 'us-east-1_UKhMNVAG1'
-const DEV_CLIENT = '59284j3vm69gqg49cinjrr4dci'
-const PUBLIC_API = 'https://jk65s5nfkj2sfnnoang4huvbvq0bsruo.lambda-url.us-east-1.on.aws'
 const SHIPMENT_ACTIONS_LAMBDA = 'amplify-d3dejqzs77khq6-de-tmsshipmentactionslambda-x2KeBv2mM6Mk'
-const region = 'us-east-1'
-
-const outputs = {
-  auth: {
-    user_pool_id: DEV_POOL,
-    user_pool_client_id: DEV_CLIENT,
-    aws_region: region,
-    username_attributes: ['email'],
-  },
-  data: { url: DEV_API, aws_region: region, default_authorization_type: 'AMAZON_COGNITO_USER_POOLS' },
-  version: '1.3',
-}
 
 const results = []
 function ok(name, detail) { results.push({ ok: true, name, detail }); console.log(`PASS  ${name}${detail ? ` — ${detail}` : ''}`) }
@@ -67,29 +50,7 @@ async function refuses(name, pattern, run) {
   }
 }
 
-const cognito = new CognitoIdentityProviderClient({ region })
 const lambda = new LambdaClient({ region, maxAttempts: 1 })
-
-async function gql(token, query, variables) {
-  const res = await fetch(DEV_API, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', authorization: token },
-    body: JSON.stringify({ query, variables }),
-  })
-  const body = await res.json()
-  if (body.errors) throw new Error(body.errors.map((e) => e.message).join('; '))
-  return body.data
-}
-
-const routerAs = (token, field) => async (action, input) => {
-  const data = await gql(
-    token,
-    `mutation($action:String!,$input:AWSJSON!){ ${field}(action:$action,input:$input) }`,
-    { action, input: JSON.stringify(input ?? {}) },
-  )
-  const raw = data[field]
-  return typeof raw === 'string' ? JSON.parse(raw) : raw
-}
 
 async function publicGet(path) {
   const res = await fetch(`${PUBLIC_API}${path}`, { headers: { accept: 'application/json' } })
@@ -109,38 +70,6 @@ async function publicPost(path, payload) {
   let body = null
   try { body = JSON.parse(text) } catch { body = null }
   return { status: res.status, body, text }
-}
-
-/** A throwaway dev login. The password is generated here and never printed. */
-async function mintIdentity(email, groups) {
-  const password = `Aa1!${randomBytes(18).toString('base64url')}`
-  await cognito.send(new AdminCreateUserCommand({
-    UserPoolId: DEV_POOL, Username: email, MessageAction: 'SUPPRESS',
-    UserAttributes: [{ Name: 'email', Value: email }, { Name: 'email_verified', Value: 'true' }],
-  }))
-  await cognito.send(new AdminSetUserPasswordCommand({ UserPoolId: DEV_POOL, Username: email, Password: password, Permanent: true }))
-  for (const group of groups) {
-    await cognito.send(new AdminAddUserToGroupCommand({ UserPoolId: DEV_POOL, Username: email, GroupName: group }))
-  }
-  const { Amplify } = await import('aws-amplify')
-  const { signIn, signOut, fetchAuthSession } = await import('aws-amplify/auth')
-  Amplify.configure(outputs)
-  await signOut().catch(() => {})
-  await signIn({ username: email, password })
-  const session = await fetchAuthSession({ forceRefresh: true })
-  const username = session.tokens.idToken.payload['cognito:username']
-  const prefix = `CognitoIdentityServiceProvider.${DEV_CLIENT}`
-  const { defaultStorage } = await import('aws-amplify/utils')
-  const refreshToken = await defaultStorage.getItem(`${prefix}.${username}.refreshToken`)
-  if (!refreshToken) throw new Error('Temporary dev login did not yield a refresh token')
-  const storage = {
-    [`${prefix}.${username}.refreshToken`]: refreshToken,
-    [`${prefix}.LastAuthUser`]: username,
-    [`${prefix}.${username}.idToken`]: session.tokens.idToken.toString(),
-    [`${prefix}.${username}.accessToken`]: session.tokens.accessToken.toString(),
-    [`${prefix}.${username}.clockDrift`]: '0',
-  }
-  return { token: session.tokens.idToken.toString(), password, storage }
 }
 
 async function manageUsers(token, action, input) {
@@ -382,6 +311,13 @@ async function main() {
     const bookedCarrier = bookedBundle.loadCarriers?.find((c) => c.status === 'ACTIVE')
     if (!bookedCarrier) { bad('P8 booked carrier', 'no active load carrier'); return }
 
+    // The send gate needs a completed MyCarrierPackets packet; a dev seed older than p8.2 lacks one.
+    const vettedRow = (await gql(adminToken, 'query C($id: ID!) { getCarrier(id: $id) { mcpStatus } }', { id: 'carr-demo-vetted' }))?.getCarrier
+    const vettedMcp = String(vettedRow?.mcpStatus ?? '').trim().toUpperCase().replace(/[\s-]+/g, '_')
+    if (!['PENDING_REVIEW', 'ACCEPTABLE', 'MODERATE', 'UNACCEPTABLE', 'UNACCEPTABLE_REVIEW'].includes(vettedMcp)) {
+      bad('P8 preflight', 'carr-demo-vetted has no completed MyCarrierPackets status (dev seed predates p8.2) — run RESET_DEMO then SEED_DEMO')
+      return
+    }
     const pdfBase64 = Buffer.from('fake pdf content for rate con test').toString('base64')
     const rateConBundle = await ship('SEND_RATE_CON', {
       loadCarrierId: bookedCarrier.id,

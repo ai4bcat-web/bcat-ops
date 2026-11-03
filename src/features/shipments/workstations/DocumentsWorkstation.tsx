@@ -267,7 +267,7 @@ export function DocumentsWorkstation() {
 
   return (
     <div className="tms-board-shell flex h-full flex-col">
-      <div className="tms-board-toolbar flex items-center justify-between border-b px-3 py-2">
+      <div className="tms-board-toolbar flex items-center justify-between border-b border-[color:var(--tms-border)] px-3 py-2">
         <div className="flex items-center gap-3">
           <FileCheck2 size={18} />
           <span className="font-semibold">Documents</span>
@@ -317,8 +317,8 @@ export function DocumentsWorkstation() {
                       data-testid={`doc-row-${row.id}`}
                       aria-pressed={selectedId === row.id}
                       onClick={() => { setReleaseError(null); setSelectedId(row.id) }}
-                      className={`block w-full px-3 py-2 text-left hover:bg-[color:var(--tms-topbar)] ${
-                        selectedId === row.id ? 'bg-[color:var(--tms-topbar)]' : ''
+                      className={`block w-full px-3 py-2 text-left hover:bg-[color:var(--tms-surface-hover)] ${
+                        selectedId === row.id ? 'bg-[color:var(--tms-surface-selected)]' : ''
                       }`}
                     >
                       <div className="flex items-baseline gap-3">

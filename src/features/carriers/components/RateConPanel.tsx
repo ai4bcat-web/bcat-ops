@@ -2,17 +2,25 @@
  * The rate confirmation for one booked carrier: build it, look at it, send it, chase it
  * (spec §6.2 "Rate con").
  *
- * The PDF is built in the browser from what is on screen — the division letterhead, the
- * stops, the CARRIER charge lines — and handed to the Lambda as base64, so what the
- * carrier opens is exactly the document the booker approved. The server owns the token,
- * the expiry and the status; this panel only reports them.
+ * The PDF is built in the browser from what is on screen — the division letterhead (with
+ * its logo), the stops, the CARRIER charge lines — and handed to the Lambda as base64, so
+ * what the carrier opens is exactly the document the booker approved. The server owns the
+ * token, the expiry and the status; this panel only reports them. Recipients are picked
+ * from the carrier's known addresses (or typed), the sender is copied by the server, and
+ * a carrier without a completed MyCarrierPackets packet cannot be sent a rate con.
  */
 import { useEffect, useMemo, useState } from 'react'
 import { Ban, Copy, FileText, Send } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import { TmsBadge, TmsButton, TmsField, TmsInput } from '@/features/tms/kit'
 import { toast } from 'sonner'
 import { getRateConfirmUrl, listDivisions } from '@/lib/apiClient'
 import { buildRateConPdf, rateConFilename, rateConPdfBase64 } from '@/lib/carrierRateCon'
+import { useAuthUser } from '@/hooks/useAuth'
+import { dedupeEmails } from '@/lib/emailAddress'
+import { mcpPacketStanding } from '@/lib/mcpPacket'
+import { RecipientPicker } from './RecipientPicker'
+import { commitAddress, defaultSelection, knownRecipientOptions, parseCcList } from './rateConRecipients'
 import { quickPayTiersOf, tierFor } from '@/lib/quickPay'
 import { formatDateTime } from '@/lib/date'
 import { formatCents } from '@/lib/tmsDirectory'
@@ -50,10 +58,13 @@ export interface RateConPanelProps {
 
 export function RateConPanel({ bundle, loadCarrier, carrier, contacts, settings, busy, onSend, onVoid }: RateConPanelProps) {
   const [divisions, setDivisions] = useState<Division[]>([])
-  // The recipient box starts from the carrier profile and only becomes state once the
+  // The ticked list starts from the carrier profile and only becomes state once the
   // user edits it — mirroring the default into state would fight the carrier bundle
   // arriving a tick later.
-  const [toOverride, setToOverride] = useState<string | null>(null)
+  const [selectedOverride, setSelectedOverride] = useState<string[] | null>(null)
+  const [extras, setExtras] = useState<string[]>([])
+  const [draft, setDraft] = useState('')
+  const user = useAuthUser()
   const [cc, setCc] = useState('')
   const [expiryHours, setExpiryHours] = useState('')
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
@@ -66,18 +77,22 @@ export function RateConPanel({ bundle, loadCarrier, carrier, contacts, settings,
     return () => { live = false }
   }, [])
 
-  // Dispatch contacts first, then anyone flagged as a rate-con recipient; the carrier's
-  // own dispatcher email is the fallback when the profile has no contacts yet.
-  const defaultRecipients = useMemo(() => {
-    const picked = contacts
-      .filter((c) => c.active !== false && c.email)
-      .filter((c) => c.rateConRecipient || c.types?.includes('DISPATCH'))
-      .map((c) => c.email as string)
-    const fallback = [carrier?.dispatcherEmail, carrier?.email].filter((e): e is string => !!e)
-    return Array.from(new Set(picked.length > 0 ? picked : fallback))
-  }, [contacts, carrier])
+  // Everything the profile knows for this booking, and who is ticked until the user
+  // touches the list (the carrier's own dispatcher is the fallback when it has no contacts).
+  const options = useMemo(
+    () => knownRecipientOptions({ carrier, contacts, loadCarrier }),
+    [carrier, contacts, loadCarrier],
+  )
+  const defaults = useMemo(() => defaultSelection({ carrier, contacts }), [carrier, contacts])
+  const selected = selectedOverride ?? defaults
+  const recipients = dedupeEmails([...selected, ...extras])
+  // Text still in the "Add another address" box counts: Send commits it (or refuses it).
+  const noRecipients = recipients.length === 0 && !draft.trim()
 
-  const to = toOverride ?? defaultRecipients.join(', ')
+  const standing = carrier ? mcpPacketStanding(carrier) : null
+  // When the carrier bundle has not loaded the server is the authority; only a loaded
+  // carrier known to lack a completed packet pre-blocks the button.
+  const blocked = standing != null && !standing.completed
 
   const load = bundle.loads[0]
   const division = divisions.find((d) => d.key === load?.divisionKey) ?? null
@@ -152,8 +167,19 @@ export function RateConPanel({ bundle, loadCarrier, carrier, contacts, settings,
   }
 
   const send = async () => {
-    const recipients = to.split(',').map((e) => e.trim()).filter(Boolean)
-    if (recipients.length === 0) { setError('At least one recipient is required.'); return }
+    let toList = recipients
+    if (draft.trim()) {
+      // A half-typed address is sent, or refuses the send — never silently dropped.
+      const result = commitAddress({ text: draft, options, selected, extras })
+      if (!result.ok) { setError(result.error); return }
+      setSelectedOverride(result.selected)
+      setExtras(result.extras)
+      setDraft('')
+      toList = dedupeEmails([...result.selected, ...result.extras])
+    }
+    if (toList.length === 0) { setError('At least one recipient is required.'); return }
+    const ccParsed = parseCcList(cc)
+    if (ccParsed.invalid.length > 0) { setError(`CC: "${ccParsed.invalid[0]}" is not a valid email address.`); return }
     setWorking(true)
     setError(null)
     try {
@@ -161,8 +187,8 @@ export function RateConPanel({ bundle, loadCarrier, carrier, contacts, settings,
       await onSend({
         loadCarrierId: loadCarrier.id,
         pdfBase64: rateConPdfBase64(doc),
-        to: recipients,
-        cc: cc.split(',').map((e) => e.trim()).filter(Boolean),
+        to: toList,
+        cc: ccParsed.emails,
         expiresHours: expiryHours ? Number(expiryHours) : undefined,
       })
     } catch (err) {
@@ -221,9 +247,16 @@ export function RateConPanel({ bundle, loadCarrier, carrier, contacts, settings,
         <Fact label="Total" value={`$${formatCents(totalCents)}`} />
       </dl>
 
-      <TmsField label="To">
-        <TmsInput aria-label="Rate con recipients" value={to} onChange={(e) => setToOverride(e.target.value)} />
-      </TmsField>
+      <RecipientPicker
+        options={options}
+        selected={selected}
+        extras={extras}
+        draft={draft}
+        onDraftChange={setDraft}
+        onSelectedChange={setSelectedOverride}
+        onExtrasChange={setExtras}
+        disabled={busy || working}
+      />
       <div className="tms-grid tms-grid-2">
         <TmsField label="CC">
           <TmsInput aria-label="Rate con cc" value={cc} onChange={(e) => setCc(e.target.value)} />
@@ -239,14 +272,32 @@ export function RateConPanel({ bundle, loadCarrier, carrier, contacts, settings,
           />
         </TmsField>
       </div>
+      {user?.email && (
+        <p className="text-xs tms-muted">You ({user.email}) are copied automatically.</p>
+      )}
 
+      {blocked && carrier && standing && (
+        <p role="status" className="text-xs" style={{ color: 'var(--tms-badge-red)' }}>
+          Can't send yet — {carrier.name} {standing.reason}{' '}
+          <Link to={`/tms/carriers/${carrier.id}`} className="underline">Open carrier profile</Link>
+          {' '}(send a setup packet there).
+        </p>
+      )}
       {error && <p className="text-xs" style={{ color: 'var(--tms-badge-red)' }}>{error}</p>}
 
       <div className="flex flex-wrap gap-2">
         <TmsButton size="sm" onClick={preview} disabled={working}>
           <FileText size={14} />Preview
         </TmsButton>
-        <TmsButton variant="primary" size="sm" onClick={send} disabled={busy || working}>
+        <TmsButton
+          variant="primary"
+          size="sm"
+          onClick={send}
+          disabled={busy || working || blocked || noRecipients}
+          title={blocked
+            ? 'This carrier has no completed MyCarrierPackets packet'
+            : noRecipients ? 'Pick at least one recipient' : undefined}
+        >
           <Send size={14} />{version > 0 ? 'Re-send' : 'Send'}
         </TmsButton>
         {sent && (

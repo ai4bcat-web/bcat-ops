@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Map as GoogleMap, AdvancedMarker, useMap } from '@vis.gl/react-google-maps'
+import { APIProvider, Map as GoogleMap, AdvancedMarker, useMap } from '@vis.gl/react-google-maps'
 import { geoAlbersUsa, geoPath, type GeoProjection } from 'd3-geo'
 import { feature } from 'topojson-client'
 import type { Topology } from 'topojson-specification'
 import type { FeatureCollection } from 'geojson'
+import { useTmsTokens } from '@/features/tms/tmsTokens'
 import { googleMapsExtras } from './googleMapsExtras'
 
 interface GooglePolyline {
@@ -29,7 +30,7 @@ declare global {
 
 interface LatLng { lat: number; lng: number }
 
-function RoutePolyline({ from, to }: { from: LatLng; to: LatLng }) {
+function RoutePolyline({ from, to, color }: { from: LatLng; to: LatLng; color: string }) {
   const map = useMap()
 
   useEffect(() => {
@@ -38,13 +39,13 @@ function RoutePolyline({ from, to }: { from: LatLng; to: LatLng }) {
     const poly = new maps.Polyline({
       path: [from, to],
       geodesic: true,
-      strokeColor: '#f4c50c',
+      strokeColor: color,
       strokeOpacity: 0.9,
       strokeWeight: 3,
       map,
     })
     return () => { poly.setMap(null) }
-  }, [map, from, to])
+  }, [map, from, to, color])
 
   return null
 }
@@ -91,11 +92,13 @@ function pointFeature(p: LatLng) {
   return { type: 'Feature' as const, properties: {}, geometry: { type: 'Point' as const, coordinates: [p.lng, p.lat] } }
 }
 
-function StaticRouteMap({ lastKnown, delivery, deliveryName }: {
+function StaticRouteMap({ lastKnown, delivery, deliveryName, compact }: {
   lastKnown: LatLng | null
   delivery: LatLng | null
   deliveryName?: string | null
+  compact?: boolean
 }) {
+  const tk = useTmsTokens(['--tms-primary', '--tms-badge-blue', '--tms-badge-blue-tint', '--tms-card', '--tms-muted', '--tms-surface'])
   const [states, setStates] = useState<FeatureCollection | null>(null)
 
   useEffect(() => {
@@ -130,47 +133,47 @@ function StaticRouteMap({ lastKnown, delivery, deliveryName }: {
   const deliveryXY = projection && delivery ? projection([delivery.lng, delivery.lat]) : null
 
   return (
-    <div className="tms-detail-map" data-testid="tracking-detail-map">
+    <div className={`tms-detail-map${compact ? ' tms-detail-map-compact' : ''}`} data-testid="tracking-detail-map">
       <svg
         viewBox={`0 0 ${W} ${H}`}
         width="100%"
         height="100%"
         role="img"
         aria-label="Route map"
-        style={{ display: 'block', background: 'var(--ds-bg, transparent)' }}
+        style={{ display: 'block', background: tk['--tms-surface'] }}
       >
         {paths.length === 0 ? (
-          <text x={W / 2} y={H / 2} textAnchor="middle" fontSize={13} fill="var(--ds-t3, #94a3b8)">Loading map…</text>
+          <text x={W / 2} y={H / 2} textAnchor="middle" fontSize={13} fill={tk['--tms-muted']}>Loading map…</text>
         ) : (
           <g>
             {paths.map((d, i) => (
-              <path key={i} d={d} fill="rgba(30,168,243,0.05)" stroke="rgba(30,168,243,0.30)" strokeWidth={0.6} strokeLinejoin="round" />
+              <path key={i} d={d} fill={tk['--tms-card']} stroke={tk['--tms-badge-blue-tint']} strokeWidth={0.8} strokeLinejoin="round" />
             ))}
             {lastKnownXY && deliveryXY && (
               <line
                 x1={lastKnownXY[0]} y1={lastKnownXY[1]}
                 x2={deliveryXY[0]} y2={deliveryXY[1]}
-                stroke="#f4c50c" strokeWidth={2} strokeDasharray="6 4" strokeOpacity={0.9}
+                stroke={tk['--tms-primary']} strokeWidth={2} strokeDasharray="6 4" strokeOpacity={0.9}
               />
             )}
             {deliveryXY && (
               <g transform={`translate(${deliveryXY[0]} ${deliveryXY[1]})`}>
                 <title>{deliveryName ?? 'Consignee'}</title>
-                <circle r={5} fill="#0ea5e9" stroke="#fff" strokeWidth={1.2} />
+                <circle r={5} fill={tk['--tms-badge-blue']} stroke={tk['--tms-card']} strokeWidth={1.2} />
               </g>
             )}
             {lastKnownXY && (
               <g transform={`translate(${lastKnownXY[0]} ${lastKnownXY[1]})`}>
                 <title>Last known position</title>
-                <circle r={8} fill="rgba(244,197,12,0.20)" />
-                <circle r={4.5} fill="#f4c50c" stroke="#fff" strokeWidth={1.2} />
+                <circle r={8} fill={tk['--tms-primary']} fillOpacity={0.2} />
+                <circle r={4.5} fill={tk['--tms-primary']} stroke={tk['--tms-card']} strokeWidth={1.2} />
               </g>
             )}
           </g>
         )}
       </svg>
       {paths.length > 0 && !lastKnownXY && !deliveryXY && (
-        <p className="tms-muted" style={{ margin: '4px 0 0', fontSize: 11.5, textAlign: 'center' }}>
+        <p className="tms-muted tms-detail-map-note">
           No position or consignee coordinates yet
         </p>
       )}
@@ -184,6 +187,8 @@ export interface TrackingDetailMapProps {
   lastKnown: LatLng | null
   delivery: LatLng | null
   deliveryName?: string | null
+  /** Short variant for the inbox location card and info panel. */
+  compact?: boolean
 }
 
 /**
@@ -192,19 +197,20 @@ export interface TrackingDetailMapProps {
  * an `APIProvider`); without one it falls back to the static US outline so the
  * route and positions are still visible.
  */
-export function TrackingDetailMap({ apiKey, mapId, lastKnown, delivery, deliveryName }: TrackingDetailMapProps) {
+export function TrackingDetailMap({ apiKey, mapId, lastKnown, delivery, deliveryName, compact }: TrackingDetailMapProps) {
+  const tk = useTmsTokens(['--tms-primary', '--tms-badge-blue'])
   if (!apiKey) {
-    return <StaticRouteMap lastKnown={lastKnown} delivery={delivery} deliveryName={deliveryName} />
+    return <StaticRouteMap lastKnown={lastKnown} delivery={delivery} deliveryName={deliveryName} compact={compact} />
   }
 
-  const markers: { position: LatLng; title: string; color?: string }[] = []
-  if (lastKnown) markers.push({ position: lastKnown, title: 'Last known position', color: '#f4c50c' })
-  if (delivery) markers.push({ position: delivery, title: deliveryName ?? 'Delivery stop', color: '#0ea5e9' })
+  const markers: { position: LatLng; title: string; color: string }[] = []
+  if (lastKnown) markers.push({ position: lastKnown, title: 'Last known position', color: tk['--tms-primary'] })
+  if (delivery) markers.push({ position: delivery, title: deliveryName ?? 'Delivery stop', color: tk['--tms-badge-blue'] })
 
   const center = lastKnown ?? delivery ?? { lat: 39.8283, lng: -98.5795 }
 
   return (
-    <div className="tms-detail-map" data-testid="tracking-detail-map">
+    <div className={`tms-detail-map${compact ? ' tms-detail-map-compact' : ''}`} data-testid="tracking-detail-map">
       <GoogleMap
         mapId={mapId}
         defaultCenter={center}
@@ -221,9 +227,15 @@ export function TrackingDetailMap({ apiKey, mapId, lastKnown, delivery, delivery
             />
           </AdvancedMarker>
         ))}
-        {lastKnown && delivery && <RoutePolyline from={lastKnown} to={delivery} />}
+        {lastKnown && delivery && <RoutePolyline from={lastKnown} to={delivery} color={tk['--tms-primary']} />}
         <ViewportController lastKnown={lastKnown} delivery={delivery} />
       </GoogleMap>
     </div>
   )
+}
+
+/** The compact map for cards and panels: brings its own Google provider when a key exists. */
+export function TrackingMiniMap(props: TrackingDetailMapProps) {
+  const map = <TrackingDetailMap {...props} compact />
+  return props.apiKey ? <APIProvider apiKey={props.apiKey}>{map}</APIProvider> : map
 }

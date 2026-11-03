@@ -47,6 +47,8 @@ export interface InboxPanelProps {
   selectedId: string | null
   onSelect: (id: string) => void
   nowMs: number
+  /** The closable Info panel (third column); omit while it is closed. */
+  info?: ReactNode
   /** The framed conversation for the selected shipment. */
   children?: ReactNode
 }

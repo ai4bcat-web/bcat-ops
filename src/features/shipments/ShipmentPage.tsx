@@ -3,8 +3,7 @@
  * body as the drawer; this route only supplies the shared directory/settings context.
  */
 import { useEffect, useState } from 'react'
-import { useParams, useSearchParams, Link } from 'react-router-dom'
-import { ChevronLeft } from 'lucide-react'
+import { useParams, useSearchParams } from 'react-router-dom'
 import { useAuth } from '@/hooks/useAuth'
 import { useDirectory } from '@/hooks/useDirectory'
 import { getTmsSettings } from '@/lib/apiClient'
@@ -24,19 +23,12 @@ export function ShipmentPage() {
   if (!id) return <p className="tms-muted p-6 text-sm">No shipment selected.</p>
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="border-b border-[color:var(--tms-border)] px-6 py-2">
-        <Link to="/tms/shipments" className="tms-btn tms-btn-ghost tms-btn-sm">
-          <ChevronLeft size={14} className="mr-1" /> Shipments
-        </Link>
-      </div>
-      <div className="flex-1 overflow-auto">
-        <ShipmentPageBody
-          shipmentId={id}
-          options={{ customers, locations, settings, isAdmin, currentUser: user?.email ?? '' }}
-          initialTab={normalizeDetailTab(search.get('tab'))}
-        />
-      </div>
+    <div className="h-full overflow-auto">
+      <ShipmentPageBody
+        shipmentId={id}
+        options={{ customers, locations, settings, isAdmin, currentUser: user?.email ?? '' }}
+        initialTab={normalizeDetailTab(search.get('tab'))}
+      />
     </div>
   )
 }

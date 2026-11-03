@@ -231,6 +231,9 @@ import {
 import { topLevelOf } from '../../../src/lib/ownership'
 import { normalizePro } from '../../../src/lib/proNumber'
 import { evaluateReleaseGate, releaseGateError } from '../../../src/lib/releaseGate'
+import { isEmailAddress } from '../../../src/lib/emailAddress'
+import { mcpPacketStanding, rateConMcpRefusal } from '../../../src/lib/mcpPacket'
+import { composeRateConCc } from './rateConRecipients'
 import { loadReleaseGateInput } from '../_shared/releaseGateInput'
 import type { Load as LoadForCredit } from '../../../src/types'
 import type {
@@ -4264,7 +4267,7 @@ async function listLoadCarriersByCarrier(input: Row, caller: Caller): Promise<Ro
 /** A recipient line in an email header; a comma or a newline in one is an attack. */
 function assertEmail(value: unknown, label: string): string {
   const v = assertString(value, label)
-  if (v.length > 200 || !/^[^\s@,;<>"]+@[^\s@,;<>"]+\.[^\s@,;<>"]+$/.test(v)) {
+  if (!isEmailAddress(v)) {
     throw new Error(`${label} must be an email address`)
   }
   return v
@@ -4762,12 +4765,17 @@ function trackingMailbox(): string {
  * Each send is a new version: a fresh PDF on S3, a fresh CarrierDocument row, and a
  * fresh token — which is exactly what voids the previous link, since the token is
  * the only way into the signing page.
+ *
+ * Two rules: (1) the carrier must hold a completed MyCarrierPackets packet
+ * (mcpPacketStanding) — checked before any side effect, on send and re-send; (2) the
+ * sender is always cc'd after the tracking mailbox and typed cc, deduped
+ * case-insensitively and never duplicating a `to` address (composeRateConCc).
  */
 async function sendRateCon(input: Row, caller: Caller): Promise<Row> {
   const loadCarrierId = assertString(input.loadCarrierId, 'loadCarrierId')
   const pdfBase64 = assertString(input.pdfBase64, 'pdfBase64')
-  const to = assertArrayOf(input.to, 'to', (v, i) => assertEmail(v, `to[${i}]`), 20)
-  if (to.length === 0) throw new Error('A rate confirmation needs at least one recipient')
+  const toInput = assertArrayOf(input.to, 'to', (v, i) => assertEmail(v, `to[${i}]`), 20)
+  if (toInput.length === 0) throw new Error('A rate confirmation needs at least one recipient')
   const inputCc = input.cc == null ? [] : assertArrayOf(input.cc, 'cc', (v, i) => assertEmail(v, `cc[${i}]`), 20)
   const expiresHours = optionalInteger(input.expiresHours, { min: 1, max: 720, label: 'expiresHours' })
 
@@ -4778,6 +4786,12 @@ async function sendRateCon(input: Row, caller: Caller): Promise<Row> {
   }
   const carrierId = optionalString(carrier.carrierId, 100)
   if (!carrierId) throw new Error('That assignment is not a directory carrier; book it with BOOK_CARRIER first')
+  const directoryCarrier = await getById(CARRIER_TABLE_NAME, carrierId)
+  if (!directoryCarrier) throw new Error(`Carrier not found: ${carrierId}`)
+  const standing = mcpPacketStanding(directoryCarrier)
+  if (!standing.completed) {
+    throw new Error(rateConMcpRefusal(String(directoryCarrier.name ?? carrier.carrierName ?? 'This carrier'), standing))
+  }
   const loadId = String(carrier.loadId)
   const shipmentId = String(carrier.shipmentId)
   await requireLiveShipment(shipmentId)
@@ -4820,8 +4834,16 @@ async function sendRateCon(input: Row, caller: Caller): Promise<Row> {
   const documentId = `cdoc-${randomUUID()}`
   const filename = `rate-con-${loadNumber}-v${version}.pdf`
   const messageId = newMessageId(shipmentId, version)
-  const trackingCc = trackingMailbox()
-  const cc = [trackingCc, ...inputCc]
+  const composed = composeRateConCc({
+    to: toInput,
+    extraCc: inputCc,
+    tracking: trackingMailbox(),
+    sender: isEmailAddress(caller.email) ? caller.email : null,
+  })
+  if (!composed.senderCopied && caller.email && !isEmailAddress(caller.email)) {
+    console.warn('[tms-shipment-actions] sender not copied: caller email is not a valid address')
+  }
+  const { to, cc } = composed
   const threadKey = String(shipment.threadKey ?? threadKeyFor(shipmentId))
   const firstName = firstNameFromEmail(caller.email)
 
@@ -4951,7 +4973,8 @@ async function sendRateCon(input: Row, caller: Caller): Promise<Row> {
   }
 
   await writeAudit('LOAD_CARRIER', loadCarrierId, 'SEND_RATE_CON', caller, {
-    loadId, version, to, cc, expiresAt, documentId, s3Key, threadKey, emailStatus: emailOutcome.status,
+    loadId, version, to, cc, senderCc: composed.senderCopied ? caller.email : null, mcpStatus: standing.status,
+    expiresAt, documentId, s3Key, threadKey, emailStatus: emailOutcome.status,
   })
   return readBundle(shipmentId) as unknown as Row
 }

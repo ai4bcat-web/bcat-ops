@@ -213,10 +213,10 @@ describe('the company dashboard', () => {
 
   it('renders one KPI strip per top-level division, company-wide by default', async () => {
     render(<DashboardPage />)
-    await waitFor(() => expect(screen.getAllByRole('button', { name: /BCAT Logistics|Ivan Cartage|Best Care Auto Transport|Company/ })).toHaveLength(4))
+    await waitFor(() => expect(screen.getAllByRole('button', { name: /BCAT Logistics|Ivan Cartage|Best Care Auto Transport|Company/ })).toHaveLength(3))
     expect(screen.getByRole('button', { name: 'BCAT Logistics' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Ivan Cartage' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Best Care Auto Transport' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Best Care Auto Transport' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Company' })).toBeInTheDocument()
   })
 
@@ -247,15 +247,14 @@ describe('the company dashboard', () => {
     expect(within(card).getByText('1')).toBeInTheDocument()
   })
 
-  it('renders empty figures, not zeros, for a division with no data', async () => {
+  it('hides a strip with no data and fills Company from the sum of the others', async () => {
     render(<DashboardPage />)
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Best Care Auto Transport' })).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Ivan Cartage' })).toBeInTheDocument())
 
-    const carShipping = screen.getByRole('button', { name: 'Best Care Auto Transport' }).closest('.tms-business-strip') as HTMLElement
-    // No status pills and no $0.00 for money figures.
-    expect(within(carShipping).queryByText(/\$0\.00/)).not.toBeInTheDocument()
-    expect(within(carShipping).queryByText('0')).not.toBeInTheDocument()
-    expect(within(carShipping).queryByText('0.0%')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Best Care Auto Transport' })).not.toBeInTheDocument()
+    const company = screen.getByRole('button', { name: 'Company' }).closest('.tms-business-strip') as HTMLElement
+    expect(within(company).getByText('$1,500.00')).toBeInTheDocument()
+    expect(within(company).queryByText(/\$0\.00/)).not.toBeInTheDocument()
   })
 
   it('clears the division filter when the active strip heading is clicked again', async () => {

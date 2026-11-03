@@ -16,7 +16,7 @@ import type { TransactWriteItem } from '@aws-sdk/client-dynamodb'
 import { DEFAULT_CHECK_CALL_PLAN } from '../../../src/lib/checkCallPlan'
 import { DEFAULT_MARGIN_TARGET_BPS, DEFAULT_REQUIRED_LOAD_FIELDS } from '../../../src/lib/flowDefaults'
 
-export const SEED_VERSION = 'p8.1'
+export const SEED_VERSION = 'p8.2'
 
 export interface DemoDeps {
   tables: {
@@ -269,6 +269,7 @@ async function seedCarriers(deps: DemoDeps, caller: Caller, counts: Record<strin
       authorityStatus: 'ACTIVE',
       mcNumber: 'MC-123456',
       dotNumber: '2345678',
+      mcpStatus: 'ACCEPTABLE',
       dispatcherName: 'Dispatch',
       dispatcherEmail: 'dispatch@vetted.example',
       dispatcherPhone: '555-0101',

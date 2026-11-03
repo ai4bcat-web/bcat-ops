@@ -13,10 +13,10 @@
  * payroll does not.
  */
 import { useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, Building2, Plus, Trash2 } from 'lucide-react'
+import { Building2, Plus, Trash2 } from 'lucide-react'
 import { RepPicker } from '@/components/RepPicker'
 import {
-  TmsBadge, TmsButton, TmsDialog, TmsField, TmsIconButton, TmsInput, TmsSelect, TmsTabs,
+  TmsAlert, TmsBadge, TmsButton, TmsDialog, TmsField, TmsIconButton, TmsInput, TmsSelect, TmsStatRow, TmsTabs,
 } from '@/features/tms/kit'
 import { MoneyField } from '@/features/directory/components/MoneyField'
 import { useCarriers } from '@/hooks/useCarriers'
@@ -372,15 +372,17 @@ export function BookCarrierDialog({ bundle, isAdmin, busy, onClose, onConfirm, o
             ))}
           </div>
 
-          <dl
-            className="tms-grid tms-grid-4 p-3"
-            style={{ border: '1px solid var(--tms-border)', borderRadius: 'var(--tms-radius)' }}
-          >
-            <Money label="Revenue" cents={revenueCents} />
-            <Money label="Cost" cents={costCents} />
-            <Money label="Profit" cents={profitCents} note={`${(marginBps / 100).toFixed(1)}%`} />
-            <Money label="Top spend" cents={topSpendCents} />
-          </dl>
+          <TmsStatRow
+            compact
+            columns={4}
+            aria-label="Booking money summary"
+            items={[
+              { key: 'revenue', label: 'Revenue', value: money(revenueCents) },
+              { key: 'cost', label: 'Cost', value: money(costCents) },
+              { key: 'profit', label: 'Profit', value: money(profitCents), sub: `${(marginBps / 100).toFixed(1)}%`, tone: profitCents < 0 ? 'bad' : 'default' },
+              { key: 'top', label: 'Top spend', value: money(topSpendCents) },
+            ]}
+          />
 
           <div className="tms-grid tms-grid-2">
             <TmsField label="Quick pay">
@@ -480,9 +482,7 @@ export function BookCarrierDialog({ bundle, isAdmin, busy, onClose, onConfirm, o
             <p className="tms-muted">Nothing in the way.</p>
           )}
           {blocks.map((b) => (
-            <p key={b.key} className="flex items-start gap-2" style={{ color: 'var(--tms-badge-red)' }}>
-              <AlertTriangle size={14} className="mt-0.5 shrink-0" />{b.detail}
-            </p>
+            <TmsAlert key={b.key} tone="red">{b.detail}</TmsAlert>
           ))}
           {warnings.map((w) => (
             <label key={w.key} className="flex items-start gap-2">
@@ -505,13 +505,8 @@ export function BookCarrierDialog({ bundle, isAdmin, busy, onClose, onConfirm, o
   )
 }
 
-function Money({ label, cents, note }: { label: string; cents: number | null; note?: string }) {
-  return (
-    <div>
-      <dt className="text-[11px] font-semibold uppercase tracking-wider tms-muted">{label}</dt>
-      <dd>{cents == null ? '—' : `$${formatCents(cents)}`}{note ? ` (${note})` : ''}</dd>
-    </div>
-  )
+function money(cents: number | null): string {
+  return cents == null ? '—' : `$${formatCents(cents)}`
 }
 
 function Text({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {

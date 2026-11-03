@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { Check, Clock, FileUp, MapPin, Phone, Truck } from 'lucide-react'
+import { Check, Clock, FileUp, Phone } from 'lucide-react'
 import {
   commitUpload, fetchCarrierUpload, requestUpload, TrackingError,
   type CarrierUploadView, type PortalUploadMeta,
@@ -8,6 +8,7 @@ import {
 import { putPresignedFile } from '@/lib/apiClient'
 import { CARRIER_UPLOADABLE_TYPES, DOCUMENT_TYPE_LABELS } from '@/lib/shipmentDocuments'
 import type { ShipmentDocumentType } from '@/types/tms'
+import { TmsAlert, TmsButton, TmsCard, TmsPublicFrame, TmsSelect, TmsTimeline } from '@/features/tms/kit'
 
 const when = (iso: string) => new Date(iso).toLocaleString('en-US', { timeZone: 'America/Chicago', weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })
 
@@ -151,161 +152,127 @@ export function CarrierUploadPage() {
   const busy = stage !== null
 
   return (
-    <div style={{ minHeight: '100vh', background: '#f4f6f8', color: '#15202b', fontFamily: 'system-ui, -apple-system, Segoe UI, sans-serif', padding: '24px 16px' }}>
-      <div style={{ maxWidth: 560, margin: '0 auto' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
-          <Truck size={22} style={{ color: '#1ea8f3' }} />
-          <div>
-            <div style={{ fontSize: 12, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#5c6b7a', fontWeight: 600 }}>
-              {view ? `${view.broker.name} · paperwork` : 'Paperwork'}
-            </div>
-            <div style={{ fontSize: 22, fontWeight: 700 }}>{view ? `Load ${view.loadNumber}` : error ? 'Paperwork' : 'Loading…'}</div>
-          </div>
-        </div>
-
-        {error ? (
-          <div style={{ background: '#fff', border: '1px solid #e3e8ee', borderRadius: 12, padding: 20, fontSize: 15 }}>
-            {error.message}
-          </div>
-        ) : view ? (
-          <div style={{ display: 'grid', gap: 12 }}>
-            {view.stops.length > 0 && (
-              <div style={{ background: '#fff', border: '1px solid #e3e8ee', borderRadius: 12, padding: '16px 18px', display: 'grid', gap: 14 }}>
-                {view.stops.map((stop, i) => (
-                  <div key={`${stop.type}-${i}`} style={{ display: 'grid', gridTemplateColumns: '24px 1fr', gap: 10, alignItems: 'start' }}>
-                    <span style={{ color: '#1ea8f3', marginTop: 2 }}><MapPin size={16} /></span>
-                    <div>
-                      <div style={{ fontSize: 11, letterSpacing: '0.06em', textTransform: 'uppercase', color: '#5c6b7a', fontWeight: 600 }}>{stop.type === 'pickup' ? 'Pickup' : 'Delivery'}</div>
-                      <div style={{ fontSize: 15, fontWeight: 600 }}>{[stop.city, stop.state].filter(Boolean).join(', ') || stop.name || 'Stop'}</div>
-                      {stop.name && <div style={{ fontSize: 13, color: '#5c6b7a', marginTop: 2 }}>{stop.name}</div>}
-                      {stop.appt && <div style={{ fontSize: 13, color: '#5c6b7a', marginTop: 2 }}>Appointment {when(stop.appt)}</div>}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            <div style={{ background: '#fff', border: '1px solid #e3e8ee', borderRadius: 12, padding: '16px 18px' }}>
-              <div style={{ fontSize: 11, letterSpacing: '0.06em', textTransform: 'uppercase', color: '#5c6b7a', fontWeight: 600, marginBottom: 10 }}>We still need</div>
-              <div style={{ display: 'grid', gap: 8 }}>
-                {view.needed.map((need) => (
-                  <div key={need.type} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 15 }}>
-                    <span style={{
-                      width: 20, height: 20, borderRadius: 10, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                      background: need.satisfied ? '#1b9e4b' : '#fff', border: `1px solid ${need.satisfied ? '#1b9e4b' : '#cdd6df'}`, color: '#fff',
-                    }}>
-                      {need.satisfied && <Check size={13} />}
-                    </span>
-                    <span style={{ fontWeight: need.satisfied ? 500 : 600, color: need.satisfied ? '#5c6b7a' : '#15202b', textDecoration: need.satisfied ? 'line-through' : 'none' }}>
-                      {need.label}
-                    </span>
-                  </div>
-                ))}
-                {view.needed.length === 0 && <div style={{ fontSize: 15, color: '#5c6b7a' }}>Nothing outstanding — send anything else you have.</div>}
-              </div>
-            </div>
-
-            <div style={{ background: '#fff', border: '1px solid #e3e8ee', borderRadius: 12, padding: '16px 18px', display: 'grid', gap: 12 }}>
-              <div style={{ fontSize: 11, letterSpacing: '0.06em', textTransform: 'uppercase', color: '#5c6b7a', fontWeight: 600 }}>Send a document</div>
-
-              <label style={{ display: 'grid', gap: 6, fontSize: 13, color: '#5c6b7a', fontWeight: 600 }}>
-                What is it?
-                <select
-                  value={chosenType}
-                  onChange={(e) => setType(e.target.value as ShipmentDocumentType)}
-                  disabled={busy}
-                  style={{ fontFamily: 'inherit', fontSize: 16, padding: '10px 12px', borderRadius: 10, border: '1px solid #cdd6df', background: '#fff', color: '#15202b', fontWeight: 500 }}
-                >
-                  {typeChoices.map((choice) => (
-                    <option key={choice} value={choice}>{DOCUMENT_TYPE_LABELS[choice]}</option>
-                  ))}
-                </select>
-              </label>
-
-              <label style={{ display: 'grid', gap: 6, fontSize: 13, color: '#5c6b7a', fontWeight: 600 }}>
-                Pick the file
-                <input
-                  ref={fileRef}
-                  type="file"
-                  accept={view.acceptedTypes.join(',')}
-                  onChange={pick}
-                  disabled={busy}
-                  style={{ fontFamily: 'inherit', fontSize: 15, padding: '10px 12px', borderRadius: 10, border: '1px solid #cdd6df', background: '#fff' }}
-                />
-              </label>
-              <div style={{ fontSize: 13, color: '#5c6b7a', marginTop: -4 }}>
-                {acceptedWords} up to {mb(view.maxBytes)}.
-              </div>
-
-              <button
-                type="button"
-                onClick={() => void upload()}
-                disabled={busy || !file}
-                style={{
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
-                  width: '100%', padding: '18px', border: 'none', borderRadius: 12,
-                  background: busy || !file ? '#8ac9ef' : '#1ea8f3', color: '#fff',
-                  fontSize: 18, fontWeight: 700, fontFamily: 'inherit',
-                  cursor: busy || !file ? 'default' : 'pointer',
-                }}
-              >
-                <FileUp size={19} />
-                {busy ? 'Sending…' : 'Send this document'}
-              </button>
-
-              {stage && (
-                <div>
-                  <div style={{ height: 6, borderRadius: 3, background: '#e3e8ee', overflow: 'hidden' }}>
-                    <div style={{ height: '100%', width: `${stage.pct}%`, background: '#1ea8f3' }} />
-                  </div>
-                  <div style={{ fontSize: 13, color: '#5c6b7a', marginTop: 6 }}>{stage.label}</div>
-                </div>
-              )}
-
-              {uploadError && (
-                <div style={{ background: '#fff4f4', border: '1px solid #f3c4c4', borderRadius: 12, padding: '14px 16px', fontSize: 14, color: '#8a1f1f' }}>
-                  {uploadError}
-                </div>
-              )}
-
-              {sent && !uploadError && !busy && (
-                <div style={{ background: '#f1fbf4', border: '1px solid #bfe6cc', borderRadius: 12, padding: '14px 16px', fontSize: 14, color: '#14612f' }}>
-                  Thanks — we have {sent}. Somebody will check it.
-                </div>
-              )}
-            </div>
-
-            {view.uploads.length > 0 && (
-              <div style={{ background: '#fff', border: '1px solid #e3e8ee', borderRadius: 12, padding: '16px 18px' }}>
-                <div style={{ fontSize: 11, letterSpacing: '0.06em', textTransform: 'uppercase', color: '#5c6b7a', fontWeight: 600, marginBottom: 10 }}>Received — being reviewed</div>
-                <div style={{ display: 'grid', gap: 10 }}>
-                  {view.uploads.map((up) => (
-                    <div key={up.id} style={{ fontSize: 14 }}>
-                      <div style={{ fontWeight: 600 }}>{up.name}</div>
-                      <div style={{ color: '#5c6b7a', marginTop: 2 }}>
-                        {DOCUMENT_TYPE_LABELS[up.type]} · {when(up.uploadedAt)} · {REVIEW_LABELS[up.reviewStatus] ?? up.reviewStatus}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            <div style={{ fontSize: 13, color: '#5c6b7a', textAlign: 'center', display: 'flex', gap: 6, justifyContent: 'center', alignItems: 'center' }}>
-              <Clock size={14} />
-              This link stops working {when(view.expiresAt)}.
-            </div>
-
-            <div style={{ fontSize: 13, color: '#5c6b7a', textAlign: 'center', display: 'flex', gap: 6, justifyContent: 'center', alignItems: 'center' }}>
+    <TmsPublicFrame
+      brand={view?.broker.name}
+      subtitle="Paperwork"
+      title={view ? `Load ${view.loadNumber}` : error ? 'Paperwork' : 'Loading…'}
+      width="md"
+      footer={
+        <>
+          <span className="tms-public-footer-line">
+            {view && (<><Clock size={14} />This link stops working {when(view.expiresAt)}.</>)}
+          </span>
+          {view && (
+            <span className="tms-public-footer-line">
               <Phone size={14} />
               {view.contactPhone
-                ? <a href={`tel:${view.contactPhone}`} style={{ color: '#1ea8f3' }}>{view.contactPhone}</a>
+                ? <a href={`tel:${view.contactPhone}`}>{view.contactPhone}</a>
                 : 'Call dispatch if anything here looks wrong.'}
-            </div>
-          </div>
-        ) : null}
-      </div>
-    </div>
+            </span>
+          )}
+        </>
+      }
+    >
+      {error ? (
+        <TmsAlert tone="red">{error.message}</TmsAlert>
+      ) : view ? (
+        <div className="tms-public-stack">
+          {view.stops.length > 0 && (
+            <TmsCard title="Stops">
+              <TmsTimeline
+                ariaLabel="Stops"
+                items={view.stops.map((stop, i) => ({
+                  id: `${stop.type}-${i}`,
+                  title: [stop.city, stop.state].filter(Boolean).join(', ') || stop.name || 'Stop',
+                  tag: stop.type === 'pickup' ? 'Pickup' : 'Delivery',
+                  tone: 'blue' as const,
+                  description: (
+                    <>
+                      {stop.name && <div>{stop.name}</div>}
+                      {stop.appt && <div>Appointment {when(stop.appt)}</div>}
+                    </>
+                  ),
+                }))}
+              />
+            </TmsCard>
+          )}
+
+          <section className="tms-card tms-public-section">
+            <div className="tms-public-label">We still need</div>
+            <ul className="tms-public-checklist">
+              {view.needed.map((need) => (
+                <li key={need.type} className="tms-public-check" data-done={need.satisfied ? 'true' : 'false'}>
+                  <span className="tms-public-check-box" aria-hidden="true">
+                    {need.satisfied && <Check size={13} />}
+                  </span>
+                  <span className="tms-public-check-label">{need.label}</span>
+                </li>
+              ))}
+            </ul>
+            {view.needed.length === 0 && <div className="tms-muted">Nothing outstanding — send anything else you have.</div>}
+          </section>
+
+          <section className="tms-card tms-public-section">
+            <div className="tms-public-label">Send a document</div>
+
+            <label className="tms-public-field">
+              What is it?
+              <TmsSelect value={chosenType} onChange={(e) => setType(e.target.value as ShipmentDocumentType)} disabled={busy}>
+                {typeChoices.map((choice) => (
+                  <option key={choice} value={choice}>{DOCUMENT_TYPE_LABELS[choice]}</option>
+                ))}
+              </TmsSelect>
+            </label>
+
+            <label className="tms-public-field">
+              Pick the file
+              <input
+                ref={fileRef}
+                type="file"
+                className="tms-input tms-public-file"
+                accept={view.acceptedTypes.join(',')}
+                onChange={pick}
+                disabled={busy}
+              />
+            </label>
+            <div className="tms-public-sub">{acceptedWords} up to {mb(view.maxBytes)}.</div>
+
+            <TmsButton variant="primary" className="tms-public-cta" onClick={() => void upload()} disabled={busy || !file}>
+              <FileUp size={19} />
+              {busy ? 'Sending…' : 'Send this document'}
+            </TmsButton>
+
+            {stage && (
+              <div>
+                <div className="tms-public-progress"><div style={{ width: `${stage.pct}%` }} /></div>
+                <div className="tms-public-sub">{stage.label}</div>
+              </div>
+            )}
+
+            {uploadError && <TmsAlert tone="red">{uploadError}</TmsAlert>}
+
+            {sent && !uploadError && !busy && (
+              <TmsAlert tone="green">Thanks — we have {sent}. Somebody will check it.</TmsAlert>
+            )}
+          </section>
+
+          {view.uploads.length > 0 && (
+            <TmsCard title="Received — being reviewed">
+              <ul className="tms-public-list">
+                {view.uploads.map((up) => (
+                  <li key={up.id}>
+                    <div className="tms-public-strong">{up.name}</div>
+                    <div className="tms-public-sub">
+                      {DOCUMENT_TYPE_LABELS[up.type]} · {when(up.uploadedAt)} · {REVIEW_LABELS[up.reviewStatus] ?? up.reviewStatus}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </TmsCard>
+          )}
+        </div>
+      ) : null}
+    </TmsPublicFrame>
   )
 }
 

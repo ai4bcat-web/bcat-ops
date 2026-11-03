@@ -15,11 +15,11 @@
  * any paperwork override and its note — because that is the record somebody audits
  * later, and a warning waved through silently might as well never have been raised.
  */
-import { useState, type ReactNode } from 'react'
+import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { ChevronLeft, ShieldAlert } from 'lucide-react'
+import { ChevronLeft } from 'lucide-react'
 import { toast } from 'sonner'
-import { TmsBadge, TmsButton, TmsCard, TmsPage, TmsTabs } from '@/features/tms/kit'
+import { TmsAlert, TmsBadge, TmsButton, TmsCard, TmsMetaList, TmsPage, TmsTabs, TmsTimeline } from '@/features/tms/kit'
 import { useCarrierBill } from '@/hooks/useCarrierBill'
 import { graphqlErrorText, unapproveBill, voidBill } from '@/lib/apiClient'
 import { APPROVAL_WARNING_KEYS, billData } from '@/lib/carrierBill'
@@ -184,7 +184,8 @@ export function BillDetail() {
                   className="rounded-full px-2 py-0.5"
                   style={{
                     border: `1px ${reached ? 'solid' : 'dashed'} ${current ? 'var(--tms-primary)' : 'var(--tms-border)'}`,
-                    color: current ? 'var(--tms-text)' : 'var(--tms-muted)',
+                    background: current ? 'var(--tms-primary-tint)' : undefined,
+                    color: current ? 'var(--tms-primary-ink)' : 'var(--tms-muted)',
                     fontWeight: current ? 600 : 400,
                   }}
                 >
@@ -195,21 +196,24 @@ export function BillDetail() {
           </ol>
         )}
 
-        <dl className="tms-grid tms-grid-4">
-          <Field label="Carrier" value={view.carrier.name || bill.carrierId} />
-          <Field
-            label="Shipment"
-            value={<Link to={`/tms/shipments/${view.shipmentId}`}>{view.shipmentNumber ?? view.shipmentId}</Link>}
-          />
-          <Field label="Load" value={view.loadNumber ?? '—'} />
-          <Field label="Terms" value={view.quickPay ? `Quick pay, net ${view.termsDays}` : `Net ${view.termsDays}`} />
-          <Field label="Bill date" value={formatDay(view.billDate)} />
-          <Field label="Due" value={formatDay(view.dueAt)} />
-          <Field label="Recorded" value={`${formatDateTime(view.recordedAt)} by ${view.recordedBy}`} />
-          <Field label="Balance" value={<span className="font-semibold">{formatCents(view.totals.balanceCents)}</span>} />
-          {view.recordedEarly && <Field label="Recorded early" value="Before the load delivered" />}
-          {view.status === 'VOID' && <Field label="Voided" value={view.voidReason ?? 'No reason recorded'} />}
-        </dl>
+        <TmsMetaList
+          columns={4}
+          items={[
+            { label: 'Carrier', value: view.carrier.name || bill.carrierId },
+            {
+              label: 'Shipment',
+              value: <Link to={`/tms/shipments/${view.shipmentId}`}>{view.shipmentNumber ?? view.shipmentId}</Link>,
+            },
+            { label: 'Load', value: view.loadNumber },
+            { label: 'Terms', value: view.quickPay ? `Quick pay, net ${view.termsDays}` : `Net ${view.termsDays}` },
+            { label: 'Bill date', value: formatDay(view.billDate) },
+            { label: 'Due', value: formatDay(view.dueAt) },
+            { label: 'Recorded', value: `${formatDateTime(view.recordedAt)} by ${view.recordedBy}` },
+            { label: 'Balance', value: <span className="font-semibold">{formatCents(view.totals.balanceCents)}</span> },
+            { label: 'Recorded early', value: 'Before the load delivered', hidden: !view.recordedEarly },
+            { label: 'Voided', value: view.voidReason ?? 'No reason recorded', hidden: view.status !== 'VOID' },
+          ]}
+        />
       </TmsCard>
 
       <TmsTabs tabs={TABS} active={tab} onSelect={setTab} />
@@ -276,24 +280,28 @@ export function BillDetail() {
       {tab === 'payee' && (
         <div className="tms-grid tms-grid-2">
           <TmsCard title="Paid to">
-            <dl className="tms-grid tms-grid-2">
-              <Field label="Payee" value={`${view.payee.name} (${AP_PAYEE_KIND_LABEL[view.payee.kind]})`} />
-              {view.payee.factorName && <Field label="Factor" value={view.payee.factorName} />}
-              <Field label="Method" value={view.payee.method ?? 'Not set'} />
-              <Field label="Account" value={view.payee.accountLast4 ? `•••• ${view.payee.accountLast4}` : '—'} />
-              <Field label="Remit e-mail" value={view.payee.payeeEmail ?? '—'} />
-              {view.payee.address?.city && (
-                <Field
-                  label="Remit to"
-                  value={[view.payee.address.street, view.payee.address.city, view.payee.address.state]
-                    .filter(Boolean).join(', ')}
-                />
-              )}
-            </dl>
+            <TmsMetaList
+              columns={2}
+              items={[
+                { label: 'Payee', value: `${view.payee.name} (${AP_PAYEE_KIND_LABEL[view.payee.kind]})` },
+                { label: 'Factor', value: view.payee.factorName, hidden: !view.payee.factorName },
+                { label: 'Method', value: view.payee.method ?? 'Not set' },
+                { label: 'Account', value: view.payee.accountLast4 ? `•••• ${view.payee.accountLast4}` : null },
+                { label: 'Remit e-mail', value: view.payee.payeeEmail },
+                {
+                  label: 'Remit to',
+                  hidden: !view.payee.address?.city,
+                  value: [view.payee.address?.street, view.payee.address?.city, view.payee.address?.state]
+                    .filter(Boolean).join(', '),
+                },
+              ]}
+            />
             {!view.payee.method && (
-              <p className="mt-2 text-xs" style={{ color: 'var(--tms-badge-orange)' }}>
-                This bill has no payment method on it. Set one on the carrier before approving.
-              </p>
+              <div className="mt-2">
+                <TmsAlert tone="orange">
+                  This bill has no payment method on it. Set one on the carrier before approving.
+                </TmsAlert>
+              </div>
             )}
           </TmsCard>
 
@@ -326,23 +334,24 @@ export function BillDetail() {
             <p>Approved {formatDateTime(view.approvedAt)} by {view.approvedBy ?? 'unknown'}.</p>
           )}
           {acknowledged.length > 0 && (
-            <ul className="mt-2 flex flex-col gap-1 text-xs tms-muted">
-              {acknowledged.map((key) => (
-                <li key={key} className="flex items-start gap-2">
-                  <ShieldAlert size={13} className="mt-0.5 shrink-0" style={{ color: 'var(--tms-badge-orange)' }} />
-                  Acknowledged: {WARNING_LABEL[key] ?? key}
-                </li>
-              ))}
-            </ul>
+            <div className="mt-2">
+              <TmsTimeline
+                compact
+                items={acknowledged.map((key) => ({
+                  id: key,
+                  tone: 'orange',
+                  title: `Acknowledged: ${WARNING_LABEL[key] ?? key}`,
+                }))}
+              />
+            </div>
           )}
           {bill.docsOverrideAt && (
-            <p
-              className="mt-2 p-2 text-xs"
-              style={{ border: '1px solid var(--tms-badge-orange)', borderRadius: 'var(--tms-radius)' }}
-            >
-              Paperwork gate overridden {formatDateTime(bill.docsOverrideAt)} by {bill.docsOverrideBy ?? 'unknown'}
-              {bill.docsOverrideNote ? ` — ${bill.docsOverrideNote}` : ' with no note'}.
-            </p>
+            <div className="mt-2">
+              <TmsAlert tone="orange">
+                Paperwork gate overridden {formatDateTime(bill.docsOverrideAt)} by {bill.docsOverrideBy ?? 'unknown'}
+                {bill.docsOverrideNote ? ` — ${bill.docsOverrideNote}` : ' with no note'}.
+              </TmsAlert>
+            </div>
           )}
         </TmsCard>
       )}
@@ -417,14 +426,5 @@ export function BillDetail() {
         />
       )}
     </TmsPage>
-  )
-}
-
-function Field({ label, value }: { label: string; value: ReactNode }) {
-  return (
-    <div>
-      <dt className="text-[11px] font-semibold uppercase tracking-wider tms-muted">{label}</dt>
-      <dd>{value}</dd>
-    </div>
   )
 }

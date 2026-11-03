@@ -11,7 +11,7 @@
  */
 import { useMemo, useState } from 'react'
 import { Plus, Trash2, AlertTriangle } from 'lucide-react'
-import { TmsBadge, TmsButton, TmsCard, TmsInput, TmsSelect } from '@/features/tms/kit'
+import { TmsAlert, TmsBadge, TmsButton, TmsCard, TmsInput, TmsSelect, TmsStatRow } from '@/features/tms/kit'
 import { Label } from '@/components/ui/label'
 import { MoneyField } from '@/features/directory/components/MoneyField'
 import { computeFinancials, isRateCode } from '@/lib/shipmentCharges'
@@ -153,7 +153,7 @@ export function FinancialLines({ charges, catalog, context, pricing, marginFloor
                       isRate: isRateCode(e.target.value),
                     })
                   }}
-                  className="mt-1 h-9 w-full rounded-md border border-[color:var(--tms-input-border)] bg-[color:var(--tms-input)] px-2 text-sm"
+                  className="mt-1 w-full"
                 >
                   <option value="">— select —</option>
                   {catalog.map((c) => <option key={c.code} value={c.code}>{c.label} ({c.code})</option>)}
@@ -166,7 +166,7 @@ export function FinancialLines({ charges, catalog, context, pricing, marginFloor
                   value={line.calculatedBy}
                   disabled={readOnly}
                   onChange={(e) => update(index, { calculatedBy: e.target.value as ChargeCalc })}
-                  className="mt-1 h-9 w-full rounded-md border border-[color:var(--tms-input-border)] bg-[color:var(--tms-input)] px-2 text-sm"
+                  className="mt-1 w-full"
                 >
                   {CALC_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                 </TmsSelect>
@@ -238,19 +238,12 @@ function TotalsBox({ totals, overTopSpend }: { totals: FinancialTotals; overTopS
     { label: 'Target buy', value: totals.targetBuyCents != null ? `$${formatCents(totals.targetBuyCents)}` : '—' },
   ]
   return (
-    <div data-testid="financial-totals" className="rounded-[var(--tms-radius)] border border-[color:var(--tms-border)] bg-[color:var(--tms-card)] p-3">
-      <dl className="grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-4">
-        {cells.map((c) => (
-          <div key={c.label}>
-            <dt className="text-[10px] uppercase tracking-wider tms-muted">{c.label}</dt>
-            <dd className="text-sm font-medium tabular-nums">{c.value}</dd>
-          </div>
-        ))}
-      </dl>
+    <div data-testid="financial-totals" className="space-y-2">
+      <TmsStatRow compact columns={4} aria-label="Financial totals" items={cells.map((c) => ({ key: c.label, label: c.label, value: c.value }))} />
       {overTopSpend && (
-        <p className="mt-2 flex items-center gap-1 text-xs text-[color:var(--tms-badge-orange)]">
-          <AlertTriangle size={12} /> Carrier cost exceeds top spend — booking will warn.
-        </p>
+        <TmsAlert tone="orange" icon={AlertTriangle}>
+          Carrier cost exceeds top spend — booking will warn.
+        </TmsAlert>
       )}
     </div>
   )

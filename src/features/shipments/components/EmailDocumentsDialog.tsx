@@ -239,7 +239,7 @@ export function EmailDocumentsDialog({
                 href={d.url}
                 target="_blank"
                 rel="noreferrer"
-                className="block truncate font-medium text-primary"
+                className="block truncate font-medium text-[color:var(--tms-primary-ink)]"
               >
                 {d.name}
               </a>

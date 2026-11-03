@@ -10,11 +10,13 @@
  * signed download. The E-mail tab reports exactly that and never claims a send that did
  * not happen.
  */
-import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { ChevronLeft, Copy, Download, ExternalLink, RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
-import { TmsBadge, TmsButton, TmsCard, TmsPage, TmsTabs, statusTone } from '@/features/tms/kit'
+import {
+  TmsBadge, TmsButton, TmsCard, TmsDetailSplit, TmsMetaList, TmsPage, TmsTabs, TmsTimeline, statusTone,
+} from '@/features/tms/kit'
 import { useAuthUser } from '@/hooks/useAuth'
 import { useFactoringItems } from '@/hooks/useFactoringItems'
 import { useInvoice } from '@/hooks/useInvoice'
@@ -185,22 +187,25 @@ export function InvoiceDetail() {
       }
     >
       <TmsCard>
-        <dl className="tms-grid tms-grid-4">
-          <Field label="Customer" value={invoice.customerName ?? invoice.customerId} />
-          <Field label="Bill-to" value={invoice.billTo?.name ?? invoice.customerName ?? '—'} />
-          <Field
-            label="Shipment"
-            value={<Link to={`/tms/shipments/${invoice.shipmentId}`}>{invoice.shipmentNumber ?? invoice.shipmentId}</Link>}
-          />
-          <Field label="Terms" value={`Net ${invoice.termsDays}`} />
-          <Field label="Issued" value={formatDay(invoice.invoiceDate)} />
-          <Field label="Due" value={formatDay(invoice.dueAt)} />
-          <Field label="Total" value={formatCents(invoice.totalCents)} />
-          <Field label="Paid" value={formatCents(invoice.paidCents)} />
-          <Field label="Written off" value={formatCents(invoice.writtenOffCents)} />
-          <Field label="Balance" value={<span className="font-semibold">{formatCents(invoice.balanceCents)}</span>} />
-          {invoice.status === 'VOID' && <Field label="Voided" value={invoice.voidReason ?? 'No reason recorded'} />}
-        </dl>
+        <TmsMetaList
+          columns={4}
+          items={[
+            { label: 'Customer', value: invoice.customerName ?? invoice.customerId },
+            { label: 'Bill-to', value: invoice.billTo?.name ?? invoice.customerName },
+            {
+              label: 'Shipment',
+              value: <Link to={`/tms/shipments/${invoice.shipmentId}`}>{invoice.shipmentNumber ?? invoice.shipmentId}</Link>,
+            },
+            { label: 'Terms', value: `Net ${invoice.termsDays}` },
+            { label: 'Issued', value: formatDay(invoice.invoiceDate) },
+            { label: 'Due', value: formatDay(invoice.dueAt) },
+            { label: 'Total', value: formatCents(invoice.totalCents) },
+            { label: 'Paid', value: formatCents(invoice.paidCents) },
+            { label: 'Written off', value: formatCents(invoice.writtenOffCents) },
+            { label: 'Balance', value: <span className="font-semibold">{formatCents(invoice.balanceCents)}</span> },
+            { label: 'Voided', value: invoice.voidReason ?? 'No reason recorded', hidden: invoice.status !== 'VOID' },
+          ]}
+        />
       </TmsCard>
 
       <TmsTabs tabs={TABS} active={tab} onSelect={setTab} />
@@ -248,11 +253,10 @@ export function InvoiceDetail() {
           <div className="tms-grid tms-grid-2">
             <TmsCard title="References">
               {references.length === 0 && <p className="tms-muted">None on the bill.</p>}
-              <dl className="tms-grid tms-grid-2">
-                {references.map((r) => (
-                  <Field key={`${r.code}:${r.value}`} label={r.label ?? r.code} value={r.value} />
-                ))}
-              </dl>
+              <TmsMetaList
+                columns={2}
+                items={references.map((r) => ({ label: r.label ?? r.code, value: r.value }))}
+              />
             </TmsCard>
 
             <TmsCard title="Attachments">
@@ -272,36 +276,56 @@ export function InvoiceDetail() {
       )}
 
       {tab === 'pdf' && (
-        <TmsCard
-          title="PDF"
-          actions={
-            <>
-              <TmsButton size="sm" aria-label="Re-render invoice PDF" disabled={busy} onClick={runRender}>
-                <RefreshCw size={14} /> Re-render
-              </TmsButton>
-              {pdfUrl && (
-                <TmsButton size="sm" aria-label="Download invoice PDF" onClick={downloadPdf}>
-                  <Download size={14} /> Download
-                </TmsButton>
+        <TmsDetailSplit
+          ratio="6/6"
+          aside={
+            <TmsCard
+              title="PDF"
+              actions={
+                <>
+                  <TmsButton size="sm" aria-label="Re-render invoice PDF" disabled={busy} onClick={runRender}>
+                    <RefreshCw size={14} /> Re-render
+                  </TmsButton>
+                  {pdfUrl && (
+                    <TmsButton size="sm" aria-label="Download invoice PDF" onClick={downloadPdf}>
+                      <Download size={14} /> Download
+                    </TmsButton>
+                  )}
+                </>
+              }
+            >
+              {!pdfKey && (
+                <p className="tms-muted">
+                  No PDF stored yet. Re-render writes one from the invoice snapshot — nothing on the bill changes.
+                </p>
               )}
-            </>
+              {pdfKey && !pdfUrl && <p className="tms-muted">Opening the stored PDF…</p>}
+              {pdfKey && pdfUrl && (
+                // A PDF page is white by nature; the matte stays paper in both themes.
+                <div data-tms-paper className="rounded-[var(--tms-radius)] bg-[color:var(--tms-paper)] p-1">
+                  <iframe
+                    title={`Invoice ${invoice.number} PDF`}
+                    src={pdfUrl}
+                    className="h-[560px] w-full"
+                    style={{ border: '1px solid var(--tms-border)', borderRadius: 'var(--tms-radius)' }}
+                  />
+                </div>
+              )}
+            </TmsCard>
           }
         >
-          {!pdfKey && (
-            <p className="tms-muted">
-              No PDF stored yet. Re-render writes one from the invoice snapshot — nothing on the bill changes.
-            </p>
-          )}
-          {pdfKey && !pdfUrl && <p className="tms-muted">Opening the stored PDF…</p>}
-          {pdfKey && pdfUrl && (
-            <iframe
-              title={`Invoice ${invoice.number} PDF`}
-              src={pdfUrl}
-              className="h-[560px] w-full"
-              style={{ border: '1px solid var(--tms-border)', borderRadius: 'var(--tms-radius)' }}
+          <TmsCard title="Summary">
+            <TmsMetaList
+              columns={1}
+              items={[
+                { label: 'Invoice', value: invoice.number },
+                { label: 'Due', value: formatDay(invoice.dueAt) },
+                { label: 'Total', value: formatCents(invoice.totalCents) },
+                { label: 'Balance', value: <span className="font-semibold">{formatCents(invoice.balanceCents)}</span> },
+              ]}
             />
-          )}
-        </TmsCard>
+          </TmsCard>
+        </TmsDetailSplit>
       )}
 
       {tab === 'email' && (
@@ -319,38 +343,37 @@ export function InvoiceDetail() {
           }
         >
           {notices.length === 0 && <p className="tms-muted">This invoice has never been e-mailed from here.</p>}
-          <ul className="flex flex-col gap-2">
-            {notices.map((notice) => {
+          <TmsTimeline
+            items={notices.map((notice) => {
               const detail = noticeStatusDetail(notice)
-              return (
-                <li
-                  key={notice.id}
-                  className="p-2"
-                  style={{ border: '1px solid var(--tms-border)', borderRadius: 'var(--tms-radius)' }}
-                >
-                  <div className="flex flex-wrap items-center gap-2">
-                    <TmsBadge tone={notice.status === 'SENT' ? 'green' : 'red'}>
-                      {NOTICE_STATUS_LABEL[notice.status]}
-                    </TmsBadge>
-                    <span>{recipientList(notice.to) || 'no recipients'}</span>
-                    <span className="text-xs tms-muted">{formatDateTime(notice.at)}</span>
+              return {
+                id: notice.id,
+                tone: notice.status === 'SENT' ? 'green' : 'red',
+                title: recipientList(notice.to) || 'no recipients',
+                tag: (
+                  <TmsBadge tone={notice.status === 'SENT' ? 'green' : 'red'}>
+                    {NOTICE_STATUS_LABEL[notice.status]}
+                  </TmsBadge>
+                ),
+                at: formatDateTime(notice.at),
+                description: (
+                  <>
+                    {notice.cc && <p className="text-xs tms-muted">cc {recipientList(notice.cc)}</p>}
+                    <p className="mt-1 text-xs">{notice.subject}</p>
+                    {detail && <p className="mt-1 text-xs" style={RED}>{detail}</p>}
                     <TmsButton
                       variant="ghost"
                       size="sm"
-                      className="ml-auto"
                       aria-label={`Copy e-mail body sent ${notice.at}`}
                       onClick={() => copyBody(notice.body)}
                     >
                       <Copy size={13} /> Copy body
                     </TmsButton>
-                  </div>
-                  {notice.cc && <p className="text-xs tms-muted">cc {recipientList(notice.cc)}</p>}
-                  <p className="mt-1 text-xs">{notice.subject}</p>
-                  {detail && <p className="mt-1 text-xs" style={RED}>{detail}</p>}
-                </li>
-              )
+                  </>
+                ),
+              }
             })}
-          </ul>
+          />
           {invoice.markedSentAt && (
             <p className="mt-2 text-xs tms-muted">
               Marked sent by hand on {formatDateTime(invoice.markedSentAt)} by {invoice.markedSentBy ?? 'unknown'}.
@@ -415,12 +438,15 @@ export function InvoiceDetail() {
             </p>
           )}
           {factoringItem && (
-            <dl className="tms-grid tms-grid-4">
-              <Field label="PRO" value={factoringItem.proNumber} />
-              <Field label="Queue status" value={factoringItem.status} />
-              <Field label="OTR status" value={otrStatusLabel(factoringItem.otrStatus) ?? 'Not submitted'} />
-              <Field label="Submitted" value={factoringItem.otrSubmittedAt ? formatDay(factoringItem.otrSubmittedAt) : '—'} />
-            </dl>
+            <TmsMetaList
+              columns={4}
+              items={[
+                { label: 'PRO', value: factoringItem.proNumber },
+                { label: 'Queue status', value: factoringItem.status },
+                { label: 'OTR status', value: otrStatusLabel(factoringItem.otrStatus) ?? 'Not submitted' },
+                { label: 'Submitted', value: factoringItem.otrSubmittedAt ? formatDay(factoringItem.otrSubmittedAt) : null },
+              ]}
+            />
           )}
           <div className="mt-2">
             <TmsButton
@@ -478,14 +504,5 @@ export function InvoiceDetail() {
         />
       )}
     </TmsPage>
-  )
-}
-
-function Field({ label, value }: { label: string; value: ReactNode }) {
-  return (
-    <div>
-      <dt className="text-[11px] font-semibold uppercase tracking-wider tms-muted">{label}</dt>
-      <dd>{value}</dd>
-    </div>
   )
 }

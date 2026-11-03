@@ -11,9 +11,8 @@
  * extending credit, and the desk is allowed to quote past the limit knowing it.
  */
 import { useMemo, useState } from 'react'
-import { AlertTriangle } from 'lucide-react'
 import { toast } from 'sonner'
-import { TmsButton, TmsDialog, TmsField, TmsInput } from '@/features/tms/kit'
+import { TmsAlert, TmsButton, TmsDialog, TmsField, TmsInput } from '@/features/tms/kit'
 import { duplicateQuotes, graphqlErrorText, type DuplicateQuotesResult } from '@/lib/apiClient'
 import { formatCents } from '@/lib/invoiceBuild'
 import type { QuoteRecord } from '@/types/tms'
@@ -144,21 +143,13 @@ export function DuplicateQuoteDialog({ quote, open, onOpenChange, onDone }: {
             {result.quotes.length} quote{result.quotes.length === 1 ? '' : 's'} created:{' '}
             {result.quotes.map((row) => row.id).join(', ')}. None of them carries a link until it is sent.
           </p>
-          <div
-            style={{
-              borderRadius: 'var(--tms-radius)',
-              border: `1px solid ${result.exposure.overLimit ? 'var(--tms-badge-orange)' : 'var(--tms-border)'}`,
-              background: result.exposure.overLimit ? 'rgba(255,136,10,0.12)' : 'transparent',
-              padding: 8,
-            }}
-          >
-            <p style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 12, margin: 0 }}>
-              {result.exposure.overLimit && <AlertTriangle size={14} style={{ marginTop: 2, flexShrink: 0, color: 'var(--tms-badge-orange)' }} />}
+          <TmsAlert tone={result.exposure.overLimit ? 'orange' : 'blue'} icon={result.exposure.overLimit ? undefined : false} role="status">
+            <p style={{ fontSize: 12, margin: 0 }}>
               Projected exposure {formatCents(result.exposure.projectedCents)}
               {limitCents != null && ` against a ${formatCents(limitCents)} limit`}
               {result.exposure.overLimit && ' — conversion will be refused until the book comes down.'}
             </p>
-          </div>
+          </TmsAlert>
         </div>
       )}
     </TmsDialog>

@@ -16,7 +16,9 @@ import {
   TmsButton,
   TmsCard,
   TmsDialog,
+  TmsMetaList,
   TmsTextarea,
+  TmsTimeline,
   statusTone,
 } from '@/features/tms/kit'
 import { useShipment } from '@/hooks/useShipment'
@@ -42,12 +44,13 @@ const STEP_LABELS: Record<WorkflowStep['status'], string> = {
   SKIPPED: 'skipped',
 }
 
-function Fact({ label, value }: { label: string; value: string | null | undefined }) {
+function Facts({ items }: { items: Array<[label: string, value: string | null | undefined]> }) {
   return (
-    <div>
-      <dt className="tms-field-label">{label}</dt>
-      <dd>{value && value.trim() ? value : '—'}</dd>
-    </div>
+    <TmsMetaList
+      columns={4}
+      dense
+      items={items.map(([label, value]) => ({ label, value: value && value.trim() ? value : null }))}
+    />
   )
 }
 
@@ -58,20 +61,23 @@ function StepsRail({ run }: { run: WorkflowRunRecord }) {
 
   return (
     <TmsCard title="Steps">
-      <ol className="flex flex-wrap items-start gap-4" data-testid="steps-rail">
-        {stepsOf(run.agent).map((key) => {
+      <TmsTimeline
+        data-testid="steps-rail"
+        ariaLabel="Run steps"
+        items={stepsOf(run.agent).map((key) => {
           const step = recorded.get(key)
-          return (
-            <li key={key} className="min-w-[8rem]">
-              <div className="text-xs font-medium">{key.replace(/_/g, ' ').toLowerCase()}</div>
-              {step
-                ? <TmsBadge tone={STEP_TONES[step.status]}>{STEP_LABELS[step.status]}</TmsBadge>
-                : <TmsBadge tone="gray">pending</TmsBadge>}
-              <div className="tms-muted text-xs">{step?.ms != null ? `${step.ms} ms` : '—'}</div>
-            </li>
-          )
+          return {
+            id: key,
+            title: key.replace(/_/g, ' ').toLowerCase(),
+            tag: step
+              ? <TmsBadge tone={STEP_TONES[step.status]}>{STEP_LABELS[step.status]}</TmsBadge>
+              : <TmsBadge tone="gray">pending</TmsBadge>,
+            at: step?.ms != null ? `${step.ms} ms` : '—',
+            state: !step ? 'upcoming' : step.status === 'RUNNING' ? 'current' : 'done',
+            tone: step?.status === 'FAILED' ? 'red' : step?.status === 'SKIPPED' ? 'gray' : undefined,
+          }
         })}
-      </ol>
+      />
       {failed ? (
         <p className="tms-field-error mt-3 text-sm" data-testid="failed-step-detail">
           {failed.key}: {failed.detail ?? failed.note ?? run.error ?? 'The step failed without a message.'}
@@ -183,12 +189,12 @@ function LinkedShipmentCard({ shipmentId }: { shipmentId: string }) {
       actions={<Link className="tms-btn tms-btn-secondary tms-btn-sm" to={`/tms/shipments/${shipmentId}`}>Open shipment</Link>}
     >
       {loading && !shipment ? <p className="tms-muted">Loading…</p> : (
-        <dl className="tms-grid tms-grid-4">
-          <Fact label="Number" value={shipment?.number} />
-          <Fact label="Status" value={shipment?.status} />
-          <Fact label="Customer" value={shipment?.customerName} />
-          <Fact label="Created" value={shipment?.createdAt ? formatDateTime(shipment.createdAt) : null} />
-        </dl>
+        <Facts items={[
+          ['Number', shipment?.number],
+          ['Status', shipment?.status],
+          ['Customer', shipment?.customerName],
+          ['Created', shipment?.createdAt ? formatDateTime(shipment.createdAt) : null],
+        ]} />
       )}
     </TmsCard>
   )
@@ -225,16 +231,16 @@ export function RunTrace({ runId }: { runId: string }) {
           <TmsButton size="sm" onClick={() => setDismissing('')}>Dismiss</TmsButton>
         )}
       >
-        <dl className="tms-grid tms-grid-4">
-          <Fact label="Agent" value={descriptor?.label ?? run.agent} />
-          <Fact label="Inbox role" value={run.inboxRole} />
-          <Fact label="From" value={from} />
-          <Fact label="Subject" value={run.subject} />
-          <Fact label="Received" value={run.receivedAt ? formatDateTime(run.receivedAt) : null} />
-          <Fact label="Attempts" value={String(run.attempts ?? 0)} />
-          <Fact label="Duration" value={duration} />
-          <Fact label="Status" value={run.status} />
-        </dl>
+        <Facts items={[
+          ['Agent', descriptor?.label ?? run.agent],
+          ['Inbox role', run.inboxRole],
+          ['From', from],
+          ['Subject', run.subject],
+          ['Received', run.receivedAt ? formatDateTime(run.receivedAt) : null],
+          ['Attempts', String(run.attempts ?? 0)],
+          ['Duration', duration],
+          ['Status', run.status],
+        ]} />
         {cost ? <p className="tms-muted mt-3 text-xs" data-testid="model-cost">{cost}</p> : null}
         {run.bodyPreview ? <p className="mt-3 text-sm">{run.bodyPreview}</p> : null}
         {run.dismissReason ? (

@@ -11,10 +11,10 @@ export interface TmsTabsProps {
   className?: string
 }
 
-/** Plain text tabs with a yellow underline on the active one (reference §4). */
+/** Plain text tabs with a green underline on the active one (reference §4). */
 export function TmsTabs({ tabs, active, onSelect, className }: TmsTabsProps) {
   return (
-    <div className={`tms-tabs${className ? ` ${className}` : ''}`} role="tablist">
+    <div className={`tms-tabs${tabs.length >= 8 ? ' tms-tabs-many' : ''}${className ? ` ${className}` : ''}`} role="tablist">
       {tabs.map((tab) => (
         <button
           key={tab.key}

@@ -13,6 +13,7 @@ import { marshall, unmarshall } from '@aws-sdk/util-dynamodb'
 // The rule the public offer page shows a carrier, used here to answer a link the
 // way a carrier would rather than by hard-coding the number we hope is on it.
 import { ourOfferCents } from '../../../src/lib/quotes'
+import { RATE_CON_MCP_ERROR_PREFIX } from '../../../src/lib/mcpPacket'
 
 type Row = Record<string, unknown>
 
@@ -2345,6 +2346,7 @@ describe('carrier booking', () => {
       authorityStatus: 'ACTIVE',
       mcNumber: '123456',
       dotNumber: '77',
+      mcpStatus: 'ACCEPTABLE',
       dispatcherEmail: 'dispatch@swift.com',
       paymentTermsDays: 30,
       insurancePolicies: [
@@ -2613,6 +2615,90 @@ describe('carrier booking', () => {
     await expect(
       call('SEND_RATE_CON', { loadCarrierId, pdfBase64: PDF_BASE64, to: ['dispatch@swift.com\r\nBcc: x@y.com'] }),
     ).rejects.toThrow(/email address/)
+  })
+
+  describe('MyCarrierPackets gate and sender cc', () => {
+    async function booked(carrierExtra: Row = {}): Promise<{ shipmentId: string; loadCarrierId: string }> {
+      const { shipmentId, loadId } = await bookableLoad()
+      seedCarrier(carrierExtra)
+      seedCarrierDocs()
+      await book(loadId)
+      return { shipmentId, loadCarrierId: String(activeCarrier().id) }
+    }
+    const send = (loadCarrierId: string, extra: Row = {}, identity: unknown = DISPATCHER) =>
+      call('SEND_RATE_CON', { loadCarrierId, pdfBase64: PDF_BASE64, to: ['dispatch@swift.com'], ...extra }, identity)
+    const rawMime = () => {
+      const sesCall = sesSend.mock.calls[0][0] as { input: { Content: { Raw: { Data: Uint8Array } }; Destination: { CcAddresses: string[] } } }
+      return { raw: new TextDecoder().decode(sesCall.input.Content.Raw.Data), cc: sesCall.input.Destination.CcAddresses }
+    }
+    const sendAudit = () => {
+      const row = [...table(TABLES.audit).values()].find((r) => r.action === 'SEND_RATE_CON')!
+      return JSON.parse(String(row.changes))
+    }
+
+    it.each([undefined, 'INVITED', 'IN_PROGRESS', 'NOT_INVITED', 'Ready'])(
+      'refuses a carrier whose mcpStatus is %s and writes nothing',
+      async (mcpStatus) => {
+        const { loadCarrierId } = await booked({ mcpStatus })
+        await expect(send(loadCarrierId)).rejects.toThrow(
+          new RegExp(`^${RATE_CON_MCP_ERROR_PREFIX} SWIFT TRANSPORTATION`),
+        )
+        expect(s3Send).not.toHaveBeenCalled()
+        expect(sesSend).not.toHaveBeenCalled()
+        expect(table(TABLES.carrier).get(loadCarrierId)!.rateConToken ?? null).toBeNull()
+        expect(table(TABLES.carrier).get(loadCarrierId)!.rateConStatus ?? 'NOT_SENT').toBe('NOT_SENT')
+        expect([...table(TABLES.carrierDoc).values()].filter((d) => d.type === 'RATE_CON')).toHaveLength(0)
+        expect(table(TABLES.message).size).toBe(0)
+      },
+    )
+
+    it.each(['ACCEPTABLE', ' pending_review ', 'MODERATE'])('sends for completed status %s', async (mcpStatus) => {
+      const { loadCarrierId } = await booked({ mcpStatus })
+      await send(loadCarrierId)
+      expect(table(TABLES.carrier).get(loadCarrierId)!.rateConStatus).toBe('SENT')
+    })
+
+    it('copies the sender once, after the tracking mailbox', async () => {
+      const { loadCarrierId } = await booked()
+      await send(loadCarrierId)
+      const { raw, cc } = rawMime()
+      expect(raw).toContain('Cc: ai4bcat+tracking@gmail.com, dispatch@bcatcorp.com')
+      expect(cc).toEqual(['ai4bcat+tracking@gmail.com', 'dispatch@bcatcorp.com'])
+      const message = [...table(TABLES.message).values()][0]
+      expect(message.cc).toBe('ai4bcat+tracking@gmail.com, dispatch@bcatcorp.com')
+      expect(sendAudit()).toMatchObject({ senderCc: 'dispatch@bcatcorp.com', mcpStatus: 'ACCEPTABLE' })
+    })
+
+    it('dedupes typed cc against itself, the tracking mailbox and the sender', async () => {
+      const { loadCarrierId } = await booked()
+      await send(loadCarrierId, {
+        cc: ['Dispatch@BCATCorp.com', 'x@y.com', 'X@Y.COM', 'ai4bcat+tracking@gmail.com'],
+      })
+      expect(rawMime().cc).toEqual(['ai4bcat+tracking@gmail.com', 'Dispatch@BCATCorp.com', 'x@y.com'])
+    })
+
+    it('does not cc anyone who is already a to recipient', async () => {
+      const { loadCarrierId } = await booked()
+      await send(loadCarrierId, { to: ['dispatch@swift.com', 'Dispatch@bcatcorp.com'], cc: ['DISPATCH@swift.com', 'x@y.com'] })
+      expect(rawMime().cc).toEqual(['ai4bcat+tracking@gmail.com', 'x@y.com'])
+      expect(sendAudit().senderCc).toBeNull()
+    })
+
+    it('refuses an invalid typed cc before sending anything', async () => {
+      const { loadCarrierId } = await booked()
+      await expect(send(loadCarrierId, { cc: ['not an email'] })).rejects.toThrow(/cc\[0\] must be an email address/)
+      expect(sesSend).not.toHaveBeenCalled()
+    })
+
+    it('sends without a sender entry when the caller claim is not an email address', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+      const { loadCarrierId } = await booked()
+      const odd = { ...DISPATCHER, claims: { ...DISPATCHER.claims, email: 'ops@localhost' } }
+      await send(loadCarrierId, {}, odd)
+      expect(rawMime().cc).toEqual(['ai4bcat+tracking@gmail.com'])
+      expect(sendAudit().senderCc).toBeNull()
+      warn.mockRestore()
+    })
   })
 
   it('refuses to send the rate con when driver or dispatcher fields are missing', async () => {
@@ -6291,7 +6377,7 @@ describe('Step P demo actions', () => {
     table('UserProfile-test').set('sub-owner', { id: 'sub-owner', role: 'CARRIER_REP' })
     const result = await call('SEED_DEMO_DATA', {}, OWNER)
 
-    expect(result.seedVersion).toBe('p8.1')
+    expect(result.seedVersion).toBe('p8.2')
     expect(result.created).toBeGreaterThan(0)
     expect(table(TABLES.demo).size).toBeGreaterThan(0)
     expect(table(TABLES.customer).size).toBeGreaterThan(0)
@@ -6306,7 +6392,7 @@ describe('Step P demo actions', () => {
 
     const result = await call('RESET_DEMO_DATA', {}, OWNER)
 
-    expect(result.seedVersion).toBe('p8.1')
+    expect(result.seedVersion).toBe('p8.2')
     expect(table(TABLES.shipment).size).toBeGreaterThanOrEqual(shipmentCount)
     expect(table(TABLES.shipment).size).toBeGreaterThan(0)
   })

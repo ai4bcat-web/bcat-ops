@@ -19,6 +19,7 @@ import type { LucideIcon } from 'lucide-react'
 // Kit files are imported directly, never through `./kit`: the barrel re-exports TmsShell.
 import { TmsCountBadge } from './kit/TmsCountBadge'
 import { isPathActive } from './navActive'
+import { personName } from '@/lib/roles'
 import { useTmsCompany } from './tmsCompany'
 import { useTmsTheme } from './tmsTheme'
 import './theme.css'
@@ -487,7 +488,8 @@ export function TmsShell({
     [onSearch]
   )
 
-  const userName = user.name?.trim() || user.email.split('@')[0] || user.email
+  const userName = personName({ name: user.name, email: user.email }, 'Team member')
+  const shownEmail = user.email.includes('@') ? user.email : ''
   const dark = theme === 'dark'
   const rowProps = { activePath, shipmentViews, badgeCounts, trackedLoads }
 
@@ -521,11 +523,11 @@ export function TmsShell({
         </nav>
 
         <div className="tms-sidebar-foot">
-          <div className="tms-user-card" title={user.email}>
+          <div className="tms-user-card" title={shownEmail || userName}>
             <span className="tms-user-avatar" aria-hidden="true">{user.initial}</span>
             <span className="tms-user-text">
               <span className="tms-user-name">{userName}</span>
-              <span className="tms-user-email">{user.email}</span>
+              {shownEmail ? <span className="tms-user-email">{shownEmail}</span> : null}
             </span>
           </div>
           {onLogout ? (

@@ -7,7 +7,10 @@ import {
   TmsCard,
   TmsDialog,
   TmsField,
+  TmsEmptyState,
   TmsInput,
+  TmsMetaList,
+  TmsProfileHeader,
   TmsSelect,
   TmsTabs,
   TmsTextarea,
@@ -171,12 +174,7 @@ export function CustomerProfile({
       open
       onOpenChange={(v) => { if (!v) onClose() }}
       className="tms-dialog-xl"
-      title={
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-          {customer.name}
-          {customer.status && <TmsBadge tone={statusTones[customer.status]}>{customer.status}</TmsBadge>}
-        </span>
-      }
+      title="Customer profile"
       footer={
         <>
           <TmsButton onClick={onClose}>Cancel</TmsButton>
@@ -185,20 +183,28 @@ export function CustomerProfile({
       }
     >
       <div style={{ display: 'grid', gap: 14 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <p className="tms-muted" style={{ fontSize: 12, margin: 0 }}>
-            Board: {boardTab(effectiveStatus)} · effective status {effectiveStatus}
-          </p>
-          <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-            {canActivate && (
-              <TmsButton variant="primary" size="sm" onClick={() => setStatusAction('activate')}>
-                {customer.status === 'PENDING' ? 'Approve' : 'Activate'}
-              </TmsButton>
-            )}
-            {canClose && <TmsButton size="sm" onClick={() => setStatusAction('close')}>Close lead</TmsButton>}
-            <TmsButton size="sm" onClick={() => setStatusAction('deactivate')}>Deactivate</TmsButton>
-          </div>
-        </div>
+        <TmsProfileHeader
+          name={customer.name}
+          as="h3"
+          subtitle={`Board: ${boardTab(effectiveStatus)} · effective status ${effectiveStatus}`}
+          chips={customer.status ? <TmsBadge tone={statusTones[customer.status]}>{customer.status}</TmsBadge> : undefined}
+          actions={
+            <>
+              {canActivate && (
+                <TmsButton variant="primary" size="sm" onClick={() => setStatusAction('activate')}>
+                  {customer.status === 'PENDING' ? 'Approve' : 'Activate'}
+                </TmsButton>
+              )}
+              {canClose && <TmsButton size="sm" onClick={() => setStatusAction('close')}>Close lead</TmsButton>}
+              <TmsButton size="sm" onClick={() => setStatusAction('deactivate')}>Deactivate</TmsButton>
+            </>
+          }
+          columns={[
+            { title: 'MC', rows: [{ label: 'MC #', value: customer.mcNumber || '—' }, { label: 'DOT #', value: customer.dotNumber || '—' }] },
+            { title: 'Billing', rows: [{ label: 'Terms', value: customer.paymentTermsDays != null ? `Net ${customer.paymentTermsDays}` : '—' }] },
+            { title: 'Account owner', rows: [{ value: accountOwnerIds.length ? `${accountOwnerIds.length} assigned` : 'Unassigned' }] },
+          ]}
+        />
 
         <TmsTabs tabs={tabs} active={tab} onSelect={setTab} />
 
@@ -296,22 +302,19 @@ export function CustomerProfile({
 
         {tab === 'locations' && (
           <div style={{ display: 'grid', gap: 8 }}>
-            {matchedLocations.length === 0 && <p className="tms-muted" style={{ fontSize: 13 }}>No linked locations.</p>}
+            {matchedLocations.length === 0 && <TmsEmptyState compact title="No linked locations." message="" />}
             {matchedLocations.map((l) => (
-              <div key={l.id} className="tms-card">
-                <div className="tms-card-body">
-                  <div style={{ fontWeight: 600 }}>{l.name}</div>
-                  <div className="tms-muted" style={{ fontSize: 12 }}>
-                    {[l.street, [l.city, l.state].filter(Boolean).join(', '), l.zip, l.country].filter(Boolean).join(' · ')}
-                  </div>
-                  {l.facilityType && <div style={{ marginTop: 4 }}><TmsBadge tone="blue">{l.facilityType}</TmsBadge></div>}
-                  {l.apptContactEmail && (
-                    <div className="tms-muted" style={{ fontSize: 12, marginTop: 4 }}>
-                      Appt: {[l.apptContactName, l.apptContactEmail, l.apptContactPhone].filter(Boolean).join(' · ')}
-                    </div>
-                  )}
-                </div>
-              </div>
+              <TmsCard key={l.id} title={l.name}>
+                <TmsMetaList
+                  columns={2}
+                  dense
+                  items={[
+                    { label: 'Address', value: [l.street, [l.city, l.state].filter(Boolean).join(', '), l.zip, l.country].filter(Boolean).join(' · '), wide: true },
+                    { label: 'Facility', value: l.facilityType ? <TmsBadge tone="blue">{l.facilityType}</TmsBadge> : null, hidden: !l.facilityType },
+                    { label: 'Appt', value: [l.apptContactName, l.apptContactEmail, l.apptContactPhone].filter(Boolean).join(' · '), hidden: !l.apptContactEmail },
+                  ]}
+                />
+              </TmsCard>
             ))}
           </div>
         )}

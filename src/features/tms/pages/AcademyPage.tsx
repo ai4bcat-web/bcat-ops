@@ -62,7 +62,7 @@ function Spans({ spans }: { spans: MdSpan[] }) {
             ? <Link key={i} to={`/tms/academy/${span.href.replace(/\.md$/, '')}`}>{span.text}</Link>
             : <a key={i} href={span.href} target="_blank" rel="noreferrer">{span.text}</a>
         }
-        if (span.code) return <code key={i} className="tms-academy-code">{span.text}</code>
+        if (span.code) return <code key={i} className="tms-code tms-code-inline">{span.text}</code>
         if (span.bold) return <strong key={i}>{span.text}</strong>
         if (span.italic) return <em key={i}>{span.text}</em>
         return <Fragment key={i}>{span.text}</Fragment>
@@ -77,29 +77,26 @@ function Blocks({ blocks }: { blocks: MdBlock[] }) {
       {blocks.map((block, i) => {
         if (block.kind === 'heading') {
           const Tag = (block.level <= 2 ? 'h2' : block.level === 3 ? 'h3' : 'h4') as 'h2' | 'h3' | 'h4'
-          return <Tag key={i} style={{ marginTop: 20, marginBottom: 8 }}><Spans spans={block.spans} /></Tag>
+          return <Tag key={i}><Spans spans={block.spans} /></Tag>
         }
         if (block.kind === 'paragraph') {
-          return <p key={i} style={{ marginBottom: 10, lineHeight: 1.6 }}><Spans spans={block.spans} /></p>
+          return <p key={i}><Spans spans={block.spans} /></p>
         }
         if (block.kind === 'list') {
           const Tag = block.ordered ? 'ol' : 'ul'
           return (
-            <Tag key={i} style={{ margin: '0 0 12px 20px', lineHeight: 1.6 }}>
+            <Tag key={i}>
               {block.items.map((item, j) => <li key={j}><Spans spans={item} /></li>)}
             </Tag>
           )
         }
         if (block.kind === 'code') {
           return (
-            <pre key={i} style={{
-              background: 'var(--tms-card)', border: '1px solid var(--tms-border)',
-              borderRadius: 'var(--tms-radius)', padding: 12, overflowX: 'auto', marginBottom: 12,
-            }}><code>{block.text}</code></pre>
+            <pre key={i} className="tms-code"><code>{block.text}</code></pre>
           )
         }
         return (
-          <table key={i} className="tms-table" style={{ marginBottom: 12 }}>
+          <table key={i} className="tms-table">
             <thead>
               <tr>{block.header.map((cell, j) => <th key={j}><Spans spans={cell} /></th>)}</tr>
             </thead>
@@ -151,7 +148,7 @@ function AskPanel() {
 
   return (
     <TmsCard title="Ask the Academy">
-      <p style={{ color: 'var(--tms-muted)', marginBottom: 12 }}>
+      <p className="tms-muted tms-academy-lede">
         Ask a question about BCAT Ops and the TMS. The assistant answers only from the
         Academy articles shown below and cites the ones it used.
       </p>
@@ -161,20 +158,19 @@ function AskPanel() {
           onChange={(e) => setQuestion(e.target.value)}
           placeholder="e.g. How do I release a shipment to accounting?"
           rows={3}
-          style={{ width: '100%' }}
         />
       </TmsField>
-      <div style={{ marginTop: 12 }}>
+      <div className="tms-academy-ask-actions">
         <TmsButton onClick={submit} disabled={!canAsk}>
           Ask
         </TmsButton>
       </div>
-      {error ? <p style={{ color: 'var(--ds-red)', marginTop: 12 }}>{error}</p> : null}
+      {error ? <p className="tms-field-error tms-academy-error">{error}</p> : null}
       {answer ? (
-        <div style={{ marginTop: 16, padding: 12, background: 'var(--tms-card)', borderRadius: 'var(--tms-radius)' }}>
-          <p style={{ margin: 0, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{answer.answer}</p>
+        <div className="tms-academy-answer">
+          <p>{answer.answer}</p>
           {answer.citations.length > 0 ? (
-            <div style={{ marginTop: 10, fontSize: 12, color: 'var(--tms-muted)' }}>
+            <div className="tms-academy-cited">
               Cited: {answer.citations.map((slug, i) => (
                 <span key={slug}>
                   {i > 0 ? ', ' : ''}
@@ -201,7 +197,7 @@ export function AcademyPage() {
             title="That article is not in the Academy."
             message="It may have been renamed. The index lists everything that ships with this build."
           />
-          <p style={{ marginTop: 12 }}><Link to="/tms/academy">Back to the Academy</Link></p>
+          <p className="tms-academy-back"><Link to="/tms/academy">Back to the Academy</Link></p>
         </TmsPage>
       )
     }
@@ -219,19 +215,19 @@ export function AcademyPage() {
 
   return (
     <TmsPage title={<>Academy <TmsBadge tone="purple">BETA</TmsBadge></>}>
-      <div style={{ display: 'grid', gap: 16 }}>
+      <div className="tms-academy-index">
         <AskPanel />
         <TmsCard title={`${ARTICLES.length} articles`}>
-          <p style={{ color: 'var(--tms-muted)', marginBottom: 14 }}>
+          <p className="tms-muted tms-academy-lede">
             How this TMS works, written against the build you are running.
           </p>
-          <ul style={{ listStyle: 'none', display: 'grid', gap: 10 }}>
+          <ul className="tms-academy-list">
             {ARTICLES.map((article) => (
               <li key={article.slug}>
-                <Link to={`/tms/academy/${article.slug}`} style={{ fontWeight: 600 }}>{article.title}</Link>
-                {article.category ? <span style={{ color: 'var(--tms-muted)', marginLeft: 8, fontSize: 12 }}>{article.category}</span> : null}
+                <Link to={`/tms/academy/${article.slug}`} className="tms-academy-link">{article.title}</Link>
+                {article.category ? <span className="tms-muted tms-academy-category">{article.category}</span> : null}
                 {article.summary ? (
-                  <div style={{ color: 'var(--tms-muted)', marginTop: 2, lineHeight: 1.5 }}>{article.summary}</div>
+                  <div className="tms-muted tms-academy-summary">{article.summary}</div>
                 ) : null}
               </li>
             ))}

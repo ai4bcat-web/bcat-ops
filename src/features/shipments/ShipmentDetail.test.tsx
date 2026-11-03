@@ -279,7 +279,7 @@ describe('ShipmentDetail tabs', () => {
     expect(screen.getByRole('tab', { name: 'Overview' }).getAttribute('aria-selected')).toBe('true')
     expect(screen.getByText('Acme Freight')).toBeTruthy()
     expect(screen.getByText('Chicago, IL')).toBeTruthy()
-    expect(screen.getByText('$2000.00')).toBeTruthy()
+    expect(within(screen.getByText('Revenue').closest('.tms-kpi-card') as HTMLElement).getByText('$2000.00')).toBeTruthy()
     // Previously the Details tab: one record, one set of facts.
     expect(screen.getByText('S000001-1')).toBeTruthy()
     expect(screen.getByText("53' Dry Van")).toBeTruthy()

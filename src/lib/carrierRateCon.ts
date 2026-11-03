@@ -3,6 +3,7 @@
  *
  * Built in the browser from the shipment bundle, mailed as a PDF attachment by
  * SEND_RATE_CON, and stamped with the typed signature by the public signing page.
+ * The header carries the division logo (on a white plate) when it has a PNG/JPEG one.
  * The layout follows the driver-pay statement (`src/lib/payPdf.ts`): jsPDF in
  * points on letter stock, a black header band, `jspdf-autotable` for the grids.
  *
@@ -17,6 +18,7 @@ import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib'
 import type { CarrierRecord, Division, LoadCarrierRecord, RateConRequiredField } from '@/types/tms'
+import { fetchDivisionLogoDataUrl } from '@/lib/divisionLogo'
 
 /** `jspdf-autotable` writes the finished table's geometry back onto the doc it drew into. */
 interface AutoTabled { lastAutoTable: { finalY: number } }
@@ -140,21 +142,75 @@ function brokerLines(division: Division | null): { name: string; ids: string; re
   return { name, ids, remit }
 }
 
+export interface BuildRateConOptions {
+  /** Resolves a Division.logoKey to a PNG/JPEG data URL, or null. Defaults to the S3 loader. */
+  loadLogo?: (logoKey: string) => Promise<string | null>
+}
+
+interface HeaderLogo { dataUrl: string; format: 'PNG' | 'JPEG'; width: number; height: number }
+
+const LOGO_BOX_W = 150
+const LOGO_BOX_H = 38
+
+/**
+ * The division logo fitted into its box, or null. Every failure (no key, loader null or
+ * throw, undecodable or non-PNG/JPEG image) is the same fallback: the text header.
+ * A logo problem must never fail a send.
+ */
+async function resolveLogo(
+  doc: jsPDF,
+  division: Division | null,
+  loadLogo: (logoKey: string) => Promise<string | null>,
+): Promise<HeaderLogo | null> {
+  const logoKey = division?.logoKey
+  if (!logoKey) return null
+  try {
+    const dataUrl = await loadLogo(logoKey)
+    if (!dataUrl) return null
+    const props = doc.getImageProperties(dataUrl)
+    const format = String(props.fileType).toUpperCase()
+    if ((format !== 'PNG' && format !== 'JPEG') || !(props.width > 0) || !(props.height > 0)) return null
+    const scale = Math.min(LOGO_BOX_W / props.width, LOGO_BOX_H / props.height)
+    return { dataUrl, format, width: props.width * scale, height: props.height * scale }
+  } catch {
+    return null
+  }
+}
+
 /** Black band at the top of every page: who is tendering, which load, which leg. */
-function drawHeader(doc: jsPDF, input: RateConInput, legIndex: number, legCount: number): void {
+function drawHeader(doc: jsPDF, input: RateConInput, legIndex: number, legCount: number, logo: HeaderLogo | null): void {
   const W = doc.internal.pageSize.getWidth()
   const broker = brokerLines(input.division)
   doc.setFillColor(0, 0, 0)
   doc.rect(0, 0, W, 70, 'F')
   doc.setTextColor(255, 255, 255)
   doc.setFont('helvetica', 'bold')
-  doc.setFontSize(16)
-  doc.text(broker.name, M, 34)
-  if (broker.ids) {
-    doc.setFont('helvetica', 'normal')
-    doc.setFontSize(9)
-    doc.setTextColor(190, 200, 215)
-    doc.text(broker.ids, M, 50)
+  if (logo) {
+    // Brand marks are usually dark: sit it on a white plate inside the black band. The
+    // fixed alias embeds the image once however many pages draw the header.
+    const plateW = logo.width + 16
+    doc.setFillColor(255, 255, 255)
+    doc.roundedRect(M - 8, 10, plateW, 50, 5, 5, 'F')
+    doc.addImage(logo.dataUrl, logo.format, M, 35 - logo.height / 2, logo.width, logo.height, 'division-logo')
+    const x = M + plateW + 10
+    doc.setFontSize(11)
+    const name = (doc.splitTextToSize(broker.name, W - M - 150 - x) as string[])[0] ?? broker.name
+    doc.text(name, x, 32)
+    if (broker.ids) {
+      doc.setFont('helvetica', 'normal')
+      doc.setFontSize(9)
+      doc.setTextColor(190, 200, 215)
+      doc.text(broker.ids, x, 47)
+    }
+  } else {
+    doc.setFontSize(16)
+    doc.text(broker.name, M, 34)
+    if (broker.ids) {
+      doc.setFont('helvetica', 'normal')
+      doc.setFontSize(9)
+      doc.setTextColor(190, 200, 215)
+      doc.text(broker.ids, M, 50)
+    }
   }
   doc.setTextColor(255, 255, 255)
   doc.setFont('helvetica', 'bold')
@@ -235,7 +291,7 @@ function drawStops(doc: jsPDF, leg: RateConStop[], startY: number): number {
  * Throws when `totalCents` disagrees with the charge lines — a rate con whose printed
  * total is not the sum of what it lists is the one document we may never send.
  */
-export async function buildRateConPdf(input: RateConInput): Promise<jsPDF> {
+export async function buildRateConPdf(input: RateConInput, options: BuildRateConOptions = {}): Promise<jsPDF> {
   const summed = input.charges.reduce((total, c) => total + c.amountCents, 0)
   if (summed !== input.totalCents) {
     throw new Error(
@@ -244,6 +300,7 @@ export async function buildRateConPdf(input: RateConInput): Promise<jsPDF> {
   }
 
   const doc = new jsPDF({ unit: 'pt', format: 'letter' })
+  const logo = await resolveLogo(doc, input.division, options.loadLogo ?? fetchDivisionLogoDataUrl)
   const W = doc.internal.pageSize.getWidth()
   const H = doc.internal.pageSize.getHeight()
   const legs = legsOf(input.stops)
@@ -251,7 +308,7 @@ export async function buildRateConPdf(input: RateConInput): Promise<jsPDF> {
   let y = 0
   for (let i = 0; i < legs.length; i++) {
     if (i > 0) doc.addPage()
-    drawHeader(doc, input, i, legs.length)
+    drawHeader(doc, input, i, legs.length, logo)
     y = drawParties(doc, input)
     y = drawStops(doc, legs[i], y)
   }
@@ -260,7 +317,7 @@ export async function buildRateConPdf(input: RateConInput): Promise<jsPDF> {
   const room = (h: number) => {
     if (y + h <= H - FOOT_ROOM) return
     doc.addPage()
-    drawHeader(doc, input, legs.length - 1, legs.length)
+    drawHeader(doc, input, legs.length - 1, legs.length, logo)
     y = 100
   }
 

@@ -15,20 +15,18 @@ import {
   Filter,
   Heart,
   Link2,
-  Map as MapIcon,
   MoreHorizontal,
   Plus,
   Save,
   Search,
   Settings2,
-  Table2,
   X,
 } from 'lucide-react'
 import type { BoardFilterPanelProps } from '../../board/BoardFilterPanel'
 import { BoardFilterPanel } from '../../board/BoardFilterPanel'
 import { BoardGrid, type BoardGridColumn, type BoardGridSort } from '../../board/BoardGrid'
 import { BoardMapView } from '../../board/BoardMapView'
-import { TmsBadge, TmsButton, TmsIconButton, TmsInput, type TmsTone } from '@/features/tms/kit'
+import { TmsBadge, TmsButton, TmsIconButton, TmsInput, TmsSegmentedTabs, type TmsTone } from '@/features/tms/kit'
 import { formatDateTime } from '@/lib/date'
 import { trackingEtaEstimate, type ComputedTrackingEta } from '@/lib/trackingEta'
 import type { Stop } from '@/types'
@@ -36,6 +34,16 @@ import { boardStatusOf, type BoardStatusKey, type ShipmentRow } from '../../ship
 import { relativeTime as relativeTimeOf, motionOf } from '../motion'
 import { nextEventText } from './nextEventText'
 import type { TrackingBoardProps } from './types'
+
+const LIFECYCLE_TABS = [
+  { key: 'active', label: 'Active' },
+  { key: 'closed', label: 'Closed' },
+]
+
+const VIEW_TABS = [
+  { key: 'table', label: 'Table View' },
+  { key: 'map', label: 'Map View' },
+]
 
 const COLUMNS: BoardGridColumn[] = [
   { key: 'shipment', header: 'Shipment #', sortable: true, width: 170 },
@@ -335,14 +343,14 @@ export function TrackingBoard(props: TrackingBoardProps) {
           <TmsButton size="sm" variant="primary" onClick={onCreateShipment}>
             <Plus size={14} /> Create Shipment
           </TmsButton>
-          <div className="tms-tracking-toggle-group" role="group" aria-label="Shipment lifecycle">
-            <TmsButton size="sm" variant={activeOnly ? 'primary' : 'secondary'} aria-pressed={activeOnly} onClick={() => setActiveOnly(true)}>
-              Active
-            </TmsButton>
-            <TmsButton size="sm" variant={!activeOnly ? 'primary' : 'secondary'} aria-pressed={!activeOnly} onClick={() => setActiveOnly(false)}>
-              Closed
-            </TmsButton>
-          </div>
+          <TmsSegmentedTabs
+            className="tms-tracking-toggle-group"
+            aria-label="Shipment lifecycle"
+            size="sm"
+            tabs={LIFECYCLE_TABS}
+            active={activeOnly ? 'active' : 'closed'}
+            onSelect={(key) => setActiveOnly(key === 'active')}
+          />
         </div>
         {recent.length > 0 && (
           <div className="tms-tracking-recent-row">
@@ -359,14 +367,14 @@ export function TrackingBoard(props: TrackingBoardProps) {
             ))}
           </div>
         )}
-        <div className="tms-tracking-view-toggle" role="group" aria-label="Table or map">
-          <TmsButton size="sm" variant={!mapVisible ? 'primary' : 'secondary'} aria-pressed={!mapVisible} onClick={() => setMapVisible(false)}>
-            <Table2 size={14} /> Table View
-          </TmsButton>
-          <TmsButton size="sm" variant={mapVisible ? 'primary' : 'secondary'} aria-pressed={mapVisible} onClick={() => setMapVisible(true)}>
-            <MapIcon size={14} /> Map View
-          </TmsButton>
-        </div>
+        <TmsSegmentedTabs
+          className="tms-tracking-view-toggle"
+          aria-label="Table or map"
+          size="sm"
+          tabs={VIEW_TABS}
+          active={mapVisible ? 'map' : 'table'}
+          onSelect={(key) => setMapVisible(key === 'map')}
+        />
       </div>
       {error && <p className="tms-tracking-error">{error}</p>}
       <div className="tms-tracking-board-main">

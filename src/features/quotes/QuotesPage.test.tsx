@@ -121,7 +121,7 @@ describe('the quote board', () => {
     setup({ open: [quote({ id: 'Q1', status: 'QUOTED', amountCents: 250_000, expiresAt: TOMORROW })] })
 
     const strip = within(screen.getByLabelText('Quote totals'))
-    const tile = (label: string) => within(strip.getByText(label).parentElement as HTMLElement)
+    const tile = (label: string) => within(strip.getByText(label).closest('.tms-kpi-card') as HTMLElement)
     expect(tile('Open quotes').getByText('$2,500.00')).toBeTruthy()
     expect(tile('Win rate').getByText('0%')).toBeTruthy()
     // Nobody has answered anything, so the reply time is unmeasured rather than zero.

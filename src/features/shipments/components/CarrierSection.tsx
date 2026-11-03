@@ -23,7 +23,7 @@ import { useDrivers } from '@/hooks/useDrivers'
 import { netPayable, quickPayFee, quickPayTiersOf, tierFor } from '@/lib/quickPay'
 import { formatCents } from '@/lib/tmsDirectory'
 import { formatDateTime } from '@/lib/date'
-import { TmsBadge, TmsButton, TmsCard, TmsField, TmsSelect } from '@/features/tms/kit'
+import { TmsBadge, TmsButton, TmsCard, TmsField, TmsMetaList, TmsSelect } from '@/features/tms/kit'
 import { DispatchDialog } from './DispatchDialog'
 import { PostingsSection } from './PostingsSection'
 import { CarrierOffersSection } from './CarrierOffersSection'
@@ -106,15 +106,18 @@ export function CarrierSection({ bundle, actions }: {
           </>
         }
       >
-        <dl className="tms-grid tms-grid-3 text-sm">
-          <Fact label="Rate" value={`$${formatCents(rateCents)}`} />
-          <Fact label="Terms" value={loadCarrier.paymentTermsDays != null ? `${loadCarrier.paymentTermsDays} days` : '—'} />
-          <Fact label="Booked" value={loadCarrier.bookedAt ? formatDateTime(loadCarrier.bookedAt) : '—'} />
-          <Fact label="Dispatcher" value={loadCarrier.dispatcherName ?? '—'} />
-          <Fact label="Driver" value={[loadCarrier.driverName, loadCarrier.driverPhone].filter(Boolean).join(' · ') || '—'} />
-          <Fact label="Truck" value={loadCarrier.truckNumber || '—'} />
-          <Fact label="Trailer" value={loadCarrier.trailerNumber || '—'} />
-        </dl>
+        <TmsMetaList
+          columns={3}
+          items={[
+            { label: 'Rate', value: `$${formatCents(rateCents)}` },
+            { label: 'Terms', value: loadCarrier.paymentTermsDays != null ? `${loadCarrier.paymentTermsDays} days` : null },
+            { label: 'Booked', value: loadCarrier.bookedAt ? formatDateTime(loadCarrier.bookedAt) : null },
+            { label: 'Dispatcher', value: loadCarrier.dispatcherName },
+            { label: 'Driver', value: [loadCarrier.driverName, loadCarrier.driverPhone].filter(Boolean).join(' · ') },
+            { label: 'Truck', value: loadCarrier.truckNumber },
+            { label: 'Trailer', value: loadCarrier.trailerNumber },
+          ]}
+        />
         {(loadCarrier.bookingWarnings?.length ?? 0) > 0 && (
           <div className="mt-2 flex flex-wrap gap-1">
             {loadCarrier.bookingWarnings?.map((w) => <TmsBadge key={w} tone="orange">{w}</TmsBadge>)}
@@ -214,11 +217,3 @@ export function CarrierSection({ bundle, actions }: {
   )
 }
 
-function Fact({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <dt className="tms-field-label">{label}</dt>
-      <dd className="truncate">{value}</dd>
-    </div>
-  )
-}

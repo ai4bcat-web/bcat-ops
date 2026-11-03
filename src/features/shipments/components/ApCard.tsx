@@ -20,7 +20,7 @@ import { Link } from 'react-router-dom'
 import { Ban, Banknote, CheckCircle2, FileText, Pencil, Truck } from 'lucide-react'
 import { toast } from 'sonner'
 import { useDrivers } from '@/hooks/useDrivers'
-import { TmsBadge, TmsButton, TmsCard } from '@/features/tms/kit'
+import { TmsBadge, TmsButton, TmsCard, TmsMetaList, TmsStatRow } from '@/features/tms/kit'
 import { getCarrier, getCarrierBill, voidBill } from '@/lib/apiClient'
 import { billData, billLinesFor, billReadiness } from '@/lib/carrierBill'
 import { AGING_BUCKET_LABEL, type AgingBucket } from '@/lib/arAging'
@@ -207,7 +207,7 @@ function AssignmentCard({ bundle, loadCarrier, bill, carrier, directoryRead, onR
                   className={cn(
                     'rounded-full border px-2 py-0.5 text-[11px]',
                     lit
-                      ? 'border-[color:var(--tms-primary)] font-medium text-[color:var(--tms-text)]'
+                      ? 'border-[color:var(--tms-primary)] bg-[color:var(--tms-primary-tint)] font-medium text-[color:var(--tms-primary-ink)]'
                       : 'border-[color:var(--tms-border)] text-[color:var(--tms-muted)]',
                   )}
                 >
@@ -222,49 +222,62 @@ function AssignmentCard({ bundle, loadCarrier, bill, carrier, directoryRead, onR
       <div className="space-y-3" data-testid="ap-card" data-assignment={loadCarrier.id}>
 
       {view ? (
-        <dl className="tms-grid tms-grid-4 text-sm">
-          <div>
-            <dt className="tms-field-label">Bill</dt>
-            <dd>
-              <Link to={`/tms/invoicing/payable/bills/${view.id}`} className="underline underline-offset-2">
-                {view.billNumber ?? view.id}
-              </Link>
-              {voided && <TmsBadge tone="red">void</TmsBadge>}
-            </dd>
-          </div>
-          <div>
-            <dt className="tms-field-label">Net</dt>
-            <dd className="tabular-nums">{formatCents(view.totals.netCents)}</dd>
-          </div>
-          <div>
-            <dt className="tms-field-label">Balance</dt>
-            <dd className="tabular-nums">{formatCents(view.totals.balanceCents)}</dd>
-          </div>
-          <div>
-            <dt className="tms-field-label">Due</dt>
-            <dd className="flex flex-wrap items-center gap-1">
-              {view.aging.dueAt}
-              {view.aging.open && (
-                <TmsBadge tone={BUCKET_TONE[view.aging.bucket]}>
-                  {view.aging.bucket === 'CURRENT'
-                    ? AGING_BUCKET_LABEL[view.aging.bucket]
-                    : `${AGING_BUCKET_LABEL[view.aging.bucket]} days late`}
-                </TmsBadge>
-              )}
-            </dd>
-          </div>
-          <div className="col-span-4">
-            <dt className="tms-field-label">Paid to</dt>
-            <dd data-testid="ap-payee">
-              {payee || '—'}
-              {view.totals.quickPayFeeCents > 0 && (
-                <span className="tms-muted ml-1 text-xs">
-                  quick pay · {formatCents(view.totals.quickPayFeeCents)} deducted
-                </span>
-              )}
-            </dd>
-          </div>
-        </dl>
+        <>
+          <TmsStatRow
+            compact
+            columns={2}
+            aria-label="Bill amounts"
+            items={[
+              { key: 'net', label: 'Net', value: formatCents(view.totals.netCents) },
+              { key: 'balance', label: 'Balance', value: formatCents(view.totals.balanceCents) },
+            ]}
+          />
+          <TmsMetaList
+            columns={2}
+            items={[
+              {
+                label: 'Bill',
+                value: (
+                  <>
+                    <Link to={`/tms/invoicing/payable/bills/${view.id}`} className="underline underline-offset-2">
+                      {view.billNumber ?? view.id}
+                    </Link>
+                    {voided && <TmsBadge tone="red">void</TmsBadge>}
+                  </>
+                ),
+              },
+              {
+                label: 'Due',
+                value: (
+                  <span className="flex flex-wrap items-center gap-1">
+                    {view.aging.dueAt}
+                    {view.aging.open && (
+                      <TmsBadge tone={BUCKET_TONE[view.aging.bucket]}>
+                        {view.aging.bucket === 'CURRENT'
+                          ? AGING_BUCKET_LABEL[view.aging.bucket]
+                          : `${AGING_BUCKET_LABEL[view.aging.bucket]} days late`}
+                      </TmsBadge>
+                    )}
+                  </span>
+                ),
+              },
+              {
+                label: 'Paid to',
+                wide: true,
+                value: (
+                  <span data-testid="ap-payee">
+                    {payee || '—'}
+                    {view.totals.quickPayFeeCents > 0 && (
+                      <span className="tms-muted ml-1 text-xs">
+                        quick pay · {formatCents(view.totals.quickPayFeeCents)} deducted
+                      </span>
+                    )}
+                  </span>
+                ),
+              },
+            ]}
+          />
+        </>
       ) : (
         <div className="space-y-1 text-sm" data-testid="ap-readiness">
           <p className="tms-muted">

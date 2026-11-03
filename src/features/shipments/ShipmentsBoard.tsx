@@ -293,7 +293,7 @@ export function ShipmentsBoard() {
 
   return (
     <div className="tms-board-shell flex h-full flex-col">
-      <div className="tms-board-toolbar flex items-center justify-between border-b px-3 py-2">
+      <div className="tms-board-toolbar flex items-center justify-between border-b border-[color:var(--tms-border)] px-3 py-2">
         <div className="flex items-center gap-3">
           <Truck size={18} />
           <span className="font-semibold">Shipments</span>
@@ -882,7 +882,7 @@ function BoardPane({
         />
 
         <div className="flex min-w-0 flex-1 flex-col">
-          <div className="flex items-center gap-2 border-b px-3 py-2">
+          <div className="flex items-center gap-2 border-b border-[color:var(--tms-border)] px-3 py-2">
             <Search size={16} className="tms-muted" />
             <TmsInput
               placeholder="Search"

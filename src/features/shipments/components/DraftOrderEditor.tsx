@@ -17,7 +17,7 @@ import { AlertTriangle, Plus, Trash2, ShieldCheck } from 'lucide-react'
 import { RepPicker } from '@/components/RepPicker'
 import { Switch } from '@/components/ui/switch'
 import {
-  TmsBadge, TmsButton, TmsCard, TmsField, TmsIconButton, TmsInput, TmsSelect, TmsTextarea,
+  TmsAlert, TmsBadge, TmsButton, TmsCard, TmsField, TmsIconButton, TmsInput, TmsSelect, TmsTextarea,
 } from '@/features/tms/kit'
 import { formatCents } from '@/lib/tmsDirectory'
 import { computeFinancials } from '@/lib/shipmentCharges'
@@ -350,13 +350,8 @@ function CreditBanner({ credit, projectedCents, short, customerName }: {
 }) {
   if (!credit) return null
   const blocked = credit.blockReasons.length > 0
-  const tone = blocked || short
-    ? 'border-[color:var(--tms-badge-red)] text-[color:var(--tms-badge-red)]'
-    : credit.warning
-      ? 'border-[color:var(--tms-badge-orange)] text-[color:var(--tms-badge-orange)]'
-      : 'border-[color:var(--tms-border)] text-[color:var(--tms-muted)]'
-  return (
-    <div data-testid="credit-banner" className={`flex flex-wrap items-center gap-x-4 gap-y-1 rounded-[var(--tms-radius)] border p-3 text-xs ${tone}`}>
+  const body = (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
       <span className="flex items-center gap-1 font-medium">
         <ShieldCheck size={14} /> {customerName ?? 'Customer'} credit
       </span>
@@ -364,6 +359,19 @@ function CreditBanner({ credit, projectedCents, short, customerName }: {
       <span>This shipment {formatCents(projectedCents)}</span>
       {blocked && <span>Blocked: {credit.blockReasons.join(', ')}</span>}
       {!blocked && short && <span>Shipment exceeds available credit — submit will be refused.</span>}
+    </div>
+  )
+  return (
+    <div data-testid="credit-banner">
+      {blocked || short ? (
+        <TmsAlert tone="red" icon={false}>{body}</TmsAlert>
+      ) : credit.warning ? (
+        <TmsAlert tone="orange" icon={false}>{body}</TmsAlert>
+      ) : (
+        <div className="rounded-[var(--tms-radius)] border border-[color:var(--tms-border)] bg-[color:var(--tms-surface)] p-3 text-[color:var(--tms-muted)]">
+          {body}
+        </div>
+      )}
     </div>
   )
 }

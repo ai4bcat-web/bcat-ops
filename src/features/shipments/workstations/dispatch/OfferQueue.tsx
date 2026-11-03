@@ -1,13 +1,16 @@
 /**
  * P7 — parsed carrier offers for the selected shipment.
  *
- * Offers are sorted open-first, then by rate. A vetted carrier gets one-click
- * "Assign carrier + send rate con"; an unknown or unvetted MC gets "Send setup packet".
+ * Offers are sorted open-first, then by rate. A vetted carrier with a completed
+ * MyCarrierPackets packet gets one-click "Assign carrier + send rate con" (the carrier is
+ * re-checked before booking, so a stale snapshot never books-then-refuses); a vetted
+ * carrier without a completed packet gets that button disabled with the reason plus
+ * "Send setup packet"; an unknown or unvetted MC gets "Send setup packet".
  */
 import { useCallback, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 
-import { TmsBadge, TmsButton, TmsCard } from '@/features/tms/kit'
+import { TmsApprovalCard, TmsBadge, TmsButton, TmsCard } from '@/features/tms/kit'
 import { formatDateTime } from '@/lib/date'
 import {
   getCarrierBundle,
@@ -25,6 +28,7 @@ import {
 } from './rateCon'
 import type { ShipmentActions } from '@/features/shipments/useShipmentActions'
 import type { Division, ShipmentBundle, TmsSettings } from '@/types/tms'
+import { mcpPacketStanding, rateConMcpRefusal } from '@/lib/mcpPacket'
 
 interface OfferQueueProps {
   shipmentId: string
@@ -137,60 +141,72 @@ function OfferRow({ offer, busy, onAssign, onSetupPacket }: OfferRowProps) {
   const vetting = offer.vetting
   const isOpen = offer.quoteOpen === 'OPEN'
   const bookable = vetting.bookable && offer.carrierId != null
+  const packetStanding = mcpPacketStanding({ mcpStatus: vetting.mcpStatus })
+
+  const actions = bookable ? (
+    <>
+      {!packetStanding.completed && offer.carrierEmail && (
+        <TmsButton
+          size="sm"
+          disabled={busy}
+          onClick={onSetupPacket}
+          data-testid="setup-packet-button"
+        >
+          Send setup packet
+        </TmsButton>
+      )}
+      <TmsButton
+        size="sm"
+        variant="approve"
+        disabled={busy || !packetStanding.completed}
+        onClick={onAssign}
+        data-testid="assign-offer-button"
+      >
+        {busy ? 'Working…' : 'Assign carrier + send rate con'}
+      </TmsButton>
+    </>
+  ) : (
+    <TmsButton
+      size="sm"
+      disabled={busy || !offer.carrierEmail}
+      onClick={onSetupPacket}
+      data-testid="setup-packet-button"
+    >
+      {busy ? 'Working…' : 'Send setup packet'}
+    </TmsButton>
+  )
 
   return (
-    <div
-      className="tms-dispatch-offer-row rounded border p-3"
-      data-testid="offer-row"
-      data-offer-id={offer.id}
+    <TmsApprovalCard
+      className="tms-dispatch-offer-row"
+      testId="offer-row"
+      title={offer.carrierName ?? 'Unknown carrier'}
+      subtitle={`MC ${offer.carrierMc ?? '—'} · $${formatCents(offer.amountCents)} · ${offer.equipmentType ?? '—'}`}
+      chip={
+        <span className="flex items-center gap-2">
+          <TmsBadge tone={bookable ? 'green' : vetting.known ? 'orange' : 'gray'}>
+            {vetting.status ?? (bookable ? 'Vetted' : vetting.known ? 'Unvetted' : 'Unknown')}
+          </TmsBadge>
+          {isOpen && <TmsBadge tone="blue">Open</TmsBadge>}
+        </span>
+      }
+      meta={
+        <>
+          {offer.offerSource ?? 'MANUAL'} · {offer.offerContactName ?? '—'}
+          {offer.offerAvailableAt && ` · available ${formatDateTime(offer.offerAvailableAt)}`}
+        </>
+      }
+      actions={actions}
     >
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <span className="font-medium text-sm">{offer.carrierName ?? 'Unknown carrier'}</span>
-            <TmsBadge tone={bookable ? 'green' : vetting.known ? 'orange' : 'gray'}>
-              {vetting.status ?? (bookable ? 'Vetted' : vetting.known ? 'Unvetted' : 'Unknown')}
-            </TmsBadge>
-            {isOpen && <TmsBadge tone="blue">Open</TmsBadge>}
-          </div>
-          <div className="mt-1 text-xs tms-muted">
-            MC {offer.carrierMc ?? '—'} · ${formatCents(offer.amountCents)} · {offer.equipmentType ?? '—'}
-          </div>
-          <div className="mt-1 text-xs tms-muted">
-            {offer.offerSource ?? 'MANUAL'} · {offer.offerContactName ?? '—'}
-            {offer.offerAvailableAt && ` · available ${formatDateTime(offer.offerAvailableAt)}`}
-          </div>
-          {vetting.blockers.length > 0 && (
-            <div className="mt-1 text-xs tms-text-destructive">
-              {vetting.blockers.join(' · ')}
-            </div>
-          )}
-        </div>
-
-        <div className="shrink-0">
-          {bookable ? (
-            <TmsButton
-              size="sm"
-              variant="primary"
-              disabled={busy}
-              onClick={onAssign}
-              data-testid="assign-offer-button"
-            >
-              {busy ? 'Working…' : 'Assign carrier + send rate con'}
-            </TmsButton>
-          ) : (
-            <TmsButton
-              size="sm"
-              disabled={busy || !offer.carrierEmail}
-              onClick={onSetupPacket}
-              data-testid="setup-packet-button"
-            >
-              {busy ? 'Working…' : 'Send setup packet'}
-            </TmsButton>
-          )}
-        </div>
-      </div>
-    </div>
+      {vetting.blockers.length > 0 && (
+        <div className="text-xs tms-text-destructive">{vetting.blockers.join(' · ')}</div>
+      )}
+      {bookable && !packetStanding.completed && (
+        <p className="text-xs tms-muted" data-testid="offer-packet-reason">
+          {offer.carrierName ?? 'This carrier'} {packetStanding.reason}
+        </p>
+      )}
+    </TmsApprovalCard>
   )
 }
 
@@ -206,6 +222,14 @@ interface BookAndSendParams {
 
 async function bookCarrierAndSendRateCon(params: BookAndSendParams): Promise<void> {
   const { shipmentId, carrierId, carrierRateCents, actions, settings, divisions } = params
+  // Check the carrier's packet BEFORE booking: the offer's vetting snapshot can be stale,
+  // and a carrier that would be refused a rate con must never end up booked-then-refused.
+  const carrierBundle = await getCarrierBundle(carrierId)
+  const standing = mcpPacketStanding(carrierBundle.carrier)
+  if (!standing.completed) {
+    throw new Error(rateConMcpRefusal(carrierBundle.carrier?.name ?? 'This carrier', standing))
+  }
+
   await actions.bookCarrier({ carrierId, carrierRateCents })
 
   const fresh = await getShipmentBundle(shipmentId)
@@ -214,7 +238,6 @@ async function bookCarrierAndSendRateCon(params: BookAndSendParams): Promise<voi
   )
   if (!loadCarrier) throw new Error('Carrier was not assigned to the load')
 
-  const carrierBundle = await getCarrierBundle(carrierId)
   const doc = await buildRateConPdf(
     buildRateConInput(fresh, loadCarrier, carrierBundle.carrier, settings, divisions),
   )

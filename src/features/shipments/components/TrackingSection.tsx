@@ -12,7 +12,7 @@ import { useCallback, useContext, useEffect, useState } from 'react'
 import {
   AlertTriangle, Check, Clock, Cog, Link2, MapPin, PhoneCall, Send, Smartphone, Truck, Users,
 } from 'lucide-react'
-import { TmsBadge, TmsButton, TmsCard, TmsInput } from '@/features/tms/kit'
+import { TmsAlert, TmsBadge, TmsButton, TmsCard, TmsInput, TmsTimeline, type TmsTimelineItem } from '@/features/tms/kit'
 import { Label } from '@/components/ui/label'
 import { AuthContext } from '@/hooks/useAuth'
 import {
@@ -129,11 +129,51 @@ export function TrackingSection({ bundle, customer, catalog, actions }: {
     void actions.tracking.setNextCheckCall(iso).then(() => setReminderDraft(null)).catch(() => { /* reported */ })
   }
 
-  const tone = state === 'OVERDUE'
-    ? 'border-[color:var(--tms-badge-red)]  text-[color:var(--tms-badge-red)]'
-    : state === 'DUE'
-      ? 'border-[color:var(--tms-badge-orange)] 0/5 text-[color:var(--tms-badge-orange)]'
-      : 'border-[color:var(--tms-border)]'
+  const checkCallBody = (
+    <div className="space-y-2 text-sm">
+      <div className="flex flex-wrap items-center gap-2">
+        <Clock size={14} />
+        <span className="font-medium">
+          {state === 'NONE' && 'No check call scheduled'}
+          {state === 'SCHEDULED' && `Next check call ${formatDateTime(load.nextCheckCallAt)}`}
+          {state === 'DUE' && `Check call due — ${formatDateTime(load.nextCheckCallAt)}`}
+          {state === 'OVERDUE' && `Check call overdue since ${formatDateTime(load.nextCheckCallAt)}`}
+        </span>
+        {load.nextCheckCallNote && <span className="tms-muted">· {load.nextCheckCallNote}</span>}
+        <div className="ml-auto flex flex-wrap gap-2">
+          <TmsButton size="sm" className="h-7"
+            onClick={() => setReminderDraft(formatDateTimeInput(load.nextCheckCallAt ?? new Date().toISOString()))}
+          >
+            Edit reminder
+          </TmsButton>
+          <TmsButton size="sm" className="h-7"
+            onClick={() => saveReminder(new Date(now + HOUR_MS).toISOString())}
+            disabled={actions.busy}
+          >
+            Snooze 1 h
+          </TmsButton>
+          <TmsButton variant="ghost" size="sm" className="h-7" onClick={() => saveReminder(null)} disabled={actions.busy}>
+            No reminder
+          </TmsButton>
+        </div>
+      </div>
+      {reminderDraft != null && (
+        <div className="flex flex-wrap items-center gap-2">
+          <TmsInput
+            aria-label="Reminder time"
+            type="datetime-local"
+            value={reminderDraft}
+            onChange={(e) => setReminderDraft(e.target.value)}
+            className="h-9 w-56 text-sm"
+          />
+          <TmsButton variant="primary" size="sm" className="h-9" disabled={actions.busy} onClick={() => saveReminder(reminderDraft ? fromDateTimeInput(reminderDraft) : null)}>
+            Save
+          </TmsButton>
+          <TmsButton variant="ghost" size="sm" className="h-9" onClick={() => setReminderDraft(null)}>Cancel</TmsButton>
+        </div>
+      )}
+    </div>
+  )
 
   return (
     <div className="space-y-4">
@@ -183,54 +223,17 @@ export function TrackingSection({ bundle, customer, catalog, actions }: {
         </div>
       </TmsCard>
 
-      <div className={`space-y-2 rounded-[var(--tms-radius)] border p-3 text-sm ${tone}`} data-testid="check-call-banner">
-        <div className="flex flex-wrap items-center gap-2">
-          <Clock size={14} />
-          <span className="font-medium">
-            {state === 'NONE' && 'No check call scheduled'}
-            {state === 'SCHEDULED' && `Next check call ${formatDateTime(load.nextCheckCallAt)}`}
-            {state === 'DUE' && `Check call due — ${formatDateTime(load.nextCheckCallAt)}`}
-            {state === 'OVERDUE' && `Check call overdue since ${formatDateTime(load.nextCheckCallAt)}`}
-          </span>
-          {load.nextCheckCallNote && <span className="tms-muted">· {load.nextCheckCallNote}</span>}
-          <div className="ml-auto flex flex-wrap gap-2">
-            <TmsButton size="sm" className="h-7"
-              onClick={() => setReminderDraft(formatDateTimeInput(load.nextCheckCallAt ?? new Date().toISOString()))}
-            >
-              Edit reminder
-            </TmsButton>
-            <TmsButton size="sm" className="h-7"
-              onClick={() => saveReminder(new Date(now + HOUR_MS).toISOString())}
-              disabled={actions.busy}
-            >
-              Snooze 1 h
-            </TmsButton>
-            <TmsButton variant="ghost" size="sm" className="h-7" onClick={() => saveReminder(null)} disabled={actions.busy}>
-              No reminder
-            </TmsButton>
-          </div>
-        </div>
-        {reminderDraft != null && (
-          <div className="flex flex-wrap items-center gap-2">
-            <TmsInput
-              aria-label="Reminder time"
-              type="datetime-local"
-              value={reminderDraft}
-              onChange={(e) => setReminderDraft(e.target.value)}
-              className="h-9 w-56 text-sm"
-            />
-            <TmsButton variant="primary" size="sm" className="h-9" disabled={actions.busy} onClick={() => saveReminder(reminderDraft ? fromDateTimeInput(reminderDraft) : null)}>
-              Save
-            </TmsButton>
-            <TmsButton variant="ghost" size="sm" className="h-9" onClick={() => setReminderDraft(null)}>Cancel</TmsButton>
-          </div>
+      <div data-testid="check-call-banner">
+        {state === 'OVERDUE' || state === 'DUE' ? (
+          <TmsAlert tone={state === 'OVERDUE' ? 'red' : 'orange'} icon={false}>{checkCallBody}</TmsAlert>
+        ) : (
+          <div className="tms-card p-3">{checkCallBody}</div>
         )}
       </div>
 
       {loadCarrier && (
-        <div className="rounded-[var(--tms-radius)] border border-[color:var(--tms-border)] p-3">
-          <p className="text-xs uppercase tracking-wider tms-muted">ETAs</p>
-          <div className="mt-1 flex flex-wrap items-end gap-3">
+        <TmsCard title="ETAs">
+          <div className="flex flex-wrap items-end gap-3">
             <div>
               <Label className="tms-field-label">Pickup</Label>
               <TmsInput
@@ -264,7 +267,7 @@ export function TrackingSection({ bundle, customer, catalog, actions }: {
               Save ETAs
             </TmsButton>
           </div>
-        </div>
+        </TmsCard>
       )}
 
       {/* The same pane the tracking desk mounts: header, map, computed ETA, cadence
@@ -296,18 +299,13 @@ export function TrackingSection({ bundle, customer, catalog, actions }: {
         {tracking.timeline.length === 0 && !tracking.loading && (
           <p className="text-sm tms-muted">Nothing has been logged on this load yet.</p>
         )}
-        <ul className="space-y-2" data-testid="tracking-timeline">
-          {tracking.timeline.map((item) => (
-            <TimelineRow
-              key={timelineKey(item)}
-              item={item}
-              busy={actions.busy}
-              onResolve={(checkCallId) => {
-                void actions.tracking.resolveIncident(checkCallId).then(() => tracking.refresh()).catch(() => { /* reported */ })
-              }}
-            />
-          ))}
-        </ul>
+        <TmsTimeline
+          data-testid="tracking-timeline"
+          ariaLabel="Tracking events"
+          items={tracking.timeline.map((item) => timelineEntry(item, actions.busy, (checkCallId) => {
+            void actions.tracking.resolveIncident(checkCallId).then(() => tracking.refresh()).catch(() => { /* reported */ })
+          }))}
+        />
       </div>
 
       {dialog?.kind === 'check_call' && (
@@ -368,82 +366,69 @@ function linkRowLabel(row: TrackingLinkRecord): string {
   return `Tracking link ${row.sentVia === 'EMAIL' ? 'emailed' : 'texted'} to the ${who}`
 }
 
-function TimelineRow({ item, busy, onResolve }: {
-  item: TimelineItem
-  busy: boolean
-  onResolve: (checkCallId: string) => void
-}) {
+function timelineEntry(item: TimelineItem, busy: boolean, onResolve: (checkCallId: string) => void): TmsTimelineItem {
   if (item.kind === 'position') {
-    return (
-      <li className="flex items-start gap-2 rounded-[var(--tms-radius)] border border-[color:var(--tms-border)] p-2 text-sm">
-        <Truck size={14} className="mt-0.5 shrink-0 tms-muted" />
-        <div className="min-w-0">
-          <p>{item.description ?? `${item.lat.toFixed(3)}, ${item.lon.toFixed(3)}`}</p>
-          <p className="text-xs tms-muted">
-            {formatDateTime(item.at)} · Motive{item.speed != null ? ` · ${Math.round(item.speed)} mph` : ''}
-          </p>
-        </div>
-      </li>
-    )
+    return {
+      id: timelineKey(item),
+      tone: 'gray',
+      title: <><Truck size={13} className="tms-timeline-icon" aria-hidden />{item.description ?? `${item.lat.toFixed(3)}, ${item.lon.toFixed(3)}`}</>,
+      at: formatDateTime(item.at),
+      description: `Motive${item.speed != null ? ` · ${Math.round(item.speed)} mph` : ''}`,
+    }
   }
 
   if (item.kind === 'link') {
-    return (
-      <li className="flex items-start gap-2 rounded-[var(--tms-radius)] border border-[color:var(--tms-border)] p-2 text-sm">
-        <Link2 size={14} className="mt-0.5 shrink-0 tms-muted" />
-        <div className="min-w-0">
-          {/* Never assert a send that did not happen: on dev Twilio is unconfigured
-              and SES is denied, so a COPY link is created, not sent. */}
-          <p>{linkRowLabel(item.row)}</p>
-          <p className="text-xs tms-muted">
-            {formatDateTime(item.at)}{item.row.sentTo ? ` · ${item.row.sentTo}` : ''} · {item.row.status.toLowerCase()}
-          </p>
-        </div>
-      </li>
-    )
+    // Never assert a send that did not happen: on dev Twilio is unconfigured
+    // and SES is denied, so a COPY link is created, not sent.
+    return {
+      id: timelineKey(item),
+      tone: 'blue',
+      title: <><Link2 size={13} className="tms-timeline-icon" aria-hidden />{linkRowLabel(item.row)}</>,
+      at: formatDateTime(item.at),
+      description: `${item.row.sentTo ? `${item.row.sentTo} · ` : ''}${item.row.status.toLowerCase()}`,
+    }
   }
 
   const row = item.row
   const Icon = SOURCE_ICON[row.source] ?? PhoneCall
   const isOpenIncident = row.incidentOpen === 'OPEN'
+  const where = [row.city, row.state].filter(Boolean).join(', ')
 
-  return (
-    <li className={`flex items-start gap-2 rounded-[var(--tms-radius)] border p-2 text-sm ${isOpenIncident ? 'border-[color:var(--tms-badge-red)] ' : 'border-[color:var(--tms-border)]'}`}>
-      <Icon size={14} className="mt-0.5 shrink-0 tms-muted" />
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className="font-medium">{CHECK_CALL_TYPE_LABELS[row.type]}</span>
-          {row.incidentType && (
-            <TmsBadge tone="gray" className="text-[10px]">{INCIDENT_TYPE_LABELS[row.incidentType]}</TmsBadge>
-          )}
-          {row.statusAfter && (
-            <span className="flex items-center gap-1 text-xs tms-muted">
-              {row.statusBefore ? LOAD_WORKFLOW_STATUS_LABELS[row.statusBefore] : '—'}
-              {' → '}
-              <TmsBadge tone="gray" className="text-[10px]">{LOAD_WORKFLOW_STATUS_LABELS[row.statusAfter]}</TmsBadge>
-            </span>
-          )}
-        </div>
+  return {
+    id: timelineKey(item),
+    tone: isOpenIncident ? 'red' : 'green',
+    title: <><Icon size={13} className="tms-timeline-icon" aria-hidden />{CHECK_CALL_TYPE_LABELS[row.type]}</>,
+    tag: (
+      <>
+        {row.incidentType && <TmsBadge tone="gray">{INCIDENT_TYPE_LABELS[row.incidentType]}</TmsBadge>}
+        {row.statusAfter && (
+          <span className="tms-timeline-status-move">
+            {row.statusBefore ? LOAD_WORKFLOW_STATUS_LABELS[row.statusBefore] : '—'}
+            {' → '}
+            <TmsBadge tone="gray">{LOAD_WORKFLOW_STATUS_LABELS[row.statusAfter]}</TmsBadge>
+          </span>
+        )}
+      </>
+    ),
+    at: formatDateTime(row.at),
+    description: (
+      <>
         {row.note && <p className="whitespace-pre-wrap break-words">{row.note}</p>}
-        <p className="text-xs tms-muted">
-          {formatDateTime(row.at)}
-          {[row.city, row.state].filter(Boolean).length > 0 ? ` · ${[row.city, row.state].filter(Boolean).join(', ')}` : ''}
-          {row.personName ? ` · ${row.personName}` : ''}
-          {' · '}{row.source.replace(/_/g, ' ').toLowerCase()}
-          {' · '}{row.createdBy}
+        <p>
+          {[where, row.personName, row.source.replace(/_/g, ' ').toLowerCase(), row.createdBy].filter(Boolean).join(' · ')}
         </p>
         {row.resolvedAt && (
-          <p className="flex items-center gap-1 text-xs tms-muted">
+          <p className="flex items-center gap-1">
             <Check size={12} />Resolved {formatDateTime(row.resolvedAt)}{row.resolvedBy ? ` by ${row.resolvedBy}` : ''}
             {row.resolutionNote ? ` — ${row.resolutionNote}` : ''}
           </p>
         )}
-      </div>
-      {isOpenIncident && (
-        <TmsButton size="sm" className="h-7 shrink-0" disabled={busy} onClick={() => onResolve(row.id)}>
-          <AlertTriangle size={13} className="mr-1" />Resolve
-        </TmsButton>
-      )}
-    </li>
-  )
+        {isOpenIncident && (
+          <TmsButton size="sm" className="h-7" disabled={busy} onClick={() => onResolve(row.id)}>
+            <AlertTriangle size={13} className="mr-1" />Resolve
+          </TmsButton>
+        )}
+      </>
+    ),
+  }
 }

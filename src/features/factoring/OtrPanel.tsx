@@ -17,7 +17,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AlertTriangle, CheckCircle2, Loader2, Send, ShieldCheck, RefreshCw } from 'lucide-react'
-import { TmsButton, TmsInput } from '@/features/tms/kit'
+import { TmsBadge, TmsButton, TmsInput } from '@/features/tms/kit'
 import { toast } from 'sonner'
 import {
   OTR_FIELD_LABEL,
@@ -199,13 +199,12 @@ export function OtrPanel({ item, onChanged }: Props) {
               )
             }
             return (
-              <span
-                className="rounded px-2 py-0.5 text-xs font-semibold"
-                style={{ background: meta.tone.bg, color: meta.tone.fg, border: `1px solid ${meta.tone.border}` }}
+              <TmsBadge
+                tone={meta.tone}
                 title={meta.needsAttention ? 'OTR or the broker is waiting on us' : undefined}
               >
                 {meta.label}
-              </span>
+              </TmsBadge>
             )
           })()}
           {item.otrScheduleId && (
@@ -649,7 +648,7 @@ function FieldRow({
         {editable && (
           <button
             type="button"
-            className="shrink-0 text-[10px] font-semibold text-[var(--tms-primary,#2563eb)] underline-offset-2 hover:underline disabled:opacity-50"
+            className="shrink-0 text-[10px] font-semibold text-[color:var(--tms-primary-ink)] underline-offset-2 hover:underline disabled:opacity-50"
             disabled={busy}
             aria-label={`${typed ? 'Change' : 'Override'} ${label} for PRO ${pro}`}
             onClick={() => { setDraft(typed ? String(value ?? '') : ''); setOpen(true) }}

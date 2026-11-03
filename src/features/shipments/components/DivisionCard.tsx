@@ -81,7 +81,9 @@ export function DivisionCard({ shipment, canTag, busy, onSetRevTag, onClearRevTa
           <span
             className="tms-badge"
             data-testid="division-chip"
-            style={chipColor ? { background: chipColor, color: '#121212' } : undefined}
+            style={chipColor
+              ? { background: `color-mix(in srgb, ${chipColor} 22%, var(--tms-card))`, borderColor: chipColor, color: 'var(--tms-text)' }
+              : undefined}
           >
             {label}{subdivision ? ` · ${subdivision.name}` : shipment.revSubdivision ? ` · ${shipment.revSubdivision}` : ''}
           </span>

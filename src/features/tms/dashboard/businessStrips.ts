@@ -309,3 +309,57 @@ export function buildBusinessStrips(
 
   return result
 }
+
+/** The rollup strip: it totals the businesses rather than standing beside them. */
+export const COMPANY_STRIP_CODE = 'COMPANY'
+
+function isEmptyStrip(strip: BusinessStrip): boolean {
+  return Object.keys(strip.shipmentsByStatus).length === 0
+    && strip.revenueCents == null
+    && strip.profitCents == null
+    && strip.arOpenCents == null
+    && strip.apOpenCents == null
+    && strip.trackedCount == null
+    && strip.podNeededCount == null
+}
+
+/** Sum nullable figures: `null` only when every part is `null`. */
+function sumOrNull(parts: Array<number | null>): number | null {
+  let total: number | null = null
+  for (const part of parts) if (part != null) total = (total ?? 0) + part
+  return total
+}
+
+/**
+ * What the dashboard renders: the Company card carries the sum of the strips (strips are
+ * disjoint, so the sum includes anything tagged straight to Company); margin is recomputed
+ * from the summed revenue and profit, never averaged. Then any strip with nothing to show
+ * is dropped.
+ */
+export function rollupBusinessStrips(strips: BusinessStrip[]): BusinessStrip[] {
+  const filled = strips.map((strip): BusinessStrip => {
+    if (strip.code !== COMPANY_STRIP_CODE) return strip
+    const shipmentsByStatus: Record<string, number> = {}
+    for (const other of strips) {
+      for (const [status, count] of Object.entries(other.shipmentsByStatus)) {
+        shipmentsByStatus[status] = (shipmentsByStatus[status] ?? 0) + count
+      }
+    }
+    const revenueCents = sumOrNull(strips.map((s) => s.revenueCents))
+    const profitCents = sumOrNull(strips.map((s) => s.profitCents))
+    return {
+      ...strip,
+      shipmentsByStatus,
+      revenueCents,
+      profitCents,
+      marginBps: revenueCents != null && revenueCents > 0 && profitCents != null
+        ? Math.round((profitCents / revenueCents) * 10000)
+        : null,
+      arOpenCents: sumOrNull(strips.map((s) => s.arOpenCents)),
+      apOpenCents: sumOrNull(strips.map((s) => s.apOpenCents)),
+      trackedCount: sumOrNull(strips.map((s) => s.trackedCount)),
+      podNeededCount: sumOrNull(strips.map((s) => s.podNeededCount)),
+    }
+  })
+  return filled.filter((strip) => !isEmptyStrip(strip))
+}

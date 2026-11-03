@@ -1,6 +1,6 @@
 import type { ButtonHTMLAttributes, ReactNode } from 'react'
 
-export type TmsButtonVariant = 'primary' | 'secondary' | 'ghost' | 'destructive'
+export type TmsButtonVariant = 'primary' | 'secondary' | 'ghost' | 'destructive' | 'approve' | 'reject'
 
 export interface TmsButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: TmsButtonVariant

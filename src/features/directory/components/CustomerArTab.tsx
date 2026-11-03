@@ -13,7 +13,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Banknote, Plus } from 'lucide-react'
-import { TmsBadge, TmsButton } from '@/features/tms/kit'
+import { TmsBadge, TmsButton, TmsEmptyState, TmsStatRow } from '@/features/tms/kit'
 import type { TmsTone } from '@/features/tms/kit'
 import { AGING_BUCKET_LABEL, agingBucket, type AgingBucket } from '@/lib/arAging'
 import { formatCents } from '@/lib/invoiceBuild'
@@ -68,16 +68,14 @@ export function CustomerArTab({
   return (
     <div style={{ display: 'grid', gap: 20 }} data-testid="customer-ar">
       <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 16 }}>
-        <div>
-          <p className="tms-field-label">Open AR</p>
-          <p style={{ fontSize: 18, fontWeight: 600 }}>{formatCents(openCents)}</p>
-        </div>
-        <div>
-          <p className="tms-field-label">Unapplied credit</p>
-          <p style={{ fontSize: 18, fontWeight: 600, color: unappliedCents > 0 ? 'var(--tms-badge-green)' : undefined }}>
-            {formatCents(unappliedCents)}
-          </p>
-        </div>
+        <TmsStatRow
+          compact
+          columns={2}
+          items={[
+            { key: 'open', label: 'Open AR', value: formatCents(openCents) },
+            { key: 'unapplied', label: 'Unapplied credit', value: formatCents(unappliedCents), tone: unappliedCents > 0 ? 'good' : 'default' },
+          ]}
+        />
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
           <TmsButton variant="primary" size="sm" onClick={() => setDialog('payment')}>
             <Banknote size={14} />Receive payment
@@ -94,7 +92,7 @@ export function CustomerArTab({
       <section>
         <h3 style={{ marginBottom: 8 }}>Open invoices</h3>
         {open.length === 0 ? (
-          <p className="tms-muted" style={{ fontSize: 13 }}>Nothing outstanding.</p>
+          <TmsEmptyState compact title="Nothing outstanding." message="" />
         ) : (
           <div style={{ display: 'grid', gap: 4 }}>
             {open.map((inv) => {
@@ -120,7 +118,7 @@ export function CustomerArTab({
       <section>
         <h3 style={{ marginBottom: 8 }}>Payments &amp; credits</h3>
         {payments.length === 0 ? (
-          <p className="tms-muted" style={{ fontSize: 13 }}>Nothing posted yet.</p>
+          <TmsEmptyState compact title="Nothing posted yet." message="" />
         ) : (
           <div style={{ display: 'grid', gap: 4 }}>
             {payments.map((row) => (

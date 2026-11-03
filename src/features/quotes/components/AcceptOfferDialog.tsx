@@ -12,9 +12,9 @@
  * machine `key`, which is what the server matches its own answer against.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, Loader2 } from 'lucide-react'
+import { Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
-import { TmsBadge, TmsButton, TmsDialog, TmsField, TmsInput, TmsSelect } from '@/features/tms/kit'
+import { TmsAlert, TmsBadge, TmsButton, TmsDialog, TmsField, TmsInput, TmsSelect } from '@/features/tms/kit'
 import { MoneyField } from '@/features/directory/components/MoneyField'
 import { useAuth } from '@/hooks/useAuth'
 import {
@@ -189,20 +189,15 @@ export function AcceptOfferDialog({ quote, open, onOpenChange, onDone }: {
           </div>
 
           {blocks.length > 0 && (
-            <div style={{ borderRadius: 'var(--tms-radius)', border: '1px solid var(--tms-badge-red)', background: 'rgba(237,90,118,0.14)', padding: 8 }}>
-              <p style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 12, fontWeight: 600, margin: 0 }}>
-                <AlertTriangle size={14} style={{ marginTop: 2, flexShrink: 0, color: 'var(--tms-badge-red)' }} />
-                This carrier cannot be booked.
-              </p>
-              <ul style={{ margin: '4px 0 0', paddingLeft: 18, fontSize: 12, color: 'var(--tms-badge-red)' }}>
+            <TmsAlert tone="red" title="This carrier cannot be booked.">
+              <ul style={{ margin: '4px 0 0', paddingLeft: 18, fontSize: 12 }}>
                 {blocks.map((block) => <li key={block.key}>{block.detail}</li>)}
               </ul>
-            </div>
+            </TmsAlert>
           )}
 
           {warnings.length > 0 && (
-            <div style={{ display: 'grid', gap: 8, borderRadius: 'var(--tms-radius)', border: '1px solid var(--tms-badge-orange)', background: 'rgba(255,136,10,0.12)', padding: 8 }}>
-              <p style={{ fontSize: 12, fontWeight: 600, margin: 0 }}>Read these and say so; the acknowledgement is kept on the booking.</p>
+            <TmsAlert tone="orange" title="Read these and say so; the acknowledgement is kept on the booking.">
               {warnings.map((warning) => (
                 <label key={warning.key} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 12 }}>
                   <input
@@ -217,7 +212,7 @@ export function AcceptOfferDialog({ quote, open, onOpenChange, onDone }: {
                   {warning.detail}
                 </label>
               ))}
-            </div>
+            </TmsAlert>
           )}
 
           <MoneyField label="Carrier rate" value={rateCents} onChange={setRateCents} disabled={busy} />

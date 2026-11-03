@@ -61,6 +61,8 @@
   --tms-shadow-pop: 0 12px 40px rgba(16, 24, 40, 0.12);
   --tms-shadow-modal: 0 24px 60px rgba(16, 24, 40, 0.18);
   --tms-overlay: rgba(17, 24, 39, 0.45);
+  /* Page / PDF / image matte in document previews: white in both themes. */
+  --tms-paper: #ffffff;
 
   --tms-scroll-track: #f3f6f4;
   --tms-scroll-thumb: #cbd5d1;
@@ -159,6 +161,7 @@
   --tms-shadow-pop: 0 12px 40px rgba(0, 0, 0, 0.45);
   --tms-shadow-modal: 0 24px 60px rgba(0, 0, 0, 0.55);
   --tms-overlay: rgba(0, 0, 0, 0.6);
+  --tms-paper: #ffffff;
 
   --tms-scroll-track: #1b1b1b;
   --tms-scroll-thumb: #4a4a4a;
@@ -217,6 +220,17 @@
   --tms-chart-10: #4ade80;
   --tms-chart-11: #f59e0b;
   --tms-chart-12: #93c5fd;
+}
+
+/* ── shadcn bridge: ui/* utilities (bg-popover, text-muted-foreground, …) follow the TMS tokens ── */
+.tms-shell, .tms-portal { --background: var(--tms-card); --foreground: var(--tms-text); --card: var(--tms-card); --card-foreground: var(--tms-text); --popover: var(--tms-bg-elevated); --popover-foreground: var(--tms-text); --primary: var(--tms-primary); --primary-foreground: var(--tms-on-primary); --secondary: var(--tms-surface); --secondary-foreground: var(--tms-text); --muted: var(--tms-surface); --muted-foreground: var(--tms-muted); --accent: var(--tms-surface-hover); --accent-foreground: var(--tms-text); --destructive: var(--tms-destructive); --destructive-foreground: var(--tms-on-destructive); --border: var(--tms-border); --input: var(--tms-input-border); --ring: var(--tms-primary); --radius: var(--tms-radius); }
+
+/* Tailwind v4's bare `border` is currentColor. Layered, so explicit border-[color:…] utilities still win. */
+@layer base {
+  .tms-shell *,
+  .tms-portal * {
+    border-color: var(--tms-border);
+  }
 }
 
 /* ── Base ─────────────────────────────────────────────────────────────────── */
@@ -466,7 +480,7 @@
 
 .tms-shell .tms-select option,
 .tms-portal .tms-select option {
-  background: var(--tms-topbar);
+  background: var(--tms-surface-subtle);
   color: var(--tms-text);
 }
 
@@ -601,33 +615,54 @@
 }
 
 .tms-shell .tms-quick-tabs {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
+  max-width: 100%;
+  padding: 3px;
   overflow-x: auto;
-  border-bottom: 1px solid var(--tms-border);
+  background: var(--tms-surface);
+  border: 1px solid var(--tms-border);
+  border-radius: var(--tms-radius-pill);
 }
 
 .tms-shell .tms-quick-tab {
-  height: 40px;
-  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 14px;
   background: none;
   border: 0;
+  border-radius: var(--tms-radius-pill);
   color: var(--tms-muted);
-  font-size: 14px;
+  font-size: 13px;
+  font-weight: 500;
   cursor: pointer;
   white-space: nowrap;
 }
 
-.tms-shell .tms-quick-tab.tms-active {
+.tms-shell .tms-quick-tab:hover {
   color: var(--tms-text);
+}
+
+.tms-shell .tms-quick-tab.tms-active {
+  background: var(--tms-card);
+  color: var(--tms-primary-ink);
   font-weight: 600;
+  box-shadow: var(--tms-shadow);
 }
 
 .tms-shell .tms-quick-tab-count {
   margin-left: 6px;
-  color: var(--tms-muted);
-  font-size: 12px;
+  padding: 0 7px;
+  min-width: 20px;
+  border-radius: var(--tms-radius-pill);
+  background: var(--tms-primary-tint);
+  color: var(--tms-primary-ink);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+  text-align: center;
 }
 
 /* ── Table ────────────────────────────────────────────────────────────────── */
@@ -655,11 +690,11 @@
   top: 0;
   z-index: 1;
   height: 42px;
-  padding: 4px 8px;
+  padding: 4px 12px;
   background: var(--tms-surface-subtle);
   color: var(--tms-muted);
   font-size: 12px;
-  font-weight: 500;
+  font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   text-align: left;
@@ -686,16 +721,48 @@
 
 .tms-shell .tms-table tbody td,
 .tms-portal .tms-table tbody td {
-  padding: 8px;
+  height: var(--tms-row-h);
+  padding: 8px 12px;
   font-size: 13px;
   color: var(--tms-text);
   border-bottom: 1px solid var(--tms-border);
   white-space: nowrap;
 }
 
+.tms-shell .tms-table tbody tr:last-child td,
+.tms-portal .tms-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
 .tms-shell .tms-table tbody tr:hover td,
 .tms-portal .tms-table tbody tr:hover td {
   background: var(--tms-surface-hover);
+}
+
+.tms-shell .tms-table tbody tr[aria-selected='true'] td,
+.tms-shell .tms-table tbody tr.tms-selected td,
+.tms-portal .tms-table tbody tr[aria-selected='true'] td,
+.tms-portal .tms-table tbody tr.tms-selected td {
+  background: var(--tms-surface-selected);
+}
+
+/* Checkbox column and trailing icon actions. */
+.tms-shell .tms-table th:has(> input[type='checkbox']),
+.tms-shell .tms-table td:has(> input[type='checkbox']),
+.tms-portal .tms-table th:has(> input[type='checkbox']),
+.tms-portal .tms-table td:has(> input[type='checkbox']) {
+  width: 40px;
+  padding-right: 0;
+}
+
+.tms-shell .tms-table td .tms-icon-btn-plain,
+.tms-portal .tms-table td .tms-icon-btn-plain {
+  color: var(--tms-muted);
+}
+
+.tms-shell .tms-table td .tms-icon-btn-plain:hover,
+.tms-portal .tms-table td .tms-icon-btn-plain:hover {
+  color: var(--tms-text);
 }
 
 .tms-shell .tms-table tbody tr.tms-clickable,
@@ -714,6 +781,11 @@
   gap: 8px;
   padding: 56px 16px;
   text-align: center;
+}
+
+.tms-shell .tms-empty.tms-empty-compact,
+.tms-portal .tms-empty.tms-empty-compact {
+  padding: 20px 12px;
 }
 
 .tms-shell .tms-empty-icon,
@@ -841,9 +913,17 @@
 .tms-portal .tms-tabs {
   display: flex;
   align-items: center;
-  gap: 18px;
+  gap: 20px;
   border-bottom: 1px solid var(--tms-border);
   overflow-x: auto;
+  scrollbar-width: none;
+}
+
+/* Fade the right edge when many tabs overflow (shipment detail has 10); mask uses alpha only. */
+.tms-shell .tms-tabs.tms-tabs-many,
+.tms-portal .tms-tabs.tms-tabs-many {
+  -webkit-mask-image: linear-gradient(to right, var(--tms-text) calc(100% - 24px), transparent);
+  mask-image: linear-gradient(to right, var(--tms-text) calc(100% - 24px), transparent);
 }
 
 .tms-shell .tms-tab,
@@ -851,9 +931,10 @@
   position: relative;
   background: none;
   border: 0;
-  padding: 8px 0;
+  padding: 10px 0;
   color: var(--tms-muted);
   font-size: 14px;
+  font-weight: 500;
   cursor: pointer;
   white-space: nowrap;
 }
@@ -866,14 +947,23 @@
 .tms-shell .tms-tab.tms-active,
 .tms-portal .tms-tab.tms-active {
   color: var(--tms-text);
+  font-weight: 600;
   box-shadow: inset 0 -2px 0 0 var(--tms-primary);
 }
 
 .tms-shell .tms-tab-count,
 .tms-portal .tms-tab-count {
   margin-left: 6px;
-  color: var(--tms-muted);
-  font-size: 12px;
+  padding: 0 7px;
+  min-width: 20px;
+  border-radius: var(--tms-radius-pill);
+  background: var(--tms-primary-tint);
+  color: var(--tms-primary-ink);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+  text-align: center;
+  display: inline-block;
 }
 
 /* ── Badges ───────────────────────────────────────────────────────────────── */
@@ -1133,916 +1223,5 @@
   }
 }
 
-/* ── Shipments board extras (division chip, chip filter panel, check-call tones) ── */
-.tms-shell .tms-division-chip { display: inline-block; padding: 1px 8px; border: 1px solid var(--tms-border); border-radius: 999px; font-size: 12px; line-height: 18px; white-space: nowrap; }
-.tms-shell .tms-filter-panel { margin: 0 0 8px; padding: 12px; }
-.tms-shell .tms-filter-panel-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 12px; }
-.tms-shell .tms-filter-toggles, .tms-portal .tms-filter-toggles { display: flex; flex-wrap: wrap; gap: 12px; }
-.tms-shell .tms-check, .tms-portal .tms-check { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--tms-text); }
-.tms-shell .tms-overdue { color: var(--tms-badge-red); font-weight: 500; }
-
-/* ── Aljex-style shipments board (R2) ─────────────────────────────────────── */
-
-/* Layout */
-.tms-shell .tms-board { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; min-height: 0; }
-.tms-shell .tms-board-main { display: flex; flex: 1 1 auto; min-width: 0; min-height: 0; overflow: hidden; }
-.tms-shell .tms-board-content { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; min-height: 0; overflow: hidden; }
-
-/* Filter panel */
-.tms-shell .tms-board-panel { width: 240px; flex: 0 0 auto; display: flex; flex-direction: column; border-right: 1px solid var(--tms-border); background: var(--tms-card); transition: width 0.2s ease; overflow: hidden; }
-.tms-shell .tms-board-panel-collapsed { width: 44px; align-items: center; padding: 8px 4px; }
-.tms-shell .tms-board-panel-collapsed .tms-icon-btn { position: relative; }
-.tms-shell .tms-board-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--tms-border); }
-.tms-shell .tms-board-panel-title { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; font-size: 14px; }
-.tms-shell .tms-board-panel-body { flex: 1 1 auto; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 16px; }
-.tms-shell .tms-board-panel-section { display: flex; flex-direction: column; gap: 8px; }
-.tms-shell .tms-board-section-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.tms-shell .tms-board-section-title { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; color: var(--tms-text); }
-.tms-shell .tms-board-section-hint { font-size: 12px; color: var(--tms-badge-orange); font-style: italic; }
-.tms-shell .tms-board-panel-row { display: flex; align-items: center; gap: 6px; }
-.tms-shell .tms-board-panel-select { flex: 1 1 auto; min-width: 0; }
-.tms-shell .tms-board-panel-actions { display: flex; flex-wrap: wrap; gap: 6px; }
-.tms-shell .tms-board-panel-foot { display: flex; gap: 8px; padding: 12px; border-top: 1px solid var(--tms-border); }
-.tms-shell .tms-board-count { position: absolute; top: -4px; right: -4px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 999px; background: var(--tms-count-bg); color: var(--tms-count-ink); font-size: 10px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
-
-/* Status checkboxes */
-.tms-shell .tms-board-status-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; }
-.tms-shell .tms-board-status-label { display: inline-flex; align-items: center; gap: 6px; }
-.tms-shell .tms-board-status-count { color: var(--tms-muted); font-size: 12px; }
-
-/* Detail filters */
-.tms-shell .tms-board-detail-list { display: flex; flex-direction: column; gap: 10px; }
-.tms-shell .tms-board-detail-row { display: flex; flex-direction: column; gap: 4px; }
-.tms-shell .tms-board-detail-label { font-size: 12px; color: var(--tms-muted); }
-.tms-shell .tms-board-detail-controls { display: flex; align-items: flex-start; gap: 8px; }
-.tms-shell .tms-board-detail-controls .tms-board-multi { flex: 1 1 auto; min-width: 0; }
-
-/* Date filters */
-.tms-shell .tms-board-date-group { border: 0; padding: 0; margin: 0 0 12px; }
-.tms-shell .tms-board-date-group:last-child { margin-bottom: 0; }
-.tms-shell .tms-board-date-legend { font-size: 13px; font-weight: 600; padding: 0; margin-bottom: 6px; }
-.tms-shell .tms-board-date-modes { display: flex; gap: 12px; margin-bottom: 6px; }
-.tms-shell .tms-board-date-range { display: flex; gap: 8px; }
-
-/* Shared small controls */
-.tms-shell .tms-board-check { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-size: 13px; color: var(--tms-text); }
-.tms-shell .tms-board-check-input { width: 16px; height: 16px; accent-color: var(--tms-primary); cursor: pointer; }
-.tms-shell .tms-board-multi { width: 100%; min-height: 72px; padding: 6px; background: var(--tms-input); border: 1px solid var(--tms-input-border); border-radius: 4px; color: var(--tms-text); font-size: 13px; }
-.tms-shell .tms-board-multi option { padding: 4px; }
-
-/* View tabs */
-.tms-shell .tms-board-tabs { display: flex; align-items: center; gap: 4px; padding: 0 12px; border-bottom: 1px solid var(--tms-border); overflow-x: hidden; }
-.tms-shell .tms-board-tab { position: relative; display: inline-flex; align-items: center; gap: 4px; height: 36px; padding: 0 12px; background: none; border: 0; color: var(--tms-muted); font-size: 14px; cursor: pointer; white-space: nowrap; }
-.tms-shell .tms-board-tab:hover { color: var(--tms-text); }
-.tms-shell .tms-board-tab.tms-active { color: var(--tms-text); box-shadow: inset 0 -2px 0 0 var(--tms-primary); }
-.tms-shell .tms-board-tab-dup { width: 20px; height: 20px; }
-.tms-shell .tms-board-tab-overflow { position: relative; }
-.tms-shell .tms-board-tab-overflow-menu { display: none; position: absolute; top: 100%; right: 0; z-index: 30; min-width: 160px; background: var(--tms-card); border: 1px solid var(--tms-border); border-radius: 6px; box-shadow: var(--tms-shadow-pop); }
-.tms-shell .tms-board-tab-overflow:hover .tms-board-tab-overflow-menu,
-.tms-shell .tms-board-tab-overflow:focus-within .tms-board-tab-overflow-menu { display: block; }
-.tms-shell .tms-board-overflow-item { display: block; width: 100%; padding: 8px 12px; background: none; border: 0; color: var(--tms-text); text-align: left; cursor: pointer; font-size: 13px; }
-.tms-shell .tms-board-overflow-item:hover { background: var(--tms-surface-hover); }
-
-/* Grid */
-.tms-shell .tms-board-grid-wrap { flex: 1 1 auto; overflow: auto; }
-.tms-shell .tms-board-grid { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; }
-.tms-shell .tms-board-grid thead th { position: sticky; top: 0; z-index: 2; height: 36px; padding: 4px 8px; background: var(--tms-bg); color: var(--tms-muted); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.02em; text-align: left; white-space: nowrap; border-bottom: 1px solid var(--tms-border); }
-.tms-shell .tms-board-grid th.tms-board-sticky { z-index: 4; background: var(--tms-bg); }
-.tms-shell .tms-board-grid td.tms-board-sticky { position: sticky; z-index: 1; }
-.tms-shell .tms-board-grid .tms-board-sticky-0 { left: 0; width: 44px; min-width: 44px; }
-.tms-shell .tms-board-grid .tms-board-sticky-1 { left: 44px; width: 76px; min-width: 76px; }
-.tms-shell .tms-board-grid .tms-board-sticky-2 { left: 120px; width: 92px; min-width: 92px; }
-.tms-shell .tms-board-grid .tms-board-col-check { text-align: center; padding: 4px; }
-.tms-shell .tms-board-grid .tms-board-sortable { cursor: pointer; user-select: none; }
-.tms-shell .tms-board-grid .tms-board-sort-dir { margin-left: 4px; color: var(--tms-primary-ink); }
-.tms-shell .tms-board-grid tbody td { padding: 6px 8px; border-bottom: 1px solid var(--tms-border); white-space: nowrap; }
-.tms-shell .tms-board-grid tbody tr { --tms-row-bg: var(--tms-row-open); --tms-row-fg: var(--tms-row-open-text); }
-.tms-shell .tms-board-grid tbody tr[data-tone="delivered"] { --tms-row-bg: var(--tms-row-delivered); --tms-row-fg: var(--tms-row-delivered-text); }
-.tms-shell .tms-board-grid tbody tr[data-tone="dispatched"] { --tms-row-bg: var(--tms-row-dispatched); --tms-row-fg: var(--tms-row-dispatched-text); }
-.tms-shell .tms-board-grid tbody tr[data-tone="departed"] { --tms-row-bg: var(--tms-row-departed); --tms-row-fg: var(--tms-row-departed-text); }
-.tms-shell .tms-board-grid tbody tr[data-tone="arrived"] { --tms-row-bg: var(--tms-row-arrived); --tms-row-fg: var(--tms-row-arrived-text); }
-.tms-shell .tms-board-grid tbody tr[data-tone="covered"] { --tms-row-bg: var(--tms-row-covered); --tms-row-fg: var(--tms-row-covered-text); }
-.tms-shell .tms-board-grid tbody tr[data-tone="hold"] { --tms-row-bg: var(--tms-row-hold); --tms-row-fg: var(--tms-row-hold-text); }
-.tms-shell .tms-board-grid tbody tr[data-tone="reserved"] { --tms-row-bg: var(--tms-row-reserved); --tms-row-fg: var(--tms-row-reserved-text); }
-.tms-shell .tms-board-grid tbody tr[data-tone="voided"],
-.tms-shell .tms-board-grid tbody tr[data-tone="canceled"] { --tms-row-bg: var(--tms-row-voided); --tms-row-fg: var(--tms-row-voided-text); }
-.tms-shell .tms-board-grid tbody td { background: var(--tms-row-bg); color: var(--tms-row-fg); }
-.tms-shell .tms-board-grid tbody tr[data-tone="voided"] td,
-.tms-shell .tms-board-grid tbody tr[data-tone="canceled"] td { text-decoration: line-through; }
-.tms-shell .tms-board-grid tbody tr:hover td { filter: brightness(1.15); }
-.tms-shell .tms-board-grid tbody tr[data-selected="true"] td { box-shadow: inset 0 0 0 1px var(--tms-primary); }
-.tms-shell .tms-board-grid tbody tr.tms-board-clickable { cursor: pointer; }
-
-/* Footer */
-.tms-shell .tms-board-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 12px; border-top: 1px solid var(--tms-border); font-size: 13px; color: var(--tms-muted); }
-.tms-shell .tms-board-footer-count strong { color: var(--tms-text); font-weight: 600; }
-.tms-shell .tms-board-footer-refresh { display: inline-flex; align-items: center; gap: 6px; }
-.tms-shell .tms-board-footer-toggle { padding: 2px 6px; background: var(--tms-input); border: 1px solid var(--tms-input-border); border-radius: 4px; color: var(--tms-text); font-size: 12px; cursor: pointer; }
-.tms-shell .tms-board-footer-toggle.tms-active { background: var(--tms-primary); color: var(--tms-on-primary); border-color: var(--tms-primary); }
-.tms-shell .tms-board-footer-badge { margin-left: 4px; padding: 1px 5px; border-radius: 999px; background: var(--tms-primary); color: var(--tms-on-primary); font-size: 10px; font-weight: 700; }
-
-/* Map view */
-.tms-shell .tms-board-map { flex: 1 1 auto; min-height: 300px; }
-.tms-shell .tms-board-map-empty { display: flex; align-items: center; justify-content: center; padding: 40px; color: var(--tms-muted); border: 1px dashed var(--tms-border); border-radius: 6px; }
-
-/* Icon key dialog */
-.tms-portal .tms-board-key-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
-.tms-portal .tms-board-key-heading { font-size: 14px; font-weight: 600; margin: 0 0 10px; }
-.tms-portal .tms-board-key-list { display: flex; flex-direction: column; gap: 8px; }
-.tms-portal .tms-board-key-row { display: flex; align-items: center; gap: 10px; font-size: 13px; }
-.tms-portal .tms-board-key-swatch { width: 24px; height: 24px; border-radius: 4px; border: 1px solid var(--tms-border); }
-.tms-portal .tms-board-key-swatch-delivered { background: var(--tms-row-delivered); }
-.tms-portal .tms-board-key-swatch-dispatched { background: var(--tms-row-dispatched); }
-.tms-portal .tms-board-key-swatch-departed { background: var(--tms-row-departed); }
-.tms-portal .tms-board-key-swatch-arrived { background: var(--tms-row-arrived); }
-.tms-portal .tms-board-key-swatch-covered { background: var(--tms-row-covered); }
-.tms-portal .tms-board-key-swatch-open { background: var(--tms-row-open); }
-.tms-portal .tms-board-key-swatch-hold { background: var(--tms-row-hold); }
-.tms-portal .tms-board-key-swatch-reserved { background: var(--tms-row-reserved); }
-.tms-portal .tms-board-key-swatch-voided { background: var(--tms-row-voided); }
-.tms-portal .tms-board-key-name { min-width: 90px; font-weight: 500; color: var(--tms-text); }
-.tms-portal .tms-board-key-statuses { color: var(--tms-muted); }
-.tms-portal .tms-board-key-icon { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; color: var(--tms-text); }
-
-/* ── Tracking workstation (P8-UI) ─────────────────────────────────────────── */
-
-.tms-shell .tms-tracking-breadcrumb-bar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  border-bottom: 1px solid var(--tms-border);
-  font-size: 13px;
-  color: var(--tms-muted);
-}
-
-.tms-shell .tms-tracking-division {
-  font-weight: 600;
-  color: var(--tms-text);
-}
-
-.tms-shell .tms-tracking-breadcrumb-sep {
-  color: var(--tms-border);
-}
-
-.tms-shell .tms-tracking-board {
-  display: flex;
-  flex-direction: column;
-  flex: 1 1 auto;
-  min-width: 0;
-  min-height: 0;
-}
-
-.tms-shell .tms-tracking-toolbar {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--tms-border);
-  background: var(--tms-bg);
-}
-
-.tms-shell .tms-tracking-toolbar-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-}
-
-.tms-shell .tms-tracking-toolbar-icon {
-  color: var(--tms-muted);
-}
-
-.tms-shell .tms-tracking-search {
-  width: 220px;
-}
-
-.tms-shell .tms-tracking-search input {
-  height: 30px;
-}
-
-.tms-shell .tms-tracking-toggle-group {
-  display: flex;
-  align-items: center;
-  gap: 0;
-  margin-left: auto;
-}
-
-.tms-shell .tms-tracking-toggle-group .tms-btn:first-child {
-  border-top-right-radius: 0;
-  border-bottom-right-radius: 0;
-}
-
-.tms-shell .tms-tracking-toggle-group .tms-btn:last-child {
-  border-top-left-radius: 0;
-  border-bottom-left-radius: 0;
-}
-
-.tms-shell .tms-tracking-recent-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-}
-
-.tms-shell .tms-tracking-recent-label {
-  color: var(--tms-muted);
-}
-
-.tms-shell .tms-tracking-recent-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  padding: 2px 6px;
-  background: var(--tms-card);
-  border: 1px solid var(--tms-border);
-  border-radius: 999px;
-}
-
-.tms-shell .tms-tracking-recent-pro {
-  background: none;
-  border: 0;
-  color: var(--tms-text);
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.tms-shell .tms-tracking-recent-pro:hover {
-  color: var(--tms-primary-ink);
-}
-
-.tms-shell .tms-tracking-view-toggle {
-  display: flex;
-  align-items: center;
-  gap: 0;
-}
-
-.tms-shell .tms-tracking-view-toggle .tms-btn:first-child {
-  border-top-right-radius: 0;
-  border-bottom-right-radius: 0;
-}
-
-.tms-shell .tms-tracking-view-toggle .tms-btn:last-child {
-  border-top-left-radius: 0;
-  border-bottom-left-radius: 0;
-}
-
-.tms-shell .tms-tracking-views-dropdown {
-  position: relative;
-}
-
-.tms-shell .tms-tracking-views-menu {
-  display: none;
-  position: absolute;
-  top: 100%;
-  left: 0;
-  z-index: 30;
-  min-width: 180px;
-  max-height: 320px;
-  overflow-y: auto;
-  background: var(--tms-card);
-  border: 1px solid var(--tms-border);
-  border-radius: 6px;
-  box-shadow: var(--tms-shadow-pop);
-}
-
-.tms-shell .tms-tracking-views-dropdown:hover .tms-tracking-views-menu,
-.tms-shell .tms-tracking-views-dropdown:focus-within .tms-tracking-views-menu {
-  display: block;
-}
-
-.tms-shell .tms-tracking-views-item {
-  display: block;
-  width: 100%;
-  padding: 8px 12px;
-  background: none;
-  border: 0;
-  color: var(--tms-text);
-  text-align: left;
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.tms-shell .tms-tracking-views-item:hover,
-.tms-shell .tms-tracking-views-item.tms-active {
-  background: var(--tms-surface-hover);
-}
-
-.tms-shell .tms-tracking-views-empty {
-  display: block;
-  padding: 8px 12px;
-  color: var(--tms-muted);
-  font-size: 13px;
-}
-
-.tms-shell .tms-tracking-board-main {
-  display: flex;
-  flex: 1 1 auto;
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.tms-shell .tms-tracking-board-content {
-  display: flex;
-  flex-direction: row;
-  flex: 1 1 auto;
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.tms-shell .tms-tracking-error {
-  padding: 8px 12px;
-  color: var(--tms-badge-red);
-  font-size: 13px;
-}
-
-.tms-shell .tms-tracking-empty {
-  padding: 24px;
-  color: var(--tms-muted);
-  font-size: 13px;
-  text-align: center;
-}
-
-.tms-shell .tms-tracking-footer {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  border-top: 1px solid var(--tms-border);
-  font-size: 13px;
-  color: var(--tms-muted);
-}
-
-/* Tracking table cells (P8-UI rebuild). */
-.tms-shell .tms-tracking-table-pane {
-  display: flex;
-  flex-direction: column;
-  flex: 1 1 auto;
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.tms-shell .tms-tracking-shipment-cell {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.tms-shell .tms-tracking-pro {
-  background: none;
-  border: 0;
-  padding: 0;
-  color: var(--tms-text);
-  font-weight: 600;
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.tms-shell .tms-tracking-pro:hover {
-  color: var(--tms-primary-ink);
-  text-decoration: underline;
-}
-
-.tms-shell .tms-tracking-favorited {
-  background: none;
-  border: 0;
-  padding: 0;
-  color: var(--tms-primary-ink);
-  cursor: pointer;
-}
-
-.tms-shell .tms-tracking-cell-muted {
-  color: var(--tms-muted);
-  font-size: 12px;
-}
-
-.tms-shell .tms-tracking-status-cell {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 4px;
-}
-
-.tms-shell .tms-tracking-next-event {
-  color: var(--tms-muted);
-  font-size: 12px;
-}
-
-.tms-shell .tms-tracking-tracking-cell {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 4px;
-}
-
-.tms-shell .tms-tracking-last-place {
-  color: var(--tms-text);
-  font-size: 12px;
-}
-
-.tms-shell .tms-tracking-team-cell {
-  font-size: 12px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 200px;
-}
-
-/* Per-row hover menu (open shipment, customer URL). */
-.tms-shell .tms-tracking-rowmenu {
-  position: relative;
-  display: inline-flex;
-}
-
-.tms-shell .tms-tracking-rowmenu-menu {
-  display: none;
-  position: absolute;
-  top: 100%;
-  right: 0;
-  z-index: 30;
-  min-width: 180px;
-  background: var(--tms-card);
-  border: 1px solid var(--tms-border);
-  border-radius: 6px;
-  box-shadow: var(--tms-shadow-pop);
-}
-
-.tms-shell .tms-tracking-rowmenu:hover .tms-tracking-rowmenu-menu,
-.tms-shell .tms-tracking-rowmenu:focus-within .tms-tracking-rowmenu-menu {
-  display: block;
-}
-
-.tms-shell .tms-tracking-rowmenu-item {
-  display: block;
-  width: 100%;
-  padding: 8px 12px;
-  background: none;
-  border: 0;
-  color: var(--tms-text);
-  text-align: left;
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.tms-shell .tms-tracking-rowmenu-item:hover {
-  background: var(--tms-surface-hover);
-}
-
-/* ── Inbox: Chaine conversations ──────────────────────────────────────────── */
-
-.tms-shell .tms-inbox {
-  display: flex;
-  flex: 1 1 auto;
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.tms-shell .tms-inbox-list {
-  width: 340px;
-  flex: 0 0 auto;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  border-right: 1px solid var(--tms-border);
-}
-
-.tms-shell .tms-inbox-list-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--tms-border);
-}
-
-.tms-shell .tms-inbox-items {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-}
-
-.tms-shell .tms-inbox-item {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  width: 100%;
-  padding: 10px 12px 10px 14px;
-  background: none;
-  border: 0;
-  border-bottom: 1px solid var(--tms-border);
-  border-left: 3px solid transparent;
-  color: var(--tms-text);
-  text-align: left;
-  cursor: pointer;
-}
-
-.tms-shell .tms-inbox-item:hover {
-  background: var(--tms-surface-hover);
-}
-
-.tms-shell .tms-inbox-item.tms-active {
-  background: var(--tms-surface-selected);
-  border-left-color: var(--tms-primary);
-}
-
-.tms-shell .tms-inbox-item-top {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.tms-shell .tms-inbox-item-pro {
-  font-weight: 600;
-  font-size: 13px;
-}
-
-.tms-shell .tms-inbox-item-time {
-  color: var(--tms-muted);
-  font-size: 12px;
-  flex: 0 0 auto;
-}
-
-.tms-shell .tms-inbox-item-customer {
-  font-size: 12px;
-  color: var(--tms-text);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.tms-shell .tms-inbox-item-lane {
-  font-size: 12px;
-  color: var(--tms-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.tms-shell .tms-inbox-item-preview {
-  font-size: 12px;
-  color: var(--tms-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.tms-shell .tms-inbox-item-count {
-  position: absolute;
-  right: 12px;
-  bottom: 10px;
-}
-
-.tms-shell .tms-inbox-chat {
-  flex: 1 1 auto;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 12px;
-}
-
-@media (max-width: 1100px) {
-  .tms-shell .tms-inbox {
-    flex-direction: column;
-  }
-
-  .tms-shell .tms-inbox-list {
-    width: auto;
-    flex: 0 0 auto;
-    max-height: 40%;
-    border-right: 0;
-    border-bottom: 1px solid var(--tms-border);
-  }
-}
-
-.tms-shell .tms-tracking-detail {
-  flex: 1 1 auto;
-  overflow-y: auto;
-  padding: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.tms-shell .tms-tracking-detail-empty {
-  padding: 24px;
-  color: var(--tms-muted);
-  font-size: 13px;
-}
-
-.tms-shell .tms-detail-map {
-  height: 220px;
-  width: 100%;
-}
-
-.tms-shell .tms-detail-map-empty {
-  height: 220px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-  color: var(--tms-muted);
-  font-size: 13px;
-  text-align: center;
-  border-bottom: 1px solid var(--tms-border);
-}
-
-.tms-shell .tms-detail-map-pin {
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  border: 2px solid var(--tms-card);
-  box-shadow: var(--tms-shadow-pop);
-}
-
-.tms-shell .tms-tracking-detail-eta {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 10px 12px;
-  border-top: 1px solid var(--tms-border);
-  font-size: 13px;
-}
-
-.tms-shell .tms-tracking-detail-eta-label {
-  color: var(--tms-muted);
-}
-
-.tms-shell .tms-tracking-detail-eta-value {
-  color: var(--tms-text);
-  font-weight: 600;
-}
-
-.tms-shell .tms-tracking-detail-source {
-  margin: 0;
-  color: var(--tms-muted);
-  font-size: 12px;
-  font-style: italic;
-}
-
-.tms-shell .tms-thread-signature-preview {
-  color: var(--tms-muted);
-  font-size: 12px;
-}
-
-.tms-shell .tms-thread-composer-error {
-  margin: 0;
-  color: var(--tms-badge-red);
-  font-size: 12px;
-}
-
-.tms-portal .tms-board-batch { display: flex; flex-direction: column; gap: 14px; }
-.tms-portal .tms-board-batch-results { display: flex; flex-direction: column; gap: 6px; max-height: 240px; overflow-y: auto; }
-.tms-portal .tms-board-batch-result { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 4px; background: var(--tms-badge-green-tint); color: var(--tms-text); font-size: 13px; }
-.tms-portal .tms-board-batch-failed { background: var(--tms-badge-red-tint); }
-.tms-portal .tms-board-batch-label { font-weight: 500; }
-.tms-portal .tms-board-batch-message { margin-left: auto; color: var(--tms-muted); font-size: 13px; }
-.tms-portal .tms-board-batch-empty { display: inline-flex; align-items: center; gap: 8px; color: var(--tms-muted); font-size: 13px; }
-
-/* Save dialogs (column template / filter set) */
-.tms-portal .tms-board-save-dialog { display: flex; flex-direction: column; gap: 12px; }
-.tms-portal .tms-board-save-label { font-size: 12px; color: var(--tms-muted); }
-.tms-portal .tms-board-save-scope { padding: 8px; border: 1px solid var(--tms-border); border-radius: 4px; }
-.tms-portal .tms-board-column-list { display: flex; flex-direction: column; gap: 6px; max-height: 320px; overflow-y: auto; padding-right: 4px; }
-.tms-portal .tms-board-column-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 8px; border-radius: 4px; }
-.tms-portal .tms-board-column-row:hover { background: var(--tms-surface-hover); }
-.tms-portal .tms-board-column-off { opacity: 0.6; }
-.tms-portal .tms-board-column-order { display: flex; align-items: center; gap: 2px; }
-.tms-portal .tms-board-confirm { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--tms-text); }
-
-/* ── Demo page (Step P11) ─────────────────────────────────────────────────── */
-.tms-shell .tms-demo-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
-.tms-shell .tms-demo-actions { display: flex; align-items: center; gap: 8px; }
-.tms-shell .tms-demo-list { display: flex; flex-direction: column; gap: 10px; }
-.tms-shell .tms-demo-step { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 16px; padding: 14px 16px; background: var(--tms-card); border: 1px solid var(--tms-border); border-radius: 6px; }
-.tms-shell .tms-demo-step-main { min-width: 0; }
-.tms-shell .tms-demo-step-head { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
-.tms-shell .tms-demo-step-title { font-size: 14px; font-weight: 600; color: var(--tms-text); }
-.tms-shell .tms-demo-step-see { font-size: 13px; color: var(--tms-muted); }
-.tms-shell .tms-demo-step-missing { font-size: 12px; color: var(--tms-badge-orange); font-style: italic; }
-.tms-shell .tms-demo-evidence { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--tms-muted); }
-.tms-shell .tms-demo-tick { width: 18px; height: 18px; border-radius: 999px; background: var(--tms-primary); color: var(--tms-on-primary); display: inline-flex; align-items: center; justify-content: center; }
-.tms-shell .tms-demo-tick.tms-demo-tick-off { background: var(--tms-border); color: var(--tms-muted); }
-.tms-shell .tms-demo-empty { padding: 40px; text-align: center; color: var(--tms-muted); }
-.tms-shell .tms-demo-reason { font-size: 13px; color: var(--tms-muted); font-style: italic; }
-.tms-shell .tms-demo-title { font-size: 16px; font-weight: 600; margin: 0; }
-
-.tms-shell .tms-due { color: var(--tms-badge-orange); font-weight: 500; }
-
-/* ── Step P — shipment detail additions ───────────────────────────────────── */
-
-/* Building banner (P5) */
-.tms-shell .tms-building-banner { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--tms-badge-orange); border-radius: var(--tms-radius); background: var(--tms-badge-orange-tint); color: var(--tms-text); font-size: 13px; }
-.tms-shell .tms-building-banner-main { display: inline-flex; align-items: center; gap: 8px; }
-.tms-shell .tms-building-banner-needs { font-weight: 500; }
-.tms-shell .tms-building-banner-chips { display: flex; flex-wrap: wrap; gap: 6px; flex: 1 1 auto; }
-.tms-shell .tms-building-chip { font-size: 11px; }
-
-/* Postings section (P6) */
-.tms-shell .tms-postings-wrap { display: flex; flex-direction: column; gap: 12px; }
-.tms-shell .tms-postings-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.tms-shell .tms-postings-table th { text-align: left; padding: 6px 8px; color: var(--tms-muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; border-bottom: 1px solid var(--tms-border); }
-.tms-shell .tms-postings-table td { padding: 8px; border-bottom: 1px solid var(--tms-border); vertical-align: top; }
-.tms-shell .tms-postings-provider { font-weight: 500; }
-.tms-shell .tms-postings-board-id { display: inline-flex; align-items: center; gap: 6px; }
-.tms-shell .tms-postings-stub { font-size: 10px; }
-.tms-shell .tms-postings-message { color: var(--tms-muted); max-width: 260px; word-break: break-word; }
-.tms-shell .tms-postings-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-
-/* Carrier offers section (P7) */
-.tms-shell .tms-offers-list { display: flex; flex-direction: column; gap: 10px; }
-.tms-shell .tms-offer-row { display: flex; flex-wrap: wrap; gap: 10px; justify-content: space-between; padding: 10px; border: 1px solid var(--tms-border); border-radius: var(--tms-radius); }
-.tms-shell .tms-offer-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
-.tms-shell .tms-offer-carrier { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-.tms-shell .tms-offer-name { font-weight: 500; }
-.tms-shell .tms-offer-source { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; }
-.tms-shell .tms-offer-details { display: flex; flex-wrap: wrap; gap: 12px; color: var(--tms-muted); font-size: 12px; }
-.tms-shell .tms-offer-vetting { display: flex; flex-direction: column; gap: 4px; }
-.tms-shell .tms-offer-blocker { color: var(--tms-badge-red); font-size: 12px; margin: 0; }
-.tms-shell .tms-offer-warning { color: var(--tms-badge-orange); font-size: 12px; margin: 0; }
-.tms-shell .tms-offer-actions { display: flex; align-items: flex-start; gap: 8px; }
-.tms-shell .tms-offer-message-link { color: var(--tms-primary-ink); font-size: 12px; text-decoration: underline; }
-
-/* Shipment thread and check-call plan (P8) */
-.tms-shell .tms-thread-panel { display: flex; flex-direction: column; gap: 12px; }
-.tms-shell .tms-thread-flag { display: flex; gap: 10px; padding: 10px 12px; border: 1px solid var(--tms-badge-red); border-radius: var(--tms-radius); background: var(--tms-badge-red-tint); color: var(--tms-text); font-size: 13px; }
-.tms-shell .tms-thread-flag p { margin: 2px 0 0; }
-.tms-shell .tms-checkcall-editor { display: flex; flex-direction: column; gap: 14px; }
-.tms-shell .tms-checkcall-channels { display: flex; flex-wrap: wrap; gap: 10px; }
-.tms-shell .tms-checkcall-channel { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border: 1px solid var(--tms-border); border-radius: var(--tms-radius); font-size: 13px; cursor: pointer; }
-.tms-shell .tms-checkcall-channel-disabled { opacity: 0.55; cursor: not-allowed; background: var(--tms-input); }
-.tms-shell .tms-checkcall-channel input { margin: 0; accent-color: var(--tms-primary); }
-.tms-shell .tms-checkcall-channel-reason { color: var(--tms-muted); font-size: 11px; }
-.tms-shell .tms-checkcall-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-.tms-shell .tms-checkcall-result { padding: 8px; border: 1px solid var(--tms-border); border-radius: var(--tms-radius); background: var(--tms-card); font-size: 13px; }
-.tms-shell .tms-thread-list { display: flex; flex-direction: column; gap: 10px; list-style: none; margin: 0; padding: 0; }
-.tms-shell .tms-thread-row { display: flex; }
-.tms-shell .tms-thread-out { justify-content: flex-end; }
-.tms-shell .tms-thread-in { justify-content: flex-start; }
-.tms-shell .tms-thread-bubble { max-width: 80%; padding: 10px 12px; border-radius: var(--tms-radius); border: 1px solid var(--tms-border); background: var(--tms-card); font-size: 13px; }
-.tms-shell .tms-thread-out .tms-thread-bubble { background: var(--tms-primary-tint); }
-.tms-shell .tms-thread-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 6px; color: var(--tms-muted); font-size: 11px; }
-.tms-shell .tms-thread-party { font-weight: 500; color: var(--tms-text); }
-.tms-shell .tms-thread-time { margin-left: auto; }
-.tms-shell .tms-thread-subject { font-weight: 500; margin: 0 0 4px; }
-.tms-shell .tms-thread-body { margin: 0; white-space: pre-wrap; word-break: break-word; }
-.tms-shell .tms-thread-not-sent { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--tms-border); color: var(--tms-muted); font-size: 12px; }
-.tms-shell .tms-thread-not-sent p { margin: 4px 0 0; }
-.tms-shell .tms-thread-composer { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--tms-border); }
-.tms-shell .tms-thread-composer-top { display: flex; flex-wrap: wrap; gap: 8px; }
-.tms-shell .tms-thread-composer-top > * { flex: 1 1 auto; min-width: 140px; }
-.tms-shell .tms-thread-composer-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
-.tms-shell .tms-thread-signature { color: var(--tms-muted); font-size: 12px; font-style: italic; }
-.tms-shell .tms-thread-channel-reason { white-space: nowrap; }
-.tms-shell .tms-checkcall-source { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.tms-shell .tms-checkcall-source .tms-field-label { margin: 0; }
-.tms-shell .tms-thread-author-kind { color: var(--tms-muted); font-size: 11px; text-transform: lowercase; }
-.tms-shell .tms-grid-col-2 { grid-column: span 2; }
-
-/* ── Dispatch workstation (P6/P7) ─────────────────────────────────────────── */
-
-.tms-shell .tms-dispatch-posting-row,
-.tms-shell .tms-dispatch-offer-row {
-  border-color: var(--tms-border);
-  background: var(--tms-card-body);
-}
-
-.tms-shell .tms-text-destructive {
-  color: var(--tms-badge-red);
-}
-
-.tms-shell .tms-badge-stub {
-  display: inline-flex;
-  align-items: center;
-  padding: 1px 6px;
-  border-radius: 999px;
-  background: var(--tms-count-bg);
-  color: var(--tms-count-ink);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-}
-
-/* ── POD review (P9) ─────────────────────────────────────────────────────── */
-.tms-shell .tms-pod-flag {
-  display: flex;
-  gap: 10px;
-  align-items: flex-start;
-  padding: 10px 12px;
-  border: 1px solid var(--tms-badge-red);
-  border-radius: 6px;
-  background: var(--tms-badge-red-tint);
-  color: var(--tms-text);
-  margin-bottom: 12px;
-}
-
-.tms-shell .tms-pod-flag strong {
-  color: var(--tms-badge-red);
-}
-
-.tms-shell .tms-pod-request-line {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 12px;
-}
-
-.tms-shell .tms-pod-doc-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.tms-shell .tms-pod-doc {
-  border: 1px solid var(--tms-border);
-  border-radius: 6px;
-  padding: 10px;
-}
-
-.tms-shell .tms-pod-doc-main {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.tms-shell .tms-pod-reject-reason {
-  margin-top: 6px;
-  font-size: 12px;
-  color: var(--tms-badge-red);
-}
-
-.tms-shell .tms-pod-outcome {
-  margin-top: 10px;
-  padding: 8px;
-  background: var(--tms-topbar);
-  border-radius: 4px;
-}
-
-.tms-shell .tms-pod-outcome-reasons {
-  margin-top: 6px;
-  padding-left: 16px;
-  font-size: 12px;
-  color: var(--tms-text);
-}
-
-/* ── Ready for billing (P10) ─────────────────────────────────────────────── */
-.tms-shell .tms-ready-refusal {
-  border-left: 3px solid var(--tms-badge-red);
-}
-
-.tms-shell .tms-ready-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.tms-shell .tms-ready-row {
-  border: 1px solid var(--tms-border);
-  border-radius: 6px;
-  padding: 12px;
-}
-
-.tms-shell .tms-ready-shipment-cell {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.tms-shell .tms-ready-shipment-head {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.tms-shell .tms-ready-customer {
-  font-size: 13px;
-  color: var(--tms-text);
-}
-
-.tms-shell .tms-ready-charge {
-  font-size: 14px;
-  font-weight: 600;
-}
-
-.tms-shell .tms-ready-delivered {
-  font-size: 12px;
-  color: var(--tms-muted);
-}
-
-.tms-shell .tms-ready-docs,
-.tms-shell .tms-ready-refs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
+.tms-shell .tms-grid-col-2,
+.tms-portal .tms-grid-col-2 { grid-column: span 2; }

@@ -8,13 +8,13 @@
  *
  * Routing lives in the sidebar agent; this module only renders `/tms/dispatch`.
  */
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Truck } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { BoardFilterPanel } from '@/features/shipments/board/BoardFilterPanel'
 import { teamRepIdsFor, useBoardFilters } from '@/features/shipments/board/useBoardFilters'
-import { TmsBadge, TmsButton, TmsCard, TmsEmptyState } from '@/features/tms/kit'
+import { TmsBadge, TmsButton, TmsCard, TmsEmptyState, TmsMetaList } from '@/features/tms/kit'
 import type { TmsTone } from '@/features/tms/kit'
 import { useShipmentActions, type ShipmentActions } from '@/features/shipments/useShipmentActions'
 import { useAuth } from '@/hooks/useAuth'
@@ -69,6 +69,7 @@ import type {
   TmsSettings,
 } from '@/types/tms'
 import type { CarrierOfferVetting } from '@/lib/apiClient'
+import { mcpPacketStanding, rateConMcpRefusal } from '@/lib/mcpPacket'
 
 const BASE_FILTERS = { ...EMPTY_BOARD_FILTER_SET, statuses: ['OPEN', 'COVERED'] as BoardStatusKey[] }
 
@@ -195,7 +196,7 @@ export function DispatchWorkstation() {
 
   return (
     <div className="tms-board-shell flex h-full flex-col" data-testid="dispatch-workstation">
-      <header className="tms-board-toolbar flex items-center justify-between border-b px-3 py-2">
+      <header className="tms-board-toolbar flex items-center justify-between border-b border-[color:var(--tms-border)] px-3 py-2">
         <div className="flex items-center gap-3">
           <Truck size={18} />
           <span className="font-semibold">Dispatch</span>
@@ -376,8 +377,8 @@ export function DispatchBody({
 
   return (
     <div className="flex flex-1 overflow-hidden">
-      <div className="flex w-1/2 min-w-0 flex-col border-r">
-        <div className="border-b px-3 py-2 text-sm font-medium tms-muted">
+      <div className="flex w-1/2 min-w-0 flex-col border-r border-[color:var(--tms-border)]">
+        <div className="border-b border-[color:var(--tms-border)] px-3 py-2 text-sm font-medium tms-muted">
           Coverage queue ({queueRows.length})
         </div>
         <div className="flex-1 overflow-y-auto p-3 space-y-3">
@@ -483,7 +484,7 @@ function CoverageQueueCard({ row, customers, activeLeg, postings, offers, select
       onClick={onClick}
       data-testid="coverage-card"
       data-selected={selected}
-      className={`w-full text-left rounded-lg border p-3 transition-colors hover:bg-[var(--tms-surface-hover)] ${
+      className={`tms-card w-full text-left rounded-lg border border-[color:var(--tms-border)] p-3 transition-colors hover:bg-[var(--tms-surface-hover)] ${
         selected ? 'ring-1 ring-[var(--tms-primary)] bg-[var(--tms-surface-selected)]' : ''
       }`}
     >
@@ -501,12 +502,17 @@ function CoverageQueueCard({ row, customers, activeLeg, postings, offers, select
         <TmsBadge tone={COVERAGE_TONE[state]}>{COVERAGE_LABEL[state]}</TmsBadge>
       </div>
 
-      <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
-        <Fact label="Equipment" value={row.equipmentType ?? '—'} />
-        <Fact label="Commodity" value={row.commodity ?? '—'} />
-        <Fact label="Customer rate" value={row.revenueCents != null ? `$${formatCents(row.revenueCents)}` : '—'} />
-        <Fact label="Posted" value={posted} />
-      </div>
+      <TmsMetaList
+        className="mt-3"
+        columns={2}
+        dense
+        items={[
+          { label: 'Equipment', value: row.equipmentType },
+          { label: 'Commodity', value: row.commodity },
+          { label: 'Customer rate', value: row.revenueCents != null ? `$${formatCents(row.revenueCents)}` : null },
+          { label: 'Posted', value: posted },
+        ]}
+      />
 
       {offers.length > 0 && (
         <div className="mt-2 text-xs tms-muted" data-testid="offer-count">
@@ -514,15 +520,6 @@ function CoverageQueueCard({ row, customers, activeLeg, postings, offers, select
         </div>
       )}
     </button>
-  )
-}
-
-function Fact({ label, value }: { label: string; value: ReactNode }) {
-  return (
-    <div>
-      <dt className="text-xs tms-muted">{label}</dt>
-      <dd className="truncate">{value}</dd>
-    </div>
   )
 }
 
@@ -534,25 +531,17 @@ function ActiveLegCard({ leg }: ActiveLegCardProps) {
   return (
     <TmsCard title="Covering now">
       {leg ? (
-        <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-          <Fact label="Carrier" value={leg.carrierName ?? '—'} />
-          <Fact label="MC" value={leg.carrierMc ?? '—'} />
-          <Fact
-            label="Dispatcher"
-            value={
-              [leg.dispatcherName, leg.dispatcherPhone].filter(Boolean).join(' · ') || '—'
-            }
-          />
-          <Fact label="Driver" value={leg.driverName ?? '—'} />
-          <Fact
-            label="Rate"
-            value={leg.carrierRateCents != null ? `$${formatCents(leg.carrierRateCents)}` : '—'}
-          />
-          <Fact
-            label="Rate con"
-            value={RATE_CON_STATUS_LABELS[leg.rateConStatus ?? 'NOT_SENT']}
-          />
-        </dl>
+        <TmsMetaList
+          columns={2}
+          items={[
+            { label: 'Carrier', value: leg.carrierName },
+            { label: 'MC', value: leg.carrierMc },
+            { label: 'Dispatcher', value: [leg.dispatcherName, leg.dispatcherPhone].filter(Boolean).join(' · ') },
+            { label: 'Driver', value: leg.driverName },
+            { label: 'Rate', value: leg.carrierRateCents != null ? `$${formatCents(leg.carrierRateCents)}` : null },
+            { label: 'Rate con', value: RATE_CON_STATUS_LABELS[leg.rateConStatus ?? 'NOT_SENT'] },
+          ]}
+        />
       ) : (
         <p className="text-sm tms-muted">Nothing is covering this shipment yet.</p>
       )}
@@ -609,6 +598,11 @@ function SuggestionsCard({
       }
       try {
         const carrierBundle = await getCarrierBundle(suggestion.carrier.id)
+        const standing = mcpPacketStanding(carrierBundle.carrier)
+        if (!standing.completed) {
+          toast.error(rateConMcpRefusal(carrierBundle.carrier?.name ?? suggestion.carrier.name, standing))
+          return
+        }
         const doc = await buildRateConPdf(
           buildRateConInput(
             selectedBundle,
@@ -644,16 +638,20 @@ function SuggestionsCard({
         <p className="text-sm tms-muted">No carriers have run this lane before.</p>
       ) : (
         <div className="space-y-3">
-          {suggestions.map((suggestion) => (
-            <SuggestionRow
-              key={suggestion.carrier.id}
-              suggestion={suggestion}
-              active={activeLeg?.carrierId === suggestion.carrier.id}
-              busy={actions.busy}
-              onAssign={() => { void handleAssign(suggestion) }}
-              onSendRateCon={() => { void handleSendRateCon(suggestion) }}
-            />
-          ))}
+          {suggestions.map((suggestion) => {
+            const standing = mcpPacketStanding(suggestion.carrier)
+            return (
+              <SuggestionRow
+                key={suggestion.carrier.id}
+                suggestion={suggestion}
+                active={activeLeg?.carrierId === suggestion.carrier.id}
+                busy={actions.busy}
+                rateConBlockedReason={standing.completed ? null : standing.reason}
+                onAssign={() => { void handleAssign(suggestion) }}
+                onSendRateCon={() => { void handleSendRateCon(suggestion) }}
+              />
+            )
+          })}
         </div>
       )}
     </TmsCard>
@@ -664,15 +662,17 @@ interface SuggestionRowProps {
   suggestion: SuggestedCarrier
   active: boolean
   busy: boolean
+  /** Why "Send rate con" is off for this carrier (no completed MyCarrierPackets packet), or null. */
+  rateConBlockedReason: string | null
   onAssign: () => void
   onSendRateCon: () => void
 }
 
-function SuggestionRow({ suggestion, active, busy, onAssign, onSendRateCon }: SuggestionRowProps) {
+function SuggestionRow({ suggestion, active, busy, rateConBlockedReason, onAssign, onSendRateCon }: SuggestionRowProps) {
   const { carrier, loadsOnLane, lastRateCents, lastLoadAt, flags, clean } = suggestion
   return (
     <div
-      className={`rounded border p-3 ${clean ? '' : 'bg-[var(--tms-surface-subtle)]'}`}
+      className={`tms-card rounded border border-[color:var(--tms-border)] p-3 ${clean ? '' : 'bg-[var(--tms-surface-subtle)]'}`}
       data-testid="suggested-carrier"
     >
       <div className="flex items-start justify-between gap-3">
@@ -710,12 +710,17 @@ function SuggestionRow({ suggestion, active, busy, onAssign, onSendRateCon }: Su
         </TmsButton>
         <TmsButton
           size="sm"
-          disabled={busy || !active}
+          disabled={busy || !active || rateConBlockedReason != null}
           onClick={onSendRateCon}
         >
           Send rate con
         </TmsButton>
       </div>
+      {rateConBlockedReason && (
+        <p className="mt-2 text-xs tms-muted" data-testid="rate-con-blocked-reason">
+          Can't send a rate con yet — {carrier.name} {rateConBlockedReason}
+        </p>
+      )}
     </div>
   )
 }

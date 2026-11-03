@@ -14,9 +14,9 @@
  * server's check.
  */
 import { useRef, useState } from 'react'
-import { AlertTriangle, FileUp, Upload } from 'lucide-react'
+import { FileUp, Upload } from 'lucide-react'
 import { toast } from 'sonner'
-import { TmsButton, TmsDialog, TmsSelect } from '@/features/tms/kit'
+import { TmsAlert, TmsButton, TmsDialog, TmsSelect } from '@/features/tms/kit'
 import { Label } from '@/components/ui/label'
 import { commitDocument, prepareDocumentUpload, putPresignedFile } from '@/lib/apiClient'
 import {
@@ -157,7 +157,7 @@ export function UploadDocumentDialog({ bundle, onClose, onSaved }: {
           onDragOver={(e) => { e.preventDefault(); setDragging(true) }}
           onDragLeave={() => setDragging(false)}
           onDrop={(e) => { e.preventDefault(); setDragging(false); take(e.dataTransfer.files?.[0]) }}
-          className={`rounded-[var(--tms-radius)] border border-dashed p-4 text-center text-sm ${dragging ? 'border-primary bg-[color:var(--tms-primary)]/5' : 'border-[color:var(--tms-border)]'}`}
+          className={`rounded-[var(--tms-radius)] border border-dashed p-4 text-center text-sm ${dragging ? 'border-[color:var(--tms-primary)] bg-[color:var(--tms-primary-tint)]' : 'border-[color:var(--tms-border)]'}`}
         >
           <FileUp size={18} className="mx-auto mb-1 tms-muted" />
           {file ? (
@@ -235,11 +235,7 @@ export function UploadDocumentDialog({ bundle, onClose, onSaved }: {
           </div>
         </div>
 
-        {error && (
-          <p className="flex items-start gap-2 rounded-[var(--tms-radius)] border border-[color:var(--tms-badge-red)]  p-2 text-xs text-[color:var(--tms-badge-red)]">
-            <AlertTriangle size={14} className="mt-0.5 shrink-0" />{error}
-          </p>
-        )}
+        {error && <TmsAlert tone="red">{error}</TmsAlert>}
     </TmsDialog>
   )
 }

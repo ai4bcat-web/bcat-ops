@@ -15,6 +15,7 @@ import {
 import {
   TmsBadge, TmsButton, TmsDialog, TmsField, TmsIconButton, TmsInput, TmsListPage,
 } from '@/features/tms/kit'
+import { TmsAlert, TmsMetaList } from '@/features/tms/kit'
 import type { ColumnDef } from '@/features/tms/kit'
 import { useVendorPayables } from '@/hooks/useVendorPayables'
 import { findVendorApDuplicates } from '@/lib/vendorApDuplicates'
@@ -152,12 +153,16 @@ function LinkedInvoiceDetails({ invoiceId, canSeeInvoices }: { invoiceId: string
           </Link>
         )}
       </div>
-      <div className="tms-grid tms-grid-2">
-        <Field label="Equipment" value={equipment ? `#${equipment.unitNumber}${equipment.nickname ? ` · ${equipment.nickname}` : ''}` : invoice.equipmentId} />
-        <Field label="Invoice date" value={invoice.date || '—'} />
-        <Field label="Amount" value={formatCents(invoice.amount)} />
-        <Field label="Invoice #" value={invoice.invoiceNumber || '—'} />
-      </div>
+      <TmsMetaList
+        columns={2}
+        dense
+        items={[
+          { label: 'Equipment', value: equipment ? `#${equipment.unitNumber}${equipment.nickname ? ` · ${equipment.nickname}` : ''}` : invoice.equipmentId },
+          { label: 'Invoice date', value: invoice.date || '—' },
+          { label: 'Amount', value: formatCents(invoice.amount) },
+          { label: 'Invoice #', value: invoice.invoiceNumber || '—' },
+        ]}
+      />
       {invoice.description && (
         <div className="tms-muted" style={{ fontSize: 12, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>
           {invoice.description}
@@ -169,15 +174,6 @@ function LinkedInvoiceDetails({ invoiceId, canSeeInvoices }: { invoiceId: string
           {invoice.paymentDate && <span style={{ marginLeft: 6 }}>{invoice.paymentDate}</span>}
         </div>
       )}
-    </div>
-  )
-}
-
-function Field({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <div className="tms-field-label">{label}</div>
-      <div style={{ fontSize: 13, fontWeight: 500 }}>{value}</div>
     </div>
   )
 }
@@ -392,15 +388,23 @@ function DetailsDialog({
           </Section>
         ) : (
           <Section title="Invoice details">
-            <div className="tms-grid tms-grid-2">
-              <Field label="Vendor" value={item.vendor || '—'} />
-              <Field label="Invoice #" value={item.invoiceNumber || '—'} />
-              <Field label="Amount" value={formatAmount(item.amount)} />
-              <Field label="Invoice date" value={item.invoiceDate || '—'} />
-              <Field label="Due date" value={item.dueDate || '—'} />
-              <Field label="Vendor email" value={item.vendorEmail || item.fromEmail || '—'} />
-              {item.confirmationSentAt ? <Field label="Confirmation" value={`Emailed to ${item.confirmationSentTo} · ${formatReceivedAt(item.confirmationSentAt)}`} /> : null}
-            </div>
+            <TmsMetaList
+              columns={2}
+              dense
+              items={[
+                { label: 'Vendor', value: item.vendor || '—' },
+                { label: 'Invoice #', value: item.invoiceNumber || '—' },
+                { label: 'Amount', value: formatAmount(item.amount) },
+                { label: 'Invoice date', value: item.invoiceDate || '—' },
+                { label: 'Due date', value: item.dueDate || '—' },
+                { label: 'Vendor email', value: item.vendorEmail || item.fromEmail || '—' },
+                {
+                  label: 'Confirmation',
+                  value: `Emailed to ${item.confirmationSentTo} · ${item.confirmationSentAt ? formatReceivedAt(item.confirmationSentAt) : ''}`,
+                  hidden: !item.confirmationSentAt,
+                },
+              ]}
+            />
             {item.description && <div className="tms-muted" style={{ fontSize: 13, marginTop: 8, whiteSpace: 'pre-wrap' }}>{item.description}</div>}
           </Section>
         )}
@@ -416,9 +420,7 @@ function DetailsDialog({
                 Loading full message…
               </div>
             ) : error ? (
-              <div style={{ padding: 12, borderRadius: 'var(--tms-radius)', background: 'rgba(237,90,118,0.14)', border: '1px solid var(--tms-badge-red)', color: 'var(--tms-badge-red)', fontSize: 13 }}>
-                {error}
-              </div>
+              <TmsAlert tone="red">{error}</TmsAlert>
             ) : item.emailBody ? (
               <pre
                 style={{

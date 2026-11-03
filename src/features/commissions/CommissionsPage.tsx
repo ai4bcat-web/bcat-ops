@@ -19,7 +19,7 @@ import { Link } from 'react-router-dom'
 import { Coins, Download, RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
 import {
-  TmsBadge, TmsButton, TmsDialog, TmsField, TmsInput, TmsSelect, TmsTabs, TmsTextarea,
+  TmsAlert, TmsApprovalCard, TmsBadge, TmsButton, TmsDialog, TmsField, TmsInput, TmsMetaList, TmsSelect, TmsTabs, TmsTextarea, TmsTimeline,
 } from '@/features/tms/kit'
 import type { TmsTone } from '@/features/tms/kit'
 import { useAuth } from '@/hooks/useAuth'
@@ -387,86 +387,96 @@ function CommissionRow({
   const flagged = row.needsReview === true && showReview === true
 
   return (
-    <li style={flagged ? { ...PANEL, borderColor: 'var(--tms-badge-orange)' } : PANEL}>
-      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
-        <span style={{ fontWeight: 500 }}>{row.shipmentNumber ?? row.invoiceNumber ?? row.orderId}</span>
-        <span className="tms-muted" style={{ fontSize: 14 }}>{row.customerName ?? '—'}</span>
-        <TmsBadge tone="gray">{roleLabel(row)}</TmsBadge>
-        {row.kind && row.kind !== 'EARNED' && <TmsBadge tone="purple">{kindLabel(row.kind)}</TmsBadge>}
-        <TmsBadge tone={BADGE_TONES[statusTone(row.status)] ?? 'gray'}>{statusLabel(row.status)}</TmsBadge>
-        <span style={{ marginLeft: 'auto', fontSize: 16, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
-          {formatCents(row.netCents)}
-        </span>
-      </div>
-
-      <dl className="tms-grid tms-grid-4" style={{ margin: 0, fontSize: 12, gap: 8 }}>
-        <Field label="Rep" value={row.repName ?? row.repId} />
-        <Field label="Basis" value={`${row.basis ?? '—'} · ${formatCents(row.basisCents)}`} />
-        <Field label="Rate" value={rateLabel(row)} />
-        <Field label="Plan said" value={formatCents(row.amountCents)} />
-      </dl>
-
-      {reason && (
-        <p style={{ margin: 0, border: '1px solid var(--tms-badge-orange)', borderRadius: 4, padding: '4px 8px', fontSize: 12 }}>
-          Needs a look: this one {reason}.
-        </p>
-      )}
-
-      {row.counterCents != null && (
-        <p className="tms-field-hint" style={{ margin: 0 }}>
-          Countered at {formatCents(row.counterCents)} by {row.counterBy ?? 'unknown'}
-          {row.counterNote ? ` — ${row.counterNote}` : ''}
-        </p>
-      )}
-      {row.overrideCents != null && (
-        <p className="tms-field-hint" style={{ margin: 0 }}>
-          Overridden to {formatCents(row.overrideCents)} by {row.overrideBy ?? 'unknown'}
-          {row.overrideNote ? ` — ${row.overrideNote}` : ''}
-        </p>
-      )}
-      {row.cancelReason && (
-        <p style={{ margin: 0, fontSize: 12, color: 'var(--tms-badge-red)' }}>Cancelled: {row.cancelReason}</p>
-      )}
-
-      {events.length > 0 && (
-        <ul className="tms-muted" style={{ ...LIST, gap: 2, fontSize: 12 }}>
-          {events.map((event, i) => (
-            <li key={`${event.at}:${i}`}>
-              {formatDateTime(event.at)} · {event.action} · {event.by}
-              {event.amountCents != null ? ` · ${formatCents(event.amountCents)}` : ''}
-              {event.note ? ` — ${event.note}` : ''}
-            </li>
-          ))}
-        </ul>
-      )}
-
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-        {onApprove && state.canApprove && (
-          <TmsButton variant="primary" size="sm" aria-label={`Approve ${row.id}`} disabled={busy} onClick={() => onApprove(row)}>
-            Approve
-          </TmsButton>
+    <li>
+      <TmsApprovalCard
+        className={flagged ? 'tms-approval-flagged' : undefined}
+        title={(
+          <>
+            <span>{row.shipmentNumber ?? row.invoiceNumber ?? row.orderId}</span>
+            <span className="tms-muted tms-approval-sub">{row.customerName ?? '—'}</span>
+          </>
         )}
-        {onAccept && state.canAcceptCounter && (
-          <TmsButton variant="primary" size="sm" aria-label={`Accept counter on ${row.id}`} disabled={busy} onClick={() => onAccept(row)}>
-            Accept
-          </TmsButton>
+        chip={(
+          <>
+            <TmsBadge tone="gray">{roleLabel(row)}</TmsBadge>
+            {row.kind && row.kind !== 'EARNED' && <TmsBadge tone="purple">{kindLabel(row.kind)}</TmsBadge>}
+            <TmsBadge tone={BADGE_TONES[statusTone(row.status)] ?? 'gray'}>{statusLabel(row.status)}</TmsBadge>
+          </>
         )}
-        {onCounter && state.canCounter && (
-          <TmsButton size="sm" aria-label={`Counter ${row.id}`} disabled={busy} onClick={() => onCounter(row)}>
-            Counter
-          </TmsButton>
+        meta={<span className="tms-approval-amount">{formatCents(row.netCents)}</span>}
+        actions={(
+          <>
+            {onApprove && state.canApprove && (
+              <TmsButton variant="approve" size="sm" aria-label={`Approve ${row.id}`} disabled={busy} onClick={() => onApprove(row)}>
+                Approve
+              </TmsButton>
+            )}
+            {onAccept && state.canAcceptCounter && (
+              <TmsButton variant="primary" size="sm" aria-label={`Accept counter on ${row.id}`} disabled={busy} onClick={() => onAccept(row)}>
+                Accept
+              </TmsButton>
+            )}
+            {onCounter && state.canCounter && (
+              <TmsButton size="sm" aria-label={`Counter ${row.id}`} disabled={busy} onClick={() => onCounter(row)}>
+                Counter
+              </TmsButton>
+            )}
+            {onOverride && state.canOverride && (
+              <TmsButton size="sm" aria-label={`Override ${row.id}`} disabled={busy} onClick={() => onOverride(row)}>
+                Override
+              </TmsButton>
+            )}
+            {onCancel && state.canCancel && (
+              <TmsButton size="sm" variant="destructive" aria-label={`Cancel ${row.id}`} disabled={busy} onClick={() => onCancel(row)}>
+                Cancel
+              </TmsButton>
+            )}
+          </>
         )}
-        {onOverride && state.canOverride && (
-          <TmsButton size="sm" aria-label={`Override ${row.id}`} disabled={busy} onClick={() => onOverride(row)}>
-            Override
-          </TmsButton>
+      >
+        <TmsMetaList
+          columns={4}
+          dense
+          items={[
+            { label: 'Rep', value: row.repName ?? row.repId },
+            { label: 'Basis', value: `${row.basis ?? '—'} · ${formatCents(row.basisCents)}` },
+            { label: 'Rate', value: rateLabel(row) },
+            { label: 'Plan said', value: formatCents(row.amountCents) },
+          ]}
+        />
+
+        {reason && (
+          <TmsAlert tone="orange">Needs a look: this one {reason}.</TmsAlert>
         )}
-        {onCancel && state.canCancel && (
-          <TmsButton size="sm" variant="destructive" aria-label={`Cancel ${row.id}`} disabled={busy} onClick={() => onCancel(row)}>
-            Cancel
-          </TmsButton>
+
+        {row.counterCents != null && (
+          <p className="tms-field-hint tms-flush">
+            Countered at {formatCents(row.counterCents)} by {row.counterBy ?? 'unknown'}
+            {row.counterNote ? ` — ${row.counterNote}` : ''}
+          </p>
         )}
-      </div>
+        {row.overrideCents != null && (
+          <p className="tms-field-hint tms-flush">
+            Overridden to {formatCents(row.overrideCents)} by {row.overrideBy ?? 'unknown'}
+            {row.overrideNote ? ` — ${row.overrideNote}` : ''}
+          </p>
+        )}
+        {row.cancelReason && (
+          <TmsAlert tone="red">Cancelled: {row.cancelReason}</TmsAlert>
+        )}
+
+        {events.length > 0 && (
+          <TmsTimeline
+            compact
+            ariaLabel="Commission events"
+            items={events.map((event, i) => ({
+              id: `${event.at}:${i}`,
+              title: `${event.action} · ${event.by}${event.amountCents != null ? ` · ${formatCents(event.amountCents)}` : ''}${event.note ? ` — ${event.note}` : ''}`,
+              at: formatDateTime(event.at),
+            }))}
+          />
+        )}
+      </TmsApprovalCard>
     </li>
   )
 }
@@ -1035,14 +1045,5 @@ function PayPeriodDialog({ period, today, busy, onClose, onConfirm }: {
         </TmsField>
       </div>
     </TmsDialog>
-  )
-}
-
-function Field({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <dt className="tms-field-label" style={{ textTransform: 'uppercase', letterSpacing: '.04em' }}>{label}</dt>
-      <dd style={{ margin: 0 }}>{value}</dd>
-    </div>
   )
 }

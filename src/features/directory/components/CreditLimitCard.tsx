@@ -1,5 +1,4 @@
-import { useMemo } from 'react'
-import { TmsCard, TmsField, TmsInput } from '@/features/tms/kit'
+import { TmsAlert, TmsBadge, TmsCard, TmsField, TmsInput, TmsSegmentedBar, TmsStatRow } from '@/features/tms/kit'
 import { MoneyField } from './MoneyField'
 import type { CreditPolicy, CreditSummary, CreditBucket } from '@/lib/customerCredit'
 
@@ -10,13 +9,6 @@ const bucketLabels: Record<CreditBucket, string> = {
   ACTIVE: 'Active',
   DELIVERED: 'Delivered',
   INVOICED: 'Invoiced',
-}
-
-const bucketColors: Record<CreditBucket, string> = {
-  OPEN: 'var(--tms-badge-blue)',
-  ACTIVE: 'var(--tms-badge-orange)',
-  DELIVERED: 'var(--tms-badge-green)',
-  INVOICED: 'var(--tms-badge-purple)',
 }
 
 function formatCents(cents: number | null): string {
@@ -37,66 +29,35 @@ interface CreditLimitCardProps {
 }
 
 export function CreditLimitCard({ policy, summary, editable, onChange }: CreditLimitCardProps) {
-  const totalExposure = summary.usedCents
-  const maxBar = useMemo(() => {
-    const limit = policy.creditLimitCents ?? 0
-    return Math.max(limit, totalExposure, 1)
-  }, [policy.creditLimitCents, totalExposure])
-
   return (
     <TmsCard
       title="Credit"
-      actions={summary.warning ? <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--tms-badge-orange)' }}>Warning</span> : null}
+      actions={summary.warning ? <TmsBadge tone="orange">Warning</TmsBadge> : null}
     >
       <div style={{ display: 'grid', gap: 16 }}>
-        <div className="tms-grid tms-grid-4">
-          <div>
-            <p className="tms-field-label">Limit</p>
-            <p style={{ fontWeight: 600, color: policy.source.creditLimitCents === 'org' ? 'var(--tms-muted)' : undefined }}>
-              {formatCents(policy.creditLimitCents)}
-              {policy.source.creditLimitCents === 'org' && <span style={{ marginLeft: 4, fontSize: 10 }}>(org default)</span>}
-            </p>
-          </div>
-          <div>
-            <p className="tms-field-label">Used</p>
-            <p style={{ fontWeight: 600 }}>{formatCents(summary.usedCents)}</p>
-          </div>
-          <div>
-            <p className="tms-field-label">Available</p>
-            <p style={{ fontWeight: 600, color: summary.availableCents != null && summary.availableCents < 0 ? 'var(--tms-badge-red)' : undefined }}>
-              {formatCents(summary.availableCents)}
-            </p>
-          </div>
-          <div>
-            <p className="tms-field-label">Usage</p>
-            <p style={{ fontWeight: 600 }}>{formatBps(summary.usageBps)}</p>
-          </div>
-        </div>
+        <TmsStatRow
+          compact
+          columns={4}
+          aria-label="Credit usage"
+          items={[
+            { key: 'limit', label: 'Limit', value: formatCents(policy.creditLimitCents), sub: policy.source.creditLimitCents === 'org' ? '(org default)' : null },
+            { key: 'used', label: 'Used', value: formatCents(summary.usedCents) },
+            { key: 'available', label: 'Available', value: formatCents(summary.availableCents), tone: summary.availableCents != null && summary.availableCents < 0 ? 'bad' : 'default' },
+            { key: 'usage', label: 'Usage', value: formatBps(summary.usageBps) },
+          ]}
+        />
 
-        <div style={{ display: 'grid', gap: 6 }}>
-          {BUCKET_ORDER.map((bucket) => {
-            const amount = summary.byBucket[bucket]
-            const pct = maxBar > 0 ? Math.round((amount / maxBar) * 100) : 0
-            return (
-              <div key={bucket} style={{ display: 'grid', gap: 4 }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 12 }}>
-                  <span className="tms-muted">{bucketLabels[bucket]}</span>
-                  <span style={{ fontWeight: 600 }}>{formatCents(amount)}</span>
-                </div>
-                <div style={{ height: 8, width: '100%', borderRadius: 999, background: 'var(--tms-input)', overflow: 'hidden' }}>
-                  <div style={{ height: '100%', borderRadius: 999, width: `${pct}%`, background: bucketColors[bucket] }} />
-                </div>
-              </div>
-            )
-          })}
-        </div>
+        <TmsSegmentedBar
+          ariaLabel="Credit exposure by stage"
+          segments={BUCKET_ORDER.map((bucket) => ({ key: bucket, label: `${bucketLabels[bucket]} ${formatCents(summary.byBucket[bucket])}`, value: summary.byBucket[bucket] }))}
+        />
 
         {summary.blockReasons.length > 0 && (
-          <div style={{ borderRadius: 'var(--tms-radius)', background: 'rgba(237,90,118,0.14)', padding: 8, fontSize: 12, color: 'var(--tms-badge-red)' }}>
+          <TmsAlert tone="red">
             {summary.blockReasons.map((reason) => (
               <p key={reason}>{reason.replace(/_/g, ' ')}</p>
             ))}
-          </div>
+          </TmsAlert>
         )}
 
         <div className="tms-grid tms-grid-2" style={{ borderTop: '1px solid var(--tms-border)', paddingTop: 12 }}>

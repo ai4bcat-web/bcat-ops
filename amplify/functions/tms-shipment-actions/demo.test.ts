@@ -14,6 +14,7 @@ import {
 import type { Caller } from '../_shared/actionInputs'
 import type { Row } from '../_shared/shipmentStore'
 import { DEMO_STEPS } from '../../../src/lib/demoFlow'
+import { mcpPacketStanding } from '../../../src/lib/mcpPacket'
 
 type TableName = string
 
@@ -609,6 +610,16 @@ describe('demo seed', () => {
     for (const key of required) {
       expect(demoKeys.has(key)).toBe(true)
     }
+  })
+
+  it('seeds only the vetted carrier with a completed MyCarrierPackets packet', async () => {
+    const deps = makeDeps(true)
+    await seedDemoData(deps, {}, caller)
+    const carriers = await scanTable(TABLES.carrier)
+    const standing = (id: string) => mcpPacketStanding(carriers.find((c) => c.id === id))
+    expect(standing('carr-demo-vetted').completed).toBe(true)
+    expect(standing('carr-demo-lapsed').completed).toBe(false)
+    expect(standing('carr-demo-nobuy').completed).toBe(false)
   })
 
   it('creates nothing on a second seed', async () => {

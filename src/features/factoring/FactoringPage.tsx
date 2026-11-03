@@ -2,9 +2,10 @@ import { useEffect, useMemo, useState, useCallback } from 'react'
 import { Loader2, Trash2, FilePlus2 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import {
-  TmsBadge, TmsButton, TmsCard, TmsDialog, TmsIconButton, TmsListPage, TmsSelect,
+  TmsBadge, TmsButton, TmsCard, TmsCountBadge, TmsDialog, TmsIconButton, TmsListPage, TmsSelect, TmsStatRow,
   type ColumnDef, type TmsTone,
 } from '@/features/tms/kit'
+import '@/features/tms/styles/directory.css'
 import { OtrPanel } from './OtrPanel'
 import { LoadDrawer } from '@/features/loads/LoadDrawer'
 import { ShipmentDrawer } from '@/features/shipments/components/ShipmentDrawer'
@@ -204,28 +205,22 @@ function StatusTotals({ items }: { items: FactoringItem[] }) {
 
   return (
     <TmsCard title="What the queue is worth">
-      <div role="group" aria-label="What the queue is worth, by status" className="flex flex-wrap gap-3">
-        {buckets.map(([key, label]) => {
+      <TmsStatRow
+        aria-label="What the queue is worth, by status"
+        columns={4}
+        compact
+        items={buckets.map(([key, label]) => {
           const t = totals[key]
-          return (
-            <div
-              key={key}
-              aria-label={`${label}: ${money(t.total)} across ${t.count} invoices`}
-              className="min-w-[160px] flex-1 px-3 py-2"
-              style={{ border: '1px solid var(--tms-border)', borderRadius: 'var(--tms-radius)' }}
-            >
-              <p className="text-[11px] font-semibold uppercase tracking-wider tms-muted">{label}</p>
-              <p className="text-lg font-bold tabular-nums">{money(t.total)}</p>
-              <p className="text-[11px] tms-muted">
-                {t.count} {t.count === 1 ? 'invoice' : 'invoices'}
-                {t.missingRate > 0 && (
-                  <span className="font-semibold" style={RED}> {'\u00b7'} {t.missingRate} with no rate</span>
-                )}
-              </p>
-            </div>
-          )
+          return {
+            key,
+            label,
+            value: money(t.total),
+            ariaLabel: `${label}: ${money(t.total)} across ${t.count} invoices`,
+            sub: `${t.count} ${t.count === 1 ? 'invoice' : 'invoices'}${t.missingRate > 0 ? ` \u00b7 ${t.missingRate} with no rate` : ''}`,
+            tone: t.missingRate > 0 ? 'warn' : 'default',
+          }
         })}
-      </div>
+      />
     </TmsCard>
   )
 }
@@ -358,30 +353,24 @@ function OtrStatusFlag({ item }: { item: FactoringItem }) {
   const synced = item.otrStatusSyncedAt ? ` · synced ${new Date(item.otrStatusSyncedAt).toLocaleString()}` : ''
   if (!meta) {
     return (
-      <span
+      <TmsBadge
+        tone="gray"
         title={`Submitted to OTR; their board has not reported a status yet${synced}`}
         aria-label={`OTR status for PRO ${item.proNumber}: not reported yet`}
-        className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold tms-muted"
-        style={{ border: '1px dashed var(--tms-border)', whiteSpace: 'nowrap' }}
+        className="tms-otr-unreported"
       >
         OTR: {OTR_UNREPORTED.toLowerCase()}
-      </span>
+      </TmsBadge>
     )
   }
   return (
-    <span
+    <TmsBadge
+      tone={meta.tone}
       title={`${meta.needsAttention ? 'OTR or the broker is waiting on us' : "OTR's board"}${synced}`}
       aria-label={`OTR status for PRO ${item.proNumber}: ${meta.label}`}
-      className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-bold"
-      style={{
-        whiteSpace: 'nowrap',
-        background: meta.tone.bg,
-        color: meta.tone.fg,
-        border: `1px solid ${meta.tone.border}`,
-      }}
     >
       OTR: {meta.label}{meta.needsAttention ? ' ⚠' : ''}
-    </span>
+    </TmsBadge>
   )
 }
 
@@ -719,20 +708,10 @@ export function FactoringPage() {
                       aria-pressed={on}
                       onClick={() => setOtrFilter(on ? null : label)}
                       title={attention ? 'OTR or the broker is waiting on us' : undefined}
-                      className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11.5px] font-bold"
-                      style={{
-                        cursor: 'pointer',
-                        background: meta ? meta.tone.bg : 'transparent',
-                        color: meta ? meta.tone.fg : 'var(--tms-muted)',
-                        border: `${meta ? '1px solid' : '1px dashed'} ${meta ? meta.tone.border : 'var(--tms-border)'}`,
-                        outline: on ? '2px solid var(--tms-primary)' : 'none',
-                        outlineOffset: 1,
-                      }}
+                      className={`tms-badge tms-badge-${meta ? meta.tone : 'gray'} tms-otr-chip${meta ? '' : ' tms-otr-chip-unreported'}${on ? ' tms-active' : ''}`}
                     >
                       {label}{attention ? ' ⚠' : ''}
-                      <span className="rounded-full px-1.5 text-[10px] font-bold" style={{ background: 'rgba(0,0,0,0.15)' }}>
-                        {count}
-                      </span>
+                      <TmsCountBadge count={count} />
                     </button>
                   )
                 })}

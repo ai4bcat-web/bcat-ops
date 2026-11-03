@@ -13,7 +13,7 @@
 import { useEffect, useState } from 'react'
 import { listAuditLogs } from '@/lib/apiClient'
 import { formatDateTime } from '@/lib/date'
-import { TmsCard, TmsBadge } from '@/features/tms/kit'
+import { TmsCard, TmsTimeline } from '@/features/tms/kit'
 import type { AuditLogEntry } from '@/types'
 import type { ShipmentBundle } from '@/types/tms'
 
@@ -61,18 +61,21 @@ export function HistorySection({ bundle }: { bundle: ShipmentBundle }) {
         <p className="tms-muted text-sm">No audited change has been recorded against this shipment.</p>
       )}
       {rows && rows.length > 0 && (
-        <ol className="space-y-2" data-testid="shipment-history">
-          {rows.map((row) => (
-            <li key={row.id} className="border-b border-[color:var(--tms-border)] pb-2 last:border-b-0 last:pb-0">
-              <div className="flex flex-wrap items-center gap-2 text-sm">
-                <TmsBadge tone={row.action.startsWith('VOID') ? 'red' : 'gray'}>{row.action}</TmsBadge>
+        <TmsTimeline
+          data-testid="shipment-history"
+          items={rows.map((row) => ({
+            id: row.id,
+            title: row.action,
+            description: (
+              <>
                 <span>{row.user}</span>
-                <span className="tms-muted ml-auto">{formatDateTime(row.createdAt)}</span>
-              </div>
-              <ChangeSummary changes={row.changes} />
-            </li>
-          ))}
-        </ol>
+                <ChangeSummary changes={row.changes} />
+              </>
+            ),
+            at: formatDateTime(row.createdAt),
+            tone: row.action.startsWith('VOID') ? 'red' : 'gray',
+          }))}
+        />
       )}
     </TmsCard>
   )

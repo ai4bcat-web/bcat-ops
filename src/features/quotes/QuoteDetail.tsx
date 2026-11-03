@@ -21,7 +21,8 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { ChevronLeft, Copy, Loader2, Plus, RefreshCw, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
-  TmsBadge, TmsButton, TmsCard, TmsField, TmsIconButton, TmsInput, TmsPage, TmsSelect, TmsTextarea,
+  TmsAlert, TmsBadge, TmsButton, TmsCard, TmsDetailSplit, TmsField, TmsIconButton, TmsInput, TmsMetaList, TmsPage, TmsSelect,
+  TmsStatRow, TmsTextarea, TmsTimeline,
 } from '@/features/tms/kit'
 import { useAuthUser } from '@/hooks/useAuth'
 import { useDirectory } from '@/hooks/useDirectory'
@@ -678,7 +679,21 @@ export function QuoteDetail() {
         </TmsCard>
       )}
 
-      <div className="tms-grid" style={{ gridTemplateColumns: 'minmax(0, 2fr) minmax(0, 1fr)' }}>
+      <TmsDetailSplit
+        aside={
+        <div style={{ display: 'grid', gap: 16, alignContent: 'start' }}>
+          <LaneHistoryPanel
+            laneKey={quote?.laneKey ?? laneKeys.laneKey}
+            laneKey3={quote?.laneKey3 ?? laneKeys.laneKey3}
+            miles={milesValue}
+            equipmentType={form.equipmentType || null}
+            rateType={form.rateType}
+          />
+
+          {quote && <Thread quote={quote} />}
+        </div>
+        }
+      >
         <div style={{ display: 'grid', gap: 16, alignContent: 'start' }}>
           <TmsCard title="Freight">
             <div className="tms-grid tms-grid-3">
@@ -892,16 +907,20 @@ export function QuoteDetail() {
               </table>
             </div>
 
+            <TmsStatRow
+              className="mt-3"
+              compact
+              columns={4}
+              items={[
+                { key: 'revenue', label: 'Revenue', value: formatCents(pricing.revenueCents) },
+                { key: 'cost', label: 'Cost', value: formatCents(pricing.costCents) },
+                { key: 'profit', label: 'Profit', value: formatCents(pricing.profitCents), tone: pricing.profitCents < 0 ? 'bad' : 'default' },
+                { key: 'margin', label: 'Margin', value: `${(pricing.marginBps / 100).toFixed(1)}%` },
+                { key: 'top', label: 'Top spend', value: formatCents(pricing.topSpendCents) },
+                ...(pricing.targetBuyCents != null ? [{ key: 'target', label: 'Target buy', value: formatCents(pricing.targetBuyCents) }] : []),
+              ]}
+            />
             <div className="tms-grid tms-grid-4" style={{ marginTop: 12 }}>
-              <Money label="Revenue" cents={pricing.revenueCents} />
-              <Money label="Cost" cents={pricing.costCents} />
-              <Money label="Profit" cents={pricing.profitCents} />
-              <div>
-                <div className="tms-field-label">Margin</div>
-                <div style={{ fontVariantNumeric: 'tabular-nums' }}>{(pricing.marginBps / 100).toFixed(1)}%</div>
-              </div>
-              <Money label="Top spend" cents={pricing.topSpendCents} />
-              {pricing.targetBuyCents != null && <Money label="Target buy" cents={pricing.targetBuyCents} />}
               <MoneyField
                 label="Target buy override"
                 value={form.targetBuyCents}
@@ -911,14 +930,16 @@ export function QuoteDetail() {
             </div>
 
             {pricing.warnings.length > 0 && (
-              <ul style={{ marginTop: 12, display: 'grid', gap: 4, borderRadius: 'var(--tms-radius)', border: '1px solid var(--tms-badge-orange)', background: 'rgba(255,136,10,0.12)', padding: '8px 8px 8px 24px', fontSize: 12 }}>
-                {pricing.warnings.map((warning) => (
-                  <li key={warning.key}>
-                    {warning.message}
-                    {warning.adminOnly && <TmsBadge tone="gray">owner / admin</TmsBadge>}
-                  </li>
-                ))}
-              </ul>
+              <TmsAlert tone="orange" className="mt-3">
+                <ul style={{ display: 'grid', gap: 4, paddingLeft: 16, fontSize: 12, margin: 0 }}>
+                  {pricing.warnings.map((warning) => (
+                    <li key={warning.key}>
+                      {warning.message}
+                      {warning.adminOnly && <TmsBadge tone="gray">owner / admin</TmsBadge>}
+                    </li>
+                  ))}
+                </ul>
+              </TmsAlert>
             )}
           </TmsCard>
 
@@ -946,18 +967,7 @@ export function QuoteDetail() {
           </TmsCard>
         </div>
 
-        <div style={{ display: 'grid', gap: 16, alignContent: 'start' }}>
-          <LaneHistoryPanel
-            laneKey={quote?.laneKey ?? laneKeys.laneKey}
-            laneKey3={quote?.laneKey3 ?? laneKeys.laneKey3}
-            miles={milesValue}
-            equipmentType={form.equipmentType || null}
-            rateType={form.rateType}
-          />
-
-          {quote && <Thread quote={quote} />}
-        </div>
-      </div>
+      </TmsDetailSplit>
 
       {quote && dialog?.kind === 'send' && (
         <SendQuoteDialog open quote={quote} onOpenChange={(o) => { if (!o) setDialog(null) }} onDone={closeAndRefresh} />
@@ -1000,15 +1010,6 @@ function Text({ label, value, disabled, onChange }: {
   )
 }
 
-function Money({ label, cents }: { label: string; cents: number }) {
-  return (
-    <div>
-      <div className="tms-field-label">{label}</div>
-      <div style={{ fontVariantNumeric: 'tabular-nums' }}>{formatCents(cents)}</div>
-    </div>
-  )
-}
-
 /**
  * Everything that has happened to this quote, newest last: what we did, what we sent and
  * who answered. The sends and the response are kept as fields on the row rather than as
@@ -1027,42 +1028,44 @@ function Thread({ quote }: { quote: QuoteRecord }) {
         </span>
       }
     >
-      <dl className="tms-grid tms-grid-2" style={{ marginBottom: 12, fontSize: 12 }}>
-        <div>
-          <dt className="tms-field-label">Sent</dt>
-          <dd style={{ margin: 0 }}>
-            {quote.sentAt ? formatDateTime(quote.sentAt) : 'never'}
-            {quote.sendCount ? ` · ${quote.sendCount} send${quote.sendCount === 1 ? '' : 's'}` : ''}
-            {quote.lastSendStatus === 'NOT_SENT' && <TmsBadge tone="red">Not sent</TmsBadge>}
-          </dd>
-        </div>
-        <div>
-          <dt className="tms-field-label">To</dt>
-          <dd style={{ margin: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{quote.sentTo ?? quote.contactEmail ?? '—'}</dd>
-        </div>
-        <div>
-          <dt className="tms-field-label">Answered</dt>
-          <dd style={{ margin: 0 }}>{quote.respondedAt ? `${quote.response ?? ''} ${formatDateTime(quote.respondedAt)}` : 'not yet'}</dd>
-        </div>
-        <div>
-          <dt className="tms-field-label">By</dt>
-          <dd style={{ margin: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{quote.responderName ?? quote.responderEmail ?? '—'}</dd>
-        </div>
-      </dl>
+      <TmsMetaList
+        columns={2}
+        dense
+        className="mb-3"
+        items={[
+          {
+            label: 'Sent',
+            value: (
+              <>
+                {quote.sentAt ? formatDateTime(quote.sentAt) : 'never'}
+                {quote.sendCount ? ` · ${quote.sendCount} send${quote.sendCount === 1 ? '' : 's'}` : ''}
+                {quote.lastSendStatus === 'NOT_SENT' && <TmsBadge tone="red">Not sent</TmsBadge>}
+              </>
+            ),
+          },
+          { label: 'To', value: quote.sentTo ?? quote.contactEmail ?? '—' },
+          { label: 'Answered', value: quote.respondedAt ? `${quote.response ?? ''} ${formatDateTime(quote.respondedAt)}` : 'not yet' },
+          { label: 'By', value: quote.responderName ?? quote.responderEmail ?? '—' },
+        ]}
+      />
 
-      <ol style={{ display: 'grid', gap: 8, fontSize: 12, listStyle: 'none', padding: 0, margin: 0 }}>
-        {events.length === 0 && <li className="tms-muted">Nothing has happened to this quote yet.</li>}
-        {events.map((event, index) => (
-          <li key={`${event.at}-${index}`} style={{ borderLeft: '2px solid var(--tms-border)', paddingLeft: 8 }}>
-            <div style={{ fontWeight: 600 }}>
+      <TmsTimeline
+        compact
+        ariaLabel="Quote thread"
+        empty={<span className="tms-muted">Nothing has happened to this quote yet.</span>}
+        items={events.map((event, index) => ({
+          id: `${event.at}-${index}`,
+          state: 'done' as const,
+          title: (
+            <>
               {event.kind.replace(/_/g, ' ').toLowerCase()}
               {event.amountCents != null && <span style={{ marginLeft: 4, fontVariantNumeric: 'tabular-nums' }}>{formatCents(event.amountCents)}</span>}
-            </div>
-            <div className="tms-muted">{formatDateTime(event.at)} · {event.by}</div>
-            {event.note && <div style={{ marginTop: 2 }}>{event.note}</div>}
-          </li>
-        ))}
-      </ol>
+            </>
+          ),
+          at: `${formatDateTime(event.at)} · ${event.by}`,
+          description: event.note ?? undefined,
+        }))}
+      />
     </TmsCard>
   )
 }

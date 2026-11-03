@@ -26,7 +26,10 @@ import { useDrivers } from '@/hooks/useDrivers'
 import { useTrucks } from '@/hooks/useTrucks'
 import { LaneHistoryPanel } from '@/features/quotes/components/LaneHistoryPanel'
 import { UnresolvedCustomerCard } from '@/features/workflows/IdentifyCustomerDialog'
-import { TmsBadge, TmsButton, TmsCard, TmsIconButton, TmsKeyHint, TmsTabs, statusTone } from '@/features/tms/kit'
+import {
+  TmsAlert, TmsBadge, TmsButton, TmsCard, TmsIconButton, TmsKeyHint, TmsMetaList, TmsStatRow, TmsTabs, TmsTimeline,
+  statusTone,
+} from '@/features/tms/kit'
 import { useIntegrations } from '@/hooks/useIntegrations'
 import { listWorkflowRunsForShipment, runIntegrationStub } from '@/lib/apiClient'
 import { AGENTS } from '@/lib/workflows/agents'
@@ -229,37 +232,55 @@ export function ShipmentDetail(props: ShipmentDetailProps) {
               />
             ) : undefined}
           >
-            <dl className="tms-grid tms-grid-3 text-sm">
-              <Field label="Status" value={SHIPMENT_STATUS_LABELS[shipment.status]} />
-              <Field label="Customer" value={customerDisplayName(shipment)} />
-              <Field label="Mode" value={shipment.mode} />
-              <Field label="Origin" value={shipment.originCity ?? '—'} />
-              <Field label="Destination" value={shipment.destinationCity ?? '—'} />
-              <Field label="Pickup" value={shipment.pickupAppt ? formatDateTime(shipment.pickupAppt) : '—'} />
-              <Field label="Delivery" value={shipment.deliveryAppt ? formatDateTime(shipment.deliveryAppt) : '—'} />
-              <Field label="Load status" value={load?.status ? LOAD_WORKFLOW_STATUS_LABELS[load.status] : '—'} />
-              <Field
-                label="Last update"
-                value={load?.lastKnownAt || load?.lastCheckCallAt
-                  ? [
-                      formatDateTime(load.lastKnownAt ?? load.lastCheckCallAt),
-                      [load.lastKnownCity, load.lastKnownState].filter(Boolean).join(', '),
-                    ].filter(Boolean).join(' · ')
-                  : '—'}
+            <TmsStatRow
+              compact
+              columns={3}
+              aria-label="Shipment financial summary"
+              items={[
+                { key: 'revenue', label: 'Revenue', value: `$${formatCents(totals.revenueCents)}` },
+                { key: 'cost', label: 'Cost', value: `$${formatCents(totals.costCents)}` },
+                {
+                  key: 'profit',
+                  label: 'Profit',
+                  value: `$${formatCents(totals.profitCents)}`,
+                  sub: `${(totals.marginBps / 100).toFixed(1)}%`,
+                  tone: totals.profitCents < 0 ? 'bad' : 'default',
+                },
+              ]}
+            />
+            <div className="mt-3">
+              <TmsMetaList
+                columns={3}
+                items={[
+                  { label: 'Status', value: SHIPMENT_STATUS_LABELS[shipment.status] },
+                  { label: 'Customer', value: customerDisplayName(shipment) },
+                  { label: 'Mode', value: shipment.mode },
+                  { label: 'Origin', value: shipment.originCity },
+                  { label: 'Destination', value: shipment.destinationCity },
+                  { label: 'Pickup', value: shipment.pickupAppt ? formatDateTime(shipment.pickupAppt) : null },
+                  { label: 'Delivery', value: shipment.deliveryAppt ? formatDateTime(shipment.deliveryAppt) : null },
+                  { label: 'Load status', value: load?.status ? LOAD_WORKFLOW_STATUS_LABELS[load.status] : null },
+                  {
+                    label: 'Last update',
+                    value: load?.lastKnownAt || load?.lastCheckCallAt
+                      ? [
+                          formatDateTime(load.lastKnownAt ?? load.lastCheckCallAt),
+                          [load.lastKnownCity, load.lastKnownState].filter(Boolean).join(', '),
+                        ].filter(Boolean).join(' · ')
+                      : null,
+                  },
+                  { label: 'Next check call', value: load?.nextCheckCallAt ? formatDateTime(load.nextCheckCallAt) : null },
+                  { label: 'Load number', value: load?.loadNumber },
+                  { label: 'Leg', value: load?.leg != null ? String(load.leg) : null },
+                  { label: 'Assignment', value: load?.assignmentType },
+                  { label: 'Equipment', value: order?.equipmentType ?? load?.equipmentType },
+                  { label: 'Rate type', value: order?.rateType },
+                  { label: 'Tracking', value: load?.trackingProvider },
+                  { label: 'Carrier rep', value: load?.carrierRepId },
+                  { label: 'Miles', value: load?.miles != null ? String(load.miles) : null },
+                ]}
               />
-              <Field label="Next check call" value={load?.nextCheckCallAt ? formatDateTime(load.nextCheckCallAt) : '—'} />
-              <Field label="Load number" value={load?.loadNumber ?? '—'} />
-              <Field label="Leg" value={load?.leg != null ? String(load.leg) : '—'} />
-              <Field label="Assignment" value={load?.assignmentType ?? '—'} />
-              <Field label="Equipment" value={order?.equipmentType ?? load?.equipmentType ?? '—'} />
-              <Field label="Rate type" value={order?.rateType ?? '—'} />
-              <Field label="Tracking" value={load?.trackingProvider ?? '—'} />
-              <Field label="Carrier rep" value={load?.carrierRepId ?? '—'} />
-              <Field label="Miles" value={load?.miles != null ? String(load.miles) : '—'} />
-              <Field label="Revenue" value={`$${formatCents(totals.revenueCents)}`} />
-              <Field label="Cost" value={`$${formatCents(totals.costCents)}`} />
-              <Field label="Profit" value={`$${formatCents(totals.profitCents)} (${(totals.marginBps / 100).toFixed(1)}%)`} />
-            </dl>
+            </div>
 
             {(order?.references?.length ?? 0) > 0 && (
               <div className="mt-3">
@@ -540,43 +561,39 @@ function ProviderRow({ descriptor, capability, row, busy, result, onRunStub, onO
 function AiAgentRuns({ runs }: { runs: WorkflowRunRecord[] }) {
   return (
     <TmsCard title="AI Agent">
-      <ul className="space-y-2" data-testid="shipment-workflow-runs">
-        {runs.map((run) => (
-          <li key={run.id} className="border-b border-[color:var(--tms-border)] pb-2 last:border-b-0 last:pb-0">
-            <div className="flex flex-wrap items-center gap-2 text-sm">
-              <Link className="font-medium underline underline-offset-2" to={`/tms/workflows/runs/${run.id}`}>
-                {AGENTS[run.agent]?.label ?? run.agent}
-              </Link>
-              {/*
-               * `statusTone` knows the shipment, AR and AP vocabularies, not the agent's.
-               * FAILED is the one value a gray cap would misreport, so it is named here.
-               */}
+      <TmsTimeline
+        data-testid="shipment-workflow-runs"
+        items={runs.map((run) => ({
+          id: run.id,
+          title: (
+            <Link className="font-medium underline underline-offset-2" to={`/tms/workflows/runs/${run.id}`}>
+              {AGENTS[run.agent]?.label ?? run.agent}
+            </Link>
+          ),
+          /*
+           * `statusTone` knows the shipment, AR and AP vocabularies, not the agent's.
+           * FAILED is the one value a gray cap would misreport, so it is named here.
+           */
+          tag: (
+            <>
               <TmsBadge tone={run.status === 'FAILED' ? 'red' : statusTone(run.status)}>{run.status}</TmsBadge>
               {run.outcome && <TmsBadge tone="gray">{run.outcome}</TmsBadge>}
-              <span className="tms-muted ml-auto">
-                {run.updatedAt ? formatDateTime(run.updatedAt) : '—'}
-              </span>
-            </div>
-          </li>
-        ))}
-      </ul>
+            </>
+          ),
+          at: run.updatedAt ? formatDateTime(run.updatedAt) : '—',
+          tone: run.status === 'FAILED' ? 'red' : 'gray',
+        }))}
+      />
     </TmsCard>
-  )
-}
-
-function Field({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <dt className="tms-field-label">{label}</dt>
-      <dd className="truncate">{value}</dd>
-    </div>
   )
 }
 
 function Note({ label, text }: { label: string; text: string }) {
   return (
-    <div className="mt-3 rounded-[var(--tms-radius)] border border-[color:var(--tms-border)] p-2 text-xs">
-      <span className="font-medium">{label}: </span>{text}
+    <div className="mt-3">
+      <TmsAlert tone="orange" icon={false} role="status">
+        <span className="font-medium">{label}: </span>{text}
+      </TmsAlert>
     </div>
   )
 }

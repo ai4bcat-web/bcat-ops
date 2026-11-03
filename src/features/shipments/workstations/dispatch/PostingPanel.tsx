@@ -67,7 +67,7 @@ export function PostingPanel({ shipmentId, postings, loading, onChange }: Postin
           return (
             <div
               key={provider}
-              className="tms-dispatch-posting-row flex items-center justify-between gap-3 rounded border p-3"
+              className="tms-dispatch-posting-row flex items-center justify-between gap-3 tms-card rounded border border-[color:var(--tms-border)] p-3"
               data-testid="posting-row"
               data-provider={provider}
             >

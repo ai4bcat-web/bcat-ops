@@ -137,7 +137,7 @@ export function BoardTagPicker({
             return (
               <span
                 key={value}
-                className="inline-flex items-center gap-1 rounded border border-[var(--tms-border)] bg-[#333] px-2 py-0.5 text-xs text-[var(--tms-text)]"
+                className="inline-flex items-center gap-1 rounded border border-[var(--tms-border)] bg-[var(--tms-surface-selected)] px-2 py-0.5 text-xs text-[var(--tms-text)]"
                 role="listitem"
               >
                 <span>{display}</span>
@@ -190,8 +190,8 @@ export function BoardTagPicker({
               <li
                 key={opt.value}
                 id={`tms-detail-${facet}-opt-${i}`}
-                className={`flex cursor-pointer items-center justify-between px-2 py-1.5 text-sm text-[var(--tms-text)] hover:bg-[#1d1d1d] ${
-                  i === highlighted ? 'bg-[#1d1d1d]' : ''
+                className={`flex cursor-pointer items-center justify-between px-2 py-1.5 text-sm text-[var(--tms-text)] hover:bg-[var(--tms-surface-hover)] ${
+                  i === highlighted ? 'bg-[var(--tms-surface-selected)]' : ''
                 }`}
                 role="option"
                 aria-selected={i === highlighted}

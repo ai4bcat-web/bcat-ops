@@ -261,11 +261,11 @@ describe('TrackingWorkstation table', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'S001' })).toBeVisible())
     expect(screen.queryByRole('button', { name: 'S002' })).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Closed', exact: true }))
+    fireEvent.click(screen.getByRole('tab', { name: 'Closed', exact: true }))
     await waitFor(() => expect(screen.getByRole('button', { name: 'S002' })).toBeVisible())
     expect(screen.queryByRole('button', { name: 'S001' })).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Active', exact: true }))
+    fireEvent.click(screen.getByRole('tab', { name: 'Active', exact: true }))
     expect(screen.getByRole('button', { name: 'S001' })).toBeVisible()
     expect(screen.queryByRole('button', { name: 'S002' })).not.toBeInTheDocument()
   })
@@ -364,7 +364,7 @@ describe('TrackingWorkstation inbox', () => {
     await waitFor(() => expect(screen.getByTestId('inbox-composer')).toBeInTheDocument())
 
     fireEvent.change(screen.getByLabelText('Message body'), { target: { value: 'Where are you?' } })
-    fireEvent.click(screen.getByRole('button', { name: /Send/i }))
+    fireEvent.click(within(screen.getByTestId('inbox-composer')).getByRole('button', { name: /Send/i }))
 
     await waitFor(() => expect(api.sendShipmentMessage).toHaveBeenCalledWith(expect.objectContaining({
       shipmentId: active.id,

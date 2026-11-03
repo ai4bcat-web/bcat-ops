@@ -2,9 +2,9 @@ import { useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, Mail, MessageSquare, Phone, Play, FileImage } from 'lucide-react'
 import { APIProvider, useApiIsLoaded } from '@vis.gl/react-google-maps'
 import { toast } from 'sonner'
-import { TmsButton, TmsCard, TmsEmptyState, TmsField, TmsInput } from '@/features/tms/kit'
+import { TmsButton, TmsCard, TmsEmptyState, TmsField, TmsInput, TmsMetaList, TmsStatRow, TmsTimeline } from '@/features/tms/kit'
 import { formatDateTime } from '@/lib/date'
-import { trackingEtaEstimate, trackingEtaFromMatrix } from '@/lib/trackingEta'
+import { trackingEtaFromMatrix } from '@/lib/trackingEta'
 import type { ComputedTrackingEta, EtaToStopInput, EtaToStopStop } from '@/lib/trackingEta'
 import { runCheckCallPlan, requestPod, saveLoadCheckCallPlan } from '@/lib/apiClient'
 import {
@@ -12,13 +12,14 @@ import {
   isChannelEnabled,
 } from '@/lib/checkCallPlan'
 import type { CheckCallChannel, CheckCallMilestone, CheckCallPlan } from '@/lib/checkCallPlan'
-import type { Stop } from '@/types'
 import type { CustomerRecord, ShipmentBundle, ShipmentMessageRecord, TmsSettings } from '@/types/tms'
 import type { ShipmentRow } from '@/features/shipments/shipmentViews'
 import { TrackingDetailMap } from './TrackingDetailMap'
 import { googleMapsExtras } from './googleMapsExtras'
 import { TrackingConversation } from './TrackingConversation'
 import { resolveCheckCallPlanWithSource } from './checkCallPlanSource'
+import { DriverCard } from './DriverCard'
+import { buildStatusTimeline, estimateEta, etaUnavailableReason, formatMiles, legGeometry } from './statusTimeline'
 
 const CHANNEL_ICONS: Record<CheckCallChannel, typeof Mail> = { EMAIL: Mail, SMS: MessageSquare, VOICE: Phone }
 
@@ -44,8 +45,9 @@ export function TrackingDetailPanel(props: TrackingDetailPanelProps) {
 }
 
 function DetailSession({ row, bundle, messages, loading, customers, settings, userName, mapsKey, mapsMapId, onSendMessage, onSavePlan, onRefresh }: TrackingDetailPanelProps) {
-  const load = bundle?.shipment.id === row.id ? bundle.loads[0] ?? null : null
-  const carrier = bundle?.loadCarriers.find((c) => c.loadId === load?.id && c.status === 'ACTIVE') ?? null
+  const geo = useMemo(() => legGeometry(bundle, row.id), [bundle, row.id])
+  const { load, lastKnown, pingAt, deliveryStop, destination } = geo
+  const carrier = geo.leg
   const customer = customers.find((c) => c.id === row.customerId) ?? null
   const resolved = useMemo(() => resolveCheckCallPlanWithSource(load, customer, settings), [load, customer, settings])
   const [plan, setPlan] = useState(resolved.plan)
@@ -57,33 +59,12 @@ function DetailSession({ row, bundle, messages, loading, customers, settings, us
   const [busy, setBusy] = useState(false)
   const [runResult, setRunResult] = useState<{ action: string; reason: string } | null>(null)
 
-  const lastKnown = useMemo(() => {
-    const lat = load?.lastKnownLat
-    const lng = load?.lastKnownLng
-    if (lat == null || lng == null) return null
-    return { lat, lng }
-  }, [load?.lastKnownLat, load?.lastKnownLng])
-  const deliveryStop = useMemo(() => {
-    let final: Stop | null = null
-    for (const stop of load?.stops ?? []) {
-      if (stop.type === 'delivery' && !stop.arrivedAt && (!final || stop.sequence > final.sequence)) final = stop
-    }
-    return final
-  }, [load?.stops])
-  const destination = useMemo(() => {
-    if (deliveryStop?.address?.lat == null || deliveryStop.address.lng == null) return null
-    return {
-      lat: deliveryStop.address.lat, lng: deliveryStop.address.lng,
-      appt: deliveryStop.apptType === 'tbd' || deliveryStop.apptType === 'fcfs'
-        ? null : deliveryStop.apptEnd || deliveryStop.appt || null,
-    }
-  }, [deliveryStop])
-  const pingAt = load?.lastKnownAt ?? null
   const now = useMemo(() => new Date().toISOString(), [])
-  const estimate = useMemo(() => {
-    if (!lastKnown || !destination || !pingAt) return null
-    try { return trackingEtaEstimate(lastKnown, destination, pingAt, now) } catch { return null }
-  }, [lastKnown, destination, pingAt, now])
+  const estimate = useMemo(() => estimateEta(geo, now), [geo, now])
+  const statusTimeline = useMemo(
+    () => buildStatusTimeline({ row, bundle, nowMs: Date.parse(now), eta: estimate }),
+    [row, bundle, now, estimate],
+  )
 
   const perform = async (action: 'save' | 'clear' | 'run' | 'pod') => {
     if (!load || busy) return
@@ -111,33 +92,45 @@ function DetailSession({ row, bundle, messages, loading, customers, settings, us
     setPlan((p) => ({ ...p, milestones: p.milestones.includes(milestone) ? p.milestones.filter((m) => m !== milestone) : [...p.milestones, milestone] }))
   }
   const map = <TrackingDetailMap apiKey={mapsKey} mapId={mapsMapId} lastKnown={lastKnown} delivery={destination} deliveryName={deliveryStop?.name ?? row.destinationCity} />
-  const reason = !lastKnown || !pingAt ? 'No timestamped position reported yet.' : !destination ? 'No pending delivery with coordinates.' : 'Position or timestamp is invalid.'
+  const reason = etaUnavailableReason(geo)
 
   return (
     <div className="tms-tracking-detail" data-testid="tracking-detail" data-shipment-id={row.id}>
       {loading ? <p className="tms-tracking-detail-empty">Loading shipment details…</p> : !load ? (
         <TmsEmptyState title="No load" message="This shipment has no load to track yet." />
       ) : <>
-        <header className="rounded-[var(--tms-radius)] border border-[color:var(--tms-border)] p-3" data-testid="tracking-detail-header">
-          <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <header className="tms-card tms-tracking-detail-header" data-testid="tracking-detail-header">
+          <div className="tms-tracking-detail-title">
             <h2 className="m-0 text-base font-semibold">PRO {row.number}</h2>
             <span className="tms-muted text-sm">{customer?.name ?? row.customerName ?? '—'}</span>
           </div>
-          <dl className="m-0 mt-2 grid grid-cols-2 gap-3 text-sm">
-            <div><dt className="tms-muted text-xs">Carrier</dt><dd className="m-0">{carrier?.kind === 'OWN_ASSET' ? 'Own fleet' : carrier?.carrierName ?? 'No carrier assigned'}</dd></div>
-            <div><dt className="tms-muted text-xs">Driver</dt><dd className="m-0">{carrier?.driverName ?? '—'} {carrier?.driverPhone && <a href={`tel:${carrier.driverPhone}`}>{carrier.driverPhone}</a>}</dd></div>
-            <div><dt className="tms-muted text-xs">Dispatcher</dt><dd className="m-0">{carrier?.dispatcherName ?? '—'} {carrier?.dispatcherPhone && <a href={`tel:${carrier.dispatcherPhone}`}>{carrier.dispatcherPhone}</a>}</dd></div>
-          </dl>
+          <TmsMetaList
+            columns={3}
+            dense
+            items={[
+              { label: 'Carrier', value: carrier?.kind === 'OWN_ASSET' ? 'Own fleet' : carrier?.carrierName ?? 'No carrier assigned' },
+              { label: 'Truck #', value: carrier?.truckNumber, hidden: !carrier?.truckNumber },
+              { label: 'Trailer #', value: carrier?.trailerNumber, hidden: !carrier?.trailerNumber },
+            ]}
+          />
         </header>
         {row.trackingFlaggedAt && <div className="tms-thread-flag" role="alert" data-testid="detail-flag">
           <AlertTriangle size={16} aria-hidden /><div><strong>Tracking flagged</strong><p>{row.trackingFlagReason}</p><p className="tms-muted">{formatDateTime(row.trackingFlaggedAt)}</p></div>
         </div>}
+        <TmsCard title="Order info timeline">
+          <TmsTimeline items={statusTimeline} ariaLabel="Order status timeline" data-testid="tracking-status-timeline" />
+        </TmsCard>
         <TmsCard title="Map & ETA" flush>
           {mapsKey ? <APIProvider apiKey={mapsKey}>
             {map}
             <GoogleEta key={`${pingAt}/${destination?.lat}/${destination?.lng}/${destination?.appt}`} from={lastKnown} stop={destination} pingAt={pingAt} now={now} estimate={estimate} reason={reason} />
           </APIProvider> : <>{map}<EtaView eta={estimate} pingAt={pingAt} appt={destination?.appt} reason={reason} /></>}
         </TmsCard>
+        <DriverCard
+          driver={carrier ? { name: carrier.driverName, phone: carrier.driverPhone } : null}
+          dispatcher={carrier ? { name: carrier.dispatcherName, phone: carrier.dispatcherPhone, email: carrier.dispatcherEmail } : null}
+          loadStatus={row.loadStatus ?? load.status}
+        />
         <div data-testid="tracking-cadence">
           <TmsCard title="Check-call plan">
             <div className="tms-checkcall-editor">
@@ -206,10 +199,19 @@ function GoogleEta({ from, stop, pingAt, now, estimate, reason }: {
 }
 
 function EtaView({ eta, pingAt, appt, reason }: { eta: ComputedTrackingEta | null; pingAt: string | null; appt?: string | null; reason: string }) {
-  return <section data-testid="tracking-eta" className="p-3 text-sm" aria-label="Delivery ETA">
-    <div className="flex flex-wrap items-center justify-between gap-2"><span className="tms-muted">Delivery ETA</span><strong>{eta ? formatDateTime(eta.etaAt) : 'Unavailable'}</strong></div>
+  return <section data-testid="tracking-eta" className="tms-tracking-eta" aria-label="Delivery ETA">
+    <TmsStatRow
+      compact
+      columns={3}
+      aria-label="Distance to arrival"
+      items={[
+        { label: 'Distance', value: eta ? formatMiles(eta.miles) : null },
+        { label: 'ETA', value: eta ? formatDateTime(eta.etaAt) : null, sub: eta ? null : 'Unavailable' },
+        { label: 'Last ping', value: pingAt ? formatDateTime(pingAt) : null },
+      ]}
+    />
     <p className="tms-muted mt-1 text-xs">{eta?.basisLabel ?? reason}</p>
-    {eta && <p className="mt-1 text-xs">{Math.round(eta.miles)} mi · {Math.round(eta.driveMinutes)} min driving · Ping {formatDateTime(pingAt)}</p>}
+    {eta && <p className="mt-1 text-xs">{Math.round(eta.driveMinutes)} min driving</p>}
     {appt && <p className="mt-1 text-xs">Appointment {formatDateTime(appt)}{eta ? eta.lateBy != null ? ` · ${eta.lateBy} min late` : ' · On time' : ''}</p>}
     {eta && <p className="tms-muted mt-1 text-xs">Driving estimate only; excludes breaks and intermediate stops.</p>}
   </section>

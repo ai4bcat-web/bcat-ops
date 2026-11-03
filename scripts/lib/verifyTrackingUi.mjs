@@ -1,96 +1,13 @@
-import { spawn } from 'node:child_process'
-import { mkdtemp, readFile, rm, mkdir, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import WebSocket from 'ws'
-
-const DEV_ORIGIN = 'https://dev.d3dejqzs77khq6.amplifyapp.com'
-const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+import { launchBrowser, DEV_ORIGIN } from './cdpBrowser.mjs'
 
 /** Exercise the real dev UI in an isolated Chrome profile; never persist login tokens. */
 export async function verifyTrackingUi({ storage, shipmentIds, origin = DEV_ORIGIN, screenshots }) {
-  if (![DEV_ORIGIN, 'http://localhost:5173', 'http://127.0.0.1:5173'].includes(origin)) {
-    throw new Error('Tracking UI verification only permits dev or the local development server')
-  }
-  const profile = await mkdtemp(join(tmpdir(), 'bcat-p8-ui-'))
-  const executable = process.env.CHROME_BIN ?? (process.platform === 'darwin'
-    ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
-    : 'google-chrome')
-  const chrome = spawn(executable, [
-    '--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profile}`,
-    '--no-first-run', '--no-default-browser-check', '--window-size=1600,1100', 'about:blank',
-  ], { stdio: 'ignore' })
-  let launchError
-  chrome.on('error', (error) => { launchError = error })
-  let socket
-  const pending = new Map()
-  let nextId = 0
-  let sessionId
-  async function poll(run, label, timeout = 60_000) {
-    const deadline = Date.now() + timeout
-    while (Date.now() < deadline) {
-      const result = await run()
-      if (result) return result
-      await pause(200)
-    }
-    throw new Error(`Timed out waiting for ${label}`)
-  }
-  function command(method, params = {}, session = sessionId) {
-    const id = ++nextId
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => { pending.delete(id); reject(new Error(`CDP timed out: ${method}`)) }, 30_000)
-      pending.set(id, {
-        resolve: (result) => { clearTimeout(timer); resolve(result) },
-        reject: (error) => { clearTimeout(timer); reject(error) },
-      })
-      socket.send(JSON.stringify({ id, method, params, ...(session ? { sessionId: session } : {}) }))
-    })
-  }
-  async function evaluate(expression) {
-    const result = await command('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true })
-    if (result.exceptionDetails) throw new Error(result.exceptionDetails.text)
-    return result.result.value
-  }
+  const browser = await launchBrowser({
+    origin, storage, screenshots, profilePrefix: 'bcat-p8-ui-', collect: false,
+    purpose: 'Tracking UI verification',
+  })
+  const { command, evaluate, poll, capture } = browser
   try {
-    const portFile = await poll(async () => {
-      if (launchError) throw launchError
-      if (chrome.exitCode != null) throw new Error(`Chrome exited with ${chrome.exitCode}`)
-      return readFile(join(profile, 'DevToolsActivePort'), 'utf8').catch(() => null)
-    }, 'Chrome startup', 20_000)
-    const [port, endpoint] = portFile.trim().split('\n')
-    socket = new WebSocket(`ws://127.0.0.1:${port}${endpoint}`)
-    await new Promise((resolve, reject) => { socket.once('open', resolve); socket.once('error', reject) })
-    socket.on('message', (raw) => {
-      try {
-        let message
-        try {
-          message = JSON.parse(typeof raw === 'string' ? raw : raw.toString())
-        } catch {
-          return
-        }
-        const request = pending.get(message.id)
-        if (!request) return
-        pending.delete(message.id)
-        if (message.error) request.reject(new Error(String(message.error.message ?? message.error)))
-        else request.resolve(message.result)
-      } catch (err) {
-        console.error('[CDP] resolver error:', err?.message)
-      }
-    })
-    const { targetId } = await command('Target.createTarget', { url: 'about:blank' })
-    ;({ sessionId } = await command('Target.attachToTarget', { targetId, flatten: true }))
-    await command('Page.enable')
-    await command('Emulation.setDeviceMetricsOverride', { width: 1600, height: 1100, deviceScaleFactor: 1, mobile: false })
-    await command('Page.addScriptToEvaluateOnNewDocument', {
-      source: `if(location.origin===${JSON.stringify(origin)}){for(const [key,value] of Object.entries(${JSON.stringify(storage)}))localStorage.setItem(key,value)}`,
-    })
-    async function capture(name) {
-      if (!screenshots) return
-      await mkdir(screenshots, { recursive: true })
-      await pause(500)
-      const image = await command('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false })
-      await writeFile(join(screenshots, name), Buffer.from(image.data, 'base64'))
-    }
     await command('Page.navigate', { url: `${origin}/tms/tracking?tab=tracking` })
     const rows = await poll(() => evaluate(`(() => {
       const rows = [...document.querySelectorAll('[data-testid="tracking-row"][data-status="DEPARTED"]')];
@@ -152,13 +69,6 @@ export async function verifyTrackingUi({ storage, shipmentIds, origin = DEV_ORIG
     await capture('P8-UI-create-customer-url.png')
     return { inTransitRows: rows.length, selected, inboxDeepLinkReload: true, eta: detail.eta }
   } finally {
-    for (const request of pending.values()) request.reject(new Error('Browser verification closed'))
-    socket?.close()
-    if (chrome.exitCode == null && !launchError) {
-      chrome.kill('SIGTERM')
-      await Promise.race([new Promise((resolve) => chrome.once('exit', resolve)), pause(5000)])
-      if (chrome.exitCode == null) chrome.kill('SIGKILL')
-    }
-    await rm(profile, { recursive: true, force: true })
+    await browser.close()
   }
 }

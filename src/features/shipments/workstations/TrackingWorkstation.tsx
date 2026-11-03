@@ -17,13 +17,14 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 
 import { teamRepIdsFor, useBoardFilters } from '../board/useBoardFilters'
-import { TmsButton, TmsDialog, TmsInput, TmsTabs } from '@/features/tms/kit'
+import { TmsButton, TmsDialog, TmsInput, TmsSegmentedTabs } from '@/features/tms/kit'
 import { useAuth } from '@/hooks/useAuth'
 import { useDirectory } from '@/hooks/useDirectory'
 import { useShipments } from '@/hooks/useShipments'
 import { useStaff } from '@/hooks/useStaff'
 import { useShipmentViews } from '@/features/tms/useShipmentViews'
 import type {
+  LoadCarrierRecord,
   ShipmentBundle,
   ShipmentMessageRecord,
   TrackingLinkRecord,
@@ -32,6 +33,7 @@ import type {
 import {
   getShipmentBundle,
   getTmsSettings,
+  listDivisions,
   listShipmentMessages,
   listTrackingLinksByShipment,
   sendShipmentMessage,
@@ -40,7 +42,14 @@ import { viewCallerOf, viewsVisibleTo } from '@/lib/shipmentViewDefs'
 import { displayName } from '@/lib/roles'
 import { CreateShipmentDialog } from '../components/CreateShipmentDialog'
 import { CustomerLinkDialog } from '../components/CustomerLinkDialog'
+import { TrackingLinkDialog } from '../components/TrackingLinkDialog'
+import { InboxChatHeader } from './tracking/InboxChatHeader'
+import { InboxInfoPanel } from './tracking/InboxInfoPanel'
+import { useInboxInfoOpen } from './tracking/useInboxInfoOpen'
 import { InboxPanel } from './tracking/InboxPanel'
+import { InboxQuickActions } from './tracking/InboxQuickActions'
+import { LocationCard } from './tracking/LocationCard'
+import { estimateEta, legGeometry } from './tracking/statusTimeline'
 import { TrackingBoard } from './tracking/TrackingBoard'
 import { TrackingConversation } from './tracking/TrackingConversation'
 import { useRecentlyViewed } from './tracking/useRecentlyViewed'
@@ -54,6 +63,13 @@ const MAPS_KEY = (import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string | undefined
 const MAPS_MAP_ID = import.meta.env.VITE_GOOGLE_MAPS_MAP_ID as string | undefined
 
 type TabKey = 'inbox' | 'tracking'
+
+interface TrackingLinkDialogTarget {
+  leg: LoadCarrierRecord
+  loadNumber: string
+  link: TrackingLinkRecord | null
+  brokerName: string
+}
 
 interface CustomerLinkDialogTarget {
   bundle: ShipmentBundle
@@ -91,6 +107,8 @@ export function TrackingWorkstation() {
 
   const [customerLinkTarget, setCustomerLinkTarget] = useState<CustomerLinkDialogTarget | null>(null)
   const [settings, setSettings] = useState<TmsSettings | null>(null)
+  const [trackingLinkTarget, setTrackingLinkTarget] = useState<TrackingLinkDialogTarget | null>(null)
+  const [infoOpen, setInfoOpen] = useInboxInfoOpen()
 
   useEffect(() => {
     let cancelled = false
@@ -279,11 +297,49 @@ export function TrackingWorkstation() {
     await refreshConversation()
   }, [refreshConversation, selectedConversationId, senderName])
 
-  const activeLeg = useMemo(() => {
-    const load = conversationBundle?.loads[0]
-    if (!load) return null
-    return conversationBundle?.loadCarriers.find((c) => c.loadId === load.id && c.status === 'ACTIVE') ?? null
-  }, [conversationBundle])
+  const selectedRow = useMemo(
+    () => inboxRows.find((r) => r.id === selectedConversationId) ?? null,
+    [inboxRows, selectedConversationId],
+  )
+  // The bundle may still be the previous conversation's while the next one loads;
+  // legGeometry only accepts a bundle that belongs to the selected shipment.
+  const geo = useMemo(
+    () => legGeometry(conversationBundle, selectedConversationId ?? ''),
+    [conversationBundle, selectedConversationId],
+  )
+  const activeLeg = geo.leg
+  const eta = useMemo(() => estimateEta(geo, new Date(nowMs).toISOString()), [geo, nowMs])
+
+  const openTrackingLinkDialog = useCallback(async () => {
+    const id = selectedConversationId
+    if (!id || !geo.leg || !geo.load) return
+    const leg = geo.leg
+    const loadNumber = geo.load.loadNumber ?? geo.load.aljexId ?? ''
+    try {
+      const [links, divisions] = await Promise.all([
+        listTrackingLinksByShipment(id),
+        listDivisions().catch(() => []),
+      ])
+      const own = geo.load.divisionKey ? divisions.find((d) => d.key === geo.load?.divisionKey) : divisions[0]
+      setTrackingLinkTarget({
+        leg,
+        loadNumber,
+        link: links.find((l) => l.kind === 'CARRIER_PING' && l.status === 'ACTIVE') ?? null,
+        brokerName: own?.name ?? 'BCAT Logistics',
+      })
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not open the tracking link')
+    }
+  }, [geo, selectedConversationId])
+
+  const reloadConversationBundle = useCallback(async () => {
+    const id = selectedConversationId
+    if (!id) return
+    try {
+      const bundle = await getShipmentBundle(id)
+      if (selectedConversationId === id) setConversationBundle(bundle)
+    } catch { /* keep the bundle on screen */ }
+  }, [selectedConversationId])
 
   const openShipment = useCallback(
     (id: string) => {
@@ -333,13 +389,8 @@ export function TrackingWorkstation() {
 
   return (
     <div className="tms-board-shell flex h-full flex-col">
-      <div className="tms-board-toolbar flex items-center justify-between border-b px-3 py-2">
-        <TmsTabs tabs={tabs} active={tab} onSelect={(key) => setTab(key as TabKey)} />
-      </div>
-      <div className="tms-tracking-breadcrumb-bar px-3 py-1">
-        <span className="tms-tracking-division">{panelProps.viewName}</span>
-        <span className="tms-tracking-breadcrumb-sep">›</span>
-        <span>Shipments</span>
+      <div className="tms-board-toolbar flex items-center justify-between px-3 py-2">
+        <TmsSegmentedTabs tabs={tabs} active={tab} onSelect={(key) => setTab(key as TabKey)} aria-label="Tracking desk" />
       </div>
       <div className="flex flex-1 overflow-hidden">
         {tab === 'tracking' ? (
@@ -374,6 +425,18 @@ export function TrackingWorkstation() {
             selectedId={selectedConversationId}
             onSelect={selectConversation}
             nowMs={nowMs}
+            info={infoOpen && selectedRow ? (
+              <InboxInfoPanel
+                row={selectedRow}
+                bundle={geo.load ? conversationBundle : null}
+                geo={geo}
+                eta={eta}
+                nowMs={nowMs}
+                mapsKey={MAPS_KEY}
+                mapsMapId={MAPS_MAP_ID}
+                onClose={() => setInfoOpen(false)}
+              />
+            ) : undefined}
           >
             <TrackingConversation
               variant="inbox"
@@ -386,6 +449,28 @@ export function TrackingWorkstation() {
               conversationKey={selectedConversationId ?? ''}
               onSendMessage={handleSendMessage}
               onRefresh={refreshConversation}
+              header={selectedRow ? (
+                <InboxChatHeader
+                  row={selectedRow}
+                  leg={activeLeg}
+                  pingAt={geo.pingAt ?? selectedRow.lastUpdateAt ?? null}
+                  nowMs={nowMs}
+                  infoOpen={infoOpen}
+                  onToggleInfo={() => setInfoOpen(!infoOpen)}
+                />
+              ) : undefined}
+              quickActions={selectedRow ? (
+                <InboxQuickActions
+                  shipmentId={selectedRow.id}
+                  leg={activeLeg}
+                  voided={boardStatusOf(selectedRow) === 'VOIDED'}
+                  onRefresh={async () => { await Promise.all([refreshConversation(), reloadConversationBundle()]) }}
+                  onSendTrackingLink={() => { void openTrackingLinkDialog() }}
+                />
+              ) : undefined}
+              streamTail={selectedRow ? (
+                <LocationCard row={selectedRow} geo={geo} eta={eta} nowMs={nowMs} mapsKey={MAPS_KEY} mapsMapId={MAPS_MAP_ID} />
+              ) : undefined}
             />
           </InboxPanel>
         )}
@@ -407,6 +492,17 @@ export function TrackingWorkstation() {
           </label>
         </div>
       </TmsDialog>
+      {trackingLinkTarget && (
+        <TrackingLinkDialog
+          loadCarrier={trackingLinkTarget.leg}
+          loadNumber={trackingLinkTarget.loadNumber}
+          link={trackingLinkTarget.link}
+          settings={settings}
+          brokerName={trackingLinkTarget.brokerName}
+          onClose={() => setTrackingLinkTarget(null)}
+          onChanged={() => { void reloadConversationBundle(); void refreshShipments() }}
+        />
+      )}
       {customerLinkTarget && (
         <CustomerLinkDialog
           shipment={customerLinkTarget.bundle.shipment}

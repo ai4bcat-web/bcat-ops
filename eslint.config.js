@@ -29,4 +29,28 @@ export default defineConfig([
       }],
     },
   },
+  {
+    // TSX twin of the CSS literal guard in theme.scope.test.ts: TMS surfaces take colour
+    // from --tms-* tokens (or TmsAlert / TmsBadge), never a hex / rgb / hsl literal.
+    // Data colours and PDF mattes: `// eslint-disable-next-line no-restricted-syntax -- data colour`.
+    files: [
+      'src/features/{tms,shipments,carriers,directory,quotes,ar,ap,factoring,vendor-ap,workflows,tracking,documents,settings,users,commissions,reports,audit}/**/*.{ts,tsx}',
+      'src/components/{RepPicker,RequirePage}.tsx',
+      'src/components/directory-picker/**/*.{ts,tsx}',
+    ],
+    // TrackPage (legacy truck tracking, /track/:code) is converted in S3; remove this exemption then.
+    ignores: ['**/*.test.{ts,tsx}', 'src/features/tracking/TrackPage.tsx'],
+    rules: {
+      'no-restricted-syntax': ['error',
+        {
+          selector: "Literal[value=/^\\s*(#[0-9a-fA-F]{3,8}|rgba?\\(|hsla?\\()/]",
+          message: 'Use a --tms-* token (or TmsAlert/TmsBadge).',
+        },
+        {
+          selector: "TemplateElement[value.raw=/^\\s*(#[0-9a-fA-F]{3,8}|rgba?\\(|hsla?\\()/]",
+          message: 'Use a --tms-* token (or TmsAlert/TmsBadge).',
+        },
+      ],
+    },
+  },
 ])

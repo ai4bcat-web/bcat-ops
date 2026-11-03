@@ -148,6 +148,7 @@ function DivisionDialog({
         <TmsField label="Colour">
           <TmsInput
             type="color"
+            // eslint-disable-next-line no-restricted-syntax -- data colour (colour input default)
             value={draft.color || '#888888'}
             onChange={(e) => onChange({ ...draft, color: e.target.value })}
           />
@@ -534,21 +535,14 @@ export function DivisionsPage() {
         {treeError ? <p className="tms-field-error">{treeError}</p> : null}
         {loading ? <p className="tms-muted">Loading…</p> : null}
         {!loading && rows.length === 0 ? <p className="tms-muted">No divisions yet.</p> : null}
-        <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+        <ul className="tms-division-list">
           {rows.map(({ division, depth }) => (
             <li
               key={division.code}
               data-depth={depth}
               data-testid={`division-${division.code}`}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                paddingTop: 6,
-                paddingBottom: 6,
-                paddingLeft: depth * 22,
-                borderBottom: '1px solid var(--tms-border)',
-              }}
+              className="tms-division-row"
+              style={{ paddingLeft: 14 + depth * 22 }}
             >
               <span
                 aria-hidden="true"
@@ -616,7 +610,7 @@ export function DivisionsPage() {
             ))}
           </ul>
         ) : null}
-        <ol style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+        <ol className="tms-division-list">
           {ruleDrafts.map((rule, index) => (
             <li
               key={rule.key}
@@ -629,14 +623,7 @@ export function DivisionsPage() {
                 setDragFrom(null)
               }}
               onDragEnd={() => setDragFrom(null)}
-              style={{
-                display: 'flex',
-                alignItems: 'flex-start',
-                gap: 8,
-                paddingTop: 8,
-                paddingBottom: 8,
-                borderBottom: '1px solid var(--tms-border)',
-              }}
+              className="tms-rule-row"
             >
               <span className="tms-muted" aria-label={`Drag ${index + 1}`} style={{ cursor: 'grab', marginTop: 10 }}>
                 <GripVertical size={14} />

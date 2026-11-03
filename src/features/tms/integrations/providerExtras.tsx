@@ -277,7 +277,7 @@ function QuickBooksExtra({ descriptor, row, onChanged }: ExtrasProps) {
           <>
             <TmsBadge tone="orange">Stub</TmsBadge>
             <p className="tms-muted">Nothing was sent to QuickBooks Online.</p>
-            <pre>{payload}</pre>
+            <pre className="tms-code">{payload}</pre>
           </>
         ) : null}
         {errors.map((text) => <p className="tms-field-error" key={text}>{text}</p>)}

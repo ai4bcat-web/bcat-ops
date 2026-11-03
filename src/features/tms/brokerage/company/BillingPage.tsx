@@ -9,12 +9,12 @@ import { useEffect, useMemo, useState } from 'react'
 import { Building2, Plus, Save, Star, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
-  TmsBadge,
   TmsButton,
   TmsCard,
   TmsField,
   TmsIconButton,
   TmsInput,
+  TmsSegmentedTabs,
   TmsTable,
   TmsTextarea,
 } from '@/features/tms/kit'
@@ -269,22 +269,18 @@ export function BillingPage() {
       <TmsCard title="Billing entity">
         {error ? <ErrorText>{error}</ErrorText> : null}
         <Stack>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            {divisions
+          <TmsSegmentedTabs
+            aria-label="Billing entity"
+            tabs={divisions
               .slice()
               .sort((a, b) => (a.isPrimary === b.isPrimary ? a.name.localeCompare(b.name) : a.isPrimary ? -1 : 1))
-              .map((d) => (
-                <TmsButton
-                  key={d.id}
-                  size="sm"
-                  variant={d.id === selectedId ? 'primary' : 'secondary'}
-                  onClick={() => { setSelectedId(d.id); setDraft({ ...d }) }}
-                >
-                  {d.name}
-                  {d.isPrimary ? <TmsBadge tone="green" style={{ marginLeft: 6 }}>Primary</TmsBadge> : null}
-                </TmsButton>
-              ))}
-          </div>
+              .map((d) => ({ key: d.id, label: d.isPrimary ? `${d.name} (Primary)` : d.name }))}
+            active={selectedId ?? ''}
+            onSelect={(id) => {
+              const d = divisions.find((x) => x.id === id)
+              if (d) { setSelectedId(d.id); setDraft({ ...d }) }
+            }}
+          />
 
           {draft ? (
             <>

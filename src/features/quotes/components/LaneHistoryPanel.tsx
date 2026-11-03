@@ -14,7 +14,7 @@
  */
 import { useMemo, useState } from 'react'
 import { RefreshCw } from 'lucide-react'
-import { TmsBadge, TmsButton, TmsCard, TmsField, TmsIconButton, TmsSelect } from '@/features/tms/kit'
+import { TmsBadge, TmsCard, TmsEmptyState, TmsField, TmsIconButton, TmsMetaList, TmsSegmentedTabs, TmsSelect } from '@/features/tms/kit'
 import { useLaneStats } from '@/hooks/useLaneStats'
 import { laneLabelFor } from '@/lib/laneKey'
 import { formatCents } from '@/lib/invoiceBuild'
@@ -48,23 +48,19 @@ function SideStats({ title, side, note }: { title: string; side: LaneStatsSide; 
       {side.count === 0 ? (
         <p className="tms-muted" style={{ marginTop: 8, fontSize: 13 }}>{note ?? 'Nothing in this window.'}</p>
       ) : (
-        <dl className="tms-grid tms-grid-3" style={{ marginTop: 8, fontSize: 13 }}>
-          <Cell label="Low" value={money(side.lowCents)} />
-          <Cell label="Median" value={money(side.medianCents)} />
-          <Cell label="Avg" value={money(side.avgCents)} />
-          <Cell label="High" value={money(side.highCents)} />
-          <Cell label="Per mile" value={perMile(side.perMileCents)} />
-        </dl>
+        <TmsMetaList
+          columns={3}
+          dense
+          className="mt-2"
+          items={[
+            { label: 'Low', value: money(side.lowCents) },
+            { label: 'Median', value: money(side.medianCents) },
+            { label: 'Avg', value: money(side.avgCents) },
+            { label: 'High', value: money(side.highCents) },
+            { label: 'Per mile', value: perMile(side.perMileCents) },
+          ]}
+        />
       )}
-    </div>
-  )
-}
-
-function Cell({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <dt className="tms-field-label">{label}</dt>
-      <dd style={{ margin: 0, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis' }}>{value}</dd>
     </div>
   )
 }
@@ -120,18 +116,13 @@ export function LaneHistoryPanel({ laneKey, laneKey3, miles, equipmentType, rate
     >
       <div style={{ display: 'grid', gap: 12 }} data-testid="lane-history">
         <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-end', gap: 12 }}>
-          <div style={{ display: 'flex', gap: 4 }} role="group" aria-label="Lane history window">
-            {WINDOWS.map((w) => (
-              <TmsButton
-                key={String(w.value)}
-                size="sm"
-                variant={windowDays === w.value ? 'primary' : 'secondary'}
-                onClick={() => setWindowDays(w.value)}
-              >
-                {w.label}
-              </TmsButton>
-            ))}
-          </div>
+          <TmsSegmentedTabs
+            size="sm"
+            aria-label="Lane history window"
+            tabs={WINDOWS.map((w) => ({ key: String(w.value), label: w.label }))}
+            active={String(windowDays)}
+            onSelect={(key) => setWindowDays(WINDOWS.find((w) => String(w.value) === key)?.value ?? 180)}
+          />
           <TmsField label="Equipment">
             <TmsSelect
               aria-label="Lane history equipment"
@@ -160,9 +151,9 @@ export function LaneHistoryPanel({ laneKey, laneKey3, miles, equipmentType, rate
         {loading && samples.length === 0 ? (
           <p className="tms-muted" style={{ fontSize: 13 }}>Loading lane history…</p>
         ) : empty ? (
-          <p className="tms-muted" style={{ fontSize: 13 }}>No history on this lane.</p>
+          <TmsEmptyState compact title="No history on this lane." message="" />
         ) : nothingInWindow ? (
-          <p className="tms-muted" style={{ fontSize: 13 }}>No history on this lane in this window.</p>
+          <TmsEmptyState compact title="No history on this lane in this window." message="" />
         ) : (
           <>
             <div className="tms-grid tms-grid-2">

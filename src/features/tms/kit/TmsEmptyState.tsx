@@ -9,19 +9,22 @@ export interface TmsEmptyStateProps {
   onAction?: () => void
   /** Key cap shown beside the action, e.g. `C` for "clear all filters". */
   actionKey?: string
+  /** In-card use: no big icon, tighter padding. */
+  compact?: boolean
 }
 
-/** The MVMNT empty state: info icon, headline, muted line, yellow action + key cap. */
+/** The MVMNT empty state: info icon, headline, muted line, green action + key cap. */
 export function TmsEmptyState({
   title = 'No items found using these filters.',
   message = 'Please try again using a different query.',
   actionLabel,
   onAction,
   actionKey,
+  compact,
 }: TmsEmptyStateProps) {
   return (
-    <div className="tms-empty">
-      <Info className="tms-empty-icon" size={20} aria-hidden="true" />
+    <div className={`tms-empty${compact ? ' tms-empty-compact' : ''}`}>
+      {compact ? null : <Info className="tms-empty-icon" size={20} aria-hidden="true" />}
       <div className="tms-empty-title">{title}</div>
       {message ? <div className="tms-empty-sub">{message}</div> : null}
       {actionLabel && onAction ? (

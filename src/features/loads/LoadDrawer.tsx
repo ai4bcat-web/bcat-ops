@@ -98,7 +98,7 @@ function EditLoadDialog({
   return (
     <Dialog open={isOpen} onOpenChange={(open) => { if (!open) onClose() }}>
       <DialogContent
-        className="p-0 gap-0 flex flex-col overflow-hidden"
+        className="tms-portal p-0 gap-0 flex flex-col overflow-hidden"
         style={{ maxWidth: 640, maxHeight: '85vh', width: '100%' }}
         onInteractOutside={(e) => e.preventDefault()}
         onEscapeKeyDown={(e) => e.preventDefault()}
@@ -600,7 +600,7 @@ export function LoadDrawer() {
 
   const proDialog = proDraft !== null && load && (
     <Dialog open onOpenChange={(open) => { if (!open) setProDraft(null) }}>
-      <DialogContent style={{ maxWidth: 420 }}>
+      <DialogContent className="tms-portal" style={{ maxWidth: 420 }}>
         <h2 style={{ fontSize: 16, fontWeight: 600, color: 'var(--ds-t1)', margin: 0 }}>Change Pro #</h2>
         <p style={{ fontSize: 12.5, color: 'var(--ds-t3)', margin: '6px 0 0' }}>
           The new number is claimed for good. {load.aljexId || 'The old one'} stays claimed too —

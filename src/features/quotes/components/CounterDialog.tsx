@@ -14,7 +14,7 @@
 import { useMemo, useState } from 'react'
 import { AlertTriangle, Copy, Link2 } from 'lucide-react'
 import { toast } from 'sonner'
-import { TmsButton, TmsDialog, TmsField, TmsTextarea } from '@/features/tms/kit'
+import { TmsAlert, TmsButton, TmsDialog, TmsField, TmsTextarea } from '@/features/tms/kit'
 import { MoneyField } from '@/features/directory/components/MoneyField'
 import { counterOffer, counterQuote, graphqlErrorText, type QuoteSendResult } from '@/lib/apiClient'
 import { formatCents } from '@/lib/invoiceBuild'
@@ -179,9 +179,9 @@ export function CounterDialog({ quote, open, onOpenChange, onDone }: {
       {result && (
         <div style={{ display: 'grid', gap: 12 }}>
           {result.sent === false && (
-            <div style={{ borderRadius: 'var(--tms-radius)', border: '1px solid var(--tms-badge-orange)', background: 'rgba(255,136,10,0.12)', padding: 8, fontSize: 13 }}>
+            <TmsAlert tone="orange">
               Nothing was e-mailed. The counter is recorded and the link below is live — send it by hand.
-            </div>
+            </TmsAlert>
           )}
           {result.link && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

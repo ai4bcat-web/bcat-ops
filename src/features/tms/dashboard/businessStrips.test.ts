@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest'
 import { SEED_DIVISIONS } from '@/lib/ownership'
 import type { DashboardData, DashboardFilters } from './types'
-import { buildBusinessStrips, buildCompanyTotals } from './businessStrips'
+import { buildBusinessStrips, buildCompanyTotals, rollupBusinessStrips, type BusinessStrip } from './businessStrips'
 
 const MONTH = '2026-10'
 const DAY = `${MONTH}-02`
@@ -300,5 +300,36 @@ describe('buildCompanyTotals', () => {
     const totals = buildCompanyTotals(d, { ...filters, divisions: ['ASSETS'] })
     expect(totals.shipmentCount).toBe(1)
     expect(totals.revenueCents).toBe(50_000)
+  })
+})
+
+describe('rollupBusinessStrips', () => {
+  const empty = { subdivisions: [], shipmentsByStatus: {}, brand: null, revenueCents: null, profitCents: null, marginBps: null, arOpenCents: null, apOpenCents: null, trackedCount: null, podNeededCount: null }
+  const strip = (code: string, over: Partial<BusinessStrip> = {}): BusinessStrip => ({ ...empty, code, name: code, ...over })
+
+  it('hides strips whose every figure is empty, Company included', () => {
+    expect(rollupBusinessStrips([strip('CAR_SHIPPING'), strip('COMPANY')])).toEqual([])
+    const out = rollupBusinessStrips([strip('BROKERAGE', { podNeededCount: 0, shipmentsByStatus: { BOOKED: 1 } }), strip('CAR_SHIPPING'), strip('COMPANY')])
+    expect(out.map((s) => s.code)).toEqual(['BROKERAGE', 'COMPANY'])
+  })
+
+  it('fills Company from the sum of the other strips, recomputing margin from the sums', () => {
+    const out = rollupBusinessStrips([
+      strip('BROKERAGE', { revenueCents: 10000, profitCents: 2000, marginBps: 2000, arOpenCents: 500, trackedCount: 2, podNeededCount: 1, shipmentsByStatus: { BOOKED: 1, DELIVERED: 1 } }),
+      strip('ASSETS', { revenueCents: 30000, profitCents: 3000, marginBps: 1000, apOpenCents: 700, trackedCount: 3, shipmentsByStatus: { BOOKED: 2 } }),
+      strip('CAR_SHIPPING'),
+      strip('COMPANY'),
+    ])
+    expect(out.map((s) => s.code)).toEqual(['BROKERAGE', 'ASSETS', 'COMPANY'])
+    expect(out[2]).toMatchObject({
+      revenueCents: 40000,
+      profitCents: 5000,
+      marginBps: 1250,
+      arOpenCents: 500,
+      apOpenCents: 700,
+      trackedCount: 5,
+      podNeededCount: 1,
+      shipmentsByStatus: { BOOKED: 3, DELIVERED: 1 },
+    })
   })
 })

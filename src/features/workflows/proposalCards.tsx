@@ -10,7 +10,7 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
-import { TmsButton, TmsCard, TmsDialog, TmsField, TmsInput } from '@/features/tms/kit'
+import { TmsApprovalCard, TmsBadge, TmsButton, TmsCard, TmsDialog, TmsField, TmsInput, TmsMetaList } from '@/features/tms/kit'
 import { linkWorkflowRun, listShipments, setWorkflowRunParty } from '@/lib/apiClient'
 import { formatCents } from '@/lib/invoiceBuild'
 import { proposalToPrefill } from '@/lib/workflows/tenderProposal'
@@ -30,15 +30,18 @@ export interface ProposalCardProps {
   onChanged: () => void | Promise<void>
 }
 
-/** A label/value row. The cards are read far more often than they are acted on. */
-function Fact({ label, value }: { label: string; value: string | null | undefined }) {
+/** The facts of a proposal as one meta list. The cards are read far more often than they are acted on. */
+function Facts({ items }: { items: Array<[label: string, value: string | null | undefined]> }) {
   return (
-    <div>
-      <dt className="tms-field-label">{label}</dt>
-      <dd>{value && value.trim() ? value : '—'}</dd>
-    </div>
+    <TmsMetaList
+      columns={4}
+      dense
+      items={items.map(([label, value]) => ({ label, value: value && value.trim() ? value : null }))}
+    />
   )
 }
+
+const PROPOSAL_CHIP = <TmsBadge tone="blue">Agent proposal</TmsBadge>
 
 function placeOf(part: { city?: string | null; state?: string | null; zip?: string | null } | null | undefined): string {
   if (!part) return ''
@@ -79,7 +82,8 @@ function TenderCard({ run, proposal, onChanged }: ProposalCardProps & { proposal
   }
 
   return (
-    <TmsCard
+    <TmsApprovalCard
+      chip={PROPOSAL_CHIP}
       title="Proposed tender"
       actions={applied ? null : (
         <>
@@ -88,12 +92,12 @@ function TenderCard({ run, proposal, onChanged }: ProposalCardProps & { proposal
         </>
       )}
     >
-      <dl className="tms-grid tms-grid-4">
-        <Fact label="Customer" value={run.partyName ?? proposal.customerName ?? tender.customer} />
-        <Fact label="Reference" value={tender.reference} />
-        <Fact label="Pickup number" value={tender.pickupNumber} />
-        <Fact label="Weight" value={tender.weightLb ? `${tender.weightLb.toLocaleString()} lb` : null} />
-      </dl>
+      <Facts items={[
+        ['Customer', run.partyName ?? proposal.customerName ?? tender.customer],
+        ['Reference', tender.reference],
+        ['Pickup number', tender.pickupNumber],
+        ['Weight', tender.weightLb ? `${tender.weightLb.toLocaleString()} lb` : null],
+      ]} />
       <ol className="mt-3 text-sm">
         {tender.stops.map((stop, i) => (
           <li key={`${stop.type}-${i}`}>
@@ -150,7 +154,7 @@ function TenderCard({ run, proposal, onChanged }: ProposalCardProps & { proposal
           <TmsInput aria-label="Shipment number" value={number} onChange={(e) => setNumber(e.target.value)} />
         </TmsField>
       </TmsDialog>
-    </TmsCard>
+    </TmsApprovalCard>
   )
 }
 
@@ -168,7 +172,8 @@ function QuoteCard({ run, proposal }: ProposalCardProps & { proposal: QuotePropo
   const navigate = useNavigate()
   const applied = run.outcome === 'APPLIED'
   return (
-    <TmsCard
+    <TmsApprovalCard
+      chip={PROPOSAL_CHIP}
       title="Proposed quote"
       actions={applied ? null : (
         <TmsButton variant="primary" size="sm" onClick={() => navigate(`/tms/rates/new?run=${encodeURIComponent(run.id)}`)}>
@@ -180,21 +185,21 @@ function QuoteCard({ run, proposal }: ProposalCardProps & { proposal: QuotePropo
         Opens a new quote seeded from this proposal. Nothing is priced for you, and saving it
         links this run to the quote.
       </p>
-      <dl className="tms-grid tms-grid-4">
-        <Fact label="Customer" value={run.partyName ?? proposal.customerName} />
-        <Fact label="Origin" value={placeOf(proposal.origin)} />
-        <Fact label="Destination" value={placeOf(proposal.destination)} />
-        <Fact label="Equipment" value={proposal.equipmentType} />
-        <Fact label="Pickup" value={proposal.pickupDate} />
-        <Fact label="Delivery" value={proposal.deliveryDate} />
-        <Fact label="Commodity" value={proposal.commodity} />
-        <Fact label="Weight" value={proposal.weightLbs ? `${proposal.weightLbs.toLocaleString()} lb` : null} />
-        {/* Their number, never ours: a target the customer named is not a quote. */}
-        <Fact label="Target rate" value={proposal.targetRateCents != null ? formatCents(proposal.targetRateCents) : null} />
-      </dl>
+      <Facts items={[
+        ['Customer', run.partyName ?? proposal.customerName],
+        ['Origin', placeOf(proposal.origin)],
+        ['Destination', placeOf(proposal.destination)],
+        ['Equipment', proposal.equipmentType],
+        ['Pickup', proposal.pickupDate],
+        ['Delivery', proposal.deliveryDate],
+        ['Commodity', proposal.commodity],
+        ['Weight', proposal.weightLbs ? `${proposal.weightLbs.toLocaleString()} lb` : null],
+        // Their number, never ours: a target the customer named is not a quote.
+        ['Target rate', proposal.targetRateCents != null ? formatCents(proposal.targetRateCents) : null],
+      ]} />
       {proposal.memoryHint ? <p className="tms-muted mt-3 text-xs">Memory used: {proposal.memoryHint}</p> : null}
       {proposal.notes ? <p className="mt-3 text-sm">{proposal.notes}</p> : null}
-    </TmsCard>
+    </TmsApprovalCard>
   )
 }
 
@@ -204,7 +209,8 @@ function CarrierBillCard({ run, proposal }: ProposalCardProps & { proposal: Carr
   const shipmentId = proposal.shipmentId ?? run.shipmentId ?? null
   const pending = (run.documents ?? []).length
   return (
-    <TmsCard
+    <TmsApprovalCard
+      chip={PROPOSAL_CHIP}
       title="Proposed carrier bill"
       actions={shipmentId ? (
         <Link className="tms-btn tms-btn-primary tms-btn-sm" to={`/tms/shipments/${shipmentId}?tab=carrierPay`}>
@@ -212,22 +218,22 @@ function CarrierBillCard({ run, proposal }: ProposalCardProps & { proposal: Carr
         </Link>
       ) : null}
     >
-      <dl className="tms-grid tms-grid-4">
-        <Fact label="Carrier" value={proposal.carrierName ?? run.partyName} />
-        <Fact label="Shipment" value={proposal.shipmentNumber ?? run.shipmentNumber} />
-        <Fact label="Invoice #" value={proposal.invoiceNumber} />
-        <Fact label="Amount" value={proposal.amountCents != null ? formatCents(proposal.amountCents) : null} />
-        <Fact label="Invoice date" value={proposal.invoiceDate} />
-        <Fact label="Due" value={proposal.dueDate} />
-        {/* The run files the invoice as a PENDING document; a person reviews it there. */}
-        <Fact label="Documents filed" value={pending ? `${pending} PENDING` : null} />
-      </dl>
+      <Facts items={[
+        ['Carrier', proposal.carrierName ?? run.partyName],
+        ['Shipment', proposal.shipmentNumber ?? run.shipmentNumber],
+        ['Invoice #', proposal.invoiceNumber],
+        ['Amount', proposal.amountCents != null ? formatCents(proposal.amountCents) : null],
+        ['Invoice date', proposal.invoiceDate],
+        ['Due', proposal.dueDate],
+        // The run files the invoice as a PENDING document; a person reviews it there.
+        ['Documents filed', pending ? `${pending} PENDING` : null],
+      ]} />
       {!shipmentId ? (
         <p className="tms-muted mt-3 text-sm">
           No shipment was matched, so there is no Carrier Pay tab to open. Name the party or dismiss the run.
         </p>
       ) : null}
-    </TmsCard>
+    </TmsApprovalCard>
   )
 }
 
@@ -235,17 +241,18 @@ function CarrierBillCard({ run, proposal }: ProposalCardProps & { proposal: Carr
 
 function VendorBillCard({ proposal }: ProposalCardProps & { proposal: VendorBillProposal }) {
   return (
-    <TmsCard
+    <TmsApprovalCard
+      chip={PROPOSAL_CHIP}
       title="Proposed vendor bill"
       actions={<Link className="tms-btn tms-btn-primary tms-btn-sm" to="/tms/vendors">Open in Vendors</Link>}
     >
-      <dl className="tms-grid tms-grid-4">
-        <Fact label="Vendor" value={proposal.vendorName} />
-        <Fact label="Invoice #" value={proposal.invoiceNumber} />
-        <Fact label="Amount" value={proposal.amountCents != null ? formatCents(proposal.amountCents) : null} />
-        <Fact label="Due" value={proposal.dueDate} />
-      </dl>
-    </TmsCard>
+      <Facts items={[
+        ['Vendor', proposal.vendorName],
+        ['Invoice #', proposal.invoiceNumber],
+        ['Amount', proposal.amountCents != null ? formatCents(proposal.amountCents) : null],
+        ['Due', proposal.dueDate],
+      ]} />
+    </TmsApprovalCard>
   )
 }
 
@@ -254,17 +261,17 @@ function VendorBillCard({ proposal }: ProposalCardProps & { proposal: VendorBill
 /** A posting is read and noted. There is nothing to apply, so there is no button. */
 function CapacityCard({ run, proposal }: ProposalCardProps & { proposal: CapacityProposal }) {
   return (
-    <TmsCard title="Capacity noted">
-      <dl className="tms-grid tms-grid-4">
-        <Fact label="Carrier" value={proposal.carrierName ?? run.partyName} />
-        <Fact label="Equipment" value={proposal.equipment} />
-        <Fact label="From" value={[proposal.originCity, proposal.originState].filter(Boolean).join(', ')} />
-        <Fact label="To" value={[proposal.destinationCity, proposal.destinationState].filter(Boolean).join(', ')} />
-        <Fact label="Available" value={proposal.availableDate} />
-        <Fact label="Trucks" value={proposal.trucks != null ? String(proposal.trucks) : null} />
-      </dl>
+    <TmsApprovalCard chip={PROPOSAL_CHIP} title="Capacity noted">
+      <Facts items={[
+        ['Carrier', proposal.carrierName ?? run.partyName],
+        ['Equipment', proposal.equipment],
+        ['From', [proposal.originCity, proposal.originState].filter(Boolean).join(', ')],
+        ['To', [proposal.destinationCity, proposal.destinationState].filter(Boolean).join(', ')],
+        ['Available', proposal.availableDate],
+        ['Trucks', proposal.trucks != null ? String(proposal.trucks) : null],
+      ]} />
       {proposal.notes ? <p className="mt-3 text-sm">{proposal.notes}</p> : null}
-    </TmsCard>
+    </TmsApprovalCard>
   )
 }
 

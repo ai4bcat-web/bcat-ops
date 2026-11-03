@@ -277,8 +277,7 @@ export function SendRemittanceDialog({ payment, open, onOpenChange, onDone }: {
 
           {notSent && result && (
             <div
-              className="flex flex-col gap-2 p-2"
-              style={{ border: '1px solid var(--tms-badge-orange)', borderRadius: 'var(--tms-radius)' }}
+              className="flex flex-col gap-2 p-2 tms-tint tms-tint-orange"
             >
               <p className="flex items-start gap-2 text-xs font-medium">
                 <AlertTriangle size={14} className="mt-0.5 shrink-0" style={{ color: 'var(--tms-badge-orange)' }} />

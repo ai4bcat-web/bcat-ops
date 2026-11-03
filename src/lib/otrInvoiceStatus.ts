@@ -12,25 +12,27 @@
  * and the whole app follows.
  */
 
+import type { TmsTone } from '@/features/tms/kit/statusTone'
+
 export interface OtrStatusMeta {
   code: number
   /** Exactly what OTR's portal calls it. */
   label: string
-  /** Portal row colour, so a glance here matches a glance there. */
-  tone: { bg: string; fg: string; border: string }
+  /** Badge tone, so a glance here matches a glance at the portal's row colour. */
+  tone: TmsTone
   /** Nothing more will happen to this invoice. */
   terminal: boolean
   /** OTR or the broker is waiting on us — these are the rows worth chasing. */
   needsAttention: boolean
 }
 
-const YELLOW = { bg: '#fef9c3', fg: '#854d0e', border: '#fde047' }
-const RED    = { bg: '#fecaca', fg: '#b91c1c', border: '#f87171' }
-const ORANGE = { bg: '#fed7aa', fg: '#c2410c', border: '#fb923c' }
-const TAN    = { bg: '#e7d7a8', fg: '#854d0e', border: '#d6bd6a' }
-const GREEN  = { bg: '#dcfce7', fg: '#15803d', border: '#86efac' }
-const BLUE   = { bg: '#dbeafe', fg: '#1d4ed8', border: '#93c5fd' }
-const GREY   = { bg: '#f1f5f9', fg: '#64748b', border: '#cbd5e1' }
+const YELLOW: TmsTone = 'orange'
+const RED: TmsTone = 'red'
+const ORANGE: TmsTone = 'orange'
+const TAN: TmsTone = 'gray'
+const GREEN: TmsTone = 'green'
+const BLUE: TmsTone = 'blue'
+const GREY: TmsTone = 'gray'
 
 /**
  * OTR's published status enum, by code.

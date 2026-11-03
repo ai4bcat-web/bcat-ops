@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { APIProvider, Map as GoogleMap, AdvancedMarker, useMap } from '@vis.gl/react-google-maps'
+import { useTmsTokens } from '../../tms/tmsTokens'
 
 interface GooglePolyline {
   setMap(map: unknown | null): void
@@ -52,6 +53,8 @@ function validStops(row: BoardMapRow): Array<BoardMapStop & { lat: number; lng: 
 /** Draws one polyline per shipment after the map instance is available. */
 function ShipmentPolylines({ paths }: { paths: LatLng[][] }) {
   const map = useMap()
+  // Map options are JS-only, so the line colour is resolved from the theme token.
+  const { '--tms-primary': lineColor } = useTmsTokens(['--tms-primary'] as const)
 
   useEffect(() => {
     const maps = window.google?.maps
@@ -62,7 +65,7 @@ function ShipmentPolylines({ paths }: { paths: LatLng[][] }) {
       const poly = new maps.Polyline({
         path,
         geodesic: true,
-        strokeColor: '#f4c50c',
+        strokeColor: lineColor,
         strokeOpacity: 0.8,
         strokeWeight: 2,
         map,
@@ -72,7 +75,7 @@ function ShipmentPolylines({ paths }: { paths: LatLng[][] }) {
     return () => {
       for (const poly of polylines) poly.setMap(null)
     }
-  }, [map, paths])
+  }, [map, paths, lineColor])
 
   return null
 }

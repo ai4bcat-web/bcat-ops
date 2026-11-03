@@ -106,8 +106,7 @@ export function SendToFactorDialog({ invoiceId, busy, onClose, onDone }: {
 
       {!loading && preview && !preview.ready && (
         <div
-          className="p-2 text-xs"
-          style={{ border: '1px solid var(--tms-badge-orange)', borderRadius: 'var(--tms-radius)' }}
+          className="p-2 text-xs tms-tint tms-tint-orange"
         >
           <p className="flex items-start gap-2">
             <AlertTriangle size={14} className="mt-0.5 shrink-0" style={{ color: 'var(--tms-badge-orange)' }} />

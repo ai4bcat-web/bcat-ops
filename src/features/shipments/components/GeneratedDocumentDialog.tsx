@@ -12,9 +12,9 @@
  * audience INTERNAL and this dialog offers no way to change that.
  */
 import { useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, FileText, Save } from 'lucide-react'
+import { FileText, Save } from 'lucide-react'
 import { toast } from 'sonner'
-import { TmsBadge, TmsButton, TmsDialog } from '@/features/tms/kit'
+import { TmsAlert, TmsBadge, TmsButton, TmsDialog } from '@/features/tms/kit'
 import { getTmsSettings, listCheckCallsByLoad, listDivisions, saveGeneratedDocument } from '@/lib/apiClient'
 import { bolData, loadSummaryData } from '@/lib/documentData'
 import { buildBolPdf, bolFilename } from '@/lib/bolPdf'
@@ -269,11 +269,7 @@ export function GeneratedDocumentDialog({
           )}
         </div>
 
-        {error && (
-          <p className="flex items-start gap-2 rounded-[var(--tms-radius)] border border-[color:var(--tms-badge-red)]  p-2 text-xs text-[color:var(--tms-badge-red)]">
-            <AlertTriangle size={14} className="mt-0.5 shrink-0" />{error}
-          </p>
-        )}
+        {error && <TmsAlert tone="red">{error}</TmsAlert>}
 
 
     </TmsDialog>

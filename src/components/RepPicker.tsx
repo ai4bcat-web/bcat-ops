@@ -203,7 +203,7 @@ export function RepPicker(props: RepPickerProps) {
           style={{
             position: 'absolute', zIndex: 50, marginTop: 4, width: '100%',
             borderRadius: 'var(--tms-radius)', border: '1px solid var(--tms-border)',
-            background: 'var(--tms-card)', padding: 4, boxShadow: '0 12px 30px rgba(0,0,0,0.45)',
+            background: 'var(--tms-card)', padding: 4, boxShadow: 'var(--tms-shadow-pop)',
           }}
         >
           <TmsInput

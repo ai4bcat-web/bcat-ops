@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState, type CSSProperties } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { AlertTriangle, CheckCircle2, FileText, PenLine, ShieldCheck, XCircle } from 'lucide-react'
+import { FileText, PenLine, ShieldCheck, XCircle } from 'lucide-react'
 import {
   declineRateCon,
   getRateCon,
@@ -12,42 +12,11 @@ import {
 import { stampSignature } from '@/lib/carrierRateCon'
 import { formatCents } from '@/lib/tmsDirectory'
 import type { RateConRequiredField, RateConStatus } from '@/types/tms'
+import { TmsAlert, TmsButton, TmsCard, TmsInput, TmsMetaList, TmsPublicFrame, TmsTextarea } from '@/features/tms/kit'
 
 // This page is PUBLIC — a carrier opens it from an emailed link with no account.
 // It must never import anything that needs Cognito (no useAuth, no apiClient); the
 // only backend it talks to is the rate-con-sign Function URL via rateConSignClient.
-
-// ── Shared styles (design-system tokens, matching the driver portal) ────────────
-const cardStyle: CSSProperties = {
-  background: 'var(--ds-surface)',
-  border: '1px solid var(--ds-border)',
-  borderRadius: 12,
-  boxShadow: 'var(--sh-sm)',
-  padding: 14,
-}
-const btnPrimary: CSSProperties = {
-  display: 'inline-flex', alignItems: 'center', gap: 7,
-  borderRadius: 9, padding: '11px 22px', fontSize: 14, fontWeight: 600,
-  background: 'var(--ds-blue)', color: '#fff', border: 'none', cursor: 'pointer',
-}
-const btnGhost: CSSProperties = {
-  display: 'inline-flex', alignItems: 'center', gap: 7,
-  borderRadius: 9, padding: '11px 18px', fontSize: 14, fontWeight: 600,
-  background: 'var(--ds-surface)', color: 'var(--ds-t2)',
-  border: '1px solid var(--ds-border)', cursor: 'pointer',
-}
-const btnDanger: CSSProperties = { ...btnPrimary, background: 'var(--ds-red)' }
-const inputStyle: CSSProperties = {
-  width: '100%', borderRadius: 7, border: '1px solid var(--ds-border)', padding: '9px 12px',
-  fontSize: 14, background: 'var(--ds-surface)', color: 'var(--ds-t1)', outline: 'none',
-}
-const labelStyle: CSSProperties = {
-  display: 'block', fontSize: 11, fontWeight: 700, letterSpacing: '0.05em',
-  textTransform: 'uppercase', color: 'var(--ds-t3)', marginBottom: 4,
-}
-// Centered content column — matches the driver portal (720px, generous padding).
-const PORTAL_COL = 'mx-auto w-full px-6 py-8'
-const PORTAL_MAXW: CSSProperties = { maxWidth: 720 }
 
 const FIELD_LABELS: Record<RateConRequiredField, string> = {
   DRIVER_NAME: 'Driver name',
@@ -159,7 +128,7 @@ export function RateConSignPage() {
   }
 
   if (loading) {
-    return <Shell><div className="px-4 py-16 text-center" style={{ color: 'var(--ds-t3)' }}>Loading…</div></Shell>
+    return <Shell><div className="tms-public-loading">Loading…</div></Shell>
   }
 
   // ── Not found / dead link ──
@@ -253,142 +222,121 @@ export function RateConSignPage() {
   }
 
   return (
-    <Shell broker={state.brokerName}>
-      <div className={PORTAL_COL} style={PORTAL_MAXW}>
-        <h1 className="text-2xl font-bold" style={{ color: 'var(--ds-t1)' }}>
-          Rate confirmation — load {state.loadNumber}
-        </h1>
-        <p className="mt-1" style={{ color: 'var(--ds-t3)' }}>
-          {state.brokerName} is offering this load to {state.carrierName} at{' '}
-          <span style={{ fontWeight: 600, color: 'var(--ds-t2)' }}>${formatCents(state.totalCents)}</span>.
-          Read it, fill in the trip details and sign below.
-          {state.expiresAt && ` This link expires ${new Date(state.expiresAt).toLocaleString()}.`}
-        </p>
+    <Shell broker={state.brokerName} title={`Rate confirmation — load ${state.loadNumber}`} width="lg">
+      <div className="tms-public-stack">
+        <TmsCard>
+          <p className="tms-public-intro">
+            {state.brokerName} is offering this load to {state.carrierName}. Read it, fill in the trip details and sign below.
+          </p>
+          <TmsMetaList
+            columns={2}
+            items={[
+              { label: 'Load', value: state.loadNumber },
+              { label: 'Carrier', value: state.carrierName },
+              { label: 'Rate', value: <span className="tms-public-strong">${formatCents(state.totalCents)}</span> },
+              {
+                label: 'Link expires',
+                value: state.expiresAt ? new Date(state.expiresAt).toLocaleString() : null,
+                hidden: !state.expiresAt,
+              },
+            ]}
+          />
+        </TmsCard>
 
-        {/* The rate confirmation itself — read before you sign. */}
-        <div className="mt-4" style={{ ...cardStyle, padding: 0, overflow: 'hidden' }}>
-          <div className="flex items-center gap-2 px-3.5 py-2.5" style={{ borderBottom: '1px solid var(--ds-border)' }}>
-            <FileText size={15} style={{ color: 'var(--ds-t3)' }} />
-            <span className="text-sm font-semibold" style={{ color: 'var(--ds-t1)' }}>Rate confirmation</span>
-            <a href={state.pdfUrl} target="_blank" rel="noreferrer"
-              className="ml-auto text-sm font-semibold" style={{ color: 'var(--ds-blue)', textDecoration: 'none' }}>
-              Open PDF
-            </a>
+        {/* The rate confirmation itself — read before you sign. The PDF sits on a paper matte in both themes. */}
+        <TmsCard
+          flush
+          title={<span className="tms-public-doc-title"><FileText size={15} /> Rate confirmation</span>}
+          actions={<a href={state.pdfUrl} target="_blank" rel="noreferrer" className="tms-link">Open PDF</a>}
+        >
+          <div className="tms-public-paper" data-tms-paper>
+            <iframe title="Rate confirmation" src={state.pdfUrl} className="tms-public-pdf" />
           </div>
-          <iframe title="Rate confirmation" src={state.pdfUrl} style={{ width: '100%', height: 520, border: 'none', display: 'block' }} />
-        </div>
+        </TmsCard>
 
         {/* Trip details the broker requires before dispatch. */}
         {requiredFields.length > 0 && (
-          <div className="mt-4" style={cardStyle}>
-            <div className="mb-3 text-sm font-semibold" style={{ color: 'var(--ds-t1)' }}>Trip details</div>
-            <div className="grid grid-cols-2 gap-3">
+          <TmsCard title="Trip details">
+            <div className="tms-public-grid-2">
               {requiredFields.map((field) => (
-                <div key={field}>
-                  <label style={labelStyle} htmlFor={`rate-con-${field}`}>{FIELD_LABELS[field] ?? field}</label>
-                  <input
+                <div key={field} className="tms-public-field">
+                  <label className="tms-public-label" htmlFor={`rate-con-${field}`}>{FIELD_LABELS[field] ?? field}</label>
+                  <TmsInput
                     id={`rate-con-${field}`}
                     type={fieldInputType(field)}
-                    style={inputStyle}
                     value={fields[field] ?? ''}
                     onChange={(e) => setFields((prev) => ({ ...prev, [field]: e.target.value }))}
                   />
                 </div>
               ))}
             </div>
-          </div>
+          </TmsCard>
         )}
 
         {/* Signature block. */}
-        <div className="mt-4" style={cardStyle}>
-          <div className="mb-3 flex items-center gap-2">
-            <PenLine size={15} style={{ color: 'var(--ds-t3)' }} />
-            <span className="text-sm font-semibold" style={{ color: 'var(--ds-t1)' }}>Sign</span>
+        <TmsCard title={<span className="tms-public-doc-title"><PenLine size={15} /> Sign</span>}>
+          <div className="tms-public-field">
+            <label className="tms-public-label" htmlFor="rate-con-signer">Your full name</label>
+            <TmsInput id="rate-con-signer" value={signerName} autoComplete="name"
+              onChange={(e) => setSignerName(e.target.value)} />
           </div>
-          <label style={labelStyle} htmlFor="rate-con-signer">Your full name</label>
-          <input id="rate-con-signer" style={inputStyle} value={signerName} autoComplete="name"
-            onChange={(e) => setSignerName(e.target.value)} />
-          <label className="mt-3 flex items-start gap-2.5 text-sm" style={{ color: 'var(--ds-t2)', cursor: 'pointer' }}>
-            <input type="checkbox" checked={agreed} style={{ marginTop: 3 }}
-              onChange={(e) => setAgreed(e.target.checked)} />
+          <label className="tms-public-agree">
+            <input type="checkbox" checked={agreed} onChange={(e) => setAgreed(e.target.checked)} />
             <span>
               I am authorised to sign for {state.carrierName} and I accept this rate confirmation and its terms.
               Typing my name counts as my signature.
             </span>
           </label>
 
-          {actionError && <p className="mt-3 text-sm" style={{ color: 'var(--ds-red)' }}>{actionError}</p>}
+          {actionError && <TmsAlert tone="red">{actionError}</TmsAlert>}
 
-          <div className="mt-4 flex flex-wrap items-center gap-2.5">
-            <button type="button" style={{ ...btnPrimary, opacity: canSign ? 1 : 0.5, cursor: canSign ? 'pointer' : 'not-allowed' }}
-              disabled={!canSign} onClick={sign}>
+          <div className="tms-public-actions">
+            <TmsButton variant="primary" disabled={!canSign} onClick={sign}>
               <ShieldCheck size={15} /> {busy ? 'Working…' : 'Sign rate confirmation'}
-            </button>
+            </TmsButton>
             {!declining && (
-              <button type="button" style={btnGhost} disabled={busy} onClick={() => setDeclining(true)}>
+              <TmsButton disabled={busy} onClick={() => setDeclining(true)}>
                 <XCircle size={15} /> Decline
-              </button>
+              </TmsButton>
             )}
             {!fieldsComplete && requiredFields.length > 0 && (
-              <span className="text-xs" style={{ color: 'var(--ds-t3)' }}>Fill in every trip detail first.</span>
+              <span className="tms-public-sub">Fill in every trip detail first.</span>
             )}
           </div>
 
           {declining && (
-            <div className="mt-4" style={{ borderTop: '1px solid var(--ds-border)', paddingTop: 14 }}>
-              <label style={labelStyle} htmlFor="rate-con-decline">Why are you declining?</label>
-              <textarea id="rate-con-decline" rows={3} style={{ ...inputStyle, resize: 'vertical' }}
-                value={declineReason} onChange={(e) => setDeclineReason(e.target.value)} />
-              <div className="mt-2.5 flex items-center gap-2.5">
-                <button type="button" disabled={busy || declineReason.trim() === ''}
-                  style={{ ...btnDanger, opacity: busy || declineReason.trim() === '' ? 0.5 : 1 }}
-                  onClick={decline}>
+            <div className="tms-public-decline">
+              <label className="tms-public-label" htmlFor="rate-con-decline">Why are you declining?</label>
+              <TmsTextarea id="rate-con-decline" rows={3} value={declineReason} onChange={(e) => setDeclineReason(e.target.value)} />
+              <div className="tms-public-actions">
+                <TmsButton variant="destructive" disabled={busy || declineReason.trim() === ''} onClick={decline}>
                   Decline this load
-                </button>
-                <button type="button" style={btnGhost} disabled={busy}
-                  onClick={() => { setDeclining(false); setDeclineReason('') }}>
+                </TmsButton>
+                <TmsButton disabled={busy} onClick={() => { setDeclining(false); setDeclineReason('') }}>
                   Cancel
-                </button>
+                </TmsButton>
               </div>
             </div>
           )}
-        </div>
+        </TmsCard>
       </div>
     </Shell>
   )
 }
 
 function Notice({ tone, title, children }: { tone: 'warn' | 'good'; title: string; children: React.ReactNode }) {
-  const Icon = tone === 'good' ? CheckCircle2 : AlertTriangle
-  const color = tone === 'good' ? 'var(--ds-green)' : 'var(--ds-amber)'
   return (
-    <div className="mx-auto max-w-md px-4 py-16 text-center">
-      <Icon className="mx-auto mb-4" size={40} style={{ color }} />
-      <h1 className="mb-2 text-xl font-semibold" style={{ color: 'var(--ds-t1)' }}>{title}</h1>
-      <p style={{ color: 'var(--ds-t3)' }}>{children}</p>
-    </div>
+    <TmsAlert tone={tone === 'good' ? 'green' : 'orange'} title={title}>
+      {children}
+    </TmsAlert>
   )
 }
 
-function Shell({ children, broker }: { children: React.ReactNode; broker?: string }) {
+function Shell({ children, broker, title, width = 'md' }: { children: React.ReactNode; broker?: string; title?: string; width?: 'md' | 'lg' }) {
   return (
-    <div style={{ minHeight: '100vh', background: 'var(--ds-bg)', display: 'flex', flexDirection: 'column' }}>
-      {/* Black sticky top bar — broker identity, always visible while the carrier scrolls. */}
-      <header style={{ position: 'sticky', top: 0, zIndex: 20, background: '#0e1116', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
-        <div className="mx-auto flex w-full items-center gap-3 px-6" style={{ ...PORTAL_MAXW, height: 60 }}>
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg" style={{ background: 'linear-gradient(135deg, var(--ds-blue) 0%, var(--ds-blue-dark) 100%)' }}>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M5 4h7a4 4 0 0 1 0 8H5z M5 12h8a4 4 0 0 1 0 8H5z" fill="white" /></svg>
-          </div>
-          <div>
-            <div className="text-sm font-bold" style={{ color: '#fff', letterSpacing: '0.02em' }}>{broker ?? 'BCAT'}</div>
-            <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)', marginTop: 1 }}>Rate confirmation</div>
-          </div>
-        </div>
-      </header>
-      <main style={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'flex-start' }}>
-        <div style={{ width: '100%', maxWidth: 720 }}>{children}</div>
-      </main>
-    </div>
+    <TmsPublicFrame brand={broker ?? 'BCAT'} subtitle="Rate confirmation" title={title} width={width}>
+      {children}
+    </TmsPublicFrame>
   )
 }
 

@@ -24,7 +24,7 @@ import {
   Mail, Pencil, Plus, RotateCw, Send, Smartphone, StopCircle, Upload, Wand2, X,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { TmsBadge, TmsButton, TmsCard, TmsDialog, TmsInput, TmsSelect, TmsTextarea } from '@/features/tms/kit'
+import { TmsAlert, TmsBadge, TmsButton, TmsCard, TmsDialog, TmsInput, TmsSelect, TmsTextarea } from '@/features/tms/kit'
 import { Label } from '@/components/ui/label'
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
@@ -192,7 +192,7 @@ export function DocumentsSection({
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
         {docs.pendingCount > 0 && (
-          <TmsBadge tone="gray" className="border-[color:var(--tms-badge-orange)] text-[10px] text-[color:var(--tms-badge-orange)]">
+          <TmsBadge tone="orange" className="text-[10px]">
             {docs.pendingCount} upload{docs.pendingCount === 1 ? '' : 's'} to review
           </TmsBadge>
         )}
@@ -224,16 +224,8 @@ export function DocumentsSection({
         </div>
       </div>
 
-      {docs.error && (
-        <p className="flex items-start gap-2 rounded-[var(--tms-radius)] border border-[color:var(--tms-border)] bg-[color:var(--tms-card)] p-2 text-xs">
-          <AlertTriangle size={14} className="mt-0.5 shrink-0 text-[color:var(--tms-badge-orange)]" />{docs.error}
-        </p>
-      )}
-      {error && (
-        <p className="flex items-start gap-2 rounded-[var(--tms-radius)] border border-[color:var(--tms-badge-red)]  p-2 text-xs text-[color:var(--tms-badge-red)]">
-          <AlertTriangle size={14} className="mt-0.5 shrink-0" />{error}
-        </p>
-      )}
+      {docs.error && <TmsAlert tone="orange">{docs.error}</TmsAlert>}
+      {error && <TmsAlert tone="red">{error}</TmsAlert>}
 
       {order && (
         <RequiredStrip
@@ -498,11 +490,11 @@ function DocumentRow({ doc, onPreview, onDownload, onRetype, onVoid }: { doc: Sh
   const spent = doc.status === 'SUPERSEDED' || doc.status === 'VOID'
 
   const tone = pending
-    ? 'border-[color:var(--tms-badge-orange)] 0/5'
+    ? 'border-[color:var(--tms-badge-orange)] bg-[color:var(--tms-badge-orange-tint)]'
     : rejected
-      ? 'border-[color:var(--tms-badge-red)] '
+      ? 'border-[color:var(--tms-badge-red)] bg-[color:var(--tms-badge-red-tint)]'
       : spent
-        ? 'border-[color:var(--tms-border)] bg-[color:var(--tms-card)] tms-muted'
+        ? 'border-[color:var(--tms-border)] bg-[color:var(--tms-surface)] tms-muted'
         : 'border-[color:var(--tms-border)]'
 
   return (

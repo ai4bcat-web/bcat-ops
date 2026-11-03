@@ -11,10 +11,10 @@
  * the shipment must: freight nobody owns is freight nobody chases.
  */
 import { useCallback, useEffect, useState } from 'react'
-import { AlertTriangle, Loader2 } from 'lucide-react'
+import { Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { RepPicker } from '@/components/RepPicker'
-import { TmsBadge, TmsButton, TmsDialog, TmsField, TmsSelect } from '@/features/tms/kit'
+import { TmsAlert, TmsBadge, TmsButton, TmsDialog, TmsField, TmsSelect } from '@/features/tms/kit'
 import { useAuthUser } from '@/hooks/useAuth'
 import { checkCredit, convertQuote, graphqlErrorText, listDivisions } from '@/lib/apiClient'
 import { formatCents } from '@/lib/invoiceBuild'
@@ -131,31 +131,27 @@ export function ConvertQuoteDialog({ quote, open, onOpenChange, onDone }: {
           </div>
 
           {credit && (
-            <div
-              style={{
-                border: `1px solid ${credit.hold ? 'var(--tms-badge-red)' : credit.warning ? 'var(--tms-badge-orange)' : 'var(--tms-border)'}`,
-                background: credit.hold ? 'rgba(237,90,118,0.14)' : credit.warning ? 'rgba(255,136,10,0.12)' : 'transparent',
-                borderRadius: 'var(--tms-radius)',
-                padding: 10,
-              }}
+            <TmsAlert
+              tone={credit.hold ? 'red' : credit.warning ? 'orange' : 'blue'}
+              icon={credit.hold || credit.warning ? undefined : false}
+              role="status"
             >
               <p style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 12, fontWeight: 600, margin: 0 }}>
-                {(credit.hold || credit.warning) && <AlertTriangle size={14} style={{ marginTop: 2, flexShrink: 0 }} />}
                 Credit — {formatCents(credit.usedCents)} used
                 {credit.availableCents != null && `, ${formatCents(credit.availableCents)} left`}
                 {credit.usageBps != null && <TmsBadge tone="gray">{(credit.usageBps / 100).toFixed(0)}% of limit</TmsBadge>}
               </p>
               {credit.blockReasons.length > 0 && (
-                <ul style={{ margin: '4px 0 0', paddingLeft: 18, fontSize: 12, color: 'var(--tms-badge-red)' }}>
+                <ul style={{ margin: '4px 0 0', paddingLeft: 18, fontSize: 12 }}>
                   {credit.blockReasons.map((reason) => <li key={reason}>{reason.replace(/_/g, ' ').toLowerCase()}</li>)}
                 </ul>
               )}
               {credit.hold && (
-                <p style={{ marginTop: 4, fontSize: 12, color: 'var(--tms-badge-red)' }}>
+                <p style={{ marginTop: 4, fontSize: 12 }}>
                   Conversion is refused while the customer is on credit hold.
                 </p>
               )}
-            </div>
+            </TmsAlert>
           )}
 
           {customerId == null && (

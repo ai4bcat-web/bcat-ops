@@ -28,8 +28,8 @@ const COLUMNS: ColumnDef<AuditLogEntry>[] = [
     header: 'CHANGES',
     render: (e) => (
       <details>
-        <summary style={{ cursor: 'pointer' }}>{Object.keys(e.changes).length} field(s)</summary>
-        <pre style={{ margin: '6px 0 0', fontSize: 10, maxWidth: 360, overflow: 'auto' }}>
+        <summary className="tms-details-summary">{Object.keys(e.changes).length} field(s)</summary>
+        <pre className="tms-code tms-code-compact">
           {JSON.stringify(e.changes, null, 2)}
         </pre>
       </details>

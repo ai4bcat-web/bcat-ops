@@ -5,7 +5,7 @@
  * right pane (variant="inbox"). The Inbox header, kind pills and structured cards
  * live here; the detail panel frames its own title and cadence controls.
  */
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   Bold, Italic, List, Link2, Mail, MessageSquare, Paperclip,
   Phone, Send, AtSign, FileUp, X, ExternalLink,
@@ -25,7 +25,7 @@ import { ACCEPTED_CONTENT_TYPES, MAX_DOCUMENT_BYTES } from '@/lib/shipmentDocume
 import type { ShipmentDocumentType } from '@/types/tms'
 import { useStaff } from '@/hooks/useStaff'
 import { displayName } from '@/lib/roles'
-import './TrackingConversation.css'
+import '@/features/tms/styles/conversation.css'
 
 // ── Icons ────────────────────────────────────────────────────────────────────
 
@@ -62,6 +62,12 @@ export interface TrackingConversationProps {
   bundle?: ShipmentBundle | null
   /** True = show every message unfiltered (full history view). */
   filtersOff?: boolean
+  /** Inbox only: the chat header, pinned above the stream. */
+  header?: ReactNode
+  /** Inbox only: quick-action bar between the stream and the composer. */
+  quickActions?: ReactNode
+  /** Inbox only: pinned as the last item of the stream (the location card). */
+  streamTail?: ReactNode
   onSendMessage: (input: {
     channel: ComposerChannel
     to: string | null
@@ -266,50 +272,47 @@ const ThreadRow = memo(function ThreadRow({ message }: { message: ShipmentMessag
   const isOutbound = message.direction === 'OUT'
   const notSent = message.status === 'NOT_SENT'
   const author = authorBadge(message)
-  const isCardMessage =
-    message.kind === 'POD_REPLY' || !!message.trackingLinkId
 
-  // If it's a structured card, render that instead of a bubble.
-  if (!isCardMessage) {
-    // render bubble
-  }
   if (message.trackingLinkId) return <TrackingLinkSentCard message={message} />
   if (message.kind === 'POD_REPLY') return <PodReceivedCard message={message} />
 
   return (
     <li className={`tms-thread-row${isOutbound ? ' tms-thread-out' : ' tms-thread-in'}`}>
-      <div className="tms-thread-bubble">
+      <div className="tms-thread-stack">
+        <div className="tms-thread-bubble">
+          {message.subject && <p className="tms-thread-subject">{message.subject}</p>}
+          <p
+            className="tms-thread-body"
+            dangerouslySetInnerHTML={{ __html: safeMarkdown(message.body) }}
+          />
+          {message.attachments && message.attachments.length > 0 && (
+            <div className="tms-convo-bubble-files">
+              {message.attachments.map((att, i) => (
+                <span key={i} className="tms-convo-file-chip" title={`${att.name}${att.sizeBytes != null ? ` (${Math.round(att.sizeBytes / 1024)} KB)` : ''}`}>
+                  <Paperclip size={10} /> {att.name}
+                </span>
+              ))}
+            </div>
+          )}
+          {notSent && message.body && (
+            <div className="tms-thread-not-sent">
+              <strong>Would have sent:</strong>
+              <p data-testid="not-sent-body">{message.body}</p>
+            </div>
+          )}
+        </div>
         <div className="tms-thread-meta">
-          <Icon size={14} aria-hidden />
-          <TmsBadge tone={statusToneFor(message.status)}>{message.status}</TmsBadge>
+          <Icon size={12} aria-hidden />
           <span className="tms-thread-party" title={author.title}>{partyLabel(message)}</span>
+          <span className="tms-thread-time">{formatDateTime(message.at)}</span>
+          {message.to && <span className="tms-thread-to">→ {message.to}</span>}
           <TmsBadge tone="gray" title={author.title} data-testid="thread-author">
             {author.text}
           </TmsBadge>
-          {message.to && <span className="tms-muted">→ {message.to}</span>}
-          <span className="tms-muted tms-thread-time">{formatDateTime(message.at)}</span>
+          {(notSent || message.status === 'FAILED') && (
+            <TmsBadge tone={statusToneFor(message.status)}>{message.status}</TmsBadge>
+          )}
         </div>
-        {message.subject && <p className="tms-thread-subject">{message.subject}</p>}
-        <p
-          className="tms-thread-body"
-          dangerouslySetInnerHTML={{ __html: safeMarkdown(message.body) }}
-        />
-        {/* Show attachments on the bubble */}
-        {message.attachments && message.attachments.length > 0 && (
-          <div className="tms-convo-bubble-files">
-            {message.attachments.map((att, i) => (
-              <span key={i} className="tms-convo-file-chip" title={`${att.name}${att.sizeBytes != null ? ` (${Math.round(att.sizeBytes / 1024)} KB)` : ''}`}>
-                <Paperclip size={10} /> {att.name}
-              </span>
-            ))}
-          </div>
-        )}
-        {notSent && message.body && (
-          <div className="tms-thread-not-sent">
-            <strong>Would have sent:</strong>
-            <p data-testid="not-sent-body">{message.body}</p>
-          </div>
-        )}
       </div>
     </li>
   )
@@ -357,6 +360,9 @@ export function TrackingConversation({
   variant = 'detail',
   bundle,
   filtersOff = false,
+  header,
+  quickActions,
+  streamTail,
   onSendMessage,
   onRefresh,
 }: TrackingConversationProps) {
@@ -561,45 +567,43 @@ export function TrackingConversation({
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
+  // The inbox stream rests on its newest item, like any chat.
+  const streamRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const el = streamRef.current
+    if (isInbox && el) el.scrollTop = el.scrollHeight
+  }, [isInbox, conversationKey, threadItems.length, loading])
+
   const rootTestId = isInbox ? 'inbox-conversation' : 'tracking-thread'
   const composerTestId = isInbox ? 'inbox-composer' : 'thread-composer'
 
-  const lastMessageAt = sortedMessages.length > 0
-    ? sortedMessages[sortedMessages.length - 1].at
-    : null
-
   return (
     <div data-testid={rootTestId} className="tms-convo-root">
-      {/* Inbox header */}
-      {isInbox && bundle && (
-        <div className="tms-convo-inbox-head" data-testid="convo-inbox-head">
-          <span className="tms-convo-inbox-pro">{bundle.shipment.number}</span>
-          {lastMessageAt && (
-            <span className="tms-convo-inbox-activity">
-              Last activity · {formatDateTime(lastMessageAt)}
-            </span>
-          )}
-        </div>
-      )}
+      {isInbox && header}
 
-      {/* Messages + cards + pills */}
-      {loading ? (
-        <p className="tms-muted text-sm">Loading thread…</p>
-      ) : threadItems.length === 0 ? (
-        <TmsEmptyState title="No messages" message="Send a message to start the thread." />
-      ) : (
-        <ul className="tms-thread-list" data-testid="detail-thread">
-          {threadItems.map((item, idx) => {
-            if (item.kind === 'load-card') {
-              return bundle ? <LoadSummaryCard key="load-summary" bundle={bundle} /> : null
-            }
-            if (item.kind === 'pill') {
-              return <KindPill key={`pill-${idx}-${item.pillKind}`} kind={item.pillKind!} />
-            }
-            return item.message ? <ThreadRow key={item.message.id} message={item.message} /> : null
-          })}
-        </ul>
-      )}
+      {/* Messages + cards + pills, with the location card pinned last */}
+      <div className="tms-convo-stream" ref={streamRef} data-testid="convo-stream">
+        {loading ? (
+          <p className="tms-muted text-sm">Loading thread…</p>
+        ) : threadItems.length === 0 ? (
+          <TmsEmptyState compact title="No messages" message="Send a message to start the thread." />
+        ) : (
+          <ul className="tms-thread-list" data-testid="detail-thread">
+            {threadItems.map((item, idx) => {
+              if (item.kind === 'load-card') {
+                return bundle ? <LoadSummaryCard key="load-summary" bundle={bundle} /> : null
+              }
+              if (item.kind === 'pill') {
+                return <KindPill key={`pill-${idx}-${item.pillKind}`} kind={item.pillKind!} />
+              }
+              return item.message ? <ThreadRow key={item.message.id} message={item.message} /> : null
+            })}
+          </ul>
+        )}
+        {isInbox && streamTail}
+      </div>
+
+      {isInbox && quickActions}
 
       {/* Composer */}
       <div className="tms-thread-composer" data-testid={composerTestId}>

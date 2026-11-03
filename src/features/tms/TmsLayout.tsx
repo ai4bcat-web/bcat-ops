@@ -16,6 +16,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { useCheckCallWorklist } from '@/hooks/useCheckCallWorklist'
 import { useShipments, type ShipmentListRow } from '@/hooks/useShipments'
 import { useStaff } from '@/hooks/useStaff'
+import { personName } from '@/lib/roles'
 import type { UserProfileRecord } from '@/types/tms'
 
 /** The board status facets that mean a load is still in a rep's working queue. */
@@ -133,13 +134,14 @@ export function TmsLayout() {
   const companies = useMemo(() => companyOptions(sections, divisions), [sections, divisions])
 
   const email = user?.email ?? ''
+  const initial = personName({ name: me?.name, email }, 'Team member').charAt(0).toUpperCase()
   return (
     <TmsShell
       pinned={pinned}
       sections={sections}
       activePath={location.pathname}
       breadcrumb={tmsBreadcrumb(location.pathname, shipmentViews)}
-      user={{ initial: (email.trim()[0] ?? 'U').toUpperCase(), email, name: me?.name ?? null }}
+      user={{ initial, email, name: me?.name ?? null }}
       shipmentViews={shipmentViews}
       badgeCounts={badgeCounts}
       companies={companies}

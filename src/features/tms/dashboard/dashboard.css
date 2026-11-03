@@ -326,18 +326,27 @@
 }
 
 .tms-shell .tms-strip-sub {
-  display: grid;
-  grid-template-columns: minmax(120px, 1.2fr) 1.5fr repeat(6, minmax(56px, 1fr));
-  align-items: center;
-  gap: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
   padding: 8px var(--tms-pad);
   background: var(--tms-card);
   font-size: 12px;
 }
 
+.tms-shell .tms-strip-sub-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  min-width: 0;
+}
+
 .tms-shell .tms-strip-sub-name {
   color: var(--tms-text);
   font-weight: 500;
+  overflow-wrap: anywhere;
 }
 
 .tms-shell .tms-strip-sub-statuses {
@@ -346,7 +355,33 @@
   gap: 4px;
 }
 
-.tms-shell .tms-strip-sub-metric {
+/* Labelled figures that wrap onto more rows as the card narrows — never clipped. */
+.tms-shell .tms-strip-sub-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
+  gap: 6px 8px;
+  margin: 0;
+  min-width: 0;
+}
+
+.tms-shell .tms-strip-sub-metrics > div {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.tms-shell .tms-strip-sub-metrics dt {
+  color: var(--tms-muted);
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.tms-shell .tms-strip-sub-metrics dd {
+  margin: 0;
   color: var(--tms-text);
-  text-align: right;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
 }

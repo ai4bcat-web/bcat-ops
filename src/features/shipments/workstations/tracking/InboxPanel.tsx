@@ -12,7 +12,7 @@
  */
 import { useMemo, useState } from 'react'
 import { Search } from 'lucide-react'
-import { TmsBadge, TmsEmptyState, TmsInput } from '@/features/tms/kit'
+import { TmsAvatar, TmsBadge, TmsEmptyState, TmsInput } from '@/features/tms/kit'
 import type { ShipmentMessageRecord } from '@/types/tms'
 import type { ShipmentRow } from '../../shipmentViews'
 import { relativeTime } from '../motion'
@@ -40,7 +40,7 @@ function latestMessage(messages: ShipmentMessageRecord[]): ShipmentMessageRecord
   return latest
 }
 
-export function InboxPanel({ rows, messagesByShipment, loading, selectedId, onSelect, nowMs, children }: InboxPanelProps) {
+export function InboxPanel({ rows, messagesByShipment, loading, selectedId, onSelect, nowMs, info, children }: InboxPanelProps) {
   const [query, setQuery] = useState('')
 
   const conversations = useMemo(() => {
@@ -61,7 +61,7 @@ export function InboxPanel({ rows, messagesByShipment, loading, selectedId, onSe
   }, [rows, messagesByShipment, query, selectedId])
 
   return (
-    <div className="tms-inbox">
+    <div className={`tms-inbox${info ? ' tms-inbox-with-info' : ''}`} data-testid="inbox">
       <div className="tms-inbox-list">
         <div className="tms-inbox-list-head">
           <Search size={14} className="tms-tracking-toolbar-icon" />
@@ -74,11 +74,9 @@ export function InboxPanel({ rows, messagesByShipment, loading, selectedId, onSe
         </div>
         <div className="tms-inbox-items">
           {loading && conversations.length === 0 ? (
-            <p className="tms-tracking-empty">Loading conversations…</p>
+            <TmsEmptyState compact title="Loading conversations…" />
           ) : conversations.length === 0 ? (
-            <p className="tms-tracking-empty">
-              {query ? 'No conversations match the search.' : 'No tracking conversations yet.'}
-            </p>
+            <TmsEmptyState compact title={query ? 'No conversations match the search.' : 'No tracking conversations yet.'} />
           ) : (
             conversations.map(({ row, messages }) => (
               <ConversationRow
@@ -103,6 +101,7 @@ export function InboxPanel({ rows, messagesByShipment, loading, selectedId, onSe
           />
         )}
       </div>
+      {selectedId && info}
     </div>
   )
 }
@@ -131,20 +130,23 @@ function ConversationRow({
       aria-pressed={selected}
       onClick={onSelect}
     >
-      <span className="tms-inbox-item-top">
-        <span className="tms-inbox-item-pro">{row.number}</span>
-        {when && <span className="tms-inbox-item-time">{when}</span>}
-      </span>
-      <span className="tms-inbox-item-customer">{row.customerName ?? 'Unknown customer'}</span>
-      <span className="tms-inbox-item-lane">
-        {row.originCity ?? '—'} → {row.destinationCity ?? '—'}
-      </span>
-      <span className="tms-inbox-item-preview">
-        {latest ? latest.body ?? latest.subject ?? '(no body)' : 'No messages yet — start the thread.'}
+      <TmsAvatar label={row.driverName?.trim() || row.customerName || row.number} size="sm" className="tms-inbox-item-avatar" />
+      <span className="tms-inbox-item-text">
+        <span className="tms-inbox-item-top">
+          <span className="tms-inbox-item-pro">{row.number}</span>
+          {when && <span className="tms-inbox-item-time">{when}</span>}
+        </span>
+        <span className="tms-inbox-item-customer">{row.customerName ?? 'Unknown customer'}</span>
+        <span className="tms-inbox-item-lane">
+          {row.originCity ?? '—'} → {row.destinationCity ?? '—'}
+        </span>
+        <span className="tms-inbox-item-preview">
+          {latest ? latest.body ?? latest.subject ?? '(no body)' : 'No messages yet — start the thread.'}
+        </span>
       </span>
       {messages.length > 0 && (
         <span className="tms-inbox-item-count">
-          <TmsBadge tone="blue">{messages.length}</TmsBadge>
+          <TmsBadge tone="green">{messages.length}</TmsBadge>
         </span>
       )}
     </button>

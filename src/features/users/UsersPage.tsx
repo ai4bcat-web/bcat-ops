@@ -13,13 +13,13 @@
  * changed.
  */
 import { useState, useEffect } from 'react'
-import type { CSSProperties, ReactNode } from 'react'
+import type { ReactNode } from 'react'
 import { errorMessage } from '@/lib/utils/errorMessage'
 import {
   Plus, KeyRound, UserX, UserCheck, ChevronDown, ShieldCheck, Shield,
   Check, Loader2, RefreshCw, AlertTriangle, Users, Trash2, Send, LogOut, Info,
 } from 'lucide-react'
-import { TmsBadge, TmsButton, TmsCard, TmsField, TmsInput, TmsSelect } from '@/features/tms/kit'
+import { TmsBadge, TmsButton, TmsCard, TmsField, TmsInput, TmsProfileHeader, TmsSelect, TmsStatRow } from '@/features/tms/kit'
 import type { TmsTone } from '@/features/tms/kit'
 import { RepPicker } from '@/components/RepPicker'
 import { useAuth } from '@/hooks/useAuth'
@@ -53,37 +53,8 @@ interface UserRow extends CognitoUser {
   profile: UserProfileRecord | null
 }
 
-// ── Shared styles (theme tokens only — this page lives in the dark shell) ─────
-
-const CARD: CSSProperties = {
-  border: '1px solid var(--tms-border)',
-  borderRadius: 'var(--tms-radius)',
-  background: 'var(--tms-card)',
-  overflow: 'hidden',
-}
-const SUB_PANEL: CSSProperties = {
-  borderTop: '1px solid var(--tms-border)',
-  padding: '16px 20px',
-  display: 'flex',
-  flexDirection: 'column',
-  gap: 20,
-}
-const PILL: CSSProperties = {
-  display: 'inline-flex', alignItems: 'center', gap: 6, height: 28, padding: '0 10px',
-  borderRadius: 999, border: '1px solid var(--tms-border)', background: 'transparent',
-  color: 'var(--tms-muted)', fontSize: 12, fontWeight: 500, cursor: 'pointer',
-}
-const PILL_ON: CSSProperties = {
-  ...PILL, borderColor: 'var(--tms-primary)', color: 'var(--tms-primary)',
-}
-
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
-function getInitials(name: string): string {
-  return name.split(' ').slice(0, 2).map((n) => n[0] ?? '').join('').toUpperCase() || '?'
-}
-
-/** The row's role: the profile's if it has one, else the group the pool still carries. */
 function roleOf(u: UserRow): RoleKey {
   const fromProfile = u.profile?.role
   if (isRoleKey(fromProfile)) return fromProfile
@@ -203,76 +174,58 @@ function UserCard({
   const isAdminBusy = busyAdminId === user.username
 
   return (
-    <div data-testid="user-card" style={CARD}>
+    <div data-testid="user-card" className="tms-user-card">
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '14px 18px' }}>
-        <span
-          aria-hidden="true"
-          style={{
-            width: 36, height: 36, borderRadius: 999, flex: '0 0 auto',
-            background: 'var(--tms-primary)', color: 'var(--tms-on-primary)',
-            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: 13, fontWeight: 600,
-          }}
-        >
-          {getInitials(name)}
-        </span>
-
-        <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: 14, fontWeight: 600 }}>{name}</span>
-            {admin && <TmsBadge tone="purple">Admin</TmsBadge>}
-          </div>
-          <div className="tms-muted" style={{ fontSize: 12, marginTop: 2 }}>
-            {user.email} · {ROLE_LABELS[role]}
-          </div>
-        </div>
-
-        <div style={{ flex: '0 0 auto', textAlign: 'right' }}>
-          <div className="tms-field-label" style={{ textTransform: 'uppercase', letterSpacing: '.04em', fontWeight: 600 }}>Access</div>
-          <div style={{ fontSize: 12, marginTop: 2 }}>{access}</div>
-        </div>
-
-        <TmsBadge tone={STATUS_TONES[status]}>{STATUS_LABELS[status]}</TmsBadge>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: '0 0 auto' }}>
-          <TmsButton size="sm" onClick={() => onReset(user)} disabled={isResetting || !user.enabled}>
-            {isResetting ? <Loader2 size={13} /> : <KeyRound size={13} />}Reset
-          </TmsButton>
-          <TmsButton
-            size="sm"
-            variant={user.enabled ? 'destructive' : 'secondary'}
-            onClick={() => onToggleEnabled(user)}
-            disabled={isToggling}
-          >
-            {isToggling ? <Loader2 size={13} /> : user.enabled ? <UserX size={13} /> : <UserCheck size={13} />}
-            {user.enabled ? 'Disable' : 'Enable'}
-          </TmsButton>
-          <TmsButton
-            size="sm"
-            variant="destructive"
-            onClick={() => onDelete(user)}
-            disabled={isToggling || !callerIsOwner}
-            title={callerIsOwner
-              ? 'Remove this user entirely — sign-in, groups and page access'
-              : OWNER_ONLY}
-          >
-            <Trash2 size={13} />Delete
-          </TmsButton>
-          <button
-            type="button"
-            onClick={() => setExpanded((v) => !v)}
-            className="tms-icon-btn tms-icon-btn-plain"
-            aria-label="Toggle permissions"
-          >
-            <ChevronDown size={16} style={{ transform: expanded ? 'rotate(180deg)' : undefined }} />
-          </button>
-        </div>
-      </div>
+      <TmsProfileHeader
+        compact
+        as="div"
+        name={name}
+        chips={<>{admin && <TmsBadge tone="purple">Admin</TmsBadge>}<TmsBadge tone={STATUS_TONES[status]}>{STATUS_LABELS[status]}</TmsBadge></>}
+        subtitle={`${user.email} · ${ROLE_LABELS[role]}`}
+        actions={(
+          <>
+            <div className="tms-user-access">
+              <div className="tms-group-label">Access</div>
+              <div className="tms-user-access-value">{access}</div>
+            </div>
+            <TmsButton size="sm" onClick={() => onReset(user)} disabled={isResetting || !user.enabled}>
+              {isResetting ? <Loader2 size={13} /> : <KeyRound size={13} />}Reset
+            </TmsButton>
+            <TmsButton
+              size="sm"
+              variant={user.enabled ? 'destructive' : 'secondary'}
+              onClick={() => onToggleEnabled(user)}
+              disabled={isToggling}
+            >
+              {isToggling ? <Loader2 size={13} /> : user.enabled ? <UserX size={13} /> : <UserCheck size={13} />}
+              {user.enabled ? 'Disable' : 'Enable'}
+            </TmsButton>
+            <TmsButton
+              size="sm"
+              variant="destructive"
+              onClick={() => onDelete(user)}
+              disabled={isToggling || !callerIsOwner}
+              title={callerIsOwner
+                ? 'Remove this user entirely — sign-in, groups and page access'
+                : OWNER_ONLY}
+            >
+              <Trash2 size={13} />Delete
+            </TmsButton>
+            <button
+              type="button"
+              onClick={() => setExpanded((v) => !v)}
+              className="tms-icon-btn tms-icon-btn-plain"
+              aria-label="Toggle permissions"
+            >
+              <ChevronDown size={16} style={{ transform: expanded ? 'rotate(180deg)' : undefined }} />
+            </button>
+          </>
+        )}
+      />
 
       {/* Expanded body */}
       {expanded && (
-        <div style={SUB_PANEL}>
+        <div className="tms-user-body">
 
           {/* Role */}
           <div>
@@ -314,7 +267,7 @@ function UserCard({
                       aria-pressed={on}
                       disabled={savingPermissions}
                       onClick={() => onToggleTeam(user, team.key)}
-                      style={on ? PILL_ON : PILL}
+                      className={`tms-chip-toggle${on ? ' tms-chip-toggle-on' : ''}`}
                     >
                       {on && <Check size={12} />}{team.name}
                     </button>
@@ -344,7 +297,7 @@ function UserCard({
                       aria-pressed={on}
                       disabled={savingPermissions}
                       onClick={() => onToggleDivision(user, division.code)}
-                      style={on ? PILL_ON : PILL}
+                      className={`tms-chip-toggle${on ? ' tms-chip-toggle-on' : ''}`}
                     >
                       {on && <Check size={12} />}{division.name}
                     </button>
@@ -780,14 +733,7 @@ export function UsersPage() {
         </div>
       )}
 
-      <div className="tms-grid tms-grid-4">
-        {KPIS.map((k) => (
-          <TmsCard key={k.label}>
-            <div className="tms-field-label" style={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.04em' }}>{k.label}</div>
-            <div style={{ fontSize: 28, fontWeight: 600, marginTop: 4, fontVariantNumeric: 'tabular-nums' }}>{k.value}</div>
-          </TmsCard>
-        ))}
-      </div>
+      <TmsStatRow items={KPIS.map((k) => ({ key: k.label, label: k.label, value: String(k.value) }))} columns={4} aria-label="User totals" />
 
       <div className="tms-grid" style={{ gridTemplateColumns: '360px minmax(0, 1fr)', gap: 20, alignItems: 'start' }}>
         {/* Invite card */}
@@ -835,7 +781,7 @@ export function UsersPage() {
                         aria-pressed={on}
                         disabled={creating}
                         onClick={() => setInviteTeams((prev) => (on ? prev.filter((k) => k !== team.key) : [...prev, team.key]))}
-                        style={on ? PILL_ON : PILL}
+                        className={`tms-chip-toggle${on ? ' tms-chip-toggle-on' : ''}`}
                       >
                         {on && <Check size={12} />}{team.name}
                       </button>

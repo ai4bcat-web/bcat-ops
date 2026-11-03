@@ -11,6 +11,7 @@ import {
   groupsForProfile,
   isEnforcedClaim,
   lockoutCheck,
+  personName,
   reconcileGroups,
   rolePagesFor,
 } from './roles'
@@ -223,6 +224,27 @@ describe('displayName', () => {
   it('prints an em dash rather than an empty name', () => {
     expect(displayName('')).toBe('—')
     expect(displayName({ email: null, name: null, username: null })).toBe('—')
+  })
+})
+
+describe('personName', () => {
+  const SUB = '84d8f408-a061-709d-8a1c-0123456789ab'
+  const UUID_LIKE = /[0-9a-f]{8}-[0-9a-f]{4}/i
+
+  it('prefers the staff profile name', () => {
+    expect(personName({ name: 'Rynaldo Smith', email: 'ryne@x.com' })).toBe('Rynaldo Smith')
+  })
+
+  it('falls back to the e-mail prefix without a profile name', () => {
+    expect(personName({ name: null, email: 'ryne.smith@x.com' })).toBe('Ryne Smith')
+    expect(personName({ name: '  ', email: 'ryne@x.com' })).toBe('Ryne')
+  })
+
+  it('never returns a Cognito sub, whichever field carries it', () => {
+    for (const input of [{ email: SUB }, { name: SUB, email: `${SUB}@x.com` }, { name: null, email: '' }, {}]) {
+      expect(personName(input, 'Team member')).toBe('Team member')
+      expect(personName(input)).not.toMatch(UUID_LIKE)
+    }
   })
 })
 

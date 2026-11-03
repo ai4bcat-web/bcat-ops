@@ -1,6 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate, useLocation, useParams } from 'react-router-dom'
 import { readScanIntent, scanIntentPath } from '@/features/driver-app/scanner/scanIntent'
-import { Toaster } from 'sonner'
 import { UpdateBanner } from '@/components/UpdateBanner'
 import { DriverAutoUpdate } from '@/components/DriverAutoUpdate'
 import { Loader2 } from 'lucide-react'
@@ -10,6 +9,7 @@ import { AuthGuard } from '@/components/AuthGuard'
 import { AppLayout } from '@/components/layout/AppLayout'
 import { DashboardPage } from '@/features/dashboard/DashboardPage'
 import { CalendarPage } from '@/features/calendar/CalendarPage'
+import { TmsToaster } from '@/features/tms/kit/TmsToaster'
 import { TmsLayout } from '@/features/tms/TmsLayout'
 import { DashboardPage as TmsDashboardPage } from '@/features/tms/dashboard/DashboardPage'
 import { WorkflowsPage } from '@/features/workflows/WorkflowsPage'
@@ -180,14 +180,6 @@ function DriverRoutes() {
       )}
     </Routes>
   )
-}
-
-/**
- * A phone-sized viewport. Read once at mount: the toaster's position is not worth
- * re-rendering the whole app for, and nobody resizes a phone.
- */
-function isPhone(): boolean {
-  return typeof window !== 'undefined' && window.matchMedia?.('(max-width: 640px)').matches === true
 }
 
 /**
@@ -377,7 +369,7 @@ export default function App() {
           * picked a file the app could not read saw nothing happen at all, which is how
           * "it just takes me back to the upload screen" was all anyone could report.
           */}
-        <Toaster position={isPhone() ? 'top-center' : 'bottom-right'} richColors />
+        <TmsToaster />
         {/*
           A long-lived tab runs whatever JavaScript it loaded. This is the only thing that
           tells somebody their window is behind the server — without it a shipped feature

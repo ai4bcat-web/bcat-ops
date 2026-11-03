@@ -23,7 +23,7 @@ import { Link } from 'react-router-dom'
 import { Ban, Banknote, FileText, Mail, Send } from 'lucide-react'
 import { toast } from 'sonner'
 import { Switch } from '@/components/ui/switch'
-import { TmsBadge, TmsButton, TmsCard } from '@/features/tms/kit'
+import { TmsBadge, TmsButton, TmsCard, TmsMetaList, TmsStatRow } from '@/features/tms/kit'
 import { ReleaseGateList } from './ReleaseGateCard'
 import { releaseGateMessages } from './releaseGateView'
 import { getInvoice, readyToInvoice, saveOrderForm, voidInvoice, getInvoicePdfUrl } from '@/lib/apiClient'
@@ -170,7 +170,7 @@ export function ArCard({ bundle, onReload }: ArCardProps) {
                 className={cn(
                   'rounded-full border px-2 py-0.5 text-[11px]',
                   lit
-                    ? 'border-[color:var(--tms-primary)] font-medium text-[color:var(--tms-text)]'
+                    ? 'border-[color:var(--tms-primary)] bg-[color:var(--tms-primary-tint)] font-medium text-[color:var(--tms-primary-ink)]'
                     : 'border-[color:var(--tms-border)] text-[color:var(--tms-muted)]',
                 )}
               >
@@ -198,36 +198,46 @@ export function ArCard({ bundle, onReload }: ArCardProps) {
       )}
 
       {number && (
-        <dl className="tms-grid tms-grid-4 text-sm">
-          <div>
-            <dt className="tms-field-label">Invoice</dt>
-            <dd>
-              <Link to={`/tms/invoicing/invoices/${invoiceId}`} className="underline underline-offset-2">{number}</Link>
-              {voided && <TmsBadge tone="red">void</TmsBadge>}
-            </dd>
-          </div>
-          <div>
-            <dt className="tms-field-label">Total</dt>
-            <dd>{invoice ? formatCents(invoice.totalCents) : '—'}</dd>
-          </div>
-          <div>
-            <dt className="tms-field-label">Balance</dt>
-            <dd>{balanceCents != null ? formatCents(balanceCents) : '—'}</dd>
-          </div>
-          <div>
-            <dt className="tms-field-label">Due</dt>
-            <dd className="flex flex-wrap items-center gap-1">
-              {invoice?.dueAt ?? '—'}
-              {bucket && (
-                <TmsBadge tone={BUCKET_TONE[bucket]}>
-                  {bucket === 'CURRENT'
-                    ? AGING_BUCKET_LABEL[bucket]
-                    : `${AGING_BUCKET_LABEL[bucket]} days late`}
-                </TmsBadge>
-              )}
-            </dd>
-          </div>
-        </dl>
+        <>
+          <TmsStatRow
+            compact
+            columns={2}
+            aria-label="Invoice amounts"
+            items={[
+              { key: 'total', label: 'Total', value: invoice ? formatCents(invoice.totalCents) : null },
+              { key: 'balance', label: 'Balance', value: balanceCents != null ? formatCents(balanceCents) : null },
+            ]}
+          />
+          <TmsMetaList
+            columns={2}
+            items={[
+              {
+                label: 'Invoice',
+                value: (
+                  <>
+                    <Link to={`/tms/invoicing/invoices/${invoiceId}`} className="underline underline-offset-2">{number}</Link>
+                    {voided && <TmsBadge tone="red">void</TmsBadge>}
+                  </>
+                ),
+              },
+              {
+                label: 'Due',
+                value: (
+                  <span className="flex flex-wrap items-center gap-1">
+                    {invoice?.dueAt ?? '—'}
+                    {bucket && (
+                      <TmsBadge tone={BUCKET_TONE[bucket]}>
+                        {bucket === 'CURRENT'
+                          ? AGING_BUCKET_LABEL[bucket]
+                          : `${AGING_BUCKET_LABEL[bucket]} days late`}
+                      </TmsBadge>
+                    )}
+                  </span>
+                ),
+              },
+            ]}
+          />
+        </>
       )}
 
       {invoice && <EmailStatus invoice={invoice} />}

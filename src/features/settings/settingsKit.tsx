@@ -16,16 +16,6 @@ import type { CSSProperties, ReactNode } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import { TmsCard } from '@/features/tms/kit'
 
-const TITLE_ICON: CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 8 }
-const PANEL: CSSProperties = {
-  border: '1px solid var(--tms-border)',
-  borderRadius: 'var(--tms-radius)',
-  padding: 12,
-  display: 'flex',
-  flexDirection: 'column',
-  gap: 12,
-}
-
 export function SettingsCard({
   icon: Icon, title, description, actions, children,
 }: {
@@ -37,10 +27,10 @@ export function SettingsCard({
 }) {
   return (
     <TmsCard
-      title={<span style={TITLE_ICON}><Icon size={14} aria-hidden="true" />{title}</span>}
+      title={<span className="tms-title-icon"><Icon size={14} aria-hidden="true" />{title}</span>}
       actions={actions}
     >
-      {description ? <p className="tms-field-hint" style={{ margin: '0 0 12px' }}>{description}</p> : null}
+      {description ? <p className="tms-field-hint tms-settings-desc">{description}</p> : null}
       {children}
     </TmsCard>
   )
@@ -49,7 +39,7 @@ export function SettingsCard({
 /** A vertical run of controls. The gap is the one the MVMNT cards use throughout. */
 export function Stack({ children, gap = 12, className }: { children: ReactNode; gap?: number; className?: string }) {
   return (
-    <div className={className} style={{ display: 'flex', flexDirection: 'column', gap }}>
+    <div className={className ? `tms-stack ${className}` : 'tms-stack'} style={gap === 12 ? undefined : { gap }}>
       {children}
     </div>
   )
@@ -67,28 +57,13 @@ export function CheckRow({
   align?: 'center' | 'start'
 }) {
   return (
-    <label
-      style={{
-        display: 'flex',
-        alignItems: align === 'start' ? 'flex-start' : 'center',
-        gap: 10,
-        fontSize: 14,
-        cursor: disabled ? 'default' : 'pointer',
-      }}
-    >
+    <label className={`tms-check-row${align === 'start' ? ' tms-check-row-start' : ''}${disabled ? ' tms-check-row-disabled' : ''}`}>
       <input
         type="checkbox"
         aria-label={ariaLabel}
         checked={checked}
         disabled={disabled}
         onChange={(e) => onChange(e.target.checked)}
-        style={{
-          accentColor: 'var(--tms-primary)',
-          width: 15,
-          height: 15,
-          marginTop: align === 'start' ? 3 : 0,
-          flex: '0 0 auto',
-        }}
       />
       <span>{label}</span>
     </label>
@@ -97,31 +72,24 @@ export function CheckRow({
 
 /** Muted explanation under a control. */
 export function Hint({ children }: { children: ReactNode }) {
-  return <p className="tms-field-hint" style={{ margin: 0 }}>{children}</p>
+  return <p className="tms-field-hint tms-flush">{children}</p>
 }
 
 /** The refusal a card shows instead of saving — the server's own sentence, verbatim. */
 export function ErrorText({ children }: { children: ReactNode }) {
-  return <p className="tms-field-error" style={{ margin: 0 }}>{children}</p>
+  return <p className="tms-field-error tms-flush">{children}</p>
 }
 
 /** A labelled group that is not a single field: a checkbox set, a sub-panel, a table. */
 export function GroupLabel({ children }: { children: ReactNode }) {
-  return (
-    <p
-      className="tms-field-label"
-      style={{ margin: 0, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.04em' }}
-    >
-      {children}
-    </p>
-  )
+  return <p className="tms-group-label">{children}</p>
 }
 
 /** A bordered sub-panel inside a card: the factor remit-to, a plan, a team. */
 export function Panel({ children, style }: { children: ReactNode; style?: CSSProperties }) {
-  return <div style={style ? { ...PANEL, ...style } : PANEL}>{children}</div>
+  return <div className="tms-panel" style={style}>{children}</div>
 }
 
 export function Loading() {
-  return <p className="tms-muted" style={{ margin: 0, fontSize: 14 }}>Loading…</p>
+  return <p className="tms-muted tms-flush">Loading…</p>
 }

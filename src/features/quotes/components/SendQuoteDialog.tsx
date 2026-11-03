@@ -14,9 +14,9 @@
  * — on dev it is how a quote actually reaches a customer.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, Copy, Link2, Loader2, Send } from 'lucide-react'
+import { Copy, Link2, Loader2, Send } from 'lucide-react'
 import { toast } from 'sonner'
-import { TmsBadge, TmsButton, TmsDialog, TmsField, TmsTextarea } from '@/features/tms/kit'
+import { TmsAlert, TmsBadge, TmsButton, TmsDialog, TmsField, TmsTextarea } from '@/features/tms/kit'
 import {
   counterQuote, getTmsSettings, graphqlErrorText, listCustomers, listDivisions, sendQuote,
   type QuoteSendResult,
@@ -39,11 +39,6 @@ const CODE_STYLE: React.CSSProperties = {
   flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12,
   borderRadius: 'var(--tms-radius)', border: '1px solid var(--tms-border)',
   background: 'var(--tms-card)', padding: '4px 8px',
-}
-
-const WARN_BOX: React.CSSProperties = {
-  display: 'grid', gap: 8, borderRadius: 'var(--tms-radius)',
-  border: '1px solid var(--tms-badge-orange)', background: 'rgba(255,136,10,0.12)', padding: 8,
 }
 
 export function SendQuoteDialog({ quote, open, onOpenChange, onDone }: {
@@ -215,11 +210,7 @@ export function SendQuoteDialog({ quote, open, onOpenChange, onDone }: {
           </div>
 
           {warnings.length > 0 && (
-            <div style={WARN_BOX}>
-              <p style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 12, fontWeight: 600, margin: 0 }}>
-                <AlertTriangle size={14} style={{ marginTop: 2, flexShrink: 0, color: 'var(--tms-badge-orange)' }} />
-                Read these before the number goes out; the acknowledgement is kept on the quote.
-              </p>
+            <TmsAlert tone="orange" title="Read these before the number goes out; the acknowledgement is kept on the quote.">
               {warnings.map((warning) => (
                 <label key={warning.key} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 12 }}>
                   <input
@@ -237,7 +228,7 @@ export function SendQuoteDialog({ quote, open, onOpenChange, onDone }: {
                   </span>
                 </label>
               ))}
-            </div>
+            </TmsAlert>
           )}
 
           {state.canSend === false && (
@@ -257,16 +248,12 @@ export function SendQuoteDialog({ quote, open, onOpenChange, onDone }: {
               Sent to {recipients.join(', ')}. The link is live until the quote expires.
             </p>
           ) : (
-            <div style={WARN_BOX}>
-              <p style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 13, fontWeight: 600, margin: 0 }}>
-                <AlertTriangle size={14} style={{ marginTop: 2, flexShrink: 0, color: 'var(--tms-badge-orange)' }} />
-                Nothing was e-mailed. The quote is sent and the link is live — send it by hand.
-              </p>
+            <TmsAlert tone="orange" title="Nothing was e-mailed. The quote is sent and the link is live — send it by hand.">
               <p className="tms-muted" style={{ fontSize: 12, margin: 0 }}>
                 This is the dev path: outbound mail is denied outside production, so the copy below is the
                 delivery. The quote row already says it went out, because the link works.
               </p>
-            </div>
+            </TmsAlert>
           )}
 
           {result.link && (

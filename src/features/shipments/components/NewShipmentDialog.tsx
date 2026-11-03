@@ -52,6 +52,7 @@ import { errorMessage } from '@/lib/utils/errorMessage'
 import type { TenderPrefill } from '@/lib/intakeTender'
 import type { Load, Stop } from '@/types'
 import type { LocationRecord, ShipmentBundle, ShipmentMode, TmsSettings } from '@/types/tms'
+import { TmsAlert, TmsSelect } from '@/features/tms/kit'
 import { MODE_OPTIONS } from '../orderDraft'
 import { ShipmentDrawer } from './ShipmentDrawer'
 
@@ -514,15 +515,13 @@ export function NewShipmentDialog({ open, prefill, defaultMode = 'FTL', onClose,
   return (
     <Dialog open onOpenChange={(next) => { if (!next) onClose() }}>
       <DialogContent
-        className="p-0 gap-0 flex flex-col overflow-hidden"
+        className="tms-portal p-0 gap-0 flex flex-col overflow-hidden"
         style={{ maxWidth: 640, maxHeight: '85vh', width: '100%' }}
         onInteractOutside={(e) => e.preventDefault()}
         onEscapeKeyDown={(e) => e.preventDefault()}
       >
-        <div style={{
-          padding: '16px 52px 16px 24px', borderBottom: '1px solid var(--ds-border)', flexShrink: 0,
-        }}>
-          <h2 style={{ fontSize: 16, fontWeight: 600, color: 'var(--ds-t1)', margin: 0 }}>New shipment</h2>
+        <div className="tms-new-shipment-head">
+          <h2>New shipment</h2>
         </div>
 
         <div style={{ flex: 1, overflowY: 'auto', padding: '24px 24px 8px' }}>
@@ -536,18 +535,11 @@ export function NewShipmentDialog({ open, prefill, defaultMode = 'FTL', onClose,
               the document is coming and uploads a second copy to be sure.
             */}
             {tender && (
-              <div
-                style={{
-                  display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 16,
-                  padding: '10px 12px', borderRadius: 8, fontSize: 12.5,
-                  background: tender.rateConKey ? '#ecfdf5' : 'var(--ds-bg)',
-                  border: `1px solid ${tender.rateConKey ? '#86efac' : 'var(--ds-border)'}`,
-                  color: tender.rateConKey ? '#15803d' : 'var(--ds-t3)',
-                }}
-              >
-                {tender.rateConKey ? <Check size={14} style={{ marginTop: 1, flexShrink: 0 }} />
-                  : <FileText size={14} style={{ marginTop: 1, flexShrink: 0 }} />}
-                <span>
+              <div className="mb-4">
+                <TmsAlert
+                  tone={tender.rateConKey ? 'green' : 'blue'}
+                  icon={tender.rateConKey ? Check : FileText}
+                >
                   {/*
                     Said here because a blank appointment on a Batory load otherwise reads
                     as a prefill that failed, and somebody goes looking for the date in the
@@ -570,7 +562,7 @@ export function NewShipmentDialog({ open, prefill, defaultMode = 'FTL', onClose,
                       on the load or in the factoring queue once you have it.
                     </>
                   )}
-                </span>
+                </TmsAlert>
               </div>
             )}
 
@@ -594,14 +586,14 @@ export function NewShipmentDialog({ open, prefill, defaultMode = 'FTL', onClose,
                   />
                 </Field>
                 <Field label="Mode">
-                  <select
+                  <TmsSelect
                     aria-label="Mode"
                     value={mode}
                     onChange={(e) => setMode(e.target.value as ShipmentMode)}
-                    className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground"
+                    className="h-9 w-full"
                   >
                     {MODE_OPTIONS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
-                  </select>
+                  </TmsSelect>
                 </Field>
               </div>
 
@@ -612,22 +604,15 @@ export function NewShipmentDialog({ open, prefill, defaultMode = 'FTL', onClose,
                 the shipment reads as not linked until somebody links one.
               */}
               {!customerId && (
-                <div style={{
-                  border: '1px solid var(--ds-border)', borderRadius: 8, padding: '12px 14px',
-                  background: 'var(--ds-bg)', marginBottom: 12,
-                }}>
+                <div className="tms-new-shipment-typed">
                   <button
                     type="button"
                     onClick={() => setUseTypedCustomer((v) => !v)}
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: 8, background: 'none',
-                      border: 'none', padding: 0, cursor: 'pointer', fontSize: 13,
-                      color: 'var(--ds-t1)', fontWeight: 600, fontFamily: 'inherit',
-                    }}
+                    className="tms-new-shipment-typed-toggle"
                   >
                     {useTypedCustomer
-                      ? <CheckCircle2 size={16} style={{ color: '#16a34a' }} />
-                      : <Circle size={16} style={{ color: 'var(--ds-t3)' }} />}
+                      ? <CheckCircle2 size={16} style={{ color: 'var(--tms-badge-green)' }} />
+                      : <Circle size={16} style={{ color: 'var(--tms-muted)' }} />}
                     No matching customer — record the name for now
                   </button>
                   {useTypedCustomer && (
@@ -639,7 +624,7 @@ export function NewShipmentDialog({ open, prefill, defaultMode = 'FTL', onClose,
                         placeholder="Arrive Logistics, Echo Global…"
                         className="h-9"
                       />
-                      <p style={{ fontSize: 12, color: 'var(--ds-t3)', margin: '6px 0 0' }}>
+                      <p className="tms-muted" style={{ fontSize: 12, margin: '6px 0 0' }}>
                         No customer record is created. The shipment shows as
                         “{UNRESOLVED_CUSTOMER_LABEL}” and cannot be invoiced or sent to
                         factoring until someone links one on the shipment detail.
@@ -699,13 +684,9 @@ export function NewShipmentDialog({ open, prefill, defaultMode = 'FTL', onClose,
           </form>
         </div>
 
-        <div style={{
-          padding: '12px 24px', borderTop: '1px solid var(--ds-border)',
-          display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0,
-          background: 'var(--ds-surface)',
-        }}>
+        <div className="tms-new-shipment-foot">
           {(error || Object.keys(errors).length > 0) && (
-            <span style={{ flex: 1, fontSize: 12, color: 'var(--ds-red, #dc2626)' }}>
+            <span style={{ flex: 1, fontSize: 12, color: 'var(--tms-badge-red)' }}>
               {error ?? 'Please fill in the required fields above.'}
             </span>
           )}
@@ -724,6 +705,7 @@ export function NewShipmentDialog({ open, prefill, defaultMode = 'FTL', onClose,
         <DirectoryCreateDialog
           type="customer"
           open
+          tmsTheme
           initial={createCustomerFor}
           customers={directory.customers}
           divisions={[]}
@@ -743,6 +725,7 @@ export function NewShipmentDialog({ open, prefill, defaultMode = 'FTL', onClose,
         <DirectoryCreateDialog
           type="location"
           open
+          tmsTheme
           initial={createLocationFor.initial}
           customers={directory.customers}
           divisions={[]}

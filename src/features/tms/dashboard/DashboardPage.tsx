@@ -17,13 +17,14 @@ import { TmsButton, TmsDialog, TmsFilterChip, TmsIconButton, TmsInput, TmsKpiCar
 import { useTmsCompany } from '@/features/tms/tmsCompany'
 import { useAuth } from '@/hooks/useAuth'
 import { SHIPMENT_STATUS_LABELS } from '@/lib/shipmentStatus'
+import { personName } from '@/lib/roles'
 import { indexOf } from '@/lib/dashboardCharts'
 import { formatCents } from '@/lib/invoiceBuild'
 import { SEED_DIVISIONS } from '@/lib/ownership'
 import { BROKERAGE_CHARTS } from './brokerageCards'
 import { CLASSIC_CHARTS } from './classicCharts'
 import { ChartCard } from './ChartCard'
-import { buildBusinessStrips, buildCompanyTotals } from './businessStrips'
+import { buildBusinessStrips, buildCompanyTotals, rollupBusinessStrips } from './businessStrips'
 import { WelcomeHeader } from './WelcomeHeader'
 import { useBrokerageDashboard } from './useBrokerageDashboard'
 import {
@@ -94,12 +95,6 @@ function optionsFrom(data: DashboardData | null): Record<ListChipKey, Option[]> 
   }
 }
 
-/** "ryne.smith@…" → "Ryne": the first `.`/`_`/`-` token of the local part, capitalised. */
-function firstNameFromEmail(email: string): string {
-  const token = email.split('@')[0]?.split(/[._-]/)[0] ?? ''
-  return token ? token.charAt(0).toUpperCase() + token.slice(1) : 'there'
-}
-
 export function DashboardPage() {
   const { user } = useAuth()
   const email = user?.email ?? ''
@@ -138,14 +133,13 @@ export function DashboardPage() {
 
   const divisions = data?.divisions && data.divisions.length > 0 ? data.divisions : SEED_DIVISIONS
   const strips = useMemo(
-    () => (data ? buildBusinessStrips(data, filters, divisions) : []),
+    () => (data ? rollupBusinessStrips(buildBusinessStrips(data, filters, divisions)) : []),
     [data, filters, divisions],
   )
   const totals = useMemo(() => (data ? buildCompanyTotals(data, filters) : null), [data, filters])
   const firstName = useMemo(() => {
     const profile = data?.profiles.find((candidate) => candidate.email?.toLowerCase() === email.toLowerCase())
-    const named = profile?.name?.trim().split(/\s+/)[0]
-    return named || firstNameFromEmail(email)
+    return personName({ name: profile?.name, email }).split(/\s+/)[0]
   }, [data, email])
 
   const selectDivision = useCallback((code: string) => {
@@ -471,21 +465,25 @@ export function DashboardPage() {
                   <div className="tms-strip-subdivisions">
                     {strip.subdivisions.map((sub) => (
                       <div key={sub.code} className="tms-strip-sub">
-                        <span className="tms-strip-sub-name">{sub.name}</span>
-                        <span className="tms-strip-sub-statuses">
-                          {Object.entries(sub.shipmentsByStatus).map(([status, count]) => (
-                            <span key={status} className="tms-strip-pill" title={statusLabel(status)}>
-                              {count} {statusLabel(status)}
-                            </span>
-                          ))}
-                        </span>
-                        <span className="tms-strip-sub-metric">{sub.revenueCents != null ? formatCents(sub.revenueCents) : '—'}</span>
-                        <span className="tms-strip-sub-metric">{sub.profitCents != null ? formatCents(sub.profitCents) : '—'}</span>
-                        <span className="tms-strip-sub-metric">{sub.marginBps != null ? `${(sub.marginBps / 100).toFixed(1)}%` : '—'}</span>
-                        <span className="tms-strip-sub-metric">{sub.arOpenCents != null ? formatCents(sub.arOpenCents) : '—'}</span>
-                        <span className="tms-strip-sub-metric">{sub.apOpenCents != null ? formatCents(sub.apOpenCents) : '—'}</span>
-                        <span className="tms-strip-sub-metric">{sub.trackedCount != null ? sub.trackedCount : '—'}</span>
-                        <span className="tms-strip-sub-metric">{sub.podNeededCount != null ? sub.podNeededCount : '—'}</span>
+                        <div className="tms-strip-sub-head">
+                          <span className="tms-strip-sub-name">{sub.name}</span>
+                          <span className="tms-strip-sub-statuses">
+                            {Object.entries(sub.shipmentsByStatus).map(([status, count]) => (
+                              <span key={status} className="tms-strip-pill" title={statusLabel(status)}>
+                                {count} {statusLabel(status)}
+                              </span>
+                            ))}
+                          </span>
+                        </div>
+                        <dl className="tms-strip-sub-metrics">
+                          <div><dt>Revenue</dt><dd>{sub.revenueCents != null ? formatCents(sub.revenueCents) : '—'}</dd></div>
+                          <div><dt>Profit</dt><dd>{sub.profitCents != null ? formatCents(sub.profitCents) : '—'}</dd></div>
+                          <div><dt>Margin</dt><dd>{sub.marginBps != null ? `${(sub.marginBps / 100).toFixed(1)}%` : '—'}</dd></div>
+                          <div><dt>AR</dt><dd>{sub.arOpenCents != null ? formatCents(sub.arOpenCents) : '—'}</dd></div>
+                          <div><dt>AP</dt><dd>{sub.apOpenCents != null ? formatCents(sub.apOpenCents) : '—'}</dd></div>
+                          <div><dt>Tracked</dt><dd>{sub.trackedCount != null ? sub.trackedCount : '—'}</dd></div>
+                          <div><dt>PODs</dt><dd>{sub.podNeededCount != null ? sub.podNeededCount : '—'}</dd></div>
+                        </dl>
                       </div>
                     ))}
                   </div>

@@ -279,9 +279,9 @@ export function BrandingPage() {
                   onChange={(e) => setField('brandTheme', (e.target.value as TmsSettings['brandTheme']) || null)}
                   options={[{ value: '', label: 'Use default' }, ...THEME_OPTIONS]}
                 />
-                {draft.brandTheme && draft.brandTheme !== 'DARK' ? (
+                {draft.brandTheme ? (
                   <p className="tms-field-hint" style={{ marginTop: 6 }}>
-                    Only the dark theme is built; LIGHT and SYSTEM will follow.
+                    Each person chooses light or dark from the top bar.
                   </p>
                 ) : null}
               </TmsField>
@@ -339,7 +339,7 @@ export function BrandingPage() {
               />
             </TmsField>
             {settings?.whiteLabel?.status === 'PENDING' ? (
-              <span className="tms-badge tms-badge-yellow" style={{ alignSelf: 'flex-start' }}>PENDING</span>
+              <span className="tms-badge tms-badge-orange" style={{ alignSelf: 'flex-start' }}>PENDING</span>
             ) : null}
             {dnsRecords.length > 0 ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>

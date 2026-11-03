@@ -228,7 +228,7 @@ export function ColumnsPickerDialog({
                       min={COLUMN_WIDTH_MIN}
                       max={COLUMN_WIDTH_MAX}
                       step={10}
-                      className="w-16 rounded border border-[#333] bg-transparent px-1 py-0.5 text-right text-xs"
+                      className="w-16 rounded border border-[color:var(--tms-input-border)] bg-transparent px-1 py-0.5 text-right text-xs"
                       value={widthMap[key] ?? col.width ?? 140}
                       onChange={(e) => setWidth(key, e.target.value)}
                     />
