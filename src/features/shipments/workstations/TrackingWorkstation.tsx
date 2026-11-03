@@ -253,17 +253,17 @@ export function TrackingWorkstation() {
   }, [tab, selectedConversationId])
 
   const refreshConversation = useCallback(async () => {
-    const id = conversationIdRef.current
+    const id = selectedConversationId
     if (!id) return
     try {
       const messages = await listShipmentMessages(id)
-      if (conversationIdRef.current !== id) return
+      if (selectedConversationId !== id) return
       setMessagesByShipment((prev) => ({ ...prev, [id]: messages }))
     } catch (err) {
-      if (conversationIdRef.current !== id) return
+      if (selectedConversationId !== id) return
       toast.error(err instanceof Error ? err.message : 'Could not refresh the conversation')
     }
-  }, [])
+  }, [selectedConversationId])
 
   const handleSendMessage = useCallback(async (input: {
     channel: 'EMAIL' | 'SMS'
