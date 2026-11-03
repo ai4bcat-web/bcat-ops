@@ -8,19 +8,26 @@ import {
   Bar, BarChart, CartesianGrid, Cell, Legend, Line, LineChart, Pie, PieChart,
   ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts'
-import { TmsChartCard, TmsDialog, TmsEmptyState } from '@/features/tms/kit'
+import { BarChart3, Gauge, PieChart as PieChartIcon, Table2, TrendingUp } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
+import { TmsChartCard, TmsDialog, TmsEmptyState, TmsKpiCard } from '@/features/tms/kit'
 import { formatValue } from '@/lib/dashboardCharts'
 import type { ChartDef, ChartSeries, DashboardGroupBy, ValueFormat } from './types'
 import { GROUP_BY_OPTIONS } from './dashboardViews'
 
-/** The dark-theme series colours: MVMNT's yellow first, then the badge palette. */
-const SERIES_COLORS = [
-  '#f4c50c', '#0a81ff', '#1ba774', '#ff880a', '#880aff', '#09e2e5', '#ed5a76', '#ff0afc',
-  '#9ca3af', '#c2a000', '#4d9fff', '#2fd3a0',
-]
+/** Series colours are theme tokens (green → dark green → near-black, then the rest), so light and dark both read. */
+const SERIES_COLORS = Array.from({ length: 12 }, (_, i) => `var(--tms-chart-${i + 1})`)
 
-const AXIS = '#a7a7a7'
-const GRID = '#383838'
+const AXIS = 'var(--tms-chart-axis)'
+const GRID = 'var(--tms-chart-grid)'
+
+const KIND_ICONS: Record<ChartDef['kind'], LucideIcon> = {
+  kpis: Gauge,
+  bar: BarChart3,
+  line: TrendingUp,
+  pie: PieChartIcon,
+  table: Table2,
+}
 
 /**
  * Axis ticks have to fit and still differ from one another: $1.2M, $45k, $2.8k, $850.
@@ -117,11 +124,7 @@ function ChartBody({ def, series, numbers }: { def: ChartDef; series: ChartSerie
   const tiles = hasKpis ? (
     <div className="tms-grid tms-grid-4 tms-kpi-strip">
       {series.kpis?.map((kpi) => (
-        <div key={kpi.label} className="tms-kpi">
-          <span className="tms-kpi-label">{kpi.label}</span>
-          <strong className="tms-kpi-value">{kpi.value}</strong>
-          {kpi.sub ? <span className="tms-kpi-sub">{kpi.sub}</span> : null}
-        </div>
+        <TmsKpiCard key={kpi.label} label={kpi.label} value={kpi.value} sub={kpi.sub} />
       ))}
     </div>
   ) : null
@@ -141,7 +144,7 @@ function ChartBody({ def, series, numbers }: { def: ChartDef; series: ChartSerie
         <ResponsiveContainer width="100%" height="100%">
           {kind === 'pie' ? (
             <PieChart>
-              <Pie data={chartData} dataKey={series.groups[0]} nameKey="label" outerRadius="80%" stroke="#232323">
+              <Pie data={chartData} dataKey={series.groups[0]} nameKey="label" outerRadius="80%" stroke="var(--tms-card)">
                 {chartData.map((row, i) => <Cell key={row.label} fill={SERIES_COLORS[i % SERIES_COLORS.length]} />)}
               </Pie>
               <Legend wrapperStyle={{ fontSize: 12, color: AXIS }} />
@@ -225,6 +228,8 @@ export function ChartCard({ def, series, override, onOverride }: ChartCardProps)
     <>
       <TmsChartCard
         title={def.title}
+        icon={KIND_ICONS[def.kind]}
+        className={def.kind === 'table' ? 'tms-chart-wide' : undefined}
         menu={picker}
         onNumbers={() => setNumbers((on) => !on)}
         onExpand={() => setExpanded(true)}

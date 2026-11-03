@@ -213,7 +213,7 @@ describe('TmsShell badge counts', () => {
           ]}
           sections={[]}
           activePath="/tms/shipments"
-          pageTitle="TMS"
+          breadcrumb={[{ label: 'TMS' }]}
           user={{ initial: 'O', email: 'owner@bcatcorp.com' }}
           shipmentViews={[]}
           badgeCounts={{ myQueue: 3, teamQueue: 0 }}
@@ -239,7 +239,7 @@ describe('TmsShell badge counts', () => {
           ]}
           sections={[]}
           activePath="/tms/shipments"
-          pageTitle="TMS"
+          breadcrumb={[{ label: 'TMS' }]}
           user={{ initial: 'O', email: 'owner@bcatcorp.com' }}
           shipmentViews={[]}
           badgeCounts={{ myQueue: 0 }}

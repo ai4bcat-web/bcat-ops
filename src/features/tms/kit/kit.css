@@ -1,0 +1,167 @@
+/*
+ * Kit-only rules: KPI card, delta chip, page eyebrow and the dashboard chart card.
+ * Tokens live in `../theme.css`; every selector stays under `.tms-shell` / `.tms-portal`
+ * so no BCAT Ops page is touched. No colour literals — tokens only.
+ */
+
+/* ── Page eyebrow (welcome row above the title) ───────────────────────────── */
+
+.tms-shell .tms-page-eyebrow,
+.tms-portal .tms-page-eyebrow {
+  margin-bottom: 4px;
+  color: var(--tms-muted);
+  font-size: 13px;
+}
+
+/* ── KPI card ─────────────────────────────────────────────────────────────── */
+
+.tms-shell .tms-kpi-card,
+.tms-portal .tms-kpi-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: var(--tms-pad);
+  border: 1px solid var(--tms-border);
+  border-radius: var(--tms-radius-card);
+  background: var(--tms-card);
+  box-shadow: var(--tms-shadow);
+}
+
+.tms-shell .tms-kpi-card-label,
+.tms-portal .tms-kpi-card-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--tms-muted);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.tms-shell .tms-kpi-card-label svg,
+.tms-portal .tms-kpi-card-label svg {
+  flex: 0 0 auto;
+}
+
+.tms-shell .tms-kpi-card-value,
+.tms-portal .tms-kpi-card-value {
+  color: var(--tms-text);
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+}
+
+.tms-shell .tms-kpi-card-foot,
+.tms-portal .tms-kpi-card-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.tms-shell .tms-kpi-card-sub,
+.tms-portal .tms-kpi-card-sub {
+  color: var(--tms-muted);
+  font-size: 12px;
+}
+
+.tms-shell .tms-delta,
+.tms-portal .tms-delta {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 8px;
+  border-radius: var(--tms-radius-pill);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.tms-shell .tms-delta-good,
+.tms-portal .tms-delta-good {
+  background: var(--tms-badge-green-tint);
+  color: var(--tms-badge-green);
+}
+
+.tms-shell .tms-delta-bad,
+.tms-portal .tms-delta-bad {
+  background: var(--tms-badge-red-tint);
+  color: var(--tms-badge-red);
+}
+
+.tms-shell .tms-delta-flat,
+.tms-portal .tms-delta-flat {
+  background: var(--tms-surface);
+  color: var(--tms-muted);
+}
+
+/* KPI tiles inside a chart card: flat, no shadow, tighter. */
+.tms-shell .tms-chart-card .tms-kpi-card,
+.tms-portal .tms-chart-expanded .tms-kpi-card {
+  padding: 12px 14px;
+  gap: 4px;
+  border-radius: var(--tms-radius);
+  box-shadow: none;
+}
+
+.tms-shell .tms-chart-card .tms-kpi-card-value,
+.tms-portal .tms-chart-expanded .tms-kpi-card-value {
+  font-size: 20px;
+}
+
+/* ── Chart card ───────────────────────────────────────────────────────────── */
+
+.tms-shell .tms-chart-card {
+  display: flex;
+  flex-direction: column;
+  height: 360px;
+  min-width: 0;
+  border: 1px solid var(--tms-border);
+  border-radius: var(--tms-radius-card);
+  background: var(--tms-card);
+  box-shadow: var(--tms-shadow);
+  overflow: hidden;
+}
+
+.tms-shell .tms-chart-wide {
+  grid-column: 1 / -1;
+}
+
+.tms-shell .tms-chart-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  padding: 14px var(--tms-pad) 4px;
+  background: transparent;
+}
+
+.tms-shell .tms-chart-icon {
+  flex: 0 0 auto;
+  color: var(--tms-muted);
+}
+
+.tms-shell .tms-chart-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--tms-text);
+  font-size: 14px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tms-shell .tms-chart-head-right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.tms-shell .tms-chart-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 8px var(--tms-pad) var(--tms-pad);
+}

@@ -19,7 +19,7 @@ import {
 import { NAV_ITEMS } from '@/lib/navItems'
 import { SEED_DIVISIONS, topLevelOf } from '@/lib/ownership'
 import type { OwnershipDivisionRecord } from '@/types/tms'
-import type { TmsNavChild, TmsNavItem, TmsNavSection } from '@/features/tms/TmsShell'
+import type { TmsBreadcrumbItem, TmsCompanyOption, TmsNavChild, TmsNavItem, TmsNavSection } from '@/features/tms/TmsShell'
 
 /** The single grant that opens the whole Brokerage section. */
 export const TMS_PAGE_KEY = 'tms'
@@ -28,7 +28,8 @@ export const TMS_PAGE_KEY = 'tms'
 export type SectionKey = string
 
 const BROKERAGE = 'BROKERAGE'
-const COMPANY = 'COMPANY'
+const SHIPMENTS_PATH = '/tms/shipments'
+export const COMPANY_DIVISION = 'COMPANY'
 
 export interface NavItemDef {
   to: string
@@ -109,15 +110,68 @@ export function sectionTitle(code: string): string {
   return code.replace(/_/g, ' ')
 }
 
-/** The title the TMS top bar shows for a path — the longest matching item wins. */
-export function tmsPageTitle(pathname: string): string {
+/** Workstation pages that live under the Shipments item without being nav items of their own. */
+const SHIPMENT_WORKSTATIONS: Record<string, string> = {
+  '/tms/dispatch': 'Dispatch',
+  '/tms/tracking': 'Tracking',
+  '/tms/documents': 'Documents',
+  '/tms/check-calls': 'Check calls',
+}
+
+/** `my-queue` reads `My queue`. */
+function titleCase(slug: string): string {
+  const words = slug.replace(/[-_]+/g, ' ').trim()
+  return words.charAt(0).toUpperCase() + words.slice(1)
+}
+
+/**
+ * The trail the TMS top bar shows for a path: the nav item the page belongs to (the
+ * longest match wins), then at most one more level. Every crumb but the last links.
+ */
+export function tmsBreadcrumb(
+  pathname: string,
+  shipmentViews: Array<{ slug: string; name: string }> = [],
+): TmsBreadcrumbItem[] {
+  const shipments: TmsBreadcrumbItem = { label: 'Shipments', to: SHIPMENTS_PATH }
+
+  if (pathname === '/tms/tracking/links') {
+    return [shipments, { label: 'Tracking', to: '/tms/tracking' }, { label: 'Manage links' }]
+  }
+  const workstation = SHIPMENT_WORKSTATIONS[pathname]
+  if (workstation) return [shipments, { label: workstation }]
+
+  const viewPrefix = `${SHIPMENTS_PATH}/view/`
+  if (pathname.startsWith(viewPrefix)) {
+    const slug = pathname.slice(viewPrefix.length).split('/')[0]
+    return [shipments, { label: shipmentViews.find((v) => v.slug === slug)?.name ?? titleCase(slug) }]
+  }
+  if (pathname.startsWith(`${SHIPMENTS_PATH}/`)) return [shipments, { label: 'Shipment' }]
+
   let best: NavItemDef | null = null
   for (const item of ALL_TMS_ITEMS) {
     if (pathname === item.to || pathname.startsWith(`${item.to}/`)) {
       if (!best || item.to.length > best.to.length) best = item
     }
   }
-  return best?.label ?? 'TMS'
+  if (!best) return [{ label: 'TMS' }]
+  if (pathname === best.to) return [{ label: best.label }]
+  const segment = pathname.slice(best.to.length + 1).split('/')[0]
+  return [{ label: best.label, to: best.to }, { label: /\d/.test(segment) ? 'Details' : titleCase(segment) }]
+}
+
+/**
+ * The businesses the company switcher offers: one per visible section, in section order,
+ * minus the COMPANY group (it is the company, not a business). Names come from the
+ * division list so the switcher never shows a code.
+ */
+export function companyOptions(
+  sections: Array<{ key: string }>,
+  divisions: Array<Pick<OwnershipDivisionRecord, 'code' | 'name'>> | null,
+): TmsCompanyOption[] {
+  const known = divisions ?? SEED_DIVISIONS
+  return sections
+    .filter((s) => s.key !== COMPANY_DIVISION)
+    .map((s) => ({ code: s.key, name: known.find((d) => d.code === s.key)?.name ?? s.key }))
 }
 
 type DivisionLike = Pick<OwnershipDivisionRecord, 'id' | 'code' | 'name' | 'brand' | 'parentId' | 'sortOrder' | 'active'>
@@ -173,7 +227,7 @@ export function buildNavSections({
 
   const tops = all
     .filter((d) => d.active && !d.parentId)
-    .sort((a, b) => (a.code === COMPANY ? 1 : b.code === COMPANY ? -1 : a.sortOrder - b.sortOrder))
+    .sort((a, b) => (a.code === COMPANY_DIVISION ? 1 : b.code === COMPANY_DIVISION ? -1 : a.sortOrder - b.sortOrder))
 
   const sections: NavSection[] = []
   for (const division of tops) {

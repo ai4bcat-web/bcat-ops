@@ -11,9 +11,10 @@
  */
 import { useCallback, useMemo, useState } from 'react'
 import {
-  ArrowLeftRight, ChevronDown, Download, Eye, Plus, RotateCw, Save, XCircle,
+  ArrowLeftRight, ChevronDown, CircleDollarSign, Download, Eye, Plus, ReceiptText, RotateCw, Save, TrendingUp, Wallet, XCircle,
 } from 'lucide-react'
-import { TmsButton, TmsDialog, TmsFilterChip, TmsIconButton, TmsInput, TmsPage } from '@/features/tms/kit'
+import { TmsButton, TmsDialog, TmsFilterChip, TmsIconButton, TmsInput, TmsKpiCard, TmsPage } from '@/features/tms/kit'
+import { useTmsCompany } from '@/features/tms/tmsCompany'
 import { useAuth } from '@/hooks/useAuth'
 import { SHIPMENT_STATUS_LABELS } from '@/lib/shipmentStatus'
 import { indexOf } from '@/lib/dashboardCharts'
@@ -22,7 +23,8 @@ import { SEED_DIVISIONS } from '@/lib/ownership'
 import { BROKERAGE_CHARTS } from './brokerageCards'
 import { CLASSIC_CHARTS } from './classicCharts'
 import { ChartCard } from './ChartCard'
-import { buildBusinessStrips } from './businessStrips'
+import { buildBusinessStrips, buildCompanyTotals } from './businessStrips'
+import { WelcomeHeader } from './WelcomeHeader'
 import { useBrokerageDashboard } from './useBrokerageDashboard'
 import {
   CLASSIC_VIEW, DATE_PRESETS, GROUP_BY_OPTIONS, chartsToCsv, dateChipLabel, defaultFilters,
@@ -92,12 +94,28 @@ function optionsFrom(data: DashboardData | null): Record<ListChipKey, Option[]> 
   }
 }
 
+/** "ryne.smith@…" → "Ryne": the first `.`/`_`/`-` token of the local part, capitalised. */
+function firstNameFromEmail(email: string): string {
+  const token = email.split('@')[0]?.split(/[._-]/)[0] ?? ''
+  return token ? token.charAt(0).toUpperCase() + token.slice(1) : 'there'
+}
+
 export function DashboardPage() {
   const { user } = useAuth()
   const email = user?.email ?? ''
   const [now] = useState(() => new Date().toISOString())
+  const { company } = useTmsCompany()
 
-  const [filters, setFilters] = useState<DashboardFilters>(() => defaultFilters(now))
+  const [filters, setFilters] = useState<DashboardFilters>(() => ({
+    ...defaultFilters(now),
+    divisions: company ? [company] : [],
+  }))
+  // The shell's company switcher is a scope preference: follow it live while mounted.
+  const [seenCompany, setSeenCompany] = useState(company)
+  if (seenCompany !== company) {
+    setSeenCompany(company)
+    setFilters((current) => ({ ...current, divisions: company ? [company] : [], subdivisions: [] }))
+  }
   const [groupBy, setGroupBy] = useState<DashboardGroupBy | null>('DIVISION')
   const [visibleKeys, setVisibleKeys] = useState<string[]>(() => ALL_CHARTS.map((chart) => chart.key))
   const [overrides, setOverrides] = useState<Record<string, DashboardGroupBy | null | undefined>>({})
@@ -123,6 +141,12 @@ export function DashboardPage() {
     () => (data ? buildBusinessStrips(data, filters, divisions) : []),
     [data, filters, divisions],
   )
+  const totals = useMemo(() => (data ? buildCompanyTotals(data, filters) : null), [data, filters])
+  const firstName = useMemo(() => {
+    const profile = data?.profiles.find((candidate) => candidate.email?.toLowerCase() === email.toLowerCase())
+    const named = profile?.name?.trim().split(/\s+/)[0]
+    return named || firstNameFromEmail(email)
+  }, [data, email])
 
   const selectDivision = useCallback((code: string) => {
     setFilters((current) =>
@@ -233,7 +257,7 @@ export function DashboardPage() {
       <TmsIconButton aria-label="Refresh" onClick={refresh}><RotateCw size={15} /></TmsIconButton>
       <TmsIconButton aria-label="Clear filters" onClick={clearAll}><XCircle size={15} /></TmsIconButton>
       <TmsIconButton aria-label="Save view" onClick={() => setSaveOpen(true)}><Save size={15} /></TmsIconButton>
-      <TmsIconButton aria-label="Export CSV" onClick={exportCsv}><Download size={15} /></TmsIconButton>
+      <TmsButton variant="primary" onClick={exportCsv}><Download size={15} aria-hidden="true" /> Export CSV</TmsButton>
       <button
         type="button"
         className="tms-dash-picker-btn"
@@ -247,7 +271,7 @@ export function DashboardPage() {
   )
 
   return (
-    <TmsPage title={title} actions={actions} className="tms-dash">
+    <TmsPage title={title} eyebrow={<WelcomeHeader name={firstName} />} actions={actions} className="tms-dash">
       {pickerOpen ? (
         <div className="tms-dash-panel tms-dash-picker">
           {ALL_CHARTS.map((chart) => (
@@ -368,6 +392,37 @@ export function DashboardPage() {
             <option value="">Anything</option>
             {options[openChip].map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
           </select>
+        </div>
+      ) : null}
+
+      {totals ? (
+        <div className="tms-grid tms-grid-4 tms-dash-kpis">
+          <TmsKpiCard
+            label="Revenue"
+            icon={CircleDollarSign}
+            value={totals.revenueCents != null ? formatCents(totals.revenueCents) : null}
+            sub={totals.shipmentCount != null ? `${totals.shipmentCount} shipments` : null}
+          />
+          <TmsKpiCard
+            label="Profit"
+            icon={TrendingUp}
+            value={totals.profitCents != null ? formatCents(totals.profitCents) : null}
+            sub={totals.marginBps != null ? `${(totals.marginBps / 100).toFixed(1)}% margin` : null}
+          />
+          <TmsKpiCard
+            label="Open AR"
+            icon={ReceiptText}
+            value={totals.arOpenCents != null ? formatCents(totals.arOpenCents) : null}
+            positiveIsGood={false}
+            sub="outstanding invoices"
+          />
+          <TmsKpiCard
+            label="Open AP"
+            icon={Wallet}
+            value={totals.apOpenCents != null ? formatCents(totals.apOpenCents) : null}
+            positiveIsGood={false}
+            sub="outstanding carrier bills"
+          />
         </div>
       ) : null}
 

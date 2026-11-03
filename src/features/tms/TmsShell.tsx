@@ -1,28 +1,42 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import { NavLink } from 'react-router-dom'
+import { Link, NavLink } from 'react-router-dom'
 import {
   Bell,
+  Check,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronsUpDown,
   CircleHelp,
-  CircleUser,
-  History,
-  MessageSquare,
-  Monitor,
+  LayoutGrid,
+  LogOut,
   Moon,
   Search,
-  Zap,
+  Sun,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
+// Kit files are imported directly, never through `./kit`: the barrel re-exports TmsShell.
+import { TmsCountBadge } from './kit/TmsCountBadge'
 import { isPathActive } from './navActive'
+import { useTmsCompany } from './tmsCompany'
+import { useTmsTheme } from './tmsTheme'
 import './theme.css'
+import './shell.css'
+
+export interface TmsLiveChild {
+  id: string
+  label: string
+  sub?: string | null
+  to: string
+}
 
 export interface TmsNavChild {
   to: string
   label: string
   badgeKey?: string
+  /** Shipments currently moving, listed under the Tracking child. Set by `childrenFor`. */
+  live?: TmsLiveChild[]
 }
 
 export interface TmsNavChildGroup {
@@ -48,24 +62,45 @@ export interface TmsNavSection {
   items: TmsNavItem[]
 }
 
+export interface TmsCompanyOption {
+  code: string
+  name: string
+}
+
+export interface TmsBreadcrumbItem {
+  label: string
+  to?: string
+}
+
 export interface TmsShellProps {
   pinned?: TmsNavItem[]
   sections: TmsNavSection[]
   /** The current pathname. Drives the active row, not react-router's own matching. */
   activePath: string
-  pageTitle: string
-  user: { initial: string; email: string }
+  breadcrumb: TmsBreadcrumbItem[]
+  user: { initial: string; email: string; name?: string | null }
   shipmentViews: Array<{ slug: string; name: string }>
   /** Numeric counts for `badgeKey` items. The legacy NavBar has its own resolver —
-   *  this map is for the TMS rail only, so a count can ship without touching BCAT Ops chrome. */
+   *  this map is for the TMS rail only, so a count can ship without touching BCAT Ops chrome.
+   *  `tracking` carries the shipments currently moving. */
   badgeCounts?: Record<string, number>
+  /** The businesses the switcher offers. Fewer than two means a static org card, no menu. */
+  companies?: TmsCompanyOption[]
+  /** Check calls due or overdue; the bell links to the Check calls page. */
+  notificationCount?: number
+  /** Most recently updated moving shipments, newest first, already sliced. */
+  trackedLoads?: TmsLiveChild[]
+  /** The Log out button renders only when this is provided. */
+  onLogout?: () => void
   onSearch?: (q: string) => void
   children?: ReactNode
 }
 
 const COLLAPSE_KEY = 'tms-sidebar-collapsed'
 export const SHIPMENTS_PATH = '/tms/shipments'
-
+const TRACKING_PATH = '/tms/tracking'
+const COMPANY_GROUP = 'COMPANY'
+const ALL_BUSINESSES = 'All businesses'
 
 function readCollapsed(): boolean {
   try {
@@ -73,6 +108,11 @@ function readCollapsed(): boolean {
   } catch {
     return false
   }
+}
+
+function initialsOf(name: string): string {
+  const words = name.split(/\s+/).filter(Boolean)
+  return (words.length > 1 ? words[0][0] + words[1][0] : name.slice(0, 2)).toUpperCase()
 }
 
 function isChildActive(activePath: string, child: TmsNavChild): boolean {
@@ -83,7 +123,7 @@ function isChildActive(activePath: string, child: TmsNavChild): boolean {
   }
   // The Tracking workstation has a child Manage page under /tms/tracking/links;
   // the parent /tms/tracking stays highlighted while on that page.
-  if (child.to === '/tms/tracking') {
+  if (child.to === TRACKING_PATH) {
     return activePath === child.to || activePath.startsWith(`${child.to}/`)
   }
   return activePath === child.to
@@ -94,7 +134,11 @@ interface NavChildren {
   groups: TmsNavChildGroup[]
 }
 
-function childrenFor(item: TmsNavItem, shipmentViews: TmsShellProps['shipmentViews']): NavChildren {
+function childrenFor(
+  item: TmsNavItem,
+  shipmentViews: TmsShellProps['shipmentViews'],
+  trackedLoads: TmsLiveChild[],
+): NavChildren {
   if (item.to !== SHIPMENTS_PATH) {
     return { items: item.children ?? [], groups: item.childGroups ?? [] }
   }
@@ -102,7 +146,7 @@ function childrenFor(item: TmsNavItem, shipmentViews: TmsShellProps['shipmentVie
     { to: SHIPMENTS_PATH, label: 'Active Shipments' },
     ...(item.children ?? []),
     { to: '/tms/dispatch', label: 'Dispatch' },
-    { to: '/tms/tracking', label: 'Tracking' },
+    { to: TRACKING_PATH, label: 'Tracking', badgeKey: 'tracking', live: trackedLoads },
     { to: '/tms/documents', label: 'Documents' },
   ]
   const queuedSlugs = new Set((item.children ?? []).map((c) => c.to.replace(`${SHIPMENTS_PATH}/view/`, '')))
@@ -117,18 +161,77 @@ function childrenFor(item: TmsNavItem, shipmentViews: TmsShellProps['shipmentVie
   return { items, groups }
 }
 
+function NavChildRow({
+  child,
+  activePath,
+  badgeCounts,
+}: {
+  child: TmsNavChild
+  activePath: string
+  badgeCounts?: Record<string, number>
+}) {
+  const active = isChildActive(activePath, child)
+  const count = child.badgeKey != null ? (badgeCounts?.[child.badgeKey] ?? 0) : 0
+  const live = child.live ?? []
+  const expandable = live.length > 0
+  // Under the workstation the live list opens by itself; a caret click overrides that.
+  const [override, setOverride] = useState<boolean | null>(null)
+  const open = expandable && (override ?? active)
+
+  return (
+    <>
+      <div className="tms-nav-childrow">
+        <NavLink
+          to={child.to}
+          className={`tms-nav-child${active ? ' tms-active' : ''}`}
+          title={child.label}
+        >
+          <span className="tms-nav-child-label">{child.label}</span>
+          <TmsCountBadge count={count} className="tms-nav-child-badge" />
+        </NavLink>
+        {expandable ? (
+          <button
+            type="button"
+            className="tms-nav-caret"
+            aria-label={`${open ? 'Collapse' : 'Expand'} ${child.label}`}
+            aria-expanded={open}
+            onClick={() => setOverride(!open)}
+          >
+            {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+          </button>
+        ) : null}
+      </div>
+      {open ? (
+        <div className="tms-nav-live">
+          {live.map((load) => (
+            <NavLink key={load.id} to={load.to} className="tms-nav-live-item" title={load.label}>
+              <span>{load.label}</span>
+              {load.sub ? <span className="tms-nav-live-sub">{load.sub}</span> : null}
+            </NavLink>
+          ))}
+        </div>
+      ) : null}
+    </>
+  )
+}
+
 function NavRow({
   item,
   activePath,
   shipmentViews,
   badgeCounts,
+  trackedLoads,
 }: {
   item: TmsNavItem
   activePath: string
   shipmentViews: TmsShellProps['shipmentViews']
   badgeCounts?: Record<string, number>
+  trackedLoads: TmsLiveChild[]
 }) {
-  const { items, groups } = useMemo(() => childrenFor(item, shipmentViews), [item, shipmentViews])
+  const { items, groups } = useMemo(
+    () => childrenFor(item, shipmentViews, trackedLoads),
+    [item, shipmentViews, trackedLoads],
+  )
   const parentActive = isPathActive(activePath, item.to)
   const anyChildActive = useMemo(
     () =>
@@ -145,7 +248,6 @@ function NavRow({
   const Icon = item.icon
   const hasKids = items.length > 0 || groups.length > 0
   const count = item.badgeKey != null ? (badgeCounts?.[item.badgeKey] ?? 0) : 0
-  const showBadge = item.badge != null || count > 0
 
   return (
     <div className={`tms-nav-rowwrap${hasKids ? ' tms-has-children' : ''}`}>
@@ -157,8 +259,10 @@ function NavRow({
       >
         <Icon className="tms-nav-icon" size={20} aria-hidden="true" />
         <span className="tms-nav-label">{item.label}</span>
-        {showBadge ? (
-          <span className="tms-nav-badge">{count > 0 ? count : item.badge}</span>
+        {count > 0 ? (
+          <TmsCountBadge count={count} className="tms-nav-badge" />
+        ) : item.badge != null ? (
+          <span className="tms-nav-badge">{item.badge}</span>
         ) : null}
       </NavLink>
       {hasKids ? (
@@ -174,42 +278,160 @@ function NavRow({
       ) : null}
       {hasKids && open ? (
         <div className="tms-nav-children">
-          {items.map((child) => {
-            const childCount = child.badgeKey != null ? (badgeCounts?.[child.badgeKey] ?? 0) : 0
-            return (
-              <NavLink
-                key={child.to}
-                to={child.to}
-                className={`tms-nav-child${isChildActive(activePath, child) ? ' tms-active' : ''}`}
-                title={child.label}
-              >
-                <span className="tms-nav-child-label">{child.label}</span>
-                {childCount > 0 ? <span className="tms-nav-badge tms-nav-child-badge">{childCount}</span> : null}
-              </NavLink>
-            )
-          })}
+          {items.map((child) => (
+            <NavChildRow key={child.to} child={child} activePath={activePath} badgeCounts={badgeCounts} />
+          ))}
           {groups.map((group) => (
             <div key={group.label}>
               <div className="tms-nav-childgroup" aria-hidden="true">
                 {group.label}
               </div>
-              {group.children.map((child) => {
-                const childCount = child.badgeKey != null ? (badgeCounts?.[child.badgeKey] ?? 0) : 0
-                return (
-                  <NavLink
-                    key={child.to}
-                    to={child.to}
-                    className={`tms-nav-child${isChildActive(activePath, child) ? ' tms-active' : ''}`}
-                    title={child.label}
-                  >
-                    <span className="tms-nav-child-label">{child.label}</span>
-                    {childCount > 0 ? <span className="tms-nav-badge tms-nav-child-badge">{childCount}</span> : null}
-                  </NavLink>
-                )
-              })}
+              {group.children.map((child) => (
+                <NavChildRow key={child.to} child={child} activePath={activePath} badgeCounts={badgeCounts} />
+              ))}
             </div>
           ))}
         </div>
+      ) : null}
+    </div>
+  )
+}
+
+function NavSectionBlock({
+  section,
+  company,
+  ...rowProps
+}: {
+  section: TmsNavSection
+  /** The effective business preference, or null for All businesses. */
+  company: string | null
+  activePath: string
+  shipmentViews: TmsShellProps['shipmentViews']
+  badgeCounts?: Record<string, number>
+  trackedLoads: TmsLiveChild[]
+}) {
+  // Choosing a business folds the other business sections to their header; a header click
+  // afterwards wins until the business changes again.
+  const [toggle, setToggle] = useState<{ company: string | null; open: boolean } | null>(null)
+  const foldedByCompany = company !== null && section.key !== COMPANY_GROUP && section.key !== company
+  const open = toggle?.company === company ? toggle.open : !foldedByCompany
+
+  return (
+    <div>
+      <button
+        type="button"
+        className="tms-section-head"
+        aria-expanded={open}
+        onClick={() => setToggle({ company, open: !open })}
+      >
+        <span>
+          {section.name}
+          {section.brand ? <span className="tms-section-brand"> [{section.brand}]</span> : null}
+        </span>
+        {open ? <ChevronDown size={12} aria-hidden="true" /> : <ChevronRight size={12} aria-hidden="true" />}
+      </button>
+      {open
+        ? section.items.map((item) => <NavRow key={item.to} item={item} {...rowProps} />)
+        : null}
+    </div>
+  )
+}
+
+function CompanySwitcher({
+  companies,
+  company,
+  collapsed,
+  onSelect,
+}: {
+  companies: TmsCompanyOption[]
+  company: TmsCompanyOption | null
+  collapsed: boolean
+  onSelect: (code: string | null) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const rootRef = useRef<HTMLDivElement>(null)
+  const switchable = companies.length >= 2
+  const name = company?.name ?? 'BCAT Ops'
+  const avatar = <span className="tms-company-avatar" aria-hidden="true">{company ? initialsOf(company.name) : 'BC'}</span>
+
+  useEffect(() => {
+    if (!open) return
+    const onPointer = (e: MouseEvent) => {
+      if (!rootRef.current?.contains(e.target as Node)) setOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('mousedown', onPointer)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onPointer)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  if (!switchable) {
+    return (
+      <div className="tms-company-card tms-company-static" title={name}>
+        {avatar}
+        {collapsed ? null : <span className="tms-company-name">{name}</span>}
+      </div>
+    )
+  }
+
+  const choose = (code: string | null) => {
+    onSelect(code)
+    setOpen(false)
+  }
+  const options: Array<{ code: string | null; label: string }> = [
+    { code: null, label: ALL_BUSINESSES },
+    ...companies.map((c) => ({ code: c.code, label: c.name })),
+  ]
+
+  return (
+    <div className="tms-company" ref={rootRef}>
+      <button
+        type="button"
+        className="tms-company-card"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label={`Business: ${company?.name ?? ALL_BUSINESSES}`}
+        title={name}
+        onClick={() => setOpen((v) => !v)}
+      >
+        {avatar}
+        {collapsed ? null : (
+          <>
+            <span className="tms-company-name">{name}</span>
+            <ChevronsUpDown size={14} aria-hidden="true" />
+          </>
+        )}
+      </button>
+      {open ? (
+        <ul className="tms-company-menu" role="listbox" aria-label="Business">
+          {options.map((option) => {
+            const selected = (option.code ?? null) === (company?.code ?? null)
+            return (
+              <li
+                key={option.code ?? 'all'}
+                role="option"
+                aria-selected={selected}
+                tabIndex={0}
+                className="tms-company-option"
+                onClick={() => choose(option.code)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    choose(option.code)
+                  }
+                }}
+              >
+                <span>{option.label}</span>
+                {selected ? <Check size={14} aria-hidden="true" /> : null}
+              </li>
+            )
+          })}
+        </ul>
       ) : null}
     </div>
   )
@@ -219,16 +441,24 @@ export function TmsShell({
   pinned = [],
   sections,
   activePath,
-  pageTitle,
+  breadcrumb,
   user,
   shipmentViews,
   badgeCounts,
+  companies = [],
+  notificationCount = 0,
+  trackedLoads = [],
+  onLogout,
   onSearch,
   children,
 }: TmsShellProps) {
   const [collapsed, setCollapsed] = useState(readCollapsed)
   const [query, setQuery] = useState('')
   const searchRef = useRef<HTMLInputElement>(null)
+  const { theme, toggleTheme } = useTmsTheme()
+  const { company: storedCompany, setCompany } = useTmsCompany()
+  // A stored business that is no longer offered behaves as All businesses.
+  const company = companies.find((c) => c.code === storedCompany) ?? null
 
   useEffect(() => {
     try {
@@ -257,13 +487,15 @@ export function TmsShell({
     [onSearch]
   )
 
+  const userName = user.name?.trim() || user.email.split('@')[0] || user.email
+  const dark = theme === 'dark'
+  const rowProps = { activePath, shipmentViews, badgeCounts, trackedLoads }
+
   return (
     <div className={`tms-shell${collapsed ? ' tms-is-collapsed' : ''}`}>
       <aside className="tms-sidebar">
         <div className="tms-sidebar-head">
-          <span className="tms-wordmark">
-            BCAT<span className="tms-wordmark-mark">{collapsed ? '' : ' OPS'}</span>
-          </span>
+          <CompanySwitcher companies={companies} company={company} collapsed={collapsed} onSelect={setCompany} />
           <button
             type="button"
             className="tms-collapse-btn"
@@ -279,57 +511,56 @@ export function TmsShell({
           {pinned.length > 0 && (
             <div className="tms-pinned">
               {pinned.map((item) => (
-                <NavRow key={item.to} item={item} activePath={activePath} shipmentViews={shipmentViews} badgeCounts={badgeCounts} />
+                <NavRow key={item.to} item={item} {...rowProps} />
               ))}
             </div>
           )}
           {sections.map((section) => (
-            <div key={section.key}>
-              <div className="tms-section-head">
-                {section.name}
-                {section.brand ? <span className="tms-section-brand"> [{section.brand}]</span> : null}
-              </div>
-              {section.items.map((item) => (
-                <NavRow key={item.to} item={item} activePath={activePath} shipmentViews={shipmentViews} badgeCounts={badgeCounts} />
-              ))}
-            </div>
+            <NavSectionBlock key={section.key} section={section} company={company?.code ?? null} {...rowProps} />
           ))}
         </nav>
 
         <div className="tms-sidebar-foot">
-          <button type="button" className="tms-foot-btn" aria-label="Notifications">
-            <Bell size={16} />
-          </button>
-          <button type="button" className="tms-foot-btn" aria-label="Theme">
-            <Moon size={16} />
-          </button>
-          <button type="button" className="tms-foot-btn" aria-label="Chat">
-            <MessageSquare size={16} />
-          </button>
-          <button type="button" className="tms-foot-btn" aria-label={user.email} title={user.email}>
-            <CircleUser size={16} />
-          </button>
+          <div className="tms-user-card" title={user.email}>
+            <span className="tms-user-avatar" aria-hidden="true">{user.initial}</span>
+            <span className="tms-user-text">
+              <span className="tms-user-name">{userName}</span>
+              <span className="tms-user-email">{user.email}</span>
+            </span>
+          </div>
+          {onLogout ? (
+            <button type="button" className="tms-logout" aria-label="Log out" onClick={onLogout}>
+              <LogOut size={16} aria-hidden="true" />
+              <span className="tms-logout-label">Log out</span>
+            </button>
+          ) : null}
         </div>
       </aside>
 
       <div className="tms-content">
         <header className="tms-topbar">
-          <span className="tms-topbar-title">{pageTitle}</span>
+          <nav aria-label="Breadcrumb">
+            <ol className="tms-breadcrumb">
+              <li className="tms-crumb">
+                <Link to="/tms/dashboard" aria-label="Dashboard home">
+                  <LayoutGrid size={16} aria-hidden="true" />
+                </Link>
+              </li>
+              {breadcrumb.map((crumb, i) => {
+                const last = i === breadcrumb.length - 1
+                return (
+                  <li
+                    key={`${i}-${crumb.label}`}
+                    className={last ? 'tms-crumb tms-crumb-current' : 'tms-crumb'}
+                    aria-current={last ? 'page' : undefined}
+                  >
+                    {crumb.to && !last ? <Link to={crumb.to}>{crumb.label}</Link> : crumb.label}
+                  </li>
+                )
+              })}
+            </ol>
+          </nav>
           <div className="tms-topbar-spacer" />
-          <div className="tms-topbar-icons">
-            <button type="button" className="tms-icon-btn tms-icon-btn-sq" aria-label="Display">
-              <Monitor size={15} />
-            </button>
-            <button type="button" className="tms-icon-btn tms-icon-btn-sq" aria-label="Quick actions">
-              <Zap size={15} />
-            </button>
-            <button type="button" className="tms-icon-btn tms-icon-btn-sq" aria-label="Help">
-              <CircleHelp size={15} />
-            </button>
-            <button type="button" className="tms-icon-btn tms-icon-btn-sq" aria-label="History">
-              <History size={15} />
-            </button>
-          </div>
           <form
             className="tms-search"
             role="search"
@@ -348,8 +579,26 @@ export function TmsShell({
               onChange={(e) => handleQuery(e.target.value)}
             />
           </form>
-          <div className="tms-avatar" title={user.email} aria-label={user.email}>
-            {user.initial}
+          <div className="tms-topbar-icons">
+            <Link
+              to="/tms/check-calls"
+              className="tms-icon-btn tms-icon-btn-sq tms-bell"
+              aria-label={notificationCount > 0 ? `Check calls due: ${notificationCount}` : 'Check calls'}
+            >
+              <Bell size={16} aria-hidden="true" />
+              <TmsCountBadge count={notificationCount} tone="amber" />
+            </Link>
+            <Link to="/tms/academy" className="tms-icon-btn tms-icon-btn-sq" aria-label="Help">
+              <CircleHelp size={16} aria-hidden="true" />
+            </Link>
+            <button
+              type="button"
+              className="tms-icon-btn tms-icon-btn-sq tms-theme-toggle"
+              aria-label={dark ? 'Switch to light theme' : 'Switch to dark theme'}
+              onClick={toggleTheme}
+            >
+              {dark ? <Sun size={16} aria-hidden="true" /> : <Moon size={16} aria-hidden="true" />}
+            </button>
           </div>
         </header>
 

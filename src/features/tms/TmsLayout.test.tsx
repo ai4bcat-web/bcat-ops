@@ -17,6 +17,7 @@ const auth = vi.hoisted(() => ({
   isOwner: false,
   isAdmin: false,
   hasPageAccess: () => true,
+  logout: vi.fn(),
 }))
 vi.mock('@/hooks/useAuth', () => ({ useAuth: () => auth }))
 
@@ -36,6 +37,8 @@ vi.mock('@/lib/apiClient', () => ({
   listCustomers: vi.fn(async () => []),
   listCarriers: vi.fn(async () => []),
   listDrivers: vi.fn(async () => []),
+  listCheckCallWorklist: vi.fn(async () => []),
+  listLoadCarriersByLoad: vi.fn(async () => []),
 }))
 
 import { TmsLayout } from './TmsLayout'

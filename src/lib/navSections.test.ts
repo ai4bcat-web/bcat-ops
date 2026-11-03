@@ -10,7 +10,7 @@ import { render, screen } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import { MemoryRouter } from 'react-router-dom'
 import { createElement } from 'react'
-import { buildNavSections, PINNED_ITEMS, TMS_ITEMS, tmsPageTitle } from './navSections'
+import { buildNavSections, companyOptions, PINNED_ITEMS, TMS_ITEMS, tmsBreadcrumb } from './navSections'
 import { TmsShell } from '@/features/tms/TmsShell'
 import type { OwnershipDivisionRecord } from '@/types/tms'
 
@@ -77,7 +77,7 @@ describe('buildNavSections', () => {
             pinned,
             sections,
             activePath: '/tms/shipments',
-            pageTitle: 'Shipments',
+            breadcrumb: [{ label: 'Shipments' }],
             user: { initial: 'R', email: 'ryne@bcatcorp.com' },
             shipmentViews: views,
           },
@@ -154,7 +154,7 @@ describe('buildNavSections', () => {
             pinned,
             sections,
             activePath: '/tms/shipments',
-            pageTitle: 'Shipments',
+            breadcrumb: [{ label: 'Shipments' }],
             user: { initial: 'R', email: 'ryne@bcatcorp.com' },
             shipmentViews: [{ slug: 'local', name: 'Local Drivers' }],
           },
@@ -198,12 +198,56 @@ describe('buildNavSections', () => {
   })
 })
 
-describe('tmsPageTitle', () => {
-  it('names the page a TMS path belongs to, deepest match first', () => {
-    expect(tmsPageTitle('/tms/shipments')).toBe('Shipments')
-    expect(tmsPageTitle('/tms/shipments/SHP-1')).toBe('Shipments')
-    expect(tmsPageTitle('/tms/invoicing/payable/bills/B-1')).toBe('Invoicing')
-    expect(tmsPageTitle('/tms/brokerage/users')).toBe('My Brokerage')
-    expect(tmsPageTitle('/tms/nothing')).toBe('TMS')
+describe('tmsBreadcrumb', () => {
+  const labels = (path: string, views?: Array<{ slug: string; name: string }>) =>
+    tmsBreadcrumb(path, views).map((c) => c.label)
+
+  it('puts a saved view under Shipments, by its name', () => {
+    expect(labels('/tms/shipments/view/my-queue', [{ slug: 'my-queue', name: 'My queue' }])).toEqual(['Shipments', 'My queue'])
+    expect(labels('/tms/shipments/view/pod-collection')).toEqual(['Shipments', 'Pod collection'])
+  })
+
+  it('files the workstation pages under Shipments', () => {
+    expect(labels('/tms/dispatch')).toEqual(['Shipments', 'Dispatch'])
+    expect(labels('/tms/check-calls')).toEqual(['Shipments', 'Check calls'])
+    expect(labels('/tms/tracking/links')).toEqual(['Shipments', 'Tracking', 'Manage links'])
+    expect(tmsBreadcrumb('/tms/tracking/links')[1].to).toBe('/tms/tracking')
+  })
+
+  it('names the item and one level below it, hiding ids behind Details', () => {
+    expect(labels('/tms/invoicing/payable/bills/B-1')).toEqual(['Invoicing', 'Payable'])
+    expect(labels('/tms/customers/CUS-12')).toEqual(['Customers', 'Details'])
+    expect(labels('/tms/shipments/SHP-1')).toEqual(['Shipments', 'Shipment'])
+    expect(labels('/tms/brokerage/users')).toEqual(['My Brokerage', 'Users'])
+  })
+
+  it('links every crumb but the last', () => {
+    const crumbs = tmsBreadcrumb('/tms/invoicing/payable')
+    expect(crumbs[0].to).toBe('/tms/invoicing')
+    expect(crumbs[crumbs.length - 1].to).toBeUndefined()
+    expect(tmsBreadcrumb('/tms/shipments')).toEqual([{ label: 'Shipments' }])
+  })
+
+  it('falls back to TMS for an unknown path', () => {
+    expect(labels('/tms/nothing')).toEqual(['TMS'])
+  })
+})
+
+describe('companyOptions', () => {
+  const sections = [{ key: 'BROKERAGE' }, { key: 'ASSETS' }, { key: 'COMPANY' }]
+
+  it('offers one option per business in section order, never the COMPANY group', () => {
+    expect(companyOptions(sections, null)).toEqual([
+      { code: 'BROKERAGE', name: expect.any(String) },
+      { code: 'ASSETS', name: expect.any(String) },
+    ])
+  })
+
+  it('names a business from the division list and falls back to its code', () => {
+    const named = companyOptions(sections, [{ code: 'ASSETS', name: 'Ivan Cartage' }])
+    expect(named).toEqual([
+      { code: 'BROKERAGE', name: 'BROKERAGE' },
+      { code: 'ASSETS', name: 'Ivan Cartage' },
+    ])
   })
 })

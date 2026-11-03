@@ -113,6 +113,40 @@ function stripValues(
   }
 }
 
+export interface CompanyTotals {
+  shipmentCount: number | null
+  revenueCents: number | null
+  profitCents: number | null
+  marginBps: number | null
+  arOpenCents: number | null
+  apOpenCents: number | null
+}
+
+/**
+ * The company-wide figures over every filtered row. Deliberately not the sum of the
+ * business strips: a shipment with no division tag falls in no strip, and a sum would
+ * silently drop it. "No data" is `null`, never zero.
+ */
+export function buildCompanyTotals(data: DashboardData, filters: DashboardFilters): CompanyTotals {
+  const filtered = applyFilters(data, filters)
+  const values = stripValues(
+    filtered.shipments,
+    pricedSamples(filtered.samples),
+    filtered.loads,
+    filtered.openInvoices,
+    filtered.openBills,
+    0,
+  )
+  return {
+    shipmentCount: filtered.shipments.length > 0 ? filtered.shipments.length : null,
+    revenueCents: values.revenueCents,
+    profitCents: values.profitCents,
+    marginBps: values.marginBps,
+    arOpenCents: values.arOpenCents,
+    apOpenCents: values.apOpenCents,
+  }
+}
+
 /**
  * Build one KPI strip per active top-level ownership division.
  *

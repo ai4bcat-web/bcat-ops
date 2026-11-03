@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest'
 import { SEED_DIVISIONS } from '@/lib/ownership'
 import type { DashboardData, DashboardFilters } from './types'
-import { buildBusinessStrips } from './businessStrips'
+import { buildBusinessStrips, buildCompanyTotals } from './businessStrips'
 
 const MONTH = '2026-10'
 const DAY = `${MONTH}-02`
@@ -228,5 +228,77 @@ describe('buildBusinessStrips', () => {
 
     expect(assets.shipmentsByStatus).toEqual({ PICKED_UP: 1 })
     expect(boxTrucks.shipmentsByStatus).toEqual({ PICKED_UP: 1 })
+  })
+})
+
+describe('buildCompanyTotals', () => {
+  const shipment = (id: string, revDivision?: string) => ({
+    id,
+    number: id,
+    status: 'OPEN',
+    customerId: 'c1',
+    mode: 'TRUCKLOAD',
+    source: 'MANUAL',
+    pickupAppt: PICKUP,
+    ...(revDivision ? { revDivision } : {}),
+    createdBy: 't',
+    updatedBy: 't',
+    createdAt: PICKUP,
+    updatedAt: PICKUP,
+  }) as DashboardData['shipments'][number]
+
+  const sample = (id: string, shipmentId: string, revenueCents: number, profitCents: number, revDivision?: string) => ({
+    id,
+    laneKey: 'A>B',
+    date: DAY,
+    loadId: `load-${id}`,
+    shipmentId,
+    ...(revDivision ? { revDivision } : {}),
+    revenueCents,
+    costCents: revenueCents - profitCents,
+    profitCents,
+    source: 'LOAD',
+    sampledAt: PICKUP,
+    version: 1,
+  }) as DashboardData['samples'][number]
+
+  it('counts rows that carry no division tag, which the per-business strips drop', () => {
+    const d = data({
+      shipments: [shipment('s1', 'BROKERAGE'), shipment('s2')],
+      samples: [sample('a', 's1', 100_000, 20_000, 'BROKERAGE'), sample('b', 's2', 50_000, 10_000)],
+    })
+    const totals = buildCompanyTotals(d, filters)
+    expect(totals.shipmentCount).toBe(2)
+    expect(totals.revenueCents).toBe(150_000)
+    expect(totals.profitCents).toBe(30_000)
+    const stripSum = buildBusinessStrips(d, filters, SEED_DIVISIONS)
+      .reduce((sum, strip) => sum + (strip.revenueCents ?? 0), 0)
+    expect(stripSum).toBe(100_000)
+  })
+
+  it('reports margin as profit over revenue in basis points', () => {
+    const d = data({ samples: [sample('a', 's1', 200_000, 50_000, 'BROKERAGE')] })
+    expect(buildCompanyTotals(d, filters).marginBps).toBe(2500)
+  })
+
+  it('returns null, not zero, when the window holds nothing', () => {
+    expect(buildCompanyTotals(data(), filters)).toEqual({
+      shipmentCount: null,
+      revenueCents: null,
+      profitCents: null,
+      marginBps: null,
+      arOpenCents: null,
+      apOpenCents: null,
+    })
+  })
+
+  it('respects the division filter', () => {
+    const d = data({
+      shipments: [shipment('s1', 'BROKERAGE'), shipment('s2', 'ASSETS')],
+      samples: [sample('a', 's1', 100_000, 20_000, 'BROKERAGE'), sample('b', 's2', 50_000, 10_000, 'ASSETS')],
+    })
+    const totals = buildCompanyTotals(d, { ...filters, divisions: ['ASSETS'] })
+    expect(totals.shipmentCount).toBe(1)
+    expect(totals.revenueCents).toBe(50_000)
   })
 })

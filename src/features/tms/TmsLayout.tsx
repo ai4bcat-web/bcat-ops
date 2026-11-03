@@ -7,11 +7,13 @@
  */
 import { useMemo } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { TmsShell } from '@/features/tms/TmsShell'
+import { TmsShell, type TmsLiveChild } from '@/features/tms/TmsShell'
 import { useOwnershipDivisions, useShipmentViews } from '@/features/tms/useShipmentViews'
-import { buildNavSections, tmsPageTitle } from '@/lib/navSections'
+import { buildNavSections, companyOptions, TMS_PAGE_KEY, tmsBreadcrumb } from '@/lib/navSections'
+import { MOVEMENT_STATUSES } from '@/lib/brokerageCharts'
 import { boardStatusOf, viewCallerOf, viewsVisibleTo } from '@/lib/shipmentViewDefs'
 import { useAuth } from '@/hooks/useAuth'
+import { useCheckCallWorklist } from '@/hooks/useCheckCallWorklist'
 import { useShipments, type ShipmentListRow } from '@/hooks/useShipments'
 import { useStaff } from '@/hooks/useStaff'
 import type { UserProfileRecord } from '@/types/tms'
@@ -68,7 +70,7 @@ function useTmsBadgeCounts(
 }
 
 export function TmsLayout() {
-  const { user, isOwner, isAdmin, hasPageAccess } = useAuth()
+  const { user, isOwner, isAdmin, hasPageAccess, logout } = useAuth()
   const { divisions } = useOwnershipDivisions()
   const { views } = useShipmentViews()
   const { shipments } = useShipments({ kind: 'all' })
@@ -101,7 +103,7 @@ export function TmsLayout() {
   )
 
   const userId = user?.email ?? user?.userId ?? ''
-  const badgeCounts = useTmsBadgeCounts(
+  const teamCounts = useTmsBadgeCounts(
     shipments,
     userId,
     byId,
@@ -109,16 +111,41 @@ export function TmsLayout() {
     me?.teamKeys ?? [],
   )
 
+  // "Tracking" is the loads moving right now, the same definition the dashboard's Tracked
+  // metric uses. The rail lists the six most recently updated ones.
+  const { trackedCount, trackedLoads } = useMemo(() => {
+    const moving = shipments.filter(
+      (row) => row.loadStatus != null && MOVEMENT_STATUSES.includes(row.loadStatus) && !row.voidedAt,
+    )
+    const live: TmsLiveChild[] = [...moving]
+      .sort((a, b) => (b.lastUpdateAt ?? '').localeCompare(a.lastUpdateAt ?? ''))
+      .slice(0, 6)
+      .map((row) => ({ id: row.id, label: row.number, sub: row.customerName ?? null, to: `/tms/shipments/${row.id}` }))
+    return { trackedCount: moving.length, trackedLoads: live }
+  }, [shipments])
+  const badgeCounts = useMemo(() => ({ ...teamCounts, tracking: trackedCount }), [teamCounts, trackedCount])
+
+  // The bell's number is the check-call worklist's due count: one `checkCallState`
+  // function behind the legacy rail, the Check calls page and the notifier.
+  const { dueCount } = useCheckCallWorklist({
+    enabled: isOwner || isAdmin || hasPageAccess('loads') || hasPageAccess(TMS_PAGE_KEY),
+  })
+  const companies = useMemo(() => companyOptions(sections, divisions), [sections, divisions])
+
   const email = user?.email ?? ''
   return (
     <TmsShell
       pinned={pinned}
       sections={sections}
       activePath={location.pathname}
-      pageTitle={tmsPageTitle(location.pathname)}
-      user={{ initial: (email.trim()[0] ?? 'U').toUpperCase(), email }}
+      breadcrumb={tmsBreadcrumb(location.pathname, shipmentViews)}
+      user={{ initial: (email.trim()[0] ?? 'U').toUpperCase(), email, name: me?.name ?? null }}
       shipmentViews={shipmentViews}
       badgeCounts={badgeCounts}
+      companies={companies}
+      notificationCount={dueCount}
+      trackedLoads={trackedLoads}
+      onLogout={() => { void logout() }}
       onSearch={(q) => navigate(`/tms/shipments?q=${encodeURIComponent(q)}`)}
     >
       <Outlet />

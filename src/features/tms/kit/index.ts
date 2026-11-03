@@ -1,7 +1,10 @@
 /**
  * The MVMNT component kit. Every TMS page builds from these; the look lives in
- * `src/features/tms/theme.css`, which `TmsShell` imports once.
+ * `src/features/tms/theme.css` (tokens, base) and `./kit.css` (kit-only rules), which
+ * `TmsShell` and this barrel import.
  */
+import './kit.css'
+
 export { TmsShell, SHIPMENTS_PATH } from '../TmsShell'
 export { isPathActive } from '../navActive'
 export type { TmsShellProps, TmsNavSection, TmsNavItem, TmsNavChild, TmsNavChildGroup } from '../TmsShell'
@@ -35,6 +38,12 @@ export type { TmsSelectProps, TmsSelectOption } from './TmsSelect'
 
 export { TmsField } from './TmsField'
 export type { TmsFieldProps } from './TmsField'
+
+export { TmsKpiCard } from './TmsKpiCard'
+export type { TmsKpiCardProps } from './TmsKpiCard'
+
+export { TmsCountBadge } from './TmsCountBadge'
+export type { TmsCountBadgeProps } from './TmsCountBadge'
 
 export { TmsChartCard } from './TmsChartCard'
 export type { TmsChartCardProps } from './TmsChartCard'

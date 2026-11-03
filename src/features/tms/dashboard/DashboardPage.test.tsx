@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 import { describe, expect, it, beforeEach, vi } from 'vitest'
 import '@testing-library/jest-dom/vitest'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { LaneRateSampleRecord, OrderRecord, ShipmentRecord } from '@/types/tms'
 import { DashboardPage } from './DashboardPage'
+import { useTmsCompany } from '@/features/tms/tmsCompany'
 import { CLASSIC_CHARTS } from './classicCharts'
 import { BROKERAGE_CHARTS } from './brokerageCards'
 import { clearDashboardCache } from './useBrokerageDashboard'
@@ -266,5 +267,34 @@ describe('the company dashboard', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Ivan Cartage' }))
     await waitFor(() => expect(screen.getByText(/Division is All divisions/)).toBeInTheDocument())
+  })
+
+  it('opens filtered to the company the shell switcher chose, and follows it live', async () => {
+    localStorage.setItem('tms-company', 'ASSETS')
+    let setCompany: (code: string | null) => void = () => {}
+    function Probe() {
+      setCompany = useTmsCompany().setCompany
+      return null
+    }
+    render(<><Probe /><DashboardPage /></>)
+    await waitFor(() => expect(screen.getByText(/Division is Ivan Cartage/)).toBeInTheDocument())
+
+    act(() => setCompany(null))
+    await waitFor(() => expect(screen.getByText(/Division is All divisions/)).toBeInTheDocument())
+
+    act(() => setCompany('BROKERAGE'))
+    await waitFor(() => expect(screen.getByText(/Division is BCAT Logistics/)).toBeInTheDocument())
+  })
+
+  it('shows the company-wide totals in the KPI strip', async () => {
+    render(<DashboardPage />)
+    await waitFor(() => expect(document.querySelector('.tms-dash-kpis')).not.toBeNull())
+    const strip = within(document.querySelector('.tms-dash-kpis') as HTMLElement)
+    const revenue = strip.getByText('Revenue').closest('.tms-kpi-card') as HTMLElement
+    expect(within(revenue).getByText('$1,500.00')).toBeInTheDocument()
+    expect(within(revenue).getByText('2 shipments')).toBeInTheDocument()
+    const profit = strip.getByText('Profit').closest('.tms-kpi-card') as HTMLElement
+    expect(within(profit).getByText('20.0% margin')).toBeInTheDocument()
+    expect(within(strip.getByText('Open AR').closest('.tms-kpi-card') as HTMLElement).getByText('—')).toBeInTheDocument()
   })
 })
