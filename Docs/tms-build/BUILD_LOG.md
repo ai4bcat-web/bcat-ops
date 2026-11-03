@@ -1,5 +1,62 @@
 # TMS build log
 
+## 2026-11-03 — Steps S2 + S3 + rate-con changes deployed on dev (Amplify jobs 133 and 134)
+
+**Committed and deployed on dev. Dev only; nothing near main.** Ryne approved S1; the S1 nits (welcome name,
+Owner Operators clipping, empty Company card) shipped in `5c52438`. S4 (six added features) is next.
+
+**S2 — every `/tms/*` page on the S1 kit** (`5c52438`, job 133; plan `S2-plan.md`). New kit pieces: StatRow,
+SegmentedTabs, MetaList, DetailSplit, ProfileHeader, Timeline, ApprovalCard, Alert, SegmentedBar, Drawer, Toaster,
+PublicFrame. theme.css split into `styles/*.css`. Inbox is three-pane (list, chat with header + quick-action bar +
+location card, closable Info panel with driver card and status timeline). Public pages on `TmsPublicFrame`.
+
+**S3 — everything else** (`ccb52ba`, job 134; plan `S3-plan.md`): `--tms-*` tokens promoted to `:root`, ~3,700
+`--ds-*` references codemodded over 183 files, legacy routes render inside the same `TmsShell` (fill mode, phone
+drawer, company switcher, theme toggle, log out), old `components/layout/*` deleted, login, TrackPage, files, PODs,
+disputes, driver portal, hand-built modals on TmsDialog/TmsDrawer, driver PWA on the same tokens (light default,
+dark toggle on Account; manifest theme/background colours updated), hex-literal lint guard over all UI source.
+Plan defaults taken for D-1..D-7 (see `S3-plan.md` top): driver PWA light default; Best Care e-mail NOT recoloured
+(only HTML mail in the repo, different brand); off-canvas phone drawer for both shells; PWA icon artwork stays blue;
+dropped legacy-only chrome (Quick Add, Live ticker, topbar-to-Calendar filter, duplicate Users link); customer PDFs
+untouched; iOS status bar style. **Decision needed (Ryne):** confirm or change any of those.
+
+**Rate-con (4 items, in job 133; plan `RATECON-plan.md`):** (a) PDF header draws the revenue division's logo
+(`Division.logoKey`, PNG/JPEG, 2 MB cap, 5 s timeout) and falls back to the name text; never fails a send;
+(b) `SEND_RATE_CON` adds the caller to cc (deduped, validated); (c) rate-con panel has a recipient picker
+(carrier's emails + typed address, validated); (d) only carriers with a completed MyCarrierPackets packet can be sent
+a rate con, server-side refusal before any side effect plus UI disable with the reason. "Completed" = `mcpStatus` in
+`PENDING_REVIEW | ACCEPTABLE | MODERATE | UNACCEPTABLE | UNACCEPTABLE_REVIEW` (literal reading; **Decision needed:**
+exclude UNACCEPTABLE/UNACCEPTABLE_REVIEW and/or PENDING_REVIEW? one constant in `src/lib/mcpPacket.ts`). **Effect
+on dev data: all 19 dev carriers have a blank `mcpStatus`, so none can be sent a rate con until their packet
+completes.** Demo seed p8.2 marks `carr-demo-vetted` ACCEPTABLE; `carr-demo-lapsed`/`carr-demo-nobuy` stay blank as the
+live refusal examples. Not built, per Ryne: multi-carrier-at-once covering.
+
+**Real bug fixed on the way:** `readBundle` read loads only from `shipment.loadIds` (BatchGet), so a second leg
+missing from `loadIds` was invisible and `REVERT_TO_QUOTE`'s single-load guard / `DUPLICATE_SHIPMENT`'s leg pick
+would act on a multi-leg shipment. It now unions the BatchGet with the shipment index. The two tests that caught it
+had been hidden for days: Vite resolves `.js` before `.ts`, so stale gitignored compiled copies (311 files removed
+this session) were being tested instead of the source. After this, local `npm run test` runs the real sources.
+
+**Gates:** `tsc` (app + root) clean; `eslint` 0 errors (3 pre-existing warnings); `npm run test` 508 files /
+6674 tests pass; `npm run build` OK. `scripts/devVerifyP.mjs` **48/48** against deployed dev after job 133.
+`scripts/devVerifyS2.mjs` (new; every /tms route, tab, drawer, dialog, public page; light + dark; asserts no legacy
+tokens, unstyled classes, console errors, failed requests) after job 134: **206 PASS / 0 FAIL / 17 SKIPPED**; skips
+are states with no data on dev (no invoice, carrier bill, workflow run, integration link, countered quote or active
+customer link yet; the full demo-shipment test after S4 covers invoice/bill) plus four harness triggers/tokens not
+found (02a-filterset, 14a-send, P3 upload token, P4 rate-con token). `scripts/devVerifyS3.mjs` (new; non-/tms routes,
+login, driver PWA with real temp driver identities, phone viewport + shell drawer): **153 PASS / 6 FAIL = 2 real
+defects.** (1) white-on-light-grey avatar initials for unassigned colours (contrast 1.2): fixed in
+`src/lib/driverColors.ts` (committed, ships with the S4 deploy). (2) `/dashboard` at 390px reported horizontal overflow
+(scrollWidth 693): NOT reproducible in a direct re-probe (scrollWidth 390 after 12 s and 35 s); left unchanged,
+re-check on the next devVerifyS3 run. Not covered by S3 verification: driver screens D11/D12/D14 and the overlay-state
+probes. All temp identities (staff and driver pools) deleted; no `zz-*` users remain.
+
+**Process notes:** S2Triage hung (no edits for 30+ min) and was cancelled; its harness fixes (public-audit crash,
+hook-class allow-list) had landed and the harness passed afterwards. Screenshots: curated set in
+`Docs/tms-build/screenshots/review/` (light/dark dashboard, shipments, tracking tab, Inbox, carriers, My Brokerage,
+login, driver login/account at phone size, legacy dashboard/calendar/dispatch, phone drawer); full S2/S3 sets are
+regenerated by the two devVerify scripts and gitignored.
+
 ## 2026-11-02 — Step S1 (UI redesign: tokens + kit + shell + company dashboard) deployed on dev — AWAITING RYNE'S REVIEW
 
 **Committed and deployed on dev. Stopped at the review gate: S2 (TMS pages), S3 (legacy ops) and S4

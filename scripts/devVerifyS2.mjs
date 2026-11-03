@@ -262,7 +262,8 @@ export function auditInPage(opts) {
       else if (kind === 'border' && BANNED_BORDER.has(key)) push(out.legacy, `${describe(el)} ${prop} ${key}`)
     }
     // dark-on-light / light-on-dark surfaces
-    if (bg && bg.a >= 0.9 && rect.width * rect.height >= 1600) {
+    // decorative blurred glows (opacity < 0.5) are not surfaces
+    if (bg && bg.a >= 0.9 && Number(cs.opacity) >= 0.5 && rect.width * rect.height >= 1600) {
       const l = lum(bg)
       if (opts.theme === 'light' && l < 0.12) push(out.surface, `${describe(el)} dark surface ${norm(bg)} in light theme`)
       if (opts.theme === 'dark' && l > 0.85) push(out.surface, `${describe(el)} light surface ${norm(bg)} in dark theme`)
