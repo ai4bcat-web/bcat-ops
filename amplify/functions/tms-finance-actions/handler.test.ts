@@ -8,7 +8,7 @@
  * under it" is. Every concurrency test below works by mutating a row between the read
  * and the write and watching the transaction lose.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb'
 
 type Row = Record<string, unknown>
@@ -619,7 +619,13 @@ function seedSecondOrder(orderId: string, over: Row = {}): void {
   }
 }
 
+/**
+ * The fixture lives in October 2026 (delivered 10-20, POD 10-21, pay period 10-01..10-31),
+ * so the clock is pinned there: a commission's trigger date comes from "now" at invoicing,
+ * and the period that claims it must not depend on the day the suite happens to run.
+ */
 beforeEach(() => {
+  vi.useFakeTimers({ now: new Date('2026-10-22T12:00:00.000Z'), toFake: ['Date'] })
   store.clear()
   send.mockReset()
   s3Send.mockReset()
@@ -631,6 +637,10 @@ beforeEach(() => {
   sesSend.mockResolvedValue({ MessageId: 'msg-1' })
   getSignedUrl.mockResolvedValue('https://signed.example/invoice.pdf')
   seed()
+})
+
+afterEach(() => {
+  vi.useRealTimers()
 })
 
 // ── authorization ───────────────────────────────────────────────────────────
@@ -1300,7 +1310,7 @@ describe('SAVE_AR_SETTINGS', () => {
   it('stores what it accepts and uses it on the next invoice', async () => {
     await call('SAVE_AR_SETTINGS', { invoiceNumberFormat: 'B{yyyy}-{n:4}' })
     const { number } = await generate()
-    expect(number).toBe('B2026-0001'.replace('2026', new Date().toISOString().slice(0, 4)))
+    expect(number).toBe('B2026-0001')
   })
 })
 

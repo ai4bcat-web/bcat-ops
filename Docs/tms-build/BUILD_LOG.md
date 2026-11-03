@@ -1,5 +1,38 @@
 # TMS build log
 
+## 2026-11-02 — Demo page Open buttons fixed on dev
+
+**Committed and deployed on dev.** The "Seeded record not found" rows on My Brokerage → Demo
+were not missing lifecycle states (Steps B–N were already deployed and proved, see the
+2026-10-30 entries): the page matched `record.kind` against the lower-cased `opensOn` prefix
+(`shipment`) while the backend writes `SHIPMENT` / `CUSTOMER` / `QUOTE`, so every Open button
+was disabled. The page test's fixture used lower-cased kinds and masked it.
+
+- Commit `56a1180` (DemoPage matches by `demoKey`; fixture mirrors the backend; new test asserts
+  Open is enabled and navigates to the seeded in-transit shipment's tracking tab). The new test
+  fails on the previous DemoPage and passes on this one.
+- Amplify dev job `127` for `56a1180` **SUCCEEDED** at 2026-11-02 20:46:55 UTC-6.
+- Deployed Demo page checked in a headless browser with a temporary ADMIN identity (removed
+  afterwards): 11 steps, 0 "Seeded record not found" rows, 9 Open buttons enabled (P2–P10) and
+  2 disabled (P1, P11); P8 Open landed on `/tms/shipments/<seeded id>?tab=tracking`.
+  Screenshot: `Docs/tms-build/screenshots/demo-page-open-buttons.png`.
+- `scripts/devVerifyP.mjs` against the deployed dev stack: **48/48 PASS** (P8-UI screenshots refreshed).
+- `npx vitest run` on the working tree: 8,283 pass; the only 4 failures were
+  `tms-finance-actions` commissions tests that depended on the wall clock (see below), fixed in
+  the follow-up commit. `npx eslint` on touched files clean; `npx tsc --noEmit -p tsconfig.app.json` clean.
+
+### Follow-up in the same unit of work
+
+- `amplify/functions/tms-finance-actions/handler.test.ts` now pins `Date` to 2026-10-22 for every
+  test. The fixture lives in October 2026 and the two pay-period tests open the October period,
+  but a commission's `triggerAt` is stamped from "now" at invoicing, so from 1 November the
+  period stopped claiming the row. After the pin: 132/132 in the finance suites.
+- Removed 8 leftover temporary dev identities (`zz-debug-*`, `zz-screenshot-admin`, `zz-test-*`,
+  `zz-p-admin-*`, `zz-r-rep-*` at `@example.invalid`) from the dev user pool and the one orphan
+  `UserProfile` row they left; no `zz-p-walk-*` identity remained. Seeded `demo-*` staff kept.
+- Academy: `Docs/academy/the-demo-flow.md` already describes the intended behaviour (each row
+  opens the exact seeded record); no article change needed.
+
 ## 2026-11-02 — Step DEMO-WALK fixes deployed on dev
 
 **Committed and deployed on dev.** Click-by-click polish on the customer-facing demo flow.
