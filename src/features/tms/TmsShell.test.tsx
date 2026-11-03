@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 /**
  * The TMS shell sidebar is the only place the MVMNT nav renders: pinned pages,
- * business sections, and the Shipments row with its fixed workstation children plus
- * saved board views under a labelled group. These tests guard that shape and the
+ * business sections, and the Shipments row with its Shipments, Intake, Tracking and
+ * Documents children. These tests guard that shape and the
  * collapse / active behaviour.
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
@@ -15,7 +15,12 @@ import type { TmsCompanyOption, TmsNavItem, TmsNavSection, TmsShellProps } from 
 
 const PINNED: TmsNavItem[] = [
   { to: '/tms/dashboard', label: 'Company Dashboard', icon: LayoutDashboard },
-  { to: '/tms/shipments', label: 'Shipments', icon: Package },
+  {
+    to: '/tms/shipments',
+    label: 'Shipments',
+    icon: Package,
+    children: [{ to: '/tms/shipments/intake', label: 'Intake', badgeKey: 'intakeLoads' }],
+  },
 ]
 
 const SECTIONS: TmsNavSection[] = [
@@ -31,11 +36,6 @@ const SECTIONS: TmsNavSection[] = [
     brand: 'Ivan Cartage',
     items: [{ to: '/dispatch', label: 'Fleet dispatch', icon: Truck }],
   },
-]
-
-const VIEWS = [
-  { slug: 'brokerage-board', name: 'Brokerage Board' },
-  { slug: 'pod-collection', name: 'POD collection' },
 ]
 
 const COMPANIES: TmsCompanyOption[] = [
@@ -56,7 +56,6 @@ function renderShell(
         activePath={activePath}
         breadcrumb={[{ label: 'Shipments' }]}
         user={{ initial: 'R', email: 'ryne@bcatcorp.com' }}
-        shipmentViews={VIEWS}
         onSearch={onSearch}
         {...extra}
       >
@@ -90,42 +89,45 @@ describe('TmsShell', () => {
 
   it('marks the item matching activePath active and leaves the others alone', () => {
     renderShell('/tms/shipments')
-    expect(rail().getByRole('link', { name: /^Shipments$/ })).toHaveClass('tms-active')
+    expect(rail().getAllByRole('link', { name: /^Shipments$/ })[0]).toHaveClass('tms-active')
     expect(rail().getByRole('link', { name: /^Company Dashboard$/ })).not.toHaveClass('tms-active')
   })
 
-  it('treats a deeper board view as active on the Shipments parent and on Active Shipments', () => {
-    renderShell('/tms/shipments/view/brokerage-board')
-    expect(rail().getByRole('link', { name: /^Shipments$/ })).toHaveClass('tms-active')
-    expect(rail().getByRole('link', { name: 'Active Shipments' })).toHaveClass('tms-active')
-    expect(rail().getByRole('link', { name: 'Brokerage Board' })).toHaveClass('tms-active')
+  it('lights the Intake child, not the Shipments child, on an intake review page', () => {
+    renderShell('/tms/shipments/intake/abc')
+    expect(rail().getByRole('link', { name: 'Intake' })).toHaveClass('tms-active')
+    const [, boardChild] = rail().getAllByRole('link', { name: /^Shipments$/ })
+    expect(boardChild).not.toHaveClass('tms-active')
   })
 
-  it('renders the four fixed workstation pages before the Views group', () => {
-    renderShell()
-    expect(rail().getByRole('link', { name: 'Active Shipments' })).toHaveAttribute('href', '/tms/shipments')
-    expect(rail().getByRole('link', { name: 'Dispatch' })).toHaveAttribute('href', '/tms/dispatch')
+  it('lights the Shipments child only on the bare board path', () => {
+    renderShell('/tms/shipments')
+    const [, boardChild] = rail().getAllByRole('link', { name: /^Shipments$/ })
+    expect(boardChild).toHaveClass('tms-active')
+    expect(rail().getByRole('link', { name: 'Intake' })).not.toHaveClass('tms-active')
+  })
+
+  it('lists Shipments, Intake (with its count), Tracking and Documents under Shipments — no views, no Dispatch', () => {
+    renderShell('/tms/shipments', undefined, { badgeCounts: { intakeLoads: 3 } })
+    const [, boardChild] = rail().getAllByRole('link', { name: /^Shipments$/ })
+    expect(boardChild).toHaveAttribute('href', '/tms/shipments')
+    expect(rail().getByRole('link', { name: /^Intake/ })).toHaveAttribute('href', '/tms/shipments/intake')
+    expect(rail().getByRole('link', { name: /^Intake/ })).toHaveTextContent('3')
     expect(rail().getByRole('link', { name: 'Tracking' })).toHaveAttribute('href', '/tms/tracking')
-    expect(rail().getByRole('link', { name: 'Documents' })).toHaveAttribute('href', '/tms/documents')
+    expect(rail().getByRole('link', { name: 'Documents' })).toHaveAttribute('href', '/tms/documents/review')
+    expect(rail().queryByRole('link', { name: 'Dispatch' })).not.toBeInTheDocument()
+    expect(screen.queryByText('Views')).not.toBeInTheDocument()
   })
 
-  it('lists the saved views under the Views group', () => {
+  it('has no Help link to the retired Academy', () => {
     renderShell()
-    expect(rail().getByRole('link', { name: 'Brokerage Board' })).toHaveAttribute(
-      'href',
-      '/tms/shipments/view/brokerage-board'
-    )
-    expect(rail().getByRole('link', { name: 'POD collection' })).toHaveAttribute(
-      'href',
-      '/tms/shipments/view/pod-collection'
-    )
-    expect(screen.getByText('Views')).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Help' })).not.toBeInTheDocument()
   })
 
   it('collapses the children when the caret is clicked', () => {
     renderShell()
     fireEvent.click(screen.getByRole('button', { name: 'Collapse Shipments' }))
-    expect(rail().queryByRole('link', { name: 'POD collection' })).not.toBeInTheDocument()
+    expect(rail().queryByRole('link', { name: 'Intake' })).not.toBeInTheDocument()
   })
 
   it('focuses the search on ctrl+k', () => {
@@ -228,13 +230,13 @@ describe('TmsShell', () => {
   })
 
   it('renders the breadcrumb with linked crumbs and the last one current', () => {
-    renderShell('/tms/shipments/view/mine', undefined, {
-      breadcrumb: [{ label: 'Shipments', to: '/tms/shipments' }, { label: 'Mine' }],
+    renderShell('/tms/shipments/intake/abc', undefined, {
+      breadcrumb: [{ label: 'Shipments', to: '/tms/shipments' }, { label: 'Intake', to: '/tms/shipments/intake' }, { label: 'Load' }],
     })
     const trail = within(screen.getByRole('navigation', { name: 'Breadcrumb' }))
     expect(trail.getByRole('link', { name: 'Dashboard home' })).toHaveAttribute('href', '/tms/dashboard')
     expect(trail.getByRole('link', { name: 'Shipments' })).toHaveAttribute('href', '/tms/shipments')
-    expect(trail.getByText('Mine')).toHaveAttribute('aria-current', 'page')
+    expect(trail.getByText('Load')).toHaveAttribute('aria-current', 'page')
   })
 
   it('counts moving shipments on Tracking and lists them when it is expanded', () => {
@@ -258,14 +260,14 @@ describe('TmsShell', () => {
       sections: [{
         key: 'ASSETS', name: 'ASSETS', brand: null,
         items: [
-          { to: '/intake', label: 'Intake', icon: Truck, badgeKey: 'intake' },
+          { to: '/intake', label: 'Intake inbox', icon: Truck, badgeKey: 'intake' },
           { to: '/pods', label: 'PODs', icon: Truck, badgeKey: 'pods' },
           { to: '/fuel', label: 'Fuel', icon: Truck, badgeKey: 'fuel' },
         ],
       }],
       badgeCounts: { intake: 4, pods: 0 },
     })
-    expect(rail().getByRole('link', { name: /^Intake/ })).toHaveTextContent('4')
+    expect(rail().getByRole('link', { name: /^Intake inbox/ })).toHaveTextContent('4')
     expect(rail().getByRole('link', { name: /^PODs/ })).not.toHaveTextContent('0')
     expect(rail().getByRole('link', { name: /^Fuel/ })).toHaveTextContent(/^Fuel$/)
   })

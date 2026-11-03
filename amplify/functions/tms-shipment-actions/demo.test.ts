@@ -49,6 +49,7 @@ const TABLES: Record<string, TableName> = {
   document: 'ShipmentDocument-test',
   checkCall: 'LoadCheckCall-test',
   settings: 'TmsSettings-test',
+  intakeLoad: 'IntakeLoad-test',
 }
 
 const store = new Map<TableName, Map<string, Row>>()
@@ -622,6 +623,17 @@ describe('demo seed', () => {
     expect(standing('carr-demo-nobuy').completed).toBe(false)
   })
 
+  it('alternates the first two staff across the in-transit shipments and leaves the fourth unassigned', async () => {
+    const deps = makeDeps(true)
+    await seedDemoData(deps, { staff: [{ id: 'trk-a', name: 'A' }, { id: 'trk-b', name: 'B' }] }, caller)
+    const transit = (await scanTable(TABLES.shipment)).filter((s) => s.status === 'IN_TRANSIT')
+    const trackers = transit.map((s) => s.trackerId ?? null)
+    expect(transit).toHaveLength(5)
+    expect(trackers.filter((t) => t === 'trk-a')).toHaveLength(3)
+    expect(trackers.filter((t) => t === 'trk-b')).toHaveLength(1)
+    expect(trackers.filter((t) => t === null)).toHaveLength(1)
+  })
+
   it('creates nothing on a second seed', async () => {
     const deps = makeDeps(true)
     const first = await seedDemoData(deps, {}, caller)
@@ -645,6 +657,23 @@ describe('demo seed', () => {
     }
     // Reset re-seeds, so there are also fresh non-voided shipments.
     expect(after.some((s) => !s.voidedAt)).toBe(true)
+  })
+
+  it('seeds one open intake load and replaces it on reset', async () => {
+    const deps = makeDeps(true)
+    await seedDemoData(deps, {}, caller)
+    const seeded = await scanTable(TABLES.intakeLoad)
+    expect(seeded).toHaveLength(1)
+    expect(seeded[0].status).toBe('OPEN')
+    expect(((await getDemoState(deps)) as unknown as { facts: { openIntakeLoads: number } }).facts.openIntakeLoads).toBe(1)
+
+    // A reviewer dismisses it; reset must hand the next demo a fresh open one.
+    table(TABLES.intakeLoad).set(String(seeded[0].id), { ...seeded[0], status: 'DISMISSED' })
+    await resetDemoData(deps, {}, caller)
+
+    const after = await scanTable(TABLES.intakeLoad)
+    expect(after).toHaveLength(1)
+    expect(after[0].status).toBe('OPEN')
   })
 
   it('leaves non-demo records untouched during reset', async () => {

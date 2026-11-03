@@ -330,7 +330,7 @@ export const ALJEX_COLUMN_KEYS = [
 export const BOARD_COLUMN_KEYS = [
   // The original MVMNT and Aljex-board columns, in the catalog's order.
   'number', 'exceptions', 'status', 'proNumber', 'massRelease', 'equip', 'customerReference',
-  'description', 'revenueType', 'salesRep', 'customerName', 'carrier', 'customerTotalRate',
+  'description', 'revenueType', 'salesRep', 'tracker', 'customerName', 'carrier', 'customerTotalRate',
   'carrierTotalRates', 'grossProfit', 'netMargin', 'pickupShip', 'originCity', 'destinationCity',
   'pickupAppt', 'deliveryAppt', 'stops', 'salesRepId', 'division', 'driver', 'truck', 'arStatus',
   'apStatus', 'lastUpdateAt', 'nextCheckCallAt', 'openIncidentCount', 'mode', 'docsMissing',

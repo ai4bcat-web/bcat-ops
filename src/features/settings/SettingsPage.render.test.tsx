@@ -10,6 +10,7 @@ if (!Element.prototype.hasPointerCapture) Element.prototype.hasPointerCapture = 
 if (!Element.prototype.scrollIntoView) Element.prototype.scrollIntoView = () => {}
 
 vi.mock('@/hooks/useAuth', () => ({ useAuth: () => ({ user: { email: 'admin@bcatcorp.com' }, isAdmin: true, isOwner: false }) }))
+vi.mock('@/features/tms/useOwnershipDivisions', () => ({ useOwnershipDivisions: () => ({ divisions: null, loading: false, error: null, refresh: () => {} }) }))
 
 /** Every apiClient function the settings cards import; a missing one throws on render. */
 const api = vi.hoisted(() => ({
@@ -21,6 +22,13 @@ const api = vi.hoisted(() => ({
   saveShipmentSettings: vi.fn(async () => ({ settings: { id: 'default' } as TmsSettings })),
   saveCommissionSettings: vi.fn(async () => ({ settings: { id: 'default' } as TmsSettings })),
   saveTrackingSettings: vi.fn(async (patch: Partial<TmsSettings>) => ({ id: 'default', ...patch } as TmsSettings)),
+  saveTrackingAutomation: vi.fn(async (input: { trackingAutomation?: unknown }) => ({ id: 'default', ...input } as unknown as TmsSettings)),
+  runTrackingAutomation: vi.fn(async () => ({
+    mode: 'AUTO', checked: 3, acted: 2, deferred: 0, escalated: 0, skipped: 1, errors: 0,
+    pod: { checked: 0, requested: 0, skipped: 0, deferred: 0 }, reasons: [],
+  })),
+  listCustomers: vi.fn(async () => []),
+  listLocations: vi.fn(async () => []),
 }))
 vi.mock('@/lib/apiClient', () => api)
 
@@ -30,6 +38,7 @@ import { ChargeCodesCard } from './ChargeCodesCard'
 import { TeamsCard } from './TeamsCard'
 import { CommissionSettingsCard } from './CommissionSettingsCard'
 import { TrackingSettingsCard } from './TrackingSettingsCard'
+import { TrackingAutomationCard } from './TrackingAutomationCard'
 import { PostalCodeAliasesCard } from './PostalCodeAliasesCard'
 
 function settingsAre(settings: Partial<TmsSettings>) {
@@ -226,6 +235,42 @@ describe('TrackingSettingsCard', () => {
 
     await waitFor(() => expect(screen.getByText(/Tracking ping interval must be a whole number between 5 and 240/)).toBeTruthy())
     expect(api.saveTrackingSettings).not.toHaveBeenCalled()
+  })
+})
+
+describe('TrackingAutomationCard', () => {
+  it('saves the global policy and the plan in one call, and blocks save on an unknown placeholder', async () => {
+    settingsAre({ updatedAt: '2026-01-01T00:00:00Z' })
+    render(<MemoryRouter><TrackingAutomationCard /></MemoryRouter>)
+    await waitFor(() => expect(screen.getByText('Save automation')).toBeTruthy())
+
+    fireEvent.click(screen.getByLabelText('Send check calls on the plan\'s schedule without anyone clicking'))
+    const sms = screen.getAllByPlaceholderText('Built-in wording')[0]
+    fireEvent.change(sms, { target: { value: 'Hi {nope}' } })
+    expect(screen.getByText('Save automation').closest('button')?.disabled).toBe(true)
+    fireEvent.change(sms, { target: { value: 'Hi {driverName}' } })
+    expect(screen.getByText('Save automation').closest('button')?.disabled).toBe(false)
+
+    fireEvent.click(screen.getByText('Save automation'))
+    await waitFor(() => expect(api.saveTrackingAutomation).toHaveBeenCalled())
+    const [input] = api.saveTrackingAutomation.mock.calls[0] as unknown as [{
+      expectedUpdatedAt: string
+      trackingAutomation: { global: { checkCallsAuto: boolean; templates: { checkCallSms: string } } }
+      defaultCheckCallPlan: { intervalHours: number }
+    }]
+    expect(input.expectedUpdatedAt).toBe('2026-01-01T00:00:00Z')
+    expect(input.trackingAutomation.global.checkCallsAuto).toBe(true)
+    expect(input.trackingAutomation.global.templates.checkCallSms).toBe('Hi {driverName}')
+    expect(input.defaultCheckCallPlan.intervalHours).toBe(4)
+  })
+
+  it('shows the run counts from Run automation now', async () => {
+    settingsAre({})
+    render(<MemoryRouter><TrackingAutomationCard /></MemoryRouter>)
+    await waitFor(() => expect(screen.getByText('Run automation now')).toBeTruthy())
+    fireEvent.click(screen.getByText('Run automation now'))
+    await waitFor(() => expect(screen.getByTestId('automation-run-result').textContent).toMatch(/acted 2/))
+    expect(api.runTrackingAutomation).toHaveBeenCalledWith({ mode: 'AUTO' })
   })
 })
 

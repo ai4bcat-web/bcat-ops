@@ -13,7 +13,6 @@ import {
   boardStatusOf,
   carrierLabel,
   detailOptions,
-  divisionCodeOfViewSlug,
   divisionLabel,
   massReleaseReady,
   matchesBoardFilters,
@@ -127,12 +126,6 @@ describe('department views', () => {
   it('never lets a voided shipment through a department view', () => {
     const projected = toViewRow(row('1', { revDivision: 'BROKERAGE', voidedAt: '2026-02-01T00:00:00.000Z' }))
     expect(applyViewFilters({ divisions: ['BROKERAGE'] }, [projected])).toHaveLength(0)
-  })
-
-  it('reads the division code out of the sidebar’s synthetic view slug', () => {
-    expect(divisionCodeOfViewSlug('division-ASSETS')).toBe('ASSETS')
-    expect(divisionCodeOfViewSlug('dispatch')).toBeNull()
-    expect(divisionCodeOfViewSlug(null)).toBeNull()
   })
 })
 

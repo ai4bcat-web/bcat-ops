@@ -16,6 +16,7 @@ import type {
   OwnershipRuleRecord,
 } from '@/types/tms'
 import type { OwnershipDivisionInput, OwnershipRuleInput } from '@/lib/apiClient'
+import { normalizeIntakeEmail } from '@/lib/intakeMail'
 
 // ── Labels ───────────────────────────────────────────────────────────────────
 
@@ -188,6 +189,8 @@ export interface DivisionDraft {
   active: boolean
   owners: Record<keyof OwnershipOwners, string>
   flows: Record<keyof OwnershipFlows, boolean | null>
+  /** Where tender e-mails for this division arrive. Required while the division is active. */
+  intakeEmail: string
   /** A new row may still choose its code; an existing one never may. */
   isNew: boolean
 }
@@ -208,6 +211,7 @@ export function blankDivisionDraft(parentId = '', sortOrder = 0): DivisionDraft 
     parentId,
     color: '',
     sortOrder,
+    intakeEmail: '',
     active: true,
     owners: { ...EMPTY_OWNERS },
     flows: { ...EMPTY_FLOWS },
@@ -231,6 +235,7 @@ export function divisionToDraft(division: OwnershipDivisionRecord): DivisionDraf
     color: division.color ?? '',
     sortOrder: division.sortOrder,
     active: division.active,
+    intakeEmail: division.intakeEmail ?? '',
     owners,
     flows,
     isNew: false,
@@ -246,7 +251,7 @@ export function divisionToDraft(division: OwnershipDivisionRecord): DivisionDraf
 export function divisionsWithDraft(
   divisions: OwnershipDivisionRecord[],
   draft: DivisionDraft,
-): Array<Pick<OwnershipDivisionRecord, 'id' | 'code' | 'name' | 'parentId' | 'sortOrder'>> {
+): Array<Pick<OwnershipDivisionRecord, 'id' | 'code' | 'name' | 'parentId' | 'sortOrder' | 'active' | 'intakeEmail'>> {
   const code = draft.code.trim()
   const row = {
     id: code,
@@ -254,10 +259,15 @@ export function divisionsWithDraft(
     name: draft.name.trim(),
     parentId: draft.parentId.trim() || null,
     sortOrder: draft.sortOrder,
+    active: draft.active,
+    intakeEmail: normalizeIntakeEmail(draft.intakeEmail),
   }
   const rest = divisions
     .filter((d) => d.code !== code)
-    .map((d) => ({ id: d.id, code: d.code, name: d.name, parentId: d.parentId, sortOrder: d.sortOrder }))
+    .map((d) => ({
+      id: d.id, code: d.code, name: d.name, parentId: d.parentId, sortOrder: d.sortOrder,
+      active: d.active, intakeEmail: d.intakeEmail ?? null,
+    }))
   return [...rest, row]
 }
 
@@ -282,6 +292,7 @@ export function draftToDivisionInput(draft: DivisionDraft): OwnershipDivisionInp
     color: draft.color.trim() || null,
     sortOrder: draft.sortOrder,
     active: draft.active,
+    intakeEmail: draft.intakeEmail.trim().toLowerCase(),
     owners,
     flows,
   }

@@ -1579,3 +1579,83 @@ describe('SAVE_DOCUMENT_SETTINGS', () => {
     ).rejects.toThrow(/between 1 and 180/)
   })
 })
+
+// ── System callers and tracking automation ───────────────────────────────────
+function callAsSystem(action: string, input: Row, systemCaller: unknown, identity?: unknown): Promise<Row> {
+  return handler({ arguments: { action, input: JSON.stringify(input) }, identity, systemCaller } as never)
+}
+
+describe('systemCaller', () => {
+  it('lets the scheduler run AUTO automation and the intake ingest a reply, with no identity', async () => {
+    const run = await callAsSystem('RUN_TRACKING_AUTOMATION', { mode: 'AUTO', shipmentIds: ['shp-none'] }, 'tracking-automation')
+    expect(run.mode).toBe('AUTO')
+
+    seed({ shipment: { status: 'DELIVERED' }, load: { status: 'DELIVERED' } })
+    const ingest = await callAsSystem('INGEST_SHIPMENT_MESSAGE', {
+      messageId: '<sys-1@example.com>', to: 'ai4bcat+tracking.shp-1@gmail.com', from: 'driver@example.com', subject: 'Re', body: 'ok',
+    }, 'shipment-email-intake')
+    expect(ingest.routed).toBe(true)
+  })
+
+  it('refuses a known system caller on an action outside its list', async () => {
+    await expect(callAsSystem('SAVE_TRACKING_SETTINGS', { id: 'default', trackByDefault: true }, 'tracking-automation')).rejects.toThrow(/missing identity/)
+    await expect(callAsSystem('RUN_TRACKING_AUTOMATION', {}, 'shipment-email-intake')).rejects.toThrow(/missing identity/)
+  })
+
+  it('is never an administrator: MANUAL automation is refused', async () => {
+    await expect(callAsSystem('RUN_TRACKING_AUTOMATION', { mode: 'MANUAL' }, 'tracking-automation')).rejects.toThrow(/MANUAL automation requires/)
+  })
+
+  it('ignores an unknown or inherited systemCaller and falls to the identity gate', async () => {
+    await expect(callAsSystem('RUN_TRACKING_AUTOMATION', {}, 'somebody-else')).rejects.toThrow(/missing identity/)
+    await expect(callAsSystem('RUN_TRACKING_AUTOMATION', {}, 'constructor')).rejects.toThrow(/missing identity/)
+    await expect(callAsSystem('RUN_TRACKING_AUTOMATION', {}, ['tracking-automation'])).rejects.toThrow(/missing identity/)
+  })
+})
+
+describe('SAVE_TRACKING_AUTOMATION', () => {
+  const body = {
+    id: 'default',
+    trackingAutomation: {
+      global: { checkCallsAuto: true, quietHours: { enabled: true, start: '21:00', end: '06:00', timezone: 'America/Chicago', channels: ['SMS'] } },
+      divisions: { WEST: { policy: { podAuto: true }, plan: { intervalHours: 3 } } },
+    },
+    defaultCheckCallPlan: { intervalHours: 6, channels: ['EMAIL'], requestPodOnDelivery: true },
+  }
+
+  it('is owner/ADMIN only', async () => {
+    await expect(call('SAVE_TRACKING_AUTOMATION', body)).rejects.toThrow(/requires owner or ADMIN/)
+    expect(table(TABLES.settings).size).toBe(0)
+  })
+
+  it('writes the policy and the org plan together, normalized', async () => {
+    const saved = await call('SAVE_TRACKING_AUTOMATION', body, ADMIN)
+    const ta = saved.trackingAutomation as { global: Row; divisions: Record<string, Row> }
+    expect(ta.global.checkCallsAuto).toBe(true)
+    expect(ta.divisions.WEST.policy).toEqual({ podAuto: true })
+    const plan = saved.defaultCheckCallPlan as Row
+    expect(plan.intervalHours).toBe(6)
+    expect('requestPodOnDelivery' in plan).toBe(false)
+  })
+
+  it('rejects an unknown placeholder and leaves the row untouched', async () => {
+    await expect(call('SAVE_TRACKING_AUTOMATION', {
+      id: 'default', trackingAutomation: { global: { templates: { podSms: 'hello {nope}' } } },
+    }, ADMIN)).rejects.toThrow(/\{nope\}/)
+    expect(table(TABLES.settings).size).toBe(0)
+  })
+
+  it('refuses a stale expectedUpdatedAt', async () => {
+    await call('SAVE_TRACKING_AUTOMATION', body, ADMIN)
+    await expect(call('SAVE_TRACKING_AUTOMATION', { ...body, expectedUpdatedAt: '2020-01-01T00:00:00.000Z' }, ADMIN))
+      .rejects.toThrow(/changed by someone else/)
+  })
+})
+
+describe('RUN_TRACKING_AUTOMATION authorization', () => {
+  it('refuses MANUAL for a dispatcher but allows scoped AUTO', async () => {
+    await expect(call('RUN_TRACKING_AUTOMATION', { mode: 'MANUAL' })).rejects.toThrow(/MANUAL automation requires/)
+    const result = await call('RUN_TRACKING_AUTOMATION', { mode: 'AUTO', shipmentIds: ['shp-none'] })
+    expect(result.mode).toBe('AUTO')
+  })
+})

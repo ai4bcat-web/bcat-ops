@@ -1,15 +1,10 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, within, fireEvent, waitFor, act } from '@testing-library/react'
+import { render, screen, within, fireEvent, waitFor } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
-import { useState } from 'react'
 import { ShipmentsBoard } from './ShipmentsBoard'
-import * as useBoardFiltersModule from './board/useBoardFilters'
-import type { UseBoardFiltersOptions } from './board/useBoardFilters'
 import type { ShipmentRow } from './shipmentViews'
-import * as useStaffModule from '@/hooks/useStaff'
-import type { ShipmentViewRecord, OrderRecord } from '@/types/tms'
 import type { Load } from '@/types'
 
 // Force the tab strip to show every tab; its ResizeObserver would otherwise collapse
@@ -53,90 +48,7 @@ const customers = [
   { id: 'cust-2', name: 'Globex' },
 ]
 
-const views: ShipmentViewRecord[] = [
-  {
-    id: 'active-shipments',
-    slug: 'active-shipments',
-    name: 'Active Shipments',
-    department: 'Shipments',
-    description: null,
-    filters: {
-      board: {
-        statuses: ['OPEN', 'COVERED', 'DISPATCHED', 'ARRIVED', 'DEPARTED', 'DELIVERED'],
-        details: {},
-        dates: {},
-      },
-    },
-    columns: null,
-    sort: null,
-    isDefault: true,
-    audience: null,
-    sortOrder: 0,
-    active: true,
-    createdBy: 'a@b.c',
-    updatedBy: 'a@b.c',
-    version: 1,
-    createdAt: '2026-01-01T00:00:00.000Z',
-    updatedAt: '2026-01-01T00:00:00.000Z',
-  },
-  {
-    id: 'all-shipments',
-    slug: 'all-shipments',
-    name: 'All Shipments',
-    department: 'Shipments',
-    description: null,
-    filters: {
-      board: {
-        statuses: [],
-        details: {},
-        dates: {},
-      },
-    },
-    columns: null,
-    sort: null,
-    isDefault: false,
-    audience: null,
-    sortOrder: 10,
-    active: true,
-    createdBy: 'a@b.c',
-    updatedBy: 'a@b.c',
-    version: 1,
-    createdAt: '2026-01-01T00:00:00.000Z',
-    updatedAt: '2026-01-01T00:00:00.000Z',
-  },
-]
 
-const statusOnlyView: ShipmentViewRecord = {
-  id: 'status-only',
-  slug: 'status-only',
-  name: 'Status Only',
-  department: 'Shipments',
-  description: null,
-  filters: { board: { statuses: ['OPEN'], details: {}, dates: {} } },
-  columns: ['status'],
-  sort: null,
-  isDefault: false,
-  audience: null,
-  sortOrder: 20,
-  active: true,
-  createdBy: 'a@b.c',
-  updatedBy: 'a@b.c',
-  version: 1,
-  createdAt: '2026-01-01T00:00:00.000Z',
-  updatedAt: '2026-01-01T00:00:00.000Z',
-}
-
-let __views: ShipmentViewRecord[] = views
-let __loading = false
-let __setViews: React.Dispatch<React.SetStateAction<ShipmentViewRecord[]>> | null = null
-let __setLoading: React.Dispatch<React.SetStateAction<boolean>> | null = null
-
-function setMockViews(next: ShipmentViewRecord[], loading = false) {
-  __views = next
-  __loading = loading
-  __setViews?.(next)
-  __setLoading?.(loading)
-}
 
 const { auth } = vi.hoisted(() => ({ auth: { isAdmin: true, isOwner: false } }))
 
@@ -223,14 +135,7 @@ vi.mock('@/hooks/useStaff', () => ({
   }),
 }))
 
-vi.mock('@/features/tms/useShipmentViews', () => ({
-  useShipmentViews: () => {
-    const [v, setV] = useState(__views)
-    const [loading, setLoading] = useState(__loading)
-    __setViews = setV
-    __setLoading = setLoading
-    return { views: v, loading, error: null, refresh: vi.fn() }
-  },
+vi.mock('@/features/tms/useOwnershipDivisions', () => ({
   useOwnershipDivisions: () => ({
     divisions: [
       { code: 'ASSETS', name: 'Ivan Cartage', color: '#1ba774' },
@@ -241,6 +146,8 @@ vi.mock('@/features/tms/useShipmentViews', () => ({
     refresh: vi.fn(),
   }),
 }))
+
+vi.mock('./intake/useIntakeLoads', () => ({ useOpenIntakeCount: () => 0 }))
 
 vi.mock('@/lib/apiClient', () => ({
   listOrders,
@@ -277,7 +184,7 @@ function renderBoard(path = '/tms/shipments', initialShipments: ShipmentRow[] = 
     <MemoryRouter initialEntries={[path]}>
       <Routes>
         <Route path="/tms/shipments" element={<ShipmentsBoard />} />
-        <Route path="/tms/shipments/view/:slug" element={<ShipmentsBoard />} />
+        <Route path="/tms/shipments/intake" element={<div>intake page</div>} />
       </Routes>
     </MemoryRouter>,
   )
@@ -288,26 +195,8 @@ describe('ShipmentsBoard', () => {
     vi.clearAllMocks()
     auth.isAdmin = true
     auth.isOwner = false
-    __views = views
-    __loading = false
   })
 
-  it('lands on the Active Shipments default view', async () => {
-    const shipments = [
-      row('S001', { status: 'OPEN' }),
-      row('S002', { status: 'DELIVERED' }),
-      row('S003', { status: 'ON_HOLD' }),
-      row('S004', { status: 'DELIVERED', voidedAt: '2026-02-01T00:00:00Z' }),
-    ]
-    renderBoard('/tms/shipments', shipments)
-    await waitFor(() => expect(screen.getByRole('combobox', { name: /View/i })).toHaveValue('active-shipments'))
-
-    // Default view excludes VOIDED and HOLD rows.
-    expect(screen.queryByText('S003')).toBeNull()
-    expect(screen.queryByText('S004')).toBeNull()
-    expect(screen.getByText('S001')).toBeTruthy()
-    expect(screen.getByText('S002')).toBeTruthy()
-  })
 
   it('filters rows when a status is checked and keeps counts from the unfiltered set', async () => {
     const shipments = [
@@ -315,25 +204,19 @@ describe('ShipmentsBoard', () => {
       row('S002', { status: 'DELIVERED' }),
       row('S003', { status: 'DELIVERED' }),
     ]
-    renderBoard('/tms/shipments/view/active-shipments', shipments)
+    renderBoard('/tms/shipments', shipments)
     await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
 
-    // The Open checkbox shows the unfiltered count (1).
-    const openCheckbox = screen.getByRole('checkbox', { name: /Open\s+1/i })
-    expect(openCheckbox).toBeChecked()
-
-    // Uncheck Delivered; the count stays visible.
-    const deliveredCheckbox = screen.getByRole('checkbox', { name: /Delivered\s+2/i })
-    expect(deliveredCheckbox).toBeChecked()
-    fireEvent.click(deliveredCheckbox)
+    // Ticking Open narrows to the open row; the counts keep coming from the unfiltered set.
+    expect(screen.getByRole('checkbox', { name: /Open\s+1/i })).not.toBeChecked()
+    fireEvent.click(screen.getByRole('checkbox', { name: /Open\s+1/i }))
 
     await waitFor(() => expect(screen.queryByText('S002')).toBeNull())
     expect(screen.queryByText('S003')).toBeNull()
     expect(screen.getByText('S001')).toBeTruthy()
 
-    // Counts remain the same.
     expect(screen.getByRole('checkbox', { name: /Delivered\s+2/i })).toBeTruthy()
-    expect(screen.getByRole('checkbox', { name: /Open\s+1/i })).toBeTruthy()
+    expect(screen.getByRole('checkbox', { name: /Open\s+1/i })).toBeChecked()
   })
 
   it('Exclude toggle inverts one facet only', async () => {
@@ -342,7 +225,7 @@ describe('ShipmentsBoard', () => {
       row('S002', { status: 'OPEN', customerId: 'cust-2' }),
       row('S003', { status: 'DELIVERED', customerId: 'cust-1' }),
     ]
-    renderBoard('/tms/shipments/view/active-shipments', shipments)
+    renderBoard('/tms/shipments', shipments)
     await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
 
     // Pick Acme Freight in the Customer facet type-ahead.
@@ -369,13 +252,13 @@ describe('ShipmentsBoard', () => {
     expect(screen.getByText('S002')).toBeTruthy()
 
     // Other facets (statuses) stay untouched.
-    expect(screen.getByRole('checkbox', { name: /Open\s+2/i })).toBeChecked()
-    expect(screen.getByRole('checkbox', { name: /Delivered\s+1/i })).toBeChecked()
+    expect(screen.getByRole('checkbox', { name: /Open\s+2/i })).not.toBeChecked()
+    expect(screen.getByRole('checkbox', { name: /Delivered\s+1/i })).not.toBeChecked()
   })
 
   it('gives a row the tone its status implies and voided rows are struck through', async () => {
     const shipments = [deliveredRow('S001'), row('S002', { status: 'OPEN', voidedAt: '2026-02-01T00:00:00Z' })]
-    renderBoard('/tms/shipments/view/active-shipments', shipments)
+    renderBoard('/tms/shipments', shipments)
     await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
 
     const deliveredRowEl = screen.getByText('S001').closest('tr')!
@@ -397,7 +280,7 @@ describe('ShipmentsBoard', () => {
       deliveredRow('S003', { docsMissing: ['POD'], readyToInvoiceAt: null }),
       deliveredRow('S004', { docsMissing: [], readyToInvoiceAt: '2026-02-01T00:00:00Z' }),
     ]
-    renderBoard('/tms/shipments/view/active-shipments', shipments)
+    renderBoard('/tms/shipments?list=all', shipments)
     await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
 
     const row1 = screen.getByText('S001').closest('tr')!
@@ -415,7 +298,7 @@ describe('ShipmentsBoard', () => {
 
   it('Get next 50 shows more rows', async () => {
     const shipments = Array.from({ length: 75 }, (_, i) => row(`S${String(i).padStart(3, '0')}`, { status: 'OPEN' }))
-    renderBoard('/tms/shipments/view/active-shipments', shipments)
+    renderBoard('/tms/shipments', shipments)
     await waitFor(() => expect(screen.getByText('S000')).toBeTruthy())
 
     expect(screen.getByText((_, node) => node?.textContent === 'Records shown 50 of 75')).toBeTruthy()
@@ -426,7 +309,7 @@ describe('ShipmentsBoard', () => {
 
   it('Export to CSV writes the visible columns', async () => {
     const shipments = [deliveredRow('S001', { customerReference: 'PO-123', equipmentType: 'Van', revenueCents: 100_000 })]
-    renderBoard('/tms/shipments/view/active-shipments', shipments)
+    renderBoard('/tms/shipments', shipments)
     await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
 
     fireEvent.click(screen.getByRole('button', { name: /Export to CSV/i }))
@@ -454,7 +337,7 @@ describe('ShipmentsBoard', () => {
       { id: 'ord-2', shipmentId: 'S002', updatedAt: '2026-01-01T00:00:00Z' },
     ] as unknown as OrderRecord[])
 
-    renderBoard('/tms/shipments/view/active-shipments', shipments)
+    renderBoard('/tms/shipments', shipments)
     await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
 
     // Select both rows via the master checkbox.
@@ -490,7 +373,7 @@ describe('ShipmentsBoard', () => {
     ]
     __loads = loads as unknown as Load[]
 
-    renderBoard('/tms/shipments/view/active-shipments')
+    renderBoard('/tms/shipments')
     await waitFor(() => expect(screen.getByRole('button', { name: /Create shipment/i })).toBeTruthy())
 
     fireEvent.click(screen.getByRole('button', { name: /Create shipment/i }))
@@ -507,7 +390,7 @@ describe('ShipmentsBoard', () => {
 
   it('Unvoid requires a reason', async () => {
     const shipments = [row('S001', { status: 'CANCELED', voidedAt: '2026-02-01T00:00:00Z', voidedBy: 'admin', voidReason: 'test' })]
-    renderBoard('/tms/shipments/view/active-shipments', shipments)
+    renderBoard('/tms/shipments', shipments)
 
     // Make voided rows visible by selecting VOIDED.
     const voidedCheckbox = screen.getByRole('checkbox', { name: /Voided/i })
@@ -538,7 +421,7 @@ describe('ShipmentsBoard', () => {
     resolveRevTag.mockResolvedValue({})
 
     const shipments = [row('S001', { status: 'DELIVERED', customerId: 'cust-1' })]
-    renderBoard('/tms/shipments/view/active-shipments', shipments)
+    renderBoard('/tms/shipments', shipments)
     await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
 
     const openRepoint = async () => {
@@ -590,7 +473,7 @@ describe('ShipmentsBoard', () => {
 
   it('Unvoid surfaces a stale-token refusal as a readable message', async () => {
     const shipments = [row('S001', { status: 'CANCELED', voidedAt: '2026-02-01T00:00:00.000Z', voidedBy: 'admin', voidReason: 'test' })]
-    renderBoard('/tms/shipments/view/active-shipments', shipments)
+    renderBoard('/tms/shipments', shipments)
 
     const voidedCheckbox = screen.getByRole('checkbox', { name: /Voided/i })
     fireEvent.click(voidedCheckbox)
@@ -610,7 +493,7 @@ describe('ShipmentsBoard', () => {
 
   it('Re-point customer surfaces a stale-token refusal as a readable message', async () => {
     const shipments = [row('S001', { status: 'DELIVERED', customerId: 'cust-1' })]
-    renderBoard('/tms/shipments/view/active-shipments', shipments)
+    renderBoard('/tms/shipments', shipments)
     await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
 
     fireEvent.pointerDown(screen.getByLabelText('Shipment actions'), { button: 0, pointerType: 'mouse' })
@@ -632,7 +515,7 @@ describe('ShipmentsBoard', () => {
     const overdue = deliveredRow('S001', { nextCheckCallAt: '2026-01-15T11:00:00.000Z', checkCallOpen: 'OPEN' })
     const due = deliveredRow('S002', { nextCheckCallAt: '2026-01-15T12:00:00.000Z', checkCallOpen: 'OPEN' })
     const future = deliveredRow('S003', { nextCheckCallAt: '2026-01-15T13:00:00.000Z', checkCallOpen: 'OPEN' })
-    renderBoard('/tms/shipments/view/active-shipments', [overdue, due, future])
+    renderBoard('/tms/shipments', [overdue, due, future])
     await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
 
     const overdueRow = screen.getByText('S001').closest('tr')!
@@ -654,7 +537,7 @@ describe('ShipmentsBoard', () => {
       deliveredRow('S003', { docsMissing: ['POD', 'Lumper Receipt'] }),
       deliveredRow('S004', { customerId: null, customerName: 'Unknown' }),
     ]
-    renderBoard('/tms/shipments/view/active-shipments', shipments)
+    renderBoard('/tms/shipments', shipments)
     await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
 
     const row1 = screen.getByText('S001').closest('tr')!
@@ -675,7 +558,7 @@ describe('ShipmentsBoard', () => {
       deliveredRow('S001', { docsMissing: ['POD'] }),
       deliveredRow('S002', { docsMissing: [] }),
     ]
-    renderBoard('/tms/shipments/view/active-shipments', shipments)
+    renderBoard('/tms/shipments', shipments)
     await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
 
     fireEvent.click(screen.getByRole('checkbox', { name: /Missing documents/i }))
@@ -688,7 +571,7 @@ describe('ShipmentsBoard', () => {
 
   it('Cancel shipment calls setShipmentStatus with reason', async () => {
     const shipments = [row('S001', { status: 'OPEN' })]
-    renderBoard('/tms/shipments/view/active-shipments', shipments)
+    renderBoard('/tms/shipments', shipments)
     await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
 
     setShipmentStatus.mockResolvedValueOnce({})
@@ -708,7 +591,7 @@ describe('ShipmentsBoard', () => {
 
   it('Un-cancel shipment calls setShipmentStatus', async () => {
     const shipments = [row('S001', { status: 'CANCELED' })]
-    renderBoard('/tms/shipments/view/all-shipments', shipments)
+    renderBoard('/tms/shipments?list=all', shipments)
     await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
 
     setShipmentStatus.mockResolvedValueOnce({})
@@ -723,7 +606,7 @@ describe('ShipmentsBoard', () => {
 
   it('Put on hold and take off hold call setShipmentStatus', async () => {
     const shipments = [row('S001', { status: 'OPEN' })]
-    renderBoard('/tms/shipments/view/active-shipments', shipments)
+    renderBoard('/tms/shipments', shipments)
     await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
 
     setShipmentStatus.mockResolvedValueOnce({})
@@ -743,7 +626,7 @@ describe('ShipmentsBoard', () => {
 
   it('Duplicate shipment calls duplicateShipment with copies', async () => {
     const shipments = [row('S001', { status: 'OPEN', pickupAppt: '2026-01-02T10:00:00.000Z', deliveryAppt: '2026-01-03T10:00:00.000Z' })]
-    renderBoard('/tms/shipments/view/active-shipments', shipments)
+    renderBoard('/tms/shipments', shipments)
     await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
 
     duplicateShipment.mockResolvedValueOnce({})
@@ -762,7 +645,7 @@ describe('ShipmentsBoard', () => {
 
   it('Void shipment triggers refresh after the void dialog succeeds', async () => {
     const shipments = [row('S001', { status: 'OPEN' })]
-    renderBoard('/tms/shipments/view/active-shipments', shipments)
+    renderBoard('/tms/shipments', shipments)
     await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
 
     voidShipment.mockResolvedValueOnce({ id: 'S001', number: 'S001', status: 'VOIDED' })
@@ -778,7 +661,7 @@ describe('ShipmentsBoard', () => {
 
   it('Accept tender calls tenderRespond', async () => {
     const shipments = [row('S001', { status: 'TENDER_PENDING' })]
-    renderBoard('/tms/shipments/view/all-shipments', shipments)
+    renderBoard('/tms/shipments?list=all', shipments)
     await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
 
     tenderRespond.mockResolvedValueOnce({})
@@ -793,7 +676,7 @@ describe('ShipmentsBoard', () => {
 
   it('Reject tender calls tenderRespond with reason', async () => {
     const shipments = [row('S001', { status: 'TENDER_PENDING' })]
-    renderBoard('/tms/shipments/view/all-shipments', shipments)
+    renderBoard('/tms/shipments?list=all', shipments)
     await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
 
     tenderRespond.mockResolvedValueOnce({})
@@ -813,7 +696,7 @@ describe('ShipmentsBoard', () => {
 
   it('Reset tender calls tenderRespond', async () => {
     const shipments = [row('S001', { status: 'TENDER_REJECTED' })]
-    renderBoard('/tms/shipments/view/all-shipments', shipments)
+    renderBoard('/tms/shipments?list=all', shipments)
     await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
 
     tenderRespond.mockResolvedValueOnce({})
@@ -826,152 +709,82 @@ describe('ShipmentsBoard', () => {
     })))
   })
 
-  it('hydrates saved board filters after views arrive asynchronously', async () => {
-    const shipments = [row('S001', { status: 'OPEN' }), deliveredRow('S002')]
-    setMockViews([], true)
-    renderBoard('/tms/shipments/view/active-shipments', shipments)
-
-    act(() => {
-      setMockViews(views, false)
-    })
-
-    await waitFor(() => {
-      expect(screen.getByRole('checkbox', { name: /Open\s+1/i })).toBeChecked()
-      expect(screen.getByRole('checkbox', { name: /Covered/i })).toBeChecked()
-      expect(screen.getByRole('checkbox', { name: /Dispatched/i })).toBeChecked()
-      expect(screen.getByRole('checkbox', { name: /Arrived/i })).toBeChecked()
-      expect(screen.getByRole('checkbox', { name: /Departed/i })).toBeChecked()
-      expect(screen.getByRole('checkbox', { name: /Delivered\s+1/i })).toBeChecked()
-      expect(screen.getByRole('checkbox', { name: /Hold/i })).not.toBeChecked()
-      expect(screen.getByRole('checkbox', { name: /Reserved/i })).not.toBeChecked()
-      expect(screen.getByRole('checkbox', { name: /Voided/i })).not.toBeChecked()
-    })
-
-    expect(screen.queryByText('Unsaved changes')).toBeNull()
+  it('has no View selector, Save as view or queue link anywhere on the board', async () => {
+    renderBoard('/tms/shipments', [row('S001')])
+    await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
+    expect(screen.queryByRole('combobox', { name: /^View$/i })).toBeNull()
+    expect(screen.queryByText(/Save as view/i)).toBeNull()
+    expect(screen.queryByText(/My queue|Team queue/i)).toBeNull()
   })
 
-  it('shows Unsaved changes after a hydrated filter is edited', async () => {
-    const shipments = [row('S001', { status: 'OPEN' })]
-    setMockViews([], true)
-    renderBoard('/tms/shipments/view/active-shipments', shipments)
+  it('starts every list with no status ticked and Reset filters returns there', async () => {
+    renderBoard('/tms/shipments', [row('S001'), deliveredRow('S002')])
+    await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
+    const open = screen.getByRole('checkbox', { name: /Open\s+1/i })
+    expect(open).not.toBeChecked()
+    fireEvent.click(open)
+    await waitFor(() => expect(screen.queryByText('S002')).toBeNull())
+    fireEvent.click(screen.getByRole('button', { name: /Reset filters/i }))
+    await waitFor(() => expect(screen.getByText('S002')).toBeTruthy())
+  })
 
-    act(() => {
-      setMockViews(views, false)
-    })
-
-    await waitFor(() => {
-      expect(screen.getByRole('checkbox', { name: /Open\s+1/i })).toBeChecked()
-    })
-
-    expect(screen.queryByText(/Unsaved changes/)).toBeNull()
-
+  it('drops filters when the list changes', async () => {
+    renderBoard('/tms/shipments', [row('S001'), deliveredRow('S002'), deliveredRow('S003', { arStatus: 'PAID' })])
+    await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
     fireEvent.click(screen.getByRole('checkbox', { name: /Open\s+1/i }))
-
-    await waitFor(() => {
-      expect(screen.getByText(/Unsaved changes · Active Shipments/i)).toBeTruthy()
-    })
+    await waitFor(() => expect(screen.queryByText('S002')).toBeNull())
+    fireEvent.click(screen.getByRole('tab', { name: /^All/ }))
+    await waitFor(() => expect(screen.getByText('S003')).toBeTruthy())
+    expect(screen.getByText('S002')).toBeTruthy()
+    expect(screen.getByRole('checkbox', { name: /Open\s+1/i })).not.toBeChecked()
   })
 
-  it('Revert restores the saved filter set and clears Unsaved changes', async () => {
-    const shipments = [row('S001', { status: 'OPEN' }), deliveredRow('S002')]
-    setMockViews([], true)
-    renderBoard('/tms/shipments/view/active-shipments', shipments)
+  describe('Active and All lists', () => {
+    const released = deliveredRow('S002', { arStatus: 'UNBILLED' })
+    const canceled = row('S003', { status: 'CANCELED' })
+    const unreleased = deliveredRow('S001', { arStatus: 'DOCS_NEEDED' })
 
-    act(() => {
-      setMockViews(views, false)
+    it('defaults to Active: unreleased rows only, Active tab selected', async () => {
+      renderBoard('/tms/shipments', [unreleased, released, canceled])
+      await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
+      expect(screen.queryByText('S002')).toBeNull()
+      expect(screen.queryByText('S003')).toBeNull()
+      expect(screen.getByRole('tab', { name: /^Active/ })).toHaveAttribute('aria-selected', 'true')
     })
 
-    await waitFor(() => {
-      expect(screen.getByRole('checkbox', { name: /Open\s+1/i })).toBeChecked()
-      expect(screen.getByRole('checkbox', { name: /Delivered\s+1/i })).toBeChecked()
+    it('?list=all also shows released rows and selects the All tab', async () => {
+      renderBoard('/tms/shipments?list=all', [unreleased, released])
+      await waitFor(() => expect(screen.getByText('S002')).toBeTruthy())
+      expect(screen.getByText('S001')).toBeTruthy()
+      expect(screen.getByRole('tab', { name: /^All/ })).toHaveAttribute('aria-selected', 'true')
     })
 
-    fireEvent.click(screen.getByRole('checkbox', { name: /Open\s+1/i }))
-    await waitFor(() => {
-      expect(screen.getByRole('checkbox', { name: /Open\s+1/i })).not.toBeChecked()
-      expect(screen.getByText(/Unsaved changes · Active Shipments/i)).toBeTruthy()
+    it('falls back to Active on an unknown ?list=', async () => {
+      renderBoard('/tms/shipments?list=bogus', [unreleased, released])
+      await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
+      expect(screen.queryByText('S002')).toBeNull()
+      expect(screen.getByRole('tab', { name: /^Active/ })).toHaveAttribute('aria-selected', 'true')
     })
 
-    fireEvent.click(screen.getByRole('button', { name: /Revert/i }))
+    it('releasing a row removes it from Active on refresh', async () => {
+      vi.mocked(listOrders).mockResolvedValueOnce([
+        { id: 'ord-1', shipmentId: 'S001', updatedAt: '2026-01-01T00:00:00Z' },
+      ] as unknown as OrderRecord[])
+      vi.mocked(batchShipmentTask).mockResolvedValue({ results: [{ shipmentId: 'S001', number: 'S001', ok: true, message: null }] })
+      renderBoard('/tms/shipments', [unreleased])
+      await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
 
-    await waitFor(() => {
-      expect(screen.getByRole('checkbox', { name: /Open\s+1/i })).toBeChecked()
-      expect(screen.getByRole('checkbox', { name: /Delivered\s+1/i })).toBeChecked()
-      expect(screen.queryByText(/Unsaved changes/)).toBeNull()
+      vi.mocked(listOrders).mockResolvedValue([
+        { id: 'ord-1', shipmentId: 'S001', readyToInvoiceAt: '2026-02-01T00:00:00Z', updatedAt: '2026-02-01T00:00:00Z' },
+      ] as unknown as OrderRecord[])
+      fireEvent.click(screen.getByRole('checkbox', { name: /Release S001/i }))
+      fireEvent.click(screen.getByRole('button', { name: /Batch task/i }))
+      const dialog = screen.getByRole('dialog', { name: /Batch task/i })
+      fireEvent.change(within(dialog).getByRole('combobox'), { target: { value: 'release' } })
+      fireEvent.click(screen.getByRole('button', { name: /^Run$/i }))
+
+      await waitFor(() => expect(batchShipmentTask).toHaveBeenCalledTimes(1))
+      await waitFor(() => expect(document.querySelector('table')?.textContent).not.toContain('S001'))
     })
-  })
-
-  it('re-hydrates filters when switching to another view', async () => {
-    const shipments = [row('S001', { status: 'OPEN' }), deliveredRow('S002')]
-    renderBoard('/tms/shipments/view/active-shipments', shipments)
-
-    const viewSelect = await waitFor(() => screen.getByRole('combobox', { name: /View/i }))
-    await waitFor(() => expect(viewSelect).toHaveValue('active-shipments'))
-
-    expect(screen.getByRole('checkbox', { name: /Open\s+1/i })).toBeChecked()
-    expect(screen.getByRole('checkbox', { name: /Delivered\s+1/i })).toBeChecked()
-
-    fireEvent.change(viewSelect, { target: { value: 'all-shipments' } })
-
-    await waitFor(() => {
-      expect(screen.getByRole('combobox', { name: /View/i })).toHaveValue('all-shipments')
-      expect(screen.getByRole('checkbox', { name: /Open\s+1/i })).not.toBeChecked()
-      expect(screen.getByRole('checkbox', { name: /Delivered\s+1/i })).not.toBeChecked()
-      expect(screen.queryByText(/Unsaved changes/)).toBeNull()
-    })
-
-    fireEvent.change(screen.getByRole('combobox', { name: /View/i }), { target: { value: 'active-shipments' } })
-
-    await waitFor(() => {
-      expect(screen.getByRole('combobox', { name: /View/i })).toHaveValue('active-shipments')
-      expect(screen.getByRole('checkbox', { name: /Open\s+1/i })).toBeChecked()
-      expect(screen.getByRole('checkbox', { name: /Delivered\s+1/i })).toBeChecked()
-      expect(screen.queryByText(/Unsaved changes/)).toBeNull()
-    })
-  })
-
-  it('hydrates the saved column selection after a fresh load', async () => {
-    setMockViews([], true)
-    renderBoard('/tms/shipments/view/status-only', [row('S001')])
-
-    act(() => {
-      setMockViews([...views, statusOnlyView], false)
-    })
-
-    await waitFor(() => {
-      const headers = screen.getAllByRole('columnheader')
-      expect(headers.some((h) => h.textContent?.includes('Status'))).toBe(true)
-      expect(headers.some((h) => h.textContent?.includes('PRO #'))).toBe(false)
-    })
-  })
-
-  it('passes the signed-in viewer to useBoardFilters', async () => {
-    const calls: UseBoardFiltersOptions[] = []
-    const actual = useBoardFiltersModule.useBoardFilters
-    const spy = vi.spyOn(useBoardFiltersModule, 'useBoardFilters').mockImplementation((options: UseBoardFiltersOptions) => {
-      calls.push(options)
-      return actual(options)
-    })
-
-    const me = { id: 'ryne@bcatcorp.com', email: 'ryne@bcatcorp.com', teamKeys: ['dispatchers'] }
-    const team = { key: 'dispatchers', name: 'Dispatch', memberIds: ['ryne@bcatcorp.com', 'dana@bcatcorp.com'] }
-    vi.spyOn(useStaffModule, 'useStaff').mockReturnValue({
-      staff: [me],
-      byId: { 'ryne@bcatcorp.com': me },
-      loading: false,
-      error: null,
-      refresh: vi.fn(),
-      nameOf: (id: string | null) => (id ? String(id).split('@')[0] : '—'),
-      me,
-    })
-    getTmsSettings.mockResolvedValue({ teams: [team] })
-
-    renderBoard('/tms/shipments/view/my-queue', [row('S001', { dispatcherAssignedId: 'ryne@bcatcorp.com' })])
-    await waitFor(() => {
-      expect(calls.at(-1)?.viewer?.userId).toBe('ryne')
-      expect(calls.at(-1)?.viewer?.teamRepIds).toContain('dana@bcatcorp.com')
-    })
-
-    spy.mockRestore()
   })
 })

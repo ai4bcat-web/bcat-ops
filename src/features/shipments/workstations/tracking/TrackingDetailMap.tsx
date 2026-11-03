@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { APIProvider, Map as GoogleMap, AdvancedMarker, useMap } from '@vis.gl/react-google-maps'
+import { Map as GoogleMap, AdvancedMarker, useMap } from '@vis.gl/react-google-maps'
 import { geoAlbersUsa, geoPath, type GeoProjection } from 'd3-geo'
 import { feature } from 'topojson-client'
 import type { Topology } from 'topojson-specification'
@@ -92,11 +92,10 @@ function pointFeature(p: LatLng) {
   return { type: 'Feature' as const, properties: {}, geometry: { type: 'Point' as const, coordinates: [p.lng, p.lat] } }
 }
 
-function StaticRouteMap({ lastKnown, delivery, deliveryName, compact }: {
+function StaticRouteMap({ lastKnown, delivery, deliveryName }: {
   lastKnown: LatLng | null
   delivery: LatLng | null
   deliveryName?: string | null
-  compact?: boolean
 }) {
   const tk = useTmsTokens(['--tms-primary', '--tms-badge-blue', '--tms-badge-blue-tint', '--tms-card', '--tms-muted', '--tms-surface'])
   const [states, setStates] = useState<FeatureCollection | null>(null)
@@ -133,7 +132,7 @@ function StaticRouteMap({ lastKnown, delivery, deliveryName, compact }: {
   const deliveryXY = projection && delivery ? projection([delivery.lng, delivery.lat]) : null
 
   return (
-    <div className={`tms-detail-map${compact ? ' tms-detail-map-compact' : ''}`} data-testid="tracking-detail-map">
+    <div className="tms-detail-map" data-testid="tracking-detail-map">
       <svg
         viewBox={`0 0 ${W} ${H}`}
         width="100%"
@@ -187,8 +186,6 @@ export interface TrackingDetailMapProps {
   lastKnown: LatLng | null
   delivery: LatLng | null
   deliveryName?: string | null
-  /** Short variant for the inbox location card and info panel. */
-  compact?: boolean
 }
 
 /**
@@ -197,10 +194,10 @@ export interface TrackingDetailMapProps {
  * an `APIProvider`); without one it falls back to the static US outline so the
  * route and positions are still visible.
  */
-export function TrackingDetailMap({ apiKey, mapId, lastKnown, delivery, deliveryName, compact }: TrackingDetailMapProps) {
+export function TrackingDetailMap({ apiKey, mapId, lastKnown, delivery, deliveryName }: TrackingDetailMapProps) {
   const tk = useTmsTokens(['--tms-primary', '--tms-badge-blue'])
   if (!apiKey) {
-    return <StaticRouteMap lastKnown={lastKnown} delivery={delivery} deliveryName={deliveryName} compact={compact} />
+    return <StaticRouteMap lastKnown={lastKnown} delivery={delivery} deliveryName={deliveryName} />
   }
 
   const markers: { position: LatLng; title: string; color: string }[] = []
@@ -210,7 +207,7 @@ export function TrackingDetailMap({ apiKey, mapId, lastKnown, delivery, delivery
   const center = lastKnown ?? delivery ?? { lat: 39.8283, lng: -98.5795 }
 
   return (
-    <div className={`tms-detail-map${compact ? ' tms-detail-map-compact' : ''}`} data-testid="tracking-detail-map">
+    <div className="tms-detail-map" data-testid="tracking-detail-map">
       <GoogleMap
         mapId={mapId}
         defaultCenter={center}
@@ -232,10 +229,4 @@ export function TrackingDetailMap({ apiKey, mapId, lastKnown, delivery, delivery
       </GoogleMap>
     </div>
   )
-}
-
-/** The compact map for cards and panels: brings its own Google provider when a key exists. */
-export function TrackingMiniMap(props: TrackingDetailMapProps) {
-  const map = <TrackingDetailMap {...props} compact />
-  return props.apiKey ? <APIProvider apiKey={props.apiKey}>{map}</APIProvider> : map
 }

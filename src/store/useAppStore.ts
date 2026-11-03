@@ -317,6 +317,8 @@ const SEED_EXPENSES: Expense[] = [
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 let _invSeq = 0
+/** The in-flight or settled `loadReferenceData` fetch; reset on failure so it can retry. */
+let referenceLoad: Promise<void> | null = null
 function nowIso(): string { return new Date().toISOString() }
 function initWeekStart(): string {
   return getMondayOf(new Date()).toISOString().slice(0, 10)
@@ -388,6 +390,10 @@ interface AppState {
   // periodic calendar poll so every client converges on the same server state. Does NOT
   // re-run initializeData (which would re-open subscriptions).
   refreshCalendarData: () => Promise<void>
+  // The fleet roster (drivers + equipment) only — no loads, no subscriptions. For /tms pages
+  // and the shell's bell, which run without the legacy runtime's initializeData. Fetches at
+  // most once per session, and not at all when drivers are already loaded.
+  loadReferenceData: () => Promise<void>
 
   // ── Driver actions ─────────────────────────────────────────────────────────
   addDriver: (d: Omit<Driver, 'id' | 'createdAt' | 'updatedAt'>) => Promise<Driver>
@@ -582,6 +588,28 @@ export const useAppStore = create<AppState>()(
         } catch (err) {
           console.warn('[store] refreshCalendarData failed', err)
         }
+      },
+
+      loadReferenceData: () => {
+        if (get().drivers.length > 0) return Promise.resolve()
+        referenceLoad ??= (async () => {
+          try {
+            const drivers = await api.listDrivers()
+            // initializeData may have landed first with the same table; never overwrite it.
+            if (get().drivers.length === 0) set({ drivers })
+          } catch (err) {
+            referenceLoad = null
+            console.warn('[store] loadReferenceData: drivers failed', err)
+            return
+          }
+          try {
+            const equipment = await api.listEquipment()
+            if (equipment.length > 0) set({ equipment })
+          } catch (err) {
+            console.warn('[store] loadReferenceData: equipment unavailable', err)
+          }
+        })()
+        return referenceLoad
       },
 
       // ── Drivers ────────────────────────────────────────────────────────────

@@ -142,6 +142,7 @@ const TMS_PERMISSION_PAGE = { key: 'tms', label: 'TMS (Brokerage section)' }
 const OFF_NAV_PERMISSION_PAGES: { key: string; label: string }[] = [
   { key: 'tasks', label: 'Tasks' },
   { key: 'schedule', label: 'Schedule' },
+  { key: 'intakeReview', label: 'Intake review' },
 ]
 
 /**

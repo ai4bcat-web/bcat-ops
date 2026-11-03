@@ -11,7 +11,6 @@ import { TmsLayout } from '@/features/tms/TmsLayout'
 import { DashboardPage as TmsDashboardPage } from '@/features/tms/dashboard/DashboardPage'
 import { WorkflowsPage } from '@/features/workflows/WorkflowsPage'
 import { RunTracePage } from '@/features/workflows/RunTracePage'
-import { AcademyPage } from '@/features/tms/pages/AcademyPage'
 import { TrucksPage } from '@/features/trucks/TrucksPage'
 import { TruckDocumentsPage } from '@/features/truck-docs/TruckDocumentsPage'
 import { FuelPage } from '@/features/fuel/FuelPage'
@@ -31,9 +30,9 @@ import CustomerTrackPage from '@/features/tracking/CustomerTrackPage'
 import CarrierPingPage from '@/features/tracking/CarrierPingPage'
 import CarrierUploadPage from '@/features/tracking/CarrierUploadPage'
 import { DocumentReviewPage } from '@/features/documents/DocumentReviewPage'
-import { DispatchWorkstation } from '@/features/shipments/workstations/DispatchWorkstation'
 import { TrackingWorkstation } from '@/features/shipments/workstations/TrackingWorkstation'
-import { DocumentsWorkstation } from '@/features/shipments/workstations/DocumentsWorkstation'
+import { IntakeBoard } from '@/features/shipments/intake/IntakeBoard'
+import { IntakeReviewPage } from '@/features/shipments/intake/IntakeReviewPage'
 import CustomerLinksPage from '@/features/shipments/workstations/CustomerLinksPage'
 import { InsurancePage } from '@/features/insurance/InsurancePage'
 import { SchedulePage } from '@/features/schedule/SchedulePage'
@@ -94,6 +93,12 @@ function ParamRedirect({ to }: { to: string }) {
   return <Navigate to={`${path}${search}${hash}`} replace />
 }
 
+/** A retired saved-view URL: the all-shipments slug maps to the All list, the rest to Active. */
+function SavedViewRedirect() {
+  const slug = useParams()['*']
+  return <Navigate to={slug === 'all-shipments' ? '/tms/shipments?list=all' : '/tms/shipments'} replace />
+}
+
 
 export default function App() {
   return (
@@ -138,15 +143,16 @@ export default function App() {
                   <Route index element={<Navigate to="/tms/dashboard" replace />} />
                   <Route path="dashboard" element={<RequirePage page="tms"><TmsDashboardPage /></RequirePage>} />
                   <Route path="shipments" element={<RequirePage page={['loads', 'tms']}><ShipmentsBoard /></RequirePage>} />
-                  {/* A saved department view — the slug is a `ShipmentView` id. */}
-                  <Route path="shipments/view/:slug" element={<RequirePage page={['loads', 'tms']}><ShipmentsBoard /></RequirePage>} />
+                  {/* Saved board views are gone: old bookmarks land on the board. */}
+                  <Route path="shipments/view/*" element={<SavedViewRedirect />} />
+                  <Route path="shipments/intake" element={<RequirePage page={['loads', 'tms', 'intakeReview']}><IntakeBoard /></RequirePage>} />
+                  <Route path="shipments/intake/:intakeId" element={<RequirePage page={['loads', 'tms', 'intakeReview']}><IntakeReviewPage /></RequirePage>} />
                   <Route path="shipments/:id" element={<RequirePage page={['loads', 'tms']}><ShipmentPage /></RequirePage>} />
-                  <Route path="dispatch" element={<RequirePage page={['loads', 'tms']}><DispatchWorkstation /></RequirePage>} />
+                  <Route path="dispatch" element={<Navigate to="/tms/shipments" replace />} />
                   <Route path="tracking" element={<RequirePage page={['loads', 'tms']}><TrackingWorkstation /></RequirePage>} />
                   <Route path="tracking/links" element={<RequirePage page={['loads', 'tms']}><CustomerLinksPage /></RequirePage>} />
                   <Route path="documents/review" element={<RequirePage page={['loads', 'tms']}><DocumentReviewPage /></RequirePage>} />
-                  <Route path="documents/view/:slug" element={<RequirePage page={['loads', 'tms']}><DocumentsWorkstation /></RequirePage>} />
-                  <Route path="documents" element={<RequirePage page={['loads', 'tms']}><DocumentsWorkstation /></RequirePage>} />
+                  <Route path="documents/*" element={<Navigate to="/tms/documents/review" replace />} />
                   <Route path="check-calls" element={<RequirePage page={['loads', 'tms']}><CheckCallsPage /></RequirePage>} />
                   {/* Rates: customer quotes and carrier offers, with the lane history behind them. */}
                   <Route path="rates" element={<RequirePage page={['quotes', 'tms']}><QuotesPage /></RequirePage>} />
@@ -164,10 +170,11 @@ export default function App() {
                   <Route path="customers" element={<RequirePage page={['customers', 'tms']}><CustomersPage /></RequirePage>} />
                   <Route path="locations" element={<RequirePage page={['locations', 'tms']}><LocationsPage /></RequirePage>} />
                   <Route path="vendors" element={<RequirePage page={['vendorAp', 'tms']}><VendorApPage /></RequirePage>} />
+                  {/* Hidden, not removed: no nav item, but four live deep links land here. */}
                   <Route path="workflows" element={<RequirePage page="tms"><WorkflowsPage /></RequirePage>} />
                   <Route path="workflows/runs/:id" element={<RequirePage page="tms"><RunTracePage /></RequirePage>} />
-                  <Route path="academy" element={<RequirePage page="tms"><AcademyPage /></RequirePage>} />
-                  <Route path="academy/:slug" element={<RequirePage page="tms"><AcademyPage /></RequirePage>} />
+                  {/* Academy is hidden: the pages stay in the tree, the routes land on the dashboard. */}
+                  <Route path="academy/*" element={<Navigate to="/tms/dashboard" replace />} />
                   {/* My Brokerage owns its own tab strip and nested routes; each tab
                       keeps the guard its standalone route carried before Step R. */}
                   <Route path="brokerage/*" element={<BrokeragePage />} />
@@ -181,7 +188,7 @@ export default function App() {
               <Route path="/shipments" element={<ParamRedirect to="/tms/shipments" />} />
               <Route path="/shipments/:id" element={<ParamRedirect to="/tms/shipments/:id" />} />
               <Route path="/check-calls" element={<ParamRedirect to="/tms/check-calls" />} />
-              <Route path="/documents" element={<ParamRedirect to="/tms/documents" />} />
+              <Route path="/documents" element={<Navigate to="/tms/documents/review" replace />} />
               {/* Retired: the driver roster and editor now live in the Files hub. */}
               <Route path="/drivers" element={<Navigate to="/files" replace />} />
               <Route path="/fleet-dashboard" element={<RequirePage page="fleetManagerDashboard"><FleetManagerDashboardPage /></RequirePage>} />

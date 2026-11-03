@@ -15,6 +15,17 @@ import {
   type CheckCallTick,
 } from '../../../src/lib/checkCallPlan'
 import { resolveCheckCallPlan } from '../../../src/lib/flowDefaults'
+import {
+  isQuietNow,
+  isRateConSent,
+  renderTemplate,
+  resolveAutomation,
+  type AutomationPolicy,
+  type TemplatePlaceholder,
+} from '../../../src/lib/trackingAutomation'
+import { MAX_SMS_BODY } from '../../../src/lib/dispatch'
+import { TZ } from '../../../src/lib/date'
+import { isVoided } from '../_shared/voided'
 import { assertExpectedUpdatedAt, assertString, optionalString, type Caller } from '../_shared/actionInputs'
 import { type Row, updateItemTx } from '../_shared/shipmentStore'
 import { sendShipmentMessage, type ThreadDeps } from './thread'
@@ -22,6 +33,16 @@ import { sendShipmentMessage, type ThreadDeps } from './thread'
 export interface CheckCallDeps extends ThreadDeps {
   /** Build the publicly reachable URL for a tracking link token. */
   trackingUrl(token: string): string
+  /** UserProfile by id (the shipment's tracker), for template placeholders. Absent = no tracker details. */
+  getUserProfile?(id: string): Promise<Row | null>
+}
+
+export interface RunCheckCallOptions {
+  /**
+   * MANUAL (default) is a person pressing the button: no master switch, no quiet
+   * hours, no rate-con guard. AUTO is the scheduled sweep and honours all three.
+   */
+  mode?: 'AUTO' | 'MANUAL'
 }
 
 interface TickResult {
@@ -29,6 +50,9 @@ interface TickResult {
   tick: CheckCallTick
   plan: CheckCallPlan | null
   carrier: Row | null
+  policy: AutomationPolicy
+  /** AUTO only: why this leg may not be touched at all (no write, nothing sent). */
+  blocked: string | null
 }
 
 const IN_MOTION: Record<string, boolean> = {
@@ -58,7 +82,7 @@ function milestoneSentForLoad(loadId: string, messages: Row[]): Record<string, t
   return sent
 }
 
-function activeLoadCarrier(load: Row, carriers: Row[]): Row | null {
+export function activeLoadCarrier(load: Row, carriers: Row[]): Row | null {
   const activeId = optionalString(load.activeLoadCarrierId, 100)
   if (activeId) {
     const found = carriers.find((c) => c.id === activeId)
@@ -76,7 +100,7 @@ function parseStops(load: Row): Row[] {
   }
 }
 
-async function activePingLink(deps: CheckCallDeps, loadId: string): Promise<Row | null> {
+export async function activePingLink(deps: CheckCallDeps, loadId: string): Promise<Row | null> {
   const links = await deps.queryIndex(
     deps.tables.trackingLink,
     'trackingLinksByLoadId',
@@ -99,28 +123,84 @@ function resolveTick(load: Row, plan: CheckCallPlan, messages: Row[], now: strin
   })
 }
 
-async function resolvePlanForLoad(
-  deps: CheckCallDeps,
-  load: Row,
-  customer: Row | null,
-  settings: Row | null,
-): Promise<CheckCallPlan | null> {
-  const plan = resolveCheckCallPlan(settings, customer, load)
-  const enabled = plan.channels.filter(isChannelEnabled)
-  return enabled.length ? plan : null
+function stopOf(load: Row, type: 'pickup' | 'delivery'): Row | undefined {
+  const stops = parseStops(load)
+  return stops.find((s) => s.type === type) ?? stops[type === 'pickup' ? 0 : stops.length - 1]
 }
 
 function loadCity(load: Row, type: 'pickup' | 'delivery'): string | null {
-  const stops = parseStops(load)
-  const stop = stops.find((s) => s.type === type) ?? stops[type === 'pickup' ? 0 : stops.length - 1]
-  return ((stop?.city ?? '') as string) || null
+  return ((stopOf(load, type)?.city ?? '') as string) || null
+}
+
+function stopPlace(load: Row, type: 'pickup' | 'delivery'): string {
+  const stop = stopOf(load, type)
+  return [stop?.city, stop?.state].filter((v) => typeof v === 'string' && v).join(', ')
+}
+
+function stopDate(load: Row, type: 'pickup' | 'delivery'): string {
+  const appt = stopOf(load, type)?.appt
+  const ms = typeof appt === 'string' ? Date.parse(appt) : NaN
+  return Number.isNaN(ms) ? '' : new Date(ms).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: TZ })
+}
+
+/** Placeholder values for the policy templates; shared with the POD pass. */
+export async function templateVarsFor(
+  deps: CheckCallDeps,
+  ctx: { shipment: Row; load: Row; carrier: Row | null; customer: Row | null; trackingUrl: string | null },
+): Promise<Partial<Record<TemplatePlaceholder, string>>> {
+  const { shipment, load, carrier, customer, trackingUrl } = ctx
+  const trackerId = optionalString(shipment.trackerId, 100)
+  const tracker = trackerId && deps.getUserProfile ? await deps.getUserProfile(trackerId).catch(() => null) : null
+  const lastLocation = [load.lastKnownCity, load.lastKnownState].filter((v) => typeof v === 'string' && v).join(', ')
+  return {
+    proNumber: String(shipment.number ?? shipment.id ?? ''),
+    loadNumber: String(load.loadNumber ?? ''),
+    origin: stopPlace(load, 'pickup'),
+    destination: stopPlace(load, 'delivery'),
+    pickupDate: stopDate(load, 'pickup'),
+    deliveryDate: stopDate(load, 'delivery'),
+    customer: String(customer?.name ?? ''),
+    carrier: String(carrier?.carrierName ?? ''),
+    driverName: String(carrier?.driverName ?? ''),
+    lastLocation,
+    trackerName: String(tracker?.name ?? ''),
+    trackerPhone: String(tracker?.phone ?? ''),
+    trackingUrl: trackingUrl ?? '',
+  }
+}
+
+const HOUR_MS = 60 * 60 * 1000
+
+/**
+ * The cadence slot `now` falls in. Slots are anchored to when the agent took the leg
+ * (`checkCallPlanStartedAt`, else the last check call, else now), so they never drift
+ * with tick jitter: slot n is [anchor + n·interval, anchor + (n+1)·interval).
+ * A channel sends at most once per slot (`auto:cc:<legId>:<slot>:<CHANNEL>` claims);
+ * a NOT_SENT or FAILED attempt is still an attempt and occupies its slot.
+ */
+function cadenceSlot(load: Row, intervalMs: number, nowMs: number): { index: number; startMs: number; anchorIso: string } {
+  const parse = (v: unknown) => (v ? Date.parse(String(v)) : NaN)
+  let anchor = parse(load.checkCallPlanStartedAt)
+  if (!Number.isFinite(anchor)) anchor = parse(load.lastCheckCallAt)
+  if (!Number.isFinite(anchor) || anchor > nowMs) anchor = nowMs
+  const index = Math.floor((nowMs - anchor) / intervalMs)
+  return { index, startMs: anchor + index * intervalMs, anchorIso: new Date(anchor).toISOString() }
 }
 
 /** Perform one check-call tick for every load on the shipment. */
-export async function runCheckCallPlan(deps: CheckCallDeps, input: Row, caller: Caller): Promise<Row> {
+export async function runCheckCallPlan(
+  deps: CheckCallDeps,
+  input: Row,
+  caller: Caller,
+  opts: RunCheckCallOptions = {},
+): Promise<Row> {
+  const auto = opts.mode === 'AUTO'
   const shipmentId = assertString(input.shipmentId, 'shipmentId')
   const shipment = await deps.getById(deps.tables.shipment, shipmentId)
   if (!shipment) throw new Error(`Shipment not found: ${shipmentId}`)
+  if (auto && isVoided(shipment)) {
+    return { checked: 0, acted: 0, escalated: 0, skipped: 0, deferred: 0, reasons: ['Shipment is voided'], processed: [] }
+  }
 
   const [loads, carriers, messages, settings, customer] = await Promise.all([
     deps.queryIndex(deps.tables.load, 'loadsByShipmentId', 'shipmentId', shipmentId),
@@ -130,10 +210,37 @@ export async function runCheckCallPlan(deps: CheckCallDeps, input: Row, caller: 
     shipment.customerId ? deps.getById(deps.tables.customer, String(shipment.customerId)) : Promise.resolve(null),
   ])
 
+  const knownIds = new Set(messages.map((m) => String(m.id ?? '')))
   const results: TickResult[] = []
   for (const load of loads) {
     const carrier = activeLoadCarrier(load, carriers)
-    const plan = await resolvePlanForLoad(deps, load, customer, settings)
+    const resolved = resolveAutomation({
+      settings,
+      customer,
+      load,
+      revDivision: optionalString(shipment.revDivision, 100),
+      revSubdivision: optionalString(shipment.revSubdivision, 100),
+    })
+    const policy = resolved.policy
+    const enabled = resolved.plan.channels.filter(isChannelEnabled)
+    const plan = enabled.length ? resolved.plan : null
+    let blocked: string | null = null
+    if (auto) {
+      if (!policy.checkCallsAuto) blocked = 'Automatic check calls are off'
+      else if (!carrier || carrier.kind !== 'CARRIER' || carrier.status !== 'ACTIVE') blocked = 'Not a brokered carrier leg'
+      else if (!isRateConSent(carrier)) blocked = 'Rate confirmation not sent'
+    }
+    if (blocked) {
+      results.push({
+        load,
+        tick: { kind: 'NONE', milestone: null, channels: [], nextDueAt: null, reason: blocked },
+        plan,
+        carrier,
+        policy,
+        blocked,
+      })
+      continue
+    }
     if (!plan) {
       results.push({
         load,
@@ -146,23 +253,32 @@ export async function runCheckCallPlan(deps: CheckCallDeps, input: Row, caller: 
         },
         plan: null,
         carrier,
+        policy,
+        blocked: null,
       })
       continue
     }
     const tick = resolveTick(load, plan, messages, deps.now())
-    results.push({ load, tick, plan, carrier })
+    results.push({ load, tick, plan, carrier, policy, blocked: null })
   }
 
   let acted = 0
+  let deferred = 0
   let escalated = 0
   let skipped = 0
   const processed: Row[] = []
 
-  for (const { load, tick, plan, carrier } of results) {
+  for (const { load, tick, plan, carrier, policy, blocked } of results) {
     const now = deps.now()
     const loadId = String(load.id)
     const loadStatus = String(load.status ?? '')
     const inMotion = IN_MOTION[loadStatus]
+
+    if (blocked) {
+      skipped += 1
+      processed.push({ loadId, kind: 'NONE', reason: blocked })
+      continue
+    }
 
     if (tick.kind === 'NONE') {
       skipped += 1
@@ -185,11 +301,24 @@ export async function runCheckCallPlan(deps: CheckCallDeps, input: Row, caller: 
       continue
     }
 
+    // AUTO: a quiet channel is held back, not skipped. If every channel is quiet nothing is
+    // written, so the next sweep after the window ends finds the same tick still due.
+    let channels = tick.channels
+    if (auto && tick.kind !== 'ESCALATE_EXCEPTION') {
+      const nowMs = Date.parse(now)
+      channels = tick.channels.filter((c) => c === 'VOICE' || !isQuietNow(policy.quietHours, c, nowMs))
+      if (tick.channels.length > 0 && channels.length === 0) {
+        deferred += 1
+        processed.push({ loadId, kind: 'DEFERRED', reason: 'Quiet hours' })
+        continue
+      }
+    }
+
     const milestone = tick.milestone
     const link = await activePingLink(deps, loadId)
     const trackingUrl = link ? deps.trackingUrl(String(link.id)) : null
     const shipmentNumber = String(shipment.number ?? shipmentId)
-    const body = checkCallSmsBody({
+    let body = checkCallSmsBody({
       shipmentNumber,
       kind: tick.kind,
       milestone,
@@ -198,9 +327,26 @@ export async function runCheckCallPlan(deps: CheckCallDeps, input: Row, caller: 
       destinationCity: loadCity(load, 'delivery'),
     })
 
+    // Policy templates colour CADENCE check calls only (milestone and escalation wording stay built in).
+    let emailSubject = `Load ${shipmentNumber}${milestone ? ` — ${milestone}` : ''}`
+    let emailBody = body
+    if (auto && tick.kind === 'CADENCE') {
+      const t = policy.templates
+      if (t.checkCallSms || t.checkCallEmailSubject || t.checkCallEmailBody) {
+        const vars = await templateVarsFor(deps, { shipment, load, carrier, customer, trackingUrl })
+        if (t.checkCallSms) {
+          const rendered = renderTemplate(t.checkCallSms, vars)
+          const withLink = trackingUrl && !t.checkCallSms.includes('{trackingUrl}') ? `${rendered} ${trackingUrl}` : rendered
+          body = withLink.slice(0, MAX_SMS_BODY)
+        }
+        if (t.checkCallEmailSubject) emailSubject = renderTemplate(t.checkCallEmailSubject, vars)
+        if (t.checkCallEmailBody) emailBody = renderTemplate(t.checkCallEmailBody, vars)
+        else if (t.checkCallSms) emailBody = body
+      }
+    }
+
     const sharedUpdate: Row = {
       nextCheckCallAt: tick.nextDueAt,
-      checkCallAwaitingSince: now,
       checkCallOpen: 'OPEN',
       lastCheckCallAt: now,
       updatedAt: now,
@@ -212,7 +358,7 @@ export async function runCheckCallPlan(deps: CheckCallDeps, input: Row, caller: 
       const reason = tick.reason
       const dispatcherEmail = optionalString(carrier?.dispatcherEmail, 250)
       let sent = false
-      if (dispatcherEmail && tick.channels.includes('EMAIL')) {
+      if (dispatcherEmail && channels.includes('EMAIL')) {
         const text = `Following up on load ${shipmentNumber}: we have not heard from the driver. Please reply with the truck's current location.`
         const outcome = await sendShipmentMessage(
           deps,
@@ -272,28 +418,48 @@ export async function runCheckCallPlan(deps: CheckCallDeps, input: Row, caller: 
       continue
     }
 
-    // MILESTONE or CADENCE
-    const smsId = milestone && tick.kind === 'MILESTONE'
-      ? milestoneMessageId(loadId, milestone)
-      : `msg:${loadId}:${deps.randomId()}`
-    const emailId = milestone && tick.kind === 'MILESTONE'
-      ? `${milestoneMessageId(loadId, milestone)}:email`
-      : `msg:${loadId}:${deps.randomId()}:email`
+    // MILESTONE or CADENCE. Milestones keep their per-load ids; a cadence check call is a
+    // per-slot, per-channel claim, so a repeat run in the same slot (a second "Run now", a
+    // 5-minute tick after a refused send, a quiet-hours retry) can never send a channel twice.
+    const nowMs = Date.parse(now)
+    const intervalMs = Math.max(1, (plan?.intervalHours ?? 1) * HOUR_MS)
+    const slot = tick.kind === 'CADENCE' ? cadenceSlot(load, intervalMs, nowMs) : null
+    const smsId = slot
+      ? `auto:cc:${carrier?.id}:${slot.index}:SMS`
+      : milestoneMessageId(loadId, String(milestone))
+    const emailId = slot
+      ? `auto:cc:${carrier?.id}:${slot.index}:EMAIL`
+      : `${milestoneMessageId(loadId, String(milestone))}:email`
 
     const dispatcherEmail = optionalString(carrier?.dispatcherEmail, 250)
-    const outcomes: Row[] = []
-    if (carrier && carrier.driverPhone && tick.channels.includes('SMS')) {
-      outcomes.push(await sendShipmentMessage(
+    const hasSms = Boolean(carrier && carrier.driverPhone && tick.channels.includes('SMS'))
+    const hasEmail = Boolean(dispatcherEmail && tick.channels.includes('EMAIL'))
+    // A channel held back by quiet hours: nothing is stamped, so the next tick sends it if the slot is still open.
+    const held = (hasSms && !channels.includes('SMS')) || (hasEmail && !channels.includes('EMAIL'))
+
+    let attempted = 0 // new rows this run (SENT, NOT_SENT or FAILED alike)
+    let covered = 0 // channels that already had their row for this slot
+    let anySent = false
+    const track = (outcome: Row | null) => {
+      if (!outcome || outcome.status === 'DUPLICATE') {
+        covered += 1
+        return
+      }
+      attempted += 1
+      if (outcome.status === 'SENT') anySent = true
+    }
+    if (hasSms && channels.includes('SMS')) {
+      track(knownIds.has(smsId) ? null : await sendShipmentMessage(
         deps,
         {
           id: smsId,
           shipmentId,
           loadId,
-          loadCarrierId: carrier.id,
+          loadCarrierId: carrier!.id,
           channel: 'SMS',
           kind: 'CHECK_CALL',
           party: 'DRIVER',
-          to: carrier.driverPhone,
+          to: carrier!.driverPhone,
           body,
           label: carrier,
           authorKind: 'AGENT',
@@ -301,8 +467,8 @@ export async function runCheckCallPlan(deps: CheckCallDeps, input: Row, caller: 
         caller,
       ))
     }
-    if (dispatcherEmail && tick.channels.includes('EMAIL')) {
-      outcomes.push(await sendShipmentMessage(
+    if (hasEmail && channels.includes('EMAIL')) {
+      track(knownIds.has(emailId) ? null : await sendShipmentMessage(
         deps,
         {
           id: emailId,
@@ -313,68 +479,63 @@ export async function runCheckCallPlan(deps: CheckCallDeps, input: Row, caller: 
           kind: 'CHECK_CALL',
           party: 'DISPATCHER',
           to: dispatcherEmail,
-          subject: `Load ${shipmentNumber}${milestone ? ` — ${milestone}` : ''}`,
-          body,
+          subject: emailSubject,
+          body: emailBody,
           authorKind: 'AGENT',
         },
         caller,
       ))
     }
 
-    if (outcomes.some((o) => o.status === 'SENT')) {
-      acted += 1
-      await deps.transact([
-        updateItemTx(deps.tables.load, loadId, sharedUpdate, String(load.updatedAt ?? '')),
-      ])
-      if (milestone === 'DELIVERED' && ((plan as CheckCallPlan).requestPodOnDelivery ?? true)) {
-        await requestPodForLoad(deps, load, carrier, caller)
+    if (attempted + covered === 0 && !held) {
+      skipped += 1
+      processed.push({ loadId, kind: 'NONE', reason: 'No available channel' })
+      continue
+    }
+
+    if (held) {
+      // Partial (or nothing yet) because of quiet hours. Only anchor the leg so the sweep keeps
+      // finding it; lastCheckCallAt stays put, so the held channel still goes out later in the same slot.
+      deferred += 1
+      if (attempted > 0) acted += 1
+      if (!load.checkCallPlanStartedAt || load.checkCallOpen !== 'OPEN' || !load.nextCheckCallAt) {
+        await deps.transact([
+          updateItemTx(deps.tables.load, loadId, {
+            checkCallPlanStartedAt: load.checkCallPlanStartedAt || slot?.anchorIso || now,
+            checkCallOpen: 'OPEN',
+            nextCheckCallAt: load.nextCheckCallAt || now,
+            updatedAt: now,
+            updatedBy: caller.email,
+          }, String(load.updatedAt ?? '')),
+        ])
       }
+      processed.push({ loadId, kind: attempted > 0 ? tick.kind : 'DEFERRED', milestone: milestone ?? undefined, reason: 'Quiet hours' })
+      continue
+    }
+
+    // Every wanted channel has its row for this slot (sent or not): the slot is spent.
+    // A cadence slot stamps its own start so lastCheckCallAt + interval is the next slot
+    // boundary — what the Tracking table shows as the next check call.
+    if (slot) {
+      sharedUpdate.lastCheckCallAt = new Date(slot.startMs).toISOString()
+      sharedUpdate.nextCheckCallAt = new Date(slot.startMs + intervalMs).toISOString()
+      if (!load.checkCallPlanStartedAt) sharedUpdate.checkCallPlanStartedAt = slot.anchorIso
+    }
+    // The reply clock only starts when something actually reached a provider-accepted send.
+    if (anySent) sharedUpdate.checkCallAwaitingSince = now
+    await deps.transact([
+      updateItemTx(deps.tables.load, loadId, sharedUpdate, String(load.updatedAt ?? '')),
+    ])
+    if (attempted > 0) {
+      acted += 1
       processed.push({ loadId, kind: tick.kind, milestone: milestone ?? undefined, reason: tick.reason })
     } else {
       skipped += 1
-      processed.push({ loadId, kind: 'NONE', reason: outcomes.length > 0 ? 'Send refused' : 'No available channel' })
+      processed.push({ loadId, kind: 'NONE', reason: 'Already sent for this slot' })
     }
   }
 
-  return { checked: results.length, acted, escalated, skipped, reasons: results.map((r) => r.tick.reason), processed }
-}
-
-export interface SweepResult {
-  checked: number
-  acted: number
-  escalated: number
-  skipped: number
-  errors: number
-}
-
-/** Walk the open worklist and run every load whose next check call is due. */
-export async function sweepCheckCallPlans(deps: CheckCallDeps, caller: Caller): Promise<Row> {
-  const now = deps.now()
-  const open = await deps.queryIndex(
-    deps.tables.load,
-    'loadsByCheckCallOpenAndNextCheckCallAt',
-    'checkCallOpen',
-    'OPEN',
-  )
-  const due = open.filter((l) => String(l.nextCheckCallAt ?? '') <= now)
-  const shipmentIds = [...new Set(due.map((l) => String(l.shipmentId)))]
-
-  const result: SweepResult & Record<string, unknown> = { checked: 0, acted: 0, escalated: 0, skipped: 0, errors: 0 }
-  for (const shipmentId of shipmentIds) {
-    try {
-      const run = (await runCheckCallPlan(deps, { shipmentId }, caller)) as unknown as SweepResult
-      result.checked += run.checked ?? 0
-      result.acted += run.acted ?? 0
-      result.escalated += run.escalated ?? 0
-      result.skipped += run.skipped ?? 0
-    } catch (err) {
-      result.errors += 1
-      deps.writeAudit('LOAD', shipmentId, 'CHECK_CALL_SWEEEP_ERROR', caller, {
-        error: err instanceof Error ? err.message : String(err),
-      }).catch(() => undefined)
-    }
-  }
-  return result
+  return { checked: results.length, acted, escalated, skipped, deferred, reasons: results.map((r) => r.tick.reason), processed }
 }
 
 export async function saveCheckCallPlan(deps: CheckCallDeps, input: Row, caller: Caller): Promise<Row> {
@@ -400,72 +561,4 @@ export async function saveCheckCallPlan(deps: CheckCallDeps, input: Row, caller:
   ])
 
   return { loadId, plan }
-}
-
-async function requestPodForLoad(
-  deps: CheckCallDeps,
-  load: Row,
-  carrier: Row | null,
-  caller: Caller,
-  reason?: string,
-): Promise<void> {
-  const shipmentId = String(load.shipmentId)
-  const shipment = await deps.getById(deps.tables.shipment, shipmentId)
-  if (!shipment) return
-  const shipmentNumber = String(shipment.number ?? shipmentId)
-  const loadId = String(load.id)
-  const base = `Please upload the signed POD for load ${shipmentNumber}${load.loadNumber ? ` (${load.loadNumber})` : ''}. Reply with photos or use your upload link.`
-  const text = reason ? `Last POD was rejected: ${reason}. ${base}` : base
-
-  if (carrier && carrier.dispatcherEmail) {
-    await sendShipmentMessage(
-      deps,
-      {
-        shipmentId,
-        loadId,
-        loadCarrierId: carrier.id,
-        channel: 'EMAIL',
-        kind: 'POD_REQUEST',
-        party: 'DISPATCHER',
-        to: carrier.dispatcherEmail,
-        subject: `Load ${shipmentNumber} — POD needed`,
-        body: text,
-        authorKind: 'AGENT',
-      },
-      caller,
-    )
-  }
-  if (carrier && carrier.driverPhone) {
-    await sendShipmentMessage(
-      deps,
-      {
-        shipmentId,
-        loadId,
-        loadCarrierId: carrier.id,
-        channel: 'SMS',
-        kind: 'POD_REQUEST',
-        party: 'DRIVER',
-        to: carrier.driverPhone,
-        body: text,
-        label: carrier,
-        authorKind: 'AGENT',
-      },
-      caller,
-    )
-  }
-
-  if (carrier) {
-    await deps.transact([
-      updateItemTx(
-        deps.tables.loadCarrier,
-        String(carrier.id),
-        {
-          podRequestedAt: deps.now(),
-          updatedAt: deps.now(),
-          updatedBy: caller.email,
-        },
-        String(carrier.updatedAt ?? ''),
-      ),
-    ])
-  }
 }

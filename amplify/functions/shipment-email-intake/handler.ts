@@ -232,7 +232,7 @@ export const handler = async (event: LambdaFunctionUrlEvent) => {
     const invoked = await lambda.send(new InvokeCommand({
       FunctionName: trackingActionsFunctionName,
       InvocationType: 'RequestResponse',
-      Payload: Buffer.from(JSON.stringify({ arguments: invokeInput, identity: { sub: 'shipment-email-intake', email: 'system@bcatcorp.com' } })),
+      Payload: Buffer.from(JSON.stringify({ arguments: invokeInput, systemCaller: 'shipment-email-intake' })),
     }))
     const payloadText = invoked.Payload ? Buffer.from(invoked.Payload).toString('utf-8') : '{}'
     const parsed = JSON.parse(payloadText)

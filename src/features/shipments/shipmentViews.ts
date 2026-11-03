@@ -58,6 +58,8 @@ export type ShipmentRow = ShipmentRecord & {
   /** The active assignment's AP rung. */
   apStatus?: ApStatus | null
   assignmentType?: AssignmentType | null
+  /** Step V — display name of `trackerId`, projected by useShipments. */
+  trackerName?: string | null
   loadStatus?: LoadWorkflowStatus | null
   /** Step D — the load's tracking clock, projected onto the shipment. */
   lastUpdateAt?: string | null
@@ -685,6 +687,7 @@ export const BOARD_COLUMNS: BoardColumn[] = [
   { key: 'description', label: 'Description', group: 'Order', value: (r) => r.commodity ?? '', width: 180 },
   { key: 'revenueType', label: 'Revenue Type', group: 'Shipment', value: (r) => divisionLabel(r), width: 160 },
   { key: 'salesRep', label: 'Sales Rep', group: 'Shipment', value: (r) => r.salesRepName ?? r.salesRepId ?? '', width: 140 },
+  { key: 'tracker', label: 'Tracker', group: 'Shipment', value: (r) => r.trackerName ?? '', width: 140 },
   // The typed text when there is one, "Customer not linked" when the row carries nothing:
   // a blank cell would read as "no customer needed" rather than "nobody matched one yet".
   { key: 'customerName', label: 'Customer', group: 'Customer', value: customerDisplayName, sortKey: 'customerName', width: 180 },
@@ -1040,13 +1043,4 @@ export function toViewRow(row: ShipmentRow): ShipmentViewRow {
     customerReference: row.customerReference ?? null,
     commodity: row.commodity ?? null,
   }
-}
-
-/** The sidebar's per-division slice: `/tms/shipments/view/division-ASSETS`. */
-export const DIVISION_VIEW_PREFIX = 'division-'
-
-export function divisionCodeOfViewSlug(slug: string | null | undefined): string | null {
-  if (!slug || !slug.startsWith(DIVISION_VIEW_PREFIX)) return null
-  const code = slug.slice(DIVISION_VIEW_PREFIX.length)
-  return code || null
 }

@@ -56,6 +56,7 @@ import {
   resetModelBudget,
   type ClassifyResult,
   type FileBlock,
+  type TenderEmailFill,
 } from './model'
 import { extractFromInvoice, fileBlocks, type Attachment } from './ap/extract'
 import { mergeExtraction, type Extraction, type ExtractableRow } from './ap/merge'
@@ -81,6 +82,7 @@ import {
   type Row,
   type RunRow,
 } from './store'
+import { cleanToAddresses, stageIntake, customerCandidatesOf, type IntakeSourceMail, type StageInput, type TenderParse } from './intakeStage'
 
 /** A run that has not moved in this long is not coming back. */
 export const STALL_MINUTES = 10
@@ -256,6 +258,8 @@ interface SourceData {
    */
   authResult: string | null
   attachments: Attachment[]
+  /** Every address an INBOX message was delivered to, as the bridge reported them. */
+  toAddresses?: string[]
   /** The VendorPayable row, when that is what we are reading. */
   payable: (ExtractableRow & { id: string }) | null
 }
@@ -324,6 +328,7 @@ async function readSource(run: RunRow): Promise<SourceData> {
       // not the sender's claim, and `matchParty` is the only thing that reads it.
       authResult: str(parsed.authResult),
       attachments: attachmentsOf(parsed.attachments),
+      toAddresses: cleanToAddresses(parsed.toAddresses),
       payable: null,
     }
   }
@@ -549,6 +554,24 @@ async function spendingGate(agent: WorkflowAgentKey, orgSettings: AiAgentsSettin
   return null
 }
 
+function mailOf(source: SourceData): IntakeSourceMail {
+  return {
+    subject: source.subject,
+    fromEmail: source.fromEmail,
+    fromName: source.fromName,
+    receivedAt: source.receivedAt,
+    bodyText: source.bodyText,
+    attachments: source.attachments,
+    toAddresses: source.toAddresses ?? [],
+  }
+}
+
+/** Stages the e-mail for Intake; never throws and never changes the run. Returns a trace line ('' = nothing staged). */
+async function stageForIntake(run: RunRow, mail: IntakeSourceMail | null, input: StageInput): Promise<string> {
+  if (!mail || run.agent !== 'TENDER') return ''
+  return (await stageIntake(run, mail, input)).detail
+}
+
 async function execute(run: RunRow, pinned?: PinnedParty, budgetMs: number | null = null): Promise<RunRow> {
   resetModelBudget()
   startDeadline(budgetMs)
@@ -556,6 +579,7 @@ async function execute(run: RunRow, pinned?: PinnedParty, budgetMs: number | nul
   run.startedAt = run.startedAt ?? startedAt
   run.errorCode = null
   run.error = null
+  let mailForIntake: IntakeSourceMail | null = null
 
   try {
     const isWebhook = run.agent === 'WEBHOOK'
@@ -574,6 +598,7 @@ async function execute(run: RunRow, pinned?: PinnedParty, budgetMs: number | nul
         .map((a) => documentFor(a.key, a.name, a.contentType, a.size))
       return { value: data, detail: `${data.attachments.length} attachment(s)` }
     })
+    mailForIntake = mailOf(source)
 
     const settingsRow = await getSettings()
     const rawAiAgents = settingsRow && typeof settingsRow.aiAgents === 'string'
@@ -585,7 +610,11 @@ async function execute(run: RunRow, pinned?: PinnedParty, budgetMs: number | nul
 
     // Steps 3 and 4 — the daily cap and the enabled switch, before any model call.
     const gate = await spendingGate(run.agent, orgSettings)
-    if (gate) return finishWith(run, 'NO_ACTION', gate)
+    if (gate) {
+      // The e-mail must not be lost to a cap or a switch: a tender is staged bare for a person.
+      await stageForIntake(run, mailForIntake, { kind: 'BARE', parseState: 'NOT_PARSED', parseNote: gate })
+      return finishWith(run, 'NO_ACTION', gate)
+    }
 
     // Step 5 — the blacklist. Still no model call.
     if (!isWebhook) {
@@ -643,7 +672,10 @@ async function execute(run: RunRow, pinned?: PinnedParty, budgetMs: number | nul
     // cap and switch are the ones that decide whether it goes on.
     if (run.agent !== inboxAgent) {
       const reGate = await spendingGate(run.agent, orgSettings)
-      if (reGate) return finishWith(run, 'NO_ACTION', reGate)
+      if (reGate) {
+        await stageForIntake(run, mailForIntake, { kind: 'BARE', parseState: 'NOT_PARSED', parseNote: reGate })
+        return finishWith(run, 'NO_ACTION', reGate)
+      }
     }
 
     const descriptor = AGENTS[run.agent]
@@ -654,6 +686,8 @@ async function execute(run: RunRow, pinned?: PinnedParty, budgetMs: number | nul
 
     // Step 7 — parse.
     const parsed = await parseFor(run, source, files, memoryHint)
+    // A TENDER parse carries its provenance (`TenderParse`); the proposal still uses `tender` alone.
+    const tenderParse = run.agent === 'TENDER' ? (parsed as TenderParse) : null
 
     // Step 8 — record who sent it. Computed above; this step is where the trace a
     // person reads states it, which is where the spec's vocabulary puts it.
@@ -683,12 +717,20 @@ async function execute(run: RunRow, pinned?: PinnedParty, budgetMs: number | nul
     // A name we could not resolve but could guess at is the Errors queue's job,
     // not the model's: a person picks, and SET_RUN_PARTY re-runs from here.
     if (!match.match && match.candidates.length > 0) {
+      if (tenderParse) {
+        await stageForIntake(run, mailForIntake, {
+          kind: 'PARSED', parse: tenderParse, stopFacilityHits: [],
+          party: { kind: null, id: null, name: null, how: null },
+          candidates: customerCandidatesOf(match.candidates),
+        })
+      }
       return finishWith(run, 'UNKNOWN_PARTY')
     }
 
     // Steps 9 and 10 — per agent.
-    if (run.agent === 'TENDER') {
-      const tender = parsed as TenderPrefill
+    if (run.agent === 'TENDER' && tenderParse) {
+      const tender = tenderParse.tender
+      const stopFacilityHits: boolean[] = []
       await runStep(run, 'MATCH_STOP', async () => {
         let hits = 0
         for (const stop of tender.stops) {
@@ -696,6 +738,7 @@ async function execute(run: RunRow, pinned?: PinnedParty, budgetMs: number | nul
             String(row.city ?? '').toUpperCase().startsWith(String(stop.city ?? '').toUpperCase()) &&
             !!stop.city &&
             String(row.state ?? '').toUpperCase() === String(stop.state ?? '').toUpperCase())
+          stopFacilityHits.push(!!facility)
           if (!facility) continue
           hits += 1
           if (!stop.name) stop.name = String(facility.name ?? '')
@@ -705,7 +748,12 @@ async function execute(run: RunRow, pinned?: PinnedParty, budgetMs: number | nul
       await runStep(run, 'PROPOSE_TENDER', async () => {
         run.proposalKind = 'TENDER'
         run.proposal = { kind: 'TENDER', tender, customerId: run.partyKind === 'CUSTOMER' ? run.partyId : null, customerName: run.partyName ?? tender.customer ?? null }
-        return { value: null, detail: `${tender.stops.length} stop(s), reference ${tender.reference ?? 'none'}` }
+        const staged = await stageForIntake(run, mailForIntake, {
+          kind: 'PARSED', parse: tenderParse, stopFacilityHits,
+          party: { kind: run.partyKind ?? null, id: run.partyId ?? null, name: run.partyName ?? null, how: run.partyMatchHow ?? null },
+          candidates: [],
+        })
+        return { value: null, detail: `${tender.stops.length} stop(s), reference ${tender.reference ?? 'none'}${staged ? ` — ${staged}` : ''}` }
       })
       return finishWith(run, 'PROPOSED')
     }
@@ -796,6 +844,7 @@ async function execute(run: RunRow, pinned?: PinnedParty, budgetMs: number | nul
   } catch (err) {
     const code = errorCodeOf(err)
     console.error('[workflow-agent] run failed', run.id, code, messageOf(err))
+    await stageForIntake(run, mailForIntake, { kind: 'BARE', parseState: 'FAILED', parseNote: code })
     Object.assign(run, failRun(run, code, redactError(messageOf(err)), nowIso()))
     stampModel(run)
     await persist(run)
@@ -821,6 +870,8 @@ async function parseFor(run: RunRow, source: SourceData, files: FileBlock[], mem
       // tenders, and the model only ever fills what it left blank.
       const prefill = parseTender(source.subject, source.bodyText)
       let fill: TenderModelFill | null
+      let fillKind: TenderParse['fillKind']
+      let lowConfidence: string[] = []
       if (files.length > 0) {
         // One pass over the document with the SAME schema the rate-con dialog
         // uses, so the agent and the client can never disagree about one page.
@@ -829,8 +880,9 @@ async function parseFor(run: RunRow, source: SourceData, files: FileBlock[], mem
           memoryHint,
         ].filter(Boolean).join('\n\n'), 2000)
         fill = fillFromRatecon(blanksToNull(answer.value))
+        fillKind = 'RATECON'
       } else {
-        const answer = await callModel<TenderModelFill>(
+        const answer = await callModel<TenderEmailFill>(
           TENDER_FILL_SCHEMA,
           [],
           emailPrompt(
@@ -840,9 +892,14 @@ async function parseFor(run: RunRow, source: SourceData, files: FileBlock[], mem
           1200,
         )
         fill = answer.value
+        fillKind = 'EMAIL'
+        lowConfidence = (answer.value.lowConfidence ?? []).filter((k): k is string => typeof k === 'string')
       }
       const tender = tenderFromParse(prefill, fill)
-      return { value: tender, detail: `${tender.stops.length} stop(s) from ${prefill.format ?? 'model'}` }
+      // Cloned: MATCH_STOP names facilities on `tender`, which IS `prefill` when the model added nothing.
+      const parserTender: TenderPrefill = { ...prefill, stops: prefill.stops.map((stop) => ({ ...stop })) }
+      const parse: TenderParse = { tender, parserTender, fillKind, lowConfidence }
+      return { value: parse, detail: `${tender.stops.length} stop(s) from ${prefill.format ?? 'model'}` }
     })
   }
 

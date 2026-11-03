@@ -33,6 +33,102 @@ function parseStops(load: Row | null): Row[] {
   }
 }
 
+export interface RequestPodForLegInput {
+  shipment: Row
+  load: Row
+  carrier: Row
+  /** Why a previous POD was rejected; prefixes the default body. */
+  reason?: string | null
+  /** With a prefix every message gets the deterministic id `<prefix>:<loadCarrierId>:<CHANNEL>`, so asking twice is a no-op. */
+  idPrefix?: string
+  /** Default: every channel the leg has a recipient for. */
+  channels?: readonly ('SMS' | 'EMAIL')[]
+  /** Already-rendered replacements for the built-in text. */
+  templates?: { sms?: string | null; emailSubject?: string | null; emailBody?: string | null }
+  authorKind?: 'AGENT' | 'PERSON'
+  caller: Caller
+}
+
+/**
+ * Ask one carrier leg for the signed POD in the shipment thread: the dispatcher by
+ * e-mail, the driver by SMS. Shared by the manual REQUEST_POD and the automation sweep.
+ */
+export async function requestPodForLeg(
+  deps: ThreadDeps,
+  input: RequestPodForLegInput,
+): Promise<{ messages: Row[]; requested: number; duplicates: number }> {
+  const { shipment, load, carrier, caller } = input
+  const shipmentId = String(shipment.id)
+  const shipmentNumber = String(shipment.number ?? shipmentId)
+  const loadNumber = String(load.loadNumber ?? load.id)
+  const bodyBase = `Please upload the signed POD for load ${shipmentNumber}${loadNumber ? ` (${loadNumber})` : ''}. Reply with photos or use your upload link.`
+  const defaultBody = input.reason ? `Last POD was rejected: ${input.reason}. ${bodyBase}` : bodyBase
+  const wants = (channel: 'SMS' | 'EMAIL') => !input.channels || input.channels.includes(channel)
+  const idFor = (channel: 'SMS' | 'EMAIL') =>
+    input.idPrefix ? { id: `${input.idPrefix}:${carrier.id}:${channel}` } : {}
+  const author = input.authorKind ? { authorKind: input.authorKind } : {}
+
+  const messages: Row[] = []
+  if (carrier.dispatcherEmail && wants('EMAIL')) {
+    messages.push(
+      await sendShipmentMessage(
+        deps,
+        {
+          ...idFor('EMAIL'),
+          shipmentId,
+          loadId: load.id,
+          loadCarrierId: carrier.id,
+          channel: 'EMAIL',
+          kind: 'POD_REQUEST',
+          party: 'DISPATCHER',
+          to: carrier.dispatcherEmail,
+          subject: input.templates?.emailSubject || `Load ${shipmentNumber} — POD needed`,
+          body: input.templates?.emailBody || defaultBody,
+          ...author,
+        },
+        caller,
+      ),
+    )
+  }
+  if (carrier.driverPhone && wants('SMS')) {
+    messages.push(
+      await sendShipmentMessage(
+        deps,
+        {
+          ...idFor('SMS'),
+          shipmentId,
+          loadId: load.id,
+          loadCarrierId: carrier.id,
+          channel: 'SMS',
+          kind: 'POD_REQUEST',
+          party: 'DRIVER',
+          to: carrier.driverPhone,
+          body: input.templates?.sms || defaultBody,
+          label: carrier,
+          ...author,
+        },
+        caller,
+      ),
+    )
+  }
+
+  const duplicates = messages.filter((m) => m.duplicate === true).length
+  const requested = messages.length - duplicates
+  // A manual ask always starts the reply clock; an automatic one only when it actually sent.
+  if (requested > 0 || (messages.length === 0 && !input.idPrefix)) {
+    const now = deps.now()
+    await deps.transact([
+      updateItemTx(
+        deps.tables.loadCarrier,
+        String(carrier.id),
+        { podRequestedAt: now, updatedAt: now, updatedBy: caller.email },
+        String(carrier.updatedAt ?? ''),
+      ),
+    ])
+  }
+  return { messages, requested, duplicates }
+}
+
 export async function requestPod(deps: PodReviewDeps, input: Row, caller: Caller): Promise<Row> {
   const shipmentId = assertString(input.shipmentId, 'shipmentId')
   const shipment = await deps.getById(deps.tables.shipment, shipmentId)
@@ -51,68 +147,13 @@ export async function requestPod(deps: PodReviewDeps, input: Row, caller: Caller
   )
 
   const messages: Row[] = []
-  const shipmentNumber = String(shipment.number ?? shipmentId)
   const now = deps.now()
 
   for (const load of loads) {
     const carrier = loadCarrierForLoadSync(load, carriers)
     if (!carrier || carrier.kind !== 'CARRIER' || carrier.status !== 'ACTIVE') continue
-
-    const loadNumber = String(load.loadNumber ?? load.id)
-    const bodyBase = `Please upload the signed POD for load ${shipmentNumber}${loadNumber ? ` (${loadNumber})` : ''}. Reply with photos or use your upload link.`
-    const body = reason ? `Last POD was rejected: ${reason}. ${bodyBase}` : bodyBase
-
-    if (carrier.dispatcherEmail) {
-      messages.push(
-        await sendShipmentMessage(
-          deps,
-          {
-            shipmentId,
-            loadId: load.id,
-            loadCarrierId: carrier.id,
-            channel: 'EMAIL',
-            kind: 'POD_REQUEST',
-            party: 'DISPATCHER',
-            to: carrier.dispatcherEmail,
-            subject: `Load ${shipmentNumber} — POD needed`,
-            body,
-          },
-          caller,
-        ),
-      )
-    }
-    if (carrier.driverPhone) {
-      messages.push(
-        await sendShipmentMessage(
-          deps,
-          {
-            shipmentId,
-            loadId: load.id,
-            loadCarrierId: carrier.id,
-            channel: 'SMS',
-            kind: 'POD_REQUEST',
-            party: 'DRIVER',
-            to: carrier.driverPhone,
-            body,
-            label: carrier,
-          },
-          caller,
-        ),
-      )
-    }
-
-    await deps.transact([
-      updateItemTx(
-        deps.tables.loadCarrier,
-        String(carrier.id),
-        {
-          podRequestedAt: now,
-          updatedAt: now,
-          updatedBy: caller.email,
-        },
-        String(carrier.updatedAt ?? ''),
-      ),
-    ])
+    const result = await requestPodForLeg(deps, { shipment, load, carrier, reason, caller })
+    messages.push(...result.messages)
   }
 
   return { shipmentId, requestedAt: now, messages }

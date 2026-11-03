@@ -67,6 +67,7 @@ import { tmsAljexImport } from './functions/tms-aljex-import/resource'
 import { loadTrackingProjector } from './functions/load-tracking-projector/resource'
 import { shipmentNotifier } from './functions/shipment-notifier/resource'
 import { checkCallNotifier } from './functions/check-call-notifier/resource'
+import { trackingAutomation } from './functions/tracking-automation/resource'
 import { rateConSignApi } from './functions/rate-con-sign-api/resource'
 import { tmsGeocode } from './functions/tms-geocode/resource'
 import { podActions } from './functions/pod-actions/resource'
@@ -159,6 +160,7 @@ const backend = defineBackend({
   tmsAljexImport,
   loadTrackingProjector,
   checkCallNotifier,
+  trackingAutomation,
   shipmentNotifier,
   rateConSignApi,
   tmsGeocode,
@@ -1674,6 +1676,13 @@ const workflowSubmissionTable  = backend.data.resources.tables['DriverSubmission
 const workflowProClaimTable    = backend.data.resources.tables['ProClaim']
 const workflowIntegrationTable = backend.data.resources.tables['Integration']
 const workflowAuditLogTable    = backend.data.resources.tables['AuditLog']
+// Step U: the tender e-mails a division's intake address received are staged as IntakeLoad
+// rows (conditional put, so a re-run never overwrites a row a reviewer started editing),
+// and the e-mail bridge asks which addresses to watch, so the division table is read-only
+// here. Put + Get only on IntakeLoad: staging can add a row and see one, never change or
+// remove one — editing and promoting are tmsShipmentActions'.
+const workflowIntakeLoadTable  = backend.data.resources.tables['IntakeLoad']
+const workflowDivisionTable    = backend.data.resources.tables['OwnershipDivision']
 
 // TABLE_NAME is VendorPayable: the moved AP extractor reads it under that name and
 // changing it would be a rename for no gain.
@@ -1696,6 +1705,8 @@ workflowAgentFn.addEnvironment('DRIVER_SUBMISSION_TABLE_NAME',  workflowSubmissi
 workflowAgentFn.addEnvironment('PRO_CLAIM_TABLE_NAME',          workflowProClaimTable.tableName)
 workflowAgentFn.addEnvironment('INTEGRATION_TABLE_NAME',        workflowIntegrationTable.tableName)
 workflowAgentFn.addEnvironment('AUDIT_LOG_TABLE_NAME',          workflowAuditLogTable.tableName)
+workflowAgentFn.addEnvironment('INTAKE_LOAD_TABLE_NAME',        workflowIntakeLoadTable.tableName)
+workflowAgentFn.addEnvironment('OWNERSHIP_DIVISION_TABLE_NAME', workflowDivisionTable.tableName)
 // Access tokens carry no e-mail; the action router resolves the caller through
 // AdminGetUser for the owner/ADMIN checks, the vendorApActions pattern above.
 workflowAgentFn.addEnvironment('USER_POOL_ID',                  backend.auth.resources.userPool.userPoolId)
@@ -1706,6 +1717,14 @@ workflowAgentFn.addEnvironment('USER_POOL_ID',                  backend.auth.res
 workflowAgentFn.addToRolePolicy(new PolicyStatement({
   actions:   ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem', 'dynamodb:Query'],
   resources: [workflowRunTable.tableArn, `${workflowRunTable.tableArn}/index/*`],
+}))
+workflowAgentFn.addToRolePolicy(new PolicyStatement({
+  actions:   ['dynamodb:GetItem', 'dynamodb:PutItem'],
+  resources: [workflowIntakeLoadTable.tableArn],
+}))
+workflowAgentFn.addToRolePolicy(new PolicyStatement({
+  actions:   ['dynamodb:GetItem', 'dynamodb:Query', 'dynamodb:Scan'],
+  resources: [workflowDivisionTable.tableArn],
 }))
 
 // Everything the agent needs to recognise a sender, a shipment or a document — read
@@ -2328,6 +2347,14 @@ shipmentActionsFn.addEnvironment('OWNERSHIP_RULE_TABLE_NAME',     shipmentOwners
 shipmentActionsFn.addEnvironment('PRO_CLAIM_TABLE_NAME',       shipmentProClaimTable.tableName)
 shipmentActionsFn.addEnvironment('USER_PROFILE_TABLE_NAME',    shipmentUserProfileTable.tableName)
 shipmentActionsFn.addEnvironment('USER_POOL_ID',               backend.auth.resources.userPool.userPoolId)
+// Step U: the intake review queue. Edit, promote and dismiss are this function's; staging
+// (the Put) belongs to workflow-agent.
+const shipmentIntakeLoadTable = backend.data.resources.tables['IntakeLoad']
+shipmentActionsFn.addEnvironment('INTAKE_LOAD_TABLE_NAME', shipmentIntakeLoadTable.tableName)
+shipmentActionsFn.addToRolePolicy(new PolicyStatement({
+  actions:   ['dynamodb:GetItem', 'dynamodb:Query', 'dynamodb:UpdateItem', 'dynamodb:PutItem'],
+  resources: [shipmentIntakeLoadTable.tableArn, `${shipmentIntakeLoadTable.tableArn}/index/*`],
+}))
 shipmentActionsFn.addToRolePolicy(
   new PolicyStatement({
     actions: ['cognito-idp:AdminGetUser'],
@@ -2592,6 +2619,23 @@ trackingActionsFn.addToRolePolicy(
 trackingActionsFn.addToRolePolicy(
   new PolicyStatement({ actions: ['ses:SendEmail', 'ses:SendRawEmail'], resources: ['*'] })
 )
+// Step V. The automation engine (a) reads the shipment's tracker (UserProfile) for the
+// {trackerName}/{trackerPhone} template placeholders and (b) queries the Shipment
+// status+pickupAppt index for the POD pass (DELIVERED, last 21 days).
+const trackingUserProfileTbl = backend.data.resources.tables['UserProfile']
+trackingActionsFn.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['dynamodb:GetItem'],
+    resources: [trackingUserProfileTbl.tableArn],
+  })
+)
+trackingActionsFn.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['dynamodb:Query'],
+    resources: [`${trackingShipmentTbl.tableArn}/index/*`],
+  })
+)
+trackingActionsFn.addEnvironment('USER_PROFILE_TABLE_NAME', trackingUserProfileTbl.tableName)
 // ── Step E: the notice log, the document index and the files they carry ─────
 // tmsTrackingActions owns ShipmentNotice because it owns everything that leaves
 // the building. It only reads ShipmentDocument — document rows belong to
@@ -3105,6 +3149,24 @@ new EventSourceMapping(Stack.of(brokerAlertFn), 'BrokerLoadStreamMapping', {
     actions:   ['cognito-idp:AdminGetUser'],
     resources: [backend.auth.resources.userPool.userPoolArn],
   }))
+}
+
+// ── trackingAutomation Lambda (Step V; every 5m) ────────────────────────────
+// Owns no logic: it invokes tmsTrackingActions as the `tracking-automation` system caller
+// (SYSTEM_CALLERS in the router) to run one AUTO sweep. Same group ('data') and grant
+// pattern as shipmentEmailIntake above, so no new stack edge. The EventBridge rule
+// defineFunction({schedule}) creates lives in the data stack, so the dev guard
+// (every CfnRule DISABLED) disables it and the BCAT_ISOLATED_PREVIEW guard zeroes the
+// Lambda: no guard edit needed. Every master switch defaults OFF, so a production deploy
+// sends nothing until Settings turns it on.
+{
+  const automationFn = backend.trackingAutomation.resources.lambda as LambdaFunction
+  automationFn.addEnvironment('TMS_TRACKING_ACTIONS_FUNCTION_NAME', backend.tmsTrackingActions.resources.lambda.functionName)
+  backend.tmsTrackingActions.resources.lambda.addPermission('TrackingAutomationInvoke', {
+    principal: automationFn.grantPrincipal,
+    action: 'lambda:InvokeFunction',
+    sourceArn: automationFn.functionArn,
+  })
 }
 
 // ── podActions Lambda (JobsDone PODs) ──────────────────────────────────────

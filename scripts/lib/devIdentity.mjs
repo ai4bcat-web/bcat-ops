@@ -9,6 +9,7 @@ import {
   AdminCreateUserCommand,
   AdminSetUserPasswordCommand,
   AdminAddUserToGroupCommand,
+  CreateGroupCommand,
   AdminDeleteUserCommand,
   AdminGetUserCommand,
 } from '@aws-sdk/client-cognito-identity-provider'
@@ -62,17 +63,23 @@ export async function mintIdentity(email, groups) {
   }))
   await cognito.send(new AdminSetUserPasswordCommand({ UserPoolId: DEV_POOL, Username: email, Password: password, Permanent: true }))
   for (const group of groups) {
+    // The userManagement Lambda mints `page-*` groups lazily on first grant, so a pool only
+    // holds the ones somebody has granted. Mirror that: create the group if it is missing.
+    try { await cognito.send(new CreateGroupCommand({ UserPoolId: DEV_POOL, GroupName: group })) } catch (e) { if (e?.name !== 'GroupExistsException') throw e }
     await cognito.send(new AdminAddUserToGroupCommand({ UserPoolId: DEV_POOL, Username: email, GroupName: group }))
   }
   const { Amplify } = await import('aws-amplify')
-  const { signIn, signOut, fetchAuthSession } = await import('aws-amplify/auth')
+  const { signIn, fetchAuthSession } = await import('aws-amplify/auth')
+  const { defaultStorage } = await import('aws-amplify/utils')
   Amplify.configure(outputs)
-  await signOut().catch(() => {})
+  // NOT signOut(): it revokes the previous identity's refresh token server-side, which kills the
+  // tokens a caller already holds for an identity minted earlier in the same run. Drop the local
+  // session only.
+  await defaultStorage.clear()
   await signIn({ username: email, password })
   const session = await fetchAuthSession({ forceRefresh: true })
   const username = session.tokens.idToken.payload['cognito:username']
   const prefix = `CognitoIdentityServiceProvider.${DEV_CLIENT}`
-  const { defaultStorage } = await import('aws-amplify/utils')
   const refreshToken = await defaultStorage.getItem(`${prefix}.${username}.refreshToken`)
   if (!refreshToken) throw new Error('Temporary dev login did not yield a refresh token')
   const storage = {

@@ -12,7 +12,9 @@ import { pause } from './cdpBrowser.mjs'
 export function extraAuditInPage(opts) {
   const TEXT_BANNED = new Set(opts.extraBanned)
   const SURFACE = new Set(opts.extraBannedSurface)
-  const EXCLUDE = '.gm-style, iframe, [data-tms-paper], [data-user-color], [data-camera], .tms-chart-tip, #recharts_measurement_span, .tms-count-badge'
+  // [class*="uNGBb"]: Google Maps' own error dialog (dev Maps key is neutered); Google-owned DOM
+  // .tms-segbar-seg: TmsSegmentedBar data-series fills (a dark green segment is data colour, not chrome)
+  const EXCLUDE = '.gm-style, [class*="uNGBb"], .tms-segbar-seg, iframe, [data-tms-paper], [data-user-color], [data-camera], .tms-chart-tip, #recharts_measurement_span, .tms-count-badge'
   const parse = (s) => {
     const m = /rgba?\(([^)]+)\)/.exec(s || '')
     if (!m) return null
@@ -100,7 +102,7 @@ export const sameRect = (a, b) => a && b && a.every((v, i) => Math.abs(v - b[i])
  * facts of the same theme (rect parity is skipped while it is empty). `legacyHost: false` for pages that
  * live under /tms and therefore have no `.tms-legacy-host` wrapper.
  */
-export function shellFailures(f, t, ref = {}, { legacyHost = true } = {}) {
+export function shellFailures(f, t, ref = {}, { legacyHost = true, scrollOk = false } = {}) {
   const failures = []
   if (legacyHost && !f.host) failures.push('.tms-legacy-host missing')
   if (f.asides !== 1) failures.push(`aside.tms-sidebar count ${f.asides}`)
@@ -109,7 +111,8 @@ export function shellFailures(f, t, ref = {}, { legacyHost = true } = {}) {
   if (!f.logout) failures.push('Log out button missing')
   if (ref.sidebar && !sameRect(f.sidebar, ref.sidebar)) failures.push(`.tms-sidebar rect ${JSON.stringify(f.sidebar)} != /tms/dashboard ${JSON.stringify(ref.sidebar)}`)
   if (ref.topbar && !sameRect(f.topbar, ref.topbar)) failures.push(`.tms-topbar rect ${JSON.stringify(f.topbar)} != /tms/dashboard ${JSON.stringify(ref.topbar)}`)
-  if (f.docH > f.winH + 2) failures.push(`page scrolls vertically (${f.docH} > ${f.winH})`)
+  // /tms pages live in the document flow (the shell has min-height, not a fixed height), so they scroll the document.
+  if (!scrollOk && f.docH > f.winH + 2) failures.push(`page scrolls vertically (${f.docH} > ${f.winH})`)
   if (f.docW > f.winW + 2) failures.push(`page overflows horizontally (${f.docW} > ${f.winW})`)
   if (!t.tmsBg) failures.push('--tms-bg empty on :root')
   if (t.dsT1 || t.dsBg || t.shSm) failures.push(`unmigrated tokens resolve on :root: ${['--ds-t1', '--ds-bg', '--sh-sm'].filter((k, i) => [t.dsT1, t.dsBg, t.shSm][i]).join(', ')}`)

@@ -60,6 +60,7 @@ const TABLES = {
   demo: 'DemoRecord-test',
   posting: 'ShipmentPosting-test',
   message: 'ShipmentMessage-test',
+  intakeLoad: 'IntakeLoad-test',
 }
 
 const store = vi.hoisted(() => {
@@ -89,6 +90,7 @@ const store = vi.hoisted(() => {
   process.env.BUCKET_NAME = 'bcat-test-bucket'
   process.env.DEMO_RECORD_TABLE_NAME = 'DemoRecord-test'
   process.env.SHIPMENT_MESSAGE_TABLE_NAME = 'ShipmentMessage-test'
+  process.env.INTAKE_LOAD_TABLE_NAME = 'IntakeLoad-test'
   process.env.SHIPMENT_POSTING_TABLE_NAME = 'ShipmentPosting-test'
   process.env.BCAT_DEV_STACK = 'true'
   process.env.USER_PROFILE_TABLE_NAME = 'UserProfile-test'
@@ -666,6 +668,34 @@ describe('authorization', () => {
 
   it('refuses a request with no identity at all', async () => {
     await expect(call('CREATE_SHIPMENT', { customerId: 'cus-1' }, null)).rejects.toThrow(/Unauthorized/)
+  })
+})
+
+describe('intake authorization', () => {
+  const REVIEWER = {
+    sub: 'sub-rev',
+    username: 'rev',
+    claims: { email: 'reviewer@bcatcorp.com', 'cognito:groups': ['page-intakeReview'] },
+  }
+  const actions = ['INTAKE_SAVE_DRAFT', 'INTAKE_MOVE_TO_ACTIVE', 'INTAKE_DISMISS']
+
+  it.each(actions)('lets the owner, an ADMIN and the intake reviewer reach %s', async (action) => {
+    for (const who of [OWNER, ADMIN, REVIEWER]) {
+      // Past authorization the row does not exist: that is the proof the call got in.
+      await expect(call(action, { intakeId: 'il:none', expectedVersion: 1, reason: 'x' }, who)).rejects.toThrow(
+        /Intake load not found/,
+      )
+    }
+  })
+
+  it.each(actions)('refuses page-tms, page-loads, page-quotes and no grant for %s', async (action) => {
+    const loads = { sub: 's', username: 'l', claims: { email: 'l@bcatcorp.com', 'cognito:groups': ['page-loads'] } }
+    const none = { sub: 's2', username: 'n', claims: { email: 'n@bcatcorp.com', 'cognito:groups': [] } }
+    for (const who of [TMS_USER, loads, QUOTER, DISPATCHER, none]) {
+      await expect(call(action, { intakeId: 'il:none', expectedVersion: 1, reason: 'x' }, who)).rejects.toThrow(
+        `Forbidden: ${action} requires owner, ADMIN, or page-intakeReview`,
+      )
+    }
   })
 })
 
@@ -1965,6 +1995,104 @@ describe('ownership tagging', () => {
     expect(table(TABLES.shipment).get(ids.shipmentId)!.salesRepId).toBe('amanda')
     expect(table(TABLES.order).get(ids.orderId)!.customerRepId).toBe('amanda')
     expect(table(TABLES.load).get(ids.loadId)!.salesRepId).toBe('amanda')
+  })
+})
+
+// ── Step V: the tracker ─────────────────────────────────────────────────────
+
+describe('tracker assignee', () => {
+  const profiles = () => table('UserProfile-test')
+  beforeEach(() => {
+    profiles().set('tess', { id: 'tess', role: 'CUSTOMER_REP', status: 'ACTIVE' })
+    profiles().set('gone', { id: 'gone', role: 'CUSTOMER_REP', status: 'INACTIVE' })
+  })
+
+  it('copies the customer default tracker on create, and yields null for an inactive, missing or absent one without failing', async () => {
+    seedCustomer({ defaultTrackerId: 'tess' })
+    const a = await createDraft()
+    expect(table(TABLES.shipment).get(a.shipmentId)!.trackerId).toBe('tess')
+
+    seedCustomer({ defaultTrackerId: 'gone' })
+    const b = await createDraft()
+    expect(table(TABLES.shipment).get(b.shipmentId)!.trackerId).toBeNull()
+
+    seedCustomer({ defaultTrackerId: 'never-existed' })
+    const c = await createDraft()
+    expect(table(TABLES.shipment).get(c.shipmentId)!.trackerId).toBeNull()
+
+    seedCustomer({})
+    const d = await createDraft()
+    expect(table(TABLES.shipment).get(d.shipmentId)!.trackerId).toBeNull()
+  })
+
+  it('assigns, clears and audits one row per shipment; bulk skips voided and missing ids with a reason', async () => {
+    const a = await createDraft()
+    const b = await createDraft()
+    const v = await createDraft()
+    Object.assign(table(TABLES.shipment).get(v.shipmentId)!, { voidedAt: '2026-10-29T00:00:00Z' })
+
+    const result = (await call('ASSIGN_TRACKER', {
+      shipmentIds: [a.shipmentId, b.shipmentId, v.shipmentId, 'shp-missing'],
+      trackerId: 'tess',
+    }, TMS_USER)) as { updated: string[]; skipped: { shipmentId: string; reason: string }[] }
+    expect(result.updated).toEqual([a.shipmentId, b.shipmentId])
+    expect(result.skipped).toEqual([
+      { shipmentId: v.shipmentId, reason: 'Shipment is voided' },
+      { shipmentId: 'shp-missing', reason: 'Shipment not found' },
+    ])
+    expect(table(TABLES.shipment).get(a.shipmentId)!.trackerId).toBe('tess')
+    expect(table(TABLES.shipment).get(v.shipmentId)!.trackerId ?? null).toBeNull()
+    const audits = [...table(TABLES.audit).values()].filter((row) => row.action === 'ASSIGN_TRACKER')
+    expect(audits.map((row) => row.entityId).sort()).toEqual([a.shipmentId, b.shipmentId].sort())
+    expect(JSON.parse(String(audits.find((row) => row.entityId === a.shipmentId)!.changes))).toEqual({ from: null, to: 'tess', batch: true })
+
+    await call('ASSIGN_TRACKER', { shipmentIds: [a.shipmentId], trackerId: null }, TMS_USER)
+    expect(table(TABLES.shipment).get(a.shipmentId)!.trackerId).toBeNull()
+  })
+
+  it('refuses an inactive or unknown tracker per shipment and a caller without TMS access', async () => {
+    const a = await createDraft()
+    for (const trackerId of ['gone', 'never-existed']) {
+      const r = (await call('ASSIGN_TRACKER', { shipmentIds: [a.shipmentId], trackerId }, TMS_USER)) as {
+        updated: string[]
+        skipped: { reason: string }[]
+      }
+      expect(r.updated).toEqual([])
+      expect(r.skipped[0].reason).toBe('Tracker is not an active user profile')
+    }
+    expect(table(TABLES.shipment).get(a.shipmentId)!.trackerId ?? null).toBeNull()
+    await expect(call('ASSIGN_TRACKER', { shipmentIds: [a.shipmentId], trackerId: 'tess' }, OUTSIDER)).rejects.toThrow(/page-loads/)
+  })
+
+  it('fills an empty tracker when a customer is linked but never overwrites one', async () => {
+    seedCustomer({ defaultTrackerId: 'tess' })
+    const bundle = (await call('CREATE_SHIPMENT', { customerName: 'BATORY' })) as { shipment: Row }
+    const id = String(bundle.shipment.id)
+    await call('SET_SHIPMENT_CUSTOMER', { shipmentId: id, customerId: 'cus-1' })
+    expect(table(TABLES.shipment).get(id)!.trackerId).toBe('tess')
+
+    profiles().set('other', { id: 'other', role: 'CUSTOMER_REP', status: 'ACTIVE' })
+    const kept = (await call('CREATE_SHIPMENT', { customerName: 'BATORY' })) as { shipment: Row }
+    const keptId = String(kept.shipment.id)
+    await call('ASSIGN_TRACKER', { shipmentIds: [keptId], trackerId: 'other' }, TMS_USER)
+    await call('SET_SHIPMENT_CUSTOMER', { shipmentId: keptId, customerId: 'cus-1' })
+    expect(table(TABLES.shipment).get(keptId)!.trackerId).toBe('other')
+  })
+
+  it('duplicates the source tracker, falling back to the customer default', async () => {
+    seedCustomer({ defaultTrackerId: 'tess' })
+    profiles().set('other', { id: 'other', role: 'CUSTOMER_REP', status: 'ACTIVE' })
+    const withTracker = await createDraft()
+    await saveForm(withTracker.shipmentId)
+    await call('ASSIGN_TRACKER', { shipmentIds: [withTracker.shipmentId], trackerId: 'other' }, TMS_USER)
+    const first = (await call('DUPLICATE_SHIPMENT', { shipmentId: withTracker.shipmentId, copies: [{}] })) as { created: string[] }
+    expect(table(TABLES.shipment).get(first.created[0])!.trackerId).toBe('other')
+
+    const bare = await createDraft()
+    await saveForm(bare.shipmentId)
+    await call('ASSIGN_TRACKER', { shipmentIds: [bare.shipmentId], trackerId: null }, TMS_USER)
+    const second = (await call('DUPLICATE_SHIPMENT', { shipmentId: bare.shipmentId, copies: [{}] })) as { created: string[] }
+    expect(table(TABLES.shipment).get(second.created[0])!.trackerId).toBe('tess')
   })
 })
 
@@ -6377,7 +6505,7 @@ describe('Step P demo actions', () => {
     table('UserProfile-test').set('sub-owner', { id: 'sub-owner', role: 'CARRIER_REP' })
     const result = await call('SEED_DEMO_DATA', {}, OWNER)
 
-    expect(result.seedVersion).toBe('p8.2')
+    expect(result.seedVersion).toBe('p8.3')
     expect(result.created).toBeGreaterThan(0)
     expect(table(TABLES.demo).size).toBeGreaterThan(0)
     expect(table(TABLES.customer).size).toBeGreaterThan(0)
@@ -6392,7 +6520,7 @@ describe('Step P demo actions', () => {
 
     const result = await call('RESET_DEMO_DATA', {}, OWNER)
 
-    expect(result.seedVersion).toBe('p8.2')
+    expect(result.seedVersion).toBe('p8.3')
     expect(table(TABLES.shipment).size).toBeGreaterThanOrEqual(shipmentCount)
     expect(table(TABLES.shipment).size).toBeGreaterThan(0)
   })

@@ -33,6 +33,7 @@ import {
 } from '@/lib/apiClient'
 import type { OwnershipRuleTest, RetagReport } from '@/lib/apiClient'
 import { OWN_FLEET_CARRIER_CODE, validateDivisions, validateRules } from '@/lib/ownership'
+import { checkIntakeEmail, intakeEmailOwner, suggestIntakeMailboxes } from '@/lib/intakeMail'
 import type {
   CarrierRecord,
   CustomerRecord,
@@ -67,6 +68,17 @@ import {
 } from './taxonomyDrafts'
 import type { DivisionDraft, RuleDraft } from './taxonomyDrafts'
 
+/** What stops a draft from being saved before the server is even asked (the server says the same). */
+function intakeProblems(draft: DivisionDraft): string[] {
+  if (draft.intakeEmail.trim() === '') {
+    return draft.active
+      ? [`A division needs an intake e-mail address — choose the address tender e-mails for ${draft.name.trim() || draft.code.trim() || 'it'} arrive at`]
+      : []
+  }
+  const check = checkIntakeEmail(draft.intakeEmail)
+  return check.message ? [check.message] : []
+}
+
 const messageOf = (err: unknown): string => (err instanceof Error ? err.message : String(err))
 
 // ── Division editor ──────────────────────────────────────────────────────────
@@ -95,6 +107,16 @@ function DivisionDialog({
     [divisions, draft.isNew, draft.code],
   )
   const suggestions = useMemo(() => partySuggestions(divisions), [divisions])
+  const mailboxes = useMemo(
+    () => suggestIntakeMailboxes({ divisionCode: draft.code, divisions }),
+    [divisions, draft.code],
+  )
+  const intakeCheck = checkIntakeEmail(draft.intakeEmail)
+  const intakeOwner = intakeEmailOwner(divisions, draft.intakeEmail, draft.code)
+  const intakeProblem =
+    draft.intakeEmail.trim() === ''
+      ? null
+      : intakeCheck.message ?? (intakeOwner ? `That address already receives tenders for ${intakeOwner.name}` : null)
   const parentId = draft.parentId.trim() || null
 
   return (
@@ -170,6 +192,48 @@ function DivisionDialog({
             Shipments may be tagged with it
           </label>
         </TmsField>
+      </div>
+
+      <div style={{ marginTop: 12 }}>
+        <datalist id="tms-intake-mailboxes">
+          {mailboxes.map((s) => (
+            <option key={s.email} value={s.email} disabled={Boolean(s.disabledReason)}>
+              {s.disabledReason ? `${s.label} — ${s.disabledReason}` : `${s.label} — ${s.note}`}
+            </option>
+          ))}
+        </datalist>
+        <TmsField
+          label="Intake e-mail"
+          hint={
+            draft.active
+              ? 'Required. Tender e-mails sent to this address are staged under Shipments › Intake for this division.'
+              : 'Not needed while the division is archived.'
+          }
+          error={intakeProblem ?? undefined}
+        >
+          <TmsInput
+            type="email"
+            list="tms-intake-mailboxes"
+            value={draft.intakeEmail}
+            placeholder="tenders@bcatcorp.com"
+            onChange={(e) => onChange({ ...draft, intakeEmail: e.target.value })}
+          />
+        </TmsField>
+        {intakeCheck.unverifiedDomain && !intakeProblem ? (
+          <TmsBadge tone="orange">Unverified domain</TmsBadge>
+        ) : null}
+        {mailboxes.length > 0 ? (
+          <p className="tms-muted" style={{ margin: '6px 0 0' }}>
+            Suggestions:{' '}
+            {mailboxes
+              .filter((s) => !s.disabledReason)
+              .map((s) => (
+                <TmsButton key={s.email} size="sm" onClick={() => onChange({ ...draft, intakeEmail: s.email })}>
+                  {s.email}
+                </TmsButton>
+              ))}
+          </p>
+        ) : null}
       </div>
 
       <h3 style={{ margin: '16px 0 8px' }}>Ownership settings</h3>
@@ -389,6 +453,11 @@ export function DivisionsPage() {
 
   const saveDivision = async () => {
     if (!draft) return
+    const problems = intakeProblems(draft)
+    if (problems.length) {
+      setDraftErrors(problems)
+      return
+    }
     const errors = validateDivisions(divisionsWithDraft(divisions, draft))
     if (errors.length) {
       setDraftErrors(errors)
@@ -559,6 +628,7 @@ export function DivisionsPage() {
               <span className="tms-muted">{division.code}</span>
               {division.brand ? <span className="tms-muted">[{division.brand}]</span> : null}
               <TmsBadge tone={division.active ? 'green' : 'gray'}>{division.active ? 'Active' : 'Archived'}</TmsBadge>
+              {division.active && !division.intakeEmail ? <TmsBadge tone="orange">No intake e-mail</TmsBadge> : null}
               <span className="tms-muted">#{division.sortOrder}</span>
               <span style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
                 <TmsButton

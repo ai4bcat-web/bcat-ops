@@ -1,11 +1,10 @@
 /**
  * Step P8-UI — the shared shipment conversation: bubbles, cards, pills and composer.
  *
- * Powers both the shipment Tracking detail (variant="detail") and the Inbox
- * right pane (variant="inbox"). The Inbox header, kind pills and structured cards
- * live here; the detail panel frames its own title and cadence controls.
+ * Powers the shipment Tracking detail panel: bubbles, cards, pills and composer;
+ * the detail panel frames its own title and cadence controls.
  */
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Bold, Italic, List, Link2, Mail, MessageSquare, Paperclip,
   Phone, Send, AtSign, FileUp, X, ExternalLink,
@@ -56,18 +55,10 @@ export interface TrackingConversationProps {
   dispatcher?: TrackingConversationRecipient | null
   /** Change when the underlying conversation changes — resets composer. */
   conversationKey?: string
-  /** "detail" (default) keeps existing testids; "inbox" surfaces inbox‑conversation / inbox‑composer. */
-  variant?: 'detail' | 'inbox'
   /** The bundle the conversation sits beside, for the load summary card and header. */
   bundle?: ShipmentBundle | null
   /** True = show every message unfiltered (full history view). */
   filtersOff?: boolean
-  /** Inbox only: the chat header, pinned above the stream. */
-  header?: ReactNode
-  /** Inbox only: quick-action bar between the stream and the composer. */
-  quickActions?: ReactNode
-  /** Inbox only: pinned as the last item of the stream (the location card). */
-  streamTail?: ReactNode
   onSendMessage: (input: {
     channel: ComposerChannel
     to: string | null
@@ -357,12 +348,8 @@ export function TrackingConversation({
   driver,
   dispatcher,
   conversationKey,
-  variant = 'detail',
   bundle,
   filtersOff = false,
-  header,
-  quickActions,
-  streamTail,
   onSendMessage,
   onRefresh,
 }: TrackingConversationProps) {
@@ -391,8 +378,6 @@ export function TrackingConversation({
     document.addEventListener('mousedown', handler, true)
     return () => document.removeEventListener('mousedown', handler, true)
   }, [showMentions])
-
-  const isInbox = variant === 'inbox'
 
   // Reset composer on conversation change.
   const [prevKey, setPrevKey] = useState(conversationKey)
@@ -567,22 +552,10 @@ export function TrackingConversation({
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
-  // The inbox stream rests on its newest item, like any chat.
-  const streamRef = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    const el = streamRef.current
-    if (isInbox && el) el.scrollTop = el.scrollHeight
-  }, [isInbox, conversationKey, threadItems.length, loading])
-
-  const rootTestId = isInbox ? 'inbox-conversation' : 'tracking-thread'
-  const composerTestId = isInbox ? 'inbox-composer' : 'thread-composer'
-
   return (
-    <div data-testid={rootTestId} className="tms-convo-root">
-      {isInbox && header}
-
-      {/* Messages + cards + pills, with the location card pinned last */}
-      <div className="tms-convo-stream" ref={streamRef} data-testid="convo-stream">
+    <div data-testid="tracking-thread" className="tms-convo-root">
+      {/* Messages + cards + pills */}
+      <div className="tms-convo-stream" data-testid="convo-stream">
         {loading ? (
           <p className="tms-muted text-sm">Loading thread…</p>
         ) : threadItems.length === 0 ? (
@@ -600,13 +573,10 @@ export function TrackingConversation({
             })}
           </ul>
         )}
-        {isInbox && streamTail}
       </div>
 
-      {isInbox && quickActions}
-
       {/* Composer */}
-      <div className="tms-thread-composer" data-testid={composerTestId}>
+      <div className="tms-thread-composer" data-testid="thread-composer">
         {/* Formatting toolbar */}
         <div className="tms-convo-toolbar" role="toolbar" aria-label="Formatting">
           {FORMAT_BUTTONS.map((fmt) => (

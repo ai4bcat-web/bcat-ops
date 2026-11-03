@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { LoadCarrierRecord, ShipmentBundle, ShipmentLoad } from '@/types/tms'
-import { buildStatusTimeline, isFreshPing, lateMinutes } from './statusTimeline'
+import { buildStatusTimeline, lateMinutes } from './statusTimeline'
 
 const stops = [
   { id: 'pu', type: 'pickup', sequence: 0, appt: '2026-10-29T14:00:00Z', driverId: null },
@@ -72,16 +72,9 @@ describe('buildStatusTimeline', () => {
   })
 })
 
-describe('lateMinutes / isFreshPing', () => {
+describe('lateMinutes', () => {
   it('ignores a missing appointment or ETA', () => {
     expect(lateMinutes(null, '2026-10-30T10:30:00Z')).toBeNull()
     expect(lateMinutes('2026-10-30T10:00:00Z', undefined)).toBeNull()
-  })
-
-  it('treats a ping under 30 minutes old as fresh and a future or old ping as not', () => {
-    expect(isFreshPing('2026-10-29T11:45:00Z', nowMs)).toBe(true)
-    expect(isFreshPing('2026-10-29T11:20:00Z', nowMs)).toBe(false)
-    expect(isFreshPing('2026-10-29T12:30:00Z', nowMs)).toBe(false)
-    expect(isFreshPing(null, nowMs)).toBe(false)
   })
 })

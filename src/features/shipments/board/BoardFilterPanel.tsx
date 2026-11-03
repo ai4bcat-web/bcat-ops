@@ -9,7 +9,6 @@ import type {
   BoardDetailDef,
   BoardDetailKey,
   BoardFilterSet,
-  BoardFilterSetOption,
   BoardStatusKey,
 } from './types'
 
@@ -45,16 +44,6 @@ const FLAG_KEYS = Object.keys(FLAG_LABELS) as Array<keyof typeof FLAG_LABELS>
 export interface BoardFilterPanelProps {
   collapsed: boolean
   onToggleCollapse: () => void
-  /** Active view name shown in the view selector. */
-  viewName: string
-  filterSets: BoardFilterSetOption[]
-  activeFilterSetId: string | null
-  filterSetDirty: boolean
-  onSelectFilterSet: (id: string) => void
-  onCreateFilterSet: () => void
-  onUpdateFilterSet: () => void
-  onRevertFilterSet: () => void
-  onDeleteFilterSet: () => void
   columnTemplates?: BoardColumnTemplateOption[]
   activeColumnTemplateId?: string | null
   onSelectColumnTemplate?: (id: string) => void
@@ -86,15 +75,6 @@ export interface BoardFilterPanelProps {
 export function BoardFilterPanel({
   collapsed,
   onToggleCollapse,
-  viewName,
-  filterSets,
-  activeFilterSetId,
-  filterSetDirty,
-  onSelectFilterSet,
-  onCreateFilterSet,
-  onUpdateFilterSet,
-  onRevertFilterSet,
-  onDeleteFilterSet,
   columnTemplates,
   activeColumnTemplateId,
   onSelectColumnTemplate,
@@ -152,42 +132,6 @@ export function BoardFilterPanel({
       </div>
 
       <div className="tms-board-panel-body">
-        {/* View */}
-        <section className="tms-board-panel-section">
-          <BoardSectionTitle hint={filterSetDirty ? `Unsaved changes · ${viewName}` : viewName}>
-            View
-          </BoardSectionTitle>
-          <div className="tms-board-panel-row">
-            <TmsSelect
-              className="tms-board-panel-select"
-              value={activeFilterSetId ?? ''}
-              onChange={(e) => onSelectFilterSet(e.target.value)}
-              options={filterSets.map((fs) => ({ value: fs.id, label: fs.name }))}
-              placeholder="Select a view"
-              aria-label="View"
-            />
-          </div>
-          <div className="tms-board-panel-actions">
-            <TmsButton
-              size="sm"
-              variant="primary"
-              onClick={onUpdateFilterSet}
-              disabled={!filterSetDirty || !activeFilterSetId}
-            >
-              Save
-            </TmsButton>
-            <TmsButton size="sm" variant="secondary" onClick={onCreateFilterSet}>
-              Save as view
-            </TmsButton>
-            <TmsButton size="sm" variant="secondary" onClick={onRevertFilterSet} disabled={!activeFilterSetId}>
-              Revert
-            </TmsButton>
-            <TmsButton size="sm" variant="destructive" onClick={onDeleteFilterSet} disabled={!activeFilterSetId}>
-              Delete
-            </TmsButton>
-          </div>
-        </section>
-
         {/* Column template */}
         {columnTemplates ? (
           <section className="tms-board-panel-section">

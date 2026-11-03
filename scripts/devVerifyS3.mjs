@@ -40,6 +40,8 @@ const SHOTS = resolve('Docs/tms-build/screenshots/S3')
 const ALLOW_PROBLEMS = [
   // `vite` dev server only: the PWA manifest is generated at build time, so localhost serves index.html for it.
   { pattern: /Manifest: Line: 1, column: 1, Syntax error\. http:\/\/(127\.0\.0\.1|localhost):5173\/manifest\.webmanifest$/, reason: 'vite dev server has no built manifest' },
+  // The dev Google Maps key is neutered, so Maps logs its own Map ID error; Google-owned, not an app defect.
+  { pattern: /The map is initialized without a valid Map ID/, reason: 'dev Maps key is neutered' },
 ]
 
 /** Same allow-list as S2: tms-* classes that are hooks only. */
@@ -90,7 +92,7 @@ export const REDIRECTS = [
   ['/shipments', '/shipments', '/tms/shipments'],
   ['/shipments/:id', '/shipments/zz-x', '/tms/shipments/zz-x'],
   ['/check-calls', '/check-calls', '/tms/check-calls'],
-  ['/documents', '/documents', '/tms/documents'],
+  ['/documents', '/documents', '/tms/documents/review'],
   ['/drivers', '/drivers', '/files'],
   ['/factoring', '/factoring', '/tms/factors'],
   ['/ar', '/ar', '/tms/invoicing'],
@@ -212,7 +214,7 @@ async function redirects(b) {
     await b.navigate(path)
     let landed = ''
     try {
-      await b.poll(async () => { landed = await b.evaluate('location.pathname'); return landed === expected || (expected === '/tms/shipments' && landed.startsWith('/tms/shipments/view/')) }, `landing on ${expected}`, 12_000)
+      await b.poll(async () => { landed = await b.evaluate('location.pathname'); return landed === expected }, `landing on ${expected}`, 12_000)
       line('PASS', id, `→ ${expected}`)
     } catch {
       line('FAIL', id, `landed on ${landed}, expected ${expected}`)

@@ -14,6 +14,7 @@ import { AdminGetUserCommand, CognitoIdentityProviderClient } from '@aws-sdk/cli
 import { applyLink, dismiss, resolveException, retryable } from '../../../src/lib/workflows/runState'
 import { AGENT_KEYS, isAgent } from '../../../src/lib/workflows/agents'
 import { sampleRun } from './inbox'
+import { cleanToAddresses } from './intakeStage'
 import { rerunWithParty, retryRun, sweepStalled, backfillAp } from './run'
 import {
   QUOTE_TABLE_NAME,
@@ -302,7 +303,7 @@ export async function dispatch(action: string, rawInput: unknown, identity?: App
       // A real run against a sample message, so Try it exercises the same
       // pipeline the inbox does — including the caps and the blacklist.
       const messageId = `sample:${caller.email}:${Date.now()}`
-      const run = await sampleRun({ agent, subject, body, fromEmail, messageId })
+      const run = await sampleRun({ agent, subject, body, fromEmail, messageId, toAddresses: cleanToAddresses(input.toAddresses) })
       await writeAudit('WorkflowRun', run.id, action, caller, { agent, subject })
       return run
     }

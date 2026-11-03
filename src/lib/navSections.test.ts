@@ -49,7 +49,7 @@ beforeEach(() => {
 })
 
 describe('buildNavSections', () => {
-  it('pins Company Dashboard first and Shipments second, and keeps its view children working', () => {
+  it('pins Company Dashboard first and Shipments second, and renders the Shipments children', () => {
     const { pinned, sections } = buildNavSections({ divisions: FOUR, hasPageAccess: grants('tms') })
 
     // Company Dashboard is the top-level home; Shipments is the shared freight list.
@@ -62,12 +62,7 @@ describe('buildNavSections', () => {
       expect(section.items.some((i) => i.to === '/tms/shipments')).toBe(false)
     }
 
-    // The Shipments row renders fixed workstation pages first, then saved views under
-    // a labelled group.
-    const views = [
-      { slug: 'brokerage-board', name: 'Brokerage Board' },
-      { slug: 'car-shipping', name: 'Car Shipping Board' },
-    ]
+    // The Shipments row renders Shipments, Intake, Tracking and Documents as children.
     render(
       createElement(
         MemoryRouter,
@@ -80,26 +75,17 @@ describe('buildNavSections', () => {
             activePath: '/tms/shipments',
             breadcrumb: [{ label: 'Shipments' }],
             user: { initial: 'R', email: 'ryne@bcatcorp.com' },
-            shipmentViews: views,
           },
           createElement('div', null, 'page body')
         )
       )
     )
     expect(screen.getByRole('link', { name: /^Company Dashboard$/ })).toHaveAttribute('href', '/tms/dashboard')
-    expect(screen.getByRole('link', { name: /^Shipments$/ })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Active Shipments' })).toHaveAttribute('href', '/tms/shipments')
-    expect(screen.getByRole('link', { name: 'Dispatch' })).toHaveAttribute('href', '/tms/dispatch')
+    expect(screen.getAllByRole('link', { name: /^Shipments$/ })).toHaveLength(2)
+    expect(screen.getByRole('link', { name: 'Intake' })).toHaveAttribute('href', '/tms/shipments/intake')
     expect(screen.getByRole('link', { name: 'Tracking' })).toHaveAttribute('href', '/tms/tracking')
-    expect(screen.getByRole('link', { name: 'Documents' })).toHaveAttribute('href', '/tms/documents')
-    expect(screen.getByRole('link', { name: 'Brokerage Board' })).toHaveAttribute(
-      'href',
-      '/tms/shipments/view/brokerage-board'
-    )
-    expect(screen.getByRole('link', { name: 'Car Shipping Board' })).toHaveAttribute(
-      'href',
-      '/tms/shipments/view/car-shipping'
-    )
+    expect(screen.getByRole('link', { name: 'Documents' })).toHaveAttribute('href', '/tms/documents/review')
+    expect(screen.queryByRole('link', { name: 'Dispatch' })).not.toBeInTheDocument()
   })
 
   it('opens the whole Brokerage section on the one `tms` grant, and nothing else', () => {
@@ -137,44 +123,32 @@ describe('buildNavSections', () => {
     expect(pinned).toEqual([])
   })
 
-  it('shows Shipments and its workstation children to a shared-loads grant', () => {
+  it('shows Shipments to a shared-loads grant, with the Intake child and the badge key', () => {
     const { pinned, sections } = buildNavSections({ divisions: FOUR, hasPageAccess: grants('loads') })
-    // Shipments is still reachable for the same people; it just lives in pinned now.
     // Company Dashboard is not visible on `loads` alone.
     expect(pinned.map((i) => i.label)).toEqual(['Shipments'])
     // No other Brokerage page leaks through.
     expect(sections).toEqual([])
-
-    render(
-      createElement(
-        MemoryRouter,
-        { initialEntries: ['/tms/shipments'] },
-        createElement(
-          TmsShell,
-          {
-            pinned,
-            sections,
-            activePath: '/tms/shipments',
-            breadcrumb: [{ label: 'Shipments' }],
-            user: { initial: 'R', email: 'ryne@bcatcorp.com' },
-            shipmentViews: [{ slug: 'local', name: 'Local Drivers' }],
-          },
-          createElement('div', null, 'page body')
-        )
-      )
-    )
-    expect(screen.getByRole('link', { name: 'Active Shipments' })).toHaveAttribute('href', '/tms/shipments')
-    expect(screen.getByRole('link', { name: 'Dispatch' })).toHaveAttribute('href', '/tms/dispatch')
-    expect(screen.getByRole('link', { name: 'Local Drivers' })).toHaveAttribute('href', '/tms/shipments/view/local')
+    expect(pinned[0].children).toEqual([{ to: '/tms/shipments/intake', label: 'Intake', badgeKey: 'intakeLoads' }])
   })
 
-  it('gives a division with no pages of its own a shipments link', () => {
+  it('has no Academy, Workflows or Dispatch row anywhere in the rail', () => {
+    const { pinned, sections } = buildNavSections({ divisions: FOUR, hasPageAccess: () => false, isOwner: true })
+    const hrefs = [...pinned, ...sections.flatMap((s) => s.items)].map((i) => i.to)
+    for (const gone of ['/tms/academy', '/tms/workflows', '/tms/dispatch']) expect(hrefs).not.toContain(gone)
+  })
+
+  it('offers Intake review as a grantable page', () => {
+    expect(PERMISSION_PAGES).toContainEqual({ key: 'intakeReview', label: 'Intake review' })
+  })
+
+  it('gives a division with no pages of its own an intake link', () => {
     const withNew = [...FOUR, division({ code: 'FLATBED', name: 'Flatbed Division', sortOrder: 25 })]
     const { pinned, sections } = buildNavSections({ divisions: withNew, hasPageAccess: grants('tms') })
     const flatbed = sections.find((s) => s.key === 'FLATBED')
     expect(flatbed?.items).toEqual([{
-      to: '/tms/shipments/view/division-FLATBED',
-      label: 'Shipments · Flatbed Division',
+      to: '/tms/shipments/intake?division=FLATBED',
+      label: 'Intake · Flatbed Division',
       icon: expect.anything(),
       badge: null,
       pageKey: 'tms',
@@ -222,16 +196,16 @@ describe('buildNavSections', () => {
 })
 
 describe('tmsBreadcrumb', () => {
-  const labels = (path: string, views?: Array<{ slug: string; name: string }>) =>
-    tmsBreadcrumb(path, views).map((c) => c.label)
+  const labels = (path: string) => tmsBreadcrumb(path).map((c) => c.label)
 
-  it('puts a saved view under Shipments, by its name', () => {
-    expect(labels('/tms/shipments/view/my-queue', [{ slug: 'my-queue', name: 'My queue' }])).toEqual(['Shipments', 'My queue'])
-    expect(labels('/tms/shipments/view/pod-collection')).toEqual(['Shipments', 'Pod collection'])
+  it('gives the intake queue and an intake load their own trail, not "Shipment"', () => {
+    expect(labels('/tms/shipments/intake')).toEqual(['Shipments', 'Intake'])
+    expect(labels('/tms/shipments/intake/abc')).toEqual(['Shipments', 'Intake', 'Load'])
+    expect(tmsBreadcrumb('/tms/shipments/intake/abc')[1].to).toBe('/tms/shipments/intake')
   })
 
   it('files the workstation pages under Shipments', () => {
-    expect(labels('/tms/dispatch')).toEqual(['Shipments', 'Dispatch'])
+    expect(labels('/tms/documents/review')).toEqual(['Shipments', 'Document review'])
     expect(labels('/tms/check-calls')).toEqual(['Shipments', 'Check calls'])
     expect(labels('/tms/tracking/links')).toEqual(['Shipments', 'Tracking', 'Manage links'])
     expect(tmsBreadcrumb('/tms/tracking/links')[1].to).toBe('/tms/tracking')

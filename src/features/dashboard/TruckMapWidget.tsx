@@ -80,6 +80,10 @@ function motionLabel(loc: TruckLocation, stale: boolean): { text: string; moving
   return { text: since ? `${base} · ${since}` : base, moving }
 }
 
+/** Header and every row share one grid; TABLE_MIN_WIDTH is its tracks at their minimums (796) + six 10px gaps + 2×20px padding. */
+const TABLE_COLUMNS = '48px minmax(80px, 1fr) 132px 84px minmax(130px, 1.3fr) 230px 92px'
+const TABLE_MIN_WIDTH = 896
+
 export function TruckMapWidget() {
   const [locations, setLocations] = useState<TruckLocation[]>([])
   const [loading, setLoading] = useState(true)
@@ -219,10 +223,10 @@ export function TruckMapWidget() {
           </div>
         ) : (
           <div style={{ display: 'flex', alignItems: 'stretch', flexWrap: 'wrap' }}>
-          {/* The table flexes to whatever the map leaves; columns shrink and clip rather than scroll sideways. */}
-          <div style={{ display: 'flex', flexDirection: 'column', flex: '1 1 560px', minWidth: 0 }}>
+          {/* The table flexes to whatever the map leaves; below its minimum width it scrolls inside the card instead of widening the page. */}
+          <div style={{ display: 'flex', flexDirection: 'column', flex: '1 1 560px', minWidth: 0, overflowX: 'auto' }}>
             {/* Header row: every column sorts; tap again to flip. */}
-            <div style={{ display: 'grid', gridTemplateColumns: '48px minmax(80px, 1fr) 132px 84px minmax(130px, 1.3fr) 230px 92px', gap: 10, padding: '8px 20px', fontSize: 11, fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', color: 'var(--tms-muted)', borderBottom: '1px solid var(--tms-border)' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: TABLE_COLUMNS, minWidth: TABLE_MIN_WIDTH, gap: 10, padding: '8px 20px', fontSize: 11, fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', color: 'var(--tms-muted)', borderBottom: '1px solid var(--tms-border)' }}>
               {([
                 ['unit', 'Unit'], ['location', 'Location'], ['driver', 'Driver'], ['load', 'Load'], ['status', 'Status'], ['tracking', 'Tracking · Copy info'], ['updated', 'Updated'],
               ] as Array<[SortKey, string]>).map(([key, label]) => {
@@ -254,7 +258,7 @@ export function TruckMapWidget() {
                 <div
                   key={loc.truckId}
                   style={{
-                    display: 'grid', gridTemplateColumns: '48px minmax(80px, 1fr) 132px 84px minmax(130px, 1.3fr) 230px 92px', gap: 10,
+                    display: 'grid', gridTemplateColumns: TABLE_COLUMNS, minWidth: TABLE_MIN_WIDTH, gap: 10,
                     padding: '9px 20px', fontSize: 13, alignItems: 'center',
                     borderBottom: '1px solid var(--tms-border)',
                     opacity: stale ? 0.55 : 1,

@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Archive, Merge, Pencil, Settings2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useAuth } from '@/hooks/useAuth'
@@ -71,7 +72,16 @@ export function CustomersPage() {
   const [filters, setFilters] = useState<CustomerFilters>(EMPTY_CUSTOMER_FILTERS)
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [editing, setEditing] = useState<CustomerRecord | 'new' | null>(null)
-  const [profileId, setProfileId] = useState<string | null>(null)
+  // `?customer=<id>` owns which profile is open (Settings → Tracking automation links here), the way `?doc=` does elsewhere.
+  const [params, setParams] = useSearchParams()
+  const profileId = params.get('customer')
+  const setProfileId = useCallback((id: string | null) => {
+    setParams((prev) => {
+      const next = new URLSearchParams(prev)
+      if (id) next.set('customer', id); else next.delete('customer')
+      return next
+    }, { replace: true })
+  }, [setParams])
   const [divisions, setDivisions] = useState<Division[]>([])
   const [settings, setSettings] = useState<TmsSettings | null>(null)
   const [showDefaults, setShowDefaults] = useState(false)
@@ -113,6 +123,14 @@ export function CustomersPage() {
   useEffect(() => { if (dir.error) toast.error(dir.error) }, [dir.error])
 
   const profileCustomer = useMemo(() => dir.customers.find((c) => c.id === profileId) ?? null, [dir.customers, profileId])
+
+  // A link to a customer that no longer exists (or that this user cannot see) must not leave a dead param behind.
+  useEffect(() => {
+    if (profileId && !dir.loading && !dir.error && !profileCustomer) {
+      toast.error('That customer was not found')
+      setProfileId(null)
+    }
+  }, [profileId, profileCustomer, dir.loading, dir.error, setProfileId])
 
   const archive = async (c: CustomerRecord) => {
     if (!window.confirm(`Archive customer "${c.name}"?\n\nShipments keep their customer name; only the directory entry is marked inactive.`)) return

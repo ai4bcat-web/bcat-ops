@@ -186,15 +186,17 @@ export function resolveRequiredFields(
   return [...seen].sort((a, b) => (FIELD_ORDER[a] ?? 999) - (FIELD_ORDER[b] ?? 999) || a.localeCompare(b))
 }
 
-/** The check-call plan a load runs on: the load's own, else the customer's, else the org's. */
+/** The check-call plan a load runs on: the load's own, else the customer's, else the division's, else the org's. */
 export function resolveCheckCallPlan(
   settings: { defaultCheckCallPlan?: unknown } | null | undefined,
   customer: CustomerFlowSource | null | undefined,
   load?: { checkCallPlan?: unknown } | null,
+  divisionPlan?: CheckCallPlan | null,
 ): CheckCallPlan {
   return (
     normalizeCheckCallPlan(load?.checkCallPlan)
     ?? normalizeCheckCallPlan(customer?.checkCallPlan)
+    ?? normalizeCheckCallPlan(divisionPlan)
     ?? normalizeCheckCallPlan(settings?.defaultCheckCallPlan)
     ?? DEFAULT_CHECK_CALL_PLAN
   )

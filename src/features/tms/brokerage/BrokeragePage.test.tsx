@@ -29,7 +29,6 @@ vi.mock('@/features/commissions/CommissionsPage', () => ({ CommissionsPage: () =
 vi.mock('@/features/reports/ReportsPage', () => ({ ReportsPage: () => <p>reports body</p> }))
 vi.mock('@/features/audit/AuditPage', () => ({ AuditPage: () => <p>audit body</p> }))
 vi.mock('@/features/tms/settings/DivisionsPage', () => ({ default: () => <p>divisions body</p> }))
-vi.mock('@/features/tms/settings/ShipmentViewsPage', () => ({ default: () => <p>views body</p> }))
 vi.mock('@/features/tms/integrations/IntegrationsTab', () => ({ IntegrationsTab: () => <p>integrations body</p> }))
 vi.mock('@/features/tms/settings/AiAgentsPage', () => ({ default: () => <p>ai agents body</p> }))
 vi.mock('./DemoPage', () => ({ DemoPage: () => <p>demo body</p> }))
@@ -61,7 +60,7 @@ describe('BrokeragePage', () => {
     draw()
 
     expect(tabNames()).toEqual([
-      'Settings', 'Users', 'Commissions', 'Reports', 'Audit', 'Divisions & ownership', 'Shipment views',
+      'Settings', 'Users', 'Commissions', 'Reports', 'Audit', 'Divisions & ownership',
       'Integrations', 'AI Agents', 'Company', 'Demo',
     ])
     expect(screen.getByText('settings body')).toBeInTheDocument()
@@ -122,11 +121,11 @@ describe('BrokeragePage', () => {
     expect(screen.queryByText('users body')).toBeNull()
   })
 
-  it('opens the deep-linked taxonomy desks for an owner', () => {
+  it('opens the deep-linked divisions desk for an owner', () => {
     auth.isOwner = true
-    draw('/tms/brokerage/views')
+    draw('/tms/brokerage/divisions')
 
-    expect(screen.getByText('views body')).toBeInTheDocument()
-    expect(screen.getByRole('tab', { name: 'Shipment views' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByText('divisions body')).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Divisions & ownership' })).toHaveAttribute('aria-selected', 'true')
   })
 })

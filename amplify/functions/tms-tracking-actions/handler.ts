@@ -33,6 +33,7 @@ import {
   DynamoDBClient,
   GetItemCommand,
   PutItemCommand,
+  QueryCommand,
   UpdateItemCommand,
   type AttributeValue,
   type TransactWriteItem,
@@ -126,6 +127,7 @@ const SHIPMENT_DOCUMENT_TABLE_NAME = process.env.SHIPMENT_DOCUMENT_TABLE_NAME ??
 const SHIPMENT_NOTICE_TABLE_NAME = process.env.SHIPMENT_NOTICE_TABLE_NAME ?? ''
 const CUSTOMER_TABLE_NAME = process.env.CUSTOMER_TABLE_NAME ?? ''
 /** Step P8. The shipment's own e-mail/SMS thread. This router is its only writer. */
+const USER_PROFILE_TABLE_NAME = process.env.USER_PROFILE_TABLE_NAME ?? ''
 const SHIPMENT_MESSAGE_TABLE_NAME = process.env.SHIPMENT_MESSAGE_TABLE_NAME ?? ''
 /** Same server key tms-geocode holds; unset means a free-text reply stays a note. */
 const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY ?? ''
@@ -232,9 +234,15 @@ import {
 import {
   runCheckCallPlan,
   saveCheckCallPlan,
-  sweepCheckCallPlans,
   type CheckCallDeps,
 } from './checkCallAgent'
+import { runTrackingAutomation, type AutomationDeps } from './automation'
+import { normalizeCheckCallPlan } from '../../../src/lib/checkCallPlan'
+import {
+  normalizeTrackingAutomation,
+  validateAutomationPatch,
+  type TrackingAutomationSettings,
+} from '../../../src/lib/trackingAutomation'
 import {
   requestPod,
   reviewShipmentPod,
@@ -257,7 +265,8 @@ type Action =
   | 'INGEST_SHIPMENT_MESSAGE'
   | 'LIST_SHIPMENT_THREAD'
   | 'RUN_CHECK_CALL_PLAN'
-  | 'SWEEP_CHECK_CALL_PLANS'
+  | 'RUN_TRACKING_AUTOMATION'
+  | 'SAVE_TRACKING_AUTOMATION'
   | 'SAVE_CHECK_CALL_PLAN'
   | 'REQUEST_POD'
   | 'REVIEW_SHIPMENT_POD'
@@ -286,6 +295,12 @@ interface AppSyncEvent {
     input?: string | Record<string, unknown> | null
   }
   identity?: AppSyncIdentity | null
+  /**
+   * Set only by a Lambda that invoked this function directly (AppSync's envelope has no
+   * such key, and `arguments` is the only place a client's data lands), so it can only come
+   * from a principal holding lambda:InvokeFunction. SYSTEM_CALLERS limits what it may do.
+   */
+  systemCaller?: string
 }
 
 interface Caller {
@@ -326,7 +341,27 @@ function getGroups(identity?: AppSyncIdentity | null): string[] {
   return []
 }
 
-async function authorize(action: Action, identity?: AppSyncIdentity | null): Promise<Caller> {
+/** Internal Lambdas that may call this router without a user, and the only actions they may call. */
+export const SYSTEM_CALLERS: Record<string, readonly Action[]> = {
+  'tracking-automation': ['RUN_TRACKING_AUTOMATION'],
+  'shipment-email-intake': ['INGEST_SHIPMENT_MESSAGE', 'INGEST_ATTACHMENT'],
+}
+
+export const SYSTEM_CALLER_EMAIL = 'system@bcatcorp.com'
+
+export async function authorize(
+  action: Action,
+  identity?: AppSyncIdentity | null,
+  systemCaller?: string | null,
+): Promise<Caller> {
+  if (
+    typeof systemCaller === 'string'
+    && Object.prototype.hasOwnProperty.call(SYSTEM_CALLERS, systemCaller)
+    && SYSTEM_CALLERS[systemCaller].includes(action)
+  ) {
+    // Never admin: a system caller can run AUTO automation and ingest replies, nothing else.
+    return { email: SYSTEM_CALLER_EMAIL, sub: systemCaller, groups: [], isAdmin: false }
+  }
   if (!identity) throw new Error('Unauthorized: missing identity')
   const email = await getCallerEmail(identity)
   if (!email) throw new Error('Unauthorized: could not resolve caller email')
@@ -336,7 +371,7 @@ async function authorize(action: Action, identity?: AppSyncIdentity | null): Pro
   // How long every link lives, who the customer page says to call, and what every
   // carrier is asked to upload is org-wide configuration, not a dispatcher's call on
   // one load.
-  if (action === 'SAVE_TRACKING_SETTINGS' || action === 'SAVE_DOCUMENT_SETTINGS') {
+  if (action === 'SAVE_TRACKING_SETTINGS' || action === 'SAVE_DOCUMENT_SETTINGS' || action === 'SAVE_TRACKING_AUTOMATION') {
     if (!isAdmin) throw new Error(`Forbidden: ${action} requires owner or ADMIN`)
   } else if (!isAdmin && !groups.includes(LOAD_PAGE_GROUP) && !groups.includes(TMS_PAGE_GROUP)) {
     throw new Error(`Forbidden: ${action} requires owner, ADMIN, ${LOAD_PAGE_GROUP}, or ${TMS_PAGE_GROUP}`)
@@ -1388,6 +1423,51 @@ async function saveSettings(input: Row, caller: Caller, action: Action, patch: R
   return saved
 }
 
+// ── SAVE_TRACKING_AUTOMATION ─────────────────────────────────────────────────
+
+/**
+ * The automation policy and the org plan are written together (one row, one CAS), so the
+ * Settings card can never save a policy that disagrees with the plan beside it.
+ */
+function trackingAutomationPatch(input: Row): Row {
+  const raw = input.trackingAutomation
+  if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('trackingAutomation must be an object')
+  const blob = raw as Row
+  const settings: TrackingAutomationSettings = { global: validateAutomationPatch(blob.global), divisions: {} }
+  const divisions = blob.divisions
+  if (divisions != null) {
+    if (typeof divisions !== 'object' || Array.isArray(divisions)) throw new Error('divisions must be an object')
+    const entries = Object.entries(divisions as Row)
+    if (entries.length > 200) throw new Error('At most 200 divisions can carry automation settings')
+    for (const [rawCode, value] of entries) {
+      const code = rawCode.trim()
+      if (!code || code.length > 64 || code === '__proto__' || code === 'constructor' || code === 'prototype') {
+        throw new Error(`Invalid division code: ${rawCode}`)
+      }
+      if (value == null || typeof value !== 'object' || Array.isArray(value)) throw new Error(`Division ${code} must be an object`)
+      const entry = value as Row
+      const policy = validateAutomationPatch(entry.policy)
+      const plan = entry.plan == null ? null : normalizeCheckCallPlan(entry.plan)
+      if (entry.plan != null && !plan) throw new Error(`Division ${code} has an invalid check-call plan`)
+      const division: TrackingAutomationSettings['divisions'][string] = {}
+      if (Object.keys(policy).length) division.policy = policy
+      if (plan) division.plan = plan
+      if (division.policy || division.plan) settings.divisions[code] = division
+    }
+  }
+  const patch: Row = { trackingAutomation: normalizeTrackingAutomation(settings) }
+  if ('defaultCheckCallPlan' in input) {
+    if (input.defaultCheckCallPlan == null) {
+      patch.defaultCheckCallPlan = null
+    } else {
+      const plan = normalizeCheckCallPlan(input.defaultCheckCallPlan)
+      if (!plan) throw new Error('defaultCheckCallPlan must be an object')
+      patch.defaultCheckCallPlan = plan
+    }
+  }
+  return patch
+}
+
 // ── SAVE_DOCUMENT_SETTINGS ───────────────────────────────────────────────────
 
 /** Only the keys step E owns; everything else on the row is another router's. */
@@ -2261,6 +2341,29 @@ const threadDeps: ThreadDeps = {
 const checkCallDeps: CheckCallDeps = {
   ...threadDeps,
   trackingUrl: (token) => `${PORTAL_ORIGIN}/l/${token}`,
+  getUserProfile: async (id) => (USER_PROFILE_TABLE_NAME ? getById(USER_PROFILE_TABLE_NAME, id) : null),
+}
+
+const automationDeps: AutomationDeps = {
+  ...checkCallDeps,
+  // Shipment GSI status + pickupAppt: one bounded range read, not a scan.
+  queryDeliveredShipments: async (sinceIso) => {
+    const items: Row[] = []
+    let lastKey: Record<string, AttributeValue> | undefined
+    do {
+      const page = await dynamo.send(new QueryCommand({
+        TableName: SHIPMENT_TABLE_NAME,
+        IndexName: 'shipmentsByStatusAndPickupAppt',
+        KeyConditionExpression: '#s = :s AND #p >= :since',
+        ExpressionAttributeNames: { '#s': 'status', '#p': 'pickupAppt' },
+        ExpressionAttributeValues: { ':s': { S: 'DELIVERED' }, ':since': { S: sinceIso } },
+        ExclusiveStartKey: lastKey,
+      }))
+      if (page.Items) items.push(...page.Items.map((item) => unmarshall(item)))
+      lastKey = page.LastEvaluatedKey
+    } while (lastKey)
+    return items
+  },
 }
 
 /** The bytes of one stored document, for the POD reviewer. */
@@ -2318,7 +2421,7 @@ const podReviewDeps: PodReviewDeps = {
 
 export const handler = async (event: AppSyncEvent): Promise<Row> => {
   const action = event.arguments.action as Action
-  const caller = await authorize(action, event.identity)
+  const caller = await authorize(action, event.identity, event.systemCaller)
   const input = parseInput(event.arguments.input)
 
   switch (action) {
@@ -2364,8 +2467,10 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return listThread(threadDeps, input)
     case 'RUN_CHECK_CALL_PLAN':
       return runCheckCallPlan(checkCallDeps, input, caller)
-    case 'SWEEP_CHECK_CALL_PLANS':
-      return sweepCheckCallPlans(checkCallDeps, caller)
+    case 'RUN_TRACKING_AUTOMATION':
+      return runTrackingAutomation(automationDeps, input, caller) as unknown as Promise<Row>
+    case 'SAVE_TRACKING_AUTOMATION':
+      return saveSettings(input, caller, action, trackingAutomationPatch(input))
     case 'SAVE_CHECK_CALL_PLAN':
       return saveCheckCallPlan(checkCallDeps, input, caller)
     case 'REQUEST_POD':

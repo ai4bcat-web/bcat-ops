@@ -12,17 +12,8 @@ import { toast } from 'sonner'
 import { TmsButton, TmsField, TmsInput, TmsSelect, TmsTextarea } from '@/features/tms/kit'
 import { getTmsSettings, saveTmsSettings } from '@/lib/apiClient'
 import type { TmsSettings } from '@/types/tms'
-import {
-  type CheckCallPlan,
-  CHANNEL_DISABLED_REASON,
-  CHECK_CALL_CHANNELS,
-  CHECK_CALL_MILESTONES,
-  DEFAULT_CHECK_CALL_PLAN,
-  isChannelEnabled,
-  MILESTONE_LABELS,
-} from '@/lib/checkCallPlan'
 import { REQUIRED_FIELD_CATALOG } from '@/lib/flowDefaults'
-import { CheckRow, ErrorText, GroupLabel, Loading, Panel, SettingsCard, Stack } from './settingsKit'
+import { CheckRow, ErrorText, GroupLabel, Hint, Loading, Panel, SettingsCard, Stack } from './settingsKit'
 
 function percentOfBps(bps: number | null | undefined): string {
   if (bps == null) return ''
@@ -52,7 +43,6 @@ export function TmsSettingsCard() {
   const [marginTargetBpsByMode, setMarginTargetBpsByMode] = useState({ FTL: '', LTL: '' })
   const [quoteAutoReplyDefault, setQuoteAutoReplyDefault] = useState<boolean | null>(null)
   const [defaultRequiredLoadFields, setDefaultRequiredLoadFields] = useState<string[]>([])
-  const [defaultCheckCallPlan, setDefaultCheckCallPlan] = useState<CheckCallPlan>(DEFAULT_CHECK_CALL_PLAN)
 
   const [error, setError] = useState<string | null>(null)
 
@@ -73,7 +63,6 @@ export function TmsSettingsCard() {
         setMarginTargetBpsByMode({ FTL: String(byMode.FTL ?? ''), LTL: String(byMode.LTL ?? '') })
         setQuoteAutoReplyDefault(s?.quoteAutoReplyDefault ?? null)
         setDefaultRequiredLoadFields(Array.isArray(s?.defaultRequiredLoadFields) ? s.defaultRequiredLoadFields as string[] : [])
-        setDefaultCheckCallPlan(s?.defaultCheckCallPlan ?? DEFAULT_CHECK_CALL_PLAN)
       })
       .catch((e) => setError(e instanceof Error ? e.message : 'Could not load settings'))
       .finally(() => setLoading(false))
@@ -134,7 +123,6 @@ export function TmsSettingsCard() {
       marginTargetBpsByMode: finalByMode,
       quoteAutoReplyDefault,
       defaultRequiredLoadFields: defaultRequiredLoadFields.length ? defaultRequiredLoadFields : null,
-      defaultCheckCallPlan: defaultCheckCallPlan,
     }
 
     setSaving(true)
@@ -147,10 +135,6 @@ export function TmsSettingsCard() {
     } finally { setSaving(false) }
   }
 
-  const plan = defaultCheckCallPlan
-  const setPlan = (patch: Partial<CheckCallPlan>) => {
-    setDefaultCheckCallPlan({ ...plan, ...patch })
-  }
 
   return (
     <SettingsCard
@@ -254,92 +238,8 @@ export function TmsSettingsCard() {
           </Panel>
 
           <Panel>
-            <GroupLabel>Default check-call plan</GroupLabel>
-            <div className="tms-grid tms-grid-2">
-              <TmsField label="Interval (hours)" hint="How often a moving load is pinged.">
-                <TmsInput
-                  type="number"
-                  min={1}
-                  max={24}
-                  step={1}
-                  value={plan.intervalHours}
-                  onChange={(e) => setPlan({ intervalHours: Number(e.target.value) })}
-                />
-              </TmsField>
-              <TmsField label="Escalate after (minutes)" hint="Silence before the ladder repeats.">
-                <TmsInput
-                  type="number"
-                  min={5}
-                  max={1440}
-                  step={1}
-                  value={plan.escalateAfterMinutes}
-                  onChange={(e) => setPlan({ escalateAfterMinutes: Number(e.target.value) })}
-                />
-              </TmsField>
-            </div>
-            <div style={{ display: 'grid', gap: 10, marginTop: 6 }}>
-              <p className="tms-field-label" style={{ margin: 0, fontSize: 13 }}>Channels</p>
-              {CHECK_CALL_CHANNELS.map((channel) => {
-                const disabled = !isChannelEnabled(channel)
-                const checked = plan.channels.includes(channel)
-                return (
-                  <CheckRow
-                    key={channel}
-                    checked={checked}
-                    disabled={disabled}
-                    onChange={() => {
-                      if (disabled) return
-                      setPlan({
-                        channels: checked
-                          ? plan.channels.filter((c) => c !== channel)
-                          : [...plan.channels, channel],
-                      })
-                    }}
-                    label={
-                      <span>
-                        {channel}
-                        {disabled && (
-                          <span className="tms-field-hint" style={{ marginLeft: 6 }}>
-                            — {CHANNEL_DISABLED_REASON[channel]}
-                          </span>
-                        )}
-                      </span>
-                    }
-                  />
-                )
-              })}
-            </div>
-            <div style={{ display: 'grid', gap: 10, marginTop: 12 }}>
-              <p className="tms-field-label" style={{ margin: 0, fontSize: 13 }}>Milestones</p>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
-                {CHECK_CALL_MILESTONES.map((milestone) => (
-                  <CheckRow
-                    key={milestone}
-                    checked={plan.milestones.includes(milestone)}
-                    onChange={() => {
-                      setPlan({
-                        milestones: plan.milestones.includes(milestone)
-                          ? plan.milestones.filter((m) => m !== milestone)
-                          : [...plan.milestones, milestone],
-                      })
-                    }}
-                    label={MILESTONE_LABELS[milestone]}
-                  />
-                ))}
-              </div>
-            </div>
-            <div style={{ display: 'grid', gap: 10, marginTop: 12 }}>
-              <CheckRow
-                checked={plan.emailDispatcher}
-                onChange={() => setPlan({ emailDispatcher: !plan.emailDispatcher })}
-                label="E-mail the dispatcher on the shipment thread"
-              />
-              <CheckRow
-                checked={plan.requestPodOnDelivery}
-                onChange={() => setPlan({ requestPodOnDelivery: !plan.requestPodOnDelivery })}
-                label="Ask for the POD on delivery confirmation"
-              />
-            </div>
+            <GroupLabel>Check-call plan</GroupLabel>
+            <Hint>The default check-call plan, automatic check calls and POD requests now live in the Tracking automation card.</Hint>
           </Panel>
 
           {error && <ErrorText>{error}</ErrorText>}

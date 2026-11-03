@@ -2,6 +2,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import type { CustomerRecord, LocationRecord, Division, TmsSettings, UserProfileRecord } from '@/types/tms'
+import { MemoryRouter, useLocation } from 'react-router-dom'
 import { CustomersPage, LocationsPage } from './DirectoryPages'
 import { CustomerForm } from './components/CustomerForm'
 import { useCustomerForm } from './components/useCustomerForm'
@@ -123,9 +124,22 @@ vi.mock('@/lib/apiClient', () => ({
   graphqlErrorText: (e: unknown) => (e instanceof Error ? e.message : ''),
 }))
 
+function SearchProbe() {
+  return <span data-testid="search">{useLocation().search}</span>
+}
+
+function renderCustomers(url = '/tms/customers') {
+  return render(
+    <MemoryRouter initialEntries={[url]}>
+      <CustomersPage />
+      <SearchProbe />
+    </MemoryRouter>,
+  )
+}
+
 describe('DirectoryPages', () => {
   it('renders the customer board with tab counts', async () => {
-    render(<CustomersPage />)
+    renderCustomers()
     await waitFor(() => expect(screen.getByText('Active Co')).toBeTruthy())
     expect(screen.getByText('Pending Co')).toBeTruthy()
     expect(screen.getByText('Legacy Active')).toBeTruthy()
@@ -141,7 +155,7 @@ describe('DirectoryPages', () => {
   })
 
   it('filters rows by board tab', async () => {
-    render(<CustomersPage />)
+    renderCustomers()
     await waitFor(() => expect(screen.getByText('Active Co')).toBeTruthy())
     expect(screen.queryByText('Lead Co')).toBeNull()
 
@@ -162,7 +176,7 @@ describe('DirectoryPages', () => {
   })
 
   it('opens customer profile and deactivating requires a reason', async () => {
-    render(<CustomersPage />)
+    renderCustomers()
     await waitFor(() => expect(screen.getByText('Active Co')).toBeTruthy())
     fireEvent.click(screen.getByText('Active Co'))
     await waitFor(() => expect(screen.getByText('Deactivate')).toBeTruthy())
@@ -185,7 +199,7 @@ describe('DirectoryPages', () => {
 
   it('credit inputs are disabled for non-admin', async () => {
     authState.isAdmin = false
-    render(<CustomersPage />)
+    renderCustomers()
     await waitFor(() => expect(screen.getByText('Legacy Active')).toBeTruthy())
     fireEvent.click(screen.getByText('Legacy Active'))
     await waitFor(() => expect(screen.getByText('Credit')).toBeTruthy())
@@ -196,7 +210,7 @@ describe('DirectoryPages', () => {
   })
 
   it('CreditLimitCard shows org default when customer credit limit is null', async () => {
-    render(<CustomersPage />)
+    renderCustomers()
     await waitFor(() => expect(screen.getByText('Legacy Active')).toBeTruthy())
     fireEvent.click(screen.getByText('Legacy Active'))
     await waitFor(() => expect(screen.getByText('Credit')).toBeTruthy())
@@ -204,14 +218,14 @@ describe('DirectoryPages', () => {
   })
 
   it('pending customer shows Approve action', async () => {
-    render(<CustomersPage />)
+    renderCustomers()
     await waitFor(() => expect(screen.getByText('Pending Co')).toBeTruthy())
     fireEvent.click(screen.getByText('Pending Co'))
     await waitFor(() => expect(screen.getByText('Approve')).toBeTruthy())
   })
 
   it('keeps a free-text rep and owner exactly as the record holds them', async () => {
-    render(<CustomersPage />)
+    renderCustomers()
     await waitFor(() => expect(screen.getByText('Legacy Active')).toBeTruthy())
     fireEvent.click(screen.getByText('Legacy Active'))
     fireEvent.click(await screen.findByText('Settings'))
@@ -231,7 +245,7 @@ describe('DirectoryPages', () => {
   })
 
   it('saves the username of a rep picked from the directory', async () => {
-    render(<CustomersPage />)
+    renderCustomers()
     await waitFor(() => expect(screen.getByText('Legacy Active')).toBeTruthy())
     fireEvent.click(screen.getByText('Legacy Active'))
     fireEvent.click(await screen.findByText('Settings'))
@@ -244,6 +258,27 @@ describe('DirectoryPages', () => {
       expect.objectContaining({ id: 'c-legacy-true' }),
       expect.objectContaining({ operatedById: 'dana@bcatcorp.com' }),
     ))
+  })
+
+  describe('?customer=<id> deep link', () => {
+    it('opens that customer\'s profile, even from a board tab that does not list it', async () => {
+      renderCustomers('/tms/customers?customer=c-lead')
+      expect((await screen.findAllByText('Lead Co')).length).toBeGreaterThan(0) // not in the Active tab's rows, so it is the profile
+      expect(screen.getByTestId('search').textContent).toBe('?customer=c-lead')
+    })
+
+    it('writes the param when a row is opened, so the profile is linkable', async () => {
+      renderCustomers()
+      fireEvent.click(await screen.findByText('Active Co'))
+      await waitFor(() => expect(screen.getByTestId('search').textContent).toBe('?customer=c-active'))
+      expect(await screen.findByText('Deactivate')).toBeTruthy()
+    })
+
+    it('drops a param that names no customer instead of leaving it behind', async () => {
+      renderCustomers('/tms/customers?customer=nope&keep=1')
+      await waitFor(() => expect(screen.getByTestId('search').textContent).toBe('?keep=1'))
+      expect(screen.queryByText('Deactivate')).toBeNull()
+    })
   })
 })
 

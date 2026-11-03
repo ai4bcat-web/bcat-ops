@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { RepPicker, TeamPicker } from '@/components/RepPicker'
+import { TrackerPicker } from '@/components/TrackerPicker'
 import { TmsField, TmsInput, TmsSelect, TmsTabs, TmsTextarea } from '@/features/tms/kit'
 import { DocumentTypesField } from '@/features/documents/DocumentTypesField'
 import { MoneyField } from './MoneyField'
@@ -141,6 +142,13 @@ export function CustomerForm({
               <TmsInput value={value.defaultSalesRepId} onChange={(e) => set('defaultSalesRepId', e.target.value)} />
             </TmsField>
           </div>
+          <TmsField label="Default tracker" hint="Tracks every new shipment for this customer unless changed.">
+            <TrackerPicker
+              value={value.defaultTrackerId || null}
+              onChange={(id) => set('defaultTrackerId', id ?? '')}
+              aria-label="Default tracker"
+            />
+          </TmsField>
           <DocumentTypesField
             label="Required for accounting release"
             value={value.requiredDocs}

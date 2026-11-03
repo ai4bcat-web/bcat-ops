@@ -23,6 +23,8 @@ const TABLES = {
   settings: 'TmsSettings-test',
   integration: 'Integration-test',
   audit: 'AuditLog-test',
+  intakeLoad: 'IntakeLoad-test',
+  division: 'OwnershipDivision-test',
 }
 
 const store = vi.hoisted(() => {
@@ -44,6 +46,8 @@ const store = vi.hoisted(() => {
   process.env.PRO_CLAIM_TABLE_NAME = 'ProClaim-test'
   process.env.INTEGRATION_TABLE_NAME = 'Integration-test'
   process.env.AUDIT_LOG_TABLE_NAME = 'AuditLog-test'
+  process.env.INTAKE_LOAD_TABLE_NAME = 'IntakeLoad-test'
+  process.env.OWNERSHIP_DIVISION_TABLE_NAME = 'OwnershipDivision-test'
   process.env.BUCKET_NAME = 'bcat-test-bucket'
   process.env.USER_POOL_ID = 'us-east-1_test'
   process.env.INBOX_SECRET = 'inbox-secret'
@@ -473,6 +477,49 @@ describe('event discrimination', () => {
     expect(JSON.parse(result.body).error).toMatch(/outside this message's folder/)
     // Nothing was recorded: no message.json, no run.
     expect(table(TABLES.run).size).toBe(0)
+  })
+})
+
+describe('intake routing inputs', () => {
+  const post = (body: Row) => handler({ requestContext: { http: { method: 'POST' } }, body: JSON.stringify(body) } as never) as Promise<{ statusCode: number; body: string }>
+
+  it('intakeAddresses needs the secret and lists only active divisions that have an address', async () => {
+    table(TABLES.division).set('A', { id: 'A', code: 'A', name: 'A', active: true, intakeEmail: 'Tenders+A@bcatcorp.com' })
+    table(TABLES.division).set('B', { id: 'B', code: 'B', name: 'B', active: false, intakeEmail: 'old@bcatcorp.com' })
+    table(TABLES.division).set('C', { id: 'C', code: 'C', name: 'C', active: true })
+
+    expect((await post({ action: 'intakeAddresses', secret: 'wrong' })).statusCode).toBe(401)
+    expect((await post({ action: 'intakeAddresses' })).statusCode).toBe(401)
+    const ok = await post({ action: 'intakeAddresses', secret: 'inbox-secret' })
+    expect(ok.statusCode).toBe(200)
+    expect(JSON.parse(ok.body)).toEqual({ ok: true, addresses: [{ email: 'tenders+a@bcatcorp.com', divisionCode: 'A' }] })
+  })
+
+  it('commit validates, lower-cases, de-duplicates and caps toAddresses, and stores them in message.json', async () => {
+    const many = Array.from({ length: 30 }, (_, i) => `u${i}@bcatcorp.com`)
+    modelReplies.push({ agent: 'QUOTE', confidence: 'high', reason: 'x' }, {})
+    const res = await post({
+      action: 'commit', secret: 'inbox-secret', role: 'QUOTE', messageId: 'msg-to',
+      subject: 'Rate', fromEmail: 'a@b.com', bodyText: 'price?',
+      toAddresses: ['Tenders@BCATCorp.com ', 42, null, 'tenders@bcatcorp.com', 'x'.repeat(400), ...many],
+      attachments: [],
+    })
+    expect(res.statusCode).toBe(200)
+    const key = [...s3Objects.keys()].find((k) => k.endsWith('message.json'))
+    const stored = JSON.parse(s3Objects.get(String(key))?.body ?? '{}') as { toAddresses: string[] }
+    expect(stored.toAddresses).toHaveLength(20)
+    expect(stored.toAddresses.slice(0, 3)).toEqual(['tenders@bcatcorp.com', 'u0@bcatcorp.com', 'u1@bcatcorp.com'])
+  })
+
+  it('RUN_SAMPLE accepts toAddresses, so a sample tender lands under its division', async () => {
+    table(TABLES.division).set('A', { id: 'A', code: 'A', name: 'A', active: true, intakeEmail: 'tenders+a@bcatcorp.com' })
+    modelReplies.push({ agent: 'TENDER', confidence: 'high', reason: 't' }, {
+      customer: 'Batory Foods', reference: '778899', pickupNumber: null, weightLb: null, lowConfidence: [],
+      stops: [{ type: 'pickup', city: 'CHICAGO', state: 'IL' }, { type: 'delivery', city: 'DALLAS', state: 'TX' }],
+    })
+    const run = await call('RUN_SAMPLE', { agent: 'TENDER', subject: 'Tender', body: 'Ref #: 778899', fromEmail: 'dispatch@batory.com', toAddresses: ['Tenders+A@bcatcorp.com'] }) as Row
+    expect(run.outcome).toBe('PROPOSED')
+    expect(table(TABLES.intakeLoad).get(`il:${String(run.id)}`)).toMatchObject({ divisionCode: 'A', toAddress: 'tenders+a@bcatcorp.com' })
   })
 })
 

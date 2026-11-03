@@ -1,78 +1,52 @@
 /**
- * Step P8-UI rebuild — the tracking desk inside the TMS shell.
+ * The tracking desk inside the TMS shell: the table of every shipment whose rate
+ * confirmation was sent, grouped by the person tracking it.
  *
- * Two top tabs, both deep-linkable through the URL (`?tab=`):
+ * - Rows: shipments with a sent rate con (`isRateConSent`), narrowed by lifecycle
+ *   (Active · POD due · Closed), then by the shared filter panel and search, then by the
+ *   assignee tab (`?assignee=`: `me`, `all`, `unassigned`, or a user id).
+ * - A row click opens the shipment's own Tracking tab, where the conversation lives.
+ *   Old `?shipment=` / `?tab=inbox` bookmarks redirect there.
  *
- * - **Tracking** — the Chaine-style table of the filtered shipment set. A row click
- *   opens the shipment's own Tracking tab; the table itself has no detail pane.
- * - **Inbox** — tracking conversations: a Chaine conversation list on the left and
- *   the shared TrackingConversation on the right, deep-linked with `?shipment=`.
- *
- * Booking is gone: offers, vetting, assign and setup packets live on the Dispatch
- * workstation (OfferQueue + PostingPanel). Customer links are one toolbar/row
- * callback here; the Manage Customer Links page owns listing, revoke and extend.
+ * Customer links are one toolbar/row callback here; the Manage Customer Links page owns
+ * listing, revoke and extend.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 
-import { teamRepIdsFor, useBoardFilters } from '../board/useBoardFilters'
-import { TmsButton, TmsDialog, TmsInput, TmsSegmentedTabs } from '@/features/tms/kit'
+import { useBoardFilters } from '../board/useBoardFilters'
 import { useAuth } from '@/hooks/useAuth'
 import { useDirectory } from '@/hooks/useDirectory'
 import { useShipments } from '@/hooks/useShipments'
 import { useStaff } from '@/hooks/useStaff'
-import { useShipmentViews } from '@/features/tms/useShipmentViews'
-import type {
-  LoadCarrierRecord,
-  ShipmentBundle,
-  ShipmentMessageRecord,
-  TrackingLinkRecord,
-  TmsSettings,
-} from '@/types/tms'
+import type { ShipmentBundle, TrackingLinkRecord, TmsSettings } from '@/types/tms'
 import {
+  assignTracker,
   getShipmentBundle,
   getTmsSettings,
-  listDivisions,
-  listShipmentMessages,
   listTrackingLinksByShipment,
-  sendShipmentMessage,
+  requestPod,
+  runCheckCallPlan,
 } from '@/lib/apiClient'
-import { viewCallerOf, viewsVisibleTo } from '@/lib/shipmentViewDefs'
-import { displayName } from '@/lib/roles'
-import { mapLimit } from '@/lib/mapLimit'
 import { CreateShipmentDialog } from '../components/CreateShipmentDialog'
 import { CustomerLinkDialog } from '../components/CustomerLinkDialog'
-import { TrackingLinkDialog } from '../components/TrackingLinkDialog'
-import { InboxChatHeader } from './tracking/InboxChatHeader'
-import { InboxInfoPanel } from './tracking/InboxInfoPanel'
-import { useInboxInfoOpen } from './tracking/useInboxInfoOpen'
-import { InboxPanel } from './tracking/InboxPanel'
-import { InboxQuickActions } from './tracking/InboxQuickActions'
-import { LocationCard } from './tracking/LocationCard'
-import { estimateEta, legGeometry } from './tracking/statusTimeline'
 import { TrackingBoard } from './tracking/TrackingBoard'
-import { TrackingConversation } from './tracking/TrackingConversation'
+import {
+  assigneeTabs as buildAssigneeTabs,
+  defaultAssignee,
+  groupByAssignee,
+  isRateConSent,
+  lifecycleOf,
+  rowsForAssignee,
+} from './tracking/trackingTable'
+import type { TrackingLifecycle } from './tracking/types'
 import { useRecentlyViewed } from './tracking/useRecentlyViewed'
 import { useTrackingFavorites } from './tracking/useTrackingFavorites'
-import { boardStatusOf, EMPTY_BOARD_FILTER_SET, type BoardFilterSet, type BoardStatusKey, type ShipmentRow } from '../shipmentViews'
+import { EMPTY_BOARD_FILTER_SET, type ShipmentRow } from '../shipmentViews'
 
-const BASE_FILTERS: BoardFilterSet = { ...EMPTY_BOARD_FILTER_SET }
-const ACTIVE_STATUSES: BoardStatusKey[] = ['OPEN', 'COVERED', 'DISPATCHED', 'ARRIVED', 'DEPARTED', 'HOLD', 'RESERVED']
-const CLOSED_STATUSES: BoardStatusKey[] = ['DELIVERED', 'VOIDED']
 const MAPS_KEY = (import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string | undefined) ?? ''
 const MAPS_MAP_ID = import.meta.env.VITE_GOOGLE_MAPS_MAP_ID as string | undefined
-/** Concurrent per-shipment message reads when the Inbox opens. */
-const MESSAGE_READS = 6
-
-type TabKey = 'inbox' | 'tracking'
-
-interface TrackingLinkDialogTarget {
-  leg: LoadCarrierRecord
-  loadNumber: string
-  link: TrackingLinkRecord | null
-  brokerName: string
-}
 
 interface CustomerLinkDialogTarget {
   bundle: ShipmentBundle
@@ -83,43 +57,17 @@ interface CustomerLinkDialogTarget {
 export function TrackingWorkstation() {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
-  const { user, isOwner, isAdmin } = useAuth()
+  const { user } = useAuth()
   const { shipments, loading: shipmentsLoading, error: shipmentsError, refresh: refreshShipments } = useShipments()
   const { customers } = useDirectory()
   const staff = useStaff(user?.email)
-  const senderName = useMemo(() => {
-    if (staff.me) return displayName(staff.me)
-    return user?.email ?? null
-  }, [staff.me, user?.email])
+  const myId = staff.me?.id ?? user?.userId ?? null
 
-  const viewsState = useShipmentViews()
-  const [viewSlug, setViewSlug] = useState('')
-  const [activeOnly, setActiveOnly] = useState(true)
+  const [lifecycle, setLifecycle] = useState<TrackingLifecycle>('active')
+  const [includeUnsent, setIncludeUnsent] = useState(false)
   const [nowMs, setNowMs] = useState(() => Date.now())
-
-  const [messagesByShipment, setMessagesByShipment] = useState<Record<string, ShipmentMessageRecord[]>>({})
-  const [messagesReadyKey, setMessagesReadyKey] = useState<string | null>(null)
-  const [conversationBundle, setConversationBundle] = useState<ShipmentBundle | null>(null)
-  const [bundleReadyKey, setBundleReadyKey] = useState<string | null>(null)
-
   const [createOpen, setCreateOpen] = useState(false)
-  const [saveOpen, setSaveOpen] = useState(false)
-  const [viewName, setViewName] = useState('')
-  const [shared, setShared] = useState(false)
-  const [savingView, setSavingView] = useState(false)
-
   const [customerLinkTarget, setCustomerLinkTarget] = useState<CustomerLinkDialogTarget | null>(null)
-  const [settings, setSettings] = useState<TmsSettings | null>(null)
-  const [trackingLinkTarget, setTrackingLinkTarget] = useState<TrackingLinkDialogTarget | null>(null)
-  const [infoOpen, setInfoOpen] = useInboxInfoOpen()
-
-  useEffect(() => {
-    let cancelled = false
-    getTmsSettings()
-      .then((s) => { if (!cancelled) setSettings(s) })
-      .catch(() => {})
-    return () => { cancelled = true }
-  }, [])
 
   const { favorites, toggleFavorite } = useTrackingFavorites(user?.email)
   const { recent, push: pushRecent, remove: removeRecent } = useRecentlyViewed(user?.email)
@@ -130,217 +78,42 @@ export function TrackingWorkstation() {
     return () => window.clearInterval(timer)
   }, [])
 
-  const caller = useMemo(
-    () => viewCallerOf({ groups: user?.groups, divisions: staff.me?.divisions, isOwner, isAdmin }),
-    [user?.groups, staff.me?.divisions, isOwner, isAdmin],
-  )
-  const visibleViews = useMemo(() => viewsVisibleTo(viewsState.views, caller), [viewsState.views, caller])
+  // Old Inbox bookmarks (`?tab=inbox&shipment=<id>`) land on the shipment's Tracking tab.
+  const legacyShipmentId = searchParams.get('shipment')
+  useEffect(() => {
+    if (legacyShipmentId) navigate(`/tms/shipments/${legacyShipmentId}?tab=tracking`, { replace: true })
+  }, [legacyShipmentId, navigate])
 
-  const viewer = useMemo(
-    () => ({ userId: user?.userId ?? null, teamRepIds: teamRepIdsFor(staff.me, settings?.teams) }),
-    [user?.userId, staff.me, settings?.teams],
+  const lifecycleRows = useMemo(
+    () => shipments.filter((r) => (includeUnsent || isRateConSent(r)) && lifecycleOf(r) === lifecycle),
+    [shipments, includeUnsent, lifecycle],
   )
 
-  const {
-    query,
-    setQuery,
-    setFilters,
-    rows: filteredRows,
-    panelProps,
-    createView,
-  } = useBoardFilters({
-    rows: shipments,
+  const { query, setQuery, rows: filteredRows, panelProps } = useBoardFilters({
+    rows: lifecycleRows,
     customers,
     staffNameOf: staff.nameOf,
-    views: visibleViews,
-    viewSlug,
-    onSelectView: setViewSlug,
-    onViewsChanged: viewsState.refresh,
-    onCreateView: () => { setViewName(''); setShared(false); setSaveOpen(true) },
     storageKey: 'tms-tracking',
-    baseFilters: { ...BASE_FILTERS, statuses: ACTIVE_STATUSES },
-    viewer,
+    baseFilters: EMPTY_BOARD_FILTER_SET,
   })
 
-  // Active / Closed toggle drives the status filter set so the panel stays in sync.
-  useEffect(() => {
-    const statuses = activeOnly ? ACTIVE_STATUSES : CLOSED_STATUSES
-    setFilters((prev) => ({ ...prev, statuses }))
-  }, [activeOnly, setFilters])
+  const tabs = useMemo(() => buildAssigneeTabs(filteredRows, myId, staff.nameOf), [filteredRows, myId, staff.nameOf])
+  const activeAssignee = searchParams.get('assignee') ?? defaultAssignee(filteredRows, myId)
+  const groups = useMemo(
+    () => groupByAssignee(rowsForAssignee(filteredRows, activeAssignee, myId), staff.nameOf),
+    [filteredRows, activeAssignee, myId, staff.nameOf],
+  )
 
-  const displayRows = useMemo(() => {
-    return filteredRows.filter((r) => {
-      const status = boardStatusOf(r)
-      const closed = status === 'DELIVERED' || status === 'VOIDED'
-      return activeOnly ? !closed : closed
-    })
-  }, [filteredRows, activeOnly])
-
-  // The Inbox is a communication hub, not a saved board view: show every active
-  // (or closed) shipment with traffic, regardless of which board filter the
-  // Tracking tab is using. Its own search box handles PRO/customer filtering.
-  const inboxRows = useMemo(() => {
-    return shipments.filter((r) => {
-      const status = boardStatusOf(r)
-      const closed = status === 'DELIVERED' || status === 'VOIDED'
-      return activeOnly ? !closed : closed
-    })
-  }, [shipments, activeOnly])
-
-  // ── URL-owned tab + conversation selection ────────────────────────────────
-  const tab: TabKey = searchParams.get('tab') === 'inbox' ? 'inbox' : 'tracking'
-  const setTab = useCallback(
-    (key: TabKey) => {
+  const selectAssignee = useCallback(
+    (key: string) => {
       setSearchParams((prev) => {
         const next = new URLSearchParams(prev)
-        if (key === 'tracking') next.delete('tab')
-        else next.set('tab', key)
+        next.set('assignee', key)
         return next
-      })
+      }, { replace: true })
     },
     [setSearchParams],
   )
-
-  const requestedId = searchParams.get('shipment')
-  // A deep-linked shipment keeps its (possibly still empty) conversation; without a
-  // link, fall back to the busiest conversation, then the first row.
-  const selectedConversationId = useMemo(() => {
-    if (requestedId && inboxRows.some((r) => r.id === requestedId)) return requestedId
-    const busiest = inboxRows.find((r) => (messagesByShipment[r.id] ?? []).length > 0)
-    return busiest?.id ?? inboxRows[0]?.id ?? null
-  }, [inboxRows, requestedId, messagesByShipment])
-
-  const selectConversation = useCallback(
-    (id: string) => {
-      if (requestedId === id) return
-      setSearchParams((prev) => {
-        const next = new URLSearchParams(prev)
-        next.set('shipment', id)
-        return next
-      })
-    },
-    [requestedId, setSearchParams],
-  )
-
-  // Landing on the Inbox without a deep link says the fallback in the URL (replace:
-  // the user never asked for this entry).
-  useEffect(() => {
-    if (tab !== 'inbox' || requestedId || !selectedConversationId) return
-    const next = new URLSearchParams(searchParams)
-    next.set('shipment', selectedConversationId)
-    setSearchParams(next, { replace: true })
-  }, [tab, requestedId, selectedConversationId, searchParams, setSearchParams])
-
-  const displayKey = useMemo(() => inboxRows.map((r) => r.id).sort().join(','), [inboxRows])
-  const messagesLoading = tab === 'inbox' && messagesReadyKey !== displayKey
-  const bundleLoading = selectedConversationId != null && bundleReadyKey !== selectedConversationId
-
-  // The conversation list reads every filtered shipment's traffic when the Inbox opens.
-  useEffect(() => {
-    if (tab !== 'inbox') return
-    let alive = true
-    const ids = displayKey ? displayKey.split(',') : []
-    mapLimit(ids, MESSAGE_READS, (id) =>
-      listShipmentMessages(id).then((rows) => ({ id, rows })),
-    )
-      .then((results) => {
-        if (!alive) return
-        const next: Record<string, ShipmentMessageRecord[]> = {}
-        for (const { id, rows } of results) next[id] = rows
-        setMessagesByShipment(next)
-      })
-      .catch(() => { if (alive) setMessagesByShipment({}) })
-      .finally(() => { if (alive) setMessagesReadyKey(displayKey) })
-    return () => { alive = false }
-  }, [tab, displayKey])
-
-  // The framed conversation needs the bundle for the driver/dispatcher contacts.
-  useEffect(() => {
-    if (tab !== 'inbox') return
-    const id = selectedConversationId
-    if (!id) return
-    let alive = true
-    getShipmentBundle(id)
-      .then((bundle) => { if (alive) setConversationBundle(bundle) })
-      .catch((err) => {
-        if (!alive) return
-        setConversationBundle(null)
-        toast.error(err instanceof Error ? err.message : 'Could not load the conversation')
-      })
-      .finally(() => { if (alive) setBundleReadyKey(id) })
-    return () => { alive = false }
-  }, [tab, selectedConversationId])
-
-  const refreshConversation = useCallback(async () => {
-    const id = selectedConversationId
-    if (!id) return
-    try {
-      const messages = await listShipmentMessages(id)
-      if (selectedConversationId !== id) return
-      setMessagesByShipment((prev) => ({ ...prev, [id]: messages }))
-    } catch (err) {
-      if (selectedConversationId !== id) return
-      toast.error(err instanceof Error ? err.message : 'Could not refresh the conversation')
-    }
-  }, [selectedConversationId])
-
-  const handleSendMessage = useCallback(async (input: {
-    channel: 'EMAIL' | 'SMS'
-    to: string | null
-    subject: string | null
-    body: string
-    documentIds?: string[]
-    party?: 'DRIVER' | 'DISPATCHER'
-  }) => {
-    const id = selectedConversationId
-    if (!id) return
-    await sendShipmentMessage({ shipmentId: id, ...input, authorName: senderName ?? undefined })
-    await refreshConversation()
-  }, [refreshConversation, selectedConversationId, senderName])
-
-  const selectedRow = useMemo(
-    () => inboxRows.find((r) => r.id === selectedConversationId) ?? null,
-    [inboxRows, selectedConversationId],
-  )
-  // The bundle may still be the previous conversation's while the next one loads;
-  // legGeometry only accepts a bundle that belongs to the selected shipment.
-  const geo = useMemo(
-    () => legGeometry(conversationBundle, selectedConversationId ?? ''),
-    [conversationBundle, selectedConversationId],
-  )
-  const activeLeg = geo.leg
-  const eta = useMemo(() => estimateEta(geo, new Date(nowMs).toISOString()), [geo, nowMs])
-
-  const openTrackingLinkDialog = useCallback(async () => {
-    const id = selectedConversationId
-    if (!id || !geo.leg || !geo.load) return
-    const leg = geo.leg
-    const loadNumber = geo.load.loadNumber ?? geo.load.aljexId ?? ''
-    try {
-      const [links, divisions] = await Promise.all([
-        listTrackingLinksByShipment(id),
-        listDivisions().catch(() => []),
-      ])
-      const own = geo.load.divisionKey ? divisions.find((d) => d.key === geo.load?.divisionKey) : divisions[0]
-      setTrackingLinkTarget({
-        leg,
-        loadNumber,
-        link: links.find((l) => l.kind === 'CARRIER_PING' && l.status === 'ACTIVE') ?? null,
-        brokerName: own?.name ?? 'BCAT Logistics',
-      })
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Could not open the tracking link')
-    }
-  }, [geo, selectedConversationId])
-
-  const reloadConversationBundle = useCallback(async () => {
-    const id = selectedConversationId
-    if (!id) return
-    try {
-      const bundle = await getShipmentBundle(id)
-      if (selectedConversationId === id) setConversationBundle(bundle)
-    } catch { /* keep the bundle on screen */ }
-  }, [selectedConversationId])
 
   const openShipment = useCallback(
     (id: string) => {
@@ -366,144 +139,76 @@ export function TrackingWorkstation() {
     }
   }, [])
 
-  const saveView = useCallback(async () => {
-    if (!viewName.trim()) return
-    setSavingView(true)
+  const handleRequestCheckCall = useCallback(async (row: ShipmentRow) => {
     try {
-      await createView(viewName.trim(), shared)
-      setSaveOpen(false)
-      toast.success('View saved')
+      const result = await runCheckCallPlan({ shipmentId: row.id })
+      toast.success(`${row.number}: ${result.reason}`)
+      await refreshShipments()
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'View could not be saved')
-    } finally {
-      setSavingView(false)
+      toast.error(err instanceof Error ? err.message : 'Could not request a check call')
     }
-  }, [createView, shared, viewName])
+  }, [refreshShipments])
 
-  const tabs = useMemo(
-    () => [
-      { key: 'inbox', label: 'Inbox' },
-      { key: 'tracking', label: 'Tracking' },
-    ],
-    [],
-  )
+  const handleRequestPod = useCallback(async (row: ShipmentRow) => {
+    try {
+      await requestPod({ shipmentId: row.id })
+      toast.success(`POD requested for ${row.number}`)
+      await refreshShipments()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not request the POD')
+    }
+  }, [refreshShipments])
+
+  const handleAssignTracker = useCallback(async (shipmentIds: string[], trackerId: string | null) => {
+    try {
+      const result = await assignTracker({ shipmentIds, trackerId })
+      if (result.updated.length > 0) {
+        toast.success(
+          `${result.updated.length} shipment${result.updated.length === 1 ? '' : 's'} ${trackerId ? `assigned to ${staff.nameOf(trackerId)}` : 'unassigned'}`,
+        )
+      }
+      for (const skipped of result.skipped) toast.error(`${skipped.shipmentId}: ${skipped.reason}`)
+      await refreshShipments()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not assign the tracker')
+    }
+  }, [refreshShipments, staff])
 
   return (
     <div className="tms-board-shell flex h-full flex-col">
-      <div className="tms-board-toolbar flex items-center justify-between px-3 py-2">
-        <TmsSegmentedTabs tabs={tabs} active={tab} onSelect={(key) => setTab(key as TabKey)} aria-label="Tracking desk" />
-      </div>
       <div className="flex flex-1 overflow-hidden">
-        {tab === 'tracking' ? (
-          <TrackingBoard
-            rows={displayRows}
-            loading={shipmentsLoading}
-            error={shipmentsError}
-            nowMs={nowMs}
-            mapsKey={MAPS_KEY}
-            mapsMapId={MAPS_MAP_ID}
-            query={query}
-            setQuery={setQuery}
-            activeOnly={activeOnly}
-            setActiveOnly={setActiveOnly}
-            favorites={favorites}
-            onToggleFavorite={toggleFavorite}
-            onOpenShipment={openShipment}
-            onCreateShipment={() => setCreateOpen(true)}
-            onManageLinks={() => navigate('/tms/tracking/links')}
-            onCreateCustomerUrl={(row) => { void openCustomerLinkDialog(row) }}
-            onSaveView={() => panelProps.onCreateFilterSet()}
-            panelProps={panelProps}
-            recent={recent}
-            onOpenRecent={openShipment}
-            onRemoveRecent={removeRecent}
-          />
-        ) : (
-          <InboxPanel
-            rows={inboxRows}
-            messagesByShipment={messagesByShipment}
-            loading={messagesLoading}
-            selectedId={selectedConversationId}
-            onSelect={selectConversation}
-            nowMs={nowMs}
-            info={infoOpen && selectedRow ? (
-              <InboxInfoPanel
-                row={selectedRow}
-                bundle={geo.load ? conversationBundle : null}
-                geo={geo}
-                eta={eta}
-                nowMs={nowMs}
-                mapsKey={MAPS_KEY}
-                mapsMapId={MAPS_MAP_ID}
-                onClose={() => setInfoOpen(false)}
-              />
-            ) : undefined}
-          >
-            <TrackingConversation
-              variant="inbox"
-              bundle={conversationBundle}
-              messages={selectedConversationId ? messagesByShipment[selectedConversationId] ?? [] : []}
-              loading={messagesLoading || bundleLoading}
-              userName={senderName ?? null}
-              driver={activeLeg ? { name: activeLeg.driverName, phone: activeLeg.driverPhone } : null}
-              dispatcher={activeLeg ? { name: activeLeg.dispatcherName, phone: activeLeg.dispatcherPhone, email: activeLeg.dispatcherEmail } : null}
-              conversationKey={selectedConversationId ?? ''}
-              onSendMessage={handleSendMessage}
-              onRefresh={refreshConversation}
-              header={selectedRow ? (
-                <InboxChatHeader
-                  row={selectedRow}
-                  leg={activeLeg}
-                  pingAt={geo.pingAt ?? selectedRow.lastUpdateAt ?? null}
-                  nowMs={nowMs}
-                  infoOpen={infoOpen}
-                  onToggleInfo={() => setInfoOpen(!infoOpen)}
-                />
-              ) : undefined}
-              quickActions={selectedRow ? (
-                <InboxQuickActions
-                  shipmentId={selectedRow.id}
-                  leg={activeLeg}
-                  voided={boardStatusOf(selectedRow) === 'VOIDED'}
-                  onRefresh={async () => { await Promise.all([refreshConversation(), reloadConversationBundle()]) }}
-                  onSendTrackingLink={() => { void openTrackingLinkDialog() }}
-                />
-              ) : undefined}
-              streamTail={selectedRow ? (
-                <LocationCard row={selectedRow} geo={geo} eta={eta} nowMs={nowMs} mapsKey={MAPS_KEY} mapsMapId={MAPS_MAP_ID} />
-              ) : undefined}
-            />
-          </InboxPanel>
-        )}
+        <TrackingBoard
+          groups={groups}
+          assigneeTabs={tabs}
+          activeAssignee={activeAssignee}
+          onSelectAssignee={selectAssignee}
+          lifecycle={lifecycle}
+          onLifecycle={setLifecycle}
+          includeUnsent={includeUnsent}
+          onIncludeUnsent={setIncludeUnsent}
+          loading={shipmentsLoading}
+          error={shipmentsError}
+          nowMs={nowMs}
+          mapsKey={MAPS_KEY}
+          mapsMapId={MAPS_MAP_ID}
+          query={query}
+          setQuery={setQuery}
+          favorites={favorites}
+          onToggleFavorite={toggleFavorite}
+          onOpenShipment={openShipment}
+          onCreateShipment={() => setCreateOpen(true)}
+          onManageLinks={() => navigate('/tms/tracking/links')}
+          onCreateCustomerUrl={(row) => { void openCustomerLinkDialog(row) }}
+          onRequestCheckCall={handleRequestCheckCall}
+          onRequestPod={handleRequestPod}
+          onAssignTracker={handleAssignTracker}
+          panelProps={panelProps}
+          recent={recent}
+          onOpenRecent={openShipment}
+          onRemoveRecent={removeRecent}
+        />
       </div>
       <CreateShipmentDialog open={createOpen} onOpenChange={setCreateOpen} onCreated={refreshShipments} />
-      <TmsDialog open={saveOpen} onOpenChange={setSaveOpen} title="Save tracking view" footer={
-        <TmsButton disabled={!viewName.trim() || savingView} onClick={saveView}>
-          {savingView ? 'Saving…' : 'Save view'}
-        </TmsButton>
-      }>
-        <div className="space-y-3">
-          <label className="block text-sm">
-            View name
-            <TmsInput value={viewName} onChange={(e) => setViewName(e.target.value)} />
-          </label>
-          <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={shared} onChange={(e) => setShared(e.target.checked)} />
-            Shared view
-          </label>
-        </div>
-      </TmsDialog>
-      {trackingLinkTarget && (
-        <TrackingLinkDialog
-          loadCarrier={trackingLinkTarget.leg}
-          loadNumber={trackingLinkTarget.loadNumber}
-          link={trackingLinkTarget.link}
-          settings={settings}
-          brokerName={trackingLinkTarget.brokerName}
-          onClose={() => setTrackingLinkTarget(null)}
-          onChanged={() => { void reloadConversationBundle(); void refreshShipments() }}
-        />
-      )}
       {customerLinkTarget && (
         <CustomerLinkDialog
           shipment={customerLinkTarget.bundle.shipment}

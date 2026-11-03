@@ -70,8 +70,16 @@ describe('shipment-email-intake', () => {
     expect(body.shipmentId).toBe('shp-123')
 
     const invoke = lambdaSend.mock.calls[0][0] as { input: { FunctionName: string; Payload: Buffer } }
-    const payload = JSON.parse(invoke.input.Payload.toString('utf-8')) as { arguments: { action: string; input: Record<string, unknown> } }
+    const payload = JSON.parse(invoke.input.Payload.toString('utf-8')) as {
+      arguments: { action: string; input: Record<string, unknown> }
+      systemCaller?: string
+      identity?: unknown
+    }
     expect(payload.arguments.action).toBe('INGEST_SHIPMENT_MESSAGE')
+    // The router can only authorize this caller through the system-caller allow-list; a
+    // hand-built identity has no claims and fails `Unauthorized: could not resolve caller email`.
+    expect(payload.systemCaller).toBe('shipment-email-intake')
+    expect(payload.identity).toBeUndefined()
     expect(payload.arguments.input.shipmentId).toBe('shp-123')
     expect(payload.arguments.input.messageId).toBe('<reply-1@example.com>')
   })

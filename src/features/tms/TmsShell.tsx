@@ -8,7 +8,6 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronsUpDown,
-  CircleHelp,
   LayoutGrid,
   LogOut,
   Menu,
@@ -81,7 +80,6 @@ export interface TmsShellProps {
   activePath: string
   breadcrumb: TmsBreadcrumbItem[]
   user: { initial: string; email: string; name?: string | null }
-  shipmentViews: Array<{ slug: string; name: string }>
   /** Numeric counts for `badgeKey` items (see `useShellBadgeCounts`; absent or 0 renders no badge).
    *  `tracking` carries the shipments currently moving. */
   badgeCounts?: Record<string, number>
@@ -111,6 +109,8 @@ export interface TmsShellProps {
 const COLLAPSE_KEY = 'tms-sidebar-collapsed'
 export const SHIPMENTS_PATH = '/tms/shipments'
 const TRACKING_PATH = '/tms/tracking'
+const INTAKE_PATH = '/tms/shipments/intake'
+const DOCUMENTS_PATH = '/tms/documents/review'
 const COMPANY_GROUP = 'COMPANY'
 const ALL_BUSINESSES = 'All businesses'
 
@@ -128,14 +128,12 @@ function initialsOf(name: string): string {
 }
 
 function isChildActive(activePath: string, child: TmsNavChild): boolean {
-  // Active Shipments is the default board view, so it stays selected for the bare
-  // shipments path and for any saved board view slug under it.
-  if (child.to === SHIPMENTS_PATH) {
-    return activePath === SHIPMENTS_PATH || activePath.startsWith(`${SHIPMENTS_PATH}/view/`)
-  }
+  // The Shipments child is the board itself: not the intake queue or a shipment page.
+  if (child.to === SHIPMENTS_PATH) return activePath === SHIPMENTS_PATH
+  // Intake has its own review pages under /tms/shipments/intake/:id.
   // The Tracking workstation has a child Manage page under /tms/tracking/links;
   // the parent /tms/tracking stays highlighted while on that page.
-  if (child.to === TRACKING_PATH) {
+  if (child.to === INTAKE_PATH || child.to === TRACKING_PATH) {
     return activePath === child.to || activePath.startsWith(`${child.to}/`)
   }
   return activePath === child.to
@@ -146,30 +144,15 @@ interface NavChildren {
   groups: TmsNavChildGroup[]
 }
 
-function childrenFor(
-  item: TmsNavItem,
-  shipmentViews: TmsShellProps['shipmentViews'],
-  trackedLoads: TmsLiveChild[],
-): NavChildren {
-  if (item.to !== SHIPMENTS_PATH) {
-    return { items: item.children ?? [], groups: item.childGroups ?? [] }
-  }
+function childrenFor(item: TmsNavItem, trackedLoads: TmsLiveChild[]): NavChildren {
+  const groups = item.childGroups ?? []
+  if (item.to !== SHIPMENTS_PATH) return { items: item.children ?? [], groups }
   const items: TmsNavChild[] = [
-    { to: SHIPMENTS_PATH, label: 'Active Shipments' },
+    { to: SHIPMENTS_PATH, label: 'Shipments' },
     ...(item.children ?? []),
-    { to: '/tms/dispatch', label: 'Dispatch' },
     { to: TRACKING_PATH, label: 'Tracking', badgeKey: 'tracking', live: trackedLoads },
-    { to: '/tms/documents', label: 'Documents' },
+    { to: DOCUMENTS_PATH, label: 'Documents' },
   ]
-  const queuedSlugs = new Set((item.children ?? []).map((c) => c.to.replace(`${SHIPMENTS_PATH}/view/`, '')))
-  const groups: TmsNavChildGroup[] = shipmentViews.length
-    ? [{
-        label: 'Views',
-        children: shipmentViews
-          .filter((v) => !queuedSlugs.has(v.slug))
-          .map((v) => ({ to: `${SHIPMENTS_PATH}/view/${v.slug}`, label: v.name })),
-      }]
-    : []
   return { items, groups }
 }
 
@@ -230,19 +213,17 @@ function NavChildRow({
 function NavRow({
   item,
   activePath,
-  shipmentViews,
   badgeCounts,
   trackedLoads,
 }: {
   item: TmsNavItem
   activePath: string
-  shipmentViews: TmsShellProps['shipmentViews']
   badgeCounts?: Record<string, number>
   trackedLoads: TmsLiveChild[]
 }) {
   const { items, groups } = useMemo(
-    () => childrenFor(item, shipmentViews, trackedLoads),
-    [item, shipmentViews, trackedLoads],
+    () => childrenFor(item, trackedLoads),
+    [item, trackedLoads],
   )
   const parentActive = isPathActive(activePath, item.to)
   const anyChildActive = useMemo(
@@ -318,7 +299,6 @@ function NavSectionBlock({
   /** The effective business preference, or null for All businesses. */
   company: string | null
   activePath: string
-  shipmentViews: TmsShellProps['shipmentViews']
   badgeCounts?: Record<string, number>
   trackedLoads: TmsLiveChild[]
 }) {
@@ -455,7 +435,6 @@ export function TmsShell({
   activePath,
   breadcrumb,
   user,
-  shipmentViews,
   badgeCounts,
   companies = [],
   notificationCount = 0,
@@ -524,7 +503,7 @@ export function TmsShell({
   const userName = personName({ name: user.name, email: user.email }, 'Team member')
   const shownEmail = user.email.includes('@') ? user.email : ''
   const dark = theme === 'dark'
-  const rowProps = { activePath, shipmentViews, badgeCounts, trackedLoads }
+  const rowProps = { activePath, badgeCounts, trackedLoads }
 
   return (
     <div className={`tms-shell${collapsed ? ' tms-is-collapsed' : ''}${fill ? ' tms-fill' : ''}${navOpen ? ' tms-nav-open' : ''}`}>
@@ -646,9 +625,6 @@ export function TmsShell({
                 <TmsCountBadge count={notificationCount} tone="amber" />
               </button>
             )}
-            <Link to="/tms/academy" className="tms-icon-btn tms-icon-btn-sq" aria-label="Help">
-              <CircleHelp size={16} aria-hidden="true" />
-            </Link>
             <button
               type="button"
               className="tms-icon-btn tms-icon-btn-sq tms-theme-toggle"

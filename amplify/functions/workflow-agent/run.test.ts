@@ -31,6 +31,8 @@ const TABLES = {
   proClaim: 'ProClaim-test',
   integration: 'Integration-test',
   audit: 'AuditLog-test',
+  intakeLoad: 'IntakeLoad-test',
+  division: 'OwnershipDivision-test',
 }
 
 /** Any Put/Update the agent is forbidden to make lands in one of these. */
@@ -58,6 +60,8 @@ const store = vi.hoisted(() => {
   process.env.PRO_CLAIM_TABLE_NAME = 'ProClaim-test'
   process.env.INTEGRATION_TABLE_NAME = 'Integration-test'
   process.env.AUDIT_LOG_TABLE_NAME = 'AuditLog-test'
+  process.env.INTAKE_LOAD_TABLE_NAME = 'IntakeLoad-test'
+  process.env.OWNERSHIP_DIVISION_TABLE_NAME = 'OwnershipDivision-test'
   process.env.BUCKET_NAME = 'bcat-test-bucket'
   process.env.USER_POOL_ID = 'us-east-1_test'
   process.env.INBOX_SECRET = 'inbox-secret'
@@ -495,11 +499,13 @@ describe('runFor', () => {
     expect(run.outcome).toBe('PROPOSED')
   })
 
-  it('proposes a tender and writes nothing to shipment, order, load, quote, customer or carrier', async () => {
+  it('proposes a tender, stages one intake load, and writes nothing to shipment, order, load, quote, customer or carrier', async () => {
+    table(TABLES.division).set('BROKERAGE', { id: 'BROKERAGE', code: 'BROKERAGE', name: 'Brokerage', active: true, intakeEmail: 'tenders+brokerage@bcatcorp.com' })
     seedInboxMessage('workflow-inbox/d/message.json', {
       subject: 'Tender CHICAGO, IL to DALLAS, TX',
       fromEmail: 'dispatch@batory.com',
       bodyText: 'Ref #: 778899',
+      toAddresses: ['someone@bcatcorp.com', 'tenders+brokerage@bcatcorp.com'],
       attachments: [],
     })
     modelReplies.push({ agent: 'TENDER', confidence: 'high', reason: 'a tender' }, {
@@ -507,6 +513,7 @@ describe('runFor', () => {
       reference: '778899',
       pickupNumber: null,
       weightLb: 42000,
+      lowConfidence: ['weightLb'],
       stops: [{ type: 'pickup', city: 'CHICAGO', state: 'IL', dateStr: '2026-11-02' }],
     })
 
@@ -516,10 +523,97 @@ describe('runFor', () => {
     expect(run.outcome).toBe('PROPOSED')
     expect(run.proposalKind).toBe('TENDER')
     expect(run.partyId).toBe('cust1')
-    expect(tablesWritten()).toEqual([TABLES.run])
+    // The proposal is exactly what it was before intake existed: no intake fields leak into it.
+    expect(Object.keys(run.proposal as Row).sort()).toEqual(['customerId', 'customerName', 'kind', 'tender'])
+    expect(tablesWritten()).toEqual([TABLES.run, TABLES.intakeLoad].sort())
     for (const forbidden of BUSINESS_TABLES) {
       expect(writes.some((w) => w.table === forbidden)).toBe(false)
     }
+    const intake = table(TABLES.intakeLoad).get(`il:${run.id}`)
+    expect(intake).toMatchObject({
+      status: 'OPEN', divisionCode: 'BROKERAGE', toAddress: 'tenders+brokerage@bcatcorp.com', runId: run.id, parseState: 'PARSED',
+    })
+    const weightMeta = (intake?.meta as Record<string, { source: string; confidence: string }>).weightLb
+    expect(weightMeta).toMatchObject({ confidence: 'low' })
+  })
+
+  describe('intake staging around the tender pipeline', () => {
+    const intakeRows = () => [...table(TABLES.intakeLoad).values()]
+    const TENDER_FILL = { customer: 'Batory Foods', reference: '445566', pickupNumber: null, weightLb: null, lowConfidence: [], stops: [] }
+
+    it('stages an UNKNOWN_PARTY tender with the customer missing and the candidates kept', async () => {
+      seedInboxMessage('workflow-inbox/u1/message.json', {
+        subject: 'Tender CHICAGO, IL to DALLAS, TX', fromEmail: 'dispatch@batory.com', bodyText: 'Ref #: 445566',
+        authResult: 'mx.google.com; spf=softfail smtp.mailfrom=batory.com; dkim=none; dmarc=fail header.from=batory.com', attachments: [],
+      })
+      modelReplies.push({ agent: 'TENDER', confidence: 'high', reason: 't' }, TENDER_FILL)
+
+      const run = await runFor({ sourceKind: 'INBOX', sourceId: 'u1', inboxRole: 'TENDER', provider: 'INBOX', sourceKey: 'workflow-inbox/u1/message.json' })
+
+      expect(run.outcome).toBe('UNKNOWN_PARTY')
+      const [row] = intakeRows()
+      expect(row).toMatchObject({ status: 'OPEN', divisionCode: null, parseState: 'PARSED' })
+      expect((row.fields as { customerId: string | null }).customerId).toBeNull()
+      expect((row.autoFields as { customerCandidates: unknown[] }).customerCandidates).toEqual([{ id: 'cust1', name: 'BATORY FOODS', how: 'DOMAIN' }])
+    })
+
+    it('stages the bare e-mail when the cap stops the run, and stages nothing for a blacklisted sender', async () => {
+      table(TABLES.settings).set('default', { id: 'default', aiAgents: { dailyRunCap: 1 } })
+      table(TABLES.run).set('wf:TENDER:earlier', { id: 'wf:TENDER:earlier', agent: 'TENDER', status: 'COMPLETED', createdAt: new Date().toISOString(), lastAttemptAt: new Date().toISOString(), updatedAt: new Date().toISOString() })
+      seedInboxMessage('workflow-inbox/u2/message.json', { subject: 'Tender', fromEmail: 'dispatch@batory.com', bodyText: 'Ref #: 1', attachments: [] })
+      const capped = await runFor({ sourceKind: 'INBOX', sourceId: 'u2', inboxRole: 'TENDER', provider: 'INBOX', sourceKey: 'workflow-inbox/u2/message.json' })
+      expect(capped.errorCode).toBe('DAILY_CAP')
+      expect(modelPrompts).toHaveLength(0)
+      expect(intakeRows()).toHaveLength(1)
+      expect(intakeRows()[0]).toMatchObject({ runId: capped.id, parseState: 'NOT_PARSED', parseNote: 'DAILY_CAP', subject: 'Tender' })
+
+      table(TABLES.settings).set('default', { id: 'default', aiAgents: { dailyRunCap: 200 } })
+      table(TABLES.integration).set('GMAIL', { id: 'GMAIL', provider: 'GMAIL', settings: { blacklistAddresses: ['noreply@marketing.example'], blacklistKeywords: [] } })
+      seedInboxMessage('workflow-inbox/u3/message.json', { subject: 'Newsletter', fromEmail: 'noreply@marketing.example', bodyText: 'Buy', attachments: [] })
+      const black = await runFor({ sourceKind: 'INBOX', sourceId: 'u3', inboxRole: 'TENDER', provider: 'INBOX', sourceKey: 'workflow-inbox/u3/message.json' })
+      expect(black.errorCode).toBe('BLACKLISTED')
+      expect(intakeRows()).toHaveLength(1)
+    })
+
+    it('stages nothing when the classifier re-routes a tender-inbox message to another desk', async () => {
+      seedInboxMessage('workflow-inbox/u4/message.json', { subject: 'Rate please', fromEmail: 'dispatch@batory.com', bodyText: 'What would you charge Chicago to Dallas?', attachments: [] })
+      modelReplies.push({ agent: 'QUOTE', confidence: 'high', reason: 'a rate request' }, { originCity: 'CHICAGO', originState: 'IL', destinationCity: 'DALLAS', destinationState: 'TX' })
+      const run = await runFor({ sourceKind: 'INBOX', sourceId: 'u4', inboxRole: 'TENDER', provider: 'INBOX', sourceKey: 'workflow-inbox/u4/message.json' })
+      expect(run.agent).toBe('QUOTE')
+      expect(intakeRows()).toHaveLength(0)
+    })
+
+    it('a failing intake write is swallowed: the run still ends PROPOSED with the same proposal', async () => {
+      seedInboxMessage('workflow-inbox/u5/message.json', { subject: 'Tender CHICAGO, IL to DALLAS, TX', fromEmail: 'dispatch@batory.com', bodyText: 'Ref #: 778899', attachments: [] })
+      modelReplies.push({ agent: 'TENDER', confidence: 'high', reason: 't' }, { ...TENDER_FILL, reference: '778899' })
+      const original = send.getMockImplementation() as (cmd: MockCommand) => Promise<unknown>
+      send.mockImplementation(async (cmd: MockCommand) => {
+        if (cmd.__type === 'Put' && cmd.input.TableName === TABLES.intakeLoad) throw new Error('DynamoDB unavailable')
+        return original(cmd)
+      })
+      try {
+        const run = await runFor({ sourceKind: 'INBOX', sourceId: 'u5', inboxRole: 'TENDER', provider: 'INBOX', sourceKey: 'workflow-inbox/u5/message.json' })
+        expect(run.outcome).toBe('PROPOSED')
+        expect(run.status).toBe('COMPLETED')
+        expect(run.proposalKind).toBe('TENDER')
+        expect(intakeRows()).toHaveLength(0)
+      } finally {
+        send.mockImplementation(original)
+      }
+    })
+
+    it('re-running a run never overwrites an intake load a reviewer has edited', async () => {
+      seedInboxMessage('workflow-inbox/u6/message.json', { subject: 'Tender CHICAGO, IL to DALLAS, TX', fromEmail: 'dispatch@batory.com', bodyText: 'Ref #: 778899', attachments: [] })
+      modelReplies.push({ agent: 'TENDER', confidence: 'high', reason: 't' }, { ...TENDER_FILL, reference: '778899' })
+      const run = await runFor({ sourceKind: 'INBOX', sourceId: 'u6', inboxRole: 'TENDER', provider: 'INBOX', sourceKey: 'workflow-inbox/u6/message.json' })
+      const id = `il:${run.id}`
+      table(TABLES.intakeLoad).set(id, { ...(table(TABLES.intakeLoad).get(id) as Row), commodity: 'edited by a person', version: 5 })
+      const stored = table(TABLES.run).get(run.id) as Row
+      table(TABLES.run).set(run.id, { ...stored, status: 'FAILED', outcome: null, errorCode: 'MODEL_TIMEOUT', exceptionOpen: 'OPEN' })
+      modelReplies.push({ agent: 'TENDER', confidence: 'high', reason: 't' }, { ...TENDER_FILL, reference: '778899' })
+      await retryRun(run.id, Number(stored.version), { email: 'dennis@bcatcorp.com' })
+      expect(table(TABLES.intakeLoad).get(id)).toMatchObject({ commodity: 'edited by a person', version: 5 })
+    })
   })
 
   it('treats an instruction in the body as data: still a proposal, still no privileged write', async () => {

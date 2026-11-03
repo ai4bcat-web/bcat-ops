@@ -1,5 +1,5 @@
 /*
- * Tracking workstation, Inbox, shipment thread / check-call plan.
+ * Tracking workstation (table by assignee), shipment thread / check-call plan.
  * Moved verbatim out of theme.css (S2 slice A); owned by S2 slice C from here on.
  * Tokens live in ../theme.css; every selector stays under .tms-shell / .tms-portal. No colour literals.
  */
@@ -295,135 +295,77 @@
   background: var(--tms-surface-hover);
 }
 
-/* ── Inbox: Chaine conversations ──────────────────────────────────────────── */
+.tms-shell .tms-tracking-rowmenu-item:disabled {
+  color: var(--tms-disabled);
+  cursor: not-allowed;
+}
 
-.tms-shell .tms-inbox {
-  display: grid;
-  grid-template-columns: 340px minmax(0, 1fr);
-  flex: 1 1 auto;
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-  background: var(--tms-card);
+.tms-shell .tms-tracking-rowmenu-item:disabled:hover {
+  background: none;
+}
+
+.tms-shell .tms-tracking-rowmenu.tms-open .tms-tracking-rowmenu-menu {
+  display: block;
+}
+
+.tms-shell .tms-tracking-rowmenu-picker {
+  padding: 8px 12px;
   border-top: 1px solid var(--tms-border);
 }
 
-.tms-shell .tms-inbox.tms-inbox-with-info {
-  grid-template-columns: 340px minmax(0, 1fr) 320px;
-}
-
-.tms-shell .tms-inbox-list {
+/* Assignee tabs and the per-assignee table sections (step V). */
+.tms-shell .tms-tracking-assignee-tabs {
   display: flex;
-  flex-direction: column;
-  min-width: 0;
-  min-height: 0;
-  border-right: 1px solid var(--tms-border);
-}
-
-.tms-shell .tms-inbox-list-head {
-  display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-  padding: 12px 14px;
-  border-bottom: 1px solid var(--tms-border);
 }
 
-.tms-shell .tms-inbox-items {
+.tms-shell .tms-tracking-groups {
   flex: 1 1 auto;
   min-height: 0;
-  overflow-y: auto;
-}
-
-.tms-shell .tms-inbox-item {
-  position: relative;
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  width: 100%;
-  padding: 12px 14px;
-  background: none;
-  border: 0;
-  border-bottom: 1px solid var(--tms-border);
-  border-left: 3px solid transparent;
-  color: var(--tms-text);
-  text-align: left;
-  cursor: pointer;
-}
-
-.tms-shell .tms-inbox-item:hover {
-  box-shadow: inset 0 0 0 9999px color-mix(in srgb, var(--tms-text) 6%, transparent);
-}
-
-.tms-shell .tms-inbox-item.tms-active {
-  background: var(--tms-surface-selected);
-  border-left-color: var(--tms-primary);
-}
-
-.tms-shell .tms-inbox-item-avatar { flex: 0 0 auto; }
-
-.tms-shell .tms-inbox-item-text {
+  overflow: auto;
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  flex: 1 1 auto;
-  min-width: 0;
+  gap: 16px;
 }
 
-.tms-shell .tms-inbox-item-top {
+.tms-shell .tms-tracking-group {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
+  flex-direction: column;
+  flex: 0 0 auto;
+}
+
+.tms-shell .tms-tracking-group-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--tms-border);
+}
+
+.tms-shell .tms-tracking-group-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--tms-text);
+}
+
+.tms-shell .tms-tracking-group-count {
+  color: var(--tms-muted);
+  font-size: 12px;
+}
+
+.tms-shell .tms-tracking-group-reassign {
+  margin-left: auto;
+  min-width: 220px;
+}
+
+.tms-shell .tms-tracking-detail-tracker {
+  display: inline-flex;
+  align-items: center;
   gap: 8px;
 }
-
-.tms-shell .tms-inbox-item-pro { font-weight: 600; font-size: 13px; }
-
-.tms-shell .tms-inbox-item-time { color: var(--tms-muted); font-size: 12px; flex: 0 0 auto; }
-
-.tms-shell .tms-inbox-item-customer,
-.tms-shell .tms-inbox-item-lane,
-.tms-shell .tms-inbox-item-preview {
-  font-size: 12px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.tms-shell .tms-inbox-item-customer { color: var(--tms-text); }
-.tms-shell .tms-inbox-item-lane,
-.tms-shell .tms-inbox-item-preview { color: var(--tms-muted); }
-
-.tms-shell .tms-inbox-item-count { position: absolute; right: 14px; bottom: 12px; }
-
-.tms-shell .tms-inbox-chat {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-}
-
-/* Chat header */
-.tms-shell .tms-chat-header {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  flex: 0 0 auto;
-  padding: 14px 16px;
-  border-bottom: 1px solid var(--tms-border);
-}
-
-.tms-shell .tms-chat-header-title { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.tms-shell .tms-chat-header-name { margin: 0; font-size: 16px; font-weight: 600; color: var(--tms-text); }
-.tms-shell .tms-chat-header-pro { margin-left: auto; font-size: 12px; font-weight: 600; color: var(--tms-primary-ink); text-decoration: none; }
-.tms-shell .tms-chat-header-pro:hover { text-decoration: underline; }
-.tms-shell .tms-chat-header-contact { display: flex; align-items: center; gap: 10px; }
-.tms-shell .tms-chat-header-who { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; }
-.tms-shell .tms-chat-header-person { font-size: 13px; font-weight: 600; color: var(--tms-text); }
-.tms-shell .tms-chat-header-ping { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--tms-muted); }
-.tms-shell .tms-ping-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--tms-disabled); }
-.tms-shell .tms-chat-header-ping[data-fresh="true"] .tms-ping-dot { background: var(--tms-primary); }
-.tms-shell .tms-chat-header-actions { display: flex; align-items: center; gap: 6px; }
 
 .tms-shell .tms-icon-link {
   display: inline-flex;
@@ -442,56 +384,6 @@
 
 .tms-shell .tms-icon-link:hover { color: var(--tms-text); background: var(--tms-surface-hover); }
 .tms-shell .tms-icon-link[aria-pressed="true"] { color: var(--tms-primary-ink); background: var(--tms-primary-tint); border-color: var(--tms-primary); }
-
-/* Quick-action bar */
-.tms-shell .tms-quick-actions {
-  display: flex;
-  flex: 0 0 auto;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding: 10px 16px 0;
-  background: var(--tms-card);
-  border-top: 1px solid var(--tms-border);
-}
-
-.tms-shell .tms-quick-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 30px;
-  padding: 0 12px;
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--tms-text);
-  background: var(--tms-card);
-  border: 1px solid var(--tms-input-border);
-  border-radius: var(--tms-radius-pill);
-  cursor: pointer;
-  text-decoration: none;
-}
-
-.tms-shell .tms-quick-chip:hover:not(:disabled):not([aria-disabled="true"]) { background: var(--tms-primary-tint); border-color: var(--tms-primary); color: var(--tms-primary-ink); }
-.tms-shell .tms-quick-chip:disabled,
-.tms-shell .tms-quick-chip[aria-disabled="true"] { color: var(--tms-disabled); cursor: not-allowed; }
-
-.tms-shell .tms-quick-actions + .tms-thread-composer { border-top: 0; }
-
-/* Info panel */
-.tms-shell .tms-inbox-info {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  min-height: 0;
-  border-left: 1px solid var(--tms-border);
-  background: var(--tms-card);
-}
-
-.tms-shell .tms-inbox-info-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; border-bottom: 1px solid var(--tms-border); }
-.tms-shell .tms-inbox-info-title { margin: 0; font-size: 14px; font-weight: 600; color: var(--tms-text); }
-.tms-shell .tms-inbox-info-body { display: flex; flex-direction: column; gap: 16px; padding: 16px; overflow-y: auto; }
-.tms-shell .tms-inbox-info-map { overflow: hidden; border: 1px solid var(--tms-border); border-radius: var(--tms-radius); }
-.tms-shell .tms-inbox-info-sub { margin: 0 0 8px; font-size: 12px; font-weight: 600; letter-spacing: 0.03em; text-transform: uppercase; color: var(--tms-muted); }
-
 /* Driver card */
 .tms-shell .tms-driver-card { display: flex; flex-direction: column; gap: 10px; padding: 12px; background: var(--tms-card); border: 1px solid var(--tms-border); border-radius: var(--tms-radius); }
 .tms-shell .tms-driver-card-main { display: flex; align-items: center; gap: 10px; }
@@ -503,27 +395,6 @@
 .tms-shell .tms-driver-card-contact { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; }
 .tms-shell .tms-driver-card-contact a { display: inline-flex; align-items: center; gap: 4px; color: var(--tms-primary-ink); text-decoration: none; }
 .tms-shell .tms-driver-card-contact a:hover { text-decoration: underline; }
-
-/* Location card */
-.tms-shell .tms-location-card { margin-top: 4px; overflow: hidden; background: var(--tms-card); border: 1px solid var(--tms-border); border-radius: var(--tms-radius-card); box-shadow: var(--tms-shadow); }
-.tms-shell .tms-location-card-body { display: flex; flex-direction: column; gap: 2px; padding: 12px 14px; }
-.tms-shell .tms-location-card-label { font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--tms-muted); }
-.tms-shell .tms-location-card-figure { font-size: 22px; font-weight: 700; color: var(--tms-text); }
-.tms-shell .tms-location-card-lane { font-size: 13px; color: var(--tms-text-2); }
-.tms-shell .tms-location-card-ping { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--tms-muted); }
-
-/* Narrow screens: Info becomes an overlay column, closed by default (see useInboxInfoOpen). */
-@media (max-width: 1280px) {
-  .tms-shell .tms-inbox.tms-inbox-with-info { grid-template-columns: 300px minmax(0, 1fr); position: relative; }
-  .tms-shell .tms-inbox-with-info .tms-inbox-info { position: absolute; top: 0; right: 0; bottom: 0; z-index: 5; width: 320px; max-width: 100%; box-shadow: var(--tms-shadow-pop); }
-}
-
-@media (max-width: 1100px) {
-  .tms-shell .tms-inbox,
-  .tms-shell .tms-inbox.tms-inbox-with-info { display: flex; flex-direction: column; }
-  .tms-shell .tms-inbox-list { flex: 0 0 auto; max-height: 40%; border-right: 0; border-bottom: 1px solid var(--tms-border); }
-  .tms-shell .tms-inbox-chat { flex: 1 1 auto; }
-}
 
 .tms-shell .tms-tracking-detail {
   flex: 1 1 auto;
@@ -544,8 +415,6 @@
   height: 220px;
   width: 100%;
 }
-
-.tms-shell .tms-detail-map-compact { height: 140px; }
 
 .tms-shell .tms-detail-map-note { margin: 4px 0 0; font-size: 11.5px; text-align: center; }
 

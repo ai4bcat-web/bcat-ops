@@ -16,7 +16,7 @@ import type { TransactWriteItem } from '@aws-sdk/client-dynamodb'
 import { DEFAULT_CHECK_CALL_PLAN } from '../../../src/lib/checkCallPlan'
 import { DEFAULT_MARGIN_TARGET_BPS, DEFAULT_REQUIRED_LOAD_FIELDS } from '../../../src/lib/flowDefaults'
 
-export const SEED_VERSION = 'p8.2'
+export const SEED_VERSION = 'p8.3'
 
 export interface DemoDeps {
   tables: {
@@ -35,6 +35,7 @@ export interface DemoDeps {
     checkCall: string
     trackingLink: string
     settings: string
+    intakeLoad: string
   }
   getById(table: string, id: string): Promise<Row | null>
   queryIndex(table: string, indexName: string, keyName: string, keyValue: string): Promise<Row[]>
@@ -73,6 +74,7 @@ const DEMO_KEYS = {
   IN_TRANSIT_4: 'shipment.intransit.4',
   POD_FLAGGED: 'shipment.podflagged',
   READY_TO_BILL: 'shipment.readytobill',
+  INTAKE_REVIEW: 'intake.review',
 } as const
 
 const STAFF_ROLES = [
@@ -695,7 +697,7 @@ export async function seedDemoData(deps: DemoDeps, input: Row, caller: Caller): 
 
   // Stage a subset of shipments into the later rungs of the tracking ladder so
   // the demo has 5 real in-transit rows plus 2 delivered rows for POD/billing fixtures.
-  await stageTrackingStates(deps, [...seededShipments.slice(11, 16), ...seededShipments.slice(2, 6)], caller)
+  await stageTrackingStates(deps, [...seededShipments.slice(11, 16), ...seededShipments.slice(2, 6)], staff.slice(0, 2).map((s) => s.id), caller)
 
   // Re-read so the named fixtures pick up the staged statuses.
   seededShipments = (await Promise.all(
@@ -967,6 +969,62 @@ export async function seedDemoData(deps: DemoDeps, input: Row, caller: Caller): 
     createdIds.DOCUMENT = [...(createdIds.DOCUMENT ?? []), String(cleanPod.id), String(bolDoc.id)]
   }
 
+  // ── Step U: one OPEN intake load, partially built, for the Intake review step ──
+  const intakeLane = LANES[0]
+  const intakeNow = deps.now()
+  const intakeStop = (type: 'pickup' | 'delivery', city: string, state: string) => ({
+    type, name: null, street: null, city, state, zip: null, date: null, time: null, instructions: null,
+  })
+  const intakeFields = {
+    customerId: String(autoCustomer.id), customerName: String(autoCustomer.name),
+    billToId: null, salesRepId, divisionCode: 'BROKERAGE',
+    reference: null, pickupNumber: null, deliveryNumber: null,
+    equipmentType: 'Dry van', commodity: null, weightLb: null, customerRateCents: null,
+    stops: [
+      intakeStop('pickup', intakeLane.originCity, intakeLane.originState),
+      intakeStop('delivery', intakeLane.destinationCity, intakeLane.destinationState),
+    ],
+  }
+  const intakeMeta = Object.fromEntries(
+    ['customerId', 'divisionCode', 'equipmentType', 'stops.0.city', 'stops.0.state', 'stops.1.city', 'stops.1.state'].map(
+      (key) => [key, { source: key === 'customerId' ? 'DIRECTORY' : key === 'divisionCode' ? 'ADDRESS' : 'PARSER', confidence: 'high' }],
+    ),
+  )
+  const intakeRow: Row = {
+    id: 'il:demo-intake',
+    __typename: 'IntakeLoad',
+    status: 'OPEN',
+    divisionCode: 'BROKERAGE',
+    toAddress: 'tenders@bcatcorp.com',
+    toAddresses: ['tenders@bcatcorp.com'],
+    runId: 'demo-intake-run',
+    sourceKey: null,
+    subject: `Load tender: ${intakeLane.originCity}, ${intakeLane.originState} to ${intakeLane.destinationCity}, ${intakeLane.destinationState}`,
+    fromEmail: 'dispatch@acme-distribution.example',
+    fromName: 'Acme Distribution dispatch',
+    receivedAt: intakeNow,
+    bodyText: `Please cover one dry van ${intakeLane.originCity}, ${intakeLane.originState} to ${intakeLane.destinationCity}, ${intakeLane.destinationState}. Reference and weight to follow.`,
+    attachments: '[]',
+    parseState: 'PARSED',
+    parseNote: null,
+    format: null,
+    fields: JSON.stringify(intakeFields),
+    autoFields: JSON.stringify(intakeFields),
+    meta: JSON.stringify(intakeMeta),
+    confirmed: [],
+    missingFields: ['poNumber', 'commodity'],
+    createdBy: caller.email,
+    updatedBy: caller.email,
+    version: 1,
+    createdAt: intakeNow,
+    updatedAt: intakeNow,
+  }
+  await deps.transact([putTx(deps.tables.intakeLoad, intakeRow)])
+  await recordDemo(deps, 'INTAKE_LOAD', DEMO_KEYS.INTAKE_REVIEW, String(intakeRow.id), caller, {
+    step: 'P5',
+    label: 'Open intake load awaiting review',
+  })
+
   // ── P4: the inbound quote priced from a (stub) market rate ─────────────────
   const inboundQuote = makeSellQuote(deps, caller, autoCustomer, { status: 'QUOTED', amountCents: 320000 })
   await deps.transact([putTx(deps.tables.quote, inboundQuote)])
@@ -1182,6 +1240,7 @@ function tableForKind(deps: DemoDeps, kind: string): string | null {
     case 'MESSAGE': return deps.tables.message
     case 'CHECK_CALL': return deps.tables.checkCall
     case 'DOCUMENT': return deps.tables.document
+    case 'INTAKE_LOAD': return deps.tables.intakeLoad
     case 'STAFF': return '' // Staff are Cognito users; only the DemoRecord lives here.
     default: return null
   }
@@ -1217,6 +1276,7 @@ export async function getDemoState(deps: DemoDeps): Promise<Row> {
     assignedCount,
     customersWithFlowDefaults,
     quotesWithMarketRate: quotes.filter((q) => typeof q.marketRateCents === 'number').length,
+    openIntakeLoads: (await deps.scanTable(deps.tables.intakeLoad)).filter((i) => i.status === 'OPEN').length,
     buildingShipments: shipments.filter((s) => s.buildState === 'BUILDING').length,
     activePostings: postings.filter((p) => p.status === 'POSTED').length,
     carrierOffers: quotes.filter((q) => q.side === 'BUY').length,
@@ -1244,7 +1304,7 @@ export async function getDemoState(deps: DemoDeps): Promise<Row> {
   }
 }
 
-async function stageTrackingStates(deps: DemoDeps, shipments: Row[], caller: Caller): Promise<void> {
+async function stageTrackingStates(deps: DemoDeps, shipments: Row[], trackerIds: string[], caller: Caller): Promise<void> {
   const now = deps.now()
   const writes: TransactWriteItem[] = []
   // Stage 5 in-transit rows (board status DEPARTED) plus 2 delivered rows for the
@@ -1278,8 +1338,12 @@ async function stageTrackingStates(deps: DemoDeps, shipments: Row[], caller: Cal
       pickup.arrivedAt = pickup.appt
       pickup.departedAt = new Date(Date.parse(now) - 3 * 3_600_000).toISOString()
       delivery.appt = new Date(Date.parse(now) + (3 + i) * 3_600_000).toISOString()
+      // Step V. Alternate the first two staff; the fourth in-transit row stays unassigned so
+      // the Tracking page has an Unassigned group to show.
+      const trackerId = i === 3 ? null : trackerIds[i % 2] ?? null
       writes.push(updateTx(deps.tables.shipment, String(shipment.id), stampedPatch(deps, caller, {
         status: 'IN_TRANSIT', pickupAppt: pickup.appt, deliveryAppt: delivery.appt,
+        ...(trackerId ? { trackerId } : {}),
       }), String(shipment.updatedAt ?? '')))
       writes.push(updateTx(deps.tables.load, String(load.id), stampedPatch(deps, caller, {
         status: 'IN_TRANSIT', pickupAppt: pickup.appt, deliveryAppt: delivery.appt,

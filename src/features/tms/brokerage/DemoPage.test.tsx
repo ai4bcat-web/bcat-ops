@@ -17,7 +17,7 @@ const DEMO_STATE_SEEDED = {
     { id: 'rec-1', kind: 'SHIPMENT', demoKey: 'shipment.open.assigned', recordId: 'shp-open', seedVersion: 'p1-2026-10-29', createdBy: 'seed', createdAt: '', updatedAt: '' },
     { id: 'rec-2', kind: 'CUSTOMER', demoKey: 'customer.auto', recordId: 'cust-auto', seedVersion: 'p1-2026-10-29', createdBy: 'seed', createdAt: '', updatedAt: '' },
     { id: 'rec-3', kind: 'QUOTE', demoKey: 'quote.inbound', recordId: 'quote-in', seedVersion: 'p1-2026-10-29', createdBy: 'seed', createdAt: '', updatedAt: '' },
-    { id: 'rec-4', kind: 'SHIPMENT', demoKey: 'shipment.building', recordId: 'shp-build', seedVersion: 'p1-2026-10-29', createdBy: 'seed', createdAt: '', updatedAt: '' },
+    { id: 'rec-4', kind: 'INTAKE_LOAD', demoKey: 'intake.review', recordId: 'il:demo-intake', seedVersion: 'p1-2026-10-29', createdBy: 'seed', createdAt: '', updatedAt: '' },
     { id: 'rec-5', kind: 'SHIPMENT', demoKey: 'shipment.posted', recordId: 'shp-post', seedVersion: 'p1-2026-10-29', createdBy: 'seed', createdAt: '', updatedAt: '' },
     { id: 'rec-6', kind: 'SHIPMENT', demoKey: 'shipment.intransit', recordId: 'shp-track', seedVersion: 'p1-2026-10-29', createdBy: 'seed', createdAt: '', updatedAt: '' },
     { id: 'rec-7', kind: 'SHIPMENT', demoKey: 'shipment.podflagged', recordId: 'shp-pod', seedVersion: 'p1-2026-10-29', createdBy: 'seed', createdAt: '', updatedAt: '' },
@@ -29,7 +29,8 @@ const DEMO_STATE_SEEDED = {
     assignedCount: 1,
     customersWithFlowDefaults: 1,
     quotesWithMarketRate: 1,
-    buildingShipments: 1,
+    buildingShipments: 0,
+    openIntakeLoads: 1,
     activePostings: 2,
     carrierOffers: 3,
     shipmentsWithThread: 1,
@@ -48,6 +49,7 @@ const EMPTY_FACTS = {
   customersWithFlowDefaults: 0,
   quotesWithMarketRate: 0,
   buildingShipments: 0,
+  openIntakeLoads: 0,
   activePostings: 0,
   carrierOffers: 0,
   shipmentsWithThread: 0,
@@ -103,7 +105,7 @@ describe('DemoPage', () => {
       'Assign a carrier rep or team',
       'Customer flow defaults',
       'Quote in, rate out',
-      'Tender to a built load',
+      'Tender to an intake load',
       'Post to DAT and Truckstop',
       'Carrier answers the posting',
       'Rate con, thread and tracking',
@@ -151,6 +153,27 @@ describe('DemoPage', () => {
     expect(window.location.pathname + window.location.search).toBe('/tms/shipments/shp-track?tab=tracking')
   })
 
+  it('opens the seeded intake load on its review page and ticks only while one is open', async () => {
+    vi.spyOn(apiClient, 'getDemoState').mockResolvedValue(DEMO_STATE_SEEDED)
+    renderDemo()
+    await waitFor(() => expect(screen.getByText('Tender to an intake load')).toBeInTheDocument())
+    const p5 = screen.getByText('Tender to an intake load').closest('.tms-demo-step') as HTMLElement
+    expect(p5.querySelector('.tms-demo-tick:not(.tms-demo-tick-off)')).toBeInTheDocument()
+    fireEvent.click(within(p5).getByRole('button', { name: /open/i }))
+    expect(window.location.pathname).toBe('/tms/shipments/intake/il%3Ademo-intake')
+  })
+
+  it('leaves the intake step unticked when no intake load is open', async () => {
+    vi.spyOn(apiClient, 'getDemoState').mockResolvedValue({
+      ...DEMO_STATE_SEEDED,
+      facts: { ...DEMO_STATE_SEEDED.facts, openIntakeLoads: 0 },
+    })
+    renderDemo()
+    await waitFor(() => expect(screen.getByText('Tender to an intake load')).toBeInTheDocument())
+    const p5 = screen.getByText('Tender to an intake load').closest('.tms-demo-step') as HTMLElement
+    expect(p5.querySelector('.tms-demo-tick-off')).toBeInTheDocument()
+  })
+
   it('shows Reset for an owner on dev and confirms before resetting', async () => {
     vi.spyOn(apiClient, 'getDemoState').mockResolvedValue(DEMO_STATE_SEEDED)
     const resetSpy = vi.spyOn(apiClient, 'resetDemoData').mockResolvedValue({ counts: {}, seedVersion: 'p1-2026-10-29' })
@@ -196,7 +219,7 @@ describe('DemoPage', () => {
 })
 
 describe('TmsShell badge counts', () => {
-  it('renders a numeric badge on My queue when the count is greater than zero', () => {
+  it('renders a numeric badge on the Intake child when the count is greater than zero', () => {
     render(
       <BrowserRouter>
         <TmsShell
@@ -206,8 +229,7 @@ describe('TmsShell badge counts', () => {
               label: 'Shipments',
               icon: () => null,
               children: [
-                { to: '/tms/shipments/view/my-queue', label: 'My queue', badgeKey: 'myQueue' },
-                { to: '/tms/shipments/view/team-queue', label: 'Team queue', badgeKey: 'teamQueue' },
+                { to: '/tms/shipments/intake', label: 'Intake', badgeKey: 'intakeLoads' },
               ],
             },
           ]}
@@ -215,15 +237,14 @@ describe('TmsShell badge counts', () => {
           activePath="/tms/shipments"
           breadcrumb={[{ label: 'TMS' }]}
           user={{ initial: 'O', email: 'owner@bcatcorp.com' }}
-          shipmentViews={[]}
-          badgeCounts={{ myQueue: 3, teamQueue: 0 }}
+          badgeCounts={{ intakeLoads: 3 }}
         />
       </BrowserRouter>,
     )
     expect(screen.getByText('3')).toBeInTheDocument()
   })
 
-  it('renders no badge when the count is zero', () => {
+  it('renders no badge on the Intake child when the count is zero', () => {
     render(
       <BrowserRouter>
         <TmsShell
@@ -233,7 +254,7 @@ describe('TmsShell badge counts', () => {
               label: 'Shipments',
               icon: () => null,
               children: [
-                { to: '/tms/shipments/view/my-queue', label: 'My queue', badgeKey: 'myQueue' },
+                { to: '/tms/shipments/intake', label: 'Intake', badgeKey: 'intakeLoads' },
               ],
             },
           ]}
@@ -241,12 +262,11 @@ describe('TmsShell badge counts', () => {
           activePath="/tms/shipments"
           breadcrumb={[{ label: 'TMS' }]}
           user={{ initial: 'O', email: 'owner@bcatcorp.com' }}
-          shipmentViews={[]}
-          badgeCounts={{ myQueue: 0 }}
+          badgeCounts={{ intakeLoads: 0 }}
         />
       </BrowserRouter>,
     )
-    const child = screen.getByText('My queue').closest('a') as HTMLElement
+    const child = screen.getByText('Intake').closest('a') as HTMLElement
     expect(within(child).queryByText('0')).not.toBeInTheDocument()
   })
 })

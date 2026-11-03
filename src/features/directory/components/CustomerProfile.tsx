@@ -39,6 +39,8 @@ import { CreditLimitCard } from './CreditLimitCard'
 import { CustomerArTab } from './CustomerArTab'
 import { StatusActionDialog } from './StatusActionDialog'
 import { FlowDefaultsCard } from './FlowDefaultsCard'
+import { TrackingAutomationEditor } from '@/features/settings/automation/TrackingAutomationEditor'
+import { resolveAutomation } from '@/lib/trackingAutomation'
 import type {
   AiAgentKey,
   CustomerRecord,
@@ -118,6 +120,11 @@ export function CustomerProfile({
   const { loads, orders, shipments, lastLoadAt, loading: loadsLoading } = useCustomerOrders(customer.id, customer)
   const ar = useCustomerAr(customer.id)
   const accountOwnerIds = value.accountOwnerIdsText.split(/\r?\n/).map((s) => s.trim()).filter(Boolean)
+  // The layers above the customer: org defaults only (a profile knows no division).
+  const inheritedAutomation = useMemo(
+    () => resolveAutomation({ settings, customer: null, load: null, revDivision: null }).policy,
+    [settings],
+  )
 
   /**
    * Exposure now spans both eras: shipments carry it from booking to paid, and the loads
@@ -389,6 +396,7 @@ export function CustomerProfile({
               value={{
                 defaultCarrierTeamKey: value.defaultCarrierTeamKey,
                 defaultCarrierRepId: value.defaultCarrierRepId,
+                defaultTrackerId: value.defaultTrackerId,
                 marginTargetBps: value.marginTargetBps,
                 marginFloorBps: value.marginFloorBps,
                 quoteAutoReply: value.quoteAutoReply,
@@ -397,6 +405,17 @@ export function CustomerProfile({
               }}
               onChange={(patch) => setPartial(patch)}
             />
+            <TmsCard title="Tracking automation">
+              <p className="tms-muted" style={{ fontSize: 12, margin: '0 0 8px' }}>
+                Overrides the org defaults for this customer. Division overrides apply per shipment.
+              </p>
+              <TrackingAutomationEditor
+                scope="CUSTOMER"
+                value={value.trackingAutomation ?? {}}
+                inherited={inheritedAutomation}
+                onChange={(next) => set('trackingAutomation', Object.keys(next).length ? next : null)}
+              />
+            </TmsCard>
           </div>
         )}
 

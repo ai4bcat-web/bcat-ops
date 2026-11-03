@@ -48,9 +48,9 @@ export const DEMO_STEPS: DemoStepDef[] = [
   },
   {
     key: 'P5',
-    title: 'Tender to a built load',
-    whatYouSee: 'A shipment the tender agent built from the e-mail, still Building, with the Needs: list of the fields the customer requires and the automation could not fill.',
-    opensOn: 'shipment.building',
+    title: 'Tender to an intake load',
+    whatYouSee: 'A tender e-mail the agent turned into a partially built load on Shipments › Intake: the fields it filled, the ones to check, and the Needs: list that gates Move to active.',
+    opensOn: 'intake.review',
   },
   {
     key: 'P6',
@@ -102,6 +102,8 @@ export interface DemoChecklistFacts {
   customersWithFlowDefaults: number
   quotesWithMarketRate: number
   buildingShipments: number
+  /** IntakeLoad rows still OPEN: the P5 tick. */
+  openIntakeLoads: number
   activePostings: number
   carrierOffers: number
   shipmentsWithThread: number
@@ -131,7 +133,7 @@ export function demoChecklist(facts: DemoChecklistFacts): DemoChecklistRow[] {
     { key: 'P2', done: facts.assignedCount > 0, evidence: `${facts.assignedCount} shipments assigned to a rep or team` },
     { key: 'P3', done: facts.customersWithFlowDefaults > 0, evidence: `${facts.customersWithFlowDefaults} customers with flow defaults` },
     { key: 'P4', done: facts.quotesWithMarketRate > 0, evidence: `${facts.quotesWithMarketRate} quotes priced from a market rate` },
-    { key: 'P5', done: facts.buildingShipments > 0, evidence: `${facts.buildingShipments} shipments still Building` },
+    { key: 'P5', done: facts.openIntakeLoads > 0, evidence: `${facts.openIntakeLoads} open intake loads` },
     { key: 'P6', done: facts.activePostings > 0, evidence: `${facts.activePostings} live board postings` },
     { key: 'P7', done: facts.carrierOffers > 0, evidence: `${facts.carrierOffers} carrier offers` },
     { key: 'P8', done: facts.shipmentsWithThread > 0 && facts.checkCallMessages > 0, evidence: `${facts.shipmentsWithThread} threads · ${facts.checkCallMessages} check-call messages` },

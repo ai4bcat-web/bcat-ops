@@ -212,6 +212,16 @@ describe('validateDivisions', () => {
       'Division "X" has an unknown parent "GHOST".',
     ])
   })
+
+  it('lets only one active division own an intake address, and frees it on archive', () => {
+    const row = (code: string, over: Partial<OwnershipDivisionRecord>): OwnershipDivisionRecord =>
+      ({ ...AUDIT, id: code, code, name: `Div ${code}`, brand: null, parentId: null, color: null, sortOrder: 1, active: true, owners: null, flows: null, ...over })
+    const shared = { intakeEmail: 'Tenders@bcatcorp.com' }
+    expect(validateDivisions([row('A', shared), row('B', { intakeEmail: 'tenders@bcatcorp.com' })]))
+      .toEqual(['That address already receives tenders for Div A.'])
+    expect(validateDivisions([row('A', shared), row('B', { intakeEmail: 'tenders@bcatcorp.com', active: false })])).toEqual([])
+    expect(validateDivisions([row('A', {}), row('B', {})])).toEqual([])
+  })
 })
 
 describe('validateRules', () => {

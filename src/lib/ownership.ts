@@ -22,6 +22,7 @@
  */
 import { driverProgramOf } from './driverProgram'
 import type { DriverProgram, ProgramInputs } from './driverProgram'
+import { normalizeIntakeEmail } from './intakeMail'
 import type {
   OwnershipCondition,
   OwnershipDivisionRecord,
@@ -195,7 +196,9 @@ export function divisionTree<T extends DivisionTreeShape>(divisions: T[]): Divis
 }
 
 /** Everything wrong with a division tree, in plain English. Empty = it is sound. */
-export function validateDivisions(divisions: (DivisionShape & Pick<OwnershipDivisionRecord, 'name'>)[]): string[] {
+export function validateDivisions(
+  divisions: (DivisionShape & Pick<OwnershipDivisionRecord, 'name'> & { active?: boolean; intakeEmail?: string | null })[],
+): string[] {
   const errors: string[] = []
   const seen = new Set<string>()
   for (const d of divisions) {
@@ -218,6 +221,17 @@ export function validateDivisions(divisions: (DivisionShape & Pick<OwnershipDivi
       continue
     }
     if (topLevelOf(divisions, code) == null) errors.push(`Division "${code}" is its own ancestor.`)
+  }
+
+  // One intake address ↔ one active division. An archived division keeps its address on
+  // the row but no longer owns it; a missing `active` counts as active (a draft row).
+  const owners = new Map<string, string>()
+  for (const d of divisions) {
+    const email = normalizeIntakeEmail(d.intakeEmail)
+    if (email == null || d.active === false) continue
+    const first = owners.get(email)
+    if (first != null) errors.push(`That address already receives tenders for ${first}.`)
+    else owners.set(email, text(d.name) || text(d.code))
   }
   return errors
 }

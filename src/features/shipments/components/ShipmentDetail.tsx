@@ -47,6 +47,7 @@ import { DeliveryCard } from './DeliveryCard'
 import { ArCard } from './ArCard'
 import { ApCard } from './ApCard'
 import { DivisionCard } from './DivisionCard'
+import { TrackerCard } from './TrackerCard'
 import { ReleaseGateCard } from './ReleaseGateCard'
 import { HistorySection } from './HistorySection'
 import { LoadActions } from './StatusActions'
@@ -335,6 +336,8 @@ export function ShipmentDetail(props: ShipmentDetailProps) {
             onClearRevTag={actions.onClearRevTag}
             onSetSalesRep={actions.onSetSalesRep}
           />
+
+          <TrackerCard shipment={shipment} customer={customer} canEdit={canTag && !voided} onChanged={actions.reload} />
 
           {/*
            * Which providers could touch freight like this one, and what state each is in.

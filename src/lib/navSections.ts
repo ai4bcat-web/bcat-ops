@@ -13,7 +13,7 @@
  */
 import {
   LayoutDashboard, Package, LineChart, FileSpreadsheet, Truck, Banknote, Building2,
-  MapPin, Receipt, Workflow, GraduationCap, Building, Link2, type LucideIcon,
+  MapPin, Receipt, Building, Link2, type LucideIcon,
 } from 'lucide-react'
 import { NAV_ITEMS } from '@/lib/navItems'
 import { SEED_DIVISIONS, topLevelOf } from '@/lib/ownership'
@@ -40,7 +40,7 @@ export interface NavItemDef {
   tms?: boolean
   /** Which sidebar count this item carries, if any (`useShellBadgeCounts` resolves it). */
   badgeKey?: string
-  /** A fixed label badge, e.g. Academy's BETA tag. */
+  /** A fixed label badge. */
   badge?: string | null
   /** Sub-items rendered under this row in the MVMNT rail. */
   children?: TmsNavChild[]
@@ -64,7 +64,7 @@ export interface NavSectionsResult {
 /**
  * Pages that sit above the business sections because they serve all three businesses.
  * The company dashboard is the top-level home; Shipments is the shared freight list.
- * Shipments renders its workstation pages and saved views as children in `TmsShell`.
+ * Shipments renders its Intake, Tracking and Documents pages as children in `TmsShell`.
  */
 export const PINNED_ITEMS: NavItemDef[] = [
   { to: '/tms/dashboard', label: 'Company Dashboard', icon: LayoutDashboard, pageKey: 'tms', section: BROKERAGE, tms: true },
@@ -77,8 +77,7 @@ export const PINNED_ITEMS: NavItemDef[] = [
     tms: true,
     badgeKey: 'checkCalls',
     children: [
-      { to: '/tms/shipments/view/my-queue', label: 'My queue', badgeKey: 'myQueue' },
-      { to: '/tms/shipments/view/team-queue', label: 'Team queue', badgeKey: 'teamQueue' },
+      { to: '/tms/shipments/intake', label: 'Intake', badgeKey: 'intakeLoads' },
     ],
   },
 ]
@@ -96,8 +95,6 @@ export const TMS_ITEMS: NavItemDef[] = [
   { to: '/tms/customers',  label: 'Customers',    icon: Building2,       pageKey: 'customers', section: BROKERAGE, tms: true },
   { to: '/tms/locations',  label: 'Locations',    icon: MapPin,          pageKey: 'locations', section: BROKERAGE, tms: true },
   { to: '/tms/vendors',    label: 'Vendors',      icon: Receipt,         pageKey: 'vendorAp',  section: BROKERAGE, tms: true },
-  { to: '/tms/workflows',  label: 'Workflows',    icon: Workflow,        pageKey: 'tms',       section: BROKERAGE, tms: true },
-  { to: '/tms/academy',    label: 'Academy',      icon: GraduationCap,   pageKey: 'tms',       section: BROKERAGE, tms: true, badge: 'BETA' },
   { to: '/tms/tracking/links',  label: 'Manage Customer Links', icon: Link2, pageKey: 'tms', section: BROKERAGE, tms: true },
   { to: '/tms/brokerage',  label: 'My Brokerage', icon: Building,        pageKey: 'settings',  section: BROKERAGE, tms: true },
 ]
@@ -109,11 +106,12 @@ export function sectionTitle(code: string): string {
   return code.replace(/_/g, ' ')
 }
 
-/** Workstation pages that live under the Shipments item without being nav items of their own. */
+const INTAKE_PATH = '/tms/shipments/intake'
+
+/** Pages that live under the Shipments item without being nav items of their own. */
 const SHIPMENT_WORKSTATIONS: Record<string, string> = {
-  '/tms/dispatch': 'Dispatch',
   '/tms/tracking': 'Tracking',
-  '/tms/documents': 'Documents',
+  '/tms/documents/review': 'Document review',
   '/tms/check-calls': 'Check calls',
 }
 
@@ -128,7 +126,7 @@ const LEGACY_CRUMBS: Array<{ path: string; prefix?: boolean; crumbs: TmsBreadcru
   { path: '/invoices', crumbs: [{ label: 'Invoices' }] },
 ]
 
-/** `my-queue` reads `My queue`. */
+/** `team-queue` reads `Team queue`. */
 function titleCase(slug: string): string {
   const words = slug.replace(/[-_]+/g, ' ').trim()
   return words.charAt(0).toUpperCase() + words.slice(1)
@@ -138,10 +136,7 @@ function titleCase(slug: string): string {
  * The trail the TMS top bar shows for a path: the nav item the page belongs to (the
  * longest match wins), then at most one more level. Every crumb but the last links.
  */
-export function tmsBreadcrumb(
-  pathname: string,
-  shipmentViews: Array<{ slug: string; name: string }> = [],
-): TmsBreadcrumbItem[] {
+export function tmsBreadcrumb(pathname: string): TmsBreadcrumbItem[] {
   const shipments: TmsBreadcrumbItem = { label: 'Shipments', to: SHIPMENTS_PATH }
 
   if (pathname === '/tms/tracking/links') {
@@ -150,10 +145,10 @@ export function tmsBreadcrumb(
   const workstation = SHIPMENT_WORKSTATIONS[pathname]
   if (workstation) return [shipments, { label: workstation }]
 
-  const viewPrefix = `${SHIPMENTS_PATH}/view/`
-  if (pathname.startsWith(viewPrefix)) {
-    const slug = pathname.slice(viewPrefix.length).split('/')[0]
-    return [shipments, { label: shipmentViews.find((v) => v.slug === slug)?.name ?? titleCase(slug) }]
+  // Before the generic `/tms/shipments/` branch, or an intake load would read "Shipment".
+  if (pathname === INTAKE_PATH) return [shipments, { label: 'Intake' }]
+  if (pathname.startsWith(`${INTAKE_PATH}/`)) {
+    return [shipments, { label: 'Intake', to: INTAKE_PATH }, { label: 'Load' }]
   }
   if (pathname.startsWith(`${SHIPMENTS_PATH}/`)) return [shipments, { label: 'Shipment' }]
 
@@ -264,8 +259,8 @@ export function buildNavSections({
         name: sectionTitle(division.code),
         brand: division.brand ?? null,
         items: [{
-          to: `/tms/shipments/view/division-${division.code}`,
-          label: `Shipments · ${division.name}`,
+          to: `/tms/shipments/intake?division=${division.code}`,
+          label: `Intake · ${division.name}`,
           icon: Package,
           badge: null,
           pageKey: TMS_PAGE_KEY,

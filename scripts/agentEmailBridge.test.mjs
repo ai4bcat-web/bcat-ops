@@ -52,6 +52,8 @@ function makeBridge({
   s3Responses = [],
   messages = [],
   globals = {},
+  intakeAddresses = [],
+  intakeResponse = null,
 } = {}) {
   const state = {
     properties: {
@@ -62,6 +64,7 @@ function makeBridge({
     labels: {},
     triggers: [],
     fetched: [],
+    intakeFetched: [],
     responses: responses.length ? responses : [makePrepareResponse(), makeCommitResponse()],
     responseIndex: 0,
     s3Responses: s3Responses.length ? s3Responses : [{ code: 200, body: '' }],
@@ -123,6 +126,14 @@ function makeBridge({
           try { parsedPayload = JSON.parse(opts.payload); } catch (e) { parsedPayload = null; }
         } else if (opts.payload) {
           parsedPayload = opts.payload;
+        }
+        // The division-address lookup is its own conversation: it must not consume the scripted
+        // prepare/commit responses, and the call-order assertions below are about the mail itself.
+        if (parsedPayload && parsedPayload.action === 'intakeAddresses') {
+          state.intakeFetched.push({ url, payload: parsedPayload });
+          if (intakeResponse === 'throw') throw new Error('network down');
+          const r = intakeResponse || { code: 200, body: JSON.stringify({ ok: true, addresses: intakeAddresses }) };
+          return { getResponseCode: () => r.code, getContentText: () => r.body };
         }
         state.fetched.push({ url, payload: parsedPayload, opts });
 
@@ -547,5 +558,76 @@ describe('agentEmailBridge.gs', () => {
     const sent = prepareCalls(state)[0].payload.bodyText;
     expect(sent.length).toBeLessThanOrEqual(50_000);
     expect(sent.endsWith('[truncated]')).toBe(true);
+  });
+});
+
+describe('agentEmailBridge.gs division intake (Step U)', () => {
+  const divisions = [
+    { email: 'Tenders+A@BCATCorp.com', divisionCode: 'A' },
+    { email: 'tenders+b@bcatcorp.com', divisionCode: 'B' },
+  ];
+
+  it('builds toAddresses from To, Cc, Delivered-To and X-Original-To: bare, lower-cased, de-duplicated, in order', () => {
+    const m = makeMessage({
+      id: 'to1',
+      to: '"Dispatch" <Ops@Carrier.com>, tenders+a@bcatcorp.com',
+      cc: 'OPS@carrier.com, other@x.com',
+      deliveredTo: 'ai4bcat+tenders-a@gmail.com',
+      xOriginalTo: 'Tenders+A@bcatcorp.com',
+    });
+    const { ctx, state } = makeBridge({ messages: [m], intakeAddresses: divisions });
+
+    ctx.processAgentInboxEmails();
+
+    const expected = ['ops@carrier.com', 'tenders+a@bcatcorp.com', 'other@x.com', 'ai4bcat+tenders-a@gmail.com'];
+    expect(prepareCalls(state)[0].payload.toAddresses).toEqual(expected);
+    expect(commitCalls(state)[0].payload.toAddresses).toEqual(expected);
+  });
+
+  it('caps toAddresses at 20', () => {
+    const many = ['quotes@bcatcorp.com', ...Array.from({ length: 30 }, (_, i) => `u${i}@x.com`)].join(', ');
+    const { ctx, state } = makeBridge({ messages: [makeMessage({ id: 'to2', to: many })] });
+    ctx.processAgentInboxEmails();
+    expect(prepareCalls(state)[0].payload.toAddresses).toHaveLength(20);
+  });
+
+  it('asks the server for the division addresses with the secret, and watches them as TENDER inboxes', () => {
+    const m = makeMessage({ id: 'div1', to: 'tenders+a@bcatcorp.com' });
+    const { ctx, state } = makeBridge({ messages: [m], intakeAddresses: divisions });
+
+    ctx.processAgentInboxEmails();
+
+    expect(state.intakeFetched).toHaveLength(1);
+    expect(state.intakeFetched[0].payload).toEqual({ secret: 'secret', action: 'intakeAddresses' });
+    expect(state.searchCalls[0].query).toContain('to:tenders+a@bcatcorp.com');
+    expect(state.searchCalls[0].query).toContain('deliveredto:tenders+b@bcatcorp.com');
+    expect(prepareCalls(state)[0].payload.role).toBe('TENDER');
+  });
+
+  it('appends the division addresses after the env roles: a message to quotes@ and a division address stays QUOTE', () => {
+    const m = makeMessage({ id: 'div2', to: 'tenders+a@bcatcorp.com', cc: 'quotes@bcatcorp.com' });
+    const { ctx, state } = makeBridge({ messages: [m], intakeAddresses: divisions });
+
+    ctx.processAgentInboxEmails();
+
+    expect(prepareCalls(state)[0].payload.role).toBe('QUOTE');
+    expect(prepareCalls(state)[0].payload.toAddresses).toEqual(['tenders+a@bcatcorp.com', 'quotes@bcatcorp.com']);
+  });
+
+  it('does not duplicate an address a role already watches', () => {
+    const { ctx, state } = makeBridge({ messages: [], intakeAddresses: [{ email: 'TENDERS@bcatcorp.com', divisionCode: 'A' }] });
+    ctx.processAgentInboxEmails();
+    const query = state.searchCalls[0].query;
+    expect(query.split('"tenders@bcatcorp.com"').length - 1).toBe(1);
+  });
+
+  it('keeps the env roles working when the lookup fails, whether it errors, throws or returns junk', () => {
+    for (const intakeResponse of [{ code: 401, body: '{"error":"unauthorized"}' }, 'throw', { code: 200, body: 'not json' }, { code: 200, body: '{"ok":true}' }]) {
+      const m = makeMessage({ id: `fail-${typeof intakeResponse === 'string' ? 'throw' : intakeResponse.code}-${Math.random()}`, to: 'quotes@bcatcorp.com' });
+      const { ctx, state } = makeBridge({ messages: [m], intakeResponse });
+      ctx.processAgentInboxEmails();
+      expect(prepareCalls(state)).toHaveLength(1);
+      expect(prepareCalls(state)[0].payload.role).toBe('QUOTE');
+    }
   });
 });

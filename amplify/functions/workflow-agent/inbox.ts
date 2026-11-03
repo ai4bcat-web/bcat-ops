@@ -20,11 +20,13 @@ import {
   INBOX_SECRET,
   getRun,
   headObject,
+  listDivisions,
   nowIso,
   putObjectJson,
   signedPutUrl,
   type RunRow,
 } from './store'
+import { cleanToAddresses } from './intakeStage'
 
 const MAX_BODY_BYTES = 1 * 1024 * 1024
 const MAX_SUBJECT_LENGTH = 500
@@ -72,6 +74,9 @@ interface BasePayload {
    *  `matchParty` is the one place that grades a sender, and a verdict this file had
    *  already "helpfully" parsed would be a second opinion to keep in step. */
   authResult: string
+  /** Every address the message was delivered to (To, Cc, Delivered-To, X-Original-To), in the
+   *  order the bridge reported them. Intake routes on these; see `matchDivisionByAddresses`. */
+  toAddresses: string[]
 }
 
 type ValidationResult<T> =
@@ -205,6 +210,7 @@ function validateBase(raw: unknown): ValidationResult<BasePayload> {
         receivedAt: typeof raw.receivedAt === 'string' ? raw.receivedAt : '',
         bodyText: typeof raw.bodyText === 'string' ? raw.bodyText.slice(0, MAX_BODY_LENGTH) : '',
         authResult: typeof raw.authResult === 'string' ? raw.authResult.slice(0, MAX_AUTH_RESULT_LENGTH) : '',
+        toAddresses: cleanToAddresses(raw.toAddresses),
       },
     }
   } catch (err) {
@@ -302,6 +308,7 @@ async function handleCommit(payload: BasePayload, rawAttachments: unknown) {
     bodyText: payload.bodyText,
     // Verbatim, uninterpreted: `matchParty` grades it when the run reads the message.
     authResult: payload.authResult,
+    toAddresses: payload.toAddresses,
     attachments: verified,
   })
 
@@ -313,6 +320,24 @@ async function handleCommit(payload: BasePayload, rawAttachments: unknown) {
     sourceKey,
   })
   return respond(200, { ok: true, duplicate: false, runId: run.id, outcome: run.outcome ?? null })
+}
+
+/**
+ * `intakeAddresses` — the bridge asks which addresses mean "tender for division X" so it can
+ * search its mailbox for them. Same secret as prepare/commit; only ACTIVE divisions with an address.
+ */
+async function handleIntakeAddresses(raw: Record<string, unknown>) {
+  if (!secretEquals(raw.secret)) {
+    console.warn('[workflow-agent] unauthorized inbox request')
+    return respond(401, { error: 'unauthorized' })
+  }
+  const addresses: { email: string; divisionCode: string }[] = []
+  for (const row of await listDivisions()) {
+    const email = typeof row.intakeEmail === 'string' ? row.intakeEmail.trim().toLowerCase() : ''
+    if (row.active !== true || !email) continue
+    addresses.push({ email, divisionCode: String(row.code ?? row.id) })
+  }
+  return respond(200, { ok: true, addresses })
 }
 
 export async function handleInbox(event: FnUrlEvent) {
@@ -328,8 +353,9 @@ export async function handleInbox(event: FnUrlEvent) {
   }
 
   const action = isPlainObject(raw) && typeof raw.action === 'string' ? raw.action : undefined
+  if (action === 'intakeAddresses' && isPlainObject(raw)) return handleIntakeAddresses(raw)
   if (action !== 'prepare' && action !== 'commit') {
-    return respond(400, { error: 'action must be prepare or commit' })
+    return respond(400, { error: 'action must be prepare, commit or intakeAddresses' })
   }
 
   const validated = validateBase(raw)
@@ -370,6 +396,7 @@ export async function sampleRun(input: {
   body: string
   fromEmail: string
   messageId: string
+  toAddresses?: string[]
 }): Promise<RunRow> {
   const { sourceKey } = slotFor(input.agent, input.messageId)
   await putObjectJson(sourceKey, {
@@ -380,6 +407,7 @@ export async function sampleRun(input: {
     fromName: '',
     receivedAt: nowIso(),
     bodyText: input.body,
+    toAddresses: cleanToAddresses(input.toAddresses),
     attachments: [],
   })
   return runFor({

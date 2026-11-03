@@ -32,7 +32,7 @@ import type {
   LaneRateSampleRecord, OrderReference, RateType,
   UserProfileRecord, RoleKey, CommissionRecord, CommissionPayPeriodRecord,
   CommissionSettings, ShipmentSettings,
-  OwnershipDivisionRecord, OwnershipRuleRecord, ShipmentViewRecord, ShipmentColumnTemplateRecord, RevTagSource,
+  OwnershipDivisionRecord, OwnershipRuleRecord, ShipmentColumnTemplateRecord, RevTagSource,
   WorkflowRunRecord, WorkflowAgentKey,
 } from '@/types/tms'
 import type { CreditSummary } from '@/lib/customerCredit'
@@ -41,6 +41,9 @@ import type { ResolveContext, Resolution } from '@/lib/ownership'
 import type { ReleaseGateResult } from '@/lib/releaseGate'
 import type { AdapterResult, Capability, IntegrationRecord } from '@/lib/integrations/types'
 import { isActiveDirectoryRecord } from '@/lib/tmsDirectory'
+import type {
+  IntakeFields, IntakeLoadRecord, IntakeStatus as IntakeLoadStatus,
+} from '@/types/intake'
 
 // Untyped client — our own types from src/types handle type safety
 const client = generateClient()
@@ -1153,17 +1156,21 @@ const CUSTOMER_V5_FIELDS = [
   'defaultCarrierTeamKey', 'defaultCarrierRepId', 'marginTargetBps', 'marginFloorBps',
   'quoteAutoReply', 'requiredLoadFields', 'checkCallPlan',
 ]
-const CUSTOMER_JSON_FIELDS: (keyof CustomerRecord)[] = ['billingAddress', 'contacts', 'billToParties', 'requiredReferences', 'chargeCodeOverrides', 'defaultCharges', 'pricingDefaults', 'quotingDefaults', 'visibilityPrefs', 'ediSettings', 'aiMemory', 'checkCallPlan']
+// Step V: the default tracker a new shipment inherits and the automation policy override.
+const CUSTOMER_V6_FIELDS = ['defaultTrackerId', 'trackingAutomation']
+const CUSTOMER_JSON_FIELDS: (keyof CustomerRecord)[] = ['billingAddress', 'contacts', 'billToParties', 'requiredReferences', 'chargeCodeOverrides', 'defaultCharges', 'pricingDefaults', 'quotingDefaults', 'visibilityPrefs', 'ediSettings', 'aiMemory', 'checkCallPlan', 'trackingAutomation']
 let customersHaveV2 = true
 let customersHaveV3 = true
 let customersHaveV4 = true
 let customersHaveV5 = true
+let customersHaveV6 = true
 const customerFields = () => [
   CUSTOMER_FIELDS_BASE,
   customersHaveV2 ? CUSTOMER_V2_FIELDS.join(' ') : '',
   customersHaveV3 ? CUSTOMER_V3_FIELDS.join(' ') : '',
   customersHaveV4 ? CUSTOMER_V4_FIELDS.join(' ') : '',
   customersHaveV5 ? CUSTOMER_V5_FIELDS.join(' ') : '',
+  customersHaveV6 ? CUSTOMER_V6_FIELDS.join(' ') : '',
 ].filter(Boolean).join(' ')
 
 const LOCATION_FIELDS = `
@@ -1256,7 +1263,9 @@ const TMS_SETTINGS_V14_FIELDS = [
   'rateConTemplate', 'carrierAgreementTemplate', 'consolidationRules', 'notificationSubscriptions',
   'notificationWebhooks', 'notificationDefaults', 'paymentTerms',
 ]
-const TMS_SETTINGS_JSON_FIELDS: (keyof TmsSettings)[] = ['accessorialCodes', 'loadStatusRules', 'defaultRequiredReferences', 'chargeCodes', 'quickPayTiers', 'trackingContact', 'factorRemitTo', 'teams', 'commissionPlans', 'commissionPaySchedule', 'postalCodeAliases', 'aiAgents', 'marginTargetBpsByMode', 'defaultCheckCallPlan', 'brandSenders', 'whiteLabel', 'customerPortalDefaults', 'customerTags', 'rateConTemplate', 'carrierAgreementTemplate', 'consolidationRules', 'notificationSubscriptions', 'notificationWebhooks', 'notificationDefaults', 'paymentTerms']
+// Step V: the tracking automation policy. Its own flag again, for the same reason.
+const TMS_SETTINGS_V15_FIELDS = ['trackingAutomation']
+const TMS_SETTINGS_JSON_FIELDS: (keyof TmsSettings)[] = ['accessorialCodes', 'loadStatusRules', 'defaultRequiredReferences', 'chargeCodes', 'quickPayTiers', 'trackingContact', 'factorRemitTo', 'teams', 'commissionPlans', 'commissionPaySchedule', 'postalCodeAliases', 'aiAgents', 'marginTargetBpsByMode', 'defaultCheckCallPlan', 'brandSenders', 'whiteLabel', 'customerPortalDefaults', 'customerTags', 'rateConTemplate', 'carrierAgreementTemplate', 'consolidationRules', 'notificationSubscriptions', 'notificationWebhooks', 'notificationDefaults', 'paymentTerms', 'trackingAutomation']
 let settingsHaveV2 = true
 let settingsHaveV3 = true
 let settingsHaveV4 = true
@@ -1270,6 +1279,7 @@ let settingsHaveV11 = true
 let settingsHaveV12 = true
 let settingsHaveV13 = true
 let settingsHaveV14 = true
+let settingsHaveV15 = true
 const tmsSettingsFields = () => [
   TMS_SETTINGS_FIELDS_BASE,
   settingsHaveV2 ? TMS_SETTINGS_V2_FIELDS.join(' ') : '',
@@ -1285,6 +1295,7 @@ const tmsSettingsFields = () => [
   settingsHaveV12 ? TMS_SETTINGS_V12_FIELDS.join(' ') : '',
   settingsHaveV13 ? TMS_SETTINGS_V13_FIELDS.join(' ') : '',
   settingsHaveV14 ? TMS_SETTINGS_V14_FIELDS.join(' ') : '',
+  settingsHaveV15 ? TMS_SETTINGS_V15_FIELDS.join(' ') : '',
 ].filter(Boolean).join(' ')
 const fieldNamed = (names: string[], err: unknown) => {
   const msg = safeStringify(err)
@@ -1374,7 +1385,12 @@ export async function listCustomers(opts?: { includeArchived?: boolean }): Promi
       const rows = await run()
       return opts?.includeArchived ? rows : rows.filter(isActiveDirectoryRecord)
     } catch (err) {
-      if (attempt >= 4) throw err
+      if (attempt >= 5) throw err
+      if (customersHaveV6 && fieldNamed(CUSTOMER_V6_FIELDS, err)) {
+        console.warn('[apiClient] backend has no Customer tracker/automation fields yet — querying without them until deploy')
+        customersHaveV6 = false
+        continue
+      }
       if (customersHaveV5 && fieldNamed(CUSTOMER_V5_FIELDS, err)) {
         console.warn('[apiClient] backend has no Customer flow defaults yet — querying without them until deploy')
         customersHaveV5 = false
@@ -1474,7 +1490,12 @@ export async function getTmsSettings(): Promise<TmsSettings | null> {
     try {
       return await run()
     } catch (err) {
-      if (attempt >= 12) throw err
+      if (attempt >= 14) throw err
+      if (settingsHaveV15 && fieldNamed(TMS_SETTINGS_V15_FIELDS, err)) {
+        console.warn('[apiClient] backend has no tracking automation settings yet — querying without them until deploy')
+        settingsHaveV15 = false
+        continue
+      }
       if (settingsHaveV14 && fieldNamed(TMS_SETTINGS_V14_FIELDS, err)) {
         console.warn('[apiClient] backend has no Step L My Brokerage fields yet — querying without them until deploy')
         settingsHaveV14 = false
@@ -1544,7 +1565,7 @@ export async function getTmsSettings(): Promise<TmsSettings | null> {
     }
   }
 }
-export async function saveTmsSettings(patch: Partial<Omit<TmsSettings, 'id' | 'createdAt' | 'updatedAt'>>, expectedUpdatedAt?: string): Promise<TmsSettings> {
+export async function saveTmsSettings(patch: Partial<Omit<TmsSettings, 'id' | 'createdAt' | 'updatedAt' | 'trackingAutomation'>>, expectedUpdatedAt?: string): Promise<TmsSettings> {
   return directoryAction<TmsSettings>('SAVE_SETTINGS', { id: 'default', expectedUpdatedAt, ...patch })
 }
 
@@ -1750,6 +1771,12 @@ const SHIPMENT_REV_FIELDS = [
 let shipmentsHaveRevTag = true
 const SHIPMENT_COVERAGE_FIELDS = ['carrierRepId', 'carrierTeamKey']
 let shipmentsHaveCoverage = true
+// Step U: who reviewed the intake load this shipment was moved from. Own flag, same reason.
+const SHIPMENT_INTAKE_FIELDS = ['intakeLoadId', 'intakeReviewedBy', 'intakeReviewedAt']
+let shipmentsHaveIntake = true
+// Step V: the person tracking the shipment. Own flag, same reason.
+const SHIPMENT_TRACKER_FIELDS = ['trackerId']
+let shipmentsHaveTracker = true
 
 /** Every Shipment read, with each newer group dropped and retried if the backend predates it. */
 async function readShipments<T>(run: (fields: string) => Promise<T>): Promise<T> {
@@ -1758,10 +1785,20 @@ async function readShipments<T>(run: (fields: string) => Promise<T>): Promise<T>
       return await run([
         SHIPMENT_FIELDS,
         shipmentsHaveDelivery ? SHIPMENT_DELIVERY_FIELDS.join(' ') : '',
+        shipmentsHaveTracker ? SHIPMENT_TRACKER_FIELDS.join(' ') : '',
         shipmentsHaveRevTag ? SHIPMENT_REV_FIELDS.join(' ') : '',
         shipmentsHaveCoverage ? SHIPMENT_COVERAGE_FIELDS.join(' ') : '',
+        shipmentsHaveIntake ? SHIPMENT_INTAKE_FIELDS.join(' ') : '',
       ].filter(Boolean).join(' '))
     } catch (err) {
+      if (shipmentsHaveTracker && fieldNamed(SHIPMENT_TRACKER_FIELDS, err)) {
+        shipmentsHaveTracker = false
+        continue
+      }
+      if (shipmentsHaveIntake && fieldNamed(SHIPMENT_INTAKE_FIELDS, err)) {
+        shipmentsHaveIntake = false
+        continue
+      }
       if (shipmentsHaveCoverage && fieldNamed(SHIPMENT_COVERAGE_FIELDS, err)) {
         shipmentsHaveCoverage = false
         continue
@@ -2148,6 +2185,12 @@ export async function setSalesRep(input: { shipmentId: string; repId: string | n
   return shipmentAction<ShipmentBundle>('SET_SALES_REP', input)
 }
 
+export interface AssignTrackerResult { updated: string[]; skipped: { shipmentId: string; reason: string }[] }
+/** Assign (or clear, with null) the tracker of 1–100 shipments; one shape for single and bulk. */
+export async function assignTracker(input: { shipmentIds: string[]; trackerId: string | null }): Promise<AssignTrackerResult> {
+  return shipmentAction<AssignTrackerResult>('ASSIGN_TRACKER', input)
+}
+
 /** What a re-tag did, or would do: `dryRun` writes nothing and reports the same counts. */
 export interface RetagReport {
   dryRun: boolean
@@ -2187,16 +2230,12 @@ export async function testOwnershipRules(input: { shipmentId: string }): Promise
  * every page that renders a sidebar.
  */
 const OWNERSHIP_DIVISION_FIELDS = `
-  id code name brand parentId color sortOrder active owners flows
+  id code name brand parentId color sortOrder active owners flows intakeEmail
   createdBy updatedBy version createdAt updatedAt
 `
 const OWNERSHIP_RULE_FIELDS = `
   id name sortOrder active condition divisionCode
   createdBy updatedBy version createdAt updatedAt
-`
-const SHIPMENT_VIEW_FIELDS = `
-  id slug name department description filters columns sort isDefault audience
-  sortOrder active createdBy updatedBy version createdAt updatedAt
 `
 
 let ownershipModelsAvailable = true
@@ -2237,21 +2276,11 @@ export async function listOwnershipRules(): Promise<OwnershipRuleRecord[]> {
   }
 }
 
-/** Every saved view; `viewsVisibleTo` decides which of them this caller may open. */
-export async function listShipmentViews(): Promise<ShipmentViewRecord[]> {
-  if (!ownershipModelsAvailable) return []
-  try {
-    const rows = await listAll<ShipmentViewRecord>('listShipmentViews', SHIPMENT_VIEW_FIELDS, 200)
-    return rows.map((v) => unwrapJsonFields(v, ['filters', 'sort', 'audience']))
-  } catch (err) {
-    forgetOwnershipModels(err)
-    return []
-  }
-}
-
 export type OwnershipDivisionInput =
   Partial<Omit<OwnershipDivisionRecord, 'createdBy' | 'updatedBy' | 'version' | 'createdAt' | 'updatedAt'>>
-  & { code: string; name: string }
+  // Required by callers; the server refuses an empty one on an active division (an
+  // archived division may send ''). Omitting the key keeps the stored address.
+  & { code: string; name: string; intakeEmail: string }
 
 export async function saveOwnershipDivision(input: OwnershipDivisionInput): Promise<OwnershipDivisionRecord> {
   return directoryAction<OwnershipDivisionRecord>('SAVE_OWNERSHIP_DIVISION', input)
@@ -2259,6 +2288,102 @@ export async function saveOwnershipDivision(input: OwnershipDivisionInput): Prom
 /** Archive, never delete: a division a shipment is tagged with has to stay resolvable. */
 export async function archiveOwnershipDivision(input: { id: string }): Promise<OwnershipDivisionRecord> {
   return directoryAction<OwnershipDivisionRecord>('ARCHIVE_OWNERSHIP_DIVISION', input)
+}
+
+// ── Intake loads (Step U) ─────────────────────────────────────────────────────
+//
+// Partially built loads staged from tender e-mails. Read through the generated status
+// index; written only by tmsShipmentActions. Until the step-U deploy AppSync has no such
+// query, so reads degrade to "nothing waiting" rather than throwing on every shell render.
+
+const INTAKE_LOAD_FIELDS = `
+  id status divisionCode toAddress toAddresses runId sourceKey
+  subject fromEmail fromName receivedAt bodyText attachments
+  parseState parseNote format fields autoFields meta confirmed missingFields
+  shipmentId shipmentNumber reviewedBy reviewedAt lastEditedBy lastEditedAt
+  dismissedBy dismissedAt dismissReason createdBy updatedBy version createdAt updatedAt
+`
+const INTAKE_LOAD_JSON_FIELDS: (keyof IntakeLoadRecord)[] = ['attachments', 'fields', 'autoFields', 'meta']
+
+let intakeModelAvailable = true
+const isMissingIntakeModel = (err: unknown) =>
+  /[\\'"](get|list)IntakeLoad\w*[\\'"]|Unknown type [\\'"]+IntakeLoad/i.test(safeStringify(err))
+
+function forgetIntakeModel(err: unknown): void {
+  if (!isMissingIntakeModel(err)) throw err
+  console.warn('[apiClient] backend has no IntakeLoad model yet — intake stays empty until deploy')
+  intakeModelAvailable = false
+}
+
+function intakeRow(row: IntakeLoadRecord): IntakeLoadRecord {
+  const r = unwrapJsonFields(row, INTAKE_LOAD_JSON_FIELDS)
+  return { ...r, toAddresses: r.toAddresses ?? [], attachments: r.attachments ?? [], confirmed: r.confirmed ?? [], missingFields: r.missingFields ?? [], meta: r.meta ?? {} }
+}
+
+/** Loads in one status, newest first. Defaults to the OPEN worklist. */
+export async function listIntakeLoads(opts: { status?: IntakeLoadStatus; limit?: number } = {}): Promise<IntakeLoadRecord[]> {
+  if (!intakeModelAvailable) return []
+  try {
+    const rows = await listAllByIndex<IntakeLoadRecord>(
+      'listIntakeLoadByStatusAndReceivedAt', { status: opts.status ?? 'OPEN' }, INTAKE_LOAD_FIELDS, 200,
+      { status: 'IntakeLoadStatus!' },
+    )
+    const sorted = rows.map(intakeRow).sort((a, b) => (b.receivedAt ?? '').localeCompare(a.receivedAt ?? ''))
+    return opts.limit ? sorted.slice(0, opts.limit) : sorted
+  } catch (err) {
+    forgetIntakeModel(err)
+    return []
+  }
+}
+
+export async function getIntakeLoad(id: string): Promise<IntakeLoadRecord | null> {
+  if (!intakeModelAvailable) return null
+  try {
+    const r = await client.graphql({
+      query: `query GetIntakeLoad($id: ID!) { getIntakeLoad(id: $id) { ${INTAKE_LOAD_FIELDS} } }`,
+      variables: { id },
+    }) as { data: { getIntakeLoad: IntakeLoadRecord | null } }
+    return r.data.getIntakeLoad ? intakeRow(r.data.getIntakeLoad) : null
+  } catch (err) {
+    forgetIntakeModel(err)
+    return null
+  }
+}
+
+/** How many loads are waiting for review — the Intake badge. Selects only the key. */
+export async function countOpenIntakeLoads(): Promise<number> {
+  if (!intakeModelAvailable) return 0
+  try {
+    return (await listAllByIndex<{ id: string }>(
+      'listIntakeLoadByStatusAndReceivedAt', { status: 'OPEN' }, 'id', 1000, { status: 'IntakeLoadStatus!' },
+    )).length
+  } catch (err) {
+    forgetIntakeModel(err)
+    return 0
+  }
+}
+
+type IntakeFieldsPatch = Partial<Omit<IntakeFields, 'stops'>> & { stops?: Array<Partial<IntakeFields['stops'][number]>> }
+
+export async function saveIntakeDraft(input: {
+  intakeId: string
+  expectedVersion: number
+  fields: IntakeFieldsPatch
+  confirm?: { add: string[]; remove: string[] }
+}): Promise<IntakeLoadRecord> {
+  return intakeRow(await shipmentAction<IntakeLoadRecord>('INTAKE_SAVE_DRAFT', input))
+}
+
+export async function moveIntakeToActive(input: {
+  intakeId: string
+  expectedVersion: number
+}): Promise<{ intake: IntakeLoadRecord; shipmentId: string; shipmentNumber: string }> {
+  const r = await shipmentAction<{ intake: IntakeLoadRecord; shipmentId: string; shipmentNumber: string }>('INTAKE_MOVE_TO_ACTIVE', input)
+  return { ...r, intake: intakeRow(r.intake) }
+}
+
+export async function dismissIntake(input: { intakeId: string; expectedVersion: number; reason: string }): Promise<IntakeLoadRecord> {
+  return intakeRow(await shipmentAction<IntakeLoadRecord>('INTAKE_DISMISS', input))
 }
 
 export type OwnershipRuleInput =
@@ -2272,17 +2397,6 @@ export type OwnershipRuleInput =
  */
 export async function saveOwnershipRules(input: { rules: OwnershipRuleInput[] }): Promise<OwnershipRuleRecord[]> {
   return directoryAction<OwnershipRuleRecord[]>('SAVE_OWNERSHIP_RULES', input)
-}
-
-export type ShipmentViewInput =
-  Partial<Omit<ShipmentViewRecord, 'createdBy' | 'updatedBy' | 'version' | 'createdAt' | 'updatedAt'>>
-  & { name: string }
-
-export async function saveShipmentView(input: ShipmentViewInput): Promise<ShipmentViewRecord> {
-  return directoryAction<ShipmentViewRecord>('SAVE_SHIPMENT_VIEW', input)
-}
-export async function archiveShipmentView(input: { id: string }): Promise<ShipmentViewRecord> {
-  return directoryAction<ShipmentViewRecord>('ARCHIVE_SHIPMENT_VIEW', input)
 }
 
 // ── Shipment column templates (tmsDirectoryActions) ───────────────────────────
@@ -7110,7 +7224,7 @@ export type {
   ShipmentMessageStatus, CheckCallPlan, CheckCallChannel, CheckCallMilestone, RateViewAnswer,
 } from '@/types/tms'
 import type {
-  ShipmentPostingRecord, ShipmentMessageRecord, DemoRecordRow, CheckCallPlan, RateViewAnswer,
+  ShipmentPostingRecord, ShipmentMessageRecord, DemoRecordRow, CheckCallPlan, RateViewAnswer, TrackingAutomationSettings,
 } from '@/types/tms'
 import type { DemoChecklistFacts } from '@/lib/demoFlow'
 export type { DemoChecklistFacts, DemoStepDef, DemoStepKey, DemoChecklistRow } from '@/lib/demoFlow'
@@ -7313,6 +7427,29 @@ export async function saveLoadCheckCallPlan(input: {
 
 export async function requestPod(input: { shipmentId: string }): Promise<{ messages: ShipmentMessageRecord[] }> {
   return trackingAction<{ messages: ShipmentMessageRecord[] }>('REQUEST_POD', input)
+}
+
+export interface AutomationRunResult {
+  mode: 'AUTO' | 'MANUAL'
+  checked: number; acted: number; deferred: number; escalated: number; skipped: number; errors: number
+  pod: { checked: number; requested: number; skipped: number; deferred: number }
+  reasons: string[]
+}
+/** One sweep of the tracking automation: `AUTO` honours the policy switches, `MANUAL` (admin) ignores them. */
+export async function runTrackingAutomation(input?: { mode?: 'AUTO' | 'MANUAL'; shipmentIds?: string[] }): Promise<AutomationRunResult> {
+  return trackingAction<AutomationRunResult>('RUN_TRACKING_AUTOMATION', input ?? {})
+}
+
+/**
+ * Save the automation policy and/or the org check-call plan in one write (owner/ADMIN; CAS on
+ * `TmsSettings.updatedAt`). Omitted = keep, null = clear.
+ */
+export async function saveTrackingAutomation(input: {
+  expectedUpdatedAt: string
+  trackingAutomation?: TrackingAutomationSettings | null
+  defaultCheckCallPlan?: CheckCallPlan | null
+}): Promise<TmsSettings> {
+  return trackingAction<TmsSettings>('SAVE_TRACKING_AUTOMATION', input)
 }
 
 export interface PodReviewOutcome {

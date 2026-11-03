@@ -119,6 +119,8 @@ export const INTAKE_ITEM_TABLE_NAME = process.env.INTAKE_ITEM_TABLE_NAME ?? ''
 export const DRIVER_SUBMISSION_TABLE_NAME = process.env.DRIVER_SUBMISSION_TABLE_NAME ?? ''
 export const PRO_CLAIM_TABLE_NAME = process.env.PRO_CLAIM_TABLE_NAME ?? ''
 export const INTEGRATION_TABLE_NAME = process.env.INTEGRATION_TABLE_NAME ?? ''
+export const INTAKE_LOAD_TABLE_NAME = process.env.INTAKE_LOAD_TABLE_NAME ?? ''
+export const OWNERSHIP_DIVISION_TABLE_NAME = process.env.OWNERSHIP_DIVISION_TABLE_NAME ?? ''
 export const AUDIT_LOG_TABLE_NAME = process.env.AUDIT_LOG_TABLE_NAME ?? ''
 export const BUCKET_NAME = process.env.BUCKET_NAME ?? ''
 export const USER_POOL_ID = process.env.USER_POOL_ID ?? ''
@@ -409,6 +411,30 @@ export async function loadDirectory(): Promise<DirectorySnapshot> {
     scanProjected(LOCATION_TABLE_NAME, 'id, #n, city, #s, zip', { '#n': 'name', '#s': 'state' }),
   ])
   return { customers, carriers, carrierContacts, locations }
+}
+
+/** Every division row, projected to what intake routing reads (the table is a handful of rows). */
+export async function listDivisions(): Promise<Row[]> {
+  return scanProjected(OWNERSHIP_DIVISION_TABLE_NAME, 'id, code, #n, active, intakeEmail', { '#n': 'name' })
+}
+
+/**
+ * Creates the IntakeLoad row for one e-mail. `attribute_not_exists(id)`: a re-run
+ * (RETRY_RUN, SET_RUN_PARTY) must never overwrite a row a reviewer has started editing.
+ * Returns false when the row was already there.
+ */
+export async function putIntakeLoadIfAbsent(row: Row): Promise<boolean> {
+  try {
+    await dynamo.send(new PutItemCommand({
+      TableName: INTAKE_LOAD_TABLE_NAME,
+      Item: marshallRow({ ...row, __typename: 'IntakeLoad' }),
+      ConditionExpression: 'attribute_not_exists(id)',
+    }))
+    return true
+  } catch (err) {
+    if (isConditionalFailure(err)) return false
+    throw err
+  }
 }
 
 export async function getById(table: string, id: string): Promise<Row | null> {

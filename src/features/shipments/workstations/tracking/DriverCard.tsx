@@ -1,5 +1,5 @@
 /**
- * The driver card shared by the Inbox info panel and the shipment Tracking tab:
+ * The driver card on the shipment Tracking tab:
  * avatar, name, load-status pill, a call button when a phone is on file, and the
  * dispatcher beneath. Presence is never claimed — only stored facts show.
  */
@@ -25,7 +25,7 @@ export function DriverCard({ driver, dispatcher, loadStatus }: DriverCardProps) 
   const pill = driverStatusPill(loadStatus)
   const hasDispatcher = Boolean(dispatcher?.name || dispatcher?.phone || dispatcher?.email)
   return (
-    <section className="tms-driver-card" data-testid="inbox-driver-card" aria-label="Driver">
+    <section className="tms-driver-card" data-testid="driver-card" aria-label="Driver">
       <div className="tms-driver-card-main">
         <TmsAvatar label={name ?? 'Driver'} size="md" />
         <div className="tms-driver-card-id">

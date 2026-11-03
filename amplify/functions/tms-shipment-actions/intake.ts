@@ -1,0 +1,434 @@
+/**
+ * Step U — Intake actions. An `IntakeLoad` is a tender e-mail's partially built load;
+ * these three actions are the only writers of it after `workflow-agent` stages it:
+ *
+ *  - `INTAKE_SAVE_DRAFT`     — a reviewer's edits and confirmations (OPEN rows only).
+ *  - `INTAKE_DISMISS`        — "this is not a load", with a reason.
+ *  - `INTAKE_MOVE_TO_ACTIVE` — validate, create the shipment through the router's own
+ *    `createShipment`, finish it, mark the row MOVED.
+ *
+ * Move is built to be resumable. The shipment (and its permanent PRO) is created once:
+ * its id is written onto the row (still PROMOTING) the moment `createShipment` returns,
+ * and a retry that finds a `shipmentId` skips straight to finishing that shipment. A
+ * failure before that point puts the row back to OPEN; a failed validation writes nothing.
+ *
+ * The router owns authorization, clients and the shipment bodies; this module is handed
+ * them through `IntakeDeps` and re-implements none of them.
+ */
+import type { TransactWriteItem } from '@aws-sdk/client-dynamodb'
+
+import {
+  IDX_LOADS_BY_SHIPMENT,
+  IDX_ORDERS_BY_SHIPMENT,
+  buildSearchKey,
+  isConflict,
+  numberOrNull,
+  updateItemTx,
+  type Row,
+} from '../_shared/shipmentStore'
+import { assertRecord, assertString, optionalInteger, optionalString, type Caller } from '../_shared/actionInputs'
+
+import {
+  INTAKE_NOT_READY_PREFIX,
+  canMoveToActive,
+  correctedKeys,
+  intakeMissing,
+  intakeRequired,
+  patchIntakeFields,
+  toCreateShipmentInput,
+} from '../../../src/lib/intakeLoad'
+import { requiresApptProofs } from '../../../src/lib/apptQueue'
+import type { IntakeFields, IntakeLoadRecord, IntakeMeta } from '../../../src/types/intake'
+
+export const INTAKE_ACTIONS = ['INTAKE_SAVE_DRAFT', 'INTAKE_MOVE_TO_ACTIVE', 'INTAKE_DISMISS'] as const
+export type IntakeAction = (typeof INTAKE_ACTIONS)[number]
+
+/** A PROMOTING row with no shipment older than this was abandoned (Lambda timeout is shorter). */
+export const PROMOTING_STALE_MS = 2 * 60 * 1000
+
+export const INTAKE_CONFLICT_MESSAGE = 'This intake load changed while you were editing — reload it'
+
+export interface IntakeDeps {
+  tables: { intakeLoad: string; shipment: string; order: string; load: string }
+  getById(table: string, id: string): Promise<Row | null>
+  queryIndex(table: string, indexName: string, keyName: string, keyValue: string): Promise<Row[]>
+  transact(items: TransactWriteItem[], label: string): Promise<void>
+  getSettings(): Promise<Row | null>
+  /** The raw customer row (any status) or null. */
+  getCustomer(id: string): Promise<Row | null>
+  /** True when `code` is an active top-level ownership division. */
+  isDivisionActive(code: string): Promise<boolean>
+  writeAudit(entityType: string, entityId: string, action: string, caller: Caller, changes: Row): Promise<void>
+  actions: {
+    createShipment(input: Row, caller: Caller): Promise<Row>
+    setRevTag(input: Row, caller: Caller): Promise<Row>
+    setSalesRep(input: Row, caller: Caller): Promise<Row>
+  }
+  now(): string
+}
+
+// ── Row <-> record ───────────────────────────────────────────────────────────
+
+function jsonOf<T>(value: unknown, fallback: T): T {
+  if (value == null) return fallback
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value)
+      return (parsed ?? fallback) as T
+    } catch {
+      return fallback
+    }
+  }
+  return value as T
+}
+
+function strOrNull(value: unknown): string | null {
+  return typeof value === 'string' && value !== '' ? value : null
+}
+
+export function intakeRecordOf(row: Row): IntakeLoadRecord {
+  return {
+    id: String(row.id),
+    status: row.status as IntakeLoadRecord['status'],
+    divisionCode: strOrNull(row.divisionCode),
+    toAddress: strOrNull(row.toAddress),
+    toAddresses: jsonOf<string[]>(row.toAddresses, []),
+    runId: String(row.runId ?? ''),
+    sourceKey: strOrNull(row.sourceKey),
+    subject: String(row.subject ?? ''),
+    fromEmail: String(row.fromEmail ?? ''),
+    fromName: String(row.fromName ?? ''),
+    receivedAt: String(row.receivedAt ?? ''),
+    bodyText: String(row.bodyText ?? ''),
+    attachments: jsonOf(row.attachments, []),
+    parseState: row.parseState as IntakeLoadRecord['parseState'],
+    parseNote: strOrNull(row.parseNote),
+    format: strOrNull(row.format),
+    fields: jsonOf(row.fields, {} as IntakeFields),
+    autoFields: jsonOf(row.autoFields, {} as IntakeLoadRecord['autoFields']),
+    meta: jsonOf(row.meta, {} as IntakeMeta),
+    confirmed: jsonOf<string[]>(row.confirmed, []),
+    missingFields: jsonOf<string[]>(row.missingFields, []),
+    shipmentId: strOrNull(row.shipmentId),
+    shipmentNumber: strOrNull(row.shipmentNumber),
+    reviewedBy: strOrNull(row.reviewedBy),
+    reviewedAt: strOrNull(row.reviewedAt),
+    lastEditedBy: strOrNull(row.lastEditedBy),
+    lastEditedAt: strOrNull(row.lastEditedAt),
+    dismissedBy: strOrNull(row.dismissedBy),
+    dismissedAt: strOrNull(row.dismissedAt),
+    dismissReason: strOrNull(row.dismissReason),
+    createdBy: String(row.createdBy ?? ''),
+    updatedBy: String(row.updatedBy ?? ''),
+    version: numberOrNull(row.version) ?? 1,
+    createdAt: String(row.createdAt ?? ''),
+    updatedAt: String(row.updatedAt ?? ''),
+  }
+}
+
+async function loadRow(deps: IntakeDeps, intakeId: string): Promise<Row> {
+  const row = await deps.getById(deps.tables.intakeLoad, intakeId)
+  if (!row) throw new Error(`Intake load not found: ${intakeId}`)
+  return row
+}
+
+function assertExpectedVersion(row: Row, input: Row): number {
+  const expected = optionalInteger(input.expectedVersion, { min: 0, label: 'expectedVersion' })
+  if (expected == null) throw new Error('expectedVersion is required')
+  if ((numberOrNull(row.version) ?? 1) !== expected) throw new Error(INTAKE_CONFLICT_MESSAGE)
+  return expected
+}
+
+/** One transaction against the intake table; any CAS loss reads as the reviewer's conflict. */
+async function writeIntake(
+  deps: IntakeDeps,
+  row: Row,
+  patch: Row,
+  extra: TransactWriteItem[] = [],
+  cas: boolean = true,
+): Promise<Row> {
+  const now = deps.now()
+  const next: Row = {
+    ...patch,
+    updatedAt: now,
+    version: (numberOrNull(row.version) ?? 1) + 1,
+  }
+  try {
+    await deps.transact(
+      [
+        updateItemTx(deps.tables.intakeLoad, String(row.id), next, cas ? String(row.updatedAt ?? '') : null),
+        ...extra,
+      ],
+      'intake load',
+    )
+  } catch (err) {
+    if (isConflict(err)) throw Object.assign(new Error(INTAKE_CONFLICT_MESSAGE), { cause: err })
+    throw err
+  }
+  return { ...row, ...next }
+}
+
+async function validationContext(deps: IntakeDeps, fields: IntakeFields) {
+  const [settings, customer, divisionActive] = await Promise.all([
+    deps.getSettings(),
+    fields.customerId ? deps.getCustomer(fields.customerId) : Promise.resolve(null),
+    fields.divisionCode ? deps.isDivisionActive(fields.divisionCode) : Promise.resolve(false),
+  ])
+  const customerActive =
+    customer != null &&
+    !customer.mergedIntoId &&
+    (customer.status == null ? customer.active !== false : customer.status === 'ACTIVE')
+  return { settings, customer, customerActive, divisionActive }
+}
+
+// ── INTAKE_SAVE_DRAFT ────────────────────────────────────────────────────────
+
+export async function intakeSaveDraft(deps: IntakeDeps, input: Row, caller: Caller): Promise<Row> {
+  const intakeId = assertString(input.intakeId, 'intakeId')
+  const row = await loadRow(deps, intakeId)
+  assertExpectedVersion(row, input)
+  if (row.status !== 'OPEN') throw new Error('Only an open intake load can be edited')
+
+  const patch = assertRecord(input.fields ?? {}, 'fields') as Partial<IntakeFields>
+  const confirmIn = assertRecord(input.confirm ?? {}, 'confirm')
+  const keys = (v: unknown, label: string): string[] => {
+    if (v == null) return []
+    if (!Array.isArray(v) || v.some((k) => typeof k !== 'string')) throw new Error(`${label} must be a list of field keys`)
+    return v as string[]
+  }
+  const record = intakeRecordOf(row)
+  const patched = patchIntakeFields(record, patch, {
+    add: keys(confirmIn.add, 'confirm.add'),
+    remove: keys(confirmIn.remove, 'confirm.remove'),
+  })
+
+  // A reviewer may re-route to another active division or to Unrouted (null), never to a dead one.
+  const nextDivision = patched.fields.divisionCode ?? null
+  if (nextDivision && nextDivision !== record.fields.divisionCode && !(await deps.isDivisionActive(nextDivision))) {
+    throw new Error(`Unknown or archived division: ${nextDivision}`)
+  }
+
+  const [settings, customer] = await Promise.all([
+    deps.getSettings(),
+    patched.fields.customerId ? deps.getCustomer(patched.fields.customerId) : Promise.resolve(null),
+  ])
+  const missingFields = intakeMissing(patched.fields, intakeRequired(settings, customer).gated)
+  const now = deps.now()
+  const saved = await writeIntake(deps, row, {
+    fields: JSON.stringify(patched.fields),
+    meta: JSON.stringify(patched.meta),
+    confirmed: patched.confirmed,
+    missingFields,
+    divisionCode: nextDivision,
+    lastEditedBy: caller.email,
+    lastEditedAt: now,
+    updatedBy: caller.email,
+  })
+  await deps.writeAudit('INTAKE_LOAD', intakeId, 'INTAKE_SAVE_DRAFT', caller, {
+    edited: correctedKeys(record.fields, patched.fields),
+    missingFields,
+  })
+  return intakeRecordOf(saved) as unknown as Row
+}
+
+// ── INTAKE_DISMISS ───────────────────────────────────────────────────────────
+
+export async function intakeDismiss(deps: IntakeDeps, input: Row, caller: Caller): Promise<Row> {
+  const intakeId = assertString(input.intakeId, 'intakeId')
+  const reason = assertString(input.reason, 'reason')
+  if (reason.length > 500) throw new Error('reason must be 500 characters or fewer')
+  const row = await loadRow(deps, intakeId)
+  assertExpectedVersion(row, input)
+  if (row.status !== 'OPEN') throw new Error('Only an open intake load can be dismissed')
+  const now = deps.now()
+  const saved = await writeIntake(deps, row, {
+    status: 'DISMISSED',
+    dismissedBy: caller.email,
+    dismissedAt: now,
+    dismissReason: reason,
+    updatedBy: caller.email,
+  })
+  await deps.writeAudit('INTAKE_LOAD', intakeId, 'INTAKE_DISMISS', caller, { reason, runId: row.runId ?? null })
+  return intakeRecordOf(saved) as unknown as Row
+}
+
+// ── INTAKE_MOVE_TO_ACTIVE ────────────────────────────────────────────────────
+
+function referencesFrom(fields: IntakeFields, existing: Row[]): Row[] {
+  const mine: Array<[string, string, string | null]> = [
+    ['po', 'PO #', fields.reference],
+    ['pickup', 'Pickup #', fields.pickupNumber],
+    ['delivery', 'Delivery #', fields.deliveryNumber],
+  ]
+  const codes = new Set(mine.map(([code]) => code))
+  const kept = existing.filter((r) => !codes.has(String(r.code ?? '')))
+  const added = mine
+    .filter(([, , value]) => value != null && value !== '')
+    .map(([code, label, value]) => ({ code, label, value, level: 'ORDER', stopId: null, visibility: 'INTERNAL' }))
+  return [...kept, ...added]
+}
+
+/** Step 6 — idempotent: running it twice against the same shipment converges. */
+async function finishShipment(
+  deps: IntakeDeps,
+  row: Row,
+  fields: IntakeFields,
+  shipmentId: string,
+  caller: Caller,
+  reviewedAt: string,
+): Promise<void> {
+  const shipment0 = await deps.getById(deps.tables.shipment, shipmentId)
+  if (!shipment0) throw new Error(`Shipment not found: ${shipmentId}`)
+  const orders = await deps.queryIndex(deps.tables.order, IDX_ORDERS_BY_SHIPMENT, 'shipmentId', shipmentId)
+  const order = orders[0]
+  if (!order) throw new Error(`Shipment ${shipmentId} has no order`)
+  const references = referencesFrom(fields, Array.isArray(order.references) ? (order.references as Row[]) : [])
+  const now = deps.now()
+  await deps.transact(
+    [
+      updateItemTx(
+        deps.tables.order,
+        String(order.id),
+        {
+          references,
+          ...(fields.billToId ? { billToId: fields.billToId } : {}),
+          updatedBy: caller.email,
+          updatedAt: now,
+          version: (numberOrNull(order.version) ?? 1) + 1,
+        },
+        null,
+      ),
+    ],
+    'intake order',
+  )
+
+  // The reviewer's explicit division beats the rules: a hand tag.
+  if (fields.divisionCode && !(shipment0.revTagSource === 'HAND' && shipment0.revDivision === fields.divisionCode)) {
+    await deps.actions.setRevTag({ shipmentId, divisionCode: fields.divisionCode }, caller)
+  }
+  if (fields.salesRepId && shipment0.salesRepId !== fields.salesRepId) {
+    await deps.actions.setSalesRep({ shipmentId, repId: fields.salesRepId }, caller)
+  }
+
+  // Fresh read: the two actions above moved the shipment's updatedAt.
+  const shipment = (await deps.getById(deps.tables.shipment, shipmentId)) ?? shipment0
+  const loads = await deps.queryIndex(deps.tables.load, IDX_LOADS_BY_SHIPMENT, 'shipmentId', shipmentId)
+  const freshOrder = (await deps.getById(deps.tables.order, String(order.id))) ?? { ...order, references }
+  await deps.transact(
+    [
+      updateItemTx(
+        deps.tables.shipment,
+        shipmentId,
+        {
+          intakeLoadId: String(row.id),
+          intakeReviewedBy: caller.email,
+          intakeReviewedAt: reviewedAt,
+          searchKey: buildSearchKey(shipment, [freshOrder], loads),
+          updatedBy: caller.email,
+          updatedAt: deps.now(),
+          version: (numberOrNull(shipment.version) ?? 1) + 1,
+        },
+        String(shipment.updatedAt ?? ''),
+      ),
+    ],
+    'intake shipment',
+  )
+}
+
+export async function intakeMoveToActive(deps: IntakeDeps, input: Row, caller: Caller): Promise<Row> {
+  const intakeId = assertString(input.intakeId, 'intakeId')
+  let row = await loadRow(deps, intakeId)
+  const resumeShipmentId = row.status === 'PROMOTING' ? optionalString(row.shipmentId, 120) : null
+
+  let shipmentId: string
+  let shipmentNumber: string
+  if (resumeShipmentId) {
+    // Resume at step 6: the shipment exists, nothing is validated or created again.
+    shipmentId = resumeShipmentId
+    shipmentNumber = optionalString(row.shipmentNumber, 120) ?? ''
+  } else {
+    if (row.status === 'PROMOTING') {
+      // Another call may be mid-flight. Only an abandoned attempt can be retaken.
+      const age = Date.parse(deps.now()) - Date.parse(String(row.updatedAt ?? ''))
+      if (!(age > PROMOTING_STALE_MS)) throw new Error('This intake load is already being moved — try again in a moment')
+    } else {
+      assertExpectedVersion(row, input)
+      if (row.status !== 'OPEN') throw new Error(`This intake load is ${String(row.status).toLowerCase()}, not open`)
+    }
+
+    const record = intakeRecordOf(row)
+    const ctx = await validationContext(deps, record.fields)
+    const verdict = canMoveToActive(record, ctx)
+    if (!verdict.ok) {
+      const parts = [
+        ...verdict.missing,
+        ...verdict.problems,
+        ...verdict.unconfirmed.map((k) => `confirm ${k}`),
+      ]
+      throw new Error(`${INTAKE_NOT_READY_PREFIX} — still needs: ${parts.join(', ')}`)
+    }
+
+    // Step 3 — claim the row. Nothing has been created yet, so a loss here is a plain conflict.
+    row = await writeIntake(deps, row, { status: 'PROMOTING', updatedBy: caller.email })
+
+    try {
+      const customerName = optionalString(ctx.customer?.name, 200) ?? record.fields.customerName
+      const createInput = toCreateShipmentInput(record.fields, {
+        requiresApptProofs: requiresApptProofs({
+          customer: customerName,
+          customerApptWorkflow: (ctx.customer?.apptWorkflow as 'NONE' | 'BATORY' | null | undefined) ?? null,
+        }),
+        runId: record.runId,
+      })
+      const bundle = await deps.actions.createShipment(createInput, caller)
+      const shipment = assertRecord(bundle.shipment, 'created shipment')
+      shipmentId = String(shipment.id)
+      shipmentNumber = String(shipment.number ?? '')
+    } catch (err) {
+      // Before step 5 the shipment, if any, was voided by createShipment's own rollback.
+      await writeIntake(deps, row, { status: 'OPEN', updatedBy: caller.email }).catch((restoreErr) =>
+        console.error('[tms-shipment-actions] intake restore failed:', String(restoreErr)),
+      )
+      throw err
+    }
+
+    // Step 5 — record the shipment at once. Unconditional: this call holds the PROMOTING claim,
+    // and losing this write would orphan a PRO a retry then duplicates.
+    row = await writeIntake(deps, row, { shipmentId, shipmentNumber, updatedBy: caller.email }, [], false)
+  }
+
+  const reviewedAt = deps.now()
+  const record = intakeRecordOf(row)
+  await finishShipment(deps, row, record.fields, shipmentId, caller, reviewedAt)
+
+  // Step 7.
+  const moved = await writeIntake(deps, row, {
+    status: 'MOVED',
+    reviewedBy: caller.email,
+    reviewedAt,
+    updatedBy: caller.email,
+  })
+  const changes: Row = {
+    reviewedBy: caller.email,
+    reviewedAt,
+    runId: record.runId,
+    confirmed: record.confirmed,
+    corrected: correctedKeys(record.autoFields, record.fields),
+    divisionCode: record.fields.divisionCode,
+  }
+  await deps.writeAudit('SHIPMENT', shipmentId, 'INTAKE_MOVE_TO_ACTIVE', caller, changes)
+  await deps.writeAudit('INTAKE_LOAD', intakeId, 'INTAKE_MOVE_TO_ACTIVE', caller, { ...changes, shipmentId })
+
+  return { intake: intakeRecordOf(moved), shipmentId, shipmentNumber } as unknown as Row
+}
+
+export function runIntakeAction(deps: IntakeDeps, action: IntakeAction, input: Row, caller: Caller): Promise<Row> {
+  switch (action) {
+    case 'INTAKE_SAVE_DRAFT':
+      return intakeSaveDraft(deps, input, caller)
+    case 'INTAKE_MOVE_TO_ACTIVE':
+      return intakeMoveToActive(deps, input, caller)
+    case 'INTAKE_DISMISS':
+      return intakeDismiss(deps, input, caller)
+  }
+}

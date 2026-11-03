@@ -3,7 +3,6 @@ import type { TransactWriteItem } from '@aws-sdk/client-dynamodb'
 import {
   runCheckCallPlan,
   saveCheckCallPlan,
-  sweepCheckCallPlans,
   type CheckCallDeps,
 } from './checkCallAgent'
 import { threadKeyFor } from '../../../src/lib/shipmentThread'
@@ -56,7 +55,6 @@ function seedSettings(store: MemoryStore): Row {
       milestones: ['DISPATCHED', 'AT_PICKUP', 'DEPARTED_PICKUP', 'AT_DELIVERY', 'DELIVERED'],
       escalateAfterMinutes: 30,
       emailDispatcher: true,
-      requestPodOnDelivery: true,
     },
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
@@ -220,7 +218,7 @@ describe('runCheckCallPlan', () => {
 
     expect(second.acted).toBe(1)
     expect(second.skipped).toBe(0)
-    const cadence = messagesForLoad(store, 'lod-1').find((m) => typeof m.id === 'string' && m.id.startsWith('msg:lod-1:r'))
+    const cadence = messagesForLoad(store, 'lod-1').find((m) => typeof m.id === 'string' && m.id.startsWith('auto:cc:lc-1:'))
     expect(cadence?.kind).toBe('CHECK_CALL')
   })
 
@@ -322,27 +320,68 @@ describe('runCheckCallPlan', () => {
     expect(msgs.filter((m) => m.channel === 'SMS').length).toBe(1)
   })
 
-  it('leaves the load clock untouched when the send is refused', async () => {
+  it('records a refused send as an attempt: it occupies the slot and a second run adds nothing', async () => {
     const store = new MemoryStore()
     seedSettings(store)
     seedCustomer(store)
     seedShipment(store)
-    seedLoad(store, { status: 'DISPATCHED' })
+    seedLoad(store, { status: 'IN_TRANSIT' })
     seedCarrier(store)
     seedLink(store)
     const sendSms = vi.fn(async () => ({ status: 'NOT_SENT' as const, providerRef: null, error: 'Twilio unconfigured' }))
     const sendEmail = vi.fn(async () => ({ status: 'NOT_SENT' as const, providerRef: null, error: 'SES unconfigured' }))
     const deps = makeDeps(store, { sendSms, sendEmail })
 
-    const before = store.getById('Load-test', 'lod-1')
-    const result = await runCheckCallPlan(deps, { shipmentId: 'shp-1' }, CALLER)
-    const after = store.getById('Load-test', 'lod-1')
+    const first = await runCheckCallPlan(deps, { shipmentId: 'shp-1' }, CALLER)
+    expect(first.acted).toBe(1)
+    const afterFirst = store.getById('Load-test', 'lod-1')
+    expect(messagesForLoad(store, 'lod-1').every((m) => m.status === 'NOT_SENT')).toBe(true)
+    expect(afterFirst?.lastCheckCallAt).toBe(currentTime)
+    expect(afterFirst?.nextCheckCallAt).toBe('2026-02-02T16:00:00.000Z')
+    expect(afterFirst?.checkCallAwaitingSince ?? null).toBeNull() // nothing reached a provider: no reply clock
 
-    expect(result.acted).toBe(0)
-    expect(after?.checkCallAwaitingSince).toBe(before?.checkCallAwaitingSince)
-    expect(after?.checkCallOpen).toBe(before?.checkCallOpen)
-    expect(after?.lastCheckCallAt).toBe(before?.lastCheckCallAt)
-    expect(after?.nextCheckCallAt).toBe(before?.nextCheckCallAt)
+    // An immediate second run, and every 5-minute tick until the next slot, adds no row.
+    for (const t of ['2026-02-02T12:00:30.000Z', '2026-02-02T12:05:00.000Z', '2026-02-02T15:59:00.000Z']) {
+      currentTime = t
+      const again = await runCheckCallPlan(deps, { shipmentId: 'shp-1' }, CALLER)
+      expect(again.acted).toBe(0)
+    }
+    expect(messagesForLoad(store, 'lod-1')).toHaveLength(2)
+    expect(sendSms).toHaveBeenCalledTimes(1)
+    expect(sendEmail).toHaveBeenCalledTimes(1)
+  })
+
+  it('anchors cadence slots to the plan start and sends at most once per channel per slot', async () => {
+    const store = new MemoryStore()
+    seedSettings(store)
+    seedCustomer(store)
+    seedShipment(store)
+    seedLoad(store, { status: 'IN_TRANSIT' })
+    seedCarrier(store)
+    seedLink(store)
+    // Refused sends start no reply clock, so the ladder stays on the cadence.
+    const refused = async () => ({ status: 'NOT_SENT' as const, providerRef: null, error: 'unconfigured' })
+    const deps = makeDeps(store, { sendSms: refused, sendEmail: refused })
+    await runCheckCallPlan(deps, { shipmentId: 'shp-1' }, CALLER) // first cadence send at 12:00 is slot 0 and starts the plan
+
+    // 30 minutes late for slot 1 (16:00): the stamp is the slot start, so the cadence does not drift.
+    currentTime = '2026-02-02T16:30:00.000Z'
+    await runCheckCallPlan(deps, { shipmentId: 'shp-1' }, CALLER)
+    const load = store.getById('Load-test', 'lod-1')
+    expect(load?.lastCheckCallAt).toBe('2026-02-02T16:00:00.000Z')
+    expect(load?.nextCheckCallAt).toBe('2026-02-02T20:00:00.000Z')
+    expect(messagesForLoad(store, 'lod-1').map((m) => m.id).filter((id) => String(id).startsWith('auto:cc:')).sort()).toEqual([
+      'auto:cc:lc-1:0:EMAIL',
+      'auto:cc:lc-1:0:SMS',
+      'auto:cc:lc-1:1:EMAIL',
+      'auto:cc:lc-1:1:SMS',
+    ])
+
+    // MANUAL "Run now" in the same slot is a no-op.
+    currentTime = '2026-02-02T17:00:00.000Z'
+    const again = await runCheckCallPlan(deps, { shipmentId: 'shp-1' }, CALLER)
+    expect(again.acted).toBe(0)
+    expect(messagesForLoad(store, 'lod-1')).toHaveLength(4)
   })
 })
 
@@ -384,61 +423,160 @@ describe('saveCheckCallPlan', () => {
   })
 })
 
-describe('sweepCheckCallPlans', () => {
-  it('runs loads whose nextCheckCallAt is now or in the past', async () => {
-    const store = new MemoryStore()
-    seedSettings(store)
-    seedCustomer(store)
-    seedShipment(store)
-    seedLoad(store, {
-      status: 'IN_TRANSIT',
-      checkCallOpen: 'OPEN',
-      nextCheckCallAt: '2026-02-02T11:59:00.000Z',
-      lastCheckCallAt: '2026-02-02T08:00:00.000Z',
-    })
-    seedCarrier(store)
-    seedLink(store)
-    const deps = makeDeps(store)
+describe('runCheckCallPlan in AUTO mode', () => {
+  const AUTO = { mode: 'AUTO' as const }
+  // 2026-02-02 12:00Z is 06:00 CST; the default quiet window (21:00–06:00, SMS) has just ended.
+  const QUIET_NOW = '2026-02-02T04:00:00.000Z' // 22:00 the evening before, Chicago
 
-    const result = await sweepCheckCallPlans(deps, CALLER)
-
-    expect(result.acted).toBeGreaterThan(0)
-    expect(result.checked).toBeGreaterThan(0)
+  beforeEach(() => {
+    currentTime = '2026-02-02T12:00:00.000Z'
   })
 
-  it('continues past one shipment that throws', async () => {
-    const store = new MemoryStore()
+  function seedAutoWorld(store: MemoryStore, customerOverrides: Row = {}, carrierOverrides: Row = {}) {
     seedSettings(store)
-    seedCustomer(store)
-
-    seedShipment(store, { id: 'shp-1', number: 'BC1001' })
-    seedLoad(store, { id: 'lod-1', shipmentId: 'shp-1', status: 'DISPATCHED', checkCallOpen: 'OPEN', nextCheckCallAt: currentTime })
-    seedCarrier(store)
+    seedCustomer(store, customerOverrides)
+    seedShipment(store)
+    seedLoad(store, { status: 'DISPATCHED' })
+    seedCarrier(store, { rateConStatus: 'SENT', ...carrierOverrides })
     seedLink(store)
+  }
+  const switchedOn = { trackingAutomation: { checkCallsAuto: true } }
 
-    seedShipment(store, { id: 'shp-2', number: 'BC1002' })
-    seedLoad(store, {
-      id: 'lod-2',
-      shipmentId: 'shp-2',
-      status: 'DISPATCHED',
-      checkCallOpen: 'OPEN',
-      nextCheckCallAt: currentTime,
-      activeLoadCarrierId: 'lc-2',
-    })
-    seedCarrier(store, { id: 'lc-2', loadId: 'lod-2', shipmentId: 'shp-2', status: 'ACTIVE' })
-    seedLink(store, { id: 'link-2', shipmentId: 'shp-2', loadId: 'lod-2', loadCarrierId: 'lc-2' })
+  it('sends nothing while every automatic switch is at its default (off)', async () => {
+    const store = new MemoryStore()
+    seedAutoWorld(store)
+    const result = await runCheckCallPlan(makeDeps(store), { shipmentId: 'shp-1' }, CALLER, AUTO)
+    expect(result.acted).toBe(0)
+    expect(messagesForLoad(store, 'lod-1')).toHaveLength(0)
+    expect(store.getById('Load-test', 'lod-1')?.lastCheckCallAt).toBeNull()
+  })
 
-    const deps = makeDeps(store)
-    const originalGetById = deps.getById
-    deps.getById = async (table, id) => {
-      if (table === deps.tables.shipment && id === 'shp-1') throw new Error('boom')
-      return originalGetById(table, id)
-    }
-
-    const result = await sweepCheckCallPlans(deps, CALLER)
-
-    expect(result.errors).toBe(1)
+  it('MANUAL ignores the switch, the rate-con guard and quiet hours', async () => {
+    const store = new MemoryStore()
+    seedAutoWorld(store, {}, { rateConStatus: 'NOT_SENT' })
+    currentTime = QUIET_NOW
+    const result = await runCheckCallPlan(makeDeps(store), { shipmentId: 'shp-1' }, CALLER)
     expect(result.acted).toBe(1)
-    expect(result.checked).toBe(1)
+    expect(messagesForLoad(store, 'lod-1').map((m) => m.channel).sort()).toEqual(['EMAIL', 'SMS'])
+  })
+
+  it('sends by SMS and e-mail once the customer switches automatic check calls on', async () => {
+    const store = new MemoryStore()
+    seedAutoWorld(store, switchedOn)
+    const result = await runCheckCallPlan(makeDeps(store), { shipmentId: 'shp-1' }, CALLER, AUTO)
+    expect(result.acted).toBe(1)
+    expect(messagesForLoad(store, 'lod-1').map((m) => m.channel).sort()).toEqual(['EMAIL', 'SMS'])
+  })
+
+  it('skips a leg whose rate confirmation was not sent, an own-fleet leg and a voided shipment', async () => {
+    for (const carrier of [{ rateConStatus: 'NOT_SENT' }, { rateConStatus: 'DECLINED' }, { kind: 'OWN_ASSET' }]) {
+      const store = new MemoryStore()
+      seedAutoWorld(store, switchedOn, carrier)
+      const result = await runCheckCallPlan(makeDeps(store), { shipmentId: 'shp-1' }, CALLER, AUTO)
+      expect(result.acted).toBe(0)
+      expect(messagesForLoad(store, 'lod-1')).toHaveLength(0)
+    }
+    const store = new MemoryStore()
+    seedAutoWorld(store, switchedOn)
+    store.seed({ ...(store.getById('Shipment-test', 'shp-1') as Row), voidedAt: '2026-02-01T00:00:00.000Z' })
+    const result = await runCheckCallPlan(makeDeps(store), { shipmentId: 'shp-1' }, CALLER, AUTO)
+    expect(result.acted).toBe(0)
+    expect(messagesForLoad(store, 'lod-1')).toHaveLength(0)
+  })
+
+  it('holds an SMS back in quiet hours but still e-mails, and defers entirely when every channel is quiet', async () => {
+    const store = new MemoryStore()
+    seedAutoWorld(store, switchedOn)
+    currentTime = QUIET_NOW
+    const result = await runCheckCallPlan(makeDeps(store), { shipmentId: 'shp-1' }, CALLER, AUTO)
+    expect(result.acted).toBe(1)
+    expect(messagesForLoad(store, 'lod-1').map((m) => m.channel)).toEqual(['EMAIL'])
+
+    const quietAll = new MemoryStore()
+    seedAutoWorld(quietAll, {
+      trackingAutomation: { checkCallsAuto: true, quietHours: { enabled: true, start: '21:00', end: '06:00', timezone: 'America/Chicago', channels: ['SMS', 'EMAIL'] } },
+    })
+    currentTime = QUIET_NOW
+    const deferred = await runCheckCallPlan(makeDeps(quietAll), { shipmentId: 'shp-1' }, CALLER, AUTO)
+    expect(deferred.deferred).toBe(1)
+    expect(deferred.acted).toBe(0)
+    expect(messagesForLoad(quietAll, 'lod-1')).toHaveLength(0)
+    const load = quietAll.getById('Load-test', 'lod-1')
+    expect(load?.lastCheckCallAt).toBeNull()
+
+    // The window ends; the same tick is still due and goes out.
+    currentTime = '2026-02-02T12:30:00.000Z'
+    const later = await runCheckCallPlan(makeDeps(quietAll), { shipmentId: 'shp-1' }, CALLER, AUTO)
+    expect(later.acted).toBe(1)
+    expect(messagesForLoad(quietAll, 'lod-1').map((m) => m.channel).sort()).toEqual(['EMAIL', 'SMS'])
+  })
+
+  it('does not stamp a partial quiet tick: the held SMS still goes out later in the same slot, the e-mail is not repeated', async () => {
+    const store = new MemoryStore()
+    seedAutoWorld(store, switchedOn)
+    seedLoad(store, { status: 'IN_TRANSIT', lastCheckCallAt: '2026-02-01T22:00:00.000Z', checkCallPlanStartedAt: '2026-02-01T22:00:00.000Z' })
+    for (const m of ['DISPATCHED', 'AT_PICKUP', 'DEPARTED_PICKUP', 'IN_TRANSIT', 'AT_DELIVERY', 'DELIVERED']) {
+      store.seed({ id: `msg:lod-1:${m}`, __typename: 'ShipmentMessage', shipmentId: 'shp-1', loadId: 'lod-1', channel: 'SMS', direction: 'OUT', at: '2026-02-01T22:00:00.000Z' })
+    }
+    // 04:00Z = 22:00 Chicago (quiet for SMS); slot 1 of the 4 h cadence anchored at 22:00Z is 02:00Z–06:00Z.
+    currentTime = '2026-02-02T04:00:00.000Z'
+    const deps = makeDeps(store)
+    const first = await runCheckCallPlan(deps, { shipmentId: 'shp-1' }, CALLER, AUTO)
+    expect(first.acted).toBe(1)
+    expect(first.deferred).toBe(1)
+    expect(messagesForLoad(store, 'lod-1').filter((m) => m.kind === 'CHECK_CALL').map((m) => m.channel)).toEqual(['EMAIL'])
+    expect(store.getById('Load-test', 'lod-1')?.lastCheckCallAt).toBe('2026-02-01T22:00:00.000Z') // not stamped
+
+    // Still quiet at the next tick: nothing new.
+    currentTime = '2026-02-02T04:05:00.000Z'
+    const second = await runCheckCallPlan(deps, { shipmentId: 'shp-1' }, CALLER, AUTO)
+    expect(second.acted).toBe(0)
+    expect(messagesForLoad(store, 'lod-1').filter((m) => m.kind === 'CHECK_CALL')).toHaveLength(1)
+
+    // The window ends inside the same slot: the SMS goes out, the e-mail is not repeated, and the slot is spent.
+    currentTime = '2026-02-02T05:05:00.000Z'
+    const policy = { trackingAutomation: { checkCallsAuto: true, quietHours: { enabled: true, start: '21:00', end: '23:00', timezone: 'America/Chicago', channels: ['SMS'] } } }
+    store.seed({ ...(store.getById('Customer-test', 'cus-1') as Row), ...policy })
+    const third = await runCheckCallPlan(deps, { shipmentId: 'shp-1' }, CALLER, AUTO)
+    expect(third.acted).toBe(1)
+    const checkCalls = messagesForLoad(store, 'lod-1').filter((m) => m.kind === 'CHECK_CALL')
+    expect(checkCalls.map((m) => m.id).sort()).toEqual(['auto:cc:lc-1:1:EMAIL', 'auto:cc:lc-1:1:SMS'])
+    expect(store.getById('Load-test', 'lod-1')?.lastCheckCallAt).toBe('2026-02-02T02:00:00.000Z')
+  })
+
+  it('renders the customer templates for a cadence check call and appends the tracking link to an SMS without one', async () => {
+    const store = new MemoryStore()
+    seedAutoWorld(store, {
+      trackingAutomation: {
+        checkCallsAuto: true,
+        templates: { checkCallSms: 'Hi {driverName}, where is {proNumber}?', checkCallEmailSubject: 'Status {proNumber}', checkCallEmailBody: 'Update on {loadNumber} from {origin}' },
+      },
+    })
+    seedLoad(store, { status: 'IN_TRANSIT', lastCheckCallAt: '2026-02-02T07:00:00.000Z', checkCallPlanStartedAt: '2026-02-02T00:00:00.000Z', milestonesDone: true })
+    // All milestones are already sent, so the next tick is cadence.
+    for (const m of ['DISPATCHED', 'AT_PICKUP', 'DEPARTED_PICKUP', 'AT_DELIVERY', 'DELIVERED']) {
+      store.seed({ id: `msg:lod-1:${m}`, __typename: 'ShipmentMessage', shipmentId: 'shp-1', loadId: 'lod-1', channel: 'SMS', direction: 'OUT', at: '2026-02-02T00:00:00.000Z' })
+    }
+    const result = await runCheckCallPlan(makeDeps(store), { shipmentId: 'shp-1' }, CALLER, AUTO)
+    expect(result.acted).toBe(1)
+    const sent = messagesForLoad(store, 'lod-1').filter((m) => m.kind === 'CHECK_CALL')
+    const sms = sent.find((m) => m.channel === 'SMS')
+    const email = sent.find((m) => m.channel === 'EMAIL')
+    expect(String(sms?.body)).toContain('Hi Jose, where is BC1001?')
+    expect(String(sms?.body)).toContain('https://track.test/l/link-1')
+    expect(email?.subject).toBe('Status BC1001')
+    expect(String(email?.body)).toContain('Update on BC1001-1 from Chicago, IL')
+  })
+
+  it('applies a division plan when the customer has none', async () => {
+    const store = new MemoryStore()
+    seedAutoWorld(store, switchedOn)
+    store.seed({
+      ...(store.getById('TmsSettings-test', 'settings-1') as Row),
+      trackingAutomation: { global: {}, divisions: { WEST: { plan: { intervalHours: 2, channels: ['EMAIL'], milestones: ['DISPATCHED'], escalateAfterMinutes: 30, emailDispatcher: true } } } },
+    })
+    store.seed({ ...(store.getById('Shipment-test', 'shp-1') as Row), revDivision: 'WEST' })
+    await runCheckCallPlan(makeDeps(store), { shipmentId: 'shp-1' }, CALLER, AUTO)
+    expect(messagesForLoad(store, 'lod-1').map((m) => m.channel)).toEqual(['EMAIL'])
   })
 })

@@ -81,6 +81,7 @@ export interface ShipmentListRow extends ShipmentRecord {
   // ── R2 column catalog — everything the picker's columns read, null when unknown ──
   /** Rep and audit ids resolved to profile names; null when no profile matches. */
   salesRepName: string | null
+  trackerName: string | null
   customerRepName: string | null
   dispatcherAssignedName: string | null
   dispatcherActualName: string | null
@@ -616,6 +617,7 @@ export function useShipments(view: ShipmentsView = DEFAULT_VIEW) {
         stops,
         // Resolved names.
         salesRepName: nameOf(s.salesRepId),
+        trackerName: nameOf(s.trackerId),
         customerRepName: nameOf(customerRepId),
         dispatcherAssignedName: nameOf(dispatcherAssignedId),
         dispatcherActualName: nameOf(dispatcherActualId),

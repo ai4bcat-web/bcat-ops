@@ -959,6 +959,8 @@ const schema = a.schema({
       quoteAutoReply:        a.boolean(),      // true = the agent sends; false = a human presses Send
       requiredLoadFields:    a.string().array(), // adds to TmsSettings.defaultRequiredLoadFields
       checkCallPlan:         a.json(),         // CheckCallPlan — cadence + channels, overridable per load
+      defaultTrackerId:      a.string(),       // Step V. UserProfile id copied onto new shipments as the tracker (blank = unassigned)
+      trackingAutomation:    a.json(),         // Step V. AutomationPolicyPatch — auto check calls / POD / quiet hours / templates
     })
     .secondaryIndexes((index) => [index('normalizedName')])
     // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
@@ -1230,6 +1232,8 @@ const schema = a.schema({
       defaultRequiredLoadFields: a.string().array(),
       // { intervalHours: 4, channels: ['SMS','EMAIL'], milestones: [...], escalateAfterMinutes: 30 }
       defaultCheckCallPlan:     a.json(),
+      // Step V. { global: AutomationPolicyPatch, divisions: { [code]: { policy?, plan? } } }
+      trackingAutomation:       a.json(),
       // The P1 seed's version stamp, so the Demo page can say what it is looking at.
       demoSeedVersion:          a.string(),
       demoSeededAt:             a.datetime(),
@@ -1467,6 +1471,58 @@ const schema = a.schema({
     .disableOperations(['subscriptions', 'delete'])
     .authorization((allow) => [allow.authenticated().to(['read'])]),
 
+  /*
+   * Step U. A tender e-mail that arrived at a division's intake address, staged as a
+   * partially built load a person reviews before it becomes an Active shipment. It is
+   * deliberately NOT a Shipment: every Shipment burns a permanent PRO, and a load nobody
+   * has confirmed yet must be able to be dismissed without one. `id` is `il:` + the
+   * WorkflowRun id, so the conditional put `attribute_not_exists(id)` makes staging
+   * idempotent (one e-mail, one intake). workflow-agent creates rows; tmsShipmentActions
+   * edits, promotes and dismisses them. No client write, no subscriptions (TMS_DESIGN
+   * §12), and `delete` is dropped: a row is MOVED or DISMISSED, never removed.
+   */
+  IntakeLoad: a
+    .model({
+      id:            a.id(),
+      status:        a.enum(['OPEN', 'PROMOTING', 'MOVED', 'DISMISSED']),
+      divisionCode:  a.string(),             // null = Unrouted
+      toAddress:     a.string(),             // the address that matched a division
+      toAddresses:   a.string().array(),     // every recipient the bridge reported
+      runId:         a.string().required(),
+      sourceKey:     a.string(),
+      subject:       a.string(),
+      fromEmail:     a.string(),
+      fromName:      a.string(),
+      receivedAt:    a.datetime(),           // sort key of the status index
+      bodyText:      a.string(),             // <= 20 000 chars
+      attachments:   a.json(),               // [{ name, contentType, size, key }]
+      parseState:    a.enum(['PARSED', 'NOT_PARSED', 'FAILED']),
+      parseNote:     a.string(),
+      format:        a.string(),
+      fields:        a.json(),               // IntakeFields — the draft the reviewer edits
+      autoFields:    a.json(),               // immutable snapshot of what automation built
+      meta:          a.json(),               // per-field { source, confidence }
+      confirmed:     a.string().array(),
+      missingFields: a.string().array(),
+      shipmentId:    a.string(),             // set the moment createShipment returns
+      shipmentNumber: a.string(),
+      reviewedBy:    a.string(),
+      reviewedAt:    a.datetime(),
+      lastEditedBy:  a.string(),
+      lastEditedAt:  a.datetime(),
+      dismissedBy:   a.string(),
+      dismissedAt:   a.datetime(),
+      dismissReason: a.string(),
+      createdBy:     a.string().required(),
+      updatedBy:     a.string().required(),
+      version:       a.integer().required(),  // CAS token for every write
+    })
+    .secondaryIndexes((index) => [
+      index('status').sortKeys(['receivedAt']),
+    ])
+    .disableOperations(['subscriptions', 'delete'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
   // Long-running (but synchronous in pieces) location merge job. Lambdas move it through.
   DirectoryMergeJob: a
     .model({
@@ -1558,6 +1614,7 @@ const schema = a.schema({
       revRuleId:       a.string(),   // the OwnershipRule that resolved it
       revTaggedBy:     a.string(),   // who set a HAND tag; null while the rules decide
       salesRepId:      a.string(),   // Cognito username of the rep who sold it
+      trackerId:       a.string(),   // Step V. UserProfile id of the person tracking it (null = unassigned)
       carrierRepId:    a.string(),   // Step I. rep covering the shipment, mirrored onto every load
       carrierTeamKey:  a.string(),   // Step I. team assigned to cover the shipment
       // Ryne, 2026-10-28: Void is the only way a shipment leaves the working
@@ -1572,6 +1629,11 @@ const schema = a.schema({
       // The WorkflowRun a person applied to create this shipment. Read-only to a
       // client (the `voidedAt` pattern above): CREATE_SHIPMENT writes it, nothing else.
       workflowRunId:   a.string().authorization((allow) => [allow.authenticated().to(['read'])]),
+      // Step U. The IntakeLoad this shipment was moved from and who reviewed it, when.
+      // Read-only to a client (the `workflowRunId` pattern): INTAKE_MOVE_TO_ACTIVE writes them.
+      intakeLoadId:     a.string().authorization((allow) => [allow.authenticated().to(['read'])]),
+      intakeReviewedBy: a.string().authorization((allow) => [allow.authenticated().to(['read'])]),
+      intakeReviewedAt: a.datetime().authorization((allow) => [allow.authenticated().to(['read'])]),
 
       // ── The demo flow (Step P) ──────────────────────────────────────────
       // P5. A shipment the automation built from an e-mail is BUILDING until every
@@ -2704,6 +2766,10 @@ const schema = a.schema({
       // Which existing views its shipments flow into:
       // { calendar, dispatch, driverApp, driverPay, fleetDashboards, carShipping }.
       flows:       a.json(),
+      // Step U. The address tender e-mails for this division arrive at, lower-cased.
+      // Optional here (seed rows have none); SAVE_OWNERSHIP_DIVISION requires it on an
+      // active division and keeps it unique across active divisions.
+      intakeEmail: a.string(),
       createdBy:   a.string().required(),
       updatedBy:   a.string().required(),
       version:     a.integer().required(),

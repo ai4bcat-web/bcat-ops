@@ -58,34 +58,20 @@ function Row({ item, nowMs, onNavigate }: { item: NotificationItem; nowMs: numbe
   const Icon = ICONS[item.kind]
   const age = relativeTime(item.at, nowMs)
   return (
-    <Link
-      to={item.to}
-      onClick={onNavigate}
-      className="tms-notification-row"
-      style={{
-        display: 'flex',
-        alignItems: 'flex-start',
-        gap: 10,
-        padding: '10px 4px',
-        borderBottom: '1px solid var(--tms-border)',
-        color: 'inherit',
-        textDecoration: 'none',
-      }}
-    >
-      <Icon size={16} aria-hidden="true" style={{ marginTop: 2, flex: 'none' }} />
-      <span style={{ minWidth: 0, flex: 1 }}>
-        <span style={{ display: 'block', fontWeight: 600 }}>{item.title}</span>
-        <span className="tms-muted" style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {item.detail}
-        </span>
+    <Link to={item.to} onClick={onNavigate} className="tms-notification-row">
+      <Icon size={16} aria-hidden="true" className="tms-notification-icon" />
+      <span className="tms-notification-text">
+        <span className="tms-notification-title">{item.title}</span>
+        <span className="tms-notification-detail">{item.detail}</span>
       </span>
-      <span style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 'none' }}>
+      <span className="tms-notification-meta">
         <span
           role="img"
           aria-label={SEVERITY_LABEL[item.severity]}
-          style={{ width: 8, height: 8, borderRadius: '50%', background: SEVERITY_DOT[item.severity] }}
+          className="tms-notification-dot"
+          style={{ background: SEVERITY_DOT[item.severity] }}
         />
-        {age ? <span className="tms-muted">{age}</span> : null}
+        {age ? <span>{age}</span> : null}
       </span>
     </Link>
   )
@@ -103,10 +89,10 @@ function Body({ groups, onNavigate }: { groups: NotificationGroup[]; onNavigate:
   const shown = active === ALL ? groups : groups.filter((g) => g.kind === active)
   const sections: ReactNode[] = shown.map((g) => (
     <section key={g.kind} aria-label={g.label}>
-      {active === ALL ? <h3 style={{ fontSize: 12, margin: '14px 0 2px' }} className="tms-muted">{g.label}</h3> : null}
+      {active === ALL ? <h3 className="tms-notification-group">{g.label}</h3> : null}
       {g.items.map((item) => <Row key={item.id} item={item} nowMs={nowMs} onNavigate={onNavigate} />)}
       {g.total > g.items.length ? (
-        <Link to={g.moreTo} onClick={onNavigate} style={{ display: 'block', padding: '8px 4px' }}>
+        <Link to={g.moreTo} onClick={onNavigate} className="tms-notification-more">
           {g.moreLabel} — {g.total - g.items.length} more →
         </Link>
       ) : null}

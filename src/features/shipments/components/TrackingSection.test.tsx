@@ -71,7 +71,7 @@ const actions = {
 
 function renderTab(withUser = false) {
   const value = withUser
-    ? ({ user: { userId: 'u1', email: 'maria.gomez@bcatcorp.com', groups: [] }, loading: false, needsNewPassword: false, isAdmin: false } as never)
+    ? ({ user: { userId: 'u1', email: 'maria.gomez@bcatcorp.com', groups: [] }, loading: false, needsNewPassword: false, isAdmin: false, isOwner: false, hasPageAccess: () => false } as never)
     : null
   return render(
     <AuthContext.Provider value={value}>

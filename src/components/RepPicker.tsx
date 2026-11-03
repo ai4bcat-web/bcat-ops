@@ -23,6 +23,8 @@ import type { RoleKey, Team, UserProfileRecord } from '@/types/tms'
 interface RepPickerBase {
   /** Only offer people with this role. A value already set is shown either way. */
   role?: RoleKey
+  /** Hide people whose profile is INACTIVE (default true). A value already set is shown either way. */
+  activeOnly?: boolean
   placeholder?: string
   /** Let the picker commit a typed value nobody has a profile for. */
   allowUnknown?: boolean
@@ -62,7 +64,7 @@ const OPTION_STYLE: React.CSSProperties = {
 }
 
 export function RepPicker(props: RepPickerProps) {
-  const { role, placeholder = 'Pick a person…', allowUnknown = false, disabled = false, className } = props
+  const { role, placeholder = 'Pick a person…', allowUnknown = false, disabled = false, className, activeOnly = true } = props
   const { staff, loading } = useStaff()
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
@@ -81,8 +83,8 @@ export function RepPicker(props: RepPickerProps) {
   }, [staff])
 
   const pool = useMemo(
-    () => (role ? staff.filter((p) => p.role === role) : staff),
-    [staff, role],
+    () => staff.filter((p) => (role ? p.role === role : true) && (activeOnly ? p.status !== 'INACTIVE' : true)),
+    [staff, role, activeOnly],
   )
 
   useEffect(() => {

@@ -1,15 +1,14 @@
 /**
- * The Chaine-style tracking table: one row per shipment with everything a tracker
- * scans for — PRO, lane, status with the next event, last known + age, motion,
- * next-stop miles + ETA, team and carrier DOT/MC. The toolbar carries search, the
- * collapsed type-ahead filter panel, sort, saved views, favorites, the link actions
- * and the Active/Closed lifecycle toggle; the recently-viewed chips sit beneath it.
+ * The Tracking table: every shipment whose rate confirmation went out, grouped by the
+ * person tracking it. One section per assignee (a single section when one assignee tab is
+ * selected); each row carries PRO, customer, lane, status with the next event, last
+ * location + age + motion, ETA, next check call, POD state, carrier DOT/MC and the tracker.
  *
- * A row click opens the shipment's own Tracking tab — the board has no detail pane,
- * so the shipment page and this table can never drift. Rows are stamped with
- * data-testid="tracking-row", data-status and data-shipment-id for verification.
+ * A row click opens the shipment's own Tracking tab — the board has no detail pane, so the
+ * shipment page and this table can never drift. Rows are stamped with
+ * data-testid="tracking-row", data-status, data-shipment-id and data-tracker-id.
  */
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import {
   ArrowUpDown,
   Filter,
@@ -17,26 +16,33 @@ import {
   Link2,
   MoreHorizontal,
   Plus,
-  Save,
   Search,
   Settings2,
   X,
 } from 'lucide-react'
-import type { BoardFilterPanelProps } from '../../board/BoardFilterPanel'
+import { TrackerPicker } from '@/components/TrackerPicker'
 import { BoardFilterPanel } from '../../board/BoardFilterPanel'
 import { BoardGrid, type BoardGridColumn, type BoardGridSort } from '../../board/BoardGrid'
 import { BoardMapView } from '../../board/BoardMapView'
-import { TmsBadge, TmsButton, TmsIconButton, TmsInput, TmsSegmentedTabs, type TmsTone } from '@/features/tms/kit'
+import { TmsBadge, TmsButton, TmsIconButton, TmsInput, TmsSegmentedTabs, TmsSelect, type TmsTone } from '@/features/tms/kit'
 import { formatDateTime } from '@/lib/date'
-import { trackingEtaEstimate, type ComputedTrackingEta } from '@/lib/trackingEta'
-import type { Stop } from '@/types'
 import { boardStatusOf, type BoardStatusKey, type ShipmentRow } from '../../shipmentViews'
 import { relativeTime as relativeTimeOf, motionOf } from '../motion'
 import { nextEventText } from './nextEventText'
-import type { TrackingBoardProps } from './types'
+import {
+  MAX_ASSIGNEE_TABS,
+  UNASSIGNED_KEY,
+  durationText,
+  etaOf,
+  nextCheckCallStateOf,
+  podStateOf,
+  type PodState,
+} from './trackingTable'
+import type { TrackingBoardProps, TrackingGroup } from './types'
 
 const LIFECYCLE_TABS = [
   { key: 'active', label: 'Active' },
+  { key: 'pod', label: 'POD due' },
   { key: 'closed', label: 'Closed' },
 ]
 
@@ -46,24 +52,27 @@ const VIEW_TABS = [
 ]
 
 const COLUMNS: BoardGridColumn[] = [
-  { key: 'shipment', header: 'Shipment #', sortable: true, width: 170 },
-  { key: 'origin', header: 'Origin', sortable: true, width: 160 },
-  { key: 'destination', header: 'Destination', sortable: true, width: 160 },
+  { key: 'shipment', header: 'Shipment #', sortable: true, width: 150 },
+  { key: 'customer', header: 'Customer', sortable: true, width: 160 },
+  { key: 'lane', header: 'Lane', sortable: true, width: 230 },
   { key: 'status', header: 'Status', sortable: true, width: 190 },
-  { key: 'tracking', header: 'Tracking & Last Location', sortable: false, width: 210 },
-  { key: 'motion', header: 'Motion', sortable: true, width: 110 },
-  { key: 'nextStop', header: 'Next Stop', sortable: false, width: 200 },
-  { key: 'team', header: 'Team Members', sortable: false, width: 170 },
+  { key: 'lastLocation', header: 'Last Location', sortable: true, width: 200 },
+  { key: 'eta', header: 'ETA', sortable: true, width: 170 },
+  { key: 'nextCheckCall', header: 'Next Check Call', sortable: true, width: 160 },
+  { key: 'pod', header: 'POD', sortable: false, width: 110 },
   { key: 'carrier', header: 'Carrier DOT/MC', sortable: false, width: 190 },
+  { key: 'tracker', header: 'Tracker', sortable: false, width: 150 },
   { key: 'actions', header: '', sortable: false, width: 44 },
 ]
 
 const SORTABLE: { key: string; label: string }[] = [
   { key: 'shipment', label: 'Shipment #' },
-  { key: 'origin', label: 'Origin' },
-  { key: 'destination', label: 'Destination' },
+  { key: 'customer', label: 'Customer' },
+  { key: 'lane', label: 'Lane' },
   { key: 'status', label: 'Status' },
-  { key: 'motion', label: 'Motion' },
+  { key: 'lastLocation', label: 'Last location' },
+  { key: 'eta', label: 'ETA' },
+  { key: 'nextCheckCall', label: 'Next check call' },
 ]
 
 const STATUS_TONES: Record<BoardStatusKey | 'CANCELED', TmsTone> = {
@@ -79,8 +88,13 @@ const STATUS_TONES: Record<BoardStatusKey | 'CANCELED', TmsTone> = {
   CANCELED: 'red',
 }
 
-/** Ping coordinates land on the row with the data projection; read structurally so both compile. */
-type RowWithPing = ShipmentRow & { lastKnownLat?: number | null; lastKnownLng?: number | null }
+const POD_BADGES: Record<Exclude<PodState, 'NOT_DUE'>, { tone: TmsTone; label: string }> = {
+  NEEDED: { tone: 'orange', label: 'POD needed' },
+  REQUESTED: { tone: 'blue', label: 'Requested' },
+  IN_REVIEW: { tone: 'turquoise', label: 'In review' },
+  RECEIVED: { tone: 'green', label: 'Received' },
+  UNKNOWN: { tone: 'gray', label: 'Not checked' },
+}
 
 function motionText(row: ShipmentRow, nowMs: number): string {
   return motionOf({
@@ -92,46 +106,14 @@ function motionText(row: ShipmentRow, nowMs: number): string {
   })
 }
 
-/** The stop the shipment drives at next: delivery once it is rolling, pickup before. */
-function nextStopOf(row: ShipmentRow): Stop | null {
-  const stops = row.stops ?? []
-  if (stops.length === 0) return null
-  const status = boardStatusOf(row)
-  const wantDelivery = status === 'DEPARTED' || status === 'ARRIVED'
-  const typed = stops.filter((s) => (wantDelivery ? s.type === 'delivery' : s.type === 'pickup'))
-  const pending = typed.filter((s) => !s.arrivedAt && !s.departedAt)
-  return pending[0] ?? typed[0] ?? null
-}
-
-/** Miles + ETA from the last ping to the next stop; null when there is no fix to work from. */
-function nextStopEta(row: ShipmentRow, nowMs: number): ComputedTrackingEta | null {
-  const withPing = row as RowWithPing
-  const lat = withPing.lastKnownLat
-  const lng = withPing.lastKnownLng
-  if (lat == null || lng == null) return null
-  const stop = nextStopOf(row)
-  const stopLat = stop?.address?.lat
-  const stopLng = stop?.address?.lng
-  if (!stop || stopLat == null || stopLng == null) return null
-  const pingAt = row.lastUpdateAt ?? row.lastKnownAt
-  if (!pingAt) return null
-  try {
-    return trackingEtaEstimate(
-      { lat, lng },
-      { lat: stopLat, lng: stopLng, appt: stop.appt ?? null },
-      pingAt,
-      new Date(nowMs).toISOString(),
-    )
-  } catch {
-    return null
-  }
-}
-
 function lateText(minutes: number): string {
   if (minutes < 60) return `${minutes} min`
   if (minutes < 1440) return `${Math.round(minutes / 60)} h`
   return `${Math.round(minutes / 1440)} d`
 }
+
+/** Missing values sort last in either direction. */
+const NO_VALUE = Number.POSITIVE_INFINITY
 
 function sortRows(rows: ShipmentRow[], sort: BoardGridSort | null, nowMs: number): ShipmentRow[] {
   if (!sort) return rows
@@ -145,13 +127,13 @@ function sortRows(rows: ShipmentRow[], sort: BoardGridSort | null, nowMs: number
         av = a.number
         bv = b.number
         break
-      case 'origin':
+      case 'customer':
+        av = a.customerName ?? ''
+        bv = b.customerName ?? ''
+        break
+      case 'lane':
         av = a.originCity ?? ''
         bv = b.originCity ?? ''
-        break
-      case 'destination':
-        av = a.destinationCity ?? ''
-        bv = b.destinationCity ?? ''
         break
       case 'status': {
         const statusOrder: Record<string, number> = {
@@ -161,7 +143,7 @@ function sortRows(rows: ShipmentRow[], sort: BoardGridSort | null, nowMs: number
         bv = statusOrder[boardStatusOf(b)] ?? 99
         break
       }
-      case 'motion': {
+      case 'lastLocation': {
         const motionOrder: Record<string, number> = { Moving: 1, Stopped: 2, 'No signal': 3 }
         const am = motionOrder[motionText(a, nowMs)] ?? 99
         const bm = motionOrder[motionText(b, nowMs)] ?? 99
@@ -169,12 +151,32 @@ function sortRows(rows: ShipmentRow[], sort: BoardGridSort | null, nowMs: number
           av = am
           bv = bm
         } else {
-          // Within the same motion, newest ping first so the active board surface
-          // the shipments a dispatcher should look at right now.
+          // Within the same motion, newest ping first so the board surfaces the shipments
+          // a tracker should look at right now.
           const ad = new Date(a.lastUpdateAt ?? a.lastKnownAt ?? 0).getTime()
           const bd = new Date(b.lastUpdateAt ?? b.lastKnownAt ?? 0).getTime()
           return bd - ad
         }
+        break
+      }
+      case 'eta': {
+        const at = etaOf(a, nowMs)?.at
+        const bt = etaOf(b, nowMs)?.at
+        av = at ? Date.parse(at) : NO_VALUE
+        bv = bt ? Date.parse(bt) : NO_VALUE
+        if (av === bv) return 0
+        if (av === NO_VALUE) return 1
+        if (bv === NO_VALUE) return -1
+        break
+      }
+      case 'nextCheckCall': {
+        const an = nextCheckCallStateOf(a, nowMs)
+        const bn = nextCheckCallStateOf(b, nowMs)
+        av = an.kind === 'NONE' ? NO_VALUE : Date.parse(an.at)
+        bv = bn.kind === 'NONE' ? NO_VALUE : Date.parse(bn.at)
+        if (av === bv) return 0
+        if (av === NO_VALUE) return 1
+        if (bv === NO_VALUE) return -1
         break
       }
       default:
@@ -188,9 +190,23 @@ function sortRows(rows: ShipmentRow[], sort: BoardGridSort | null, nowMs: number
   return sorted
 }
 
+function emptyMessage(props: Pick<TrackingBoardProps, 'activeAssignee' | 'includeUnsent' | 'lifecycle'>): string {
+  if (props.activeAssignee === 'me') return 'Nothing assigned to you — pick All.'
+  if (props.activeAssignee !== 'all') return 'Nothing in this view.'
+  if (!props.includeUnsent && props.lifecycle === 'active') return 'No shipments with a sent rate confirmation yet.'
+  return 'No shipments in this view.'
+}
+
 export function TrackingBoard(props: TrackingBoardProps) {
   const {
-    rows,
+    groups,
+    assigneeTabs,
+    activeAssignee,
+    onSelectAssignee,
+    lifecycle,
+    onLifecycle,
+    includeUnsent,
+    onIncludeUnsent,
     loading,
     error,
     nowMs,
@@ -198,15 +214,15 @@ export function TrackingBoard(props: TrackingBoardProps) {
     mapsMapId,
     query,
     setQuery,
-    activeOnly,
-    setActiveOnly,
     favorites,
     onToggleFavorite,
     onOpenShipment,
     onCreateShipment,
     onManageLinks,
     onCreateCustomerUrl,
-    onSaveView,
+    onRequestCheckCall,
+    onRequestPod,
+    onAssignTracker,
     panelProps,
     recent,
     onOpenRecent,
@@ -215,13 +231,21 @@ export function TrackingBoard(props: TrackingBoardProps) {
 
   const [favoritesOnly, setFavoritesOnly] = useState(false)
   const [mapVisible, setMapVisible] = useState(false)
-  const [sort, setSort] = useState<BoardGridSort | null>({ key: 'motion', dir: 'asc' })
+  const [sort, setSort] = useState<BoardGridSort | null>({ key: 'lastLocation', dir: 'asc' })
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
+  // The grid's row handler cannot see the event, so a click that landed on a selection
+  // checkbox is noted on the way down and swallowed by the row handler on the way up.
+  const checkboxClick = useRef(false)
 
-  const listRows = useMemo(() => {
-    const sorted = sortRows(rows, sort, nowMs)
-    if (!favoritesOnly) return sorted
-    return sorted.filter((r) => favorites.has(r.id))
-  }, [rows, sort, nowMs, favoritesOnly, favorites])
+  const visibleGroups = useMemo(
+    () =>
+      groups.map((g) => {
+        const sorted = sortRows(g.rows, sort, nowMs)
+        return { ...g, rows: favoritesOnly ? sorted.filter((r) => favorites.has(r.id)) : sorted }
+      }).filter((g) => !favoritesOnly || g.rows.length > 0),
+    [groups, sort, nowMs, favoritesOnly, favorites],
+  )
+  const allRows = useMemo(() => visibleGroups.flatMap((g) => g.rows), [visibleGroups])
 
   const onSort = useCallback((key: string) => {
     setSort((prev) => {
@@ -231,6 +255,10 @@ export function TrackingBoard(props: TrackingBoardProps) {
   }, [])
 
   const handleRowClick = useCallback((row: ShipmentRow) => {
+    if (checkboxClick.current) {
+      checkboxClick.current = false
+      return
+    }
     onOpenShipment(row.id)
   }, [onOpenShipment])
 
@@ -239,9 +267,27 @@ export function TrackingBoard(props: TrackingBoardProps) {
       'data-testid': 'tracking-row',
       'data-status': boardStatusOf(row),
       'data-shipment-id': row.id,
+      'data-tracker-id': row.trackerId ?? '',
     }),
     [],
   )
+
+  const toggleOne = useCallback((id: string) => {
+    setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
+  }, [])
+
+  const toggleGroup = useCallback((group: TrackingGroup) => {
+    const ids = group.rows.map((r) => r.id)
+    setSelectedIds((prev) => {
+      const all = ids.every((id) => prev.includes(id))
+      return all ? prev.filter((id) => !ids.includes(id)) : [...new Set([...prev, ...ids])]
+    })
+  }, [])
+
+  const reassign = useCallback(async (ids: string[], trackerId: string | null) => {
+    await onAssignTracker(ids, trackerId)
+    setSelectedIds((prev) => prev.filter((id) => !ids.includes(id)))
+  }, [onAssignTracker])
 
   const renderCell = useCallback(
     (row: ShipmentRow, key: string) => {
@@ -255,45 +301,47 @@ export function TrackingBoard(props: TrackingBoardProps) {
               onToggleFavorite={() => onToggleFavorite(row.id)}
             />
           )
-        case 'origin':
-          return (
-            <div>
-              <div>{row.originCity ?? '—'}</div>
-              <div className="tms-tracking-cell-muted">{row.pickupAppt ? formatDateTime(row.pickupAppt) : 'No pickup appt'}</div>
-            </div>
-          )
-        case 'destination':
-          return (
-            <div>
-              <div>{row.destinationCity ?? '—'}</div>
-              <div className="tms-tracking-cell-muted">{row.deliveryAppt ? formatDateTime(row.deliveryAppt) : 'No delivery appt'}</div>
-            </div>
-          )
+        case 'customer':
+          return <span>{row.customerName ?? '—'}</span>
+        case 'lane':
+          return <LaneCell row={row} />
         case 'status':
           return <StatusCell row={row} nowMs={nowMs} />
-        case 'tracking':
-          return <TrackingCell row={row} nowMs={nowMs} />
-        case 'motion':
-          return <MotionCell row={row} nowMs={nowMs} />
-        case 'nextStop':
-          return <NextStopCell row={row} nowMs={nowMs} />
-        case 'team':
-          return <TeamCell row={row} />
+        case 'lastLocation':
+          return <LastLocationCell row={row} nowMs={nowMs} />
+        case 'eta':
+          return <EtaCell row={row} nowMs={nowMs} />
+        case 'nextCheckCall':
+          return <NextCheckCallCell row={row} nowMs={nowMs} />
+        case 'pod':
+          return <PodCell row={row} />
         case 'carrier':
           return <CarrierCell row={row} />
+        case 'tracker':
+          return <TrackerCell row={row} />
         case 'actions':
           return (
             <RowMenu
+              row={row}
               onOpen={() => onOpenShipment(row.id)}
               onCreateCustomerUrl={() => onCreateCustomerUrl(row)}
+              onRequestCheckCall={() => onRequestCheckCall(row)}
+              onRequestPod={() => onRequestPod(row)}
+              onAssignTracker={(trackerId) => onAssignTracker([row.id], trackerId)}
             />
           )
         default:
           return null
       }
     },
-    [favorites, onOpenShipment, onToggleFavorite, onCreateCustomerUrl, nowMs],
+    [favorites, onOpenShipment, onToggleFavorite, onCreateCustomerUrl, onRequestCheckCall, onRequestPod, onAssignTracker, nowMs],
   )
+
+  // Tabs beyond the eighth fold into a select so the strip never wraps off screen.
+  const shownTabs = assigneeTabs.slice(0, MAX_ASSIGNEE_TABS)
+  const overflowTabs = assigneeTabs.slice(MAX_ASSIGNEE_TABS)
+  const activeInOverflow = overflowTabs.some((t) => t.key === activeAssignee)
+  const unassignedCount = assigneeTabs.find((t) => t.key === UNASSIGNED_KEY)?.count ?? 0
 
   return (
     <div className="tms-tracking-board">
@@ -307,10 +355,6 @@ export function TrackingBoard(props: TrackingBoardProps) {
             onChange={(e) => setQuery(e.target.value)}
             className="tms-tracking-search"
           />
-          <ViewsDropdown {...panelProps} />
-          <TmsButton size="sm" variant="ghost" onClick={onSaveView}>
-            <Save size={14} /> Save view
-          </TmsButton>
           <SortDropdown sort={sort} onSort={onSort} />
           <TmsButton
             size="sm"
@@ -326,9 +370,9 @@ export function TrackingBoard(props: TrackingBoardProps) {
           <TmsButton
             size="sm"
             variant="secondary"
-            disabled={listRows.length === 0}
-            title={listRows.length === 0 ? 'No shipment in view' : `Create a customer link for ${listRows[0].number}`}
-            onClick={() => { if (listRows[0]) onCreateCustomerUrl(listRows[0]) }}
+            disabled={allRows.length === 0}
+            title={allRows.length === 0 ? 'No shipment in view' : `Create a customer link for ${allRows[0].number}`}
+            onClick={() => { if (allRows[0]) onCreateCustomerUrl(allRows[0]) }}
           >
             <Link2 size={14} /> Create Customer URL
           </TmsButton>
@@ -348,9 +392,37 @@ export function TrackingBoard(props: TrackingBoardProps) {
             aria-label="Shipment lifecycle"
             size="sm"
             tabs={LIFECYCLE_TABS}
-            active={activeOnly ? 'active' : 'closed'}
-            onSelect={(key) => setActiveOnly(key === 'active')}
+            active={lifecycle}
+            onSelect={(key) => onLifecycle(key as typeof lifecycle)}
           />
+          <TmsButton
+            size="sm"
+            variant={includeUnsent ? 'primary' : 'secondary'}
+            aria-pressed={includeUnsent}
+            title="Also list loads whose rate confirmation was not sent through the TMS (Aljex-era or own-fleet loads)"
+            onClick={() => onIncludeUnsent(!includeUnsent)}
+          >
+            Include loads without a TMS rate con
+          </TmsButton>
+        </div>
+        <div className="tms-tracking-assignee-tabs" data-testid="tracking-assignee-tabs">
+          <TmsSegmentedTabs
+            aria-label="Assignee"
+            size="sm"
+            tabs={shownTabs}
+            active={activeAssignee}
+            onSelect={onSelectAssignee}
+          />
+          {overflowTabs.length > 0 && (
+            <TmsSelect
+              aria-label="More assignees"
+              value={activeInOverflow ? activeAssignee : ''}
+              onChange={(e) => { if (e.target.value) onSelectAssignee(e.target.value) }}
+              placeholder="More assignees"
+              options={overflowTabs.map((t) => ({ value: t.key, label: `${t.label} (${t.count})` }))}
+            />
+          )}
+          {unassignedCount > 0 && <TmsBadge tone="orange">{unassignedCount} unassigned</TmsBadge>}
         </div>
         {recent.length > 0 && (
           <div className="tms-tracking-recent-row">
@@ -381,30 +453,70 @@ export function TrackingBoard(props: TrackingBoardProps) {
         <BoardFilterPanel {...panelProps} />
         <div className="tms-tracking-board-content">
           <div className="tms-tracking-table-pane" data-testid="tracking-list">
-            {loading && !rows.length ? (
+            {loading && allRows.length === 0 ? (
               <p className="tms-tracking-empty">Loading shipments…</p>
+            ) : allRows.length === 0 ? (
+              <p className="tms-tracking-empty" data-testid="tracking-empty">{emptyMessage({ activeAssignee, includeUnsent, lifecycle })}</p>
             ) : mapVisible ? (
-              <BoardMapView rows={listRows} apiKey={mapsKey} mapId={mapsMapId} onOpenShipment={onOpenShipment} />
+              <BoardMapView rows={allRows} apiKey={mapsKey} mapId={mapsMapId} onOpenShipment={onOpenShipment} />
             ) : (
-              <BoardGrid
-                columns={COLUMNS}
-                rows={listRows}
-                rowKey={(row) => row.id}
-                selectedIds={[]}
-                selectable={false}
-                rowDataAttrs={rowDataAttrs}
-                toneOf={() => ''}
-                onToggle={() => {}}
-                onToggleAll={() => {}}
-                sort={sort}
-                onSort={onSort}
-                onRowClick={handleRowClick}
-                renderCell={renderCell}
-              />
+              <div
+                className="tms-tracking-groups"
+                onClickCapture={(e) => {
+                  const target = e.target as HTMLElement
+                  checkboxClick.current = target instanceof HTMLInputElement && target.type === 'checkbox'
+                }}
+              >
+                {visibleGroups.map((group) => {
+                  const selectedHere = group.rows.filter((r) => selectedIds.includes(r.id)).map((r) => r.id)
+                  return (
+                    <section
+                      key={group.key}
+                      className="tms-tracking-group"
+                      data-testid="tracking-group"
+                      data-group-key={group.key}
+                      aria-label={`${group.label} — ${group.rows.length} shipment${group.rows.length === 1 ? '' : 's'}`}
+                    >
+                      <header className="tms-tracking-group-head">
+                        <h3 className="tms-tracking-group-title">
+                          {group.trackerId === null ? <TmsBadge tone="orange">{group.label}</TmsBadge> : group.label}
+                        </h3>
+                        <span className="tms-tracking-group-count">{group.rows.length}</span>
+                        {selectedHere.length > 0 && (
+                          <span className="tms-tracking-group-reassign">
+                            <TrackerPicker
+                              value={null}
+                              allowClear={false}
+                              aria-label={`Reassign ${selectedHere.length} selected`}
+                              placeholder={`Reassign ${selectedHere.length} selected to…`}
+                              onChange={(id) => { if (id) void reassign(selectedHere, id) }}
+                            />
+                          </span>
+                        )}
+                      </header>
+                      <BoardGrid
+                        columns={COLUMNS}
+                        rows={group.rows}
+                        rowKey={(row) => row.id}
+                        selectedIds={selectedIds}
+                        selectable
+                        rowDataAttrs={rowDataAttrs}
+                        toneOf={() => ''}
+                        onToggle={toggleOne}
+                        onToggleAll={() => toggleGroup(group)}
+                        sort={sort}
+                        onSort={onSort}
+                        onRowClick={handleRowClick}
+                        renderCell={renderCell}
+                      />
+                    </section>
+                  )
+                })}
+              </div>
             )}
             <div className="tms-tracking-footer">
               <span>
-                <strong>{listRows.length}</strong> shipment{listRows.length === 1 ? '' : 's'}
+                <strong>{allRows.length}</strong> shipment{allRows.length === 1 ? '' : 's'}
               </span>
             </div>
           </div>
@@ -435,11 +547,21 @@ function ShipmentCell({
       >
         <Heart size={14} fill={favorites.has(row.id) ? 'currentColor' : 'none'} />
       </button>
-      <div>
-        <button type="button" className="tms-tracking-pro" onClick={(e) => { e.stopPropagation(); onOpen() }}>
-          {row.number}
-        </button>
-        <div className="tms-tracking-cell-muted">{row.customerName ?? '—'}</div>
+      <button type="button" className="tms-tracking-pro" onClick={(e) => { e.stopPropagation(); onOpen() }}>
+        {row.number}
+      </button>
+    </div>
+  )
+}
+
+function LaneCell({ row }: { row: ShipmentRow }) {
+  return (
+    <div>
+      <div>{row.originCity ?? '—'} → {row.destinationCity ?? '—'}</div>
+      <div className="tms-tracking-cell-muted">
+        {row.pickupAppt ? formatDateTime(row.pickupAppt) : 'No pickup appt'}
+        {' → '}
+        {row.deliveryAppt ? formatDateTime(row.deliveryAppt) : 'No delivery appt'}
       </div>
     </div>
   )
@@ -461,55 +583,53 @@ function StatusCell({ row, nowMs }: { row: ShipmentRow; nowMs: number }) {
   )
 }
 
-function TrackingCell({ row, nowMs }: { row: ShipmentRow; nowMs: number }) {
+function LastLocationCell({ row, nowMs }: { row: ShipmentRow; nowMs: number }) {
   const place = row.lastUpdatePlace ?? row.lastKnownCity ?? '—'
-  const when = row.lastUpdateAt ? relativeTimeOf(row.lastUpdateAt, nowMs) : row.lastKnownAt ? relativeTimeOf(row.lastKnownAt, nowMs) : null
+  const when = relativeTimeOf(row.lastUpdateAt ?? row.lastKnownAt, nowMs)
+  const text = motionText(row, nowMs)
+  const tone: TmsTone = text === 'Moving' ? 'green' : text === 'Stopped' ? 'orange' : 'gray'
   return (
     <div className="tms-tracking-tracking-cell">
       <div>{place}</div>
       {when && <div className="tms-tracking-last-place">{when}</div>}
+      <TmsBadge tone={tone}>{text}</TmsBadge>
     </div>
   )
 }
 
-function MotionCell({ row, nowMs }: { row: ShipmentRow; nowMs: number }) {
-  const text = motionText(row, nowMs)
-  const tone: TmsTone = text === 'Moving' ? 'green' : text === 'Stopped' ? 'orange' : 'gray'
-  return <TmsBadge tone={tone}>{text}</TmsBadge>
-}
-
-function NextStopCell({ row, nowMs }: { row: ShipmentRow; nowMs: number }) {
-  const eta = nextStopEta(row, nowMs)
+function EtaCell({ row, nowMs }: { row: ShipmentRow; nowMs: number }) {
+  const eta = etaOf(row, nowMs)
   if (!eta) return <span className="tms-tracking-cell-muted">—</span>
-  const lateBy = eta.lateBy != null && eta.lateBy > 0 ? eta.lateBy : null
   return (
-    <div className="tms-tracking-nextstop-cell" title={eta.basisLabel}>
+    <div className="tms-tracking-nextstop-cell" title={eta.estimated ? 'Estimate from the last ping' : 'Reported by the carrier'}>
       <div>
-        {Math.round(eta.miles)} mi · ETA {formatDateTime(eta.etaAt)}
+        {formatDateTime(eta.at)}
+        {eta.estimated && <span className="tms-tracking-cell-muted"> est.</span>}
       </div>
       <div className="tms-tracking-cell-muted">
-        {lateBy ? (
-          <TmsBadge tone="red">Late {lateText(lateBy)}</TmsBadge>
-        ) : (
-          eta.basis === 'ESTIMATE' ? 'on time · estimate' : 'on time'
-        )}
+        {eta.lateMinutes ? <TmsBadge tone="red">Late {lateText(eta.lateMinutes)}</TmsBadge> : 'on time'}
       </div>
     </div>
   )
 }
 
-function TeamCell({ row }: { row: ShipmentRow }) {
-  const members: { role: string; name: string }[] = []
-  const dispatcher = row.dispatcherAssignedName ?? row.dispatcherActualName
-  if (dispatcher) members.push({ role: 'Dispatcher', name: dispatcher })
-  if (row.salesRepName) members.push({ role: 'Sales', name: row.salesRepName })
-  if (row.customerRepName) members.push({ role: 'Customer rep', name: row.customerRepName })
-  if (members.length === 0) return <span className="tms-tracking-cell-muted">—</span>
-  return (
-    <div className="tms-tracking-team-cell" title={members.map((m) => `${m.role}: ${m.name}`).join('\n')}>
-      {members.map((m) => m.name).join(' · ')}
-    </div>
-  )
+function NextCheckCallCell({ row, nowMs }: { row: ShipmentRow; nowMs: number }) {
+  const next = nextCheckCallStateOf(row, nowMs)
+  if (next.kind === 'NONE') return <span className="tms-tracking-cell-muted">—</span>
+  if (next.kind === 'OVERDUE') return <TmsBadge tone="red" title={formatDateTime(next.at)}>overdue {durationText(next.minutes)}</TmsBadge>
+  return <span title={formatDateTime(next.at)}>in {durationText(next.minutes)}</span>
+}
+
+function PodCell({ row }: { row: ShipmentRow }) {
+  const state = podStateOf(row)
+  if (state === 'NOT_DUE') return <span className="tms-tracking-cell-muted">—</span>
+  const badge = POD_BADGES[state]
+  return <TmsBadge tone={badge.tone}>{badge.label}</TmsBadge>
+}
+
+function TrackerCell({ row }: { row: ShipmentRow }) {
+  if (!row.trackerId) return <TmsBadge tone="orange">Unassigned</TmsBadge>
+  return <span className="tms-tracking-team-cell">{row.trackerName ?? row.trackerId}</span>
 }
 
 function CarrierCell({ row }: { row: ShipmentRow }) {
@@ -526,9 +646,42 @@ function CarrierCell({ row }: { row: ShipmentRow }) {
   )
 }
 
-function RowMenu({ onOpen, onCreateCustomerUrl }: { onOpen: () => void; onCreateCustomerUrl: () => void }) {
+function RowMenu({
+  row,
+  onOpen,
+  onCreateCustomerUrl,
+  onRequestCheckCall,
+  onRequestPod,
+  onAssignTracker,
+}: {
+  row: ShipmentRow
+  onOpen: () => void
+  onCreateCustomerUrl: () => void
+  onRequestCheckCall: () => Promise<void>
+  onRequestPod: () => Promise<void>
+  onAssignTracker: (trackerId: string | null) => Promise<void>
+}) {
+  const [assigning, setAssigning] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const status = boardStatusOf(row)
+  const voided = status === 'VOIDED'
+  const checkCallReason = voided ? 'This shipment is voided.' : undefined
+  const podReason = voided ? 'This shipment is voided.' : status !== 'DELIVERED' ? 'A POD is requested once the shipment is delivered.' : undefined
+
+  const run = async (action: () => Promise<void>) => {
+    setBusy(true)
+    try {
+      await action()
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
-    <div className="tms-tracking-rowmenu" onClick={(e) => e.stopPropagation()}>
+    <div
+      className={`tms-tracking-rowmenu${assigning ? ' tms-open' : ''}`}
+      onClick={(e) => e.stopPropagation()}
+    >
       <TmsIconButton shape="plain" aria-label="Row actions">
         <MoreHorizontal size={14} />
       </TmsIconButton>
@@ -539,32 +692,46 @@ function RowMenu({ onOpen, onCreateCustomerUrl }: { onOpen: () => void; onCreate
         <button type="button" className="tms-tracking-rowmenu-item" onClick={onCreateCustomerUrl}>
           Create customer URL
         </button>
-      </div>
-    </div>
-  )
-}
-
-function ViewsDropdown(panelProps: BoardFilterPanelProps) {
-  const active = panelProps.filterSets.find((f) => f.id === panelProps.activeFilterSetId)
-  return (
-    <div className="tms-tracking-views-dropdown">
-      <TmsButton size="sm" variant="secondary">
-        <Save size={14} /> {active?.name ?? 'Views'}
-      </TmsButton>
-      <div className="tms-tracking-views-menu">
-        {panelProps.filterSets.length === 0 && (
-          <div className="tms-tracking-views-empty">No saved views</div>
+        <button
+          type="button"
+          className="tms-tracking-rowmenu-item"
+          disabled={busy || Boolean(checkCallReason)}
+          title={checkCallReason}
+          onClick={() => { void run(onRequestCheckCall) }}
+        >
+          Request check call
+        </button>
+        <button
+          type="button"
+          className="tms-tracking-rowmenu-item"
+          disabled={busy || Boolean(podReason)}
+          title={podReason}
+          onClick={() => { void run(onRequestPod) }}
+        >
+          Request POD
+        </button>
+        <button
+          type="button"
+          className="tms-tracking-rowmenu-item"
+          disabled={voided}
+          title={voided ? 'This shipment is voided.' : undefined}
+          aria-expanded={assigning}
+          onClick={() => setAssigning((v) => !v)}
+        >
+          Assign tracker…
+        </button>
+        {assigning && (
+          <div className="tms-tracking-rowmenu-picker">
+            <TrackerPicker
+              value={row.trackerId ?? null}
+              aria-label={`Tracker for ${row.number}`}
+              onChange={(id) => {
+                setAssigning(false)
+                void run(() => onAssignTracker(id))
+              }}
+            />
+          </div>
         )}
-        {panelProps.filterSets.map((f) => (
-          <button
-            key={f.id}
-            type="button"
-            className={`tms-tracking-views-item${f.id === panelProps.activeFilterSetId ? ' tms-active' : ''}`}
-            onClick={() => panelProps.onSelectFilterSet(f.id)}
-          >
-            {f.name}
-          </button>
-        ))}
       </div>
     </div>
   )

@@ -28,8 +28,10 @@ import { marshall, unmarshall } from '@aws-sdk/util-dynamodb'
 import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'crypto'
 import Anthropic from '@anthropic-ai/sdk'
 import { validateCommissionPlans, validatePaySchedule } from '../../../src/lib/commission'
+import { validateAutomationPatch } from '../../../src/lib/trackingAutomation'
 import { teamMembership, validateTeams } from '../../../src/lib/teams'
 import { SEED_DIVISIONS, SEED_RULES, validateDivisions, validateRules } from '../../../src/lib/ownership'
+import { checkIntakeEmail, normalizeIntakeEmail } from '../../../src/lib/intakeMail'
 import { RETIRED_SEED_VIEWS, SEED_VIEWS, slugify, validateView, BOARD_COLUMN_KEYS } from '../../../src/lib/shipmentViewDefs'
 import { validateAiAgents, validatePartyMemory } from '../../../src/lib/workflows/memory'
 import {
@@ -704,7 +706,6 @@ function validateCheckCallPlan(value: unknown): Record<string, unknown> | null {
     channels: channels?.length ? channels : [...DEFAULT_CHECK_CALL_PLAN.channels],
     milestones: milestones?.length ? milestones : [...DEFAULT_CHECK_CALL_PLAN.milestones],
     emailDispatcher: optionalBoolean(obj.emailDispatcher) ?? true,
-    requestPodOnDelivery: optionalBoolean(obj.requestPodOnDelivery) ?? true,
   }
 }
 
@@ -1046,6 +1047,7 @@ async function upsertCustomer(input: Record<string, unknown>, caller: Caller): P
   throwIfFloorAboveTarget(marginTargetBps, marginFloorBps, { target: 'marginTargetBps', floor: 'marginFloorBps' })
   const requiredLoadFields = validateRequiredLoadFields(input.requiredLoadFields)
   const checkCallPlan = validateCheckCallPlan(input.checkCallPlan)
+  const trackingAutomation = input.trackingAutomation == null ? null : validateAutomationPatch(input.trackingAutomation)
 
   // ── Admin-only credit fields ───────────────────────────────────────────────
   const isAdmin = caller.email === OWNER_EMAIL || (caller.groups ?? []).includes(ADMIN_GROUP)
@@ -1166,6 +1168,10 @@ async function upsertCustomer(input: Record<string, unknown>, caller: Caller): P
     quoteAutoReply: optionalBoolean(input.quoteAutoReply),
     requiredLoadFields,
     checkCallPlan,
+    // Step V — the tracker a new shipment inherits, and the automation policy override.
+    // Absent keys keep what is stored so a patch that predates the fields never clears them.
+    defaultTrackerId: 'defaultTrackerId' in input ? optionalString(input.defaultTrackerId, 100) : (existing?.defaultTrackerId as string | undefined) ?? null,
+    trackingAutomation: 'trackingAutomation' in input ? trackingAutomation : (existing?.trackingAutomation as Record<string, unknown> | undefined) ?? null,
 
     createdBy: isCreate ? caller.email : (existing?.createdBy as string) ?? caller.email,
     updatedBy: caller.email,
@@ -2673,6 +2679,12 @@ async function saveOwnershipDivision(
     throw new Error(`Division code "${code}" already exists — open it to edit it.`)
   }
 
+  // Step U3. An older client that omits the key must not erase the stored address; sending
+  // null or '' clears it, and clearing is only allowed on a division that is not active.
+  const intakeEmail = normalizeIntakeEmail(
+    'intakeEmail' in input ? input.intakeEmail : existing?.intakeEmail,
+  )
+
   const now = nowIso()
   const item: Record<string, unknown> = {
     id: code,
@@ -2689,11 +2701,24 @@ async function saveOwnershipDivision(
     active: optionalBoolean(input.active) ?? existing?.active ?? true,
     owners: optionalJsonObject(input.owners),
     flows: optionalJsonObject(input.flows),
+    intakeEmail,
     createdBy: existing?.createdBy ?? caller.email,
     updatedBy: caller.email,
     version: (existing?.version ?? 0) + 1,
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
+  }
+
+  // Required on every save of an ACTIVE division — checked for the row being saved only,
+  // so editing or archiving one division never fails on another that still has no address.
+  if (item.active === true && intakeEmail == null) {
+    throw new Error(
+      `A division needs an intake e-mail address — choose the address tender e-mails for ${name} arrive at`,
+    )
+  }
+  if (intakeEmail != null) {
+    const check = checkIntakeEmail(intakeEmail)
+    if (check.problem) throw new Error(check.message ?? 'Invalid intake e-mail address')
   }
 
   // Validated over the resulting SET, not over this row: a parent that closes a cycle
@@ -2729,6 +2754,7 @@ async function saveOwnershipDivision(
     name,
     parentId: item.parentId,
     active: item.active,
+    intakeEmail: { before: existing?.intakeEmail ?? null, after: intakeEmail },
   })
   return item
 }

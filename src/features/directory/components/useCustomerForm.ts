@@ -13,6 +13,7 @@ import type {
   CustomerStatus,
   CheckCallPlan,
 } from '@/types/tms'
+import type { AutomationPolicyPatch } from '@/lib/trackingAutomation'
 
 function linesToArray(value: string): string[] {
   return value.split(/\r?\n/).map((s) => s.trim()).filter(Boolean)
@@ -116,6 +117,9 @@ export interface CustomerFormValue {
   quoteAutoReply: boolean | null
   requiredLoadFields: string[]
   checkCallPlan: CheckCallPlan | null
+  defaultTrackerId: string
+  /** Customer layer of the tracking-automation policy; null = inherit everything. */
+  trackingAutomation: AutomationPolicyPatch | null
 }
 
 const APPT_WORKFLOW_OPTIONS: { value: 'UNSET' | 'NONE' | 'BATORY'; label: string }[] = [
@@ -191,6 +195,8 @@ function emptyCustomerForm(initial?: CustomerRecord | null): CustomerFormValue {
     quoteAutoReply: initial?.quoteAutoReply ?? null,
     requiredLoadFields: initial?.requiredLoadFields ?? [],
     checkCallPlan: initial?.checkCallPlan ?? null,
+    defaultTrackerId: initial?.defaultTrackerId ?? '',
+    trackingAutomation: initial?.trackingAutomation ?? null,
   }
 }
 
@@ -321,6 +327,8 @@ export function useCustomerForm(initial?: CustomerRecord | null) {
     quoteAutoReply: value.quoteAutoReply,
     requiredLoadFields: value.requiredLoadFields.length ? value.requiredLoadFields : null,
     checkCallPlan: value.checkCallPlan,
+    defaultTrackerId: value.defaultTrackerId.trim() || null,
+    trackingAutomation: value.trackingAutomation && Object.keys(value.trackingAutomation).length ? value.trackingAutomation : null,
   })
 
   const errors = useMemo(() => validateCustomerForm(value), [value])

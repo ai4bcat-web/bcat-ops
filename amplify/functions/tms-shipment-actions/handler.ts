@@ -155,6 +155,7 @@ import {
 } from './ownershipResolve'
 import { assertNotVoided, isVoided } from '../_shared/voided'
 import { batchShipmentTask, BATCH_TASK_ACTIONS } from './batch'
+import { INTAKE_ACTIONS, runIntakeAction, type IntakeAction, type IntakeDeps } from './intake'
 // ── Step P ──────────────────────────────────────────────────────────────────
 // The demo flow's four shipment-side modules. Same bargain as the quote and
 // document modules above: they are handed this file's clients, tables and
@@ -326,6 +327,8 @@ const INTEGRATION_TABLE_NAME = process.env.INTEGRATION_TABLE_NAME ?? ''
 // for the demo checklist's thread count.
 const DEMO_RECORD_TABLE_NAME = process.env.DEMO_RECORD_TABLE_NAME ?? ''
 const SHIPMENT_MESSAGE_TABLE_NAME = process.env.SHIPMENT_MESSAGE_TABLE_NAME ?? ''
+// Step U. IntakeLoad is staged by workflow-agent and changed only here (INTAKE_*).
+const INTAKE_LOAD_TABLE_NAME = process.env.INTAKE_LOAD_TABLE_NAME ?? ''
 
 const OWNER_EMAIL = 'ryne@bcatcorp.com'
 const ADMIN_GROUP = 'ADMIN'
@@ -497,6 +500,10 @@ const FINALIZED_CHARGES_MESSAGE =
 
 type Action =
   | 'CREATE_SHIPMENT'
+  // Step U. A tender e-mail's partially built load: edit it, dismiss it, or move it to Active.
+  | 'INTAKE_SAVE_DRAFT'
+  | 'INTAKE_MOVE_TO_ACTIVE'
+  | 'INTAKE_DISMISS'
   | 'SAVE_ORDER_FORM'
   | 'CHECK_CREDIT'
   | 'SUBMIT_ORDER'
@@ -519,6 +526,7 @@ type Action =
   | 'RESOLVE_REV_TAG'
   | 'SET_SALES_REP'
   | 'ASSIGN_CARRIER_REP'
+  | 'ASSIGN_TRACKER'
   | 'BATCH_SHIPMENT_TASK'
   | 'TEST_OWNERSHIP_RULES'
   | 'RETAG_SHIPMENTS'
@@ -679,6 +687,12 @@ const LOADS_PAGE_GROUP = 'page-loads'
  * reaches everything those three keys reached — nothing more.
  */
 const TMS_PAGE_GROUP = 'page-tms'
+/**
+ * Step U. The intake reviewer is a page grant, deliberately narrower than "can open
+ * Brokerage": `page-tms` and `page-loads` do not pass, owner/ADMIN and this group do.
+ */
+const INTAKE_REVIEW_PAGE_GROUP = 'page-intakeReview'
+const INTAKE_REVIEW_ACTIONS: Record<string, true> = Object.fromEntries(INTAKE_ACTIONS.map((a) => [a, true]))
 
 interface AppSyncIdentity {
   sub: string
@@ -736,6 +750,7 @@ function isActionAuthorized(action: Action, caller: Caller): boolean {
   if (OFFER_ACTIONS[action]) {
     return groups.includes(LOADS_PAGE_GROUP) || groups.includes(QUOTES_PAGE_GROUP) || tms
   }
+  if (INTAKE_REVIEW_ACTIONS[action]) return groups.includes(INTAKE_REVIEW_PAGE_GROUP)
   if (ADMIN_ONLY_ACTIONS[action]) return false
   if (action === 'UPDATE_CARRIER_CHARGES') {
     return groups.includes(LOADS_PAGE_GROUP) || tms || groups.includes('page-carrierPay')
@@ -753,6 +768,9 @@ async function authorize(action: Action, identity?: AppSyncIdentity | null): Pro
   if (!isActionAuthorized(action, caller)) {
     if (ADMIN_ONLY_ACTIONS[action] || QUOTE_ADMIN_ONLY_ACTIONS[action]) {
       throw new Error(`Forbidden: ${action} requires owner or ADMIN`)
+    }
+    if (INTAKE_REVIEW_ACTIONS[action]) {
+      throw new Error(`Forbidden: ${action} requires owner, ADMIN, or ${INTAKE_REVIEW_PAGE_GROUP}`)
     }
     const tms = groups.includes(TMS_PAGE_GROUP)
     throw new Error(
@@ -794,6 +812,22 @@ async function assertRepProfile(repId: string | null, label: string): Promise<vo
   if (repId == null || repId === '') return
   const profile = await getById(USER_PROFILE_TABLE_NAME, repId)
   if (!profile) throw new Error(`${label} is not a user profile: ${repId}`)
+}
+
+/**
+ * The profile id when it names an ACTIVE user, else null. Inheritance of a customer's
+ * default tracker never fails a create on a stale or deleted profile.
+ */
+async function activeProfileIdOrNull(value: unknown): Promise<string | null> {
+  const id = optionalString(value, 100)
+  if (!id) return null
+  try {
+    const profile = await getById(USER_PROFILE_TABLE_NAME, id)
+    return profile && profile.status !== 'INACTIVE' ? id : null
+  } catch (err) {
+    console.warn('[tms-shipment-actions] tracker profile lookup failed:', String(err))
+    return null
+  }
 }
 
 /** Carrier rep assignment also checks the role, because coverage is its own desk. */
@@ -1810,6 +1844,7 @@ async function createShipment(input: Row, caller: Caller): Promise<Row> {
 
   const customerName = customer ? optionalString(customer.name, 200) : typedCustomerName
   const salesRepId = optionalString(customer?.defaultSalesRepId, 100)
+  const trackerId = await activeProfileIdOrNull(customer?.defaultTrackerId)
   const shipment: Row = {
     id: shipmentId,
     __typename: 'Shipment',
@@ -1837,6 +1872,7 @@ async function createShipment(input: Row, caller: Caller): Promise<Row> {
     // Step R. The rep who sells the freight, mirrored onto the Load below and kept
     // in step by SET_SALES_REP. The order carries the same id as `customerRepId`.
     salesRepId,
+    trackerId,
     workflowRunId,
     createdBy: caller.email,
     updatedBy: caller.email,
@@ -3026,6 +3062,55 @@ async function setSalesRep(input: Row, caller: Caller): Promise<Row> {
 }
 
 /**
+ * ASSIGN_TRACKER — who is tracking these shipments. One shape for single and bulk:
+ * each id is written on its own (a bad id never blocks the others) and reported in
+ * `skipped` with the reason. The tracker lives on the Shipment only.
+ */
+async function assignTracker(input: Row, caller: Caller): Promise<Row> {
+  const rawIds = Array.isArray(input.shipmentIds) ? input.shipmentIds : null
+  if (!rawIds || rawIds.length < 1 || rawIds.length > 100) throw new Error('shipmentIds must list 1 to 100 shipments')
+  const shipmentIds = [...new Set(rawIds.map((id) => assertString(id, 'shipmentIds[]')))]
+  if (!('trackerId' in input)) throw new Error('trackerId is required; send null to clear it')
+  const trackerId = optionalString(input.trackerId, 100)
+  const tracker = trackerId ? await getById(USER_PROFILE_TABLE_NAME, trackerId) : null
+  const trackerOk = trackerId == null || (tracker != null && tracker.status !== 'INACTIVE')
+
+  const updated: string[] = []
+  const skipped: { shipmentId: string; reason: string }[] = []
+  for (const shipmentId of shipmentIds) {
+    const shipment = await getById(SHIPMENT_TABLE_NAME, shipmentId)
+    if (!shipment) {
+      skipped.push({ shipmentId, reason: 'Shipment not found' })
+      continue
+    }
+    if (isVoided(shipment)) {
+      skipped.push({ shipmentId, reason: 'Shipment is voided' })
+      continue
+    }
+    if (!trackerOk) {
+      skipped.push({ shipmentId, reason: 'Tracker is not an active user profile' })
+      continue
+    }
+    await transact(
+      [updateItemTx(SHIPMENT_TABLE_NAME, shipmentId, {
+        trackerId,
+        updatedBy: caller.email,
+        updatedAt: nowIso(),
+        version: (numberOrNull(shipment.version) ?? 1) + 1,
+      }, null)],
+      'tracker',
+    )
+    await writeAudit('SHIPMENT', shipmentId, 'ASSIGN_TRACKER', caller, {
+      from: shipment.trackerId ?? null,
+      to: trackerId,
+      batch: shipmentIds.length > 1,
+    })
+    updated.push(shipmentId)
+  }
+  return { updated, skipped }
+}
+
+/**
  * ASSIGN_CARRIER_REP — the coverage desk owns the rep and team on a shipment.
  *
  * The value is written on the Shipment, mirrored onto every Load of the shipment,
@@ -3414,6 +3499,9 @@ async function duplicateShipment(input: Row, caller: Caller): Promise<Row> {
       createdAt: now,
       updatedAt: now,
     }
+    // The copy keeps its source's tracker; a source with none falls back to the customer's default.
+    shipmentRow.trackerId = optionalString(source.shipment.trackerId, 100)
+      ?? (sourceCustomerId ? await activeProfileIdOrNull((await getById(CUSTOMER_TABLE_NAME, sourceCustomerId))?.defaultTrackerId) : null)
     shipmentRow.searchKey = buildSearchKey(shipmentRow, [sourceOrder], [{ stops: JSON.stringify(stops) }])
 
     const orderRow: Row = {
@@ -3540,6 +3628,9 @@ async function writeCustomerToBundle(
   const now = nowIso()
   const linked: Row = { ...shipment, customerId, customerName }
   const takesRep = defaultRepId != null && optionalString(shipment.salesRepId, 100) == null
+  // The customer's default tracker fills a blank; it never replaces a tracker already set.
+  const takesTracker = optionalString(shipment.trackerId, 100) == null
+  const defaultTrackerId = takesTracker ? await activeProfileIdOrNull(customer.defaultTrackerId) : null
   await transact(
     [
       updateItemTx(SHIPMENT_TABLE_NAME, shipmentId, {
@@ -3547,6 +3638,7 @@ async function writeCustomerToBundle(
         customerName,
         searchKey: buildSearchKey(linked, bundle.orders, bundle.loads),
         ...(takesRep ? { salesRepId: defaultRepId } : {}),
+        ...(defaultTrackerId ? { trackerId: defaultTrackerId } : {}),
         updatedBy: caller.email,
         updatedAt: now,
         version: (numberOrNull(shipment.version) ?? 1) + 1,
@@ -6682,6 +6774,19 @@ const carrierOfferDeps: CarrierOfferDeps = {
   now: nowIso,
 }
 
+const intakeDeps: IntakeDeps = {
+  tables: { intakeLoad: INTAKE_LOAD_TABLE_NAME, shipment: SHIPMENT_TABLE_NAME, order: ORDER_TABLE_NAME, load: LOAD_TABLE_NAME },
+  getById,
+  queryIndex,
+  transact: (items, label) => transact(items, label),
+  getSettings,
+  getCustomer: (id) => getById(CUSTOMER_TABLE_NAME, id),
+  isDivisionActive: (code) => assertTaggableDivision(code, null).then(() => true, () => false),
+  writeAudit,
+  actions: { createShipment, setRevTag, setSalesRep },
+  now: nowIso,
+}
+
 const demoDeps: DemoDeps = {
   tables: {
     demo: DEMO_RECORD_TABLE_NAME,
@@ -6699,6 +6804,7 @@ const demoDeps: DemoDeps = {
     checkCall: LOAD_CHECK_CALL_TABLE_NAME,
     trackingLink: TRACKING_LINK_TABLE_NAME,
     settings: SETTINGS_TABLE_NAME,
+    intakeLoad: INTAKE_LOAD_TABLE_NAME,
   },
   getById,
   queryIndex: (tableName, indexName, keyName, keyValue) =>
@@ -6734,6 +6840,10 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
   switch (action) {
     case 'CREATE_SHIPMENT':
       return createShipment(input, caller)
+    case 'INTAKE_SAVE_DRAFT':
+    case 'INTAKE_MOVE_TO_ACTIVE':
+    case 'INTAKE_DISMISS':
+      return runIntakeAction(intakeDeps, action as IntakeAction, input, caller)
     case 'SAVE_ORDER_FORM':
       return (await saveOrderForm(input, caller)).bundle as unknown as Row
     case 'CHECK_CREDIT':
@@ -6758,6 +6868,8 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return resolveRevTag(input, caller)
     case 'SET_SALES_REP':
       return setSalesRep(input, caller)
+    case 'ASSIGN_TRACKER':
+      return assignTracker(input, caller)
     case 'ASSIGN_CARRIER_REP':
       return assignCarrierRep(input, caller)
     case 'BATCH_SHIPMENT_TASK':

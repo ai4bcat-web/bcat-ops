@@ -62,6 +62,23 @@ describe('RepPicker', () => {
     expect(options[0]).toHaveTextContent('Carl Hauler — carl@bcatcorp.com')
   })
 
+  it('hides INACTIVE people by default but still prints one already chosen; activeOnly=false lists them', async () => {
+    mocks.listUserProfiles.mockResolvedValue([
+      ...STAFF,
+      profile({ id: 'ian@bcatcorp.com', name: 'Ian Gone', status: 'INACTIVE' }),
+    ])
+    const { rerender } = render(<RepPicker value="ian@bcatcorp.com" onChange={vi.fn()} />)
+    await waitFor(() => expect(mocks.listUserProfiles).toHaveBeenCalled())
+    expect(await screen.findByRole('combobox')).toHaveTextContent('Ian Gone')
+    fireEvent.click(screen.getByRole('combobox'))
+    expect(screen.queryByRole('option', { name: /Ian Gone/ })).toBeNull()
+
+    rerender(<RepPicker value="" onChange={vi.fn()} />)
+    expect(screen.queryByRole('option', { name: /Ian Gone/ })).toBeNull()
+    rerender(<RepPicker value="" onChange={vi.fn()} activeOnly={false} />)
+    expect(await screen.findByRole('option', { name: /Ian Gone/ })).toBeInTheDocument()
+  })
+
   it('filters the list by the typed query', async () => {
     render(<RepPicker value="" onChange={vi.fn()} />)
 

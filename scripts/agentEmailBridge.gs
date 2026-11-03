@@ -48,6 +48,14 @@
 //     trigger for processAgentInboxEmails. It touches no other trigger, so the
 //     factoring, loads and vendor-AP bridges keep running.
 //
+// ── DIVISION INTAKE ADDRESSES (Step U) ───────────────────────────────────────
+// Each run first asks the workflow-agent which addresses the rev divisions receive tenders
+// at ({ action: 'intakeAddresses' }) and watches those too, as extra TENDER inboxes appended
+// AFTER the four roles above (table order decides ties, so a message also sent to quotes@
+// stays a QUOTE). If that call fails the run carries on with the four roles. Every
+// prepare/commit now also carries `toAddresses` — every address the message was delivered
+// to — which is what the server routes a tender to its division on.
+//
 // Dedup is per-Gmail-message-id in PropertiesService (namespaced 'agentinbox:'),
 // so a new message landing in an already-seen thread is still processed.
 
@@ -69,6 +77,10 @@ const AGENT_BODY_TRUNCATION_INDICATOR = '\n\n[truncated]';
 // The agent caps the stored verdict at 1000 characters; cap it here so what the two
 // phases post is identical to what gets stored.
 const AGENT_MAX_AUTH_RESULT_CHARS = 1000;
+// The agent keeps at most 20 recipient addresses per message; send the same 20.
+const AGENT_MAX_TO_ADDRESSES = 20;
+// Each watched address adds five clauses to the Gmail query; bound the query.
+const AGENT_MAX_INTAKE_ADDRESSES = 30;
 // The agent's own limits, enforced here so an oversized attachment is skipped at
 // the source instead of being uploaded and then rejected at commit.
 const AGENT_MAX_ATTACHMENTS = 3;
@@ -128,6 +140,8 @@ function processAgentInboxEmails() {
     if (!cfg.inboxes.length) {
       throw new Error('[AgentInbox] no inbox address configured; set at least one AGENT_INBOX_* property');
     }
+
+    cfg.inboxes = cfg.inboxes.concat(agentIntakeInboxes_(cfg));
 
     const startTime = Date.now();
     const PAGE_SIZE = AGENT_PAGE_SIZE;
@@ -206,6 +220,42 @@ function agentConfiguredInboxes_(props) {
     out.push({ role: def.role, email: email });
   }
   return out;
+}
+
+/**
+ * The division intake addresses, as extra TENDER inboxes. Never throws: the four env/default
+ * roles must keep working when the lookup fails (network, 401, an agent without Step U).
+ * Addresses already watched under a role are skipped so a shared address keeps its role.
+ */
+function agentIntakeInboxes_(cfg) {
+  try {
+    const res = agentPost_(cfg.url, { secret: cfg.secret, action: 'intakeAddresses' });
+    const code = res.getResponseCode();
+    if (code !== 200) {
+      console.warn('[AgentInbox] intakeAddresses returned', code, '; using the configured inboxes only');
+      return [];
+    }
+    const parsed = JSON.parse(res.getContentText());
+    if (!parsed || parsed.ok !== true || !Array.isArray(parsed.addresses)) return [];
+    const seen = {};
+    cfg.inboxes.forEach(function (i) { seen[i.email] = true; });
+    const out = [];
+    for (let i = 0; i < parsed.addresses.length; i++) {
+      const entry = parsed.addresses[i];
+      const email = entry && typeof entry.email === 'string' ? entry.email.trim().toLowerCase() : '';
+      if (!email || email.indexOf('@') === -1 || seen[email]) continue;
+      if (out.length >= AGENT_MAX_INTAKE_ADDRESSES) {
+        console.warn('[AgentInbox] more than', AGENT_MAX_INTAKE_ADDRESSES, 'division intake addresses; the rest are not watched');
+        break;
+      }
+      seen[email] = true;
+      out.push({ role: 'TENDER', email: email });
+    }
+    return out;
+  } catch (e) {
+    console.warn('[AgentInbox] intakeAddresses failed; using the configured inboxes only:', e);
+    return [];
+  }
 }
 
 function agentGlobalSecret_() {
@@ -351,6 +401,7 @@ function agentProcessMessageInternal_(message, cfg, props, msgId, role) {
         // Read once in the prepare payload and reused here: the two phases must agree,
         // and re-reading the raw message would be a second Gmail call per commit.
         authResult: preparePayload.authResult,
+        toAddresses: preparePayload.toAddresses,
         attachments: committedAttachments,
       };
 
@@ -429,6 +480,7 @@ function agentBuildPreparePayload_(message, cfg, role, attachments) {
     receivedAt: receivedAt,
     bodyText: bodyText,
     authResult: agentAuthResult_(message),
+    toAddresses: agentToAddresses_(message),
     attachments: attachmentMeta,
   };
 }
@@ -475,6 +527,32 @@ function agentAuthResult_(message) {
     console.warn('[AgentInbox] could not read Authentication-Results for', message.getId(), e);
     return '';
   }
+}
+
+/**
+ * Every address the message was delivered to — To, Cc, Delivered-To, X-Original-To, in that
+ * order — as bare lower-cased addresses, de-duplicated, at most AGENT_MAX_TO_ADDRESSES. The
+ * order is meaningful: the server routes to the division of the FIRST address that matches one.
+ */
+function agentToAddresses_(message) {
+  const headers = [
+    message.getTo(),
+    message.getCc(),
+    message.getHeader('Delivered-To'),
+    message.getHeader('X-Original-To'),
+  ];
+  const out = [];
+  for (let i = 0; i < headers.length; i++) {
+    if (!headers[i]) continue;
+    const addrs = agentExtractAddresses_(String(headers[i]));
+    for (let j = 0; j < addrs.length; j++) {
+      const email = addrs[j].toLowerCase();
+      if (email.indexOf('@') === -1 || out.indexOf(email) !== -1) continue;
+      out.push(email);
+      if (out.length >= AGENT_MAX_TO_ADDRESSES) return out;
+    }
+  }
+  return out;
 }
 
 /**

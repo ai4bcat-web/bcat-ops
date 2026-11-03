@@ -10,6 +10,11 @@ import type { TenderPrefill } from '../lib/intakeTender'
 // feature code keeps importing the TMS vocabulary from one place.
 import type { CheckCallPlan } from '../lib/checkCallPlan'
 export type { CheckCallChannel, CheckCallMilestone, CheckCallPlan } from '../lib/checkCallPlan'
+import type { AutomationPolicyPatch, TrackingAutomationSettings } from '../lib/trackingAutomation'
+export type {
+  AutomationChannel, AutomationPolicy, AutomationPolicyPatch, AutomationTemplates, DivisionAutomation,
+  QuietHours, TrackingAutomationSettings,
+} from '../lib/trackingAutomation'
 export type { RateViewAnswer } from '../lib/integrations/rateView'
 
 // ── Integrations (Step J) ────────────────────────────────────────────────────
@@ -275,6 +280,10 @@ export interface CustomerRecord {
   requiredLoadFields?: string[] | null
   /** Cadence and channels for this customer's loads, overridable per load. */
   checkCallPlan?: CheckCallPlan | null
+  /** Step V. UserProfile id copied onto new shipments as the tracker. */
+  defaultTrackerId?: string | null
+  /** Step V. Auto check calls / POD / quiet hours / templates; a field-level patch over division and global. */
+  trackingAutomation?: AutomationPolicyPatch | null
 
   createdAt: string
   updatedAt: string
@@ -564,6 +573,8 @@ export interface TmsSettings {
   defaultRequiredLoadFields?: string[] | null
   /** The org's check-call cadence and channels. */
   defaultCheckCallPlan?: CheckCallPlan | null
+  /** Step V. Global policy plus per-division overrides; saved through `saveTrackingAutomation`. */
+  trackingAutomation?: TrackingAutomationSettings | null
   /** The P1 seed's version stamp, so the Demo page can say what it is looking at. */
   demoSeedVersion?: string | null
   demoSeededAt?: string | null
@@ -1166,6 +1177,8 @@ export interface ShipmentRecord {
   revTaggedBy?: string | null
   /** Cognito username of the rep who sold it. */
   salesRepId?: string | null
+  /** Step V. UserProfile id of the person tracking the shipment; null = unassigned. */
+  trackerId?: string | null
   /** Step I. Cognito username of the rep covering the shipment; mirrored onto every load. */
   carrierRepId?: string | null
   /** Step I. Team assigned to cover the shipment. */
@@ -1181,6 +1194,10 @@ export interface ShipmentRecord {
    * (the `voidedAt` pattern): CREATE_SHIPMENT writes it, nothing else.
    */
   workflowRunId?: string | null
+  /** Step U. The IntakeLoad this shipment was moved from, and who reviewed it, when. */
+  intakeLoadId?: string | null
+  intakeReviewedBy?: string | null
+  intakeReviewedAt?: string | null
 
   // ── The demo flow (Step P) ─────────────────────────────────────────────────
   /**
@@ -3272,6 +3289,8 @@ export interface OwnershipDivisionRecord {
   active: boolean
   owners: OwnershipOwners | null
   flows: OwnershipFlows | null
+  /** Step U. Where tender e-mails for this division arrive; lower-cased. Required when saving an active division. */
+  intakeEmail?: string | null
   createdBy: string
   updatedBy: string
   version: number

@@ -55,9 +55,10 @@ export interface CheckCallPlan {
   escalateAfterMinutes: number
   /** Whether the dispatcher gets the same beat by e-mail on the shipment thread. */
   emailDispatcher: boolean
-  /** Whether the agent asks for the POD on a delivery confirmation. */
-  requestPodOnDelivery: boolean
 }
+
+/** Where the effective plan came from (whole-plan override: load → customer → division → org → default). */
+export type CheckCallPlanSource = 'load' | 'customer' | 'division' | 'org' | 'default'
 
 export const DEFAULT_CHECK_CALL_PLAN: CheckCallPlan = {
   intervalHours: 4,
@@ -65,7 +66,6 @@ export const DEFAULT_CHECK_CALL_PLAN: CheckCallPlan = {
   milestones: ['DISPATCHED', 'AT_PICKUP', 'DEPARTED_PICKUP', 'AT_DELIVERY', 'DELIVERED'],
   escalateAfterMinutes: 30,
   emailDispatcher: true,
-  requestPodOnDelivery: true,
 }
 
 /**
@@ -106,7 +106,6 @@ export function normalizeCheckCallPlan(raw: unknown): CheckCallPlan | null {
       ? Math.round(escalate)
       : DEFAULT_CHECK_CALL_PLAN.escalateAfterMinutes,
     emailDispatcher: row.emailDispatcher == null ? true : Boolean(row.emailDispatcher),
-    requestPodOnDelivery: row.requestPodOnDelivery == null ? true : Boolean(row.requestPodOnDelivery),
   }
 }
 

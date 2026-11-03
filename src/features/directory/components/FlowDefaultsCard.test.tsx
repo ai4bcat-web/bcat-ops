@@ -48,6 +48,16 @@ vi.mock('@/components/RepPicker', () => ({
   ),
 }))
 
+vi.mock('@/components/TrackerPicker', () => ({
+  TrackerPicker: ({ value, onChange }: { value: string | null; onChange: (v: string | null) => void }) => (
+    <select data-testid="tracker-picker" value={value ?? ''} onChange={(e) => onChange(e.target.value || null)}>
+      <option value="">none</option>
+      <option value="trk-1">Trk One</option>
+      <option value="trk-2">Trk Two</option>
+    </select>
+  ),
+}))
+
 function baseSettings(overrides?: Partial<TmsSettings>): TmsSettings {
   return {
     id: 'default',
@@ -63,7 +73,6 @@ function baseSettings(overrides?: Partial<TmsSettings>): TmsSettings {
       milestones: ['DISPATCHED', 'AT_PICKUP', 'DEPARTED_PICKUP', 'AT_DELIVERY', 'DELIVERED'],
       escalateAfterMinutes: 30,
       emailDispatcher: true,
-      requestPodOnDelivery: true,
     },
     ...overrides,
   } as TmsSettings
@@ -73,6 +82,7 @@ function baseValue(overrides?: Partial<FlowDefaultsValue>): FlowDefaultsValue {
   return {
     defaultCarrierTeamKey: '',
     defaultCarrierRepId: '',
+    defaultTrackerId: '',
     marginTargetBps: null,
     marginFloorBps: null,
     quoteAutoReply: null,
@@ -117,13 +127,6 @@ describe('FlowDefaultsCard', () => {
     expect(screen.getAllByText('(org default)').length).toBe(5)
   })
 
-  it('shows VOICE greyed out with the deferred-channel reason', () => {
-    render(<FlowDefaultsCard value={baseValue()} settings={baseSettings()} onChange={() => {}} />)
-    const voice = screen.getByRole('checkbox', { name: /VOICE/i }) as HTMLInputElement
-    expect(voice.disabled).toBe(true)
-    expect(voice.checked).toBe(false)
-    expect(screen.getByText(/voice is not switched on yet/i)).toBeTruthy()
-  })
 
   it('shows a per-mode org margin when previewing an LTL customer', () => {
     render(<FlowDefaultsCard value={baseValue()} settings={baseSettings()} onChange={() => {}} />)
@@ -152,12 +155,21 @@ describe('FlowDefaultsCard', () => {
     expect(next).toEqual({ checkCallPlan: null })
   })
 
-  it('shows a blank interval field as inheritance, not zero', () => {
-    render(<FlowDefaultsCard value={baseValue()} settings={baseSettings()} onChange={() => {}} />)
-    const input = screen.getByLabelText('Interval (hours)') as HTMLInputElement
-    expect(input.value).toBe('')
-    expect(input.placeholder).toBe('4')
+  it('hands the chosen default tracker to onChange and clears it to empty', () => {
+    const patches: Partial<FlowDefaultsValue>[] = []
+    render(<FlowDefaultsCard value={baseValue({ defaultTrackerId: 'trk-1' })} settings={baseSettings()} onChange={(p) => patches.push(p)} />)
+    const picker = screen.getByTestId('tracker-picker') as HTMLSelectElement
+    expect(picker.value).toBe('trk-1')
+    fireEvent.change(picker, { target: { value: 'trk-2' } })
+    fireEvent.change(picker, { target: { value: '' } })
+    expect(patches).toEqual([{ defaultTrackerId: 'trk-2' }, { defaultTrackerId: '' }])
   })
+
+  it('does not offer a POD-on-delivery toggle in the plan form', () => {
+    render(<FlowDefaultsCard value={baseValue()} settings={baseSettings()} onChange={() => {}} />)
+    expect(screen.queryByRole('checkbox', { name: /POD/i })).toBeNull()
+  })
+
 
   it('shows a built-in default source when the org has no check-call plan', () => {
     render(<FlowDefaultsCard value={baseValue()} settings={baseSettings({ defaultCheckCallPlan: null })} onChange={() => {}} />)

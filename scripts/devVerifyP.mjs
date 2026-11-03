@@ -354,7 +354,7 @@ async function main() {
     equals('P8 geocoded reply set last known city', postedLoadAfterReply?.lastKnownCity, 'Dallas')
 
     // ── P8: silence escalation ────────────────────────────────────────────────
-    const sweep = await track('SWEEP_CHECK_CALL_PLANS', {})
+    const sweep = await track('RUN_TRACKING_AUTOMATION', { mode: 'MANUAL' })
     equals('P8 check-call sweep ran', typeof sweep.acted, 'number')
     const transitRec = findDemoRecord(state, 'SHIPMENT', 'shipment.intransit')
     const transitMessages = await track('LIST_SHIPMENT_THREAD', { shipmentId: transitRec.recordId })

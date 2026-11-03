@@ -22,6 +22,7 @@
  */
 import Anthropic from '@anthropic-ai/sdk'
 import { UNTRUSTED_NOTICE, wrapUntrusted } from '../../../src/lib/workflows/untrusted'
+import type { TenderModelFill } from '../../../src/lib/workflows/tenderProposal'
 
 export const MODEL_ID = 'claude-sonnet-5'
 export const MAX_MODEL_CALLS = 3
@@ -116,12 +117,17 @@ export const CLASSIFY_SCHEMA = {
 export const TENDER_FILL_SCHEMA = {
   type: 'object',
   additionalProperties: false,
-  required: ['customer', 'reference', 'pickupNumber', 'weightLb', 'stops'],
+  required: ['customer', 'reference', 'pickupNumber', 'weightLb', 'stops', 'lowConfidence'],
   properties: {
     customer: { type: ['string', 'null'], description: 'The broker or shipper offering the load.' },
     reference: { type: ['string', 'null'], description: 'The reference the broker will match on — TMS ID, load #, order #.' },
     pickupNumber: { type: ['string', 'null'], description: 'Shipment / SO / PU number at the pickup.' },
     weightLb: { type: ['number', 'null'], description: 'Total weight in pounds.' },
+    lowConfidence: {
+      type: 'array',
+      items: { type: 'string' },
+      description: 'Keys of the values above you are NOT sure the message states: customer, reference, pickupNumber, weightLb, or stops.<index>.<city|state|zip|name|dateStr|time>. Empty array when you are sure of everything.',
+    },
     stops: {
       type: 'array',
       items: {
@@ -182,6 +188,11 @@ export const CAPACITY_SCHEMA = {
     confidence: { type: 'string', description: 'One of high, medium, low.' },
   },
 } as const
+
+/** The e-mail fill answer: `TenderModelFill` plus the model's own doubts (`lowConfidence`, may be absent). */
+export interface TenderEmailFill extends TenderModelFill {
+  lowConfidence?: string[] | null
+}
 
 export interface ClassifyResult {
   agent: string

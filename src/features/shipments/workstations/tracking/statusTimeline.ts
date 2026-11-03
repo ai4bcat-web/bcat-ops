@@ -1,5 +1,5 @@
 /**
- * Pure derivations shared by the Inbox info panel and the shipment Tracking tab:
+ * Pure derivations for the shipment Tracking tab:
  * where the active leg is, the ETA the tab already shows, and the order status
  * timeline (Scheduled → Confirmed → On route → Arrived → Delivered).
  *
@@ -17,8 +17,6 @@ import type { ShipmentRow } from '../../shipmentViews'
 
 /** A "late" pill shows only when the ETA runs this far past the appointment. */
 export const LATE_PILL_MINUTES = 15
-/** A ping younger than this is shown as a live (green) dot. */
-export const FRESH_PING_MS = 30 * 60_000
 
 const ARRIVED_STATUSES: readonly LoadWorkflowStatus[] = ['ARRIVED_AT_DELIVERY_TERMINAL', 'UNLOADING', 'DELIVERED', 'INVOICING']
 const DELIVERED_STATUSES: readonly LoadWorkflowStatus[] = ['DELIVERED', 'INVOICING']
@@ -79,12 +77,6 @@ export function etaUnavailableReason(geo: LegGeometry): string {
   if (!geo.lastKnown || !geo.pingAt) return 'No timestamped position reported yet.'
   if (!geo.destination) return 'No pending delivery with coordinates.'
   return 'Position or timestamp is invalid.'
-}
-
-/** "4 min ago"-style freshness: green dot only for a ping younger than 30 minutes. */
-export function isFreshPing(pingAt: string | null | undefined, nowMs: number): boolean {
-  const at = Date.parse(pingAt ?? '')
-  return Number.isFinite(at) && nowMs - at >= 0 && nowMs - at < FRESH_PING_MS
 }
 
 export function formatMiles(miles: number | null | undefined): string {

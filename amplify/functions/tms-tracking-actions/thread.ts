@@ -14,7 +14,7 @@ import {
   threadReplyAddress,
 } from '../../../src/lib/shipmentThread'
 import { assertEnum, assertString, optionalString, type Caller } from '../_shared/actionInputs'
-import { putItem, type Row, updateItemTx } from '../_shared/shipmentStore'
+import { isConflict, putItem, type Row, updateItemTx } from '../_shared/shipmentStore'
 
 export type ShipmentMessageChannel = 'EMAIL' | 'SMS' | 'VOICE'
 export type ShipmentMessageDirection = 'IN' | 'OUT'
@@ -269,7 +269,18 @@ export async function sendShipmentMessage(deps: ThreadDeps, input: Row, caller: 
     updatedAt: now,
   }
 
-  await deps.transact([putItem(deps.tables.message, message)])
+  // Deterministic automation ids (`auto:…`) are claims: a second sweep that finds the
+  // row already there has nothing to do — never a duplicate send, never an error.
+  const isAutoClaim = String(message.id).startsWith('auto:')
+  const duplicate = { id: message.id, shipmentId, duplicate: true, status: 'DUPLICATE' }
+  if (isAutoClaim && (await deps.getById(deps.tables.message, String(message.id)))) return duplicate
+  try {
+    await deps.transact([putItem(deps.tables.message, message)])
+  } catch (err) {
+    // A concurrent sweep claimed it between the read above and this write.
+    if (isAutoClaim && isConflict(err)) return duplicate
+    throw err
+  }
 
   let outcome: SendEmailOutcome | SendSmsOutcome
   if (isEmail) {

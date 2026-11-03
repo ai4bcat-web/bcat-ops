@@ -444,9 +444,9 @@
 .tms-portal .tms-segbar-empty { padding: 8px 0; color: var(--tms-muted); font-size: 12px; }
 
 /* ── Drawer ─ */
-.tms-portal.tms-drawer { position: fixed; top: 0; right: 0; bottom: 0; z-index: 61; display: flex; flex-direction: column; width: 100%; max-width: 560px; background: var(--tms-card); border-left: 1px solid var(--tms-border); box-shadow: var(--tms-shadow-modal); }
-.tms-portal.tms-drawer-lg { max-width: 760px; }
-.tms-portal.tms-drawer-xl { max-width: 1040px; }
+.tms-portal.tms-drawer { position: fixed; top: 0; right: 0; bottom: 0; z-index: 61; display: flex; flex-direction: column; width: 100%; max-width: min(560px, 100vw); min-width: 0; overflow-x: hidden; background: var(--tms-card); border-left: 1px solid var(--tms-border); box-shadow: var(--tms-shadow-modal); }
+.tms-portal.tms-drawer-lg { max-width: min(760px, 100vw); }
+.tms-portal.tms-drawer-xl { max-width: min(1040px, 100vw); }
 .tms-shell .tms-portal .tms-drawer-head,
 .tms-portal .tms-portal .tms-drawer-head { display: flex; align-items: center; gap: 12px; flex: 0 0 auto; padding: 14px var(--tms-pad); border-bottom: 1px solid var(--tms-border); }
 .tms-shell .tms-portal .tms-drawer-titles,
@@ -458,9 +458,22 @@
 .tms-shell .tms-portal .tms-drawer-extra,
 .tms-portal .tms-portal .tms-drawer-extra { display: inline-flex; align-items: center; gap: 8px; }
 .tms-shell .tms-portal .tms-drawer-body,
-.tms-portal .tms-portal .tms-drawer-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: var(--tms-pad); background: var(--tms-bg); }
+.tms-portal .tms-portal .tms-drawer-body { flex: 1 1 auto; min-height: 0; min-width: 0; overflow-x: hidden; overflow-y: auto; padding: var(--tms-pad); background: var(--tms-bg); }
 .tms-shell .tms-portal .tms-drawer-foot,
 .tms-portal .tms-portal .tms-drawer-foot { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex: 0 0 auto; padding: 12px var(--tms-pad); border-top: 1px solid var(--tms-border); }
+
+/* ── Notification rows (bell drawer) ─ */
+.tms-portal .tms-notification-row { display: flex; align-items: flex-start; gap: 10px; min-width: 0; margin: 0 -8px; padding: 10px 8px; border-bottom: 1px solid var(--tms-border); border-radius: var(--tms-radius-sm); color: var(--tms-text); text-decoration: none; }
+.tms-portal .tms-notification-row:hover { background: var(--tms-surface-hover); }
+.tms-portal .tms-notification-row:focus-visible { outline: 2px solid var(--tms-primary); outline-offset: -2px; }
+.tms-portal .tms-notification-icon { flex: 0 0 auto; margin-top: 2px; color: var(--tms-muted); }
+.tms-portal .tms-notification-text { display: block; flex: 1 1 auto; min-width: 0; }
+.tms-portal .tms-notification-title { display: block; overflow: hidden; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.tms-portal .tms-notification-detail { display: block; overflow: hidden; color: var(--tms-muted); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.tms-portal .tms-notification-meta { display: flex; align-items: center; flex: 0 0 auto; gap: 6px; color: var(--tms-muted); font-size: 12px; }
+.tms-portal .tms-notification-dot { width: 8px; height: 8px; border-radius: var(--tms-radius-pill); }
+.tms-portal .tms-notification-group { margin: 14px 0 2px; color: var(--tms-muted); font-size: 12px; }
+.tms-portal .tms-notification-more { display: block; padding: 8px 0; }
 
 /* ── Public frame ─ */
 .tms-portal.tms-public { min-height: 100vh; display: flex; justify-content: center; align-items: flex-start; padding: 32px 16px; background: var(--tms-bg); color: var(--tms-text); }
@@ -599,7 +612,7 @@
 .tms-portal .tms-gauge-sub { color: var(--tms-muted); font-size: 12px; }
 
 .tms-shell .tms-pillbar,
-.tms-portal .tms-pillbar { width: 100%; min-width: 0; }
+.tms-portal .tms-pillbar { position: relative; width: 100%; min-width: 0; }
 .tms-shell .tms-pillbar-empty,
 .tms-portal .tms-pillbar-empty { display: grid; place-items: center; color: var(--tms-muted); font-size: 13px; }
 .tms-shell .tms-pillbar .tms-sr-only,

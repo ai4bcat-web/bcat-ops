@@ -24,6 +24,9 @@ function stepTarget(
     const search = step.tab ? `?tab=${step.tab}` : undefined
     return { to: `/tms/shipments/${recordId}`, search }
   }
+  if (prefix === 'intake') {
+    return { to: `/tms/shipments/intake/${encodeURIComponent(recordId)}` }
+  }
   if (prefix === 'customer') {
     return { to: '/tms/customers', search: `?customer=${recordId}` }
   }
@@ -88,6 +91,7 @@ const FALLBACK_STATE: DemoState = {
     customersWithFlowDefaults: 0,
     quotesWithMarketRate: 0,
     buildingShipments: 0,
+    openIntakeLoads: 0,
     activePostings: 0,
     carrierOffers: 0,
     shipmentsWithThread: 0,

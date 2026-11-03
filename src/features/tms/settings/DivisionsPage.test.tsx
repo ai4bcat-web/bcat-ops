@@ -109,6 +109,63 @@ describe('DivisionsPage', () => {
     expect(await screen.findByText('ASSETS still has an active subsidiary.')).toBeInTheDocument()
   })
 
+  describe('intake e-mail', () => {
+    const open = async () => {
+      mocks.listOwnershipDivisions.mockResolvedValue([
+        ...DIVISIONS.filter((d) => d.code !== 'ASSETS'),
+        division({ code: 'ASSETS', name: 'Ivan Cartage', sortOrder: 20, intakeEmail: 'assets@bcatcorp.com' }),
+      ])
+      render(<DivisionsPage />)
+      await ready()
+      fireEvent.click(screen.getByRole('button', { name: 'Edit BROKERAGE' }))
+      return screen.getByLabelText('Intake e-mail')
+    }
+    const save = () => fireEvent.click(screen.getByRole('button', { name: 'Save division' }))
+
+    it('flags an active division that has no address', async () => {
+      await open()
+      expect(within(screen.getByTestId('division-BROKERAGE')).getByText('No intake e-mail')).toBeInTheDocument()
+      expect(within(screen.getByTestId('division-ASSETS')).queryByText('No intake e-mail')).toBeNull()
+    })
+
+    it('refuses an empty address on an active division without calling the server', async () => {
+      await open()
+      save()
+      expect(await screen.findByText(/A division needs an intake e-mail address/)).toBeInTheDocument()
+      expect(mocks.saveOwnershipDivision).not.toHaveBeenCalled()
+    })
+
+    it.each([
+      ['not an address', /valid e-mail address/],
+      ['ai4bcat@gmail.com', /already used by another mailbox/],
+      ['ai4bcat+tracking-shp-1@gmail.com', /shipment reply threads/],
+      ['Assets@BCATcorp.com', /already receives tenders for Ivan Cartage/],
+    ])('refuses %s with its reason', async (value, message) => {
+      const input = await open()
+      fireEvent.change(input, { target: { value } })
+      save()
+      expect((await screen.findAllByText(message)).length).toBeGreaterThan(0)
+      expect(mocks.saveOwnershipDivision).not.toHaveBeenCalled()
+    })
+
+    it('saves a valid address lower-cased', async () => {
+      mocks.saveOwnershipDivision.mockResolvedValue({})
+      const input = await open()
+      fireEvent.change(input, { target: { value: ' Tenders@BCATcorp.com ' } })
+      save()
+      await waitFor(() => expect(mocks.saveOwnershipDivision).toHaveBeenCalledTimes(1))
+      expect(mocks.saveOwnershipDivision.mock.calls[0][0]).toMatchObject({ code: 'BROKERAGE', intakeEmail: 'tenders@bcatcorp.com' })
+    })
+
+    it('shows the server refusal inline when it still refuses', async () => {
+      mocks.saveOwnershipDivision.mockRejectedValue(new Error('That address already receives tenders for Somebody'))
+      const input = await open()
+      fireEvent.change(input, { target: { value: 'new@bcatcorp.com' } })
+      save()
+      expect(await screen.findByText('That address already receives tenders for Somebody')).toBeInTheDocument()
+    })
+  })
+
   it('saves the rule order the ▲ button produced', async () => {
     mocks.saveOwnershipRules.mockResolvedValue(RULES)
     render(<DivisionsPage />)

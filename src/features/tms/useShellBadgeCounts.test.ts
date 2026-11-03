@@ -5,7 +5,7 @@
  * the resolver to answer each one.
  */
 import { describe, it, expect, vi } from 'vitest'
-import { renderHook } from '@testing-library/react'
+import { renderHook, waitFor } from '@testing-library/react'
 
 vi.mock('@/hooks/useAuth', () => ({ useAuth: () => ({ hasPageAccess: () => true }) }))
 vi.mock('@/hooks/useLoads', () => ({ useLoads: () => ({ loads: [{ id: 'l1' }] }) }))
@@ -24,25 +24,24 @@ vi.mock('@/hooks/useDocumentReviewQueue', () => ({ useDocumentReviewQueue: () =>
 vi.mock('@/hooks/useArToInvoiceCount', () => ({ useArToInvoiceCount: () => 1 }))
 vi.mock('@/hooks/useApToReviewCount', () => ({ useApToReviewCount: () => 1 }))
 vi.mock('@/hooks/useQuotesToReplyCount', () => ({ useQuotesToReplyCount: () => 3 }))
-vi.mock('@/lib/shipmentViewDefs', () => ({ boardStatusOf: () => 'OPEN' }))
+const intake = vi.hoisted(() => ({ count: vi.fn(async () => 2) }))
+vi.mock('@/lib/apiClient', () => ({ countOpenIntakeLoads: intake.count }))
 vi.mock('@/lib/brokerageCharts', () => ({ MOVEMENT_STATUSES: ['IN_TRANSIT'] }))
 
 import { useShellBadgeCounts, movingShipments } from './useShellBadgeCounts'
 import { NAV_ITEMS } from '@/lib/navItems'
 import { PINNED_ITEMS, TMS_ITEMS } from '@/lib/navSections'
 import type { ShipmentListRow } from '@/hooks/useShipments'
-import type { UserProfileRecord } from '@/types/tms'
 
 const shipments = [
   { id: 's1', status: 'OPEN', voidedAt: null, dispatcherAssignedId: 'rep@bcatcorp.com', loadStatus: 'IN_TRANSIT' },
   { id: 's2', status: 'OPEN', voidedAt: '2026-01-01', dispatcherAssignedId: 'rep@bcatcorp.com', loadStatus: 'IN_TRANSIT' },
 ] as unknown as ShipmentListRow[]
 
-const rep = { id: 'rep@bcatcorp.com', email: 'rep@bcatcorp.com', teamKeys: ['east'] } as unknown as UserProfileRecord
-const args = { shipments, userId: 'rep@bcatcorp.com', staffById: {}, staff: [rep], myTeamKeys: ['east'] }
+const args = { shipments }
 
 describe('useShellBadgeCounts', () => {
-  it('answers every badgeKey the nav config declares', () => {
+  it('answers every badgeKey the nav config declares', async () => {
     const declared = new Set<string>()
     for (const item of [...PINNED_ITEMS, ...TMS_ITEMS, ...NAV_ITEMS]) {
       if (item.badgeKey) declared.add(item.badgeKey)
@@ -50,16 +49,19 @@ describe('useShellBadgeCounts', () => {
     }
     expect(declared.size).toBeGreaterThan(5)
     const { result } = renderHook(() => useShellBadgeCounts(args))
+    // The open-intake count is a polled read, so it lands a tick after the first paint.
+    await waitFor(() => expect(result.current.intakeLoads).toBe(2))
     const unanswered = [...declared].filter((key) => !result.current[key])
     expect(unanswered).toEqual([])
   })
 
-  it('carries the real counts and drops zero ones', () => {
-    const { result } = renderHook(() => useShellBadgeCounts({ ...args, shipments: [] }))
+  it('carries the real counts and drops zero ones', async () => {
+    const { result } = renderHook(() => useShellBadgeCounts({ shipments: [] }))
+    await waitFor(() => expect(result.current.intakeLoads).toBe(2))
     expect(result.current.quotesToReply).toBe(3)
     expect(result.current.maintenance).toBe(1)
     expect(result.current.intake).toBe(1)
-    expect('myQueue' in result.current).toBe(false)
+    expect('myQueue' in result.current || 'teamQueue' in result.current).toBe(false)
     expect('tracking' in result.current).toBe(false)
   })
 

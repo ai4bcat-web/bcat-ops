@@ -20,7 +20,6 @@ import { ReportsPage } from '@/features/reports/ReportsPage'
 import { SettingsPage } from '@/features/settings/SettingsPage'
 import DivisionsPage from '@/features/tms/settings/DivisionsPage'
 import AiAgentsPage from '@/features/tms/settings/AiAgentsPage'
-import ShipmentViewsPage from '@/features/tms/settings/ShipmentViewsPage'
 import { IntegrationsTab } from '@/features/tms/integrations/IntegrationsTab'
 import { CompanyTab } from '@/features/tms/brokerage/company/CompanyTab'
 import { UsersPage } from '@/features/users/UsersPage'
@@ -42,7 +41,7 @@ interface BrokerageTab {
 /**
  * The tab strip, in the order Ryne reads it: what the business is set to, then the
  * people, then the money the people earned, then the numbers, then the record, then
- * the two taxonomy editors that decide how everything above is sliced.
+ * the divisions editor that decides how everything above is sliced.
  */
 const TABS: BrokerageTab[] = [
   { key: 'settings', label: 'Settings', path: '', pages: ['settings', TMS_PAGE_KEY] },
@@ -51,7 +50,6 @@ const TABS: BrokerageTab[] = [
   { key: 'reports', label: 'Reports', path: 'reports', pages: ['reports', TMS_PAGE_KEY] },
   { key: 'audit', label: 'Audit', path: 'audit', pages: ['audit', TMS_PAGE_KEY] },
   { key: 'divisions', label: 'Divisions & ownership', path: 'divisions', pages: [] },
-  { key: 'views', label: 'Shipment views', path: 'views', pages: [] },
   { key: 'integrations', label: 'Integrations', path: 'integrations', pages: [] },
   { key: 'ai-agents', label: 'AI Agents', path: 'ai-agents', pages: [] },
   { key: 'company', label: 'Company', path: 'company', pages: [] },
@@ -92,7 +90,6 @@ export function BrokeragePage() {
         <Route path="reports" element={<RequirePage page={['reports', TMS_PAGE_KEY]}><ReportsPage /></RequirePage>} />
         <Route path="audit" element={<RequirePage page={['audit', TMS_PAGE_KEY]}><AuditPage /></RequirePage>} />
         <Route path="divisions" element={<RequireAdmin><DivisionsPage /></RequireAdmin>} />
-        <Route path="views" element={<RequireAdmin><ShipmentViewsPage /></RequireAdmin>} />
         {/* The tab owns its own index and `:provider` routes, so the strip stays lit
             on a deep link; the guard is here, where a typed URL still meets it. */}
         <Route path="integrations/*" element={<RequireAdmin><IntegrationsTab /></RequireAdmin>} />

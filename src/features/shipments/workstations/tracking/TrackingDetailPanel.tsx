@@ -1,12 +1,14 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useContext, useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, Mail, MessageSquare, Phone, Play, FileImage } from 'lucide-react'
 import { APIProvider, useApiIsLoaded } from '@vis.gl/react-google-maps'
 import { toast } from 'sonner'
+import { TrackerPicker } from '@/components/TrackerPicker'
+import { AuthContext } from '@/hooks/useAuth'
 import { TmsButton, TmsCard, TmsEmptyState, TmsField, TmsInput, TmsMetaList, TmsStatRow, TmsTimeline } from '@/features/tms/kit'
 import { formatDateTime } from '@/lib/date'
 import { trackingEtaFromMatrix } from '@/lib/trackingEta'
 import type { ComputedTrackingEta, EtaToStopInput, EtaToStopStop } from '@/lib/trackingEta'
-import { runCheckCallPlan, requestPod, saveLoadCheckCallPlan } from '@/lib/apiClient'
+import { assignTracker, runCheckCallPlan, requestPod, saveLoadCheckCallPlan } from '@/lib/apiClient'
 import {
   CHECK_CALL_CHANNELS, CHECK_CALL_MILESTONES, CHANNEL_DISABLED_REASON, MILESTONE_LABELS,
   isChannelEnabled,
@@ -66,6 +68,20 @@ function DetailSession({ row, bundle, messages, loading, customers, settings, us
     [row, bundle, now, estimate],
   )
 
+  // Same gate as the Tracker card on the overview: owner, admin or the TMS page grant.
+  const auth = useContext(AuthContext)
+  const canEditTracker = (auth?.isAdmin ?? false) || (auth?.isOwner ?? false) || (auth?.hasPageAccess('tms') ?? false)
+  const changeTracker = async (trackerId: string | null) => {
+    try {
+      const result = await assignTracker({ shipmentIds: [row.id], trackerId })
+      const skipped = result.skipped[0]
+      if (skipped) toast.error(skipped.reason)
+      await onRefresh()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not assign the tracker')
+    }
+  }
+
   const perform = async (action: 'save' | 'clear' | 'run' | 'pod') => {
     if (!load || busy) return
     setBusy(true)
@@ -103,6 +119,18 @@ function DetailSession({ row, bundle, messages, loading, customers, settings, us
           <div className="tms-tracking-detail-title">
             <h2 className="m-0 text-base font-semibold">PRO {row.number}</h2>
             <span className="tms-muted text-sm">{customer?.name ?? row.customerName ?? '—'}</span>
+            <span className="tms-tracking-detail-tracker" data-testid="detail-tracker">
+              <span className="tms-muted text-sm">Tracker</span>
+              {canEditTracker ? (
+                <TrackerPicker
+                  value={row.trackerId ?? null}
+                  aria-label="Tracker"
+                  onChange={(id) => { void changeTracker(id) }}
+                />
+              ) : (
+                <span className="text-sm">{row.trackerName ?? (row.trackerId ? row.trackerId : 'Unassigned')}</span>
+              )}
+            </span>
           </div>
           <TmsMetaList
             columns={3}

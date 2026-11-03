@@ -674,7 +674,6 @@ describe('UPSERT_CUSTOMER', () => {
         milestones: ['DISPATCHED', 'DELIVERED'],
         escalateAfterMinutes: 45,
         emailDispatcher: true,
-        requestPodOnDelivery: false,
       },
     }))
     expect(result.defaultCarrierTeamKey).toBe('DESK_A')
@@ -731,7 +730,6 @@ describe('UPSERT_CUSTOMER', () => {
         channels: [],
         milestones: [],
         emailDispatcher: false,
-        requestPodOnDelivery: false,
       },
     }))
     const plan = result.checkCallPlan as CheckCallPlan
@@ -739,7 +737,6 @@ describe('UPSERT_CUSTOMER', () => {
       intervalHours: 6,
       escalateAfterMinutes: 45,
       emailDispatcher: false,
-      requestPodOnDelivery: false,
     })
     expect(plan.channels).toEqual(DEFAULT_CHECK_CALL_PLAN.channels)
     expect(plan.milestones).toEqual(DEFAULT_CHECK_CALL_PLAN.milestones)
@@ -756,6 +753,28 @@ describe('UPSERT_CUSTOMER', () => {
     await expect(
       handler(event('UPSERT_CUSTOMER', { name: 'Acme', checkCallPlan: { intervalHours: 4, escalateAfterMinutes: 3 } })),
     ).rejects.toThrow('checkCallPlan.escalateAfterMinutes must be 5–1440')
+  })
+
+  it('stores the default tracker and a valid automation policy, and refuses an invalid one', async () => {
+    send.mockImplementation(withSettingsGet((cmd: MockCommand) => {
+      if (cmd.__type === 'Scan') return Promise.resolve({ Items: [], LastEvaluatedKey: undefined })
+      if (cmd.__type === 'Put') return Promise.resolve({})
+      throw new Error('unexpected')
+    }))
+    const result = await handler(event('UPSERT_CUSTOMER', {
+      name: 'Acme',
+      defaultTrackerId: 'tracker-1',
+      trackingAutomation: { checkCallsAuto: true, podAuto: false },
+    }))
+    expect(result.defaultTrackerId).toBe('tracker-1')
+    expect(result.trackingAutomation).toMatchObject({ checkCallsAuto: true, podAuto: false })
+
+    await expect(
+      handler(event('UPSERT_CUSTOMER', {
+        name: 'Acme',
+        trackingAutomation: { templates: { podSms: 'Hi {notAPlaceholder}' } },
+      })),
+    ).rejects.toThrow(/notAPlaceholder/)
   })
 })
 
@@ -1284,7 +1303,6 @@ describe('SAVE_SETTINGS', () => {
         milestones: ['AT_PICKUP', 'DELIVERED'],
         escalateAfterMinutes: 30,
         emailDispatcher: true,
-        requestPodOnDelivery: true,
       },
     }, identity({ groups: ['ADMIN'] })))
     expect(result.marginTargetBps).toBe(2000)
@@ -2098,7 +2116,7 @@ describe('SAVE_OWNERSHIP_DIVISION', () => {
       'OwnershipDivision-test': [division({ code: 'ASSETS' }), division({ code: 'BOX_TRUCK', parentId: 'ASSETS' })],
     })
     await expect(
-      handler(event('SAVE_OWNERSHIP_DIVISION', { id: 'ASSETS', code: 'ASSETS', name: 'Ivan Cartage', parentId: 'BOX_TRUCK' }, ADMIN_CALLER)),
+      handler(event('SAVE_OWNERSHIP_DIVISION', { id: 'ASSETS', code: 'ASSETS', name: 'Ivan Cartage', parentId: 'BOX_TRUCK', intakeEmail: 'assets@bcatcorp.com' }, ADMIN_CALLER)),
     ).rejects.toThrow(/its own ancestor/)
   })
 
@@ -2119,10 +2137,14 @@ describe('SAVE_OWNERSHIP_DIVISION', () => {
 
   it('creates a subsidiary and bumps the version on the next save', async () => {
     const tables = ownershipTables({ 'OwnershipDivision-test': [division({ code: 'ASSETS' })] })
-    await handler(event('SAVE_OWNERSHIP_DIVISION', { code: 'LOCAL', name: 'Local Drivers', parentId: 'ASSETS' }, ADMIN_CALLER))
+    await handler(event('SAVE_OWNERSHIP_DIVISION', {
+      code: 'LOCAL', name: 'Local Drivers', parentId: 'ASSETS', intakeEmail: 'local@bcatcorp.com',
+    }, ADMIN_CALLER))
     expect(tables.divisions.get('LOCAL')).toMatchObject({ parentId: 'ASSETS', version: 1, active: true })
 
-    await handler(event('SAVE_OWNERSHIP_DIVISION', { id: 'LOCAL', code: 'LOCAL', name: 'Local drivers', parentId: 'ASSETS' }, ADMIN_CALLER))
+    await handler(event('SAVE_OWNERSHIP_DIVISION', {
+      id: 'LOCAL', code: 'LOCAL', name: 'Local drivers', parentId: 'ASSETS', intakeEmail: 'local@bcatcorp.com',
+    }, ADMIN_CALLER))
     expect(tables.divisions.get('LOCAL')).toMatchObject({ name: 'Local drivers', version: 2 })
   })
 
@@ -2136,14 +2158,14 @@ describe('SAVE_OWNERSHIP_DIVISION', () => {
 
     await expect(
       handler(event('SAVE_OWNERSHIP_DIVISION', {
-        id: 'BOX_TRUCK', code: 'BOX_TRUCK', name: 'Box trucks', parentId: 'ASSETS', active: true,
+        id: 'BOX_TRUCK', code: 'BOX_TRUCK', name: 'Box trucks', parentId: 'ASSETS', active: true, intakeEmail: 'box@bcatcorp.com',
       }, ADMIN_CALLER)),
     ).rejects.toThrow(/"Box trucks" cannot be active under the archived division "Division ASSETS"/)
 
     // A grandchild is refused by the same walk, through an active parent.
     await expect(
       handler(event('SAVE_OWNERSHIP_DIVISION', {
-        code: 'LOCAL', name: 'Local drivers', parentId: 'BOX_TRUCK', active: true,
+        code: 'LOCAL', name: 'Local drivers', parentId: 'BOX_TRUCK', active: true, intakeEmail: 'local@bcatcorp.com',
       }, ADMIN_CALLER)),
     ).rejects.toThrow(/cannot be active under the archived division/)
     expect(tables.divisions.get('LOCAL')).toBeUndefined()
@@ -2153,6 +2175,66 @@ describe('SAVE_OWNERSHIP_DIVISION', () => {
       id: 'BOX_TRUCK', code: 'BOX_TRUCK', name: 'Box trucks', parentId: 'ASSETS', active: false,
     }, ADMIN_CALLER))
     expect(tables.divisions.get('BOX_TRUCK')).toMatchObject({ name: 'Box trucks', active: false })
+  })
+
+  describe('intake e-mail', () => {
+    it('refuses an active division without one, naming the division', async () => {
+      const tables = ownershipTables({ 'OwnershipDivision-test': [division({ code: 'ASSETS' })] })
+      await expect(
+        handler(event('SAVE_OWNERSHIP_DIVISION', { code: 'LOCAL', name: 'Local Drivers', parentId: 'ASSETS' }, ADMIN_CALLER)),
+      ).rejects.toThrow('A division needs an intake e-mail address — choose the address tender e-mails for Local Drivers arrive at')
+      await expect(
+        handler(event('SAVE_OWNERSHIP_DIVISION', { code: 'LOCAL', name: 'Local Drivers', intakeEmail: '  ' }, ADMIN_CALLER)),
+      ).rejects.toThrow(/needs an intake e-mail/)
+      expect(tables.divisions.get('LOCAL')).toBeUndefined()
+    })
+
+    it.each([
+      ['nonsense', /valid e-mail address/],
+      ['ai4bcat@gmail.com', /already used by another mailbox/],
+      ['ai4bcat+tracking-shp-1@gmail.com', /shipment reply threads/],
+    ])('refuses %s', async (intakeEmail, message) => {
+      const tables = ownershipTables({ 'OwnershipDivision-test': [division({ code: 'ASSETS' })] })
+      await expect(
+        handler(event('SAVE_OWNERSHIP_DIVISION', { code: 'LOCAL', name: 'Local', intakeEmail }, ADMIN_CALLER)),
+      ).rejects.toThrow(message)
+      expect(tables.divisions.get('LOCAL')).toBeUndefined()
+    })
+
+    it('refuses an address another active division owns, case-insensitively, but not an archived one’s', async () => {
+      const tables = ownershipTables({
+        'OwnershipDivision-test': [
+          division({ code: 'ASSETS', name: 'Ivan Cartage', intakeEmail: 'assets@bcatcorp.com' }),
+          division({ code: 'OLD', name: 'Old', active: false, intakeEmail: 'old@bcatcorp.com' }),
+        ],
+      })
+      await expect(
+        handler(event('SAVE_OWNERSHIP_DIVISION', { code: 'LOCAL', name: 'Local', intakeEmail: 'Assets@BCATcorp.com' }, ADMIN_CALLER)),
+      ).rejects.toThrow('That address already receives tenders for Ivan Cartage')
+      await handler(event('SAVE_OWNERSHIP_DIVISION', { code: 'LOCAL', name: 'Local', intakeEmail: 'OLD@bcatcorp.com' }, ADMIN_CALLER))
+      expect(tables.divisions.get('LOCAL')).toMatchObject({ intakeEmail: 'old@bcatcorp.com' })
+    })
+
+    it('keeps the stored address when an older client omits the key, and still saves rows nobody has fixed', async () => {
+      const tables = ownershipTables({
+        'OwnershipDivision-test': [
+          division({ code: 'ASSETS', intakeEmail: 'assets@bcatcorp.com' }),
+          division({ code: 'BROKERAGE' }),
+        ],
+      })
+      await handler(event('SAVE_OWNERSHIP_DIVISION', { id: 'ASSETS', code: 'ASSETS', name: 'Ivan Cartage' }, ADMIN_CALLER))
+      expect(tables.divisions.get('ASSETS')).toMatchObject({ intakeEmail: 'assets@bcatcorp.com', version: 2 })
+      // BROKERAGE has no address yet; saving ASSETS above did not fail on it. Saving BROKERAGE itself does.
+      await expect(
+        handler(event('SAVE_OWNERSHIP_DIVISION', { id: 'BROKERAGE', code: 'BROKERAGE', name: 'BCAT' }, ADMIN_CALLER)),
+      ).rejects.toThrow(/needs an intake e-mail/)
+    })
+
+    it('lets an archived division be saved without an address', async () => {
+      const tables = ownershipTables({ 'OwnershipDivision-test': [division({ code: 'OLD', active: false })] })
+      await handler(event('SAVE_OWNERSHIP_DIVISION', { id: 'OLD', code: 'OLD', name: 'Old', active: false }, ADMIN_CALLER))
+      expect(tables.divisions.get('OLD')).toMatchObject({ active: false, version: 2 })
+    })
   })
 })
 

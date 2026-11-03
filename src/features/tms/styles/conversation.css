@@ -1,5 +1,5 @@
 /*
- * Shared shipment conversation (Inbox chat pane and the shipment Tracking tab):
+ * Shared shipment conversation (the shipment Tracking tab):
  * stream, bubbles, kind pills, structured cards, composer pieces.
  * Moved out of TrackingConversation.css (S2 slice C): scoped, tokens only, no fallbacks.
  */

@@ -34,11 +34,14 @@ const SHOTS = resolve('Docs/tms-build/screenshots/S2')
 const ALLOW_PROBLEMS = [
   // `vite` dev server only: the PWA manifest is generated at build time, so localhost serves index.html for it.
   { pattern: /Manifest: Line: 1, column: 1, Syntax error\. http:\/\/(127\.0\.0\.1|localhost):5173\/manifest\.webmanifest$/, reason: 'vite dev server has no built manifest' },
+  // The dev Google Maps key is neutered, so Maps logs its own Map ID error; Google-owned, not an app defect.
+  { pattern: /The map is initialized without a valid Map ID/, reason: 'dev Maps key is neutered' },
 ]
 
 /** Routes/states that may legitimately be SKIPPED when dev has no data for them. */
 const SKIP_ALLOWED = {
   '23-run': 'no workflow run may exist on dev',
+  '02j-intake-review': 'no open intake load may exist on dev',
   '31b-provider': 'no integration provider link may be listed on dev',
   '35-toast': 'no active customer link may exist to copy',
   '15a-invoice-detail': 'dev has no invoice yet (every order has invoiceId=null; Receivable lists none); generating one would mutate dev data',
@@ -60,12 +63,14 @@ const SKIP_ALLOWED = {
 const HOOK_CLASSES = ['tms-overdue', 'tms-due', 'tms-theme-toggle', 'tms-dash', 'tms-probe-field', 'tms-public-head', 'tms-public-brand-name']
 
 // ───────────────────────────── route table ─────────────────────────────
-// path placeholders: {shipment} {quote} {invoice} {bill} {carrier} {run} {academy} {provider} {view} {docview}
+// path placeholders: {shipment} {quote} {invoice} {bill} {carrier} {run} {provider} {intake}
 // pattern: the App.tsx / tab route this entry covers (":id"/":slug" normalise to ":p"); `light`/`dark` pass flags.
 export const ROUTES = [
   { nn: '01', slug: 'dashboard', path: '/tms/dashboard', pattern: '/tms/dashboard', dark: true },
   { nn: '02', slug: 'shipments', path: '/tms/shipments', pattern: '/tms/shipments', dark: true, wideOk: true },
-  { nn: '03', slug: 'shipments-view', path: '/tms/shipments/view/{view}', pattern: '/tms/shipments/view/:slug', wideOk: true },
+  { nn: '02b', slug: 'shipments-all', path: '/tms/shipments?list=all', pattern: '/tms/shipments?list=all', wideOk: true },
+  { nn: '02i', slug: 'intake', path: '/tms/shipments/intake', pattern: '/tms/shipments/intake', dark: true },
+  { nn: '02j', slug: 'intake-review', path: '/tms/shipments/intake/{intake}', pattern: '/tms/shipments/intake/:intakeId', dark: true },
   { nn: '04', slug: 'shipment-overview', path: '/tms/shipments/{shipment}', pattern: '/tms/shipments/:id', dark: true },
   { nn: '04a', slug: 'shipment-stops', path: '/tms/shipments/{shipment}?tab=stops', pattern: '/tms/shipments/:id?tab=stops' },
   { nn: '04b', slug: 'shipment-carrier', path: '/tms/shipments/{shipment}?tab=carrier', pattern: '/tms/shipments/:id?tab=carrier' },
@@ -76,13 +81,10 @@ export const ROUTES = [
   { nn: '04g', slug: 'shipment-carrierpay', path: '/tms/shipments/{shipment}?tab=carrierPay', pattern: '/tms/shipments/:id?tab=carrierPay' },
   { nn: '04h', slug: 'shipment-history', path: '/tms/shipments/{shipment}?tab=history', pattern: '/tms/shipments/:id?tab=history' },
   { nn: '04j', slug: 'shipment-aiagent', path: '/tms/shipments/{shipment}?tab=aiAgent', pattern: '/tms/shipments/:id?tab=aiAgent' },
-  { nn: '07', slug: 'dispatch', path: '/tms/dispatch', pattern: '/tms/dispatch', dark: true },
   { nn: '08', slug: 'tracking', path: '/tms/tracking?tab=tracking', pattern: '/tms/tracking', wideOk: true },
-  { nn: '09', slug: 'tracking-inbox', path: '/tms/tracking?tab=inbox&shipment={shipment}', pattern: '/tms/tracking', dark: true, wideOk: true },
+  { nn: '09', slug: 'tracking-by-assignee', path: '/tms/tracking', pattern: '/tms/tracking', dark: true, wideOk: true },
   { nn: '10', slug: 'tracking-links', path: '/tms/tracking/links', pattern: '/tms/tracking/links' },
-  { nn: '11', slug: 'documents', path: '/tms/documents', pattern: '/tms/documents', dark: true },
   { nn: '11a', slug: 'documents-review', path: '/tms/documents/review', pattern: '/tms/documents/review' },
-  { nn: '11b', slug: 'documents-view', path: '/tms/documents/view/{docview}', pattern: '/tms/documents/view/:slug' },
   { nn: '12', slug: 'check-calls', path: '/tms/check-calls', pattern: '/tms/check-calls' },
   { nn: '13', slug: 'rates', path: '/tms/rates', pattern: '/tms/rates', dark: true },
   { nn: '13a', slug: 'rates-lanes', path: '/tms/rates/lanes', pattern: '/tms/rates/lanes' },
@@ -100,8 +102,6 @@ export const ROUTES = [
   { nn: '21', slug: 'vendors', path: '/tms/vendors', pattern: '/tms/vendors' },
   { nn: '22', slug: 'workflows', path: '/tms/workflows', pattern: '/tms/workflows' },
   { nn: '23', slug: 'run', path: '/tms/workflows/runs/{run}', pattern: '/tms/workflows/runs/:id', dark: true },
-  { nn: '24', slug: 'academy', path: '/tms/academy', pattern: '/tms/academy' },
-  { nn: '24a', slug: 'academy-article', path: '/tms/academy/{academy}', pattern: '/tms/academy/:slug', dark: true },
   { nn: '25', slug: 'brokerage', path: '/tms/brokerage', pattern: '/tms/brokerage', dark: true },
   { nn: '26', slug: 'users', path: '/tms/brokerage/users', pattern: '/tms/brokerage/users', dark: true },
   { nn: '27', slug: 'commissions', path: '/tms/brokerage/commissions', pattern: '/tms/brokerage/commissions' },
@@ -131,7 +131,6 @@ export const STATES = [
   { id: '02a-menu', nn: '02a', slug: 'board-row-menu', path: '/tms/shipments', dark: true, steps: [{ click: { selector: 'tbody button[aria-label="Shipment actions"]', real: true } }], probe: 'menu' },
   { id: '02a-columns', nn: '02a', slug: 'board-columns', path: '/tms/shipments', dark: true, steps: [{ click: { label: '^Manage column templates' } }] },
   { id: '02a-iconkey', nn: '02a', slug: 'board-icon-key', path: '/tms/shipments', steps: [{ click: { pattern: '^Icon key' } }] },
-  { id: '02a-filterset', nn: '02a', slug: 'board-filter-set', path: '/tms/shipments', steps: [{ click: { label: '^Save as view' } }] },
   { id: '05-drawer', nn: '05', slug: 'board-drawer', path: '/tms/shipments', dark: true, steps: [{ click: { selector: FIRST_ROW } }] },
   { id: '06-new', nn: '06', slug: 'new-shipment', path: '/tms/shipments', dark: true, steps: [{ click: { pattern: '^(\\+\\s*)?Create shipment' } }] },
   { id: '12-tabs', nn: '12', slug: 'check-calls-tabs', path: '/tms/check-calls', tabs: true },
@@ -165,8 +164,10 @@ export async function requiredPatterns(root = process.cwd()) {
   const end = app.indexOf('</Route>', start)
   const block = app.slice(start, end)
   const found = new Set()
-  for (const m of block.matchAll(/<Route\s+path="([^"]+)"/g)) {
+  for (const m of block.matchAll(/<Route\s+path="([^"]+)"([^\n]*)/g)) {
     const path = m[1]
+    // A redirect route has no page to render; devVerifyU asserts where each one lands.
+    if (/<Navigate\b|<SavedViewRedirect\b/.test(m[2])) continue
     if (path === '/tms') continue
     if (path === 'brokerage/*') continue
     found.add(normalise(`/tms/${path}`))
@@ -206,7 +207,8 @@ export function auditInPage(opts) {
   const BANNED_SURFACE = new Set(['rgb(244, 247, 251)', 'rgb(244, 246, 248)'])
   const BANNED_BORDER = new Set(['rgb(226, 232, 240)'])
   // gm-style/iframe: third-party; recharts_measurement_span: library text-measuring node; [data-user-color]: user-chosen data colour swatch (not chrome)
-  const EXCLUDE = '.gm-style, iframe, [data-tms-paper], .tms-chart-tip, [data-sonner-toast] [role="tooltip"], .tms-count-badge, #recharts_measurement_span, [data-user-color]'
+  // .tms-segbar-seg: data-series fills of TmsSegmentedBar (data colour, not chrome). [class*="uNGBb"]: Google Maps' own error dialog (e.g. "invalid Map ID" because the dev Maps key is neutered); Google-owned DOM, not app chrome
+  const EXCLUDE = '.gm-style, [class*="uNGBb"], .tms-segbar-seg, iframe, [data-tms-paper], .tms-chart-tip, [data-sonner-toast] [role="tooltip"], .tms-count-badge, #recharts_measurement_span, [data-user-color]'
   const parse = (s) => {
     const m = /rgba?\(([^)]+)\)/.exec(s || '')
     if (!m) return null
@@ -436,21 +438,18 @@ async function discoverData(b, ship) {
   const transitBundle = data.transit ? await ship('GET_SHIPMENT_BUNDLE', { shipmentId: data.transit }).catch(() => null) : null
   data.carrier = transitBundle?.loadCarriers?.find((c) => c.carrierId)?.carrierId ?? rec('CARRIER')?.recordId
   const list = [
-    ['shipment', '/tms/shipments', '^/tms/shipments/(?!view/)([^/?#]+)'],
-    ['view', '/tms/shipments', '^/tms/shipments/view/([^/?#]+)'],
-    ['docview', '/tms/documents', '^/tms/documents/view/([^/?#]+)'],
+    ['shipment', '/tms/shipments', '^/tms/shipments/(?!intake)([^/?#]+)'],
     ['quote', '/tms/rates', '^/tms/rates/(?!lanes|new)([^/?#]+)'],
     ['invoice', '/tms/invoicing', '^/tms/invoicing/invoices/([^/?#]+)'],
     ['bill', '/tms/invoicing/payable', '^/tms/invoicing/payable/bills/([^/?#]+)'],
     ['run', '/tms/workflows', '^/tms/workflows/runs/([^/?#]+)'],
-    ['academy', '/tms/academy', '^/tms/academy/([^/?#]+)'],
+    ['intake', '/tms/shipments/intake', '^/tms/shipments/intake/([^/?#]+)'],
     ['provider', '/tms/brokerage/integrations', '^/tms/brokerage/integrations/([^/?#]+)'],
   ]
   for (const [key, path, regex] of list) {
     if (data[key]) continue
     data[key] = await discover(b, path, regex).catch(() => null)
   }
-  data.docview ??= data.view // saved views are shared by the board and documents workstations
   return { data, state, rec }
 }
 
@@ -475,17 +474,19 @@ async function runRoute(b, route, data, theme) {
   b.mark()
   await pause(500)
   const extra = []
-  if (route.slug === 'tracking-inbox') extra.push(...await inboxAsserts(b))
+  if (route.slug === 'tracking-by-assignee') extra.push(...await trackingAsserts(b))
   await judge(b, id, theme, { nn: route.nn, slug: route.slug, wideOk: route.wideOk, extra })
 }
 
-const INBOX_TESTIDS = ['inbox-chat-header', 'inbox-quick-actions', 'inbox-info-panel', 'inbox-status-timeline', 'inbox-driver-card']
-async function inboxAsserts(b) {
-  // Conversations arrive after the list (one message read per shipment): wait for the framed thread.
-  await b.waitFor('[data-testid="inbox-chat-header"]', 45_000).catch(() => {})
+async function trackingAsserts(b) {
+  // The shipment list arrives after the shell: wait for the assignee tab strip and at least one rate-con-sent row.
+  await b.waitFor('[data-testid="tracking-assignee-tabs"]', 45_000).catch(() => {})
+  await b.poll(() => b.evaluate(`!!document.querySelector('[data-testid="tracking-row"]')`), 'a tracking row', 90_000).catch(() => {})
   await pause(500)
-  const missing = await b.evaluate(`${JSON.stringify(INBOX_TESTIDS)}.filter((t) => !document.querySelector('[data-testid="' + t + '"]'))`)
-  return missing.length ? [`inbox elements missing: ${missing.join(', ')}`] : []
+  const out = []
+  if (!(await b.evaluate(`!!document.querySelector('[data-testid="tracking-assignee-tabs"]')`))) out.push('tracking-assignee-tabs missing')
+  if (!(await b.evaluate(`!!document.querySelector('[data-testid="tracking-row"]')`))) out.push('no tracking-row listed')
+  return out
 }
 
 async function closeOverlays(b) {
@@ -558,32 +559,6 @@ async function menuProbe(b) {
     if (checked && getComputedStyle(checked).backgroundColor !== probe('--tms-primary')) out.push('checked control fill ' + getComputedStyle(checked).backgroundColor + ' != --tms-primary ' + probe('--tms-primary'));
     return out;
   })()`)
-}
-
-async function inboxPanelPersistence(b, data) {
-  const id = '09-inbox-info-persist'
-  if (!matches(id)) return
-  if (!data.shipment) { skipLine(id, 'light', 'shipment'); return }
-  await b.navigate(`/tms/tracking?tab=inbox&shipment=${data.shipment}`)
-  try { await waitLoaded(b) } catch (e) { line('FAIL', `${id} light`, e.message); return }
-  await b.waitFor('[data-testid="inbox-info-panel"]', 45_000).catch(() => {})
-  const hasPanel = await b.evaluate(`!!document.querySelector('[data-testid="inbox-info-panel"]')`)
-  if (!hasPanel) { line('FAIL', `${id} light`, 'inbox-info-panel absent'); return }
-  try { await b.click({ selector: '[data-testid="inbox-info-panel"] button[aria-label^="Close"], [data-testid="inbox-info-panel"] button[aria-label="×"]' }) } catch {
-    line('FAIL', `${id} light`, 'info panel has no Close button'); return
-  }
-  await pause(600)
-  const gone = await b.evaluate(`!document.querySelector('[data-testid="inbox-info-panel"]')`)
-  await b.reload()
-  await waitLoaded(b).catch(() => {})
-  await pause(800)
-  const stillGone = await b.evaluate(`!document.querySelector('[data-testid="inbox-info-panel"]')`)
-  b.mark()
-  await shot(b, id, 'light', '09', 'tracking-inbox-info-closed')
-  // restore the default (open) state for later runs
-  await b.evaluate(`localStorage.removeItem('tms-inbox-info')`)
-  if (gone && stillGone) line('PASS', `${id} light`)
-  else line('FAIL', `${id} light`, `closed=${gone} afterReload=${stillGone}`)
 }
 
 async function toastProbe(b, theme) {
@@ -748,7 +723,6 @@ async function main() {
       await setTheme(b, 'light').catch(() => {})
       for (const route of ROUTES) await runRoute(b, route, data, 'light')
       for (const st of STATES) await runState(b, st, data, 'light')
-      await inboxPanelPersistence(b, data)
       // 4. toast (light then dark)
       await toastProbe(b, 'light')
       // 5. dark pass + pre-paint theme check

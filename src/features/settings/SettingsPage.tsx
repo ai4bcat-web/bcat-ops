@@ -16,6 +16,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { TmsSettingsCard } from './TmsSettingsCard'
 import { CarrierBookingSettingsCard } from './CarrierBookingSettingsCard'
 import { TrackingSettingsCard } from './TrackingSettingsCard'
+import { TrackingAutomationCard } from './TrackingAutomationCard'
 import { PostalCodeAliasesCard } from './PostalCodeAliasesCard'
 import { DocumentSettingsCard } from './DocumentSettingsCard'
 import { ArSettingsCard } from './ArSettingsCard'
@@ -53,6 +54,7 @@ export function SettingsPage() {
           <CarrierBookingSettingsCard />
           <CarrierDocumentsCard />
           <TrackingSettingsCard />
+          <TrackingAutomationCard />
           <PostalCodeAliasesCard />
           <DocumentSettingsCard />
           <ArSettingsCard />
