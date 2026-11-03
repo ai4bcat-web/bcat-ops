@@ -32,6 +32,8 @@ was disabled. The page test's fixture used lower-cased kinds and masked it.
   `UserProfile` row they left; no `zz-p-walk-*` identity remained. Seeded `demo-*` staff kept.
 - Academy: `Docs/academy/the-demo-flow.md` already describes the intended behaviour (each row
   opens the exact seeded record); no article change needed.
+- Follow-up commit `05a847f` (finance-suite clock pin, this entry, refreshed screenshots):
+  Amplify dev job `128` **SUCCEEDED** at 2026-11-02 21:08:03 UTC-6.
 
 ## 2026-11-02 — Step DEMO-WALK fixes deployed on dev
 
