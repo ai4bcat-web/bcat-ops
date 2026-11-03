@@ -756,14 +756,11 @@ async function v03Table(b, ctx, theme, ref) {
   await step('V03-row-menu', async () => {
     await openPage(b, '/tms/tracking?assignee=all')
     await waitTracking(b, [shipmentOf(ctx, 'sM')])
-    // The table re-lays out while staff names / groups settle, so re-measure until the pointer really lands on this row's button.
+    // The menu opens on :hover and :focus-within; focus is deterministic in headless Chrome, so drive it that way.
     let text = null
     for (let attempt = 0; attempt < 6 && !text; attempt += 1) {
-      const rect = await b.evaluate(`(() => { const row = document.querySelector('[data-testid="tracking-row"][data-shipment-id="${shipmentOf(ctx, 'sM')}"]'); const btn = row?.querySelector('button[aria-label="Row actions"]'); if (!btn) return null; btn.scrollIntoView({ block: 'center' }); const r = btn.getBoundingClientRect(); const x = r.x + r.width / 2, y = r.y + r.height / 2; return btn.closest('.tms-tracking-rowmenu')?.contains(document.elementFromPoint(x, y)) ? { x, y } : { covered: true } })()`)
-      expect(rect, 'the row has no Row actions button')
-      if (rect.covered) { await pause(500); continue }
-      await b.command('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 5, y: 5 })
-      await b.command('Input.dispatchMouseEvent', { type: 'mouseMoved', x: rect.x, y: rect.y })
+      const found = await b.evaluate(`(() => { const row = document.querySelector('[data-testid="tracking-row"][data-shipment-id="${shipmentOf(ctx, 'sM')}"]'); const btn = row?.querySelector('button[aria-label="Row actions"]'); if (!btn) return false; btn.scrollIntoView({ block: 'center' }); btn.focus(); return true })()`)
+      expect(found, 'the row has no Row actions button')
       await pause(400)
       text = await b.evaluate(`(() => { const m = document.querySelector('[data-testid="tracking-row"][data-shipment-id="${shipmentOf(ctx, 'sM')}"] .tms-tracking-rowmenu-menu'); return m && getComputedStyle(m).display !== 'none' ? m.innerText : null })()`)
     }

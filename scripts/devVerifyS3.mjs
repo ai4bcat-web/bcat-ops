@@ -470,7 +470,11 @@ async function driverPasses(origin, d, identities) {
         try {
           await b.navigate(who === 'paperwork' ? '/driver/paperwork' : '/driver/settlement')
           await waitBody(b)
-          const has = await b.evaluate(`[...document.querySelectorAll('a, button')].some((e) => /^\\s*Hours\\s*$/i.test(e.textContent))`)
+          // The Hours tab renders only once the driver profile has loaded (timeClock is false until then): wait for the nav, then poll for the expected state.
+          const hoursProbe = `[...document.querySelectorAll('a, button')].some((e) => /^\\s*Hours\\s*$/i.test(e.textContent))`
+          await b.poll(async () => b.evaluate(`!!document.querySelector('nav a[href="/driver/account"]')`), 'driver tab bar', 20_000).catch(() => {})
+          let has = await b.evaluate(hoursProbe)
+          for (let i = 0; i < 20 && has !== expect; i += 1) { await pause(1000); has = await b.evaluate(hoursProbe) }
           if (has === expect) line('PASS', `D13-hours-tab-${who}`, expect ? 'visible' : 'hidden')
           else line('FAIL', `D13-hours-tab-${who}`, `Hours tab ${has ? 'visible' : 'hidden'}, expected ${expect ? 'visible' : 'hidden'}`)
         } finally { await b.close() }

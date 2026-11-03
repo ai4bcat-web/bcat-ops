@@ -1,5 +1,117 @@
 # TMS build log
 
+## 2026-11-03 — Step V deployed on dev (tracking assignee, Tracking by assignee, Settings > Tracking automation)
+
+**Committed and deployed on dev (Amplify jobs 136, 137, 138; commits `e207e5c`, `bf061a3`, `c88ec20`). Dev only.** Plan:
+`Docs/tms-build/V-plan.md` (15 decisions, each with a default taken). Schema is additive and shipped as a data deploy
+together with Step U.
+- **V1 Tracking assignee:** `Shipment.trackerId`, `Customer.defaultTrackerId`. New shipments inherit the customer's default
+  tracker (create, link-customer, duplicate; never overwrites an existing tracker), and a per-shipment override is allowed.
+  New `ASSIGN_TRACKER` action (bulk <= 100, one audit row per shipment, voided/missing/inactive skipped with a reason).
+  Tracker card on the shipment, Default tracker on the customer.
+- **V2 Tracking page:** the Inbox/conversation UI is gone. `/tms/tracking` is a table of every shipment whose rate con was
+  SENT/OPENED/SIGNED, grouped by assignee: My loads (default when you have loads), All, one tab per assignee, Unassigned.
+  Columns: Shipment #, Customer, Lane, Status, Last location + age, ETA, Next check call, POD, Carrier DOT/MC, Tracker
+  (the right-hand columns scroll horizontally on narrower screens). Create customer URL, Request check call, Request POD
+  and Assign tracker are in the row menu. **Manage Customer Links is NOT inbox-only**: it stays its own page and nav item.
+  `?shipment=<id>` and the old `?tab=inbox` links redirect to the shipment's Tracking tab. Replies still thread to the
+  shipment's one e-mail thread.
+- **V3 Settings > Tracking automation:** global defaults + per-division + per-customer overrides (inherit toggles), per
+  channel on/off (SMS, e-mail), cadence, quiet hours, templates with placeholder chips + preview + SMS segment counter,
+  POD request on Delivered (once per leg per channel), "Run automation now". All master switches default OFF (dev
+  `TmsSettings.trackingAutomation` is unset). New scheduled Lambda `tracking-automation` (every 5 minutes) calling
+  `RUN_TRACKING_AUTOMATION`; **on dev the EventBridge rule is disabled**, so dev exercises it with Run now / the scripts.
+  On dev every send is recorded NOT_SENT in the thread with the exact would-have-sent text and the provider error.
+  Check calls use deterministic per-slot, per-channel ids `auto:cc:<loadCarrierId>:<slot>:<SMS|EMAIL>` (a NOT_SENT attempt
+  still occupies its slot, so no retry spam); a channel held by quiet hours sends later in the same slot or is dropped
+  when the slot ends. Auto POD skips any leg+channel that already has a POD request (manual or auto).
+- **Real bugs found and fixed:** inbound mail replies would have failed to authorize against `tmsTrackingActions` (system
+  caller path added with a regression test); a half-filled quiet-hours layer crashed the customer profile
+  (`quiet.channels.includes`, fixed + regression test); the V harness's SDK fixtures had written LoadCarrier rows without
+  `createdBy/updatedBy`, which made AppSync null the whole `listLoadCarriers` page and emptied the Shipments/Tracking boards
+  for everyone on dev until cleaned (fixtures fixed, cleanup verified: 0 such rows).
+- **Verification on deployed dev:** `devVerifyV` (new): **32 PASS / 2 FAIL**, both the same cosmetic unstyled-class finding
+  below. `devVerifyP` **48/48**. Screenshots: `Docs/tms-build/screenshots/review/V-*.png` (Tracking by assignee light/dark,
+  my loads, row menu, shipment Tracker card, customer Default tracker, Settings > Automation defaults/divisions light+dark,
+  phone tracking).
+- **Decisions for Ryne (defaults taken, see V-plan section 11):** assignee is a user profile (not a team); who may assign =
+  anyone with TMS access; automation master switches default off; quiet-hours timezone and template placeholders as in the
+  plan; the Tracker column and "unassigned" badge wording.
+
+## 2026-11-03 — Step U deployed on dev (two shipment lists, Academy/Workflows hidden, division intake e-mail, Intake tabs + review)
+
+**Committed and deployed on dev (same jobs 136-138). Dev only.** Plan: `Docs/tms-build/U-plan.md` (16 decisions, defaults taken).
+- **U1 Shipments:** exactly two lists, **Active** (not yet released to invoicing: `Order.readyToInvoiceAt`, `invoiceId` set, or
+  `arStatus` not DOCS_NEEDED/empty means released) and **All**; segmented header Active | All | Intake. Removed: all saved
+  views and queues, Dispatch/Documents workstations and boards, My/Team queue, Views group, Shipment views settings page,
+  the Brokerage/Car shipping/Owner operators/Box trucks/Local drivers boards. Kept: column customization, type-ahead filters,
+  batch actions, duplicate, the Statuses checkbox facet (a filter with counts, not a view; **say if you want it gone**),
+  Tracking and Manage Customer Links, and all shipment detail tabs. Old URLs redirect (`/tms/shipments/view/*`,
+  `/tms/dispatch`, `/tms/documents*`, `/tms/academy*`). Canceled shows in All only; voided stays out of both unless the
+  Statuses facet asks for it.
+- **U2 Academy and Workflows:** Academy fully removed from nav, routes and the header help icon (files and `ASK_ACADEMY`
+  backend left in the tree, unreferenced; Ask-assistant lived under Academy). Workflows: nav item removed; `/tms/workflows`
+  and `/tms/workflows/runs/:id` still resolve by URL because shipment AI-agent tabs, quote cards, notifications and Platform
+  health link to them; My Brokerage > AI Agents stays (spend cap and memory). Nothing deleted, data and Lambdas untouched.
+- **U3 Division intake e-mail:** `OwnershipDivision.intakeEmail`, required on create and on every edit-save of an active
+  division (empty/invalid/reserved/duplicate refused client-side and server-side); picker suggestions
+  (`tenders@bcatcorp.com`, `ai4bcat+tenders-<code>@gmail.com`) plus free typing. Divisions that existed before show an orange
+  "No intake e-mail" badge until set. **Action for Ryne/ops: set an intake address on each existing division on dev.**
+- **U4 Intake tabs:** Shipments > Intake has a tab per active division (+ Unrouted for mail to an address no division owns)
+  listing `IntakeLoad` records built from tender e-mails by the existing tender/parse pipeline: completeness count, which
+  fields were auto-filled (parser / rate-con / model / directory) versus missing or low-confidence, and the source e-mail.
+  An intake load is a separate additive record, so no PRO is burned until Move to active.
+- **U5 Review step:** reviewer opens an intake load, checks/corrects every field (Confirm all, revert to e-mail), and
+  **Move to active** creates the shipment as `TENDER_PENDING` (it appears in Active; Accept/Reject plus the credit check stay the next
+  deliberate click), audited with who/when and which fields were corrected. Blocked until the required fields are valid.
+  Idempotent resume if a failure happens mid-promotion (no second shipment/PRO). New page grant `intakeReview`
+  (`page-intakeReview`) on the Users page; owner/ADMIN always allowed; page-tms alone can view but not review.
+- **Demo:** step P5 is now "Tender to an intake load" (opens the seeded intake load); seed version p8.3.
+- **Verification on deployed dev:** `devVerifyU` (new): **44 PASS / 0 FAIL / 1 allowed skip**: removed routes are gone or
+  redirect, division dialog refusals, intake ingest of seeded ZZ tender e-mails through the real staging path, review, Move to
+  active (shipment appears in Active), permission matrix, light + dark + phone. Cleanup re-scan: 0 IntakeLoad,
+  OwnershipDivision, AuditLog residue; shipments created are voided. Screenshots: `screenshots/review/U-*.png` (Active, All,
+  Intake tabs light/dark, review, review needs-list, division dialog error + filled, divisions badge, Active after move).
+- **Real bug found and fixed:** the demo scan on `IntakeLoad` was missing from the `tmsShipmentActions` IAM grant (mocked tests
+  cannot see IAM); fixed in `backend.ts` (job 137), after which the demo seeds again.
+- **IMPORTANT, intake mail is not live on dev (and I could not make it live):** SES inbound is not used anywhere in this repo.
+  Tender e-mail reaches the pipeline through the existing Google Apps Script Gmail bridge, `scripts/agentEmailBridge.gs`.
+  It was changed (recipient addresses, an `intakeAddresses` lookup, tests) but **a person must redeploy it in Ryne's Google
+  account** for division routing to work; until then intake is exercised on dev through the same staging path with seeded e-mails.
+  Also note: the `INTAKE_WEBHOOK_SECRET` the bridge/ingest uses is an **app-shared** Amplify parameter
+  (`/amplify/shared/<app>/INTAKE_WEBHOOK_SECRET`), i.e. production's agent resolves the same value. Not printed or copied.
+- **Decisions for Ryne (U-plan section 13; defaults taken):** D-U1 separate IntakeLoad record; D-U2 Workflows URL kept; D-U3
+  definition of "released to invoicing"; D-U4 canceled in All only; D-U5 every active division needs an address; D-U6 Move to
+  active lands `TENDER_PENDING`; D-U7 page grant not a new role; D-U8 unrouted mail staged under Unrouted; D-U9 Statuses facet
+  kept; D-U10 mailbox picker = suggestions + typing (no mailbox settings table).
+
+## 2026-11-03 — Step S4 deployed on dev (six added features), re-verified after the U/V deploys
+
+**Committed and deployed on dev (job 135, `ba7c536`; fixes in jobs 136-138). Dev only. No schema change in S4.** Plan: `S4-plan.md`.
+Compliance > Document overview (`/compliance`: approve/reject, expiring-soon queue, MCP sync heartbeat), User management overview
+with New registrations (blocked sign-ups are now logged by the driver pre-sign-up gate; its refusal message/success path
+byte-identical), Financial operations (`/financial-operations`), Expenses overview (`/expenses`), Platform health
+(`/platform-health`, admin only, dev banner, NEUTERED_ON_DEV not counted as failing), and the Notifications bell + drawer.
+Kit additions: TmsPeriodToggle, TmsGauge, TmsPillBarChart, TmsDocumentFrame. Real defects found by `devVerifyS4` and fixed:
+`/tms` routes never loaded the driver/equipment reference data (driver names showed as ids; expiring driver documents were
+missing from the bell), notification rows had no CSS, sr-only chart tables stretched the page, and the page-actions row
+overflowed phones (693px > 390px on `/dashboard` and the bell drawer; fixed once for every page head). Verified on deployed dev:
+`devVerifyS4` **58 PASS / 0 FAIL**; `devVerifyS3` **155 PASS** (the single FAIL, D13 Hours tab, was a harness timing race:
+it passes 3/3 once the check waits for the driver profile); `devVerifyS2` **200 PASS / 0 FAIL / 18 skips** (states with no data on
+dev: invoice, bill, workflow run; plus harness triggers 14a-send and the P3/P4 token mints). Screenshots: `review/S4-*.png`.
+
+### Deferred cosmetic items (not functional; not blocking)
+- `.tms-thread-to` had no CSS rule (found by devVerifyV): rule added locally in `styles/conversation.css`, **committed locally
+  and not pushed so far** (no doc/cosmetic-only deploys); it ships with the next code deploy.
+- Settings > Tracking automation shows a template problem both inline in the editor and in the card-level error list.
+- Intake division tab strip clips the last tab at narrow widths (no scroll affordance); Tracking table's right-hand columns
+  need horizontal scroll below ~1700 px.
+- `devVerifyV` prints "TmsSettings ... NOT confirmed restored" at cleanup although the dev settings row is verified clean
+  (`trackingAutomation` unset): the harness comparison is too strict.
+- Customer deep link `/tms/customers?customer=<id>` now opens the profile (was dead); the harness still opens it by search.
+- Open follow-ups from the V engine: a manual REQUEST_POD followed by auto POD is deduped; a partially quiet tick drops that
+  slot's quiet channel (documented in V-plan risks).
+
 ## 2026-11-03 — PLAN: the two dev-only tests after S4 (big import, then full demo shipment); main is Ryne's call afterwards
 
 Everything stays on dev. No main merge or merge-to-main prep is planned or done. Order: (1) big data import on dev,

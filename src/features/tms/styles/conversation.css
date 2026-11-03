@@ -82,6 +82,7 @@
 
 .tms-shell .tms-thread-party { font-weight: 500; color: var(--tms-text-2); }
 .tms-shell .tms-thread-time { margin-left: 0; }
+.tms-shell .tms-thread-to { color: var(--tms-muted); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .tms-shell .tms-thread-subject { font-weight: 600; margin: 0 0 4px; }
 .tms-shell .tms-thread-body { margin: 0; white-space: pre-wrap; word-break: break-word; }
