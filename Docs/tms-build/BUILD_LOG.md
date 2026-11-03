@@ -1,5 +1,38 @@
 # TMS build log
 
+## 2026-11-02 — Step DEMO-WALK fixes deployed on dev
+
+**Committed and deployed on dev.** Click-by-click polish on the customer-facing demo flow.
+
+- Commits: `d6c4ee3` (DEMO-WALK tracking + inbox + customer-link polish), `9f41700` (remove stale `conversationIdRef`).
+- Amplify dev job `125` for `9f41700` **SUCCEEDED** at 2026-11-02 20:15:49 UTC-5.
+- `scripts/devVerifyP.mjs` run against the deployed dev stack: **48/48 PASS**
+  (P8-UI browser verification refreshed screenshots).
+- `npx vitest run amplify/functions/tms-shipment-actions/handler.test.ts amplify/functions/tms-tracking-actions/handler.test.ts`: **363/363 PASS**.
+- `npm run lint`: 0 errors, 3 pre-existing warnings.
+
+### What changed
+
+- Tracking board now defaults to **Motion** sort (Moving first) with a recent-ping tiebreaker,
+  so seeded in-transit shipments with pings surface at the top of the Active tab.
+- `useShipments` projects `lastKnownLat`/`lastKnownLng` onto the row; the Next Stop cell can
+  now render miles + ETA.
+- `TrackingLink` gained `shipmentNumber` and `customerName` snapshot fields; the backend
+  writes them when sending a customer link.
+- Manage Customer Links page displays the snapshot fields and hides verification-user test
+  artifacts (`zz-p-admin-*` / `tms-verify*`).
+- `RESET_DEMO_DATA` purges verification-created `TrackingLink` rows.
+- Inbox composer signs with the staff display name and sends `authorName` to the thread Lambda.
+- Seeded in-transit threads include a dispatcher email and a person-sent message so the
+  Agent vs Person badges are visible.
+- React Compiler lint cleanups in `InboxPanel`, `TrackingDetailPanel`, and `TrackingDetailMap`.
+
+### Next
+
+Continue the walk through tender → cover → rate con → tracking → POD → release, then begin
+Step S1 (redesign tokens + kit + shell + company dashboard) and **stop before S2** for
+Ryne's screenshot review.
+
 ## 2026-10-30 — devVerifyP stability fixes deployed on dev
 
 **Committed and deployed on dev.** Follow-up to the Step P verification harness.
