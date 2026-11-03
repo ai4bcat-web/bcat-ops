@@ -756,6 +756,8 @@ export async function seedDemoData(deps: DemoDeps, input: Row, caller: Caller): 
         postedAt: now,
         postedBy: caller.email,
         offerCount: 3,
+        createdAt: now,
+        updatedAt: now,
         createdBy: caller.email,
         updatedBy: caller.email,
         version: 1,
@@ -772,6 +774,8 @@ export async function seedDemoData(deps: DemoDeps, input: Row, caller: Caller): 
         postedAt: now,
         postedBy: caller.email,
         offerCount: 0,
+        createdAt: now,
+        updatedAt: now,
         createdBy: caller.email,
         updatedBy: caller.email,
         version: 1,
@@ -1364,6 +1368,8 @@ function makeOffer(
     offerSource: 'EMAIL',
     offerContactName: 'Dispatcher',
     offerAvailableAt: now,
+    createdAt: now,
+    updatedAt: now,
     createdBy: caller.email,
     updatedBy: caller.email,
     version: 1,
@@ -1456,7 +1462,10 @@ function makeCheckCall(
     state: opts.state ?? null,
     lat: opts.lat ?? null,
     lng: opts.lng ?? null,
+    createdAt: deps.now(),
+    updatedAt: deps.now(),
     createdBy: caller.email,
+    updatedBy: caller.email,
   }
 }
 
