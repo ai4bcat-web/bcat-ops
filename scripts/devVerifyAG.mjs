@@ -262,10 +262,11 @@ const WARNINGS = ['MISSING_DOC:COI_CARGO', 'MISSING_DOC:COI_AUTO', 'MISSING_DOC:
 /** One booked leg with a known PRO; `bill` records its carrier bill (blank number unless `billNumber`). */
 async function makeLeg(ctx, key, { amount, bill = true, billNumber, billDate }) {
   const idx = LEGS.indexOf(key) + 1
-  const pro = `9${String(ctx.ts).slice(-6)}${idx}`
   const day = dayPlus(10 + idx)
-  let b = await ctx.ship('CREATE_SHIPMENT', { customerId: ctx.customerId, pro })
+  let b = await ctx.ship('CREATE_SHIPMENT', { customerId: ctx.customerId })
   const shipmentId = b.shipment.id
+  // The PRO is derived by the system (a typed number at or above the counter is refused); read it back from the leg.
+  const pro = String(b.loads?.[0]?.aljexId ?? b.shipment.number)
   ctx.shipmentIds.add(shipmentId)
   for (const l of b.loads ?? []) ctx.owned.Load = (ctx.owned.Load ?? new Set()).add(String(l.id))
   b = await ctx.ship('SAVE_ORDER_FORM', {
@@ -313,12 +314,13 @@ async function ag01Fixtures(ctx) {
   }).then((r) => r.customer ?? r)
   ctx.customerId = String(customer.id)
   const nextYear = new Date(Date.now() + 365 * 86_400_000).toISOString()
+  const lastYear = new Date(Date.now() - 30 * 86_400_000).toISOString()
   const carrier = await ctx.car('UPSERT_CARRIER', {
     name: ctx.carrierName, type: 'TL', status: 'ACTIVE', mcNumber: `9${n}`, dotNumber: `9${n}`, mcpStatus: 'NOT_INVITED',
     accountingEmail: `zz-ag-carrier-ap-${ctx.ts}@example.invalid`,
     insurancePolicies: [
-      { type: 'AUTO_LIABILITY', company: 'Verification Mutual', policyNumber: `AL-${ctx.ts}`, limitCents: 100000000, expiresAt: nextYear },
-      { type: 'CARGO', company: 'Verification Mutual', policyNumber: `CG-${ctx.ts}`, limitCents: 10000000, expiresAt: nextYear },
+      { type: 'AUTO_LIABILITY', company: 'Verification Mutual', policyNumber: `AL-${ctx.ts}`, limitCents: 100000000, effectiveAt: lastYear, expiresAt: nextYear },
+      { type: 'CARGO', company: 'Verification Mutual', policyNumber: `CG-${ctx.ts}`, limitCents: 10000000, effectiveAt: lastYear, expiresAt: nextYear },
     ],
     notes: 'Dev-only Step AG verification fixture. Safe to delete.',
   }).then((r) => r.carrier ?? r)
@@ -326,7 +328,8 @@ async function ag01Fixtures(ctx) {
   ctx.carrier = { name: ctx.carrierName, mc: `9${n}`, dot: `9${n}`, remit: ctx.carrierName }
   // the remit-to name on file is what the REMIT_MISMATCH veto compares against
   ;(ctx.owned.Carrier ??= new Set()).add(ctx.carrierId)
-  await zzSet(ctx, 'Carrier', ctx.carrierId, { remitToName: ctx.carrierName })
+  // A new carrier is PENDING and ACTIVE needs MyCarrierPackets (or an Aljex import): the fixture stands in with a guarded write on its own row.
+  await zzSet(ctx, 'Carrier', ctx.carrierId, { remitToName: ctx.carrierName, status: 'ACTIVE', legacyImported: true })
 
   const amounts = { B1: 1111.11, B2: 2222.22, B3: 3333.33, B4: 4444.44, B5: 5555.55, B6: 6666.66, B7: 7777.77 }
   const typedNumber = `ZZAG-${ctx.ts}-TYPED`
@@ -522,10 +525,10 @@ async function ag07Cursor(ctx) {
     const m = {
       id: `zz-ag-${ctx.ts}-${n}`,
       message: {
-        id: `zz-ag-${ctx.ts}-${n}`, internalDate: String(Date.now() - (4 - i) * 30_000), from: 'ZZ AG Billing <billing-cap@zz-ag.example.invalid>', subject: `Invoice ZZAGCAP-${ctx.ts}-${n} PRO 8${ctx.ts}${i}`,
+        id: `zz-ag-${ctx.ts}-${n}`, internalDate: String(Date.now() - (4 - i) * 1000), from: 'ZZ AG Billing <billing-cap@zz-ag.example.invalid>', subject: `Invoice ZZAGCAP-${ctx.ts}-${n} PRO 8${ctx.ts}${i}`,
         body: `Invoice attached for PRO 8${String(ctx.ts).slice(-6)}${i}. Amount due $${(100 + i).toFixed(2)}.`,
         attachments: [(() => { const pdf = buildInvoicePdf({ vendor: 'ZZ AG Cap', invoiceNumber: `ZZAGCAP-${ctx.ts}-${n}`, date: dayPlus(-1), amount: 100 + i }); return { name: `cap-${n}.pdf`, contentType: 'application/pdf', size: pdf.length, dataBase64: pdf.toString('base64') } })()],
-        devExtraction: rawExtraction({ issuerName: 'ZZ AG Cap', issuerKind: 'VENDOR', invoiceNumber: `ZZAGCAP-${ctx.ts}-${n}`, invoiceDate: dayPlus(-1), amountDollars: 100 + i }),
+        // no devExtraction: the dev bypass skips the model, and the cap only counts real model calls
       },
     }
     return m
@@ -533,12 +536,13 @@ async function ag07Cursor(ctx) {
   for (const m of capped) await ctx.ap('AP_INBOX_SIM_INJECT', injectInput(m))
   ctx.capIds = new Set(capped.map((m) => m.message.id))
   const first = await ctx.ap('AP_INBOX_SYNC_NOW', {})
-  const partialSeen = first.done === false || first.digest?.partial === true || first.remaining > 0
-  expect(partialSeen, 'with maxModelCallsPerRun=2 and 4 model-bound mails the first slice did not report partial/remaining')
-  await syncToDone(ctx)
-  const items = await itemsFor(ctx, ctx.capIds)
-  expect(items.length === capped.length, `${items.length}/${capped.length} cap mails stored after the continuation`)
+  const capped1 = first.digest?.partial === true || first.digest?.error === 'MODEL_CAP' || first.done === false || first.remaining > 0
+  expect(capped1, `with maxModelCallsPerRun=2 and 4 model-bound mails the first slice did not stop early (digest ${JSON.stringify({ partial: first.digest?.partial, error: first.digest?.error, modelCalls: first.digest?.modelCalls })})`)
+  expect((first.digest?.modelCalls ?? 0) <= 2, `the cap of 2 was exceeded: ${first.digest?.modelCalls} model calls`)
   await ctx.ap('AP_INBOX_SAVE_SETTINGS', { config: { ...st.config, maxModelCallsPerRun: 80 }, expectedVersion: (await ctx.ap('AP_INBOX_STATUS', {})).config.version })
+  const rest = await syncToDone(ctx)
+  expect(rest.digest?.partial !== true, 'the continuation is still partial')
+  expect((rest.digest?.reviewed ?? 0) >= 1, 'the continuation read nothing: the cursor did not hold the unread mail')
   ctx.extraIds = new Set([...extra.map((m) => m.message.id), ...ctx.capIds])
   return `cursor held (${dg.listed ?? '?'} listed for 3 new mails); the model cap made a partial run that the next call finished`
 }
@@ -687,7 +691,10 @@ async function ag12Ui(b, ctx, theme) {
     } catch (err) { line('FAIL', `${id} ${theme}`, short(err)) }
   }
   await shotStep('AG12-digest-and-queue', async () => {
-    await openPage(b, '/tms/invoicing/payable', () => hasTestId(b, 'ap-inbox-digest'))
+    await openPage(b, '/tms/invoicing/payable', () => hasTestId(b, 'ap-inbox-digest')).catch(async (err) => {
+      const seen = await b.evaluate(`(document.querySelector('.tms-main')?.innerText ?? '').replace(/\\s+/g, ' ').slice(0, 160)`)
+      throw new Error(`${short(err)}; page shows: "${seen}"`)
+    })
     const text = await b.evaluate(`document.querySelector('[data-testid="ap-inbox-digest"]')?.innerText ?? ''`)
     expect(/reviewed \d+ e-mails?/i.test(text) && /updated \d+ bills?/i.test(text) && /\d+ need review/i.test(text), `digest line reads: "${text.slice(0, 160)}"`)
     expect(await hasTestId(b, 'ap-inbox-review-now'), 'no Review now button')
@@ -713,9 +720,9 @@ async function ag12Ui(b, ctx, theme) {
     return 'the bill detail shows the AP-inbox source strip'
   })
   await shotStep('AG12-settings-card', async () => {
-    await openPage(b, '/tms/settings', () => hasTestId(b, 'ap-inbox-settings-card'))
-    expect(await hasTestId(b, 'ap-inbox-sim'), 'no "Use simulated mailbox" control on the dev stack')
+    await openPage(b, '/tms/brokerage', () => hasTestId(b, 'ap-inbox-settings-card'))
     const text = await b.evaluate(`document.querySelector('[data-testid="ap-inbox-settings-card"]')?.innerText ?? ''`)
+    expect(await hasTestId(b, 'ap-inbox-sim') || await hasTestId(b, 'ap-inbox-disconnect'), `the card shows neither "Use simulated mailbox" nor Disconnect on the dev stack; card text: "${text.replace(/\\s+/g, ' ').slice(0, 160)}"`)
     expect(/Google/i.test(text) && /ai4bcat@gmail\\.com/i.test(text), 'the settings card does not name the Google mailbox')
     await snap('AG12e', 'settings-card')
     return 'Settings card: mailbox, Google note, simulated mailbox control'

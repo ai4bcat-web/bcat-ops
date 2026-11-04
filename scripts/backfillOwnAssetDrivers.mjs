@@ -23,7 +23,8 @@
  *
  * Dry run is the default and writes NOTHING to AWS. `--plan` saves the plan, `--apply
  * --plan` replays it after checking the source rows have not moved. The environment is
- * read off the table suffix; the production suffix is refused before a single read.
+ * read off the table suffix; the production suffix is refused before a single read
+ * unless the run goes through the shared gate (`--target prod`, scripts/lib/prodGate.mjs).
  *
  *   node scripts/backfillOwnAssetDrivers.mjs --help
  *   node scripts/backfillOwnAssetDrivers.mjs --plan plans/w-own-asset-drivers.json --csv gaps.csv
@@ -38,6 +39,8 @@ import { DynamoDBDocumentClient, ScanCommand, PutCommand, UpdateCommand, Transac
 import { parseTmsArgs } from './lib/tmsConfig.mjs';
 import { createPlan, loadPlan, savePlan, validatePlan, summarize, stableId } from './lib/tmsPlan.mjs';
 import { getStops } from './lib/tmsStops.mjs';
+import { PROD_GATE_OPTIONS, PROD_GATE_USAGE, requireProd, assertWritableSuffix } from './lib/prodGate.mjs';
+import { PROD_WRITE_SETS } from './lib/prodWriteSets.mjs';
 
 export const REGION_DEFAULT = 'us-east-1';
 /** The dev stack. Every write this script makes lands here unless --suffix says otherwise. */
@@ -57,7 +60,7 @@ Usage: node scripts/backfillOwnAssetDrivers.mjs [options]
 Options:
   --help, -h          Show this offline help.
   --suffix <s>        DynamoDB table suffix (default ${DEV_TABLE_SUFFIX});
-                      the production suffix is refused.
+                      the production suffix is refused (production only via --target prod).
   --region <r>        AWS region (default ${REGION_DEFAULT}).
   --plan <path>       (dry-run) write the plan file; (apply) read it back.
   --apply             Apply the reviewed plan.
@@ -74,6 +77,8 @@ inactive drivers. Voided/canceled loads are skipped; relays and brokered loads t
 a driver are counted for information.
 
 Dry run reads the tables and writes nothing to AWS.
+
+${PROD_GATE_USAGE}
 `;
 
 /**
@@ -86,7 +91,7 @@ export function resolveTarget(value) {
   if (suffix.includes(PRODUCTION_SUFFIX_FRAGMENT)) {
     throw new Error(
       `Refusing to run against production tables (${suffix}): this backfill writes ` +
-        'LoadCarrier rows and Load.activeLoadCarrierId, and Step W is a dev-only build. ' +
+        'LoadCarrier rows and Load.activeLoadCarrierId, and Step W is a dev-only build without --target prod. ' +
         `Point it at the dev suffix (${DEV_TABLE_SUFFIX}).`
     );
   }
@@ -452,6 +457,7 @@ const isConditionFailure = (err) =>
  * @param {string} input.suffix
  */
 export async function applyOwnAssetDriversPlan({ doc, plan, suffix }) {
+  assertWritableSuffix(suffix, 'LoadCarrier legs and Load pointers');
   const legTable = `LoadCarrier-${suffix}`;
   const loadTable = `Load-${suffix}`;
   const auditTable = `AuditLog-${suffix}`;
@@ -541,13 +547,16 @@ async function main() {
     region: { type: 'string' },
     csv: { type: 'string' },
     'only-load': { type: 'string', multiple: true },
+    ...PROD_GATE_OPTIONS,
   });
   if (args.values.help) {
     console.log(USAGE);
     process.exit(0);
   }
 
-  const { suffix, environment } = resolveTarget(args.values.suffix);
+  const prod = await requireProd({ script: 'backfillOwnAssetDrivers', values: args.values, tables: PROD_WRITE_SETS.backfillOwnAssetDrivers.models });
+  const { suffix, environment } = prod ?? resolveTarget(args.values.suffix);
+  const apply = prod ? prod.apply : args.values.apply;
   const region = args.values.region ?? REGION_DEFAULT;
   const doc = DynamoDBDocumentClient.from(new DynamoDBClient({ region }), {
     marshallOptions: { removeUndefinedValues: true },
@@ -555,7 +564,7 @@ async function main() {
 
   const source = scopeSource(await readSource(doc, suffix), args.values['only-load']);
 
-  if (!args.values.apply) {
+  if (!apply) {
     const plan = buildOwnAssetDriversPlan({ source, environment, suffix });
     console.log(reviewText(plan));
     if (args.values.csv) {

@@ -38,11 +38,20 @@ export function isApInboxAction(action: string): action is ApInboxAction {
   return Object.prototype.hasOwnProperty.call(AP_INBOX_ACTIONS, action)
 }
 
-export function authorize(action: ApInboxAction, identity: AppSyncIdentity | null | undefined, devStack: boolean): ApCaller {
+/** Resolves a Cognito username (an access token carries no e-mail claim) to its e-mail; '' when unknown. */
+export type EmailResolver = (username: string) => Promise<string>
+
+export async function authorize(
+  action: ApInboxAction,
+  identity: AppSyncIdentity | null | undefined,
+  devStack: boolean,
+  resolveEmail?: EmailResolver,
+): Promise<ApCaller> {
   if (!identity) throw new Error('Unauthorized: missing identity')
-  const candidates = [claimString(identity.claims, 'email'), identity.username]
-  const email = (candidates.find((v): v is string => typeof v === 'string' && v.includes('@')) ?? '').toLowerCase().trim()
+  const candidates = [claimString(identity.claims, 'email'), identity.username, claimString(identity.claims, 'cognito:username')]
+  let email = (candidates.find((v): v is string => typeof v === 'string' && v.includes('@')) ?? '').toLowerCase().trim()
   const userId = identity.username ?? claimString(identity.claims, 'cognito:username') ?? identity.sub ?? ''
+  if (!email && userId && resolveEmail) email = (await resolveEmail(userId).catch(() => '')).toLowerCase().trim()
   if (!email || !userId) throw new Error('Unauthorized: could not resolve caller')
   const groups = groupsOf(identity)
   const isAdmin = email === OWNER_EMAIL || groups.includes(ADMIN_GROUP)

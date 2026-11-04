@@ -8,6 +8,7 @@
  * Audit rows carry ids and counts, never message text.
  */
 import { randomUUID } from 'node:crypto'
+import { AdminGetUserCommand, CognitoIdentityProviderClient } from '@aws-sdk/client-cognito-identity-provider'
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
 import { DynamoDBDocumentClient, GetCommand, PutCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb'
 import { planCrmBackfill, type BackfillCustomer } from '../../../src/lib/crm/backfill'
@@ -107,7 +108,19 @@ function groupsOf(identity: AppSyncIdentity): string[] {
   return []
 }
 
-export async function authorize(identity: AppSyncIdentity | null | undefined, db: Db = defaultDb): Promise<Caller> {
+let cognito: CognitoIdentityProviderClient | undefined
+async function emailFromPool(username: string): Promise<string> {
+  const me = await (cognito ??= new CognitoIdentityProviderClient({})).send(
+    new AdminGetUserCommand({ UserPoolId: process.env.USER_POOL_ID ?? '', Username: username }),
+  )
+  return me.UserAttributes?.find((a) => a.Name === 'email')?.Value ?? ''
+}
+
+export async function authorize(
+  identity: AppSyncIdentity | null | undefined,
+  db: Db = defaultDb,
+  resolveFromPool: (username: string) => Promise<string> = emailFromPool,
+): Promise<Caller> {
   if (!identity) throw new Error('Unauthorized: missing identity')
   const id = identity.username ?? identity.sub ?? ''
   if (!id) throw new Error('Unauthorized: could not resolve caller id')
@@ -116,6 +129,7 @@ export async function authorize(identity: AppSyncIdentity | null | undefined, db
     const profile = await db.send(new GetCommand({ TableName: env('USER_PROFILE_TABLE_NAME'), Key: { id } }))
     email = String(profile.Item?.email ?? '').toLowerCase().trim()
   }
+  if (!email) email = (await resolveFromPool(id).catch(() => '')).toLowerCase().trim()
   if (!email) throw new Error('Unauthorized: could not resolve caller email')
   const groups = groupsOf(identity)
   const isAdmin = email === OWNER_EMAIL || groups.includes(ADMIN_GROUP)

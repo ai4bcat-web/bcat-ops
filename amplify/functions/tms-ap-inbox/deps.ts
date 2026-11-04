@@ -2,6 +2,7 @@
  * tms-ap-inbox — the real wiring: DynamoDB store, S3 objects, the Gmail / simulated mailbox, the
  * Anthropic model and the OAuth helpers. Tests build an `ApInboxDeps` from the memory store instead.
  */
+import { AdminGetUserCommand, CognitoIdentityProviderClient } from '@aws-sdk/client-cognito-identity-provider'
 import { DeleteObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { AP_INBOX_USER_ID } from '../../../src/lib/apInbox/constants'
 import { googlePort } from '../_shared/gmail/googlePort'
@@ -22,6 +23,8 @@ function parseOrigins(raw: string | undefined): string[] {
   }
   return []
 }
+
+let cognito: CognitoIdentityProviderClient | undefined
 
 export function createApInboxDeps(): ApInboxDeps {
   const s3 = new S3Client({})
@@ -59,6 +62,12 @@ export function createApInboxDeps(): ApInboxDeps {
     now: () => new Date(),
     devStack: IS_DEV_STACK,
     portalOrigins: parseOrigins(process.env.PORTAL_ORIGINS),
+    async resolveEmail(username) {
+      const me = await (cognito ??= new CognitoIdentityProviderClient({})).send(
+        new AdminGetUserCommand({ UserPoolId: process.env.USER_POOL_ID ?? '', Username: username }),
+      )
+      return me.UserAttributes?.find((a) => a.Name === 'email')?.Value ?? ''
+    },
     devExtraction: IS_DEV_STACK ? (id) => simDevExtraction(AP_INBOX_USER_ID, id) : undefined,
   }
 }

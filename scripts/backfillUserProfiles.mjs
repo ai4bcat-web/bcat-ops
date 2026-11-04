@@ -47,7 +47,12 @@
  * after checking the pool has not moved underneath it.
  *
  * The guard that matters is the TABLE SUFFIX, not a flag a human types: the
- * production suffix is refused before a single read.
+ * production suffix is refused before a single read. Production is reachable ONLY
+ * through the shared gate (`--target prod`, scripts/lib/prodGate.mjs); the user pool
+ * is then the one named by the `--outputs` file the operator passes (the repo-root
+ * amplify_outputs.json for a real run), and `--pool` / USER_POOL_ID are refused.
+ * Cognito is only ever READ (ListUsers, AdminListGroupsForUser); the writes are the
+ * UserProfile and AuditLog tables.
  *
  * Usage:
  *   node scripts/backfillUserProfiles.mjs --plan /tmp/profiles.json
@@ -61,7 +66,9 @@ import {
   AdminListGroupsForUserCommand,
   ListUsersCommand,
 } from '@aws-sdk/client-cognito-identity-provider';
-import { parseTmsArgs } from './lib/tmsConfig.mjs';
+import { parseTmsArgs, loadAmplifyOutputs } from './lib/tmsConfig.mjs';
+import { PROD_GATE_OPTIONS, PROD_GATE_USAGE, assertWritableSuffix, requireProd } from './lib/prodGate.mjs';
+import { PROD_WRITE_SETS } from './lib/prodWriteSets.mjs';
 import { createPlan, loadPlan, savePlan, validatePlan } from './lib/tmsPlan.mjs';
 
 export const REGION_DEFAULT = 'us-east-1';
@@ -82,12 +89,15 @@ const CLAIM_PREFIX = 'claim-';
 const USAGE = `Backfill UserProfile rows from the Cognito user pool (Step I).
 
   --suffix <s>      DynamoDB table suffix (default ${DEV_TABLE_SUFFIX});
-                    the production suffix is refused.
+                    the production suffix is refused without --target prod.
   --pool <id>       Cognito user pool (default ${DEV_USER_POOL_ID});
-                    the production pool is refused.
+                    the production pool is refused without --target prod.
+  --outputs <path>  --target prod only: amplify_outputs.json naming the user pool
+                    (repo-root file for production; --pool is refused there).
   --region <r>      AWS region (default ${REGION_DEFAULT}).
   --plan <path>     (dry-run) write the plan file; (apply) read it back.
   --apply           Apply the reviewed plan.
+${PROD_GATE_USAGE}
 
 Role is ADMIN for the ADMIN group and NONE for everybody else — no role is inferred
 from a page grant. Existing page grants are recorded as extraPages and left in place.`;
@@ -97,8 +107,8 @@ export function resolveTarget(value) {
   if (!suffix) throw new Error('--suffix <tableSuffix> cannot be empty');
   if (suffix.includes(PRODUCTION_SUFFIX_FRAGMENT)) {
     throw new Error(
-      `Refusing to run against production tables (${suffix}): Step I is a dev-only ` +
-        `build. Point it at the dev suffix (${DEV_TABLE_SUFFIX}).`
+      `Refusing to run against production tables (${suffix}): Production only via the ` +
+        `shared gate: --target prod. Otherwise point it at the dev suffix (${DEV_TABLE_SUFFIX}).`
     );
   }
   return { suffix, environment: suffix === DEV_TABLE_SUFFIX ? 'dev' : suffix };
@@ -113,6 +123,23 @@ export function resolvePool(value) {
     );
   }
   return pool;
+}
+
+/**
+ * The pool a `--target prod` run reads: the one in the outputs file the operator passed, which
+ * `loadAmplifyOutputs(path, prod)` already forced to be the production backend (real run) or
+ * anything but it (rehearsal seam). The rehearsal additionally may never name the production pool.
+ */
+export function poolFromOutputs(outputs, prod, flagPool) {
+  if (flagPool !== undefined || process.env.USER_POOL_ID) {
+    throw new Error('--target prod takes the user pool from --outputs; --pool and USER_POOL_ID are not accepted');
+  }
+  const pool = outputs?.auth?.user_pool_id;
+  if (typeof pool !== 'string' || !pool.trim()) throw new Error('--outputs has no auth.user_pool_id');
+  if (prod.rehearsal && pool === PRODUCTION_USER_POOL_ID) {
+    throw new Error(`Refusing the rehearsal seam against the production user pool (${pool})`);
+  }
+  return pool.trim();
 }
 
 /** PENDING, ACTIVE or INACTIVE — the reading the Users page has always shown. */
@@ -303,9 +330,7 @@ async function writeAudit(doc, table, entityId, action, changes) {
 }
 
 export async function applyUserProfilePlan({ doc, plan, suffix }) {
-  if (suffix.includes(PRODUCTION_SUFFIX_FRAGMENT)) {
-    throw new Error(`Refusing to write UserProfile rows to production tables (${suffix})`);
-  }
+  assertWritableSuffix(suffix, 'UserProfile rows');
   const profileTable = `UserProfile-${suffix}`;
   const auditTable = `AuditLog-${suffix}`;
   const report = { written: 0, alreadyPresent: 0, failures: [] };
@@ -347,14 +372,19 @@ async function main() {
     suffix: { type: 'string' },
     region: { type: 'string' },
     pool: { type: 'string' },
+    ...PROD_GATE_OPTIONS,
   });
   if (args.values.help) {
     console.log(USAGE);
     process.exit(0);
   }
 
-  const { suffix, environment } = resolveTarget(args.values.suffix);
-  const pool = resolvePool(args.values.pool);
+  const prod = await requireProd({ script: 'backfillUserProfiles', values: args.values, tables: PROD_WRITE_SETS.backfillUserProfiles.models });
+  const { suffix, environment } = prod ?? resolveTarget(args.values.suffix);
+  const apply = prod ? prod.apply : args.values.apply;
+  const pool = prod
+    ? poolFromOutputs(loadAmplifyOutputs(args.values.outputs, prod), prod, args.values.pool)
+    : resolvePool(args.values.pool);
   const region = args.values.region ?? REGION_DEFAULT;
   const doc = DynamoDBDocumentClient.from(new DynamoDBClient({ region }), {
     marshallOptions: { removeUndefinedValues: true },
@@ -363,7 +393,7 @@ async function main() {
 
   const source = await readSource(doc, cognito, suffix, pool);
 
-  if (!args.values.apply) {
+  if (!apply) {
     const plan = buildUserProfilePlan({ source, environment, suffix, pool });
     console.log(reviewText(plan));
     if (args.values.plan) {

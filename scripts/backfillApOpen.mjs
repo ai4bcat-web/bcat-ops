@@ -52,7 +52,8 @@
  *
  * The guard that matters is the TABLE SUFFIX, not a flag a human types: this script
  * talks to DynamoDB directly, so the environment is read off the tables it was
- * pointed at and the production suffix is refused before a single read.
+ * pointed at and the production suffix is refused before a single read. Production
+ * is reachable only through the shared gate (`--target prod`, scripts/lib/prodGate.mjs).
  *
  *   node scripts/backfillApOpen.mjs --help
  *   node scripts/backfillApOpen.mjs --plan plans/g-ap-open.json
@@ -65,6 +66,8 @@ import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, ScanCommand, PutCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { parseTmsArgs } from './lib/tmsConfig.mjs';
 import { createPlan, loadPlan, savePlan, validatePlan, summarize } from './lib/tmsPlan.mjs';
+import { PROD_GATE_OPTIONS, PROD_GATE_USAGE, requireProd, assertWritableSuffix } from './lib/prodGate.mjs';
+import { PROD_WRITE_SETS } from './lib/prodWriteSets.mjs';
 
 export const REGION_DEFAULT = 'us-east-1';
 /** The dev stack. Every write this script makes lands here unless --suffix says otherwise. */
@@ -89,7 +92,7 @@ Usage: node scripts/backfillApOpen.mjs [options]
 Options:
   --help, -h        Show this offline help.
   --suffix <s>      DynamoDB table suffix (default ${DEV_TABLE_SUFFIX});
-                    the production suffix is refused.
+                    the production suffix is refused (production only via --target prod).
   --region <r>      AWS region (default ${REGION_DEFAULT}).
   --plan <path>     (dry-run) write the plan file; (apply) read it back.
   --apply           Apply the reviewed plan.
@@ -109,6 +112,8 @@ No CarrierBill rows are written: Aljex-era carrier pay was settled in Aljex.
 Dry run reads the table, prints what both passes would do, and writes nothing to AWS.
 Apply re-reads the same table, refuses a plan whose sources have changed, and then
 writes each update under a condition that makes a re-run free.
+
+${PROD_GATE_USAGE}
 `;
 
 /**
@@ -123,7 +128,7 @@ export function resolveTarget(value) {
     throw new Error(
       `Refusing to run against production tables (${suffix}): this backfill rewrites ` +
         'LoadCarrier.apStatus, LoadCarrier.apOpen and LoadCarrier.apStatusChangedAt, and ' +
-        `Step G is a dev-only build. Point it at the dev suffix (${DEV_TABLE_SUFFIX}).`
+        `Step G is a dev-only build without --target prod. Point it at the dev suffix (${DEV_TABLE_SUFFIX}).`
     );
   }
   return { suffix, environment: suffix === DEV_TABLE_SUFFIX ? 'dev' : suffix };
@@ -491,6 +496,7 @@ async function writeAudit(doc, table, entityId, action, changes) {
  * @param {string} input.suffix
  */
 export async function applyApOpenPlan({ doc, plan, suffix }) {
+  assertWritableSuffix(suffix, 'LoadCarrier AP markers');
   const legTable = `LoadCarrier-${suffix}`;
   const auditTable = `AuditLog-${suffix}`;
   const report = {
@@ -583,13 +589,15 @@ export async function applyApOpenPlan({ doc, plan, suffix }) {
 // ── CLI ──────────────────────────────────────────────────────────────────────
 
 async function main() {
-  const args = parseTmsArgs({ suffix: { type: 'string' }, region: { type: 'string' } });
+  const args = parseTmsArgs({ suffix: { type: 'string' }, region: { type: 'string' }, ...PROD_GATE_OPTIONS });
   if (args.values.help) {
     console.log(USAGE);
     process.exit(0);
   }
 
-  const { suffix, environment } = resolveTarget(args.values.suffix);
+  const prod = await requireProd({ script: 'backfillApOpen', values: args.values, tables: PROD_WRITE_SETS.backfillApOpen.models });
+  const { suffix, environment } = prod ?? resolveTarget(args.values.suffix);
+  const apply = prod ? prod.apply : args.values.apply;
   const region = args.values.region ?? REGION_DEFAULT;
   const doc = DynamoDBDocumentClient.from(new DynamoDBClient({ region }), {
     marshallOptions: { removeUndefinedValues: true },
@@ -597,7 +605,7 @@ async function main() {
 
   const source = await readSource(doc, suffix);
 
-  if (!args.values.apply) {
+  if (!apply) {
     const plan = buildApOpenPlan({ source, environment, suffix });
     console.log(reviewText(plan));
     if (args.values.plan) {

@@ -819,6 +819,8 @@ const RUNNERS = {
 
       // Stale tone: the own-asset leg's newest Motive row is 130 min old.
       await openDrawer(b, ctx.f.sOwn.shipment.id)
+      // The drawer paints the panel before the Motive read returns (60 s poll hook, first read async): wait for the fixes, then judge.
+      await b.poll(async () => (await mapFacts(b)).fixes === 8, 'the own-asset leg\'s 8 Motive fixes', 30_000).catch(() => {})
       const own = await mapFacts(b)
       expect(own.fixes === 8 && own.source === 'motive' && own.tone === 'stale', `own-asset drawer: ${own.fixes} fixes, source ${own.source}, tone ${own.tone}; expected 8 / motive / stale`)
       await shotClip(b, SHOT.stale, tid('tracking-map-panel'))

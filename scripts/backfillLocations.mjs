@@ -15,6 +15,8 @@
  *
  * Stop JSON is preserved in full: proofs, appointment workflow state, mirrors,
  * and legacy-derived pickup/delivery fields stay intact.
+ *
+ * Production only via `--target prod` (the shared gate in lib/prodGate.mjs).
  */
 
 import { dirname, resolve } from 'node:path';
@@ -38,6 +40,8 @@ import {
   validatePlan,
   summarize,
 } from './lib/tmsPlan.mjs';
+import { PROD_GATE_OPTIONS, PROD_GATE_USAGE, requireProd } from './lib/prodGate.mjs';
+import { PROD_WRITE_SETS } from './lib/prodWriteSets.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -46,7 +50,7 @@ Usage: node scripts/backfillLocations.mjs [options]
 
 Options:
   --help, -h        Show this offline help.
-  --outputs <path>  Required: path to amplify_outputs.json (repo-root production file refused).
+  --outputs <path>  Required: path to amplify_outputs.json (repo-root production file refused without --target prod).
   --plan <path>     (dry-run) write plan file; (apply) read plan file.
   --env <target>    Required with --apply: test / sandbox / local. Production blocked.
   --apply           Apply the reviewed plan.
@@ -54,6 +58,9 @@ Options:
 Dry-run writes a JSON plan of location matches and load stop updates.
 Apply validates the plan's fingerprint, environment, and endpoint, then executes
 via the generated updateLoad mutation with condition { updatedAt: { eq: ... } }.
+
+Production only through the shared gate (--outputs must then be the repo-root file; sign in with BCAT_EMAIL/BCAT_PASSWORD):
+${PROD_GATE_USAGE}
 `;
 
 /**
@@ -305,14 +312,15 @@ export async function applyLocationPlan({ client, planPath, env, endpoint }) {
 }
 
 async function main() {
-  const args = parseTmsArgs();
+  const args = parseTmsArgs(PROD_GATE_OPTIONS);
   if (args.values.help) {
     console.log(USAGE);
     process.exit(0);
   }
 
-  const { mode, env } = detectMode(args.values.apply, args.values.env);
-  const outputs = loadAmplifyOutputs(args.values.outputs);
+  const prod = await requireProd({ script: 'backfillLocations', values: args.values, tables: PROD_WRITE_SETS.backfillLocations.models });
+  const { mode, env } = detectMode(args.values.apply, args.values.env, prod);
+  const outputs = loadAmplifyOutputs(args.values.outputs, prod);
   const endpoint = outputs?.data?.url;
   if (!endpoint) {
     throw new Error('amplify_outputs.json missing data.url');

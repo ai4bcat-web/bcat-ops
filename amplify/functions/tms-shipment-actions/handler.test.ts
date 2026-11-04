@@ -2992,6 +2992,8 @@ describe('carrier booking', () => {
     })
     expect(String(message.cc)).toContain('ai4bcat+tracking@gmail.com')
     expect(String(message.body)).toMatch(/— Dispatch, BCAT Tracking/)
+    // SES rewrites Message-ID, so its own id is what a reply's In-Reply-To will name.
+    expect(message.providerRef).toBe('msg-1')
     expect(message.documentIds).toEqual(expect.arrayContaining([expect.any(String)]))
 
     const sesCall = sesSend.mock.calls[0][0] as { input: { Content: { Raw: { Data: Uint8Array } } } }

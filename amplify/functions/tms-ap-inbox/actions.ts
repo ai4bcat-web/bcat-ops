@@ -194,6 +194,6 @@ const HANDLERS: Record<ApInboxAction, Handler> = {
 
 export async function dispatch(action: string, rawInput: unknown, identity: AppSyncIdentity | null | undefined, deps: ApInboxDeps): Promise<unknown> {
   if (!isApInboxAction(action) || !AP_INBOX_ACTIONS[action]) throw new Error(`Unknown action: ${action}`)
-  const caller = authorize(action, identity, deps.devStack)
+  const caller = await authorize(action, identity, deps.devStack, deps.resolveEmail)
   return HANDLERS[action](deps, caller, inputOf(rawInput))
 }

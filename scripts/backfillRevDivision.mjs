@@ -56,12 +56,17 @@
  * it was computed from have not moved underneath it (the same fingerprint every other
  * TMS migration uses). A second plan after an applied one reports zero changes.
  *
- * Two guards, because this script talks to two things. The TABLE SUFFIX is checked
- * before a single read — the production suffix is refused outright — and the
- * `--outputs` file may not be the repo-root (production) `amplify_outputs.json`. The
- * identity it signs in with (`BCAT_EMAIL` / `BCAT_PASSWORD`, the same helper every TMS
- * migration uses) must be the owner or an ADMIN: both Lambda actions refuse anybody
- * else, and that refusal is the point.
+ * Guards, because this script talks to two things. The TABLE SUFFIX is checked
+ * before a single read — the production suffix is refused outright unless the run
+ * passed the shared production gate (`--target prod`, scripts/lib/prodGate.mjs) — and
+ * the `--outputs` file may not be the repo-root (production) `amplify_outputs.json`
+ * except under that gate. The identity it signs in with (`BCAT_EMAIL` / `BCAT_PASSWORD`,
+ * the same helper every TMS migration uses) must be the owner or an ADMIN: both Lambda
+ * actions refuse anybody else, and that refusal is the point.
+ *
+ * Production is reachable ONLY through the shared gate: `--target prod` (see PROD_GATE_USAGE),
+ * which then needs the repo-root amplify_outputs.json as `--outputs`. The two Lambdas
+ * write the stack the outputs file names, so the outputs file and the suffix must agree.
  *
  *   node scripts/backfillRevDivision.mjs --help
  *   node scripts/backfillRevDivision.mjs --outputs dev_outputs.json --plan plans/r-rev-division.json
@@ -75,6 +80,8 @@ import { DynamoDBDocumentClient, ScanCommand, PutCommand, UpdateCommand } from '
 import { createTmsClient } from './lib/tmsClient.mjs';
 import { authenticateTmsUser } from './lib/tmsAuth.mjs';
 import { parseTmsArgs, loadAmplifyOutputs } from './lib/tmsConfig.mjs';
+import { PROD_GATE_OPTIONS, PROD_GATE_USAGE, assertWritableSuffix, requireProd } from './lib/prodGate.mjs';
+import { PROD_WRITE_SETS } from './lib/prodWriteSets.mjs';
 import { createPlan, loadPlan, savePlan, validatePlan, summarize } from './lib/tmsPlan.mjs';
 
 export const REGION_DEFAULT = 'us-east-1';
@@ -96,13 +103,14 @@ Usage: node scripts/backfillRevDivision.mjs [options]
 Options:
   --help, -h        Show this offline help.
   --outputs <path>  Required: amplify_outputs.json for the DEV stack (the repo-root
-                    production file is refused). Sign-in uses BCAT_EMAIL / BCAT_PASSWORD
-                    and that identity must be the owner or an ADMIN.
+                    production file is refused, except with --target prod). Sign-in uses
+                    BCAT_EMAIL / BCAT_PASSWORD and that identity must be the owner or an ADMIN.
   --suffix <s>      DynamoDB table suffix (default ${DEV_TABLE_SUFFIX});
-                    the production suffix is refused.
+                    the production suffix is refused without --target prod.
   --region <r>      AWS region (default ${REGION_DEFAULT}).
   --plan <path>     (dry-run) write the plan file; (apply) read it back.
   --apply           Apply the reviewed plan.
+${PROD_GATE_USAGE}
 
 SEED:      ENSURE_OWNERSHIP_SEED (tmsDirectoryActions) writes the division, rule and
            view rows that are missing, and only those.
@@ -140,8 +148,8 @@ export function resolveTarget(value) {
   if (suffix.includes(PRODUCTION_SUFFIX_FRAGMENT)) {
     throw new Error(
       `Refusing to run against production tables (${suffix}): this backfill re-tags every ` +
-        'shipment and voids legacy soft deletes, and Step R is a dev-only build. Point it ' +
-        `at the dev suffix (${DEV_TABLE_SUFFIX}).`
+        'shipment and voids legacy soft deletes. Production only via the shared gate: ' +
+        `--target prod. Otherwise point it at the dev suffix (${DEV_TABLE_SUFFIX}).`
     );
   }
   return { suffix, environment: suffix === DEV_TABLE_SUFFIX ? 'dev' : suffix };
@@ -805,9 +813,7 @@ async function clearVoidedLoad(doc, table, load) {
 export async function applyRevDivisionPlan({ client, doc, plan, suffix }) {
   // The suffix was checked before the read; it is checked again here because this is
   // the function that writes, and it is exported for tests and for other callers.
-  if (suffix.includes(PRODUCTION_SUFFIX_FRAGMENT)) {
-    throw new Error(`Refusing to write shipments in production tables (${suffix})`);
-  }
+  assertWritableSuffix(suffix, 'shipments');
   const shipmentTable = `Shipment-${suffix}`;
   const loadTable = `Load-${suffix}`;
   const auditTable = `AuditLog-${suffix}`;
@@ -932,25 +938,27 @@ export async function finalCounts(doc, suffix) {
 // ── CLI ──────────────────────────────────────────────────────────────────────
 
 async function main() {
-  const args = parseTmsArgs({ suffix: { type: 'string' }, region: { type: 'string' } });
+  const args = parseTmsArgs({ suffix: { type: 'string' }, region: { type: 'string' }, ...PROD_GATE_OPTIONS });
   if (args.values.help) {
     console.log(USAGE);
     process.exit(0);
   }
 
-  const { suffix, environment } = resolveTarget(args.values.suffix);
+  const prod = await requireProd({ script: 'backfillRevDivision', values: args.values, tables: PROD_WRITE_SETS.backfillRevDivision.models });
+  const { suffix, environment } = prod ?? resolveTarget(args.values.suffix);
+  const apply = prod ? prod.apply : args.values.apply;
   const region = args.values.region ?? REGION_DEFAULT;
   const doc = DynamoDBDocumentClient.from(new DynamoDBClient({ region }), {
     marshallOptions: { removeUndefinedValues: true },
   });
 
-  const outputs = loadAmplifyOutputs(args.values.outputs);
+  const outputs = loadAmplifyOutputs(args.values.outputs, prod);
   const auth = await authenticateTmsUser(outputs);
   const client = createTmsClient({ endpoint: auth.endpoint, token: auth.token });
 
   const source = await readSource(doc, suffix);
 
-  if (!args.values.apply) {
+  if (!apply) {
     // The one Lambda call a dry run makes, and it writes nothing by contract.
     const retag = await client.tmsShipmentActions('RETAG_SHIPMENTS', { dryRun: true });
     const plan = buildRevDivisionPlan({ source, retag, environment, suffix });

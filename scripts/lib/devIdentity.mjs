@@ -13,6 +13,7 @@ import {
   AdminDeleteUserCommand,
   AdminGetUserCommand,
 } from '@aws-sdk/client-cognito-identity-provider'
+import { blockWhenReadOnly } from './readOnlyGuard.mjs'
 
 export const DEV_API = 'https://f5iqzdpidzalvjys7yxijn5ave.appsync-api.us-east-1.amazonaws.com/graphql'
 export const DEV_POOL = 'us-east-1_UKhMNVAG1'
@@ -31,7 +32,8 @@ export const outputs = {
   version: '1.3',
 }
 
-export const cognito = new CognitoIdentityProviderClient({ region })
+// A `--read-only` run never calls Cognito: every send() on this client throws (CUTOVER_PLAN NB-7).
+export const cognito = blockWhenReadOnly(new CognitoIdentityProviderClient({ region }))
 
 export async function gql(token, query, variables) {
   const res = await fetch(DEV_API, {

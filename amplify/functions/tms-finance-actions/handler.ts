@@ -12,6 +12,7 @@
  * .arPostingAdminOnly` is true, which it is by default. The setting is read per call
  * rather than cached, because the point of it is that it can be turned off.
  */
+import './tableEnv'
 import { parseInput, type Caller } from '../_shared/actionInputs'
 import {
   batchEmail,

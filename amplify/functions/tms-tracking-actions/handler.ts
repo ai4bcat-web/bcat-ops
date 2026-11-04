@@ -26,6 +26,7 @@
  * so a send that cannot happen returns `smsStatus: 'NOT_CONFIGURED'` /
  * `emailStatus: 'NOT_SENT'` together with the URL, and the operator copies it.
  */
+import './tableEnv'
 import { getAmplifyDataClientConfig, type DataClientEnv } from '@aws-amplify/backend-function/runtime'
 import { Amplify } from 'aws-amplify'
 import { generateClient } from 'aws-amplify/data'

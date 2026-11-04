@@ -1,8 +1,11 @@
 #!/usr/bin/env node
 /**
  * Offline Aljex import driver: the same engine the Lambda worker runs, from a laptop with AWS credentials.
- * DEV STACK ONLY (it refuses production table names). Real exports stay outside the repo; this script never
- * copies one into it and prints aggregates only (counts, sums, timings).
+ * Dev stack by default (the engine refuses production table names). PRODUCTION only through `--target prod:<liveTag>`
+ * behind the shared gate (scripts/lib/prodGate.mjs): env BCAT_ALLOW_PROD=<today YYYY-MM-DD>, --i-mean-production,
+ * fresh `prodpre-importAljex-` on-demand backups of the 17 written tables (scripts/prodBackup.mjs), a printed plan,
+ * a dry run unless --apply, and the typed confirmation <account id>:<table suffix> (prompt or --confirm-prod).
+ * Real exports stay outside the repo; this script never copies one into it and prints aggregates only.
  *
  *   node scripts/importAljex.mjs rehearsal-create --tag rh1103          # on-demand backup + restore to <Table>-<devSuffix>-rh1103
  *   node scripts/importAljex.mjs run --source <csv> --slice every:8 --target rehearsal:rh1103 [--synthetic] [--no-apply]
@@ -13,6 +16,14 @@
  *   node scripts/importAljex.mjs backup-create|backup-restore --tag rh1103
  *   node scripts/importAljex.mjs pitr-restore --table Shipment --time 2026-11-03T12:00:00Z --as Shipment-<devSuffix>-rhNNN
  *   node scripts/importAljex.mjs rollback --run <applyJobId> --target ... --i-understand-dev-only [--apply]   # dev-only delete rollback
+ *
+ * Production (plan = stage + plan, writes nothing; --apply writes):
+ *   BCAT_ALLOW_PROD=$(date +%F) node scripts/importAljex.mjs run --source <csv> --target prod:<liveTag> --i-mean-production [--apply]
+ *   ... resume --run <jobId> --target prod:<liveTag> --i-mean-production --apply
+ *   ... seed-counter --target prod:<liveTag> --i-mean-production [--apply] [--enable-numeric]
+ *   ... rollback --run <applyJobId> --target prod:<liveTag> --i-mean-production [--apply]
+ *   ... pitr-restore --table Shipment --time <iso> --as Shipment-<prodSuffix>-rhNNN --target prod --i-mean-production --apply
+ *   Test-only rehearsal seam: add --prod-mode-rehearsal-suffix=<dev suffix | dev suffix-rhTAG> to run the same gated path on dev tables.
  *   add --memory to any run against an in-memory table set (no AWS): smoke tests with a synthetic file.
  *
  * `--slice every:N` keeps data rows 1, N+1, 2N+1, ... (1-based, header excluded); the profiler's slice
@@ -23,6 +34,9 @@ import { createHash } from 'node:crypto'
 import { mkdirSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { splitProdArgs } from './lib/importAljexArgs.mjs'
+import { requireProd } from './lib/prodGate.mjs'
+import { PROD_WRITE_SETS } from './lib/prodWriteSets.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const root = resolve(here, '..')
@@ -55,6 +69,29 @@ async function bundle() {
   return outfile
 }
 
-const outfile = await bundle()
-const { main } = await import(pathToFileURL(outfile).href)
-process.exitCode = await main(process.argv.slice(2))
+/** Gate first: a refused production run never even builds the engine. */
+let split;
+let gate = null;
+try {
+  split = splitProdArgs(process.argv.slice(2))
+  if (split.prod) {
+    gate = await requireProd({
+      script: 'importAljex',
+      values: split.values,
+      tables: PROD_WRITE_SETS.importAljex.models,
+      readOnly: split.readOnly,
+    })
+    if (gate.rehearsal === false && split.synthetic) throw new Error('--synthetic is never allowed against production')
+  }
+} catch (err) {
+  console.error(err instanceof Error ? err.message : String(err))
+  process.exit(1)
+}
+
+if (gate && split.stopAfterPlan) {
+  console.log(`dry run: ${split.command} writes; nothing was done. Add --apply to run it.`)
+} else {
+  const outfile = await bundle()
+  const { main, productionPolicy } = await import(pathToFileURL(outfile).href)
+  process.exitCode = await main(split.cliArgv, undefined, gate ? { prod: productionPolicy(gate.suffix) } : {})
+}

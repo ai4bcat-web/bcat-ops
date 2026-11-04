@@ -1,0 +1,2 @@
+Docs/tms-build/ag-proof/AG12d-bill-source-strip-L.png
+Docs/tms-build/ag-proof/AG12d-bill-source-strip-D.png

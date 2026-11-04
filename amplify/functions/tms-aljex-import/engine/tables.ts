@@ -2,7 +2,7 @@
  * Table targets and the guards around them (plan §4.7): never production, never live dev unless
  * explicitly tagged, rehearsal copies only as `<live>-rh<tag>`.
  */
-import type { AljexImportJob, EngineTable, TableSet } from '../../../../src/types/tms'
+import type { AljexImportJob, EngineTable, EngineTargetPolicy, TableSet } from '../../../../src/types/tms'
 
 export const PROD_SUFFIX = '5ucwdyvwivelbo4k4jomvrwel4-NONE'
 export const DEV_SUFFIX = 'nc3jsnxdmjhkpequimypiatkma-NONE'
@@ -103,13 +103,44 @@ export function liveTablesOf(tables: TableSet): TableSet {
 
 export class TargetRefused extends Error {}
 
+const DEV_WRITE_SUFFIX = new RegExp(`^${DEV_SUFFIX}(-rh[a-z0-9]{3,12})?$`)
+
+/** The full table set for a policy: written tables on `writeSuffix`, every other (read-only) table on `readSuffix`. */
+export function tableSetFor(readSuffix: string, writeSuffix: string): TableSet {
+  const written = new Set<string>(WRITTEN_TABLES)
+  return Object.fromEntries(Object.entries(MODEL_NAME).map(([k, model]) => [k, `${model}-${written.has(k) ? writeSuffix : readSuffix}`])) as unknown as TableSet
+}
+
+/**
+ * The only way to let the engine touch non-dev tables: the OFFLINE CLI calls this after the production gate passed
+ * (scripts/lib/prodGate.mjs). `writeSuffix` is the production suffix, or - for the test-only rehearsal seam - the dev
+ * suffix (optionally `-rh<tag>`); the two stacks are never mixed (a production write set reads production reference
+ * tables, a dev-shaped one reads dev reference tables). Anything else is refused here.
+ */
+export function productionPolicy(writeSuffix: string): EngineTargetPolicy {
+  if (writeSuffix === PROD_SUFFIX) return { readSuffix: PROD_SUFFIX, writeSuffix, production: true }
+  if (DEV_WRITE_SUFFIX.test(writeSuffix)) return { readSuffix: DEV_SUFFIX, writeSuffix, production: true }
+  throw new TargetRefused(`Production mode writes ${PROD_SUFFIX} (or, in the rehearsal seam, a dev suffix), never "${writeSuffix}"`)
+}
+
 /**
  * Runs before every phase. Throws `TargetRefused` unless the write set is safe for this job:
+ * 0. with a production `policy` (offline CLI only, after the production gate) the table set must be exactly the policy's;
  * 1. no table (read or write) names production, and every table ends with the dev suffix (optionally `-rh<tag>`);
  * 2. REHEARSAL writes only `-rh<tag>` tables with the job's tag; LIVE writes only the live tables and needs a `liveTag`.
  * (The synthetic-data and reconciled-rehearsal gates need staged data / other jobs and live in `runSlice`.)
  */
-export function assertTargets(live: TableSet, written: TableSet, job: Pick<AljexImportJob, 'target' | 'targetTag' | 'liveTag'>): void {
+export function assertTargets(live: TableSet, written: TableSet, job: Pick<AljexImportJob, 'target' | 'targetTag' | 'liveTag'>, policy?: EngineTargetPolicy): void {
+  if (policy?.production === true) {
+    // Production mode: exactly the policy's table set, a LIVE job, the owner's live tag. No rehearsal tables, no mixing.
+    const want = tableSetFor(policy.readSuffix, policy.writeSuffix)
+    for (const key of Object.keys(want) as EngineTable[]) {
+      if (written[key] !== want[key]) throw new TargetRefused(`Production mode must use ${want[key]} for ${key}, got ${written[key]}`)
+    }
+    if ((job.target ?? 'LIVE') !== 'LIVE') throw new TargetRefused('Production mode runs LIVE jobs only')
+    if (!job.liveTag || !job.liveTag.trim()) throw new TargetRefused('A production import needs the live tag typed by the owner')
+    return
+  }
   for (const set of [live, written]) {
     for (const name of Object.values(set)) {
       if (name.includes(PROD_SUFFIX)) throw new TargetRefused(`Refusing to touch a production table (${name})`)

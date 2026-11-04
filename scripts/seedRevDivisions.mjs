@@ -22,11 +22,21 @@
  * `intakeEmailConfirmed:false`: the Divisions page badges them UNCONFIRMED and the inbound matcher
  * ignores them until an admin confirms the mailbox. A non-blank address is never overwritten.
  *
- * Dev only: refuses any AppSync endpoint or Cognito pool but the dev ones. Uses a throwaway ADMIN
+ * Dev by default: refuses any AppSync endpoint or Cognito pool but the dev ones, with a throwaway ADMIN
  * identity that is deleted (and re-read to prove it) in `finally`. Idempotent: a second run is a no-op.
+ *
+ * Production only via `--target prod` (the shared gate in lib/prodGate.mjs; `--outputs <repo-root amplify_outputs.json>`,
+ * signs in with BCAT_EMAIL / BCAT_PASSWORD, no identity is minted):
+ *   --target prod --i-mean-production, env BCAT_ALLOW_PROD=<today>, fresh prodpre-seedRevDivisions- backups to --apply,
+ *   typed confirmation; a dry run unless --apply (see lib/prodGate.mjs).
  */
+import { parseArgs } from 'node:util'
 import { pathToFileURL } from 'node:url'
 import { DEV_API, DEV_POOL, mintIdentity, deleteIdentity, gql, routerAs } from './lib/devIdentity.mjs'
+import { authenticateTmsUser } from './lib/tmsAuth.mjs'
+import { loadAmplifyOutputs } from './lib/tmsConfig.mjs'
+import { PROD_GATE_OPTIONS, requireProd } from './lib/prodGate.mjs'
+import { PROD_WRITE_SETS } from './lib/prodWriteSets.mjs'
 
 const DEV_APPSYNC = /^https:\/\/f5iqzdpidzalvjys7yxijn5ave\.appsync-api\.us-east-1\.amazonaws\.com\/graphql$/
 
@@ -198,43 +208,78 @@ export async function applyPlan(plan, { save, archive }) {
   return done
 }
 
-async function listAll(token, field, selection) {
+async function listAll(gqlCall, token, field, selection) {
   const items = []
   let next = null
   do {
-    const r = await gql(token, `query($n: String) { ${field}(limit: 1000, nextToken: $n) { items { ${selection} } nextToken } }`, { n: next })
+    const r = await gqlCall(token, `query($n: String) { ${field}(limit: 1000, nextToken: $n) { items { ${selection} } nextToken } }`, { n: next })
     items.push(...r[field].items)
     next = r[field].nextToken
   } while (next)
   return items
 }
 
+/** The same AppSync call as devIdentity's `gql`/`routerAs`, against the endpoint of the outputs file (--target prod). */
+const apiAt = (endpoint) => {
+  const call = async (token, query, variables) => {
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: token },
+      body: JSON.stringify({ query, variables }),
+    })
+    const body = await res.json()
+    if (body.errors) throw new Error(body.errors.map((e) => e.message).join('; '))
+    return body.data
+  }
+  const router = (token, field) => async (action, input) => {
+    const data = await call(token, `mutation($action:String!,$input:AWSJSON!){ ${field}(action:$action,input:$input) }`, { action, input: JSON.stringify(input ?? {}) })
+    const raw = data[field]
+    return typeof raw === 'string' ? JSON.parse(raw) : raw
+  }
+  return { call, router }
+}
+
+/** Read the four lists, print the plan, and (apply) perform it, as the admin `token` through `api`. */
+async function runPlan({ token, api, apply }) {
+  const dir = api.router(token, 'tmsDirectoryActions')
+  const divisions = await listAll(api.call, token, 'listOwnershipDivisions', 'id code name brand parentId color sortOrder active owners flows intakeEmail version')
+  const rules = await listAll(api.call, token, 'listOwnershipRules', 'id name active divisionCode')
+  const shipmentCounts = new Map()
+  for (const s of await listAll(api.call, token, 'listShipments', 'revDivision')) {
+    if (s.revDivision) shipmentCounts.set(s.revDivision, (shipmentCounts.get(s.revDivision) ?? 0) + 1)
+  }
+  const plan = planRevDivisions({ divisions, rules, shipmentCounts })
+  console.log(describePlan(plan, { apply }))
+  if (apply) {
+    const done = await applyPlan(plan, {
+      save: (input) => dir('SAVE_OWNERSHIP_DIVISION', input),
+      archive: (input) => dir('ARCHIVE_OWNERSHIP_DIVISION', input),
+    })
+    console.log(`applied ${done.length} step(s): ${done.join(', ') || '-'}`)
+  }
+  if (plan.blocked.length) process.exitCode = 2
+}
+
 async function main() {
+  const args = parseArgs({ options: { apply: { type: 'boolean' }, outputs: { type: 'string' }, ...PROD_GATE_OPTIONS }, allowPositionals: false })
+  const prod = await requireProd({ script: 'seedRevDivisions', values: args.values, tables: PROD_WRITE_SETS.seedRevDivisions.models })
+  if (prod) {
+    // Production (or the rehearsal seam): sign in as BCAT_EMAIL / BCAT_PASSWORD (an ADMIN) on the pool in the outputs
+    // file. No throwaway identity is ever minted outside the dev pool.
+    const outputs = loadAmplifyOutputs(args.values.outputs, prod)
+    const auth = await authenticateTmsUser(outputs)
+    await runPlan({ token: auth.token, api: apiAt(auth.endpoint), apply: prod.apply })
+    return
+  }
   if (!DEV_APPSYNC.test(DEV_API)) throw new Error('seedRevDivisions refuses any endpoint other than the dev AppSync URL')
   if (DEV_POOL !== 'us-east-1_UKhMNVAG1') throw new Error('seedRevDivisions refuses any staff pool other than the dev pool')
-  const apply = process.argv.includes('--apply')
+  const apply = args.values.apply === true
   const email = `zz-revdiv-admin-${Date.now()}@example.invalid`
   let made = false
   try {
     const admin = await mintIdentity(email, ['ADMIN', 'page-tms'])
     made = true
-    const dir = routerAs(admin.token, 'tmsDirectoryActions')
-    const divisions = await listAll(admin.token, 'listOwnershipDivisions', 'id code name brand parentId color sortOrder active owners flows intakeEmail version')
-    const rules = await listAll(admin.token, 'listOwnershipRules', 'id name active divisionCode')
-    const shipmentCounts = new Map()
-    for (const s of await listAll(admin.token, 'listShipments', 'revDivision')) {
-      if (s.revDivision) shipmentCounts.set(s.revDivision, (shipmentCounts.get(s.revDivision) ?? 0) + 1)
-    }
-    const plan = planRevDivisions({ divisions, rules, shipmentCounts })
-    console.log(describePlan(plan, { apply }))
-    if (apply) {
-      const done = await applyPlan(plan, {
-        save: (input) => dir('SAVE_OWNERSHIP_DIVISION', input),
-        archive: (input) => dir('ARCHIVE_OWNERSHIP_DIVISION', input),
-      })
-      console.log(`applied ${done.length} step(s): ${done.join(', ') || '-'}`)
-    }
-    if (plan.blocked.length) process.exitCode = 2
+    await runPlan({ token: admin.token, api: { call: gql, router: routerAs }, apply })
   } finally {
     if (made) {
       const gone = await deleteIdentity(email)

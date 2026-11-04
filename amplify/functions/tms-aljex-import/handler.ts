@@ -10,6 +10,7 @@
  * event with `kind` and no `arguments` is the self-invoke (the only principal with
  * lambda:InvokeFunction on this function is this function's own role).
  */
+import './tableEnv'
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
 import { GetObjectCommand, HeadObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda'

@@ -9,7 +9,8 @@
  *   guessed by the script.
  * - Builds a dry-run plan file tied to the input fingerprint and environment.
  * - Apply mode executes SAVE_DIVISION / SAVE_SETTINGS actions through
- *   tmsDirectoryActions only against an explicit non-production target.
+ *   tmsDirectoryActions against an explicit non-production target, or production
+ *   via `--target prod` (the shared gate in lib/prodGate.mjs).
  *
  * Money values use decimal strings, not floats, when present (seeded divisions
  * and settings contain no money fields today; the rule is enforced here for any
@@ -33,6 +34,8 @@ import {
   validatePlan,
   summarize,
 } from './lib/tmsPlan.mjs';
+import { PROD_GATE_OPTIONS, PROD_GATE_USAGE, requireProd } from './lib/prodGate.mjs';
+import { PROD_WRITE_SETS } from './lib/prodWriteSets.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -41,7 +44,7 @@ Usage: node scripts/seedDivisions.mjs --input <json-file> --outputs <path> [opti
 
 Options:
   --input <path>    Operator-reviewed JSON file (required).
-  --outputs <path>  Required: path to amplify_outputs.json (repo-root production file refused).
+  --outputs <path>  Required: path to amplify_outputs.json (repo-root production file refused without --target prod).
   --plan <path>     (dry-run) write plan file; (apply) read plan file.
   --env <target>    Required with --apply: test / sandbox / local. Production blocked.
   --apply           Apply the reviewed plan.
@@ -53,6 +56,9 @@ Input JSON schema:
     ],
     "settings": { "id": "default", ... }
   }
+
+Production only through the shared gate (--outputs must then be the repo-root file; sign in with BCAT_EMAIL/BCAT_PASSWORD):
+${PROD_GATE_USAGE}
 `;
 
 const KNOWN_FLEET_GROUPS = new Set(['LOCAL', 'AMAZON', 'BOX_TRUCK']);
@@ -297,7 +303,7 @@ export async function applyDivisionPlan({ client, planPath, inputPath, env, endp
 }
 
 async function main() {
-  const args = parseTmsArgs();
+  const args = parseTmsArgs(PROD_GATE_OPTIONS);
   if (args.values.help) {
     console.log(USAGE);
     process.exit(0);
@@ -307,9 +313,10 @@ async function main() {
     throw new Error('--input <path> is required');
   }
 
-  const { mode, env } = detectMode(args.values.apply, args.values.env);
+  const prod = await requireProd({ script: 'seedDivisions', values: args.values, tables: PROD_WRITE_SETS.seedDivisions.models });
+  const { mode, env } = detectMode(args.values.apply, args.values.env, prod);
   const inputPath = resolve(process.cwd(), args.values.input);
-  const outputs = loadAmplifyOutputs(args.values.outputs);
+  const outputs = loadAmplifyOutputs(args.values.outputs, prod);
   const endpoint = outputs?.data?.url;
   if (!endpoint) {
     throw new Error('amplify_outputs.json missing data.url');

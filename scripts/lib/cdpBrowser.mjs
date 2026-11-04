@@ -19,6 +19,7 @@ export const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
  * @param {string} [options.profilePrefix] temp profile dir prefix
  * @param {{width:number,height:number,deviceScaleFactor?:number}} [options.viewport]
  * @param {boolean} [options.collect]      enable Runtime/Log/Network collectors for problems()
+ * @param {string[]} [options.allowedOrigins] override ALLOWED_ORIGINS (the read-only prod smoke passes the runbook's https origin; never defaulted)
  */
 export async function launchBrowser({
   origin = DEV_ORIGIN,
@@ -28,8 +29,9 @@ export async function launchBrowser({
   viewport = { width: 1600, height: 1100, deviceScaleFactor: 1 },
   collect = true,
   purpose = 'Browser verification',
+  allowedOrigins = ALLOWED_ORIGINS,
 } = {}) {
-  if (!ALLOWED_ORIGINS.includes(origin)) {
+  if (!allowedOrigins.includes(origin)) {
     throw new Error(`${purpose} only permits dev or the local development server`)
   }
   const profile = await mkdtemp(join(tmpdir(), profilePrefix))
@@ -51,6 +53,7 @@ export async function launchBrowser({
   const log = { exceptions: [], consoleErrors: [], httpErrors: [], failedRequests: [] }
   const markAt = { exceptions: 0, consoleErrors: 0, httpErrors: 0, failedRequests: 0 }
   const requestUrls = new Map()
+  let interceptor = null
 
   async function poll(run, label, timeout = 60_000) {
     const deadline = Date.now() + timeout
@@ -78,7 +81,16 @@ export async function launchBrowser({
     return result.result.value
   }
   const argText = (a) => String(a.value ?? a.description ?? a.type ?? '')
+  /** Fetch.requestPaused: ask the interceptor; it throwing or returning { block: true } fails the request. */
+  async function dispatchPaused(p) {
+    let verdict
+    try { verdict = await interceptor({ method: p.request.method, url: p.request.url, postData: p.request.postData, headers: p.request.headers ?? {}, hasPostData: !!p.request.hasPostData, resourceType: p.resourceType }) } catch (err) { verdict = { block: true, reason: err?.message } }
+    const sid = sessionId
+    if (verdict?.block) await command('Fetch.failRequest', { requestId: p.requestId, errorReason: 'BlockedByClient' }, sid).catch(() => {})
+    else await command('Fetch.continueRequest', { requestId: p.requestId }, sid).catch(() => {})
+  }
   function onEvent(message) {
+    if (message.method === 'Fetch.requestPaused' && interceptor && message.sessionId === sessionId) { void dispatchPaused(message.params); return }
     if (!collect || message.sessionId !== sessionId) return
     const p = message.params ?? {}
     switch (message.method) {
@@ -238,6 +250,14 @@ export async function launchBrowser({
       /** Block requests whose URL matches any wildcard pattern (e.g. '*states-10m*'); `[]` unblocks. */
       async blockUrls(urls) {
         await command('Network.setBlockedURLs', { urls })
+      },
+      /**
+       * Pause every request and let `handler({ method, url, postData, headers, hasPostData, resourceType })` return `{ block: true, reason }`
+       * to fail it (BlockedByClient) or anything else to let it continue. A handler that throws blocks. Must be called before navigating.
+       */
+      async intercept(handler) {
+        interceptor = handler
+        await command('Fetch.enable', { patterns: [{ urlPattern: '*', requestStage: 'Request' }] })
       },
       /** Save a screenshot at an absolute/relative path; clipToContent captures the page height (capped at 2400px). */
       async screenshot(path, { clipToContent = false } = {}) {

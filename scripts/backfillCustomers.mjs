@@ -9,7 +9,8 @@
  *   exact unique matching. Ambiguous or unmatched rows are routed to review.
  * - Build a dry-run plan file with source fingerprints and environment.
  * - Apply mode executes the plan through `tmsDirectoryActions` only against an
- *   explicit non-production environment.
+ *   explicit non-production environment, or production via `--target prod` (the
+ *   shared gate in lib/prodGate.mjs: dated allow env, backups, typed confirmation).
  *
  * No automatic inference: Batory customers are flagged for reviewer approval.
  * The original `Load.customer` text is preserved; only `customerId` is added.
@@ -30,6 +31,8 @@ import {
   detectMode,
 } from './lib/tmsConfig.mjs';
 import { createPlan, loadPlan, savePlan, validatePlan, summarize } from './lib/tmsPlan.mjs';
+import { PROD_GATE_OPTIONS, PROD_GATE_USAGE, requireProd } from './lib/prodGate.mjs';
+import { PROD_WRITE_SETS } from './lib/prodWriteSets.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -38,7 +41,7 @@ Usage: node scripts/backfillCustomers.mjs [options]
 
 Options:
   --help, -h        Show this offline help.
-  --outputs <path>  Required: path to amplify_outputs.json (repo-root production file refused).
+  --outputs <path>  Required: path to amplify_outputs.json (repo-root production file refused without --target prod).
   --plan <path>     (dry-run) write plan file; (apply) read plan file.
   --env <target>    Required with --apply: test / sandbox / local. Production blocked.
   --apply           Apply the reviewed plan.
@@ -48,6 +51,9 @@ Options:
 Dry-run writes a JSON plan of proposed creates and load updates. A load that already
 carries a customerId is counted and left alone.
 Apply validates the plan's fingerprint, environment, and endpoint, then executes via AppSync.
+
+Production only through the shared gate (--outputs must then be the repo-root file; sign in with BCAT_EMAIL/BCAT_PASSWORD):
+${PROD_GATE_USAGE}
 `;
 
 
@@ -364,14 +370,15 @@ export async function applyCustomerPlan({ client, planPath, env, endpoint }) {
 }
 
 async function main() {
-  const args = parseTmsArgs({ 'link-only': { type: 'boolean', default: false } });
+  const args = parseTmsArgs({ 'link-only': { type: 'boolean', default: false }, ...PROD_GATE_OPTIONS });
   if (args.values.help) {
     console.log(USAGE);
     process.exit(0);
   }
 
-  const { mode, env } = detectMode(args.values.apply, args.values.env);
-  const outputs = loadAmplifyOutputs(args.values.outputs);
+  const prod = await requireProd({ script: 'backfillCustomers', values: args.values, tables: PROD_WRITE_SETS.backfillCustomers.models });
+  const { mode, env } = detectMode(args.values.apply, args.values.env, prod);
+  const outputs = loadAmplifyOutputs(args.values.outputs, prod);
   const endpoint = outputs?.data?.url;
   if (!endpoint) {
     throw new Error('amplify_outputs.json missing data.url');

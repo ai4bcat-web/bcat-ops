@@ -14,9 +14,12 @@
  * was cleaned by rules we have since decided were wrong. That is how a readability fix
  * reaches the PODs that are already on file rather than only the next ones.
  *
- *   node scripts/backfillDriverDocScans.mjs            # report only
- *   node scripts/backfillDriverDocScans.mjs --apply    # actually run it
- *   node scripts/backfillDriverDocScans.mjs --force    # re-run everything regardless
+ *   node scripts/backfillDriverDocScans.mjs --target prod            # report only, PRODUCTION (shared gate: lib/prodGate.mjs)
+ *   node scripts/backfillDriverDocScans.mjs --target prod --apply    # actually run it on production, once the gate is satisfied
+ *   TABLE_SUFFIX=<non-prod suffix> POD_FUNCTION_NAME=<that stack's pod-actions> node scripts/backfillDriverDocScans.mjs [--apply] [--force]
+ *
+ * Without --target prod the script never touches production: it needs TABLE_SUFFIX + POD_FUNCTION_NAME of another stack.
+ * It writes the DriverSubmissionDoc and DriverSubmission tables (and new S3 copies) through the Lambda.
  */
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
 import { DynamoDBDocumentClient, ScanCommand } from '@aws-sdk/lib-dynamodb'
@@ -24,6 +27,14 @@ import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
+import { parseArgs } from 'node:util'
+import { PROD_GATE_OPTIONS, requireProd, assertWritableSuffix, isProductionSuffix } from './lib/prodGate.mjs'
+import { PROD_WRITE_SETS } from './lib/prodWriteSets.mjs'
+
+const { values: args } = parseArgs({
+  options: { apply: { type: 'boolean' }, force: { type: 'boolean' }, ...PROD_GATE_OPTIONS },
+  allowPositionals: false,
+})
 
 /*
  * Read the pipeline's version from its own source rather than restating it here.
@@ -42,10 +53,35 @@ const POD_SCAN_VERSION = (() => {
 })()
 
 const REGION = 'us-east-1'
-const SUFFIX = process.env.TABLE_SUFFIX ?? '5ucwdyvwivelbo4k4jomvrwel4-NONE'
-const POD_FUNCTION = process.env.POD_FUNCTION_NAME ?? 'pod-actions-46198baffbf671f8'
-const APPLY = process.argv.includes('--apply')
-const FORCE = process.argv.includes('--force')
+const PROD_POD_FUNCTION = 'pod-actions-46198baffbf671f8'
+const APPLY_FLAG = args.apply === true
+const FORCE = args.force === true
+
+// The Lambda this script invokes writes DriverSubmissionDoc, DriverSubmission and S3 copies in ITS OWN stack, so the
+// table suffix and the function must name the same stack: a dev suffix with the production function (or the reverse)
+// would scan one stack and write the other.
+const fail = (err) => {
+  console.error(err.message)
+  process.exit(1)
+}
+const prod = await requireProd({ script: 'backfillDriverDocScans', values: args, tables: PROD_WRITE_SETS.backfillDriverDocScans.models, apply: APPLY_FLAG }).catch(fail)
+let SUFFIX
+let POD_FUNCTION
+if (prod) {
+  SUFFIX = prod.suffix
+  POD_FUNCTION = process.env.POD_FUNCTION_NAME
+  if (prod.rehearsal) {
+    if (!POD_FUNCTION || POD_FUNCTION === PROD_POD_FUNCTION) throw new Error('--prod-mode-rehearsal-suffix needs POD_FUNCTION_NAME set to the DEV pod-actions function (not the production one)')
+  } else {
+    POD_FUNCTION = PROD_POD_FUNCTION
+  }
+} else {
+  SUFFIX = process.env.TABLE_SUFFIX
+  POD_FUNCTION = process.env.POD_FUNCTION_NAME
+  if (!SUFFIX || !POD_FUNCTION) throw new Error('set TABLE_SUFFIX and POD_FUNCTION_NAME to a non-production stack, or pass --target prod (shared production gate)')
+  if (isProductionSuffix(SUFFIX) || POD_FUNCTION === PROD_POD_FUNCTION) throw new Error('refusing production without --target prod (shared production gate)')
+}
+const APPLY = prod ? prod.apply : APPLY_FLAG
 
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({ region: REGION }))
 const lambda = new LambdaClient({ region: REGION })
@@ -119,6 +155,7 @@ if (!APPLY) {
   console.log('\nreport only — pass --apply to run it')
   process.exit(0)
 }
+assertWritableSuffix(SUFFIX, 'backfillDriverDocScans')
 
 for (const w of work) {
   console.log(`\n${w.kind} ${w.sub.id} (${w.sub.referenceNumber ?? 'no ref'})`)

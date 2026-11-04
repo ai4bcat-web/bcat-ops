@@ -58,6 +58,8 @@
  * secret the bridge posts with, and nothing on the stack hands it back out.
  */
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
+import { refuseReadOnlyFlag } from './lib/readOnlyGuard.mjs'
+refuseReadOnlyFlag('devVerifyStepK.mjs')
 
 const DEV_API = 'https://f5iqzdpidzalvjys7yxijn5ave.appsync-api.us-east-1.amazonaws.com/graphql'
 const DEV_POOL = 'us-east-1_UKhMNVAG1'

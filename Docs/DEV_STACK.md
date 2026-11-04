@@ -14,7 +14,7 @@ reviewed end to end on a real URL before anything reaches `main`, which is produ
 | Amplify branch env | — | `BCAT_DEV_STACK=true` |
 | EventBridge schedules | on | **all disabled** (`amplify/backend.ts`, dev stack guard) |
 | Load-stream consumers (`broker-load-alert`, `ratecon-assigned-text`) | on | created disabled |
-| SES (email) | on | **denied** on every Lambda |
+| SES (email) | on | **denied** on every Lambda for any recipient except `ai4bcat@gmail.com` (+ `+tag` aliases); one other recipient refuses the whole send |
 | Slack, OTR Solutions, Paychex, Blue Ink | real credentials (shared SSM secrets) | a synth-time Aspect in `backend.ts` removes those names from each Lambda's `AMPLIFY_SSM_ENV_CONFIG` and pins the variables to `disabled-on-dev`, so the calls fail harmlessly |
 | Twilio dispatch texting / calls | configured under `/bcat/dispatch/<prodPoolId>/` | inert — dev's pool has no config |
 | Anthropic, Google Maps, Motive (read-only) | real | real (shared secrets) |

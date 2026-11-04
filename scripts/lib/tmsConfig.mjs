@@ -38,16 +38,22 @@ export function parseTmsArgs(spec = {}) {
 
 /**
  * Read amplify_outputs.json from the path provided by --outputs.
- * Refuses the file at the repo root because that is the production backend.
+ * Refuses the file at the repo root because that is the production backend, EXCEPT for a run that passed the
+ * production gate (`prod` = the result of `requireProd` from ./prodGate.mjs): a real production run must pass
+ * exactly the repo-root file, and the rehearsal seam must pass anything else.
  * @param {string} outputsPath
+ * @param {{rehearsal?: boolean} | null} [prod]
  * @returns {Record<string, unknown>}
  */
-export function loadAmplifyOutputs(outputsPath) {
+export function loadAmplifyOutputs(outputsPath, prod = null) {
   if (!outputsPath) {
     throw new Error('--outputs <path> is required');
   }
   const resolved = resolve(process.cwd(), outputsPath);
-  if (canonical(resolved) === canonical(REPO_ROOT_AMPLIFY_OUTPUTS)) {
+  const isRoot = canonical(resolved) === canonical(REPO_ROOT_AMPLIFY_OUTPUTS);
+  if (prod && !prod.rehearsal) {
+    if (!isRoot) throw new Error(`--target prod needs --outputs <repo-root amplify_outputs.json> (the production backend), got ${resolved}`);
+  } else if (isRoot) {
     throw new Error(
       `Refusing to use repo-root amplify_outputs.json (production): ${resolved}`
     );
@@ -79,8 +85,13 @@ export function requireApplyEnv(env, target = 'target') {
 /**
  * @param {boolean} apply
  * @param {string | undefined} env
+ * @param {{apply: boolean, environment: string} | null} [prod] result of `requireProd` (./prodGate.mjs): a run that
+ *   passed the production gate takes its mode and environment label from it instead of --env.
  */
-export function detectMode(apply, env) {
+export function detectMode(apply, env, prod = null) {
+  if (prod) {
+    return { mode: prod.apply ? 'apply' : 'dry-run', env: prod.environment };
+  }
   if (apply) {
     return { mode: 'apply', env: requireApplyEnv(env) };
   }

@@ -173,6 +173,8 @@ export interface ApInboxDeps {
   devStack: boolean
   /** Allowed OAuth redirect origins (`PORTAL_ORIGINS`). */
   portalOrigins?: string[]
+  /** Cognito username -> e-mail for access-token callers (no `email` claim). Absent in tests. */
+  resolveEmail?(username: string): Promise<string>
   /**
    * Dev only: the classification a harness stored inside a simulated message (`RawApModelOutput`),
    * read instead of calling the model. Absent in production deps; ignored unless `devStack` and

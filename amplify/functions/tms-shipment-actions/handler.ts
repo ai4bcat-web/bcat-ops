@@ -28,6 +28,7 @@
  * change to `checkCallOpen` — a sparse GSI hash key — goes through a raw UpdateItem
  * that REMOVEs, because a stored NULL is an index key DynamoDB refuses.
  */
+import './tableEnv'
 import { getAmplifyDataClientConfig, type DataClientEnv } from '@aws-amplify/backend-function/runtime'
 import { Amplify } from 'aws-amplify'
 import { generateClient } from 'aws-amplify/data'
@@ -5632,7 +5633,7 @@ async function sendRateConEmail(args: {
   pdfBase64: string
   messageId: string
   replyTo: string
-}): Promise<{ status: 'SENT' | 'NOT_SENT' | 'FAILED'; error: string | null; raw: string }> {
+}): Promise<{ status: 'SENT' | 'NOT_SENT' | 'FAILED'; error: string | null; raw: string; sesMessageId: string | null }> {
   const boundary = `=_bcatratecon_${Date.now().toString(36)}`
   const raw =
     `From: ${FROM_ADDRESS}\r\n` +
@@ -5659,15 +5660,15 @@ async function sendRateConEmail(args: {
     `--${boundary}--\r\n`
 
   try {
-    await ses.send(new SendEmailCommand({
+    const out = await ses.send(new SendEmailCommand({
       FromEmailAddress: FROM_ADDRESS,
       Destination: { ToAddresses: args.to, CcAddresses: args.cc.length > 0 ? args.cc : undefined },
       Content: { Raw: { Data: new TextEncoder().encode(raw) } },
     }))
-    return { status: 'SENT', error: null, raw }
+    return { status: 'SENT', error: null, raw, sesMessageId: out?.MessageId ?? null }
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err)
-    return { status: 'NOT_SENT', error, raw }
+    return { status: 'NOT_SENT', error, raw, sesMessageId: null }
   }
 }
 
@@ -5911,7 +5912,7 @@ async function sendRateCon(input: Row, caller: Caller): Promise<Row> {
     // stacks (where SES is denied) can prove the email body and headers.
     console.log('[tms-shipment-actions] rate con email would have sent:\n', emailOutcome.raw)
     if (process.env.BCAT_DEV_STACK === 'true') {
-      // Dev stacks deny SES to keep notifications inert. Patch the row to the
+      // Dev stacks only let SES reach the test mailbox. Patch the row to the
       // real outcome so the thread does not pretend an email was delivered.
       await dynamo.send(new UpdateItemCommand({
         TableName: SHIPMENT_MESSAGE_TABLE_NAME,
@@ -5932,10 +5933,21 @@ async function sendRateCon(input: Row, caller: Caller): Promise<Row> {
     }
   }
 
+  // SES rewrites the Message-ID header on every send, so the id a reply's In-Reply-To will carry is
+  // `<sesMessageId@email.amazonses.com>`. Keep SES's id on the row so a reply can be matched to it.
+  if (emailOutcome.status === 'SENT' && emailOutcome.sesMessageId) {
+    await dynamo.send(new UpdateItemCommand({
+      TableName: SHIPMENT_MESSAGE_TABLE_NAME,
+      Key: marshall({ id: message.id }),
+      UpdateExpression: 'SET providerRef = :ref',
+      ExpressionAttributeValues: marshall({ ':ref': emailOutcome.sesMessageId }),
+    }))
+  }
+
   await writeAudit('LOAD_CARRIER', loadCarrierId, 'SEND_RATE_CON', caller, {
     loadId, version, to, cc, senderCc: composed.senderCopied ? caller.email : null, mcpStatus: standing.status,
     assignmentStatus: sentRung?.to ?? carrier.assignmentStatus ?? null,
-    expiresAt, documentId, s3Key, threadKey, emailStatus: emailOutcome.status,
+    expiresAt, documentId, s3Key, threadKey, emailStatus: emailOutcome.status, sesMessageId: emailOutcome.sesMessageId,
   })
   return readBundle(shipmentId) as unknown as Row
 }

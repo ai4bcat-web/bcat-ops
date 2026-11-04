@@ -1,8 +1,11 @@
 #!/usr/bin/env node
 /**
- * Read-only duplicate / orphan audit of the DEV stack's freight tables.
+ * Read-only duplicate / orphan audit of the DEV stack's freight tables. Production tables are read only
+ * through the shared gate (`--target prod`, scripts/lib/prodGate.mjs; read-only, so it needs the
+ * BCAT_ALLOW_PROD date and --i-mean-production but no backup and no confirmation).
  *
  *   node scripts/checkDevDuplicates.mjs [--suffix <dev suffix>] [--json /tmp/dupes.json] [--show-ids] [--strict]
+ *   node scripts/checkDevDuplicates.mjs --target prod --i-mean-production [--json /tmp/dupes.json] [--show-ids] [--strict]
  *
  * Scans Load, Shipment, ProClaim, Invoice, CarrierBill and Order with `Scan` only (nothing
  * here can write) and reports:
@@ -22,14 +25,15 @@
  * suffix, else 0.
  */
 import { pathToFileURL } from 'node:url'
+import { parseArgs } from 'node:util'
 import { writeFileSync } from 'node:fs'
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
 import { DynamoDBDocumentClient, ScanCommand } from '@aws-sdk/lib-dynamodb'
 import { normalizePro } from '../src/lib/proNumber.ts'
+import { DEV_SUFFIX, PROD_GATE_OPTIONS, PROD_SUFFIX, isProdAuthorized, isProductionSuffix, requireProd } from './lib/prodGate.mjs'
 
 const REGION = 'us-east-1'
-export const PROD_SUFFIX = '5ucwdyvwivelbo4k4jomvrwel4-NONE'
-export const DEV_SUFFIX = 'nc3jsnxdmjhkpequimypiatkma-NONE'
+export { PROD_SUFFIX, DEV_SUFFIX }
 
 /**
  * Rows grouped by key where a key is shared by more than one row. Rows whose key is
@@ -161,12 +165,15 @@ export function exitCodeFor(report, { strict = false } = {}) {
 }
 
 /**
- * Only the dev stack may be read: the pinned production suffix is refused outright, and
- * so is anything that is not a `-NONE` Amplify suffix.
+ * Only the dev stack may be read: the pinned production suffix is refused outright (unless `requireProd`
+ * passed in this process for exactly that suffix), and so is anything that is not a `-NONE` Amplify suffix
+ * (a gate-authorised rehearsal copy `<dev>-rh<tag>` is exempt from the shape check).
  * @param {string} suffix
  */
 export function assertReadableSuffix(suffix) {
-  if (!suffix || suffix.includes(PROD_SUFFIX)) throw new Error('refusing the production suffix')
+  if (!suffix) throw new Error('refusing the production suffix')
+  if (isProdAuthorized(suffix)) return
+  if (isProductionSuffix(suffix)) throw new Error('refusing the production suffix (reading it needs --target prod and the production gate)')
   if (!/^[a-z0-9]+-NONE$/.test(suffix)) throw new Error(`not an Amplify table suffix: ${suffix}`)
 }
 
@@ -197,22 +204,21 @@ async function scanAll(doc, table, attrs) {
 }
 
 function parseArgv(argv) {
-  const out = { suffix: DEV_SUFFIX, json: undefined, showIds: false, strict: false }
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i]
-    if (a === '--suffix') out.suffix = argv[++i]
-    else if (a === '--json') out.json = argv[++i]
-    else if (a === '--show-ids') out.showIds = true
-    else if (a === '--strict') out.strict = true
-    else throw new Error(`unknown argument ${a}`)
-  }
-  return out
+  const { values } = parseArgs({
+    args: argv,
+    options: { suffix: { type: 'string' }, json: { type: 'string' }, 'show-ids': { type: 'boolean' }, strict: { type: 'boolean' }, ...PROD_GATE_OPTIONS },
+    allowPositionals: false,
+  })
+  return values
 }
 
 async function main() {
   let opts
+  let prod
   try {
-    opts = parseArgv(process.argv.slice(2))
+    const values = parseArgv(process.argv.slice(2))
+    prod = await requireProd({ script: 'checkDevDuplicates', values, tables: Object.keys(PROJECTIONS), readOnly: true })
+    opts = { suffix: prod ? prod.suffix : values.suffix ?? DEV_SUFFIX, json: values.json, showIds: values['show-ids'] === true, strict: values.strict === true }
     assertReadableSuffix(opts.suffix)
     if (opts.json && !opts.json.startsWith('/tmp/')) throw new Error('--json must be a path under /tmp')
   } catch (e) {

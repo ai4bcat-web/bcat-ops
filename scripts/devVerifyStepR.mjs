@@ -37,6 +37,8 @@
  */
 import { randomBytes, randomUUID } from 'node:crypto'
 import { authenticateTmsUser } from './lib/tmsAuth.mjs'
+import { refuseReadOnlyFlag } from './lib/readOnlyGuard.mjs'
+refuseReadOnlyFlag('devVerifyStepR.mjs')
 
 const DEV_API = 'https://f5iqzdpidzalvjys7yxijn5ave.appsync-api.us-east-1.amazonaws.com/graphql'
 const DEV_POOL = 'us-east-1_UKhMNVAG1'

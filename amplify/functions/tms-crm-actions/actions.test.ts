@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { CrmFakeDb } from '../_shared/crmFakeDb'
 import { addSystemActivity } from '../_shared/crmStore'
-import { dispatch, type AppSyncIdentity } from './actions'
+import { authorize, dispatch, type AppSyncIdentity } from './actions'
 
 const T = {
   customer: 'Customer', quote: 'Quote', shipment: 'Shipment', user: 'User', audit: 'Audit',
@@ -192,5 +192,18 @@ describe('CRM_BACKFILL', () => {
     expect(db.get(T.domain, 'zz-bf.test')).toMatchObject({ customerId: 'c-bf', conflict: false })
     const again = (await call(admin, 'CRM_BACKFILL', { apply: true })) as { created: { accounts: number; contacts: number; domains: number } }
     expect(again.created).toEqual({ accounts: 0, contacts: 0, domains: 0 })
+  })
+})
+
+describe('authorize caller resolution', () => {
+  const token = (groups: string[]) => ({ username: 'abc-1', sub: 'abc-1', claims: { 'cognito:groups': groups } })
+
+  it('an access-token caller with no UserProfile row falls back to the user pool e-mail', async () => {
+    const owner = await authorize(token([]), db, async () => 'ryne@bcatcorp.com')
+    expect(owner).toMatchObject({ email: 'ryne@bcatcorp.com', isAdmin: true })
+  })
+
+  it('refuses when neither the profile nor the pool resolves an e-mail', async () => {
+    await expect(authorize(token(['ADMIN']), db, async () => '')).rejects.toThrow(/could not resolve caller email/)
   })
 })

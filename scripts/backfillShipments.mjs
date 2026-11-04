@@ -11,7 +11,8 @@
  *
  * Dry run is the default and writes nothing: it asks the Lambda to plan each batch
  * and prints the mapping it would apply. `--apply` runs the same batches for real
- * against an explicitly named non-production environment.
+ * against an explicitly named non-production environment, or production via
+ * `--target prod` (the shared gate in lib/prodGate.mjs).
  *
  * Idempotent in both directions: a load that already carries a `shipmentId` is
  * skipped, a load whose link was erased (a Load table refreshed from production) is
@@ -25,13 +26,15 @@ import { createTmsClient } from './lib/tmsClient.mjs';
 import { authenticateTmsUser } from './lib/tmsAuth.mjs';
 import { parseTmsArgs, loadAmplifyOutputs, detectMode } from './lib/tmsConfig.mjs';
 import { createPlan, loadPlan, savePlan, validatePlan, summarize } from './lib/tmsPlan.mjs';
+import { PROD_GATE_OPTIONS, PROD_GATE_USAGE, requireProd } from './lib/prodGate.mjs';
+import { PROD_WRITE_SETS } from './lib/prodWriteSets.mjs';
 
 const USAGE = `
 Usage: node scripts/backfillShipments.mjs [options]
 
 Options:
   --help, -h        Show this offline help.
-  --outputs <path>  Required: path to amplify_outputs.json (repo-root production file refused).
+  --outputs <path>  Required: path to amplify_outputs.json (repo-root production file refused without --target prod).
   --plan <path>     (dry-run) write plan file; (apply) read plan file.
   --env <target>    Required with --apply: test / sandbox / local. Production blocked.
   --apply           Apply the reviewed plan.
@@ -40,6 +43,9 @@ Options:
 Dry run asks the Lambda to plan every un-backfilled load and writes the result as a
 JSON plan. Apply validates the plan's fingerprint, environment and endpoint, then
 replays the same batches for real.
+
+Production only through the shared gate (--outputs must then be the repo-root file; sign in with BCAT_EMAIL/BCAT_PASSWORD):
+${PROD_GATE_USAGE}
 `;
 
 /** The Lambda caps a batch at 50; 25 keeps a single call comfortably inside its timeout. */
@@ -207,14 +213,15 @@ export async function applyShipmentPlan({ client, planPath, env, endpoint }) {
 }
 
 async function main() {
-  const args = parseTmsArgs({ batch: { type: 'string' } });
+  const args = parseTmsArgs({ batch: { type: 'string' }, ...PROD_GATE_OPTIONS });
   if (args.values.help) {
     console.log(USAGE);
     process.exit(0);
   }
 
-  const { mode, env } = detectMode(args.values.apply, args.values.env);
-  const outputs = loadAmplifyOutputs(args.values.outputs);
+  const prod = await requireProd({ script: 'backfillShipments', values: args.values, tables: PROD_WRITE_SETS.backfillShipments.models });
+  const { mode, env } = detectMode(args.values.apply, args.values.env, prod);
+  const outputs = loadAmplifyOutputs(args.values.outputs, prod);
   const endpoint = outputs?.data?.url;
   if (!endpoint) {
     throw new Error('amplify_outputs.json missing data.url');

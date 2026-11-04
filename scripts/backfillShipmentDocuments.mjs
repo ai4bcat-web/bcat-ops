@@ -29,7 +29,7 @@
  * The guard that matters here is the TABLE SUFFIX, not a flag a human types: this script talks
  * to DynamoDB directly (there is no Lambda action for a migration that touches five models), so
  * the environment is read off the tables it was pointed at and the production suffix is refused
- * outright.
+ * outright, except through the shared gate (`--target prod`, scripts/lib/prodGate.mjs).
  *
  *   node scripts/backfillShipmentDocuments.mjs --help
  *   node scripts/backfillShipmentDocuments.mjs --plan plans/e-docs.json
@@ -42,6 +42,8 @@ import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, ScanCommand, PutCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { parseTmsArgs } from './lib/tmsConfig.mjs';
 import { createPlan, loadPlan, savePlan, validatePlan, summarize } from './lib/tmsPlan.mjs';
+import { PROD_GATE_OPTIONS, PROD_GATE_USAGE, requireProd, assertWritableSuffix } from './lib/prodGate.mjs';
+import { PROD_WRITE_SETS } from './lib/prodWriteSets.mjs';
 // Node strips the types at run time, so the script shares the Lambda's rules rather than
 // restating them. A second copy of the gate would stay right for exactly one release.
 import {
@@ -72,7 +74,7 @@ Usage: node scripts/backfillShipmentDocuments.mjs [options]
 Options:
   --help, -h        Show this offline help.
   --suffix <s>      DynamoDB table suffix (default ${DEV_TABLE_SUFFIX});
-                    the production suffix is refused.
+                    the production suffix is refused (production only via --target prod).
   --region <r>      AWS region (default ${REGION_DEFAULT}).
   --plan <path>     (dry-run) write the plan file; (apply) read it back.
   --apply           Apply the reviewed plan.
@@ -80,6 +82,8 @@ Options:
 Dry run reads the tables, prints what each of the four passes would do, and writes
 nothing to AWS. Apply re-reads the same tables, refuses a plan whose sources have
 changed, and then writes the rows under their deterministic ids.
+
+${PROD_GATE_USAGE}
 `;
 
 /**
@@ -93,7 +97,7 @@ export function resolveTarget(value) {
   if (suffix.includes(PRODUCTION_SUFFIX_FRAGMENT)) {
     throw new Error(
       `Refusing to run against production tables (${suffix}): this backfill writes ShipmentDocument rows ` +
-        'and rewrites Customer, TmsSettings and Order fields, and Step E is a dev-only build. ' +
+        'and rewrites Customer, TmsSettings and Order fields, and Step E is a dev-only build without --target prod. ' +
         `Point it at the dev suffix (${DEV_TABLE_SUFFIX}).`
     );
   }
@@ -802,6 +806,7 @@ function unchangedSince(name, before, slot) {
  * @param {string} input.suffix
  */
 export async function applyDocumentPlan({ doc, plan, suffix }) {
+  assertWritableSuffix(suffix, 'ShipmentDocument rows and required-document fields');
   const table = (model) => `${model}-${suffix}`;
   const auditTable = table('AuditLog');
   const report = {
@@ -904,13 +909,15 @@ export async function applyDocumentPlan({ doc, plan, suffix }) {
 // ── CLI ──────────────────────────────────────────────────────────────────────
 
 async function main() {
-  const args = parseTmsArgs({ suffix: { type: 'string' }, region: { type: 'string' } });
+  const args = parseTmsArgs({ suffix: { type: 'string' }, region: { type: 'string' }, ...PROD_GATE_OPTIONS });
   if (args.values.help) {
     console.log(USAGE);
     process.exit(0);
   }
 
-  const { suffix, environment } = resolveTarget(args.values.suffix);
+  const prod = await requireProd({ script: 'backfillShipmentDocuments', values: args.values, tables: PROD_WRITE_SETS.backfillShipmentDocuments.models });
+  const { suffix, environment } = prod ?? resolveTarget(args.values.suffix);
+  const apply = prod ? prod.apply : args.values.apply;
   const region = args.values.region ?? REGION_DEFAULT;
   const doc = DynamoDBDocumentClient.from(new DynamoDBClient({ region }), {
     marshallOptions: { removeUndefinedValues: true },
@@ -918,7 +925,7 @@ async function main() {
 
   const source = await readSource(doc, suffix);
 
-  if (!args.values.apply) {
+  if (!apply) {
     const plan = buildDocumentPlan({ source, environment, suffix });
     console.log(reviewText(plan));
     if (args.values.plan) {

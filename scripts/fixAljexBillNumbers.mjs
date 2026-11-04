@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 /**
- * Dev-only repair: CarrierBill.billNumber of Aljex-imported bills becomes the load's PRO.
+ * Repair: CarrierBill.billNumber of Aljex-imported bills becomes the load's PRO. Runs against the dev
+ * stack by default; production only through the shared gate (`--target prod`, scripts/lib/prodGate.mjs).
  *
  *   node scripts/fixAljexBillNumbers.mjs [--suffix <dev suffix>] [--apply]
+ *   node scripts/fixAljexBillNumbers.mjs --target prod --i-mean-production [--apply]   (needs BCAT_ALLOW_PROD)
  *
  * The first full import numbered bills by Aljex's `Carrier Ref #`, which is a copy of Driver Name
  * (a first name shared by many loads), so bill numbers collided per carrier and leaked driver names
@@ -21,14 +23,16 @@
  * Dry run (default) writes nothing. Output is aggregate counts only.
  */
 import { pathToFileURL } from 'node:url'
+import { parseArgs } from 'node:util'
 import { randomUUID } from 'node:crypto'
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
 import { DynamoDBDocumentClient, ScanCommand, PutCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb'
+import { DEV_SUFFIX, PROD_GATE_OPTIONS, PROD_SUFFIX, assertWritableSuffix as assertGateWritable, isProdAuthorized, isProductionSuffix, requireProd } from './lib/prodGate.mjs'
+import { PROD_WRITE_SETS } from './lib/prodWriteSets.mjs'
 import { normalizePro } from '../src/lib/proNumber.ts'
 
 const REGION = 'us-east-1'
-export const PROD_SUFFIX = '5ucwdyvwivelbo4k4jomvrwel4-NONE'
-export const DEV_SUFFIX = 'nc3jsnxdmjhkpequimypiatkma-NONE'
+export { PROD_SUFFIX, DEV_SUFFIX }
 export const REPAIR_ACTOR = 'migration:fixAljexBillNumbers'
 export const IMPORT_ACTOR = 'aljex-import'
 
@@ -85,10 +89,14 @@ export function planBillNumberRepairs({ bills, loads }) {
   return { updates, counts }
 }
 
-/** Only the dev stack may be written: the pinned production suffix is refused and so is anything but a `-NONE` Amplify suffix. */
+/**
+ * The dev stack may always be written; a production suffix (or a rehearsal copy) only after `requireProd`
+ * passed in this process for exactly that suffix. Anything else is refused.
+ */
 export function assertWritableSuffix(suffix) {
-  if (!suffix || suffix.includes(PROD_SUFFIX) || suffix.includes(PROD_SUFFIX.split('-')[0])) throw new Error('refusing the production suffix')
-  if (suffix !== DEV_SUFFIX) throw new Error('only the dev suffix may be repaired')
+  if (!suffix) throw new Error('refusing the production suffix')
+  if (isProductionSuffix(suffix)) return assertGateWritable(suffix, 'carrier bill numbers')
+  if (suffix !== DEV_SUFFIX && !isProdAuthorized(suffix)) throw new Error('only the dev suffix may be repaired')
 }
 
 async function scanAll(doc, table, attrs) {
@@ -127,20 +135,18 @@ export async function applyUpdates(doc, billTable, updates, now = new Date().toI
 }
 
 function parseArgv(argv) {
-  const out = { suffix: DEV_SUFFIX, apply: false }
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i]
-    if (a === '--suffix') out.suffix = argv[++i]
-    else if (a === '--apply') out.apply = true
-    else throw new Error(`unknown argument ${a}`)
-  }
-  return out
+  const { values } = parseArgs({ args: argv, options: { suffix: { type: 'string' }, apply: { type: 'boolean' }, ...PROD_GATE_OPTIONS }, allowPositionals: false })
+  return values
 }
 
 async function main() {
   let opts
   try {
-    opts = parseArgv(process.argv.slice(2))
+    const values = parseArgv(process.argv.slice(2))
+    const prod = await requireProd({ script: 'fixAljexBillNumbers', values, tables: PROD_WRITE_SETS.fixAljexBillNumbers.models })
+    opts = prod
+      ? { suffix: prod.suffix, apply: prod.apply }
+      : { suffix: values.suffix ?? DEV_SUFFIX, apply: values.apply === true }
     assertWritableSuffix(opts.suffix)
   } catch (e) {
     console.error(String(e.message ?? e))

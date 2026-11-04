@@ -40,12 +40,17 @@
  * not moved underneath it, then RE-PLANS off the table and prints that there is nothing
  * left to write.
  *
- * Two guards, because this script writes to DynamoDB directly (ProClaim is Lambda-written
+ * Guards, because this script writes to DynamoDB directly (ProClaim is Lambda-written
  * by the schema and there is no action for a migration): the TABLE SUFFIX is checked
- * before a single read — the production suffix is refused outright — the `--outputs` file
- * may not be the repo-root (production) `amplify_outputs.json`, and the identity it signs
- * in with (`BCAT_EMAIL` / `BCAT_PASSWORD`) must be the owner or in the ADMIN group, which
- * is read off the id token's own claims rather than taken on trust.
+ * before a single read — the production suffix is refused outright unless the run
+ * passed the shared production gate (`--target prod`, scripts/lib/prodGate.mjs) — the
+ * `--outputs` file may not be the repo-root (production) `amplify_outputs.json` except
+ * under that gate, and the identity it signs in with (`BCAT_EMAIL` / `BCAT_PASSWORD`)
+ * must be the owner or in the ADMIN group, which is read off the id token's own claims
+ * rather than taken on trust.
+ *
+ * Production is reachable ONLY through the shared gate: `--target prod` (see PROD_GATE_USAGE),
+ * which then needs the repo-root amplify_outputs.json as `--outputs`.
  *
  *   node scripts/backfillProClaims.mjs --help
  *   node scripts/backfillProClaims.mjs --outputs dev_outputs.json --plan plans/r-pro-claims.json
@@ -57,6 +62,8 @@ import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, ScanCommand, PutCommand } from '@aws-sdk/lib-dynamodb';
 import { authenticateTmsUser } from './lib/tmsAuth.mjs';
 import { parseTmsArgs, loadAmplifyOutputs } from './lib/tmsConfig.mjs';
+import { PROD_GATE_OPTIONS, PROD_GATE_USAGE, assertWritableSuffix, requireProd } from './lib/prodGate.mjs';
+import { PROD_WRITE_SETS } from './lib/prodWriteSets.mjs';
 import { createPlan, loadPlan, savePlan, validatePlan, summarize } from './lib/tmsPlan.mjs';
 // Node strips the types at run time, so the script claims PROs under exactly the key the
 // app and the Lambda use. A second copy of the normalizer would stay right for one release.
@@ -82,13 +89,15 @@ Usage: node scripts/backfillProClaims.mjs [options]
 Options:
   --help, -h        Show this offline help.
   --outputs <path>  Required: amplify_outputs.json for the DEV stack (the repo-root
-                    production file is refused). Sign-in uses BCAT_EMAIL / BCAT_PASSWORD
-                    and that identity must be the owner or in the ADMIN group.
+                    production file is refused, except with --target prod). Sign-in uses
+                    BCAT_EMAIL / BCAT_PASSWORD and that identity must be the owner or in
+                    the ADMIN group.
   --suffix <s>      DynamoDB table suffix (default ${DEV_TABLE_SUFFIX});
-                    the production suffix is refused.
+                    the production suffix is refused without --target prod.
   --region <r>      AWS region (default ${REGION_DEFAULT}).
   --plan <path>     (dry-run) write the plan file; (apply) read it back.
   --apply           Apply the reviewed plan.
+${PROD_GATE_USAGE}
 
 CLAIM:       one ProClaim row per PRO a Load already carries, keyed by the normalized
              PRO and written under attribute_not_exists(id) with origin ${CLAIM_ORIGIN}.
@@ -116,8 +125,8 @@ export function resolveTarget(value) {
   if (suffix.includes(PRODUCTION_SUFFIX_FRAGMENT)) {
     throw new Error(
       `Refusing to run against production tables (${suffix}): this backfill claims every PRO ` +
-        'on the board permanently and a claim is never released. Step R is a dev-only build. ' +
-        `Point it at the dev suffix (${DEV_TABLE_SUFFIX}).`
+        'on the board permanently and a claim is never released. Production only via the shared ' +
+        `gate: --target prod. Otherwise point it at the dev suffix (${DEV_TABLE_SUFFIX}).`
     );
   }
   return { suffix, environment: suffix === DEV_TABLE_SUFFIX ? 'dev' : suffix };
@@ -489,9 +498,7 @@ export async function readSource(doc, suffix) {
 export async function applyProClaimPlan({ doc, plan, suffix }) {
   // The suffix was checked before the read; it is checked again here because this is the
   // function that writes, and it is exported for tests and for other callers.
-  if (suffix.includes(PRODUCTION_SUFFIX_FRAGMENT)) {
-    throw new Error(`Refusing to write PRO claims in production tables (${suffix})`);
-  }
+  assertWritableSuffix(suffix, 'PRO claims');
   const table = `ProClaim-${suffix}`;
   const report = { claimsWritten: 0, alreadyClaimed: 0, failures: [] };
 
@@ -553,26 +560,28 @@ export async function replanAfterApply(doc, suffix) {
 // ── CLI ──────────────────────────────────────────────────────────────────────
 
 async function main() {
-  const args = parseTmsArgs({ suffix: { type: 'string' }, region: { type: 'string' } });
+  const args = parseTmsArgs({ suffix: { type: 'string' }, region: { type: 'string' }, ...PROD_GATE_OPTIONS });
   if (args.values.help) {
     console.log(USAGE);
     process.exit(0);
   }
 
-  const { suffix, environment } = resolveTarget(args.values.suffix);
+  const prod = await requireProd({ script: 'backfillProClaims', values: args.values, tables: PROD_WRITE_SETS.backfillProClaims.models });
+  const { suffix, environment } = prod ?? resolveTarget(args.values.suffix);
+  const apply = prod ? prod.apply : args.values.apply;
   const region = args.values.region ?? REGION_DEFAULT;
   const doc = DynamoDBDocumentClient.from(new DynamoDBClient({ region }), {
     marshallOptions: { removeUndefinedValues: true },
   });
 
-  const outputs = loadAmplifyOutputs(args.values.outputs);
+  const outputs = loadAmplifyOutputs(args.values.outputs, prod);
   const auth = await authenticateTmsUser(outputs);
   const identity = requireAdminIdentity(auth.token);
   console.log(`signed in as ${identity.email ?? '(no email claim)'}`);
 
   const source = await readSource(doc, suffix);
 
-  if (!args.values.apply) {
+  if (!apply) {
     const plan = buildProClaimPlan({ source, environment, suffix });
     console.log(reviewText(plan));
     if (args.values.plan) {

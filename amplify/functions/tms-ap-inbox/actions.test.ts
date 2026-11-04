@@ -33,6 +33,16 @@ describe('authorization matrix', () => {
     await expect(dispatch('AP_INBOX_NOPE', {}, ADMIN, kit.deps)).rejects.toThrow(/Unknown action/)
   })
 
+  it('an access-token caller (no email claim) is resolved through the directory, and still gated by group', async () => {
+    const kit = makeKit()
+    kit.deps.resolveEmail = async (u) => (u === 'abc-123' ? 'pay@bcatcorp.com' : '')
+    const tok = (groups: string[]) => ({ sub: 's', username: 'abc-123', claims: { 'cognito:groups': groups } })
+    await expect(dispatch('AP_INBOX_STATUS', {}, tok(['page-carrierPay']), kit.deps)).resolves.toMatchObject({ openCount: 0 })
+    await expect(dispatch('AP_INBOX_STATUS', {}, tok([]), kit.deps)).rejects.toThrow(/^Forbidden/)
+    kit.deps.resolveEmail = async () => ''
+    await expect(dispatch('AP_INBOX_STATUS', {}, tok(['ADMIN']), kit.deps)).rejects.toThrow(/could not resolve caller/)
+  })
+
   it('simulated-mailbox actions are refused off the dev stack, even for the owner', async () => {
     const kit = makeKit({}, { devStack: false })
     for (const a of ['AP_INBOX_CONNECT_SIMULATED', 'AP_INBOX_SIM_INJECT', 'AP_INBOX_SIM_RESET', 'AP_INBOX_SIM_PURGE_TEST']) {

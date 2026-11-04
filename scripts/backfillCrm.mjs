@@ -14,7 +14,8 @@
  * claim survives and a second run creates nothing. Dry run is the default and writes
  * nothing; `--apply` writes. Output is counts only — no addresses, no names.
  *
- * DEV ONLY: the production table suffix is refused before a single read.
+ * Dev by default: the production table suffix is refused before a single read, except through
+ * the shared gate (`--target prod`, scripts/lib/prodGate.mjs).
  *
  *   node scripts/backfillCrm.mjs               # dry run, counts only
  *   node scripts/backfillCrm.mjs --apply
@@ -23,6 +24,8 @@ import { randomUUID } from 'node:crypto';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, PutCommand, ScanCommand } from '@aws-sdk/lib-dynamodb';
 import { parseTmsArgs } from './lib/tmsConfig.mjs';
+import { PROD_GATE_OPTIONS, PROD_GATE_USAGE, requireProd, assertWritableSuffix } from './lib/prodGate.mjs';
+import { PROD_WRITE_SETS } from './lib/prodWriteSets.mjs';
 
 export const REGION_DEFAULT = 'us-east-1';
 export const DEV_TABLE_SUFFIX = 'nc3jsnxdmjhkpequimypiatkma-NONE';
@@ -33,12 +36,14 @@ const USAGE = `
 Usage: node scripts/backfillCrm.mjs [options]
 
   --help, -h     Show this offline help.
-  --suffix <s>   DynamoDB table suffix (default ${DEV_TABLE_SUFFIX}); production is refused.
+  --suffix <s>   DynamoDB table suffix (default ${DEV_TABLE_SUFFIX}); production only via --target prod.
   --region <r>   AWS region (default ${REGION_DEFAULT}).
   --apply        Write the rows. Without it nothing is written (dry run).
 
 Creates CrmAccount / CrmContact / CrmDomain rows for existing customers. Never overwrites
 a row, so it is safe to re-run. Prints counts only.
+
+${PROD_GATE_USAGE}
 `;
 
 /** @param {string | undefined} value */
@@ -47,7 +52,7 @@ export function resolveTarget(value) {
   if (!suffix) throw new Error('--suffix <tableSuffix> cannot be empty');
   if (suffix.includes(PRODUCTION_SUFFIX_FRAGMENT)) {
     throw new Error(
-      `Refusing to run against production tables (${suffix}): the CRM backfill is a dev-only build. ` +
+      `Refusing to run against production tables (${suffix}): the CRM backfill is a dev-only build without --target prod. ` +
         `Point it at the dev suffix (${DEV_TABLE_SUFFIX}).`
     );
   }
@@ -254,6 +259,7 @@ export async function readSource(doc, suffix) {
 
 /** @param {any} doc @param {ReturnType<typeof planCrmBackfill>} plan @param {string} suffix */
 export async function applyPlan({ doc, plan, suffix }) {
+  assertWritableSuffix(suffix, 'CRM rows');
   const now = new Date().toISOString();
   const created = { accounts: 0, contacts: 0, domains: 0 };
   const put = async (model, item) => {
@@ -300,19 +306,21 @@ export async function applyPlan({ doc, plan, suffix }) {
 // ── CLI ──────────────────────────────────────────────────────────────────────
 
 async function main() {
-  const args = parseTmsArgs({ suffix: { type: 'string' }, region: { type: 'string' } });
+  const args = parseTmsArgs({ suffix: { type: 'string' }, region: { type: 'string' }, ...PROD_GATE_OPTIONS });
   if (args.values.help) {
     console.log(USAGE);
     process.exit(0);
   }
-  const { suffix, environment } = resolveTarget(args.values.suffix);
+  const prod = await requireProd({ script: 'backfillCrm', values: args.values, tables: PROD_WRITE_SETS.backfillCrm.models });
+  const { suffix, environment } = prod ?? resolveTarget(args.values.suffix);
+  const apply = prod ? prod.apply : args.values.apply;
   const doc = DynamoDBDocumentClient.from(new DynamoDBClient({ region: args.values.region ?? REGION_DEFAULT }), {
     marshallOptions: { removeUndefinedValues: true },
   });
   const { customers, existing } = await readSource(doc, suffix);
   const plan = planCrmBackfill(customers, existing);
-  console.log(JSON.stringify({ environment, suffix, mode: args.values.apply ? 'apply' : 'dry-run', stats: plan.stats }, null, 2));
-  if (!args.values.apply) {
+  console.log(JSON.stringify({ environment, suffix, mode: apply ? 'apply' : 'dry-run', stats: plan.stats }, null, 2));
+  if (!apply) {
     console.log('\nDry run: nothing was written. Re-run with --apply to create these rows.');
     return;
   }

@@ -1,6 +1,7 @@
 /**
  * tms-crm-actions Lambda — see resource.ts. AppSync `tmsCrmActions(action, input)` only.
  */
+import './tableEnv'
 import { dispatch, type AppSyncIdentity } from './actions'
 
 interface CrmEvent {

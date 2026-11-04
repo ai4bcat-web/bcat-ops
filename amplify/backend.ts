@@ -70,7 +70,12 @@ import { tmsSpotQuoter } from './functions/tms-spot-quoter/resource'
 import { tmsCrmActions } from './functions/tms-crm-actions/resource'
 import { tmsApInbox } from './functions/tms-ap-inbox/resource'
 import { tmsDashboardRollup } from './functions/tms-dashboard-rollup/resource'
-import { devRuleState } from './devRuleGuard'
+import { devRuleState, devSesDeny } from './devRuleGuard'
+import { SHIPMENT_ACTIONS_TABLES } from './functions/tms-shipment-actions/tableEnv'
+import { TRACKING_ACTIONS_TABLES } from './functions/tms-tracking-actions/tableEnv'
+import { FINANCE_ACTIONS_TABLES } from './functions/tms-finance-actions/tableEnv'
+import { CRM_ACTIONS_TABLES } from './functions/tms-crm-actions/tableEnv'
+import { ALJEX_IMPORT_TABLES } from './functions/tms-aljex-import/tableEnv'
 import { loadTrackingProjector } from './functions/load-tracking-projector/resource'
 import { shipmentNotifier } from './functions/shipment-notifier/resource'
 import { checkCallNotifier } from './functions/check-call-notifier/resource'
@@ -888,11 +893,28 @@ const dispatchTableArns = [dispatchConversationTable.tableArn, dispatchMessageTa
 // (what tablesFromEnv reads); tmsTrackingActions reads TmsSettings from
 // TMS_SETTINGS_TABLE_NAME, wired with the rest of its own tables further down.
 const trackingActionsFn = backend.tmsTrackingActions.resources.lambda as LambdaFunction
+
+// One suffix instead of a full name per table. Each `<X>_TABLE_NAME` costs ~300 B in the data-stack
+// template (a Select/Split over the table ARN) and ~60 B of Lambda environment; the big TMS routers
+// carried 15-33 of them, which was 36 KB of a template capped at 1,000,000 B. The handler's tableEnv.ts
+// derives `<Model>-<suffix>` for every name it lists. The api id is cut out of a table name (no
+// reference to the API construct: that would close a cycle).
+function passDataTableSuffix(fn: LambdaFunction, tables: Readonly<Record<string, string>>): void {
+  const dataTables = backend.data.resources.tables
+  const models = [...new Set(Object.values(tables))]
+  const missing = models.filter((model) => !dataTables[model])
+  if (missing.length > 0) throw new Error(`DATA_TABLE_SUFFIX: ${fn.node.id} names models the data stack does not have: ${missing.join(', ')}`)
+  fn.addEnvironment('DATA_TABLE_SUFFIX', `${Fn.select(1, Fn.split('-', dataTables[models[0]].tableName))}-NONE`)
+}
+passDataTableSuffix(trackingActionsFn, TRACKING_ACTIONS_TABLES)
 for (const fn of [dispatchWebhookFn, dispatchActionsFn, dispatchSlackBridgeFn, dispatchNudgeFn, driverApiFn, trackingActionsFn]) {
-  fn.addEnvironment('CONVERSATION_TABLE_NAME', dispatchConversationTable.tableName)
-  fn.addEnvironment('MESSAGE_TABLE_NAME', dispatchMessageTable.tableName)
-  fn.addEnvironment('SETTINGS_TABLE_NAME', dispatchSettingsTable.tableName)
-  fn.addEnvironment('DRIVER_TABLE_NAME', dispatchDriverTable.tableName)
+  // trackingActionsFn takes its table names from DATA_TABLE_SUFFIX (passDataTableSuffix above).
+  if (fn !== trackingActionsFn) {
+    fn.addEnvironment('CONVERSATION_TABLE_NAME', dispatchConversationTable.tableName)
+    fn.addEnvironment('MESSAGE_TABLE_NAME', dispatchMessageTable.tableName)
+    fn.addEnvironment('SETTINGS_TABLE_NAME', dispatchSettingsTable.tableName)
+    fn.addEnvironment('DRIVER_TABLE_NAME', dispatchDriverTable.tableName)
+  }
   fn.addEnvironment('BUCKET_NAME', backend.storage.resources.bucket.bucketName)
   fn.addEnvironment('DISPATCH_PARAM_PATH', dispatchParamPath)
   fn.addToRolePolicy(new PolicyStatement({
@@ -939,7 +961,7 @@ for (const fn of [dispatchWebhookFn, dispatchActionsFn, dispatchSlackBridgeFn, d
 {
   const truckConfigTable = backend.data.resources.tables['TruckConfig']
   for (const fn of [trackingActionsFn, driverApiFn]) {
-    fn.addEnvironment('TRUCK_CONFIG_TABLE_NAME', truckConfigTable.tableName)
+    if (fn !== trackingActionsFn) fn.addEnvironment('TRUCK_CONFIG_TABLE_NAME', truckConfigTable.tableName)
     fn.addToRolePolicy(new PolicyStatement({ actions: ['dynamodb:GetItem'], resources: [truckConfigTable.tableArn] }))
   }
   trackingActionsFn.addToRolePolicy(new PolicyStatement({ actions: ['dynamodb:GetItem'], resources: [dispatchDriverTable.tableArn] }))
@@ -2325,6 +2347,7 @@ const shipmentNoticeTable    = backend.data.resources.tables['ShipmentNotice']
 // so the calendar's subscriptions still fire. Customer/TmsSettings are read-only
 // here — their writes stay with tmsDirectoryActions.
 const shipmentActionsFn = backend.tmsShipmentActions.resources.lambda as LambdaFunction
+passDataTableSuffix(shipmentActionsFn, SHIPMENT_ACTIONS_TABLES)
 ;(shipmentActionsFn.node.defaultChild as CfnFunction).timeout = 120
 const shipmentTable          = backend.data.resources.tables['Shipment']
 const orderTable             = backend.data.resources.tables['Order']
@@ -2423,7 +2446,6 @@ shipmentActionsFn.addToRolePolicy(new PolicyStatement({
   actions:   ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem', 'dynamodb:Scan'],
   resources: [shipmentAljexCodeMapTable.tableArn],
 }))
-shipmentActionsFn.addEnvironment('ALJEX_CODE_MAP_TABLE_NAME', shipmentAljexCodeMapTable.tableName)
 // Board and bundle reads come off the GSIs declared on these models.
 shipmentActionsFn.addToRolePolicy(
   new PolicyStatement({
@@ -2453,32 +2475,13 @@ shipmentActionsFn.addToRolePolicy(new PolicyStatement({
   actions:   ['dynamodb:Scan'],
   resources: [shipmentBoxTruckTripTable.tableArn],
 }))
-shipmentActionsFn.addEnvironment('BOX_TRUCK_TRIP_TABLE_NAME', shipmentBoxTruckTripTable.tableName)
 
-shipmentActionsFn.addEnvironment('SHIPMENT_TABLE_NAME',        shipmentTable.tableName)
-shipmentActionsFn.addEnvironment('ORDER_TABLE_NAME',           orderTable.tableName)
-shipmentActionsFn.addEnvironment('LOAD_CARRIER_TABLE_NAME',    loadCarrierTable.tableName)
-shipmentActionsFn.addEnvironment('LOAD_FINANCIALS_TABLE_NAME', loadFinancialsTable.tableName)
-shipmentActionsFn.addEnvironment('LOAD_CHARGE_TABLE_NAME',     loadChargeTable.tableName)
-shipmentActionsFn.addEnvironment('LOAD_TABLE_NAME',            shipmentLoadTable.tableName)
-shipmentActionsFn.addEnvironment('CUSTOMER_TABLE_NAME',        shipmentCustomerTable.tableName)
-shipmentActionsFn.addEnvironment('SETTINGS_TABLE_NAME',        shipmentSettingsTable.tableName)
-shipmentActionsFn.addEnvironment('AUDIT_LOG_TABLE_NAME',       shipmentAuditLogTable.tableName)
-shipmentActionsFn.addEnvironment('DRIVER_TABLE_NAME',          shipmentDriverTable.tableName)
-shipmentActionsFn.addEnvironment('LOAD_CHECK_CALL_TABLE_NAME', backend.data.resources.tables['LoadCheckCall'].tableName)
-shipmentActionsFn.addEnvironment('TRACKING_LINK_TABLE_NAME',   backend.data.resources.tables['TrackingLink'].tableName)
-shipmentActionsFn.addEnvironment('SHIPMENT_NOTICE_TABLE_NAME', shipmentNoticeTable.tableName)
-shipmentActionsFn.addEnvironment('OWNERSHIP_DIVISION_TABLE_NAME', shipmentOwnershipDivisionTable.tableName)
-shipmentActionsFn.addEnvironment('OWNERSHIP_RULE_TABLE_NAME',     shipmentOwnershipRuleTable.tableName)
-shipmentActionsFn.addEnvironment('PRO_CLAIM_TABLE_NAME',       shipmentProClaimTable.tableName)
-shipmentActionsFn.addEnvironment('USER_PROFILE_TABLE_NAME',    shipmentUserProfileTable.tableName)
 shipmentActionsFn.addEnvironment('USER_POOL_ID',               backend.auth.resources.userPool.userPoolId)
 // Step U: the intake review queue. Edit, promote and dismiss are this function's; staging
 // (the Put) belongs to workflow-agent. Scan + DeleteItem: the demo seed counts the open
 // rows (GET_DEMO_STATE) and a reset removes the one it staged; ConditionCheckItem for the
 // promote transaction's guards.
 const shipmentIntakeLoadTable = backend.data.resources.tables['IntakeLoad']
-shipmentActionsFn.addEnvironment('INTAKE_LOAD_TABLE_NAME', shipmentIntakeLoadTable.tableName)
 shipmentActionsFn.addToRolePolicy(new PolicyStatement({
   actions:   ['dynamodb:GetItem', 'dynamodb:Query', 'dynamodb:Scan', 'dynamodb:UpdateItem', 'dynamodb:PutItem', 'dynamodb:DeleteItem', 'dynamodb:ConditionCheckItem'],
   resources: [shipmentIntakeLoadTable.tableArn, `${shipmentIntakeLoadTable.tableArn}/index/*`],
@@ -2492,13 +2495,7 @@ shipmentActionsFn.addToRolePolicy(
 
 // Step C: BOOK_CARRIER reads the carrier and its paperwork, SEND_RATE_CON
 // stores the generated PDF and emails it to the carrier with SES.
-shipmentActionsFn.addEnvironment('CARRIER_TABLE_NAME',          shipmentCarrierTable.tableName)
-shipmentActionsFn.addEnvironment('CARRIER_DOCUMENT_TABLE_NAME', shipmentCarrierDocTable.tableName)
-shipmentActionsFn.addEnvironment('DIVISION_TABLE_NAME',         shipmentDivisionTable.tableName)
 // Step H: the quote board, the offer thread and the lane history.
-shipmentActionsFn.addEnvironment('CARRIER_CONTACT_TABLE_NAME',  shipmentCarrierContactTable.tableName)
-shipmentActionsFn.addEnvironment('QUOTE_TABLE_NAME',            shipmentQuoteTable.tableName)
-shipmentActionsFn.addEnvironment('LANE_RATE_SAMPLE_TABLE_NAME', shipmentLaneSampleTable.tableName)
 shipmentActionsFn.addEnvironment('BUCKET_NAME',                 backend.storage.resources.bucket.bucketName)
 shipmentActionsFn.addEnvironment('FROM_ADDRESS',                'ai4bcat@gmail.com')
 // The signing link in the email points at the app, not at the Function URL.
@@ -2539,9 +2536,6 @@ shipmentActionsFn.addToRolePolicy(
     ],
   }),
 )
-shipmentActionsFn.addEnvironment('SHIPMENT_DOCUMENT_TABLE_NAME',     shipmentDocumentTable.tableName)
-shipmentActionsFn.addEnvironment('DRIVER_SUBMISSION_TABLE_NAME',     driverSubmissionTable.tableName)
-shipmentActionsFn.addEnvironment('DRIVER_SUBMISSION_DOC_TABLE_NAME', driverSubmissionDocTable.tableName)
 backend.storage.resources.bucket.grantReadWrite(shipmentActionsFn, 'shipment-docs/*')
 
 // ── Step P: postings, carrier offers and the demo seed ──────────────────────
@@ -2578,16 +2572,12 @@ shipmentActionsFn.addToRolePolicy(
     ],
   }),
 )
-shipmentActionsFn.addEnvironment('SHIPMENT_POSTING_TABLE_NAME', shipmentPostingTable.tableName)
-shipmentActionsFn.addEnvironment('DEMO_RECORD_TABLE_NAME',      shipmentDemoTable.tableName)
-shipmentActionsFn.addEnvironment('SHIPMENT_MESSAGE_TABLE_NAME', shipmentMessageTable.tableName)
 // Step J: the market rate behind a quote and the board adapters read the
 // Integration row to decide stub vs live, and the credential pointer it carries.
 shipmentActionsFn.addToRolePolicy(new PolicyStatement({
   actions:   ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem', 'dynamodb:Query'],
   resources: [backend.data.resources.tables['Integration'].tableArn],
 }))
-shipmentActionsFn.addEnvironment('INTEGRATION_TABLE_NAME', backend.data.resources.tables['Integration'].tableName)
 // The credentials themselves stay in SSM. Read-only, and scoped to the same
 // per-pool integration path tmsDirectoryActions writes — a board posting and a
 // RateView lookup need DAT's key, and nothing on this role may write one.
@@ -2724,16 +2714,6 @@ trackingActionsFn.addToRolePolicy(
     ],
   })
 )
-trackingActionsFn.addEnvironment('TRACKING_LINK_TABLE_NAME',    trackingLinkTbl.tableName)
-trackingActionsFn.addEnvironment('LOAD_CHECK_CALL_TABLE_NAME',  trackingCheckCallTbl.tableName)
-trackingActionsFn.addEnvironment('SHIPMENT_TABLE_NAME',         trackingShipmentTbl.tableName)
-trackingActionsFn.addEnvironment('ORDER_TABLE_NAME',            trackingOrderTbl.tableName)
-trackingActionsFn.addEnvironment('LOAD_CARRIER_TABLE_NAME',     trackingLoadCarrTbl.tableName)
-trackingActionsFn.addEnvironment('LOAD_TABLE_NAME',             trackingLoadTbl.tableName)
-trackingActionsFn.addEnvironment('CUSTOMER_TABLE_NAME',         trackingCustomerTbl.tableName)
-trackingActionsFn.addEnvironment('TMS_SETTINGS_TABLE_NAME',     trackingSettingsTbl.tableName)
-trackingActionsFn.addEnvironment('AUDIT_LOG_TABLE_NAME',        trackingAuditLogTbl.tableName)
-trackingActionsFn.addEnvironment('DIVISION_TABLE_NAME',         trackingDivisionTbl.tableName)
 trackingActionsFn.addEnvironment('USER_POOL_ID',                backend.auth.resources.userPool.userPoolId)
 trackingActionsFn.addEnvironment('PORTAL_ORIGIN',               PORTAL_ORIGIN)
 trackingActionsFn.addEnvironment('FROM_ADDRESS',                'ai4bcat@gmail.com')
@@ -2745,8 +2725,6 @@ trackingActionsFn.addToRolePolicy(new PolicyStatement({
   actions:   ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:Query'],
   resources: [truckLocationHistoryTable.tableArn, `${truckLocationHistoryTable.tableArn}/index/*`, truckLocationTable.tableArn],
 }))
-trackingActionsFn.addEnvironment('TRUCK_LOCATION_HISTORY_TABLE_NAME', truckLocationHistoryTable.tableName)
-trackingActionsFn.addEnvironment('TRUCK_LOCATION_TABLE_NAME',         truckLocationTable.tableName)
 trackingActionsFn.addToRolePolicy(
   new PolicyStatement({
     // The Customer Link's contact card is the order's rep, read from the pool.
@@ -2773,7 +2751,6 @@ trackingActionsFn.addToRolePolicy(
     resources: [`${trackingShipmentTbl.tableArn}/index/*`],
   })
 )
-trackingActionsFn.addEnvironment('USER_PROFILE_TABLE_NAME', trackingUserProfileTbl.tableName)
 // ── Step E: the notice log, the document index and the files they carry ─────
 // tmsTrackingActions owns ShipmentNotice because it owns everything that leaves
 // the building. It only reads ShipmentDocument — document rows belong to
@@ -2787,8 +2764,6 @@ trackingActionsFn.addToRolePolicy(new PolicyStatement({
   actions:   ['dynamodb:GetItem', 'dynamodb:Query'],
   resources: [shipmentDocumentTable.tableArn, `${shipmentDocumentTable.tableArn}/index/*`],
 }))
-trackingActionsFn.addEnvironment('SHIPMENT_NOTICE_TABLE_NAME',   shipmentNoticeTable.tableName)
-trackingActionsFn.addEnvironment('SHIPMENT_DOCUMENT_TABLE_NAME', shipmentDocumentTable.tableName)
 backend.storage.resources.bucket.grantRead(trackingActionsFn, 'shipment-docs/*')
 backend.storage.resources.bucket.grantRead(trackingActionsFn, 'driver-docs/*')
 backend.storage.resources.bucket.grantRead(trackingActionsFn, 'rate-confirms/*')
@@ -2825,9 +2800,7 @@ trackingActionsFn.addToRolePolicy(new PolicyStatement({
   actions:   ['dynamodb:UpdateItem'],
   resources: [trackingOrderTbl.tableArn, trackingLoadTbl.tableArn],
 }))
-trackingActionsFn.addEnvironment('SHIPMENT_MESSAGE_TABLE_NAME', trackingMessageTbl.tableName)
 // The release gate reads the order's documents and charges before it answers.
-trackingActionsFn.addEnvironment('LOAD_CHARGE_TABLE_NAME', loadChargeTable.tableName)
 trackingActionsFn.addToRolePolicy(new PolicyStatement({
   actions:   ['dynamodb:GetItem', 'dynamodb:Query'],
   resources: [loadChargeTable.tableArn, `${loadChargeTable.tableArn}/index/*`],
@@ -2837,7 +2810,6 @@ trackingActionsFn.addToRolePolicy(new PolicyStatement({
 // Without these two grants (and the table name) REVIEW_SHIPMENT_POD fails on a real shipment
 // with "not authorized to perform: dynamodb:BatchGetItem".
 const trackingLoadFinancialsTbl = backend.data.resources.tables['LoadFinancials']
-trackingActionsFn.addEnvironment('LOAD_FINANCIALS_TABLE_NAME', trackingLoadFinancialsTbl.tableName)
 trackingActionsFn.addToRolePolicy(new PolicyStatement({
   actions:   ['dynamodb:BatchGetItem'],
   resources: [trackingLoadTbl.tableArn, trackingLoadFinancialsTbl.tableArn],
@@ -2854,6 +2826,7 @@ trackingActionsFn.addToRolePolicy(new PolicyStatement({
 // ShipmentNotice log every other outbound document uses, and writes the factoring
 // queue row that Send to Factor hands to the existing OTR submit.
 const financeActionsFn      = backend.tmsFinanceActions.resources.lambda as LambdaFunction
+passDataTableSuffix(financeActionsFn, FINANCE_ACTIONS_TABLES)
 const invoiceTable          = backend.data.resources.tables['Invoice']
 const arPaymentTable        = backend.data.resources.tables['ArPayment']
 const financeOrderTable     = backend.data.resources.tables['Order']
@@ -2939,29 +2912,6 @@ financeActionsFn.addToRolePolicy(
     ],
   })
 )
-financeActionsFn.addEnvironment('INVOICE_TABLE_NAME',            invoiceTable.tableName)
-financeActionsFn.addEnvironment('AR_PAYMENT_TABLE_NAME',         arPaymentTable.tableName)
-financeActionsFn.addEnvironment('ORDER_TABLE_NAME',              financeOrderTable.tableName)
-financeActionsFn.addEnvironment('SHIPMENT_TABLE_NAME',           financeShipmentTable.tableName)
-financeActionsFn.addEnvironment('LOAD_TABLE_NAME',               financeLoadTable.tableName)
-financeActionsFn.addEnvironment('LOAD_CARRIER_TABLE_NAME',       financeLoadCarrierTbl.tableName)
-financeActionsFn.addEnvironment('LOAD_FINANCIALS_TABLE_NAME',    financeFinancialsTbl.tableName)
-financeActionsFn.addEnvironment('LOAD_CHARGE_TABLE_NAME',        financeChargeTable.tableName)
-financeActionsFn.addEnvironment('CUSTOMER_TABLE_NAME',           financeCustomerTable.tableName)
-financeActionsFn.addEnvironment('DIVISION_TABLE_NAME',           financeDivisionTable.tableName)
-financeActionsFn.addEnvironment('SETTINGS_TABLE_NAME',           financeSettingsTable.tableName)
-financeActionsFn.addEnvironment('AUDIT_LOG_TABLE_NAME',          financeAuditLogTable.tableName)
-financeActionsFn.addEnvironment('FACTORING_ITEM_TABLE_NAME',     financeFactoringTable.tableName)
-financeActionsFn.addEnvironment('CARRIER_BILL_TABLE_NAME',       carrierBillTable.tableName)
-financeActionsFn.addEnvironment('AP_PAYMENT_TABLE_NAME',         apPaymentTable.tableName)
-financeActionsFn.addEnvironment('CARRIER_TABLE_NAME',            financeCarrierTable.tableName)
-financeActionsFn.addEnvironment('CARRIER_PAYMENT_METHOD_TABLE_NAME', financeCarrierPayTbl.tableName)
-financeActionsFn.addEnvironment('CARRIER_CONTACT_TABLE_NAME',    financeCarrierCntTbl.tableName)
-financeActionsFn.addEnvironment('SHIPMENT_DOCUMENT_TABLE_NAME',  shipmentDocumentTable.tableName)
-financeActionsFn.addEnvironment('SHIPMENT_NOTICE_TABLE_NAME',    shipmentNoticeTable.tableName)
-financeActionsFn.addEnvironment('COMMISSION_TABLE_NAME',          commissionTable.tableName)
-financeActionsFn.addEnvironment('COMMISSION_PAY_PERIOD_TABLE_NAME', commissionPeriodTable.tableName)
-financeActionsFn.addEnvironment('USER_PROFILE_TABLE_NAME',        financeUserProfileTbl.tableName)
 financeActionsFn.addEnvironment('BUCKET_NAME',                   backend.storage.resources.bucket.bucketName)
 financeActionsFn.addEnvironment('USER_POOL_ID',                  backend.auth.resources.userPool.userPoolId)
 financeActionsFn.addEnvironment('PORTAL_ORIGIN',                 PORTAL_ORIGIN)
@@ -3034,19 +2984,19 @@ const tableArnPattern = (fn: LambdaFunction, apiId: string, suffix = '') =>
 // same API id) — never another API's (production's) tables, by IAM and by code.
 const aljexImportFn = backend.tmsAljexImport.resources.lambda as LambdaFunction
 const aljexTables = backend.data.resources.tables
-const ALJEX_WRITE_TABLES: Array<[string, string]> = [
-  ['AljexImportJob', 'ALJEX_IMPORT_JOB_TABLE_NAME'], ['AljexMappingProfile', 'ALJEX_MAPPING_PROFILE_TABLE_NAME'],
-  ['LegacyAljexRow', 'LEGACY_ALJEX_ROW_TABLE_NAME'], ['Shipment', 'SHIPMENT_TABLE_NAME'], ['Order', 'ORDER_TABLE_NAME'],
-  ['Load', 'LOAD_TABLE_NAME'], ['LoadCarrier', 'LOAD_CARRIER_TABLE_NAME'], ['LoadFinancials', 'LOAD_FINANCIALS_TABLE_NAME'],
-  ['LoadCharge', 'LOAD_CHARGE_TABLE_NAME'], ['Customer', 'CUSTOMER_TABLE_NAME'], ['Location', 'LOCATION_TABLE_NAME'],
-  ['Carrier', 'CARRIER_TABLE_NAME'], ['Invoice', 'INVOICE_TABLE_NAME'], ['ArPayment', 'AR_PAYMENT_TABLE_NAME'],
-  ['CarrierBill', 'CARRIER_BILL_TABLE_NAME'], ['ApPayment', 'AP_PAYMENT_TABLE_NAME'], ['ProClaim', 'PRO_CLAIM_TABLE_NAME'],
-  ['TmsSettings', 'SETTINGS_TABLE_NAME'], ['AuditLog', 'AUDIT_LOG_TABLE_NAME'],
+const ALJEX_WRITE_TABLES: string[] = [
+  'AljexImportJob', 'AljexMappingProfile',
+  'LegacyAljexRow', 'Shipment', 'Order',
+  'Load', 'LoadCarrier', 'LoadFinancials',
+  'LoadCharge', 'Customer', 'Location',
+  'Carrier', 'Invoice', 'ArPayment',
+  'CarrierBill', 'ApPayment', 'ProClaim',
+  'TmsSettings', 'AuditLog',
 ]
-const ALJEX_READ_TABLES: Array<[string, string]> = [
-  ['FactoringItem', 'FACTORING_ITEM_TABLE_NAME'], ['Driver', 'DRIVER_TABLE_NAME'], ['UserProfile', 'USER_PROFILE_TABLE_NAME'],
-  ['OwnershipDivision', 'OWNERSHIP_DIVISION_TABLE_NAME'], ['OwnershipRule', 'OWNERSHIP_RULE_TABLE_NAME'],
-  ['Division', 'DIVISION_TABLE_NAME'], ['Integration', 'MCP_INTEGRATION_TABLE_NAME'],
+const ALJEX_READ_TABLES: string[] = [
+  'FactoringItem', 'Driver', 'UserProfile',
+  'OwnershipDivision', 'OwnershipRule',
+  'Division', 'Integration',
 ]
 const aljexApiId = stackApiId(aljexTables['Shipment'].tableName)
 aljexImportFn.addToRolePolicy(
@@ -3056,7 +3006,7 @@ aljexImportFn.addToRolePolicy(
       'dynamodb:Scan', 'dynamodb:Query', 'dynamodb:ConditionCheckItem', 'dynamodb:TransactWriteItems',
     ],
     resources: [
-      ...ALJEX_WRITE_TABLES.flatMap(([model]) => [aljexTables[model].tableArn, `${aljexTables[model].tableArn}/index/*`]),
+      ...ALJEX_WRITE_TABLES.flatMap((model) => [aljexTables[model].tableArn, `${aljexTables[model].tableArn}/index/*`]),
       // Rehearsal copies: unmanaged siblings of the live tables carrying the same API id.
       tableArnPattern(aljexImportFn, aljexApiId, '-rh*'),
       `${tableArnPattern(aljexImportFn, aljexApiId, '-rh*')}/index/*`,
@@ -3066,12 +3016,10 @@ aljexImportFn.addToRolePolicy(
 aljexImportFn.addToRolePolicy(
   new PolicyStatement({
     actions: ['dynamodb:GetItem', 'dynamodb:BatchGetItem', 'dynamodb:Scan', 'dynamodb:Query'],
-    resources: ALJEX_READ_TABLES.flatMap(([model]) => [aljexTables[model].tableArn, `${aljexTables[model].tableArn}/index/*`]),
+    resources: ALJEX_READ_TABLES.flatMap((model) => [aljexTables[model].tableArn, `${aljexTables[model].tableArn}/index/*`]),
   })
 )
-for (const [model, env] of [...ALJEX_WRITE_TABLES, ...ALJEX_READ_TABLES]) {
-  aljexImportFn.addEnvironment(env, aljexTables[model].tableName)
-}
+passDataTableSuffix(aljexImportFn, ALJEX_IMPORT_TABLES)
 aljexImportFn.addEnvironment('DATA_SAFETY_BUCKET', dataSafetyBucket.bucketName)
 aljexImportFn.addEnvironment('USER_POOL_ID', backend.auth.resources.userPool.userPoolId)
 aljexImportFn.addToRolePolicy(
@@ -3760,6 +3708,7 @@ factoringIntakeFn.addToRolePolicy(
 // from the Integrations page parameter, each rep's refresh token from its own prefix.
 const spotFn = backend.tmsSpotQuoter.resources.lambda as LambdaFunction
 const crmFn  = backend.tmsCrmActions.resources.lambda as LambdaFunction
+passDataTableSuffix(crmFn, CRM_ACTIONS_TABLES)
 const abTable = (name: string) => backend.data.resources.tables[name]
 const spotSettingsTable   = abTable('SpotSettings')
 const gmailConnTable      = abTable('GmailConnection')
@@ -3879,12 +3828,12 @@ backend.data.resources.cfnResources.amplifyDynamoDbTables['TruckLocationHistory'
 // The listener is a third door in the spot Lambda. It classifies and hands the result to
 // tms-shipment-actions (FILE_INBOUND_OFFER, system caller 'carrier-inbox' only); the spot role
 // gets no write on Quote/Shipment/ShipmentMessage. The invoke grant is a resource policy on the
-// target (no cycle; the TrackingAutomationInvoke precedent).
+// target (no cycle). NO sourceArn: a direct Invoke by a role carries no aws:SourceArn, so that
+// condition (the TrackingAutomationInvoke shape) never matches and the call is denied.
 spotFn.addEnvironment('SHIPMENT_ACTIONS_FUNCTION_NAME', backend.tmsShipmentActions.resources.lambda.functionName)
 backend.tmsShipmentActions.resources.lambda.addPermission('CarrierInboxInvoke', {
   principal: spotFn.grantPrincipal,
   action: 'lambda:InvokeFunction',
-  sourceArn: spotFn.functionArn,
 })
 // Cowtown voice agent POSTs a call summary here; the body secret (sha256 in SpotSettings) is the only auth.
 const carrierCallUrl = new FunctionUrl(spotFn.stack, 'CarrierCallUrl', {
@@ -3933,6 +3882,12 @@ apInboxFn.addEnvironment('BUCKET_NAME',                 backend.storage.resource
 apInboxFn.addEnvironment('INTEGRATION_PARAM_PATH',      integrationParamPath)
 apInboxFn.addEnvironment('GMAIL_TOKEN_PARAM_PATH',      gmailTokenParamPath)
 apInboxFn.addEnvironment('PORTAL_ORIGINS',              JSON.stringify(PORTAL_ORIGINS))
+// Access tokens carry no e-mail claim: authorize() resolves the caller through AdminGetUser (vendorApActions pattern).
+apInboxFn.addEnvironment('USER_POOL_ID',                  backend.auth.resources.userPool.userPoolId)
+apInboxFn.addToRolePolicy(new PolicyStatement({
+  actions:   ['cognito-idp:AdminGetUser'],
+  resources: [backend.auth.resources.userPool.userPoolArn],
+}))
 
 apInboxFn.addToRolePolicy(new PolicyStatement({
   actions:   ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem', 'dynamodb:Query', 'dynamodb:Scan'],
@@ -4004,17 +3959,12 @@ backend.data.resources.cfnResources.amplifyDynamoDbTables['ApInboxItem'].timeToL
 
 // tms-crm-actions: RW on the four CRM tables; read-only on what the timeline derives
 // from; audit PutItem. No SSM, S3, model or Gmail.
-crmFn.addEnvironment('CRM_CONTACT_TABLE_NAME',  crmContactTable.tableName)
-crmFn.addEnvironment('CRM_DOMAIN_TABLE_NAME',   crmDomainTable.tableName)
-crmFn.addEnvironment('CRM_ACTIVITY_TABLE_NAME', crmActivityTable.tableName)
-crmFn.addEnvironment('CRM_ACCOUNT_TABLE_NAME',  crmAccountTable.tableName)
-crmFn.addEnvironment('CUSTOMER_TABLE_NAME',     abCustomerTable.tableName)
-crmFn.addEnvironment('QUOTE_TABLE_NAME',        abQuoteTable.tableName)
-crmFn.addEnvironment('SHIPMENT_TABLE_NAME',     abShipmentTable.tableName)
-crmFn.addEnvironment('ORDER_TABLE_NAME',        abOrderTable.tableName)
-crmFn.addEnvironment('USER_PROFILE_TABLE_NAME', abUserProfileTable.tableName)
-crmFn.addEnvironment('AUDIT_LOG_TABLE_NAME',    abAuditTable.tableName)
 crmFn.addEnvironment('USER_POOL_ID',            backend.auth.resources.userPool.userPoolId)
+// A caller with no UserProfile row (first load on a fresh stack) is resolved through the pool.
+crmFn.addToRolePolicy(new PolicyStatement({
+  actions:   ['cognito-idp:AdminGetUser'],
+  resources: [backend.auth.resources.userPool.userPoolArn],
+}))
 crmFn.addToRolePolicy(new PolicyStatement({
   actions:   ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem', 'dynamodb:DeleteItem', 'dynamodb:Query', 'dynamodb:Scan'],
   resources: withIndexes(crmContactTable, crmDomainTable, crmActivityTable, crmAccountTable),
@@ -4039,11 +3989,6 @@ crmFn.addToRolePolicy(new PolicyStatement({
 // and DashboardRollup is the spec store (rows 'DASH:<id>'; Put/Update ONLY there).
 {
   const aiTables = backend.data.resources.tables
-  crmFn.addEnvironment('INVOICE_TABLE_NAME',            aiTables['Invoice'].tableName)
-  crmFn.addEnvironment('LANE_RATE_SAMPLE_TABLE_NAME',   aiTables['LaneRateSample'].tableName)
-  crmFn.addEnvironment('TMS_SETTINGS_TABLE_NAME',       aiTables['TmsSettings'].tableName)
-  crmFn.addEnvironment('OWNERSHIP_DIVISION_TABLE_NAME', aiTables['OwnershipDivision'].tableName)
-  crmFn.addEnvironment('DASHBOARD_ROLLUP_TABLE_NAME',   aiTables['DashboardRollup'].tableName)
   crmFn.addToRolePolicy(new PolicyStatement({
     actions:   ['dynamodb:GetItem', 'dynamodb:Scan', 'dynamodb:PutItem', 'dynamodb:UpdateItem'],
     resources: [aiTables['DashboardRollup'].tableArn],
@@ -4120,7 +4065,9 @@ crmFn.addToRolePolicy(new PolicyStatement({
 // shipmentNotifier is enabled here too: its one outside call is SES, which the deny
 // below refuses, so every notice it writes lands as a NOT_SENT row carrying the text
 // it rendered — which is exactly the behaviour dev needs to exercise.
-// Every Lambda is denied SES. Slack, OTR, Paychex and Blue Ink are
+// Every Lambda is denied SES to any recipient except ai4bcat@gmail.com (and its +tag aliases):
+// the account has SES production access, so this condition is the only thing standing between
+// dev data and a real customer's inbox. Slack, OTR, Paychex and Blue Ink are
 // neutered on dev by branch-level secret overrides (see Docs/DEV_STACK.md); Twilio
 // is inert because dev's user pool has no /bcat/dispatch/<poolId>/ config.
 // Runs last so every rule already exists. Refused on main.
@@ -4137,24 +4084,39 @@ if (process.env.BCAT_DEV_STACK === 'true') {
     // tables and writes only the DashboardRollup table. A lookalike id stays disabled.
     if (construct instanceof CfnRule) construct.state = devRuleState(construct.node.scope?.node.id)
   }
-  // Secrets that reach a third party with side effects are replaced by a placeholder on
-  // dev. Amplify resolves `secret()` values at cold start from the SSM paths listed in
-  // AMPLIFY_SSM_ENV_CONFIG; dropping a name from that list and setting the variable to a
-  // plain string leaves the Lambda running with a token that no provider will accept.
-  // Read-only providers (Motive, Google, Anthropic) keep their real keys.
-  const NEUTERED_SECRETS = ['SLACK_BOT_TOKEN', 'OTR_USERNAME', 'OTR_PASSWORD', 'OTR_SUBSCRIPTION_KEY', 'PAYCHEX_CLIENT_ID', 'PAYCHEX_CLIENT_SECRET', 'BLUE_INK_TECH_API_KEY']
   for (const construct of Object.values(backend)) {
     const lambda = (construct as { resources?: { lambda?: LambdaFunction } }).resources?.lambda
     if (!lambda) continue
-    lambda.addToRolePolicy(new PolicyStatement({ effect: Effect.DENY, actions: ['ses:*'], resources: ['*'] }))
+    // Mail may only reach the test mailbox (devRuleGuard.ts devSesDeny): one other recipient refuses the send.
+    const sesDeny = devSesDeny()
+    lambda.addToRolePolicy(new PolicyStatement({ effect: Effect.DENY, actions: sesDeny.actions, resources: ['*'], conditions: sesDeny.conditions }))
     lambda.addEnvironment('BCAT_DEV_STACK', 'true')
   }
+}
+
+// ── Secret environment variables (every stack) ──────────────────────────────
+// Amplify fills each `secret()` variable from SSM at cold start: the runtime shim overwrites
+// process.env[name] with the parameter, whatever the deployed value was. The deployed value is
+// the 39-byte placeholder "<value will be resolved during runtime>", which Lambda counts against
+// its 4 KB environment limit (89 variables on main = 3.4 KB of template and environment). Ship
+// an empty string instead; a secret SSM does not hold then reads as unset rather than as that text.
+//
+// On the dev stack the secrets that reach a third party with side effects are replaced by a
+// placeholder: Amplify resolves `secret()` values at cold start from the SSM paths listed in
+// AMPLIFY_SSM_ENV_CONFIG; dropping a name from that list and setting the variable to a plain
+// string leaves the Lambda running with a token that no provider will accept. Read-only
+// providers (Motive, Google, Anthropic) keep their real keys.
+{
+  const SSM_VALUE_PLACEHOLDER = '<value will be resolved during runtime>'
+  const DEV_STACK = process.env.BCAT_DEV_STACK === 'true'
+  const NEUTERED_SECRETS = ['SLACK_BOT_TOKEN', 'OTR_USERNAME', 'OTR_PASSWORD', 'OTR_SUBSCRIPTION_KEY', 'PAYCHEX_CLIENT_ID', 'PAYCHEX_CLIENT_SECRET', 'BLUE_INK_TECH_API_KEY']
+  let envRootStack: Stack = backend.data.stack
+  while (envRootStack.nestedStackParent) envRootStack = envRootStack.nestedStackParent
   // Amplify sets AMPLIFY_SSM_ENV_CONFIG to a Lazy token (JSON of {name: {path, sharedPath}})
-  // and each secret variable to a placeholder that its runtime shim replaces from SSM. The
-  // rendered environment is only knowable at synth, so an Aspect resolves it then, drops the
-  // neutered names from the SSM config and pins those variables to a placeholder string
-  // through property overrides (which apply after the L2 renders its environment).
-  Aspects.of(devRootStack).add({
+  // and each secret variable to the placeholder. The rendered environment is only knowable at
+  // synth, so an Aspect resolves it then and applies property overrides (which apply after the
+  // L2 renders its environment). One Aspect owns both rewrites so the dev pin always wins.
+  Aspects.of(envRootStack).add({
     visit(node: IConstruct) {
       if (!(node instanceof CfnFunction)) return
       const rendered = Stack.of(node).resolve(node.environment) as { variables?: Record<string, unknown> } | undefined
@@ -4162,13 +4124,15 @@ if (process.env.BCAT_DEV_STACK === 'true') {
       const ssmConfig = vars.AMPLIFY_SSM_ENV_CONFIG
       if (typeof ssmConfig !== 'string') return
       const parsed = JSON.parse(ssmConfig) as Record<string, unknown>
-      const removed = NEUTERED_SECRETS.filter((name) => name in parsed)
-      if (removed.length === 0) return
-      for (const name of removed) {
+      const neutered = DEV_STACK ? NEUTERED_SECRETS.filter((name) => name in parsed) : []
+      for (const name of neutered) {
         delete parsed[name]
         node.addPropertyOverride(`Environment.Variables.${name}`, 'disabled-on-dev')
       }
-      node.addPropertyOverride('Environment.Variables.AMPLIFY_SSM_ENV_CONFIG', JSON.stringify(parsed))
+      for (const name of Object.keys(parsed)) {
+        if (vars[name] === SSM_VALUE_PLACEHOLDER) node.addPropertyOverride(`Environment.Variables.${name}`, '')
+      }
+      if (neutered.length > 0) node.addPropertyOverride('Environment.Variables.AMPLIFY_SSM_ENV_CONFIG', JSON.stringify(parsed))
     },
   })
 }

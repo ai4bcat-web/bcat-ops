@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { TRACKING_ACTIONS_TABLES } from './functions/tms-tracking-actions/tableEnv'
 
 const backend = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'backend.ts'), 'utf8')
 
@@ -34,6 +35,6 @@ describe('tmsTrackingActions can run readBundle', () => {
   })
 
   it('is told the LoadFinancials table name, which shipmentTablesFromEnv reads', () => {
-    expect(backend).toMatch(/trackingActionsFn\.addEnvironment\('LOAD_FINANCIALS_TABLE_NAME', trackingLoadFinancialsTbl\.tableName\)/)
+    expect(TRACKING_ACTIONS_TABLES.LOAD_FINANCIALS_TABLE_NAME).toBe('LoadFinancials')
   })
 })

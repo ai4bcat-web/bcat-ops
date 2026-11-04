@@ -1326,9 +1326,20 @@ export type TxResult =
   | { ok: true }
   | { ok: false; reason: 'CONDITION' | 'THROTTLED' | 'ERROR'; failedIndex?: number; message?: string }
 
+/**
+ * Set ONLY by the offline CLI after the production gate passed (scripts/lib/prodGate.mjs). The deployed worker never
+ * sets it, so the Lambda keeps refusing everything but the dev stack. See `productionPolicy` in engine/tables.ts.
+ */
+export interface EngineTargetPolicy {
+  readSuffix: string
+  writeSuffix: string
+  production: true
+}
+
 export interface EngineStore {
   now(): string
   tables: TableSet
+  targetPolicy?: EngineTargetPolicy
   getMany(table: EngineTable, ids: string[]): Promise<EngineRow[]>
   scanAll(table: EngineTable, projection?: string[]): AsyncIterable<EngineRow[]>
   transact(items: TxItem[], label: string): Promise<TxResult>

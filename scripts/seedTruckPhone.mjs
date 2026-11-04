@@ -1,19 +1,27 @@
 #!/usr/bin/env node
 /**
- * Step AK — put a test work phone on the truck currently assigned to driver John Brittich (DEV ONLY).
+ * Step AK — put a test work phone on the truck currently assigned to driver John Brittich (dev; production only
+ * through the shared gate, and CUTOVER_PLAN ADVISES AGAINST running this on production: it is a test fixture).
  *
  *   node scripts/seedTruckPhone.mjs --phone=<US number>            # dry run (default): prints the plan
  *   node scripts/seedTruckPhone.mjs --phone=<US number> --apply    # writes TruckConfig.phone / phoneLabel
  *   node scripts/seedTruckPhone.mjs --revert --apply               # writes phone: null, phoneLabel: null
+ *   node scripts/seedTruckPhone.mjs --phone=<US number> --target prod --i-mean-production --outputs <repo-root amplify_outputs.json>
+ *                                                                   # production-gated (scripts/lib/prodGate.mjs); dry run unless --apply;
+ *                                                                   # signs in as BCAT_EMAIL / BCAT_PASSWORD (ADMIN), mints nobody
  *
  * The number comes ONLY from --phone= or the AJK_SEED_PHONE environment variable. It is never
  * stored in this repository and is printed masked (last four digits). Truck choice: the truck on
  * John Brittich's driver file (`assignedTruckId`); `--truck=<unitNumber>` names one instead
- * (it does NOT assign that truck to the driver). Dev only: the endpoint is the dev AppSync API,
- * and a production table suffix anywhere in the target aborts before a single read. SSM is never
- * touched; the throwaway admin login is deleted afterwards.
+ * (it does NOT assign that truck to the driver). Without --target prod: the endpoint is the dev AppSync API,
+ * a production table suffix anywhere in the target aborts before a single read, a throwaway admin login is
+ * minted in the dev pool and deleted afterwards. With --target prod the shared gate decides and the
+ * identity is the BCAT_EMAIL / BCAT_PASSWORD ADMIN login on the pool in --outputs. SSM is never touched.
  */
 import { pathToFileURL } from 'node:url'
+import { parseArgs as nodeParseArgs } from 'node:util'
+import { PROD_GATE_OPTIONS, requireProd } from './lib/prodGate.mjs'
+import { PROD_WRITE_SETS } from './lib/prodWriteSets.mjs'
 
 export const DRIVER_NAME = 'John Brittich'
 export const PHONE_LABEL = 'Dev test phone (Ryne)'
@@ -97,14 +105,37 @@ export function describePlan(plan, apply) {
 }
 
 export function parseArgs(argv, env = {}) {
-  const flags = new Set(argv.filter((a) => !a.includes('=')))
-  const kv = Object.fromEntries(argv.filter((a) => a.startsWith('--') && a.includes('=')).map((a) => [a.slice(2, a.indexOf('=')), a.slice(a.indexOf('=') + 1)]))
+  const { values } = nodeParseArgs({
+    args: argv,
+    options: {
+      apply: { type: 'boolean' },
+      revert: { type: 'boolean' },
+      truck: { type: 'string' },
+      phone: { type: 'string' },
+      outputs: { type: 'string' },
+      ...PROD_GATE_OPTIONS,
+    },
+    allowPositionals: false,
+  })
   return {
-    apply: flags.has('--apply'),
-    revert: flags.has('--revert'),
-    truckUnit: kv.truck || null,
-    phone: kv.phone ?? env.AJK_SEED_PHONE ?? null,
+    apply: values.apply === true,
+    revert: values.revert === true,
+    truckUnit: values.truck || null,
+    phone: values.phone ?? env.AJK_SEED_PHONE ?? null,
+    values,
   }
+}
+
+/** GraphQL against the endpoint a production-gated run signed in to (the dev helper is pinned to the dev API). */
+async function gqlAt(endpoint, token, query, variables) {
+  const res = await fetch(endpoint, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: token },
+    body: JSON.stringify({ query, variables }),
+  })
+  const body = await res.json()
+  if (body.errors) throw new Error(body.errors.map((e) => e.message).join('; '))
+  return body.data
 }
 
 const TRUCK_CONFIG_FIELDS = 'truckId unitNumber phone phoneLabel'
@@ -119,13 +150,27 @@ async function main() {
       process.exit(2)
     }
   }
-  const { DEV_API, mintIdentity, deleteIdentity, gql } = await import('./lib/devIdentity.mjs')
-  assertDevTarget({ endpoint: DEV_API, suffix: process.env.TABLE_SUFFIX })
-
-  const email = `zz-ajk-seed-${Date.now()}@example.com`
+  const prod = await requireProd({ script: 'seedTruckPhone', values: args.values, tables: PROD_WRITE_SETS.seedTruckPhone.models })
+  const apply = prod ? prod.apply : args.apply
+  let token
+  let gql
+  let email
+  let dev
   let created = false
+  if (prod) {
+    const { loadAmplifyOutputs } = await import('./lib/tmsConfig.mjs')
+    const { authenticateTmsUser } = await import('./lib/tmsAuth.mjs')
+    const auth = await authenticateTmsUser(loadAmplifyOutputs(args.values.outputs, prod))
+    token = auth.token
+    gql = (t, query, variables) => gqlAt(auth.endpoint, t, query, variables)
+  } else {
+    dev = await import('./lib/devIdentity.mjs')
+    assertDevTarget({ endpoint: dev.DEV_API, suffix: process.env.TABLE_SUFFIX })
+    gql = dev.gql
+    email = `zz-ajk-seed-${Date.now()}@example.com`
+  }
   try {
-    const { token } = await mintIdentity(email, ['ADMIN'])
+    if (!prod) token = (await dev.mintIdentity(email, ['ADMIN'])).token
     const list = async (field, fields) => {
       const rows = []
       let nextToken = null
@@ -148,21 +193,21 @@ async function main() {
       return list('listTruckConfigs', 'truckId unitNumber')
     })
     const plan = planTruckPhone({ drivers, equipment, configs, truckUnit: args.truckUnit, phone, revert: args.revert })
-    console.log(describePlan(plan, args.apply && schemaReady))
+    console.log(describePlan(plan, apply && schemaReady))
     if (!plan.ok) process.exitCode = plan.code
-    else if (args.apply && !schemaReady) {
+    else if (apply && !schemaReady) {
       console.error('The dev schema has no TruckConfig.phone yet (AJ/AK not deployed) — nothing written; run --apply after the deploy.')
       process.exitCode = 3
-    } else if (args.apply && plan.action !== 'unchanged') {
+    } else if (apply && plan.action !== 'unchanged') {
       const model = plan.action === 'create' ? 'Create' : 'Update'
       await gql(
         token,
         `mutation($input: ${model}TruckConfigInput!){ ${model.toLowerCase()}TruckConfig(input:$input){ ${TRUCK_CONFIG_FIELDS} } }`,
         { input: plan.input },
       )
-    } else if (!args.apply) console.log('Dry run — pass --apply to write.')
+    } else if (!apply) console.log('Dry run — pass --apply to write.')
   } finally {
-    if (created) console.log(`throwaway login removed: ${await deleteIdentity(email)}`)
+    if (created) console.log(`throwaway login removed: ${await dev.deleteIdentity(email)}`)
   }
 }
 

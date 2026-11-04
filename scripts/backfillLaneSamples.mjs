@@ -57,7 +57,8 @@
  *
  * The guard that matters is the TABLE SUFFIX, not a flag a human types: this script
  * talks to DynamoDB directly, so the environment is read off the tables it was
- * pointed at and the production suffix is refused before a single read.
+ * pointed at and the production suffix is refused before a single read. Production
+ * is reachable only through the shared gate (`--target prod`, scripts/lib/prodGate.mjs).
  *
  *   node scripts/backfillLaneSamples.mjs --help
  *   node scripts/backfillLaneSamples.mjs --plan plans/h-lane-samples.json
@@ -90,6 +91,8 @@ import { DynamoDBDocumentClient, ScanCommand, PutCommand, UpdateCommand } from '
 import { parseTmsArgs } from './lib/tmsConfig.mjs';
 import { createPlan, loadPlan, savePlan, validatePlan, summarize } from './lib/tmsPlan.mjs';
 import { getStops } from './lib/tmsStops.mjs';
+import { PROD_GATE_OPTIONS, PROD_GATE_USAGE, requireProd, assertWritableSuffix } from './lib/prodGate.mjs';
+import { PROD_WRITE_SETS } from './lib/prodWriteSets.mjs';
 
 export const REGION_DEFAULT = 'us-east-1';
 /** The dev stack. Every write this script makes lands here unless --suffix says otherwise. */
@@ -143,7 +146,7 @@ Usage: node scripts/backfillLaneSamples.mjs [options]
 Options:
   --help, -h        Show this offline help.
   --suffix <s>      DynamoDB table suffix (default ${DEV_TABLE_SUFFIX});
-                    the production suffix is refused.
+                    the production suffix is refused (production only via --target prod).
   --region <r>      AWS region (default ${REGION_DEFAULT}).
   --plan <path>     (dry-run) write the plan file; (apply) read it back.
   --apply           Apply the reviewed plan.
@@ -170,6 +173,8 @@ writes each row under a condition that makes a re-run free.
 
   node scripts/backfillLaneSamples.mjs --refresh --plan plans/r-lane-facts.json
   node scripts/backfillLaneSamples.mjs --refresh --apply --plan plans/r-lane-facts.json
+
+${PROD_GATE_USAGE}
 `;
 
 /**
@@ -184,7 +189,7 @@ export function resolveTarget(value) {
     throw new Error(
       `Refusing to run against production tables (${suffix}): this backfill writes ` +
         'LaneRateSample rows that price every future quote, and Step H is a dev-only ' +
-        `build. Point it at the dev suffix (${DEV_TABLE_SUFFIX}).`
+        `build without --target prod. Point it at the dev suffix (${DEV_TABLE_SUFFIX}).`
     );
   }
   return { suffix, environment: suffix === DEV_TABLE_SUFFIX ? 'dev' : suffix };
@@ -1148,9 +1153,7 @@ async function writeAudit(doc, table, entityId, action, changes) {
 export async function applyLaneSamplePlan({ doc, plan, suffix }) {
   // The suffix was checked before the read; it is checked again here because this is
   // the function that writes, and it is exported for tests and for other callers.
-  if (suffix.includes(PRODUCTION_SUFFIX_FRAGMENT)) {
-    throw new Error(`Refusing to write LaneRateSample rows to production tables (${suffix})`);
-  }
+  assertWritableSuffix(suffix, 'LaneRateSample rows');
   const sampleTable = `LaneRateSample-${suffix}`;
   const auditTable = `AuditLog-${suffix}`;
   const report = {
@@ -1256,13 +1259,16 @@ async function main() {
     suffix: { type: 'string' },
     region: { type: 'string' },
     refresh: { type: 'boolean' },
+    ...PROD_GATE_OPTIONS,
   });
   if (args.values.help) {
     console.log(USAGE);
     process.exit(0);
   }
 
-  const { suffix, environment } = resolveTarget(args.values.suffix);
+  const prod = await requireProd({ script: 'backfillLaneSamples', values: args.values, tables: PROD_WRITE_SETS.backfillLaneSamples.models });
+  const { suffix, environment } = prod ?? resolveTarget(args.values.suffix);
+  const apply = prod ? prod.apply : args.values.apply;
   const region = args.values.region ?? REGION_DEFAULT;
   const doc = DynamoDBDocumentClient.from(new DynamoDBClient({ region }), {
     marshallOptions: { removeUndefinedValues: true },
@@ -1270,7 +1276,7 @@ async function main() {
 
   const source = await readSource(doc, suffix);
 
-  if (!args.values.apply) {
+  if (!apply) {
     const plan = buildLaneSamplePlan({ source, environment, suffix, refreshLive: Boolean(args.values.refresh) });
     console.log(reviewText(plan));
     if (args.values.plan) {

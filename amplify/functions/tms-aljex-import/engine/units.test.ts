@@ -8,6 +8,7 @@ import { invoiceMath } from './memos'
 import { main, parseArgs, parseSlice, parseTarget } from './cli'
 import { makeFixture, makeStore } from './testKit'
 import { MemoryStore } from './memoryStore'
+import { assertTargets, DEV_SUFFIX, PROD_SUFFIX, productionPolicy, tableSetFor, TargetRefused } from './tables'
 import type { StagedMasters, MasterCarrier } from './types'
 
 describe('directory keys (golden corpus: each helper keeps its historical output)', () => {
@@ -171,5 +172,47 @@ describe('invoice math with memo adjustments (DECIDED-1)', () => {
 
   it('does not invent a residual when the load has no Bal Due', () => {
     expect(invoiceMath(load({ invoice: 100_00, paid: 0, bal: null }), 10_00)).toMatchObject({ residualCents: 0, totalCents: 110_00, balanceCents: 110_00 })
+  })
+})
+
+describe('production policy (offline CLI only)', () => {
+  const job = { target: 'LIVE' as const, targetTag: null, liveTag: 'GO-LIVE' }
+  const dev = tableSetFor(DEV_SUFFIX, DEV_SUFFIX)
+
+  it('without a policy production tables stay refused', () => {
+    const prod = tableSetFor(PROD_SUFFIX, PROD_SUFFIX)
+    expect(() => assertTargets(prod, prod, job)).toThrow(TargetRefused)
+  })
+
+  it('accepts exactly the policy table set, for production and for the dev-shaped rehearsal seam', () => {
+    const prod = tableSetFor(PROD_SUFFIX, PROD_SUFFIX)
+    expect(() => assertTargets(prod, prod, job, productionPolicy(PROD_SUFFIX))).not.toThrow()
+    const rh = tableSetFor(DEV_SUFFIX, `${DEV_SUFFIX}-rhabc`)
+    expect(() => assertTargets(rh, rh, job, productionPolicy(`${DEV_SUFFIX}-rhabc`))).not.toThrow()
+  })
+
+  it('refuses mixed stacks, a rehearsal job, a missing live tag and foreign suffixes', () => {
+    const p = productionPolicy(PROD_SUFFIX)
+    const mixed = { ...tableSetFor(PROD_SUFFIX, PROD_SUFFIX), load: `Load-${DEV_SUFFIX}` }
+    expect(() => assertTargets(mixed, mixed, job, p)).toThrow(TargetRefused)
+    expect(() => assertTargets(dev, dev, job, p)).toThrow(TargetRefused)
+    const prod = tableSetFor(PROD_SUFFIX, PROD_SUFFIX)
+    expect(() => assertTargets(prod, prod, { ...job, target: 'REHEARSAL', targetTag: 'abc' }, p)).toThrow(/LIVE/)
+    expect(() => assertTargets(prod, prod, { ...job, liveTag: ' ' }, p)).toThrow(/live tag/)
+    expect(() => productionPolicy('other-NONE')).toThrow(TargetRefused)
+  })
+
+  it('production mode runs end to end in memory (synthetic fixture) and refuses dev tooling commands', async () => {
+    const { mkdtempSync, writeFileSync } = await import('node:fs')
+    const { join } = await import('node:path')
+    const { tmpdir } = await import('node:os')
+    const file = join(mkdtempSync(join(tmpdir(), 'aljex-cli-prod-')), 'synthetic.csv')
+    writeFileSync(file, makeFixture({ rows: 60, seed: 7 }).csv)
+    const lines: string[] = []
+    const io = { out: (l: string) => lines.push(l), err: (l: string) => lines.push(`ERR ${l}`) }
+    const code = await main(['run', '--memory', '--synthetic', '--source', file, '--target', 'live:ZZ-P'], io, { prod: productionPolicy(PROD_SUFFIX) })
+    expect(code).toBe(0)
+    expect(lines.join('\n')).toMatch(/PRODUCTION-GATED .*reconciled YES|PRODUCTION-GATED/s)
+    expect(await main(['rehearsal-drop', '--tag', 'abc'], io, { prod: productionPolicy(PROD_SUFFIX) })).toBe(1)
   })
 })

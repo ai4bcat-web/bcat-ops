@@ -111,7 +111,7 @@ export async function runSlice(store: EngineStore, jobId: string, deadlineMs: nu
     if (job.status === 'STAGING') return await stagePhase(store, job, root)
     // Plans only read the live tables; the liveTag guard is for writes.
     const guardJob = job.status === 'PLANNING' ? { ...job, liveTag: job.liveTag || 'plan' } : job
-    assertTargets(liveTablesOf(store.tables), store.tables, guardJob)
+    assertTargets(liveTablesOf(store.tables), store.tables, guardJob, store.targetPolicy)
     if (job.status === 'PLANNING') return await planPhase(store, job, root)
     return await applyPhase(store, job, root, deadlineMs)
   } catch (err) {

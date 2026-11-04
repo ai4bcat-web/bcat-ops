@@ -7,6 +7,9 @@
  *   resume     continue a RUNNING job recorded by an earlier invocation
  *   seed-counter, rehearsal-create/-drop, backup-create/-restore, pitr-restore, drop-copy, rollback
  *
+ * Production: `main(argv, io, { prod })` where `prod` comes from `productionPolicy()` after scripts/importAljex.mjs passed the
+ * shared production gate (scripts/lib/prodGate.mjs). Without that context every command is dev-only.
+ *
  * Output is aggregates only (counts, sums, timings). Anything row-level goes to a 0700 directory under the
  * OS temp dir, outside the repo, and is the operator's to delete after review.
  */
@@ -28,7 +31,7 @@ import {
 } from '@aws-sdk/client-dynamodb'
 import { marshall } from '@aws-sdk/util-dynamodb'
 import type { S3Client } from '@aws-sdk/client-s3'
-import type { AljexEntityCounts, AljexImportJob, EngineRow, EngineStore, EngineTable, TableSet, TxCondition } from '../../../../src/types/tms'
+import type { AljexEntityCounts, AljexImportJob, EngineRow, EngineStore, EngineTable, EngineTargetPolicy, TableSet, TxCondition } from '../../../../src/types/tms'
 import { DynamoStore } from './dynamoStore'
 import { MemoryStore } from './memoryStore'
 import { reconcile } from './reconcile'
@@ -36,7 +39,9 @@ import { runSlice } from './runSlice'
 import { seedProCounter } from './seedCounter'
 import { evalCondition } from './stamp'
 import { readStageData } from './stage'
-import { assertTargets, DEV_SUFFIX, MODEL_NAME, PROD_SUFFIX, resolveTables, TAG_PATTERN, WRITTEN_TABLES } from './tables'
+import { assertTargets, DEV_SUFFIX, MODEL_NAME, productionPolicy, PROD_SUFFIX, resolveTables, TAG_PATTERN, tableSetFor, WRITTEN_TABLES } from './tables'
+
+export { productionPolicy }
 import { stableId } from './util'
 
 const REGION = 'us-east-1'
@@ -45,6 +50,15 @@ const JOBS_FILE = join(tmpdir(), 'aljex-cli-jobs.json')
 export interface CliIo {
   out(line: string): void
   err(line: string): void
+}
+
+/**
+ * Production mode. Only scripts/importAljex.mjs builds this, and only after scripts/lib/prodGate.mjs passed every gate
+ * (BCAT_ALLOW_PROD date, --i-mean-production, fresh prodpre- backups, typed account:suffix). Without it the CLI is
+ * dev-only exactly as before.
+ */
+export interface CliContext {
+  prod?: EngineTargetPolicy
 }
 
 const consoleIo: CliIo = { out: (l) => console.log(l), err: (l) => console.error(l) }
@@ -91,7 +105,7 @@ export interface TargetSpec {
 /** `rehearsal:<tag>` | `live:<liveTag>` */
 export function parseTarget(spec: string): TargetSpec {
   const m = /^(rehearsal|live):(.+)$/.exec(spec)
-  if (!m) throw new Error('--target must be rehearsal:<tag> or live:<liveTag>')
+  if (!m) throw new Error('--target must be rehearsal:<tag> or live:<liveTag> (production: scripts/importAljex.mjs --target prod:<liveTag> with every gate)')
   if (m[1] === 'rehearsal') {
     if (!TAG_PATTERN.test(m[2])) throw new Error('rehearsal tag must be 3-12 lowercase letters/digits')
     return { target: 'REHEARSAL', targetTag: m[2], liveTag: null }
@@ -175,6 +189,7 @@ class AwsCliStore extends DynamoStore {
     tables: TableSet,
     private local: LocalObjects,
     private book: JobBook,
+    readonly targetPolicy?: EngineTargetPolicy,
   ) {
     super({ db, s3: NOT_S3, bucket: 'local', tables })
   }
@@ -218,6 +233,7 @@ class MemoryCliStore extends MemoryStore {
     tables: TableSet,
     private local: LocalObjects,
     private book: JobBook,
+    readonly targetPolicy?: EngineTargetPolicy,
   ) {
     super({ tables })
   }
@@ -367,10 +383,11 @@ async function rehearsalDrop(db: DynamoDBClient, tag: string, io: CliIo): Promis
   } while (token)
 }
 
-async function pitrRestore(db: DynamoDBClient, model: string, time: string, as: string, io: CliIo): Promise<void> {
-  const source = `${model}-${DEV_SUFFIX}`
+async function pitrRestore(db: DynamoDBClient, model: string, time: string, as: string, io: CliIo, policy?: EngineTargetPolicy): Promise<void> {
+  const suffix = policy ? policy.writeSuffix : DEV_SUFFIX
+  const source = `${model}-${suffix}`
   if (!Object.values(MODEL_NAME).includes(model)) throw new Error(`unknown model ${model}`)
-  if (!new RegExp(`^${model}-${DEV_SUFFIX}-rh[a-z0-9]{3,12}$`).test(as)) throw new Error(`--as must be ${model}-${DEV_SUFFIX}-rh<tag>: restores never overwrite a table`)
+  if (!new RegExp(`^${model}-${suffix}-rh[a-z0-9]{3,12}$`).test(as)) throw new Error(`--as must be ${model}-${suffix}-rh<tag>: restores never overwrite a table`)
   await db.send(new RestoreTableToPointInTimeCommand({ SourceTableName: source, TargetTableName: as, RestoreDateTime: new Date(time) }))
   io.out(`restoring ${source} @ ${time} -> ${as}`)
   await waitActive(db, as, io)
@@ -388,20 +405,20 @@ function runDirOf(id: string): string {
   return join(tmpdir(), `aljex-run-${id.replace(/[^a-z0-9]+/gi, '-')}`)
 }
 
-async function openStore(a: Args, spec: TargetSpec, runId: string, sourcePath: string | null): Promise<RunSetup> {
-  const live = liveTableSet()
-  const tables = resolveTables(live, { target: spec.target, targetTag: spec.targetTag })
+async function openStore(a: Args, spec: TargetSpec, runId: string, sourcePath: string | null, ctx: CliContext): Promise<RunSetup> {
+  if (ctx.prod && spec.target !== 'LIVE') throw new Error('production mode runs --target live:<liveTag> jobs only (no rehearsal tables)')
+  const tables = ctx.prod ? tableSetFor(ctx.prod.readSuffix, ctx.prod.writeSuffix) : resolveTables(liveTableSet(), { target: spec.target, targetTag: spec.targetTag })
   const objects = new LocalObjects(runDirOf(runId), sourcePath)
   if (a.flags.has('memory')) {
     const book = new JobBook(null)
-    return { store: new MemoryCliStore(tables, objects, book), objects, book }
+    return { store: new MemoryCliStore(tables, objects, book, ctx.prod), objects, book }
   }
   const db = new DynamoDBClient({ region: REGION })
   for (const t of WRITTEN_TABLES) {
     if (!(await tableExists(db, tables[t]))) throw new Error(`table ${tables[t]} does not exist${spec.target === 'REHEARSAL' ? ' (run rehearsal-create first)' : ''}`)
   }
   const book = new JobBook(JOBS_FILE)
-  return { store: new AwsCliStore(db, tables, objects, book), objects, book }
+  return { store: new AwsCliStore(db, tables, objects, book, ctx.prod), objects, book }
 }
 
 function dollars(cents: number | null): string {
@@ -424,7 +441,7 @@ async function driveJob(store: EngineStore, id: string): Promise<AljexImportJob>
   throw new Error('job did not finish in 200 slices')
 }
 
-async function cmdRun(a: Args, io: CliIo): Promise<number> {
+async function cmdRun(a: Args, io: CliIo, ctx: CliContext): Promise<number> {
   const spec = parseTarget(need(a, 'target'))
   const source = need(a, 'source')
   if (!existsSync(source)) throw new Error(`source not found: ${source}`)
@@ -432,9 +449,9 @@ async function cmdRun(a: Args, io: CliIo): Promise<number> {
   const synthetic = a.flags.has('synthetic')
   const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14)
   const rootId = `aljexrun:${stamp}`
-  const { store, objects, book } = await openStore(a, spec, rootId, source)
+  const { store, objects, book } = await openStore(a, spec, rootId, source, ctx)
   // Fail before any work if the target is unsafe.
-  assertTargets(liveTableSet(), store.tables, { target: spec.target, targetTag: spec.targetTag, liveTag: spec.liveTag ?? 'plan' })
+  assertTargets(liveTableSet(), store.tables, { target: spec.target, targetTag: spec.targetTag, liveTag: spec.liveTag ?? 'plan' }, store.targetPolicy)
   const base: AljexImportJob = {
     id: rootId,
     kind: 'IMPORT',
@@ -449,7 +466,7 @@ async function cmdRun(a: Args, io: CliIo): Promise<number> {
     createdBy: 'importAljex-cli',
   }
   book.put(base as unknown as EngineRow)
-  io.out(`run ${rootId} target ${spec.target}${spec.targetTag ? `:${spec.targetTag}` : ''} ${synthetic ? '(synthetic)' : '(real data)'}${sliceEvery ? ` slice every:${sliceEvery}` : ''}`)
+  io.out(`run ${rootId} target ${ctx.prod ? `PRODUCTION-GATED ${ctx.prod.writeSuffix} ` : ''}${spec.target}${spec.targetTag ? `:${spec.targetTag}` : ''} ${synthetic ? '(synthetic)' : '(real data)'}${sliceEvery ? ` slice every:${sliceEvery}` : ''}`)
 
   const t0 = Date.now()
   const staged = await driveJob(store, rootId)
@@ -493,31 +510,31 @@ function fail(io: CliIo, job: AljexImportJob): number {
   return 1
 }
 
-async function cmdResume(a: Args, io: CliIo): Promise<number> {
+async function cmdResume(a: Args, io: CliIo, ctx: CliContext): Promise<number> {
   const id = need(a, 'run')
   const spec = parseTarget(need(a, 'target'))
   const book = new JobBook(JOBS_FILE)
   const [row] = book.get([id])
   if (!row) throw new Error(`no such job in ${JOBS_FILE}`)
   const root = rootOf(book, row)
-  const { store } = await openStore(a, spec, root, flag(a, 'source') ?? null)
+  const { store } = await openStore(a, spec, root, flag(a, 'source') ?? null, ctx)
   const job = await driveJob(store, id)
   io.out(`job ${id}: ${job.status}`)
   printCounts(io, job.entityCounts)
   return job.status === 'APPLIED' ? 0 : 1
 }
 
-async function cmdSeed(a: Args, io: CliIo): Promise<number> {
+async function cmdSeed(a: Args, io: CliIo, ctx: CliContext): Promise<number> {
   const spec = parseTarget(need(a, 'target'))
-  const { store } = await openStore(a, spec, `seed-${Date.now()}`, null)
-  assertTargets(liveTableSet(), store.tables, { target: spec.target, targetTag: spec.targetTag, liveTag: spec.liveTag ?? 'plan' })
+  const { store } = await openStore(a, spec, `seed-${Date.now()}`, null, ctx)
+  assertTargets(liveTableSet(), store.tables, { target: spec.target, targetTag: spec.targetTag, liveTag: spec.liveTag ?? 'plan' }, store.targetPolicy)
   const result = await seedProCounter(store, { apply: a.flags.has('apply'), enableNumericScheme: a.flags.has('enable-numeric'), jobId: flag(a, 'run') ?? null })
   io.out(JSON.stringify(result))
   return 0
 }
 
-async function cmdRollback(a: Args, io: CliIo): Promise<number> {
-  if (!a.flags.has('i-understand-dev-only')) throw new Error('rollback deletes rows; pass --i-understand-dev-only (dev stack only)')
+async function cmdRollback(a: Args, io: CliIo, ctx: CliContext): Promise<number> {
+  if (!ctx.prod && !a.flags.has('i-understand-dev-only')) throw new Error('rollback deletes rows; pass --i-understand-dev-only (dev stack only), or run it through scripts/importAljex.mjs --target prod:<liveTag> with every production gate')
   const runId = need(a, 'run')
   const spec = parseTarget(need(a, 'target'))
   if (a.flags.has('memory')) throw new Error('rollback is for AWS tables only')
@@ -525,8 +542,8 @@ async function cmdRollback(a: Args, io: CliIo): Promise<number> {
   const [job] = book.get([runId]) as unknown as AljexImportJob[]
   if (!job) throw new Error(`no such job ${runId} in ${JOBS_FILE}`)
   const root = rootOf(book, job as unknown as EngineRow)
-  const { store } = await openStore(a, spec, root, null)
-  assertTargets(liveTableSet(), store.tables, { target: spec.target, targetTag: spec.targetTag, liveTag: spec.liveTag ?? 'plan' })
+  const { store } = await openStore(a, spec, root, null, ctx)
+  assertTargets(liveTableSet(), store.tables, { target: spec.target, targetTag: spec.targetTag, liveTag: spec.liveTag ?? 'plan' }, store.targetPolicy)
   const aws = store as unknown as AwsCliStore
   const all = async (t: EngineTable, proj: string[]): Promise<EngineRow[]> => {
     const out: EngineRow[] = []
@@ -584,19 +601,22 @@ async function cmdRollback(a: Args, io: CliIo): Promise<number> {
   return 0
 }
 
-export async function main(argv: string[], io: CliIo = consoleIo): Promise<number> {
+export async function main(argv: string[], io: CliIo = consoleIo, ctx: CliContext = {}): Promise<number> {
   try {
     const a = parseArgs(argv)
+    if (ctx.prod && !['run', 'resume', 'seed-counter', 'rollback', 'pitr-restore'].includes(a.command)) {
+      throw new Error(`production mode runs run | resume | seed-counter | rollback | pitr-restore only; "${a.command}" is dev tooling (backups: scripts/prodBackup.mjs)`)
+    }
     const aws = () => new DynamoDBClient({ region: REGION })
     switch (a.command) {
       case 'run':
-        return await cmdRun(a, io)
+        return await cmdRun(a, io, ctx)
       case 'resume':
-        return await cmdResume(a, io)
+        return await cmdResume(a, io, ctx)
       case 'seed-counter':
-        return await cmdSeed(a, io)
+        return await cmdSeed(a, io, ctx)
       case 'rollback':
-        return await cmdRollback(a, io)
+        return await cmdRollback(a, io, ctx)
       case 'rehearsal-create': {
         const only = flag(a, 'tables')?.split(',') ?? null
         await backupCreate(aws(), need(a, 'tag'), only, io)
@@ -614,7 +634,7 @@ export async function main(argv: string[], io: CliIo = consoleIo): Promise<numbe
         await rehearsalDrop(aws(), need(a, 'tag'), io)
         return 0
       case 'pitr-restore':
-        await pitrRestore(aws(), need(a, 'table'), need(a, 'time'), need(a, 'as'), io)
+        await pitrRestore(aws(), need(a, 'table'), need(a, 'time'), need(a, 'as'), io, ctx.prod)
         return 0
       case 'rehearsal-list': {
         const r = await aws().send(new ListTablesCommand({}))
