@@ -5,7 +5,6 @@ import '@testing-library/jest-dom/vitest'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import { ShipmentsBoard } from './ShipmentsBoard'
 import type { ShipmentRow } from './shipmentViews'
-import type { Load } from '@/types'
 import { useAppStore } from '@/store/useAppStore'
 
 // Force the tab strip to show every tab; its ResizeObserver would otherwise collapse
@@ -59,7 +58,6 @@ const {
   tenderRespond,
   readyToInvoice,
   setSalesRep,
-  createShipmentForLoad,
   unvoidShipment,
   voidShipment,
   repointShipmentCustomer,
@@ -82,7 +80,6 @@ const {
   tenderRespond: vi.fn(),
   readyToInvoice: vi.fn(),
   setSalesRep: vi.fn(),
-  createShipmentForLoad: vi.fn(),
   unvoidShipment: vi.fn(),
   voidShipment: vi.fn(),
   repointShipmentCustomer: vi.fn(),
@@ -127,11 +124,6 @@ vi.mock('@/hooks/useShipments', async () => {
   }
 })
 
-let __loads: Load[] = []
-vi.mock('@/hooks/useLoads', () => ({
-  useLoads: () => ({ allLoads: __loads, loads: [], updateLoad: vi.fn() }),
-}))
-
 vi.mock('@/hooks/useStaff', () => ({
   useStaff: () => ({
     staff: [],
@@ -170,7 +162,6 @@ vi.mock('@/lib/apiClient', () => ({
   tenderRespond,
   setSalesRep,
   readyToInvoice,
-  createShipmentForLoad,
   unvoidShipment,
   voidShipment,
   repointShipmentCustomer,
@@ -194,6 +185,7 @@ function renderBoard(path = '/tms/shipments', initialShipments: ShipmentRow[] = 
       <Routes>
         <Route path="/tms/shipments" element={<ShipmentsBoard />} />
         <Route path="/tms/shipments/intake" element={<div>intake page</div>} />
+        <Route path="/tms/shipments/new" element={<div>shipment form page</div>} />
       </Routes>
     </MemoryRouter>,
   )
@@ -435,26 +427,13 @@ describe('ShipmentsBoard', () => {
     useAppStore.setState({ drivers: [], equipment: [] })
   })
 
-  it('Create shipment lists only loads without a shipment and calls the backfill wrapper', async () => {
-    const loads = [
-      { id: 'load-1', pickupNumber: 'L001', shipmentId: 'ship-1', originCity: 'Chicago', destinationCity: 'Dallas', pickupAppt: '2026-01-01T00:00:00Z' },
-      { id: 'load-2', pickupNumber: 'L002', shipmentId: null, originCity: 'Denver', destinationCity: 'Boise', pickupAppt: '2026-01-02T00:00:00Z' },
-    ]
-    __loads = loads as unknown as Load[]
-
+  it('Create shipment opens the new-shipment form, not the mint utility, and needs no admin rights', async () => {
+    auth.isAdmin = false
+    auth.isOwner = false
     renderBoard('/tms/shipments')
-    await waitFor(() => expect(screen.getByRole('button', { name: /Create shipment/i })).toBeTruthy())
-
-    fireEvent.click(screen.getByRole('button', { name: /Create shipment/i }))
-    await waitFor(() => expect(screen.getByRole('dialog', { name: /Create shipment/i })).toBeTruthy())
-
-    expect(screen.queryByText('L001')).toBeNull()
-    expect(screen.getByText('L002')).toBeTruthy()
-
-    createShipmentForLoad.mockResolvedValueOnce({})
-    fireEvent.click(screen.getByRole('button', { name: /^Create$/i }))
-
-    await waitFor(() => expect(createShipmentForLoad).toHaveBeenCalledWith('load-2'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Create shipment' }))
+    expect(await screen.findByText('shipment form page')).toBeTruthy()
+    expect(screen.queryByRole('dialog')).toBeNull()
   })
 
   it('Unvoid requires a reason', async () => {

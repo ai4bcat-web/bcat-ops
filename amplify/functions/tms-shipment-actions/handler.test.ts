@@ -7253,3 +7253,311 @@ describe('Step AB — a prospect is promoted on its first shipment', () => {
     expect([...table(TABLES.shipment).values()]).toHaveLength(0)
   })
 })
+
+// ── Step AH — Aljex-parity order form backend ────────────────────────────────
+
+describe('Step AH — SAVE_ORDER_FORM', () => {
+  const IMPORTED_FLAGS = {
+    escort: true,
+    oversize: true,
+    permit: true,
+    blind: true,
+    sealRequired: true,
+    tempControl: true,
+    customsBond: 'Y',
+    palletsIn: 6,
+    palletsOut: 3,
+    form: { v: 1, ship: { truckMiles: 700 } },
+  }
+
+  function seedImportedFlags(orderId: string): void {
+    const order = table(TABLES.order).get(orderId)!
+    table(TABLES.order).set(orderId, { ...order, specialRequirements: { ...IMPORTED_FLAGS, team: false } })
+  }
+
+  it('keeps an Aljex-imported order\'s flags through the order editor\'s five-key save', async () => {
+    const { shipmentId, orderId } = await createDraft()
+    seedImportedFlags(orderId)
+    await saveForm(shipmentId, {
+      order: { equipmentType: "53' VAN", specialRequirements: { team: true, tarps: false, straps: false, liftgate: false, hazmat: false } },
+    })
+    expect(table(TABLES.order).get(orderId)!.specialRequirements).toMatchObject({ ...IMPORTED_FLAGS, team: true })
+  })
+
+  it('also keeps them when the save carries no specialRequirements at all', async () => {
+    const { shipmentId, orderId } = await createDraft()
+    seedImportedFlags(orderId)
+    await saveForm(shipmentId)
+    expect(table(TABLES.order).get(orderId)!.specialRequirements).toMatchObject(IMPORTED_FLAGS)
+  })
+
+  it('clears one flag on an explicit null and all of them on a null payload', async () => {
+    const { shipmentId, orderId } = await createDraft()
+    seedImportedFlags(orderId)
+    await saveForm(shipmentId, { order: { equipmentType: "53' VAN", specialRequirements: { escort: null } } })
+    const sr = table(TABLES.order).get(orderId)!.specialRequirements as Row
+    expect(sr).not.toHaveProperty('escort')
+    expect(sr.oversize).toBe(true)
+    await saveForm(shipmentId, { order: { equipmentType: "53' VAN", specialRequirements: null } })
+    expect(table(TABLES.order).get(orderId)!.specialRequirements).toBeNull()
+  })
+
+  it('draftSave skips the equipment and required-reference rules; the same payload without it is refused', async () => {
+    seedCustomer({ requiredReferences: [{ code: 'PO', level: 'ORDER', display: true, countOnNewOrder: 1 }] })
+    const { shipmentId } = await createDraft()
+    await expect(saveForm(shipmentId, { order: {} })).rejects.toThrow(/PO reference|equipment type/)
+    const bundle = (await saveForm(shipmentId, { order: {}, draftSave: true })) as { shipment: Row }
+    expect(bundle.shipment.status).toBe('DRAFT')
+  })
+
+  it('SUBMIT_ORDER strips draftSave, so a submit still needs equipment', async () => {
+    const { shipmentId } = await createDraft()
+    await saveForm(shipmentId, { order: {}, draftSave: true })
+    await expect(
+      call('SUBMIT_ORDER', {
+        shipmentId,
+        expectedUpdatedAt: table(TABLES.shipment).get(shipmentId)!.updatedAt,
+        order: {},
+        stops: [PICKUP, DELIVERY],
+        draftSave: true,
+      }),
+    ).rejects.toThrow(/equipment type/)
+    expect(table(TABLES.shipment).get(shipmentId)!.status).toBe('DRAFT')
+  })
+
+  it('writes the new load fields and shipment OSD, and leaves omitted keys alone', async () => {
+    const { shipmentId, loadId } = await createDraft()
+    await saveForm(shipmentId, {
+      loadFields: { pieces: 12, piecesUnit: 'pallets', cargoValueCents: 500_000, hot: true, notes: 'dock early' },
+      shipmentFlags: { osd: true },
+    })
+    expect(table(TABLES.load).get(loadId)!).toMatchObject({
+      pieces: 12, piecesUnit: 'pallets', cargoValueCents: 500_000, hot: true, notes: 'dock early',
+    })
+    expect(table(TABLES.shipment).get(shipmentId)!.osd).toBe(true)
+    await saveForm(shipmentId, { loadFields: { pieces: 14 } })
+    expect(table(TABLES.load).get(loadId)!).toMatchObject({ pieces: 14, piecesUnit: 'pallets', hot: true })
+    await saveForm(shipmentId, { loadFields: { notes: null } })
+    expect(table(TABLES.load).get(loadId)!.notes).toBeNull()
+  })
+
+  it('links a quote of the same customer and refuses another customer\'s or an already-linked one', async () => {
+    const { shipmentId, orderId } = await createDraft()
+    table(TABLES.quote).set('Q1', { id: 'Q1', customerId: 'cus-1', amountCents: 123_000 })
+    table(TABLES.quote).set('Q2', { id: 'Q2', customerId: 'cus-other', amountCents: 1 })
+    table(TABLES.quote).set('Q3', { id: 'Q3', customerId: 'cus-1', amountCents: 1, orderId: 'ord-elsewhere' })
+    await expect(saveForm(shipmentId, { order: { equipmentType: "53' VAN", quoteId: 'Q2' } })).rejects.toThrow(/different customer/)
+    await expect(saveForm(shipmentId, { order: { equipmentType: "53' VAN", quoteId: 'Q3' } })).rejects.toThrow(/already linked/)
+    await saveForm(shipmentId, { order: { equipmentType: "53' VAN", quoteId: 'Q1' } })
+    expect(table(TABLES.order).get(orderId)!).toMatchObject({ quoteId: 'Q1', quoteNumber: 'Q1', quoteAmountCents: 123_000 })
+    await saveForm(shipmentId, { order: { equipmentType: "53' VAN", quoteId: null } })
+    expect(table(TABLES.order).get(orderId)!.quoteId).toBeNull()
+  })
+})
+
+describe('Step AH — UPDATE_ORDER_DETAILS', () => {
+  async function openShipment(): Promise<{ shipmentId: string; loadId: string; orderId: string }> {
+    const ids = await createDraft()
+    await saveForm(ids.shipmentId, {
+      loadFields: { miles: 500 },
+      charges: [{ side: 'CUSTOMER', code: 'LINEHAUL', calculatedBy: 'PER_MILE', rateCents: 400, sortOrder: 0 }],
+    })
+    await call('SUBMIT_ORDER', {
+      shipmentId: ids.shipmentId,
+      expectedUpdatedAt: table(TABLES.shipment).get(ids.shipmentId)!.updatedAt,
+      order: { equipmentType: "53' VAN" },
+      stops: [PICKUP, DELIVERY],
+    })
+    return ids
+  }
+
+  function update(shipmentId: string, extra: Row, identity: unknown = DISPATCHER): Promise<Row> {
+    return call(
+      'UPDATE_ORDER_DETAILS',
+      { shipmentId, expectedUpdatedAt: table(TABLES.shipment).get(shipmentId)!.updatedAt, ...extra },
+      identity,
+    )
+  }
+
+  it('refuses a draft and points at SAVE_ORDER_FORM', async () => {
+    const { shipmentId } = await createDraft()
+    await expect(update(shipmentId, { order: { internalNotes: 'x' } })).rejects.toThrow(/SAVE_ORDER_FORM/)
+  })
+
+  it('refuses a voided shipment', async () => {
+    const { shipmentId } = await openShipment()
+    table(TABLES.shipment).set(shipmentId, { ...table(TABLES.shipment).get(shipmentId)!, voidedAt: '2026-03-05T00:00:00.000Z' })
+    await expect(update(shipmentId, { order: { internalNotes: 'x' } })).rejects.toThrow(/void/i)
+  })
+
+  it.each([
+    [{ order: { mode: 'LTL' } }, /mode/],
+    [{ stops: [] }, /UPDATE_STOP/],
+    [{ charges: [] }, /RECALC_CHARGES/],
+    [{ customerId: 'cus-2' }, /SET_SHIPMENT_CUSTOMER/],
+  ])('refuses keys another action owns (%j)', async (extra, message) => {
+    const { shipmentId } = await openShipment()
+    await expect(update(shipmentId, extra as Row)).rejects.toThrow(message)
+  })
+
+  it('refuses a stale expectedUpdatedAt', async () => {
+    const { shipmentId } = await openShipment()
+    await expect(
+      call('UPDATE_ORDER_DETAILS', { shipmentId, expectedUpdatedAt: '1999-01-01T00:00:00.000Z', order: { internalNotes: 'x' } }),
+    ).rejects.toThrow(/changed by someone else/)
+  })
+
+  it('locks references after invoicing and miles/weight once frozen', async () => {
+    const { shipmentId, orderId, loadId } = await openShipment()
+    const financials = table(TABLES.financials).get(loadId)!
+    table(TABLES.financials).set(loadId, { ...financials, frozenAt: '2026-03-10T00:00:00.000Z' })
+    await expect(update(shipmentId, { loadFields: { miles: 900 } })).rejects.toThrow(/frozen/)
+    // Resending the value it already has is not a change.
+    await update(shipmentId, { loadFields: { miles: 500, notes: 'same miles' } })
+    table(TABLES.order).set(orderId, { ...table(TABLES.order).get(orderId)!, invoiceId: 'inv-1' })
+    await expect(update(shipmentId, { order: { references: [] } })).rejects.toThrow(/invoice/)
+    await update(shipmentId, { order: { internalNotes: 'still editable' } })
+  })
+
+  it('writes extras and notes, refreshes the search key, and audits key names only', async () => {
+    const { shipmentId, orderId, loadId } = await openShipment()
+    const bundle = (await update(shipmentId, {
+      order: {
+        internalNotes: 'SECRET-NOTE-TEXT',
+        references: [{ code: 'PO', label: 'PO', value: 'PO-AH-7788', level: 'ORDER', visibility: 'CUSTOMER' }],
+        specialRequirements: { fsma: true, form: { v: 1, customer: { emails: ['secret.person@example.com'] } } },
+      },
+      loadFields: { commodity: 'WIDGETS', hot: true },
+      shipmentFlags: { osd: true },
+    })) as { shipment: Row }
+    const order = table(TABLES.order).get(orderId)!
+    expect(order.internalNotes).toBe('SECRET-NOTE-TEXT')
+    expect(order.specialRequirements).toMatchObject({ fsma: true })
+    expect(table(TABLES.load).get(loadId)!).toMatchObject({ commodity: 'WIDGETS', hot: true })
+    expect(bundle.shipment.osd).toBe(true)
+    expect(String(table(TABLES.shipment).get(shipmentId)!.searchKey).toLowerCase()).toContain('po-ah-7788')
+    const audit = [...table(TABLES.audit).values()].find((row) => row.action === 'UPDATE_ORDER_DETAILS')!
+    expect(audit).toBeDefined()
+    expect(String(audit.changes)).toContain('internalNotes')
+    expect(String(audit.changes)).not.toMatch(/SECRET|secret\.person|WIDGETS|PO-AH/)
+  })
+
+  it('re-prices a PER_MILE charge when the miles change', async () => {
+    const { shipmentId, orderId, loadId } = await openShipment()
+    expect(table(TABLES.order).get(orderId)!.revenueCents).toBe(200_000)
+    await update(shipmentId, { loadFields: { miles: 600 } })
+    const line = [...table(TABLES.charge).values()].find((c) => c.side === 'CUSTOMER' && c.code === 'LINEHAUL')!
+    expect(line.amountCents).toBe(240_000)
+    expect(table(TABLES.order).get(orderId)!.revenueCents).toBe(240_000)
+    expect(table(TABLES.load).get(loadId)!).toMatchObject({ miles: 600, rate: 240_000 })
+    expect(table(TABLES.financials).get(loadId)!.revenueCents).toBe(240_000)
+  })
+
+  it('needs page-loads or page-tms: an outsider is refused, a page-tms non-admin passes', async () => {
+    const { shipmentId } = await openShipment()
+    await expect(update(shipmentId, { order: { internalNotes: 'x' } }, OUTSIDER)).rejects.toThrow(/Forbidden/)
+    await update(shipmentId, { order: { internalNotes: 'x' } }, TMS_USER)
+  })
+})
+
+describe('Step AH — UPDATE_LOAD_CARRIER_DETAILS', () => {
+  async function covered(): Promise<{ shipmentId: string; loadCarrierId: string }> {
+    const ids = await createDraft()
+    await saveForm(ids.shipmentId)
+    await call('SUBMIT_ORDER', {
+      shipmentId: ids.shipmentId,
+      expectedUpdatedAt: table(TABLES.shipment).get(ids.shipmentId)!.updatedAt,
+      order: { equipmentType: "53' VAN" },
+      stops: [PICKUP, DELIVERY],
+    })
+    await call('ASSIGN_CARRIER', { loadId: ids.loadId, carrierName: 'SWIFT', carrierRateCents: 180_000 })
+    const loadCarrierId = String([...table(TABLES.carrier).values()].find((c) => c.status === 'ACTIVE')!.id)
+    return { shipmentId: ids.shipmentId, loadCarrierId }
+  }
+
+  function details(loadCarrierId: string, extra: Row, identity: unknown = DISPATCHER): Promise<Row> {
+    return call(
+      'UPDATE_LOAD_CARRIER_DETAILS',
+      { loadCarrierId, expectedUpdatedAt: table(TABLES.carrier).get(loadCarrierId)!.updatedAt, ...extra },
+      identity,
+    )
+  }
+
+  it('writes the seal, trip and driver fields without touching the money', async () => {
+    const { loadCarrierId } = await covered()
+    const before = table(TABLES.carrier).get(loadCarrierId)!
+    await details(loadCarrierId, { sealNumber: 'SEAL-9', tripNumber: 'T-55', driverName: 'Pat Driver' })
+    expect(table(TABLES.carrier).get(loadCarrierId)!).toMatchObject({
+      sealNumber: 'SEAL-9', tripNumber: 'T-55', driverName: 'Pat Driver',
+      carrierRateCents: before.carrierRateCents, costCents: before.costCents, status: 'ACTIVE',
+    })
+    await details(loadCarrierId, { sealNumber: null })
+    expect(table(TABLES.carrier).get(loadCarrierId)!.sealNumber).toBeNull()
+  })
+
+  it('refuses money keys, a bounced row, an own-fleet row and a stale token', async () => {
+    const { loadCarrierId } = await covered()
+    await expect(details(loadCarrierId, { carrierRateCents: 1 })).rejects.toThrow(/carrierRateCents/)
+    await expect(
+      call('UPDATE_LOAD_CARRIER_DETAILS', { loadCarrierId, expectedUpdatedAt: '1999-01-01T00:00:00.000Z', sealNumber: 'x' }),
+    ).rejects.toThrow(/changed by someone else/)
+    const row = table(TABLES.carrier).get(loadCarrierId)!
+    table(TABLES.carrier).set(loadCarrierId, { ...row, kind: 'OWN_ASSET' })
+    await expect(details(loadCarrierId, { sealNumber: 'x' })).rejects.toThrow(/own-fleet/)
+    table(TABLES.carrier).set(loadCarrierId, { ...row, status: 'BOUNCED' })
+    await expect(details(loadCarrierId, { sealNumber: 'x' })).rejects.toThrow(/active carrier/)
+  })
+
+  it('refuses an outsider and lets a page-tms non-admin through', async () => {
+    const { loadCarrierId } = await covered()
+    await expect(details(loadCarrierId, { sealNumber: 'x' }, OUTSIDER)).rejects.toThrow(/Forbidden/)
+    await details(loadCarrierId, { sealNumber: 'x' }, TMS_USER)
+  })
+})
+
+describe('Step AH — UPDATE_STOP SET_DETAILS', () => {
+  async function withStops(): Promise<{ loadId: string }> {
+    const { shipmentId, loadId } = await createDraft()
+    await saveForm(shipmentId, {
+      stops: [
+        { ...PICKUP, contact: { name: 'Dock', hours: '8-4' }, arrivedAt: '2026-03-02T13:05:00.000Z' },
+        DELIVERY,
+      ],
+    })
+    return { loadId }
+  }
+
+  function stopOf(loadId: string, id: string): Row {
+    return (JSON.parse(String(table(TABLES.load).get(loadId)!.stops)) as Row[]).find((s) => s.id === id)!
+  }
+
+  it('sets instructions, pieces and weight and leaves times and contact hours intact', async () => {
+    const { loadId } = await withStops()
+    await call('UPDATE_STOP', {
+      loadId,
+      expectedUpdatedAt: table(TABLES.load).get(loadId)!.updatedAt,
+      op: 'SET_DETAILS',
+      stopId: 'stp-pu',
+      patch: { instructions: 'Dock 4, call first', pieces: 12, weightLbs: 9000 },
+    })
+    expect(stopOf(loadId, 'stp-pu')).toMatchObject({
+      instructions: 'Dock 4, call first', pieces: 12, weightLbs: 9000,
+      arrivedAt: '2026-03-02T13:05:00.000Z', contact: { name: 'Dock', hours: '8-4' },
+    })
+  })
+
+  it('SET_LOCATION keeps contact.hours when it is not resent and takes new ones when it is', async () => {
+    const { loadId } = await withStops()
+    const send = (contact: Row): Promise<Row> => call('UPDATE_STOP', {
+      loadId,
+      expectedUpdatedAt: table(TABLES.load).get(loadId)!.updatedAt,
+      op: 'SET_LOCATION',
+      stopId: 'stp-pu',
+      patch: { name: 'DOCK CO', city: 'CHICAGO, IL', contact },
+    })
+    await send({ name: 'New Name', phone: '555-1' })
+    expect(stopOf(loadId, 'stp-pu').contact).toMatchObject({ name: 'New Name', hours: '8-4' })
+    await send({ name: 'New Name', hours: '6-2' })
+    expect(stopOf(loadId, 'stp-pu').contact).toMatchObject({ hours: '6-2' })
+  })
+})

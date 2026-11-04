@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
-  autoColumnWidth,
   columnWidths,
+  defaultColumnWidth,
   facetOptions,
   filterRows,
   nextSort,
@@ -107,18 +107,30 @@ describe('facetOptions', () => {
 })
 
 describe('widths', () => {
-  it('fits the longest of the header and the first rows, between the column min and max', () => {
-    const short = autoColumnWidth(text, [{ ...rows[0], name: 'x' }])
-    const long = autoColumnWidth(text, [{ ...rows[0], name: 'x'.repeat(200) }])
-    expect(short).toBeGreaterThanOrEqual(56)
-    expect(long).toBe(340)
-    expect(autoColumnWidth({ ...text, maxWidth: 120 }, [{ ...rows[0], name: 'x'.repeat(200) }])).toBe(120)
+  it('defaults a column to its measured header, never under 72px, growing with a longer label', () => {
+    const short = defaultColumnWidth({ ...text, header: 'ID' })
+    const long = defaultColumnWidth({ ...text, header: 'Customer Reference Number' })
+    expect(short).toBe(72)
+    expect(long).toBeGreaterThan(short)
+    expect(long).toBeGreaterThan(defaultColumnWidth({ ...text, header: 'Customer' }))
   })
 
-  it("prefers the user's dragged width (clamped) and a column's fixed width", () => {
-    const widths = columnWidths([text, { ...age, width: 40 }], rows, { name: 5000, age: 500 })
-    expect(widths.name).toBe(340)
+  it('adds room for the sort arrow and the filter button', () => {
+    const label = 'Customer Reference'
+    const bare = defaultColumnWidth({ ...text, header: label, sortable: false, filter: false })
+    expect(defaultColumnWidth({ ...text, header: label, filter: false })).toBeGreaterThan(bare)
+    expect(defaultColumnWidth({ ...text, header: label })).toBeGreaterThan(defaultColumnWidth({ ...text, header: label, filter: false }))
+  })
+
+  it("ignores the rows' content: only the header sets the default", () => {
+    expect(defaultColumnWidth(text)).toBe(columnWidths([text], {}).name)
+  })
+
+  it("prefers the user's width (up to the drag limit) and a column's fixed width", () => {
+    const widths = columnWidths([text, { ...age, width: 40 }, carrier], { name: 5000, age: 500, carrier: 480 })
+    expect(widths.name).toBe(800)
     expect(widths.age).toBe(40)
+    expect(widths.carrier).toBe(480)
   })
 })
 

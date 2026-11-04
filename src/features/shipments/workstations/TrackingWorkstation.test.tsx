@@ -337,7 +337,8 @@ describe('dense grid', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Comfortable' }))
     fireEvent.change(screen.getByRole('combobox', { name: 'Group by' }), { target: { value: 'status' } })
     fireEvent.click(screen.getByRole('button', { name: 'Columns' }))
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Show Carrier DOT/MC' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Carrier DOT/MC' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }))
     first.unmount()
 
     renderPage('/tms/tracking?assignee=all')
@@ -364,5 +365,13 @@ describe('dense grid', () => {
     await waitFor(() => expect(ids().length).toBeGreaterThan(0))
     expect(ids().length).toBeLessThan(60)
     expect(screen.getByText('Show 100 more')).toBeInTheDocument()
+  })
+})
+
+describe('create shipment', () => {
+  it('opens the new-shipment form instead of the mint-a-load dialog', async () => {
+    renderPage()
+    fireEvent.click(await screen.findByRole('button', { name: /Create Shipment/ }))
+    expect(screen.getByTestId('location')).toHaveTextContent('/tms/shipments/new')
   })
 })

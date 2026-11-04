@@ -399,7 +399,7 @@ function CreditBanner({ credit, projectedCents, short, customerName }: {
   )
 }
 
-function FreightEditor({ freight, onChange, onCommit }: {
+export function FreightEditor({ freight, onChange, onCommit }: {
   freight: FreightItem[]
   onChange: (freight: FreightItem[]) => void
   onCommit: () => void
@@ -460,7 +460,7 @@ function FreightEditor({ freight, onChange, onCommit }: {
   )
 }
 
-function ReferenceEditor({ references, required, onChange, onCommit }: {
+export function ReferenceEditor({ references, required, onChange, onCommit }: {
   references: OrderReference[]
   required: RequiredReference[]
   onChange: (references: OrderReference[]) => void

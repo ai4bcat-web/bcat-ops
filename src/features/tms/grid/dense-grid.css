@@ -443,57 +443,6 @@
   cursor: pointer;
 }
 
-/* ── Column chooser ───────────────────────────────────────────────────────── */
-
-.tms-shell .tms-dg-chooser {
-  position: relative;
-}
-
-.tms-shell .tms-dg-chooser-pop {
-  position: absolute;
-  top: calc(100% + 4px);
-  right: 0;
-  z-index: 60;
-  width: 260px;
-  max-height: 60vh;
-  overflow: auto;
-  padding: 8px;
-  background: var(--tms-card);
-  border: 1px solid var(--tms-border);
-  border-radius: var(--tms-radius-card);
-  box-shadow: var(--tms-shadow);
-}
-
-.tms-shell .tms-dg-chooser-pop ul {
-  margin: 0 0 8px;
-  padding: 0;
-  list-style: none;
-}
-
-.tms-shell .tms-dg-chooser-pop li {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 2px 0;
-}
-
-.tms-shell .tms-dg-chooser-pop label {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-}
-
-.tms-shell .tms-dg-chooser-move button {
-  width: 20px;
-  height: 20px;
-  border: 0;
-  background: none;
-  color: var(--tms-muted);
-  cursor: pointer;
-}
-
 /* ── Footer ───────────────────────────────────────────────────────────────── */
 
 .tms-shell .tms-dense-foot {

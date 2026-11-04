@@ -254,6 +254,7 @@ describe('tmsBreadcrumb', () => {
   const labels = (path: string) => tmsBreadcrumb(path).map((c) => c.label)
 
   it('gives the intake queue and an intake load their own trail, not "Shipment"', () => {
+    expect(labels('/tms/shipments/new')).toEqual(['Shipments', 'New shipment'])
     expect(labels('/tms/shipments/intake')).toEqual(['Shipments', 'Intake'])
     expect(labels('/tms/shipments/intake/abc')).toEqual(['Shipments', 'Intake', 'Load'])
     expect(tmsBreadcrumb('/tms/shipments/intake/abc')[1].to).toBe('/tms/shipments/intake')

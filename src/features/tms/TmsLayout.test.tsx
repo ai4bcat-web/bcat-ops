@@ -81,6 +81,8 @@ const renderAt = (path: string) =>
           <Route path="/tms/shipments/intake/:id" element={<div data-testid="page" />} />
           <Route path="/tms/shipments" element={<div data-testid="page" />} />
           <Route path="/tms/shipments/:id" element={<div data-testid="page" />} />
+          <Route path="/tms/shipments/new" element={<div data-testid="page" />} />
+          <Route path="/tms/shipments/:id/edit" element={<div data-testid="page" />} />
           <Route path="/tms/tracking" element={<div data-testid="page" />} />
           <Route path="/tms/tracking/links" element={<div data-testid="page" />} />
         </Route>
@@ -135,7 +137,7 @@ describe('TmsLayout', () => {
   })
 
   it('runs the list pages dense (icon rail, full bleed) and every other /tms page normally', () => {
-    for (const path of ['/tms/shipments', '/tms/shipments?list=all', '/tms/shipments/intake', '/tms/tracking']) {
+    for (const path of ['/tms/shipments', '/tms/shipments?list=all', '/tms/shipments/intake', '/tms/tracking', '/tms/shipments/new', '/tms/shipments/S-1/edit']) {
       const view = renderAt(path)
       expect(shell.props?.dense, path).toBe(true)
       view.unmount()

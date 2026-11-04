@@ -1,0 +1,172 @@
+/*
+ * The Aljex-parity shipment form (AH-plan §6). Dense, tokens only. Grid classes (never inline
+ * `repeat(3` styles — the phone rules match on the serialized attribute).
+ */
+
+.tms-shell .tms-ship-form {
+  --ship-gap: 8px;
+}
+
+.tms-shell .tms-ship-form-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 8px;
+  background: var(--tms-surface-subtle);
+}
+
+.tms-shell .tms-ship-form .tms-dense-bar .tms-ship-dirty {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--tms-radius-pill);
+  background: var(--tms-badge-red);
+}
+
+.tms-shell .tms-ship-form .tms-ship-banner {
+  margin-bottom: 8px;
+}
+
+.tms-shell .tms-ship-form .tms-ship-issues {
+  margin-bottom: 8px;
+}
+
+.tms-shell .tms-ship-form .tms-ship-issues button {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+  font: inherit;
+}
+
+/* ── Sections ─────────────────────────────────────────────────────────────── */
+
+.tms-shell .tms-ship-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--ship-gap, 8px);
+  align-items: start;
+}
+
+.tms-shell .tms-ship-section {
+  min-width: 0;
+  background: var(--tms-card);
+  border: 1px solid var(--tms-border);
+  border-radius: var(--tms-radius-sm);
+}
+
+.tms-shell .tms-ship-section-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 0 8px;
+  background: var(--tms-surface-subtle);
+  border-bottom: 1px solid var(--tms-border);
+  border-radius: var(--tms-radius-sm) var(--tms-radius-sm) 0 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.tms-shell .tms-ship-section-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1 1 auto;
+  min-height: 28px;
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--tms-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tms-shell .tms-ship-section-badge {
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: var(--tms-radius-pill);
+  background: var(--tms-badge-red);
+  color: var(--tms-card);
+  font-size: 11px;
+  line-height: 18px;
+  text-align: center;
+}
+
+.tms-shell .tms-ship-section-body {
+  padding: 8px;
+}
+
+.tms-shell .tms-ship-section-body[hidden] {
+  display: none;
+}
+
+/* ── Density ──────────────────────────────────────────────────────────────── */
+
+.tms-shell .tms-ship-form .tms-input,
+.tms-shell .tms-ship-form .tms-select {
+  height: 28px;
+  min-height: 28px;
+  padding-top: 0;
+  padding-bottom: 0;
+  font-size: 12px;
+}
+
+.tms-shell .tms-ship-form .tms-field-label {
+  font-size: 12px;
+}
+
+.tms-shell .tms-ship-form .tms-field-label[data-required='true'] {
+  color: var(--tms-badge-red);
+}
+
+/* ── Aljex rows ───────────────────────────────────────────────────────────── */
+
+@media (min-width: 1100px) {
+  .tms-shell .tms-ship-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .tms-shell .tms-ship-section-shipping {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (min-width: 1500px) {
+  .tms-shell .tms-ship-grid {
+    grid-template-columns: repeat(10, minmax(0, 1fr));
+  }
+
+  /* Row 1: Shipping Requirements, full width. */
+  .tms-shell .tms-ship-section-shipping {
+    grid-column: 1 / -1;
+  }
+
+  /* Row 2: five cards. */
+  .tms-shell .tms-ship-section-customer,
+  .tms-shell .tms-ship-section-pickup,
+  .tms-shell .tms-ship-section-consignee,
+  .tms-shell .tms-ship-section-history,
+  .tms-shell .tms-ship-section-roles {
+    grid-column: span 2;
+  }
+
+  /* Row 3: More Information (~60%) + Rates (~40%). */
+  .tms-shell .tms-ship-section-more {
+    grid-column: span 6;
+  }
+
+  .tms-shell .tms-ship-section-rates {
+    grid-column: span 4;
+  }
+
+  /* Rows 4 and 5: two halves. */
+  .tms-shell .tms-ship-section-carrier,
+  .tms-shell .tms-ship-section-picks,
+  .tms-shell .tms-ship-section-documents,
+  .tms-shell .tms-ship-section-checkCalls {
+    grid-column: span 5;
+  }
+}

@@ -3063,6 +3063,30 @@ const schema = a.schema({
     .disableOperations(['subscriptions'])
     .authorization((allow) => [allow.authenticated().to(['read'])]),
 
+  /*
+   * Step AF. Pre-aggregated dashboard figures: one row per calendar month
+   * ('M:YYYY-MM'), one legacy-KPI row per month ('LG:YYYY-MM') and one live row for
+   * open AR/AP ('L:CURRENT'), plus the Lambda's own dirty markers ('D:<rowId>') and
+   * leases ('K:<rowId>'). ~100 rows, read by id, so no secondary index. Only the
+   * tms-dashboard-rollup Lambda writes (SDK, IAM); clients read.
+   */
+  DashboardRollup: a
+    .model({
+      id:            a.id(),                 // 'M:2026-11' | 'LG:2026-11' | 'L:CURRENT' | 'D:<rowId>' | 'K:<rowId>'
+      kind:          a.string().required(),  // 'M' | 'LG' | 'L' | 'D' | 'K'
+      periodKey:     a.string().required(),  // '2026-11' | 'CURRENT'
+      schemaVersion: a.integer(),
+      payload:       a.json(),
+      computedAt:    a.datetime(),
+      computeMs:     a.integer(),
+      sourceCounts:  a.json(),
+      dirtyAt:       a.datetime(),
+      leaseUntil:    a.integer(),            // K rows: epoch seconds
+      version:       a.integer().required(),
+    })
+    .disableOperations(['subscriptions', 'create', 'update', 'delete'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
   // ── Revenue ownership & department views (Step R) ──────────────────────────
   /*
    * Ryne, 2026-10-28: who owns a shipment is DATA, not code. BCAT runs three

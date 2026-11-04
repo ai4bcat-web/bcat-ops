@@ -15,12 +15,13 @@ vi.mock('@/lib/carrierRateCon', () => ({
   buildRateConPdf: vi.fn(async () => ({ output: () => 'data:application/pdf;base64,AAAA' })),
   rateConPdfBase64: vi.fn(() => 'AAAA'),
   rateConFilename: vi.fn(() => 'rate-con.pdf'),
+  joinRateConNotes: vi.fn(() => ''),
 }))
 vi.mock('@/hooks/useAuth', () => ({
   useAuthUser: () => ({ email: 'dispatch@bcatcorp.com', userId: 'u1', groups: [] }),
 }))
 
-const bundle = { loads: [], charges: [], loadCarriers: [] } as unknown as ShipmentBundle
+const bundle = { loads: [], orders: [], charges: [], loadCarriers: [] } as unknown as ShipmentBundle
 const loadCarrier = { id: 'lc-1', carrierName: 'Swift', status: 'ACTIVE', rateConStatus: 'NOT_SENT' } as LoadCarrierRecord
 const contact = (over: Partial<CarrierContactRecord>) => ({
   id: 'c', carrierId: 'car-1', name: 'Dana', active: true, ...over,

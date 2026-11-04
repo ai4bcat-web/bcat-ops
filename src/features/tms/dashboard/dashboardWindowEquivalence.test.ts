@@ -161,7 +161,7 @@ describe('dashboard window equivalence', () => {
     const filters: DashboardFilters = { ...defaultFilters(new Date('2026-11-15T12:00:00Z')), from: '2026-11-01', to: '2026-11-30' }
     const { result } = renderHook(() => useBrokerageDashboard(filters))
     await waitFor(() => expect(result.current.loading).toBe(false))
-    expect(table.views).toContainEqual({ kind: 'window', months: ['2026-10', '2026-11', '2026-12'] })
+    expect(table.views).toContainEqual({ kind: 'window', months: ['2026-10', '2026-11', '2026-12'], financials: false })
     expect(table.views).toContainEqual({ kind: 'working' })
   })
 })

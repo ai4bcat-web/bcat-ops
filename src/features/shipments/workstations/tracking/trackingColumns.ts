@@ -101,30 +101,29 @@ export const TRACKING_DEFAULT_COLUMNS = [
 
 export function trackingColumns({ nowMs, nameOf }: TrackingColumnContext): DenseColumn<ShipmentRow>[] {
   return [
-    { key: 'shipment', header: 'Shipment #', text: (r) => r.number, minWidth: 100 },
+    { key: 'shipment', header: 'Shipment #', group: 'Shipment', text: (r) => r.number },
     {
       key: 'status',
       header: 'Status',
+      group: 'Shipment',
       text: (r) => [boardStatusOf(r), nextEventText(r, nowMs), r.trackingFlaggedAt ? 'Tracking flag' : null].filter(Boolean).join(' · '),
       filter: 'multi',
       optionsOf: (r) => [statusOptionOf(r)],
       fixedOptions: STATUS_KEYS.map((s) => ({ value: s, label: titleCase(s) })),
       sortValue: (r) => STATUS_ORDER[boardStatusOf(r)] ?? 99,
-      minWidth: 140,
-      maxWidth: 270,
     },
-    { key: 'customer', header: 'Customer', text: (r) => r.customerName ?? '', filter: 'multi', maxWidth: 170 },
+    { key: 'customer', header: 'Customer', group: 'Shipment', text: (r) => r.customerName ?? '', filter: 'multi' },
     {
       key: 'lane',
       header: 'Lane',
+      group: 'Shipment',
       text: (r) => `${r.originCity ?? '—'} → ${r.destinationCity ?? '—'}`,
       sortValue: (r) => r.originCity ?? '',
-      minWidth: 140,
-      maxWidth: 230,
     },
     {
       key: 'pickup',
       header: 'Pickup',
+      group: 'Shipment',
       text: (r) => (r.pickupAppt ? formatBoardDateTime(r.pickupAppt) : ''),
       filter: 'date',
       dateOf: (r) => r.pickupAppt ?? null,
@@ -132,6 +131,7 @@ export function trackingColumns({ nowMs, nameOf }: TrackingColumnContext): Dense
     {
       key: 'delivery',
       header: 'Delivery',
+      group: 'Shipment',
       text: (r) => (r.deliveryAppt ? formatBoardDateTime(r.deliveryAppt) : ''),
       filter: 'date',
       dateOf: (r) => r.deliveryAppt ?? null,
@@ -139,14 +139,14 @@ export function trackingColumns({ nowMs, nameOf }: TrackingColumnContext): Dense
     {
       key: 'lastLocation',
       header: 'Last location',
+      group: 'Tracking',
       text: (r) => [r.lastUpdatePlace ?? r.lastKnownCity ?? '', motionText(r, nowMs)].filter(Boolean).join(' · '),
       sortValue: (r) => lastLocationSort(r, nowMs),
-      minWidth: 150,
-      maxWidth: 210,
     },
     {
       key: 'ping',
       header: 'Ping age',
+      group: 'Tracking',
       text: (r) => relativeTime(pingAt(r), nowMs) ?? '',
       filter: 'number',
       numberOf: (r) => pingAgeMinutes(r, nowMs),
@@ -156,17 +156,18 @@ export function trackingColumns({ nowMs, nameOf }: TrackingColumnContext): Dense
     {
       key: 'eta',
       header: 'ETA',
+      group: 'Tracking',
       text: (r) => {
         const eta = etaOf(r, nowMs)
         return eta ? `${formatBoardDateTime(eta.at)}${eta.estimated ? ' est.' : ''}${eta.lateMinutes ? ` late ${durationText(eta.lateMinutes)}` : ''}` : ''
       },
       filter: 'date',
       dateOf: (r) => etaOf(r, nowMs)?.at ?? null,
-      minWidth: 130,
     },
     {
       key: 'nextCheck',
       header: 'Next check',
+      group: 'Tracking',
       text: (r) => nextCheckText(r, nowMs),
       filter: 'number',
       numberOf: (r) => nextCheckMinutes(r, nowMs),
@@ -176,6 +177,7 @@ export function trackingColumns({ nowMs, nameOf }: TrackingColumnContext): Dense
     {
       key: 'pod',
       header: 'POD',
+      group: 'Tracking',
       text: (r) => {
         const state = podStateOf(r)
         return state === 'NOT_DUE' ? '' : POD_LABELS[state]
@@ -190,14 +192,15 @@ export function trackingColumns({ nowMs, nameOf }: TrackingColumnContext): Dense
     {
       key: 'carrier',
       header: 'Carrier DOT/MC',
+      group: 'Carrier',
       text: (r) => (r.carrierName || r.carrierMc || r.carrierDot ? `${r.carrierName ?? '—'} · DOT ${r.carrierDot ?? '—'} · MC ${r.carrierMc ?? '—'}` : ''),
       filter: 'multi',
       optionsOf: (r) => (r.carrierName ? [{ value: r.carrierName, label: r.carrierName }] : []),
-      maxWidth: 210,
     },
     {
       key: 'tracker',
       header: 'Tracker',
+      group: 'Tracking',
       text: (r) => trackerLabel(r, nameOf),
       filter: 'multi',
       optionsOf: (r) => [{ value: r.trackerId ?? UNASSIGNED_KEY, label: trackerLabel(r, nameOf) }],

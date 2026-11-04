@@ -43,24 +43,14 @@ import { SHIPMENT_STATUSES, SHIPMENT_STATUS_LABELS } from '@/lib/shipmentStatus'
 import type {
   LaneRateSampleRecord,
   LoadCarrierRecord,
-  LoadWorkflowStatus,
   ShipmentRecord,
 } from '@/types/tms'
+import { MOVEMENT_STATUSES } from './movementStatuses'
 
 const HOUR_MS = 3_600_000
 const DAY_MS = 86_400_000
 
-/** A load is "moving" from the moment it is dispatched until the trailer is empty. */
-export const MOVEMENT_STATUSES: readonly LoadWorkflowStatus[] = [
-  'DISPATCHED',
-  'LOADING',
-  'PICKED_UP',
-  'IN_TRANSIT',
-  'RECOVERED',
-  'ARRIVED_AT_DELIVERY_TERMINAL',
-  'OUT_FOR_DELIVERY',
-  'UNLOADING',
-]
+export { MOVEMENT_STATUSES }
 
 /** Providers that report a position on their own; MANUAL is a person telephoning. */
 export const LIVE_TRACKING_PROVIDERS: readonly string[] = ['LINK', 'DRIVER_APP', 'MOTIVE']

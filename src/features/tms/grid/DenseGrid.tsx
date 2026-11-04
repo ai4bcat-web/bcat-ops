@@ -148,9 +148,9 @@ export function DenseGrid<T>({
 
   const fit = fitRows ?? rows
   const widths = useMemo(() => {
-    const base = columnWidths(columns, fit, userWidths)
+    const base = columnWidths(columns, userWidths)
     return { ...base, ...liveWidths }
-  }, [columns, fit, userWidths, liveWidths])
+  }, [columns, userWidths, liveWidths])
 
   const items = useMemo(() => buildItems(rows, groupKeyOf), [rows, groupKeyOf])
   const win = virtualWindow(items.length, rowHeight, topRow * rowHeight, viewport, OVERSCAN)
@@ -225,7 +225,7 @@ export function DenseGrid<T>({
     const startWidth = widths[col.key]
     let latest = startWidth
     const move = (ev: MouseEvent) => {
-      latest = clampWidth({ ...col, maxWidth: 800 }, startWidth + ev.clientX - startX)
+      latest = clampWidth(startWidth + ev.clientX - startX)
       setLiveWidths((prev) => ({ ...prev, [col.key]: latest }))
     }
     const up = () => {

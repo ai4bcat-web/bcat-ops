@@ -70,7 +70,14 @@ export interface RateConInput {
   quickPay?: { days: number; feeBps: number; feeCents: number; netCents: number } | null
   paymentTermsDays?: number | null
   terms: string
+  /** Order special instructions + rate-con notes (Step AH), printed above Terms. */
+  notes?: string
   requiredFields: RateConRequiredField[]
+}
+
+/** The two free-text order fields the rate con prints, blank-safe and in print order. */
+export function joinRateConNotes(special?: string | null, rateCon?: string | null): string {
+  return [special, rateCon].map((s) => s?.trim()).filter(Boolean).join('\n\n')
 }
 
 /** `${loadNumber}` is the broker's number, `${version}` the re-send counter. */
@@ -404,6 +411,22 @@ export async function buildRateConPdf(input: RateConInput, options: BuildRateCon
       if (col === 1 || i === input.requiredFields.length - 1) y += 22
     })
     y += 4
+  }
+
+  // ── Notes (special instructions / rate con notes) ───────────────────────────
+  if (input.notes?.trim()) {
+    const lines = doc.splitTextToSize(input.notes.trim(), W - M * 2) as string[]
+    room(26 + lines.length * 10)
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(9)
+    doc.setTextColor(107, 114, 128)
+    doc.text('NOTES', M, y)
+    y += 14
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(8)
+    doc.setTextColor(75, 85, 99)
+    doc.text(lines, M, y)
+    y += lines.length * 10 + 12
   }
 
   // ── Terms ───────────────────────────────────────────────────────────────────

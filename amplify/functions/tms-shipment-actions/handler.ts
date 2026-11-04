@@ -248,6 +248,17 @@ import { evaluateReleaseGate, releaseGateError } from '../../../src/lib/releaseG
 import { isEmailAddress } from '../../../src/lib/emailAddress'
 import { mcpPacketStanding, rateConMcpRefusal } from '../../../src/lib/mcpPacket'
 import { composeRateConCc } from './rateConRecipients'
+import {
+  FROZEN_LOCKED_LOAD_KEYS,
+  INVOICE_LOCKED_ORDER_KEYS,
+  mergeSpecialRequirements,
+  validateCarrierDetails,
+  validateLoadFieldsV2,
+  validateShipmentFlags,
+  validateSpecialRequirementsV2,
+  validateStopDetailsPatch,
+  validateUpdateOrderDetails,
+} from './orderForm'
 import { loadReleaseGateInput } from '../_shared/releaseGateInput'
 import {
   OWN_ASSET_MESSAGES,
@@ -499,7 +510,7 @@ const STOP_TYPES = ['pickup', 'delivery'] as const
 const APPT_REQUESTED_BY = ['CUSTOMER', 'CARRIER', 'BROKER'] as const
 const STOP_OPS = [
   'ADD', 'REMOVE', 'SWAP', 'SET_APPT', 'SET_REQUESTED', 'SET_TIMES', 'SET_TYPE',
-  'SET_REFS', 'SET_LOCATION',
+  'SET_REFS', 'SET_LOCATION', 'SET_DETAILS',
 ] as const
 type StopOp = (typeof STOP_OPS)[number]
 
@@ -578,6 +589,8 @@ type Action =
   | 'REMOVE_LOAD_CARRIER'
   | 'RECALC_CHARGES'
   | 'UPDATE_CARRIER_CHARGES'
+  | 'UPDATE_ORDER_DETAILS'
+  | 'UPDATE_LOAD_CARRIER_DETAILS'
   | 'SET_AR_STATUS'
   | 'LOG_CHECK_CALL'
   | 'RESOLVE_INCIDENT'
@@ -1052,7 +1065,22 @@ function validateContact(value: unknown, label: string): Row {
     name: optionalString(c.name, 120),
     phone: optionalString(c.phone, 40),
     email: optionalString(c.email, 200),
+    // Step AH: the form's opening hours ride on the contact. The key exists only
+    // when the caller sent it, so a contact without hours stays the shape it was.
+    ...(c.hours !== undefined ? { hours: optionalString(c.hours, 120) } : {}),
   }
+}
+
+/**
+ * SET_LOCATION replaces a stop's contact wholesale; the hours the form stored on it
+ * survive a caller (the detail's stop card) that never sends them. An explicit null
+ * or empty `hours` clears them.
+ */
+function replaceContact(value: unknown, previous: unknown, label: string): Row {
+  const next = validateContact(value, label)
+  if ('hours' in next) return next
+  const kept = optionalString((previous as Row | null | undefined)?.hours, 120)
+  return kept ? { ...next, hours: kept } : next
 }
 
 /**
@@ -2228,25 +2256,29 @@ function validateFreightItem(item: unknown, index: number): Row {
   }
 }
 
-function validateSpecialRequirements(value: unknown): Row | null {
-  if (value == null) return null
-  const s = assertRecord(value, 'order.specialRequirements')
-  const tempF = s.tempF == null ? null : assertRecord(s.tempF, 'order.specialRequirements.tempF')
-  return {
-    team: optionalBoolean(s.team),
-    tarps: optionalBoolean(s.tarps),
-    straps: optionalBoolean(s.straps),
-    liftgate: optionalBoolean(s.liftgate),
-    hazmat: optionalBoolean(s.hazmat),
-    tempF: tempF == null ? null : {
-      target: optionalInteger(tempF.target, { label: 'order.specialRequirements.tempF.target' }),
-      min: optionalInteger(tempF.min, { label: 'order.specialRequirements.tempF.min' }),
-      max: optionalInteger(tempF.max, { label: 'order.specialRequirements.tempF.max' }),
-    },
-    other: Array.isArray(s.other)
-      ? assertArrayOf(s.other, 'order.specialRequirements.other', (v, i) => assertString(v, `order.specialRequirements.other[${i}]`))
-      : null,
+/**
+ * Resolve `order.quoteId` into the three columns it fills. A quote can be linked
+ * only to an order of its own customer and only while no other order holds it; the
+ * link is cleared with an explicit null, and never once the order is invoiced.
+ */
+async function quoteLinkPatch(requested: string | null, order: Row, shipment: Row): Promise<Row> {
+  const current = optionalString(order.quoteId, 100)
+  if (requested == null) {
+    if (!current) return {}
+    if (order.invoiceId) throw new Error('This order has an invoice; its quote link can no longer be changed')
+    return { quoteId: null, quoteNumber: null, quoteAmountCents: null }
   }
+  if (requested === current) return {}
+  if (order.invoiceId) throw new Error('This order has an invoice; its quote link can no longer be changed')
+  const quote = await getById(QUOTE_TABLE_NAME, requested)
+  if (!quote) throw new Error(`Quote not found: ${requested}`)
+  if (optionalString(quote.customerId, 100) !== optionalString(shipment.customerId, 100)) {
+    throw new Error('That quote belongs to a different customer')
+  }
+  const heldBy = optionalString(quote.orderId, 100)
+  if (heldBy && heldBy !== String(order.id)) throw new Error('That quote is already linked to another order')
+  // The quote id is its number (CONVERT_QUOTE writes it the same way).
+  return { quoteId: requested, quoteNumber: requested, quoteAmountCents: numberOrNull(quote.amountCents) }
 }
 
 /**
@@ -2290,6 +2322,9 @@ async function saveOrderForm(input: Row, caller: Caller): Promise<SavedForm> {
   const { shipment } = bundle
   assertNotVoided(shipment)
   if (shipment.status !== 'DRAFT') throw new Error('Only a draft order can be edited on the order form')
+  // Step AH "Save draft": skips the two completeness rules below and nothing else.
+  // SUBMIT_ORDER strips the flag before it re-saves, so a submit can never ride it.
+  const draftSave = input.draftSave === true
 
   const order = bundle.orders[0]
   if (!order) throw new Error(`Shipment ${shipmentId} has no order`)
@@ -2311,10 +2346,10 @@ async function saveOrderForm(input: Row, caller: Caller): Promise<SavedForm> {
     ? (Array.isArray(order.freight) ? (order.freight as Row[]) : [])
     : assertArrayOf(orderInput.freight, 'order.freight', validateFreightItem)
   assertWeightUnitsAgree(freight)
-  assertRequiredReferences(customer, references)
+  if (!draftSave) assertRequiredReferences(customer, references)
 
   const equipmentType = optionalString(orderInput.equipmentType, 80) ?? optionalString(order.equipmentType, 80)
-  if (isTruckloadMode(mode) && !equipmentType) {
+  if (!draftSave && isTruckloadMode(mode) && !equipmentType) {
     throw new Error('A truckload order needs an equipment type')
   }
 
@@ -2328,9 +2363,14 @@ async function saveOrderForm(input: Row, caller: Caller): Promise<SavedForm> {
     ? bundle.charges.map(chargeRowToInput)
     : assertArrayOf(input.charges, 'charges', (item, i) => validateChargeInput(item, i, rules))
 
-  const loadFields = assertRecord(input.loadFields ?? {}, 'loadFields')
-  const miles = optionalInteger(loadFields.miles, { min: 0, label: 'loadFields.miles' }) ?? numberOrNull(load.miles)
-  const weightLbs = optionalInteger(loadFields.weight, { min: 0, label: 'loadFields.weight' }) ?? numberOrNull(load.weight)
+  const loadFieldsPatch = validateLoadFieldsV2(input.loadFields)
+  const shipmentFlags = validateShipmentFlags(input.shipmentFlags)
+  // miles / weight / commodity keep their long-standing rule: null leaves them alone.
+  const miles = loadFieldsPatch.miles as number | null | undefined ?? numberOrNull(load.miles)
+  const weightLbs = loadFieldsPatch.weight as number | null | undefined ?? numberOrNull(load.weight)
+  const quoteLink = 'quoteId' in orderInput
+    ? await quoteLinkPatch(optionalString(orderInput.quoteId, 100), order, shipment)
+    : {}
 
   const { amounts, totals } = priceFor(
     charges,
@@ -2365,6 +2405,7 @@ async function saveOrderForm(input: Row, caller: Caller): Promise<SavedForm> {
         SHIPMENT_TABLE_NAME,
         shipmentId,
         {
+          ...shipmentFlags,
           mode,
           ...mirrors,
           searchKey: buildSearchKey(nextShipment, [{ ...order, references }], [{ ...load, stops: JSON.stringify(stops) }]),
@@ -2375,6 +2416,7 @@ async function saveOrderForm(input: Row, caller: Caller): Promise<SavedForm> {
         expectedUpdatedAt,
       ),
       updateItemTx(ORDER_TABLE_NAME, orderIdValue, {
+        ...quoteLink,
         mode,
         rateType: optionalEnum(orderInput.rateType, ['SPOT', 'CONTRACT'] as const, 'order.rateType') ?? order.rateType ?? 'SPOT',
         customerContactId: 'customerContactId' in orderInput
@@ -2389,7 +2431,7 @@ async function saveOrderForm(input: Row, caller: Caller): Promise<SavedForm> {
           ? optionalInteger(orderInput.equipmentLengthFt, { min: 0, label: 'order.equipmentLengthFt' })
           : (order.equipmentLengthFt ?? null),
         specialRequirements: 'specialRequirements' in orderInput
-          ? validateSpecialRequirements(orderInput.specialRequirements)
+          ? mergeSpecialRequirements(order.specialRequirements, validateSpecialRequirementsV2(orderInput.specialRequirements))
           : (order.specialRequirements ?? null),
         freight,
         customerNotes: 'customerNotes' in orderInput
@@ -2435,7 +2477,12 @@ async function saveOrderForm(input: Row, caller: Caller): Promise<SavedForm> {
       equipmentType,
       miles,
       weight: weightLbs,
-      commodity: optionalString(loadFields.commodity, 200) ?? load.commodity ?? null,
+      commodity: (loadFieldsPatch.commodity as string | null | undefined) ?? load.commodity ?? null,
+      ...Object.fromEntries(
+        ['pieces', 'piecesUnit', 'cargoValueCents', 'hot', 'notes']
+          .filter((key) => loadFieldsPatch[key] !== undefined)
+          .map((key) => [key, loadFieldsPatch[key]]),
+      ),
       rate: totals.revenueCents,
       updatedBy: caller.email,
     }),
@@ -2478,6 +2525,7 @@ async function submitOrder(input: Row, caller: Caller): Promise<Row> {
     : readStops(await getById(LOAD_TABLE_NAME, firstLoadId) ?? { stops: '[]' })
   assertStopShape(submitStops, true)
   input.expectedUpdatedAt = String(currentShipment.updatedAt ?? '')
+  delete input.draftSave
   const saved = await saveOrderForm(input, caller)
   const shipment = saved.bundle.shipment
   const mode = optionalEnum(shipment.mode, SHIPMENT_MODES, 'mode') ?? 'FTL'
@@ -4335,8 +4383,14 @@ async function updateStop(input: Row, caller: Caller): Promise<Row> {
         name: optionalString(patch.name, 200),
         city: optionalString(patch.city, 120),
         address: patch.address == null ? null : assertRecord(patch.address, 'patch.address'),
-        contact: patch.contact == null ? s.contact ?? null : validateContact(patch.contact, 'patch.contact'),
+        contact: patch.contact == null ? s.contact ?? null : replaceContact(patch.contact, s.contact, 'patch.contact'),
       } : s)
+      break
+    }
+    case 'SET_DETAILS': {
+      const i = indexOfStop()
+      const details = validateStopDetailsPatch(patch)
+      stops = stops.map((s, idx) => idx === i ? { ...s, ...details } : s)
       break
     }
   }
@@ -5822,6 +5876,9 @@ function repriceShipment(args: {
   caller: Caller
   /** CAS on the shipment, or null when the caller already CAS'd the load. */
   expectedShipmentUpdatedAt: string | null
+  /** Extra columns written in the same order / shipment update (UPDATE_ORDER_DETAILS). */
+  orderPatch?: Row
+  shipmentPatch?: Row
 }): { writes: TransactWriteItem[]; chargeRows: Row[]; totals: FinancialsTotals } {
   const { bundle, charges, customer, settings, caller } = args
   const { shipment } = bundle
@@ -5867,6 +5924,7 @@ function repriceShipment(args: {
       false,
     ),
     updateItemTx(ORDER_TABLE_NAME, orderId, {
+      ...args.orderPatch,
       customerRateCents: totals.customerRateCents,
       revenueCents: totals.revenueCents,
       updatedBy: caller.email,
@@ -5874,6 +5932,7 @@ function repriceShipment(args: {
       version: (numberOrNull(order.version) ?? 1) + 1,
     }, null),
     updateItemTx(SHIPMENT_TABLE_NAME, shipmentId, {
+      ...args.shipmentPatch,
       updatedBy: caller.email,
       updatedAt: now,
       version: (numberOrNull(shipment.version) ?? 1) + 1,
@@ -6037,6 +6096,180 @@ async function updateCarrierCharges(input: Row, caller: Caller): Promise<Row> {
   if (isDeliveredOrLater(bundle.loads.find((row) => String(row.id) === loadId)?.status)) {
     await writeLaneSample(quoteDeps, loadId)
   }
+  return readBundle(shipmentId) as unknown as Row
+}
+
+// ── UPDATE_ORDER_DETAILS (Step AH) ───────────────────────────────────────────
+
+/**
+ * Edit the order-level extras of a shipment that has left DRAFT: references, equipment,
+ * special requirements, freight, notes, contact, bill-to, quote link, and the load's
+ * miles / weight / commodity / pieces / declared value / hot / notes. A draft goes
+ * through SAVE_ORDER_FORM; mode, customer, stops and charges have their own actions.
+ */
+async function updateOrderDetails(input: Row, caller: Caller): Promise<Row> {
+  const shipmentId = assertString(input.shipmentId, 'shipmentId')
+  const expectedUpdatedAt = assertExpectedUpdatedAt(input)
+  const requested = validateUpdateOrderDetails(input, { reference: validateOrderReference, freight: validateFreightItem })
+  const { order: orderIn, loadFields, shipmentFlags } = requested
+  if (Object.keys(orderIn).length + Object.keys(loadFields).length + Object.keys(shipmentFlags).length === 0) {
+    throw new Error('Nothing to change: send order, loadFields or shipmentFlags')
+  }
+
+  const bundle = await readBundle(shipmentId)
+  const { shipment } = bundle
+  assertNotVoided(shipment)
+  if (shipment.status === 'DRAFT') throw new Error('Use SAVE_ORDER_FORM on a draft')
+  const order = bundle.orders[0]
+  const load = bundle.loads[0]
+  if (!order) throw new Error(`Shipment ${shipmentId} has no order`)
+  if (!load) throw new Error(`Shipment ${shipmentId} has no load`)
+  const loadId = String(load.id)
+  const orderId = String(order.id)
+
+  if (order.invoiceId) {
+    const locked = INVOICE_LOCKED_ORDER_KEYS.filter((key) => key in orderIn)
+    if (locked.length > 0) {
+      const label = optionalString(order.invoiceNumber, 100) ?? String(order.invoiceId)
+      throw new Error(`This order has invoice ${label}; ${locked.join(', ')} can no longer be changed`)
+    }
+  }
+  const existingFinancials = bundle.financials.find((f) => f.id === loadId) ?? null
+  const milesNext = 'miles' in loadFields ? (loadFields.miles as number | null) : numberOrNull(load.miles)
+  const weightNext = 'weight' in loadFields ? (loadFields.weight as number | null) : numberOrNull(load.weight)
+  const repriced = milesNext !== numberOrNull(load.miles) || weightNext !== numberOrNull(load.weight)
+  if (repriced && existingFinancials?.frozenAt) {
+    const locked = FROZEN_LOCKED_LOAD_KEYS.filter((key) => key in loadFields)
+    throw new Error(`This load's financials are frozen; ${locked.join(' and ')} can no longer be changed`)
+  }
+
+  const customer = await customerOf(shipment)
+  const mode = shipment.mode as ShipmentMode
+  const references = Array.isArray(orderIn.references) ? (orderIn.references as Row[]) : null
+  if (references) assertRequiredReferences(customer, references)
+  if (Array.isArray(orderIn.freight)) assertWeightUnitsAgree(orderIn.freight as Row[])
+  if ('equipmentType' in orderIn && isTruckloadMode(mode) && !orderIn.equipmentType) {
+    throw new Error('A truckload order needs an equipment type')
+  }
+  const { specialRequirements: srPatch, quoteId: quoteIdIn, ...plainOrder } = orderIn
+  const quoteLink = 'quoteId' in orderIn
+    ? await quoteLinkPatch(quoteIdIn as string | null, order, shipment)
+    : {}
+  const orderExtra: Row = {
+    ...plainOrder,
+    ...quoteLink,
+    ...('specialRequirements' in orderIn
+      ? { specialRequirements: mergeSpecialRequirements(order.specialRequirements, srPatch as Row | null) }
+      : {}),
+  }
+  const shipmentExtra: Row = {
+    ...shipmentFlags,
+    ...(references
+      ? { searchKey: buildSearchKey({ ...shipment, ...shipmentFlags }, [{ ...order, references }], bundle.loads) }
+      : {}),
+  }
+
+  const now = nowIso()
+  let totals: FinancialsTotals | null = null
+  let writes: TransactWriteItem[]
+  if (repriced) {
+    const settings = await getSettings()
+    const priced = repriceShipment({
+      bundle: { ...bundle, loads: [{ ...load, miles: milesNext, weight: weightNext }, ...bundle.loads.slice(1)] },
+      charges: bundle.charges.map(chargeRowToInput),
+      customer,
+      settings,
+      caller,
+      expectedShipmentUpdatedAt: expectedUpdatedAt,
+      orderPatch: orderExtra,
+      shipmentPatch: shipmentExtra,
+    })
+    totals = priced.totals
+    writes = priced.writes
+  } else {
+    const stamp = { updatedBy: caller.email, updatedAt: now }
+    writes = [
+      updateItemTx(
+        SHIPMENT_TABLE_NAME,
+        shipmentId,
+        { ...shipmentExtra, ...stamp, version: (numberOrNull(shipment.version) ?? 1) + 1 },
+        expectedUpdatedAt,
+      ),
+      updateItemTx(
+        ORDER_TABLE_NAME,
+        orderId,
+        { ...orderExtra, ...stamp, version: (numberOrNull(order.version) ?? 1) + 1 },
+        null,
+      ),
+    ]
+  }
+  await transact(writes, 'shipment')
+
+  const loadPatch: Row = {
+    ...loadFields,
+    ...('equipmentType' in orderIn ? { equipmentType: orderIn.equipmentType } : {}),
+    ...(totals ? { rate: totals.revenueCents } : {}),
+  }
+  if (Object.keys(loadPatch).length > 0) {
+    const client = await getDataClient()
+    assertLoadWriteOk(
+      await client.models.Load.update({ id: loadId, ...loadPatch, updatedBy: caller.email }),
+      'Load update',
+    )
+  }
+  // References and equipment are what the ownership rules read.
+  if ('references' in orderIn || 'equipmentType' in orderIn) await applyTagToLoads(shipmentId, caller)
+
+  // Key names only: the free text, e-mails and notes never reach the audit log.
+  await writeAudit('SHIPMENT', shipmentId, 'UPDATE_ORDER_DETAILS', caller, {
+    orderKeys: Object.keys(orderIn),
+    loadKeys: Object.keys(loadFields),
+    shipmentKeys: Object.keys(shipmentFlags),
+    repriced,
+  })
+  if (repriced && isDeliveredOrLater(load.status)) await writeLaneSample(quoteDeps, loadId)
+  return readBundle(shipmentId) as unknown as Row
+}
+
+// ── UPDATE_LOAD_CARRIER_DETAILS (Step AH) ────────────────────────────────────
+
+/**
+ * Correct the contact and equipment details of the ACTIVE outside-carrier assignment in
+ * place: dispatcher, driver(s), truck, trailer, plates, VIN, seal and trip number — the
+ * fields BOOK_CARRIER does not take. Money, rate con and status are never touched.
+ */
+async function updateLoadCarrierDetails(input: Row, caller: Caller): Promise<Row> {
+  const loadCarrierId = assertString(input.loadCarrierId, 'loadCarrierId')
+  const expectedUpdatedAt = assertExpectedUpdatedAt(input)
+  const patch = validateCarrierDetails(input)
+
+  const assignment = await getById(LOAD_CARRIER_TABLE_NAME, loadCarrierId)
+  if (!assignment) throw new Error(`Load carrier not found: ${loadCarrierId}`)
+  if (assignment.kind === 'OWN_ASSET') {
+    throw new Error('An own-fleet leg is edited through ASSIGN_ASSET, not here')
+  }
+  if (String(assignment.status ?? '') !== 'ACTIVE') {
+    throw new Error('Only the active carrier assignment can be edited')
+  }
+  const shipmentId = String(assignment.shipmentId)
+  await requireLiveShipment(shipmentId)
+  if (String(assignment.updatedAt ?? '') !== expectedUpdatedAt) throw conflictError('assignment', null)
+
+  await transact(
+    [
+      updateItemTx(
+        LOAD_CARRIER_TABLE_NAME,
+        loadCarrierId,
+        { ...patch, updatedBy: caller.email, updatedAt: nowIso() },
+        expectedUpdatedAt,
+      ),
+    ],
+    'assignment',
+  )
+  await writeAudit('LOAD_CARRIER', loadCarrierId, 'UPDATE_LOAD_CARRIER_DETAILS', caller, {
+    loadId: assignment.loadId,
+    keys: Object.keys(patch),
+  })
   return readBundle(shipmentId) as unknown as Row
 }
 
@@ -7490,6 +7723,10 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return recalcCharges(input, caller)
     case 'UPDATE_CARRIER_CHARGES':
       return updateCarrierCharges(input, caller)
+    case 'UPDATE_ORDER_DETAILS':
+      return updateOrderDetails(input, caller)
+    case 'UPDATE_LOAD_CARRIER_DETAILS':
+      return updateLoadCarrierDetails(input, caller)
     case 'SET_AR_STATUS':
       return setArStatus(input, caller)
     case 'LOG_CHECK_CALL':

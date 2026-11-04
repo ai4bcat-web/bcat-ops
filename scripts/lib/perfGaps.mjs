@@ -112,7 +112,55 @@ export async function perfGaps(root = process.cwd()) {
   return { r1: scanR1(files), directory: scanDirectory(files), polls: scanPolls(polls) }
 }
 
+// ───────────────────────────── G11 (Step AF) ─────────────────────────────
+/** The six legacy-dashboard widgets that must mount only behind KPI-ready + visible (AF-plan §4.3). */
+export const LEGACY_WIDGETS = ['YearProfitWidget', 'PerMileKpis', 'DriverLeaderboardWidget', 'DieselPriceWidget', 'ComplianceAlertsWidget', 'RepairInvoicesWidget']
+const isTest = (path) => /\.test\.[jt]sx?$/.test(path)
+
+/**
+ * G11 static gaps over { path: text } (comments stripped):
+ *   workingSet     src/features/tms/dashboard/** (non-test) carries `kind: 'working'`: the working-set read is gone from the dashboard
+ *   financials     the same files import loadFinancials / getLoadFinancials / listLoadFinancials
+ *   widgets        src/features/dashboard/DashboardPage.tsx mounts a legacy widget (`<Widget`) outside a <LazyWidget> element
+ *   metricsHook    anything under src/ (tests included) still names useDashboardMetrics (deleted by AF4)
+ * Each list holds { path, line, ... }.
+ */
+export function scanAF(files) {
+  const out = { workingSet: [], financials: [], widgets: [], metricsHook: [] }
+  for (const [path, raw] of Object.entries(files)) {
+    const text = stripComments(raw)
+    const inCompany = path.startsWith('src/features/tms/dashboard/') && !isTest(path)
+    if (inCompany) {
+      for (const m of text.matchAll(/kind\s*:\s*['"]working['"]/g)) out.workingSet.push({ path, line: lineOf(text, m.index) })
+      for (const m of text.matchAll(/import\s[^;]*?\b(loadFinancials|getLoadFinancials|listLoadFinancials)\b[^;]*?from/g)) out.financials.push({ path, line: lineOf(text, m.index), symbol: m[1] })
+    }
+    if (path === 'src/features/dashboard/DashboardPage.tsx') {
+      const blocks = []
+      for (const m of text.matchAll(/<LazyWidget\b/g)) {
+        const close = text.indexOf('</LazyWidget>', m.index)
+        const next = text.indexOf('<LazyWidget', m.index + 1)
+        blocks.push([m.index, close >= 0 && (next < 0 || close < next || next < close) ? close : m.index + 600])
+      }
+      for (const w of LEGACY_WIDGETS) {
+        for (const m of text.matchAll(new RegExp(`<${w}\\b`, 'g'))) {
+          if (!blocks.some(([a, b]) => m.index > a && m.index < b)) out.widgets.push({ path, line: lineOf(text, m.index), widget: w })
+        }
+      }
+    }
+    if (path.startsWith('src/') && /\buseDashboardMetrics\b/.test(text)) out.metricsHook.push({ path, line: lineOf(text, text.search(/\buseDashboardMetrics\b/)) })
+  }
+  return out
+}
+
+/** G11 against the working tree. */
+export async function afStatic(root = process.cwd()) {
+  const paths = [...await gitFiles(root, 'src/*.ts'), ...await gitFiles(root, 'src/*.tsx')]
+  return scanAF(await readTree(root, paths)) // readTree drops files deleted in the working tree
+}
+
 // ───────────────────────────── G6 ─────────────────────────────
+/** Pay/metrics hooks Step AF deletes deliberately: a missing file is not a G6 violation (G11 checks nothing still imports it). */
+export const REMOVED_BY_AF = ['useDashboardMetrics']
 const LIB = ['driverPay', 'commission', 'invoiceBuild', 'quickPay', 'profitReview', 'otrInvoice', 'otrInvoiceStatus', 'factoringTotals', 'payPeriod', 'payPeriods', 'carrierBill', 'customerCredit', 'arAging', 'releaseGate', 'carrierEligibility']
 /** No diff at all. */
 export const FROZEN_PATHS = [
@@ -210,6 +258,7 @@ export async function moneyFreeze(root = process.cwd(), base = 'HEAD') {
   for (const name of PAY_HOOKS) payPaths.push(...await gitFiles(root, `src/**/${name}.ts`), ...await gitFiles(root, `src/**/${name}.tsx`))
   const payHooks = []
   for (const path of payPaths) {
+    if (REMOVED_BY_AF.includes(path.split('/').pop().replace(/\.tsx?$/, '')) && !(await readFile(join(root, path), 'utf8').catch(() => null))) continue // Step AF4 deletes it on purpose (G11 enforces that nothing names it)
     const { stdout } = await run('git', ['diff', '-U0', base, '--', path], { cwd: root, maxBuffer: 16 * 1024 * 1024 })
     const lines = payHookViolations(stdout, path)
     if (lines.length > 0) payHooks.push({ path, lines })

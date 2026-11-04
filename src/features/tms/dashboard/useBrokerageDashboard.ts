@@ -1,12 +1,15 @@
 /**
- * The one read behind `/tms/dashboard`.
+ * The one read behind `/tms/dashboard`'s charts and filter options (the KPI strip paints from the
+ * rollup, see `useDashboardKpis`; this read is also its exact-path fallback).
  *
- * Ten reads, in parallel, once per pickup window: the window's shipments (month index, voided
- * filtered server-side) and the open-work set with their orders, board loads and carrier legs
- * joined by id, the window's priced samples and quotes (by month, through `reportsClient`'s
- * month cache), the outstanding AR and AP, the staff profiles for rep names and the division tree
- * for division names. The bundle is memoised for five minutes per window, so changing a division
- * chip or a group-by is instant — those filters are applied in `applyFilters`, not re-fetched.
+ * Reads, in parallel, once per pickup window: the window's shipments (month index, voided
+ * filtered server-side) joined with their orders, board loads and carrier legs by id (no
+ * financials: no card reads them), the window's priced samples and quotes (by month, through
+ * `reportsClient`'s month cache), the outstanding AR and AP, the staff profiles and the division
+ * tree. As soon as those land the charts can draw (tier A: `partial`); the open-work set, which
+ * only the AR/AP-by-rep cards and tracking read for rows outside the window, follows in two
+ * steps and replaces it. The bundle is memoised for five minutes per window, so changing a
+ * division chip or a group-by is instant: those filters are applied in `applyFilters`.
  *
  * A month the backend refuses is reported, never faked: `failedMonths` is non-empty and
  * the page says which months are missing from the numbers on screen.
@@ -48,8 +51,8 @@ function unionById<T extends { id: string }>(...sets: T[][]): T[] {
  */
 async function readWindow(from: string, to: string, onPartial: (b: DashboardBundle) => void): Promise<DashboardBundle> {
   const months = monthsCovering(from, to, 1)
-  // The working set lands in two steps (open rows joined, then the delivered backlog). The first
-  // step is enough to draw the page; the second replaces it. A loader that never reports a partial
+  // The working set lands in two steps (open rows joined, then the delivered backlog). Neither
+  // blocks the first draw: tier A is the window alone. A loader that never reports a partial
   // resolves this with its final bundle.
   let firstWorking!: (b: BoardBundle) => void
   const workingFirst = new Promise<BoardBundle>((resolve) => { firstWorking = resolve })
@@ -57,7 +60,7 @@ async function readWindow(from: string, to: string, onPartial: (b: DashboardBund
   let finished = false
   workingFinal.then((b) => { finished = true; firstWorking(b) }, () => {})
   const [windowed, samples, quotes, openInvoices, openBills, profiles, divisions] = await Promise.all([
-    loadBoardBundle({ kind: 'window', months }),
+    loadBoardBundle({ kind: 'window', months, financials: false }),
     loadSamples(from, to),
     loadQuotes(from, to),
     listOpenInvoices(),
@@ -66,11 +69,15 @@ async function readWindow(from: string, to: string, onPartial: (b: DashboardBund
     listOwnershipDivisions(),
   ])
   const rest = { samples, quotes, openInvoices, openBills, profiles, divisions }
-  const first = await workingFirst
   if (finished) return assemble(windowed, await workingFinal, rest) // final already landed: nothing partial to show
+  onPartial(assemble(windowed, emptyBoard, rest))
+  const first = await workingFirst
+  if (finished) return assemble(windowed, await workingFinal, rest)
   onPartial(assemble(windowed, first, rest))
   return assemble(windowed, await workingFinal, rest)
 }
+
+const emptyBoard: BoardBundle = { shipments: [], orders: [], loads: [], loadCarriers: [], loadFinancials: [] }
 
 interface WindowRest {
   samples: Awaited<ReturnType<typeof loadSamples>>
@@ -111,6 +118,8 @@ function bundleFor(from: string, to: string): Promise<DashboardBundle> {
 export interface BrokerageDashboard {
   data: DashboardData | null
   loading: boolean
+  /** `data` is the final bundle: nothing more will land for this window (a partial is a first draw only). */
+  final: boolean
   error: string | null
   failedMonths: FailedMonth[]
   refresh: () => void
@@ -122,22 +131,22 @@ export function useBrokerageDashboard(filters: DashboardFilters): BrokerageDashb
   const key = `${from}|${to}|${reloadToken}`
   // What the last settled read produced, tagged with the key it answered; a key that
   // has not settled yet IS the loading state, so no effect writes state up front.
-  const [settled, setSettled] = useState<{ key: string; bundle: DashboardBundle | null; error: string | null }>({
-    key: '', bundle: null, error: null,
+  const [settled, setSettled] = useState<{ key: string; bundle: DashboardBundle | null; error: string | null; partial: boolean }>({
+    key: '', bundle: null, error: null, partial: false,
   })
 
   useEffect(() => {
     let live = true
     const listenKey = `${CACHE_PREFIX}${from}|${to}`
-    const onPartial = (next: DashboardBundle) => { if (live) setSettled({ key, bundle: next, error: null }) }
+    const onPartial = (next: DashboardBundle) => { if (live) setSettled({ key, bundle: next, error: null, partial: true }) }
     const listeners = partialListeners.get(listenKey) ?? new Set()
     listeners.add(onPartial)
     partialListeners.set(listenKey, listeners)
     bundleFor(from, to).then(
-      (next) => { if (live) setSettled({ key, bundle: next, error: null }) },
+      (next) => { if (live) setSettled({ key, bundle: next, error: null, partial: false }) },
       (err: unknown) => {
         if (!live) return
-        setSettled({ key, bundle: null, error: err instanceof Error && err.message ? err.message : 'The dashboard could not be loaded' })
+        setSettled({ key, bundle: null, error: err instanceof Error && err.message ? err.message : 'The dashboard could not be loaded', partial: false })
       },
     )
     return () => {
@@ -153,6 +162,7 @@ export function useBrokerageDashboard(filters: DashboardFilters): BrokerageDashb
 
   const refresh = useCallback(() => {
     invalidateLists('board:')
+    invalidateLists('rollup:')
     clearReportCache()
     setReloadToken((token) => token + 1)
   }, [])
@@ -160,6 +170,7 @@ export function useBrokerageDashboard(filters: DashboardFilters): BrokerageDashb
   return {
     data: bundle?.data ?? null,
     loading,
+    final: !loading && !settled.partial && bundle != null,
     error,
     failedMonths: bundle?.failedMonths ?? [],
     refresh,

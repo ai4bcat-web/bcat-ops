@@ -25,7 +25,7 @@ import { BoardFooterBar } from './board/BoardFooterBar'
 import { IconKeyDialog, type BoardToneKey, type BoardExceptionKey } from './board/IconKeyDialog'
 import { BatchTaskDialog, type BatchTaskAction, type BatchTaskResult } from './board/BatchTaskDialog'
 import { BoardMapView } from './board/BoardMapView'
-import { ColumnsPickerDialog } from './board/ColumnsPickerDialog'
+import { ColumnsDialog } from '@/features/tms/grid/ColumnsDialog'
 import { ShipmentsSectionTabs } from './ShipmentsSectionTabs'
 import { TmsBadge, TmsButton, TmsFilterChip, TmsInput, TmsSegmentedTabs, TmsSelect, statusTone } from '@/features/tms/kit'
 import { DenseGrid } from '@/features/tms/grid/DenseGrid'
@@ -76,7 +76,6 @@ import { SEED_DIVISIONS } from '@/lib/ownership'
 import { cn } from '@/lib/utils'
 import { ShipmentDrawer } from './components/ShipmentDrawer'
 import { ShipmentRowActions, type ShipmentActionHandlers } from './components/StatusActions'
-import { CreateShipmentDialog } from './components/CreateShipmentDialog'
 import { UnvoidShipmentDialog } from './components/UnvoidShipmentDialog'
 import { RepointCustomerDialog } from './components/RepointCustomerDialog'
 
@@ -187,15 +186,6 @@ function batchTaskOf(
   return null
 }
 
-/** Only the widths that differ from the catalog default are the user's; the rest keep auto-fitting. */
-function dragged(widths: Record<string, number>): Record<string, number> {
-  const out: Record<string, number> = {}
-  for (const [key, width] of Object.entries(widths)) {
-    if (BOARD_COLUMNS.find((c) => c.key === key)?.width !== width) out[key] = width
-  }
-  return out
-}
-
 function arraysEqual(a: readonly string[], b: readonly string[]): boolean {
   if (a.length !== b.length) return false
   const sa = [...a].sort()
@@ -246,6 +236,7 @@ function toneRows(): BoardToneKey[] {
 
 export function ShipmentsBoard() {
   const { isAdmin, isOwner, user } = useAuth()
+  const navigate = useNavigate()
   const email = user?.email ?? ''
   const { shipments: workingRows, loading: workingLoading, partial: workingPartial, error: workingError, refresh: refreshWorking } = useShipments({ kind: 'working' })
   const { customers, locations } = useDirectory()
@@ -261,7 +252,6 @@ export function ShipmentsBoard() {
   const [columnTemplates, setColumnTemplates] = useState<ShipmentColumnTemplateRecord[]>([])
   const [settings, setSettings] = useState<TmsSettings | null>(null)
   const [split, setSplit] = useState(false)
-  const [createOpen, setCreateOpen] = useState(false)
   const [rightList, setRightList] = useState<ShipmentList>('all')
 
   useEffect(() => {
@@ -320,8 +310,6 @@ export function ShipmentsBoard() {
 
   const counts = useMemo(() => shipmentListCounts(allRows), [allRows])
 
-  const mayAdmin = isOwner || isAdmin
-
   return (
     <div className="tms-dense-page">
       <div className="tms-dense-bar">
@@ -350,11 +338,9 @@ export function ShipmentsBoard() {
           )}
         </div>
         <span className="tms-dense-spacer" />
-        {mayAdmin && (
-          <TmsButton size="sm" variant="secondary" onClick={() => setCreateOpen(true)}>
-            Create shipment
-          </TmsButton>
-        )}
+        <TmsButton size="sm" variant="primary" data-testid="create-shipment" onClick={() => navigate('/tms/shipments/new')}>
+          Create shipment
+        </TmsButton>
       </div>
 
       <div className={`flex min-h-0 flex-1 overflow-hidden ${split ? 'gap-1' : ''}`}>
@@ -405,11 +391,6 @@ export function ShipmentsBoard() {
         )}
       </div>
 
-      <CreateShipmentDialog
-        open={createOpen}
-        onOpenChange={setCreateOpen}
-        onCreated={refresh}
-      />
     </div>
   )
 }
@@ -1064,14 +1045,15 @@ function BoardPane({
         results={batchResults}
       />
 
-      <ColumnsPickerDialog
+      <ColumnsDialog
+        catalog={SHIPMENT_GRID_COLUMNS}
         open={columnsOpen}
         onOpenChange={setColumnsOpen}
         columns={columnKeys}
         widths={prefs.widths}
         pinned={prefs.pinned}
         onApply={(next) => {
-          prefs.applyLayout({ columns: next.columns, widths: dragged(next.widths), pinned: next.pinned })
+          prefs.applyLayout({ ...next, replaceWidths: true })
           setColumnTemplateId(null)
         }}
         onSaveTemplate={async (next) => {
@@ -1084,7 +1066,7 @@ function BoardPane({
               pinned: next.pinned,
               shared: next.shared,
             })
-            prefs.applyLayout({ columns: next.columns, widths: dragged(next.widths), pinned: next.pinned })
+            prefs.applyLayout({ columns: next.columns, widths: next.widths, pinned: next.pinned })
             toast.success('Template saved')
             refreshTemplates()
           } catch (err) {

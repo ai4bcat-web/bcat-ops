@@ -76,7 +76,7 @@ const bundle: ShipmentBundle = {
   financials: [],
 }
 
-function renderDialog() {
+function renderDialog(initial?: Partial<BookCarrierFields>) {
   return render(
     <BookCarrierDialog
       bundle={bundle}
@@ -85,6 +85,7 @@ function renderDialog() {
       onClose={vi.fn()}
       onConfirm={(input) => bookCarrier({ loadId: 'load-1', expectedUpdatedAt: bundle.shipment.updatedAt, ...input })}
       onRateCon={vi.fn()}
+      initial={initial}
     />,
   )
 }
@@ -158,5 +159,33 @@ describe('BookCarrierDialog', () => {
     fireEvent.click(bookButton())
     await waitFor(() => expect(bookCarrier).toHaveBeenCalledTimes(1))
     expect(bookCarrier.mock.calls[0][0]).toMatchObject({ carrierRepId: 'dana@bcatcorp.com' })
+  })
+
+  it('opens prefilled from the shipment form but still gates on the preflight warnings', async () => {
+    state.carrier = carrier()
+    renderDialog({
+      carrierId: 'car-1',
+      carrierRateCents: 150000,
+      charges: [{ side: 'CARRIER', code: 'LUMPER', calculatedBy: 'FLAT', rateCents: 7500, count: 1 }],
+      driverName: 'Sam Roe',
+      truckNumber: 'T-9',
+    })
+
+    // Straight to the Money step with the typed rate in place — no re-picking.
+    expect((await screen.findByLabelText('Carrier rate') as HTMLInputElement).value).toBe('1500.00')
+    await waitFor(() => expect(screen.getByText('Preflight')).toBeTruthy())
+    expect(bookButton().disabled).toBe(true)
+
+    for (const box of screen.getAllByRole('checkbox')) fireEvent.click(box)
+    await waitFor(() => expect(bookButton().disabled).toBe(false))
+    fireEvent.click(bookButton())
+    await waitFor(() => expect(bookCarrier).toHaveBeenCalledTimes(1))
+    expect(bookCarrier.mock.calls[0][0]).toMatchObject({
+      carrierId: 'car-1',
+      carrierRateCents: 150000,
+      driverName: 'Sam Roe',
+      truckNumber: 'T-9',
+      charges: [expect.objectContaining({ side: 'CARRIER', code: 'LUMPER', rateCents: 7500 })],
+    })
   })
 })

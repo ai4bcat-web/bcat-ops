@@ -4762,3 +4762,79 @@ export interface CrmAccountRecord {
   createdAt?: string
   updatedAt?: string
 }
+
+// ── Step AH — Aljex-parity create / edit shipment form ───────────────────────
+// Additive declaration merges only (no schema change): `Order.specialRequirements` is a
+// json column, so the new typed flags and the namespaced `form` extras live inside it.
+
+/** Optional second street line on a stop's free `address` record. */
+export interface Address {
+  street2?: string | null
+}
+
+/** Order columns that exist in the schema but were not yet on the client type. */
+export interface OrderRecord {
+  quoteId?: string | null
+  quoteNumber?: string | null
+  quoteAmountCents?: number | null
+}
+
+export type AljexCustomerRateKind = 'FLAT' | 'PER_MILE' | 'PER_HOUR' | 'PER_CWT'
+
+/**
+ * Everything Aljex's form has that Order has no column for. Stored under
+ * `Order.specialRequirements.form` (namespaced, versioned). Access it only through
+ * `readExtras` / `withExtras` in `src/features/shipments/form/model.ts`.
+ */
+export interface AljexFormExtras {
+  v: 1
+  ship?: {
+    truckMiles?: number
+    footage?: number
+    billableWeightLbs?: number
+    disableMileage?: boolean
+    freightClass?: string
+    tarpSize?: string
+    temp?: { unit: 'F' | 'C'; min?: number; max?: number; preCool?: number }
+  }
+  customer?: { hours?: string; emails?: string[] }
+  roles?: { serviceRepId?: string; tariff?: string }
+  instructions?: { special?: string; rateCon?: string }
+  rates?: {
+    customerRateType?: AljexCustomerRateKind
+    customerHours?: number
+    smrCents?: number
+    maxRateCents?: number
+    carrierDraft?: { rateType: string; hours?: number; lhRateCents?: number; payPct?: number; maxRateCents?: number }
+  }
+  carrier?: {
+    loadCarrierId?: string
+    originCity?: string
+    originState?: string
+    emptyMiles?: number
+    driverEmail1?: string
+    driverEmail2?: string
+  }
+}
+
+export interface SpecialRequirements {
+  /** Typed Aljex flags added by Step AH (`inside` is tri-state: null = N/A). */
+  fsma?: boolean | null
+  noBroker?: boolean | null
+  labor?: boolean | null
+  highRisk?: boolean | null
+  massRelease?: boolean | null
+  palletExchange?: boolean | null
+  inside?: boolean | null
+  form?: AljexFormExtras | null
+}
+
+/** Load columns the form reads that the shipment-load view type did not declare. */
+export interface ShipmentLoad {
+  hot?: boolean | null
+  pieces?: number | null
+  piecesUnit?: string | null
+  tmsId?: string | null
+  pickupNumber?: string | null
+  notes?: string | null
+}

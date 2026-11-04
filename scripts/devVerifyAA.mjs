@@ -102,7 +102,7 @@ export function oldUrlGaps() {
   // Rows that legitimately have no pre-AA URL of their own: new routes, params of an already-listed route, the splats.
   const NO_OLD = new Set([
     '/tms/load-review', '/tms/carrier-sales', '/tms/rates/spot', '/tms/rates/spot/callback', '/tms/customers/follow-ups',
-    '/tms/brokerage/spot-quoter', '/tms/shipments/intake/:intakeId', '/tms/workflows/runs/:id', '/driver-view/:driverId',
+    '/tms/brokerage/spot-quoter', '/tms/shipments/intake/:intakeId', '/tms/shipments/new', '/tms/shipments/:id/edit', '/tms/workflows/runs/:id', '/driver-view/:driverId',
     '/tms/brokerage/integrations/:provider',
   ])
   for (const h of AA_HOMES) {

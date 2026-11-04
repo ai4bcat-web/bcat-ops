@@ -65,9 +65,7 @@ export const SHIPMENT_GRID_COLUMNS: DenseColumn<ShipmentRow>[] = BOARD_COLUMNS.m
     key: col.key,
     header: col.label,
     text: col.value,
-    // The wide catalog width is the *upper* bound of the auto-fit: a dense grid trims to content.
-    maxWidth: Math.max(col.width ?? 200, 120) + 60,
-    minWidth: 64,
+    group: col.group,
   }
   if (NO_FILTER.has(col.key)) return { ...base, filter: false, sortable: false }
   const number = NUMBER_FIELDS[col.key]

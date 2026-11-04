@@ -318,6 +318,13 @@ export interface Stop {
   documentContact?: StopDocumentContact | null
   /** Free text about this stop; `Load.notes` is the load's, this one is the stop's. */
   stopNotes?: string | null
+  /** Step AH. The Aljex Pick Up / Consignee block: who to call, and when the dock is open. */
+  contact?: { name?: string | null; phone?: string | null; email?: string | null; hours?: string | null } | null
+  /** Step AH. The stop's driver/carrier-visible note (prints on the rate con); `stopNotes` stays internal. */
+  instructions?: string | null
+  /** Step AH. What is picked up / dropped here; summed by "Calculate totals from picks". */
+  pieces?: number | null
+  weightLbs?: number | null
 }
 
 export type ApptWorkflowStatus =

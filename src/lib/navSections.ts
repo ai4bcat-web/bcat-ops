@@ -236,6 +236,7 @@ const CRUMBS: CrumbRule[] = [
   { path: '/tms/rates/spot', prefix: true, crumbs: [QUOTES, { label: 'Spot inbox' }] },
   { path: SHIPMENTS_PATH, crumbs: [{ label: 'Shipments' }] },
   { path: SHIPMENTS_PATH, prefix: true, crumbs: [SHIPMENTS, { label: 'Shipment' }] },
+  { path: '/tms/shipments/new', crumbs: [SHIPMENTS, { label: 'New shipment' }] },
   // After the generic shipment branch, or an intake load would read "Shipment".
   { path: INTAKE_PATH, crumbs: [SHIPMENTS, { label: 'Intake' }] },
   { path: INTAKE_PATH, prefix: true, crumbs: [SHIPMENTS, { label: 'Intake', to: INTAKE_PATH }, { label: 'Load' }] },

@@ -1,3 +1,4 @@
+import { lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, useLocation, useParams } from 'react-router-dom'
 import { UpdateBanner } from '@/components/UpdateBanner'
 import { DriverAutoUpdate } from '@/components/DriverAutoUpdate'
@@ -82,6 +83,8 @@ import { DriverAuthProvider } from '@/features/driver-app/DriverAuthContext'
 
 import { DriverRoutes } from '@/features/driver-app/DriverRoutes'
 
+// The Aljex create/edit form is ~150 controls; load it only when someone opens it.
+const ShipmentFormPage = lazy(() => import('@/features/shipments/form/ShipmentFormPage').then((m) => ({ default: m.ShipmentFormPage })))
 
 /**
  * A legacy path redirected to its `/tms/*` home, carrying its route params, query and
@@ -152,6 +155,8 @@ export default function App() {
                   <Route path="shipments/view/*" element={<SavedViewRedirect />} />
                   <Route path="shipments/intake" element={<RequirePage page={['loads', 'tms', 'intakeReview']}><IntakeBoard /></RequirePage>} />
                   <Route path="shipments/intake/:intakeId" element={<RequirePage page={['loads', 'tms', 'intakeReview']}><IntakeReviewPage /></RequirePage>} />
+                  <Route path="shipments/new" element={<RequirePage page={['loads', 'tms']}><Suspense fallback={null}><ShipmentFormPage mode="create" /></Suspense></RequirePage>} />
+                  <Route path="shipments/:id/edit" element={<RequirePage page={['loads', 'tms']}><Suspense fallback={null}><ShipmentFormPage mode="edit" /></Suspense></RequirePage>} />
                   <Route path="shipments/:id" element={<RequirePage page={['loads', 'tms']}><ShipmentPage /></RequirePage>} />
                   {/* The old Dispatch "needs cover" workstation is Carrier Sales now. */}
                   <Route path="dispatch" element={<Navigate to="/tms/carrier-sales" replace />} />

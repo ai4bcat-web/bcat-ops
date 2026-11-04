@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
+import { render, screen, fireEvent, waitFor, within, cleanup } from '@testing-library/react'
+import { MemoryRouter, useLocation } from 'react-router-dom'
 import { ShipmentDetail } from './components/ShipmentDetail'
 import { normalizeDetailTab } from './components/detailTabs'
 import type { ShipmentActions } from './useShipmentActions'
@@ -207,6 +207,10 @@ beforeEach(() => {
   listWorkflowRunsForShipment.mockResolvedValue([])
 })
 
+function Where() {
+  return <output data-testid="where">{useLocation().pathname}</output>
+}
+
 function renderDetail(
   status: ShipmentStatus = 'BOOKED',
   over: Partial<React.ComponentProps<typeof ShipmentDetail>> = {},
@@ -214,6 +218,7 @@ function renderDetail(
 ) {
   render(
     <MemoryRouter>
+      <Where />
       <ShipmentDetail
         bundle={bundle(status, bundleOver)}
         customer={null}
@@ -331,6 +336,19 @@ describe('ShipmentDetail tabs', () => {
     renderDetail('DRAFT')
     expect(screen.queryByRole('tab', { name: 'Overview' })).toBeNull()
     expect(screen.getByRole('button', { name: 'Submit shipment' })).toBeTruthy()
+  })
+
+  it('opens the Aljex form from Edit, on a draft and on a live shipment, but not on a voided one', () => {
+    renderDetail('DRAFT')
+    fireEvent.click(screen.getByTestId('shipment-edit'))
+    expect(screen.getByTestId('where').textContent).toBe(`/tms/shipments/${bundle('BOOKED').shipment.id}/edit`)
+    cleanup()
+    renderDetail('BOOKED')
+    fireEvent.click(screen.getByTestId('shipment-edit'))
+    expect(screen.getByTestId('where').textContent).toBe(`/tms/shipments/${bundle('BOOKED').shipment.id}/edit`)
+    cleanup()
+    renderDetail('BOOKED', {}, { shipment: { ...bundle('BOOKED').shipment, voidedAt: '2026-04-04T10:00:00.000Z' } })
+    expect((screen.getByTestId('shipment-edit') as HTMLButtonElement).disabled).toBe(true)
   })
 
   it('refuses stop edits on a canceled shipment', async () => {

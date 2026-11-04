@@ -1,5 +1,23 @@
 # TMS build log
 
+## 2026-11-04 - Step AC follow-up (columns dialog + widths)
+
+**Dev only, not deployed, not committed.** One shared `ColumnsDialog` (`src/features/tms/grid/`) now serves Shipments Active / All, Load Tracking and Intake; the old `ColumnsPickerDialog` and the Tracking/Intake popover `ColumnChooser` are gone.
+- **Dialog:** full-height, two equal panes. Left: one scrollable list, a sticky section per group (groups come from a new `group` field on the column defs; Tracking = Shipment / Tracking / Carrier, Intake = E-mail / Order / Review, Shipments = the catalog's groups), 36px rows, search, "Select all" per group (only what the search shows). Right: chosen columns with drag handle (arrow keys too), width input, pin, remove, and "Reset widths". Templates row stays at the bottom (Shipments only).
+- **Widths:** a column's default is its header label measured in the header font (canvas `measureText`, cached per label+font) plus padding, sort and filter icons, floor 72px; `minWidth`/`maxWidth` and the content-based auto-fit were removed from every column def. Dragging a header or typing a width saves it as that user's default for that board (`tms:grid:<board>:<email>`); a template overrides only the widths it sets; the dialog's Apply replaces the saved set (Reset widths = empty). Saved widths now clamp to 60-800 (they used to be cut to 340 on render).
+- **Pins:** Load Tracking and Intake now honour pinned columns (sticky count), as Shipments already did.
+- **Proof:** targeted vitest (src/features/shipments, src/features/tms/grid: 588 pass), `tsc -p tsconfig.app.json`, eslint on touched dirs. Screenshots `Docs/tms-build/screenshots/ac2/` (`scripts/devShotsAC2.mjs`, local vite on the dev API, temp admin deleted); before: `Docs/tms-build/mvmnt-ui/columns-dialog-crowded.webp`, `screenshots/ac/`.
+
+## 2026-11-04 - Steps AB and AC deployed on dev (Amplify jobs 148-153; final commit 2079047)
+
+**Dev only. AB: jobs 148-152 (schema deploy with 7 new tables + 2 Lambdas, then four fix rounds); AB read-only change + AC dense grid shipped together in job 153 (SUCCEED).**
+- **AB live harness `devVerifyAB`: 33 pass / 0 fail / 0 skipped on job 153** (read-only build). Journey of defects found on the live API and fixed: spot Lambda SSM read denied for DAT (now unreadable credential = STUB, OAuth start reads only the Gmail client); Anthropic structured-output schema had 21 union params (HTTP 400; now plain string/number with sentinels, test counts 0 unions); empty string written to a GSI key (`spotRequestsByGmailThreadId`; all index keys now omitted when empty); model calls bounded (10 s) and `SPOT_POLL_NOW` returns `partial`; suggestion never computed server-side (now stored, stub-labelled, floor-respecting).
+- **Read-only mailbox (Ryne 2026-11-04):** Gmail scope `gmail.readonly` only; send/draft actions, per-rep and org auto-send and the `SPOT_AUTO_QUOTE` door removed (legacy schema fields left in place, additive-only rule). Suggested response (subject + body with rate, lane, equipment, validity) in an editable text area, `Copy response` (clipboard, logs `SPOT_LOG_COPIED`), `Open in Gmail` plain compose URL + mailto, rep marks Sent / Won / Lost by hand. Quote-requests-only retention unchanged. Docs updated (STEP_AA_NAV_CRM_SPOTQUOTER.md, AB-plan.md).
+- **AB deploy-pending for Ryne:** no Gmail OAuth client registered yet (provider NOT_CONNECTED -> STUB, SIMULATED inbox); live Anthropic classification not exercised: the key available to the builders returned 'credit balance too low' (decision needed: add credit or confirm which key the Lambda uses). DAT RateView remains stub until the service login exists.
+- **AC:** shared dense grid on Load Tracking and Shipments Active / All / Intake as in the entry below; deployed in job 153. Live verification of the grid on the deployed app rides on the AF perf run.
+- **Risk for Ryne:** the Amplify data stack template is at ~965 KB of the 1,000,000-byte CloudFormation limit (444 of 500 resources) after AF's DashboardRollup model: little headroom for further tables (nested-stack split needed before the next big model addition).
+- Next in flight: AF (company dashboard rollup), AH (create-shipment form with Aljex fields), then AD, AE, AG.
+
 ## 2026-11-04 - Step AC: dense spreadsheet grid for Load Tracking and the Shipments lists (dev branch, UI only, not deployed)
 
 - **One shared grid** `src/features/tms/grid/` (`DenseGrid`, `denseGridModel`, `useDenseGridPrefs`, `DenseControls`, `DenseFilterPopover`) now draws Load Tracking and Shipments Active / All / Intake. The old `BoardGrid`, `BoardFilterPanel` and `useBoardFilters` are deleted (side filter panel gone everywhere).

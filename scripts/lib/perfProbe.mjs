@@ -13,7 +13,8 @@
 /** Operations whose names are full-table reads of the six big tables (R1 / G4). */
 export const FULL_TABLE_OPS = ['listShipments', 'listOrders', 'listLoads', 'listLoadCarriers', 'listLoadFinancials', 'listAuditLogs']
 /** A router mutation whose action reads (the app drives all reads of some tables through `mutation tmsXActions`). */
-export const READ_ACTION = /^(GET|LIST|SEARCH|FIND|READ|COUNT|PREVIEW|CHECK|LOOKUP)_/
+// Same classification as apiClient.ts READ_ROUTER_ACTION (Step AF5-a): SPOT_COUNT / SPOT_STATUS / SPOT_LIST_REQUESTS / CRM_LIST_* read.
+export const READ_ACTION = /^(?:SPOT_|CRM_)?(GET|LIST|SEARCH|FIND|READ|COUNT|PREVIEW|CHECK|LOOKUP|STATUS)(_|$)/
 /**
  * Legacy lowercase-action routers that the schema declares as mutations (AppSync custom operations cannot be queries) but whose
  * listed actions only read: managePods list/status (pod-actions: listing and connection status) and manageDispatch status
@@ -193,9 +194,36 @@ export function requestShape(log) {
   return { counts, requestsByOp, bytesByOp, fullTable, maxDepth: Math.max(0, ...depthOf.values()), depthByOp: Object.fromEntries(depthOf), repeated, mutations }
 }
 
+// ───────────────────────────── KPI detection (Step AF, AF-plan §6.1) ─────────────────────────────
+/** The DOM contract: data-testid on the KPI wrapper of each page (AF3 produces dash-kpis, AF4 legacy-kpis). */
+export const KPI_TESTIDS = { '/tms/dashboard': 'dash-kpis', '/dashboard': 'legacy-kpis' }
+
+/**
+ * Is the KPI strip honestly visible? Pure and self-contained: HOOK_SOURCE embeds this function's source, so what the unit
+ * tests pin is what runs in the page.
+ *   f = { state: data-state attribute, text: strip text, skeleton: a skeleton / aria-busy descendant exists }
+ * dash-kpis:    state "ready", no skeleton, four money values (Revenue, Profit, Open AR, Open AP) and an "N shipments" sub-line.
+ * legacy-kpis:  state "ready", no skeleton, a loads count > 0 ("171 loads" or "Loads 171").
+ * A skeleton, a placeholder zero or a not-yet-ready strip never counts.
+ */
+export function kpiReadiness(testId, f) {
+  if (!f || f.state !== 'ready' || f.skeleton) return false
+  const t = f.text || ''
+  if (testId === 'dash-kpis') return (t.match(/\$[\d,]+/g) || []).length >= 4 && /\d+ shipments?/.test(t)
+  if (testId === 'legacy-kpis') {
+    const m = t.match(/(\d[\d,]*)\s+loads?\b/i) || t.match(/\bloads?\b\D{0,24}?(\d[\d,]*)/i)
+    return !!m && Number(m[1].replace(/,/g, '')) > 0
+  }
+  return false
+}
+
 // ───────────────────────────── in-page hook ─────────────────────────────
 /**
- * config: { minRows, expectEmpty, minCharts, kpi: bool, rowSelector?: string, readyOps?: regex source }
+ * config: { minRows, expectEmpty, minCharts, kpi: bool, kpiTestId?: 'dash-kpis'|'legacy-kpis', rowSelector?: string, readyOps?: regex source }
+ *  - kpiTestId: Step AF KPI stamps on window.__perf (all ms on the performance clock; t0 = 0 on a navigation, set by __perfMark() for in-app runs):
+ *      kpiAt (first kpiReadiness), kpiSource/kpiAsOf (data-source/data-asof then), kpiRequests (AppSync requests STARTED before it),
+ *      kpiMb (MB COMPLETED before it), kpiFlips (changes of the strip's digits after kpiAt), chartAt (first .recharts-surface),
+ *      lastChangeAt (last change of the first 1,400 characters of the page text).
  *  - readyOps: legacy pages have no row markers; ready = a request matching it completed AND the network has been quiet 1.5 s (firstRows is stamped at that last response).
  *  - rows:    rows in the DOM (tbody tr minus colspan empty-states, [role=row] minus header rows, [data-testid*=row] words, or rowSelector).
  *  - ready:   expectEmpty ? empty state visible : rows >= minRows (and charts >= minCharts, and the first KPI sub-line has loaded when kpi).
@@ -221,6 +249,31 @@ export function HOOK_SOURCE(config) {
       return res
     }, (err) => { entry.status = -1; done(); throw err })
   }
+  const kpiReadiness = ${kpiReadiness.toString()}
+  st.t0 = 0; st.reqBase = 0; st.bytesBase = 0; st.kpiAt = null; st.chartAt = null; st.lastChangeAt = null; st.kpiFlips = 0
+  let kpiSig = null; let pageSig = null
+  window.__perfMark = () => { st.t0 = T(); st.reqBase = st.reqs.length; st.bytesBase = st.bytes; st.kpiAt = null; st.chartAt = null; st.lastChangeAt = null; st.kpiFlips = 0; kpiSig = null; pageSig = null }
+  const kpiProbe = () => {
+    if (!cfg.kpiTestId || !document.body) return
+    const now = T()
+    const el = document.querySelector('[data-testid="' + cfg.kpiTestId + '"]')
+    if (el && st.kpiAt == null) {
+      const f = { state: el.getAttribute('data-state'), text: el.innerText || '', skeleton: !!el.querySelector('[aria-busy="true"], [data-skeleton], .tms-skeleton') }
+      if (kpiReadiness(cfg.kpiTestId, f)) {
+        st.kpiAt = now; st.kpiSource = el.getAttribute('data-source'); st.kpiAsOf = el.getAttribute('data-asof')
+        st.kpiRequests = st.reqs.length - st.reqBase; st.kpiMb = (st.bytes - st.bytesBase) / 1e6
+        kpiSig = f.text.replace(/\\D/g, '')
+      }
+    } else if (el && st.kpiAt != null) {
+      const sig = (el.innerText || '').replace(/\\D/g, '')
+      if (sig !== kpiSig) { st.kpiFlips += 1; kpiSig = sig }
+      st.kpiFlipsAttr = el.getAttribute('data-kpi-flips')
+    }
+    if (st.chartAt == null && document.querySelector('.recharts-surface')) st.chartAt = now
+    const sig = ((document.querySelector('.tms-main') || document.body).innerText || '').slice(0, 1400).replace(/\\D/g, '')
+    if (sig !== pageSig) { pageSig = sig; st.lastChangeAt = now }
+  }
+  setInterval(kpiProbe, 25)
   const word = /(^|[-_])row/i
   const count = () => {
     let rows
@@ -240,12 +293,15 @@ export function HOOK_SOURCE(config) {
     st.empty = !!main.querySelector('[data-testid*="empty"], .tms-empty, [class*="empty-state"]') || /\\bno (loads|shipments|results|rows|customers|carriers|invoices|bills|items|data|matching)\\b/i.test(main.innerText || '')
     let ok = cfg.expectEmpty ? st.empty && rows === 0 : rows >= cfg.minRows
     if (cfg.minCharts) ok = ok && st.charts >= cfg.minCharts
-    if (cfg.kpi) ok = ok && /^\\d+ shipments?$/.test(st.kpiSub || '')
+    if (cfg.kpi) ok = ok && (st.kpiAt != null || /^\\d+ shipments?$/.test(st.kpiSub || ''))
     if (cfg.readyOps) {
       const re = new RegExp(cfg.readyOps)
       const quiet = st.inflight === 0 && T() - Math.max(st.lastEnd, st.lastStart) >= 1500
-      ok = ok && quiet && st.reqs.some((r) => r.end != null && re.test(r.body))
-      if (ok && st.firstRowsAt == null) { st.firstRowsAt = st.lastEnd; return }
+      const viaOps = quiet && st.reqs.some((r) => r.end != null && re.test(r.body))
+      // Step AF: a page that paints its KPIs from the rollup issues no load reads; the KPI contract is ready on its own.
+      const viaKpi = !!cfg.kpiTestId && st.kpiAt != null
+      ok = ok && (viaOps || viaKpi)
+      if (ok && st.firstRowsAt == null) { st.firstRowsAt = viaKpi && !viaOps ? T() : st.lastEnd; return }
     }
     if (ok && st.firstRowsAt == null) st.firstRowsAt = T()
   }
@@ -305,6 +361,120 @@ export async function measurePage(browser, path, spec, { quietMs = 2000, minSett
       shape: requestShape(log),
       problems,
     }
+  } finally {
+    await browser.command('Page.removeScriptToEvaluateOnNewDocument', { identifier }).catch(() => {})
+  }
+}
+
+// ───────────────────────────── Step AF: modes (cold / warm / spa) ─────────────────────────────
+const KPI_SNAPSHOT = `(() => { const s = window.__perf; if (!s) return null; return { href: location.href, now: performance.now(), inflight: s.inflight, lastEnd: s.lastEnd, lastStart: s.lastStart, t0: s.t0, reqBase: s.reqBase, bytes: s.bytes, bytesBase: s.bytesBase, requests: s.reqs.length, kpiAt: s.kpiAt, kpiSource: s.kpiSource ?? null, kpiAsOf: s.kpiAsOf ?? null, kpiRequests: s.kpiRequests ?? null, kpiMb: s.kpiMb ?? null, kpiFlips: s.kpiFlips, kpiFlipsAttr: s.kpiFlipsAttr ?? null, chartAt: s.chartAt, lastChangeAt: s.lastChangeAt } })()`
+
+const secs = (at, t0) => (at == null ? null : Math.max(0, at - t0) / 1000)
+
+/** Wait until the KPI strip was seen and the network has been quiet `quietMs` (flips and charts are collected meanwhile). */
+async function awaitKpiRun(browser, { quietMs = 2000, hardMs = 60_000, pollMs = 100 }) {
+  const t0 = Date.now()
+  let last = null
+  for (;;) {
+    await browser.pause(pollMs)
+    const snap = await browser.evaluate(KPI_SNAPSHOT).catch(() => null)
+    if (snap && !snap.href.startsWith('about:')) {
+      last = snap
+      const quiet = snap.inflight === 0 && snap.now - Math.max(snap.lastEnd, snap.lastStart) >= quietMs
+      if (quiet && snap.kpiAt != null) break
+      if (quiet && snap.kpiAt == null && snap.now - snap.t0 >= 12_000 + quietMs) break // never visible: report null, do not hang
+    }
+    if (Date.now() - t0 > hardMs) break
+  }
+  const log = (await browser.evaluate(FULL_LOG).catch(() => [])) ?? []
+  const base = last?.reqBase ?? 0
+  const runLog = log.slice(base)
+  return {
+    kpiS: secs(last?.kpiAt, last?.t0 ?? 0),
+    chartS: secs(last?.chartAt, last?.t0 ?? 0),
+    lastChangeS: secs(last?.lastChangeAt, last?.t0 ?? 0),
+    kpiSource: last?.kpiSource ?? null,
+    kpiAsOf: last?.kpiAsOf ?? null,
+    kpiRequests: last?.kpiRequests ?? null,
+    kpiMb: last?.kpiMb ?? null,
+    kpiFlips: last?.kpiFlips ?? null,
+    kpiFlipsAttr: last?.kpiFlipsAttr ?? null,
+    requests: runLog.length,
+    mb: ((last?.bytes ?? 0) - (last?.bytesBase ?? 0)) / 1e6,
+    timedOut: Date.now() - t0 > hardMs,
+    shape: requestShape(runLog),
+    problems: browser.problems(),
+  }
+}
+
+async function navigateKpi(browser, path) {
+  await browser.navigate('about:blank')
+  await browser.pause(300)
+  browser.mark()
+  await browser.navigate(path)
+}
+
+/**
+ * Step AF modes for one dashboard page (promoted from the baseline probe, AF-plan §6.2). Viewport is the launcher's job (1440x900).
+ *   launch: async () => browser   a fresh Chrome profile (cdpBrowser.launchBrowser with the temp admin's storage)
+ *   spec:   { kpiTestId, spaFrom?: '/tms/carriers' }   the hook is installed with { kpiTestId, minRows: 0 }
+ *   runs:   { cold, warm, spa }   (default 3 each; 0 skips a mode)
+ * cold = a brand-new profile per run (bundle uncached). warm = same browser, one unmeasured priming load, then about:blank ->
+ * navigate (HTTP cache warm, module caches empty). spa = load spaFrom, wait for quiet, click a[href=path]; the clock starts at the click.
+ * Returns { cold: [run], warm: [run], spa: [run] } with run as in awaitKpiRun.
+ */
+export async function measureModes(launch, path, spec, runs = { cold: 3, warm: 3, spa: 3 }) {
+  const hook = HOOK_SOURCE({ minRows: 0, kpiTestId: spec.kpiTestId })
+  const withHook = async (browser) => { await browser.command('Page.addScriptToEvaluateOnNewDocument', { source: hook }); return browser }
+  const out = { cold: [], warm: [], spa: [] }
+  for (let i = 0; i < (runs.cold ?? 0); i += 1) {
+    const b = await withHook(await launch())
+    try { await navigateKpi(b, path); out.cold.push({ mode: 'cold', ...(await awaitKpiRun(b, {})) }) } finally { await b.close().catch(() => {}) }
+  }
+  if (runs.warm) {
+    const b = await withHook(await launch())
+    try {
+      await navigateKpi(b, path); await awaitKpiRun(b, {}) // prime the HTTP cache (unmeasured)
+      for (let i = 0; i < runs.warm; i += 1) { await navigateKpi(b, path); out.warm.push({ mode: 'warm', ...(await awaitKpiRun(b, {})) }) }
+    } finally { await b.close().catch(() => {}) }
+  }
+  if (runs.spa) {
+    const b = await withHook(await launch())
+    try {
+      for (let i = 0; i < runs.spa; i += 1) {
+        await navigateKpi(b, spec.spaFrom ?? '/tms/carriers')
+        await awaitKpiRun(b, {}) // shell warm and quiet
+        b.mark()
+        await b.evaluate('window.__perfMark()')
+        await b.click(`a[href="${path}"]`)
+        out.spa.push({ mode: 'spa', ...(await awaitKpiRun(b, {})) })
+      }
+    } finally { await b.close().catch(() => {}) }
+  }
+  return out
+}
+
+// ───────────────────────────── Step AF: G12 cache hygiene ─────────────────────────────
+/**
+ * Per-operation repeat budget over a soak: counts the HTTP requests that STARTED a chain of each operation (requestShape.repeated only
+ * reports > MAX_REPEATS, which cannot see a working-set read that is issued twice because a router poll wiped the cache).
+ * budget: { op: maxStarts }. Returns the offenders [{ op, times, max }].
+ */
+export function repeatViolations(log, budget) {
+  const starts = {}
+  for (const e of log) { // one HTTP request = one start, however many aliases it batches (the 15-status read is ONE request)
+    for (const name of new Set(parseOperations(e.body ?? '').filter((op) => !op.nextToken).map((op) => op.name))) starts[name] = (starts[name] ?? 0) + 1
+  }
+  return Object.entries(budget).filter(([name, max]) => (starts[name] ?? 0) > max).map(([name, max]) => ({ op: name, times: starts[name], max }))
+}
+
+/** Soak one page for `ms` after it is ready and return the request log (browser must already have the hook: see measureSoak). */
+export async function measureSoak(browser, path, spec, ms = 14_000) {
+  const { identifier } = await browser.command('Page.addScriptToEvaluateOnNewDocument', { source: HOOK_SOURCE({ minRows: 0, ...spec }) })
+  try {
+    await navigateKpi(browser, path)
+    await browser.pause(ms)
+    return (await browser.evaluate(FULL_LOG).catch(() => [])) ?? []
   } finally {
     await browser.command('Page.removeScriptToEvaluateOnNewDocument', { identifier }).catch(() => {})
   }

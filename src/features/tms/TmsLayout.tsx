@@ -20,7 +20,13 @@ import { DispatchDrawer } from '@/features/dispatch/DispatchDrawer'
 import { useShellBadgeCounts, movingShipments } from '@/features/tms/useShellBadgeCounts'
 
 /** The list pages that run edge to edge on an icon rail (Shipments Active / All / Intake, Load Tracking). */
-const DENSE_PATHS = new Set(['/tms/shipments', '/tms/shipments/intake', '/tms/tracking'])
+const DENSE_PATHS = new Set(['/tms/shipments', '/tms/shipments/intake', '/tms/tracking', '/tms/shipments/new'])
+
+/** Those pages plus the create / edit shipment form (`/tms/shipments/new`, `/tms/shipments/:id/edit`). */
+function isDensePath(pathname: string): boolean {
+  const path = pathname.replace(/\/+$/, '')
+  return DENSE_PATHS.has(path) || /^\/tms\/shipments\/[^/]+\/edit$/.test(path)
+}
 
 function LegacyRuntime() {
   const { user } = useAuth()
@@ -88,7 +94,7 @@ export function TmsLayout() {
   // Every route that is not under /tms is a legacy page: same shell, but the content area is
   // a fixed-height host (the pages scroll themselves) with the dispatch column beside it.
   const legacy = !location.pathname.startsWith('/tms')
-  const dense = DENSE_PATHS.has(location.pathname.replace(/\/+$/, ''))
+  const dense = isDensePath(location.pathname)
   const initial = personName({ name: me?.name, email }, 'Team member').charAt(0).toUpperCase()
   return (
     <TmsShell

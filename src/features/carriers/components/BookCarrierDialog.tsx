@@ -75,29 +75,34 @@ export interface BookCarrierDialogProps {
   onConfirm: (input: BookCarrierFields) => Promise<void>
   /** Booked and the user wants the rate con — the caller switches to the Carrier tab. */
   onRateCon: () => void
+  /** Prefill (the shipment form's Carrier Information section). The preflight still runs on it. */
+  initial?: Partial<BookCarrierFields>
 }
 
-export function BookCarrierDialog({ bundle, isAdmin, busy, onClose, onConfirm, onRateCon }: BookCarrierDialogProps) {
+export function BookCarrierDialog({ bundle, isAdmin, busy, onClose, onConfirm, onRateCon, initial }: BookCarrierDialogProps) {
   const { carriers, loading: carriersLoading } = useCarriers()
   const [settings, setSettings] = useState<TmsSettings | null>(null)
-  const [step, setStep] = useState<1 | 2 | 3>(1)
+  const [step, setStep] = useState<1 | 2 | 3>(initial?.carrierId ? 2 : 1)
   const [search, setSearch] = useState('')
-  const [carrierId, setCarrierId] = useState('')
+  const [carrierId, setCarrierId] = useState(initial?.carrierId ?? '')
   const [carrierBundle, setCarrierBundle] = useState<CarrierBundle | null>(null)
-  const [rateCents, setRateCents] = useState<number | null>(null)
-  const [charges, setCharges] = useState<ChargeDraft[]>([])
-  const [contactId, setContactId] = useState('')
-  const [dispatcherName, setDispatcherName] = useState('')
-  const [dispatcherPhone, setDispatcherPhone] = useState('')
-  const [dispatcherEmail, setDispatcherEmail] = useState('')
-  const [driverName, setDriverName] = useState('')
-  const [driverPhone, setDriverPhone] = useState('')
-  const [truckNumber, setTruckNumber] = useState('')
-  const [trailerNumber, setTrailerNumber] = useState('')
-  const [plates, setPlates] = useState('')
-  const [vin, setVin] = useState('')
-  const [equipmentType, setEquipmentType] = useState('')
-  const [carrierRepId, setCarrierRepId] = useState('')
+  const [rateCents, setRateCents] = useState<number | null>(initial?.carrierRateCents ?? null)
+  const [charges, setCharges] = useState<ChargeDraft[]>(() =>
+    (initial?.charges ?? [])
+      .filter((c) => c.side === 'CARRIER' && c.rateCents != null)
+      .map((c, i) => ({ key: `init-${i}`, code: c.code, amountCents: c.rateCents ?? null })))
+  const [contactId, setContactId] = useState(initial?.contactId ?? '')
+  const [dispatcherName, setDispatcherName] = useState(initial?.dispatcherName ?? '')
+  const [dispatcherPhone, setDispatcherPhone] = useState(initial?.dispatcherPhone ?? '')
+  const [dispatcherEmail, setDispatcherEmail] = useState(initial?.dispatcherEmail ?? '')
+  const [driverName, setDriverName] = useState(initial?.driverName ?? '')
+  const [driverPhone, setDriverPhone] = useState(initial?.driverPhone ?? '')
+  const [truckNumber, setTruckNumber] = useState(initial?.truckNumber ?? '')
+  const [trailerNumber, setTrailerNumber] = useState(initial?.trailerNumber ?? '')
+  const [plates, setPlates] = useState(initial?.plates ?? '')
+  const [vin, setVin] = useState(initial?.vin ?? '')
+  const [equipmentType, setEquipmentType] = useState(initial?.equipmentType ?? '')
+  const [carrierRepId, setCarrierRepId] = useState(initial?.carrierRepId ?? '')
   const [trackingProvider, setTrackingProvider] = useState<TrackingProvider>('NONE')
   const [quickPayDays, setQuickPayDays] = useState('')
   const [termsDays, setTermsDays] = useState('')

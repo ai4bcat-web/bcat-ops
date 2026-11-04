@@ -29,12 +29,14 @@ const { useBrokerageDashboard, clearDashboardCache } = await import('./useBroker
 describe('useBrokerageDashboard', () => {
   beforeEach(() => clearDashboardCache())
 
-  it('draws from the first working-set step and swaps in the delivered backlog when it lands', async () => {
+  it('draws the window first, then adds the open-work set, then the delivered backlog; only the last is final', async () => {
     const { result } = renderHook(() => useBrokerageDashboard({ from: '2026-11-01', to: '2026-11-30' } as never))
     await waitFor(() => expect(result.current.data?.shipments.map((s) => s.id).sort()).toEqual(['open1', 'w1']))
     expect(result.current.loading).toBe(false)
+    expect(result.current.final).toBe(false)
     await waitFor(() => expect(releaseFinal).toBeTypeOf('function'))
     act(() => releaseFinal())
     await waitFor(() => expect(result.current.data?.shipments.map((s) => s.id).sort()).toEqual(['delivered1', 'open1', 'w1']))
+    expect(result.current.final).toBe(true)
   })
 })

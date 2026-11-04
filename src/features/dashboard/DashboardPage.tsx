@@ -5,12 +5,11 @@ import {
   RefreshCw, Plus, Handshake,
 } from 'lucide-react'
 import { KpiCard } from '@/components/ui/kpi-card'
-import { useDashboardMetrics, type DateRangeKey } from '@/hooks/useDashboardMetrics'
 import { useFactoringItems } from '@/hooks/useFactoringItems'
 import { factoringTotals, type FactoringTotals } from '@/lib/factoringTotals'
 import type { RevenueSplit, LoadsSplit } from '@/lib/revenueByFleet'
-import { useLoads, useEnsureLoadRange } from '@/hooks/useLoads'
-import { chicagoDateStr, addDays } from '@/lib/date'
+import { useLoads } from '@/hooks/useLoads'
+import { TZ } from '@/lib/date'
 import { ComplianceAlertsWidget } from './ComplianceAlertsWidget'
 import { RepairInvoicesWidget } from './RepairInvoicesWidget'
 import { VendorApCard } from './VendorApCard'
@@ -21,6 +20,9 @@ import { useIsMobile } from '@/hooks/useIsMobile'
 import { useAuth } from '@/hooks/useAuth'
 import { useTmsTokens } from '@/features/tms/tmsTokens'
 import { TmsScrollPage } from '@/features/tms/kit/TmsScrollPage'
+import { useLegacyDashboardKpis, type DateRangeKey } from './useLegacyDashboardKpis'
+import { useBatoryApptCount } from './useBatoryApptCount'
+import { LazyWidget } from './LazyWidget'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -310,6 +312,30 @@ function LoadsCard({ split, delta, deltaDir, sublabel }: {
   )
 }
 
+/** Placeholder with the card's footprint while its figures are unknown: no numbers, never a zero. */
+function KpiSkeleton({ label }: { label: string }) {
+  return (
+    <div className="tms-card" aria-busy="true" aria-label={`${label} loading`} style={{ position: 'relative' }}>
+      <div style={{ padding: '16px 18px' }}>
+        <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--tms-muted)', marginBottom: 14 }}>{label}</div>
+        <div style={{ height: 30, width: '45%', borderRadius: 6, background: 'var(--tms-bg)', marginBottom: 12 }} />
+        <div style={{ height: 6, borderRadius: 999, background: 'var(--tms-bg)', marginBottom: 12 }} />
+        <div style={{ height: 12, width: '70%', borderRadius: 4, background: 'var(--tms-bg)', marginBottom: 6 }} />
+        <div style={{ height: 12, width: '55%', borderRadius: 4, background: 'var(--tms-bg)' }} />
+      </div>
+    </div>
+  )
+}
+
+/** A grid cell: lets the strip keep its visual order while the DOM groups the three rollup cards. */
+function Cell({ order, children }: { order: number; children: React.ReactNode }) {
+  return <div style={{ order, display: 'grid', minWidth: 0 }}>{children}</div>
+}
+
+function asOfLabel(iso: string): string {
+  return new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: TZ })
+}
+
 function IconBtn({ children, label }: { children: React.ReactNode; label?: string }) {
   return (
     <button title={label} style={{
@@ -335,12 +361,10 @@ const RANGES: { value: DateRangeKey; label: string }[] = [
 
 export function DashboardPage() {
   const [rangeKey, setRangeKey] = useState<DateRangeKey>('this-month')
-  const metrics = useDashboardMetrics(rangeKey)
-  // The range card compares against the previous period, so the window reaches back far
-  // enough for it: the year to date, else the last six months.
-  const [windowNow] = useState(() => new Date())
-  const windowFrom = rangeKey === 'this-year' ? `${windowNow.getFullYear()}-01-01` : chicagoDateStr(addDays(windowNow, -185))
-  useEnsureLoadRange(windowFrom, chicagoDateStr(windowNow))
+  const kpi = useLegacyDashboardKpis(rangeKey)
+  const metrics = kpi.kpis
+  const kpiFinal = kpi.state !== 'loading'
+  const needsAppt = useBatoryApptCount()
 
   /*
    * The factoring queue, counted off the same rows the Factoring page works from, so the
@@ -393,6 +417,14 @@ export function DashboardPage() {
               </button>
             ))}
           </div>
+          {kpi.asOf && (
+            <span
+              data-testid="legacy-asof"
+              style={{ fontSize: 11.5, fontVariantNumeric: 'tabular-nums', color: kpi.state === 'stale' ? 'var(--tms-badge-orange)' : 'var(--tms-muted)' }}
+            >
+              as of {asOfLabel(kpi.asOf)}
+            </span>
+          )}
           <IconBtn label="Refresh"><RefreshCw size={13} /> Refresh</IconBtn>
           {hasPageAccess('loads') && (
             <button
@@ -413,13 +445,56 @@ export function DashboardPage() {
 
         {/* ── KPI strip ────────────────────────────────────────────────────── */}
         {/* Six cards, one row on desktop. */}
-        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, minmax(0, 1fr))' : 'repeat(6, minmax(0, 1fr))', gap: 12 }}>
-          <LoadsCard
-            split={metrics.loadsSplit}
-            delta={metrics.totalLoadsDelta > 0 ? `+${metrics.totalLoadsDelta}` : String(metrics.totalLoadsDelta)}
-            deltaDir={metrics.totalLoadsDelta > 0 ? 'up' : metrics.totalLoadsDelta < 0 ? 'down' : 'neutral'}
-            sublabel={`vs. previous ${RANGES.find((r) => r.value === rangeKey)?.label.toLowerCase()}`}
-          />
+        <div
+          data-testid="legacy-kpis-all"
+          data-state={kpiFinal && !factoringLoading && needsAppt !== null ? kpi.state : 'loading'}
+          data-source={kpi.source ?? ''}
+          data-asof={kpi.asOf ?? ''}
+          data-kpi-flips={kpi.flips}
+          style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, minmax(0, 1fr))' : 'repeat(6, minmax(0, 1fr))', gap: 12 }}
+        >
+          {/* Loads, Revenue and Broker covered come from the rollup together; `display: contents` keeps them grid items. */}
+          <div
+            data-testid="legacy-kpis"
+            data-state={kpi.state}
+            data-source={kpi.source ?? ''}
+            data-asof={kpi.asOf ?? ''}
+            data-kpi-flips={kpi.flips}
+            style={{ display: 'contents' }}
+          >
+            <Cell order={1}>
+              {metrics ? (
+                <LoadsCard
+                  split={metrics.loadsSplit}
+                  delta={metrics.totalLoadsDelta > 0 ? `+${metrics.totalLoadsDelta}` : String(metrics.totalLoadsDelta)}
+                  deltaDir={metrics.totalLoadsDelta > 0 ? 'up' : metrics.totalLoadsDelta < 0 ? 'down' : 'neutral'}
+                  sublabel={`vs. previous ${RANGES.find((r) => r.value === rangeKey)?.label.toLowerCase()}`}
+                />
+              ) : <KpiSkeleton label="Total Loads" />}
+            </Cell>
+            <Cell order={5}>
+              {metrics ? (
+                <RevenueCard
+                  split={metrics.revenueSplit}
+                  connected={metrics.revenueConnected}
+                  delta={metrics.revenueConnected ? `${metrics.revenueDelta >= 0 ? '+' : '−'}${cents(Math.abs(metrics.revenueDelta))}` : undefined}
+                  deltaDir={metrics.revenueDelta > 0 ? 'up' : metrics.revenueDelta < 0 ? 'down' : 'neutral'}
+                  sublabel={metrics.revenueConnected ? `vs. previous ${RANGES.find((r) => r.value === rangeKey)?.label.toLowerCase()}` : 'Connect rates to loads'}
+                />
+              ) : <KpiSkeleton label="Revenue" />}
+            </Cell>
+            <Cell order={6}>
+              {metrics ? (
+                <BrokerCoveredCard
+                  count={metrics.brokerLoads}
+                  countDelta={metrics.brokerLoadsDelta}
+                  revenue={metrics.brokerRevenue}
+                  revenueDelta={metrics.brokerRevenueDelta}
+                  sublabel={`vs. previous ${RANGES.find((r) => r.value === rangeKey)?.label.toLowerCase()}`}
+                />
+              ) : <KpiSkeleton label="Broker Covered" />}
+            </Cell>
+          </div>
           {/*
             The factoring queue in money, not a derived "past delivery not invoiced" guess.
 
@@ -429,50 +504,44 @@ export function DashboardPage() {
             an amount, because "12 to factor" says nothing about whether that is a quiet
             afternoon or thirty thousand dollars sitting unsent.
           */}
-          <FactoringCard
-            totals={factoringTotalsValue}
-            loading={factoringLoading}
-            onOpen={() => navigate('/tms/factors')}
-          />
+          <Cell order={2}>
+            <FactoringCard
+              totals={factoringTotalsValue}
+              loading={factoringLoading}
+              onOpen={() => navigate('/tms/factors')}
+            />
+          </Cell>
           {/* What we owe vendors, beside what we are owed. */}
-          <VendorApCard onOpen={() => navigate('/tms/vendors')} />
-          <KpiCard
-            label="Batory Appts to Book"
-            value={metrics.needsAppt}
-            sublabel={metrics.needsAppt > 0 ? 'Stops still on the Batory ladder' : 'All booked'}
-            accent={metrics.needsAppt > 0 ? 'var(--tms-badge-orange)' : undefined}
-            sparkColor={orange}
-            icon={<CalendarClock size={15} />}
-          />
-          <RevenueCard
-            split={metrics.revenueSplit}
-            connected={metrics.revenueConnected}
-            delta={metrics.revenueConnected ? `${metrics.revenueDelta >= 0 ? '+' : '−'}${cents(Math.abs(metrics.revenueDelta))}` : undefined}
-            deltaDir={metrics.revenueDelta > 0 ? 'up' : metrics.revenueDelta < 0 ? 'down' : 'neutral'}
-            sublabel={metrics.revenueConnected ? `vs. previous ${RANGES.find((r) => r.value === rangeKey)?.label.toLowerCase()}` : 'Connect rates to loads'}
-          />
-          <BrokerCoveredCard
-            count={metrics.brokerLoads}
-            countDelta={metrics.brokerLoadsDelta}
-            revenue={metrics.brokerRevenue}
-            revenueDelta={metrics.brokerRevenueDelta}
-            sublabel={`vs. previous ${RANGES.find((r) => r.value === rangeKey)?.label.toLowerCase()}`}
-          />
+          <Cell order={3}>
+            <VendorApCard onOpen={() => navigate('/tms/vendors')} />
+          </Cell>
+          <Cell order={4}>
+            {needsAppt === null ? <KpiSkeleton label="Batory Appts to Book" /> : (
+              <KpiCard
+                label="Batory Appts to Book"
+                value={needsAppt}
+                sublabel={needsAppt > 0 ? 'Stops still on the Batory ladder' : 'All booked'}
+                accent={needsAppt > 0 ? 'var(--tms-badge-orange)' : undefined}
+                sparkColor={orange}
+                icon={<CalendarClock size={15} />}
+              />
+            )}
+          </Cell>
         </div>
 
         {/* ── The year so far: combined profit, month over month by source ─── */}
-        <YearProfitWidget />
+        <LazyWidget enabled={kpiFinal} minHeight={320} label="year-profit"><YearProfitWidget /></LazyWidget>
 
         {/* ── Driver leaderboard: hours (Ivan local), gross (owner-operators, box truck) ─ */}
-        <DriverLeaderboardWidget />
+        <LazyWidget enabled={kpiFinal} minHeight={420} label="driver-leaderboard"><DriverLeaderboardWidget /></LazyWidget>
 
         {/* ── Current diesel price (fleet average, week-over-week) ──────────── */}
-        <DieselPriceWidget />
+        <LazyWidget enabled={kpiFinal} minHeight={160} label="diesel-price"><DieselPriceWidget /></LazyWidget>
 
         {/* ── Compliance alerts + recent repair invoices ────────────────────── */}
         <div style={{ display: 'grid', gridTemplateColumns: col1 ?? '1fr 1fr', gap: 16 }}>
-          <ComplianceAlertsWidget />
-          <RepairInvoicesWidget />
+          <LazyWidget enabled={kpiFinal} minHeight={260} label="compliance-alerts"><ComplianceAlertsWidget /></LazyWidget>
+          <LazyWidget enabled={kpiFinal} minHeight={260} label="repair-invoices"><RepairInvoicesWidget /></LazyWidget>
         </div>
       </div>
     </TmsScrollPage>

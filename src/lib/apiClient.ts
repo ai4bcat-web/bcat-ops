@@ -64,8 +64,8 @@ const rawClient = generateClient()
  * *queries* with a non-list action are writes too and clear the profile list. Subscriptions
  * (observables) and plain queries pass through untouched.
  */
-/** Router mutations whose action only reads: the UPPER_SNAKE read verbs of the tms*Actions routers and the lowercase read actions of manageDispatch. */
-const READ_ROUTER_ACTION = /^(GET|LIST|SEARCH|FIND|READ|COUNT|PREVIEW|CHECK|LOOKUP)_/
+/** Router mutations whose action only reads: the UPPER_SNAKE read verbs of the tms*Actions routers (optionally behind the SPOT_/CRM_ prefix) and the lowercase read actions of manageDispatch. */
+const READ_ROUTER_ACTION = /^(?:SPOT_|CRM_)?(GET|LIST|SEARCH|FIND|READ|COUNT|PREVIEW|CHECK|LOOKUP|STATUS)(_|$)/
 const READ_DISPATCH_ACTIONS = new Set(['status', 'getSettings', 'listStaff', 'mediaUrl', 'slackUrl'])
 function isReadOnlyRouterCall(text: string, action: unknown): boolean {
   if (typeof action !== 'string') return false
@@ -8533,4 +8533,75 @@ export async function listGmailConnections(): Promise<import('@/lib/spot/types')
     1000,
   )
   return rows.map((r) => unwrapJsonFields(r, ['lastPollStats', 'settings']))
+}
+
+// ── Step AH — Aljex-parity create / edit shipment form (append-only block) ───
+
+/** `SAVE_ORDER_FORM` additions: Save draft skips only the equipment and required-reference rules; `shipmentFlags` writes Shipment.osd. */
+export interface SaveOrderFormInput {
+  draftSave?: boolean
+  shipmentFlags?: { osd?: boolean }
+}
+
+/** The `Load` columns `SAVE_ORDER_FORM` / `UPDATE_ORDER_DETAILS` write (present key written, `null` clears). */
+export interface OrderFormLoadFields {
+  miles?: number | null
+  weight?: number | null
+  commodity?: string | null
+  pieces?: number | null
+  piecesUnit?: string | null
+  cargoValueCents?: number | null
+  hot?: boolean | null
+  notes?: string | null
+}
+
+/** Order columns `UPDATE_ORDER_DETAILS` writes on a shipment that has left DRAFT. */
+export type OrderDetailsOrderPatch = Partial<Pick<OrderRecord,
+  'references' | 'equipmentType' | 'equipmentLengthFt' | 'specialRequirements' | 'freight'
+  | 'customerNotes' | 'internalNotes' | 'customerContactId' | 'costCenter' | 'billToId' | 'quoteId'>>
+
+export interface UpdateOrderDetailsInput {
+  shipmentId: string
+  expectedUpdatedAt: string
+  order?: OrderDetailsOrderPatch
+  loadFields?: OrderFormLoadFields
+  shipmentFlags?: { osd?: boolean }
+}
+/** Edit order extras after the draft stage (refused on a DRAFT: that is SAVE_ORDER_FORM). */
+export async function updateOrderDetails(input: UpdateOrderDetailsInput): Promise<ShipmentBundle> {
+  return shipmentAction<ShipmentBundle>('UPDATE_ORDER_DETAILS', input)
+}
+
+export interface UpdateLoadCarrierDetailsInput {
+  loadCarrierId: string
+  /** The LoadCarrier row's own `updatedAt`. */
+  expectedUpdatedAt: string
+  dispatcherName?: string | null
+  dispatcherPhone?: string | null
+  dispatcherEmail?: string | null
+  driverName?: string | null
+  driverPhone?: string | null
+  driver2Name?: string | null
+  driver2Phone?: string | null
+  truckNumber?: string | null
+  trailerNumber?: string | null
+  plates?: string | null
+  vin?: string | null
+  sealNumber?: string | null
+  tripNumber?: string | null
+}
+/** Seal # and Carrier Ref # are not BOOK_CARRIER inputs; this is the only writer on an ACTIVE outside-carrier assignment. */
+export async function updateLoadCarrierDetails(input: UpdateLoadCarrierDetailsInput): Promise<ShipmentBundle> {
+  return shipmentAction<ShipmentBundle>('UPDATE_LOAD_CARRIER_DETAILS', input)
+}
+
+/** `UPDATE_STOP` op `SET_DETAILS`: the three stop fields no other op sets. `null` clears. */
+export interface UpdateStopDetailsInput {
+  loadId: string
+  expectedUpdatedAt?: string
+  stopId: string
+  patch: { instructions?: string | null; pieces?: number | null; weightLbs?: number | null }
+}
+export async function updateStopDetails(input: UpdateStopDetailsInput): Promise<ShipmentBundle> {
+  return shipmentAction<ShipmentBundle>('UPDATE_STOP', { ...input, op: 'SET_DETAILS' })
 }

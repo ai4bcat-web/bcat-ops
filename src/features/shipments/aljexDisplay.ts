@@ -3,7 +3,7 @@
  * flag set (OSD + special requirements) and the verbatim Aljex staff codes. Pure: no I/O.
  */
 import { ALJEX_REFERENCE_CODES } from '@/types/tms'
-import type { OrderReference, ShipmentRecord, SpecialRequirements } from '@/types/tms'
+import type { AljexFormExtras, OrderReference, ShipmentRecord, SpecialRequirements } from '@/types/tms'
 
 const REFERENCE_LABELS: Record<string, string> = {
   [ALJEX_REFERENCE_CODES.quote]: 'Quote #',
@@ -36,12 +36,40 @@ export function shipmentFlagLabels(osd: ShipmentRecord['osd'], sr: SpecialRequir
     [sr.team, 'Team'], [sr.hazmat, 'Hazmat'], [sr.tarps, 'Tarps'], [sr.escort, 'Escort'],
     [sr.oversize, 'Oversize'], [sr.permit, 'Permit'], [sr.blind, 'Blind'],
     [sr.sealRequired, 'Seal required'], [sr.tempControl, 'Temp control'],
+    [sr.fsma, 'FSMA'], [sr.noBroker, 'No broker'], [sr.labor, 'Labor'], [sr.highRisk, 'High risk'],
+    [sr.massRelease, 'Mass release'], [sr.palletExchange, 'Pallet exchange'], [sr.inside, 'Inside delivery'],
   ]
   for (const [flag, label] of on) if (flag === true) out.push(label)
   if (sr.customsBond) out.push(`Customs bond ${sr.customsBond}`)
   if (sr.palletsIn != null) out.push(`Pallets in ${sr.palletsIn}`)
   if (sr.palletsOut != null) out.push(`Pallets out ${sr.palletsOut}`)
   return out
+}
+
+/**
+ * Step AH extras the form stores under `specialRequirements.form` that nothing else on the detail shows:
+ * only what is set, labelled in Aljex's words. Pure.
+ */
+export function shippingRequirementRows(extras: AljexFormExtras | null | undefined): Array<{ label: string; value: string }> {
+  if (!extras) return []
+  const rows: Array<[string, string | number | null | undefined]> = []
+  const ship = extras.ship
+  const temp = ship?.temp
+  const degrees = (n: number | undefined) => (n == null ? '' : `${n}°${temp?.unit ?? 'F'}`)
+  rows.push(
+    ['Truck miles', ship?.truckMiles],
+    ['Footage', ship?.footage],
+    ['Billable weight', ship?.billableWeightLbs != null ? `${ship.billableWeightLbs} lb` : null],
+    ['Freight class', ship?.freightClass],
+    ['Tarp size', ship?.tarpSize],
+    ['Temperature', temp && (temp.min != null || temp.max != null) ? [degrees(temp.min), degrees(temp.max)].filter(Boolean).join(' – ') : null],
+    ['PreCool', temp?.preCool != null ? degrees(temp.preCool) : null],
+    ['Customer hours', extras.customer?.hours],
+    ['Customer e-mails', extras.customer?.emails?.length ? String(extras.customer.emails.length) : null],
+    ['Tariff', extras.roles?.tariff],
+    ['Special instructions', extras.instructions?.special],
+  )
+  return rows.filter((r): r is [string, string | number] => r[1] != null && r[1] !== '').map(([label, value]) => ({ label, value: String(value) }))
 }
 
 /** `Aljex codes` rows: only codes that are present. */

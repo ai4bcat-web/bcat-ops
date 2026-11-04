@@ -12,6 +12,9 @@ const api = vi.hoisted(() => ({
   listExports: vi.fn(),
   startCsvExport: vi.fn(),
 }))
+
+// The mint utility has its own test and its own data (loads); this page's tests are about exports.
+vi.mock('./components/MintShipmentCard', () => ({ MintShipmentCard: () => <div data-testid="mint-shipment-card" /> }))
 vi.mock('@/lib/apiClient', () => api)
 
 import { DataSafetyPage } from './DataSafetyPage'

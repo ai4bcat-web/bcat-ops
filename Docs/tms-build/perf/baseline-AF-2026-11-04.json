@@ -1,0 +1,30 @@
+{
+  "kind": "pre-AF baseline (AF-plan §0.2 / §1.2)",
+  "measuredAt": "2026-11-04",
+  "origin": "https://dev.d3dejqzs77khq6.amplifyapp.com",
+  "method": "headless Chrome 1440x900, temp ADMIN, 3 runs per mode; cold = new profile, reload = same browser after about:blank (HTTP cache warm), in-app = SPA link click from /tms/carriers (clock at click). KPIs = first appearance of the KPI strip content (/tms/dashboard: .tms-dash-kpis, one change per run); legacy /dashboard = last change of the first 1,400 characters (no stable marker existed).",
+  "dataAtMeasurement": { "Shipment": 10842, "Order": 10842, "Load": 10842, "Invoice": 7522, "LoadCarrier": 8677, "CarrierBill": 1608, "LaneRateSample": 931, "OwnershipDivision": 7 },
+  "pages": {
+    "/tms/dashboard": {
+      "cold": { "fcpS": 0.48, "kpiS": { "runs": [4.38, 4.48, 5.18], "median": 4.48 }, "firstChartS": { "runs": [4.38, 4.5, 5.22], "median": 4.5 }, "lastResponseS": { "runs": [5.29, 5.02, 5.42], "median": 5.29 }, "requests": 75, "mb": 10.75, "longTaskMs": 168 },
+      "reload": { "fcpS": 0.23, "kpiS": { "runs": [4.56, 3.22, 4.07], "median": 4.07 }, "firstChartS": { "runs": [4.56, 3.22, 4.1], "median": 4.1 }, "lastResponseS": { "runs": [5.72, 4.63, 4.37], "median": 4.63 }, "requests": 75, "mb": 10.75, "longTaskMs": 217 },
+      "inApp": { "kpiS": { "runs": [2.96, 2.83, 3.64], "median": 2.96 }, "firstChartS": { "runs": [2.99, 2.86, 3.67], "median": 2.99 }, "lastResponseS": { "runs": [2.95, 2.82, 3.63], "median": 2.95 }, "requests": 50, "mb": 7.11, "longTaskMs": 121 }
+    },
+    "/dashboard": {
+      "cold": { "fcpS": 0.55, "lastContentChangeS": { "runs": [4.05, 3.9, 3.68], "median": 3.9 }, "placeholderZerosPaintedAtS": 1.5, "lastResponseS": { "runs": [6.87, 6.07, 5.99], "median": 6.07 }, "requests": 160, "mb": 30.21, "longTaskMs": 1326 },
+      "reload": { "fcpS": 0.26, "lastContentChangeS": { "runs": [4.88, 3.72, 4.11], "median": 4.11 }, "lastResponseS": { "median": 6.56 }, "requests": 160, "mb": 30.21, "longTaskMs": 1433 },
+      "inApp": { "lastContentChangeS": { "runs": [3.05, 1.8, 2.43], "median": 2.43 }, "lastResponseS": { "median": 5.13 }, "requests": 120, "mb": 24.74, "longTaskMs": 1156 }
+    },
+    "/tms/carriers (shell floor, cold)": { "fcpS": 0.52, "lastResponseS": 5.54, "requests": 46, "mb": 5.99, "longTaskMs": 180 }
+  },
+  "dashboardOnlyCostOverShellFloor": { "/tms/dashboard": { "requests": 29, "mb": 4.8 }, "/dashboard": { "requests": 114, "mb": 24.2 } },
+  "ceilingsBefore": {
+    "PAGE_BUDGETS['/tms/dashboard']": { "firstRows": 4.5, "settled": 6, "requests": 80, "mb": 12 },
+    "PAGE_BUDGETS['/dashboard']": { "firstRows": 6, "settled": 8, "requests": 130, "mb": 20, "note": "already red on dev: measured 160 requests / 30.2 MB" }
+  },
+  "ceilingsAfterAF6": {
+    "KPI_BUDGETS['/tms/dashboard']": { "cold": 3, "warm": 1.5, "spa": 0.8, "chartsCold": 4.5, "chartsWarm": 3, "spaRequests": 25, "spaMb": 3, "kpiFlips": 1 },
+    "KPI_BUDGETS['/dashboard']": { "cold": 3, "warm": 1.5, "spa": 1, "allCold": 5, "kpiFlips": 1 },
+    "PAGE_BUDGETS['/dashboard']": { "firstRows": 6, "settled": 8, "requests": 175, "mb": 33, "note": "re-based to measured + 10 % (D-AF15); AF4's deploy lowers it via --ratchet, never raised again" }
+  }
+}

@@ -120,3 +120,33 @@ describe('read-only router calls', () => {
     expect(reads('listCarriers')).toBe(2)
   })
 })
+
+describe('router action classification (every known action)', () => {
+  const READS = [
+    'SPOT_COUNT', 'SPOT_STATUS', 'SPOT_LIST_REQUESTS', 'SPOT_GET_REQUEST',
+  ]
+  const WRITES = [
+    'SPOT_OAUTH_START', 'SPOT_OAUTH_FINISH', 'SPOT_CONNECT_SIMULATED', 'SPOT_DISCONNECT', 'SPOT_SET_PAUSED', 'SPOT_PURGE_MINE',
+    'SPOT_SAVE_MY_SETTINGS', 'SPOT_POLL_NOW', 'SPOT_ADD_MANUAL', 'SPOT_UPDATE_FIELDS', 'SPOT_SET_CUSTOMER', 'SPOT_SUGGEST_RESPONSE',
+    'SPOT_LOG_COPIED', 'SPOT_MARK_SENT', 'SPOT_DISMISS', 'SPOT_MARK_OUTCOME', 'SPOT_SAVE_SETTINGS', 'SPOT_ADMIN_DISCONNECT',
+    'SPOT_SIM_INJECT', 'SPOT_SIM_RESET', 'SPOT_SIM_PURGE_TEST',
+  ]
+  const CRM_READS = ['CRM_GET_ACCOUNT', 'CRM_LIST_ACCOUNTS', 'CRM_LIST_FOLLOWUPS']
+  const CRM_WRITES = ['CRM_ADD_ACTIVITY', 'CRM_ADD_TASK', 'CRM_COMPLETE_TASK', 'CRM_SET_NEXT_STEP', 'CRM_UPSERT_CONTACT', 'CRM_CLAIM_DOMAIN', 'CRM_ASSIGN_OWNER', 'CRM_BACKFILL']
+
+  it.each([
+    ...READS.map((a) => ['spot', a, true] as const),
+    ...WRITES.map((a) => ['spot', a, false] as const),
+    ...CRM_READS.map((a) => ['crm', a, true] as const),
+    ...CRM_WRITES.map((a) => ['crm', a, false] as const),
+  ])('%s %s: read=%s', async (router, action, isRead) => {
+    const { spotAction, crmAction } = await import('./apiClient')
+    await listCarriers()
+    const field = router === 'spot' ? 'tmsSpotActions' : 'tmsCrmActions'
+    graphqlMock.mockImplementationOnce(async () => ({ data: { [field]: '{}' } }))
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (router === 'spot' ? spotAction(action as any, {}) : crmAction(action as any, {}))
+    await listCarriers()
+    expect(reads('listCarriers')).toBe(isRead ? 1 : 2)
+  })
+})

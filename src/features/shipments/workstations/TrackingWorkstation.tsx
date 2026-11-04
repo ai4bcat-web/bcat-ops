@@ -30,7 +30,6 @@ import {
   requestPod,
   runCheckCallPlan,
 } from '@/lib/apiClient'
-import { CreateShipmentDialog } from '../components/CreateShipmentDialog'
 import { CustomerLinkDialog } from '../components/CustomerLinkDialog'
 import { TrackingBoard } from './tracking/TrackingBoard'
 import {
@@ -75,7 +74,6 @@ export function TrackingWorkstation() {
   const { shipments, loading: shipmentsLoading, error: shipmentsError, refresh: refreshShipments } = useShipments(
     lifecycle === 'closed' ? { kind: 'window', months: closedMonths } : { kind: 'working' },
   )
-  const [createOpen, setCreateOpen] = useState(false)
   const [customerLinkTarget, setCustomerLinkTarget] = useState<CustomerLinkDialogTarget | null>(null)
 
   const { favorites, toggleFavorite } = useTrackingFavorites(user?.email)
@@ -208,7 +206,7 @@ export function TrackingWorkstation() {
           favorites={favorites}
           onToggleFavorite={toggleFavorite}
           onOpenShipment={openShipment}
-          onCreateShipment={() => setCreateOpen(true)}
+          onCreateShipment={() => navigate('/tms/shipments/new')}
           onManageLinks={() => navigate('/tms/tracking/links')}
           onCreateCustomerUrl={(row) => { void openCustomerLinkDialog(row) }}
           onRequestCheckCall={handleRequestCheckCall}
@@ -221,7 +219,6 @@ export function TrackingWorkstation() {
           onRemoveRecent={removeRecent}
         />
       </div>
-      <CreateShipmentDialog open={createOpen} onOpenChange={setCreateOpen} onCreated={refreshShipments} />
       {customerLinkTarget && (
         <CustomerLinkDialog
           shipment={customerLinkTarget.bundle.shipment}

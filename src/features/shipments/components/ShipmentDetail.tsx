@@ -13,7 +13,7 @@
  * asked for.
  */
 import { useContext, useEffect, useMemo, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import { AuthContext } from '@/hooks/useAuth'
 import { formatCents } from '@/lib/tmsDirectory'
@@ -37,7 +37,8 @@ import { PROVIDERS, isApplicable, liveCapabilitiesOf } from '@/lib/integrations/
 import { badgeOf } from '@/lib/integrations/health'
 import type { Capability, IntegrationRecord, ProviderDescriptor } from '@/lib/integrations/types'
 import type { CreditSummary } from '@/lib/customerCredit'
-import { aljexCodeItems, referenceLabel, shipmentFlagLabels } from '../aljexDisplay'
+import { aljexCodeItems, referenceLabel, shipmentFlagLabels, shippingRequirementRows } from '../aljexDisplay'
+import { readExtras } from '../form/model'
 import { StopCards } from './StopCards'
 import { FinancialLines } from './FinancialLines'
 import { BuildingBanner } from './BuildingBanner'
@@ -98,6 +99,7 @@ export function ShipmentDetail(props: ShipmentDetailProps) {
   // Same optional read as `useAuthUser`: the detail renders inside drawers, dialogs and
   // tests that do not always sit under AuthProvider, and the router is the real gate.
   const auth = useContext(AuthContext)
+  const navigate = useNavigate()
   const canTag = isAdmin || (auth?.isOwner ?? false) || (auth?.hasPageAccess('tms') ?? false)
   // LIST_INTEGRATIONS is owner/ADMIN only, the same gate the Integrations tab carries.
   // Anyone else must not even mount the hook: the refused list would read as "every
@@ -108,6 +110,18 @@ export function ShipmentDetail(props: ShipmentDetailProps) {
   const order = bundle.orders[0]
   const load = bundle.loads[0]
   const voided = Boolean(shipment.voidedAt)
+  // The Aljex-style form edits every shipment, not only drafts; a voided one is frozen.
+  const editButton = (
+    <TmsButton
+      size="sm"
+      variant="secondary"
+      data-testid="shipment-edit"
+      disabled={voided}
+      onClick={() => navigate(`/tms/shipments/${shipment.id}/edit`)}
+    >
+      Edit
+    </TmsButton>
+  )
   const activeCarrier = bundle.loadCarriers.find((c) => c.status === 'ACTIVE') ?? null
   const totals = useMemo(
     () => computeFinancials(bundle.charges, { miles: load?.miles ?? null }, pricing, marginFloorBps),
@@ -183,6 +197,7 @@ export function ShipmentDetail(props: ShipmentDetailProps) {
     return (
       <div className="space-y-4">
         {unresolvedCustomer}
+        <div className="flex justify-end">{editButton}</div>
         <DraftOrderEditor
           bundle={bundle}
           customer={customer}
@@ -247,23 +262,28 @@ export function ShipmentDetail(props: ShipmentDetailProps) {
         <div className="space-y-3">
           <TmsCard
             title="Shipment"
-            actions={load ? (
-              <LoadActions
-                load={load}
-                mode={shipment.mode}
-                bundle={bundle}
-                activeCarrier={activeCarrier}
-                drivers={drivers}
-                trucks={trucks}
-                trailers={trailers}
-                arStatus={order?.arStatus ?? null}
-                isAdmin={isAdmin}
-                voided={voided}
-                handlers={actions.load}
-                onRateCon={() => setTab('carrier')}
-                onError={(message) => setActionError({ message, status: load.status ?? null })}
-              />
-            ) : undefined}
+            actions={(
+              <div className="flex items-center gap-2">
+                {editButton}
+                {load ? (
+                  <LoadActions
+                    load={load}
+                    mode={shipment.mode}
+                    bundle={bundle}
+                    activeCarrier={activeCarrier}
+                    drivers={drivers}
+                    trucks={trucks}
+                    trailers={trailers}
+                    arStatus={order?.arStatus ?? null}
+                    isAdmin={isAdmin}
+                    voided={voided}
+                    handlers={actions.load}
+                    onRateCon={() => setTab('carrier')}
+                    onError={(message) => setActionError({ message, status: load.status ?? null })}
+                  />
+                ) : null}
+              </div>
+            )}
           >
             <TmsStatRow
               compact
@@ -336,6 +356,12 @@ export function ShipmentDetail(props: ShipmentDetailProps) {
             {aljexCodeItems(shipment).length > 0 && (
               <div className="mt-3" data-testid="aljex-codes">
                 <TmsMetaList columns={4} items={aljexCodeItems(shipment)} />
+              </div>
+            )}
+            {shippingRequirementRows(readExtras(order)).length > 0 && (
+              <div className="mt-3" data-testid="shipping-requirements">
+                <p className="tms-field-label">Shipping requirements</p>
+                <TmsMetaList columns={4} items={shippingRequirementRows(readExtras(order))} />
               </div>
             )}
             {(order?.freight?.length ?? 0) > 0 && (

@@ -15,7 +15,7 @@ import { Link } from 'react-router-dom'
 import { TmsBadge, TmsButton, TmsField, TmsInput } from '@/features/tms/kit'
 import { toast } from 'sonner'
 import { getRateConfirmUrl, listDivisions } from '@/lib/apiClient'
-import { buildRateConPdf, rateConFilename, rateConPdfBase64 } from '@/lib/carrierRateCon'
+import { buildRateConPdf, joinRateConNotes, rateConFilename, rateConPdfBase64 } from '@/lib/carrierRateCon'
 import { useAuthUser } from '@/hooks/useAuth'
 import { dedupeEmails } from '@/lib/emailAddress'
 import { mcpPacketStanding } from '@/lib/mcpPacket'
@@ -25,6 +25,7 @@ import { quickPayTiersOf, tierFor } from '@/lib/quickPay'
 import { formatDateTime } from '@/lib/date'
 import { formatCents } from '@/lib/tmsDirectory'
 import type { RateConInput, RateConStop } from '@/lib/carrierRateCon'
+import { readExtras } from '@/features/shipments/form/model'
 import type {
   CarrierContactRecord, CarrierRecord, Division, LoadCarrierRecord, RateConRequiredField, RateConStatus,
   ShipmentBundle, TmsSettings,
@@ -150,6 +151,10 @@ export function RateConPanel({ bundle, loadCarrier, carrier, contacts, settings,
       : null,
     paymentTermsDays: loadCarrier.paymentTermsDays ?? settings?.defaultCarrierTermsDays ?? null,
     terms: settings?.rateConTerms ?? '',
+    notes: joinRateConNotes(
+      readExtras(bundle.orders[0])?.instructions?.special,
+      readExtras(bundle.orders[0])?.instructions?.rateCon,
+    ),
     requiredFields: (settings?.rateConRequiredFields as RateConRequiredField[] | null) ?? DEFAULT_REQUIRED_FIELDS,
   })
 

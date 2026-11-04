@@ -15,7 +15,7 @@ import { BoardMapView } from '../../board/BoardMapView'
 import { DenseGrid } from '@/features/tms/grid/DenseGrid'
 import {
   ClearFiltersButton,
-  ColumnChooser,
+  ColumnsButton,
   DensityToggle,
   DenseKpiStrip,
   SummaryToggle,
@@ -381,11 +381,12 @@ export function TrackingBoard(props: TrackingBoardProps) {
         <TmsButton size="sm" variant="primary" onClick={onCreateShipment}>
           <Plus size={14} /> Create Shipment
         </TmsButton>
-        <ColumnChooser
-          all={allColumns.map((c) => ({ key: c.key, label: c.header }))}
-          visible={prefs.columns}
-          onChange={prefs.setColumns}
-          onReset={prefs.resetColumns}
+        <ColumnsButton
+          catalog={allColumns}
+          columns={prefs.columns}
+          widths={prefs.widths}
+          pinned={prefs.pinned}
+          onApply={(next) => prefs.applyLayout({ ...next, replaceWidths: true })}
         />
         <DensityToggle density={prefs.density} onChange={prefs.setDensity} />
         <SummaryToggle open={prefs.kpiOpen} onToggle={() => prefs.setKpiOpen(!prefs.kpiOpen)} />
@@ -432,6 +433,7 @@ export function TrackingBoard(props: TrackingBoardProps) {
             renderCell={renderCell}
             density={prefs.density}
             userWidths={prefs.widths}
+            stickyCount={Math.max(1, prefs.pinned.length)}
             sort={prefs.sort}
             onSort={(key) => prefs.setSort(nextSort(prefs.sort, key))}
             filters={filters}

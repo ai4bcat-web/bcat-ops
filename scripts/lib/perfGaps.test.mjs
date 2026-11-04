@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { scanR1, scanDirectory, scanPolls, payHookViolations } from './perfGaps.mjs'
+import { scanR1, scanDirectory, scanPolls, payHookViolations, scanAF } from './perfGaps.mjs'
 
 describe('scanR1', () => {
   it('flags a page calling a full-table list but not the allowlisted client, tests, or similarly named indexed reads', () => {
@@ -90,5 +90,34 @@ describe('payHookViolations', () => {
     expect(payHookViolations(ok, 'src/hooks/useDashboardMetrics.ts')).toEqual([])
     expect(payHookViolations(ok, 'src/hooks/useBoxTruckPay.ts').length).toBeGreaterThan(0)
     expect(payHookViolations(`${ok}\n-      (l) => l.readyToInvoiceAt == null`, 'src/hooks/useDashboardMetrics.ts')).toEqual(['-      (l) => l.readyToInvoiceAt == null'])
+  })
+})
+
+describe('scanAF (G11)', () => {
+  it('flags the working-set read and a loadFinancials import in the company dashboard, not in tests or elsewhere', () => {
+    const hits = scanAF({
+      'src/features/tms/dashboard/useBrokerageDashboard.ts': "import { getLoadFinancials } from '@/lib/apiClient'\nconst b = load({ kind: 'working' })",
+      'src/features/tms/dashboard/useBrokerageDashboard.test.ts': "load({ kind: 'working' })",
+      'src/features/tms/shipments/Board.tsx': "load({ kind: 'working' })",
+      'src/features/tms/dashboard/Other.ts': "// kind: 'working' in a comment\nconst loadFinancials = []",
+    })
+    expect(hits.workingSet).toEqual([{ path: 'src/features/tms/dashboard/useBrokerageDashboard.ts', line: 2 }])
+    expect(hits.financials).toEqual([{ path: 'src/features/tms/dashboard/useBrokerageDashboard.ts', line: 1, symbol: 'getLoadFinancials' }])
+  })
+
+  it('accepts widgets inside LazyWidget and flags a bare mount', () => {
+    const page = [
+      '<LazyWidget height={300}>',
+      '  <YearProfitWidget />',
+      '</LazyWidget>',
+      '<LazyWidget height={200}><DieselPriceWidget /></LazyWidget>',
+      '<DriverLeaderboardWidget />',
+    ].join('\n')
+    expect(scanAF({ 'src/features/dashboard/DashboardPage.tsx': page }).widgets).toEqual([{ path: 'src/features/dashboard/DashboardPage.tsx', line: 5, widget: 'DriverLeaderboardWidget' }])
+  })
+
+  it('flags any remaining useDashboardMetrics reference under src', () => {
+    expect(scanAF({ 'src/features/dashboard/DashboardPage.tsx': "import { useDashboardMetrics } from '@/hooks/useDashboardMetrics'" }).metricsHook).toHaveLength(1)
+    expect(scanAF({ 'src/features/dashboard/DashboardPage.tsx': 'useLegacyDashboardKpis()' }).metricsHook).toEqual([])
   })
 })

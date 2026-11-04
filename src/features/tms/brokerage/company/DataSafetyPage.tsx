@@ -14,6 +14,7 @@ import { ErrorText, GroupLabel, Hint, Loading, Panel, SettingsCard, Stack } from
 import { exportNow, getCsvExport, getCsvExportLinks, getDataStatus, listExports, startCsvExport } from '@/lib/apiClient'
 import type { DataExportJob, DataExportLinks, DataExportScope, DataStatus } from '@/types/tms'
 import { ACTIVE_EXPORT, EXPORT_ALL_PHRASE, bytesLabel, csvExportBlockReason, tablesDone } from './components/dataSafetyLogic'
+import { MintShipmentCard } from './components/MintShipmentCard'
 
 const messageOf = (e: unknown) => (e instanceof Error ? e.message : String(e))
 const POLL_MS = 3000
@@ -246,6 +247,7 @@ export function DataSafetyPage() {
           </table>
         )}
       </SettingsCard>
+      <MintShipmentCard />
     </div>
   )
 }

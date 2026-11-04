@@ -9,7 +9,7 @@
  *
  * Everything on screen is read from the dev data. A card or strip with nothing to show says so.
  */
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowLeftRight, ChevronDown, CircleDollarSign, Download, Eye, Plus, ReceiptText, RotateCw, Save, TrendingUp, Wallet, XCircle,
 } from 'lucide-react'
@@ -20,11 +20,10 @@ import { SHIPMENT_STATUS_LABELS } from '@/lib/shipmentStatus'
 import { personName } from '@/lib/roles'
 import { indexOf } from '@/lib/dashboardCharts'
 import { formatCents } from '@/lib/invoiceBuild'
-import { SEED_DIVISIONS } from '@/lib/ownership'
+import { LazyChartCard, ChartPlaceholder } from './LazyChartCard'
 import { BROKERAGE_CHARTS } from './brokerageCards'
 import { CLASSIC_CHARTS } from './classicCharts'
-import { LazyChartCard } from './ChartCard'
-import { buildBusinessStrips, buildCompanyTotals, rollupBusinessStrips } from './businessStrips'
+import { useDashboardKpis } from './useDashboardKpis'
 import { WelcomeHeader } from './WelcomeHeader'
 import { useBrokerageDashboard } from './useBrokerageDashboard'
 import {
@@ -43,6 +42,11 @@ const ALL_CHARTS: ChartDef[] = [...CLASSIC_CHARTS, ...BROKERAGE_CHARTS]
  */
 function statusLabel(status: string): string {
   return (SHIPMENT_STATUS_LABELS as Record<string, string>)[status] ?? status
+}
+
+/** Browser-local hh:mm of an ISO time. */
+function asOfLabel(iso: string): string {
+  return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 }
 
 /** Which filter panel is open. `add` is the "+ Filter" chooser. */
@@ -121,22 +125,33 @@ export function DashboardPage() {
   const [saveOpen, setSaveOpen] = useState(false)
   const [saveName, setSaveName] = useState('')
 
-  const { data, loading, error, failedMonths, refresh } = useBrokerageDashboard(filters)
+  const { data, final, error, failedMonths, refresh: refreshExact } = useBrokerageDashboard(filters)
+  // Refresh always runs the exact path (and re-reads the rollup afterwards); the window it was pressed on stays "live".
+  const windowKey = `${filters.from}|${filters.to}`
+  const [refreshedWindow, setRefreshedWindow] = useState<string | null>(null)
+  const kpis = useDashboardKpis(filters, { data, final, error }, refreshedWindow === windowKey)
+  const refresh = useCallback(() => { setRefreshedWindow(windowKey); refreshExact() }, [windowKey, refreshExact])
+  const { strips, totals } = kpis
+  const kpiSignature = kpis.state === 'loading' ? null : JSON.stringify(totals)
+  const kpiFlips = useRef({ signature: null as string | null, flips: 0 })
+  const kpiNode = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    const seen = kpiFlips.current
+    if (kpiSignature === null) { seen.signature = null; seen.flips = 0 } else {
+      if (seen.signature !== null && seen.signature !== kpiSignature) seen.flips += 1
+      seen.signature = kpiSignature
+    }
+    kpiNode.current?.setAttribute('data-kpi-flips', String(seen.flips))
+  }, [kpiSignature])
 
   const options = useMemo(() => optionsFrom(data), [data])
   const divisionOptions = useMemo<Option[]>(
-    () => (data?.divisions ?? [])
+    () => (data?.divisions ?? kpis.divisions ?? [])
       .filter((division) => division.active !== false)
       .map((division) => ({ value: division.code, label: division.brand ? `${division.name} [${division.brand}]` : division.name })),
-    [data],
+    [data, kpis.divisions],
   )
 
-  const divisions = data?.divisions && data.divisions.length > 0 ? data.divisions : SEED_DIVISIONS
-  const strips = useMemo(
-    () => (data ? rollupBusinessStrips(buildBusinessStrips(data, filters, divisions)) : []),
-    [data, filters, divisions],
-  )
-  const totals = useMemo(() => (data ? buildCompanyTotals(data, filters) : null), [data, filters])
   const firstName = useMemo(() => {
     const profile = data?.profiles.find((candidate) => candidate.email?.toLowerCase() === email.toLowerCase())
     return personName({ name: profile?.name, email }).split(/\s+/)[0]
@@ -246,10 +261,19 @@ export function DashboardPage() {
           {views.map((view) => <option key={view.name} value={view.name}>{view.name}</option>)}
         </select>
       </label>
+      {kpis.asOf && kpis.source !== 'live' ? (
+        <span
+          className={`tms-dash-asof${kpis.state === 'stale' ? ' tms-dash-asof-stale' : ''}`}
+          data-testid="dash-asof"
+          title="Refreshed within 5 minutes of any change; click Refresh for the exact figures"
+        >
+          {`as of ${asOfLabel(kpis.asOf)}`}
+        </span>
+      ) : null}
       <TmsIconButton aria-label="Refresh" onClick={refresh}><RotateCw size={15} /></TmsIconButton>
       <TmsIconButton aria-label="Clear filters" onClick={clearAll}><XCircle size={15} /></TmsIconButton>
       <TmsIconButton aria-label="Save view" onClick={() => setSaveOpen(true)}><Save size={15} /></TmsIconButton>
-      <TmsButton variant="primary" onClick={exportCsv}><Download size={15} aria-hidden="true" /> Export CSV</TmsButton>
+      <TmsButton variant="primary" onClick={exportCsv} disabled={!final}><Download size={15} aria-hidden="true" /> Export CSV</TmsButton>
       <button
         type="button"
         className="tms-dash-picker-btn"
@@ -387,35 +411,56 @@ export function DashboardPage() {
         </div>
       ) : null}
 
-      {totals ? (
-        <div className="tms-grid tms-grid-4 tms-dash-kpis">
-          <TmsKpiCard
-            label="Revenue"
-            icon={CircleDollarSign}
-            value={totals.revenueCents != null ? formatCents(totals.revenueCents) : null}
-            sub={totals.shipmentCount != null ? `${totals.shipmentCount} shipments` : null}
-          />
-          <TmsKpiCard
-            label="Profit"
-            icon={TrendingUp}
-            value={totals.profitCents != null ? formatCents(totals.profitCents) : null}
-            sub={totals.marginBps != null ? `${(totals.marginBps / 100).toFixed(1)}% margin` : null}
-          />
-          <TmsKpiCard
-            label="Open AR"
-            icon={ReceiptText}
-            value={totals.arOpenCents != null ? formatCents(totals.arOpenCents) : null}
-            positiveIsGood={false}
-            sub="outstanding invoices"
-          />
-          <TmsKpiCard
-            label="Open AP"
-            icon={Wallet}
-            value={totals.apOpenCents != null ? formatCents(totals.apOpenCents) : null}
-            positiveIsGood={false}
-            sub="outstanding carrier bills"
-          />
-        </div>
+      <div
+        ref={kpiNode}
+        className="tms-grid tms-grid-4 tms-dash-kpis"
+        data-testid="dash-kpis"
+        data-state={kpis.state}
+        data-source={kpis.source ?? undefined}
+        data-asof={kpis.asOf ?? undefined}
+        data-kpi-flips="0"
+      >
+        {kpis.state === 'loading' ? (
+          ['Revenue', 'Profit', 'Open AR', 'Open AP'].map((label) => (
+            <div key={label} className="tms-kpi-card tms-kpi-skeleton" aria-busy="true" aria-label={`${label} loading`}>
+              <span className="tms-kpi-skeleton-label">{label}</span>
+            </div>
+          ))
+        ) : (
+          <>
+            <TmsKpiCard
+              label="Revenue"
+              icon={CircleDollarSign}
+              value={totals?.revenueCents != null ? formatCents(totals.revenueCents) : null}
+              sub={totals?.shipmentCount != null ? `${totals.shipmentCount} shipments` : null}
+            />
+            <TmsKpiCard
+              label="Profit"
+              icon={TrendingUp}
+              value={totals?.profitCents != null ? formatCents(totals.profitCents) : null}
+              sub={totals?.marginBps != null ? `${(totals.marginBps / 100).toFixed(1)}% margin` : null}
+            />
+            <TmsKpiCard
+              label="Open AR"
+              icon={ReceiptText}
+              value={totals?.arOpenCents != null ? formatCents(totals.arOpenCents) : null}
+              positiveIsGood={false}
+              sub="outstanding invoices"
+            />
+            <TmsKpiCard
+              label="Open AP"
+              icon={Wallet}
+              value={totals?.apOpenCents != null ? formatCents(totals.apOpenCents) : null}
+              positiveIsGood={false}
+              sub="outstanding carrier bills"
+            />
+          </>
+        )}
+      </div>
+      {kpis.source && kpis.source !== 'live' && kpis.asOf ? (
+        <p className="tms-dash-footnote" data-testid="dash-kpis-note">
+          {`KPIs as of ${asOfLabel(kpis.asOf)}; the charts below are live.`}
+        </p>
       ) : null}
 
       {error ? <p className="tms-dash-error">{error}</p> : null}
@@ -424,8 +469,6 @@ export function DashboardPage() {
           {`These months could not be read, so they are missing from the numbers: ${failedMonths.map((month) => month.month).join(', ')}`}
         </p>
       ) : null}
-      {loading && !data ? <p className="tms-dash-loading">Loading the window…</p> : null}
-
       {strips.length > 0 ? (
         <div className="tms-business-strips">
           {strips.map((strip) => {
@@ -493,9 +536,9 @@ export function DashboardPage() {
       ) : null}
 
       <div className="tms-dash-cards">
-        {data ? visible.map((def) => {
+        {visible.map((def) => {
           const override = overrides[def.key]
-          return (
+          return data ? (
             <LazyChartCard
               key={def.key}
               def={def}
@@ -505,8 +548,8 @@ export function DashboardPage() {
               override={override}
               onOverride={(next) => setOverrides((current) => ({ ...current, [def.key]: next }))}
             />
-          )
-        }) : null}
+          ) : <ChartPlaceholder key={def.key} def={def} />
+        })}
       </div>
 
       <TmsDialog

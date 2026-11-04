@@ -5,6 +5,7 @@
  * Intake all narrow and order rows the same way.
  */
 import { chicagoDateStr } from '@/lib/date'
+import { headerDefaultWidth, headerFont } from './columnMeasure'
 
 export type DenseFilterKind = 'text' | 'multi' | 'date' | 'number'
 export type DenseDensity = 'compact' | 'comfortable'
@@ -40,13 +41,12 @@ export interface DenseColumn<T> {
   numberOf?: (row: T) => number | null
   /** Unit shown beside the number range inputs. */
   numberUnit?: string
-  /** Width floor / ceiling in px for resize and auto-fit. */
-  minWidth?: number
-  maxWidth?: number
   /** A fixed pixel width instead of auto-fit (icon and action columns). */
   width?: number
   /** A fixed column cannot be reordered, resized or hidden from the chooser. */
   fixed?: boolean
+  /** The Columns dialog's section for this field (Shipment, Order, Carrier, ...). */
+  group?: string
   align?: 'left' | 'right'
 }
 
@@ -181,45 +181,37 @@ export function facetOptions<T>(rows: readonly T[], col: DenseColumn<T>): DenseF
   return col.fixedOptions ? all : all.sort((a, b) => collator.compare(a.label, b.label))
 }
 
-const CHAR_PX = 6.6
-const CELL_PAD_PX = 20
-const HEADER_CHROME_PX = 44
-const AUTO_FIT_SAMPLE = 200
-export const DEFAULT_MIN_WIDTH = 56
-export const DEFAULT_MAX_WIDTH = 340
+/** The narrowest and widest a person can drag or type a column. */
+export const MIN_USER_WIDTH = 60
+export const MAX_USER_WIDTH = 800
 export const CHECK_COLUMN_WIDTH = 30
 /** Fixed row heights (px): the list is virtualised on them, and the CSS reads the same number. */
 export const ROW_HEIGHT: Record<DenseDensity, number> = { compact: 30, comfortable: 40 }
 
-export function clampWidth<T>(col: DenseColumn<T>, px: number): number {
-  return Math.round(Math.min(col.maxWidth ?? DEFAULT_MAX_WIDTH, Math.max(col.minWidth ?? DEFAULT_MIN_WIDTH, px)))
+export function clampWidth(px: number): number {
+  return Math.round(Math.min(MAX_USER_WIDTH, Math.max(MIN_USER_WIDTH, px)))
 }
 
 /**
- * Width that fits the header and the longest of the first rows' text, between the column's
- * min and max. A text estimate (not a DOM measure) so a virtualised list never depends on
- * which rows happen to be mounted.
+ * The width a column starts at: its header label measured in the grid's header font (plus
+ * padding, sort and filter controls), floored at 72px. Fixed icon / action columns keep their
+ * `width`. Content never widens a column; the user does, by dragging or in the Columns dialog.
  */
-export function autoColumnWidth<T>(col: DenseColumn<T>, rows: readonly T[]): number {
+export function defaultColumnWidth<T>(col: DenseColumn<T>, font?: string): number {
   if (col.width != null) return col.width
-  let longest = 0
-  const n = Math.min(rows.length, AUTO_FIT_SAMPLE)
-  for (let i = 0; i < n; i += 1) longest = Math.max(longest, col.text(rows[i]).length)
-  const content = longest * CHAR_PX + CELL_PAD_PX
-  const header = col.header.length * (CHAR_PX + 0.6) + HEADER_CHROME_PX
-  return clampWidth(col, Math.max(content, header))
+  return headerDefaultWidth(col.header, { sortable: col.sortable !== false, filterable: filterKindOf(col) != null }, font)
 }
 
-/** Effective pixel width per column: the user's width, else the auto-fit one. */
+/** Effective pixel width per column: the user's saved width, else the header-measured default. */
 export function columnWidths<T>(
   columns: readonly DenseColumn<T>[],
-  rows: readonly T[],
   userWidths: Record<string, number>,
 ): Record<string, number> {
   const out: Record<string, number> = {}
+  const font = headerFont()
   for (const col of columns) {
     const user = userWidths[col.key]
-    out[col.key] = col.width != null ? col.width : user != null ? clampWidth(col, user) : autoColumnWidth(col, rows)
+    out[col.key] = col.width != null ? col.width : user != null ? clampWidth(user) : defaultColumnWidth(col, font)
   }
   return out
 }

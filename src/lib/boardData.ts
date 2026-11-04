@@ -35,7 +35,7 @@ export type BoardView =
   /** The open-work set: every non-terminal shipment plus delivered-and-not-yet-released ones. */
   | { kind: 'working' }
   /** pickupMonth fan-out; `includeVoided` drops the server-side void filter. */
-  | { kind: 'window'; months: string[]; includeVoided?: boolean }
+  | { kind: 'window'; months: string[]; includeVoided?: boolean; /** `false` skips the per-load financials read (the dashboard reads none). */ financials?: boolean }
   /** A getShipment batch (worklists, error tab). */
   | { kind: 'ids'; ids: string[] }
   | { kind: 'status'; status: ShipmentStatus }
@@ -79,7 +79,7 @@ function hashIds(ids: readonly string[]): string {
 export function boardViewKey(view: BoardView): string {
   switch (view.kind) {
     case 'working': return 'board:working'
-    case 'window': return `board:window:${[...new Set(view.months)].sort().join(',')}${view.includeVoided ? ':voided' : ''}`
+    case 'window': return `board:window:${[...new Set(view.months)].sort().join(',')}${view.includeVoided ? ':voided' : ''}${view.financials === false ? ':nofin' : ''}`
     case 'ids': return `board:ids:${hashIds([...new Set(view.ids)].sort())}`
     case 'status': return `board:status:${view.status}`
     case 'customer': return `board:customer:${view.customerId}`
@@ -111,8 +111,8 @@ export function loadBoardBundle(view: BoardView, opts?: LoadBoardOpts): Promise<
   return readBoardBundle(view, opts).fresh
 }
 
-/** The tables joined to a set of shipments: aliased batches by shipment id, then financials by load id. */
-async function joinShipments(shipments: ShipmentRecord[]): Promise<BoardBundle> {
+/** The tables joined to a set of shipments: aliased batches by shipment id, then (optionally) financials by load id. */
+async function joinShipments(shipments: ShipmentRecord[], financials = true): Promise<BoardBundle> {
   if (shipments.length === 0) return emptyBundle()
   const ids = shipments.map((s) => s.id)
   const [orders, loads, loadCarriers] = await Promise.all([
@@ -120,7 +120,7 @@ async function joinShipments(shipments: ShipmentRecord[]): Promise<BoardBundle> 
     listLoadSummariesByShipmentIds(ids),
     listLoadCarriersByShipmentIds(ids),
   ])
-  const loadFinancials = await listLoadFinancialsByLoadIds(loads.map((l) => l.id))
+  const loadFinancials = financials ? await listLoadFinancialsByLoadIds(loads.map((l) => l.id)) : []
   return { shipments, orders, loads, loadCarriers, loadFinancials }
 }
 
@@ -186,7 +186,7 @@ async function fetchBundle(view: BoardView, onPartial?: (b: BoardBundle) => void
     }
     case 'window': {
       const sets = await Promise.all([...new Set(view.months)].map((m) => listShipmentsByMonthFiltered(m, { includeVoided: view.includeVoided })))
-      return joinShipments(mergeShipmentSets(...sets))
+      return joinShipments(mergeShipmentSets(...sets), view.financials !== false)
     }
     case 'ids':
       return joinShipments([...(await getShipmentsBatch(view.ids, false)).values()])

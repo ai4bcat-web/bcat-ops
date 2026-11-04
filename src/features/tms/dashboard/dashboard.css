@@ -385,3 +385,29 @@
   font-variant-numeric: tabular-nums;
   overflow-wrap: anywhere;
 }
+
+.tms-shell .tms-kpi-skeleton {
+  min-height: 96px;
+  padding: 14px 16px;
+  border: 1px solid var(--tms-border);
+  border-radius: var(--tms-radius);
+  background: var(--tms-surface);
+  color: var(--tms-muted);
+  font-size: 13px;
+}
+
+.tms-shell .tms-dash-asof {
+  align-self: center;
+  color: var(--tms-muted);
+  font-size: 12px;
+}
+
+.tms-shell .tms-dash-asof-stale {
+  color: var(--tms-badge-orange);
+}
+
+.tms-shell .tms-dash-footnote {
+  margin: 0 0 var(--tms-gap);
+  color: var(--tms-muted);
+  font-size: 12px;
+}

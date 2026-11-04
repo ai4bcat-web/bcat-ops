@@ -67,6 +67,7 @@ import { tmsAljexImport } from './functions/tms-aljex-import/resource'
 import { tmsDataSafety } from './functions/tms-data-safety/resource'
 import { tmsSpotQuoter } from './functions/tms-spot-quoter/resource'
 import { tmsCrmActions } from './functions/tms-crm-actions/resource'
+import { tmsDashboardRollup } from './functions/tms-dashboard-rollup/resource'
 import { devRuleState } from './devRuleGuard'
 import { loadTrackingProjector } from './functions/load-tracking-projector/resource'
 import { shipmentNotifier } from './functions/shipment-notifier/resource'
@@ -165,6 +166,7 @@ const backend = defineBackend({
   tmsDataSafety,
   tmsSpotQuoter,
   tmsCrmActions,
+  tmsDashboardRollup,
   loadTrackingProjector,
   checkCallNotifier,
   trackingAutomation,
@@ -3821,6 +3823,64 @@ crmFn.addToRolePolicy(new PolicyStatement({
   resources: [abCustomerTable.tableArn],
 }))
 
+// ── tmsDashboardRollup Lambda (Step AF; dashboard KPIs from ~100 pre-aggregated rows) ────
+// Stream consumer on the six tables the dashboards are computed from, plus a five-minute
+// sweep. Reads the source tables, writes only DashboardRollup. Mappings are created in the
+// Lambda's own stack (deploy #227 cycle), like the other stream consumers.
+{
+  const rollupFn = backend.tmsDashboardRollup.resources.lambda as LambdaFunction
+  const rollupTables = backend.data.resources.tables
+  const rollupTable = rollupTables['DashboardRollup']
+  const rollupSources = {
+    Shipment:       rollupTables['Shipment'],
+    Order:          rollupTables['Order'],
+    Load:           rollupTables['Load'],
+    LaneRateSample: rollupTables['LaneRateSample'],
+    Invoice:        rollupTables['Invoice'],
+    CarrierBill:    rollupTables['CarrierBill'],
+  }
+  rollupFn.addEnvironment('DASHBOARD_ROLLUP_TABLE_NAME', rollupTable.tableName)
+  rollupFn.addEnvironment('SHIPMENT_TABLE_NAME',         rollupSources.Shipment.tableName)
+  rollupFn.addEnvironment('ORDER_TABLE_NAME',            rollupSources.Order.tableName)
+  rollupFn.addEnvironment('LOAD_TABLE_NAME',             rollupSources.Load.tableName)
+  rollupFn.addEnvironment('LANE_RATE_SAMPLE_TABLE_NAME', rollupSources.LaneRateSample.tableName)
+  rollupFn.addEnvironment('INVOICE_TABLE_NAME',          rollupSources.Invoice.tableName)
+  rollupFn.addEnvironment('CARRIER_BILL_TABLE_NAME',     rollupSources.CarrierBill.tableName)
+  // Read/write: its own table only (rows, dirty markers, leases).
+  rollupFn.addToRolePolicy(new PolicyStatement({
+    actions:   ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem', 'dynamodb:DeleteItem', 'dynamodb:Query', 'dynamodb:Scan'],
+    resources: [rollupTable.tableArn],
+  }))
+  // Read-only on the sources (BatchGetItem: the readBundle lesson), tables and their indexes.
+  rollupFn.addToRolePolicy(new PolicyStatement({
+    actions:   ['dynamodb:GetItem', 'dynamodb:BatchGetItem', 'dynamodb:Query'],
+    resources: Object.values(rollupSources).flatMap((t) => [t.tableArn, `${t.tableArn}/index/*`]),
+  }))
+  rollupFn.addToRolePolicy(new PolicyStatement({
+    actions:   ['dynamodb:DescribeStream', 'dynamodb:GetRecords', 'dynamodb:GetShardIterator', 'dynamodb:ListStreams'],
+    resources: Object.values(rollupSources).map((t) => t.tableStreamArn!),
+  }))
+  for (const [name, table] of Object.entries(rollupSources)) {
+    new EventSourceMapping(Stack.of(rollupFn), `DashboardRollup${name}StreamMapping`, {
+      target:                rollupFn,
+      eventSourceArn:        table.tableStreamArn,
+      startingPosition:      StartingPosition.LATEST,
+      batchSize:             100,
+      maxBatchingWindow:     Duration.seconds(10),
+      retryAttempts:         3,
+      bisectBatchOnError:    true,
+      reportBatchItemFailures: true,
+      enabled:               process.env.BCAT_ISOLATED_PREVIEW !== 'true',
+    })
+  }
+  // The only dev-enabled schedule besides the DataSafety pair (devRuleGuard.ts): it writes only DashboardRollup.
+  const rollupSweepRule = new Rule(rollupFn.stack, 'DashboardRollupSweepRule', {
+    schedule:    Schedule.rate(Duration.minutes(5)),
+    description: 'Recompute dirty dashboard rollup rows, the live row and the current months',
+  })
+  rollupSweepRule.addTarget(new EventsLambdaTarget(rollupFn, { event: RuleTargetInput.fromObject({ sweep: true }) }))
+}
+
 // ── Dev stack guard (ops-dev.bcatcorp.com) ──────────────────────────────────
 // BCAT_DEV_STACK=true marks the long-lived `dev` branch stack: a full working copy of
 // the app (every page, every Lambda callable) on its own tables, pool and bucket, used
@@ -3844,9 +3904,10 @@ if (process.env.BCAT_DEV_STACK === 'true') {
   let devRootStack: Stack = backend.data.stack
   while (devRootStack.nestedStackParent) devRootStack = devRootStack.nestedStackParent
   for (const construct of devRootStack.node.findAll()) {
-    // Exactly two exceptions (exact scope-id match): the nightly export and its check. The
-    // guard's rule is "nothing acts on the outside world by itself"; these two read dev tables
-    // and write the dev DataSafety bucket, nothing external. A lookalike id stays disabled.
+    // Exactly three exceptions (exact scope-id match): the nightly export and its check, and the
+    // dashboard rollup sweep. The guard's rule is "nothing acts on the outside world by itself";
+    // the first two read dev tables and write the dev DataSafety bucket, the third reads dev
+    // tables and writes only the DashboardRollup table. A lookalike id stays disabled.
     if (construct instanceof CfnRule) construct.state = devRuleState(construct.node.scope?.node.id)
   }
   // Secrets that reach a third party with side effects are replaced by a placeholder on

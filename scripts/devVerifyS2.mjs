@@ -70,6 +70,8 @@ export const ROUTES = [
   { nn: '02', slug: 'shipments', path: '/tms/shipments', pattern: '/tms/shipments', dark: true, wideOk: true },
   { nn: '02b', slug: 'shipments-all', path: '/tms/shipments?list=all', pattern: '/tms/shipments?list=all', wideOk: true },
   { nn: '02i', slug: 'intake', path: '/tms/shipments/intake', pattern: '/tms/shipments/intake', dark: true },
+  { nn: '06r', slug: 'shipment-new-form', path: '/tms/shipments/new', pattern: '/tms/shipments/new', dark: true },
+  { nn: '06s', slug: 'shipment-edit-form', path: '/tms/shipments/{shipment}/edit', pattern: '/tms/shipments/:id/edit', dark: true },
   { nn: '02j', slug: 'intake-review', path: '/tms/shipments/intake/{intake}', pattern: '/tms/shipments/intake/:intakeId', dark: true },
   { nn: '04', slug: 'shipment-overview', path: '/tms/shipments/{shipment}', pattern: '/tms/shipments/:id', dark: true },
   { nn: '04a', slug: 'shipment-stops', path: '/tms/shipments/{shipment}?tab=stops', pattern: '/tms/shipments/:id?tab=stops' },
@@ -139,7 +141,8 @@ export const STATES = [
   { id: '02a-columns', nn: '02a', slug: 'board-columns', path: '/tms/shipments', dark: true, steps: [{ click: { label: '^Manage column templates' } }] },
   { id: '02a-iconkey', nn: '02a', slug: 'board-icon-key', path: '/tms/shipments', steps: [{ click: { pattern: '^Icon key' } }] },
   { id: '05-drawer', nn: '05', slug: 'board-drawer', path: '/tms/shipments', dark: true, steps: [{ click: { selector: FIRST_ROW } }] },
-  { id: '06-new', nn: '06', slug: 'new-shipment', path: '/tms/shipments', dark: true, steps: [{ click: { pattern: '^(\\+\\s*)?Create shipment' } }] },
+  // Step AH: the board button opens the Aljex create form (a route), no longer the mint-a-load dialog.
+  { id: '06-new', nn: '06', slug: 'new-shipment', path: '/tms/shipments', dark: true, steps: [{ click: { selector: '[data-testid="create-shipment"]' } }], expect: '[data-testid="ship-form"]' },
   { id: '12-tabs', nn: '12', slug: 'check-calls-tabs', path: '/tms/check-calls', tabs: true },
   { id: '08-tabs', nn: '08', slug: 'tracking-tabs', path: '/tms/tracking?tab=tracking', tabs: true },
   { id: '15-tabs', nn: '15', slug: 'invoicing-tabs', path: '/tms/invoicing', tabs: true, dark: true },

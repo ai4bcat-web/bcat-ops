@@ -197,4 +197,28 @@ describe('useDenseGridPrefs', () => {
     localStorage.setItem(densePrefsKey('test', 'a@b.c'), '{nope')
     expect(renderHook(() => useDenseGridPrefs(opts)).result.current.columns).toEqual(['name', 'city'])
   })
+
+  it("keeps a dragged width as that user's default for that board, across a reload", () => {
+    const first = renderHook(() => useDenseGridPrefs(opts))
+    act(() => first.result.current.setWidth('name', 260))
+    first.unmount()
+
+    expect(renderHook(() => useDenseGridPrefs(opts)).result.current.widths).toEqual({ name: 260 })
+    // Another user, and another board of the same user, keep their own defaults.
+    expect(renderHook(() => useDenseGridPrefs({ ...opts, email: 'z@b.c' })).result.current.widths).toEqual({})
+    expect(renderHook(() => useDenseGridPrefs({ ...opts, gridId: 'other' })).result.current.widths).toEqual({})
+  })
+
+  it('a template overrides only the widths it sets; the dialog replaces them all', () => {
+    const { result } = renderHook(() => useDenseGridPrefs(opts))
+    act(() => {
+      result.current.setWidth('name', 260)
+      result.current.setWidth('city', 140)
+    })
+    act(() => result.current.applyLayout({ columns: ['name', 'city'], widths: { city: 300 }, pinned: [] }))
+    expect(result.current.widths).toEqual({ name: 260, city: 300 })
+
+    act(() => result.current.applyLayout({ columns: ['name', 'city'], widths: {}, pinned: [], replaceWidths: true }))
+    expect(result.current.widths).toEqual({})
+  })
 })

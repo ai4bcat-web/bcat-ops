@@ -3,7 +3,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import type jsPDF from 'jspdf'
 import { PDFDocument } from 'pdf-lib'
-import { buildRateConPdf, rateConFilename, stampSignature } from './carrierRateCon'
+import { buildRateConPdf, joinRateConNotes, rateConFilename, stampSignature } from './carrierRateCon'
 import type { RateConInput, RateConStop } from './carrierRateCon'
 import type { Division, LoadCarrierRecord } from '@/types/tms'
 
@@ -87,6 +87,19 @@ describe('buildRateConPdf', () => {
       quickPay: { days: 7, feeBps: 250, feeCents: 3938, netCents: 153562 },
     }))
     expect(doc.getNumberOfPages()).toBe(1)
+  })
+
+  it('prints the order notes above the terms, and nothing when there are none', async () => {
+    const withNotes = (await buildRateConPdf(input({ notes: 'Call 30 min before arrival' }))).output()
+    expect(withNotes).toContain('Call 30 min before arrival')
+    expect(withNotes.indexOf('NOTES')).toBeLessThan(withNotes.indexOf('TERMS'))
+    expect((await buildRateConPdf(input({ notes: '  ' }))).output()).not.toContain('NOTES')
+  })
+
+  it('joins special instructions and rate-con notes in print order, skipping blanks', () => {
+    expect(joinRateConNotes(' A ', 'B')).toBe('A\n\nB')
+    expect(joinRateConNotes(undefined, 'B')).toBe('B')
+    expect(joinRateConNotes('', null)).toBe('')
   })
 })
 

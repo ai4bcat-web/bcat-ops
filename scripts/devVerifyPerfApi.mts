@@ -2,7 +2,10 @@
  * Step PERF API gates (PERF-plan.md §11.2 G1, G2, G7): the app's REAL loaders (src/lib/boardData.ts, apiClient.ts) against the
  * DEV API, compared with independent raw reads (scripts/lib/perfExpected.mjs). Read-only.
  *
- *   npx tsx --tsconfig tsconfig.app.json scripts/devVerifyPerfApi.mts [--only=G1|G2|G7]
+ *   npx tsx --tsconfig tsconfig.app.json scripts/devVerifyPerfApi.mts [--only=G1|G2|G7|G9] [--enforce-af]
+ *
+ * G9 (Step AF, AF-plan §6.4): DashboardRollup rows vs the exact client path, plus the rollup read budget and freshness. Until the AF
+ * deploy lands (AF_ENFORCED) its verdicts print as WARN and do not fail the run.
  *
  * Dev only: devIdentity points at the dev pool / AppSync; a throwaway admin is minted and deleted in `finally`
  * (`identity deleted: true`). The identity is minted BEFORE the app modules are imported so Amplify is configured when
@@ -11,15 +14,18 @@
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { DEV_API, DEV_POOL, mintIdentity, deleteIdentity, gql } from './lib/devIdentity.mjs'
-import { LOADER_BUDGETS, SCALE } from './lib/perfBudgets.mjs'
+import { LOADER_BUDGETS, SCALE, AF_ENFORCED } from './lib/perfBudgets.mjs'
 import { fullScan, activeIdsOf, monthIdsOf, pageAll, trackingRows } from './lib/perfExpected.mjs'
 
 const DEV_APPSYNC = /^https:\/\/f5iqzdpidzalvjys7yxijn5ave\.appsync-api\.us-east-1\.amazonaws\.com\/graphql$/
 const only = process.argv.find((a) => a.startsWith('--only='))?.slice(7)
+const ENFORCE_AF = AF_ENFORCED || process.argv.includes('--enforce-af')
+/** A Step AF verdict: FAIL when enforced, WARN until the AF deploys land. */
+const outAF = (bad: boolean, id: string, detail = '') => out(bad ? (ENFORCE_AF ? 'FAIL' : 'WARN') : 'PASS', id, detail)
 const want = (gate: string) => !only || only === gate
 
 let failed = 0
-const out = (status: 'PASS' | 'FAIL', id: string, detail = '') => {
+const out = (status: 'PASS' | 'FAIL' | 'WARN', id: string, detail = '') => {
   if (status === 'FAIL') failed += 1
   console.log(`${status.padEnd(4)} ${id}${detail ? `  ${detail}` : ''}`)
 }
@@ -49,6 +55,15 @@ async function measure<T>(fn: () => Promise<T>): Promise<{ value: T; seconds: nu
 
 const diff = (a: Set<string>, b: Set<string>) => [...a].filter((x) => !b.has(x))
 const first10 = (ids: string[]) => ids.slice(0, 10).join(', ')
+
+/** G2-style loader budget line whose verdict follows the Step AF switch. */
+function g2Af(id: string, m: { seconds: number; trips: number; mb: number }, budget: Record<string, number>, extra = '') {
+  const bad: string[] = []
+  if (budget.seconds != null && m.seconds > budget.seconds) bad.push(`${m.seconds.toFixed(2)} s > ${budget.seconds}`)
+  if (budget.trips != null && m.trips > budget.trips) bad.push(`${m.trips} trips > ${budget.trips}`)
+  if (budget.mb != null && m.mb > budget.mb) bad.push(`${m.mb.toFixed(2)} MB > ${budget.mb}`)
+  outAF(bad.length > 0, `G2 ${id}`, `${m.seconds.toFixed(2)} s, ${m.trips} trips, ${m.mb.toFixed(2)} MB${extra ? `, ${extra}` : ''}${bad.length ? `  OVER: ${bad.join('; ')}` : ''}`)
+}
 
 async function main() {
   if (!DEV_APPSYNC.test(DEV_API)) throw new Error('devVerifyPerfApi refuses any endpoint other than the dev AppSync URL')
@@ -197,6 +212,113 @@ async function main() {
         const dMissing = diff(raw, cached)
         const dExtra = diff(cached, raw)
         out(dMissing.length === 0 && dExtra.length === 0 ? 'PASS' : 'FAIL', `G1 cached directory ${name} == uncached`, `${cached.size} vs ${raw.size}`)
+      }
+    }
+
+    // ── G9 rollup parity, freshness and read budget (Step AF) ──
+    if (want('G9')) {
+      const rollupLib = await import('../src/lib/dashboardRollup.ts')
+      const strips = await import('../src/features/tms/dashboard/businessStrips.ts')
+      const views = await import('../src/features/tms/dashboard/dashboardViews.ts')
+      const charts = await import('../src/lib/dashboardCharts.ts')
+      const reports = await import('../src/lib/reportsClient.ts')
+      const nowIso = new Date().toISOString()
+      const windowsToCheck = [
+        { label: 'this month', ...views.presetRange('this-month', nowIso) },
+        { label: 'last month', ...views.presetRange('last-month', nowIso) },
+        { label: 'last 30 days', ...views.presetRange('last-30', nowIso) },
+      ]
+      const fieldsQ = 'id kind periodKey schemaVersion payload computedAt sourceCounts'
+      const readRows = async (ids: string[]) => {
+        const q = `query { ${ids.map((id, i) => `r${i}: getDashboardRollup(id: ${JSON.stringify(id)}) { ${fieldsQ} }`).join(' ')} }`
+        const data = await gql(token, q, {}) as Record<string, { id: string; schemaVersion: number | null; computedAt: string | null; payload: unknown } | null>
+        return ids.map((_id, i) => {
+          const row = data[`r${i}`]
+          if (!row) return null
+          const payload = typeof row.payload === 'string' ? JSON.parse(row.payload) : row.payload
+          return { id: row.id, schemaVersion: row.schemaVersion ?? 0, computedAt: row.computedAt ?? '', payload }
+        })
+      }
+      const divisions = await api.listOwnershipDivisions()
+      const topLevel = divisions.filter((d) => d.active !== false && d.parentId == null).map((d) => d.code)
+      const unionById = <T extends { id: string }>(...sets: T[][]): T[] => [...new Map(sets.flat().map((r) => [r.id, r] as const)).values()]
+      const working = workingBundle ?? await board.loadBoardBundle({ kind: 'working' })
+      const openInvoices = await api.listOpenInvoices()
+      const openBills = await api.listOpenBills()
+      const profiles = await api.listUserProfiles()
+
+      // The rollup read budget: one aliased request for the months of the widest window (what the page issues).
+      const wide = windowsToCheck[2]
+      const ids = [...rollupLib.rollupMonthsFor(wide.from, wide.to, 1).map((m: string) => `M:${m}`), rollupLib.LIVE_ROW_ID]
+      const rm = await measure(() => readRows(ids))
+      g2Af('rollup', rm, LOADER_BUDGETS.rollup, `${ids.length} rows`)
+
+      // Months before the first shipment ever may legitimately have no row only when the source has none: report, do not guess.
+      outAF(rm.value.some((r, i) => r == null && ids[i] === rollupLib.LIVE_ROW_ID), 'G9 live row present', rm.value[ids.length - 1] ? 'L:CURRENT present' : 'L:CURRENT missing (run the backfill / wait for the sweep)')
+      const knownVersion = rm.value.filter(Boolean).every((r) => r!.schemaVersion === rollupLib.ROLLUP_SCHEMA_VERSION)
+      outAF(!knownVersion, 'G9 schemaVersion known', knownVersion ? `all rows at v${rollupLib.ROLLUP_SCHEMA_VERSION}` : 'a row carries another schemaVersion')
+      const currentRow = rm.value.find((r) => r?.id === `M:${month}`)
+      const ageMin = currentRow?.computedAt ? (Date.now() - new Date(currentRow.computedAt).getTime()) / 60_000 : null
+      outAF(ageMin == null || ageMin > 10, `G9 freshness M:${month}`, ageMin == null ? 'row missing' : `computed ${ageMin.toFixed(1)} min ago (<= 10: sweep/streams alive)`)
+
+      const nz = (n: number | null | undefined) => n ?? 0
+      const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
+      const sortKeys = (o: Record<string, number>) => Object.fromEntries(Object.entries(o).sort(([a], [b]) => a.localeCompare(b)))
+      const bundleCache = new Map<string, Promise<unknown>>()
+      const exactData = async (from: string, to: string) => {
+        const months = windows.monthsCovering(from, to, 1)
+        const key = months.join(',')
+        if (!bundleCache.has(key)) bundleCache.set(key, (async () => {
+          const windowed = await board.loadBoardBundle({ kind: 'window', months }, { force: true })
+          const samples = await reports.loadSamples(from, to)
+          return { windowed, samples }
+        })())
+        const { windowed, samples } = await bundleCache.get(key) as { windowed: Awaited<ReturnType<typeof board.loadBoardBundle>>; samples: Awaited<ReturnType<typeof reports.loadSamples>> }
+        const shipments = windows.mergeShipmentSets(windowed.shipments, working.shipments)
+        const loadCarriers = unionById(windowed.loadCarriers, working.loadCarriers)
+        return {
+          shipments, orders: unionById(windowed.orders, working.orders),
+          loads: charts.hydrateLoads(unionById(windowed.loads, working.loads), shipments, loadCarriers, samples.rows),
+          loadCarriers, samples: samples.rows, openInvoices, openBills, quotes: [], profiles, divisions, now: nowIso,
+        }
+      }
+
+      for (const w of windowsToCheck) {
+        const rowIds = [...rollupLib.rollupMonthsFor(w.from, w.to, 1).map((m: string) => `M:${m}`), rollupLib.LIVE_ROW_ID]
+        const rows = await readRows(rowIds)
+        const missing = rowIds.filter((_, i) => rows[i] == null)
+        const window = { months: rows.filter((r) => r && r.id.startsWith('M:')) as never[], live: (rows[rows.length - 1] ?? null) as never }
+        const data = await exactData(w.from, w.to)
+        for (const scope of [null, ...topLevel]) {
+          const id = `G9 ${w.label} (${w.from}..${w.to}) division ${scope ?? 'none'}`
+          if (missing.length) { outAF(true, id, `rollup rows missing: ${missing.join(', ')}`); continue }
+          const filters = { divisions: scope ? [scope] : [], subdivisions: [], from: w.from, to: w.to, mode: null, status: null, customerId: null, carrierId: null, repId: null }
+          const exactTotals = strips.buildCompanyTotals(data as never, filters)
+          const exactStrips = strips.rollupBusinessStrips(strips.buildBusinessStrips(data as never, filters, divisions as never))
+          const rolled = rollupLib.stripsFromRollup(window as never, filters, divisions as never)
+          const bad: string[] = []
+          for (const k of ['shipmentCount', 'revenueCents', 'profitCents', 'arOpenCents', 'apOpenCents'] as const) {
+            if (exactTotals[k] !== rolled.totals[k]) bad.push(`company ${k}: rollup ${rolled.totals[k]} vs exact ${exactTotals[k]}`)
+          }
+          const byCode = new Map(rolled.strips.map((st) => [st.code, st] as const))
+          for (const ex of exactStrips) {
+            const ro = byCode.get(ex.code)
+            if (!ro) { bad.push(`strip ${ex.code} missing from the rollup`); continue }
+            if (!same(sortKeys(ro.shipmentsByStatus), sortKeys(ex.shipmentsByStatus))) bad.push(`strip ${ex.code} shipmentsByStatus differ`)
+            for (const k of ['revenueCents', 'profitCents', 'marginBps', 'trackedCount', 'podNeededCount'] as const) {
+              if (ro[k] !== ex[k]) bad.push(`strip ${ex.code} ${k}: rollup ${ro[k]} vs exact ${ex[k]}`)
+            }
+            for (const k of ['arOpenCents', 'apOpenCents'] as const) {
+              if (nz(ro[k]) < nz(ex[k])) bad.push(`strip ${ex.code} ${k}: rollup ${ro[k]} < exact ${ex[k]} (full id resolution can only add)`)
+            }
+          }
+          const top = rolled.strips.filter((st) => st.code !== rollupLib.COMPANY_STRIP_CODE)
+          for (const k of ['revenueCents', 'profitCents', 'arOpenCents', 'apOpenCents'] as const) {
+            const sum = top.reduce((a, st) => a + nz(st[k]), 0)
+            if (sum > nz(rolled.totals[k])) bad.push(`Σ strips ${k} ${sum} > company ${rolled.totals[k]} (untagged would be negative)`)
+          }
+          outAF(bad.length > 0, id, bad.length ? bad.slice(0, 6).join('; ') : `${exactStrips.length} strips + company equal (AR/AP rollup ≥ exact)`)
+        }
       }
     }
   } finally {

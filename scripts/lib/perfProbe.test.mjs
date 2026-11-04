@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseOperations, requestShape, topLevelFields } from './perfProbe.mjs'
+import { parseOperations, requestShape, topLevelFields, kpiReadiness, repeatViolations, HOOK_SOURCE } from './perfProbe.mjs'
 
 const body = (query, variables = {}) => ({ body: JSON.stringify({ query, variables }) })
 
@@ -74,5 +74,49 @@ describe('requestShape', () => {
 
   it('ignores bodies that are not JSON', () => {
     expect(parseOperations('not json')).toEqual([])
+  })
+})
+
+describe('kpiReadiness (Step AF)', () => {
+  const money = 'Revenue $30,500 214 shipments Profit $10,700 35.1% Open AR $327,968.69 Open AP $154,546.86'
+  it('needs data-state ready, four money values and the shipments sub-line', () => {
+    expect(kpiReadiness('dash-kpis', { state: 'ready', text: money, skeleton: false })).toBe(true)
+    expect(kpiReadiness('dash-kpis', { state: 'loading', text: money, skeleton: false })).toBe(false)
+    expect(kpiReadiness('dash-kpis', { state: 'ready', text: money, skeleton: true })).toBe(false)
+    expect(kpiReadiness('dash-kpis', { state: 'ready', text: 'Revenue $30,500 214 shipments Profit $10,700', skeleton: false })).toBe(false)
+    expect(kpiReadiness('dash-kpis', { state: 'ready', text: money.replace('214 shipments', ''), skeleton: false })).toBe(false)
+  })
+
+  it('legacy strip needs a loads count above zero (a placeholder "0 loads" is not visible KPIs)', () => {
+    expect(kpiReadiness('legacy-kpis', { state: 'ready', text: 'Loads 197 Revenue $1,200', skeleton: false })).toBe(true)
+    expect(kpiReadiness('legacy-kpis', { state: 'ready', text: '171 loads', skeleton: false })).toBe(true)
+    expect(kpiReadiness('legacy-kpis', { state: 'ready', text: '0 loads $0', skeleton: false })).toBe(false)
+    expect(kpiReadiness('legacy-kpis', { state: 'ready', text: '171 loads', skeleton: true })).toBe(false)
+    expect(kpiReadiness('nope', { state: 'ready', text: money, skeleton: false })).toBe(false)
+  })
+
+  it('the hook that runs in the page embeds the same function and parses', () => {
+    const src = HOOK_SOURCE({ minRows: 0, kpiTestId: 'dash-kpis' })
+    expect(src).toContain(kpiReadiness.toString())
+    expect(() => new Function(src)).not.toThrow()
+  })
+})
+
+describe('repeatViolations (G12)', () => {
+  const q = 'query($nextToken: String, $s: String) { a0: listShipmentByStatusAndPickupAppt(status: $s, nextToken: $nextToken) { items { id } nextToken } a1: listShipmentByStatusAndPickupAppt(status: "B") { items { id } } }'
+  it('counts requests that start a chain: one aliased 15-status request is one, a second identical request is a repeat', () => {
+    expect(repeatViolations([body(q, { s: 'A' })], { listShipmentByStatusAndPickupAppt: 1 })).toEqual([])
+    expect(repeatViolations([body(q, { s: 'A' }), body(q, { s: 'A' })], { listShipmentByStatusAndPickupAppt: 1 })).toEqual([{ op: 'listShipmentByStatusAndPickupAppt', times: 2, max: 1 }])
+  })
+  it('paging a chain is not a repeat', () => {
+    expect(repeatViolations([body(q, { s: 'A' }), body(q, { s: 'A', nextToken: 't' })], { listShipmentByStatusAndPickupAppt: 1 })).toEqual([])
+  })
+})
+
+describe('router read classification (G0, mirrors apiClient READ_ROUTER_ACTION)', () => {
+  it('SPOT_COUNT / SPOT_STATUS / CRM_LIST_X read; SPOT_ADD_MANUAL still counts as a mutation', () => {
+    const router = 'mutation($action: String!, $input: AWSJSON!) { tmsSpotActions(action: $action, input: $input) }'
+    const shape = requestShape(['SPOT_COUNT', 'SPOT_STATUS', 'SPOT_LIST_REQUESTS', 'SPOT_ADD_MANUAL'].map((action) => body(router, { action, input: '{}' })))
+    expect(shape.mutations).toEqual(['tmsSpotActions:SPOT_ADD_MANUAL'])
   })
 })

@@ -33,8 +33,12 @@ export interface UseDensePrefsOptions {
 export interface UseDensePrefsResult extends DensePrefs {
   setColumns: (columns: string[]) => void
   setWidth: (key: string, width: number) => void
-  /** A template or the Columns dialog: columns, widths and pins at once. */
-  applyLayout: (layout: { columns: string[]; widths: Record<string, number>; pinned: string[] }) => void
+  /**
+   * A template or the Columns dialog: columns and pins at once. Widths merge into the user's own
+   * (a template overrides only the widths it sets); `replaceWidths` is the dialog's Apply,
+   * which hands back the complete set (Reset widths = an empty one).
+   */
+  applyLayout: (layout: { columns: string[]; widths: Record<string, number>; pinned: string[]; replaceWidths?: boolean }) => void
   setDensity: (density: DenseDensity) => void
   setSort: (sort: DenseSort | null) => void
   setGroupBy: (groupBy: string | null) => void
@@ -108,7 +112,16 @@ export function useDenseGridPrefs(opts: UseDensePrefsOptions): UseDensePrefsResu
     ...current.prefs,
     setColumns: useCallback((columns) => update((p) => ({ ...p, columns, pinned: p.pinned.filter((k) => columns.includes(k)) })), [update]),
     setWidth: useCallback((k, width) => update((p) => ({ ...p, widths: { ...p.widths, [k]: width } })), [update]),
-    applyLayout: useCallback((layout) => update((p) => ({ ...p, ...layout })), [update]),
+    applyLayout: useCallback(
+      (layout) =>
+        update((p) => ({
+          ...p,
+          columns: layout.columns,
+          pinned: layout.pinned,
+          widths: layout.replaceWidths ? { ...layout.widths } : { ...p.widths, ...layout.widths },
+        })),
+      [update],
+    ),
     setDensity: useCallback((density) => update((p) => ({ ...p, density })), [update]),
     setSort: useCallback((sort) => update((p) => ({ ...p, sort })), [update]),
     setGroupBy: useCallback((groupBy) => update((p) => ({ ...p, groupBy })), [update]),

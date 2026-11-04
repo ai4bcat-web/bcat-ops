@@ -10,7 +10,7 @@ import { TmsAlert, TmsBadge, TmsEmptyState, TmsFilterChip, TmsSegmentedTabs } fr
 import { DenseGrid } from '@/features/tms/grid/DenseGrid'
 import {
   ClearFiltersButton,
-  ColumnChooser,
+  ColumnsButton,
   DensityToggle,
   DenseKpiStrip,
   SummaryToggle,
@@ -124,21 +124,21 @@ export function IntakeBoard() {
 
   const columns = useMemo<Array<DenseColumn<IntakeLoadRecord>>>(
     () => [
-      { key: 'received', header: 'Received', text: (r) => formatDateTime(r.receivedAt), filter: 'date', dateOf: (r) => r.receivedAt, sortValue: (r) => r.receivedAt },
+      { key: 'received', header: 'Received', group: 'E-mail', text: (r) => formatDateTime(r.receivedAt), filter: 'date', dateOf: (r) => r.receivedAt, sortValue: (r) => r.receivedAt },
       {
         key: 'from',
         header: 'From / Subject',
+        group: 'E-mail',
         text: (r) => `${r.fromName || r.fromEmail} ${r.subject || '(no subject)'}`,
         sortValue: (r) => r.fromName || r.fromEmail,
-        minWidth: 200,
-        maxWidth: 440,
       },
-      { key: 'customer', header: 'Customer', text: (r) => r.fields.customerName ?? '—', filter: 'multi', optionsOf: (r) => (r.fields.customerName ? [{ value: r.fields.customerName, label: r.fields.customerName }] : []) },
-      { key: 'reference', header: 'Reference', text: (r) => r.fields.reference ?? '—' },
-      { key: 'route', header: 'Pickup → Delivery', text: route, minWidth: 160 },
+      { key: 'customer', header: 'Customer', group: 'Order', text: (r) => r.fields.customerName ?? '—', filter: 'multi', optionsOf: (r) => (r.fields.customerName ? [{ value: r.fields.customerName, label: r.fields.customerName }] : []) },
+      { key: 'reference', header: 'Reference', group: 'Order', text: (r) => r.fields.reference ?? '—' },
+      { key: 'route', header: 'Pickup → Delivery', group: 'Order', text: route },
       {
         key: 'completeness',
         header: 'Completeness',
+        group: 'Review',
         text: completeness,
         filter: 'number',
         numberOf: (r) => {
@@ -146,11 +146,11 @@ export function IntakeBoard() {
           return required - missing
         },
         numberUnit: 'required fields filled',
-        minWidth: 150,
       },
       {
         key: 'review',
         header: 'Review',
+        group: 'Review',
         text: reviewText,
         filter: 'multi',
         fixedOptions: [{ value: 'Reviewed', label: 'Reviewed' }, { value: 'Needs review', label: 'Needs review' }],
@@ -269,11 +269,12 @@ export function IntakeBoard() {
         <TmsFilterChip label="Demo" value={demoOnly ? 'only' : null} onClick={() => update({ demo: demoOnly ? null : '1' })} />
         <ClearFiltersButton count={activeFilterCount(filters)} onClear={() => setFilters({})} />
         <span className="tms-dense-spacer" />
-        <ColumnChooser
-          all={columns.filter((c) => !c.fixed).map((c) => ({ key: c.key, label: c.header }))}
-          visible={prefs.columns.filter((k) => k !== 'source')}
-          onChange={prefs.setColumns}
-          onReset={prefs.resetColumns}
+        <ColumnsButton
+          catalog={columns}
+          columns={prefs.columns.filter((k) => k !== 'source')}
+          widths={prefs.widths}
+          pinned={prefs.pinned}
+          onApply={(next) => prefs.applyLayout({ ...next, replaceWidths: true })}
         />
         <DensityToggle density={prefs.density} onChange={prefs.setDensity} />
         <SummaryToggle open={prefs.kpiOpen} onToggle={() => prefs.setKpiOpen(!prefs.kpiOpen)} />
@@ -298,6 +299,7 @@ export function IntakeBoard() {
           renderCell={renderCell}
           density={prefs.density}
           userWidths={prefs.widths}
+          stickyCount={Math.max(1, prefs.pinned.length)}
           sort={prefs.sort}
           onSort={(key) => prefs.setSort(nextSort(prefs.sort, key))}
           filters={filters}

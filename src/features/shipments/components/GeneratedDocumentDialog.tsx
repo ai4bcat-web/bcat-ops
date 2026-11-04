@@ -19,7 +19,8 @@ import { getTmsSettings, listCheckCallsByLoad, listDivisions, saveGeneratedDocum
 import { bolData, loadSummaryData } from '@/lib/documentData'
 import { buildBolPdf, bolFilename } from '@/lib/bolPdf'
 import { buildLoadSummaryPdf, loadSummaryFilename } from '@/lib/loadSummaryPdf'
-import { buildRateConPdf, type RateConInput, type RateConStop } from '@/lib/carrierRateCon'
+import { buildRateConPdf, joinRateConNotes, type RateConInput, type RateConStop } from '@/lib/carrierRateCon'
+import { readExtras } from '../form/model'
 import { generatedFilename, nextVersion, DOCUMENT_TYPE_LABELS } from '@/lib/shipmentDocuments'
 import { quickPayTiersOf, tierFor } from '@/lib/quickPay'
 import type {
@@ -154,6 +155,10 @@ export function GeneratedDocumentDialog({
         : null,
       paymentTermsDays: assignment.paymentTermsDays ?? settings?.defaultCarrierTermsDays ?? null,
       terms: settings?.rateConTerms ?? '',
+      notes: joinRateConNotes(
+        readExtras(bundle.orders[0])?.instructions?.special,
+        readExtras(bundle.orders[0])?.instructions?.rateCon,
+      ),
       requiredFields: (settings?.rateConRequiredFields as RateConRequiredField[] | null) ?? DEFAULT_REQUIRED_FIELDS,
     }
   }

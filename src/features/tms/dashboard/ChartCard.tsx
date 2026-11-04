@@ -3,7 +3,7 @@
  * expanded view. The card draws the series the page computed — including the card's
  * `note` and its real zero — and never invents a number of its own.
  */
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import {
   Bar, BarChart, CartesianGrid, Cell, Legend, Line, LineChart, Pie, PieChart,
   ResponsiveContainer, Tooltip, XAxis, YAxis,
@@ -12,8 +12,7 @@ import { BarChart3, Gauge, PieChart as PieChartIcon, Table2, TrendingUp } from '
 import type { LucideIcon } from 'lucide-react'
 import { TmsChartCard, TmsDialog, TmsEmptyState, TmsKpiCard } from '@/features/tms/kit'
 import { formatValue } from '@/lib/dashboardCharts'
-import type { ChartDef, ChartSeries, DashboardData, DashboardFilters, DashboardGroupBy, ValueFormat } from './types'
-import { useOnVisible } from '@/hooks/useOnVisible'
+import type { ChartDef, ChartSeries, DashboardGroupBy, ValueFormat } from './types'
 import { GROUP_BY_OPTIONS } from './dashboardViews'
 
 /** Series colours are theme tokens (green → dark green → near-black, then the rest), so light and dark both read. */
@@ -251,41 +250,6 @@ export function ChartCard({ def, series, override, onOverride }: ChartCardProps)
       ) : null}
     </>
   )
-}
-
-export interface LazyChartCardProps {
-  def: ChartDef
-  data: DashboardData
-  filters: DashboardFilters
-  /** The effective group-by (the card's override, else the dashboard's). */
-  groupBy: DashboardGroupBy | null
-  override: DashboardGroupBy | null | undefined
-  onOverride: (groupBy: DashboardGroupBy | null | undefined) => void
-}
-
-/**
- * Computes and mounts the chart only once the card is within 400px of the viewport (PERF R6):
- * 26 compute passes and 42 recharts surfaces at once are the page's CPU cost. Until then it is
- * an empty card-sized placeholder in the same grid cell.
- */
-export function LazyChartCard({ def, data, filters, groupBy, override, onOverride }: LazyChartCardProps) {
-  const [ref, visible] = useOnVisible('400px')
-  const series = useMemo(
-    () => (visible ? def.compute(data, filters, groupBy) : null),
-    [visible, def, data, filters, groupBy],
-  )
-  if (!series) {
-    return (
-      <section
-        ref={ref}
-        className={`tms-chart-card${def.kind === 'table' ? ' tms-chart-wide' : ''}`}
-        style={{ minHeight: 240 }}
-        aria-busy="true"
-        aria-label={def.title}
-      />
-    )
-  }
-  return <ChartCard def={def} series={series} override={override} onOverride={onOverride} />
 }
 
 export default ChartCard

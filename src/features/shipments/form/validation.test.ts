@@ -1,0 +1,97 @@
+import { describe, expect, it } from 'vitest'
+import { CUSTOMER, filledValues } from './testFixtures'
+import { blockingIssues, issueSummary, toRequiredFieldSubject, validateForm } from './validation'
+import { emptyValues } from './model'
+import { missingRequiredFields } from '@/lib/flowDefaults'
+import { LABEL, SECTION_ORDER, SECTION_TITLE, labelFor } from './labels'
+
+const base = { mode: 'create' as const, settings: null }
+
+describe('required fields by action', () => {
+  it('Save draft needs only a customer', () => {
+    const v = emptyValues()
+    expect(blockingIssues(validateForm(v, { ...base, level: 'draft', customer: null })).map((i) => i.label)).toEqual(['Name'])
+    v.customer.useTyped = true; v.customer.typedName = 'Typed'
+    expect(blockingIssues(validateForm(v, { ...base, level: 'draft', customer: null }))).toEqual([])
+  })
+
+  it('Create on an empty form lists exactly the Aljex reds', () => {
+    const issues = blockingIssues(validateForm(emptyValues(), { ...base, level: 'create', customer: null }))
+    expect(issues.map((i) => i.label)).toEqual(
+      expect.arrayContaining(['Name', 'Equipment', 'Revenue Type', 'Weight', 'Description']))
+    const labels = new Set(issues.map((i) => `${i.section}:${i.label}`))
+    expect(labels).toContain('pickup:Name')
+    expect(labels).toContain('pickup:Ready')
+    expect(issues).toHaveLength(7)
+    expect(issueSummary(issues)).toMatch(/^7 required fields missing — /)
+  })
+
+  it('a filled form passes Create; LTL does not need equipment', () => {
+    const v = filledValues()
+    expect(blockingIssues(validateForm(v, { ...base, level: 'create', customer: CUSTOMER }))).toEqual([])
+    const ltl = filledValues(); ltl.mode = 'LTL'; ltl.ship.equipmentType = ''
+    expect(blockingIssues(validateForm(ltl, { ...base, level: 'create', customer: CUSTOMER }))).toEqual([])
+  })
+
+  it('carrier origin city/state are required only once a carrier is set', () => {
+    const v = filledValues(); v.carrier.originCity = ''; v.carrier.originState = ''
+    expect(blockingIssues(validateForm(v, { ...base, level: 'create', customer: CUSTOMER }))).toEqual([])
+    v.carrier.carrierId = 'car-1'
+    expect(blockingIssues(validateForm(v, { ...base, level: 'draft', customer: CUSTOMER }))).toEqual([])
+    expect(blockingIssues(validateForm(v, { ...base, level: 'create', customer: CUSTOMER })).map((i) => i.label)).toEqual(['Origin City', 'Origin State'])
+  })
+
+  it('the customer’s required references block Create but not Save draft', () => {
+    const customer = { ...CUSTOMER, requiredReferences: [{ code: 'PO', label: 'PO', level: 'ORDER' as const, display: true, countOnNewOrder: 1 }] }
+    const v = filledValues(); v.customer.refNo = ''
+    expect(blockingIssues(validateForm(v, { ...base, level: 'create', customer })).map((i) => i.id)).toEqual(['customer:ref:po'])
+    expect(blockingIssues(validateForm(v, { ...base, level: 'draft', customer }))).toEqual([])
+  })
+
+  it('Submit blocks on the required list and on a non-truckload mode; warnings never block Create', () => {
+    const v = filledValues(); v.roles.salesRepId = ''; v.customer.billToId = ''
+    const create = validateForm(v, { ...base, level: 'create', customer: CUSTOMER })
+    expect(blockingIssues(create)).toEqual([])
+    expect(create.some((i) => i.severity === 'warn' && i.id.startsWith('roles:needs'))).toBe(true)
+    const submit = blockingIssues(validateForm(v, { ...base, level: 'submit', customer: CUSTOMER }))
+    expect(submit.map((i) => i.id)).toEqual(expect.arrayContaining(['roles:needs:salesRep', 'customer:needs:billTo']))
+    const ltl = filledValues(); ltl.mode = 'LTL'
+    expect(blockingIssues(validateForm(ltl, { ...base, level: 'submit', customer: CUSTOMER })).map((i) => i.id)).toContain('shipping:mode')
+  })
+
+  it('stop format rules: two-letter state and zip digits', () => {
+    const v = filledValues(); v.stops[2].state = 'Texas'; v.stops[2].zip = '75'
+    const ids = blockingIssues(validateForm(v, { ...base, level: 'submit', customer: CUSTOMER })).map((i) => i.id)
+    expect(ids).toEqual(expect.arrayContaining(['consignee:state:2', 'consignee:zip:2']))
+    expect(blockingIssues(validateForm(v, { ...base, level: 'create', customer: CUSTOMER }))).toEqual([])
+  })
+
+  it('the form → RequiredFieldSubject adapter agrees with the gate on what is missing', () => {
+    const v = filledValues()
+    expect(missingRequiredFields(toRequiredFieldSubject(v, CUSTOMER), ['pickupAddress', 'deliveryAddress', 'pickupAppt', 'billTo', 'salesRep', 'revenueDivision', 'equipmentType', 'commodity', 'weight', 'poNumber', 'pickupNumber', 'deliveryNumber', 'bolNumber', 'customerRate'])).toEqual([])
+    v.customer.refNo = ''; v.ship.weightLbs = ''; v.stops[0].ready = ''; v.stops[0].appt = ''
+    expect(missingRequiredFields(toRequiredFieldSubject(v, CUSTOMER), ['poNumber', 'weight', 'pickupAppt'])).toEqual(['poNumber', 'weight', 'pickupAppt'])
+  })
+})
+
+describe('Aljex wording', () => {
+  it('section headings and field labels are Aljex’s verbatim', () => {
+    expect(SECTION_ORDER.map((k) => SECTION_TITLE[k])).toEqual([
+      'Shipping Requirements', 'Customer', 'Pick Up', 'Consignee', 'Historical Rates', 'Roles',
+      'More Information', 'Rates', 'Carrier Information', 'Picks & Stops', 'Documents', 'Check Calls',
+    ])
+    const texts = [
+      LABEL.shipping.equipmentType, LABEL.shipping.revDivision, LABEL.shipping.customerMiles, LABEL.shipping.billableWeightLbs,
+      LABEL.shipping.calculateTotals, LABEL.flags.customsBonded, LABEL.flags.strapsChains, LABEL.flags.massRelease,
+      LABEL.roles.dispatcherAssigned ?? LABEL.roles.dispatcherAssignedId, LABEL.rates.fscPerMile, LABEL.rates.maxRate,
+      LABEL.carrier.originCity, LABEL.carrier.carrierRef, LABEL.carrier.sendRateConf, LABEL.checkCalls.nextAt, LABEL.checkCalls.ediReason,
+    ].map((d) => d.text)
+    expect(texts).toEqual([
+      'Equipment', 'Revenue Type', 'Customer Miles', 'Billable Weight', 'Calculate Totals from Picks', 'Customs Bonded',
+      'Straps/Chains', 'Mass Release', 'Dispatcher Assigned', 'FSC/Mile', 'Max Rate', 'Origin City', 'Carrier Ref #',
+      'Send Rate Conf', 'Next Chk Call Date And Time', 'EDI Reason',
+    ])
+    expect(labelFor(LABEL.shipping.weightLbs)).toBe('Weight (required)')
+    expect(labelFor(LABEL.shipping.pieces)).toBe('Pieces')
+  })
+})
