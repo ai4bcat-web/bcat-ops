@@ -482,7 +482,8 @@ function makeStops(lane: DemoLane, now: string): Row[] {
       type: 'pickup',
       sequence: 0,
       name: `${lane.originCity} Shipper`,
-      city: lane.originCity,
+      // Stop.city is "City, ST" everywhere else in the app (Load Review's details check reads it that way)
+      city: `${lane.originCity}, ${lane.originState}`,
       state: lane.originState,
       address: {
         street: '100 Industrial Blvd',
@@ -501,7 +502,8 @@ function makeStops(lane: DemoLane, now: string): Row[] {
       type: 'delivery',
       sequence: 1,
       name: `${lane.destinationCity} Receiver`,
-      city: lane.destinationCity,
+      // Stop.city is "City, ST" everywhere else in the app (Load Review's details check reads it that way)
+      city: `${lane.destinationCity}, ${lane.destinationState}`,
       state: lane.destinationState,
       address: {
         street: '200 Commerce Pkwy',

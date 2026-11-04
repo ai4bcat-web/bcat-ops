@@ -663,6 +663,12 @@ const rowText = (b, needle) => b.evaluate(`(() => {
   const row = [...document.querySelectorAll('.tms-main tr, .tms-main [role="row"]')].find((r) => r.textContent.includes(${JSON.stringify(needle)}));
   return row ? row.innerText.replace(/\\s+/g, ' ') : null;
 })()`)
+/** The queue is oldest-delivered first, 50 a page, and a fixture delivered today sorts last: narrow it with the page's own search. */
+async function filterQueue(b, number) {
+  const url = new URL(await b.evaluate('location.href'))
+  url.searchParams.set('q', number); url.searchParams.delete('page'); url.searchParams.delete('shipment')
+  await b.navigate(url.pathname + url.search); await waitLoaded(b).catch(() => {}); await pause(800)
+}
 async function openRowDrawer(b, number) {
   const hit = await b.evaluate(`(() => {
     const row = [...document.querySelectorAll('.tms-main tr, .tms-main [role="row"]')].find((r) => r.textContent.includes(${JSON.stringify(number)}));
@@ -744,16 +750,16 @@ async function loadReviewGate(b, ctx, theme) {
     const tabs = await b.evaluate(`[...document.querySelectorAll('.tms-main [role="tab"]')].map((t) => t.textContent.trim())`)
     for (const wanted of [/Needs fixes/i, /Looks ready/i, /All in review/i, /Released/i]) if (!tabs.some((t) => wanted.test(t))) fail(`no ${wanted} tab (tabs: ${tabs.join(', ')})`)
     if (!/Load Review/.test(text0.split('\n').slice(0, 6).join('\n'))) fail('the page title is not "Load Review"')
-    await clickTab(b, 'Looks ready')
+    await clickTab(b, 'Looks ready'); await filterQueue(b, ctx.demo.readytobill.number); await clickTab(b, 'Looks ready')
     if (ctx.demoReleased) { if (await rowText(b, ctx.demo.readytobill.number)) fail('the released demo shipment is still in the queue') } else if (!(await rowText(b, ctx.demo.readytobill.number))) fail(`${ctx.demo.readytobill.number} (shipment.readytobill) is not under Looks ready`)
-    await clickTab(b, 'Needs fixes')
+    await clickTab(b, 'Needs fixes'); await filterQueue(b, ctx.demo.podflagged.number); await clickTab(b, 'Needs fixes')
     if (!(await rowText(b, ctx.demo.podflagged.number))) fail(`${ctx.demo.podflagged.number} (shipment.podflagged) is not under Needs fixes`)
     await walk.shot(b, 'AA03', 'load-review-list', themeTag(theme), true).catch(() => {})
     return 'tabs present; readytobill under Looks ready, podflagged under Needs fixes'
   })
   await step(`AA03-drawer-failing-${theme}`, async () => {
     await b.navigate('/tms/load-review'); await waitLoaded(b); await pause(800)
-    await clickTab(b, 'Needs fixes')
+    await clickTab(b, 'Needs fixes'); await filterQueue(b, ctx.demo.podflagged.number); await clickTab(b, 'Needs fixes')
     await openRowDrawer(b, ctx.demo.podflagged.number)
     const text = await drawerText(b)
     for (const section of [/Sales rep/i, /Rev(enue)? division/i, /Details/i, /Charges/i, /Documents/i]) if (!section.test(text)) fail(`the drawer lacks the ${section} section`)
@@ -764,7 +770,7 @@ async function loadReviewGate(b, ctx, theme) {
   await step(`AA03-drawer-ready-${theme}`, async () => {
     if (ctx.demoReleased) return 'released earlier in this run; the drawer-ready screenshot was taken before'
     await b.navigate('/tms/load-review'); await waitLoaded(b); await pause(800)
-    await clickTab(b, 'Looks ready')
+    await clickTab(b, 'Looks ready'); await filterQueue(b, ctx.demo.readytobill.number); await clickTab(b, 'Looks ready')
     await openRowDrawer(b, ctx.demo.readytobill.number)
     const text = await drawerText(b)
     if (!/Move to billing/i.test(text)) fail('the ready drawer has no Move to billing action')
@@ -795,7 +801,7 @@ async function loadReviewGate(b, ctx, theme) {
 async function loadReviewMove(b, ctx) {
   await backendStep(ctx, 'AA03-move-to-billing', async () => {
     await b.navigate('/tms/load-review'); await waitLoaded(b); await pause(800)
-    await clickTab(b, 'Looks ready')
+    await clickTab(b, 'Looks ready'); await filterQueue(b, ctx.demo.readytobill.number); await clickTab(b, 'Looks ready')
     await openRowDrawer(b, ctx.demo.readytobill.number)
     await clickByText(b, 'drawer', 'button', 'Move to billing')
     // a confirm step may sit between the click and the call
@@ -819,9 +825,9 @@ async function loadReviewMove(b, ctx) {
     if (String(released.user).toLowerCase() !== ctx.emails.lr.toLowerCase() && String(released.user).toLowerCase() !== String(ctx.lrUsername ?? '').toLowerCase()) fail(`LOAD_REVIEW_RELEASED user ${released.user} is not the reviewer`)
     ctx.trackedIds.add(order.id)
     await b.navigate('/tms/load-review'); await waitLoaded(b); await pause(800)
-    await clickTab(b, 'Looks ready')
+    await clickTab(b, 'Looks ready'); await filterQueue(b, ctx.demo.readytobill.number); await clickTab(b, 'Looks ready')
     if (await rowText(b, ctx.demo.readytobill.number)) fail('the released shipment is still in Looks ready')
-    await clickTab(b, 'Released')
+    await clickTab(b, 'Released'); await filterQueue(b, ctx.demo.readytobill.number); await clickTab(b, 'Released')
     await b.poll(async () => !!(await rowText(b, ctx.demo.readytobill.number)), 'row under Released', 20_000)
     const row = await rowText(b, ctx.demo.readytobill.number)
     if (!/\bby\b/i.test(row) && !new RegExp(ctx.emails.lr.split('@')[0], 'i').test(row)) fail(`the Released row does not say who released it: ${row}`)

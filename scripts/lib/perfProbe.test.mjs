@@ -64,6 +64,14 @@ describe('requestShape', () => {
     expect(shape.mutations).toEqual(['managePods:assign'])
   })
 
+  it('treats a nextToken inside a router call input as the same chain, not a new start', () => {
+    const q = 'mutation ManagePods($action: String!, $input: AWSJSON) { managePods(action: $action, input: $input) }'
+    const pages = [{}, { nextToken: 'a' }, { nextToken: 'b' }, { nextToken: 'c' }, { nextToken: 'd' }].map((i) => body(q, { action: 'list', input: JSON.stringify(i) }))
+    const shape = requestShape(pages)
+    expect(shape.repeated).toEqual([])
+    expect(shape.maxDepth).toBe(5)
+  })
+
   it('ignores bodies that are not JSON', () => {
     expect(parseOperations('not json')).toEqual([])
   })

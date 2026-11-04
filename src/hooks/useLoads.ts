@@ -7,10 +7,11 @@ import { useAppStore } from '@/store/useAppStore'
 /**
  * The two views of the Load table, kept apart on purpose.
  *
- * `store.loads` is the IDENTITY TABLE: every load ever created, voided ones
- * included, because a Pro # is permanent and must stay claimed forever. Only the
- * duplicate-Pro check and the PRO/id matchers (Intake, PODs, factoring) read it,
- * and they get it here as `allLoads`.
+ * `store.loads` is the IDENTITY TABLE for what has been looked at: the bulk window read
+ * leaves voided shipments out, but a voided load that something asked for (by id through
+ * `useResolveLoads`, by PRO through `proConflictAllHistory`) is merged in, because a Pro #
+ * is permanent and must stay claimed forever. The duplicate-Pro check and the PRO/id
+ * matchers (Intake, PODs, factoring) read it, and they get it here as `allLoads`.
  *
  * `loads` is the LIVE WORKING SET: the same table with voided loads filtered out,
  * which is what the calendar, dispatch, the schedule, the appointment queue, the

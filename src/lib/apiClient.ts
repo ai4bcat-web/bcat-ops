@@ -64,10 +64,18 @@ const rawClient = generateClient()
  * *queries* with a non-list action are writes too and clear the profile list. Subscriptions
  * (observables) and plain queries pass through untouched.
  */
+/** Router mutations whose action only reads: the UPPER_SNAKE read verbs of the tms*Actions routers and the lowercase read actions of manageDispatch. */
+const READ_ROUTER_ACTION = /^(GET|LIST|SEARCH|FIND|READ|COUNT|PREVIEW|CHECK|LOOKUP)_/
+const READ_DISPATCH_ACTIONS = new Set(['status', 'getSettings', 'listStaff', 'mediaUrl', 'slackUrl'])
+function isReadOnlyRouterCall(text: string, action: unknown): boolean {
+  if (typeof action !== 'string') return false
+  if (/^\s*mutation\s+ManageDispatch\b/.test(text)) return READ_DISPATCH_ACTIONS.has(action)
+  return /^\s*mutation\s+Tms\w*Actions\b/.test(text) && READ_ROUTER_ACTION.test(action)
+}
 function touchesWrite(opts: unknown): 'all' | 'profiles' | null {
   const o = opts as { query?: unknown; variables?: { action?: unknown } } | null
   const text = typeof o?.query === 'string' ? o.query : ''
-  if (/^\s*mutation\b/.test(text)) return 'all'
+  if (/^\s*mutation\b/.test(text)) return isReadOnlyRouterCall(text, o?.variables?.action) ? null : 'all'
   if (/^\s*query\s+ManageUsers\b/.test(text) && o?.variables?.action !== 'list') return 'profiles'
   return null
 }
@@ -3227,10 +3235,17 @@ export async function listShipmentsByNumber(number: string): Promise<ShipmentRec
   return readShipments((fields) => listAllByIndex<ShipmentRecord>('listShipmentByNumber', { number }, fields, 100))
 }
 
-/** Ids only, voided included, of every shipment picked up in any of these months. */
-export async function listShipmentIdsByMonths(months: readonly string[]): Promise<string[]> {
+/**
+ * Ids only of every shipment picked up in any of these months, voided ones dropped server-side unless asked for.
+ * The legacy store's window read uses the default: a month of import debris is thousands of voided shipments whose
+ * full loads nobody renders. Voided loads stay reachable by id / PRO on demand (`getLoads`, `proConflictAllHistory`).
+ */
+export async function listShipmentIdsByMonths(months: readonly string[], opts?: { includeVoided?: boolean }): Promise<string[]> {
   const perMonth = await Promise.all([...new Set(months)].map((m) => (
-    listAllByIndex<{ id: string }>('listShipmentByPickupMonthAndPickupAppt', { pickupMonth: m }, 'id', 1000)
+    readShipments(() => listAllByIndex<{ id: string }>(
+      'listShipmentByPickupMonthAndPickupAppt', { pickupMonth: m }, 'id', 1000, {},
+      !opts?.includeVoided && shipmentsHaveRevTag ? NOT_VOIDED : undefined,
+    ))
   )))
   return [...new Set(perMonth.flat().map((r) => r.id))]
 }
@@ -3261,10 +3276,11 @@ export type DocsNeededOrder = Pick<OrderRecord, 'id' | 'shipmentId' | 'arStatus'
 export async function listDocsNeededOrdersNarrow(): Promise<DocsNeededOrder[]> {
   if (!arModelsAvailable) return []
   try {
-    return await listAllByIndex(
+    // Shared: the shell's working set and the invoicing worklist ask for this list at the same page load.
+    return await sharedRead<DocsNeededOrder>('docsNeededOrdersNarrow', () => listAllByIndex<DocsNeededOrder>(
       'listOrderByArStatusAndArStatusChangedAt', { arStatus: 'DOCS_NEEDED' },
       'id shipmentId arStatus readyToInvoiceAt invoiceId', 5000, { arStatus: 'OrderArStatus!' },
-    )
+    ))
   } catch (err) {
     forgetArModels(err)
     return []

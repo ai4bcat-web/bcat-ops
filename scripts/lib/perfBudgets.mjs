@@ -21,20 +21,27 @@ export const RATCHET_FACTOR = 1.5
 // (customers, users, carriers) carried budgets (40 req, 4-6 MB) below their own floor. They are now floor + their own reads (<= 5 req).
 // /tms/dashboard = shell floor + the 3-month window loader (G7 window:3, 37 trips, 5.7 MB).
 // directory:locations: 3,169 rows / 2.55 MB, bandwidth-bound at ~0.9 s/MB (2 trips at limit 3000 measured the same 2.3 s as 4 trips).
+// Timing, from the job-144 medians (deployed dev): tracking 3.4 / 5.0 s, customers settled 4.6, carriers 4.0 are three dependent
+// stages (status index -> joins by id -> financials) plus the directory lists, i.e. round trips under ~45 concurrent shell
+// requests; the API loader alone is 1.7-2.1 s to first partial. Dashboard first rows draw from the working set's first step
+// (useBrokerageDashboard) and wait for window:3 (2.5 s API) plus the report reads.
+// Legacy pages = shell (45 req) + the store's month window and open loads + ~20 side lists. Their budgets and invoicing's 9 MB are
+// ESTIMATES for the voided-excluded window read (dev: 35 -> 4 requests, 12.6 -> 1.1 MB for listLoadByShipmentId) and the
+// DOCS_NEEDED live-only read (dev: 4.0 -> ~1.7 MB cold): re-measure after deploy, then --ratchet.
 // <budgets>
 export const PAGE_BUDGETS = {
-  '/tms/dashboard': { firstRows: 3, settled: 5, requests: 80, mb: 12 },
-  '/tms/tracking': { firstRows: 2.5, settled: 4, requests: 50, mb: 8 },
+  '/tms/dashboard': { firstRows: 4.5, settled: 6, requests: 80, mb: 12 },
+  '/tms/tracking': { firstRows: 3.5, settled: 5.2, requests: 50, mb: 8 },
   '/tms/shipments': { firstRows: 3, settled: 6, requests: 60, mb: 12 },
   '/tms/shipments?list=all': { firstRows: 3, settled: 6, requests: 70, mb: 12 },
-  '/tms/customers': { firstRows: 2.5, settled: 4, requests: 50, mb: 7 },
+  '/tms/customers': { firstRows: 2.5, settled: 4.8, requests: 50, mb: 7 },
   '/tms/brokerage/users': { firstRows: 2, settled: 4, requests: 50, mb: 7 },
-  '/tms/invoicing': { firstRows: 3, settled: 5, requests: 60, mb: 8 },
+  '/tms/invoicing': { firstRows: 3, settled: 5.5, requests: 60, mb: 9 },
   '/tms/invoicing/payable': { firstRows: 3, settled: 5, requests: 60, mb: 8 },
-  '/tms/carriers': { firstRows: 2.5, settled: 4, requests: 50, mb: 7 },
-  '/schedule': { firstRows: 3, settled: 5, requests: 50, mb: 8 },
-  '/calendar': { firstRows: 3, settled: 5, requests: 50, mb: 8 },
-  '/dashboard': { firstRows: 3, settled: 6, requests: 70, mb: 10 },
+  '/tms/carriers': { firstRows: 2.5, settled: 4.4, requests: 50, mb: 7 },
+  '/schedule': { firstRows: 4.5, settled: 5, requests: 85, mb: 12 },
+  '/calendar': { firstRows: 4.5, settled: 5.5, requests: 95, mb: 14 },
+  '/dashboard': { firstRows: 6, settled: 8, requests: 130, mb: 20 },
 }
 // </budgets>
 

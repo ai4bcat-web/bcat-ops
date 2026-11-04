@@ -11,11 +11,16 @@ import type { OrderRecord, ShipmentRecord } from '@/types/tms'
 import { useArWorklist } from './useArWorklist'
 
 const { data } = vi.hoisted(() => ({
-  data: { orders: [] as OrderRecord[], shipments: [] as ShipmentRecord[] },
+  data: { orders: [] as OrderRecord[], shipments: [] as ShipmentRecord[], fullOrderReads: [] as string[][] },
 }))
 
 vi.mock('@/lib/apiClient', () => ({
   listOrdersByArStatus: async () => data.orders,
+  listDocsNeededOrdersNarrow: async () => data.orders.filter((o) => o.arStatus === 'DOCS_NEEDED'),
+  listOrdersByShipmentIds: async (ids: readonly string[]) => {
+    data.fullOrderReads.push([...ids])
+    return data.orders.filter((o) => ids.includes(o.shipmentId as string))
+  },
 }))
 
 // The by-id reader: only the asked-for shipments come back, as a Map.
@@ -80,5 +85,19 @@ describe('useArWorklist', () => {
     const rows = await rowsFor()
     expect(rows.map((r) => r.orderId)).toEqual(['o-live'])
     expect(rows[0].reasons).toEqual([])
+  })
+
+  it('DOCS_NEEDED reads full orders only for live shipments, and still drops the voided ones', async () => {
+    data.fullOrderReads = []
+    data.orders = [
+      order('o-live', 's-live', { arStatus: 'DOCS_NEEDED' }),
+      order('o-void', 's-void', { arStatus: 'DOCS_NEEDED' }),
+      order('o-other', 's-live', { arStatus: 'UNBILLED' }),
+    ]
+    data.shipments = [shipment('s-live'), shipment('s-void', { voidedAt: '2026-10-06T00:00:00.000Z' })]
+    const { result } = renderHook(() => useArWorklist('DOCS_NEEDED'))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.rows.map((r) => r.orderId)).toEqual(['o-live'])
+    expect(data.fullOrderReads).toEqual([['s-live']])
   })
 })

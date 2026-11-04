@@ -20,6 +20,7 @@ import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { useAppStore } from '@/store/useAppStore'
 import { useLoads } from '@/hooks/useLoads'
+import { useResolveLoads } from '@/hooks/useResolveLoads'
 import { useDrivers } from '@/hooks/useDrivers'
 import { useAuth } from '@/hooks/useAuth'
 import { LoadPods } from '@/features/pods/LoadPods'
@@ -268,6 +269,8 @@ export function LoadDrawer() {
   // hiding voided rows here would let a dead Pro # be reissued; and the drawer opens on a
   // load id, which the Voided tab hands it, so the record has to still be findable.
   const { allLoads: loads, updateLoad } = useLoads()
+  // The window read leaves voided loads out; the Voided tab (or a link) opens one by id, so fetch it on demand.
+  useResolveLoads([selectedLoadId])
   const { drivers } = useDrivers()
   // What the driver app recorded at each stop, plus when the POD came in. Looked up by the
   // selected load id so the hook runs on every render, ahead of the mode-based early returns.

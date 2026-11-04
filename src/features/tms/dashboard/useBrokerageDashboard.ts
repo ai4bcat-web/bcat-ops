@@ -13,7 +13,7 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import { listOpenBills, listOpenInvoices, listOwnershipDivisions, listUserProfiles } from '@/lib/apiClient'
-import { loadBoardBundle } from '@/lib/boardData'
+import { loadBoardBundle, type BoardBundle } from '@/lib/boardData'
 import { cachedList, invalidateLists } from '@/lib/listCache'
 import { monthsCovering, mergeShipmentSets } from '@/lib/shipmentWindows'
 import { clearReportCache, loadQuotes, loadSamples, type FailedMonth } from '@/lib/reportsClient'
@@ -46,11 +46,18 @@ function unionById<T extends { id: string }>(...sets: T[][]): T[] {
  * whatever the window is. Joined tables come with them by id, so the work grows with the window and
  * with open work, never with the table.
  */
-async function readWindow(from: string, to: string): Promise<DashboardBundle> {
+async function readWindow(from: string, to: string, onPartial: (b: DashboardBundle) => void): Promise<DashboardBundle> {
   const months = monthsCovering(from, to, 1)
-  const [windowed, working, samples, quotes, openInvoices, openBills, profiles, divisions] = await Promise.all([
+  // The working set lands in two steps (open rows joined, then the delivered backlog). The first
+  // step is enough to draw the page; the second replaces it. A loader that never reports a partial
+  // resolves this with its final bundle.
+  let firstWorking!: (b: BoardBundle) => void
+  const workingFirst = new Promise<BoardBundle>((resolve) => { firstWorking = resolve })
+  const workingFinal = loadBoardBundle({ kind: 'working' }, { onPartial: (b) => firstWorking(b) })
+  let finished = false
+  workingFinal.then((b) => { finished = true; firstWorking(b) }, () => {})
+  const [windowed, samples, quotes, openInvoices, openBills, profiles, divisions] = await Promise.all([
     loadBoardBundle({ kind: 'window', months }),
-    loadBoardBundle({ kind: 'working' }),
     loadSamples(from, to),
     loadQuotes(from, to),
     listOpenInvoices(),
@@ -58,6 +65,23 @@ async function readWindow(from: string, to: string): Promise<DashboardBundle> {
     listUserProfiles(),
     listOwnershipDivisions(),
   ])
+  const rest = { samples, quotes, openInvoices, openBills, profiles, divisions }
+  const first = await workingFirst
+  if (finished) return assemble(windowed, await workingFinal, rest) // final already landed: nothing partial to show
+  onPartial(assemble(windowed, first, rest))
+  return assemble(windowed, await workingFinal, rest)
+}
+
+interface WindowRest {
+  samples: Awaited<ReturnType<typeof loadSamples>>
+  quotes: Awaited<ReturnType<typeof loadQuotes>>
+  openInvoices: Awaited<ReturnType<typeof listOpenInvoices>>
+  openBills: Awaited<ReturnType<typeof listOpenBills>>
+  profiles: Awaited<ReturnType<typeof listUserProfiles>>
+  divisions: Awaited<ReturnType<typeof listOwnershipDivisions>>
+}
+
+function assemble(windowed: BoardBundle, working: BoardBundle, { samples, quotes, openInvoices, openBills, profiles, divisions }: WindowRest): DashboardBundle {
   const shipments = mergeShipmentSets(windowed.shipments, working.shipments)
   const loadCarriers = unionById(windowed.loadCarriers, working.loadCarriers)
   const data: DashboardData = {
@@ -76,8 +100,12 @@ async function readWindow(from: string, to: string): Promise<DashboardBundle> {
   return { data, failedMonths: [...samples.failedMonths, ...quotes.failedMonths] }
 }
 
+/** Mounted readers waiting on a window's first, partial bundle (the cache only keeps the final one). */
+const partialListeners = new Map<string, Set<(b: DashboardBundle) => void>>()
+
 function bundleFor(from: string, to: string): Promise<DashboardBundle> {
-  return cachedList(`${CACHE_PREFIX}${from}|${to}`, () => readWindow(from, to), { ttlMs: TTL_MS })
+  const key = `${CACHE_PREFIX}${from}|${to}`
+  return cachedList(key, () => readWindow(from, to, (b) => partialListeners.get(key)?.forEach((fn) => fn(b))), { ttlMs: TTL_MS })
 }
 
 export interface BrokerageDashboard {
@@ -100,6 +128,11 @@ export function useBrokerageDashboard(filters: DashboardFilters): BrokerageDashb
 
   useEffect(() => {
     let live = true
+    const listenKey = `${CACHE_PREFIX}${from}|${to}`
+    const onPartial = (next: DashboardBundle) => { if (live) setSettled({ key, bundle: next, error: null }) }
+    const listeners = partialListeners.get(listenKey) ?? new Set()
+    listeners.add(onPartial)
+    partialListeners.set(listenKey, listeners)
     bundleFor(from, to).then(
       (next) => { if (live) setSettled({ key, bundle: next, error: null }) },
       (err: unknown) => {
@@ -107,7 +140,11 @@ export function useBrokerageDashboard(filters: DashboardFilters): BrokerageDashb
         setSettled({ key, bundle: null, error: err instanceof Error && err.message ? err.message : 'The dashboard could not be loaded' })
       },
     )
-    return () => { live = false }
+    return () => {
+      live = false
+      listeners.delete(onPartial)
+      if (listeners.size === 0) partialListeners.delete(listenKey)
+    }
   }, [from, to, key])
 
   const loading = settled.key !== key

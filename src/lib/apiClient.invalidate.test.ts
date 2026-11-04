@@ -8,7 +8,7 @@ const graphqlMock = vi.fn()
 vi.mock('aws-amplify/data', () => ({ generateClient: () => ({ graphql: graphqlMock }) }))
 vi.mock('aws-amplify/storage', () => ({ uploadData: vi.fn(), getUrl: vi.fn(), remove: vi.fn() }))
 
-const { listCarriers, listUserProfiles, listCustomers, deleteDriver, setUserTeams, listDriverPaySettings, listExpenseTypes } = await import('./apiClient')
+const { listCarriers, listUserProfiles, listCustomers, deleteDriver, setUserTeams, listDriverPaySettings, listExpenseTypes, listShipmentIdsByMonths } = await import('./apiClient')
 const { invalidateLists } = await import('./listCache')
 
 let carriers: { id: string; name: string }[]
@@ -90,5 +90,33 @@ describe('shared whole-table side lists', () => {
     await deleteDriver('d1')
     await listDriverPaySettings()
     expect(reads('listDriverPaySettings')).toBe(2)
+  })
+})
+
+describe('window shipment ids', () => {
+  it('drop voided shipments server-side by default and keep them when asked', async () => {
+    graphqlMock.mockImplementation(async () => ({ data: { listShipmentByPickupMonthAndPickupAppt: { items: [{ id: 's1' }], nextToken: null } } }))
+    await listShipmentIdsByMonths(['2026-11'])
+    const filtered = graphqlMock.mock.calls.at(-1)![0]
+    expect(filtered.query).toContain('filter: $filter')
+    expect(filtered.variables.filter).toEqual({ voidedAt: { attributeExists: false } })
+    await listShipmentIdsByMonths(['2026-11'], { includeVoided: true })
+    const all = graphqlMock.mock.calls.at(-1)![0]
+    expect(all.query).not.toContain('filter')
+  })
+})
+
+describe('read-only router calls', () => {
+  it('do not clear the cache, but a write action on the same router does', async () => {
+    const { financeAction } = await import('./apiClient')
+    await listCarriers()
+    graphqlMock.mockImplementationOnce(async () => ({ data: { tmsFinanceActions: '{}' } }))
+    await financeAction('PREVIEW_INVOICE', {})
+    await listCarriers()
+    expect(reads('listCarriers')).toBe(1)
+    graphqlMock.mockImplementationOnce(async () => ({ data: { tmsFinanceActions: '{}' } }))
+    await financeAction('GENERATE_INVOICE', {})
+    await listCarriers()
+    expect(reads('listCarriers')).toBe(2)
   })
 })

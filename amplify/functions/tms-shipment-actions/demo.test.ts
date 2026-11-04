@@ -627,6 +627,15 @@ describe('demo seed', () => {
     }
   })
 
+  it('seeds stops as "City, ST", the form Load Review reads for a stop\'s state', async () => {
+    const deps = makeDeps(true)
+    await seedDemoData(deps, {}, caller)
+    const loads = await scanTable(TABLES.load)
+    const stops = loads.flatMap((l) => JSON.parse(String(l.stops ?? '[]')) as Row[])
+    expect(stops.length).toBeGreaterThan(0)
+    for (const stop of stops) expect(String(stop.city)).toMatch(/,\s*[A-Z]{2}$/)
+  })
+
   it('seeds only the vetted carrier with a completed MyCarrierPackets packet', async () => {
     const deps = makeDeps(true)
     await seedDemoData(deps, {}, caller)

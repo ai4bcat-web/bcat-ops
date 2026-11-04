@@ -15,6 +15,7 @@ Docs/tms-build/screenshots/AA/AA11c-settlements-owner-operator-light.png
 Docs/tms-build/screenshots/AA/AA12-spot-inbox-light.png
 Docs/tms-build/screenshots/AA/AA13-follow-ups-light.png
 Docs/tms-build/screenshots/AA/AA14-spot-quoter-light.png
+Docs/tms-build/screenshots/AA/AA03-load-review-drawer-failing-L.png
 Docs/tms-build/screenshots/AA/AA01-sidebar-D.png
 Docs/tms-build/screenshots/AA/AA02-carrier-sales-dark.png
 Docs/tms-build/screenshots/AA/AA03-load-review-dark.png
@@ -24,9 +25,12 @@ Docs/tms-build/screenshots/AA/AA06-accounting-ar-dark.png
 Docs/tms-build/screenshots/AA/AA07-accounting-ap-dark.png
 Docs/tms-build/screenshots/AA/AA08-settings-dark.png
 Docs/tms-build/screenshots/AA/AA10-intake-review-dark.png
+Docs/tms-build/screenshots/AA/AA03-load-review-drawer-failing-D.png
 Docs/tms-build/screenshots/AA/AA01-sidebar-drawer-M.png
 Docs/tms-build/screenshots/AA/AA02-carrier-sales-M.png
+Docs/tms-build/screenshots/AA/AA03-load-review-M.png
 Docs/tms-build/screenshots/AA/AA04-vendors-M.png
+Docs/tms-build/screenshots/AA/AA03-load-review-drawer-M.png
 Docs/tms-build/screenshots/AA/AA10-intake-needs-review-D.png
 Docs/tms-build/screenshots/AA/AA10-intake-needs-review-L.png
 Docs/tms-build/screenshots/AA/AA10-intake-reviewed-L.png

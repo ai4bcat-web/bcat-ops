@@ -1,66 +1,50 @@
 {
-  "at": "2026-11-04T08:35:29.468Z",
+  "at": "2026-11-04T10:05:23.695Z",
   "summary": {
-    "/schedule": {
-      "label": "Schedule (legacy)",
-      "firstRowsS": 5.96839999961853,
-      "settledS": 5.96839999961853,
-      "requests": 142,
-      "mb": 22.009866,
+    "/tms/invoicing": {
+      "label": "Invoicing (AR)",
+      "firstRowsS": 2.5695,
+      "settledS": 5.49719999885559,
+      "requests": 61,
+      "mb": 11.742152,
       "p95": {
-        "firstRows": 5.96839999961853,
-        "settled": 5.96839999961853,
-        "requests": 142,
-        "mb": 22.009866
+        "firstRows": 2.5695,
+        "settled": 5.49719999885559,
+        "requests": 61,
+        "mb": 11.742152
       },
       "rowsAtEnd": [
-        0
+        2
+      ],
+      "fullTableOps": [],
+      "mutations": [],
+      "maxChainDepth": 3,
+      "repeated": [],
+      "problems": [],
+      "dashboardKpi": []
+    },
+    "/dashboard": {
+      "label": "Dashboard (legacy)",
+      "firstRowsS": 9.371199998855591,
+      "settledS": 11.337,
+      "requests": 190,
+      "mb": 42.671452,
+      "p95": {
+        "firstRows": 9.371199998855591,
+        "settled": 11.337,
+        "requests": 190,
+        "mb": 42.671452
+      },
+      "rowsAtEnd": [
+        3
       ],
       "fullTableOps": [],
       "mutations": [],
       "maxChainDepth": 4,
       "repeated": [
         {
-          "op": "listDriverSubmissionDocs",
-          "times": 4
-        }
-      ],
-      "problems": [
-        "failedRequests: net::ERR_CERT_VERIFIER_CHANGED https://f5iqzdpidzalvjys7yxijn5ave.appsync-api.us-east-1.amazonaws.com/graphql",
-        "failedRequests: net::ERR_CERT_VERIFIER_CHANGED https://f5iqzdpidzalvjys7yxijn5ave.appsync-api.us-east-1.amazonaws.com/graphql"
-      ],
-      "dashboardKpi": []
-    },
-    "/calendar": {
-      "label": "Calendar (legacy)",
-      "firstRowsS": 6.3495,
-      "settledS": 6.3495,
-      "requests": 155,
-      "mb": 26.298884,
-      "p95": {
-        "firstRows": 6.3495,
-        "settled": 6.3495,
-        "requests": 155,
-        "mb": 26.298884
-      },
-      "rowsAtEnd": [
-        0
-      ],
-      "fullTableOps": [],
-      "mutations": [],
-      "maxChainDepth": 6,
-      "repeated": [
-        {
           "op": "managePods",
-          "times": 6
-        },
-        {
-          "op": "listDriverSubmissions",
-          "times": 6
-        },
-        {
-          "op": "listDriverSubmissionDocs",
-          "times": 6
+          "times": 4
         }
       ],
       "problems": [],

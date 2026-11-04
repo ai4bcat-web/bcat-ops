@@ -367,7 +367,7 @@ export function mergeLoads(held: Load[], incoming: Load[]): Load[] {
 
 /**
  * The loads of these pickup months: shipment ids by the month index (ids only, voided
- * included — the store is the identity table), then every leg of those shipments with the
+ * shipments excluded server-side), then every leg of those shipments with the
  * full load field set, so every legacy consumer sees the same `Load` shape as before.
  * `refresh` re-reads months that are already loaded and does not touch `loadedMonths`.
  */
@@ -625,12 +625,11 @@ export const useAppStore = create<AppState>()(
         // on the loads, and the loads no longer wait on a table scan.
         const small = Promise.all([loadFleet(), loadDisputes()])
         try {
-          // The store is the IDENTITY TABLE for the window it holds, so it asks for
-          // voided loads too (a Pro # is claimed forever and the duplicate-Pro check
-          // keeps seeing the voided load that holds it). The live working set — no
-          // voided rows — is `useLoads()`, which filters this array for every screen
-          // that shows work. What it holds is the current month ±1 plus every open
-          // load; a page needing more calls `ensureLoadRange`.
+          // The window read leaves voided shipments out (a month of import debris is thousands of
+          // them). A voided load is still found when somebody asks for it: by id (`useResolveLoads`,
+          // the drawer, the queues) and by PRO (`proConflictAllHistory`, voided included). What the
+          // store holds is the current month ±1 plus every open load; a page needing more calls
+          // `ensureLoadRange`.
           const [drivers] = await Promise.all([
             api.listDrivers(),
             get().ensureLoadMonths(monthsCovering(currentMonth(new Date()), currentMonth(new Date()), 1)),
@@ -692,8 +691,7 @@ export const useAppStore = create<AppState>()(
           const months = range
             ? monthsCovering(range.from, range.to, 1).filter((m) => loadedMonths.has(m))
             : [...loadedMonths]
-          // Same identity-table rule as initializeData: voided included, and
-          // `useLoads()` hides the voided rows from the calendar.
+          // Same window rule as initializeData: voided shipments are fetched on demand, not in bulk.
           const [drivers] = await Promise.all([
             api.listDrivers(),
             months.length > 0 ? fetchMonths(months, set, true) : Promise.resolve(),

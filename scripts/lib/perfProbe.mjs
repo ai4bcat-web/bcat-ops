@@ -104,6 +104,12 @@ const argUsesVariable = (args, variables) => {
   return false
 }
 
+/** The page token of a router call: the Lambda-backed `managePods` list carries it inside its AWSJSON `input`, not as a variable. */
+function inputToken(variables) {
+  if (typeof variables?.input !== 'string') return null
+  try { return JSON.parse(variables.input)?.nextToken ?? null } catch { return null }
+}
+
 /** One logged body -> [{ type, name, args, nextToken, hasFilter, action, variables }] (one per top-level field per document). */
 export function parseOperations(body) {
   let parsed
@@ -122,7 +128,7 @@ export function parseOperations(body) {
         type,
         name: field.name,
         args: field.args,
-        nextToken: variables.nextToken != null || /nextToken:\s*"/.test(field.args),
+        nextToken: variables.nextToken != null || inputToken(variables) != null || /nextToken:\s*"/.test(field.args),
         hasFilter: /filter:\s*\{/.test(field.args) || (/filter:\s*\$/.test(field.args) && argUsesVariable(field.args.match(/filter:\s*\$[A-Za-z0-9_]+/)?.[0] ?? '', variables)),
         action: typeof variables.action === 'string' ? variables.action : null,
         variables,
@@ -136,6 +142,9 @@ export function parseOperations(body) {
 const chainKey = (op) => {
   const rest = { ...(op.variables ?? {}) }
   delete rest.nextToken
+  if (typeof rest.input === 'string') {
+    try { const { nextToken: _drop, ...input } = JSON.parse(rest.input); rest.input = input } catch { /* not JSON: keep as is */ }
+  }
   return `${op.name}|${op.args.replace(/nextToken:\s*"[^"]*"/, '')}|${JSON.stringify(rest)}`
 }
 

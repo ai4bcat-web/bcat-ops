@@ -1,5 +1,13 @@
 # TMS build log
 
+## 2026-11-04 — PERF fix pass 2 (after job 144): voided loads out of the window read, dashboard partial render, invoicing MB
+
+- **Legacy window read excludes voided shipments** (`listShipmentIdsByMonths` filters `voidedAt` server-side; `includeVoided` opts back in). Dev: 538 ids / 11 requests / 2.0 MB instead of 3,500 / 35+ / 12.6 MB for `listLoadByShipmentId`. A voided load is still found on demand: by id (`useResolveLoads`, now also called by `LoadDrawer` for the selected id, so the Voided tab still opens it), by PRO (`proConflictAllHistory`, voided included, unchanged). `useResolveLoads.test.ts` proves a voided load resolves by id and by PRO and that held loads trigger no read.
+- **/dashboard `managePods x4`**: two causes. The harness counted each page of a `managePods` list (token inside the AWSJSON `input`) as a new chain start; `parseOperations`/`chainKey` now read it. And every router mutation, including read actions (`manageDispatch status`, `Tms*Actions GET_/PREVIEW_`), cleared the whole list cache from the apiClient proxy; read-only router calls no longer do.
+- **/tms/invoicing 12 MB**: 4.4 MB was `listOrderByArStatus` DOCS_NEEDED in full (2,717 orders, 2,446 of voided shipments). The tab now reads the narrow order list (shared with the shell), the narrow shipment check, then full orders of live shipments only (271; dev 4.0 -> ~1.7 MB cold, identical live rows). `getShipment` 1.4 MB falls with the shared narrow memo.
+- **Dashboard first rows**: `useBrokerageDashboard` draws from the working set's first step (open rows joined) and swaps in the delivered backlog when stage 2 lands.
+- **Budgets from measured medians** (tracking, customers, carriers, dashboard timing) and estimated legacy/invoicing budgets: see the comment above the budget block in `perfBudgets.mjs`.
+
 ## 2026-11-04 — PERF fix pass: shell floor, duplicate reads, harness defects (dev-measured, not yet deployed)
 
 - **Shell floor (G3/G8, every /tms page 77-99 req).** The shell's working set cost 57 trips: 15 status partitions (one request each), 2,137 stage-2 `getShipment` ids at 100/request (22), DOCS_NEEDED order pages, financials. Now one aliased request for all open statuses (`listShipmentsByStatusesFiltered`, `batchByIndex` gained a shared `filter`), narrow stage-2 ids at 500/request, DOCS_NEEDED at limit 5000, financials at 250/request: **working set 57 -> 24 trips** (API gate, same 3.3 MB, first partial 1.3-2.1 s <= 3). Chunk sizes were measured against dev: index batches stay at 100 (200 aliases x limit 50 = "Unknown error"), 500 financials aliases refused. Stage 2 now goes through `getShipmentsByIds` so the AR/AP worklists reuse its narrow rows instead of re-reading 2,100 ids.

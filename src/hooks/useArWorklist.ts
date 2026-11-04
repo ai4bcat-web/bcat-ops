@@ -17,7 +17,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { listOrdersByArStatus } from '@/lib/apiClient'
-import { loadWorklistShipments } from '@/lib/worklistShipments'
+import { loadDocsNeededWorklist, loadWorklistShipments } from '@/lib/worklistShipments'
 import { customerDisplayName, isCustomerUnresolved } from '@/lib/customerResolution'
 import { isShipmentVoided } from '@/lib/shipmentVoid'
 import type { OrderRecord, ShipmentRecord } from '@/types/tms'
@@ -70,9 +70,11 @@ export function useArWorklist(tab: ArWorklistTab): ArWorklist {
   // Non-async on purpose: `react-hooks/set-state-in-effect` cannot see through an
   // `async` function, so every state write lives in an explicit promise chain.
   const load = useCallback(() => {
-    return listOrdersByArStatus(tab)
-      .then(async (orderRows) => {
-        const shipmentRows = await loadWorklistShipments(orderRows.map((o) => o.shipmentId))
+    const read = tab === 'DOCS_NEEDED'
+      ? loadDocsNeededWorklist()
+      : listOrdersByArStatus(tab).then(async (orders) => ({ orders, shipments: await loadWorklistShipments(orders.map((o) => o.shipmentId)) }))
+    return read
+      .then(({ orders: orderRows, shipments: shipmentRows }) => {
         setOrders(orderRows)
         setShipments(shipmentRows)
         setError(null)
