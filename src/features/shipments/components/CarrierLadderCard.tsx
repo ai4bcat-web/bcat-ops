@@ -20,6 +20,7 @@ import type { CarrierRecord, LoadCarrierRecord, ShipmentBundle } from '@/types/t
 import { dispatchBlock, ladderActions } from '../carrierLadder'
 import type { ShipmentActions } from '../useShipmentActions'
 import { CarrierAssignmentChip } from './CarrierAssignmentChip'
+import { isIvanCartageName } from '@/lib/ownFleetDrivers'
 import { DriverInfoDialog } from './DriverInfoDialog'
 import { MarkSignedDialog } from './MarkSignedDialog'
 
@@ -145,6 +146,7 @@ export function CarrierLadderCard({ bundle, loadCarrier, carrier, actions, onRem
         <DriverInfoDialog
           initial={loadCarrier}
           carrierName={name}
+          ownFleet={isIvanCartageName(name)}
           busy={actions.busy}
           onClose={() => setDialog(null)}
           onConfirm={async (values) => { await actions.enterDriverInfo({ loadCarrierId: loadCarrier.id, ...values }); setDialog(null) }}

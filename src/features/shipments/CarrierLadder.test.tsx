@@ -17,6 +17,8 @@ if (!Element.prototype.scrollIntoView) Element.prototype.scrollIntoView = () => 
 
 const mocks = vi.hoisted(() => ({
   carrier: null as unknown,
+  drivers: [] as unknown[],
+  equipment: [] as unknown[],
   prepare: vi.fn(),
   put: vi.fn(),
   commit: vi.fn(),
@@ -24,8 +26,11 @@ const mocks = vi.hoisted(() => ({
   invite: vi.fn(),
 }))
 
-vi.mock('@/hooks/useDrivers', () => ({ useDrivers: () => ({ drivers: [] }) }))
-vi.mock('@/hooks/useTrucks', () => ({ useTrucks: () => ({ equipment: [] }) }))
+vi.mock('@/hooks/useDrivers', () => ({ useDrivers: () => ({ drivers: mocks.drivers }) }))
+vi.mock('@/hooks/useTrucks', () => ({ useTrucks: () => ({ equipment: mocks.equipment }) }))
+vi.mock('@/hooks/useTruckConfigs', () => ({
+  useTruckConfigs: () => ({ byId: new Map([['t1', { truckId: 't1', unitNumber: '12', phone: '+13125550100' }]]) }),
+}))
 vi.mock('@/lib/apiClient', async (importOriginal) => ({
   ...(await importOriginal<typeof ApiClient>()),
   getTmsSettings: vi.fn(async () => null),
@@ -81,6 +86,8 @@ const btn = (key: string) => screen.getByTestId(`ladder-${key}`) as HTMLButtonEl
 beforeEach(() => {
   vi.clearAllMocks()
   mocks.carrier = { id: 'car-1', name: 'Swift', status: 'ACTIVE', mcpStatus: 'ACCEPTABLE' } as CarrierRecord
+  mocks.drivers = []
+  mocks.equipment = []
 })
 
 describe('Carrier tab ladder', () => {
@@ -148,6 +155,33 @@ describe('Carrier tab ladder', () => {
     fireEvent.click(screen.getByTestId('driver-info-save'))
     await waitFor(() => expect(actions.enterDriverInfo).toHaveBeenCalledWith({
       loadCarrierId: 'lc-1', driverName: 'Dee', driverPhone: '555-0100', truckNumber: 'T1', trailerNumber: 'R9',
+    }))
+  })
+
+  it('Ivan Cartage: the driver comes from the roster, phone/truck/trailer fill in and cannot be typed, the id is sent', async () => {
+    mocks.carrier = { id: 'car-1', name: 'Ivan Cartage', status: 'ACTIVE', mcpStatus: 'ACCEPTABLE' } as CarrierRecord
+    mocks.drivers = [
+      { id: 'd1', name: 'Alvaro Ruiz', phone: '+13125550101', active: true, assignedTruckId: 't1', assignedTrailerId: 'tr1' },
+      { id: 'd2', name: 'Gone Driver', phone: '', active: false },
+    ]
+    mocks.equipment = [{ id: 't1', type: 'truck', unitNumber: '12', active: true }, { id: 'tr1', type: 'trailer', unitNumber: 'R-7', active: true }]
+    const actions = await renderTab(bundleOf([leg({ carrierName: 'Ivan Cartage' })]))
+    fireEvent.click(btn('ENTER_DRIVER_INFO'))
+    const dialog = await screen.findByRole('dialog')
+
+    const picker = within(dialog).getByLabelText('Driver name') as HTMLSelectElement
+    expect(picker.tagName).toBe('SELECT')
+    expect([...picker.options].map((o) => o.text)).toEqual(['Pick a driver', 'Alvaro Ruiz · Truck 12 · Trailer R-7 · (312) 555-0100'])
+    for (const label of ['Driver phone', 'Truck #', 'Trailer #']) expect((within(dialog).getByLabelText(label) as HTMLInputElement).readOnly).toBe(true)
+
+    fireEvent.click(screen.getByTestId('driver-info-save'))
+    expect(await within(dialog).findByText('Pick the driver from the list.')).toBeTruthy()
+    expect(actions.enterDriverInfo).not.toHaveBeenCalled()
+
+    fireEvent.change(picker, { target: { value: 'd1' } })
+    fireEvent.click(screen.getByTestId('driver-info-save'))
+    await waitFor(() => expect(actions.enterDriverInfo).toHaveBeenCalledWith({
+      loadCarrierId: 'lc-1', driverId: 'd1', driverName: 'Alvaro Ruiz', driverPhone: '+13125550100', truckNumber: '12', trailerNumber: 'R-7',
     }))
   })
 

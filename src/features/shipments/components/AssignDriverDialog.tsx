@@ -8,10 +8,10 @@
  * toast, so the dialog stays open for the retry.
  */
 import { useState } from 'react'
+import { OwnFleetDriverPicker } from '@/components/OwnFleetDriverPicker'
 import { TmsAlert, TmsButton, TmsDialog, TmsField, TmsSelect, TmsTextarea } from '@/features/tms/kit'
-import {
-  PAY_OVERRIDE_REASON_MIN, distinctStopDrivers, evaluatePayLock, isBrokerDriver,
-} from '@/lib/ownAssetDriver'
+import { useOwnFleetRoster } from '@/hooks/useOwnFleetRoster'
+import { PAY_OVERRIDE_REASON_MIN, distinctStopDrivers, evaluatePayLock } from '@/lib/ownAssetDriver'
 import type { Driver } from '@/types'
 import type { Equipment } from '@/types/equipment'
 import type { LoadCarrierRecord, ShipmentLoad } from '@/types/tms'
@@ -39,13 +39,6 @@ export interface AssignDriverDialogProps {
   onConfirm: (input: AssignDriverFields) => Promise<void>
 }
 
-const FLEET_GROUPS: { key: string; label: string; match: (d: Driver) => boolean }[] = [
-  { key: 'local', label: 'Ivan local', match: (d) => !d.fleetGroup || d.fleetGroup === 'LOCAL' },
-  { key: 'box', label: 'Box trucks', match: (d) => d.fleetGroup === 'BOX_TRUCK' },
-  { key: 'oo', label: 'Owner operators', match: (d) => d.fleetGroup === 'OWNER_OPERATOR' },
-  { key: 'amazon', label: 'Amazon', match: (d) => d.fleetGroup === 'AMAZON' },
-]
-
 /** The driver the load's delivery stop (the one pay reads) currently names. */
 function currentDeliveryDriverId(load: ShipmentLoad, activeLeg: LoadCarrierRecord | null): string | null {
   const stops = load.stops ?? []
@@ -59,7 +52,7 @@ export function AssignDriverDialog({
   load, activeLeg, drivers, trucks, trailers, isAdmin, busy, onClose, onConfirm,
 }: AssignDriverDialogProps) {
   const ownLeg = activeLeg?.kind === 'OWN_ASSET' ? activeLeg : null
-  const roster = drivers.filter((d) => d.active && !isBrokerDriver(d))
+  const roster = useOwnFleetRoster({ drivers, trucks, trailers })
   const activeTrucks = trucks.filter((t) => t.active !== false)
   const activeTrailers = trailers.filter((t) => t.active !== false)
 
@@ -76,12 +69,11 @@ export function AssignDriverDialog({
   const changing = Boolean(ownLeg)
   const nameOf = (id: string | null | undefined) => (id ? drivers.find((d) => d.id === id)?.name ?? id : '')
 
-  const pickDriver = (id: string) => {
-    setDriverId(id)
+  const pickDriver = (d: (typeof roster)[number] | null) => {
+    setDriverId(d?.id ?? '')
     setError(null)
-    const d = roster.find((x) => x.id === id)
-    if (!touched.truck) setTruckId(d?.assignedTruckId && activeTrucks.some((t) => t.id === d.assignedTruckId) ? d.assignedTruckId : '')
-    if (!touched.trailer) setTrailerId(d?.assignedTrailerId && activeTrailers.some((t) => t.id === d.assignedTrailerId) ? d.assignedTrailerId : '')
+    if (!touched.truck) setTruckId(d?.truckId ?? '')
+    if (!touched.trailer) setTrailerId(d?.trailerId ?? '')
   }
 
   const stopDrivers = distinctStopDrivers(load.stops)
@@ -148,23 +140,14 @@ export function AssignDriverDialog({
     >
       <div className="space-y-3">
         <TmsField label="Driver">
-          <TmsSelect
-            aria-label="Driver"
-            data-testid="assign-driver-select"
+          <OwnFleetDriverPicker
+            roster={roster}
             value={driverId}
-            onChange={(e) => pickDriver(e.target.value)}
-          >
-            <option value="">— select —</option>
-            {FLEET_GROUPS.map((g) => {
-              const members = roster.filter(g.match)
-              if (members.length === 0) return null
-              return (
-                <optgroup key={g.key} label={g.label}>
-                  {members.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-                </optgroup>
-              )
-            })}
-          </TmsSelect>
+            ariaLabel="Driver"
+            placeholder="— select —"
+            testId="assign-driver-select"
+            onChange={pickDriver}
+          />
         </TmsField>
         <TmsField label="Truck">
           <TmsSelect

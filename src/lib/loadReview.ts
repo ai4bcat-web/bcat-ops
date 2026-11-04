@@ -13,6 +13,13 @@
  * `loadReviewRefusal` so the server refuses on exactly the sentences the page shows.
  */
 import type { ApStatus, ArStatus, AssignmentType, LoadWorkflowStatus, ShipmentBuildState, ShipmentStatus } from '../types/tms'
+import {
+  DEFAULT_REVIEW_REQUIREMENTS,
+  evaluateReviewRequirements,
+  profitFromFacts,
+  type ReviewFacts,
+  type ReviewRequirement,
+} from './reviewRequirements'
 import { isReleasedToInvoicing } from './shipmentLists'
 import {
   releaseGateError,
@@ -94,6 +101,10 @@ export interface LoadReviewRow {
   orderRevenueCents?: number | null
   revenueCents?: number | null
   costCents?: number | null
+  /** Step AP. First order reference and the customer's reference, for the `referenceNumber` requirement. */
+  reference?: string | null
+  customerReference?: string | null
+  loadReviewPushedAt?: string | null
 }
 
 const EARLY_POD_STATUSES: readonly string[] = ['ARRIVED_AT_DELIVERY_TERMINAL', 'OUT_FOR_DELIVERY', 'UNLOADING']
@@ -111,6 +122,8 @@ export function inLoadReviewQueue(row: LoadReviewRow): boolean {
   if (row.voidedAt || row.deletedAt || row.status === 'CANCELED') return false
   if (row.legacyImported === true) return false
   if (isReleasedToInvoicing(row)) return false
+  // Pushed from the board: in the queue whatever the delivery clock says.
+  if (row.loadReviewPushedAt) return true
   return row.status === 'DELIVERED' || row.deliveredAt != null || row.loadStatus === 'DELIVERED'
     || podInBeforeDelivery(row)
 }
@@ -156,23 +169,49 @@ function blank(value: string | null | undefined): boolean {
   return !value || value.trim().length === 0
 }
 
+/** Where each requirement's failure is drawn and what the reviewer can click to fix it. */
+const REQUIREMENT_PLACEMENT: Record<ReviewRequirement, { check: LoadReviewCheckKey; action: LoadReviewAction }> = {
+  revDivision: { check: 'revDivision', action: { kind: 'SET_REV_DIVISION' } },
+  salesRep: { check: 'salesRep', action: { kind: 'SET_SALES_REP' } },
+  referenceNumber: { check: 'details', action: { kind: 'OPEN_TAB', tab: 'overview' } },
+  podReceived: { check: 'documents', action: { kind: 'OPEN_TAB', tab: 'documents' } },
+  revenueEntered: { check: 'charges', action: { kind: 'OPEN_TAB', tab: 'financials' } },
+  expenseEntered: { check: 'charges', action: { kind: 'OPEN_TAB', tab: 'carrierPay' } },
+  profitEntered: { check: 'charges', action: { kind: 'OPEN_TAB', tab: 'financials' } },
+}
+
+/** The facts the board row can state; unknown stays null and therefore fails. */
+export function reviewFactsOfRow(row: LoadReviewRow): ReviewFacts {
+  const revenueCents = row.orderRevenueCents ?? row.revenueCents ?? null
+  const expenseCents = row.costCents ?? null
+  return {
+    revDivision: row.revDivision,
+    salesRepId: row.salesRepId,
+    referenceNumber: row.reference ?? row.customerReference ?? null,
+    podReceived: Array.isArray(row.docsMissing) && row.docsRequired?.includes('POD') === true && !row.docsMissing.includes('POD'),
+    revenueCents,
+    expenseCents,
+    profitCents: profitFromFacts(revenueCents, expenseCents),
+  }
+}
+
 /**
- * The three checks the release gate does not own. Run server-side on `review`
- * releases and by `REVIEW_LOAD`, so the page and the refusal cannot disagree.
- * Imported history is exempt (it cannot be queued; this is belt and braces).
+ * The checks the release gate does not own: the customer's Load Review requirements
+ * (`resolveReviewRequirements`) evaluated by the one shared function. Run server-side
+ * on review releases, pushes and `REVIEW_LOAD`, so the page, the push and the refusal
+ * cannot disagree. Imported history is exempt (it cannot be queued; belt and braces).
  */
 export function loadReviewExtras(input: {
-  shipment: { salesRepId?: string | null; revDivision?: string | null; legacyImported?: boolean | null }
-  order: { revenueCents?: number | null }
+  shipment: { legacyImported?: boolean | null }
+  facts: ReviewFacts
+  requirements?: readonly ReviewRequirement[]
 }): LoadReviewReason[] {
   if (input.shipment.legacyImported === true) return []
-  const out: LoadReviewReason[] = []
-  if (blank(input.shipment.salesRepId)) out.push(reason('SALES_REP_MISSING', 'Missing sales rep', 'salesRep', { kind: 'SET_SALES_REP' }))
-  if (blank(input.shipment.revDivision)) out.push(reason('REV_DIVISION_MISSING', 'Missing revenue division', 'revDivision', { kind: 'SET_REV_DIVISION' }))
-  if (!((input.order.revenueCents ?? 0) > 0)) {
-    out.push(reason('NO_CUSTOMER_CHARGES', 'No customer charges', 'charges', { kind: 'OPEN_TAB', tab: 'financials' }))
-  }
-  return out
+  const { failures } = evaluateReviewRequirements(input.requirements ?? DEFAULT_REVIEW_REQUIREMENTS, input.facts)
+  return failures.map((failure) => {
+    const placement = REQUIREMENT_PLACEMENT[failure.requirement]
+    return reason(failure.code, failure.message, placement.check, placement.action)
+  })
 }
 
 /**
@@ -259,6 +298,8 @@ export function evaluateLoadReview(input: {
   /** Caller's customer-resolution fact; defaults to "no customerId on the row". */
   customerUnresolved?: boolean
   revDivisionActive?: boolean
+  /** The customer's resolved Load Review list; defaults to the built-in seven. */
+  requirements?: readonly ReviewRequirement[]
 }): LoadReviewVerdict {
   const { row, gate } = input
   const reasons: LoadReviewReason[] = gate ? gateReasons(gate) : gateFromRow(row)
@@ -274,9 +315,12 @@ export function evaluateLoadReview(input: {
   if (input.extras) {
     reasons.push(...input.extras)
   } else {
+    // The release gate (supplied or derived from the row) already owns POD; the
+    // requirement list stays the same, the sentence is not said twice.
     reasons.push(...loadReviewExtras({
-      shipment: { salesRepId: row.salesRepId, revDivision: row.revDivision, legacyImported: row.legacyImported },
-      order: { revenueCents: row.orderRevenueCents ?? row.revenueCents },
+      shipment: { legacyImported: row.legacyImported },
+      facts: reviewFactsOfRow(row),
+      requirements: (input.requirements ?? DEFAULT_REVIEW_REQUIREMENTS).filter((key) => key !== 'podReceived'),
     }))
   }
   if (input.revDivisionActive === false && !blank(row.revDivision)) {

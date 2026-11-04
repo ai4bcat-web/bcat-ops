@@ -162,6 +162,11 @@ export const storage = defineStorage({
       allow.authenticated.to(['read']),
       allow.groups(STAFF_GROUPS).to(['read']),
     ],
+    // Feedback-page screenshots, keyed feedback/{feedbackId}/… — any signed-in user.
+    'feedback/*': [
+      allow.authenticated.to(['read', 'write']),
+      allow.groups(STAFF_GROUPS).to(['read', 'write', 'delete']),
+    ],
     // Brand assets (Step L): logos for square, wide, and document headers.
     // Staff upload through presigned PUTs; authenticated users read for preview.
     'brand/*': [

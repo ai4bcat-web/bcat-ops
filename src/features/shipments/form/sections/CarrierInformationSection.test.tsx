@@ -11,11 +11,22 @@ import { makeCtx, makeForm, savedBundle } from './ah5TestKit'
 vi.mock('@/hooks/useDrivers', () => ({
   useDrivers: () => ({
     drivers: [
-      { id: 'd1', name: 'Alvaro Ruiz', phone: '+13125550101', email: 'alvaro@example.invalid', active: true },
+      { id: 'd1', name: 'Alvaro Ruiz', phone: '+13125550101', email: 'alvaro@example.invalid', active: true, assignedTruckId: 't1', assignedTrailerId: 'tr1' },
       { id: 'd2', name: 'Brokered Freight', phone: '', active: true, type: 'broker' },
       { id: 'd3', name: 'Gone Driver', phone: '', active: false },
     ],
   }),
+}))
+vi.mock('@/hooks/useTrucks', () => ({
+  useTrucks: () => ({
+    equipment: [
+      { id: 't1', type: 'truck', unitNumber: '12', active: true },
+      { id: 'tr1', type: 'trailer', unitNumber: 'R-7', active: true },
+    ],
+  }),
+}))
+vi.mock('@/hooks/useTruckConfigs', () => ({
+  useTruckConfigs: () => ({ byId: new Map([['t1', { truckId: 't1', unitNumber: '12', phone: '+13125550100' }]]) }),
 }))
 
 const carrier = (over: Partial<CarrierRecord> = {}): CarrierRecord => ({
@@ -69,14 +80,38 @@ describe('CarrierInformationSection', () => {
     expect(ctx.actions.cover).toHaveBeenCalledTimes(1)
   })
 
-  it('Ivan Cartage gets the roster picker (no brokers, no inactive) and no Driver 2', () => {
+  it('Ivan Cartage gets the roster picker (no brokers, no inactive), no Driver 2, and a selection fills phone, truck and trailer', () => {
     const { onChange } = setup({ isOwnFleet: true })
     const picker = screen.getByLabelText('Driver 1') as HTMLSelectElement
-    expect([...picker.options].map((o) => o.text)).toEqual(['Pick a driver', 'Alvaro Ruiz'])
+    expect(picker.tagName).toBe('SELECT')
+    // The truck's work phone (Step AK) is the number shown and filled, not the driver's own.
+    expect([...picker.options].map((o) => o.text)).toEqual(['Pick a driver', 'Alvaro Ruiz · Truck 12 · Trailer R-7 · (312) 555-0100'])
     expect(screen.queryByLabelText('Driver 2')).toBeNull()
     fireEvent.change(picker, { target: { value: 'd1' } })
     const update = onChange.mock.calls[0][0] as (p: ShipmentFormValues['carrier']) => ShipmentFormValues['carrier']
-    expect(update(emptyValues().carrier).driver1).toEqual({ name: 'Alvaro Ruiz', phone: '+13125550101', email: 'alvaro@example.invalid' })
+    expect(update(emptyValues().carrier)).toMatchObject({
+      driver1: { name: 'Alvaro Ruiz', phone: '+13125550100', email: 'alvaro@example.invalid' },
+      truckNo: '12',
+      trailerNo: 'R-7',
+    })
+  })
+
+  it('own fleet: nothing about the driver, truck or trailer can be typed', () => {
+    setup({ isOwnFleet: true, driver1: { name: 'Alvaro Ruiz', phone: '+13125550100', email: '' }, truckNo: '12', trailerNo: 'R-7' })
+    expect(screen.queryByRole('textbox', { name: 'Driver 1' })).toBeNull()
+    for (const label of ['Driver 1 Cell', 'Truck #', 'Trailer #']) {
+      expect((screen.getByLabelText(label) as HTMLInputElement).readOnly).toBe(true)
+    }
+  })
+
+  it('a brokered carrier keeps the free-text driver fields', () => {
+    const { onChange } = setup({ carrierId: 'car-1' })
+    const name = screen.getByLabelText('Driver 1') as HTMLInputElement
+    expect(name.tagName).toBe('INPUT')
+    fireEvent.change(name, { target: { value: 'Typed Name' } })
+    expect(onChange).toHaveBeenCalled()
+    expect((screen.getByLabelText('Truck #') as HTMLInputElement).readOnly).toBe(false)
+    expect(screen.getByLabelText('Driver 2')).toBeTruthy()
   })
 
   it('routes a typed "Ivan Cartage" to the own-fleet picker instead of recording a name', () => {

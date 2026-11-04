@@ -31,6 +31,7 @@ import { validateCommissionPlans, validatePaySchedule } from '../../../src/lib/c
 import { validateAutomationPatch } from '../../../src/lib/trackingAutomation'
 import { DRIVER_SMS_TARGETS, TRACKING_METHODS, TRACKING_MODES } from '../../../src/lib/trackingPrefs'
 import { teamMembership, validateTeams } from '../../../src/lib/teams'
+import { REVIEW_REQUIREMENTS, normalizeReviewRequirements } from '../../../src/lib/reviewRequirements'
 import { SEED_DIVISIONS, SEED_RULES, validateDivisions, validateRules } from '../../../src/lib/ownership'
 import { checkIntakeEmail, normalizeIntakeEmail } from '../../../src/lib/intakeMail'
 import { RETIRED_SEED_VIEWS, SEED_VIEWS, slugify, validateView, BOARD_COLUMN_KEYS } from '../../../src/lib/shipmentViewDefs'
@@ -98,28 +99,39 @@ import { parsePoints, routeMiles } from './routeMiles'
 const dynamo = new DynamoDBClient({})
 const cognito = new CognitoIdentityProviderClient({})
 
+/**
+ * Table names. Lambda refuses environment variables over 4 KB, and 17 full table names were what
+ * pushed this function past it (deploy 158). The stack passes ONE `DATA_TABLE_SUFFIX`
+ * (`<apiId>-NONE`) and every table is `<Model>-<suffix>`; an explicit `<X>_TABLE_NAME` still wins
+ * (tests, rehearsal stacks).
+ */
 const TABLE_NAME = process.env.TABLE_NAME ?? ''
-const CUSTOMER_TABLE_NAME = process.env.CUSTOMER_TABLE_NAME ?? TABLE_NAME
-const LOCATION_TABLE_NAME = process.env.LOCATION_TABLE_NAME ?? TABLE_NAME
-const DIVISION_TABLE_NAME = process.env.DIVISION_TABLE_NAME ?? TABLE_NAME
-const SETTINGS_TABLE_NAME = process.env.SETTINGS_TABLE_NAME ?? TABLE_NAME
-const MERGE_JOB_TABLE_NAME = process.env.MERGE_JOB_TABLE_NAME ?? TABLE_NAME
-const LOAD_TABLE_NAME = process.env.LOAD_TABLE_NAME ?? ''
-const USER_PROFILE_TABLE_NAME = process.env.USER_PROFILE_TABLE_NAME ?? ''
+const DATA_TABLE_SUFFIX = process.env.DATA_TABLE_SUFFIX ?? ''
+const tableOf = (envName: string, model: string, fallback = ''): string =>
+  process.env[envName] ?? (DATA_TABLE_SUFFIX ? `${model}-${DATA_TABLE_SUFFIX}` : fallback)
+const CUSTOMER_TABLE_NAME = tableOf('CUSTOMER_TABLE_NAME', 'Customer', TABLE_NAME)
+const LOCATION_TABLE_NAME = tableOf('LOCATION_TABLE_NAME', 'Location', TABLE_NAME)
+const DIVISION_TABLE_NAME = tableOf('DIVISION_TABLE_NAME', 'Division', TABLE_NAME)
+const SETTINGS_TABLE_NAME = tableOf('SETTINGS_TABLE_NAME', 'TmsSettings', TABLE_NAME)
+const MERGE_JOB_TABLE_NAME = tableOf('MERGE_JOB_TABLE_NAME', 'DirectoryMergeJob', TABLE_NAME)
+const LOAD_TABLE_NAME = tableOf('LOAD_TABLE_NAME', 'Load')
+const USER_PROFILE_TABLE_NAME = tableOf('USER_PROFILE_TABLE_NAME', 'UserProfile')
 // Step R — the self-serve revenue taxonomy and the saved department views. This
 // Lambda is their only writer; the client reads the three tables directly.
-const OWNERSHIP_DIVISION_TABLE_NAME = process.env.OWNERSHIP_DIVISION_TABLE_NAME ?? ''
-const OWNERSHIP_RULE_TABLE_NAME = process.env.OWNERSHIP_RULE_TABLE_NAME ?? ''
-const SHIPMENT_VIEW_TABLE_NAME = process.env.SHIPMENT_VIEW_TABLE_NAME ?? ''
-const SHIPMENT_COLUMN_TEMPLATE_TABLE_NAME = process.env.SHIPMENT_COLUMN_TEMPLATE_TABLE_NAME ?? ''
-const AUDIT_LOG_TABLE_NAME = process.env.AUDIT_LOG_TABLE_NAME ?? ''
+const OWNERSHIP_DIVISION_TABLE_NAME = tableOf('OWNERSHIP_DIVISION_TABLE_NAME', 'OwnershipDivision')
+const OWNERSHIP_RULE_TABLE_NAME = tableOf('OWNERSHIP_RULE_TABLE_NAME', 'OwnershipRule')
+const SHIPMENT_VIEW_TABLE_NAME = tableOf('SHIPMENT_VIEW_TABLE_NAME', 'ShipmentView')
+const SHIPMENT_COLUMN_TEMPLATE_TABLE_NAME = tableOf('SHIPMENT_COLUMN_TEMPLATE_TABLE_NAME', 'ShipmentColumnTemplate')
+const AUDIT_LOG_TABLE_NAME = tableOf('AUDIT_LOG_TABLE_NAME', 'AuditLog')
 // Step J — one row per integration provider, API client and webhook receipt.
 // This Lambda is its only writer apart from tracking-api's `lastUsedAt` stamp.
-const INTEGRATION_TABLE_NAME = process.env.INTEGRATION_TABLE_NAME ?? ''
+const INTEGRATION_TABLE_NAME = tableOf('INTEGRATION_TABLE_NAME', 'Integration')
 // Step L — spreadsheet import jobs. Small table; list action scans.
-const IMPORT_JOB_TABLE_NAME = process.env.IMPORT_JOB_TABLE_NAME ?? ''
+const IMPORT_JOB_TABLE_NAME = tableOf('IMPORT_JOB_TABLE_NAME', 'ImportJob')
 // Step N2: MyCarrierPackets sync writes compliance data back onto Carrier rows.
-const CARRIER_TABLE_NAME = process.env.CARRIER_TABLE_NAME ?? ''
+const CARRIER_TABLE_NAME = tableOf('CARRIER_TABLE_NAME', 'Carrier')
+// Step AD: Find & Invite notes the invitation on the load's thread.
+const SHIPMENT_MESSAGE_TABLE_NAME = tableOf('SHIPMENT_MESSAGE_TABLE_NAME', 'ShipmentMessage')
 const GEOCODE_TOKEN_SECRET = process.env.GEOCODE_TOKEN_SECRET ?? ''
 const USER_POOL_ID = process.env.USER_POOL_ID ?? 'us-east-1_IbPKPNJC9'
 
@@ -412,6 +424,19 @@ function optionalBoolean(value: unknown): boolean | null {
   if (value === 'true') return true
   if (value === 'false') return false
   throw new Error('Value must be a boolean')
+}
+
+/**
+ * Step AP: a Load Review requirement list. Null clears it (customer -> org default,
+ * org -> built-in seven); an empty array is a deliberate "nothing required"; an unknown
+ * key is refused rather than silently dropped.
+ */
+function validateReviewRequirements(value: unknown): string[] | null {
+  if (value == null) return null
+  if (!Array.isArray(value)) throw new Error('reviewRequirements must be an array')
+  const unknown = value.filter((item) => !(REVIEW_REQUIREMENTS as readonly unknown[]).includes(item))
+  if (unknown.length > 0) throw new Error(`Unknown review requirement: ${unknown.map(String).join(', ')}`)
+  return normalizeReviewRequirements(value)
 }
 
 function optionalStringArray(value: unknown, maxLen?: number): string[] | null {
@@ -1107,6 +1132,7 @@ async function upsertCustomer(input: Record<string, unknown>, caller: Caller): P
     creditLimitCents: validateAwsIntegerCents(input.creditLimitCents, 'creditLimitCents'),
     creditHoldFlag: optionalBoolean(input.creditHoldFlag),
     requiredDocsForInvoice: optionalStringArray(input.requiredDocsForInvoice, 50),
+    reviewRequirements: validateReviewRequirements(input.reviewRequirements),
     defaultDivisionKey: optionalString(input.defaultDivisionKey, 50),
     defaultSalesRepId: optionalString(input.defaultSalesRepId, 100),
     aliases,
@@ -1778,6 +1804,7 @@ async function saveSettings(input: Record<string, unknown>, caller: Caller): Pro
     defaultMaxDaysLate: keep(input.defaultMaxDaysLate, (v) => optionalInteger(v, { min: 0 }), 'defaultMaxDaysLate'),
     requireCustomerApproval: keep(input.requireCustomerApproval, (v) => (typeof v === 'boolean' ? v : undefined), 'requireCustomerApproval'),
     defaultRequiredDocs: keep(input.defaultRequiredDocs, (v) => optionalStringArray(v, 50), 'defaultRequiredDocs'),
+    reviewRequirements: keep(input.reviewRequirements, validateReviewRequirements, 'reviewRequirements'),
     defaultRequiredReferences: keep(input.defaultRequiredReferences, validateRequiredReferences, 'defaultRequiredReferences'),
     chargeCodes: keep(input.chargeCodes, (v) => validateChargeCodes(v), 'chargeCodes'),
     rateConTerms: keep(input.rateConTerms, (v) => optionalString(v, 8000), 'rateConTerms'),
@@ -3283,7 +3310,7 @@ const integrationDeps: IntegrationDeps = {
 
 const mcpFindDeps: McpFindDeps = {
   ...integrationDeps,
-  shipmentMessageTableName: process.env.SHIPMENT_MESSAGE_TABLE_NAME ?? '',
+  shipmentMessageTableName: SHIPMENT_MESSAGE_TABLE_NAME,
 }
 
 // ── Main handler ───────────────────────────────────────────────────────────────

@@ -77,6 +77,8 @@ export interface CustomerFormValue {
   creditHoldFlag: boolean
   /** Stored strings, typed values plus anything that predates the vocabulary. */
   requiredDocs: string[]
+  /** Step AP: null = the organization default. */
+  reviewRequirements: string[] | null
   defaultDivisionKey: string
   defaultSalesRepId: string
   aliasesText: string
@@ -161,6 +163,7 @@ function emptyCustomerForm(initial?: CustomerRecord | null): CustomerFormValue {
     creditLimitCents: initial?.creditLimitCents ?? null,
     creditHoldFlag: initial?.creditHoldFlag ?? false,
     requiredDocs: initial?.requiredDocsForInvoice ?? [],
+    reviewRequirements: initial?.reviewRequirements ?? null,
     defaultDivisionKey: initial?.defaultDivisionKey ?? '',
     defaultSalesRepId: initial?.defaultSalesRepId ?? '',
     aliasesText: arrayToLines(initial?.aliases),
@@ -297,6 +300,7 @@ export function useCustomerForm(initial?: CustomerRecord | null) {
     creditLimitCents: parseOptionalCents(value.creditLimitCents),
     creditHoldFlag: value.creditHoldFlag,
     requiredDocsForInvoice: value.requiredDocs,
+    reviewRequirements: value.reviewRequirements,
     defaultDivisionKey: value.defaultDivisionKey || null,
     defaultSalesRepId: value.defaultSalesRepId.trim() || null,
     aliases: linesToArray(value.aliasesText),

@@ -17,6 +17,7 @@ export const OWN_ASSET_MESSAGES = {
   releaseNoDeliveryDriver: 'Missing driver on the delivery stop: re-assign the driver on the Carrier/Driver tab',
   relay: (a: string, b: string) => `This load runs as a relay (${a} → ${b}). Booking one driver puts them on every stop. Confirm to continue.`,
   typedIvanCartage: 'Ivan Cartage is our own fleet. Use "Book Ivan Cartage (own fleet)" and pick the driver.',
+  freeTextDriver: 'Ivan Cartage drivers come from the driver list: pick the driver (phone, truck and trailer are filled from the driver record). A typed driver name is not accepted.',
   batchMultiLeg: 'Batch driver assignment handles one-leg shipments; open this shipment to assign each leg.',
   batchCovered: (carrier: string) => `This load is covered by ${carrier}. Bounce the carrier on the shipment first.`,
   payClosedWeek: (date: string, oldName: string, newName: string) =>

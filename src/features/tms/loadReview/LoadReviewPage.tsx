@@ -10,6 +10,7 @@ import { formatCents } from '@/lib/invoiceBuild'
 import { formatDateTime } from '@/lib/date'
 import { useLoadReviewQueue } from './useLoadReviewQueue'
 import { LoadReviewDrawer } from './LoadReviewDrawer'
+import { MAX_REVIEW_BATCH, batchCapMessage } from '@/lib/reviewRequirements'
 import './loadReview.css'
 
 type ReviewEntry = { row: ShipmentListRow; verdict?: LoadReviewVerdict }
@@ -20,6 +21,7 @@ export function LoadReviewPage() {
   const canOpen = hasPageAccess('loads') || hasPageAccess('tms')
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [confirm, setConfirm] = useState(false)
+  const [capMessage, setCapMessage] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [attempts, setAttempts] = useState<Record<string, string>>({})
   const [notice, setNotice] = useState<string | null>(null)
@@ -40,7 +42,7 @@ export function LoadReviewPage() {
   const pageNumber = Math.max(0, Number(params.get('page')) || 0)
   const page = filtered.slice(pageNumber * 50, pageNumber * 50 + 50)
   const eligible = filtered.filter((entry) => entry.verdict?.ok)
-  const chosen = eligible.filter(({ row }) => selected.has(row.id)).slice(0, 100).map(({ row }) => row.id)
+  const chosen = eligible.filter(({ row }) => selected.has(row.id)).slice(0, MAX_REVIEW_BATCH).map(({ row }) => row.id)
   const openRow = shipments.find((row) => row.id === params.get('shipment')) ?? target
   function update(values: Record<string, string | null>) {
     setParams((previous) => {
@@ -87,6 +89,7 @@ export function LoadReviewPage() {
       const result = await batchShipmentTask({ task: 'RELEASE_TO_BILLING', shipmentIds: chosen, params: { review: { source: 'LOAD_REVIEW' } } })
       setAttempts((old) => ({ ...old, ...Object.fromEntries(result.results.map((entry) => [entry.shipmentId, entry.ok ? 'Moved to billing' : entry.message ?? 'Release refused'])) }))
       setSelected(new Set())
+      setCapMessage(null)
       setNotice(result.results.map((entry) => `${entry.number ?? entry.shipmentId}: ${entry.ok ? 'Moved to billing' : entry.message}`).join('\n'))
       setConfirm(false)
       await refresh()
@@ -94,7 +97,11 @@ export function LoadReviewPage() {
     finally { setBusy(false); setConfirm(false) }
   }
   const columns: ColumnDef<ReviewEntry>[] = [
-    { key: 'select', header: 'Select', render: ({ row, verdict }) => tab === 'released' ? null : <input type="checkbox" aria-label={`Select ${row.number}`} disabled={!verdict?.ok} title={verdict ? failingReasons(verdict)[0]?.message : undefined} checked={selected.has(row.id)} onClick={(event) => event.stopPropagation()} onChange={(event) => setSelected((old) => { const next = new Set(old); if (event.target.checked) next.add(row.id); else next.delete(row.id); return next })} /> },
+    { key: 'select', header: 'Select', render: ({ row, verdict }) => tab === 'released' ? null : <input type="checkbox" aria-label={`Select ${row.number}`} disabled={!verdict?.ok} title={verdict ? failingReasons(verdict)[0]?.message : undefined} checked={selected.has(row.id)} onClick={(event) => event.stopPropagation()} onChange={(event) => {
+      if (event.target.checked && !selected.has(row.id) && selected.size >= MAX_REVIEW_BATCH) { setCapMessage(batchCapMessage()); return }
+      setCapMessage(null)
+      setSelected((old) => { const next = new Set(old); if (event.target.checked) next.add(row.id); else next.delete(row.id); return next })
+    }} /> },
     { key: 'shipment', header: 'Shipment', render: ({ row }) => <><TmsButton variant="ghost" onClick={() => update({ shipment: row.id })}>{row.number}</TmsButton>{attempts[row.id] && <p>Last attempt: {attempts[row.id]}</p>}</> },
     { key: 'customer', header: 'Customer', render: ({ row }) => row.customerName ?? '—' },
     { key: 'lane', header: 'Lane', render: ({ row }) => `${row.originCity ?? '—'} → ${row.destinationCity ?? '—'}` },
@@ -110,15 +117,16 @@ export function LoadReviewPage() {
   const options = [...new Set(shipments.map((row) => row[field]).filter((value): value is string => !!value))].sort()
   return <div className="aa-load-review">
     {error && <TmsAlert tone="red">{error}</TmsAlert>}{auditError && <TmsAlert tone="red">{auditError}</TmsAlert>}
-    {notice && <div role="status" className="aa-review-results">{notice}</div>}
+    {capMessage && <TmsAlert tone="orange" title="Selection limit">{capMessage}</TmsAlert>}
+    {notice && <div role="status" className="aa-review-results" style={{ whiteSpace: 'pre-line' }}>{notice}</div>}
     <TmsListPage title="Load Review" rows={page} columns={columns} rowKey={({ row }) => row.id} onRowClick={({ row }) => update({ shipment: row.id })}
       onRefresh={() => void refresh()} search={{ value: params.get('q') ?? '', onChange: (q) => update({ q, page: null }), placeholder: 'Shipment, customer or reference' }}
-      quickTabs={{ active: tab, onSelect: (key) => { update({ tab: key, page: null }); setSelected(new Set()) }, tabs: [{ key: 'fixes', label: 'Needs fixes', count: needs.length }, { key: 'ready', label: 'Looks ready', count: ready.length }, { key: 'all', label: 'All in review', count: queue.length }, { key: 'released', label: 'Released (14 d)', count: released.length }] }}
+      quickTabs={{ active: tab, onSelect: (key) => { update({ tab: key, page: null }); setSelected(new Set()); setCapMessage(null) }, tabs: [{ key: 'fixes', label: 'Needs fixes', count: needs.length }, { key: 'ready', label: 'Looks ready', count: ready.length }, { key: 'all', label: 'All in review', count: queue.length }, { key: 'released', label: 'Released (14 d)', count: released.length }] }}
       filterChips={[
         ...['division', 'rep', 'customer'].map((key) => ({ key, label: key === 'division' ? 'Revenue division' : key === 'rep' ? 'Sales rep' : 'Customer', value: params.get(key), onClick: () => setFilter(key) })),
         { key: 'demo', label: 'Demo', value: params.get('demo') === '1' ? 'only' : null, onClick: () => update({ demo: params.get('demo') === '1' ? null : '1', page: null }) },
       ]}
-      actions={tab !== 'released' && <TmsButton onClick={() => setSelected(new Set(eligible.slice(0, 100).map(({ row }) => row.id)))}>Select all looks ready (up to 100)</TmsButton>}
+      actions={tab !== 'released' && <TmsButton onClick={() => { setSelected(new Set(eligible.slice(0, MAX_REVIEW_BATCH).map(({ row }) => row.id))); setCapMessage(eligible.length > MAX_REVIEW_BATCH ? batchCapMessage() : null) }}>Select all looks ready (up to {MAX_REVIEW_BATCH})</TmsButton>}
       banner={<TmsStatRow columns={5} items={[{ label: 'In review', value: String(queue.length) }, { label: 'Looks ready', value: String(ready.length) }, { label: 'Needs fixes', value: String(needs.length) }, { label: 'Oldest', value: `${Math.max(0, ...queue.map(({ row }) => reviewAgeDays(row, now) ?? 0))} d` }, { label: 'Value in review', value: formatCents(queue.reduce((sum, { row }) => sum + (row.orderRevenueCents ?? row.revenueCents ?? 0), 0)) }]} />}
       page={{ from: filtered.length ? pageNumber * 50 + 1 : 0, to: pageNumber * 50 + page.length, total: filtered.length, pageSize: 50 }}
       footerExtra={<><TmsButton disabled={!pageNumber} onClick={() => update({ page: String(pageNumber - 1) })}>Previous</TmsButton><TmsButton disabled={(pageNumber + 1) * 50 >= filtered.length} onClick={() => update({ page: String(pageNumber + 1) })}>Next</TmsButton></>}

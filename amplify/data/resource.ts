@@ -899,6 +899,7 @@ const schema = a.schema({
       creditLimitCents:  a.integer(),          // non-negative integer cents
       creditHoldFlag:    a.boolean(),
       requiredDocsForInvoice: a.string().array(), // ['POD','BOL','LUMPER_RECEIPT']
+      reviewRequirements: a.string().array(),    // Step AP: per-customer Load Review requirements; null = org default
       defaultDivisionKey:  a.string(),
       defaultSalesRepId:   a.string(),           // Cognito username
       aliases:        a.string().array(),        // ratecon names that resolve here
@@ -1099,6 +1100,7 @@ const schema = a.schema({
       defaultMaxDaysLate: a.integer(),            // ≥0
       requireCustomerApproval: a.boolean(),       // non-admin creates land on PENDING
       defaultRequiredDocs: a.string().array(),    // e.g. ['POD','BOL']
+      reviewRequirements: a.string().array(),     // Step AP: org default Load Review requirements (ReviewRequirement[])
       defaultRequiredReferences: a.json(),        // RequiredReference[]
       chargeCodes: a.json(),                      // ChargeCodeDef[]
       rateConTerms: a.string(),                   // default rate-con terms
@@ -1946,6 +1948,9 @@ const schema = a.schema({
       legacyImported:  a.boolean(),
       legacySource:    a.string(),
       importRunId:     a.string(),
+      // Step AP: Load Review push. Written by tms-shipment-actions PUSH_TO_LOAD_REVIEW only.
+      loadReviewPushedAt: a.datetime(),
+      loadReviewPushedBy: a.string(),
       // Aljex codes kept verbatim so Settings > Users (AljexCodeMap) can map them to people
       // later without a re-import. `salesRepId` stays null until a mapping is applied.
       salesRepCode:    a.string(),
@@ -2565,7 +2570,7 @@ const schema = a.schema({
   // index anywhere and a guess has to hit a 192-bit primary key.
   TrackingLink: a
     .model({
-      kind:           a.enum(['CARRIER_PING', 'CUSTOMER_VIEW', 'CARRIER_UPLOAD']),
+      kind:           a.enum(['CARRIER_PING', 'CUSTOMER_VIEW', 'CARRIER_UPLOAD', 'PROVIDER_TRACK']),
       shipmentId:     a.string().required(),
       shipmentNumber: a.string(),
       customerId:     a.string(),
@@ -2602,6 +2607,10 @@ const schema = a.schema({
       uploadCount:   a.integer(),
       lastUploadAt:  a.datetime(),
       neededTypes:   a.string().array(),
+      // ── Step AO ─────────────────────────────────────────────────────────
+      provider:      a.string(),      // PROVIDER_TRACK: registry key, e.g. 'MACROPOINT'
+      providerRef:   a.string(),      // PROVIDER_TRACK: the provider's id ('stub:<token8>' while STUB)
+      consentAt:     a.datetime(),    // CARRIER_PING: when the driver ticked the consent box (server clock)
       createdBy:     a.string().required(),
     })
     .secondaryIndexes((index) => [index('shipmentId'), index('loadId')])
@@ -3823,6 +3832,26 @@ const schema = a.schema({
       allow.authenticated().to(['create', 'read']),
     ]),
 
+  // ── Feedback ───────────────────────────────────────────────────────────────
+  // "What is not working" reports from any signed-in user, triaged by the owner/admins
+  // on /feedback. Screenshots live in S3 under feedback/{id}/ (keys in screenshotKeys).
+  Feedback: a
+    .model({
+      page:             a.string().required(),
+      summary:          a.string().required(),
+      details:          a.string(),
+      screenshotKeys:   a.string().array(),
+      status:           a.enum(['NEW', 'IN_PROGRESS', 'DONE']),
+      submittedBy:      a.string(),
+      submittedByName:  a.string(),
+      adminNotes:       a.string(),
+      resolvedAt:       a.string(),
+    })
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [
+      allow.authenticated().to(['create', 'read', 'update']),
+    ]),
+
   // ── Fuel transactions ──────────────────────────────────────────────────────
   // Imported from EFS Transaction Reports. One record per line item.
   // Covers fuel (ULSD/DEFD), scale fees (SCLE), cash advances (CASH), and others.
@@ -4094,17 +4123,25 @@ const schema = a.schema({
       bearing:     a.float(),
       speed:       a.float(),
       description: a.string(),
-      source:      a.string().required(),   // 'motive'
+      source:      a.string().required(),   // 'motive' · 'blueink' · load pings: 'link' 'sms-share' 'sms-geocode' 'provider:<key>'
       syncedAt:    a.datetime().required(),
+      // ── Step AO: load-keyed breadcrumbs share this table (truckId = 'load:<loadId>') ──
+      loadId:      a.string(),    // set on load-keyed rows; null on Motive / Blue Ink rows
+      accuracyM:   a.integer(),   // reported horizontal accuracy; for approx fixes, the radius of the guess
+      approx:      a.boolean(),   // true = geocoded from free text, never a GPS reading
+      refId:       a.string(),    // provider event id / Twilio MessageSid — audit and idempotency, never shown
+      ttlEpoch:    a.integer(),   // epoch SECONDS; DynamoDB TTL (backend.ts). Absent on Motive / Blue Ink rows
+      payload:     a.json(),      // route-cache rows only: { encoded, meters, seconds, source, fetchedAt, key, waypoints }
     })
     .identifier(['truckId', 'locatedAt'])
     .secondaryIndexes((index) => [
       index('truckId').sortKeys(['locatedAt']),
     ])
-    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
-    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
-    .disableOperations(['subscriptions'])
-    .authorization((allow) => [allow.authenticated()]),
+    // Nothing writes this model through GraphQL (the sync Lambdas and the public tracking
+    // Lambda use the DynamoDB SDK), and a customer-visible breadcrumb must not be forgeable
+    // by a signed-in user: no subscriptions and no create/update/delete resolvers.
+    .disableOperations(['subscriptions', 'create', 'update', 'delete'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
 
   // ── Open engine fault codes (DTCs) from Motive ────────────────────────────
   // One record per truck per open Motive fault code, refreshed hourly by the

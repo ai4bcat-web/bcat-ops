@@ -2,6 +2,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { batchShipmentTask, type BatchShipmentDeps } from './batch'
 import type { Caller } from '../_shared/actionInputs'
+import { releaseGateError } from '../../../src/lib/releaseGate'
 
 const caller: Caller = { email: 'admin@test.com', sub: 'admin', groups: ['ADMIN'], isAdmin: true }
 function dependencies(): BatchShipmentDeps {
@@ -13,6 +14,7 @@ function dependencies(): BatchShipmentDeps {
       if (input.orderId === 'order-b') throw new Error('Not ready for accounting: Missing document: POD')
     },
     setSalesRep: vi.fn(), setRevTag: vi.fn(), assignCarrierRep: vi.fn(), setStatus: vi.fn(), writeAudit: vi.fn(),
+    pushToReview: vi.fn(async () => ({ reasons: [], already: false })),
     getLoadsOf: vi.fn(async () => []),
     assignAsset: vi.fn(),
   }
@@ -21,7 +23,7 @@ function dependencies(): BatchShipmentDeps {
 describe('batchShipmentTask', () => {
   it('continues after a gate refusal and retains every input position, including duplicates and missing ids', async () => {
     const deps = dependencies()
-    const result = await batchShipmentTask(deps, { task: 'RELEASE_TO_BILLING', shipmentIds: ['a', 'b', 'missing', 'a', 'c'] }, caller)
+    const result = await batchShipmentTask(deps, { task: 'RELEASE_TO_BILLING', shipmentIds: ['a', 'b', 'missing', 'a', 'c'], params: { review: { source: 'LOAD_REVIEW' } } }, caller)
     expect(result.results).toEqual([
       { shipmentId: 'a', number: 'S-a', ok: true, message: null },
       { shipmentId: 'b', number: 'S-b', ok: false, message: 'Not ready for accounting: Missing document: POD' },
@@ -30,7 +32,7 @@ describe('batchShipmentTask', () => {
       { shipmentId: 'c', number: 'S-c', ok: true, message: null },
     ])
     expect(deps.writeAudit).toHaveBeenCalledWith('SHIPMENT', 'BATCH', 'BATCH_SHIPMENT_TASK', caller, {
-      task: 'RELEASE_TO_BILLING', count: 5, okCount: 3, failCount: 2,
+      task: 'RELEASE_TO_BILLING', count: 5, okCount: 3, failCount: 2, review: true,
     })
   })
 
@@ -47,18 +49,14 @@ describe('batchShipmentTask', () => {
     })
   })
 
-  it('ignores a review marker that is not the literal one, so the release is an ordinary release', async () => {
-    for (const review of [true, 'LOAD_REVIEW', { source: 'OTHER' }]) {
+  it('refuses a release that does not carry the literal Load Review marker', async () => {
+    for (const review of [undefined, true, 'LOAD_REVIEW', { source: 'OTHER' }]) {
       const deps = dependencies()
       deps.releaseToBilling = vi.fn(async () => undefined)
-      await batchShipmentTask(deps, { task: 'RELEASE_TO_BILLING', shipmentIds: ['a'], params: { review } }, caller)
-      expect(deps.releaseToBilling).toHaveBeenCalledWith(
-        { shipmentId: 'a', orderId: 'order-a', expectedUpdatedAt: '2026-10-29T00:00:00Z' },
-        caller,
-      )
-      expect(deps.writeAudit).toHaveBeenCalledWith('SHIPMENT', 'BATCH', 'BATCH_SHIPMENT_TASK', caller, {
-        task: 'RELEASE_TO_BILLING', count: 1, okCount: 1, failCount: 0,
-      })
+      await expect(
+        batchShipmentTask(deps, { task: 'RELEASE_TO_BILLING', shipmentIds: ['a'], params: review === undefined ? {} : { review } }, caller),
+      ).rejects.toThrow('Load Review only')
+      expect(deps.releaseToBilling).not.toHaveBeenCalled()
     }
   })
 
@@ -75,6 +73,53 @@ describe('batchShipmentTask', () => {
       await expect(batchShipmentTask(deps, { task: 'SET_REV_DIVISION', shipmentIds }, caller)).rejects.toThrow(/at least one|at most 100/)
     }
     expect(deps.setRevTag).not.toHaveBeenCalled()
+  })
+
+  describe('Load Review batches (Step AP)', () => {
+    const ids = (n: number) => Array.from({ length: n }, (_, i) => `s${i}`)
+
+    it('accepts nine and refuses the tenth for a push and for a release, before any row runs', async () => {
+      const deps = dependencies()
+      deps.pushToReview = vi.fn(async () => ({ reasons: [], already: false }))
+      deps.releaseToBilling = vi.fn(async () => undefined)
+      const review = { review: { source: 'LOAD_REVIEW' } }
+      expect((await batchShipmentTask(deps, { task: 'PUSH_TO_LOAD_REVIEW', shipmentIds: ids(9) }, caller)).results).toHaveLength(9)
+      expect((await batchShipmentTask(deps, { task: 'RELEASE_TO_BILLING', shipmentIds: ids(9), params: review }, caller)).results).toHaveLength(9)
+      vi.mocked(deps.pushToReview).mockClear()
+      vi.mocked(deps.releaseToBilling).mockClear()
+      await expect(batchShipmentTask(deps, { task: 'PUSH_TO_LOAD_REVIEW', shipmentIds: ids(10) }, caller)).rejects.toThrow('at most 9')
+      await expect(batchShipmentTask(deps, { task: 'RELEASE_TO_BILLING', shipmentIds: ids(10), params: review }, caller)).rejects.toThrow('at most 9')
+      expect(deps.pushToReview).not.toHaveBeenCalled()
+      expect(deps.releaseToBilling).not.toHaveBeenCalled()
+    })
+
+    it('reports a refused push per row with its reasons and still pushes the clean rows', async () => {
+      const deps = dependencies()
+      deps.pushToReview = vi.fn(async (id) => (id === 'b'
+        ? { reasons: ['Missing sales rep', 'POD not received'], already: false }
+        : { reasons: [], already: id === 'c' }))
+      const { results } = await batchShipmentTask(deps, { task: 'PUSH_TO_LOAD_REVIEW', shipmentIds: ['a', 'b', 'c'] }, caller)
+      expect(results).toEqual([
+        { shipmentId: 'a', number: 'S-a', ok: true, message: null },
+        { shipmentId: 'b', number: 'S-b', ok: false, message: 'Missing sales rep; POD not received', reasons: ['Missing sales rep', 'POD not received'] },
+        { shipmentId: 'c', number: 'S-c', ok: true, message: 'Already in Load Review' },
+      ])
+      expect(deps.writeAudit).toHaveBeenCalledWith('SHIPMENT', 'BATCH', 'BATCH_SHIPMENT_TASK', caller, {
+        task: 'PUSH_TO_LOAD_REVIEW', count: 3, okCount: 2, failCount: 1,
+      })
+    })
+
+    it('carries a release refusal as a per-row reason list', async () => {
+      const deps = dependencies()
+      deps.releaseToBilling = async () => {
+        throw releaseGateError([
+          { code: 'DOC_MISSING', detail: 'POD', message: 'Missing document: POD' },
+          { code: 'DRIVER_MISSING', detail: null, message: 'No driver' },
+        ])
+      }
+      const { results } = await batchShipmentTask(deps, { task: 'RELEASE_TO_BILLING', shipmentIds: ['a'], params: { review: { source: 'LOAD_REVIEW' } } }, caller)
+      expect(results[0]).toMatchObject({ ok: false, reasons: ['Missing document: POD', 'No driver'] })
+    })
   })
 
   it('sends each row its own version token when it sets a status', async () => {

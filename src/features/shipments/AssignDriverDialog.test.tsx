@@ -9,6 +9,7 @@ import type { ShipmentLoad } from '@/types/tms'
 
 class ResizeObserverStub { observe() {} unobserve() {} disconnect() {} }
 globalThis.ResizeObserver ??= ResizeObserverStub as unknown as typeof ResizeObserver
+vi.mock('@/hooks/useTruckConfigs', () => ({ useTruckConfigs: () => ({ byId: new Map() }) }))
 
 const driver = (over: Partial<Driver>): Driver => ({
   id: 'd', name: 'D', phone: '', active: true, onTollwayAccount: false, ...over,
@@ -52,12 +53,16 @@ const confirm = () => screen.getByRole('button', { name: /Book own fleet|Change 
 afterEach(() => { vi.useRealTimers() })
 
 describe('AssignDriverDialog', () => {
-  it('offers only active, non-broker drivers', () => {
+  it('lists the active, non-broker drivers by name with their truck and trailer, and nothing else', () => {
     renderDialog()
     const names = Array.from(select().querySelectorAll('option')).map((o) => o.textContent)
-    expect(names).toContain('Pavel Ivanov')
-    expect(names).not.toContain('BROKER COVERED')
-    expect(names).not.toContain('Armando Aranda')
+    expect(names).toEqual(['— select —', 'Ann Lee · Truck T-310', 'Pavel Ivanov · Truck T-204 · Trailer TR-19'])
+  })
+
+  it('has no way to type a driver: the driver control is a select', () => {
+    renderDialog()
+    expect(select().tagName).toBe('SELECT')
+    expect(screen.queryByRole('textbox', { name: 'Driver' })).toBeNull()
   })
 
   it('pre-fills the driver\'s truck and trailer until the user touches them', () => {

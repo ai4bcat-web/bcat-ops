@@ -204,6 +204,8 @@ export interface CustomerRecord {
   creditLimitCents?: number | null
   creditHoldFlag?: boolean | null
   requiredDocsForInvoice?: string[] | null
+  /** Step AP: Load Review requirements for this customer; null = the org default. */
+  reviewRequirements?: string[] | null
   defaultDivisionKey?: string | null
   defaultSalesRepId?: string | null
   aliases?: string[] | null
@@ -404,6 +406,8 @@ export interface TmsSettings {
   requireCustomerApproval?: boolean | null
 
   defaultRequiredDocs?: string[] | null
+  /** Step AP: org default Load Review requirements; null = the built-in seven. */
+  reviewRequirements?: string[] | null
   defaultRequiredReferences?: RequiredReference[] | null
   chargeCodes?: ChargeCodeDef[] | null
   rateConTerms?: string | null
@@ -1760,6 +1764,9 @@ export interface ShipmentRecord {
   legacyImported?: boolean | null
   legacySource?: LegacySource | null
   importRunId?: string | null
+  /** Step AP: set when the shipment was pushed into Load Review from the board. */
+  loadReviewPushedAt?: string | null
+  loadReviewPushedBy?: string | null
   /**
    * Aljex codes stored verbatim by the import so Settings > Users can map them to people later
    * (`AljexCodeMap`). `salesRepId` stays null until a mapping is applied.
@@ -2120,12 +2127,15 @@ export type BatchShipmentTask =
   | 'SET_CARRIER_REP'
   | 'SET_STATUS'
   | 'ASSIGN_DRIVER'
+  | 'PUSH_TO_LOAD_REVIEW'
 
 export interface BatchShipmentTaskRowResult {
   shipmentId: string
   number: string | null
   ok: boolean
   message: string | null
+  /** Step AP: per-row reasons a push or release was refused (one sentence each); absent on success. */
+  reasons?: string[]
 }
 
 export interface BatchShipmentTaskResult {
@@ -2591,7 +2601,7 @@ export interface LoadCheckCallRecord {
   updatedAt?: string
 }
 
-export type TrackingLinkKind = 'CARRIER_PING' | 'CUSTOMER_VIEW' | 'CARRIER_UPLOAD'
+export type TrackingLinkKind = 'CARRIER_PING' | 'CUSTOMER_VIEW' | 'CARRIER_UPLOAD' | 'PROVIDER_TRACK'
 export type TrackingLinkStatus = 'ACTIVE' | 'REVOKED' | 'EXPIRED'
 export type TrackingLinkChannel = 'SMS' | 'EMAIL' | 'COPY'
 
@@ -2638,6 +2648,13 @@ export interface TrackingLinkRecord {
   uploadCount?: number | null
   lastUploadAt?: string | null
   neededTypes?: string[] | null
+  // ── Step AO block ──────────────────────────────────────────────────────
+  /** PROVIDER_TRACK: registry key, e.g. 'MACROPOINT'. */
+  provider?: string | null
+  /** PROVIDER_TRACK: the provider's id for the subscription ('stub:<token8>' while STUB). */
+  providerRef?: string | null
+  /** CARRIER_PING: when the driver ticked the consent box (server clock). */
+  consentAt?: string | null
   createdBy: string
   createdAt?: string
   updatedAt?: string
@@ -2693,6 +2710,8 @@ export interface CustomerTrackingView {
   eta: string | null
   /** Rounded to three decimals (~100 m). Absent when the link hides position. */
   position?: TrackingViewPosition
+  /** Step AO. Present only when the link shows position: stops, cached route, thinned trail. */
+  map?: CustomerTrackingMap
   lastUpdate: { at: string; type: CheckCallType } | null
   /** Name only, and only when the link was minted with `showCarrier`. */
   carrier?: { name: string }
@@ -2707,6 +2726,26 @@ export interface TrackingViewPing {
   accuracyM: number | null
 }
 
+/** Step AO: the customer's map. 3 dp, thinned, no source / accuracy / speed anywhere. */
+export interface CustomerTrackingMap {
+  stops: Array<{ type: 'pickup' | 'delivery' | 'stop'; lat: number; lng: number }>
+  /** Encoded polyline from the cached route row; null when never computed. */
+  route: string | null
+  trail: Array<{ lat: number; lng: number; at: string; approx?: true }>
+}
+
+/** Step AO: what the driver's page needs to share location with consent. */
+export interface CarrierShareView {
+  everyMin: number
+  consentRequired: boolean
+  consentVersion: string
+  consentText: string
+  /** False once the load is closed. */
+  active: boolean
+  lastPingAt: string | null
+  pingCount: number
+}
+
 /** What the driver's ping link shows. No customer, no money. */
 export interface CarrierTrackingView {
   loadNumber: string
@@ -2716,6 +2755,8 @@ export interface CarrierTrackingView {
   nextStop: TrackingViewStop | null
   /** The pings this link itself sent, so the driver sees the tap landed. */
   pings: TrackingViewPing[]
+  /** Step AO. */
+  share?: CarrierShareView
   contactPhone: string | null
   generatedAt: string
 }

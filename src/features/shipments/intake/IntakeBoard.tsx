@@ -3,6 +3,9 @@
  * partially built loads. One tab per active division (+ Unrouted), status chips, a table; a row
  * opens the review page.
  */
+import { BatchActionBar } from '../board/BatchActionBar'
+import { outcomesFromServer, selectAllUpToCap, toggleSelection, type BatchOutcome } from '../batchReview'
+import { batchShipmentTask } from '@/lib/apiClient'
 import { useCallback, useMemo, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { Mail, Truck } from 'lucide-react'
@@ -72,6 +75,10 @@ export function IntakeBoard() {
   const { user } = useAuth()
   const [params, setParams] = useSearchParams()
   const [filters, setFilters] = useState<DenseFilters>({})
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const [capRefusal, setCapRefusal] = useState<string | null>(null)
+  const [outcomes, setOutcomes] = useState<BatchOutcome[] | undefined>()
+  const [pushing, setPushing] = useState(false)
   const { divisions } = useOwnershipDivisions()
   const { isOwnerOrAdmin } = useIntakePermissions()
 
@@ -233,6 +240,43 @@ export function IntakeBoard() {
     }
   }
 
+  const toggleRow = (id: string) => {
+    const next = toggleSelection(selectedIds, id)
+    setSelectedIds(next.ids)
+    setCapRefusal(next.refusal)
+  }
+
+  // Push to Load Review acts on the shipment an intake row became. An intake row that has not
+  // become one yet is refused with the reason; the server then decides each shipment itself.
+  async function pushSelected() {
+    const picked = sortedRows.filter((r) => selectedIds.includes(r.id))
+    if (picked.length === 0) return
+    setPushing(true)
+    setOutcomes(undefined)
+    const unlinked: BatchOutcome[] = picked
+      .filter((r) => !r.shipmentId)
+      .map((r) => ({ rowId: r.id, rowLabel: r.subject || r.fromEmail, ok: false, reasons: ['No shipment yet: create the shipment first'] }))
+    const linked = picked.filter((r) => r.shipmentId)
+    let sent: BatchOutcome[] = []
+    if (linked.length > 0) {
+      const byShipment = new Map(linked.map((r) => [r.shipmentId as string, r]))
+      try {
+        const res = await batchShipmentTask({ task: 'PUSH_TO_LOAD_REVIEW', shipmentIds: linked.map((r) => r.shipmentId as string), params: {} })
+        sent = outcomesFromServer(res.results, (id, fallback) => byShipment.get(id)?.shipmentNumber ?? fallback ?? id)
+          .map((o) => ({ ...o, rowId: byShipment.get(o.rowId)?.id ?? o.rowId }))
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Batch failed'
+        sent = linked.map((r) => ({ rowId: r.id, rowLabel: r.shipmentNumber ?? r.id, ok: false, reasons: [message] }))
+      }
+    }
+    const all = [...unlinked, ...sent]
+    setOutcomes(all)
+    setPushing(false)
+    const failedIds = new Set(all.filter((o) => !o.ok).map((o) => o.rowId))
+    setSelectedIds((prev) => prev.filter((id) => failedIds.has(id)))
+    setCapRefusal(null)
+  }
+
   const noAddress = division != null && !division.intakeEmail
   const emptyBody = noAddress ? (
     <TmsEmptyState
@@ -298,6 +342,15 @@ export function IntakeBoard() {
       ) : null}
       {shown.error ? <TmsAlert tone="red" title="Could not load intake">{shown.error}</TmsAlert> : null}
       <DenseKpiStrip open={prefs.kpiOpen} items={kpis} />
+      <BatchActionBar
+        actionLabel="Push to Load Review"
+        selectedCount={selectedIds.length}
+        running={pushing}
+        refusal={capRefusal}
+        outcomes={outcomes}
+        onRun={() => void pushSelected()}
+        onClear={() => { setSelectedIds([]); setCapRefusal(null); setOutcomes(undefined) }}
+      />
       <div className="tms-dense-body">
         <DenseGrid<IntakeLoadRecord>
           aria-label="Intake"
@@ -307,6 +360,14 @@ export function IntakeBoard() {
           rows={sortedRows}
           fitRows={rows}
           rowKey={(r) => r.id}
+          selectable
+          selectedIds={new Set(selectedIds)}
+          onToggle={toggleRow}
+          onToggleAll={() => {
+            const next = selectAllUpToCap(selectedIds, sortedRows.map((r) => r.id))
+            setSelectedIds(next.ids)
+            setCapRefusal(next.refusal)
+          }}
           renderCell={renderCell}
           density={prefs.density}
           userWidths={prefs.widths}

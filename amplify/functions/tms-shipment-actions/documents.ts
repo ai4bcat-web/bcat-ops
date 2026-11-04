@@ -59,6 +59,7 @@ import {
   documentKey,
   documentPrefix,
   driverDocumentId,
+  countsAsPresent,
   evaluateDocGate,
   gateLoadIds,
   generatedFilename,
@@ -70,6 +71,7 @@ import {
 import { loadReleaseGateInput } from '../_shared/releaseGateInput'
 import { evaluateReleaseGate, releaseGateError, type ReleaseGateResult } from '../../../src/lib/releaseGate'
 import { evaluateLoadReview, loadReviewExtras, loadReviewRefusal, type LoadReviewReason } from '../../../src/lib/loadReview'
+import { profitFromFacts, resolveReviewRequirements, type ReviewFacts, type ReviewRequirement } from '../../../src/lib/reviewRequirements'
 import {
   isCustomerUnresolved,
   unresolvedCustomerMessage,
@@ -877,7 +879,7 @@ export async function readyToInvoice(
   if (review) {
     // Load Review adds three refusals the gate does not own. A gate failure and an
     // extras failure are one error so the reviewer sees everything at once.
-    const extras = reviewExtras(bundle.shipment, order)
+    const extras = reviewExtras(bundle, order, customer, settings)
     if (!release.ok || extras.length > 0) throw loadReviewRefusal([...release.missing, ...extras])
   } else if (!release.ok) {
     throw releaseGateError(release.missing)
@@ -966,16 +968,63 @@ export async function computeReleaseGate(
   )
 }
 
+/** The customer's Load Review list, then the org default, then the built-in seven. */
+function reviewRequirementsFor(customer: Row | null, settings: Row | null): ReviewRequirement[] {
+  return resolveReviewRequirements(
+    Array.isArray(customer?.reviewRequirements) ? (customer.reviewRequirements as string[]) : null,
+    Array.isArray(settings?.reviewRequirements) ? (settings.reviewRequirements as string[]) : null,
+  )
+}
+
+/** What the requirements are checked against, read from the rows this Lambda holds. */
+function reviewFacts(bundle: Bundle, order: Row): ReviewFacts {
+  const references = Array.isArray(order.references) ? (order.references as Row[]) : []
+  const revenueCents = numberOrNull(order.revenueCents)
+  const expenseCents = bundle.financials.reduce((sum, row) => sum + (numberOrNull(row.costCents) ?? 0), 0)
+  const shipment = bundle.shipment
+  return {
+    revDivision: typeof shipment.revDivision === 'string' ? shipment.revDivision : null,
+    salesRepId: typeof shipment.salesRepId === 'string' ? shipment.salesRepId : null,
+    referenceNumber: references.map((ref) => (typeof ref?.value === 'string' ? ref.value : '')).find((value) => value.trim().length > 0) ?? null,
+    podReceived: bundle.documents.some((doc) => doc.type === 'POD' && countsAsPresent(doc as unknown as ShipmentDocumentRecord)),
+    revenueCents,
+    expenseCents,
+    profitCents: profitFromFacts(revenueCents, expenseCents),
+  }
+}
+
 /** The review extras, typed from the raw rows. Imported history is exempt inside the lib. */
-function reviewExtras(shipment: Row, order: Row): LoadReviewReason[] {
+function reviewExtras(bundle: Bundle, order: Row, customer: Row | null, settings: Row | null, gateOwnsPod = true): LoadReviewReason[] {
   return loadReviewExtras({
-    shipment: {
-      salesRepId: typeof shipment.salesRepId === 'string' ? shipment.salesRepId : null,
-      revDivision: typeof shipment.revDivision === 'string' ? shipment.revDivision : null,
-      legacyImported: shipment.legacyImported === true,
-    },
-    order: { revenueCents: numberOrNull(order.revenueCents) },
+    shipment: { legacyImported: bundle.shipment.legacyImported === true },
+    facts: reviewFacts(bundle, order),
+    // The release gate already refuses on a missing POD (with its own sentence); a push has no gate.
+    requirements: reviewRequirementsFor(customer, settings).filter((key) => !gateOwnsPod || key !== 'podReceived'),
   })
+}
+
+/**
+ * PUSH_TO_LOAD_REVIEW's verdict for one shipment: the same requirement list and the same
+ * extras REVIEW_LOAD and the review release read, plus the states that make a push
+ * meaningless. `reasons` empty means the push may proceed.
+ */
+export async function pushToReviewVerdict(deps: DocumentDeps, shipmentId: string): Promise<{ shipment: Row; reasons: string[] }> {
+  const bundle = await readBundle(deps.store, shipmentId)
+  const shipment = bundle.shipment
+  if (shipment.voidedAt || shipment.deletedAt) return { shipment, reasons: ['Voided shipment'] }
+  if (shipment.status === 'CANCELED') return { shipment, reasons: ['Canceled shipment'] }
+  const order = bundle.orders[0]
+  if (!order) return { shipment, reasons: ['Shipment has no order to review'] }
+  if (order.arStatus !== 'DOCS_NEEDED') return { shipment, reasons: [`Already released (${String(order.arStatus ?? 'unset')})`] }
+  const settings = await getSettings(deps)
+  const customerId = String(order.customerId ?? '')
+  const customer = customerId && deps.customerTable ? await getById(deps.store.db, deps.customerTable, customerId) : null
+  const reasons: string[] = []
+  if (isCustomerUnresolved(order as unknown as CustomerResolvable)) {
+    reasons.push(unresolvedCustomerMessage(order as unknown as CustomerResolvable, 'pushing it to Load Review'))
+  }
+  reasons.push(...reviewExtras(bundle, order, customer, settings, false).map((item) => item.message))
+  return { shipment, reasons }
 }
 
 /** Only the literal `{ source: 'LOAD_REVIEW' }` counts; anything else is an ordinary release. */
@@ -1002,7 +1051,7 @@ export async function reviewLoad(deps: DocumentDeps, input: Row): Promise<Row> {
     ? await getById(deps.store.db, deps.customerTable, customerId)
     : null
   const releaseGate = await computeReleaseGate(deps, order, bundle, customer, settings)
-  const extras = reviewExtras(bundle.shipment, order)
+  const extras = reviewExtras(bundle, order, customer, settings)
   return {
     shipmentId,
     orderId: String(order.id),

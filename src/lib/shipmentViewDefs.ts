@@ -315,7 +315,7 @@ export function matchesBoardFilters<R extends BoardFilterableRow>(row: R, set: B
 
 /** Aljex Active Shipments default column order. */
 export const ALJEX_COLUMN_KEYS = [
-  'exceptions', 'status', 'proNumber', 'massRelease', 'equip', 'customerReference', 'description',
+  'exceptions', 'status', 'proNumber', 'equip', 'customerReference', 'description',
   'revenueType', 'salesRep', 'customerName', 'carrier', 'carrierAssignment', 'customerTotalRate', 'carrierTotalRates',
   'grossProfit', 'netMargin', 'pickupShip', 'originCity', 'destinationCity', 'deliveryAppt', 'stops',
   'driver', 'truck', 'arStatus', 'apStatus', 'lastUpdateAt', 'nextCheckCallAt', 'mode', 'docsMissing',
@@ -329,7 +329,7 @@ export const ALJEX_COLUMN_KEYS = [
  */
 export const BOARD_COLUMN_KEYS = [
   // The original MVMNT and Aljex-board columns, in the catalog's order.
-  'number', 'exceptions', 'status', 'proNumber', 'massRelease', 'equip', 'customerReference',
+  'number', 'exceptions', 'status', 'proNumber', 'equip', 'customerReference',
   'description', 'revenueType', 'salesRep', 'tracker', 'customerName', 'carrier', 'customerTotalRate',
   'carrierTotalRates', 'grossProfit', 'netMargin', 'pickupShip', 'originCity', 'destinationCity',
   'pickupAppt', 'deliveryAppt', 'stops', 'salesRepId', 'division', 'driver', 'truck', 'arStatus',

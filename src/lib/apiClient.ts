@@ -8,6 +8,7 @@ import type { McpReviewCard } from '@/lib/integrations/mcpReview'
 import type { Equipment, MaintenanceTask, MaintenanceInvoice } from '@/types/equipment'
 import { fuelDedupKey } from '@/lib/driverFuel'
 import { fileContentType } from '@/lib/disputeFiles'
+import { fixOfRow, loadPingKey, type TrackingFix } from '@/lib/trackingPings'
 import type { FixedExpenseInput } from './driverPay'
 import type { DispatchConversation, DispatchMessage } from './dispatch'
 import type { VendorPayable, VendorApAttachment, VendorPayableDetails, VendorPayment } from '@/types/vendorAp'
@@ -1310,6 +1311,9 @@ let customersHaveV6 = true
 // Aljex-exit: the legacy flag (imported, terms/credit not reviewed yet).
 const CUSTOMER_V7_FIELDS = ['legacyImported', 'legacySource']
 let customersHaveV7 = true
+// Step AP: the per-customer Load Review requirements.
+const CUSTOMER_V8_FIELDS = ['reviewRequirements']
+let customersHaveV8 = true
 const customerFields = () => [
   CUSTOMER_FIELDS_BASE,
   customersHaveV2 ? CUSTOMER_V2_FIELDS.join(' ') : '',
@@ -1318,6 +1322,7 @@ const customerFields = () => [
   customersHaveV5 ? CUSTOMER_V5_FIELDS.join(' ') : '',
   customersHaveV6 ? CUSTOMER_V6_FIELDS.join(' ') : '',
   customersHaveV7 ? CUSTOMER_V7_FIELDS.join(' ') : '',
+  customersHaveV8 ? CUSTOMER_V8_FIELDS.join(' ') : '',
 ].filter(Boolean).join(' ')
 
 const LOCATION_FIELDS = `
@@ -1412,6 +1417,8 @@ const TMS_SETTINGS_V14_FIELDS = [
 ]
 // Step V: the tracking automation policy. Its own flag again, for the same reason.
 const TMS_SETTINGS_V15_FIELDS = ['trackingAutomation']
+// Step AP: the org default Load Review requirements. Its own flag again, for the same reason.
+const TMS_SETTINGS_V16_FIELDS = ['reviewRequirements']
 const TMS_SETTINGS_JSON_FIELDS: (keyof TmsSettings)[] = ['accessorialCodes', 'loadStatusRules', 'defaultRequiredReferences', 'chargeCodes', 'quickPayTiers', 'trackingContact', 'factorRemitTo', 'teams', 'commissionPlans', 'commissionPaySchedule', 'postalCodeAliases', 'aiAgents', 'marginTargetBpsByMode', 'defaultCheckCallPlan', 'brandSenders', 'whiteLabel', 'customerPortalDefaults', 'customerTags', 'rateConTemplate', 'carrierAgreementTemplate', 'consolidationRules', 'notificationSubscriptions', 'notificationWebhooks', 'notificationDefaults', 'paymentTerms', 'trackingAutomation']
 let settingsHaveV2 = true
 let settingsHaveV3 = true
@@ -1427,6 +1434,7 @@ let settingsHaveV12 = true
 let settingsHaveV13 = true
 let settingsHaveV14 = true
 let settingsHaveV15 = true
+let settingsHaveV16 = true
 const tmsSettingsFields = () => [
   TMS_SETTINGS_FIELDS_BASE,
   settingsHaveV2 ? TMS_SETTINGS_V2_FIELDS.join(' ') : '',
@@ -1443,6 +1451,7 @@ const tmsSettingsFields = () => [
   settingsHaveV13 ? TMS_SETTINGS_V13_FIELDS.join(' ') : '',
   settingsHaveV14 ? TMS_SETTINGS_V14_FIELDS.join(' ') : '',
   settingsHaveV15 ? TMS_SETTINGS_V15_FIELDS.join(' ') : '',
+  settingsHaveV16 ? TMS_SETTINGS_V16_FIELDS.join(' ') : '',
 ].filter(Boolean).join(' ')
 const fieldNamed = (names: string[], err: unknown) => {
   const msg = safeStringify(err)
@@ -1538,7 +1547,12 @@ async function fetchAllCustomers(): Promise<CustomerRecord[]> {
       const rows = await run()
       return rows
     } catch (err) {
-      if (attempt >= 7) throw err
+      if (attempt >= 8) throw err
+      if (customersHaveV8 && fieldNamed(CUSTOMER_V8_FIELDS, err)) {
+        console.warn('[apiClient] backend has no Customer review requirements yet — querying without them until deploy')
+        customersHaveV8 = false
+        continue
+      }
       if (customersHaveV7 && fieldNamed(CUSTOMER_V7_FIELDS, err)) {
         console.warn('[apiClient] backend has no Customer legacy flag yet — querying without it until deploy')
         customersHaveV7 = false
@@ -1651,7 +1665,12 @@ export async function getTmsSettings(): Promise<TmsSettings | null> {
     try {
       return await run()
     } catch (err) {
-      if (attempt >= 14) throw err
+      if (attempt >= 15) throw err
+      if (settingsHaveV16 && fieldNamed(TMS_SETTINGS_V16_FIELDS, err)) {
+        console.warn('[apiClient] backend has no Load Review requirement settings yet — querying without them until deploy')
+        settingsHaveV16 = false
+        continue
+      }
       if (settingsHaveV15 && fieldNamed(TMS_SETTINGS_V15_FIELDS, err)) {
         console.warn('[apiClient] backend has no tracking automation settings yet — querying without them until deploy')
         settingsHaveV15 = false
@@ -2158,6 +2177,9 @@ function withParsedPrefs<T>(result: T): T {
 // Aljex-exit: verbatim Aljex codes (mapped to people in Settings > Users) and the OSD flag.
 const SHIPMENT_ALJEX_FIELDS = ['salesRepCode', 'createdByCode', 'serviceRepCode', 'dispatcherCode', 'osd']
 let shipmentsHaveAljexCodes = true
+// Step AP: the Load Review push stamp. Own flag, same reason.
+const SHIPMENT_REVIEW_PUSH_FIELDS = ['loadReviewPushedAt', 'loadReviewPushedBy']
+let shipmentsHaveReviewPush = true
 
 /** Every Shipment read, with each newer group dropped and retried if the backend predates it. */
 async function readShipments<T>(run: (fields: string) => Promise<T>): Promise<T> {
@@ -2173,8 +2195,14 @@ async function readShipments<T>(run: (fields: string) => Promise<T>): Promise<T>
         shipmentsHaveAssignment ? SHIPMENT_ASSIGNMENT_FIELDS.join(' ') : '',
         shipmentsHaveIntake ? SHIPMENT_INTAKE_FIELDS.join(' ') : '',
         shipmentsHaveAljexCodes ? SHIPMENT_ALJEX_FIELDS.join(' ') : '',
+        shipmentsHaveReviewPush ? SHIPMENT_REVIEW_PUSH_FIELDS.join(' ') : '',
       ].filter(Boolean).join(' ')))
     } catch (err) {
+      if (shipmentsHaveReviewPush && fieldNamed(SHIPMENT_REVIEW_PUSH_FIELDS, err)) {
+        console.warn('[apiClient] backend has no Load Review push stamp on Shipment yet — querying without it until deploy')
+        shipmentsHaveReviewPush = false
+        continue
+      }
       if (shipmentsHaveAljexCodes && fieldNamed(SHIPMENT_ALJEX_FIELDS, err)) {
         console.warn('[apiClient] backend has no Aljex code fields on Shipment yet — querying without them until deploy')
         shipmentsHaveAljexCodes = false
@@ -2920,6 +2948,18 @@ export interface BatchShipmentTaskInput {
 }
 export async function batchShipmentTask(input: BatchShipmentTaskInput): Promise<BatchShipmentTaskResult> {
   return shipmentAction<BatchShipmentTaskResult>('BATCH_SHIPMENT_TASK', input)
+}
+
+// ── Step AP — board push to Load Review, Load Review batch release ───────────
+// Both are BATCH_SHIPMENT_TASK rows with per-row results (`ok`, `message`, `reasons`).
+// The server refuses more than MAX_REVIEW_BATCH ids with a thrown error.
+/** Push shipments into Load Review. A row that misses the customer's requirements comes back `ok: false` with `reasons`. */
+export async function pushToLoadReview(shipmentIds: string[]): Promise<BatchShipmentTaskResult> {
+  return batchShipmentTask({ task: 'PUSH_TO_LOAD_REVIEW', shipmentIds })
+}
+/** Load Review's release to billing; the marker is what makes the server run the review gate. Reviewer grant only. */
+export async function releaseFromLoadReview(shipmentIds: string[]): Promise<BatchShipmentTaskResult> {
+  return batchShipmentTask({ task: 'RELEASE_TO_BILLING', shipmentIds, params: { review: { source: 'LOAD_REVIEW' } } })
 }
 
 export type StopOp =
@@ -3767,6 +3807,8 @@ export interface BookCarrierInput {
   dispatcherName?: string | null
   dispatcherPhone?: string | null
   dispatcherEmail?: string | null
+  /** Ivan Cartage only (Step AQ): the roster driver id; a typed name is refused. */
+  driverId?: string | null
   driverName?: string | null
   driverPhone?: string | null
   driver2Name?: string | null
@@ -3850,6 +3892,7 @@ const TRACKING_LINK_FIELDS = `
   sentTo sentVia sentAt smsMessageId contactName contactEmail contactPhone
   showCarrier showPosition openCount lastOpenedAt requestCount
   pingCount lastPingAt lastPingLat lastPingLng lastPingAccuracyM
+  provider providerRef consentAt
   revokedAt revokedBy createdBy createdAt updatedAt
 `
 // Step E's carrier upload portal counts its files on the link row. Its own flag, as
@@ -4179,6 +4222,52 @@ export async function listTruckPositions(truckId: string, from: string, to: stri
     sortDirection: 'ASC',
   })
 }
+
+// ── Step AO block: load breadcrumbs, the planned route, provider tracking ───────
+
+/** The load-keyed columns Step AO adds to TruckLocationHistory. */
+const LOAD_BREADCRUMB_FIELDS = 'truckId unitNumber lat lon bearing speed locatedAt description source syncedAt loadId accuracyM approx'
+
+/**
+ * Every position filed against one load inside a window (driver link, shared pin,
+ * geocoded reply, provider), oldest → newest. Motive / Blue Ink rows are NOT here —
+ * they are read by the leg's truck through `listTruckPositions`.
+ */
+export async function listLoadBreadcrumbs(loadId: string, from: string, to: string): Promise<TrackingFix[]> {
+  const rows = await listTrackingIndex<Record<string, unknown>>({
+    name: 'listTruckLocationHistoryByTruckIdAndLocatedAt',
+    decls: '$truckId: String!, $from: String!, $to: String!',
+    args: 'truckId: $truckId, locatedAt: { between: [$from, $to] }',
+    variables: { truckId: loadPingKey(loadId), from, to },
+    fields: LOAD_BREADCRUMB_FIELDS,
+    limit: 1000,
+    sortDirection: 'ASC',
+  })
+  return rows.map(fixOfRow).filter((f): f is TrackingFix => f !== null)
+}
+
+export interface LoadRoute {
+  encoded: string | null; meters: number | null; seconds: number | null
+  source: 'ROUTES_API' | 'DIRECTIONS_LEGACY' | 'ESTIMATE' | 'NONE'
+  cached: boolean; fetchedAt: string | null
+  waypoints: Array<{ type: 'pickup' | 'delivery' | 'stop'; lat: number; lng: number; name: string | null }>
+  /** Why the route is an estimate / absent ("No server Maps key", "Delivery address has no coordinates", Google's status). */
+  reason: string | null
+}
+
+/** The load's planned route (server-side Routes API, cached per lane). Never throws for a Google problem. */
+export async function getLoadRoute(loadId: string): Promise<LoadRoute> {
+  return trackingAction<LoadRoute>('GET_LOAD_ROUTE', { loadId })
+}
+
+export async function startProviderTracking(input: { loadCarrierId: string; provider: string }): Promise<{ link: TrackingLinkRecord; mode: 'STUB' | 'LIVE'; message: string }> {
+  return trackingAction<{ link: TrackingLinkRecord; mode: 'STUB' | 'LIVE'; message: string }>('START_PROVIDER_TRACKING', input)
+}
+
+export async function stopProviderTracking(input: { linkId: string }): Promise<{ link: TrackingLinkRecord }> {
+  return trackingAction<{ link: TrackingLinkRecord }>('STOP_PROVIDER_TRACKING', input)
+}
+// ── end Step AO block ────────────────────────────────────────────────────────────
 
 /**
  * Every load with a check call on the clock, soonest first. `checkCallOpen` is the
@@ -8730,6 +8819,8 @@ export interface UpdateLoadCarrierDetailsInput {
   dispatcherName?: string | null
   dispatcherPhone?: string | null
   dispatcherEmail?: string | null
+  /** Ivan Cartage only (Step AQ): the roster driver id; a typed name is refused. */
+  driverId?: string | null
   driverName?: string | null
   driverPhone?: string | null
   driver2Name?: string | null
@@ -8788,6 +8879,8 @@ export async function markRateConSigned(input: { loadCarrierId: string; document
 
 export interface EnterDriverInfoInput {
   loadCarrierId: string
+  /** Ivan Cartage only (Step AQ): the roster driver; the server fills the rest from the record. */
+  driverId?: string
   driverName: string
   driverPhone: string
   truckNumber: string

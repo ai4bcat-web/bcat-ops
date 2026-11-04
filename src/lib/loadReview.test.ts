@@ -30,6 +30,7 @@ const delivered = (over: Partial<LoadReviewRow> = {}): LoadReviewRow => ({
   docsMissing: [],
   openIncidentCount: 0,
   orderRevenueCents: 120_000,
+  reference: 'PO-1',
   costCents: 95_000,
   stops: [
     { type: 'PICKUP', city: 'Chicago, IL', appt: '2026-10-28T08:00' },
@@ -108,6 +109,15 @@ describe('loadReviewCount', () => {
   })
 })
 
+describe('pushed rows', () => {
+  it('enter the queue before they deliver, and leave it once released', () => {
+    const early = delivered({ status: 'IN_TRANSIT', deliveredAt: null, loadReviewPushedAt: '2026-11-03T00:00:00Z' })
+    expect(inLoadReviewQueue(early)).toBe(true)
+    expect(inLoadReviewQueue({ ...early, readyToInvoiceAt: '2026-11-04T00:00:00Z' })).toBe(false)
+    expect(inLoadReviewQueue({ ...early, voidedAt: '2026-11-04T00:00:00Z' })).toBe(false)
+  })
+})
+
 describe('releasedWithin', () => {
   const now = Date.parse('2026-11-04T00:00:00Z')
   it('honours the lookback window', () => {
@@ -161,33 +171,48 @@ describe('gate code mapping', () => {
 })
 
 describe('loadReviewExtras', () => {
-  const clean = { shipment: { salesRepId: 'rep1', revDivision: 'BCAT' }, order: { revenueCents: 100 } }
+  const facts = {
+    revDivision: 'BCAT', salesRepId: 'rep1', referenceNumber: 'PO-1', podReceived: true,
+    revenueCents: 100, expenseCents: 60, profitCents: 40,
+  }
 
-  it('passes a complete load', () => {
-    expect(loadReviewExtras(clean)).toEqual([])
+  it('passes a complete load against the default seven', () => {
+    expect(loadReviewExtras({ shipment: {}, facts })).toEqual([])
   })
 
-  it('flags missing rep, blank-only division and non-positive revenue, each under its own check', () => {
-    const out = loadReviewExtras({ shipment: { salesRepId: null, revDivision: '   ' }, order: { revenueCents: 0 } })
-    expect(out.map((r) => [r.code, r.check, r.message])).toEqual([
-      ['SALES_REP_MISSING', 'salesRep', 'Missing sales rep'],
-      ['REV_DIVISION_MISSING', 'revDivision', 'Missing revenue division'],
-      ['NO_CUSTOMER_CHARGES', 'charges', 'No customer charges'],
+  it('flags every failing requirement in list order, each under its own check', () => {
+    const out = loadReviewExtras({ shipment: {}, facts: {} })
+    expect(out.map((r) => [r.code, r.check])).toEqual([
+      ['REV_DIVISION_MISSING', 'revDivision'],
+      ['REFERENCE_NUMBER_MISSING', 'details'],
+      ['POD_MISSING', 'documents'],
+      ['SALES_REP_MISSING', 'salesRep'],
+      ['NO_CUSTOMER_CHARGES', 'charges'],
+      ['EXPENSE_MISSING', 'charges'],
+      ['PROFIT_MISSING', 'charges'],
     ])
   })
 
-  it('treats null or negative revenue as no charges', () => {
-    expect(loadReviewExtras({ ...clean, order: { revenueCents: null } }).map((r) => r.code)).toEqual(['NO_CUSTOMER_CHARGES'])
-    expect(loadReviewExtras({ ...clean, order: { revenueCents: -5 } }).map((r) => r.code)).toEqual(['NO_CUSTOMER_CHARGES'])
+  it('treats blank-only strings and non-positive money as missing', () => {
+    const out = loadReviewExtras({
+      shipment: {}, facts: { ...facts, revDivision: '   ', revenueCents: -5, expenseCents: 0 },
+      requirements: ['revDivision', 'revenueEntered', 'expenseEntered'],
+    })
+    expect(out.map((r) => r.code)).toEqual(['REV_DIVISION_MISSING', 'NO_CUSTOMER_CHARGES', 'EXPENSE_MISSING'])
+  })
+
+  it('only checks what the customer asked for', () => {
+    expect(loadReviewExtras({ shipment: {}, facts: { ...facts, salesRepId: null }, requirements: ['revDivision'] })).toEqual([])
+    expect(loadReviewExtras({ shipment: {}, facts: { ...facts, salesRepId: null }, requirements: [] })).toEqual([])
   })
 
   it('exempts imported history entirely', () => {
-    expect(loadReviewExtras({ shipment: { salesRepId: null, revDivision: null, legacyImported: true }, order: { revenueCents: 0 } })).toEqual([])
+    expect(loadReviewExtras({ shipment: { legacyImported: true }, facts: {} })).toEqual([])
   })
 
   it('attaches the fix action for rep and division', () => {
-    const out = loadReviewExtras({ shipment: {}, order: { revenueCents: 1 } })
-    expect(out.map((r) => r.action)).toEqual([{ kind: 'SET_SALES_REP' }, { kind: 'SET_REV_DIVISION' }])
+    const out = loadReviewExtras({ shipment: {}, facts: { ...facts, salesRepId: null, revDivision: null } })
+    expect(out.map((r) => r.action)).toEqual([{ kind: 'SET_REV_DIVISION' }, { kind: 'SET_SALES_REP' }])
   })
 })
 
@@ -206,7 +231,7 @@ describe('evaluateLoadReview — cached row verdict', () => {
     expect(verdict.checks.salesRep.reasons.map((r) => r.message)).toEqual(['Missing sales rep'])
     expect(verdict.checks.revDivision.reasons.map((r) => r.message)).toEqual(['Missing revenue division'])
     expect(verdict.checks.documents.reasons.map((r) => r.message)).toEqual(['Missing document: POD'])
-    expect(verdict.checks.charges.reasons.map((r) => r.message)).toEqual(['No customer charges'])
+    expect(verdict.checks.charges.reasons.map((r) => r.message)).toEqual(['No customer charges', 'Profit not available (needs revenue and expense)'])
     expect(verdict.checks.details.ok).toBe(true)
   })
 
@@ -345,13 +370,13 @@ describe('evaluateLoadReview — gate-supplied verdict', () => {
 
 describe('loadReviewRefusal', () => {
   it('round-trips through releaseGateMessages, one entry per reason', () => {
-    const extras = loadReviewExtras({ shipment: {}, order: { revenueCents: 0 } })
+    const extras = loadReviewExtras({ shipment: {}, facts: { revenueCents: 0 }, requirements: ['salesRep', 'revDivision', 'revenueEntered'] })
     const err = loadReviewRefusal([{ code: 'DOC_MISSING', message: 'Missing document: POD' }, ...extras])
     expect(err.message.startsWith(RELEASE_GATE_ERROR_PREFIX)).toBe(true)
     expect(releaseGateMessages(err.message)).toEqual([
       'Missing document: POD',
-      'Missing sales rep',
       'Missing revenue division',
+      'Missing sales rep',
       'No customer charges',
     ])
   })

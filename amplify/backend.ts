@@ -1559,12 +1559,14 @@ trackingApiFn.addEnvironment('LOAD_TABLE_NAME', backend.data.resources.tables['L
   }))
   trackingApiFn.addToRolePolicy(new PolicyStatement({
     // A ping writes one event row. Load is deliberately NOT writable from here.
+    // Step AO: and one breadcrumb row in TruckLocationHistory (truckId 'load:<loadId>').
     actions:   ['dynamodb:PutItem'],
-    resources: [loadCheckCallTable.tableArn],
+    resources: [loadCheckCallTable.tableArn, trackHistoryTable.tableArn],
   }))
   trackingApiFn.addToRolePolicy(new PolicyStatement({
+    // Step AO: the history table is read by key for the cached route row.
     actions:   ['dynamodb:GetItem'],
-    resources: [trackShipmentTable.tableArn, trackDivisionTable.tableArn, trackSettingsTable.tableArn],
+    resources: [trackShipmentTable.tableArn, trackDivisionTable.tableArn, trackSettingsTable.tableArn, trackHistoryTable.tableArn],
   }))
   trackingApiFn.addToRolePolicy(new PolicyStatement({
     actions:   ['dynamodb:Query'],
@@ -2165,24 +2167,10 @@ directoryActionsFn.addToRolePolicy(
   }),
 )
 
-directoryActionsFn.addEnvironment('TABLE_NAME',                    '')
-directoryActionsFn.addEnvironment('CUSTOMER_TABLE_NAME',           directoryCustomerTable.tableName)
-directoryActionsFn.addEnvironment('LOCATION_TABLE_NAME',           directoryLocationTable.tableName)
-directoryActionsFn.addEnvironment('DIVISION_TABLE_NAME',           directoryDivisionTable.tableName)
-directoryActionsFn.addEnvironment('SETTINGS_TABLE_NAME',           directorySettingsTable.tableName)
-directoryActionsFn.addEnvironment('MERGE_JOB_TABLE_NAME',          directoryMergeJobTable.tableName)
-directoryActionsFn.addEnvironment('IMPORT_JOB_TABLE_NAME',         directoryImportJobTable.tableName)
-directoryActionsFn.addEnvironment('LOAD_TABLE_NAME',               directoryLoadTable.tableName)
-directoryActionsFn.addEnvironment('CARRIER_TABLE_NAME',             directoryCarrierTable.tableName)
-directoryActionsFn.addEnvironment('OWNERSHIP_DIVISION_TABLE_NAME',  directoryOwnershipDivisionTable.tableName)
-directoryActionsFn.addEnvironment('OWNERSHIP_RULE_TABLE_NAME',      directoryOwnershipRuleTable.tableName)
-directoryActionsFn.addEnvironment('SHIPMENT_VIEW_TABLE_NAME',       directoryShipmentViewTable.tableName)
-directoryActionsFn.addEnvironment('SHIPMENT_COLUMN_TEMPLATE_TABLE_NAME', directoryShipmentColumnTemplateTable.tableName)
-directoryActionsFn.addEnvironment('AUDIT_LOG_TABLE_NAME',           backend.data.resources.tables['AuditLog'].tableName)
-directoryActionsFn.addEnvironment(
-  'USER_PROFILE_TABLE_NAME',
-  backend.data.resources.tables['UserProfile'].tableName,
-)
+// One suffix instead of a full name per table: Lambda caps environment variables at 4 KB and 17
+// table names took tms-directory-actions over it (deploy 158). The handler derives `<Model>-<suffix>`.
+// The api id is cut out of a table name (no reference to the API construct: that would close a cycle).
+directoryActionsFn.addEnvironment('DATA_TABLE_SUFFIX', `${Fn.select(1, Fn.split('-', directoryCustomerTable.tableName))}-NONE`)
 directoryActionsFn.addEnvironment('USER_POOL_ID',                  backend.auth.resources.userPool.userPoolId)
 directoryActionsFn.addToRolePolicy(
   new PolicyStatement({
@@ -2200,7 +2188,6 @@ const integrationParamArn = Stack.of(directoryActionsFn).formatArn({
   // For hierarchical SSM parameter ARNs the leading slash is part of the resource id.
   resourceName: `${integrationParamPath.replace(/^\//, '')}/*`,
 })
-directoryActionsFn.addEnvironment('INTEGRATION_TABLE_NAME', directoryIntegrationTable.tableName)
 directoryActionsFn.addEnvironment('INTEGRATION_PARAM_PATH', integrationParamPath)
 directoryActionsFn.addToRolePolicy(
   new PolicyStatement({
@@ -2292,7 +2279,6 @@ mcpSyncFn.addToRolePolicy(
 // Step AD (Find & Invite): the invitation is noted on the load's thread. PutItem on ShipmentMessage only:
 // no Shipment, Order or invoice table is reachable from here.
 const directoryMessageTable = backend.data.resources.tables['ShipmentMessage']
-directoryActionsFn.addEnvironment('SHIPMENT_MESSAGE_TABLE_NAME', directoryMessageTable.tableName)
 directoryActionsFn.addToRolePolicy(
   new PolicyStatement({ actions: ['dynamodb:PutItem'], resources: [directoryMessageTable.tableArn] }),
 )
@@ -2749,6 +2735,16 @@ trackingActionsFn.addEnvironment('DIVISION_TABLE_NAME',         trackingDivision
 trackingActionsFn.addEnvironment('USER_POOL_ID',                backend.auth.resources.userPool.userPoolId)
 trackingActionsFn.addEnvironment('PORTAL_ORIGIN',               PORTAL_ORIGIN)
 trackingActionsFn.addEnvironment('FROM_ADDRESS',                'ai4bcat@gmail.com')
+// ── Step AO (append-only block): load-keyed breadcrumbs and the cached route ──
+// tmsTrackingActions files shared-pin / geocoded-reply fixes and the route cache row in
+// TruckLocationHistory, and reads TruckLocation to decide whether an own-asset leg still has
+// an ELD fix (a tracking link is only allowed when it has none for two hours).
+trackingActionsFn.addToRolePolicy(new PolicyStatement({
+  actions:   ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:Query'],
+  resources: [truckLocationHistoryTable.tableArn, `${truckLocationHistoryTable.tableArn}/index/*`, truckLocationTable.tableArn],
+}))
+trackingActionsFn.addEnvironment('TRUCK_LOCATION_HISTORY_TABLE_NAME', truckLocationHistoryTable.tableName)
+trackingActionsFn.addEnvironment('TRUCK_LOCATION_TABLE_NAME',         truckLocationTable.tableName)
 trackingActionsFn.addToRolePolicy(
   new PolicyStatement({
     // The Customer Link's contact card is the order's rep, read from the pool.
@@ -3866,6 +3862,12 @@ spotPollRule.addTarget(new EventsLambdaTarget(spotFn, {
 // A spot request carries the mail body: DynamoDB expires it (`ttlEpoch`, epoch seconds)
 // instead of anything sweeping. Dismissed requests get a shorter horizon from the Lambda.
 backend.data.resources.cfnResources.amplifyDynamoDbTables['SpotRequest'].timeToLiveAttribute = {
+  attributeName: 'ttlEpoch',
+  enabled: true,
+}
+// Step AO: load-keyed breadcrumbs and route-cache rows in TruckLocationHistory carry
+// `ttlEpoch` (90 / 30 days); Motive and Blue Ink rows have none and are never touched.
+backend.data.resources.cfnResources.amplifyDynamoDbTables['TruckLocationHistory'].timeToLiveAttribute = {
   attributeName: 'ttlEpoch',
   enabled: true,
 }

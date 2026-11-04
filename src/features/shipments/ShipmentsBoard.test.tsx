@@ -287,29 +287,6 @@ describe('ShipmentsBoard', () => {
     expect(voidedRowEl).toHaveAttribute('data-tone', 'voided')
   })
 
-  it('shows a Mass Release checkbox only for releasable shipments and the reason otherwise', async () => {
-    const shipments = [
-      deliveredRow('S001', { docsMissing: [] }),
-      deliveredRow('S002', { docsMissing: null }),
-      deliveredRow('S003', { docsMissing: ['POD'], readyToInvoiceAt: null }),
-      deliveredRow('S004', { docsMissing: [], readyToInvoiceAt: '2026-02-01T00:00:00Z' }),
-    ]
-    renderBoard('/tms/shipments?list=all', shipments)
-    await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
-
-    const row1 = screen.getByText('S001').closest('tr')!
-    expect(within(row1).getByRole('checkbox', { name: /Release S001/i })).toBeTruthy()
-
-    const row2 = screen.getByText('S002').closest('tr')!
-    expect(within(row2).getByText('Documents not checked')).toBeTruthy()
-
-    const row3 = screen.getByText('S003').closest('tr')!
-    expect(within(row3).getByText(/Missing documents:/i)).toBeTruthy()
-
-    const row4 = screen.getByText('S004').closest('tr')!
-    expect(within(row4).getByText('Already released to accounting')).toBeTruthy()
-  })
-
   it('lists 100 rows a page, mounts only the rows in view, and Get next 100 adds the rest', async () => {
     const shipments = Array.from({ length: 250 }, (_, i) => row(`S${String(i).padStart(3, '0')}`, { status: 'OPEN' }))
     renderBoard('/tms/shipments', shipments)
@@ -361,14 +338,14 @@ describe('ShipmentsBoard', () => {
     await waitFor(() => expect(screen.getByRole('dialog', { name: /Batch task/i })).toBeTruthy())
 
     const dialog = screen.getByRole('dialog', { name: /Batch task/i })
-    fireEvent.change(within(dialog).getByRole('combobox'), { target: { value: 'release' } })
+    fireEvent.change(within(dialog).getByRole('combobox'), { target: { value: 'status:ON_HOLD' } })
     fireEvent.click(screen.getByRole('button', { name: /^Run$/i }))
 
     await waitFor(() => expect(batchShipmentTask).toHaveBeenCalledTimes(1))
     expect(batchShipmentTask).toHaveBeenCalledWith(expect.objectContaining({
-      task: 'RELEASE_TO_BILLING',
+      task: 'SET_STATUS',
       shipmentIds: ['S001', 'S002'],
-      params: {},
+      params: { status: 'ON_HOLD', reason: 'Batch task' },
     }))
     expect(readyToInvoice).not.toHaveBeenCalled()
 
@@ -607,7 +584,7 @@ describe('ShipmentsBoard', () => {
     renderBoard('/tms/shipments', shipments)
     await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
 
-    fireEvent.click(screen.getByRole('button', { name: 'Missing documents' }))
+    fireEvent.click(screen.getByRole('button', { name: /^Missing documents/ }))
 
     await waitFor(() => {
       expect(screen.getByText('S001')).toBeTruthy()
@@ -866,21 +843,76 @@ describe('ShipmentsBoard', () => {
       expect(screen.queryByText('S002')).toBeNull()
       expect(screen.getByRole('tab', { name: /^Active/ })).toHaveAttribute('aria-selected', 'true')
     })
+  })
+  describe('Step AP: chips and Push to Load Review', () => {
+    const complete = { reference: 'PO-1', salesRepId: 'rep-1', revDivision: 'ASSETS', docsRequired: ['POD'], docsMissing: [] as string[] }
+    const chipNames = () =>
+      screen.getAllByRole('button', { pressed: false }).map((b) => b.textContent ?? '').filter((t) => /\(\d+\)$/.test(t))
 
-    it('releasing a row removes it from Active on refresh', async () => {
-      vi.mocked(batchShipmentTask).mockResolvedValue({ results: [{ shipmentId: 'S001', number: 'S001', ok: true, message: null }] })
-      renderBoard('/tms/shipments', [unreleased])
+    it('shows the missing-field chips with live counts, ends with Check call overdue, and has no Open exceptions chip', async () => {
+      renderBoard('/tms/shipments', [
+        deliveredRow('S001', complete),
+        deliveredRow('S002', { ...complete, reference: null }),
+        deliveredRow('S003', { ...complete, salesRepId: null, revDivision: null }),
+      ])
       await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
+      expect(chipNames()).toEqual([
+        'Missing reference # (1)',
+        'Missing sales rep (1)',
+        'Missing rev division (1)',
+        'Missing documents (0)',
+        'Check call overdue (0)',
+      ])
+      expect(screen.queryByRole('button', { name: /Open exceptions/ })).toBeNull()
+    })
 
-      __shipments = [{ ...unreleased, readyToInvoiceAt: '2026-02-01T00:00:00Z' }]
-      fireEvent.click(screen.getByRole('checkbox', { name: /Release S001/i }))
-      fireEvent.click(screen.getByRole('button', { name: /Batch task/i }))
-      const dialog = screen.getByRole('dialog', { name: /Batch task/i })
-      fireEvent.change(within(dialog).getByRole('combobox'), { target: { value: 'release' } })
-      fireEvent.click(screen.getByRole('button', { name: /^Run$/i }))
+    it('clicking a chip filters the list to the rows missing that field', async () => {
+      renderBoard('/tms/shipments', [
+        deliveredRow('S001', complete),
+        deliveredRow('S002', { ...complete, reference: null }),
+      ])
+      await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
+      fireEvent.click(screen.getByRole('button', { name: /^Missing reference #/ }))
+      await waitFor(() => expect(screen.queryByText('S001')).toBeNull())
+      expect(screen.getByText('S002')).toBeTruthy()
+    })
 
-      await waitFor(() => expect(batchShipmentTask).toHaveBeenCalledTimes(1))
-      await waitFor(() => expect(document.querySelector('table')?.textContent).not.toContain('S001'))
+    it('refuses the 10th selected row with a message and keeps nine', async () => {
+      const rows = Array.from({ length: 10 }, (_, i) => deliveredRow(`S${String(i + 1).padStart(3, '0')}`, complete))
+      renderBoard('/tms/shipments', rows)
+      await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
+      for (const r of rows) fireEvent.click(screen.getByRole('checkbox', { name: `Select row ${r.id}` }))
+      expect(screen.getByTestId('batch-cap-message').textContent).toMatch(/at most 9/)
+      expect(screen.getByText('9 selected (max 9)')).toBeTruthy()
+    })
+
+    it('offers Push to Load Review and no Release on the board', async () => {
+      renderBoard('/tms/shipments', [deliveredRow('S001', complete)])
+      await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Select row S001' }))
+      expect(screen.getByRole('button', { name: 'Push to Load Review' })).toBeTruthy()
+      expect(screen.queryByRole('button', { name: /^Release/ })).toBeNull()
+      expect(screen.queryByRole('checkbox', { name: /^Release / })).toBeNull()
+    })
+
+    it('blocks failing rows with per-row reasons, sends only the rest, and reports partial success', async () => {
+      batchShipmentTask.mockClear()
+      batchShipmentTask.mockResolvedValueOnce({ results: [{ shipmentId: 'S001', number: 'S001', ok: true, message: null }] })
+      renderBoard('/tms/shipments', [
+        deliveredRow('S001', complete),
+        deliveredRow('S002', { ...complete, salesRepId: null, reference: null }),
+      ])
+      await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Select all rows' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Push to Load Review' }))
+      await waitFor(() => expect(screen.getByTestId('batch-result-S002')).toBeTruthy())
+      expect(batchShipmentTask).toHaveBeenCalledWith({ task: 'PUSH_TO_LOAD_REVIEW', shipmentIds: ['S001'], params: {} })
+      expect(screen.getByTestId('batch-result-S001')).toHaveAttribute('data-ok', 'true')
+      const failed = screen.getByTestId('batch-result-S002')
+      expect(failed).toHaveAttribute('data-ok', 'false')
+      expect(failed.textContent).toContain('Missing sales rep')
+      expect(failed.textContent).toContain('Missing reference #')
+      expect(screen.getByTestId('batch-results').textContent).toContain('1 of 2 done, 1 not done')
     })
   })
 })

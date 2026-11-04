@@ -7,11 +7,11 @@
 import { memo, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { TmsBadge, TmsButton, TmsField, TmsInput, TmsSelect } from '@/features/tms/kit'
-import { useDrivers } from '@/hooks/useDrivers'
+import { OwnFleetDriverPicker } from '@/components/OwnFleetDriverPicker'
+import { useOwnFleetRoster } from '@/hooks/useOwnFleetRoster'
 import { CARRIER_STATUS_LABELS, effectiveCarrierStatus } from '@/lib/carrierStatus'
-import { selectableDrivers } from '@/lib/driverFilter'
+import { isIvanCartageName, ownFleetDriverByName, ownFleetFill } from '@/lib/ownFleetDrivers'
 import { mcpPacketStanding } from '@/lib/mcpPacket'
-import { isBrokerDriver } from '@/lib/ownAssetDriver'
 import { isTruckloadMode } from '@/lib/shipmentStatus'
 import { formatDateTime } from '@/lib/date'
 import { formatCents } from '@/lib/tmsDirectory'
@@ -24,7 +24,6 @@ import type { SliceSectionProps } from '../sectionRegistry'
 import { fieldAttrs } from './fieldAttrs'
 import { FindInvite } from './carrier/FindInvite'
 
-const IVAN_RE = /^\s*ivan\s+cartage\b/i
 
 function policyText(carrier: CarrierRecord | null, type: InsurancePolicyType): string {
   const p = carrier?.insurancePolicies?.find((x) => x.type === type)
@@ -43,7 +42,7 @@ function Static({ def, text }: { def: { text: string; testId: string }; text: st
 }
 
 function CarrierInformationSectionImpl({ value, onChange, ctx, form }: SliceSectionProps<'carrier'>) {
-  const { drivers } = useDrivers()
+  const roster = useOwnFleetRoster()
   const [search, setSearch] = useState('')
   const [coverHint, setCoverHint] = useState<string | null>(null)
 
@@ -54,6 +53,9 @@ function CarrierInformationSectionImpl({ value, onChange, ctx, form }: SliceSect
   const pickerLocked = isLocked(ctx.locked, 'carrierPicker') || active != null
   const carrier = ctx.directory.carriers.find((c) => c.id === value.carrierId) ?? null
   const own = value.isOwnFleet
+  // Step AQ: a directory carrier that is Ivan Cartage is own fleet too: its driver is picked from our
+  // Driver records in "Enter driver info", never typed here.
+  const typedLock = own || isIvanCartageName(carrier?.name ?? active?.carrierName)
   const set = (patch: Partial<typeof value>) => onChange(patch)
   const setBits = (key: 'dispatcher' | 'driver1' | 'driver2', patch: Partial<typeof value.dispatcher>) =>
     onChange((p) => ({ ...p, [key]: { ...p[key], ...patch } }))
@@ -66,7 +68,6 @@ function CarrierInformationSectionImpl({ value, onChange, ctx, form }: SliceSect
       .slice(0, 8)
   }, [ctx.directory.carriers, search])
 
-  const roster = useMemo(() => selectableDrivers(drivers).filter((d) => !isBrokerDriver(d)), [drivers])
 
   const standing = carrier ? effectiveCarrierStatus(carrier, new Date()) : null
   const packet = carrier ? mcpPacketStanding(carrier) : null
@@ -154,7 +155,7 @@ function CarrierInformationSectionImpl({ value, onChange, ctx, form }: SliceSect
                   </li>
                 ))}
               </ul>
-              {IVAN_RE.test(search) && (
+              {isIvanCartageName(search) && (
                 <p className="text-xs" data-testid="carrier-ivan-hint">
                   Ivan Cartage is our own fleet — use the roster picker below.
                 </p>
@@ -174,7 +175,7 @@ function CarrierInformationSectionImpl({ value, onChange, ctx, form }: SliceSect
                   data-testid="carrier-record-name"
                   disabled={disabled || pickerLocked}
                   onClick={() => {
-                    if (IVAN_RE.test(search)) { set({ carrierId: '', typedName: '', useTyped: false, isOwnFleet: true }); setSearch(''); return }
+                    if (isIvanCartageName(search)) { set({ carrierId: '', typedName: '', useTyped: false, isOwnFleet: true }); setSearch(''); return }
                     set({ carrierId: '', useTyped: true, typedName: search.trim(), isOwnFleet: false })
                     setSearch('')
                   }}
@@ -191,7 +192,7 @@ function CarrierInformationSectionImpl({ value, onChange, ctx, form }: SliceSect
               disabled={disabled || pickerLocked}
               onChange={(e) => {
                 const text = e.target.value
-                if (IVAN_RE.test(text)) set({ typedName: '', useTyped: false, isOwnFleet: true })
+                if (isIvanCartageName(text)) set({ typedName: '', useTyped: false, isOwnFleet: true })
                 else set({ typedName: text })
               }}
             />
@@ -257,26 +258,32 @@ function CarrierInformationSectionImpl({ value, onChange, ctx, form }: SliceSect
 
         {own ? (
           <TmsField label={LABEL.carrier.driver1.text} hint="One driver per Ivan Cartage load">
-            <TmsSelect
-              {...fieldAttrs(LABEL.carrier.driver1)}
-              value={roster.find((d) => d.name === value.driver1.name)?.id ?? ''}
+            <OwnFleetDriverPicker
+              roster={roster}
+              value={ownFleetDriverByName(roster, value.driver1.name)?.id ?? ''}
+              ariaLabel={LABEL.carrier.driver1.text}
+              testId={LABEL.carrier.driver1.testId}
               disabled={disabled}
-              placeholder="Pick a driver"
-              onChange={(e) => {
-                const d = roster.find((x) => x.id === e.target.value)
-                setBits('driver1', { name: d?.name ?? '', phone: d?.phone ?? '', email: d?.email ?? '' })
-              }}
-              options={roster.map((d) => ({ value: d.id, label: d.name }))}
+              showSummary={false}
+              onChange={(d) => onChange((p) => {
+                const fill = d ? ownFleetFill(d) : null
+                return {
+                  ...p,
+                  driver1: { name: fill?.driverName ?? '', phone: fill?.driverPhone ?? '', email: d?.email ?? '' },
+                  truckNo: fill?.truckNumber ?? '',
+                  trailerNo: fill?.trailerNumber ?? '',
+                }
+              })}
             />
           </TmsField>
         ) : (
           <TmsField label={LABEL.carrier.driver1.text}>
-            <TmsInput {...fieldAttrs(LABEL.carrier.driver1)} value={value.driver1.name} disabled={disabled}
+            <TmsInput {...fieldAttrs(LABEL.carrier.driver1)} value={value.driver1.name} disabled={disabled} readOnly={typedLock}
               onChange={(e) => setBits('driver1', { name: e.target.value })} />
           </TmsField>
         )}
         <TmsField label={LABEL.carrier.driver1Cell.text}>
-          <TmsInput {...fieldAttrs(LABEL.carrier.driver1Cell)} type="tel" value={value.driver1.phone} disabled={disabled} readOnly={own}
+          <TmsInput {...fieldAttrs(LABEL.carrier.driver1Cell)} type="tel" value={value.driver1.phone} disabled={disabled} readOnly={typedLock}
             onChange={(e) => setBits('driver1', { phone: e.target.value })} />
         </TmsField>
         <TmsField label={LABEL.carrier.driver1Email.text}>
@@ -287,11 +294,11 @@ function CarrierInformationSectionImpl({ value, onChange, ctx, form }: SliceSect
         {!own && (
           <>
             <TmsField label={LABEL.carrier.driver2.text}>
-              <TmsInput {...fieldAttrs(LABEL.carrier.driver2)} value={value.driver2.name} disabled={disabled}
+              <TmsInput {...fieldAttrs(LABEL.carrier.driver2)} value={value.driver2.name} disabled={disabled} readOnly={typedLock}
                 onChange={(e) => setBits('driver2', { name: e.target.value })} />
             </TmsField>
             <TmsField label={LABEL.carrier.driver2Cell.text}>
-              <TmsInput {...fieldAttrs(LABEL.carrier.driver2Cell)} type="tel" value={value.driver2.phone} disabled={disabled}
+              <TmsInput {...fieldAttrs(LABEL.carrier.driver2Cell)} type="tel" value={value.driver2.phone} disabled={disabled} readOnly={typedLock}
                 onChange={(e) => setBits('driver2', { phone: e.target.value })} />
             </TmsField>
             <TmsField label={LABEL.carrier.driver2Email.text}>
@@ -302,11 +309,11 @@ function CarrierInformationSectionImpl({ value, onChange, ctx, form }: SliceSect
         )}
 
         <TmsField label={LABEL.carrier.truckNo.text}>
-          <TmsInput {...fieldAttrs(LABEL.carrier.truckNo)} maxLength={40} value={value.truckNo} disabled={disabled}
+          <TmsInput {...fieldAttrs(LABEL.carrier.truckNo)} maxLength={40} value={value.truckNo} disabled={disabled} readOnly={typedLock}
             onChange={(e) => set({ truckNo: e.target.value })} />
         </TmsField>
         <TmsField label={LABEL.carrier.trailerNo.text}>
-          <TmsInput {...fieldAttrs(LABEL.carrier.trailerNo)} maxLength={40} value={value.trailerNo} disabled={disabled}
+          <TmsInput {...fieldAttrs(LABEL.carrier.trailerNo)} maxLength={40} value={value.trailerNo} disabled={disabled} readOnly={typedLock}
             onChange={(e) => set({ trailerNo: e.target.value })} />
         </TmsField>
         <TmsField label={LABEL.carrier.seal.text}>

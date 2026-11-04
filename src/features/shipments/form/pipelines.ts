@@ -13,6 +13,7 @@ import {
 } from '@/lib/apiClient'
 import { apptNotices } from '@/lib/apptNotify'
 import { fromDateTimeInput } from '@/lib/date'
+import { isIvanCartageName } from '@/lib/ownFleetDrivers'
 import { errorMessage } from '@/lib/utils/errorMessage'
 import type { Stop } from '@/types'
 import type { CustomerRecord, LocationRecord, ShipmentBundle, TmsSettings } from '@/types/tms'
@@ -292,11 +293,17 @@ function carrierDetailsPatch(values: ShipmentFormValues, bundle: ShipmentBundle)
   const lc = activeLoadCarrier(bundle)
   if (!lc || lc.kind !== 'CARRIER') return null
   const c = values.carrier
+  // Step AQ: an Ivan Cartage leg's driver, truck and trailer come from a Driver record through
+  // ENTER_DRIVER_INFO's picker; this typed patch never carries them.
+  const ivan = isIvanCartageName(lc.carrierName)
   const want = {
     dispatcherName: c.dispatcher.name, dispatcherPhone: c.dispatcher.phone, dispatcherEmail: c.dispatcher.email,
-    driverName: c.driver1.name, driverPhone: c.driver1.phone, driver2Name: c.driver2.name, driver2Phone: c.driver2.phone,
-    truckNumber: c.truckNo, trailerNumber: c.trailerNo, sealNumber: c.seal, tripNumber: c.carrierRef,
-  } as const
+    ...(ivan ? {} : {
+      driverName: c.driver1.name, driverPhone: c.driver1.phone, driver2Name: c.driver2.name, driver2Phone: c.driver2.phone,
+      truckNumber: c.truckNo, trailerNumber: c.trailerNo,
+    }),
+    sealNumber: c.seal, tripNumber: c.carrierRef,
+  } as Record<string, string>
   const patch: Record<string, string | null> = {}
   for (const [k, v] of Object.entries(want)) {
     if ((lc[k as keyof typeof lc] as string | null | undefined ?? '') !== v.trim()) patch[k] = v.trim() || null

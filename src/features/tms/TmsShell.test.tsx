@@ -315,6 +315,12 @@ describe('TmsShell', () => {
     expect(screen.queryByRole('button', { name: 'Log out' })).not.toBeInTheDocument()
   })
 
+  it('offers Feedback in the rail footer to a user with no page grants at all (nothing pinned, no sections)', () => {
+    renderShell('/dashboard', undefined, { pinned: [], sections: [] })
+    expect(rail().queryAllByRole('link')).toEqual([])
+    expect(screen.getByRole('link', { name: 'Feedback' })).toHaveAttribute('href', '/feedback')
+  })
+
   it('renders the bell as a button that opens notifications, with the count only when there is one, and none without a handler', () => {
     const onOpenNotifications = vi.fn()
     const { unmount } = renderShell('/tms/shipments', undefined, { notificationCount: 4, onOpenNotifications })

@@ -2,8 +2,7 @@
  * Everything the one Shipments list decides without React: how a row is matched by the
  * search box, which columns exist, what a CSV export of the current list looks like,
  * how a board row is projected onto the `ShipmentViewRow` the saved department views
- * filter, and the R2 Aljex-style board logic (status mapping, filters, counts,
- * mass-release readiness).
+ * filter, and the R2 Aljex-style board logic (status mapping, filters, counts).
  *
  * Status vocabulary is MVMNT's (spec §6.8). Void is the only exit a shipment has: a
  * voided row keeps its PRO, and rows that were soft-deleted before Void existed are
@@ -458,28 +457,6 @@ function detailCodesFor(row: ShipmentRow, key: BoardDetailKey, value: string): s
   }
 }
 
-// ── R2 mass release ──────────────────────────────────────────────────────────
-
-/**
- * Whether the Mass Release checkbox may be shown for this row. It reads the cached
- * document gate verdict (the same facts the Step F release gate reads) and refuses if
- * the order has already been released to accounting. The returned reason is the muted
- * text the cell shows when the checkbox is absent.
- */
-export function massReleaseReady(row: ShipmentRow): { ready: boolean; reason: string | null } {
-  if (isVoided(row)) return { ready: false, reason: 'Voided shipment' }
-  if (boardStatusOf(row) === 'CANCELED') return { ready: false, reason: 'Canceled shipment' }
-  if (row.readyToInvoiceAt != null || row.invoiceId != null) {
-    return { ready: false, reason: 'Already released to accounting' }
-  }
-  if (row.docsMissing == null) return { ready: false, reason: 'Documents not checked' }
-  if (row.docsMissing.length > 0) {
-    const labels = row.docsMissing.map((type) => (DOCUMENT_TYPE_LABELS as Record<string, string>)[type] ?? type)
-    return { ready: false, reason: `Missing documents: ${labels.join(', ')}` }
-  }
-  return { ready: true, reason: null }
-}
-
 // ── Search ───────────────────────────────────────────────────────────────────
 
 export function matchesQuery(row: ShipmentRow, query: string): boolean {
@@ -714,7 +691,6 @@ export const BOARD_COLUMNS: BoardColumn[] = [
   },
   { key: 'status', label: 'Status', group: 'Shipment', value: statusWithProgress, sortKey: 'status', width: 130 },
   { key: 'proNumber', label: 'PRO #', group: 'Shipment', value: (r) => r.number ?? '', sortKey: 'number', width: 120 },
-  { key: 'massRelease', label: 'Mass Release', group: 'Computed', value: () => '', width: 110 },
   { key: 'equip', label: 'Equip', group: 'Order', value: (r) => r.equipmentType ?? '', width: 100 },
   { key: 'customerReference', label: 'Customer Reference Number', group: 'Order', value: (r) => r.customerReference ?? '', width: 180 },
   { key: 'description', label: 'Description', group: 'Order', value: (r) => r.commodity ?? '', width: 180 },

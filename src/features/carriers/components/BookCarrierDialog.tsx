@@ -22,6 +22,9 @@ import {
 import { MoneyField } from '@/features/directory/components/MoneyField'
 import { useCarriers } from '@/hooks/useCarriers'
 import { getCarrierBundle, getTmsSettings } from '@/lib/apiClient'
+import { OwnFleetDriverPicker } from '@/components/OwnFleetDriverPicker'
+import { useOwnFleetRoster } from '@/hooks/useOwnFleetRoster'
+import { isIvanCartageName, ownFleetFill, type OwnFleetDriverOption } from '@/lib/ownFleetDrivers'
 import { evaluateCarrierBooking } from '@/lib/carrierEligibility'
 import { effectiveCarrierStatus, CARRIER_STATUS_LABELS } from '@/lib/carrierStatus'
 import { netPayable, quickPayFee, quickPayTiersOf, tierFor } from '@/lib/quickPay'
@@ -38,6 +41,7 @@ export interface BookCarrierFields {
   dispatcherName?: string
   dispatcherPhone?: string
   dispatcherEmail?: string
+  driverId?: string
   driverName?: string
   driverPhone?: string
   driver2Name?: string
@@ -147,6 +151,18 @@ export function BookCarrierDialog({ bundle, isAdmin, busy, onClose, onConfirm, o
 
   const carrier: CarrierRecord | null =
     carrierBundle?.carrier ?? carriers.find((c) => c.id === carrierId) ?? null
+  // Step AQ: a directory carrier that is Ivan Cartage takes its driver from our Driver records.
+  const ownFleet = isIvanCartageName(carrier?.name)
+  const roster = useOwnFleetRoster()
+  const [driverId, setDriverId] = useState('')
+  const pickOwnFleetDriver = (d: OwnFleetDriverOption | null) => {
+    const fill = d ? ownFleetFill(d) : null
+    setDriverId(d?.id ?? '')
+    setDriverName(fill?.driverName ?? '')
+    setDriverPhone(fill?.driverPhone ?? '')
+    setTruckNumber(fill?.truckNumber ?? '')
+    setTrailerNumber(fill?.trailerNumber ?? '')
+  }
 
   const extraCents = charges.reduce((sum, c) => sum + (c.amountCents ?? 0), 0)
   const costCents = (rateCents ?? 0) + extraCents
@@ -201,6 +217,7 @@ export function BookCarrierDialog({ bundle, isAdmin, busy, onClose, onConfirm, o
   const confirm = async () => {
     if (rateCents == null) { setError('A carrier rate is required.'); return }
     if (quickPayDays && !tier) { setError('That quick-pay term is not one of the configured tiers.'); return }
+    if (ownFleet && !driverId) { setError('Pick the driver from our driver list.'); return }
     setError(null)
     setWorking(true)
     try {
@@ -224,10 +241,14 @@ export function BookCarrierDialog({ bundle, isAdmin, busy, onClose, onConfirm, o
         dispatcherName: dispatcherName.trim() || undefined,
         dispatcherPhone: dispatcherPhone.trim() || undefined,
         dispatcherEmail: dispatcherEmail.trim() || undefined,
-        driverName: driverName.trim() || undefined,
-        driverPhone: driverPhone.trim() || undefined,
-        truckNumber: truckNumber.trim() || undefined,
-        trailerNumber: trailerNumber.trim() || undefined,
+        ...(ownFleet
+          ? { driverId, driverPhone: driverPhone || undefined, truckNumber: truckNumber || undefined, trailerNumber: trailerNumber || undefined }
+          : {
+            driverName: driverName.trim() || undefined,
+            driverPhone: driverPhone.trim() || undefined,
+            truckNumber: truckNumber.trim() || undefined,
+            trailerNumber: trailerNumber.trim() || undefined,
+          }),
         plates: plates.trim() || undefined,
         vin: vin.trim() || undefined,
         equipmentType: equipmentType.trim() || undefined,
@@ -459,10 +480,20 @@ export function BookCarrierDialog({ bundle, isAdmin, busy, onClose, onConfirm, o
           <Text label="Dispatcher" value={dispatcherName} onChange={setDispatcherName} />
           <Text label="Dispatcher phone" value={dispatcherPhone} onChange={setDispatcherPhone} />
           <Text label="Dispatcher email" value={dispatcherEmail} onChange={setDispatcherEmail} />
-          <Text label="Driver" value={driverName} onChange={setDriverName} />
-          <Text label="Driver phone" value={driverPhone} onChange={setDriverPhone} />
-          <Text label="Truck #" value={truckNumber} onChange={setTruckNumber} />
-          <Text label="Trailer #" value={trailerNumber} onChange={setTrailerNumber} />
+          {ownFleet ? (
+            <div style={{ gridColumn: '1 / -1' }}>
+              <TmsField label="Driver (Ivan Cartage: pick from our drivers)">
+                <OwnFleetDriverPicker roster={roster} value={driverId} ariaLabel="Driver" testId="book-own-fleet-driver" onChange={pickOwnFleetDriver} />
+              </TmsField>
+            </div>
+          ) : (
+            <>
+              <Text label="Driver" value={driverName} onChange={setDriverName} />
+              <Text label="Driver phone" value={driverPhone} onChange={setDriverPhone} />
+              <Text label="Truck #" value={truckNumber} onChange={setTruckNumber} />
+              <Text label="Trailer #" value={trailerNumber} onChange={setTrailerNumber} />
+            </>
+          )}
           <Text label="Plates" value={plates} onChange={setPlates} />
           <Text label="VIN" value={vin} onChange={setVin} />
           <Text label="Equipment" value={equipmentType} onChange={setEquipmentType} />

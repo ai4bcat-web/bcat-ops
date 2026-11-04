@@ -26,6 +26,8 @@ import { TmsButton, TmsDialog, TmsField, TmsIconButton, TmsInput, TmsSelect, Tms
 import { type RemoveLoadCarrierReason } from '@/lib/apiClient'
 import { VoidShipmentDialog } from './VoidShipmentDialog'
 import { AssignDriverDialog, type AssignDriverFields } from './AssignDriverDialog'
+import { OWN_ASSET_MESSAGES } from '@/lib/ownAssetDriver'
+import { isIvanCartageName } from '@/lib/ownFleetDrivers'
 import type { Driver } from '@/types'
 import type { Equipment } from '@/types/equipment'
 import type {
@@ -541,6 +543,7 @@ function AssignCarrierDialog({ busy, onClose, onConfirm }: {
             variant="primary"
             onClick={() => {
               if (!carrierName.trim()) { setError('Carrier name is required.'); return }
+              if (isIvanCartageName(carrierName)) { setError(OWN_ASSET_MESSAGES.typedIvanCartage); return }
               if (rateCents != null && rateCents < 0) { setError('Carrier rate cannot be negative.'); return }
               onConfirm({
                 carrierName: carrierName.trim(),

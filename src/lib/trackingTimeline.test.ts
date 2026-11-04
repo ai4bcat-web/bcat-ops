@@ -140,6 +140,15 @@ describe('lastKnownPosition', () => {
     expect(lastKnownPosition(later)?.source).toBe('MOTIVE')
   })
 
+  it('names the feed a position came from, defaulting a bare Motive row to motive', () => {
+    const bare = lastKnownPosition(buildTimeline({ positions: [fix('2026-03-02T12:00:00.000Z')] }))
+    expect(bare?.pingSource).toBe('motive')
+    const approx = lastKnownPosition(buildTimeline({
+      positions: [fix('2026-03-02T12:00:00.000Z', { source: 'sms-geocode', approx: true, accuracyM: 8000 })],
+    }))
+    expect(approx).toMatchObject({ pingSource: 'sms-geocode', approx: true, accuracyM: 8000 })
+  })
+
   it('ignores check calls that carry no coordinates', () => {
     const items = buildTimeline({ checkCalls: [checkCall('2026-03-02T13:00:00.000Z', { city: 'Joliet' })] })
     expect(lastKnownPosition(items)).toBeNull()

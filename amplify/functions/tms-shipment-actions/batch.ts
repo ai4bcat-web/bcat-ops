@@ -3,6 +3,8 @@ import { OWN_ASSET_MESSAGES } from '../../../src/lib/ownAssetDriver'
 import { assertArrayOf, assertEnum, assertRecord, assertString, type Caller } from '../_shared/actionInputs'
 import type { Row } from '../_shared/shipmentStore'
 import type { BatchShipmentTask, BatchShipmentTaskResult } from '../../../src/types/tms'
+import { releaseGateOf } from '../../../src/lib/releaseGate'
+import { MAX_REVIEW_BATCH, batchCapMessage } from '../../../src/lib/reviewRequirements'
 
 export const BATCH_TASK_ACTIONS = {
   RELEASE_TO_BILLING: 'READY_TO_INVOICE',
@@ -12,6 +14,8 @@ export const BATCH_TASK_ACTIONS = {
   SET_STATUS: 'SET_SHIPMENT_STATUS',
   // A batch driver assignment is an ASSIGN_ASSET per row: same authorization, same gates.
   ASSIGN_DRIVER: 'ASSIGN_ASSET',
+  // Step AP: pushing a row into the Load Review queue is a Load Review action.
+  PUSH_TO_LOAD_REVIEW: 'REVIEW_LOAD',
 } as const
 
 export interface BatchShipmentDeps {
@@ -26,6 +30,8 @@ export interface BatchShipmentDeps {
   assignCarrierRep: (input: Row, caller: Caller) => Promise<unknown>
   setStatus: (input: Row, caller: Caller) => Promise<unknown>
   writeAudit: (entityType: string, entityId: string, action: string, caller: Caller, changes: Row) => Promise<void>
+  /** Step AP: the verdict and, when it is clean, the write. `reasons` non-empty = refused, nothing written. */
+  pushToReview: (shipmentId: string, caller: Caller) => Promise<{ reasons: string[]; already: boolean }>
 }
 
 export async function batchShipmentTask(deps: BatchShipmentDeps, input: Row, caller: Caller): Promise<BatchShipmentTaskResult> {
@@ -34,15 +40,21 @@ export async function batchShipmentTask(deps: BatchShipmentDeps, input: Row, cal
   if (shipmentIds.length === 0) throw new Error('shipmentIds must have at least one entry')
   const params = input.params == null ? {} : assertRecord(input.params, 'params')
   if (!deps.authorize(BATCH_TASK_ACTIONS[task], caller)) throw new Error(`Forbidden: ${task}`)
-  // Only the literal Load Review marker counts; anything else is an ordinary release.
+  // Step AP: pushes and releases carry the Load Review gate, so a batch is small enough to read.
+  if ((task === 'PUSH_TO_LOAD_REVIEW' || task === 'RELEASE_TO_BILLING') && shipmentIds.length > MAX_REVIEW_BATCH) {
+    throw new Error(batchCapMessage())
+  }
+  // Releasing to billing is Load Review's act alone: the marker is required, never optional.
   const marker = params.review
   const review = task === 'RELEASE_TO_BILLING' && marker != null && typeof marker === 'object' && (marker as Row).source === 'LOAD_REVIEW'
     ? { source: 'LOAD_REVIEW' }
     : null
+  if (task === 'RELEASE_TO_BILLING' && !review) throw new Error('Release to billing runs from Load Review only')
 
   const results: BatchShipmentTaskResult['results'] = []
   for (const shipmentId of shipmentIds) {
     let number: string | null = null
+    let note: string | null = null
     try {
       const shipment = await deps.getShipment(shipmentId)
       if (!shipment) throw new Error(`Shipment not found: ${shipmentId}`)
@@ -87,10 +99,27 @@ export async function batchShipmentTask(deps: BatchShipmentDeps, input: Row, cal
           await deps.assignAsset(driverParams, caller)
           break
         }
+        case 'PUSH_TO_LOAD_REVIEW': {
+          const pushed = await deps.pushToReview(shipmentId, caller)
+          if (pushed.reasons.length > 0) {
+            // Refused, not failed: the sentence is the join, the list is the per-row reasons.
+            results.push({ shipmentId, number, ok: false, message: pushed.reasons.join('; '), reasons: pushed.reasons })
+            continue
+          }
+          note = pushed.already ? 'Already in Load Review' : null
+          break
+        }
       }
-      results.push({ shipmentId, number, ok: true, message: null })
+      results.push({ shipmentId, number, ok: true, message: note })
     } catch (error) {
-      results.push({ shipmentId, number, ok: false, message: error instanceof Error ? error.message : String(error) })
+      const gate = releaseGateOf(error)
+      results.push({
+        shipmentId,
+        number,
+        ok: false,
+        message: error instanceof Error ? error.message : String(error),
+        ...(gate && gate.missing.length > 0 ? { reasons: gate.missing.map((item) => item.message) } : {}),
+      })
     }
   }
   const okCount = results.filter((result) => result.ok).length

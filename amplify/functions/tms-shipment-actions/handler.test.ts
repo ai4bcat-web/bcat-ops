@@ -4506,9 +4506,9 @@ describe('READY_TO_INVOICE', () => {
     )
   }
   it('batch releases three shipments through the same gate and preserves the refusal reason', async () => {
-    const shipments = []
+    const shipments: DocIds[] = []
     for (let i = 0; i < 3; i += 1) {
-      const ids = await deliveredOrder({ requiredDocsForInvoice: ['POD', 'BOL'] })
+      const ids = await deliveredOrder({ requiredDocsForInvoice: ['POD', 'BOL'], reviewRequirements: [] })
       seedDocs(ids, i === 1 ? ['BOL'] : ['BOL', 'POD'])
       for (const [id, doc] of table(TABLES.shipmentDocument)) {
         if (doc.shipmentId === ids.shipmentId && id.startsWith('sdoc-')) {
@@ -4518,16 +4518,19 @@ describe('READY_TO_INVOICE', () => {
       }
       shipments.push(ids)
     }
-    const result = await call('BATCH_SHIPMENT_TASK', {
-      task: 'RELEASE_TO_BILLING', shipmentIds: shipments.map((row) => row.shipmentId),
-    }) as { results: { shipmentId: string; ok: boolean; message: string | null }[] }
+    const batchRelease = (identity: unknown) => call('BATCH_SHIPMENT_TASK', {
+      task: 'RELEASE_TO_BILLING', shipmentIds: shipments.map((row) => row.shipmentId), params: { review: { source: 'LOAD_REVIEW' } },
+    }, identity)
+    // A dispatcher holds READY_TO_INVOICE singly but a batch release is Load Review's act.
+    await expect(batchRelease(DISPATCHER)).rejects.toThrow('Forbidden: RELEASE_TO_BILLING')
+    const result = await batchRelease(ADMIN) as { results: { shipmentId: string; ok: boolean; message: string | null }[] }
     expect(result.results.map((row) => row.shipmentId)).toEqual(shipments.map((row) => row.shipmentId))
     expect(result.results.map((row) => row.ok)).toEqual([true, false, true])
     expect(result.results[1].message).toBe('Not ready for accounting: Missing document: POD')
     expect(shipments.map((row) => table(TABLES.order).get(row.orderId)!.arStatus)).toEqual(['UNBILLED', 'DOCS_NEEDED', 'UNBILLED'])
     const releaseAudits = [...table(TABLES.audit).values()].filter((row) => row.action === 'READY_TO_INVOICE')
     expect(releaseAudits.map((row) => [row.entityType, row.entityId])).toEqual([
-      ['SHIPMENT', shipments[0].shipmentId], ['SHIPMENT', shipments[2].shipmentId],
+      ['ORDER', shipments[0].orderId], ['ORDER', shipments[2].orderId],
     ])
   })
 
@@ -4645,8 +4648,8 @@ describe('READY_TO_INVOICE', () => {
     const REVIEW = { source: 'LOAD_REVIEW' }
 
     /** A delivered, documented own-fleet order; `tag` fills the rep, division and revenue the review needs. */
-    async function reviewable(tag: { rep?: boolean; division?: boolean; revenue?: number } = {}): Promise<DocIds> {
-      const ids = await deliveredOrder()
+    async function reviewable(tag: { rep?: boolean; division?: boolean; revenue?: number; customer?: Row } = {}): Promise<DocIds> {
+      const ids = await deliveredOrder(tag.customer)
       seedDocs(ids)
       // seedDocs keys by type alone; scope the ids so several shipments can coexist.
       for (const [id, doc] of [...table(TABLES.shipmentDocument)]) {
@@ -4662,7 +4665,13 @@ describe('READY_TO_INVOICE', () => {
         revDivision: tag.division === false ? null : 'BROKERAGE',
       })
       const order = table(TABLES.order).get(ids.orderId)!
-      table(TABLES.order).set(ids.orderId, { ...order, revenueCents: tag.revenue ?? 150_000 })
+      table(TABLES.order).set(ids.orderId, {
+        ...order,
+        revenueCents: tag.revenue ?? 150_000,
+        references: [{ code: 'PO', label: 'PO', value: 'PO-REVIEW-1', level: 'ORDER', visibility: 'CUSTOMER' }],
+      })
+      // The expense the review requirements read: what the load costs.
+      table(TABLES.financials).set(ids.loadId, { ...(table(TABLES.financials).get(ids.loadId) ?? { id: ids.loadId, loadId: ids.loadId }), costCents: 90_000 })
       return ids
     }
     const releaseAudits = (action: string): Row[] => [...table(TABLES.audit).values()].filter((row) => row.action === action)
@@ -4715,9 +4724,50 @@ describe('READY_TO_INVOICE', () => {
       expect(result).toMatchObject({ orderId: ids.orderId, arStatus: 'DOCS_NEEDED', salesRepId: null, legacyImported: false })
       expect((result as unknown as { pendingDocReviewCount: number }).pendingDocReviewCount).toBe(0)
       expect(result.releaseGate.ok).toBe(true)
-      expect(result.extras.map((e) => e.code)).toEqual(['SALES_REP_MISSING', 'REV_DIVISION_MISSING', 'NO_CUSTOMER_CHARGES'])
+      expect(result.extras.map((e) => e.code)).toEqual(['REV_DIVISION_MISSING', 'SALES_REP_MISSING', 'NO_CUSTOMER_CHARGES', 'PROFIT_MISSING'])
       expect(JSON.stringify(table(TABLES.order).get(ids.orderId))).toBe(orderBefore)
       expect(table(TABLES.audit).size).toBe(auditsBefore)
+    })
+
+    describe('Step AP requirements and push', () => {
+      const extrasOf = async (ids: DocIds) =>
+        ((await call('REVIEW_LOAD', { shipmentId: ids.shipmentId }, REVIEWER)) as { extras: { code: string }[] }).extras.map((e) => e.code)
+
+      it('reads the customer list first, then the org default, then the built-in seven', async () => {
+        const noRep = { rep: false, division: false }
+        expect(await extrasOf(await reviewable({ ...noRep, customer: { reviewRequirements: ['salesRep'] } }))).toEqual(['SALES_REP_MISSING'])
+        expect(await extrasOf(await reviewable({ ...noRep, customer: { reviewRequirements: [] } }))).toEqual([])
+        table(TABLES.settings).set('default', { ...table(TABLES.settings).get('default')!, reviewRequirements: ['revDivision'] })
+        expect(await extrasOf(await reviewable(noRep))).toEqual(['REV_DIVISION_MISSING'])
+        // The customer still wins over the org default.
+        expect(await extrasOf(await reviewable({ ...noRep, customer: { reviewRequirements: ['salesRep'] } }))).toEqual(['SALES_REP_MISSING'])
+      })
+
+      it('refuses the release on the same list the push read', async () => {
+        const ids = await reviewable({ rep: false, customer: { reviewRequirements: ['salesRep'] } })
+        await expect(ready(ids.orderId, { review: REVIEW })).rejects.toThrow('Not ready for accounting: Missing sales rep')
+        const pushed = (await call('BATCH_SHIPMENT_TASK', { task: 'PUSH_TO_LOAD_REVIEW', shipmentIds: [ids.shipmentId] }, REVIEWER)) as { results: { ok: boolean; reasons?: string[] }[] }
+        expect(pushed.results[0]).toMatchObject({ ok: false, reasons: ['Missing sales rep'] })
+      })
+
+      it('pushes the clean rows, reports each refused row with its reasons, and stamps only the pushed', async () => {
+        const good = await reviewable()
+        const bad = await reviewable({ rep: false, division: false })
+        const run = () => call('BATCH_SHIPMENT_TASK', { task: 'PUSH_TO_LOAD_REVIEW', shipmentIds: [good.shipmentId, bad.shipmentId] }, REVIEWER) as Promise<{ results: { ok: boolean; message: string | null; reasons?: string[] }[] }>
+        const first = await run()
+        expect(first.results.map((r) => r.ok)).toEqual([true, false])
+        expect(first.results[1].reasons).toEqual(['Missing revenue division', 'Missing sales rep'])
+        expect(table(TABLES.shipment).get(good.shipmentId)!.loadReviewPushedAt).toBeTruthy()
+        expect(table(TABLES.shipment).get(bad.shipmentId)!.loadReviewPushedAt).toBeUndefined()
+        expect((await run()).results[0]).toMatchObject({ ok: true, message: 'Already in Load Review' })
+      })
+
+      it('refuses the tenth shipment of a batch before any row is touched', async () => {
+        const ids = await reviewable()
+        const shipmentIds = Array.from({ length: 10 }, () => ids.shipmentId)
+        await expect(call('BATCH_SHIPMENT_TASK', { task: 'PUSH_TO_LOAD_REVIEW', shipmentIds }, REVIEWER)).rejects.toThrow('at most 9')
+        expect(table(TABLES.shipment).get(ids.shipmentId)!.loadReviewPushedAt).toBeUndefined()
+      })
     })
 
     it('REVIEW_LOAD answers for an already released order and carries the gate failures', async () => {
@@ -4737,7 +4787,7 @@ describe('READY_TO_INVOICE', () => {
     it('refuses a review release with no sales rep, no division or no charges, listed together', async () => {
       const ids = await reviewable({ rep: false, division: false, revenue: 0 })
       await expect(ready(ids.orderId, { review: REVIEW })).rejects.toThrow(
-        'Not ready for accounting: Missing sales rep; Missing revenue division; No customer charges',
+        'Not ready for accounting: Missing revenue division; Missing sales rep; No customer charges; Profit not available (needs revenue and expense)',
       )
       expect(table(TABLES.order).get(ids.orderId)!.arStatus).toBe('DOCS_NEEDED')
       expect(releaseAudits('LOAD_REVIEW_RELEASED')).toEqual([])
@@ -7952,6 +8002,94 @@ describe('Step AM — cover flow and assignment ladder', () => {
       expect(out.repost).toMatchObject({ ok: false })
       expect(String((out.repost as Row).message)).toMatch(/Finish building/)
       expect(table(TABLES.carrier).get(loadCarrierId)!.status).toBe('BOUNCED')
+    })
+  })
+})
+
+// ── Step AQ — an Ivan Cartage driver is a Driver record, never typed ─────────
+
+describe('Step AQ — own-fleet drivers come from the Driver records', () => {
+  const TYPED = { driverName: 'Typed Person', driverPhone: '+12245550137', truckNumber: '4471', trailerNumber: 'T-88' }
+  const NO_TYPED = /A typed driver name is not accepted/
+
+  /** A leg on a directory carrier named Ivan Cartage, MyCarrierPackets-complete. */
+  async function ivanLeg(): Promise<{ loadId: string; loadCarrierId: string }> {
+    const ids = await sourcingLoad()
+    seedBookableCarrier('car-ivan', { name: 'Ivan Cartage', mcpStatus: 'ACCEPTABLE' })
+    await call('COVER_CARRIER', {
+      loadId: ids.loadId, expectedUpdatedAt: table(TABLES.load).get(ids.loadId)!.updatedAt, carrierId: 'car-ivan', carrierRateCents: 0,
+    })
+    const leg = [...table(TABLES.carrier).values()].find((c) => c.status === 'ACTIVE')!
+    return { loadId: ids.loadId, loadCarrierId: String(leg.id) }
+  }
+  const leg = (id: string): Row => table(TABLES.carrier).get(id)!
+
+  it('ENTER_DRIVER_INFO refuses a typed name and fills phone from the record for a roster driver', async () => {
+    const { loadCarrierId } = await ivanLeg()
+    await expect(call('ENTER_DRIVER_INFO', { loadCarrierId, ...TYPED })).rejects.toThrow(NO_TYPED)
+    expect(leg(loadCarrierId).driverName).toBeFalsy()
+
+    await call('ENTER_DRIVER_INFO', { loadCarrierId, driverId: 'drv-1', truckNumber: '4471', trailerNumber: 'T-88' })
+    expect(leg(loadCarrierId)).toMatchObject({
+      driverName: 'Driver One', driverPhone: '555-0001', truckNumber: '4471', trailerNumber: 'T-88', assignmentStatus: 'DRIVER_INFO_ENTERED',
+    })
+  })
+
+  it('refuses an inactive, broker or unknown driver id', async () => {
+    const { loadCarrierId } = await ivanLeg()
+    seedDriver('drv-off', { name: 'Gone Driver', active: false })
+    table(TABLES.driver).set('drv-broker', { id: 'drv-broker', name: 'BROKER COVERED', type: 'broker', active: true })
+    const send = (driverId: string): Promise<unknown> =>
+      call('ENTER_DRIVER_INFO', { loadCarrierId, driverId, truckNumber: '1', trailerNumber: '2' })
+    await expect(send('drv-off')).rejects.toThrow(/Gone Driver is inactive/)
+    await expect(send('drv-broker')).rejects.toThrow(/placeholder/)
+    await expect(send('drv-nope')).rejects.toThrow('Driver not found: drv-nope')
+    expect(leg(loadCarrierId).driverName).toBeFalsy()
+  })
+
+  it('UPDATE_LOAD_CARRIER_DETAILS refuses a typed driver on an Ivan Cartage leg and takes a roster id', async () => {
+    const { loadCarrierId } = await ivanLeg()
+    const update = (extra: Row): Promise<unknown> =>
+      call('UPDATE_LOAD_CARRIER_DETAILS', { loadCarrierId, expectedUpdatedAt: leg(loadCarrierId).updatedAt, ...extra })
+    await expect(update({ driverName: 'Typed Person' })).rejects.toThrow(NO_TYPED)
+    await expect(update({ driver2Name: 'Typed Person' })).rejects.toThrow(NO_TYPED)
+    await update({ driverId: 'drv-2', truckNumber: '9', trailerNumber: '8' })
+    expect(leg(loadCarrierId)).toMatchObject({ driverName: 'Driver Two', driverPhone: '555-0002', truckNumber: '9' })
+    // Seal and trip numbers are not drivers: they stay editable.
+    await update({ sealNumber: 'S-1' })
+    expect(leg(loadCarrierId).sealNumber).toBe('S-1')
+  })
+
+  it('COVER_CARRIER / BOOK_CARRIER on Ivan Cartage refuse a typed driver and fill from the record', async () => {
+    const ids = await sourcingLoad()
+    seedBookableCarrier('car-ivan', { name: 'Ivan Cartage', mcpStatus: 'ACCEPTABLE' })
+    const cover = (extra: Row): Promise<unknown> => call('COVER_CARRIER', {
+      loadId: ids.loadId, expectedUpdatedAt: table(TABLES.load).get(ids.loadId)!.updatedAt, carrierId: 'car-ivan', carrierRateCents: 0, ...extra,
+    })
+    await expect(cover({ driverName: 'Typed Person' })).rejects.toThrow(NO_TYPED)
+    expect([...table(TABLES.carrier).values()]).toHaveLength(0)
+    await cover({ driverId: 'drv-1', truckNumber: '4471', trailerNumber: 'T-88' })
+    expect([...table(TABLES.carrier).values()][0]).toMatchObject({ driverName: 'Driver One', driverPhone: '555-0001', truckNumber: '4471' })
+  })
+
+  it('a brokered carrier keeps free-text driver fields', async () => {
+    const ids = await sourcingLoad()
+    seedBookableCarrier('car-2', { name: 'Reliable Freight', mcpStatus: 'ACCEPTABLE' })
+    await call('COVER_CARRIER', {
+      loadId: ids.loadId, expectedUpdatedAt: table(TABLES.load).get(ids.loadId)!.updatedAt, carrierId: 'car-2', carrierRateCents: 100_000, ...TYPED,
+    })
+    expect([...table(TABLES.carrier).values()][0]).toMatchObject({ driverName: 'Typed Person', truckNumber: '4471' })
+  })
+
+  it('ASSIGN_ASSET fills the truck and trailer from the driver record and refuses a typed second driver', async () => {
+    const ids = await sourcingLoad()
+    seedDriver('drv-rig', { name: 'Rig Driver', phone: '555-0003', assignedTruckId: 'eq-truck', assignedTrailerId: 'eq-trailer' })
+    await expect(call('ASSIGN_ASSET', { loadId: ids.loadId, driverId: 'drv-rig', driver2: { name: 'Typed Person', phone: '555' } })).rejects.toThrow(NO_TYPED)
+    expect([...table(TABLES.carrier).values()]).toHaveLength(0)
+
+    await call('ASSIGN_ASSET', { loadId: ids.loadId, driverId: 'drv-rig' })
+    expect([...table(TABLES.carrier).values()][0]).toMatchObject({
+      kind: 'OWN_ASSET', driverName: 'Rig Driver', driverPhone: '555-0003', truckId: 'eq-truck', trailerId: 'eq-trailer',
     })
   })
 })

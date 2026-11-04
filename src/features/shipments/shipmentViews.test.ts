@@ -14,7 +14,6 @@ import {
   carrierLabel,
   detailOptions,
   divisionLabel,
-  massReleaseReady,
   matchesBoardFilters,
   isDemoShipment,
   matchesQuery,
@@ -425,43 +424,10 @@ describe('board filter set helpers', () => {
   })
 })
 
-describe('mass release readiness', () => {
-  it('is ready only when documents are complete and the order is not released', () => {
-    expect(massReleaseReady(row('ready', { status: 'DELIVERED', docsMissing: [] }))).toEqual({ ready: true, reason: null })
-  })
-
-  it('refuses with a reason when documents are missing', () => {
-    const result = massReleaseReady(row('missing', { status: 'DELIVERED', docsMissing: ['POD'] }))
-    expect(result.ready).toBe(false)
-    expect(result.reason).toMatch(/Missing documents/i)
-    expect(result.reason).toMatch(/Proof of delivery/i)
-  })
-
-  it('refuses when the document gate has not run', () => {
-    expect(massReleaseReady(row('unchecked', { status: 'DELIVERED', docsMissing: null }))).toEqual({
-      ready: false, reason: 'Documents not checked',
-    })
-  })
-
-  it('refuses when the order is already released', () => {
-    expect(massReleaseReady(row('released', { status: 'DELIVERED', docsMissing: [], readyToInvoiceAt: '2026-01-01T00:00:00.000Z' })))
-      .toEqual({ ready: false, reason: 'Already released to accounting' })
-    expect(massReleaseReady(row('invoiced', { status: 'DELIVERED', docsMissing: [], invoiceId: 'inv-1' })))
-      .toEqual({ ready: false, reason: 'Already released to accounting' })
-  })
-
-  it('refuses voided and canceled shipments', () => {
-    expect(massReleaseReady(row('void', { status: 'DELIVERED', docsMissing: [], voidedAt: '2026-01-01T00:00:00.000Z' })))
-      .toEqual({ ready: false, reason: 'Voided shipment' })
-    expect(massReleaseReady(row('canceled', { status: 'CANCELED', docsMissing: [] })))
-      .toEqual({ ready: false, reason: 'Canceled shipment' })
-  })
-})
-
 describe('Aljex column order', () => {
   it('lists the Active Shipments default columns in plan order', () => {
     expect(ALJEX_COLUMN_KEYS).toEqual([
-      'exceptions', 'status', 'proNumber', 'massRelease', 'equip', 'customerReference', 'description',
+      'exceptions', 'status', 'proNumber', 'equip', 'customerReference', 'description',
       'revenueType', 'salesRep', 'customerName', 'carrier', 'carrierAssignment', 'customerTotalRate', 'carrierTotalRates',
       'grossProfit', 'netMargin', 'pickupShip', 'originCity', 'destinationCity', 'deliveryAppt', 'stops',
       'driver', 'truck', 'arStatus', 'apStatus', 'lastUpdateAt', 'nextCheckCallAt', 'mode', 'docsMissing',

@@ -18,7 +18,7 @@ let divisions: OwnershipDivisionRecord[] = []
 vi.mock('@/features/tms/useOwnershipDivisions', () => ({
   useOwnershipDivisions: () => ({ divisions, loading: false, error: null, refresh: () => undefined }),
 }))
-vi.mock('@/lib/apiClient', () => ({ listIntakeLoads: vi.fn(), countOpenIntakeLoads: vi.fn().mockResolvedValue(0) }))
+vi.mock('@/lib/apiClient', () => ({ listIntakeLoads: vi.fn(), countOpenIntakeLoads: vi.fn().mockResolvedValue(0), batchShipmentTask: vi.fn() }))
 
 function Where() {
   const loc = useLocation()
@@ -132,5 +132,37 @@ describe('IntakeBoard', () => {
     expect(first).toHaveTextContent('Needs review')
     expect(second).toHaveTextContent('Reviewed')
     expect(second).not.toHaveTextContent('Needs review')
+  })
+  describe('Push to Load Review', () => {
+    it('has Push to Load Review and no Release', async () => {
+      renderBoard()
+      await screen.findByText('First tender')
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Select row il:a' }))
+      expect(screen.getByRole('button', { name: 'Push to Load Review' })).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: /Release/ })).not.toBeInTheDocument()
+    })
+
+    it('refuses an intake row with no shipment yet, per row, without calling the server', async () => {
+      renderBoard()
+      await screen.findByText('First tender')
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Select row il:a' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Push to Load Review' }))
+      const result = await screen.findByTestId('batch-result-il:a')
+      expect(result).toHaveTextContent('No shipment yet')
+      expect(api.batchShipmentTask).not.toHaveBeenCalled()
+    })
+
+    it('pushes the shipment a moved row became and reports the server answer against that row', async () => {
+      vi.mocked(api.batchShipmentTask).mockResolvedValue({ results: [{ shipmentId: 's-9', number: 'S-9', ok: false, message: 'x', reasons: ['Missing sales rep'] }] })
+      vi.mocked(api.listIntakeLoads).mockImplementation(async () => [
+        intakeRow({ id: 'il:moved', status: 'MOVED', shipmentId: 's-9', shipmentNumber: 'S-9', subject: 'Moved one' }),
+      ])
+      renderBoard('/tms/shipments/intake?status=moved')
+      await screen.findByText('Moved one')
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Select row il:moved' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Push to Load Review' }))
+      await waitFor(() => expect(screen.getByTestId('batch-result-il:moved')).toHaveTextContent('Missing sales rep'))
+      expect(api.batchShipmentTask).toHaveBeenCalledWith({ task: 'PUSH_TO_LOAD_REVIEW', shipmentIds: ['s-9'], params: {} })
+    })
   })
 })

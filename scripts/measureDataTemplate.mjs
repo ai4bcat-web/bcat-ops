@@ -22,6 +22,8 @@ import { MemoryContext, StackSelectionStrategy, Toolkit } from '@aws-cdk/toolkit
 import { CloudAssembly } from 'aws-cdk-lib/cx-api'
 import { tsImport } from 'tsx/esm/api'
 
+import { reportLambdaEnv, scanAssembly } from './checkLambdaEnvSize.mjs'
+
 const CAP_BYTES = 1_000_000
 const REPORT_OVER = 100_000
 
@@ -97,4 +99,7 @@ const headroom = CAP_BYTES - data.bytes
 console.log(`data stack: ${data.bytes} bytes, ${headroom} under the ${CAP_BYTES} cap`)
 if (dataAsset) console.log(`asset key:  ${dataAsset[0]}`)
 console.log(`outdir:     ${outdir}`)
+console.log('')
+const envOk = reportLambdaEnv(scanAssembly(outdir))
 if (headroom <= 0) process.exit(2)
+if (!envOk) process.exit(3)

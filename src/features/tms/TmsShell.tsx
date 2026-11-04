@@ -11,6 +11,7 @@ import {
   LayoutGrid,
   LogOut,
   Menu,
+  MessageSquareWarning,
   Moon,
   Search,
   Sun,
@@ -529,6 +530,11 @@ export function TmsShell({
               {shownEmail ? <span className="tms-user-email">{shownEmail}</span> : null}
             </span>
           </div>
+          {/* Feedback is open to every signed-in user (no page grant), so it lives in the rail footer. */}
+          <NavLink to="/feedback" className="tms-logout tms-foot-link" aria-label="Feedback" title="Feedback">
+            <MessageSquareWarning size={16} aria-hidden="true" />
+            <span className="tms-logout-label">Feedback</span>
+          </NavLink>
           {onLogout ? (
             <button type="button" className="tms-logout" aria-label="Log out" onClick={onLogout}>
               <LogOut size={16} aria-hidden="true" />

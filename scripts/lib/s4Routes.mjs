@@ -17,6 +17,7 @@ export const S4_ROUTES = [
   { nn: 'S03', slug: 'financial-operations', path: '/financial-operations', pattern: '/financial-operations' },
   { nn: 'S04', slug: 'expenses', path: '/expenses', pattern: '/expenses', phone: true },
   { nn: 'S05', slug: 'platform-health', path: '/platform-health', pattern: '/platform-health' },
+  { nn: 'S06', slug: 'feedback', path: '/feedback', pattern: '/feedback' },
 ]
 
 /** Patterns for S3's completeness gate (outside /tms), normalised the way S3's `normalise` does. */

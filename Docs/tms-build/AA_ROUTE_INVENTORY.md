@@ -142,6 +142,7 @@ Totals: pages 78 · redirects 41 (Step AE: Quotes › Lane rates retired into a 
 | /tms/brokerage/integrations | page | Settings › Integrations | ADMIN | /tms/brokerage/integrations → /tms/brokerage/integrations | 31 |
 | /tms/brokerage/integrations/:provider | page | Settings › Integrations | ADMIN | unchanged | 31b |
 | /platform-health | page | Settings › Platform health | ADMIN | /platform-health → /platform-health | — |
+| /feedback | offnav | Settings › Feedback (rail footer link, every signed-in user) | any signed-in user | /feedback → /feedback | — |
 | /tms/brokerage/reports | page | Settings › Reports | reports\|tms | /tms/brokerage/reports → /tms/brokerage/reports | 28 |
 | /tms/brokerage/spot-quoter | page | Settings › Spot quoter & e-mail | ADMIN | (new) | AA14 |
 | /tms/brokerage/users | page | Settings › Users & roles | ADMIN | /tms/brokerage/users → /tms/brokerage/users | 26 |

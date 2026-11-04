@@ -88,7 +88,6 @@ import {
   boardRowTone,
   boardStatusOf,
   carrierLabel,
-  massReleaseReady,
   matchesQuery,
   needsDriver,
   toCsv,
@@ -103,6 +102,15 @@ import {
   statusCellText,
 } from './shipmentGridColumns'
 import type { BatchShipmentTask, CustomerRecord, LocationRecord, ShipmentColumnTemplateRecord, TmsSettings, UserProfileRecord } from '@/types/tms'
+import { BOARD_FLAGS, BOARD_FLAG_LABELS, flagCounts, matchesFlags, type BoardFlag } from './boardChips'
+import { BatchActionBar } from './board/BatchActionBar'
+import {
+  outcomesFromServer,
+  pushRefusals,
+  selectAllUpToCap,
+  toggleSelection,
+  type BatchOutcome,
+} from './batchReview'
 
 type Period = { key: 'this' | 'last' | 'last3' } | { key: 'month'; month: string }
 
@@ -148,21 +156,6 @@ const DEFAULT_COLUMNS = ['proNumber', ...ALJEX_COLUMN_KEYS.filter((k) => k !== '
 
 const COLUMN_BY_KEY = Object.fromEntries(SHIPMENT_GRID_COLUMNS.map((c) => [c.key, c]))
 
-/** The quick "needs attention" toggles that used to be the filter panel's Flags. */
-type BoardFlag = 'checkCallOverdue' | 'openExceptions' | 'docsMissing'
-const FLAG_LABELS: Record<BoardFlag, string> = {
-  checkCallOverdue: 'Check call overdue',
-  openExceptions: 'Open exceptions',
-  docsMissing: 'Missing documents',
-}
-
-function matchesFlags(row: ShipmentRow, flags: ReadonlySet<BoardFlag>, nowMs: number): boolean {
-  if (flags.has('checkCallOverdue') && checkCallState({ nextCheckCallAt: row.nextCheckCallAt }, nowMs) !== 'OVERDUE') return false
-  if (flags.has('openExceptions') && (row.openIncidentCount ?? 0) === 0) return false
-  if (flags.has('docsMissing') && (row.docsMissing?.length ?? 0) === 0) return false
-  return true
-}
-
 /**
  * The footer's Batch task offers one flat list of choices; the router takes a task and
  * its parameters. This is the one place the two vocabularies meet.
@@ -171,7 +164,6 @@ function batchTaskOf(
   action: string,
   driverParams?: (driverId: string) => Record<string, unknown>,
 ): { task: BatchShipmentTask; params: Record<string, unknown> } | null {
-  if (action === 'release') return { task: 'RELEASE_TO_BILLING', params: {} }
   if (action.startsWith('rep:')) return { task: 'SET_SALES_REP', params: { repId: action.slice(4) } }
   if (action.startsWith('carrierRep:')) return { task: 'SET_CARRIER_REP', params: { repId: action.slice(11) } }
   if (action.startsWith('carrierTeam:')) return { task: 'SET_CARRIER_REP', params: { teamKey: action.slice(12) } }
@@ -504,6 +496,9 @@ function BoardPane({
   const [filters, setFilters] = useState<DenseFilters>({})
   const [flags, setFlags] = useState<ReadonlySet<BoardFlag>>(() => new Set())
   const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const [capRefusal, setCapRefusal] = useState<string | null>(null)
+  const [barOutcomes, setBarOutcomes] = useState<BatchOutcome[] | undefined>()
+  const [barRunning, setBarRunning] = useState(false)
   const [mapVisible, setMapVisible] = useState(false)
   const [iconKeyOpen, setIconKeyOpen] = useState(false)
   const [batchOpen, setBatchOpen] = useState(false)
@@ -553,16 +548,23 @@ function BoardPane({
   // List scope, then search, then the quick toggles, then voided rows (hidden unless the Status
   // header asks for them), then every header filter. `fitRows` is the list before the header
   // filters: the facet options and auto-fit widths are drawn from it so they do not shift as you filter.
+  // The chips count this base: the list after search, scope, voided and demo handling.
+  const chipBase = useMemo(
+    () =>
+      listRows.filter(
+        (r) =>
+          (!query || matchesQuery(r, query))
+          && (wantsVoided || boardStatusOf(r) !== 'VOIDED')
+          && (!demoOnly || isDemoShipment(r)),
+      ),
+    [listRows, query, wantsVoided, demoOnly],
+  )
+  const chipCounts = useMemo(() => flagCounts(chipBase, Date.now()), [chipBase])
   const fitRows = useMemo(() => {
+    if (flags.size === 0) return chipBase
     const nowMs = Date.now()
-    return listRows.filter(
-      (r) =>
-        (!query || matchesQuery(r, query))
-        && (flags.size === 0 || matchesFlags(r, flags, nowMs))
-        && (wantsVoided || boardStatusOf(r) !== 'VOIDED')
-        && (!demoOnly || isDemoShipment(r)),
-    )
-  }, [listRows, query, flags, wantsVoided, demoOnly])
+    return chipBase.filter((r) => matchesFlags(r, flags, nowMs))
+  }, [chipBase, flags])
   const filteredRows = useMemo(() => filterRows(fitRows, gridColumns, filters), [fitRows, gridColumns, filters])
   const toggleDemo = useCallback(() => {
     setPageSize(PAGE_SIZE_INITIAL)
@@ -611,9 +613,9 @@ function BoardPane({
   }, [filteredRows, columnKeys])
 
   // Batch task actions. Everything but the CSV runs on the server: one call, one
-  // audit row per shipment, and the release gate decides each row for itself.
+  // audit row per shipment.
   const batchActions = useMemo<BatchTaskAction[]>(() => {
-    const actions: BatchTaskAction[] = [{ key: 'release', label: 'Release to billing' }]
+    const actions: BatchTaskAction[] = []
     for (const u of staffProfiles) {
       actions.push({ key: `rep:${u.id}`, label: `Change sales rep to ${displayName(u)}` })
     }
@@ -719,6 +721,47 @@ function BoardPane({
     }
   }, [batchAction, selectedRows, columnKeys, handleRefresh, ivanDrivers, equipment])
 
+  const toggleRow = useCallback(
+    (id: string) => {
+      const next = toggleSelection(selectedIds, id)
+      setSelectedIds(next.ids)
+      setCapRefusal(next.refusal)
+    },
+    [selectedIds],
+  )
+
+  // Step AP: Push to Load Review. Rows that fail their customer's requirements are refused
+  // here with every reason; the rest go to the server, which decides each row again.
+  // Release is not here: Load Review is the only way into billing.
+  const runPush = useCallback(async () => {
+    if (selectedRows.length === 0) return
+    setBarRunning(true)
+    setBarOutcomes(undefined)
+    const labelOf = (id: string, fallback: string | null) => selectedRows.find((r) => r.id === id)?.number ?? fallback ?? id
+    const refused = pushRefusals(selectedRows, { customers, orgDefault: settings?.reviewRequirements })
+    const refusedIds = new Set(refused.map((o) => o.rowId))
+    const sendRows = selectedRows.filter((r) => !refusedIds.has(r.id))
+    let sent: BatchOutcome[] = []
+    if (sendRows.length > 0) {
+      try {
+        const res = await batchShipmentTask({ task: 'PUSH_TO_LOAD_REVIEW', shipmentIds: sendRows.map((r) => r.id), params: {} })
+        sent = outcomesFromServer(res.results, labelOf)
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Batch failed'
+        sent = sendRows.map((r) => ({ rowId: r.id, rowLabel: r.number, ok: false, reasons: [message] }))
+      }
+    }
+    const order = new Map(selectedRows.map((r, i) => [r.id, i]))
+    const all = [...refused, ...sent].sort((a, b) => (order.get(a.rowId) ?? 0) - (order.get(b.rowId) ?? 0))
+    setBarOutcomes(all)
+    setBarRunning(false)
+    // Done rows leave the selection; the ones that failed stay selected so they can be fixed and retried.
+    const failedIds = new Set(all.filter((o) => !o.ok).map((o) => o.rowId))
+    setSelectedIds((prev) => prev.filter((id) => failedIds.has(id)))
+    setCapRefusal(null)
+    await handleRefresh()
+  }, [selectedRows, customers, settings, handleRefresh])
+
   const renderCell = useCallback(
     (row: ShipmentRow, columnKey: string): ReactNode => {
       if (columnKey === 'exceptions') {
@@ -736,21 +779,6 @@ function BoardPane({
       }
       if (columnKey === 'status') {
         return <span className="font-medium">{statusCellText(row)}</span>
-      }
-      if (columnKey === 'massRelease') {
-        const { ready, reason } = massReleaseReady(row)
-        if (ready) {
-          return (
-            <input
-              type="checkbox"
-              aria-label={`Release ${row.number}`}
-              checked={selectedIds.includes(row.id)}
-              onChange={() => setSelectedIds((prev) => (prev.includes(row.id) ? prev.filter((id) => id !== row.id) : [...prev, row.id]))}
-              onClick={(e) => e.stopPropagation()}
-            />
-          )
-        }
-        return <span className="tms-muted text-xs">{reason}</span>
       }
       if (columnKey === 'customerName') {
         if (!isCustomerUnresolved(row)) return <>{customerDisplayName(row)}</>
@@ -792,7 +820,7 @@ function BoardPane({
       const col = BOARD_COLUMNS.find((c) => c.key === columnKey)
       return col ? col.value(row) : null
     },
-    [selectedIds],
+    [],
   )
 
   const rowHandlers = useCallback(
@@ -938,7 +966,7 @@ function BoardPane({
           />
         )}
         <TmsFilterChip label="Demo" value={demoOnly ? 'only' : null} onClick={toggleDemo} />
-        {(Object.keys(FLAG_LABELS) as BoardFlag[]).map((flag) => (
+        {BOARD_FLAGS.map((flag) => (
           <TmsButton
             key={flag}
             size="sm"
@@ -946,7 +974,7 @@ function BoardPane({
             aria-pressed={flags.has(flag)}
             onClick={() => toggleFlag(flag)}
           >
-            {FLAG_LABELS[flag]}
+            {BOARD_FLAG_LABELS[flag]} ({chipCounts[flag]})
           </TmsButton>
         ))}
         <ClearFiltersButton count={activeFilterCount(filters) + flags.size} onClear={clearFilters} />
@@ -968,6 +996,15 @@ function BoardPane({
         <SummaryToggle open={prefs.kpiOpen} onToggle={() => prefs.setKpiOpen(!prefs.kpiOpen)} />
       </div>
       <DenseKpiStrip open={prefs.kpiOpen} items={kpis} />
+      <BatchActionBar
+        actionLabel="Push to Load Review"
+        selectedCount={selectedIds.length}
+        running={barRunning}
+        refusal={capRefusal}
+        outcomes={barOutcomes}
+        onRun={() => void runPush()}
+        onClear={() => { setSelectedIds([]); setCapRefusal(null); setBarOutcomes(undefined) }}
+      />
 
       <div className="tms-dense-body">
         {mapVisible ? (
@@ -999,10 +1036,12 @@ function BoardPane({
             selectable
             selectedIds={selectedSet}
             toneOf={boardRowTone}
-            onToggle={(id) => setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))}
-            onToggleAll={() =>
-              setSelectedIds((prev) => (prev.length === shownRows.length ? [] : shownRows.map((r) => r.id)))
-            }
+            onToggle={toggleRow}
+            onToggleAll={() => {
+              const next = selectAllUpToCap(selectedIds, shownRows.map((r) => r.id))
+              setSelectedIds(next.ids)
+              setCapRefusal(next.refusal)
+            }}
             onRowClick={(row) => setOpenDrawerId(row.id)}
             onRowDoubleClick={(row) => navigate(`/tms/shipments/${row.id}`)}
             empty="No shipments match."

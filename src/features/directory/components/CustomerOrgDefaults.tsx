@@ -3,9 +3,11 @@ import { TmsButton, TmsDialog, TmsField, TmsInput, TmsTextarea } from '@/feature
 import type { TmsSettings } from '@/types/tms'
 import { MoneyField } from './MoneyField'
 import { ReferencesEditor } from './ReferencesEditor'
+import { ReviewRequirementsField } from './ReviewRequirementsField'
+import { DEFAULT_REVIEW_REQUIREMENTS } from '@/lib/reviewRequirements'
 import { DocumentTypesField } from '@/features/documents/DocumentTypesField'
 
-type Defaults = Pick<TmsSettings, 'defaultCreditLimitCents' | 'defaultFreeCreditRequired' | 'defaultCreditUsageWarningBps' | 'defaultMaxDaysLate' | 'requireCustomerApproval' | 'defaultRequiredDocs' | 'defaultRequiredReferences' | 'rateConTerms'>
+type Defaults = Pick<TmsSettings, 'defaultCreditLimitCents' | 'defaultFreeCreditRequired' | 'defaultCreditUsageWarningBps' | 'defaultMaxDaysLate' | 'requireCustomerApproval' | 'defaultRequiredDocs' | 'reviewRequirements' | 'defaultRequiredReferences' | 'rateConTerms'>
 
 export function CustomerOrgDefaults({ settings, onSave, onClose }: {
   settings: TmsSettings | null
@@ -19,6 +21,7 @@ export function CustomerOrgDefaults({ settings, onSave, onClose }: {
     defaultMaxDaysLate: settings?.defaultMaxDaysLate ?? null,
     requireCustomerApproval: settings?.requireCustomerApproval ?? false,
     defaultRequiredDocs: settings?.defaultRequiredDocs ?? [],
+    reviewRequirements: settings?.reviewRequirements ?? [...DEFAULT_REVIEW_REQUIREMENTS],
     defaultRequiredReferences: settings?.defaultRequiredReferences ?? [],
     rateConTerms: settings?.rateConTerms ?? null,
   })
@@ -89,6 +92,14 @@ export function CustomerOrgDefaults({ settings, onSave, onClose }: {
           disabled={saving}
           help="What every customer needs on file before a shipment can be released to accounting and invoiced, unless that customer asks for its own list."
         />
+        <div>
+          <h3 style={{ marginBottom: 8 }}>Required for Load Review</h3>
+          <ReviewRequirementsField
+            value={draft.reviewRequirements}
+            onChange={(next) => setDraft({ ...draft, reviewRequirements: next ?? [...DEFAULT_REVIEW_REQUIREMENTS] })}
+            disabled={saving}
+          />
+        </div>
         <div>
           <h3 style={{ marginBottom: 8 }}>Required references</h3>
           <ReferencesEditor references={draft.defaultRequiredReferences ?? []} onChange={(refs) => setDraft({ ...draft, defaultRequiredReferences: refs })} disabled={saving} />

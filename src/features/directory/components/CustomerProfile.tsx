@@ -42,6 +42,7 @@ import { ReferencesEditor } from './ReferencesEditor'
 import { PricingDefaultsForm } from './PricingDefaultsForm'
 import { QuotingDefaultsForm } from './QuotingDefaultsForm'
 import { CreditLimitCard } from './CreditLimitCard'
+import { ReviewRequirementsField } from './ReviewRequirementsField'
 import { CustomerArTab } from './CustomerArTab'
 import { StatusActionDialog } from './StatusActionDialog'
 import { FlowDefaultsCard } from './FlowDefaultsCard'
@@ -337,6 +338,13 @@ export function CustomerProfile({
                 value={value.requiredDocs}
                 onChange={(next) => set('requiredDocs', next)}
                 help="What must be on file before this customer's shipments can be released to accounting and invoiced. Leave every box clear to use the organization default; document upload is managed per shipment."
+              />
+            </TmsCard>
+            <TmsCard title="Required for Load Review">
+              <ReviewRequirementsField
+                value={value.reviewRequirements}
+                inheritFrom={settings?.reviewRequirements ?? null}
+                onChange={(next) => set('reviewRequirements', next)}
               />
             </TmsCard>
             <TmsCard title="Required references">

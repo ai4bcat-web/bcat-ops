@@ -23,6 +23,26 @@ const { getTmsSettings, getCarrierBundle, bookCarrier } = vi.hoisted(() => ({
   getCarrierBundle: vi.fn(),
   bookCarrier: vi.fn(async (_input: BookCarrierFields & { loadId: string; expectedUpdatedAt: string }) => ({})),
 }))
+// The own-fleet roster: our Driver records, their trucks and the truck's work phone.
+vi.mock('@/hooks/useDrivers', () => ({
+  useDrivers: () => ({
+    drivers: [
+      { id: 'd1', name: 'Alvaro Ruiz', phone: '+13125550101', active: true, assignedTruckId: 't1', assignedTrailerId: 'tr1' },
+      { id: 'd2', name: 'Gone Driver', phone: '', active: false },
+    ],
+  }),
+}))
+vi.mock('@/hooks/useTrucks', () => ({
+  useTrucks: () => ({
+    equipment: [
+      { id: 't1', type: 'truck', unitNumber: '12', active: true },
+      { id: 'tr1', type: 'trailer', unitNumber: 'R-7', active: true },
+    ],
+  }),
+}))
+vi.mock('@/hooks/useTruckConfigs', () => ({
+  useTruckConfigs: () => ({ byId: new Map([['t1', { truckId: 't1', unitNumber: '12', phone: '+13125550100' }]]) }),
+}))
 // The carrier-rep field is a RepPicker, so the dialog reads the staff directory.
 const staff = vi.hoisted(() => [
   {
@@ -211,5 +231,42 @@ describe('BookCarrierDialog', () => {
     expect(params.get('loadId')).toBe('load-1')
     expect(params.get('q')).toBe('Ivan Cartage')
     expect(onClose).toHaveBeenCalled()
+  })
+
+  describe('Ivan Cartage (own fleet)', () => {
+    async function toDispatchStep() {
+      state.carrier = carrier({ name: 'Ivan Cartage' })
+      renderDialog()
+      fireEvent.click(screen.getByText('Ivan Cartage'))
+      const rate = await screen.findByLabelText('Carrier rate')
+      fireEvent.change(rate, { target: { value: '0.00' } })
+      fireEvent.blur(rate)
+      await waitFor(() => expect(screen.getByText('Preflight')).toBeTruthy())
+      for (const box of screen.getAllByRole('checkbox')) fireEvent.click(box)
+      fireEvent.click(screen.getByRole('tab', { name: '3. Dispatch' }))
+    }
+
+    it('takes the driver from the roster only: a select, no typed driver, phone, truck or trailer', async () => {
+      await toDispatchStep()
+      const picker = await screen.findByLabelText('Driver') as HTMLSelectElement
+      expect(picker.tagName).toBe('SELECT')
+      expect([...picker.options].map((o) => o.text)).toEqual(['Pick a driver', 'Alvaro Ruiz · Truck 12 · Trailer R-7 · (312) 555-0100'])
+      for (const label of ['Driver phone', 'Truck #', 'Trailer #']) expect(screen.queryByLabelText(label)).toBeNull()
+    })
+
+    it('will not book without a driver, then sends the driver id with the numbers the record filled', async () => {
+      await toDispatchStep()
+      await waitFor(() => expect(bookButton().disabled).toBe(false))
+      fireEvent.click(bookButton())
+      expect(await screen.findByText('Pick the driver from our driver list.')).toBeTruthy()
+      expect(bookCarrier).not.toHaveBeenCalled()
+
+      fireEvent.change(screen.getByLabelText('Driver'), { target: { value: 'd1' } })
+      fireEvent.click(bookButton())
+      await waitFor(() => expect(bookCarrier).toHaveBeenCalledTimes(1))
+      const sent = bookCarrier.mock.calls[0][0] as Record<string, unknown>
+      expect(sent).toMatchObject({ driverId: 'd1', driverPhone: '+13125550100', truckNumber: '12', trailerNumber: 'R-7' })
+      expect(sent).not.toHaveProperty('driverName')
+    })
   })
 })

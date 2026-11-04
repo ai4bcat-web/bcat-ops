@@ -56,6 +56,7 @@ import { FleetManagerDashboardPage } from '@/features/fleet-dashboard/FleetManag
 import { DisputesPage } from '@/features/disputes/DisputesPage'
 import { DriverDisputesPage } from '@/features/disputes/DriverDisputesPage'
 import { FilesPage } from '@/features/files/FilesPage'
+import { FeedbackPage } from '@/features/feedback/FeedbackPage'
 import { ComplianceOverviewPage } from '@/features/compliance/overview/ComplianceOverviewPage'
 import { FinancialOperationsPage } from '@/features/financial-ops/FinancialOperationsPage'
 import { ExpensesOverviewPage } from '@/features/expenses/overview/ExpensesOverviewPage'
@@ -233,6 +234,8 @@ export default function App() {
               <Route path="/driver-view/:driverId" element={<RequirePage page="ownerOperatorPay"><DriverAppViewPage /></RequirePage>} />
               <Route path="/disputes" element={<RequirePage page="disputes"><DisputesPage /></RequirePage>} />
               <Route path="/files" element={<RequirePage page="files"><FilesPage /></RequirePage>} />
+              {/* Open to every signed-in user (no page grant) — it is where staff report problems. */}
+              <Route path="/feedback" element={<FeedbackPage />} />
               <Route path="/settings" element={<ParamRedirect to="/tms/brokerage" />} />
               {/* Integrations was written down under /settings before it became the
                   eighth My Brokerage tab; both shapes of that link still land. */}

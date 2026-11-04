@@ -35,7 +35,7 @@ function shipment(id: string, over: Record<string, unknown> = {}) {
   return {
     id, number: id.toUpperCase(), status: 'DELIVERED', customerId: 'c-1', customerName: 'Acme',
     deliveredAt: new Date(Date.now() - 2 * DAY).toISOString(), arStatus: 'DOCS_NEEDED',
-    assignmentType: 'OWN_ASSET', docsRequired: ['POD'], docsMissing: [], salesRepId: 'rep-1', revDivision: 'DRY',
+    assignmentType: 'OWN_ASSET', docsRequired: ['POD'], docsMissing: [], salesRepId: 'rep-1', revDivision: 'DRY', reference: 'PO-1',
     orderRevenueCents: 120_000, costCents: 90_000, openIncidentCount: 0, orderIds: [`o-${id}`],
     stops: [{ type: 'PICKUP', city: 'Dallas, TX', appt: '2026-01-01T10:00' }, { type: 'DELIVERY', city: 'Austin, TX', appt: '2026-01-02T10:00' }],
     ...over,
@@ -118,6 +118,24 @@ describe('LoadReviewPage', () => {
     expect(call.task).toBe('RELEASE_TO_BILLING')
     expect([...call.shipmentIds].sort()).toEqual(['s-1', 's-2'])
     expect(call.params).toEqual({ review: { source: 'LOAD_REVIEW' } })
+  })
+
+  it('releases at most nine at a time: select-all stops at nine and the tenth tick is refused with a message', async () => {
+    const many = Array.from({ length: 10 }, (_, i) => shipment(`m-${i + 1}`))
+    mocks.shipments.mockReturnValue({ shipments: many, loading: false, error: null, refresh: mocks.refresh })
+    mocks.batch.mockResolvedValue({ results: [] })
+    renderPage('/tms/load-review?tab=ready')
+    fireEvent.click(screen.getByRole('button', { name: /Select all looks ready/ }))
+    expect(screen.getByRole('button', { name: 'Move 9 to billing' })).toBeTruthy()
+    expect(screen.getByText(/at most 9/)).toBeTruthy()
+    const unticked = many.map((r) => checkbox(r.number)!).find((box) => !box.checked)!
+    fireEvent.click(unticked)
+    expect(unticked.checked).toBe(false)
+    expect(screen.getByRole('button', { name: 'Move 9 to billing' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Move 9 to billing' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm move to billing' }))
+    await waitFor(() => expect(mocks.batch).toHaveBeenCalledTimes(1))
+    expect(mocks.batch.mock.calls[0][0].shipmentIds).toHaveLength(9)
   })
 
   it('a refused row keeps the server message and stays in the queue; moved rows are reported', async () => {

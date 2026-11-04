@@ -437,6 +437,15 @@
   cursor: pointer;
 }
 
+.tms-shell .tms-foot-link {
+  text-decoration: none;
+}
+
+.tms-shell .tms-foot-link.active {
+  background: var(--tms-surface-hover);
+  color: var(--tms-text);
+}
+
 .tms-shell .tms-logout:hover {
   background: var(--tms-surface-hover);
   color: var(--tms-text);

@@ -11,6 +11,7 @@
  * so a `@/` alias would break the function build.
  */
 import type { LastKnownSource, LoadCheckCallRecord, TrackingLinkRecord } from '../types/tms'
+import type { PingSource } from './trackingPings'
 
 /** One Motive fix, as `TruckLocationHistory` stores it. A `TruckLocation` satisfies it. */
 export interface TrackPosition {
@@ -22,6 +23,10 @@ export interface TrackPosition {
   speed?: number | null
   /** `MOVING` / `STATIONARY` when Motive reported it; otherwise read from `speed`. */
   motion?: string | null
+  /** Step AO: which feed reported it. Absent on a bare Motive row, read as `motive`. */
+  source?: PingSource
+  accuracyM?: number | null
+  approx?: boolean
 }
 
 export type TimelineItem =
@@ -35,6 +40,9 @@ export type TimelineItem =
       locatedAt: string
       description: string | null
       speed: number | null
+      source?: PingSource
+      accuracyM?: number | null
+      approx?: boolean
     }
   | { kind: 'link'; at: string; row: TrackingLinkRecord }
 
@@ -156,6 +164,9 @@ export function buildTimeline(input: TimelineInput): TimelineItem[] {
       locatedAt: position.locatedAt,
       description: position.description ?? null,
       speed: position.speed ?? null,
+      ...(position.source ? { source: position.source } : {}),
+      ...(position.accuracyM != null ? { accuracyM: position.accuracyM } : {}),
+      ...(position.approx ? { approx: true } : {}),
     })
   }
   for (const row of input.links ?? []) {
@@ -176,6 +187,10 @@ export interface LastKnownFix {
   lng: number
   description: string | null
   source: LastKnownSource
+  /** Step AO: the precise feed, for the map header ("Driver phone (link)"). Absent for check calls. */
+  pingSource?: PingSource
+  accuracyM?: number | null
+  approx?: boolean
 }
 
 /**
@@ -198,6 +213,9 @@ export function lastKnownPosition(items: TimelineItem[]): LastKnownFix | null {
         lng: item.lon,
         description: item.description,
         source: 'MOTIVE',
+        pingSource: item.source ?? 'motive',
+        ...(item.accuracyM != null ? { accuracyM: item.accuracyM } : {}),
+        ...(item.approx ? { approx: true } : {}),
       }
       bestAt = at
       continue

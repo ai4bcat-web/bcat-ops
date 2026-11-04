@@ -436,7 +436,7 @@ export const CARRIER_DETAIL_KEYS = Object.keys(CARRIER_DETAIL_CAPS) as (keyof ty
 const CARRIER_MONEY_OR_STATE_KEYS = [
   'carrierRateCents', 'costCents', 'charges', 'status', 'rateConStatus', 'rateConSentAt', 'rateConSignedAt',
   'dispatchedAt', 'bookedAt', 'apStatus', 'quickPay', 'quickPayFeeBps', 'quickPayFeeCents',
-  'chargesFinalizedAt', 'carrierId', 'carrierName', 'carrierMc', 'kind', 'driverId', 'truckId', 'trailerId',
+  'chargesFinalizedAt', 'carrierId', 'carrierName', 'carrierMc', 'kind', 'truckId', 'trailerId',
   'pickupEtaAt', 'deliveryEtaAt',
 ] as const
 
@@ -452,6 +452,8 @@ export function validateCarrierDetails(input: Row): Row {
   const patch: Row = {}
   for (const key of Object.keys(input)) {
     if ((CARRIER_ENVELOPE_KEYS as readonly string[]).includes(key)) continue
+    // Step AQ: an Ivan Cartage leg names its driver by roster id. The handler refuses it on every other leg.
+    if (key === 'driverId') continue
     if ((CARRIER_MONEY_OR_STATE_KEYS as readonly string[]).includes(key)) {
       throw new Error(`${key} cannot be changed here: money, rate confirmation and status have their own actions`)
     }
@@ -462,7 +464,7 @@ export function validateCarrierDetails(input: Row): Row {
   for (const key of CARRIER_DETAIL_KEYS) {
     if (present(input, key)) patch[key] = text(input[key], CARRIER_DETAIL_CAPS[key], key)
   }
-  if (Object.keys(patch).length === 0) throw new Error('Nothing to change: send at least one assignment detail')
+  if (Object.keys(patch).length === 0 && !present(input, 'driverId')) throw new Error('Nothing to change: send at least one assignment detail')
   return patch
 }
 

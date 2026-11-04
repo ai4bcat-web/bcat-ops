@@ -12,6 +12,7 @@ import { TmsButton, TmsDialog, TmsInput, TmsSelect, TmsTextarea } from '@/featur
 import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
 import { formatDateTimeInput, fromDateTimeInput } from '@/lib/date'
+import { isIvanCartageName } from '@/lib/ownFleetDrivers'
 import type { LoadCarrierRecord, TrackingProvider } from '@/types/tms'
 
 const TRACKING_PROVIDERS: TrackingProvider[] = ['NONE', 'MANUAL', 'LINK', 'DRIVER_APP', 'MOTIVE']
@@ -59,7 +60,7 @@ export function DispatchDialog({ loadCarrier, busy, onClose, onConfirm }: {
   const [error, setError] = useState<string | null>(null)
 
   const rateConSigned = loadCarrier.rateConStatus === 'SIGNED'
-  const isOwnAsset = loadCarrier.kind === 'OWN_ASSET'
+  const isOwnAsset = loadCarrier.kind === 'OWN_ASSET' || isIvanCartageName(loadCarrier.carrierName)
 
   return (
     <TmsDialog

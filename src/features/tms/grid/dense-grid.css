@@ -490,3 +490,33 @@
 }
 .tms-shell .tms-dg-table tbody td * { white-space: nowrap; }
 .tms-shell .tms-dg-table tbody td .tms-badge { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+
+/* Step AP — batch action bar over a selected set of rows. */
+.tms-shell .tms-batch-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--tms-border);
+  background: var(--tms-card);
+}
+
+.tms-shell .tms-batch-bar-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+}
+
+.tms-shell .tms-batch-bar-count {
+  font-weight: 600;
+}
+
+.tms-shell .tms-batch-bar-results ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+
+.tms-shell .tms-batch-bar-results li[data-ok='false'] {
+  color: var(--tms-danger);
+}

@@ -49,9 +49,6 @@ const NUMBER_FIELDS: Record<string, { value: (row: ShipmentRow) => number | null
   openIncidentCount: { value: (r) => r.openIncidentCount ?? 0, unit: '' },
 }
 
-/** Columns that are controls, not data. */
-const NO_FILTER = new Set(['massRelease'])
-
 const BOARD_STATUS_ORDER = ['OPEN', 'COVERED', 'DISPATCHED', 'ARRIVED', 'DEPARTED', 'DELIVERED', 'HOLD', 'RESERVED', 'VOIDED']
 
 export const STATUS_OPTIONS: DenseOption[] = BOARD_STATUS_ORDER.map((s) => ({ value: s, label: sentence(s) }))
@@ -68,7 +65,6 @@ export const SHIPMENT_GRID_COLUMNS: DenseColumn<ShipmentRow>[] = BOARD_COLUMNS.m
     text: col.value,
     group: col.group,
   }
-  if (NO_FILTER.has(col.key)) return { ...base, filter: false, sortable: false }
   const number = NUMBER_FIELDS[col.key]
   if (number) {
     return { ...base, filter: 'number', numberOf: number.value, numberUnit: number.unit, align: 'right' }

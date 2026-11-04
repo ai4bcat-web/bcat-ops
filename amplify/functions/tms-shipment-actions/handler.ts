@@ -104,6 +104,7 @@ import {
   rateCarrier,
   readyToInvoice,
   reviewLoad,
+  pushToReviewVerdict,
   reviewDocument,
   saveGeneratedDocument,
   updateDocument,
@@ -281,6 +282,7 @@ import {
   type OwnAssetLoadFacts,
   type RosterDriverFacts,
 } from '../../../src/lib/ownAssetDriver'
+import { isIvanCartageName, resolveOwnFleetDriver, type OwnFleetDriverSource } from '../../../src/lib/ownFleetDrivers'
 import type { Load as LoadForCredit } from '../../../src/types'
 import type {
   ArStatus,
@@ -321,6 +323,9 @@ const CUSTOMER_TABLE_NAME = process.env.CUSTOMER_TABLE_NAME ?? ''
 const SETTINGS_TABLE_NAME = process.env.SETTINGS_TABLE_NAME ?? ''
 const AUDIT_LOG_TABLE_NAME = process.env.AUDIT_LOG_TABLE_NAME ?? ''
 const DRIVER_TABLE_NAME = process.env.DRIVER_TABLE_NAME ?? ''
+// Step AQ. Read-only, to fill an own-fleet driver's truck # and trailer # from Equipment. Optional: until
+// backend.ts wires it (env + GetItem grant) unit numbers come only from what the caller sent.
+const EQUIPMENT_TABLE_NAME = process.env.EQUIPMENT_TABLE_NAME ?? ''
 // Step W. Read-only: ASSIGN_ASSET refuses to move a load that is already on a stored
 // box-truck settlement (BoxTruckTrip.loadId), or the new driver could be paid for it twice.
 const BOX_TRUCK_TRIP_TABLE_NAME = process.env.BOX_TRUCK_TRIP_TABLE_NAME ?? ''
@@ -3175,6 +3180,31 @@ async function assertTaggableDivision(divisionCode: string, subdivisionCode: str
   }
 }
 
+// ── Step AP ─────────────────────────────────────────────────────────────────
+/**
+ * One row of PUSH_TO_LOAD_REVIEW: the shared requirement verdict (the same list
+ * REVIEW_LOAD and the review release read), and only a clean verdict writes the push
+ * stamp. Pushing an already-pushed shipment is a no-op reported as such.
+ */
+async function pushToReview(shipmentId: string, caller: Caller): Promise<{ reasons: string[]; already: boolean }> {
+  const { shipment, reasons } = await pushToReviewVerdict(documentDeps, shipmentId)
+  if (reasons.length > 0) return { reasons, already: false }
+  if (shipment.loadReviewPushedAt) return { reasons: [], already: true }
+  const now = nowIso()
+  await transact(
+    [updateItemTx(SHIPMENT_TABLE_NAME, shipmentId, {
+      loadReviewPushedAt: now,
+      loadReviewPushedBy: caller.email,
+      updatedBy: caller.email,
+      updatedAt: now,
+      version: (numberOrNull(shipment.version) ?? 1) + 1,
+    }, null)],
+    'load review push',
+  )
+  await writeAudit('SHIPMENT', shipmentId, 'PUSH_TO_LOAD_REVIEW', caller, { pushedAt: now })
+  return { reasons: [], already: false }
+}
+
 /** SET_REV_TAG — a person says who earned this load, and the rules stop arguing. */
 async function setRevTag(input: Row, caller: Caller): Promise<Row> {
   const shipmentId = assertString(input.shipmentId, 'shipmentId')
@@ -4576,6 +4606,47 @@ async function assertOwnAssetDriver(
   if (gap) throw new Error(gap.message)
 }
 
+/** Step AQ. Unit numbers for Equipment ids (active units only). Empty until EQUIPMENT_TABLE_NAME is wired. */
+async function ownFleetUnits(ids: Array<unknown>): Promise<Map<string, string>> {
+  const out = new Map<string, string>()
+  if (!EQUIPMENT_TABLE_NAME) return out
+  for (const id of new Set(ids.map((v) => optionalString(v, 100)).filter((v): v is string => v != null))) {
+    const row = await getById(EQUIPMENT_TABLE_NAME, id)
+    const unit = optionalString(row?.unitNumber, 40)
+    if (unit && row?.active !== false) out.set(id, unit)
+  }
+  return out
+}
+
+/** Step AQ. The Driver record for an own-fleet driver id, with phone, truck # and trailer # filled from it. */
+async function ownFleetDriverRecord(
+  driverId: string, asked: { driverPhone?: string | null; truckNumber?: string | null; trailerNumber?: string | null } = {},
+): Promise<{ driverName: string; driverPhone: string | null; truckNumber: string | null; trailerNumber: string | null }> {
+  const driver = (await getById(DRIVER_TABLE_NAME, driverId)) as OwnFleetDriverSource | null
+  const units = await ownFleetUnits([driver?.assignedTruckId, driver?.assignedTrailerId])
+  const r = resolveOwnFleetDriver(driverId, driver, asked, (id) => units.get(id) ?? null)
+  return { driverName: r.driverName, driverPhone: r.driverPhone, truckNumber: r.truckNumber, trailerNumber: r.trailerNumber }
+}
+
+/**
+ * Step AQ. Driver fields for an Ivan Cartage assignment written outside ASSIGN_ASSET (ENTER_DRIVER_INFO,
+ * UPDATE_LOAD_CARRIER_DETAILS, BOOK_CARRIER). `typed` is what the caller typed: with no `driverId`, a
+ * typed driver name is refused; with one, the Driver record answers and fills what was left blank.
+ */
+async function ownFleetDriverPatch(input: Row, typed: Row): Promise<Row> {
+  if (typed.driver2Name || typed.driver2Phone) throw new Error(OWN_ASSET_MESSAGES.freeTextDriver)
+  const driverId = optionalString(input.driverId, 100)
+  if (!driverId) {
+    if (typed.driverName) throw new Error(OWN_ASSET_MESSAGES.freeTextDriver)
+    return {}
+  }
+  return ownFleetDriverRecord(driverId, {
+    driverPhone: optionalString(input.driverPhone, 40),
+    truckNumber: optionalString(input.truckNumber, 40),
+    trailerNumber: optionalString(input.trailerNumber, 40),
+  })
+}
+
 async function driverLabel(id: string | null): Promise<string> {
   if (!id) return 'nobody'
   const row = await getById(DRIVER_TABLE_NAME, id)
@@ -4595,10 +4666,10 @@ async function assignAsset(input: Row, caller: Caller): Promise<Row> {
 async function assignAssetCore(input: Row, caller: Caller, opts: { skipPayLock?: boolean }): Promise<Row> {
   const loadId = assertString(input.loadId, 'loadId')
   const driverId = assertString(input.driverId, 'driverId')
-  const truckId = optionalString(input.truckId, 100)
-  const trailerId = optionalString(input.trailerId, 100)
-  const truckNumber = optionalString(input.truckNumber, 40)
-  const trailerNumber = optionalString(input.trailerNumber, 40)
+  const askedTruckId = optionalString(input.truckId, 100)
+  const askedTrailerId = optionalString(input.trailerId, 100)
+  const askedTruckNumber = optionalString(input.truckNumber, 40)
+  const askedTrailerNumber = optionalString(input.trailerNumber, 40)
   const driver2 = input.driver2 == null ? null : assertRecord(input.driver2, 'driver2')
   const flattenSplit = optionalBoolean(input.flattenSplit) ?? false
   const payOverrideReason = optionalString(input.payOverrideReason, 500)
@@ -4615,6 +4686,18 @@ async function assignAssetCore(input: Row, caller: Caller, opts: { skipPayLock?:
   if (problem) throw new Error(problem)
   const driverName = optionalString(driver!.name, 120) ?? driverId
   const driverPhone = optionalString(driver!.phone, 40)
+  // Step AQ. Truck and trailer default to the ones on the driver record; a second driver is a
+  // record too, never a typed name.
+  const units = await ownFleetUnits([askedTruckId, askedTrailerId, driver!.assignedTruckId, driver!.assignedTrailerId])
+  const filled = resolveOwnFleetDriver(driverId, driver as unknown as OwnFleetDriverSource | null, {
+    truckId: askedTruckId, truckNumber: askedTruckNumber, trailerId: askedTrailerId, trailerNumber: askedTrailerNumber,
+  }, (id) => units.get(id) ?? null)
+  const { truckId, truckNumber, trailerId, trailerNumber } = filled
+  const driver2Id = driver2 == null ? null : optionalString(driver2.driverId, 100)
+  if (driver2 != null && !driver2Id && (optionalString(driver2.name, 120) || optionalString(driver2.phone, 40))) {
+    throw new Error(OWN_ASSET_MESSAGES.freeTextDriver)
+  }
+  const driver2Resolved = driver2Id ? await ownFleetDriverRecord(driver2Id) : null
 
   const carriers = await queryIndex(LOAD_CARRIER_TABLE_NAME, IDX_CARRIERS_BY_LOAD, 'loadId', loadId)
   const activeCarrier = carriers.find((c) => c.status === 'ACTIVE') ?? null
@@ -4694,8 +4777,8 @@ async function assignAssetCore(input: Row, caller: Caller, opts: { skipPayLock?:
     driverId,
     driverName,
     driverPhone,
-    driver2Name: driver2 == null ? null : optionalString(driver2.name, 120),
-    driver2Phone: driver2 == null ? null : optionalString(driver2.phone, 40),
+    driver2Name: driver2Resolved?.driverName ?? null,
+    driver2Phone: driver2Resolved?.driverPhone ?? null,
     truckId,
     truckNumber,
     trailerId,
@@ -5302,6 +5385,14 @@ async function bookCarrier(input: Row, caller: Caller, extra?: BookCarrierExtra,
     trailerNumber: optionalString(input.trailerNumber, 40),
   }))
   const ladderCols = ladderPatch({}, startRung, now)
+  // Step AQ. A directory carrier that is Ivan Cartage takes its driver from our Driver records.
+  const ownFleetDriver: Row | null = isIvanCartageName(carrierName)
+    ? await ownFleetDriverPatch(input, {
+      driverName: optionalString(input.driverName, 120),
+      driver2Name: optionalString(input.driver2Name, 120),
+      driver2Phone: optionalString(input.driver2Phone, 40),
+    })
+    : null
   const loadCarrier: Row = {
     id: newCarrierId,
     __typename: 'LoadCarrier',
@@ -5319,12 +5410,14 @@ async function bookCarrier(input: Row, caller: Caller, extra?: BookCarrierExtra,
     dispatcherName: optionalString(input.dispatcherName, 120) ?? optionalString(carrier.dispatcherName, 120),
     dispatcherPhone: optionalString(input.dispatcherPhone, 40) ?? optionalString(carrier.dispatcherPhone, 40),
     dispatcherEmail: optionalString(input.dispatcherEmail, 200) ?? optionalString(carrier.dispatcherEmail, 200),
-    driverName: optionalString(input.driverName, 120),
-    driverPhone: optionalString(input.driverPhone, 40),
-    driver2Name: optionalString(input.driver2Name, 120),
-    driver2Phone: optionalString(input.driver2Phone, 40),
-    truckNumber: optionalString(input.truckNumber, 40),
-    trailerNumber: optionalString(input.trailerNumber, 40),
+    ...(ownFleetDriver ?? {
+      driverName: optionalString(input.driverName, 120),
+      driverPhone: optionalString(input.driverPhone, 40),
+      truckNumber: optionalString(input.truckNumber, 40),
+      trailerNumber: optionalString(input.trailerNumber, 40),
+    }),
+    driver2Name: ownFleetDriver ? null : optionalString(input.driver2Name, 120),
+    driver2Phone: ownFleetDriver ? null : optionalString(input.driver2Phone, 40),
     plates: optionalString(input.plates, 40),
     vin: optionalString(input.vin, 40),
     paymentTermsDays,
@@ -5864,16 +5957,21 @@ async function setUpAssignment(loadCarrierId: string, what: string): Promise<{ r
  */
 async function enterDriverInfo(input: Row, caller: Caller): Promise<Row> {
   const loadCarrierId = assertString(input.loadCarrierId, 'loadCarrierId')
-  const fields: Row = {
+  const { row, directory } = await setUpAssignment(loadCarrierId, 'Entering driver info')
+  const typed: Row = {
     driverName: optionalString(input.driverName, 120),
     driverPhone: optionalString(input.driverPhone, 40),
     truckNumber: optionalString(input.truckNumber, 40),
     trailerNumber: optionalString(input.trailerNumber, 40),
   }
+  // Step AQ. Ivan Cartage takes its driver from our Driver records: phone, truck and trailer are
+  // filled from the record when omitted, and a typed name is refused.
+  const fields: Row = isIvanCartageName(optionalString(row.carrierName, 200) ?? optionalString(directory.name, 200))
+    ? { ...typed, ...(await ownFleetDriverPatch(input, typed)) }
+    : typed
   const gaps = driverInfoGaps(fields)
   if (gaps.length > 0) throw new Error(`Driver info is required: enter the ${formatMissingFields(gaps)}.`)
 
-  const { row, directory } = await setUpAssignment(loadCarrierId, 'Entering driver info')
   const now = nowIso()
   const step = ladderStep(row, directory.status, fields, now)
   await transact(
@@ -5989,7 +6087,7 @@ async function dispatchLoad(input: Row, caller: Caller): Promise<Row> {
   const pickupEtaAt = optionalIso(input.pickupEtaAt, 'pickupEtaAt')
   if (pickupEtaAt) patch.pickupEtaAt = pickupEtaAt
   // An own-fleet leg's driver is the roster driver; a typed name could only drift from it.
-  if (active.kind !== 'OWN_ASSET') {
+  if (active.kind !== 'OWN_ASSET' && !isIvanCartageName(optionalString(active.carrierName, 200))) {
     const driverName = optionalString(input.driverName, 120)
     if (driverName) patch.driverName = driverName
     const driverPhone = optionalString(input.driverPhone, 40)
@@ -6499,18 +6597,26 @@ async function updateLoadCarrierDetails(input: Row, caller: Caller): Promise<Row
   const shipmentId = String(assignment.shipmentId)
   await requireLiveShipment(shipmentId)
   if (String(assignment.updatedAt ?? '') !== expectedUpdatedAt) throw conflictError('assignment', null)
+  // Step AQ. An Ivan Cartage carrier's driver is a Driver record, never typed; on every other leg a
+  // roster id has no meaning here.
+  const ivan = isIvanCartageName(optionalString(assignment.carrierName, 200))
+  if (!ivan && input.driverId != null) {
+    throw new Error('driverId cannot be changed here: money, rate confirmation and status have their own actions')
+  }
+  const ownFleetPatch: Row = ivan ? await ownFleetDriverPatch(input, patch) : {}
 
   // Step AM. Filling in the last driver field here earns the same rung ENTER_DRIVER_INFO does.
   const directoryId = optionalString(assignment.carrierId, 100)
   const directory = directoryId ? await getById(CARRIER_TABLE_NAME, directoryId) : null
   const now = nowIso()
-  const step = directory ? ladderStep(assignment, directory.status, patch, now) : null
+  const merged: Row = { ...patch, ...ownFleetPatch }
+  const step = directory ? ladderStep(assignment, directory.status, merged, now) : null
   await transact(
     [
       updateItemTx(
         LOAD_CARRIER_TABLE_NAME,
         loadCarrierId,
-        { ...patch, ...(step?.cols ?? {}), updatedBy: caller.email, updatedAt: now },
+        { ...merged, ...(step?.cols ?? {}), updatedBy: caller.email, updatedAt: now },
         expectedUpdatedAt,
       ),
       ...(step ? ladderMirrorWrites(assignment, step.to, now) : []),
@@ -6519,7 +6625,7 @@ async function updateLoadCarrierDetails(input: Row, caller: Caller): Promise<Row
   )
   await writeAudit('LOAD_CARRIER', loadCarrierId, 'UPDATE_LOAD_CARRIER_DETAILS', caller, {
     loadId: assignment.loadId,
-    keys: Object.keys(patch),
+    keys: Object.keys(merged),
   })
   return readBundle(shipmentId) as unknown as Row
 }
@@ -7934,21 +8040,19 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
         getOrders: (id) => queryIndex(ORDER_TABLE_NAME, IDX_ORDERS_BY_SHIPMENT, 'shipmentId', id),
         getLoadsOf: (id) => queryIndex(LOAD_TABLE_NAME, IDX_LOADS_BY_SHIPMENT, 'shipmentId', id),
         assignAsset,
-        authorize: isActionAuthorized,
-        releaseToBilling: (row, actor) => readyToInvoice({
-          ...documentDeps,
-          // Review releases keep ORDER/READY_TO_INVOICE (plus the SHIPMENT history row);
-          // the legacy batch release is audited shipment-scoped.
-          writeAudit: row.review
-            ? writeAudit
-            : (_type, _id, action, actor, changes) =>
-              writeAudit('SHIPMENT', String(row.shipmentId), action, actor, changes),
-        }, row, actor, { batch: true }),
+        // Step AP: a batch release is Load Review's act. The reviewer grant (or ADMIN) only —
+        // page-loads / page-tms reach READY_TO_INVOICE singly but not in bulk.
+        authorize: (taskAction, actor) => taskAction === 'READY_TO_INVOICE'
+          ? actor.isAdmin || actor.groups.includes(LOAD_REVIEW_PAGE_GROUP)
+          : isActionAuthorized(taskAction, actor),
+        // Every batch release is a Load Review release (the batch refuses one without the marker).
+        releaseToBilling: (row, actor) => readyToInvoice(documentDeps, row, actor, { batch: true }),
         setSalesRep,
         setRevTag,
         assignCarrierRep,
         setStatus: setShipmentStatus,
         writeAudit,
+        pushToReview,
       }, input, caller)) }
     case 'TEST_OWNERSHIP_RULES':
       return testOwnershipRules(input)
