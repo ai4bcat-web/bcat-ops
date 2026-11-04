@@ -43,17 +43,20 @@ Demo records: shipment **99277** (brokered), invoice **20002** (20000 and 20001 
 
 The only pay-bearing rows written are the ZZ driver and its pay setting (`zz-demo-…` keys, payPercent 0.25 = 25%). No pay-period rows, no real pay history.
 
-## Defects found, fixed, and re-verified live on job 146
+## Defects found, fixed, and verified live (jobs 146 and 147)
 
-Re-run on deploy 146 (commit 2e9b96a) with fresh ZZ records (shipment 99279, invoice 20003; screenshots 01-27, 41 and 42 are from that run; 30-40 (own-asset) are from the job-145 run, whose flow was not re-run):
+Fresh ZZ records on job 146 (shipment 99279, invoice 20003), re-checked on job 147 (commit 354e5cc):
 
-| # | Defect | Result on job 146 | Evidence |
+| # | Defect | Result | Evidence |
 |---|---|---|---|
-| 1 | Tracking Lambda lacked BatchGetItem for readBundle (POD review / thread) | **PASS** | `REVIEW_SHIPMENT_POD` ran (no IAM error): POD document `ACCEPTED`, review answer was the release gate's "Carrier charges not settled" (bill not yet recorded); thread read returned 5 messages. Shot 42 |
-| 2 | Intake wrote PO as `po`, gate needs `PO` | **PASS** | Order references `PO, pickup, delivery`; no hand patch; Load Review released it (UNBILLED) and invoice 20003 followed. Shots 22-24 |
-| 3 | "Run check call now" on a delivered load: ValidationError | **FAIL, second cause found and fixed locally, deploy pending** | Job 146 fixed only the idle path. The delivered-milestone path wrote `nextCheckCallAt: null` too (`sharedUpdate`, and both escalate writes). Now all use one helper that removes the attribute; new test `sends the delivered milestone without writing NULL into the worklist index key` fails before, passes after |
-| 4 | Per-load check-call plan ignored | **FAIL live, further cause fixed locally, deploy pending** | Tracking tab still showed "Inherited from BCAT default, 4 h / 30 min" (shot 41) although the load stores 2 h / 20 min. The browser receives the AWSJSON text JSON-encoded twice; `normalizeCheckCallPlan` now parses until it is no longer text (test added) |
-| 5 | `UPSERT_CUSTOMER` update failed on `:aiMemory` | **PASS** | Update of the ZZ customer succeeded (billing e-mail changed) |
+| 1 | Tracking Lambda lacked BatchGetItem (POD review / thread) | **PASS (146)** | `REVIEW_SHIPMENT_POD` ran, POD `ACCEPTED`; thread read returned 5 messages |
+| 2 | Intake wrote PO as `po`, gate needs `PO` | **PASS (146)** | References `PO, pickup, delivery`, no hand patch; released via Load Review, invoice 20003 |
+| 3 | "Run check call now" on a delivered load: ValidationError | **PASS (147)** | Run on delivered 99279 answered `checked 1, skipped 1, "The load is not moving"` (job 146 still failed; second cause fixed in 147) |
+| 4 | Per-load check-call plan ignored | **PASS (147)** | Tracking tab shows interval 2 / escalate 20, "Overridden for this shipment" (shot 41, replaced) |
+| 5 | `UPSERT_CUSTOMER` update failed on `:aiMemory` | **PASS (146)** | Update of the ZZ customer succeeded |
+| 6 | Demo chip (shipments board) | **PASS (147)** | `/tms/shipments?demo=1`: "Demo only", 1 of 1 rows (ZZ own-asset 99278) out of 267 active; shot 43 |
+
+Screenshots 30-40 (own-asset) are from the job-145 run; the own-asset flow was not re-run.
 
 ## Open questions for Ryne
 

@@ -704,6 +704,24 @@ STAGES.verify146 = async (ctx) => {
   say(JSON.stringify(V, null, 1))
 }
 
+STAGES.verify147 = async (ctx) => {
+  const S = ctx.state
+  const V = (S.log.verify147 = {})
+  const run = await ctx.trk('RUN_CHECK_CALL_PLAN', { shipmentId: S.shipmentId }).catch((e) => ({ error: short(e) }))
+  V.runOnDelivered = run.error ?? { checked: run.checked, acted: run.acted, skipped: run.skipped, reasons: (run.reasons ?? []).slice(0, 2) }
+  const b = await openBrowser(ctx.id)
+  try {
+    await b.navigate('/tms/dashboard'); await pause(3500)
+    await shot(b, shipUrl(S, 'tracking'), '41-verify-tracking-tab-per-load-plan', { wait: waitText(b, 'Check-call plan') })
+    V.interval = await b.evaluate(`[...document.querySelectorAll('input[type="number"]')].slice(0,2).map((e) => e.value)`)
+    V.source = await b.evaluate(`(document.body.innerText.match(/(Inherited from [^\\n]*|Overridden for this shipment)/) ?? [null])[0]`)
+    await b.navigate('/tms/shipments?demo=1'); await waitSettled(b); await pause(6000)
+    V.demoRows = await b.evaluate(`(() => { const t = document.body.innerText; return { has99279: t.includes('99279'), zz: (t.match(/ZZ DEMO/g) ?? []).length, rows: document.querySelectorAll('tbody tr').length } })()`)
+    await snap(b, '43-shipments-board-demo-chip')
+  } finally { await b.close() }
+  say(JSON.stringify(V))
+}
+
 // ───────────────────────────── retire: tidy an earlier attempt ─────────────────────────────
 /** Void the ZZ shipments, archive the ZZ customer / carrier / division, and forget the state (nothing is deleted; a PRO is permanent). */
 STAGES.retire = async (ctx) => {
