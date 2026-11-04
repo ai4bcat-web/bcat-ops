@@ -376,8 +376,17 @@ async function runWalk(ctx, b) {
 
   await step('AM14 Load Tracking grid: Carrier status column', async () => {
     await b.navigate('/tms/tracking')
-    await b.poll(() => b.evaluate(`/carrier status/i.test(document.body.innerText)`), 'the Carrier status column header', 90_000)
-    await pause(500)
+    const text = (re) => b.evaluate(`/${re}/i.test(document.body?.innerText ?? '')`)
+    await b.poll(() => text('Columns'), 'the tracking grid toolbar', 90_000)
+    await pause(800)
+    if (!(await text('Carrier status'))) {
+      // Saved layouts predate the column: add it through the Columns dialog, as a user would.
+      await b.evaluate(`[...document.querySelectorAll('button')].find((x) => /Columns/.test(x.textContent))?.click()`)
+      await b.poll(() => has('#tms-cd-carrierAssignment'), 'the Columns dialog', 15_000)
+      await b.evaluate(`(() => { const el = document.querySelector('#tms-cd-carrierAssignment'); if (!el.checked) el.click() })()`)
+      await b.evaluate(`[...document.querySelectorAll('button')].find((x) => x.textContent.trim() === 'Apply')?.click()`)
+      await b.poll(() => text('Carrier status'), 'the Carrier status column header', 30_000)
+    }
     await shot('AM14-tracking-grid-column')
     return 'column present'
   })

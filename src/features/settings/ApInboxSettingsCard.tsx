@@ -99,7 +99,7 @@ function Form({ status, sync }: { status: ApInboxStatusView; sync: ApInboxStatus
           </TmsField>
           <p className="tms-flush text-sm">
             <span data-testid="ap-inbox-status-pill"><strong>{PILL[connection.status]}</strong></span>
-            {connection.googleEmail ? ` · ${connection.googleEmail}` : ''}
+            {` · ${connection.googleEmail ?? config.mailbox}`}{connection.status === 'SIMULATED' ? ' (no Google account is read)' : ''}
           </p>
           {connection.lastError && <ErrorText>{connection.lastError}</ErrorText>}
           <div className="flex flex-wrap gap-2">

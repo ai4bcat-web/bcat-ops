@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { parseOperations, requestShape, topLevelFields, kpiReadiness, repeatViolations, HOOK_SOURCE } from './perfProbe.mjs'
+import { readFileSync } from 'node:fs'
+import { parseOperations, requestShape, topLevelFields, READ_ACTION, kpiReadiness, repeatViolations, HOOK_SOURCE } from './perfProbe.mjs'
 
 const body = (query, variables = {}) => ({ body: JSON.stringify({ query, variables }) })
 
@@ -118,5 +119,18 @@ describe('router read classification (G0, mirrors apiClient READ_ROUTER_ACTION)'
     const router = 'mutation($action: String!, $input: AWSJSON!) { tmsSpotActions(action: $action, input: $input) }'
     const shape = requestShape(['SPOT_COUNT', 'SPOT_STATUS', 'SPOT_LIST_REQUESTS', 'SPOT_ADD_MANUAL'].map((action) => body(router, { action, input: '{}' })))
     expect(shape.mutations).toEqual(['tmsSpotActions:SPOT_ADD_MANUAL'])
+  })
+})
+
+describe('READ_ACTION stays equal to apiClient READ_ROUTER_ACTION', () => {
+  it('same pattern as the app (a drift made AP_INBOX_STATUS a G0 mutation)', () => {
+    const src = readFileSync(new URL('../../src/lib/apiClient.ts', import.meta.url), 'utf8')
+    const app = /const READ_ROUTER_ACTION = (\/.*\/)\n/.exec(src)?.[1]
+    expect(app).toBe(String(READ_ACTION))
+  })
+  it('AP_INBOX_STATUS and CS_LIST_X read; AP_INBOX_APPLY does not', () => {
+    const q = 'mutation($action: String!, $input: AWSJSON!) { tmsApInboxActions(action: $action, input: $input) }'
+    const b = (action) => ({ body: JSON.stringify({ query: q, variables: { action, input: '{}' } }) })
+    expect(requestShape([b('AP_INBOX_STATUS'), b('CS_LIST_X'), b('AP_INBOX_LINK')]).mutations).toEqual(['tmsApInboxActions:AP_INBOX_LINK'])
   })
 })

@@ -74,4 +74,12 @@ describe('ApInboxSettingsCard', () => {
     expect(client.apInboxSaveSettings.mock.calls[0][0]).toMatchObject({ autoApplyMinScore: 0.92, mailbox: 'ai4bcat@gmail.com' })
     expect(client.apInboxSaveSettings.mock.calls[0][1]).toBe(4)
   })
+
+  it('names the mailbox in every state: the Google account when connected, the configured address on the simulated mailbox', async () => {
+    client.apInboxStatus.mockResolvedValue(status({ connection: { status: 'SIMULATED', googleEmail: null, connectedAt: null, lastError: null } }))
+    draw()
+    expect(await screen.findByTestId('ap-inbox-status-pill')).toBeTruthy()
+    const card = screen.getByTestId('ap-inbox-settings-card')
+    expect(card).toHaveTextContent('Simulated mailbox · ai4bcat@gmail.com')
+  })
 })

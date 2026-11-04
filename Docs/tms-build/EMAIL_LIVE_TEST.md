@@ -10,9 +10,180 @@
 
 Also: `SEND_RATE_CON` now stores the SES MessageId on the `ShipmentMessage` row (`providerRef`); before it was dropped.
 
-## Reply threading (what the code does)
-- Outbound rate con carries `Reply-To: ai4bcat+tracking.<shipmentId>@gmail.com`. The Gmail bridge posts the reply to `shipment-email-intake`, which routes by that plus address (works) and the app writes an inbound `ShipmentMessage` on the same `threadKey` (`tracking+<shipmentId>`).
-- **Gap:** SES overwrites the `Message-ID` header on every send, so the stored `messageId` (`<s.<shipment>.<n>.<t>@bcatcorp.com>`) is NOT what the carrier's client quotes in `In-Reply-To` (that will be `<SES MessageId@email.amazonses.com>`). The intake handler also ignores `In-Reply-To` and looks up the reply's OWN Message-ID. So a reply that loses its plus-address (some mailing lists / forwards) is not routable today. Plus-address routing is the working path. Fix, if wanted: accept `inReplyTo` in the intake and match it against `providerRef` (now stored).
+## Reply threading
+SES overwrites the `Message-ID` header on every send. Implemented (repo, needs deploy):
+- `SEND_RATE_CON` stores SES's id in `providerRef` and sets the row's `messageId` to the wire form `<SESMessageId@email.amazonses.com>`, so the `shipmentMessagesByMessageId` index resolves a reply's `In-Reply-To` / `References`.
+- The rate-con subject carries a stable `[ref <shipmentId>]` token.
+- `shipment-email-intake` precedence: plus-address `ai4bcat+tracking.<shipmentId>@` > own Message-ID / `In-Reply-To` / `References` (newest first) > subject `[ref]`. If sources disagree the plus-address (else the next) wins, the response carries `conflict:true` and the ingest input a `routingNote`. A reply matching nothing stays 422/unthreaded.
+- Unit tests (`shipment-email-intake/handler.test.ts`): SES id in In-Reply-To with no plus-address; subject-ref only; plus beats In-Reply-To and subject with conflict flagged; In-Reply-To beats subject; unrelated reply unthreaded. `shipmentThread.test.ts`: subject token round-trip.
+- Second bug found by the live run: the deployed intake role lacked `lambda:InvokeFunction` on tmsTrackingActions (the resource-policy grant has an `aws:SourceArn` condition a role never satisfies) -> every routed reply returned 502. Identity grant added in `backend.ts`.
+
+## Live run status (honest)
+Real sends proven on dev (deploy 162): rate con and invoice both `SENT` through SES to the allow-listed mailbox, SES MessageIds recorded in the runs below. Reply ingest and the In-Reply-To check FAIL on the deployed code (502 IAM / 422 not yet deployed) and the run is marked INCOMPLETE: re-run after the next deploy. Early runs ABORTED were harness fixture gaps (invoice needs an assigned carrier, a RATE_CON document and a recorded bill), fixed. Each run sent one rate con (and the last, one invoice) to the mailbox; a leftover fixture shipment from a failed cleanup was voided by hand.
 
 ## Production sending (Ryne, not done here)
 Production already has SES production access and a verified `bcatcorp.com` domain. For any new sending address on that domain nothing more is needed. If DKIM/SPF/DMARC were never confirmed: in SES console > Identities > bcatcorp.com confirm DKIM "Successful" (3 CNAMEs in DNS), set a custom MAIL FROM domain (e.g. `mail.bcatcorp.com`: MX `10 feedback-smtp.us-east-1.amazonses.com` + TXT `v=spf1 include:amazonses.com ~all`), and publish `_dmarc.bcatcorp.com TXT "v=DMARC1; p=none; rua=mailto:<mailbox>"` then move to `quarantine` once reports are clean. Rate cons and invoices on prod should send from a `@bcatcorp.com` address (the code's `FROM_ADDRESS` is `ai4bcat@gmail.com`, a Gmail address, which fails DMARC alignment for strict receivers).
+
+## Live run 2026-11-04T23:35:27.095Z — ABORTED: Not ready for accounting: No carrier or driver assigned
+
+Recipient: the single allow-listed mailbox only. Ids and statuses; no other addresses.
+
+```json
+{
+  "rateCon": {
+    "shipmentId": "shp-5d092a50-1a0d-4903-9ef9-f60a0a1870b1",
+    "loadCarrierId": "lcr-c82ae558-57f2-46a3-874e-66cb4ba7a32f",
+    "messageRowId": "msg:shp-5d092a50-1a0d-4903-9ef9-f60a0a1870b1:25040bf8-92af-48ea-bf57-81df038b835b",
+    "status": "SENT",
+    "sesMessageId": "010001a1a8eaab5a-f0b555e7-8ad3-4967-a9da-c85b33c7cf69-000000",
+    "storedMessageIdHeader": "<s.shp-5d092a50-1a0d-4903-9ef9-f60a0a1870b1.1.mw2r8ann@bcatcorp.com>",
+    "threadKey": "tracking+shp-5d092a50-1a0d-4903-9ef9-f60a0a1870b1",
+    "error": null
+  },
+  "invoice": {},
+  "reply": {
+    "intakeStatus": 401,
+    "routedShipmentMatches": false,
+    "inboundRowId": null,
+    "inboundThreadKey": null,
+    "strippedAliasStatus": 401
+  }
+}
+```
+
+```
+PASS  fixture customer created — 1793835308744-q6ann2wqk
+PASS  SEND_RATE_CON returned SENT — loadCarrier lcr-c82ae558-57f2-46a3-874e-66cb4ba7a32f
+PASS  rate con SENT through SES — SES MessageId 010001a1a8eaab5a-f0b555e7-8ad3-4967-a9da-c85b33c7cf69-000000
+PASS  every rate con recipient is inside the allow-listed mailbox — to 1, cc 2
+PASS  stored Message-ID header and per-load thread key — <s.shp-5d092a50-1a0d-4903-9ef9-f60a0a1870b1.1.mw2r8ann@bcatcorp.com> · tracking+shp-5d092a50-1a0d-4903-9ef9-f60a0a1870b1
+FAIL  reply routed by the plus address to the right shipment — HTTP 401 {"error":"unauthorized"}
+FAIL  inbound reply landed on the same per-load thread key — no inbound row
+FAIL  reply with the plus alias stripped threads by In-Reply-To — HTTP 401 {"error":"unauthorized"}
+PASS  fixture shipment voided — shp-5d092a50-1a0d-4903-9ef9-f60a0a1870b1
+PASS  fixture shipment voided — shp-22ade5db-053d-4da0-99da-5e1089e14548
+PASS  temp admin identity deleted
+```
+
+## Live run 2026-11-04T23:35:57.499Z — ABORTED: UnknownError
+
+Recipient: the single allow-listed mailbox only. Ids and statuses; no other addresses.
+
+```json
+{
+  "rateCon": {
+    "shipmentId": "shp-61194b0b-108f-4a23-b445-b8f93d3ce17f",
+    "loadCarrierId": "lcr-78b773e2-c795-4e44-a9e6-352668fa7ed3",
+    "messageRowId": "msg:shp-61194b0b-108f-4a23-b445-b8f93d3ce17f:d0259f9f-c871-471e-981a-115d82fa27cc",
+    "status": "SENT",
+    "sesMessageId": "010001a1a8eb4d27-08536a2e-cbd3-4a14-b674-894798bfd6af-000000",
+    "storedMessageIdHeader": "<s.shp-61194b0b-108f-4a23-b445-b8f93d3ce17f.1.mw2r96nb@bcatcorp.com>",
+    "threadKey": "tracking+shp-61194b0b-108f-4a23-b445-b8f93d3ce17f",
+    "error": null
+  },
+  "invoice": {},
+  "reply": {}
+}
+```
+
+```
+PASS  fixture customer created — 1793835350664-hkvrqsyhw
+PASS  SEND_RATE_CON returned SENT — loadCarrier lcr-78b773e2-c795-4e44-a9e6-352668fa7ed3
+PASS  rate con SENT through SES — SES MessageId 010001a1a8eb4d27-08536a2e-cbd3-4a14-b674-894798bfd6af-000000
+PASS  every rate con recipient is inside the allow-listed mailbox — to 1, cc 2
+PASS  stored Message-ID header and per-load thread key — <s.shp-61194b0b-108f-4a23-b445-b8f93d3ce17f.1.mw2r96nb@bcatcorp.com> · tracking+shp-61194b0b-108f-4a23-b445-b8f93d3ce17f
+PASS  fixture shipment voided — shp-61194b0b-108f-4a23-b445-b8f93d3ce17f
+PASS  temp admin identity deleted
+```
+
+## Live run 2026-11-04T23:36:33.325Z — ABORTED: Not ready for accounting: Missing document: RATE_CON; Carrier charges not settled: Vetted Transport LLC — record the carrier bill first
+
+Recipient: the single allow-listed mailbox only. Ids and statuses; no other addresses.
+
+```json
+{
+  "rateCon": {
+    "shipmentId": "shp-cef06299-ff79-4016-9121-215fb52f881c",
+    "loadCarrierId": "lcr-526bf617-b080-4a03-b59e-9eebc543a2a7",
+    "messageRowId": "msg:shp-cef06299-ff79-4016-9121-215fb52f881c:24640247-4a8f-46f9-a149-ba1ad4627933",
+    "status": "SENT",
+    "sesMessageId": "010001a1a8eba872-4069fb9f-e580-45e8-8a57-4dbe6c6ae0a8-000000",
+    "storedMessageIdHeader": "<s.shp-cef06299-ff79-4016-9121-215fb52f881c.1.mw2r9ool@bcatcorp.com>",
+    "threadKey": "tracking+shp-cef06299-ff79-4016-9121-215fb52f881c",
+    "error": null
+  },
+  "invoice": {},
+  "reply": {
+    "intakeStatus": 502,
+    "routedShipmentMatches": false,
+    "inboundRowId": null,
+    "inboundThreadKey": null,
+    "strippedAliasStatus": 422
+  }
+}
+```
+
+```
+PASS  fixture customer created — 1793835373442-eofjre2ng
+PASS  SEND_RATE_CON returned SENT — loadCarrier lcr-526bf617-b080-4a03-b59e-9eebc543a2a7
+PASS  rate con SENT through SES — SES MessageId 010001a1a8eba872-4069fb9f-e580-45e8-8a57-4dbe6c6ae0a8-000000
+PASS  every rate con recipient is inside the allow-listed mailbox — to 1, cc 2
+PASS  stored Message-ID header and per-load thread key — <s.shp-cef06299-ff79-4016-9121-215fb52f881c.1.mw2r9ool@bcatcorp.com> · tracking+shp-cef06299-ff79-4016-9121-215fb52f881c
+FAIL  reply routed by the plus address to the right shipment — HTTP 502 {"error":"invoke failed","detail":"User: arn:aws:sts::273354631837:assumed-role/amplify-d3dejqzs77khq6-de-shipmentemaili
+FAIL  inbound reply landed on the same per-load thread key — no inbound row
+FAIL  reply with the plus alias stripped threads by In-Reply-To — HTTP 422 {"error":"Could not route to a shipment"}
+PASS  fixture shipment voided — shp-cef06299-ff79-4016-9121-215fb52f881c
+PASS  fixture shipment voided — shp-16964b7b-0910-40bb-b75c-83561ca3264a
+PASS  temp admin identity deleted
+```
+
+## Live run 2026-11-04T23:38:24.469Z — INCOMPLETE: not every step ran and returned ids; 4 check(s) FAILED
+
+Recipient: the single allow-listed mailbox only. Ids and statuses; no other addresses.
+
+```json
+{
+  "rateCon": {
+    "shipmentId": "shp-d6a42500-1e10-46ea-9adf-4274efd8a041",
+    "loadCarrierId": "lcr-c146daf6-b3f2-4036-af05-3d014e303e07",
+    "messageRowId": "msg:shp-d6a42500-1e10-46ea-9adf-4274efd8a041:f6a05c5d-ae72-4d04-b825-a54631458611",
+    "status": "SENT",
+    "sesMessageId": "010001a1a8ed49bc-a6001ad5-941e-4475-b87f-e9f567e473b5-000000",
+    "storedMessageIdHeader": "<s.shp-d6a42500-1e10-46ea-9adf-4274efd8a041.1.mw2rbz3i@bcatcorp.com>",
+    "threadKey": "tracking+shp-d6a42500-1e10-46ea-9adf-4274efd8a041",
+    "error": null
+  },
+  "invoice": {
+    "shipmentId": "shp-5c1a4485-6665-48a1-8f6d-00a9dfc44669",
+    "invoiceId": "20004",
+    "noticeId": "inv:20004:1",
+    "status": "SENT",
+    "sesMessageId": "010001a1a8ed884b-0a75d88f-c076-43e5-9389-8861170b2c14-000000",
+    "error": null
+  },
+  "reply": {
+    "intakeStatus": 502,
+    "routedShipmentMatches": false,
+    "inboundRowId": null,
+    "inboundThreadKey": null,
+    "strippedAliasStatus": 422
+  }
+}
+```
+
+```
+PASS  fixture customer created — 1793835481062-9rcuun6ma
+PASS  SEND_RATE_CON returned SENT — loadCarrier lcr-c146daf6-b3f2-4036-af05-3d014e303e07
+PASS  rate con SENT through SES — SES MessageId 010001a1a8ed49bc-a6001ad5-941e-4475-b87f-e9f567e473b5-000000
+PASS  every rate con recipient is inside the allow-listed mailbox — to 1, cc 2
+PASS  stored Message-ID header and per-load thread key — <s.shp-d6a42500-1e10-46ea-9adf-4274efd8a041.1.mw2rbz3i@bcatcorp.com> · tracking+shp-d6a42500-1e10-46ea-9adf-4274efd8a041
+FAIL  reply routed by the plus address to the right shipment — HTTP 502 {"error":"invoke failed","detail":"User: arn:aws:sts::273354631837:assumed-role/amplify-d3dejqzs77khq6-de-shipmentemaili
+FAIL  inbound reply landed on the same per-load thread key — no inbound row
+FAIL  reply with the plus alias stripped threads by In-Reply-To — HTTP 422 {"error":"Could not route to a shipment"}
+PASS  fixture invoice generated — 20004
+PASS  invoice SENT through SES — SES MessageId 010001a1a8ed884b-0a75d88f-c076-43e5-9389-8861170b2c14-000000 · notice inv:20004:1
+PASS  every invoice recipient is inside the allow-listed mailbox — to 1, cc 0
+PASS  fixture shipment voided — shp-d6a42500-1e10-46ea-9adf-4274efd8a041
+FAIL  fixture shipment voided — shp-5c1a4485-6665-48a1-8f6d-00a9dfc44669: Vetted Transport LLC has a carrier bill on this shipment; void the bill first, then void the shipmen
+PASS  temp admin identity deleted
+```

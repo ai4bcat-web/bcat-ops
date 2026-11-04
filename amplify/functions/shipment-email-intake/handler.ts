@@ -2,6 +2,7 @@ import { createHash, timingSafeEqual } from 'crypto'
 import { DynamoDBClient, QueryCommand } from '@aws-sdk/client-dynamodb'
 import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda'
 import { unmarshall } from '@aws-sdk/util-dynamodb'
+import { shipmentIdFromSubject } from '../../../src/lib/shipmentThread'
 
 const dynamo = new DynamoDBClient({})
 const lambda = new LambdaClient({})
@@ -28,6 +29,9 @@ interface ParsedPayload {
   from: string
   subject: string
   body: string
+  /** RFC-5322 In-Reply-To / References of the reply: ids of OUR outbound messages (SES rewrites ours on send). */
+  inReplyTo?: string
+  references?: string
   attachments?: Attachment[]
   receivedAt?: string
 }
@@ -143,6 +147,8 @@ function validatePayload(raw: unknown): ValidatedPayload {
       from: p.from.trim(),
       subject: p.subject.trim(),
       body: p.body,
+      inReplyTo: typeof p.inReplyTo === 'string' && p.inReplyTo.trim() ? p.inReplyTo.trim() : undefined,
+      references: typeof p.references === 'string' && p.references.trim() ? p.references.trim() : undefined,
       attachments,
       receivedAt: typeof p.receivedAt === 'string' ? p.receivedAt : undefined,
     },
@@ -190,7 +196,22 @@ export const handler = async (event: LambdaFunctionUrlEvent) => {
   const addresses = [...extractAddresses(payload.to), ...extractAddresses(payload.cc)]
   const fromPlus = shipmentIdFromPlusAddress(addresses)
   const fromHeader = await shipmentIdFromMessageId(payload.messageId)
-  const shipmentId = fromPlus || fromHeader
+  // Precedence: plus-address, then our own outbound message (In-Reply-To / References resolve against the
+  // stored messageId, which for SES sends is `<SESMessageId@email.amazonses.com>`), then the `[ref <id>]` subject
+  // token. When the sources disagree the plus-address wins and the conflict is flagged.
+  let fromReply: string | null = null
+  const ids = [payload.inReplyTo, ...(payload.references?.match(/<[^<>\s]+>/g) ?? []).reverse()]
+  for (const id of ids) {
+    if (!id) continue
+    fromReply = await shipmentIdFromMessageId(id)
+    if (fromReply) break
+  }
+  const fromSubject = shipmentIdFromSubject(payload.subject)
+  const candidates = { plus: fromPlus, ownMessageId: fromHeader, inReplyTo: fromReply, subject: fromSubject }
+  const shipmentId = fromPlus || fromHeader || fromReply || fromSubject
+  const routedBy = fromPlus ? 'plus-address' : fromHeader ? 'message-id' : fromReply ? 'in-reply-to' : fromSubject ? 'subject-ref' : null
+  const conflict = new Set(Object.values(candidates).filter(Boolean)).size > 1
+  if (conflict) console.warn('[shipment-email-intake] routing sources disagree; filed to the highest-precedence match', { routedBy, candidates })
 
   if (!shipmentId) {
     console.warn('[shipment-email-intake] could not route message', {
@@ -210,9 +231,11 @@ export const handler = async (event: LambdaFunctionUrlEvent) => {
       from: payload.from,
       subject: payload.subject,
       body: payload.body,
+      inReplyTo: payload.inReplyTo,
       attachments: payload.attachments,
       kind: 'CHECK_CALL_REPLY',
       party: 'DRIVER',
+      ...(conflict ? { routingNote: `routing sources disagree (${routedBy} won)` } : {}),
     },
   }
 
@@ -225,7 +248,7 @@ export const handler = async (event: LambdaFunctionUrlEvent) => {
       ...invokeInput.input,
       attachments: payload.attachments?.map((a) => ({ name: a.name, contentType: a.contentType, sizeBytes: Buffer.from(a.base64, 'base64').length })),
     })
-    return respond(200, { ok: true, logged: true, shipmentId })
+    return respond(200, { ok: true, logged: true, shipmentId, routedBy, conflict })
   }
 
   try {
@@ -240,7 +263,7 @@ export const handler = async (event: LambdaFunctionUrlEvent) => {
       console.error('[shipment-email-intake] tracking actions returned error', parsed)
       return respond(502, { error: 'tracking actions failed', detail: parsed.errorMessage ?? parsed })
     }
-    return respond(200, { ok: true, shipmentId, result: parsed })
+    return respond(200, { ok: true, shipmentId, routedBy, conflict, result: parsed })
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err)
     console.error('[shipment-email-intake] invoke failed', error)

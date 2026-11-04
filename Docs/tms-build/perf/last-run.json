@@ -1,17 +1,17 @@
 {
-  "at": "2026-11-04T20:53:34.563Z",
+  "at": "2026-11-04T23:40:15.800Z",
   "summary": {
     "/tms/dashboard": {
       "label": "Brokerage dashboard (this month)",
       "firstRowsS": null,
-      "settledS": 6.828800001144409,
-      "requests": 82,
-      "mb": 12.193619,
+      "settledS": 4.9673999996185305,
+      "requests": 84,
+      "mb": 12.448931,
       "p95": {
         "firstRows": null,
-        "settled": 11.02529999923706,
-        "requests": 82,
-        "mb": 12.193619
+        "settled": 5.9818999996185305,
+        "requests": 84,
+        "mb": 12.448931
       },
       "rowsAtEnd": [
         0,
@@ -20,26 +20,26 @@
       ],
       "fullTableOps": [],
       "mutations": [],
-      "maxChainDepth": 3,
+      "maxChainDepth": 4,
       "repeated": [],
       "problems": [],
       "dashboardKpi": [
-        "213 shipments",
-        "213 shipments",
-        "213 shipments"
+        "218 shipments",
+        "218 shipments",
+        "218 shipments"
       ]
     },
     "/tms/tracking": {
       "label": "Load tracking",
-      "firstRowsS": 3.494800001144409,
-      "settledS": 5.183800001144409,
+      "firstRowsS": 2.59139999961853,
+      "settledS": 3.7593999996185303,
       "requests": 47,
-      "mb": 6.231163,
+      "mb": 6.418106,
       "p95": {
-        "firstRows": 4.728200000762939,
-        "settled": 5.570800001144409,
+        "firstRows": 3.29989999961853,
+        "settled": 4.858699998855591,
         "requests": 47,
-        "mb": 6.231163
+        "mb": 6.418106
       },
       "rowsAtEnd": [
         5,
@@ -55,15 +55,15 @@
     },
     "/tms/shipments": {
       "label": "Shipments board (Active)",
-      "firstRowsS": 3.034900001525879,
-      "settledS": 4.9372999992370605,
+      "firstRowsS": 3.9722000007629394,
+      "settledS": 5.231700000762939,
       "requests": 53,
-      "mb": 8.834135,
+      "mb": 9.024485,
       "p95": {
-        "firstRows": 4.40810000038147,
-        "settled": 5.10439999961853,
+        "firstRows": 7.22929999923706,
+        "settled": 7.86089999961853,
         "requests": 53,
-        "mb": 8.834135
+        "mb": 9.024485
       },
       "rowsAtEnd": [
         34,
@@ -79,15 +79,15 @@
     },
     "/tms/shipments?list=all": {
       "label": "Shipments board (All, month window)",
-      "firstRowsS": 3.107099998474121,
-      "settledS": 4.649899999618531,
-      "requests": 66,
-      "mb": 10.293804,
+      "firstRowsS": 2.6448999996185303,
+      "settledS": 4.047200000762939,
+      "requests": 67,
+      "mb": 10.493682,
       "p95": {
-        "firstRows": 3.2337000007629393,
-        "settled": 5.2422000007629395,
-        "requests": 66,
-        "mb": 10.293804
+        "firstRows": 2.9263000011444094,
+        "settled": 4.826699998855591,
+        "requests": 67,
+        "mb": 10.493682
       },
       "rowsAtEnd": [
         34,
@@ -103,15 +103,15 @@
     },
     "/tms/customers": {
       "label": "Customers",
-      "firstRowsS": 2.0155,
-      "settledS": 4.4835,
+      "firstRowsS": 1.9558000011444092,
+      "settledS": 3.60189999961853,
       "requests": 49,
-      "mb": 6.231459,
+      "mb": 6.564616,
       "p95": {
-        "firstRows": 2.3307999992370605,
-        "settled": 4.68560000038147,
+        "firstRows": 2.0285,
+        "settled": 3.9525,
         "requests": 49,
-        "mb": 6.231459
+        "mb": 6.564616
       },
       "rowsAtEnd": [
         50,
@@ -127,15 +127,15 @@
     },
     "/tms/brokerage/users": {
       "label": "Users",
-      "firstRowsS": 0.8141000003814697,
-      "settledS": 4.697799999237061,
+      "firstRowsS": 0.691,
+      "settledS": 3.3786000003814696,
       "requests": 50,
-      "mb": 6.240701,
+      "mb": 6.434028,
       "p95": {
-        "firstRows": 0.9256999988555908,
-        "settled": 4.8351999988555905,
+        "firstRows": 0.7867000007629394,
+        "settled": 3.8908999996185303,
         "requests": 50,
-        "mb": 6.240701
+        "mb": 6.434028
       },
       "rowsAtEnd": [
         7,
@@ -151,15 +151,15 @@
     },
     "/tms/invoicing": {
       "label": "Invoicing (AR)",
-      "firstRowsS": 2.6543999996185303,
-      "settledS": 5.633699998855591,
+      "firstRowsS": 2.0827000007629395,
+      "settledS": 5.151799999237061,
       "requests": 67,
-      "mb": 9.145399,
+      "mb": 9.342282,
       "p95": {
-        "firstRows": 4.057800001144409,
-        "settled": 6.96439999961853,
+        "firstRows": 2.271199998855591,
+        "settled": 5.199299999237061,
         "requests": 67,
-        "mb": 9.145399
+        "mb": 9.356797
       },
       "rowsAtEnd": [
         2,
@@ -175,15 +175,15 @@
     },
     "/tms/invoicing/payable": {
       "label": "Invoicing (payable)",
-      "firstRowsS": 2.2883999996185302,
-      "settledS": 4.612899999618531,
-      "requests": 55,
-      "mb": 6.599741,
+      "firstRowsS": 1.2251999988555908,
+      "settledS": 3.3826000003814696,
+      "requests": 57,
+      "mb": 6.849186,
       "p95": {
-        "firstRows": 2.9488000011444093,
-        "settled": 5.682900001525879,
-        "requests": 55,
-        "mb": 6.599741
+        "firstRows": 1.5808999996185302,
+        "settled": 3.9676999988555908,
+        "requests": 57,
+        "mb": 6.849186
       },
       "rowsAtEnd": [
         21,
@@ -191,7 +191,9 @@
         21
       ],
       "fullTableOps": [],
-      "mutations": [],
+      "mutations": [
+        "tmsApInboxActions:AP_INBOX_STATUS"
+      ],
       "maxChainDepth": 3,
       "repeated": [],
       "problems": [],
@@ -199,20 +201,20 @@
     },
     "/tms/carriers": {
       "label": "Carriers (shell floor probe)",
-      "firstRowsS": 1.5352000007629394,
-      "settledS": 4.088799999237061,
+      "firstRowsS": 1.455599998474121,
+      "settledS": 4.149300001144409,
       "requests": 47,
-      "mb": 6.231163,
+      "mb": 6.396305,
       "p95": {
-        "firstRows": 1.749,
-        "settled": 4.29010000038147,
+        "firstRows": 1.4889000015258789,
+        "settled": 5.770699998855591,
         "requests": 47,
-        "mb": 6.231163
+        "mb": 6.396305
       },
       "rowsAtEnd": [
-        22,
-        22,
-        22
+        27,
+        27,
+        27
       ],
       "fullTableOps": [],
       "mutations": [],
@@ -223,15 +225,15 @@
     },
     "/schedule": {
       "label": "Schedule (legacy)",
-      "firstRowsS": 4.207800001144409,
-      "settledS": 4.207800001144409,
-      "requests": 78,
-      "mb": 9.924436,
+      "firstRowsS": 4.11260000038147,
+      "settledS": 4.11260000038147,
+      "requests": 79,
+      "mb": 10.092207,
       "p95": {
-        "firstRows": 4.54379999923706,
-        "settled": 4.54379999923706,
-        "requests": 78,
-        "mb": 9.924436
+        "firstRows": 4.184900001525879,
+        "settled": 4.184900001525879,
+        "requests": 79,
+        "mb": 10.092207
       },
       "rowsAtEnd": [
         0,
@@ -240,22 +242,22 @@
       ],
       "fullTableOps": [],
       "mutations": [],
-      "maxChainDepth": 3,
+      "maxChainDepth": 4,
       "repeated": [],
       "problems": [],
       "dashboardKpi": []
     },
     "/calendar": {
       "label": "Calendar (legacy)",
-      "firstRowsS": 4.69089999961853,
-      "settledS": 4.69089999961853,
-      "requests": 84,
-      "mb": 12.523539,
+      "firstRowsS": 4.03660000038147,
+      "settledS": 4.03660000038147,
+      "requests": 85,
+      "mb": 12.694718,
       "p95": {
-        "firstRows": 5.03389999961853,
-        "settled": 5.03389999961853,
-        "requests": 84,
-        "mb": 12.523539
+        "firstRows": 4.54360000038147,
+        "settled": 4.54360000038147,
+        "requests": 85,
+        "mb": 12.694718
       },
       "rowsAtEnd": [
         0,
@@ -271,15 +273,15 @@
     },
     "/dashboard": {
       "label": "Dashboard (legacy)",
-      "firstRowsS": 0.8248000011444092,
-      "settledS": 5.703800001144409,
-      "requests": 134,
-      "mb": 19.198652,
+      "firstRowsS": 0.8145,
+      "settledS": 6.380600000381469,
+      "requests": 135,
+      "mb": 19.373357,
       "p95": {
-        "firstRows": 1.6191000003814697,
-        "settled": 6.27139999961853,
-        "requests": 134,
-        "mb": 19.198652
+        "firstRows": 1.1126999988555908,
+        "settled": 8.33610000038147,
+        "requests": 136,
+        "mb": 19.392448
       },
       "rowsAtEnd": [
         3,
@@ -288,11 +290,11 @@
       ],
       "fullTableOps": [],
       "mutations": [],
-      "maxChainDepth": 4,
+      "maxChainDepth": 5,
       "repeated": [
         {
           "op": "managePods",
-          "times": 4
+          "times": 5
         },
         {
           "op": "managePods",
@@ -310,26 +312,26 @@
   "kpi": {
     "/tms/dashboard": {
       "medians": {
-        "cold": 1.6573999996185302,
-        "warm": 1.06,
-        "spa": 0.04469999885559082,
+        "cold": 1.7903000011444092,
+        "warm": 1.0651000003814697,
+        "spa": 0.04060000038146973,
         "chartsCold": null,
         "chartsWarm": null,
-        "allCold": 1.6573999996185302,
-        "spaRequests": 36,
-        "spaMb": 5.9664,
+        "allCold": 1.8793999996185302,
+        "spaRequests": 38,
+        "spaMb": 6.01289,
         "kpiFlips": 0
       },
       "p95": {
-        "cold": 2.1566000003814696,
-        "warm": 1.6806999988555908,
-        "spa": 0.6292000007629395,
+        "cold": 1.8057000007629394,
+        "warm": 1.5232999992370606,
+        "spa": 0.2505,
         "chartsCold": null,
         "chartsWarm": null,
-        "allCold": 2.1566000003814696,
-        "spaRequests": 36,
-        "spaMb": 5.9664,
-        "kpiFlips": 0
+        "allCold": 1.9123000011444091,
+        "spaRequests": 38,
+        "spaMb": 6.01289,
+        "kpiFlips": 1
       },
       "sources": {
         "cold": [
@@ -352,26 +354,26 @@
     },
     "/dashboard": {
       "medians": {
-        "cold": 2.161199998855591,
-        "warm": 0.8481999988555908,
-        "spa": 0.05830000114440918,
-        "chartsCold": 2.161199998855591,
-        "chartsWarm": 0.9035,
-        "allCold": 8.07,
-        "spaRequests": 88,
-        "spaMb": 12.979742,
+        "cold": 1.7545999984741212,
+        "warm": 1.210800001144409,
+        "spa": 0.12689999961853027,
+        "chartsCold": 1.7921000003814698,
+        "chartsWarm": 1.2643000011444092,
+        "allCold": 5.30789999961853,
+        "spaRequests": 90,
+        "spaMb": 12.983375,
         "kpiFlips": 0
       },
       "p95": {
-        "cold": 2.377,
-        "warm": 1.4238000011444092,
-        "spa": 1.0423999996185302,
-        "chartsCold": 2.377,
-        "chartsWarm": 1.4753000011444093,
-        "allCold": 10.305,
+        "cold": 1.805800001144409,
+        "warm": 1.3172000007629394,
+        "spa": 0.272,
+        "chartsCold": 1.805800001144409,
+        "chartsWarm": 1.3718000011444091,
+        "allCold": 5.54529999923706,
         "spaRequests": 90,
-        "spaMb": 12.988617,
-        "kpiFlips": 0
+        "spaMb": 12.983375,
+        "kpiFlips": 1
       },
       "sources": {
         "cold": [

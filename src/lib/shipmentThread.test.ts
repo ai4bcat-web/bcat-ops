@@ -67,3 +67,13 @@ describe('RFC-5322 headers, so a carrier\'s mail client threads us like anybody'
     expect(threadSubject('S000123', null)).toBe('Load S000123')
   })
 })
+
+import { shipmentIdFromSubject, subjectRef } from './shipmentThread'
+describe('subject reference token', () => {
+  it('round-trips through Re:/Fwd: prefixes and refuses lookalikes', () => {
+    expect(shipmentIdFromSubject(`Re: Fwd: Rate confirmation — load X ${subjectRef('shp-9f')}`)).toBe('shp-9f')
+    expect(shipmentIdFromSubject('Rate confirmation — load X')).toBeNull()
+    expect(shipmentIdFromSubject('[ref ]')).toBeNull()
+    expect(shipmentIdFromSubject(null)).toBeNull()
+  })
+})

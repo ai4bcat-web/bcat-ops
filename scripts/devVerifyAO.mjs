@@ -829,7 +829,7 @@ const RUNNERS = {
       // Provider badge + menu on the provider leg.
       await openDrawer(b, ctx.f.sP.shipment.id)
       await b.poll(() => has(b, tid('tracking-map-provider')), 'provider badge', 20_000)
-      expect(/MacroPoint · STUB/.test(await textOf(b, tid('tracking-map-provider')) ?? ''), 'the provider badge does not read "MacroPoint · STUB"')
+      expect(/MacroPoint.*STUB/.test(await textOf(b, tid("tracking-map-provider")) ?? ""), 'the provider badge does not read "MacroPoint · STUB"')
       await b.click({ selector: tid('tracking-map-menu'), real: true })
       await b.poll(() => has(b, tid('provider-stop')), 'provider menu offers Stop', 10_000)
       await shotFile(b, SHOT.providerStub)

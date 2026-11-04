@@ -29,6 +29,10 @@ function makeDeps(store: Map<string, Row>): TestDeps {
   const apply = (item: TransactWriteItem): void => {
     if (item.Put) {
       const row = unmarshall(item.Put.Item as never) as Row
+      // DynamoDB refuses NULL on an index key, in production only.
+      for (const k of ['shipmentId', 'threadKey', 'messageId']) {
+        if (item.Put.TableName === T.message && k in row && row[k] === null) throw new Error(`ValidationError: Type mismatch for Index Key ${k}`)
+      }
       const key = `${item.Put.TableName}#${String(row.id)}`
       if (item.Put.ConditionExpression?.includes('attribute_not_exists(id)') && store.has(key)) {
         throw new Error('TransactionCanceledException: ConditionalCheckFailed')
@@ -154,6 +158,28 @@ describe('fileInboundOffer', () => {
     expect(res.outcome).toBe('FILED')
     expect(quotes(store)[0]).toMatchObject({ offerSource: 'PHONE' })
     expect(messages(store)[0]).toMatchObject({ channel: 'VOICE', from: '+13125550123', providerRef: 'call:CA1' })
+  })
+
+  it('a call with no Message-ID files without a NULL index key', async () => {
+    seedLoadFor(store, 1, 'S5001')
+    const call = { callSid: 'CA2', durationSec: null, outcome: null, recordingUrl: null }
+    for (const [n, over] of [['u', { messageId: null }], ['v', { messageId: null, subject: null, fromEmail: null, fromName: null }]] as const) {
+      const res = await fileInboundOffer(deps, mail(n.repeat(20), { source: 'CALL', to: [], call, ...over }), SYSTEM)
+      expect(res.outcome).toBe('FILED')
+    }
+  })
+
+  it('lane + date alone suggests the posted load even when the posting stores "City, ST" as the city', async () => {
+    const { shipmentId } = seedLoadFor(store, 1, 'S5001')
+    store.set(`${T.posting}#post:ship-1:DAT`, {
+      id: 'post:ship-1:DAT', shipmentId, status: 'POSTED', originCity: 'Chicago, IL', originState: 'IL',
+      destinationCity: 'Dallas, TX', destinationState: 'TX', pickupAppt: '2026-11-06T09:00:00.000Z', rateCents: 180_000, updatedAt: NOW, version: 1,
+    })
+    const x = extraction({ loadRefs: [], origin: { city: 'Chicago', state: 'IL' }, destination: { city: 'Dallas', state: 'TX' }, pickupDate: '2026-11-06' })
+    const res = await fileInboundOffer(deps, mail('w'.repeat(20), { subject: 'truck available', extraction: x }), SYSTEM)
+    expect(res.outcome).toBe('SUGGESTED')
+    expect(quotes(store)).toHaveLength(0)
+    expect(((messages(store)[0]!.offer as Row).match as Row).top).toMatchObject({ shipmentId, how: 'LANE_DATE' })
   })
 
   it('an unknown reference lands in the Unmatched bucket with a TTL and no quote', async () => {

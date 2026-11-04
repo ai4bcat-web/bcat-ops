@@ -106,6 +106,86 @@ describe('shipment-email-intake', () => {
     expect(JSON_BODY(res).shipmentId).toBe('shp-456')
   })
 
+  it('routes a reply that lost its plus-address by In-Reply-To, and passes it on', async () => {
+    dynamoSend.mockImplementation(async (cmd: { input: { ExpressionAttributeValues: { ':k': { S: string } } } }) =>
+      cmd.input.ExpressionAttributeValues[':k'].S === '<SES123@email.amazonses.com>'
+        ? { Items: [{ shipmentId: { S: 'shp-789' }, messageId: { S: '<SES123@email.amazonses.com>' } }] }
+        : { Items: [] })
+    lambdaSend.mockResolvedValue({ Payload: Buffer.from(JSON.stringify({ routed: true })) })
+    const res = await handler(event({
+      secret: 'intake-secret',
+      messageId: '<reply-1@carrier.example>',
+      inReplyTo: '<SES123@email.amazonses.com>',
+      to: 'ai4bcat@gmail.com',
+      from: 'driver@example.com',
+      subject: 'Re: Rate confirmation',
+      body: 'ok',
+    }))
+    expect(res.statusCode).toBe(200)
+    expect(JSON_BODY(res).shipmentId).toBe('shp-789')
+    const invoked = JSON.parse(Buffer.from(lambdaSend.mock.calls[0][0].input.Payload).toString())
+    expect(invoked.arguments.input.inReplyTo).toBe('<SES123@email.amazonses.com>')
+  })
+
+  it('walks References newest-first when In-Reply-To is not ours', async () => {
+    dynamoSend.mockImplementation(async (cmd: { input: { ExpressionAttributeValues: { ':k': { S: string } } } }) =>
+      cmd.input.ExpressionAttributeValues[':k'].S === '<SES9@email.amazonses.com>'
+        ? { Items: [{ shipmentId: { S: 'shp-9' } }] }
+        : { Items: [] })
+    lambdaSend.mockResolvedValue({ Payload: Buffer.from('{}') })
+    const res = await handler(event({
+      secret: 'intake-secret', messageId: '<r2@x.example>', inReplyTo: '<mid-thread@x.example>',
+      references: '<SES9@email.amazonses.com> <mid-thread@x.example>',
+      to: 'ai4bcat@gmail.com', from: 'a@b.example', subject: 's', body: 'b',
+    }))
+    expect(JSON_BODY(res).shipmentId).toBe('shp-9')
+  })
+
+  const byId = (map: Record<string, string>) =>
+    dynamoSend.mockImplementation(async (cmd: { input: { ExpressionAttributeValues: { ':k': { S: string } } } }) => {
+      const sid = map[cmd.input.ExpressionAttributeValues[':k'].S]
+      return sid ? { Items: [{ shipmentId: { S: sid } }] } : { Items: [] }
+    })
+  const reply = (extra: Record<string, unknown>) => handler(event({
+    secret: 'intake-secret', messageId: '<r@x.example>', to: 'ai4bcat@gmail.com', from: 'a@b.example', subject: 'Re: hello', body: 'b', ...extra,
+  }))
+
+  it('matches a forwarded reply (no plus-address) on the SES Message-ID in In-Reply-To', async () => {
+    byId({ '<SESABC@email.amazonses.com>': 'shp-1' })
+    lambdaSend.mockResolvedValue({ Payload: Buffer.from('{}') })
+    const body = JSON_BODY(await reply({ inReplyTo: '<SESABC@email.amazonses.com>' }))
+    expect(body).toMatchObject({ shipmentId: 'shp-1', routedBy: 'in-reply-to', conflict: false })
+  })
+
+  it('matches a reply by the [ref <shipment>] subject token alone', async () => {
+    lambdaSend.mockResolvedValue({ Payload: Buffer.from('{}') })
+    const body = JSON_BODY(await reply({ subject: 'Re: Fwd: Rate confirmation — load S1-A [ref shp-77]' }))
+    expect(body).toMatchObject({ shipmentId: 'shp-77', routedBy: 'subject-ref', conflict: false })
+  })
+
+  it('plus-address wins over In-Reply-To and the subject, and the conflict is flagged', async () => {
+    byId({ '<SESX@email.amazonses.com>': 'shp-B' })
+    lambdaSend.mockResolvedValue({ Payload: Buffer.from('{}') })
+    const res = await reply({ to: 'ai4bcat+tracking.shp-a@gmail.com', inReplyTo: '<SESX@email.amazonses.com>', subject: 'Re: x [ref shp-C]' })
+    const body = JSON_BODY(res)
+    expect(body).toMatchObject({ shipmentId: 'shp-a', routedBy: 'plus-address', conflict: true })
+    const invoked = JSON.parse(Buffer.from(lambdaSend.mock.calls[0][0].input.Payload).toString())
+    expect(invoked.arguments.input.routingNote).toMatch(/disagree/)
+  })
+
+  it('In-Reply-To wins over the subject when they disagree', async () => {
+    byId({ '<SESY@email.amazonses.com>': 'shp-B' })
+    lambdaSend.mockResolvedValue({ Payload: Buffer.from('{}') })
+    const body = JSON_BODY(await reply({ inReplyTo: '<SESY@email.amazonses.com>', subject: '[ref shp-C]' }))
+    expect(body).toMatchObject({ shipmentId: 'shp-B', conflict: true })
+  })
+
+  it('leaves an unrelated reply unthreaded', async () => {
+    const res = await reply({ inReplyTo: '<someone-else@x.example>', subject: 'Re: lunch' })
+    expect(res.statusCode).toBe(422)
+    expect(lambdaSend).not.toHaveBeenCalled()
+  })
+
   it('returns 422 when it cannot route the message', async () => {
     const res = await handler(event({
       secret: 'intake-secret',

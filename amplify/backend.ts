@@ -773,6 +773,14 @@ backend.shipmentEmailIntake.resources.lambda.addToRolePolicy(
 shipmentEmailIntakeFn.addEnvironment('SHIPMENT_MESSAGE_TABLE_NAME', shipmentEmailIntakeMessageTable.tableName)
 shipmentEmailIntakeFn.addEnvironment('TMS_TRACKING_ACTIONS_FUNCTION_NAME', backend.tmsTrackingActions.resources.lambda.functionName)
 
+// The resource-policy grant below carries an aws:SourceArn condition that an IAM role principal never
+// satisfies, so the intake also needs the plain identity grant (deployed dev: AccessDenied on Invoke).
+backend.shipmentEmailIntake.resources.lambda.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['lambda:InvokeFunction'],
+    resources: [backend.tmsTrackingActions.resources.lambda.functionArn],
+  })
+)
 backend.tmsTrackingActions.resources.lambda.addPermission('ShipmentEmailIntakeInvoke', {
   principal: shipmentEmailIntakeFn.grantPrincipal,
   action: 'lambda:InvokeFunction',

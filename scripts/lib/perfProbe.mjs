@@ -13,8 +13,8 @@
 /** Operations whose names are full-table reads of the six big tables (R1 / G4). */
 export const FULL_TABLE_OPS = ['listShipments', 'listOrders', 'listLoads', 'listLoadCarriers', 'listLoadFinancials', 'listAuditLogs']
 /** A router mutation whose action reads (the app drives all reads of some tables through `mutation tmsXActions`). */
-// Same classification as apiClient.ts READ_ROUTER_ACTION (Step AF5-a): SPOT_COUNT / SPOT_STATUS / SPOT_LIST_REQUESTS / CRM_LIST_* read.
-export const READ_ACTION = /^(?:SPOT_|CRM_)?(GET|LIST|SEARCH|FIND|READ|COUNT|PREVIEW|CHECK|LOOKUP|STATUS)(_|$)/
+// Same classification as apiClient.ts READ_ROUTER_ACTION (kept equal by perfProbe.test.mjs, which reads the source): SPOT_COUNT / CRM_LIST_* / CS_ / AP_INBOX_STATUS read.
+export const READ_ACTION = /^(?:SPOT_|CRM_|CS_|AP_INBOX_)?(GET|LIST|SEARCH|FIND|READ|COUNT|PREVIEW|CHECK|LOOKUP|STATUS)(_|$)/
 /**
  * Legacy lowercase-action routers that the schema declares as mutations (AppSync custom operations cannot be queries) but whose
  * listed actions only read: managePods list/status (pod-actions: listing and connection status) and manageDispatch status

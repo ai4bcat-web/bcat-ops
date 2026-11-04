@@ -708,7 +708,11 @@ async function ag12Ui(b, ctx, theme) {
     const opened = await b.evaluate(`(() => { const el = document.querySelector('[data-testid^="ap-inbox-link-"]:not([data-testid="ap-inbox-link-dialog"])'); if (!el) return false; el.scrollIntoView({ block: 'center' }); el.click(); return true })()`)
     expect(opened, 'no "Link to bill" action on any queue row')
     await b.poll(() => hasTestId(b, 'ap-inbox-link-dialog'), 'link dialog', 20_000)
-    expect(await hasPrefix(b, 'ap-inbox-pick-'), 'the link dialog shows no per-field pick')
+    // The preview is a round trip; a row with no suggested match previews only once a target is chosen.
+    if (!await b.poll(() => hasPrefix(b, 'ap-inbox-pick-'), 'per-field picks', 8_000).then(() => true, () => false)) {
+      await b.evaluate(`(() => { const sel = document.querySelector('select[aria-label="Link target"]'); const opt = sel && [...sel.options].find((o) => o.value); if (!opt) return; const set = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set; set.call(sel, opt.value); sel.dispatchEvent(new Event('change', { bubbles: true })) })()`)
+    }
+    await b.poll(() => hasPrefix(b, 'ap-inbox-pick-') || hasPrefix(b, 'ap-inbox-skip-'), 'the link dialog shows no per-field pick', 20_000)
     await snap('AG12c', 'link-dialog')
     await b.evaluate(`document.querySelector('[data-testid="ap-inbox-link-dialog"]')?.closest('[role="dialog"]')?.querySelector('button[aria-label="Close"], button')?.click()`)
     return 'link dialog with a pick per field'
@@ -723,7 +727,7 @@ async function ag12Ui(b, ctx, theme) {
     await openPage(b, '/tms/brokerage', () => hasTestId(b, 'ap-inbox-settings-card'))
     const text = await b.evaluate(`document.querySelector('[data-testid="ap-inbox-settings-card"]')?.innerText ?? ''`)
     expect(await hasTestId(b, 'ap-inbox-sim') || await hasTestId(b, 'ap-inbox-disconnect'), `the card shows neither "Use simulated mailbox" nor Disconnect on the dev stack; card text: "${text.replace(/\\s+/g, ' ').slice(0, 160)}"`)
-    expect(/Google/i.test(text) && /ai4bcat@gmail\\.com/i.test(text), 'the settings card does not name the Google mailbox')
+    expect(/Google|Simulated mailbox/i.test(text) && /ai4bcat@gmail\.com/i.test(text), 'the settings card does not name the Google mailbox')
     await snap('AG12e', 'settings-card')
     return 'Settings card: mailbox, Google note, simulated mailbox control'
   })

@@ -114,6 +114,15 @@ function firstPickupAppt(loads: Row[]): string | null {
   return pickup ? String(pickup.appt) : null
 }
 
+/**
+ * Stops and posting snapshots store `city` as "Joliet, IL" as often as plain "Joliet" with a
+ * separate state; the matcher compares city to city, so split a trailing ", ST" off.
+ */
+function splitPlace(city: string | null, state: string | null): { city: string | null; state: string | null } {
+  const m = city ? /^(.*?),\s*([A-Za-z]{2})$/.exec(city.trim()) : null
+  return m ? { city: m[1]!.trim(), state: state || m[2]!.toUpperCase() } : { city, state }
+}
+
 // ── Match context (all verified against the data) ────────────────────────────
 
 interface ShipmentFacts {
@@ -196,10 +205,11 @@ async function buildMatch(deps: CarrierInboundDeps, input: FileInboundOfferInput
       shipmentId: String(p.shipmentId),
       loadId: str(p.loadId) ?? shipments[String(p.shipmentId)]!.loadId,
       shipmentNumber: shipments[String(p.shipmentId)]!.shipmentNumber,
-      originCity: str(p.originCity),
-      originState: str(p.originState),
-      destinationCity: str(p.destinationCity),
-      destinationState: str(p.destinationState),
+      ...(() => {
+        const o = splitPlace(str(p.originCity), str(p.originState))
+        const d = splitPlace(str(p.destinationCity), str(p.destinationState))
+        return { originCity: o.city, originState: o.state, destinationCity: d.city, destinationState: d.state }
+      })(),
       pickupAppt: str(p.pickupAppt),
       equipmentType: str(p.equipmentType),
       rateCents: numberOrNull(p.rateCents),
@@ -510,8 +520,9 @@ export async function fileInboundOffer(deps: CarrierInboundDeps, raw: Row, calle
     subject: isCall ? (input.subject ?? `Call · ${callLabel}`).slice(0, 200) : input.subject,
     body: input.body,
     status: 'RECEIVED',
-    messageId: isCall ? null : input.messageId,
-    inReplyTo: isCall ? null : input.inReplyTo,
+    // `messageId` is a GSI hash key: DynamoDB refuses NULL there, so an absent id is omitted, not nulled.
+    messageId: isCall ? undefined : (input.messageId ?? undefined),
+    inReplyTo: isCall ? undefined : (input.inReplyTo ?? undefined),
     providerRef: isCall ? `call:${input.call?.callSid ?? input.sourceKey}` : `gmail:${input.mailboxId ?? 'none'}:${input.sourceKey}`,
     attachments: input.attachments.length ? input.attachments : null,
     authorKind: 'AGENT',

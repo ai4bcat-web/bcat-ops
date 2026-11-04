@@ -113,3 +113,19 @@ export function trackingThreadMessages<T extends { kind: string; at: string }>(m
   // No rate confirmation yet: show everything that remains.
   return visible
 }
+
+/** The Message-ID header SES actually puts on the wire for a send it returned `sesMessageId` for (us-east-1). */
+export function sesWireMessageId(sesMessageId: string, region = 'email.amazonses.com'): string {
+  return `<${sesMessageId}@${region}>`
+}
+
+/** A stable reference token for a subject line: survives `Re:`/`Fwd:`, a forward, and a lost plus-address. */
+export function subjectRef(shipmentId: string): string {
+  return `[ref ${shipmentId}]`
+}
+
+/** The shipment named by a `[ref <id>]` token in a subject, or null. */
+export function shipmentIdFromSubject(subject: string | null | undefined): string | null {
+  const m = /\[ref ([A-Za-z0-9_-]+)\]/.exec(String(subject ?? ''))
+  return m ? m[1] : null
+}

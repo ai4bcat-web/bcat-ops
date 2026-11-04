@@ -79,6 +79,8 @@ import {
 import {
   THREAD_MAILBOX,
   newMessageId,
+  sesWireMessageId,
+  subjectRef,
   threadKeyFor,
   threadReplyAddress,
 } from '../../../src/lib/shipmentThread'
@@ -5825,7 +5827,7 @@ async function sendRateCon(input: Row, caller: Caller): Promise<Row> {
     to: to.join(', '),
     cc: cc.join(', '),
     from: FROM_ADDRESS,
-    subject: `Rate confirmation — load ${loadNumber}`,
+    subject: `Rate confirmation — load ${loadNumber} ${subjectRef(shipmentId)}`,
     body,
     status: 'SENT',
     error: null,
@@ -5898,7 +5900,7 @@ async function sendRateCon(input: Row, caller: Caller): Promise<Row> {
   const emailOutcome = await sendRateConEmail({
     to,
     cc,
-    subject: `Rate confirmation — load ${loadNumber}`,
+    subject: `Rate confirmation — load ${loadNumber} ${subjectRef(shipmentId)}`,
     body,
     filename,
     pdfBase64,
@@ -5934,13 +5936,14 @@ async function sendRateCon(input: Row, caller: Caller): Promise<Row> {
   }
 
   // SES rewrites the Message-ID header on every send, so the id a reply's In-Reply-To will carry is
-  // `<sesMessageId@email.amazonses.com>`. Keep SES's id on the row so a reply can be matched to it.
+  // `<sesMessageId@email.amazonses.com>`. Store that as the row's messageId (the shipmentMessagesByMessageId
+  // index then resolves a reply's In-Reply-To) and keep SES's bare id in providerRef.
   if (emailOutcome.status === 'SENT' && emailOutcome.sesMessageId) {
     await dynamo.send(new UpdateItemCommand({
       TableName: SHIPMENT_MESSAGE_TABLE_NAME,
       Key: marshall({ id: message.id }),
-      UpdateExpression: 'SET providerRef = :ref',
-      ExpressionAttributeValues: marshall({ ':ref': emailOutcome.sesMessageId }),
+      UpdateExpression: 'SET providerRef = :ref, messageId = :mid',
+      ExpressionAttributeValues: marshall({ ':ref': emailOutcome.sesMessageId, ':mid': sesWireMessageId(emailOutcome.sesMessageId) }),
     }))
   }
 

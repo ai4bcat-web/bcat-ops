@@ -23,6 +23,7 @@ import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { SESv2Client, GetAccountCommand, ListEmailIdentitiesCommand } from '@aws-sdk/client-sesv2'
 import { LambdaClient, GetFunctionConfigurationCommand, GetFunctionUrlConfigCommand } from '@aws-sdk/client-lambda'
+import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm'
 import { IAMClient, ListRolePoliciesCommand, GetRolePolicyCommand } from '@aws-sdk/client-iam'
 import { DEV_API, region, gql, routerAs, mintIdentity, deleteIdentity } from './lib/devIdentity.mjs'
 
@@ -52,6 +53,14 @@ export function splitAddresses(value) {
   return String(value ?? '').split(/[,;]/).map((s) => s.trim()).filter(Boolean)
 }
 
+const PROD_SUFFIX = '5ucwdyvwivelbo4k4jomvrwel4-NONE'
+
+/** A dev Lambda: BCAT_DEV_STACK=true, a DATA_TABLE_SUFFIX, and that suffix is not production's. */
+export function isDevStackEnv(env) {
+  const suffix = env?.DATA_TABLE_SUFFIX
+  return env?.BCAT_DEV_STACK === 'true' && typeof suffix === 'string' && suffix.length > 0 && suffix !== PROD_SUFFIX
+}
+
 export function allInMailbox(value) {
   return splitAddresses(value).every(isMailbox)
 }
@@ -60,6 +69,8 @@ const args = process.argv.slice(2)
 
 const results = []
 const report = { rateCon: {}, invoice: {}, reply: {} }
+let completed = false
+let abortReason = null
 const lines = []
 function log(line = '') { lines.push(line); console.log(line) }
 function ok(name, detail) { results.push({ ok: true, name }); log(`PASS  ${name}${detail ? ` — ${detail}` : ''}`) }
@@ -119,8 +130,7 @@ async function run() {
   if (!conditional) throw new Error('the dev role still has the unconditional ses:* deny: deploy the dev guard change first (node scripts/devVerifyEmail.mjs --inventory)')
 
   const shipEnv = (await lambda.send(new GetFunctionConfigurationCommand({ FunctionName: SHIPMENT_LAMBDA }))).Environment?.Variables ?? {}
-  const messageTable = shipEnv.SHIPMENT_MESSAGE_TABLE_NAME
-  if (shipEnv.BCAT_DEV_STACK !== 'true' || !messageTable) throw new Error('target Lambda is not the dev stack')
+  if (!isDevStackEnv(shipEnv)) throw new Error('target Lambda is not the dev stack (needs BCAT_DEV_STACK=true and a non-production DATA_TABLE_SUFFIX)')
 
   const stamp = Date.now()
   // The temp admin is an alias of the allow-listed mailbox so the rate con's "copy the sender" Cc stays inside it.
@@ -131,7 +141,7 @@ async function run() {
   const ship = routerAs(token, 'tmsShipmentActions')
   const fin = routerAs(token, 'tmsFinanceActions')
   const dir = routerAs(token, 'tmsDirectoryActions')
-  const fixtures = { shipments: [] }
+  const fixtures = { shipments: [], bills: [] }
 
   const messagesOf = async (shipmentId) => {
     const rows = []
@@ -225,12 +235,21 @@ async function run() {
     // ── reply: plus-address routing through the real intake Function URL ──────
     const replyId = `<zz.reply.${stamp}@gmail.com>`
     const intakeEnv = (await lambda.send(new GetFunctionConfigurationCommand({ FunctionName: INTAKE_LAMBDA }))).Environment?.Variables ?? {}
+    // The secret is an Amplify secret. Dev has no branch-level value, so Amplify falls back to the app-shared
+    // parameter; read-only, used only against the dev intake URL, never printed.
+    const cfg = JSON.parse(intakeEnv.AMPLIFY_SSM_ENV_CONFIG ?? '{}').SHIPMENT_EMAIL_INTAKE_SECRET ?? {}
+    const ssm = new SSMClient({ region })
+    let intakeSecret
+    for (const name of [cfg.path, cfg.sharedPath].filter(Boolean)) {
+      try { intakeSecret = (await ssm.send(new GetParameterCommand({ Name: name, WithDecryption: true }))).Parameter?.Value; if (intakeSecret) break } catch { /* try the next path */ }
+    }
+    if (!intakeSecret) throw new Error('could not read the dev intake secret from SSM (branch or shared path)')
     const intakeUrl = (await lambda.send(new GetFunctionUrlConfigCommand({ FunctionName: INTAKE_LAMBDA }))).FunctionUrl
     const replyTo = `ai4bcat+tracking.${rcShipment}@gmail.com`
     assertAllowed([ALLOWED])
     const res = await fetch(intakeUrl, {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ secret: intakeEnv.SHIPMENT_EMAIL_INTAKE_SECRET, messageId: replyId, to: replyTo, from: ALLOWED, subject: 'Re: Rate confirmation', body: 'ZZ live test reply: driver is assigned.' }),
+      body: JSON.stringify({ secret: intakeSecret, messageId: replyId, to: replyTo, from: ALLOWED, subject: 'Re: Rate confirmation', body: 'ZZ live test reply: driver is assigned.' }),
     })
     const resBody = await res.json().catch(() => ({}))
     report.reply.intakeStatus = res.status
@@ -246,15 +265,26 @@ async function run() {
     // ── reply with ONLY In-Reply-To (no plus address): what the intake does today ──
     const stripped = await fetch(intakeUrl, {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ secret: intakeEnv.SHIPMENT_EMAIL_INTAKE_SECRET, messageId: `<zz.reply2.${stamp}@gmail.com>`, inReplyTo: out.messageId, to: ALLOWED, from: ALLOWED, subject: 'Re: Rate confirmation', body: 'ZZ no plus alias' }),
+      body: JSON.stringify({ secret: intakeSecret, messageId: `<zz.reply2.${stamp}@gmail.com>`, inReplyTo: out.messageId, to: ALLOWED, from: ALLOWED, subject: 'Re: Rate confirmation', body: 'ZZ no plus alias' }),
     })
     report.reply.strippedAliasStatus = stripped.status
-    log(`INFO  reply with the plus alias stripped and only In-Reply-To set: HTTP ${stripped.status} (422 = intake cannot route it; see EMAIL_LIVE_TEST.md)`)
+    const strippedBody = await stripped.json().catch(() => ({}))
+    // The stored messageId is what a reply's In-Reply-To names (SES wire form); the plus alias is absent here.
+    if (stripped.status === 200 && strippedBody.shipmentId === rcShipment) ok('reply with the plus alias stripped threads by In-Reply-To', `HTTP ${stripped.status}`)
+    else bad('reply with the plus alias stripped threads by In-Reply-To', `HTTP ${stripped.status} ${JSON.stringify(strippedBody).slice(0, 120)}`)
 
     // ── invoice ─────────────────────────────────────────────────────────────
-    let ib = await newFixture(customer, false)
+    let ib = await newFixture(customer, true)
     const invShipment = ib.shipment.id
     const orderId = ib.orders[0].id
+    const invLoad = ib.loads[0]
+    const othersNow = ((await ship('LIST_LOAD_CARRIERS_BY_CARRIER', { carrierId: 'carr-demo-vetted' }))?.loadCarriers ?? []).filter((c) => c.status === 'ACTIVE')
+    await ship('BOOK_CARRIER', {
+      loadId: invLoad.id, carrierId: 'carr-demo-vetted', carrierRateCents: 180000, expectedUpdatedAt: invLoad.updatedAt,
+      driverName: 'ZZ Driver', driverPhone: '+12245550137', dispatcherEmail: ALLOWED,
+      acknowledgeWarnings: ['COST_EXCEEDS_TOP_SPEND', ...othersNow.map((c) => `DOUBLE_BOOKED:${c.loadId}`)],
+    })
+    ib = await ship('GET_SHIPMENT_BUNDLE', { shipmentId: invShipment })
     for (const status of ['BOOKED', 'PLANNED', 'DISPATCHED', 'LOADING', 'PICKED_UP', 'IN_TRANSIT', 'UNLOADING', 'DELIVERED']) {
       const l = ib.loads[0]
       try { await ship('SET_LOAD_STATUS', { loadId: l.id, status, expectedUpdatedAt: l.updatedAt }) } catch { /* ladder step not applicable */ }
@@ -262,6 +292,12 @@ async function run() {
     }
     await attach(invShipment, orderId, ib.loads[0].id, 'BOL')
     await attach(invShipment, orderId, ib.loads[0].id, 'POD')
+    await attach(invShipment, orderId, ib.loads[0].id, 'RATE_CON')
+    ib = await ship('GET_SHIPMENT_BUNDLE', { shipmentId: invShipment })
+    // The release gate refuses an outside carrier until its bill is recorded.
+    const leg = ib.loadCarriers.find((c) => c.status === 'ACTIVE')
+    const rec = await fin('RECORD_BILL', { loadCarrierId: leg.id, billNumber: `ZZ-EMAIL-${String(stamp).slice(-6)}`, billDate: today, billedCents: 180000 })
+    fixtures.bills.push(rec.bill.id)
     ib = await ship('GET_SHIPMENT_BUNDLE', { shipmentId: invShipment })
     await ship('READY_TO_INVOICE', { orderId, expectedUpdatedAt: ib.orders[0].updatedAt })
     const generated = await fin('GENERATE_INVOICE', { orderId })
@@ -277,7 +313,11 @@ async function run() {
 
     // ── cleanup: void the invoice and both fixtures ───────────────────────────
     await fin('VOID_INVOICE', { invoiceId, reason: 'e-mail live test cleanup' })
+    completed = true
   } finally {
+    for (const billId of fixtures.bills) {
+      try { await fin('VOID_BILL', { billId, reason: 'e-mail live test cleanup' }); ok('fixture carrier bill voided', billId) } catch (err) { bad('fixture carrier bill voided', `${billId}: ${String(err.message ?? err).slice(0, 100)}`) }
+    }
     for (const shipmentId of fixtures.shipments) {
       try {
         const sb = await ship('GET_SHIPMENT_BUNDLE', { shipmentId })
@@ -295,16 +335,22 @@ async function run() {
 
 }
 
-function writeReport(report) {
+function writeReport() {
   const failed = results.filter((r) => !r.ok)
+  const haveIds = Boolean(report.rateCon.sesMessageId && report.rateCon.storedMessageIdHeader && report.rateCon.threadKey && report.invoice.sesMessageId && report.reply.inboundRowId)
+  let verdict
+  if (abortReason) verdict = `ABORTED: ${abortReason}`
+  else if (!completed || !haveIds) verdict = `INCOMPLETE: not every step ran and returned ids${failed.length ? `; ${failed.length} check(s) FAILED` : ''}`
+  else verdict = failed.length === 0 ? 'ALL PASSED' : `${failed.length} FAILED`
+  if (results.length === 0 && abortReason) return verdict
   const body = [
     '',
-    `## Live run ${new Date().toISOString()} — ${failed.length === 0 ? 'ALL PASSED' : `${failed.length} FAILED`}`,
+    `## Live run ${new Date().toISOString()} — ${verdict}`,
     '',
     'Recipient: the single allow-listed mailbox only. Ids and statuses; no other addresses.',
     '',
     '```json',
-    JSON.stringify(report ?? {}, null, 2),
+    JSON.stringify(report, null, 2),
     '```',
     '',
     '```',
@@ -314,6 +360,7 @@ function writeReport(report) {
   ].join('\n')
   if (!existsSync(REPORT)) writeFileSync(REPORT, '# Dev e-mail live test\n')
   appendFileSync(REPORT, body)
+  return verdict
 }
 
 async function main() {
@@ -323,14 +370,17 @@ async function main() {
     return
   }
   if (DEV_API !== 'https://f5iqzdpidzalvjys7yxijn5ave.appsync-api.us-east-1.amazonaws.com/graphql') throw new Error('refusing to run against a non-dev API')
+  let verdict
   try {
     await run()
-  } finally {
-    writeReport(report)
+  } catch (err) {
+    abortReason = String(err?.message ?? err).slice(0, 300)
+    console.error('verification aborted:', abortReason)
+    process.exitCode = 1
   }
-  const failed = results.filter((r) => !r.ok)
-  console.log(`\n${results.length - failed.length}/${results.length} checks passed`)
-  if (failed.length) process.exitCode = 1
+  verdict = writeReport()
+  console.log(`\n${verdict}`)
+  if (verdict !== 'ALL PASSED') process.exitCode = 1
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
