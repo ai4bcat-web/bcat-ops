@@ -6699,6 +6699,15 @@ describe('Ivan Cartage driver (Step W)', () => {
       expect(changes.payLock).toEqual({ state: 'CLOSED_WEEK_OVERRIDE', deliveryDate: '2026-03-03', reason: 'Wrong driver was booked' })
     })
 
+    it('audits the override on a first assignment, where there is no previous driver to change', async () => {
+      const { loadId } = await openLoad()
+      closeWeek()
+      await call('ASSIGN_ASSET', { loadId, driverId: 'drv-1', payOverrideReason: 'Booked after the week closed' }, ADMIN)
+      expect(auditOf('CHANGE_ASSET_DRIVER')).toHaveLength(0)
+      const changes = JSON.parse(String(auditOf('ASSIGN_ASSET')[0].changes)) as { payLock: Row }
+      expect(changes.payLock).toEqual({ state: 'CLOSED_WEEK_OVERRIDE', deliveryDate: '2026-03-03', reason: 'Booked after the week closed' })
+    })
+
     it('refuses even an admin when the load is already on a box-truck settlement', async () => {
       const { loadId } = await openLoad()
       await call('ASSIGN_ASSET', { loadId, driverId: 'drv-1' })
@@ -6738,6 +6747,13 @@ describe('Ivan Cartage driver (Step W)', () => {
         createdAt: '2026-03-01T00:00:00.000Z', updatedAt: '2026-03-01T00:00:00.000Z',
       })
       const dispatch = (): Promise<Row> => call('DISPATCH_LOAD', { loadId, dispatchedAt: '2026-03-02T12:00:00.000Z' })
+      // No leg at all: the driver message, not "nobody on it".
+      table(TABLES.carrier).delete('lcr-nobody')
+      await expect(dispatch()).rejects.toThrow('Ivan Cartage load: pick the driver before dispatching (Carrier/Driver tab → Assign driver).')
+      table(TABLES.carrier).set('lcr-nobody', {
+        id: 'lcr-nobody', loadId, shipmentId, kind: 'OWN_ASSET', status: 'ACTIVE', sequence: 1,
+        createdAt: '2026-03-01T00:00:00.000Z', updatedAt: '2026-03-01T00:00:00.000Z',
+      })
       await expect(dispatch()).rejects.toThrow('Ivan Cartage load: pick the driver before dispatching (Carrier/Driver tab → Assign driver).')
 
       table(TABLES.carrier).delete('lcr-nobody')

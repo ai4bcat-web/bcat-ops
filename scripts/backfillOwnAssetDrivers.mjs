@@ -459,7 +459,9 @@ export async function applyOwnAssetDriversPlan({ doc, plan, suffix }) {
               {
                 Put: {
                   TableName: legTable,
-                  Item: { id: entry.id, __typename: 'LoadCarrier', ...entry.item, createdAt: now, updatedAt: now },
+                  // createdBy/updatedBy are non-nullable in the LoadCarrier schema: a row without them
+                  // makes every listLoadCarriers page return an error and blanks the TMS boards.
+                  Item: { id: entry.id, __typename: 'LoadCarrier', ...entry.item, createdBy: MIGRATION_USER, updatedBy: MIGRATION_USER, createdAt: now, updatedAt: now },
                   ConditionExpression: 'attribute_not_exists(id)',
                 },
               },

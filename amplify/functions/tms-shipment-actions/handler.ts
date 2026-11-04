@@ -4280,6 +4280,9 @@ async function assignAssetCore(input: Row, caller: Caller, opts: { skipPayLock?:
 
   await writeAudit('LOAD_CARRIER', newCarrierId, 'ASSIGN_ASSET', caller, {
     loadId, driverId, driverName, truckId, truckNumber, trailerNumber, previousDriverId,
+    // A closed-week override is a money decision: it is on this row even when there was no
+    // previous driver, and so no CHANGE_ASSET_DRIVER row.
+    payLock,
   })
   if (driverChanged) {
     const nameOf = (id: string | null, name: string): string => (id ? `${name} (${id})` : 'nobody')
@@ -5305,8 +5308,10 @@ async function dispatchLoad(input: Row, caller: Caller): Promise<Row> {
 
   const carriers = await queryIndex(LOAD_CARRIER_TABLE_NAME, IDX_CARRIERS_BY_LOAD, 'loadId', loadId)
   const active = carriers.find((c) => c.status === 'ACTIVE') ?? null
-  if (!active) throw new Error('That load has nobody on it to dispatch')
+  // An Ivan Cartage load with no leg at all is the driverless case, so it gets the driver
+  // message and not the generic one.
   await assertOwnAssetDriver(load, active, 'DISPATCH')
+  if (!active) throw new Error('That load has nobody on it to dispatch')
 
   const warnings = new Set(
     (Array.isArray(active.bookingWarnings) ? active.bookingWarnings : []).map((w) => String(w)),

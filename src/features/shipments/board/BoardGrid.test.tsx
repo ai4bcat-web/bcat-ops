@@ -62,6 +62,15 @@ describe('BoardGrid', () => {
     expect(onToggle).toHaveBeenCalledWith('b')
   })
 
+  it('does not open the row when its checkbox is ticked', () => {
+    const onRowClick = vi.fn()
+    renderGrid({ onRowClick })
+    fireEvent.click(screen.getByRole('checkbox', { name: /Select row b/i }))
+    expect(onRowClick).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByText('Beta'))
+    expect(onRowClick).toHaveBeenCalledTimes(1)
+  })
+
   it('sets aria-sort on the sorted column', () => {
     renderGrid({ sort: { key: 'value', dir: 'desc' } })
     expect(screen.getByRole('columnheader', { name: /Value/i })).toHaveAttribute('aria-sort', 'descending')

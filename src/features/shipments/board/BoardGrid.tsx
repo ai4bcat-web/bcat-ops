@@ -125,6 +125,8 @@ export function BoardGrid<T>({
                       aria-label={`Select row ${id}`}
                       checked={selected}
                       onChange={() => onToggle(id)}
+                      // Ticking a row must not also open it.
+                      onClick={(e) => e.stopPropagation()}
                     />
                   </td>
                 )}

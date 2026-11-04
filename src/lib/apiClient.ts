@@ -561,14 +561,26 @@ export async function deleteDriver(id: string): Promise<void> {
 
 // ── Audit log ─────────────────────────────────────────────────────────────────
 
-export async function listAuditLogs(): Promise<AuditLogEntry[]> {
-  const result = await client.graphql({
-    query: `query ListAuditLogs { listAuditLogs(limit: 10000) { items { ${AUDIT_FIELDS} } } }`,
-  }) as { data: { listAuditLogs: { items: (Omit<AuditLogEntry, 'changes'> & { changes: string })[] } } }
-  return (result.data.listAuditLogs.items ?? []).map((e) => ({
-    ...e,
-    changes: JSON.parse(e.changes ?? '{}'),
-  }))
+/**
+ * The audit log, every page. The table has no index on `entityId`, so a read is a scan that
+ * DynamoDB cuts off at 1 MB: stopping at the first page returned an arbitrary slice that
+ * drops recent rows once the table is large. `entityIds` narrows it server-side to those
+ * records' rows.
+ */
+export async function listAuditLogs(entityIds?: string[]): Promise<AuditLogEntry[]> {
+  type Page = { data: { listAuditLogs: { items: (Omit<AuditLogEntry, 'changes'> & { changes: string })[]; nextToken?: string | null } } }
+  const filter = entityIds && entityIds.length > 0 ? { or: entityIds.map((id) => ({ entityId: { eq: id } })) } : null
+  const entries: AuditLogEntry[] = []
+  let nextToken: string | null = null
+  do {
+    const result = await client.graphql({
+      query: `query ListAuditLogs($filter: ModelAuditLogFilterInput, $nextToken: String) { listAuditLogs(filter: $filter, limit: 10000, nextToken: $nextToken) { items { ${AUDIT_FIELDS} } nextToken } }`,
+      variables: { filter, nextToken },
+    }) as Page
+    for (const e of result.data.listAuditLogs.items ?? []) entries.push({ ...e, changes: JSON.parse(e.changes ?? '{}') })
+    nextToken = result.data.listAuditLogs.nextToken ?? null
+  } while (nextToken)
+  return entries
 }
 
 export async function createAuditLog(entry: {

@@ -37,7 +37,7 @@ export function HistorySection({ bundle }: { bundle: ShipmentBundle }) {
   useEffect(() => {
     let live = true
     const wanted = new Set(ids.split(','))
-    listAuditLogs()
+    listAuditLogs([...wanted])
       .then((all) => {
         if (!live) return
         setRows(

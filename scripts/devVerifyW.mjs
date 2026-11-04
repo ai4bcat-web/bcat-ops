@@ -171,7 +171,7 @@ async function clickText(b, scope, selector, pattern) {
     if (!root) return 'no-scope';
     const re = new RegExp(spec.pattern, 'i');
     const el = [...root.querySelectorAll(spec.selector)].find((n) => re.test(n.textContent.trim()));
-    if (!el) return 'no-match';
+    if (!el) return 'no-match among: ' + JSON.stringify([...root.querySelectorAll(spec.selector)].slice(0, 14).map((n) => n.textContent.trim().slice(0, 40)));
     if (el.disabled) return 'disabled';
     el.scrollIntoView({ block: 'center' }); el.click(); return 'ok';
   })()`)
@@ -187,9 +187,9 @@ async function snap(b, id, slug, theme, clip = true) {
   await walk.shot(b, id, slug, theme, clip).catch((e) => line('FAIL', `${id} ${theme}`, `screenshot failed: ${e.message}`))
 }
 
-async function pageDiagnostics(b) {
+async function pageDiagnostics(b, length = 240) {
   const p = b.problems()
-  const text = await b.evaluate(`(document.querySelector('.tms-main')?.innerText ?? document.body.innerText).replace(/\\s+/g, ' ').slice(0, 240)`).catch(() => '')
+  const text = await b.evaluate(`(document.querySelector('.tms-main')?.innerText ?? document.body.innerText).replace(/\\s+/g, ' ').slice(0, ${length})`).catch(() => '')
   const clip = (list) => list.slice(0, 3).map((x) => String(x).slice(0, 160)).join(' // ')
   return `page: ${JSON.stringify(text)} | console: ${clip(p.consoleErrors) || '-'} | http: ${clip(p.httpErrors) || '-'} | failed: ${clip(p.failedRequests) || '-'} | exceptions: ${clip(p.exceptions) || '-'}`
 }
@@ -510,7 +510,12 @@ async function w03UiPages(b, ctx, theme, ref) {
     return '/calendar shows a card for the ZZ load'
   })
   await step(`W03c-ivan-app-${theme}`, async () => {
-    const text = await pageText(b, '/ivan-driver-app', ctx.legacyFixtures.ivanPro)
+    // The page shows one driver's week at a time (the first chip by name is selected), so pick the fixture driver's chip.
+    await openPage(b, '/ivan-driver-app')
+    await b.poll(() => b.evaluate(`!!document.querySelector('button[title="ZZ W Driver Ivan"]')`), 'the ZZ W Driver Ivan chip', 45_000)
+    await b.click({ selector: 'button[title="ZZ W Driver Ivan"]', real: true })
+    let text = ''
+    await b.poll(async () => { text = await bodyText(b); return text.includes(ctx.legacyFixtures.ivanPro) }, `${ctx.legacyFixtures.ivanPro} on /ivan-driver-app`, 45_000).catch(() => {})
     expect(text.includes(ctx.legacyFixtures.ivanPro), '/ivan-driver-app does not list the LOCAL fixture PRO')
     return `/ivan-driver-app lists ${ctx.legacyFixtures.ivanPro}`
   })
@@ -678,10 +683,11 @@ async function w07PayLock(ctx) {
   const out = await assignAs(ctx, 'admin', b, { driverId: F.drvA, payOverrideReason: OVERRIDE_REASON })
   const leg = activeLegOf(out)
   expect(leg?.driverId === F.drvA, 'the admin override did not book A')
-  const audits = await auditRows(ctx.token, leg.id, 'ASSIGN_ASSET')
-  const changed = await ctx.poll(async () => (await auditRows(ctx.token, loadId, 'CHANGE_ASSET_DRIVER')).length > 0, 'CHANGE_ASSET_DRIVER (closed-week)', 20_000).catch(() => false)
-  const rows = changed ? await auditRows(ctx.token, loadId, 'CHANGE_ASSET_DRIVER') : audits
-  const lock = rows.map((r) => r.changes?.payLock).find(Boolean)
+  // The closed fixture had no previous driver, so there is no CHANGE_ASSET_DRIVER row: the override is on the ASSIGN_ASSET row.
+  const lockOf = async () => [...await auditRows(ctx.token, leg.id, 'ASSIGN_ASSET'), ...await auditRows(ctx.token, loadId, 'CHANGE_ASSET_DRIVER')]
+    .map((r) => r.changes?.payLock).find(Boolean)
+  await ctx.poll(async () => Boolean(await lockOf()), 'closed-week payLock audit', 20_000).catch(() => false)
+  const lock = await lockOf()
   expect(lock?.state === 'CLOSED_WEEK_OVERRIDE' && String(lock.reason ?? '').includes(OVERRIDE_REASON), `audit payLock ${JSON.stringify(lock)}`)
   // a stored box-truck trip for the load refuses even the admin
   const tripId = `zz-w-trip-${ctx.ts}`
@@ -709,7 +715,9 @@ async function w08Batch(ctx) {
   expect(results.map((x) => x.shipmentId).join() === ids.join(), `results order ${results.map((x) => x.shipmentId).join()}`)
   expect(results[0].ok === true, `clean row: ${results[0].message}`)
   expect(results[1].ok === false && /covered by ZZ W Carrier/.test(results[1].message ?? ''), `outside-carrier row: ${JSON.stringify(results[1])}`)
-  expect(results[2].ok === false && /pay week has closed/.test(results[2].message ?? ''), `closed-week row: ${JSON.stringify(results[2])}`)
+  // The batch caller is an ADMIN and a batch never carries a pay-lock reason, so the row comes back with the
+  // admin's "give a reason" refusal (a non-admin would get the "pay week has closed" sentence).
+  expect(results[2].ok === false && /pay week has closed|Give a reason \(at least 10 characters\)/.test(results[2].message ?? ''), `closed-week row: ${JSON.stringify(results[2])}`)
   const reread = await reload(ctx, F.batchOk.shipment.id)
   trackLegs(ctx, reread)
   expect(activeLegOf(reread)?.driverId === F.drvA, 'the clean batch row did not book A')
@@ -768,10 +776,16 @@ async function w09Backfill(ctx) {
 }
 
 // ───────────────────────────── W10: UI walk ─────────────────────────────
+/** The Load actions menu is a Radix dropdown: it opens on pointerdown, which a synthetic el.click() never fires. */
+async function openLoadActions(b) {
+  await b.poll(() => b.evaluate(`!!document.querySelector('.tms-main button[aria-label="Load actions"]')`), 'the Load actions button', 30_000)
+  await b.click({ selector: '.tms-main button[aria-label="Load actions"]', real: true })
+  await b.poll(() => b.evaluate(`!!document.querySelector('[role="menu"]')`), 'the Load actions menu', 10_000)
+}
+
 async function openAssignDialog(b) {
-  await clickText(b, 'main', 'button', '^(Load )?actions?$|^Actions')
-  await pause(300)
-  await clickText(b, 'body', '[role="menuitem"], [role="menu"] button, button', 'Book Ivan Cartage|Change driver')
+  await openLoadActions(b)
+  await clickText(b, 'body', '[role="menuitem"]', 'Book Ivan Cartage|Change driver')
   await b.poll(() => hasTestId(b, 'assign-driver-select'), 'assign-driver-select', 20_000)
 }
 
@@ -834,6 +848,7 @@ async function w10Walk(b, ctx, theme, ref) {
     return 'the no-driver banner (own-asset-no-driver) with Assign driver'
   })
   await step(`W10-inline-error-dispatch-${theme}`, async () => {
+    await openShipment(b, F.driverlessUi.shipment.id, 'carrier', () => hasTestId(b, 'own-asset-no-driver'))
     await clickText(b, 'main', 'button', '^Dispatch').catch(() => {})
     const shown = await b.poll(() => hasTestId(b, 'dispatch-error'), 'dispatch-error', 15_000).catch(() => false)
     const disabled = await b.evaluate(`[...document.querySelectorAll('.tms-main button')].some((n) => /^Dispatch/.test(n.textContent.trim()) && n.disabled)`)
@@ -843,26 +858,42 @@ async function w10Walk(b, ctx, theme, ref) {
     return shown ? 'inline dispatch-error shown' : 'Dispatch is disabled while no driver is booked'
   })
   await step(`W10-inline-error-delivered-${theme}`, async () => {
-    await openShipment(b, F.driverlessUi.shipment.id)
-    await clickText(b, 'main', 'button', '^(Load )?actions?$|^Actions')
-    await pause(300)
-    await clickText(b, 'body', '[role="menuitem"], button', 'Move load to|Delivered').catch(() => {})
-    await clickText(b, 'body', '[role="menuitem"], button', '^Delivered$|Move load to Delivered').catch(() => {})
-    await b.poll(() => hasTestId(b, 'load-action-error'), 'load-action-error', 20_000)
+    // "Delivered" is only offered from Unloading; put the fixture there for this step and back to Booked after.
+    const uiLoad = loadOf(F.driverlessUi).id
+    await ownedUpdate(ctx, 'Load', uiLoad, { status: 'UNLOADING' })
+    try {
+      await openShipment(b, F.driverlessUi.shipment.id)
+      await openLoadActions(b)
+      await clickText(b, 'body', '[role="menuitem"]', '^(Delivered|DEL)$')
+      await b.poll(() => hasTestId(b, 'load-action-error'), 'load-action-error', 20_000)
+    } finally {
+      await ownedUpdate(ctx, 'Load', uiLoad, { status: 'BOOKED' })
+    }
     const t = await testIdText(b, 'load-action-error')
     expect(/pick the driver before marking it delivered/.test(t), `load-action-error says ${JSON.stringify(t)}`)
     await snap(b, 'W10', 'inline-error-delivered', theme)
     return 'the refused Delivered move shows the server text in load-action-error'
   })
   await step(`W10-inline-error-release-${theme}`, async () => {
-    await openShipment(b, F.driverlessUi.shipment.id, 'invoicing')
-    await b.poll(async () => /Missing driver/.test(await bodyText(b)), 'the release gate list with Missing driver', 45_000)
-    await snap(b, 'W10', 'inline-error-release', theme)
+    // The release card only runs the gate once the shipment is delivered, so the fixture is shown as delivered here.
+    const shipmentId = F.driverlessUi.shipment.id
+    ctx.owned.add(shipmentId)
+    await ownedUpdate(ctx, 'Shipment', shipmentId, { status: 'DELIVERED' })
+    try {
+      await openShipment(b, shipmentId, 'invoicing')
+      await b.poll(async () => /Missing driver/.test(await bodyText(b)), 'the release gate list with Missing driver', 45_000)
+        .catch(async (err) => { throw new Error(`${err.message} (${await pageDiagnostics(b, 900)})`) })
+      await snap(b, 'W10', 'inline-error-release', theme)
+    } finally {
+      await ownedUpdate(ctx, 'Shipment', shipmentId, { status: 'OPEN' })
+    }
     return 'Invoicing tab lists "Missing driver" in the release gate'
   })
   await step(`W10-board-needs-driver-${theme}`, async () => {
     await openPage(b, '/tms/shipments')
+    await boardSearch(b, F.driverlessUi.shipment.number)
     await b.poll(async () => /Own fleet · no driver/.test(await bodyText(b)), 'the "Own fleet · no driver" label', 60_000)
+      .catch(async (err) => { throw new Error(`${err.message} (${await pageDiagnostics(b, 900)})`) })
     await auditNow(b, theme, ref)
     await snap(b, 'W10', 'board-needs-driver', theme)
     return 'board shows Own fleet · no driver'
@@ -870,10 +901,19 @@ async function w10Walk(b, ctx, theme, ref) {
   if (!light) return
   await step('W10-batch-assign-driver', async () => {
     await openPage(b, '/tms/shipments')
-    const found = await b.evaluate(`!![...document.querySelectorAll('.tms-main option, .tms-main [role="menuitem"]')].find((n) => /Assign driver \\(Ivan Cartage\\)/.test(n.textContent))`)
-    expect(found || /Assign driver \(Ivan Cartage\)/.test(await bodyText(b)), 'the Batch task menu has no "Assign driver (Ivan Cartage)" choice')
+    await boardSearch(b, F.driverlessUi.shipment.number)
+    const box = `input[aria-label="Select row ${F.driverlessUi.shipment.id}"]`
+    await b.poll(() => b.evaluate(`!!document.querySelector(${JSON.stringify(box)})`), 'the fixture row on the board', 60_000)
+    await b.click({ selector: box, real: true })
+    await b.click({ selector: 'button[aria-label="Batch task"]', real: true })
+    await b.poll(() => b.evaluate(`!![...document.querySelectorAll('[role="dialog"] option')].find((n) => /Assign driver \\(Ivan Cartage\\)/.test(n.textContent))`), 'the "Assign driver (Ivan Cartage)" choice in the Batch task dialog', 20_000)
+      .catch(async (err) => {
+        const facts = await b.evaluate(`JSON.stringify({ dialogs: document.querySelectorAll('[role="dialog"]').length, options: [...document.querySelectorAll('[role="dialog"] option')].map((o) => o.textContent.trim()).map((t) => t.slice(0, 50)).slice(0, 14), title: document.querySelector('[role="dialog"]')?.innerText.slice(0, 120), checked: document.querySelector(${JSON.stringify(box)})?.checked, batchDisabled: document.querySelector('button[aria-label="Batch task"]')?.disabled })`)
+        throw new Error(`${err.message} (${facts})`)
+      })
     await snap(b, 'W10', 'batch-assign-driver', theme)
-    return 'batch task menu offers Assign driver (Ivan Cartage)'
+    await closeDialogs(b)
+    return 'batch task dialog offers Assign driver (Ivan Cartage)'
   })
   await step('W10-draft-driver-row', async () => {
     const draft = await ctx.ship('CREATE_SHIPMENT', { customerId: ctx.customer.id })
@@ -882,6 +922,13 @@ async function w10Walk(b, ctx, theme, ref) {
     await openShipment(b, draft.shipment.id, null, () => hasTestId(b, 'draft-driver-row'))
     return 'the draft editor shows draft-driver-row'
   })
+}
+
+/** Narrow the Shipments board to one shipment by typing its number into the search box. */
+async function boardSearch(b, text) {
+  await b.poll(() => b.evaluate(`!!document.querySelector('.tms-main input[placeholder="Search"]')`), 'the board search box', 60_000)
+  await setValue(b, '.tms-main input[placeholder="Search"]', text)
+  await pause(800)
 }
 
 /** Put a one-driver fixture back to "no active leg" so the cover dialog opens on the first-assignment title. */
@@ -935,6 +982,16 @@ async function w11Cleanup(ctx) {
   }
   allOk = say(`voided ZZ loads still carrying a driver mirror: ${stillOnDrivers.length}`, stillOnDrivers.length === 0) && allOk
   for (const id of ctx.tripIds) allOk = say(`BoxTruckTrip ${id} ${(await zzDelete(ctx, 'BoxTruckTrip', id)) ? 'deleted and confirmed gone' : 'NOT confirmed deleted'}`) && allOk
+  // Legs this run's assignments created (tracked in ctx.owned): only ever on a Load this run created. A leg left behind on a
+  // voided ZZ shipment is harmless, but one without createdBy/updatedBy once blanked every board, so none are kept.
+  for (const id of [...ctx.owned].filter((x) => x.startsWith('lcr-'))) {
+    const leg = await getItem(ctx, 'LoadCarrier', id)
+    if (!leg) continue
+    if (!ctx.owned.has(String(leg.loadId))) { allOk = say(`LoadCarrier ${id} is on a Load this run did not create: left alone`, false) && allOk; continue }
+    await doc.send(new DeleteCommand({ TableName: devTable('LoadCarrier', ctx.suffix), Key: { id } }))
+    allOk = say(`LoadCarrier ${id} ${(await getItem(ctx, 'LoadCarrier', id)) ? 'NOT confirmed deleted' : 'deleted and confirmed gone'}`, !(await getItem(ctx, 'LoadCarrier', id))) && allOk
+  }
+  for (const id of ctx.legIds) allOk = say(`LoadCarrier ${id} ${(await zzDelete(ctx, 'LoadCarrier', id)) ? 'deleted and confirmed gone' : 'NOT confirmed deleted'}`) && allOk
   for (const id of ctx.paySettingIds) {
     const gone = await zzDelete(ctx, 'DriverPaySetting', id)
     allOk = say(`DriverPaySetting ${id} ${gone ? 'deleted and confirmed gone' : 'NOT confirmed deleted'}`, gone) && allOk
@@ -977,14 +1034,15 @@ const RUNNERS = {
 }
 
 async function step(id, fn) {
-  if (!matches(id)) return undefined
+  // Cleanup is never filtered out by --only: the fixtures are created whatever is run.
+  if (!matches(id) && !id.startsWith('W11-')) return undefined
   try {
     const detail = await fn()
     if (detail !== undefined) line('PASS', id, typeof detail === 'string' ? detail : undefined)
     return detail
   } catch (err) {
     if (err instanceof SkipError) { skipLine(id, '', err.message); return undefined }
-    line('FAIL', id, String(err?.message ?? err).replace(/\s+/g, ' ').slice(0, 300))
+    line('FAIL', id, String(err?.message ?? err).replace(/\s+/g, ' ').slice(0, 1800))
     return undefined
   }
 }
@@ -1024,7 +1082,7 @@ async function main() {
   const made = []
   const ctx = {
     ts, origin, emails, suffix: null, f: {},
-    owned: new Set(), shipmentIds: new Set(), driverIds: new Set(), paySettingIds: new Set(), tripIds: new Set(), customerIds: new Set(),
+    owned: new Set(), shipmentIds: new Set(), driverIds: new Set(), paySettingIds: new Set(), tripIds: new Set(), legIds: new Set(), customerIds: new Set(),
     payBefore: null, legacyFixtures: null,
   }
   ctx.owned.add = ((orig) => function add(id) { orig.call(this, String(id)); return String(id) })(Set.prototype.add)
@@ -1049,7 +1107,15 @@ async function main() {
     // A driverless own-asset fixture the UI walk can open (the API one is spent by W06).
     ctx.f.driverlessUi = await makeShipment(ctx, 'driverless-ui', chicagoDay(1), chicagoDay(2))
     const uiLoad = loadOf(ctx.f.driverlessUi).id
-    await ownedUpdate(ctx, 'Load', uiLoad, { assignmentType: 'OWN_ASSET', status: 'BOOKED' }, ['activeLoadCarrierId'])
+    // The state the old duplicate / backfill paths left: OWN_ASSET with an ACTIVE leg and nobody on it. (A load with no
+    // leg at all has no Dispatch button; the leg is what the Dispatch gate, the release gate and the board flag read.)
+    const uiLegId = `zz-w-lcr-ui-${ctx.ts}`
+    await zzPut(ctx, 'LoadCarrier', {
+      id: uiLegId, loadId: uiLoad, shipmentId: ctx.f.driverlessUi.shipment.id, kind: 'OWN_ASSET', status: 'ACTIVE', sequence: 1,
+      carrierRateCents: 0, costCents: 0, createdBy: 'zz-w-harness', updatedBy: 'zz-w-harness',
+    })
+    ctx.legIds.add(uiLegId)
+    await ownedUpdate(ctx, 'Load', uiLoad, { assignmentType: 'OWN_ASSET', status: 'BOOKED', activeLoadCarrierId: uiLegId })
 
     const needsBrowser = !only || /W03|W04|W05|W10/.test(only)
     if (needsBrowser) {
@@ -1065,7 +1131,8 @@ async function main() {
       await setTheme(b, 'light')
     }
     const runUi = async (phase) => {
-      if (!b) return
+      // The legacy-page steps read what W03 / W05 recorded; a filtered run that skipped them has nothing to walk.
+      if (!b || !ctx.legacyFixtures || (phase !== 'legacy-before' && !ctx.legacyFixtures.changedTo)) return
       for (const theme of themes) {
         await setTheme(b, theme).catch(() => {})
         if (phase === 'legacy-before') await w03UiPages(b, ctx, theme, refs[theme])

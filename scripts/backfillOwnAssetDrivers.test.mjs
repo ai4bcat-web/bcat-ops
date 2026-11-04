@@ -3,6 +3,7 @@ import {
   CREATE_LEG,
   FILL_LEG_NAME,
   DEV_TABLE_SUFFIX,
+  applyOwnAssetDriversPlan,
   buildOwnAssetDriversPlan,
   csvOf,
   planOwnAssetDrivers,
@@ -158,6 +159,20 @@ describe('backfillOwnAssetDrivers — which own-fleet loads get fixed and which 
     const csv = csvOf([{ class: 'NO_DRIVER_ANYWHERE', severity: 'fix', pro: 'P1', customer: 'A, "B"', detail: 'x' }]);
     expect(csv.split('\n')[0]).toBe('class,severity,pro,shipmentNumber,loadId,status,pickupDate,customer,detail');
     expect(csv.split('\n')[1]).toBe('NO_DRIVER_ANYWHERE,fix,P1,,,,,"A, ""B""",x');
+  });
+});
+
+describe('backfillOwnAssetDrivers — apply', () => {
+  it('stamps the non-nullable createdBy/updatedBy on a created leg', async () => {
+    const f = fixtures();
+    const source = scopeSource({ Load: f.loads, LoadCarrier: f.legs, Driver: drivers(), Shipment: [] }, ['legless']);
+    const p = buildOwnAssetDriversPlan({ source, environment: 'dev', suffix: DEV_TABLE_SUFFIX });
+    const sent = [];
+    const doc = { send: async (command) => { sent.push(command.input); return {}; } };
+    await applyOwnAssetDriversPlan({ doc, plan: p, suffix: DEV_TABLE_SUFFIX });
+    const put = sent.flatMap((i) => i.TransactItems ?? []).find((t) => t.Put)?.Put.Item;
+    expect(put.createdBy).toBe('migration:backfillOwnAssetDrivers');
+    expect(put.updatedBy).toBe('migration:backfillOwnAssetDrivers');
   });
 });
 
