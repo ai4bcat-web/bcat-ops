@@ -33,6 +33,8 @@ import { TmsBadge, TmsButton, TmsInput, TmsSegmentedTabs, statusTone } from '@/f
 import { useOwnershipDivisions } from '@/features/tms/useOwnershipDivisions'
 import { useAuth } from '@/hooks/useAuth'
 import { useDirectory } from '@/hooks/useDirectory'
+import { useDrivers } from '@/hooks/useDrivers'
+import { useTrucks } from '@/hooks/useTrucks'
 import { useShipments } from '@/hooks/useShipments'
 import { useStaff } from '@/hooks/useStaff'
 import {
@@ -65,6 +67,7 @@ import {
   boardRowTone,
   carrierLabel,
   massReleaseReady,
+  needsDriver,
   toCsv,
   visibleColumns,
   type ShipmentRow,
@@ -94,7 +97,10 @@ const DEFAULT_SORT: BoardGridSort = { key: 'pickupShip', dir: 'asc' }
  * The footer's Batch task offers one flat list of choices; the router takes a task and
  * its parameters. This is the one place the two vocabularies meet.
  */
-function batchTaskOf(action: string): { task: BatchShipmentTask; params: Record<string, unknown> } | null {
+function batchTaskOf(
+  action: string,
+  driverParams?: (driverId: string) => Record<string, unknown>,
+): { task: BatchShipmentTask; params: Record<string, unknown> } | null {
   if (action === 'release') return { task: 'RELEASE_TO_BILLING', params: {} }
   if (action.startsWith('rep:')) return { task: 'SET_SALES_REP', params: { repId: action.slice(4) } }
   if (action.startsWith('carrierRep:')) return { task: 'SET_CARRIER_REP', params: { repId: action.slice(11) } }
@@ -105,6 +111,10 @@ function batchTaskOf(action: string): { task: BatchShipmentTask; params: Record<
   }
   if (action.startsWith('status:')) {
     return { task: 'SET_STATUS', params: { status: action.slice(7), reason: 'Batch task' } }
+  }
+  if (action.startsWith('driver:')) {
+    const driverId = action.slice(7)
+    return { task: 'ASSIGN_DRIVER', params: driverParams ? driverParams(driverId) : { driverId } }
   }
   return null
 }
@@ -175,6 +185,9 @@ function sortRows(rows: ShipmentRow[], sort: BoardGridSort | null): ShipmentRow[
   })
 }
 
+/** Step W: a live Ivan Cartage shipment nobody is driving. */
+const NEEDS_DRIVER_MEANING = 'Ivan Cartage load with no driver'
+
 function exceptionIcons(row: ShipmentRow): Array<{ icon: ReactNode; meaning: string }> {
   const out: Array<{ icon: ReactNode; meaning: string }> = []
   if ((row.openIncidentCount ?? 0) > 0) {
@@ -192,6 +205,9 @@ function exceptionIcons(row: ShipmentRow): Array<{ icon: ReactNode; meaning: str
   }
   if (isCustomerUnresolved(row)) {
     out.push({ icon: <UserX size={14} />, meaning: 'Customer not linked' })
+  }
+  if (needsDriver(row)) {
+    out.push({ icon: <UserX size={14} />, meaning: NEEDS_DRIVER_MEANING })
   }
   return out
 }
@@ -392,6 +408,13 @@ function BoardPane({
 }: BoardPaneProps) {
   const { staff: staffProfiles, nameOf: staffNameOf } = staff
   const divisions = useOwnershipDivisions().divisions ?? SEED_DIVISIONS
+  const { drivers } = useDrivers()
+  const { equipment } = useTrucks()
+  // Step W: the roster the batch can book onto Ivan Cartage loads (active, not a broker placeholder).
+  const ivanDrivers = useMemo(
+    () => drivers.filter((d) => d.active && d.type !== 'broker').sort((a, b) => a.name.localeCompare(b.name)),
+    [drivers],
+  )
   // Step I teams are a property of the people, so the batch offers exactly the teams
   // somebody is actually on rather than a list nobody maintains.
   const teamKeys = useMemo(
@@ -539,9 +562,12 @@ function BoardPane({
     for (const status of SETTABLE_STATUSES) {
       actions.push({ key: `status:${status}`, label: `Set status to ${sentence(status)}` })
     }
+    for (const d of ivanDrivers) {
+      actions.push({ key: `driver:${d.id}`, label: `Assign driver (Ivan Cartage): ${d.name}` })
+    }
     actions.push({ key: 'export', label: 'Export selected' })
     return actions
-  }, [staffProfiles, divisions, teamKeys])
+  }, [staffProfiles, divisions, teamKeys, ivanDrivers])
 
   const selectedRows = useMemo(
     () => shownRows.filter((r) => selectedIds.includes(r.id)),
@@ -570,7 +596,18 @@ function BoardPane({
       return
     }
 
-    const task = batchTaskOf(batchAction)
+    // The driver's own truck and trailer ride along, as the single-load dialog pre-fills them.
+    const driverParams = (driverId: string): Record<string, unknown> => {
+      const d = ivanDrivers.find((x) => x.id === driverId)
+      const truck = d?.assignedTruckId ? equipment.find((e) => e.id === d.assignedTruckId) : undefined
+      const trailer = d?.assignedTrailerId ? equipment.find((e) => e.id === d.assignedTrailerId) : undefined
+      return {
+        driverId,
+        ...(truck ? { truckId: truck.id, truckNumber: truck.unitNumber } : {}),
+        ...(trailer ? { trailerId: trailer.id, trailerNumber: trailer.unitNumber } : {}),
+      }
+    }
+    const task = batchTaskOf(batchAction, driverParams)
     if (!task) {
       setBatchResults([{ rowId: 'batch', rowLabel: 'Batch task', success: false, message: 'Unknown task' }])
       setBatchRunning(false)
@@ -608,7 +645,7 @@ function BoardPane({
       )
       setBatchRunning(false)
     }
-  }, [batchAction, selectedRows, columnKeys, handleRefresh])
+  }, [batchAction, selectedRows, columnKeys, handleRefresh, ivanDrivers, equipment])
 
   const gridColumns = useMemo<BoardGridColumn[]>(
     () =>

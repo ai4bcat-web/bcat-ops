@@ -34,11 +34,13 @@ import {
 import { useAuth } from '@/hooks/useAuth'
 import { useDirectory } from '@/hooks/useDirectory'
 import { useDrivers } from '@/hooks/useDrivers'
+import { useTrucks } from '@/hooks/useTrucks'
 import { useLoads } from '@/hooks/useLoads'
 import {
-  createApptTask, createLocation, createShipment, getTmsSettings, notifySlackStatusChange,
+  assignAsset, createApptTask, createLocation, createShipment, getTmsSettings, notifySlackStatusChange,
   updateIntakeItem, updateLoad,
 } from '@/lib/apiClient'
+import { distinctStopDrivers } from '@/lib/ownAssetDriver'
 import { apptNotices } from '@/lib/apptNotify'
 import { requiresApptProofs } from '@/lib/apptQueue'
 import { effectiveCustomerStatus } from '@/lib/customerCredit'
@@ -221,9 +223,14 @@ async function applyNewShipmentEffects({
   }
 }
 
+/** One driver per Ivan Cartage load (Step W). */
+const ONE_DRIVER_MESSAGE =
+  'One driver per Ivan Cartage load. Pick the driver for the whole load, or create one leg per driver.'
+
 export function NewShipmentDialog({ open, prefill, defaultMode = 'FTL', onClose, onCreated }: NewShipmentDialogProps) {
   const directory = useDirectory()
   const { drivers } = useDrivers()
+  const { equipment } = useTrucks()
   // The identity table on purpose: `proConflict` is the fast client-side answer and a
   // voided load keeps its Pro # forever, so hiding voided rows would let a dead number
   // read as free. The server's claim is the rule either way.
@@ -430,6 +437,14 @@ export function NewShipmentDialog({ open, prefill, defaultMode = 'FTL', onClose,
         return
       }
     }
+    // Step W: an Ivan Cartage load has one driver. Two different stop drivers would be a
+    // relay the booking cannot represent, so refuse before anything is saved.
+    const stopDrivers = distinctStopDrivers(values.stops.map((s, i) => stopFormToStop(s, i)))
+    if (stopDrivers.length > 1) {
+      setError(ONE_DRIVER_MESSAGE)
+      return
+    }
+    const pickedDriverId = stopDrivers[0] ?? null
     saveInFlight.current = true
     setSaving(true)
     setError(null)
@@ -457,7 +472,10 @@ export function NewShipmentDialog({ open, prefill, defaultMode = 'FTL', onClose,
         source: prefill?.source ?? 'MANUAL',
         ...(prefill?.workflowRunId ? { workflowRunId: prefill.workflowRunId } : {}),
         load: {
-          stops,
+          // The driver is booked through ASSIGN_ASSET below, which writes the stops, the
+          // mirrors and the Ivan Cartage leg together. Sending it here would create a
+          // driver on the load with no leg behind it.
+          stops: pickedDriverId ? stops.map((s) => ({ ...s, driverId: null })) : stops,
           tmsId: values.tmsId?.trim() || undefined,
           pickupNumber: values.pickupNumber?.trim() || undefined,
           commodity: values.commodity?.trim() || undefined,
@@ -473,6 +491,21 @@ export function NewShipmentDialog({ open, prefill, defaultMode = 'FTL', onClose,
         },
       })
       toast.success(`Shipment ${bundle.shipment.number} created`)
+      if (pickedDriverId) {
+        const driver = drivers.find((d) => d.id === pickedDriverId)
+        const truck = driver?.assignedTruckId ? equipment.find((e) => e.id === driver.assignedTruckId) : undefined
+        const trailer = driver?.assignedTrailerId ? equipment.find((e) => e.id === driver.assignedTrailerId) : undefined
+        try {
+          await assignAsset({
+            loadId: bundle.loads[0].id,
+            driverId: pickedDriverId,
+            ...(truck ? { truckId: truck.id, truckNumber: truck.unitNumber } : {}),
+            ...(trailer ? { trailerId: trailer.id, trailerNumber: trailer.unitNumber } : {}),
+          })
+        } catch (err) {
+          toast.warning(`Shipment ${bundle.shipment.number} created, but the driver was not booked: ${errorMessage(err)}`)
+        }
+      }
       await applyNewShipmentEffects({
         bundle,
         stops,
@@ -667,7 +700,7 @@ export function NewShipmentDialog({ open, prefill, defaultMode = 'FTL', onClose,
               errors={errors}
               watch={watch}
               setValue={setValue}
-              drivers={drivers.filter((d) => d.active)}
+              drivers={drivers.filter((d) => d.active && d.type !== 'broker')}
               locations={directory.locations}
               onCreateLocation={(initial, stopIndex) => setCreateLocationFor({ initial, stopIndex })}
             />

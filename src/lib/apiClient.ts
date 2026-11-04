@@ -2535,8 +2535,8 @@ export interface AssignAssetInput {
   loadId: string
   expectedUpdatedAt?: string
   driverId: string
-  driverName?: string | null
-  driverPhone?: string | null
+  flattenSplit?: boolean
+  payOverrideReason?: string | null
   truckId?: string | null
   truckNumber?: string | null
   trailerId?: string | null

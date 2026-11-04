@@ -26,7 +26,7 @@ import { StopCards, type StopActionInput } from './StopCards'
 import { FinancialLines } from './FinancialLines'
 import { MODE_OPTIONS, TRUCKLOAD_MODES, validateOrderDraft, issuesForSection } from '../orderDraft'
 import type {
-  ChargeCodeDef, CustomerRecord, FreightItem, HandlingUnit, LoadChargeInput, LoadChargeRecord, LocationRecord,
+  AssignmentType, ChargeCodeDef, CustomerRecord, FreightItem, HandlingUnit, LoadChargeInput, LoadChargeRecord, LocationRecord,
   OrderRecord, OrderReference, PricingDefaults, RateType, ReferenceLevel, ReferenceVisibility,
   RequiredReference, ShipmentBundle, ShipmentMode,
 } from '@/types/tms'
@@ -90,11 +90,18 @@ interface DraftOrderEditorProps {
   onSubmit: (carrierRepId: string | undefined) => Promise<void>
   onStopAction: (input: StopActionInput) => Promise<void>
   onSaveCharges: (charges: LoadChargeInput[]) => Promise<void>
+  /** Step W: who is driving the Ivan Cartage load; ShipmentDetail owns the assign dialog. */
+  driverRow?: {
+    driverName: string | null
+    assignmentType: AssignmentType | null
+    voided: boolean
+    onOpen: () => void
+  }
 }
 
 export function DraftOrderEditor({
   bundle, customer, requiredReferences, catalog, pricing, marginFloorBps, locations,
-  credit, currentUser, onSaveForm, onSubmit, onStopAction, onSaveCharges,
+  credit, currentUser, onSaveForm, onSubmit, onStopAction, onSaveCharges, driverRow,
 }: DraftOrderEditorProps) {
   const order = bundle.orders[0]
   const load = bundle.loads[0]
@@ -283,6 +290,22 @@ export function DraftOrderEditor({
               </label>
             ))}
           </div>
+          {driverRow && (
+            <div className="mt-3 flex flex-wrap items-center gap-3 text-sm" data-testid="draft-driver-row">
+              <span className="font-medium">Driver</span>
+              {driverRow.assignmentType === 'OWN_ASSET' && driverRow.driverName ? (
+                <>
+                  <span>{driverRow.driverName} · Ivan Cartage</span>
+                  {!driverRow.voided && <TmsButton onClick={driverRow.onOpen}>Change</TmsButton>}
+                </>
+              ) : (
+                <>
+                  <span>None</span>
+                  {!driverRow.voided && <TmsButton onClick={driverRow.onOpen}>Assign driver</TmsButton>}
+                </>
+              )}
+            </div>
+          )}
         </Section>
       )}
 

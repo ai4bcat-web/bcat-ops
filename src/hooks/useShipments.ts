@@ -55,6 +55,7 @@ export interface ShipmentListRow extends ShipmentRecord {
   stopCount: number | null
   carrierName: string | null
   driverName: string | null
+  driverId: string | null
   truckNumber: string | null
   /** The order's rep, behind the shipment's own `salesRepId`. */
   customerRepId: string | null
@@ -596,6 +597,7 @@ export function useShipments(view: ShipmentsView = DEFAULT_VIEW) {
         reference: referenceByShipment[s.id] ?? null,
         carrierName: active?.carrierName ?? null,
         driverName: active?.driverName ?? null,
+        driverId: active?.driverId ?? null,
         truckNumber: active?.truckNumber ?? null,
         customerRepId,
         quoteId: quoteByShipment[s.id] ?? null,

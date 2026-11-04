@@ -15,7 +15,7 @@
  */
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Building2, Send, Truck, UserMinus } from 'lucide-react'
+import { Building2, Send, Truck, UserCog, UserMinus } from 'lucide-react'
 import { RateConPanel } from '@/features/carriers/components/RateConPanel'
 import { CarrierOffersCard } from '@/features/quotes/components/CarrierOffersCard'
 import { getCarrierBundle, getTmsSettings } from '@/lib/apiClient'
@@ -23,25 +23,33 @@ import { useDrivers } from '@/hooks/useDrivers'
 import { netPayable, quickPayFee, quickPayTiersOf, tierFor } from '@/lib/quickPay'
 import { formatCents } from '@/lib/tmsDirectory'
 import { formatDateTime } from '@/lib/date'
-import { TmsBadge, TmsButton, TmsCard, TmsField, TmsMetaList, TmsSelect } from '@/features/tms/kit'
+import { TmsAlert, TmsBadge, TmsButton, TmsCard, TmsField, TmsMetaList, TmsSelect } from '@/features/tms/kit'
 import { DispatchDialog } from './DispatchDialog'
 import { PostingsSection } from './PostingsSection'
 import { CarrierOffersSection } from './CarrierOffersSection'
 import { RemoveCarrierDialog } from './StatusActions'
 import { OWN_FLEET_CALENDAR_PATH, OWN_FLEET_DISPATCH_PATH, settlementPathFor } from './ownFleet'
+import { AssignDriverDialog } from './AssignDriverDialog'
+import { distinctStopDrivers } from '@/lib/ownAssetDriver'
+import { useTrucks } from '@/hooks/useTrucks'
 import type { ShipmentActions } from '../useShipmentActions'
 import type { CarrierBundle, ShipmentBundle, TmsSettings } from '@/types/tms'
 
-type CarrierDialog = { kind: 'dispatch' } | { kind: 'remove'; outcome: 'BOUNCED' | 'TONU' } | null
+const OWN_FLEET_SCHEDULE_PATH = '/schedule'
 
-export function CarrierSection({ bundle, actions }: {
+type CarrierDialog = { kind: 'dispatch' } | { kind: 'assign' } | { kind: 'remove'; outcome: 'BOUNCED' | 'TONU' } | null
+
+export function CarrierSection({ bundle, actions, isAdmin = false }: {
   bundle: ShipmentBundle
   actions: ShipmentActions
+  /** Owner/ADMIN may change the driver on a load in a closed pay week, with a reason. */
+  isAdmin?: boolean
 }) {
   const [settings, setSettings] = useState<TmsSettings | null>(null)
   const [carrierBundle, setCarrierBundle] = useState<CarrierBundle | null>(null)
   const [dialog, setDialog] = useState<CarrierDialog>(null)
   const { drivers } = useDrivers()
+  const { equipment } = useTrucks()
 
   const load = bundle.loads[0]
   const loadCarrier = bundle.loadCarriers.find((c) => c.status === 'ACTIVE') ?? null
@@ -67,6 +75,30 @@ export function CarrierSection({ bundle, actions }: {
 
   const shipmentId = bundle.shipment.id
   const buildState = bundle.shipment.buildState
+  const voided = Boolean(bundle.shipment.voidedAt)
+  const ownAssetNoLeg = load?.assignmentType === 'OWN_ASSET' && !voided
+
+  const noDriverBanner = (
+    <TmsAlert tone="orange">
+      <div data-testid="own-asset-no-driver" className="flex flex-wrap items-center justify-between gap-2">
+        <span>
+          No driver on this Ivan Cartage load. It will not show on the Schedule or in any settlement until you pick one.
+        </span>
+        <TmsButton size="sm" variant="primary" onClick={() => setDialog({ kind: 'assign' })} disabled={actions.busy}>
+          Assign driver
+        </TmsButton>
+      </div>
+    </TmsAlert>
+  )
+  const assignDialog = dialog?.kind === 'assign' && load ? (
+    <AssignDriverDialog
+      load={load} activeLeg={loadCarrier} drivers={drivers}
+      trucks={equipment.filter((e) => e.type === 'truck')} trailers={equipment.filter((e) => e.type === 'trailer')}
+      isAdmin={isAdmin} busy={actions.busy}
+      onClose={() => setDialog(null)}
+      onConfirm={actions.load.onAssignAsset}
+    />
+  ) : null
 
   if (!loadCarrier) {
     return (
@@ -74,13 +106,20 @@ export function CarrierSection({ bundle, actions }: {
         <CarrierOffersSection shipmentId={shipmentId} bundle={bundle} onReload={actions.reload} />
         <PostingsSection shipmentId={shipmentId} loadId={load?.id} buildState={buildState} onReload={actions.reload} />
         {offers}
-        <p className="tms-muted text-sm">Nobody is on this load yet. Book a carrier from the Overview tab.</p>
+        {ownAssetNoLeg
+          ? noDriverBanner
+          : <p className="tms-muted text-sm">Nobody is on this load yet. Book a carrier from the Overview tab.</p>}
+        {assignDialog}
       </div>
     )
   }
 
   const isOwnAsset = loadCarrier.kind === 'OWN_ASSET'
+  const ownAssetNoDriver = isOwnAsset && !loadCarrier.driverId
   const driver = loadCarrier.driverId ? drivers.find((d) => d.id === loadCarrier.driverId) ?? null : null
+  const localDriver = Boolean(driver) && (!driver?.fleetGroup || driver.fleetGroup === 'LOCAL')
+  const stopDriverIds = distinctStopDrivers(load?.stops)
+  const relayNames = stopDriverIds.length >= 2 ? stopDriverIds.map((id) => drivers.find((d) => d.id === id)?.name ?? id) : null
   const tiers = quickPayTiersOf(settings)
   const rateCents = loadCarrier.carrierRateCents ?? 0
   const tier = loadCarrier.quickPayDays ? tierFor(loadCarrier.quickPayDays, tiers) : null
@@ -123,14 +162,24 @@ export function CarrierSection({ bundle, actions }: {
             {loadCarrier.bookingWarnings?.map((w) => <TmsBadge key={w} tone="orange">{w}</TmsBadge>)}
           </div>
         )}
+        {relayNames && (
+          <div className="mt-2">
+            <TmsBadge tone="blue">Relay: {relayNames.join(' → ')}</TmsBadge>
+          </div>
+        )}
+        {ownAssetNoDriver && noDriverBanner}
         {isOwnAsset && (
           <p className="mt-3 text-sm" data-testid="own-fleet-links">
             On the <Link to={OWN_FLEET_CALENDAR_PATH} className="underline underline-offset-2">calendar</Link>
+            {' · '}on the <Link to={OWN_FLEET_SCHEDULE_PATH} className="underline underline-offset-2">Schedule</Link>
             {' · '}in <Link to={OWN_FLEET_DISPATCH_PATH} className="underline underline-offset-2">Dispatch</Link>
-            {' · '}pays through{' '}
-            <Link to={settlementPathFor(driver?.fleetGroup)} className="underline underline-offset-2" data-testid="own-fleet-settlement">
-              driver settlements
-            </Link>
+            {' · '}
+            {localDriver
+              ? <Link to={settlementPathFor(driver?.fleetGroup)} className="underline underline-offset-2" data-testid="own-fleet-settlement">paperwork (no settlement)</Link>
+              : <>pays through{' '}
+                <Link to={settlementPathFor(driver?.fleetGroup)} className="underline underline-offset-2" data-testid="own-fleet-settlement">
+                  driver settlements
+                </Link></>}
           </p>
         )}
       </TmsCard>
@@ -180,8 +229,17 @@ export function CarrierSection({ bundle, actions }: {
 
       <div className="flex flex-wrap gap-2">
         {load?.status === 'BOOKED' && (
-          <TmsButton variant="primary" size="sm" onClick={() => setDialog({ kind: 'dispatch' })} disabled={actions.busy}>
+          <TmsButton
+            variant="primary" size="sm" onClick={() => setDialog({ kind: 'dispatch' })}
+            disabled={actions.busy || ownAssetNoDriver}
+            title={ownAssetNoDriver ? 'Pick the driver before dispatching' : undefined}
+          >
             <Send size={14} className="mr-1" />Dispatch
+          </TmsButton>
+        )}
+        {isOwnAsset && !voided && !ownAssetNoDriver && (
+          <TmsButton size="sm" onClick={() => setDialog({ kind: 'assign' })} disabled={actions.busy}>
+            <UserCog size={14} className="mr-1" />{loadCarrier.driverId ? 'Change driver' : 'Assign driver'}
           </TmsButton>
         )}
         <TmsButton size="sm" onClick={() => setDialog({ kind: 'remove', outcome: 'BOUNCED' })} disabled={actions.busy}>
@@ -197,9 +255,10 @@ export function CarrierSection({ bundle, actions }: {
           loadCarrier={loadCarrier}
           busy={actions.busy}
           onClose={() => setDialog(null)}
-          onConfirm={(input) => { void actions.dispatchLoad(input).then(() => setDialog(null)).catch(() => {}) }}
+          onConfirm={async (input) => { await actions.dispatchLoad(input); setDialog(null) }}
         />
       )}
+      {assignDialog}
       {dialog?.kind === 'remove' && (
         <RemoveCarrierDialog
           outcome={dialog.outcome}

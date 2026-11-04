@@ -1461,6 +1461,7 @@ export type BatchShipmentTask =
   | 'SET_REV_DIVISION'
   | 'SET_CARRIER_REP'
   | 'SET_STATUS'
+  | 'ASSIGN_DRIVER'
 
 export interface BatchShipmentTaskRowResult {
   shipmentId: string

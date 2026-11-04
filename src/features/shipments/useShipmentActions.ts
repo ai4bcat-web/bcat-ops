@@ -74,14 +74,15 @@ export function useShipmentActions(
   const [busy, setBusy] = useState(false)
 
   // Every action funnels through here so the busy flag, the toast and the bundle swap
-  // are written once instead of sixteen times.
-  const call = useCallback(async (label: string, fn: () => Promise<ShipmentBundle>) => {
+  // are written once instead of sixteen times. `quiet` skips the toast for the callers
+  // that render the refusal inline (the message is still rethrown).
+  const call = useCallback(async (label: string, fn: () => Promise<ShipmentBundle>, opts?: { quiet?: boolean }) => {
     setBusy(true)
     try {
       onBundle(await fn())
     } catch (err) {
       const message = err instanceof Error ? err.message : `${label} failed`
-      toast.error(message)
+      if (!opts?.quiet) toast.error(message)
       throw err instanceof Error ? err : new Error(message)
     } finally {
       setBusy(false)
@@ -171,7 +172,7 @@ export function useShipmentActions(
     },
     dispatchLoad: async (input) => {
       const { sendTrackingLink: alsoSendLink, ...fields } = input
-      await call('Dispatch', () => dispatchLoad({ loadId: load?.id ?? '', ...fields }))
+      await call('Dispatch', () => dispatchLoad({ loadId: load?.id ?? '', ...fields }), { quiet: true })
       // Only after the truck is dispatched, and never rolled back into it: a text that
       // fails to send is reported on its own and leaves the dispatch standing.
       if (alsoSendLink) {
@@ -236,10 +237,10 @@ export function useShipmentActions(
     },
     load: {
       onSetLoadStatus: async (status) => {
-        await call('Load status', () => setLoadStatus({ loadId: load?.id ?? '', status }))
+        await call('Load status', () => setLoadStatus({ loadId: load?.id ?? '', status }), { quiet: true })
       },
       onAssignAsset: async (input) => {
-        await call('Assign asset', () => assignAsset({ loadId: load?.id ?? '', ...input }))
+        await call('Assign asset', () => assignAsset({ loadId: load?.id ?? '', ...input }), { quiet: true })
       },
       onAssignCarrier: async (input) => {
         await call('Assign carrier', () => assignCarrier({ loadId: load?.id ?? '', ...input }))

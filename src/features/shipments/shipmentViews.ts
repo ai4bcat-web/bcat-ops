@@ -89,6 +89,8 @@ export type ShipmentRow = ShipmentRecord & {
   /** The ACTIVE assignment: an outside carrier's name, or our own driver and truck. */
   carrierName?: string | null
   driverName?: string | null
+  /** The ACTIVE assignment's driver id. Blank on an own-fleet row is the "no driver" exception. */
+  driverId?: string | null
   truckNumber?: string | null
   /** The order's rep, when the shipment itself carries none. */
   customerRepId?: string | null
@@ -537,6 +539,14 @@ function paymentTermsLabel(days: number | null | undefined): string {
   return `Net ${days}`
 }
 
+/** The Carrier column's text for an own-fleet shipment nobody is driving. */
+export const OWN_FLEET_NO_DRIVER = 'Own fleet · no driver'
+
+/** A live Ivan Cartage shipment with no driver on its active assignment (Step W). */
+export function needsDriver(row: ShipmentRow): boolean {
+  return row.assignmentType === 'OWN_ASSET' && !row.driverId && !isVoided(row) && row.status !== 'CANCELED'
+}
+
 /**
  * Who is hauling it, in MVMNT's words: the outside carrier's name, our own driver and
  * truck when the fleet has it, and "Need to cover" while nobody does.
@@ -544,6 +554,7 @@ function paymentTermsLabel(days: number | null | undefined): string {
 export function carrierLabel(row: ShipmentRow): string {
   if (row.assignmentType === 'OWN_ASSET') {
     const own = [row.driverName, row.truckNumber ? `Truck ${row.truckNumber}` : null].filter(Boolean).join(' · ')
+    if (needsDriver(row)) return OWN_FLEET_NO_DRIVER
     return own || 'Own fleet'
   }
   if (row.carrierName) return row.carrierName

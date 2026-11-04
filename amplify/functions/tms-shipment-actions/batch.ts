@@ -1,4 +1,5 @@
 /** Server batches preserve each single-shipment gate and report every requested row. */
+import { OWN_ASSET_MESSAGES } from '../../../src/lib/ownAssetDriver'
 import { assertArrayOf, assertEnum, assertRecord, assertString, type Caller } from '../_shared/actionInputs'
 import type { Row } from '../_shared/shipmentStore'
 import type { BatchShipmentTask, BatchShipmentTaskResult } from '../../../src/types/tms'
@@ -9,10 +10,14 @@ export const BATCH_TASK_ACTIONS = {
   SET_REV_DIVISION: 'SET_REV_TAG',
   SET_CARRIER_REP: 'ASSIGN_CARRIER_REP',
   SET_STATUS: 'SET_SHIPMENT_STATUS',
+  // A batch driver assignment is an ASSIGN_ASSET per row: same authorization, same gates.
+  ASSIGN_DRIVER: 'ASSIGN_ASSET',
 } as const
 
 export interface BatchShipmentDeps {
   getShipment: (shipmentId: string) => Promise<Row | null>
+  getLoadsOf: (shipmentId: string) => Promise<Row[]>
+  assignAsset: (input: Row, caller: Caller) => Promise<unknown>
   getOrders: (shipmentId: string) => Promise<Row[]>
   authorize: (action: typeof BATCH_TASK_ACTIONS[BatchShipmentTask], caller: Caller) => boolean
   releaseToBilling: (input: Row, caller: Caller) => Promise<unknown>
@@ -58,6 +63,20 @@ export async function batchShipmentTask(deps: BatchShipmentDeps, input: Row, cal
           // overwrite a change somebody made between the click and the call.
           await deps.setStatus({ ...params, shipmentId, expectedUpdatedAt: shipment.updatedAt }, caller)
           break
+        case 'ASSIGN_DRIVER': {
+          const loads = await deps.getLoadsOf(shipmentId)
+          if (loads.length !== 1) throw new Error(OWN_ASSET_MESSAGES.batchMultiLeg)
+          if (loads[0].assignmentType === 'CARRIER') {
+            throw new Error(OWN_ASSET_MESSAGES.batchCovered(typeof loads[0].carrierName === 'string' && loads[0].carrierName ? loads[0].carrierName : 'an outside carrier'))
+          }
+          // A batch has no way to ask about a relay or give a pay-lock reason, so a row
+          // that needs either comes back as a failure with the single-load text.
+          const driverParams: Row = { ...params, loadId: String(loads[0].id) }
+          delete driverParams.payOverrideReason
+          delete driverParams.flattenSplit
+          await deps.assignAsset(driverParams, caller)
+          break
+        }
       }
       results.push({ shipmentId, number, ok: true, message: null })
     } catch (error) {

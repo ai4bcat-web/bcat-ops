@@ -1,6 +1,11 @@
 import { describe, it, expect } from 'vitest'
 
-import { evaluateReleaseGate, releaseGateError, releaseGateOf, type ReleaseGateInput } from './releaseGate'
+import { evaluateReleaseGate, releaseGateError, releaseGateOf, type ReleaseGateInput, type ReleaseGateLeg } from './releaseGate'
+
+const own = (over: Partial<ReleaseGateLeg> = {}): ReleaseGateLeg =>
+  ({ kind: 'OWN_ASSET', status: 'ACTIVE', driverId: 'drv-1', deliveryDriverId: 'drv-1', ...over })
+const outside = (over: Partial<ReleaseGateLeg> = {}): ReleaseGateLeg =>
+  ({ kind: 'CARRIER', status: 'ACTIVE', driverId: null, deliveryDriverId: null, ...over })
 
 /** A delivered brokered shipment with everything in hand, which every test bends. */
 function input(overrides: Partial<ReleaseGateInput> = {}): ReleaseGateInput {
@@ -14,7 +19,7 @@ function input(overrides: Partial<ReleaseGateInput> = {}): ReleaseGateInput {
       { type: 'BOL', status: 'ACTIVE', reviewStatus: 'ACCEPTED' },
       { type: 'POD', status: 'ACTIVE', reviewStatus: 'ACCEPTED' },
     ],
-    legs: [{ kind: 'OWN_ASSET', status: 'ACTIVE' }],
+    legs: [own()],
     openIncidentCount: 0,
     ...overrides,
   }
@@ -97,14 +102,13 @@ describe('evaluateReleaseGate', () => {
   })
 
   it('wants a rate confirmation once somebody else’s truck is on the load', () => {
-    const carrierLeg = { kind: 'CARRIER' as const, status: 'ACTIVE', carrierName: 'Wheeler', chargesFinalizedAt: 'x' }
+    const carrierLeg = outside({ carrierName: 'Wheeler', chargesFinalizedAt: 'x' })
     expect(messages(input({ legs: [carrierLeg] }))).toEqual(['Missing document: RATE_CON'])
     expect(messages(input({ legs: [{ ...carrierLeg, rateConStatus: 'SIGNED' }] }))).toEqual([])
   })
 
   it('asks nothing extra of an own-fleet leg: no rate con, no carrier bill', () => {
-    expect(evaluateReleaseGate(input({ legs: [{ kind: 'OWN_ASSET', status: 'ACTIVE' }] })))
-      .toEqual({ ok: true, missing: [] })
+    expect(evaluateReleaseGate(input({ legs: [own()] }))).toEqual({ ok: true, missing: [] })
   })
 
   it('names a missing reference by the label the customer configured', () => {
@@ -137,7 +141,7 @@ describe('evaluateReleaseGate', () => {
           { type: 'POD', status: 'ACTIVE' },
           { type: 'RATE_CON', status: 'ACTIVE' },
         ],
-        legs: [{ kind: 'CARRIER', status: 'ACTIVE', carrierName: 'Wheeler Trucking', chargesFinalizedAt: null }],
+        legs: [outside({ carrierName: 'Wheeler Trucking', chargesFinalizedAt: null })],
       }),
     )
     expect(gate.missing).toEqual([
@@ -150,7 +154,7 @@ describe('evaluateReleaseGate', () => {
   })
 
   it('ignores a bounced leg entirely: it is neither assigned nor owed', () => {
-    expect(messages(input({ legs: [{ kind: 'CARRIER', status: 'BOUNCED', carrierName: 'Wheeler' }] })))
+    expect(messages(input({ legs: [outside({ status: 'BOUNCED', carrierName: 'Wheeler' })] })))
       .toEqual(['No carrier or driver assigned'])
   })
 
@@ -174,7 +178,7 @@ describe('evaluateReleaseGate', () => {
         shipment: { status: 'IN_TRANSIT' },
         order: { arStatus: 'DOCS_NEEDED', references: [] },
         documents: [],
-        legs: [{ kind: 'CARRIER', status: 'ACTIVE', carrierName: 'Wheeler' }],
+        legs: [own({ driverId: null }), outside({ carrierName: 'Wheeler' })],
         openIncidentCount: 2,
       }),
     )
@@ -184,9 +188,40 @@ describe('evaluateReleaseGate', () => {
       'DOC_MISSING',
       'DOC_MISSING',
       'REFERENCE_MISSING',
+      'DRIVER_MISSING',
       'CARRIER_CHARGES_UNSETTLED',
       'OPEN_EXCEPTIONS',
     ])
+  })
+})
+
+describe('evaluateReleaseGate: Ivan Cartage driver', () => {
+  it('refuses an own-fleet leg with no driver, with the exact sentence and no detail', () => {
+    const gate = evaluateReleaseGate(input({ legs: [own({ driverId: null })] }))
+    expect(gate.ok).toBe(false)
+    expect(gate.missing).toEqual([
+      { code: 'DRIVER_MISSING', detail: null, message: 'Missing driver: this Ivan Cartage load has no driver (Carrier/Driver tab → Assign driver)' },
+    ])
+  })
+
+  it('refuses a driver on the leg but nobody on the delivery stop (no settlement would pick it up)', () => {
+    expect(messages(input({ legs: [own({ deliveryDriverId: null })] })))
+      .toEqual(['Missing driver on the delivery stop: re-assign the driver on the Carrier/Driver tab'])
+  })
+
+  it('lets a legacy relay through: leg driver and delivery driver may differ', () => {
+    expect(evaluateReleaseGate(input({ legs: [own({ driverId: 'drv-1', deliveryDriverId: 'drv-2' })] })))
+      .toEqual({ ok: true, missing: [] })
+  })
+
+  it('ignores a bounced own-fleet leg and does not ask an outside carrier for a driver', () => {
+    const legs = [own({ status: 'BOUNCED', driverId: null }), outside({ chargesFinalizedAt: 'x', carrierName: 'W', rateConStatus: 'SIGNED' })]
+    expect(messages(input({ legs }))).toEqual([])
+  })
+
+  it('says nothing more about a voided shipment', () => {
+    const shipment = { status: 'DELIVERED', voidedAt: '2026-10-21T00:00:00.000Z' }
+    expect(messages(input({ shipment, legs: [own({ driverId: null })] }))).toEqual(['Voided shipment'])
   })
 })
 

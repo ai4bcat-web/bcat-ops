@@ -2180,6 +2180,14 @@ describe('commissions', () => {
       shipmentId: SHIPMENT_ID,
       kind: 'OWN_ASSET',
       status: 'ACTIVE',
+      // Step W: an Ivan Cartage load needs a driver before it can be released to invoicing.
+      driverId: 'drv-own',
+      driverName: 'Own Driver',
+    })
+    table(TABLES.load).set(LOAD_ID, {
+      ...(table(TABLES.load).get(LOAD_ID) as Row),
+      pickupDriverId: 'drv-own',
+      deliveryDriverId: 'drv-own',
     })
     table(TABLES.financials).set(LOAD_ID, {
       ...(table(TABLES.financials).get(LOAD_ID) as Row),

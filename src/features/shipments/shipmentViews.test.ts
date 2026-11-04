@@ -17,6 +17,7 @@ import {
   massReleaseReady,
   matchesBoardFilters,
   matchesQuery,
+  needsDriver,
   stopProgressOf,
   toCsv,
   toViewRow,
@@ -83,9 +84,18 @@ describe('columns', () => {
 
   it('names who is hauling it, or says nobody is', () => {
     expect(carrierLabel(row('1', { assignmentType: 'CARRIER', carrierName: 'Bay Logistics' }))).toBe('Bay Logistics')
-    expect(carrierLabel(row('2', { assignmentType: 'OWN_ASSET', driverName: 'Pavel K', truckNumber: '117' })))
+    expect(carrierLabel(row('2', { assignmentType: 'OWN_ASSET', driverId: 'drv-9', driverName: 'Pavel K', truckNumber: '117' })))
       .toBe('Pavel K · Truck 117')
     expect(carrierLabel(row('3', { assignmentType: 'NEED_TO_COVER' }))).toBe('Need to cover')
+  })
+
+  it('says an own-fleet shipment has no driver, but only while it is live', () => {
+    expect(carrierLabel(row('1', { assignmentType: 'OWN_ASSET', driverId: null }))).toBe('Own fleet · no driver')
+    expect(carrierLabel(row('2', { assignmentType: 'OWN_ASSET', driverId: 'drv-1' }))).toBe('Own fleet')
+    expect(carrierLabel(row('3', { assignmentType: 'OWN_ASSET', driverId: null, voidedAt: '2026-02-01T00:00:00Z' }))).toBe('Own fleet')
+    expect(carrierLabel(row('4', { assignmentType: 'OWN_ASSET', driverId: null, status: 'CANCELED' }))).toBe('Own fleet')
+    expect(needsDriver(row('5', { assignmentType: 'NEED_TO_COVER', driverId: null }))).toBe(false)
+    expect(needsDriver(row('6', { assignmentType: 'OWN_ASSET' }))).toBe(true)
   })
 
   it('puts the subdivision in brackets behind the division name', () => {

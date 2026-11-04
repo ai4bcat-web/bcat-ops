@@ -40,7 +40,8 @@ export function DispatchDialog({ loadCarrier, busy, onClose, onConfirm }: {
   loadCarrier: LoadCarrierRecord
   busy: boolean
   onClose: () => void
-  onConfirm: (input: DispatchFields) => void
+  /** Resolves when the dispatch landed (the caller closes); a rejection is shown inline. */
+  onConfirm: (input: DispatchFields) => Promise<void>
 }) {
   const [dispatchedAt, setDispatchedAt] = useState(formatDateTimeInput(new Date().toISOString()))
   const [pickupEta, setPickupEta] = useState(loadCarrier.pickupEtaAt ? formatDateTimeInput(loadCarrier.pickupEtaAt) : '')
@@ -58,6 +59,7 @@ export function DispatchDialog({ loadCarrier, busy, onClose, onConfirm }: {
   const [error, setError] = useState<string | null>(null)
 
   const rateConSigned = loadCarrier.rateConStatus === 'SIGNED'
+  const isOwnAsset = loadCarrier.kind === 'OWN_ASSET'
 
   return (
     <TmsDialog
@@ -68,21 +70,27 @@ export function DispatchDialog({ loadCarrier, busy, onClose, onConfirm }: {
         <>
           <TmsButton variant="ghost" onClick={onClose} disabled={busy}>Cancel</TmsButton>
           <TmsButton variant="primary"
-            onClick={() => {
+            onClick={async () => {
               if (!dispatchedAt) { setError('A dispatch time is required.'); return }
-              onConfirm({
-                dispatchedAt: fromDateTimeInput(dispatchedAt),
-                pickupEtaAt: pickupEta ? fromDateTimeInput(pickupEta) : undefined,
-                driverName: driverName.trim() || undefined,
-                driverPhone: driverPhone.trim() || undefined,
-                truckNumber: truckNumber.trim() || undefined,
-                trailerNumber: trailerNumber.trim() || undefined,
-                trackingProvider,
-                nextCheckCallAt: checkCallAt ? fromDateTimeInput(checkCallAt) : undefined,
-                nextCheckCallNote: checkCallNote.trim() || undefined,
-                note: note.trim() || undefined,
-                sendTrackingLink: sendLink && driverPhone.trim().length > 0,
-              })
+              setError(null)
+              try {
+                await onConfirm({
+                  dispatchedAt: fromDateTimeInput(dispatchedAt),
+                  pickupEtaAt: pickupEta ? fromDateTimeInput(pickupEta) : undefined,
+                  // The driver on an own-fleet leg is the roster's, never typed here.
+                  driverName: isOwnAsset ? undefined : driverName.trim() || undefined,
+                  driverPhone: isOwnAsset ? undefined : driverPhone.trim() || undefined,
+                  truckNumber: truckNumber.trim() || undefined,
+                  trailerNumber: trailerNumber.trim() || undefined,
+                  trackingProvider,
+                  nextCheckCallAt: checkCallAt ? fromDateTimeInput(checkCallAt) : undefined,
+                  nextCheckCallNote: checkCallNote.trim() || undefined,
+                  note: note.trim() || undefined,
+                  sendTrackingLink: sendLink && driverPhone.trim().length > 0,
+                })
+              } catch (err) {
+                setError(err instanceof Error ? err.message : 'The load could not be dispatched.')
+              }
             }}
             disabled={busy}
           >
@@ -110,11 +118,15 @@ export function DispatchDialog({ loadCarrier, busy, onClose, onConfirm }: {
           </div>
           <div>
             <Label className="tms-field-label">Driver</Label>
-            <TmsInput aria-label="Dispatch driver name" value={driverName} onChange={(e) => setDriverName(e.target.value)} className="h-9 text-sm" />
+            {isOwnAsset
+              ? <p className="mt-1 h-9 text-sm leading-9" data-testid="dispatch-driver-name">{driverName || '—'}</p>
+              : <TmsInput aria-label="Dispatch driver name" value={driverName} onChange={(e) => setDriverName(e.target.value)} className="h-9 text-sm" />}
           </div>
           <div>
             <Label className="tms-field-label">Driver phone</Label>
-            <TmsInput aria-label="Dispatch driver phone" value={driverPhone} onChange={(e) => setDriverPhone(e.target.value)} className="h-9 text-sm" />
+            {isOwnAsset
+              ? <p className="mt-1 h-9 text-sm leading-9" data-testid="dispatch-driver-phone">{driverPhone || '—'}</p>
+              : <TmsInput aria-label="Dispatch driver phone" value={driverPhone} onChange={(e) => setDriverPhone(e.target.value)} className="h-9 text-sm" />}
           </div>
           <div>
             <Label className="tms-field-label">Truck #</Label>
@@ -151,7 +163,7 @@ export function DispatchDialog({ loadCarrier, busy, onClose, onConfirm }: {
             <Label className="tms-field-label">Dispatch note</Label>
             <TmsTextarea aria-label="Dispatch note" rows={2} value={note} onChange={(e) => setNote(e.target.value)} className="text-sm" />
           </div>
-          {error && <p className="col-span-2 text-xs text-[color:var(--tms-badge-red)]">{error}</p>}
+          {error && <p className="col-span-2 text-xs text-[color:var(--tms-badge-red)]" data-testid="dispatch-error" role="alert">{error}</p>}
           <div className="col-span-2">
             <label className="flex items-center gap-2 text-sm">
               <Checkbox

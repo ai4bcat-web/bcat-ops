@@ -61,6 +61,7 @@ const TABLES = {
   posting: 'ShipmentPosting-test',
   message: 'ShipmentMessage-test',
   intakeLoad: 'IntakeLoad-test',
+  boxTrip: 'BoxTruckTrip-test',
 }
 
 const store = vi.hoisted(() => {
@@ -95,6 +96,7 @@ const store = vi.hoisted(() => {
   process.env.BCAT_DEV_STACK = 'true'
   process.env.USER_PROFILE_TABLE_NAME = 'UserProfile-test'
   process.env.PORTAL_ORIGIN = 'https://portal.test'
+  process.env.BOX_TRUCK_TRIP_TABLE_NAME = 'BoxTruckTrip-test'
   process.env.AMPLIFY_DATA_DEFAULT_NAME = 'amplifyData'
   return new Map<string, Map<string, Record<string, unknown>>>()
 })
@@ -623,6 +625,11 @@ function runS3Command(cmd: MockCommand): unknown {
 }
 
 beforeEach(() => {
+  // The fixtures are dated early March 2026. Step W's pay lock closes any delivery week that
+  // has passed, so the suite's "today" is pinned inside the fixtures' own week. Only Date is
+  // faked: timers and promises stay real.
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(new Date('2026-03-07T23:00:00.000Z'))
   store.clear()
   send.mockReset()
   cognitoSend.mockReset()
@@ -657,6 +664,9 @@ beforeEach(() => {
 
   seedSettings()
   seedCustomer()
+  // Step W: ASSIGN_ASSET reads the roster, so the two drivers most tests book exist.
+  seedDriver('drv-1', { name: 'Driver One', phone: '555-0001' })
+  seedDriver('drv-2', { name: 'Driver Two', phone: '555-0002' })
 })
 
 // ── Authorization ────────────────────────────────────────────────────────────
@@ -3915,6 +3925,12 @@ describe('SET_AR_STATUS', () => {
       kind: 'OWN_ASSET', status: 'ACTIVE', sequence: 1, driverId: 'drv-1',
       createdAt: '2026-03-01T00:00:00.000Z', updatedAt: '2026-03-01T00:00:00.000Z',
     })
+    // Step W: an own-fleet leg is only releasable with the driver on the Load mirrors too.
+    table(TABLES.load).set(ids.loadId, {
+      ...table(TABLES.load).get(ids.loadId)!,
+      pickupDriverId: 'drv-1',
+      deliveryDriverId: 'drv-1',
+    })
     for (const type of ['BOL', 'POD']) {
       table(TABLES.shipmentDocument).set(`doc-${type}`, {
         id: `doc-${type}`, shipmentId: ids.shipmentId, loadId: ids.loadId,
@@ -6529,5 +6545,333 @@ describe('Step P demo actions', () => {
 describe('unknown action', () => {
   it('is refused by name', async () => {
     await expect(call('NOT_AN_ACTION', {})).rejects.toThrow(/Unknown action/)
+  })
+})
+
+// ── Step W: an Ivan Cartage load must carry a driver ─────────────────────────
+
+describe('Ivan Cartage driver (Step W)', () => {
+  async function openLoad(): Promise<{ shipmentId: string; loadId: string; orderId: string }> {
+    const ids = await createDraft()
+    await saveForm(ids.shipmentId)
+    await call('SUBMIT_ORDER', {
+      shipmentId: ids.shipmentId,
+      expectedUpdatedAt: table(TABLES.shipment).get(ids.shipmentId)!.updatedAt,
+      order: { equipmentType: "53' VAN" },
+      stops: [PICKUP, DELIVERY],
+    })
+    return ids
+  }
+  const loadRow = (id: string): Row => table(TABLES.load).get(id)!
+  const legsOf = (loadId: string): Row[] => [...table(TABLES.carrier).values()].filter((c) => c.loadId === loadId)
+  const activeLeg = (loadId: string): Row => legsOf(loadId).find((c) => c.status === 'ACTIVE')!
+  const stopsOf = (loadId: string): Row[] => JSON.parse(String(loadRow(loadId).stops)) as Row[]
+  const auditOf = (action: string): Row[] => [...table(TABLES.audit).values()].filter((a) => a.action === action)
+  /** Everything an assignment can touch, to prove a refused call wrote nothing. */
+  const snapshot = (): string =>
+    JSON.stringify([TABLES.load, TABLES.carrier, TABLES.audit].map((t) => [...table(t).values()]))
+
+  /** The state the old duplicate and backfill paths left behind: OWN_ASSET, nobody on it. */
+  function makeDriverless(loadId: string, status = 'BOOKED'): void {
+    table(TABLES.load).set(loadId, {
+      ...loadRow(loadId), assignmentType: 'OWN_ASSET', status,
+      pickupDriverId: null, deliveryDriverId: null, activeLoadCarrierId: null,
+    })
+  }
+
+  describe('ASSIGN_ASSET', () => {
+    it('refuses an unknown, broker or inactive driver with the exact text and writes nothing', async () => {
+      const { loadId } = await openLoad()
+      table(TABLES.driver).set('drv-broker', { id: 'drv-broker', name: 'BROKER COVERED', type: 'broker', active: true })
+      seedDriver('drv-off', { name: 'Armando Aranda', active: false })
+      const before = snapshot()
+      await expect(call('ASSIGN_ASSET', { loadId, driverId: 'drv-nope' })).rejects.toThrow('Driver not found: drv-nope')
+      await expect(call('ASSIGN_ASSET', { loadId, driverId: 'drv-broker' }))
+        .rejects.toThrow("BROKER COVERED is a placeholder for brokered freight, not one of Ivan Cartage's drivers")
+      await expect(call('ASSIGN_ASSET', { loadId, driverId: 'drv-off' }))
+        .rejects.toThrow('Armando Aranda is inactive. Reactivate the driver or pick another one.')
+      expect(snapshot()).toBe(before)
+    })
+
+    it('takes the name and phone from the roster, keeps truck and trailer, and never touches money fields', async () => {
+      const { loadId } = await openLoad()
+      table(TABLES.load).set(loadId, { ...loadRow(loadId), rate: 150000, aljexId: 'A1', readyToInvoice: false })
+      await call('ASSIGN_ASSET', {
+        loadId, driverId: 'drv-1', driverName: 'junk', driverPhone: '000',
+        truckId: 'trk-7', truckNumber: '107', trailerId: 'trl-2', trailerNumber: 'TR-9',
+      })
+      const leg = activeLeg(loadId)
+      expect(leg).toMatchObject({
+        kind: 'OWN_ASSET', driverId: 'drv-1', driverName: 'Driver One', driverPhone: '555-0001',
+        truckId: 'trk-7', truckNumber: '107', trailerId: 'trl-2', trailerNumber: 'TR-9',
+      })
+      const load = loadRow(loadId)
+      expect(load).toMatchObject({
+        assignmentType: 'OWN_ASSET', trackingProvider: 'DRIVER_APP', carrierName: null,
+        pickupDriverId: 'drv-1', deliveryDriverId: 'drv-1', truckId: 'trk-7', trailerNumber: 'TR-9',
+        activeLoadCarrierId: leg.id, rate: 150000, aljexId: 'A1', readyToInvoice: false,
+        pickupAppt: PICKUP.appt, deliveryAppt: DELIVERY.appt,
+      })
+      expect(stopsOf(loadId).every((s) => s.driverId === 'drv-1')).toBe(true)
+      expect(auditOf('ASSIGN_ASSET')).toHaveLength(1)
+    })
+
+    it('is a no-op when the same driver, truck and trailer are booked again', async () => {
+      const { loadId } = await openLoad()
+      const input = { loadId, driverId: 'drv-1', truckId: 'trk-7', truckNumber: '107', trailerNumber: 'TR-9' }
+      await call('ASSIGN_ASSET', input)
+      const before = snapshot()
+      await call('ASSIGN_ASSET', input)
+      expect(snapshot()).toBe(before)
+      expect(legsOf(loadId)).toHaveLength(1)
+    })
+
+    it('changes the driver: old leg bounced, mirrors and colours move, the change is audited', async () => {
+      const { loadId } = await openLoad()
+      await call('ASSIGN_ASSET', { loadId, driverId: 'drv-1', truckId: 'trk-7' })
+      table(TABLES.load).set(loadId, {
+        ...loadRow(loadId), colorKey: 'driver-3',
+        stops: JSON.stringify(stopsOf(loadId).map((s) => ({ ...s, colorKey: 'driver-3' }))),
+      })
+      const oldLeg = activeLeg(loadId)
+      await call('ASSIGN_ASSET', { loadId, driverId: 'drv-2', truckId: 'trk-8' })
+
+      expect(legsOf(loadId).find((c) => c.id === oldLeg.id)).toMatchObject({ status: 'BOUNCED', removalReason: 'REASSIGNED' })
+      expect(activeLeg(loadId)).toMatchObject({ driverId: 'drv-2', driverName: 'Driver Two' })
+      const load = loadRow(loadId)
+      expect(load).toMatchObject({ pickupDriverId: 'drv-2', deliveryDriverId: 'drv-2', truckId: 'trk-8', colorKey: null })
+      expect(stopsOf(loadId).every((s) => s.driverId === 'drv-2' && s.colorKey === null)).toBe(true)
+
+      const [audit] = auditOf('CHANGE_ASSET_DRIVER')
+      const changes = JSON.parse(String(audit.changes)) as Row
+      expect(changes.driver).toEqual({ from: 'Driver One (drv-1)', to: 'Driver Two (drv-2)' })
+      expect(changes.previousLegId).toBe(oldLeg.id)
+      expect((changes.payLock as Row).state).toBe('OPEN')
+    })
+
+    it('does not flatten a relay unless asked', async () => {
+      const { loadId } = await openLoad()
+      table(TABLES.load).set(loadId, {
+        ...loadRow(loadId),
+        stops: JSON.stringify([{ ...PICKUP, driverId: 'drv-1' }, { ...DELIVERY, driverId: 'drv-2' }]),
+      })
+      const before = snapshot()
+      await expect(call('ASSIGN_ASSET', { loadId, driverId: 'drv-1' }))
+        .rejects.toThrow('This load runs as a relay (Driver One → Driver Two). Booking one driver puts them on every stop. Confirm to continue.')
+      expect(snapshot()).toBe(before)
+      await call('ASSIGN_ASSET', { loadId, driverId: 'drv-1', flattenSplit: true })
+      expect(stopsOf(loadId).every((s) => s.driverId === 'drv-1')).toBe(true)
+    })
+  })
+
+  describe('pay lock', () => {
+    // Fixture delivery is 2026-03-03 (pay week Sun 03-01..Sat 03-07).
+    const closeWeek = (): void => { vi.setSystemTime(new Date('2026-03-15T12:00:00.000Z')) }
+
+    it('refuses a non-admin on a closed pay week, and writes nothing', async () => {
+      const { loadId } = await openLoad()
+      await call('ASSIGN_ASSET', { loadId, driverId: 'drv-1' })
+      closeWeek()
+      const before = snapshot()
+      await expect(call('ASSIGN_ASSET', { loadId, driverId: 'drv-2' }))
+        .rejects.toThrow("Delivered 2026-03-03: that pay week has closed. Changing the driver would move this load between Driver One's and Driver Two's settlements. An owner or ADMIN can do it with a reason.")
+      expect(snapshot()).toBe(before)
+      expect(loadRow(loadId).deliveryDriverId).toBe('drv-1')
+    })
+
+    it('locks the first assignment on a closed week too', async () => {
+      const { loadId } = await openLoad()
+      closeWeek()
+      await expect(call('ASSIGN_ASSET', { loadId, driverId: 'drv-1' })).rejects.toThrow(/pay week has closed/)
+    })
+
+    it('lets an admin through only with a reason, and audits it', async () => {
+      const { loadId } = await openLoad()
+      await call('ASSIGN_ASSET', { loadId, driverId: 'drv-1' })
+      closeWeek()
+      await expect(call('ASSIGN_ASSET', { loadId, driverId: 'drv-2' }, ADMIN))
+        .rejects.toThrow('Give a reason (at least 10 characters) to change the driver on a load in a closed pay week.')
+      await expect(call('ASSIGN_ASSET', { loadId, driverId: 'drv-2', payOverrideReason: 'too short' }, ADMIN))
+        .rejects.toThrow(/at least 10 characters/)
+      await call('ASSIGN_ASSET', { loadId, driverId: 'drv-2', payOverrideReason: 'Wrong driver was booked' }, ADMIN)
+      expect(loadRow(loadId).deliveryDriverId).toBe('drv-2')
+      const changes = JSON.parse(String(auditOf('CHANGE_ASSET_DRIVER')[0].changes)) as { payLock: Row }
+      expect(changes.payLock).toEqual({ state: 'CLOSED_WEEK_OVERRIDE', deliveryDate: '2026-03-03', reason: 'Wrong driver was booked' })
+    })
+
+    it('refuses even an admin when the load is already on a box-truck settlement', async () => {
+      const { loadId } = await openLoad()
+      await call('ASSIGN_ASSET', { loadId, driverId: 'drv-1' })
+      table(TABLES.boxTrip).set('bt-1', { id: 'bt-1', driverId: 'drv-1', periodStart: '2026-02-25', loadId })
+      const before = snapshot()
+      await expect(call('ASSIGN_ASSET', { loadId, driverId: 'drv-2', payOverrideReason: 'Wrong driver was booked' }, ADMIN))
+        .rejects.toThrow("This load is already on Driver One's box-truck settlement (period starting 2026-02-25). Remove it from that settlement first, then change the driver.")
+      expect(snapshot()).toBe(before)
+    })
+
+    it('leaves the current week and the future open', async () => {
+      const { loadId } = await openLoad()
+      await call('ASSIGN_ASSET', { loadId, driverId: 'drv-1' })
+      await call('ASSIGN_ASSET', { loadId, driverId: 'drv-2' })
+      expect(loadRow(loadId).deliveryDriverId).toBe('drv-2')
+    })
+
+    it('does not lock a duplicate-created copy', async () => {
+      const { shipmentId, loadId } = await openLoad()
+      await call('ASSIGN_ASSET', { loadId, driverId: 'drv-1' })
+      closeWeek()
+      await call('DUPLICATE_SHIPMENT', {
+        shipmentId, keepDriver: true,
+        copies: [{ pickupAppt: '2026-03-09T13:00:00.000Z', deliveryAppt: '2026-03-10T13:00:00.000Z' }],
+      })
+      const copy = [...table(TABLES.load).values()].find((l) => l.shipmentId !== shipmentId)!
+      expect(copy.assignmentType).toBe('OWN_ASSET')
+    })
+  })
+
+  describe('gates', () => {
+    it('refuses to dispatch a driverless Ivan Cartage load, and one whose driver is inactive', async () => {
+      const { loadId, shipmentId } = await openLoad()
+      makeDriverless(loadId)
+      table(TABLES.carrier).set('lcr-nobody', {
+        id: 'lcr-nobody', loadId, shipmentId, kind: 'OWN_ASSET', status: 'ACTIVE', sequence: 1,
+        createdAt: '2026-03-01T00:00:00.000Z', updatedAt: '2026-03-01T00:00:00.000Z',
+      })
+      const dispatch = (): Promise<Row> => call('DISPATCH_LOAD', { loadId, dispatchedAt: '2026-03-02T12:00:00.000Z' })
+      await expect(dispatch()).rejects.toThrow('Ivan Cartage load: pick the driver before dispatching (Carrier/Driver tab → Assign driver).')
+
+      table(TABLES.carrier).delete('lcr-nobody')
+      await call('ASSIGN_ASSET', { loadId, driverId: 'drv-1' })
+      table(TABLES.driver).set('drv-1', { ...table(TABLES.driver).get('drv-1')!, active: false })
+      await expect(dispatch()).rejects.toThrow('Driver One is inactive: pick an active driver before dispatching.')
+      table(TABLES.driver).set('drv-1', { ...table(TABLES.driver).get('drv-1')!, active: true })
+
+      await call('DISPATCH_LOAD', { loadId, dispatchedAt: '2026-03-02T12:00:00.000Z', driverName: 'Typed Name' })
+      expect(loadRow(loadId).status).toBe('DISPATCHED')
+      expect(activeLeg(loadId).driverName).toBe('Driver One')
+    })
+
+    it('refuses Delivered with nobody on the load, but accepts an inactive driver', async () => {
+      const { loadId } = await openLoad()
+      makeDriverless(loadId, 'UNLOADING')
+      await expect(call('SET_LOAD_STATUS', { loadId, status: 'DELIVERED' }))
+        .rejects.toThrow('Ivan Cartage load: pick the driver before marking it delivered (Carrier/Driver tab → Assign driver).')
+      expect(loadRow(loadId).status).toBe('UNLOADING')
+
+      await call('ASSIGN_ASSET', { loadId, driverId: 'drv-1' })
+      table(TABLES.driver).set('drv-1', { ...table(TABLES.driver).get('drv-1')!, active: false })
+      await call('SET_LOAD_STATUS', { loadId, status: 'DELIVERED' })
+      expect(loadRow(loadId).status).toBe('DELIVERED')
+    })
+
+    it('refuses departing the last delivery with nobody on the load and writes no tracking row', async () => {
+      const { loadId } = await openLoad()
+      makeDriverless(loadId, 'UNLOADING')
+      const departed = '2026-03-03T16:00:00.000Z'
+      table(TABLES.load).set(loadId, {
+        ...loadRow(loadId),
+        stops: JSON.stringify([
+          { ...PICKUP, arrivedAt: '2026-03-02T13:00:00.000Z', departedAt: '2026-03-02T14:00:00.000Z' },
+          { ...DELIVERY, arrivedAt: '2026-03-03T13:00:00.000Z' },
+        ]),
+      })
+      const checkCalls = table(TABLES.checkCall).size
+      await expect(call('UPDATE_STOP', {
+        loadId, expectedUpdatedAt: loadRow(loadId).updatedAt, op: 'SET_TIMES', stopId: DELIVERY.id,
+        patch: { departedAt: departed },
+      })).rejects.toThrow('Ivan Cartage load: pick the driver before marking it delivered (Carrier/Driver tab → Assign driver).')
+      expect(table(TABLES.checkCall).size).toBe(checkCalls)
+      expect(loadRow(loadId).status).toBe('UNLOADING')
+    })
+
+    it('refuses to release a delivered driverless load to accounting', async () => {
+      const { loadId, shipmentId, orderId } = await openLoad()
+      await call('ASSIGN_ASSET', { loadId, driverId: 'drv-1' })
+      for (const status of ['DISPATCHED', 'LOADING', 'IN_TRANSIT', 'UNLOADING', 'DELIVERED']) {
+        await call('SET_LOAD_STATUS', { loadId, status })
+      }
+      for (const type of ['BOL', 'POD']) {
+        table(TABLES.shipmentDocument).set(`doc-${type}`, {
+          id: `doc-${type}`, shipmentId, loadId, type, status: 'ACTIVE', name: `${type}.pdf`,
+          uploadedAt: '2026-03-03T18:00:00.000Z', createdAt: '2026-03-03T18:00:00.000Z', updatedAt: '2026-03-03T18:00:00.000Z',
+        })
+      }
+      table(TABLES.load).set(loadId, { ...loadRow(loadId), deliveryDriverId: null, pickupDriverId: null })
+      await expect(call('SET_AR_STATUS', { orderId, status: 'UNBILLED' }))
+        .rejects.toThrow(/Not ready for accounting: .*Missing driver/)
+    })
+
+    it('leaves a brokered load exactly as it was: no driver asked at dispatch or delivery', async () => {
+      const { loadId } = await openLoad()
+      await call('ASSIGN_CARRIER', { loadId, carrierName: 'Swift', carrierRateCents: 100_000 })
+      await call('DISPATCH_LOAD', { loadId, dispatchedAt: '2026-03-02T12:00:00.000Z' })
+      for (const status of ['LOADING', 'IN_TRANSIT', 'UNLOADING', 'DELIVERED']) {
+        await call('SET_LOAD_STATUS', { loadId, status })
+      }
+      expect(loadRow(loadId).status).toBe('DELIVERED')
+    })
+
+    it('does not gate a voided own-asset load', async () => {
+      const { loadId, shipmentId } = await openLoad()
+      await call('ASSIGN_ASSET', { loadId, driverId: 'drv-1' })
+      await voidCall(shipmentId)
+      // The void keeps assignmentType by design; the gate must still treat it as exempt.
+      await expect(call('SET_LOAD_STATUS', { loadId, status: 'DELIVERED' })).rejects.not.toThrow(/Ivan Cartage load/)
+    })
+  })
+
+  describe('stop edits and copies', () => {
+    it('gives a stop added to a booked Ivan Cartage load the leg\u2019s driver and truck', async () => {
+      const { loadId } = await openLoad()
+      await call('ASSIGN_ASSET', { loadId, driverId: 'drv-1', truckId: 'trk-7' })
+      await call('UPDATE_STOP', {
+        loadId, expectedUpdatedAt: loadRow(loadId).updatedAt, op: 'ADD',
+        patch: { type: 'delivery', name: 'SECOND DROP', city: 'ST LOUIS, MO', appt: '2026-03-04T13:00:00.000Z' },
+      })
+      const stops = stopsOf(loadId)
+      expect(stops).toHaveLength(3)
+      expect(stops.every((s) => s.driverId === 'drv-1' && s.truckId === 'trk-7')).toBe(true)
+      expect(loadRow(loadId).deliveryDriverId).toBe('drv-1')
+    })
+
+    it('leaves a delivered load\u2019s stops alone', async () => {
+      const { loadId } = await openLoad()
+      await call('ASSIGN_ASSET', { loadId, driverId: 'drv-1' })
+      table(TABLES.load).set(loadId, { ...loadRow(loadId), status: 'DELIVERED' })
+      await call('UPDATE_STOP', {
+        loadId, expectedUpdatedAt: loadRow(loadId).updatedAt, op: 'ADD',
+        patch: { type: 'delivery', name: 'SECOND DROP', city: 'ST LOUIS, MO', appt: '2026-03-04T13:00:00.000Z' },
+      })
+      expect(stopsOf(loadId).filter((s) => !s.driverId)).toHaveLength(1)
+    })
+
+    it('duplicates with the driver as a first-class Ivan Cartage load, and a bare truck stays uncovered', async () => {
+      const { shipmentId, loadId } = await openLoad()
+      await call('ASSIGN_ASSET', { loadId, driverId: 'drv-1', truckId: 'trk-7' })
+      const copies = [{ pickupAppt: '2026-03-09T13:00:00.000Z', deliveryAppt: '2026-03-10T13:00:00.000Z' }]
+      await call('DUPLICATE_SHIPMENT', { shipmentId, keepDriver: true, copies })
+      const copy = [...table(TABLES.load).values()].find((l) => l.shipmentId !== shipmentId)!
+      expect(copy).toMatchObject({ assignmentType: 'OWN_ASSET', status: 'BOOKED', deliveryDriverId: 'drv-1' })
+      expect(activeLeg(String(copy.id))).toMatchObject({ kind: 'OWN_ASSET', driverId: 'drv-1', driverName: 'Driver One' })
+
+      // A source with a truck but no driver anywhere does not become an Ivan Cartage load.
+      table(TABLES.load).set(loadId, {
+        ...loadRow(loadId), truckId: 'trk-7',
+        stops: JSON.stringify(stopsOf(loadId).map((s) => ({ ...s, driverId: null }))),
+        pickupDriverId: null, deliveryDriverId: null,
+      })
+      await call('DUPLICATE_SHIPMENT', { shipmentId, keepDriver: true, copies })
+      const bare = [...table(TABLES.load).values()].find((l) => l.shipmentId !== shipmentId && l.id !== copy.id)!
+      expect(bare.assignmentType).toBe('NEED_TO_COVER')
+    })
+
+    it('refuses ASSIGN_CARRIER with Ivan Cartage typed as the carrier', async () => {
+      const { loadId } = await openLoad()
+      await expect(call('ASSIGN_CARRIER', { loadId, carrierName: 'Ivan Cartage' }))
+        .rejects.toThrow('Ivan Cartage is our own fleet. Use "Book Ivan Cartage (own fleet)" and pick the driver.')
+      await expect(call('ASSIGN_CARRIER', { loadId, carrierName: 'IVAN  CARTAGE LLC' })).rejects.toThrow(/own fleet/)
+      await call('ASSIGN_CARRIER', { loadId, carrierName: 'Swift' })
+      expect(loadRow(loadId).assignmentType).toBe('CARRIER')
+    })
   })
 })

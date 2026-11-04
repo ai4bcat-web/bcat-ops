@@ -24,6 +24,7 @@ import { BookCarrierDialog, type BookCarrierFields } from '@/features/carriers/c
 import { TmsButton, TmsDialog, TmsField, TmsIconButton, TmsInput, TmsSelect, TmsTextarea } from '@/features/tms/kit'
 import { type RemoveLoadCarrierReason } from '@/lib/apiClient'
 import { VoidShipmentDialog } from './VoidShipmentDialog'
+import { AssignDriverDialog, type AssignDriverFields } from './AssignDriverDialog'
 import type { Driver } from '@/types'
 import type { Equipment } from '@/types/equipment'
 import type {
@@ -227,7 +228,7 @@ export function ShipmentRowActions({ shipment, isAdmin, cancelDeleteAdminOnly, h
 
 export interface LoadActionHandlers {
   onSetLoadStatus: (status: LoadWorkflowStatus) => Promise<void>
-  onAssignAsset: (input: { driverId: string; truckId?: string; trailerId?: string }) => Promise<void>
+  onAssignAsset: (input: AssignDriverFields) => Promise<void>
   onAssignCarrier: (input: {
     carrierName: string; carrierMc?: string; dispatcherName?: string; dispatcherPhone?: string
     driverName?: string; driverPhone?: string; carrierRateCents?: number
@@ -244,7 +245,7 @@ type LoadDialog =
   | { kind: 'asset' } | { kind: 'carrier' } | { kind: 'book' } | { kind: 'remove'; outcome: 'BOUNCED' | 'TONU' } | null
 
 export function LoadActions({
-  load, mode, bundle, activeCarrier, drivers, trucks, trailers, arStatus, isAdmin, voided = false, handlers, onRateCon,
+  load, mode, bundle, activeCarrier, drivers, trucks, trailers, arStatus, isAdmin, voided = false, handlers, onRateCon, onError,
 }: {
   load: ShipmentLoad
   mode: ShipmentMode
@@ -260,8 +261,11 @@ export function LoadActions({
   handlers: LoadActionHandlers
   /** The booker asked for the rate con straight after booking. */
   onRateCon: () => void
+  /** A refused "Move load to…" lands here as the server's own sentence. */
+  onError?: (message: string) => void
 }) {
   const [dialog, setDialog] = useState<LoadDialog>(null)
+  const ownLeg = activeCarrier?.kind === 'OWN_ASSET'
   const [busy, setBusy] = useState(false)
   const nextStatuses = load.status ? nextLoadStatuses(load.status, mode) : []
   // BOOK_CARRIER is the truckload path and only exists while the load is still being
@@ -277,6 +281,14 @@ export function LoadActions({
     setBusy(true)
     try { await fn(); setDialog(null) } catch { /* already reported */ } finally { setBusy(false) }
   }
+  // A status move is refused with a sentence the user must read (e.g. the Ivan Cartage
+  // driver gate), so it is handed to the detail to show inline instead of a toast.
+  const runStatus = async (fn: () => Promise<void>) => {
+    setBusy(true)
+    try { await fn() } catch (err) {
+      onError?.(err instanceof Error ? err.message : 'The load status could not be changed.')
+    } finally { setBusy(false) }
+  }
 
   return (
     <>
@@ -289,7 +301,7 @@ export function LoadActions({
         <DropdownMenuContent align="end" className="tms-portal w-60">
           <DropdownMenuLabel>Assignment</DropdownMenuLabel>
           <DropdownMenuItem disabled={voided} onSelect={() => setDialog({ kind: 'asset' })}>
-            <Truck size={14} className="mr-2" />Book Ivan Cartage (own fleet)
+            <Truck size={14} className="mr-2" />{ownLeg ? 'Change driver…' : 'Book Ivan Cartage (own fleet)'}
           </DropdownMenuItem>
           {bookable && (
             <DropdownMenuItem disabled={voided} onSelect={() => setDialog({ kind: 'book' })}>
@@ -315,7 +327,7 @@ export function LoadActions({
               <DropdownMenuSeparator />
               <DropdownMenuLabel>Move load to</DropdownMenuLabel>
               {nextStatuses.map((s) => (
-                <DropdownMenuItem key={s} disabled={voided} onSelect={() => run(() => handlers.onSetLoadStatus(s))}>
+                <DropdownMenuItem key={s} disabled={voided} onSelect={() => runStatus(() => handlers.onSetLoadStatus(s))}>
                   {LOAD_WORKFLOW_STATUS_LABELS[s]}
                 </DropdownMenuItem>
               ))}
@@ -343,10 +355,11 @@ export function LoadActions({
       </DropdownMenu>
 
       {dialog?.kind === 'asset' && (
-        <AssignAssetDialog
-          drivers={drivers} trucks={trucks} trailers={trailers} busy={busy}
+        <AssignDriverDialog
+          load={load} activeLeg={activeCarrier} drivers={drivers} trucks={trucks} trailers={trailers}
+          isAdmin={isAdmin} busy={busy}
           onClose={() => setDialog(null)}
-          onConfirm={(input) => run(() => handlers.onAssignAsset(input))}
+          onConfirm={handlers.onAssignAsset}
         />
       )}
       {dialog?.kind === 'carrier' && (
@@ -465,70 +478,6 @@ function DuplicateDialog({ pickupAppt, deliveryAppt, busy, onClose, onConfirm }:
           <TmsInput aria-label="Duplicate delivery" type="datetime-local" value={delivery} onChange={(e) => setDelivery(e.target.value)} />
         </TmsField>
         {error && <p className="tms-field-error">{error}</p>}
-      </div>
-    </TmsDialog>
-  )
-}
-
-/**
- * Own fleet is not a third kind of assignment: it is Ivan Cartage taking the load, with
- * one of our drivers and one of our trucks. Booking it here writes the mirrored Load, so
- * the shipment turns up on the calendar, in dispatch and in that driver's settlement.
- */
-function AssignAssetDialog({ drivers, trucks, trailers, busy, onClose, onConfirm }: {
-  drivers: Driver[]
-  trucks: Equipment[]
-  trailers: Equipment[]
-  busy: boolean
-  onClose: () => void
-  onConfirm: (input: { driverId: string; truckId?: string; trailerId?: string }) => void
-}) {
-  const [driverId, setDriverId] = useState('')
-  const [truckId, setTruckId] = useState('')
-  const [trailerId, setTrailerId] = useState('')
-  const [error, setError] = useState<string | null>(null)
-
-  return (
-    <TmsDialog
-      open
-      onOpenChange={(open) => { if (!open) onClose() }}
-      title="Book Ivan Cartage (own fleet)"
-      description="The driver and truck picked here are written to the load every own-fleet view reads: the calendar, dispatch, the driver app and driver settlements."
-      footer={
-        <>
-          <TmsButton variant="ghost" onClick={onClose} disabled={busy}>Cancel</TmsButton>
-          <TmsButton
-            variant="primary"
-            onClick={() => {
-              if (!driverId) { setError('Pick a driver.'); return }
-              onConfirm({ driverId, truckId: truckId || undefined, trailerId: trailerId || undefined })
-            }}
-            disabled={busy}
-          >
-            {busy ? 'Booking…' : 'Book own fleet'}
-          </TmsButton>
-        </>
-      }
-    >
-      <div className="space-y-3">
-        <TmsField label="Driver" error={error}>
-          <TmsSelect aria-label="Driver" value={driverId} onChange={(e) => setDriverId(e.target.value)}>
-            <option value="">— select —</option>
-            {drivers.filter((d) => d.active).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-          </TmsSelect>
-        </TmsField>
-        <TmsField label="Truck">
-          <TmsSelect aria-label="Truck" value={truckId} onChange={(e) => setTruckId(e.target.value)}>
-            <option value="">— none —</option>
-            {trucks.map((t) => <option key={t.id} value={t.id}>{t.unitNumber}</option>)}
-          </TmsSelect>
-        </TmsField>
-        <TmsField label="Trailer">
-          <TmsSelect aria-label="Trailer" value={trailerId} onChange={(e) => setTrailerId(e.target.value)}>
-            <option value="">— none —</option>
-            {trailers.map((t) => <option key={t.id} value={t.id}>{t.unitNumber}</option>)}
-          </TmsSelect>
-        </TmsField>
       </div>
     </TmsDialog>
   )

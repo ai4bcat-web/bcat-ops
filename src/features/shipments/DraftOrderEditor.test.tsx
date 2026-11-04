@@ -90,6 +90,27 @@ describe('DraftOrderEditor', () => {
     await waitFor(() => expect(screen.queryByText('Equipment + Driver')).toBeNull())
   })
 
+  it('shows no driver row unless ShipmentDetail supplies one', () => {
+    renderEditor()
+    expect(screen.queryByTestId('draft-driver-row')).toBeNull()
+  })
+
+  it('names the Ivan Cartage driver and offers Change', () => {
+    const onOpen = vi.fn()
+    renderEditor({ driverRow: { driverName: 'Dana Driver', assignmentType: 'OWN_ASSET', voided: false, onOpen } })
+    const row = screen.getByTestId('draft-driver-row')
+    expect(row.textContent).toContain('Dana Driver · Ivan Cartage')
+    fireEvent.click(screen.getByRole('button', { name: 'Change' }))
+    expect(onOpen).toHaveBeenCalledTimes(1)
+  })
+
+  it('offers Assign driver when nobody is on the load', () => {
+    const onOpen = vi.fn()
+    renderEditor({ driverRow: { driverName: null, assignmentType: null, voided: false, onOpen } })
+    fireEvent.click(screen.getByRole('button', { name: 'Assign driver' }))
+    expect(onOpen).toHaveBeenCalledTimes(1)
+  })
+
   it('submits a complete draft', async () => {
     const { onSaveForm, onSubmit } = renderEditor()
     fireEvent.click(screen.getByRole('button', { name: 'Submit shipment' }))

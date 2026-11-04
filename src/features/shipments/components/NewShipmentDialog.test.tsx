@@ -21,6 +21,8 @@ if (!Element.prototype.hasPointerCapture) Element.prototype.hasPointerCapture = 
 if (!Element.prototype.scrollIntoView) Element.prototype.scrollIntoView = () => {}
 
 const createShipmentMock = vi.fn()
+const assignAssetMock = vi.fn()
+const toastWarningMock = vi.fn()
 const createApptTaskMock = vi.fn(async () => ({}))
 const updateIntakeItemMock = vi.fn(async () => ({}))
 const notifySlackStatusChangeMock = vi.fn()
@@ -41,6 +43,7 @@ vi.mock('@/lib/apiClient', () => ({
   notifyApptNeeded: (...a: unknown[]) => notifyApptNeededMock(...(a as [unknown])),
   createApptMoveTask: (...a: unknown[]) => createApptMoveTaskMock(...(a as [unknown])),
   getTmsSettings: async () => null,
+  assignAsset: (...a: unknown[]) => assignAssetMock(...a),
 }))
 
 // The detail is a whole page of its own; the only thing these tests care about is THAT it
@@ -67,7 +70,19 @@ vi.mock('@/hooks/useDirectory', () => ({
     archiveCustomer: vi.fn(), archiveLocation: vi.fn(),
   }),
 }))
-vi.mock('@/hooks/useDrivers', () => ({ useDrivers: () => ({ drivers: [] }) }))
+const ROSTER = [
+  { id: 'drv-1', name: 'Dana Driver', active: true, type: 'driver', assignedTruckId: 'trk-1', assignedTrailerId: null },
+  { id: 'drv-2', name: 'Eli Driver', active: true, type: 'driver', assignedTruckId: null, assignedTrailerId: null },
+  { id: 'drv-b', name: 'BROKER COVERED', active: true, type: 'broker' },
+]
+vi.mock('@/hooks/useDrivers', () => ({ useDrivers: () => ({ drivers: ROSTER }) }))
+vi.mock('@/hooks/useTrucks', () => ({
+  useTrucks: () => ({ equipment: [{ id: 'trk-1', type: 'truck', unitNumber: '101' }] }),
+}))
+vi.mock('sonner', async (orig) => {
+  const mod = await orig<typeof import('sonner')>()
+  return { ...mod, toast: Object.assign(mod.toast, { warning: (...a: unknown[]) => toastWarningMock(...a) }) }
+})
 /*
  * `useLoads` is deliberately NOT mocked: it reads the real store, and the store being
  * EMPTY at the moment the effects run is the condition the tests below are about.
@@ -88,6 +103,9 @@ const bundleFor = (over: Record<string, unknown> = {}) => ({
 
 beforeEach(() => {
   createShipmentMock.mockReset()
+  assignAssetMock.mockReset()
+  assignAssetMock.mockResolvedValue({})
+  toastWarningMock.mockClear()
   createShipmentMock.mockResolvedValue(bundleFor())
   createApptTaskMock.mockClear()
   updateIntakeItemMock.mockClear()
@@ -434,5 +452,65 @@ describe('applying a tender proposal', () => {
     const input = createShipmentMock.mock.calls[0][0] as Record<string, unknown>
     expect(input.source).toBe('MANUAL')
     expect('workflowRunId' in input).toBe(false)
+  })
+})
+
+describe('an Ivan Cartage driver on the create form (Step W)', () => {
+  type Sent = { load: { stops: Array<{ driverId?: string | null }> } }
+
+  it('books the driver through ASSIGN_ASSET, not through the stops', async () => {
+    render(<NewShipmentDialog open onClose={vi.fn()} prefill={{ dateStr: '2026-10-09', driverId: 'drv-1' }} />)
+    pickCustomer('Axle Logistics, LLC')
+    fillStopDates('2026-10-09')
+    save()
+
+    await waitFor(() => expect(assignAssetMock).toHaveBeenCalledTimes(1))
+    const sent = createShipmentMock.mock.calls[0][0] as Sent
+    expect(sent.load.stops.every((st) => !st.driverId)).toBe(true)
+    expect(assignAssetMock.mock.calls[0][0]).toMatchObject({
+      loadId: 'load-9', driverId: 'drv-1', truckId: 'trk-1', truckNumber: '101',
+    })
+  })
+
+  it('still opens the shipment when the booking is refused, and says why', async () => {
+    assignAssetMock.mockRejectedValue(new Error('Dana Driver is inactive. Reactivate the driver or pick another one.'))
+    render(<NewShipmentDialog open onClose={vi.fn()} prefill={{ dateStr: '2026-10-09', driverId: 'drv-1' }} />)
+    pickCustomer('Axle Logistics, LLC')
+    fillStopDates('2026-10-09')
+    save()
+
+    await waitFor(() => expect(screen.getByTestId('shipment-detail').textContent).toBe('shp-9'))
+    expect(toastWarningMock.mock.calls[0][0]).toContain('created, but the driver was not booked: Dana Driver is inactive')
+  })
+
+  it('refuses two different stop drivers before anything is saved', async () => {
+    render(<NewShipmentDialog open onClose={vi.fn()} prefill={{ dateStr: '2026-10-09', driverId: 'drv-1' }} />)
+    pickCustomer('Axle Logistics, LLC')
+    fillStopDates('2026-10-09')
+    fireEvent.click(screen.getByLabelText(/Split assignment/))
+    // Splitting clears the delivery driver; give it a different one.
+    fireEvent.click(screen.getByText('Unassigned').closest('button')!)
+    fireEvent.click(screen.getByText('Eli Driver'))
+    save()
+
+    await waitFor(() => expect(screen.getByText(/One driver per Ivan Cartage load/)).toBeTruthy())
+    expect(createShipmentMock).not.toHaveBeenCalled()
+    expect(assignAssetMock).not.toHaveBeenCalled()
+  })
+
+  it('never offers a broker placeholder in the stop driver picker', () => {
+    render(<NewShipmentDialog open onClose={vi.fn()} prefill={{ dateStr: '2026-10-09', driverId: 'drv-1' }} />)
+    fireEvent.click(screen.getAllByText('Dana Driver')[0].closest('button')!)
+    expect(screen.getByText('Eli Driver')).toBeTruthy()
+    expect(screen.queryByText('BROKER COVERED')).toBeNull()
+  })
+
+  it('creates with no driver call when no stop has a driver', async () => {
+    render(<NewShipmentDialog open onClose={vi.fn()} prefill={{ dateStr: '2026-10-09' }} />)
+    pickCustomer('Axle Logistics, LLC')
+    fillStopDates('2026-10-09')
+    save()
+    await waitFor(() => expect(createShipmentMock).toHaveBeenCalledTimes(1))
+    expect(assignAssetMock).not.toHaveBeenCalled()
   })
 })

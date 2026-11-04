@@ -13,8 +13,11 @@
  * list rather than re-deriving it, and the Lambda's refusal and the page's warning
  * can never disagree about why.
  *
- * Imports nothing: the two routers bundle this file by relative path.
+ * Imports only the shared own-asset message constants (relative path): the routers
+ * bundle this file by relative path.
  */
+
+import { OWN_ASSET_MESSAGES } from './ownAssetDriver'
 
 export type ReleaseGateReasonCode =
   | 'VOIDED'
@@ -23,6 +26,7 @@ export type ReleaseGateReasonCode =
   | 'DOC_MISSING'
   | 'REFERENCE_MISSING'
   | 'CARRIER_NOT_ASSIGNED'
+  | 'DRIVER_MISSING'
   | 'CARRIER_CHARGES_UNSETTLED'
   | 'OPEN_EXCEPTIONS'
 
@@ -63,6 +67,9 @@ export interface ReleaseGateDocument {
 export interface ReleaseGateLeg {
   kind: 'OWN_ASSET' | 'CARRIER'
   status: string | null
+  /** Step W: the leg's driver and the load's delivery-stop driver (pay reads the latter). */
+  driverId: string | null
+  deliveryDriverId: string | null
   carrierName?: string | null
   chargesFinalizedAt?: string | null
   /**
@@ -181,6 +188,14 @@ export function evaluateReleaseGate(input: ReleaseGateInput): ReleaseGateResult 
   const active = legs.filter((leg) => leg.status === 'ACTIVE')
   if (active.length === 0) {
     missing.push(reason('CARRIER_NOT_ASSIGNED', null, 'No carrier or driver assigned'))
+  }
+  for (const leg of active) {
+    if (leg.kind !== 'OWN_ASSET') continue
+    if (!leg.driverId?.trim()) {
+      missing.push(reason('DRIVER_MISSING', null, OWN_ASSET_MESSAGES.releaseNoDriver))
+    } else if (!leg.deliveryDriverId?.trim()) {
+      missing.push(reason('DRIVER_MISSING', null, OWN_ASSET_MESSAGES.releaseNoDeliveryDriver))
+    }
   }
   // An own-asset leg is already recorded: its cost is a driver settlement, and it
   // never enters AP. Somebody else's truck has to have a bill against it first.

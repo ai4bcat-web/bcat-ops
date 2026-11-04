@@ -2328,6 +2328,14 @@ shipmentActionsFn.addToRolePolicy(
     ],
   }),
 )
+// Step W: ASSIGN_ASSET refuses to move a load that is already on a box-truck
+// settlement (a stored BoxTruckTrip row). Read-only: one Scan, table ARN only.
+const shipmentBoxTruckTripTable = backend.data.resources.tables['BoxTruckTrip']
+shipmentActionsFn.addToRolePolicy(new PolicyStatement({
+  actions:   ['dynamodb:Scan'],
+  resources: [shipmentBoxTruckTripTable.tableArn],
+}))
+shipmentActionsFn.addEnvironment('BOX_TRUCK_TRIP_TABLE_NAME', shipmentBoxTruckTripTable.tableName)
 
 shipmentActionsFn.addEnvironment('SHIPMENT_TABLE_NAME',        shipmentTable.tableName)
 shipmentActionsFn.addEnvironment('ORDER_TABLE_NAME',           orderTable.tableName)

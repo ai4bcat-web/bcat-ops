@@ -13,6 +13,8 @@ function dependencies(): BatchShipmentDeps {
       if (input.orderId === 'order-b') throw new Error('Not ready for accounting: Missing document: POD')
     },
     setSalesRep: vi.fn(), setRevTag: vi.fn(), assignCarrierRep: vi.fn(), setStatus: vi.fn(), writeAudit: vi.fn(),
+    getLoadsOf: vi.fn(async () => []),
+    assignAsset: vi.fn(),
   }
 }
 
@@ -52,5 +54,41 @@ describe('batchShipmentTask', () => {
     await batchShipmentTask(deps, { task: 'SET_STATUS', shipmentIds: ['a', 'b'], params: { status: 'ON_HOLD', reason: 'Weather' } }, caller)
     expect(deps.setStatus).toHaveBeenNthCalledWith(1, { status: 'ON_HOLD', reason: 'Weather', shipmentId: 'a', expectedUpdatedAt: 'upd-a' }, caller)
     expect(deps.setStatus).toHaveBeenNthCalledWith(2, { status: 'ON_HOLD', reason: 'Weather', shipmentId: 'b', expectedUpdatedAt: 'upd-b' }, caller)
+  })
+
+  describe('ASSIGN_DRIVER', () => {
+    it('reports each row in request order, refuses multi-leg and covered rows, and never forwards the overrides', async () => {
+      const deps = dependencies()
+      const loads: Record<string, Array<Record<string, unknown>>> = {
+        ok: [{ id: 'lod-ok', assignmentType: 'NEED_TO_COVER' }],
+        legs: [{ id: 'lod-1' }, { id: 'lod-2' }],
+        covered: [{ id: 'lod-cov', assignmentType: 'CARRIER', carrierName: 'Swift' }],
+        closed: [{ id: 'lod-closed', assignmentType: 'OWN_ASSET' }],
+      }
+      deps.getLoadsOf = async (id) => loads[id]
+      deps.assignAsset = vi.fn(async (input) => {
+        if (input.loadId === 'lod-closed') throw new Error('Delivered 2026-03-03: that pay week has closed.')
+      })
+      const params = { driverId: 'drv-1', truckId: 'trk-7', payOverrideReason: 'sneaky reason here', flattenSplit: true }
+      const result = await batchShipmentTask(deps, { task: 'ASSIGN_DRIVER', shipmentIds: ['ok', 'legs', 'covered', 'closed'], params }, caller)
+      expect(result.results.map((r) => [r.shipmentId, r.ok, r.message])).toEqual([
+        ['ok', true, null],
+        ['legs', false, 'Batch driver assignment handles one-leg shipments; open this shipment to assign each leg.'],
+        ['covered', false, 'This load is covered by Swift. Bounce the carrier on the shipment first.'],
+        ['closed', false, 'Delivered 2026-03-03: that pay week has closed.'],
+      ])
+      expect(deps.assignAsset).toHaveBeenCalledTimes(2)
+      expect(deps.assignAsset).toHaveBeenNthCalledWith(1, { driverId: 'drv-1', truckId: 'trk-7', loadId: 'lod-ok' }, caller)
+      expect(deps.writeAudit).toHaveBeenCalledTimes(1)
+    })
+
+    it('authorizes as ASSIGN_ASSET and refuses an unauthorized caller before any row', async () => {
+      const deps = dependencies()
+      const authorize = vi.fn(() => false)
+      deps.authorize = authorize
+      await expect(batchShipmentTask(deps, { task: 'ASSIGN_DRIVER', shipmentIds: ['a'], params: { driverId: 'drv-1' } }, caller)).rejects.toThrow('Forbidden')
+      expect(authorize).toHaveBeenCalledWith('ASSIGN_ASSET', caller)
+      expect(deps.assignAsset).not.toHaveBeenCalled()
+    })
   })
 })

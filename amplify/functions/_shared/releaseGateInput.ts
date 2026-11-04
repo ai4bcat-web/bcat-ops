@@ -195,6 +195,11 @@ export async function loadReleaseGateInput(
     kind: leg.kind === 'OWN_ASSET' ? 'OWN_ASSET' : 'CARRIER',
     status: leg.status == null ? null : String(leg.status),
     carrierName: leg.carrierName == null ? null : String(leg.carrierName),
+    driverId: leg.driverId == null ? null : String(leg.driverId),
+    deliveryDriverId: (() => {
+      const v = orderLoads.find((l) => String(l.id) === String(leg.loadId))?.deliveryDriverId
+      return v == null ? null : String(v)
+    })(),
     chargesFinalizedAt: leg.chargesFinalizedAt == null ? null : String(leg.chargesFinalizedAt),
     rateConStatus: leg.rateConStatus == null ? null : String(leg.rateConStatus),
   }))

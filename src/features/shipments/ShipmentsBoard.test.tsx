@@ -6,6 +6,7 @@ import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import { ShipmentsBoard } from './ShipmentsBoard'
 import type { ShipmentRow } from './shipmentViews'
 import type { Load } from '@/types'
+import { useAppStore } from '@/store/useAppStore'
 
 // Force the tab strip to show every tab; its ResizeObserver would otherwise collapse
 // everything into the overflow menu under jsdom's zero-width container.
@@ -364,6 +365,54 @@ describe('ShipmentsBoard', () => {
       expect(within(resultDialog).getByText('S002')).toBeTruthy()
       expect(within(resultDialog).getByText('Gate refused: missing POD')).toBeTruthy()
     })
+  })
+
+  it('flags a live Ivan Cartage shipment with no driver, and only that', async () => {
+    renderBoard('/tms/shipments', [
+      row('S001', { assignmentType: 'OWN_ASSET', driverId: null }),
+      row('S002', { assignmentType: 'OWN_ASSET', driverId: 'drv-1', driverName: 'Dana Driver' }),
+      row('S003', { assignmentType: 'OWN_ASSET', driverId: null, voidedAt: '2026-02-01T00:00:00Z' }),
+      row('S004', { assignmentType: 'CARRIER', carrierName: 'Swift' }),
+    ])
+    await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
+    expect(document.querySelectorAll('[title="Ivan Cartage load with no driver"]')).toHaveLength(1)
+    expect(screen.getAllByText('Own fleet · no driver')).toHaveLength(1)
+    expect(screen.getAllByText('Dana Driver').length).toBeGreaterThan(0)
+  })
+
+  it('Batch Task offers Assign driver per active non-broker driver and sends ASSIGN_DRIVER', async () => {
+    useAppStore.setState({
+      drivers: [
+        { id: 'drv-1', name: 'Dana Driver', phone: '', active: true, type: 'driver', assignedTruckId: 'trk-1' },
+        { id: 'drv-x', name: 'Off Driver', phone: '', active: false, type: 'driver' },
+        { id: 'drv-b', name: 'BROKER COVERED', phone: '', active: true, type: 'broker' },
+      ] as never,
+      equipment: [{ id: 'trk-1', type: 'truck', unitNumber: '101' }] as never,
+    })
+    batchShipmentTask.mockResolvedValueOnce({
+      results: [{ shipmentId: 'S001', number: 'S-a', ok: false, message: 'Delivered 2026-10-14: that pay week has closed.' }],
+    })
+    vi.mocked(listOrders).mockResolvedValue([] as unknown as OrderRecord[])
+    renderBoard('/tms/shipments', [row('S001', { assignmentType: 'OWN_ASSET', driverId: null })])
+    await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
+    fireEvent.click(screen.getByRole('checkbox', { name: /Select all rows/i }))
+    fireEvent.click(screen.getByRole('button', { name: /Batch task/i }))
+    const dialog = await screen.findByRole('dialog', { name: /Batch task/i })
+
+    expect(within(dialog).queryByText(/Off Driver/)).toBeNull()
+    expect(within(dialog).queryByText(/BROKER COVERED/)).toBeNull()
+    fireEvent.change(within(dialog).getByRole('combobox'), { target: { value: 'driver:drv-1' } })
+    expect(within(dialog).getByRole('option', { name: 'Assign driver (Ivan Cartage): Dana Driver' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: /^Run$/i }))
+
+    await waitFor(() => expect(batchShipmentTask).toHaveBeenCalledTimes(1))
+    expect(batchShipmentTask).toHaveBeenCalledWith({
+      task: 'ASSIGN_DRIVER',
+      shipmentIds: ['S001'],
+      params: { driverId: 'drv-1', truckId: 'trk-1', truckNumber: '101' },
+    })
+    await waitFor(() => expect(screen.getByText('Delivered 2026-10-14: that pay week has closed.')).toBeTruthy())
+    useAppStore.setState({ drivers: [], equipment: [] })
   })
 
   it('Create shipment lists only loads without a shipment and calls the backfill wrapper', async () => {

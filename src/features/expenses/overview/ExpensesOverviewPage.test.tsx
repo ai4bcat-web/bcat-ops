@@ -46,7 +46,8 @@ vi.mock('@/lib/apiClient', () => ({
 vi.mock('@/store/useAppStore', () => ({
   useAppStore: (sel: (s: unknown) => unknown) => sel({
     maintenanceInvoices: [
-      { id: 'i1', equipmentId: 't1', date: new Date().toISOString().slice(0, 10), vendor: 'Joes Tire', amount: 12345, createdAt: '', updatedAt: '', paymentDate: undefined },
+      // The page's "today" is the Chicago date, which differs from the UTC date in the evening.
+      { id: 'i1', equipmentId: 't1', date: new Date().toLocaleDateString('en-CA', { timeZone: 'America/Chicago' }), vendor: 'Joes Tire', amount: 12345, createdAt: '', updatedAt: '', paymentDate: undefined },
     ],
   }),
 }))

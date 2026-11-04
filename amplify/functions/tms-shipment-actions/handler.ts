@@ -236,6 +236,19 @@ import { isEmailAddress } from '../../../src/lib/emailAddress'
 import { mcpPacketStanding, rateConMcpRefusal } from '../../../src/lib/mcpPacket'
 import { composeRateConCc } from './rateConRecipients'
 import { loadReleaseGateInput } from '../_shared/releaseGateInput'
+import {
+  OWN_ASSET_MESSAGES,
+  clearStopColors,
+  distinctStopDrivers,
+  driverProblem,
+  evaluatePayLock,
+  fillBlankStopDrivers,
+  isOwnAssetLoad,
+  ownAssetDriverGap,
+  type OwnAssetLegFacts,
+  type OwnAssetLoadFacts,
+  type RosterDriverFacts,
+} from '../../../src/lib/ownAssetDriver'
 import type { Load as LoadForCredit } from '../../../src/types'
 import type {
   ArStatus,
@@ -276,6 +289,9 @@ const CUSTOMER_TABLE_NAME = process.env.CUSTOMER_TABLE_NAME ?? ''
 const SETTINGS_TABLE_NAME = process.env.SETTINGS_TABLE_NAME ?? ''
 const AUDIT_LOG_TABLE_NAME = process.env.AUDIT_LOG_TABLE_NAME ?? ''
 const DRIVER_TABLE_NAME = process.env.DRIVER_TABLE_NAME ?? ''
+// Step W. Read-only: ASSIGN_ASSET refuses to move a load that is already on a stored
+// box-truck settlement (BoxTruckTrip.loadId), or the new driver could be paid for it twice.
+const BOX_TRUCK_TRIP_TABLE_NAME = process.env.BOX_TRUCK_TRIP_TABLE_NAME ?? ''
 const USER_POOL_ID = process.env.USER_POOL_ID ?? 'us-east-1_IbPKPNJC9'
 // Step I. ASSIGN_CARRIER_REP and BATCH_SHIPMENT_TASK validate rep ids against real
 // UserProfile rows. The table is owned by userManagement; this Lambda only reads it.
@@ -2505,6 +2521,10 @@ async function setLoadStatus(input: Row, caller: Caller): Promise<Row> {
   if (!canTransitionLoadStatus(current, requested)) {
     throw new Error(`A load cannot go from ${current ?? 'SOURCING'} to ${requested}`)
   }
+  if (requested === 'DELIVERED') {
+    const legs = await queryIndex(LOAD_CARRIER_TABLE_NAME, IDX_CARRIERS_BY_LOAD, 'loadId', loadId)
+    await assertOwnAssetDriver(load, legs.find((c) => c.status === 'ACTIVE') ?? null, 'DELIVERED')
+  }
 
   const now = nowIso()
   const client = await getDataClient()
@@ -3428,12 +3448,23 @@ async function duplicateShipment(input: Row, caller: Caller): Promise<Row> {
   const client = await getDataClient()
   const created: string[] = []
 
+  // Step W. The driver only travels when the source names a real, usable roster driver:
+  // a truck alone, a broker placeholder or an inactive driver leaves the copy uncovered
+  // rather than an Ivan Cartage load nobody is on.
+  let keptDriverId: string | null = null
+  if (keepDriver) {
+    const sourceLegacy = deriveLegacyFields(readStops(sourceLoad))
+    const candidate = optionalString(sourceLegacy.pickupDriverId, 100) ?? optionalString(sourceLegacy.deliveryDriverId, 100)
+    if (candidate && driverProblem(candidate, (await getById(DRIVER_TABLE_NAME, candidate)) as RosterDriverFacts | null) == null) {
+      keptDriverId = candidate
+    }
+  }
   for (const copy of copies) {
     const number = await nextShipmentNumber(caller)
     const newShipmentId = `shp-${randomUUID()}`
     const newOrderId = `ord-${randomUUID()}`
     const newLoadId = `lod-${randomUUID()}`
-    const stops = shiftStops(readStops(sourceLoad), copy.pickupAppt, copy.deliveryAppt, keepDriver)
+    const stops = shiftStops(readStops(sourceLoad), copy.pickupAppt, copy.deliveryAppt, keptDriverId != null)
     const now = nowIso()
 
     const charges = sourceCharges.filter((c) => c.side === 'CUSTOMER').map((c) => ({
@@ -3453,12 +3484,10 @@ async function duplicateShipment(input: Row, caller: Caller): Promise<Row> {
     const mirrors = shipmentMirrors([{ stops: JSON.stringify(stops) }])
     // An own-fleet copy that kept its driver is already covered by our own asset;
     // leaving it NEED_TO_COVER would file it in the uncovered lane, away from the
-    // calendar row the dispatcher pressed Duplicate on.
-    const keptDriver = keepDriver && (
-      optionalString(legacy.pickupDriverId, 100) != null
-      || optionalString(legacy.deliveryDriverId, 100) != null
-      || optionalString(sourceLoad.truckId, 100) != null
-    )
+    // calendar row the dispatcher pressed Duplicate on. A truck alone is not a driver:
+    // the copy is only an Ivan Cartage load when a real, usable roster driver rides
+    // along (and then it gets its own leg, below).
+    const keptDriver = keptDriverId != null
     // The copy's PRO is derived from its own number and claimed like any other.
     // There is no `-copy` PRO any more: the second duplicate would collide with it.
     const pro = `${number}-1`
@@ -3585,6 +3614,17 @@ async function duplicateShipment(input: Row, caller: Caller): Promise<Row> {
       }),
       'Load create',
     )
+    if (keptDriverId) {
+      // The copy is a fresh load, so the pay lock does not apply. A relay source copies
+      // as one driver on every stop (the TMS rule: one driver per Ivan Cartage load).
+      await assignAssetCore({
+        loadId: newLoadId,
+        driverId: keptDriverId,
+        truckId: optionalString(sourceLoad.truckId, 100),
+        trailerNumber: optionalString(sourceLoad.trailerNumber, 40),
+        flattenSplit: true,
+      }, caller, { skipPayLock: true })
+    }
     await writeAudit('SHIPMENT', newShipmentId, 'DUPLICATE_SHIPMENT', caller, {
       sourceShipmentId: shipmentId, sourceNumber: source.shipment.number, number, pro,
     })
@@ -3943,6 +3983,18 @@ async function updateStop(input: Row, caller: Caller): Promise<Row> {
   }
 
   stops = resequence(stops)
+  // Step W. A stop added, removed, retyped or swapped on an Ivan Cartage load that has not
+  // been delivered yet inherits the leg's driver and truck, so the mirrors the Schedule and
+  // pay read do not lose the driver. Delivered history is never touched.
+  if (['ADD', 'REMOVE', 'SET_TYPE', 'SWAP'].includes(op) && String(load.assignmentType ?? '') === 'OWN_ASSET'
+    && !isDeliveredOrLater(load.status) && !load.voidedAt) {
+    const legs = await queryIndex(LOAD_CARRIER_TABLE_NAME, IDX_CARRIERS_BY_LOAD, 'loadId', loadId)
+    const leg = legs.find((c) => c.status === 'ACTIVE' && c.kind === 'OWN_ASSET') ?? null
+    const legDriver = leg ? optionalString(leg.driverId, 100) : null
+    if (legDriver) {
+      stops = fillBlankStopDrivers(stops, legDriver, optionalString(leg!.truckId, 100) ?? optionalString(load.truckId, 100))
+    }
+  }
   assertStopShape(stops, false)
   const legacy = deriveLegacyFields(stops)
 
@@ -3952,6 +4004,12 @@ async function updateStop(input: Row, caller: Caller): Promise<Row> {
   const derivedStatus = op === 'SET_TIMES'
     ? loadStatusFromStopTimes(stopTimesOf(stops), currentStatus)
     : currentStatus
+  // Step W. Departing the last delivery with nobody on the truck is a delivery no
+  // settlement would pick up: refuse before any tracking row is written.
+  if (op === 'SET_TIMES' && derivedStatus === 'DELIVERED' && currentStatus !== 'DELIVERED') {
+    const legs = await queryIndex(LOAD_CARRIER_TABLE_NAME, IDX_CARRIERS_BY_LOAD, 'loadId', loadId)
+    await assertOwnAssetDriver(load, legs.find((c) => c.status === 'ACTIVE') ?? null, 'DELIVERED', optionalString(legacy.deliveryDriverId, 100))
+  }
 
   // The tracking log is written before the load moves, so a reader who sees the new
   // status can already see what proved it. The `evt:` id is derived from the stop,
@@ -4030,14 +4088,53 @@ function retireCarrier(
   })
 }
 
+/**
+ * Step W. The one place an Ivan Cartage load's driver is decided on the server. `phase`
+ * DISPATCH also needs the driver to be usable; DELIVERED only that somebody is on it.
+ */
+async function assertOwnAssetDriver(
+  load: Row,
+  active: Row | null,
+  phase: 'DISPATCH' | 'DELIVERED',
+  deliveryDriverId?: string | null,
+): Promise<void> {
+  const facts = { ...load, stops: readStops(load) } as unknown as OwnAssetLoadFacts
+  const leg = active as unknown as OwnAssetLegFacts | null
+  let driver: RosterDriverFacts | null | undefined
+  const legDriverId = active ? optionalString(active.driverId, 100) : null
+  if (phase === 'DISPATCH' && legDriverId && isOwnAssetLoad(facts, leg)) {
+    driver = (await getById(DRIVER_TABLE_NAME, legDriverId)) as RosterDriverFacts | null
+  }
+  const gap = ownAssetDriverGap({ load: facts, activeLeg: leg, driver, phase, deliveryDriverId })
+  if (gap) throw new Error(gap.message)
+}
+
+async function driverLabel(id: string | null): Promise<string> {
+  if (!id) return 'nobody'
+  const row = await getById(DRIVER_TABLE_NAME, id)
+  return optionalString(row?.name, 120) ?? id
+}
+
 async function assignAsset(input: Row, caller: Caller): Promise<Row> {
+  return assignAssetCore(input, caller, {})
+}
+
+/**
+ * Step W. Book a roster driver on a load as Ivan Cartage. Every refusal happens before the
+ * first write, so a refused call leaves Load, LoadCarrier and AuditLog untouched. The
+ * Load fields written are exactly `ownFleetLoadPatch`'s (plus the colour reset on a real
+ * driver change): no rate, date or invoice field moves.
+ */
+async function assignAssetCore(input: Row, caller: Caller, opts: { skipPayLock?: boolean }): Promise<Row> {
   const loadId = assertString(input.loadId, 'loadId')
   const driverId = assertString(input.driverId, 'driverId')
   const truckId = optionalString(input.truckId, 100)
   const trailerId = optionalString(input.trailerId, 100)
-  const driverName = optionalString(input.driverName, 120)
-  const driverPhone = optionalString(input.driverPhone, 40)
+  const truckNumber = optionalString(input.truckNumber, 40)
+  const trailerNumber = optionalString(input.trailerNumber, 40)
   const driver2 = input.driver2 == null ? null : assertRecord(input.driver2, 'driver2')
+  const flattenSplit = optionalBoolean(input.flattenSplit) ?? false
+  const payOverrideReason = optionalString(input.payOverrideReason, 500)
 
   const load = await getById(LOAD_TABLE_NAME, loadId)
   if (!load) throw new Error(`Load not found: ${loadId}`)
@@ -4045,8 +4142,76 @@ async function assignAsset(input: Row, caller: Caller): Promise<Row> {
   if (!shipmentId) throw new Error('That load is not part of a shipment yet')
   const shipment = await requireLiveShipment(shipmentId)
 
+  // The roster row is the truth for who this is: the client's typed name is never used.
+  const driver = await getById(DRIVER_TABLE_NAME, driverId)
+  const problem = driverProblem(driverId, driver as RosterDriverFacts | null)
+  if (problem) throw new Error(problem)
+  const driverName = optionalString(driver!.name, 120) ?? driverId
+  const driverPhone = optionalString(driver!.phone, 40)
+
   const carriers = await queryIndex(LOAD_CARRIER_TABLE_NAME, IDX_CARRIERS_BY_LOAD, 'loadId', loadId)
   const activeCarrier = carriers.find((c) => c.status === 'ACTIVE') ?? null
+  const activeOwn = activeCarrier && activeCarrier.kind === 'OWN_ASSET' ? activeCarrier : null
+  const stopsBefore = readStops(load)
+
+  // A relay is not flattened by accident.
+  const stopDrivers = distinctStopDrivers(stopsBefore as OwnAssetLoadFacts['stops'])
+  if (stopDrivers.length >= 2 && !flattenSplit) {
+    throw new Error(OWN_ASSET_MESSAGES.relay(await driverLabel(stopDrivers[0]), await driverLabel(stopDrivers[1])))
+  }
+
+  const ownFleet = ownFleetLoadPatch(stopsBefore as MirrorStop[], {
+    driverId,
+    truckId: truckId ?? optionalString(load.truckId, 100),
+    trailerNumber: trailerNumber ?? optionalString(load.trailerNumber, 40),
+  })
+
+  // Same driver, truck and trailer, mirrors already in step: nothing to do.
+  const sameOr = (asked: string | null, held: unknown): boolean => asked == null || asked === (optionalString(held, 100) ?? null)
+  if (
+    activeOwn
+    && optionalString(activeOwn.driverId, 100) === driverId
+    && optionalString(activeOwn.driverName, 120) === driverName
+    && sameOr(truckId, activeOwn.truckId) && sameOr(trailerId, activeOwn.trailerId)
+    && sameOr(truckNumber, activeOwn.truckNumber) && sameOr(trailerNumber, activeOwn.trailerNumber)
+    && String(load.assignmentType ?? '') === 'OWN_ASSET'
+    && optionalString(load.pickupDriverId, 100) === ownFleet.pickupDriverId
+    && optionalString(load.deliveryDriverId, 100) === ownFleet.deliveryDriverId
+    && stopDrivers.length === 1 && stopDrivers[0] === driverId
+  ) {
+    return readBundle(shipmentId) as unknown as Row
+  }
+
+  const previousDriverId = (activeOwn ? optionalString(activeOwn.driverId, 100) : null)
+    ?? optionalString(load.deliveryDriverId, 100)
+    ?? optionalString(load.pickupDriverId, 100)
+    ?? stopDrivers[0]
+    ?? null
+  const driverChanged = [previousDriverId, optionalString(load.pickupDriverId, 100), optionalString(load.deliveryDriverId, 100), ...stopDrivers]
+    .some((id) => id != null && id !== driverId)
+
+  // Pay lock: only a change of who gets paid for the delivery can move history.
+  let payLock: { state: 'OPEN' | 'CLOSED_WEEK_OVERRIDE'; deliveryDate?: string; reason?: string } = { state: 'OPEN' }
+  const movesPay = optionalString(load.deliveryDriverId, 100) !== driverId
+  if (movesPay && !opts.skipPayLock) {
+    const trips = await scanTable(BOX_TRUCK_TRIP_TABLE_NAME)
+    const trip = trips.find((t) => String(t.loadId ?? '') === loadId) ?? null
+    const oldDriverId = optionalString(load.deliveryDriverId, 100) ?? previousDriverId
+    const lock = evaluatePayLock({
+      deliveryAppt: optionalString(load.deliveryAppt, 40),
+      todayUtc: nowIso().slice(0, 10),
+      boxTrip: trip
+        ? { periodStart: String(trip.periodStart ?? ''), driverName: await driverLabel(optionalString(trip.driverId, 100)) }
+        : null,
+      oldDriverName: await driverLabel(oldDriverId),
+      newDriverName: driverName,
+      isAdmin: caller.isAdmin,
+      reason: payOverrideReason,
+    })
+    if (lock.state === 'REFUSED') throw new Error(lock.message)
+    if (lock.state === 'CLOSED_WEEK_OVERRIDE') payLock = { state: lock.state, deliveryDate: lock.deliveryDate, reason: lock.reason }
+  }
+
   const sequence = carriers.reduce((max, c) => Math.max(max, numberOrNull(c.sequence) ?? 0), 0) + 1
   const newCarrierId = `lcr-${randomUUID()}`
   const now = nowIso()
@@ -4065,9 +4230,9 @@ async function assignAsset(input: Row, caller: Caller): Promise<Row> {
     driver2Name: driver2 == null ? null : optionalString(driver2.name, 120),
     driver2Phone: driver2 == null ? null : optionalString(driver2.phone, 40),
     truckId,
-    truckNumber: optionalString(input.truckNumber, 40),
+    truckNumber,
     trailerId,
-    trailerNumber: optionalString(input.trailerNumber, 40),
+    trailerNumber,
     carrierRateCents: 0,
     costCents: 0,
     // No apStatus: an own-fleet leg is paid through a driver settlement and never
@@ -4086,11 +4251,7 @@ async function assignAsset(input: Row, caller: Caller): Promise<Row> {
   // them — so every own-fleet reader keeps seeing the assignment it already
   // understands. `ownFleetLoadPatch` is that mapping, shared with the backfill so
   // one definition says what an own-fleet load looks like.
-  const ownFleet = ownFleetLoadPatch(readStops(load) as MirrorStop[], {
-    driverId,
-    truckId: truckId ?? optionalString(load.truckId, 100),
-    trailerNumber: optionalString(input.trailerNumber, 40) ?? optionalString(load.trailerNumber, 40),
-  })
+  const patchStops = driverChanged ? clearStopColors(ownFleet.stops) : ownFleet.stops
   const currentStatus = (optionalEnum(load.status, LOAD_STATUS_VALUES, 'status') ?? null) as LoadWorkflowStatus | null
   const nextStatus = currentStatus == null || currentStatus === 'SOURCING' ? 'BOOKED' : currentStatus
   // Step R. The leg is written, so the rules can now see whose truck this is — and
@@ -4103,7 +4264,10 @@ async function assignAsset(input: Row, caller: Caller): Promise<Row> {
     await client.models.Load.update({
       id: loadId,
       ...ownFleet,
-      stops: JSON.stringify(ownFleet.stops),
+      stops: JSON.stringify(patchStops),
+      // The Calendar prefers a stored colour over the driver's own, so a reassigned
+      // load must drop the old one to show the new driver's.
+      ...(driverChanged ? { colorKey: null } : {}),
       activeLoadCarrierId: newCarrierId,
       ...tag,
       ...(nextStatus !== currentStatus
@@ -4114,7 +4278,27 @@ async function assignAsset(input: Row, caller: Caller): Promise<Row> {
     'Load update',
   )
 
-  await writeAudit('LOAD_CARRIER', newCarrierId, 'ASSIGN_ASSET', caller, { loadId, driverId, truckId })
+  await writeAudit('LOAD_CARRIER', newCarrierId, 'ASSIGN_ASSET', caller, {
+    loadId, driverId, driverName, truckId, truckNumber, trailerNumber, previousDriverId,
+  })
+  if (driverChanged) {
+    const nameOf = (id: string | null, name: string): string => (id ? `${name} (${id})` : 'nobody')
+    await writeAudit('LOAD', loadId, 'CHANGE_ASSET_DRIVER', caller, {
+      loadId,
+      driver: { from: nameOf(previousDriverId, await driverLabel(previousDriverId)), to: nameOf(driverId, driverName) },
+      truck: {
+        from: optionalString(activeOwn?.truckNumber, 40) ?? optionalString(load.truckId, 100),
+        to: truckNumber ?? ownFleet.truckId,
+      },
+      trailer: {
+        from: optionalString(activeOwn?.trailerNumber, 40) ?? optionalString(load.trailerNumber, 40),
+        to: ownFleet.trailerNumber,
+      },
+      previousLegId: activeCarrier ? String(activeCarrier.id) : null,
+      relayFlattened: stopDrivers.length >= 2,
+      payLock,
+    })
+  }
   // Step H. A covered load never shows a live request.
   await cancelOpenOffers(quoteDeps, loadId, caller)
   return rederiveShipmentStatus(shipmentId, caller)
@@ -4128,6 +4312,7 @@ async function assignCarrier(input: Row, caller: Caller): Promise<Row> {
   }
   const loadId = assertString(input.loadId, 'loadId')
   const carrierName = assertString(input.carrierName, 'carrierName')
+  if (/\bivan\s*cartage\b/i.test(carrierName)) throw new Error(OWN_ASSET_MESSAGES.typedIvanCartage)
   const carrierRateCents = optionalInteger(input.carrierRateCents, { min: 0, label: 'carrierRateCents' })
 
   const load = await getById(LOAD_TABLE_NAME, loadId)
@@ -5121,6 +5306,7 @@ async function dispatchLoad(input: Row, caller: Caller): Promise<Row> {
   const carriers = await queryIndex(LOAD_CARRIER_TABLE_NAME, IDX_CARRIERS_BY_LOAD, 'loadId', loadId)
   const active = carriers.find((c) => c.status === 'ACTIVE') ?? null
   if (!active) throw new Error('That load has nobody on it to dispatch')
+  await assertOwnAssetDriver(load, active, 'DISPATCH')
 
   const warnings = new Set(
     (Array.isArray(active.bookingWarnings) ? active.bookingWarnings : []).map((w) => String(w)),
@@ -5139,10 +5325,13 @@ async function dispatchLoad(input: Row, caller: Caller): Promise<Row> {
   // carrier already told us at booking.
   const pickupEtaAt = optionalIso(input.pickupEtaAt, 'pickupEtaAt')
   if (pickupEtaAt) patch.pickupEtaAt = pickupEtaAt
-  const driverName = optionalString(input.driverName, 120)
-  if (driverName) patch.driverName = driverName
-  const driverPhone = optionalString(input.driverPhone, 40)
-  if (driverPhone) patch.driverPhone = driverPhone
+  // An own-fleet leg's driver is the roster driver; a typed name could only drift from it.
+  if (active.kind !== 'OWN_ASSET') {
+    const driverName = optionalString(input.driverName, 120)
+    if (driverName) patch.driverName = driverName
+    const driverPhone = optionalString(input.driverPhone, 40)
+    if (driverPhone) patch.driverPhone = driverPhone
+  }
   const truckNumber = optionalString(input.truckNumber, 40)
   if (truckNumber) patch.truckNumber = truckNumber
   const trailerNumber = optionalString(input.trailerNumber, 40)
@@ -6876,6 +7065,8 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return { ...(await batchShipmentTask({
         getShipment: (id) => getById(SHIPMENT_TABLE_NAME, id),
         getOrders: (id) => queryIndex(ORDER_TABLE_NAME, IDX_ORDERS_BY_SHIPMENT, 'shipmentId', id),
+        getLoadsOf: (id) => queryIndex(LOAD_TABLE_NAME, IDX_LOADS_BY_SHIPMENT, 'shipmentId', id),
+        assignAsset,
         authorize: isActionAuthorized,
         releaseToBilling: (row, actor) => readyToInvoice({
           ...documentDeps,

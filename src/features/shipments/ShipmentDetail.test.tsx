@@ -11,6 +11,7 @@ import type {
 } from '@/types/tms'
 import type { Stop } from '@/types'
 import type * as ApiClient from '@/lib/apiClient'
+import { toast } from 'sonner'
 
 class ResizeObserverStub { observe() {} unobserve() {} disconnect() {} }
 globalThis.ResizeObserver ??= ResizeObserverStub as unknown as typeof ResizeObserver
@@ -625,5 +626,23 @@ describe('the Overview Integrations card', () => {
     expect(runIntegrationStub).toHaveBeenCalledWith('DAT', 'post')
     expect(actions.reload).not.toHaveBeenCalled()
     expect(actions.load.onSetLoadStatus).not.toHaveBeenCalled()
+  })
+})
+
+describe('a refused "Move load to… Delivered"', () => {
+  it('shows the server sentence above the tabs and does not toast it', async () => {
+    const refusal = 'Ivan Cartage load: pick the driver before marking it delivered (Carrier/Driver tab → Assign driver).'
+    actions.load.onSetLoadStatus = vi.fn(async () => { throw new Error(refusal) })
+    const toastSpy = vi.spyOn(toast, 'error')
+    const base = bundle('IN_TRANSIT')
+    renderDetail('IN_TRANSIT', {}, { loads: [{ ...base.loads[0], status: 'IN_TRANSIT', assignmentType: 'OWN_ASSET' }] })
+
+    fireEvent.pointerDown(screen.getByLabelText('Load actions'), { button: 0, pointerType: 'mouse' })
+    fireEvent.click(await screen.findByText('DEL'))
+
+    await waitFor(() => expect(screen.getByTestId('load-action-error').textContent).toContain(refusal))
+    expect(toastSpy).not.toHaveBeenCalled()
+    fireEvent.click(within(screen.getByTestId('load-action-error')).getByRole('button', { name: 'Dismiss' }))
+    expect(screen.queryByTestId('load-action-error')).toBeNull()
   })
 })

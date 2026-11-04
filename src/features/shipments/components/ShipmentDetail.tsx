@@ -52,6 +52,7 @@ import { ReleaseGateCard } from './ReleaseGateCard'
 import { HistorySection } from './HistorySection'
 import { LoadActions } from './StatusActions'
 import { DraftOrderEditor } from './DraftOrderEditor'
+import { AssignDriverDialog } from './AssignDriverDialog'
 import { DETAIL_TABS, type DetailTabKey } from './detailTabs'
 import type { ShipmentActions } from '../useShipmentActions'
 import type {
@@ -87,6 +88,11 @@ export function ShipmentDetail(props: ShipmentDetailProps) {
   const { equipment } = useTrucks()
   const trucks = equipment.filter((e) => e.type === 'truck')
   const trailers = equipment.filter((e) => e.type === 'trailer')
+  const [assignOpen, setAssignOpen] = useState(false)
+  // A refused "Move load to…" is tied to the status the load had, so it disappears by
+  // itself once the load actually moves (no effect needed to clear it).
+  const [actionError, setActionError] = useState<{ message: string; status: string | null } | null>(null)
+  const visibleActionError = actionError && actionError.status === (bundle.loads[0]?.status ?? null) ? actionError.message : null
 
   // Same optional read as `useAuthUser`: the detail renders inside drawers, dialogs and
   // tests that do not always sit under AuthProvider, and the router is the real gate.
@@ -190,7 +196,21 @@ export function ShipmentDetail(props: ShipmentDetailProps) {
           onSubmit={actions.submit}
           onStopAction={actions.stopAction}
           onSaveCharges={actions.saveCharges}
+          driverRow={load ? {
+            driverName: activeCarrier?.kind === 'OWN_ASSET' ? activeCarrier.driverName ?? null : null,
+            assignmentType: load.assignmentType ?? null,
+            voided,
+            onOpen: () => setAssignOpen(true),
+          } : undefined}
         />
+        {assignOpen && load && (
+          <AssignDriverDialog
+            load={load} activeLeg={activeCarrier} drivers={drivers} trucks={trucks} trailers={trailers}
+            isAdmin={isAdmin} busy={actions.busy}
+            onClose={() => setAssignOpen(false)}
+            onConfirm={actions.load.onAssignAsset}
+          />
+        )}
       </div>
     )
   }
@@ -198,6 +218,16 @@ export function ShipmentDetail(props: ShipmentDetailProps) {
   return (
     <div className="space-y-4" ref={rootRef} data-testid="shipment-detail">
       {unresolvedCustomer}
+      {visibleActionError && (
+        <div data-testid="load-action-error">
+          <TmsAlert tone="red">
+            <span className="flex items-start justify-between gap-2">
+              <span>{visibleActionError}</span>
+              <TmsButton size="sm" variant="ghost" onClick={() => setActionError(null)}>Dismiss</TmsButton>
+            </span>
+          </TmsAlert>
+        </div>
+      )}
       <BuildingBanner shipment={shipment} onReload={actions.reload} />
       <div className="flex items-center gap-2">
         <TmsTabs
@@ -230,6 +260,7 @@ export function ShipmentDetail(props: ShipmentDetailProps) {
                 voided={voided}
                 handlers={actions.load}
                 onRateCon={() => setTab('carrier')}
+                onError={(message) => setActionError({ message, status: load.status ?? null })}
               />
             ) : undefined}
           >
@@ -359,7 +390,7 @@ export function ShipmentDetail(props: ShipmentDetailProps) {
         />
       )}
 
-      {activeTab === 'carrier' && <CarrierSection bundle={bundle} actions={actions} />}
+      {activeTab === 'carrier' && <CarrierSection bundle={bundle} actions={actions} isAdmin={isAdmin} />}
 
       {activeTab === 'tracking' && (
         <TrackingSection bundle={bundle} customer={customer} catalog={catalog} actions={actions} />
