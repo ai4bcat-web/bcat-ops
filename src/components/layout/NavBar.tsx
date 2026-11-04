@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom'
-import { UserCog, LogOut, Plus, Truck, ChevronsLeft, ChevronsRight } from 'lucide-react'
+import { UserCog, MessageSquareWarning, LogOut, Plus, Truck, ChevronsLeft, ChevronsRight } from 'lucide-react'
 import bcatLogo from '@/assets/bcat-logo.png'
 import { useAuth } from '@/hooks/useAuth'
 import { useAppStore } from '@/store/useAppStore'
@@ -157,6 +157,17 @@ export function NavBar({
             </div>
           )
         })}
+
+        <div style={{ height: 1, background: 'var(--ds-border)', margin: '8px 6px' }} />
+        <NavLink
+          to="/feedback"
+          onClick={onClose}
+          title={collapsed ? 'Feedback' : undefined}
+          className={({ isActive }) => `sidebar-link${isActive ? ' active' : ''}`}
+        >
+          <MessageSquareWarning size={16} style={{ flexShrink: 0 }} />
+          {!collapsed && <span>Feedback</span>}
+        </NavLink>
 
         {isOwner && (
           <>

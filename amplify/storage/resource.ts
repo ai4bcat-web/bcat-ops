@@ -76,6 +76,11 @@ export const storage = defineStorage({
       allow.authenticated.to(['read', 'write', 'delete']),
       allow.groups(STAFF_GROUPS).to(['read', 'write', 'delete']),
     ],
+    // Feedback-page screenshots, keyed feedback/{feedbackId}/… — any signed-in user.
+    'feedback/*': [
+      allow.authenticated.to(['read', 'write']),
+      allow.groups(STAFF_GROUPS).to(['read', 'write', 'delete']),
+    ],
     /*
      * Rate confirmations and PODs uploaded by drivers via the driver-app-api Lambda
      * presigned-PUT flow, and by staff uploading on a driver's behalf. Drivers never hold

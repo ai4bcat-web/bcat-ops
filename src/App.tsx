@@ -43,6 +43,7 @@ import { DisputesPage } from '@/features/disputes/DisputesPage'
 import { DriverDisputesPage } from '@/features/disputes/DriverDisputesPage'
 import { FilesPage } from '@/features/files/FilesPage'
 import { SettingsPage } from '@/features/settings/SettingsPage'
+import { FeedbackPage } from '@/features/feedback/FeedbackPage'
 import { RedditQueuePage } from '@/features/reddit-queue/RedditQueuePage'
 import { PricingMarginPage } from '@/features/pricing-margin/PricingMarginPage'
 import { FactoringPage } from '@/features/factoring/FactoringPage'
@@ -229,6 +230,8 @@ export default function App() {
               <Route path="/disputes" element={<RequirePage page="disputes"><DisputesPage /></RequirePage>} />
               <Route path="/files" element={<RequirePage page="files"><FilesPage /></RequirePage>} />
               <Route path="/settings" element={<RequirePage page="settings"><SettingsPage /></RequirePage>} />
+              {/* Open to every signed-in user (no page grant) — it is where staff report problems. */}
+              <Route path="/feedback" element={<FeedbackPage />} />
               <Route path="/audit-log" element={<RequirePage page="audit"><AuditPage /></RequirePage>} />
               <Route path="/intake"   element={<RequirePage page="intake"><IntakePage /></RequirePage>} />
               <Route path="/pods"     element={<RequirePage page="pods"><PodsPage /></RequirePage>} />

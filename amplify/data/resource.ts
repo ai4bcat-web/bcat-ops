@@ -1108,6 +1108,26 @@ const schema = a.schema({
       allow.authenticated().to(['create', 'read']),
     ]),
 
+  // ── Feedback ───────────────────────────────────────────────────────────────
+  // "What is not working" reports from any signed-in user, triaged by the owner/admins
+  // on /feedback. Screenshots live in S3 under feedback/{id}/ (keys in screenshotKeys).
+  Feedback: a
+    .model({
+      page:             a.string().required(),
+      summary:          a.string().required(),
+      details:          a.string(),
+      screenshotKeys:   a.string().array(),
+      status:           a.enum(['NEW', 'IN_PROGRESS', 'DONE']),
+      submittedBy:      a.string(),
+      submittedByName:  a.string(),
+      adminNotes:       a.string(),
+      resolvedAt:       a.string(),
+    })
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [
+      allow.authenticated().to(['create', 'read', 'update']),
+    ]),
+
   // ── Fuel transactions ──────────────────────────────────────────────────────
   // Imported from EFS Transaction Reports. One record per line item.
   // Covers fuel (ULSD/DEFD), scale fees (SCLE), cash advances (CASH), and others.
