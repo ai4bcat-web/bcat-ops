@@ -2687,6 +2687,8 @@ export interface TrackingViewPosition {
   lng: number
   at: string
   description: string | null
+  /** Step AO: a guess from a text reply, not a GPS reading. The page says "near", with no precision claim. */
+  approx?: true
 }
 
 export interface TrackingViewContact {

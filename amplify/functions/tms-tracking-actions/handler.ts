@@ -74,6 +74,17 @@ import { sendMessage } from '../_shared/twilio'
 import { MAX_SMS_BODY, toE164Strict } from '../../../src/lib/dispatch'
 import { resolveDriverSmsForLeg } from './driverPhone'
 import { linkExpiry, smsBodyFor } from '../../../src/lib/trackingLink'
+import { haversineMiles } from '../../../src/lib/polyline'
+import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb'
+import { putPing as filePing } from '../_shared/trackingPings'
+import { getLoadRoute, type RouteDeps } from './route'
+import { resolveShareLink, reverseGeocodeWith, simPings, simText, type SimDeps } from './shareIngest'
+import {
+  simProviderDelivery,
+  startProviderTracking,
+  stopProviderTracking,
+  type ProviderActionDeps,
+} from './providers'
 import {
   DEFAULT_REQUIRED_CARRIER_UPLOAD_TYPES,
   DEFAULT_UPLOAD_LINK_EXPIRY_DAYS,
@@ -135,6 +146,11 @@ const USER_PROFILE_TABLE_NAME = process.env.USER_PROFILE_TABLE_NAME ?? ''
 const SHIPMENT_MESSAGE_TABLE_NAME = process.env.SHIPMENT_MESSAGE_TABLE_NAME ?? ''
 /** Same server key tms-geocode holds; unset means a free-text reply stays a note. */
 const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY ?? ''
+/** Step AO: load-keyed breadcrumbs + the cached route row, and the ELD fix an own-asset leg is judged by. */
+const TRUCK_LOCATION_HISTORY_TABLE_NAME = process.env.TRUCK_LOCATION_HISTORY_TABLE_NAME ?? ''
+const TRUCK_LOCATION_TABLE_NAME = process.env.TRUCK_LOCATION_TABLE_NAME ?? ''
+/** An own truck with an ELD fix newer than this does not need a tapped link (D-AO9). */
+const OWN_ASSET_FRESH_FIX_MS = 2 * 3_600_000
 const BUCKET_NAME = process.env.BUCKET_NAME ?? ''
 const USER_POOL_ID = process.env.USER_POOL_ID ?? 'us-east-1_IbPKPNJC9'
 const PORTAL_ORIGIN = process.env.PORTAL_ORIGIN ?? ''
@@ -280,6 +296,13 @@ type Action =
   | 'EMAIL_DOCUMENTS'
   | 'SAVE_DOCUMENT_SETTINGS'
   | 'INGEST_ATTACHMENT'
+  // ── Step AO — the driver map ───────────────────────────────────────────────
+  | 'GET_LOAD_ROUTE'
+  | 'START_PROVIDER_TRACKING'
+  | 'STOP_PROVIDER_TRACKING'
+  | 'TRACKING_SIM_PINGS'
+  | 'TRACKING_SIM_TEXT'
+  | 'TRACKING_SIM_PROVIDER'
 
 /**
  * What an audit row is about. `AuditLog.entityType` is an open string in the schema,
@@ -813,7 +836,7 @@ async function sendTrackingLink(input: Row, caller: Caller): Promise<Row> {
   if (loadCarrier.status !== 'ACTIVE') {
     throw new Error('Only the carrier currently on the load can be sent a tracking link')
   }
-  if (loadCarrier.kind === 'OWN_ASSET') {
+  if (loadCarrier.kind === 'OWN_ASSET' && (await ownAssetHasFreshFix(loadCarrier))) {
     throw new Error('Own trucks track through Motive and the driver app — a ping link is for outside carriers')
   }
 
@@ -937,6 +960,9 @@ async function sendTrackingLink(input: Row, caller: Caller): Promise<Row> {
     loadId, loadCarrierId, via, to: phone, expiresAt, smsStatus: sms.status,
     revoked: previous.map((p) => String(p.id)),
   })
+
+  // Best effort: the customer page reads the route from the cache and has no key of its own.
+  await warmRoute(loadId, caller)
 
   return { link, url, smsStatus: sms.status, smsError: sms.error, messageId: sms.messageId }
 }
@@ -1206,6 +1232,9 @@ async function sendCustomerLink(input: Row, caller: Caller): Promise<Row> {
   await writeAudit('TRACKING_LINK', token, 'SEND_CUSTOMER_LINK', caller, {
     shipmentId, via, to, cc, regenerate, reused: reuse, expiresAt, emailStatus,
   })
+
+  const shipmentLoads = await queryIndex(LOAD_TABLE_NAME, IDX_LOADS_BY_SHIPMENT, 'shipmentId', shipmentId)
+  for (const l of shipmentLoads.slice(0, 5)) await warmRoute(String(l.id), caller)
 
   return { link, url, emailStatus, emailError, shipment: saved }
 }
@@ -2286,14 +2315,32 @@ const COMMON_GEOCODE_FALLBACKS: Record<string, { city: string; state: string; la
   'chicago il': { city: 'Chicago', state: 'IL', lat: 41.8781, lng: -87.6298 },
 }
 
-async function geocodeReply(text: string): Promise<{ city: string; state: string; lat: number; lng: number } | null> {
+/** Half the viewport diagonal in metres, bounded; a rooftop hit is no coarser than 2 km. */
+function geocodeRadiusM(hit: {
+  geometry?: {
+    location_type?: string
+    viewport?: { northeast: { lat: number; lng: number }; southwest: { lat: number; lng: number } }
+  }
+}): number {
+  const vp = hit.geometry?.viewport
+  const half = vp
+    ? (haversineMiles({ lat: vp.northeast.lat, lng: vp.northeast.lng }, { lat: vp.southwest.lat, lng: vp.southwest.lng }) * 1609.34) / 2
+    : 8000
+  const bounded = Math.min(50_000, Math.max(2000, half))
+  const type = hit.geometry?.location_type
+  return Math.round(type === 'ROOFTOP' || type === 'RANGE_INTERPOLATED' ? Math.min(bounded, 2000) : bounded)
+}
+
+async function geocodeReply(
+  text: string,
+): Promise<{ city: string; state: string; lat: number; lng: number; radiusM: number } | null> {
   const trimmed = text.trim()
   if (trimmed.length < 3) return null
 
   // Dev/test deterministic fallback: common demo phrases without burning a key.
   const lower = trimmed.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim()
   const fallback = COMMON_GEOCODE_FALLBACKS[lower]
-  if (fallback) return fallback
+  if (fallback) return { ...fallback, radiusM: 8000 }
 
   if (!GOOGLE_MAPS_API_KEY) return null
   try {
@@ -2305,7 +2352,14 @@ async function geocodeReply(text: string): Promise<{ city: string; state: string
     if (!res.ok) return null
     const body = await res.json() as {
       status?: string
-      results?: { geometry?: { location?: { lat: number; lng: number } }; address_components?: { long_name: string; short_name: string; types: string[] }[] }[]
+      results?: {
+        geometry?: {
+          location?: { lat: number; lng: number }
+          location_type?: string
+          viewport?: { northeast: { lat: number; lng: number }; southwest: { lat: number; lng: number } }
+        }
+        address_components?: { long_name: string; short_name: string; types: string[] }[]
+      }[]
     }
     const hit = body.status === 'OK' ? body.results?.[0] : null
     const loc = hit?.geometry?.location
@@ -2316,7 +2370,7 @@ async function geocodeReply(text: string): Promise<{ city: string; state: string
       ?? ''
     const state = parts.find((p) => p.types.includes('administrative_area_level_1'))?.short_name ?? ''
     if (!city && !state) return null
-    return { city, state, lat: loc.lat, lng: loc.lng }
+    return { city, state, lat: loc.lat, lng: loc.lng, radiusM: geocodeRadiusM(hit) }
   } catch (err) {
     console.warn('[tms-tracking-actions] geocode failed:', String(err))
     return null
@@ -2352,6 +2406,9 @@ const threadDeps: ThreadDeps = {
     }
   },
   geocode: geocodeReply,
+  reverseGeocode: (lat, lng) => reverseGeocodeWith(fetch, GOOGLE_MAPS_API_KEY, lat, lng),
+  resolveShareLink: (url) => resolveShareLink(url, fetch),
+  putPing: TRUCK_LOCATION_HISTORY_TABLE_NAME ? (input) => filePing(pingDeps(), input) : undefined,
   readDocumentBytes: async (s3Key) => {
     const out = await s3.send(new GetObjectCommand({ Bucket: BUCKET_NAME, Key: s3Key }))
     const body = out.Body as { transformToByteArray?: () => Promise<Uint8Array> } | undefined
@@ -2360,6 +2417,105 @@ const threadDeps: ThreadDeps = {
   },
   now: nowIso,
   randomId: randomUUID,
+}
+
+// ── Step AO: breadcrumbs, the route cache, the dev sim doors, the provider slot ──
+
+let docClient: DynamoDBDocumentClient | null = null
+/** `putPing` writes through the document client; built on first use so a unit test that never pings never needs one. */
+function pingDeps(): { ddb: DynamoDBDocumentClient; table: string } {
+  docClient ??= DynamoDBDocumentClient.from(dynamo, { marshallOptions: { removeUndefinedValues: true } })
+  return { ddb: docClient, table: TRUCK_LOCATION_HISTORY_TABLE_NAME }
+}
+
+/** Own-asset leg: true when its truck has reported from the ELD inside the last two hours. */
+async function ownAssetHasFreshFix(loadCarrier: Row): Promise<boolean> {
+  const truckId = optionalString(loadCarrier.truckId, 200)
+  if (!truckId || !TRUCK_LOCATION_TABLE_NAME) return false
+  const result = await dynamo.send(new GetItemCommand({ TableName: TRUCK_LOCATION_TABLE_NAME, Key: marshall({ truckId }) }))
+  const at = result.Item ? Date.parse(String(unmarshall(result.Item).locatedAt ?? '')) : NaN
+  return Number.isFinite(at) && Date.now() - at < OWN_ASSET_FRESH_FIX_MS
+}
+
+const routeDeps: RouteDeps = {
+  tables: { load: LOAD_TABLE_NAME },
+  getById,
+  getHistory: async (truckId, locatedAt) => {
+    const result = await dynamo.send(new GetItemCommand({
+      TableName: TRUCK_LOCATION_HISTORY_TABLE_NAME,
+      Key: marshall({ truckId, locatedAt }),
+    }))
+    return result.Item ? unmarshall(result.Item) : null
+  },
+  putHistory: async (item, nowEpochSec) => {
+    try {
+      await dynamo.send(new PutItemCommand({
+        TableName: TRUCK_LOCATION_HISTORY_TABLE_NAME,
+        Item: marshallRow(item),
+        ConditionExpression: 'attribute_not_exists(locatedAt) OR ttlEpoch < :now',
+        ExpressionAttributeValues: { ':now': { N: String(nowEpochSec) } },
+      }))
+    } catch (err) {
+      // A concurrent open already cached this lane; theirs is as good as ours.
+      if (!isConflict(err)) throw err
+    }
+  },
+  geocodeAddress: async (text) => {
+    const hit = await geocodeReply(text)
+    return hit ? { lat: hit.lat, lng: hit.lng } : null
+  },
+  fetch,
+  apiKey: GOOGLE_MAPS_API_KEY,
+  now: nowIso,
+}
+
+/** The route cache, warmed when a link goes out; the public pages read it and cannot compute. Never fatal. */
+async function warmRoute(loadId: string, caller: Caller): Promise<void> {
+  if (!TRUCK_LOCATION_HISTORY_TABLE_NAME) return
+  try {
+    await getLoadRoute(routeDeps, { loadId }, caller)
+  } catch (err) {
+    console.warn('[tms-tracking-actions] route cache warm failed', { loadId, err: String(err) })
+  }
+}
+
+const simDeps: SimDeps = {
+  isDevStack: () => process.env.BCAT_DEV_STACK === 'true',
+  now: nowIso,
+  getLoad: (loadId) => getById(LOAD_TABLE_NAME, loadId),
+  putPing: (input) => filePing(pingDeps(), input),
+  thread: threadDeps,
+}
+
+async function bumpProviderLink(token: string, n: number, lastAtIso: string): Promise<void> {
+  await dynamo.send(new UpdateItemCommand({
+    TableName: TRACKING_LINK_TABLE_NAME,
+    Key: marshall({ id: token }),
+    UpdateExpression: 'SET lastPingAt = :at, updatedAt = :at ADD pingCount :n',
+    ExpressionAttributeValues: { ':at': { S: lastAtIso }, ':n': { N: String(n) } },
+  }))
+}
+
+const providerDeps: ProviderActionDeps = {
+  tables: {
+    trackingLink: TRACKING_LINK_TABLE_NAME,
+    loadCarrier: LOAD_CARRIER_TABLE_NAME,
+    load: LOAD_TABLE_NAME,
+    shipment: SHIPMENT_TABLE_NAME,
+  },
+  getById,
+  queryIndex,
+  transact,
+  getSettings,
+  writeAudit: (entityType, entityId, action, caller, changes) =>
+    writeAudit(entityType as AuditEntityType, entityId, action as Action, caller, changes),
+  now: nowIso,
+  newToken: () => randomBytes(TOKEN_BYTES).toString('base64url'),
+  bumpLink: bumpProviderLink,
+  get ping() {
+    return pingDeps()
+  },
+  isDevStack: () => process.env.BCAT_DEV_STACK === 'true',
 }
 
 const checkCallDeps: CheckCallDeps = {
@@ -2473,6 +2629,20 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return emailDocuments(input, caller)
     case 'SAVE_DOCUMENT_SETTINGS':
       return saveSettings(input, caller, action, documentSettingsPatch(input))
+
+    // ── Step AO ────────────────────────────────────────────────────────────
+    case 'GET_LOAD_ROUTE':
+      return getLoadRoute(routeDeps, input, caller) as unknown as Promise<Row>
+    case 'START_PROVIDER_TRACKING':
+      return startProviderTracking(providerDeps, input, caller)
+    case 'STOP_PROVIDER_TRACKING':
+      return stopProviderTracking(providerDeps, input, caller)
+    case 'TRACKING_SIM_PINGS':
+      return simPings(simDeps, input, caller)
+    case 'TRACKING_SIM_TEXT':
+      return simText(simDeps, input, caller)
+    case 'TRACKING_SIM_PROVIDER':
+      return simProviderDelivery(providerDeps, input, caller)
 
     // ── Step P8/P9 ─────────────────────────────────────────────────────────
     case 'OPEN_SHIPMENT_THREAD':

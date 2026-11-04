@@ -141,6 +141,7 @@ async function runWalk(ctx, b) {
     await b.poll(() => has(tid('carrier-own-fleet')), 'the Carrier Information section', 90_000)
     await click(tid('carrier-own-fleet'))
     await b.poll(() => has(tid('f-carrier-driver1')), 'the own-fleet Driver 1 picker', 15_000)
+    await b.poll(() => b.evaluate(`document.querySelector('[data-testid="f-carrier-driver1"]').options.length > 1`), 'the driver roster to load', 30_000)
     const facts = await b.evaluate(`(() => {
       const picker = document.querySelector('[data-testid="f-carrier-driver1"]')
       const readOnly = (label) => document.querySelector('[aria-label=' + JSON.stringify(label) + ']')?.readOnly === true
@@ -170,10 +171,13 @@ async function runWalk(ctx, b) {
     await b.navigate(`/tms/shipments/${ctx.shipmentId}`)
     await b.poll(() => b.evaluate(`document.body.innerText.length > 200`), 'the shipment page', 90_000)
     await pause(800)
-    expect(await clickText('^\\\\s*Actions'), 'there is no Actions menu')
-    await pause(300)
+    // The Load actions menu is a Radix dropdown: it opens on a real pointer press, not el.click().
+    await b.poll(() => has('.tms-main button[aria-label="Load actions"]'), 'the Load actions button', 30_000)
+    await b.click({ selector: '.tms-main button[aria-label="Load actions"]', real: true })
+    await b.poll(() => has('[role="menu"]'), 'the Load actions menu', 10_000)
     expect(await clickText('Book Ivan Cartage'), 'there is no "Book Ivan Cartage (own fleet)" action')
     await b.poll(() => has(tid('assign-driver-select')), 'the Book Ivan Cartage dialog', 20_000)
+    await b.poll(() => b.evaluate(`document.querySelector('[data-testid="assign-driver-select"]').options.length > 1`), 'the driver roster to load', 30_000)
     const facts = await b.evaluate(`(() => {
       const select = document.querySelector('[data-testid="assign-driver-select"]')
       return { tag: select.tagName, options: select.options.length - 1, typed: !!document.querySelector('input[aria-label="Driver"]') }
@@ -247,14 +251,20 @@ async function main() {
     })
     ctx.customerId = String((cust.customer ?? cust).id)
     const day = today()
-    const bundle = await ctx.ship('CREATE_SHIPMENT', {
-      customerId: ctx.customerId,
-      load: { stops: [
+    // A buildable, submitted shipment: only then does the shipment page carry the Load actions menu.
+    let bundle = await ctx.ship('CREATE_SHIPMENT', { customerId: ctx.customerId })
+    ctx.shipmentId = bundle.shipment.id
+    bundle = await ctx.ship('SAVE_ORDER_FORM', {
+      shipmentId: ctx.shipmentId, expectedUpdatedAt: bundle.shipment.updatedAt,
+      order: { mode: 'FTL', equipmentType: 'Dry Van', references: [{ code: 'PO', label: 'Purchase order', value: `ZZAQ-${ts}`, level: 'ORDER', visibility: 'CUSTOMER' }] },
+      stops: [
         { type: 'pickup', name: 'ZZ AQ Shipper', city: 'Chicago, IL', address: { city: 'Chicago', state: 'IL', zip: '60601' }, appt: `${day}T13:00:00.000Z` },
         { type: 'delivery', name: 'ZZ AQ Receiver', city: 'Dallas, TX', address: { city: 'Dallas', state: 'TX', zip: '75201' }, appt: `${day}T21:00:00.000Z` },
-      ] },
+      ],
+      charges: [{ side: 'CUSTOMER', code: 'LINEHAUL', rateCents: 150000, count: 1 }],
     })
-    ctx.shipmentId = bundle.shipment.id
+    await ctx.ship('SUBMIT_ORDER', { shipmentId: ctx.shipmentId, expectedUpdatedAt: bundle.shipment.updatedAt })
+    bundle = await ctx.ship('GET_SHIPMENT_BUNDLE', { shipmentId: ctx.shipmentId })
     ctx.loadId = bundle.loads[0].id
     console.log('fixtures: 1 ZZ customer and 1 ZZ shipment (removed in cleanup); nothing is assigned to any driver')
 

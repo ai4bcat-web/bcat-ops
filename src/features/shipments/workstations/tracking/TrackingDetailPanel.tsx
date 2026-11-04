@@ -18,7 +18,6 @@ import {
 import type { CheckCallChannel, CheckCallMilestone, CheckCallPlan } from '@/lib/checkCallPlan'
 import type { CustomerRecord, ShipmentBundle, TmsSettings } from '@/types/tms'
 import type { ShipmentRow } from '@/features/shipments/shipmentViews'
-import { TrackingDetailMap } from './TrackingDetailMap'
 import { googleMapsExtras } from './googleMapsExtras'
 import { resolveCheckCallPlanWithSource } from './checkCallPlanSource'
 import { DriverCard } from './DriverCard'
@@ -33,7 +32,6 @@ interface TrackingDetailPanelProps {
   customers: CustomerRecord[]
   settings: TmsSettings | null
   mapsKey?: string
-  mapsMapId?: string
   onSavePlan: (loadId: string, plan: CheckCallPlan, expectedUpdatedAt?: string) => Promise<void>
   onRefresh: () => void | Promise<void>
 }
@@ -44,9 +42,9 @@ export function TrackingDetailPanel(props: TrackingDetailPanelProps) {
   return <DetailSession key={props.row.id} {...props} />
 }
 
-function DetailSession({ row, bundle, loading, customers, settings, mapsKey, mapsMapId, onSavePlan, onRefresh }: TrackingDetailPanelProps) {
+function DetailSession({ row, bundle, loading, customers, settings, mapsKey, onSavePlan, onRefresh }: TrackingDetailPanelProps) {
   const geo = useMemo(() => legGeometry(bundle, row.id), [bundle, row.id])
-  const { load, lastKnown, pingAt, deliveryStop, destination } = geo
+  const { load, lastKnown, pingAt, destination } = geo
   const carrier = geo.leg
   const customer = customers.find((c) => c.id === row.customerId) ?? null
   const drivers = useAppStore((s) => s.drivers)
@@ -108,7 +106,6 @@ function DetailSession({ row, bundle, loading, customers, settings, mapsKey, map
   const toggleMilestone = (milestone: CheckCallMilestone) => {
     setPlan((p) => ({ ...p, milestones: p.milestones.includes(milestone) ? p.milestones.filter((m) => m !== milestone) : [...p.milestones, milestone] }))
   }
-  const map = <TrackingDetailMap apiKey={mapsKey} mapId={mapsMapId} lastKnown={lastKnown} delivery={destination} deliveryName={deliveryStop?.name ?? row.destinationCity} />
   const reason = etaUnavailableReason(geo)
 
   return (
@@ -149,11 +146,10 @@ function DetailSession({ row, bundle, loading, customers, settings, mapsKey, map
         <TmsCard title="Order info timeline">
           <TmsTimeline items={statusTimeline} ariaLabel="Order status timeline" data-testid="tracking-status-timeline" />
         </TmsCard>
-        <TmsCard title="Map & ETA" flush>
+        <TmsCard title="ETA" flush>
           {mapsKey ? <APIProvider apiKey={mapsKey}>
-            {map}
             <GoogleEta key={`${pingAt}/${destination?.lat}/${destination?.lng}/${destination?.appt}`} from={lastKnown} stop={destination} pingAt={pingAt} now={now} estimate={estimate} reason={reason} />
-          </APIProvider> : <>{map}<EtaView eta={estimate} pingAt={pingAt} appt={destination?.appt} reason={reason} /></>}
+          </APIProvider> : <EtaView eta={estimate} pingAt={pingAt} appt={destination?.appt} reason={reason} />}
         </TmsCard>
         <DriverCard
           driver={carrier ? { name: carrier.driverName, phone: carrier.driverPhone } : null}

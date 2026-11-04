@@ -263,33 +263,6 @@
   font-size: 13px;
 }
 
-.tms-shell .tms-detail-map {
-  height: 220px;
-  width: 100%;
-}
-
-.tms-shell .tms-detail-map-note { margin: 4px 0 0; font-size: 11.5px; text-align: center; }
-
-.tms-shell .tms-detail-map-empty {
-  height: 220px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-  color: var(--tms-muted);
-  font-size: 13px;
-  text-align: center;
-  border-bottom: 1px solid var(--tms-border);
-}
-
-.tms-shell .tms-detail-map-pin {
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  border: 2px solid var(--tms-card);
-  box-shadow: var(--tms-shadow-pop);
-}
-
 .tms-shell .tms-tracking-detail-eta {
   display: flex;
   align-items: center;

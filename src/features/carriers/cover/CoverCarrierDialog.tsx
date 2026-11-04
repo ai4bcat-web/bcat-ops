@@ -10,7 +10,7 @@
  *
  * There is deliberately no "add to carriers" here: a carrier only enters our directory through MyCarrierPackets.
  */
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Search } from 'lucide-react'
 import { toast } from 'sonner'
 import { MoneyField } from '@/features/directory/components/MoneyField'
@@ -61,6 +61,8 @@ export function CoverCarrierDialog({ shipmentId, shipmentNumber, onClose, onCove
   const [acked, setAcked] = useState(false)
   const [inviteOpen, setInviteOpen] = useState(false)
   const [working, setWorking] = useState(false)
+  // A lookup asked for while the directory is still loading waits for it, instead of the click doing nothing.
+  const [queued, setQueued] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const card = preview?.card ?? null
@@ -87,6 +89,7 @@ export function CoverCarrierDialog({ shipmentId, shipmentNumber, onClose, onCove
   }
 
   const lookUp = () => {
+    setQueued(false)
     const parsed = parseSearch(query)
     setLooked(true)
     setNameMatches(null)
@@ -99,6 +102,13 @@ export function CoverCarrierDialog({ shipmentId, shipmentNumber, onClose, onCove
     const next: Ref = { ...(parsed.mcNumber ? { mcNumber: parsed.mcNumber } : {}), ...(parsed.dotNumber ? { dotNumber: parsed.dotNumber } : {}) }
     pick(findByNumber(carriers, parsed), next)
   }
+
+  useEffect(() => {
+    if (!queued || carriersLoading) return
+    void Promise.resolve().then(lookUp)
+    // lookUp reads the settled directory; it only needs to run once when loading ends.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queued, carriersLoading])
 
   /** Re-read the load right before the write: its updatedAt is the CAS token, and an invitation may have taken a while. */
   const cover = async (carrierId: string) => {
@@ -211,7 +221,7 @@ export function CoverCarrierDialog({ shipmentId, shipmentNumber, onClose, onCove
           <form
             className="flex flex-wrap items-center gap-2"
             role="search"
-            onSubmit={(e) => { e.preventDefault(); lookUp() }}
+            onSubmit={(e) => { e.preventDefault(); if (carriersLoading) setQueued(true); else lookUp() }}
           >
             <TmsInput
               aria-label="Carrier MC or DOT"
@@ -221,8 +231,8 @@ export function CoverCarrierDialog({ shipmentId, shipmentNumber, onClose, onCove
               style={{ minWidth: 280 }}
               autoFocus
             />
-            <TmsButton type="submit" variant="primary" disabled={!query.trim() || previewing || carriersLoading} data-testid="cover-lookup">
-              <Search size={14} /> {previewing ? 'Looking up…' : 'Look up'}
+            <TmsButton type="submit" variant="primary" disabled={!query.trim() || previewing || queued} data-testid="cover-lookup">
+              <Search size={14} /> {previewing || queued ? 'Looking up…' : 'Look up'}
             </TmsButton>
           </form>
 

@@ -13,6 +13,8 @@ import {
   threadKeyFor,
   threadReplyAddress,
 } from '../../../src/lib/shipmentThread'
+import { looksLikePlace, parseLocationShare, type ShareParse } from '../../../src/lib/locationShare'
+import type { PingInput } from '../../../src/lib/trackingPings'
 import { assertEnum, assertString, optionalString, type Caller } from '../_shared/actionInputs'
 import { resolveDriverSmsForLeg } from './driverPhone'
 import { isConflict, putItem, type Row, updateItemTx } from '../_shared/shipmentStore'
@@ -92,8 +94,14 @@ export interface ThreadDeps {
     attachments?: EmailAttachment[]
   }): Promise<SendEmailOutcome>
   sendSms(input: { to: string; body: string; label: Row }): Promise<SendSmsOutcome>
-  /** Geocode a free-text driver reply. Null means the text named no place. */
-  geocode(text: string): Promise<{ city: string; state: string; lat: number; lng: number } | null>
+  /** Geocode a free-text driver reply. Null means the text named no place. `radiusM` is the size of the guess. */
+  geocode(text: string): Promise<{ city: string; state: string; lat: number; lng: number; radiusM?: number } | null>
+  /** Step AO: City / state of a shared pin. Null when unknown; never throws. */
+  reverseGeocode?(lat: number, lng: number): Promise<{ city: string; state: string } | null>
+  /** Step AO: follow a maps short link to its final URL (allow-listed hosts only). Null when refused. */
+  resolveShareLink?(url: string): Promise<string | null>
+  /** Step AO: file a breadcrumb. Absent = no ping store on this deployment. */
+  putPing?(input: PingInput): Promise<unknown>
   /** Fetch a document's bytes out of storage (caller already validated the s3Key). */
   readDocumentBytes(s3Key: string): Promise<Uint8Array>
   now(): string
@@ -339,6 +347,62 @@ export async function sendShipmentMessage(deps: ThreadDeps, input: Row, caller: 
   return { ...message, ...patch }
 }
 
+interface TextPosition {
+  city: string | null
+  state: string | null
+  lat: number
+  lng: number
+  approx: boolean
+  /** Radius of the guess for an approximate fix; null for an exact pin. */
+  accuracyM: number | null
+  place: string | null
+}
+
+const MIN_APPROX_RADIUS_M = 2000
+const MAX_APPROX_RADIUS_M = 50_000
+const DEFAULT_APPROX_RADIUS_M = 5000
+
+/**
+ * Where a driver's text says they are. A shared pin (coordinates, Apple / Google Maps
+ * link, short link) is exact; a text that merely looks like a place goes to the geocoder
+ * and is approximate. Everything else ("Thanks") costs no geocoder call and yields no fix.
+ */
+async function positionOfText(deps: ThreadDeps, body: string): Promise<TextPosition | null> {
+  const share = parseLocationShare(body)
+  if (share) {
+    let exact: Exclude<ShareParse, { kind: 'SHORT_LINK' }> | null
+    if (share.kind === 'SHORT_LINK') {
+      let resolved: string | null = null
+      try {
+        resolved = deps.resolveShareLink ? await deps.resolveShareLink(share.url) : null
+      } catch (err) {
+        console.warn('[tms-tracking-actions] share link not resolved', { err: String(err) })
+      }
+      const parsed = resolved ? parseLocationShare(resolved) : null
+      exact = parsed && parsed.kind !== 'SHORT_LINK' ? parsed : null
+    } else {
+      exact = share
+    }
+    if (!exact) return null
+    let rev: { city: string; state: string } | null
+    try {
+      rev = deps.reverseGeocode ? await deps.reverseGeocode(exact.lat, exact.lng) : null
+    } catch {
+      rev = null
+    }
+    const city = rev?.city || null
+    const state = rev?.state || null
+    const place = city && state ? `${city}, ${state}` : city ?? state ?? `${exact.lat.toFixed(3)}, ${exact.lng.toFixed(3)}`
+    return { city, state, lat: exact.lat, lng: exact.lng, approx: false, accuracyM: null, place }
+  }
+  if (!looksLikePlace(body)) return null
+  const geo = await deps.geocode(body)
+  if (!geo) return null
+  const radius = Math.min(MAX_APPROX_RADIUS_M, Math.max(MIN_APPROX_RADIUS_M, geo.radiusM ?? DEFAULT_APPROX_RADIUS_M))
+  const place = geo.city && geo.state ? `${geo.city}, ${geo.state}` : geo.city || geo.state || null
+  return { city: geo.city, state: geo.state, lat: geo.lat, lng: geo.lng, approx: true, accuracyM: Math.round(radius), place }
+}
+
 /**
  * Ingest an inbound message from e-mail or SMS.
  *
@@ -431,7 +495,9 @@ export async function ingestShipmentMessage(deps: ThreadDeps, input: Row, caller
   const loadPatches: TransactWriteItem[] = []
   const firstLoad = loads[0]
   const body = String(input.body ?? '')
-  const geo = body ? await deps.geocode(body) : null
+  const fix = body ? await positionOfText(deps, body) : null
+  const geo = fix
+
 
   if (firstLoad) {
     if (geo) {
@@ -502,6 +568,27 @@ export async function ingestShipmentMessage(deps: ThreadDeps, input: Row, caller
   }
 
   await deps.transact([putItem(deps.tables.message, inbound), ...clearAwaiting, ...checkCalls, ...loadPatches])
+
+  // Step AO: one breadcrumb for the fix, after the message and check call are safe. A
+  // failed ping write never undoes them. Ids only in the log, never a coordinate.
+  if (fix && firstLoad && deps.putPing) {
+    try {
+      await deps.putPing({
+        loadId: String(firstLoad.id),
+        at: now,
+        lat: fix.lat,
+        lng: fix.lng,
+        source: fix.approx ? 'sms-geocode' : 'sms-share',
+        accuracyM: fix.accuracyM,
+        approx: fix.approx,
+        place: fix.place,
+        refId: messageId,
+        nowIso: now,
+      })
+    } catch (err) {
+      console.warn('[tms-tracking-actions] ping write failed', { loadId: String(firstLoad.id), err: String(err) })
+    }
+  }
 
   return { routed: true, message: inbound }
 }

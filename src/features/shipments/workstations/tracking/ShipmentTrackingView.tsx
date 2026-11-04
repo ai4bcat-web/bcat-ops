@@ -1,7 +1,7 @@
 /**
  * Everything a tracker needs about one load on one screen, dense enough to sit above the
- * fold at 1440 × 900: the summary strip, an SMS pane (driver) beside an e-mail pane
- * (dispatcher/carrier), and the last five check calls.
+ * fold at 1440 × 900: the summary strip (with the inline tracking-prefs row), the route map,
+ * an SMS pane (driver) beside an e-mail pane (dispatcher/carrier), and the last five check calls.
  *
  * The drawer on the Tracking grid and the shipment page's Tracking tab both mount this, so
  * the two can never drift. It reads its own thread, check calls, links and truck phones.
@@ -26,6 +26,8 @@ import type { ShipmentActions } from '../../useShipmentActions'
 import type { ShipmentRow } from '../../shipmentViews'
 import { RecentCheckCalls } from './RecentCheckCalls'
 import { TrackingConversation } from './TrackingConversation'
+import { TrackingMapPanel } from './map/TrackingMapPanel'
+import { TrackingPrefsRow } from './TrackingPrefsRow'
 import { TrackingSummaryStrip } from './TrackingSummaryStrip'
 import { summaryOf } from './trackingSummary'
 
@@ -82,7 +84,16 @@ export function ShipmentTrackingView({ bundle, customer, catalog = [], actions, 
     loadId: load?.id,
     shipmentId: shipment.id,
     truckId: loadCarrier?.truckId ?? null,
-    load: { pickupAppt: load?.pickupAppt, deliveredAt: load?.deliveredAt },
+    load: {
+      pickupAppt: load?.pickupAppt,
+      deliveredAt: load?.deliveredAt,
+      lastKnownAt: load?.lastKnownAt,
+      lastKnownLat: load?.lastKnownLat,
+      lastKnownLng: load?.lastKnownLng,
+      lastKnownCity: load?.lastKnownCity,
+      lastKnownState: load?.lastKnownState,
+      lastKnownSource: load?.lastKnownSource,
+    },
     loadCarrier: { dispatchedAt: loadCarrier?.dispatchedAt },
   })
 
@@ -122,6 +133,12 @@ export function ShipmentTrackingView({ bundle, customer, catalog = [], actions, 
         summary={summary}
         busy={actions.busy}
         onSetNextCheck={(iso) => { void actions.tracking.setNextCheckCall(iso).catch(() => { /* reported */ }) }}
+        prefs={<TrackingPrefsRow key={JSON.stringify(shipment.trackingPrefs ?? null)} shipment={shipment} customer={customer} onSaved={() => actions.reload()} />}
+      />
+
+      <TrackingMapPanel
+        bundle={bundle} tracking={tracking} summary={summary} links={tracking.links}
+        onProviderChanged={() => { void tracking.refresh() }}
       />
 
       <div className="tms-tracking-panes" data-testid="tracking-panes">

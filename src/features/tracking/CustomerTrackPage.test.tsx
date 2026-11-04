@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
+import '@testing-library/jest-dom/vitest'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import type { CustomerTrackingView } from '@/types/tms'
 
@@ -16,8 +17,6 @@ vi.mock('@/lib/trackingClient', () => ({
   fetchCarrierTracking: vi.fn(),
   postTrackingPing: vi.fn(),
 }))
-// The map projects through d3-geo and an atlas fetch; the pin itself is not under test.
-vi.mock('@/features/dashboard/FleetMiniMap', () => ({ FleetMiniMap: () => <div data-testid="mini-map" /> }))
 
 const { CustomerTrackPage } = await import('./CustomerTrackPage')
 
@@ -59,7 +58,7 @@ describe('CustomerTrackPage', () => {
     expect(screen.getByText('Dallas, TX')).toBeTruthy()
     expect(screen.getByText('Dana Reed')).toBeTruthy()
     expect(container.textContent).toContain('PO 99-12')
-    expect(screen.getByTestId('mini-map')).toBeTruthy()
+    expect(screen.getByTestId('tracking-map')).toBeTruthy()
   })
 
   it('prints nothing about the carrier when the link hides it', async () => {
@@ -81,7 +80,44 @@ describe('CustomerTrackPage', () => {
     fetchCustomerTracking.mockResolvedValue(noPosition)
     renderPage()
     await waitFor(() => expect(screen.getByText('Shipment S-1001')).toBeTruthy())
-    expect(screen.queryByTestId('mini-map')).toBeNull()
+    expect(screen.queryByTestId('tracking-map')).toBeNull()
+  })
+
+  it('draws the thinned trail on the map in fallback mode, with the position as the marker', async () => {
+    fetchCustomerTracking.mockResolvedValue({
+      ...VIEW,
+      map: {
+        stops: [{ type: 'pickup', lat: 41.5, lng: -88.1 }, { type: 'delivery', lat: 32.8, lng: -96.8 }],
+        route: null,
+        trail: [
+          { lat: 41.5, lng: -88.1, at: '2026-10-21T08:00:00.000Z' },
+          { lat: 39.0, lng: -91.0, at: '2026-10-21T10:00:00.000Z' },
+          { lat: 38.4, lng: -92.1, at: '2026-10-21T12:00:00.000Z' },
+        ],
+      },
+    })
+    renderPage()
+    const map = await screen.findByTestId('tracking-map')
+    expect(map).toHaveAttribute('data-mode', 'fallback')
+    // The marker's own fix is the last trail point, so the trail is three dots, not four.
+    expect(map).toHaveAttribute('data-breadcrumbs', '3')
+    expect(map).toHaveAttribute('data-current-source', '')
+  })
+
+  it('still shows the marker, with no trail, when the view carries no map block', async () => {
+    renderPage()
+    const map = await screen.findByTestId('tracking-map')
+    expect(map).toHaveAttribute('data-breadcrumbs', '1')
+  })
+
+  it('never prints a source, an accuracy or a speed on the map', async () => {
+    fetchCustomerTracking.mockResolvedValue({
+      ...VIEW,
+      map: { stops: [], route: null, trail: [{ lat: 41.5, lng: -88.1, at: '2026-10-21T08:00:00.000Z' }] },
+    })
+    const { container } = renderPage()
+    await screen.findByTestId('tracking-map')
+    expect(container.innerHTML).not.toMatch(/Driver phone|Motive|ELD|accuracy|speed|mph|sms-share|provider:/i)
   })
 
   it('reads like the truck page when the link is dead', async () => {

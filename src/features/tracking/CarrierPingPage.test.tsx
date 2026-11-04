@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import type { CarrierTrackingView } from '@/types/tms'
 
@@ -31,20 +31,39 @@ const VIEW: CarrierTrackingView = {
   ],
   nextStop: { id: 'st-2', type: 'delivery', sequence: 2, name: 'Consignee', city: 'Dallas', state: 'TX', appt: '2026-10-22T09:00:00.000Z', apptEnd: null, arrivedAt: null, departedAt: null, references: [] },
   pings: [],
+  share: {
+    everyMin: 5,
+    consentRequired: true,
+    consentVersion: 'ao-1',
+    consentText: 'BCAT Logistics will receive this phone\'s location while this page is open.',
+    active: true,
+    lastPingAt: null,
+    pingCount: 0,
+  },
   contactPhone: '(224) 875-6477',
   generatedAt: '2026-10-21T12:05:00.000Z',
 }
 
-/** Stands in for the phone: either a fix or the error the browser would raise. */
-function geolocation(outcome: { coords?: { latitude: number; longitude: number; accuracy: number }; code?: number }) {
+/** Stands in for the phone: `emit` is the browser delivering a position to the page's watch. */
+const watchPosition = vi.fn()
+const clearWatch = vi.fn()
+const getCurrentPosition = vi.fn()
+let deliver: PositionCallback | null = null
+let fail: PositionErrorCallback | null = null
+
+function phone() {
+  deliver = null
+  fail = null
+  watchPosition.mockImplementation((ok: PositionCallback, bad: PositionErrorCallback) => { deliver = ok; fail = bad; return 7 })
   Object.defineProperty(navigator, 'geolocation', {
     configurable: true,
-    value: {
-      getCurrentPosition: (ok: PositionCallback, fail: PositionErrorCallback) => {
-        if (outcome.coords) ok({ coords: outcome.coords, timestamp: Date.now() } as GeolocationPosition)
-        else fail({ code: outcome.code, PERMISSION_DENIED: 1, POSITION_UNAVAILABLE: 2, TIMEOUT: 3, message: '' } as GeolocationPositionError)
-      },
-    },
+    value: { watchPosition, clearWatch, getCurrentPosition },
+  })
+}
+
+async function emit(latitude: number, longitude: number, accuracy = 12.4) {
+  await act(async () => {
+    deliver?.({ coords: { latitude, longitude, accuracy, speed: null, heading: null }, timestamp: Date.now() } as unknown as GeolocationPosition)
   })
 }
 
@@ -56,48 +75,128 @@ function renderPage() {
   )
 }
 
-const shareButton = () => screen.getByRole('button', { name: /Share my location/ })
+const startButton = () => screen.getByRole('button', { name: /Start sharing/ }) as HTMLButtonElement
+const agree = () => fireEvent.click(screen.getByRole('checkbox', { name: /I agree/ }))
+const loaded = () => waitFor(() => expect(screen.getByText('Load S-1001-1')).toBeTruthy())
 
 beforeEach(() => {
   vi.clearAllMocks()
+  vi.useRealTimers()
   fetchCarrierTracking.mockResolvedValue(VIEW)
-  postTrackingPing.mockResolvedValue({ ok: true, at: '2026-10-21T12:10:00.000Z' })
-  geolocation({ coords: { latitude: 38.4, longitude: -92.1, accuracy: 12.4 } })
+  postTrackingPing.mockResolvedValue({ ok: true, at: '2026-10-21T12:10:00.000Z', nextInMin: 5 })
+  phone()
 })
 
+afterEach(() => { vi.useRealTimers() })
+
+/** Loads the page on real timers, then hands the clock over so the cadence can be driven. */
+async function startSharing() {
+  renderPage()
+  await loaded()
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] })
+  agree()
+  fireEvent.click(startButton())
+}
+
 describe('CarrierPingPage', () => {
-  it('sends the phone fix and confirms it landed', async () => {
+  it('asks for nothing from the phone until the driver agrees and taps Start sharing', async () => {
     renderPage()
-    await waitFor(() => expect(screen.getByText('Load S-1001-1')).toBeTruthy())
-    expect(screen.getByText('Dallas, TX')).toBeTruthy()
+    await loaded()
+    expect(screen.getByTestId('consent-text').textContent).toContain('will receive this phone')
+    expect(startButton().disabled).toBe(true)
+    expect(watchPosition).not.toHaveBeenCalled()
+    expect(getCurrentPosition).not.toHaveBeenCalled()
 
-    fireEvent.click(shareButton())
-    await waitFor(() => expect(postTrackingPing).toHaveBeenCalled())
-    expect(postTrackingPing.mock.calls[0][1]).toEqual({ lat: 38.4, lng: -92.1, accuracyM: 12 })
-    await waitFor(() => expect(screen.getByText(/the office has your location/)).toBeTruthy())
+    agree()
+    expect(startButton().disabled).toBe(false)
+    expect(watchPosition).not.toHaveBeenCalled()
+    fireEvent.click(startButton())
+    expect(watchPosition).toHaveBeenCalledTimes(1)
   })
 
-  it('explains a blocked permission instead of failing silently', async () => {
-    geolocation({ code: 1 })
-    renderPage()
-    await waitFor(() => expect(screen.getByText('Load S-1001-1')).toBeTruthy())
-    fireEvent.click(shareButton())
-    await waitFor(() => expect(screen.getByText(/Location is blocked for this page/)).toBeTruthy())
+  it('posts the first fix at once with consent, then no more often than the cadence', async () => {
+    await startSharing()
+    await emit(38.4, -92.1)
+    expect(postTrackingPing).toHaveBeenCalledTimes(1)
+    expect(postTrackingPing.mock.calls[0][1]).toMatchObject({ lat: 38.4, lng: -92.1, accuracyM: 12, trigger: 'tap', consent: true })
+
+    // A minute later the phone reports again a few metres on: too soon, nothing goes out.
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000) })
+    await emit(38.4005, -92.1)
+    expect(postTrackingPing).toHaveBeenCalledTimes(1)
+
+    // Five minutes after the first post a quiet phone's latest fix goes out on the timer.
+    await act(async () => { await vi.advanceTimersByTimeAsync(4 * 60_000) })
+    expect(postTrackingPing).toHaveBeenCalledTimes(2)
+    expect(postTrackingPing.mock.calls[1][1]).toMatchObject({ trigger: 'watch' })
+  })
+
+  it('posts early when the phone has moved more than a kilometre', async () => {
+    await startSharing()
+    await emit(38.4, -92.1)
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000) })
+    await emit(38.45, -92.1)
+    expect(postTrackingPing).toHaveBeenCalledTimes(2)
+  })
+
+  it('Stop sharing clears the watch and nothing is posted afterwards', async () => {
+    await startSharing()
+    await emit(38.4, -92.1)
+    fireEvent.click(screen.getByRole('button', { name: /Stop sharing/ }))
+    expect(clearWatch).toHaveBeenCalledWith(7)
+    await act(async () => { await vi.advanceTimersByTimeAsync(20 * 60_000) })
+    expect(postTrackingPing).toHaveBeenCalledTimes(1)
+    expect(startButton()).toBeTruthy()
+  })
+
+  it('a 410 clears the watch and shows the delivered state', async () => {
+    postTrackingPing.mockRejectedValueOnce(new TrackingError(410, 'Delivery is complete — sharing has stopped. Thank you.'))
+    await startSharing()
+    await emit(38.4, -92.1)
+    expect(clearWatch).toHaveBeenCalledWith(7)
+    expect(screen.getByText(/Delivery complete — sharing has stopped/)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /Start sharing|Stop sharing/ })).toBeNull()
+  })
+
+  it('treats a 429 as already in, not as an error', async () => {
+    postTrackingPing.mockRejectedValueOnce(new TrackingError(429, 'Thanks — your location is already in. Tap again in a minute.'))
+    await startSharing()
+    await emit(38.4, -92.1)
+    expect(screen.queryByText(/already in/)).toBeNull()
+    expect(screen.getByText(/Sharing ·/)).toBeTruthy()
+  })
+
+  it('explains a blocked permission and stops instead of failing silently', async () => {
+    await startSharing()
+    await act(async () => { fail?.({ code: 1, PERMISSION_DENIED: 1, POSITION_UNAVAILABLE: 2, TIMEOUT: 3, message: '' } as GeolocationPositionError) })
+    expect(screen.getByText(/Location is blocked for this page/)).toBeTruthy()
     expect(postTrackingPing).not.toHaveBeenCalled()
+    expect(clearWatch).toHaveBeenCalledWith(7)
   })
 
-  it('passes the server own wording through for 409 and 429', async () => {
-    for (const [status, message] of [
-      [409, 'Location too imprecise — turn on precise location'],
-      [429, 'Thanks — your location is already in. Tap again in a minute.'],
-    ] as const) {
-      postTrackingPing.mockRejectedValueOnce(new TrackingError(status, message))
-      const { unmount } = renderPage()
-      await waitFor(() => expect(screen.getByText('Load S-1001-1')).toBeTruthy())
-      fireEvent.click(shareButton())
-      await waitFor(() => expect(screen.getByText(message)).toBeTruthy())
-      unmount()
-    }
+  it('shows the server wording for a coarse fix and keeps sharing', async () => {
+    postTrackingPing.mockRejectedValueOnce(new TrackingError(409, 'Location too imprecise — turn on precise location'))
+    await startSharing()
+    await emit(38.4, -92.1, 9000)
+    expect(screen.getByText('Location too imprecise — turn on precise location')).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Stop sharing/ })).toBeTruthy()
+  })
+
+  it('needs no checkbox once the server has the driver\'s consent, and still waits for the tap', async () => {
+    fetchCarrierTracking.mockResolvedValue({ ...VIEW, share: { ...VIEW.share!, consentRequired: false } })
+    renderPage()
+    await loaded()
+    expect(screen.queryByRole('checkbox', { name: /I agree/ })).toBeNull()
+    expect(watchPosition).not.toHaveBeenCalled()
+    expect(startButton().disabled).toBe(false)
+  })
+
+  it('shows the delivered state for a load that is already closed', async () => {
+    fetchCarrierTracking.mockResolvedValue({ ...VIEW, share: { ...VIEW.share!, active: false } })
+    renderPage()
+    await loaded()
+    expect(screen.getByText(/Delivery complete/)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /Start sharing/ })).toBeNull()
   })
 
   it('shows the dead-link wording and no button at all', async () => {

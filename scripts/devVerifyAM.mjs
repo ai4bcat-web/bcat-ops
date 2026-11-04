@@ -267,6 +267,7 @@ async function runWalk(ctx, b) {
     await click(tid('cover-row'))
     await b.poll(() => has(tid('cover-lookup')), 'the Cover dialog', 15_000)
     await typeInto('Carrier MC or DOT', ctx.activeCarrier.mc)
+    await b.poll(() => b.evaluate(`document.querySelector('[data-testid="cover-lookup"]')?.disabled === false`), 'the Look up button to enable', 60_000)
     await click(tid('cover-lookup'))
     await b.poll(() => has(tid('cover-directory')), 'the directory result', 30_000)
     await pause(400)

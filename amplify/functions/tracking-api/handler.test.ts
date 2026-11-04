@@ -1,5 +1,6 @@
 // The handler reads its table names from process.env at module scope, so the import
 // has to happen after beforeAll sets them — a genuine module-loading boundary.
+import { createHash } from 'node:crypto'
 import { vi, describe, it, expect, beforeAll, beforeEach, afterEach } from 'vitest'
 import type * as HandlerModule from './handler'
 import type * as ApiModule from './api'
@@ -107,6 +108,7 @@ interface Cmd {
   UpdateExpression?: string
   ConditionExpression?: string
   ExpressionAttributeValues?: Record<string, unknown>
+  ExpressionAttributeNames?: Record<string, string>
 }
 
 const sent = () => mockSend.mock.calls.map(([c]) => c as Cmd)
@@ -164,6 +166,9 @@ function route(by: {
   document?: unknown
   checkCalls?: unknown[]
   positions?: unknown[]
+  /** Step AO: the load's own breadcrumbs (history rows keyed `load:<id>`) and the cached route row. */
+  loadPings?: unknown[]
+  routeRow?: unknown
   division?: unknown
   quotes?: unknown[]
   settings?: unknown
@@ -187,6 +192,7 @@ function route(by: {
       if (cmd.TableName === TABLES.loadCarrier) return { Item: by.carrier ?? undefined }
       if (cmd.TableName === TABLES.document) return { Item: by.document ?? undefined }
       if (cmd.TableName === TABLES.integration) return { Item: by.integration ?? undefined }
+      if (cmd.TableName === TABLES.history) return { Item: by.routeRow ?? undefined }
       return { Item: undefined }
     }
     if (cmd.__cmd === 'Query') {
@@ -194,7 +200,10 @@ function route(by: {
       if (cmd.TableName === TABLES.load) return { Items: by.loads ?? [] }
       if (cmd.TableName === TABLES.loadCarrier) return { Items: by.carriers ?? [] }
       if (cmd.TableName === TABLES.checkCall) return { Items: by.checkCalls ?? [] }
-      if (cmd.TableName === TABLES.history) return { Items: by.positions ?? [] }
+      if (cmd.TableName === TABLES.history) {
+        const key = String(cmd.ExpressionAttributeValues?.[':k'] ?? '')
+        return { Items: (key.startsWith('load:') ? by.loadPings : by.positions) ?? [] }
+      }
       if (cmd.TableName === TABLES.document) return { Items: by.documents ?? [] }
       if (cmd.TableName === TABLES.quote) return { Items: by.quotes ?? [] }
       if (cmd.TableName === TABLES.shipment) return { Items: by.shipments ?? [] }
@@ -340,9 +349,13 @@ describe('GET /l/<token>', () => {
 })
 
 describe('POST /l/<token>/ping', () => {
-  const fix = { lat: 38.4, lng: -92.1, accuracyM: 12 }
+  const fix = { lat: 38.4, lng: -92.1, accuracyM: 12, consent: true }
+  const consented = (over: Record<string, unknown> = {}) => carrierLink({ consentAt: '2026-10-21T10:00:00.000Z', ...over })
+  const ago = (ms: number) => new Date(Date.now() - ms).toISOString()
+  const puts = (table: string) => sent().filter((c) => c.__cmd === 'Put' && c.TableName === table)
+  const linkUpdate = () => sent().find((c) => c.__cmd === 'Update' && c.TableName === TABLES.link)
 
-  it('writes one check call and the link counters, and stores the ETA on the carrier assignment', async () => {
+  it('files the breadcrumb, the first check call and the consent, and stores the ETA on the assignment', async () => {
     route({
       link: carrierLink(),
       load: LOAD,
@@ -351,36 +364,96 @@ describe('POST /l/<token>/ping', () => {
     const res = await post(`/l/${TOKEN}/ping`, fix)
     expect(res.statusCode).toBe(200)
     const body = json(res)
-    expect(body.ok).toBe(true)
+    expect(body).toMatchObject({ ok: true, nextInMin: 5 })
     expect(body.eta).toMatchObject({ at: expect.stringMatching(/^\d{4}-/), miles: expect.any(Number), driveMinutes: expect.any(Number) })
 
-    const puts = sent().filter((c) => c.__cmd === 'Put')
-    expect(puts).toHaveLength(1)
-    expect(puts[0].TableName).toBe(TABLES.checkCall)
-    expect(puts[0].Item).toMatchObject({
-      loadId: 'ld-1',
-      shipmentId: 'shp-1',
-      loadCarrierId: 'lc-1',
-      type: 'TRACKING_PING',
-      source: 'LINK',
-      lat: 38.4,
-      lng: -92.1,
-      accuracyM: 12,
-      createdBy: `link:${TOKEN.slice(0, 8)}`,
+    const crumb = puts(TABLES.history)
+    expect(crumb).toHaveLength(1)
+    expect(crumb[0].ConditionExpression).toBe('attribute_not_exists(locatedAt)')
+    expect(crumb[0].Item).toMatchObject({ truckId: 'load:ld-1', loadId: 'ld-1', lat: 38.4, lon: -92.1, source: 'link', accuracyM: 12 })
+    const ttl = (crumb[0].Item?.ttlEpoch as number) - Date.now() / 1000
+    expect(ttl).toBeGreaterThan(89 * 86_400)
+    expect(ttl).toBeLessThan(91 * 86_400)
+
+    const calls = puts(TABLES.checkCall)
+    expect(calls).toHaveLength(1)
+    expect(calls[0].Item).toMatchObject({
+      loadId: 'ld-1', shipmentId: 'shp-1', loadCarrierId: 'lc-1', type: 'TRACKING_PING', source: 'LINK',
+      lat: 38.4, lng: -92.1, accuracyM: 12, note: 'Driver consented (ao-1)', createdBy: `link:${TOKEN.slice(0, 8)}`,
     })
 
-    const updates = sent().filter((c) => c.__cmd === 'Update')
-    const linkUpdate = updates.find((c) => c.TableName === TABLES.link)
-    expect(linkUpdate?.TableName).toBe(TABLES.link)
-    expect(linkUpdate?.UpdateExpression).toContain('ADD pingCount :one')
-    const carrierUpdate = updates.find((c) => c.TableName === TABLES.loadCarrier)
+    expect(linkUpdate()?.UpdateExpression).toContain('ADD pingCount :one')
+    // Set once: a later consenting post cannot move the moment the driver agreed.
+    expect(linkUpdate()?.UpdateExpression).toContain('consentAt = if_not_exists(consentAt, :now)')
+    const carrierUpdate = sent().find((c) => c.__cmd === 'Update' && c.TableName === TABLES.loadCarrier)
     expect(carrierUpdate?.UpdateExpression).toContain('deliveryEtaAt')
     // The public role has no Load write; nothing here may try one.
     expect(writes().some((c) => c.TableName === TABLES.load)).toBe(false)
   })
 
+  it('403s a link nobody has agreed to, and writes nothing — not even the counter', async () => {
+    route({ link: carrierLink(), load: LOAD })
+    const res = await post(`/l/${TOKEN}/ping`, { lat: 38.4, lng: -92.1, accuracyM: 12 })
+    expect(res.statusCode).toBe(403)
+    expect(json(res).error).toBe('consent')
+    expect(writes()).toHaveLength(0)
+  })
+
+  it('does not ask again once consent is on file, and does not touch the recorded moment', async () => {
+    route({ link: consented(), load: LOAD })
+    const res = await post(`/l/${TOKEN}/ping`, { lat: 38.4, lng: -92.1, accuracyM: 12 })
+    expect(res.statusCode).toBe(200)
+    expect(linkUpdate()?.UpdateExpression).not.toContain('consentAt')
+    expect(puts(TABLES.checkCall)[0]?.Item).not.toHaveProperty('note')
+  })
+
+  it('files every fix as a breadcrumb but logs the check-call list only once per half hour', async () => {
+    route({ link: consented({ lastPingAt: ago(61_000), lastLogPingAt: ago(61_000), pingCount: 3 }), load: LOAD })
+    expect((await post(`/l/${TOKEN}/ping`, fix)).statusCode).toBe(200)
+    expect(puts(TABLES.history)).toHaveLength(1)
+    expect(puts(TABLES.checkCall)).toHaveLength(0)
+    expect(linkUpdate()?.UpdateExpression).not.toContain('lastLogPingAt')
+
+    mockSend.mockReset()
+    route({ link: consented({ lastPingAt: ago(61_000), lastLogPingAt: ago(31 * 60_000), pingCount: 3 }), load: LOAD })
+    expect((await post(`/l/${TOKEN}/ping`, fix)).statusCode).toBe(200)
+    expect(puts(TABLES.checkCall)).toHaveLength(1)
+    expect(linkUpdate()?.UpdateExpression).toContain('lastLogPingAt')
+  })
+
+  it('files the breadcrumb under the device fix time when its clock is believable, else under the server clock', async () => {
+    const near = new Date(Date.now() - 90_000).toISOString()
+    route({ link: consented(), load: LOAD })
+    await post(`/l/${TOKEN}/ping`, { ...fix, fixAt: near })
+    expect(puts(TABLES.history)[0].Item?.locatedAt).toBe(near)
+
+    mockSend.mockReset()
+    route({ link: consented(), load: LOAD })
+    const before = Date.now()
+    await post(`/l/${TOKEN}/ping`, { ...fix, fixAt: '2020-01-01T00:00:00.000Z' })
+    expect(Date.parse(String(puts(TABLES.history)[0].Item?.locatedAt))).toBeGreaterThanOrEqual(before)
+  })
+
+  it('answers every ping with a fresh ETA but rewrites the assignment at most every ten minutes', async () => {
+    route({ link: consented(), load: LOAD, carrier: { id: 'lc-1', status: 'ACTIVE', updatedAt: ago(60_000) } })
+    const res = await post(`/l/${TOKEN}/ping`, fix)
+    expect(json(res).eta).toMatchObject({ at: expect.any(String) })
+    expect(sent().some((c) => c.__cmd === 'Update' && c.TableName === TABLES.loadCarrier)).toBe(false)
+  })
+
+  it('410s a delivered load and writes nothing', async () => {
+    for (const load of [{ ...LOAD, status: 'DELIVERED' }, { ...LOAD, deliveredAt: '2026-10-22T09:30:00.000Z' }]) {
+      mockSend.mockReset()
+      route({ link: consented(), load })
+      const res = await post(`/l/${TOKEN}/ping`, fix)
+      expect(res.statusCode).toBe(410)
+      expect(json(res)).toMatchObject({ done: true, error: 'Delivery is complete — sharing has stopped. Thank you.' })
+      expect(writes()).toHaveLength(0)
+    }
+  })
+
   it('409s a fix too coarse to mean anything, before writing', async () => {
-    route({ link: carrierLink() })
+    route({ link: consented(), load: LOAD })
     const res = await post(`/l/${TOKEN}/ping`, { ...fix, accuracyM: 5001 })
     expect(res.statusCode).toBe(409)
     expect(json(res).error).toBe('Location too imprecise — turn on precise location')
@@ -388,27 +461,30 @@ describe('POST /l/<token>/ping', () => {
   })
 
   it('400s coordinates outside the globe', async () => {
-    route({ link: carrierLink() })
+    route({ link: consented(), load: LOAD })
     expect((await post(`/l/${TOKEN}/ping`, { lat: 91, lng: 0, accuracyM: 5 })).statusCode).toBe(400)
     expect((await post(`/l/${TOKEN}/ping`, { lat: 0, lng: -181, accuracyM: 5 })).statusCode).toBe(400)
     expect((await post(`/l/${TOKEN}/ping`, { lat: 'north', lng: 0 })).statusCode).toBe(400)
     expect(writes()).toHaveLength(0)
   })
 
-  it('429s a second tap inside a minute, and writes nothing', async () => {
-    route({ link: carrierLink({ lastPingAt: new Date(Date.now() - 30_000).toISOString() }) })
+  it('429s a second post inside a minute, and writes nothing', async () => {
+    route({ link: consented({ lastPingAt: ago(30_000) }), load: LOAD })
     const res = await post(`/l/${TOKEN}/ping`, fix)
     expect(res.statusCode).toBe(429)
     expect(writes()).toHaveLength(0)
   })
 
-  it('accepts the next tap once the minute is up', async () => {
-    route({ link: carrierLink({ lastPingAt: new Date(Date.now() - 90_000).toISOString() }) })
+  it('accepts the next post once the minute is up', async () => {
+    route({ link: consented({ lastPingAt: ago(90_000) }), load: LOAD })
     expect((await post(`/l/${TOKEN}/ping`, fix)).statusCode).toBe(200)
   })
 
-  it('429s a link that has spent its ping budget', async () => {
-    route({ link: carrierLink({ pingCount: 500 }) })
+  it('takes the 1,499th ping and refuses the 1,500th', async () => {
+    route({ link: consented({ pingCount: 1499 }), load: LOAD })
+    expect((await post(`/l/${TOKEN}/ping`, fix)).statusCode).toBe(200)
+    mockSend.mockReset()
+    route({ link: consented({ pingCount: 1500 }), load: LOAD })
     const res = await post(`/l/${TOKEN}/ping`, fix)
     expect(res.statusCode).toBe(429)
     expect(writes()).toHaveLength(0)
@@ -421,15 +497,116 @@ describe('POST /l/<token>/ping', () => {
     expect(writes()).toHaveLength(0)
   })
 
-  it('leaves no check call behind when the counter guard refuses the tap', async () => {
+  it('leaves no breadcrumb or check call behind when the counter guard refuses the post', async () => {
     mockSend.mockImplementation(async (cmd: Cmd) => {
-      if (cmd.__cmd === 'Get' && cmd.TableName === TABLES.link) return { Item: carrierLink() }
+      if (cmd.__cmd === 'Get' && cmd.TableName === TABLES.link) return { Item: consented() }
       if (cmd.__cmd === 'Update') throw new ConditionalCheckFailedException()
       return {}
     })
     const res = await post(`/l/${TOKEN}/ping`, fix)
     expect(res.statusCode).toBe(429)
     expect(sent().some((c) => c.__cmd === 'Put')).toBe(false)
+  })
+
+  it('treats a retry of the same fix as already filed', async () => {
+    mockSend.mockImplementation(async (cmd: Cmd) => {
+      if (cmd.__cmd === 'Get' && cmd.TableName === TABLES.link) return { Item: consented() }
+      if (cmd.__cmd === 'Get' && cmd.TableName === TABLES.load) return { Item: LOAD }
+      if (cmd.__cmd === 'Put' && cmd.TableName === TABLES.history) throw new ConditionalCheckFailedException()
+      return {}
+    })
+    expect((await post(`/l/${TOKEN}/ping`, fix)).statusCode).toBe(200)
+  })
+})
+
+describe('GET /l/<token> share', () => {
+  it('asks for consent until the link has one, then stops asking', async () => {
+    route({ link: carrierLink(), load: LOAD, division: { key: 'BCAT_LOGISTICS', name: 'BCAT Logistics', active: true } })
+    const fresh = json(await get(`/l/${TOKEN}`)).share as Record<string, unknown>
+    expect(fresh).toMatchObject({ everyMin: 5, consentRequired: true, consentVersion: 'ao-1', active: true, pingCount: 0, lastPingAt: null })
+    expect(String(fresh.consentText)).toContain('BCAT Logistics will receive this phone')
+    expect(String(fresh.consentText)).toContain('load S-1001-1')
+
+    mockSend.mockReset()
+    route({ link: carrierLink({ consentAt: '2026-10-21T10:00:00.000Z', pingCount: 4, lastPingAt: '2026-10-21T11:00:00.000Z' }), load: LOAD })
+    expect(json(await get(`/l/${TOKEN}`)).share).toMatchObject({ consentRequired: false, pingCount: 4, lastPingAt: '2026-10-21T11:00:00.000Z' })
+  })
+
+  it('is not active once the load is delivered', async () => {
+    route({ link: carrierLink(), load: { ...LOAD, status: 'DELIVERED' } })
+    expect(json(await get(`/l/${TOKEN}`)).share).toMatchObject({ active: false })
+  })
+})
+
+describe('GET /s/<token> map', () => {
+  const crumb = (min: number, over: Record<string, unknown> = {}) => ({
+    truckId: 'load:ld-1',
+    locatedAt: new Date(Date.parse('2026-10-21T12:00:00.000Z') + min * 60_000).toISOString(),
+    lat: 38.4004 + min / 1000,
+    lon: -92.1004,
+    source: 'link',
+    accuracyM: 14,
+    speed: 61,
+    bearing: 90,
+    refId: 'ref-secret-1',
+    unitNumber: 'LOAD',
+    ...over,
+  })
+  const base = {
+    shipment: SHIPMENT,
+    loads: [LOAD],
+    carriers: [{ id: 'lc-1', loadId: 'ld-1', shipmentId: 'shp-1', status: 'ACTIVE', carrierName: 'Blue Sky Trucking' }],
+  }
+  const QUERY_HISTORY = (c: Cmd) => c.__cmd === 'Query' && c.TableName === TABLES.history
+
+  it('serves a thinned, rounded trail with the stops and the cached route, and none of the metadata', async () => {
+    const lane = createHash('sha1').update('41.52,-88.08|32.78,-96.80').digest('hex')
+    route({
+      ...base,
+      link: customerLink(),
+      loadPings: [crumb(0), crumb(5), crumb(10), crumb(20), crumb(40, { source: 'sms-geocode', approx: true, accuracyM: 9000 })],
+      routeRow: { truckId: `route:${lane}`, locatedAt: 'route', ttlEpoch: Date.now() / 1000 + 86_400, payload: JSON.stringify({ encoded: '_p~iF~ps|U', source: 'ROUTES_API' }) },
+    })
+    const res = await get(`/s/${TOKEN}`)
+    expect(res.statusCode).toBe(200)
+    const view = json(res)
+    const map = view.map as { stops: unknown[]; route: string | null; trail: Array<Record<string, unknown>> }
+    expect(map.route).toBe('_p~iF~ps|U')
+    expect(map.stops).toEqual([
+      { type: 'pickup', lat: 41.525, lng: -88.082 },
+      { type: 'delivery', lat: 32.777, lng: -96.797 },
+    ])
+    expect(map.trail.map((t) => t.at)).toEqual([crumb(0).locatedAt, crumb(20).locatedAt, crumb(40).locatedAt])
+    expect(map.trail[0]).toEqual({ lat: 38.4, lng: -92.1, at: crumb(0).locatedAt })
+    expect(map.trail[2]).toMatchObject({ approx: true })
+    expect(sent().find((c) => c.__cmd === 'Get' && c.TableName === TABLES.history)?.Key).toEqual({ truckId: `route:${lane}`, locatedAt: 'route' })
+
+    for (const leak of ['source', 'accuracyM', 'speed', 'bearing', 'refId', 'ref-secret-1', 'sms-geocode', '9000', 'Blue Sky']) {
+      expect(res.body).not.toContain(leak)
+    }
+  })
+
+  it('serves the load\'s pings as the position, approximate guesses flagged', async () => {
+    route({ ...base, link: customerLink(), loadPings: [crumb(0, { source: 'sms-geocode', approx: true, description: 'Gary, IN', lat: 41.5934, lon: -87.3464 })] })
+    expect(json(await get(`/s/${TOKEN}`)).position).toMatchObject({ lat: 41.593, lng: -87.346, description: 'Gary, IN', approx: true })
+  })
+
+  it('ignores an expired route row and shows the trail without a route', async () => {
+    route({
+      ...base,
+      link: customerLink(),
+      loadPings: [crumb(0)],
+      routeRow: { truckId: 'route:x', locatedAt: 'route', ttlEpoch: Date.now() / 1000 - 10, payload: JSON.stringify({ encoded: 'old' }) },
+    })
+    expect((json(await get(`/s/${TOKEN}`)).map as { route: unknown }).route).toBeNull()
+  })
+
+  it('sends no map, no position and reads no breadcrumbs when the link hides position', async () => {
+    route({ ...base, link: customerLink({ showPosition: false }), loadPings: [crumb(0)] })
+    const view = json(await get(`/s/${TOKEN}`))
+    expect(view.map).toBeUndefined()
+    expect(view.position).toBeUndefined()
+    expect(sent().some(QUERY_HISTORY)).toBe(false)
   })
 })
 
@@ -1642,5 +1819,130 @@ describe('Step J — a warm container re-reads one parameter when a comparison f
     const forged = { 'x-bcat-signature': signWebhookBody(BODY, 'somebody-elses', Math.floor(Date.now() / 1000)) }
     expect((await postRaw('/api/webhooks/mycarrierpackets', BODY, forged)).statusCode).toBe(401)
     expect(ssmReadsOf(MCP_WEBHOOK_PARAM)).toBe(2)
+  })
+})
+
+// ── Step AO: a tracking provider's delivery becomes load breadcrumbs ────────
+
+describe('POST /api/webhooks/<provider> — tracking provider deliveries', () => {
+  const MP_PARAM = `${INTEGRATION_PARAM_PATH}/MACROPOINT/webhook`
+  const REF = 'Pq3Zn7Lp0vWx9TbKcRdYu1Ms4Ae6Gi2K'
+  const NOW = Date.now()
+  const iso = (minutesAgo: number) => new Date(NOW - minutesAgo * 60_000).toISOString()
+
+  const subscription = (over: Record<string, unknown> = {}) => ({
+    id: REF, kind: 'PROVIDER_TRACK', provider: 'MACROPOINT', status: 'ACTIVE',
+    shipmentId: 'shp-1', loadId: 'ld-1', loadCarrierId: 'lc-1',
+    expiresAt: '2099-01-01T00:00:00.000Z', ...over,
+  })
+  const deliveryOf = (eventId: string, over: Record<string, unknown> = {}) => JSON.stringify({
+    id: eventId, reference: REF, status: 'ACTIVE',
+    fixes: [
+      { refId: 'a', at: iso(40), lat: 41.525, lng: -88.082, accuracyM: 30, speedMph: 54 },
+      { refId: 'b', at: iso(5), lat: 41.1, lng: -87.9, accuracyM: 30, speedMph: 61 },
+    ],
+    ...over,
+  })
+  const signedFor = (body: string) => ({ 'x-bcat-signature': signWebhookBody(body, WEBHOOK_SECRET, Math.floor(Date.now() / 1000)) })
+
+  /** A tiny stateful table set: receipts and breadcrumbs dedupe on their keys like the real conditional puts. */
+  function world(by: { link?: unknown; load?: unknown }) {
+    const history: Record<string, unknown>[] = []
+    const linkUpdates: Cmd[] = []
+    const receipts = new Set<string>()
+    mockSend.mockImplementation(async (cmd: Cmd) => {
+      if (cmd.__cmd === 'Get') {
+        if (cmd.TableName === TABLES.integration) return { Item: providerRow({ id: 'MACROPOINT', provider: 'MACROPOINT' }) }
+        if (cmd.TableName === TABLES.link) return { Item: by.link }
+        if (cmd.TableName === TABLES.load) return { Item: by.load }
+        return {}
+      }
+      if (cmd.__cmd === 'Put') {
+        if (cmd.TableName === TABLES.integration) {
+          const id = String(cmd.Item?.id)
+          if (receipts.has(id)) throw new ConditionalCheckFailedException()
+          receipts.add(id)
+        }
+        if (cmd.TableName === TABLES.history) {
+          const key = `${cmd.Item?.truckId}|${cmd.Item?.locatedAt}`
+          if (history.some((r) => `${r.truckId}|${r.locatedAt}` === key)) throw new ConditionalCheckFailedException()
+          history.push(cmd.Item as Record<string, unknown>)
+        }
+        return {}
+      }
+      if (cmd.__cmd === 'Update' && cmd.TableName === TABLES.link) linkUpdates.push(cmd)
+      return {}
+    })
+    return { history, linkUpdates }
+  }
+  const openLoad = { id: 'ld-1', status: 'IN_TRANSIT' }
+  const post = (body: string) => postRaw('/api/webhooks/macropoint', body, signedFor(body))
+  beforeEach(() => params({ [MP_PARAM]: JSON.stringify({ webhookSigningSecret: WEBHOOK_SECRET }) }))
+
+  it('files a signed SIM delivery as load breadcrumbs, and a replay writes none', async () => {
+    const w = world({ link: subscription(), load: openLoad })
+    const body = deliveryOf('evt-1')
+    const res = await post(body)
+    expect(res.statusCode).toBe(200)
+    expect(json(res)).toMatchObject({ ok: true, duplicate: false, pings: { accepted: 2, duplicates: 0 } })
+    expect(w.history).toHaveLength(2)
+    expect(w.history.every((r) => r.truckId === 'load:ld-1' && r.source === 'provider:macropoint' && r.loadId === 'ld-1')).toBe(true)
+    expect(w.linkUpdates).toHaveLength(1)
+    expect(w.linkUpdates[0].UpdateExpression).toContain('ADD pingCount')
+    expect(w.linkUpdates[0].ExpressionAttributeValues).toMatchObject({ ':n': 2 })
+
+    const replay = await post(body)
+    expect(json(replay)).toMatchObject({ duplicate: true })
+    expect(w.history).toHaveLength(2)
+    expect(w.linkUpdates).toHaveLength(1)
+  })
+
+  it('counts a re-sent fix under a new event as a duplicate, not a second breadcrumb', async () => {
+    const w = world({ link: subscription(), load: openLoad })
+    await post(deliveryOf('evt-1'))
+    const again = await post(deliveryOf('evt-2'))
+    expect(json(again)).toMatchObject({ pings: { accepted: 0, duplicates: 2 } })
+    expect(w.history).toHaveLength(2)
+  })
+
+  it.each([
+    ['a revoked subscription', { link: subscription({ status: 'REVOKED' }), load: openLoad }, deliveryOf('evt-3')],
+    ['an expired subscription', { link: subscription({ expiresAt: '2020-01-01T00:00:00.000Z' }), load: openLoad }, deliveryOf('evt-4')],
+    ['another provider\'s subscription', { link: subscription({ provider: 'TRUCKER_TOOLS' }), load: openLoad }, deliveryOf('evt-5')],
+    ['an unknown reference', { link: undefined, load: openLoad }, deliveryOf('evt-6')],
+    ['a delivered load', { link: subscription(), load: { id: 'ld-1', status: 'DELIVERED' } }, deliveryOf('evt-7')],
+    ['a body that is not the documented shape', { link: subscription(), load: openLoad }, JSON.stringify({ id: 'evt-8', positions: [{ x: 1 }] })],
+  ])('answers 200 and writes no breadcrumb for %s', async (_name, state, body) => {
+    const w = world(state)
+    const res = await post(body)
+    expect(res.statusCode).toBe(200)
+    expect(json(res)).toMatchObject({ ok: true, duplicate: false, pings: { accepted: 0, duplicates: 0 } })
+    expect(w.history).toHaveLength(0)
+    expect(w.linkUpdates).toHaveLength(0)
+  })
+
+  it('refuses an unsigned delivery before any breadcrumb is considered', async () => {
+    const w = world({ link: subscription(), load: openLoad })
+    const res = await postRaw('/api/webhooks/macropoint', deliveryOf('evt-9'))
+    expect(res.statusCode).toBe(401)
+    expect(w.history).toHaveLength(0)
+  })
+
+  it('chain: a webhook delivery reads back as the map\'s current marker, source and dots', async () => {
+    const [{ fixOfRow }, { buildMapModel }] = await Promise.all([
+      import('../../../src/lib/trackingPings'),
+      import('../../../src/features/shipments/workstations/tracking/map/mapModel'),
+    ])
+    const { currentFix } = await import('../../../src/lib/trackingPings')
+    const w = world({ link: subscription(), load: openLoad })
+    await post(deliveryOf('evt-chain'))
+
+    const fixes = w.history.map((r) => fixOfRow(r)).filter((f): f is NonNullable<typeof f> => f !== null)
+    const model = buildMapModel({
+      mode: 'staff', pins: [], fixes, current: currentFix(fixes, NOW), route: null, routeSource: 'NONE', nowMs: NOW,
+    })
+    expect(model.dots).toHaveLength(2)
+    expect(model.current).toMatchObject({ lat: 41.1, lng: -87.9, tone: 'fresh' })
+    expect(model.current?.title).toContain('MacroPoint')
   })
 })

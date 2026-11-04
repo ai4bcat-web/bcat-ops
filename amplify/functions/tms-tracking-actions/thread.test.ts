@@ -8,6 +8,7 @@ import {
   type ThreadDeps,
 } from './thread'
 import { threadKeyFor, threadReplyAddress, newMessageId } from '../../../src/lib/shipmentThread'
+import type { PingInput } from '../../../src/lib/trackingPings'
 import { MemoryStore, type Row } from './testSupport'
 
 const CALLER = { email: 'ops@bcatcorp.com', sub: 'sub-ops', groups: [], isAdmin: false }
@@ -45,6 +46,9 @@ function makeDeps(store: MemoryStore, overrides: Partial<ThreadDeps> = {}): Thre
     sendEmail: overrides.sendEmail ?? sentEmails,
     sendSms: overrides.sendSms ?? sentSms,
     geocode: overrides.geocode ?? vi.fn(async () => null),
+    reverseGeocode: overrides.reverseGeocode,
+    resolveShareLink: overrides.resolveShareLink,
+    putPing: overrides.putPing,
     readDocumentBytes: overrides.readDocumentBytes ?? vi.fn(async () => new Uint8Array(0)),
     now: () => '2026-02-02T12:00:00.000Z',
     randomId: () => `r${Math.random().toString(36).slice(2)}`,
@@ -605,5 +609,104 @@ describe('listThread', () => {
 
     const result = await listThread(deps, { shipmentId: 'shp-1' })
     expect((result.messages as Row[]).length).toBe(0)
+  })
+})
+
+describe('ingestShipmentMessage — Step AO position sources', () => {
+  const ingest = (deps: ThreadDeps, body: string, messageId = '<ao-1@example.com>') =>
+    ingestShipmentMessage(
+      deps,
+      { messageId, to: threadReplyAddress('shp-1'), from: 'driver@example.com', subject: 'Re:', channel: 'SMS', body },
+      CALLER,
+    )
+  const fresh = () => {
+    const store = new MemoryStore()
+    seedShipment(store, { threadKey: threadKeyFor('shp-1') })
+    seedLoad(store)
+    return store
+  }
+  const callsOf = (store: MemoryStore) => store.queryIndex('LoadCheckCall-test', 'loadCheckCallsByLoadIdAndAt', 'loadId', 'lod-1')
+
+  it('files an exact sms-share ping and a positioned location update for an Apple Maps pin', async () => {
+    const store = fresh()
+    const putPing = vi.fn(async (_input: PingInput) => 'WRITTEN')
+    const geocode = vi.fn(async () => null)
+    const deps = makeDeps(store, {
+      putPing,
+      geocode,
+      reverseGeocode: async () => ({ city: 'Joliet', state: 'IL' }),
+    })
+
+    await ingest(deps, 'https://maps.apple.com/?ll=41.5251,-88.0817&q=Dropped%20Pin')
+
+    expect(putPing).toHaveBeenCalledTimes(1)
+    expect(putPing.mock.calls[0]?.[0]).toMatchObject({
+      loadId: 'lod-1', lat: 41.5251, lng: -88.0817, source: 'sms-share', approx: false, accuracyM: null, place: 'Joliet, IL',
+    })
+    expect(geocode).not.toHaveBeenCalled()
+    const location = callsOf(store).find((c) => c.type === 'LOCATION_UPDATE')
+    expect(location).toMatchObject({ city: 'Joliet', state: 'IL', lat: 41.5251, lng: -88.0817 })
+    expect(store.getById('Load-test', 'lod-1')?.lastKnownCity).toBe('Joliet')
+  })
+
+  it('resolves a short link through the injected resolver and files the pin', async () => {
+    const store = fresh()
+    const putPing = vi.fn(async (_input: PingInput) => 'WRITTEN')
+    const resolveShareLink = vi.fn(async () => 'https://www.google.com/maps/@41.6001,-87.3372,17z')
+    await ingest(makeDeps(store, { putPing, resolveShareLink }), 'here https://maps.app.goo.gl/abc123')
+
+    expect(resolveShareLink).toHaveBeenCalledWith('https://maps.app.goo.gl/abc123')
+    expect(putPing.mock.calls[0]?.[0]).toMatchObject({ lat: 41.6001, lng: -87.3372, source: 'sms-share' })
+  })
+
+  it('keeps a short link the resolver refuses as a plain NOTE with no ping', async () => {
+    const store = fresh()
+    const putPing = vi.fn(async (_input: PingInput) => 'WRITTEN')
+    const geocode = vi.fn(async () => null)
+    await ingest(makeDeps(store, { putPing, geocode, resolveShareLink: async () => null }), 'https://maps.app.goo.gl/abc123')
+
+    expect(putPing).not.toHaveBeenCalled()
+    expect(geocode).not.toHaveBeenCalled()
+    expect(callsOf(store).some((c) => c.type === 'NOTE')).toBe(true)
+  })
+
+  it('never geocodes chatter like "Thanks"', async () => {
+    const store = fresh()
+    const geocode = vi.fn(async () => ({ city: 'Thanks', state: 'MO', lat: 36.5, lng: -91.5 }))
+    const putPing = vi.fn(async (_input: PingInput) => 'WRITTEN')
+    await ingest(makeDeps(store, { geocode, putPing }), 'Thanks')
+
+    expect(geocode).not.toHaveBeenCalled()
+    expect(putPing).not.toHaveBeenCalled()
+    expect(callsOf(store).some((c) => c.type === 'NOTE' && c.note === 'Thanks')).toBe(true)
+  })
+
+  it('files a geocoded place reply as an approximate fix with at least a 2 km radius', async () => {
+    const store = fresh()
+    const putPing = vi.fn(async (_input: PingInput) => 'WRITTEN')
+    const geocode = vi.fn(async () => ({ city: 'Gary', state: 'IN', lat: 41.5934, lng: -87.3464, radiusM: 300 }))
+    await ingest(makeDeps(store, { geocode, putPing }), 'just passed Gary IN')
+
+    expect(putPing.mock.calls[0]?.[0]).toMatchObject({ source: 'sms-geocode', approx: true, accuracyM: 2000, place: 'Gary, IN' })
+  })
+
+  it('keeps the message and check call when the ping write fails', async () => {
+    const store = fresh()
+    const putPing = vi.fn(async () => { throw new Error('ddb down') })
+    const result = await ingest(makeDeps(store, { putPing }), '41.5251, -88.0817')
+
+    expect(result.routed).toBe(true)
+    expect(callsOf(store).some((c) => c.type === 'LOCATION_UPDATE')).toBe(true)
+  })
+
+  it('files one ping when the same Twilio sid arrives twice', async () => {
+    const store = fresh()
+    const putPing = vi.fn(async (_input: PingInput) => 'WRITTEN')
+    const deps = makeDeps(store, { putPing })
+    await ingest(deps, '41.5251, -88.0817', 'sms:SM1')
+    const again = await ingest(deps, '41.5251, -88.0817', 'sms:SM1')
+
+    expect(again.duplicate).toBe(true)
+    expect(putPing).toHaveBeenCalledTimes(1)
   })
 })

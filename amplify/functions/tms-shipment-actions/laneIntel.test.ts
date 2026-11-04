@@ -51,13 +51,18 @@ describe('LANE_INTELLIGENCE', () => {
     expect(calls.filter((c) => c.TableName === 'Q')).toHaveLength(25)
   })
 
-  it('serves a repeat of the same lane from cache', async () => {
+  it('memoises closed months but always re-reads the current one, so a quote just written shows up', async () => {
     const { db, send } = fakeDb()
     const deps = { db, tables: { quote: 'Q', laneSample: 'S' }, now: () => NOW }
     await getLaneIntelligence(deps, input)
-    const first = send.mock.calls.length
-    await getLaneIntelligence(deps, input)
-    expect(send.mock.calls.length).toBe(first)
+    QUOTES.push({ id: 'Q3', side: 'SELL', status: 'WON', quoteDate: '2026-11-03', customerName: 'ZZ New', amountCents: 320000, equipmentType: 'VAN', laneKey: 'CHICAGO|IL>DALLAS|TX', laneKey3: '606>752' })
+    try {
+      send.mockClear()
+      const again = await getLaneIntelligence(deps, input)
+      expect(again.quotes.stats.count).toBe(3)
+      const monthReads = send.mock.calls.map((c) => c[0].input as Record<string, unknown>).filter((c) => c.TableName === 'Q')
+      expect(monthReads).toHaveLength(1) // only 2026-11; the 24 closed months came from memory
+    } finally { QUOTES.pop() }
   })
 
   it('refuses a lane it cannot index instead of scanning', async () => {

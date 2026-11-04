@@ -68,6 +68,7 @@ const store = vi.hoisted(() => {
   process.env.MESSAGE_TABLE_NAME = 'DispatchMessage-test'
   process.env.SETTINGS_TABLE_NAME = 'DispatchSettings-test'
   process.env.DRIVER_TABLE_NAME = 'Driver-test'
+  process.env.TRUCK_LOCATION_TABLE_NAME = 'TruckLocation-test'
   process.env.SHIPMENT_DOCUMENT_TABLE_NAME = 'ShipmentDocument-test'
   process.env.SHIPMENT_NOTICE_TABLE_NAME = 'ShipmentNotice-test'
   process.env.SHIPMENT_MESSAGE_TABLE_NAME = 'ShipmentMessage-test'
@@ -580,13 +581,35 @@ beforeEach(() => {
 // ── SEND_TRACKING_LINK ───────────────────────────────────────────────────────
 
 describe('SEND_TRACKING_LINK', () => {
-  it('refuses an own-asset leg and points at Motive instead', async () => {
-    seed({ loadCarrier: { kind: 'OWN_ASSET', carrierId: null, carrierName: null } })
+  it('refuses an own-asset leg whose truck reported from the ELD in the last two hours', async () => {
+    seed({ loadCarrier: { kind: 'OWN_ASSET', carrierId: null, carrierName: null, truckId: 'trk-1' } })
+    table('TruckLocation-test').set('trk-1', { truckId: 'trk-1', locatedAt: new Date(Date.now() - 30 * 60_000).toISOString() })
 
     await expect(call('SEND_TRACKING_LINK', { loadCarrierId: 'lc-1', via: 'COPY' })).rejects.toThrow(
       /Motive and the driver app/,
     )
     expect(links()).toHaveLength(0)
+  })
+
+  it('allows an own-asset leg whose truck has been silent for more than two hours, or has no truck', async () => {
+    seed({ loadCarrier: { kind: 'OWN_ASSET', carrierId: null, carrierName: null, truckId: 'trk-1' } })
+    table('TruckLocation-test').set('trk-1', { truckId: 'trk-1', locatedAt: new Date(Date.now() - 3 * 3_600_000).toISOString() })
+    const stale = await call('SEND_TRACKING_LINK', { loadCarrierId: 'lc-1', via: 'COPY' })
+    expect(table(TABLES.link).get(String((stale.link as Row).id))).toMatchObject({ kind: 'CARRIER_PING', status: 'ACTIVE' })
+
+    store.clear()
+    seed({ loadCarrier: { kind: 'OWN_ASSET', carrierId: null, carrierName: null, truckId: null } })
+    const none = await call('SEND_TRACKING_LINK', { loadCarrierId: 'lc-1', via: 'COPY' })
+    expect(table(TABLES.link).get(String((none.link as Row).id))).toMatchObject({ status: 'ACTIVE' })
+  })
+
+  it('does not revoke a PROVIDER_TRACK link on the same assignment', async () => {
+    seed()
+    table(TABLES.link).set('provider-tok', {
+      id: 'provider-tok', kind: 'PROVIDER_TRACK', status: 'ACTIVE', loadId: 'lod-1', loadCarrierId: 'lc-1', shipmentId: 'shp-1',
+    })
+    await call('SEND_TRACKING_LINK', { loadCarrierId: 'lc-1', via: 'COPY' })
+    expect(table(TABLES.link).get('provider-tok')).toMatchObject({ status: 'ACTIVE' })
   })
 
   it('refuses a load that already delivered', async () => {
@@ -1657,5 +1680,14 @@ describe('RUN_TRACKING_AUTOMATION authorization', () => {
     await expect(call('RUN_TRACKING_AUTOMATION', { mode: 'MANUAL' })).rejects.toThrow(/MANUAL automation requires/)
     const result = await call('RUN_TRACKING_AUTOMATION', { mode: 'AUTO', shipmentIds: ['shp-none'] })
     expect(result.mode).toBe('AUTO')
+  })
+})
+
+describe('Step AO sim doors', () => {
+  it('refuse outside the dev stack', async () => {
+    delete process.env.BCAT_DEV_STACK
+    seed()
+    await expect(call('TRACKING_SIM_PINGS', { loadId: 'lod-1', fixes: [] }, ADMIN)).rejects.toThrow('This action only exists on the dev stack')
+    await expect(call('TRACKING_SIM_TEXT', { shipmentId: 'shp-1', body: '41.5251, -88.0817' }, ADMIN)).rejects.toThrow('only exists on the dev stack')
   })
 })

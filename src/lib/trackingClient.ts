@@ -56,12 +56,29 @@ export async function fetchCarrierTracking(token: string): Promise<CarrierTracki
   return linkFetch<CarrierTrackingView>(`/l/${encodeURIComponent(token)}`)
 }
 
-/** One tap of the driver's page. 409 means the fix is too coarse, 429 means too soon. */
+/** One fix from the driver's page. */
+export interface PingFixBody {
+  lat: number
+  lng: number
+  accuracyM: number | null
+  /** The device's own fix time (ISO); the server believes it only when it is near its own clock. */
+  fixAt?: string
+  speedMph?: number | null
+  headingDeg?: number | null
+  trigger?: 'tap' | 'watch'
+  /** Sent with every post until the server has recorded the driver's consent. */
+  consent?: true
+}
+
+/**
+ * One fix of the driver's page. 403 `consent` means the server has no consent on file,
+ * 409 the fix is too coarse, 410 the load is delivered and sharing is over, 429 too soon.
+ */
 export async function postTrackingPing(
   token: string,
-  fix: { lat: number; lng: number; accuracyM: number | null },
-): Promise<{ ok: true; at: string }> {
-  return linkFetch<{ ok: true; at: string }>(`/l/${encodeURIComponent(token)}/ping`, {
+  fix: PingFixBody,
+): Promise<{ ok: true; at: string; nextInMin?: number }> {
+  return linkFetch<{ ok: true; at: string; nextInMin?: number }>(`/l/${encodeURIComponent(token)}/ping`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(fix),

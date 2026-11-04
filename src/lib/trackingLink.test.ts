@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest'
-import { TOKEN_BYTES, carrierView, customerView, isLinkToken, linkExpiry, newLinkToken, smsBodyFor } from './trackingLink'
+import { TOKEN_BYTES, carrierView, consentText, loadIsClosed, routeWaypoints, customerView, isLinkToken, linkExpiry, newLinkToken, smsBodyFor } from './trackingLink'
 import { MAX_SMS_BODY } from './dispatch'
 import type { LastKnownFix } from './trackingTimeline'
+import type { TrackingFix } from './trackingPings'
 import type {
   LoadCarrierRecord,
   LoadCheckCallRecord,
@@ -264,6 +265,125 @@ describe('carrierView', () => {
   })
 })
 
+describe('customerView map', () => {
+  const at = (min: number) => new Date(Date.parse('2026-03-02T14:00:00.000Z') + min * 60_000).toISOString()
+  const fix = (min: number, over: Partial<TrackingFix> = {}): TrackingFix => ({
+    at: at(min), lat: 41.5249731 + min / 1000, lng: -88.0817323, source: 'link', accuracyM: 14, approx: false,
+    speedMph: 61, headingDeg: 180, place: null, ...over,
+  })
+  const located: ShipmentLoad = {
+    ...load,
+    stops: [
+      stop('pu1', 'pickup', 0, { address: { street: '1 Dock', city: 'Joliet', state: 'IL', zip: '60431', lat: 41.52497, lng: -88.08173 } as Stop['address'] }),
+      stop('de1', 'delivery', 1, { address: { street: '2 Dock', city: 'Dallas', state: 'TX', zip: '75201', lat: 32.77671, lng: -96.79699 } as Stop['address'] }),
+    ],
+  }
+  const build = (fixes: TrackingFix[] | null, over: Partial<TrackingLinkRecord> = {}, route: string | null = 'abc') =>
+    customerView({
+      shipment, orders: [order], loads: [located], loadCarriers: [loadCarrier], fixes, route,
+      link: customerLink(over), nowIso: at(300), position: null,
+    })
+
+  it('thins the trail to fifteen minutes, rounds to three decimals and flags a guess', () => {
+    const fixes = [0, 3, 8, 16, 20, 31].map((m) => fix(m))
+    fixes.push(fix(40, { approx: true, source: 'sms-geocode', accuracyM: 8000 }))
+    const map = build(fixes).map!
+    expect(map.trail.map((t) => t.at)).toEqual([at(0), at(16), at(31), at(40)].filter((a) => map.trail.some((t) => t.at === a)))
+    for (let i = 1; i < map.trail.length - 1; i++) {
+      expect(Date.parse(map.trail[i].at) - Date.parse(map.trail[i - 1].at)).toBeGreaterThanOrEqual(15 * 60_000)
+    }
+    expect(map.trail[0].lat).toBe(41.525)
+    expect(map.trail.at(-1)).toMatchObject({ approx: true })
+    expect(map.trail[0].approx).toBeUndefined()
+    expect(map.stops).toEqual([
+      { type: 'pickup', lat: 41.525, lng: -88.082 },
+      { type: 'delivery', lat: 32.777, lng: -96.797 },
+    ])
+    expect(map.route).toBe('abc')
+  })
+
+  it('never says where a fix came from, how exact it was, or how fast the truck went', () => {
+    const json = JSON.stringify(build([fix(0), fix(20, { source: 'provider:macropoint' }), fix(40, { approx: true, accuracyM: 9000 })]))
+    for (const leak of ['source', 'accuracyM', 'speed', 'heading', 'refId', 'macropoint', 'sms-', '9000']) {
+      expect(json).not.toContain(leak)
+    }
+  })
+
+  it('leaves out map and position when the link hides position', () => {
+    const result = build([fix(0)], { showPosition: false })
+    expect(result.map).toBeUndefined()
+    expect(result.position).toBeUndefined()
+  })
+
+  it('shows no map when no fixes were read, and an empty trail when there are none', () => {
+    expect(build(null).map).toBeUndefined()
+    expect(build([]).map?.trail).toEqual([])
+  })
+
+  it('keeps a fresh precise fix as the position over a newer guess', () => {
+    const result = build([fix(280), fix(295, { approx: true, source: 'sms-geocode', lat: 40, lng: -90 })])
+    expect(result.position).toMatchObject({ lat: 41.805, at: at(280) })
+    expect(result.position?.approx).toBeUndefined()
+  })
+
+  it('flags the position as approximate when nothing precise is recent', () => {
+    const result = build([fix(0), fix(60, { approx: true, source: 'sms-geocode', lat: 40.1234, lng: -90 })], {}, null)
+    // nowIso is 5 h after the precise fix, so the guess takes over
+    expect(result.position).toMatchObject({ lat: 40.123, approx: true })
+  })
+
+  it('prefers a staff-logged position that has no ping of its own when it is clearly newer', () => {
+    const result = customerView({
+      shipment, orders: [order], loads: [located], loadCarriers: [loadCarrier], fixes: [fix(0)],
+      position: { at: at(30), lat: 38.1, lng: -92.2, description: 'Columbia, MO', source: 'MANUAL' },
+      link: customerLink(), nowIso: at(300),
+    })
+    expect(result.position).toMatchObject({ lat: 38.1, description: 'Columbia, MO' })
+  })
+})
+
+describe('routeWaypoints', () => {
+  const at = (n: number): Stop['address'] => ({ lat: 40 + n, lng: -90 - n }) as Stop['address']
+  it('keeps the first pickup, the middle stops and the last delivery that carry coordinates', () => {
+    const w = routeWaypoints([
+      stop('c', 'delivery', 3, { address: at(3) }),
+      stop('a', 'pickup', 0, { address: at(0) }),
+      stop('x', 'pickup', 1, { address: null }),
+      stop('b', 'pickup', 2, { address: at(2) }),
+    ])
+    expect(w.map((p) => p.type)).toEqual(['pickup', 'stop', 'delivery'])
+    expect(w.map((p) => p.lat)).toEqual([40, 42, 43])
+  })
+  it('is empty when no stop has coordinates', () => {
+    expect(routeWaypoints([stop('a', 'pickup', 0), stop('b', 'delivery', 1)])).toEqual([])
+  })
+})
+
+describe('carrierView share', () => {
+  const link = { ...customerLink(), kind: 'CARRIER_PING' as const, loadId: 'load-1', loadCarrierId: 'lc-1' }
+  const run = (l: TrackingLinkRecord, over: Partial<ShipmentLoad> = {}) =>
+    carrierView({ load: { ...load, ...over }, link: l, broker: 'Acme Brokerage', nowIso: '2026-03-02T18:05:00.000Z' }).share!
+
+  it('asks for consent until the server has recorded it, and names the broker and load', () => {
+    const fresh = run(link)
+    expect(fresh).toMatchObject({ consentRequired: true, consentVersion: 'ao-1', everyMin: 5, active: true })
+    expect(fresh.consentText).toBe(consentText('Acme Brokerage', 'S-1001-1'))
+    expect(run({ ...link, consentAt: '2026-03-02T17:00:00.000Z' }).consentRequired).toBe(false)
+  })
+
+  it('stops being active when the load is delivered, invoiced, canceled or has a delivery time', () => {
+    for (const status of ['DELIVERED', 'INVOICING', 'CANCELED'] as const) {
+      expect(run(link, { status }).active).toBe(false)
+    }
+    expect(loadIsClosed({ status: 'IN_TRANSIT', deliveredAt: '2026-03-03T10:00:00.000Z' })).toBe(true)
+    expect(loadIsClosed({ status: 'IN_TRANSIT' })).toBe(false)
+  })
+
+  it('reports the counters', () => {
+    expect(run({ ...link, lastPingAt: '2026-03-02T18:00:00.000Z', pingCount: 7 })).toMatchObject({ lastPingAt: '2026-03-02T18:00:00.000Z', pingCount: 7 })
+  })
+})
+
 describe('linkExpiry', () => {
   const now = '2026-03-02T18:00:00.000Z'
 
@@ -280,6 +400,10 @@ describe('linkExpiry', () => {
     expect(linkExpiry('CUSTOMER_VIEW', null, { customerLinkExpiryDays: 0.1 }, now)).toBe(
       '2026-03-03T18:00:00.000Z',
     )
+  })
+
+  it('treats a provider subscription like a ping link', () => {
+    expect(linkExpiry('PROVIDER_TRACK', '2026-03-03T09:00:00.000Z', null, now)).toBe(linkExpiry('CARRIER_PING', '2026-03-03T09:00:00.000Z', null, now))
   })
 
   it('gives a customer link its days from now', () => {

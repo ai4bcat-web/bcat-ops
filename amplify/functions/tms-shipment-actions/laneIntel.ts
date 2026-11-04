@@ -37,8 +37,6 @@ export const IDX_QUOTES_BY_MONTH = 'quotesByQuoteMonthAndQuoteDate'
 
 /** Pages (of ≤1 MB) one lane read may take: a hard ceiling on cost, far above a lane's real history. */
 const MAX_PAGES = 6
-const RESULT_TTL_MS = 60_000
-const CURRENT_MONTH_TTL_MS = 60_000
 const PAST_MONTH_TTL_MS = 10 * 60_000
 
 const SAMPLE_FIELDS = [
@@ -58,12 +56,10 @@ export interface LaneIntelDeps {
 }
 
 interface Cached<T> { at: number; value: T }
-const resultCache = new Map<string, Cached<LaneIntelligence>>()
 const monthCache = new Map<string, Cached<{ rows: QuoteRecord[]; truncated: boolean }>>()
 
 /** Test seam: the caches are module state. */
 export function clearLaneIntelCache(): void {
-  resultCache.clear()
   monthCache.clear()
 }
 
@@ -107,10 +103,11 @@ async function sampleRows(
 }
 
 async function monthQuotes(deps: LaneIntelDeps, month: string, currentMonth: string): Promise<{ rows: QuoteRecord[]; truncated: boolean }> {
-  const hit = monthCache.get(month)
-  const ttl = month === currentMonth ? CURRENT_MONTH_TTL_MS : PAST_MONTH_TTL_MS
+  // The current month is never cached: a quote saved, sent or marked lost a moment ago must show up on the
+  // next read. Past months are effectively closed books and are memoised.
   const nowMs = Date.parse(deps.now())
-  if (hit && nowMs - hit.at < ttl) return hit.value
+  const hit = month === currentMonth ? undefined : monthCache.get(month)
+  if (hit && nowMs - hit.at < PAST_MONTH_TTL_MS) return hit.value
   const p = projection(QUOTE_FIELDS)
   const { rows, truncated } = await queryPages(deps.db, {
     TableName: deps.tables.quote,
@@ -122,7 +119,7 @@ async function monthQuotes(deps: LaneIntelDeps, month: string, currentMonth: str
     ScanIndexForward: false,
   })
   const value = { rows: rows as unknown as QuoteRecord[], truncated }
-  monthCache.set(month, { at: nowMs, value })
+  if (month !== currentMonth) monthCache.set(month, { at: nowMs, value })
   return value
 }
 
@@ -148,10 +145,6 @@ export async function getLaneIntelligence(deps: LaneIntelDeps, input: Row): Prom
     // Names and ZIPs are both partial on one end: nothing indexable. Say so rather than scan.
     throw new Error('The lane needs a city and state, or a ZIP, on both ends')
   }
-
-  const cacheKey = [laneKey, laneKey3, equipmentType ?? '', excludeQuoteId ?? ''].join('#')
-  const cached = resultCache.get(cacheKey)
-  if (cached && Date.parse(nowIso) - cached.at < RESULT_TTL_MS) return cached.value
 
   const fromDate = laneIntelFloor(nowIso, LANE_INTEL_MONTHS)
   const months = laneIntelMonths(nowIso, LANE_INTEL_MONTHS)
@@ -179,6 +172,5 @@ export async function getLaneIntelligence(deps: LaneIntelDeps, input: Row): Prom
     quotes: { stats: laneQuoteStats(quoteAll), rows: quoteAll.slice(0, LANE_INTEL_LIST_LIMIT) },
     truncated: exact.truncated || zip3.truncated || monthResults.some((r) => r.truncated),
   }
-  resultCache.set(cacheKey, { at: Date.parse(nowIso), value })
   return value
 }

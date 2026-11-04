@@ -24,7 +24,7 @@
  * ShipmentDocument row plus the link's counters. A quote answer is one conditioned
  * UpdateItem on the row whose live token the caller is holding — nothing else.
  */
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
 import { DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand, ScanCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb'
 import { HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
@@ -34,7 +34,9 @@ import { currentLoadForDriver, laneLabel } from '../../../src/lib/driverJourney'
 import { quotePublicView } from '../../../src/lib/quotes'
 import { MAX_UPLOADS_PER_LINK, documentKey, documentPrefix } from '../../../src/lib/shipmentDocuments'
 import { pendingDeliveryEta } from '../../../src/lib/stopEvents'
-import { carrierView, customerView, isLinkToken } from '../../../src/lib/trackingLink'
+import { CONSENT_VERSION, SHARE_EVERY_MIN, carrierView, customerView, isLinkToken, loadIsClosed, routeLoadOf, routeWaypoints } from '../../../src/lib/trackingLink'
+import { fixOfRow, loadPingKey, mergeFixes, resolveFixAt, routeKeyOf, ROUTE_ROW_PREFIX, type TrackingFix } from '../../../src/lib/trackingPings'
+import { putPing } from '../_shared/trackingPings'
 import { etaToStop } from '../../../src/lib/trackingEta'
 import { buildTimeline, lastKnownPosition, thinPositions, trackingWindow, type TrackPosition } from '../../../src/lib/trackingTimeline'
 import { carrierUploadView, portalUploadAllowed, uploadLinkUsable } from '../../../src/lib/uploadPortal'
@@ -124,7 +126,12 @@ const QUOTE_ANSWERED = 'This quote has already been answered'
 // an abuse ceiling, not a budget: 30k is ~3 weeks of continuous visible polling,
 // comfortably past the 14-day customer link and the delivery + 72h carrier link.
 const MAX_LINK_REQUESTS = 30_000
-const MAX_LINK_PINGS = 500
+/** Five-minute cadence over a multi-day trip is ~900 fixes; the rest is a stuck loop. */
+const MAX_LINK_PINGS = 1500
+/** The check-call list is for people: one row at the first fix, then at most one per half hour. */
+const CHECK_CALL_GAP_MS = 30 * 60_000
+/** The load's ETA is rewritten at most this often; every ping still answers with a fresh one. */
+const ETA_WRITE_GAP_MS = 10 * 60_000
 /** One tap a minute is plenty; the rest is a stuck finger or a script. */
 const MIN_PING_GAP_MS = 60_000
 /** A cell-tower fix is useless for proving where the freight is. */
@@ -422,6 +429,44 @@ async function motivePositions(loads: ShipmentLoad[], carriers: LoadCarrierRecor
   return thinPositions(out)
 }
 
+/**
+ * Every source's fixes for these legs inside each leg's window: the truck's Motive /
+ * Blue Ink breadcrumbs by its real id, plus the load's own pings (`load:<id>`).
+ */
+async function windowFixes(loads: ShipmentLoad[], carriers: LoadCarrierRecord[], nowIso: string): Promise<TrackingFix[]> {
+  const sets: TrackingFix[][] = []
+  for (const load of loads) {
+    const truckId = typeof (load as unknown as Row).truckId === 'string' ? String((load as unknown as Row).truckId).trim() : ''
+    const carrier = carriers.find((lc) => lc.loadId === load.id && lc.status === 'ACTIVE') ?? null
+    const window = trackingWindow(load, carrier, nowIso)
+    for (const key of [truckId, loadPingKey(load.id)]) {
+      if (!key) continue
+      const rows = await queryIndex({
+        table: TRUCK_LOCATION_HISTORY_TABLE,
+        index: IDX_POSITIONS_BY_TRUCK,
+        key: 'truckId',
+        value: key,
+        sort: { name: 'locatedAt', from: window.from, to: window.to },
+        limit: POSITION_LIMIT,
+      })
+      sets.push(rows.map(fixOfRow).filter((f): f is TrackingFix => f != null))
+    }
+  }
+  return mergeFixes(...sets)
+}
+
+/** The planned route for this leg, read-only from the cache `GET_LOAD_ROUTE` fills; null when never computed or expired. */
+async function cachedRoute(load: ShipmentLoad | null): Promise<string | null> {
+  const waypoints = routeWaypoints(load?.stops)
+  if (waypoints.length < 2) return null
+  const key = `${ROUTE_ROW_PREFIX}${createHash('sha1').update(routeKeyOf(waypoints)).digest('hex')}`
+  const row = await getRow(TRUCK_LOCATION_HISTORY_TABLE, { truckId: key, locatedAt: 'route' })
+  if (!row) return null
+  if (typeof row.ttlEpoch === 'number' && row.ttlEpoch * 1000 < Date.now()) return null
+  const payload = parseJson<{ encoded?: unknown }>(row.payload)
+  return typeof payload?.encoded === 'string' && payload.encoded ? payload.encoded : null
+}
+
 /** `GET /s/<token>` — the Customer Link. */
 async function customerRoute(token: string) {
   const link = await activeLink(token, 'CUSTOMER_VIEW')
@@ -444,9 +489,12 @@ async function customerRoute(token: string) {
   const events = eventRows.map(toEvent)
   const nowIso = new Date().toISOString()
 
-  const [division, positions] = await Promise.all([
+  const showPosition = link.showPosition !== false
+  const [division, positions, fixes, route] = await Promise.all([
     divisionFor(loads),
-    link.showPosition === false ? Promise.resolve<TrackPosition[]>([]) : motivePositions(loads, loadCarriers, nowIso),
+    showPosition ? motivePositions(loads, loadCarriers, nowIso) : Promise.resolve<TrackPosition[]>([]),
+    showPosition ? windowFixes(loads, loadCarriers, nowIso) : Promise.resolve<TrackingFix[] | null>(null),
+    showPosition ? cachedRoute(routeLoadOf(loads, loadCarriers)).catch(() => null) : Promise.resolve<string | null>(null),
   ])
 
   return reply(200, customerView({
@@ -455,7 +503,9 @@ async function customerRoute(token: string) {
     loads,
     loadCarriers,
     events,
-    position: link.showPosition === false ? null : lastKnownPosition(buildTimeline({ checkCalls: events, positions })),
+    position: showPosition ? lastKnownPosition(buildTimeline({ checkCalls: events, positions })) : null,
+    fixes,
+    route,
     link,
     division,
     nowIso,
@@ -485,15 +535,18 @@ async function carrierRoute(token: string) {
   const loadRow = await getRow(LOAD_TABLE, { id: link.loadId })
   if (!loadRow) return reply(404, { error: LINK_GONE })
 
-  const [events, settingsRow, carrierRow] = await Promise.all([
+  const load = toLoad(loadRow)
+  const [events, settingsRow, carrierRow, division] = await Promise.all([
     pingsForLink(link),
     settings().catch(() => null),
     link.loadCarrierId ? getRow(LOAD_CARRIER_TABLE, { id: link.loadCarrierId }) : Promise.resolve(null),
+    divisionFor([load]).catch(() => null),
   ])
   const view = carrierView({
-    load: toLoad(loadRow),
+    load,
     events,
     link,
+    broker: division?.name ?? null,
     contactPhone: settingsRow?.trackingContact?.phone?.trim() || null,
     nowIso: new Date().toISOString(),
   }) as unknown as Record<string, unknown>
@@ -505,6 +558,10 @@ interface PingFix {
   lat: number
   lng: number
   accuracyM: number | null
+  fixAt: string | null
+  speedMph: number | null
+  headingDeg: number | null
+  consent: boolean
 }
 
 /** What the driver's browser sent, or the reason it is unusable. */
@@ -514,15 +571,35 @@ function readFix(body: unknown): { fix: PingFix } | { error: string } {
   const { lat, lng } = raw
   if (typeof lat !== 'number' || !Number.isFinite(lat) || lat < -90 || lat > 90) return { error: 'That location is out of range' }
   if (typeof lng !== 'number' || !Number.isFinite(lng) || lng < -180 || lng > 180) return { error: 'That location is out of range' }
+  const num = (v: unknown, min: number, max: number): number | null =>
+    typeof v === 'number' && Number.isFinite(v) && v >= min && v <= max ? v : null
   const accuracy = raw.accuracyM
   const accuracyM = typeof accuracy === 'number' && Number.isFinite(accuracy) ? Math.round(accuracy) : null
-  return { fix: { lat, lng, accuracyM } }
+  return {
+    fix: {
+      lat,
+      lng,
+      accuracyM,
+      fixAt: typeof raw.fixAt === 'string' ? raw.fixAt : null,
+      speedMph: num(raw.speedMph, 0, 250),
+      headingDeg: num(raw.headingDeg, 0, 360),
+      consent: raw.consent === true,
+    },
+  }
 }
 
-/** `POST /l/<token>/ping` — one tap. */
+const DONE_MESSAGE = 'Delivery is complete — sharing has stopped. Thank you.'
+
+/** `POST /l/<token>/ping` — one fix from the open page (a tap or the watch). */
 async function pingRoute(token: string, event: FnUrlEvent) {
   const link = await activeLink(token, 'CARRIER_PING')
   if (!link?.loadId) return reply(404, { error: LINK_GONE })
+
+  // A load that is delivered or closed takes no more locations, whatever the page thinks.
+  const loadRow = await getRow(LOAD_TABLE, { id: link.loadId })
+  if (loadRow && loadIsClosed(loadRow as { status?: string | null; deliveredAt?: string | null })) {
+    return reply(410, { error: DONE_MESSAGE, done: true })
+  }
 
   const body = event.isBase64Encoded && event.body
     ? Buffer.from(event.body, 'base64').toString('utf-8')
@@ -530,6 +607,10 @@ async function pingRoute(token: string, event: FnUrlEvent) {
   const read = readFix(body)
   if ('error' in read) return reply(400, { error: read.error })
   const { fix } = read
+
+  // No row of any kind exists for a link whose driver has not agreed.
+  const firstConsent = !link.consentAt
+  if (firstConsent && !fix.consent) return reply(403, { error: 'consent' })
 
   if (fix.accuracyM != null && fix.accuracyM > MAX_ACCURACY_M) {
     return reply(409, { error: 'Location too imprecise — turn on precise location' })
@@ -545,23 +626,34 @@ async function pingRoute(token: string, event: FnUrlEvent) {
   }
 
   const nowIso = new Date(now).toISOString()
+  // The list a person reads gets the first fix and then one per half hour; the
+  // breadcrumb store gets every fix. The link's counter guard below lets only one
+  // concurrent ping through, so this snapshot decision cannot double-log.
+  const lastLog = Date.parse(String((link as unknown as Row).lastLogPingAt ?? ''))
+  const logCheckCall = Number.isNaN(lastLog) || now - lastLog >= CHECK_CALL_GAP_MS
+
   // The counter moves first: it is the guard, and a tap that is refused must not
-  // leave an event row behind claiming the freight was there.
+  // leave a row behind claiming the freight was there.
+  const sets = ['lastPingAt = :now', 'lastPingLat = :lat', 'lastPingLng = :lng', 'lastPingAccuracyM = :acc', 'updatedAt = :now']
+  const values: Record<string, unknown> = {
+    ':now': nowIso,
+    ':lat': fix.lat,
+    ':lng': fix.lng,
+    ':acc': fix.accuracyM,
+    ':one': 1,
+    ':max': MAX_LINK_PINGS,
+    ':cutoff': new Date(now - MIN_PING_GAP_MS).toISOString(),
+  }
+  // Set once, server clock: a later ping never moves the moment the driver agreed.
+  if (firstConsent) sets.push('consentAt = if_not_exists(consentAt, :now)')
+  if (logCheckCall) sets.push('lastLogPingAt = :now')
   try {
     await ddb.send(new UpdateCommand({
       TableName: TRACKING_LINK_TABLE,
       Key: { id: token },
-      UpdateExpression: 'SET lastPingAt = :now, lastPingLat = :lat, lastPingLng = :lng, lastPingAccuracyM = :acc, updatedAt = :now ADD pingCount :one',
+      UpdateExpression: `SET ${sets.join(', ')} ADD pingCount :one`,
       ConditionExpression: '(attribute_not_exists(pingCount) OR pingCount < :max) AND (attribute_not_exists(lastPingAt) OR lastPingAt < :cutoff)',
-      ExpressionAttributeValues: {
-        ':now': nowIso,
-        ':lat': fix.lat,
-        ':lng': fix.lng,
-        ':acc': fix.accuracyM,
-        ':one': 1,
-        ':max': MAX_LINK_PINGS,
-        ':cutoff': new Date(now - MIN_PING_GAP_MS).toISOString(),
-      },
+      ExpressionAttributeValues: values,
     }))
   } catch (err) {
     if ((err as { name?: string } | null)?.name === 'ConditionalCheckFailedException') {
@@ -570,32 +662,46 @@ async function pingRoute(token: string, event: FnUrlEvent) {
     throw err
   }
 
-  await ddb.send(new PutCommand({
-    TableName: LOAD_CHECK_CALL_TABLE,
-    Item: {
-      id: randomUUID(),
-      loadId: link.loadId,
-      shipmentId: link.shipmentId,
-      loadCarrierId: link.loadCarrierId ?? null,
-      at: nowIso,
-      type: 'TRACKING_PING',
-      source: 'LINK',
-      lat: fix.lat,
-      lng: fix.lng,
-      accuracyM: fix.accuracyM,
-      createdBy: `link:${token.slice(0, 8)}`,
-      createdAt: nowIso,
-      updatedAt: nowIso,
-    },
-  }))
+  const truckNumber = (loadRow as { truckNumber?: unknown } | null)?.truckNumber
+  await putPing({ ddb, table: TRUCK_LOCATION_HISTORY_TABLE }, {
+    loadId: link.loadId,
+    unitNumber: typeof truckNumber === 'string' ? truckNumber : null,
+    at: resolveFixAt(fix.fixAt, nowIso),
+    lat: fix.lat,
+    lng: fix.lng,
+    source: 'link',
+    accuracyM: fix.accuracyM,
+    speedMph: fix.speedMph,
+    headingDeg: fix.headingDeg,
+    nowIso,
+  })
+
+  if (logCheckCall) {
+    await ddb.send(new PutCommand({
+      TableName: LOAD_CHECK_CALL_TABLE,
+      Item: {
+        id: randomUUID(),
+        loadId: link.loadId,
+        shipmentId: link.shipmentId,
+        loadCarrierId: link.loadCarrierId ?? null,
+        at: nowIso,
+        type: 'TRACKING_PING',
+        source: 'LINK',
+        lat: fix.lat,
+        lng: fix.lng,
+        accuracyM: fix.accuracyM,
+        ...(firstConsent ? { note: `Driver consented (${CONSENT_VERSION})` } : {}),
+        createdBy: `link:${token.slice(0, 8)}`,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      },
+    }))
+  }
 
   let eta: { at: string; miles: number; driveMinutes: number; lateBy: number | null } | null = null
-  if (link.loadCarrierId) {
-    const [loadRow, carrierRow] = await Promise.all([
-      getRow(LOAD_TABLE, { id: link.loadId }),
-      getRow(LOAD_CARRIER_TABLE, { id: link.loadCarrierId }),
-    ])
-    if (loadRow && carrierRow) {
+  if (link.loadCarrierId && loadRow) {
+    const carrierRow = await getRow(LOAD_CARRIER_TABLE, { id: link.loadCarrierId })
+    if (carrierRow) {
       const stops = parseJson<Stop[]>(loadRow.stops) ?? []
       const delivery = [...stops].reverse().find((s) => s.type === 'delivery')
       const stopLat = delivery?.address?.lat ?? null
@@ -612,17 +718,20 @@ async function pingRoute(token: string, event: FnUrlEvent) {
           driveMinutes: computed.driveMinutes,
           lateBy: computed.lateBy,
         }
-        await ddb.send(new UpdateCommand({
-          TableName: LOAD_CARRIER_TABLE,
-          Key: { id: link.loadCarrierId },
-          UpdateExpression: 'SET deliveryEtaAt = :eta, updatedAt = :now',
-          ExpressionAttributeValues: { ':eta': computed.etaAt, ':now': nowIso },
-        }))
+        const lastWrite = Date.parse(String((carrierRow as { updatedAt?: unknown }).updatedAt ?? ''))
+        if (Number.isNaN(lastWrite) || now - lastWrite >= ETA_WRITE_GAP_MS) {
+          await ddb.send(new UpdateCommand({
+            TableName: LOAD_CARRIER_TABLE,
+            Key: { id: link.loadCarrierId },
+            UpdateExpression: 'SET deliveryEtaAt = :eta, updatedAt = :now',
+            ExpressionAttributeValues: { ':eta': computed.etaAt, ':now': nowIso },
+          }))
+        }
       }
     }
   }
 
-  return reply(200, { ok: true, at: nowIso, eta })
+  return reply(200, { ok: true, at: nowIso, eta, nextInMin: SHARE_EVERY_MIN })
 }
 
 // ── Step E: the carrier upload portal ───────────────────────────────────────

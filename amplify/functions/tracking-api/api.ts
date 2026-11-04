@@ -9,11 +9,12 @@
  *
  * What this file may not do is as important as what it does.
  *
- * • It writes nothing but the `Integration` table. No Shipment, Load, Order,
+ * • It writes nothing but the `Integration` table, with one exception: a verified
+ *   delivery from a TRACKING provider is filed as load breadcrumbs (and the
+ *   subscription's counters) by `./providerTracking`. No Shipment, Load, Order,
  *   Carrier, Invoice or FactoringItem is created, updated or voided here, and the
- *   Lambda has no grant that would let it — a webhook in step J is a *receipt*, not
- *   a consumer. Acting on what a provider says is step K's Workflows, behind the
- *   release gate where it belongs.
+ *   Lambda has no grant that would let it. Acting on what a provider says beyond
+ *   that is step K's Workflows, behind the release gate where it belongs.
  * • It answers a voided shipment with `status: 'VOIDED'`, never 404: a PRO is
  *   permanent and an outside system must not be told the freight never existed.
  * • Every refusal that could tell an attacker something — a wrong secret, an
@@ -40,6 +41,7 @@ import {
   type ApiStopInput,
 } from '../_shared/openApi'
 import { WEBHOOK_TOLERANCE_SECONDS, verifyWebhookSignature, webhookEventId } from '../_shared/webhook'
+import { consumeTrackingDelivery, isTrackingProvider } from './providerTracking'
 import { mergeInsurancePolicies, applyMcpUpdate, type McpInsurance } from '../../../src/lib/integrations/mcpAdapter'
 
 type Row = Record<string, unknown>
@@ -62,6 +64,9 @@ export interface ApiDeps {
   openApiParamName: string
   /** `/bcat/integrations/<userPoolId>` — a provider's own parameter hangs off it. */
   integrationParamPath: string
+  /** Step AO: unset = read from the Lambda environment, as the handler wires it. */
+  trackingLinkTable?: string
+  truckLocationHistoryTable?: string
 }
 
 const IDX_LOADS_BY_SHIPMENT = 'loadsByShipmentId'
@@ -521,17 +526,16 @@ async function processMcpWebhookBody(deps: ApiDeps, rawBody: string): Promise<{ 
 // ── POST /api/webhooks/<provider> ───────────────────────────────────────────
 
 /**
- * A signed delivery from a provider, receipted and nothing more.
+ * A signed delivery from a provider, receipted.
  *
- * Step J proves the three things Ryne asked for and stops: the signature is ours,
- * the delivery is recent, and a redelivery of the same event writes nothing twice.
- * The dedupe row and the two counters on the provider's own row are the *only*
- * writes — consuming what the provider said (a status, a document, a rate) is step
- * K, through the actions that already own those records.
+ * Step J proves the three things Ryne asked for: the signature is ours, the delivery
+ * is recent, and a redelivery of the same event writes nothing twice. The dedupe row
+ * and the two counters on the provider's own row are the receipt.
  *
  * Step N2 extends this for MyCarrierPackets: a verified carrier.updated event is
- * applied directly to the Carrier row(s) matched by mcNumber. The update is best
- * effort after the receipt is committed; a failure here does not make the provider
+ * applied directly to the Carrier row(s) matched by mcNumber. Step AO does the same
+ * for tracking providers: their positions become load breadcrumbs. Both run after the
+ * receipt is committed and are best effort; a failure here does not make the provider
  * redeliver.
  */
 export async function webhookRoute(deps: ApiDeps, provider: string, event: FnUrlRequest, nowIso: string): Promise<ApiReply> {
@@ -650,5 +654,29 @@ export async function webhookRoute(deps: ApiDeps, provider: string, event: FnUrl
     }
   }
 
-  return { status: 200, body: { ok: true, duplicate: false, eventId, ...mcpResult } }
+  // Step AO. A tracking provider's delivery carries positions: parse, find the
+  // subscription by the reference we gave the provider, and file the breadcrumbs.
+  // Same best-effort rule — the receipt is the answer, and a provider must never be
+  // told to redeliver over a fix we chose not to keep.
+  let pings: { accepted: number; duplicates: number } | undefined
+  if (isTrackingProvider(key)) {
+    try {
+      const outcome = await consumeTrackingDelivery(
+        {
+          ddb: deps.ddb,
+          linkTable: deps.trackingLinkTable ?? process.env.TRACKING_LINK_TABLE_NAME ?? '',
+          loadTable: deps.loadTable,
+          historyTable: deps.truckLocationHistoryTable ?? process.env.TRUCK_LOCATION_HISTORY_TABLE_NAME ?? '',
+        },
+        key,
+        { headers: event.headers ?? {}, body: rawBody },
+        nowIso,
+      )
+      pings = { accepted: outcome.accepted, duplicates: outcome.duplicates }
+    } catch (err) {
+      console.warn('[tracking-api] provider delivery not consumed', String(err))
+    }
+  }
+
+  return { status: 200, body: { ok: true, duplicate: false, eventId, ...mcpResult, ...(pings ? { pings } : {}) } }
 }

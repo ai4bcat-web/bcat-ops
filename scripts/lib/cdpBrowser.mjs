@@ -227,6 +227,18 @@ export async function launchBrowser({
           permissions: ['clipboardReadWrite', 'clipboardSanitizedWrite'],
         }, null)
       },
+      /** Grant the page the geolocation permission (the browser would otherwise leave it at "prompt"). */
+      async grantGeolocation() {
+        await command('Browser.grantPermissions', { origin, permissions: ['geolocation'] }, null)
+      },
+      /** Emulate the device position `navigator.geolocation` reports (fictional coordinates only; Step AO). */
+      async setGeolocation(latitude, longitude, accuracy = 25) {
+        await command('Emulation.setGeolocationOverride', { latitude, longitude, accuracy })
+      },
+      /** Block requests whose URL matches any wildcard pattern (e.g. '*states-10m*'); `[]` unblocks. */
+      async blockUrls(urls) {
+        await command('Network.setBlockedURLs', { urls })
+      },
       /** Save a screenshot at an absolute/relative path; clipToContent captures the page height (capped at 2400px). */
       async screenshot(path, { clipToContent = false } = {}) {
         await mkdir(dirname(path), { recursive: true })

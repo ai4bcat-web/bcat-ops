@@ -24,6 +24,8 @@ vi.mock('@/lib/apiClient', async () => {
     listCheckCallsByLoad: vi.fn(async () => []),
     listTrackingLinksByShipment: vi.fn(async () => []),
     listTruckPositions: vi.fn(async () => []),
+    listLoadBreadcrumbs: vi.fn(async () => []),
+    getLoadRoute: vi.fn(async () => ({ encoded: null, meters: null, seconds: null, source: 'NONE', cached: false, fetchedAt: null, waypoints: [], reason: null })),
     listTruckConfigs,
     listShipmentMessages,
     sendShipmentMessage,
@@ -119,5 +121,17 @@ describe('ShipmentTrackingView', () => {
     renderView()
     await waitFor(() => expect(screen.getByTestId('driver-phone-work')).toHaveTextContent('Work (truck 12): (312) 555-0100'))
     expect(screen.getByTestId('driver-phone-personal')).toHaveTextContent('Personal: (312) 555-0199')
+  })
+
+  it('stacks the strip (with the prefs row inside it), the map, then the panes', async () => {
+    renderView()
+    const strip = screen.getByTestId('tracking-strip')
+    const map = screen.getByTestId('tracking-map-panel')
+    const panes = screen.getByTestId('tracking-panes')
+    expect(within(strip).getByTestId('tracking-prefs-row')).toBeInTheDocument()
+    expect(strip.compareDocumentPosition(map) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(map.compareDocumentPosition(panes) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(screen.queryByTestId('tracking-prefs-button')).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.getByTestId('driver-phone-work')).toBeInTheDocument())
   })
 })

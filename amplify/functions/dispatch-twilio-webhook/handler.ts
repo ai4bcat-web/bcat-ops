@@ -23,6 +23,7 @@ import { normalizePro } from '../../../src/lib/proNumber'
 import type { Load, Stop } from '../../../src/types'
 import { matchDriverByPhone, conversationTitle, callPlan, type DispatchMedia, type DispatchDriver, type DispatchConversation, type DispatchMessage } from '../../../src/lib/dispatch'
 import { bridgeToShipment, type ShipmentBridgeDeps } from './shipmentBridge'
+import { textOfVcard } from '../../../src/lib/locationShare'
 import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda'
 import { GetParameterCommand, SSMClient } from '@aws-sdk/client-ssm'
 
@@ -155,6 +156,9 @@ async function inboundSms(p: Record<string, string>, deps: Deps): Promise<Reply>
   const { conversation, created } = await store.ensureConversation(from, roster, matchDriverByPhone)
 
   const media: DispatchMedia[] = []
+  // Step AO: an iPhone "Share My Location" arrives as a vCard attachment; its map URL / GEO line
+  // is what the shipment bridge reads. The stored message and S3 object are unchanged.
+  let vcardText: string | null = null
   const n = Math.min(Number(p.NumMedia ?? 0) || 0, MAX_INBOUND_MEDIA)
   for (let i = 0; i < n; i += 1) {
     const url = p[`MediaUrl${i}`]
@@ -165,6 +169,9 @@ async function inboundSms(p: Record<string, string>, deps: Deps): Promise<Reply>
       const key = `${MEDIA_PREFIX}/in/${conversation.id}/${sid}-${i}.${extensionFor(contentType)}`
       await deps.putObject(key, got.bytes, contentType)
       media.push({ key, contentType })
+      if (!vcardText && /^text\/(?:x-)?vcard\b/i.test(contentType)) {
+        vcardText = textOfVcard(new TextDecoder().decode(got.bytes))
+      }
     } catch (err) {
       console.error('[dispatch-webhook] media download failed', { sid, i, err: String(err) })
     }
@@ -204,9 +211,10 @@ async function inboundSms(p: Record<string, string>, deps: Deps): Promise<Reply>
   }
 
   // A text from a driver also lands in their shipment's thread when exactly one shipment is theirs to answer.
-  if (deps.shipmentBridge && updated.driverId && body) {
+  const bridgeBody = body || vcardText || ''
+  if (deps.shipmentBridge && updated.driverId && bridgeBody) {
     try {
-      const bridged = await bridgeToShipment(deps.shipmentBridge, { driverId: updated.driverId, from, body, sid })
+      const bridged = await bridgeToShipment(deps.shipmentBridge, { driverId: updated.driverId, from, body: bridgeBody, sid })
       if (bridged) console.log('[dispatch-webhook] text bridged to shipment thread', { driverId: updated.driverId, shipmentId: bridged.shipmentId })
     } catch (err) {
       console.error('[dispatch-webhook] shipment bridge failed', { sid, err: String(err) })

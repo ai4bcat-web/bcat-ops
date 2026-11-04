@@ -137,8 +137,7 @@ describe('TrackingSection', () => {
     expect(typeof setNextCheckCall.mock.calls[0][0]).toBe('string')
   })
 
-  // Map coverage is in TrackingDetailPanel.test.tsx and TrackingSection mount-of-shared-sections test above.
-  // The FleetMiniMap was replaced with TrackingDetailPanel which uses tracking-detail-map testid.
+  // Map coverage: map/*.test.ts(x) and components/TrackingSection.test.tsx.
 
   // Twilio is unconfigured on dev and SES is denied there, so a link is routinely
   // created and copied rather than sent. The timeline must not claim otherwise.

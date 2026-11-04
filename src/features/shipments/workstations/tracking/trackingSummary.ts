@@ -4,6 +4,7 @@
  * and who to call at the carrier. No React, no I/O; the caller owns the clock.
  */
 import { checkCallState, type CheckCallState } from '@/lib/checkCalls'
+import { formatBoardDateTime } from '@/lib/date'
 import type { LastKnownFix } from '@/lib/trackingTimeline'
 import type { DriverPhones } from '@/lib/workPhone'
 import type { ShipmentBundle } from '@/types/tms'
@@ -21,6 +22,11 @@ export interface TrackingSummary {
   /** null = not due yet (not delivered) or unknowable. */
   pod: Exclude<PodState, 'NOT_DUE'> | null
   carrier: { label: string; contactName: string | null; phone: string | null; email: string | null }
+}
+
+/** "Nov 4, 3:00 PM" / "Nov 4, 3:00 PM (est.)": the strip's ETA, which the map header repeats verbatim. */
+export function etaText(eta: NonNullable<TrackingSummary['eta']>): string {
+  return `${formatBoardDateTime(eta.at)}${eta.estimated ? ' (est.)' : ''}`
 }
 
 const MINUTE_MS = 60_000

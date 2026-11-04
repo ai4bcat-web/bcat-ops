@@ -82,6 +82,12 @@ describe('PROVIDERS', () => {
     expect(liveCapabilitiesOf(descriptorOf('OTR')!)).toContain('factor')
   })
 
+  it('does not claim a live `track` capability for any TRACKING-category provider: only the STUB port exists', () => {
+    const tracking = PROVIDERS.filter((d) => d.category === 'TRACKING' && d.capabilities.includes('track'))
+    expect(tracking.map((d) => d.key)).toEqual(expect.arrayContaining(['MACROPOINT', 'TRUCKER_TOOLS', 'LOAD_MARKET']))
+    for (const d of tracking) expect(liveCapabilitiesOf(d), d.key).not.toContain('track')
+  })
+
   it('gives every not-applicable provider a reason and no live check', () => {
     const notApplicable = PROVIDERS.filter((d) => !isApplicable(d)).map((d) => d.key)
     expect(notApplicable).toEqual(['CONVOY', 'FREIGHTLINK', 'TRIUMPH', 'QUICKBOOKS_DESKTOP', 'SAGE50'])

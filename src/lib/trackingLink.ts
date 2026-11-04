@@ -33,6 +33,7 @@ import type {
   TrackingViewReference,
   TrackingViewStop,
 } from '../types/tms'
+import { currentFix, thinFixes, type TrackingFix } from './trackingPings'
 import type { LastKnownFix } from './trackingTimeline'
 import { MAX_SMS_BODY } from './dispatch'
 
@@ -114,7 +115,7 @@ export function linkExpiry(
   if (Number.isNaN(now)) throw new Error('linkExpiry needs a valid timestamp')
 
   let expires: number
-  if (kind === 'CARRIER_PING') {
+  if (kind === 'CARRIER_PING' || kind === 'PROVIDER_TRACK') {
     const hours = settings?.trackingLinkExpiryHours
     const appt = Date.parse(lastDeliveryAppt ?? '')
     const base = Number.isNaN(appt) ? now : appt
@@ -208,9 +209,40 @@ export interface CustomerViewInput {
   events?: LoadCheckCallRecord[] | null
   /** The newest fix from `lastKnownPosition`, already merged across sources. */
   position?: LastKnownFix | null
+  /** Step AO: every fix of the tracking window, all sources. Absent = no map. */
+  fixes?: TrackingFix[] | null
+  /** Step AO: the cached route's encoded polyline for `routeLoadOf(...)`, when one exists. */
+  route?: string | null
   link: TrackingLinkRecord
   division?: Division | null
   nowIso: string
+}
+
+const TRAIL_GAP_MIN = 15
+const TRAIL_MAX = 96
+/** A staff-logged position newer than the newest ping by more than this has no ping of its own. */
+const OWN_PING_SLACK_MS = 2 * 60_000
+
+const round3 = (n: number): number => Math.round(n * 1000) / 1000
+
+/** The stops that carry coordinates, as a route's waypoints: first pickup, middle stops (≤ 8), last delivery. Full precision. */
+export function routeWaypoints(stops: Stop[] | null | undefined): Array<{ type: 'pickup' | 'delivery' | 'stop'; lat: number; lng: number }> {
+  const located = [...(stops ?? [])]
+    .sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0))
+    .filter((s) => typeof s.address?.lat === 'number' && typeof s.address?.lng === 'number' &&
+      Number.isFinite(s.address.lat) && Number.isFinite(s.address.lng))
+  if (located.length === 0) return []
+  const pt = (s: Stop, type: 'pickup' | 'delivery' | 'stop') => ({ type, lat: s.address!.lat as number, lng: s.address!.lng as number })
+  if (located.length === 1) return [pt(located[0], located[0].type)]
+  const middle = located.slice(1, -1).slice(0, 8).map((s) => pt(s, 'stop'))
+  return [pt(located[0], 'pickup'), ...middle, pt(located[located.length - 1], 'delivery')]
+}
+
+/** The leg the customer's map and route describe: the active assignment's load, else the first leg. */
+export function routeLoadOf(loads: ShipmentLoad[], loadCarriers: LoadCarrierRecord[] | null | undefined): ShipmentLoad | null {
+  const ordered = [...loads].sort((a, b) => Number(a.leg ?? 0) - Number(b.leg ?? 0))
+  const active = (loadCarriers ?? []).find((lc) => lc.status === 'ACTIVE')
+  return ordered.find((l) => l.id === active?.loadId) ?? ordered[0] ?? null
 }
 
 /**
@@ -218,7 +250,8 @@ export interface CustomerViewInput {
  *
  * The carrier appears only when the link itself was minted with `showCarrier`, and
  * then by name alone — never the driver, never a phone number. The position is
- * dropped entirely, not nulled, when the link hides it.
+ * dropped entirely, not nulled, when the link hides it. The map (stops, route, trail)
+ * follows the same rule and carries no source, accuracy, speed or reference.
  */
 export function customerView(input: CustomerViewInput): CustomerTrackingView {
   const { link, shipment } = input
@@ -249,12 +282,37 @@ export function customerView(input: CustomerViewInput): CustomerTrackingView {
   const latest = latestEvent(input.events)
   if (latest != null) view.lastUpdate = { at: latest.at, type: latest.type }
 
-  if (link.showPosition !== false && input.position != null) {
-    view.position = {
-      lat: Math.round(input.position.lat * 1000) / 1000,
-      lng: Math.round(input.position.lng * 1000) / 1000,
-      at: input.position.at,
-      description: input.position.description,
+  if (link.showPosition !== false) {
+    // Every source is on `fixes`; the timeline's own newest fix only wins when a person
+    // logged a position that has no ping of its own (a staff check call with coordinates).
+    const cur = input.fixes?.length ? currentFix(input.fixes, Date.parse(input.nowIso)) : null
+    const staff = input.position
+    const staffNewer =
+      staff != null && (cur == null || Date.parse(staff.at) - Date.parse(cur.fix.at) > OWN_PING_SLACK_MS)
+    if (staffNewer && staff) {
+      view.position = { lat: round3(staff.lat), lng: round3(staff.lng), at: staff.at, description: staff.description }
+    } else if (cur) {
+      view.position = {
+        lat: round3(cur.fix.lat),
+        lng: round3(cur.fix.lng),
+        at: cur.fix.at,
+        description: cur.fix.place,
+        ...(cur.fix.approx ? { approx: true as const } : {}),
+      }
+    }
+
+    if (input.fixes != null) {
+      const leg = routeLoadOf(input.loads, input.loadCarriers)
+      view.map = {
+        stops: routeWaypoints(leg?.stops).map((w) => ({ type: w.type, lat: round3(w.lat), lng: round3(w.lng) })),
+        route: input.route ?? null,
+        trail: thinFixes(input.fixes, TRAIL_GAP_MIN, TRAIL_MAX).map((f) => ({
+          lat: round3(f.lat),
+          lng: round3(f.lng),
+          at: f.at,
+          ...(f.approx ? { approx: true as const } : {}),
+        })),
+      }
     }
   }
 
@@ -271,7 +329,31 @@ export interface CarrierViewInput {
   link: TrackingLinkRecord
   /** The desk the driver should call. Falls back to the contact snapshot on the link. */
   contactPhone?: string | null
+  /** The brokerage's name for the consent text. */
+  broker?: string | null
   nowIso: string
+}
+
+/** How often the driver's page posts a fix while it is open. A server value, so it can change without shipping the page. */
+export const SHARE_EVERY_MIN = 5
+/** Bump when the consent wording changes; recorded with the consent. */
+export const CONSENT_VERSION = 'ao-1'
+/** The statuses at which a load is done as far as sharing goes. */
+const CLOSED_STATUSES: Record<string, true> = { DELIVERED: true, INVOICING: true, CANCELED: true }
+
+/** A closed load stops accepting a driver's location: delivered, invoicing, canceled, or a delivery time on file. */
+export function loadIsClosed(load: { status?: string | null; deliveredAt?: string | null }): boolean {
+  return Boolean(load.deliveredAt) || CLOSED_STATUSES[load.status ?? ''] === true
+}
+
+/** The wording the driver agrees to. Rendered verbatim by the page; versioned by `CONSENT_VERSION`. */
+export function consentText(broker: string, loadNumber: string): string {
+  return (
+    `${broker} will receive this phone's location while this page is open — about every ${SHARE_EVERY_MIN} minutes — ` +
+    `until load ${loadNumber} is delivered or you tap Stop sharing. It is used only to track this load. ` +
+    `It is shown to ${broker} dispatch and, as a map position, to the customer whose freight you are hauling. ` +
+    'We keep it for 90 days. You can stop at any time; nothing is collected when the page is closed.'
+  )
 }
 
 /**
@@ -295,13 +377,23 @@ export function carrierView(input: CarrierViewInput): CarrierTrackingView {
     }))
 
   const status = load.status ?? 'SOURCING'
+  const loadNumber = load.loadNumber ?? ''
   return {
-    loadNumber: load.loadNumber ?? '',
+    loadNumber,
     status,
     statusLabel: humanStatus(status),
     stops,
     nextStop,
     pings,
+    share: {
+      everyMin: SHARE_EVERY_MIN,
+      consentRequired: !link.consentAt,
+      consentVersion: CONSENT_VERSION,
+      consentText: consentText(input.broker?.trim() || BROKER_FALLBACK, loadNumber),
+      active: !loadIsClosed(load),
+      lastPingAt: link.lastPingAt ?? null,
+      pingCount: link.pingCount ?? 0,
+    },
     contactPhone: input.contactPhone?.trim() || link.contactPhone?.trim() || null,
     generatedAt: input.nowIso,
   }

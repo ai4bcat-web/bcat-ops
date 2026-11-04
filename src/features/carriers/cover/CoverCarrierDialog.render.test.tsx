@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   bundle: vi.fn(),
   refresh: vi.fn(),
   carriers: [] as unknown[],
+  loading: false,
   toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() },
 }))
 
@@ -27,7 +28,7 @@ vi.mock('@/lib/apiClient', () => ({
   getShipmentBundle: mocks.bundle,
 }))
 vi.mock('@/hooks/useCarriers', () => ({
-  useCarriers: () => ({ carriers: mocks.carriers, loading: false, error: null, refresh: mocks.refresh, replace: vi.fn() }),
+  useCarriers: () => ({ carriers: mocks.carriers, loading: mocks.loading, error: null, refresh: mocks.refresh, replace: vi.fn() }),
 }))
 vi.mock('sonner', () => ({ toast: mocks.toast }))
 
@@ -70,6 +71,7 @@ function enterRate(value = '1500') {
 beforeEach(() => {
   vi.clearAllMocks()
   mocks.carriers = []
+  mocks.loading = false
   mocks.preview.mockResolvedValue(live())
   mocks.refresh.mockResolvedValue(undefined)
   mocks.bundle.mockResolvedValue({ shipment: { id: 'shp-1', updatedAt: 'S-UPD' }, loads: [{ id: 'load-1', updatedAt: 'L-UPD' }] })
@@ -91,6 +93,17 @@ describe('CoverCarrierDialog', () => {
     expect(mocks.cover).toHaveBeenCalledWith({ loadId: 'load-1', expectedUpdatedAt: 'L-UPD', carrierId: 'car-1', carrierRateCents: 150_000 })
     await waitFor(() => expect(onClose).toHaveBeenCalled())
     expect(onCovered).toHaveBeenCalled()
+  })
+
+  it('a lookup submitted while the directory is still loading runs when it finishes, not never', async () => {
+    mocks.loading = true
+    mocks.carriers = [carrierRow({ status: 'ACTIVE', mcpStatus: 'ACCEPTABLE' })]
+    const view = renderDialog()
+    await lookUp('MC 900001')
+    expect(screen.queryByTestId('cover-directory')).toBeNull()
+    mocks.loading = false
+    view.rerender(<CoverCarrierDialog shipmentId="shp-1" shipmentNumber="S000001" onClose={onClose} onCovered={onCovered} />)
+    expect(await screen.findByTestId('cover-directory')).toBeTruthy()
   })
 
   it('will not assign until a rate is entered', async () => {

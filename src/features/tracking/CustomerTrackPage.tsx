@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { fetchCustomerTracking, TrackingError, type CustomerTrackingView } from '@/lib/trackingClient'
-import { FleetMiniMap } from '@/features/dashboard/FleetMiniMap'
-import type { TruckLocation } from '@/lib/apiClient'
+import { RouteMapView } from '@/features/shipments/workstations/tracking/map/RouteMapView'
+import { buildMapModel, publicModelInput } from '@/features/shipments/workstations/tracking/map/mapModel'
 import type { ShipmentStatus } from '@/types/tms'
 import { TmsAlert, TmsAvatar, TmsCard, TmsMetaList, TmsPublicFrame, TmsTimeline } from '@/features/tms/kit'
 import type { TmsTimelineItem } from '@/features/tms/kit'
@@ -54,11 +54,9 @@ export function CustomerTrackPage() {
     return () => { alive = false; clearInterval(t) }
   }, [token])
 
-  const location: TruckLocation[] = useMemo(() => (
-    view?.position
-      ? [{ truckId: 'this', unitNumber: view.number, lat: view.position.lat, lon: view.position.lng, locatedAt: view.position.at, description: view.position.description ?? undefined, source: 'tracking', syncedAt: view.generatedAt } as unknown as TruckLocation]
-      : []
-  ), [view])
+  // The shared map in public mode: the thinned trail, the cached route, the current marker —
+  // never a source, an accuracy or a tooltip. `now` moves with each refresh.
+  const model = useMemo(() => (view?.position ? buildMapModel(publicModelInput(view, now)) : null), [view, now])
 
   // A stop the truck has already left means in transit, even when the status lags.
   const step = !view || view.status === 'CANCELED'
@@ -103,9 +101,11 @@ export function CustomerTrackPage() {
             <TmsTimeline items={statusItems} compact ariaLabel="Shipment progress" />
           </TmsCard>
 
-          {view.position && (
+          {view.position && model && (
             <TmsCard flush>
-              <FleetMiniMap locations={location} />
+              <div className="tms-public-map">
+                <RouteMapView model={model} fitKey={token} />
+              </div>
               <div className="tms-public-caption">
                 Last seen {view.position.description ? `near ${view.position.description}` : `at ${view.position.lat.toFixed(3)}, ${view.position.lng.toFixed(3)}`} · {ago(view.position.at, now)}
               </div>

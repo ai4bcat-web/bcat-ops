@@ -1,0 +1,3 @@
+Docs/tms-build/screenshots/ad/AD01-find-card.png
+Docs/tms-build/screenshots/ad/AD02-invite-dialog.png
+Docs/tms-build/screenshots/ad/AD03-carrier-sales-launch.png

@@ -29,7 +29,8 @@ export async function verifyTrackingUi({ storage, shipmentIds, origin = DEV_ORIG
     })()`), 'shipment Tracking tab with computed ETA and thread')
     const detail = await evaluate(`(() => {
       const root = document.querySelector('[data-testid="tracking-detail"]');
-      return { map: !!root.querySelector('[data-testid="tracking-detail-map"]'),
+      // Step AO: the detail-panel map card is gone; the shared map panel sits above the old cards.
+      return { map: !!document.querySelector('[data-testid="tracking-map-panel"]'),
         cadence: !!root.querySelector('[data-testid="tracking-cadence"]'),
         eta: root.querySelector('[data-testid="tracking-eta"]')?.innerText };
     })()`)

@@ -36,7 +36,7 @@ import { createWalk } from './lib/uiWalk.mjs'
 import { AA_HOMES } from './lib/aaRoutes.mjs'
 import { requiredPatterns, missingFromRoutes } from './devVerifyS2.mjs'
 import { discoverDevSuffix, devTable, doc } from './devVerifyU.mjs'
-import { PutCommand, DeleteCommand } from '@aws-sdk/lib-dynamodb'
+import { PutCommand, DeleteCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb'
 
 const DEV_APPSYNC = /^https:\/\/f5iqzdpidzalvjys7yxijn5ave\.appsync-api\.us-east-1\.amazonaws\.com\/graphql$/
 const SHOTS = resolve('Docs/tms-build/screenshots/ah')
@@ -98,7 +98,7 @@ async function labelFacts() {
   const text = await readFile(resolve('src/features/shipments/form/labels.ts'), 'utf8')
   const ids = new Set()
   for (const m of text.matchAll(/def\('(\w+)',\s*'([\w-]+)'/g)) ids.add(`f-${m[1]}-${m[2]}`)
-  for (let n = 1; n <= 6; n += 1) ids.add(`f-customer-email-${n}`)
+  for (let n = 1; n <= 2; n += 1) ids.add(`f-customer-email-${n}`)
   const list = (name) => {
     const at = text.indexOf(`${name} = [`)
     return at < 0 ? [] : [...text.slice(at, text.indexOf(']', at)).matchAll(/'(\w+)'/g)].map((m) => m[1])
@@ -457,7 +457,7 @@ const RUNNERS = {
     // Customer
     await pickFrom(b, `${tid('f-customer-name')} input`, CUSTOMER_OPTION, ctx.customerName)
     await fill(b, 'f-customer-hours', '08:00-16:00')
-    for (let n = 1; n <= 6; n += 1) await fill(b, `f-customer-email-${n}`, `zz-ah-${n}-${ctx.ts}@example.invalid`)
+    for (let n = 1; n <= 2; n += 1) await fill(b, `f-customer-email-${n}`, `zz-ah-${n}-${ctx.ts}@example.invalid`)
     await fill(b, 'f-customer-refNo', ctx.refPo)
     // Shipping Requirements
     await fill(b, 'f-shipping-equipmentType', 'Dry Van')
@@ -542,7 +542,7 @@ const RUNNERS = {
     eq('tempF mirror (2-4 °C → °F)', [sr.tempF?.min, sr.tempF?.max], [36, 39])
     eq('form.ship.temp', [form.ship?.temp?.unit, form.ship?.temp?.min, form.ship?.temp?.max], ['C', 2, 4])
     eq('form.ship.truckMiles', form.ship?.truckMiles, 520)
-    eq('form.customer.emails', form.customer?.emails?.length, 6)
+    eq('form.customer.emails', form.customer?.emails?.length, 2)
     eq('form.customer.hours', form.customer?.hours, '08:00-16:00')
     eq('form.instructions.special length', form.instructions?.special?.length, 420)
     eq('form.instructions.rateCon length', form.instructions?.rateCon?.length, 260)
@@ -846,10 +846,16 @@ async function setupFixtures(ctx) {
   })
   ctx.customerId = String((customer.customer ?? customer).id)
   ctx.locNames = { shipper: `ZZ AH Shipper ${ts}`, receiver: `ZZ AH Receiver ${ts}`, pick2: `ZZ AH Second Pick ${ts}`, stop2: `ZZ AH Second Stop ${ts}` }
-  const places = [['shipper', 'Chicago', 'IL', '60601'], ['receiver', 'Dallas', 'TX', '75201'], ['pick2', 'Joliet', 'IL', '60431'], ['stop2', 'Waco', 'TX', '76701']]
-  for (const [key, city, state, zip] of places) {
+  const places = [['shipper', 'Chicago', 'IL', '60601', 41.88, -87.63], ['receiver', 'Dallas', 'TX', '75201', 32.78, -96.8], ['pick2', 'Joliet', 'IL', '60431', 41.52, -88.08], ['stop2', 'Waco', 'TX', '76701', 31.55, -97.15]]
+  for (const [key, city, state, zip, lat, lng] of places) {
     const loc = await ctx.dir('UPSERT_LOCATION', { name: ctx.locNames[key], street: '1 ZZ Test Way', city, state, zip, country: 'US' })
-    ctx.locationIds.push(String((loc.location ?? loc).id))
+    const id = String((loc.location ?? loc).id)
+    ctx.locationIds.push(id)
+    // Coordinates normally come from a signed geocode token the harness cannot mint: set them on this run's own ZZ row
+    // so the stop carries geo and Customer Miles can be measured (Distance Matrix, else the labelled estimate).
+    if (ctx.suffix) {
+      await doc.send(new UpdateCommand({ TableName: devTable('Location', ctx.suffix), Key: { id }, ConditionExpression: 'begins_with(#n, :zz)', UpdateExpression: 'SET lat = :lat, lng = :lng, geocodeExpiresAt = :exp, geocodedAt = :now', ExpressionAttributeNames: { '#n': 'name' }, ExpressionAttributeValues: { ':zz': 'ZZ AH ', ':lat': lat, ':lng': lng, ':exp': new Date(Date.now() + 29 * 86_400_000).toISOString(), ':now': new Date().toISOString() } }))
+    }
   }
   ctx.carrierName = `ZZ AH Carrier ${String(ts).slice(-6)}`
   const nextYear = new Date(Date.now() + 365 * 24 * 3600 * 1000).toISOString()

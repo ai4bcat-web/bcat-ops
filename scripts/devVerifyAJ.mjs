@@ -90,7 +90,7 @@ const PLAN_FILES = [
   'src/features/shipments/workstations/tracking/TrackingSummaryStrip.tsx',
   'src/features/shipments/workstations/tracking/trackingSummary.ts',
   'src/features/shipments/workstations/tracking/RecentCheckCalls.tsx',
-  'src/features/shipments/workstations/tracking/TrackingPrefsPopover.tsx',
+  'src/features/shipments/workstations/tracking/TrackingPrefsRow.tsx',
   'src/features/shipments/workstations/tracking/TrackingDrawer.tsx',
   'src/features/documents/DocumentReviewPanel.tsx', 'src/features/documents/DocumentReviewDialog.tsx',
   'src/features/directory/components/TrackingPrefsFields.tsx',
@@ -681,10 +681,12 @@ const RUNNERS = {
         if (t.theme === 'light') {
           expect(/work phone/i.test(facts.target) && facts.target.includes('(312) 555-0102'), `SMS target reads ${JSON.stringify(facts.target)}, expected the truck work phone`)
           await shotFile(b, 'AJ07-drawer-notsent-L')
-          await clickSel(b, tid('tracking-prefs-button'))
-          await b.poll(() => has(b, tid('tracking-prefs-panel')), 'override popover', 10_000)
-          await shotFile(b, 'AJ08-drawer-override-popover-L')
-          await clickSel(b, tid('tracking-prefs-button')).catch(() => {})
+          // Step AO: the prefs control is an always-visible row inside the strip (no button, no popover, no dialog).
+          const prefsRow = await b.evaluate(`(() => { const r = document.querySelector('[data-testid="tracking-prefs-row"]'); return r ? { selects: r.querySelectorAll('select').length, dialogs: document.querySelectorAll('[role="dialog"]').length, inStrip: !!r.closest('[data-testid="tracking-strip"]'), effective: r.querySelector('[data-testid="tracking-prefs-effective"]')?.innerText ?? '' } : null })()`)
+          expect(prefsRow != null, 'the inline tracking-prefs row is missing from the drawer')
+          expect(prefsRow.selects === 3 && prefsRow.inStrip && prefsRow.dialogs === 0, `prefs row has ${prefsRow.selects} selects, inside strip: ${prefsRow.inStrip}, dialogs open: ${prefsRow.dialogs}`)
+          expect(/In force:/.test(prefsRow.effective), `the prefs row read-out says ${JSON.stringify(prefsRow.effective)}`)
+          await shotFile(b, 'AJ08-drawer-prefs-row-L')
         }
         await shotFile(b, `AJ06-drawer-${t.tag}`)
         note.push(t.theme)

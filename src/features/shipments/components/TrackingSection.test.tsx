@@ -3,6 +3,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import { AuthContext } from '@/hooks/useAuth'
+import { encodePolyline } from '@/lib/polyline'
 import { TrackingSection } from './TrackingSection'
 import type { ShipmentActions } from '../useShipmentActions'
 import type {
@@ -27,6 +28,10 @@ vi.mock('@/lib/apiClient', async () => {
     listTrackingLinksByShipment: vi.fn(async () => []),
     listTruckPositions: vi.fn(async () => []),
     listTruckConfigs: vi.fn(async () => []),
+    getLoadRoute: vi.fn(async () => ({
+      encoded: encodePolyline([{ lat: 41.525, lng: -88.0817 }, { lat: 32.7767, lng: -96.797 }]), meters: null, seconds: null,
+      source: 'ESTIMATE', cached: false, fetchedAt: null, waypoints: [], reason: null,
+    })),
     listShipmentMessages,
     sendShipmentMessage,
     runCheckCallPlan,
@@ -105,9 +110,10 @@ describe('TrackingSection delivery ETA', () => {
 })
 
 describe('TrackingSection shared detail pane', () => {
-  it('mounts the shared map, ETA, cadence and thread sections', async () => {
+  it('mounts the route map panel (not the retired detail map), ETA, cadence and thread sections', async () => {
     renderTab()
-    await waitFor(() => expect(screen.getByTestId('tracking-detail-map')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByTestId('tracking-map-panel')).toBeInTheDocument())
+    expect(screen.queryByTestId('tracking-detail-map')).not.toBeInTheDocument()
     expect(screen.getByTestId('tracking-eta')).toBeInTheDocument()
     expect(screen.getByTestId('tracking-cadence')).toBeInTheDocument()
     // Two panes, one per channel, each its own thread.
@@ -142,7 +148,14 @@ describe('TrackingSection shared detail pane', () => {
     expect(eta.textContent).toMatch(/\d+ min late/)
   })
 
-  it('draws the last position and the route to the consignee with no Google key', async () => {
+  it('keeps the tracking prefs inside the strip, not in the tab header', async () => {
+    renderTab()
+    const strip = await screen.findByTestId('tracking-strip')
+    expect(within(strip).getByTestId('tracking-prefs-row')).toBeInTheDocument()
+    expect(screen.queryByTestId('tracking-prefs-button')).not.toBeInTheDocument()
+  })
+
+  it('draws the last position, the consignee and the route with no Google key', async () => {
     const pingLoad = {
       ...load,
       lastKnownLat: 41.525, lastKnownLng: -88.0817,
@@ -158,11 +171,12 @@ describe('TrackingSection shared detail pane', () => {
       </AuthContext.Provider>,
     )
 
-    const map = await screen.findByTestId('tracking-detail-map')
-    // The fallback carries the real geometry, not a "not configured" notice.
-    await waitFor(() => expect(map.querySelector('svg')).toBeInTheDocument())
-    expect(map.querySelector('line')).toBeInTheDocument()
-    expect(map.textContent).not.toContain('Map not configured')
+    const map = await screen.findByTestId('tracking-map')
+    expect(map).toHaveAttribute('data-mode', 'fallback')
+    // The outline carries the real geometry: the consignee pin, the current marker and the route.
+    await waitFor(() => expect(within(map).getByTestId('tracking-map-pin-delivery')).toBeInTheDocument())
+    expect(within(map).getByTestId('tracking-map-current-marker')).toBeInTheDocument()
+    await waitFor(() => expect(within(map).getByTestId('tracking-map-route')).toBeInTheDocument())
   })
 
   it('labels each thread row agent or person and previews the server signature', async () => {

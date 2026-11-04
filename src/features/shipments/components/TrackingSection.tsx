@@ -1,7 +1,7 @@
 /**
  * The Tracking tab of a shipment. The tracking view (strip, SMS and e-mail panes, recent
  * check calls) is the same component the Tracking drawer mounts; below it the page keeps
- * the ETA editor, the shared detail pane (map, computed ETA, cadence) and the full timeline.
+ * the ETA editor, the shared detail pane (computed ETA, cadence) and the full timeline.
  */
 import { useEffect, useState } from 'react'
 import { AlertTriangle, Check, Link2, PhoneCall, Smartphone, Truck, Users } from 'lucide-react'
@@ -18,11 +18,9 @@ import type {
 } from '@/types/tms'
 import { TrackingDetailPanel } from '../workstations/tracking/TrackingDetailPanel'
 import { ShipmentTrackingView } from '../workstations/tracking/ShipmentTrackingView'
-import { TrackingPrefsPopover } from '../workstations/tracking/TrackingPrefsPopover'
 import type { ShipmentActions } from '../useShipmentActions'
 
 const MAPS_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string | undefined
-const MAPS_MAP_ID = import.meta.env.VITE_GOOGLE_MAPS_MAP_ID as string | undefined
 
 const SOURCE_ICON: Record<CheckCallSource, typeof PhoneCall> = {
   MANUAL: PhoneCall,
@@ -75,9 +73,6 @@ export function TrackingSection({ bundle, customer, catalog, actions }: {
             {load.openIncidentCount} open exception{load.openIncidentCount === 1 ? '' : 's'}
           </TmsBadge>
         )}
-        <div className="ml-auto">
-          <TrackingPrefsPopover shipment={shipment} customer={customer} onSaved={() => actions.reload()} />
-        </div>
       </div>
 
       <ShipmentTrackingView bundle={bundle} customer={customer} catalog={catalog} actions={actions} />
@@ -121,7 +116,7 @@ export function TrackingSection({ bundle, customer, catalog, actions }: {
         </TmsCard>
       )}
 
-      {/* The same pane the tracking desk mounts: header, map, computed ETA and cadence. */}
+      {/* The detail pane: header, computed ETA and cadence. The route map is the panel inside the tracking view above. */}
       <TrackingDetailPanel
         row={shipment}
         bundle={bundle}
@@ -129,7 +124,6 @@ export function TrackingSection({ bundle, customer, catalog, actions }: {
         customers={customer ? [customer] : []}
         settings={settings}
         mapsKey={MAPS_KEY}
-        mapsMapId={MAPS_MAP_ID}
         onSavePlan={async (loadId, plan, expectedUpdatedAt) => {
           await saveLoadCheckCallPlan({ loadId, plan, expectedUpdatedAt })
         }}

@@ -367,13 +367,34 @@
 .tms-portal .tms-tracking-drawer-body { display: flex; flex-direction: column; min-height: 100%; }
 .tms-portal .tms-tracking-drawer-body > .tms-tracking-view { flex: 1 1 auto; }
 
-/* Summary strip: one line, every segment truncates. */
+/* Summary strip card: the one-line facts, then (optionally) the inline tracking-prefs row. */
 .tms-shell .tms-strip,
 .tms-portal .tms-strip {
-  display: flex; align-items: center; gap: 12px; min-width: 0; flex: 0 0 auto;
-  padding: 6px 10px; font-size: 12px; white-space: nowrap; overflow: visible;
+  display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 0 0 auto;
+  padding: 6px 10px; font-size: 12px; overflow: visible;
   background: var(--tms-card); border: 1px solid var(--tms-border); border-radius: var(--tms-radius);
 }
+.tms-shell .tms-strip-line,
+.tms-portal .tms-strip-line { display: flex; align-items: center; gap: 12px; min-width: 0; white-space: nowrap; }
+/* Fixed height, fixed select widths, nothing conditional: saving can never move what is below. */
+.tms-shell .tms-strip-line-prefs,
+.tms-portal .tms-strip-line-prefs { height: 28px; flex: 0 0 28px; gap: 8px; }
+.tms-shell .tms-strip-prefs,
+.tms-portal .tms-strip-prefs { display: flex; align-items: center; gap: 8px; min-width: 0; width: 100%; }
+.tms-shell .tms-strip-prefs-label,
+.tms-portal .tms-strip-prefs-label { flex: 0 0 auto; font-weight: 600; }
+.tms-shell .tms-strip-prefs .tms-select,
+.tms-portal .tms-strip-prefs .tms-select { height: 24px; padding-top: 0; padding-bottom: 0; font-size: 12px; flex: 0 0 auto; }
+.tms-shell .tms-strip-prefs .tms-select[data-field='mode'],
+.tms-portal .tms-strip-prefs .tms-select[data-field='mode'] { width: 128px; }
+.tms-shell .tms-strip-prefs .tms-select[data-field='method'],
+.tms-portal .tms-strip-prefs .tms-select[data-field='method'] { width: 150px; }
+.tms-shell .tms-strip-prefs .tms-select[data-field='sms'],
+.tms-portal .tms-strip-prefs .tms-select[data-field='sms'] { width: 168px; }
+.tms-shell .tms-strip-prefs .tms-btn,
+.tms-portal .tms-strip-prefs .tms-btn { height: 24px; flex: 0 0 auto; }
+.tms-shell .tms-strip-prefs-effective,
+.tms-portal .tms-strip-prefs-effective { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tms-shell .tms-strip-seg,
 .tms-portal .tms-strip-seg {
   display: inline-flex; align-items: center; gap: 4px; flex: 0 1 auto; min-width: 0;
@@ -397,12 +418,6 @@
 }
 .tms-shell .tms-strip-menu-edit,
 .tms-portal .tms-strip-menu-edit { display: flex; gap: 6px; padding-top: 4px; }
-.tms-shell .tms-prefs-panel,
-.tms-portal .tms-prefs-panel { min-width: 280px; gap: 8px; }
-.tms-shell .tms-prefs-field,
-.tms-portal .tms-prefs-field { display: grid; grid-template-columns: 90px minmax(0, 1fr); align-items: center; gap: 8px; }
-.tms-shell .tms-prefs-foot,
-.tms-portal .tms-prefs-foot { display: flex; justify-content: flex-end; gap: 6px; }
 .tms-shell .tms-dot,
 .tms-portal .tms-dot { display: inline-block; width: 6px; height: 6px; margin-left: 4px; border-radius: 50%; background: var(--tms-badge-orange); }
 
@@ -465,3 +480,72 @@
 .tms-portal .tms-recent-row > * { overflow: hidden; text-overflow: ellipsis; }
 .tms-shell .tms-recent-row + .tms-recent-row,
 .tms-portal .tms-recent-row + .tms-recent-row { border-top: 1px solid var(--tms-border); }
+
+/* Route map panel: a 28 px header and a 232 px body between the strip and the panes. */
+.tms-shell .tms-map-panel,
+.tms-portal .tms-map-panel {
+  flex: 0 0 auto; min-width: 0;
+  background: var(--tms-card); border: 1px solid var(--tms-border); border-radius: var(--tms-radius);
+}
+.tms-shell .tms-map-head,
+.tms-portal .tms-map-head { display: flex; align-items: center; gap: 8px; min-width: 0; height: 28px; padding: 0 8px; font-size: 12px; white-space: nowrap; }
+.tms-shell .tms-map-head-text,
+.tms-portal .tms-map-head-text { display: inline-flex; align-items: center; gap: 6px; flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.tms-shell .tms-map-head-end,
+.tms-portal .tms-map-head-end { display: inline-flex; align-items: center; gap: 2px; margin-left: auto; }
+.tms-shell .tms-map-chip,
+.tms-portal .tms-map-chip { flex: 0 0 auto; padding: 0 6px; border: 1px solid var(--tms-border); border-radius: 999px; font-size: 11px; line-height: 18px; }
+.tms-shell .tms-map-tone,
+.tms-portal .tms-map-tone { flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%; background: var(--tms-muted); }
+.tms-shell .tms-map-tone-fresh,
+.tms-portal .tms-map-tone-fresh { background: var(--tms-badge-green); }
+.tms-shell .tms-map-tone-aging,
+.tms-portal .tms-map-tone-aging { background: var(--tms-badge-orange); }
+.tms-shell .tms-map-body,
+.tms-portal .tms-map-body { position: relative; height: 232px; border-top: 1px solid var(--tms-border); overflow: hidden; }
+.tms-shell .tms-map-body-inner,
+.tms-portal .tms-map-body-inner { position: relative; width: 100%; height: 100%; }
+.tms-shell .tms-map-google,
+.tms-portal .tms-map-google,
+.tms-shell .tms-map-fallback,
+.tms-portal .tms-map-fallback { width: 100%; height: 100%; }
+.tms-shell .tms-map-svg,
+.tms-portal .tms-map-svg { display: block; }
+.tms-shell .tms-map-caption,
+.tms-portal .tms-map-caption {
+  position: absolute; left: 8px; bottom: 6px; margin: 0; padding: 1px 6px; font-size: 11px;
+  background: var(--tms-card); border: 1px solid var(--tms-border); border-radius: var(--tms-radius);
+}
+.tms-shell .tms-map-empty,
+.tms-portal .tms-map-empty,
+.tms-shell .tms-map-unavailable,
+.tms-portal .tms-map-unavailable { display: flex; align-items: center; justify-content: center; height: 100%; margin: 0; padding: 12px; font-size: 13px; text-align: center; }
+.tms-shell .tms-map-dot,
+.tms-portal .tms-map-dot { position: relative; display: block; width: 8px; height: 8px; border-radius: 50%; background: var(--tms-badge-blue); border: 1px solid var(--tms-card); }
+.tms-shell .tms-map-dot-approx,
+.tms-portal .tms-map-dot-approx { opacity: 0.5; }
+.tms-shell .tms-map-dot-label,
+.tms-portal .tms-map-dot-label { position: absolute; left: 10px; top: -4px; font-size: 9px; white-space: nowrap; color: var(--tms-muted); }
+.tms-shell .tms-map-pin,
+.tms-portal .tms-map-pin {
+  display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%;
+  font-size: 10px; font-weight: 700; color: var(--tms-card); background: var(--tms-muted); border: 2px solid var(--tms-card);
+}
+.tms-shell .tms-map-pin-pickup,
+.tms-portal .tms-map-pin-pickup { background: var(--tms-badge-green); }
+.tms-shell .tms-map-pin-delivery,
+.tms-portal .tms-map-pin-delivery { background: var(--tms-badge-blue); }
+.tms-shell .tms-map-pin-stop,
+.tms-portal .tms-map-pin-stop { width: 10px; height: 10px; }
+.tms-shell .tms-map-current,
+.tms-portal .tms-map-current { position: relative; display: block; width: 16px; height: 16px; border-radius: 50%; background: var(--tms-muted); border: 2px solid var(--tms-card); box-shadow: var(--tms-shadow-pop); }
+.tms-shell .tms-map-current-fresh,
+.tms-portal .tms-map-current-fresh { background: var(--tms-badge-green); }
+.tms-shell .tms-map-current-aging,
+.tms-portal .tms-map-current-aging { background: var(--tms-badge-orange); }
+.tms-shell .tms-map-warn,
+.tms-portal .tms-map-warn { position: absolute; top: -14px; left: 3px; font-weight: 700; color: var(--tms-badge-red); }
+/* A fresh fix wears a ring; no animation (nothing to reflow, nothing to disable for reduced motion). */
+.tms-shell .tms-map-pulse,
+.tms-portal .tms-map-pulse { box-shadow: 0 0 0 5px var(--tms-badge-green-tint); }
+.tms-portal .tms-public-map { position: relative; height: 260px; }
