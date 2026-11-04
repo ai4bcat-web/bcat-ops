@@ -1,7 +1,7 @@
 /**
- * My Brokerage — the settings of the business and the desks run from it.
+ * Settings — the settings of the business and the desks run from it.
  *
- * One page, nine tabs, each its own URL under `/tms/brokerage/*` so a tab can be
+ * One page, eleven tabs, each its own URL under `/tms/brokerage/*` so a tab can be
  * linked and bookmarked. The h1 and the tab strip live here; every tab body is just a
  * body (no title row of its own), which is why `SettingsPage`, `UsersPage`,
  * `CommissionsPage`, `ReportsPage` and `AuditPage` render no heading.
@@ -24,6 +24,7 @@ import { IntegrationsTab } from '@/features/tms/integrations/IntegrationsTab'
 import { CompanyTab } from '@/features/tms/brokerage/company/CompanyTab'
 import { UsersPage } from '@/features/users/UsersPage'
 import { DemoPage } from './DemoPage'
+import { SpotQuoterSettingsPage } from '@/features/tms/settings/SpotQuoterSettingsPage'
 import { useAuth } from '@/hooks/useAuth'
 import { TMS_PAGE_KEY } from '@/lib/navSections'
 
@@ -52,6 +53,7 @@ const TABS: BrokerageTab[] = [
   { key: 'divisions', label: 'Divisions & ownership', path: 'divisions', pages: [] },
   { key: 'integrations', label: 'Integrations', path: 'integrations', pages: [] },
   { key: 'ai-agents', label: 'AI Agents', path: 'ai-agents', pages: [] },
+  { key: 'spot-quoter', label: 'Spot quoter & e-mail', path: 'spot-quoter', pages: [] },
   { key: 'company', label: 'Company', path: 'company', pages: [] },
   { key: 'demo', label: 'Demo', path: 'demo', pages: [TMS_PAGE_KEY] },
 ]
@@ -73,7 +75,7 @@ export function BrokeragePage() {
   const active = activeTab(pathname)
 
   return (
-    <TmsPage title="My Brokerage">
+    <TmsPage title="Settings">
       <TmsTabs
         tabs={visible.map((t) => ({ key: t.key, label: t.label }))}
         active={active}
@@ -96,6 +98,7 @@ export function BrokeragePage() {
         {/* The page carries its own inner tab strip under one path, so the route is a
             wildcard for the same reason Integrations is. */}
         <Route path="ai-agents/*" element={<RequireAdmin><AiAgentsPage /></RequireAdmin>} />
+        <Route path="spot-quoter" element={<RequireAdmin><SpotQuoterSettingsPage /></RequireAdmin>} />
         <Route path="company/*" element={<RequireAdmin><CompanyTab /></RequireAdmin>} />
         <Route path="demo" element={<RequirePage page={[TMS_PAGE_KEY]}><DemoPage /></RequirePage>} />
         {/* An unknown tab is a stale link, not a dead end: Settings is the page's home. */}

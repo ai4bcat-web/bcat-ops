@@ -30,7 +30,7 @@ export const U_KEPT = [
 export const U_REDIRECTS = [
   ['/tms/shipments/view/*', '/tms/shipments/view/zz-x', '/tms/shipments'],
   ['/tms/shipments/view/*', '/tms/shipments/view/all-shipments', '/tms/shipments'],
-  ['/tms/dispatch', '/tms/dispatch', '/tms/shipments'],
+  ['/tms/dispatch', '/tms/dispatch', '/tms/carrier-sales'],
   ['/tms/documents/*', '/tms/documents', '/tms/documents/review'],
   ['/tms/documents/*', '/tms/documents/view/zz-x', '/tms/documents/review'],
   ['/tms/academy/*', '/tms/academy', '/tms/dashboard'],
@@ -44,7 +44,7 @@ export const U_REDIRECTS = [
  */
 export const U_GONE = [
   { path: '/tms/shipments/view/zz-x', routePath: 'shipments/view/*', component: null, target: '/tms/shipments', markers: ['Save as view'] },
-  { path: '/tms/dispatch', routePath: 'dispatch', component: 'DispatchWorkstation', target: '/tms/shipments', markers: ['Covering now', 'No freight needs coverage'] },
+  { path: '/tms/dispatch', routePath: 'dispatch', component: 'DispatchWorkstation', target: '/tms/carrier-sales', markers: ['Covering now', 'No freight needs coverage'] },
   { path: '/tms/documents', routePath: 'documents/*', component: 'DocumentsWorkstation', target: '/tms/documents/review', markers: ['Documents on this shipment'] },
   { path: '/tms/documents/view/zz-x', routePath: 'documents/*', component: 'DocumentsWorkstation', target: '/tms/documents/review', markers: ['Documents on this shipment'] },
   { path: '/tms/academy', routePath: 'academy/*', component: 'AcademyPage', target: '/tms/dashboard', markers: ['Ask the Academy'] },

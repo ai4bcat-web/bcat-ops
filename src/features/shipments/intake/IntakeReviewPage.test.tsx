@@ -7,7 +7,7 @@ import * as api from '@/lib/apiClient'
 import * as auth from '@/hooks/useAuth'
 import type { OwnershipDivisionRecord } from '@/types/tms'
 import { IntakeReviewPage } from './IntakeReviewPage'
-import { intakeRow } from './testFixtures'
+import { completeIntakeRow, intakeRow, reviewed } from './testFixtures'
 
 const BRK = {
   id: 'BRK', code: 'BRK', name: 'Brokerage', brand: null, parentId: null, color: null, sortOrder: 0, active: true,
@@ -19,7 +19,7 @@ vi.mock('@/features/tms/useOwnershipDivisions', () => ({
 }))
 vi.mock('@/components/RepPicker', () => ({ RepPicker: ({ value }: { value: string | null }) => <span>rep:{value}</span> }))
 vi.mock('@/lib/apiClient', () => ({
-  getIntakeLoad: vi.fn(), saveIntakeDraft: vi.fn(), moveIntakeToActive: vi.fn(), dismissIntake: vi.fn(),
+  getIntakeLoad: vi.fn(), saveIntakeDraft: vi.fn(), markIntakeReviewed: vi.fn(), moveIntakeToActive: vi.fn(), dismissIntake: vi.fn(),
   listCustomers: vi.fn(), getTmsSettings: vi.fn(), getWorkflowRun: vi.fn(), linkWorkflowRun: vi.fn(),
   dismissWorkflowRun: vi.fn(), getIntakePdfUrl: vi.fn(),
 }))
@@ -68,7 +68,9 @@ describe('IntakeReviewPage', () => {
     expect(within(status('Commodity')).getByText('Confirmed')).toBeInTheDocument()
   })
 
-  it('keeps Move disabled with the exact list until the missing field is filled and the low-confidence one confirmed', async () => {
+  it('keeps Move disabled with the exact list until the missing field is filled, the low-confidence one confirmed and the load reviewed', async () => {
+    vi.mocked(api.markIntakeReviewed).mockResolvedValue(reviewed(completeIntakeRow({ version: 3 })))
+    vi.mocked(api.saveIntakeDraft).mockResolvedValue(completeIntakeRow({ version: 2 }))
     renderPage()
     await screen.findByDisplayValue('PO-100')
     expect(moveButton()).toBeDisabled()
@@ -76,37 +78,83 @@ describe('IntakeReviewPage', () => {
     fireEvent.change(screen.getByLabelText('Bill to'), { target: { value: 'b1' } })
     expect(moveButton()).toBeDisabled()
     fireEvent.click(screen.getByLabelText('Confirm Weight (lb)'))
-    expect(moveButton()).toBeEnabled()
+    expect(moveButton()).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: 'Mark reviewed' }))
+    await waitFor(() => expect(moveButton()).toBeEnabled())
   })
 
-  it('saves the edits, moves once, and lands on the new shipment', async () => {
-    const saved = intakeRow({ version: 2 })
+  it('saves the edits, marks reviewed, moves once, and lands on the new shipment', async () => {
+    const saved = completeIntakeRow({ version: 2 })
+    const done = reviewed(completeIntakeRow({ version: 3 }))
     vi.mocked(api.saveIntakeDraft).mockResolvedValue(saved)
-    vi.mocked(api.moveIntakeToActive).mockResolvedValue({ intake: saved, shipmentId: 'shp-9', shipmentNumber: 'PRO-9' })
+    vi.mocked(api.markIntakeReviewed).mockResolvedValue(done)
+    vi.mocked(api.moveIntakeToActive).mockResolvedValue({ intake: done, shipmentId: 'shp-9', shipmentNumber: 'PRO-9' })
     renderPage()
     await screen.findByDisplayValue('PO-100')
     fireEvent.change(screen.getByLabelText('Bill to'), { target: { value: 'b1' } })
     fireEvent.click(screen.getByLabelText('Confirm Weight (lb)'))
-    fireEvent.click(moveButton())
-    await waitFor(() => expect(api.moveIntakeToActive).toHaveBeenCalledTimes(1))
+    expect(moveButton()).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: 'Mark reviewed' }))
+    await waitFor(() => expect(api.markIntakeReviewed).toHaveBeenCalledTimes(1))
     expect(api.saveIntakeDraft).toHaveBeenCalledWith(expect.objectContaining({
       intakeId: 'il:run-1',
       expectedVersion: 1,
       fields: expect.objectContaining({ billToId: 'b1' }),
       confirm: { add: ['weightLb'], remove: [] },
     }))
-    expect(api.moveIntakeToActive).toHaveBeenCalledWith({ intakeId: 'il:run-1', expectedVersion: 2 })
+    expect(api.markIntakeReviewed).toHaveBeenCalledWith({ intakeId: 'il:run-1', expectedVersion: 2 })
+    await waitFor(() => expect(moveButton()).toBeEnabled())
+    fireEvent.click(moveButton())
+    await waitFor(() => expect(api.moveIntakeToActive).toHaveBeenCalledTimes(1))
+    expect(api.saveIntakeDraft).toHaveBeenCalledTimes(1)
+    expect(api.moveIntakeToActive).toHaveBeenCalledWith({ intakeId: 'il:run-1', expectedVersion: 3 })
     await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/tms/shipments/shp-9'))
   })
 
-  it('shows a non-reviewer the fields disabled and no Move, Save or Dismiss', async () => {
+  it('shows a non-reviewer the fields disabled and no Move, Mark reviewed, Save or Dismiss', async () => {
     renderPage(false)
     const reference = await screen.findByDisplayValue('PO-100')
     expect(reference).toBeDisabled()
     expect(screen.queryByRole('button', { name: 'Move to active' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Mark reviewed' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Dismiss' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument()
     expect(screen.getByText(/look but not change/i)).toBeInTheDocument()
+  })
+
+  it('shows a non-reviewer who reviewed the load and when', async () => {
+    vi.mocked(api.getIntakeLoad).mockResolvedValue(reviewed(completeIntakeRow(), 'ann@bcatcorp.com'))
+    renderPage(false)
+    await screen.findByDisplayValue('PO-100')
+    expect(screen.getByText(/Reviewed by ann@bcatcorp.com/)).toBeInTheDocument()
+  })
+
+  it('does not let a fully filled and confirmed load move until it is marked reviewed', async () => {
+    vi.mocked(api.getIntakeLoad).mockResolvedValue(completeIntakeRow())
+    renderPage()
+    await screen.findByDisplayValue('PO-100')
+    expect(moveButton()).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Mark reviewed' })).toBeEnabled()
+    expect(screen.getByText('Needs review — check the fields, then Mark reviewed.')).toBeInTheDocument()
+  })
+
+  it('a reviewed load can move, and an unsaved edit takes the review away', async () => {
+    vi.mocked(api.getIntakeLoad).mockResolvedValue(reviewed(completeIntakeRow()))
+    renderPage()
+    await screen.findByDisplayValue('PO-100')
+    expect(moveButton()).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Mark reviewed' })).toBeDisabled()
+    expect(screen.getByText(/Reviewed by rev@bcatcorp.com/)).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Commodity'), { target: { value: 'Paper' } })
+    expect(moveButton()).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Mark reviewed' })).toBeEnabled()
+    expect(screen.getByText('Saving clears the review.')).toBeInTheDocument()
+  })
+
+  it('does not offer Mark reviewed for an incomplete load', async () => {
+    renderPage()
+    await screen.findByDisplayValue('PO-100')
+    expect(screen.getByRole('button', { name: 'Mark reviewed' })).toBeDisabled()
   })
 
   it('needs a reason to dismiss', async () => {

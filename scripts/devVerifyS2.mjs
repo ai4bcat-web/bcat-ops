@@ -108,7 +108,6 @@ export const ROUTES = [
   { nn: '28', slug: 'reports', path: '/tms/brokerage/reports', pattern: '/tms/brokerage/reports', dark: true },
   { nn: '29', slug: 'audit', path: '/tms/brokerage/audit', pattern: '/tms/brokerage/audit' },
   { nn: '30', slug: 'divisions', path: '/tms/brokerage/divisions', pattern: '/tms/brokerage/divisions' },
-  { nn: '30b', slug: 'views', path: '/tms/brokerage/views', pattern: '/tms/brokerage/views' },
   { nn: '31', slug: 'integrations', path: '/tms/brokerage/integrations', pattern: '/tms/brokerage/integrations' },
   { nn: '31b', slug: 'provider', path: '/tms/brokerage/integrations/{provider}', pattern: '/tms/brokerage/integrations/:provider' },
   { nn: '32', slug: 'ai-agents', path: '/tms/brokerage/ai-agents', pattern: '/tms/brokerage/ai-agents' },
@@ -119,7 +118,15 @@ export const ROUTES = [
   { nn: '33e', slug: 'company-import', path: '/tms/brokerage/company/import', pattern: '/tms/brokerage/company/import' },
   { nn: '33f', slug: 'company-aljex-import', path: '/tms/brokerage/company/aljex-import', pattern: '/tms/brokerage/company/aljex-import' },
   { nn: '33g', slug: 'company-account', path: '/tms/brokerage/company/account', pattern: '/tms/brokerage/company/account' },
+  { nn: '33h', slug: 'company-data', path: '/tms/brokerage/company/data', pattern: '/tms/brokerage/company/data' },
   { nn: '34', slug: 'demo', path: '/tms/brokerage/demo', pattern: '/tms/brokerage/demo' },
+  // Step AA: Carrier Sales, Load Review, and the four routes reserved for Step AB (labelled placeholders until AB lands).
+  { nn: '35', slug: 'carrier-sales', path: '/tms/carrier-sales', pattern: '/tms/carrier-sales', dark: true },
+  { nn: '36', slug: 'load-review', path: '/tms/load-review', pattern: '/tms/load-review', dark: true, wideOk: true },
+  { nn: '37', slug: 'spot-inbox', path: '/tms/rates/spot', pattern: '/tms/rates/spot' },
+  { nn: '37b', slug: 'spot-callback', path: '/tms/rates/spot/callback', pattern: '/tms/rates/spot/callback' },
+  { nn: '38', slug: 'follow-ups', path: '/tms/customers/follow-ups', pattern: '/tms/customers/follow-ups' },
+  { nn: '39', slug: 'spot-quoter', path: '/tms/brokerage/spot-quoter', pattern: '/tms/brokerage/spot-quoter' },
 ]
 
 // ───────────────────────────── states ─────────────────────────────

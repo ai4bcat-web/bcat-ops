@@ -1,35 +1,67 @@
 // @vitest-environment jsdom
 /**
- * The TMS shell sidebar is the only place the MVMNT nav renders: pinned pages,
- * business sections, and the Shipments row with its Shipments, Intake, Tracking and
- * Documents children. These tests guard that shape and the
- * collapse / active behaviour.
+ * The TMS shell sidebar is the only place the MVMNT nav renders: the pinned freight list
+ * with its data-driven children, business sections, and the collapse / active behaviour.
+ * What breaks silently here is which row lights: a child that stays lit on its sibling's
+ * page, or a parent that does not open under a page that lives elsewhere (Accounting on
+ * /tms/vendors).
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { render, screen, fireEvent, within } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import { MemoryRouter } from 'react-router-dom'
-import { LayoutDashboard, Package, Truck } from 'lucide-react'
+import { LayoutDashboard, LineChart, Package, Truck } from 'lucide-react'
 import { TmsShell } from './TmsShell'
 import type { TmsCompanyOption, TmsNavItem, TmsNavSection, TmsShellProps } from './TmsShell'
 
 const PINNED: TmsNavItem[] = [
   { to: '/tms/dashboard', label: 'Company Dashboard', icon: LayoutDashboard },
   {
+    to: '/tms/rates',
+    label: 'Quotes',
+    icon: LineChart,
+    badgeKey: 'quotesToReply',
+    children: [
+      { to: '/tms/rates', label: 'Quotes', badgeKey: 'quotesToReply', exclude: ['/tms/rates/lanes'] },
+      { to: '/tms/rates/lanes', label: 'Lane rates' },
+    ],
+  },
+  {
     to: '/tms/shipments',
     label: 'Shipments',
     icon: Package,
-    children: [{ to: '/tms/shipments/intake', label: 'Intake', badgeKey: 'intakeLoads' }],
+    children: [
+      { to: '/tms/shipments', label: 'Active', exact: true, params: { list: null } },
+      { to: '/tms/shipments?list=all', label: 'All', exact: true, params: { list: 'all' } },
+      { to: '/tms/shipments/intake', label: 'Intake', badgeKey: 'intakeLoads' },
+    ],
+  },
+  {
+    to: '/tms/tracking',
+    label: 'Load Tracking',
+    icon: Truck,
+    badgeKey: 'loadTracking',
+    children: [
+      { to: '/tms/tracking', label: 'Tracking', badgeKey: 'tracking', exclude: ['/tms/tracking/links'] },
+      { to: '/tms/tracking/links', label: 'Customer links' },
+    ],
+  },
+  {
+    to: '/tms/invoicing',
+    label: 'Accounting',
+    icon: Truck,
+    group: true,
+    badgeKey: 'accounting',
+    children: [
+      { to: '/tms/invoicing', label: 'Accounts Receivable', exclude: ['/tms/invoicing/payable'] },
+      { to: '/tms/invoicing/payable', label: 'Accounts Payable' },
+      { to: '/tms/vendors', label: 'Vendors' },
+    ],
   },
 ]
 
+/** The brokerage is the pinned block, so only the fleet is a business section here. */
 const SECTIONS: TmsNavSection[] = [
-  {
-    key: 'BROKERAGE',
-    name: 'BROKERAGE',
-    brand: 'BCAT Logistics',
-    items: [{ to: '/tms/rates', label: 'Rates', icon: LayoutDashboard }],
-  },
   {
     key: 'ASSETS',
     name: 'ASSETS',
@@ -74,49 +106,99 @@ beforeEach(() => {
 })
 
 describe('TmsShell', () => {
-  it('shows each section as NAME [Brand]', () => {
+  it('shows each section as NAME [Brand], and the pinned block has no header', () => {
     renderShell()
-    expect(screen.getByText(/BROKERAGE/)).toHaveTextContent('BROKERAGE [BCAT Logistics]')
     expect(screen.getByText(/ASSETS/)).toHaveTextContent('ASSETS [Ivan Cartage]')
+    expect(screen.queryByText(/BROKERAGE/)).not.toBeInTheDocument()
   })
 
-  it('pins Company Dashboard first and Shipments second', () => {
+  it('pins Company Dashboard first', () => {
     renderShell()
-    const pinned = rail().getAllByRole('link', { name: /^Company Dashboard$|^Shipments$/ })
+    const pinned = rail().getAllByRole('link', { name: /^Company Dashboard$|^Quotes$|^Shipments$/ })
     expect(pinned[0]).toHaveAttribute('href', '/tms/dashboard')
-    expect(pinned[1]).toHaveAttribute('href', '/tms/shipments')
+    expect(pinned[1]).toHaveAttribute('href', '/tms/rates')
   })
 
   it('marks the item matching activePath active and leaves the others alone', () => {
     renderShell('/tms/shipments')
-    expect(rail().getAllByRole('link', { name: /^Shipments$/ })[0]).toHaveClass('tms-active')
+    expect(rail().getByRole('link', { name: /^Shipments$/ })).toHaveClass('tms-active')
     expect(rail().getByRole('link', { name: /^Company Dashboard$/ })).not.toHaveClass('tms-active')
   })
 
-  it('lights the Intake child, not the Shipments child, on an intake review page', () => {
-    renderShell('/tms/shipments/intake/abc')
+  it('lights Active on the bare board and All on ?list=all, never both', () => {
+    const { unmount } = renderShell('/tms/shipments')
+    expect(rail().getByRole('link', { name: 'Active' })).toHaveClass('tms-active')
+    expect(rail().getByRole('link', { name: 'All' })).not.toHaveClass('tms-active')
+    unmount()
+    renderShell('/tms/shipments', undefined, { activeSearch: '?list=all' })
+    expect(rail().getByRole('link', { name: 'All' })).toHaveClass('tms-active')
+    expect(rail().getByRole('link', { name: 'Active' })).not.toHaveClass('tms-active')
+  })
+
+  it('lights the Intake child, not Active, on an intake review page, and nothing on a shipment page', () => {
+    const { unmount } = renderShell('/tms/shipments/intake/abc')
     expect(rail().getByRole('link', { name: 'Intake' })).toHaveClass('tms-active')
-    const [, boardChild] = rail().getAllByRole('link', { name: /^Shipments$/ })
-    expect(boardChild).not.toHaveClass('tms-active')
+    expect(rail().getByRole('link', { name: 'Active' })).not.toHaveClass('tms-active')
+    unmount()
+    renderShell('/tms/shipments/SHP-1')
+    expect(rail().getByRole('link', { name: 'Active' })).not.toHaveClass('tms-active')
+    expect(rail().getByRole('link', { name: 'Shipments' })).toHaveClass('tms-active')
   })
 
-  it('lights the Shipments child only on the bare board path', () => {
-    renderShell('/tms/shipments')
-    const [, boardChild] = rail().getAllByRole('link', { name: /^Shipments$/ })
-    expect(boardChild).toHaveClass('tms-active')
-    expect(rail().getByRole('link', { name: 'Intake' })).not.toHaveClass('tms-active')
+  it('does not light the Quotes child on the Lane rates page', () => {
+    renderShell('/tms/rates/lanes')
+    expect(rail().getByRole('link', { name: 'Lane rates' })).toHaveClass('tms-active')
+    const [parent, child] = rail().getAllByRole('link', { name: /^Quotes/ })
+    expect(parent).toHaveClass('tms-active')
+    expect(child).not.toHaveClass('tms-active')
   })
 
-  it('lists Shipments, Intake (with its count), Tracking and Documents under Shipments — no views, no Dispatch', () => {
+  it('lights Accounts Receivable on an invoice but not on the payable side', () => {
+    const { unmount } = renderShell('/tms/invoicing/invoices/INV-1')
+    expect(rail().getByRole('link', { name: 'Accounts Receivable' })).toHaveClass('tms-active')
+    unmount()
+    renderShell('/tms/invoicing/payable')
+    expect(rail().getByRole('link', { name: 'Accounts Receivable' })).not.toHaveClass('tms-active')
+    expect(rail().getByRole('link', { name: 'Accounts Payable' })).toHaveClass('tms-active')
+  })
+
+  it('lights the Accounting header, opened, on a page that lives outside its own path', () => {
+    renderShell('/tms/vendors')
+    expect(rail().getByRole('link', { name: 'Accounting' })).toHaveClass('tms-active')
+    expect(rail().getByRole('link', { name: 'Vendors' })).toHaveClass('tms-active')
+  })
+
+  it('sends a group header to its first visible child and lights it only through a child', () => {
+    const group: TmsNavItem = {
+      to: '/tms/vendors',
+      label: 'Accounting',
+      icon: Truck,
+      group: true,
+      children: [{ to: '/tms/vendors', label: 'Vendors' }, { to: '/tms/factors', label: 'Factoring' }],
+    }
+    const { unmount } = renderShell('/tms/dashboard', undefined, { pinned: [group] })
+    expect(rail().getByRole('link', { name: 'Accounting' })).toHaveAttribute('href', '/tms/vendors')
+    expect(rail().getByRole('link', { name: 'Accounting' })).not.toHaveClass('tms-active')
+    unmount()
+    renderShell('/tms/factors', undefined, { pinned: [group] })
+    expect(rail().getByRole('link', { name: 'Accounting' })).toHaveClass('tms-active')
+  })
+
+  it('lists Active, All and Intake (with its count) under Shipments — no views, no Dispatch', () => {
     renderShell('/tms/shipments', undefined, { badgeCounts: { intakeLoads: 3 } })
-    const [, boardChild] = rail().getAllByRole('link', { name: /^Shipments$/ })
-    expect(boardChild).toHaveAttribute('href', '/tms/shipments')
+    expect(rail().getByRole('link', { name: 'Active' })).toHaveAttribute('href', '/tms/shipments')
+    expect(rail().getByRole('link', { name: 'All' })).toHaveAttribute('href', '/tms/shipments?list=all')
     expect(rail().getByRole('link', { name: /^Intake/ })).toHaveAttribute('href', '/tms/shipments/intake')
     expect(rail().getByRole('link', { name: /^Intake/ })).toHaveTextContent('3')
-    expect(rail().getByRole('link', { name: 'Tracking' })).toHaveAttribute('href', '/tms/tracking')
-    expect(rail().getByRole('link', { name: 'Documents' })).toHaveAttribute('href', '/tms/documents/review')
     expect(rail().queryByRole('link', { name: 'Dispatch' })).not.toBeInTheDocument()
     expect(screen.queryByText('Views')).not.toBeInTheDocument()
+  })
+
+  it('shows a parent badge and a child badge independently', () => {
+    renderShell('/tms/tracking', undefined, { badgeCounts: { loadTracking: 5, tracking: 2 } })
+    expect(rail().getByRole('link', { name: /^Load Tracking/ })).toHaveTextContent('5')
+    expect(rail().getByRole('link', { name: /^Tracking/ })).toHaveTextContent('2')
+    expect(rail().getByRole('link', { name: /^Accounting/ })).not.toHaveTextContent(/\d/)
   })
 
   it('has no Help link to the retired Academy', () => {
@@ -174,29 +256,32 @@ describe('TmsShell', () => {
     expect(screen.queryByRole('button', { name: /^Business:/ })).not.toBeInTheDocument()
   })
 
-  it('narrows the rail to the chosen business and restores it on All businesses', () => {
+  it('narrows the rail to the chosen business, always keeps the pinned freight list, and restores on All businesses', () => {
     renderShell('/tms/dashboard', undefined, { companies: COMPANIES })
-    expect(rail().getByRole('link', { name: 'Rates' })).toBeInTheDocument()
     expect(rail().getByRole('link', { name: 'Fleet dispatch' })).toBeInTheDocument()
+
+    // Choosing the brokerage folds the fleet section; the pinned block never folds.
+    fireEvent.click(screen.getByRole('button', { name: /^Business:/ }))
+    fireEvent.click(screen.getByRole('option', { name: 'BCAT Logistics' }))
+    expect(rail().queryByRole('link', { name: 'Fleet dispatch' })).not.toBeInTheDocument()
+    expect(rail().getByRole('link', { name: 'Company Dashboard' })).toBeInTheDocument()
+    expect(window.localStorage.getItem('tms-company')).toBe('BROKERAGE')
 
     fireEvent.click(screen.getByRole('button', { name: /^Business:/ }))
     fireEvent.click(screen.getByRole('option', { name: 'Ivan Cartage' }))
-    expect(rail().queryByRole('link', { name: 'Rates' })).not.toBeInTheDocument()
     expect(rail().getByRole('link', { name: 'Fleet dispatch' })).toBeInTheDocument()
-    // Pinned rows are never folded away.
     expect(rail().getByRole('link', { name: 'Company Dashboard' })).toBeInTheDocument()
     expect(window.localStorage.getItem('tms-company')).toBe('ASSETS')
 
     fireEvent.click(screen.getByRole('button', { name: /^Business:/ }))
     fireEvent.click(screen.getByRole('option', { name: 'All businesses' }))
-    expect(rail().getByRole('link', { name: 'Rates' })).toBeInTheDocument()
+    expect(rail().getByRole('link', { name: 'Fleet dispatch' })).toBeInTheDocument()
     expect(window.localStorage.getItem('tms-company')).toBeNull()
   })
 
   it('treats a stored business that is not offered as All businesses', () => {
     window.localStorage.setItem('tms-company', 'GONE')
     renderShell('/tms/dashboard', undefined, { companies: COMPANIES })
-    expect(rail().getByRole('link', { name: 'Rates' })).toBeInTheDocument()
     expect(rail().getByRole('link', { name: 'Fleet dispatch' })).toBeInTheDocument()
   })
 
@@ -240,7 +325,7 @@ describe('TmsShell', () => {
   })
 
   it('counts moving shipments on Tracking and lists them when it is expanded', () => {
-    renderShell('/tms/shipments', undefined, {
+    renderShell('/tms/tracking/links', undefined, {
       badgeCounts: { tracking: 2 },
       trackedLoads: [
         { id: 'a', label: 'SHP-1', sub: 'Acme', to: '/tms/shipments/a' },

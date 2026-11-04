@@ -18,6 +18,7 @@ import { getColor } from '@/lib/driverColors'
 import type { Driver } from '@/types'
 import { sundayOf, shiftWeek, weekLabelLong } from './week'
 import { TripModal, ImportModal, MasterImportModal, DeductionModal, SettingsModal, EmailModal, CreditModal, WeeklyMileageRow } from './DriverPayForms'
+import { PayrollCadenceBanner } from '@/features/payroll/PayrollCadenceBanner'
 
 // Owner is CC'd on every pay statement that goes out to a driver.
 const PAY_EMAIL_CC = 'ryne@bcatcorp.com'
@@ -217,6 +218,7 @@ export function DriverPayPage() {
     >
 
       <div style={{ padding: '20px 32px 40px', maxWidth: 1100, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <PayrollCadenceBanner />
         {pay.loading && pay.rows.length === 0 && <div style={{ color: 'var(--tms-muted)', fontSize: 14, padding: 40, textAlign: 'center' }}>Loading…</div>}
 
         {!pay.loading && pay.rows.length === 0 && (

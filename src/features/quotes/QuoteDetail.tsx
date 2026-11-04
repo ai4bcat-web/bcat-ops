@@ -552,7 +552,7 @@ export function QuoteDetail() {
       title={
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
           <Link to="/tms/rates" aria-label="Back to quotes" className="tms-btn tms-btn-ghost tms-btn-sm">
-            <ChevronLeft size={14} /> Rates
+            <ChevronLeft size={14} /> Quotes
           </Link>
           {quote?.id ?? 'New quote'}
           {quote && <TmsBadge tone="blue">{statusLabel(quote)}</TmsBadge>}

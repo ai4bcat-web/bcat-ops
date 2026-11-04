@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { needsLine } from './flowDefaults'
 import {
-  buildIntakeDraft, canMoveToActive, correctedKeys, emptyIntakeFields, fieldStatusOf, intakeCounts,
+  buildIntakeDraft, canMarkReviewed, canMoveToActive, correctedKeys, emptyIntakeFields, fieldStatusOf, intakeCounts,
   intakeMissing, intakeRequired, patchIntakeFields, toCreateShipmentInput,
 } from './intakeLoad'
 import type { TenderPrefill } from './intakeTender'
@@ -22,10 +22,16 @@ const draft = (over: Partial<Parameters<typeof buildIntakeDraft>[0]> = {}) => bu
   customer: { defaultSalesRepId: 'rep1' }, divisionCode: 'BROKERAGE', stopFacilityHits: [false, false], ...over,
 })
 
-/** A fully built, confirmed load: only what the shipment page would also require. */
-function readyRow(): Pick<IntakeLoadRecord, 'fields' | 'meta' | 'confirmed'> {
+/** A fully built, confirmed, reviewed load: only what the shipment page would also require. */
+function readyRow(): Pick<IntakeLoadRecord, 'fields' | 'meta' | 'confirmed' | 'reviewedBy' | 'reviewedAt'> {
   const d = draft({ customer: { defaultSalesRepId: 'rep1', defaultBillToId: 'bt1' } })
-  return { fields: { ...d.fields, customerRateCents: 150000, deliveryNumber: 'D1' }, meta: d.meta, confirmed: [] }
+  return {
+    fields: { ...d.fields, customerRateCents: 150000, deliveryNumber: 'D1' },
+    meta: d.meta,
+    confirmed: [],
+    reviewedBy: 'rev@bcatcorp.com',
+    reviewedAt: '2026-11-03T16:00:00.000Z',
+  }
 }
 interface StopOut { type: string; city: string; sequence: number; appt: string; apptStatus?: string }
 interface ShipmentInput { customerId: string; load: { stops: StopOut[]; notes?: string } & Record<string, unknown> }
@@ -105,7 +111,7 @@ describe('intakeRequired', () => {
 
 describe('canMoveToActive', () => {
   it('passes a complete, confirmed load', () => {
-    expect(canMoveToActive(readyRow(), ctx)).toEqual({ ok: true, missing: [], problems: [], unconfirmed: [] })
+    expect(canMoveToActive(readyRow(), ctx)).toEqual({ ok: true, missing: [], problems: [], unconfirmed: [], needsReview: false })
   })
 
   it('blocks on each hard minimum and on a missing default-required field', () => {
@@ -136,6 +142,25 @@ describe('canMoveToActive', () => {
     const keys = intakeMissing(fields, intakeRequired(null, null).gated)
     const result = canMoveToActive({ ...base, fields }, ctx)
     expect(`Needs: ${result.missing.join(', ')}`).toBe(needsLine(keys))
+  })
+
+  it('a complete, fully confirmed load still cannot move until a reviewer has marked it reviewed', () => {
+    const base = readyRow()
+    const unreviewed = { ...base, reviewedBy: null, reviewedAt: null }
+    expect(canMoveToActive(unreviewed, ctx)).toEqual({ ok: false, missing: [], problems: [], unconfirmed: [], needsReview: true })
+    expect(canMarkReviewed(unreviewed, ctx).ok).toBe(true)
+    // Either half of the stamp missing is not a review.
+    expect(canMoveToActive({ ...base, reviewedAt: null }, ctx).needsReview).toBe(true)
+    expect(canMoveToActive({ ...base, reviewedBy: null }, ctx).needsReview).toBe(true)
+  })
+
+  it('an incomplete load cannot be marked reviewed, and a review does not rescue it', () => {
+    const base = readyRow()
+    const fields = { ...base.fields, billToId: null }
+    expect(canMarkReviewed({ ...base, fields }, ctx).ok).toBe(false)
+    const moved = canMoveToActive({ ...base, fields }, ctx)
+    expect(moved).toMatchObject({ ok: false, needsReview: false })
+    expect(moved.missing).toEqual(['Bill-to party'])
   })
 })
 

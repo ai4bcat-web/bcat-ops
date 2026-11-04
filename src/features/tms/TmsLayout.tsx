@@ -58,7 +58,7 @@ export function TmsLayout() {
   const location = useLocation()
   const navigate = useNavigate()
 
-  const { pinned, sections } = useMemo(
+  const { pinned, sections, businesses } = useMemo(
     () => buildNavSections({ divisions, hasPageAccess, isOwner, isAdmin }),
     [divisions, hasPageAccess, isOwner, isAdmin],
   )
@@ -79,7 +79,7 @@ export function TmsLayout() {
   // The bell's number is everything the notification drawer lists for this person.
   const { groups: notificationGroups, count: notificationCount } = useNotifications(shipments)
   const [notificationsOpen, setNotificationsOpen] = useState(false)
-  const companies = useMemo(() => companyOptions(sections, divisions), [sections, divisions])
+  const companies = useMemo(() => companyOptions(businesses, divisions), [businesses, divisions])
 
   const email = user?.email ?? ''
   // Every route that is not under /tms is a legacy page: same shell, but the content area is
@@ -91,6 +91,7 @@ export function TmsLayout() {
       pinned={pinned}
       sections={sections}
       activePath={location.pathname}
+      activeSearch={location.search}
       breadcrumb={tmsBreadcrumb(location.pathname)}
       user={{ initial, email, name: me?.name ?? null }}
       badgeCounts={badgeCounts}

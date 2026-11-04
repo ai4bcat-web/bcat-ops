@@ -7,7 +7,7 @@ import * as api from '@/lib/apiClient'
 import * as auth from '@/hooks/useAuth'
 import type { OwnershipDivisionRecord } from '@/types/tms'
 import { IntakeBoard } from './IntakeBoard'
-import { intakeRow } from './testFixtures'
+import { intakeRow, reviewed } from './testFixtures'
 
 const division = (code: string, name: string, over: Partial<OwnershipDivisionRecord> = {}): OwnershipDivisionRecord => ({
   id: code, code, name, brand: null, parentId: null, color: null, sortOrder: 0, active: true, owners: null, flows: null,
@@ -100,5 +100,18 @@ describe('IntakeBoard', () => {
     const row = (await screen.findByText('First tender')).closest('tr') as HTMLElement
     expect(row).toHaveTextContent(/of \d+ required · 1 to check/)
     expect(row).toHaveTextContent('Dallas, TX → Atlanta, GA')
+  })
+
+  it('marks open rows Reviewed or Needs review so unreviewed loads are visible', async () => {
+    vi.mocked(api.listIntakeLoads).mockImplementation(async () => [
+      intakeRow({ id: 'il:a', subject: 'First tender' }),
+      reviewed(intakeRow({ id: 'il:b', subject: 'Second tender' })),
+    ])
+    renderBoard('/tms/shipments/intake?division=BRK')
+    const first = (await screen.findByText('First tender')).closest('tr') as HTMLElement
+    const second = (await screen.findByText('Second tender')).closest('tr') as HTMLElement
+    expect(first).toHaveTextContent('Needs review')
+    expect(second).toHaveTextContent('Reviewed')
+    expect(second).not.toHaveTextContent('Needs review')
   })
 })

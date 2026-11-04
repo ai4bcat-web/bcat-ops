@@ -66,7 +66,7 @@ export const ROLE_PAGES: Record<RoleKey, readonly string[]> = {
   ADMIN: [],
   MANAGER: [
     'loads', 'customers', 'carriers', 'locations', 'quotes',
-    'invoicing', 'carrierPay', 'reports', 'commissions', 'audit',
+    'invoicing', 'carrierPay', 'reports', 'commissions', 'audit', 'loadReview',
   ],
   CUSTOMER_REP: ['loads', 'customers', 'locations', 'quotes', 'invoicing', 'reports', 'commissions'],
   CARRIER_REP: ['loads', 'carriers', 'locations', 'quotes', 'carrierPay', 'reports', 'commissions'],

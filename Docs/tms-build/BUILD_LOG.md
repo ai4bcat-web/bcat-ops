@@ -63,6 +63,9 @@ Engine now numbers bills by PRO (same string as the invoice number); 385 affecte
 1. Confirm or change the four UNCONFIRMED division intake e-mails. 2. Decide on PRO 99001 (above). 3. Map Aljex rep/staff codes to users at Settings > Users (then bulk reassign). 4. The 278 ENRICH_MISMATCH PROs and the 28 no-customer loads need a look (lists in the report).
 5. Open AP ($149,396.86 derived): compare with your Aljex AP aging report (the export has no AP balance column). 6. Imported carriers are PENDING until the MyCarrierPackets pull runs (press Validate on dev; then Settings > Integrations > MyCarrierPackets > Pull all monitored carriers now).
 7. Customer terms are not in the export: invoices assume Net 30 (org default) until customer terms are set.
+8. **Performance gate (found after the import):** with 10,564 loads on dev the pages that read whole tables client-side are slow: `/tms/dashboard` about 26 s, `/tms/tracking` about 22 s, `/tms/brokerage/users` about 11 s,
+   `/tms/customers` about 5 s (Shipments board, Schedule, Calendar, Invoicing and Carriers open in 1-2 s by the probe, which may report ready slightly early). The legacy readers page the whole Load table (`listLoads`) and the
+   dashboard/tracking hooks read every shipment. Nothing is broken, but this must be fixed (server-side windowing / date-bounded queries / Active-only reads) before any production use: scheduled as a dedicated pass after Step AA.
 
 ## 2026-11-04 — Aljex exit Phase 0 deployed on dev (importer for the 486-column export, backups, export-all, MCP live adapter)
 

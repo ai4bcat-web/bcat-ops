@@ -43,7 +43,7 @@ describe('groupsForProfile', () => {
   it('gives a manager every TMS board', () => {
     expect(groupsForProfile({ role: 'MANAGER' })).toEqual([
       'page-audit', 'page-carrierPay', 'page-carriers', 'page-commissions',
-      'page-customers', 'page-invoicing', 'page-loads', 'page-locations',
+      'page-customers', 'page-invoicing', 'page-loadReview', 'page-loads', 'page-locations',
       'page-quotes', 'page-reports', 'role-MANAGER',
     ])
   })
@@ -86,6 +86,11 @@ describe('groupsForProfile', () => {
       'page-carriers', 'page-compliance', 'page-customers', 'page-dispatch', 'page-locations',
       'page-trucks', 'role-COMPLIANCE',
     ])
+  })
+
+  it('grants Load review to a role that does not carry it by extra page', () => {
+    expect(groupsForProfile({ role: 'AR_AP' })).not.toContain('page-loadReview')
+    expect(groupsForProfile({ role: 'AR_AP', extraPages: ['loadReview'] })).toContain('page-loadReview')
   })
 
   it('ignores an unknown role or claim, and a page key no group could be named for', () => {

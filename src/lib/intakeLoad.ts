@@ -322,10 +322,20 @@ export function intakeProblems(fields: IntakeFields, ctx: { customerActive: bool
   return out
 }
 
-export function canMoveToActive(
+type IntakeReadinessCtx = { settings: unknown; customer: unknown; customerActive: boolean; divisionActive: boolean }
+export interface IntakeVerdict {
+  ok: boolean
+  missing: string[]
+  problems: string[]
+  unconfirmed: string[]
+  needsReview: boolean
+}
+
+/** Every required field populated and valid, ignoring whether a reviewer has signed the load off. */
+export function canMarkReviewed(
   row: Pick<IntakeLoadRecord, 'fields' | 'meta' | 'confirmed'>,
-  ctx: { settings: unknown; customer: unknown; customerActive: boolean; divisionActive: boolean },
-): { ok: boolean; missing: string[]; problems: string[]; unconfirmed: string[] } {
+  ctx: IntakeReadinessCtx,
+): Omit<IntakeVerdict, 'needsReview'> {
   const { fields, meta, confirmed } = row
   const problems = intakeProblems(fields, ctx)
   const missing = intakeMissing(fields, intakeRequired(ctx.settings, ctx.customer).gated).map(requiredFieldLabel)
@@ -336,6 +346,16 @@ export function canMoveToActive(
     else if (status === 'INVALID') problems.push(`${intakeFieldLabel(key)} is not valid`)
   }
   return { ok: !problems.length && !missing.length && !unconfirmed.length, missing, problems, unconfirmed }
+}
+
+/** A load becomes an Active shipment only when complete AND explicitly marked reviewed (Step AA). */
+export function canMoveToActive(
+  row: Pick<IntakeLoadRecord, 'fields' | 'meta' | 'confirmed' | 'reviewedAt' | 'reviewedBy'>,
+  ctx: IntakeReadinessCtx,
+): IntakeVerdict {
+  const base = canMarkReviewed(row, ctx)
+  const needsReview = !row.reviewedAt || !row.reviewedBy
+  return { ...base, ok: base.ok && !needsReview, needsReview }
 }
 
 // ── reviewer edits ───────────────────────────────────────────────────────────

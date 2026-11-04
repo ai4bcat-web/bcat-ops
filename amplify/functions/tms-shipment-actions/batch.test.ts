@@ -34,6 +34,34 @@ describe('batchShipmentTask', () => {
     })
   })
 
+  it('forwards the literal Load Review marker to each release and records it in the audit', async () => {
+    const deps = dependencies()
+    deps.releaseToBilling = vi.fn(async () => undefined)
+    await batchShipmentTask(deps, { task: 'RELEASE_TO_BILLING', shipmentIds: ['a'], params: { review: { source: 'LOAD_REVIEW', extra: 1 } } }, caller)
+    expect(deps.releaseToBilling).toHaveBeenCalledWith(
+      { shipmentId: 'a', orderId: 'order-a', expectedUpdatedAt: '2026-10-29T00:00:00Z', review: { source: 'LOAD_REVIEW' } },
+      caller,
+    )
+    expect(deps.writeAudit).toHaveBeenCalledWith('SHIPMENT', 'BATCH', 'BATCH_SHIPMENT_TASK', caller, {
+      task: 'RELEASE_TO_BILLING', count: 1, okCount: 1, failCount: 0, review: true,
+    })
+  })
+
+  it('ignores a review marker that is not the literal one, so the release is an ordinary release', async () => {
+    for (const review of [true, 'LOAD_REVIEW', { source: 'OTHER' }]) {
+      const deps = dependencies()
+      deps.releaseToBilling = vi.fn(async () => undefined)
+      await batchShipmentTask(deps, { task: 'RELEASE_TO_BILLING', shipmentIds: ['a'], params: { review } }, caller)
+      expect(deps.releaseToBilling).toHaveBeenCalledWith(
+        { shipmentId: 'a', orderId: 'order-a', expectedUpdatedAt: '2026-10-29T00:00:00Z' },
+        caller,
+      )
+      expect(deps.writeAudit).toHaveBeenCalledWith('SHIPMENT', 'BATCH', 'BATCH_SHIPMENT_TASK', caller, {
+        task: 'RELEASE_TO_BILLING', count: 1, okCount: 1, failCount: 0,
+      })
+    }
+  })
+
   it('refuses unauthorized tasks before executing any row', async () => {
     const deps = dependencies()
     deps.authorize = () => false

@@ -19,6 +19,9 @@ function stepTarget(
   recordId: string | undefined,
 ): { to: string; search?: string } | null {
   if (!recordId || !step.opensOn) return null
+  if (step.route === 'loadReview') {
+    return { to: '/tms/load-review', search: `?shipment=${encodeURIComponent(recordId)}` }
+  }
   const prefix = step.opensOn.split('.')[0]
   if (prefix === 'shipment') {
     const search = step.tab ? `?tab=${step.tab}` : undefined

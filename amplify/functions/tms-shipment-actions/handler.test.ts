@@ -4568,6 +4568,175 @@ describe('READY_TO_INVOICE', () => {
     await expect(ready(String(order.id))).rejects.toThrow(/This shipment has no customer record linked/)
     expect(table(TABLES.order).get(String(order.id))!.arStatus).toBe('DOCS_NEEDED')
   })
+
+  describe('Load Review', () => {
+    const REVIEWER = { sub: 'sub-lr', username: 'lr', claims: { email: 'lr@bcatcorp.com', 'cognito:groups': ['page-loadReview'] } }
+    const INTAKE_ONLY = { sub: 'sub-ir', username: 'ir', claims: { email: 'ir@bcatcorp.com', 'cognito:groups': ['page-intakeReview'] } }
+    const REVIEW = { source: 'LOAD_REVIEW' }
+
+    /** A delivered, documented own-fleet order; `tag` fills the rep, division and revenue the review needs. */
+    async function reviewable(tag: { rep?: boolean; division?: boolean; revenue?: number } = {}): Promise<DocIds> {
+      const ids = await deliveredOrder()
+      seedDocs(ids)
+      // seedDocs keys by type alone; scope the ids so several shipments can coexist.
+      for (const [id, doc] of [...table(TABLES.shipmentDocument)]) {
+        if (doc.shipmentId === ids.shipmentId && id.startsWith('sdoc-')) {
+          table(TABLES.shipmentDocument).delete(id)
+          table(TABLES.shipmentDocument).set(ids.shipmentId + id, { ...doc, id: ids.shipmentId + id })
+        }
+      }
+      const shipment = table(TABLES.shipment).get(ids.shipmentId)!
+      table(TABLES.shipment).set(ids.shipmentId, {
+        ...shipment,
+        salesRepId: tag.rep === false ? null : 'rep-1',
+        revDivision: tag.division === false ? null : 'BROKERAGE',
+      })
+      const order = table(TABLES.order).get(ids.orderId)!
+      table(TABLES.order).set(ids.orderId, { ...order, revenueCents: tag.revenue ?? 150_000 })
+      return ids
+    }
+    const releaseAudits = (action: string): Row[] => [...table(TABLES.audit).values()].filter((row) => row.action === action)
+
+    it('admits a page-loadReview caller to exactly the four review actions and the release batch', async () => {
+      const ids = await reviewable()
+      const verdict = (await call('REVIEW_LOAD', { shipmentId: ids.shipmentId }, REVIEWER)) as { releaseGate: { ok: boolean } }
+      expect(verdict.releaseGate.ok).toBe(true)
+      // Past authorization the input is what fails, which is the proof the call got in.
+      for (const [action, input] of [
+        ['SET_SALES_REP', { shipmentId: 'none' }],
+        ['SET_REV_TAG', { shipmentId: 'none' }],
+        ['READY_TO_INVOICE', { orderId: 'none', expectedUpdatedAt: 'x' }],
+      ] as const) {
+        await expect(call(action, input, REVIEWER)).rejects.not.toThrow(/Forbidden/)
+      }
+      const batch = (await call('BATCH_SHIPMENT_TASK', { task: 'RELEASE_TO_BILLING', shipmentIds: [ids.shipmentId], params: { review: REVIEW } }, REVIEWER)) as { results: { ok: boolean }[] }
+      expect(batch.results.map((r) => r.ok)).toEqual([true])
+
+      await expect(call('UPLOAD_DOCUMENT', { shipmentId: ids.shipmentId }, REVIEWER)).rejects.toThrow(/Forbidden/)
+      await expect(call('ASSIGN_ASSET', { loadId: ids.loadId, driverId: 'drv-1' }, REVIEWER)).rejects.toThrow(/Forbidden/)
+      await expect(call('SET_SHIPMENT_STATUS', { shipmentId: ids.shipmentId, status: 'ON_HOLD' }, REVIEWER)).rejects.toThrow(/Forbidden/)
+      await expect(
+        call('BATCH_SHIPMENT_TASK', { task: 'ASSIGN_DRIVER', shipmentIds: [ids.shipmentId], params: { driverId: 'drv-1' } }, REVIEWER),
+      ).rejects.toThrow(/Forbidden/)
+    })
+
+    it('refuses a page-intakeReview caller every review action', async () => {
+      const ids = await reviewable()
+      for (const [action, input] of [
+        ['REVIEW_LOAD', { shipmentId: ids.shipmentId }],
+        ['SET_SALES_REP', { shipmentId: ids.shipmentId }],
+        ['SET_REV_TAG', { shipmentId: ids.shipmentId }],
+        ['READY_TO_INVOICE', { orderId: ids.orderId, expectedUpdatedAt: 'x' }],
+        ['BATCH_SHIPMENT_TASK', { task: 'RELEASE_TO_BILLING', shipmentIds: [ids.shipmentId] }],
+      ] as const) {
+        await expect(call(action, input, INTAKE_ONLY)).rejects.toThrow(/Forbidden/)
+      }
+      expect(table(TABLES.order).get(ids.orderId)!.arStatus).toBe('DOCS_NEEDED')
+    })
+
+    it('REVIEW_LOAD reports the gate verdict and the extras without writing anything', async () => {
+      const ids = await reviewable({ rep: false, division: false, revenue: 0 })
+      const orderBefore = JSON.stringify(table(TABLES.order).get(ids.orderId))
+      const auditsBefore = table(TABLES.audit).size
+      const result = (await call('REVIEW_LOAD', { shipmentId: ids.shipmentId }, REVIEWER)) as {
+        orderId: string; arStatus: string; releaseGate: { ok: boolean }; extras: { code: string }[]
+        salesRepId: string | null; legacyImported: boolean
+      }
+      expect(result).toMatchObject({ orderId: ids.orderId, arStatus: 'DOCS_NEEDED', salesRepId: null, legacyImported: false })
+      expect((result as { pendingDocReviewCount: number }).pendingDocReviewCount).toBe(0)
+      expect(result.releaseGate.ok).toBe(true)
+      expect(result.extras.map((e) => e.code)).toEqual(['SALES_REP_MISSING', 'REV_DIVISION_MISSING', 'NO_CUSTOMER_CHARGES'])
+      expect(JSON.stringify(table(TABLES.order).get(ids.orderId))).toBe(orderBefore)
+      expect(table(TABLES.audit).size).toBe(auditsBefore)
+    })
+
+    it('REVIEW_LOAD answers for an already released order and carries the gate failures', async () => {
+      const ids = await deliveredOrder({ requiredDocsForInvoice: ['POD', 'BOL'] })
+      const failing = (await call('REVIEW_LOAD', { shipmentId: ids.shipmentId }, REVIEWER)) as {
+        releaseGate: { ok: boolean; missing: { code: string }[] }
+      }
+      expect(failing.releaseGate.ok).toBe(false)
+      expect(failing.releaseGate.missing.map((m) => m.code)).toContain('DOC_MISSING')
+
+      const released = await reviewable()
+      await ready(released.orderId)
+      const after = (await call('REVIEW_LOAD', { shipmentId: released.shipmentId }, REVIEWER)) as { arStatus: string }
+      expect(after.arStatus).toBe('UNBILLED')
+    })
+
+    it('refuses a review release with no sales rep, no division or no charges, listed together', async () => {
+      const ids = await reviewable({ rep: false, division: false, revenue: 0 })
+      await expect(ready(ids.orderId, { review: REVIEW })).rejects.toThrow(
+        'Not ready for accounting: Missing sales rep; Missing revenue division; No customer charges',
+      )
+      expect(table(TABLES.order).get(ids.orderId)!.arStatus).toBe('DOCS_NEEDED')
+      expect(releaseAudits('LOAD_REVIEW_RELEASED')).toEqual([])
+    })
+
+    it('lists a gate failure and the extras in one refusal', async () => {
+      const ids = await reviewable({ rep: false })
+      for (const [id, doc] of [...table(TABLES.shipmentDocument)]) {
+        if (doc.shipmentId === ids.shipmentId && doc.type === 'POD') table(TABLES.shipmentDocument).delete(id)
+      }
+      await expect(ready(ids.orderId, { review: REVIEW })).rejects.toThrow(
+        /^Not ready for accounting: Missing document: POD; Missing sales rep$/,
+      )
+    })
+
+    it('releases the same incomplete order without review exactly as before', async () => {
+      const ids = await reviewable({ rep: false, division: false, revenue: 0 })
+      const result = (await ready(ids.orderId)) as { bundle: { orders: Row[] } }
+      expect(result.bundle.orders[0].arStatus).toBe('UNBILLED')
+      const audits = releaseAudits('READY_TO_INVOICE')
+      expect(audits).toHaveLength(1)
+      expect(JSON.parse(String(audits[0].changes))).toEqual({ missing: [] })
+      expect(releaseAudits('LOAD_REVIEW_RELEASED')).toEqual([])
+    })
+
+    it('a clean review release audits the checks on the order and on the shipment history', async () => {
+      const ids = await reviewable()
+      const result = (await ready(ids.orderId, { review: REVIEW }, REVIEWER)) as { bundle: { orders: Row[] } }
+      expect(result.bundle.orders[0]).toMatchObject({ arStatus: 'UNBILLED', updatedBy: 'lr@bcatcorp.com' })
+      const checks = { salesRep: true, revDivision: true, details: true, charges: true, documents: true }
+      const orderAudit = releaseAudits('READY_TO_INVOICE')[0]
+      expect(orderAudit).toMatchObject({ entityType: 'ORDER', entityId: ids.orderId, user: 'lr@bcatcorp.com' })
+      expect(JSON.parse(String(orderAudit.changes))).toEqual({
+        missing: [], review: { source: 'LOAD_REVIEW', checks, warnings: [], batch: false },
+      })
+      const shipmentAudit = releaseAudits('LOAD_REVIEW_RELEASED')[0]
+      expect(shipmentAudit).toMatchObject({ entityType: 'SHIPMENT', entityId: ids.shipmentId })
+      expect(JSON.parse(String(shipmentAudit.changes))).toEqual({ orderId: ids.orderId, checks, warnings: [], batch: false })
+    })
+
+    it('a negative margin is a warning in the audit, not a refusal', async () => {
+      const ids = await reviewable({ revenue: 100_000 })
+      for (const [id, row] of table(TABLES.financials)) {
+        if (row.orderId === ids.orderId) table(TABLES.financials).set(id, { ...row, costCents: 130_000 })
+      }
+      await ready(ids.orderId, { review: REVIEW })
+      const audit = JSON.parse(String(releaseAudits('LOAD_REVIEW_RELEASED')[0].changes)) as { warnings: string[] }
+      expect(audit.warnings).toEqual(['Cost exceeds revenue by $300'])
+    })
+
+    it('a review batch enforces the extras per row and records review and batch in the audit', async () => {
+      const good = await reviewable()
+      const noRep = await reviewable({ rep: false })
+      const result = (await call('BATCH_SHIPMENT_TASK', {
+        task: 'RELEASE_TO_BILLING', shipmentIds: [good.shipmentId, noRep.shipmentId], params: { review: REVIEW },
+      }, REVIEWER)) as { results: { ok: boolean; message: string | null }[] }
+      expect(result.results.map((r) => [r.ok, r.message])).toEqual([
+        [true, null], [false, 'Not ready for accounting: Missing sales rep'],
+      ])
+      expect(table(TABLES.order).get(noRep.orderId)!.arStatus).toBe('DOCS_NEEDED')
+      const released = JSON.parse(String(releaseAudits('LOAD_REVIEW_RELEASED')[0].changes)) as { batch: boolean }
+      expect(released.batch).toBe(true)
+      // A review batch audits the order itself, not the shipment-scoped legacy row.
+      expect(releaseAudits('READY_TO_INVOICE').map((r) => [r.entityType, r.entityId])).toEqual([['ORDER', good.orderId]])
+      expect(JSON.parse(String(releaseAudits('READY_TO_INVOICE')[0].changes)).review.batch).toBe(true)
+      const summary = JSON.parse(String(releaseAudits('BATCH_SHIPMENT_TASK')[0].changes))
+      expect(summary).toEqual({ task: 'RELEASE_TO_BILLING', count: 2, okCount: 1, failCount: 1, review: true })
+    })
+  })
 })
 
 // ── DUPLICATE_SHIPMENT ───────────────────────────────────────────────────────

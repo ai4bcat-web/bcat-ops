@@ -6,14 +6,18 @@
  * itself. Those are `OwnershipDivision` rows, not a hardcoded list: the sections come from
  * whatever divisions exist, and a division somebody adds in settings shows up here.
  *
- * The one `TmsShell` rail renders this function, on `/tms/*` and on the legacy pages alike. The BROKERAGE section is the MVMNT page set
- * (`TMS_ITEMS`); every other section is the existing nav config grouped by its `section`
- * code. A BROKERAGE page opens for anybody granted `tms` OR that page's original key, so
- * a broker is granted one thing rather than fifteen.
+ * The one `TmsShell` rail renders this function, on `/tms/*` and on the legacy pages alike.
+ * The freight pages (the old BROKERAGE section) are the pinned block (`PINNED_ITEMS`): one
+ * flat list with no header, children as data, never folded when a business is chosen,
+ * because Shipments, Customers and Carriers serve all three businesses. Every other
+ * section is the existing nav config grouped by its `section` code. A pinned page opens
+ * for anybody granted `tms` OR that page's original key, so a broker is granted one thing
+ * rather than fifteen; a child is gated the same way, and a group header shows only while
+ * one of its children does.
  */
 import {
-  LayoutDashboard, Package, LineChart, FileSpreadsheet, Truck, Banknote, Building2,
-  MapPin, Receipt, Building, Link2, type LucideIcon,
+  LayoutDashboard, Package, LineChart, Truck, Banknote, Building2,
+  MapPin, PhoneCall, Activity, ClipboardList, SlidersHorizontal, type LucideIcon,
 } from 'lucide-react'
 import { NAV_ITEMS } from '@/lib/navItems'
 import { SEED_DIVISIONS, topLevelOf } from '@/lib/ownership'
@@ -30,6 +34,21 @@ const BROKERAGE = 'BROKERAGE'
 const SHIPMENTS_PATH = '/tms/shipments'
 export const COMPANY_DIVISION = 'COMPANY'
 
+/**
+ * The three rows Step AB owns (Spot inbox, Follow-ups, Spot quoter & e-mail). Their routes
+ * and placeholder pages exist either way; flip to `false` to hide the rows before AB ships.
+ */
+const SHOW_RESERVED_AB = true
+
+/** A child row plus the gate that decides whether this user sees it. */
+export interface NavChildDef extends TmsNavChild {
+  pageKey: string
+  /** Set on the `/tms/*` pages: they also open on the `tms` grant. */
+  tms?: boolean
+  /** Owner/ADMIN only (never opened by a page grant). */
+  adminOnly?: boolean
+}
+
 export interface NavItemDef {
   to: string
   label: string
@@ -38,12 +57,16 @@ export interface NavItemDef {
   section: SectionKey
   /** Set on the `/tms/*` pages: they also open on the `tms` grant. */
   tms?: boolean
+  /** Owner/ADMIN only (never opened by a page grant). */
+  adminOnly?: boolean
   /** Which sidebar count this item carries, if any (`useShellBadgeCounts` resolves it). */
   badgeKey?: string
   /** A fixed label badge. */
   badge?: string | null
-  /** Sub-items rendered under this row in the MVMNT rail. */
-  children?: TmsNavChild[]
+  /** A header row with no page of its own: visible while a child is, `to` is the first visible child. */
+  group?: boolean
+  /** Sub-items rendered under this row. */
+  children?: NavChildDef[]
 }
 
 /** A built item: a `TmsNavItem` plus what the legacy rail needs to gate and count it. */
@@ -59,47 +82,125 @@ export interface NavSection extends TmsNavSection {
 export interface NavSectionsResult {
   pinned: NavSectionItem[]
   sections: NavSection[]
+  /** The businesses the switcher offers: BROKERAGE whenever any pinned row shows, then each visible section. */
+  businesses: Array<{ key: string }>
 }
 
+const SHIPMENT_CHILDREN: NavChildDef[] = [
+  { to: '/tms/shipments', label: 'Active', pageKey: 'loads', tms: true, exact: true, params: { list: null } },
+  { to: '/tms/shipments?list=all', label: 'All', pageKey: 'loads', tms: true, exact: true, params: { list: 'all' } },
+  { to: '/tms/shipments/intake', label: 'Intake', pageKey: 'loads', tms: true, badgeKey: 'intakeLoads' },
+]
+
+const ACCOUNTING_CHILDREN: NavChildDef[] = [
+  { to: '/tms/invoicing', label: 'Accounts Receivable', pageKey: 'invoicing', tms: true, badgeKey: 'arToInvoice', exclude: ['/tms/invoicing/payable'] },
+  { to: '/tms/invoicing/payable', label: 'Accounts Payable', pageKey: 'carrierPay', tms: true, badgeKey: 'apToReview' },
+  { to: '/tms/vendors', label: 'Vendors', pageKey: 'vendorAp', tms: true },
+  { to: '/tms/factors', label: 'Factoring', pageKey: 'factoring', tms: true },
+]
+
+const SETTINGS_CHILDREN: NavChildDef[] = [
+  { to: '/tms/brokerage', label: 'General & automation', pageKey: 'settings', tms: true, exact: true },
+  { to: '/tms/brokerage/company', label: 'Company', pageKey: 'tms', adminOnly: true },
+  { to: '/tms/brokerage/divisions', label: 'Divisions & ownership', pageKey: 'tms', adminOnly: true },
+  { to: '/tms/brokerage/users', label: 'Users & roles', pageKey: 'users', adminOnly: true },
+  { to: '/tms/brokerage/integrations', label: 'Integrations', pageKey: 'tms', adminOnly: true },
+  { to: '/tms/brokerage/ai-agents', label: 'AI agents', pageKey: 'tms', adminOnly: true },
+  ...(SHOW_RESERVED_AB
+    ? [{ to: '/tms/brokerage/spot-quoter', label: 'Spot quoter & e-mail', pageKey: 'tms', adminOnly: true }]
+    : []),
+  { to: '/tms/brokerage/commissions', label: 'Commissions', pageKey: 'commissions', tms: true },
+  { to: '/tms/brokerage/reports', label: 'Reports', pageKey: 'reports', tms: true },
+  { to: '/tms/brokerage/audit', label: 'Audit log', pageKey: 'audit', tms: true },
+  { to: '/compliance', label: 'Compliance', pageKey: 'compliance', badgeKey: 'review' },
+  { to: '/platform-health', label: 'Platform health', pageKey: 'platformHealth', adminOnly: true },
+  { to: '/tms/brokerage/demo', label: 'Demo', pageKey: 'tms', tms: true },
+]
+
 /**
- * Pages that sit above the business sections because they serve all three businesses.
- * The company dashboard is the top-level home; Shipments is the shared freight list.
- * Shipments renders its Intake, Tracking and Documents pages as children in `TmsShell`.
+ * The pinned block, top to bottom: every freight page, once. Page keys are the ones the
+ * old paths used, so an existing grant still opens the re-homed page.
  */
 export const PINNED_ITEMS: NavItemDef[] = [
   { to: '/tms/dashboard', label: 'Company Dashboard', icon: LayoutDashboard, pageKey: 'tms', section: BROKERAGE, tms: true },
   {
-    to: '/tms/shipments',
-    label: 'Shipments',
-    icon: Package,
+    to: '/tms/rates',
+    label: 'Quotes',
+    icon: LineChart,
+    pageKey: 'quotes',
+    section: BROKERAGE,
+    tms: true,
+    badgeKey: 'quotesToReply',
+    children: [
+      { to: '/tms/rates', label: 'Quotes', pageKey: 'quotes', tms: true, badgeKey: 'quotesToReply', exclude: ['/tms/rates/lanes', '/tms/rates/spot'] },
+      { to: '/tms/rates/lanes', label: 'Lane rates', pageKey: 'quotes', tms: true },
+      ...(SHOW_RESERVED_AB
+        ? [{ to: '/tms/rates/spot', label: 'Spot inbox', pageKey: 'quotes', tms: true, badgeKey: 'spotNew' }]
+        : []),
+    ],
+  },
+  { to: '/tms/shipments', label: 'Shipments', icon: Package, pageKey: 'loads', section: BROKERAGE, tms: true, children: SHIPMENT_CHILDREN },
+  { to: '/tms/carrier-sales', label: 'Carrier Sales', icon: PhoneCall, pageKey: 'loads', section: BROKERAGE, tms: true, badgeKey: 'carrierSales' },
+  {
+    to: '/tms/tracking',
+    label: 'Load Tracking',
+    icon: Activity,
     pageKey: 'loads',
     section: BROKERAGE,
     tms: true,
-    badgeKey: 'checkCalls',
+    badgeKey: 'loadTracking',
     children: [
-      { to: '/tms/shipments/intake', label: 'Intake', badgeKey: 'intakeLoads' },
+      { to: '/tms/tracking', label: 'Tracking', pageKey: 'loads', tms: true, badgeKey: 'tracking', exclude: ['/tms/tracking/links'] },
+      { to: '/tms/check-calls', label: 'Check calls', pageKey: 'loads', tms: true, badgeKey: 'checkCalls' },
+      { to: '/tms/documents/review', label: 'Document review', pageKey: 'loads', tms: true, badgeKey: 'documentReview' },
+      { to: '/tms/tracking/links', label: 'Customer links', pageKey: 'loads', tms: true },
     ],
+  },
+  { to: '/tms/load-review', label: 'Load Review', icon: ClipboardList, pageKey: 'loadReview', section: BROKERAGE, tms: true, badgeKey: 'loadReview' },
+  {
+    to: '/tms/customers',
+    label: 'Customers',
+    icon: Building2,
+    pageKey: 'customers',
+    section: BROKERAGE,
+    tms: true,
+    children: [
+      { to: '/tms/customers', label: 'Customers', pageKey: 'customers', tms: true, exclude: ['/tms/customers/follow-ups'] },
+      ...(SHOW_RESERVED_AB
+        ? [{ to: '/tms/customers/follow-ups', label: 'Follow-ups', pageKey: 'customers', tms: true }]
+        : []),
+    ],
+  },
+  { to: '/tms/carriers', label: 'Carriers', icon: Truck, pageKey: 'carriers', section: BROKERAGE, tms: true },
+  { to: '/tms/locations', label: 'Locations', icon: MapPin, pageKey: 'locations', section: BROKERAGE, tms: true },
+  {
+    to: '/tms/invoicing',
+    label: 'Accounting',
+    icon: Banknote,
+    pageKey: 'tms',
+    section: BROKERAGE,
+    group: true,
+    badgeKey: 'accounting',
+    children: ACCOUNTING_CHILDREN,
+  },
+  {
+    to: '/tms/brokerage',
+    label: 'Settings',
+    icon: SlidersHorizontal,
+    pageKey: 'tms',
+    section: BROKERAGE,
+    group: true,
+    children: SETTINGS_CHILDREN,
   },
 ]
 
 /**
- * The Brokerage pages, in MVMNT's sidebar order (MVMNT_UI_REFERENCE §1). Each keeps the
- * page key its old path used, so an existing grant still opens the re-homed page.
- * The company dashboard and Shipments are pinned above the sections and are not in this bucket.
+ * Every page-bearing nav def once, in sidebar order: top-level rows and their children,
+ * group headers excluded (they open nothing of their own).
  */
-export const TMS_ITEMS: NavItemDef[] = [
-  { to: '/tms/rates',      label: 'Rates',        icon: LineChart,       pageKey: 'quotes',    section: BROKERAGE, tms: true, badgeKey: 'quotesToReply' },
-  { to: '/tms/invoicing',  label: 'Invoicing',    icon: FileSpreadsheet, pageKey: 'invoicing', section: BROKERAGE, tms: true, badgeKey: 'arToInvoice' },
-  { to: '/tms/carriers',   label: 'Carriers',     icon: Truck,           pageKey: 'carriers',  section: BROKERAGE, tms: true },
-  { to: '/tms/factors',    label: 'Factors',      icon: Banknote,        pageKey: 'factoring', section: BROKERAGE, tms: true },
-  { to: '/tms/customers',  label: 'Customers',    icon: Building2,       pageKey: 'customers', section: BROKERAGE, tms: true },
-  { to: '/tms/locations',  label: 'Locations',    icon: MapPin,          pageKey: 'locations', section: BROKERAGE, tms: true },
-  { to: '/tms/vendors',    label: 'Vendors',      icon: Receipt,         pageKey: 'vendorAp',  section: BROKERAGE, tms: true },
-  { to: '/tms/tracking/links',  label: 'Manage Customer Links', icon: Link2, pageKey: 'tms', section: BROKERAGE, tms: true },
-  { to: '/tms/brokerage',  label: 'My Brokerage', icon: Building,        pageKey: 'settings',  section: BROKERAGE, tms: true },
-]
-
-const ALL_TMS_ITEMS: NavItemDef[] = [...PINNED_ITEMS, ...TMS_ITEMS]
+export function flatNavDefs(): Array<Pick<NavItemDef, 'to' | 'label' | 'pageKey'>> {
+  return PINNED_ITEMS.flatMap((item) => [...(item.group ? [] : [item]), ...(item.children ?? [])])
+}
 
 /** A division code as a section header: `CAR_SHIPPING` reads `CAR SHIPPING`. */
 export function sectionTitle(code: string): string {
@@ -108,23 +209,81 @@ export function sectionTitle(code: string): string {
 
 const INTAKE_PATH = '/tms/shipments/intake'
 
-/** Pages that live under the Shipments item without being nav items of their own. */
-const SHIPMENT_WORKSTATIONS: Record<string, string> = {
-  '/tms/tracking': 'Tracking',
-  '/tms/documents/review': 'Document review',
-  '/tms/check-calls': 'Check calls',
+interface CrumbRule {
+  path: string
+  /** Matches the path or anything under it; without it only the exact path matches. */
+  prefix?: boolean
+  crumbs: TmsBreadcrumbItem[]
 }
 
+const QUOTES: TmsBreadcrumbItem = { label: 'Quotes', to: '/tms/rates' }
+const SHIPMENTS: TmsBreadcrumbItem = { label: 'Shipments', to: SHIPMENTS_PATH }
+const ACCOUNTING: TmsBreadcrumbItem = { label: 'Accounting' }
+const SETTINGS: TmsBreadcrumbItem = { label: 'Settings' }
+const LOAD_TRACKING: TmsBreadcrumbItem = { label: 'Load Tracking' }
+const AR: TmsBreadcrumbItem = { label: 'Accounts Receivable', to: '/tms/invoicing' }
+const AP: TmsBreadcrumbItem = { label: 'Accounts Payable', to: '/tms/invoicing/payable' }
+
+/**
+ * Trails for the pages whose trail is not just their nav label. The longest matching path
+ * wins; at equal length an exact rule beats a prefix rule. A group crumb has no link.
+ */
+const CRUMBS: CrumbRule[] = [
+  { path: '/tms/rates', crumbs: [{ label: 'Quotes' }] },
+  { path: '/tms/rates', prefix: true, crumbs: [QUOTES, { label: 'Quote' }] },
+  { path: '/tms/rates/new', crumbs: [QUOTES, { label: 'New quote' }] },
+  { path: '/tms/rates/lanes', crumbs: [QUOTES, { label: 'Lane rates' }] },
+  { path: '/tms/rates/spot', prefix: true, crumbs: [QUOTES, { label: 'Spot inbox' }] },
+  { path: SHIPMENTS_PATH, crumbs: [{ label: 'Shipments' }] },
+  { path: SHIPMENTS_PATH, prefix: true, crumbs: [SHIPMENTS, { label: 'Shipment' }] },
+  // After the generic shipment branch, or an intake load would read "Shipment".
+  { path: INTAKE_PATH, crumbs: [SHIPMENTS, { label: 'Intake' }] },
+  { path: INTAKE_PATH, prefix: true, crumbs: [SHIPMENTS, { label: 'Intake', to: INTAKE_PATH }, { label: 'Load' }] },
+  { path: '/tms/tracking', crumbs: [LOAD_TRACKING, { label: 'Tracking' }] },
+  { path: '/tms/tracking/links', crumbs: [LOAD_TRACKING, { label: 'Customer links' }] },
+  { path: '/tms/check-calls', crumbs: [LOAD_TRACKING, { label: 'Check calls' }] },
+  { path: '/tms/documents/review', crumbs: [LOAD_TRACKING, { label: 'Document review' }] },
+  { path: '/tms/customers/follow-ups', crumbs: [{ label: 'Customers', to: '/tms/customers' }, { label: 'Follow-ups' }] },
+  { path: '/tms/invoicing', crumbs: [ACCOUNTING, { label: 'Accounts Receivable' }] },
+  { path: '/tms/invoicing/invoices', prefix: true, crumbs: [ACCOUNTING, AR, { label: 'Invoice' }] },
+  { path: '/tms/invoicing/payable', crumbs: [ACCOUNTING, { label: 'Accounts Payable' }] },
+  { path: '/tms/invoicing/payable/bills', prefix: true, crumbs: [ACCOUNTING, AP, { label: 'Bill' }] },
+  { path: '/tms/vendors', crumbs: [ACCOUNTING, { label: 'Vendors' }] },
+  { path: '/tms/factors', crumbs: [ACCOUNTING, { label: 'Factoring' }] },
+  { path: '/tms/brokerage', prefix: true, crumbs: [SETTINGS, { label: 'General & automation' }] },
+  // One rule per Settings child, labelled as the sidebar labels it (the root is exact-only).
+  ...SETTINGS_CHILDREN.filter((c) => c.to !== '/tms/brokerage').map<CrumbRule>((c) => ({
+    path: c.to,
+    prefix: true,
+    crumbs: [SETTINGS, { label: c.label }],
+  })),
+  { path: '/tms/workflows', prefix: true, crumbs: [SETTINGS, { label: 'Workflows' }] },
+]
+
 /** Legacy pages that are not nav items of their own (or whose trail differs from their item). */
-const LEGACY_CRUMBS: Array<{ path: string; prefix?: boolean; crumbs: TmsBreadcrumbItem[] }> = [
+const LEGACY_CRUMBS: CrumbRule[] = [
   { path: '/finances/review', crumbs: [{ label: 'Finances', to: '/finances' }, { label: 'Profit review' }] },
-  { path: '/compliance', crumbs: [{ label: 'Compliance', to: '/compliance' }, { label: 'Document overview' }] },
   { path: '/finance/cash-checkin', crumbs: [{ label: 'Cash check-in' }] },
   { path: '/driver-view', prefix: true, crumbs: [{ label: 'Owner operator pay', to: '/owner-operator-pay' }, { label: 'Driver app' }] },
   { path: '/truck-docs', crumbs: [{ label: 'Truck documents' }] },
   { path: '/ivan-driver-app', crumbs: [{ label: 'Ivan driver app' }] },
   { path: '/invoices', crumbs: [{ label: 'Invoices' }] },
 ]
+
+function bestRule(rules: CrumbRule[], pathname: string): CrumbRule | null {
+  let best: CrumbRule | null = null
+  let bestScore = -1
+  for (const rule of rules) {
+    const hit = pathname === rule.path || (rule.prefix === true && pathname.startsWith(`${rule.path}/`))
+    if (!hit) continue
+    const score = rule.path.length * 2 + (rule.prefix ? 0 : 1)
+    if (score > bestScore) {
+      best = rule
+      bestScore = score
+    }
+  }
+  return best
+}
 
 /** `team-queue` reads `Team queue`. */
 function titleCase(slug: string): string {
@@ -133,35 +292,18 @@ function titleCase(slug: string): string {
 }
 
 /**
- * The trail the TMS top bar shows for a path: the nav item the page belongs to (the
- * longest match wins), then at most one more level. Every crumb but the last links.
+ * The trail the TMS top bar shows for a path: an explicit rule when the page has one, else
+ * the nav item the page belongs to (the longest match wins) and at most one more level.
+ * Every crumb but the last links.
  */
 export function tmsBreadcrumb(pathname: string): TmsBreadcrumbItem[] {
-  const shipments: TmsBreadcrumbItem = { label: 'Shipments', to: SHIPMENTS_PATH }
+  const explicit = bestRule(CRUMBS, pathname) ?? bestRule(LEGACY_CRUMBS, pathname)
+  if (explicit) return explicit.crumbs
 
-  if (pathname === '/tms/tracking/links') {
-    return [shipments, { label: 'Tracking', to: '/tms/tracking' }, { label: 'Manage links' }]
-  }
-  const workstation = SHIPMENT_WORKSTATIONS[pathname]
-  if (workstation) return [shipments, { label: workstation }]
-
-  // Before the generic `/tms/shipments/` branch, or an intake load would read "Shipment".
-  if (pathname === INTAKE_PATH) return [shipments, { label: 'Intake' }]
-  if (pathname.startsWith(`${INTAKE_PATH}/`)) {
-    return [shipments, { label: 'Intake', to: INTAKE_PATH }, { label: 'Load' }]
-  }
-  if (pathname.startsWith(`${SHIPMENTS_PATH}/`)) return [shipments, { label: 'Shipment' }]
-
-  // Legacy (non-/tms) pages: pages that are not nav items get an explicit trail, every nav
-  // item answers to its own label, and nothing ever reads "TMS".
+  // Every nav item answers to its own label, and nothing ever reads "TMS".
   const isTms = pathname === '/tms' || pathname.startsWith('/tms/')
-  if (!isTms) {
-    const explicit = LEGACY_CRUMBS.find((c) => pathname === c.path || (c.prefix && pathname.startsWith(`${c.path}/`)))
-    if (explicit) return explicit.crumbs
-  }
-
-  let best: NavItemDef | null = null
-  for (const item of isTms ? ALL_TMS_ITEMS : ITEM_POOL) {
+  let best: Pick<NavItemDef, 'to' | 'label'> | null = null
+  for (const item of isTms ? flatNavDefs() : ITEM_POOL) {
     if (pathname === item.to || pathname.startsWith(`${item.to}/`)) {
       if (!best || item.to.length > best.to.length) best = item
     }
@@ -177,7 +319,7 @@ export function tmsBreadcrumb(pathname: string): TmsBreadcrumbItem[] {
 }
 
 /**
- * The businesses the company switcher offers: one per visible section, in section order,
+ * The businesses the company switcher offers: one per visible business, in section order,
  * minus the COMPANY group (it is the company, not a business). Names come from the
  * division list so the switcher never shows a code.
  */
@@ -194,12 +336,12 @@ export function companyOptions(
 type DivisionLike = Pick<OwnershipDivisionRecord, 'id' | 'code' | 'name' | 'brand' | 'parentId' | 'sortOrder' | 'active'>
 
 /**
- * Every nav item, once, tagged with the division that owns it. The Brokerage pages are
- * the `/tms/*` set; the legacy config's BROKERAGE rows are the old paths those replaced
- * (they stay in `navItems.ts` because they are still the permission list), so they are
- * listed here once, not twice.
+ * Every section nav item, once, tagged with the division that owns it. The freight pages
+ * are the pinned block; the legacy config's BROKERAGE rows are the old paths those replaced
+ * (they stay in `navItems.ts` because they are still the permission list), so they are not
+ * rendered here.
  */
-const ITEM_POOL: NavItemDef[] = [...TMS_ITEMS, ...NAV_ITEMS.filter((i) => i.section !== BROKERAGE)]
+const ITEM_POOL: NavItemDef[] = NAV_ITEMS.filter((i) => i.section !== BROKERAGE)
 
 export function buildNavSections({
   divisions,
@@ -217,20 +359,34 @@ export function buildNavSections({
   const all: DivisionLike[] = divisions ?? SEED_DIVISIONS
   const everything = isOwner || isAdmin
   const canOpenTms = everything || hasPageAccess(TMS_PAGE_KEY)
-  const visible = (def: NavItemDef): boolean =>
-    everything || hasPageAccess(def.pageKey) || ((def.tms === true || def.section === BROKERAGE) && canOpenTms)
+  const visible = (def: { pageKey: string; tms?: boolean; adminOnly?: boolean }): boolean =>
+    everything || (def.adminOnly !== true && (hasPageAccess(def.pageKey) || (def.tms === true && canOpenTms)))
 
   // Pinned items are never part of a business section; they render first and are gated
   // exactly like any other page, so a shared-loads grant keeps seeing Shipments.
-  const pinned: NavSectionItem[] = PINNED_ITEMS.filter(visible).map((def) => ({
-    to: def.to,
-    label: def.label,
-    icon: def.icon,
-    badge: def.badge ?? null,
-    pageKey: def.pageKey,
-    badgeKey: def.badgeKey,
-    children: def.children,
-  }))
+  const pinned: NavSectionItem[] = []
+  for (const def of PINNED_ITEMS) {
+    const children = (def.children ?? []).filter(visible).map<TmsNavChild>((c) => ({
+      to: c.to,
+      label: c.label,
+      badgeKey: c.badgeKey,
+      exact: c.exact,
+      exclude: c.exclude,
+      params: c.params,
+    }))
+    // A group is only as visible as its children; a page with children is visible by its own gate.
+    if (def.group ? children.length === 0 : !visible(def)) continue
+    pinned.push({
+      to: def.group ? children[0].to : def.to,
+      label: def.label,
+      icon: def.icon,
+      badge: def.badge ?? null,
+      pageKey: def.pageKey,
+      badgeKey: def.badgeKey,
+      children: children.length > 0 ? children : undefined,
+      group: def.group,
+    })
+  }
 
   // An item tagged with a subdivision (Owner Operators, Box Trucks…) belongs to the
   // business that owns it, so it rolls up to the top-level division's section.
@@ -248,6 +404,8 @@ export function buildNavSections({
 
   const sections: NavSection[] = []
   for (const division of tops) {
+    // The brokerage is the pinned block above: no section, no intake fallback link.
+    if (division.code === BROKERAGE) continue
     const defs = byTopLevel.get(division.code) ?? []
     if (defs.length === 0) {
       // A division nobody has written pages for yet still has freight: its shipments.
@@ -279,5 +437,9 @@ export function buildNavSections({
     if (items.length === 0) continue
     sections.push({ key: division.code, name: sectionTitle(division.code), brand: division.brand ?? null, items })
   }
-  return { pinned, sections }
+
+  const businesses = tops
+    .filter((d) => d.code !== COMPANY_DIVISION && (d.code === BROKERAGE ? pinned.length > 0 : sections.some((s) => s.key === d.code)))
+    .map((d) => ({ key: d.code }))
+  return { pinned, sections, businesses }
 }

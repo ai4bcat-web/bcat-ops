@@ -33,11 +33,18 @@ export interface TmsLiveChild {
 }
 
 export interface TmsNavChild {
+  /** May carry a query: `/tms/shipments?list=all`. */
   to: string
   label: string
   badgeKey?: string
-  /** Shipments currently moving, listed under the Tracking child. Set by `childrenFor`. */
+  /** Shipments currently moving, listed under the Tracking child. Set by `NavRow`. */
   live?: TmsLiveChild[]
+  /** Default false = prefix match (the path or anything under it). */
+  exact?: boolean
+  /** Path prefixes that belong to a sibling child (`/tms/invoicing/payable`). */
+  exclude?: string[]
+  /** Query params that must equal the value; `null` means the param must be absent. */
+  params?: Record<string, string | null>
 }
 
 export interface TmsNavChildGroup {
@@ -51,9 +58,11 @@ export interface TmsNavItem {
   icon: LucideIcon
   badge?: string | null
   badgeKey?: string
-  /** Explicit sub-items. The Shipments item computes its own children plus groups. */
+  /** Explicit sub-items, already gated per user by `buildNavSections`. */
   children?: TmsNavChild[]
   childGroups?: TmsNavChildGroup[]
+  /** A header row with no page of its own: `to` is its first visible child and only a child lights it. */
+  group?: boolean
 }
 
 export interface TmsNavSection {
@@ -78,6 +87,8 @@ export interface TmsShellProps {
   sections: TmsNavSection[]
   /** The current pathname. Drives the active row, not react-router's own matching. */
   activePath: string
+  /** The current query string (`location.search`); child rows can depend on it (`?list=all`). */
+  activeSearch?: string
   breadcrumb: TmsBreadcrumbItem[]
   user: { initial: string; email: string; name?: string | null }
   /** Numeric counts for `badgeKey` items (see `useShellBadgeCounts`; absent or 0 renders no badge).
@@ -109,8 +120,7 @@ export interface TmsShellProps {
 const COLLAPSE_KEY = 'tms-sidebar-collapsed'
 export const SHIPMENTS_PATH = '/tms/shipments'
 const TRACKING_PATH = '/tms/tracking'
-const INTAKE_PATH = '/tms/shipments/intake'
-const DOCUMENTS_PATH = '/tms/documents/review'
+
 const COMPANY_GROUP = 'COMPANY'
 const ALL_BUSINESSES = 'All businesses'
 
@@ -127,16 +137,15 @@ function initialsOf(name: string): string {
   return (words.length > 1 ? words[0][0] + words[1][0] : name.slice(0, 2)).toUpperCase()
 }
 
-function isChildActive(activePath: string, child: TmsNavChild): boolean {
-  // The Shipments child is the board itself: not the intake queue or a shipment page.
-  if (child.to === SHIPMENTS_PATH) return activePath === SHIPMENTS_PATH
-  // Intake has its own review pages under /tms/shipments/intake/:id.
-  // The Tracking workstation has a child Manage page under /tms/tracking/links;
-  // the parent /tms/tracking stays highlighted while on that page.
-  if (child.to === INTAKE_PATH || child.to === TRACKING_PATH) {
-    return activePath === child.to || activePath.startsWith(`${child.to}/`)
-  }
-  return activePath === child.to
+function isChildActive(activePath: string, activeSearch: string, child: TmsNavChild): boolean {
+  const [path, query] = child.to.split('?')
+  const pathOk = child.exact ? activePath === path : isPathActive(activePath, path)
+  if (!pathOk) return false
+  if (child.exclude?.some((prefix) => isPathActive(activePath, prefix))) return false
+  const search = new URLSearchParams(activeSearch)
+  const required = { ...Object.fromEntries(new URLSearchParams(query ?? '')), ...child.params }
+  // A child whose `to` carries a query (and no explicit params) is lit only by that query.
+  return Object.entries(required).every(([key, value]) => (value === null ? !search.has(key) : search.get(key) === value))
 }
 
 interface NavChildren {
@@ -144,28 +153,24 @@ interface NavChildren {
   groups: TmsNavChildGroup[]
 }
 
+/** The children as data; only the Tracking child gets the live loads list opening under it. */
 function childrenFor(item: TmsNavItem, trackedLoads: TmsLiveChild[]): NavChildren {
-  const groups = item.childGroups ?? []
-  if (item.to !== SHIPMENTS_PATH) return { items: item.children ?? [], groups }
-  const items: TmsNavChild[] = [
-    { to: SHIPMENTS_PATH, label: 'Shipments' },
-    ...(item.children ?? []),
-    { to: TRACKING_PATH, label: 'Tracking', badgeKey: 'tracking', live: trackedLoads },
-    { to: DOCUMENTS_PATH, label: 'Documents' },
-  ]
-  return { items, groups }
+  const items = (item.children ?? []).map((c) => (c.to === TRACKING_PATH ? { ...c, live: trackedLoads } : c))
+  return { items, groups: item.childGroups ?? [] }
 }
 
 function NavChildRow({
   child,
   activePath,
+  activeSearch,
   badgeCounts,
 }: {
   child: TmsNavChild
   activePath: string
+  activeSearch: string
   badgeCounts?: Record<string, number>
 }) {
-  const active = isChildActive(activePath, child)
+  const active = isChildActive(activePath, activeSearch, child)
   const count = child.badgeKey != null ? (badgeCounts?.[child.badgeKey] ?? 0) : 0
   const live = child.live ?? []
   const expandable = live.length > 0
@@ -213,11 +218,13 @@ function NavChildRow({
 function NavRow({
   item,
   activePath,
+  activeSearch,
   badgeCounts,
   trackedLoads,
 }: {
   item: TmsNavItem
   activePath: string
+  activeSearch: string
   badgeCounts?: Record<string, number>
   trackedLoads: TmsLiveChild[]
 }) {
@@ -225,13 +232,14 @@ function NavRow({
     () => childrenFor(item, trackedLoads),
     [item, trackedLoads],
   )
-  const parentActive = isPathActive(activePath, item.to)
   const anyChildActive = useMemo(
     () =>
-      items.some((c) => isChildActive(activePath, c)) ||
-      groups.some((g) => g.children.some((c) => isChildActive(activePath, c))),
-    [activePath, items, groups],
+      items.some((c) => isChildActive(activePath, activeSearch, c)) ||
+      groups.some((g) => g.children.some((c) => isChildActive(activePath, activeSearch, c))),
+    [activePath, activeSearch, items, groups],
   )
+  // A group header has no page of its own: only a lit child lights it.
+  const parentActive = item.group ? anyChildActive : isPathActive(activePath, item.to) || anyChildActive
   // Landing under the item opens it; a caret click afterwards is remembered for that
   // path only, so the next navigation under the item opens it again.
   const [toggle, setToggle] = useState<{ path: string; open: boolean } | null>(null)
@@ -272,7 +280,7 @@ function NavRow({
       {hasKids && open ? (
         <div className="tms-nav-children">
           {items.map((child) => (
-            <NavChildRow key={child.to} child={child} activePath={activePath} badgeCounts={badgeCounts} />
+            <NavChildRow key={child.to} child={child} activePath={activePath} activeSearch={activeSearch} badgeCounts={badgeCounts} />
           ))}
           {groups.map((group) => (
             <div key={group.label}>
@@ -280,7 +288,7 @@ function NavRow({
                 {group.label}
               </div>
               {group.children.map((child) => (
-                <NavChildRow key={child.to} child={child} activePath={activePath} badgeCounts={badgeCounts} />
+                <NavChildRow key={child.to} child={child} activePath={activePath} activeSearch={activeSearch} badgeCounts={badgeCounts} />
               ))}
             </div>
           ))}
@@ -299,6 +307,7 @@ function NavSectionBlock({
   /** The effective business preference, or null for All businesses. */
   company: string | null
   activePath: string
+  activeSearch: string
   badgeCounts?: Record<string, number>
   trackedLoads: TmsLiveChild[]
 }) {
@@ -433,6 +442,7 @@ export function TmsShell({
   pinned = [],
   sections,
   activePath,
+  activeSearch = '',
   breadcrumb,
   user,
   badgeCounts,
@@ -503,7 +513,7 @@ export function TmsShell({
   const userName = personName({ name: user.name, email: user.email }, 'Team member')
   const shownEmail = user.email.includes('@') ? user.email : ''
   const dark = theme === 'dark'
-  const rowProps = { activePath, badgeCounts, trackedLoads }
+  const rowProps = { activePath, activeSearch, badgeCounts, trackedLoads }
 
   return (
     <div className={`tms-shell${collapsed ? ' tms-is-collapsed' : ''}${fill ? ' tms-fill' : ''}${navOpen ? ' tms-nav-open' : ''}`}>

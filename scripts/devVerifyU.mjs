@@ -166,15 +166,15 @@ async function auditRoute(b, route, theme, ref) {
 
 // ───────────────────────────── safety + discovery ─────────────────────────────
 const ddb = new DynamoDBClient({ region: REGION })
-const doc = DynamoDBDocumentClient.from(ddb, { marshallOptions: { removeUndefinedValues: true } })
+export const doc = DynamoDBDocumentClient.from(ddb, { marshallOptions: { removeUndefinedValues: true } })
 
-async function discoverDevSuffix() {
+export async function discoverDevSuffix() {
   const suffix = process.env.DEV_TABLE_SUFFIX || 'nc3jsnxdmjhkpequimypiatkma-NONE'
   if (suffix === PROD_SUFFIX || suffix.includes(PROD_SUFFIX)) throw new Error('refusing the production table suffix')
   await ddb.send(new DescribeTableCommand({ TableName: `Load-${suffix}` })).catch(() => { throw new Error(`no Load-${suffix} table in the account`) })
   return suffix
 }
-function devTable(model, suffix) {
+export function devTable(model, suffix) {
   const name = `${model}-${suffix}`
   if (!name.endsWith(`-${suffix}`) || name.includes(PROD_SUFFIX) || suffix === PROD_SUFFIX) throw new Error(`refusing non-dev table ${name}`)
   return name
@@ -182,7 +182,7 @@ function devTable(model, suffix) {
 
 let agentFunction = null
 /** The dev workflow-agent Function URL (and its bucket), as devVerifyStepK finds it. */
-async function workflowAgent() {
+export async function workflowAgent() {
   if (agentFunction) return agentFunction
   const fromEnv = process.env.WORKFLOW_AGENT_URL ? process.env.WORKFLOW_AGENT_URL.replace(/\/$/, '') : null
   try {
@@ -208,7 +208,7 @@ async function workflowAgent() {
 }
 
 const sha20 = (value) => createHash('sha256').update(value).digest('hex').slice(0, 20)
-const slotFor = (role, messageId) => {
+export const slotFor = (role, messageId) => {
   const prefix = `workflow-inbox/${sha20(messageId)}`
   const sourceKey = `${prefix}/message.json`
   return { prefix, sourceKey, runId: `wf:${role}:${sha20(sourceKey)}` }
@@ -223,7 +223,7 @@ const SECRET_PATHS = [
   `/amplify/shared/${DEV_APP_ID}/INTAKE_WEBHOOK_SECRET`,
 ]
 let intakeSecret = null
-async function resolveIntakeSecret() {
+export async function resolveIntakeSecret() {
   if (intakeSecret) return intakeSecret
   if (process.env.INTAKE_WEBHOOK_SECRET) return (intakeSecret = process.env.INTAKE_WEBHOOK_SECRET)
   const { SSMClient, GetParameterCommand } = await import('@aws-sdk/client-ssm')
@@ -238,7 +238,7 @@ async function resolveIntakeSecret() {
   }
   throw new Error(`INTAKE_WEBHOOK_SECRET not in the environment or at ${SECRET_PATHS.join(' / ')}`)
 }
-async function postInbox(action, fixture) {
+export async function postInbox(action, fixture) {
   const { url } = await workflowAgent()
   const res = await fetch(url, {
     method: 'POST',
@@ -247,14 +247,14 @@ async function postInbox(action, fixture) {
   })
   return { status: res.status, body: await res.json().catch(() => ({})) }
 }
-async function deliver(fixture) {
+export async function deliver(fixture) {
   const prepared = await postInbox('prepare', fixture)
   if (prepared.status !== 200) throw new Error(`inbox prepare answered ${prepared.status}`)
   const committed = await postInbox('commit', fixture)
   if (committed.status !== 200) throw new Error(`inbox commit answered ${committed.status}`)
   return { committed: committed.body, ...slotFor(fixture.role, fixture.messageId) }
 }
-async function deleteInboxPrefix(prefix) {
+export async function deleteInboxPrefix(prefix) {
   const { bucket } = await workflowAgent()
   if (!bucket) return 0
   const { S3Client, ListObjectsV2Command, DeleteObjectCommand } = await import('@aws-sdk/client-s3')
@@ -270,9 +270,9 @@ async function deleteInboxPrefix(prefix) {
 }
 
 // ───────────────────────────── data reads ─────────────────────────────
-const asJson = (v) => (typeof v === 'string' ? (() => { try { return JSON.parse(v) } catch { return v } })() : v)
+export const asJson = (v) => (typeof v === 'string' ? (() => { try { return JSON.parse(v) } catch { return v } })() : v)
 
-async function listAllRows(token, field, selection) {
+export async function listAllRows(token, field, selection) {
   const items = []
   let next = null
   do {
@@ -302,9 +302,9 @@ async function expectedListCounts(token) {
 }
 const footerTotal = (text) => { const m = /Records shown\s+(\d+)\s+of\s+(\d+)/.exec(text); return m ? Number(m[2]) : null }
 
-const INTAKE_SELECTION = 'id status divisionCode runId subject fields meta confirmed missingFields shipmentId shipmentNumber reviewedBy version'
+export const INTAKE_SELECTION = 'id status divisionCode runId subject fields meta confirmed missingFields shipmentId shipmentNumber reviewedBy reviewedAt version'
 const intakeRows = (token) => listAllRows(token, 'listIntakeLoads', INTAKE_SELECTION)
-const getRow = async (token, model, id, selection = 'id') => (await gql(token, `query($id: ID!) { get${model}(id: $id) { ${selection} } }`, { id }))[`get${model}`]
+export const getRow = async (token, model, id, selection = 'id') => (await gql(token, `query($id: ID!) { get${model}(id: $id) { ${selection} } }`, { id }))[`get${model}`]
 
 // ───────────────────────────── flows ─────────────────────────────
 /** U01: the two lists, the removed controls, the kept ones. */
@@ -462,7 +462,7 @@ async function divisionServerSequence(ctx) {
   })
 }
 
-const tenderBody = (ref, extra = []) => [
+export const tenderBody = (ref, extra = []) => [
   'Tender for your acceptance.', '', `Reference: ${ref}`, 'Pickup: Dallas TX, 08:00', 'Delivery: Atlanta GA, 14:00 two days later',
   'Equipment: 53ft dry van, 38,000 lbs', ...extra, '', 'ZZ U Sender',
 ].join('\n')
@@ -587,7 +587,16 @@ async function reviewFlow(b, ctx, theme) {
     if (bill) await setValue(b, byLabel('Bill to'), bill)
     await b.evaluate(`[...document.querySelectorAll('.tms-main input[type="checkbox"][aria-label^="Confirm "]')].forEach((c) => c.click())`)
     await pause(500)
-    if ((await buttonState(b, '^Move to active$')) !== 'enabled') throw new Error(`Move still disabled: ${((await mainText(b)).match(/Needs:[^\n]*/) ?? ['(no Needs line)'])[0]}`)
+    // Step AA gate: a complete load still cannot move until the reviewer presses Mark reviewed.
+    if ((await buttonState(b, '^Save')) === 'enabled') { await clickIn(b, 'main', '^Save'); await pause(800) }
+    if ((await buttonState(b, '^Mark reviewed$')) !== 'enabled') throw new Error(`Mark reviewed is not available on a complete load: ${((await mainText(b)).match(/Needs:[^\n]*/) ?? ['(no Needs line)'])[0]}`)
+    if ((await buttonState(b, '^Move to active$')) !== 'disabled') throw new Error('Move to active is enabled before the load is reviewed')
+    await clickIn(b, 'main', '^Mark reviewed$')
+    try {
+      await b.poll(async () => (await buttonState(b, '^Move to active$')) === 'enabled', 'Move to active after Mark reviewed', 30_000)
+    } catch {
+      throw new Error(`Move still disabled after Mark reviewed: ${((await mainText(b)).match(/Needs:[^\n]*/) ?? ['(no Needs line)'])[0]}`)
+    }
     await clickIn(b, 'main', '^Move to active$')
     await b.poll(async () => /^\/tms\/shipments\/shp-/.test(await pathname(b)), 'navigation to the new shipment', 60_000)
     const shipmentId = (await pathname(b)).split('/').pop()
@@ -657,7 +666,7 @@ async function phonePass(b, ctx) {
 }
 
 // ───────────────────────────── cleanup ─────────────────────────────
-async function scanIds(table, ids) {
+export async function scanIds(table, ids) {
   const hits = []
   let startKey
   do {
@@ -667,7 +676,7 @@ async function scanIds(table, ids) {
   } while (startKey)
   return hits
 }
-async function scanAudit(table, runStart, isOurs) {
+export async function scanAudit(table, runStart, isOurs) {
   const hits = []
   let startKey
   do {

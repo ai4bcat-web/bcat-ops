@@ -19,6 +19,8 @@ export interface DemoStepDef {
   opensOn: string | null
   /** The tab or sub-view the record opens to, when it matters. */
   tab?: string
+  /** Opens a named page instead of the record's own page; the record id rides along as ?shipment=. */
+  route?: 'loadReview'
 }
 
 export const DEMO_STEPS: DemoStepDef[] = [
@@ -31,7 +33,7 @@ export const DEMO_STEPS: DemoStepDef[] = [
   {
     key: 'P2',
     title: 'Assign a carrier rep or team',
-    whatYouSee: 'An open shipment assigned to a carrier rep, showing in My queue and in the team queue, mirrored onto the load.',
+    whatYouSee: 'An open shipment assigned to a carrier rep or team, mirrored onto the load.',
     opensOn: 'shipment.open.assigned',
   },
   {
@@ -49,7 +51,7 @@ export const DEMO_STEPS: DemoStepDef[] = [
   {
     key: 'P5',
     title: 'Tender to an intake load',
-    whatYouSee: 'A tender e-mail the agent turned into a partially built load on Shipments › Intake: the fields it filled, the ones to check, and the Needs: list that gates Move to active.',
+    whatYouSee: 'A tender e-mail the agent turned into a partially built load on Shipments › Intake: the fields it filled, the ones to check, and the Needs: list that gates Move to active and the explicit Mark reviewed step.',
     opensOn: 'intake.review',
   },
   {
@@ -82,9 +84,9 @@ export const DEMO_STEPS: DemoStepDef[] = [
   {
     key: 'P10',
     title: 'Release to billing',
-    whatYouSee: 'The accounting list of ready-for-billing shipments, and Release to billing going through the Step F gate rather than around it.',
+    whatYouSee: 'The Load Review queue: the seeded delivered shipment with every check green, and Move to billing going through the Step F gate rather than around it; the POD-flagged shipment stays in the queue with its reason.',
     opensOn: 'shipment.readytobill',
-    tab: 'documents',
+    route: 'loadReview',
   },
   {
     key: 'P11',

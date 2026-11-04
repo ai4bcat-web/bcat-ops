@@ -16,6 +16,7 @@
 .tms-intake-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: var(--tms-gap); }
 .tms-intake-footer-spacer { flex: 1; }
 .tms-intake-needs { color: var(--tms-muted); margin-top: var(--tms-gap); }
+.tms-intake-review-line { color: var(--tms-muted); font-size: 12px; text-align: right; }
 .tms-intake-needs-list { margin: 4px 0 0; padding-left: 18px; }
 
 .tms-intake-email-body { white-space: pre-wrap; word-break: break-word; max-height: 420px; overflow: auto; border: 1px solid var(--tms-border); border-radius: var(--tms-radius-sm); padding: 8px; }

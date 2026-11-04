@@ -15,7 +15,7 @@ export interface DuplicateMark {
   reason: 'invoice number' | 'amount and date'
 }
 
-function normVendor(v: string | null | undefined): string {
+export function normVendor(v: string | null | undefined): string {
   return (v ?? '').toLowerCase().replace(/\b(inc|llc|ltd|co|corp|company|the)\b\.?/g, '').replace(/[^a-z0-9]/g, '')
 }
 

@@ -41,3 +41,15 @@ export function intakeRow(over: Partial<IntakeLoadRecord> = {}): IntakeLoadRecor
     ...over,
   }
 }
+
+/** The row after a reviewer pressed Mark reviewed. */
+export function reviewed(row: IntakeLoadRecord, by = 'rev@bcatcorp.com', at = '2026-11-03T16:00:00.000Z'): IntakeLoadRecord {
+  return { ...row, reviewedBy: by, reviewedAt: at }
+}
+
+/** Every gated field filled and the one low-confidence field confirmed, so only the review is outstanding. */
+export function completeIntakeRow(over: Partial<IntakeLoadRecord> = {}): IntakeLoadRecord {
+  const base = intakeRow()
+  const fields = intakeFields({ billToId: 'b1' })
+  return { ...base, fields, autoFields: fields, confirmed: ['weightLb'], missingFields: [], ...over }
+}

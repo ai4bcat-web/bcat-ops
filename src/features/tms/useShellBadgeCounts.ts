@@ -1,11 +1,12 @@
 /**
  * Sidebar badge counts for the one staff shell.
  *
- * Answers every `badgeKey` the nav config declares (`NavItemDef.badgeKey`): the moving-loads
- * and open-intake counts, and the twelve
- * counts the retired legacy `NavBar` resolved. A key whose count is zero is omitted — the
- * shell renders no badge for an absent key. Each sub-hook keeps whatever page-access gate it
- * carries on its own (e.g. `useArToInvoiceCount` gates itself on `invoicing`).
+ * Answers every `badgeKey` the nav config declares (`NavItemDef.badgeKey`, children
+ * included): the moving-loads and open-intake counts, the twelve counts the retired legacy
+ * `NavBar` resolved, and the composites the parent rows carry (`loadTracking`, `accounting`).
+ * A key whose count is zero is omitted — the shell renders no badge for an absent key. Each
+ * sub-hook keeps whatever page-access gate it carries on its own (e.g. `useArToInvoiceCount`
+ * gates itself on `invoicing`).
  */
 import { useEffect, useMemo, useState } from 'react'
 import { useAuth } from '@/hooks/useAuth'
@@ -24,6 +25,8 @@ import { useApToReviewCount } from '@/hooks/useApToReviewCount'
 import { useQuotesToReplyCount } from '@/hooks/useQuotesToReplyCount'
 import { MOVEMENT_STATUSES } from '@/lib/brokerageCharts'
 import { countOpenIntakeLoads } from '@/lib/apiClient'
+import { loadReviewCount } from '@/lib/loadReview'
+import { needsCoverCount } from '@/features/tms/carrierSales/carrierSalesQueue'
 import type { ShipmentListRow } from '@/hooks/useShipments'
 
 const POLL_MS = 60_000
@@ -85,6 +88,11 @@ export function useShellBadgeCounts({ shipments }: ShellBadgeArgs): Record<strin
   )
 
   const tracking = useMemo(() => movingShipments(shipments).length, [shipments])
+  // Both queues are derived from the shipments the shell already holds: no new read.
+  const mayReviewLoads = hasPageAccess('loadReview') || hasPageAccess('tms')
+  const mayWorkLoads = hasPageAccess('loads') || hasPageAccess('tms')
+  const loadReview = useMemo(() => (mayReviewLoads ? loadReviewCount(shipments) : 0), [mayReviewLoads, shipments])
+  const carrierSales = useMemo(() => (mayWorkLoads ? needsCoverCount(shipments) : 0), [mayWorkLoads, shipments])
 
   return useMemo(() => {
     // Every open intake item, appt-move tasks included: the intake queue lists them all.
@@ -104,6 +112,12 @@ export function useShellBadgeCounts({ shipments }: ShellBadgeArgs): Record<strin
       arToInvoice: arToInvoiceCount,
       apToReview: apToReviewCount,
       quotesToReply: quotesToReplyCount,
+      loadReview,
+      carrierSales,
+      // The parent rows' chores: moving loads are not one, so Tracking is left out of the sum.
+      loadTracking: checkCallsDue + documentReviewCount,
+      accounting: arToInvoiceCount + apToReviewCount,
+      // `spotNew` (Quotes › Spot inbox) is a slot: Step AB fills it with its own hook and adds the one line here.
     }
     const out: Record<string, number> = {}
     for (const [key, n] of Object.entries(counts)) if (n) out[key] = n
@@ -111,5 +125,6 @@ export function useShellBadgeCounts({ shipments }: ShellBadgeArgs): Record<strin
   }, [
     tracking, loads, maintenanceTasks, intakeItems, reviewCount, truckDocAlerts, dispatchUnread,
     checkCallsDue, documentReviewCount, arToInvoiceCount, apToReviewCount, quotesToReplyCount, intakeLoads,
+    loadReview, carrierSales,
   ])
 }

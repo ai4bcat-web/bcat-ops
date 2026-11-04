@@ -54,6 +54,24 @@ describe('LandingRedirect', () => {
     renderRedirect()
     expect(screen.getByTestId('path')).toHaveTextContent('/tms/dashboard')
   })
+
+  it('sends a loadReview-only user to Load Review', () => {
+    auth.hasPageAccess = (key) => key === 'loadReview'
+    renderRedirect()
+    expect(screen.getByTestId('path')).toHaveTextContent('/tms/load-review')
+  })
+
+  it('sends a carriers-only user to /tms/carriers', () => {
+    auth.hasPageAccess = (key) => key === 'carriers'
+    renderRedirect()
+    expect(screen.getByTestId('path')).toHaveTextContent('/tms/carriers')
+  })
+
+  it('shows a user with no page the no-access card instead of redirecting', () => {
+    renderRedirect()
+    expect(screen.getByTestId('path')).toHaveTextContent(/^\/$/)
+    expect(screen.getByText('No page access')).toBeInTheDocument()
+  })
 })
 
 describe('RequirePage', () => {

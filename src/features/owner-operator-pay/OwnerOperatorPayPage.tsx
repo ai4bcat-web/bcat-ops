@@ -18,6 +18,7 @@ import { payCreditsDeployed, sendDriverPayEmail, type DriverPayCredit } from '@/
 import { buildOwnerOperatorStatementPdf, ownerOperatorPdfFilename, pdfToBase64 } from '@/lib/payPdfOwnerOperator'
 import { getColor } from '@/lib/driverColors'
 import { weekLabelLong, sundayOf, shiftWeek } from '@/features/driver-pay/week'
+import { PayrollCadenceBanner } from '@/features/payroll/PayrollCadenceBanner'
 import type { Driver } from '@/types'
 import { SettingsModal, CreditModal } from './OwnerOperatorPayForms'
 import { DeductionModal, WeeklyMileageRow, EmailModal } from '../driver-pay/DriverPayForms'
@@ -403,6 +404,7 @@ export function OwnerOperatorPayPage() {
     >
 
       <div style={{ padding: '20px 32px 40px', maxWidth: 1100, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <PayrollCadenceBanner />
         {pay.loading && pay.rows.length === 0 && <div style={{ color: 'var(--tms-muted)', fontSize: 14, padding: 40, textAlign: 'center' }}>Loading…</div>}
         {pay.error && <div style={{ color: 'var(--tms-badge-red)', fontSize: 13, padding: 12, border: '1px solid var(--tms-badge-red)', borderRadius: 8, background: 'var(--tms-badge-red-tint)' }}>{pay.error}</div>}
         {!pay.loading && !pay.podsKnown && <PodCheckUnavailable />}

@@ -34,6 +34,11 @@ export async function batchShipmentTask(deps: BatchShipmentDeps, input: Row, cal
   if (shipmentIds.length === 0) throw new Error('shipmentIds must have at least one entry')
   const params = input.params == null ? {} : assertRecord(input.params, 'params')
   if (!deps.authorize(BATCH_TASK_ACTIONS[task], caller)) throw new Error(`Forbidden: ${task}`)
+  // Only the literal Load Review marker counts; anything else is an ordinary release.
+  const marker = params.review
+  const review = task === 'RELEASE_TO_BILLING' && marker != null && typeof marker === 'object' && (marker as Row).source === 'LOAD_REVIEW'
+    ? { source: 'LOAD_REVIEW' }
+    : null
 
   const results: BatchShipmentTaskResult['results'] = []
   for (const shipmentId of shipmentIds) {
@@ -46,7 +51,12 @@ export async function batchShipmentTask(deps: BatchShipmentDeps, input: Row, cal
         case 'RELEASE_TO_BILLING': {
           const orders = await deps.getOrders(shipmentId)
           if (orders.length === 0) throw new Error('Shipment has no order to release to billing')
-          await deps.releaseToBilling({ shipmentId, orderId: orders[0].id, expectedUpdatedAt: orders[0].updatedAt }, caller)
+          await deps.releaseToBilling({
+            shipmentId,
+            orderId: orders[0].id,
+            expectedUpdatedAt: orders[0].updatedAt,
+            ...(review ? { review } : {}),
+          }, caller)
           break
         }
         case 'SET_SALES_REP':
@@ -86,6 +96,7 @@ export async function batchShipmentTask(deps: BatchShipmentDeps, input: Row, cal
   const okCount = results.filter((result) => result.ok).length
   await deps.writeAudit('SHIPMENT', 'BATCH', 'BATCH_SHIPMENT_TASK', caller, {
     task, count: results.length, okCount, failCount: results.length - okCount,
+    ...(review ? { review: true } : {}),
   })
   return { results }
 }

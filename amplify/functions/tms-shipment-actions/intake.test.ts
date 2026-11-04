@@ -14,6 +14,7 @@ import type { Caller } from '../_shared/actionInputs'
 type Row = Record<string, unknown>
 
 const T = { intakeLoad: 'Intake', shipment: 'Shipment', order: 'Order', load: 'Load' }
+const REVIEWED = { reviewedBy: 'reviewer@bcatcorp.com', reviewedAt: '2026-11-03T11:30:00.000Z' }
 const caller: Caller = { email: 'rev@bcatcorp.com', sub: 'sub-rev', groups: ['page-intakeReview'], isAdmin: false }
 
 let store: Map<string, Map<string, Row>>
@@ -161,6 +162,24 @@ describe('INTAKE_SAVE_DRAFT', () => {
   })
 })
 
+describe('review invalidation on save', () => {
+  it('an edit clears the review; a no-op save keeps it', async () => {
+    seedIntake(REVIEWED)
+    await run('INTAKE_SAVE_DRAFT', { intakeId: 'il:r1', expectedVersion: 3, fields: { commodity: 'Paper' } })
+    expect(intake()).toMatchObject(REVIEWED)
+
+    await run('INTAKE_SAVE_DRAFT', { intakeId: 'il:r1', expectedVersion: 4, fields: { commodity: 'Steel' } })
+    expect(intake()).toMatchObject({ reviewedBy: null, reviewedAt: null })
+    expect(audits.at(-1)!.changes).toMatchObject({ reviewCleared: true })
+  })
+
+  it('ticking a confirmation is an edit too', async () => {
+    seedIntake(REVIEWED)
+    await run('INTAKE_SAVE_DRAFT', { intakeId: 'il:r1', expectedVersion: 3, confirm: { add: ['commodity'] } })
+    expect(intake().reviewedAt).toBeNull()
+  })
+})
+
 describe('INTAKE_DISMISS', () => {
   it('needs a reason', async () => {
     await expect(run('INTAKE_DISMISS', { intakeId: 'il:r1', expectedVersion: 3 })).rejects.toThrow(/reason/)
@@ -174,11 +193,60 @@ describe('INTAKE_DISMISS', () => {
   })
 })
 
-describe('INTAKE_MOVE_TO_ACTIVE', () => {
-  it('refuses a load that is not ready and writes no state', async () => {
+describe('INTAKE_MARK_REVIEWED', () => {
+  it('records who reviewed and when, bumps the version and audits it', async () => {
+    const out = (await run('INTAKE_MARK_REVIEWED', { intakeId: 'il:r1', expectedVersion: 3 })) as unknown as {
+      reviewedBy: string
+      reviewedAt: string
+      version: number
+    }
+    expect(out).toMatchObject({ reviewedBy: caller.email, reviewedAt: new Date(clock).toISOString(), version: 4 })
+    expect(intake()).toMatchObject({ reviewedBy: caller.email, status: 'OPEN' })
+    expect(audits.map((a) => a.action)).toEqual(['INTAKE_MARK_REVIEWED'])
+  })
+
+  it('refuses an incomplete load and writes nothing', async () => {
     const fields = JSON.parse(String(intake().fields))
     fields.stops = []
     seedIntake({ fields: JSON.stringify(fields) })
+    const before = { ...intake() }
+    await expect(run('INTAKE_MARK_REVIEWED', { intakeId: 'il:r1', expectedVersion: 3 })).rejects.toThrow(
+      /^Cannot mark reviewed — still needs:/,
+    )
+    expect(intake()).toEqual(before)
+  })
+
+  it('is idempotent once reviewed, even with a stale version', async () => {
+    seedIntake(REVIEWED)
+    await run('INTAKE_MARK_REVIEWED', { intakeId: 'il:r1', expectedVersion: 3 })
+    expect(intake()).toMatchObject(REVIEWED)
+    expect(audits).toEqual([])
+  })
+
+  it('refuses a stale version and a row that is no longer open', async () => {
+    await expect(run('INTAKE_MARK_REVIEWED', { intakeId: 'il:r1', expectedVersion: 2 })).rejects.toThrow(INTAKE_CONFLICT_MESSAGE)
+    seedIntake({ status: 'DISMISSED' })
+    await expect(run('INTAKE_MARK_REVIEWED', { intakeId: 'il:r1', expectedVersion: 3 })).rejects.toThrow(/open/)
+  })
+})
+
+describe('INTAKE_MOVE_TO_ACTIVE', () => {
+  beforeEach(() => seedIntake(REVIEWED))
+
+  it('refuses a complete, fully auto-filled load that nobody has marked reviewed', async () => {
+    seedIntake()
+    const before = { ...intake() }
+    await expect(run('INTAKE_MOVE_TO_ACTIVE', { intakeId: 'il:r1', expectedVersion: 3 })).rejects.toThrow(
+      /^Not ready to move to active — still needs: review/,
+    )
+    expect(intake()).toEqual(before)
+    expect(createShipment).not.toHaveBeenCalled()
+  })
+
+  it('refuses a load that is not ready and writes no state', async () => {
+    const fields = JSON.parse(String(intake().fields))
+    fields.stops = []
+    seedIntake({ ...REVIEWED, fields: JSON.stringify(fields) })
     const before = { ...intake() }
     await expect(run('INTAKE_MOVE_TO_ACTIVE', { intakeId: 'il:r1', expectedVersion: 3 })).rejects.toThrow(
       /^Not ready to move to active — still needs:/,
@@ -204,10 +272,11 @@ describe('INTAKE_MOVE_TO_ACTIVE', () => {
     expect(createShipment.mock.calls[0][0]).toMatchObject({ source: 'TENDER', workflowRunId: 'run-1', customerId: 'cus-1' })
     expect(setRevTag).toHaveBeenCalledWith({ shipmentId: 'shp-1', divisionCode: 'BROKERAGE' }, caller)
     expect(setSalesRep).toHaveBeenCalledWith({ shipmentId: 'shp-1', repId: 'rep-1' }, caller)
-    expect(rows(T.shipment).get('shp-1')).toMatchObject({ intakeLoadId: 'il:r1', intakeReviewedBy: caller.email })
+    expect(rows(T.shipment).get('shp-1')).toMatchObject({ intakeLoadId: 'il:r1', intakeReviewedBy: 'reviewer@bcatcorp.com', intakeReviewedAt: REVIEWED.reviewedAt })
     const refs = rows(T.order).get('ord-1')!.references as Row[]
     expect(refs.map((r) => [r.code, r.value])).toEqual([['po', 'PO-77'], ['pickup', 'PU-9']])
-    expect(intake()).toMatchObject({ status: 'MOVED', shipmentId: 'shp-1', reviewedBy: caller.email })
+    expect(intake()).toMatchObject({ status: 'MOVED', shipmentId: 'shp-1', reviewedBy: 'reviewer@bcatcorp.com', reviewedAt: REVIEWED.reviewedAt })
+    expect(audits.find((a) => a.type === 'INTAKE_LOAD')!.changes).toMatchObject({ movedBy: caller.email, reviewedBy: 'reviewer@bcatcorp.com' })
     expect(audits.map((a) => `${a.type}:${a.action}`).sort()).toEqual([
       'INTAKE_LOAD:INTAKE_MOVE_TO_ACTIVE',
       'SHIPMENT:INTAKE_MOVE_TO_ACTIVE',
@@ -246,11 +315,11 @@ describe('INTAKE_MOVE_TO_ACTIVE', () => {
   })
 
   it('does not start a second move while one is in flight, but retakes an abandoned one', async () => {
-    seedIntake({ status: 'PROMOTING', updatedAt: new Date(clock - 1000).toISOString() })
+    seedIntake({ ...REVIEWED, status: 'PROMOTING', updatedAt: new Date(clock - 1000).toISOString() })
     await expect(run('INTAKE_MOVE_TO_ACTIVE', { intakeId: 'il:r1', expectedVersion: 3 })).rejects.toThrow(/already being moved/)
     expect(createShipment).not.toHaveBeenCalled()
 
-    seedIntake({ status: 'PROMOTING', updatedAt: new Date(clock - PROMOTING_STALE_MS - 1000).toISOString() })
+    seedIntake({ ...REVIEWED, status: 'PROMOTING', updatedAt: new Date(clock - PROMOTING_STALE_MS - 1000).toISOString() })
     await run('INTAKE_MOVE_TO_ACTIVE', { intakeId: 'il:r1', expectedVersion: 3 })
     expect(createShipment).toHaveBeenCalledTimes(1)
     expect(intake().status).toBe('MOVED')

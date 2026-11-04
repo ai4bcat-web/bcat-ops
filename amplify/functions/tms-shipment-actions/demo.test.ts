@@ -613,6 +613,20 @@ describe('demo seed', () => {
     }
   })
 
+  it('seeds a sales rep and revenue division on the Load Review demo shipments', async () => {
+    const deps = makeDeps(true)
+    await seedDemoData(deps, {}, caller)
+    const demos = await scanTable(TABLES.demo)
+    const shipments = await scanTable(TABLES.shipment)
+    for (const key of ['shipment.readytobill', 'shipment.podflagged']) {
+      const record = demos.find((d) => d.demoKey === key)
+      const shipment = shipments.find((s) => s.id === record?.recordId)
+      expect(shipment, key).toBeDefined()
+      expect(String(shipment?.salesRepId ?? '')).not.toBe('')
+      expect(String(shipment?.revDivision ?? '')).not.toBe('')
+    }
+  })
+
   it('seeds only the vetted carrier with a completed MyCarrierPackets packet', async () => {
     const deps = makeDeps(true)
     await seedDemoData(deps, {}, caller)

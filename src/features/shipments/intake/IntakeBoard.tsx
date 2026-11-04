@@ -111,6 +111,14 @@ export function IntakeBoard() {
     { key: 'route', header: 'Pickup → Delivery', render: route },
     { key: 'completeness', header: 'Completeness', render: (r) => <span className="tms-intake-completeness">{completeness(r)}</span> },
     {
+      key: 'review',
+      header: 'Review',
+      render: (r) => {
+        if (r.reviewedAt && r.reviewedBy) return <TmsBadge tone="green">Reviewed</TmsBadge>
+        return r.status === 'OPEN' ? <TmsBadge tone="orange">Needs review</TmsBadge> : '—'
+      },
+    },
+    {
       key: 'source',
       header: 'E-mail',
       render: (r) => (

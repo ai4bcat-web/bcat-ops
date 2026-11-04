@@ -61,6 +61,11 @@ import { RedditQueuePage } from '@/features/reddit-queue/RedditQueuePage'
 import { PricingMarginPage } from '@/features/pricing-margin/PricingMarginPage'
 import { QuotesPage } from '@/features/quotes/QuotesPage'
 import { QuoteDetail } from '@/features/quotes/QuoteDetail'
+import { LoadReviewPage } from '@/features/tms/loadReview/LoadReviewPage'
+import { CarrierSalesPage } from '@/features/tms/carrierSales/CarrierSalesPage'
+import { SpotInboxPage } from '@/features/spot-quoter/SpotInboxPage'
+import { SpotCallbackPage } from '@/features/spot-quoter/SpotCallbackPage'
+import { FollowUpsPage } from '@/features/directory/FollowUpsPage'
 import { LaneRatesPage } from '@/features/quotes/LaneRatesPage'
 import { QuoteRespondPage } from '@/features/quotes/public/QuoteRespondPage'
 import { FactoringPage } from '@/features/factoring/FactoringPage'
@@ -148,15 +153,22 @@ export default function App() {
                   <Route path="shipments/intake" element={<RequirePage page={['loads', 'tms', 'intakeReview']}><IntakeBoard /></RequirePage>} />
                   <Route path="shipments/intake/:intakeId" element={<RequirePage page={['loads', 'tms', 'intakeReview']}><IntakeReviewPage /></RequirePage>} />
                   <Route path="shipments/:id" element={<RequirePage page={['loads', 'tms']}><ShipmentPage /></RequirePage>} />
-                  <Route path="dispatch" element={<Navigate to="/tms/shipments" replace />} />
+                  {/* The old Dispatch "needs cover" workstation is Carrier Sales now. */}
+                  <Route path="dispatch" element={<Navigate to="/tms/carrier-sales" replace />} />
+                  <Route path="carrier-sales" element={<RequirePage page={['loads', 'tms']}><CarrierSalesPage /></RequirePage>} />
                   <Route path="tracking" element={<RequirePage page={['loads', 'tms']}><TrackingWorkstation /></RequirePage>} />
                   <Route path="tracking/links" element={<RequirePage page={['loads', 'tms']}><CustomerLinksPage /></RequirePage>} />
                   <Route path="documents/review" element={<RequirePage page={['loads', 'tms']}><DocumentReviewPage /></RequirePage>} />
                   <Route path="documents/*" element={<Navigate to="/tms/documents/review" replace />} />
                   <Route path="check-calls" element={<RequirePage page={['loads', 'tms']}><CheckCallsPage /></RequirePage>} />
-                  {/* Rates: customer quotes and carrier offers, with the lane history behind them. */}
+                  {/* Load Review: the pre-billing queue. `?shipment=<id>` opens a load's checklist. */}
+                  <Route path="load-review" element={<RequirePage page={['loadReview', 'tms']}><LoadReviewPage /></RequirePage>} />
+                  {/* Quotes (path stays /tms/rates): customer quotes and carrier offers, with the lane history behind them. */}
                   <Route path="rates" element={<RequirePage page={['quotes', 'tms']}><QuotesPage /></RequirePage>} />
                   <Route path="rates/lanes" element={<RequirePage page={['quotes', 'tms']}><LaneRatesPage /></RequirePage>} />
+                  {/* Step AB slots, declared before `rates/:id` so a static segment is never read as a quote id. */}
+                  <Route path="rates/spot" element={<RequirePage page={['quotes', 'tms']}><SpotInboxPage /></RequirePage>} />
+                  <Route path="rates/spot/callback" element={<RequirePage page={['quotes', 'tms']}><SpotCallbackPage /></RequirePage>} />
                   <Route path="rates/new" element={<RequirePage page={['quotes', 'tms']}><QuoteDetail /></RequirePage>} />
                   <Route path="rates/:id" element={<RequirePage page={['quotes', 'tms']}><QuoteDetail /></RequirePage>} />
                   {/* Invoicing: what we are owed, with carrier pay as its payable side. */}
@@ -168,6 +180,7 @@ export default function App() {
                   <Route path="carriers/:id" element={<RequirePage page={['carriers', 'tms']}><CarriersPage /></RequirePage>} />
                   <Route path="factors" element={<RequirePage page={['factoring', 'tms']}><FactoringPage /></RequirePage>} />
                   <Route path="customers" element={<RequirePage page={['customers', 'tms']}><CustomersPage /></RequirePage>} />
+                  <Route path="customers/follow-ups" element={<RequirePage page={['customers', 'tms']}><FollowUpsPage /></RequirePage>} />
                   <Route path="locations" element={<RequirePage page={['locations', 'tms']}><LocationsPage /></RequirePage>} />
                   <Route path="vendors" element={<RequirePage page={['vendorAp', 'tms']}><VendorApPage /></RequirePage>} />
                   {/* Hidden, not removed: no nav item, but four live deep links land here. */}
@@ -175,7 +188,7 @@ export default function App() {
                   <Route path="workflows/runs/:id" element={<RequirePage page="tms"><RunTracePage /></RequirePage>} />
                   {/* Academy is hidden: the pages stay in the tree, the routes land on the dashboard. */}
                   <Route path="academy/*" element={<Navigate to="/tms/dashboard" replace />} />
-                  {/* My Brokerage owns its own tab strip and nested routes; each tab
+                  {/* Settings (path stays /tms/brokerage) owns its own tab strip and nested routes; each tab
                       keeps the guard its standalone route carried before Step R. */}
                   <Route path="brokerage/*" element={<BrokeragePage />} />
                 </Route>

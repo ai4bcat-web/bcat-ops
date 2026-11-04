@@ -30,6 +30,7 @@ import { assertRecord, assertString, optionalInteger, optionalString, type Calle
 
 import {
   INTAKE_NOT_READY_PREFIX,
+  canMarkReviewed,
   canMoveToActive,
   correctedKeys,
   intakeMissing,
@@ -40,7 +41,7 @@ import {
 import { requiresApptProofs } from '../../../src/lib/apptQueue'
 import type { IntakeFields, IntakeLoadRecord, IntakeMeta } from '../../../src/types/intake'
 
-export const INTAKE_ACTIONS = ['INTAKE_SAVE_DRAFT', 'INTAKE_MOVE_TO_ACTIVE', 'INTAKE_DISMISS'] as const
+export const INTAKE_ACTIONS = ['INTAKE_SAVE_DRAFT', 'INTAKE_MARK_REVIEWED', 'INTAKE_MOVE_TO_ACTIVE', 'INTAKE_DISMISS'] as const
 export type IntakeAction = (typeof INTAKE_ACTIONS)[number]
 
 /** A PROMOTING row with no shipment older than this was abandoned (Lambda timeout is shorter). */
@@ -213,6 +214,9 @@ export async function intakeSaveDraft(deps: IntakeDeps, input: Row, caller: Call
     patched.fields.customerId ? deps.getCustomer(patched.fields.customerId) : Promise.resolve(null),
   ])
   const missingFields = intakeMissing(patched.fields, intakeRequired(settings, customer).gated)
+  const changed =
+    JSON.stringify(patched.fields) !== JSON.stringify(record.fields) ||
+    JSON.stringify([...patched.confirmed].sort()) !== JSON.stringify([...record.confirmed].sort())
   const now = deps.now()
   const saved = await writeIntake(deps, row, {
     fields: JSON.stringify(patched.fields),
@@ -223,10 +227,13 @@ export async function intakeSaveDraft(deps: IntakeDeps, input: Row, caller: Call
     lastEditedBy: caller.email,
     lastEditedAt: now,
     updatedBy: caller.email,
+    // An edit invalidates the review, otherwise a reviewer could be bypassed by editing afterwards.
+    ...(changed ? { reviewedBy: null, reviewedAt: null } : {}),
   })
   await deps.writeAudit('INTAKE_LOAD', intakeId, 'INTAKE_SAVE_DRAFT', caller, {
     edited: correctedKeys(record.fields, patched.fields),
     missingFields,
+    ...(changed && row.reviewedAt ? { reviewCleared: true } : {}),
   })
   return intakeRecordOf(saved) as unknown as Row
 }
@@ -249,6 +256,40 @@ export async function intakeDismiss(deps: IntakeDeps, input: Row, caller: Caller
     updatedBy: caller.email,
   })
   await deps.writeAudit('INTAKE_LOAD', intakeId, 'INTAKE_DISMISS', caller, { reason, runId: row.runId ?? null })
+  return intakeRecordOf(saved) as unknown as Row
+}
+
+// ── INTAKE_MARK_REVIEWED ─────────────────────────────────────────────────────
+
+/** The explicit reviewer act the move gate checks. An incomplete load cannot be reviewed. */
+export async function intakeMarkReviewed(deps: IntakeDeps, input: Row, caller: Caller): Promise<Row> {
+  const intakeId = assertString(input.intakeId, 'intakeId')
+  const row = await loadRow(deps, intakeId)
+  assertExpectedVersion(row, input)
+  if (row.status !== 'OPEN') throw new Error('Only an open intake load can be marked reviewed')
+  if (row.reviewedAt && row.reviewedBy) return intakeRecordOf(row) as unknown as Row
+
+  const record = intakeRecordOf(row)
+  const ctx = await validationContext(deps, record.fields)
+  const verdict = canMarkReviewed(record, ctx)
+  if (!verdict.ok) {
+    const parts = [
+      ...verdict.missing,
+      ...verdict.problems,
+      ...verdict.unconfirmed.map((k) => `confirm ${k}`),
+    ]
+    throw new Error(`Cannot mark reviewed — still needs: ${parts.join(', ')}`)
+  }
+  const reviewedAt = deps.now()
+  const saved = await writeIntake(deps, row, {
+    reviewedBy: caller.email,
+    reviewedAt,
+    updatedBy: caller.email,
+  })
+  await deps.writeAudit('INTAKE_LOAD', intakeId, 'INTAKE_MARK_REVIEWED', caller, {
+    reviewedBy: caller.email,
+    reviewedAt,
+  })
   return intakeRecordOf(saved) as unknown as Row
 }
 
@@ -275,7 +316,6 @@ async function finishShipment(
   fields: IntakeFields,
   shipmentId: string,
   caller: Caller,
-  reviewedAt: string,
 ): Promise<void> {
   const shipment0 = await deps.getById(deps.tables.shipment, shipmentId)
   if (!shipment0) throw new Error(`Shipment not found: ${shipmentId}`)
@@ -321,8 +361,8 @@ async function finishShipment(
         shipmentId,
         {
           intakeLoadId: String(row.id),
-          intakeReviewedBy: caller.email,
-          intakeReviewedAt: reviewedAt,
+          intakeReviewedBy: strOrNull(row.reviewedBy) ?? caller.email,
+          intakeReviewedAt: strOrNull(row.reviewedAt) ?? deps.now(),
           searchKey: buildSearchKey(shipment, [freshOrder], loads),
           updatedBy: caller.email,
           updatedAt: deps.now(),
@@ -364,6 +404,7 @@ export async function intakeMoveToActive(deps: IntakeDeps, input: Row, caller: C
         ...verdict.missing,
         ...verdict.problems,
         ...verdict.unconfirmed.map((k) => `confirm ${k}`),
+        ...(verdict.needsReview ? ['review (open the load and press Mark reviewed)'] : []),
       ]
       throw new Error(`${INTAKE_NOT_READY_PREFIX} — still needs: ${parts.join(', ')}`)
     }
@@ -397,20 +438,18 @@ export async function intakeMoveToActive(deps: IntakeDeps, input: Row, caller: C
     row = await writeIntake(deps, row, { shipmentId, shipmentNumber, updatedBy: caller.email }, [], false)
   }
 
-  const reviewedAt = deps.now()
   const record = intakeRecordOf(row)
-  await finishShipment(deps, row, record.fields, shipmentId, caller, reviewedAt)
+  await finishShipment(deps, row, record.fields, shipmentId, caller)
 
-  // Step 7.
+  // Step 7. reviewedBy/reviewedAt keep the reviewer's values; the mover goes in the audit payload.
   const moved = await writeIntake(deps, row, {
     status: 'MOVED',
-    reviewedBy: caller.email,
-    reviewedAt,
     updatedBy: caller.email,
   })
   const changes: Row = {
-    reviewedBy: caller.email,
-    reviewedAt,
+    reviewedBy: record.reviewedBy,
+    reviewedAt: record.reviewedAt,
+    movedBy: caller.email,
     runId: record.runId,
     confirmed: record.confirmed,
     corrected: correctedKeys(record.autoFields, record.fields),
@@ -426,6 +465,8 @@ export function runIntakeAction(deps: IntakeDeps, action: IntakeAction, input: R
   switch (action) {
     case 'INTAKE_SAVE_DRAFT':
       return intakeSaveDraft(deps, input, caller)
+    case 'INTAKE_MARK_REVIEWED':
+      return intakeMarkReviewed(deps, input, caller)
     case 'INTAKE_MOVE_TO_ACTIVE':
       return intakeMoveToActive(deps, input, caller)
     case 'INTAKE_DISMISS':

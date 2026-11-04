@@ -19,6 +19,12 @@ import { TmsAlert, TmsMetaList } from '@/features/tms/kit'
 import type { ColumnDef } from '@/features/tms/kit'
 import { useVendorPayables } from '@/hooks/useVendorPayables'
 import { findVendorApDuplicates } from '@/lib/vendorApDuplicates'
+import {
+  filterBySource, groupByVendor, sourceCounts as countSources, vendorApTotals,
+  type VendorGroup, type VendorSourceFilter,
+} from '@/lib/vendorApSources'
+import { VendorSourceStrip } from './VendorSourceStrip'
+import type { VendorView } from './VendorSourceStrip'
 import { useAuth } from '@/hooks/useAuth'
 import { useAppStore } from '@/store/useAppStore'
 import { toLocalDateString } from '@/lib/payPeriod'
@@ -654,6 +660,8 @@ export function VendorApPage() {
   const { user, hasPageAccess } = useAuth()
 
   const [search, setSearch] = useState('')
+  const [source, setSource] = useState<VendorSourceFilter>('ALL')
+  const [view, setView] = useState<VendorView>('bills')
   // Opens on what is still owed: a paid row leaves this view, which is what "mark done" should look like.
   const [activeTab, setActiveTab] = useState<'ALL' | 'NEED_TO_PAY' | 'DONE'>('NEED_TO_PAY')
   const [detailId, setDetailId] = useState<string | null>(null)
@@ -729,12 +737,22 @@ export function VendorApPage() {
   // The same bill twice: later copies go red so an admin can delete them.
   const duplicates = useMemo(() => findVendorApDuplicates(items), [items])
 
+  const today = todayIso()
+  const totals = useMemo(() => vendorApTotals(items, today), [items, today])
+  const sourceCounts = useMemo(() => countSources(items), [items])
+
   const filtered = useMemo(() => {
-    return items
+    return filterBySource(items, source)
       .filter((item) => activeTab === 'ALL' || item.status === activeTab)
       .filter((item) => matchesSearch(item, search))
       .sort((a, b) => new Date(b.receivedAt).getTime() - new Date(a.receivedAt).getTime())
-  }, [items, activeTab, search])
+  }, [items, source, activeTab, search])
+
+  // The by-vendor view ignores the status tab: Open bills / Owed already say what is unpaid.
+  const vendorGroups = useMemo(
+    () => groupByVendor(filterBySource(items, source).filter((item) => matchesSearch(item, search)), today),
+    [items, source, search, today],
+  )
 
   const pageRows = useMemo(() => filtered.slice(0, pageSize), [filtered, pageSize])
 
@@ -817,8 +835,6 @@ export function VendorApPage() {
     [canDelete, closeDetails, removePayable],
   )
 
-  const today = todayIso()
-
   const columns: Array<ColumnDef<VendorPayable>> = [
     {
       key: 'vendor',
@@ -900,42 +916,102 @@ export function VendorApPage() {
     },
   ]
 
+  const vendorColumns: Array<ColumnDef<VendorGroup>> = [
+    { key: 'vendor', header: 'VENDOR', width: 260, render: (g) => <strong>{g.vendor}</strong> },
+    { key: 'open', header: 'OPEN BILLS', width: 120, render: (g) => g.openCount },
+    {
+      key: 'owed',
+      header: 'OWED',
+      width: 140,
+      render: (g) => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{formatCents(g.owedCents)}</span>,
+    },
+    {
+      key: 'overdue',
+      header: 'OVERDUE',
+      width: 110,
+      render: (g) => (g.overdueCount > 0
+        ? <span style={{ color: 'var(--tms-badge-red)', fontWeight: 600 }}>{g.overdueCount}</span>
+        : <span className="tms-muted">0</span>),
+    },
+    {
+      key: 'last',
+      header: 'LAST BILL',
+      width: 140,
+      render: (g) => <span className="tms-muted" title={formatReceivedAt(g.lastBillAt)}>{relativeReceived(g.lastBillAt)}</span>,
+    },
+  ]
+
+  const refreshAll = () => { void (async () => { await refresh(); reloadDetails() })() }
+  const queueError = error ? (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginLeft: 8, color: 'var(--tms-badge-red)' }}>
+      <AlertCircle size={14} />
+      {error}
+    </span>
+  ) : null
+  const banner = (
+    <>
+      <VendorSourceStrip
+        totals={totals}
+        sourceCounts={sourceCounts}
+        source={source}
+        onSource={setSource}
+        view={view}
+        onView={setView}
+      />
+      <p className="tms-muted" style={{ fontSize: 12 }}>
+        Email invoices to vendorpayments@bcatcorp.com. Maintenance invoices are linked from the Invoices page.
+        {queueError}
+      </p>
+    </>
+  )
+  const searchProps = { value: search, onChange: setSearch, placeholder: 'Search vendor, invoice #, subject, or sender…' }
+
   return (
     <>
-      <TmsListPage<VendorPayable>
-        title="Vendors"
-        search={{ value: search, onChange: setSearch, placeholder: 'Search vendor, invoice #, subject, or sender…' }}
-        onRefresh={() => { void (async () => { await refresh(); reloadDetails() })() }}
-        quickTabs={{
-          tabs: TABS.map(({ key, label }) => ({ key, label, count: counts[key] })),
-          active: activeTab,
-          onSelect: (key) => setActiveTab(key as 'ALL' | 'NEED_TO_PAY' | 'DONE'),
-        }}
-        banner={
-          <p className="tms-muted" style={{ fontSize: 12 }}>
-            Email invoices to vendorpayments@bcatcorp.com. Maintenance invoices are linked from the Invoices page.
-            {error ? (
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginLeft: 8, color: 'var(--tms-badge-red)' }}>
-                <AlertCircle size={14} />
-                {error}
-              </span>
-            ) : null}
-          </p>
-        }
-        columns={columns}
-        rows={pageRows}
-        rowKey={(item) => item.id}
-        onRowClick={openDetails}
-        page={{ from: pageRows.length === 0 ? 0 : 1, to: pageRows.length, total: filtered.length, pageSize, onPageSize: setPageSize }}
-        emptyText={
-          error
-            ? 'Couldn’t load queue. Try refreshing.'
-            : loading
-              ? 'Loading vendor AP queue…'
-              : 'No items match the current filters.'
-        }
-        onClearFilters={() => { setSearch(''); setActiveTab('ALL') }}
-      />
+      {view === 'vendors' ? (
+        <TmsListPage<VendorGroup>
+          title="Vendors"
+          search={searchProps}
+          onRefresh={refreshAll}
+          banner={banner}
+          columns={vendorColumns}
+          rows={vendorGroups.slice(0, pageSize)}
+          rowKey={(g) => g.key || 'unknown'}
+          onRowClick={(g) => {
+            setSearch(g.key === '' ? '' : g.vendor)
+            setView('bills')
+            setActiveTab('ALL')
+          }}
+          page={{ from: vendorGroups.length === 0 ? 0 : 1, to: Math.min(pageSize, vendorGroups.length), total: vendorGroups.length, pageSize, onPageSize: setPageSize }}
+          emptyText={error ? 'Couldn’t load queue. Try refreshing.' : loading ? 'Loading vendor AP queue…' : 'No vendors match the current filters.'}
+          onClearFilters={() => { setSearch(''); setSource('ALL') }}
+        />
+      ) : (
+        <TmsListPage<VendorPayable>
+          title="Vendors"
+          search={searchProps}
+          onRefresh={refreshAll}
+          quickTabs={{
+            tabs: TABS.map(({ key, label }) => ({ key, label, count: counts[key] })),
+            active: activeTab,
+            onSelect: (key) => setActiveTab(key as 'ALL' | 'NEED_TO_PAY' | 'DONE'),
+          }}
+          banner={banner}
+          columns={columns}
+          rows={pageRows}
+          rowKey={(item) => item.id}
+          onRowClick={openDetails}
+          page={{ from: pageRows.length === 0 ? 0 : 1, to: pageRows.length, total: filtered.length, pageSize, onPageSize: setPageSize }}
+          emptyText={
+            error
+              ? 'Couldn’t load queue. Try refreshing.'
+              : loading
+                ? 'Loading vendor AP queue…'
+                : 'No items match the current filters.'
+          }
+          onClearFilters={() => { setSearch(''); setActiveTab('ALL'); setSource('ALL') }}
+        />
+      )}
 
       {detailItem && (
         <DetailsDialog

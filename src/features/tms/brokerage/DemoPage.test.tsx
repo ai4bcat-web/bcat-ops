@@ -115,6 +115,16 @@ describe('DemoPage', () => {
     ])
   })
 
+  it('opens Release to billing on the Load Review queue for the ready-to-bill shipment', async () => {
+    vi.spyOn(apiClient, 'getDemoState').mockResolvedValue(DEMO_STATE_SEEDED)
+    renderDemo()
+    await waitFor(() => expect(screen.getByText('Release to billing')).toBeInTheDocument())
+    const p10 = screen.getByText('Release to billing').closest('.tms-demo-step') as HTMLElement
+    fireEvent.click(within(p10).getByRole('button', { name: 'Open' }))
+    expect(window.location.pathname).toBe('/tms/load-review')
+    expect(window.location.search).toBe('?shipment=shp-bill')
+  })
+
   it('ticks a step only when the facts say so', async () => {
     vi.spyOn(apiClient, 'getDemoState').mockResolvedValue({
       ...DEMO_STATE_SEEDED,

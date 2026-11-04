@@ -542,7 +542,7 @@ export function QuotesPage() {
   return (
     <>
       <TmsListPage<QuoteRecord>
-        title="Rates"
+        title="Quotes"
         primaryAction={{ label: 'Quote', onClick: () => navigate('/tms/rates/new') }}
         actions={
           <Link className="tms-btn tms-btn-secondary" to="/tms/rates/lanes">Lane rates</Link>

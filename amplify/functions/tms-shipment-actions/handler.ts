@@ -103,6 +103,7 @@ import {
   prepareDocumentUpload,
   rateCarrier,
   readyToInvoice,
+  reviewLoad,
   reviewDocument,
   saveGeneratedDocument,
   updateDocument,
@@ -530,6 +531,7 @@ type Action =
   // Step U. A tender e-mail's partially built load: edit it, dismiss it, or move it to Active.
   | 'INTAKE_SAVE_DRAFT'
   | 'INTAKE_MOVE_TO_ACTIVE'
+  | 'INTAKE_MARK_REVIEWED'
   | 'INTAKE_DISMISS'
   | 'SAVE_ORDER_FORM'
   | 'CHECK_CREDIT'
@@ -588,6 +590,7 @@ type Action =
   | 'UPDATE_DOCUMENT'
   | 'VOID_DOCUMENT'
   | 'READY_TO_INVOICE'
+  | 'REVIEW_LOAD'
   | 'RATE_CARRIER'
   // Step H — the sell side of a quote, which is the quotes page's own work.
   | 'SAVE_QUOTE'
@@ -714,6 +717,8 @@ const ADMIN_ONLY_ACTIONS: Record<string, true> = {
 
 const QUOTES_PAGE_GROUP = 'page-quotes'
 const LOADS_PAGE_GROUP = 'page-loads'
+const LOAD_REVIEW_PAGE_GROUP = 'page-loadReview'
+const LOAD_REVIEW_ACTIONS: Record<string, true> = { READY_TO_INVOICE: true, SET_SALES_REP: true, SET_REV_TAG: true, REVIEW_LOAD: true }
 /**
  * Step R. The BROKERAGE section's one grant. The TMS merged the loads page, the
  * quotes page and the carrier-pay card into `/tms/*`, so a user who holds this key
@@ -784,6 +789,7 @@ function isActionAuthorized(action: Action, caller: Caller): boolean {
     return groups.includes(LOADS_PAGE_GROUP) || groups.includes(QUOTES_PAGE_GROUP) || tms
   }
   if (INTAKE_REVIEW_ACTIONS[action]) return groups.includes(INTAKE_REVIEW_PAGE_GROUP)
+  if (LOAD_REVIEW_ACTIONS[action]) return groups.includes(LOAD_REVIEW_PAGE_GROUP) || groups.includes(LOADS_PAGE_GROUP) || tms
   if (ADMIN_ONLY_ACTIONS[action]) return false
   if (action === 'UPDATE_CARRIER_CHARGES') {
     return groups.includes(LOADS_PAGE_GROUP) || tms || groups.includes('page-carrierPay')
@@ -805,6 +811,9 @@ async function authorize(action: Action, identity?: AppSyncIdentity | null): Pro
     if (INTAKE_REVIEW_ACTIONS[action]) {
       throw new Error(`Forbidden: ${action} requires owner, ADMIN, or ${INTAKE_REVIEW_PAGE_GROUP}`)
     }
+    if (LOAD_REVIEW_ACTIONS[action]) throw new Error(
+      'Forbidden: ' + action + ' requires owner, ADMIN, page-loadReview, page-loads, or page-tms',
+    )
     const tms = groups.includes(TMS_PAGE_GROUP)
     throw new Error(
       action === 'UPDATE_CARRIER_CHARGES'
@@ -7299,6 +7308,7 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return createShipment(input, caller)
     case 'INTAKE_SAVE_DRAFT':
     case 'INTAKE_MOVE_TO_ACTIVE':
+    case 'INTAKE_MARK_REVIEWED':
     case 'INTAKE_DISMISS':
       return runIntakeAction(intakeDeps, action as IntakeAction, input, caller)
     case 'SAVE_ORDER_FORM':
@@ -7344,10 +7354,13 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
         authorize: isActionAuthorized,
         releaseToBilling: (row, actor) => readyToInvoice({
           ...documentDeps,
-          // The batch history is shipment-scoped even though the gate writes its order.
-          writeAudit: (_type, _id, action, actor, changes) =>
-            writeAudit('SHIPMENT', String(row.shipmentId), action, actor, changes),
-        }, row, actor),
+          // Review releases keep ORDER/READY_TO_INVOICE (plus the SHIPMENT history row);
+          // the legacy batch release is audited shipment-scoped.
+          writeAudit: row.review
+            ? writeAudit
+            : (_type, _id, action, actor, changes) =>
+              writeAudit('SHIPMENT', String(row.shipmentId), action, actor, changes),
+        }, row, actor, { batch: true }),
         setSalesRep,
         setRevTag,
         assignCarrierRep,
@@ -7418,6 +7431,8 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return voidDocument(documentDeps, input, caller)
     case 'READY_TO_INVOICE':
       return readyToInvoice(documentDeps, input, caller)
+    case 'REVIEW_LOAD':
+      return reviewLoad(documentDeps, input)
     case 'RATE_CARRIER':
       return rateCarrier(documentDeps, input, caller)
     case 'SAVE_QUOTE':

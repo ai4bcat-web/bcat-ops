@@ -12,6 +12,7 @@ interface ShellProps {
   aside?: ReactNode
   children?: ReactNode
   breadcrumb: { label: string }[]
+  activeSearch?: string
 }
 const shell = vi.hoisted(() => ({ props: null as unknown as ShellProps | null }))
 vi.mock('@/features/tms/TmsShell', () => ({
@@ -78,6 +79,7 @@ const renderAt = (path: string) =>
           <Route path="/trucks" element={<div data-testid="page" />} />
           <Route path="/driver-view/:id" element={<div data-testid="page" />} />
           <Route path="/tms/shipments/intake/:id" element={<div data-testid="page" />} />
+          <Route path="/tms/shipments" element={<div data-testid="page" />} />
         </Route>
       </Routes>
     </MemoryRouter>,
@@ -122,6 +124,11 @@ describe('TmsLayout', () => {
   it('hands the shell the intake trail for an intake load', () => {
     renderAt('/tms/shipments/intake/abc')
     expect(shell.props?.breadcrumb.map((c) => c.label)).toEqual(['Shipments', 'Intake', 'Load'])
+  })
+
+  it('hands the shell the query string, so Active and All can tell the board lists apart', () => {
+    renderAt('/tms/shipments?list=all')
+    expect(shell.props?.activeSearch).toBe('?list=all')
   })
 
   it('hands the shell the notification total and a bell that opens the drawer on the item list', async () => {

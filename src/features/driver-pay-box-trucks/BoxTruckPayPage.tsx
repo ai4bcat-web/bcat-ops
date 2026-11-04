@@ -15,6 +15,7 @@ import { currentPeriodStart, shiftPeriod, periodEnd, periodLabelLong } from '@/l
 import type { Driver } from '@/types'
 import { TripModal, ImportModal, SettingsModal, CreditModal } from './BoxTruckPayForms'
 import { DeductionModal, EmailModal } from '../driver-pay/DriverPayForms'
+import { PayrollCadenceBanner } from '@/features/payroll/PayrollCadenceBanner'
 
 const PAY_EMAIL_CC = 'ryne@bcatcorp.com'
 const money = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n)
@@ -158,6 +159,7 @@ export function BoxTruckPayPage() {
     >
 
       <div style={{ padding: '20px 32px 40px', maxWidth: 1100, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <PayrollCadenceBanner />
         {pay.loading && pay.rows.length === 0 && <div style={{ color: 'var(--tms-muted)', fontSize: 14, padding: 40, textAlign: 'center' }}>Loading…</div>}
         {pay.error && <div style={{ color: 'var(--tms-badge-red)', fontSize: 13, padding: 12, border: '1px solid var(--tms-badge-red)', borderRadius: 8, background: 'var(--tms-badge-red-tint)' }}>{pay.error}</div>}
 

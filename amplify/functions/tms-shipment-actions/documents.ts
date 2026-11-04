@@ -68,7 +68,8 @@ import {
   supersede,
 } from '../../../src/lib/shipmentDocuments'
 import { loadReleaseGateInput } from '../_shared/releaseGateInput'
-import { evaluateReleaseGate, releaseGateError } from '../../../src/lib/releaseGate'
+import { evaluateReleaseGate, releaseGateError, type ReleaseGateResult } from '../../../src/lib/releaseGate'
+import { evaluateLoadReview, loadReviewExtras, loadReviewRefusal, type LoadReviewReason } from '../../../src/lib/loadReview'
 import {
   isCustomerUnresolved,
   unresolvedCustomerMessage,
@@ -78,8 +79,9 @@ import { isVoided } from '../_shared/voided'
 // Step P5. The one build-state refusal every downstream action shares.
 import { assertBuilt } from './buildGate'
 import type {
-  CustomerRecord,
   DocGateResult,
+  CustomerRecord,
+  ShipmentStatus,
   LoadCarrierRecord,
   LoadWorkflowStatus,
   ShipmentDocumentAudience,
@@ -833,7 +835,12 @@ export async function voidDocument(deps: DocumentDeps, input: Row, caller: Calle
  * The cached `docsRequired` / `docsMissing` are still written here, because the
  * board column and the Documents tab read them.
  */
-export async function readyToInvoice(deps: DocumentDeps, input: Row, caller: Caller): Promise<Row> {
+export async function readyToInvoice(
+  deps: DocumentDeps,
+  input: Row,
+  caller: Caller,
+  options: { batch?: boolean } = {},
+): Promise<Row> {
   const orderId = assertString(input.orderId, 'orderId')
   const expectedUpdatedAt = assertExpectedUpdatedAt(input)
 
@@ -865,32 +872,16 @@ export async function readyToInvoice(deps: DocumentDeps, input: Row, caller: Cal
     ? await getById(deps.store.db, deps.customerTable, customerId)
     : null
 
-  const release = evaluateReleaseGate(
-    await loadReleaseGateInput(
-      {
-        db: deps.store.db,
-        tables: {
-          ...deps.store.tables,
-          customer: deps.customerTable,
-          settings: deps.settingsTable,
-          loadCheckCall: LOAD_CHECK_CALL_TABLE_NAME,
-        },
-      },
-      {
-        shipmentId,
-        orderId,
-        shipment: bundle.shipment,
-        order,
-        orders: bundle.orders,
-        loads: bundle.loads,
-        loadCarriers: bundle.loadCarriers,
-        documents: bundle.documents,
-        customer,
-        settings,
-      },
-    ),
-  )
-  if (!release.ok) throw releaseGateError(release.missing)
+  const release = await computeReleaseGate(deps, order, bundle, customer, settings)
+  const review = reviewPayload(input.review)
+  if (review) {
+    // Load Review adds three refusals the gate does not own. A gate failure and an
+    // extras failure are one error so the reviewer sees everything at once.
+    const extras = reviewExtras(bundle.shipment, order)
+    if (!release.ok || extras.length > 0) throw loadReviewRefusal([...release.missing, ...extras])
+  } else if (!release.ok) {
+    throw releaseGateError(release.missing)
+  }
 
   const gate = customerDocGate({ bundle, documents: bundle.documents, order, customer, settings })
   const now = nowIso()
@@ -911,8 +902,120 @@ export async function readyToInvoice(deps: DocumentDeps, input: Row, caller: Cal
     [updateItemTx(deps.store.tables.order, orderId, patch, expectedUpdatedAt)],
     'order',
   )
-  await deps.writeAudit('ORDER', orderId, 'READY_TO_INVOICE', caller, { missing: gate.missing })
+  if (review) {
+    const verdict = evaluateLoadReview({
+      row: {
+        id: shipmentId,
+        number: String(bundle.shipment.number ?? shipmentId),
+        status: bundle.shipment.status as ShipmentStatus,
+        orderRevenueCents: numberOrNull(order.revenueCents),
+        costCents: bundle.financials.reduce((sum, row) => sum + (numberOrNull(row.costCents) ?? 0), 0),
+        pendingDocReviewCount: bundle.documents.filter((doc) => doc.status !== 'VOID' && doc.reviewStatus === 'PENDING').length,
+      },
+      gate: release,
+      extras: [],
+      customerUnresolved: false,
+    })
+    const checks = { salesRep: true, revDivision: true, details: true, charges: true, documents: true }
+    const audited = { source: review.source, checks, warnings: verdict.warnings, batch: options.batch === true }
+    await deps.writeAudit('ORDER', orderId, 'READY_TO_INVOICE', caller, { missing: gate.missing, review: audited })
+    await deps.writeAudit('SHIPMENT', shipmentId, 'LOAD_REVIEW_RELEASED', caller, {
+      orderId, checks, warnings: verdict.warnings, batch: options.batch === true,
+    })
+  } else {
+    await deps.writeAudit('ORDER', orderId, 'READY_TO_INVOICE', caller, { missing: gate.missing })
+  }
   return { bundle: await readBundle(deps.store, shipmentId), gate, releaseGate: release }
+}
+
+/**
+ * The one place the release gate's input is built, shared by the release itself and
+ * by REVIEW_LOAD so the drawer's verdict and the server's refusal cannot drift.
+ */
+export async function computeReleaseGate(
+  deps: DocumentDeps,
+  order: Row,
+  bundle: Bundle,
+  customer: Row | null,
+  settings: Row | null,
+): Promise<ReleaseGateResult> {
+  return evaluateReleaseGate(
+    await loadReleaseGateInput(
+      {
+        db: deps.store.db,
+        tables: {
+          ...deps.store.tables,
+          customer: deps.customerTable,
+          settings: deps.settingsTable,
+          loadCheckCall: LOAD_CHECK_CALL_TABLE_NAME,
+        },
+      },
+      {
+        shipmentId: String(bundle.shipment.id),
+        orderId: String(order.id),
+        shipment: bundle.shipment,
+        order,
+        orders: bundle.orders,
+        loads: bundle.loads,
+        loadCarriers: bundle.loadCarriers,
+        documents: bundle.documents,
+        customer,
+        settings,
+      },
+    ),
+  )
+}
+
+/** The review extras, typed from the raw rows. Imported history is exempt inside the lib. */
+function reviewExtras(shipment: Row, order: Row): LoadReviewReason[] {
+  return loadReviewExtras({
+    shipment: {
+      salesRepId: typeof shipment.salesRepId === 'string' ? shipment.salesRepId : null,
+      revDivision: typeof shipment.revDivision === 'string' ? shipment.revDivision : null,
+      legacyImported: shipment.legacyImported === true,
+    },
+    order: { revenueCents: numberOrNull(order.revenueCents) },
+  })
+}
+
+/** Only the literal `{ source: 'LOAD_REVIEW' }` counts; anything else is an ordinary release. */
+function reviewPayload(value: unknown): { source: 'LOAD_REVIEW' } | null {
+  if (value == null || typeof value !== 'object') return null
+  return (value as Row).source === 'LOAD_REVIEW' ? { source: 'LOAD_REVIEW' } : null
+}
+
+/**
+ * REVIEW_LOAD — read-only. The same gate verdict READY_TO_INVOICE would reach plus
+ * the three review extras, from rows this Lambda reads itself, so a reviewer who
+ * holds no finance grant sees exactly what the release would refuse on. No writes,
+ * no audit. An order that is already released still answers (with its `arStatus`).
+ */
+export async function reviewLoad(deps: DocumentDeps, input: Row): Promise<Row> {
+  const shipmentId = assertString(input.shipmentId, 'shipmentId')
+  const bundle = await readBundle(deps.store, shipmentId)
+  const order = bundle.orders[0]
+  if (!order) throw new Error('Shipment has no order to review')
+
+  const settings = await getSettings(deps)
+  const customerId = String(order.customerId ?? '')
+  const customer = customerId && deps.customerTable
+    ? await getById(deps.store.db, deps.customerTable, customerId)
+    : null
+  const releaseGate = await computeReleaseGate(deps, order, bundle, customer, settings)
+  const extras = reviewExtras(bundle.shipment, order)
+  return {
+    shipmentId,
+    orderId: String(order.id),
+    orderUpdatedAt: order.updatedAt ?? null,
+    arStatus: order.arStatus ?? null,
+    releaseGate,
+    extras,
+    salesRepId: bundle.shipment.salesRepId ?? null,
+    revDivision: bundle.shipment.revDivision ?? null,
+    revSubdivision: bundle.shipment.revSubdivision ?? null,
+    legacyImported: bundle.shipment.legacyImported === true,
+    pendingDocReviewCount: bundle.documents.filter((doc) => doc.status !== 'VOID' && doc.reviewStatus === 'PENDING').length,
+  }
 }
 
 // ── RATE_CARRIER ─────────────────────────────────────────────────────────────

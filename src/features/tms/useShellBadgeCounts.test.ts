@@ -7,7 +7,8 @@
 import { describe, it, expect, vi } from 'vitest'
 import { renderHook, waitFor } from '@testing-library/react'
 
-vi.mock('@/hooks/useAuth', () => ({ useAuth: () => ({ hasPageAccess: () => true }) }))
+const auth = vi.hoisted(() => ({ hasPageAccess: (_key: string) => true }))
+vi.mock('@/hooks/useAuth', () => ({ useAuth: () => auth }))
 vi.mock('@/hooks/useLoads', () => ({ useLoads: () => ({ loads: [{ id: 'l1' }] }) }))
 vi.mock('@/lib/apptQueue', () => ({ apptQueueCount: () => 2 }))
 vi.mock('@/store/useAppStore', () => ({
@@ -27,10 +28,12 @@ vi.mock('@/hooks/useQuotesToReplyCount', () => ({ useQuotesToReplyCount: () => 3
 const intake = vi.hoisted(() => ({ count: vi.fn(async () => 2) }))
 vi.mock('@/lib/apiClient', () => ({ countOpenIntakeLoads: intake.count }))
 vi.mock('@/lib/brokerageCharts', () => ({ MOVEMENT_STATUSES: ['IN_TRANSIT'] }))
+vi.mock('@/lib/loadReview', () => ({ loadReviewCount: () => 4 }))
+vi.mock('@/features/tms/carrierSales/carrierSalesQueue', () => ({ needsCoverCount: () => 5 }))
 
 import { useShellBadgeCounts, movingShipments } from './useShellBadgeCounts'
 import { NAV_ITEMS } from '@/lib/navItems'
-import { PINNED_ITEMS, TMS_ITEMS } from '@/lib/navSections'
+import { PINNED_ITEMS } from '@/lib/navSections'
 import type { ShipmentListRow } from '@/hooks/useShipments'
 
 const shipments = [
@@ -40,13 +43,17 @@ const shipments = [
 
 const args = { shipments }
 
+/** Declared in the nav, answered by Step AB's own hook (it adds one line to the resolver). */
+const RESERVED_FOR_AB = ['spotNew']
+
 describe('useShellBadgeCounts', () => {
   it('answers every badgeKey the nav config declares', async () => {
     const declared = new Set<string>()
-    for (const item of [...PINNED_ITEMS, ...TMS_ITEMS, ...NAV_ITEMS]) {
+    for (const item of [...PINNED_ITEMS, ...NAV_ITEMS]) {
       if (item.badgeKey) declared.add(item.badgeKey)
       for (const child of item.children ?? []) if (child.badgeKey) declared.add(child.badgeKey)
     }
+    for (const key of RESERVED_FOR_AB) declared.delete(key)
     expect(declared.size).toBeGreaterThan(5)
     const { result } = renderHook(() => useShellBadgeCounts(args))
     // The open-intake count is a polled read, so it lands a tick after the first paint.
@@ -63,6 +70,27 @@ describe('useShellBadgeCounts', () => {
     expect(result.current.intake).toBe(1)
     expect('myQueue' in result.current || 'teamQueue' in result.current).toBe(false)
     expect('tracking' in result.current).toBe(false)
+  })
+
+  it('sums the parent rows from their children, leaving moving loads out of Load Tracking', async () => {
+    const { result } = renderHook(() => useShellBadgeCounts(args))
+    await waitFor(() => expect(result.current.intakeLoads).toBe(2))
+    // checkCalls 1 + documentReview 1; tracking (1 moving load) is not a chore.
+    expect(result.current.loadTracking).toBe(2)
+    // arToInvoice 1 + apToReview 1.
+    expect(result.current.accounting).toBe(2)
+  })
+
+  it('hides Load Review and Carrier Sales counts from a user without the grants', async () => {
+    auth.hasPageAccess = (key) => key === 'quotes'
+    try {
+      const { result } = renderHook(() => useShellBadgeCounts(args))
+      await waitFor(() => expect(result.current.quotesToReply).toBe(3))
+      expect('loadReview' in result.current).toBe(false)
+      expect('carrierSales' in result.current).toBe(false)
+    } finally {
+      auth.hasPageAccess = () => true
+    }
   })
 
   it('counts a voided load out of Tracking', () => {

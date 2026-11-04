@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '@/hooks/useAuth'
 import { NAV_ITEMS } from '@/lib/navItems'
-import { PINNED_ITEMS, TMS_ITEMS } from '@/lib/navSections'
+import { flatNavDefs } from '@/lib/navSections'
 
 /**
  * Route-level access control. `hasPageAccess` is the SAME allowlist the sidebar uses,
@@ -16,7 +16,7 @@ import { PINNED_ITEMS, TMS_ITEMS } from '@/lib/navSections'
  * those routes accepts its original page key OR `tms`. Pinned items (Shipments) are
  * included so a shared-loads grant still has a landing target.
  */
-const ALL_ITEMS = [...PINNED_ITEMS, ...TMS_ITEMS, ...NAV_ITEMS]
+const ALL_ITEMS = [...flatNavDefs(), ...NAV_ITEMS]
 
 function firstAccessiblePath(hasPageAccess: (k: string) => boolean): string | null {
   return ALL_ITEMS.find((i) => hasPageAccess(i.pageKey))?.to ?? null

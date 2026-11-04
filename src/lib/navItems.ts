@@ -40,7 +40,7 @@ export interface NavItem {
  * no page access.
  *
  * The BROKERAGE rows below are the OLD paths of pages that now live under `/tms/*`
- * (`TMS_ITEMS` in `navSections.ts` is what the rails render). They stay here because
+ * (`PINNED_ITEMS` in `navSections.ts` is what the rails render). They stay here because
  * this list is also the permission list, and those page keys are still what a grant
  * names; the old paths redirect to their TMS homes.
  */
@@ -119,13 +119,13 @@ export const NAV_ITEMS: NavItem[] = [
   { to: '/finances',  label: 'Finances',  icon: LineChart, pageKey: 'finances', section: 'COMPANY' },
   { to: '/finances/review', label: 'Profit Review', icon: ClipboardList, pageKey: 'finances', section: 'COMPANY' },
   { to: '/finance/cash-checkin', label: 'Weekly Cash Check-in', icon: Wallet, pageKey: 'cashCheckIn', section: 'COMPANY' },
-  { to: '/compliance', label: 'Compliance', icon: ShieldCheck, pageKey: 'compliance', section: 'COMPANY', badgeKey: 'review' },
+  { to: '/compliance', label: 'Compliance', icon: ShieldCheck, pageKey: 'compliance', section: 'BROKERAGE', badgeKey: 'review' },
   { to: '/reddit-queue', label: 'Reddit Queue', icon: MessageSquare, pageKey: 'redditQueue', section: 'COMPANY' },
-  // Pages that serve the whole company rather than one business (the brief's Company
-  // group). Both live under `/tms/brokerage`, which is where My Brokerage keeps them.
-  { to: '/platform-health', label: 'Platform health', icon: Activity, pageKey: 'platformHealth', section: 'COMPANY', adminOnly: true },
-  { to: '/tms/brokerage/users', label: 'Users', icon: UserCog, pageKey: 'users', section: 'COMPANY', adminOnly: true },
-  { to: '/tms/brokerage', label: 'Settings', icon: SlidersHorizontal, pageKey: 'settings', section: 'COMPANY' },
+  // Settings-group pages (permission rows only; the sidebar renders them under Settings).
+  // All three live under `/tms/brokerage` or are legacy fill-mode routes.
+  { to: '/platform-health', label: 'Platform health', icon: Activity, pageKey: 'platformHealth', section: 'BROKERAGE', adminOnly: true },
+  { to: '/tms/brokerage/users', label: 'Users', icon: UserCog, pageKey: 'users', section: 'BROKERAGE', adminOnly: true },
+  { to: '/tms/brokerage', label: 'Settings', icon: SlidersHorizontal, pageKey: 'settings', section: 'BROKERAGE' },
 ]
 
 /**
@@ -143,6 +143,7 @@ const OFF_NAV_PERMISSION_PAGES: { key: string; label: string }[] = [
   { key: 'tasks', label: 'Tasks' },
   { key: 'schedule', label: 'Schedule' },
   { key: 'intakeReview', label: 'Intake review' },
+  { key: 'loadReview', label: 'Load review' },
 ]
 
 /**

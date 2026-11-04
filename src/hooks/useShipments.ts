@@ -33,6 +33,8 @@ export type ShipmentsView =
  */
 export interface ShipmentListRow extends ShipmentRecord {
   arStatus: ArStatus | null
+  readyToInvoiceAt?: string | null
+  invoiceId?: string | null
   /** Step G — the active assignment's AP rung, for the board's AP column. */
   apStatus: ApStatus | null
   assignmentType: AssignmentType | null
@@ -647,6 +649,8 @@ export function useShipments(view: ShipmentsView = DEFAULT_VIEW) {
         internalNotes: order?.internalNotes ?? null,
         customerRateCents: order?.customerRateCents ?? null,
         orderRevenueCents: order?.revenueCents ?? null,
+        readyToInvoiceAt: order?.readyToInvoiceAt ?? null,
+        invoiceId: order?.invoiceId ?? null,
         arStatusChangedAt: order?.arStatusChangedAt ?? null,
         invoiceNumber: order?.invoiceNumber ?? null,
         invoicedAt: order?.invoicedAt ?? null,

@@ -45,6 +45,7 @@ import type { CreditSummary } from '@/lib/customerCredit'
 import type { QuotePricingResult } from '@/lib/quotes'
 import type { ResolveContext, Resolution } from '@/lib/ownership'
 import type { ReleaseGateResult } from '@/lib/releaseGate'
+import type { LoadReviewReason } from '@/lib/loadReview'
 import type { AdapterResult, Capability, IntegrationRecord } from '@/lib/integrations/types'
 import { isActiveDirectoryRecord } from '@/lib/tmsDirectory'
 import type {
@@ -2558,6 +2559,9 @@ export async function saveIntakeDraft(input: {
   return intakeRow(await shipmentAction<IntakeLoadRecord>('INTAKE_SAVE_DRAFT', input))
 }
 
+export async function markIntakeReviewed(input: { intakeId: string; expectedVersion: number }): Promise<IntakeLoadRecord> {
+  return intakeRow(await shipmentAction<IntakeLoadRecord>('INTAKE_MARK_REVIEWED', input))
+}
 export async function moveIntakeToActive(input: {
   intakeId: string
   expectedVersion: number
@@ -4005,6 +4009,7 @@ export async function voidDocument(input: { documentId: string; reason: string }
 }
 
 export interface ReadyToInvoiceInput {
+  review?: { source: 'LOAD_REVIEW' }
   orderId: string
   /** The Order's `updatedAt` as the page read it. */
   expectedUpdatedAt: string
@@ -4023,6 +4028,23 @@ export interface ReadyToInvoiceResult {
 }
 export async function readyToInvoice(input: ReadyToInvoiceInput): Promise<ReadyToInvoiceResult> {
   return shipmentAction<ReadyToInvoiceResult>('READY_TO_INVOICE', input)
+}
+export interface LoadReviewResult {
+  shipmentId: string
+  orderId: string
+  orderUpdatedAt: string
+  arStatus: string | null
+  releaseGate: ReleaseGateResult
+  extras: LoadReviewReason[]
+  salesRepId: string | null
+  revDivision: string | null
+  revSubdivision: string | null
+  legacyImported: boolean
+  pendingDocReviewCount?: number
+}
+
+export async function reviewLoad(input: { shipmentId: string }): Promise<LoadReviewResult> {
+  return shipmentAction<LoadReviewResult>('REVIEW_LOAD', input)
 }
 
 /** How the office rates the carrier once their load is done. One to five stars. */
