@@ -444,6 +444,29 @@ describe('UPSERT_CUSTOMER', () => {
     ).rejects.toThrow('was changed by someone else')
   })
 
+  it('updates a customer that has no AI memory without naming a value it does not have', async () => {
+    const existing = makeDynamoItem({
+      id: 'c-1', name: 'Batory Foods', normalizedName: 'batory foods', active: true,
+      createdAt: '2025-01-01', createdBy: 'someone@bcatcorp.com', updatedAt: '2025-01-02',
+    })
+    let update: MockCommand | undefined
+    send.mockImplementation((cmd: MockCommand) => {
+      if (cmd.__type === 'Get') return Promise.resolve({ Item: existing })
+      if (cmd.__type === 'Scan') return Promise.resolve({ Items: [existing], LastEvaluatedKey: undefined })
+      if (cmd.__type === 'Update') { update = cmd; return Promise.resolve({ Attributes: existing }) }
+      throw new Error('unexpected')
+    })
+    await handler(event('UPSERT_CUSTOMER', { id: 'c-1', expectedUpdatedAt: '2025-01-02', name: 'Batory Foods', mcNumber: '123456' }))
+    const input = (update?.input ?? {}) as { UpdateExpression?: string; ExpressionAttributeValues?: Record<string, unknown> }
+    const expression = String(input.UpdateExpression ?? '')
+    const values = input.ExpressionAttributeValues ?? {}
+    const named = [...expression.matchAll(/= (:\w+)/g)].map((m) => m[1])
+    expect(named.length).toBeGreaterThan(5)
+    // every value the SET clause names exists; DynamoDB refuses the update otherwise
+    expect(named.filter((n) => values[n] === undefined)).toEqual([])
+    expect(expression).not.toContain('#aiMemory')
+  })
+
   it('rejects non-integer creditLimitCents', async () => {
     send.mockImplementation((cmd: MockCommand) => {
       if (cmd.__type === 'Scan') return Promise.resolve({ Items: [], LastEvaluatedKey: undefined })

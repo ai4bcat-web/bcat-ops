@@ -274,7 +274,7 @@ describe('INTAKE_MOVE_TO_ACTIVE', () => {
     expect(setSalesRep).toHaveBeenCalledWith({ shipmentId: 'shp-1', repId: 'rep-1' }, caller)
     expect(rows(T.shipment).get('shp-1')).toMatchObject({ intakeLoadId: 'il:r1', intakeReviewedBy: 'reviewer@bcatcorp.com', intakeReviewedAt: REVIEWED.reviewedAt })
     const refs = rows(T.order).get('ord-1')!.references as Row[]
-    expect(refs.map((r) => [r.code, r.value])).toEqual([['po', 'PO-77'], ['pickup', 'PU-9']])
+    expect(refs.map((r) => [r.code, r.value])).toEqual([['PO', 'PO-77'], ['pickup', 'PU-9']])
     expect(intake()).toMatchObject({ status: 'MOVED', shipmentId: 'shp-1', reviewedBy: 'reviewer@bcatcorp.com', reviewedAt: REVIEWED.reviewedAt })
     expect(audits.find((a) => a.type === 'INTAKE_LOAD')!.changes).toMatchObject({ movedBy: caller.email, reviewedBy: 'reviewer@bcatcorp.com' })
     expect(audits.map((a) => `${a.type}:${a.action}`).sort()).toEqual([

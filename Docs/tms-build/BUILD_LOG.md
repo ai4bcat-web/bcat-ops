@@ -1,5 +1,22 @@
 # TMS build log
 
+## 2026-11-04 - Step Y: end-to-end demo run on dev (brokered 99277 + Ivan Cartage 99278), DEMO_WALKTHROUGH.md
+
+- `node scripts/devDemoY.mjs` (+ `scripts/lib/demoY.mjs`) drove both flows on real dev data after `RESET_DEMO_DATA`: tender -> intake gates (required fields, then review) -> move -> MCP (Validate OK, LIVE; live invite refused HTTP 400 for the ZZ DOT) -> cover -> rate con (signed on the public link) -> tracking by assignee -> POD -> Load Review release -> invoice 20002 -> carrier bill -> factoring row; Ivan Cartage load needs a driver (dialog disabled until picked) -> Schedule -> dispatch -> owner-operator settlement (Wednesday payroll). 39 screenshots in `Docs/tms-build/screenshots/demo/`; walkthrough in `Docs/tms-build/DEMO_WALKTHROUGH.md`.
+- 5 real defects fixed locally with tests, **deploy pending**: tracking Lambda lacks BatchGetItem/LoadFinancials env for readBundle (POD review fails), intake PO code `po` vs gate `PO`, check-call NULL index key (ValidationError), per-load plan stored as text ignored, UPSERT_CUSTOMER update `:aiMemory`.
+- Open: bill-before-release order, live MCP test carrier. Earlier rehearsal runs left voided invoices 20000, 20001 and voided ZZ shipments 99272-99276.
+
+## 2026-11-04 - Step AA deployed on dev (navigation reorganisation, Load Review, Carrier Sales, Vendors, perf passes 1-2)
+
+**Committed and deployed on dev (Amplify jobs 142 failed on two Amplify-project typecheck errors in tests, fixed; 143, 144, 145 SUCCEED; commits 2364934, 6918443, 179a7ec, 210d11c). Dev only.**
+- Gates: all three `tsc` projects (incl. `amplify/tsconfig.json`, now part of the gate: Amplify typechecks backend test files), eslint 0 errors, `npm run test` 610 files / 7,752 tests, `npm run build` OK.
+- devVerifyAA after job 144: 81 pass / 7 fail; AAFix then fixed harness pagination (queue is 50/page: filter with `?q=`), the demo seed stop-city format (`"City, ST"`), Load Review by-id open from `?shipment=`, phone overflow, payroll banner regex. Perf: dashboard 23.5 s/158 MB to 5.7 s/11 MB; shell working set 57 to 24 trips; invoicing 369 to 66 requests.
+- **AA follow-ups (timeboxed, deferred, not functional defects):**
+  1. After this deploy run `RESET_DEMO_DATA` once (demo stops changed format) and re-run `node scripts/devVerifyAA.mjs`; the 3 Ready-to-bill checks (AA03-list, drawer-ready, move-to-billing) should then pass.
+  2. Re-measure legacy `/schedule`, `/calendar`, `/dashboard` (budgets are estimates: 85 req/12 MB, 95/14, 130/20) then `devVerifyPerf --ratchet`.
+  3. `/tms/dashboard` first rows is about 4-4.5 s vs the original 3 s target (structural: three dependent stages); budgets set from measured medians with reasons in `perfBudgets.mjs`.
+  4. `FactoringPage.test.tsx` emits an unhandled `NoCredentials` rejection (unmocked `useDirectory`); no test fails.
+- Next: Step Y - demo walkthrough on the final structure (brokered + Ivan Cartage with driver), DEMO_WALKTHROUGH.md with URLs and screenshots.
 ## 2026-11-04 — PERF fix pass 2 (after job 144): voided loads out of the window read, dashboard partial render, invoicing MB
 
 - **Legacy window read excludes voided shipments** (`listShipmentIdsByMonths` filters `voidedAt` server-side; `includeVoided` opts back in). Dev: 538 ids / 11 requests / 2.0 MB instead of 3,500 / 35+ / 12.6 MB for `listLoadByShipmentId`. A voided load is still found on demand: by id (`useResolveLoads`, now also called by `LoadDrawer` for the selected id, so the Voided tab still opens it), by PRO (`proConflictAllHistory`, voided included, unchanged). `useResolveLoads.test.ts` proves a voided load resolves by id and by PRO and that held loads trigger no read.

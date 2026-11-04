@@ -284,17 +284,19 @@ export async function runCheckCallPlan(
       skipped += 1
       const next = tick.nextDueAt ?? null
       const keepOpen = inMotion && Boolean(next)
+      // `nextCheckCallAt` is the sort key of the check-call worklist index: DynamoDB refuses a NULL there, so "nothing due" is
+      // the attribute removed, never null (a delivered load otherwise failed "Run check call now" with a ValidationError).
       await deps.transact([
         updateItemTx(
           deps.tables.load,
           loadId,
           {
-            nextCheckCallAt: next,
+            ...(next ? { nextCheckCallAt: next } : {}),
             updatedAt: now,
             updatedBy: caller.email,
           },
           String(load.updatedAt ?? ''),
-          keepOpen ? undefined : { remove: ['checkCallOpen'] },
+          { remove: [...(next ? [] : ['nextCheckCallAt']), ...(keepOpen ? [] : ['checkCallOpen'])] },
         ),
       ])
       processed.push({ loadId, kind: 'NONE', reason: tick.reason })

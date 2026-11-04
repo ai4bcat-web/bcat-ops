@@ -300,6 +300,8 @@ describe('runCheckCallPlan', () => {
     expect(result.skipped).toBe(1)
     const load = store.getById('Load-test', 'lod-1')
     expect(load?.checkCallOpen).toBeUndefined()
+    // nothing is due: the worklist index's sort key is removed, not set to NULL (which DynamoDB refuses)
+    expect(load && 'nextCheckCallAt' in load ? load.nextCheckCallAt : undefined).toBeUndefined()
   })
 
   it('keeps VOICE in a stored plan but never sends it', async () => {

@@ -297,12 +297,14 @@ export async function intakeMarkReviewed(deps: IntakeDeps, input: Row, caller: C
 
 function referencesFrom(fields: IntakeFields, existing: Row[]): Row[] {
   const mine: Array<[string, string, string | null]> = [
-    ['po', 'PO #', fields.reference],
+    // The PO is the catalog's own code, upper-case: the release gate and the invoice readiness compare
+    // reference codes exactly, so a lower-case 'po' reads as "Missing reference: Purchase order" forever.
+    ['PO', 'PO #', fields.reference],
     ['pickup', 'Pickup #', fields.pickupNumber],
     ['delivery', 'Delivery #', fields.deliveryNumber],
   ]
-  const codes = new Set(mine.map(([code]) => code))
-  const kept = existing.filter((r) => !codes.has(String(r.code ?? '')))
+  const codes = new Set(mine.map(([code]) => code.toLowerCase()))
+  const kept = existing.filter((r) => !codes.has(String(r.code ?? '').toLowerCase()))
   const added = mine
     .filter(([, , value]) => value != null && value !== '')
     .map(([code, label, value]) => ({ code, label, value, level: 'ORDER', stopId: null, visibility: 'INTERNAL' }))

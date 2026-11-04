@@ -40,6 +40,9 @@ describe('reading a stored plan', () => {
   it('answers null for a record that has nothing stored, so the caller falls through', () => {
     expect(normalizeCheckCallPlan(null)).toBeNull()
     expect(normalizeCheckCallPlan('every 4 hours')).toBeNull()
+    // a plan stored as JSON text (SAVE_CHECK_CALL_PLAN writes the load row that way) is still the plan
+    expect(normalizeCheckCallPlan(JSON.stringify({ intervalHours: 2, escalateAfterMinutes: 20, channels: ['SMS'], milestones: ['DELIVERED'] }))).toMatchObject({ intervalHours: 2, escalateAfterMinutes: 20, channels: ['SMS'] })
+    expect(normalizeCheckCallPlan('{not json')).toBeNull()
     expect(normalizeCheckCallPlan([])).toBeNull()
   })
 

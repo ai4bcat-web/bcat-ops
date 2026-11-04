@@ -11,7 +11,7 @@ const INDEXES: Record<string, Record<string, readonly string[]>> = {
   },
   Load: {
     loadsByShipmentId: ['shipmentId'],
-    loadsByCheckCallOpenAndNextCheckCallAt: ['checkCallOpen'],
+    loadsByCheckCallOpenAndNextCheckCallAt: ['checkCallOpen', 'nextCheckCallAt'],
     loadsByLoadCarrierId: ['activeLoadCarrierId'],
   },
   LoadCarrier: {

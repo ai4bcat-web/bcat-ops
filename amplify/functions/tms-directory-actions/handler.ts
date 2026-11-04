@@ -1168,6 +1168,9 @@ async function upsertCustomer(input: Record<string, unknown>, caller: Caller): P
   const sets: string[] = []
   for (const [key, value] of Object.entries(item)) {
     if (key === 'id' || key === 'createdAt' || key === 'createdBy' || key === 'mergedIntoId') continue
+    // An undefined value is a field this request did not carry (aiMemory on a customer that has none): marshall drops it, so
+    // naming it in SET would reference an undefined `:key` and DynamoDB would refuse the whole update.
+    if (value === undefined) continue
     names[`#${key}`] = key
     values[`:${key}`] = marshall({ [key]: value }, { removeUndefinedValues: true })[key]
     sets.push(`#${key} = :${key}`)

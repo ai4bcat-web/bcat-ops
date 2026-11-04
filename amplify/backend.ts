@@ -2749,6 +2749,16 @@ trackingActionsFn.addToRolePolicy(new PolicyStatement({
   actions:   ['dynamodb:GetItem', 'dynamodb:Query'],
   resources: [loadChargeTable.tableArn, `${loadChargeTable.tableArn}/index/*`],
 }))
+// The release gate and the thread read the whole shipment through the shared readBundle,
+// which collects the Loads by their ids and each load's LoadFinancials in one BatchGet each.
+// Without these two grants (and the table name) REVIEW_SHIPMENT_POD fails on a real shipment
+// with "not authorized to perform: dynamodb:BatchGetItem".
+const trackingLoadFinancialsTbl = backend.data.resources.tables['LoadFinancials']
+trackingActionsFn.addEnvironment('LOAD_FINANCIALS_TABLE_NAME', trackingLoadFinancialsTbl.tableName)
+trackingActionsFn.addToRolePolicy(new PolicyStatement({
+  actions:   ['dynamodb:BatchGetItem'],
+  resources: [trackingLoadTbl.tableArn, trackingLoadFinancialsTbl.tableArn],
+}))
 // `GOOGLE_MAPS_API_KEY` and `ANTHROPIC_API_KEY` reach this function as Amplify
 // secrets declared on its own resource, the way tms-geocode and pod-actions hold
 // theirs: a key is never an environment variable this file can print.

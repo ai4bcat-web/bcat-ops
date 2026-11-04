@@ -86,8 +86,14 @@ export function isChannelEnabled(channel: CheckCallChannel): boolean {
  * record that merely has the column.
  */
 export function normalizeCheckCallPlan(raw: unknown): CheckCallPlan | null {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
-  const row = raw as Record<string, unknown>
+  // A plan saved with SAVE_CHECK_CALL_PLAN is stored as JSON text on the Load row, and the Lambdas and the shipment bundle read
+  // raw rows: parse that text, or a per-load override is silently dropped and the customer / org plan wins.
+  let value = raw
+  if (typeof value === 'string') {
+    try { value = JSON.parse(value) } catch { return null }
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const row = value as Record<string, unknown>
   const interval = Number(row.intervalHours)
   const escalate = Number(row.escalateAfterMinutes)
   const channels = Array.isArray(row.channels)
