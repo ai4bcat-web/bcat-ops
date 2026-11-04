@@ -26,6 +26,11 @@ export const MAX_HELD_RUNS = 3
 export const POLL_STALE_MS = 4 * 60_000
 export const MIN_REMAINING_MS = 25_000
 export const DEFAULT_BUDGET_MS = 270_000
+/** AppSync cuts an action off at 30 s: a manual poll stops itself well before that. */
+export const ACTION_BUDGET_MS = 20_000
+export const ACTION_MIN_REMAINING_MS = 2_000
+/** Messages in flight per connection; model calls dominate and are I/O bound. */
+export const POLL_CONCURRENCY = 6
 
 interface Shared {
   settings: ResolvedSpotSettings
@@ -80,34 +85,49 @@ export async function pollConnection(deps: SpotDeps, conn: GmailConnectionRecord
     }
     stats.listed = ids.length
 
-    for (const id of ids.slice(0, max)) {
-      if (deps.now().getTime() > shared.deadline) {
-        hold = hold ?? 'DEFER'
-        break
-      }
-      try {
-        const outcome = await processMessage(ctx, id)
-        if (outcome === 'MODEL_CAP') hold = hold ?? 'DEFER'
-      } catch (err) {
-        if (err instanceof NeedsReconnect) throw err
-        stats.errors += 1
-        hold = 'ERROR'
-        console.warn('[tms-spot-quoter] one message failed:', redact(err))
+    const queue = ids.slice(0, max)
+    let fatal: unknown = null
+    const worker = async (): Promise<void> => {
+      while (!fatal) {
+        if (deps.now().getTime() > shared.deadline) {
+          if (queue.length > 0) hold = hold ?? 'DEFER'
+          return
+        }
+        const id = queue.shift()
+        if (id === undefined) return
+        try {
+          const outcome = await processMessage(ctx, id)
+          if (outcome === 'MODEL_CAP') hold = hold ?? 'DEFER'
+        } catch (err) {
+          if (err instanceof NeedsReconnect) {
+            fatal = err
+            return
+          }
+          stats.errors += 1
+          hold = 'ERROR'
+          console.warn('[tms-spot-quoter] one message failed:', redact(err))
+        }
       }
     }
+    await Promise.all(Array.from({ length: Math.min(POLL_CONCURRENCY, queue.length) }, worker))
+    if (fatal) throw fatal
 
     const priorHeld = (conn.lastPollStats as PollStats | null | undefined)?.held ?? 0
     if (hold === 'ERROR' && priorHeld < MAX_HELD_RUNS) {
       stats.held = priorHeld + 1
     } else if (hold === 'DEFER') {
       stats.held = priorHeld
+      stats.deferred = 1
     } else if (nextHistory) {
       patch.historyId = nextHistory
     }
 
     await reconcileDrafts(deps, conn, port).catch((err: unknown) => console.warn('[tms-spot-quoter] reconcile failed:', redact(err)))
     patch.lastPollOk = stats.errors === 0
-    patch.lastError = null
+    // A message that could not be classified is not stored; it is retried while the cursor holds.
+    patch.lastError = stats.errors > 0
+      ? `${stats.errors} message${stats.errors === 1 ? '' : 's'} could not be classified this run (model or Gmail error); retrying next run. Nothing from them was stored.`
+      : null
   } catch (err) {
     patch.lastPollOk = false
     if (err instanceof NeedsReconnect) {
@@ -138,7 +158,12 @@ export interface PollAllResult {
   reason?: 'DISABLED'
 }
 
-export async function pollAll(deps: SpotDeps, scope: PollScope = {}, budgetMs = DEFAULT_BUDGET_MS): Promise<PollAllResult> {
+export async function pollAll(
+  deps: SpotDeps,
+  scope: PollScope = {},
+  budgetMs = DEFAULT_BUDGET_MS,
+  minRemainingMs = MIN_REMAINING_MS,
+): Promise<PollAllResult> {
   const total = emptyStats()
   const settings = resolveSpotSettings(await deps.store.getSpotSettings())
   if (!settings.enabled) return { stats: total, polled: 0, skipped: 0, reason: 'DISABLED' }
@@ -157,7 +182,7 @@ export async function pollAll(deps: SpotDeps, scope: PollScope = {}, budgetMs = 
   let polled = 0
   let skipped = 0
   for (const conn of connections) {
-    if (shared.deadline - deps.now().getTime() < MIN_REMAINING_MS) {
+    if (shared.deadline - deps.now().getTime() < minRemainingMs) {
       skipped += connections.length - polled - skipped
       break
     }
@@ -167,6 +192,7 @@ export async function pollAll(deps: SpotDeps, scope: PollScope = {}, budgetMs = 
       continue
     }
     polled += 1
+    if (stats.deferred) total.deferred = 1
     for (const key of ['listed', 'stage1Rejected', 'stage2Rejected', 'modelCalls', 'stored', 'attached', 'errors'] as const) {
       total[key] += stats[key]
     }

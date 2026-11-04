@@ -16,7 +16,7 @@ import type { SenderMatch } from '../../../src/lib/crm/types'
 import type { SpotAutoQuoteEvent, SpotAutoQuoteResult } from '../../../src/lib/spot/types'
 import type { CrmPort, OAuthPort, SimPorts, SpotDeps } from './deps'
 import type { SpotModel } from './model'
-import { ConflictError, type Row, type SpotStore } from './store'
+import { ConflictError, INDEX_KEY_ATTRS, omitEmptyKeys, type Row, type SpotStore } from './store'
 
 export interface WriteLogEntry {
   op: string
@@ -36,6 +36,14 @@ export interface MemoryStore extends SpotStore {
   settings: { value: SpotSettingsRecord | null }
   writes: WriteLogEntry[]
   audits: Array<{ entityType: string; entityId: string; action: string; actorEmail: string; changes: Row }>
+}
+
+/** Models DynamoDB: an index key attribute that is present must be non-empty. */
+function assertNoEmptyKeys(item: object): void {
+  const row = item as Row
+  for (const k of INDEX_KEY_ATTRS.SpotRequest) {
+    if (k in row && (row[k] === '' || row[k] == null)) throw new Error(`ValidationException: empty index key ${k}`)
+  }
 }
 
 export function memoryStore(clock: () => Date = () => new Date()): MemoryStore {
@@ -109,7 +117,9 @@ export function memoryStore(clock: () => Date = () => new Date()): MemoryStore {
     },
     async putRequestIfAbsent(row) {
       if (requests.has(row.id)) return false
-      requests.set(row.id, { ...row })
+      const item = omitEmptyKeys({ ...row } as unknown as Row, INDEX_KEY_ATTRS.SpotRequest) as unknown as SpotRequestRecord
+      assertNoEmptyKeys(item)
+      requests.set(row.id, item)
       writes.push({ op: 'put', table: 'request', id: row.id, patch: row as unknown as Row })
       return true
     },
@@ -118,7 +128,10 @@ export function memoryStore(clock: () => Date = () => new Date()): MemoryStore {
       if (!current) throw new ConflictError('missing')
       if (guard?.statusIn && !guard.statusIn.includes(current.status)) throw new ConflictError('status')
       if (guard?.expectedVersion !== undefined && (current.version ?? 0) !== guard.expectedVersion) throw new ConflictError('stale')
-      const next = applyPatch(current, patch)
+      const keyed: Row = { ...patch }
+      for (const k of INDEX_KEY_ATTRS.SpotRequest) if (keyed[k] === '') keyed[k] = null
+      const next = applyPatch(current, keyed)
+      assertNoEmptyKeys(next)
       requests.set(id, next)
       writes.push({ op: 'update', table: 'request', id, patch })
       return next

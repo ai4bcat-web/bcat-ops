@@ -87,6 +87,8 @@ export interface SpotDeps {
   /** Registry-style provider modes: LIVE only when the credentials exist. */
   providerModes(): Promise<{ gmail: 'STUB' | 'LIVE'; dat: 'STUB' | 'LIVE' }>
   now(): Date
+  /** Per model call; a slower answer is treated as an error (retried next run). */
+  modelTimeoutMs?: number
   devStack: boolean
   portalOrigins: string[]
   /** This environment's own origin: the customer link is `${portalOrigin}/quote/<linkToken>`. */

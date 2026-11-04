@@ -40,7 +40,7 @@ import {
 import type { SimInboxMessage } from '../_shared/gmail/simPort'
 import type { SpotDeps } from './deps'
 import { loadAiAgents, processManual, ttlFor } from './pipeline'
-import { pollAll } from './poll'
+import { ACTION_BUDGET_MS, ACTION_MIN_REMAINING_MS, pollAll } from './poll'
 import { reconcileOne } from './reconcile'
 import { buildReply, draftOpenUrl } from './reply'
 import { jsonOf, type Row } from './store'
@@ -423,8 +423,9 @@ const pollNow: Handler = async (deps, caller, input) => {
     if (conn.status !== 'CONNECTED') throw new Error('This connection is not active; resume or reconnect it first.')
     scope = { userId: caller.userId }
   }
-  const result = await pollAll(deps, scope)
-  return { stats: result.stats }
+  const result = await pollAll(deps, scope, ACTION_BUDGET_MS, ACTION_MIN_REMAINING_MS)
+  // `partial`: time ran out first; polling again continues (the cursor was held).
+  return { stats: result.stats, partial: result.skipped > 0 || Boolean(result.stats.deferred) }
 }
 
 function targetUserOf(caller: SpotCaller, input: Row): string {

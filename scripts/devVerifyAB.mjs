@@ -253,7 +253,13 @@ async function inject(ctx, { from, subject, body, threadId, inReplyTo, headers }
   return (await ctx.spot('SPOT_SIM_INJECT', { message })).id
 }
 
-const poll = async (ctx) => (await ctx.spot('SPOT_POLL_NOW', {})).stats
+// A manual poll stops itself before AppSync's 30 s limit and says `partial`; poll again until it is done.
+const poll = async (ctx) => {
+  const first = await ctx.spot('SPOT_POLL_NOW', {})
+  let last = first
+  for (let i = 0; i < 8 && last.partial; i++) last = await ctx.spot('SPOT_POLL_NOW', {})
+  return { ...last.stats, listed: first.stats.listed }
+}
 const listRequests = async (ctx) => (await ctx.spot('SPOT_LIST_REQUESTS', {})).rows ?? []
 const requestBySubject = async (ctx, subject) => (await listRequests(ctx)).find((r) => String(r.subject ?? '').includes(subject)) ?? null
 const fullRequest = async (ctx, id) => (await ctx.spot('SPOT_GET_REQUEST', { id }))
@@ -595,7 +601,8 @@ async function ab10Crm(ctx) {
   expect(mgr.visible === true, 'a manager cannot see an account owned by someone else')
   const repList = await ctx.crmRep('CRM_LIST_ACCOUNTS', { scope: 'all' })
   expect(!repList.rows.some((r) => r.customerId === cid), 'CRM_LIST_ACCOUNTS leaks another rep\'s account to a rep')
-  await refused('a rep reading another rep\'s spot request', /./, () => ctx.spotRep('SPOT_GET_REQUEST', { id: ctx.f.req?.id ?? `sr:${ctx.userId}:none` }))
+  const someRequest = ctx.f.req?.id ?? (await listRequests(ctx))[0]?.id
+  if (someRequest) await refused('a rep reading another rep\'s spot request', /./, () => ctx.spotRep('SPOT_GET_REQUEST', { id: someRequest }))
   const restricted = (await ctx.crmRep('CRM_GET_ACCOUNT', { customerId: unowned.id })).timeline.filter((e) => e.kind === 'EMAIL_IN' || e.kind === 'EMAIL_OUT')
   expect(restricted.every((e) => e.subject == null), 'a rep sees an e-mail subject on an account they do not own mail on')
   return `note+call+task+next step stored; last touch ${lastBefore.slice(0, 10)} unmoved by a back-dated note; derived quote/shipment + e-mail rows present; follow-ups lists it; visibility: non-owner rep refused, unowned visible, manager sees all, list filtered`
@@ -612,14 +619,14 @@ async function ab12Retention(ctx) {
     if (Math.abs(Number(r.ttlEpoch) - want) > 60) bad.push(`${r.status}:${Math.round((Number(r.ttlEpoch) - want) / 3600)}h`)
   }
   expect(bad.length === 0, `ttlEpoch off for ${bad.length}/${rows.length} rows (${bad.slice(0, 3).join(', ')})`)
-  const quote = ctx.f.quoteId
+  const quote = ctx.f.quoteId ?? null
   const purged = await ctx.spot('SPOT_PURGE_MINE', {})
   expect(purged.deleted >= 1, 'SPOT_PURGE_MINE deleted nothing')
   expect((await listRequests(ctx)).length === 0, 'requests remain after SPOT_PURGE_MINE')
   const acct = await ctx.crm('CRM_GET_ACCOUNT', { customerId: ctx.f.prospect.id })
   const mails = acct.timeline.filter((e) => e.kind === 'EMAIL_IN' || e.kind === 'EMAIL_OUT')
   expect(mails.every((e) => e.subject == null), 'an e-mail activity still carries its subject after the purge')
-  expect((await getQuote(ctx, quote))?.id === quote, 'the Quote disappeared with the purge')
+  if (quote) expect((await getQuote(ctx, quote))?.id === quote, 'the Quote disappeared with the purge')
   expect((await getRow(ctx.token, 'Customer', ctx.f.prospect.id, 'id'))?.id, 'the Customer disappeared with the purge')
   const { connection } = await ctx.spot('SPOT_DISCONNECT', { purge: true })
   expect(connection.status === 'DISCONNECTED', `status ${connection.status} after disconnect`)

@@ -262,7 +262,8 @@ describe('manual paste', () => {
     expect(first.request.id).toMatch(new RegExp(`^sr:${REP_ID}:manual-[0-9a-f]{16}$`))
     expect(again.request.id).toBe(first.request.id)
     expect(rig.model.classifyCalls).toHaveLength(1)
-    expect(first.request.gmailThreadId).toBe('')
+    // A pasted request has no thread: the index-key attribute is omitted, never written empty.
+    expect(first.request.gmailThreadId).toBeUndefined()
 
     rig.model.answer = () => ({ ...requestRaw(), kind: 'NOT_A_REQUEST' })
     await expect(call(rig, 'SPOT_ADD_MANUAL', { text: 'lunch on friday?' })).rejects.toThrow(/does not look like/)
@@ -438,5 +439,53 @@ describe('disconnect, purge and rep settings', () => {
     await expect(call(rig, 'SPOT_POLL_NOW', {}, OTHER)).rejects.toThrow(/Connect Gmail/)
     const out = (await call(rig, 'SPOT_POLL_NOW', {})) as { stats: { listed: number } }
     expect(out.stats.listed).toBe(0)
+  })
+})
+
+describe('another rep can read or change nothing of a request (one case per action)', () => {
+  const id = `sr:${REP_ID}:zz-1`
+  const cases: Array<[string, Record<string, unknown>]> = [
+    ['SPOT_GET_REQUEST', { id }],
+    ['SPOT_UPDATE_FIELDS', { requestId: id, patch: { weightLbs: 1 }, expectedVersion: 1 }],
+    ['SPOT_SET_CUSTOMER', { requestId: id, customerId: 'cust-1' }],
+    ['SPOT_CREATE_DRAFT', { requestId: id, quoteId: 'q-1' }],
+    ['SPOT_SEND_DRAFT', { requestId: id, confirm: true }],
+    ['SPOT_DISMISS', { requestId: id }],
+    ['SPOT_MARK_OUTCOME', { requestId: id }],
+  ]
+  it.each(cases)('%s by a rep who does not own it is refused and changes nothing', async (action, input) => {
+    const rig = rigWith()
+    drafted(rig)
+    rig.store.customers.set('cust-1', { id: 'cust-1', status: 'ACTIVE' })
+    rig.store.connections.set('rep-2', connectedRow({ id: 'rep-2', userEmail: 'other@zz-bcat.test' }))
+    const before = JSON.stringify(rig.store.requests.get(id))
+    await expect(call(rig, action, input, OTHER)).rejects.toThrow(/not found|owning rep|Forbidden/)
+    expect(JSON.stringify(rig.store.requests.get(id))).toBe(before)
+    expect(rig.port.sendCalls).toBe(0)
+    expect(rig.port.drafts.size).toBe(0)
+  })
+
+  it('listing or counting another rep’s requests is refused', async () => {
+    const rig = rigWith()
+    await expect(call(rig, 'SPOT_LIST_REQUESTS', { userId: REP_ID }, OTHER)).rejects.toThrow(/managers only/)
+    await expect(call(rig, 'SPOT_COUNT', { userId: REP_ID }, OTHER)).rejects.toThrow(/managers only/)
+  })
+
+  it('purging removes only the caller’s own rows', async () => {
+    const rig = rigWith()
+    await call(rig, 'SPOT_PURGE_MINE', {}, OTHER)
+    expect(rig.store.requests.has(id)).toBe(true)
+  })
+})
+
+describe('missing ids', () => {
+  it.each([
+    ['SPOT_GET_REQUEST', {}],
+    ['SPOT_DISMISS', {}],
+    ['SPOT_CREATE_DRAFT', { requestId: 'x' }],
+    ['SPOT_MARK_OUTCOME', { requestId: null }],
+    ['SPOT_SEND_DRAFT', { confirm: true }],
+  ])('%s with no id answers with a clear validation error', async (action, input) => {
+    await expect(call(rigWith(), action, input)).rejects.toThrow(/is required|must be a string/)
   })
 })

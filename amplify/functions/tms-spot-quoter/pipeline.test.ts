@@ -291,3 +291,58 @@ describe('simulated and Google connections share one code path', () => {
     expect(results[0]).toEqual(results[1])
   })
 })
+
+describe('slow or failing model', () => {
+  it('a model call that never answers times out: nothing is stored, the poll still completes and retries later', async () => {
+    const rig = rigWithRep()
+    rig.deps.modelTimeoutMs = 20
+    rig.model.classify = () => new Promise(() => {})
+    seed(rig, fresh.filter((f) => f.expectStage === 'STORE').slice(0, 2))
+    const { stats } = await pollAll(rig.deps)
+    expect(stats.errors).toBe(2)
+    expect(rig.store.requests.size).toBe(0)
+    const conn = rig.store.connections.get(REP_ID)!
+    expect(conn.lastPollOk).toBe(false)
+    expect(conn.lastError).toMatch(/could not be classified/)
+    expect(conn.lastError).not.toContain('Rate request')
+    expect(conn.historyId ?? null).toBeNull()
+  })
+
+  it('a poll that runs out of time returns partial progress and a later poll finishes the rest', async () => {
+    const rig = rigWithRep()
+    seed(rig, fresh.filter((f) => f.expectStage === 'STORE'))
+    // Each call to the model advances the clock past the (tiny) budget.
+    const inner = rig.model.classify.bind(rig.model)
+    rig.model.classify = async (input) => {
+      rig.clock.now = new Date(rig.clock.now.getTime() + 600)
+      return inner(input)
+    }
+    const first = await pollAll(rig.deps, {}, 1000, 0)
+    const partial = rig.store.requests.size
+    expect(partial).toBeGreaterThan(0)
+    expect(partial).toBeLessThan(fresh.filter((f) => f.expectStage === 'STORE').length)
+    expect(first.stats.deferred).toBe(1)
+    for (let i = 0; i < 40 && rig.store.requests.size < fresh.filter((f) => f.expectStage === 'STORE').length; i++) {
+      await pollAll(rig.deps, {}, 1000, 0)
+    }
+    expect(rig.store.requests.size).toBe(fresh.filter((f) => f.expectStage === 'STORE').length)
+  })
+
+  it('classifies several messages at once without exceeding the concurrency cap', async () => {
+    const rig = rigWithRep()
+    seed(rig, fresh.filter((f) => f.expectStage === 'STORE'))
+    let live = 0
+    let peak = 0
+    const inner = rig.model.classify.bind(rig.model)
+    rig.model.classify = async (input) => {
+      live += 1
+      peak = Math.max(peak, live)
+      await new Promise((r) => setTimeout(r, 5))
+      live -= 1
+      return inner(input)
+    }
+    await pollAll(rig.deps)
+    expect(peak).toBeGreaterThan(1)
+    expect(peak).toBeLessThanOrEqual(6)
+  })
+})

@@ -41,6 +41,23 @@ const t = (name: string): string => process.env[name] ?? ''
 export const IDX_REQUESTS_BY_USER = 'spotRequestsByUserIdAndReceivedAt'
 export const IDX_REQUESTS_BY_THREAD = 'spotRequestsByGmailThreadId'
 
+/**
+ * Every attribute that is a key (partition or sort) of an index on a table this Lambda
+ * writes. DynamoDB rejects an empty string or NULL there, so such an attribute is omitted
+ * from a write, never written empty. (The CRM tables' own are handled in crmStore.)
+ */
+export const INDEX_KEY_ATTRS = {
+  SpotRequest: ['userId', 'receivedAt', 'gmailThreadId', 'status'],
+  GmailConnection: [],
+  SpotSettings: [],
+} as const
+
+export function omitEmptyKeys<T extends Row>(row: T, keys: readonly string[]): T {
+  const out: Row = { ...row }
+  for (const key of keys) if (out[key] === '' || out[key] == null) delete out[key]
+  return out as T
+}
+
 export class ConflictError extends Error {
   constructor(message: string) {
     super(message)
@@ -128,6 +145,7 @@ export function createDynamoStore(): SpotStore {
     id: string,
     patch: Row,
     guard: { statusIn?: string[]; expectedVersion?: number; mustExist?: boolean } = {},
+    indexKeys: readonly string[] = [],
   ): Promise<Row> {
     const names: Record<string, string> = { '#version': 'version', '#updatedAt': 'updatedAt' }
     const values: Row = { ':one': 1, ':zero': 0, ':now': nowIso() }
@@ -138,7 +156,7 @@ export function createDynamoStore(): SpotStore {
       if (value === undefined || key === 'id' || key === 'version') continue
       const nk = `#k${n}`
       names[nk] = key
-      if (value === null) {
+      if (value === null || (value === '' && indexKeys.includes(key))) {
         removes.push(nk)
       } else {
         const vk = `:v${n}`
@@ -269,7 +287,7 @@ export function createDynamoStore(): SpotStore {
       try {
         await db.send(new PutCommand({
           TableName: REQUEST(),
-          Item: { ...row, updatedAt: nowIso() },
+          Item: omitEmptyKeys({ ...row, updatedAt: nowIso() }, INDEX_KEY_ATTRS.SpotRequest),
           ConditionExpression: 'attribute_not_exists(id)',
         }))
         return true
@@ -279,7 +297,7 @@ export function createDynamoStore(): SpotStore {
       }
     },
     async updateRequest(id, patch, guard) {
-      return (await patchRow(REQUEST(), id, patch, guard)) as unknown as SpotRequestRecord
+      return (await patchRow(REQUEST(), id, patch, guard, INDEX_KEY_ATTRS.SpotRequest)) as unknown as SpotRequestRecord
     },
     async requestsByThread(threadId) {
       if (!threadId) return []

@@ -34,6 +34,21 @@ import { jsonOf } from './store'
 import { maybeAutoSend } from './autoSend'
 
 export const MAX_BODY_CHARS = 8000
+export const DEFAULT_MODEL_TIMEOUT_MS = 10_000
+
+/** A model call that does not answer in time is an error like any other: unstored, retried. */
+export async function withModelTimeout<T>(deps: Pick<SpotDeps, 'modelTimeoutMs'>, work: Promise<T>): Promise<T> {
+  const ms = deps.modelTimeoutMs ?? DEFAULT_MODEL_TIMEOUT_MS
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const late = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error('MODEL_TIMEOUT')), ms)
+  })
+  try {
+    return await Promise.race([work, late])
+  } finally {
+    clearTimeout(timer)
+  }
+}
 export const MAX_THREAD_ENTRIES = 20
 
 export type MailOutcome =
@@ -47,7 +62,7 @@ export type MailOutcome =
   | 'MODEL_CAP'
 
 /** `SpotPollStats` plus the consecutive-held-runs counter (a number, never content). */
-export type PollStats = SpotPollStats & { held?: number }
+export type PollStats = SpotPollStats & { held?: number; /** 1 when time or the model cap stopped the run early. */ deferred?: number }
 
 export interface PollContext {
   deps: SpotDeps
@@ -216,11 +231,11 @@ async function attach(ctx: PollContext, meta: GmailMessageMeta, tracked: SpotReq
         const body = await ctx.port.getBody(meta.id)
         ctx.budget.count += 1
         ctx.stats.modelCalls += 1
-        const intent: SpotReplyIntent = await ctx.deps.model.replyIntent({
+        const intent: SpotReplyIntent = await withModelTimeout(ctx.deps, ctx.deps.model.replyIntent({
           subject: meta.subject,
           fromEmail: addressOf(meta.from).email,
           body: stripQuotedHistory(body.text),
-        })
+        }))
         patch.replyIntent = intent
       } catch (err) {
         // The intent chip is a hint; the reply itself is still attached.
@@ -276,13 +291,13 @@ export async function processMessage(ctx: PollContext, id: string): Promise<Mail
   const receivedAt = isoOfInternalDate(meta.internalDate)
   ctx.budget.count += 1
   ctx.stats.modelCalls += 1
-  const answer = await deps.model.classify({
+  const answer = await withModelTimeout(deps, deps.model.classify({
     subject: meta.subject,
     fromEmail: sender.email,
     mailDate: receivedAt,
     body: stripped,
     aiAgents: ctx.aiAgents,
-  })
+  }))
   if (answer.output.kind !== 'QUOTE_REQUEST') return 'NOT_REQUEST'
 
   const replyTo = meta.replyTo ? addressOf(meta.replyTo).email : null
@@ -338,13 +353,13 @@ export async function processManual(
     const gate = modelGate({ aiAgents: ctx.aiAgents, settings: ctx.settings, budget })
     if (gate === 'OFF') throw new Error('The QUOTE agent is switched off by an admin.')
     if (gate === 'CAP') throw new Error('The daily model-call limit for this mailbox has been reached.')
-    const answer = await deps.model.classify({
+    const answer = await withModelTimeout(deps, deps.model.classify({
       subject: input.subject ?? null,
       fromEmail: fromEmail || null,
       mailDate: receivedAt,
       body: stripQuotedHistory(text),
       aiAgents: ctx.aiAgents,
-    })
+    }))
     if (ctx.conn) {
       await deps.store.updateConnection(ctx.userId, { modelCallsDay: budget.day, modelCallsToday: budget.count + 1 })
     }
