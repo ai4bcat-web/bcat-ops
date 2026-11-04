@@ -489,3 +489,13 @@ describe('missing ids', () => {
     await expect(call(rigWith(), action, input)).rejects.toThrow(/is required|must be a string/)
   })
 })
+
+describe('suggestion follows the rep’s edits', () => {
+  it('fixing a missing required field makes the request priceable', async () => {
+    const row = request()
+    const broken = { ...row, extraction: { ...row.extraction!, equipmentType: null, equipment: null }, suggestion: null, status: 'NEEDS_INFO' as const }
+    const rig = rigWith(broken)
+    const out = (await call(rig, 'SPOT_UPDATE_FIELDS', { requestId: row.id, patch: { equipmentType: 'VAN', equipment: 'van' }, expectedVersion: 1 })) as { request: SpotRequestRecord }
+    expect(out.request.suggestion).toMatchObject({ basis: 'STUB', stub: true })
+  })
+})

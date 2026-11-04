@@ -32,6 +32,7 @@ import { resolveRepSettings, type ResolvedSpotSettings } from '../../../src/lib/
 import type { SpotDeps } from './deps'
 import { jsonOf } from './store'
 import { maybeAutoSend } from './autoSend'
+import { computeSuggestion } from './suggestion'
 
 export const MAX_BODY_CHARS = 8000
 export const DEFAULT_MODEL_TIMEOUT_MS = 10_000
@@ -162,6 +163,8 @@ export async function buildRequestRow(
   if (downgraded && match?.customerId && !candidates.some((c) => c.customerId === match.customerId)) {
     candidates.unshift({ customerId: match.customerId, how: match.how === 'EMAIL' ? 'EMAIL' : 'DOMAIN' })
   }
+  const customerId = matched ? match.customerId ?? null : null
+  const suggestion = await computeSuggestion(ctx.deps, { extraction: normalized.extraction, customerId })
   return {
     id: input.id,
     userId: input.userId,
@@ -180,7 +183,8 @@ export async function buildRequestRow(
     extraction: normalized.extraction,
     fieldMeta: normalized.fieldMeta,
     missingFields: normalized.missingFields,
-    customerId: matched ? match.customerId ?? null : null,
+    customerId,
+    suggestion,
     contactEmail: input.replyTo ?? (input.fromEmail || null),
     matchHow: downgraded ? 'NONE' : (match?.how ?? 'NONE'),
     matchCandidates: candidates,

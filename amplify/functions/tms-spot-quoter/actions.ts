@@ -40,6 +40,7 @@ import {
 import type { SimInboxMessage } from '../_shared/gmail/simPort'
 import type { SpotDeps } from './deps'
 import { loadAiAgents, processManual, ttlFor } from './pipeline'
+import { computeSuggestion } from './suggestion'
 import { ACTION_BUDGET_MS, ACTION_MIN_REMAINING_MS, pollAll } from './poll'
 import { reconcileOne } from './reconcile'
 import { buildReply, draftOpenUrl } from './reply'
@@ -521,6 +522,7 @@ const updateFields: Handler = async (deps, caller, input) => {
       extraction: applied.extraction,
       fieldMeta: applied.fieldMeta,
       missingFields: applied.missingFields,
+      suggestion: await computeSuggestion(deps, { extraction: applied.extraction, customerId: row.customerId }),
       ...(flips ? { status: applied.status } : {}),
     },
     { expectedVersion: input.expectedVersion },
@@ -545,7 +547,11 @@ const setCustomer: Handler = async (deps, caller, input) => {
       source: 'SPOT_REQUEST',
     })
   }
-  const request = await deps.store.updateRequest(row.id, { customerId, matchHow: 'EMAIL' })
+  const request = await deps.store.updateRequest(row.id, {
+    customerId,
+    matchHow: 'EMAIL',
+    suggestion: await computeSuggestion(deps, { extraction: row.extraction, customerId }),
+  })
   await deps.store.writeAudit('SPOT_REQUEST', row.id, 'SPOT_SET_CUSTOMER', caller.email, { customerId })
   return { request }
 }

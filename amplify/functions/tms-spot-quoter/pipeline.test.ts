@@ -346,3 +346,29 @@ describe('slow or failing model', () => {
     expect(peak).toBeLessThanOrEqual(6)
   })
 })
+
+describe('suggestion snapshot', () => {
+  it('a stored request carries a stub-labelled, whole-dollar suggestion that respects the floor', async () => {
+    const rig = rigWithRep()
+    const fx = fresh.find((f) => f.meta.id === 'zz-req-van-clear')!
+    seed(rig, [fx])
+    await pollAll(rig.deps)
+    const s = rig.store.requests.get(`sr:${REP_ID}:${fx.meta.id}`)!.suggestion as {
+      basis: string; stub: boolean; confidence: string; suggestedCents: number; floorSellCents: number; label: string
+    }
+    expect(s).toMatchObject({ basis: 'STUB', stub: true, confidence: 'STUB' })
+    expect(s.suggestedCents).toBeGreaterThan(0)
+    expect(s.suggestedCents % 100).toBe(0)
+    expect(s.suggestedCents).toBeGreaterThanOrEqual(s.floorSellCents)
+    expect(s.label).toMatch(/\S/)
+  })
+
+  it('a request that cannot be priced (LTL) has no suggestion', async () => {
+    const rig = rigWithRep()
+    const fx = fresh.find((f) => f.meta.id === 'zz-req-van-clear')!
+    seed(rig, [fx])
+    rig.model.answer = () => requestRaw({ mode: 'LTL' })
+    await pollAll(rig.deps)
+    expect(rig.store.requests.get(`sr:${REP_ID}:${fx.meta.id}`)!.suggestion ?? null).toBeNull()
+  })
+})

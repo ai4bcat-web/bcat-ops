@@ -536,7 +536,9 @@ async function ab09AutoSend(ctx) {
     const dec = (await fullRequest(ctx, row.id)).request.autoDecision
     if (dec) { expect(dec.decision !== 'SENT' && dec.reasons.includes(code), `gate ${code}: decision ${dec.decision} reasons ${dec.reasons.join(',')}`); flips.push(code) } else flips.push(`${code}(door not invoked)`)
   }
-  await flip('optout', () => ctx.dir('UPSERT_CUSTOMER', { id: active.id, quoteAutoReply: false, name: active.name }), 'CUSTOMER_OPT_OUT', () => ctx.dir('UPSERT_CUSTOMER', { id: active.id, quoteAutoReply: true, name: active.name }))
+  // UPSERT_CUSTOMER on an existing row needs the updatedAt of the row as last read.
+  const setOptIn = async (value) => ctx.dir('UPSERT_CUSTOMER', { id: active.id, quoteAutoReply: value, name: active.name, expectedUpdatedAt: String((await getRow(ctx.token, 'Customer', active.id, 'updatedAt')).updatedAt) })
+  await flip('optout', () => setOptIn(false), 'CUSTOMER_OPT_OUT', () => setOptIn(true))
   await flip('reptoff', () => ctx.spot('SPOT_SAVE_MY_SETTINGS', { settings: { autoSend: false } }), 'REP_OFF', () => ctx.spot('SPOT_SAVE_MY_SETTINGS', { settings: { autoSend: true } }))
   await flip('orgoff', () => ctx.spot('SPOT_SAVE_SETTINGS', { settings: { allowAutoSend: false } }), 'ORG_OFF', () => ctx.spot('SPOT_SAVE_SETTINGS', { settings: { allowAutoSend: true } }))
   const door = await ctx.ship('SAVE_QUOTE', {
