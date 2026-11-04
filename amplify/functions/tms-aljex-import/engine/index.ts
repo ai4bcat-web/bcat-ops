@@ -1,0 +1,6 @@
+export { runSlice, linkSkippedCarriers, FaultInjected } from './runSlice'
+export { DynamoStore } from './dynamoStore'
+export { MemoryStore, CrashInjected } from './memoryStore'
+export { seedProCounter, SeedRefused } from './seedCounter'
+export { reconcile, conservation } from './reconcile'
+export { resolveTables, assertTargets, liveTablesOf, TargetRefused, WRITTEN_TABLES, PROD_SUFFIX, DEV_SUFFIX } from './tables'

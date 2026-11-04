@@ -77,4 +77,16 @@ describe('matchDivisionByAddresses', () => {
     expect(matchDivisionByAddresses(['old@bcatcorp.com', 'nobody@bcatcorp.com'], DIVS)).toBeNull()
     expect(matchDivisionByAddresses([], DIVS)).toBeNull()
   })
+
+  it('routes nothing by a seeded placeholder address until a person confirms it', () => {
+    const divs = [
+      { code: 'ASSETS', active: true, intakeEmail: 'tenders-ivan-cartage@bcatcorp.com', intakeEmailConfirmed: false },
+      { code: 'BROKERAGE', active: true, intakeEmail: 'tenders@bcatcorp.com', intakeEmailConfirmed: true },
+      { code: 'LEGACY', active: true, intakeEmail: 'legacy@bcatcorp.com', intakeEmailConfirmed: null },
+    ]
+    expect(matchDivisionByAddresses(['tenders-ivan-cartage@bcatcorp.com'], divs)).toBeNull()
+    expect(matchDivisionByAddresses(['tenders-ivan-cartage@bcatcorp.com', 'tenders@bcatcorp.com'], divs))
+      .toEqual({ divisionCode: 'BROKERAGE', address: 'tenders@bcatcorp.com' })
+    expect(matchDivisionByAddresses(['legacy@bcatcorp.com'], divs)).toEqual({ divisionCode: 'LEGACY', address: 'legacy@bcatcorp.com' })
+  })
 })

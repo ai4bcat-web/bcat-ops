@@ -16,6 +16,7 @@
  *     away, and calling the provider with it would be both noise and a lie.
  */
 import { OtrClient, OTR_STAGING_BASE } from './otrClient'
+import { validateMcpCredentials } from '../../../src/lib/integrations/mcpAdapter'
 import { redactSecrets } from '../../../src/lib/integrations/secrets'
 // `healthFrom` is the only consumer of what this returns, so its outcome type is
 // the contract — duplicating it here is how the two would quietly drift apart.
@@ -338,6 +339,10 @@ export async function validateProvider(
         // The decision only — never the reply text, which carries a broker's name.
         return { kind: 'HTTP', statusCode: 200, message: `Broker check: ${checked.decision}` }
       }
+
+      case 'MCP_TOKEN':
+        // The adapter's own token call: 200 → OK, 400/401 → INVALID_CREDENTIALS, else the HTTP code only.
+        return validateMcpCredentials(creds, fetchImpl)
 
       case 'PAYCHEX_TOKEN': {
         const got = requireCreds(creds, ['PAYCHEX_CLIENT_ID', 'PAYCHEX_CLIENT_SECRET'])

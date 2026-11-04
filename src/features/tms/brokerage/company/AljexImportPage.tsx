@@ -1,506 +1,403 @@
 /**
- * My Brokerage → Company → Import from Aljex.
+ * My Brokerage → Company → Aljex import (owner/ADMIN; CompanyTab gates the route, the Lambda enforces it).
  *
- * Bulk CSV import for Aljex exports: upload, map columns, dry-run preview,
- * then apply. Idempotent by file hash; owner/ADMIN only (CompanyTab is gated).
+ * A six-step stepper over a server-driven job: File → Profile → Review → Plan → Apply → Reconcile.
+ * The file never goes through AppSync: the browser hashes it, reads only its header row to recognise the
+ * layout, and PUTs it to a presigned URL. Every gate (unmapped values block, Apply needs a PLANNED job under
+ * the saved profile, LIVE needs the typed tag and — for real data — a reconciled rehearsal) lives in
+ * `components/aljexImportLogic.ts`; this page only renders the answer.
  */
-import { useEffect, useMemo, useState } from 'react'
-import { FileUp, Play, RefreshCw, Upload } from 'lucide-react'
-import { uploadData } from 'aws-amplify/storage'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { FileUp, Upload } from 'lucide-react'
 import { toast } from 'sonner'
-import { TmsBadge, TmsButton, TmsCard, TmsSelect, TmsTable } from '@/features/tms/kit'
-import type { ColumnDef } from '@/features/tms/kit'
-import { applyAljexImport, listAljexImportJobs, previewAljexImport } from '@/lib/apiClient'
-import type { AljexColumnTarget } from '@/lib/aljexImport'
-import type { AljexImportCounts, AljexImportJob } from '@/types/tms'
-import { ErrorText, GroupLabel, Loading, Panel, SettingsCard, Stack } from '@/features/settings/settingsKit'
+import { TmsAlert, TmsBadge, TmsButton } from '@/features/tms/kit'
+import { ErrorText, GroupLabel, Hint, Loading, Panel, SettingsCard, Stack } from '@/features/settings/settingsKit'
+import {
+  applyAljexImport, cancelAljexImport, getAljexImport, getAljexProfile, listAljexImports, pauseAljexImport,
+  planAljexImport, prepareAljexImport, resumeAljexImport, sampleAljexImport, saveAljexProfile, stageAljexImport,
+} from '@/lib/apiClient'
+import { DEFAULT_ALJEX_PROFILE } from '@/lib/aljex/profile'
+import type { AljexProfile } from '@/lib/aljex/profile'
+import type { AljexImportJob, AljexMappingProfileBody, AljexSampleRow } from '@/types/tms'
+import { AljexApplyPanel } from './components/AljexApplyPanel'
+import { AljexJobList } from './components/AljexJobList'
+import { AljexProfileEditor } from './components/AljexProfileEditor'
+import { AljexReconcilePanel } from './components/AljexReconcilePanel'
+import {
+  STEPS, WORKING_STATUSES, applyBlockReason, blockingOf, detectLayout, furthestStep, naturalStep,
+  parseHeaderRecord, planBlockReason, sampleCell, sha256Hex, unmappedFor,
+} from './components/aljexImportLogic'
+import type { LayoutDetection, StepIndex } from './components/aljexImportLogic'
+import { putWithProgress } from './components/uploadFile'
 
-const TARGET_FIELDS: { value: AljexColumnTarget; label: string }[] = [
-  { value: 'pro', label: 'Pro #' },
-  { value: 'po', label: 'PO / TMS ID' },
-  { value: 'pickupNumber', label: 'PU #' },
-  { value: 'customer', label: 'Customer' },
-  { value: 'customerMc', label: 'Customer MC' },
-  { value: 'originName', label: 'Origin name' },
-  { value: 'originCity', label: 'Origin city' },
-  { value: 'originState', label: 'Origin state' },
-  { value: 'originZip', label: 'Origin zip' },
-  { value: 'destinationName', label: 'Destination name' },
-  { value: 'destinationCity', label: 'Destination city' },
-  { value: 'destinationState', label: 'Destination state' },
-  { value: 'destinationZip', label: 'Destination zip' },
-  { value: 'pickupDate', label: 'Pickup date' },
-  { value: 'deliveryDate', label: 'Delivery date' },
-  { value: 'equipment', label: 'Equipment' },
-  { value: 'commodity', label: 'Commodity' },
-  { value: 'weight', label: 'Weight' },
-  { value: 'pieces', label: 'Pieces' },
-  { value: 'miles', label: 'Miles' },
-  { value: 'customerRate', label: 'Customer rate' },
-  { value: 'carrierRate', label: 'Carrier rate' },
-  { value: 'carrierName', label: 'Carrier name' },
-  { value: 'carrierMc', label: 'Carrier MC' },
-  { value: 'invoiceNumber', label: 'Invoice #' },
-  { value: 'invoiceDate', label: 'Invoice date' },
-  { value: 'invoicePaidDate', label: 'Invoice paid date' },
-  { value: 'invoiceAmount', label: 'Invoice amount' },
-  { value: 'carrierBillNumber', label: 'Carrier bill #' },
-  { value: 'carrierBillAmount', label: 'Carrier bill amount' },
-  { value: 'status', label: 'Status' },
-]
+const messageOf = (e: unknown) => (e instanceof Error ? e.message : String(e))
+const HEADER_BYTES = 256 * 1024
+const POLL_MS = 2500
 
-const ALIASES: Record<string, AljexColumnTarget> = {
-  'pro #': 'pro',
-  'pro': 'pro',
-  'pronumber': 'pro',
-  'pro no': 'pro',
-  'po #': 'po',
-  'po': 'po',
-  'tms id': 'po',
-  'tmsid': 'po',
-  'order #': 'po',
-  'pu #': 'pickupNumber',
-  'pickup #': 'pickupNumber',
-  'punumber': 'pickupNumber',
-  'customer': 'customer',
-  'shipper': 'customer',
-  'customer name': 'customer',
-  'customer mc': 'customerMc',
-  'shipper mc': 'customerMc',
-  'cust mc': 'customerMc',
-  'origin': 'originName',
-  'shipper name': 'originName',
-  'pickup name': 'originName',
-  'origin city': 'originCity',
-  'from city': 'originCity',
-  'origin state': 'originState',
-  'from state': 'originState',
-  'origin zip': 'originZip',
-  'from zip': 'originZip',
-  'destination': 'destinationName',
-  'consignee name': 'destinationName',
-  'delivery name': 'destinationName',
-  'destination city': 'destinationCity',
-  'to city': 'destinationCity',
-  'destination state': 'destinationState',
-  'to state': 'destinationState',
-  'destination zip': 'destinationZip',
-  'to zip': 'destinationZip',
-  'pickup date': 'pickupDate',
-  'ship date': 'pickupDate',
-  'pickup at': 'pickupDate',
-  'delivery date': 'deliveryDate',
-  'deliver by': 'deliveryDate',
-  'delivery at': 'deliveryDate',
-  'equipment': 'equipment',
-  'equip type': 'equipment',
-  'trailer type': 'equipment',
-  'commodity': 'commodity',
-  'description': 'commodity',
-  'freight desc': 'commodity',
-  'weight': 'weight',
-  'weight lbs': 'weight',
-  'total weight': 'weight',
-  'pieces': 'pieces',
-  'qty': 'pieces',
-  'pallets': 'pieces',
-  'miles': 'miles',
-  'trip miles': 'miles',
-  'distance': 'miles',
-  'customer rate': 'customerRate',
-  'revenue': 'customerRate',
-  'sell rate': 'customerRate',
-  'total rate': 'customerRate',
-  'carrier rate': 'carrierRate',
-  'cost': 'carrierRate',
-  'buy rate': 'carrierRate',
-  'pay rate': 'carrierRate',
-  'carrier': 'carrierName',
-  'carrier name': 'carrierName',
-  'booked carrier': 'carrierName',
-  'carrier mc': 'carrierMc',
-  'carrier mc #': 'carrierMc',
-  'invoice #': 'invoiceNumber',
-  'invoice number': 'invoiceNumber',
-  'ar invoice': 'invoiceNumber',
-  'invoice date': 'invoiceDate',
-  'invoiced at': 'invoiceDate',
-  'paid date': 'invoicePaidDate',
-  'paid at': 'invoicePaidDate',
-  'payment date': 'invoicePaidDate',
-  'invoice amount': 'invoiceAmount',
-  'ar amount': 'invoiceAmount',
-  'bill #': 'carrierBillNumber',
-  'carrier bill #': 'carrierBillNumber',
-  'ap invoice': 'carrierBillNumber',
-  'bill amount': 'carrierBillAmount',
-  'ap amount': 'carrierBillAmount',
-  'status': 'status',
-  'shipment status': 'status',
-  'load status': 'status',
-}
-
-function messageOf(err: unknown): string {
-  return err instanceof Error ? err.message : String(err)
-}
-
-function parseCsvLine(line: string): string[] {
-  const values: string[] = []
-  let current = ''
-  let inQuotes = false
-  for (let i = 0; i < line.length; i++) {
-    const char = line[i]
-    const next = line[i + 1]
-    if (char === '"') {
-      if (inQuotes && next === '"') {
-        current += '"'
-        i++
-      } else {
-        inQuotes = !inQuotes
-      }
-    } else if (char === ',' && !inQuotes) {
-      values.push(current)
-      current = ''
-    } else {
-      current += char
-    }
-  }
-  values.push(current)
-  return values
-}
-
-function parseCsv(text: string): { headers: string[]; rows: Record<string, string>[] } {
-  const lines = text.split(/\r?\n/).filter((l) => l.trim())
-  if (lines.length === 0) return { headers: [], rows: [] }
-  const headers = parseCsvLine(lines[0]).map((h) => h.trim())
-  const rows: Record<string, string>[] = []
-  for (let i = 1; i < lines.length; i++) {
-    const cells = parseCsvLine(lines[i])
-    const row: Record<string, string> = {}
-    headers.forEach((h, idx) => {
-      row[h] = cells[idx] ?? ''
-    })
-    rows.push(row)
-  }
-  return { headers, rows }
-}
-
-async function sha256Hex(buffer: ArrayBuffer): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', buffer)
-  return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, '0')).join('')
-}
-
-function guessTarget(header: string): string {
-  const norm = header.trim().toLowerCase()
-  const direct = ALIASES[norm]
-  if (direct) return direct
-  for (const field of TARGET_FIELDS) {
-    if (field.value.toLowerCase() === norm) return field.value
-  }
-  for (const field of TARGET_FIELDS) {
-    if (norm.includes(field.label.toLowerCase()) || field.label.toLowerCase().includes(norm)) return field.value
-  }
-  for (const field of TARGET_FIELDS) {
-    if (norm.includes(field.value.toLowerCase()) || field.value.toLowerCase().includes(norm)) return field.value
-  }
-  return ''
-}
-
-function formatCounts(counts: AljexImportCounts | null | undefined): string {
-  if (!counts) return 'No counts available'
-  const parts: string[] = []
-  if (counts.shipmentsCreated) parts.push(`${counts.shipmentsCreated} shipment${counts.shipmentsCreated === 1 ? '' : 's'} created`)
-  if (counts.customersCreated) parts.push(`${counts.customersCreated} customer${counts.customersCreated === 1 ? '' : 's'} created`)
-  if (counts.locationsCreated) parts.push(`${counts.locationsCreated} location${counts.locationsCreated === 1 ? '' : 's'} created`)
-  if (counts.invoicesCreated) parts.push(`${counts.invoicesCreated} invoice${counts.invoicesCreated === 1 ? '' : 's'} created`)
-  if (counts.billsCreated) parts.push(`${counts.billsCreated} bill${counts.billsCreated === 1 ? '' : 's'} created`)
-  if (counts.skipped) parts.push(`${counts.skipped} skipped`)
-  if (counts.conflicts) parts.push(`${counts.conflicts} conflict${counts.conflicts === 1 ? '' : 's'}`)
-  if (counts.errored) parts.push(`${counts.errored} error${counts.errored === 1 ? '' : 's'}`)
-  return parts.length ? parts.join(' · ') : 'Nothing changed'
-}
-
-type RowError = { row?: number; message: string }
-
-function parseErrors(job: AljexImportJob | null): RowError[] {
-  if (!job) return []
-  if (job.note) {
-    try {
-      const parsed = JSON.parse(job.note)
-      if (Array.isArray(parsed)) {
-        return parsed.slice(0, 50).map((e) => ({ row: Number(e.row) || undefined, message: String(e.message ?? e) }))
-      }
-    } catch {
-      // note is plain text — treat as a single error/summary.
-    }
-  }
-  return job.note ? [{ message: job.note }] : []
+interface PickedFile {
+  file: File
+  hash: string
+  layout: LayoutDetection
 }
 
 export function AljexImportPage() {
-  const [file, setFile] = useState<File | null>(null)
-  const [fileHash, setFileHash] = useState<string | null>(null)
-  const [headers, setHeaders] = useState<string[]>([])
-  const [rows, setRows] = useState<Record<string, string>[]>([])
-  const [mapping, setMapping] = useState<Record<string, string>>({})
   const [jobs, setJobs] = useState<AljexImportJob[]>([])
-  const [previewJob, setPreviewJob] = useState<AljexImportJob | null>(null)
+  const [job, setJob] = useState<AljexImportJob | null>(null)
+  const [step, setStep] = useState<StepIndex>(0)
   const [loading, setLoading] = useState(true)
-  const [parsing, setParsing] = useState(false)
-  const [previewing, setPreviewing] = useState(false)
-  const [running, setRunning] = useState(false)
+  const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [now, setNow] = useState(() => Date.now())
+
+  const [picked, setPicked] = useState<PickedFile | null>(null)
+  const [reading, setReading] = useState(false)
+  const [uploadFraction, setUploadFraction] = useState<number | null>(null)
+
+  const [profile, setProfile] = useState<AljexProfile>(DEFAULT_ALJEX_PROFILE)
+  const [savedProfile, setSavedProfile] = useState<AljexProfile>(DEFAULT_ALJEX_PROFILE)
+  const [profileVersion, setProfileVersion] = useState<number | null>(null)
+  const [plannedProfileVersion, setPlannedProfileVersion] = useState<number | null>(null)
+
+  const [sampleText, setSampleText] = useState('')
+  const [sample, setSample] = useState<AljexSampleRow[] | null>(null)
+  const [reveal, setReveal] = useState(false)
+
+  const [target, setTarget] = useState<'LIVE' | 'REHEARSAL'>('REHEARSAL')
+  const [tag, setTag] = useState('')
+
+  const jobRef = useRef<AljexImportJob | null>(null)
+  useEffect(() => { jobRef.current = job }, [job])
+
+  const adopt = useCallback((next: AljexImportJob) => {
+    setJob(next)
+    setJobs((prev) => [next, ...prev.filter((j) => j.id !== next.id)])
+  }, [])
 
   useEffect(() => {
     let cancelled = false
-    listAljexImportJobs()
-      .then((jobRows) => {
-        if (cancelled) return
-        setJobs(jobRows)
-      })
-      .catch((err) => {
-        if (cancelled) return
-        setError(messageOf(err))
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
-    return () => {
-      cancelled = true
-    }
+    listAljexImports()
+      .then((rows) => { if (!cancelled) setJobs(rows) })
+      .catch((e) => { if (!cancelled) setError(messageOf(e)) })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
   }, [])
 
-  const handleFileSelect = async (selected: File | undefined) => {
-    if (!selected) return
-    setParsing(true)
+  // A worker is moving the job: poll it. Stalled detection needs a clock that ticks even when nothing else does.
+  useEffect(() => {
+    const tick = setInterval(() => setNow(Date.now()), 5000)
+    return () => clearInterval(tick)
+  }, [])
+  const working = job != null && WORKING_STATUSES.includes(job.status)
+  const jobId = job?.id ?? null
+  useEffect(() => {
+    if (!working || jobId == null) return undefined
+    let cancelled = false
+    const poll = setInterval(() => {
+      getAljexImport(jobId)
+        .then((next) => { if (!cancelled && jobRef.current?.id === next.id) adopt(next) })
+        .catch((e) => { if (!cancelled) setError(messageOf(e)) })
+    }, POLL_MS)
+    return () => { cancelled = true; clearInterval(poll) }
+  }, [working, jobId, adopt])
+
+  // The profile belongs to the layout, not the run: load it whenever a job with a layout is open.
+  const layoutId = job?.layoutId ?? picked?.layout.layoutId ?? null
+  useEffect(() => {
+    if (layoutId == null) return undefined
+    let cancelled = false
+    getAljexProfile(layoutId)
+      .then((row) => {
+        if (cancelled) return
+        const body = row ? ({ ...DEFAULT_ALJEX_PROFILE, ...(row.profile as unknown as Partial<AljexProfile>) } as AljexProfile) : DEFAULT_ALJEX_PROFILE
+        setProfile(body)
+        setSavedProfile(body)
+        setProfileVersion(row?.version ?? null)
+      })
+      .catch((e) => { if (!cancelled) setError(messageOf(e)) })
+    return () => { cancelled = true }
+  }, [layoutId])
+
+  const run = useCallback(async (name: string, fn: () => Promise<void>) => {
+    setBusy(name)
     setError(null)
-    setPreviewJob(null)
-    try {
-      const [text, hash] = await Promise.all([selected.text(), selected.arrayBuffer().then(sha256Hex)])
-      const parsed = parseCsv(text)
-      setFile(selected)
-      setFileHash(hash)
-      setHeaders(parsed.headers)
-      setRows(parsed.rows)
-      const initial: Record<string, string> = {}
-      for (const h of parsed.headers) {
-        initial[h] = guessTarget(h)
-      }
-      setMapping(initial)
-    } catch (err) {
-      setError(messageOf(err))
-    } finally {
-      setParsing(false)
-    }
-  }
+    try { await fn() } catch (e) { setError(messageOf(e)) } finally { setBusy(null) }
+  }, [])
 
-  const handleUpload = async (): Promise<string> => {
-    if (!file || !fileHash) throw new Error('No file selected.')
-    const safeName = file.name.replace(/[^\w.-]+/g, '_').slice(-80) || 'sheet.csv'
-    const key = `imports/aljex/${fileHash}-${Date.now()}-${safeName}`
-    await uploadData({ path: key, data: file, options: { contentType: file.type || 'text/csv' } }).result
-    return key
-  }
-
-  const mappingToSend = useMemo(() => {
-    return Object.fromEntries(Object.entries(mapping).filter(([, v]) => v))
-  }, [mapping])
-
-  const handlePreview = async () => {
-    if (!fileHash || !file) { setError('Upload a file first.'); return }
-    setPreviewing(true)
+  const pick = async (file: File | undefined) => {
+    if (!file) return
+    setReading(true)
     setError(null)
+    setPicked(null)
     try {
-      const s3Key = await handleUpload()
-      const result = await previewAljexImport({
-        s3Key,
-        fileName: file.name,
-        fileHash,
-        mapping: mappingToSend,
-      })
-      setPreviewJob(result)
-      setJobs((prev) => {
-        const filtered = prev.filter((j) => j.id !== result.id)
-        return [result, ...filtered]
-      })
-      toast.success('Preview ready')
-    } catch (err) {
-      setError(messageOf(err))
+      const [head, hash] = await Promise.all([file.slice(0, HEADER_BYTES).text(), file.arrayBuffer().then(sha256Hex)])
+      setPicked({ file, hash, layout: detectLayout(parseHeaderRecord(head)) })
+    } catch (e) {
+      setError(messageOf(e))
     } finally {
-      setPreviewing(false)
+      setReading(false)
     }
   }
 
-  const handleRun = async () => {
-    if (!fileHash || !file || !previewJob) { setError('Run preview first.'); return }
-    setRunning(true)
+  const upload = () => run('upload', async () => {
+    if (!picked) return
+    const { file, hash, layout } = picked
+    const { job: created, uploadUrl } = await prepareAljexImport({ fileName: file.name, fileHash: hash, sizeBytes: file.size, headerCount: layout.headerCount })
+    adopt(created)
+    setUploadFraction(0)
+    await putWithProgress(uploadUrl, file, setUploadFraction)
+    const staging = await stageAljexImport(created.id)
+    adopt(staging)
+    setUploadFraction(null)
+    toast.success('Uploaded. Staging the file…')
+  })
+
+  const unmapped = useMemo(() => unmappedFor(profile, job?.stage), [profile, job?.stage])
+  const blocking = blockingOf(unmapped)
+  const dirty = JSON.stringify(profile) !== JSON.stringify(savedProfile)
+  const furthest = furthestStep(job)
+
+  const saveProfile = () => run('profile', async () => {
+    if (!job) return
+    const row = await saveAljexProfile({
+      layoutId: job.layoutId ?? profile.layoutId,
+      headerCount: picked?.layout.headerCount,
+      profile: profile as unknown as AljexMappingProfileBody,
+      expectedVersion: profileVersion,
+    })
+    const body = { ...DEFAULT_ALJEX_PROFILE, ...(row.profile as unknown as Partial<AljexProfile>) } as AljexProfile
+    setSavedProfile(body)
+    setProfile(body)
+    setProfileVersion(row.version)
+    toast.success(`Profile saved (version ${row.version})`)
+  })
+
+  const planReason = planBlockReason({ job, blockingUnmapped: blocking.length, profileDirty: dirty })
+  const plan = () => run('plan', async () => {
+    if (!job) return
+    const next = await planAljexImport({ jobId: job.id, options: { expectedRows: job.stage?.rows ?? null } })
+    adopt(next)
+    setPlannedProfileVersion(profileVersion)
+    setStep(3)
+  })
+
+  const synthetic = job?.synthetic === true || job?.options?.synthetic === true
+  const applyReason = applyBlockReason({
+    job, blockingUnmapped: blocking.length, profileDirty: dirty,
+    plannedProfileVersion, savedProfileVersion: profileVersion, target, tag, synthetic, rehearsalGate: job?.rehearsalGate,
+  })
+  const apply = () => run('apply', async () => {
+    if (!job) return
+    const options = target === 'LIVE'
+      ? { target, liveTag: tag.trim(), synthetic, expectedRows: job.stage?.rows ?? null }
+      : { target, targetTag: tag.trim(), synthetic, expectedRows: job.stage?.rows ?? null }
+    adopt(await applyAljexImport({ jobId: job.id, options }))
+  })
+  const control = (fn: (id: string) => Promise<AljexImportJob>, name: string) => () => run(name, async () => {
+    if (job) adopt(await fn(job.id))
+  })
+
+  const loadSample = (unmask: boolean) => run('sample', async () => {
+    if (!job) return
+    const rows = [...new Set(sampleText.split(/[\s,]+/).map(Number).filter((n) => Number.isInteger(n) && n > 0))].slice(0, 5)
+    setSample(rows.length ? await sampleAljexImport(job.id, rows, unmask) : [])
+  })
+
+  const open = (next: AljexImportJob) => {
+    setJob(next)
+    setStep(naturalStep(next))
+    setSample(null)
+    setPlannedProfileVersion(null)
     setError(null)
-    try {
-      const s3Key = await handleUpload()
-      const result = await applyAljexImport({
-        s3Key,
-        fileName: file.name,
-        fileHash,
-        mapping: mappingToSend,
-      })
-      setPreviewJob(result)
-      setJobs((prev) => {
-        const filtered = prev.filter((j) => j.id !== result.id)
-        return [result, ...filtered]
-      })
-      toast.success('Import finished')
-    } catch (err) {
-      setError(messageOf(err))
-    } finally {
-      setRunning(false)
-    }
+    // The list row can be stale; fetch the job with its stage/plan/gate attached.
+    void getAljexImport(next.id).then(adopt).catch((e) => setError(messageOf(e)))
   }
 
-  const mappingRows = useMemo(() => headers.map((h) => ({ header: h, target: mapping[h] ?? '' })), [headers, mapping])
+  if (loading) return <Loading />
 
-  const mappingColumns: Array<ColumnDef<{ header: string; target: string }>> = [
-    { key: 'header', header: 'Sheet header', render: (row) => row.header },
-    {
-      key: 'target',
-      header: 'Target field',
-      render: (row) => (
-        <TmsSelect
-          value={row.target}
-          onChange={(e) => setMapping((prev) => ({ ...prev, [row.header]: e.target.value }))}
-          options={[{ value: '', label: '— ignore —' }, ...TARGET_FIELDS]}
-        />
-      ),
-    },
-  ]
-
-  const statusTone = (status: AljexImportJob['status']) => {
-    switch (status) {
-      case 'APPLIED': return 'green'
-      case 'FAILED': return 'red'
-      case 'DRY_RUN': return 'turquoise'
-      default: return 'gray'
-    }
-  }
-
-  const jobColumns: Array<ColumnDef<AljexImportJob>> = [
-    { key: 'status', header: 'Status', width: 100, render: (row) => <TmsBadge tone={statusTone(row.status)}>{row.status}</TmsBadge> },
-    { key: 'fileName', header: 'File', render: (row) => row.fileName ?? '—' },
-    { key: 'rowCount', header: 'Rows', width: 70, render: (row) => String(row.rowCount ?? '—') },
-    { key: 'result', header: 'Result', render: (row) => formatCounts(row.counts) },
-    { key: 'appliedAt', header: 'Applied', width: 160, render: (row) => row.appliedAt ? new Date(row.appliedAt).toLocaleString() : '—' },
-  ]
-
-  const errors = parseErrors(previewJob)
-
-  if (loading) {
-    return (
-      <TmsCard>
-        <Loading />
-      </TmsCard>
-    )
-  }
+  const stage = job?.stage ?? null
+  const sampleColumns = sample && sample.length ? [...new Set(sample.flatMap((r) => Object.keys(r.fields)))] : []
 
   return (
     <div style={{ display: 'grid', gap: 16 }}>
       <SettingsCard
         icon={FileUp}
         title="Import from Aljex"
-        description="Upload an Aljex export CSV, map its columns, preview the dry-run result, then run the import."
-        actions={
-          <TmsButton variant="primary" onClick={() => void handlePreview()} disabled={previewing || rows.length === 0}>
-            <RefreshCw size={14} /> {previewing ? 'Previewing…' : 'Preview / dry-run'}
-          </TmsButton>
-        }
+        description="Upload the Aljex full export, check how its values map, review, plan, then apply to a rehearsal copy or live. Nothing is written until Apply."
       >
         <Stack>
           {error ? <ErrorText>{error}</ErrorText> : null}
+          <ol className="tms-stepper" style={{ display: 'flex', gap: 8, listStyle: 'none', padding: 0, margin: 0, flexWrap: 'wrap' }} aria-label="Import steps">
+            {STEPS.map((label, i) => (
+              <li key={label}>
+                <TmsButton
+                  size="sm"
+                  variant={i === step ? 'primary' : undefined}
+                  disabled={i > Math.max(furthest, 0) && i !== 0}
+                  aria-current={i === step ? 'step' : undefined}
+                  onClick={() => setStep(i as StepIndex)}
+                >
+                  {i + 1}. {label}
+                </TmsButton>
+              </li>
+            ))}
+          </ol>
 
-          <Panel>
-            <GroupLabel>File</GroupLabel>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-              <TmsButton size="sm" onClick={() => document.getElementById('aljex-import-file')?.click()} disabled={parsing}>
-                <Upload size={14} /> {parsing ? 'Reading…' : 'Choose CSV'}
-              </TmsButton>
-              <span className="tms-muted">{file ? file.name : 'No file selected'}</span>
-              <input
-                id="aljex-import-file"
-                type="file"
-                accept=".csv,text/csv"
-                style={{ display: 'none' }}
-                onChange={(e) => { void handleFileSelect(e.target.files?.[0]); e.target.value = '' }}
-              />
-            </div>
-            {fileHash ? <p className="tms-field-hint">SHA-256: {fileHash.slice(0, 16)}…</p> : null}
-          </Panel>
-
-          {headers.length > 0 ? (
+          {step === 0 ? (
             <Panel>
-              <GroupLabel>Column mapping</GroupLabel>
-              <TmsTable
-                columns={mappingColumns}
-                rows={mappingRows}
-                rowKey={(row) => row.header}
-                empty={<span className="tms-muted">No columns found.</span>}
-              />
-              <p className="tms-field-hint">Select a target field for each sheet column, or leave it as “ignore”.</p>
-            </Panel>
-          ) : null}
-
-          {rows.length > 0 ? (
-            <Panel>
-              <GroupLabel>First rows</GroupLabel>
-              <div style={{ overflowX: 'auto' }}>
-                <table className="tms-table">
-                  <thead>
-                    <tr>
-                      {headers.map((h) => <th key={h}>{h}</th>)}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rows.slice(0, 10).map((row, i) => (
-                      <tr key={i}>
-                        {headers.map((h) => <td key={h}>{row[h]}</td>)}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <GroupLabel>File</GroupLabel>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                <TmsButton size="sm" disabled={reading} onClick={() => document.getElementById('aljex-import-file')?.click()}>
+                  <Upload size={14} /> {reading ? 'Reading…' : 'Choose CSV'}
+                </TmsButton>
+                <span className="tms-muted">{picked ? picked.file.name : 'No file selected'}</span>
+                <input
+                  id="aljex-import-file"
+                  aria-label="Aljex export file"
+                  type="file"
+                  accept=".csv,text/csv"
+                  style={{ display: 'none' }}
+                  onChange={(e) => { void pick(e.target.files?.[0]); e.target.value = '' }}
+                />
               </div>
-            </Panel>
-          ) : null}
-
-          {previewJob ? (
-            <Panel style={{ background: 'var(--tms-bg-elevated)' }}>
-              <GroupLabel>Preview result · {previewJob.id}</GroupLabel>
-              <p className="tms-field-hint">{formatCounts(previewJob.counts)}</p>
-              {errors.length > 0 ? (
-                <div style={{ maxHeight: 240, overflow: 'auto', border: '1px solid var(--tms-border)', borderRadius: 'var(--tms-radius)', padding: 8 }}>
-                  {errors.map((e, i) => (
-                    <p key={i} className="tms-field-error" style={{ margin: '0 0 4px' }}>
-                      {e.row != null ? `Row ${e.row}: ` : ''}{e.message}
-                    </p>
-                  ))}
+              {picked ? (
+                <>
+                  <p className="tms-field-hint" data-testid="file-hash">SHA-256 {picked.hash.slice(0, 16)}… · {(picked.file.size / 1024 / 1024).toFixed(1)} MB</p>
+                  <p data-testid="layout-detection">
+                    <TmsBadge tone={picked.layout.matches ? 'green' : 'red'}>{picked.layout.matches ? 'Layout recognised' : 'Layout not recognised'}</TmsBadge>{' '}
+                    Aljex full export · {picked.layout.headerCount} columns ·{' '}
+                    {picked.layout.matches
+                      ? 'matches the saved layout'
+                      : `does not match the saved layout (${picked.layout.expectedCount} columns expected${picked.layout.mismatchedColumns.length ? `; columns ${picked.layout.mismatchedColumns.join(', ')} differ` : ''})`}
+                  </p>
+                  <TmsButton variant="primary" disabled={!picked.layout.matches || busy != null} onClick={() => void upload()}>
+                    {busy === 'upload' ? 'Uploading…' : 'Upload and stage'}
+                  </TmsButton>
+                  {!picked.layout.matches ? <Hint>The importer only reads the layout it knows. Export the full Aljex file again, or ask for a new layout profile.</Hint> : null}
+                </>
+              ) : null}
+              {uploadFraction != null ? (
+                <div role="progressbar" aria-label="Upload progress" aria-valuenow={Math.round(uploadFraction * 100)} aria-valuemin={0} aria-valuemax={100} style={{ height: 8, background: 'var(--tms-border)', borderRadius: 4, marginTop: 8 }}>
+                  <div style={{ width: `${uploadFraction * 100}%`, height: '100%', background: 'var(--tms-primary)' }} />
                 </div>
               ) : null}
-              <TmsButton
-                variant="primary"
-                onClick={() => void handleRun()}
-                disabled={running || previewJob.status === 'FAILED'}
-              >
-                <Play size={14} /> {running ? 'Running…' : 'Run import'}
-              </TmsButton>
+              {job?.status === 'STAGING' ? <TmsAlert tone="blue">Staging {job.fileName ?? 'the file'}…</TmsAlert> : null}
+              {job?.status === 'FAILED' && job.error ? <TmsAlert tone="red" title="Staging failed">{job.error}</TmsAlert> : null}
             </Panel>
           ) : null}
+
+          {step === 1 && job ? (
+            <>
+              {blocking.length > 0 ? (
+                <TmsAlert tone="red" title={`${blocking.length} unmapped value${blocking.length === 1 ? '' : 's'} block the import`}>
+                  Map every red row below, then save the profile.
+                </TmsAlert>
+              ) : null}
+              <AljexProfileEditor profile={profile} onChange={setProfile} stage={stage} unmapped={unmapped} disabled={busy != null} />
+              <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                <TmsButton variant="primary" disabled={!dirty || busy != null} onClick={() => void saveProfile()}>
+                  {busy === 'profile' ? 'Saving…' : 'Save profile'}
+                </TmsButton>
+                <span className="tms-muted" data-testid="profile-version">
+                  {dirty ? 'Unsaved changes' : profileVersion != null ? `Saved · version ${profileVersion}` : 'Defaults (not saved yet)'}
+                </span>
+                <TmsButton disabled={blocking.length > 0 || dirty} onClick={() => setStep(2)}>Continue to Review</TmsButton>
+              </div>
+            </>
+          ) : null}
+
+          {step === 2 && job ? (
+            <Panel>
+              <GroupLabel>What the file contains</GroupLabel>
+              {stage ? (
+                <table className="tms-table" data-testid="stage-summary">
+                  <tbody>
+                    {([
+                      ['Rows', stage.rows], ['Loads', stage.loads], ['Memos (DEBT / CRED)', stage.memos], ['Junk dates', stage.junkDates],
+                      ['Duplicate PROs', stage.duplicatePros], ['Ragged rows', stage.raggedRows], ['Parse errors', stage.parseErrors],
+                    ] as const).map(([label, n]) => <tr key={label}><td>{label}</td><td>{n.toLocaleString('en-US')}</td></tr>)}
+                  </tbody>
+                </table>
+              ) : <p className="tms-muted">No staging summary yet.</p>}
+              <GroupLabel>Spot-check up to five rows</GroupLabel>
+              <Hint>Enter data-row numbers. Only the fields the importer maps are returned, and values are masked until you reveal them.</Hint>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '8px 0', flexWrap: 'wrap' }}>
+                <input className="tms-input" aria-label="Sample row numbers" placeholder="e.g. 12, 400, 8001" value={sampleText} onChange={(e) => setSampleText(e.target.value)} />
+                <TmsButton size="sm" disabled={busy != null || sampleText.trim() === ''} onClick={() => void loadSample(reveal)}>Show mapped fields</TmsButton>
+                <label>
+                  <input
+                    type="checkbox"
+                    aria-label="Reveal sample values"
+                    checked={reveal}
+                    onChange={(e) => { setReveal(e.target.checked); if (sample != null) void loadSample(e.target.checked) }}
+                  />{' '}
+                  Reveal values (fetched unmasked from the server)
+                </label>
+              </div>
+              {sample && sample.length > 0 ? (
+                <div style={{ overflowX: 'auto' }}>
+                  <table className="tms-table" data-testid="sample-table">
+                    <thead><tr><th>Row</th>{sampleColumns.map((c) => <th key={c}>{c}</th>)}</tr></thead>
+                    <tbody>
+                      {sample.map((r) => (
+                        <tr key={r.rowNumber}><td>{r.rowNumber}</td>{sampleColumns.map((c) => <td key={c}>{sampleCell(c, r.fields[c])}</td>)}</tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : sample ? <p className="tms-muted">No such rows.</p> : null}
+              <div style={{ marginTop: 12 }}><TmsButton variant="primary" onClick={() => setStep(3)}>Continue to Plan</TmsButton></div>
+            </Panel>
+          ) : null}
+
+          {step === 3 && job ? (
+            <Panel>
+              <GroupLabel>Plan (dry run: reads the target, writes nothing)</GroupLabel>
+              <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                <TmsButton variant="primary" disabled={planReason != null || busy != null || job.status === 'PLANNING'} onClick={() => void plan()}>
+                  {job.status === 'PLANNING' ? 'Planning…' : job.status === 'PLANNED' ? 'Plan again' : 'Plan'}
+                </TmsButton>
+                {planReason ? <span className="tms-field-hint" data-testid="plan-block-reason">{planReason}</span> : null}
+              </div>
+              {job.plan ? (
+                <div style={{ marginTop: 12 }}>
+                  <p data-testid="plan-classes">
+                    {(['CREATE', 'ENRICH', 'UNLINKED', 'CONFLICT'] as const).map((k) => (
+                      <span key={k} style={{ marginRight: 12 }}><TmsBadge tone={k === 'CONFLICT' && job.plan!.classes[k] > 0 ? 'red' : 'gray'}>{k}</TmsBadge> {job.plan!.classes[k].toLocaleString('en-US')}</span>
+                    ))}
+                  </p>
+                  {job.plan.warnings.length > 0 ? (
+                    <TmsAlert tone="orange" title="Warnings"><ul style={{ margin: 0, paddingLeft: 18 }}>{job.plan.warnings.map((w) => <li key={w}>{w}</li>)}</ul></TmsAlert>
+                  ) : null}
+                  {Object.keys(job.entityCounts ?? {}).length > 0 ? (
+                    <table className="tms-table">
+                      <thead><tr><th>Entity</th><th>Staged</th><th>Create</th><th>Match</th><th>Enrich</th><th>Skip</th><th>Conflict</th><th>Error</th></tr></thead>
+                      <tbody>
+                        {Object.entries(job.entityCounts ?? {}).map(([entity, c]) => (
+                          <tr key={entity}><td>{entity}</td><td>{c.staged}</td><td>{c.created}</td><td>{c.matched}</td><td>{c.enriched}</td><td>{c.skipped}</td><td>{c.conflicts}</td><td>{c.errors}</td></tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : null}
+                  {job.status === 'PLANNED' ? <div style={{ marginTop: 12 }}><TmsButton variant="primary" onClick={() => setStep(4)}>Continue to Apply</TmsButton></div> : null}
+                </div>
+              ) : null}
+            </Panel>
+          ) : null}
+
+          {step === 4 && job ? (
+            <AljexApplyPanel
+              job={job} now={now} target={target} tag={tag} onTarget={setTarget} onTag={setTag}
+              blockReason={applyReason} rehearsalGate={job.rehearsalGate} synthetic={synthetic} busy={busy != null}
+              onApply={() => void apply()} onPause={() => void control(pauseAljexImport, 'pause')()}
+              onResume={() => void control(resumeAljexImport, 'resume')()} onCancel={() => void control(cancelAljexImport, 'cancel')()}
+            />
+          ) : null}
+
+          {step === 5 && job ? <AljexReconcilePanel job={job} onJob={adopt} /> : null}
         </Stack>
       </SettingsCard>
 
-      <TmsCard title="Recent Aljex import jobs">
-        <TmsTable
-          columns={jobColumns}
-          rows={jobs}
-          rowKey={(row) => row.id}
-          empty={<span className="tms-muted">No Aljex import jobs yet.</span>}
-        />
-      </TmsCard>
+      <AljexJobList jobs={jobs} selectedId={job?.id ?? null} now={now} onOpen={open} />
     </div>
   )
 }

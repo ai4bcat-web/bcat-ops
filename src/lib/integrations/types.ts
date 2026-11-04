@@ -166,6 +166,7 @@ export interface ValidateHow {
     | 'TWILIO_ACCOUNT'
     | 'QBO_COMPANY_INFO'
     | 'HUBSPOT_CONTACTS'
+    | 'MCP_TOKEN'
     | 'PAYCHEX_TOKEN'
     | 'BRIDGE_LAST_INBOUND'
     | 'OPENAPI_SELF'

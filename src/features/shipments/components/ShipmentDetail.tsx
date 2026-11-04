@@ -37,6 +37,7 @@ import { PROVIDERS, isApplicable, liveCapabilitiesOf } from '@/lib/integrations/
 import { badgeOf } from '@/lib/integrations/health'
 import type { Capability, IntegrationRecord, ProviderDescriptor } from '@/lib/integrations/types'
 import type { CreditSummary } from '@/lib/customerCredit'
+import { aljexCodeItems, referenceLabel, shipmentFlagLabels } from '../aljexDisplay'
 import { StopCards } from './StopCards'
 import { FinancialLines } from './FinancialLines'
 import { BuildingBanner } from './BuildingBanner'
@@ -319,9 +320,22 @@ export function ShipmentDetail(props: ShipmentDetailProps) {
                 <p className="tms-field-label">References</p>
                 <div className="mt-1 flex flex-wrap gap-1">
                   {order?.references?.map((r, i) => (
-                    <TmsBadge key={`${r.code}-${i}`} tone="gray">{r.label || r.code}: {r.value}</TmsBadge>
+                    <TmsBadge key={`${r.code}-${i}`} tone="gray">{referenceLabel(r)}: {r.value}</TmsBadge>
                   ))}
                 </div>
+              </div>
+            )}
+            {shipmentFlagLabels(shipment.osd, order?.specialRequirements).length > 0 && (
+              <div className="mt-3" data-testid="shipment-flags">
+                <p className="tms-field-label">Flags</p>
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {shipmentFlagLabels(shipment.osd, order?.specialRequirements).map((f) => <TmsBadge key={f} tone="orange">{f}</TmsBadge>)}
+                </div>
+              </div>
+            )}
+            {aljexCodeItems(shipment).length > 0 && (
+              <div className="mt-3" data-testid="aljex-codes">
+                <TmsMetaList columns={4} items={aljexCodeItems(shipment)} />
               </div>
             )}
             {(order?.freight?.length ?? 0) > 0 && (

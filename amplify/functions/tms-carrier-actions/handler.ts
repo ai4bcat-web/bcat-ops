@@ -320,6 +320,14 @@ function optionalIsoDate(value: unknown, label: string): string | null {
   return text
 }
 
+/** A `YYYY-MM-DD` calendar date, as the Aljex compliance expiries are stored. */
+function optionalDateOnly(value: unknown, label: string): string | null {
+  const text = optionalString(value, 10)
+  if (text == null) return null
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text) || Number.isNaN(Date.parse(text))) throw new Error(`${label} must be YYYY-MM-DD`)
+  return text
+}
+
 function optionalAddress(value: unknown): Row | null {
   const obj = optionalJsonObject(value)
   if (obj == null) return null
@@ -737,6 +745,11 @@ async function upsertCarrier(input: Row, caller: Caller): Promise<Row> {
     highwayStatus: optionalEnumStrict(input.highwayStatus, COMPLIANCE_CHECK_STATUSES, 'highwayStatus'),
     rmisStatus: optionalEnumStrict(input.rmisStatus, COMPLIANCE_CHECK_STATUSES, 'rmisStatus'),
     mcpStatus: optionalString(input.mcpStatus, 100),
+    // Aljex Carrier CA Intrastate / TX PUC (YYYY-MM-DD expiries).
+    caIntrastateNumber: optionalString(input.caIntrastateNumber, 50),
+    caIntrastateExpiresAt: optionalDateOnly(input.caIntrastateExpiresAt, 'caIntrastateExpiresAt'),
+    txPucNumber: optionalString(input.txPucNumber, 50),
+    txPucExpiresAt: optionalDateOnly(input.txPucExpiresAt, 'txPucExpiresAt'),
 
     accountOwnerIds: optionalStringArray(input.accountOwnerIds, 100),
     teamKey: optionalString(input.teamKey, 100),

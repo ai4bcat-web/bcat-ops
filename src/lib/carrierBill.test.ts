@@ -380,6 +380,14 @@ describe('approvalReadiness', () => {
     expect(tonu.warnings).toEqual([])
   })
 
+  it('does not ask for a signed rate con on imported Aljex history, but still blocks a live unsigned one', () => {
+    const unsigned = loadCarrier({ rateConStatus: 'SENT' })
+    const history = approvalReadiness(approvalInput({ loadCarrier: unsigned, gate: { missing: [], legacy: true } }))
+    expect(history).toEqual({ blocks: [], warnings: [] })
+    const live = approvalReadiness(approvalInput({ loadCarrier: unsigned, gate: { missing: [] } }))
+    expect(live.blocks.join(' ')).toMatch(/rate confirmation/)
+  })
+
   it('turns an undelivered load into a warning when the bill was recorded early', () => {
     const { blocks, warnings } = approvalReadiness(
       approvalInput({

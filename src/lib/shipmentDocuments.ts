@@ -414,6 +414,11 @@ export interface DocGateInput {
   scope: DocGateScope
   /** CARRIER scope: the assignment being evaluated. */
   loadCarrierId?: string | null
+  /**
+   * Imported Aljex history (DECIDED-5): its paperwork stays in the Aljex archive, so
+   * the gate reads as satisfied in both scopes. The caller passes the shipment's flag.
+   */
+  legacyImported?: boolean | null
 }
 
 /**
@@ -423,6 +428,9 @@ export interface DocGateInput {
  * truck, paperwork is a fact about billing.
  */
 export function evaluateDocGate(input: DocGateInput): DocGateResult {
+  if (input.legacyImported === true) {
+    return { required: [], present: [], missing: [], ready: true, unrecognised: [], legacy: true }
+  }
   const { types: required, unrecognised } =
     input.scope === 'CARRIER'
       ? normalizeRequiredDocTypes(

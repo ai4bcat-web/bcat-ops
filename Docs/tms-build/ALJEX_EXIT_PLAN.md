@@ -56,6 +56,7 @@ Aljex is switched off.
 - Exit: 1k-row Aljex sample imports cleanly with counts matching the file.
 
 **Phase 1 — Full historical import rehearsal on dev (agent + Ryne, ~2-3 days)**
+- First refresh dev from production (`devStack.mjs copy-data` / `copy-files`, read-only on prod) so the import dedupes against today's real loads; refresh again at the end so Ryne reviews current data (Ryne, 2026-11-03).
 - Ryne supplies the full Aljex export (loads, customers, carriers, locations, invoices, bills, payments;
   documents if available).
 - Import into a dev table copy; reconcile: shipment count, open AR total, open AP total, factoring queue,
@@ -92,6 +93,15 @@ Aljex is switched off.
 - QuickBooks: **no** for now. AR/AP ledger lives in BCAT Ops; provide CSV export for the accountant.
 - Cutoff/freeze happens on a weekend. Date TBD after Phase 1 passes.
 - Aljex export received 2026-11-03: `/Users/adminoid/aljex-export/aljex-full-export-2026-11-03.csv` (outside repo, PII).
+- Blank-status Aljex rows (403): import as VOIDED history.
+- Documents: only new loads carry documents in BCAT Ops; Aljex stays read-only as the archive for old loads.
+- Invoice numbers: new series at cutover starting at **20000**. Imported invoices keep their Aljex numbers.
+- Carriers: import only carriers used in the last 12 months (by Covered/Ship Date); older ones stay out.
+- MyCarrierPackets: Ryne has created an integration login. Credentials are entered by Ryne on dev at
+  Integrations → MyCarrierPackets (never in the repo or chat logs). Integration guide:
+  https://mycarrierpackets.com/IntegrationGuide
+- Rev divisions: **Ivan Cartage, BCAT Logistics, Auto Shipping, Owner Operators**. Intake e-mail per division: TBD.
+- Open: users/roles, commissions, carrier payment method, customer terms, SES production, Twilio number for texts.
 
 ## 6. What Ryne supplies
 1. Full Aljex export (all entities, all history) and, if possible, the documents archive. Column headers as exported.

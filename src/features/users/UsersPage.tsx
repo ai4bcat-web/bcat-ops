@@ -41,6 +41,7 @@ import {
 import type { ClaimKey, OwnershipDivisionRecord, RoleKey, Team, UserProfileRecord, UserStatus } from '@/types/tms'
 import { toast } from 'sonner'
 import { UserOverview } from './overview/UserOverview'
+import { AljexCodeMapCard } from './AljexCodeMapCard'
 
 const PAGE_OPTIONS = pageOptions()
 const TOTAL_PAGES = PAGE_OPTIONS.length
@@ -869,6 +870,8 @@ export function UsersPage() {
           ) : null}
         </div>
       </div>
+
+      <AljexCodeMapCard />
     </div>
   )
 }

@@ -24,6 +24,8 @@ export interface ShipmentDocumentsContext {
   bundle?: Pick<ShipmentBundle, 'orders' | 'loads' | 'loadCarriers'> | null
   customer?: Pick<CustomerRecord, 'requiredDocsForInvoice'> | null
   settings?: Pick<TmsSettings, 'defaultRequiredDocs' | 'requiredCarrierUploadTypes'> | null
+  /** The shipment is imported Aljex history: its paperwork lives in the Aljex archive. */
+  legacyImported?: boolean | null
   enabled?: boolean
 }
 
@@ -49,6 +51,7 @@ export function useShipmentDocuments(
   const bundle = ctx?.bundle ?? null
   const customer = ctx?.customer ?? null
   const settings = ctx?.settings ?? null
+  const legacyImported = ctx?.legacyImported === true
   const [documents, setDocuments] = useState<ShipmentDocumentRecord[]>([])
   // A disabled caller (a drawer with no shipment open) never fetches, so the hook
   // reports "not loading" from the start rather than writing state inside the effect.
@@ -93,10 +96,11 @@ export function useShipmentDocuments(
         customer,
         settings,
         scope: 'CUSTOMER',
+        legacyImported,
       })
     }
     return gates
-  }, [bundle, documents, customer, settings])
+  }, [bundle, documents, customer, settings, legacyImported])
 
   const carrierGates = useMemo(() => {
     const gates: Record<string, DocGateResult> = {}
@@ -107,11 +111,12 @@ export function useShipmentDocuments(
         documents,
         settings,
         scope: 'CARRIER',
+        legacyImported,
         loadCarrierId: assignment.id,
       })
     }
     return gates
-  }, [bundle, documents, settings])
+  }, [bundle, documents, settings, legacyImported])
 
   const refresh = useCallback(async () => { setLoading(true); await load() }, [load])
 

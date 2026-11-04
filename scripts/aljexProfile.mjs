@@ -240,6 +240,8 @@ export function createProfiler(headers) {
   const agg = { accLabel: new Map(), accLabelSum: new Map(), chargeDesc7p: new Map(), chargeDesc7pSum: new Map(), projType2p: new Map(), projType2pSum: new Map(), paidGl: new Map(), paidGlSum: new Map(), commissionSource: new Map() };
   const batches = { arCheck: new Set(), arCheckCustDate: new Set(), arCheckCustomers: new Map(), arLines: 0, apCheck: new Set(), apCheckCarrierDate: new Set(), apCheckCarriers: new Map(), apLines: 0, apLinesNoCarrierId: 0 };
   const apx = { eq: 0, gt: 0, gtSum: 0, lt: 0, ltSum: 0, gtDelivered: 0, gtDeliveredSum: 0, gtVoidOrOpen: 0, noCarrierPaidZero: 0 };
+  const memoLink = { refFill: 0, postedInfoFill: 0, customerIdFill: 0, descFill: 0, custCredLoads: new Map(), custCredMemo: new Map(), custDebLoads: new Map(), custDebMemo: new Map(), refs: new Set(), refsCust: new Map(), postedRefs: new Set() };
+  const carrierRefVsDriver = { either: 0, equal: 0 };
   const proHash = new Map();
   let dupIdentical = 0;
   let dupDiffering = 0;
@@ -511,6 +513,14 @@ export function createProfiler(headers) {
       memo.rows++;
       const m = (memoByType[tos] ??= { rows: 0, credits: 0, debits: 0, lh: 0, invoice: 0, bal: 0, payments: 0, extSum: 0, blankStatus: 0, blankMode: 0, noCarrierId: 0, noPickup: 0, noConsignee: 0, withShipDate: 0, withInvoiceDate: 0, codes: new Map() });
       m.rows++;
+      if (get(r, 'referenceNo')) {
+        memoLink.refFill++;
+        memoLink.refs.add(get(r, 'referenceNo'));
+      }
+      if (get(r, 'postedInfo')) memoLink.postedInfoFill++;
+      if (custId0) memoLink.customerIdFill++;
+      if (get(r, 'commodity')) memoLink.descFill++;
+      bump(tos === 'CRED' ? memoLink.custCredMemo : memoLink.custDebMemo, custId0, tos === 'CRED' ? -n0(invC) : n0(invC));
       m.credits += n0(creditsC);
       m.debits += n0(debitsC);
       m.lh += n0(lhC);
@@ -531,6 +541,8 @@ export function createProfiler(headers) {
       });
     } else {
       loads.rows++;
+      if (n0(creditsC)) bump(memoLink.custCredLoads, custId0, n0(creditsC));
+      if (n0(debitsC)) bump(memoLink.custDebLoads, custId0, n0(debitsC));
       loads.credits += n0(creditsC);
       loads.debits += n0(debitsC);
       loads.invoice += n0(invC);
@@ -660,6 +672,11 @@ export function createProfiler(headers) {
     else carrierIdent.rowsNoCarrierAtAll++;
     if (carName) sets.carrierName.add(carName);
     if (driver) sets.driverName.add(driver);
+    const cref = norm(get(r, 'carrierRefNo'));
+    if (cref || driver) {
+      carrierRefVsDriver.either++;
+      if (cref && driver && cref === driver) carrierRefVsDriver.equal++;
+    }
     if (mc) sets.carrierMc.add(mc);
     if (dot) sets.carrierDot.add(dot);
     if (scac) sets.carrierScac.add(scac);
@@ -740,6 +757,16 @@ export function createProfiler(headers) {
     out.byRevenueType = fin(revT);
     out.byTypeOfShipment = fin(typeT);
     out.apProjectedVsPaid = { rowsEqual: apx.eq, rowsProjectedGreater: apx.gt, projectedGreaterTotal: usd(apx.gtSum), ofWhichDeliveredRows: apx.gtDelivered, ofWhichDeliveredTotal: usd(apx.gtDeliveredSum), ofWhichNonDeliveredRows: apx.gtVoidOrOpen, rowsPaidGreater: apx.lt, paidGreaterTotal: usd(apx.ltSum) };
+    const cmp = (a, b) => {
+      const keys = new Set([...a.keys(), ...b.keys()]);
+      let equal = 0;
+      for (const k of keys) if ((a.get(k) ?? 0) === (b.get(k) ?? 0)) equal++;
+      return { customersInEither: keys.size, customersWhereLoadTotalEqualsMemoTotal: equal };
+    };
+    out.memoLinkage = { memoRowsWithReferenceNo: memoLink.refFill, memoRowsWithPostedInfo: memoLink.postedInfoFill, memoRowsWithCustomerId: memoLink.customerIdFill, memoRowsWithDescription: memoLink.descFill, credits_perCustomer: cmp(memoLink.custCredLoads, memoLink.custCredMemo), debits_perCustomer: cmp(memoLink.custDebLoads, memoLink.custDebMemo) };
+    out.memoLinkage.memoReferenceNoMatchesALoadPro = [...memoLink.refs].filter((x) => pro.seen.has(x)).length;
+    out.memoLinkage.distinctMemoReferenceNos = memoLink.refs.size;
+    out.carrierRefNoVsDriverName = { rowsWithEither: carrierRefVsDriver.either, rowsEqualNormalized: carrierRefVsDriver.equal };
     out.groupCounts = Object.fromEntries(Object.keys(fieldKinds).map((g) => [g, groups[g].length]));
 
     // PRO
@@ -850,8 +877,9 @@ function tableOfStatus(map) {
 
 // ---------- CLI ----------
 
-export async function profileFile(csvPath, { onProgress } = {}) {
+export async function profileFile(csvPath, { onProgress, sliceEvery = 1 } = {}) {
   let profiler = null;
+  let dataRow = 0;
   let headerRow = null;
   const parser = createCsvParser((row) => {
     if (!headerRow) {
@@ -860,7 +888,8 @@ export async function profileFile(csvPath, { onProgress } = {}) {
       return;
     }
     if (row.length === 1 && row[0] === '') return; // blank line
-    profiler.addRow(row);
+    dataRow++; // 1-based data rows, header excluded, counted before any classification
+    if ((dataRow - 1) % sliceEvery === 0) profiler.addRow(row);
   });
   const decoder = new StringDecoder('utf8');
   let n = 0;
@@ -880,11 +909,19 @@ export async function profileFile(csvPath, { onProgress } = {}) {
   return { ...profiler.result(), file: { name: path.basename(csvPath), bytes: n } };
 }
 
+function sliceArg(v) {
+  const m = /^every:(\d+)$/.exec(v ?? '');
+  if (!m || +m[1] < 1) throw new Error('--slice must be every:N (N>=1)');
+  return +m[1];
+}
+
 function parseArgs(argv) {
-  const a = { csv: DEFAULT_CSV, out: null };
+  const a = { csv: DEFAULT_CSV, out: null, sliceEvery: 1 };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--out') a.out = argv[++i];
     else if (argv[i].startsWith('--out=')) a.out = argv[i].slice(6);
+    else if (argv[i] === '--slice') a.sliceEvery = sliceArg(argv[++i]);
+    else if (argv[i].startsWith('--slice=')) a.sliceEvery = sliceArg(argv[i].slice(8));
     else a.csv = argv[i];
   }
   return a;
@@ -900,12 +937,13 @@ export function assertOutsideRepo(p) {
 }
 
 async function main() {
-  const { csv, out } = parseArgs(process.argv.slice(2));
+  const { csv, out, sliceEvery } = parseArgs(process.argv.slice(2));
   const outAbs = out ? assertOutsideRepo(out) : null;
   const csvAbs = path.resolve(csv);
   if (!path.relative(REPO_ROOT, csvAbs).startsWith('..')) throw new Error('refusing to read a CSV inside the repo');
   let last = 0;
   const result = await profileFile(csvAbs, {
+    sliceEvery,
     onProgress: (bytes) => {
       if (bytes - last > 4 << 20) {
         last = bytes;

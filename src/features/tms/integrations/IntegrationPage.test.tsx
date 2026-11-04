@@ -7,7 +7,7 @@
  * showing a form that would go nowhere.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, within, cleanup } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import type { AdapterResult, IntegrationRecord } from '@/lib/integrations/types'
@@ -17,6 +17,8 @@ const api = vi.hoisted(() => ({
   listIntegrations: vi.fn(async (): Promise<IntegrationRecord[]> => []),
   connectIntegration: vi.fn(),
   validateIntegration: vi.fn(),
+  getMcpPullStatus: vi.fn().mockResolvedValue(null),
+  startMcpPull: vi.fn(),
   saveIntegrationSettings: vi.fn(),
   disconnectIntegration: vi.fn(),
   runIntegrationStub: vi.fn(),
@@ -123,10 +125,10 @@ describe('IntegrationPage credential sources', () => {
   })
 
   it('shows the webhook receiver, its signature and its replay window where a provider signs its callbacks', async () => {
-    draw('mycarrierpackets')
+    draw('parade')
 
     await waitFor(() => expect(screen.getByText('Webhook')).toBeInTheDocument())
-    expect(screen.getByText(/\/api\/webhooks\/mycarrierpackets$/)).toBeInTheDocument()
+    expect(screen.getByText(/\/api\/webhooks\/parade$/)).toBeInTheDocument()
     expect(screen.getByText(/five minutes old is refused as a replay/)).toBeInTheDocument()
     expect(screen.getByText('No delivery received yet.')).toBeInTheDocument()
   })
@@ -334,6 +336,28 @@ describe('IntegrationPage provider extras', () => {
 
     await waitFor(() => expect(screen.getByText('Provisioned by the vendor')).toBeInTheDocument())
     expect(screen.getByText(/does not sell self-service API access/)).toBeInTheDocument()
+  })
+
+  it('MyCarrierPackets: the pull button waits for LIVE, then starts a pull and shows counts, last sync and last error', async () => {
+    api.listIntegrations.mockResolvedValue([rowFor('MYCARRIERPACKETS', { mode: 'STUB', health: 'UNABLE_TO_VERIFY' })])
+    draw('mycarrierpackets')
+    await waitFor(() => expect(screen.getByText('Pull all monitored carriers now')).toBeDisabled())
+
+    api.listIntegrations.mockResolvedValue([rowFor('MYCARRIERPACKETS', { mode: 'LIVE', status: 'CONNECTED', health: 'OK' })])
+    api.getMcpPullStatus.mockResolvedValue({
+      runId: 'r', status: 'PARTIAL', startedAt: '2026-11-03T12:00:00.000Z', startedBy: 'a', lastSliceAt: '2026-11-03T12:04:00.000Z', finishedAt: null,
+      cursor: { page: 2, index: 5 }, totalPages: 9, lastError: 'MyCarrierPackets is rate limiting; the run will resume.',
+      counts: { created: 3, updated: 4, unchanged: 5, unmatchedMcp: 6, noData: 0, errors: 1, conflicts: 0 },
+      unmatchedMcp: [], unmatchedBcat: [], unmatchedBcatCount: null, changesFrom: null, lastChangesAt: null, changesCounts: null,
+    })
+    cleanup()
+    draw('mycarrierpackets')
+    await waitFor(() => expect(screen.getByText('Resume pull')).toBeEnabled())
+    expect(screen.getByText('Created: 3')).toBeInTheDocument()
+    expect(screen.getByText('Errors: 1')).toBeInTheDocument()
+    expect(screen.getByText(/Last error: MyCarrierPackets is rate limiting/)).toBeInTheDocument()
+    fireEvent.click(screen.getByText('Resume pull'))
+    await waitFor(() => expect(api.startMcpPull).toHaveBeenCalledWith(false))
   })
 
   it('EDI: saves the whole customer, not a patch that would blank it', async () => {

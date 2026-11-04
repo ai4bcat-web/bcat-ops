@@ -1,45 +1,63 @@
 /**
- * Step N2 — MyCarrierPackets scheduled sync Lambda.
+ * Step N2 — MyCarrierPackets sync Lambda. MyCarrierPackets is the source of truth for a
+ * carrier's compliance profile; this is the one function that writes it.
  *
- * Triggered by EventBridge every 30 minutes. Reads the MCP credentials from SSM,
- * scans every carrier with an mcNumber, and updates each Carrier row with the
- * latest compliance data. Does not change directory status.
+ * Invocations:
+ *  - EventBridge (every 30 min; disabled on dev by the stack guard): continues a partial
+ *    backfill, or — once a backfill has finished — polls CarriersChanges (MCP asks for no less
+ *    than 4 minutes between calls; there are no webhooks) and pulls the full profile of every
+ *    carrier whose packet just completed. It never *starts* the first backfill: that is the
+ *    "Pull all monitored carriers now" button.
+ *  - { kind: 'PULL_ALL', startedBy, restart? }   (async, from the Integrations page): a slice of
+ *    the backfill over MCP's monitored list; resumes a partial run unless `restart`.
+ *  - { kind: 'PULL_ONE', carrierId }             (sync): one carrier, full profile.
+ *  - { kind: 'IMPORT_BATCH', carrierIds, ... }   (sync, from the Aljex import router).
+ *
+ * Every path refuses unless the MYCARRIERPACKETS row reports LIVE and healthy, and every path
+ * is lookup-and-write only: it never invites a carrier.
  */
 import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm'
-import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
-import { DynamoDBDocumentClient, ScanCommand, PutCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb'
+import { DynamoDBClient, ConditionalCheckFailedException } from '@aws-sdk/client-dynamodb'
+import { DynamoDBDocumentClient, ScanCommand, QueryCommand, GetCommand, PutCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb'
+import { randomUUID } from 'crypto'
 import { heartbeatUpdate, MCP_INTEGRATION_ID } from './heartbeat'
-import { mcpAdapter, applyMcpUpdate, mergeInsurancePolicies, type McpInsurance } from '../../../src/lib/integrations/mcpAdapter'
+import { fetchMcpCarrierRaw, listCarrierChanges, listCompletedPackets, listMonitoredCarriers } from '../../../src/lib/integrations/mcpAdapter'
+import { mcpSyncRefusal, mcpUpdateItem } from '../../../src/lib/integrations/mcpBatchSync'
+import { normalizeMcpProfile } from '../../../src/lib/integrations/mcpProfile'
+import {
+  newPullState, pullOneCarrier, runBackfillSlice, runChangesPoll, MCP_PULL_ACTOR,
+  type McpPullDeps, type McpPullState,
+} from '../../../src/lib/integrations/mcpPull'
 
 const ssm = new SSMClient({})
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}), { marshallOptions: { removeUndefinedValues: true } })
 
 const CARRIER_TABLE_NAME = process.env.CARRIER_TABLE_NAME ?? ''
+const CONTACT_TABLE_NAME = process.env.CARRIER_CONTACT_TABLE_NAME ?? ''
+const PAYMENT_TABLE_NAME = process.env.CARRIER_PAYMENT_METHOD_TABLE_NAME ?? ''
+const AUDIT_LOG_TABLE_NAME = process.env.AUDIT_LOG_TABLE_NAME ?? ''
 const INTEGRATION_TABLE_NAME = process.env.INTEGRATION_TABLE_NAME ?? ''
 const INTEGRATION_PARAM_PATH = process.env.INTEGRATION_PARAM_PATH ?? ''
 
-/** The one key a webhook parameter carries. */
+/** The one key a webhook parameter carries; never part of the API credentials. */
 const WEBHOOK_SECRET_KEY = 'webhookSigningSecret'
+/** Pull progress, kept beside the provider row. The Integrations page reads it. */
+export const PULL_STATE_ID = `pull:${MCP_INTEGRATION_ID}`
+const NOT_LIVE = 'MyCarrierPackets is not LIVE (Integrations > MyCarrierPackets > Validate)'
+const RUN_BUDGET_MS = 230_000
+const LOCK_MS = 290_000
+const MAX_CARRIERS_PER_SLICE = 400
 
-interface SyncResult {
-  mcNumber: string
-  carrierId?: string
-  ok: boolean
-  mode: 'STUB' | 'LIVE'
-  error?: string
-}
+type Row = Record<string, unknown>
 
 async function readMcpCredentials(): Promise<Record<string, string> | null> {
-  const paramName = `${INTEGRATION_PARAM_PATH}/MYCARRIERPACKETS`
   try {
-    const result = await ssm.send(new GetParameterCommand({ Name: paramName, WithDecryption: true }))
+    const result = await ssm.send(new GetParameterCommand({ Name: `${INTEGRATION_PARAM_PATH}/MYCARRIERPACKETS`, WithDecryption: true }))
     const raw = result.Parameter?.Value
     if (!raw) return null
-    const parsed = JSON.parse(raw) as Record<string, unknown>
     const out: Record<string, string> = {}
-    for (const [key, value] of Object.entries(parsed)) {
-      if (key === WEBHOOK_SECRET_KEY) continue
-      if (typeof value === 'string') out[key] = value
+    for (const [key, value] of Object.entries(JSON.parse(raw) as Record<string, unknown>)) {
+      if (key !== WEBHOOK_SECRET_KEY && typeof value === 'string') out[key] = value
     }
     return out
   } catch {
@@ -47,77 +65,53 @@ async function readMcpCredentials(): Promise<Record<string, string> | null> {
   }
 }
 
-function normalizeMc(raw: unknown): string | null {
-  if (typeof raw !== 'string') return null
-  const trimmed = raw.trim()
-  return trimmed.length > 0 ? trimmed : null
+async function readRow(id: string): Promise<Row | null> {
+  const got = await ddb.send(new GetCommand({ TableName: INTEGRATION_TABLE_NAME, Key: { id }, ConsistentRead: true }))
+  return (got.Item as Row | undefined) ?? null
 }
 
-/** Find Carrier rows by mcNumber using a Scan with filter; the public Lambda is
- * explicitly granted this table, and the result set is small. */
-async function findCarriersByMc(mcNumber: string): Promise<Record<string, unknown>[]> {
-  const out: Record<string, unknown>[] = []
-  let startKey: Record<string, unknown> | undefined
-  do {
-    const page = await ddb.send(new ScanCommand({
-      TableName: CARRIER_TABLE_NAME,
-      FilterExpression: 'attribute_exists(mcNumber) AND mcNumber = :mc',
-      ExpressionAttributeValues: { ':mc': mcNumber },
-      ExclusiveStartKey: startKey,
-    }))
-    out.push(...(page.Items ?? []))
-    startKey = page.LastEvaluatedKey
-  } while (startKey)
-  return out
+async function readState(): Promise<McpPullState | null> {
+  const row = await readRow(PULL_STATE_ID)
+  return row && typeof row.state === 'string' ? (JSON.parse(row.state) as McpPullState) : null
 }
 
-/** Apply one MCP carrier snapshot to the matching Carrier row(s). */
-async function applyMcpToCarriers(mcp: Record<string, unknown>): Promise<number> {
-  const mcNumber = typeof mcp.mcNumber === 'string' ? mcp.mcNumber.trim() : ''
-  if (!mcNumber) return 0
-  const carriers = await findCarriersByMc(mcNumber)
-  if (carriers.length === 0) return 0
-  const patch = applyMcpUpdate(mcp as never)
-  const { mcNumber: _drop, ...rest } = patch as Record<string, unknown> & { mcNumber: unknown }
-  void _drop
-  if (mcp.insurance && typeof mcp.insurance === 'object') {
-    const existing = carriers[0]!.insurancePolicies
-    rest.insurancePolicies = mergeInsurancePolicies(
-      existing as Array<Record<string, unknown>> | null | undefined,
-      mcp.insurance as unknown as McpInsurance,
-    )
-  }
-  const now = new Date().toISOString()
-  for (const carrier of carriers) {
-    await ddb.send(new PutCommand({
-      TableName: CARRIER_TABLE_NAME,
-      Item: { ...carrier, ...rest, updatedAt: now },
-    }))
-  }
-  return carriers.length
+async function saveState(state: McpPullState, now: string): Promise<void> {
+  await ddb.send(new UpdateCommand({
+    TableName: INTEGRATION_TABLE_NAME,
+    Key: { id: PULL_STATE_ID },
+    UpdateExpression: 'SET #state = :s, kind = :k, provider = :p, updatedAt = :u REMOVE lockUntil',
+    ExpressionAttributeNames: { '#state': 'state' },
+    ExpressionAttributeValues: { ':s': JSON.stringify(state), ':k': 'SYNC_STATE', ':p': MCP_INTEGRATION_ID, ':u': now },
+  }))
 }
 
-/** Sync one carrier from MCP. */
-async function syncOne(mcNumber: string, credentials: Record<string, string>): Promise<SyncResult> {
-  const adapter = mcpAdapter(credentials)
-  const ctx = { provider: 'MYCARRIERPACKETS' as const, credentials, settings: {}, now: new Date().toISOString() }
+/** One slice at a time: a second invocation while one runs is refused, a crashed one expires. */
+async function takeLock(nowMs: number): Promise<boolean> {
   try {
-    const result = await adapter.sync!(ctx, { mcNumber })
-    const detail = (result.detail ?? {}) as Record<string, unknown>
-    const mcp = (detail.carrier ?? detail) as Record<string, unknown>
-    const updated = await applyMcpToCarriers(mcp)
-    return { mcNumber, ok: result.ok, mode: result.mode, ...(updated > 0 ? { carrierId: String(mcp.mcNumber ?? mcNumber) } : {}) }
+    await ddb.send(new UpdateCommand({
+      TableName: INTEGRATION_TABLE_NAME,
+      Key: { id: PULL_STATE_ID },
+      UpdateExpression: 'SET lockUntil = :l, kind = :k, provider = :p',
+      ConditionExpression: 'attribute_not_exists(lockUntil) OR lockUntil < :now',
+      ExpressionAttributeValues: { ':l': nowMs + LOCK_MS, ':now': nowMs, ':k': 'SYNC_STATE', ':p': MCP_INTEGRATION_ID },
+    }))
+    return true
   } catch (err) {
-    return { mcNumber, ok: false, mode: 'LIVE', error: err instanceof Error ? err.message : String(err) }
+    if (err instanceof ConditionalCheckFailedException) return false
+    throw err
   }
+}
+
+async function releaseLock(): Promise<void> {
+  await ddb.send(new UpdateCommand({ TableName: INTEGRATION_TABLE_NAME, Key: { id: PULL_STATE_ID }, UpdateExpression: 'REMOVE lockUntil' })).catch(() => undefined)
 }
 
 /**
  * Stamp the Integration row so the app can show "last sync". Best-effort: a failed stamp
  * must never fail an otherwise good sync run.
  */
-async function writeHeartbeat(results: SyncResult[], now: string): Promise<void> {
-  const update = heartbeatUpdate(results, now)
+async function writeHeartbeat(ok: number, failed: number, now: string): Promise<void> {
+  const update = heartbeatUpdate([...Array(ok).fill({ ok: true }), ...Array(failed).fill({ ok: false })], now)
   if (!update || !INTEGRATION_TABLE_NAME) return
   try {
     await ddb.send(new UpdateCommand({
@@ -133,33 +127,196 @@ async function writeHeartbeat(results: SyncResult[], now: string): Promise<void>
   }
 }
 
-export const handler = async () => {
-  const credentials = await readMcpCredentials()
-  if (!credentials) {
-    console.log('[mcp-sync] No MCP credentials configured; nothing to sync.')
-    return { count: 0, ok: 0, skipped: 0, results: [] }
-  }
-
-  const results: SyncResult[] = []
-  let startKey: Record<string, unknown> | undefined
-  const now = new Date().toISOString()
+async function queryByCarrier(table: string, index: string, carrierId: string): Promise<Row[]> {
+  const out: Row[] = []
+  let key: Record<string, unknown> | undefined
   do {
-    const page = await ddb.send(new ScanCommand({
-      TableName: CARRIER_TABLE_NAME,
-      FilterExpression: 'attribute_exists(mcNumber) AND NOT begins_with(mcNumber, :empty)',
-      ExpressionAttributeValues: { ':empty': '' },
-      ExclusiveStartKey: startKey,
+    const page = await ddb.send(new QueryCommand({
+      TableName: table, IndexName: index, KeyConditionExpression: 'carrierId = :c',
+      ExpressionAttributeValues: { ':c': carrierId }, ExclusiveStartKey: key,
     }))
-    for (const item of page.Items ?? []) {
-      const mcNumber = normalizeMc(item.mcNumber)
-      if (!mcNumber) continue
-      results.push(await syncOne(mcNumber, credentials))
-    }
-    startKey = page.LastEvaluatedKey
-  } while (startKey)
+    out.push(...((page.Items ?? []) as Row[]))
+    key = page.LastEvaluatedKey
+  } while (key)
+  return out
+}
 
-  const ok = results.filter((r) => r.ok).length
-  console.log(`[mcp-sync] Synced ${ok}/${results.length} carriers at ${now}`)
-  await writeHeartbeat(results, now)
-  return { count: results.length, ok, skipped: results.length - ok, results }
+function patchUpdate(patch: Row) {
+  const names: Record<string, string> = {}
+  const values: Record<string, unknown> = {}
+  const sets = Object.entries(patch).map(([k, v], i) => {
+    names[`#f${i}`] = k
+    values[`:v${i}`] = v
+    return `#f${i} = :v${i}`
+  })
+  return { UpdateExpression: `SET ${sets.join(', ')}`, ExpressionAttributeNames: names, ExpressionAttributeValues: values }
+}
+
+function pullDeps(credentials: Record<string, string>): McpPullDeps {
+  const profileOf = (raw: unknown) => normalizeMcpProfile(raw)
+  return {
+    loadCarriers: async () => {
+      const out: Row[] = []
+      let key: Record<string, unknown> | undefined
+      do {
+        const page = await ddb.send(new ScanCommand({ TableName: CARRIER_TABLE_NAME, ExclusiveStartKey: key }))
+        out.push(...((page.Items ?? []) as Row[]))
+        key = page.LastEvaluatedKey
+      } while (key)
+      return out
+    },
+    writeCarrier: async (carrier, patch) => {
+      try {
+        await ddb.send(new UpdateCommand({ TableName: CARRIER_TABLE_NAME, Key: { id: carrier.id as string }, ...mcpUpdateItem(carrier, patch, new Date().toISOString()) }))
+        return 'WRITTEN'
+      } catch (err) {
+        if (err instanceof ConditionalCheckFailedException) return 'CONFLICT'
+        throw err
+      }
+    },
+    reloadCarrier: async (id) => {
+      const got = await ddb.send(new GetCommand({ TableName: CARRIER_TABLE_NAME, Key: { id }, ConsistentRead: true }))
+      return (got.Item as Row | undefined) ?? null
+    },
+    createCarrier: async (row) => {
+      await ddb.send(new PutCommand({ TableName: CARRIER_TABLE_NAME, Item: row, ConditionExpression: 'attribute_not_exists(id)' }))
+    },
+    loadContacts: (carrierId) => queryByCarrier(CONTACT_TABLE_NAME, 'carrierContactsByCarrierId', carrierId),
+    putContact: async (row) => { await ddb.send(new PutCommand({ TableName: CONTACT_TABLE_NAME, Item: row })) },
+    updateContact: async (id, patch) => { await ddb.send(new UpdateCommand({ TableName: CONTACT_TABLE_NAME, Key: { id }, ...patchUpdate(patch) })) },
+    loadPayments: (carrierId) => queryByCarrier(PAYMENT_TABLE_NAME, 'carrierPaymentMethodsByCarrierId', carrierId),
+    putPayment: async (row) => { await ddb.send(new PutCommand({ TableName: PAYMENT_TABLE_NAME, Item: row })) },
+    updatePayment: async (id, patch) => { await ddb.send(new UpdateCommand({ TableName: PAYMENT_TABLE_NAME, Key: { id }, ...patchUpdate(patch) })) },
+    audit: async ({ entityId, action, changes }) => {
+      if (!AUDIT_LOG_TABLE_NAME) return
+      const now = new Date().toISOString()
+      await ddb.send(new PutCommand({
+        TableName: AUDIT_LOG_TABLE_NAME,
+        Item: { id: randomUUID(), __typename: 'AuditLog', entityType: 'CARRIER', entityId, action, user: MCP_PULL_ACTOR, changes: JSON.stringify(changes), createdAt: now, updatedAt: now },
+      }))
+    },
+    listMonitored: (page, size) => listMonitoredCarriers(page, size, credentials),
+    fetchProfile: async (ref) => {
+      const raw = await fetchMcpCarrierRaw(ref, credentials)
+      return raw ? normalizeMcpProfile(raw, ref) : null
+    },
+    listChanges: async (range, page, size) => {
+      const { items, totalPages } = await listCarrierChanges(range, page, size, credentials)
+      const profiles = items.flatMap((item) => {
+        const p = profileOf(item && typeof item === 'object' && 'CarrierDetails' in item ? (item as Row).CarrierDetails : item)
+        return p ? [p] : []
+      })
+      return { profiles, totalPages }
+    },
+    listCompleted: async (range) => (await listCompletedPackets(range, credentials)).map((p) => ({ dotNumber: p.dotNumber, docketNumber: p.docketNumber })),
+    newId: () => randomUUID(),
+    sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+    nowMs: Date.now,
+  }
+}
+
+async function gate(): Promise<{ credentials: Record<string, string>; createUnmatched: boolean } | { refusal: string }> {
+  const credentials = await readMcpCredentials()
+  const row = await readRow(MCP_INTEGRATION_ID)
+  const refusal = mcpSyncRefusal(row, credentials)
+  if (refusal || !credentials) return { refusal: refusal ?? NOT_LIVE }
+  const settings = (row?.settings ?? {}) as Row
+  return { credentials, createUnmatched: settings.createUnmatchedCarriers !== false }
+}
+
+// ── Invocations ──────────────────────────────────────────────────────────────
+
+interface PullAllEvent { kind: 'PULL_ALL'; startedBy?: string; restart?: boolean }
+interface PullOneEvent { kind: 'PULL_ONE'; carrierId: string }
+interface ImportBatchEvent { kind: 'IMPORT_BATCH'; carrierIds?: string[]; maxLookups?: number; cursor?: { lastCarrierId?: string } | null }
+type Event = PullAllEvent | PullOneEvent | ImportBatchEvent | { kind?: undefined }
+
+/** A slice of the backfill (or a changes poll once it is done). Returns the state it saved. */
+async function pullSlice(started: { startedBy: string; restart: boolean } | null): Promise<McpPullState | { refused: string } | { busy: true }> {
+  const g = await gate()
+  if ('refusal' in g) return { refused: g.refusal }
+  if (!(await takeLock(Date.now()))) return { busy: true }
+  try {
+    const deps = pullDeps(g.credentials)
+    const now = new Date().toISOString()
+    let state = await readState()
+    if (started && (started.restart || !state || state.status === 'DONE' || state.status === 'ERROR')) {
+      state = newPullState(randomUUID(), started.startedBy, now, state ?? undefined)
+    }
+    if (!state) {
+      await releaseLock()
+      return { refused: 'No backfill has been started. Press "Pull all monitored carriers now".' }
+    }
+    const options = { createUnmatched: g.createUnmatched, maxCarriers: MAX_CARRIERS_PER_SLICE, deadlineMs: Date.now() + RUN_BUDGET_MS }
+    state = state.status === 'DONE' ? await runChangesPoll(deps, state, options) : await runBackfillSlice(deps, state, options)
+    await saveState(state, new Date().toISOString())
+    const counts = state.status === 'DONE' && state.changesCounts ? state.changesCounts : state.counts
+    await writeHeartbeat(counts.created + counts.updated + counts.unchanged, counts.errors, new Date().toISOString())
+    return state
+  } catch (err) {
+    await releaseLock()
+    throw err
+  }
+}
+
+async function pullOne(event: PullOneEvent) {
+  const g = await gate()
+  if ('refusal' in g) return { ready: false, reason: NOT_LIVE, result: null }
+  const result = await pullOneCarrier(pullDeps(g.credentials), event.carrierId, randomUUID())
+  return { ready: true, result }
+}
+
+/**
+ * Invoked by the Aljex import router (RequestResponse):
+ *   { kind: 'IMPORT_BATCH', carrierIds, maxLookups?, cursor? }
+ * → { ready, reason?, results: [{ carrierId, result: 'SYNCED' | 'NO_PACKET' | 'ERROR' }], cursor, done }
+ * Ids are processed in the order given; a call stops at its budget or maxLookups.
+ */
+async function importBatch(event: ImportBatchEvent) {
+  const g = await gate()
+  if ('refusal' in g) return { ready: false, reason: NOT_LIVE, results: [], cursor: null, done: false }
+  const deps = pullDeps(g.credentials)
+  const ids = (event.carrierIds ?? []).filter((id): id is string => typeof id === 'string' && id !== '')
+  const start = event.cursor?.lastCarrierId ? ids.indexOf(event.cursor.lastCarrierId) + 1 : 0
+  const max = Math.min(Math.max(event.maxLookups ?? 40, 1), 200)
+  const deadline = Date.now() + RUN_BUDGET_MS
+  const runId = randomUUID()
+  const results: Array<{ carrierId: string; result: 'SYNCED' | 'NO_PACKET' | 'ERROR' }> = []
+  let rateLimited = false
+  let i = start
+  for (; i < ids.length && results.length < max && Date.now() < deadline; i++) {
+    try {
+      results.push({ carrierId: ids[i]!, result: await pullOneCarrier(deps, ids[i]!, runId) })
+    } catch (err) {
+      const kind = (err as { kind?: string }).kind
+      if (kind === 'RATE_LIMIT' || kind === 'AUTH') { rateLimited = true; break }
+      results.push({ carrierId: ids[i]!, result: 'ERROR' })
+    }
+    await deps.sleep(250)
+  }
+  const done = i >= ids.length
+  return {
+    ready: true, results,
+    cursor: done || i === start ? null : { lastCarrierId: ids[i - 1]! },
+    done,
+    ...(rateLimited ? { reason: 'MyCarrierPackets is rate limiting or refused the credentials; resume later.' } : {}),
+  }
+}
+
+export const handler = async (event?: Event) => {
+  switch (event?.kind) {
+    case 'IMPORT_BATCH': return importBatch(event)
+    case 'PULL_ONE': return pullOne(event)
+    case 'PULL_ALL': {
+      const out = await pullSlice({ startedBy: event.startedBy ?? 'admin', restart: event.restart === true })
+      return 'status' in out ? { ran: true, status: out.status } : { ran: false, ...out }
+    }
+    default: {
+      // EventBridge: continue a partial backfill, or poll for changes after a finished one.
+      const out = await pullSlice(null)
+      if ('status' in out) console.log(`[mcp-sync] ${out.status} created ${out.counts.created} updated ${out.counts.updated} unchanged ${out.counts.unchanged} errors ${out.counts.errors}`)
+      else console.log(`[mcp-sync] Not running: ${'refused' in out ? out.refused : 'another slice holds the lock'}`)
+      return 'status' in out ? { ran: true, status: out.status } : { ran: false, ...out }
+    }
+  }
 }

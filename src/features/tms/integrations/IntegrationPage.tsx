@@ -398,10 +398,13 @@ function BehaviourCard({ descriptor, row, onChanged }: CardProps) {
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
 
-  const stored = useMemo(
-    () => ({ ...defaultSettingsOf(descriptor), ...(row?.settings ?? {}) }),
-    [descriptor, row?.settings],
-  )
+  // A key a provider no longer declares (MyCarrierPackets' retired webhook toggles) must not
+  // ride along into a save: unknown keys are refused, so it would block every settings save.
+  const stored = useMemo(() => {
+    const declared = new Set(descriptor.settingsFields.map((f) => f.key))
+    const kept = Object.fromEntries(Object.entries(row?.settings ?? {}).filter(([key]) => declared.has(key)))
+    return { ...defaultSettingsOf(descriptor), ...kept }
+  }, [descriptor, row?.settings])
   const settings = draft ?? stored
 
   const save = async () => {

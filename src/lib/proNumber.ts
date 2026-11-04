@@ -16,3 +16,24 @@ export function normalizePro(value: string | null | undefined): string | null {
   const key = stripped.replace(/[^A-Za-z0-9]/g, '').toUpperCase()
   return key.length >= 3 ? key : null
 }
+
+const escapeRe = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+/**
+ * True when a PRO has the shape the shipment counter issues on its own (`S000123-1`, claim key
+ * `S0001231`): `<prefix><6+ digits>` with an optional `-<leg>` suffix. A typed or imported PRO of
+ * that shape would pre-empt a number the counter has not handed out yet, so both the shipment
+ * handler and the Aljex import refuse it.
+ *
+ * `prefix` is the configured shipment prefix as stored (it may contain dashes; the claim key
+ * keeps only alphanumerics, so the prefix is reduced the same way for the key comparison).
+ */
+export function isDerivedPro(pro: string, prefix: string): boolean {
+  const rawPrefix = escapeRe(prefix)
+  const keyPrefix = escapeRe(prefix.replace(/[^A-Za-z0-9]/g, '').toUpperCase())
+  const normalized = normalizePro(pro)
+  return (
+    new RegExp(`^${rawPrefix}\\d{6}-\\d+$`, 'i').test(pro.trim()) ||
+    (normalized != null && new RegExp(`^${keyPrefix}\\d{7,}$`).test(normalized))
+  )
+}

@@ -3,7 +3,7 @@ import { Effect, PolicyStatement } from 'aws-cdk-lib/aws-iam'
 import { CfnFunction, Function as LambdaFunction, FunctionUrl, FunctionUrlAuthType, HttpMethod, EventSourceMapping, StartingPosition } from 'aws-cdk-lib/aws-lambda'
 import { CfnRule, Rule, Schedule, RuleTargetInput } from 'aws-cdk-lib/aws-events'
 import { LambdaFunction as EventsLambdaTarget } from 'aws-cdk-lib/aws-events-targets'
-import { ArnFormat, Aspects, CfnOutput, Duration, Stack } from 'aws-cdk-lib'
+import { ArnFormat, Aspects, CfnOutput, Duration, Fn, RemovalPolicy, Stack } from 'aws-cdk-lib'
 import type { IConstruct } from 'constructs'
 import {
   UserPool,
@@ -52,7 +52,7 @@ import { amazonDisputeIntake } from './functions/amazon-dispute-intake/resource'
 import { disputePortalApi } from './functions/dispute-portal-api/resource'
 import { trackingApi } from './functions/tracking-api/resource'
 import { tripScreenshotParser } from './functions/trip-screenshot-parser/resource'
-import { Bucket, HttpMethods } from 'aws-cdk-lib/aws-s3'
+import { BlockPublicAccess, Bucket, BucketEncryption, HttpMethods, ObjectOwnership } from 'aws-cdk-lib/aws-s3'
 import { rateconParser } from './functions/ratecon-parser/resource'
 import { apptReport } from './functions/appt-report/resource'
 import { cashCheckinReminder } from './functions/cash-checkin-reminder/resource'
@@ -64,6 +64,8 @@ import { tmsCarrierActions } from './functions/tms-carrier-actions/resource'
 import { tmsTrackingActions } from './functions/tms-tracking-actions/resource'
 import { tmsFinanceActions } from './functions/tms-finance-actions/resource'
 import { tmsAljexImport } from './functions/tms-aljex-import/resource'
+import { tmsDataSafety } from './functions/tms-data-safety/resource'
+import { devRuleState } from './devRuleGuard'
 import { loadTrackingProjector } from './functions/load-tracking-projector/resource'
 import { shipmentNotifier } from './functions/shipment-notifier/resource'
 import { checkCallNotifier } from './functions/check-call-notifier/resource'
@@ -158,6 +160,7 @@ const backend = defineBackend({
   tmsTrackingActions,
   tmsFinanceActions,
   tmsAljexImport,
+  tmsDataSafety,
   loadTrackingProjector,
   checkCallNotifier,
   trackingAutomation,
@@ -2167,6 +2170,15 @@ backend.data.resources.cfnResources.amplifyDynamoDbTables['Integration'].timeToL
   enabled: true,
 }
 
+// ── Point-in-time recovery on every table (Aljex-exit Phase 0) ───────────────
+// An in-place property flip (no replacement, no data movement, no GSI change) on every
+// Amplify-managed table. PITR keeps 35 days and is also what makes
+// ExportTableToPointInTime (the nightly export) and RestoreTableToPointInTime (restore to
+// a new table) usable. Shared file: this lands on production tables too when dev merges.
+for (const table of Object.values(backend.data.resources.cfnResources.amplifyDynamoDbTables)) {
+  table.pointInTimeRecoveryEnabled = true
+}
+
 // ── Step N2: MyCarrierPackets scheduled sync ───────────────────────────────
 const mcpSyncFn = backend.mcpSync.resources.lambda as LambdaFunction
 const mcpSyncCarrierTable = backend.data.resources.tables['Carrier']
@@ -2174,9 +2186,33 @@ mcpSyncFn.addEnvironment('CARRIER_TABLE_NAME', mcpSyncCarrierTable.tableName)
 mcpSyncFn.addEnvironment('INTEGRATION_PARAM_PATH', integrationParamPath)
 mcpSyncFn.addToRolePolicy(
   new PolicyStatement({
-    actions:   ['dynamodb:Scan', 'dynamodb:PutItem', 'dynamodb:GetItem'],
+    actions:   ['dynamodb:Scan', 'dynamodb:UpdateItem', 'dynamodb:GetItem', 'dynamodb:PutItem'],
     resources: [mcpSyncCarrierTable.tableArn],
   }),
+)
+// MyCarrierPackets pull: contacts and payment methods are written beside the carrier, and
+// every pull is audited. directoryActions starts a pull by invoking this function async.
+const mcpSyncContactTable = backend.data.resources.tables['CarrierContact']
+const mcpSyncPaymentTable = backend.data.resources.tables['CarrierPaymentMethod']
+const mcpSyncAuditTable   = backend.data.resources.tables['AuditLog']
+mcpSyncFn.addEnvironment('CARRIER_CONTACT_TABLE_NAME',        mcpSyncContactTable.tableName)
+mcpSyncFn.addEnvironment('CARRIER_PAYMENT_METHOD_TABLE_NAME', mcpSyncPaymentTable.tableName)
+mcpSyncFn.addEnvironment('AUDIT_LOG_TABLE_NAME',              mcpSyncAuditTable.tableName)
+mcpSyncFn.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['dynamodb:Query', 'dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem'],
+    resources: [
+      mcpSyncContactTable.tableArn, `${mcpSyncContactTable.tableArn}/index/*`,
+      mcpSyncPaymentTable.tableArn, `${mcpSyncPaymentTable.tableArn}/index/*`,
+    ],
+  }),
+)
+mcpSyncFn.addToRolePolicy(
+  new PolicyStatement({ actions: ['dynamodb:PutItem'], resources: [mcpSyncAuditTable.tableArn] }),
+)
+directoryActionsFn.addEnvironment('MCP_SYNC_FUNCTION_NAME', mcpSyncFn.functionName)
+directoryActionsFn.addToRolePolicy(
+  new PolicyStatement({ actions: ['lambda:InvokeFunction'], resources: [mcpSyncFn.functionArn] }),
 )
 mcpSyncFn.addToRolePolicy(
   new PolicyStatement({
@@ -2190,12 +2226,14 @@ const mcpSyncIntegrationTable = backend.data.resources.tables['Integration']
 mcpSyncFn.addEnvironment('INTEGRATION_TABLE_NAME', mcpSyncIntegrationTable.tableName)
 mcpSyncFn.addToRolePolicy(
   new PolicyStatement({
-    actions:   ['dynamodb:UpdateItem'],
+    // GetItem: the LIVE gate. Put/Delete: the resume cursor row. UpdateItem: the heartbeat.
+    actions:   ['dynamodb:UpdateItem', 'dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:DeleteItem'],
     resources: [mcpSyncIntegrationTable.tableArn],
   }),
 )
 // The rule is created enabled. The dev-stack guard later disables schedules, so
-// dev still deploys but does not poll MCP by itself.
+// dev still deploys but does not poll MCP by itself. 30 minutes is well over the
+// 4-minute minimum MCP's guide sets between polling calls.
 const mcpSyncRule = new Rule(mcpSyncFn.stack, 'McpSyncRule', {
   schedule: Schedule.rate(Duration.minutes(30)),
 })
@@ -2306,6 +2344,13 @@ shipmentActionsFn.addToRolePolicy(new PolicyStatement({
   actions: ['dynamodb:GetItem'],
   resources: [shipmentUserProfileTable.tableArn],
 }))
+// Aljex-exit: the code -> user crosswalk (SET_ALJEX_CODE_MAP, REASSIGN_SHIPMENTS_BY_REP_CODE).
+const shipmentAljexCodeMapTable = backend.data.resources.tables['AljexCodeMap']
+shipmentActionsFn.addToRolePolicy(new PolicyStatement({
+  actions:   ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem', 'dynamodb:Scan'],
+  resources: [shipmentAljexCodeMapTable.tableArn],
+}))
+shipmentActionsFn.addEnvironment('ALJEX_CODE_MAP_TABLE_NAME', shipmentAljexCodeMapTable.tableName)
 // Board and bundle reads come off the GSIs declared on these models.
 shipmentActionsFn.addToRolePolicy(
   new PolicyStatement({
@@ -2848,97 +2893,191 @@ backend.storage.resources.bucket.grantRead(financeActionsFn, 'rate-confirms/*')
 // …and the commission statements a pay period renders per rep.
 backend.storage.resources.bucket.grantReadWrite(financeActionsFn, 'commissions/*')
 
-// ── tmsAljexImport Lambda (Step N1) ─────────────────────────────────────────
-// Bulk import from Aljex CSV. Owner/ADMIN only. Writes Shipment, Order, Load,
-// LoadFinancials, LoadCharge, LoadCarrier, Customer, Location, Invoice,
-// CarrierBill, ProClaim and AuditLog directly; reads TmsSettings for counters.
-const aljexImportFn         = backend.tmsAljexImport.resources.lambda as LambdaFunction
-const aljexImportJobTable   = backend.data.resources.tables['AljexImportJob']
-const aljexShipmentTable    = backend.data.resources.tables['Shipment']
-const aljexOrderTable       = backend.data.resources.tables['Order']
-const aljexLoadTable        = backend.data.resources.tables['Load']
-const aljexLoadCarrierTable = backend.data.resources.tables['LoadCarrier']
-const aljexFinancialsTable  = backend.data.resources.tables['LoadFinancials']
-const aljexChargeTable      = backend.data.resources.tables['LoadCharge']
-const aljexCustomerTable    = backend.data.resources.tables['Customer']
-const aljexLocationTable    = backend.data.resources.tables['Location']
-const aljexDivisionTable    = backend.data.resources.tables['Division']
-const aljexSettingsTable    = backend.data.resources.tables['TmsSettings']
-const aljexInvoiceTable     = backend.data.resources.tables['Invoice']
-const aljexCarrierBillTable = backend.data.resources.tables['CarrierBill']
-const aljexProClaimTable    = backend.data.resources.tables['ProClaim']
-const aljexAuditLogTable    = backend.data.resources.tables['AuditLog']
+// ── DataSafety bucket (Aljex-exit Phase 0) ──────────────────────────────────
+// A private, versioned bucket of its own — NOT the Amplify storage bucket, whose
+// `imports/*` prefix is readable by every signed-in user and carries browser CORS. It holds
+// the raw Aljex files (no expiry: the lossless archive of every column the model does not
+// map), staged chunks, reconciliation reports, nightly DynamoDB exports and the
+// export-everything CSV jobs. Reachable only through presigned links the two Lambdas hand
+// to an owner/ADMIN, and retained if the stack is ever deleted.
+const dataSafetyStack = backend.createStack('DataSafety')
+const dataSafetyBucket = new Bucket(dataSafetyStack, 'DataSafetyBucket', {
+  blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
+  enforceSSL: true,
+  encryption: BucketEncryption.S3_MANAGED,
+  versioned: true,
+  removalPolicy: RemovalPolicy.RETAIN,
+  objectOwnership: ObjectOwnership.BUCKET_OWNER_ENFORCED,
+  lifecycleRules: [
+    { id: 'nightly-exports', prefix: 'exports/nightly/', expiration: Duration.days(35) },
+    { id: 'manual-exports', prefix: 'exports/manual/', expiration: Duration.days(35) },
+    { id: 'csv-exports', prefix: 'exports/csv/', expiration: Duration.days(7) },
+    { id: 'import-stage-chunks', prefix: 'imports/jobs/', expiration: Duration.days(30) },
+    { id: 'import-reports', prefix: 'imports/runs/', expiration: Duration.days(365) },
+    // `imports/source/` deliberately has no expiry rule.
+    { id: 'noncurrent-versions', noncurrentVersionExpiration: Duration.days(90), abortIncompleteMultipartUploadAfter: Duration.days(7) },
+  ],
+  cors: [{
+    allowedMethods: [HttpMethods.PUT, HttpMethods.GET, HttpMethods.HEAD],
+    allowedOrigins: PORTAL_ORIGINS,
+    allowedHeaders: ['*'],
+    exposedHeaders: ['ETag'],
+    maxAge: 3000,
+  }],
+})
 
+// The Phase 0 Lambdas may touch only this stack's tables: `<Model>-<apiId>-NONE`. The API id
+// is cut out of a table name rather than read off the API construct, because a policy that
+// referenced the API would close a CloudFormation cycle (API -> resolver -> Lambda -> policy).
+const stackApiId = (tableName: string) => Fn.select(1, Fn.split('-', tableName))
+const tableArnPattern = (fn: LambdaFunction, apiId: string, suffix = '') =>
+  Stack.of(fn).formatArn({ service: 'dynamodb', resource: 'table', resourceName: `*-${apiId}-NONE${suffix}`, arnFormat: ArnFormat.SLASH_RESOURCE_NAME })
+
+// ── tmsAljexImport Lambda (Aljex-exit Phase 0) ──────────────────────────────
+// Owner/ADMIN router + async worker for the Aljex import. AppSync caps a call at 30 s, so
+// STAGE / PLAN / APPLY run in an `Event` self-invoke that drives the engine's runSlice for up
+// to 900 s and re-invokes itself while work remains. It writes the ~20 touched tables, reads
+// the reference tables, and may also write rehearsal copies (`...-rh<tag>` siblings of the
+// same API id) — never another API's (production's) tables, by IAM and by code.
+const aljexImportFn = backend.tmsAljexImport.resources.lambda as LambdaFunction
+const aljexTables = backend.data.resources.tables
+const ALJEX_WRITE_TABLES: Array<[string, string]> = [
+  ['AljexImportJob', 'ALJEX_IMPORT_JOB_TABLE_NAME'], ['AljexMappingProfile', 'ALJEX_MAPPING_PROFILE_TABLE_NAME'],
+  ['LegacyAljexRow', 'LEGACY_ALJEX_ROW_TABLE_NAME'], ['Shipment', 'SHIPMENT_TABLE_NAME'], ['Order', 'ORDER_TABLE_NAME'],
+  ['Load', 'LOAD_TABLE_NAME'], ['LoadCarrier', 'LOAD_CARRIER_TABLE_NAME'], ['LoadFinancials', 'LOAD_FINANCIALS_TABLE_NAME'],
+  ['LoadCharge', 'LOAD_CHARGE_TABLE_NAME'], ['Customer', 'CUSTOMER_TABLE_NAME'], ['Location', 'LOCATION_TABLE_NAME'],
+  ['Carrier', 'CARRIER_TABLE_NAME'], ['Invoice', 'INVOICE_TABLE_NAME'], ['ArPayment', 'AR_PAYMENT_TABLE_NAME'],
+  ['CarrierBill', 'CARRIER_BILL_TABLE_NAME'], ['ApPayment', 'AP_PAYMENT_TABLE_NAME'], ['ProClaim', 'PRO_CLAIM_TABLE_NAME'],
+  ['TmsSettings', 'SETTINGS_TABLE_NAME'], ['AuditLog', 'AUDIT_LOG_TABLE_NAME'],
+]
+const ALJEX_READ_TABLES: Array<[string, string]> = [
+  ['FactoringItem', 'FACTORING_ITEM_TABLE_NAME'], ['Driver', 'DRIVER_TABLE_NAME'], ['UserProfile', 'USER_PROFILE_TABLE_NAME'],
+  ['OwnershipDivision', 'OWNERSHIP_DIVISION_TABLE_NAME'], ['OwnershipRule', 'OWNERSHIP_RULE_TABLE_NAME'],
+  ['Division', 'DIVISION_TABLE_NAME'], ['Integration', 'MCP_INTEGRATION_TABLE_NAME'],
+]
+const aljexApiId = stackApiId(aljexTables['Shipment'].tableName)
 aljexImportFn.addToRolePolicy(
   new PolicyStatement({
     actions: [
-      'dynamodb:GetItem',
-      'dynamodb:PutItem',
-      'dynamodb:UpdateItem',
-      'dynamodb:Scan',
-      'dynamodb:ConditionCheckItem',
-      'dynamodb:TransactWriteItems',
+      'dynamodb:GetItem', 'dynamodb:BatchGetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem', 'dynamodb:BatchWriteItem',
+      'dynamodb:Scan', 'dynamodb:Query', 'dynamodb:ConditionCheckItem', 'dynamodb:TransactWriteItems',
     ],
     resources: [
-      aljexImportJobTable.tableArn,
-      aljexShipmentTable.tableArn,
-      aljexOrderTable.tableArn,
-      aljexLoadTable.tableArn,
-      aljexLoadCarrierTable.tableArn,
-      aljexFinancialsTable.tableArn,
-      aljexChargeTable.tableArn,
-      aljexCustomerTable.tableArn,
-      aljexLocationTable.tableArn,
-      aljexDivisionTable.tableArn,
-      aljexSettingsTable.tableArn,
-      aljexInvoiceTable.tableArn,
-      aljexCarrierBillTable.tableArn,
-      aljexProClaimTable.tableArn,
-      aljexAuditLogTable.tableArn,
+      ...ALJEX_WRITE_TABLES.flatMap(([model]) => [aljexTables[model].tableArn, `${aljexTables[model].tableArn}/index/*`]),
+      // Rehearsal copies: unmanaged siblings of the live tables carrying the same API id.
+      tableArnPattern(aljexImportFn, aljexApiId, '-rh*'),
+      `${tableArnPattern(aljexImportFn, aljexApiId, '-rh*')}/index/*`,
     ],
   })
 )
-// GSI queries for listing jobs and reading shipment-related indexes.
 aljexImportFn.addToRolePolicy(
   new PolicyStatement({
-    actions:   ['dynamodb:Query'],
-    resources: [
-      `${aljexImportJobTable.tableArn}/index/*`,
-      `${aljexOrderTable.tableArn}/index/*`,
-      `${aljexLoadTable.tableArn}/index/*`,
-      `${aljexLoadCarrierTable.tableArn}/index/*`,
-      `${aljexChargeTable.tableArn}/index/*`,
-      `${aljexCustomerTable.tableArn}/index/*`,
-      `${aljexLocationTable.tableArn}/index/*`,
-    ],
+    actions: ['dynamodb:GetItem', 'dynamodb:BatchGetItem', 'dynamodb:Scan', 'dynamodb:Query'],
+    resources: ALJEX_READ_TABLES.flatMap(([model]) => [aljexTables[model].tableArn, `${aljexTables[model].tableArn}/index/*`]),
   })
 )
-aljexImportFn.addEnvironment('ALJEX_IMPORT_JOB_TABLE_NAME', aljexImportJobTable.tableName)
-aljexImportFn.addEnvironment('SHIPMENT_TABLE_NAME',         aljexShipmentTable.tableName)
-aljexImportFn.addEnvironment('ORDER_TABLE_NAME',            aljexOrderTable.tableName)
-aljexImportFn.addEnvironment('LOAD_TABLE_NAME',             aljexLoadTable.tableName)
-aljexImportFn.addEnvironment('LOAD_CARRIER_TABLE_NAME',     aljexLoadCarrierTable.tableName)
-aljexImportFn.addEnvironment('LOAD_FINANCIALS_TABLE_NAME',  aljexFinancialsTable.tableName)
-aljexImportFn.addEnvironment('LOAD_CHARGE_TABLE_NAME',      aljexChargeTable.tableName)
-aljexImportFn.addEnvironment('CUSTOMER_TABLE_NAME',         aljexCustomerTable.tableName)
-aljexImportFn.addEnvironment('LOCATION_TABLE_NAME',         aljexLocationTable.tableName)
-aljexImportFn.addEnvironment('DIVISION_TABLE_NAME',         aljexDivisionTable.tableName)
-aljexImportFn.addEnvironment('SETTINGS_TABLE_NAME',         aljexSettingsTable.tableName)
-aljexImportFn.addEnvironment('INVOICE_TABLE_NAME',          aljexInvoiceTable.tableName)
-aljexImportFn.addEnvironment('CARRIER_BILL_TABLE_NAME',     aljexCarrierBillTable.tableName)
-aljexImportFn.addEnvironment('PRO_CLAIM_TABLE_NAME',        aljexProClaimTable.tableName)
-aljexImportFn.addEnvironment('AUDIT_LOG_TABLE_NAME',        aljexAuditLogTable.tableName)
-aljexImportFn.addEnvironment('BUCKET_NAME',                 backend.storage.resources.bucket.bucketName)
-aljexImportFn.addEnvironment('USER_POOL_ID',                backend.auth.resources.userPool.userPoolId)
+for (const [model, env] of [...ALJEX_WRITE_TABLES, ...ALJEX_READ_TABLES]) {
+  aljexImportFn.addEnvironment(env, aljexTables[model].tableName)
+}
+aljexImportFn.addEnvironment('DATA_SAFETY_BUCKET', dataSafetyBucket.bucketName)
+aljexImportFn.addEnvironment('USER_POOL_ID', backend.auth.resources.userPool.userPoolId)
 aljexImportFn.addToRolePolicy(
   new PolicyStatement({
     actions:   ['cognito-idp:AdminGetUser'],
     resources: [backend.auth.resources.userPool.userPoolArn],
   })
 )
-// Reads uploaded CSVs and writes per-row error CSVs.
-backend.storage.resources.bucket.grantRead(aljexImportFn, 'imports/*')
-backend.storage.resources.bucket.grantPut(aljexImportFn, 'imports/errors/*')
+// Source files, staged chunks, reports. The Amplify storage bucket is no longer touched.
+dataSafetyBucket.grantReadWrite(aljexImportFn, 'imports/*')
+// Async self-invoke (the worker continues itself). The name is derived from the root stack
+// (a plain string at synth time) and the invoke is granted by ARN string: granting through
+// the construct is the CloudFormation cycle pod-actions hit.
+let aljexRootStack: Stack = Stack.of(aljexImportFn)
+while (aljexRootStack.nestedStackParent) aljexRootStack = aljexRootStack.nestedStackParent
+const aljexFunctionName = `tms-aljex-import-${createHash('sha256').update(aljexRootStack.stackName).digest('hex').slice(0, 16)}`
+;(aljexImportFn.node.defaultChild as CfnFunction).functionName = aljexFunctionName
+aljexImportFn.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['lambda:InvokeFunction'],
+    resources: [Stack.of(aljexImportFn).formatArn({ service: 'lambda', resource: 'function', resourceName: aljexFunctionName, arnFormat: ArnFormat.COLON_RESOURCE_NAME })],
+  })
+)
+// IMPORT_SYNC_CARRIERS: the MyCarrierPackets sync Lambda does the MCP calls and writes the
+// `mcp*` fields itself; the import only invokes it (it never reads credentials).
+const aljexMcpSyncFn = backend.mcpSync.resources.lambda as LambdaFunction
+aljexImportFn.addEnvironment('MCP_SYNC_FUNCTION_NAME', aljexMcpSyncFn.functionName)
+aljexMcpSyncFn.grantInvoke(aljexImportFn)
+
+// ── tmsDataSafety Lambda (Aljex-exit Phase 0) ───────────────────────────────
+// Nightly + manual `ExportTableToPointInTime`, the export-everything CSV and the four
+// accountant CSVs. Reads DynamoDB directly; every table it can name is `<Model>-<apiId>-NONE`
+// of THIS stack, so it physically cannot reach a production table (different API id).
+const dataSafetyFn = backend.tmsDataSafety.resources.lambda as LambdaFunction
+const dataExportJobTable = aljexTables['DataExportJob']
+const dsApiId = aljexApiId
+dataSafetyFn.addToRolePolicy(
+  new PolicyStatement({ actions: ['dynamodb:ListTables'], resources: ['*'] }),
+)
+dataSafetyFn.addToRolePolicy(
+  new PolicyStatement({
+    actions: [
+      'dynamodb:DescribeTable', 'dynamodb:DescribeContinuousBackups', 'dynamodb:ExportTableToPointInTime',
+      'dynamodb:Scan', 'dynamodb:Query',
+    ],
+    resources: [tableArnPattern(dataSafetyFn, dsApiId), `${tableArnPattern(dataSafetyFn, dsApiId)}/index/*`],
+  })
+)
+dataSafetyFn.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['dynamodb:DescribeExport'],
+    resources: [`${tableArnPattern(dataSafetyFn, dsApiId)}/export/*`],
+  })
+)
+// Its own bookkeeping: job rows (read/write) and one AuditLog row per start/link action.
+dataSafetyFn.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem'],
+    resources: [dataExportJobTable.tableArn],
+  })
+)
+dataSafetyFn.addToRolePolicy(
+  new PolicyStatement({ actions: ['dynamodb:PutItem'], resources: [aljexTables['AuditLog'].tableArn] }),
+)
+dataSafetyFn.addEnvironment('DATA_SAFETY_BUCKET_NAME', dataSafetyBucket.bucketName)
+dataSafetyFn.addEnvironment('DATA_EXPORT_JOB_TABLE_NAME', dataExportJobTable.tableName)
+dataSafetyFn.addEnvironment('AUDIT_LOG_TABLE_NAME', aljexTables['AuditLog'].tableName)
+dataSafetyFn.addEnvironment('SHIPMENT_TABLE_NAME', aljexTables['Shipment'].tableName)
+dataSafetyFn.addEnvironment('USER_POOL_ID', backend.auth.resources.userPool.userPoolId)
+dataSafetyFn.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['cognito-idp:AdminGetUser'],
+    resources: [backend.auth.resources.userPool.userPoolArn],
+  })
+)
+// S3 export writes into `exports/nightly/…` (service-side, under this role's permissions);
+// the CSV job writes `exports/csv/…`; the Lambda also reads them back for presigned links.
+dataSafetyBucket.grantReadWrite(dataSafetyFn)
+// Self-invoke (`Event`) to continue a long CSV / export-check job; same by-name pattern.
+const dataSafetyFunctionName = `tms-data-safety-${createHash('sha256').update(aljexRootStack.stackName).digest('hex').slice(0, 16)}`
+;(dataSafetyFn.node.defaultChild as CfnFunction).functionName = dataSafetyFunctionName
+dataSafetyFn.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['lambda:InvokeFunction'],
+    resources: [Stack.of(dataSafetyFn).formatArn({ service: 'lambda', resource: 'function', resourceName: dataSafetyFunctionName, arnFormat: ArnFormat.COLON_RESOURCE_NAME })],
+  })
+)
+// Two rules, in the Lambda's own stack (the other schedules' precedent). They are the ONLY
+// rules the dev guard leaves enabled — see devRuleGuard.ts.
+const dataSafetyNightlyRule = new Rule(dataSafetyFn.stack, 'DataSafetyNightlyExportRule', {
+  schedule: Schedule.cron({ minute: '15', hour: '7', month: '*', weekDay: '*', year: '*' }),
+  description: 'Nightly DynamoDB point-in-time export to the DataSafety bucket (01:15 Central standard)',
+})
+dataSafetyNightlyRule.addTarget(new EventsLambdaTarget(dataSafetyFn, { event: RuleTargetInput.fromObject({ kind: 'NIGHTLY' }) }))
+const dataSafetyCheckRule = new Rule(dataSafetyFn.stack, 'DataSafetyNightlyCheckRule', {
+  schedule: Schedule.cron({ minute: '15', hour: '10', month: '*', weekDay: '*', year: '*' }),
+  description: 'Checks the nightly exports finished and records the result',
+})
+dataSafetyCheckRule.addTarget(new EventsLambdaTarget(dataSafetyFn, { event: RuleTargetInput.fromObject({ kind: 'NIGHTLY_CHECK' }) }))
 
 // ── brokerLoadAlert Lambda (Load stream → broker task + global Slack ping) ──
 // Fires when a load is assigned to the "Broker Need to Cover" driver: creates an
@@ -3350,6 +3489,7 @@ if (process.env.BCAT_ISOLATED_PREVIEW === 'true') {
     apptReportRule, cashReminderRule, monthlyRule, dailyMileageRule, locationSyncRule,
     faultSyncRule, odometerOpenWeekRule, odometerCloseDayRule,
     blueinkLocationRule, blueinkMileageRule, complianceScanRule, paychexWeeklyRule,
+    dataSafetyNightlyRule, dataSafetyCheckRule,
   ]) {
     (rule.node.defaultChild as CfnRule).state = 'DISABLED'
   }
@@ -3537,7 +3677,10 @@ if (process.env.BCAT_DEV_STACK === 'true') {
   let devRootStack: Stack = backend.data.stack
   while (devRootStack.nestedStackParent) devRootStack = devRootStack.nestedStackParent
   for (const construct of devRootStack.node.findAll()) {
-    if (construct instanceof CfnRule) construct.state = 'DISABLED'
+    // Exactly two exceptions (exact scope-id match): the nightly export and its check. The
+    // guard's rule is "nothing acts on the outside world by itself"; these two read dev tables
+    // and write the dev DataSafety bucket, nothing external. A lookalike id stays disabled.
+    if (construct instanceof CfnRule) construct.state = devRuleState(construct.node.scope?.node.id)
   }
   // Secrets that reach a third party with side effects are replaced by a placeholder on
   // dev. Amplify resolves `secret()` values at cold start from the SSM paths listed in

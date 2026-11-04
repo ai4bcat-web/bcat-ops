@@ -7,6 +7,12 @@
 
 import type { AttributeValue } from '@aws-sdk/client-dynamodb'
 import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest'
+
+const lambdaSend = vi.hoisted(() => vi.fn())
+vi.mock('@aws-sdk/client-lambda', () => ({
+  LambdaClient: class { send = lambdaSend },
+  InvokeCommand: class { constructor(public input: Record<string, unknown>) {} },
+}))
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb'
 import { DEFAULT_CHECK_CALL_PLAN, type CheckCallPlan } from '../../../src/lib/checkCallPlan'
 
@@ -188,6 +194,7 @@ import { signGeocodePayload } from '../tms-geocode/handler'
 import { SEED_DIVISIONS, SEED_RULES } from '../../../src/lib/ownership'
 import { SEED_VIEWS } from '../../../src/lib/shipmentViewDefs'
 import { PROVIDERS } from '../../../src/lib/integrations/registry'
+import { clearMcpTokenCache } from '../../../src/lib/integrations/mcpAdapter'
 import { resetIntegrationSecretsCache } from '../_shared/integrationSecrets'
 
 // ── Mock types ────────────────────────────────────────────────────────────────
@@ -2148,6 +2155,26 @@ describe('SAVE_OWNERSHIP_DIVISION', () => {
     expect(tables.divisions.get('LOCAL')).toMatchObject({ name: 'Local drivers', version: 2 })
   })
 
+  it('keeps a seeded placeholder address UNCONFIRMED until a person changes it', async () => {
+    const tables = ownershipTables({ 'OwnershipDivision-test': [] })
+    await handler(event('SAVE_OWNERSHIP_DIVISION', {
+      code: 'AUTO', name: 'Auto Shipping', intakeEmail: 'tenders-auto-shipping@bcatcorp.com', intakeEmailConfirmed: false,
+    }, ADMIN_CALLER))
+    expect(tables.divisions.get('AUTO')).toMatchObject({ intakeEmailConfirmed: false })
+
+    // A save that leaves the address alone (a rename) does not confirm it.
+    await handler(event('SAVE_OWNERSHIP_DIVISION', {
+      id: 'AUTO', code: 'AUTO', name: 'Auto Shipping Co', intakeEmail: 'tenders-auto-shipping@bcatcorp.com',
+    }, ADMIN_CALLER))
+    expect(tables.divisions.get('AUTO')).toMatchObject({ intakeEmailConfirmed: false })
+
+    // Typing a different address is the confirmation.
+    await handler(event('SAVE_OWNERSHIP_DIVISION', {
+      id: 'AUTO', code: 'AUTO', name: 'Auto Shipping Co', intakeEmail: 'auto@bcatcorp.com',
+    }, ADMIN_CALLER))
+    expect(tables.divisions.get('AUTO')).toMatchObject({ intakeEmailConfirmed: true })
+  })
+
   it('refuses an active subdivision under an archived parent, at any depth', async () => {
     const tables = ownershipTables({
       'OwnershipDivision-test': [
@@ -2638,6 +2665,18 @@ function integrationTables(seed: Record<string, Record<string, unknown>[]> = {})
     const id = String(update.input.Key?.id?.S ?? '')
     const existing = table.get(id) ?? { id }
     const values = update.input.ExpressionAttributeValues ?? {}
+    const names = (update.input as { ExpressionAttributeNames?: Record<string, string> }).ExpressionAttributeNames
+    if (names?.['#k0'] !== undefined) {
+      // The MyCarrierPackets CAS write: SET #updatedAt = :now, #kN = :vN guarded by :prev.
+      const prev = values[':prev']?.S
+      if (prev !== undefined ? existing.updatedAt !== prev : existing.updatedAt !== undefined) return Promise.reject(conditionFailed())
+      const patched: Record<string, unknown> = { ...existing, updatedAt: values[':now']?.S }
+      for (const [alias, key] of Object.entries(names)) {
+        if (alias.startsWith('#k')) patched[key] = unmarshall({ v: values[`:v${alias.slice(2)}`] }).v
+      }
+      table.set(id, patched)
+      return Promise.resolve({})
+    }
     const next: Record<string, unknown> = {
       ...existing,
       lastStubAt: values[':at']?.S,
@@ -2653,6 +2692,7 @@ function integrationTables(seed: Record<string, Record<string, unknown>[]> = {})
   return {
     integrations: tableOf('Integration-test'),
     audit: tableOf('AuditLog-test'),
+    carriers: tableOf('Carrier-test'),
     seen,
     tableNames: (): string[] => [...new Set(seen.map((cmd) => String(cmd.input.TableName ?? '')))].sort(),
   }
@@ -2789,8 +2829,8 @@ describe('CONNECT_INTEGRATION', () => {
       event(
         'CONNECT_INTEGRATION',
         {
-          provider: 'MYCARRIERPACKETS',
-          credentials: { username: 'bcat', password: 'mcp-password', webhookSigningSecret: 'whsec-abcdef' },
+          provider: 'PARADE',
+          credentials: { apiKey: 'parade-api-key', webhookSigningSecret: 'whsec-abcdef' },
         },
         ADMIN_CALLER,
       ),
@@ -2798,13 +2838,13 @@ describe('CONNECT_INTEGRATION', () => {
 
     // The public tracking Lambda may read `<PROVIDER>/webhook` and nothing else,
     // so the password must not be in the parameter it can decrypt.
-    const main = String(store.params.get(`${INTEGRATION_PATH}/MYCARRIERPACKETS`))
-    const webhook = String(store.params.get(`${INTEGRATION_PATH}/MYCARRIERPACKETS/webhook`))
+    const main = String(store.params.get(`${INTEGRATION_PATH}/PARADE`))
+    const webhook = String(store.params.get(`${INTEGRATION_PATH}/PARADE/webhook`))
     expect(JSON.parse(webhook) as Record<string, string>).toEqual({ webhookSigningSecret: 'whsec-abcdef' })
     expect(main).not.toContain('whsec-abcdef')
-    expect(webhook).not.toContain('mcp-password')
-    // The page still sees one object: all three fields are masked on the row.
-    expect(row.credentialMask).toHaveLength(3)
+    expect(webhook).not.toContain('parade-api-key')
+    // The page still sees one object: both fields are masked on the row.
+    expect(row.credentialMask).toHaveLength(2)
   })
 
   it('refuses a DAT service account with a plus address', async () => {
@@ -2940,117 +2980,132 @@ describe('VALIDATE_INTEGRATION', () => {
 })
 
 describe('MyCarrierPackets (Step N2)', () => {
-  it('MYCARRIERPACKETS_SYNC_CARRIER updates the matching Carrier row', async () => {
-    const tables = integrationTables({
-      'Integration-test': [{
-        id: 'MYCARRIERPACKETS',
-        provider: 'MYCARRIERPACKETS',
-        kind: 'PROVIDER',
-        status: 'CONNECTED',
-        mode: 'LIVE',
-        version: 1,
-        settings: { maxRiskAssessmentPoints: 50 },
-        capabilities: ['connect', 'validate', 'sync'],
-      }],
-      'Carrier-test': [{
-        id: 'car-1',
-        mcNumber: 'MC-123',
-        name: 'Haul Bros',
-        mcpStatus: 'INVITED',
-        insurancePolicies: [{ id: 'existing', type: 'CARGO', expiresAt: '2024-01-01T00:00:00.000Z', active: true }],
-        version: 1,
-      }],
-    })
-    ssmStore({
-      [`${process.env.INTEGRATION_PARAM_PATH}/MYCARRIERPACKETS`]: JSON.stringify({ username: 'u', password: 'p' }),
-      [`${process.env.INTEGRATION_PARAM_PATH}/MYCARRIERPACKETS/webhook`]: JSON.stringify({ webhookSigningSecret: 'whsec-test' }),
-    })
-    const fetchSpy = vi.fn().mockImplementation(async (url: string) => {
-      if (url.includes('/token')) return new Response(JSON.stringify({ access_token: 'tok-123' }), { status: 200 })
-      return new Response(JSON.stringify({
-        mcNumber: 'MC-123',
-        status: 'ACCEPTABLE',
-        safetyRating: 'SATISFACTORY',
-        reviewStatus: 'ACCEPTABLE',
-        riskAssessmentPoints: 10,
-        insurance: {
-          cargo: { expiresAt: '2099-12-31T00:00:00.000Z', active: true, limitCents: 100_000_00 },
-          liability: { expiresAt: '2099-06-30T00:00:00.000Z', active: true },
-        },
-      }), { status: 200 })
-    })
-    globalThis.fetch = fetchSpy as unknown as typeof fetch
-
-    const result = (await handler(event('MYCARRIERPACKETS_SYNC_CARRIER', { mcNumber: 'MC-123' }, ADMIN_CALLER))) as Record<string, unknown>
-
-    expect(result.result).toMatchObject({ ok: true, mode: 'LIVE' })
-    expect(result.carrier).toMatchObject({ mcNumber: 'MC-123' })
-    const carrierPut = tables.seen.find(
-      (cmd): cmd is MockPutCommand =>
-        cmd.__type === 'Put' &&
-        String(cmd.input.TableName) === 'Carrier-test' &&
-        String(cmd.input.Item?.id?.S) === 'car-1',
+  const MCP_PARAM = () => `${process.env.INTEGRATION_PARAM_PATH}/MYCARRIERPACKETS`
+  // Fake credentials only; fetch is always a mock, nothing here reaches api.mycarrierpackets.com.
+  const FAKE = { username: 'fake-user', password: 'fake-pass-123' }
+  const mcpRow = (over: Record<string, unknown> = {}) => ({
+    id: 'MYCARRIERPACKETS',
+    provider: 'MYCARRIERPACKETS',
+    kind: 'PROVIDER',
+    status: 'CONNECTED',
+    mode: 'LIVE',
+    health: 'OK',
+    version: 1,
+    ...over,
+  })
+  const carrierBody = (over: Record<string, unknown> = {}) => ({
+    DOTNumber: 5550123,
+    MCNumber: 'MC123',
+    LegalName: 'Haul Bros',
+    CarrierCustomerPacketStatuses: [{ CarrierPacketStatus: 'Completed' }],
+    CarrierCustomerAgreements: [{ SignatureDate: '2026-10-20T09:30:00', OnCurrentCustomerAgreement: true }],
+    AssureAdvantage: [{ CarrierDetails: { Safety: { rating: 'Satisfactory' }, RiskAssessmentDetails: { TotalPoints: 10, OverallRating: 'Pass' } } }],
+    ...over,
+  })
+  /** Token on /token, `body` on every carrier call. */
+  const mcpApi = (body: unknown = carrierBody()) => {
+    const spy = vi.fn(async (url: string) =>
+      url.includes('/token')
+        ? new Response(JSON.stringify({ access_token: 'tok-123', expires_in: 3600 }), { status: 200 })
+        : new Response(JSON.stringify(body), { status: 200 }),
     )
-    expect(carrierPut).toBeDefined()
-    const carrier = unmarshall(carrierPut!.input.Item ?? {}) as Record<string, unknown>
-    expect(carrier.mcpStatus).toBe('ACCEPTABLE')
-    expect(carrier.safetyRating).toBe('SATISFACTORY')
-    expect(carrier.mcpReviewStatus).toBe('ACCEPTABLE')
-    expect(carrier.mcpRiskScore).toBe(10)
+    globalThis.fetch = spy as unknown as typeof fetch
+    return spy
+  }
+
+  beforeEach(() => {
+    clearMcpTokenCache()
+    process.env.MCP_SYNC_FUNCTION_NAME = 'mcp-sync-test'
+    lambdaSend.mockReset()
+    lambdaSend.mockResolvedValue({})
   })
 
-  it('MYCARRIERPACKETS_SYNC_ALL processes every carrier with an mcNumber', async () => {
-    const _tables = integrationTables({
-      'Integration-test': [{
-        id: 'MYCARRIERPACKETS',
-        provider: 'MYCARRIERPACKETS',
-        kind: 'PROVIDER',
-        status: 'CONNECTED',
-        mode: 'LIVE',
-        version: 1,
-        capabilities: ['connect', 'validate', 'sync'],
-      }],
-      'Carrier-test': [
-        { id: 'car-1', mcNumber: 'MC-111', name: 'One', version: 1 },
-        { id: 'car-2', mcNumber: 'MC-222', name: 'Two', version: 1 },
-        { id: 'car-3', name: 'No MC', version: 1 },
-      ],
-    })
-    ssmStore({
-      [`${process.env.INTEGRATION_PARAM_PATH}/MYCARRIERPACKETS`]: JSON.stringify({ username: 'u', password: 'p' }),
-      [`${process.env.INTEGRATION_PARAM_PATH}/MYCARRIERPACKETS/webhook`]: JSON.stringify({ webhookSigningSecret: 'whsec-test' }),
-    })
-    // The mock fetch returns a token first, then the carrier body for each lookup.
-    const fetchSpy = vi.fn().mockImplementation(async (url: string) => {
-      if (url.includes('/token')) return new Response(JSON.stringify({ access_token: 'tok-123' }), { status: 200 })
-      return new Response(JSON.stringify({ mcNumber: 'MC-111', status: 'ACCEPTABLE' }), { status: 200 })
-    })
-    globalThis.fetch = fetchSpy as unknown as typeof fetch
+  it('VALIDATE_INTEGRATION proves the credential with the token call: LIVE, health OK', async () => {
+    const tables = integrationTables({ 'Integration-test': [mcpRow({ mode: 'STUB', status: 'NOT_CONNECTED', health: 'UNKNOWN' })] })
+    ssmStore({ [MCP_PARAM()]: JSON.stringify(FAKE) })
+    const fetchSpy = mcpApi()
 
-    const result = (await handler(event('MYCARRIERPACKETS_SYNC_ALL', {}, ADMIN_CALLER))) as Record<string, unknown>
+    const row = (await handler(event('VALIDATE_INTEGRATION', { provider: 'MYCARRIERPACKETS' }, ADMIN_CALLER))) as Record<string, unknown>
 
-    expect(result.count).toBe(2)
-    expect(result.ok).toBe(2)
+    expect(row).toMatchObject({ mode: 'LIVE', status: 'CONNECTED', health: 'OK', healthReason: 'OK' })
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+    expect(String(fetchSpy.mock.calls[0]![0])).toBe('https://api.mycarrierpackets.com/token')
+    expect(JSON.stringify([...tables.integrations.values(), ...tables.audit.values()])).not.toContain(FAKE.password)
   })
 
-  it('MYCARRIERPACKETS_VALIDATE marks missing credentials STUB', async () => {
-    const _tables = integrationTables({
-      'Integration-test': [{
-        id: 'MYCARRIERPACKETS',
-        provider: 'MYCARRIERPACKETS',
-        kind: 'PROVIDER',
-        status: 'NOT_CONNECTED',
-        mode: 'STUB',
-        version: 1,
-        capabilities: ['connect', 'validate', 'sync'],
-      }],
-    })
+  it('VALIDATE_INTEGRATION with a rejected password: INVALID_CREDENTIALS, no secret in the row', async () => {
+    const tables = integrationTables({ 'Integration-test': [mcpRow({ health: 'UNKNOWN' })] })
+    ssmStore({ [MCP_PARAM()]: JSON.stringify(FAKE) })
+    globalThis.fetch = vi.fn(async () => new Response(JSON.stringify({ error: 'invalid_grant' }), { status: 400 })) as unknown as typeof fetch
+
+    const row = (await handler(event('VALIDATE_INTEGRATION', { provider: 'MYCARRIERPACKETS' }, ADMIN_CALLER))) as Record<string, unknown>
+
+    expect(row).toMatchObject({ health: 'INVALID_CREDENTIALS', healthReason: 'INVALID_CREDENTIALS' })
+    expect(String(row.healthDetail)).toContain('rejected')
+    expect(JSON.stringify([...tables.integrations.values()])).not.toContain(FAKE.password)
+  })
+
+  it('VALIDATE_INTEGRATION with no credentials stays STUB and says why, without a call', async () => {
+    integrationTables({ 'Integration-test': [mcpRow({ mode: 'STUB', status: 'NOT_CONNECTED', health: 'UNKNOWN' })] })
     ssmStore()
+    const fetchSpy = mcpApi()
 
-    const row = (await handler(event('MYCARRIERPACKETS_VALIDATE', {}, ADMIN_CALLER))) as Record<string, unknown>
+    const row = (await handler(event('VALIDATE_INTEGRATION', { provider: 'MYCARRIERPACKETS' }, ADMIN_CALLER))) as Record<string, unknown>
 
-    expect(row.mode).toBe('STUB')
-    expect(row.health).toBe('UNABLE_TO_VERIFY')
+    expect(row).toMatchObject({ mode: 'STUB', health: 'UNABLE_TO_VERIFY', healthReason: 'NO_CREDENTIALS' })
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it('MYCARRIERPACKETS_PULL_START hands the pull to mcp-sync asynchronously and returns at once', async () => {
+    integrationTables({ 'Integration-test': [mcpRow()] })
+    ssmStore({ [MCP_PARAM()]: JSON.stringify(FAKE) })
+    const fetchSpy = mcpApi()
+
+    const result = (await handler(event('MYCARRIERPACKETS_PULL_START', { restart: true }, ADMIN_CALLER))) as Record<string, unknown>
+
+    expect(result).toEqual({ started: true, restart: true })
+    expect(lambdaSend).toHaveBeenCalledTimes(1)
+    const input = lambdaSend.mock.calls[0]![0].input as { InvocationType: string; Payload: Uint8Array }
+    expect(input.InvocationType).toBe('Event')
+    expect(JSON.parse(new TextDecoder().decode(input.Payload))).toMatchObject({ kind: 'PULL_ALL', restart: true })
+    expect(fetchSpy).not.toHaveBeenCalled() // no MCP call inside the resolver
+  })
+
+  it('MYCARRIERPACKETS_PULL_START refuses unless the integration reports LIVE (dev without a validated credential)', async () => {
+    integrationTables({ 'Integration-test': [mcpRow({ mode: 'STUB', health: 'UNABLE_TO_VERIFY' })] })
+    ssmStore({ [MCP_PARAM()]: JSON.stringify(FAKE) })
+
+    await expect(handler(event('MYCARRIERPACKETS_PULL_START', {}, ADMIN_CALLER))).rejects.toThrow(/does not report LIVE/)
+    expect(lambdaSend).not.toHaveBeenCalled()
+  })
+
+  it('MYCARRIERPACKETS_PULL_STATUS returns the saved progress, and null before the first run', async () => {
+    const state = { runId: 'r1', status: 'PARTIAL', counts: { created: 1 } }
+    integrationTables({ 'Integration-test': [mcpRow(), { id: 'pull:MYCARRIERPACKETS', kind: 'SYNC_STATE', state: JSON.stringify(state) }] })
+    ssmStore()
+    expect(await handler(event('MYCARRIERPACKETS_PULL_STATUS', {}, ADMIN_CALLER))).toEqual({ state })
+
+    integrationTables({ 'Integration-test': [mcpRow()] })
+    expect(await handler(event('MYCARRIERPACKETS_PULL_STATUS', {}, ADMIN_CALLER))).toEqual({ state: null })
+  })
+
+  it('MYCARRIERPACKETS_SYNC_CARRIER pulls one carrier through mcp-sync and audits it', async () => {
+    const tables = integrationTables({ 'Integration-test': [mcpRow()] })
+    ssmStore({ [MCP_PARAM()]: JSON.stringify(FAKE) })
+    lambdaSend.mockResolvedValueOnce({ Payload: new TextEncoder().encode(JSON.stringify({ ready: true, result: 'SYNCED' })) })
+
+    const result = await handler(event('MYCARRIERPACKETS_SYNC_CARRIER', { carrierId: 'car-1' }, ADMIN_CALLER))
+
+    expect(result).toEqual({ carrierId: 'car-1', result: 'SYNCED' })
+    expect(JSON.parse(new TextDecoder().decode((lambdaSend.mock.calls[0]![0].input as { Payload: Uint8Array }).Payload))).toEqual({ kind: 'PULL_ONE', carrierId: 'car-1' })
+    expect(auditRows(tables.audit).some((a) => a.action === 'MYCARRIERPACKETS_SYNC_CARRIER')).toBe(true)
+  })
+
+  it('the pull actions are owner/ADMIN only', async () => {
+    integrationTables({ 'Integration-test': [mcpRow()] })
+    ssmStore({ [MCP_PARAM()]: JSON.stringify(FAKE) })
+    await expect(handler(event('MYCARRIERPACKETS_PULL_START', {}, PAGE_CUSTOMER_CALLER))).rejects.toThrow(/Forbidden/)
+    await expect(handler(event('MYCARRIERPACKETS_PULL_STATUS', {}, PAGE_CUSTOMER_CALLER))).rejects.toThrow(/Forbidden/)
   })
 })
 

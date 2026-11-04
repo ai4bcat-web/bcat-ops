@@ -142,6 +142,7 @@ export function planOwnAssetDrivers(loads, legs, drivers, shipments = []) {
     loads: loads.length,
     ownAssetLive: 0,
     VOIDED_OR_CANCELED: 0,
+    LEGACY_IMPORTED: 0,
     NO_DRIVER_ANYWHERE: 0,
     LEG_MISSING: 0,
     LEG_NAME_MISSING: 0,
@@ -169,6 +170,12 @@ export function planOwnAssetDrivers(loads, legs, drivers, shipments = []) {
   };
 
   for (const load of loads) {
+    // Imported Aljex history carries no driver and is exempt from Step W (DECIDED-5):
+    // it is neither reported as a gap nor given a leg.
+    if (load.legacyImported === true) {
+      counts.LEGACY_IMPORTED += 1;
+      continue;
+    }
     const loadLegs = legsByLoad.get(load.id) ?? [];
     const activeLegs = loadLegs.filter((l) => l.status === 'ACTIVE');
     const activeLeg =
@@ -297,7 +304,7 @@ export function planOwnAssetDrivers(loads, legs, drivers, shipments = []) {
  */
 export function sourceRowsOf(source) {
   const FIELDS = {
-    Load: ['shipmentId', 'assignmentType', 'activeLoadCarrierId', 'status', 'voidedAt', 'pickupDriverId', 'deliveryDriverId', 'truckId', 'trailerNumber'],
+    Load: ['shipmentId', 'assignmentType', 'activeLoadCarrierId', 'status', 'voidedAt', 'legacyImported', 'pickupDriverId', 'deliveryDriverId', 'truckId', 'trailerNumber'],
     LoadCarrier: ['loadId', 'kind', 'status', 'sequence', 'driverId', 'driverName', 'driverPhone'],
     Driver: ['name', 'phone', 'active', 'type'],
   };
@@ -359,6 +366,7 @@ export function reviewText(plan) {
     `Live own-fleet loads:          ${s.ownAssetLive}`,
     '',
     `VOIDED_OR_CANCELED             ${s.VOIDED_OR_CANCELED}   (skipped)`,
+    `LEGACY_IMPORTED                ${s.LEGACY_IMPORTED}   (imported Aljex history; skipped)`,
     `NO_DRIVER_ANYWHERE             ${s.NO_DRIVER_ANYWHERE}   (report only)`,
     `LEG_MISSING                    ${s.LEG_MISSING}   (CREATE_LEG when the Load names a usable driver)`,
     `LEG_NAME_MISSING               ${s.LEG_NAME_MISSING}   (FILL_LEG_NAME)`,

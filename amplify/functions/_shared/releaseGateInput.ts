@@ -218,6 +218,7 @@ export async function loadReleaseGateInput(
       status: shipment.status == null ? null : String(shipment.status),
       voidedAt: shipment.voidedAt == null ? null : String(shipment.voidedAt),
       deletedAt: shipment.deletedAt == null ? null : String(shipment.deletedAt),
+      legacyImported: shipment.legacyImported === true,
     },
     order: {
       arStatus: order.arStatus == null ? null : String(order.arStatus),

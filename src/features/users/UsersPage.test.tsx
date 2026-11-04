@@ -28,6 +28,9 @@ const mocks = vi.hoisted(() => ({
   enableCognitoUser: vi.fn(),
   deleteCognitoUser: vi.fn(),
   resetCognitoPassword: vi.fn(),
+  listAljexCodes: vi.fn(),
+  setAljexCodeMap: vi.fn(),
+  reassignShipmentsByRepCode: vi.fn(),
 }))
 
 const auth = vi.hoisted(() => ({ loading: false, isOwner: true }))
@@ -71,6 +74,7 @@ beforeEach(() => {
   mocks.listUserProfiles.mockResolvedValue([])
   mocks.getTmsSettings.mockResolvedValue({ id: 'default', teams: [] })
   mocks.listOwnershipDivisions.mockResolvedValue([])
+  mocks.listAljexCodes.mockResolvedValue([])
 })
 
 describe('UsersPage', () => {

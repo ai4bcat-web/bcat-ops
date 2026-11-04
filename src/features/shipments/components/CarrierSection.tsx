@@ -76,7 +76,9 @@ export function CarrierSection({ bundle, actions, isAdmin = false }: {
   const shipmentId = bundle.shipment.id
   const buildState = bundle.shipment.buildState
   const voided = Boolean(bundle.shipment.voidedAt)
-  const ownAssetNoLeg = load?.assignmentType === 'OWN_ASSET' && !voided
+  // Imported Aljex history has no driver and is exempt from Step W (DECIDED-5).
+  const legacy = bundle.shipment.legacyImported === true
+  const ownAssetNoLeg = load?.assignmentType === 'OWN_ASSET' && !voided && !legacy
 
   const noDriverBanner = (
     <TmsAlert tone="orange">
@@ -115,7 +117,7 @@ export function CarrierSection({ bundle, actions, isAdmin = false }: {
   }
 
   const isOwnAsset = loadCarrier.kind === 'OWN_ASSET'
-  const ownAssetNoDriver = isOwnAsset && !loadCarrier.driverId
+  const ownAssetNoDriver = isOwnAsset && !loadCarrier.driverId && !legacy
   const driver = loadCarrier.driverId ? drivers.find((d) => d.id === loadCarrier.driverId) ?? null : null
   const localDriver = Boolean(driver) && (!driver?.fleetGroup || driver.fleetGroup === 'LOCAL')
   const stopDriverIds = distinctStopDrivers(load?.stops)

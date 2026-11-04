@@ -222,6 +222,20 @@ function DivisionDialog({
         {intakeCheck.unverifiedDomain && !intakeProblem ? (
           <TmsBadge tone="orange">Unverified domain</TmsBadge>
         ) : null}
+        {!draft.isNew && !draft.intakeEmailConfirmed ? (
+          <p className="tms-muted" style={{ margin: '6px 0 0' }}>
+            <TmsBadge tone="orange">UNCONFIRMED</TmsBadge>{' '}
+            <label>
+              <input
+                type="checkbox"
+                aria-label="This mailbox exists and receives tenders"
+                checked={draft.intakeEmailConfirmed}
+                onChange={(e) => onChange({ ...draft, intakeEmailConfirmed: e.target.checked })}
+              />{' '}
+              This mailbox exists and receives tenders. Until confirmed, incoming mail is not routed by this address.
+            </label>
+          </p>
+        ) : null}
         {mailboxes.length > 0 ? (
           <p className="tms-muted" style={{ margin: '6px 0 0' }}>
             Suggestions:{' '}
@@ -629,6 +643,12 @@ export function DivisionsPage() {
               {division.brand ? <span className="tms-muted">[{division.brand}]</span> : null}
               <TmsBadge tone={division.active ? 'green' : 'gray'}>{division.active ? 'Active' : 'Archived'}</TmsBadge>
               {division.active && !division.intakeEmail ? <TmsBadge tone="orange">No intake e-mail</TmsBadge> : null}
+              {division.active && division.intakeEmail ? (
+                <span className="tms-muted" data-testid={`division-${division.code}-intake`}>{division.intakeEmail}</span>
+              ) : null}
+              {division.active && division.intakeEmail && division.intakeEmailConfirmed !== true ? (
+                <TmsBadge tone="orange">UNCONFIRMED</TmsBadge>
+              ) : null}
               <span className="tms-muted">#{division.sortOrder}</span>
               <span style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
                 <TmsButton

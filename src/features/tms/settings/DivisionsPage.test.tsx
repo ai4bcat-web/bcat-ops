@@ -164,6 +164,49 @@ describe('DivisionsPage', () => {
       save()
       expect(await screen.findByText('That address already receives tenders for Somebody')).toBeInTheDocument()
     })
+
+    describe('seeded placeholder addresses', () => {
+      const openPlaceholder = async () => {
+        mocks.listOwnershipDivisions.mockResolvedValue([
+          division({ code: 'BROKERAGE', name: 'BCAT Logistics', intakeEmail: 'tenders-bcat-logistics@bcatcorp.com', intakeEmailConfirmed: false }),
+          division({ code: 'ASSETS', name: 'Ivan Cartage', intakeEmail: 'assets@bcatcorp.com', intakeEmailConfirmed: true }),
+        ])
+        render(<DivisionsPage />)
+        await ready()
+      }
+
+      it('badges an address nobody has confirmed, and only that one', async () => {
+        await openPlaceholder()
+        expect(within(screen.getByTestId('division-BROKERAGE')).getByText('UNCONFIRMED')).toBeInTheDocument()
+        expect(within(screen.getByTestId('division-ASSETS')).queryByText('UNCONFIRMED')).toBeNull()
+      })
+
+      it('saving the division without touching the address does not confirm it', async () => {
+        mocks.saveOwnershipDivision.mockResolvedValue({})
+        await openPlaceholder()
+        fireEvent.click(screen.getByRole('button', { name: 'Edit BROKERAGE' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Save division' }))
+        await waitFor(() => expect(mocks.saveOwnershipDivision).toHaveBeenCalledTimes(1))
+        expect(mocks.saveOwnershipDivision.mock.calls[0][0]).not.toHaveProperty('intakeEmailConfirmed')
+      })
+
+      it('ticking the confirmation, or typing a new address, confirms it', async () => {
+        mocks.saveOwnershipDivision.mockResolvedValue({})
+        await openPlaceholder()
+        fireEvent.click(screen.getByRole('button', { name: 'Edit BROKERAGE' }))
+        fireEvent.click(screen.getByLabelText('This mailbox exists and receives tenders'))
+        fireEvent.click(screen.getByRole('button', { name: 'Save division' }))
+        await waitFor(() => expect(mocks.saveOwnershipDivision).toHaveBeenCalledTimes(1))
+        expect(mocks.saveOwnershipDivision.mock.calls[0][0]).toMatchObject({ intakeEmailConfirmed: true })
+
+        mocks.saveOwnershipDivision.mockClear()
+        fireEvent.click(await screen.findByRole('button', { name: 'Edit BROKERAGE' }))
+        fireEvent.change(screen.getByLabelText('Intake e-mail'), { target: { value: 'tenders@bcatcorp.com' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Save division' }))
+        await waitFor(() => expect(mocks.saveOwnershipDivision).toHaveBeenCalledTimes(1))
+        expect(mocks.saveOwnershipDivision.mock.calls[0][0]).toMatchObject({ intakeEmail: 'tenders@bcatcorp.com', intakeEmailConfirmed: true })
+      })
+    })
   })
 
   it('saves the rule order the ▲ button produced', async () => {

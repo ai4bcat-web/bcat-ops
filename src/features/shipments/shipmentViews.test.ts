@@ -98,6 +98,12 @@ describe('columns', () => {
     expect(needsDriver(row('6', { assignmentType: 'OWN_ASSET' }))).toBe(true)
   })
 
+  it('keeps imported Aljex history out of Needs-driver and labels it as history', () => {
+    const history = row('7', { assignmentType: 'OWN_ASSET', driverId: null, legacyImported: true, status: 'DELIVERED' })
+    expect(needsDriver(history)).toBe(false)
+    expect(carrierLabel(history)).toBe('Own fleet (history)')
+  })
+
   it('puts the subdivision in brackets behind the division name', () => {
     const names: Record<string, string> = { ASSETS: 'Ivan Cartage', BOX_TRUCK: 'Box trucks' }
     expect(divisionLabel(row('1', { revDivision: 'ASSETS', revSubdivision: 'BOX_TRUCK' }), (c) => names[c] ?? c))

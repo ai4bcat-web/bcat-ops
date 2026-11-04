@@ -3,6 +3,7 @@ import { uploadData, getUrl, remove } from 'aws-amplify/storage'
 import outputs from '../../amplify_outputs.json'
 import type { Load, Stop, ApptType, Driver, AuditLogEntry, EntityType, AuditAction, FactoringItem, FactoringItemStatus, TimeClockEntry } from '@/types'
 import type { RateConExtract, RateConFreight } from '@/lib/otrInvoice'
+import type { McpPullState } from '@/lib/integrations/mcpPull'
 import type { Equipment, MaintenanceTask, MaintenanceInvoice } from '@/types/equipment'
 import { fuelDedupKey } from '@/lib/driverFuel'
 import { fileContentType } from '@/lib/disputeFiles'
@@ -12,7 +13,12 @@ import type { VendorPayable, VendorApAttachment, VendorPayableDetails, VendorPay
 import type {
   CustomerRecord, LocationRecord, Division, TmsSettings, GeocodeResult, AutocompleteSuggestion,
   LocationMergePreview, LocationMergeJob, ImportJob,
-  AljexImportInput, AljexImportJob,
+  AljexImportJob, AljexMappingProfile, AljexProfileInput, AljexReportLink, AljexSampleRow, ApplyAljexImportInput,
+  AljexCodeMapRecord, AljexCodeSummary, LegacyAljexRowResult, ReassignByRepCodeInput, ReassignByRepCodeResult,
+  SetAljexCodeMapInput,
+  CsvExportStartInput, DataExportJob, DataExportLinks, DataStatus, ImportReportSummary,
+  PlanAljexImportInput, PrepareAljexImportInput, PrepareAljexImportResult, SeedProCounterInput,
+  SeedProCounterResult, SyncImportedCarriersResult,
   ShipmentRecord, OrderRecord, LoadCarrierRecord, LoadFinancialsRecord, LoadChargeRecord,
   LoadChargeInput, ShipmentBundle, ShipmentLoadFields, ShipmentStatus, ShipmentMode,
   LoadWorkflowStatus, AssignmentType,
@@ -336,14 +342,16 @@ function serializeLoadInput<T extends { stops?: unknown; sortOrder?: unknown; cu
     const { voidedAt: _drop, ...rest } = out as T & { voidedAt?: unknown }
     out = rest as T
   }
-  // The same rule, for the same reason, on the three identity fields. A PRO is claimed
+  // The same rule, for the same reason, on the three identity fields (and, since the
+  // Aljex import, on `legacyImported`/`legacySource`: only the import engine may flag a
+  // load as history, otherwise a client could flag a live load to dodge the gates). A PRO is claimed
   // atomically and never released, so `aljexId` — and the `tmsId`/`pickupNumber` that
   // fall back to it — became field-level read-only to clients when the claim landed; only
   // SET_LOAD_PRO may move one. The drawer and the calendar both save a whole payload that
   // still carries all three, and AppSync refuses the entire mutation with
   // "Unauthorized on [aljexId]" when one is present, so every unrelated load save would
   // fail. Dropping them here keeps the write to what the client may actually change.
-  for (const field of ['aljexId', 'tmsId', 'pickupNumber'] as const) {
+  for (const field of ['aljexId', 'tmsId', 'pickupNumber', 'legacyImported', 'legacySource'] as const) {
     if (field in (out as object)) {
       const { [field]: _drop, ...rest } = out as T & Record<typeof field, unknown>
       out = rest as unknown as T
@@ -1176,6 +1184,9 @@ let customersHaveV3 = true
 let customersHaveV4 = true
 let customersHaveV5 = true
 let customersHaveV6 = true
+// Aljex-exit: the legacy flag (imported, terms/credit not reviewed yet).
+const CUSTOMER_V7_FIELDS = ['legacyImported', 'legacySource']
+let customersHaveV7 = true
 const customerFields = () => [
   CUSTOMER_FIELDS_BASE,
   customersHaveV2 ? CUSTOMER_V2_FIELDS.join(' ') : '',
@@ -1183,6 +1194,7 @@ const customerFields = () => [
   customersHaveV4 ? CUSTOMER_V4_FIELDS.join(' ') : '',
   customersHaveV5 ? CUSTOMER_V5_FIELDS.join(' ') : '',
   customersHaveV6 ? CUSTOMER_V6_FIELDS.join(' ') : '',
+  customersHaveV7 ? CUSTOMER_V7_FIELDS.join(' ') : '',
 ].filter(Boolean).join(' ')
 
 const LOCATION_FIELDS = `
@@ -1397,7 +1409,12 @@ export async function listCustomers(opts?: { includeArchived?: boolean }): Promi
       const rows = await run()
       return opts?.includeArchived ? rows : rows.filter(isActiveDirectoryRecord)
     } catch (err) {
-      if (attempt >= 5) throw err
+      if (attempt >= 7) throw err
+      if (customersHaveV7 && fieldNamed(CUSTOMER_V7_FIELDS, err)) {
+        console.warn('[apiClient] backend has no Customer legacy flag yet — querying without it until deploy')
+        customersHaveV7 = false
+        continue
+      }
       if (customersHaveV6 && fieldNamed(CUSTOMER_V6_FIELDS, err)) {
         console.warn('[apiClient] backend has no Customer tracker/automation fields yet — querying without them until deploy')
         customersHaveV6 = false
@@ -1642,18 +1659,149 @@ export async function listImportJobs(entity?: ImportEntity): Promise<ImportJob[]
   return entity ? unwrapped.filter((j) => j.entity === entity) : unwrapped
 }
 
-// Step N1: Aljex bulk import.
-export async function previewAljexImport(input: AljexImportInput): Promise<AljexImportJob> {
-  return aljexImportAction<AljexImportJob>('ALJEX_IMPORT_PREVIEW', input)
+// Aljex-exit Phase 0: import pipeline. Every call is owner/ADMIN only (enforced by the Lambda).
+export async function prepareAljexImport(input: PrepareAljexImportInput): Promise<PrepareAljexImportResult> {
+  return aljexImportAction<PrepareAljexImportResult>('IMPORT_PREPARE', input)
 }
 
-export async function applyAljexImport(input: AljexImportInput): Promise<AljexImportJob> {
-  return aljexImportAction<AljexImportJob>('ALJEX_IMPORT_APPLY', input)
+/** Starts STAGE on an uploaded file. Returns the job immediately; the worker continues in the background. */
+export async function stageAljexImport(jobId: string): Promise<AljexImportJob> {
+  const r = await aljexImportAction<{ job: AljexImportJob }>('IMPORT_STAGE', { jobId })
+  return r.job
 }
 
-export async function listAljexImportJobs(): Promise<AljexImportJob[]> {
-  const result = await aljexImportAction<{ jobs: AljexImportJob[] }>('LIST_ALJEX_IMPORT_JOBS', {})
-  return result.jobs ?? []
+export async function getAljexImport(jobId: string): Promise<AljexImportJob> {
+  const r = await aljexImportAction<{ job: AljexImportJob }>('IMPORT_GET', { jobId })
+  return r.job
+}
+
+export async function listAljexImports(): Promise<AljexImportJob[]> {
+  const r = await aljexImportAction<{ jobs: AljexImportJob[] }>('IMPORT_LIST', {})
+  return r.jobs ?? []
+}
+
+export async function getAljexProfile(layoutId: string): Promise<AljexMappingProfile | null> {
+  const r = await aljexImportAction<{ profile: AljexMappingProfile | null }>('IMPORT_GET_PROFILE', { layoutId })
+  return r.profile ?? null
+}
+
+export async function saveAljexProfile(input: AljexProfileInput): Promise<AljexMappingProfile> {
+  const r = await aljexImportAction<{ profile: AljexMappingProfile }>('IMPORT_SAVE_PROFILE', input)
+  return r.profile
+}
+
+export async function planAljexImport(input: PlanAljexImportInput): Promise<AljexImportJob> {
+  const r = await aljexImportAction<{ job: AljexImportJob }>('IMPORT_PLAN', input)
+  return r.job
+}
+
+export async function applyAljexImport(input: ApplyAljexImportInput): Promise<AljexImportJob> {
+  const r = await aljexImportAction<{ job: AljexImportJob }>('IMPORT_APPLY', input)
+  return r.job
+}
+
+export async function pauseAljexImport(jobId: string): Promise<AljexImportJob> {
+  const r = await aljexImportAction<{ job: AljexImportJob }>('IMPORT_PAUSE', { jobId })
+  return r.job
+}
+
+export async function resumeAljexImport(jobId: string): Promise<AljexImportJob> {
+  const r = await aljexImportAction<{ job: AljexImportJob }>('IMPORT_RESUME', { jobId })
+  return r.job
+}
+
+export async function cancelAljexImport(jobId: string): Promise<AljexImportJob> {
+  const r = await aljexImportAction<{ job: AljexImportJob }>('IMPORT_CANCEL', { jobId })
+  return r.job
+}
+
+export async function reconcileAljexImport(jobId: string): Promise<{ job: AljexImportJob; summary: ImportReportSummary | null }> {
+  return aljexImportAction('IMPORT_RECONCILE', { jobId })
+}
+
+export async function getAljexReportLinks(jobId: string): Promise<AljexReportLink[]> {
+  const r = await aljexImportAction<{ links: AljexReportLink[] }>('IMPORT_REPORT_LINKS', { jobId })
+  return r.links ?? []
+}
+
+/** Mapped fields of up to 5 user-chosen data rows of the uploaded file; customer/carrier names masked unless `unmask`. */
+export async function sampleAljexImport(jobId: string, rows: number[], unmask = false): Promise<AljexSampleRow[]> {
+  const r = await aljexImportAction<{ rows: AljexSampleRow[] }>('IMPORT_SAMPLE', { jobId, rows, unmask })
+  return r.rows ?? []
+}
+
+export async function seedProCounter(input: SeedProCounterInput = {}): Promise<SeedProCounterResult> {
+  return aljexImportAction<SeedProCounterResult>('IMPORT_SEED_COUNTER', input)
+}
+
+export async function syncImportedCarriers(jobId?: string | null): Promise<SyncImportedCarriersResult> {
+  return aljexImportAction<SyncImportedCarriersResult>('IMPORT_SYNC_CARRIERS', { jobId: jobId ?? null })
+}
+
+/** The lossless source row for a PRO: every non-empty Aljex column with its header (owner/ADMIN). */
+export async function getLegacyAljexRow(pro: string): Promise<LegacyAljexRowResult> {
+  return aljexImportAction<LegacyAljexRowResult>('IMPORT_LEGACY_ROW', { pro })
+}
+
+// Aljex code mapping (Settings > Users). Owner/ADMIN only (enforced by the Lambda).
+export async function listAljexCodes(): Promise<AljexCodeSummary[]> {
+  const r = await shipmentAction<{ codes: AljexCodeSummary[] }>('LIST_ALJEX_CODES', {})
+  return r.codes ?? []
+}
+
+/** Saves the code -> user crosswalk only; no shipment changes until a reassign runs. */
+export async function setAljexCodeMap(input: SetAljexCodeMapInput): Promise<AljexCodeMapRecord> {
+  const r = await shipmentAction<{ map: AljexCodeMapRecord }>('SET_ALJEX_CODE_MAP', input)
+  return r.map
+}
+
+/** Reassigns every shipment carrying the Aljex Salesrep code. Call again while `hasMore`. */
+export async function reassignShipmentsByRepCode(input: ReassignByRepCodeInput): Promise<ReassignByRepCodeResult> {
+  return shipmentAction<ReassignByRepCodeResult>('REASSIGN_SHIPMENTS_BY_REP_CODE', input)
+}
+
+// Aljex-exit Phase 0: data safety (PITR status, S3 export, export-everything CSV). Owner/ADMIN only.
+async function dataSafetyAction<T>(action: string, input: unknown): Promise<T> {
+  let r: { data: { tmsDataSafety: unknown } }
+  try {
+    r = await client.graphql({
+      query: `mutation TmsDataSafety($action: String!, $input: AWSJSON!) { tmsDataSafety(action: $action, input: $input) }`,
+      variables: { action, input: JSON.stringify(input) },
+    }) as { data: { tmsDataSafety: unknown } }
+  } catch (err) {
+    throw new Error(graphqlErrorText(err) || `${action} failed`, { cause: err })
+  }
+  const v = unwrapJson(r.data.tmsDataSafety)
+  if (v == null) throw new Error(`${action} returned no result`)
+  return v as T
+}
+
+export async function getDataStatus(): Promise<DataStatus> {
+  return dataSafetyAction<DataStatus>('DATA_STATUS', {})
+}
+
+export async function exportNow(): Promise<{ job: DataExportJob }> {
+  return dataSafetyAction<{ job: DataExportJob }>('EXPORT_NOW', {})
+}
+
+export async function startCsvExport(input: CsvExportStartInput): Promise<{ job: DataExportJob }> {
+  return dataSafetyAction<{ job: DataExportJob }>('CSV_EXPORT_START', input)
+}
+
+export async function getCsvExport(jobId: string): Promise<{ job: DataExportJob }> {
+  return dataSafetyAction<{ job: DataExportJob }>('CSV_EXPORT_STATUS', { jobId })
+}
+
+export async function getCsvExportLinks(jobId: string): Promise<DataExportLinks> {
+  return dataSafetyAction<DataExportLinks>('CSV_EXPORT_LINKS', { jobId })
+}
+
+export async function startAccountingExport(input: { from?: string; to?: string; status?: string } = {}): Promise<{ job: DataExportJob }> {
+  return dataSafetyAction<{ job: DataExportJob }>('ACCOUNTING_EXPORT', input)
+}
+
+export async function listExports(): Promise<{ jobs: DataExportJob[] }> {
+  return dataSafetyAction<{ jobs: DataExportJob[] }>('EXPORT_LIST', {})
 }
 
 export async function uploadBrandAsset(file: File, keyPrefix?: string): Promise<{ key: string; url: string }> {
@@ -1703,6 +1851,21 @@ export async function connectIntegration(provider: string, credentials: Record<s
 /** The one read call the descriptor declares; the answer is the row's health. */
 export async function validateIntegration(provider: string): Promise<IntegrationRecord> {
   return directoryAction<IntegrationRecord>('VALIDATE_INTEGRATION', { provider })
+}
+
+/** Start (or resume) "Pull all monitored carriers" from MyCarrierPackets. Returns at once; poll getMcpPullStatus. */
+export async function startMcpPull(restart = false): Promise<void> {
+  await directoryAction<{ started: boolean }>('MYCARRIERPACKETS_PULL_START', { restart })
+}
+
+/** MyCarrierPackets pull progress: counts, cursor, unmatched both ways, last sync and error. Null before the first run. */
+export async function getMcpPullStatus(): Promise<McpPullState | null> {
+  return (await directoryAction<{ state: McpPullState | null }>('MYCARRIERPACKETS_PULL_STATUS', {})).state
+}
+
+/** Pull one carrier's full profile from MyCarrierPackets onto its row. */
+export async function pullMcpCarrier(carrierId: string): Promise<{ carrierId: string; result: 'SYNCED' | 'NO_PACKET' | null }> {
+  return directoryAction('MYCARRIERPACKETS_SYNC_CARRIER', { carrierId })
 }
 export async function saveIntegrationSettings(
   provider: string,
@@ -1789,6 +1952,9 @@ let shipmentsHaveIntake = true
 // Step V: the person tracking the shipment. Own flag, same reason.
 const SHIPMENT_TRACKER_FIELDS = ['trackerId']
 let shipmentsHaveTracker = true
+// Aljex-exit: verbatim Aljex codes (mapped to people in Settings > Users) and the OSD flag.
+const SHIPMENT_ALJEX_FIELDS = ['salesRepCode', 'createdByCode', 'serviceRepCode', 'dispatcherCode', 'osd']
+let shipmentsHaveAljexCodes = true
 
 /** Every Shipment read, with each newer group dropped and retried if the backend predates it. */
 async function readShipments<T>(run: (fields: string) => Promise<T>): Promise<T> {
@@ -1801,8 +1967,14 @@ async function readShipments<T>(run: (fields: string) => Promise<T>): Promise<T>
         shipmentsHaveRevTag ? SHIPMENT_REV_FIELDS.join(' ') : '',
         shipmentsHaveCoverage ? SHIPMENT_COVERAGE_FIELDS.join(' ') : '',
         shipmentsHaveIntake ? SHIPMENT_INTAKE_FIELDS.join(' ') : '',
+        shipmentsHaveAljexCodes ? SHIPMENT_ALJEX_FIELDS.join(' ') : '',
       ].filter(Boolean).join(' '))
     } catch (err) {
+      if (shipmentsHaveAljexCodes && fieldNamed(SHIPMENT_ALJEX_FIELDS, err)) {
+        console.warn('[apiClient] backend has no Aljex code fields on Shipment yet — querying without them until deploy')
+        shipmentsHaveAljexCodes = false
+        continue
+      }
       if (shipmentsHaveTracker && fieldNamed(SHIPMENT_TRACKER_FIELDS, err)) {
         shipmentsHaveTracker = false
         continue
@@ -2242,7 +2414,7 @@ export async function testOwnershipRules(input: { shipmentId: string }): Promise
  * every page that renders a sidebar.
  */
 const OWNERSHIP_DIVISION_FIELDS = `
-  id code name brand parentId color sortOrder active owners flows intakeEmail
+  id code name brand parentId color sortOrder active owners flows intakeEmail intakeEmailConfirmed
   createdBy updatedBy version createdAt updatedAt
 `
 const OWNERSHIP_RULE_FIELDS = `
@@ -2906,6 +3078,9 @@ let carriersHaveV2 = true
 // Step N2's MCP risk score. Dropped and retried if the backend predates the field.
 const CARRIER_V3_FIELDS = ['mcpRiskScore']
 let carriersHaveV3 = true
+// Aljex-exit: CA Intrastate / TX PUC numbers + expiries and the legacy flag; MyCarrierPackets review status, packet completion and last sync.
+const CARRIER_V4_FIELDS = ['caIntrastateNumber', 'caIntrastateExpiresAt', 'txPucNumber', 'txPucExpiresAt', 'legacyImported', 'legacySource', 'mcpReviewStatus', 'mcpPacketCompletedAt', 'mcpSyncedAt']
+let carriersHaveV4 = true
 const CARRIER_JSON_FIELDS: (keyof CarrierRecord)[] = ['insurancePolicies', 'address', 'aiMemory']
 const CARRIER_CONTACT_FIELDS = `
   id carrierId name types email phone isPrimary rateConRecipient active
@@ -2930,8 +3105,14 @@ async function readCarriers<T>(run: (fields: string) => Promise<T>): Promise<T> 
         CARRIER_FIELDS_BASE,
         carriersHaveV2 ? CARRIER_V2_FIELDS.join(' ') : '',
         carriersHaveV3 ? CARRIER_V3_FIELDS.join(' ') : '',
+        carriersHaveV4 ? CARRIER_V4_FIELDS.join(' ') : '',
       ].filter(Boolean).join(' '))
     } catch (err) {
+      if (carriersHaveV4 && fieldNamed(CARRIER_V4_FIELDS, err)) {
+        console.warn('[apiClient] backend has no Carrier compliance/legacy fields yet — querying without them until deploy')
+        carriersHaveV4 = false
+        continue
+      }
       if (carriersHaveV3 && fieldNamed(CARRIER_V3_FIELDS, err)) {
         console.warn('[apiClient] backend has no Carrier MCP risk score yet — querying without it until deploy')
         carriersHaveV3 = false

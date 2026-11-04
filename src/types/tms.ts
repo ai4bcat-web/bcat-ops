@@ -177,6 +177,8 @@ export interface VisibilityPrefs {
 
 export interface CustomerRecord {
   id: string
+  /** Aljex `Customer Account #` (Phase 0 import). */
+  aljexCode?: string | null
   name: string
   contactName?: string | null
   contactEmail?: string | null
@@ -215,6 +217,9 @@ export interface CustomerRecord {
 
   // Account / lead profile
   leadSource?: string | null
+  /** Imported from Aljex and not yet reviewed here (terms, credit, factoring are not in the export). */
+  legacyImported?: boolean | null
+  legacySource?: LegacySource | null
   industry?: string | null
   serviceTier?: string | null
   website?: string | null
@@ -306,6 +311,7 @@ export interface LocationDriverNote {
 
 export interface LocationRecord extends Address {
   id: string
+  aljexCode?: string | null
   name: string
   customerName?: string | null
   apptContactName?: string | null
@@ -398,6 +404,13 @@ export interface TmsSettings {
   /** Prefix for generated shipment numbers; `nextShipmentNumber` is the atomic counter. */
   shipmentPrefix?: string | null
   nextShipmentNumber?: number | null
+  /** Aljex-exit Phase 0. `NUMERIC` mints plain numeric PROs (no prefix, no padding); `DERIVED` (default) is `<prefix><n>-1`. */
+  proScheme?: ProScheme | null
+  /** Aljex-exit Phase 0. First number of the new invoice series; `nextInvoiceNumber` is set to `start - 1`. */
+  invoiceSeriesStart?: number | null
+  invoiceSeriesStartedAt?: string | null
+  /** Written by the Aljex import: highest numeric invoice number it created. Null when nothing was imported. */
+  maxImportedInvoiceNumber?: number | null
   /** Cancel / delete a shipment is an ADMIN-only action when true. */
   cancelDeleteAdminOnly?: boolean | null
   /** Whether the optional AR "Unbilled" and AP "In review" stages are in use. */
@@ -756,32 +769,147 @@ export interface ImportJob {
   updatedAt?: string
 }
 
-export interface AljexImportCounts {
-  shipmentsCreated: number
-  customersCreated: number
-  locationsCreated: number
-  invoicesCreated: number
-  billsCreated: number
-  skipped: number
-  conflicts: number
-  errored: number
+// ── Aljex-exit Phase 0: import, legacy flag, data safety ─────────────────────
+// Shared contract between the library (src/lib/aljex), the engine
+// (amplify/functions/tms-aljex-import/engine), the router, the data-safety
+// Lambda, apiClient and the UI. Pure types: no AWS imports.
+
+/** `TmsSettings.proScheme`. DERIVED = `<prefix><n>-1` (default); NUMERIC = the plain number. */
+export type ProScheme = 'DERIVED' | 'NUMERIC'
+
+/**
+ * `legacySource` on Shipment/Load. Only LOAD rows become shipments; the Aljex AR memo rows
+ * (blank status, Type of Shipment CRED/DEBT) are invoice adjustments (never voided shipments).
+ */
+export type LegacySource = 'ALJEX'
+
+/** The pair the engine writes on every imported Shipment/Load (names fixed). */
+export interface LegacyFields {
+  legacyImported: true
+  legacySource: LegacySource
 }
 
-export interface AljexImportInput {
-  s3Key: string
-  fileName: string
-  fileHash: string
-  mapping?: Record<string, string> | null
+export type AljexEntity =
+  | 'LOAD'
+  | 'MEMO_DEBT'
+  | 'MEMO_CRED'
+  | 'CUSTOMER'
+  | 'CARRIER'
+  | 'LOCATION'
+  | 'INVOICE'
+  | 'AR_PAYMENT'
+  | 'BILL'
+  | 'AP_PAYMENT'
+
+export type AljexImportKind = 'IMPORT' | 'MCP_SYNC'
+
+export type AljexImportStatus =
+  | 'DRY_RUN'
+  | 'APPLIED'
+  | 'FAILED'
+  | 'STAGING'
+  | 'READY'
+  | 'PLANNING'
+  | 'PLANNED'
+  | 'RUNNING'
+  | 'PAUSED'
+  | 'CANCELED'
+
+/** Which pass of the pipeline the job is in (§4.1). */
+export type AljexImportPhase =
+  | 'UPLOAD'
+  | 'STAGE'
+  | 'PLAN'
+  | 'CUSTOMER'
+  | 'CARRIER'
+  | 'LOCATION'
+  | 'LOAD'
+  | 'AR_LEDGER'
+  | 'AP_LEDGER'
+  | 'FINALIZE'
+  | 'RECONCILE'
+  | 'DONE'
+
+export type AljexImportTarget = 'LIVE' | 'REHEARSAL'
+
+/** Resume point written after every batch of <= 100 PROs. */
+export interface AljexImportCursor {
+  phase: AljexImportPhase
+  entity?: string | null
+  chunk?: number | null
+  offset?: number | null
+  [extra: string]: unknown
+}
+
+/** outcome counts per entity; the invariant staged = created+matched+enriched+skipped+conflicts+errors is asserted. */
+export interface EntityCount {
+  staged: number
+  created: number
+  matched: number
+  enriched: number
+  skipped: number
+  conflicts: number
+  errors: number
+}
+
+export type AljexEntityCounts = Partial<Record<AljexEntity, EntityCount>>
+
+/** Options typed on the Plan / Apply step. No date is ever defaulted from the wall clock (DECIDED-3). */
+export interface AljexImportOptions {
+  target?: AljexImportTarget
+  /** Rehearsal table suffix: tables are `<Model>-<devSuffix>-rh<tag>` (`^[a-z0-9]{3,12}$`). */
+  targetTag?: string | null
+  /** Typed by the owner to confirm a LIVE apply; recorded in the job and the AuditLog. */
+  liveTag?: string | null
+  synthetic?: boolean
+  cutoffDate?: string | null
+  carrierCutoffDate?: string | null
+  carrierWindowMonths?: number | null
+  unbilledLegacyBefore?: string | null
+  asOf?: string | null
+  /** The UI sends the row count it saw; the server refuses on mismatch. */
+  expectedRows?: number | null
+  /** Dev-only fault injection (honoured only on the dev stack with `synthetic`). */
+  faultAfterRows?: number | null
+  /** Every Nth data row (rehearsal slices). */
+  sliceEvery?: number | null
+  [extra: string]: unknown
 }
 
 export interface AljexImportJob {
+  /** `aljexrun:<ulid>` (a run). Old rows keep `aljex:<fileHash>`. */
   id: string
-  status: 'DRY_RUN' | 'APPLIED' | 'FAILED'
+  kind?: AljexImportKind | null
+  status: AljexImportStatus
+  phase?: AljexImportPhase | null
+  cursor?: AljexImportCursor | null
+  heartbeatAt?: string | null
+  startedAt?: string | null
+  finishedAt?: string | null
   fileName?: string | null
   fileHash?: string | null
-  mapping?: Record<string, string> | null
+  stageHash?: string | null
+  layoutId?: string | null
+  profileVersion?: number | null
+  target?: AljexImportTarget | null
+  targetTag?: string | null
+  liveTag?: string | null
+  options?: AljexImportOptions | null
+  entityCounts?: AljexEntityCounts | null
+  reportPrefix?: string | null
+  error?: string | null
+  parentJobId?: string | null
+  synthetic?: boolean | null
+  /** Attached by IMPORT_GET / IMPORT_STAGE / IMPORT_PLAN (read from S3); never stored on the row. */
+  stage?: AljexStageSummary | null
+  plan?: AljexPlanSummary | null
+  rehearsalGate?: AljexRehearsalGate | null
+  /** Attached by IMPORT_GET when the reconcile report exists. */
+  summary?: ImportReportSummary | null
   rowCount?: number | null
-  counts?: AljexImportCounts | null
+  /** Legacy (pre-Phase-0) fields; still present on old rows. */
+  mapping?: Record<string, string> | null
+  counts?: Record<string, number> | null
   errorKey?: string | null
   dryRun?: boolean | null
   note?: string | null
@@ -791,6 +919,494 @@ export interface AljexImportJob {
   createdAt?: string
   updatedAt?: string
 }
+
+export interface DistinctValueCount {
+  value: string
+  count: number
+}
+
+/** STAGE result: written by the engine to `imports/jobs/<rootJobId>/stage-summary.json`, attached to the job by the router. */
+export interface AljexStageSummary {
+  rows: number
+  loads: number
+  memos: number
+  junkDates: number
+  duplicatePros: number
+  raggedRows: number
+  parseErrors: number
+  layoutMatches?: boolean | null
+  /** Distinct values of every categorical column the profile maps, with counts. */
+  distinct: {
+    status?: DistinctValueCount[]
+    typeOfShipment?: DistinctValueCount[]
+    safetyRating?: DistinctValueCount[]
+    stopMarkers?: DistinctValueCount[]
+    salesreps?: DistinctValueCount[]
+    dispatchers?: DistinctValueCount[]
+    [column: string]: DistinctValueCount[] | undefined
+  }
+  /** Distinct values with no mapping; a non-empty list blocks APPLY. */
+  unmapped?: Array<{ column: string; value: string; count: number }>
+}
+
+/** PLAN result: `imports/jobs/<rootJobId>/plan-summary.json`. */
+export interface AljexPlanSummary {
+  classes: { CREATE: number; ENRICH: number; UNLINKED: number; CONFLICT: number }
+  warnings: string[]
+  bridge?: ImportBridgeLine[]
+}
+
+/** Computed by the router: may a LIVE APPLY start? (real data needs a RECONCILED rehearsal with the same stageHash+profileVersion.) */
+export interface AljexRehearsalGate {
+  ok: boolean
+  reason?: string
+}
+
+/** One row of the masked sample: mapped fields only. */
+export interface AljexSampleRow {
+  rowNumber: number
+  fields: Record<string, string | number | null>
+}
+
+/** Computed in the UI: RUNNING with a heartbeat older than this is shown as Stalled. */
+export const ALJEX_STALLED_AFTER_MS = 3 * 60 * 1000
+
+/** Persisted per layout fingerprint (§4.2). `profile` is the editable body. */
+export interface AljexMappingProfileBody {
+  statusMap?: Record<string, string>
+  modeMap?: Record<string, string>
+  divisionRules?: Array<Record<string, unknown>>
+  repMap?: Record<string, string>
+  dispatcherMap?: Record<string, string>
+  chargeMap?: Record<string, string>
+  paymentMethodMap?: Record<string, string>
+  safetyRatingMap?: Record<string, string>
+  dateWindow?: { start: string | null; end: string | null }
+  carrierWindow?: { months: number | null; cutoffDate: string | null }
+  ownerOperatorCarrierIds?: string[]
+  policies?: Record<string, unknown>
+  /** Values the owner explicitly accepted as "use the default", as `<column>:<value>` (e.g. `status:CONSIGNEE`). */
+  acceptedUnmapped?: string[]
+  [extra: string]: unknown
+}
+
+export interface AljexMappingProfile {
+  /** = layoutId */
+  id: string
+  fingerprint: string
+  headerCount: number
+  version: number
+  profile: AljexMappingProfileBody
+  createdBy: string
+  updatedBy: string
+  createdAt?: string
+  updatedAt?: string
+}
+
+/** One row of the bridge: file value, BCAT value, difference (all cents). */
+export interface ImportBridgeLine {
+  key: string
+  label: string
+  fileCents: number | null
+  bcatCents: number | null
+  diffCents: number | null
+}
+
+export interface ImportReportSummary {
+  jobId: string
+  generatedAt: string
+  entities: AljexEntityCounts
+  /** False when the staged = created+... invariant failed for any entity. */
+  conservationOk: boolean
+  bridge: ImportBridgeLine[]
+  openArCents: number | null
+  unappliedCreditCents: number | null
+  openApCents: number | null
+  findings: Record<string, number>
+  reconciled: boolean
+  files: string[]
+  /** AR memo rows (blank status) applied as invoice adjustment lines (never shipments). */
+  memos?: ImportMemoSummary | null
+  /** Per warning category: row count and example PROs (PROs only, never names or values). */
+  warnings?: Record<string, { count: number; examplePros: string[] }> | null
+}
+
+/** Aljex AR memos (CRED/DEBT): adjustment lines on the invoice a memo's Reference # (a load PRO) names. */
+export interface ImportMemoSummary {
+  total: number
+  credits: number
+  debits: number
+  creditCents: number
+  debitCents: number
+  /** Memos whose Reference # matched an invoice and became an adjustment line on it. */
+  applied: number
+  /** Memos whose reference has no invoice: reported, never silently dropped. */
+  unmatched: number
+  unmatchedPros: string[]
+}
+
+export interface AljexReportLink {
+  name: string
+  key: string
+  url: string
+  bytes?: number | null
+}
+
+/**
+ * Reference codes the import writes on `Order.references` (visibility INTERNAL unless the engine
+ * says otherwise). Fixed names so the UI can label them.
+ */
+export const ALJEX_REFERENCE_CODES = {
+  quote: 'QUOTE_NUMBER',
+  manifest: 'MANIFEST',
+  container: 'CONTAINER',
+  customerRef: 'CUSTOMER_REF',
+  pickupRef: 'PICKUP_REF',
+  consigneeRef: 'CONSIGNEE_REF',
+  /** `ADDITIONAL_REF_1` .. `ADDITIONAL_REF_8` */
+  additionalPrefix: 'ADDITIONAL_REF_',
+  typeOfShipment: 'ALJEX_TYPE',
+  revenueType: 'ALJEX_REV_TYPE',
+} as const
+
+/** `LoadCharge` (side CARRIER) codes for the Aljex Advance Fees / Quick Pay Fees columns. */
+export const ALJEX_FEE_CHARGE_CODES = { advance: 'ADVANCE_FEE', quickPay: 'QUICKPAY_FEE' } as const
+
+/**
+ * `LegacyAljexRow.fields`: every non-empty cell of the source row, keyed `c<1-based column
+ * position>` (the same numbering as CanonicalRow.nonEmpty), each with its header text and trimmed
+ * value. Sparse: empty cells are absent.
+ */
+export type LegacyAljexFields = Record<string, { h: string; v: string }>
+
+export interface LegacyAljexRowRecord {
+  /** `aljex:<pro>` or `aljex:memo:<pro>` */
+  id: string
+  pro: string
+  kind: 'LOAD' | 'MEMO_DEBT' | 'MEMO_CRED'
+  shipmentId?: string | null
+  importRunId?: string | null
+  sourceSha256?: string | null
+  rowNumber?: number | null
+  fields: LegacyAljexFields
+  importedAt?: string | null
+}
+
+/** One surfaced source column, in file order. */
+export interface LegacyAljexColumn {
+  position: number
+  header: string
+  value: string
+}
+
+export interface LegacyAljexRowResult {
+  rows: LegacyAljexRowRecord[]
+  /** The columns of `rows[0]` (the LOAD row when there is one), sorted by position. */
+  columns: LegacyAljexColumn[]
+}
+
+// ── Aljex code mapping (Settings > Users) ────────────────────────────────────
+
+/** SALES_REP = Salesrep ID. STAFF = Created by / Service Rep / Assigned Dispatcher codes (one crosswalk). */
+export type AljexCodeKind = 'SALES_REP' | 'STAFF'
+
+/** `AljexCodeMap`: id `<kind>:<code>`. Written only by tmsShipmentActions. */
+export interface AljexCodeMapRecord {
+  id: string
+  kind: AljexCodeKind
+  code: string
+  /** UserProfile id; null = not mapped yet. */
+  userId?: string | null
+  userName?: string | null
+  lastAppliedAt?: string | null
+  lastAppliedBy?: string | null
+  lastAppliedCount?: number | null
+  updatedBy?: string | null
+  updatedAt?: string | null
+}
+
+/** One row of the mapping table: a code found on shipments (or already mapped) with its counts. */
+export interface AljexCodeSummary {
+  kind: AljexCodeKind
+  code: string
+  /** Shipments carrying the code (SALES_REP: salesRepCode; STAFF: any of createdByCode / serviceRepCode / dispatcherCode). */
+  shipmentCount: number
+  /** SALES_REP only: shipments with the code whose salesRepId is not the mapped user (what a reassign would change). */
+  pendingCount: number
+  userId: string | null
+  userName: string | null
+  lastAppliedAt: string | null
+  lastAppliedBy: string | null
+  lastAppliedCount: number | null
+}
+
+export interface SetAljexCodeMapInput {
+  kind: AljexCodeKind
+  code: string
+  /** UserProfile id, or null to clear the mapping. Never touches shipments. */
+  userId: string | null
+}
+
+export interface ReassignByRepCodeInput {
+  /** The Aljex Salesrep code (`Shipment.salesRepCode`). */
+  code: string
+  /** UserProfile id (must exist). Also saved as the code's mapping. */
+  repId: string
+  /** Count what would change; write nothing. */
+  dryRun?: boolean
+}
+
+export interface ReassignByRepCodeResult {
+  code: string
+  repId: string
+  dryRun: boolean
+  /** Shipments carrying the code. */
+  matched: number
+  /** Changed (or, with dryRun, would change). */
+  updated: number
+  skippedAlreadyAssigned: number
+  skippedVoided: number
+  /** True when the Lambda stopped at its time budget with shipments left; call again (idempotent). */
+  hasMore: boolean
+  failed: Array<{ shipmentId: string; reason: string }>
+}
+
+// ── Router (tmsAljexImport) action inputs / results ──────────────────────────
+
+export type AljexImportAction =
+  | 'IMPORT_PREPARE'
+  | 'IMPORT_STAGE'
+  | 'IMPORT_GET'
+  | 'IMPORT_LIST'
+  | 'IMPORT_SAVE_PROFILE'
+  | 'IMPORT_GET_PROFILE'
+  | 'IMPORT_PLAN'
+  | 'IMPORT_APPLY'
+  | 'IMPORT_PAUSE'
+  | 'IMPORT_RESUME'
+  | 'IMPORT_CANCEL'
+  | 'IMPORT_RECONCILE'
+  | 'IMPORT_REPORT_LINKS'
+  | 'IMPORT_SEED_COUNTER'
+  | 'IMPORT_SYNC_CARRIERS'
+  | 'IMPORT_SAMPLE'
+  | 'IMPORT_STEP'
+  | 'IMPORT_WORK'
+  | 'IMPORT_LEGACY_ROW'
+
+export interface PrepareAljexImportInput {
+  /** The layout the browser detected (e.g. `aljex-full-486-v1`); the engine re-detects at STAGE. */
+  layoutId?: string | null
+  fileName: string
+  /** sha256 hex of the file, computed in the browser. */
+  fileHash: string
+  sizeBytes: number
+  /** Header cell count the browser saw. */
+  headerCount?: number | null
+}
+
+export interface PrepareAljexImportResult {
+  job: AljexImportJob
+  /** Presigned PUT (15 min) into the DataSafety bucket, `imports/source/<jobId>/<fileName>`. */
+  uploadUrl: string
+  uploadKey: string
+}
+
+export interface AljexProfileInput {
+  layoutId: string
+  fingerprint?: string
+  headerCount?: number
+  profile: AljexMappingProfileBody
+  /** Optimistic concurrency: the version the editor loaded. */
+  expectedVersion?: number | null
+}
+
+export interface PlanAljexImportInput {
+  jobId: string
+  options?: AljexImportOptions
+}
+
+export interface ApplyAljexImportInput {
+  /** The PLANNED job being applied. */
+  jobId: string
+  options?: AljexImportOptions
+}
+
+export interface SeedProCounterInput {
+  apply?: boolean
+  enableNumericScheme?: boolean
+  jobId?: string | null
+}
+
+export interface SeedProCounterResult {
+  current: number | null
+  target: number
+  wouldChange: boolean
+  applied: boolean
+  schemeEnabled: boolean
+}
+
+export interface SyncImportedCarriersResult {
+  ready: boolean
+  reason?: string | null
+  job?: AljexImportJob | null
+}
+
+// ── Engine contract (B2 implements, B3 drives) ───────────────────────────────
+
+export type EngineRow = Record<string, unknown>
+
+/** Logical table name -> physical table name. Reads of reference tables always go to live. */
+export interface TableSet {
+  shipment: string
+  order: string
+  load: string
+  loadCarrier: string
+  loadFinancials: string
+  loadCharge: string
+  customer: string
+  location: string
+  carrier: string
+  invoice: string
+  arPayment: string
+  carrierBill: string
+  apPayment: string
+  proClaim: string
+  settings: string
+  auditLog: string
+  legacyAljexRow: string
+  aljexImportJob: string
+  aljexMappingProfile: string
+  // reference tables (read only)
+  factoringItem: string
+  driver: string
+  userProfile: string
+  ownershipDivision: string
+  ownershipRule: string
+  division: string
+  integration: string
+}
+
+export type EngineTable = keyof TableSet
+
+export interface TxCondition {
+  expression: string
+  names?: Record<string, string>
+  values?: Record<string, unknown>
+}
+
+export type TxItem =
+  | { op: 'put'; table: EngineTable; item: EngineRow; ifNotExists?: boolean; condition?: TxCondition }
+  | {
+      op: 'update'
+      table: EngineTable
+      id: string
+      set?: EngineRow
+      remove?: string[]
+      add?: Record<string, number>
+      condition?: TxCondition
+    }
+  | { op: 'check'; table: EngineTable; id: string; condition: TxCondition }
+
+export type TxResult =
+  | { ok: true }
+  | { ok: false; reason: 'CONDITION' | 'THROTTLED' | 'ERROR'; failedIndex?: number; message?: string }
+
+export interface EngineStore {
+  now(): string
+  tables: TableSet
+  getMany(table: EngineTable, ids: string[]): Promise<EngineRow[]>
+  scanAll(table: EngineTable, projection?: string[]): AsyncIterable<EngineRow[]>
+  transact(items: TxItem[], label: string): Promise<TxResult>
+  batchPut(table: EngineTable, rows: EngineRow[]): Promise<void>
+  update(table: EngineTable, id: string, patch: EngineRow, cond?: TxCondition): Promise<boolean>
+  putJob(job: AljexImportJob): Promise<void>
+  putObject(key: string, body: Uint8Array | string): Promise<void>
+  getObject(key: string): AsyncIterable<Uint8Array>
+}
+
+export interface RunSliceResult {
+  done: boolean
+  job: AljexImportJob
+}
+
+// ── Data safety (tmsDataSafety) ──────────────────────────────────────────────
+
+export type DataSafetyAction =
+  | 'DATA_STATUS'
+  | 'EXPORT_NOW'
+  | 'CSV_EXPORT_START'
+  | 'CSV_EXPORT_STATUS'
+  | 'CSV_EXPORT_LINKS'
+  | 'EXPORT_LIST'
+  | 'ACCOUNTING_EXPORT'
+
+export type DataExportKind = 'NIGHTLY' | 'NIGHTLY_CHECK' | 'S3_EXPORT' | 'CSV_ALL' | 'ACCOUNTING'
+export type DataExportStatus = 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'PARTIAL'
+export type DataExportScope = 'TMS' | 'ALL'
+
+export interface DataExportTableProgress {
+  table: string
+  status: 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'SKIPPED_NO_PITR'
+  exportArn?: string | null
+  rows?: number | null
+  bytes?: number | null
+  files?: number | null
+  pii?: boolean
+  error?: string | null
+}
+
+export interface DataExportJob {
+  id: string
+  kind: DataExportKind
+  status: DataExportStatus
+  scope?: DataExportScope | null
+  tables?: DataExportTableProgress[] | null
+  prefix?: string | null
+  cursor?: Record<string, unknown> | null
+  heartbeatAt?: string | null
+  includesPii?: boolean | null
+  startedBy?: string | null
+  startedAt?: string | null
+  finishedAt?: string | null
+  error?: string | null
+}
+
+export interface DataStatus {
+  bucketName: string
+  tableCount: number
+  pitrEnabledCount: number
+  pitrDisabled: string[]
+  earliestRestorableTime: string | null
+  latestNightly: DataExportJob | null
+  nightlyEnabled: boolean
+  s3SyncCommand: string
+}
+
+export interface CsvExportStartInput {
+  scope: DataExportScope
+  tables?: string[]
+  acknowledgePii: boolean
+  /** Must be `EXPORT ALL` when scope is ALL. */
+  confirmText?: string
+}
+
+export interface DataExportFileLink {
+  name: string
+  key: string
+  url: string
+  bytes?: number | null
+  sha256?: string | null
+  pii?: boolean
+}
+
+export interface DataExportLinks {
+  jobId: string
+  expiresInSeconds: number
+  files: DataExportFileLink[]
+  manifestUrl: string | null
+}
+
 
 export interface GeocodeResult extends Address {
   lat: number
@@ -1002,6 +1618,18 @@ export interface SpecialRequirements {
   hazmat?: boolean | null
   tempF?: TemperatureRange | null
   other?: string[] | null
+  /** Aljex Escort / Over Size / Permit / Blind / Seal (flag, not a seal number) / Temp Control (no range). */
+  escort?: boolean | null
+  oversize?: boolean | null
+  permit?: boolean | null
+  blind?: boolean | null
+  sealRequired?: boolean | null
+  tempControl?: boolean | null
+  /** Aljex Customs Bond (text as exported). */
+  customsBond?: string | null
+  /** Aljex Plt In / Plt Out (counts). */
+  palletsIn?: number | null
+  palletsOut?: number | null
 }
 
 /** Who to hand paperwork to at a stop. */
@@ -1120,6 +1748,20 @@ export interface DemoRecordRow {
 
 export interface ShipmentRecord {
   id: string
+  /** Aljex-exit Phase 0. Imported history: waives paperwork and driver gates. Written only by the import engine. */
+  legacyImported?: boolean | null
+  legacySource?: LegacySource | null
+  importRunId?: string | null
+  /**
+   * Aljex codes stored verbatim by the import so Settings > Users can map them to people later
+   * (`AljexCodeMap`). `salesRepId` stays null until a mapping is applied.
+   */
+  salesRepCode?: string | null
+  createdByCode?: string | null
+  serviceRepCode?: string | null
+  dispatcherCode?: string | null
+  /** Aljex OSD (over, short, damaged) flag. */
+  osd?: boolean | null
   /** `shipmentPrefix` + padded counter; backfilled rows keep `L<aljexId>`. */
   number: string
   status: ShipmentStatus
@@ -1480,6 +2122,9 @@ export interface BatchShipmentTaskResult {
  * own-fleet Load type.
  */
 export interface ShipmentLoadFields {
+  /** Aljex-exit Phase 0. Read-only to clients; written only by the import engine. */
+  legacyImported?: boolean | null
+  legacySource?: LegacySource | null
   shipmentId?: string | null
   orderId?: string | null
   /** `<shipment number>-<leg>`. */
@@ -1667,6 +2312,8 @@ export interface QuickPayTier {
  */
 export interface CarrierRecord {
   id: string
+  /** Aljex `Line Haul Carrier ID` (Phase 0 import). */
+  aljexCode?: string | null
   name: string
   dbaName?: string | null
   normalizedName?: string | null
@@ -1693,6 +2340,19 @@ export interface CarrierRecord {
   vehicleInspections?: number | null
   vehicleOos?: number | null
   insurancePolicies?: InsurancePolicy[] | null
+  /** Aljex Carrier CA Intrastate / TX PUC numbers and expiries (YYYY-MM-DD). */
+  caIntrastateNumber?: string | null
+  caIntrastateExpiresAt?: string | null
+  txPucNumber?: string | null
+  txPucExpiresAt?: string | null
+  /** Imported from Aljex and never reviewed here; carrier compliance data still PENDING. */
+  legacyImported?: boolean | null
+  legacySource?: LegacySource | null
+  /** MyCarrierPackets sync (McpAdapter). */
+  mcpReviewStatus?: string | null
+  mcpPacketCompletedAt?: string | null
+  mcpSyncedAt?: string | null
+  mcpSyncRunId?: string | null
   /** Human-edited notes the agents read for this carrier. Never agent-written. */
   aiMemory?: PartyAiMemory | null
   equipment?: string[] | null
@@ -2183,6 +2843,8 @@ export interface ShipmentNoticeRecord {
 
 /** What the required-document gate decided for one scope. */
 export interface DocGateResult {
+  /** True when the document requirement was waived because the shipment is an imported legacy record. */
+  legacy?: boolean
   required: ShipmentDocumentType[]
   present: ShipmentDocumentType[]
   missing: ShipmentDocumentType[]
@@ -2384,6 +3046,12 @@ export interface ArPaymentRecord {
 export interface ArSettings {
   invoiceNumberFormat?: string | null
   nextInvoiceNumber?: number | null
+  /** Aljex-exit Phase 0. Input: moves the counter forward so the next invoice is this number. */
+  invoiceSeriesStart?: number | null
+  /** Input only: sets the number format to `{n}` in the same write. */
+  usePlainInvoiceNumbers?: boolean
+  invoiceSeriesStartedAt?: string | null
+  maxImportedInvoiceNumber?: number | null
   invoiceTerms?: string | null
   invoiceEmailTemplate?: string | null
   invoiceAttachTypes?: string[] | null
@@ -3196,6 +3864,7 @@ export interface CommissionSettings {
 export interface ShipmentSettings {
   shipmentPrefix?: string | null
   nextShipmentNumber?: number | null
+  proScheme?: ProScheme | null
   cancelDeleteAdminOnly?: boolean | null
   defaultMode?: ShipmentMode | null
   arUnbilledStage?: string | null
@@ -3292,6 +3961,8 @@ export interface OwnershipDivisionRecord {
   flows: OwnershipFlows | null
   /** Step U. Where tender e-mails for this division arrive; lower-cased. Required when saving an active division. */
   intakeEmail?: string | null
+  /** Phase 0. False/absent = placeholder address nobody has confirmed (the Divisions page badges it UNCONFIRMED). */
+  intakeEmailConfirmed?: boolean | null
   createdBy: string
   updatedBy: string
   version: number

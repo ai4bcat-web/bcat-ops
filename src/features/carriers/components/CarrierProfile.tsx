@@ -94,6 +94,10 @@ interface CarrierProfileProps {
   onChanged: (carrier: CarrierRecord) => void
 }
 
+function permitLabel(number: string | null | undefined, expiresAt: string | null | undefined): string {
+  return expiresAt ? `${number} (exp ${expiresAt.slice(0, 10)})` : `${number}`
+}
+
 export function CarrierProfile({ carrierId, isAdmin, settings, onClose, onChanged }: CarrierProfileProps) {
   const navigate = useNavigate()
   const { bundle, loading, error, refresh, replaceCarrier } = useCarrier(carrierId)
@@ -228,6 +232,7 @@ export function CarrierProfile({ carrierId, isAdmin, settings, onClose, onChange
                 {carrier?.highwayStatus && <TmsBadge tone="gray">Highway {carrier.highwayStatus}</TmsBadge>}
                 {carrier?.rmisStatus && <TmsBadge tone="gray">RMIS {carrier.rmisStatus}</TmsBadge>}
                 {carrier?.mcpStatus && <TmsBadge tone="gray">MCP {carrier.mcpStatus}</TmsBadge>}
+                {carrier?.legacyImported === true && <TmsBadge tone="gray" title="Imported from Aljex; compliance data not yet reviewed here">Legacy (Aljex)</TmsBadge>}
                 {carrier && (carrier.insurancePolicies ?? []).map((policy, index) => {
                   const state = insuranceState(policy, now, warnDays)
                   return (
@@ -270,6 +275,8 @@ export function CarrierProfile({ carrierId, isAdmin, settings, onClose, onChange
                     ),
                     hidden: !carrier.dotNumber,
                   },
+                  { label: 'CA intrastate', value: permitLabel(carrier.caIntrastateNumber, carrier.caIntrastateExpiresAt), hidden: !carrier.caIntrastateNumber },
+                  { label: 'TX PUC', value: permitLabel(carrier.txPucNumber, carrier.txPucExpiresAt), hidden: !carrier.txPucNumber },
                 ],
               },
               {

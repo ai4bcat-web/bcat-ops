@@ -52,6 +52,10 @@ export interface CarrierFormValue {
   authorityStatus: AuthorityStatus | ''
   authorityGrantedAt: string
   authorityExpiresAt: string
+  caIntrastateNumber: string
+  caIntrastateExpiresAt: string
+  txPucNumber: string
+  txPucExpiresAt: string
   safetyRating: SafetyRating | ''
   safetyRatingAt: string
   reviewType: string
@@ -109,6 +113,10 @@ export function carrierFormFrom(carrier: CarrierRecord | null): CarrierFormValue
     authorityStatus: carrier?.authorityStatus ?? '',
     authorityGrantedAt: dateInput(carrier?.authorityGrantedAt),
     authorityExpiresAt: dateInput(carrier?.authorityExpiresAt),
+    caIntrastateNumber: carrier?.caIntrastateNumber ?? '',
+    caIntrastateExpiresAt: dateInput(carrier?.caIntrastateExpiresAt),
+    txPucNumber: carrier?.txPucNumber ?? '',
+    txPucExpiresAt: dateInput(carrier?.txPucExpiresAt),
     safetyRating: carrier?.safetyRating ?? '',
     safetyRatingAt: dateInput(carrier?.safetyRatingAt),
     reviewType: carrier?.reviewType ?? '',
@@ -176,6 +184,10 @@ export interface CarrierPatch {
   authorityStatus: AuthorityStatus | null
   authorityGrantedAt: string | null
   authorityExpiresAt: string | null
+  caIntrastateNumber: string | null
+  caIntrastateExpiresAt: string | null
+  txPucNumber: string | null
+  txPucExpiresAt: string | null
   safetyRating: SafetyRating | null
   safetyRatingAt: string | null
   reviewType: string | null
@@ -224,6 +236,10 @@ export function carrierFormInput(value: CarrierFormValue, policies: InsurancePol
     authorityStatus: value.authorityStatus || null,
     authorityGrantedAt: isoOrNull(value.authorityGrantedAt),
     authorityExpiresAt: isoOrNull(value.authorityExpiresAt),
+    caIntrastateNumber: value.caIntrastateNumber.trim() || null,
+    caIntrastateExpiresAt: value.caIntrastateExpiresAt || null,
+    txPucNumber: value.txPucNumber.trim() || null,
+    txPucExpiresAt: value.txPucExpiresAt || null,
     safetyRating: value.safetyRating || null,
     safetyRatingAt: isoOrNull(value.safetyRatingAt),
     reviewType: value.reviewType.trim() || null,

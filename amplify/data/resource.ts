@@ -21,6 +21,7 @@ import { tmsTrackingActions } from '../functions/tms-tracking-actions/resource'
 import { tmsFinanceActions } from '../functions/tms-finance-actions/resource'
 import { workflowAgent } from '../functions/workflow-agent/resource'
 import { tmsAljexImport } from '../functions/tms-aljex-import/resource'
+import { tmsDataSafety } from '../functions/tms-data-safety/resource'
 
 // ExpenseCategory and ExpenseEntryMethod enums are defined inline on each
 // model field — Amplify Gen 2 does not require top-level enum declarations.
@@ -195,6 +196,11 @@ const schema = a.schema({
       // the calendar and in the settlements. VOID_SHIPMENT writes it through the
       // schema's `allow.resource(tmsShipmentActions)` grant.
       voidedAt:        a.datetime().authorization((allow) => [allow.authenticated().to(['read'])]),
+      // Aljex-exit Phase 0. Imported history: waives the paperwork and Step W driver
+      // gates. Read-only to a client (the `voidedAt` pattern) so nobody can flag a live
+      // load to dodge a gate; only the import engine writes them, over IAM.
+      legacyImported:  a.boolean().authorization((allow) => [allow.authenticated().to(['read'])]),
+      legacySource:    a.string().authorization((allow) => [allow.authenticated().to(['read'])]),
       createdBy:       a.string().required(),
       updatedBy:       a.string().required(),
     })
@@ -853,6 +859,7 @@ const schema = a.schema({
   Customer: a
     .model({
       name:         a.string().required(),   // e.g. "BATORY FOODS" — matched against Load.customer
+      aljexCode:    a.string(),              // Aljex `Customer Account #` (Phase 0 import); no index
       contactName:  a.string(),
       contactEmail: a.string(),
       contactPhone: a.string(),
@@ -908,6 +915,9 @@ const schema = a.schema({
 
       // Account / lead profile
       leadSource: a.string(),
+      // Aljex-exit: imported from Aljex and not reviewed here. Written only by the import Lambda.
+      legacyImported: a.boolean(),
+      legacySource:   a.string(),
       industry: a.string(),
       serviceTier: a.string(),
       website: a.string(),
@@ -971,6 +981,7 @@ const schema = a.schema({
   Location: a
     .model({
       name:             a.string().required(),  // facility, e.g. "BATORY'S OAKLEY CHICAGO"
+      aljexCode:        a.string(),             // unused by the import for now (no location id in the export)
       city:             a.string(),             // "CHICAGO, IL"
       customerName:     a.string(),             // legacy mirror of first linked customer
       apptContactName:  a.string(),
@@ -1089,6 +1100,14 @@ const schema = a.schema({
       // Counter behind the shipment number. Incremented with an atomic ADD so two
       // dispatchers building loads at the same second cannot land on one number.
       nextShipmentNumber: a.integer(),
+      // Aljex-exit Phase 0. DERIVED (default/absent) = `<prefix><n>-1`; NUMERIC = the plain
+      // number. Flipped only by IMPORT_SEED_COUNTER / saveShipmentSettings.
+      proScheme: a.enum(['DERIVED', 'NUMERIC']),
+      // New invoice series (DECIDED-6). `nextInvoiceNumber` is set to start - 1 in the same
+      // conditional write; `maxImportedInvoiceNumber` is written by the import's FINALIZE.
+      invoiceSeriesStart: a.integer(),
+      invoiceSeriesStartedAt: a.datetime(),
+      maxImportedInvoiceNumber: a.integer(),
       cancelDeleteAdminOnly: a.boolean(),         // cancel/delete restricted to owner/ADMIN
       arUnbilledStage: a.string(),                // label for the UNBILLED AR stage
       apInReviewStage: a.string(),                // label for the IN_REVIEW AP stage
@@ -1359,18 +1378,116 @@ const schema = a.schema({
   AljexImportJob: a
     .model({
       id:          a.id(),
-      status:      a.enum(['DRY_RUN', 'APPLIED', 'FAILED']),
+      // DRY_RUN/APPLIED/FAILED are the pre-Phase-0 members; the rest drive the pipeline.
+      status:      a.enum(['DRY_RUN', 'APPLIED', 'FAILED', 'STAGING', 'READY', 'PLANNING', 'PLANNED', 'RUNNING', 'PAUSED', 'CANCELED']),
+      kind:        a.enum(['IMPORT', 'MCP_SYNC']),
+      phase:       a.string(),
+      cursor:      a.json(),     // { phase, entity, chunk, offset }
+      heartbeatAt: a.datetime(),
+      startedAt:   a.datetime(),
+      finishedAt:  a.datetime(),
+      stageHash:   a.string(),
+      layoutId:    a.string(),
+      profileVersion: a.integer(),
+      target:      a.enum(['LIVE', 'REHEARSAL']),
+      targetTag:   a.string(),
+      liveTag:     a.string(),
+      options:     a.json(),
+      entityCounts: a.json(),    // Partial<Record<AljexEntity, EntityCount>>
+      reportPrefix: a.string(),
+      error:       a.string(),
+      parentJobId: a.string(),
+      synthetic:   a.boolean(),
       fileName:    a.string(),
       fileHash:    a.string(),
-      mapping:     a.json(),     // { sheetHeader: fieldName }
+      mapping:     a.json(),     // legacy: { sheetHeader: fieldName }
       rowCount:    a.integer(),
-      counts:      a.json(),     // AljexImportCounts
+      counts:      a.json(),     // legacy AljexImportCounts
       errorKey:    a.string(),   // S3 key of per-row error CSV under imports/errors/
       dryRun:      a.boolean(),
       note:        a.string(),
       createdBy:   a.string().required(),
       appliedAt:   a.datetime(),
       appliedBy:   a.string(),
+    })
+    .disableOperations(['subscriptions', 'delete'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  /*
+   * Aljex-exit Phase 0. The persisted, versioned mapping profile for one export layout
+   * (`id` = layoutId). Written by tmsAljexImport only.
+   */
+  AljexMappingProfile: a
+    .model({
+      id:          a.id(),
+      fingerprint: a.string(),
+      headerCount: a.integer(),
+      version:     a.integer(),
+      profile:     a.json(),
+      createdBy:   a.string().required(),
+      updatedBy:   a.string().required(),
+    })
+    .disableOperations(['subscriptions', 'delete'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  /*
+   * Aljex-exit Phase 0. The lossless copy of one imported source row (`aljex:<pro>` /
+   * `aljex:memo:<pro>`): every non-empty column keyed `c<index>`. As sensitive as Customer.
+   */
+  LegacyAljexRow: a
+    .model({
+      id:           a.id(),
+      pro:          a.string().required(),
+      kind:         a.enum(['LOAD', 'MEMO_DEBT', 'MEMO_CRED']),
+      shipmentId:   a.string(),
+      importRunId:  a.string(),
+      sourceSha256: a.string(),
+      rowNumber:    a.integer(),
+      fields:       a.json(),
+      importedAt:   a.datetime(),
+    })
+    .disableOperations(['subscriptions', 'delete'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  /*
+   * Aljex-exit. Settings > Users crosswalk: an Aljex code (Salesrep ID, or a staff code from
+   * Created by / Service Rep / Assigned Dispatcher) to a UserProfile. id = `<kind>:<code>`.
+   * Written only by tmsShipmentActions (owner/ADMIN); the client reads.
+   */
+  AljexCodeMap: a
+    .model({
+      id:               a.id(),
+      kind:             a.enum(['SALES_REP', 'STAFF']),
+      code:             a.string().required(),
+      userId:           a.string(),
+      userName:         a.string(),
+      lastAppliedAt:    a.datetime(),
+      lastAppliedBy:    a.string(),
+      lastAppliedCount: a.integer(),
+      updatedBy:        a.string(),
+    })
+    .disableOperations(['subscriptions', 'delete'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  /*
+   * Aljex-exit Phase 0. One nightly / manual S3 export or export-everything CSV job.
+   * Written only by tms-data-safety over DynamoDB.
+   */
+  DataExportJob: a
+    .model({
+      id:           a.id(),
+      kind:         a.string(),     // NIGHTLY | NIGHTLY_CHECK | S3_EXPORT | CSV_ALL | ACCOUNTING
+      status:       a.string(),
+      scope:        a.string(),
+      tables:       a.json(),
+      prefix:       a.string(),
+      cursor:       a.json(),
+      heartbeatAt:  a.datetime(),
+      includesPii:  a.boolean(),
+      startedBy:    a.string(),
+      startedAt:    a.datetime(),
+      finishedAt:   a.datetime(),
+      error:        a.string(),
     })
     .disableOperations(['subscriptions', 'delete'])
     .authorization((allow) => [allow.authenticated().to(['read'])]),
@@ -1623,6 +1740,18 @@ const schema = a.schema({
       voidedAt:        a.datetime(),
       voidedBy:        a.string(),
       voidReason:      a.string(),
+      // Aljex-exit Phase 0: imported history. Shipment is client-read-only, so only the
+      // import engine writes these. `legacySource` is ALJEX (AR memos are invoice adjustments, never shipments).
+      legacyImported:  a.boolean(),
+      legacySource:    a.string(),
+      importRunId:     a.string(),
+      // Aljex codes kept verbatim so Settings > Users (AljexCodeMap) can map them to people
+      // later without a re-import. `salesRepId` stays null until a mapping is applied.
+      salesRepCode:    a.string(),
+      createdByCode:   a.string(),
+      serviceRepCode:  a.string(),
+      dispatcherCode:  a.string(),
+      osd:             a.boolean(),  // Aljex OSD (over, short, damaged)
       // When the load was posted to the DAT board. Written in step J; the
       // Brokerage dashboard's "posted to DAT" chart reads it from here.
       datPostedAt:     a.datetime(),
@@ -2770,6 +2899,8 @@ const schema = a.schema({
       // Optional here (seed rows have none); SAVE_OWNERSHIP_DIVISION requires it on an
       // active division and keeps it unique across active divisions.
       intakeEmail: a.string(),
+      // Phase 0: false/absent = placeholder nobody confirmed (UNCONFIRMED badge in the UI).
+      intakeEmailConfirmed: a.boolean(),
       createdBy:   a.string().required(),
       updatedBy:   a.string().required(),
       version:     a.integer().required(),
@@ -3014,6 +3145,7 @@ const schema = a.schema({
   Carrier: a
     .model({
       name:           a.string().required(),
+      aljexCode:      a.string(),            // Aljex `Line Haul Carrier ID` (Phase 0 import); no index
       dbaName:        a.string(),
       normalizedName: a.string(),            // dedupe key (lower, strip punctuation)
       type: a.enum(['TL', 'LTL', 'CARTAGE', 'LINEHAUL', 'AIR', 'OCEAN', 'RAIL', 'AGENT']),
@@ -3080,6 +3212,19 @@ const schema = a.schema({
       rmisStatus:    a.enum(['PASS', 'FAIL', 'INCOMPLETE', 'PARTIAL', 'NONE']),
       mcpStatus:     a.string(),
       mcpRiskScore:  a.integer(),   // Step N2 — MyCarrierPackets risk assessment points
+      // Aljex Carrier CA Intrastate / TX PUC numbers + expiries (YYYY-MM-DD).
+      caIntrastateNumber:    a.string(),
+      caIntrastateExpiresAt: a.string(),
+      txPucNumber:           a.string(),
+      txPucExpiresAt:        a.string(),
+      // Aljex-exit: imported from Aljex, compliance still PENDING. Written only by the import Lambda.
+      legacyImported:        a.boolean(),
+      legacySource:          a.string(),
+      // MyCarrierPackets sync.
+      mcpReviewStatus:       a.string(),
+      mcpPacketCompletedAt:  a.datetime(),
+      mcpSyncedAt:           a.datetime(),
+      mcpSyncRunId:          a.string(),
 
       accountOwnerIds: a.string().array(),   // [0] is primary owner
       teamKey:         a.string(),
@@ -3139,6 +3284,7 @@ const schema = a.schema({
       remitToAddress: a.json(),              // Address
       isPreferred:   a.boolean(),            // at most one per carrier
       status:        a.enum(['ACTIVE', 'INACTIVE']),
+      source:        a.string(),             // 'MCP' when MyCarrierPackets wrote it
       createdBy:     a.string().required(),
       updatedBy:     a.string().required(),
     })
@@ -4542,6 +4688,18 @@ const schema = a.schema({
     .returns(a.json())
     .authorization((allow) => [allow.authenticated()])
     .handler(a.handler.function(tmsAljexImport)),
+
+  // Aljex-exit Phase 0: backup status, S3 export and export-everything CSV. Owner/ADMIN
+  // only (the Lambda checks). The Lambda reads DynamoDB directly, so it holds no schema grant.
+  tmsDataSafety: a
+    .mutation()
+    .arguments({
+      action: a.string().required(),
+      input:  a.json(),
+    })
+    .returns(a.json())
+    .authorization((allow) => [allow.authenticated()])
+    .handler(a.handler.function(tmsDataSafety)),
 
   // Dispatch router: send, start, markRead, assign, link, archive, reopen, note,
   // mediaUrl, status, getSettings, saveSettings. Requires the page-dispatch group.

@@ -1312,6 +1312,51 @@ describe('SAVE_AR_SETTINGS', () => {
     const { number } = await generate()
     expect(number).toBe('B2026-0001')
   })
+
+  describe('invoice series start (Aljex-exit DECIDED-6)', () => {
+    const settingsRow = () => table(TABLES.settings).get('default')!
+
+    it('makes the start the next invoice number, in plain numbers when asked', async () => {
+      await call('SAVE_AR_SETTINGS', { invoiceSeriesStart: 20000, usePlainInvoiceNumbers: true })
+      expect(settingsRow()).toMatchObject({ nextInvoiceNumber: 19999, invoiceSeriesStart: 20000, invoiceNumberFormat: '{n}' })
+      expect(settingsRow().invoiceSeriesStartedAt).toBeTruthy()
+      const { number } = await generate()
+      expect(number).toBe('20000')
+    })
+
+    it('refuses a start at or below the highest imported invoice number', async () => {
+      settingsRow().maxImportedInvoiceNumber = 14912
+      await expect(call('SAVE_AR_SETTINGS', { invoiceSeriesStart: 14912 })).rejects.toThrow(/above the highest imported invoice number \(14912\)/)
+      await call('SAVE_AR_SETTINGS', { invoiceSeriesStart: 14913 })
+      expect(settingsRow().nextInvoiceNumber).toBe(14912)
+    })
+
+    it('never moves backwards past numbers already issued', async () => {
+      settingsRow().nextInvoiceNumber = 20050
+      await expect(call('SAVE_AR_SETTINGS', { invoiceSeriesStart: 20000 })).rejects.toThrow(/only move forward/)
+      expect(settingsRow().nextInvoiceNumber).toBe(20050)
+    })
+
+    it('loses a race cleanly: a counter that moved after the read refuses the write', async () => {
+      // Two admins saved: the second read counter 0, but the first already issued up to 30000.
+      const original = settingsRow()
+      let reads = 0
+      const row = new Proxy(original, {
+        get(target, prop) {
+          if (prop === 'nextInvoiceNumber') { reads += 1; return reads === 1 ? 0 : 30000 }
+          return Reflect.get(target, prop)
+        },
+        has: (target, prop) => Reflect.has(target, prop),
+      })
+      table(TABLES.settings).set('default', row)
+      await expect(call('SAVE_AR_SETTINGS', { invoiceSeriesStart: 20000 })).rejects.toThrow(/changed by someone else/)
+    })
+
+    it('refuses non-integers and zero', async () => {
+      await expect(call('SAVE_AR_SETTINGS', { invoiceSeriesStart: 0 })).rejects.toThrow()
+      await expect(call('SAVE_AR_SETTINGS', { invoiceSeriesStart: 20000.5 })).rejects.toThrow()
+    })
+  })
 })
 
 // ── what the Fable review turned up ─────────────────────────────────────────
@@ -1620,6 +1665,37 @@ describe('RECORD_BILL', () => {
     // Nothing is written: the bill and the approval are one transaction.
     expect(table(TABLES.carrierBill).size).toBe(0)
     expect((table(TABLES.loadCarrier).get(LOAD_CARRIER_ID) as Row).apStatus).toBe('AWAITING_INVOICE')
+  })
+})
+
+describe('imported Aljex history (legacyImported shipment)', () => {
+  const flag = (): void => {
+    const shipment = table(TABLES.shipment).get(SHIPMENT_ID)!
+    table(TABLES.shipment).set(SHIPMENT_ID, { ...shipment, legacyImported: true, legacySource: 'ALJEX' })
+  }
+
+  it('invoices with no POD on file and bills with no paperwork or signed rate con, while the unflagged shipment is refused', async () => {
+    table(TABLES.document).delete('doc-seed-pod')
+    await expect(call('GENERATE_INVOICE', { orderId: ORDER_ID })).rejects.toThrow(/Missing document: POD/)
+    flag()
+    const { invoiceId } = await generate()
+    expect(table(TABLES.invoice).get(invoiceId)).toBeTruthy()
+  })
+
+  it('approves a carrier bill with the paperwork and rate con left in Aljex', async () => {
+    seedAssignment({ loadCarrier: { rateConStatus: 'SENT' } })
+    table(TABLES.document).delete('doc-pod')
+    const bill = await recordBill({})
+    await expect(call('APPROVE_BILL', { billId: bill.id })).rejects.toThrow(/paperwork is missing/i)
+    flag()
+    const approved = (await call('APPROVE_BILL', { billId: bill.id })) as { bill: Row }
+    expect(approved.bill.status).toBe('TO_BE_PAID')
+  })
+
+  it('still refuses what the flag does not waive: an unsettled carrier charge', async () => {
+    flag()
+    table(TABLES.loadCarrier).set(LOAD_CARRIER_ID, { ...(table(TABLES.loadCarrier).get(LOAD_CARRIER_ID) as Row), chargesFinalizedAt: null })
+    await expect(call('GENERATE_INVOICE', { orderId: ORDER_ID })).rejects.toThrow(/Carrier charges not settled/)
   })
 })
 

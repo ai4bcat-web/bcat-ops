@@ -14,7 +14,8 @@
  * answer "what does this invoice say" — the snapshot is the answer, and a disagreement
  * with today's charges is why `VOID_INVOICE` exists.
  */
-import type { TransactWriteItem } from '@aws-sdk/client-dynamodb'
+import type { AttributeValue, TransactWriteItem } from '@aws-sdk/client-dynamodb'
+import { MAX_INVOICE_NUMBER, invoiceSeriesError } from '../../../src/lib/invoiceSeriesRules'
 import {
   assertArrayOf,
   assertRecord,
@@ -202,6 +203,7 @@ function billToOf(customer: CustomerRecord | null, billToId: string | null): Bil
 function docGateFor(context: OrderContext): DocGateResult {
   return evaluateDocGate({
     scope: 'CUSTOMER',
+    legacyImported: context.shipment?.legacyImported === true,
     documents: context.documents,
     order: context.order,
     loadIds: context.gateLoadIds,
@@ -896,9 +898,38 @@ export async function saveArSettings(input: Row, caller: Caller): Promise<Row> {
     }
   }
 
+  // The series start moves the "last issued" counter to start-1 in the SAME conditional write
+  // as the rest of the patch: forward-only, and above every imported number, even when two
+  // admins save at once (the unread-then-write alternative would let one move it backwards).
+  const startInput = optionalInteger(input.invoiceSeriesStart, { min: 1, max: MAX_INVOICE_NUMBER, label: 'invoiceSeriesStart' })
+  const plain = optionalBoolean(input.usePlainInvoiceNumbers) === true
+  if (plain) patch.invoiceNumberFormat = '{n}'
+  let condition: string | undefined
+  let extraValues: Record<string, AttributeValue> | undefined
+  if (startInput != null) {
+    const settings = await getSettings()
+    const problem = invoiceSeriesError({
+      start: startInput,
+      counter: numberOrNull(settings.nextInvoiceNumber),
+      maxImported: numberOrNull(settings.maxImportedInvoiceNumber),
+    })
+    if (problem) throw new Error(problem)
+    patch.nextInvoiceNumber = startInput - 1
+    patch.invoiceSeriesStart = startInput
+    patch.invoiceSeriesStartedAt = now
+    condition =
+      `(attribute_not_exists(nextInvoiceNumber) OR nextInvoiceNumber <= :newCounter)` +
+      ` AND (${unsetCondition('maxImportedInvoiceNumber')} OR maxImportedInvoiceNumber < :start)`
+    extraValues = {
+      ':newCounter': { N: String(startInput - 1) },
+      ':start': { N: String(startInput) },
+      ':nullType': NULL_TYPE_VALUE,
+    }
+  }
+
   await transact(
-    [updateTx(SETTINGS_TABLE_NAME, 'default', patch)],
-    'AR settings',
+    [updateTx(SETTINGS_TABLE_NAME, 'default', patch, { condition, extraValues })],
+    'invoice settings',
   )
   await writeAudit('TmsSettings', 'default', 'SAVE_AR_SETTINGS', caller, patch)
   return { settings: await getSettings() }

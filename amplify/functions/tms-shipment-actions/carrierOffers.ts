@@ -316,6 +316,7 @@ export async function sendSetupPacket(deps: CarrierOfferDeps, input: Row, caller
     email,
     carrierName: quote.carrierName,
     carrierMc: quote.carrierMc,
+    carrierDot: carrier?.dotNumber,
     shipmentId,
     quoteId,
   })
@@ -347,6 +348,7 @@ export async function sendCarrierSetupPacket(deps: CarrierOfferDeps, input: Row,
     email,
     carrierName: carrier.name,
     carrierMc: carrier.mcNumber,
+    carrierDot: carrier.dotNumber,
   })
 
   await deps.writeAudit('CARRIER', carrierId, 'SEND_CARRIER_SETUP_PACKET', caller, {

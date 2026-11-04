@@ -54,6 +54,8 @@ export type {
  * cast and every facet filter simply matches everything when the projection is absent.
  */
 export type ShipmentRow = ShipmentRecord & {
+  /** Imported Aljex history: no driver is expected and none is ever written (DECIDED-5). */
+  legacyImported?: boolean | null
   arStatus?: ArStatus | null
   /** The active assignment's AP rung. */
   apStatus?: ApStatus | null
@@ -542,9 +544,21 @@ function paymentTermsLabel(days: number | null | undefined): string {
 /** The Carrier column's text for an own-fleet shipment nobody is driving. */
 export const OWN_FLEET_NO_DRIVER = 'Own fleet · no driver'
 
-/** A live Ivan Cartage shipment with no driver on its active assignment (Step W). */
+/** The Carrier column's text for imported own-fleet history, which never has a driver. */
+export const OWN_FLEET_HISTORY = 'Own fleet (history)'
+
+/**
+ * A live Ivan Cartage shipment with no driver on its active assignment (Step W).
+ * Imported Aljex history is exempt: it has no driver and nobody may be asked for one.
+ */
 export function needsDriver(row: ShipmentRow): boolean {
-  return row.assignmentType === 'OWN_ASSET' && !row.driverId && !isVoided(row) && row.status !== 'CANCELED'
+  return (
+    row.assignmentType === 'OWN_ASSET' &&
+    !row.driverId &&
+    !isVoided(row) &&
+    row.status !== 'CANCELED' &&
+    row.legacyImported !== true
+  )
 }
 
 /**
@@ -555,7 +569,8 @@ export function carrierLabel(row: ShipmentRow): string {
   if (row.assignmentType === 'OWN_ASSET') {
     const own = [row.driverName, row.truckNumber ? `Truck ${row.truckNumber}` : null].filter(Boolean).join(' · ')
     if (needsDriver(row)) return OWN_FLEET_NO_DRIVER
-    return own || 'Own fleet'
+    if (own) return own
+    return row.legacyImported === true ? OWN_FLEET_HISTORY : 'Own fleet'
   }
   if (row.carrierName) return row.carrierName
   return 'Need to cover'

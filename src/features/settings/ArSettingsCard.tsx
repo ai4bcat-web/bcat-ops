@@ -25,6 +25,7 @@ import {
 } from '@/lib/invoiceBuild'
 import { DEFAULT_INVOICE_EMAIL_TEMPLATE, templateHasNumber } from '@/lib/shipmentNotices'
 import type { InvoiceBatchEmailMode, TmsSettings } from '@/types/tms'
+import { invoiceSeriesStartProblem } from '@/lib/invoiceSeries'
 import { CheckRow, ErrorText, GroupLabel, Hint, Loading, Panel, SettingsCard, Stack } from './settingsKit'
 
 /** What `{prefix}` resolves to when no division has set one. */
@@ -53,7 +54,11 @@ export function ArSettingsCard() {
   const [factorEmail, setFactorEmail] = useState('')
   const [factorNotice, setFactorNotice] = useState('')
   const [postingAdminOnly, setPostingAdminOnly] = useState(true)
+  const [seriesStart, setSeriesStart] = useState('')
+  const [maxImported, setMaxImported] = useState<number | null>(null)
+  const [plainNumbers, setPlainNumbers] = useState(false)
   const [batchEmail, setBatchEmail] = useState<InvoiceBatchEmailMode>('PER_INVOICE')
+  const [savedSeriesStart, setSavedSeriesStart] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   // State is written only inside the promise chain (react-hooks/set-state-in-effect).
@@ -62,6 +67,9 @@ export function ArSettingsCard() {
       .then(([s, divisions]: [TmsSettings | null, { invoicePrefix?: string | null }[]]) => {
         setNumberFormat(s?.invoiceNumberFormat ?? '')
         setNextNumber(s?.nextInvoiceNumber ?? null)
+        setSeriesStart(s?.invoiceSeriesStart != null ? String(s.invoiceSeriesStart) : '')
+        setSavedSeriesStart(s?.invoiceSeriesStart ?? null)
+        setMaxImported(s?.maxImportedInvoiceNumber ?? null)
         setPrefix(divisions.find((d) => d.invoicePrefix)?.invoicePrefix ?? FALLBACK_PREFIX)
         setTerms(s?.invoiceTerms ?? '')
         setEmailTemplate(s?.invoiceEmailTemplate ?? '')
@@ -90,10 +98,12 @@ export function ArSettingsCard() {
         n: nextNumber ?? 1,
         date: new Date().toISOString().slice(0, 10),
       })
+  const seriesProblem = invoiceSeriesStartProblem(seriesStart, { counter: nextNumber, maxImported })
 
   const save = async () => {
     setError(null)
     if (formatError) { setError(formatError); return }
+    if (seriesProblem) { setError(seriesProblem); return }
     const body = emailTemplate.trim()
     if (body && !templateHasNumber(body)) {
       setError('The invoice e-mail must contain {number} — without it the bill arrives naming nothing')
@@ -123,6 +133,11 @@ export function ArSettingsCard() {
           : null,
         arPostingAdminOnly: postingAdminOnly,
         invoiceBatchEmail: batchEmail,
+        // Only a series start the person changed is sent: the Lambda moves the counter forward on it.
+        ...(seriesStart.trim() !== '' && Number(seriesStart) !== (savedSeriesStart ?? -1)
+          ? { invoiceSeriesStart: Number(seriesStart) }
+          : {}),
+        ...(plainNumbers ? { usePlainInvoiceNumbers: true } : {}),
       })
       toast.success('Invoicing settings saved')
     } catch (e) {
@@ -167,6 +182,35 @@ export function ArSettingsCard() {
                 readOnly
                 disabled
               />
+            </TmsField>
+          </div>
+          <div className="tms-grid tms-grid-2">
+            <TmsField
+              label="New invoice series starts at"
+              hint={
+                seriesProblem
+                  ? <span className="tms-field-error">{seriesProblem}</span>
+                  : 'Imported Aljex invoices keep their own numbers. The first invoice this system issues after saving gets this number; the counter only ever moves forward.'
+              }
+            >
+              <TmsInput
+                aria-label="Invoice series start"
+                inputMode="numeric"
+                value={seriesStart}
+                onChange={(e) => setSeriesStart(e.target.value)}
+                placeholder="20000"
+              />
+            </TmsField>
+            <TmsField label="Plain numbers" hint="Sets the format to {n}: 20000, 20001, … with no prefix. Saved together with the series start.">
+              <label>
+                <input
+                  type="checkbox"
+                  aria-label="Use plain invoice numbers"
+                  checked={plainNumbers}
+                  onChange={(e) => setPlainNumbers(e.target.checked)}
+                />{' '}
+                Use plain numbers (no prefix, no padding)
+              </label>
             </TmsField>
           </div>
 

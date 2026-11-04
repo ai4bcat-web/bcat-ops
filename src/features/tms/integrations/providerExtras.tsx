@@ -14,12 +14,13 @@ import {
 import type { ColumnDef } from '@/features/tms/kit'
 import { useStaff } from '@/hooks/useStaff'
 import {
-  connectQuickBooks, getTmsSettings, issueApiClient, listCustomers, previewQboSync, revokeApiClient,
+  connectQuickBooks, getMcpPullStatus, getTmsSettings, issueApiClient, listCustomers, previewQboSync, revokeApiClient, startMcpPull,
   saveIntegrationSettings, updateCustomer, updateUserProfile,
 } from '@/lib/apiClient'
 import { qboMappingsValid } from '@/lib/integrations/qboPayloads'
 import type { QboMappings } from '@/lib/integrations/qboPayloads'
 import { validateProviderSettings } from '@/lib/integrations/settings'
+import type { McpPullState } from '@/lib/integrations/mcpPull'
 import type { IntegrationRecord, ProviderDescriptor } from '@/lib/integrations/types'
 import type { ChargeCodeDef, CustomerRecord, UserProfileRecord } from '@/types/tms'
 import { formatDateTime } from '@/lib/date'
@@ -575,12 +576,138 @@ function ArtisPayExtra({ row }: ExtrasProps) {
   )
 }
 
+// ── MyCarrierPackets ─────────────────────────────────────────────────────────
+
+const PULL_POLL_MS = 8_000
+/** A slice runs for at most ~4 minutes; after that the page stops waiting and shows what is saved. */
+const PULL_WAIT_MS = 5 * 60_000
+
+function McpExtra({ row }: ExtrasProps) {
+  const [state, setState] = useState<McpPullState | null>(null)
+  const [loaded, setLoaded] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [waitingSince, setWaitingSince] = useState<number | null>(null)
+  const baseline = useRef<string | null>(null)
+  const live = row?.mode === 'LIVE' && row?.health === 'OK'
+
+  const load = useCallback(async () => {
+    try {
+      const next = await getMcpPullStatus()
+      setState(next)
+      setError(null)
+      return next
+    } catch (err) {
+      setError(messageOf(err))
+      return null
+    } finally {
+      setLoaded(true)
+    }
+  }, [])
+
+  useEffect(() => {
+    let alive = true
+    getMcpPullStatus()
+      .then((next) => { if (alive) setState(next) })
+      .catch((err: unknown) => { if (alive) setError(messageOf(err)) })
+      .finally(() => { if (alive) setLoaded(true) })
+    return () => { alive = false }
+  }, [])
+
+  // After a start the slice runs in the background; wait for the saved state to move.
+  useEffect(() => {
+    if (waitingSince === null) return
+    const timer = setInterval(() => {
+      void load().then((next) => {
+        const stamp = next?.lastSliceAt ?? next?.finishedAt ?? null
+        if ((stamp && stamp !== baseline.current) || Date.now() - waitingSince > PULL_WAIT_MS) setWaitingSince(null)
+      })
+    }, PULL_POLL_MS)
+    return () => clearInterval(timer)
+  }, [waitingSince, load])
+
+  const start = async (restart: boolean) => {
+    setError(null)
+    baseline.current = state?.lastSliceAt ?? state?.finishedAt ?? null
+    try {
+      await startMcpPull(restart)
+      setWaitingSince(Date.now())
+    } catch (err) {
+      setError(messageOf(err))
+    }
+  }
+
+  const partial = state?.status === 'PARTIAL' || state?.status === 'RUNNING'
+  const counts = state?.counts
+  return (
+    <TmsCard title="Carrier data from MyCarrierPackets">
+      <p>
+        MyCarrierPackets is the source of truth for a carrier&apos;s insurance, W-9, payment and remit-to, contacts,
+        safety rating, risk score, authority and packet status. Its values replace hand-typed ones; every change is
+        audited. {live ? '' : 'Validate the credentials first: the pull only runs once this provider reports LIVE.'}
+      </p>
+      <div>
+        <TmsButton variant="primary" disabled={!live || waitingSince !== null} onClick={() => void start(false)}>
+          {waitingSince !== null ? 'Working…' : partial ? 'Resume pull' : 'Pull all monitored carriers now'}
+        </TmsButton>
+        {state && state.status !== 'RUNNING' ? (
+          <TmsButton variant="secondary" disabled={!live || waitingSince !== null} onClick={() => void start(true)}>
+            Start over
+          </TmsButton>
+        ) : null}
+      </div>
+      {error ? <p role="alert">{error}</p> : null}
+      {!loaded ? null : !state ? (
+        <p>No pull has run yet.</p>
+      ) : (
+        <>
+          <p>
+            <TmsBadge tone={state.status === 'DONE' ? 'green' : state.status === 'ERROR' ? 'red' : 'orange'}>{state.status}</TmsBadge>{' '}
+            Last sync: {state.lastSliceAt ? formatDateTime(state.lastSliceAt) : 'never'}
+            {state.finishedAt ? ` · finished ${formatDateTime(state.finishedAt)}` : ''}
+            {state.cursor && state.totalPages ? ` · page ${state.cursor.page} of ${state.totalPages}` : ''}
+          </p>
+          {counts ? (
+            <ul aria-label="Pull counts">
+              <li>Created: {counts.created}</li>
+              <li>Updated: {counts.updated}</li>
+              <li>Unchanged: {counts.unchanged}</li>
+              <li>Unmatched (MyCarrierPackets only): {counts.unmatchedMcp}</li>
+              <li>Unmatched (ours only): {state.unmatchedBcatCount ?? 'known when the list finishes'}</li>
+              <li>Monitored with no data: {counts.noData}</li>
+              <li>Errors: {counts.errors}</li>
+            </ul>
+          ) : null}
+          {state.lastError ? <p role="alert">Last error: {state.lastError}</p> : null}
+          {partial ? <p>Partial run: Resume continues from the saved position; the scheduled sync also resumes it.</p> : null}
+          {state.unmatchedMcp.length > 0 ? (
+            <details>
+              <summary>MyCarrierPackets carriers we did not create ({state.unmatchedMcp.length}{state.unmatchedMcp.length >= 200 ? '+' : ''})</summary>
+              <ul>{state.unmatchedMcp.slice(0, 50).map((u, i) => <li key={i}>{u.name ?? '—'} · {u.mc ?? '—'} · DOT {u.dot ?? '—'}</li>)}</ul>
+            </details>
+          ) : null}
+          {state.unmatchedBcat.length > 0 ? (
+            <details>
+              <summary>Our carriers MyCarrierPackets does not monitor ({state.unmatchedBcatCount})</summary>
+              <ul>{state.unmatchedBcat.slice(0, 50).map((u) => <li key={u.id}>{u.name} · {u.mc ?? '—'} · DOT {u.dot ?? '—'}</li>)}</ul>
+            </details>
+          ) : null}
+          {state.changesCounts && state.lastChangesAt ? (
+            <p>Changes feed last polled {formatDateTime(state.lastChangesAt)}: {state.changesCounts.updated} updated, {state.changesCounts.errors} errors.</p>
+          ) : null}
+        </>
+      )}
+    </TmsCard>
+  )
+}
+
 export function ProviderExtras(props: ExtrasProps) {
   switch (props.descriptor.key) {
     case 'QUICKBOOKS_ONLINE':
       return <QuickBooksExtra {...props} />
     case 'OPENAPI':
       return <OpenApiExtra {...props} />
+    case 'MYCARRIERPACKETS':
+      return <McpExtra {...props} />
     case 'DAT':
       return <DatEmailsExtra />
     case 'ORDERFUL':

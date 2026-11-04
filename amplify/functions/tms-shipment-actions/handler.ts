@@ -231,6 +231,15 @@ import {
 } from '../../../src/lib/customerResolution'
 import { topLevelOf } from '../../../src/lib/ownership'
 import { normalizePro } from '../../../src/lib/proNumber'
+import type { ProScheme } from '../../../src/types/tms'
+import {
+  MAX_COUNTER_SKIPS,
+  derivedLegPro,
+  derivedProRefusal,
+  formatShipmentNumber,
+  numericSchemeSwitchError,
+  proSchemeOf,
+} from './proScheme'
 import { evaluateReleaseGate, releaseGateError } from '../../../src/lib/releaseGate'
 import { isEmailAddress } from '../../../src/lib/emailAddress'
 import { mcpPacketStanding, rateConMcpRefusal } from '../../../src/lib/mcpPacket'
@@ -296,6 +305,8 @@ const USER_POOL_ID = process.env.USER_POOL_ID ?? 'us-east-1_IbPKPNJC9'
 // Step I. ASSIGN_CARRIER_REP and BATCH_SHIPMENT_TASK validate rep ids against real
 // UserProfile rows. The table is owned by userManagement; this Lambda only reads it.
 const USER_PROFILE_TABLE_NAME = process.env.USER_PROFILE_TABLE_NAME ?? ''
+// Aljex-exit: the Aljex code -> user crosswalk (Settings > Users). Written only here.
+const ALJEX_CODE_MAP_TABLE_NAME = process.env.ALJEX_CODE_MAP_TABLE_NAME ?? ''
 // Step C tables. The carrier directory is written by tms-carrier-actions; this
 // handler only reads it, and writes the booking counters back onto the row.
 const CARRIER_TABLE_NAME = process.env.CARRIER_TABLE_NAME ?? ''
@@ -541,6 +552,9 @@ type Action =
   | 'CLEAR_REV_TAG'
   | 'RESOLVE_REV_TAG'
   | 'SET_SALES_REP'
+  | 'LIST_ALJEX_CODES'
+  | 'SET_ALJEX_CODE_MAP'
+  | 'REASSIGN_SHIPMENTS_BY_REP_CODE'
   | 'ASSIGN_CARRIER_REP'
   | 'ASSIGN_TRACKER'
   | 'BATCH_SHIPMENT_TASK'
@@ -687,6 +701,9 @@ const ADMIN_ONLY_ACTIONS: Record<string, true> = {
   UNVOID_SHIPMENT: true,
   REPOINT_SHIPMENT_CUSTOMER: true,
   RESOLVE_REV_TAG: true,
+  LIST_ALJEX_CODES: true,
+  SET_ALJEX_CODE_MAP: true,
+  REASSIGN_SHIPMENTS_BY_REP_CODE: true,
   RETAG_SHIPMENTS: true,
   // Step P11. Seeding and resetting the demo mints and voids freight wholesale.
   // Ryne's rule for the Reset button is owner/ADMIN and dev only; the second half
@@ -1268,30 +1285,45 @@ function marginFloorBpsOf(settings: Row | null): number {
 /**
  * The next shipment number, taken with an atomic ADD so two dispatchers building
  * loads in the same second cannot land on the same one.
+ *
+ * Under the NUMERIC scheme (Aljex-exit DECIDED-1) the number is the plain counter and it IS the
+ * PRO, so a counter value somebody already claimed (an import above the seed, a typed PRO) is
+ * skipped by ADDing again rather than failing the create after the number was spent.
  */
 async function nextShipmentNumber(caller: Caller): Promise<string> {
-  const now = nowIso()
-  const result = await dynamo.send(
-    new UpdateItemCommand({
-      TableName: SETTINGS_TABLE_NAME,
-      Key: marshall({ id: SETTINGS_ID }),
-      // ADD both increments and seeds the counter, so the very first shipment on a
-      // fresh environment gets S000001 without anyone having saved settings first.
-      UpdateExpression:
-        'ADD nextShipmentNumber :one SET createdAt = if_not_exists(createdAt, :now), updatedAt = :now, updatedBy = :by, #tn = if_not_exists(#tn, :tn)',
-      ExpressionAttributeNames: { '#tn': '__typename' },
-      ExpressionAttributeValues: {
-        ':one': { N: '1' },
-        ':now': { S: now },
-        ':by': { S: caller.email },
-        ':tn': { S: 'TmsSettings' },
-      },
-      ReturnValues: 'ALL_NEW',
-    }),
-  )
-  const settings = result.Attributes ? unmarshall(result.Attributes) : null
-  const counter = numberOrNull(settings?.nextShipmentNumber) ?? 1
-  return `${shipmentPrefixOf(settings)}${String(counter).padStart(6, '0')}`
+  for (let attempt = 1; ; attempt += 1) {
+    const now = nowIso()
+    const result = await dynamo.send(
+      new UpdateItemCommand({
+        TableName: SETTINGS_TABLE_NAME,
+        Key: marshall({ id: SETTINGS_ID }),
+        // ADD both increments and seeds the counter, so the very first shipment on a
+        // fresh environment gets S000001 without anyone having saved settings first.
+        UpdateExpression:
+          'ADD nextShipmentNumber :one SET createdAt = if_not_exists(createdAt, :now), updatedAt = :now, updatedBy = :by, #tn = if_not_exists(#tn, :tn)',
+        ExpressionAttributeNames: { '#tn': '__typename' },
+        ExpressionAttributeValues: {
+          ':one': { N: '1' },
+          ':now': { S: now },
+          ':by': { S: caller.email },
+          ':tn': { S: 'TmsSettings' },
+        },
+        ReturnValues: 'ALL_NEW',
+      }),
+    )
+    const settings = result.Attributes ? unmarshall(result.Attributes) : null
+    const counter = numberOrNull(settings?.nextShipmentNumber) ?? 1
+    if (proSchemeOf(settings) === 'NUMERIC') {
+      const key = normalizePro(String(counter))
+      if (key && (await getById(PRO_CLAIM_TABLE_NAME, key))) {
+        if (attempt >= MAX_COUNTER_SKIPS) {
+          throw new Error(`The next ${MAX_COUNTER_SKIPS} PRO numbers are already claimed; raise the shipment counter past them in settings`)
+        }
+        continue
+      }
+    }
+    return formatShipmentNumber(settings, counter)
+  }
 }
 
 // ── The PRO claim (step R cutover) ───────────────────────────────────────────
@@ -1346,11 +1378,23 @@ function proAlreadyIssuedMessage(pro: string): string {
   return `PRO ${normalizePro(pro) ?? pro.trim()} has already been issued. A PRO is never reused — voiding the shipment it is on does not release it.`
 }
 
-const DEFAULT_SHIPMENT_PREFIX = 'S'
-
-function shipmentPrefixOf(settings: Row | null): string {
-  const prefix = typeof settings?.shipmentPrefix === 'string' ? settings.shipmentPrefix.trim() : ''
-  return prefix || DEFAULT_SHIPMENT_PREFIX
+/** The highest all-digit PRO anybody holds a claim on, or null. Rare admin read: scans ProClaim ids only. */
+async function maxClaimedNumericPro(): Promise<number | null> {
+  let max: number | null = null
+  let lastKey: Record<string, AttributeValue> | undefined
+  do {
+    const result = await dynamo.send(new ScanCommand({
+      TableName: PRO_CLAIM_TABLE_NAME,
+      ProjectionExpression: 'id',
+      ExclusiveStartKey: lastKey,
+    }))
+    for (const item of result.Items ?? []) {
+      const id = unmarshall(item).id
+      if (typeof id === 'string' && /^\d{3,15}$/.test(id)) max = Math.max(max ?? 0, Number(id))
+    }
+    lastKey = result.LastEvaluatedKey
+  } while (lastKey)
+  return max
 }
 
 /**
@@ -1364,18 +1408,8 @@ function shipmentPrefixOf(settings: Row | null): string {
  * shape can name the dashed form in the message, so it is kept as well.
  */
 function assertNotDerivedPro(pro: string, settings: Row | null): void {
-  const escapeRe = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const prefix = escapeRe(shipmentPrefixOf(settings))
-  // The claim key keeps only alphanumerics, so the prefix is reduced the same way
-  // before it is matched against one: a dashed prefix never appears in a key.
-  const keyPrefix = escapeRe(shipmentPrefixOf(settings).replace(/[^A-Za-z0-9]/g, '').toUpperCase())
-  const normalized = normalizePro(pro)
-  const derived =
-    new RegExp(`^${prefix}\\d{6}-\\d+$`, 'i').test(pro.trim())
-    || (normalized != null && new RegExp(`^${keyPrefix}\\d{7,}$`).test(normalized))
-  if (derived) {
-    throw new Error(`${pro.trim()} is the shape this system issues on its own; pick a different PRO or let it derive one`)
-  }
+  const refusal = derivedProRefusal(pro, settings, numberOrNull(settings?.nextShipmentNumber), normalizePro(pro))
+  if (refusal) throw new Error(refusal)
 }
 
 /**
@@ -1402,6 +1436,17 @@ async function saveShipmentSettings(input: Row, caller: Caller): Promise<Row> {
       throw new Error(`The shipment counter is at ${current} and can only go forward`)
     }
     if (next != null) patch.nextShipmentNumber = next
+  }
+  if ('proScheme' in input) {
+    const scheme = optionalEnum(input.proScheme, ['DERIVED', 'NUMERIC'] as const, 'proScheme')
+    if (scheme == null) throw new Error('proScheme must be DERIVED or NUMERIC')
+    if (scheme === 'NUMERIC' && proSchemeOf(settings) !== 'NUMERIC') {
+      // The counter walks forward from here, so it has to clear every numeric PRO already claimed.
+      const effective = (patch.nextShipmentNumber as number | undefined) ?? numberOrNull(settings?.nextShipmentNumber)
+      const switchError = numericSchemeSwitchError(effective, await maxClaimedNumericPro())
+      if (switchError) throw new Error(switchError)
+    }
+    patch.proScheme = scheme
   }
   if ('cancelDeleteAdminOnly' in input) patch.cancelDeleteAdminOnly = optionalBoolean(input.cancelDeleteAdminOnly)
   if ('defaultMode' in input) patch.defaultMode = optionalEnum(input.defaultMode, SHIPMENT_MODES, 'defaultMode')
@@ -1435,6 +1480,8 @@ async function saveShipmentSettings(input: Row, caller: Caller): Promise<Row> {
 // ── Load row construction ────────────────────────────────────────────────────
 
 interface NewLoadSpec {
+  /** `TmsSettings.proScheme` when the shipment number was minted; absent = DERIVED. */
+  proScheme?: ProScheme
   id: string
   shipmentId: string
   orderId: string
@@ -1462,7 +1509,7 @@ interface NewLoadSpec {
 }
 
 function buildLoadInput(spec: NewLoadSpec, caller: Caller): Row {
-  const loadNumber = `${spec.shipmentNumber}-${spec.leg}`
+  const loadNumber = derivedLegPro({ proScheme: spec.proScheme }, spec.shipmentNumber, spec.leg)
   const legacy = deriveLegacyFields(spec.stops)
   const now = nowIso()
   // The legacy identity columns are required and are read all over the own-fleet
@@ -1826,7 +1873,7 @@ async function createShipment(input: Row, caller: Caller): Promise<Row> {
   const now = nowIso()
   // Both kinds of PRO are claimed. A typed one can never collide with a future
   // derived one, and a derived one can never be retyped onto another leg later.
-  const pro = suppliedPro ?? `${number}-1`
+  const pro = suppliedPro ?? derivedLegPro(settings, number, 1)
 
   const rules = chargeCodeRules(settings, customer)
   const charges = withCustomerRate(defaultChargesFor(customer, rules), bag.rateCents, rules)
@@ -1967,6 +2014,7 @@ async function createShipment(input: Row, caller: Caller): Promise<Row> {
         shipmentId,
         orderId,
         shipmentNumber: number,
+        proScheme: proSchemeOf(settings),
         leg: 1,
         customerId: customerId ?? undefined,
         customerName,
@@ -3081,6 +3129,216 @@ async function setSalesRep(input: Row, caller: Caller): Promise<Row> {
   return readBundle(shipmentId) as unknown as Row
 }
 
+// ── Aljex code mapping (Settings > Users) ───────────────────────────────────
+// The import stores the Aljex Salesrep / staff codes verbatim on each Shipment. The crosswalk
+// code -> user lives in AljexCodeMap (`<kind>:<code>`), and a reassign applies a sales rep code
+// to every shipment carrying it, so Ryne can map them after the import without a re-import.
+
+const ALJEX_CODE_KINDS = ['SALES_REP', 'STAFF'] as const
+/** Stop with this much of the 120 s budget used; the caller repeats while `hasMore`. */
+const ALJEX_REASSIGN_BUDGET_MS = 90_000
+
+function aljexCodeOf(value: unknown, label: string): string {
+  const code = assertString(value, label).trim()
+  if (!code || code.length > 40) throw new Error(`${label} must be 1-40 characters`)
+  return code
+}
+
+async function userNameOf(userId: string, label: string): Promise<string> {
+  const profile = await getById(USER_PROFILE_TABLE_NAME, userId)
+  if (!profile) throw new Error(`${label} is not a user profile: ${userId}`)
+  return String(profile.name ?? profile.email ?? userId)
+}
+
+/** Upsert one crosswalk row, keeping whatever the patch does not name. */
+async function putAljexCodeMap(kind: string, code: string, patch: Row, caller: Caller): Promise<Row> {
+  if (!ALJEX_CODE_MAP_TABLE_NAME) throw new Error('Aljex code map table is not configured')
+  const id = `${kind}:${code}`
+  const existing = await getById(ALJEX_CODE_MAP_TABLE_NAME, id)
+  const now = nowIso()
+  const row: Row = {
+    ...(existing ?? {}),
+    id,
+    __typename: 'AljexCodeMap',
+    kind,
+    code,
+    ...patch,
+    updatedBy: caller.email,
+    createdAt: (existing?.createdAt as string | undefined) ?? now,
+    updatedAt: now,
+  }
+  await dynamo.send(new PutItemCommand({ TableName: ALJEX_CODE_MAP_TABLE_NAME, Item: marshallRow(row) }))
+  return row
+}
+
+/** LIST_ALJEX_CODES. Every code found on shipments, plus mapped codes no shipment carries. */
+async function listAljexCodes(): Promise<Row> {
+  const [shipments, maps] = await Promise.all([
+    scanTable(SHIPMENT_TABLE_NAME),
+    ALJEX_CODE_MAP_TABLE_NAME ? scanTable(ALJEX_CODE_MAP_TABLE_NAME) : Promise.resolve([] as Row[]),
+  ])
+  const mapOf = new Map<string, Row>()
+  for (const m of maps) mapOf.set(String(m.id), m)
+  const sales = new Map<string, { total: number; byUser: Map<string, number> }>()
+  const staff = new Map<string, number>()
+  for (const s of shipments) {
+    const code = optionalString(s.salesRepCode, 40)
+    if (code) {
+      const entry = sales.get(code) ?? { total: 0, byUser: new Map<string, number>() }
+      entry.total++
+      if (!isVoided(s)) {
+        const rep = typeof s.salesRepId === 'string' ? s.salesRepId : ''
+        entry.byUser.set(rep, (entry.byUser.get(rep) ?? 0) + 1)
+      }
+      sales.set(code, entry)
+    }
+    const seen = new Set<string>()
+    for (const field of ['createdByCode', 'serviceRepCode', 'dispatcherCode'] as const) {
+      const c = optionalString(s[field], 40)
+      if (c) seen.add(c)
+    }
+    for (const c of seen) staff.set(c, (staff.get(c) ?? 0) + 1)
+  }
+  const codes: Row[] = []
+  const row = (kind: string, code: string, shipmentCount: number, pending: (userId: string | null) => number): Row => {
+    const map = mapOf.get(`${kind}:${code}`)
+    const userId = (map?.userId as string | undefined) ?? null
+    return {
+      kind,
+      code,
+      shipmentCount,
+      pendingCount: userId ? pending(userId) : 0,
+      userId,
+      userName: (map?.userName as string | undefined) ?? null,
+      lastAppliedAt: (map?.lastAppliedAt as string | undefined) ?? null,
+      lastAppliedBy: (map?.lastAppliedBy as string | undefined) ?? null,
+      lastAppliedCount: numberOrNull(map?.lastAppliedCount),
+    }
+  }
+  const codeKeys = new Set<string>([...sales.keys()])
+  for (const m of maps) if (m.kind === 'SALES_REP') codeKeys.add(String(m.code))
+  for (const code of [...codeKeys].sort()) {
+    const entry = sales.get(code)
+    codes.push(row('SALES_REP', code, entry?.total ?? 0, (userId) => {
+      let pending = 0
+      for (const [rep, n] of entry?.byUser ?? []) if (rep !== userId) pending += n
+      return pending
+    }))
+  }
+  const staffKeys = new Set<string>([...staff.keys()])
+  for (const m of maps) if (m.kind === 'STAFF') staffKeys.add(String(m.code))
+  for (const code of [...staffKeys].sort()) codes.push(row('STAFF', code, staff.get(code) ?? 0, () => 0))
+  return { codes }
+}
+
+/** SET_ALJEX_CODE_MAP. Stores the crosswalk only; shipments change when a reassign runs. */
+async function setAljexCodeMap(input: Row, caller: Caller): Promise<Row> {
+  const kind = assertEnum(input.kind, ALJEX_CODE_KINDS, 'kind')
+  const code = aljexCodeOf(input.code, 'code')
+  const userId = optionalString(input.userId, 100)
+  const userName = userId ? await userNameOf(userId, 'User') : null
+  const map = await putAljexCodeMap(kind, code, { userId, userName }, caller)
+  await writeAudit('ALJEX_CODE_MAP', `${kind}:${code}`, 'SET_ALJEX_CODE_MAP', caller, { to: userId })
+  return { map }
+}
+
+/**
+ * REASSIGN_SHIPMENTS_BY_REP_CODE. Applies one Aljex Salesrep code to a user across every
+ * shipment carrying it, by exactly SET_SALES_REP's semantics: Shipment.salesRepId, the
+ * Order's customerRepId and the Load's salesRepId move together; a voided shipment is skipped
+ * (SET_SALES_REP refuses one); no Commission row is read or written, so commissions already
+ * earned keep the rep they were earned for and later ones key on the Order's new customerRepId.
+ * Idempotent (a shipment already on the rep is skipped), audited per shipment and per run, and
+ * it stops at a time budget with `hasMore` so a second call finishes the rest.
+ */
+async function reassignShipmentsByRepCode(input: Row, caller: Caller): Promise<Row> {
+  const code = aljexCodeOf(input.code, 'code')
+  const repId = assertString(input.repId, 'repId')
+  const dryRun = optionalBoolean(input.dryRun) ?? false
+  const repName = await userNameOf(repId, 'Sales rep')
+  const started = Date.now()
+
+  const [shipments, orders, loads] = await Promise.all([
+    scanTable(SHIPMENT_TABLE_NAME),
+    scanTable(ORDER_TABLE_NAME),
+    scanTable(LOAD_TABLE_NAME),
+  ])
+  const ordersOf = new Map<string, Row[]>()
+  for (const o of orders) {
+    const key = String(o.shipmentId ?? '')
+    if (key) ordersOf.set(key, [...(ordersOf.get(key) ?? []), o])
+  }
+  const loadsOf = new Map<string, Row[]>()
+  for (const l of loads) {
+    const key = String(l.shipmentId ?? '')
+    if (key) loadsOf.set(key, [...(loadsOf.get(key) ?? []), l])
+  }
+
+  const result = {
+    code, repId, dryRun, matched: 0, updated: 0, skippedAlreadyAssigned: 0, skippedVoided: 0,
+    hasMore: false, failed: [] as Array<{ shipmentId: string; reason: string }>,
+  }
+  let writes: TransactWriteItem[] = []
+  let pendingAudits: Array<{ id: string; from: unknown }> = []
+  const flush = async (): Promise<void> => {
+    if (writes.length === 0) return
+    const batch = pendingAudits
+    try {
+      await transact(writes, 'sales rep reassign')
+    } catch (err) {
+      for (const b of batch) result.failed.push({ shipmentId: b.id, reason: err instanceof Error ? err.message : String(err) })
+      result.updated -= batch.length
+      writes = []
+      pendingAudits = []
+      return
+    }
+    writes = []
+    pendingAudits = []
+    await Promise.all(batch.map((b) => writeAudit('SHIPMENT', b.id, 'SET_SALES_REP', caller, {
+      from: b.from ?? null, to: repId, viaAljexCode: code,
+    })))
+  }
+
+  for (const shipment of shipments) {
+    if (optionalString(shipment.salesRepCode, 40) !== code) continue
+    result.matched++
+    if (isVoided(shipment)) { result.skippedVoided++; continue }
+    if (shipment.salesRepId === repId) { result.skippedAlreadyAssigned++; continue }
+    if (Date.now() - started > ALJEX_REASSIGN_BUDGET_MS) { result.hasMore = true; continue }
+    result.updated++
+    if (dryRun) continue
+    const id = String(shipment.id)
+    const now = nowIso()
+    const own = ordersOf.get(id) ?? []
+    const legs = loadsOf.get(id) ?? []
+    const items: TransactWriteItem[] = [
+      updateItemTx(SHIPMENT_TABLE_NAME, id, {
+        salesRepId: repId, updatedBy: caller.email, updatedAt: now, version: (numberOrNull(shipment.version) ?? 1) + 1,
+      }, null),
+      ...own.map((o) => updateItemTx(ORDER_TABLE_NAME, String(o.id), {
+        customerRepId: repId, updatedBy: caller.email, updatedAt: now, version: (numberOrNull(o.version) ?? 1) + 1,
+      }, null)),
+      ...legs.map((l) => updateItemTx(LOAD_TABLE_NAME, String(l.id), {
+        salesRepId: repId, updatedBy: caller.email, updatedAt: now,
+      }, null)),
+    ]
+    if (writes.length + items.length > 90) await flush()
+    writes.push(...items)
+    pendingAudits.push({ id, from: shipment.salesRepId })
+  }
+  if (!dryRun) {
+    await flush()
+    await putAljexCodeMap('SALES_REP', code, {
+      userId: repId, userName: repName,
+      lastAppliedAt: nowIso(), lastAppliedBy: caller.email, lastAppliedCount: result.updated,
+    }, caller)
+    await writeAudit('ALJEX_CODE_MAP', `SALES_REP:${code}`, 'REASSIGN_SHIPMENTS_BY_REP_CODE', caller, {
+      to: repId, matched: result.matched, updated: result.updated, hasMore: result.hasMore, failed: result.failed.length,
+    })
+  }
+  return result
+}
+
 /**
  * ASSIGN_TRACKER — who is tracking these shipments. One shape for single and bulk:
  * each id is written on its own (a bad id never blocks the others) and reported in
@@ -3490,10 +3748,14 @@ async function duplicateShipment(input: Row, caller: Caller): Promise<Row> {
     const keptDriver = keptDriverId != null
     // The copy's PRO is derived from its own number and claimed like any other.
     // There is no `-copy` PRO any more: the second duplicate would collide with it.
-    const pro = `${number}-1`
+    const pro = derivedLegPro(settings, number, 1)
 
     const shipmentRow: Row = {
       ...source.shipment,
+      // Imported history is history: the copy is live freight and never inherits the waiver.
+      legacyImported: null,
+      legacySource: null,
+      importRunId: null,
       id: newShipmentId,
       __typename: 'Shipment',
       number,
@@ -3586,6 +3848,7 @@ async function duplicateShipment(input: Row, caller: Caller): Promise<Row> {
             shipmentId: newShipmentId,
             orderId: newOrderId,
             shipmentNumber: number,
+            proScheme: proSchemeOf(settings),
             leg: 1,
             customerId: sourceCustomerId ?? undefined,
             customerName: sourceCustomerName,
@@ -7062,6 +7325,12 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return resolveRevTag(input, caller)
     case 'SET_SALES_REP':
       return setSalesRep(input, caller)
+    case 'LIST_ALJEX_CODES':
+      return listAljexCodes()
+    case 'SET_ALJEX_CODE_MAP':
+      return setAljexCodeMap(input, caller)
+    case 'REASSIGN_SHIPMENTS_BY_REP_CODE':
+      return reassignShipmentsByRepCode(input, caller)
     case 'ASSIGN_TRACKER':
       return assignTracker(input, caller)
     case 'ASSIGN_CARRIER_REP':

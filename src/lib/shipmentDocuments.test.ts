@@ -279,3 +279,22 @@ describe('documentKey', () => {
     )
   })
 })
+
+describe('evaluateDocGate — imported Aljex history (legacyImported)', () => {
+  it('reads as satisfied in both scopes, flagged legacy, with nothing present', () => {
+    const customer = evaluateDocGate({
+      order: { id: 'ord-1' }, loadIds: ['ld-1'], loadCarriers: [carrier('lc-1')], documents: [],
+      customer: { requiredDocsForInvoice: ['POD', 'BOL'] }, scope: 'CUSTOMER', legacyImported: true,
+    })
+    expect(customer).toMatchObject({ ready: true, missing: [], legacy: true })
+    const carrierScope = evaluateDocGate({
+      loadIds: ['ld-1'], loadCarriers: [carrier('lc-1')], documents: [], scope: 'CARRIER',
+      loadCarrierId: 'lc-1', legacyImported: true,
+    })
+    expect(carrierScope).toMatchObject({ ready: true, missing: [], legacy: true })
+  })
+
+  it('the same shipment unflagged is still blocked', () => {
+    expect(customerGate([], ['POD', 'BOL']).missing).toEqual(['POD', 'BOL'])
+  })
+})

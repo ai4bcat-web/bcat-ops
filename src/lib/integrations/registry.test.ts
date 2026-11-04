@@ -162,12 +162,13 @@ describe('missingCredentials', () => {
     ])
   })
 
-  it('counts a webhook signing secret as missing where nothing inbound can be verified without it', () => {
+  it('needs only the MyCarrierPackets username and password: its guide defines no webhooks', () => {
     const stored = [
       { key: 'username', last4: 'ryne' },
       { key: 'password', last4: '9d21' },
     ]
-    expect(missingCredentials(mcp, stored)).toEqual(['Webhook signing secret'])
+    expect(missingCredentials(mcp, stored)).toEqual([])
+    expect(missingCredentials(mcp, [{ key: 'username', last4: 'ryne' }])).toEqual(['Password'])
   })
 
   it('does not demand an optional field', () => {

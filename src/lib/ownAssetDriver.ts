@@ -28,6 +28,8 @@ export const OWN_ASSET_MESSAGES = {
 
 export interface OwnAssetLoadFacts {
   assignmentType?: string | null; status?: string | null; voidedAt?: string | null
+  /** Imported Aljex history carries no driver fields and is exempt from Step W (DECIDED-5). */
+  legacyImported?: boolean | null
   pickupDriverId?: string | null; deliveryDriverId?: string | null; deliveryAppt?: string | null
   stops?: Array<{ driverId?: string | null; truckId?: string | null; colorKey?: string | null }> | null
 }
@@ -40,10 +42,11 @@ export function isBrokerDriver(d: { type?: string | null } | null | undefined): 
   return (d?.type ?? '').toLowerCase() === 'broker'
 }
 
-/** §2.1: an Ivan Cartage load is defined by kind, never by name; voided/canceled shipments are exempt. */
+/** §2.1: an Ivan Cartage load is defined by kind, never by name; voided/canceled shipments and imported legacy history are exempt. */
 export function isOwnAssetLoad(load: OwnAssetLoadFacts, activeLeg: OwnAssetLegFacts | null): boolean {
   if (!blank(load.voidedAt)) return false
   if (load.status === 'CANCELED') return false
+  if (load.legacyImported === true) return false
   return load.assignmentType === 'OWN_ASSET' || activeLeg?.kind === 'OWN_ASSET'
 }
 

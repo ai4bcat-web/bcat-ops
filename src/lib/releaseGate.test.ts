@@ -240,3 +240,28 @@ describe('releaseGateError', () => {
     expect(releaseGateOf(null)).toBeNull()
   })
 })
+
+describe('evaluateReleaseGate — imported Aljex history (legacyImported)', () => {
+  const legacyShipment = { status: 'DELIVERED', voidedAt: null, deletedAt: null, legacyImported: true }
+  const bare = (over: Partial<ReleaseGateInput> = {}) =>
+    input({ documents: [], order: { arStatus: 'DOCS_NEEDED', references: [], invoiceId: null }, ...over })
+
+  it('waives documents, references and the own-fleet driver, and only those', () => {
+    const history = bare({ shipment: legacyShipment, legs: [own({ driverId: null, deliveryDriverId: null })] })
+    expect(evaluateReleaseGate(history)).toEqual({ ok: true, missing: [] })
+    // the same shipment without the flag fails on all three kinds of check
+    const live = bare({ legs: [own({ driverId: null, deliveryDriverId: null })] })
+    expect(evaluateReleaseGate(live).missing.map((m) => m.code).sort())
+      .toEqual(['DOC_MISSING', 'DOC_MISSING', 'DRIVER_MISSING', 'REFERENCE_MISSING'])
+  })
+
+  it('does not waive voided, canceled, undelivered, unassigned, unsettled or excepted', () => {
+    expect(messages(bare({ shipment: { ...legacyShipment, voidedAt: '2026-10-01T00:00:00Z' } }))).toEqual(['Voided shipment'])
+    expect(messages(bare({ shipment: { ...legacyShipment, status: 'CANCELED' } }))).toEqual(['Canceled shipment'])
+    expect(messages(bare({ shipment: { ...legacyShipment, status: 'BOOKED' } }))).toEqual(['Not delivered yet (status BOOKED)'])
+    expect(messages(bare({ shipment: legacyShipment, legs: [] }))).toEqual(['No carrier or driver assigned'])
+    expect(messages(bare({ shipment: legacyShipment, legs: [outside({ carrierName: 'Zed', chargesFinalizedAt: null })] }))[0])
+      .toMatch(/^Carrier charges not settled/)
+    expect(messages(bare({ shipment: legacyShipment, openIncidentCount: 2 }))).toEqual(['2 open exceptions'])
+  })
+})

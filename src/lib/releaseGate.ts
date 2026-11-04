@@ -43,6 +43,11 @@ export interface ReleaseGateShipment {
   voidedAt?: string | null
   /** Pre-R soft deletes. A deleted shipment is as gone as a voided one. */
   deletedAt?: string | null
+  /**
+   * Imported Aljex history (DECIDED-5): its paperwork stays in the Aljex archive, so
+   * the document, reference and Step W driver checks do not apply. Nothing else is waived.
+   */
+  legacyImported?: boolean | null
 }
 
 export interface ReleaseGateOrderReference {
@@ -164,19 +169,22 @@ export function evaluateReleaseGate(input: ReleaseGateInput): ReleaseGateResult 
     missing.push(reason('NOT_DELIVERED', status, `Not delivered yet (status ${status})`))
   }
 
-  const present = new Set<string>()
-  for (const doc of documents) {
-    if (countsAsPresent(doc)) present.add(doc.type)
-  }
-  if (legs.some((leg) => leg.status === 'ACTIVE' && leg.kind === 'CARRIER' && leg.rateConStatus === 'SIGNED')) {
-    present.add('RATE_CON')
-  }
-  for (const type of requiredDocTypesForRelease(input.requiredDocTypes, legs)) {
-    if (!present.has(type)) missing.push(reason('DOC_MISSING', type, `Missing document: ${type}`))
+  const legacy = shipment.legacyImported === true
+  if (!legacy) {
+    const present = new Set<string>()
+    for (const doc of documents) {
+      if (countsAsPresent(doc)) present.add(doc.type)
+    }
+    if (legs.some((leg) => leg.status === 'ACTIVE' && leg.kind === 'CARRIER' && leg.rateConStatus === 'SIGNED')) {
+      present.add('RATE_CON')
+    }
+    for (const type of requiredDocTypesForRelease(input.requiredDocTypes, legs)) {
+      if (!present.has(type)) missing.push(reason('DOC_MISSING', type, `Missing document: ${type}`))
+    }
   }
 
   const references = order.references ?? []
-  for (const code of input.requiredReferenceCodes) {
+  for (const code of legacy ? [] : input.requiredReferenceCodes) {
     const filled = references.some(
       (ref) => ref.code === code && typeof ref.value === 'string' && ref.value.trim().length > 0,
     )
@@ -190,7 +198,7 @@ export function evaluateReleaseGate(input: ReleaseGateInput): ReleaseGateResult 
     missing.push(reason('CARRIER_NOT_ASSIGNED', null, 'No carrier or driver assigned'))
   }
   for (const leg of active) {
-    if (leg.kind !== 'OWN_ASSET') continue
+    if (leg.kind !== 'OWN_ASSET' || legacy) continue
     if (!leg.driverId?.trim()) {
       missing.push(reason('DRIVER_MISSING', null, OWN_ASSET_MESSAGES.releaseNoDriver))
     } else if (!leg.deliveryDriverId?.trim()) {

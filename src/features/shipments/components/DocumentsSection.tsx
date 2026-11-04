@@ -25,6 +25,8 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { TmsAlert, TmsBadge, TmsButton, TmsCard, TmsDialog, TmsInput, TmsSelect, TmsTextarea } from '@/features/tms/kit'
+import { LegacyBadge } from '@/features/tms/brokerage/company/components/LegacyBadge'
+import { WAIVED_LABEL } from '@/features/tms/brokerage/company/components/legacyLabels'
 import { Label } from '@/components/ui/label'
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
@@ -111,7 +113,7 @@ export function DocumentsSection({
   const [preview, setPreview] = useState<{ doc: ShipmentDocumentRecord; url: string | null } | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  const docs = useShipmentDocuments(shipment.id, { bundle, customer, settings })
+  const docs = useShipmentDocuments(shipment.id, { bundle, customer, settings, legacyImported: shipment.legacyImported })
 
   const divisionKey = load?.divisionKey ?? null
 
@@ -191,6 +193,7 @@ export function DocumentsSection({
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
+        <LegacyBadge legacyImported={shipment.legacyImported} importRunId={shipment.importRunId} importedAt={shipment.createdAt} />
         {docs.pendingCount > 0 && (
           <TmsBadge tone="orange" className="text-[10px]">
             {docs.pendingCount} upload{docs.pendingCount === 1 ? '' : 's'} to review
@@ -434,7 +437,11 @@ function RequiredStrip({ gate, documents, arStatus, onReady }: {
         </div>
       </div>
 
-      {gate.required.length === 0 && (
+      {gate.legacy === true ? (
+        <p className="text-sm tms-muted" data-testid="docs-waived">
+          {WAIVED_LABEL}: the paperwork for this shipment is in the Aljex archive.
+        </p>
+      ) : gate.required.length === 0 && (
         <p className="text-sm tms-muted">
           This customer asks for no documents before invoicing.
         </p>

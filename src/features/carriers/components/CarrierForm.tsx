@@ -205,6 +205,20 @@ export function CarrierForm({ value, set, section }: CarrierFormProps) {
         </TmsField>
       </div>
       <div className="tms-grid tms-grid-4">
+        <TmsField label="CA intrastate #">
+          <TmsInput aria-label="CA intrastate number" value={value.caIntrastateNumber} onChange={(e) => set('caIntrastateNumber', e.target.value)} />
+        </TmsField>
+        <TmsField label="CA intrastate expires">
+          <TmsInput aria-label="CA intrastate expires" type="date" value={value.caIntrastateExpiresAt} onChange={(e) => set('caIntrastateExpiresAt', e.target.value)} />
+        </TmsField>
+        <TmsField label="TX PUC #">
+          <TmsInput aria-label="TX PUC number" value={value.txPucNumber} onChange={(e) => set('txPucNumber', e.target.value)} />
+        </TmsField>
+        <TmsField label="TX PUC expires">
+          <TmsInput aria-label="TX PUC expires" type="date" value={value.txPucExpiresAt} onChange={(e) => set('txPucExpiresAt', e.target.value)} />
+        </TmsField>
+      </div>
+      <div className="tms-grid tms-grid-4">
         <TmsField label="Safety rating">
           <TmsSelect
             aria-label="Safety rating"

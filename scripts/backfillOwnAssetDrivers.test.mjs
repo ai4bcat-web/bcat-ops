@@ -131,6 +131,17 @@ describe('backfillOwnAssetDrivers — which own-fleet loads get fixed and which 
     expect(p.actions.some((a) => a.loadId === 'brokered')).toBe(false);
   });
 
+  it('skips imported Aljex history: no gap report, no leg built, counted on its own line', () => {
+    const f = fixtures();
+    f.loads.push(load('hist-nobody', { legacyImported: true, status: 'DELIVERED' }));
+    f.loads.push(load('hist-legless', { legacyImported: true, status: 'DELIVERED', pickupDriverId: 'drv-a', deliveryDriverId: 'drv-a' }));
+    const p = planOwnAssetDrivers(f.loads, f.legs, drivers());
+    expect(p.counts.LEGACY_IMPORTED).toBe(2);
+    expect(p.report.some((r) => r.loadId.startsWith('hist-'))).toBe(false);
+    expect(p.actions.some((a) => a.loadId.startsWith('hist-'))).toBe(false);
+    expect(byClass(p, 'NO_DRIVER_ANYWHERE')).toEqual(['nobody']);
+  });
+
   it('never plans a write to a driver, date, rate or stops field — the pay inputs', () => {
     const forbidden = ['pickupDriverId', 'deliveryDriverId', 'pickupAppt', 'deliveryAppt', 'rate', 'stops'];
     for (const action of plan().actions) {

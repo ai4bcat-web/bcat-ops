@@ -125,15 +125,21 @@ function withOwner(s: MailboxSuggestion, divisions: readonly DivisionAddress[], 
 /**
  * Which division a message was addressed to. Scans `addresses` in the order the bridge
  * reported them (To, Cc, Delivered-To, X-Original-To); the first one an active division owns wins.
+ *
+ * A division whose address is a seeded placeholder (`intakeEmailConfirmed === false`) owns
+ * nothing: nobody has confirmed the mailbox exists, so a message must not be routed by it.
+ * `null`/absent means "saved by a person before the flag existed" and keeps routing.
  */
 export function matchDivisionByAddresses(
   addresses: readonly string[],
-  divisions: ReadonlyArray<{ code: string; active: boolean; intakeEmail?: string | null }>,
+  divisions: ReadonlyArray<{ code: string; active: boolean; intakeEmail?: string | null; intakeEmailConfirmed?: boolean | null }>,
 ): { divisionCode: string; address: string } | null {
   for (const raw of addresses) {
     const address = normalizeIntakeEmail(raw)
     if (address == null) continue
-    const hit = divisions.find((d) => d.active && normalizeIntakeEmail(d.intakeEmail) === address)
+    const hit = divisions.find(
+      (d) => d.active && d.intakeEmailConfirmed !== false && normalizeIntakeEmail(d.intakeEmail) === address,
+    )
     if (hit) return { divisionCode: hit.code, address }
   }
   return null

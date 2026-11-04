@@ -132,3 +132,16 @@ describe('evaluatePayLock', () => {
     expect(r).toEqual({ state: 'REFUSED', code: 'BOX_TRUCK_TRIP', message: M.payBoxTrip('Bo', '2026-10-07') })
   })
 })
+
+describe('legacyImported (Aljex history) is exempt from Step W', () => {
+  it('is not an own-asset load and never has a driver gap, at either phase', () => {
+    const load = { assignmentType: 'OWN_ASSET', status: 'DELIVERED', legacyImported: true }
+    expect(isOwnAssetLoad(load, ownLeg(null))).toBe(false)
+    expect(ownAssetDriverGap({ load, activeLeg: ownLeg(null), phase: 'DELIVERED' })).toBeNull()
+    expect(ownAssetDriverGap({ load, activeLeg: ownLeg(null), phase: 'DISPATCH' })).toBeNull()
+  })
+  it('the same load without the flag still needs a driver', () => {
+    const load = { assignmentType: 'OWN_ASSET', status: 'DELIVERED' }
+    expect(ownAssetDriverGap({ load, activeLeg: ownLeg(null), phase: 'DELIVERED' })?.code).toBe('NO_DRIVER')
+  })
+})

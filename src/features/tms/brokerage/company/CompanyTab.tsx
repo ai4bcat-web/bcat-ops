@@ -1,10 +1,10 @@
 /**
  * My Brokerage → Company.
  *
- * One tab with an inner strip of six pages: the business identity, how money is
+ * One tab with an inner strip of pages: the business identity, how money is
  * collected, how the product looks, how notifications leave, how data is imported,
- * and the account itself. `BrokeragePage` owns the h1, so this body renders no
- * heading of its own.
+ * where the data is backed up and exported, and the account itself. `BrokeragePage`
+ * owns the h1, so this body renders no heading of its own.
  */
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { TmsTabs } from '@/features/tms/kit'
@@ -15,6 +15,7 @@ import { NotificationsPage } from './NotificationsPage'
 import { ImportPage } from './ImportPage'
 import { AljexImportPage } from './AljexImportPage'
 import { AccountPage } from './AccountPage'
+import { DataSafetyPage } from './DataSafetyPage'
 
 const ROOT = '/tms/brokerage/company'
 
@@ -25,6 +26,7 @@ const TABS = [
   { key: 'notifications', label: 'Notifications' },
   { key: 'import', label: 'Import' },
   { key: 'aljex-import', label: 'Aljex import' },
+  { key: 'data', label: 'Data & backups' },
   { key: 'account', label: 'Account' },
 ] as const
 
@@ -58,6 +60,7 @@ export function CompanyTab() {
           <Route path="notifications" element={<NotificationsPage />} />
           <Route path="import" element={<ImportPage />} />
           <Route path="aljex-import" element={<AljexImportPage />} />
+          <Route path="data" element={<DataSafetyPage />} />
           <Route path="account" element={<AccountPage />} />
           <Route path="*" element={<Navigate to={`${ROOT}/company`} replace />} />
         </Routes>

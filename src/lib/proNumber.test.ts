@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { normalizePro } from './proNumber'
+import { isDerivedPro, normalizePro } from './proNumber'
 
 describe('normalizePro', () => {
   it('strips the padding the live table stores', () => {
@@ -25,5 +25,24 @@ describe('normalizePro', () => {
     expect(normalizePro('12')).toBeNull()
     expect(normalizePro('')).toBeNull()
     expect(normalizePro(null)).toBeNull()
+  })
+})
+
+describe('isDerivedPro', () => {
+  it('recognises the shape the counter issues, raw or as a claim key', () => {
+    expect(isDerivedPro('S000123-1', 'S')).toBe(true)
+    expect(isDerivedPro('s000123-12', 'S')).toBe(true)
+    expect(isDerivedPro('S0001231', 'S')).toBe(true)
+    expect(isDerivedPro('PRO S000123-2', 'S')).toBe(true)
+  })
+  it('follows a dashed prefix the way the claim key does', () => {
+    expect(isDerivedPro('BC-000123-1', 'BC-')).toBe(true)
+    expect(isDerivedPro('BC0001231', 'BC-')).toBe(true)
+  })
+  it('leaves numeric Aljex PROs and ordinary strings alone', () => {
+    expect(isDerivedPro('14547', 'S')).toBe(false)
+    expect(isDerivedPro('900123', 'S')).toBe(false)
+    expect(isDerivedPro('S123', 'S')).toBe(false)
+    expect(isDerivedPro('X000123-1', 'S')).toBe(false)
   })
 })

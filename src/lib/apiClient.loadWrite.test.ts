@@ -36,6 +36,8 @@ describe('updateLoad', () => {
       tmsId: 'PO-9',
       pickupNumber: 'PU-1',
       voidedAt: '2026-10-01T00:00:00.000Z',
+      legacyImported: true,
+      legacySource: 'ALJEX',
       notes: 'moved the delivery',
     } as never)
 
@@ -44,6 +46,10 @@ describe('updateLoad', () => {
     expect(input).not.toHaveProperty('tmsId')
     expect(input).not.toHaveProperty('pickupNumber')
     expect(input).not.toHaveProperty('voidedAt')
+    // A client must never be able to flag a live load as imported history.
+    expect(input).not.toHaveProperty('legacyImported')
+    expect(input).not.toHaveProperty('legacySource')
+    expect(input).toMatchObject({ notes: 'moved the delivery' })
   })
 
   it('still writes the fields the client does own', async () => {

@@ -46,6 +46,7 @@ async function listAllTables() {
 
 function devSuffixFrom(tables) {
   const forced = flag('--to')
+  if (forced?.includes(PROD_SUFFIX)) throw new Error('--to must be a dev suffix, not the production suffix')
   if (forced) return forced
   const suffixes = tables.filter((t) => t.startsWith('Load-')).map((t) => t.slice('Load-'.length)).filter((s) => s !== PROD_SUFFIX)
   if (suffixes.length !== 1) throw new Error(`expected exactly one non-production Load table, found: ${suffixes.join(', ') || 'none'} (pass --to <suffix>)`)

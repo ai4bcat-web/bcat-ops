@@ -494,6 +494,17 @@ describe('UPSERT_CARRIER create', () => {
     expect(storedCarrier(String(created.id)).status).toBe('PENDING')
   })
 
+  it('keeps the CA Intrastate / TX PUC numbers and refuses an expiry that is not a calendar date', async () => {
+    const created = await call('UPSERT_CARRIER', {
+      name: 'Lone Star Freight', type: 'TL', caIntrastateNumber: 'CA-1', caIntrastateExpiresAt: '2027-03-01',
+      txPucNumber: 'TX-9', txPucExpiresAt: '2027-04-15',
+    })
+    expect(storedCarrier(String(created.id))).toMatchObject({
+      caIntrastateNumber: 'CA-1', caIntrastateExpiresAt: '2027-03-01', txPucNumber: 'TX-9', txPucExpiresAt: '2027-04-15',
+    })
+    await expect(call('UPSERT_CARRIER', { name: 'Bad Date Inc', type: 'TL', txPucExpiresAt: '04/15/2027' })).rejects.toThrow(/YYYY-MM-DD/)
+  })
+
   it('lets an admin open a carrier straight to ACTIVE', async () => {
     const created = await call(
       'UPSERT_CARRIER',

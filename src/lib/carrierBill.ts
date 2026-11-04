@@ -315,7 +315,7 @@ export interface ApprovalReadinessInput {
   >
   loadCarrier: Pick<LoadCarrierRecord, 'status' | 'rateConStatus'>
   load: Pick<ShipmentLoad, 'id' | 'status' | 'loadNumber'> | null | undefined
-  gate: Pick<DocGateResult, 'missing'> | null | undefined
+  gate: Pick<DocGateResult, 'missing' | 'legacy'> | null | undefined
   payee: BillPayee | null | undefined
   /** The directory row, for the status warning. Optional: a bill knows its own payee. */
   carrier?: Pick<CarrierRecord, 'name' | 'status'> | null
@@ -379,7 +379,8 @@ export function approvalReadiness(input: ApprovalReadinessInput): ApprovalReadin
 
   // The signed rate con is a status, not a document: it is the contract that says
   // what we agreed to pay. Admins may approve without one and own the decision.
-  if (settings?.apRequireSignedRateCon !== false && loadCarrier.rateConStatus !== 'SIGNED') {
+  // Imported Aljex history keeps its rate con in the Aljex archive (DECIDED-5).
+  if (gate?.legacy !== true && settings?.apRequireSignedRateCon !== false && loadCarrier.rateConStatus !== 'SIGNED') {
     const message = 'The rate confirmation for this assignment is not signed; there is no signed agreement behind this amount.'
     if (isAdmin) warnings.push({ key: APPROVAL_WARNING_KEYS.rateConUnsigned, message })
     else blocks.push(message)

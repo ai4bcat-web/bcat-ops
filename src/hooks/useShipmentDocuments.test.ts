@@ -69,6 +69,20 @@ describe('useShipmentDocuments', () => {
     expect(result.current.carrierGates['lc-bounced']).toBeUndefined()
   })
 
+  it('reads both gates as satisfied for imported Aljex history', async () => {
+    listShipmentDocuments.mockResolvedValue([])
+    const { result } = renderHook(() => useShipmentDocuments('shp-1', {
+      bundle: { orders: [order], loads, loadCarriers },
+      customer,
+      settings,
+      legacyImported: true,
+    }))
+
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.orderGates['ord-1']).toMatchObject({ ready: true, missing: [], legacy: true })
+    expect(result.current.carrierGates['lc-active']).toMatchObject({ ready: true, missing: [], legacy: true })
+  })
+
   it('does not let a pending upload or a bounced carrier satisfy the gate', async () => {
     listShipmentDocuments.mockResolvedValue([
       doc({ id: 'sdoc-2', type: 'POD', loadId: 'lod-1', loadCarrierId: 'lc-active', source: 'CARRIER_PORTAL', reviewStatus: 'PENDING' }),

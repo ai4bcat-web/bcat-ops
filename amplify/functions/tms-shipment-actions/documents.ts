@@ -248,6 +248,7 @@ export function customerDocGate(args: {
     customer: args.customer as Pick<CustomerRecord, 'requiredDocsForInvoice'> | null,
     settings: args.settings as Pick<TmsSettings, 'defaultRequiredDocs' | 'requiredCarrierUploadTypes'> | null,
     scope: 'CUSTOMER',
+    legacyImported: args.bundle.shipment?.legacyImported === true,
   })
 }
 
@@ -300,6 +301,7 @@ export async function recacheDocGates(
       settings: settings as Pick<TmsSettings, 'defaultRequiredDocs' | 'requiredCarrierUploadTypes'> | null,
       loadCarrierId: String(carrier.id),
       scope: 'CARRIER',
+      legacyImported: bundle.shipment?.legacyImported === true,
     })
     writes.push(
       updateItemTx(deps.store.tables.loadCarrier, String(carrier.id), { docsMissing: gate.missing }, null),

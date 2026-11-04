@@ -159,6 +159,7 @@ export async function readAssignmentContext(loadCarrierId: string): Promise<Assi
 export function carrierGateFor(context: AssignmentContext): DocGateResult {
   return evaluateDocGate({
     scope: 'CARRIER',
+    legacyImported: context.shipment?.legacyImported === true,
     documents: context.documents,
     loadIds: context.loadCarrier.loadId ? [context.loadCarrier.loadId] : [],
     loadCarriers: context.loadCarriers,

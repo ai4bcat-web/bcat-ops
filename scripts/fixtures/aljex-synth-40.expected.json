@@ -1,0 +1,671 @@
+{
+  "seed": 1,
+  "anomalies": "standard",
+  "synthetic": true,
+  "layoutId": "aljex-full-486-v1",
+  "headerCount": 486,
+  "fileRows": 40,
+  "loads": 32,
+  "memos": 5,
+  "memoDebt": 2,
+  "memoCred": 3,
+  "identicalDuplicateRows": 2,
+  "conflictingDuplicateRows": 1,
+  "statusCounts": {
+    "DELIVERED": 24,
+    "VOID": 2,
+    "VOID WEB": 1,
+    "CONSIGNEE": 1,
+    "COVERED": 1,
+    "OPEN": 1,
+    "LOADED": 1,
+    "DISPATCHED": 1
+  },
+  "uniqueTotals": {
+    "lhRevenue": 6130111,
+    "accRevenue": 792050,
+    "fscRevenue": 186100,
+    "invoiceAmount": 6922161,
+    "invoiceAmountLoads": 6947561,
+    "payments": 4692508,
+    "credits": 25400,
+    "debits": 2500,
+    "balDue": 558306
+  },
+  "fileTotals": {
+    "lhRevenue": 6476383,
+    "accRevenue": 792050,
+    "fscRevenue": 186100,
+    "invoiceAmount": 7268533,
+    "invoiceAmountLoads": 7293933,
+    "payments": 5038780,
+    "credits": 25400,
+    "debits": 2500,
+    "balDue": 558306
+  },
+  "invoices": 21,
+  "zeroInvoiceLoads": 1,
+  "uninvoicedLoadsWithAmount": 7,
+  "uninvoicedAmount": 1675347,
+  "creditsOnUninvoiced": 1500,
+  "debitsOnUninvoiced": 0,
+  "openAr": {
+    "count": 2,
+    "balance": 560806
+  },
+  "unappliedCredit": 2500,
+  "perCustomerOpen": {
+    "ZZA0004": 221604,
+    "ZZA0001": 339202
+  },
+  "netOpenAr": 558306,
+  "memoNet": -25400,
+  "memoCredTotal": -29600,
+  "memoDebtTotal": 4200,
+  "ap": {
+    "bills": 22,
+    "open": 310800,
+    "perCarrierOpen": {
+      "ZZK0005": 300800,
+      "ZZK0001": 10000
+    }
+  },
+  "customers": 6,
+  "carriers": 7,
+  "ivanLoads": 1,
+  "anomalyPros": {
+    "identicalDuplicates": [
+      "900021",
+      "900021"
+    ],
+    "conflictingDuplicates": [
+      "900021"
+    ],
+    "junkShipDates": [
+      "900050",
+      "900052",
+      "900054",
+      "900056"
+    ],
+    "shipAfterDelivered": [
+      "900058"
+    ],
+    "blankCustomer": [
+      "900062"
+    ],
+    "unknownStatus": [],
+    "badPros": [],
+    "rejected": [],
+    "chargeMismatch": [],
+    "overpaid": [
+      "900025"
+    ],
+    "zeroInvoice": [
+      "900069"
+    ],
+    "wideRows": [
+      "900073"
+    ],
+    "longRows": []
+  },
+  "scenarios": {
+    "PAID": [
+      "900021"
+    ],
+    "PARTIAL": [
+      "900022"
+    ],
+    "UNPAID": [
+      "900023"
+    ],
+    "OVERPAID": [
+      "900025"
+    ],
+    "TWO_PAYMENTS": [
+      "900026"
+    ],
+    "CREDIT": [
+      "900028"
+    ],
+    "DEBIT": [
+      "900032"
+    ],
+    "UNINVOICED_DELIVERED": [
+      "900036"
+    ],
+    "IVAN": [
+      "900038"
+    ],
+    "VOID": [
+      "900040"
+    ],
+    "VOID_WEB": [
+      "900041"
+    ],
+    "CONSIGNEE": [
+      "900043"
+    ],
+    "COVERED": [
+      "900045"
+    ],
+    "OPEN": [
+      "900046"
+    ],
+    "LOADED": [
+      "900048"
+    ],
+    "DISPATCHED": [
+      "900049"
+    ],
+    "JUNK_70": [
+      "900050"
+    ],
+    "JUNK_20": [
+      "900052"
+    ],
+    "JUNK_23": [
+      "900054"
+    ],
+    "JUNK_BLANK": [
+      "900056"
+    ],
+    "SHIP_AFTER_DELIVERED": [
+      "900058"
+    ],
+    "STATUS_LOWER": [
+      "900059"
+    ],
+    "STATUS_TRAILING": [
+      "900061"
+    ],
+    "BLANK_CUSTOMER_VOID": [
+      "900062"
+    ],
+    "MULTI_STOP": [
+      "900063"
+    ],
+    "UNICODE": [
+      "900064"
+    ],
+    "NEWLINE_FIELD": [
+      "900066"
+    ],
+    "MONEY_FORMATS": [
+      "900067"
+    ],
+    "ZERO_INVOICE": [
+      "900069"
+    ],
+    "TONU": [
+      "900071"
+    ],
+    "WIDE_ROW": [
+      "900073"
+    ],
+    "CREDIT_UNINVOICED": [
+      "900074"
+    ]
+  },
+  "memoAdjustments": {
+    "applied": 2,
+    "appliedNet": -21400,
+    "byInvoice": {
+      "900028": -23900,
+      "900032": 2500
+    },
+    "orphans": [
+      {
+        "memoPro": "900075",
+        "kind": "CRED",
+        "referencePro": "900074",
+        "signedAmountCents": -1500,
+        "reason": "REFERENCE_NOT_INVOICED"
+      },
+      {
+        "memoPro": "900076",
+        "kind": "CRED",
+        "referencePro": "999999",
+        "signedAmountCents": -4200,
+        "reason": "REFERENCE_NOT_FOUND"
+      },
+      {
+        "memoPro": "900078",
+        "kind": "DEBT",
+        "referencePro": "",
+        "signedAmountCents": 1700,
+        "reason": "NO_REFERENCE"
+      }
+    ],
+    "orphanNet": -4000
+  },
+  "memoLinkedCredTotal": -25400,
+  "memoLinkedDebtTotal": 2500,
+  "invoiceTotalWithMemos": 5250814,
+  "invoicePayments": 4692508,
+  "codes": {
+    "salesRep": {
+      "900021": "010",
+      "900022": "002",
+      "900023": "005",
+      "900025": "002",
+      "900026": "010",
+      "900028": "003",
+      "900032": "010",
+      "900036": "001",
+      "900038": "010",
+      "900043": "003",
+      "900045": "010",
+      "900046": "005",
+      "900048": "005",
+      "900049": "005",
+      "900050": "002",
+      "900052": "005",
+      "900054": "003",
+      "900056": "002",
+      "900058": "005",
+      "900059": "001",
+      "900061": "002",
+      "900063": "010",
+      "900064": "010",
+      "900066": "005",
+      "900067": "003",
+      "900069": "002",
+      "900071": "002",
+      "900073": "010",
+      "900074": "010"
+    },
+    "createdBy": {
+      "900021": "AA",
+      "900022": "DD",
+      "900023": "BB",
+      "900025": "DD",
+      "900026": "CC",
+      "900028": "AA",
+      "900032": "DD",
+      "900036": "DD",
+      "900038": "AA",
+      "900040": "CC",
+      "900041": "AA",
+      "900043": "BB",
+      "900045": "BB",
+      "900046": "CC",
+      "900048": "DD",
+      "900049": "AA",
+      "900050": "BB",
+      "900052": "DD",
+      "900054": "AA",
+      "900056": "CC",
+      "900058": "BB",
+      "900059": "CC",
+      "900061": "DD",
+      "900062": "AA",
+      "900063": "CC",
+      "900064": "AA",
+      "900066": "AA",
+      "900067": "DD",
+      "900069": "DD",
+      "900071": "AA",
+      "900073": "BB",
+      "900074": "CC"
+    },
+    "serviceRep": {
+      "900021": "BB",
+      "900028": "CC",
+      "900049": "AA",
+      "900058": "CC",
+      "900064": "AA",
+      "900073": "CC"
+    },
+    "dispatcher": {
+      "900021": "DD",
+      "900023": "DD",
+      "900026": "AA",
+      "900032": "AA",
+      "900038": "CC",
+      "900045": "CC",
+      "900048": "DD",
+      "900050": "CC",
+      "900054": "BB",
+      "900058": "BB",
+      "900061": "DD",
+      "900063": "DD",
+      "900066": "AA",
+      "900069": "CC",
+      "900073": "AA"
+    },
+    "actualDispatcher": {
+      "900021": "BB",
+      "900022": "CC",
+      "900023": "BB",
+      "900025": "DD",
+      "900026": "BB",
+      "900028": "DD",
+      "900032": "CC",
+      "900036": "CC",
+      "900038": "CC",
+      "900043": "AA",
+      "900045": "DD",
+      "900046": "AA",
+      "900048": "DD",
+      "900049": "DD",
+      "900050": "BB",
+      "900052": "AA",
+      "900054": "BB",
+      "900056": "BB",
+      "900058": "BB",
+      "900059": "AA",
+      "900061": "BB",
+      "900063": "CC",
+      "900064": "CC",
+      "900066": "CC",
+      "900067": "DD",
+      "900069": "BB",
+      "900071": "CC",
+      "900073": "BB",
+      "900074": "CC"
+    }
+  },
+  "salesRepCodeCounts": {
+    "010": 9,
+    "002": 7,
+    "005": 7,
+    "003": 4,
+    "001": 2
+  },
+  "promoted": {
+    "900021": {
+      "quoteNo": "ZZQ0021",
+      "manifest": "ZZMAN0021",
+      "container": "ZZCONT0021",
+      "additionalRefs": [
+        "ZZADD0021A",
+        "ZZADD0021B"
+      ],
+      "consigneeRef": "ZZCR0021",
+      "osd": true,
+      "pltIn": 3,
+      "pltOut": 2,
+      "seal": "Y",
+      "declaredValueCents": 5000000,
+      "flags": [
+        "hazmat",
+        "tempControl",
+        "team",
+        "tarps",
+        "escort",
+        "overSize",
+        "permit",
+        "blind",
+        "customsBond",
+        "pltExchange",
+        "labor",
+        "highRisk",
+        "smartway"
+      ]
+    },
+    "900026": {
+      "quoteNo": "ZZQ0026",
+      "manifest": "ZZMAN0026",
+      "container": "ZZCONT0026",
+      "additionalRefs": [
+        "ZZADD0026A",
+        "ZZADD0026B"
+      ],
+      "consigneeRef": "ZZCR0026",
+      "osd": true,
+      "pltIn": 3,
+      "pltOut": 2,
+      "seal": "Y",
+      "declaredValueCents": 5000000,
+      "flags": [
+        "hazmat",
+        "tempControl",
+        "team",
+        "tarps",
+        "escort",
+        "overSize",
+        "permit",
+        "blind",
+        "customsBond",
+        "pltExchange",
+        "labor",
+        "highRisk",
+        "smartway"
+      ]
+    },
+    "900038": {
+      "quoteNo": "ZZQ0038",
+      "manifest": "ZZMAN0038",
+      "container": "ZZCONT0038",
+      "additionalRefs": [
+        "ZZADD0038A",
+        "ZZADD0038B"
+      ],
+      "consigneeRef": "ZZCR0038",
+      "osd": true,
+      "pltIn": 3,
+      "pltOut": 2,
+      "seal": "Y",
+      "declaredValueCents": 5000000,
+      "flags": [
+        "hazmat",
+        "tempControl",
+        "team",
+        "tarps",
+        "escort",
+        "overSize",
+        "permit",
+        "blind",
+        "customsBond",
+        "pltExchange",
+        "labor",
+        "highRisk",
+        "smartway"
+      ]
+    },
+    "900045": {
+      "quoteNo": "ZZQ0045",
+      "manifest": "ZZMAN0045",
+      "container": "ZZCONT0045",
+      "additionalRefs": [
+        "ZZADD0045A",
+        "ZZADD0045B"
+      ],
+      "consigneeRef": "ZZCR0045",
+      "osd": true,
+      "pltIn": 3,
+      "pltOut": 2,
+      "seal": "Y",
+      "declaredValueCents": 5000000,
+      "flags": [
+        "hazmat",
+        "tempControl",
+        "team",
+        "tarps",
+        "escort",
+        "overSize",
+        "permit",
+        "blind",
+        "customsBond",
+        "pltExchange",
+        "labor",
+        "highRisk",
+        "smartway"
+      ]
+    },
+    "900050": {
+      "quoteNo": "ZZQ0050",
+      "manifest": "ZZMAN0050",
+      "container": "ZZCONT0050",
+      "additionalRefs": [
+        "ZZADD0050A",
+        "ZZADD0050B"
+      ],
+      "consigneeRef": "ZZCR0050",
+      "osd": true,
+      "pltIn": 3,
+      "pltOut": 2,
+      "seal": "Y",
+      "declaredValueCents": 5000000,
+      "flags": [
+        "hazmat",
+        "tempControl",
+        "team",
+        "tarps",
+        "escort",
+        "overSize",
+        "permit",
+        "blind",
+        "customsBond",
+        "pltExchange",
+        "labor",
+        "highRisk",
+        "smartway"
+      ]
+    },
+    "900058": {
+      "quoteNo": "ZZQ0058",
+      "manifest": "ZZMAN0058",
+      "container": "ZZCONT0058",
+      "additionalRefs": [
+        "ZZADD0058A",
+        "ZZADD0058B"
+      ],
+      "consigneeRef": "ZZCR0058",
+      "osd": true,
+      "pltIn": 3,
+      "pltOut": 2,
+      "seal": "Y",
+      "declaredValueCents": 5000000,
+      "flags": [
+        "hazmat",
+        "tempControl",
+        "team",
+        "tarps",
+        "escort",
+        "overSize",
+        "permit",
+        "blind",
+        "customsBond",
+        "pltExchange",
+        "labor",
+        "highRisk",
+        "smartway"
+      ]
+    },
+    "900063": {
+      "quoteNo": "ZZQ0063",
+      "manifest": "ZZMAN0063",
+      "container": "ZZCONT0063",
+      "additionalRefs": [
+        "ZZADD0063A",
+        "ZZADD0063B"
+      ],
+      "consigneeRef": "ZZCR0063",
+      "osd": true,
+      "pltIn": 3,
+      "pltOut": 2,
+      "seal": "Y",
+      "declaredValueCents": 5000000,
+      "flags": [
+        "hazmat",
+        "tempControl",
+        "team",
+        "tarps",
+        "escort",
+        "overSize",
+        "permit",
+        "blind",
+        "customsBond",
+        "pltExchange",
+        "labor",
+        "highRisk",
+        "smartway"
+      ]
+    },
+    "900069": {
+      "quoteNo": "ZZQ0069",
+      "manifest": "ZZMAN0069",
+      "container": "ZZCONT0069",
+      "additionalRefs": [
+        "ZZADD0069A",
+        "ZZADD0069B"
+      ],
+      "consigneeRef": "ZZCR0069",
+      "osd": true,
+      "pltIn": 3,
+      "pltOut": 2,
+      "seal": "Y",
+      "declaredValueCents": 5000000,
+      "flags": [
+        "hazmat",
+        "tempControl",
+        "team",
+        "tarps",
+        "escort",
+        "overSize",
+        "permit",
+        "blind",
+        "customsBond",
+        "pltExchange",
+        "labor",
+        "highRisk",
+        "smartway"
+      ]
+    }
+  },
+  "fees": {
+    "quickPayCents": -4500,
+    "advanceCents": 6000,
+    "byPro": {
+      "900021": {
+        "quickPayCents": -1500,
+        "advanceCents": 0
+      },
+      "900026": {
+        "quickPayCents": 0,
+        "advanceCents": 2000
+      },
+      "900045": {
+        "quickPayCents": 0,
+        "advanceCents": 2000
+      },
+      "900050": {
+        "quickPayCents": -1500,
+        "advanceCents": 0
+      },
+      "900058": {
+        "quickPayCents": 0,
+        "advanceCents": 2000
+      },
+      "900063": {
+        "quickPayCents": -1500,
+        "advanceCents": 0
+      }
+    }
+  },
+  "carrierCompliance": {
+    "ZZK0001": {
+      "caIntrastate": "ZZCA0001",
+      "caIntrastateExp": "2027-03-15",
+      "txPuc": "ZZTX0001",
+      "txPucExp": "2027-09-30"
+    },
+    "ZZK0006": {
+      "caIntrastate": "ZZCA0006",
+      "caIntrastateExp": "2027-03-15",
+      "txPuc": "ZZTX0006",
+      "txPucExp": "2027-09-30"
+    }
+  },
+  "customerLeadSource": {
+    "ZZA0001": "ZZ Referral",
+    "ZZA0002": "ZZ Web Form",
+    "ZZA0004": "ZZ Referral",
+    "ZZA0005": "ZZ Web Form"
+  },
+  "nonUsdCurrencyPros": [
+    "900052"
+  ],
+  "dupCount": 3
+}

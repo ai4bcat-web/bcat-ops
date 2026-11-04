@@ -95,6 +95,7 @@ const store = vi.hoisted(() => {
   process.env.SHIPMENT_POSTING_TABLE_NAME = 'ShipmentPosting-test'
   process.env.BCAT_DEV_STACK = 'true'
   process.env.USER_PROFILE_TABLE_NAME = 'UserProfile-test'
+  process.env.ALJEX_CODE_MAP_TABLE_NAME = 'AljexCodeMap-test'
   process.env.PORTAL_ORIGIN = 'https://portal.test'
   process.env.BOX_TRUCK_TRIP_TABLE_NAME = 'BoxTruckTrip-test'
   process.env.AMPLIFY_DATA_DEFAULT_NAME = 'amplifyData'
@@ -1904,6 +1905,44 @@ describe('ownership tagging', () => {
     expect(table(TABLES.shipment).get(ids.shipmentId)!.salesRepId).toBe('amanda')
     expect(table(TABLES.load).get(ids.loadId)!.salesRepId).toBe('amanda')
     expect(table(TABLES.order).get(ids.orderId)!.customerRepId).toBe('amanda')
+  })
+
+  it('maps Aljex codes and reassigns by sales rep code like SET_SALES_REP: idempotent, audited, voided untouched, owner/ADMIN only', async () => {
+    table('UserProfile-test').set('amanda', { id: 'amanda', name: 'Amanda', role: 'CUSTOMER_REP' })
+    const seed = (id: string, extra: Row) => {
+      table(TABLES.shipment).set(id, { id, number: id, status: 'DELIVERED', salesRepCode: '005', version: 1, ...extra })
+      table(TABLES.order).set(`o-${id}`, { id: `o-${id}`, shipmentId: id, version: 1 })
+      table(TABLES.load).set(`l-${id}`, { id: `l-${id}`, shipmentId: id })
+    }
+    seed('s1', { createdByCode: 'KB' })
+    seed('s2', { salesRepId: 'amanda' })
+    seed('s3', { voidedAt: '2026-10-29T00:00:00Z' })
+    seed('s4', { salesRepCode: '003' })
+
+    await expect(call('LIST_ALJEX_CODES', {})).rejects.toThrow(/requires owner or ADMIN/)
+    await expect(call('SET_ALJEX_CODE_MAP', { kind: 'SALES_REP', code: '005', userId: 'nobody' }, ADMIN)).rejects.toThrow(/user profile/)
+
+    const before = (await call('LIST_ALJEX_CODES', {}, ADMIN)) as { codes: Row[] }
+    expect(before.codes.find((c) => c.kind === 'SALES_REP' && c.code === '005')).toMatchObject({ shipmentCount: 3, userId: null, pendingCount: 0 })
+    expect(before.codes.find((c) => c.kind === 'STAFF' && c.code === 'KB')).toMatchObject({ shipmentCount: 1 })
+
+    const preview = await call('REASSIGN_SHIPMENTS_BY_REP_CODE', { code: '005', repId: 'amanda', dryRun: true }, ADMIN) as Row
+    expect(preview).toMatchObject({ matched: 3, updated: 1, skippedAlreadyAssigned: 1, skippedVoided: 1, hasMore: false })
+    expect(table(TABLES.shipment).get('s1')!.salesRepId).toBeUndefined()
+
+    const done = await call('REASSIGN_SHIPMENTS_BY_REP_CODE', { code: '005', repId: 'amanda' }, ADMIN) as Row
+    expect(done).toMatchObject({ updated: 1, failed: [] })
+    expect(table(TABLES.shipment).get('s1')!.salesRepId).toBe('amanda')
+    expect(table(TABLES.order).get('o-s1')!.customerRepId).toBe('amanda')
+    expect(table(TABLES.load).get('l-s1')!.salesRepId).toBe('amanda')
+    expect(table(TABLES.shipment).get('s3')!.salesRepId).toBeUndefined()
+    expect(table(TABLES.shipment).get('s4')!.salesRepId).toBeUndefined()
+    expect([...table('AuditLog-test').values()].some((a) => a.entityId === 's1' && a.action === 'SET_SALES_REP')).toBe(true)
+
+    const again = await call('REASSIGN_SHIPMENTS_BY_REP_CODE', { code: '005', repId: 'amanda' }, ADMIN) as Row
+    expect(again).toMatchObject({ updated: 0, skippedAlreadyAssigned: 2 })
+    const after = (await call('LIST_ALJEX_CODES', {}, ADMIN)) as { codes: Row[] }
+    expect(after.codes.find((c) => c.kind === 'SALES_REP' && c.code === '005')).toMatchObject({ userId: 'amanda', userName: 'Amanda', pendingCount: 0 })
   })
 
   it('mirrors carrier rep onto every leg and active assignment, but not historical assignments', async () => {
@@ -6505,6 +6544,59 @@ describe('SAVE_SHIPMENT_SETTINGS', () => {
     await expect(
       call('SAVE_SHIPMENT_SETTINGS', { shipmentPrefix: 'BCATCORP1' }, ADMIN),
     ).rejects.toThrow('A shipment prefix is up to 8 letters, numbers or dashes')
+  })
+})
+
+describe('Numeric PRO scheme (Aljex-exit DECIDED-1)', () => {
+  it('mints the plain counter value as shipment number, load number, PRO and claim', async () => {
+    seedSettings({ proScheme: 'NUMERIC', nextShipmentNumber: 14912 })
+    const { shipmentId, loadId } = await createDraft()
+    expect(table(TABLES.shipment).get(shipmentId)!.number).toBe('14913')
+    expect(table(TABLES.load).get(loadId)).toMatchObject({ loadNumber: '14913', aljexId: '14913' })
+    expect(table(TABLES.proClaim).get('14913')).toMatchObject({ loadId, origin: 'CREATE' })
+  })
+
+  it('skips a number somebody already claimed instead of failing the create', async () => {
+    seedSettings({ proScheme: 'NUMERIC', nextShipmentNumber: 14912 })
+    table(TABLES.proClaim).set('14913', { id: '14913', loadId: 'lod-imported', origin: 'LEGACY' })
+    const { shipmentId } = await createDraft()
+    expect(table(TABLES.shipment).get(shipmentId)!.number).toBe('14914')
+    expect(table(TABLES.proClaim).get('14913')!.loadId).toBe('lod-imported')
+    expect(table(TABLES.settings).get('default')!.nextShipmentNumber).toBe(14914)
+  })
+
+  it('keeps the DERIVED shape when the scheme is not switched on', async () => {
+    seedSettings({ nextShipmentNumber: 14912 })
+    const { loadId } = await createDraft()
+    expect(table(TABLES.load).get(loadId)!.aljexId).toBe('S014913-1')
+  })
+
+  it('refuses a typed numeric PRO the counter would walk into, but not a lower one', async () => {
+    seedSettings({ proScheme: 'NUMERIC', nextShipmentNumber: 14912 })
+    await expect(call('CREATE_SHIPMENT', { customerId: 'cus-1', pro: '15000' })).rejects.toThrow(/will issue itself/)
+    const ok = (await call('CREATE_SHIPMENT', { customerId: 'cus-1', pro: '14000' })) as { loads: Row[] }
+    expect(ok.loads[0].aljexId).toBe('14000')
+  })
+
+  it('refuses to switch to NUMERIC while the counter is below a claimed numeric PRO, then allows it', async () => {
+    seedSettings({ nextShipmentNumber: 20 })
+    table(TABLES.proClaim).set('14912', { id: '14912', loadId: 'lod-x', origin: 'LEGACY' })
+    await expect(call('SAVE_SHIPMENT_SETTINGS', { proScheme: 'NUMERIC' }, ADMIN)).rejects.toThrow(/PRO 14912 is already claimed/)
+    await call('SAVE_SHIPMENT_SETTINGS', { proScheme: 'NUMERIC', nextShipmentNumber: 14912 }, ADMIN)
+    expect(table(TABLES.settings).get('default')).toMatchObject({ proScheme: 'NUMERIC', nextShipmentNumber: 14912 })
+  })
+
+  it('a duplicate of imported history is live freight: no legacy flag, a fresh numeric PRO', async () => {
+    seedSettings({ proScheme: 'NUMERIC', nextShipmentNumber: 14912 })
+    const ids = await createDraft()
+    Object.assign(table(TABLES.shipment).get(ids.shipmentId)!, { legacyImported: true, legacySource: 'ALJEX', importRunId: 'aljexrun:1' })
+    const result = (await call('DUPLICATE_SHIPMENT', { shipmentId: ids.shipmentId, copies: [{}] })) as { created: string[] }
+    const copy = table(TABLES.shipment).get(result.created[0])!
+    expect(copy.legacyImported).toBeFalsy()
+    expect(copy.number).toBe('14914')
+    const load = [...table(TABLES.load).values()].find((row) => row.shipmentId === copy.id)!
+    expect(load).toMatchObject({ aljexId: '14914', loadNumber: '14914' })
+    expect(load.legacyImported).toBeFalsy()
   })
 })
 

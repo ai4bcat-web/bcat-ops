@@ -191,6 +191,13 @@ export interface DivisionDraft {
   flows: Record<keyof OwnershipFlows, boolean | null>
   /** Where tender e-mails for this division arrive. Required while the division is active. */
   intakeEmail: string
+  /**
+   * The address as stored when the editor opened ('' for a new row). Typing a different one is
+   * the admin vouching for it; leaving a seeded placeholder untouched is not.
+   */
+  savedIntakeEmail: string
+  /** True once a person has confirmed the mailbox exists (stored `true`, or ticked in this editor). */
+  intakeEmailConfirmed: boolean
   /** A new row may still choose its code; an existing one never may. */
   isNew: boolean
 }
@@ -212,6 +219,8 @@ export function blankDivisionDraft(parentId = '', sortOrder = 0): DivisionDraft 
     color: '',
     sortOrder,
     intakeEmail: '',
+    savedIntakeEmail: '',
+    intakeEmailConfirmed: false,
     active: true,
     owners: { ...EMPTY_OWNERS },
     flows: { ...EMPTY_FLOWS },
@@ -236,6 +245,8 @@ export function divisionToDraft(division: OwnershipDivisionRecord): DivisionDraf
     sortOrder: division.sortOrder,
     active: division.active,
     intakeEmail: division.intakeEmail ?? '',
+    savedIntakeEmail: division.intakeEmail ?? '',
+    intakeEmailConfirmed: division.intakeEmailConfirmed === true,
     owners,
     flows,
     isNew: false,
@@ -293,6 +304,11 @@ export function draftToDivisionInput(draft: DivisionDraft): OwnershipDivisionInp
     sortOrder: draft.sortOrder,
     active: draft.active,
     intakeEmail: draft.intakeEmail.trim().toLowerCase(),
+    // Omitted (keeps the stored value) unless a person confirmed it: an unchecked box must never
+    // flip an address that was saved before the flag existed to `false` and stop it routing mail.
+    ...(draft.intakeEmailConfirmed || normalizeIntakeEmail(draft.intakeEmail) !== normalizeIntakeEmail(draft.savedIntakeEmail)
+      ? { intakeEmailConfirmed: true }
+      : {}),
     owners,
     flows,
   }

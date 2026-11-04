@@ -74,6 +74,7 @@ import {
 } from '../../../src/lib/brokerage/import'
 import { validateWhiteLabel, type WhiteLabel } from '../../../src/lib/brokerage/whiteLabel'
 import { writeRawParameter, parameterNameFor } from '../_shared/integrationSecrets'
+import { normalizeAddress, normalizeName, type AddressShape } from '../_shared/directoryKeys'
 import type {
   CarrierAgreementTemplate,
   CommissionTrigger,
@@ -751,36 +752,7 @@ function conflictError(itemLabel: string, cause: unknown): Error {
 }
 
 // ── Normalization ─────────────────────────────────────────────────────────────
-
-function normalizeName(value: string): string {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .replace(/\b(llc|inc|ltd|llp|corp|co|company|enterprises)\b/g, '')
-    .trim()
-}
-
-interface AddressShape {
-  street?: string | null
-  city?: string | null
-  state?: string | null
-  zip?: string | null
-  country?: string | null
-}
-
-function normalizeAddress(value: AddressShape | string): string {
-  if (typeof value === 'string') {
-    return value.toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim()
-  }
-  const parts = [value.street, value.city, value.state, value.zip, value.country]
-  return parts
-    .map((p) => (typeof p === 'string' ? p.toLowerCase().replace(/[^a-z0-9]/g, ' ') : ''))
-    .filter(Boolean)
-    .join(' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-}
+// `normalizeName` / `normalizeAddress` / `AddressShape` live in `_shared/directoryKeys.ts` (the import engine shares them).
 
 // ── Geocode token verification ───────────────────────────────────────────────
 
@@ -2685,6 +2657,16 @@ async function saveOwnershipDivision(
     'intakeEmail' in input ? input.intakeEmail : existing?.intakeEmail,
   )
 
+  // Phase 0. An address nobody has confirmed (the seeded placeholders) is badged UNCONFIRMED. An
+  // explicit flag wins; otherwise a person changing the address confirms it, and a save that
+  // leaves the address alone (or omits it) keeps whatever was stored.
+  const explicitConfirmed = optionalBoolean(input.intakeEmailConfirmed)
+  const intakeEmailConfirmed =
+    explicitConfirmed ??
+    ('intakeEmail' in input && intakeEmail != null && intakeEmail !== (existing?.intakeEmail ?? null)
+      ? true
+      : existing?.intakeEmailConfirmed ?? null)
+
   const now = nowIso()
   const item: Record<string, unknown> = {
     id: code,
@@ -2702,6 +2684,7 @@ async function saveOwnershipDivision(
     owners: optionalJsonObject(input.owners),
     flows: optionalJsonObject(input.flows),
     intakeEmail,
+    intakeEmailConfirmed,
     createdBy: existing?.createdBy ?? caller.email,
     updatedBy: caller.email,
     version: (existing?.version ?? 0) + 1,

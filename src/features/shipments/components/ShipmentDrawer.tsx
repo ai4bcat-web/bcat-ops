@@ -16,6 +16,7 @@ import {
   TmsAlert, TmsBadge, TmsDrawer, TmsProfileHeader, statusTone,
   type TmsProfileColumn,
 } from '@/features/tms/kit'
+import { LegacyBadge } from '@/features/tms/brokerage/company/components/LegacyBadge'
 import { ShipmentDetail } from './ShipmentDetail'
 import { type DetailTabKey } from './detailTabs'
 import { ShipmentRowActions } from './StatusActions'
@@ -74,6 +75,7 @@ export function ShipmentDrawer({ shipmentId, onClose, onChanged, ...options }: S
         <>
           {shipment && <TmsBadge tone={statusTone(shipment.status)}>{SHIPMENT_STATUS_LABELS[shipment.status]}</TmsBadge>}
           {shipment?.voidedAt && <TmsBadge tone="red">VOIDED</TmsBadge>}
+          {shipment && <LegacyBadge legacyImported={shipment.legacyImported} importRunId={shipment.importRunId} importedAt={shipment.createdAt} />}
           {shipmentId && (
             <Link to={`/tms/shipments/${shipmentId}`} className="tms-icon-btn" aria-label="Open full page">
               <ExternalLink size={14} />
@@ -125,6 +127,7 @@ export function ShipmentPageBody({ shipmentId, options, initialTab }: {
           <>
             <TmsBadge tone={statusTone(shipment.status)}>{SHIPMENT_STATUS_LABELS[shipment.status]}</TmsBadge>
             {shipment.voidedAt && <TmsBadge tone="red">VOIDED</TmsBadge>}
+            <LegacyBadge legacyImported={shipment.legacyImported} importRunId={shipment.importRunId} importedAt={shipment.createdAt} />
           </>
         )}
         actions={(
