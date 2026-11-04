@@ -1,5 +1,59 @@
 # TMS build log
 
+## 2026-11-03 — Step W deployed on dev (Ivan Cartage / own-asset loads require a driver)
+
+**Committed and deployed on dev (Amplify jobs 139 and 140; commits `e6429f3`, `ec0d8e8`). Dev only. No schema change, no data deploy.**
+Plan: `Docs/tms-build/W-plan.md` (15 decisions, defaults taken). Brokered (third-party) carriers are unchanged.
+- **What counts as Ivan Cartage:** an `OWN_ASSET` load or leg (never by name). The driver is always required; truck and trailer are
+  optional and pre-filled from the driver. Roster only (active, non-broker drivers); the server looks the driver up and writes the
+  roster name/phone itself (a typed name is ignored). An inactive driver blocks new assignment and Dispatch but not Delivered or
+  Release (the load already ran).
+- **Where it asks:** cover dialog / Carrier tab (new `AssignDriverDialog`: roster picker, truck/trailer, relay checkbox, pay-lock
+  reason for owners/admins), shipment create and the draft editor (driver row), batch task "Assign driver (Ivan Cartage)", a board
+  exception "Ivan Cartage load with no driver" and the carrier label "Own fleet · no driver". Typing "Ivan Cartage" as a carrier name
+  is refused (use the assign-driver flow).
+- **Where it is enforced (server side, exact messages from `OWN_ASSET_MESSAGES`):** Dispatch, Mark delivered (including via stop
+  times), and release to invoicing (`DRIVER_MISSING` in the release gate, also `SET_AR_STATUS UNBILLED`), each with a clear inline
+  error in the UI. A leg-less own-asset load now gets the Ivan driver message from Dispatch (it used to say "nobody on it").
+- **Write-through (what the legacy pages read):** the same Load fields the existing ASSIGN_ASSET wrote (`pickupDriverId`,
+  `deliveryDriverId`, per-stop `driverId`, truck/trailer numbers, leg row), now with driver name, truck and trailer numbers filled
+  on the leg too (672 of 678 live own-asset legs on dev had no `driverName`). Changing the driver later moves the load on
+  Schedule/Calendar/pay (pickup + delivery driver, stops, mirrors, colour reset), bounces the old leg `REASSIGNED`, and writes
+  `ASSIGN_ASSET` and `CHANGE_ASSET_DRIVER` audit rows (from/to + pay-lock state), shown on the History tab.
+- **Pay-history rule (money):** changing the driver on a load whose delivery date is before the current Sun–Sat pay week is refused
+  for non-admins; owner/ADMIN can override with a reason of at least 10 characters (audited, `payLock` on the audit row, including
+  a first assignment); refused for everyone if a stored `BoxTruckTrip` row has that `loadId`. No pay reader or calculation changed;
+  `ownAssetPay.test.ts` feeds the existing, unmodified readers and pins byte-identical output. One read-only Scan on `BoxTruckTrip`
+  was added to the Lambda role.
+- **Backfill/report:** `scripts/backfillOwnAssetDrivers.mjs` (dry-run default, fingerprint, report CSV). It only creates a missing leg
+  and fills a leg's driver name; it never writes a Load driver, date, rate or stops. Dev data: 707 own-asset loads, **0 live ones
+  with no driver** (the 29 driverless ones are voided/canceled), 20 delivered loads lack a pickup driver, 92 live loads are split relays.
+- **Real bugs found and fixed on the way:** (1) the W09 backfill wrote a `LoadCarrier` leg without the required
+  `createdBy/updatedBy`, which made AppSync null the whole `listLoadCarriers` page and emptied the Shipments and Tracking boards on
+  dev: same class of bug as the Step V fixture, fixed (script sets them, new apply test), bad row removed; (2) the History tab read
+  only the first AppSync page of `AuditLog` (35,347 rows), so recent audit rows were missing: now pages through and filters by
+  entity; (3) the batch row checkbox also opened the row drawer; (4) the closed-week override left no `payLock` audit trail on a
+  first assignment; (5) test hygiene: the Expenses test fixture used the UTC date (the app uses Chicago, so it broke each evening) and
+  the finance commission fixture needed a driver on its own-fleet load.
+- **Verification on deployed dev:** `devVerifyW` (new) **42 PASS / 3 FAIL / 3 allowed skips**; `devVerifyP` **48/48**; `devVerifyS3` **156 PASS / 0 FAIL**
+  (the phone overflow and the D13 race are gone). Proven end to end on a ZZ fixture: roster validation, write-through, the load appears on
+  Schedule and Calendar under the right driver, the owner-operator pay page line for the right driver/period, change driver moves it, the
+  gates refuse with the exact text, closed-week refusal/override, batch assign, backfill idempotent re-plan (0 actions), cleanup (real pay
+  table counts identical before and after; 0 unvoided ZZ shipments). Full `npm run test`: 540 files / 7050 tests.
+- **Deferred (harness only, not functional):** W04a (owner-operator page lists the fixture) timed out once the clock passed midnight UTC
+  (fixture is dated Chicago-today; the page's day window is UTC): harness date fix; W06 expects `Missing driver` from READY_TO_INVOICE but
+  the leg-less fixture correctly gets the older `No carrier or driver assigned` reason; allowed skips W03d (Dispatch conversation row),
+  W04b (driver-app settlement needs a driver Cognito identity), W05b (Calendar colour on a canvas).
+- **Decisions for Ryne (W-plan section 13; defaults taken):** D-W8/D-W9 how wide the pay lock is (closed Sun–Sat week + any BoxTruckTrip
+  row; admin override with reason); D-W10 **Ivan LOCAL drivers have no per-load settlement in the code today** (only owner-operator pay is
+  computed from the load; box-truck pay is a stored `BoxTruckTrip` snapshot), so "appears in the driver's settlement" is proven for owner
+  operators and by the box-truck window predicate, not for a LOCAL settlement: say if LOCAL drivers should get one; D-W15 a latent bug that
+  `ASSIGN_ASSET` can bounce an outside carrier without the bill check (left as is, flagged).
+- **Demo plan addendum (Phase 2):** the Ivan Cartage run uses the same load assigned to Ivan Cartage + a ZZ roster driver: it must appear on
+  Schedule/Calendar for that driver and day, on the owner-operator pay page when the driver is an owner operator (or the box-truck window
+  predicate), refuse Dispatch/Delivered/Release without a driver with the inline errors, then change the driver and see it move; historical
+  imported Aljex Ivan loads are legacy-flagged and exempt (see Phase 0).
+
 ## 2026-11-03 — Step V deployed on dev (tracking assignee, Tracking by assignee, Settings > Tracking automation)
 
 **Committed and deployed on dev (Amplify jobs 136, 137, 138; commits `e207e5c`, `bf061a3`, `c88ec20`). Dev only.** Plan:
