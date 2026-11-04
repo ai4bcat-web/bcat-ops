@@ -53,7 +53,7 @@ function LegacyAside() {
 export function TmsLayout() {
   const { user, isOwner, isAdmin, hasPageAccess, logout } = useAuth()
   const { divisions } = useOwnershipDivisions()
-  const { shipments } = useShipments({ kind: 'all' })
+  const { shipments } = useShipments({ kind: 'working' })
   const { me } = useStaff(user?.email)
   const location = useLocation()
   const navigate = useNavigate()

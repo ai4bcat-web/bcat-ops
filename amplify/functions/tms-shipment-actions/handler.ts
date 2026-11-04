@@ -846,6 +846,47 @@ async function scanTable(tableName: string): Promise<Row[]> {
   return items
 }
 
+/** The Shipment attributes LIST_ALJEX_CODES counts from (everything else on a ~190-field row is dead weight). */
+const ALJEX_CODE_SHIPMENT_FIELDS = [
+  'id', 'salesRepCode', 'salesRepId', 'createdByCode', 'serviceRepCode', 'dispatcherCode', 'voidedAt', 'deletedAt',
+] as const
+
+/**
+ * Whole-table read as `totalSegments` parallel segmented scans, projecting only `fields`. A
+ * sequential scan pays one round trip per 1 MB of stored rows; segments run side by side, which is
+ * what an in-region Lambda can do and AppSync cannot. Same rows as `scanTable` (segments partition
+ * the table), restricted to the projected attributes.
+ */
+async function scanTableSegmented(
+  tableName: string,
+  fields: readonly string[],
+  totalSegments = 8,
+): Promise<Row[]> {
+  if (!tableName) throw new Error('Table name is not configured')
+  const names: Record<string, string> = {}
+  fields.forEach((f, i) => { names[`#f${i}`] = f })
+  const projection = Object.keys(names).join(', ')
+  const segment = async (index: number): Promise<Row[]> => {
+    const items: Row[] = []
+    let lastKey: Record<string, AttributeValue> | undefined
+    do {
+      const result = await dynamo.send(new ScanCommand({
+        TableName: tableName,
+        ExclusiveStartKey: lastKey,
+        Segment: index,
+        TotalSegments: totalSegments,
+        ProjectionExpression: projection,
+        ExpressionAttributeNames: names,
+      }))
+      if (result.Items) items.push(...result.Items.map((i) => unmarshall(i)))
+      lastKey = result.LastEvaluatedKey
+    } while (lastKey)
+    return items
+  }
+  const parts = await Promise.all(Array.from({ length: totalSegments }, (_, i) => segment(i)))
+  return parts.flat()
+}
+
 /**
  * A rep id is a Cognito username. Before a shipment field points at one, confirm
  * the row exists — clearing with null is always allowed.
@@ -3183,7 +3224,7 @@ async function putAljexCodeMap(kind: string, code: string, patch: Row, caller: C
 /** LIST_ALJEX_CODES. Every code found on shipments, plus mapped codes no shipment carries. */
 async function listAljexCodes(): Promise<Row> {
   const [shipments, maps] = await Promise.all([
-    scanTable(SHIPMENT_TABLE_NAME),
+    scanTableSegmented(SHIPMENT_TABLE_NAME, ALJEX_CODE_SHIPMENT_FIELDS),
     ALJEX_CODE_MAP_TABLE_NAME ? scanTable(ALJEX_CODE_MAP_TABLE_NAME) : Promise.resolve([] as Row[]),
   ])
   const mapOf = new Map<string, Row>()

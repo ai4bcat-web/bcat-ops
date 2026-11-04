@@ -21,7 +21,7 @@ import { useCarrier } from '@/hooks/useCarrier'
 import { useCarrierAp } from '@/hooks/useCarrierAp'
 import {
   archiveCarrierContact, archiveCarrierPaymentMethod, commitCarrierDocument, deleteCarrierDocument,
-  getCarrierDocumentUrl, graphqlErrorText, listAuditLogs, prepareCarrierDocument,
+  getCarrierDocumentUrl, graphqlErrorText, listAuditLogsFor, prepareCarrierDocument,
   sendCarrierSetupPacket, setCarrierStatus, upsertCarrier, upsertCarrierContact,
   upsertCarrierPaymentMethod, uploadCarrierDocumentFile,
 } from '@/lib/apiClient'
@@ -131,13 +131,20 @@ export function CarrierProfile({ carrierId, isAdmin, settings, onClose, onChange
   const warnDays = settings?.insuranceWarnDays ?? DEFAULT_INSURANCE_WARN_DAYS
   const requiredDocs = settings?.requiredCarrierDocs ?? DEFAULT_REQUIRED_CARRIER_DOCS
 
-  // The audit trail is a whole-table read, so it waits until somebody opens the tab.
+  // The audit trail is read per record through the (entityType, entityId) index, once somebody
+  // opens the tab: the carrier, its contacts, payment methods and documents.
   useEffect(() => {
-    if (tab !== 'activity' || logs !== null) return
-    listAuditLogs()
+    if (tab !== 'activity' || logs !== null || !bundle) return
+    const keyed = (types: string[], ids: string[]) => ids.flatMap((entityId) => types.map((entityType) => ({ entityType, entityId })))
+    listAuditLogsFor([
+      ...keyed(['CARRIER', 'Carrier'], [bundle.carrier.id]),
+      ...keyed(['CARRIER_CONTACT', 'CarrierContact'], bundle.contacts.map((c) => c.id)),
+      ...keyed(['CARRIER_PAYMENT_METHOD', 'CarrierPaymentMethod'], bundle.paymentMethods.map((m) => m.id)),
+      ...keyed(['CARRIER_DOCUMENT', 'CarrierDocument'], bundle.documents.map((d) => d.id)),
+    ])
       .then(setLogs)
       .catch((e: unknown) => setLogsError(graphqlErrorText(e) || 'Could not load activity'))
-  }, [tab, logs])
+  }, [tab, logs, bundle])
 
   const carrierLogs = useMemo(() => {
     if (!logs || !bundle) return []

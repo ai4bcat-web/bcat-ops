@@ -109,7 +109,7 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   // that pairing is the only way to measure delivery → invoice.
   const invoiced = useArWorklist('UNPAID')
   const open = useOpenInvoices()
-  const { customers } = useDirectory()
+  const { customers } = useDirectory({ locations: false })
   const { items: factoringItems } = useFactoringItems()
 
   const [selected, setSelected] = useState<string[]>([])

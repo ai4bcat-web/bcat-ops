@@ -7,11 +7,11 @@
  * order, its loads, its carrier assignments), so one shipment's history is the union of
  * those ids rather than one table's slice.
  *
- * The read is deliberately lazy: the audit table has no index on `entityId`, so it is
- * only pulled once somebody opens the tab.
+ * The read is deliberately lazy and keyed: the audit table's `(entityType, entityId)` index
+ * answers per record, so it is only pulled once somebody opens the tab.
  */
 import { useEffect, useState } from 'react'
-import { listAuditLogs } from '@/lib/apiClient'
+import { listAuditLogsFor } from '@/lib/apiClient'
 import { formatDateTime } from '@/lib/date'
 import { TmsCard, TmsTimeline } from '@/features/tms/kit'
 import type { AuditLogEntry } from '@/types'
@@ -27,6 +27,21 @@ function auditIdsFor(bundle: ShipmentBundle): string[] {
   ]
 }
 
+/**
+ * The (entityType, entityId) keys the AuditLog index is read by. The Lambda writers stamp the
+ * upper-case names and the browser writers the model names, so both spellings are asked for;
+ * `SHIPMENT_POSTING` rows are keyed by the shipment id (POST_LOAD / UNPOST_LOAD).
+ */
+function auditEntitiesFor(bundle: ShipmentBundle): Array<{ entityType: string; entityId: string }> {
+  const keyed = (types: string[], ids: string[]) => ids.flatMap((entityId) => types.map((entityType) => ({ entityType, entityId })))
+  return [
+    ...keyed(['SHIPMENT', 'Shipment', 'SHIPMENT_POSTING'], [bundle.shipment.id]),
+    ...keyed(['ORDER', 'Order'], bundle.orders.map((o) => o.id)),
+    ...keyed(['LOAD', 'Load'], bundle.loads.map((l) => l.id)),
+    ...keyed(['LOAD_CARRIER', 'LoadCarrier'], bundle.loadCarriers.map((c) => c.id)),
+  ]
+}
+
 export function HistorySection({ bundle }: { bundle: ShipmentBundle }) {
   const [rows, setRows] = useState<AuditLogEntry[] | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -37,7 +52,7 @@ export function HistorySection({ bundle }: { bundle: ShipmentBundle }) {
   useEffect(() => {
     let live = true
     const wanted = new Set(ids.split(','))
-    listAuditLogs([...wanted])
+    listAuditLogsFor(auditEntitiesFor(bundle))
       .then((all) => {
         if (!live) return
         setRows(
@@ -51,6 +66,8 @@ export function HistorySection({ bundle }: { bundle: ShipmentBundle }) {
         setError(err instanceof Error ? err.message : 'The history could not be read.')
       })
     return () => { live = false }
+    // `ids` is the identity of the record set `bundle` is made of.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ids])
 
   return (

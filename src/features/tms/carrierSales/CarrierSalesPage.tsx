@@ -103,7 +103,7 @@ export function CarrierSalesPage() {
 
 function CarrierSalesView({ offers }: { offers: OffersState | null }) {
   const { hasPageAccess } = useAuth()
-  const { shipments, loading, error, refresh } = useShipments({ kind: 'all' })
+  const { shipments, loading: shipmentsLoading, partial, error, refresh } = useShipments({ kind: 'working' })
   const [tab, setTab] = useState<TabKey>('needs-cover')
   const [search, setSearch] = useState('')
   const [pageSize, setPageSize] = useState(50)
@@ -275,7 +275,7 @@ function CarrierSalesView({ offers }: { offers: OffersState | null }) {
   }
 
   const loadFailure = error ? 'Couldn’t load shipments. Try refreshing.' : null
-  const emptyFor = (empty: string) => loadFailure ?? (loading ? 'Loading…' : empty)
+  const emptyFor = (empty: string) => loadFailure ?? (shipmentsLoading || partial ? 'Loading…' : empty)
 
   if (tab === 'offers') {
     return (

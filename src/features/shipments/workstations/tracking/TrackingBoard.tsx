@@ -38,7 +38,10 @@ import {
   podStateOf,
   type PodState,
 } from './trackingTable'
-import type { TrackingBoardProps, TrackingGroup } from './types'
+import type { TrackingBoardProps } from './types'
+
+/** Rows a tracker group draws before "Show more" (a long queue must not mount thousands of rows). */
+const GROUP_ROW_CAP = 100
 
 const LIFECYCLE_TABS = [
   { key: 'active', label: 'Active' },
@@ -233,6 +236,8 @@ export function TrackingBoard(props: TrackingBoardProps) {
   const [mapVisible, setMapVisible] = useState(false)
   const [sort, setSort] = useState<BoardGridSort | null>({ key: 'lastLocation', dir: 'asc' })
   const [selectedIds, setSelectedIds] = useState<string[]>([])
+  // Groups render at most GROUP_ROW_CAP rows until "Show more" (a tracker's queue can be long).
+  const [expandedGroups, setExpandedGroups] = useState<ReadonlySet<string>>(() => new Set())
   // The grid's row handler cannot see the event, so a click that landed on a selection
   // checkbox is noted on the way down and swallowed by the row handler on the way up.
   const checkboxClick = useRef(false)
@@ -246,6 +251,7 @@ export function TrackingBoard(props: TrackingBoardProps) {
     [groups, sort, nowMs, favoritesOnly, favorites],
   )
   const allRows = useMemo(() => visibleGroups.flatMap((g) => g.rows), [visibleGroups])
+  const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds])
 
   const onSort = useCallback((key: string) => {
     setSort((prev) => {
@@ -276,8 +282,8 @@ export function TrackingBoard(props: TrackingBoardProps) {
     setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
   }, [])
 
-  const toggleGroup = useCallback((group: TrackingGroup) => {
-    const ids = group.rows.map((r) => r.id)
+  const toggleGroup = useCallback((shownRows: ShipmentRow[]) => {
+    const ids = shownRows.map((r) => r.id)
     setSelectedIds((prev) => {
       const all = ids.every((id) => prev.includes(id))
       return all ? prev.filter((id) => !ids.includes(id)) : [...new Set([...prev, ...ids])]
@@ -468,7 +474,9 @@ export function TrackingBoard(props: TrackingBoardProps) {
                 }}
               >
                 {visibleGroups.map((group) => {
-                  const selectedHere = group.rows.filter((r) => selectedIds.includes(r.id)).map((r) => r.id)
+                  const shown = expandedGroups.has(group.key) ? group.rows : group.rows.slice(0, GROUP_ROW_CAP)
+                  const hiddenCount = group.rows.length - shown.length
+                  const selectedHere = shown.filter((r) => selectedSet.has(r.id)).map((r) => r.id)
                   return (
                     <section
                       key={group.key}
@@ -496,19 +504,29 @@ export function TrackingBoard(props: TrackingBoardProps) {
                       </header>
                       <BoardGrid
                         columns={COLUMNS}
-                        rows={group.rows}
+                        rows={shown}
                         rowKey={(row) => row.id}
                         selectedIds={selectedIds}
                         selectable
                         rowDataAttrs={rowDataAttrs}
                         toneOf={() => ''}
                         onToggle={toggleOne}
-                        onToggleAll={() => toggleGroup(group)}
+                        onToggleAll={() => toggleGroup(shown)}
                         sort={sort}
                         onSort={onSort}
                         onRowClick={handleRowClick}
                         renderCell={renderCell}
                       />
+                      {hiddenCount > 0 && (
+                        <div className="tms-tracking-footer">
+                          <TmsButton
+                            size="sm"
+                            onClick={() => setExpandedGroups((prev) => new Set(prev).add(group.key))}
+                          >
+                            {`Show ${hiddenCount} more`}
+                          </TmsButton>
+                        </div>
+                      )}
                     </section>
                   )
                 })}

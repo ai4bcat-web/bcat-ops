@@ -3,25 +3,25 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderHook, waitFor } from '@testing-library/react'
 import { useOwnerOperatorProfitability, aggregateOwnerOperator } from './useOwnerOperatorProfitability'
 
-const { listLoads, listDriverPaySettings, listDriverPayDeductions, listDriverPayCredits } = vi.hoisted(() => ({
-  listLoads: vi.fn(),
+const { loadsRef, listDriverPaySettings, listDriverPayDeductions, listDriverPayCredits } = vi.hoisted(() => ({
+  loadsRef: { current: [] as unknown[] },
   listDriverPaySettings: vi.fn(),
   listDriverPayDeductions: vi.fn(),
   listDriverPayCredits: vi.fn(),
 }))
 
 vi.mock('@/lib/apiClient', () => ({
-  listLoads: () => listLoads(),
   listDriverPaySettings: () => listDriverPaySettings(),
   listDriverPayDeductions: () => listDriverPayDeductions(),
   listDriverPayCredits: () => listDriverPayCredits(),
 }))
 
+vi.mock('./useLoads', () => ({ useLoads: () => ({ loads: loadsRef.current }), useEnsureLoadRange: () => true }))
 vi.mock('./useDrivers', () => ({ useDrivers: () => ({ drivers: [{ id: 'd1', name: 'Chad', type: 'company' }] }) }))
 vi.mock('./useFuelTransactions', () => ({ useFuelTransactions: () => ({ transactions: [] }) }))
 
 beforeEach(() => {
-  listLoads.mockReset()
+  loadsRef.current = []
   listDriverPaySettings.mockReset()
   listDriverPayDeductions.mockReset()
   listDriverPayCredits.mockReset()
@@ -50,7 +50,7 @@ describe('useOwnerOperatorProfitability', () => {
     // $4,000 freight delivered Wed 9/30 → the 9/27 pay week. Deductions are the 2%
     // factoring fee ($80) plus a $20 ELD charge, so the check is 0.88 × 4000 − 100
     // = 3420 and the company keeps 4000 − 3420 − 100.
-    listLoads.mockResolvedValue([load('L1', '2026-09-30T14:00:00Z', 400_000)])
+    loadsRef.current = ([load('L1', '2026-09-30T14:00:00Z', 400_000)])
     listDriverPaySettings.mockResolvedValue([setting([{ label: 'ELD', amount: 20 }], 0.88, false)])
 
     const { result } = renderHook(() => useOwnerOperatorProfitability())
@@ -70,7 +70,7 @@ describe('useOwnerOperatorProfitability', () => {
 
   it('contributes nothing for a week before the owner-operator changeover', async () => {
     // Delivered Wed 9/23 — that week still settles on the Amazon statement.
-    listLoads.mockResolvedValue([load('L1', '2026-09-23T14:00:00Z', 400_000)])
+    loadsRef.current = ([load('L1', '2026-09-23T14:00:00Z', 400_000)])
     listDriverPaySettings.mockResolvedValue([setting([{ label: 'ELD', amount: 20 }], 0.88, false)])
 
     const { result } = renderHook(() => useOwnerOperatorProfitability())
@@ -82,7 +82,7 @@ describe('useOwnerOperatorProfitability', () => {
   })
 
   it('counts the companyAmount of an after-split fixed charge as a company expense', async () => {
-    listLoads.mockResolvedValue([load('L1', '2026-09-30T14:00:00Z', 400_000)])
+    loadsRef.current = ([load('L1', '2026-09-30T14:00:00Z', 400_000)])
     listDriverPaySettings.mockResolvedValue([setting([
       { label: 'ELD', amount: 20 },
       { label: 'Lease', amount: 496, afterPercent: true, companyAmount: 496 },
@@ -101,7 +101,7 @@ describe('useOwnerOperatorProfitability', () => {
   })
 
   it('skips inactive settings and pay groups that are not owner-operator', async () => {
-    listLoads.mockResolvedValue([load('L1', '2026-09-30T14:00:00Z', 400_000)])
+    loadsRef.current = ([load('L1', '2026-09-30T14:00:00Z', 400_000)])
     listDriverPaySettings.mockResolvedValue([
       { ...setting([], 0.88, false), active: false },
       { ...setting([], 0.88, false), id: 's2', payGroup: 'BOX_TRUCK' },
@@ -114,7 +114,7 @@ describe('useOwnerOperatorProfitability', () => {
   })
 
   it('sums several loads in the same week into one driver-week row', async () => {
-    listLoads.mockResolvedValue([
+    loadsRef.current = ([
       load('L1', '2026-09-28T14:00:00Z', 200_000),
       load('L2', '2026-10-02T14:00:00Z', 200_000),
     ])

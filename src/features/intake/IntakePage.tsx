@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from '@/components/ui/dialog'
+import { useResolveLoads } from '@/hooks/useResolveLoads'
 import { LoadDrawer } from '@/features/loads/LoadDrawer'
 import { NewShipmentDialog } from '@/features/shipments/components/NewShipmentDialog'
 import { useIntakeItems } from '@/hooks/useIntakeItems'
@@ -563,6 +564,7 @@ const TABS = [
 
 export function IntakePage() {
   const { items, loading, refresh, updateItem } = useIntakeItems()
+  useResolveLoads(items.map((i) => i.builtLoadId))
   const { user } = useAuth()
   const setSelectedLoad      = useAppStore((s) => s.setSelectedLoad)
   const openNewShipment      = useAppStore((s) => s.openNewShipment)
@@ -572,7 +574,7 @@ export function IntakePage() {
   // owns its Pro # forever, so the match has to be able to land on one.
   const loads                = useAppStore((s) => s.loads)
   // Needed to bind the tender's broker to a real customer record (and so its MC).
-  const { customers }        = useDirectory()
+  const { customers }        = useDirectory({ locations: false })
 
   const actorEmail = user?.email ?? 'dispatch'
 

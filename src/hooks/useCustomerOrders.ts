@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { listCustomers, listLoads, listOrdersByCustomer, listShipmentsByCustomer } from '@/lib/apiClient'
+import { listCustomers, listLoadsByCustomer, listLoadsByShipmentIds, listOrdersByCustomer, listShipmentsByCustomer } from '@/lib/apiClient'
 import { customerMatchesLoad, customerNameKeys } from '@/lib/customerCredit'
 import type { Load } from '@/types'
 import type { CustomerRecord, OrderRecord, ShipmentRecord } from '@/types/tms'
@@ -26,13 +26,20 @@ export function useCustomerOrders(customerId: string, customer?: CustomerRecord)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  const load = useCallback(() =>
-    Promise.all([
+  const load = useCallback(() => {
+    const shipmentsRead = listShipmentsByCustomer(customerId)
+    return Promise.all([
       // A customer's profile is history, not a working set: a voided shipment's
-      // load still belongs in what this customer shipped with us.
-      listLoads({ includeVoided: true }),
+      // load still belongs in what this customer shipped with us. Loads come two
+      // ways — by the load's own customerId link, and through the customer's
+      // shipments (a leg whose customerId was never stamped still rides its shipment) —
+      // so the old full-table name/alias match loses nothing that has a shipment.
+      Promise.all([
+        listLoadsByCustomer(customerId),
+        shipmentsRead.then((rows) => listLoadsByShipmentIds(rows.map((s) => s.id))),
+      ]).then(([linked, viaShipments]) => [...new Map([...linked, ...viaShipments].map((l) => [l.id, l])).values()]),
       listOrdersByCustomer(customerId),
-      listShipmentsByCustomer(customerId),
+      shipmentsRead,
       customer
         ? Promise.resolve<CustomerRecord | null>(customer)
         : listCustomers({ includeArchived: true }).then((rows) => rows.find((c) => c.id === customerId) ?? null),
@@ -57,8 +64,8 @@ export function useCustomerOrders(customerId: string, customer?: CustomerRecord)
       })
       .finally(() => {
         setLoading(false)
-      }),
-  [customer, customerId])
+      })
+  }, [customer, customerId])
   const refetch = useCallback(() => { setLoading(true); return load() }, [load])
 
   useEffect(() => {

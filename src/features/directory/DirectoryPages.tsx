@@ -66,15 +66,16 @@ interface CustomerFilters {
 const EMPTY_CUSTOMER_FILTERS: CustomerFilters = { status: '', factored: '', archived: '', division: '' }
 
 export function CustomersPage() {
-  const dir = useDirectory({ includeArchived: true })
+  const [params, setParams] = useSearchParams()
+  const profileId = params.get('customer')
+  // The directory's 3,000+ locations are only read by the profile's "Shipping locations" tab.
+  const dir = useDirectory({ includeArchived: true, locations: profileId != null })
   const { isAdmin, user } = useAuth()
   const [query, setQuery] = useState('')
   const [filters, setFilters] = useState<CustomerFilters>(EMPTY_CUSTOMER_FILTERS)
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [editing, setEditing] = useState<CustomerRecord | 'new' | null>(null)
   // `?customer=<id>` owns which profile is open (Settings → Tracking automation links here), the way `?doc=` does elsewhere.
-  const [params, setParams] = useSearchParams()
-  const profileId = params.get('customer')
   const setProfileId = useCallback((id: string | null) => {
     setParams((prev) => {
       const next = new URLSearchParams(prev)

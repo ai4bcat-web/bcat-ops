@@ -13,9 +13,11 @@ import {
 } from '@/lib/registrations'
 import {
   type DriverPoolResult,
+  SignupAuditNeedsScanError,
   dismissDriverSignup,
   listDriverPoolUsers,
   listDriverSignupAudit,
+  listDriverSignupAuditScan,
 } from '@/lib/registrationsClient'
 import { errorMessage } from '@/lib/utils/errorMessage'
 
@@ -23,6 +25,9 @@ interface RegistrationsFetch {
   audit: PromiseSettledResult<SignupAuditEntry[]>
   poolResult: PromiseSettledResult<DriverPoolResult>
 }
+
+/** `needs-scan`: no AuditLog index is deployed, so refusals load only on the user's click. */
+export type SignupAuditState = 'loading' | 'loaded' | 'needs-scan'
 
 /**
  * Everything the Users overview reads that the Users page does not already hold. Loaded
@@ -40,6 +45,9 @@ export function useRegistrations() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
+  const [signup, setSignup] = useState<SignupAuditState>('loading')
+  const [scanning, setScanning] = useState(false)
+
   const fetchAll = useCallback(async (): Promise<RegistrationsFetch> => {
     const [audit, poolResult] = await Promise.allSettled([listDriverSignupAudit(), listDriverPoolUsers()])
     return { audit, poolResult }
@@ -49,6 +57,10 @@ export function useRegistrations() {
     ({ audit, poolResult }: RegistrationsFetch) => {
       if (audit.status === 'fulfilled') {
         setRefusals(openSignupRefusals(audit.value))
+        setSignup('loaded')
+        setError(null)
+      } else if (audit.reason instanceof SignupAuditNeedsScanError) {
+        setSignup((prev) => (prev === 'loaded' ? prev : 'needs-scan'))
         setError(null)
       } else {
         setError(errorMessage(audit.reason))
@@ -89,6 +101,19 @@ export function useRegistrations() {
     [user?.email],
   )
 
+  const loadRefusals = useCallback(async () => {
+    setScanning(true)
+    try {
+      setRefusals(openSignupRefusals(await listDriverSignupAuditScan()))
+      setSignup('loaded')
+      setError(null)
+    } catch (err: unknown) {
+      setError(errorMessage(err))
+    } finally {
+      setScanning(false)
+    }
+  }, [])
+
   const awaiting: AwaitingVerification[] = useMemo(
     () => (pool ? awaitingVerification(pool, drivers) : []),
     [pool, drivers],
@@ -106,6 +131,9 @@ export function useRegistrations() {
     approveApplication: queue.approveApplication,
     rejectApplication: queue.rejectApplication,
     refusals,
+    signup,
+    scanning,
+    loadRefusals,
     awaiting,
     verified,
     poolNote,

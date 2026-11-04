@@ -4,7 +4,6 @@ import { toast } from 'sonner'
 import { useAppStore } from '@/store/useAppStore'
 import { useLoads } from '@/hooks/useLoads'
 import { useDrivers } from '@/hooks/useDrivers'
-import { useAuditLog } from '@/hooks/useAuditLog'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import { LoadDrawer } from '@/features/loads/LoadDrawer'
 import {
@@ -19,12 +18,13 @@ import { ApptProofPanel } from '@/components/ApptProofPanel'
 import { loadProofCount } from '@/lib/apptProofs'
 import { apptRowsToCsv, apptCsvFilename } from '@/lib/apptCsv'
 import { saveBlob } from '@/lib/download'
-import { getTmsSettings, saveTmsSettings } from '@/lib/apiClient'
+import { getTmsSettings, saveTmsSettings, listAuditLogsFor } from '@/lib/apiClient'
+import { currentMonth, monthsCovering } from '@/lib/shipmentWindows'
 import { ApptEditPopover } from '@/components/ApptEditPopover'
 import { getStops, updateStop } from '@/lib/stops'
 import { sendApptNotices } from '@/lib/sendApptNotices'
 import { uploadApptProof, type ApptProofSlot } from '@/lib/apiClient'
-import { formatDateShort, chicagoDateStr, apptTimeLabel, PENDING_LABEL, formatDayHeader, fromDateInput, formatDateTime, formatDateTimeInput, fromDateTimeInput, apptHasTime } from '@/lib/date'
+import { formatDateShort, chicagoDateStr, addDays, apptTimeLabel, PENDING_LABEL, formatDayHeader, fromDateInput, formatDateTime, formatDateTimeInput, fromDateTimeInput, apptHasTime } from '@/lib/date'
 import type { AuditLogEntry, Load, Stop } from '@/types'
 
 const RED = 'var(--tms-badge-red)'
@@ -677,13 +677,31 @@ function SortHeader({ label, active, dir, onClick }: {
   )
 }
 
-function Section({ title, hint, rows, drivers, loadsById, auditLog, updateLoad, onOpen, sort, onSort, onExport }: {
+/**
+ * A load's audit trail: what the server returned plus this session's writes made after the
+ * fetch began (the store mirrors each save locally). A write the fetch already caught is
+ * not counted twice.
+ */
+function loadTrail(
+  loadId: string,
+  fetched: { at: string; entries: AuditLogEntry[] } | undefined,
+  session: AuditLogEntry[],
+): AuditLogEntry[] {
+  const mine = session.filter((e) => e.entityType === 'Load' && e.entityId === loadId)
+  if (!fetched) return mine
+  const seen = new Set(fetched.entries.map((e) => `${e.user}|${e.action}|${JSON.stringify(e.changes)}`))
+  const fresh = mine.filter((e) => e.createdAt > fetched.at && !seen.has(`${e.user}|${e.action}|${JSON.stringify(e.changes)}`))
+  return [...fetched.entries, ...fresh]
+}
+
+function Section({ title, hint, rows, drivers, loadsById, sessionAudit, updateLoad, onOpen, sort, onSort, onExport }: {
   title: string
   hint: string
   rows: ApptQueueRow[]
   drivers: { id: string; name: string }[]
   loadsById: Map<string, Load>
-  auditLog: AuditLogEntry[]
+  /** This session's own writes (store), merged over each fetched trail. */
+  sessionAudit: AuditLogEntry[]
   updateLoad: (id: string, patch: Partial<Load>) => Promise<unknown>
   onOpen: (loadId: string) => void
   sort: { key: ApptSortKey; dir: SortDir } | null
@@ -712,8 +730,18 @@ function Section({ title, hint, rows, drivers, loadsById, auditLog, updateLoad, 
   const openCount = rows.filter(rowOutstanding).length
   const bookedCount = rows.length - openCount
   const [openHistory, setOpenHistory] = useState<Set<string>>(new Set())
-  const toggleHistory = (id: string) =>
+  // The server audit log is not bulk loaded: a load's trail is fetched the first time its
+  // history row is opened and kept here, keyed by load id, with the moment the fetch began.
+  const [trails, setTrails] = useState<Record<string, { at: string; entries: AuditLogEntry[] }>>({})
+  const toggleHistory = (id: string) => {
+    if (!openHistory.has(id) && !trails[id]) {
+      const at = new Date().toISOString()
+      listAuditLogsFor([{ entityType: 'Load', entityId: id }])
+        .then((entries) => setTrails((t) => ({ ...t, [id]: { at, entries } })))
+        .catch((e) => toast.error(`Couldn't load appointment history: ${e instanceof Error ? e.message : 'unknown error'}`))
+    }
     setOpenHistory((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n })
+  }
   const [openProofs, setOpenProofs] = useState<Set<string>>(new Set())
   const toggleProofs = (id: string) =>
     setOpenProofs((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n })
@@ -915,7 +943,7 @@ function Section({ title, hint, rows, drivers, loadsById, auditLog, updateLoad, 
                   </tr>
                 )}
                 {showHistory && (
-                  <HistoryRow events={loadRec ? apptHistory(loadRec, auditLog) : []} colSpan={1 + COLUMNS.length} />
+                  <HistoryRow events={loadRec ? apptHistory(loadRec, loadTrail(r.loadId, trails[r.loadId], sessionAudit)) : []} colSpan={1 + COLUMNS.length} />
                 )}
                 </Fragment>
                 )
@@ -967,7 +995,20 @@ export function ApptsPage() {
   const [savingAutoClear, setSavingAutoClear] = useState(false)
   // Same people who may clear a single day may change the standing rule.
   const canClearDays = canSetChangeNeeded(useAppStore((s) => s.currentUserEmail))
-  const { entries: auditLog } = useAuditLog()
+  const sessionAudit = useAppStore((s) => s.auditLog)
+  // Open loads are always in the store; the queue's dated rows come from this and next
+  // month, and the past/cleared toggle reaches 90 days back.
+  const ensureLoadMonths = useAppStore((s) => s.ensureLoadMonths)
+  const ensureLoadRange = useAppStore((s) => s.ensureLoadRange)
+  const [now] = useState(() => new Date())
+  useEffect(() => {
+    const cur = currentMonth(now)
+    ensureLoadMonths(monthsCovering(cur, cur, 1).slice(1)).catch((e: unknown) => console.warn('[appts] ensureLoadMonths failed', e))
+  }, [ensureLoadMonths, now])
+  useEffect(() => {
+    if (!showPast) return
+    ensureLoadRange(chicagoDateStr(addDays(now, -90)), chicagoDateStr(now)).catch((e: unknown) => console.warn('[appts] ensureLoadRange failed', e))
+  }, [ensureLoadRange, showPast, now])
   // null = the default urgency order from apptQueue (NEED first, soonest first).
   const [sort, setSort] = useState<{ key: ApptSortKey; dir: SortDir } | null>(null)
   // The drawer reads its target from the store, same as the calendar and loads grid.
@@ -1130,7 +1171,7 @@ export function ApptsPage() {
             rows={sec.rows}
             drivers={drivers}
             loadsById={loadsById}
-            auditLog={auditLog}
+            sessionAudit={sessionAudit}
             updateLoad={updateLoad}
             onOpen={openById}
             sort={sort}

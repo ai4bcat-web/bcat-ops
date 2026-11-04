@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts'
 import { TrendingUp } from 'lucide-react'
 import { useFleetProfitability } from '@/hooks/useFleetProfitability'
+import { useEnsureLoadRange } from '@/hooks/useLoads'
 import { useAmazonProfitability, aggregateAmazon } from '@/hooks/useAmazonProfitability'
 import { useOwnerOperatorProfitability, aggregateOwnerOperator } from '@/hooks/useOwnerOperatorProfitability'
 import { sundayOf, shiftWeek } from '@/features/driver-pay/week'
@@ -35,6 +36,8 @@ export function FleetPLTrendChart() {
   const tok = useTmsTokens(CHART_TOKENS)
   const [tab, setTab] = useState<TrendTab>('LOCAL')
   const { computeForRange } = useFleetProfitability(weekRange(0), 'LOCAL')
+  // The chart computes WEEKS weeks back from this one, so window all of them in.
+  useEnsureLoadRange(weekRange(WEEKS - 1).start, weekRange(0).end)
   const { rows: amzRows } = useAmazonProfitability()
   const { rows: ownerOpRows } = useOwnerOperatorProfitability()
 

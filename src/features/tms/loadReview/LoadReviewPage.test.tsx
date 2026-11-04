@@ -25,7 +25,7 @@ vi.mock('@/lib/apiClient', async (importOriginal) => ({
   batchShipmentTask: mocks.batch,
   reviewLoad: mocks.review,
   readyToInvoice: mocks.ready,
-  listAuditLogs: mocks.audit,
+  listAuditLogsFor: mocks.audit,
   setSalesRep: vi.fn(),
   setRevTag: vi.fn(),
 }))

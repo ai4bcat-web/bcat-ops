@@ -7,7 +7,7 @@
  * list" flattened into "this shipment has no stops".
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { renderHook, waitFor } from '@testing-library/react'
+import { act, renderHook, waitFor } from '@testing-library/react'
 import type {
   CarrierRecord, CustomerRecord, LoadCarrierRecord, LoadFinancialsRecord, OrderRecord, QuoteRecord, ShipmentRecord,
   UserProfileRecord,
@@ -30,16 +30,39 @@ const { data } = vi.hoisted(() => ({
   },
 }))
 
+const { boardCalls, partialFirst, hold } = vi.hoisted(() => ({
+  boardCalls: [] as Array<{ view: unknown; force: boolean | undefined }>,
+  partialFirst: { current: null as null | { release: () => void } },
+  hold: { current: null as null | { release: () => void } },
+}))
+
+vi.mock('@/lib/boardData', () => ({
+  peekBoardBundle: () => undefined,
+  loadBoardBundle: async (
+    view: { kind: string; ids?: string[] },
+    opts?: { force?: boolean; onPartial?: (b: unknown) => void },
+  ) => {
+    boardCalls.push({ view, force: opts?.force })
+    const pick = <T extends { id?: string; shipmentId?: string }>(rows: unknown[], key: 'id' | 'shipmentId') =>
+      (view.kind === 'ids' ? (rows as T[]).filter((r) => view.ids!.includes(r[key] as string)) : rows)
+    const full = {
+      shipments: pick(data.shipments, 'id'),
+      orders: pick(data.orders, 'shipmentId'),
+      loads: pick(data.loads, 'shipmentId'),
+      loadCarriers: pick(data.loadCarriers, 'shipmentId'),
+      loadFinancials: pick(data.loadFinancials, 'shipmentId'),
+    }
+    if (hold.current) await new Promise<void>((resolve) => { hold.current!.release = resolve })
+    if (partialFirst.current) {
+      opts?.onPartial?.({ ...full, orders: [], loads: [], loadCarriers: [], loadFinancials: [] })
+      await new Promise<void>((resolve) => { partialFirst.current!.release = resolve })
+    }
+    return full
+  },
+}))
+
 vi.mock('@/lib/apiClient', () => ({
-  listShipments: async () => data.shipments,
-  listShipmentsByStatus: async () => data.shipments,
-  listShipmentsByCustomer: async () => data.shipments,
-  listShipmentsByMonth: async () => data.shipments,
-  listOrders: async () => data.orders,
-  listLoadSummaries: async () => data.loads,
-  listLoadCarriers: async () => data.loadCarriers,
   listQuotes: async () => data.quotes,
-  listLoadFinancials: async () => data.loadFinancials,
   listUserProfiles: async () => data.userProfiles,
   listCustomers: async () => data.customers,
   listCarriers: async () => data.carriers,
@@ -47,6 +70,9 @@ vi.mock('@/lib/apiClient', () => ({
 }))
 
 beforeEach(() => {
+  boardCalls.length = 0
+  partialFirst.current = null
+  hold.current = null
   data.shipments = []
   data.orders = []
   data.loads = []
@@ -73,8 +99,8 @@ const shipment = (id: string, patch: Partial<ShipmentRecord> = {}): ShipmentReco
   ...patch,
 })
 
-async function rowsFor(): Promise<ShipmentListRow[]> {
-  const { result } = renderHook(() => useShipments())
+async function rowsFor(view?: Parameters<typeof useShipments>[0]): Promise<ShipmentListRow[]> {
+  const { result } = renderHook(() => useShipments(view))
   await waitFor(() => expect(result.current.loading).toBe(false))
   return result.current.shipments
 }
@@ -468,5 +494,64 @@ describe('useShipments projection', () => {
     expect(row.officeTeamKeys).toBeNull()
     expect(row.equipmentType).toBe('VAN')
     expect(row.id).toBe('shp-1')
+  })
+})
+
+describe('useShipments views', () => {
+  const fixture = () => {
+    data.shipments = [shipment('shp-1', { customerId: 'cust-1' }), shipment('shp-2')]
+    data.orders = [{ id: 'o1', shipmentId: 'shp-1', customerRepId: 'dennis', arStatus: 'DOCS_NEEDED' }] as OrderRecord[]
+    data.loads = [{ id: 'lod-1', shipmentId: 'shp-1', stops: [{ id: 's1' }, { id: 's2' }] }] as LoadBoardSummary[]
+    data.customers = [{ id: 'cust-1', name: 'Acme' }] as CustomerRecord[]
+  }
+
+  it('projects the same row for a shipment whichever view produced it', async () => {
+    fixture()
+    const viaWorking = await rowsFor({ kind: 'working' })
+    const viaIds = await rowsFor({ kind: 'ids', ids: ['shp-1'] })
+    expect(viaIds).toHaveLength(1)
+    expect(viaIds[0]).toEqual(viaWorking.find((r) => r.id === 'shp-1'))
+  })
+
+  it('makes no request for an empty id list or an empty window', async () => {
+    fixture()
+    expect(await rowsFor({ kind: 'ids', ids: [] })).toEqual([])
+    expect(await rowsFor({ kind: 'window', months: [] })).toEqual([])
+    expect(boardCalls).toHaveLength(0)
+  })
+
+  it('refresh forces a re-read; the first load does not', async () => {
+    fixture()
+    const { result } = renderHook(() => useShipments({ kind: 'working' }))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(boardCalls.map((c) => c.force)).toEqual([false])
+    await act(async () => { await result.current.refresh() })
+    expect(boardCalls.map((c) => c.force)).toEqual([false, true])
+  })
+
+  it('reports partial while only the first stage is in, then clears it', async () => {
+    fixture()
+    partialFirst.current = { release: () => {} }
+    const { result } = renderHook(() => useShipments({ kind: 'working' }))
+    await waitFor(() => expect(result.current.partial).toBe(true))
+    expect(result.current.shipments.map((r) => r.id)).toEqual(['shp-1', 'shp-2'])
+    expect(result.current.shipments[0].arStatus).toBeNull()
+    await act(async () => { partialFirst.current!.release() })
+    await waitFor(() => expect(result.current.partial).toBe(false))
+    expect(result.current.shipments[0].arStatus).toBe('DOCS_NEEDED')
+  })
+
+  it('does not show one window\'s rows under another window', async () => {
+    fixture()
+    const { result, rerender } = renderHook(({ m }) => useShipments({ kind: 'window', months: [m] }), { initialProps: { m: '2026-10' } })
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.shipments).toHaveLength(2)
+    hold.current = { release: () => {} }
+    rerender({ m: '2026-09' })
+    expect(result.current.shipments).toEqual([])
+    expect(result.current.loading).toBe(true)
+    await act(async () => { hold.current!.release() })
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.shipments).toHaveLength(2)
   })
 })

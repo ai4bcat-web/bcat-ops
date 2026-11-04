@@ -22,7 +22,6 @@ const podState = vi.hoisted(() => ({ items: [] as { loadId?: string | null }[] }
 
 vi.mock('@/lib/apiClient', async (orig) => ({
   ...(await orig() as object),
-  listLoads: () => Promise.resolve(loads),
   listCustomers: () => Promise.resolve([]),
   listLocations: () => Promise.resolve([]),
   listDriverPaySettings: () => Promise.resolve(settings),
@@ -32,6 +31,7 @@ vi.mock('@/lib/apiClient', async (orig) => ({
 vi.mock('@/lib/podsClient', () => ({
   listPods: () => Promise.resolve({ items: podState.items, nextToken: null }),
 }))
+vi.mock('@/hooks/useLoads', () => ({ useLoads: () => ({ loads }), useEnsureLoadRange: () => true }))
 vi.mock('@/hooks/useDrivers', () => ({ useDrivers: () => ({ drivers, updateDriver: vi.fn() }) }))
 vi.mock('@/hooks/useFuelTransactions', () => ({ useFuelTransactions: () => ({ transactions: [] }) }))
 

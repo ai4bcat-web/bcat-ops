@@ -11,6 +11,7 @@ import { TruckAssignSelect } from '@/components/TruckAssignSelect'
 import { useEffect, useMemo, useState } from 'react'
 import { ChevronLeft, ChevronRight, Camera, FileWarning, Check, AlertTriangle, ArrowUpDown } from 'lucide-react'
 import { useAppStore } from '@/store/useAppStore'
+import { useEnsureLoadRange } from '@/hooks/useLoads'
 import { listDriverSubmissions, type SubmissionWithDocs } from '@/lib/driverSubmissionsClient'
 import { isLoadVoided } from '@/lib/shipmentVoid'
 import { weekLabelLong, sundayOf, shiftWeek } from '@/features/driver-pay/week'
@@ -120,6 +121,7 @@ export function IvanDriverAppPage() {
   const loads = useMemo(() => allLoads.filter((l) => !isLoadVoided(l)), [allLoads])
   const equipment = useAppStore((s) => s.equipment)
   const [periodStart, setPeriodStart] = useState(() => sundayOf())
+  useEnsureLoadRange(periodStart, shiftWeek(periodStart, 1))
   // One driver at a time, picked from the chips at the top — as on the owner-operator page.
   const [selectedDriverId, setSelectedDriverId] = useState<string | null>(null)
   // Where the trucks are, for today's route strips. Same feed the Dispatch page reads.

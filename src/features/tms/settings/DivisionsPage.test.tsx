@@ -9,7 +9,7 @@ const mocks = vi.hoisted(() => ({
   listOwnershipRules: vi.fn(),
   listCarriers: vi.fn(),
   listCustomers: vi.fn(),
-  listShipments: vi.fn(),
+  listShipmentsByNumber: vi.fn(),
   listUserProfiles: vi.fn(),
   saveOwnershipDivision: vi.fn(),
   archiveOwnershipDivision: vi.fn(),
@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   retagShipments: vi.fn(),
 }))
 vi.mock('@/lib/apiClient', () => mocks)
+vi.mock('@/lib/boardData', () => ({ getShipmentsByIds: async () => new Map() }))
 
 const auth = vi.hoisted(() => ({ isOwner: true, isAdmin: false }))
 vi.mock('@/hooks/useAuth', () => ({ useAuth: () => auth }))
@@ -77,7 +78,7 @@ beforeEach(() => {
   mocks.listOwnershipRules.mockResolvedValue(RULES)
   mocks.listCarriers.mockResolvedValue([{ id: 'c1', name: 'Blue Line Trucking' }])
   mocks.listCustomers.mockResolvedValue([{ id: 'cu1', name: 'Acme Foods' }])
-  mocks.listShipments.mockResolvedValue([])
+  mocks.listShipmentsByNumber.mockResolvedValue([])
   mocks.listUserProfiles.mockResolvedValue([])
 })
 
@@ -256,7 +257,8 @@ describe('DivisionsPage', () => {
   })
 
   it('resolves a PRO to its shipment and shows what the rules say against what it holds', async () => {
-    mocks.listShipments.mockResolvedValue([{ id: 'sh-1', number: 'BCAT104221' }])
+    // The number index is exact-case: only the stored spelling finds the row.
+    mocks.listShipmentsByNumber.mockImplementation(async (n: string) => (n === 'BCAT104221' ? [{ id: 'sh-1', number: 'BCAT104221' }] : []))
     mocks.testOwnershipRules.mockResolvedValue({
       context: {
         carrierId: 'OWN_FLEET',

@@ -34,3 +34,45 @@ describe('listAuditLogs', () => {
     expect(graphqlMock.mock.calls[0][0].variables.filter).toEqual({ or: [{ entityId: { eq: 'e1' } }, { entityId: { eq: 'e2' } }] })
   })
 })
+
+describe('listAuditLogsFor', () => {
+  const indexRow = (id: string, entityType: string, entityId: string) => ({ id, entityType, entityId, action: 'X', user: 'u', changes: '{"y":2}', createdAt: '2026-11-03T00:00:00.000Z' })
+
+  it('reads each (type, id) through the entity index in one aliased request and parses changes', async () => {
+    graphqlMock.mockResolvedValue({ data: {
+      a0: { items: [indexRow('1', 'Load', 'l1')], nextToken: null },
+      a1: { items: [indexRow('2', 'Shipment', 's1')], nextToken: null },
+    } })
+    const { listAuditLogsFor } = await import('./apiClient')
+    const rows = await listAuditLogsFor([{ entityType: 'Load', entityId: 'l1' }, { entityType: 'Shipment', entityId: 's1' }])
+    expect(graphqlMock).toHaveBeenCalledTimes(1)
+    expect(graphqlMock.mock.calls[0][0].query).toContain('listAuditLogByEntityTypeAndEntityId(entityType: $k0_0, entityId: { eq: $k0_1 }')
+    expect(rows.map((r) => r.id)).toEqual(['1', '2'])
+    expect(rows[0].changes).toEqual({ y: 2 })
+  })
+
+  it('falls back to the filtered scan when the backend has no entity index, keeping only the asked (type, id) pairs', async () => {
+    vi.resetModules()
+    graphqlMock.mockReset()
+    graphqlMock
+      .mockRejectedValueOnce({ errors: [{ message: 'Validation error: Cannot query field "listAuditLogByEntityTypeAndEntityId" on type "Query".' }] })
+      .mockResolvedValueOnce({ data: { listAuditLogs: { items: [indexRow('1', 'Load', 'l1'), indexRow('2', 'Shipment', 'l1')], nextToken: null } } })
+    const { listAuditLogsFor } = await import('./apiClient')
+    const rows = await listAuditLogsFor([{ entityType: 'Load', entityId: 'l1' }])
+    expect(rows.map((r) => r.id)).toEqual(['1'])
+    // the missing index is remembered: the next call scans straight away
+    graphqlMock.mockResolvedValueOnce({ data: { listAuditLogs: { items: [], nextToken: null } } })
+    await listAuditLogsFor([{ entityType: 'Load', entityId: 'l2' }])
+    expect(graphqlMock.mock.calls[2][0].query).toContain('listAuditLogs(')
+  })
+
+  it('rethrows an unrelated failure instead of silently scanning', async () => {
+    vi.resetModules()
+    graphqlMock.mockReset()
+    graphqlMock.mockRejectedValueOnce({ errors: [{ message: 'Unauthorized' }] })
+    const { listAuditLogsFor } = await import('./apiClient')
+    const outcome = await listAuditLogsFor([{ entityType: 'Load', entityId: 'l1' }]).then(() => 'resolved', (e: unknown) => e)
+    expect(outcome).toEqual({ errors: [{ message: 'Unauthorized' }] })
+    expect(graphqlMock).toHaveBeenCalledTimes(1) // no fallback scan
+  })
+})

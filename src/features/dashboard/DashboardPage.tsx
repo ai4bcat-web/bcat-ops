@@ -9,7 +9,8 @@ import { useDashboardMetrics, type DateRangeKey } from '@/hooks/useDashboardMetr
 import { useFactoringItems } from '@/hooks/useFactoringItems'
 import { factoringTotals, type FactoringTotals } from '@/lib/factoringTotals'
 import type { RevenueSplit, LoadsSplit } from '@/lib/revenueByFleet'
-import { useLoads } from '@/hooks/useLoads'
+import { useLoads, useEnsureLoadRange } from '@/hooks/useLoads'
+import { chicagoDateStr, addDays } from '@/lib/date'
 import { ComplianceAlertsWidget } from './ComplianceAlertsWidget'
 import { RepairInvoicesWidget } from './RepairInvoicesWidget'
 import { VendorApCard } from './VendorApCard'
@@ -335,6 +336,11 @@ const RANGES: { value: DateRangeKey; label: string }[] = [
 export function DashboardPage() {
   const [rangeKey, setRangeKey] = useState<DateRangeKey>('this-month')
   const metrics = useDashboardMetrics(rangeKey)
+  // The range card compares against the previous period, so the window reaches back far
+  // enough for it: the year to date, else the last six months.
+  const [windowNow] = useState(() => new Date())
+  const windowFrom = rangeKey === 'this-year' ? `${windowNow.getFullYear()}-01-01` : chicagoDateStr(addDays(windowNow, -185))
+  useEnsureLoadRange(windowFrom, chicagoDateStr(windowNow))
 
   /*
    * The factoring queue, counted off the same rows the Factoring page works from, so the

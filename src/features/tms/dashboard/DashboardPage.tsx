@@ -23,7 +23,7 @@ import { formatCents } from '@/lib/invoiceBuild'
 import { SEED_DIVISIONS } from '@/lib/ownership'
 import { BROKERAGE_CHARTS } from './brokerageCards'
 import { CLASSIC_CHARTS } from './classicCharts'
-import { ChartCard } from './ChartCard'
+import { LazyChartCard } from './ChartCard'
 import { buildBusinessStrips, buildCompanyTotals, rollupBusinessStrips } from './businessStrips'
 import { WelcomeHeader } from './WelcomeHeader'
 import { useBrokerageDashboard } from './useBrokerageDashboard'
@@ -155,15 +155,6 @@ export function DashboardPage() {
     [visibleKeys],
   )
 
-  const cards = useMemo(() => {
-    if (!data) return []
-    return visible.map((def) => {
-      const override = overrides[def.key]
-      const effective = override === undefined ? groupBy : override
-      return { def, series: def.compute(data, filters, effective) }
-    })
-  }, [data, visible, overrides, groupBy, filters])
-
   const setFilter = useCallback(<K extends keyof DashboardFilters>(key: K, value: DashboardFilters[K]) => {
     setFilters((current) => ({ ...current, [key]: value }))
   }, [])
@@ -184,7 +175,14 @@ export function DashboardPage() {
   }, [now])
 
   const exportCsv = useCallback(() => {
-    const csv = chartsToCsv(cards.map((card) => ({ title: card.def.title, series: card.series })))
+    // The cards compute as they scroll into view, so the export computes its own copy of every chart.
+    const rows = data
+      ? visible.map((def) => {
+          const override = overrides[def.key]
+          return { title: def.title, series: def.compute(data, filters, override === undefined ? groupBy : override) }
+        })
+      : []
+    const csv = chartsToCsv(rows)
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
     const url = URL.createObjectURL(blob)
     const anchor = document.createElement('a')
@@ -194,7 +192,7 @@ export function DashboardPage() {
     anchor.click()
     anchor.remove()
     URL.revokeObjectURL(url)
-  }, [cards, filters.from, filters.to])
+  }, [data, visible, overrides, groupBy, filters])
 
   const selectView = useCallback((name: string) => {
     setViewName(name)
@@ -495,15 +493,20 @@ export function DashboardPage() {
       ) : null}
 
       <div className="tms-dash-cards">
-        {cards.map((card) => (
-          <ChartCard
-            key={card.def.key}
-            def={card.def}
-            series={card.series}
-            override={overrides[card.def.key]}
-            onOverride={(next) => setOverrides((current) => ({ ...current, [card.def.key]: next }))}
-          />
-        ))}
+        {data ? visible.map((def) => {
+          const override = overrides[def.key]
+          return (
+            <LazyChartCard
+              key={def.key}
+              def={def}
+              data={data}
+              filters={filters}
+              groupBy={override === undefined ? groupBy : override}
+              override={override}
+              onOverride={(next) => setOverrides((current) => ({ ...current, [def.key]: next }))}
+            />
+          )
+        }) : null}
       </div>
 
       <TmsDialog

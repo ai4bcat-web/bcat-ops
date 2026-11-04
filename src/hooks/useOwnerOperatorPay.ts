@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import {
-  listLoads,
   listCustomers,
   listLocations,
   listDriverPaySettings,
@@ -29,6 +28,7 @@ import { splitPayableTrips, type PayHoldReason } from '@/lib/payHold'
 import type { ManualOverrides } from '@/lib/otrInvoice'
 import { useFuelTransactions } from './useFuelTransactions'
 import { useDrivers } from './useDrivers'
+import { useLoads, useEnsureLoadRange } from './useLoads'
 import {
   calcDriverPay,
   effectivePayRate,
@@ -43,7 +43,7 @@ import { matchedFuelForCard, sumFuel, effectiveFuelCard } from '@/lib/driverFuel
 import { ownerOpTripsFor, ownerOpWeekAtOrAfterFirst, type OwnerOpTrip, isOwnerOperatorGroup } from '@/lib/ownerOperatorTrips'
 import { otrSettlementReadiness } from '@/lib/otrSettlementFields'
 import { duplicateTripIds as dupIdsForWeek } from '@/lib/tripDedup'
-import type { Driver, Load } from '@/types'
+import type { Driver } from '@/types'
 import { classificationForFleet } from '@/lib/fileHub'
 import { errorText } from '@/lib/errorText'
 
@@ -194,7 +194,7 @@ export function useOwnerOperatorPay(rawPeriodStart: string): OwnerOperatorPaySta
   const { drivers, updateDriver } = useDrivers()
   const { transactions: fuelTxs } = useFuelTransactions()
 
-  const [loads, setLoads] = useState<Load[]>([])
+  const { loads } = useLoads()
   const [customers, setCustomers] = useState<CustomerRecord[]>([])
   const [locations, setLocations] = useState<LocationRecord[]>([])
   const [podIndex, setPodIndex] = useState<PodIndex>(() => buildPodIndex({ jobsdoneLoadIds: [], submissions: [] }))
@@ -215,10 +215,10 @@ export function useOwnerOperatorPay(rawPeriodStart: string): OwnerOperatorPaySta
     d.setUTCDate(d.getUTCDate() - 7)
     return d.toISOString().slice(0, 10)
   }, [periodStart])
+  const ready = useEnsureLoadRange(prevStart, end)
 
   const load = useCallback(() =>
     Promise.all([
-      listLoads(),
       loadFactoringDirectory(),
       listDriverPaySettings(),
       listDriverPayDeductions(),
@@ -226,8 +226,7 @@ export function useOwnerOperatorPay(rawPeriodStart: string): OwnerOperatorPaySta
       loadPodIndex(),
       loadManualOverrides(),
     ])
-      .then(([l, dir, s, d, creds, pods, manual]) => {
-        setLoads(l)
+      .then(([dir, s, d, creds, pods, manual]) => {
         setCustomers(dir.customers)
         setLocations(dir.locations)
         setSettings(s)
@@ -391,7 +390,7 @@ export function useOwnerOperatorPay(rawPeriodStart: string): OwnerOperatorPaySta
   }, [])
 
   return {
-    loading, error, podsKnown, rows, unconfigured, refresh,
+    loading: loading || !ready, error, podsKnown, rows, unconfigured, refresh,
     saveSetting, addDeduction, removeDeduction,
     addCredit, updateCredit, removeCredit,
   }

@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi } from 'vitest'
+import { beforeEach, describe, it, expect, vi } from 'vitest'
+import { invalidateLists } from '@/lib/listCache'
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { CheckCallsPage } from './CheckCallsPage'
@@ -55,7 +56,12 @@ const { setNextCheckCall } = vi.hoisted(() => ({ setNextCheckCall: vi.fn(async (
 vi.mock('@/lib/apiClient', () => ({
   getTmsSettings: vi.fn(async () => null),
   listCheckCallWorklist: vi.fn(async () => loads),
-  listLoadCarriersByLoad: vi.fn(async () => carriers),
+  // The batched reader: assignments grouped by load id, like the aliased index query.
+  listLoadCarriersByLoads: vi.fn(async (ids: string[]) => {
+    const byLoad = new Map<string, typeof carriers>()
+    for (const id of ids) byLoad.set(id, carriers.filter((c) => c.loadId === id))
+    return byLoad
+  }),
   listOpenIncidents: vi.fn(async () => incidents),
   logCheckCall: vi.fn(async () => ({ bundle: {}, event: null })),
   resolveIncident: vi.fn(async () => ({ bundle: {}, event: null })),
@@ -66,6 +72,8 @@ vi.mock('@/lib/apiClient', () => ({
 function tab(name: string): HTMLElement {
   return screen.getByRole('tab', { name: new RegExp(`^${name}`) })
 }
+
+beforeEach(() => { invalidateLists() })
 
 describe('CheckCallsPage', () => {
   it('counts each tab by the same clock the notifier reads', async () => {

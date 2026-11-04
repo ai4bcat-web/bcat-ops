@@ -29,7 +29,7 @@ vi.mock('@/lib/apiClient', () => ({
   getCarrierBundle: vi.fn(),
   getTmsSettings: vi.fn(async () => null),
   graphqlErrorText: (err: unknown) => (err instanceof Error ? err.message : String(err)),
-  listAuditLogs: vi.fn(async () => []),
+  listAuditLogsFor: vi.fn(async () => []),
   listBillsByCarrier: vi.fn(async () => []),
   listApPaymentsByCarrier: vi.fn(async () => []),
   listUserProfiles: vi.fn(async () => []),

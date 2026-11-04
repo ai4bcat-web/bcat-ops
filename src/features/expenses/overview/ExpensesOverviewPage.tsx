@@ -14,6 +14,7 @@ import {
 import type { ColumnDef, TmsPeriod, TmsStat } from '@/features/tms/kit'
 import { useDrivers } from '@/hooks/useDrivers'
 import { useFleetProfitability } from '@/hooks/useFleetProfitability'
+import { useEnsureLoadRange } from '@/hooks/useLoads'
 import { formatDateShort, chicagoDateStr } from '@/lib/date'
 import {
   buildReceipts, expenseCards, hoursPerDriver, periodRange, previousRange, receiptStatus,
@@ -55,6 +56,8 @@ export function ExpensesOverviewPage() {
 
   const fleet = useFleetProfitability(range, group)
   const { data, computeForRange, members, fuelTxs, loading: fleetLoading, error: fleetError } = fleet
+  // The cards compare against the previous period, which the hook's own window does not cover.
+  useEnsureLoadRange(prevRange.start, range.end)
   const sources = useReceiptSources()
   const { drivers } = useDrivers()
   const invoices = useAppStore((s) => s.maintenanceInvoices)

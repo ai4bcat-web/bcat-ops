@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 import { useAppStore } from '@/store/useAppStore'
+import { useLoads, useEnsureLoadRange } from '@/hooks/useLoads'
 import { useFuelTransactions } from '@/hooks/useFuelTransactions'
 import { useExpenseData } from '@/hooks/useExpenseData'
 import { useIsMobile } from '@/hooks/useIsMobile'
@@ -24,10 +25,8 @@ import {
   cleanupDuplicateFuelTransactions,
   listTruckConfigs,
   listTruckMileages,
-  listLoads,
 } from '@/lib/apiClient'
 import type { TruckConfig, TruckMileage } from '@/lib/apiClient'
-import type { Load } from '@/types'
 import { useTmsTokens } from '@/features/tms/tmsTokens'
 import { FuelUploadModal } from './FuelUploadModal'
 import { ExpenseManageView } from './ExpenseManageView'
@@ -774,15 +773,20 @@ function EfficiencyTab({
 }) {
   const [truckConfigs, setTruckConfigs] = useState<TruckConfig[]>([])
   const [mileages,     setMileages]     = useState<TruckMileage[]>([])
-  const [loads,        setLoads]        = useState<Load[]>([])
   const [dataLoading,  setDataLoading]  = useState(true)
+  // Revenue reads the loads picked up inside the range: window just those months into the
+  // store (non-voided, as the old `listLoads()` returned).
+  const { loads } = useLoads()
+  const loadsReady = useEnsureLoadRange(
+    rangeStart.toISOString().slice(0, 10),
+    rangeEnd.toISOString().slice(0, 10),
+  )
 
   useEffect(() => {
-    Promise.all([listTruckConfigs(), listTruckMileages(), listLoads()])
-      .then(([configs, miles, ls]) => {
+    Promise.all([listTruckConfigs(), listTruckMileages()])
+      .then(([configs, miles]) => {
         setTruckConfigs(configs)
         setMileages(miles)
-        setLoads(ls)
       })
       .catch((err) => console.error('[EfficiencyTab] load failed:', err))
       .finally(() => setDataLoading(false))
@@ -862,7 +866,7 @@ function EfficiencyTab({
     [companyTrucks, weekMilesByTruck, fuelByTruck, revenueByTruck],
   )
 
-  if (dataLoading) {
+  if (dataLoading || !loadsReady) {
     return (
       <div style={{ padding: '60px 0', textAlign: 'center', color: 'var(--tms-muted)', fontSize: 13 }}>
         Loading efficiency data…

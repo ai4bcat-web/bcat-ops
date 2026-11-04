@@ -21,7 +21,7 @@ if (!Element.prototype.scrollIntoView) Element.prototype.scrollIntoView = () => 
 const listOwnershipDivisions = vi.hoisted(() => vi.fn())
 const listOwnershipRules = vi.hoisted(() => vi.fn())
 const previewInvoice = vi.hoisted(() => vi.fn())
-const listAuditLogs = vi.hoisted(() => vi.fn())
+const listAuditLogsFor = vi.hoisted(() => vi.fn())
 // Step J — the Overview Integrations card reads the rows and runs a stub through these.
 const listIntegrations = vi.hoisted(() => vi.fn())
 const runIntegrationStub = vi.hoisted(() => vi.fn())
@@ -66,7 +66,7 @@ vi.mock('@/lib/apiClient', async (importOriginal) => {
     listOwnershipDivisions,
     listOwnershipRules,
     previewInvoice,
-    listAuditLogs,
+    listAuditLogsFor,
     listUserProfiles: vi.fn(async () => []),
     getInvoice: vi.fn(async () => null),
     getCarrier: vi.fn(async () => null),
@@ -202,7 +202,7 @@ beforeEach(() => {
   actions = makeActions()
   listOwnershipDivisions.mockResolvedValue([])
   listOwnershipRules.mockResolvedValue([])
-  listAuditLogs.mockResolvedValue([])
+  listAuditLogsFor.mockResolvedValue([])
   listIntegrations.mockResolvedValue([])
   listWorkflowRunsForShipment.mockResolvedValue([])
 })
@@ -307,7 +307,7 @@ describe('ShipmentDetail tabs', () => {
     await waitFor(() => expect(screen.getByTestId('carrier-offers')).toBeTruthy())
 
     fireEvent.click(screen.getByRole('tab', { name: 'History' }))
-    await waitFor(() => expect(listAuditLogs).toHaveBeenCalled())
+    await waitFor(() => expect(listAuditLogsFor).toHaveBeenCalled())
   })
 
   it('maps the pre-merge deep links onto Overview and keeps the new keys', () => {

@@ -1,5 +1,12 @@
 # TMS build log
 
+## 2026-11-04 — Step PERF slice P5 (verification): `devVerifyPerf`, budgets, probes, pre-change baseline
+
+- Files: `scripts/devVerifyPerf.mjs` (browser gate + `--inventory` / `--baseline` / `--ratchet`), `scripts/devVerifyPerfApi.mts` (G1/G2/G7 against the app's real `boardData`/`apiClient`), `scripts/lib/{perfBudgets,perfProbe,perfGaps,perfExpected}.mjs` + tests. Dev only (refuses any origin but `DEV_ORIGIN`), read-only, temporary admin deleted in `finally` (`identity deleted: true`).
+- Ready = the page's REAL rows in the DOM (>= min(API-expected, page size), expected counts from independent raw reads), never first paint; legacy pages (no row markers) = a Load read completed and 1.5 s of quiet.
+- **Pre-change baseline** (deployed dev, 3 cold runs, median; `Docs/tms-build/perf/baseline-2026-11-04.json`): dashboard 23.5 s / 127 req / 158 MB; tracking 21.5 / 136 / 168; shipments 21.9 / 150 / 182; customers 17.3 / 82 / 86; users 18.3 / 147 / 83; invoicing 19.6 / **366** / 136; payable 18.6 / 103 / 114; carriers (shell floor) 18.3 / 77 / 83; schedule 23.3 / 146 / 168; calendar 24.2 / 164 / 177; legacy dashboard 25.6 / **212** / 210. Request counts equal PERF-plan §1.2.
+- API gates run once on dev against the in-tree PERF loaders: working set 3.3 s / 57 trips / 3.3 MB (first partial 1.3 s, 344 shipments, stage-2 ids 2,137), window(1 month) 1.7 s / 210 shipments, window(3 months) 2.2 s / 761 shipments. G1 caught 3 non-voided Active shipments with no `pickupAppt` (absent from the status GSI) missing from the working set; fixed in `boardData` stage B, G1 now green (264 Active ids equal).
+
 ## 2026-11-04 — Step X done on dev: prod->dev refresh, rehearsals and the FULL Aljex import loaded and reconciled
 
 **Executed on the dev stack only (suffix `nc3jsnxdmjhkpequimypiatkma-NONE`). Production was only READ (`copy-data`/`copy-files` read production); nothing was written to production, no SSM

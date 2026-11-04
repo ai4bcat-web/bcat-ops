@@ -23,7 +23,7 @@ const api = vi.hoisted(() => ({
   listOrders: vi.fn(async () => [] as unknown[]),
   listLoadSummaries: vi.fn(async () => [] as unknown[]),
   listLoadCarriers: vi.fn(async () => [] as unknown[]),
-  listLoadCarriersByLoad: vi.fn(async () => [] as unknown[]),
+  listLoadCarriersByLoads: vi.fn(async () => new Map()),
   listLoadFinancials: vi.fn(async () => [] as unknown[]),
   listQuotes: vi.fn(async () => [] as unknown[]),
   listCheckCallWorklist: vi.fn(async () => [] as unknown[]),
@@ -43,6 +43,11 @@ const api = vi.hoisted(() => ({
   setShipmentCustomer: vi.fn(),
 }))
 vi.mock('@/lib/apiClient', () => api)
+// The board reads its working set through the data layer; the fixture rows come from `api.listShipments`.
+vi.mock('@/lib/boardData', () => ({
+  peekBoardBundle: () => undefined,
+  loadBoardBundle: async () => ({ shipments: await api.listShipments(), orders: [], loads: [], loadCarriers: [], loadFinancials: [] }),
+}))
 
 import { WorkflowsPage } from './WorkflowsPage'
 

@@ -7,6 +7,7 @@ import type { Equipment, MaintenanceTask, MaintenanceInvoice } from '@/types/equ
 import type { Expense } from '@/types/expense'
 import type { AmazonDispute } from '@/types/dispute'
 import { getMondayOf } from '@/lib/date'
+import { currentMonth, monthsCovering } from '@/lib/shipmentWindows'
 import * as api from '@/lib/apiClient'
 import { withDerivedLegacy, withStopsFromLegacy } from '@/lib/stops'
 import { errorMessage } from '@/lib/utils/errorMessage'
@@ -338,12 +339,72 @@ function diffChanges<T extends object>(
   return changes
 }
 
+// ── Load windowing ────────────────────────────────────────────────────────────
+
+type StoreSet = (fn: (s: AppState) => Partial<AppState>) => void
+
+/** One in-flight fetch per month, so two pages asking for the same month share a request. */
+const monthFetches = new Map<string, Promise<void>>()
+
+/**
+ * Merge fetched loads into the held ones by id, keeping order. A copy the store already
+ * holds that is NEWER than the fetched one (a save that landed while the read was in
+ * flight) wins, so a slow window read can never roll a just-saved load back.
+ */
+export function mergeLoads(held: Load[], incoming: Load[]): Load[] {
+  if (incoming.length === 0) return held
+  const incomingById = new Map(incoming.map((l) => [l.id, l]))
+  const seen = new Set<string>()
+  const out = held.map((l) => {
+    const next = incomingById.get(l.id)
+    if (!next) return l
+    seen.add(l.id)
+    return (l.updatedAt ?? '') > (next.updatedAt ?? '') ? l : next
+  })
+  for (const l of incoming) if (!seen.has(l.id)) out.push(l)
+  return out
+}
+
+/**
+ * The loads of these pickup months: shipment ids by the month index (ids only, voided
+ * included — the store is the identity table), then every leg of those shipments with the
+ * full load field set, so every legacy consumer sees the same `Load` shape as before.
+ * `refresh` re-reads months that are already loaded and does not touch `loadedMonths`.
+ */
+function fetchMonths(months: string[], set: StoreSet, refresh = false): Promise<void> {
+  const p = (async () => {
+    const ids = await api.listShipmentIdsByMonths(months)
+    const loads = await api.listLoadsByShipmentIds(ids)
+    set((s) => ({
+      loads: mergeLoads(s.loads, loads),
+      loadedMonths: refresh ? s.loadedMonths : new Set([...s.loadedMonths, ...months]),
+    }))
+  })()
+  if (!refresh) {
+    for (const m of months) monthFetches.set(m, p)
+    const clear = () => { for (const m of months) if (monthFetches.get(m) === p) monthFetches.delete(m) }
+    p.then(clear, clear)
+  }
+  return p
+}
+
 // ── State interface ───────────────────────────────────────────────────────────
 
 interface AppState {
   // ── Data (loaded from API) ─────────────────────────────────────────────────
   drivers: Driver[]
+  /**
+   * The loads this session has windowed in: the months `ensureLoadMonths` has fetched
+   * (padded) plus every all-time open load. NOT the whole table — a page that needs a
+   * date range asks for it with `ensureLoadRange` before it reads `loads`.
+   */
   loads: Load[]
+  /** The 'YYYY-MM' (shipment pickup month) windows already merged into `loads`. */
+  loadedMonths: ReadonlySet<string>
+  /**
+   * Session audit trail only: entries this tab wrote, mirrored locally. The server log
+   * is read per entity (`useAuditLog`), never loaded in bulk.
+   */
   auditLog: AuditLogEntry[]
   isLoading: boolean
   error: string | null
@@ -388,8 +449,18 @@ interface AppState {
   setCurrentUser: (email: string) => void
   // Lightweight re-fetch of the calendar's shared data (loads + drivers) — used by the
   // periodic calendar poll so every client converges on the same server state. Does NOT
-  // re-run initializeData (which would re-open subscriptions).
-  refreshCalendarData: () => Promise<void>
+  // re-run initializeData (which would re-open subscriptions). Re-reads the loaded months
+  // inside `range` (every loaded month with no argument) plus the open set; the calendar
+  // poll passes its visible range so only those months are re-read.
+  refreshCalendarData: (range?: { from: string; to: string }) => Promise<void>
+  // Fetch + merge the loads of these 'YYYY-MM' pickup months unless already loaded.
+  // Idempotent; concurrent callers for the same month share one request.
+  ensureLoadMonths: (months: string[]) => Promise<void>
+  // Same for an inclusive 'YYYY-MM-DD' date range, widened one month each side so a
+  // UTC-vs-local month edge can never leave a boundary load out of a page's window.
+  ensureLoadRange: (from: string, to: string) => Promise<void>
+  // The all-time open set (every non-terminal load): Dispatch, Appts, the truck map.
+  loadOpenLoads: () => Promise<void>
   // The fleet roster (drivers + equipment) only — no loads, no subscriptions. For /tms pages
   // and the shell's bell, which run without the legacy runtime's initializeData. Fetches at
   // most once per session, and not at all when drivers are already loaded.
@@ -480,6 +551,7 @@ export const useAppStore = create<AppState>()(
       // ── Initial state ──────────────────────────────────────────────────────
       drivers: [],
       loads: [],
+      loadedMonths: new Set<string>(),
       auditLog: [],
       isLoading: false,
       error: null,
@@ -506,60 +578,71 @@ export const useAppStore = create<AppState>()(
 
       initializeData: async (userEmail) => {
         set({ isLoading: true, error: null, currentUserEmail: userEmail })
-        try {
-          const [loads, drivers, auditLog] = await Promise.all([
-            // The store is the IDENTITY TABLE, so it asks for voided loads too: a Pro #
-            // is claimed forever and the duplicate-Pro check has to keep seeing the
-            // voided load that holds it. The live working set — no voided rows — is
-            // `useLoads()`, which filters this array for every screen that shows work.
-            api.listLoads({ includeVoided: true }),
-            api.listDrivers(),
-            api.listAuditLogs(),
-          ])
-          set({ loads, drivers, auditLog, isLoading: false })
-        } catch (err) {
-          console.error('[store] initializeData failed', err)
-          set({ isLoading: false, error: errorMessage(err) })
-          return
-        }
 
         // ── Fleet (Equipment + Maintenance) ─────────────────────────────────
         // Separate + non-fatal: if the backend models aren't deployed yet, keep the
         // local/seed fleet so the page still works until the Amplify deploy lands.
-        try {
-          const [equipment, maintenanceTasks, maintenanceInvoices] = await Promise.all([
-            api.listEquipment(),
-            api.listMaintenanceTasks(),
-            api.listMaintenanceInvoices(),
-          ])
-          if (equipment.length === 0 && !get().fleetSeeded) {
-            // First run against a fresh backend — migrate the current local fleet up
-            // (includes any edits made before deploy) so nothing is lost.
-            const localEquip = get().equipment
-            const localTasks = get().maintenanceTasks
-            const localInv   = get().maintenanceInvoices
-            await Promise.all([
-              ...localEquip.map((e) => api.createEquipment(e).catch((err) => console.warn('[store] seed equipment failed', e.id, err))),
-              ...localTasks.map((t) => api.createMaintenanceTask(t).catch((err) => console.warn('[store] seed task failed', t.id, err))),
-              ...localInv.map((i) => api.createMaintenanceInvoice(i).catch((err) => console.warn('[store] seed invoice failed', i.id, err))),
+        const loadFleet = async () => {
+          try {
+            const [equipment, maintenanceTasks, maintenanceInvoices] = await Promise.all([
+              api.listEquipment(),
+              api.listMaintenanceTasks(),
+              api.listMaintenanceInvoices(),
             ])
-            set({ fleetSeeded: true })
-          } else {
-            set({ equipment, maintenanceTasks, maintenanceInvoices, fleetSeeded: true })
+            if (equipment.length === 0 && !get().fleetSeeded) {
+              // First run against a fresh backend — migrate the current local fleet up
+              // (includes any edits made before deploy) so nothing is lost.
+              const localEquip = get().equipment
+              const localTasks = get().maintenanceTasks
+              const localInv   = get().maintenanceInvoices
+              await Promise.all([
+                ...localEquip.map((e) => api.createEquipment(e).catch((err) => console.warn('[store] seed equipment failed', e.id, err))),
+                ...localTasks.map((t) => api.createMaintenanceTask(t).catch((err) => console.warn('[store] seed task failed', t.id, err))),
+                ...localInv.map((i) => api.createMaintenanceInvoice(i).catch((err) => console.warn('[store] seed invoice failed', i.id, err))),
+              ])
+              set({ fleetSeeded: true })
+            } else {
+              set({ equipment, maintenanceTasks, maintenanceInvoices, fleetSeeded: true })
+            }
+          } catch (err) {
+            console.warn('[store] Fleet backend unavailable — using local data until the Amplify deploy', err)
           }
-        } catch (err) {
-          console.warn('[store] Fleet backend unavailable — using local data until the Amplify deploy', err)
         }
 
         // ── Amazon disputes ─────────────────────────────────────────────────
         // Non-fatal: if the AmazonDispute model isn't deployed yet, keep the page
         // usable (empty) until the Amplify deploy lands.
-        try {
-          const amazonDisputes = await api.listAmazonDisputes()
-          set({ amazonDisputes })
-        } catch (err) {
-          console.warn('[store] AmazonDispute backend unavailable — disputes empty until deploy', err)
+        const loadDisputes = async () => {
+          try {
+            const amazonDisputes = await api.listAmazonDisputes()
+            set({ amazonDisputes })
+          } catch (err) {
+            console.warn('[store] AmazonDispute backend unavailable — disputes empty until deploy', err)
+          }
         }
+
+        // The tiny tables ride in the same wave as the load window: nothing here waits
+        // on the loads, and the loads no longer wait on a table scan.
+        const small = Promise.all([loadFleet(), loadDisputes()])
+        try {
+          // The store is the IDENTITY TABLE for the window it holds, so it asks for
+          // voided loads too (a Pro # is claimed forever and the duplicate-Pro check
+          // keeps seeing the voided load that holds it). The live working set — no
+          // voided rows — is `useLoads()`, which filters this array for every screen
+          // that shows work. What it holds is the current month ±1 plus every open
+          // load; a page needing more calls `ensureLoadRange`.
+          const [drivers] = await Promise.all([
+            api.listDrivers(),
+            get().ensureLoadMonths(monthsCovering(currentMonth(new Date()), currentMonth(new Date()), 1)),
+            get().loadOpenLoads(),
+          ])
+          set({ drivers, isLoading: false })
+        } catch (err) {
+          console.error('[store] initializeData failed', err)
+          set({ isLoading: false, error: errorMessage(err) })
+          return
+        }
+        await small
 
         // ── Real-time subscriptions — keep all clients in sync ──────────────
         api.subscribeToLoadChanges({
@@ -577,14 +660,46 @@ export const useAppStore = create<AppState>()(
         })
       },
 
+      ensureLoadMonths: (months) => {
+        const wanted = [...new Set(months)]
+        const pending: Promise<void>[] = []
+        const missing: string[] = []
+        for (const m of wanted) {
+          if (get().loadedMonths.has(m)) continue
+          const inflight = monthFetches.get(m)
+          if (inflight) pending.push(inflight)
+          else missing.push(m)
+        }
+        if (missing.length > 0) pending.push(fetchMonths(missing, set))
+        return Promise.all(pending).then(() => undefined)
+      },
+
+      ensureLoadRange: (from, to) =>
+        get().ensureLoadMonths(monthsCovering(from, to, 1)),
+
+      loadOpenLoads: async () => {
+        const open = await api.listOpenLoads()
+        set((s) => ({ loads: mergeLoads(s.loads, open) }))
+      },
+
       // Poll-friendly refetch of the calendar's shared data. Non-fatal on error so a
-      // transient network blip doesn't blank the calendar.
-      refreshCalendarData: async () => {
+      // transient network blip doesn't blank the calendar. Reads only the months the
+      // caller can see (and only if already windowed in) plus the open set — never the
+      // table.
+      refreshCalendarData: async (range) => {
         try {
-          // Same identity-table rule as initializeData: refetch everything, voided
-          // included, and let `useLoads()` hide the voided rows from the calendar.
-          const [loads, drivers] = await Promise.all([api.listLoads({ includeVoided: true }), api.listDrivers()])
-          set({ loads, drivers })
+          const { loadedMonths } = get()
+          const months = range
+            ? monthsCovering(range.from, range.to, 1).filter((m) => loadedMonths.has(m))
+            : [...loadedMonths]
+          // Same identity-table rule as initializeData: voided included, and
+          // `useLoads()` hides the voided rows from the calendar.
+          const [drivers] = await Promise.all([
+            api.listDrivers(),
+            months.length > 0 ? fetchMonths(months, set, true) : Promise.resolve(),
+            get().loadOpenLoads(),
+          ])
+          set({ drivers })
         } catch (err) {
           console.warn('[store] refreshCalendarData failed', err)
         }

@@ -5,7 +5,7 @@
  * MVMNT filter row, table, empty state and footer, with no title row of its own.
  */
 import { useMemo, useState } from 'react'
-import { TmsBadge, TmsListPage } from '@/features/tms/kit'
+import { TmsBadge, TmsButton, TmsInput, TmsListPage } from '@/features/tms/kit'
 import type { ColumnDef, TmsTone } from '@/features/tms/kit'
 import { useAuditLog } from '@/hooks/useAuditLog'
 import { formatDateTime } from '@/lib/date'
@@ -37,9 +37,31 @@ const COLUMNS: ColumnDef<AuditLogEntry>[] = [
   },
 ]
 
+/**
+ * Every `entityType` literal a writer uses, in both spellings: the browser store writes
+ * PascalCase (`EntityType`), the Lambdas write some as UPPER_SNAKE (`SHIPMENT`, `ORDER`,
+ * `LOAD_CARRIER`, `CARRIER`, `DRIVER`). A lookup by id must cover both.
+ */
+const LOOKUP_ENTITY_TYPES = [
+  'Load', 'LOAD', 'Shipment', 'SHIPMENT', 'Order', 'ORDER', 'LoadCarrier', 'LOAD_CARRIER',
+  'Driver', 'DRIVER', 'Carrier', 'CARRIER', 'Customer', 'CUSTOMER', 'Quote', 'QUOTE',
+  'Invoice', 'INVOICE', 'CarrierBill', 'CARRIER_BILL',
+]
+
 export function AuditPage() {
-  const { entries } = useAuditLog()
+  const [lookupDraft, setLookupDraft] = useState('')
+  const [lookupId, setLookupId] = useState('')
+  const lookupEntities = useMemo(
+    () => (lookupId ? LOOKUP_ENTITY_TYPES.map((entityType) => ({ entityType, entityId: lookupId })) : undefined),
+    [lookupId],
+  )
+  const { entries: found, loading } = useAuditLog(lookupEntities)
+  const entries = useMemo(
+    () => (lookupId ? [...found].sort((a, b) => b.createdAt.localeCompare(a.createdAt)) : found),
+    [found, lookupId],
+  )
   const [query, setQuery] = useState('')
+  const submitLookup = () => setLookupId(lookupDraft.trim())
 
   const rows = useMemo(() => {
     const needle = query.trim().toLowerCase()
@@ -56,10 +78,33 @@ export function AuditPage() {
       columns={COLUMNS}
       rows={rows}
       rowKey={(e) => e.id}
+      banner={
+        <form
+          className="tms-filter-row"
+          onSubmit={(e) => { e.preventDefault(); submitLookup() }}
+        >
+          <TmsInput
+            aria-label="Entity lookup"
+            placeholder="Entity lookup: paste a load, shipment, order, driver, carrier or customer id"
+            value={lookupDraft}
+            onChange={(e) => setLookupDraft(e.target.value)}
+          />
+          <TmsButton type="submit" variant="secondary">Look up</TmsButton>
+          {lookupId ? (
+            <TmsButton type="button" variant="secondary" onClick={() => { setLookupDraft(''); setLookupId('') }}>
+              Back to this session
+            </TmsButton>
+          ) : null}
+        </form>
+      }
       search={{ value: query, onChange: setQuery, placeholder: 'Search entity, id or user' }}
       emptyText={
-        entries.length === 0
-          ? 'No audit entries yet. Make a change to see it here.'
+        loading
+          ? 'Looking up audit entries…'
+          : entries.length === 0
+          ? lookupId
+            ? `No audit entries found for ${lookupId}.`
+            : 'Showing this session’s changes only. Use Entity lookup to read the history of a load, shipment, order, driver, carrier or customer by id.'
           : 'Please try again using a different query.'
       }
       onClearFilters={query ? () => setQuery('') : undefined}

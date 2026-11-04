@@ -56,9 +56,12 @@ function isVerificationUser(email: string): boolean {
 
 export function CustomerLinksPage() {
   const navigate = useNavigate()
-  const { shipments } = useShipments()
-  const { customers } = useDirectory()
   const [links, setLinks] = useState<TrackingLinkRecord[]>([])
+  // The page decorates each link with its shipment's number and customer, so it reads
+  // exactly the shipments the links point at, not the board.
+  const linkShipmentIds = useMemo(() => [...new Set(links.map((l) => l.shipmentId).filter(Boolean))].sort(), [links])
+  const { shipments } = useShipments({ kind: 'ids', ids: linkShipmentIds })
+  const { customers } = useDirectory({ locations: false })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [query, setQuery] = useState('')

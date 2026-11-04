@@ -49,7 +49,7 @@ export function UserOverview({ users, onReinvite }: UserOverviewProps) {
             label: 'Pending registrations',
             value: String(counts.total),
             tone: counts.total > 0 ? 'warn' : undefined,
-            sub: `${counts.applications} applications · ${counts.blocked} blocked · ${counts.awaitingVerification} unverified · ${counts.staffInvites} invites`,
+            sub: `${counts.applications} applications · ${reg.signup === 'loaded' ? counts.blocked : '—'} blocked · ${counts.awaitingVerification} unverified · ${counts.staffInvites} invites`,
           },
         ]}
       />
@@ -64,6 +64,14 @@ export function UserOverview({ users, onReinvite }: UserOverviewProps) {
           </TmsButton>
         }
       >
+        {reg.signup === 'needs-scan' ? (
+          <p className="tms-field-hint" style={{ margin: '0 0 8px' }}>
+            Blocked sign-ups are not loaded.{' '}
+            <TmsButton size="sm" onClick={() => void reg.loadRefusals()} disabled={reg.scanning}>
+              {reg.scanning ? 'Loading sign-up refusals…' : 'Load sign-up refusals'}
+            </TmsButton>
+          </p>
+        ) : null}
         <RegistrationCards
           applications={reg.applications}
           refusals={reg.refusals}

@@ -33,6 +33,7 @@ import { useDirectory } from '@/hooks/useDirectory'
 import { useOpenBills } from '@/hooks/useOpenBills'
 import { useOpenInvoices } from '@/hooks/useOpenInvoices'
 import { useShipments } from '@/hooks/useShipments'
+import { monthsCovering } from '@/lib/shipmentWindows'
 import { useStaff } from '@/hooks/useStaff'
 import { getTmsSettings, graphqlErrorText } from '@/lib/apiClient'
 import {
@@ -224,7 +225,7 @@ export function ReportsPage() {
       />
 
       {tab === 'profit' && <ProfitPanel period={period} staffNames={staffNames} refreshKey={refreshKey} />}
-      {tab === 'pipeline' && <PipelinePanel />}
+      {tab === 'pipeline' && <PipelinePanel period={period} />}
       {tab === 'ar' && <ArPanel period={period} asOf={asOf} periodLabel={periodLabel} refreshKey={refreshKey} />}
       {tab === 'ap' && <ApPanel asOf={asOf} periodLabel={periodLabel} />}
       {tab === 'quotes' && <QuotesPanel period={period} refreshKey={refreshKey} />}
@@ -453,15 +454,16 @@ function FilterSelect({ label, value, options, onChange }: {
 
 /* ── Pipeline ────────────────────────────────────────────────────────────── */
 
-function PipelinePanel() {
-  const { shipments, loading, error } = useShipments()
+function PipelinePanel({ period }: { period: ReportPeriod }) {
+  const months = useMemo(() => monthsCovering(period.from, period.to, 0), [period.from, period.to])
+  const { shipments, loading, error } = useShipments({ kind: 'window', months })
   const counts = useMemo(() => pipelineCounts(shipments), [shipments])
 
   return (
     <TmsCard title="Pipeline">
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         <p className="tms-field-hint" style={{ margin: 0 }}>
-          The board as it stands right now — not the report period: a shipment sits on a rung until it moves.
+          Shipments picked up in the report period, by where they sit now (voided shipments are not counted).
         </p>
         {error && <p style={{ margin: 0, fontSize: 14, color: 'var(--tms-badge-red)' }}>{error}</p>}
         {loading && counts.length === 0 && <Loading />}
@@ -490,7 +492,7 @@ function ArPanel({ period, asOf, periodLabel, refreshKey }: {
   const unbilled = useArWorklist('UNBILLED')
   const docsNeeded = useArWorklist('DOCS_NEEDED')
   const invoiced = useArWorklist('UNPAID')
-  const { customers } = useDirectory()
+  const { customers } = useDirectory({ locations: false })
   const [settings, setSettings] = useState<TmsSettings | null>(null)
   const periodInvoices = useWindowRows(loadInvoices, period, refreshKey)
 

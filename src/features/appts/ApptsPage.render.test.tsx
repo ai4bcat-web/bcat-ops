@@ -23,20 +23,23 @@ vi.mock('@/hooks/useDrivers', () => ({
 vi.mock('@/hooks/useIsMobile', () => ({ useIsMobile: () => false }))
 vi.mock('@/hooks/useDirectory', () => ({ useDirectory: () => ({ customers: [], locations: [], loading: false }) }))
 vi.mock('@/lib/rateconUpload', () => ({ uploadRateconAndApply: vi.fn().mockResolvedValue(true) }))
-const auditLog = vi.fn<() => AuditLogEntry[]>(() => [])
-vi.mock('@/hooks/useAuditLog', () => ({ useAuditLog: () => ({ entries: auditLog() }) }))
+const listAuditLogsFor = vi.fn<(keys: unknown) => Promise<AuditLogEntry[]>>(() => Promise.resolve([]))
+const sessionAudit = vi.fn<() => AuditLogEntry[]>(() => [])
+const ensureLoadMonths = vi.fn().mockResolvedValue(undefined)
+const ensureLoadRange = vi.fn().mockResolvedValue(undefined)
 // The drawer pulls in the whole load-editing tree; the queue is what's under test.
 vi.mock('@/features/loads/LoadDrawer', () => ({ LoadDrawer: () => null }))
 
 const setSelectedLoad = vi.fn()
 vi.mock('@/store/useAppStore', () => ({
   useAppStore: (sel: (s: unknown) => unknown) =>
-    sel({ setSelectedLoad, currentUserEmail: 'ryne@bcatcorp.com' }),
+    sel({ setSelectedLoad, currentUserEmail: 'ryne@bcatcorp.com', ensureLoadMonths, ensureLoadRange, auditLog: sessionAudit() }),
 }))
 
 const notifyApptNeeded = vi.fn().mockResolvedValue('1699999999.000100')
 vi.mock('@/lib/apiClient', () => ({
   notifyApptNeeded: (a: unknown) => notifyApptNeeded(a),
+  listAuditLogsFor: (k: unknown) => listAuditLogsFor(k),
   uploadApptProof: vi.fn().mockResolvedValue('appt-proofs/x'),
   getApptProofUrl: vi.fn().mockResolvedValue('https://example.com/x.jpg'),
   deleteApptProof: vi.fn().mockResolvedValue(undefined),
@@ -76,7 +79,8 @@ const pair = (over: Partial<Load> = {}) => load({
 beforeEach(() => {
   vi.clearAllMocks()
   loads.mockReturnValue([])
-  auditLog.mockReturnValue([])
+  sessionAudit.mockReturnValue([])
+  listAuditLogsFor.mockResolvedValue([])
   /*
    * The page now opens on Batory shipments only, and almost every fixture below is some
    * other customer — several deliberately so, to prove the non-Batory ladder. Turning the
@@ -264,13 +268,13 @@ describe('ApptsPage', () => {
     expect(screen.getByText('Open only (1)')).toBeTruthy()
   })
 
-  it('opens a booking history row from the audit log', () => {
+  it('fetches a load\'s audit trail only when its history row is opened', async () => {
     const booked = load({
       id: 'l9', aljexId: 'HIST',
       stops: [stop({ id: 'p', apptType: 'exact', appt: fromDateTimeInput('2099-01-01T09:30') })],
     })
     loads.mockReturnValue([booked])
-    auditLog.mockReturnValue([{
+    listAuditLogsFor.mockResolvedValue([{
       id: 'a1', entityType: 'Load', entityId: 'l9', action: 'update', user: 'ryne@bcatcorp.com',
       createdAt: '2026-08-28T15:00:00.000Z',
       changes: { stops: {
@@ -279,11 +283,13 @@ describe('ApptsPage', () => {
       } },
     }])
     render(<ApptsPage />)
+    expect(listAuditLogsFor).not.toHaveBeenCalled()
     fireEvent.click(screen.getByLabelText('Show appointment history for HIST'))
-    const hist = screen.getByTestId('appt-history')
+    expect(listAuditLogsFor).toHaveBeenCalledWith([{ entityType: 'Load', entityId: 'l9' }])
+    const hist = await screen.findByTestId('appt-history')
+    await waitFor(() => expect(hist.textContent).toContain('booked'))
     expect(hist.textContent).toContain('Jan 1, 2099 · NEED')
     expect(hist.textContent).toContain('Jan 1, 2099 · 09:30')
-    expect(hist.textContent).toContain('booked')
     expect(hist.textContent).toContain('ryne@bcatcorp.com')
   })
 

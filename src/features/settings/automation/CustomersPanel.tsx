@@ -16,7 +16,7 @@ export interface CustomersPanelProps {
 }
 
 export function CustomersPanel({ inherited }: CustomersPanelProps) {
-  const { customers, loading, error, saveCustomer } = useDirectory()
+  const { customers, loading, error, saveCustomer } = useDirectory({ locations: false })
   const [search, setSearch] = useState('')
   const [editingId, setEditingId] = useState<string | null>(null)
   const [draft, setDraft] = useState<AutomationPolicyPatch>({})

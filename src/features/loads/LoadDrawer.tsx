@@ -41,7 +41,7 @@ import {
   formatDateShort, apptHasTime, PENDING_LABEL,
 } from '@/lib/date'
 import { toast } from 'sonner'
-import { proConflict } from '@/lib/proConflict'
+import { proConflictAllHistory } from '@/lib/proConflictLookup'
 import { syncLoadRateToShipment } from '@/features/shipments/loadRateSync'
 import { customerDisplayName } from '@/lib/customerResolution'
 import {
@@ -490,15 +490,17 @@ export function LoadDrawer() {
     if (!load || proDraft == null) return
     const next = proDraft.trim()
     if (!next || next === (load.aljexId ?? '').trim()) { setProDraft(null); return }
-    const conflict = proConflict(loads, next, load)
-    if (conflict.kind === 'block') {
-      toast.error(`Pro # ${next} is already used on another load`)
-      return
-    }
     setProSaving(true)
     try {
+      // The store only holds the windowed loads; this also reads every shipment ever numbered
+      // `next` (voided included) and their loads, so a dead Pro # is still seen as claimed.
+      const conflict = await proConflictAllHistory(loads, next, load)
+      if (conflict.kind === 'block') {
+        toast.error(`Pro # ${next} is already used on another load`)
+        return
+      }
       await setLoadPro({ loadId: load.id, pro: next, expectedUpdatedAt: load.updatedAt })
-      await refreshCalendarData()
+      await refreshCalendarData({ from: load.pickupAppt.slice(0, 10), to: load.pickupAppt.slice(0, 10) })
       toast.success(`Pro # is now ${next}`)
       setProDraft(null)
     } catch (err) {

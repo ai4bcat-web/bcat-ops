@@ -8,6 +8,7 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import { listDocumentReviewQueue } from '@/lib/apiClient'
+import { cachedList } from '@/lib/listCache'
 import type { ShipmentDocumentRecord } from '@/types/tms'
 
 const POLL_MS = 60_000
@@ -32,9 +33,11 @@ export function useDocumentReviewQueue(opts?: { enabled?: boolean }): DocumentRe
   // Non-async on purpose: `react-hooks/set-state-in-effect` cannot see through an
   // `async` function, so every state write lives in an explicit promise chain — the
   // same shape `useOpenIncidents` uses.
-  const load = useCallback(() => {
+  // The shell badge and the bell each mount this hook: `cachedList` makes the two copies one
+  // request per 30 s. A manual refresh bypasses it.
+  const load = useCallback((force = false) => {
     if (!enabled) return Promise.resolve()
-    return listDocumentReviewQueue()
+    return cachedList('board:documentReview', listDocumentReviewQueue, { ttlMs: 30_000, force })
       .then((rows) => { setDocuments(rows); setError(null) })
       .catch((err: unknown) => { setError(err instanceof Error ? err.message : 'Document review failed to load') })
       .finally(() => setLoading(false))
@@ -47,12 +50,12 @@ export function useDocumentReviewQueue(opts?: { enabled?: boolean }): DocumentRe
       if (document.visibilityState !== 'visible') return
       void load()
     }
-    load()
+    void load()
     const t = setInterval(() => { if (alive) tick() }, POLL_MS)
     return () => { alive = false; clearInterval(t) }
   }, [enabled, load])
 
-  const refresh = useCallback(async () => { setLoading(true); await load() }, [load])
+  const refresh = useCallback(async () => { setLoading(true); await load(true) }, [load])
 
   return { documents, pendingCount: documents.length, loading, error, refresh }
 }

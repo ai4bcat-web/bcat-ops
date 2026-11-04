@@ -15,12 +15,28 @@ import { TmsButton, TmsCard } from '@/features/tms/kit'
 import { RepPicker } from '@/components/RepPicker'
 import { listAljexCodes, reassignShipmentsByRepCode, setAljexCodeMap } from '@/lib/apiClient'
 import { errorMessage } from '@/lib/utils/errorMessage'
+import { useOnVisible } from '@/hooks/useOnVisible'
 import type { AljexCodeKind, AljexCodeSummary } from '@/types/tms'
 
 const keyOf = (c: Pick<AljexCodeSummary, 'kind' | 'code'>) => `${c.kind}:${c.code}`
 const when = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString() : '—')
 
+/**
+ * The Lambda counts every code across all shipments (seconds), so the card loads only once it
+ * scrolls near the viewport (PERF R6) and shows the same loading card until then.
+ */
 export function AljexCodeMapCard() {
+  const [ref, visible] = useOnVisible('200px')
+  return (
+    <div ref={ref}>
+      {visible
+        ? <AljexCodeMapBody />
+        : <TmsCard title="Aljex code mapping"><Loader2 size={14} /> Loading codes…</TmsCard>}
+    </div>
+  )
+}
+
+function AljexCodeMapBody() {
   const [codes, setCodes] = useState<AljexCodeSummary[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [draft, setDraft] = useState<Record<string, string>>({})

@@ -46,7 +46,7 @@ import { requiresApptProofs } from '@/lib/apptQueue'
 import { effectiveCustomerStatus } from '@/lib/customerCredit'
 import { UNRESOLVED_CUSTOMER_LABEL } from '@/lib/customerResolution'
 import { locationInputForStop, matchStopLocation } from '@/lib/locationAutoSave'
-import { proConflict } from '@/lib/proConflict'
+import { proConflictAllHistory } from '@/lib/proConflictLookup'
 import { loadSchemaFor, type LoadFormValues } from '@/lib/schemas'
 import { sendApptNotices } from '@/lib/sendApptNotices'
 import { withDerivedLegacy } from '@/lib/stops'
@@ -431,7 +431,7 @@ export function NewShipmentDialog({ open, prefill, defaultMode = 'FTL', onClose,
     }
     const typedPro = pro.trim()
     if (typedPro) {
-      const conflict = proConflict(allLoads, typedPro)
+      const conflict = await proConflictAllHistory(allLoads, typedPro)
       if (conflict.kind === 'block') {
         setError(`Pro # ${typedPro} is already used on another load. A Pro # is never reissued.`)
         return

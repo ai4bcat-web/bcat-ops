@@ -6,6 +6,7 @@
  * that re-runs them over every rule-tagged row. Owner and ADMIN only — the server
  * enforces the same thing from the token, this page just refuses to waste the trip.
  */
+import { findShipment } from '@/lib/shipmentLookup'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ChevronDown, ChevronUp, GripVertical, Plus, X } from 'lucide-react'
 import {
@@ -25,7 +26,6 @@ import {
   listCustomers,
   listOwnershipDivisions,
   listOwnershipRules,
-  listShipments,
   retagShipments,
   saveOwnershipDivision,
   saveOwnershipRules,
@@ -542,10 +542,7 @@ export function DivisionsPage() {
     setProbeError(null)
     setProbeResult(null)
     try {
-      const shipments = await listShipments()
-      const match = shipments.find(
-        (s) => s.id === typed || (s.number ?? '').toLowerCase() === typed.toLowerCase(),
-      )
+      const match = await findShipment(typed, true)
       if (!match) {
         setProbeError(`No shipment matches "${typed}".`)
         return

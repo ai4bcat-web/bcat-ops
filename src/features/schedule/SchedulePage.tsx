@@ -3,7 +3,7 @@ import { Copy, Check, ChevronLeft, ChevronRight, MessageSquare } from 'lucide-re
 import { TmsEmptyState } from '@/features/tms/kit/TmsEmptyState'
 import { TmsScrollPage } from '@/features/tms/kit/TmsScrollPage'
 import { Avatar } from '@/components/ui/avatar'
-import { useLoads } from '@/hooks/useLoads'
+import { useLoads, useEnsureLoadRange } from '@/hooks/useLoads'
 import { useDrivers } from '@/hooks/useDrivers'
 import { chicagoDateStr, addDays, apptTimeLabel } from '@/lib/date'
 import { getColor } from '@/lib/driverColors'
@@ -172,6 +172,7 @@ export function SchedulePage() {
   const { loads } = useLoads()
   const { drivers } = useDrivers()
   const [dateStr, setDateStr] = useState(todayStr)
+  useEnsureLoadRange(dateStr, dateStr)
 
   const activeDrivers = drivers.filter((d) => d.active)
 

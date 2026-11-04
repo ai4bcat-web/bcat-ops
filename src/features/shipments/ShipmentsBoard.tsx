@@ -42,8 +42,8 @@ import {
   deleteShipmentColumnTemplate,
   duplicateShipment,
   getTmsSettings,
-  listOrders,
   listShipmentColumnTemplates,
+  listShipmentsByNumber,
   saveShipmentColumnTemplate,
   setShipmentStatus,
   tenderRespond,
@@ -53,6 +53,7 @@ import { checkCallState } from '@/lib/checkCalls'
 import { customerDisplayName, isCustomerUnresolved } from '@/lib/customerResolution'
 import { displayName } from '@/lib/roles'
 import { inShipmentList, parseShipmentList, shipmentListCounts, type ShipmentList } from '@/lib/shipmentLists'
+import { currentMonth, monthsCovering } from '@/lib/shipmentWindows'
 import { SEED_DIVISIONS } from '@/lib/ownership'
 import { cn } from '@/lib/utils'
 import { ShipmentDrawer } from './components/ShipmentDrawer'
@@ -72,7 +73,26 @@ import {
   visibleColumns,
   type ShipmentRow,
 } from './shipmentViews'
-import type { BatchShipmentTask, CustomerRecord, LocationRecord, OrderRecord, ShipmentColumnTemplateRecord, TmsSettings, UserProfileRecord } from '@/types/tms'
+import type { BatchShipmentTask, CustomerRecord, LocationRecord, ShipmentColumnTemplateRecord, TmsSettings, UserProfileRecord } from '@/types/tms'
+
+type Period = { key: 'this' | 'last' | 'last3' } | { key: 'month'; month: string }
+
+/** An exact PRO or reference-sized token: shorter text is a filter, not a lookup. */
+const PRO_PATTERN = /^[A-Za-z0-9-]{5,}$/
+
+/** The month `n` before (negative) or after (positive) `month`, 'YYYY-MM'. */
+function shiftMonth(month: string, n: number): string {
+  const span = monthsCovering(month, month, Math.abs(n))
+  return n < 0 ? span[0] : span[span.length - 1]
+}
+
+/** The pickup months a period names, oldest first. */
+function periodMonths(period: Period, thisMonth: string): string[] {
+  if (period.key === 'month') return [period.month]
+  if (period.key === 'last') return [shiftMonth(thisMonth, -1)]
+  if (period.key === 'last3') return monthsCovering(shiftMonth(thisMonth, -2), thisMonth, 0)
+  return [thisMonth]
+}
 
 const MAPS_KEY = (import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string | undefined) ?? ''
 const MAPS_MAP_ID = (import.meta.env.VITE_GOOGLE_MAPS_MAP_ID as string | undefined) ?? undefined
@@ -229,12 +249,17 @@ function toneRows(): BoardToneKey[] {
 export function ShipmentsBoard() {
   const { isAdmin, isOwner, user } = useAuth()
   const email = user?.email ?? ''
-  const { shipments: rawRows, loading, error, refresh: refreshShipments } = useShipments()
+  const { shipments: workingRows, loading: workingLoading, partial: workingPartial, error: workingError, refresh: refreshWorking } = useShipments({ kind: 'working' })
   const { customers, locations } = useDirectory()
   const staff = useStaff(email)
   const [params] = useSearchParams()
   const list = parseShipmentList(params.get('list'))
-  const [orders, setOrders] = useState<OrderRecord[]>([])
+  const [period, setPeriod] = useState<Period>({ key: 'this' })
+  const [thisMonth] = useState(() => currentMonth(new Date()))
+  const [reports, setReports] = useState<Record<'left' | 'right', PaneReport>>({ left: { voided: false, query: '' }, right: { voided: false, query: '' } })
+  const report = useCallback((pane: 'left' | 'right', next: PaneReport) => {
+    setReports((prev) => (prev[pane].voided === next.voided && prev[pane].query === next.query ? prev : { ...prev, [pane]: next }))
+  }, [])
   const [columnTemplates, setColumnTemplates] = useState<ShipmentColumnTemplateRecord[]>([])
   const [settings, setSettings] = useState<TmsSettings | null>(null)
   const [split, setSplit] = useState(false)
@@ -247,20 +272,37 @@ export function ShipmentsBoard() {
     return () => { cancelled = true }
   }, [])
 
-  // Fetch the order layer: the batch release action needs order ids and CAS tokens,
-  // and the Mass Release column and the Active/All split need to know whether a row has
-  // already been released. A refresh re-reads it so a released row leaves Active.
-  const loadOrders = useCallback(
-    () => listOrders()
-      .then((rows) => setOrders(rows))
-      .catch(() => { /* already surfaced by useShipments */ }),
-    [],
-  )
-  useEffect(() => { void loadOrders() }, [loadOrders])
+  const visiblePanes: Array<'left' | 'right'> = split ? ['left', 'right'] : ['left']
+  const wantsAllList = visiblePanes.some((pane) => (pane === 'left' ? list : rightList) === 'all')
+  const wantsVoided = visiblePanes.some((pane) => reports[pane].voided)
+  const needWindow = wantsAllList || wantsVoided
+  const months = useMemo(() => periodMonths(period, thisMonth), [period, thisMonth])
+  const { shipments: windowRows, loading: windowLoading, partial: windowPartial, error: windowError, refresh: refreshWindow } = useShipments({
+    kind: 'window', months: needWindow ? months : [], includeVoided: wantsVoided,
+  })
+
+  // An exact PRO typed on an All pane adds that row from the number index, voided or
+  // not; the status facet still decides whether it shows. Debounced: one read per pause.
+  const typedPro = wantsAllList ? visiblePanes.map((pane) => reports[pane].query.trim()).find((q) => PRO_PATTERN.test(q)) ?? '' : ''
+  const [proIds, setProIds] = useState<{ query: string; ids: string[] }>({ query: '', ids: [] })
+  useEffect(() => {
+    if (!typedPro) return undefined
+    let live = true
+    const timer = setTimeout(() => {
+      listShipmentsByNumber(typedPro)
+        .then((found) => { if (live) setProIds({ query: typedPro, ids: found.map((s) => s.id) }) })
+        .catch(() => { /* the typed search still filters the rows already loaded */ })
+    }, 400)
+    return () => { live = false; clearTimeout(timer) }
+  }, [typedPro])
+  const { shipments: proRows, refresh: refreshPro } = useShipments({ kind: 'ids', ids: typedPro && proIds.query === typedPro ? proIds.ids : [] })
+  const loading = workingLoading || windowLoading
+  const partial = workingPartial || windowPartial
+  const error = workingError ?? windowError
 
   const refresh = useCallback(async () => {
-    await Promise.all([refreshShipments(), loadOrders()])
-  }, [refreshShipments, loadOrders])
+    await Promise.all([refreshWorking(), refreshWindow(), refreshPro()])
+  }, [refreshWorking, refreshWindow, refreshPro])
 
   const loadTemplates = useCallback(() => {
     listShipmentColumnTemplates()
@@ -270,21 +312,13 @@ export function ShipmentsBoard() {
 
   useEffect(() => { loadTemplates() }, [loadTemplates])
 
+  // The shell's cached working set, plus the picked period's pickup months when a pane
+  // lists All (or asks for VOIDED), plus an exact PRO match. One row per shipment id.
   const allRows = useMemo<ShipmentRow[]>(() => {
-    const orderByShipment: Record<string, OrderRecord> = {}
-    for (const o of orders) {
-      if (!o.shipmentId) continue
-      orderByShipment[o.shipmentId] = o
-    }
-    return rawRows.map((r) => {
-      const o = orderByShipment[r.id]
-      return {
-        ...r,
-        readyToInvoiceAt: o?.readyToInvoiceAt ?? (r as ShipmentRow).readyToInvoiceAt ?? null,
-        invoiceId: o?.invoiceId ?? (r as ShipmentRow).invoiceId ?? null,
-      } as ShipmentRow
-    })
-  }, [rawRows, orders])
+    const byId = new Map<string, ShipmentRow>()
+    for (const set of [workingRows, windowRows, proRows]) for (const r of set) byId.set(r.id, r as ShipmentRow)
+    return [...byId.values()]
+  }, [workingRows, windowRows, proRows])
 
   const counts = useMemo(() => shipmentListCounts(allRows), [allRows])
 
@@ -296,7 +330,26 @@ export function ShipmentsBoard() {
         <div className="flex items-center gap-3">
           <Truck size={18} />
           <span className="font-semibold">Shipments</span>
-          <ShipmentsSectionTabs current={list} activeCount={counts.active} allCount={counts.all} />
+          <ShipmentsSectionTabs current={list} activeCount={counts.active} allCount={needWindow && !windowLoading ? counts.all : undefined} />
+          {partial && <TmsBadge tone="gray">Adding delivered loads…</TmsBadge>}
+          {needWindow && (
+            <div className="flex items-center gap-1" role="group" aria-label="Period">
+              <TmsButton size="sm" variant="ghost" aria-label="Previous month" onClick={() => setPeriod({ key: 'month', month: shiftMonth(months[0], -1) })}>‹</TmsButton>
+              <TmsSegmentedTabs
+                aria-label="Period"
+                size="sm"
+                active={period.key}
+                onSelect={(key) => setPeriod(key === 'month' ? { key: 'month', month: months[0] } : { key: key as 'this' | 'last' | 'last3' })}
+                tabs={[
+                  { key: 'this', label: 'This month' },
+                  { key: 'last', label: 'Last month' },
+                  { key: 'last3', label: 'Last 3 months' },
+                  ...(period.key === 'month' ? [{ key: 'month', label: months[0] }] : []),
+                ]}
+              />
+              <TmsButton size="sm" variant="ghost" aria-label="Next month" disabled={months[months.length - 1] >= thisMonth} onClick={() => setPeriod({ key: 'month', month: shiftMonth(months[months.length - 1], 1) })}>›</TmsButton>
+            </div>
+          )}
         </div>
         {mayAdmin && (
           <TmsButton size="sm" variant="secondary" onClick={() => setCreateOpen(true)}>
@@ -325,6 +378,7 @@ export function ShipmentsBoard() {
           currentUser={email}
           email={email}
           onSplit={() => setSplit((s) => !s)}
+          onReport={report}
         />
         {split && (
           <BoardPane
@@ -347,6 +401,7 @@ export function ShipmentsBoard() {
             currentUser={email}
             email={email}
             onSplit={() => setSplit((s) => !s)}
+            onReport={report}
           />
         )}
       </div>
@@ -364,6 +419,11 @@ interface StaffSnapshot {
   staff: UserProfileRecord[]
   me: UserProfileRecord | null
   nameOf: (id: string | null | undefined) => string
+}
+
+interface PaneReport {
+  voided: boolean
+  query: string
 }
 
 interface BoardPaneProps {
@@ -386,6 +446,7 @@ interface BoardPaneProps {
   currentUser: string
   email: string
   onSplit: () => void
+  onReport?: (pane: 'left' | 'right', report: PaneReport) => void
 }
 
 function BoardPane({
@@ -405,6 +466,7 @@ function BoardPane({
   currentUser,
   email,
   onSplit,
+  onReport,
 }: BoardPaneProps) {
   const { staff: staffProfiles, nameOf: staffNameOf } = staff
   const divisions = useOwnershipDivisions().divisions ?? SEED_DIVISIONS
@@ -467,6 +529,7 @@ function BoardPane({
   // selection and the batch. The list scope applies before the filters.
   const {
     rows: filteredRows,
+    filters,
     panelProps,
   } = useBoardFilters({
     rows: listRows,
@@ -476,6 +539,11 @@ function BoardPane({
     query,
     onQueryChange: setQuery,
   })
+
+  // The page decides what to fetch, so it hears what this pane is asking for: the
+  // VOIDED facet widens the query, and a typed PRO adds that exact row (R4, §4.3).
+  const wantsVoided = filters.statuses?.includes('VOIDED') ?? false
+  useEffect(() => { onReport?.(pane, { voided: wantsVoided, query }) }, [onReport, pane, wantsVoided, query])
 
   // Countdown refetch.
   const [secondsToRefresh, setSecondsToRefresh] = useState(REFRESH_SECONDS)

@@ -241,7 +241,7 @@ export function QuoteDetail() {
   const user = useAuthUser()
   const quoteId = id ?? null
   const { quote, loading, error, refresh } = useQuote(quoteId)
-  const { customers } = useDirectory()
+  const { customers } = useDirectory({ locations: false })
   // `/tms/rates/new?customerId=…` — the New quote button on a customer's profile hands
   // the customer over so the editor opens on them instead of making the operator find
   // them again. Only a blank quote takes it; a saved one has a customer of its own. The

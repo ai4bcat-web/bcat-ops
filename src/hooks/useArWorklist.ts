@@ -4,9 +4,9 @@
  * Each tab is one sparse-index read — `listOrdersByArStatus` — joined to the shipment
  * it belongs to, because an order alone cannot say which shipment number it is, when it
  * delivered or whether the customer ever got it. The shipments come from one
- * `listShipments()` indexed by id rather than a `getShipment` per row: the three tabs
- * are bounded working sets, but they are still dozens of rows, and dozens of round
- * trips to colour a list is the pattern this codebase keeps paying for elsewhere.
+ * `loadWorklistShipments` by id rather than a `getShipment` per row or a full
+ * `listShipments()`: the three tabs are bounded working sets, but they are still dozens of rows,
+ * and dozens of round trips to colour a list is the pattern this codebase keeps paying for elsewhere.
  *
  * `reasons` here is the cheap, cached-field verdict — what the board can say without
  * opening five tables. The authoritative refusal list is the server's `invoiceReadiness`,
@@ -16,7 +16,8 @@
  * subscriptions, and a document review three desks away moves a row between tabs.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { listOrdersByArStatus, listShipments } from '@/lib/apiClient'
+import { listOrdersByArStatus } from '@/lib/apiClient'
+import { loadWorklistShipments } from '@/lib/worklistShipments'
 import { customerDisplayName, isCustomerUnresolved } from '@/lib/customerResolution'
 import { isShipmentVoided } from '@/lib/shipmentVoid'
 import type { OrderRecord, ShipmentRecord } from '@/types/tms'
@@ -69,8 +70,9 @@ export function useArWorklist(tab: ArWorklistTab): ArWorklist {
   // Non-async on purpose: `react-hooks/set-state-in-effect` cannot see through an
   // `async` function, so every state write lives in an explicit promise chain.
   const load = useCallback(() => {
-    return Promise.all([listOrdersByArStatus(tab), listShipments()])
-      .then(([orderRows, shipmentRows]) => {
+    return listOrdersByArStatus(tab)
+      .then(async (orderRows) => {
+        const shipmentRows = await loadWorklistShipments(orderRows.map((o) => o.shipmentId))
         setOrders(orderRows)
         setShipments(shipmentRows)
         setError(null)

@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { useAppStore } from '@/store/useAppStore'
 import { isLoadVoided } from '@/lib/shipmentVoid'
+import { useEnsureLoadRange } from './useLoads'
 import type { Load } from '@/types'
 
 export interface MonthBucket {
@@ -51,6 +52,7 @@ export function useMonthlyMetrics(monthsBack = 6): MonthlyMetrics {
   const loads     = useMemo(() => allLoads.filter((l) => !isLoadVoided(l)), [allLoads])
   const drivers   = useAppStore((s) => s.drivers)
   const equipment = useAppStore((s) => s.equipment)
+  useEnsureLoadRange(`${monthKey(new Date(new Date().getFullYear(), new Date().getMonth() - monthsBack, 1))}-01`, `${monthKey(new Date())}-01`)
 
   return useMemo(() => {
     const now = new Date()

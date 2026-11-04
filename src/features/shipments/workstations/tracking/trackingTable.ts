@@ -41,6 +41,20 @@ export function lifecycleOf(row: ShipmentRow): TrackingLifecycle {
   return 'active'
 }
 
+/**
+ * The rows the Tracking desk lists for a lifecycle: a sent rate con (or any, with `includeUnsent`)
+ * in that lifecycle. A pure filter, so the rows it keeps from the working set equal the rows it
+ * would keep from every shipment ever (the working set holds every non-terminal and every
+ * delivered-awaiting-POD shipment, which is all Active and POD-due can be).
+ */
+export function lifecycleRows(
+  rows: readonly ShipmentRow[],
+  lifecycle: TrackingLifecycle,
+  includeUnsent: boolean,
+): ShipmentRow[] {
+  return rows.filter((r) => (includeUnsent || isRateConSent(r)) && lifecycleOf(r) === lifecycle)
+}
+
 // ── Assignees ────────────────────────────────────────────────────────────────
 
 /** Unassigned first (when any), then people A→Z by the name shown. */

@@ -35,6 +35,7 @@ vi.mock('@/hooks/useFleetProfitability', () => ({
   },
 }))
 vi.mock('@/hooks/useDrivers', () => ({ useDrivers: () => ({ drivers: [] }) }))
+vi.mock('@/hooks/useLoads', () => ({ useEnsureLoadRange: () => true }))
 vi.mock('@/hooks/useVendorPayables', () => ({
   useVendorPayables: () => ({ items: mocks.payables, loading: false, error: null, getAttachmentUrl: () => Promise.resolve('https://x/y.png') }),
 }))

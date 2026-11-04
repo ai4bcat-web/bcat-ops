@@ -411,7 +411,14 @@ function runCommand(cmd: MockCommand): unknown {
     case 'Update':
       return { Attributes: marshall(applyUpdate(input as unknown as UpdateSpec), { removeUndefinedValues: true }) }
     case 'Scan': {
-      const items = [...table(String(input.TableName)).values()]
+      const scan = input as { Segment?: number; TotalSegments?: number; ProjectionExpression?: string; ExpressionAttributeNames?: Record<string, string> }
+      let items = [...table(String(input.TableName)).values()]
+      // Segments partition the table: every row lands in exactly one.
+      if (scan.TotalSegments) items = items.filter((_, i) => i % scan.TotalSegments! === scan.Segment)
+      if (scan.ProjectionExpression) {
+        const keep = scan.ProjectionExpression.split(',').map((p) => p.trim()).map((p) => scan.ExpressionAttributeNames?.[p] ?? p)
+        items = items.map((row) => Object.fromEntries(keep.filter((k) => k in row).map((k) => [k, row[k]])))
+      }
       return { Items: items.map((i) => marshall(i, { removeUndefinedValues: true })) }
     }
     case 'Transact': {
@@ -4643,7 +4650,7 @@ describe('READY_TO_INVOICE', () => {
         salesRepId: string | null; legacyImported: boolean
       }
       expect(result).toMatchObject({ orderId: ids.orderId, arStatus: 'DOCS_NEEDED', salesRepId: null, legacyImported: false })
-      expect((result as { pendingDocReviewCount: number }).pendingDocReviewCount).toBe(0)
+      expect((result as unknown as { pendingDocReviewCount: number }).pendingDocReviewCount).toBe(0)
       expect(result.releaseGate.ok).toBe(true)
       expect(result.extras.map((e) => e.code)).toEqual(['SALES_REP_MISSING', 'REV_DIVISION_MISSING', 'NO_CUSTOMER_CHARGES'])
       expect(JSON.stringify(table(TABLES.order).get(ids.orderId))).toBe(orderBefore)

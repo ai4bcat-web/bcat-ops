@@ -17,6 +17,7 @@ vi.mock('./useTrucks', () => ({
   }),
 }))
 vi.mock('./useLoads', () => ({
+  useEnsureLoadRange: () => true,
   useLoads: () => ({
     loads: [
       { id: 'l1', truckId: null, deliveryDriverId: 'd1', rate: 200000, deliveryAppt: '2026-09-29' },

@@ -72,7 +72,6 @@ const {
   archiveShipmentView,
   saveShipmentColumnTemplate,
   deleteShipmentColumnTemplate,
-  listOrders,
   listShipmentColumnTemplates,
   saveBlob,
   getTmsSettings,
@@ -96,7 +95,6 @@ const {
   archiveShipmentView: vi.fn(),
   saveShipmentColumnTemplate: vi.fn(),
   deleteShipmentColumnTemplate: vi.fn(),
-  listOrders: vi.fn(async () => []),
   listShipmentColumnTemplates: vi.fn(async () => []),
   saveBlob: vi.fn(),
   getTmsSettings: vi.fn(async () => null),
@@ -115,9 +113,19 @@ vi.mock('@/hooks/useDirectory', () => ({
 
 const refresh = vi.fn()
 let __shipments: ShipmentRow[] = []
-vi.mock('@/hooks/useShipments', () => ({
-  useShipments: () => ({ shipments: __shipments, loading: false, error: null, refresh }),
-}))
+const __views: unknown[] = []
+vi.mock('@/hooks/useShipments', async () => {
+  const React = await import('react')
+  return {
+    // Holds its rows in state like the real hook: a refresh re-reads what the backend now says.
+    useShipments: (view: unknown) => {
+      __views.push(view)
+      const [rows, setRows] = React.useState(__shipments)
+      const refreshRows = React.useCallback(async () => { refresh(); setRows(__shipments) }, [])
+      return { shipments: rows, loading: false, partial: false, error: null, refresh: refreshRows }
+    },
+  }
+})
 
 let __loads: Load[] = []
 vi.mock('@/hooks/useLoads', () => ({
@@ -151,8 +159,8 @@ vi.mock('@/features/tms/useOwnershipDivisions', () => ({
 vi.mock('./intake/useIntakeLoads', () => ({ useOpenIntakeCount: () => 0 }))
 
 vi.mock('@/lib/apiClient', () => ({
-  listOrders,
   listShipmentColumnTemplates,
+  listShipmentsByNumber: async () => [],
   saveShipmentView,
   archiveShipmentView,
   saveShipmentColumnTemplate,
@@ -194,10 +202,29 @@ function renderBoard(path = '/tms/shipments', initialShipments: ShipmentRow[] = 
 describe('ShipmentsBoard', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    __views.length = 0
     auth.isAdmin = true
     auth.isOwner = false
   })
 
+
+  it('reads only the working set until the VOIDED facet or the All list asks for a month window', async () => {
+    renderBoard('/tms/shipments', [row('S001', { status: 'OPEN' }), row('S002', { status: 'VOIDED' as ShipmentRow['status'], voidedAt: '2026-01-02T00:00:00Z' })])
+    await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
+    const windows = () => __views.filter((v) => (v as { kind: string }).kind === 'window') as Array<{ months: string[]; includeVoided?: boolean }>
+    expect(windows().every((w) => w.months.length === 0)).toBe(true)
+
+    fireEvent.click(screen.getByRole('checkbox', { name: /Voided/i }))
+    await waitFor(() => expect(windows().some((w) => w.months.length > 0 && w.includeVoided === true)).toBe(true))
+  })
+
+  it('the All list asks for the period window without voided rows', async () => {
+    renderBoard('/tms/shipments?list=all', [row('S001')])
+    await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
+    const asked = (__views as Array<{ kind: string; months?: string[]; includeVoided?: boolean }>).filter((v) => v.kind === 'window' && v.months!.length > 0)
+    expect(asked.length).toBeGreaterThan(0)
+    expect(asked.every((w) => w.months!.length === 1 && !w.includeVoided)).toBe(true)
+  })
 
   it('filters rows when a status is checked and keeps counts from the unfiltered set', async () => {
     const shipments = [
@@ -333,10 +360,6 @@ describe('ShipmentsBoard', () => {
     })
 
     const shipments = [deliveredRow('S001'), deliveredRow('S002')]
-    vi.mocked(listOrders).mockResolvedValue([
-      { id: 'ord-1', shipmentId: 'S001', updatedAt: '2026-01-01T00:00:00Z' },
-      { id: 'ord-2', shipmentId: 'S002', updatedAt: '2026-01-01T00:00:00Z' },
-    ] as unknown as OrderRecord[])
 
     renderBoard('/tms/shipments', shipments)
     await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
@@ -392,7 +415,6 @@ describe('ShipmentsBoard', () => {
     batchShipmentTask.mockResolvedValueOnce({
       results: [{ shipmentId: 'S001', number: 'S-a', ok: false, message: 'Delivered 2026-10-14: that pay week has closed.' }],
     })
-    vi.mocked(listOrders).mockResolvedValue([] as unknown as OrderRecord[])
     renderBoard('/tms/shipments', [row('S001', { assignmentType: 'OWN_ASSET', driverId: null })])
     await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
     fireEvent.click(screen.getByRole('checkbox', { name: /Select all rows/i }))
@@ -816,16 +838,11 @@ describe('ShipmentsBoard', () => {
     })
 
     it('releasing a row removes it from Active on refresh', async () => {
-      vi.mocked(listOrders).mockResolvedValueOnce([
-        { id: 'ord-1', shipmentId: 'S001', updatedAt: '2026-01-01T00:00:00Z' },
-      ] as unknown as OrderRecord[])
       vi.mocked(batchShipmentTask).mockResolvedValue({ results: [{ shipmentId: 'S001', number: 'S001', ok: true, message: null }] })
       renderBoard('/tms/shipments', [unreleased])
       await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
 
-      vi.mocked(listOrders).mockResolvedValue([
-        { id: 'ord-1', shipmentId: 'S001', readyToInvoiceAt: '2026-02-01T00:00:00Z', updatedAt: '2026-02-01T00:00:00Z' },
-      ] as unknown as OrderRecord[])
+      __shipments = [{ ...unreleased, readyToInvoiceAt: '2026-02-01T00:00:00Z' }]
       fireEvent.click(screen.getByRole('checkbox', { name: /Release S001/i }))
       fireEvent.click(screen.getByRole('button', { name: /Batch task/i }))
       const dialog = screen.getByRole('dialog', { name: /Batch task/i })

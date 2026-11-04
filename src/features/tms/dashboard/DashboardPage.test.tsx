@@ -53,11 +53,18 @@ const samples: LaneRateSampleRecord[] = [
   },
 ]
 
+// Window and working-set reads answer the same fixture; the page dedupes by id.
+vi.mock('@/lib/boardData', () => ({
+  loadBoardBundle: vi.fn(async () => ({
+    shipments,
+    orders,
+    loads: [{ id: 'load-s1', shipmentId: 's1', status: 'DELIVERED' }],
+    loadCarriers: [],
+    loadFinancials: [],
+  })),
+}))
+
 vi.mock('@/lib/apiClient', () => ({
-  listShipments: vi.fn(async () => shipments),
-  listOrders: vi.fn(async () => orders),
-  listLoadSummaries: vi.fn(async () => [{ id: 'load-s1', shipmentId: 's1', status: 'DELIVERED' }]),
-  listLoadCarriers: vi.fn(async () => []),
   listOpenInvoices: vi.fn(async () => []),
   listOpenBills: vi.fn(async () => []),
   listUserProfiles: vi.fn(async () => [

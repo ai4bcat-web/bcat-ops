@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useCallback, useSyncExternalStore } from 'react'
 import { toast } from 'sonner'
 import {
   listComplianceDocumentsByStatus,
@@ -11,12 +11,64 @@ import {
   sendOnboardingEmail,
 } from '@/lib/complianceClient'
 import { useAuth } from '@/hooks/useAuth'
+import { startVisiblePoll } from '@/lib/visiblePoll'
 import { approveDocument as approveDoc, rejectDocument as rejectDoc } from '@/lib/documentReview'
 import { driverPatchFromApplication } from '@/lib/applicationToDriver'
 import { useAppStore } from '@/store/useAppStore'
 import type { ComplianceDocument, DriverApplicationRecord } from '@/types'
 
 const POLL_MS = 60_000
+
+// One queue per tab: the shell badge and the Users overview (and the compliance overview)
+// share one fetch and one interval, and the interval pauses while the tab is hidden.
+interface QueueState {
+  documents: ComplianceDocument[]
+  applications: DriverApplicationRecord[]
+  loading: boolean
+}
+let queue: QueueState = { documents: [], applications: [], loading: true }
+const listeners = new Set<() => void>()
+let inflight: Promise<void> | null = null
+let stopPoll: (() => void) | null = null
+
+function publish(patch: Partial<QueueState>) {
+  queue = { ...queue, ...patch }
+  for (const l of listeners) l()
+}
+
+function refreshQueue(): Promise<void> {
+  inflight ??= Promise.all([listComplianceDocumentsByStatus('PENDING_REVIEW'), listApplicationsByStatus('SUBMITTED')])
+    .then(([documents, applications]) => { publish({ documents, applications }) })
+    .catch((err: unknown) => { console.error('[useReviewQueue] fetch error', err) })
+    .finally(() => { inflight = null; publish({ loading: false }) })
+  return inflight
+}
+
+function subscribe(listener: () => void) {
+  listeners.add(listener)
+  if (listeners.size === 1) {
+    void refreshQueue()
+    stopPoll = startVisiblePoll(() => void refreshQueue(), POLL_MS)
+  }
+  return () => {
+    listeners.delete(listener)
+    if (listeners.size === 0) {
+      stopPoll?.()
+      stopPoll = null
+    }
+  }
+}
+
+const getSnapshot = () => queue
+
+/** Test seam: forget the shared queue between cases. */
+export function resetReviewQueueForTests() {
+  stopPoll?.()
+  stopPoll = null
+  listeners.clear()
+  inflight = null
+  queue = { documents: [], applications: [], loading: true }
+}
 
 export interface ReviewQueueItem {
   kind: 'document' | 'application'
@@ -39,27 +91,12 @@ export function useReviewQueue() {
   const { user } = useAuth()
   const drivers = useAppStore((s) => s.drivers)
   const updateDriverInStore = useAppStore((s) => s.updateDriver)
-  const [documents, setDocuments] = useState<ComplianceDocument[]>([])
-  const [applications, setApplications] = useState<DriverApplicationRecord[]>([])
-  const [loading, setLoading] = useState(true)
-
+  const { documents, applications, loading } = useSyncExternalStore(subscribe, getSnapshot)
+  const load = refreshQueue
   const driverName = useCallback(
     (id: string) => drivers.find((d) => d.id === id)?.name ?? id,
     [drivers],
   )
-
-  const load = useCallback(() =>
-    Promise.all([listComplianceDocumentsByStatus('PENDING_REVIEW'), listApplicationsByStatus('SUBMITTED')])
-      .then(([docs, apps]) => { setDocuments(docs); setApplications(apps) })
-      .catch((err: unknown) => { console.error('[useReviewQueue] fetch error', err) })
-      .finally(() => setLoading(false)),
-  [])
-
-  useEffect(() => {
-    void load()
-    const id = setInterval(load, POLL_MS)
-    return () => clearInterval(id)
-  }, [load])
 
   const items: ReviewQueueItem[] = [
     ...applications.map((a) => ({
@@ -111,7 +148,7 @@ export function useReviewQueue() {
   const approveDocument = useCallback(
     async (doc: ComplianceDocument): Promise<ComplianceDocument> => {
       const saved = await approveDoc(doc, user?.email)
-      setDocuments((prev) => prev.filter((d) => d.id !== doc.id))
+      publish({ documents: queue.documents.filter((d) => d.id !== doc.id) })
       if (doc.entityType === 'DRIVER') await maybeCompleteOnboarding(doc.entityId)
       return saved
     },
@@ -121,7 +158,7 @@ export function useReviewQueue() {
   const rejectDocument = useCallback(
     async (doc: ComplianceDocument, reason: string): Promise<ComplianceDocument> => {
       const saved = await rejectDoc(doc, reason, user?.email)
-      setDocuments((prev) => prev.filter((d) => d.id !== doc.id))
+      publish({ documents: queue.documents.filter((d) => d.id !== doc.id) })
       return saved
     },
     [user?.email],
@@ -161,7 +198,7 @@ export function useReviewQueue() {
         user: user?.email ?? 'unknown',
         changes: { applicationId: app.id },
       })
-      setApplications((prev) => prev.filter((a) => a.id !== app.id))
+      publish({ applications: queue.applications.filter((a) => a.id !== app.id) })
       await maybeCompleteOnboarding(app.driverId)
     },
     [maybeCompleteOnboarding, updateDriverInStore, user?.email],
@@ -183,7 +220,7 @@ export function useReviewQueue() {
       // Application decline is terminal — send the gracious "not a fit" email, NOT the
       // document-rejected "please fix and resubmit" one.
       void sendOnboardingEmail({ type: 'declined', driverId: app.driverId, itemLabel: 'Employment application', reason })
-      setApplications((prev) => prev.filter((a) => a.id !== app.id))
+      publish({ applications: queue.applications.filter((a) => a.id !== app.id) })
     },
     [user?.email],
   )

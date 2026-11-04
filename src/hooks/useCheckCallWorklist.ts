@@ -11,7 +11,8 @@
  * when the caller is somebody who may open the page.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { listCheckCallWorklist, listLoadCarriersByLoad } from '@/lib/apiClient'
+import { listCheckCallWorklist, listLoadCarriersByLoads } from '@/lib/apiClient'
+import { cachedList } from '@/lib/listCache'
 import { checkCallState, type CheckCallState } from '@/lib/checkCalls'
 import type { Load } from '@/types'
 import type { LoadCarrierRecord } from '@/types/tms'
@@ -38,6 +39,22 @@ export interface CheckCallWorklist {
   refresh: () => Promise<void>
 }
 
+/**
+ * The tracked loads plus each one's ACTIVE assignment. One aliased request reads every load's
+ * assignments (the driver's phone lives on the assignment, not the load), not one request per load.
+ */
+async function fetchCheckCalls(): Promise<{ rows: Load[]; carriers: Record<string, LoadCarrierRecord | null> }> {
+  const rows = await listCheckCallWorklist()
+  const assignments = await listLoadCarriersByLoads(rows.filter((l) => l.activeLoadCarrierId).map((l) => l.id))
+  const carriers: Record<string, LoadCarrierRecord | null> = {}
+  for (const l of rows) {
+    carriers[l.id] = l.activeLoadCarrierId
+      ? (assignments.get(l.id) ?? []).find((c) => c.id === l.activeLoadCarrierId) ?? null
+      : null
+  }
+  return { rows, carriers }
+}
+
 export function useCheckCallWorklist(opts?: { enabled?: boolean; graceMinutes?: number | null }): CheckCallWorklist {
   const enabled = opts?.enabled ?? true
   const graceMinutes = opts?.graceMinutes ?? null
@@ -55,23 +72,16 @@ export function useCheckCallWorklist(opts?: { enabled?: boolean; graceMinutes?: 
   // Non-async on purpose: `react-hooks/set-state-in-effect` cannot see through an
   // `async` function, so every state write lives in an explicit promise chain — the
   // same shape `useDirectory` uses.
-  const load = useCallback(() => {
+  const load = useCallback((force = false) => {
     if (!enabled) return Promise.resolve()
-    return listCheckCallWorklist()
-      // One GetItem-shaped query per tracked load, not per board row: the worklist is
-      // only the loads with a reminder set, and the driver's phone lives on the
-      // assignment rather than the load.
-      .then((rows) => Promise.all(
-        rows.map((l) => (l.activeLoadCarrierId
-          ? listLoadCarriersByLoad(l.id).then((assignments) =>
-            [l.id, assignments.find((c) => c.id === l.activeLoadCarrierId) ?? null] as const)
-          : Promise.resolve([l.id, null] as const))),
-      ).then((pairs) => {
+    // The sidebar badge and the bell each mount this hook: one read per 30 s between them.
+    return cachedList('board:checkCalls', fetchCheckCalls, { ttlMs: 30_000, force })
+      .then(({ rows, carriers: byLoad }) => {
         setLoads(rows)
-        setCarriers(Object.fromEntries(pairs))
+        setCarriers(byLoad)
         setNowMs(Date.now())
         setError(null)
-      }))
+      })
       .catch((err: unknown) => { setError(err instanceof Error ? err.message : 'Check calls failed to load') })
       .finally(() => setLoading(false))
   }, [enabled])
@@ -94,7 +104,7 @@ export function useCheckCallWorklist(opts?: { enabled?: boolean; graceMinutes?: 
     state: checkCallState(l, nowMs, graceMinutes),
     carrier: carriers[l.id] ?? null,
   })), [loads, carriers, graceMinutes, nowMs])
-  const refresh = useCallback(() => { setLoading(true); return load() }, [load])
+  const refresh = useCallback(() => { setLoading(true); return load(true) }, [load])
 
   return {
     rows,

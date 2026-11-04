@@ -1,29 +1,23 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
-import {
-  listCarriers, listCustomers, listDrivers, listLoadCarriers, listLoadFinancials, listLoadSummaries, listOrders, listQuotes,
-  listShipments, listShipmentsByCustomer, listShipmentsByMonth, listShipmentsByStatus, listUserProfiles,
-} from '@/lib/apiClient'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { listCarriers, listCustomers, listDrivers, listQuotes, listUserProfiles } from '@/lib/apiClient'
 import type { LoadBoardSummary } from '@/lib/apiClient'
+import { loadBoardBundle, peekBoardBundle, type BoardBundle, type BoardView } from '@/lib/boardData'
 import type { Driver, Stop } from '@/types'
 import type { PaperworkLocation } from '@/lib/paperworkLocation'
 import type {
   ApStatus, ArStatus, AssignmentType, AuthorityStatus, CarrierRecord, CarrierStatus, ComplianceCheckStatus, CustomerRecord,
   CustomerStatus, InvoiceFrequency, LoadCarrierRecord, LoadFinancialsRecord, LoadWorkflowStatus, OrderRecord, QuoteRecord,
-  RateConStatus, RateType, SafetyRating, ShipmentRecord, ShipmentStatus, SpecialRequirements, UserProfileRecord,
+  RateConStatus, RateType, SafetyRating, ShipmentRecord, SpecialRequirements, UserProfileRecord,
 } from '@/types/tms'
 
 export type { ShipmentRecord }
 
 /**
- * Which slice of the board to load. The status, customer and month views ride their
- * GSIs; `all` scans, which is what the "everything" tab needs and what the ~890
- * backfilled rows cost today.
+ * Which slice of the board to load (the data layer's `BoardView`): `working` is the open
+ * work the shell and every desk read, `window` the pickup months a period names, `ids`
+ * an exact set. `all` scans the whole table and is for exports only.
  */
-export type ShipmentsView =
-  | { kind: 'all' }
-  | { kind: 'status'; status: ShipmentStatus }
-  | { kind: 'customer'; customerId: string }
-  | { kind: 'month'; month: string }
+export type ShipmentsView = BoardView
 
 /**
  * A board row: the shipment, plus the facets that live on its order, its loads and the
@@ -221,21 +215,37 @@ export interface ShipmentListRow extends ShipmentRecord {
   carrierLastLoadAt: string | null
 }
 
-const DEFAULT_VIEW: ShipmentsView = { kind: 'all' }
+const DEFAULT_VIEW: ShipmentsView = { kind: 'working' }
 
-/** The view's one variable, flattened so the effect can depend on a primitive. */
-function viewArg(view: ShipmentsView): string {
-  if (view.kind === 'status') return view.status
-  if (view.kind === 'customer') return view.customerId
-  if (view.kind === 'month') return view.month
-  return ''
+interface Directories {
+  quotes: QuoteRecord[]
+  userProfiles: UserProfileRecord[]
+  customers: CustomerRecord[]
+  carriers: CarrierRecord[]
+  drivers: Driver[]
 }
 
-function fetchShipments(kind: ShipmentsView['kind'], arg: string): Promise<ShipmentRecord[]> {
-  if (kind === 'status') return listShipmentsByStatus(arg as ShipmentStatus)
-  if (kind === 'customer') return listShipmentsByCustomer(arg)
-  if (kind === 'month') return listShipmentsByMonth(arg)
-  return listShipments()
+interface Slot {
+  sig: string
+  bundle: BoardBundle
+  /** True while only the first stage's rows are in (the board shows an "Adding…" chip). */
+  partial: boolean
+  error: string | null
+}
+
+const EMPTY_BUNDLE: BoardBundle = { shipments: [], orders: [], loads: [], loadCarriers: [], loadFinancials: [] }
+const EMPTY_DIRECTORIES: Directories = { quotes: [], userProfiles: [], customers: [], carriers: [], drivers: [] }
+
+/** Everything that decides the query, as one primitive the hooks can depend on. */
+function viewSignature(view: ShipmentsView): string {
+  return JSON.stringify(view)
+}
+
+/** A window of no months, or an id list of none, is an empty board without a request. */
+function isEmptyView(view: ShipmentsView): boolean {
+  if (view.kind === 'ids') return view.ids.length === 0
+  if (view.kind === 'window') return view.months.length === 0
+  return false
 }
 
 /** 'Dallas, TX' -> 'TX'. Anything without a trailing comma-state stays null. */
@@ -293,43 +303,66 @@ function parsePaperworkLocation(raw: unknown): PaperworkLocation | null {
  * did not load" are different answers.
  */
 export function useShipments(view: ShipmentsView = DEFAULT_VIEW) {
-  const [shipments, setShipments] = useState<ShipmentRecord[]>([])
-  const [orders, setOrders] = useState<OrderRecord[]>([])
-  const [loads, setLoads] = useState<LoadBoardSummary[]>([])
-  const [loadCarriers, setLoadCarriers] = useState<LoadCarrierRecord[]>([])
-  const [quotes, setQuotes] = useState<QuoteRecord[]>([])
-  const [loadFinancials, setLoadFinancials] = useState<LoadFinancialsRecord[]>([])
-  const [userProfiles, setUserProfiles] = useState<UserProfileRecord[]>([])
-  // R2 — the two directory lists and the driver roster the column catalog joins in
-  // memory: customer and carrier facts, and names for the load's driver ids.
-  const [customers, setCustomers] = useState<CustomerRecord[]>([])
-  const [carriers, setCarriers] = useState<CarrierRecord[]>([])
-  const [drivers, setDrivers] = useState<Driver[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-
   // Callers rebuild the view object every render; depending on its identity would
-  // refetch forever. Its two values are what decide the query.
-  const kind = view.kind
-  const arg = viewArg(view)
+  // refetch forever. Its signature is what decides the query.
+  const sig = viewSignature(view)
+  const stable = useMemo(() => JSON.parse(sig) as ShipmentsView, [sig])
+  const empty = isEmptyView(stable)
+
+  // The five directory lists the column catalog joins in memory (R2): customer and
+  // carrier facts, quotes, staff profiles and names for the load's driver ids. They
+  // are cached lists, so every extra mount is a cache hit.
+  const [dirs, setDirs] = useState<Directories | null>(null)
+  const [dirsError, setDirsError] = useState<string | null>(null)
+  // The result for the view `sig` names. A different signature is a different slot:
+  // another window's rows are never shown under this view's name.
+  const [slot, setSlot] = useState<Slot | null>(null)
+  const [refreshing, setRefreshing] = useState(false)
+  const seq = useRef(0)
+
+  const cur = slot?.sig === sig ? slot : null
+  // A second mount of the same view starts from the shared cache and revalidates.
+  const peeked = cur || empty ? undefined : peekBoardBundle(stable)
+  const bundle = empty ? EMPTY_BUNDLE : cur?.bundle ?? peeked ?? EMPTY_BUNDLE
+  const haveBundle = empty || cur !== null || peeked !== undefined
+  const { shipments, orders, loads, loadCarriers, loadFinancials } = bundle
+  const { quotes, userProfiles, customers, carriers, drivers } = dirs ?? EMPTY_DIRECTORIES
 
   // No synchronous setState before the first await (react-hooks/set-state-in-effect):
-  // every state write lives in the promise chain. `refresh` sets loading itself.
-  const load = useCallback(() =>
-    Promise.all([
-      fetchShipments(kind, arg), listOrders(), listLoadSummaries(), listLoadCarriers(), listQuotes(),
-      listLoadFinancials(), listUserProfiles(), listCustomers(), listCarriers(), listDrivers(),
-    ])
-      .then(([s, o, l, lc, q, lf, up, cu, ca, dr]) => {
-        setShipments(s); setOrders(o); setLoads(l); setLoadCarriers(lc); setQuotes(q); setLoadFinancials(lf)
-        setUserProfiles(up); setCustomers(cu); setCarriers(ca); setDrivers(dr); setError(null)
+  // every state write lives in the promise chain. `refresh` sets its own flag.
+  const load = useCallback((force: boolean) => {
+    const mine = ++seq.current
+    const live = () => seq.current === mine
+    const bundleRead = loadBoardBundle(stable, {
+      force,
+      onPartial: (b) => { if (live()) setSlot({ sig, bundle: b, partial: true, error: null }) },
+    })
+      .then((b) => { if (live()) setSlot({ sig, bundle: b, partial: false, error: null }) })
+      .catch((err: unknown) => {
+        if (!live()) return
+        const message = err instanceof Error ? err.message : 'Shipments failed to load'
+        setSlot((prev) => ({ sig, bundle: prev?.sig === sig ? prev.bundle : EMPTY_BUNDLE, partial: false, error: message }))
       })
-      .catch((err: unknown) => { setError(err instanceof Error ? err.message : 'Shipments failed to load') })
-      .finally(() => setLoading(false)),
-  [kind, arg])
+    const dirRead = Promise.all([listQuotes(), listUserProfiles(), listCustomers(), listCarriers(), listDrivers()])
+      .then(([quotes, userProfiles, customers, carriers, drivers]) => {
+        if (live()) { setDirs({ quotes, userProfiles, customers, carriers, drivers }); setDirsError(null) }
+      })
+      .catch((err: unknown) => {
+        if (live()) setDirsError(err instanceof Error ? err.message : 'Shipments failed to load')
+      })
+    return Promise.all([bundleRead, dirRead]).then(() => undefined).finally(() => { if (live()) setRefreshing(false) })
+  }, [stable, sig])
 
-  useEffect(() => { void load() }, [load])
-  const refresh = useCallback(() => { setLoading(true); return load() }, [load])
+  useEffect(() => {
+    if (empty) return undefined
+    void load(false)
+    return () => { seq.current += 1 }
+  }, [load, empty])
+  const refresh = useCallback(() => { setRefreshing(true); return load(true) }, [load])
+
+  const error = cur?.error ?? dirsError
+  const partial = !empty && (cur?.partial ?? false)
+  const loading = empty ? false : refreshing || (error === null && (!haveBundle || dirs === null))
 
   const rows = useMemo<ShipmentListRow[]>(() => {
     const arByShipment: Record<string, ArStatus> = {}
@@ -766,5 +799,5 @@ export function useShipments(view: ShipmentsView = DEFAULT_VIEW) {
     })
   }, [shipments, orders, loads, loadCarriers, quotes, loadFinancials, userProfiles, customers, carriers, drivers])
 
-  return { shipments: rows, loading, error, refresh }
+  return { shipments: rows, loading, partial, error, refresh }
 }

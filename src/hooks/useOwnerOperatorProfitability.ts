@@ -1,14 +1,14 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { listLoads, listDriverPaySettings, listDriverPayDeductions, listDriverPayCredits } from '@/lib/apiClient'
+import { listDriverPaySettings, listDriverPayDeductions, listDriverPayCredits } from '@/lib/apiClient'
 import type { DriverPaySetting, DriverPayDeduction, DriverPayCredit } from '@/lib/apiClient'
-import type { Load } from '@/types'
 import { useFuelTransactions } from './useFuelTransactions'
 import { useDrivers } from './useDrivers'
+import { useLoads, useEnsureLoadRange } from './useLoads'
 import { periodEnd } from './useAmazonPay'
 import { matchedFuelForCard, sumFuel, effectiveFuelCard } from '@/lib/driverFuel'
 import { calcDriverPay, effectivePayRate, effectiveFixedExpenses, fixedExpenseLineLabel, type PayDebitInput } from '@/lib/driverPay'
 import { creditLineLabel } from '@/lib/payCredits'
-import { ownerOpTripsFor, isOwnerOperatorGroup } from '@/lib/ownerOperatorTrips'
+import { ownerOpTripsFor, isOwnerOperatorGroup, OWNER_OP_FIRST_PERIOD } from '@/lib/ownerOperatorTrips'
 import { aggregateOwnerOperator, type OwnerOpWeekProfit, ownerOperatorWeeksFromLoads } from '@/lib/ownerOperatorProfit'
 import { errorText } from '@/lib/errorText'
 
@@ -38,7 +38,10 @@ export function useOwnerOperatorProfitability(): OwnerOperatorProfitabilityState
   const { drivers } = useDrivers()
   const { transactions: fuelTxs } = useFuelTransactions()
 
-  const [loads, setLoads]             = useState<Load[]>([])
+  const { loads } = useLoads()
+  // Every pay week since the first owner-operator period, through today.
+  const [today] = useState(() => new Date().toISOString().slice(0, 10))
+  const ready = useEnsureLoadRange(OWNER_OP_FIRST_PERIOD, today)
   const [settings, setSettings]       = useState<DriverPaySetting[]>([])
   const [deductions, setDeductions]   = useState<DriverPayDeduction[]>([])
   const [credits, setCredits]         = useState<DriverPayCredit[]>([])
@@ -46,8 +49,8 @@ export function useOwnerOperatorProfitability(): OwnerOperatorProfitabilityState
   const [error, setError]             = useState<string | null>(null)
 
   const load = useCallback(() =>
-    Promise.all([listLoads(), listDriverPaySettings(), listDriverPayDeductions(), listDriverPayCredits()])
-      .then(([l, s, d, c]) => { setLoads(l); setSettings(s); setDeductions(d); setCredits(c); setError(null) })
+    Promise.all([listDriverPaySettings(), listDriverPayDeductions(), listDriverPayCredits()])
+      .then(([s, d, c]) => { setSettings(s); setDeductions(d); setCredits(c); setError(null) })
       .catch((err: unknown) => { setError(errorText(err)) })
       .finally(() => setLoading(false)),
   [])
@@ -114,5 +117,5 @@ export function useOwnerOperatorProfitability(): OwnerOperatorProfitabilityState
     return { weeks, rows }
   }, [loads, settings, deductions, credits, fuelTxs, drivers])
 
-  return { loading, error, weeks, rows, refresh }
+  return { loading: loading || !ready, error, weeks, rows, refresh }
 }

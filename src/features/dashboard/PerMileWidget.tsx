@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { Gauge, Table2, LineChart as LineChartIcon, ChevronLeft, ChevronRight } from 'lucide-react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts'
 import { useFleetProfitability } from '@/hooks/useFleetProfitability'
+import { useEnsureLoadRange } from '@/hooks/useLoads'
 import { monthRange, monthLabel } from '@/features/fleet-profitability/monthRange'
 import { weekRange, weekLabel } from '@/features/fleet-profitability/weekRange'
 import { aggregateLocalSubgroups } from '@/lib/localSubgroups'
@@ -43,6 +44,9 @@ export function PerMileWidget() {
   const range = period === 'week' ? weekRange(offset) : monthRange(offset)
   const rangeLabel = period === 'week' ? weekLabel(range) : monthLabel(range)
   const { data, loading, computeForRange } = useFleetProfitability(range, 'LOCAL')
+  // The trend plots TREND_WINDOW periods back from the selected one, so window all of them in.
+  const oldest = period === 'week' ? weekRange(TREND_WINDOW.week - 1 + offset) : monthRange(TREND_WINDOW.month - 1 + offset)
+  useEnsureLoadRange(oldest.start, range.end)
 
   // Switching the period unit makes the offset ambiguous — jump back to current.
   const changePeriod = (p: 'week' | 'month') => { setPeriod(p); setOffset(0) }

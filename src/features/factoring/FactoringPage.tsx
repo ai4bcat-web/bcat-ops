@@ -21,6 +21,7 @@ import { FactoringRowFields } from './FactoringRowFields'
 import { fieldsReadyLabel, isReadyToSubmit } from './factoringFields'
 import { invoiceAmountOf, totalsByStatus, money } from './factoringTotals'
 import { FactoringDocCell } from './FactoringDocCell'
+import { useResolveLoads } from '@/hooks/useResolveLoads'
 import type { OtrReadiness } from '@/lib/otrInvoice'
 import type { FactoringItem, FactoringItemStatus } from '@/types'
 import type { TmsSettings } from '@/types/tms'
@@ -378,6 +379,7 @@ function OtrStatusFlag({ item }: { item: FactoringItem }) {
 
 export function FactoringPage() {
   const { items, loading, error, pendingIds, refresh, removeItem } = useFactoringItems()
+  useResolveLoads(items.map((i) => i.loadId))
   const { user, isAdmin } = useAuth()
   const [search, setSearch] = useState('')
   const [activeTab, setActiveTab] = useState<FilterKey>('NEED_TO_FACTOR')

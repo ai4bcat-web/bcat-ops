@@ -11,7 +11,8 @@ import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { TmsApprovalCard, TmsBadge, TmsButton, TmsCard, TmsDialog, TmsField, TmsInput, TmsMetaList } from '@/features/tms/kit'
-import { linkWorkflowRun, listShipments, setWorkflowRunParty } from '@/lib/apiClient'
+import { findShipment } from '@/lib/shipmentLookup'
+import { linkWorkflowRun, setWorkflowRunParty } from '@/lib/apiClient'
 import { formatCents } from '@/lib/invoiceBuild'
 import { proposalToPrefill } from '@/lib/workflows/tenderProposal'
 import { NewShipmentDialog } from '@/features/shipments/components/NewShipmentDialog'
@@ -133,10 +134,8 @@ function TenderCard({ run, proposal, onChanged }: ProposalCardProps & { proposal
               onClick={async () => {
                 setBusy(true)
                 try {
-                  // Shipment numbers have no index of their own, so this is the board's
-                  // own list read once, on an explicit operator action, not on render.
-                  const wanted = number.trim().toLowerCase()
-                  const match = (await listShipments()).find((s) => (s.number ?? '').toLowerCase() === wanted)
+                  // One read through the number index, on an explicit operator action.
+                  const match = await findShipment(number)
                   if (!match) { toast.error(`No shipment is numbered ${number.trim()}`); return }
                   setLinkOpen(false)
                   await link(match.id)

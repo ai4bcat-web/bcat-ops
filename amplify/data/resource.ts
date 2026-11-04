@@ -3572,6 +3572,10 @@ const schema = a.schema({
       user:       a.string().required(),
       changes:    a.json().required(),
     })
+    // The one PERF index: History, the carrier activity tab, Load Review's Released tab and
+    // the driver-signup refusals read one record's rows (or one entity type) instead of scanning
+    // the whole table. The client falls back to the old filtered scan until this is deployed.
+    .secondaryIndexes((index) => [index('entityType').sortKeys(['entityId'])])
     // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
     // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
     .disableOperations(['subscriptions'])

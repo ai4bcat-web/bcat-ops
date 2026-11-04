@@ -16,7 +16,12 @@ const { data } = vi.hoisted(() => ({
 
 vi.mock('@/lib/apiClient', () => ({
   listOpenApAssignments: async () => data.assignments,
-  listShipments: async () => data.shipments,
+}))
+
+// The by-id reader: only the asked-for shipments come back, as a Map.
+vi.mock('@/lib/boardData', () => ({
+  getShipmentsByIds: async (ids: readonly string[]) =>
+    new Map(data.shipments.filter((s) => ids.includes(s.id)).map((s) => [s.id, s])),
 }))
 
 const shipment = (id: string, patch: Partial<ShipmentRecord> = {}): ShipmentRecord => ({

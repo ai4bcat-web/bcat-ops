@@ -23,6 +23,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { LoadDrawer } from '@/features/loads/LoadDrawer'
 import { DriverDocUploadDialog } from '@/features/driver-docs'
 import { normalizePro } from '@/lib/proNumber'
+import { useResolveLoads } from '@/hooks/useResolveLoads'
 import { formatDateTime } from '@/lib/date'
 import { graphqlErrorText } from '@/lib/apiClient'
 import { listReviewSubmissions } from '@/lib/podReviewClient'
@@ -110,6 +111,7 @@ export function PodsPage() {
   const driverFor = useCallback((s: ReviewSubmission) => drivers.find((d) => d.id === s.driverId) ?? null, [drivers])
 
   const queue = useMemo(() => (subs ?? []).filter(isDriverAppPod), [subs])
+  useResolveLoads(queue.map((s) => s.loadId), queue.filter((s) => !s.loadId).map((s) => s.referenceNumber))
 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase()

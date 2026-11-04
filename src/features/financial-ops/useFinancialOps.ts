@@ -56,7 +56,7 @@ export function useFinancialOps(period: FinancePeriod): FinancialOps {
   const rangeFilters = useMemo(() => windowFilters(range.from, range.to), [range])
 
   const dash = useBrokerageDashboard(rangeFilters)
-  const directory = useDirectory()
+  const directory = useDirectory({ locations: false })
   const carriers = useCarriers()
 
   const [reloadToken, setReloadToken] = useState(0)

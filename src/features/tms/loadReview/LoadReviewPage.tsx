@@ -4,7 +4,7 @@ import { TmsAlert, TmsBadge, TmsButton, TmsDialog, TmsListPage, TmsSelect, TmsSt
 import { useAuth } from '@/hooks/useAuth'
 import type { ShipmentListRow } from '@/hooks/useShipments'
 import { matchesQuery } from '@/features/shipments/shipmentViews'
-import { batchShipmentTask, listAuditLogs } from '@/lib/apiClient'
+import { batchShipmentTask, listAuditLogsFor } from '@/lib/apiClient'
 import { failingReasons, LOAD_REVIEW_CHECKS, LOAD_REVIEW_CHECK_LABEL, releasedWithin, reviewAgeDays, type LoadReviewVerdict } from '@/lib/loadReview'
 import { formatCents } from '@/lib/invoiceBuild'
 import { formatDateTime } from '@/lib/date'
@@ -14,10 +14,10 @@ import './loadReview.css'
 
 type ReviewEntry = { row: ShipmentListRow; verdict?: LoadReviewVerdict }
 export function LoadReviewPage() {
-  const { shipments, queue, loading, error, refresh } = useLoadReviewQueue()
+  const [params, setParams] = useSearchParams()
+  const { shipments, queue, loading, partial, error, refresh } = useLoadReviewQueue(params.get('tab') === 'released')
   const { hasPageAccess } = useAuth()
   const canOpen = hasPageAccess('loads') || hasPageAccess('tms')
-  const [params, setParams] = useSearchParams()
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [confirm, setConfirm] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -48,14 +48,16 @@ export function LoadReviewPage() {
       return next
     }, { replace: true })
   }
-  const auditIdsKey = tab === 'released' ? JSON.stringify(page.flatMap(({ row }) => [row.id, ...(row.orderIds ?? [])])) : '[]'
+  const auditIdsKey = tab === 'released'
+    ? JSON.stringify(page.flatMap(({ row }) => [{ entityType: 'SHIPMENT', entityId: row.id }, ...(row.orderIds ?? []).map((entityId) => ({ entityType: 'ORDER', entityId }))]))
+    : '[]'
   useEffect(() => {
-    const ids: string[] = JSON.parse(auditIdsKey)
-    if (!ids.length) return
+    const entities: Array<{ entityType: string; entityId: string }> = JSON.parse(auditIdsKey)
+    if (!entities.length) return
     let live = true
-    // Bound each AuditLog filter to 50 ids, including the order fallback for older releases.
+    // Indexed per (entityType, entityId); order ids cover older releases that logged on the order.
     const reads = []
-    for (let offset = 0; offset < ids.length; offset += 50) reads.push(listAuditLogs(ids.slice(offset, offset + 50)))
+    for (let offset = 0; offset < entities.length; offset += 50) reads.push(listAuditLogsFor(entities.slice(offset, offset + 50)))
     Promise.all(reads).then((pages) => {
       const logs = pages.flat()
       if (!live) return
@@ -116,7 +118,7 @@ export function LoadReviewPage() {
       banner={<TmsStatRow columns={5} items={[{ label: 'In review', value: String(queue.length) }, { label: 'Looks ready', value: String(ready.length) }, { label: 'Needs fixes', value: String(needs.length) }, { label: 'Oldest', value: `${Math.max(0, ...queue.map(({ row }) => reviewAgeDays(row, now) ?? 0))} d` }, { label: 'Value in review', value: formatCents(queue.reduce((sum, { row }) => sum + (row.orderRevenueCents ?? row.revenueCents ?? 0), 0)) }]} />}
       page={{ from: filtered.length ? pageNumber * 50 + 1 : 0, to: pageNumber * 50 + page.length, total: filtered.length, pageSize: 50 }}
       footerExtra={<><TmsButton disabled={!pageNumber} onClick={() => update({ page: String(pageNumber - 1) })}>Previous</TmsButton><TmsButton disabled={(pageNumber + 1) * 50 >= filtered.length} onClick={() => update({ page: String(pageNumber + 1) })}>Next</TmsButton></>}
-      emptyText={loading ? 'Loading review queue…' : queue.length ? 'Nothing here.' : 'Nothing is waiting for review.'} />
+      emptyText={loading || partial ? 'Loading review queue…' : queue.length ? 'Nothing here.' : 'Nothing is waiting for review.'} />
     {!!chosen.length && <div className="aa-review-actions"><TmsButton variant="primary" onClick={() => setConfirm(true)}>Move {chosen.length} to billing</TmsButton></div>}
     <TmsDialog open={confirm} onOpenChange={setConfirm} title={`Move ${chosen.length} to billing`} description={`These ${chosen.length} shipments go to accounting. The server re-checks each one.`} footer={<TmsButton disabled={busy || !chosen.length} variant="primary" onClick={() => void releaseBatch()}>Confirm move to billing</TmsButton>} />
     <TmsDialog open={!!filter} onOpenChange={(open) => { if (!open) setFilter(null) }} title="Filter review queue"><TmsSelect aria-label="Filter value" value={filter ? params.get(filter) ?? '' : ''} onChange={(event) => { if (filter) update({ [filter]: event.target.value, page: null }); setFilter(null) }}><option value="">All</option>{options.map((value) => <option key={value} value={value}>{value}</option>)}</TmsSelect></TmsDialog>

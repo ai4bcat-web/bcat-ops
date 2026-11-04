@@ -65,7 +65,7 @@ vi.mock('@/lib/apiClient', () => ({
   listCarriers: vi.fn(async () => []),
   listDrivers: vi.fn(async () => []),
   listCheckCallWorklist: vi.fn(async () => []),
-  listLoadCarriersByLoad: vi.fn(async () => []),
+  listLoadCarriersByLoads: vi.fn(async () => new Map()),
 }))
 
 import { TmsLayout } from './TmsLayout'

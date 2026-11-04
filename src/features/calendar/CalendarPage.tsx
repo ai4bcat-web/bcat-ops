@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useAppStore } from '@/store/useAppStore'
-import { useLoads } from '@/hooks/useLoads'
+import { useLoads, useEnsureLoadRange } from '@/hooks/useLoads'
 import { useDrivers } from '@/hooks/useDrivers'
 import { useDriverAvailability } from '@/hooks/useDriverAvailability'
 import { CalendarToolbar } from './CalendarToolbar'
@@ -30,6 +30,11 @@ const STATUS_LEGEND = [
   { label: 'In Progress', color: 'var(--tms-primary)' },
   { label: 'Needs Action',color: 'var(--tms-badge-orange)' },
 ]
+
+/** Local calendar day as 'YYYY-MM-DD' (the board navigates in the system timezone). */
+function ymd(d: Date): string {
+  return `${String(d.getFullYear()).padStart(4, '0')}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
 
 export function CalendarPage() {
   const searchQuery = useAppStore((s) => s.searchQuery)
@@ -82,6 +87,11 @@ export function CalendarPage() {
     if (currentView === 'week') return Array.from({ length: 8 }, (_, i) => addDays(startDate, i))
     return []
   }, [currentView, startDate])
+
+  // The days the board shows; the store windows these (±1 month) in and the poll refreshes only them.
+  const visibleFrom = ymd(currentView === 'month' ? startDate : cols[0])
+  const visibleTo   = ymd(currentView === 'month' ? new Date(startDate.getFullYear(), startDate.getMonth() + 1, 0) : cols[cols.length - 1])
+  useEnsureLoadRange(visibleFrom, visibleTo)
 
   const dateLabel = useMemo(() => {
     if (currentView === 'month') {
@@ -138,13 +148,13 @@ export function CalendarPage() {
   }, [navDays])
 
   // ── Periodic refresh ────────────────────────────────────────────────────────
-  // Real-time subscriptions keep clients in sync, but a periodic full refetch is a
+  // Real-time subscriptions keep clients in sync, but a periodic refetch of the visible window is a
   // safety net so every open calendar converges on the current server state even if a
   // subscription event was missed (sleep/wake, dropped socket, etc.). Pauses while the
   // tab is hidden and does an immediate catch-up refresh when it becomes visible again.
   useEffect(() => {
     const REFRESH_MS = 60_000
-    const refreshAll = () => { void useAppStore.getState().refreshCalendarData(); void refreshAvailability() }
+    const refreshAll = () => { void useAppStore.getState().refreshCalendarData({ from: visibleFrom, to: visibleTo }); void refreshAvailability() }
     let timer = window.setInterval(refreshAll, REFRESH_MS)
     const onVisibility = () => {
       window.clearInterval(timer)
@@ -155,7 +165,7 @@ export function CalendarPage() {
     }
     document.addEventListener('visibilitychange', onVisibility)
     return () => { window.clearInterval(timer); document.removeEventListener('visibilitychange', onVisibility) }
-  }, [refreshAvailability])
+  }, [refreshAvailability, visibleFrom, visibleTo])
 
   // ── Filter loads ──────────────────────────────────────────────────────────
 

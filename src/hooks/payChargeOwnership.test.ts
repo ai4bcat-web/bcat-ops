@@ -33,11 +33,11 @@ const adjustments = [BEFORE, FIRST].flatMap((periodStart) => [
 vi.mock('@/lib/apiClient', async (orig) => ({
   ...(await orig() as object),
   listAmazonTrips: () => Promise.resolve(trips),
-  listLoads: () => Promise.resolve(loads),
   listDriverPaySettings: () => Promise.resolve(settings),
   listDriverPayDeductions: () => Promise.resolve([]),
   listDriverPayCredits: () => Promise.resolve(adjustments),
 }))
+vi.mock('@/hooks/useLoads', () => ({ useLoads: () => ({ loads }), useEnsureLoadRange: () => true }))
 vi.mock('@/hooks/useDrivers', () => ({ useDrivers: () => ({ drivers, updateDriver: vi.fn() }) }))
 vi.mock('@/hooks/useFuelTransactions', () => ({ useFuelTransactions: () => ({ transactions: [] }) }))
 

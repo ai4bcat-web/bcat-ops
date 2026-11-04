@@ -5,7 +5,8 @@ import { useAppStore } from '@/store/useAppStore'
 import { isLoadVoided } from '@/lib/shipmentVoid'
 import { getStops } from '@/lib/stops'
 import { dwellMinutes } from '@/lib/tmsDirectory'
-import { formatDateTime } from '@/lib/date'
+import { formatDateTime, chicagoDateStr } from '@/lib/date'
+import { useEnsureLoadRange } from '@/hooks/useLoads'
 import type { LocationRecord } from '@/types/tms'
 import type { Load, Stop } from '@/types'
 
@@ -21,6 +22,10 @@ const MAPS_MAP_ID = import.meta.env.VITE_GOOGLE_MAPS_MAP_ID as string | undefine
 export function LocationDetail({ location }: { location: LocationRecord }) {
   const [openedAt] = useState(() => Date.now())
   const allLoads = useAppStore((s) => s.loads)
+  // The history lists the newest 50 visits; the store holds only windowed loads, so ask for
+  // the past year plus the coming month.
+  const DAY = 86_400_000
+  useEnsureLoadRange(chicagoDateStr(new Date(openedAt - 365 * DAY)), chicagoDateStr(new Date(openedAt + 30 * DAY)))
   // This facility's visit history is real work done there, so voided loads drop out. The
   // filter lives in a memo because the selector must return the store's own array.
   const loads = useMemo(() => allLoads.filter((l) => !isLoadVoided(l)), [allLoads])

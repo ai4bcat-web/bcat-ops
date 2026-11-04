@@ -19,6 +19,7 @@ import { useBoardFilters } from '../board/useBoardFilters'
 import { useAuth } from '@/hooks/useAuth'
 import { useDirectory } from '@/hooks/useDirectory'
 import { useShipments } from '@/hooks/useShipments'
+import { monthsCovering } from '@/lib/shipmentWindows'
 import { useStaff } from '@/hooks/useStaff'
 import type { ShipmentBundle, TrackingLinkRecord, TmsSettings } from '@/types/tms'
 import {
@@ -36,8 +37,7 @@ import {
   assigneeTabs as buildAssigneeTabs,
   defaultAssignee,
   groupByAssignee,
-  isRateConSent,
-  lifecycleOf,
+  lifecycleRows as trackingLifecycleRows,
   rowsForAssignee,
 } from './tracking/trackingTable'
 import type { TrackingLifecycle } from './tracking/types'
@@ -58,14 +58,24 @@ export function TrackingWorkstation() {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const { user } = useAuth()
-  const { shipments, loading: shipmentsLoading, error: shipmentsError, refresh: refreshShipments } = useShipments()
-  const { customers } = useDirectory()
+  const { customers } = useDirectory({ locations: false })
   const staff = useStaff(user?.email)
   const myId = staff.me?.id ?? user?.userId ?? null
 
   const [lifecycle, setLifecycle] = useState<TrackingLifecycle>('active')
   const [includeUnsent, setIncludeUnsent] = useState(false)
   const [nowMs, setNowMs] = useState(() => Date.now())
+  // Active and POD-due loads are open work, so they ride the shared working set the shell already
+  // holds. Closed loads (POD received, canceled) are history: they are fetched, for this month and
+  // last month only, when the Closed toggle is opened.
+  const monthKey = new Date(nowMs).toISOString().slice(0, 7)
+  const closedMonths = useMemo(
+    () => monthsCovering(`${monthKey}-01`, `${monthKey}-01`, 1).slice(0, 2),
+    [monthKey],
+  )
+  const { shipments, loading: shipmentsLoading, error: shipmentsError, refresh: refreshShipments } = useShipments(
+    lifecycle === 'closed' ? { kind: 'window', months: closedMonths } : { kind: 'working' },
+  )
   const [createOpen, setCreateOpen] = useState(false)
   const [customerLinkTarget, setCustomerLinkTarget] = useState<CustomerLinkDialogTarget | null>(null)
 
@@ -85,7 +95,7 @@ export function TrackingWorkstation() {
   }, [legacyShipmentId, navigate])
 
   const lifecycleRows = useMemo(
-    () => shipments.filter((r) => (includeUnsent || isRateConSent(r)) && lifecycleOf(r) === lifecycle),
+    () => trackingLifecycleRows(shipments, lifecycle, includeUnsent),
     [shipments, includeUnsent, lifecycle],
   )
 
@@ -176,6 +186,11 @@ export function TrackingWorkstation() {
 
   return (
     <div className="tms-board-shell flex h-full flex-col">
+      {lifecycle === 'closed' && (
+        <p className="tms-field-hint" role="status" style={{ margin: 0 }}>
+          Closed loads: last 2 months. Older ones: Shipments → All.
+        </p>
+      )}
       <div className="flex flex-1 overflow-hidden">
         <TrackingBoard
           groups={groups}

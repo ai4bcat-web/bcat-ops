@@ -3,9 +3,9 @@
  *
  * Each tab is one sparse-index read — `listOpenApAssignments` — joined to the shipment it
  * belongs to, because an assignment alone cannot say which shipment number it is or when
- * it delivered. The shipments come from one `listShipments()` indexed by id rather than a
- * `getShipment` per row: the tabs are bounded working sets, but they are still dozens of
- * rows, and dozens of round trips to colour a list is the pattern this codebase keeps
+ * it delivered. The shipments come from `loadWorklistShipments` by id rather than a
+ * `getShipment` per row or a full `listShipments()`: the tabs are bounded working sets, but
+ * they are still dozens of rows, and dozens of round trips to colour a list is the pattern this codebase keeps
  * paying for elsewhere.
  *
  * `reasons` here is the cheap, cached-field verdict — what the board can say without
@@ -16,7 +16,8 @@
  * subscriptions, and a bill recorded three desks away moves a row between tabs.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { listOpenApAssignments, listShipments } from '@/lib/apiClient'
+import { listOpenApAssignments } from '@/lib/apiClient'
+import { loadWorklistShipments } from '@/lib/worklistShipments'
 import { isShipmentVoided } from '@/lib/shipmentVoid'
 import type { LoadCarrierRecord, ShipmentRecord } from '@/types/tms'
 
@@ -67,8 +68,9 @@ export function useApWorklist(tab: ApWorklistTab): ApWorklist {
   // Non-async on purpose: `react-hooks/set-state-in-effect` cannot see through an
   // `async` function, so every state write lives in an explicit promise chain.
   const load = useCallback(() => {
-    return Promise.all([listOpenApAssignments(tab), listShipments()])
-      .then(([assignmentRows, shipmentRows]) => {
+    return listOpenApAssignments(tab)
+      .then(async (assignmentRows) => {
+        const shipmentRows = await loadWorklistShipments(assignmentRows.map((a) => a.shipmentId))
         setAssignments(assignmentRows)
         setShipments(shipmentRows)
         setError(null)

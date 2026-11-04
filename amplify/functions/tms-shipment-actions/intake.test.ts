@@ -170,7 +170,7 @@ describe('review invalidation on save', () => {
 
     await run('INTAKE_SAVE_DRAFT', { intakeId: 'il:r1', expectedVersion: 4, fields: { commodity: 'Steel' } })
     expect(intake()).toMatchObject({ reviewedBy: null, reviewedAt: null })
-    expect(audits.at(-1)!.changes).toMatchObject({ reviewCleared: true })
+    expect(audits[audits.length - 1]!.changes).toMatchObject({ reviewCleared: true })
   })
 
   it('ticking a confirmation is an edit too', async () => {

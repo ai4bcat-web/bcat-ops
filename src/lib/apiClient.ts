@@ -51,9 +51,54 @@ import { isActiveDirectoryRecord } from '@/lib/tmsDirectory'
 import type {
   IntakeFields, IntakeLoadRecord, IntakeStatus as IntakeLoadStatus,
 } from '@/types/intake'
+import { cachedList, invalidateLists } from '@/lib/listCache'
+import { batchByIndex, batchByIndexPairs, batchGet, setDefaultGraphqlRunner } from '@/lib/aliasBatch'
+import { LOAD_WORKFLOW_STATUSES } from '@/lib/shipmentStatus'
 
 // Untyped client — our own types from src/types handle type safety
-const client = generateClient()
+const rawClient = generateClient()
+
+/**
+ * The one choke point every request passes through. A mutation clears the list cache (any
+ * write by this tab must be visible to the next cached read); the Lambda-backed ManageUsers
+ * *queries* with a non-list action are writes too and clear the profile list. Subscriptions
+ * (observables) and plain queries pass through untouched.
+ */
+function touchesWrite(opts: unknown): 'all' | 'profiles' | null {
+  const o = opts as { query?: unknown; variables?: { action?: unknown } } | null
+  const text = typeof o?.query === 'string' ? o.query : ''
+  if (/^\s*mutation\b/.test(text)) return 'all'
+  if (/^\s*query\s+ManageUsers\b/.test(text) && o?.variables?.action !== 'list') return 'profiles'
+  return null
+}
+const client: typeof rawClient = new Proxy(rawClient, {
+  get(target, prop, receiver) {
+    const value = Reflect.get(target, prop, receiver)
+    if (prop !== 'graphql' || typeof value !== 'function') return value
+    return (...args: unknown[]) => {
+      const out = (value as (...a: unknown[]) => unknown).apply(target, args)
+      const write = touchesWrite(args[0])
+      if (!write || !(out instanceof Promise)) return out
+      const clear = () => invalidateLists(write === 'all' ? undefined : 'directory:userProfiles')
+      return out.then((r) => { clear(); return r }, (e) => { clear(); throw e })
+    }
+  },
+})
+
+/** Shared by the cached directory lists below: fresh 1 min, served stale (and refreshed) for 10 more. */
+const DIRECTORY_CACHE = { ttlMs: 60_000, staleMs: 600_000 }
+/** Callers sort and filter what they get back, so each gets its own array over the shared rows. */
+async function cachedDirectory<T>(name: string, load: () => Promise<T[]>): Promise<T[]> {
+  return [...(await cachedList(`directory:${name}`, load, DIRECTORY_CACHE))]
+}
+
+// aliasBatch speaks to AppSync through this same client (queries pass through untouched).
+setDefaultGraphqlRunner(async (query, variables) => {
+  const r = await client.graphql({ query, variables }) as { data: Record<string, unknown>; errors?: unknown[] }
+  // A partial answer (data plus errors) must not look like success: a half-hydrated board is worse than an error.
+  if (r.errors?.length) throw r
+  return r.data
+})
 
 // ── GraphQL fragments ─────────────────────────────────────────────────────────
 
@@ -213,6 +258,68 @@ function undefinedLoadFields(err: unknown): { hot: boolean; stops: boolean; sort
 }
 
 /**
+ * Clears the flag of every Load field group the backend rejected in `err`. True when at least
+ * one flag changed, i.e. the same read is worth retrying with the narrower selection.
+ */
+function healLoadFields(err: unknown): boolean {
+  const u = undefinedLoadFields(err)
+  let changed = false
+  if (loadsHaveHot && u.hot) {
+    console.warn("[apiClient] backend has no 'hot' field yet — querying loads without it until deploy")
+    loadsHaveHot = false; changed = true
+  }
+  if (loadsHaveStops && u.stops) {
+    console.warn("[apiClient] backend has no 'stops' field yet — querying loads without it until deploy")
+    loadsHaveStops = false; changed = true
+  }
+  if (loadsHaveSortOrder && u.sortOrder) {
+    console.warn("[apiClient] backend has no 'sortOrder' field yet — querying loads without it until deploy")
+    loadsHaveSortOrder = false; changed = true
+  }
+  if (loadsHaveCustomerId && u.customerId) {
+    console.warn("[apiClient] backend has no 'customerId' field yet — querying loads without it until deploy")
+    loadsHaveCustomerId = false; changed = true
+  }
+  if (loadsHaveEldReview && u.eldReview) {
+    console.warn("[apiClient] backend has no ELD review fields yet — querying loads without them until deploy")
+    loadsHaveEldReview = false; changed = true
+  }
+  if (loadsHavePaperworkLocation && u.paperworkLocation) {
+    console.warn("[apiClient] backend has no paperworkLocation yet — querying loads without it until deploy")
+    loadsHavePaperworkLocation = false; changed = true
+  }
+  if (loadsHaveTrailer && u.trailer) {
+    console.warn("[apiClient] backend has no trailerNumber yet — querying loads without it until deploy")
+    loadsHaveTrailer = false; changed = true
+  }
+  if (loadsHaveFreight && u.freight) {
+    console.warn("[apiClient] backend has no freight fields yet — querying loads without them until deploy")
+    loadsHaveFreight = false; changed = true
+  }
+  if (loadsHaveCargoValue && u.cargoValue) {
+    console.warn("[apiClient] backend has no cargoValueCents yet — querying loads without it until deploy")
+    loadsHaveCargoValue = false; changed = true
+  }
+  if (loadsHavePodNotes && u.podNotes) {
+    console.warn("[apiClient] backend has no podNotes yet — querying loads without it until deploy")
+    loadsHavePodNotes = false; changed = true
+  }
+  if (loadsHaveShipment && u.shipment) {
+    console.warn('[apiClient] backend has no shipment fields on Load yet — querying loads without them until deploy')
+    loadsHaveShipment = false; changed = true
+  }
+  if (loadsHaveRevTag && u.revTag) {
+    console.warn('[apiClient] backend has no revenue tags on Load yet — querying loads without them until deploy')
+    loadsHaveRevTag = false; changed = true
+  }
+  if (loadsHaveVoided && u.voided) {
+    console.warn('[apiClient] backend has no voidedAt on Load yet — querying loads without it until deploy')
+    loadsHaveVoided = false; changed = true
+  }
+  return changed
+}
+
+/**
  * Every load-plane page reads this: the calendar, dispatch, appointments, the
  * schedule, the pay and profitability hooks. A voided shipment has left the
  * working set by Ryne's rule, so its loads do not come back from here — the
@@ -246,61 +353,7 @@ export async function listLoads(opts?: { includeVoided?: boolean }): Promise<Loa
     try { result = await run(); break }
     catch (err) {
       if (attempt >= 2) throw err
-      const u = undefinedLoadFields(err)
-      let changed = false
-      if (loadsHaveHot && u.hot) {
-        console.warn("[apiClient] backend has no 'hot' field yet — querying loads without it until deploy")
-        loadsHaveHot = false; changed = true
-      }
-      if (loadsHaveStops && u.stops) {
-        console.warn("[apiClient] backend has no 'stops' field yet — querying loads without it until deploy")
-        loadsHaveStops = false; changed = true
-      }
-      if (loadsHaveSortOrder && u.sortOrder) {
-        console.warn("[apiClient] backend has no 'sortOrder' field yet — querying loads without it until deploy")
-        loadsHaveSortOrder = false; changed = true
-      }
-      if (loadsHaveCustomerId && u.customerId) {
-        console.warn("[apiClient] backend has no 'customerId' field yet — querying loads without it until deploy")
-        loadsHaveCustomerId = false; changed = true
-      }
-      if (loadsHaveEldReview && u.eldReview) {
-        console.warn("[apiClient] backend has no ELD review fields yet — querying loads without them until deploy")
-        loadsHaveEldReview = false; changed = true
-      }
-      if (loadsHavePaperworkLocation && u.paperworkLocation) {
-        console.warn("[apiClient] backend has no paperworkLocation yet — querying loads without it until deploy")
-        loadsHavePaperworkLocation = false; changed = true
-      }
-      if (loadsHaveTrailer && u.trailer) {
-        console.warn("[apiClient] backend has no trailerNumber yet — querying loads without it until deploy")
-        loadsHaveTrailer = false; changed = true
-      }
-      if (loadsHaveFreight && u.freight) {
-        console.warn("[apiClient] backend has no freight fields yet — querying loads without them until deploy")
-        loadsHaveFreight = false; changed = true
-      }
-      if (loadsHaveCargoValue && u.cargoValue) {
-        console.warn("[apiClient] backend has no cargoValueCents yet — querying loads without it until deploy")
-        loadsHaveCargoValue = false; changed = true
-      }
-      if (loadsHavePodNotes && u.podNotes) {
-        console.warn("[apiClient] backend has no podNotes yet — querying loads without it until deploy")
-        loadsHavePodNotes = false; changed = true
-      }
-      if (loadsHaveShipment && u.shipment) {
-        console.warn('[apiClient] backend has no shipment fields on Load yet — querying loads without them until deploy')
-        loadsHaveShipment = false; changed = true
-      }
-      if (loadsHaveRevTag && u.revTag) {
-        console.warn('[apiClient] backend has no revenue tags on Load yet — querying loads without them until deploy')
-        loadsHaveRevTag = false; changed = true
-      }
-      if (loadsHaveVoided && u.voided) {
-        console.warn('[apiClient] backend has no voidedAt on Load yet — querying loads without it until deploy')
-        loadsHaveVoided = false; changed = true
-      }
-      if (!changed) throw err
+      if (!healLoadFields(err)) throw err
     }
   }
   await customersReady
@@ -429,7 +482,10 @@ export function subscribeToLoadChanges(callbacks: {
 
 // ── Drivers ───────────────────────────────────────────────────────────────────
 
-export async function listDrivers(): Promise<Driver[]> {
+export function listDrivers(): Promise<Driver[]> {
+  return cachedDirectory('drivers', fetchDrivers)
+}
+async function fetchDrivers(): Promise<Driver[]> {
   const run = async () => client.graphql({
     query: `query ListDrivers { listDrivers(limit: 1000) { items { ${driverFields()} } } }`,
   }) as Promise<{ data: { listDrivers: { items: Driver[] } } }>
@@ -590,6 +646,49 @@ export async function listAuditLogs(entityIds?: string[]): Promise<AuditLogEntry
     nextToken = result.data.listAuditLogs.nextToken ?? null
   } while (nextToken)
   return entries
+}
+
+/** Raw AuditLog row as the generated queries return it (`changes` is a JSON string). */
+type RawAuditLog = Omit<AuditLogEntry, 'changes'> & { changes: string | null }
+const parseAudit = (e: RawAuditLog): AuditLogEntry => ({ ...e, changes: JSON.parse(e.changes ?? '{}') })
+
+// Flipped off the first time the backend answers that the (entityType, entityId) index is not
+// there (frontend deployed ahead of the data stack); the old filtered scan then serves.
+let auditLogsHaveEntityIndex = true
+
+/**
+ * The audit rows of exactly these records, through the `AuditLog (entityType, entityId)` index:
+ * one aliased request per 100 records instead of a filtered scan of the whole table. Returns the
+ * same rows `listAuditLogs([ids])` returned for the same records (that call matched `entityId`
+ * alone; here the type is part of the key, as the writers always set both).
+ */
+export async function listAuditLogsFor(
+  entities: readonly { entityType: string; entityId: string }[],
+): Promise<AuditLogEntry[]> {
+  if (entities.length === 0) return []
+  if (auditLogsHaveEntityIndex) {
+    try {
+      const rows = await batchByIndexPairs<RawAuditLog>(
+        {
+          query: 'listAuditLogByEntityTypeAndEntityId',
+          keyArg: 'entityType', keyType: 'String!',
+          sortArg: 'entityId', sortType: 'String!',
+          fields: AUDIT_FIELDS,
+        },
+        entities.map((e) => ({ key: e.entityType, sort: e.entityId })),
+        { perAliasLimit: 1000 },
+      )
+      return rows.map(parseAudit)
+    } catch (err) {
+      if (!/listAuditLogByEntityTypeAndEntityId/.test(safeStringify(err))
+        || !/Cannot query field|FieldUndefined|not defined/i.test(safeStringify(err))) throw err
+      console.warn('[apiClient] backend has no AuditLog entity index yet — scanning until deploy')
+      auditLogsHaveEntityIndex = false
+    }
+  }
+  const wanted = new Set(entities.map((e) => `${e.entityType}\u0000${e.entityId}`))
+  const all = await listAuditLogs([...new Set(entities.map((e) => e.entityId))])
+  return all.filter((e) => wanted.has(`${e.entityType}\u0000${e.entityId}`))
 }
 
 export async function createAuditLog(entry: {
@@ -1402,13 +1501,19 @@ export function withCustomerPolicy<T extends Pick<Load, 'customerId' | 'customer
 
 /** Active customers only unless asked; archived and merged records stay out of pickers. */
 export async function listCustomers(opts?: { includeArchived?: boolean }): Promise<CustomerRecord[]> {
+  // One fetch of the archived superset serves both views: the filter below is what the
+  // uncached read always did client-side.
+  const rows = await cachedDirectory('customers', fetchAllCustomers)
+  return opts?.includeArchived ? rows : rows.filter(isActiveDirectoryRecord)
+}
+async function fetchAllCustomers(): Promise<CustomerRecord[]> {
   const run = async () => (await listAll<CustomerRecord>('listCustomers', customerFields(), 1000))
     .map((c) => rememberCustomerPolicy(unwrapJsonFields(c, CUSTOMER_JSON_FIELDS)))
 
   for (let attempt = 0; ; attempt++) {
     try {
       const rows = await run()
-      return opts?.includeArchived ? rows : rows.filter(isActiveDirectoryRecord)
+      return rows
     } catch (err) {
       if (attempt >= 7) throw err
       if (customersHaveV7 && fieldNamed(CUSTOMER_V7_FIELDS, err)) {
@@ -1465,11 +1570,14 @@ export async function setCustomerStatus(
 }
 
 export async function listLocations(opts?: { includeArchived?: boolean }): Promise<LocationRecord[]> {
+  const rows = await cachedDirectory('locations', fetchAllLocations)
+  return opts?.includeArchived ? rows : rows.filter(isActiveDirectoryRecord)
+}
+async function fetchAllLocations(): Promise<LocationRecord[]> {
   // driverNotes is AWSJSON too: the driver app appends to it as a native list, and
   // AppSync hands that back as a JSON STRING. Left wrapped, the load drawer called
   // .map on it and blanked the page for every load touching that location.
-  const rows = (await listAll<LocationRecord>('listLocations', LOCATION_FIELDS, 1000)).map((l) => unwrapJsonFields(l, ['contacts', 'driverNotes']))
-  return opts?.includeArchived ? rows : rows.filter(isActiveDirectoryRecord)
+  return (await listAll<LocationRecord>('listLocations', LOCATION_FIELDS, 1000)).map((l) => unwrapJsonFields(l, ['contacts', 'driverNotes']))
 }
 /**
  * Coordinates are accepted only with the `geocodeToken` the tmsGeocode call returned for
@@ -2124,16 +2232,18 @@ async function listAllByIndex<T>(
   fields: string,
   limit: number,
   argTypes: Record<string, string> = {},
+  /** A server-side filter: the generated `Model<X>FilterInput` type name and its value. */
+  filter?: { type: string; value: unknown },
 ): Promise<T[]> {
   const names = Object.keys(args)
-  const decls = names.map((n) => `$${n}: ${argTypes[n] ?? 'String!'}`).join(', ')
-  const passed = names.map((n) => `${n}: $${n}`).join(', ')
+  const decls = names.map((n) => `$${n}: ${argTypes[n] ?? 'String!'}`).join(', ') + (filter ? `, $filter: ${filter.type}` : '')
+  const passed = names.map((n) => `${n}: $${n}`).join(', ') + (filter ? ', filter: $filter' : '')
   const rows: T[] = []
   let nextToken: string | null = null
   do {
     const r = await client.graphql({
       query: `query ${name}(${decls}, $nextToken: String) { ${name}(${passed}, limit: ${limit}, nextToken: $nextToken) { items { ${fields} } nextToken } }`,
-      variables: { ...args, nextToken },
+      variables: { ...args, ...(filter ? { filter: filter.value } : {}), nextToken },
     }) as { data: Record<string, { items: (T | null)[]; nextToken?: string | null }> }
     const page = r.data[name]
     for (const item of page.items) if (item) rows.push(item)
@@ -2440,13 +2550,15 @@ function forgetOwnershipModels(err: unknown): void {
 /** The division tree, active and archived. Empty = not configured (or not deployed). */
 export async function listOwnershipDivisions(): Promise<OwnershipDivisionRecord[]> {
   if (!ownershipModelsAvailable) return []
-  try {
-    const rows = await listAll<OwnershipDivisionRecord>('listOwnershipDivisions', OWNERSHIP_DIVISION_FIELDS, 200)
-    return rows.map((d) => unwrapJsonFields(d, ['owners', 'flows']))
-  } catch (err) {
-    forgetOwnershipModels(err)
-    return []
-  }
+  return cachedDirectory('ownershipDivisions', async () => {
+    try {
+      const rows = await listAll<OwnershipDivisionRecord>('listOwnershipDivisions', OWNERSHIP_DIVISION_FIELDS, 200)
+      return rows.map((d) => unwrapJsonFields(d, ['owners', 'flows']))
+    } catch (err) {
+      forgetOwnershipModels(err)
+      return []
+    }
+  })
 }
 
 /** Every rule, in whatever order DynamoDB answers; `resolveDivision` sorts them. */
@@ -3001,22 +3113,23 @@ const LOAD_SUMMARY_FIELDS = `
   eldLogsReviewedAt eldLogsReviewedBy readyToInvoice rateConfirmKey divisionKey
   nextCheckCallNote lastCheckCallType lastKnownSource cargoValueCents notes podNotes
 `
-export async function listLoadSummaries(): Promise<LoadBoardSummary[]> {
+/**
+ * One load-summary read: the Load field groups a backend predates are dropped and the read
+ * retried (up to four attempts — `stops`, `customerId`, the revenue tags and the mirrored void
+ * each deploy on their own, and a board that drops one of them is better than a board with
+ * none). Empty while the shipment group itself is not deployed.
+ */
+async function readLoadSummaries<T>(run: (fields: string) => Promise<T[]>): Promise<T[]> {
   if (!loadsHaveShipment) return []
-  // Up to four attempts: `stops`, `customerId`, the revenue tags and the mirrored
-  // void each deploy on their own, and a board that drops one of them is better
-  // than a board with none.
   for (let attempt = 0; ; attempt++) {
     try {
-      const fields = [
+      return await run([
         LOAD_SUMMARY_FIELDS,
         loadsHaveStops ? 'stops' : '',
         loadsHaveCustomerId ? 'customerId' : '',
         loadsHaveRevTag ? LOAD_REV_FIELDS : '',
         loadsHaveVoided ? 'voidedAt' : '',
-      ].filter(Boolean).join(' ')
-      const rows = await listAll<LoadBoardSummary>('listLoads', fields, 10000)
-      return rows.map((l) => unwrapJsonFields(l, ['stops', 'paperworkLocation']))
+      ].filter(Boolean).join(' '))
     } catch (err) {
       const u = undefinedLoadFields(err)
       if (u.shipment) {
@@ -3045,6 +3158,180 @@ export async function listLoadSummaries(): Promise<LoadBoardSummary[]> {
       if (!changed) throw err
     }
   }
+}
+
+const unwrapSummary = (l: LoadBoardSummary) => unwrapJsonFields(l, ['stops', 'paperworkLocation'])
+
+export async function listLoadSummaries(): Promise<LoadBoardSummary[]> {
+  return readLoadSummaries(async (fields) => (await listAll<LoadBoardSummary>('listLoads', fields, 10000)).map(unwrapSummary))
+}
+
+// ── Windowed board reads (PERF) ──────────────────────────────────────────────
+//
+// What `boardData.ts` and the legacy store read instead of whole tables. Every one reuses an
+// existing index; the joins are aliased batches (many lookups per request) so the cost follows
+// the window, not the table. They run through the same self-heal wrappers as the full reads.
+
+const BOARD_BATCH = { chunk: 100, concurrency: 8 }
+const ID_BATCH = { chunk: 100, concurrency: 12 }
+/** The server drops voided shipments; `deletedAt` stays client-side (a NULL-typed one would hide a live row). */
+const NOT_VOIDED = { type: 'ModelShipmentFilterInput', value: { voidedAt: { attributeExists: false } } }
+
+/** One status partition of the Shipment table, voided rows excluded server-side unless asked for. */
+export async function listShipmentsByStatusFiltered(
+  status: ShipmentStatus,
+  opts?: { includeVoided?: boolean },
+): Promise<ShipmentRecord[]> {
+  return readShipments((fields) => listAllByIndex<ShipmentRecord>(
+    'listShipmentByStatusAndPickupAppt', { status }, fields, 1000, { status: 'ShipmentStatus!' },
+    !opts?.includeVoided && shipmentsHaveRevTag ? NOT_VOIDED : undefined,
+  ))
+}
+
+/** One pickup month ('YYYY-MM'), voided rows excluded server-side unless asked for. */
+export async function listShipmentsByMonthFiltered(
+  month: string,
+  opts?: { includeVoided?: boolean },
+): Promise<ShipmentRecord[]> {
+  return readShipments((fields) => listAllByIndex<ShipmentRecord>(
+    'listShipmentByPickupMonthAndPickupAppt', { pickupMonth: month }, fields, 1000, {},
+    !opts?.includeVoided && shipmentsHaveRevTag ? NOT_VOIDED : undefined,
+  ))
+}
+
+/** Exact PRO lookup. The `number` index includes voided shipments (the PRO stays taken). */
+export async function listShipmentsByNumber(number: string): Promise<ShipmentRecord[]> {
+  return readShipments((fields) => listAllByIndex<ShipmentRecord>('listShipmentByNumber', { number }, fields, 100))
+}
+
+/** Ids only, voided included, of every shipment picked up in any of these months. */
+export async function listShipmentIdsByMonths(months: readonly string[]): Promise<string[]> {
+  const perMonth = await Promise.all([...new Set(months)].map((m) => (
+    listAllByIndex<{ id: string }>('listShipmentByPickupMonthAndPickupAppt', { pickupMonth: m }, 'id', 1000)
+  )))
+  return [...new Set(perMonth.flat().map((r) => r.id))]
+}
+
+/** Decoration + release-check fields; the flagged groups follow the same self-heal flags as the full read. */
+const narrowShipmentFields = () => [
+  'id number status customerId deletedAt',
+  shipmentsHaveDelivery ? 'deliveredAt' : '',
+  shipmentsHaveRevTag ? 'voidedAt' : '',
+].filter(Boolean).join(' ')
+
+/**
+ * Shipments by id, one aliased request per 100; an id that does not exist is absent. `narrow`
+ * reads just what the working-set check needs (`id status deletedAt voidedAt`).
+ */
+export async function getShipmentsBatch(ids: readonly string[], narrow = false): Promise<Map<string, ShipmentRecord>> {
+  return readShipments((fields) => batchGet<ShipmentRecord>(
+    { query: 'getShipment', fields: narrow ? narrowShipmentFields() : fields },
+    ids,
+    ID_BATCH,
+  ))
+}
+
+/** The narrow order row the working-set check reads. */
+export type DocsNeededOrder = Pick<OrderRecord, 'id' | 'shipmentId' | 'arStatus' | 'readyToInvoiceAt' | 'invoiceId'>
+
+/** Orders still waiting for documents (`arStatus` DOCS_NEEDED), just enough to test release. */
+export async function listDocsNeededOrdersNarrow(): Promise<DocsNeededOrder[]> {
+  if (!arModelsAvailable) return []
+  try {
+    return await listAllByIndex(
+      'listOrderByArStatusAndArStatusChangedAt', { arStatus: 'DOCS_NEEDED' },
+      'id shipmentId arStatus readyToInvoiceAt invoiceId', 1000, { arStatus: 'OrderArStatus!' },
+    )
+  } catch (err) {
+    forgetArModels(err)
+    return []
+  }
+}
+
+/** Every order of these shipments, in the shape `listOrders` returns. */
+export async function listOrdersByShipmentIds(ids: readonly string[]): Promise<OrderRecord[]> {
+  const byShipment = await readOrders((fields) => batchByIndex<OrderRecord>(
+    { query: 'listOrderByShipmentId', keyArg: 'shipmentId', keyType: 'String!', fields }, ids, BOARD_BATCH,
+  ))
+  return [...byShipment.values()].flat().map((o) => unwrapJsonFields(o, ORDER_JSON_FIELDS))
+}
+
+/** Board summaries of every load of these shipments, in the shape `listLoadSummaries` returns. */
+export async function listLoadSummariesByShipmentIds(ids: readonly string[]): Promise<LoadBoardSummary[]> {
+  const byShipment = await readLoadSummaries(async (fields) => [await batchByIndex<LoadBoardSummary>(
+    { query: 'listLoadByShipmentId', keyArg: 'shipmentId', keyType: 'String!', fields }, ids, BOARD_BATCH,
+  )])
+  return byShipment.flatMap((m) => [...m.values()].flat()).map(unwrapSummary)
+}
+
+/** Every assignment of these shipments, in the shape `listLoadCarriers` returns. */
+export async function listLoadCarriersByShipmentIds(ids: readonly string[]): Promise<LoadCarrierRecord[]> {
+  const byShipment = await readLoadCarriers((fields) => batchByIndex<LoadCarrierRecord>(
+    { query: 'listLoadCarrierByShipmentId', keyArg: 'shipmentId', keyType: 'String!', fields }, ids, BOARD_BATCH,
+  ))
+  return [...byShipment.values()].flat()
+}
+
+/** Cached load totals for these load ids (`LoadFinancials.id` is the load id). */
+export async function listLoadFinancialsByLoadIds(loadIds: readonly string[]): Promise<LoadFinancialsRecord[]> {
+  if (!loadFinancialsModelsAvailable) return []
+  try {
+    const rows = await batchGet<LoadFinancialsRecord>({ query: 'getLoadFinancials', fields: LOAD_FINANCIALS_FIELDS }, loadIds, ID_BATCH)
+    return [...rows.values()]
+  } catch (err) {
+    forgetLoadFinancials(err)
+    return []
+  }
+}
+
+type RawLoad = Load & { rateConfirmKey?: string }
+
+/** The full-`Load` read: self-healing field groups, then the same customer-policy and rate-con post-processing as `listLoads`. Voided loads are included. */
+async function readFullLoads(fetch: (fields: string) => Promise<RawLoad[]>): Promise<Load[]> {
+  // The customer policy map must be current before loads are stamped with it.
+  const customersReady = listCustomers({ includeArchived: true })
+  let raw: RawLoad[]
+  for (;;) {
+    try { raw = await fetch(loadFields()); break }
+    catch (err) { if (!healLoadFields(err)) throw err }
+  }
+  await customersReady
+  return Promise.all(raw.map((l) => resolveRateConfirmUrl(withCustomerPolicy(l))))
+}
+
+/** Every load of these shipments, voided included, shaped exactly like `listLoads` rows. */
+export async function listLoadsByShipmentIds(ids: readonly string[]): Promise<Load[]> {
+  return readFullLoads(async (fields) => [...(await batchByIndex<RawLoad>(
+    { query: 'listLoadByShipmentId', keyArg: 'shipmentId', keyType: 'String!', fields }, ids, BOARD_BATCH,
+  )).values()].flat())
+}
+
+/** Loads by id (the factoring queue's lookups), shaped like `listLoads` rows. */
+export async function getLoads(ids: readonly string[]): Promise<Load[]> {
+  return readFullLoads(async (fields) => [...(await batchGet<RawLoad>({ query: 'getLoad', fields }, ids, ID_BATCH)).values()])
+}
+
+/** Every assignment of these loads, grouped by load (replaces one `listLoadCarriersByLoad` per load). */
+export async function listLoadCarriersByLoads(loadIds: readonly string[]): Promise<Map<string, LoadCarrierRecord[]>> {
+  return readLoadCarriers((fields) => batchByIndex<LoadCarrierRecord>(
+    { query: 'listLoadCarrierByLoadId', keyArg: 'loadId', keyType: 'String!', fields }, loadIds, BOARD_BATCH,
+  ))
+}
+
+/** Every load of one customer (the `customerId` index), shaped like `listLoads` rows. */
+export async function listLoadsByCustomer(customerId: string): Promise<Load[]> {
+  return readFullLoads((fields) => listAllByIndex<RawLoad>('listLoadByCustomerId', { customerId }, fields, 1000))
+}
+
+/** Statuses at which a load is done as far as dispatch is concerned. */
+const CLOSED_LOAD_STATUSES: readonly LoadWorkflowStatus[] = ['DELIVERED', 'INVOICING', 'CANCELED']
+
+/** Every load that is not delivered/invoicing/canceled, all time (Dispatch, Appts, truck map). Voided included. */
+export async function listOpenLoads(): Promise<Load[]> {
+  const open = LOAD_WORKFLOW_STATUSES.filter((s) => !CLOSED_LOAD_STATUSES.includes(s))
+  return readFullLoads(async (fields) => (await Promise.all(open.map((status) => listAllByIndex<RawLoad>(
+    'listLoadByStatus', { status }, fields, 1000, { status: 'LoadStatus!' },
+  )))).flat())
 }
 
 // ── Carriers (tmsCarrierActions) ─────────────────────────────────────────────
@@ -3152,8 +3439,10 @@ export async function carrierAction<T>(action: string, input: unknown): Promise<
 // ── Reads ────────────────────────────────────────────────────────────────────
 
 export async function listCarriers(): Promise<CarrierRecord[]> {
-  const rows = await readCarriers((fields) => listAll<CarrierRecord>('listCarriers', fields, 1000))
-  return rows.map((c) => unwrapJsonFields(c, CARRIER_JSON_FIELDS))
+  return cachedDirectory('carriers', async () => {
+    const rows = await readCarriers((fields) => listAll<CarrierRecord>('listCarriers', fields, 1000))
+    return rows.map((c) => unwrapJsonFields(c, CARRIER_JSON_FIELDS))
+  })
 }
 export async function listCarriersByStatus(status: CarrierStatus): Promise<CarrierRecord[]> {
   // The index key is the Carrier.status enum, so the variable must be declared as one.
@@ -4564,12 +4853,14 @@ function forgetUserProfiles(err: unknown): void {
 /** Every staff login, for the rep and team pickers. Any authenticated user may read it. */
 export async function listUserProfiles(): Promise<UserProfileRecord[]> {
   if (!userProfilesAvailable) return []
-  try {
-    return await listAll<UserProfileRecord>('listUserProfiles', USER_PROFILE_FIELDS, 1000)
-  } catch (err) {
-    forgetUserProfiles(err)
-    return []
-  }
+  return cachedDirectory('userProfiles', async () => {
+    try {
+      return await listAll<UserProfileRecord>('listUserProfiles', USER_PROFILE_FIELDS, 1000)
+    } catch (err) {
+      forgetUserProfiles(err)
+      return []
+    }
+  })
 }
 
 /** Owner-only when `role` is ADMIN; the Lambda refuses a lock-out with its own message. */
@@ -7110,13 +7401,15 @@ export async function listOpenQuotes(): Promise<QuoteRecord[]> {
  */
 export async function listQuotes(): Promise<QuoteRecord[]> {
   if (!quoteModelsAvailable) return []
-  try {
-    const rows = await listAll<QuoteRecord>('listQuotes', QUOTE_FIELDS, 2000)
-    return rows.map((q) => parseArJson(q, QUOTE_JSON_FIELDS))
-  } catch (err) {
-    forgetQuoteModels(err)
-    return []
-  }
+  return cachedDirectory('quotes', async () => {
+    try {
+      const rows = await listAll<QuoteRecord>('listQuotes', QUOTE_FIELDS, 2000)
+      return rows.map((q) => parseArJson(q, QUOTE_JSON_FIELDS))
+    } catch (err) {
+      forgetQuoteModels(err)
+      return []
+    }
+  })
 }
 
 /** Everything quoted in one 'YYYY-MM', newest first — the Won / Lost tab's window. */

@@ -102,9 +102,9 @@ function ErrorsTabBody({ integrations, integrationsVisible }: {
   const { user } = useAuth()
   const groups = user?.groups ?? []
   const exceptions = useWorkflowExceptions()
-  const { shipments } = useShipments()
+  const { shipments } = useShipments({ kind: 'working' })
   const worklist = useCheckCallWorklist()
-  const { customers } = useDirectory()
+  const { customers } = useDirectory({ locations: false })
 
   const [settings, setSettings] = useState<TmsSettings | null>(null)
   const [trackingLinks, setTrackingLinks] = useState<TrackingLinkRecord[]>([])

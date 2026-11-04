@@ -11,7 +11,8 @@ import { renderHook } from '@testing-library/react'
 import { fromDateInput, fromDateTimeInput } from '@/lib/date'
 import type { Load, Stop } from '@/types'
 
-let state: { loads: Load[]; drivers: unknown[] } = { loads: [], drivers: [] }
+const windowing = { loadedMonths: new Set<string>(), ensureLoadRange: () => Promise.resolve() }
+let state: { loads: Load[]; drivers: unknown[] } & typeof windowing = { loads: [], drivers: [], ...windowing }
 vi.mock('@/store/useAppStore', () => ({
   useAppStore: (sel: (s: unknown) => unknown) => sel(state),
 }))
@@ -35,7 +36,7 @@ const unbooked = (over: Partial<Load> = {}): Load => ({
 
 const metrics = () => renderHook(() => useDashboardMetrics('this-month')).result.current
 
-beforeEach(() => { state = { loads: [], drivers: [] } })
+beforeEach(() => { state = { loads: [], drivers: [], ...windowing } })
 
 describe('needsAppt — Batory only', () => {
   it('counts a Batory load with a stop still to book', () => {

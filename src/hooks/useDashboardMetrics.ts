@@ -1,6 +1,8 @@
 import { useMemo } from 'react'
 import { useAppStore } from '@/store/useAppStore'
 import { isLoadVoided } from '@/lib/shipmentVoid'
+import { useEnsureLoadRange } from './useLoads'
+import { useNeedsInvoiceBacklog } from './useNeedsInvoiceBacklog'
 import { apptOutstanding, requiresApptProofs } from '@/lib/apptQueue'
 import { revenueByFleet, loadsByFleet, type RevenueSplit, type LoadsSplit } from '@/lib/revenueByFleet'
 import type { Driver, Load } from '@/types'
@@ -105,6 +107,8 @@ export function useDashboardMetrics(rangeKey: DateRangeKey): DashboardMetrics {
   // no dashboard figure. Filtered in a memo, never in the selector.
   const loads   = useMemo(() => allLoads.filter((l) => !isLoadVoided(l)), [allLoads])
   const drivers = useAppStore((s) => s.drivers)
+  useEnsureLoadRange(dateStr(prevRange(rangeKey).start), dateStr(getRange(rangeKey).end))
+  const backlog = useNeedsInvoiceBacklog()
 
   return useMemo(() => {
     const { start, end } = getRange(rangeKey)
@@ -123,7 +127,8 @@ export function useDashboardMetrics(rangeKey: DateRangeKey): DashboardMetrics {
     // delivery dated before today) that are still not marked ready to invoice. A still-TBD
     // delivery isn't "completed", so it's excluded here (it shows under Appts to Book).
     const todayMidnight = new Date(); todayMidnight.setHours(0, 0, 0, 0)
-    const needsInvoice = loads.filter(
+    const held = new Set(allLoads.map((l) => l.id))
+    const needsInvoice = (backlog.length > 0 ? [...loads, ...backlog.filter((l) => !held.has(l.id))] : loads).filter(
       (l) =>
         l.deliveryApptType !== 'tbd' &&
         new Date(l.deliveryAppt) < todayMidnight &&
@@ -236,5 +241,5 @@ export function useDashboardMetrics(rangeKey: DateRangeKey): DashboardMetrics {
       rangeEnd:   dateStr(end),
       rangeDays:  days,
     }
-  }, [loads, drivers, rangeKey])
+  }, [loads, allLoads, backlog, drivers, rangeKey])
 }

@@ -35,9 +35,28 @@ beforeEach(() => {
 describe('AljexCodeMapCard', () => {
   it('renders nothing before an import has stored any code', async () => {
     api.listAljexCodes.mockResolvedValue([])
-    const { container } = render(<AljexCodeMapCard />)
+    render(<AljexCodeMapCard />)
     await waitFor(() => expect(api.listAljexCodes).toHaveBeenCalled())
-    await waitFor(() => expect(container).toBeEmptyDOMElement())
+    await waitFor(() => expect(screen.queryByText('Aljex code mapping')).not.toBeInTheDocument())
+  })
+
+  it('does not ask the Lambda for the codes until the card scrolls into view', async () => {
+    let reveal: (entries: Array<{ isIntersecting: boolean }>) => void = () => {}
+    vi.stubGlobal('IntersectionObserver', class {
+      constructor(cb: typeof reveal) { reveal = cb }
+      observe() {}
+      disconnect() {}
+    })
+    try {
+      render(<AljexCodeMapCard />)
+      expect(screen.getByText(/Loading codes/)).toBeInTheDocument()
+      expect(api.listAljexCodes).not.toHaveBeenCalled()
+      reveal([{ isIntersecting: true }])
+      await waitFor(() => expect(api.listAljexCodes).toHaveBeenCalledTimes(1))
+      expect(await screen.findByTestId('code-map-SALES_REP')).toBeInTheDocument()
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 
   it('saving a mapping writes only the mapping, never a reassign', async () => {
