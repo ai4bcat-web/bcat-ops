@@ -1319,7 +1319,6 @@ async function stageTrackingStates(deps: DemoDeps, shipments: Row[], trackerIds:
     }
     const shipment = (await deps.getById(deps.tables.shipment, String(seedShipment.id))) ?? seedShipment
     const load = await loadOfShipment(deps, String(shipment.id))
-    const order = await orderOfShipment(deps, String(shipment.id))
     if (!load) continue
 
     const transition = transitions[i % transitions.length]
@@ -1367,9 +1366,8 @@ async function stageTrackingStates(deps: DemoDeps, shipments: Row[], trackerIds:
       delivery.departedAt = new Date(stopAt.getTime() + 2 * 60 * 60 * 1000).toISOString()
       writes.push(updateTx(deps.tables.shipment, String(shipment.id), stampedPatch(deps, caller, { status: 'DELIVERED', deliveredAt: delivery.departedAt }), String(shipment.updatedAt ?? '')))
       writes.push(updateTx(deps.tables.load, String(load.id), stampedPatch(deps, caller, { status: 'DELIVERED', stops: JSON.stringify(stops) }), String(load.updatedAt ?? '')))
-      if (order) {
-        writes.push(updateTx(deps.tables.order, String(order.id), stampedPatch(deps, caller, { readyToInvoiceAt: delivery.departedAt }), String(order.updatedAt ?? '')))
-      }
+      // No `readyToInvoiceAt` here: since Step AA that stamp means "released from Load Review", and a
+      // delivered order still waiting for review (DOCS_NEEDED) must stay in the Load Review queue.
     } else if (transition === 'DISPATCHED') {
       writes.push(updateTx(deps.tables.shipment, String(shipment.id), stampedPatch(deps, caller, { status: 'DISPATCHED' }), String(shipment.updatedAt ?? '')))
       writes.push(updateTx(deps.tables.load, String(load.id), stampedPatch(deps, caller, { status: 'DISPATCHED' }), String(load.updatedAt ?? '')))

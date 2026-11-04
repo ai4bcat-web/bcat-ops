@@ -58,6 +58,12 @@ describe('requestShape', () => {
     expect(shape.mutations).toEqual(['tmsShipmentActions:VOID_SHIPMENT', 'createAuditLog'])
   })
 
+  it('allows only the exact read-only actions of the legacy lowercase routers', () => {
+    const pods = 'mutation ManagePods($action: String!, $input: AWSJSON) { managePods(action: $action, input: $input) }'
+    const shape = requestShape([body(pods, { action: 'list' }), body(pods, { action: 'status' }), body(pods, { action: 'assign' })])
+    expect(shape.mutations).toEqual(['managePods:assign'])
+  })
+
   it('ignores bodies that are not JSON', () => {
     expect(parseOperations('not json')).toEqual([])
   })

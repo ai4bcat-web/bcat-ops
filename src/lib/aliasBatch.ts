@@ -25,6 +25,8 @@ export interface IndexQuery {
   keyType: string
   /** Selection set body, e.g. 'id shipmentId arStatus' */
   fields: string
+  /** A server-side filter shared by every alias: the generated `Model<X>FilterInput` type name and its value. */
+  filter?: { type: string; value: unknown }
 }
 
 /** A composite-key lookup: the hash key plus an equality condition on the sort key. */
@@ -124,7 +126,7 @@ interface Lookup {
   args: string
 }
 
-async function listLookups<T>(query: string, fields: string, lookups: Lookup[], opts?: AliasBatchOpts): Promise<T[][]> {
+async function listLookups<T>(query: string, fields: string, lookups: Lookup[], opts?: AliasBatchOpts, filter?: IndexQuery['filter']): Promise<T[][]> {
   const run = runnerOf(opts)
   const limit = opts?.perAliasLimit ?? DEFAULT_ALIAS_LIMIT
   const concurrency = opts?.concurrency ?? DEFAULT_CONCURRENCY
@@ -132,14 +134,14 @@ async function listLookups<T>(query: string, fields: string, lookups: Lookup[], 
     l.args.replace(/\$(\d+)/g, (_m, i: string) => `$${prefix}${i}`)
 
   const sendChunk = async (chunk: { l: Lookup; at: number }[]) => {
-    const decls: string[] = []
-    const vars: Record<string, unknown> = {}
+    const decls: string[] = filter ? [`$filter: ${filter.type}`] : []
+    const vars: Record<string, unknown> = filter ? { filter: filter.value } : {}
     const body = chunk.map(({ l }, i) => {
       l.vars.forEach(([, type, value], j) => {
         decls.push(`$k${i}_${j}: ${type}`)
         vars[`k${i}_${j}`] = value
       })
-      return `a${i}: ${query}(${argText(l, `k${i}_`)}, limit: ${limit}) { items { ${fields} } nextToken }`
+      return `a${i}: ${query}(${argText(l, `k${i}_`)}${filter ? ', filter: $filter' : ''}, limit: ${limit}) { items { ${fields} } nextToken }`
     })
     const data = await run(`query BatchByIndex(${decls.join(', ')}) {\n${body.join('\n')}\n}`, vars)
     return chunk.map(({ at }, i) => ({ at, alias: data[`a${i}`] as ListAlias<T> }))
@@ -158,14 +160,14 @@ async function listLookups<T>(query: string, fields: string, lookups: Lookup[], 
 
   await pool(more, concurrency, async ({ at, token }) => {
     const l = lookups[at]
-    const decls = l.vars.map(([, type], j) => `$k${j}: ${type}`).join(', ')
-    const vars: Record<string, unknown> = { t: token }
+    const decls = l.vars.map(([, type], j) => `$k${j}: ${type}`).join(', ') + (filter ? `, $filter: ${filter.type}` : '')
+    const vars: Record<string, unknown> = { t: token, ...(filter ? { filter: filter.value } : {}) }
     l.vars.forEach(([, , value], j) => { vars[`k${j}`] = value })
     let next: string | null | undefined = token
     while (next) {
       vars.t = next
       const data = await run(
-        `query BatchByIndexMore(${decls}, $t: String) { a: ${query}(${argText(l, 'k')}, limit: ${FOLLOWUP_LIMIT}, nextToken: $t) { items { ${fields} } nextToken } }`,
+        `query BatchByIndexMore(${decls}, $t: String) { a: ${query}(${argText(l, 'k')}${filter ? ', filter: $filter' : ''}, limit: ${FOLLOWUP_LIMIT}, nextToken: $t) { items { ${fields} } nextToken } }`,
         vars,
       )
       const alias = data.a as ListAlias<T>
@@ -193,6 +195,7 @@ export async function batchByIndex<T>(
     q.fields,
     keys.map((id) => ({ vars: [[q.keyArg, q.keyType, id]], args: `${q.keyArg}: $0` })),
     opts,
+    q.filter,
   )
   return new Map(keys.map((k, i) => [k, rows[i]]))
 }

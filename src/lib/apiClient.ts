@@ -92,6 +92,15 @@ async function cachedDirectory<T>(name: string, load: () => Promise<T[]>): Promi
   return [...(await cachedList(`directory:${name}`, load, DIRECTORY_CACHE))]
 }
 
+/**
+ * Whole-table side lists that a dozen mounted hooks each read on their own (pay settings x7, fuel x5,
+ * expenses x4 on the legacy dashboard): readers inside this window share one request. Any write through
+ * the client above clears it, so this tab never reads its own stale rows.
+ */
+async function sharedRead<T>(key: string, load: () => Promise<T[]>, ttlMs = 15_000): Promise<T[]> {
+  return [...(await cachedList(`shared:${key}`, load, { ttlMs }))]
+}
+
 // aliasBatch speaks to AppSync through this same client (queries pass through untouched).
 setDefaultGraphqlRunner(async (query, variables) => {
   const r = await client.graphql({ query, variables }) as { data: Record<string, unknown>; errors?: unknown[] }
@@ -749,10 +758,12 @@ export async function listFuelTransactions(filter?: {
   endDate?: string
 }): Promise<FuelTransaction[]> {
   // Load all and filter client-side for simplicity (dataset is small enough)
-  const result = await client.graphql({
-    query: `query ListFuelTransactions { listFuelTransactions(limit: 10000) { items { ${FUEL_TX_FIELDS} } } }`,
-  }) as { data: { listFuelTransactions: { items: FuelTransaction[] } } }
-  let items = result.data.listFuelTransactions.items ?? []
+  let items = await sharedRead('fuelTransactions', async () => {
+    const result = await client.graphql({
+      query: `query ListFuelTransactions { listFuelTransactions(limit: 10000) { items { ${FUEL_TX_FIELDS} } } }`,
+    }) as { data: { listFuelTransactions: { items: FuelTransaction[] } } }
+    return result.data.listFuelTransactions.items ?? []
+  })
   if (filter?.truckId)   items = items.filter((t) => t.truckId === filter.truckId)
   if (filter?.cardNumber) items = items.filter((t) => t.cardNumber === filter.cardNumber)
   if (filter?.startDate) items = items.filter((t) => t.transactionDate >= filter.startDate!)
@@ -3172,20 +3183,32 @@ export async function listLoadSummaries(): Promise<LoadBoardSummary[]> {
 // existing index; the joins are aliased batches (many lookups per request) so the cost follows
 // the window, not the table. They run through the same self-heal wrappers as the full reads.
 
+// Index batches stay at 100 aliases (200 x perAliasLimit 50 hits AppSync's 10k-item cap and 500 financials aliases fail: both "Unknown error", measured).
 const BOARD_BATCH = { chunk: 100, concurrency: 8 }
 const ID_BATCH = { chunk: 100, concurrency: 12 }
+/** The stage-2 check reads five scalar fields per id: 500 aliases measured at 0.75 s, a size refusal halves and retries. */
+/** `getLoadFinancials` rows are small: 250 aliases per request measured fine on a 761-shipment window, 500 was refused. */
+const FINANCIALS_BATCH = { chunk: 250, concurrency: 6 }
+const NARROW_ID_BATCH = { chunk: 500, concurrency: 4 }
 /** The server drops voided shipments; `deletedAt` stays client-side (a NULL-typed one would hide a live row). */
 const NOT_VOIDED = { type: 'ModelShipmentFilterInput', value: { voidedAt: { attributeExists: false } } }
 
-/** One status partition of the Shipment table, voided rows excluded server-side unless asked for. */
-export async function listShipmentsByStatusFiltered(
-  status: ShipmentStatus,
+/** Several status partitions in ONE aliased request (paged per alias past 1000 rows); one index partition per status. */
+export async function listShipmentsByStatusesFiltered(
+  statuses: readonly ShipmentStatus[],
   opts?: { includeVoided?: boolean },
 ): Promise<ShipmentRecord[]> {
-  return readShipments((fields) => listAllByIndex<ShipmentRecord>(
-    'listShipmentByStatusAndPickupAppt', { status }, fields, 1000, { status: 'ShipmentStatus!' },
-    !opts?.includeVoided && shipmentsHaveRevTag ? NOT_VOIDED : undefined,
-  ))
+  return readShipments(async (fields) => {
+    const byStatus = await batchByIndex<ShipmentRecord>(
+      {
+        query: 'listShipmentByStatusAndPickupAppt', keyArg: 'status', keyType: 'ShipmentStatus!', fields,
+        ...(!opts?.includeVoided && shipmentsHaveRevTag ? { filter: NOT_VOIDED } : {}),
+      },
+      statuses,
+      { chunk: 50, concurrency: 4, perAliasLimit: 1000 },
+    )
+    return [...byStatus.values()].flat()
+  })
 }
 
 /** One pickup month ('YYYY-MM'), voided rows excluded server-side unless asked for. */
@@ -3227,7 +3250,7 @@ export async function getShipmentsBatch(ids: readonly string[], narrow = false):
   return readShipments((fields) => batchGet<ShipmentRecord>(
     { query: 'getShipment', fields: narrow ? narrowShipmentFields() : fields },
     ids,
-    ID_BATCH,
+    narrow ? NARROW_ID_BATCH : ID_BATCH,
   ))
 }
 
@@ -3240,7 +3263,7 @@ export async function listDocsNeededOrdersNarrow(): Promise<DocsNeededOrder[]> {
   try {
     return await listAllByIndex(
       'listOrderByArStatusAndArStatusChangedAt', { arStatus: 'DOCS_NEEDED' },
-      'id shipmentId arStatus readyToInvoiceAt invoiceId', 1000, { arStatus: 'OrderArStatus!' },
+      'id shipmentId arStatus readyToInvoiceAt invoiceId', 5000, { arStatus: 'OrderArStatus!' },
     )
   } catch (err) {
     forgetArModels(err)
@@ -3276,7 +3299,7 @@ export async function listLoadCarriersByShipmentIds(ids: readonly string[]): Pro
 export async function listLoadFinancialsByLoadIds(loadIds: readonly string[]): Promise<LoadFinancialsRecord[]> {
   if (!loadFinancialsModelsAvailable) return []
   try {
-    const rows = await batchGet<LoadFinancialsRecord>({ query: 'getLoadFinancials', fields: LOAD_FINANCIALS_FIELDS }, loadIds, ID_BATCH)
+    const rows = await batchGet<LoadFinancialsRecord>({ query: 'getLoadFinancials', fields: LOAD_FINANCIALS_FIELDS }, loadIds, FINANCIALS_BATCH)
     return [...rows.values()]
   } catch (err) {
     forgetLoadFinancials(err)
@@ -5347,10 +5370,12 @@ const EXPENSE_REC_FIELDS  = `id expenseTypeId allocationId amount periodMonth tr
 const RECURRING_FIELDS    = `id expenseTypeId allocationId monthlyAmount startMonth endMonth startDate endDate active notes createdAt updatedAt`
 
 export async function listExpenseTypes(): Promise<ExpenseTypeData[]> {
-  const result = await client.graphql({
-    query: `query ListExpenseTypes { listExpenseTypes(limit: 1000) { items { ${EXPENSE_TYPE_FIELDS} } } }`,
-  }) as { data: { listExpenseTypes: { items: ExpenseTypeData[] } } }
-  return result.data.listExpenseTypes.items ?? []
+  return sharedRead('listExpenseTypes', async () => {
+    const result = await client.graphql({
+      query: `query ListExpenseTypes { listExpenseTypes(limit: 1000) { items { ${EXPENSE_TYPE_FIELDS} } } }`,
+    }) as { data: { listExpenseTypes: { items: ExpenseTypeData[] } } }
+    return result.data.listExpenseTypes.items ?? []
+  })
 }
 
 export async function createExpenseType(input: Omit<ExpenseTypeData, 'id' | 'createdAt' | 'updatedAt'>): Promise<ExpenseTypeData> {
@@ -5377,10 +5402,12 @@ export async function deleteExpenseType(id: string): Promise<void> {
 }
 
 export async function listAllocations(): Promise<TruckExpenseAllocationData[]> {
-  const result = await client.graphql({
-    query: `query ListTruckExpenseAllocations { listTruckExpenseAllocations(limit: 1000) { items { ${ALLOCATION_FIELDS} } } }`,
-  }) as { data: { listTruckExpenseAllocations: { items: TruckExpenseAllocationData[] } } }
-  return result.data.listTruckExpenseAllocations.items ?? []
+  return sharedRead('listTruckExpenseAllocations', async () => {
+    const result = await client.graphql({
+      query: `query ListTruckExpenseAllocations { listTruckExpenseAllocations(limit: 1000) { items { ${ALLOCATION_FIELDS} } } }`,
+    }) as { data: { listTruckExpenseAllocations: { items: TruckExpenseAllocationData[] } } }
+    return result.data.listTruckExpenseAllocations.items ?? []
+  })
 }
 
 export async function createAllocation(input: Omit<TruckExpenseAllocationData, 'id' | 'createdAt' | 'updatedAt'>): Promise<TruckExpenseAllocationData> {
@@ -5407,10 +5434,12 @@ export async function deleteAllocation(id: string): Promise<void> {
 }
 
 export async function listExpenseRecords(): Promise<ExpenseRecordData[]> {
-  const result = await client.graphql({
-    query: `query ListExpenseRecords { listExpenseRecords(limit: 10000) { items { ${EXPENSE_REC_FIELDS} } } }`,
-  }) as { data: { listExpenseRecords: { items: ExpenseRecordData[] } } }
-  return result.data.listExpenseRecords.items ?? []
+  return sharedRead('listExpenseRecords', async () => {
+    const result = await client.graphql({
+      query: `query ListExpenseRecords { listExpenseRecords(limit: 10000) { items { ${EXPENSE_REC_FIELDS} } } }`,
+    }) as { data: { listExpenseRecords: { items: ExpenseRecordData[] } } }
+    return result.data.listExpenseRecords.items ?? []
+  })
 }
 
 export async function createExpenseRecord(input: Omit<ExpenseRecordData, 'id' | 'createdAt' | 'updatedAt'>): Promise<ExpenseRecordData> {
@@ -5437,10 +5466,12 @@ export async function deleteExpenseRecord(id: string): Promise<void> {
 }
 
 export async function listRecurringExpenses(): Promise<RecurringExpenseData[]> {
-  const result = await client.graphql({
-    query: `query ListRecurringExpenses { listRecurringExpenses(limit: 1000) { items { ${RECURRING_FIELDS} } } }`,
-  }) as { data: { listRecurringExpenses: { items: RecurringExpenseData[] } } }
-  return result.data.listRecurringExpenses.items ?? []
+  return sharedRead('listRecurringExpenses', async () => {
+    const result = await client.graphql({
+      query: `query ListRecurringExpenses { listRecurringExpenses(limit: 1000) { items { ${RECURRING_FIELDS} } } }`,
+    }) as { data: { listRecurringExpenses: { items: RecurringExpenseData[] } } }
+    return result.data.listRecurringExpenses.items ?? []
+  })
 }
 
 export async function createRecurringExpense(input: Omit<RecurringExpenseData, 'id' | 'createdAt' | 'updatedAt'>): Promise<RecurringExpenseData> {
@@ -6137,10 +6168,13 @@ function normalizePaySetting(raw: DriverPaySetting & { fixedExpenses?: unknown; 
 }
 
 export async function listDriverPaySettings(): Promise<DriverPaySetting[]> {
-  const result = await client.graphql({
-    query: `query ListDriverPaySettings { listDriverPaySettings(limit: 1000) { items { ${PAY_SETTING_FIELDS} } } }`,
-  }) as { data: { listDriverPaySettings: { items: DriverPaySetting[] } } }
-  return (result.data.listDriverPaySettings.items ?? []).map(normalizePaySetting)
+  const rows = await sharedRead('driverPaySettings', async () => {
+    const result = await client.graphql({
+      query: `query ListDriverPaySettings { listDriverPaySettings(limit: 1000) { items { ${PAY_SETTING_FIELDS} } } }`,
+    }) as { data: { listDriverPaySettings: { items: DriverPaySetting[] } } }
+    return result.data.listDriverPaySettings.items ?? []
+  })
+  return rows.map(normalizePaySetting)
 }
 
 function serializePaySetting<T extends { fixedExpenses?: unknown; rateHistory?: unknown; fuelCardHistory?: unknown }>(input: T): T {
@@ -6429,7 +6463,7 @@ const DISPATCH_MESSAGE_FIELDS = `
 `
 
 export async function listDispatchConversations(): Promise<DispatchConversation[]> {
-  return listAll<DispatchConversation>('listDispatchConversations', DISPATCH_CONVERSATION_FIELDS, 1000)
+  return sharedRead('dispatchConversations', () => listAll<DispatchConversation>('listDispatchConversations', DISPATCH_CONVERSATION_FIELDS, 1000), 3_000) // the inbox polls every 10 s: this only merges the mounts of one page load
 }
 
 /** The thread for one conversation, oldest first. */

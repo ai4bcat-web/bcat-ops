@@ -8,7 +8,7 @@ const graphqlMock = vi.fn()
 vi.mock('aws-amplify/data', () => ({ generateClient: () => ({ graphql: graphqlMock }) }))
 vi.mock('aws-amplify/storage', () => ({ uploadData: vi.fn(), getUrl: vi.fn(), remove: vi.fn() }))
 
-const { listCarriers, listUserProfiles, listCustomers, deleteDriver, setUserTeams } = await import('./apiClient')
+const { listCarriers, listUserProfiles, listCustomers, deleteDriver, setUserTeams, listDriverPaySettings, listExpenseTypes } = await import('./apiClient')
 const { invalidateLists } = await import('./listCache')
 
 let carriers: { id: string; name: string }[]
@@ -24,6 +24,8 @@ beforeEach(() => {
   graphqlMock.mockImplementation(async ({ query }: { query: string }) => {
     if (query.includes('listCarriers')) return { data: { listCarriers: { items: carriers.map((c) => ({ ...c })), nextToken: null } } }
     if (query.includes('listUserProfiles')) return { data: { listUserProfiles: { items: profiles, nextToken: null } } }
+    if (query.includes('listDriverPaySettings')) return { data: { listDriverPaySettings: { items: [{ id: 'ps1' }] } } }
+    if (query.includes('listExpenseTypes')) return { data: { listExpenseTypes: { items: [{ id: 'et1' }] } } }
     if (query.includes('listCustomers')) return { data: { listCustomers: { items: customers, nextToken: null } } }
     return { data: {} }
   })
@@ -76,5 +78,17 @@ describe('cached directory lists', () => {
     const first = await listCustomers({ includeArchived: true })
     first.sort((x, y) => x.id.localeCompare(y.id))
     expect((await listCustomers({ includeArchived: true })).map((c) => c.id)).toEqual(['b', 'a'])
+  })
+})
+
+describe('shared whole-table side lists', () => {
+  it('seven mounted hooks cost one request, and a write by this tab drops it', async () => {
+    await Promise.all(Array.from({ length: 7 }, () => listDriverPaySettings()))
+    await Promise.all(Array.from({ length: 4 }, () => listExpenseTypes()))
+    expect(reads('listDriverPaySettings')).toBe(1)
+    expect(reads('listExpenseTypes')).toBe(1)
+    await deleteDriver('d1')
+    await listDriverPaySettings()
+    expect(reads('listDriverPaySettings')).toBe(2)
   })
 })

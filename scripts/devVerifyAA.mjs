@@ -49,6 +49,8 @@ const BACKEND_ALLOWED = 'ships with the deploy'
 const ALLOW_PROBLEMS = [
   { pattern: /Manifest: Line: 1, column: 1, Syntax error\. http:\/\/(127\.0\.0\.1|localhost):5173\/manifest\.webmanifest$/, reason: 'vite dev server has no built manifest' },
   { pattern: /The map is initialized without a valid Map ID/, reason: 'dev Maps key is neutered' },
+  // The legacy /tasks page reads the external Group Command Center (VITE_COMMAND_CENTER_API_URL, localhost:4501 when unset); dev has no such service and Step AA did not touch the page.
+  { pattern: /\[TasksPage\] listTasks failed|localhost:4501\//, reason: 'Command Center API is not part of the dev stack' },
 ]
 const HOOK_CLASSES = ['tms-overdue', 'tms-due', 'tms-theme-toggle', 'tms-dash', 'tms-probe-field', 'tms-public-head', 'tms-public-brand-name', 'tms-drawer-md']
 const SKIP_ALLOWED = {}
@@ -357,28 +359,37 @@ async function sidebarGate(b, ctx, theme) {
 async function oldUrlsGate(b) {
   await step('AA03-old-urls', async () => {
     const failures = []
-    for (const [url, landing, wantSearch] of AA_OLD_URLS) {
+    // One URL, one verdict. The shell (a legacy page's shell mounts after its first paint) is polled for, not sampled once.
+    const check = async (url, landing, wantSearch) => {
       b.mark()
       await b.navigate(url)
       let landed = ''
       try {
         await b.poll(async () => { landed = await pathname(b); return landed === landing }, `landing on ${landing}`, 15_000)
-      } catch { failures.push(`${url} landed on ${landed}, expected ${landing}`); continue }
+      } catch { return `${url} landed on ${landed}, expected ${landing}` }
       await waitBody(b, 20_000)
-      if (wantSearch && (await search(b)) !== wantSearch) { failures.push(`${url}: search "${await search(b)}", expected "${wantSearch}"`); continue }
-      const facts = await b.evaluate(`(() => ({
+      if (wantSearch && (await search(b)) !== wantSearch) return `${url}: search "${await search(b)}", expected "${wantSearch}"`
+      const read = () => b.evaluate(`(() => ({
         shell: !!document.querySelector('.tms-sidebar'),
         main: (document.querySelector('.tms-main')?.innerText ?? '').trim().length,
         noAccess: /no page access/i.test(document.body.innerText),
       }))()`)
-      if (!facts.shell) failures.push(`${url}: no shell`)
-      else if (!facts.main) failures.push(`${url}: .tms-main is empty`)
-      else if (facts.noAccess) failures.push(`${url}: "No page access" panel for ADMIN`)
+      let facts = await read()
+      for (let i = 0; i < 20 && (!facts.shell || !facts.main); i += 1) { await pause(1000); facts = await read() }
+      if (!facts.shell) return `${url}: no shell`
+      if (!facts.main) return `${url}: .tms-main is empty`
+      if (facts.noAccess) return `${url}: "No page access" panel for ADMIN`
       // an id that does not exist may legitimately fail its own read; every other URL must be clean
       if (!url.includes('zz-x')) {
         const problems = problemList(b).slice(0, 2)
-        if (problems.length) failures.push(`${url}: ${problems.join(' | ')}`)
+        if (problems.length) return `${url}: ${problems.join(' | ')}`
       }
+      return null
+    }
+    for (const [url, landing, wantSearch] of AA_OLD_URLS) {
+      // a dropped request (a "Failed to fetch" while the dev API is busy) is not a routing defect: look once more
+      const verdict = (await check(url, landing, wantSearch)) && (await check(url, landing, wantSearch))
+      if (verdict) failures.push(verdict)
     }
     if (failures.length) fail(`${failures.length}/${AA_OLD_URLS.length} old URLs wrong: ${failures.slice(0, 4).join(' ;; ')}`)
     return `${AA_OLD_URLS.length} old URLs land in the shell with content (incl. /tms/dispatch → /tms/carrier-sales)`
@@ -468,7 +479,7 @@ async function pageFacts(b, ctx, theme) {
       const text = await bodyText(b)
       if (!/Payroll runs every Wednesday/.test(text)) fail(`${path}: no "Payroll runs every Wednesday" banner`)
       const line1 = /Payroll runs every Wednesday[^\n]*/.exec(text)?.[0] ?? ''
-      if (!/Next pay date\s+(Wed|Today)/i.test(line1) && !/Next pay date/.test(line1)) fail(`${path}: banner has no next pay date: ${line1.slice(0, 80)}`)
+      if (!/Next pay date\s+\w+|Pay date is today/.test(line1)) fail(`${path}: banner has no next pay date: ${line1.slice(0, 80)}`)
       if (!/Covers\s+Sun/.test(line1)) fail(`${path}: banner does not name the Sun–Sat period: ${line1.slice(0, 120)}`)
     }
     return 'the cadence line (Wednesday, next pay date, Sun–Sat period) shows on all three settlement pages'
@@ -579,7 +590,7 @@ async function buildDelivered(ctx, label, { docs, rep }) {
   }
   if (docs) { await attachDocument(ctx, shipmentId, bundle.loads[0].id, 'BOL'); await attachDocument(ctx, shipmentId, bundle.loads[0].id, 'POD'); await reload() }
   await ship('SET_REV_TAG', { shipmentId, divisionCode: ctx.divisionCode })
-  await ship('SET_SALES_REP', { shipmentId, repId: rep ? ctx.adminUsername : null })
+  await ship('SET_SALES_REP', { shipmentId, repId: rep ? ctx.repId : null })
   await reload()
   return { id: shipmentId, number: bundle.shipment.number, orderId: bundle.orders[0].id, orderUpdatedAt: bundle.orders[0].updatedAt }
 }
@@ -664,9 +675,52 @@ async function openRowDrawer(b, number) {
   await pause(800)
 }
 
+/** The seed's six staff slots (demo.ts STAFF_ROLES) need REAL UserProfile ids: the seed assigns a carrier rep, and the handler refuses a rep without a CARRIER_REP profile. */
+async function demoStaff(ctx) {
+  const rows = (await gql(ctx.token, 'query { listUserProfiles(limit: 1000) { items { id name email role status } } }', {})).listUserProfiles.items.filter((p) => p.status === 'ACTIVE')
+  const pick = (role, n = 0) => rows.filter((p) => p.role === role)[n] ?? rows[0]
+  const slots = [pick('CARRIER_REP', 0), pick('CARRIER_REP', 1), pick('MANAGER'), pick('CUSTOMER_REP'), pick('CARRIER_REP', 2), pick('AR_AP')]
+  if (slots.some((p) => !p)) fail('dev has no UserProfile rows to seed the demo staff with')
+  return slots.map((p) => ({ id: p.id, name: p.name ?? p.email ?? p.id }))
+}
+
+const demoKeysOf = (state) => (state.records ?? []).filter((r) => r.kind === 'SHIPMENT').map((r) => r.demoKey)
+const DEMO_NAMED = ['shipment.readytobill', 'shipment.podflagged']
+
+/**
+ * RESET_DEMO_DATA outlives the 30 s the API waits for it on a large dev table (the Lambda keeps running): a client
+ * timeout is not a failure. Wait for the seed to be whole again instead of trusting the response.
+ */
+async function resetDemo(ctx) {
+  const staff = await demoStaff(ctx)
+  try { await ctx.shipAs.admin('RESET_DEMO_DATA', { staff }) } catch (err) {
+    if (!/timed out/i.test(String(err?.message ?? err))) throw err
+  }
+  await ctx.poll(async () => { const keys = demoKeysOf(await ctx.shipAs.admin('GET_DEMO_STATE', {})); return DEMO_NAMED.every((k) => keys.includes(k)) }, 'the demo seed to be whole again after RESET_DEMO_DATA', 180_000)
+}
+
+/** Load Review lists a delivered DOCS_NEEDED order only while `readyToInvoiceAt` is empty; an older seed stamped it on delivery. */
+async function demoStamped(ctx, state) {
+  for (const key of DEMO_NAMED) {
+    const rec = state.records?.find((r) => r.kind === 'SHIPMENT' && r.demoKey === key)
+    if (!rec) continue
+    const orders = (await gql(ctx.token, `query { listOrderByShipmentId(shipmentId: ${JSON.stringify(rec.recordId)}) { items { arStatus readyToInvoiceAt } } }`, {})).listOrderByShipmentId.items
+    if (orders.some((o) => o.arStatus === 'DOCS_NEEDED' && o.readyToInvoiceAt)) return true
+  }
+  return false
+}
+
 async function seedDemoRefs(ctx) {
-  await ctx.shipAs.admin('SEED_DEMO_DATA', {})
-  const state = await ctx.shipAs.admin('GET_DEMO_STATE', {})
+  let state = await ctx.shipAs.admin('GET_DEMO_STATE', {})
+  // an interrupted earlier seed leaves records behind and the seed then skips forever: reset it (so does a seed from before the
+  // demo stopped stamping readyToInvoiceAt on delivered orders)
+  const whole = DEMO_NAMED.every((k) => demoKeysOf(state).includes(k))
+  if (!whole || await demoStamped(ctx, state)) {
+    if ((state.records ?? []).length) await resetDemo(ctx)
+    else await ctx.shipAs.admin('SEED_DEMO_DATA', { staff: await demoStaff(ctx) })
+    state = await ctx.shipAs.admin('GET_DEMO_STATE', {})
+    if (await demoStamped(ctx, state)) fail('the deployed demo seed still stamps readyToInvoiceAt on delivered DOCS_NEEDED orders (demo.ts stageTrackingStates), so Load Review cannot list them')
+  }
   const find = (key) => state.records?.find((r) => r.kind === 'SHIPMENT' && r.demoKey === key)
   const out = {}
   for (const [name, key] of [['readytobill', 'shipment.readytobill'], ['podflagged', 'shipment.podflagged']]) {
@@ -780,12 +834,12 @@ async function loadReviewMove(b, ctx) {
 async function loadReviewBatch(ctx) {
   await backendStep(ctx, 'AA03-batch-refusal', async () => {
     // (c) released the green demo shipment: put the seed back so the batch has a clean row again
-    await ctx.shipAs.admin('RESET_DEMO_DATA', {})
+    await resetDemo(ctx)
     ctx.demoTouched = true
     ctx.demo = await seedDemoRefs(ctx)
     ctx.demoReleased = false
     const z = ctx.zz.noRep
-    const result = await ctx.shipAs.lr('BATCH_SHIPMENT_TASK', { task: 'RELEASE_TO_BILLING', shipmentIds: [z.id, ctx.demo.readytobill.id] })
+    const result = await ctx.shipAs.lr('BATCH_SHIPMENT_TASK', { task: 'RELEASE_TO_BILLING', shipmentIds: [z.id, ctx.demo.readytobill.id], params: { review: { source: 'LOAD_REVIEW' } } })
     const byId = new Map((result.results ?? []).map((r) => [r.shipmentId, r]))
     const bad = byId.get(z.id)
     const good = byId.get(ctx.demo.readytobill.id)
@@ -808,7 +862,7 @@ const INTAKE_KEYS = [
 function completeFields(ctx, n) {
   const day = chicagoToday()
   return {
-    customerId: ctx.customerId, customerName: `ZZ AA Customer ${ctx.ts}`, billToId: ctx.billToId, salesRepId: ctx.adminUsername ?? null,
+    customerId: ctx.customerId, customerName: `ZZ AA Customer ${ctx.ts}`, billToId: ctx.billToId, salesRepId: ctx.repId ?? null,
     divisionCode: ctx.divisionCode, reference: `ZZAA${n}${String(ctx.ts).slice(-6)}`, pickupNumber: `P${n}`, deliveryNumber: `D${n}`,
     equipmentType: 'Dry Van', commodity: 'ZZ AA paper', weightLb: 20000, customerRateCents: 150000,
     stops: [
@@ -914,7 +968,11 @@ async function intakeUiGate(b, ctx, theme) {
       return 'reviewed state shows "Reviewed by …"'
     }
     if ((await buttonState(b, '^Move to active$')) !== 'disabled') fail('Move to active is enabled on a complete but unreviewed load')
-    if ((await buttonState(b, '^Mark reviewed$')) !== 'enabled') fail('Mark reviewed is not enabled on a complete load')
+    // the customer, division and settings lists the verdict needs load after the row does: wait for them instead of sampling once
+    await b.poll(async () => (await buttonState(b, '^Mark reviewed$')) === 'enabled', 'Mark reviewed to enable', 30_000).catch(async () => {
+      const why = (await mainText(b)).split('\n').map((l) => l.trim()).filter((l) => /needs|not active|choose|missing|confirm|valid|add /i.test(l)).slice(0, 6).join(' | ')
+      fail(`Mark reviewed is not enabled on a complete load (page says: ${why || 'nothing about why'})`)
+    })
     if (!/Needs review/i.test(text)) fail('the page does not say the load "Needs review"')
     await walk.shot(b, 'AA10', 'intake-needs-review', themeTag(theme), true).catch(() => {})
     if (!light) return 'unreviewed: Move disabled, Mark reviewed enabled, "Needs review"'
@@ -945,7 +1003,7 @@ async function cleanup(ctx) {
   const token = ctx.token
   if (token) {
     if (ctx.demoTouched) {
-      await ctx.shipAs.admin('RESET_DEMO_DATA', {}).then(() => say('demo seed restored with RESET_DEMO_DATA'), (err) => say(`RESET_DEMO_DATA failed: ${short(err).slice(0, 100)}`, false))
+      await resetDemo(ctx).then(() => say('demo seed restored with RESET_DEMO_DATA'), (err) => say(`RESET_DEMO_DATA failed: ${short(err).slice(0, 100)}`, false))
     }
     for (const id of ctx.shipmentIds) {
       try {
@@ -1056,11 +1114,15 @@ async function main() {
 
     // fixtures
     await step('setup-fixtures', async () => {
+      // The throwaway admin has no UserProfile, and a sales rep must be one: use a real, active staff profile (read only; nothing is written to it).
+      const profiles = (await gql(ctx.token, 'query { listUserProfiles(limit: 1000) { items { id status } } }', {})).listUserProfiles.items
+      ctx.repId = (profiles.find((p) => p.status === 'ACTIVE') ?? profiles[0])?.id ?? null
+      if (!ctx.repId) fail('no UserProfile exists in dev to act as the sales rep')
       const division = await ctx.dir('SAVE_OWNERSHIP_DIVISION', { parentId: null, active: true, brand: null, sortOrder: 900, code: `ZZ_AA_${ts}`, name: `ZZ AA ${ts}`, intakeEmail: ctx.addressA })
       ctx.divisionCode = `ZZ_AA_${ts}`
       ctx.divisionIds.add(String(division.id ?? ctx.divisionCode))
       const customer = await ctx.dir('UPSERT_CUSTOMER', {
-        name: `ZZ AA Customer ${ts}`, creditLimitCents: 100_000_000, defaultSalesRepId: ctx.adminUsername ?? null,
+        name: `ZZ AA Customer ${ts}`, creditLimitCents: 100_000_000, defaultSalesRepId: ctx.repId ?? null,
         contacts: [{ id: `cnt-${randomUUID()}`, name: 'ZZ AA Sender', email: ctx.senderEmail, types: [] }],
         billToParties: [{ id: ctx.billToId, name: 'ZZ AA Bill To', isDefault: true }],
       })

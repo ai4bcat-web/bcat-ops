@@ -236,4 +236,16 @@ describe('LoadReviewPage', () => {
     expect(await screen.findByText('Forbidden: needs page-loadReview')).toBeTruthy()
     expect(moveButton().disabled).toBe(true)
   })
+
+  it('?shipment= for a load outside the working set is fetched by id and opens the drawer', async () => {
+    const outside = shipment('s-out', { readyToInvoiceAt: new Date().toISOString(), arStatus: 'UNBILLED' })
+    mocks.shipments.mockImplementation((view: { kind: string; ids?: string[] }) => ({
+      shipments: view.kind === 'ids' ? (view.ids ?? []).map((id) => (id === 's-out' ? outside : null)).filter(Boolean) : ROWS,
+      loading: false, error: null, refresh: mocks.refresh,
+    }))
+    renderPage('/tms/load-review?shipment=s-out')
+    expect(await screen.findByRole('dialog')).toBeTruthy()
+    expect(mocks.review).toHaveBeenCalledWith({ shipmentId: 's-out' })
+    expect(mocks.shipments).not.toHaveBeenCalledWith({ kind: 'ids', ids: ['s-1'] })
+  })
 })

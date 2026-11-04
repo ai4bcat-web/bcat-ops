@@ -15,7 +15,7 @@ import './loadReview.css'
 type ReviewEntry = { row: ShipmentListRow; verdict?: LoadReviewVerdict }
 export function LoadReviewPage() {
   const [params, setParams] = useSearchParams()
-  const { shipments, queue, loading, partial, error, refresh } = useLoadReviewQueue(params.get('tab') === 'released')
+  const { shipments, queue, target, loading, partial, error, refresh } = useLoadReviewQueue(params.get('tab') === 'released', params.get('shipment'))
   const { hasPageAccess } = useAuth()
   const canOpen = hasPageAccess('loads') || hasPageAccess('tms')
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -40,7 +40,7 @@ export function LoadReviewPage() {
   const page = filtered.slice(pageNumber * 50, pageNumber * 50 + 50)
   const eligible = filtered.filter((entry) => entry.verdict?.ok)
   const chosen = eligible.filter(({ row }) => selected.has(row.id)).slice(0, 100).map(({ row }) => row.id)
-  const openRow = shipments.find((row) => row.id === params.get('shipment'))
+  const openRow = shipments.find((row) => row.id === params.get('shipment')) ?? target
   function update(values: Record<string, string | null>) {
     setParams((previous) => {
       const next = new URLSearchParams(previous)

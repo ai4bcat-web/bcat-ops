@@ -2,3 +2,6 @@
 .tms-shell .aa-review-checks { display: inline-flex; gap: 2px; }
 .tms-shell .aa-review-actions { position: sticky; bottom: 0; padding: 12px; background: var(--tms-card); border-top: 1px solid var(--tms-border); }
 .tms-shell .aa-review-results { padding: 12px; white-space: pre-line; color: var(--tms-text); }
+/* The footer carries Previous/Next beside the page-size and key hints: wrap on a phone instead of widening the page. */
+.tms-shell .aa-load-review .tms-footer { flex-wrap: wrap; }
+.tms-shell .aa-load-review .tms-footer-hints { flex-wrap: wrap; }

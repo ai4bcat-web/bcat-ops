@@ -8,15 +8,28 @@ import { generateClient } from 'aws-amplify/data'
 import { queueDriverDocScan } from './podsClient'
 import { normalizePro } from './proNumber'
 import { uploadData, getUrl } from 'aws-amplify/storage'
+import { cachedList, invalidateLists, SUBMISSION_CACHE_PREFIX } from './listCache'
 
 const client = generateClient()
 
 type GraphQLResult<T> = { data: T }
 type GqlOptions = Parameters<typeof client.graphql>[0]
 
+/**
+ * The submission and document lists are read by a dozen mounted hooks at once (calendar, schedule,
+ * dashboard each issued them six times per load), so reads share one request inside this window and
+ * every write through this client drops them. Writes by other tabs show up after the window.
+ */
+const SUBMISSION_CACHE = { ttlMs: 15_000 }
+
 async function gql<T>(query: string, variables?: Record<string, unknown>): Promise<T> {
-  const result = (await client.graphql({ query, variables } as unknown as GqlOptions)) as GraphQLResult<T>
-  return result.data
+  const write = /^\s*mutation\b/.test(query)
+  try {
+    const result = (await client.graphql({ query, variables } as unknown as GqlOptions)) as GraphQLResult<T>
+    return result.data
+  } finally {
+    if (write) invalidateLists(SUBMISSION_CACHE_PREFIX)
+  }
 }
 
 // ── Wire types ───────────────────────────────────────────────────────────────
@@ -165,7 +178,13 @@ const DOC_FIELDS = `
 
 // ── Queries ───────────────────────────────────────────────────────────────────
 
-export async function listDriverSubmissions(limit = 1000): Promise<SubmissionWithDocs[]> {
+/** `fresh` skips the shared window: read-modify-write paths must see what is on the server now. */
+export function listDriverSubmissions(limit = 1000, opts?: { fresh?: boolean }): Promise<SubmissionWithDocs[]> {
+  if (opts?.fresh) invalidateLists(SUBMISSION_CACHE_PREFIX)
+  return cachedList(`${SUBMISSION_CACHE_PREFIX}all:${limit}`, () => fetchDriverSubmissions(limit), SUBMISSION_CACHE).then((rows) => [...rows])
+}
+
+async function fetchDriverSubmissions(limit: number): Promise<SubmissionWithDocs[]> {
   const result = await gql<{ listDriverSubmissions: { items: DriverSubmissionRecord[]; nextToken?: string | null } }>(
     `query ListDriverSubmissions($limit: Int) {
       listDriverSubmissions(limit: $limit) {
@@ -179,7 +198,12 @@ export async function listDriverSubmissions(limit = 1000): Promise<SubmissionWit
   return attachDocs(submissions, limit)
 }
 
-export async function listDriverSubmissionsByDriver(driverId: string, limit = 1000): Promise<SubmissionWithDocs[]> {
+export function listDriverSubmissionsByDriver(driverId: string, limit = 1000, opts?: { fresh?: boolean }): Promise<SubmissionWithDocs[]> {
+  if (opts?.fresh) invalidateLists(SUBMISSION_CACHE_PREFIX)
+  return cachedList(`${SUBMISSION_CACHE_PREFIX}driver:${driverId}:${limit}`, () => fetchDriverSubmissionsByDriver(driverId, limit), SUBMISSION_CACHE).then((rows) => [...rows])
+}
+
+async function fetchDriverSubmissionsByDriver(driverId: string, limit: number): Promise<SubmissionWithDocs[]> {
   const result = await gql<{ listDriverSubmissions: { items: DriverSubmissionRecord[]; nextToken?: string | null } }>(
     `query ListDriverSubmissionsByDriver($filter: ModelDriverSubmissionFilterInput, $limit: Int) {
       listDriverSubmissions(filter: $filter, limit: $limit) {
@@ -213,6 +237,20 @@ export async function attachDocs(
   limit: number,
 ): Promise<SubmissionWithDocs[]> {
   if (submissions.length === 0) return []
+  const allDocs = await cachedList(`${SUBMISSION_CACHE_PREFIX}docs:${limit}`, () => fetchAllDocs(limit), SUBMISSION_CACHE)
+  const docsBySubmission = new Map<string, DriverSubmissionDocRecord[]>()
+  for (const doc of allDocs) {
+    const list = docsBySubmission.get(doc.submissionId) ?? []
+    list.push(doc)
+    docsBySubmission.set(doc.submissionId, list)
+  }
+  return submissions.map((s) => ({
+    ...s,
+    docs: docsBySubmission.get(s.id) ?? [],
+  }))
+}
+
+async function fetchAllDocs(limit: number): Promise<DriverSubmissionDocRecord[]> {
   const allDocs: DriverSubmissionDocRecord[] = []
   let nextToken: string | null = null
   do {
@@ -229,16 +267,7 @@ export async function attachDocs(
     allDocs.push(...page.listDriverSubmissionDocs.items)
     nextToken = page.listDriverSubmissionDocs.nextToken ?? null
   } while (nextToken)
-  const docsBySubmission = new Map<string, DriverSubmissionDocRecord[]>()
-  for (const doc of allDocs) {
-    const list = docsBySubmission.get(doc.submissionId) ?? []
-    list.push(doc)
-    docsBySubmission.set(doc.submissionId, list)
-  }
-  return submissions.map((s) => ({
-    ...s,
-    docs: docsBySubmission.get(s.id) ?? [],
-  }))
+  return allDocs
 }
 
 // ── Find an existing submission to attach a POD ───────────────────────────────
@@ -408,7 +437,7 @@ async function staffUploadDriverDocOnly(input: StaffUploadDriverDocInput): Promi
   const now = new Date().toISOString()
 
   if (input.kind === 'POD') {
-    const candidates = await listDriverSubmissionsByDriver(input.driver.id)
+    const candidates = await listDriverSubmissionsByDriver(input.driver.id, 1000, { fresh: true })
     const existing = pickSubmissionForPod(candidates, input.referenceNumber, input.loadId)
     if (existing) {
       return staffAddPodToSubmission(existing.id, input)
@@ -578,7 +607,7 @@ export async function removeDriverDocs(
   submissionId: string,
   kind: SubmissionKind,
 ): Promise<void> {
-  const subs = await listDriverSubmissions(1000)
+  const subs = await listDriverSubmissions(1000, { fresh: true })
   const submission = subs.find((s) => s.id === submissionId)
   if (!submission) throw new Error('That submission no longer exists')
 

@@ -39,6 +39,29 @@ describe('batchByIndex', () => {
     expect(out.size).toBe(101)
   })
 
+  it('carries one shared server-side filter on every alias and on the paging follow-ups', async () => {
+    const seen: { query: string; variables: Record<string, unknown> }[] = []
+    const run: GraphqlRunner = async (query, variables) => {
+      seen.push({ query, variables })
+      const paged = query.includes('BatchByIndexMore')
+      const data: Record<string, unknown> = {}
+      for (const [, alias] of query.matchAll(/(\w+): listOrderByShipmentId\(/g)) {
+        data[alias] = { items: [{ id: `${alias}-${paged ? 'more' : 'first'}`, shipmentId: 'x' }], nextToken: !paged && alias === 'a0' ? 'T' : null }
+      }
+      return data
+    }
+    const filter = { type: 'ModelOrderFilterInput', value: { voidedAt: { attributeExists: false } } }
+    const out = await batchByIndex<{ id: string }>({ ...Q, filter }, ['x', 'y'], { run })
+    expect(seen).toHaveLength(2)
+    for (const call of seen) {
+      expect(call.query).toContain('$filter: ModelOrderFilterInput')
+      expect(call.query).toMatch(/filter: \$filter/)
+      expect(call.variables.filter).toEqual(filter.value)
+    }
+    expect(seen[0].query.match(/filter: \$filter/g)).toHaveLength(2)
+    expect(out.get('x')).toHaveLength(2)
+  })
+
   it('de-duplicates ids so rows are not doubled', async () => {
     const f = fakeIndex(() => 2)
     const out = await batchByIndex<{ id: string }>(Q, ['x', 'x', 'y'], { run: f.run })

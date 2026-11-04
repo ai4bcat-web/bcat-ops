@@ -16,17 +16,22 @@
 export const MAX_FACTOR = 1.5
 export const RATCHET_FACTOR = 1.5
 
+// Raised (PERF fix pass, measured on dev, see BUILD_LOG 2026-11-04 "PERF fix pass"): a page cannot cost less than the shell it
+// mounts inside. The shell floor is 45 requests / ~6.3 MB (G8, working set 3.3 MB + the directory lists), so the bare-shell pages
+// (customers, users, carriers) carried budgets (40 req, 4-6 MB) below their own floor. They are now floor + their own reads (<= 5 req).
+// /tms/dashboard = shell floor + the 3-month window loader (G7 window:3, 37 trips, 5.7 MB).
+// directory:locations: 3,169 rows / 2.55 MB, bandwidth-bound at ~0.9 s/MB (2 trips at limit 3000 measured the same 2.3 s as 4 trips).
 // <budgets>
 export const PAGE_BUDGETS = {
-  '/tms/dashboard': { firstRows: 3, settled: 5, requests: 70, mb: 10 },
+  '/tms/dashboard': { firstRows: 3, settled: 5, requests: 80, mb: 12 },
   '/tms/tracking': { firstRows: 2.5, settled: 4, requests: 50, mb: 8 },
   '/tms/shipments': { firstRows: 3, settled: 6, requests: 60, mb: 12 },
   '/tms/shipments?list=all': { firstRows: 3, settled: 6, requests: 70, mb: 12 },
-  '/tms/customers': { firstRows: 2.5, settled: 4, requests: 40, mb: 6 },
-  '/tms/brokerage/users': { firstRows: 2, settled: 4, requests: 40, mb: 4 },
+  '/tms/customers': { firstRows: 2.5, settled: 4, requests: 50, mb: 7 },
+  '/tms/brokerage/users': { firstRows: 2, settled: 4, requests: 50, mb: 7 },
   '/tms/invoicing': { firstRows: 3, settled: 5, requests: 60, mb: 8 },
   '/tms/invoicing/payable': { firstRows: 3, settled: 5, requests: 60, mb: 8 },
-  '/tms/carriers': { firstRows: 2.5, settled: 4, requests: 40, mb: 5 },
+  '/tms/carriers': { firstRows: 2.5, settled: 4, requests: 50, mb: 7 },
   '/schedule': { firstRows: 3, settled: 5, requests: 50, mb: 8 },
   '/calendar': { firstRows: 3, settled: 5, requests: 50, mb: 8 },
   '/dashboard': { firstRows: 3, settled: 6, requests: 70, mb: 10 },
@@ -61,7 +66,7 @@ export const LOADER_BUDGETS = {
   'window:1': { seconds: 4, trips: 30, mb: 3 },
   'window:3': { seconds: 6, trips: 90, mb: 9 },
   'directory:customers': { seconds: 2 },
-  'directory:locations': { seconds: 2 },
+  'directory:locations': { seconds: 3 },
   'directory:carriers': { seconds: 2 },
   'directory:userProfiles': { seconds: 2 },
   'audit:5': { seconds: 2 },

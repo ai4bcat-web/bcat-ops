@@ -17,7 +17,7 @@ import {
   listShipmentsByMonth,
   listShipmentsByMonthFiltered,
   listShipmentsByStatus,
-  listShipmentsByStatusFiltered,
+  listShipmentsByStatusesFiltered,
 } from '@/lib/apiClient'
 import type {
   LoadBoardSummary,
@@ -159,7 +159,7 @@ async function deliveredAwaitingRelease(
   }
   boardStats.stage2Ids = wanted.size
   if (wanted.size === 0) return []
-  const narrow = await getShipmentsBatch([...wanted], true)
+  const narrow = await getShipmentsByIds([...wanted], true) // memoised: the AR/AP worklists ask for these same ids next
   const survivors: string[] = []
   for (const [id, s] of narrow) {
     if (s.voidedAt || s.deletedAt) putList(deadKey(id), true)
@@ -167,7 +167,7 @@ async function deliveredAwaitingRelease(
   }
   boardStats.stage2Fetched = survivors.length
   if (survivors.length === 0) return []
-  return [...(await getShipmentsBatch(survivors, false)).values()]
+  return [...(await getShipmentsByIds(survivors, false)).values()]
 }
 
 async function fetchBundle(view: BoardView, onPartial?: (b: BoardBundle) => void): Promise<BoardBundle> {
@@ -176,9 +176,7 @@ async function fetchBundle(view: BoardView, onPartial?: (b: BoardBundle) => void
       // Stage 1: the open statuses and the DOCS_NEEDED order list read in parallel.
       const docsNeeded = listDocsNeededOrdersNarrow()
       docsNeeded.catch(() => {}) // surfaced where it is awaited; never an unhandled rejection
-      const open = mergeShipmentSets(...(await Promise.all(
-        OPEN_SHIPMENT_STATUSES.map((s) => listShipmentsByStatusFiltered(s)),
-      )))
+      const open = mergeShipmentSets(await listShipmentsByStatusesFiltered(OPEN_SHIPMENT_STATUSES))
       // Stage 2 (narrow checks of the delivered backlog) runs while the open rows join.
       const stage2 = deliveredAwaitingRelease(new Set(open.map((s) => s.id)), docsNeeded)
       stage2.catch(() => {})

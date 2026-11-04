@@ -16,8 +16,8 @@ vi.mock('@/lib/apiClient', () => {
   return {
     listShipments: scan, listOrders: scan, listLoadSummaries: scan, listLoadCarriers: scan, listLoadFinancials: scan,
     listShipmentsByCustomer: scan, listShipmentsByMonth: scan, listShipmentsByStatus: scan,
-    listShipmentsByStatusFiltered: async (status: string, o?: { includeVoided?: boolean }) =>
-      db.shipments.filter((s) => s.status === status && s.id !== 'undated-draft' && (o?.includeVoided || !s.voidedAt)), // the status index sorts on pickupAppt: an undated row is not in it
+    listShipmentsByStatusesFiltered: async (statuses: string[], o?: { includeVoided?: boolean }) =>
+      db.shipments.filter((s) => statuses.includes(s.status) && s.id !== 'undated-draft' && (o?.includeVoided || !s.voidedAt)), // the status index sorts on pickupAppt: an undated row is not in it
     listShipmentsByMonthFiltered: async (month: string, o?: { includeVoided?: boolean }) => {
       calls.month.push({ month, includeVoided: o?.includeVoided })
       return db.shipments.filter((s) => s.pickupMonth === month && (o?.includeVoided || !s.voidedAt))
@@ -128,6 +128,16 @@ describe('loadBoardBundle working', () => {
     const secondNarrow = calls.batch.filter((c) => c.narrow).flatMap((c) => c.ids)
     expect(secondNarrow).not.toContain('dlv-void')
     expect(secondNarrow).not.toContain('dlv-deleted')
+  })
+
+  it('hands the narrow rows it read to the next by-id caller (the AR/AP worklists) instead of asking again', async () => {
+    await loadBoardBundle({ kind: 'working' })
+    const checked = calls.batch.filter((c) => c.narrow).flatMap((c) => c.ids)
+    expect(checked).toEqual(expect.arrayContaining(['dlv-unreleased', 'dlv-void']))
+    calls.batch = []
+    const rows = await getShipmentsByIds(checked, true)
+    expect(calls.batch).toEqual([])
+    expect(rows.get('dlv-unreleased')?.id).toBe('dlv-unreleased')
   })
 
   it('reports the joined open rows before the delivered backlog has been checked', async () => {

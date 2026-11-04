@@ -14,6 +14,12 @@
 export const FULL_TABLE_OPS = ['listShipments', 'listOrders', 'listLoads', 'listLoadCarriers', 'listLoadFinancials', 'listAuditLogs']
 /** A router mutation whose action reads (the app drives all reads of some tables through `mutation tmsXActions`). */
 export const READ_ACTION = /^(GET|LIST|SEARCH|FIND|READ|COUNT|PREVIEW|CHECK|LOOKUP)_/
+/**
+ * Legacy lowercase-action routers that the schema declares as mutations (AppSync custom operations cannot be queries) but whose
+ * listed actions only read: managePods list/status (pod-actions: listing and connection status) and manageDispatch status
+ * (dispatch-actions: settings read). Exact `field:action` pairs: any other action on these routers is still a G0 mutation.
+ */
+export const READ_ROUTED = new Set(['managePods:list', 'managePods:status', 'manageDispatch:status'])
 export const MAX_CHAIN_DEPTH = 4
 export const MAX_REPEATS = 3
 
@@ -136,12 +142,24 @@ const chainKey = (op) => {
 /**
  * G0 + G4 facts from a request log (entries as `{ body }`).
  * fullTable:  full-table ops seen (listAuditLogs only when it carries no filter).
+ * requestsByOp: HTTP requests that carried each operation (an aliased batch is one request, however many aliases).
+ * bytesByOp:  response bytes by operation (a multi-operation request is split evenly).
  * maxDepth:   longest nextToken chain of any single operation.
  * repeated:   operations whose chain STARTED more than MAX_REPEATS times (the duplicate-mount regression).
  * mutations:  non-read mutations (G0).
  */
 export function requestShape(log) {
   const ops = log.flatMap((e) => parseOperations(e.body ?? ''))
+  const requestsByOp = {}
+  const bytesByOp = {}
+  for (const e of log) {
+    const names = [...new Set(parseOperations(e.body ?? '').map((op) => op.name))]
+    if (names.length === 0) names.push(`(unparsed ${e.url ?? 'request'})`)
+    for (const name of names) {
+      requestsByOp[name] = (requestsByOp[name] ?? 0) + 1
+      bytesByOp[name] = (bytesByOp[name] ?? 0) + (e.bytes ?? 0) / names.length // an aliased batch splits its response evenly
+    }
+  }
   const counts = {}
   const chains = new Map()
   const starts = new Map()
@@ -161,9 +179,9 @@ export function requestShape(log) {
   }
   const repeated = [...starts].filter(([, n]) => n > MAX_REPEATS).map(([key, n]) => ({ op: key.split('|')[0], times: n }))
   const mutations = [...new Set(ops
-    .filter((op) => op.type === 'mutation' && !(op.action && READ_ACTION.test(op.action)))
+    .filter((op) => op.type === 'mutation' && !(op.action && (READ_ACTION.test(op.action) || READ_ROUTED.has(`${op.name}:${op.action}`))))
     .map((op) => (op.action ? `${op.name}:${op.action}` : op.name)))]
-  return { counts, fullTable, maxDepth: Math.max(0, ...depthOf.values()), depthByOp: Object.fromEntries(depthOf), repeated, mutations }
+  return { counts, requestsByOp, bytesByOp, fullTable, maxDepth: Math.max(0, ...depthOf.values()), depthByOp: Object.fromEntries(depthOf), repeated, mutations }
 }
 
 // ───────────────────────────── in-page hook ─────────────────────────────
@@ -185,7 +203,7 @@ export function HOOK_SOURCE(config) {
   window.fetch = function (input, init) {
     const url = typeof input === 'string' ? input : (input && input.url) || String(input)
     if (!track(url)) return orig(input, init)
-    const entry = { url: url.replace(/^https:\\/\\//, '').split('/')[0], body: typeof (init && init.body) === 'string' ? init.body.slice(0, 60000) : '', start: T(), end: null, bytes: 0, status: 0 }
+    const entry = { url: url.replace(/^https:\\/\\//, '').split('/')[0], body: typeof (init && init.body) === 'string' ? init.body.slice(0, 1000000) : '', start: T(), end: null, bytes: 0, status: 0 }
     st.reqs.push(entry); st.inflight += 1; st.lastStart = entry.start
     const done = () => { entry.end = T(); st.lastEnd = entry.end; st.inflight -= 1 }
     return orig(input, init).then((res) => {
@@ -209,6 +227,7 @@ export function HOOK_SOURCE(config) {
     const sub = document.querySelector('.tms-dash-kpis .tms-kpi-card-sub')
     st.kpiSub = sub ? sub.textContent.trim() : null
     const main = document.querySelector('.tms-main') || document.body
+    if (!main) return // the hook is injected before <body> exists on a cold navigation
     st.empty = !!main.querySelector('[data-testid*="empty"], .tms-empty, [class*="empty-state"]') || /\\bno (loads|shipments|results|rows|customers|carriers|invoices|bills|items|data|matching)\\b/i.test(main.innerText || '')
     let ok = cfg.expectEmpty ? st.empty && rows === 0 : rows >= cfg.minRows
     if (cfg.minCharts) ok = ok && st.charts >= cfg.minCharts

@@ -1,0 +1,70 @@
+{
+  "at": "2026-11-04T08:35:29.468Z",
+  "summary": {
+    "/schedule": {
+      "label": "Schedule (legacy)",
+      "firstRowsS": 5.96839999961853,
+      "settledS": 5.96839999961853,
+      "requests": 142,
+      "mb": 22.009866,
+      "p95": {
+        "firstRows": 5.96839999961853,
+        "settled": 5.96839999961853,
+        "requests": 142,
+        "mb": 22.009866
+      },
+      "rowsAtEnd": [
+        0
+      ],
+      "fullTableOps": [],
+      "mutations": [],
+      "maxChainDepth": 4,
+      "repeated": [
+        {
+          "op": "listDriverSubmissionDocs",
+          "times": 4
+        }
+      ],
+      "problems": [
+        "failedRequests: net::ERR_CERT_VERIFIER_CHANGED https://f5iqzdpidzalvjys7yxijn5ave.appsync-api.us-east-1.amazonaws.com/graphql",
+        "failedRequests: net::ERR_CERT_VERIFIER_CHANGED https://f5iqzdpidzalvjys7yxijn5ave.appsync-api.us-east-1.amazonaws.com/graphql"
+      ],
+      "dashboardKpi": []
+    },
+    "/calendar": {
+      "label": "Calendar (legacy)",
+      "firstRowsS": 6.3495,
+      "settledS": 6.3495,
+      "requests": 155,
+      "mb": 26.298884,
+      "p95": {
+        "firstRows": 6.3495,
+        "settled": 6.3495,
+        "requests": 155,
+        "mb": 26.298884
+      },
+      "rowsAtEnd": [
+        0
+      ],
+      "fullTableOps": [],
+      "mutations": [],
+      "maxChainDepth": 6,
+      "repeated": [
+        {
+          "op": "managePods",
+          "times": 6
+        },
+        {
+          "op": "listDriverSubmissions",
+          "times": 6
+        },
+        {
+          "op": "listDriverSubmissionDocs",
+          "times": 6
+        }
+      ],
+      "problems": [],
+      "dashboardKpi": []
+    }
+  }
+}

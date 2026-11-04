@@ -113,3 +113,6 @@ export function putList<T>(key: string, value: T): void {
   e.hasValue = true
   e.at = Date.now()
 }
+
+/** Key prefix of the driver submission + document lists; a pod write (scan, assign, review) clears it with the rest. */
+export const SUBMISSION_CACHE_PREFIX = 'driverSubmissions:'

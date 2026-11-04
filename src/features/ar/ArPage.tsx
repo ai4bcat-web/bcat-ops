@@ -175,7 +175,7 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     () => docsNeeded.rows.filter((r) => r.docsReady && !r.shipment?.podFlaggedAt),
     [docsNeeded.rows],
   )
-  const readyBilling = useReadyForBilling(readyRows)
+  const readyBilling = useReadyForBilling(readyRows, tab === 'ready-for-billing')
 
   const uninvoiced = useMemo(() => {
     const rows = [...unbilled.rows, ...docsNeeded.rows]

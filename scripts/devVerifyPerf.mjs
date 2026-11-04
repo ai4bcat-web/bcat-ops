@@ -94,7 +94,8 @@ async function measureAll(b, specs, paths) {
       const m = await measurePage(b, path, specs[path])
       runs.push(m)
       console.log(`     ${path} run ${i + 1}/${RUNS}: first ${fmt(m.firstRowsS)} s, settled ${fmt(m.settledS)} s, ${m.requests} req, ${fmt(m.mb)} MB, rows ${m.rows}${m.charts ? ` charts ${m.charts}` : ''}${m.timedOut ? ' TIMEOUT' : ''}`)
-      if (verbose) console.log(`       ops ${JSON.stringify(m.shape.counts)}`)
+      if (verbose) console.log(`       MB per op (sum ${(Object.values(m.shape.bytesByOp).reduce((a, b) => a + b, 0) / 1e6).toFixed(1)}) ${JSON.stringify(Object.fromEntries(Object.entries(m.shape.bytesByOp).sort((a, b) => b[1] - a[1]).slice(0, 14).map(([k, v]) => [k, Number((v / 1e6).toFixed(2))])))}`)
+      if (verbose) console.log(`       requests per op ${JSON.stringify(Object.fromEntries(Object.entries(m.shape.requestsByOp).sort((a, b) => b[1] - a[1])))}`)
     }
     out[path] = { label: PAGE_LABELS[path], spec: specs[path], runs }
   }
