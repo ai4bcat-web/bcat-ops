@@ -107,7 +107,7 @@ function aligned(authDomain: string, senderDomain: string): boolean {
  * `pass` for somebody else's domain (a forwarder signing its own mail) and every
  * other verdict — none, neutral, softfail, fail, temperror — do not.
  */
-function authPasses(authResult: string, senderDomain: string): boolean {
+export function authPasses(authResult: string, senderDomain: string): boolean {
   if (!senderDomain) return false
   for (const segment of authResult.split(';')) {
     const method = /^(spf|dkim)\s*=\s*([a-z]+)/i.exec(segment.trim())

@@ -12,6 +12,7 @@ import type { Stop } from '../../../src/types'
 import type { AdapterResult } from '../../../src/lib/integrations/types'
 import { normalizeName } from '../../../src/lib/tmsDirectory'
 import { laneKeyFor, laneKey3For } from '../../../src/lib/laneKey'
+import { mcpPacketStanding } from '../../../src/lib/mcpPacket'
 import {
   type Row,
   putItem,
@@ -71,7 +72,7 @@ export interface CarrierOfferDeps {
 
 // ── Carrier lookup ───────────────────────────────────────────────────────────
 
-async function findCarrier(deps: CarrierOfferDeps, input: Row): Promise<Row | null> {
+export async function findCarrier(deps: CarrierOfferDeps, input: Row): Promise<Row | null> {
   const mc = optionalString(input.carrierMc, 40)
   if (mc) {
     const byMc = await deps.queryIndex(deps.tables.carrier, IDX_CARRIERS_BY_MC, 'mcNumber', mc)
@@ -95,6 +96,9 @@ function isDuplicate(
   now: string,
 ): boolean {
   if (String(existing.side ?? '') !== 'BUY') return false
+  // Step AL: a re-delivered message never doubles a Quote, however long ago the first one landed.
+  const messageRef = typeof input.messageRef === 'string' ? input.messageRef.trim() : ''
+  if (messageRef && String(existing.offerMessageRef ?? '') === messageRef) return true
   if (numberOrNull(existing.amountCents) !== amountCents) return false
 
   const existingCarrierId = existing.carrierId ? String(existing.carrierId) : null
@@ -281,11 +285,24 @@ export async function listCarrierOffers(deps: CarrierOfferDeps, input: Row): Pro
   const enriched = await Promise.all(
     offers.map(async (quote) => {
       const carrier = quote.carrierId ? await deps.getById(deps.tables.carrier, String(quote.carrierId)) : null
-      return { ...quote, vetting: deps.carrierStanding(carrier, settings) }
+      return {
+        ...quote,
+        vetting: deps.carrierStanding(carrier, settings),
+        carrierRisk: carrierRiskOf(carrier),
+      }
     }),
   )
 
   return { offers: enriched }
+}
+
+/** The risk number and packet standing the Offers hub paints, read from the row `listCarrierOffers` already loaded. */
+function carrierRiskOf(carrier: Row | null): { mcpRiskScore: number | null; mcpStatus: string | null; packetComplete: boolean } {
+  return {
+    mcpRiskScore: numberOrNull(carrier?.mcpRiskScore),
+    mcpStatus: carrier?.mcpStatus ? String(carrier.mcpStatus) : null,
+    packetComplete: mcpPacketStanding(carrier as { mcpStatus?: string | null } | null).completed,
+  }
 }
 
 // ── SEND_SETUP_PACKET ────────────────────────────────────────────────────────

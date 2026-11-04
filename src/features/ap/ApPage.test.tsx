@@ -6,7 +6,7 @@
  * disagrees with its lines wears that variance where the approve button is; an approved
  * bill says how late it already is; the strip's figures are `@/lib/arAging`'s, not a
  * second arithmetic written in the page; and an assignment nobody has billed offers the
- * one action that can move it. The fifth pins the six tabs, because the page is the only
+ * one action that can move it. The fifth pins the seven tabs, because the page is the only
  * route to five of them.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
@@ -31,7 +31,12 @@ vi.mock('@/hooks/useCarriers', () => ({
 vi.mock('@/hooks/useAuth', () => ({
   useAuth: () => ({ isAdmin: false, isOwner: false, hasPageAccess: () => true }),
 }))
-vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() } }))
+vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn(), message: vi.fn() } }))
+// The AP inbox has its own tests; here it would only drag its router into a test about the board.
+vi.mock('./inbox/useApInbox', () => ({
+  useApInboxStatus: () => ({ status: null, error: null, refresh: vi.fn().mockResolvedValue(undefined), syncing: false, progress: null, syncNow: vi.fn() }),
+  useApInboxItems: () => ({ items: [], loading: false, error: null, refresh: vi.fn().mockResolvedValue(undefined) }),
+}))
 vi.mock('@/lib/apiClient', () => ({
   graphqlErrorText: (e: unknown) => String(e),
   getTmsSettings: vi.fn().mockResolvedValue({ apRequireSignedRateCon: true }),
@@ -187,12 +192,14 @@ beforeEach(() => vi.clearAllMocks())
 describe('the AP board', () => {
   it('offers every view of the money, and each one renders', () => {
     setup({ rowsByTab: { AWAITING_INVOICE: [worklistRow()] } })
-    for (const label of ['Awaiting invoice', 'In review', 'To be paid', 'Paid', 'Payments & credits', 'Aging']) {
+    for (const label of ['Awaiting invoice', 'In review', 'To be paid', 'Paid', 'Payments & credits', 'Aging', 'AP inbox']) {
       const tab = screen.getByRole('tab', { name: new RegExp(`^${label}`) })
       fireEvent.click(tab)
       expect(tab.getAttribute('aria-selected')).toBe('true')
     }
-    // The last click landed on Aging, whose body is the strip.
+    // The last click landed on the AP inbox, whose empty queue says so; Aging's body is the strip.
+    expect(screen.getByText(/Invoice e-mails the AP inbox finds/)).toBeTruthy()
+    fireEvent.click(screen.getByRole('tab', { name: /^Aging/ }))
     expect(screen.getByLabelText('AP totals')).toBeTruthy()
   })
 

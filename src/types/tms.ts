@@ -20,6 +20,8 @@ export type {
 import type { DriverSmsTarget, TrackingMethod, TrackingMode, TrackingPrefsOverride } from '../lib/trackingPrefs'
 export type { DriverSmsTarget, TrackingMethod, TrackingMode, TrackingPrefsOverride } from '../lib/trackingPrefs'
 export type { RateViewAnswer } from '../lib/integrations/rateView'
+// Step AL: the Carrier Sales inbox shapes ride ShipmentMessage.offer and SpotSettings. Type-only cycle.
+import type { CarrierInboxConfig, CarrierInboxState, InboundOfferRecord } from '../lib/carrierInbox/types'
 
 // ── Integrations (Step J) ────────────────────────────────────────────────────
 // The integration contract lives in `src/lib/integrations/types`, which the Lambdas
@@ -1739,6 +1741,10 @@ export interface ShipmentMessageRecord {
   authorName?: string | null
   at: string
   createdBy: string
+  /** Step AL: the classified inbound offer. Null on every other message. */
+  offer?: InboundOfferRecord | null
+  /** Step AL: epoch seconds; set only on shipmentId='UNMATCHED' bucket rows. */
+  ttlEpoch?: number | null
   createdAt: string
   updatedAt: string
 }
@@ -3223,6 +3229,10 @@ export interface CarrierBillRecord {
   docsOverrideAt?: string | null
   docsOverrideBy?: string | null
   docsOverrideNote?: string | null
+  /** Step AG: set when an AP-inbox e-mail wrote the invoice number/dates. */
+  apInboxItemId?: string | null
+  apInboxSourceUrl?: string | null
+  apInboxAppliedAt?: string | null
   paidAt?: string | null
   voidedAt?: string | null
   voidedBy?: string | null
@@ -3654,6 +3664,9 @@ export type ClaimKey =
   | 'AP_CHARGES'
   | 'CARRIER_INSURANCE_EDIT'
   | 'NO_AR_INVOICE'
+  | 'DASHBOARDS_CREATE'
+  | 'DASHBOARDS_PUBLISH_COMPANY'
+  | 'VIEW_ALL'
 
 export type UserStatus = 'PENDING' | 'ACTIVE' | 'INACTIVE'
 
@@ -4601,6 +4614,9 @@ export interface SpotSettingsRecord {
   maxMessagesPerRepPerRun?: number | null
   updatedBy?: string | null
   version?: number | null
+  /** Step AL: only on the row id='carrier-sales'. Nothing secret (hashes only). */
+  carrierInbox?: CarrierInboxConfig | null
+  carrierInboxState?: CarrierInboxState | null
   createdAt?: string
   updatedAt?: string
 }

@@ -25,6 +25,7 @@ import { CompanyTab } from '@/features/tms/brokerage/company/CompanyTab'
 import { UsersPage } from '@/features/users/UsersPage'
 import { DemoPage } from './DemoPage'
 import { SpotQuoterSettingsPage } from '@/features/tms/settings/SpotQuoterSettingsPage'
+import { CarrierSalesSettingsPage } from '@/features/tms/settings/CarrierSalesSettingsPage'
 import { useAuth } from '@/hooks/useAuth'
 import { TMS_PAGE_KEY } from '@/lib/navSections'
 
@@ -54,6 +55,7 @@ const TABS: BrokerageTab[] = [
   { key: 'integrations', label: 'Integrations', path: 'integrations', pages: [] },
   { key: 'ai-agents', label: 'AI Agents', path: 'ai-agents', pages: [] },
   { key: 'spot-quoter', label: 'Spot quoter & e-mail', path: 'spot-quoter', pages: [] },
+  { key: 'carrier-sales', label: 'Carrier Sales', path: 'carrier-sales', pages: [] },
   { key: 'company', label: 'Company', path: 'company', pages: [] },
   { key: 'demo', label: 'Demo', path: 'demo', pages: [TMS_PAGE_KEY] },
 ]
@@ -99,6 +101,7 @@ export function BrokeragePage() {
             wildcard for the same reason Integrations is. */}
         <Route path="ai-agents/*" element={<RequireAdmin><AiAgentsPage /></RequireAdmin>} />
         <Route path="spot-quoter" element={<RequireAdmin><SpotQuoterSettingsPage /></RequireAdmin>} />
+        <Route path="carrier-sales" element={<RequireAdmin><CarrierSalesSettingsPage /></RequireAdmin>} />
         <Route path="company/*" element={<RequireAdmin><CompanyTab /></RequireAdmin>} />
         <Route path="demo" element={<RequirePage page={[TMS_PAGE_KEY]}><DemoPage /></RequirePage>} />
         {/* An unknown tab is a stale link, not a dead end: Settings is the page's home. */}

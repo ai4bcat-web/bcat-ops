@@ -49,6 +49,30 @@ describe('googlePort transport', () => {
   })
 })
 
+describe('googlePort header allowlist', () => {
+  it('asks for and keeps the forwarding headers the carrier-sales filter reads, and nothing unlisted', async () => {
+    let url = ''
+    const f = vi.fn(async (u: string) => {
+      url = String(u)
+      return res({
+        id: 'm1', threadId: 't1', internalDate: '1',
+        payload: { headers: [
+          { name: 'Delivered-To', value: 'loads@example.invalid' },
+          { name: 'X-Original-To', value: 'loads@example.invalid' },
+          { name: 'X-Secret', value: 'nope' },
+        ] },
+      })
+    })
+    const port = googlePort('u', { fetchImpl: f as unknown as typeof fetch, getToken: async () => 't' })
+    const m = await port.getMetadata('m1')
+    expect(url).toContain('metadataHeaders=delivered-to')
+    expect(url).toContain('metadataHeaders=x-original-to')
+    expect(m.headers['delivered-to']).toBe('loads@example.invalid')
+    expect(m.headers['x-original-to']).toBe('loads@example.invalid')
+    expect(m.headers['x-secret']).toBeUndefined()
+  })
+})
+
 describe('googlePort is read-only on the wire', () => {
   it('only ever issues GET requests, across every port method', async () => {
     const methods: string[] = []

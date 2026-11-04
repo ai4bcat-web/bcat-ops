@@ -9,7 +9,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 
-const api = vi.hoisted(() => ({ spotAction: vi.fn() }))
+const api = vi.hoisted(() => ({ spotAction: vi.fn(), apInboxAction: vi.fn() }))
 vi.mock('@/lib/apiClient', () => api)
 
 import { SpotCallbackPage } from './SpotCallbackPage'
@@ -20,6 +20,7 @@ const draw = (url: string) =>
       <Routes>
         <Route path="/tms/rates/spot/callback" element={<SpotCallbackPage />} />
         <Route path="/tms/rates/spot" element={<p>inbox</p>} />
+        <Route path="/tms/brokerage" element={<p>settings</p>} />
       </Routes>
     </MemoryRouter>,
   )
@@ -35,6 +36,16 @@ describe('SpotCallbackPage', () => {
     expect(api.spotAction).toHaveBeenCalledWith('SPOT_OAUTH_FINISH', {
       code: 'abc', state: 'xyz', redirectUri: `${window.location.origin}/tms/rates/spot/callback`,
     })
+  })
+
+  it('routes an ap. state to the AP inbox finish and returns to Settings, never the spot door', async () => {
+    api.apInboxAction.mockResolvedValue({ connected: true })
+    draw('/tms/rates/spot/callback?code=abc&state=ap.nonce')
+    expect(await screen.findByText('settings')).toBeInTheDocument()
+    expect(api.apInboxAction).toHaveBeenCalledWith('AP_INBOX_OAUTH_FINISH', {
+      code: 'abc', state: 'ap.nonce', redirectUri: `${window.location.origin}/tms/rates/spot/callback`,
+    })
+    expect(api.spotAction).not.toHaveBeenCalled()
   })
 
   it('shows the server’s refusal and stays put', async () => {

@@ -13,10 +13,10 @@
 import { callModel, type FileBlock } from '../model'
 import { wrapUntrusted } from '../../../../src/lib/workflows/untrusted'
 import { getObjectBytes } from '../store'
+import { fileBlockFor, MAX_FILE_BYTES, MAX_FILES } from '../../_shared/invoiceFileBlocks'
 import type { Extraction, ExtractableRow } from './merge'
 
-export const MAX_FILES = 3
-export const MAX_FILE_BYTES = 8 * 1024 * 1024
+export { MAX_FILES, MAX_FILE_BYTES }
 
 export const SCHEMA = {
   type: 'object',
@@ -39,17 +39,11 @@ export async function fileBlocks(attachments: Attachment[]): Promise<FileBlock[]
   const out: FileBlock[] = []
   for (const a of attachments) {
     if (out.length >= MAX_FILES) break
-    const type = (a.contentType || '').toLowerCase()
-    const isPdf = type.includes('pdf') || a.name.toLowerCase().endsWith('.pdf')
-    const isImage = /^image\/(jpeg|jpg|png|webp)$/.test(type)
-    if (!isPdf && !isImage) continue
     if (a.size > MAX_FILE_BYTES) continue
     const bytes = await getObjectBytes(a.key)
     if (!bytes) continue
-    const data = bytes.toString('base64')
-    out.push(isPdf
-      ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data } }
-      : { type: 'image', source: { type: 'base64', media_type: (type === 'image/jpg' ? 'image/jpeg' : type) as 'image/jpeg' | 'image/png' | 'image/webp', data } })
+    const block = fileBlockFor(a, bytes)
+    if (block) out.push(block)
   }
   return out
 }

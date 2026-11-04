@@ -109,6 +109,7 @@ const SETTINGS_CHILDREN: NavChildDef[] = [
   ...(SHOW_RESERVED_AB
     ? [{ to: '/tms/brokerage/spot-quoter', label: 'Spot quoter & e-mail', pageKey: 'tms', adminOnly: true }]
     : []),
+  { to: '/tms/brokerage/carrier-sales', label: 'Carrier Sales', pageKey: 'tms', adminOnly: true },
   { to: '/tms/brokerage/commissions', label: 'Commissions', pageKey: 'commissions', tms: true },
   { to: '/tms/brokerage/reports', label: 'Reports', pageKey: 'reports', tms: true },
   { to: '/tms/brokerage/audit', label: 'Audit log', pageKey: 'audit', tms: true },

@@ -623,6 +623,10 @@ const RUNNERS = {
       // An own-fleet leg has no TMS rate con, and the desk lists rate-con-sent loads only (by design)
       // until "Include loads without a TMS rate con" is on.
       await b.poll(() => b.evaluate(`(() => { const t = [...document.querySelectorAll('button')].find((x) => /Include loads without a TMS rate con/.test(x.textContent)); if (!t) return false; if (t.getAttribute('aria-pressed') !== 'true') t.click(); return true })()`), 'the include-unsent toggle', 30_000)
+      // The grid is virtualised and grouped by tracker: with a busy dev set the fixture row is not mounted
+      // until it is searched for. Search its number so exactly that row is rendered.
+      const number = sO.shipment.number
+      await b.poll(() => b.evaluate(`(() => { const i = document.querySelector('input[aria-label="Search shipments"]'); if (!i) return false; Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(i, ${JSON.stringify(String(number))}); i.dispatchEvent(new Event('input', { bubbles: true })); return true })()`), 'the grid search box', 30_000)
       await b.poll(() => has(b, rowSel), 'the own-fleet fixture row on the grid', 45_000)
       await b.evaluate(`document.querySelector(${JSON.stringify(rowSel)}).click()`)
       await b.poll(async () => (await searchOf(b)).includes(`shipment=${id}`), 'row click adds ?shipment=', 15_000)
@@ -682,7 +686,7 @@ const RUNNERS = {
           expect(/work phone/i.test(facts.target) && facts.target.includes('(312) 555-0102'), `SMS target reads ${JSON.stringify(facts.target)}, expected the truck work phone`)
           await shotFile(b, 'AJ07-drawer-notsent-L')
           // Step AO: the prefs control is an always-visible row inside the strip (no button, no popover, no dialog).
-          const prefsRow = await b.evaluate(`(() => { const r = document.querySelector('[data-testid="tracking-prefs-row"]'); return r ? { selects: r.querySelectorAll('select').length, dialogs: document.querySelectorAll('[role="dialog"]').length, inStrip: !!r.closest('[data-testid="tracking-strip"]'), effective: r.querySelector('[data-testid="tracking-prefs-effective"]')?.innerText ?? '' } : null })()`)
+          const prefsRow = await b.evaluate(`(() => { const r = document.querySelector('[data-testid="tracking-prefs-row"]'); return r ? { selects: r.querySelectorAll('select').length, dialogs: [...document.querySelectorAll('[role="dialog"]')].filter((d) => !d.querySelector('[data-testid="tracking-drawer"]')).length, inStrip: !!r.closest('[data-testid="tracking-strip"]'), effective: r.querySelector('[data-testid="tracking-prefs-effective"]')?.innerText ?? '' } : null })()`)
           expect(prefsRow != null, 'the inline tracking-prefs row is missing from the drawer')
           expect(prefsRow.selects === 3 && prefsRow.inStrip && prefsRow.dialogs === 0, `prefs row has ${prefsRow.selects} selects, inside strip: ${prefsRow.inStrip}, dialogs open: ${prefsRow.dialogs}`)
           expect(/In force:/.test(prefsRow.effective), `the prefs row read-out says ${JSON.stringify(prefsRow.effective)}`)

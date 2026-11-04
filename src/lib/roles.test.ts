@@ -276,10 +276,25 @@ describe('tables', () => {
     expect(ROLE_LABELS.AR_AP).toBe('AR/AP')
   })
 
-  it('enforces only the five claims a Lambda refuses on', () => {
+  it('enforces exactly the claims a Lambda refuses on', () => {
     expect(ENFORCED_CLAIMS.every((c) => CLAIMS.includes(c))).toBe(true)
-    expect(isEnforcedClaim('AP_APPROVAL')).toBe(true)
+    for (const c of ['AP_APPROVAL', 'DASHBOARDS_CREATE', 'DASHBOARDS_PUBLISH_COMPANY', 'VIEW_ALL']) {
+      expect(isEnforcedClaim(c)).toBe(true)
+    }
     expect(isEnforcedClaim('AR_CHARGES')).toBe(false)
     expect(isEnforcedClaim('NOT_A_CLAIM')).toBe(false)
+  })
+
+  it('projects the dashboard claims to claim-* groups', () => {
+    const groups = groupsForProfile({
+      role: 'NONE',
+      claims: ['DASHBOARDS_CREATE', 'DASHBOARDS_PUBLISH_COMPANY', 'VIEW_ALL'],
+      extraPages: [],
+    })
+    expect(groups).toEqual([
+      'claim-DASHBOARDS_CREATE',
+      'claim-DASHBOARDS_PUBLISH_COMPANY',
+      'claim-VIEW_ALL',
+    ])
   })
 })

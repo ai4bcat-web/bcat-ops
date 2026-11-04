@@ -1,17 +1,17 @@
 {
-  "at": "2026-11-04T17:48:37.766Z",
+  "at": "2026-11-04T20:53:34.563Z",
   "summary": {
     "/tms/dashboard": {
       "label": "Brokerage dashboard (this month)",
       "firstRowsS": null,
-      "settledS": 7.46510000038147,
-      "requests": 81,
-      "mb": 11.95892,
+      "settledS": 6.828800001144409,
+      "requests": 82,
+      "mb": 12.193619,
       "p95": {
         "firstRows": null,
-        "settled": 7.830700000762939,
-        "requests": 81,
-        "mb": 11.95892
+        "settled": 11.02529999923706,
+        "requests": 82,
+        "mb": 12.193619
       },
       "rowsAtEnd": [
         0,
@@ -31,15 +31,15 @@
     },
     "/tms/tracking": {
       "label": "Load tracking",
-      "firstRowsS": 3.8151000003814697,
-      "settledS": 5.40180000114441,
-      "requests": 46,
-      "mb": 6.099001,
+      "firstRowsS": 3.494800001144409,
+      "settledS": 5.183800001144409,
+      "requests": 47,
+      "mb": 6.231163,
       "p95": {
-        "firstRows": 4.7965,
-        "settled": 7.16160000038147,
-        "requests": 46,
-        "mb": 6.099001
+        "firstRows": 4.728200000762939,
+        "settled": 5.570800001144409,
+        "requests": 47,
+        "mb": 6.231163
       },
       "rowsAtEnd": [
         5,
@@ -48,27 +48,27 @@
       ],
       "fullTableOps": [],
       "mutations": [],
-      "maxChainDepth": 2,
+      "maxChainDepth": 3,
       "repeated": [],
       "problems": [],
       "dashboardKpi": []
     },
     "/tms/shipments": {
       "label": "Shipments board (Active)",
-      "firstRowsS": 3.3925,
-      "settledS": 4.78810000038147,
-      "requests": 52,
-      "mb": 8.688688,
+      "firstRowsS": 3.034900001525879,
+      "settledS": 4.9372999992370605,
+      "requests": 53,
+      "mb": 8.834135,
       "p95": {
-        "firstRows": 4.439099998474121,
-        "settled": 5.395599998474121,
-        "requests": 52,
-        "mb": 8.688688
+        "firstRows": 4.40810000038147,
+        "settled": 5.10439999961853,
+        "requests": 53,
+        "mb": 8.834135
       },
       "rowsAtEnd": [
-        35,
-        35,
-        35
+        34,
+        34,
+        34
       ],
       "fullTableOps": [],
       "mutations": [],
@@ -79,20 +79,20 @@
     },
     "/tms/shipments?list=all": {
       "label": "Shipments board (All, month window)",
-      "firstRowsS": 3.7082000007629397,
-      "settledS": 4.61160000038147,
-      "requests": 65,
-      "mb": 10.128469,
+      "firstRowsS": 3.107099998474121,
+      "settledS": 4.649899999618531,
+      "requests": 66,
+      "mb": 10.293804,
       "p95": {
-        "firstRows": 3.7118999996185305,
-        "settled": 5.201,
-        "requests": 65,
-        "mb": 10.128469
+        "firstRows": 3.2337000007629393,
+        "settled": 5.2422000007629395,
+        "requests": 66,
+        "mb": 10.293804
       },
       "rowsAtEnd": [
-        35,
-        35,
-        35
+        34,
+        34,
+        34
       ],
       "fullTableOps": [],
       "mutations": [],
@@ -103,15 +103,15 @@
     },
     "/tms/customers": {
       "label": "Customers",
-      "firstRowsS": 2.1166000003814696,
-      "settledS": 4.3575,
-      "requests": 48,
-      "mb": 6.099297,
+      "firstRowsS": 2.0155,
+      "settledS": 4.4835,
+      "requests": 49,
+      "mb": 6.231459,
       "p95": {
-        "firstRows": 2.403199998855591,
-        "settled": 4.896,
-        "requests": 48,
-        "mb": 6.099297
+        "firstRows": 2.3307999992370605,
+        "settled": 4.68560000038147,
+        "requests": 49,
+        "mb": 6.231459
       },
       "rowsAtEnd": [
         50,
@@ -120,22 +120,22 @@
       ],
       "fullTableOps": [],
       "mutations": [],
-      "maxChainDepth": 2,
+      "maxChainDepth": 3,
       "repeated": [],
       "problems": [],
       "dashboardKpi": []
     },
     "/tms/brokerage/users": {
       "label": "Users",
-      "firstRowsS": 0.8171000003814697,
-      "settledS": 4.03489999961853,
-      "requests": 49,
-      "mb": 6.108539,
+      "firstRowsS": 0.8141000003814697,
+      "settledS": 4.697799999237061,
+      "requests": 50,
+      "mb": 6.240701,
       "p95": {
-        "firstRows": 0.829,
-        "settled": 4.439700000762939,
-        "requests": 49,
-        "mb": 6.108539
+        "firstRows": 0.9256999988555908,
+        "settled": 4.8351999988555905,
+        "requests": 50,
+        "mb": 6.240701
       },
       "rowsAtEnd": [
         7,
@@ -144,22 +144,22 @@
       ],
       "fullTableOps": [],
       "mutations": [],
-      "maxChainDepth": 2,
+      "maxChainDepth": 3,
       "repeated": [],
       "problems": [],
       "dashboardKpi": []
     },
     "/tms/invoicing": {
       "label": "Invoicing (AR)",
-      "firstRowsS": 2.3387000007629393,
-      "settledS": 5.15960000038147,
-      "requests": 66,
-      "mb": 8.955237,
+      "firstRowsS": 2.6543999996185303,
+      "settledS": 5.633699998855591,
+      "requests": 67,
+      "mb": 9.145399,
       "p95": {
-        "firstRows": 2.7418999996185303,
-        "settled": 5.30310000038147,
-        "requests": 66,
-        "mb": 8.969005
+        "firstRows": 4.057800001144409,
+        "settled": 6.96439999961853,
+        "requests": 67,
+        "mb": 9.145399
       },
       "rowsAtEnd": [
         2,
@@ -168,22 +168,22 @@
       ],
       "fullTableOps": [],
       "mutations": [],
-      "maxChainDepth": 2,
+      "maxChainDepth": 3,
       "repeated": [],
       "problems": [],
       "dashboardKpi": []
     },
     "/tms/invoicing/payable": {
       "label": "Invoicing (payable)",
-      "firstRowsS": 1.7316000003814698,
-      "settledS": 4.1665,
-      "requests": 54,
-      "mb": 6.463746,
+      "firstRowsS": 2.2883999996185302,
+      "settledS": 4.612899999618531,
+      "requests": 55,
+      "mb": 6.599741,
       "p95": {
-        "firstRows": 2.547,
-        "settled": 4.45679999923706,
-        "requests": 54,
-        "mb": 6.463746
+        "firstRows": 2.9488000011444093,
+        "settled": 5.682900001525879,
+        "requests": 55,
+        "mb": 6.599741
       },
       "rowsAtEnd": [
         21,
@@ -192,22 +192,22 @@
       ],
       "fullTableOps": [],
       "mutations": [],
-      "maxChainDepth": 2,
+      "maxChainDepth": 3,
       "repeated": [],
       "problems": [],
       "dashboardKpi": []
     },
     "/tms/carriers": {
       "label": "Carriers (shell floor probe)",
-      "firstRowsS": 1.8152999992370606,
-      "settledS": 4.56239999961853,
-      "requests": 46,
-      "mb": 6.099001,
+      "firstRowsS": 1.5352000007629394,
+      "settledS": 4.088799999237061,
+      "requests": 47,
+      "mb": 6.231163,
       "p95": {
-        "firstRows": 1.8742999992370606,
-        "settled": 4.75260000038147,
-        "requests": 46,
-        "mb": 6.099001
+        "firstRows": 1.749,
+        "settled": 4.29010000038147,
+        "requests": 47,
+        "mb": 6.231163
       },
       "rowsAtEnd": [
         22,
@@ -216,22 +216,22 @@
       ],
       "fullTableOps": [],
       "mutations": [],
-      "maxChainDepth": 2,
+      "maxChainDepth": 3,
       "repeated": [],
       "problems": [],
       "dashboardKpi": []
     },
     "/schedule": {
       "label": "Schedule (legacy)",
-      "firstRowsS": 4.420400001525879,
-      "settledS": 4.420400001525879,
-      "requests": 77,
-      "mb": 9.76781,
+      "firstRowsS": 4.207800001144409,
+      "settledS": 4.207800001144409,
+      "requests": 78,
+      "mb": 9.924436,
       "p95": {
-        "firstRows": 4.77929999923706,
-        "settled": 4.77929999923706,
-        "requests": 77,
-        "mb": 9.76781
+        "firstRows": 4.54379999923706,
+        "settled": 4.54379999923706,
+        "requests": 78,
+        "mb": 9.924436
       },
       "rowsAtEnd": [
         0,
@@ -247,15 +247,15 @@
     },
     "/calendar": {
       "label": "Calendar (legacy)",
-      "firstRowsS": 5.11989999961853,
-      "settledS": 5.11989999961853,
-      "requests": 83,
-      "mb": 12.353602,
+      "firstRowsS": 4.69089999961853,
+      "settledS": 4.69089999961853,
+      "requests": 84,
+      "mb": 12.523539,
       "p95": {
-        "firstRows": 5.3832000007629395,
-        "settled": 5.3832000007629395,
-        "requests": 83,
-        "mb": 12.353602
+        "firstRows": 5.03389999961853,
+        "settled": 5.03389999961853,
+        "requests": 84,
+        "mb": 12.523539
       },
       "rowsAtEnd": [
         0,
@@ -271,15 +271,15 @@
     },
     "/dashboard": {
       "label": "Dashboard (legacy)",
-      "firstRowsS": 0.7336999988555908,
-      "settledS": 5.91089999961853,
-      "requests": 133,
-      "mb": 18.979003,
+      "firstRowsS": 0.8248000011444092,
+      "settledS": 5.703800001144409,
+      "requests": 134,
+      "mb": 19.198652,
       "p95": {
-        "firstRows": 1.0426000003814697,
-        "settled": 6.031599998474121,
-        "requests": 133,
-        "mb": 18.979003
+        "firstRows": 1.6191000003814697,
+        "settled": 6.27139999961853,
+        "requests": 134,
+        "mb": 19.198652
       },
       "rowsAtEnd": [
         3,
@@ -297,6 +297,10 @@
         {
           "op": "managePods",
           "times": 4
+        },
+        {
+          "op": "managePods",
+          "times": 4
         }
       ],
       "problems": [],
@@ -306,25 +310,25 @@
   "kpi": {
     "/tms/dashboard": {
       "medians": {
-        "cold": 2.34610000038147,
-        "warm": 0.874,
-        "spa": 0.048399999618530275,
+        "cold": 1.6573999996185302,
+        "warm": 1.06,
+        "spa": 0.04469999885559082,
         "chartsCold": null,
         "chartsWarm": null,
-        "allCold": 2.34610000038147,
+        "allCold": 1.6573999996185302,
         "spaRequests": 36,
-        "spaMb": 5.863837,
+        "spaMb": 5.9664,
         "kpiFlips": 0
       },
       "p95": {
-        "cold": 2.4215,
-        "warm": 1.1032000007629394,
-        "spa": 0.6881999988555908,
+        "cold": 2.1566000003814696,
+        "warm": 1.6806999988555908,
+        "spa": 0.6292000007629395,
         "chartsCold": null,
         "chartsWarm": null,
-        "allCold": 2.4215,
+        "allCold": 2.1566000003814696,
         "spaRequests": 36,
-        "spaMb": 5.863837,
+        "spaMb": 5.9664,
         "kpiFlips": 0
       },
       "sources": {
@@ -348,25 +352,25 @@
     },
     "/dashboard": {
       "medians": {
-        "cold": 1.9551000003814698,
-        "warm": 1.0038000011444093,
-        "spa": 0.13289999961853027,
-        "chartsCold": 1.9551000003814698,
-        "chartsWarm": 1.0561000003814698,
-        "allCold": 5.879100000381469,
-        "spaRequests": 89,
-        "spaMb": 12.892512,
+        "cold": 2.161199998855591,
+        "warm": 0.8481999988555908,
+        "spa": 0.05830000114440918,
+        "chartsCold": 2.161199998855591,
+        "chartsWarm": 0.9035,
+        "allCold": 8.07,
+        "spaRequests": 88,
+        "spaMb": 12.979742,
         "kpiFlips": 0
       },
       "p95": {
-        "cold": 2.0465,
-        "warm": 1.1492999992370605,
-        "spa": 0.3181999988555908,
-        "chartsCold": 2.0465,
-        "chartsWarm": 1.2265999984741212,
-        "allCold": 6.08189999961853,
-        "spaRequests": 89,
-        "spaMb": 12.892512,
+        "cold": 2.377,
+        "warm": 1.4238000011444092,
+        "spa": 1.0423999996185302,
+        "chartsCold": 2.377,
+        "chartsWarm": 1.4753000011444093,
+        "allCold": 10.305,
+        "spaRequests": 90,
+        "spaMb": 12.988617,
         "kpiFlips": 0
       },
       "sources": {

@@ -7,6 +7,8 @@ import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { TmsAlert, TmsPage } from '@/features/tms/kit'
 import { spotAction } from '@/lib/apiClient'
+import { csOauthFinish, CS_SETTINGS_PATH, CS_STATE_PREFIX } from '@/features/tms/carrierSales/csClient'
+import { apInboxOauthFinish, AP_SETTINGS_PATH, AP_STATE_PREFIX } from '@/features/ap/inbox/apInboxClient'
 import { SPOT_CALLBACK_PATH, SPOT_INBOX_PATH } from './useSpotRequests'
 import './spot.css'
 
@@ -26,8 +28,16 @@ export function SpotCallbackPage() {
   useEffect(() => {
     if (denied || missing || sent.current || !code || !state) return
     sent.current = true
-    spotAction('SPOT_OAUTH_FINISH', { code, state, redirectUri: `${window.location.origin}${SPOT_CALLBACK_PATH}` })
-      .then(() => navigate(SPOT_INBOX_PATH, { replace: true }))
+    const redirectUri = `${window.location.origin}${SPOT_CALLBACK_PATH}`
+    // Step AL: a carrier-sales mailbox consent carries `cs.<mailboxId>.<nonce>`; it returns to Settings › Carrier Sales.
+    const isCarrierSales = state.startsWith(CS_STATE_PREFIX)
+    // Step AG: the AP inbox consent carries `ap.<nonce>`; it returns to Settings › General & automation.
+    const isApInbox = state.startsWith(AP_STATE_PREFIX)
+    const finish: Promise<unknown> = isApInbox
+      ? apInboxOauthFinish(code, state, redirectUri)
+      : isCarrierSales ? csOauthFinish(code, state, redirectUri) : spotAction('SPOT_OAUTH_FINISH', { code, state, redirectUri })
+    finish
+      .then(() => navigate(isApInbox ? AP_SETTINGS_PATH : isCarrierSales ? CS_SETTINGS_PATH : SPOT_INBOX_PATH, { replace: true }))
       .catch((err: unknown) => setFailure(messageOf(err)))
   }, [code, state, denied, missing, navigate])
 

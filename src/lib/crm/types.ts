@@ -104,6 +104,14 @@ export type CrmActionName =
   | 'CRM_CLAIM_DOMAIN'
   | 'CRM_ASSIGN_OWNER'
   | 'CRM_BACKFILL'
+  // Step AI: dashboards ride the CRM router; read verbs first so apiClient treats the reads as reads.
+  | 'PREVIEW_DASHBOARD_CHAT'
+  | 'PREVIEW_DASHBOARD'
+  | 'LIST_DASHBOARDS'
+  | 'GET_DASHBOARD'
+  | 'GET_DASHBOARD_OPTIONS'
+  | 'SAVE_DASHBOARD'
+  | 'ARCHIVE_DASHBOARD'
 
 export interface CrmTimelineEntry {
   id: string

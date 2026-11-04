@@ -33,6 +33,7 @@ vi.mock('@/features/tms/integrations/IntegrationsTab', () => ({ IntegrationsTab:
 vi.mock('@/features/tms/settings/AiAgentsPage', () => ({ default: () => <p>ai agents body</p> }))
 vi.mock('./DemoPage', () => ({ DemoPage: () => <p>demo body</p> }))
 vi.mock('@/features/tms/settings/SpotQuoterSettingsPage', () => ({ SpotQuoterSettingsPage: () => <p>spot quoter body</p> }))
+vi.mock('@/features/tms/settings/CarrierSalesSettingsPage', () => ({ CarrierSalesSettingsPage: () => <p>carrier sales body</p> }))
 vi.mock('./company/CompanyTab', () => ({ default: () => <p>company body</p>, CompanyTab: () => <p>company body</p> }))
 
 import { BrokeragePage } from './BrokeragePage'
@@ -63,7 +64,7 @@ describe('BrokeragePage', () => {
     expect(screen.getByRole('heading', { name: 'Settings', level: 1 })).toBeInTheDocument()
     expect(tabNames()).toEqual([
       'Settings', 'Users', 'Commissions', 'Reports', 'Audit', 'Divisions & ownership',
-      'Integrations', 'AI Agents', 'Spot quoter & e-mail', 'Company', 'Demo',
+      'Integrations', 'AI Agents', 'Spot quoter & e-mail', 'Carrier Sales', 'Company', 'Demo',
     ])
     expect(screen.getByText('settings body')).toBeInTheDocument()
   })
@@ -133,6 +134,18 @@ describe('BrokeragePage', () => {
     auth.grants = ['tms']
     draw('/tms/brokerage/spot-quoter')
     expect(screen.queryByText('spot quoter body')).toBeNull()
+  })
+
+  it('opens the Carrier Sales desk for an admin and refuses it to a tms-grant user', () => {
+    auth.isAdmin = true
+    const admin = draw('/tms/brokerage/carrier-sales')
+    expect(screen.getByText('carrier sales body')).toBeInTheDocument()
+    admin.unmount()
+
+    auth.isAdmin = false
+    auth.grants = ['tms']
+    draw('/tms/brokerage/carrier-sales')
+    expect(screen.queryByText('carrier sales body')).toBeNull()
   })
 
   it('opens the deep-linked divisions desk for an owner', () => {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb'
-import { rollupSource } from './store'
+import { rollupSource, rollupStore } from './store'
 
 /** DynamoDB rejects an expression that names an undefined #alias; the real table is the only other judge. */
 describe('rollupSource queries', () => {
@@ -27,5 +27,22 @@ describe('rollupSource queries', () => {
       const defined = Object.keys((bag.ExpressionAttributeNames ?? {}) as object)
       for (const alias of text.match(/#\w+/g) ?? []) expect(defined, `${alias} in ${text}`).toContain(alias)
     }
+  })
+})
+
+describe('rollupStore.scanAll', () => {
+  it('never returns conversational-dashboard spec rows (the sweep must not treat them as rollup rows)', async () => {
+    const db = {
+      send: async () => ({
+        Items: [
+          { id: 'M:2026-11', kind: 'M', periodKey: '2026-11', version: 1 },
+          { id: 'DASH:3f2a', kind: 'DASH', periodKey: '3f2a', version: 2 },
+          { id: 'DASH:INDEX', kind: 'DASH', periodKey: 'INDEX', version: 5 },
+          { id: 'D:M:2026-11', kind: 'D', periodKey: 'M:2026-11', version: 1 },
+        ],
+      }),
+    } as unknown as DynamoDBDocumentClient
+    const rows = await rollupStore(db, 'T').scanAll()
+    expect(rows.map((r) => r.id)).toEqual(['M:2026-11', 'D:M:2026-11'])
   })
 })

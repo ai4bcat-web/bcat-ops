@@ -67,6 +67,10 @@ const HOOK_CLASSES = ['tms-overdue', 'tms-due', 'tms-theme-toggle', 'tms-dash', 
 // pattern: the App.tsx / tab route this entry covers (":id"/":slug" normalise to ":p"); `light`/`dark` pass flags.
 export const ROUTES = [
   { nn: '01', slug: 'dashboard', path: '/tms/dashboard', pattern: '/tms/dashboard', dark: true },
+  // Step AI: the builder and viewer. `zz-x` is an id that does not exist: the not-found state is what renders.
+  { nn: '01a', slug: 'dashboard-new', path: '/tms/dashboard/new', pattern: '/tms/dashboard/new' },
+  { nn: '01b', slug: 'dashboard-view', path: '/tms/dashboard/d/zz-x', pattern: '/tms/dashboard/d/:id' },
+  { nn: '01c', slug: 'dashboard-edit', path: '/tms/dashboard/d/zz-x/edit', pattern: '/tms/dashboard/d/:id/edit' },
   { nn: '02', slug: 'shipments', path: '/tms/shipments', pattern: '/tms/shipments', dark: true, wideOk: true },
   { nn: '02b', slug: 'shipments-all', path: '/tms/shipments?list=all', pattern: '/tms/shipments?list=all', wideOk: true },
   { nn: '02i', slug: 'intake', path: '/tms/shipments/intake', pattern: '/tms/shipments/intake', dark: true },
@@ -128,6 +132,7 @@ export const ROUTES = [
   { nn: '37b', slug: 'spot-callback', path: '/tms/rates/spot/callback', pattern: '/tms/rates/spot/callback' },
   { nn: '38', slug: 'follow-ups', path: '/tms/customers/follow-ups', pattern: '/tms/customers/follow-ups' },
   { nn: '39', slug: 'spot-quoter', path: '/tms/brokerage/spot-quoter', pattern: '/tms/brokerage/spot-quoter' },
+  { nn: '39b', slug: 'carrier-sales-settings', path: '/tms/brokerage/carrier-sales', pattern: '/tms/brokerage/carrier-sales' },
 ]
 
 // ───────────────────────────── states ─────────────────────────────

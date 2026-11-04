@@ -85,6 +85,9 @@ export const CLAIMS: readonly ClaimKey[] = [
   'AP_CHARGES',
   'CARRIER_INSURANCE_EDIT',
   'NO_AR_INVOICE',
+  'DASHBOARDS_CREATE',
+  'DASHBOARDS_PUBLISH_COMPANY',
+  'VIEW_ALL',
 ]
 
 export const CLAIM_LABELS: Record<ClaimKey, string> = {
@@ -98,6 +101,9 @@ export const CLAIM_LABELS: Record<ClaimKey, string> = {
   CARRIER_INSURANCE_EDIT: 'Edit carrier insurance',
   // One record, one word: the user sees "Shipment" (Step R). The claim key is unchanged.
   NO_AR_INVOICE: 'Mark a shipment as not invoiced',
+  DASHBOARDS_CREATE: 'Create dashboards',
+  DASHBOARDS_PUBLISH_COMPANY: 'Publish company dashboards',
+  VIEW_ALL: "See all customers' data",
 }
 
 /**
@@ -110,6 +116,9 @@ export const ENFORCED_CLAIMS: readonly ClaimKey[] = [
   'AP_POSTING',
   'AP_APPROVAL',
   'CARRIER_STATUS_EDIT',
+  'DASHBOARDS_CREATE',
+  'DASHBOARDS_PUBLISH_COMPANY',
+  'VIEW_ALL',
 ]
 
 export function isEnforcedClaim(key: string): boolean {

@@ -198,15 +198,16 @@ export interface ChartCardProps {
   /** Already computed by the page, so the CSV export and the card agree exactly. */
   series: ChartSeries
   /** The card's own group-by: `undefined` follows the dashboard, `null` is ungrouped. */
-  override: DashboardGroupBy | null | undefined
-  onOverride: (groupBy: DashboardGroupBy | null | undefined) => void
+  override?: DashboardGroupBy | null | undefined
+  /** Absent for server-computed cards (Step AI), which cannot regroup: the picker is hidden. */
+  onOverride?: (groupBy: DashboardGroupBy | null | undefined) => void
 }
 
 export function ChartCard({ def, series, override, onOverride }: ChartCardProps) {
   const [numbers, setNumbers] = useState(false)
   const [expanded, setExpanded] = useState(false)
 
-  const picker = (
+  const picker = onOverride ? (
     <select
       className="tms-select tms-chart-groupby"
       aria-label={`Group ${def.title} by`}
@@ -222,7 +223,7 @@ export function ChartCard({ def, series, override, onOverride }: ChartCardProps)
         <option key={option.value} value={option.value}>{`Group: ${option.label}`}</option>
       ))}
     </select>
-  )
+  ) : undefined
 
   return (
     <>

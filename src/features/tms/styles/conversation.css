@@ -502,7 +502,7 @@
 .tms-shell .tms-map-tone-aging,
 .tms-portal .tms-map-tone-aging { background: var(--tms-badge-orange); }
 .tms-shell .tms-map-body,
-.tms-portal .tms-map-body { position: relative; height: 232px; border-top: 1px solid var(--tms-border); overflow: hidden; }
+.tms-portal .tms-map-body { position: relative; height: 150px; border-top: 1px solid var(--tms-border); overflow: hidden; }
 .tms-shell .tms-map-body-inner,
 .tms-portal .tms-map-body-inner { position: relative; width: 100%; height: 100%; }
 .tms-shell .tms-map-google,

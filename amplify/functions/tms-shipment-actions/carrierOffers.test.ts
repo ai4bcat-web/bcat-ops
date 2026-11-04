@@ -198,6 +198,9 @@ function seedPosting(store: Map<string, Row>, id = 'post:ship-1:DAT', shipmentId
   })
 }
 
+let messageSeq = 0
+
+/** Each call is a different inbound message, as in life: one message is one offer. */
 function baseInput(): Row {
   return {
     shipmentId: 'ship-1',
@@ -208,7 +211,7 @@ function baseInput(): Row {
     amountCents: 180_000,
     source: 'EMAIL',
     postingId: 'post:ship-1:DAT',
-    messageRef: 'msg-abc',
+    messageRef: `msg-${++messageSeq}`,
   }
 }
 
@@ -337,6 +340,16 @@ describe('recordCarrierOffer', () => {
     expect(offers).toHaveLength(2)
   })
 
+  it('a re-delivered message never doubles a quote, even outside the duplicate window or at another rate', async () => {
+    await recordCarrierOffer(deps, { ...baseInput(), messageRef: 'msg-same' }, CALLER)
+    store.set(`${TABLES.quote}#Q000001`, {
+      ...store.get(`${TABLES.quote}#Q000001`)!,
+      createdAt: '2026-10-22T12:00:00.000Z',
+    })
+    await recordCarrierOffer(deps, { ...baseInput(), messageRef: 'msg-same', amountCents: 170_000 }, CALLER)
+    expect([...store.values()].filter((r) => r.__typename === 'Quote')).toHaveLength(1)
+  })
+
   it('refuses a load that is already covered', async () => {
     seedLoad(store, 'load-1', 'ship-1', { activeLoadCarrierId: 'lcr-1' })
     await expect(recordCarrierOffer(deps, baseInput(), CALLER)).rejects.toThrow(/already covered/)
@@ -457,6 +470,19 @@ describe('listCarrierOffers', () => {
     const result = (await listCarrierOffers(deps, { shipmentId: 'ship-1' })) as { offers: (Row & { vetting: { known: boolean; blockers: string[] } })[] }
     expect(result.offers[0].vetting.known).toBe(true)
     expect(result.offers[1].vetting.blockers).toContain('W-9 missing')
+  })
+
+  it('attaches the carrier risk the Offers hub paints, with null/false for a carrier not in the directory', async () => {
+    seedCarrier(store, 'car-1', { normalizedName: 'swift transportation', mcNumber: '123456', mcpRiskScore: 640, mcpStatus: 'ACCEPTABLE' })
+    const deps = fakeDeps(store)
+    await recordCarrierOffer(deps, { ...baseInput(), carrierName: 'Mystery Haulers', carrierMc: '999999', amountCents: 160_000 }, CALLER)
+    const result = (await listCarrierOffers(deps, { shipmentId: 'ship-1' })) as {
+      offers: (Row & { carrierRisk: { mcpRiskScore: number | null; mcpStatus: string | null; packetComplete: boolean } })[]
+    }
+    const swift = result.offers.find((o) => o.carrierName === 'Swift Transportation')!
+    expect(swift.carrierRisk).toEqual({ mcpRiskScore: 640, mcpStatus: 'ACCEPTABLE', packetComplete: true })
+    const unknown = result.offers.find((o) => o.carrierName === 'Mystery Haulers')!
+    expect(unknown.carrierRisk).toEqual({ mcpRiskScore: null, mcpStatus: null, packetComplete: false })
   })
 })
 

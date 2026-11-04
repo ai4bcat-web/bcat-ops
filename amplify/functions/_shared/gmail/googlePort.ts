@@ -5,7 +5,8 @@
  * refreshes the token once; `invalid_grant` surfaces as NeedsReconnect (from tokens.ts).
  * Message bodies and tokens are never logged or put into an error message.
  */
-import type { GmailMessageMeta, GmailPort } from '../../../../src/lib/spot/port'
+import type { GmailMessageMeta } from '../../../../src/lib/spot/port'
+import type { MailboxAttachment, MailboxPort } from '../../../../src/lib/apInbox/mailbox'
 import { GMAIL_HEADER_ALLOWLIST } from '../../../../src/lib/spot/port'
 import { GmailApiError } from './errors'
 import { forgetAccessToken, getAccessToken } from './tokens'
@@ -94,10 +95,15 @@ function toMeta(m: GmailMessage): GmailMessageMeta {
   }
 }
 
-function collect(part: GmailPart | undefined, acc: { plain: string[]; html: string[]; files: { name: string; contentType: string; size: number }[] }): void {
+function collect(part: GmailPart | undefined, acc: { plain: string[]; html: string[]; files: MailboxAttachment[] }): void {
   if (!part) return
   if (part.filename) {
-    acc.files.push({ name: part.filename, contentType: part.mimeType ?? 'application/octet-stream', size: part.body?.size ?? 0 })
+    acc.files.push({
+      name: part.filename,
+      contentType: part.mimeType ?? 'application/octet-stream',
+      size: part.body?.size ?? 0,
+      ...(part.body?.attachmentId ? { id: part.body.attachmentId } : {}),
+    })
   } else if (part.mimeType === 'text/plain' && part.body?.data) {
     acc.plain.push(decode(part.body.data))
   } else if (part.mimeType === 'text/html' && part.body?.data) {
@@ -106,7 +112,22 @@ function collect(part: GmailPart | undefined, acc: { plain: string[]; html: stri
   for (const p of part.parts ?? []) collect(p, acc)
 }
 
-export function googlePort(userId: string, deps: GooglePortDeps = {}): GmailPort {
+/** The part carrying a named attachment's inline bytes (small attachments have `body.data`, no id). */
+function findInline(part: GmailPart | undefined, name: string): string | null {
+  if (!part) return null
+  if (part.filename === name && part.body?.data) return part.body.data
+  for (const p of part.parts ?? []) {
+    const hit = findInline(p, name)
+    if (hit) return hit
+  }
+  return null
+}
+
+const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
+/** Hard ceiling on ids paged by `listAfter` before the oldest `max` are returned. */
+const LIST_AFTER_CEILING = 1000
+
+export function googlePort(userId: string, deps: GooglePortDeps = {}): MailboxPort {
   const doFetch = deps.fetchImpl ?? fetch
   const getToken = deps.getToken ?? ((u: string) => getAccessToken(u))
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)))
@@ -219,10 +240,42 @@ export function googlePort(userId: string, deps: GooglePortDeps = {}): GmailPort
 
     async getBody(id) {
       const r = (await api('GET', `/messages/${encodeURIComponent(id)}?format=full`)) as GmailMessage
-      const acc = { plain: [] as string[], html: [] as string[], files: [] as { name: string; contentType: string; size: number }[] }
+      const acc = { plain: [] as string[], html: [] as string[], files: [] as MailboxAttachment[] }
       collect(r.payload, acc)
       const text = acc.plain.length ? acc.plain.join('\n') : stripHtml(acc.html.join('\n'))
       return { text, attachments: acc.files }
+    },
+
+    async listAfter({ afterMs, max }) {
+      // `after:` is whole seconds; start one second early so the boundary second is included and the
+      // caller's internalDate check (and boundary-id dedupe) decides.
+      const q = `after:${Math.max(0, Math.floor(afterMs / 1000) - 1)} -in:sent -in:drafts`
+      const ids: string[] = []
+      let pageToken: string | undefined
+      do {
+        const p = new URLSearchParams({ q, maxResults: '100' })
+        if (pageToken) p.set('pageToken', pageToken)
+        const r = await api('GET', `/messages?${p.toString()}`)
+        for (const m of ((r?.messages as { id?: string }[] | undefined) ?? [])) if (m.id) ids.push(m.id)
+        pageToken = r?.nextPageToken as string | undefined
+      } while (pageToken && ids.length < LIST_AFTER_CEILING)
+      // Gmail lists newest first; the pipeline settles oldest first, so truncate from the new end.
+      return ids.reverse().slice(0, max)
+    },
+
+    async getAttachment(messageId, att) {
+      if (att.size > MAX_ATTACHMENT_BYTES) return null
+      let data: string | null
+      if (att.id) {
+        const r = await api('GET', `/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(att.id)}`, undefined, true)
+        data = typeof r?.data === 'string' ? r.data : null
+      } else {
+        const r = (await api('GET', `/messages/${encodeURIComponent(messageId)}?format=full`, undefined, true)) as GmailMessage | null
+        data = findInline(r?.payload, att.name)
+      }
+      if (!data) return null
+      const bytes = Buffer.from(data, 'base64url')
+      return bytes.length > MAX_ATTACHMENT_BYTES ? null : bytes
     },
 
     async threadMessages(threadId) {

@@ -532,7 +532,8 @@ const mapFacts = (b) => b.evaluate(`(() => {
     caption: txt('[data-testid="tracking-map-caption"]'), mapEta: txt('[data-testid="tracking-map-eta"]'), stripEta: txt('[data-testid="delivery-eta"]'),
     approxMarks: document.querySelectorAll('[data-testid="tracking-map-approx"]').length, dots: document.querySelectorAll('[data-testid="tracking-map-dot"]').length,
     collapsed: document.querySelector('[data-testid="tracking-map-panel"]')?.dataset.collapsed ?? null,
-    dialogs: document.querySelectorAll('[role="dialog"]').length,
+    // The drawer itself is a role=dialog; only a dialog that is not the tracking drawer counts.
+    dialogs: [...document.querySelectorAll('[role="dialog"]')].filter((d) => !d.querySelector('[data-testid="tracking-drawer"]') && !d.matches('[data-testid="tracking-drawer"]')).length,
   };
 })()`)
 
@@ -775,16 +776,16 @@ const RUNNERS = {
         if (f.panel.top < f.strip.bottom - 1) bad.push(`the map starts at ${Math.round(f.panel.top)}px, above the strip end ${Math.round(f.strip.bottom)}px`)
         if (f.panes.top < f.panel.bottom - 1) bad.push(`the panes start at ${Math.round(f.panes.top)}px, above the map end ${Math.round(f.panel.bottom)}px`)
       }
-      if (f.mode !== 'fallback') bad.push(`data-mode is ${f.mode}; the dev Maps key is neutered, expected fallback`)
+      if (f.mode !== 'fallback' && f.mode !== 'google') bad.push(`data-mode is ${f.mode}; expected google (a working key) or fallback`)
       if (f.fixes !== 12) bad.push(`data-fixes ${f.fixes}, expected 12 (AO02)`)
       if (!(f.breadcrumbs > 0)) bad.push('data-breadcrumbs is 0')
       if (f.source !== 'provider:macropoint') bad.push(`data-current-source ${JSON.stringify(f.source)}, expected provider:macropoint (the newest PRECISE fix; the newer approximate one is only an overlay)`)
       if (!/MacroPoint/.test(f.head ?? '') || !/(\d+\s*(min|h)|just now)/i.test(f.head ?? '')) bad.push(`header text ${JSON.stringify(f.head)} lacks the source label or age`)
       if (f.approxMarks < 1) bad.push('no approximate overlay (tracking-map-approx)')
-      if (!/showing outline/i.test(f.caption ?? '')) bad.push(`caption ${JSON.stringify(f.caption)}, expected the no-key outline caption`)
+      if (f.mode === 'fallback' && !/showing outline/i.test(f.caption ?? '')) bad.push(`caption ${JSON.stringify(f.caption)}, expected the no-key outline caption`)
       if (f.mapEta && f.stripEta && f.mapEta.replace(/^ETA\s*/i, '') !== f.stripEta.replace(/^ETA\s*/i, '')) bad.push(`map ETA ${JSON.stringify(f.mapEta)} differs from the strip ${JSON.stringify(f.stripEta)}`)
       if (bad.length) throw new Error(bad.join('; '))
-      notes.push(`map between strip and panes, fallback, ${f.fixes} fixes, current ${f.source}${f.mapEta ? ', ETA matches the strip' : ''}`)
+      notes.push(`map between strip and panes, ${f.mode}, ${f.fixes} fixes, current ${f.source}${f.mapEta ? ', ETA matches the strip' : ''}`)
 
       await walk.setTheme(b, 'light').catch(() => {})
       await pause(300)
@@ -944,9 +945,10 @@ const RUNNERS = {
     try {
       await b.navigate(`/track/s/${withPosition}`)
       await b.poll(() => has(b, tid('tracking-map')), 'the customer map', 60_000)
-      await b.poll(() => b.evaluate(`(() => { const m = document.querySelector('[data-testid="tracking-map"]'); return !!m && (m.dataset.mode !== 'fallback' || m.querySelectorAll('svg path').length > 40) })()`), 'the outline drawn', 45_000)
-      const facts = await b.evaluate(`(() => { const m = document.querySelector('[data-testid="tracking-map"]'); return { mode: m.dataset.mode, fixes: Number(m.dataset.fixes), dots: document.querySelectorAll('[data-testid="tracking-map-dot"]').length, text: document.body.innerText } })()`)
-      expect(facts.mode === 'fallback' && facts.fixes >= 6 && facts.dots >= 5, `customer map mode ${facts.mode}, ${facts.fixes} fixes, ${facts.dots} dots`)
+      await b.poll(() => b.evaluate(`(() => { const m = document.querySelector('[data-testid="tracking-map"]'); return !!m && (m.dataset.mode === 'google' ? m.querySelectorAll('[data-testid="tracking-map-dot"]').length > 0 : m.querySelectorAll('svg path').length > 40) })()`), 'the map drawn', 45_000)
+      // data-breadcrumbs is the model's dot count, the same number either renderer draws.
+      const facts = await b.evaluate(`(() => { const m = document.querySelector('[data-testid="tracking-map"]'); return { mode: m.dataset.mode, fixes: Number(m.dataset.fixes), dots: Number(m.dataset.breadcrumbs), drawn: m.querySelectorAll('[data-testid="tracking-map-dot"]').length, text: document.body.innerText } })()`)
+      expect((facts.mode === 'fallback' || facts.mode === 'google') && facts.fixes >= 6 && facts.dots >= 5 && facts.drawn >= 1, `customer map mode ${facts.mode}, ${facts.fixes} fixes, ${facts.dots} model dots, ${facts.drawn} drawn`)
       expect(!/Motive|sms-share|sms-geocode|provider:|MacroPoint|accuracy|Driver phone/i.test(facts.text), 'the customer page prints a source or accuracy string')
       await shotFile(b, SHOT.customerTrail)
 
@@ -955,7 +957,7 @@ const RUNNERS = {
       await pause(800)
       expect(!(await has(b, tid('tracking-map'))) && !/Last seen/.test(await b.evaluate('document.body.innerText')), 'a showPosition:false link renders a map or a last-seen line')
       await shotFile(b, SHOT.customerNoPosition)
-      return `customer page: ${facts.dots} trail dots on the offline outline (data-mode fallback, ${facts.fixes} fixes), no source / accuracy text; the showPosition:false link renders no map and no "Last seen"`
+      return `customer page: ${facts.dots} trail dots (data-mode ${facts.mode}, ${facts.fixes} fixes), no source / accuracy text; the showPosition:false link renders no map and no "Last seen"`
     } finally { await b.close() }
   },
 

@@ -35,6 +35,9 @@ export const AA_HOMES = [
   // ── /tms block (§3.1) ──
   redirect('/tms', '/tms/dashboard'),
   page('/tms/dashboard', 'Company Dashboard', '/tms/dashboard', 'tms'),
+  page('/tms/dashboard/new', 'Company Dashboard', '/tms/dashboard', 'tms'),
+  page('/tms/dashboard/d/:id', 'Company Dashboard', '/tms/dashboard', 'tms'),
+  page('/tms/dashboard/d/:id/edit', 'Company Dashboard', '/tms/dashboard', 'tms'),
   page('/tms/shipments', 'Shipments › Active / All', '/tms/shipments', 'loads|tms'),
   redirect('/tms/shipments/view/*', '/tms/shipments'),
   page('/tms/shipments/intake', 'Shipments › Intake', '/tms/shipments/intake', 'loads|tms|intakeReview'),
@@ -83,6 +86,7 @@ export const AA_HOMES = [
   ...COMPANY_TABS.map((tab) => page(`/tms/brokerage/company/${tab}`, 'Settings › Company', '/tms/brokerage/company', 'ADMIN')),
   page('/tms/brokerage/demo', 'Settings › Demo', '/tms/brokerage/demo', 'tms'),
   page('/tms/brokerage/spot-quoter', 'Settings › Spot quoter & e-mail', '/tms/brokerage/spot-quoter', 'ADMIN'),
+  page('/tms/brokerage/carrier-sales', 'Settings › Carrier Sales', '/tms/brokerage/carrier-sales', 'ADMIN'),
 
   // ── legacy shell routes (§3.2) ──
   redirect('/', 'LandingRedirect (first page the user may open)'),
@@ -178,6 +182,9 @@ export const AA_OLD_URLS = [
   ['/', '/tms/dashboard'],
   ['/tms', '/tms/dashboard'],
   ['/tms/dashboard', '/tms/dashboard'],
+  ['/tms/dashboard/new', '/tms/dashboard/new'],
+  ['/tms/dashboard/d/zz-x', '/tms/dashboard/d/zz-x'],
+  ['/tms/dashboard/d/zz-x/edit', '/tms/dashboard/d/zz-x/edit'],
   ['/tms/shipments', '/tms/shipments'],
   ['/tms/shipments?list=all', '/tms/shipments', '?list=all'],
   ['/tms/shipments/view/zz-x', '/tms/shipments'],
@@ -219,6 +226,7 @@ export const AA_OLD_URLS = [
   ['/tms/brokerage/divisions', '/tms/brokerage/divisions'],
   ['/tms/brokerage/integrations', '/tms/brokerage/integrations'],
   ['/tms/brokerage/ai-agents', '/tms/brokerage/ai-agents'],
+  ['/tms/brokerage/carrier-sales', '/tms/brokerage/carrier-sales'],
   ...COMPANY_TABS.map((tab) => [`/tms/brokerage/company/${tab}`, `/tms/brokerage/company/${tab}`]),
   ['/tms/brokerage/demo', '/tms/brokerage/demo'],
   ['/tms/brokerage/views', '/tms/brokerage'],
@@ -349,7 +357,7 @@ export const AA_BADGE_ROWS = ['Quotes', 'Intake', 'Carrier Sales', 'Load Trackin
 /** Rows only an ADMIN/owner sees (§2.8): none may render for a plain `page-tms` user. */
 export const AA_ADMIN_ONLY_HREFS = [
   '/tms/brokerage/company', '/tms/brokerage/divisions', '/tms/brokerage/users', '/tms/brokerage/integrations',
-  '/tms/brokerage/ai-agents', '/tms/brokerage/spot-quoter', '/platform-health',
+  '/tms/brokerage/ai-agents', '/tms/brokerage/spot-quoter', '/tms/brokerage/carrier-sales', '/platform-health',
 ]
 
 export const AA_PERSONAS = {

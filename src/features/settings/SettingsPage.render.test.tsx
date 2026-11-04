@@ -31,6 +31,8 @@ const api = vi.hoisted(() => ({
   listLocations: vi.fn(async () => []),
   listTruckConfigs: vi.fn(async () => []),
   upsertTruckConfig: vi.fn(),
+  apInboxAction: vi.fn(async () => { throw new Error('AP inbox is not deployed in this test') }),
+  graphqlErrorText: (e: unknown) => (e instanceof Error ? e.message : String(e)),
 }))
 vi.mock('@/lib/apiClient', () => api)
 
@@ -55,7 +57,7 @@ beforeEach(() => {
 describe('SettingsPage', () => {
   it('renders admin-only cards', async () => {
     render(<MemoryRouter><SettingsPage /></MemoryRouter>)
-    for (const heading of ['TMS defaults', 'Customer settings', 'Carrier documents', 'Consolidation', 'Quotes & offers']) {
+    for (const heading of ['TMS defaults', 'Customer settings', 'Carrier documents', 'Consolidation', 'Quotes & offers', 'Accounting · AP inbox']) {
       expect(screen.getAllByText(heading).length).toBeGreaterThan(0)
     }
   })

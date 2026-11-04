@@ -23,6 +23,7 @@ import { workflowAgent } from '../functions/workflow-agent/resource'
 import { tmsAljexImport } from '../functions/tms-aljex-import/resource'
 import { tmsDataSafety } from '../functions/tms-data-safety/resource'
 import { tmsSpotQuoter } from '../functions/tms-spot-quoter/resource'
+import { tmsApInbox } from '../functions/tms-ap-inbox/resource'
 import { tmsCrmActions } from '../functions/tms-crm-actions/resource'
 
 // ExpenseCategory and ExpenseEntryMethod enums are defined inline on each
@@ -1079,6 +1080,10 @@ const schema = a.schema({
   TmsSettings: a
     .model({
       marginFloorBps:        a.integer(),
+      // Step AG: AP-inbox config and machine state. Read ONLY through tmsApInboxActions; written
+      // only by tms-ap-inbox with UpdateItem SET (never touches updatedAt).
+      apInbox:               a.json(),
+      apInboxState:          a.json(),
       defaultPaymentTermsDays: a.integer(),
       accessorialCodes:      a.json(),          // accessorial code objects
       loadStatusRules:       a.json(),
@@ -1366,6 +1371,10 @@ const schema = a.schema({
       maxMessagesPerRepPerRun:     a.integer(),
       updatedBy:                   a.string(),
       version:                     a.integer(),
+      // Step AL: the carrier-sales inbox rides row id='carrier-sales'. Nothing secret in either
+      // attribute (hashes only); the AB reader reads only id='default'.
+      carrierInbox:                a.json(),
+      carrierInboxState:           a.json(),
     })
     .disableOperations(['subscriptions', 'delete'])
     .authorization((allow) => [allow.authenticated().to(['read'])]),
@@ -1455,6 +1464,40 @@ const schema = a.schema({
     ])
     .disableOperations(['subscriptions', 'create', 'update', 'delete'])
     .authorization((allow) => [allow.groups(['ADMIN']).to(['read'])]),
+
+  // Step AG: an invoice / credit-memo e-mail the AP-inbox classifier found, and nothing else
+  // from the mailbox. `id` is `apin:<gmailMessageId>` (`apin:sim:<id>` for the simulated inbox), so
+  // a conditional put is the idempotency guard. DynamoDB TTL on `ttlEpoch` (epoch SECONDS)
+  // enabled in backend.ts. Written only by tms-ap-inbox; clients read.
+  ApInboxItem: a
+    .model({
+      messageId:      a.string().required(),
+      threadId:       a.string(),
+      mailbox:        a.string(),
+      mode:           a.enum(['GOOGLE', 'SIMULATED']),
+      receivedAt:     a.datetime().required(),
+      fromEmail:      a.string(),
+      fromName:       a.string(),
+      subject:        a.string(),
+      kind:           a.enum(['INVOICE', 'CREDIT_MEMO']),
+      status:         a.enum(['NEEDS_REVIEW', 'APPLIED', 'LINKED', 'CREATED', 'DISMISSED']),
+      reviewReason:   a.string(),
+      extraction:     a.json(),
+      match:          a.json(),
+      target:         a.json(),
+      applied:        a.json(),
+      attachments:    a.json(),
+      sourceUrl:      a.string(),
+      runId:          a.string(),
+      resolvedAt:     a.datetime(),
+      resolvedBy:     a.string(),
+      dismissReason:  a.string(),
+      ttlEpoch:       a.integer(),
+      version:        a.integer().required(),
+    })
+    .secondaryIndexes((index) => [index('status').sortKeys(['receivedAt'])])
+    .disableOperations(['subscriptions', 'create', 'update', 'delete'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
 
   // One person at a customer. `id` is the lower-case e-mail address.
   CrmContact: a
@@ -2439,6 +2482,10 @@ const schema = a.schema({
       voidedBy:        a.string(),
       voidReason:      a.string(),
       note:            a.string(),
+      // Step AG: provenance of an AP-inbox update (only tms-ap-inbox writes these).
+      apInboxItemId:   a.string(),
+      apInboxSourceUrl: a.string(),
+      apInboxAppliedAt: a.datetime(),
       createdBy:       a.string().required(),
       updatedBy:       a.string().required(),
       version:         a.integer().required(),
@@ -2815,6 +2862,9 @@ const schema = a.schema({
       authorName:  a.string(),
       at:          a.datetime().required(),
       createdBy:   a.string().required(),
+      // Step AL: classified inbound offer (InboundOfferRecord); ttlEpoch only on UNMATCHED rows.
+      offer:       a.json(),
+      ttlEpoch:    a.integer(),
     })
     .secondaryIndexes((index) => [
       index('shipmentId').sortKeys(['at']),
@@ -3096,7 +3146,7 @@ const schema = a.schema({
    */
   DashboardRollup: a
     .model({
-      id:            a.id(),                 // 'M:2026-11' | 'LG:2026-11' | 'L:CURRENT' | 'D:<rowId>' | 'K:<rowId>'
+      id:            a.id(),                 // 'M:2026-11' | 'LG:2026-11' | 'L:CURRENT' | 'D:<rowId>' | 'K:<rowId>' | 'DASH:<uuid>' | 'DASH:INDEX' (Step AI dashboard specs; never rollup data)
       kind:          a.string().required(),  // 'M' | 'LG' | 'L' | 'D' | 'K'
       periodKey:     a.string().required(),  // '2026-11' | 'CURRENT'
       schemaVersion: a.integer(),
@@ -3733,6 +3783,10 @@ const schema = a.schema({
       paymentReference: a.string(),
       paidBy: a.string(),
       paidAt: a.datetime(),
+      // Step AG: set when an AP-inbox mail was attached to / filled blanks on this payable.
+      apInboxItemId: a.string(),
+      apInboxSourceUrl: a.string(),
+      apInboxAppliedAt: a.datetime(),
     })
     // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
     // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
@@ -4819,6 +4873,18 @@ const schema = a.schema({
     .returns(a.json())
     .authorization((allow) => [allow.authenticated()])
     .handler(a.handler.function(tmsSpotQuoter)),
+
+  // Step AG: the Accounting AP inbox (Lambda tms-ap-inbox). Actions: AP_INBOX_STATUS,
+  // AP_INBOX_PREVIEW_LINK, AP_INBOX_SYNC_NOW, AP_INBOX_LINK, AP_INBOX_MARK_CREATED,
+  // AP_INBOX_CREATE_VENDOR_BILL, AP_INBOX_DISMISS, AP_INBOX_REVERT, AP_INBOX_SAVE_SETTINGS,
+  // AP_INBOX_OAUTH_*, and the dev-only AP_INBOX_SIM_*. The same Lambda answers the hourly rule.
+  // The mailbox is READ-ONLY; nothing is sent, drafted, approved or paid.
+  tmsApInboxActions: a
+    .mutation()
+    .arguments({ action: a.string().required(), input: a.json() })
+    .returns(a.json())
+    .authorization((allow) => [allow.authenticated()])
+    .handler(a.handler.function(tmsApInbox)),
 
   // Step AB: CRM bones. Actions: CRM_GET_ACCOUNT, CRM_LIST_ACCOUNTS, CRM_ADD_ACTIVITY,
   // CRM_ADD_TASK, CRM_COMPLETE_TASK, CRM_SET_NEXT_STEP, CRM_LIST_FOLLOWUPS,

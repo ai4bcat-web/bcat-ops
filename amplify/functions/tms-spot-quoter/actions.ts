@@ -44,6 +44,8 @@ import { loadAiAgents, processManual, ttlFor } from './pipeline'
 import { computeSuggestion } from './suggestion'
 import { ACTION_BUDGET_MS, ACTION_MIN_REMAINING_MS, pollAll } from './poll'
 import { buildSuggestedResponse } from './reply'
+import { csDispatch, isCsAction } from './carrierInbox/actions'
+import type { CarrierInboxDeps } from './carrierInbox/deps'
 import { jsonOf, type Row } from './store'
 
 const OWNER_EMAIL = 'ryne@bcatcorp.com'
@@ -737,7 +739,13 @@ export async function dispatch(
   rawInput: unknown,
   identity: AppSyncIdentity | null | undefined,
   deps: SpotDeps,
+  csDeps?: () => CarrierInboxDeps,
 ): Promise<unknown> {
+  // Step AL: the carrier inbox has its own caller rules (a page-loads-only rep may poll and read).
+  if (isCsAction(action)) {
+    if (!csDeps) throw new Error('Carrier inbox is not available')
+    return csDispatch(action, rawInput, identity, csDeps())
+  }
   const handler = (HANDLERS as Record<string, Handler | undefined>)[action]
   if (!handler) throw new Error(`Unknown action: ${action}`)
   const caller = authorize(action, identity)

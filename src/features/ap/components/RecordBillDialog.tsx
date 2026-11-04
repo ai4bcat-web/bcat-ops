@@ -26,18 +26,28 @@ import { centsFromInput, inputFromCents } from '@/features/ar/components/money'
 const RED = { color: 'var(--tms-badge-red)' }
 const BOX = { border: '1px solid var(--tms-border)', borderRadius: 'var(--tms-radius)' }
 
-export function RecordBillDialog({ loadCarrierId, open, onOpenChange, onDone }: {
+/** Step AG: values read off an AP-inbox e-mail; each one that is present replaces the dialog's default. */
+export interface RecordBillPrefill {
+  billNumber?: string | null
+  billDate?: string | null
+  dueAt?: string | null
+  billedCents?: number | null
+}
+
+export function RecordBillDialog({ loadCarrierId, open, onOpenChange, onDone, prefill }: {
   loadCarrierId: string
   open: boolean
   onOpenChange: (open: boolean) => void
-  onDone: () => void
+  /** Receives the recorded bill's id (the AP-inbox queue marks its item created with it). */
+  onDone: (billId?: string) => void
+  prefill?: RecordBillPrefill
 }) {
   const [preview, setPreview] = useState<BillPreview | null>(null)
-  const [billNumber, setBillNumber] = useState('')
+  const [billNumber, setBillNumber] = useState(prefill?.billNumber ?? '')
   const [billDate, setBillDate] = useState('')
   const [dueAt, setDueAt] = useState('')
   // Once the due date has been typed over, a later change of bill date leaves it alone.
-  const [dueAtTouched, setDueAtTouched] = useState(false)
+  const [dueAtTouched, setDueAtTouched] = useState(!!prefill?.dueAt)
   const [billed, setBilled] = useState('')
   const [documentId, setDocumentId] = useState('')
   const [note, setNote] = useState('')
@@ -51,14 +61,14 @@ export function RecordBillDialog({ loadCarrierId, open, onOpenChange, onDone }: 
     previewBill({ loadCarrierId })
       .then((result) => {
         setPreview(result)
-        setBillDate(result.snapshot.billDate)
-        setDueAt(result.snapshot.dueAt)
-        setBilled(inputFromCents(result.snapshot.grossCents))
+        setBillDate(prefill?.billDate || result.snapshot.billDate)
+        setDueAt(prefill?.dueAt || result.snapshot.dueAt)
+        setBilled(inputFromCents(prefill?.billedCents ?? result.snapshot.grossCents))
         setError(null)
       })
       .catch((err: unknown) => { setError(graphqlErrorText(err)) })
       .finally(() => setLoading(false)),
-  [loadCarrierId])
+  [loadCarrierId, prefill])
 
   useEffect(() => { load() }, [load])
 
@@ -99,7 +109,7 @@ export function RecordBillDialog({ loadCarrierId, open, onOpenChange, onDone }: 
         toast.success(result.bill.status === 'TO_BE_PAID'
           ? `Bill recorded and approved — ${formatCents(result.bill.netCents)} to pay`
           : `Bill recorded — ${formatCents(result.bill.netCents)} in review`)
-        onDone()
+        onDone(result.bill.id)
       })
       .catch((err: unknown) => {
         const text = graphqlErrorText(err)

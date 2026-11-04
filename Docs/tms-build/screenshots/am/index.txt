@@ -1,3 +1,4 @@
+Docs/tms-build/screenshots/am/AM01-cover-dialog-directory-active.png
 Docs/tms-build/screenshots/am/AM03-ladder-setup-pending.png
 Docs/tms-build/screenshots/am/AM04-ladder-setup-complete.png
 Docs/tms-build/screenshots/am/AM05-ladder-rate-con-sent.png

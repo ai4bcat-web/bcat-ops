@@ -27,7 +27,7 @@ import { useCarrierAp } from '@/hooks/useCarrierAp'
 import { useCarriers } from '@/hooks/useCarriers'
 import { useOpenBills } from '@/hooks/useOpenBills'
 import {
-  getTmsSettings, graphqlErrorText, listBillsByMonth, reverseApPayment, unapproveBill, voidBill,
+  getShipmentDocumentUrl, getTmsSettings, graphqlErrorText, listBillsByMonth, reverseApPayment, unapproveBill, voidBill,
 } from '@/lib/apiClient'
 import {
   AGING_BUCKETS, AGING_BUCKET_LABEL, apAgingCsv, type AgingPartySummary,
@@ -48,14 +48,27 @@ import {
 import { ApCreditDialog } from './components/ApCreditDialog'
 import { ApproveBillDialog } from './components/ApproveBillDialog'
 import { PayCarrierDialog } from './components/PayCarrierDialog'
-import { RecordBillDialog } from './components/RecordBillDialog'
+import { RecordBillDialog, type RecordBillPrefill } from './components/RecordBillDialog'
 import { SendRemittanceDialog } from './components/SendRemittanceDialog'
 import { UpdateCarrierChargesDialog } from './components/UpdateCarrierChargesDialog'
+import type { ApInboxItemRecord } from '@/lib/apInbox/types'
 import type { ApPaymentRecord, ApSettings, CarrierBillRecord, CarrierRecord } from '@/types/tms'
+import { ApInboxDigest } from './inbox/ApInboxDigest'
+import { CreateBillDialog } from './inbox/CreateBillDialog'
+import { DismissItemDialog } from './inbox/DismissItemDialog'
+import { LinkBillDialog } from './inbox/LinkBillDialog'
+import { apInboxMarkCreated, apInboxRevert } from './inbox/apInboxClient'
+import { INBOX_CHIPS, HISTORY_DAYS, type InboxChip } from './inbox/inboxModel'
+import { InboxChips } from './inbox/InboxParts'
+import { inboxView } from './inbox/inboxView'
+import { useApInboxItems, useApInboxStatus } from './inbox/useApInbox'
 
 /** Which dialog is open, and the one thing it is open about. */
 type ApDialog =
-  | { kind: 'record'; loadCarrierId: string }
+  | { kind: 'record'; loadCarrierId: string; prefill?: RecordBillPrefill; inboxItem?: ApInboxItemRecord }
+  | { kind: 'inbox-link'; item: ApInboxItemRecord }
+  | { kind: 'inbox-create'; item: ApInboxItemRecord }
+  | { kind: 'inbox-dismiss'; item: ApInboxItemRecord }
   | { kind: 'approve'; bill: CarrierBillRecord }
   | { kind: 'charges'; loadCarrierId: string; shipmentId: string }
   | { kind: 'pay'; carrierId: string; billIds?: string[] }
@@ -89,6 +102,13 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
 
   const { isAdmin } = useAuth()
   const [tab, setTab] = useState<ApTabKey>('awaiting')
+  const inboxStatus = useApInboxStatus()
+  const [chip, setChip] = useState<InboxChip>('NEEDS_REVIEW')
+  const [historySince] = useState(() => new Date(Date.now() - HISTORY_DAYS * 86_400_000).toISOString())
+  const inboxItems = useApInboxItems(
+    INBOX_CHIPS.find((c) => c.key === chip)?.statuses ?? ['NEEDS_REVIEW'],
+    chip === 'NEEDS_REVIEW' ? undefined : historySince,
+  )
   const [dialog, setDialog] = useState<ApDialog | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -153,8 +173,10 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   const awaitingTotals = useMemo(() => awaitingInvoiceTotals(awaiting.rows), [awaiting.rows])
 
   const refreshAll = () =>
-    Promise.all([awaiting.refresh(), inReview.refresh(), open.refresh(), carrierAp.refresh(), loadMonth()])
-      .then(() => undefined)
+    Promise.all([
+      awaiting.refresh(), inReview.refresh(), open.refresh(), carrierAp.refresh(), loadMonth(),
+      inboxItems.refresh(), inboxStatus.refresh(),
+    ]).then(() => undefined)
 
   const closeAndRefresh = () => {
     setDialog(null)
@@ -214,9 +236,49 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     paid: settled.length,
     payments: carrierAp.payments.length,
     aging: open.aging.byParty.length,
+    inbox: inboxStatus.status?.openCount ?? 0,
+  }
+
+  const reviewNow = () => {
+    void inboxStatus.syncNow().then((failure) => {
+      if (failure) toast.error(failure)
+      void inboxItems.refresh()
+      void open.refresh()
+    })
+  }
+
+  const openInboxFile = (file: { key: string }) => {
+    getShipmentDocumentUrl(file.key)
+      .then((url) => window.open(url, '_blank', 'noopener'))
+      .catch((e: unknown) => toast.error(graphqlErrorText(e) || 'Could not open the file'))
+  }
+
+  const undoInboxItem = (item: ApInboxItemRecord) => {
+    setBusy(true)
+    apInboxRevert(item.id)
+      .then(() => { toast.success('Bill restored to its earlier values'); void refreshAll() })
+      .catch((e: unknown) => toast.error(graphqlErrorText(e) || 'Could not undo'))
+      .finally(() => setBusy(false))
+  }
+
+  // The Record-bill dialog finished for a queued e-mail: close the item with the new bill's id.
+  const inboxRecorded = (item: ApInboxItemRecord | undefined, billId?: string) => {
+    if (item && billId) {
+      apInboxMarkCreated(item.id, billId)
+        .catch((e: unknown) => toast.error(graphqlErrorText(e) || 'The bill was recorded but the e-mail could not be closed'))
+        .finally(() => void refreshAll())
+    }
+    toast.message('Accept the filed invoice under Documents review to clear the paperwork gate')
+    closeAndRefresh()
   }
 
   const error = awaiting.error ?? inReview.error ?? open.error ?? carrierAp.error
+  const inboxBanner = (
+    <>
+      <InboxChips active={chip} onSelect={setChip} />
+      {inboxItems.error && <p style={{ color: 'var(--tms-badge-red)' }} className="text-sm">{inboxItems.error}</p>}
+    </>
+  )
 
   const chrome = {
     title: 'Invoicing',
@@ -294,6 +356,17 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       onRemittance: (payment) => setDialog({ kind: 'remittance', payment }),
       onReverse: (payment) => setDialog({ kind: 'reverse', payment }),
     })
+    : tab === 'inbox' ? view<ApInboxItemRecord>(inboxView({
+      banner: inboxBanner,
+      rows: inboxItems.items,
+      loading: inboxItems.loading,
+      busy,
+      onLink: (item) => setDialog({ kind: 'inbox-link', item }),
+      onCreate: (item) => setDialog({ kind: 'inbox-create', item }),
+      onDismiss: (item) => setDialog({ kind: 'inbox-dismiss', item }),
+      onUndo: undoInboxItem,
+      onOpenFile: openInboxFile,
+    }))
     : agingView({
       errorBanner,
       aging: open.aging,
@@ -306,12 +379,56 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
 
   return (
     <>
+      <ApInboxDigest
+        status={inboxStatus.status}
+        syncing={inboxStatus.syncing}
+        progress={inboxStatus.progress}
+        isAdmin={isAdmin}
+        onReviewNow={reviewNow}
+        onOpenQueue={() => { setChip('NEEDS_REVIEW'); setTab('inbox') }}
+      />
       <TmsListPage<never> {...chrome} {...current} />
 
       {dialog?.kind === 'record' && (
         <RecordBillDialog
           open
           loadCarrierId={dialog.loadCarrierId}
+          prefill={dialog.prefill}
+          onOpenChange={(o) => { if (!o) setDialog(null) }}
+          onDone={(billId) => (dialog.inboxItem ? inboxRecorded(dialog.inboxItem, billId) : closeAndRefresh())}
+        />
+      )}
+      {dialog?.kind === 'inbox-link' && (
+        <LinkBillDialog
+          item={dialog.item}
+          bills={open.bills}
+          assignments={awaiting.rows}
+          onOpenChange={(o) => { if (!o) setDialog(null) }}
+          onDone={closeAndRefresh}
+        />
+      )}
+      {dialog?.kind === 'inbox-create' && (
+        <CreateBillDialog
+          item={dialog.item}
+          assignments={awaiting.rows}
+          onOpenChange={(o) => { if (!o) setDialog(null) }}
+          onRecord={(loadCarrierId) => setDialog({
+            kind: 'record',
+            loadCarrierId,
+            inboxItem: dialog.item,
+            prefill: {
+              billNumber: dialog.item.extraction.invoiceNumber,
+              billDate: dialog.item.extraction.invoiceDate,
+              dueAt: dialog.item.extraction.dueDate,
+              billedCents: dialog.item.extraction.amountCents,
+            },
+          })}
+          onDone={closeAndRefresh}
+        />
+      )}
+      {dialog?.kind === 'inbox-dismiss' && (
+        <DismissItemDialog
+          item={dialog.item}
           onOpenChange={(o) => { if (!o) setDialog(null) }}
           onDone={closeAndRefresh}
         />

@@ -7,7 +7,7 @@
  *   node scripts/devVerifyPerf.mjs --baseline            pre-change numbers: 12 pages x 3 cold runs -> Docs/tms-build/perf/baseline-<date>.json
  *   node scripts/devVerifyPerf.mjs                       full gate: G0..G8 (browser) + G1/G2/G7 (API, via devVerifyPerfApi.mts)
  *   node scripts/devVerifyPerf.mjs --ratchet             lower every ceiling in perfBudgets.mjs to measured p95 x 1.5 from perf/last-run.json (never raises)
- *   options: --runs=N (default 3)  --pages=/tms/carriers,/schedule  --base=<sha> (G6, default 2364934)  --no-api  --verbose
+ *   options: --runs=N (default 3)  --pages=/tms/carriers,/schedule  --base=<sha> (G6, default a064b26)  --no-api  --verbose
  *            --no-kpi (skip the Step AF cold/warm/spa KPI modes)  --enforce-af (KPI budgets, G11, G12 fail the run; default: WARN until AF_ENFORCED)
  *
  * Step AF: /tms/dashboard and /dashboard are also measured in three modes (cold / warm / spa, 1440x900) until the KPI strip
@@ -37,7 +37,12 @@ import { expectedCounts } from './lib/perfExpected.mjs'
 
 const DEV_APPSYNC = /^https:\/\/f5iqzdpidzalvjys7yxijn5ave\.appsync-api\.us-east-1\.amazonaws\.com\/graphql$/
 const PERF_DIR = resolve('Docs/tms-build/perf')
-const DEFAULT_BASE = '2364934' // the AA merge: the last commit before the PERF pass
+// Re-baselined 2364934 (the AA merge, before the PERF pass) -> a064b26 (Main, Step AF6 review of `git diff 2364934 HEAD`): the only frozen
+// files that moved since are tms-shipment-actions/batch.ts + documents.ts (Step AP: Load Review gating: requirement checks read revenue/
+// expense/profit to REFUSE a push or release, nothing is computed into a stored amount; PUSH_TO_LOAD_REVIEW, batch cap) and
+// src/lib/carrierEligibility.ts (+test) (Step AM: applyCoverRules, a pure block/warn verdict over MCP status). No amount, rate, margin,
+// financials, invoice or bill arithmetic changed. Any later money change is a real diff against this base.
+const DEFAULT_BASE = 'a064b26'
 const LEGACY_LOAD_READ = '\\b(listLoads|listLoadBy[A-Za-z]+|getLoad)\\b'
 
 const args = process.argv.slice(2)

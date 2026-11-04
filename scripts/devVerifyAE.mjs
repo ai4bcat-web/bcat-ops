@@ -18,7 +18,7 @@
  * Nothing is ever sent: SEND_QUOTE uses via:'COPY' (mints the link, sends no mail). Passwords, tokens and customer names are never
  * printed (counts, ids and seconds only).
  *
- * Everything it creates is ZZ AE …: one customer and two quotes on a made-up lane (ZZVille, IL → ZZburg, TX). In `finally` the open
+ * Everything it creates is ZZ AE …: one customer and two quotes on a made-up lane (ZZVille<stamp>, IL → ZZburg<stamp>, TX, unique per run). In `finally` the open
  * quote is cancelled, the lost one is already closed, the customer archived, the temporary admin deleted (`identity deleted: true`).
  * AE01 only READS the real lane history (Chicago → Dallas, Van), so the 10k imported loads are never touched.
  *
@@ -120,16 +120,18 @@ export async function inventory() {
 }
 
 // ───────────────────────────── helpers ─────────────────────────────
-const ZZ_LANE = {
-  originCity: 'ZZVille', originState: 'IL', originZip: '', destinationCity: 'ZZburg', destinationState: 'TX', destinationZip: '', equipmentType: 'VAN',
-}
+/** Unique per run (the stamp is in the city names), so earlier runs' quotes never count and totals are exact. */
+const zzCity = (ts, kind) => `ZZ${kind}${ts}`
+const zzLane = (ts) => ({
+  originCity: zzCity(ts, 'Ville'), originState: 'IL', originZip: '', destinationCity: zzCity(ts, 'burg'), destinationState: 'TX', destinationZip: '', equipmentType: 'VAN',
+})
 
 const quoteBody = (ctx, ts, n) => ({
   customerId: ctx.customerId, mode: 'FTL', rateType: 'SPOT', equipmentType: 'VAN', commodity: 'General freight', miles: 925, weightLbs: 40000,
   contactName: 'ZZ AE Buyer', contactEmail: `zz-ae-${ts}@example.invalid`,
   stops: [
-    { type: 'pickup', name: 'ZZ AE Shipper', city: 'ZZVille, IL', address: { city: 'ZZVille', state: 'IL', zip: '' }, appt: `${day(3)}T15:00:00.000Z` },
-    { type: 'delivery', name: 'ZZ AE Receiver', city: 'ZZburg, TX', address: { city: 'ZZburg', state: 'TX', zip: '' }, appt: `${day(4)}T18:00:00.000Z` },
+    { type: 'pickup', name: 'ZZ AE Shipper', city: `${zzCity(ts, 'Ville')}, IL`, address: { city: zzCity(ts, 'Ville'), state: 'IL', zip: '' }, appt: `${day(3)}T15:00:00.000Z` },
+    { type: 'delivery', name: 'ZZ AE Receiver', city: `${zzCity(ts, 'burg')}, TX`, address: { city: zzCity(ts, 'burg'), state: 'TX', zip: '' }, appt: `${day(4)}T18:00:00.000Z` },
   ],
   lines: [{ side: 'CUSTOMER', code: 'LINEHAUL', rateCents: 250000 + n * 10000, count: 1 }, { side: 'CARRIER', code: 'LINEHAUL', rateCents: 200000, count: 1 }],
 })
@@ -175,7 +177,7 @@ async function ae02(ctx) {
   await ensureFixture(ctx)
   // Lose A first, then read the lane once: the action caches an answer for a minute.
   await ctx.ship('MARK_QUOTE_LOST', { quoteId: ctx.quoteA, reason: 'TOO_HIGH', note: 'ZZ AE verification' })
-  const out = await ctx.ship('LANE_INTELLIGENCE', ZZ_LANE)
+  const out = await ctx.ship('LANE_INTELLIGENCE', zzLane(ctx.ts))
   const { stats, rows } = out.quotes
   expect(stats.count === 2, `expected 2 quotes on the ZZ lane, got ${stats.count}`)
   expect(stats.lost === 1 && stats.pending === 1 && stats.won === 0, `outcomes lost ${stats.lost} / pending ${stats.pending} / won ${stats.won}`)
@@ -184,7 +186,7 @@ async function ae02(ctx) {
   const b = rows.find((r) => r.id === ctx.quoteB)
   expect(a?.outcome === 'LOST' && a.lostReason === 'TOO_HIGH', `quote A outcome ${a?.outcome}/${a?.lostReason}`)
   expect(b?.outcome === 'PENDING', `quote B outcome ${b?.outcome}`)
-  const excluded = await ctx.ship('LANE_INTELLIGENCE', { ...ZZ_LANE, excludeQuoteId: ctx.quoteB })
+  const excluded = await ctx.ship('LANE_INTELLIGENCE', { ...zzLane(ctx.ts), excludeQuoteId: ctx.quoteB })
   expect(excluded.quotes.rows.every((r) => r.id !== ctx.quoteB), 'excludeQuoteId still lists the quote it was told to leave out')
   expect(out.runs.stats.count === 0, `the ZZ lane has ${out.runs.stats.count} imported loads`)
   return `LOST (TOO_HIGH) + PENDING recorded, win rate 0 %, excludeQuoteId honoured, no loads on the ZZ lane`
@@ -258,7 +260,7 @@ async function ae05(ctx) {
   const posted = await ctx.ship('POST_QUOTE_LOAD', { quoteId: ctx.quoteB })
   const row = posted.postings?.[0]
   expect(row && row.status === 'POSTED' && row.mode === 'STUB' && /STUB/.test(String(row.message)), `posting ${row?.status}/${row?.mode}/${String(row?.message).slice(0, 40)}`)
-  expect(row.shipmentId === `quote:${ctx.quoteB}` && row.originCity === 'ZZVille' && row.destinationState === 'TX', `posting subject/lane ${row.shipmentId}/${row.originCity}/${row.destinationState}`)
+  expect(row.shipmentId === `quote:${ctx.quoteB}` && String(row.originCity).toUpperCase() === zzCity(ctx.ts, 'Ville').toUpperCase() && row.destinationState === 'TX', `posting subject/lane ${row.shipmentId}/${row.originCity}/${row.destinationState}`)
   const read = (await gql(ctx.token, `query { listShipmentPostingByShipmentId(shipmentId: ${JSON.stringify(`quote:${ctx.quoteB}`)}) { items { id status mode } } }`, {})).listShipmentPostingByShipmentId.items
   expect(read.length === 1 && read[0].status === 'POSTED', `recorded rows ${read.length}`)
   const down = await ctx.ship('UNPOST_QUOTE_LOAD', { quoteId: ctx.quoteB })

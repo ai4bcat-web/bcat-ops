@@ -53,4 +53,8 @@ export const GMAIL_HEADER_ALLOWLIST = [
   'message-id',
   'in-reply-to',
   'references',
+  // Step AL: the carrier-sales stage-1 filter matches the distribution address here when a
+  // forward or Google Group rewrites To/Cc.
+  'delivered-to',
+  'x-original-to',
 ] as const

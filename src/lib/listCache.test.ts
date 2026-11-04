@@ -70,6 +70,16 @@ describe('listCache', () => {
     expect(peekList('k')).toBeUndefined() // but later callers re-read
   })
 
+  it('a prefixed invalidation does not stop an unrelated in-flight read from being cached', async () => {
+    let release!: (v: string) => void
+    const slow = new Promise<string>((r) => { release = r })
+    const pending = cachedList('pods:list', () => slow, { ttlMs: 1000 })
+    invalidateLists('driverSubmissions:')
+    release('pods')
+    await pending
+    expect(peekList('pods:list')).toBe('pods')
+  })
+
   it('force re-reads a fresh entry', async () => {
     let n = 0
     const load = async () => ++n

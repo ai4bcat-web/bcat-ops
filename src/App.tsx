@@ -11,7 +11,8 @@ import { DashboardPage } from '@/features/dashboard/DashboardPage'
 import { CalendarPage } from '@/features/calendar/CalendarPage'
 import { TmsToaster } from '@/features/tms/kit/TmsToaster'
 import { TmsLayout } from '@/features/tms/TmsLayout'
-import { DashboardPage as TmsDashboardPage } from '@/features/tms/dashboard/DashboardPage'
+import { DashboardHome } from '@/features/dashboards/viewer/DashboardHome'
+import { DashboardViewPage } from '@/features/dashboards/viewer/DashboardViewPage'
 import { WorkflowsPage } from '@/features/workflows/WorkflowsPage'
 import { RunTracePage } from '@/features/workflows/RunTracePage'
 import { TrucksPage } from '@/features/trucks/TrucksPage'
@@ -86,6 +87,7 @@ import { DriverAuthProvider } from '@/features/driver-app/DriverAuthContext'
 import { DriverRoutes } from '@/features/driver-app/DriverRoutes'
 
 // The Aljex create/edit form is ~150 controls; load it only when someone opens it.
+const DashboardBuilderPage = lazy(() => import('@/features/dashboards/builder/DashboardBuilderPage').then((m) => ({ default: m.DashboardBuilderPage })))
 const ShipmentFormPage = lazy(() => import('@/features/shipments/form/ShipmentFormPage').then((m) => ({ default: m.ShipmentFormPage })))
 
 /** A retired saved-view URL: the all-shipments slug maps to the All list, the rest to Active. */
@@ -136,7 +138,11 @@ export default function App() {
                 <Route element={<TmsLayout />}>
                 <Route path="/tms">
                   <Route index element={<Navigate to="/tms/dashboard" replace />} />
-                  <Route path="dashboard" element={<RequirePage page="tms"><TmsDashboardPage /></RequirePage>} />
+                  <Route path="dashboard" element={<RequirePage page="tms"><DashboardHome /></RequirePage>} />
+                  {/* Step AI: chat-built dashboards. The builder bounces to /tms/dashboard without DASHBOARDS_CREATE. */}
+                  <Route path="dashboard/d/:id" element={<RequirePage page="tms"><DashboardViewPage /></RequirePage>} />
+                  <Route path="dashboard/new" element={<RequirePage page="tms"><Suspense fallback={null}><DashboardBuilderPage /></Suspense></RequirePage>} />
+                  <Route path="dashboard/d/:id/edit" element={<RequirePage page="tms"><Suspense fallback={null}><DashboardBuilderPage /></Suspense></RequirePage>} />
                   <Route path="shipments" element={<RequirePage page={['loads', 'tms']}><ShipmentsBoard /></RequirePage>} />
                   {/* Saved board views are gone: old bookmarks land on the board. */}
                   <Route path="shipments/view/*" element={<SavedViewRedirect />} />

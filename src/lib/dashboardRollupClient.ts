@@ -42,7 +42,8 @@ const sortedIds = (ids: readonly string[]) => [...new Set(ids)].sort()
 
 async function fetchRows(ids: string[]): Promise<RawRollupRow[]> {
   const rows = await batchGet<WireRow>({ query: 'getDashboardRollup', fields: FIELDS }, ids)
-  return [...rows.values()].map((row) => ({ ...row, payload: parsePayload(row.payload) }))
+  // 'DASH:' rows are conversational-dashboard specs (Step AI) sharing this table: never rollup data.
+  return [...rows.values()].filter((row) => !row.id.startsWith('DASH:')).map((row) => ({ ...row, payload: parsePayload(row.payload) }))
 }
 
 /**

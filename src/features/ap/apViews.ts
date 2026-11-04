@@ -23,7 +23,7 @@ import type {
   ShipmentDocumentType,
 } from '@/types/tms'
 
-export type ApTabKey = 'awaiting' | 'review' | 'to-pay' | 'paid' | 'payments' | 'aging'
+export type ApTabKey = 'awaiting' | 'review' | 'to-pay' | 'paid' | 'payments' | 'aging' | 'inbox'
 
 export const AP_TABS: { key: ApTabKey; label: string }[] = [
   { key: 'awaiting', label: 'Awaiting invoice' },
@@ -32,6 +32,7 @@ export const AP_TABS: { key: ApTabKey; label: string }[] = [
   { key: 'paid', label: 'Paid' },
   { key: 'payments', label: 'Payments & credits' },
   { key: 'aging', label: 'Aging' },
+  { key: 'inbox', label: 'AP inbox' },
 ]
 
 export const BILL_STATUS_LABEL: Record<CarrierBillStatus, string> = {

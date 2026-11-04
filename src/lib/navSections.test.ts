@@ -68,7 +68,7 @@ describe('buildNavSections', () => {
     expect(kids('Accounting')).toEqual(['Accounts Receivable', 'Accounts Payable', 'Vendors', 'Factoring'])
     expect(kids('Settings')).toEqual([
       'General & automation', 'Company', 'Divisions & ownership', 'Users & roles', 'Integrations', 'AI agents',
-      'Spot quoter & e-mail', 'Commissions', 'Reports', 'Audit log', 'Compliance', 'Platform health', 'Demo',
+      'Spot quoter & e-mail', 'Carrier Sales', 'Commissions', 'Reports', 'Audit log', 'Compliance', 'Platform health', 'Demo',
     ])
     // Every child lands somewhere different.
     const childTargets = pinned.flatMap((i) => (i.children ?? []).map((c) => c.to))

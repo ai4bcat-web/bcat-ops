@@ -17,17 +17,14 @@ interface Entry {
   hasValue: boolean
   at: number
   inflight: Promise<unknown> | null
-  /** Bumped by invalidate so a load that started before a write cannot repopulate the cache. */
-  epoch: number
 }
 
 const entries = new Map<string, Entry>()
-let epoch = 0
 
 function entryFor(key: string): Entry {
   let e = entries.get(key)
   if (!e) {
-    e = { value: undefined, hasValue: false, at: 0, inflight: null, epoch }
+    e = { value: undefined, hasValue: false, at: 0, inflight: null }
     entries.set(key, e)
   }
   return e
@@ -35,10 +32,11 @@ function entryFor(key: string): Entry {
 
 function start<T>(key: string, e: Entry, load: () => Promise<T>): Promise<T> {
   if (e.inflight) return e.inflight as Promise<T>
-  const startedEpoch = epoch
   const p = load().then(
     (v) => {
-      if (entries.get(key) === e && startedEpoch === epoch) {
+      // invalidateLists deletes the entry, so a load that started before the write cannot repopulate it; a load for a key the
+      // write did NOT match keeps its entry and is stored (a prefixed invalidation must not make unrelated reads refetch).
+      if (entries.get(key) === e) {
         e.value = v
         e.hasValue = true
         e.at = Date.now()
@@ -88,7 +86,6 @@ export function cachedList<T>(key: string, load: () => Promise<T>, opts: CacheOp
 
 /** Drop entries whose key starts with `prefix` (all when omitted). In-flight loads are orphaned. */
 export function invalidateLists(prefix?: string): void {
-  epoch += 1
   for (const [key] of entries) {
     if (!prefix || key.startsWith(prefix)) entries.delete(key)
   }

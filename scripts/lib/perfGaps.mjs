@@ -132,7 +132,7 @@ export function scanAF(files) {
     const inCompany = path.startsWith('src/features/tms/dashboard/') && !isTest(path)
     if (inCompany) {
       for (const m of text.matchAll(/kind\s*:\s*['"]working['"]/g)) out.workingSet.push({ path, line: lineOf(text, m.index) })
-      for (const m of text.matchAll(/import\s[^;]*?\b(loadFinancials|getLoadFinancials|listLoadFinancials)\b[^;]*?from/g)) out.financials.push({ path, line: lineOf(text, m.index), symbol: m[1] })
+      for (const m of text.matchAll(/import\s+(?:type\s+)?[^'"]*?\b(loadFinancials|getLoadFinancials|listLoadFinancials)\b[^'"]*?from\s+['"]/g)) out.financials.push({ path, line: lineOf(text, m.index), symbol: m[1] })
     }
     if (path === 'src/features/dashboard/DashboardPage.tsx') {
       const blocks = []

@@ -11,7 +11,8 @@ import {
   DeleteObjectCommand,
   ListObjectsV2Command,
 } from '@aws-sdk/client-s3'
-import type { GmailMessageMeta, GmailPort } from '../../../../src/lib/spot/port'
+import type { GmailMessageMeta } from '../../../../src/lib/spot/port'
+import type { MailboxAttachment, MailboxPort } from '../../../../src/lib/apInbox/mailbox'
 
 /** The subset of S3 this adapter uses; tests pass an in-memory implementation. */
 export interface SimS3 {
@@ -38,12 +39,20 @@ export interface SimInboxMessage {
   labelIds?: string[]
   headers?: Record<string, string>
   body: string
-  attachments?: { name: string; contentType: string; size: number }[]
+  /** Step AG: `dataBase64` is the simulated file's bytes (read back by `getAttachment`, never by `getBody`). */
+  attachments?: { name: string; contentType: string; size: number; dataBase64?: string }[]
+  /**
+   * Step AL, dev only: the classification a verification harness stores beside the message so the
+   * carrier inbox can run without the model. Lives inside the sim object, never in a Gmail header,
+   * so no real mail can carry it; the port never returns it in metadata.
+   */
+  devExtraction?: unknown
 }
 
 interface StoredMessage extends GmailMessageMeta {
+  devExtraction?: unknown
   body: string
-  attachments: { name: string; contentType: string; size: number }[]
+  attachments: { name: string; contentType: string; size: number; dataBase64?: string }[]
   seq: number
 }
 
@@ -88,8 +97,8 @@ let counter = 0
 const nextSeq = () => Date.now() * 1000 + (counter++ % 1000)
 
 function meta(m: StoredMessage): GmailMessageMeta {
-  const { body: _b, attachments: _a, seq: _s, ...rest } = m
-  void _b; void _a; void _s
+  const { body: _b, attachments: _a, seq: _s, devExtraction: _d, ...rest } = m
+  void _b; void _a; void _s; void _d
   return rest
 }
 
@@ -123,9 +132,17 @@ export async function simInject(userId: string, msg: SimInboxMessage, s3?: SimS3
     body: msg.body,
     attachments: msg.attachments ?? [],
     seq,
+    ...(msg.devExtraction === undefined ? {} : { devExtraction: msg.devExtraction }),
   }
   await store(s3).put(key(userId, 'inbox', id), JSON.stringify(stored))
   return { id }
+}
+
+/** Step AL: the stored dev classification of one simulated message, or null. */
+export async function simDevExtraction(userId: string, id: string, s3?: SimS3): Promise<unknown | null> {
+  const raw = await store(s3).get(key(userId, 'inbox', id))
+  if (!raw) return null
+  return (JSON.parse(raw) as StoredMessage).devExtraction ?? null
 }
 
 async function purge(userId: string, s3: SimS3 | undefined, only?: (k: string) => boolean): Promise<{ deleted: number }> {
@@ -145,7 +162,7 @@ export const simReset = (userId: string, s3?: SimS3) => purge(userId, s3)
 export const simPurgeTest = (userId: string, s3?: SimS3) =>
   purge(userId, s3, (k) => (k.split('/').pop() ?? '').startsWith('zz-'))
 
-export function simPort(userId: string, s3?: SimS3): GmailPort {
+export function simPort(userId: string, s3?: SimS3): MailboxPort {
   const s = () => store(s3)
 
   async function find(id: string): Promise<StoredMessage> {
@@ -185,7 +202,24 @@ export function simPort(userId: string, s3?: SimS3): GmailPort {
 
     async getBody(id) {
       const m = await find(id)
-      return { text: m.body, attachments: m.attachments }
+      const attachments: MailboxAttachment[] = m.attachments.map((a, i) => ({ name: a.name, contentType: a.contentType, size: a.size, id: `sim-att-${i}` }))
+      return { text: m.body, attachments }
+    },
+
+    async listAfter({ afterMs, max }) {
+      const all = await readAll(userId, 'inbox', s())
+      return all
+        .filter((m) => Number(m.internalDate) >= afterMs && !m.labelIds.some((l) => ['SENT', 'DRAFT', 'SPAM', 'TRASH'].includes(l)))
+        .sort((a, b) => Number(a.internalDate) - Number(b.internalDate) || a.seq - b.seq)
+        .slice(0, max)
+        .map((m) => m.id)
+    },
+
+    async getAttachment(messageId, att) {
+      const m = await find(messageId)
+      const idx = att.id?.startsWith('sim-att-') ? Number(att.id.slice('sim-att-'.length)) : m.attachments.findIndex((a) => a.name === att.name)
+      const data = m.attachments[idx]?.dataBase64
+      return data ? Buffer.from(data, 'base64') : null
     },
 
     async threadMessages(threadId) {

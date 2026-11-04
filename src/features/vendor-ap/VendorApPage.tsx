@@ -454,6 +454,12 @@ function DetailsDialog({
         </Section>
 
         <AttachmentList attachments={item.attachments} getAttachmentUrl={getAttachmentUrl} />
+
+        {item.apInboxSourceUrl && (
+          <p className="tms-muted" style={{ fontSize: 13 }} data-testid="ap-inbox-vendor-source">
+            Filled from an AP-inbox e-mail — <a href={item.apInboxSourceUrl} target="_blank" rel="noreferrer">Open e-mail</a>
+          </p>
+        )}
       </div>
     </TmsDialog>
   )

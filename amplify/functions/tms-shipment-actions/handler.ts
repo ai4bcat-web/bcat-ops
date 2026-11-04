@@ -189,6 +189,13 @@ import {
   type CarrierOfferDeps,
 } from './carrierOffers'
 import {
+  fileInboundOffer,
+  assignInboundOffer,
+  dismissInboundOffer,
+  SYSTEM_CALLER_EMAIL,
+  type CarrierInboundDeps,
+} from './carrierInbound'
+import {
   getDemoState,
   resetDemoData,
   seedDemoData,
@@ -670,6 +677,10 @@ type Action =
   | 'SEED_DEMO_DATA'
   | 'RESET_DEMO_DATA'
   | 'LIST_LOAD_CARRIERS_BY_CARRIER'
+  // Step AL: inbound carrier offers (mail and calls). FILE is the carrier-inbox system caller's alone.
+  | 'FILE_INBOUND_OFFER'
+  | 'ASSIGN_INBOUND_OFFER'
+  | 'DISMISS_INBOUND_OFFER'
 
 /**
  * Step H. Quoting is its own desk: a rep who prices freight all day has no business
@@ -719,6 +730,9 @@ const OFFER_ACTIONS: Record<string, true> = {
   // Step AE. Push to DAT from a quote or spot request: the same board posting as POST_LOAD, with no shipment.
   POST_QUOTE_LOAD: true,
   UNPOST_QUOTE_LOAD: true,
+  // Step AL. A rep assigns or dismisses an Unmatched inbound offer; FILE_INBOUND_OFFER is deliberately absent (system caller only).
+  ASSIGN_INBOUND_OFFER: true,
+  DISMISS_INBOUND_OFFER: true,
 }
 
 /**
@@ -787,6 +801,11 @@ interface AppSyncEvent {
     input?: string | Record<string, unknown> | null
   }
   identity?: AppSyncIdentity | null
+  /**
+   * Set only by a Lambda that invoked this function directly (AppSync's envelope has no such
+   * key), so only a principal holding lambda:InvokeFunction can send it. SYSTEM_CALLERS limits it.
+   */
+  systemCaller?: string
 }
 
 // ── Auth ─────────────────────────────────────────────────────────────────────
@@ -840,7 +859,21 @@ function isActionAuthorized(action: Action, caller: Caller): boolean {
   return groups.includes(LOADS_PAGE_GROUP) || tms
 }
 
-async function authorize(action: Action, identity?: AppSyncIdentity | null): Promise<Caller> {
+/** Internal Lambdas that may call this router without a user, and the only actions they may call. */
+export const SYSTEM_CALLERS: Record<string, readonly Action[]> = {
+  'carrier-inbox': ['FILE_INBOUND_OFFER'],
+}
+
+export async function authorize(action: Action, identity?: AppSyncIdentity | null, systemCaller?: string | null): Promise<Caller> {
+  if (
+    typeof systemCaller === 'string' &&
+    Object.prototype.hasOwnProperty.call(SYSTEM_CALLERS, systemCaller) &&
+    SYSTEM_CALLERS[systemCaller]!.includes(action)
+  ) {
+    // Never admin: a system caller files inbound offers, nothing else.
+    return { email: SYSTEM_CALLER_EMAIL, sub: systemCaller, groups: [], isAdmin: false }
+  }
+  if (action === 'FILE_INBOUND_OFFER') throw new Error('Forbidden: FILE_INBOUND_OFFER is for the carrier inbox only')
   if (!identity) throw new Error('Unauthorized: missing identity')
   const email = await getCallerEmail(identity)
   if (!email) throw new Error('Unauthorized: could not resolve caller email')
@@ -7926,6 +7959,11 @@ const carrierOfferDeps: CarrierOfferDeps = {
   now: nowIso,
 }
 
+const carrierInboundDeps: CarrierInboundDeps = {
+  ...carrierOfferDeps,
+  tables: { ...carrierOfferDeps.tables, message: SHIPMENT_MESSAGE_TABLE_NAME, proClaim: PRO_CLAIM_TABLE_NAME },
+}
+
 const intakeDeps: IntakeDeps = {
   tables: { intakeLoad: INTAKE_LOAD_TABLE_NAME, shipment: SHIPMENT_TABLE_NAME, order: ORDER_TABLE_NAME, load: LOAD_TABLE_NAME },
   getById,
@@ -7987,7 +8025,7 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
   const authorizedAction = action === 'BATCH_SHIPMENT_TASK'
     ? BATCH_TASK_ACTIONS[assertEnum(input.task, Object.keys(BATCH_TASK_ACTIONS) as (keyof typeof BATCH_TASK_ACTIONS)[], 'task')]
     : action
-  const caller = await authorize(authorizedAction, event.identity)
+  const caller = await authorize(authorizedAction, event.identity, event.systemCaller)
 
   switch (action) {
     case 'CREATE_SHIPMENT':
@@ -8206,6 +8244,12 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return resetDemoData(demoDeps, input, caller)
     case 'LIST_LOAD_CARRIERS_BY_CARRIER':
       return listLoadCarriersByCarrier(input, caller)
+    case 'FILE_INBOUND_OFFER':
+      return fileInboundOffer(carrierInboundDeps, input, caller) as unknown as Row
+    case 'ASSIGN_INBOUND_OFFER':
+      return assignInboundOffer(carrierInboundDeps, input, caller)
+    case 'DISMISS_INBOUND_OFFER':
+      return dismissInboundOffer(carrierInboundDeps, input, caller)
     default:
       throw new Error(`Unknown action: ${action}`)
   }

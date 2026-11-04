@@ -104,6 +104,9 @@ Totals: pages 78 · redirects 41 (Step AE: Quotes › Lane rates retired into a 
 | /reddit-queue | page | COMPANY › Reddit Queue | redditQueue | /reddit-queue → /reddit-queue | — |
 | /finance/cash-checkin | page | COMPANY › Weekly Cash Check-in | cashCheckIn | /finance/cash-checkin → /finance/cash-checkin | — |
 | /tms/dashboard | page | Company Dashboard | tms | /tms/dashboard → /tms/dashboard | AA01 |
+| /tms/dashboard/new | page | Company Dashboard | tms | /tms/dashboard/new → /tms/dashboard/new | — |
+| /tms/dashboard/d/:id | page | Company Dashboard | tms | /tms/dashboard/d/zz-x → /tms/dashboard/d/zz-x | — |
+| /tms/dashboard/d/:id/edit | page | Company Dashboard | tms | /tms/dashboard/d/zz-x/edit → /tms/dashboard/d/zz-x/edit | — |
 | /tms/customers | page | Customers › Customers | customers\|tms | /tms/customers → /tms/customers | 19 |
 | /tms/customers/follow-ups | page | Customers › Follow-ups | customers\|tms | (new) | AA13 |
 | /tms/load-review | page | Load Review | loadReview\|tms | (new) | AA03 |
@@ -145,6 +148,7 @@ Totals: pages 78 · redirects 41 (Step AE: Quotes › Lane rates retired into a 
 | /feedback | offnav | Settings › Feedback (rail footer link, every signed-in user) | any signed-in user | /feedback → /feedback | — |
 | /tms/brokerage/reports | page | Settings › Reports | reports\|tms | /tms/brokerage/reports → /tms/brokerage/reports | 28 |
 | /tms/brokerage/spot-quoter | page | Settings › Spot quoter & e-mail | ADMIN | (new) | AA14 |
+| /tms/brokerage/carrier-sales | page | Settings › Carrier Sales | ADMIN | (new, Step AL) | S2 39b |
 | /tms/brokerage/users | page | Settings › Users & roles | ADMIN | /tms/brokerage/users → /tms/brokerage/users | 26 |
 | /tms/brokerage/* | splat | Settings (below) | per tab | /tms/brokerage/views → /tms/brokerage | — |
 | /tms/workflows | hidden | Settings (breadcrumb only) | tms | /tms/workflows → /tms/workflows | 22 |
@@ -178,7 +182,7 @@ Older registries are re-checked by the same `--inventory` run (S2 `ROUTES` incl.
 | Shot | Page / state | Themes |
 |---|---|---|
 | AA01 | `sidebar` (all groups open), `sidebar-collapsed`, `sidebar-drawer` (390 px) | L, D, M |
-| AA02 | `carrier-sales` (tabs Needs cover / Offers / Covered, Step T card) | L, D, M |
+| AA02 | `carrier-sales` (tabs Needs cover / Offers / Covered; Step AL retires the Step T card and adds the Unmatched tab; `/tms/brokerage/carrier-sales` is the AL settings page, S2 row 39b) | L, D, M |
 | AA03 | `load-review` list; `load-review-list`, `-drawer-failing`, `-drawer-ready`, `-released`; phone list + drawer | L, D, M |
 | AA04 | `vendors` (Bills, By vendor, source chips, "Not in this queue") | L, D, M |
 | AA05 | `quotes` (title Quotes; Quotes child lit) | L, D |

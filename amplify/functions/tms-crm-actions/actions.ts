@@ -1,5 +1,6 @@
 /**
  * tms-crm-actions — the `tmsCrmActions` router (Step AB §5.4, §5.6, §6.2).
+ * Step AI adds the seven dashboard actions (dashboardActions.ts) to this same router.
  *
  * Reads Customer / Quote / Shipment / UserProfile, owns the four Crm tables through
  * `_shared/crmStore.ts`, and enforces visibility on every read and write: reps see the
@@ -53,6 +54,7 @@ import {
   type RawActivity,
   type Row,
 } from '../_shared/crmStore'
+import { defaultDashDeps, runDashboardAction, type DashDeps, type DashboardActionName } from './dashboardActions'
 
 const OWNER_EMAIL = 'ryne@bcatcorp.com'
 const ADMIN_GROUP = 'ADMIN'
@@ -643,7 +645,13 @@ async function backfill(db: Db, caller: Caller, input: Row): Promise<Row> {
 
 // ── Router ───────────────────────────────────────────────────────────────────
 
-type Handler = (db: Db, caller: Caller, input: Row) => Promise<unknown>
+type Handler = (db: Db, caller: Caller, input: Row, dashDeps?: DashDeps) => Promise<unknown>
+
+/** Step AI: the dashboard actions live in dashboardActions.ts; this binds them to the router's Db and audit(). */
+const dashboardHandler = (action: DashboardActionName): Handler => (db, caller, input, dashDeps) =>
+  runDashboardAction(action, caller, input, dashDeps ?? defaultDashDeps(db), (entityType, entityId, act, changes) =>
+    audit(db, caller, entityType, entityId, act, changes),
+  )
 
 const HANDLERS: Record<CrmActionName, Handler> = {
   CRM_GET_ACCOUNT: getAccountView,
@@ -657,6 +665,14 @@ const HANDLERS: Record<CrmActionName, Handler> = {
   CRM_CLAIM_DOMAIN: claimDomainAction,
   CRM_ASSIGN_OWNER: assignOwner,
   CRM_BACKFILL: backfill,
+  // Step AI (conversational dashboards)
+  PREVIEW_DASHBOARD_CHAT: dashboardHandler('PREVIEW_DASHBOARD_CHAT'),
+  PREVIEW_DASHBOARD: dashboardHandler('PREVIEW_DASHBOARD'),
+  LIST_DASHBOARDS: dashboardHandler('LIST_DASHBOARDS'),
+  GET_DASHBOARD: dashboardHandler('GET_DASHBOARD'),
+  GET_DASHBOARD_OPTIONS: dashboardHandler('GET_DASHBOARD_OPTIONS'),
+  SAVE_DASHBOARD: dashboardHandler('SAVE_DASHBOARD'),
+  ARCHIVE_DASHBOARD: dashboardHandler('ARCHIVE_DASHBOARD'),
 }
 
 export async function dispatch(
@@ -664,9 +680,10 @@ export async function dispatch(
   rawInput: unknown,
   identity: AppSyncIdentity | null | undefined,
   db: Db = defaultDb,
+  dashDeps?: DashDeps,
 ): Promise<unknown> {
   const handler = (HANDLERS as Record<string, Handler | undefined>)[action]
   if (!handler) throw new Error(`Unknown action: ${action}`)
   const caller = await authorize(identity, db)
-  return handler(db, caller, inputOf(rawInput))
+  return handler(db, caller, inputOf(rawInput), dashDeps)
 }

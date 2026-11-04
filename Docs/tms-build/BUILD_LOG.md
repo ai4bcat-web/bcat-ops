@@ -1,5 +1,72 @@
 # TMS build log
 
+## 2026-11-04 - Step AL: Carrier Sales inbound offers hub - e-mail and call offers filed on the right load, Unmatched bucket, Settings > Carrier Sales (dev branch, not deployed, not committed)
+
+**Dev only. No deploy claimed (the lead gates and deploys), no SSM write, no production access, no live Google or Anthropic call from the build. Plan `AL-plan.md`, runbook `AL-notes.md`.**
+- **No new model, table or Lambda:** a "carrier offer" is a BUY `Quote`; the per-load thread and the Unmatched bucket are `ShipmentMessage` rows (bucket = `shipmentId 'UNMATCHED'` with `ttlEpoch`); config and state are the `carrier-sales` row of `SpotSettings`. The listener is a third door in `tms-spot-quoter` (`carrierInbox/`); only `tms-shipment-actions` writes Quote/ShipmentMessage (`FILE_INBOUND_OFFER` system caller only, `ASSIGN_INBOUND_OFFER`, `DISMISS_INBOUND_OFFER`).
+- **Matching:** exact load reference / posting reference / reply thread auto-files at >= 0.85; lane + date alone is capped at 0.80 and never auto-files; ambiguity, medium confidence and no reference go to Unmatched with up to 3 suggestions. Covered load = `COVERED_LATE` thread message, no Quote. Nothing auto-accepts, counters or rejects; the mailbox is read-only.
+- **UI:** Carrier Sales tabs Needs cover / Offers (hub by load ID: carrier, MC, rate, source, time, packet, risk, Accept / Counter / Reject, per-load e-mail + call thread) / Unmatched (one-click assign, assign with edits, dismiss) / Covered; Settings > Carrier Sales (`/tms/brokerage/carrier-sales`, admin; mailboxes, voice agent secret, rules, SIMULATED INBOX dev panel). Route registered in `aaRoutes.mjs` (AA inventory gates pass), `devVerifyS2.mjs` row 39b, `AA_ROUTE_INVENTORY.md`.
+- **Voice:** Function URL `CarrierCallFunctionUrl` on the spot Lambda, hashed shared secret; the Cowtown payload contract is in `AL-notes.md`.
+- **Harness (not yet run):** `scripts/devVerifyAL.mjs` AL00-AL10 (temp identities, ZZ fixtures per `AL_FIXTURE_REFS`, sim mail/calls, tiers, assign/dismiss, existing offer actions, read-only/authority, UI L+D with screenshots to `Docs/tms-build/screenshots/al/`, cleanup); `--inventory` passes with `node --check`.
+- **Needs Ryne:** Google OAuth client under Integrations and the Google app published (consumer Gmail in Testing mode expires the refresh token every 7 days); the distribution address and how it reaches `ai4bcat@gmail.com`; someone to point the Cowtown agent at the webhook.
+- **Merge-to-main checklist, Step AL (additive, no backfill):** `ShipmentMessage` gains optional `offer` (json) and `ttlEpoch` (int) **and DynamoDB TTL on `ttlEpoch`** (a one-time table update at the first prod deploy; existing rows have no `ttlEpoch` and are never expired); `SpotSettings` gains optional `carrierInbox` / `carrierInboxState` (json); one new Lambda Function URL + `CarrierCallFunctionUrl` output on the spot Lambda (copy the URL into the voice agent after the prod deploy; create the secret in Settings first); `SHIPMENT_ACTIONS_FUNCTION_NAME` env on the spot Lambda and the `CarrierInboxInvoke` resource-policy permission on `tms-shipment-actions`; everything ships OFF (`enabled:false`, `voice.enabled:false`, no mailbox) until an admin switches it on. Check `node scripts/measureDataTemplate.mjs` before the push.
+
+
+## 2026-11-04 - Step AD deployed (job 159, commit d41e774; live MCP test run)
+
+**Dev only. Find & Invite at `/tms/carriers/find` (Carriers > Find & Invite; launch points: Carriers header, Carrier Sales, Cover/assign dialog).**
+- **Verified live on dev (`node scripts/devVerifyAD.mjs --live`, 33 pass / 0 fail):** MCP provider mode LIVE; PreviewCarrier for **MC 274623 (Ivan Cartage)** returned the review card (IVAN CARTAGE COMPANY, risk 3000, insurance rows 4, approved e-mails 1; GetCarrierData: no record, packet status none); invite dialog opens; launch points present. **Exactly ONE real `EmailPacketInvitation` was sent, to ai4bcat@gmail.com only: MCP HTTP 200**, response body has no keys. The harness hard-allows that single address and that single MC. MCP response status/keys logged in `Docs/tms-build/MCP_LIVE_TEST.md`. Screenshots: `Docs/tms-build/screenshots/ad/` (AD01-find-card, AD02-invite-dialog, AD03-carrier-sales-launch). The Ivan Cartage directory row was not updated by the invite (it is not a directory carrier yet: carriers enter ONLY through MCP preview/invite/packet).
+- Follow-ups: MCP has no name search (name search covers our directory only); packet status stays 'none' until the carrier completes the packet; Ryne to confirm the e-mail arrived at ai4bcat@gmail.com.
+
+## 2026-11-04 - Step AH deployed (jobs 158-160)
+
+**Dev only. Job 158 FAILED (tms-directory-actions Lambda environment 4,122 B > 4 KB; fixed with a DATA_TABLE_SUFFIX diet + a permanent per-Lambda env-size guard in `measureDataTemplate.mjs`); 159 and 160 SUCCEED.**
+- **Verified live (`devVerifyAH` on job 160): 26 pass / 0 fail**, including Ryne's 7 feedback items: required inputs green with no asterisks, 2 customer e-mail fields only, read-only Bill To block (terms, factor, billing e-mails, credit limit + available), miles auto-calc (est. straight line x 1.2 when Distance Matrix does not answer; typed override sticks), Check Calls = read-only Load Tracking preview with 'Open in Load Tracking', one-page layout, Intake row -> Create shipment prefilled from the e-mail with 'from e-mail' chips. Screenshots at 1440: `Docs/tms-build/screenshots/ah2/` (18) and `Docs/tms-build/screenshots/ah/` (34).
+- Follow-ups: a stop without coordinates gets no auto-miles (server returns null; real directory locations have coordinates); the Distance Matrix key is unverified (estimate path proven).
+
+## 2026-11-04 - Steps AK and AJ layout fix deployed (jobs 157-160)
+
+- **AK (per-truck work phones):** `TruckConfig.phone/phoneLabel`, `workPhoneFor`, SMS to the truck phone with personal fallback, Fleet phone column, 'Trucks without a phone' report. Dev seed applied: John Brittich's truck 530 phone set (number only in the seed run). Verified live (`devVerifyAJ`): AJ03/AJ05 SMS routing to the truck phone, AJ09 drawer shows work/personal. Report count mismatch (Fleet 5 vs Settings 11) was a never-clearing loading flag: fixed in `useAppStore.loadReferenceData`.
+- **AJ layout fix (Ryne's tracking drawer feedback):** the Mode / Method / Driver SMS controls are now an inline `TrackingPrefsRow` in the summary strip (no popover, no reflow). On job 160 `devVerifyAJ` still failed AJ08 (own-fleet fixture row not mounted by the virtualised grid: harness now searches first) and AJ09 (drawer ended at 968 px with the new 232 px map): map reduced to 150 px (expected ~886 px, **not yet re-measured live**).
+
+## 2026-11-04 - Step AN deployed (job 159)
+
+- Trailers share the trucks' Mark inactive / Reactivate flow (`src/lib/fleetActive.ts`, Inactive tab on both lists, audit entries, inactive units excluded from pickers, counts, map, insurance day counting). **Unit tests only (26 files / 194 tests); no live harness for AN.** Parked trucks now appear only under the Inactive tab. Merge-to-main: additive, no backfill.
+
+## 2026-11-04 - Step AP deployed (job 159)
+
+- Shipments board chips with live counts (Missing reference #, Missing sales rep, Missing rev division, Missing documents, Check call overdue LAST; 'Open exceptions' removed); batch bar with ONLY 'Push to Load Review' (max 9, per-customer requirements `Customer.reviewRequirements`, org default in `TmsSettings.reviewRequirements`, per-row failure reasons); **Release exists only on Load Review** (batch, 9 max, server requires the Load Review marker; Intake grid push-only). `devVerifyAP --walk` exit 0 on job 159. Screenshots `Docs/tms-build/screenshots/ap/`.
+- Follow-up decision for Ryne: shipment-detail `ArCard` 'Ready to invoice' and `ReleaseGateCard` still exist (plain READY_TO_INVOICE path, not Load Review); removing them changes the AR workflow.
+
+## 2026-11-04 - Step AM deployed (jobs 159-160)
+
+- Cover flow + carrier assignment ladder (ASSIGNED_SETUP_PENDING -> SETUP_COMPLETE -> RATE_CON_SENT -> RATE_CON_SIGNED -> DRIVER_INFO_ENTERED), MCP-driven `Carrier.status` (no manual setup-complete; lapse flips INACTIVE), rate con blocked until ACTIVE, dispatch blocked until the four driver fields, Remove carrier with optional DAT repost, manual Add carrier removed (admin data fix only), chips in Carrier Sales / boards / header / Load Tracking. **Verified live (`devVerifyAM --walk` on job 160): 78 pass / 0 fail / 1 skipped (AM02 MCP preview is opt-in).** Screenshots `Docs/tms-build/screenshots/am/` (15). The Cover directory lookup queued while the directory loaded (the earlier AM01 timeout).
+
+## 2026-11-04 - Step AO deployed (job 160)
+
+- Driver GPS map in the tracking drawer (Motive own-asset pings, tap-to-share consent page, shared-location SMS parsing, check-call text geocode, MacroPoint / Trucker Tools provider slot (STUB), server-side Routes API route cache, customer-page reuse); reuses `TruckLocationHistory` (no new table). **First live run `devVerifyAO` on job 160: 16 pass / 3 fail / 1 skipped**; fixes (harness: dev Maps key works so google mode accepted; dialog count excludes the drawer itself; dots polled) are in the working tree and **not yet re-verified live**. Screenshots `Docs/tms-build/screenshots/ao/` (4 so far). Runbook `Docs/tms-build/AO-notes.md`.
+
+## 2026-11-04 - Steps AE, AQ and Feedback deployed (jobs 159-160)
+
+- **AE:** Lane rates removed (redirects to /tms/rates), Rate intelligence panel (DAT live/STUB, what we ran this lane for, what we quoted + win rate), Push to DAT (ShipmentPosting, STUB label, Unpost, Carrier Sales postings list). `devVerifyAE` **5/5 on dev, two consecutive runs** (lane-intel freshness fix: current month no longer cached).
+- **AQ:** Ivan Cartage own-fleet driver pickers come only from active Driver records (shared `OwnFleetDriverPicker`; server refuses typed drivers on Ivan Cartage legs). `devVerifyAQ --walk`: **30 pass / 0 fail** (roster 14 active drivers; counts only). Gap: the server fills truck/trailer unit numbers from the caller (adding an Equipment table env to tms-shipment-actions was skipped to protect its 4 KB env limit).
+- **Feedback page** ported from main commit a90a2a3 (model + storage rule identical; footer link in the shell rail for every signed-in user; palette classes swapped for dev's tokens).
+
+## 2026-11-04 - Verification status and open risks (after job 160)
+
+- Data stack template 991,153 B of 1,000,000 B after AG (AG cost 17.9 KB, not the planned 11-16 KB); per-Lambda env sizes (estimated): tms-directory-actions ~3.1 KB real, tms-shipment-actions 3.6 KB, tms-tracking-actions 3.3 KB. AI uses the DashboardRollup table + tms-crm-actions (no new model/Lambda).
+- AF follow-ups still open: stream-driven rollup recompute (G10), chart-ready probe, SPA shell trimming; perf G6 re-baselined after review (no money math changed).
+- Decisions for Ryne: shell floor budget 45 -> 48; Anthropic credit for live classification; own-fleet loads hidden from the Tracking grid unless 'Include loads without a TMS rate con' is on (default scope question); D1 (any signed-in user can read every model via AppSync: dashboard visibility is enforced only for what the dashboard feature serves).
+
+## 2026-11-04 - Step AG: Accounting > AP inbox sync (read-only Gmail mailbox, auto-update of invoice number/dates, review queue) (dev branch, not deployed, not committed)
+
+**Dev only. No deploy claimed (the lead gates and deploys), no SSM write, no production access, no live Google call. Plan `AG-plan.md`, runbook `AG-notes.md`.**
+- **What it does:** `ai4bcat@gmail.com` (consumer Gmail, `gmail.readonly`, Google client from Settings > Integrations > Google) is read daily (Chicago run hour, catch-up) and on **Review now**. Mail the model classifies as an invoice or credit memo is cross-referenced to open Accounts Payable; a strong match fills the bill's invoice number / dates (and the amount on a placeholder `IN_REVIEW` bill) with a CAS write, an audit row with the Gmail link and a reversible `AP_INBOX_REVERT`; everything else lands in the **AP inbox** tab (link to a bill / create a bill / dismiss). It never approves, pays, records or changes the status of a bill.
+- **Pieces:** `src/lib/apInbox/*` (pure contracts, matching, apply plan, digest), Lambda `tms-ap-inbox` (hourly + Review-now doors, router actions `AP_INBOX_*`), `ApInboxItem` model (+ TTL) and additive fields, AP tab + digest line + settings card, `SpotCallbackPage` routes the `ap.` OAuth state.
+- **Needs Ryne:** Google client entered under Integrations > Google with `ai4bcat@gmail.com` as a test user; while the Google app is in Testing the connection expires every 7 days (AG-notes section 3); Anthropic credit for live extraction.
+- **Harness (not yet run):** `scripts/devVerifyAG.mjs` (AG00-AG13 on the SIMULATED mailbox, temp identities, ZZ data and cleanup; `--inventory` passes offline) with `scripts/lib/apInboxFixtures.mjs` (hand-built PDFs + the 15-entry mail corpus, tested).
+- **Merge-to-main checklist, Step AG:** new `ApInboxItem` table with DynamoDB TTL on `ttlEpoch`; additive nullable fields on `CarrierBill`/`VendorPayable` (`apInboxItemId`, `apInboxSourceUrl`, `apInboxAppliedAt`) and `TmsSettings` (`apInbox`, `apInboxState`), no backfill; Lambda `tms-ap-inbox` with an hourly EventBridge rule and the `ANTHROPIC_API_KEY` secret; one new SSM parameter name (`/bcat/gmail/<pool>/users/ap-inbox`, created only by the app's connect flow); re-run `scripts/measureDataTemplate.mjs` (data stack was near the 1 MB limit); confirm no production caller writes the AP columns the Lambda owns.
+
 ## 2026-11-04 - Step AO: driver GPS map in the Load Tracking drawer, tap-to-share driver page, text-shared pins, provider slot (STUB), cached route, inline tracking-prefs row (dev branch, not deployed, not committed)
 
 **Dev only. No deploy claimed (the lead gates and deploys), no SSM write, no production access, no live MacroPoint / Trucker Tools call. Plan `AO-plan.md`, runbook `AO-notes.md`.**

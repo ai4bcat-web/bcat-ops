@@ -68,6 +68,7 @@ import { tmsAljexImport } from './functions/tms-aljex-import/resource'
 import { tmsDataSafety } from './functions/tms-data-safety/resource'
 import { tmsSpotQuoter } from './functions/tms-spot-quoter/resource'
 import { tmsCrmActions } from './functions/tms-crm-actions/resource'
+import { tmsApInbox } from './functions/tms-ap-inbox/resource'
 import { tmsDashboardRollup } from './functions/tms-dashboard-rollup/resource'
 import { devRuleState } from './devRuleGuard'
 import { loadTrackingProjector } from './functions/load-tracking-projector/resource'
@@ -167,6 +168,7 @@ const backend = defineBackend({
   tmsDataSafety,
   tmsSpotQuoter,
   tmsCrmActions,
+  tmsApInbox,
   tmsDashboardRollup,
   loadTrackingProjector,
   checkCallNotifier,
@@ -3848,7 +3850,8 @@ spotFn.addToRolePolicy(new PolicyStatement({
   conditions: { StringLike: { 's3:prefix': ['spot-sim/*'] } },
 }))
 
-// Read-only mailbox (Ryne, 2026-11-04): the spot Lambda holds no invoke grant on anything.
+// Read-only mailbox (Ryne, 2026-11-04): the spot Lambda holds no Gmail write and no write on
+// Quote/Shipment/Load/ShipmentMessage/Carrier. Its only invoke is Step AL's, below.
 
 // Every five minutes. DISABLED on dev by the dev guard's CfnRule loop.
 const spotPollRule = new Rule(spotFn.stack, 'SpotQuoterPollRule', {
@@ -3872,6 +3875,133 @@ backend.data.resources.cfnResources.amplifyDynamoDbTables['TruckLocationHistory'
   enabled: true,
 }
 
+// ── Step AL: Carrier Sales inbound offers hub ───────────────────────────────
+// The listener is a third door in the spot Lambda. It classifies and hands the result to
+// tms-shipment-actions (FILE_INBOUND_OFFER, system caller 'carrier-inbox' only); the spot role
+// gets no write on Quote/Shipment/ShipmentMessage. The invoke grant is a resource policy on the
+// target (no cycle; the TrackingAutomationInvoke precedent).
+spotFn.addEnvironment('SHIPMENT_ACTIONS_FUNCTION_NAME', backend.tmsShipmentActions.resources.lambda.functionName)
+backend.tmsShipmentActions.resources.lambda.addPermission('CarrierInboxInvoke', {
+  principal: spotFn.grantPrincipal,
+  action: 'lambda:InvokeFunction',
+  sourceArn: spotFn.functionArn,
+})
+// Cowtown voice agent POSTs a call summary here; the body secret (sha256 in SpotSettings) is the only auth.
+const carrierCallUrl = new FunctionUrl(spotFn.stack, 'CarrierCallUrl', {
+  function: spotFn,
+  authType: FunctionUrlAuthType.NONE,
+})
+new CfnOutput(spotFn.stack, 'CarrierCallFunctionUrl', {
+  value: carrierCallUrl.url,
+  description: 'Cowtown voice agent: POST <url>carrier-call (JSON with the shared secret from Settings > Carrier Sales)',
+})
+// Unmatched inbound offers carry the mail body: DynamoDB expires them (`ttlEpoch` is set only
+// on shipmentId='UNMATCHED' rows). Every other message row has none and is never touched.
+backend.data.resources.cfnResources.amplifyDynamoDbTables['ShipmentMessage'].timeToLiveAttribute = {
+  attributeName: 'ttlEpoch',
+  enabled: true,
+}
+
+// ── Step AG: Accounting AP inbox (tms-ap-inbox) ─────────────────────────────
+// AppSync `tmsApInboxActions` + an hourly rule (DISABLED on dev by the generic CfnRule loop).
+// Least privilege, every statement named: RW on ApInboxItem; read on the AP/ledger tables;
+// UpdateItem ONLY on CarrierBill, TmsSettings and VendorPayable (+PutItem on VendorPayable for
+// create-from-queue); PutItem on ShipmentDocument and AuditLog. No DeleteItem on any table, no
+// write on LoadCarrier/Load/Shipment/Order/Invoice/ApPayment/Carrier, no ses:*, bedrock:*, KMS,
+// Cognito. SSM: the OAuth client parameter read-only and the ONE ap-inbox token parameter.
+const apInboxFn = backend.tmsApInbox.resources.lambda as LambdaFunction
+const apinItemTable     = abTable('ApInboxItem')
+const apinBillTable     = abTable('CarrierBill')
+const apinLcTable       = abTable('LoadCarrier')
+const apinVendorTable   = abTable('VendorPayable')
+const apinLoadTable     = abTable('Load')
+const apinCarrierTable  = abTable('Carrier')
+const apinDocTable      = abTable('ShipmentDocument')
+
+apInboxFn.addEnvironment('AP_INBOX_ITEM_TABLE_NAME',    apinItemTable.tableName)
+apInboxFn.addEnvironment('CARRIER_BILL_TABLE_NAME',     apinBillTable.tableName)
+apInboxFn.addEnvironment('LOAD_CARRIER_TABLE_NAME',     apinLcTable.tableName)
+apInboxFn.addEnvironment('VENDOR_PAYABLE_TABLE_NAME',   apinVendorTable.tableName)
+apInboxFn.addEnvironment('LOAD_TABLE_NAME',             apinLoadTable.tableName)
+apInboxFn.addEnvironment('SHIPMENT_TABLE_NAME',         abShipmentTable.tableName)
+apInboxFn.addEnvironment('CARRIER_TABLE_NAME',          apinCarrierTable.tableName)
+apInboxFn.addEnvironment('SHIPMENT_DOCUMENT_TABLE_NAME', apinDocTable.tableName)
+apInboxFn.addEnvironment('TMS_SETTINGS_TABLE_NAME',     abSettingsTable.tableName)
+apInboxFn.addEnvironment('INTEGRATION_TABLE_NAME',      abIntegrationTable.tableName)
+apInboxFn.addEnvironment('AUDIT_LOG_TABLE_NAME',        abAuditTable.tableName)
+apInboxFn.addEnvironment('BUCKET_NAME',                 backend.storage.resources.bucket.bucketName)
+apInboxFn.addEnvironment('INTEGRATION_PARAM_PATH',      integrationParamPath)
+apInboxFn.addEnvironment('GMAIL_TOKEN_PARAM_PATH',      gmailTokenParamPath)
+apInboxFn.addEnvironment('PORTAL_ORIGINS',              JSON.stringify(PORTAL_ORIGINS))
+
+apInboxFn.addToRolePolicy(new PolicyStatement({
+  actions:   ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem', 'dynamodb:Query', 'dynamodb:Scan'],
+  resources: withIndexes(apinItemTable),
+}))
+apInboxFn.addToRolePolicy(new PolicyStatement({
+  actions:   ['dynamodb:GetItem', 'dynamodb:Query', 'dynamodb:Scan', 'dynamodb:BatchGetItem'],
+  // Only the two GSIs the ledger queries (apOpen on CarrierBill / LoadCarrier) need `index/*`;
+  // every other table is read by key or Scan, which keeps the data-stack template small.
+  resources: [
+    ...withIndexes(apinBillTable, apinLcTable),
+    apinLoadTable.tableArn, abShipmentTable.tableArn, apinCarrierTable.tableArn, apinDocTable.tableArn,
+    abSettingsTable.tableArn, abIntegrationTable.tableArn, apinVendorTable.tableArn,
+  ],
+}))
+apInboxFn.addToRolePolicy(new PolicyStatement({
+  actions:   ['dynamodb:UpdateItem'],
+  resources: [apinBillTable.tableArn, abSettingsTable.tableArn, apinVendorTable.tableArn],
+}))
+apInboxFn.addToRolePolicy(new PolicyStatement({
+  actions:   ['dynamodb:PutItem'],
+  resources: [apinVendorTable.tableArn, apinDocTable.tableArn, abAuditTable.tableArn],
+}))
+apInboxFn.addToRolePolicy(new PolicyStatement({
+  actions:   ['ssm:GetParameter'],
+  resources: [Stack.of(apInboxFn).formatArn({
+    service: 'ssm',
+    resource: 'parameter',
+    resourceName: `${integrationParamPath.replace(/^\//, '')}/GMAIL_REP_OAUTH`,
+  })],
+}))
+apInboxFn.addToRolePolicy(new PolicyStatement({
+  actions:   ['ssm:GetParameter', 'ssm:PutParameter', 'ssm:DeleteParameter'],
+  resources: [Stack.of(apInboxFn).formatArn({
+    service: 'ssm',
+    resource: 'parameter',
+    resourceName: `${gmailTokenParamPath.replace(/^\//, '')}/ap-inbox`,
+  })],
+}))
+apInboxFn.addToRolePolicy(new PolicyStatement({
+  actions:   ['s3:PutObject', 's3:DeleteObject'],
+  resources: [`${backend.storage.resources.bucket.bucketArn}/intake-pdfs/ap-inbox/*`],
+}))
+apInboxFn.addToRolePolicy(new PolicyStatement({
+  actions:   ['s3:GetObject', 's3:PutObject', 's3:DeleteObject'],
+  resources: [`${backend.storage.resources.bucket.bucketArn}/spot-sim/ap-inbox/*`],
+}))
+apInboxFn.addToRolePolicy(new PolicyStatement({
+  actions:    ['s3:ListBucket'],
+  resources:  [backend.storage.resources.bucket.bucketArn],
+  conditions: { StringLike: { 's3:prefix': ['spot-sim/ap-inbox/*'] } },
+}))
+
+// Every hour; the handler runs the review only at the configured Chicago hour (or to finish a
+// partial run). DISABLED on dev by the dev guard's CfnRule loop.
+const apInboxRule = new Rule(apInboxFn.stack, 'ApInboxHourlyRule', {
+  schedule:    Schedule.rate(Duration.hours(1)),
+  description: 'Hourly check for the daily AP inbox review',
+})
+apInboxRule.addTarget(new EventsLambdaTarget(apInboxFn, {
+  event: RuleTargetInput.fromObject({ sync: true, scheduled: true }),
+}))
+
+// An inbox item carries the e-mail text: DynamoDB expires it (`ttlEpoch`, epoch seconds).
+backend.data.resources.cfnResources.amplifyDynamoDbTables['ApInboxItem'].timeToLiveAttribute = {
+  attributeName: 'ttlEpoch',
+  enabled: true,
+}
+
 // tms-crm-actions: RW on the four CRM tables; read-only on what the timeline derives
 // from; audit PutItem. No SSM, S3, model or Gmail.
 crmFn.addEnvironment('CRM_CONTACT_TABLE_NAME',  crmContactTable.tableName)
@@ -3889,9 +4019,11 @@ crmFn.addToRolePolicy(new PolicyStatement({
   actions:   ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem', 'dynamodb:DeleteItem', 'dynamodb:Query', 'dynamodb:Scan'],
   resources: withIndexes(crmContactTable, crmDomainTable, crmActivityTable, crmAccountTable),
 }))
+// Step AI read sources (Invoice, LaneRateSample, TmsSettings, OwnershipDivision) join this statement.
+const crmAiSources = ['Invoice', 'LaneRateSample', 'TmsSettings', 'OwnershipDivision'].map((m) => backend.data.resources.tables[m])
 crmFn.addToRolePolicy(new PolicyStatement({
-  actions:   ['dynamodb:GetItem', 'dynamodb:Query', 'dynamodb:Scan'],
-  resources: withIndexes(abCustomerTable, abQuoteTable, abShipmentTable, abOrderTable, abUserProfileTable),
+  actions:   ['dynamodb:GetItem', 'dynamodb:BatchGetItem', 'dynamodb:Query', 'dynamodb:Scan'],
+  resources: withIndexes(abCustomerTable, abQuoteTable, abShipmentTable, abOrderTable, abUserProfileTable, ...crmAiSources),
 }))
 crmFn.addToRolePolicy(new PolicyStatement({
   actions:   ['dynamodb:PutItem'],
@@ -3903,6 +4035,20 @@ crmFn.addToRolePolicy(new PolicyStatement({
   actions:   ['dynamodb:UpdateItem'],
   resources: [abCustomerTable.tableArn],
 }))
+// Step AI (conversational dashboards) rides this router: read-only on the dashboard sources,
+// and DashboardRollup is the spec store (rows 'DASH:<id>'; Put/Update ONLY there).
+{
+  const aiTables = backend.data.resources.tables
+  crmFn.addEnvironment('INVOICE_TABLE_NAME',            aiTables['Invoice'].tableName)
+  crmFn.addEnvironment('LANE_RATE_SAMPLE_TABLE_NAME',   aiTables['LaneRateSample'].tableName)
+  crmFn.addEnvironment('TMS_SETTINGS_TABLE_NAME',       aiTables['TmsSettings'].tableName)
+  crmFn.addEnvironment('OWNERSHIP_DIVISION_TABLE_NAME', aiTables['OwnershipDivision'].tableName)
+  crmFn.addEnvironment('DASHBOARD_ROLLUP_TABLE_NAME',   aiTables['DashboardRollup'].tableName)
+  crmFn.addToRolePolicy(new PolicyStatement({
+    actions:   ['dynamodb:GetItem', 'dynamodb:Scan', 'dynamodb:PutItem', 'dynamodb:UpdateItem'],
+    resources: [aiTables['DashboardRollup'].tableArn],
+  }))
+}
 
 // ── tmsDashboardRollup Lambda (Step AF; dashboard KPIs from ~100 pre-aggregated rows) ────
 // Stream consumer on the six tables the dashboards are computed from, plus a five-minute

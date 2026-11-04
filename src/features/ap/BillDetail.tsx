@@ -29,6 +29,7 @@ import { agingChipFor, formatDay } from '@/features/ar/arViews'
 import { ReasonDialog } from '@/features/ar/components/ReasonDialog'
 import { AP_PAYEE_KIND_LABEL, AP_PAYMENT_KIND_LABEL, BILL_STATUS_LABEL, paymentsForBill } from './apViews'
 import { ApproveBillDialog } from './components/ApproveBillDialog'
+import { BillInboxStrip } from './inbox/BillInboxStrip'
 import type { CarrierBillStatus } from '@/types/tms'
 import type { TmsTone } from '@/features/tms/kit'
 
@@ -215,6 +216,17 @@ export function BillDetail() {
           ]}
         />
       </TmsCard>
+
+      {bill.apInboxItemId && (
+        <div data-testid="ap-inbox-bill-strip">
+          <BillInboxStrip
+            itemId={bill.apInboxItemId}
+            sourceUrl={bill.apInboxSourceUrl}
+            appliedAt={bill.apInboxAppliedAt}
+            onReverted={() => void refresh()}
+          />
+        </div>
+      )}
 
       <TmsTabs tabs={TABS} active={tab} onSelect={setTab} />
 

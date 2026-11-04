@@ -11,12 +11,22 @@ const mocks = vi.hoisted(() => ({
   shipments: vi.fn(),
   worklist: vi.fn(),
   hasPageAccess: vi.fn(),
+  unmatched: vi.fn(),
 }))
 
 vi.mock('@/lib/apiClient', () => ({
   listActivePostings: mocks.listActivePostings,
   unpostQuoteLoad: mocks.unpostQuoteLoad,
+  listUnmatchedMessages: mocks.unmatched,
   graphqlErrorText: (e: unknown) => String(e),
+}))
+vi.mock('./OffersHub', () => ({
+  OffersHub: ({ loadParam, openOffers }: { loadParam: string | null; openOffers: unknown[] | null }) => (
+    <div data-testid="hub-stub" data-load={loadParam ?? ''} data-quotes={openOffers === null ? 'no' : 'yes'} />
+  ),
+}))
+vi.mock('./UnmatchedOffers', () => ({
+  UnmatchedOffers: ({ rows }: { rows: unknown[] }) => <div data-testid="unmatched-stub" data-rows={rows.length} />,
 }))
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 vi.mock('@/features/carriers/cover/CoverCarrierDialog', () => ({
@@ -51,6 +61,7 @@ function renderPage() {
 beforeEach(() => {
   vi.clearAllMocks()
   mocks.listActivePostings.mockResolvedValue([])
+  mocks.unmatched.mockResolvedValue([])
   mocks.shipments.mockReturnValue({ shipments: ROWS, loading: false, error: null, refresh: vi.fn() })
   mocks.worklist.mockReturnValue({ open: [], loading: false, error: null, refresh: vi.fn() })
   mocks.hasPageAccess.mockImplementation((key: string) => key === 'loads' || key === 'quotes')
@@ -84,17 +95,26 @@ describe('CarrierSalesPage', () => {
     expect(screen.getAllByTestId('assignment-chip').map((c) => c.textContent)).toEqual(['Rate con sent'])
   })
 
-  it('shows the Step T card as an inert notice, with no button inside it', () => {
+  it('has an Unmatched tab whose count is the bucket size and whose body is the bucket', async () => {
+    mocks.unmatched.mockResolvedValue([{ id: 'msg:cs:1' }, { id: 'msg:cs:2' }])
     renderPage()
-    const card = screen.getByText(/backburnered \(Step T\)/).closest('section')!
-    expect(card.querySelector('button, a, input')).toBeNull()
+    const tab = await screen.findByRole('tab', { name: /Unmatched/ })
+    await waitFor(() => expect(within(tab).getByText('2')).toBeTruthy())
+    fireEvent.click(tab)
+    expect(screen.getByTestId('unmatched-stub').getAttribute('data-rows')).toBe('2')
   })
 
-  it('without the Quotes grant the Offers tab says so instead of erroring', () => {
+  it('the Offers tab hands the typed load to the hub and keeps it in the URL', () => {
+    render(<MemoryRouter initialEntries={['/tms/carrier-sales?tab=offers&load=L123']}><CarrierSalesPage /></MemoryRouter>)
+    expect(screen.getByTestId('hub-stub').getAttribute('data-load')).toBe('L123')
+    expect(screen.getByRole('tab', { name: /Offers/ }).getAttribute('aria-selected')).toBe('true')
+  })
+
+  it('without the Quotes grant the Offers tab gets no open-offers list and never reads the worklist', () => {
     mocks.hasPageAccess.mockImplementation((key: string) => key === 'loads')
     renderPage()
     fireEvent.click(screen.getByRole('tab', { name: /Offers/ }))
-    expect(screen.getByText('Needs the Quotes grant')).toBeTruthy()
+    expect(screen.getByTestId('hub-stub').getAttribute('data-quotes')).toBe('no')
     expect(mocks.worklist).not.toHaveBeenCalled()
   })
 

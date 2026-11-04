@@ -69,7 +69,7 @@ const rawClient = generateClient()
  * (observables) and plain queries pass through untouched.
  */
 /** Router mutations whose action only reads: the UPPER_SNAKE read verbs of the tms*Actions routers (optionally behind the SPOT_/CRM_ prefix) and the lowercase read actions of manageDispatch. */
-const READ_ROUTER_ACTION = /^(?:SPOT_|CRM_)?(GET|LIST|SEARCH|FIND|READ|COUNT|PREVIEW|CHECK|LOOKUP|STATUS)(_|$)/
+const READ_ROUTER_ACTION = /^(?:SPOT_|CRM_|CS_|AP_INBOX_)?(GET|LIST|SEARCH|FIND|READ|COUNT|PREVIEW|CHECK|LOOKUP|STATUS)(_|$)/
 const READ_DISPATCH_ACTIONS = new Set(['status', 'getSettings', 'listStaff', 'mediaUrl', 'slackUrl'])
 function isReadOnlyRouterCall(text: string, action: unknown): boolean {
   if (typeof action !== 'string') return false
@@ -1091,7 +1091,7 @@ export async function deleteFactoringItem(id: string): Promise<void> {
 const VENDOR_PAYABLE_FIELDS = `
   id status source sourceInvoiceId sourceMessageId subject vendor invoiceNumber
   amount invoiceDate dueDate vendorEmail confirmationSentAt confirmationSentTo extractedAt extractionNote description fromEmail attachments receivedAt
-  paymentMethod paymentDate paymentReference paidBy paidAt createdAt updatedAt
+  paymentMethod paymentDate paymentReference paidBy paidAt apInboxItemId apInboxSourceUrl createdAt updatedAt
 `
 type VendorPayableRecord = Omit<VendorPayable, 'attachments'> & {
   attachments?: VendorApAttachment[] | string | null
@@ -7153,6 +7153,7 @@ const CARRIER_BILL_FIELDS = `
   paidCents creditedCents balanceCents apOpen documentId
   approvedAt approvedBy approvalWarnings docsOverrideAt docsOverrideBy docsOverrideNote
   paidAt voidedAt voidedBy voidReason note
+  apInboxItemId apInboxSourceUrl apInboxAppliedAt
   createdBy updatedBy version createdAt updatedAt
 `
 const CARRIER_BILL_JSON_FIELDS: (keyof CarrierBillRecord)[] = ['remitTo', 'lines']
@@ -8154,11 +8155,13 @@ export interface CarrierOfferVetting {
   mcpStatus: string | null
 }
 
+/** Step AL3: the carrier's directory risk, resolved server-side (nulls/false when the carrier is not in the directory). */
+export interface CarrierOfferRisk { mcpRiskScore: number | null; mcpStatus: string | null; packetComplete: boolean }
+export type CarrierOfferRow = QuoteRecord & { vetting: CarrierOfferVetting; carrierRisk?: CarrierOfferRisk }
+
 /** The offers on a shipment, with each carrier's standing resolved. */
-export async function listCarrierOffers(shipmentId: string): Promise<{
-  offers: (QuoteRecord & { vetting: CarrierOfferVetting })[]
-}> {
-  return shipmentAction<{ offers: (QuoteRecord & { vetting: CarrierOfferVetting })[] }>(
+export async function listCarrierOffers(shipmentId: string): Promise<{ offers: CarrierOfferRow[] }> {
+  return shipmentAction<{ offers: CarrierOfferRow[] }>(
     'LIST_CARRIER_OFFERS', { shipmentId },
   )
 }
@@ -8762,6 +8765,48 @@ export const spotListRequests = (o: SpotActionMap['SPOT_LIST_REQUESTS']['input']
 export const spotGetRequest = (id: string) => spotAction('SPOT_GET_REQUEST', { id })
 export const spotCount = (userId?: string) => spotAction('SPOT_COUNT', userId ? { userId } : {})
 
+// ── Step AL: Carrier Sales inbound offers hub (append-only block) ────────────
+// `CS_*` rides the existing tmsSpotActions mutation (the read regex above knows the prefix, so
+// CS_STATUS does not wipe list caches). Assign/dismiss are tmsShipmentActions; the Unmatched
+// bucket is ShipmentMessage rows under shipmentId='UNMATCHED' read with a dedicated selection
+// that includes `offer` (the generic SHIPMENT_MESSAGE_FIELDS is deliberately not widened).
+import type { AssignInboundOfferInput, CsAction, DismissInboundOfferInput } from '@/lib/carrierInbox/types'
+import { UNMATCHED_SHIPMENT_ID } from '@/lib/carrierInbox/types'
+
+/** Untyped CS_* door; the slice that owns a response shape types its own helper over this. */
+export async function csAction<T>(action: CsAction, input: unknown = {}): Promise<T> {
+  const v = await callSpot(action, input)
+  if (v == null) throw new Error(`${action} returned no result`)
+  return v as T
+}
+
+export const assignInboundOffer = (input: AssignInboundOfferInput) =>
+  shipmentAction<{ messageId: string; shipmentId: string; loadId: string | null; quoteId: string | null; outcome: 'FILED' | 'THREAD_ONLY' | 'COVERED_LATE' }>('ASSIGN_INBOUND_OFFER', input)
+export const dismissInboundOffer = (input: DismissInboundOfferInput) =>
+  shipmentAction<{ messageId: string; dismissed: true }>('DISMISS_INBOUND_OFFER', input)
+
+const UNMATCHED_MESSAGE_FIELDS = `${SHIPMENT_MESSAGE_FIELDS} offer ttlEpoch`
+/** The Unmatched bucket, newest first. Rows expire by TTL (default 30 days). */
+export async function listUnmatchedMessages(): Promise<ShipmentMessageRecord[]> {
+  const rows = await listAllByIndex<ShipmentMessageRecord>(
+    'listShipmentMessageByShipmentIdAndAt', { shipmentId: UNMATCHED_SHIPMENT_ID }, UNMATCHED_MESSAGE_FIELDS, 200,
+  )
+  return rows
+    .map((r) => unwrapJsonFields(r, ['offer', 'attachments']))
+    .sort((a, b) => String(b.at).localeCompare(String(a.at)))
+}
+
+/** One load's CARRIER_OFFER thread (e-mail and call rows with the classified `offer`), oldest first. */
+export async function listOfferThread(shipmentId: string): Promise<ShipmentMessageRecord[]> {
+  const rows = await listAllByIndex<ShipmentMessageRecord>(
+    'listShipmentMessageByShipmentIdAndAt', { shipmentId }, UNMATCHED_MESSAGE_FIELDS, 200,
+  )
+  return rows
+    .filter((r) => r.kind === 'CARRIER_OFFER')
+    .map((r) => unwrapJsonFields(r, ['offer', 'attachments']))
+    .sort((a, b) => String(a.at).localeCompare(String(b.at)))
+}
+
 /**
  * Every rep's Gmail connection, for the org page (ADMIN only: the schema grants read to
  * the ADMIN group and nobody else). The pending OAuth state is deliberately not selected.
@@ -8889,4 +8934,92 @@ export interface EnterDriverInfoInput {
 /** All four are mandatory; dispatch is blocked until they are on the assignment. */
 export async function enterDriverInfo(input: EnterDriverInfoInput): Promise<ShipmentBundle> {
   return shipmentAction<ShipmentBundle>('ENTER_DRIVER_INFO', input)
+}
+
+// ── Step AG · Accounting > AP inbox (append-only block) ──────────────────────
+// `AP_INBOX_*` rides its own mutation; the read regex above knows the prefix so STATUS and
+// PREVIEW_LINK never wipe list caches. Typed helpers live in `features/ap/inbox/apInboxClient.ts`.
+import type { ApInboxAction } from '@/lib/apInbox/actions'
+import type { ApInboxItemRecord, ApInboxStatus } from '@/lib/apInbox/types'
+
+/** Untyped door into `tmsApInboxActions`; the Lambda's own refusal text is rethrown as the Error message. */
+export async function apInboxAction<T>(action: ApInboxAction, input: unknown = {}): Promise<T> {
+  let r: { data: { tmsApInboxActions: unknown } }
+  try {
+    r = await client.graphql({
+      query: `mutation TmsApInboxActions($action: String!, $input: AWSJSON!) { tmsApInboxActions(action: $action, input: $input) }`,
+      variables: { action, input: JSON.stringify(input) },
+    }) as { data: { tmsApInboxActions: unknown } }
+  } catch (err) {
+    throw new Error(graphqlErrorText(err) || `${action} failed`, { cause: err })
+  }
+  const v = unwrapJson(r.data.tmsApInboxActions)
+  if (v == null) throw new Error(`${action} returned no result`)
+  return v as T
+}
+
+const AP_INBOX_ITEM_FIELDS = `
+  id messageId threadId mailbox mode receivedAt fromEmail fromName subject kind status reviewReason
+  extraction match target applied attachments sourceUrl runId resolvedAt resolvedBy dismissReason version
+`
+
+/** One status of the queue, newest first. `sinceIso` bounds `receivedAt` (the history chips look back 30 days). */
+export async function listApInboxItems(status: ApInboxStatus, sinceIso?: string): Promise<ApInboxItemRecord[]> {
+  const rows = await listAllByIndex<ApInboxItemRecord>(
+    'listApInboxItemByStatusAndReceivedAt', { status }, AP_INBOX_ITEM_FIELDS, 200, { status: 'ApInboxItemStatus!' },
+  )
+  const parsed = rows.map((r) => unwrapJsonFields(r, ['extraction', 'match', 'target', 'applied', 'attachments']))
+  return parsed
+    .filter((r) => !sinceIso || String(r.receivedAt) >= sinceIso)
+    .sort((a, b) => String(b.receivedAt).localeCompare(String(a.receivedAt)))
+}
+
+// ── Step AI: conversational dashboards (rides tmsCrmActions) ─────────────────
+// Read-verb action names so the cache only clears on SAVE/ARCHIVE. Visibility is enforced
+// by the Lambda; these wrappers carry no data rules.
+import type {
+  DashChatInput, DashChatResult, DashOptions, DashRunResult, DashboardRecord, DashboardSpec,
+  DashboardSummary, DashboardWindow,
+} from '@/lib/dashboards/types'
+
+export type DashboardRunTarget =
+  | { spec: DashboardSpec; window?: DashboardWindow }
+  | { id: string; window?: DashboardWindow }
+  | { builtin: 'OVERVIEW'; window?: DashboardWindow }
+
+export interface DashboardSaveInput {
+  id?: string
+  spec: DashboardSpec
+  sharedWith?: { userIds: string[]; teamKeys: string[] }
+  expectedVersion?: number
+}
+
+/** One model turn; never throws for a model outage (`modelError` carries it). */
+export async function dashboardChat(input: DashChatInput): Promise<DashChatResult> {
+  return crmAction<DashChatResult>('PREVIEW_DASHBOARD_CHAT', input)
+}
+
+/** Runs a spec, a saved dashboard or the built-in Overview under the caller's own visibility. */
+export async function dashboardPreview(target: DashboardRunTarget): Promise<DashRunResult> {
+  return crmAction<DashRunResult>('PREVIEW_DASHBOARD', target)
+}
+
+export async function listDashboards(): Promise<{ company: DashboardSummary[]; mine: DashboardSummary[] }> {
+  return crmAction('LIST_DASHBOARDS', {})
+}
+
+export async function getDashboard(id: string): Promise<{ dashboard: DashboardRecord; canEdit: boolean }> {
+  return crmAction('GET_DASHBOARD', { id })
+}
+
+export async function dashboardOptions(): Promise<DashOptions> {
+  return crmAction<DashOptions>('GET_DASHBOARD_OPTIONS', {})
+}
+
+export async function saveDashboard(input: DashboardSaveInput): Promise<DashboardRecord> {
+  return crmAction<DashboardRecord>('SAVE_DASHBOARD', input)
+}
+
+export async function archiveDashboard(id: string, expectedVersion: number): Promise<{ id: string; archivedAt: string }> {
+  return crmAction('ARCHIVE_DASHBOARD', { id, expectedVersion })
 }
