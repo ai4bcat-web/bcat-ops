@@ -237,6 +237,28 @@ describe('TmsShell', () => {
     expect(screen.getByRole('button', { name: 'Expand sidebar' })).toBeInTheDocument()
   })
 
+  it('dense pages show the sidebar as an icon rail that opens on hover and closes on leave, without touching the saved preference', () => {
+    const { container } = renderShell('/tms/shipments', undefined, { dense: true })
+    const shell = container.querySelector('.tms-shell') as HTMLElement
+    const sidebar = container.querySelector('.tms-sidebar') as HTMLElement
+    expect(shell).toHaveClass('tms-dense', 'tms-is-collapsed')
+    expect(screen.getByRole('button', { name: 'Expand sidebar' })).toBeInTheDocument()
+
+    fireEvent.mouseEnter(sidebar)
+    expect(shell).not.toHaveClass('tms-is-collapsed')
+    fireEvent.mouseLeave(sidebar)
+    expect(shell).toHaveClass('tms-is-collapsed')
+    expect(window.localStorage.getItem('tms-sidebar-collapsed')).toBe('0')
+  })
+
+  it('a click on the rail button pins the full sidebar open on a dense page', () => {
+    const { container } = renderShell('/tms/shipments', undefined, { dense: true })
+    fireEvent.click(screen.getByRole('button', { name: 'Expand sidebar' }))
+    expect(container.querySelector('.tms-shell')).not.toHaveClass('tms-is-collapsed')
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse sidebar' }))
+    expect(container.querySelector('.tms-shell')).toHaveClass('tms-is-collapsed')
+  })
+
   it('flips the page theme from the toggle and remembers it across a remount', () => {
     const { unmount } = renderShell()
     fireEvent.click(screen.getByRole('button', { name: 'Switch to dark theme' }))

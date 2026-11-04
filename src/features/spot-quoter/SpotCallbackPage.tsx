@@ -1,7 +1,7 @@
 /**
  * Quotes › Spot inbox, OAuth return. Google sends the rep back here with `code` and the
  * single-use `state` the server issued; this page hands both to the server, which does the
- * exchange and keeps the token. The browser never sees a token or a client secret.
+ * exchange and keeps the token. Access is read-only: nothing is ever sent or drafted. The browser never sees a token or a client secret.
  */
 import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
@@ -48,7 +48,10 @@ export function SpotCallbackPage() {
           </Link>
         </TmsAlert>
       ) : (
-        <p className="tms-muted" data-testid="spot-callback-working">Finishing the connection…</p>
+        <>
+          <p className="tms-muted" data-testid="spot-callback-working">Finishing the connection…</p>
+          <p className="tms-muted">Read-only: BCAT Ops reads quote-request e-mails and never sends or drafts mail.</p>
+        </>
       )}
     </TmsPage>
   )

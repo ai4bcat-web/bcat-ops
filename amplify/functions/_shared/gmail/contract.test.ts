@@ -6,7 +6,7 @@
 import { describe, it, expect } from 'vitest'
 import type { GmailPort } from '../../../../src/lib/spot/port'
 import { googlePort } from './googlePort'
-import { simInject, simMarkDraftSent, simPort, type SimS3 } from './simPort'
+import { simInject, simPort, type SimS3 } from './simPort'
 
 interface Harness {
   port: GmailPort
@@ -42,13 +42,11 @@ function simHarness(): Harness {
   }
 }
 
-/** A tiny in-memory Gmail: messages, drafts, history. Speaks only the routes the port uses. */
+/** A tiny in-memory Gmail: messages, history. Speaks only the routes the port uses. */
 function googleHarness(): Harness {
   interface Msg { id: string; threadId: string; internalDate: string; labelIds: string[]; from: string; subject: string; body: string }
   const messages: Msg[] = []
-  const drafts = new Map<string, { id: string; message: { id: string; threadId?: string; raw: string } }>()
   let history = 100
-  let n = 0
 
   const b64 = (s: string) => Buffer.from(s, 'utf8').toString('base64url')
   const payload = (m: Msg) => ({
@@ -66,7 +64,6 @@ function googleHarness(): Harness {
     const url = new URL(input)
     const path = url.pathname.replace('/gmail/v1/users/me', '')
     const method = init?.method ?? 'GET'
-    const body = init?.body ? (JSON.parse(String(init.body)) as { message?: { raw?: string; threadId?: string } }) : null
     if (path === '/profile') return json({ emailAddress: 'rep@example.test', historyId: String(history) })
     if (path === '/messages' && method === 'GET') return json({ messages: messages.map((m) => ({ id: m.id })) })
     if (path === '/history') {
@@ -85,25 +82,6 @@ function googleHarness(): Harness {
     if (tm) {
       const ms = messages.filter((x) => x.threadId === decodeURIComponent(tm[1]))
       return json({ messages: ms.map((m) => ({ id: m.id, threadId: m.threadId, internalDate: m.internalDate, labelIds: m.labelIds, payload: payload(m) })) })
-    }
-    if (path === '/drafts' && method === 'POST') {
-      const id = `d${++n}`
-      drafts.set(id, { id, message: { id: `dm${n}`, threadId: body?.message?.threadId, raw: body?.message?.raw ?? '' } })
-      return json({ id, message: { id: `dm${n}` } })
-    }
-    const dm = path.match(/^\/drafts\/([^/]+)$/)
-    if (dm) {
-      const d = drafts.get(dm[1])
-      if (method === 'PUT') {
-        if (!d) return json({}, 404)
-        d.message.raw = body?.message?.raw ?? ''
-        return json({ id: d.id })
-      }
-      if (!d) return json({}, 404)
-      const raw = Buffer.from(d.message.raw, 'base64url').toString('utf8')
-      const [head, ...rest] = raw.split('\r\n\r\n')
-      const hv = (name: string) => head.split('\r\n').find((l) => l.startsWith(`${name}: `))?.slice(name.length + 2) ?? ''
-      return json({ id: d.id, message: { payload: { headers: [{ name: 'To', value: hv('To') }, { name: 'Subject', value: hv('Subject') }], mimeType: 'text/plain', body: { data: b64(rest.join('\r\n\r\n').replace(/=\r\n/g, '')) } } } })
     }
     return json({}, 404)
   }) as unknown as typeof fetch
@@ -153,32 +131,16 @@ describe.each([
     if ('expired' in again) throw new Error('unexpected expiry')
     expect(again.ids).toEqual([])
   })
-
-  it('creates, reads, updates a draft; a missing draft says it does not exist', async () => {
-    const h = make()
-    const out = { threadId: 't1', to: 'pat@acme.test', subject: 'Re: Rate', inReplyTo: '<m1@x>', references: '<m1@x>', text: 'Rate is $2,450.' }
-    const { draftId } = await h.port.createDraft(out)
-    expect(draftId).toBeTruthy()
-    expect(await h.port.getDraft(draftId)).toMatchObject({ exists: true, to: 'pat@acme.test', subject: 'Re: Rate' })
-    expect((await h.port.getDraft(draftId)).text).toContain('$2,450')
-    await h.port.updateDraft(draftId, { ...out, text: 'Rate is $2,500.' })
-    expect((await h.port.getDraft(draftId)).text).toContain('$2,500')
-    expect((await h.port.getDraft('nope')).exists).toBe(false)
-  })
 })
 
-describe('simPort send safety', () => {
-  it('refuses to send and moves a draft to SENT only through the harness hook', async () => {
-    const s3 = memoryS3()
-    const port = simPort('u1', s3)
-    const { draftId } = await port.createDraft({ threadId: 't9', to: 'x@y.test', subject: 'Re: x', inReplyTo: null, references: null, text: 'hi' })
-    await expect(port.sendDraft(draftId)).rejects.toThrow(/disabled/)
-    await expect(port.sendReply({ threadId: null, to: 'x@y.test', subject: 's', inReplyTo: null, references: null, text: 't' })).rejects.toThrow(/disabled/)
-    expect((await port.getDraft(draftId)).exists).toBe(true)
-
-    await simMarkDraftSent('u1', draftId, s3)
-    expect((await port.getDraft(draftId)).exists).toBe(false)
-    const thread = await port.threadMessages('t9')
-    expect(thread.map((m) => m.labelIds)).toEqual([['SENT']])
+describe('read-only mailbox', () => {
+  it.each([
+    ['googlePort', () => googleHarness().port],
+    ['simPort', () => simPort('u1', memoryS3())],
+  ])('%s exposes no way to draft, send or modify mail', (_name, make) => {
+    const port = make() as unknown as Record<string, unknown>
+    for (const method of ['createDraft', 'updateDraft', 'getDraft', 'sendDraft', 'sendReply', 'modify']) {
+      expect(port[method]).toBeUndefined()
+    }
   })
 })

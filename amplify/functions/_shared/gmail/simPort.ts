@@ -1,8 +1,8 @@
 /**
  * Step AB §3.6 — the SIMULATED inbox. Same GmailPort over S3 objects:
- *   spot-sim/<userId>/{inbox,drafts,sent}/<id>.json   (bucket env BUCKET_NAME)
- * Only the Gmail wire is simulated; the pipeline above it is the real one. Sending is
- * refused here: the harness emulates the rep pressing Send with `simMarkDraftSent`.
+ *   spot-sim/<userId>/inbox/<id>.json   (bucket env BUCKET_NAME)
+ * Only the Gmail wire is simulated; the pipeline above it is the real one. Read-only,
+ * like the real port: there is no draft or send.
  */
 import {
   S3Client,
@@ -11,7 +11,7 @@ import {
   DeleteObjectCommand,
   ListObjectsV2Command,
 } from '@aws-sdk/client-s3'
-import type { GmailMessageMeta, GmailPort, OutgoingReply } from '../../../../src/lib/spot/port'
+import type { GmailMessageMeta, GmailPort } from '../../../../src/lib/spot/port'
 
 /** The subset of S3 this adapter uses; tests pass an in-memory implementation. */
 export interface SimS3 {
@@ -46,8 +46,6 @@ interface StoredMessage extends GmailMessageMeta {
   attachments: { name: string; contentType: string; size: number }[]
   seq: number
 }
-
-interface StoredDraft { id: string; messageId: string; threadId: string | null; to: string; subject: string; text: string; inReplyTo: string | null; references: string | null; draftedAt: string }
 
 export function s3SimStore(client: S3Client = new S3Client({}), bucket = process.env.BUCKET_NAME ?? ''): SimS3 {
   return {
@@ -84,7 +82,7 @@ const store = (s?: SimS3): SimS3 => s ?? (defaultStore ??= s3SimStore())
 
 const safeId = (id: string) => id.replace(/[^A-Za-z0-9_.-]/g, '_')
 const prefix = (userId: string) => `spot-sim/${safeId(userId)}/`
-const key = (userId: string, box: 'inbox' | 'drafts' | 'sent', id: string) => `${prefix(userId)}${box}/${safeId(id)}.json`
+const key = (userId: string, box: 'inbox', id: string) => `${prefix(userId)}${box}/${safeId(id)}.json`
 
 let counter = 0
 const nextSeq = () => Date.now() * 1000 + (counter++ % 1000)
@@ -95,7 +93,7 @@ function meta(m: StoredMessage): GmailMessageMeta {
   return rest
 }
 
-async function readAll(userId: string, box: 'inbox' | 'sent', s: SimS3): Promise<StoredMessage[]> {
+async function readAll(userId: string, box: 'inbox', s: SimS3): Promise<StoredMessage[]> {
   const out: StoredMessage[] = []
   for (const k of await s.list(`${prefix(userId)}${box}/`)) {
     const raw = await s.get(k)
@@ -130,37 +128,6 @@ export async function simInject(userId: string, msg: SimInboxMessage, s3?: SimS3
   return { id }
 }
 
-/** "The rep pressed Send in Gmail": the draft leaves drafts/ and becomes a SENT message. */
-export async function simMarkDraftSent(userId: string, draftId: string, s3?: SimS3): Promise<{ messageId: string }> {
-  const s = store(s3)
-  const raw = await s.get(key(userId, 'drafts', draftId))
-  if (!raw) throw new Error('That draft no longer exists.')
-  const d = JSON.parse(raw) as StoredDraft
-  const seq = nextSeq()
-  const sent: StoredMessage = {
-    id: d.messageId,
-    threadId: d.threadId ?? `thr-${d.messageId}`,
-    internalDate: String(Date.now()),
-    from: 'me',
-    to: [d.to],
-    cc: [],
-    replyTo: null,
-    subject: d.subject,
-    messageId: `<${d.messageId}@sim.invalid>`,
-    inReplyTo: d.inReplyTo,
-    references: d.references,
-    snippet: d.text.replace(/\s+/g, ' ').slice(0, 160),
-    labelIds: ['SENT'],
-    headers: {},
-    body: d.text,
-    attachments: [],
-    seq,
-  }
-  await s.put(key(userId, 'sent', d.messageId), JSON.stringify(sent))
-  await s.del(key(userId, 'drafts', draftId))
-  return { messageId: d.messageId }
-}
-
 async function purge(userId: string, s3: SimS3 | undefined, only?: (k: string) => boolean): Promise<{ deleted: number }> {
   const s = store(s3)
   let deleted = 0
@@ -180,27 +147,12 @@ export const simPurgeTest = (userId: string, s3?: SimS3) =>
 
 export function simPort(userId: string, s3?: SimS3): GmailPort {
   const s = () => store(s3)
-  const SEND_REFUSED = 'Sending is disabled in the simulated inbox'
 
   async function find(id: string): Promise<StoredMessage> {
-    for (const box of ['inbox', 'sent'] as const) {
-      const raw = await s().get(key(userId, box, id))
-      if (raw) return JSON.parse(raw) as StoredMessage
-    }
+    const raw = await s().get(key(userId, 'inbox', id))
+    if (raw) return JSON.parse(raw) as StoredMessage
     throw new Error(`Simulated message ${id} not found.`)
   }
-
-  const draftToStored = (d: OutgoingReply, id: string, messageId: string): StoredDraft => ({
-    id,
-    messageId,
-    threadId: d.threadId,
-    to: d.to,
-    subject: d.subject,
-    text: d.text,
-    inReplyTo: d.inReplyTo,
-    references: d.references,
-    draftedAt: new Date().toISOString(),
-  })
 
   return {
     async profile() {
@@ -237,38 +189,8 @@ export function simPort(userId: string, s3?: SimS3): GmailPort {
     },
 
     async threadMessages(threadId) {
-      const all = [...(await readAll(userId, 'inbox', s())), ...(await readAll(userId, 'sent', s()))]
+      const all = await readAll(userId, 'inbox', s())
       return all.filter((m) => m.threadId === threadId).sort((a, b) => a.seq - b.seq).map(meta)
-    },
-
-    async createDraft(d) {
-      const seq = nextSeq()
-      const id = `sim-draft-${seq}`
-      const messageId = `sim-msg-${seq}`
-      await s().put(key(userId, 'drafts', id), JSON.stringify(draftToStored(d, id, messageId)))
-      return { draftId: id, messageId }
-    },
-
-    async updateDraft(draftId, d) {
-      const raw = await s().get(key(userId, 'drafts', draftId))
-      if (!raw) throw new Error('That draft no longer exists.')
-      const prev = JSON.parse(raw) as StoredDraft
-      await s().put(key(userId, 'drafts', draftId), JSON.stringify(draftToStored(d, draftId, prev.messageId)))
-    },
-
-    async getDraft(draftId) {
-      const raw = await s().get(key(userId, 'drafts', draftId))
-      if (!raw) return { exists: false, to: '', subject: '', text: '' }
-      const d = JSON.parse(raw) as StoredDraft
-      return { exists: true, to: d.to, subject: d.subject, text: d.text }
-    },
-
-    async sendDraft() {
-      throw new Error(SEND_REFUSED)
-    },
-
-    async sendReply() {
-      throw new Error(SEND_REFUSED)
     },
   }
 }

@@ -14,38 +14,6 @@
   min-height: 0;
 }
 
-.tms-shell .tms-tracking-toolbar {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--tms-border);
-  background: var(--tms-card);
-}
-
-.tms-shell .tms-tracking-toolbar-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-}
-
-.tms-shell .tms-tracking-toolbar-icon {
-  color: var(--tms-muted);
-}
-
-.tms-shell .tms-tracking-search {
-  width: 220px;
-}
-
-.tms-shell .tms-tracking-search input {
-  height: 30px;
-}
-
-.tms-shell .tms-tracking-toggle-group {
-  margin-left: auto;
-}
-
 .tms-shell .tms-tracking-recent-row {
   display: flex;
   flex-wrap: wrap;
@@ -84,71 +52,6 @@
   align-self: flex-start;
 }
 
-.tms-shell .tms-tracking-views-dropdown {
-  position: relative;
-}
-
-.tms-shell .tms-tracking-views-menu {
-  display: none;
-  position: absolute;
-  top: 100%;
-  left: 0;
-  z-index: 30;
-  min-width: 180px;
-  max-height: 320px;
-  overflow-y: auto;
-  background: var(--tms-card);
-  border: 1px solid var(--tms-border);
-  border-radius: 6px;
-  box-shadow: var(--tms-shadow-pop);
-}
-
-.tms-shell .tms-tracking-views-dropdown:hover .tms-tracking-views-menu,
-.tms-shell .tms-tracking-views-dropdown:focus-within .tms-tracking-views-menu {
-  display: block;
-}
-
-.tms-shell .tms-tracking-views-item {
-  display: block;
-  width: 100%;
-  padding: 8px 12px;
-  background: none;
-  border: 0;
-  color: var(--tms-text);
-  text-align: left;
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.tms-shell .tms-tracking-views-item:hover,
-.tms-shell .tms-tracking-views-item.tms-active {
-  background: var(--tms-surface-hover);
-}
-
-.tms-shell .tms-tracking-views-empty {
-  display: block;
-  padding: 8px 12px;
-  color: var(--tms-muted);
-  font-size: 13px;
-}
-
-.tms-shell .tms-tracking-board-main {
-  display: flex;
-  flex: 1 1 auto;
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.tms-shell .tms-tracking-board-content {
-  display: flex;
-  flex-direction: row;
-  flex: 1 1 auto;
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-}
-
 .tms-shell .tms-tracking-error {
   padding: 8px 12px;
   color: var(--tms-badge-red);
@@ -160,26 +63,6 @@
   color: var(--tms-muted);
   font-size: 13px;
   text-align: center;
-}
-
-.tms-shell .tms-tracking-footer {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  border-top: 1px solid var(--tms-border);
-  font-size: 13px;
-  color: var(--tms-muted);
-}
-
-/* Tracking table cells (P8-UI rebuild). */
-.tms-shell .tms-tracking-table-pane {
-  display: flex;
-  flex-direction: column;
-  flex: 1 1 auto;
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
 }
 
 .tms-shell .tms-tracking-shipment-cell {
@@ -218,15 +101,15 @@
 
 .tms-shell .tms-tracking-nextstop-cell {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   gap: 2px;
   min-width: 0;
 }
 
 .tms-shell .tms-tracking-status-cell {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
+  flex-direction: row;
+  align-items: center;
   gap: 4px;
 }
 
@@ -237,8 +120,8 @@
 
 .tms-shell .tms-tracking-tracking-cell {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
+  flex-direction: row;
+  align-items: center;
   gap: 4px;
 }
 
@@ -311,37 +194,6 @@
 .tms-shell .tms-tracking-rowmenu-picker {
   padding: 8px 12px;
   border-top: 1px solid var(--tms-border);
-}
-
-/* Assignee tabs and the per-assignee table sections (step V). */
-.tms-shell .tms-tracking-assignee-tabs {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-}
-
-.tms-shell .tms-tracking-groups {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.tms-shell .tms-tracking-group {
-  display: flex;
-  flex-direction: column;
-  flex: 0 0 auto;
-}
-
-.tms-shell .tms-tracking-group-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--tms-border);
 }
 
 .tms-shell .tms-tracking-group-title {

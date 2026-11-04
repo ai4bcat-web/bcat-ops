@@ -3,8 +3,9 @@
  * confirmation was sent, grouped by the person tracking it.
  *
  * - Rows: shipments with a sent rate con (`isRateConSent`), narrowed by lifecycle
- *   (Active · POD due · Closed), then by the shared filter panel and search, then by the
- *   assignee tab (`?assignee=`: `me`, `all`, `unassigned`, or a user id).
+ *   (Active · POD due · Closed), then by search, then by the assignee quick tab
+ *   (`?assignee=`: `me`, `all`, `unassigned`, or a user id). Column filters, sort, Group by
+ *   and the layout live in the board's dense grid.
  * - A row click opens the shipment's own Tracking tab, where the conversation lives.
  *   Old `?shipment=` / `?tab=inbox` bookmarks redirect there.
  *
@@ -15,7 +16,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 
-import { useBoardFilters } from '../board/useBoardFilters'
 import { useAuth } from '@/hooks/useAuth'
 import { useDirectory } from '@/hooks/useDirectory'
 import { useShipments } from '@/hooks/useShipments'
@@ -36,14 +36,13 @@ import { TrackingBoard } from './tracking/TrackingBoard'
 import {
   assigneeTabs as buildAssigneeTabs,
   defaultAssignee,
-  groupByAssignee,
   lifecycleRows as trackingLifecycleRows,
   rowsForAssignee,
 } from './tracking/trackingTable'
 import type { TrackingLifecycle } from './tracking/types'
 import { useRecentlyViewed } from './tracking/useRecentlyViewed'
 import { useTrackingFavorites } from './tracking/useTrackingFavorites'
-import { EMPTY_BOARD_FILTER_SET, type ShipmentRow } from '../shipmentViews'
+import { matchesQuery, type ShipmentRow } from '../shipmentViews'
 
 const MAPS_KEY = (import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string | undefined) ?? ''
 const MAPS_MAP_ID = import.meta.env.VITE_GOOGLE_MAPS_MAP_ID as string | undefined
@@ -99,19 +98,17 @@ export function TrackingWorkstation() {
     [shipments, includeUnsent, lifecycle],
   )
 
-  const { query, setQuery, rows: filteredRows, panelProps } = useBoardFilters({
-    rows: lifecycleRows,
-    customers,
-    staffNameOf: staff.nameOf,
-    storageKey: 'tms-tracking',
-    baseFilters: EMPTY_BOARD_FILTER_SET,
-  })
+  const [query, setQuery] = useState('')
+  const searchedRows = useMemo(
+    () => (query ? lifecycleRows.filter((r) => matchesQuery(r, query)) : lifecycleRows),
+    [lifecycleRows, query],
+  )
 
-  const tabs = useMemo(() => buildAssigneeTabs(filteredRows, myId, staff.nameOf), [filteredRows, myId, staff.nameOf])
-  const activeAssignee = searchParams.get('assignee') ?? defaultAssignee(filteredRows, myId)
-  const groups = useMemo(
-    () => groupByAssignee(rowsForAssignee(filteredRows, activeAssignee, myId), staff.nameOf),
-    [filteredRows, activeAssignee, myId, staff.nameOf],
+  const tabs = useMemo(() => buildAssigneeTabs(searchedRows, myId), [searchedRows, myId])
+  const activeAssignee = searchParams.get('assignee') ?? defaultAssignee(searchedRows, myId)
+  const rows = useMemo(
+    () => rowsForAssignee(searchedRows, activeAssignee, myId),
+    [searchedRows, activeAssignee, myId],
   )
 
   const selectAssignee = useCallback(
@@ -185,15 +182,15 @@ export function TrackingWorkstation() {
   }, [refreshShipments, staff])
 
   return (
-    <div className="tms-board-shell flex h-full flex-col">
+    <div className="tms-dense-page">
       {lifecycle === 'closed' && (
-        <p className="tms-field-hint" role="status" style={{ margin: 0 }}>
+        <p className="tms-field-hint" role="status" style={{ margin: 0, padding: '4px 8px' }}>
           Closed loads: last 2 months. Older ones: Shipments → All.
         </p>
       )}
-      <div className="flex flex-1 overflow-hidden">
+      <div className="tms-dense-body">
         <TrackingBoard
-          groups={groups}
+          rows={rows}
           assigneeTabs={tabs}
           activeAssignee={activeAssignee}
           onSelectAssignee={selectAssignee}
@@ -217,7 +214,8 @@ export function TrackingWorkstation() {
           onRequestCheckCall={handleRequestCheckCall}
           onRequestPod={handleRequestPod}
           onAssignTracker={handleAssignTracker}
-          panelProps={panelProps}
+          email={user?.email}
+          nameOf={staff.nameOf}
           recent={recent}
           onOpenRecent={openShipment}
           onRemoveRecent={removeRecent}

@@ -1,10 +1,12 @@
 /**
- * The tmsSpotActions router: connect/OAuth, ownership, drafting and the send door.
+ * The tmsSpotActions router: connect/OAuth, ownership, the suggested response and manual marking.
+ * The mailbox is read-only: there is no draft or send action at all.
  */
 import { describe, expect, it } from 'vitest'
 import { SPOT_FIXTURES } from '../../../src/lib/spot/fixtures'
 import type { SpotRequestRecord } from '../../../src/types/tms'
-import { DEV_SEND_REFUSED, dispatch } from './actions'
+import type { SpotSuggestedResponse } from '../../../src/lib/spot/types'
+import { dispatch } from './actions'
 import { pollAll } from './poll'
 import { connectedRow, identityOf, makeRig, REP_EMAIL, REP_ID, requestRaw, type TestRig } from './testkit'
 
@@ -45,9 +47,9 @@ function rigWith(row = request(), quoteStatus = 'QUOTED', dev = false): TestRig 
   return rig
 }
 
-const drafted = (rig: TestRig) => {
+const withQuote = (rig: TestRig) => {
   const row = rig.store.requests.get(`sr:${REP_ID}:zz-1`)!
-  return rig.store.requests.set(row.id, { ...row, status: 'DRAFTED', draftId: 'draft-x', quoteId: 'q-1', draftedAt: '2026-11-04T17:00:00Z' })
+  return rig.store.requests.set(row.id, { ...row, quoteId: 'q-1' })
 }
 
 describe('authorization', () => {
@@ -102,37 +104,56 @@ describe('visibility', () => {
   })
 })
 
-describe('drafting', () => {
-  it('creates a draft in the rep’s Gmail from the Quote row, sends nothing, and updates it on a second call', async () => {
-    const rig = rigWith()
-    const out = (await call(rig, 'SPOT_CREATE_DRAFT', { requestId: `sr:${REP_ID}:zz-1`, quoteId: 'q-1' })) as { draftId: string; openUrl: string }
-    expect(out.openUrl).toContain('mail.google.com')
-    const draft = rig.port.drafts.get(out.draftId)!
-    expect(draft.text).toContain('https://ops.zz-bcat.test/quote/tok123')
-    expect(draft.text).toContain('1,850')
-    expect(draft.subject.startsWith('Re:')).toBe(true)
-    expect(draft.to).toBe('dana@zz-acme.test')
-    expect(rig.store.requests.get(`sr:${REP_ID}:zz-1`)!.status).toBe('DRAFTED')
-    expect(rig.crm.activities.map((a) => a.kind)).toEqual(['QUOTE_DRAFTED'])
+const SUGGEST = 'SPOT_SUGGEST_RESPONSE'
+const rid = `sr:${REP_ID}:zz-1`
 
-    await call(rig, 'SPOT_CREATE_DRAFT', { requestId: `sr:${REP_ID}:zz-1`, quoteId: 'q-1', intro: 'Hello again' })
-    expect(rig.port.drafts.size).toBe(1)
-    expect(rig.port.drafts.get(out.draftId)!.text).toContain('Hello again')
-    expect(rig.port.sendCalls).toBe(0)
+describe('suggested response', () => {
+  it('renders the rate, link, lane, equipment and recipient from the Quote row, and links the quote to the request', async () => {
+    const rig = rigWith()
+    const out = (await call(rig, SUGGEST, { requestId: rid, quoteId: 'q-1' })) as SpotSuggestedResponse
+    expect(out.body).toContain('1,850')
+    expect(out.body).toContain('https://ops.zz-bcat.test/quote/tok123')
+    expect(out.body).toContain('Chicago, IL to Dallas, TX')
+    expect(out).toMatchObject({ to: 'dana@zz-acme.test', rateCents: 185_000, hasLink: true })
+    expect(out.subject.startsWith('Re:')).toBe(true)
+    expect(out.gmailUrl).toContain('https://mail.google.com/mail/?view=cm')
+    expect(out.gmailUrl).toContain(encodeURIComponent('dana@zz-acme.test'))
+    expect(out.mailto.startsWith('mailto:dana%40zz-acme.test?subject=')).toBe(true)
+    expect(rig.store.requests.get(rid)).toMatchObject({ quoteId: 'q-1', quoteNumber: 'Q000123', status: 'NEW' })
+  })
+
+  it('applies the rep’s intro and outro and their saved signature', async () => {
+    const rig = rigWith()
+    rig.store.connections.set(REP_ID, connectedRow({ settings: { signature: 'Ryan, BCAT' } as never }))
+    const out = (await call(rig, SUGGEST, { requestId: rid, quoteId: 'q-1', intro: 'Hello Dana', outro: 'Thanks' })) as SpotSuggestedResponse
+    expect(out.body).toMatch(/^Hello Dana/)
+    expect(out.body).toContain('Thanks')
+    expect(out.body.trimEnd().endsWith('Ryan, BCAT')).toBe(true)
+  })
+
+  it('without a quote uses the stored suggestion and carries no accept link', async () => {
+    const rig = rigWith(request({ suggestion: { suggestedCents: 172_000 } }))
+    const out = (await call(rig, SUGGEST, { requestId: rid })) as SpotSuggestedResponse
+    expect(out).toMatchObject({ rateCents: 172_000, hasLink: false })
+    expect(out.body).toContain('1,720')
+    expect(out.body).not.toMatch(/accept this quote/i)
+  })
+
+  it('refuses when there is nothing to price from', async () => {
+    const rig = rigWith()
+    await expect(call(rig, SUGGEST, { requestId: rid })).rejects.toThrow(/no price yet/)
   })
 
   it.each([
     ['a quote that belongs to another request', { spotRequestId: 'sr:x:y' }, /does not belong/],
     ['a buy-side quote', { side: 'BUY' }, /sell/],
-    ['a quote that is still a draft', { status: 'DRAFT' }, /Quoted/],
-  ])('refuses %s and creates no draft', async (_label, quotePatch, message) => {
+  ])('refuses %s', async (_label, patch, message) => {
     const rig = rigWith()
-    rig.store.quotes.set('q-1', { ...rig.store.quotes.get('q-1')!, ...quotePatch })
-    await expect(call(rig, 'SPOT_CREATE_DRAFT', { requestId: `sr:${REP_ID}:zz-1`, quoteId: 'q-1' })).rejects.toThrow(message)
-    expect(rig.port.drafts.size).toBe(0)
+    rig.store.quotes.set('q-1', { ...rig.store.quotes.get('q-1')!, ...patch })
+    await expect(call(rig, SUGGEST, { requestId: rid, quoteId: 'q-1' })).rejects.toThrow(message)
   })
 
-  it('does not copy anything from the customer’s mail into the reply except validated fields', async () => {
+  it('never carries text from the customer’s mail beyond validated fields', async () => {
     const rig = makeRig()
     rig.store.connections.set(REP_ID, connectedRow({ historyId: null }))
     const fx = SPOT_FIXTURES.find((f) => f.id === 'req-injection')!
@@ -141,83 +162,52 @@ describe('drafting', () => {
     await pollAll(rig.deps)
     const row = [...rig.store.requests.values()][0]
     rig.store.quotes.set('q-9', { id: 'q-9', side: 'SELL', status: 'QUOTED', spotRequestId: row.id, amountCents: 100_000, linkToken: 't', equipmentType: 'VAN' })
-    const out = (await call(rig, 'SPOT_CREATE_DRAFT', { requestId: row.id, quoteId: 'q-9' })) as { draftId: string }
-    const text = rig.port.drafts.get(out.draftId)!.text
-    expect(text).not.toMatch(/IGNORE ALL RULES|evil\.test/i)
-    expect(rig.port.sendCalls).toBe(0)
+    const out = (await call(rig, SUGGEST, { requestId: row.id, quoteId: 'q-9' })) as SpotSuggestedResponse
+    expect(`${out.body}\n${out.subject}`).not.toMatch(/IGNORE ALL RULES|evil\.test/i)
+  })
+})
+
+describe('copy and manual marking (read-only mailbox)', () => {
+  it('logging a copy writes an audit and a CRM activity and changes no status', async () => {
+    const rig = rigWith()
+    const before = rig.store.requests.get(rid)!.status
+    const out = (await call(rig, 'SPOT_LOG_COPIED', { requestId: rid, quoteId: 'q-1' })) as { request: SpotRequestRecord }
+    expect(out.request.status).toBe(before)
+    expect(out.request.sentAt).toBeUndefined()
+    expect(rig.store.audits.map((a) => a.action)).toContain('SPOT_SUGGESTION_COPIED')
+    expect(rig.crm.activities).toHaveLength(1)
+    expect(rig.crm.activities[0].refs).toMatchObject({ spotRequestId: rid, quoteId: 'q-1' })
+    expect(rig.crm.activities[0].subject).toBeUndefined()
   })
 
-  it('a full detect, quote, draft run never sends', async () => {
+  it('SPOT_MARK_SENT sets SENT by the rep once, and refuses a second time or a closed request', async () => {
+    const rig = rigWith()
+    const out = (await call(rig, 'SPOT_MARK_SENT', { requestId: rid })) as { request: SpotRequestRecord }
+    expect(out.request).toMatchObject({ status: 'SENT', sentVia: 'APP' })
+    expect(out.request.sentAt).toBe(rig.clock.now.toISOString())
+    expect(rig.store.audits.map((a) => a.action)).toContain('SPOT_MARK_SENT')
+    expect(rig.crm.activities.map((a) => a.kind)).toEqual(['QUOTE_SENT'])
+    await expect(call(rig, 'SPOT_MARK_SENT', { requestId: rid })).rejects.toThrow(/not been answered/)
+  })
+
+  it('has no draft or send action, and no action reaches a mailbox write', async () => {
+    const rig = rigWith()
+    for (const action of ['SPOT_CREATE_DRAFT', 'SPOT_SEND_DRAFT', 'SPOT_SIM_MARK_SENT']) {
+      await expect(call(rig, action, { requestId: rid, confirm: true, draftId: 'x' })).rejects.toThrow(/Unknown action/)
+    }
+  })
+
+  it('a full detect, price and suggest run leaves the mailbox untouched', async () => {
     const rig = makeRig()
-    rig.store.connections.set(REP_ID, connectedRow({ historyId: null, settings: { autoSend: false } as never }))
+    rig.store.connections.set(REP_ID, connectedRow({ historyId: null }))
     const fx = SPOT_FIXTURES.find((f) => f.id === 'req-van-clear')!
     rig.port.add(fx.meta, fx.body)
     await pollAll(rig.deps)
     const row = [...rig.store.requests.values()][0]
-    rig.store.quotes.set('q-2', { id: 'q-2', side: 'SELL', status: 'QUOTED', spotRequestId: row.id, amountCents: 190_000, linkToken: 't2', equipmentType: 'VAN' })
-    await call(rig, 'SPOT_CREATE_DRAFT', { requestId: row.id, quoteId: 'q-2' })
-    expect(rig.port.drafts.size).toBe(1)
-    expect(rig.port.sendCalls).toBe(0)
-    expect(rig.doorCalls).toHaveLength(0)
-  })
-})
-
-describe('SPOT_SEND_DRAFT', () => {
-  const id = `sr:${REP_ID}:zz-1`
-
-  it('sends the draft exactly once when every condition holds', async () => {
-    const rig = rigWith()
-    drafted(rig)
-    const out = (await call(rig, 'SPOT_SEND_DRAFT', { requestId: id, confirm: true })) as { request: SpotRequestRecord }
-    expect(rig.port.sentDrafts).toEqual(['draft-x'])
-    expect(out.request.status).toBe('SENT')
-    expect(out.request.sentVia).toBe('APP')
-    expect(rig.store.audits.map((a) => a.action)).toContain('SPOT_SENT')
-  })
-
-  it('refuses without confirm', async () => {
-    const rig = rigWith()
-    drafted(rig)
-    await expect(call(rig, 'SPOT_SEND_DRAFT', { requestId: id })).rejects.toThrow(/confirmation/)
-    await expect(call(rig, 'SPOT_SEND_DRAFT', { requestId: id, confirm: 'yes' })).rejects.toThrow(/confirmation/)
-    expect(rig.port.sendCalls).toBe(0)
-  })
-
-  it('refuses ADMIN and managers: only the owner sends', async () => {
-    const rig = rigWith()
-    drafted(rig)
-    await expect(call(rig, 'SPOT_SEND_DRAFT', { requestId: id, confirm: true }, ADMIN)).rejects.toThrow(/owning rep|not found/)
-    await expect(call(rig, 'SPOT_SEND_DRAFT', { requestId: id, confirm: true }, MANAGER)).rejects.toThrow(/owning rep|not found/)
-    expect(rig.port.sendCalls).toBe(0)
-  })
-
-  it('refuses on the dev stack and keeps the draft', async () => {
-    const rig = rigWith(request(), 'QUOTED', true)
-    drafted(rig)
-    await expect(call(rig, 'SPOT_SEND_DRAFT', { requestId: id, confirm: true })).rejects.toThrow(DEV_SEND_REFUSED)
-    expect(rig.port.sendCalls).toBe(0)
-    expect(rig.store.requests.get(id)!.status).toBe('DRAFTED')
-  })
-
-  it('refuses when there is no draft', async () => {
-    const rig = rigWith()
-    await expect(call(rig, 'SPOT_SEND_DRAFT', { requestId: id, confirm: true })).rejects.toThrow(/no draft/)
-    expect(rig.port.sendCalls).toBe(0)
-  })
-
-  it('refuses when the quote is no longer open', async () => {
-    const rig = rigWith(request(), 'WON')
-    drafted(rig)
-    await expect(call(rig, 'SPOT_SEND_DRAFT', { requestId: id, confirm: true })).rejects.toThrow(/no longer open/)
-    expect(rig.port.sendCalls).toBe(0)
-  })
-
-  it('refuses in a simulated inbox even off the dev flag', async () => {
-    const rig = rigWith()
-    rig.store.connections.set(REP_ID, connectedRow({ mode: 'SIMULATED' }))
-    drafted(rig)
-    await expect(call(rig, 'SPOT_SEND_DRAFT', { requestId: id, confirm: true })).rejects.toThrow(DEV_SEND_REFUSED)
-    expect(rig.port.sendCalls).toBe(0)
+    await call(rig, SUGGEST, { requestId: row.id })
+    await call(rig, 'SPOT_LOG_COPIED', { requestId: row.id })
+    await call(rig, 'SPOT_MARK_SENT', { requestId: row.id })
+    expect(Object.keys(rig.port).filter((k) => /draft|send|modify/i.test(k))).toEqual([])
   })
 })
 
@@ -226,7 +216,7 @@ describe('outcome and dismissal', () => {
 
   it('marks WON with the shipment only when the Quote itself says WON', async () => {
     const rig = rigWith()
-    drafted(rig)
+    withQuote(rig)
     await expect(call(rig, 'SPOT_MARK_OUTCOME', { requestId: id })).rejects.toThrow(/still open/)
     rig.store.quotes.set('q-1', { ...rig.store.quotes.get('q-1')!, status: 'WON', shipmentId: 'ship-1', shipmentNumber: 'S0001' })
     const out = (await call(rig, 'SPOT_MARK_OUTCOME', { requestId: id })) as { request: SpotRequestRecord }
@@ -236,11 +226,21 @@ describe('outcome and dismissal', () => {
 
   it('marks LOST when the quote is lost, and refuses a quote that is not this request’s', async () => {
     const rig = rigWith()
-    drafted(rig)
+    withQuote(rig)
     rig.store.quotes.set('q-1', { ...rig.store.quotes.get('q-1')!, status: 'LOST' })
     expect(((await call(rig, 'SPOT_MARK_OUTCOME', { requestId: id })) as { request: SpotRequestRecord }).request.status).toBe('LOST')
     rig.store.quotes.set('q-1', { ...rig.store.quotes.get('q-1')!, spotRequestId: 'other' })
     await expect(call(rig, 'SPOT_MARK_OUTCOME', { requestId: id })).rejects.toThrow(/no quote of its own/)
+  })
+
+  it('lets the rep mark a request LOST by hand, with or without a quote, but never WON by hand', async () => {
+    const rig = rigWith(request({ status: 'SENT' }))
+    const out = (await call(rig, 'SPOT_MARK_OUTCOME', { requestId: id, outcome: 'LOST', lostReason: 'price' })) as { request: SpotRequestRecord }
+    expect(out.request.status).toBe('LOST')
+    expect(JSON.stringify(rig.store.audits)).toContain('price')
+    const again = rigWith(request({ status: 'SENT' }))
+    await expect(call(again, 'SPOT_MARK_OUTCOME', { requestId: id, outcome: 'WON' })).rejects.toThrow(/no quote of its own/)
+    await expect(call(again, 'SPOT_MARK_OUTCOME', { requestId: id, outcome: 'MAYBE' })).rejects.toThrow(/WON or LOST/)
   })
 
   it('dismissing shortens retention to the dismissed window', async () => {
@@ -356,7 +356,7 @@ describe('Gmail OAuth connect', () => {
     ['a different Google account', (r: TestRig) => { r.oauth.identity = { email: 'someone@zz-bcat.test', emailVerified: true, hd: 'zz-bcat.test' } }, /your own mailbox/],
     ['an unverified e-mail', (r: TestRig) => { r.oauth.identity = { email: REP_EMAIL, emailVerified: false, hd: 'zz-bcat.test' } }, /your own mailbox/],
     ['a missing refresh token', (r: TestRig) => { r.oauth.exchange = { ...r.oauth.exchange, refreshToken: null } }, /read and compose/],
-    ['a missing Gmail scope', (r: TestRig) => { r.oauth.exchange = { ...r.oauth.exchange, scope: 'openid email gmail.readonly' } }, /read and compose/],
+    ['a missing Gmail scope', (r: TestRig) => { r.oauth.exchange = { ...r.oauth.exchange, scope: 'openid email' } }, /read and compose/],
     ['a wrong Workspace domain', (r: TestRig) => {
       r.store.integrations.set('GMAIL_REP_OAUTH', { id: 'GMAIL_REP_OAUTH', settings: { allowedDomain: 'zz-bcat.test' } })
       r.oauth.identity = { email: REP_EMAIL, emailVerified: true, hd: 'other.test' }
@@ -412,16 +412,13 @@ describe('disconnect, purge and rep settings', () => {
     expect([...rig.store.requests.keys()]).toEqual(['sr:rep-2:zz-9'])
   })
 
-  it('turning auto-send on needs the org switch, is audited, and stamps who changed it', async () => {
+  it('rep settings keep only the read-only knobs: a stale autoSend key is ignored', async () => {
     const rig = rigWith()
-    await expect(call(rig, 'SPOT_SAVE_MY_SETTINGS', { settings: { autoSend: true } })).rejects.toThrow(/organization/)
-    expect(rig.store.connections.get(REP_ID)!.settings).toBeUndefined()
-
-    rig.store.settings.value = { id: 'default', allowAutoSend: true }
-    await call(rig, 'SPOT_SAVE_MY_SETTINGS', { settings: { autoSend: true } })
+    await call(rig, 'SPOT_SAVE_MY_SETTINGS', { settings: { autoSend: true, signature: 'Ryan' } })
     const row = rig.store.connections.get(REP_ID)!
-    expect(row.autoSendChangedBy).toBe(REP_EMAIL)
-    expect(rig.store.audits.find((a) => a.action === 'SET_AUTO_SEND')?.changes).toEqual({ from: false, to: true })
+    expect(row.settings).toMatchObject({ signature: 'Ryan' })
+    expect(row.settings).not.toHaveProperty('autoSend')
+    expect(row.autoSendChangedBy).toBeUndefined()
   })
 
   it('a rep can pause and resume their own watching', async () => {
@@ -448,21 +445,21 @@ describe('another rep can read or change nothing of a request (one case per acti
     ['SPOT_GET_REQUEST', { id }],
     ['SPOT_UPDATE_FIELDS', { requestId: id, patch: { weightLbs: 1 }, expectedVersion: 1 }],
     ['SPOT_SET_CUSTOMER', { requestId: id, customerId: 'cust-1' }],
-    ['SPOT_CREATE_DRAFT', { requestId: id, quoteId: 'q-1' }],
-    ['SPOT_SEND_DRAFT', { requestId: id, confirm: true }],
+    ['SPOT_SUGGEST_RESPONSE', { requestId: id, quoteId: 'q-1' }],
+    ['SPOT_LOG_COPIED', { requestId: id }],
+    ['SPOT_MARK_SENT', { requestId: id }],
     ['SPOT_DISMISS', { requestId: id }],
     ['SPOT_MARK_OUTCOME', { requestId: id }],
   ]
   it.each(cases)('%s by a rep who does not own it is refused and changes nothing', async (action, input) => {
     const rig = rigWith()
-    drafted(rig)
+    withQuote(rig)
     rig.store.customers.set('cust-1', { id: 'cust-1', status: 'ACTIVE' })
     rig.store.connections.set('rep-2', connectedRow({ id: 'rep-2', userEmail: 'other@zz-bcat.test' }))
     const before = JSON.stringify(rig.store.requests.get(id))
     await expect(call(rig, action, input, OTHER)).rejects.toThrow(/not found|owning rep|Forbidden/)
     expect(JSON.stringify(rig.store.requests.get(id))).toBe(before)
-    expect(rig.port.sendCalls).toBe(0)
-    expect(rig.port.drafts.size).toBe(0)
+    expect(rig.crm.activities).toHaveLength(0)
   })
 
   it('listing or counting another rep’s requests is refused', async () => {
@@ -482,9 +479,10 @@ describe('missing ids', () => {
   it.each([
     ['SPOT_GET_REQUEST', {}],
     ['SPOT_DISMISS', {}],
-    ['SPOT_CREATE_DRAFT', { requestId: 'x' }],
+    ['SPOT_SUGGEST_RESPONSE', {}],
+    ['SPOT_MARK_SENT', {}],
     ['SPOT_MARK_OUTCOME', { requestId: null }],
-    ['SPOT_SEND_DRAFT', { confirm: true }],
+    ['SPOT_LOG_COPIED', {}],
   ])('%s with no id answers with a clear validation error', async (action, input) => {
     await expect(call(rigWith(), action, input)).rejects.toThrow(/is required|must be a string/)
   })

@@ -5,10 +5,9 @@
  * refreshes the token once; `invalid_grant` surfaces as NeedsReconnect (from tokens.ts).
  * Message bodies and tokens are never logged or put into an error message.
  */
-import type { GmailMessageMeta, GmailPort, OutgoingReply } from '../../../../src/lib/spot/port'
+import type { GmailMessageMeta, GmailPort } from '../../../../src/lib/spot/port'
 import { GMAIL_HEADER_ALLOWLIST } from '../../../../src/lib/spot/port'
 import { GmailApiError } from './errors'
-import { base64Url, buildMime } from './mime'
 import { forgetAccessToken, getAccessToken } from './tokens'
 
 const BASE = 'https://gmail.googleapis.com/gmail/v1/users/me'
@@ -113,7 +112,7 @@ export function googlePort(userId: string, deps: GooglePortDeps = {}): GmailPort
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)))
   let labelIds: Map<string, string> | null = null
 
-  async function api(method: string, path: string, body?: unknown, allow404 = false): Promise<Json | null> {
+  async function api(method: 'GET', path: string, body?: undefined, allow404 = false): Promise<Json | null> {
     let refreshed = false
     for (let attempt = 0; ; attempt++) {
       const token = await getToken(userId)
@@ -161,13 +160,6 @@ export function googlePort(userId: string, deps: GooglePortDeps = {}): GmailPort
     const s = q.toString()
     return `${s}${[...GMAIL_HEADER_ALLOWLIST, 'from', 'to', 'cc', 'reply-to', 'subject'].map((h) => `&metadataHeaders=${encodeURIComponent(h)}`).join('')}`
   }
-
-  async function sendRaw(path: string, payload: Json): Promise<string> {
-    const r = await api('POST', path, payload)
-    return String((r?.id as string | undefined) ?? '')
-  }
-
-  const rawOf = (d: OutgoingReply) => base64Url(buildMime(d))
 
   return {
     async profile() {
@@ -236,40 +228,6 @@ export function googlePort(userId: string, deps: GooglePortDeps = {}): GmailPort
     async threadMessages(threadId) {
       const r = await api('GET', `/threads/${encodeURIComponent(threadId)}?${metaQuery()}`)
       return ((r?.messages as GmailMessage[] | undefined) ?? []).map(toMeta)
-    },
-
-    async createDraft(d) {
-      const r = await api('POST', '/drafts', { message: { raw: rawOf(d), ...(d.threadId ? { threadId: d.threadId } : {}) } })
-      return { draftId: String(r?.id ?? ''), messageId: String((r?.message as { id?: string } | undefined)?.id ?? '') }
-    },
-
-    async updateDraft(draftId, d) {
-      await api('PUT', `/drafts/${encodeURIComponent(draftId)}`, {
-        message: { raw: rawOf(d), ...(d.threadId ? { threadId: d.threadId } : {}) },
-      })
-    },
-
-    async getDraft(draftId) {
-      const r = await api('GET', `/drafts/${encodeURIComponent(draftId)}?format=full`, undefined, true)
-      if (!r) return { exists: false, to: '', subject: '', text: '' }
-      const msg = r.message as GmailMessage | undefined
-      const h = headerMap(msg?.payload?.headers)
-      const acc = { plain: [] as string[], html: [] as string[], files: [] as { name: string; contentType: string; size: number }[] }
-      collect(msg?.payload, acc)
-      return {
-        exists: true,
-        to: h.to ?? '',
-        subject: h.subject ?? '',
-        text: acc.plain.length ? acc.plain.join('\n') : stripHtml(acc.html.join('\n')),
-      }
-    },
-
-    async sendDraft(draftId) {
-      return { messageId: await sendRaw('/drafts/send', { id: draftId }) }
-    },
-
-    async sendReply(d) {
-      return { messageId: await sendRaw('/messages/send', { raw: rawOf(d), ...(d.threadId ? { threadId: d.threadId } : {}) }) }
     },
   }
 }

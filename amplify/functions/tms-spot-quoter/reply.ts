@@ -1,13 +1,15 @@
 /**
- * tms-spot-quoter — the outgoing reply, built from the Quote row and validated fields
- * (never from model free text; `renderSpotReply` takes only enums, numbers, dates and
- * the minted link). Shared by SPOT_CREATE_DRAFT and the auto-send path.
+ * tms-spot-quoter — the SUGGESTED RESPONSE the rep may copy (read-only mailbox, Ryne
+ * 2026-11-04). It is rendered from the Quote row or the stored suggestion and validated
+ * fields only (`renderSpotReply` takes enums, numbers, dates and the minted link; model free
+ * text is not an input, so an instruction injected into a customer mail cannot reach it).
+ * Nothing here talks to Gmail: the rep pastes it, or opens a compose window prefilled by URL.
  */
 import type { GmailRepSettings, SpotExtraction, SpotRequestRecord } from '../../../src/types/tms'
-import type { GmailPort, OutgoingReply } from '../../../src/lib/spot/port'
 import { renderSpotReply, replySubject } from '../../../src/lib/spot/replyTemplate'
+import type { SpotSuggestedResponse } from '../../../src/lib/spot/types'
 import type { SpotDeps } from './deps'
-import type { Row } from './store'
+import { jsonOf, type Row } from './store'
 
 export function recipientOf(row: Pick<SpotRequestRecord, 'contactEmail' | 'replyTo' | 'fromEmail'>): string {
   return (row.contactEmail ?? row.replyTo ?? row.fromEmail ?? '').trim()
@@ -32,58 +34,50 @@ export function quoteLink(deps: Pick<SpotDeps, 'portalOrigin'>, quote: Row): str
   return `${deps.portalOrigin.replace(/\/+$/, '')}/quote/${token}`
 }
 
-/** Threading headers come from the customer's own message; a pasted request has none. */
-async function threadingOf(port: GmailPort, row: SpotRequestRecord): Promise<{ inReplyTo: string | null; references: string | null }> {
-  if (!row.gmailThreadId) return { inReplyTo: null, references: null }
-  try {
-    const meta = await port.getMetadata(row.gmailMessageId)
-    const references = [meta.references, meta.messageId].filter(Boolean).join(' ').trim()
-    return { inReplyTo: meta.messageId || null, references: references || null }
-  } catch {
-    return { inReplyTo: null, references: null }
-  }
+/** One line, no control characters: safe in a URL and in a mail header the rep may paste into. */
+function oneLine(value: string): string {
+  // eslint-disable-next-line no-control-regex
+  return value.replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim()
 }
 
-export async function buildReply(
+export function buildSuggestedResponse(
   deps: Pick<SpotDeps, 'portalOrigin'>,
-  port: GmailPort,
   row: SpotRequestRecord,
-  quote: Row,
+  quote: Row | null,
   repSettings: Pick<GmailRepSettings, 'signature'>,
-  text: { intro?: string | null; outro?: string | null } = {},
-): Promise<OutgoingReply> {
-  const to = recipientOf(row)
+  text: { intro?: string | null; outro?: string | null; googleEmail?: string | null } = {},
+): SpotSuggestedResponse {
+  const to = oneLine(recipientOf(row))
   if (!to) throw new Error('This request has no reply address.')
-  const link = quoteLink(deps, quote)
-  if (!link) throw new Error('This quote has no customer link yet — send it from the quote first.')
   const extraction = row.extraction ?? null
+  const suggestion = jsonOf<{ suggestedCents?: number }>(row.suggestion)
+  const rateCents = quote ? Number(quote.amountCents ?? 0) : Number(suggestion?.suggestedCents ?? 0)
+  if (!(rateCents > 0)) throw new Error('There is no price yet: price the quote first.')
+  const link = quote ? quoteLink(deps, quote) : ''
   const { origin, destination } = endpoints(extraction)
   const body = renderSpotReply({
-    rateCents: Number(quote.amountCents ?? 0),
+    rateCents,
     origin,
     destination,
-    equipmentType: String(quote.equipmentType ?? extraction?.equipmentType ?? 'VAN'),
-    lengthFt: typeof quote.equipmentLengthFt === 'number' ? quote.equipmentLengthFt : extraction?.lengthFt ?? null,
+    equipmentType: String(quote?.equipmentType ?? extraction?.equipmentType ?? 'VAN'),
+    lengthFt: typeof quote?.equipmentLengthFt === 'number' ? quote.equipmentLengthFt : extraction?.lengthFt ?? null,
     pickupDate: extraction?.pickupDate ?? null,
-    expiresAt: typeof quote.expiresAt === 'string' ? quote.expiresAt : null,
+    expiresAt: typeof quote?.expiresAt === 'string' ? quote.expiresAt : null,
     link,
     intro: text.intro,
     outro: text.outro,
     signature: repSettings.signature,
   })
-  const { inReplyTo, references } = await threadingOf(port, row)
+  const subject = replySubject(row.subject)
+  const enc = encodeURIComponent
+  const authuser = text.googleEmail && !text.googleEmail.includes(' ') ? `&authuser=${enc(text.googleEmail)}` : ''
   return {
-    threadId: row.gmailThreadId || null,
     to,
-    subject: replySubject(row.subject),
-    inReplyTo,
-    references,
-    text: body,
+    subject,
+    body,
+    mailto: `mailto:${enc(to)}?subject=${enc(subject)}&body=${enc(body)}`,
+    gmailUrl: `https://mail.google.com/mail/?view=cm&fs=1&to=${enc(to)}&su=${enc(subject)}&body=${enc(body)}${authuser}`,
+    rateCents,
+    hasLink: Boolean(link),
   }
-}
-
-/** `https://mail.google.com/...` link to the draft in the rep's own Gmail. */
-export function draftOpenUrl(googleEmail: string | null | undefined, draftMessageId: string | null | undefined): string {
-  const authuser = googleEmail && !googleEmail.includes(' ') ? `?authuser=${encodeURIComponent(googleEmail)}` : ''
-  return `https://mail.google.com/mail/${authuser}#drafts${draftMessageId ? `?compose=${encodeURIComponent(draftMessageId)}` : ''}`
 }

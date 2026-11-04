@@ -43,8 +43,15 @@ sidebar group as today. Company Dashboard stays on top.
   texts, notes, tasks; owner = sales rep; pipeline stage; "last touch" and "next step" on the
   customer card; free-mail domains (gmail/yahoo) fall back to per-contact matching.
 
+## Ryne's change (2026-11-04)
+- Spot quoter is READ-ONLY on e-mail: Gmail read scope only, no send/draft from the platform, no auto-send.
+  The tool suggests a response (copy/paste, or a prefilled compose link); the rep replies in their own mail app
+  and marks the quote Sent / Won / Lost by hand.
+
 ## Ryne's answers (2026-11-03)
-1. Quote replies: drafted in the rep's Gmail, rep sends. Auto-send = per-rep switch, off by default.
+> **Changed 2026-11-04: read-only.** Answer 1 and the draft/auto-send sentences in the "Earlier defaults" below are superseded: the platform never drafts, sends or modifies mail (scope `gmail.readonly` only); it suggests a reply the rep copies, and the rep marks Sent / Won / Lost by hand.
+
+1. Quote replies: drafted in the rep's Gmail, rep sends. Auto-send = per-rep switch, off by default. *(superseded, see the note above)*
 2. Retain only e-mails classified as quote requests (and their threads); discard the rest.
 3. Google Workspace admin for bcatcorp.com is Ryne; he registers/consents the OAuth app.
 4. DAT RateView: ONE service login (credentials still to come).
@@ -58,7 +65,7 @@ sidebar group as today. Company Dashboard stays on top.
 10. Reps see their own customers; managers see all.
 
 ## Earlier defaults (superseded where answered above)
-- Quote replies are drafts the rep sends; no auto-send.
+- Quote replies are suggested text the rep copies and sends themselves; no drafts, no sending, no auto-send (read-only, 2026-11-04).
 - Only e-mails classified as quote requests (and their threads) are stored; other mail is not retained.
 - One service DAT login until per-rep DAT e-mails are supplied.
 - Load Review is a role (reviewer) distinct from Intake reviewer; both can be the same person.

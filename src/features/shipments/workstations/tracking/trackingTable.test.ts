@@ -4,7 +4,6 @@ import {
   assigneeTabs,
   defaultAssignee,
   etaOf,
-  groupByAssignee,
   lifecycleOf,
   nextCheckCallStateOf,
   podStateOf,
@@ -100,18 +99,13 @@ describe('assignees', () => {
     row('4', { trackerId: 'u-amy', trackerName: 'Amy' }),
     row('5', { trackerId: 'u-me', trackerName: 'Me' }),
   ]
-  const nameOf = (id: string) => id
 
-  it('groups Unassigned first, then people A to Z', () => {
-    const groups = groupByAssignee(rows, nameOf)
-    expect(groups.map((g) => [g.key, g.rows.length])).toEqual([['unassigned', 1], ['u-amy', 2], ['u-me', 1], ['u-zed', 1]])
-  })
-
-  it('builds My loads, All, Unassigned (warned) and a tab per other person', () => {
-    const tabs = assigneeTabs(rows, 'u-me', nameOf)
-    expect(tabs.map((t) => [t.key, t.count])).toEqual([['me', 1], ['all', 5], ['unassigned', 1], ['u-amy', 2], ['u-zed', 1]])
+  it('builds the My loads, All and Unassigned quick tabs (Unassigned warned only when some exist)', () => {
+    const tabs = assigneeTabs(rows, 'u-me')
+    expect(tabs.map((t) => [t.key, t.count])).toEqual([['me', 1], ['all', 5], ['unassigned', 1]])
     expect(tabs.find((t) => t.key === 'unassigned')?.tone).toBe('warn')
-    expect(assigneeTabs([rows[0]], 'u-me', nameOf).find((t) => t.key === 'unassigned')?.tone).toBeUndefined()
+    expect(assigneeTabs([rows[0]], 'u-me').find((t) => t.key === 'unassigned')?.tone).toBeUndefined()
+    expect(assigneeTabs(rows, null).map((t) => t.key)).toEqual(['all', 'unassigned'])
   })
 
   it('defaults to My loads only when the viewer has some', () => {

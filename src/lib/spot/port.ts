@@ -1,5 +1,6 @@
 /**
- * Step AB §9.2 — the Gmail wire, as the spot pipeline sees it.
+ * Step AB §9.2 — the Gmail wire, as the spot pipeline sees it. READ-ONLY (Ryne, 2026-11-04): the
+ * port has no draft, send or modify method; the app never writes to a mailbox.
  *
  * Implemented by `amplify/functions/_shared/gmail/googlePort.ts` (REST over fetch with a
  * per-rep bearer token) and `simPort.ts` (S3-backed simulated inbox, dev only). Both
@@ -25,15 +26,6 @@ export interface GmailMessageMeta {
   headers: Record<string, string>
 }
 
-export interface OutgoingReply {
-  threadId: string | null
-  to: string
-  subject: string
-  inReplyTo: string | null
-  references: string | null
-  text: string
-}
-
 export interface GmailPort {
   profile(): Promise<{ emailAddress: string; historyId: string }>
   listRecent(o: { lookbackDays: number; label: string | null; max: number }): Promise<string[]>
@@ -48,13 +40,6 @@ export interface GmailPort {
     attachments: { name: string; contentType: string; size: number }[]
   }>
   threadMessages(threadId: string): Promise<GmailMessageMeta[]>
-  createDraft(d: OutgoingReply): Promise<{ draftId: string; messageId: string }>
-  updateDraft(draftId: string, d: OutgoingReply): Promise<void>
-  getDraft(draftId: string): Promise<{ exists: boolean; to: string; subject: string; text: string }>
-  /** ONLY called from sendNow() / autoSendReply(). */
-  sendDraft(draftId: string): Promise<{ messageId: string }>
-  /** ONLY called from autoSendReply(). */
-  sendReply(d: OutgoingReply): Promise<{ messageId: string }>
 }
 
 /** Header names the port keeps in `GmailMessageMeta.headers` (lower-case). */

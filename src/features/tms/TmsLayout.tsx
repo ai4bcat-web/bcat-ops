@@ -19,6 +19,9 @@ import { useAppStore } from '@/store/useAppStore'
 import { DispatchDrawer } from '@/features/dispatch/DispatchDrawer'
 import { useShellBadgeCounts, movingShipments } from '@/features/tms/useShellBadgeCounts'
 
+/** The list pages that run edge to edge on an icon rail (Shipments Active / All / Intake, Load Tracking). */
+const DENSE_PATHS = new Set(['/tms/shipments', '/tms/shipments/intake', '/tms/tracking'])
+
 function LegacyRuntime() {
   const { user } = useAuth()
   const initializeData = useAppStore((s) => s.initializeData)
@@ -85,6 +88,7 @@ export function TmsLayout() {
   // Every route that is not under /tms is a legacy page: same shell, but the content area is
   // a fixed-height host (the pages scroll themselves) with the dispatch column beside it.
   const legacy = !location.pathname.startsWith('/tms')
+  const dense = DENSE_PATHS.has(location.pathname.replace(/\/+$/, ''))
   const initial = personName({ name: me?.name, email }, 'Team member').charAt(0).toUpperCase()
   return (
     <TmsShell
@@ -103,6 +107,7 @@ export function TmsLayout() {
       onLogout={() => { void logout() }}
       onSearch={(q) => navigate(`/tms/shipments?q=${encodeURIComponent(q)}`)}
       fill={legacy}
+      dense={dense}
       aside={legacy ? <LegacyAside /> : undefined}
     >
       {legacy ? (

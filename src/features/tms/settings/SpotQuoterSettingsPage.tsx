@@ -18,13 +18,10 @@ import type { SpotConnectionView } from '@/lib/spot/types'
 
 const messageOf = (err: unknown): string => (err instanceof Error ? err.message : String(err))
 
-type NumberKey = Exclude<keyof ResolvedSpotSettings, 'enabled' | 'allowAutoSend'>
+type NumberKey = Exclude<keyof ResolvedSpotSettings, 'enabled'>
 const NUMBER_FIELDS: Array<{ key: NumberKey; label: string; hint: string }> = [
   { key: 'retentionDays', label: 'Keep a request for (days)', hint: 'The mail text is deleted automatically after this.' },
   { key: 'dismissedRetentionDays', label: 'Keep a dismissed request for (days)', hint: 'Long enough that the same thread is not found again.' },
-  { key: 'autoSendDailyCapPerRep', label: 'Auto-send limit per rep per day', hint: 'Only matters when a rep has auto-send on.' },
-  { key: 'autoSendDailyCapPerCustomer', label: 'Auto-send limit per customer per day', hint: 'Per rep and customer.' },
-  { key: 'autoSendMinSamples', label: 'Loads of history needed to auto-send', hint: 'Used when there is no live DAT price.' },
   { key: 'modelCallsPerRepPerDay', label: 'AI reads per rep per day', hint: 'The spend control: each candidate mail is one read.' },
   { key: 'maxMessagesPerRepPerRun', label: 'Mails checked per rep per run', hint: 'Caps one poll of one inbox.' },
 ]
@@ -37,7 +34,6 @@ const pollText = (c: SpotConnectionView): string => {
 export function SpotQuoterSettingsPage() {
   const { status, loading, error, refresh } = useSpotStatus()
   const [enabled, setEnabled] = useState(true)
-  const [allowAuto, setAllowAuto] = useState(false)
   const [numbers, setNumbers] = useState<Record<NumberKey, string> | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -51,7 +47,6 @@ export function SpotQuoterSettingsPage() {
     const s = resolveSpotSettings(status.settings)
     setSeeded(status.settings)
     setEnabled(s.enabled)
-    setAllowAuto(s.allowAutoSend)
     setNumbers(Object.fromEntries(NUMBER_FIELDS.map((f) => [f.key, String(s[f.key])])) as Record<NumberKey, string>)
   }
 
@@ -68,7 +63,6 @@ export function SpotQuoterSettingsPage() {
     if (!numbers) return
     const patch = {
       enabled,
-      allowAutoSend: allowAuto,
       ...Object.fromEntries(NUMBER_FIELDS.map((f) => [f.key, Number(numbers[f.key])])),
     }
     const checked = validateSpotSettings(patch)
@@ -113,7 +107,6 @@ export function SpotQuoterSettingsPage() {
       render: (c) => (c.lastPollAt ? `${c.lastPollOk === false ? 'failed · ' : 'ok · '}${relativeTime(c.lastPollAt)}` : 'never'),
     },
     { key: 'counts', header: 'listed / rejected / model / stored', render: (c) => <span className="tms-spot-numbers">{pollText(c)}</span> },
-    { key: 'auto', header: 'Auto-send', render: (c) => (c.settings?.autoSend ? 'ON' : 'off') },
     {
       key: 'act',
       header: '',
@@ -154,8 +147,9 @@ export function SpotQuoterSettingsPage() {
             </TmsBadge>{' '}
             <Link to="/tms/brokerage/integrations">Open Integrations</Link>
           </p>
-          <Hint>One service DAT login serves every rep. Until it is set up, prices carry a STUB label and are never auto-sent.</Hint>
-          {status.devStack ? <Hint>This is the dev stack: sending from Gmail is disabled and a simulated inbox is available.</Hint> : null}
+          <Hint><span data-testid="spot-readonly-copy">Read-only: BCAT Ops reads quote-request e-mails and never sends or drafts mail; reps copy the suggested response and send it themselves.</span></Hint>
+          <Hint>One service DAT login serves every rep. Until it is set up, prices carry a STUB label.</Hint>
+          {status.devStack ? <Hint>This is the dev stack: a simulated inbox is available.</Hint> : null}
         </Stack>
       </SettingsCard>
 
@@ -167,12 +161,6 @@ export function SpotQuoterSettingsPage() {
         <Stack>
           {saveError ? <ErrorText>{saveError}</ErrorText> : null}
           <CheckRow label="The spot quoter is on" checked={enabled} onChange={setEnabled} ariaLabel="Spot quoter enabled" />
-          <CheckRow
-            label="Let reps turn on auto-send (each rep and each customer must also opt in)"
-            checked={allowAuto}
-            onChange={setAllowAuto}
-            ariaLabel="Allow auto-send"
-          />
           {NUMBER_FIELDS.map((f) => (
             <TmsField key={f.key} label={f.label} hint={f.hint}>
               <TmsInput
@@ -194,7 +182,7 @@ export function SpotQuoterSettingsPage() {
           </Hint>
           <Hint>
             A rep sees their own requests. Managers, admins and the owner see everyone’s. Reps see the customers they own,
-            plus customers nobody owns yet; managers see all. Quote replies are drafts in the rep’s own Gmail.
+            plus customers nobody owns yet; managers see all. The mailbox is read-only: BCAT Ops never sends or drafts mail; reps copy the suggested response and send it themselves.
           </Hint>
         </Stack>
       </SettingsCard>

@@ -48,7 +48,7 @@ export function AddRequestDialog({
       open={open}
       onOpenChange={onOpenChange}
       title="Add a request"
-      description="Paste the text of a quote request. The reply will be drafted as a new message to the address you give."
+      description="Paste the text of a quote request. A suggested response will be prepared for you to copy and send yourself."
       footer={
         <>
           <TmsButton onClick={() => onOpenChange(false)}>Cancel</TmsButton>

@@ -19,13 +19,13 @@ const STATUS = {
   gmailProvider: { mode: 'STUB', health: null },
   datProvider: { mode: 'LIVE' },
   connection: null,
-  settings: { id: 'default', enabled: true, allowAutoSend: false, retentionDays: 90, version: 7 },
+  settings: { id: 'default', enabled: true, retentionDays: 90, version: 7 },
 }
 const REPS = [
   {
     id: 'u1', userEmail: 'jane.rep@bcatcorp.com', mode: 'GOOGLE', status: 'CONNECTED', lastPollAt: '2026-11-04T10:00:00Z', lastPollOk: true,
     lastPollStats: { listed: 12, stage1Rejected: 6, stage2Rejected: 3, modelCalls: 3, stored: 2, attached: 0, errors: 0 },
-    settings: { autoSend: true }, version: 1,
+    version: 1,
   },
 ]
 
@@ -41,6 +41,8 @@ describe('SpotQuoterSettingsPage', () => {
   it('shows the provider modes', async () => {
     draw()
     expect(await screen.findByTestId('spot-gmail-mode')).toHaveTextContent('STUB')
+    expect(screen.getByTestId('spot-readonly-copy')).toHaveTextContent(/never sends or drafts mail/)
+    expect(screen.queryByLabelText('Allow auto-send')).toBeNull()
     expect(screen.getByTestId('spot-dat-mode')).toHaveTextContent('LIVE')
   })
 
@@ -48,12 +50,11 @@ describe('SpotQuoterSettingsPage', () => {
     draw()
     const retention = await screen.findByTestId('spot-policy-retentionDays')
     fireEvent.change(retention, { target: { value: '30' } })
-    fireEvent.click(screen.getByLabelText('Allow auto-send'))
     fireEvent.click(screen.getByTestId('spot-policy-save'))
     await waitFor(() => expect(api.spotAction).toHaveBeenCalledWith('SPOT_SAVE_SETTINGS', expect.anything()))
     const call = api.spotAction.mock.calls.find((c) => c[0] === 'SPOT_SAVE_SETTINGS')![1]
     expect(call.expectedVersion).toBe(7)
-    expect(call.settings).toMatchObject({ retentionDays: 30, allowAutoSend: true, enabled: true })
+    expect(call.settings).toMatchObject({ retentionDays: 30, enabled: true })
   })
 
   it('refuses a nonsense number without calling the server', async () => {

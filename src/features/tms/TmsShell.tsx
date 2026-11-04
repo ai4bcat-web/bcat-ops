@@ -112,6 +112,11 @@ export interface TmsShellProps {
    * own scroll container) instead of page scroll.
    */
   fill?: boolean
+  /**
+   * A dense list page (Shipments lists, Load Tracking): the sidebar is an icon rail that opens on
+   * hover, focus or click, and the page runs edge to edge with no gutters.
+   */
+  dense?: boolean
   /** A column to the right of the page (the dispatch drawer on legacy routes); `fill` only. */
   aside?: ReactNode
   children?: ReactNode
@@ -454,10 +459,16 @@ export function TmsShell({
   onLogout,
   onSearch,
   fill = false,
+  dense = false,
   aside,
   children,
 }: TmsShellProps) {
-  const [collapsed, setCollapsed] = useState(readCollapsed)
+  const [storedCollapsed, setCollapsed] = useState(readCollapsed)
+  // Dense pages show the rail until the pointer, keyboard focus or a click opens the full sidebar over the page.
+  const [railHover, setRailHover] = useState(false)
+  const [railPinned, setRailPinned] = useState(false)
+  const railOpen = railHover || railPinned
+  const collapsed = dense ? !railOpen : storedCollapsed
   // The phone drawer is open for one path only: navigating anywhere closes it without an effect.
   const [navOpenFor, setNavOpenFor] = useState<string | null>(null)
   const navOpen = navOpenFor === activePath
@@ -472,11 +483,11 @@ export function TmsShell({
 
   useEffect(() => {
     try {
-      window.localStorage.setItem(COLLAPSE_KEY, collapsed ? '1' : '0')
+      window.localStorage.setItem(COLLAPSE_KEY, storedCollapsed ? '1' : '0')
     } catch {
       /* private mode: the sidebar just forgets between sessions */
     }
-  }, [collapsed])
+  }, [storedCollapsed])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -516,12 +527,20 @@ export function TmsShell({
   const rowProps = { activePath, activeSearch, badgeCounts, trackedLoads }
 
   return (
-    <div className={`tms-shell${collapsed ? ' tms-is-collapsed' : ''}${fill ? ' tms-fill' : ''}${navOpen ? ' tms-nav-open' : ''}`}>
+    <div
+      className={`tms-shell${collapsed ? ' tms-is-collapsed' : ''}${fill ? ' tms-fill' : ''}${dense ? ' tms-dense' : ''}${navOpen ? ' tms-nav-open' : ''}`}
+    >
       <aside
         className="tms-sidebar"
+        onMouseEnter={dense ? () => setRailHover(true) : undefined}
+        onMouseLeave={dense ? () => setRailHover(false) : undefined}
+        onFocus={dense ? () => setRailHover(true) : undefined}
+        onBlur={dense ? (e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setRailHover(false) } : undefined}
         onClick={(e) => {
           if ((e.target as HTMLElement).closest('a')) {
             setNavOpen(false)
+            setRailHover(false)
+            setRailPinned(false)
             menuBtnRef.current?.focus()
           }
         }}
@@ -533,7 +552,7 @@ export function TmsShell({
             className="tms-collapse-btn"
             aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
             aria-expanded={!collapsed}
-            onClick={() => setCollapsed((v) => !v)}
+            onClick={() => (dense ? setRailPinned((v) => !v) : setCollapsed((v) => !v))}
           >
             {collapsed ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
           </button>

@@ -3718,7 +3718,6 @@ spotFn.addEnvironment('AUDIT_LOG_TABLE_NAME',        abAuditTable.tableName)
 spotFn.addEnvironment('BUCKET_NAME',                 backend.storage.resources.bucket.bucketName)
 spotFn.addEnvironment('INTEGRATION_PARAM_PATH',      integrationParamPath)
 spotFn.addEnvironment('GMAIL_TOKEN_PARAM_PATH',      gmailTokenParamPath)
-spotFn.addEnvironment('TMS_SHIPMENT_ACTIONS_FUNCTION_NAME', shipmentActionsFn.functionName)
 spotFn.addEnvironment('PORTAL_ORIGINS',              JSON.stringify(PORTAL_ORIGINS))
 spotFn.addEnvironment('PORTAL_ORIGIN',               PORTAL_ORIGIN)
 spotFn.addEnvironment('USER_POOL_ID',                backend.auth.resources.userPool.userPoolId)
@@ -3772,9 +3771,7 @@ spotFn.addToRolePolicy(new PolicyStatement({
   conditions: { StringLike: { 's3:prefix': ['spot-sim/*'] } },
 }))
 
-// The one door that can mint a Quote without a browser. Same stack, no cycle:
-// tms-shipment-actions references nothing of the spot Lambda.
-shipmentActionsFn.grantInvoke(spotFn)
+// Read-only mailbox (Ryne, 2026-11-04): the spot Lambda holds no invoke grant on anything.
 
 // Every five minutes. DISABLED on dev by the dev guard's CfnRule loop.
 const spotPollRule = new Rule(spotFn.stack, 'SpotQuoterPollRule', {

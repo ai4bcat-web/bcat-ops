@@ -13,6 +13,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   AlertTriangle,
   Clock,
+  Columns3,
   FileX,
   Search,
   Truck,
@@ -20,16 +21,32 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 
-import { BoardFilterPanel } from './board/BoardFilterPanel'
-import { useBoardFilters } from './board/useBoardFilters'
-import { BoardGrid, type BoardGridColumn, type BoardGridSort } from './board/BoardGrid'
 import { BoardFooterBar } from './board/BoardFooterBar'
 import { IconKeyDialog, type BoardToneKey, type BoardExceptionKey } from './board/IconKeyDialog'
 import { BatchTaskDialog, type BatchTaskAction, type BatchTaskResult } from './board/BatchTaskDialog'
 import { BoardMapView } from './board/BoardMapView'
 import { ColumnsPickerDialog } from './board/ColumnsPickerDialog'
 import { ShipmentsSectionTabs } from './ShipmentsSectionTabs'
-import { TmsBadge, TmsButton, TmsFilterChip, TmsInput, TmsSegmentedTabs, statusTone } from '@/features/tms/kit'
+import { TmsBadge, TmsButton, TmsFilterChip, TmsInput, TmsSegmentedTabs, TmsSelect, statusTone } from '@/features/tms/kit'
+import { DenseGrid } from '@/features/tms/grid/DenseGrid'
+import {
+  ClearFiltersButton,
+  DensityToggle,
+  DenseKpiStrip,
+  SummaryToggle,
+  type DenseKpi,
+} from '@/features/tms/grid/DenseControls'
+import {
+  activeFilterCount,
+  filterRows,
+  nextSort,
+  reorderKeys,
+  sortDenseRows,
+  type DenseColumnFilter,
+  type DenseFilters,
+  type DenseSort,
+} from '@/features/tms/grid/denseGridModel'
+import { useDenseGridPrefs } from '@/features/tms/grid/useDenseGridPrefs'
 import { useOwnershipDivisions } from '@/features/tms/useOwnershipDivisions'
 import { useAuth } from '@/hooks/useAuth'
 import { useDirectory } from '@/hooks/useDirectory'
@@ -50,6 +67,7 @@ import {
 } from '@/lib/apiClient'
 import { saveBlob } from '@/lib/download'
 import { checkCallState } from '@/lib/checkCalls'
+import { formatCents } from '@/lib/invoiceBuild'
 import { customerDisplayName, isCustomerUnresolved } from '@/lib/customerResolution'
 import { displayName } from '@/lib/roles'
 import { inShipmentList, parseShipmentList, shipmentListCounts, type ShipmentList } from '@/lib/shipmentLists'
@@ -66,14 +84,22 @@ import {
   ALJEX_COLUMN_KEYS,
   BOARD_COLUMNS,
   boardRowTone,
+  boardStatusOf,
   carrierLabel,
   massReleaseReady,
+  matchesQuery,
   needsDriver,
   toCsv,
-  visibleColumns,
   isDemoShipment,
   type ShipmentRow,
 } from './shipmentViews'
+import {
+  ACTIONS_COLUMN,
+  SHIPMENT_COLUMN_KEYS,
+  SHIPMENT_GRID_COLUMNS,
+  sentence,
+  statusCellText,
+} from './shipmentGridColumns'
 import type { BatchShipmentTask, CustomerRecord, LocationRecord, ShipmentColumnTemplateRecord, TmsSettings, UserProfileRecord } from '@/types/tms'
 
 type Period = { key: 'this' | 'last' | 'last3' } | { key: 'month'; month: string }
@@ -99,8 +125,9 @@ const MAPS_KEY = (import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string | undefined
 const MAPS_MAP_ID = (import.meta.env.VITE_GOOGLE_MAPS_MAP_ID as string | undefined) ?? undefined
 
 const REFRESH_SECONDS = 60
-const PAGE_SIZE_INITIAL = 50
-const PAGE_SIZE_INCREMENT = 50
+/** A hundred rows a page; the grid virtualises them, so the DOM holds only the rows in view. */
+const PAGE_SIZE_INITIAL = 100
+const PAGE_SIZE_INCREMENT = 100
 
 /** Kept for the one place the board still reasons about standard page sizes. */
 const PAGE_SIZES = [20, 50, 100]
@@ -112,7 +139,27 @@ function normalizePageSize(size: number): number {
 
 const SETTABLE_STATUSES = ['ON_HOLD', 'OPEN', 'CANCELED', 'UNCANCEL'] as const
 
-const DEFAULT_SORT: BoardGridSort = { key: 'pickupShip', dir: 'asc' }
+const DEFAULT_SORT: DenseSort = { key: 'pickupShip', dir: 'asc' }
+
+/** The Aljex column order, with the PRO first: it is the sticky column. */
+const DEFAULT_COLUMNS = ['proNumber', ...ALJEX_COLUMN_KEYS.filter((k) => k !== 'proNumber')]
+
+const COLUMN_BY_KEY = Object.fromEntries(SHIPMENT_GRID_COLUMNS.map((c) => [c.key, c]))
+
+/** The quick "needs attention" toggles that used to be the filter panel's Flags. */
+type BoardFlag = 'checkCallOverdue' | 'openExceptions' | 'docsMissing'
+const FLAG_LABELS: Record<BoardFlag, string> = {
+  checkCallOverdue: 'Check call overdue',
+  openExceptions: 'Open exceptions',
+  docsMissing: 'Missing documents',
+}
+
+function matchesFlags(row: ShipmentRow, flags: ReadonlySet<BoardFlag>, nowMs: number): boolean {
+  if (flags.has('checkCallOverdue') && checkCallState({ nextCheckCallAt: row.nextCheckCallAt }, nowMs) !== 'OVERDUE') return false
+  if (flags.has('openExceptions') && (row.openIncidentCount ?? 0) === 0) return false
+  if (flags.has('docsMissing') && (row.docsMissing?.length ?? 0) === 0) return false
+  return true
+}
 
 /**
  * The footer's Batch task offers one flat list of choices; the router takes a task and
@@ -140,8 +187,13 @@ function batchTaskOf(
   return null
 }
 
-function sentence(value: string): string {
-  return value.toLowerCase().replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase())
+/** Only the widths that differ from the catalog default are the user's; the rest keep auto-fitting. */
+function dragged(widths: Record<string, number>): Record<string, number> {
+  const out: Record<string, number> = {}
+  for (const [key, width] of Object.entries(widths)) {
+    if (BOARD_COLUMNS.find((c) => c.key === key)?.width !== width) out[key] = width
+  }
+  return out
 }
 
 function arraysEqual(a: readonly string[], b: readonly string[]): boolean {
@@ -149,61 +201,6 @@ function arraysEqual(a: readonly string[], b: readonly string[]): boolean {
   const sa = [...a].sort()
   const sb = [...b].sort()
   return sa.every((v, i) => v === sb[i])
-}
-
-function panelStorageKey(email: string, pane: 'left' | 'right'): string {
-  return `tms:shipments:panelCollapsed:${email ?? 'anon'}:${pane}`
-}
-
-function rowSortValue(row: ShipmentRow, key: string): string | number {
-  switch (key) {
-    case 'status':
-      return statusCellText(row)
-    case 'customerTotalRate':
-      return row.revenueCents ?? Number.NEGATIVE_INFINITY
-    case 'carrierTotalRates':
-      return row.costCents ?? Number.NEGATIVE_INFINITY
-    case 'grossProfit':
-      return row.profitCents ?? Number.NEGATIVE_INFINITY
-    case 'netMargin':
-      return row.marginBps ?? Number.NEGATIVE_INFINITY
-    case 'pickupShip':
-      return row.shipDate ?? ''
-    case 'pickupAppt':
-      return row.pickupAppt ?? ''
-    case 'deliveryAppt':
-      return row.deliveryAppt ?? ''
-    default: {
-      const col = BOARD_COLUMNS.find((c) => c.key === key)
-      return col ? col.value(row) : ''
-    }
-  }
-}
-
-/**
- * The screen and the CSV print the same Status text, because they ask the same
- * column for it. A second copy of this here is how `DEL` ended up on the board
- * beside a checkbox reading `Delivered`.
- */
-const STATUS_COLUMN = BOARD_COLUMNS.find((c) => c.key === 'status')
-function statusCellText(row: ShipmentRow): string {
-  return STATUS_COLUMN ? STATUS_COLUMN.value(row) : ''
-}
-
-function sortRows(rows: ShipmentRow[], sort: BoardGridSort | null): ShipmentRow[] {
-  if (!sort) return rows
-  const dir = sort.dir === 'asc' ? 1 : -1
-  return [...rows].sort((a, b) => {
-    const va = rowSortValue(a, sort.key)
-    const vb = rowSortValue(b, sort.key)
-    if (typeof va === 'number' && typeof vb === 'number') {
-      if (va !== vb) return (va - vb) * dir
-    } else {
-      const cmp = String(va).localeCompare(String(vb))
-      if (cmp !== 0) return cmp * dir
-    }
-    return a.id.localeCompare(b.id)
-  })
 }
 
 /** Step W: a live Ivan Cartage shipment nobody is driving. */
@@ -326,8 +323,8 @@ export function ShipmentsBoard() {
   const mayAdmin = isOwner || isAdmin
 
   return (
-    <div className="tms-board-shell flex h-full flex-col">
-      <div className="tms-board-toolbar flex items-center justify-between border-b border-[color:var(--tms-border)] px-3 py-2">
+    <div className="tms-dense-page">
+      <div className="tms-dense-bar">
         <div className="flex items-center gap-3">
           <Truck size={18} />
           <span className="font-semibold">Shipments</span>
@@ -352,6 +349,7 @@ export function ShipmentsBoard() {
             </div>
           )}
         </div>
+        <span className="tms-dense-spacer" />
         {mayAdmin && (
           <TmsButton size="sm" variant="secondary" onClick={() => setCreateOpen(true)}>
             Create shipment
@@ -359,7 +357,7 @@ export function ShipmentsBoard() {
         )}
       </div>
 
-      <div className={`flex flex-1 overflow-hidden ${split ? 'gap-1' : ''}`}>
+      <div className={`flex min-h-0 flex-1 overflow-hidden ${split ? 'gap-1' : ''}`}>
         <BoardPane
           key={`left-${list}`}
           pane="left"
@@ -469,7 +467,7 @@ function BoardPane({
   onSplit,
   onReport,
 }: BoardPaneProps) {
-  const { staff: staffProfiles, nameOf: staffNameOf } = staff
+  const { staff: staffProfiles } = staff
   const divisions = useOwnershipDivisions().divisions ?? SEED_DIVISIONS
   const { drivers } = useDrivers()
   const { equipment } = useTrucks()
@@ -509,11 +507,18 @@ function BoardPane({
 
   const listRows = useMemo(() => allRows.filter((r) => inShipmentList(r, list)), [allRows, list])
 
-  const [columnKeys, setColumnKeys] = useState<string[]>(ALJEX_COLUMN_KEYS)
-  const [columnWidths, setColumnWidths] = useState<Record<string, number>>({})
-  const [pinnedKeys, setPinnedKeys] = useState<string[]>([])
+  // Columns, widths, density, sort and the summary strip persist per user and per pane.
+  const prefs = useDenseGridPrefs({
+    gridId: `shipments-${pane}`,
+    email,
+    defaultColumns: DEFAULT_COLUMNS,
+    validKeys: SHIPMENT_COLUMN_KEYS,
+    defaultSort: DEFAULT_SORT,
+  })
+  const columnKeys = prefs.columns
   const [columnsOpen, setColumnsOpen] = useState(false)
-  const [sort, setSort] = useState<BoardGridSort>(DEFAULT_SORT)
+  const [filters, setFilters] = useState<DenseFilters>({})
+  const [flags, setFlags] = useState<ReadonlySet<BoardFlag>>(() => new Set())
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [mapVisible, setMapVisible] = useState(false)
   const [iconKeyOpen, setIconKeyOpen] = useState(false)
@@ -525,25 +530,10 @@ function BoardPane({
   const [dialogShipment, setDialogShipment] = useState<ShipmentRow | null>(null)
   const [dialogKind, setDialogKind] = useState<'unvoid' | 'repoint' | null>(null)
 
-  // The filters, the facet options and the panel itself come from one hook (shared
-  // with the Tracking desk). The board keeps what is its own: columns, sort,
-  // selection and the batch. The list scope applies before the filters.
-  const {
-    rows: boardRows,
-    filters,
-    panelProps,
-  } = useBoardFilters({
-    rows: listRows,
-    customers,
-    staffNameOf,
-    storageKey: panelStorageKey(email, pane),
-    query,
-    onQueryChange: setQuery,
-  })
-
-  // The page decides what to fetch, so it hears what this pane is asking for: the
-  // VOIDED facet widens the query, and a typed PRO adds that exact row (R4, §4.3).
-  const wantsVoided = filters.statuses?.includes('VOIDED') ?? false
+  // The page decides what to fetch, so it hears what this pane is asking for: the Status
+  // header's VOIDED option widens the query, and a typed PRO adds that exact row (R4, §4.3).
+  const statusFilter = filters.status
+  const wantsVoided = (statusFilter?.values?.includes('VOIDED') ?? false) && !statusFilter?.exclude
   useEffect(() => { onReport?.(pane, { voided: wantsVoided, query }) }, [onReport, pane, wantsVoided, query])
 
   // Countdown refetch.
@@ -571,7 +561,25 @@ function BoardPane({
   // The "Demo" chip: only the ZZ DEMO walkthrough rows. It lives in the URL (`?demo=1`)
   // so the isolated view can be bookmarked or handed over as a link.
   const demoOnly = params.get('demo') === '1'
-  const filteredRows = useMemo(() => (demoOnly ? boardRows.filter(isDemoShipment) : boardRows), [boardRows, demoOnly])
+  const gridColumns = useMemo(() => {
+    const chosen = columnKeys.map((k) => COLUMN_BY_KEY[k]).filter((c) => c != null)
+    return [...chosen, ACTIONS_COLUMN]
+  }, [columnKeys])
+
+  // List scope, then search, then the quick toggles, then voided rows (hidden unless the Status
+  // header asks for them), then every header filter. `fitRows` is the list before the header
+  // filters: the facet options and auto-fit widths are drawn from it so they do not shift as you filter.
+  const fitRows = useMemo(() => {
+    const nowMs = Date.now()
+    return listRows.filter(
+      (r) =>
+        (!query || matchesQuery(r, query))
+        && (flags.size === 0 || matchesFlags(r, flags, nowMs))
+        && (wantsVoided || boardStatusOf(r) !== 'VOIDED')
+        && (!demoOnly || isDemoShipment(r)),
+    )
+  }, [listRows, query, flags, wantsVoided, demoOnly])
+  const filteredRows = useMemo(() => filterRows(fitRows, gridColumns, filters), [fitRows, gridColumns, filters])
   const toggleDemo = useCallback(() => {
     setPageSize(PAGE_SIZE_INITIAL)
     setParams((prev) => {
@@ -581,7 +589,7 @@ function BoardPane({
       return next
     }, { replace: true })
   }, [setParams])
-  const sortedRows = useMemo(() => sortRows(filteredRows, sort), [filteredRows, sort])
+  const sortedRows = useMemo(() => sortDenseRows(filteredRows, gridColumns, prefs.sort), [filteredRows, gridColumns, prefs.sort])
   const shownRows = useMemo(() => sortedRows.slice(0, pageSize), [sortedRows, pageSize])
 
   const activeTemplate = useMemo(
@@ -606,13 +614,11 @@ function BoardPane({
     (id: string) => {
       const t = columnTemplates.find((ct) => ct.id === id)
       if (t) {
-        setColumnKeys([...t.columns])
-        setColumnWidths({ ...(t.widths ?? {}) })
-        setPinnedKeys([...(t.pinned ?? [])])
+        prefs.applyLayout({ columns: [...t.columns], widths: { ...(t.widths ?? {}) }, pinned: [...(t.pinned ?? [])] })
         setColumnTemplateId(id)
       }
     },
-    [columnTemplates],
+    [columnTemplates, prefs],
   )
 
   const exportCsv = useCallback(() => {
@@ -729,17 +735,6 @@ function BoardPane({
     }
   }, [batchAction, selectedRows, columnKeys, handleRefresh, ivanDrivers, equipment])
 
-  const gridColumns = useMemo<BoardGridColumn[]>(
-    () =>
-      visibleColumns(columnKeys).map((col) => ({
-        key: col.key,
-        header: col.label,
-        sortable: col.sortKey != null,
-        width: col.width,
-      })),
-    [columnKeys],
-  )
-
   const renderCell = useCallback(
     (row: ShipmentRow, columnKey: string): ReactNode => {
       if (columnKey === 'exceptions') {
@@ -846,16 +841,6 @@ function BoardPane({
     [refresh],
   )
 
-  const actionsColumn: BoardGridColumn = useMemo(
-    () => ({ key: 'actions', header: '', width: 44 }),
-    [],
-  )
-
-  const columnsWithActions = useMemo(
-    () => [...gridColumns, actionsColumn],
-    [gridColumns, actionsColumn],
-  )
-
   const renderCellWithActions = useCallback(
     (row: ShipmentRow, key: string): ReactNode => {
       if (key === 'actions') {
@@ -885,87 +870,178 @@ function BoardPane({
     return [...meanings.entries()].map(([meaning, icon]) => ({ icon, meaning }))
   }, [shownRows])
 
+  const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds])
+  const resetPage = useCallback(() => setPageSize(PAGE_SIZE_INITIAL), [])
+  const setColumnFilter = useCallback(
+    (key: string, next: DenseColumnFilter | null) => {
+      setFilters((prev) => {
+        const copy = { ...prev }
+        if (next) copy[key] = next
+        else delete copy[key]
+        return copy
+      })
+      resetPage()
+    },
+    [resetPage],
+  )
+  const clearFilters = useCallback(() => {
+    setFilters({})
+    setFlags(new Set())
+    resetPage()
+  }, [resetPage])
+  const toggleFlag = useCallback(
+    (flag: BoardFlag) => {
+      setFlags((prev) => {
+        const next = new Set(prev)
+        if (next.has(flag)) next.delete(flag)
+        else next.add(flag)
+        return next
+      })
+      resetPage()
+    },
+    [resetPage],
+  )
+
+  // The summary strip counts what the list shows now, so it follows every filter.
+  const kpis = useMemo<DenseKpi[]>(() => {
+    if (!prefs.kpiOpen) return []
+    let open = 0
+    let moving = 0
+    let delivered = 0
+    let docs = 0
+    let revenue = 0
+    let profit = 0
+    for (const r of filteredRows) {
+      const status = boardStatusOf(r)
+      if (status === 'OPEN') open += 1
+      else if (status === 'DISPATCHED' || status === 'ARRIVED' || status === 'DEPARTED') moving += 1
+      else if (status === 'DELIVERED') delivered += 1
+      if ((r.docsMissing?.length ?? 0) > 0) docs += 1
+      revenue += r.revenueCents ?? 0
+      profit += r.profitCents ?? 0
+    }
+    return [
+      { label: 'Shipments', value: filteredRows.length },
+      { label: 'Open', value: open },
+      { label: 'In transit', value: moving },
+      { label: 'Delivered', value: delivered },
+      { label: 'Missing docs', value: docs, tone: docs > 0 ? 'warn' : undefined },
+      { label: 'Revenue', value: formatCents(revenue) },
+      { label: 'Gross profit', value: formatCents(profit), tone: profit < 0 ? 'bad' : 'good' },
+    ]
+  }, [prefs.kpiOpen, filteredRows])
+
   return (
     <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-      <div className="flex flex-1 overflow-hidden">
-        <BoardFilterPanel
-          {...panelProps}
-          columnTemplates={columnTemplateOptions}
-          activeColumnTemplateId={activeColumnTemplateId}
-          onSelectColumnTemplate={handleSelectColumnTemplate}
-          onManageColumnTemplates={() => setColumnsOpen(true)}
+      <div className="tms-dense-bar">
+        <Search size={14} className="tms-muted" aria-hidden="true" />
+        <TmsInput
+          placeholder="Search"
+          aria-label="Search shipments"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          className="tms-dense-search"
         />
-
-        <div className="flex min-w-0 flex-1 flex-col">
-          <div className="flex items-center gap-2 border-b border-[color:var(--tms-border)] px-3 py-2">
-            <Search size={16} className="tms-muted" />
-            <TmsInput
-              placeholder="Search"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              className="h-8 w-64"
-            />
-            {onListChange && (
-              <TmsSegmentedTabs
-                aria-label="Shipment list"
-                size="sm"
-                active={list}
-                onSelect={(key) => onListChange(parseShipmentList(key))}
-                tabs={[{ key: 'active', label: 'Active' }, { key: 'all', label: 'All' }]}
-              />
-            )}
-            <TmsFilterChip label="Demo" value={demoOnly ? 'only' : null} onClick={toggleDemo} />
-          </div>
-
-          <div className="flex-1 overflow-hidden">
-            {mapVisible ? (
-              <BoardMapView
-                rows={shownRows}
-                apiKey={MAPS_KEY}
-                mapId={MAPS_MAP_ID}
-                onOpenShipment={(id) => setOpenDrawerId(id)}
-              />
-            ) : (
-              <BoardGrid<ShipmentRow>
-                columns={columnsWithActions}
-                rows={shownRows}
-                rowKey={(r) => r.id}
-                selectedIds={selectedIds}
-                toneOf={(r) => boardRowTone(r)}
-                onToggle={(id) => setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))}
-                onToggleAll={() =>
-                  setSelectedIds((prev) => (prev.length === shownRows.length ? [] : shownRows.map((r) => r.id)))
-                }
-                sort={sort}
-                onSort={(key) =>
-                  setSort((prev) => (prev?.key === key ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' }))
-                }
-                onRowClick={(row) => setOpenDrawerId(row.id)}
-                onRowDoubleClick={(row) => navigate(`/tms/shipments/${row.id}`)}
-                renderCell={renderCellWithActions}
-              />
-            )}
-          </div>
-
-          <BoardFooterBar
-            shown={shownRows.length}
-            total={filteredRows.length}
-            secondsToRefresh={secondsToRefresh}
-            autoRefresh={autoRefresh}
-            onToggleAutoRefresh={() => setAutoRefresh((a) => !a)}
-            onNext50={() => setPageSize((s) => normalizePageSize(s + PAGE_SIZE_INCREMENT))}
-            onRefresh={handleRefresh}
-            onExportCsv={exportCsv}
-            onShowMap={() => setMapVisible((m) => !m)}
-            onIconKey={() => setIconKeyOpen(true)}
-            onNewTab={() => window.open(window.location.href, '_blank')}
-            onBatchTask={() => setBatchOpen(true)}
-            onSplitScreen={onSplit}
-            mapVisible={mapVisible}
-            selectedCount={selectedIds.length}
+        {onListChange && (
+          <TmsSegmentedTabs
+            aria-label="Shipment list"
+            size="sm"
+            active={list}
+            onSelect={(key) => onListChange(parseShipmentList(key))}
+            tabs={[{ key: 'active', label: 'Active' }, { key: 'all', label: 'All' }]}
           />
-        </div>
+        )}
+        <TmsFilterChip label="Demo" value={demoOnly ? 'only' : null} onClick={toggleDemo} />
+        {(Object.keys(FLAG_LABELS) as BoardFlag[]).map((flag) => (
+          <TmsButton
+            key={flag}
+            size="sm"
+            variant={flags.has(flag) ? 'primary' : 'secondary'}
+            aria-pressed={flags.has(flag)}
+            onClick={() => toggleFlag(flag)}
+          >
+            {FLAG_LABELS[flag]}
+          </TmsButton>
+        ))}
+        <ClearFiltersButton count={activeFilterCount(filters) + flags.size} onClear={clearFilters} />
+        <span className="tms-dense-spacer" />
+        {columnTemplateOptions.length > 0 && (
+          <TmsSelect
+            aria-label="Column template"
+            className="tms-dense-select"
+            value={activeColumnTemplateId ?? ''}
+            onChange={(e) => { if (e.target.value) handleSelectColumnTemplate(e.target.value) }}
+            options={columnTemplateOptions.map((ct) => ({ value: ct.id, label: ct.name }))}
+            placeholder="Column template"
+          />
+        )}
+        <TmsButton size="sm" variant="secondary" onClick={() => setColumnsOpen(true)}>
+          <Columns3 size={14} aria-hidden="true" /> Columns
+        </TmsButton>
+        <DensityToggle density={prefs.density} onChange={prefs.setDensity} />
+        <SummaryToggle open={prefs.kpiOpen} onToggle={() => prefs.setKpiOpen(!prefs.kpiOpen)} />
       </div>
+      <DenseKpiStrip open={prefs.kpiOpen} items={kpis} />
+
+      <div className="tms-dense-body">
+        {mapVisible ? (
+          <BoardMapView
+            rows={shownRows}
+            apiKey={MAPS_KEY}
+            mapId={MAPS_MAP_ID}
+            onOpenShipment={(id) => setOpenDrawerId(id)}
+          />
+        ) : (
+          <DenseGrid<ShipmentRow>
+            aria-label="Shipments"
+            recentKey={`tms:shipments:recent:${email}`}
+            resetKey={`${query}|${flags.size}|${demoOnly}|${JSON.stringify(filters)}|${JSON.stringify(prefs.sort)}`}
+            columns={gridColumns}
+            rows={shownRows}
+            fitRows={fitRows}
+            rowKey={(r) => r.id}
+            renderCell={renderCellWithActions}
+            density={prefs.density}
+            userWidths={prefs.widths}
+            stickyCount={Math.max(1, prefs.pinned.length)}
+            sort={prefs.sort}
+            onSort={(key) => prefs.setSort(nextSort(prefs.sort, key))}
+            filters={filters}
+            onFilterChange={setColumnFilter}
+            onReorder={(from, to) => prefs.setColumns(reorderKeys(columnKeys, from, to))}
+            onResize={prefs.setWidth}
+            selectable
+            selectedIds={selectedSet}
+            toneOf={boardRowTone}
+            onToggle={(id) => setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))}
+            onToggleAll={() =>
+              setSelectedIds((prev) => (prev.length === shownRows.length ? [] : shownRows.map((r) => r.id)))
+            }
+            onRowClick={(row) => setOpenDrawerId(row.id)}
+            onRowDoubleClick={(row) => navigate(`/tms/shipments/${row.id}`)}
+            empty="No shipments match."
+          />
+        )}
+      </div>
+
+      <BoardFooterBar
+        shown={shownRows.length}
+        total={filteredRows.length}
+        secondsToRefresh={secondsToRefresh}
+        autoRefresh={autoRefresh}
+        onToggleAutoRefresh={() => setAutoRefresh((a) => !a)}
+        pageSize={PAGE_SIZE_INCREMENT}
+        onNextPage={() => setPageSize((s) => normalizePageSize(s + PAGE_SIZE_INCREMENT))}
+        onRefresh={handleRefresh}
+        onExportCsv={exportCsv}
+        onShowMap={() => setMapVisible((m) => !m)}
+        onIconKey={() => setIconKeyOpen(true)}
+        onNewTab={() => window.open(window.location.href, '_blank')}
+        onBatchTask={() => setBatchOpen(true)}
+        onSplitScreen={onSplit}
+        mapVisible={mapVisible}
+        selectedCount={selectedIds.length}
+      />
 
       <IconKeyDialog
         open={iconKeyOpen}
@@ -992,12 +1068,10 @@ function BoardPane({
         open={columnsOpen}
         onOpenChange={setColumnsOpen}
         columns={columnKeys}
-        widths={columnWidths}
-        pinned={pinnedKeys}
+        widths={prefs.widths}
+        pinned={prefs.pinned}
         onApply={(next) => {
-          setColumnKeys(next.columns)
-          setColumnWidths(next.widths)
-          setPinnedKeys(next.pinned)
+          prefs.applyLayout({ columns: next.columns, widths: dragged(next.widths), pinned: next.pinned })
           setColumnTemplateId(null)
         }}
         onSaveTemplate={async (next) => {
@@ -1010,9 +1084,7 @@ function BoardPane({
               pinned: next.pinned,
               shared: next.shared,
             })
-            setColumnKeys(next.columns)
-            setColumnWidths(next.widths)
-            setPinnedKeys(next.pinned)
+            prefs.applyLayout({ columns: next.columns, widths: dragged(next.widths), pinned: next.pinned })
             toast.success('Template saved')
             refreshTemplates()
           } catch (err) {

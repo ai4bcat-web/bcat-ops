@@ -1,7 +1,7 @@
 /**
  * Quotes › Spot inbox. A rep's quote requests that arrived by e-mail, with the fields read
- * from each, a suggested rate, and a one-click Gmail draft. Nothing is sent from here by
- * default: the rep reviews the draft in Gmail and presses Send there.
+ * from each, a suggested rate and a suggested response. The mailbox is read-only: nothing
+ * is sent or drafted from here; the rep copies the response and sends it from Gmail.
  */
 import { useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
@@ -10,7 +10,7 @@ import { Settings } from 'lucide-react'
 import { TmsAlert, TmsBadge, TmsButton, TmsEmptyState, TmsPage, TmsSelect, TmsTable, TmsTabs, type ColumnDef } from '@/features/tms/kit'
 import { spotAction } from '@/lib/apiClient'
 import { SPOT_FIXTURES } from '@/lib/spot/fixtures'
-import { resolveRepSettings, resolveSpotSettings } from '@/lib/spot/settings'
+import { resolveSpotSettings } from '@/lib/spot/settings'
 import type { SpotRequestRow, SpotSuggestion } from '@/lib/spot/types'
 import { AddRequestDialog } from './AddRequestDialog'
 import { RepSettingsDrawer } from './RepSettingsDrawer'
@@ -25,7 +25,7 @@ import './spot.css'
 const messageOf = (err: unknown): string => (err instanceof Error ? err.message : String(err))
 
 const STATUS_TONE: Record<string, 'blue' | 'green' | 'orange' | 'gray' | 'red'> = {
-  NEW: 'blue', NEEDS_INFO: 'orange', DRAFTED: 'blue', AUTO_PENDING: 'orange', SENT: 'green', WON: 'green', LOST: 'red', DISMISSED: 'gray',
+  NEW: 'blue', NEEDS_INFO: 'orange', SENT: 'green', WON: 'green', LOST: 'red', DISMISSED: 'gray',
 }
 const MATCH_CHIP: Record<string, string> = { EMAIL: 'Known contact', DOMAIN: 'Domain match', AMBIGUOUS: 'Ambiguous', NONE: 'Unknown sender' }
 
@@ -98,7 +98,6 @@ export function SpotInboxPage() {
   }
 
   const org = resolveSpotSettings(status.settings)
-  const rep = resolveRepSettings(connection?.settings)
   const simulated = connection?.mode === 'SIMULATED'
   const notConfigured = status.gmailProvider.mode === 'STUB' && !connection
   const needsReconnect = connection?.status === 'NEEDS_RECONNECT'
@@ -177,9 +176,7 @@ export function SpotInboxPage() {
       <div className="tms-spot-strip">
         {connChip}
         {connection?.lastPollAt ? <span className="tms-muted">Checked {relativeTime(connection.lastPollAt)}</span> : null}
-        <TmsBadge tone={rep.autoSend ? 'orange' : 'gray'} data-testid="spot-autosend-chip">
-          {rep.autoSend ? `Auto-send ON · ${connection?.autoSendCount ?? 0} of ${org.autoSendDailyCapPerRep} today` : 'Auto-send OFF'}
-        </TmsBadge>
+        <TmsBadge tone="gray" data-testid="spot-readonly-chip">Read-only mailbox</TmsBadge>
         <span className="tms-spot-strip-spacer" />
         {simulated ? (
           <>
@@ -232,7 +229,7 @@ export function SpotInboxPage() {
       {!notConfigured && (!connection || connection.status === 'DISCONNECTED') ? (
         <div className="tms-spot-banner">
           <TmsAlert tone="blue" title="Connect your Gmail">
-            Your quote requests will appear here with a suggested rate, and replies are saved as drafts in your own Gmail.
+            Your quote requests will appear here with a suggested rate, and BCAT Ops only reads quote-request e-mails — it never sends or drafts mail. You copy the suggested response and send it yourself.
             <div className="tms-spot-banner-actions">
               <TmsButton variant="primary" data-testid="spot-connect" disabled={busy} onClick={() => void connectGmail()}>Connect Gmail</TmsButton>
             </div>

@@ -3,8 +3,7 @@
  *
  * This Lambda has no DAT client and no read on the lane-sample table, so the market answer
  * is the labelled stub (`stubRateView`, `stub:true`, "no DAT call was made") and the sample
- * list is empty: the result is a STUB-basis, floor-respecting price, never `GOOD`, never
- * auto-sendable. The rep's page replaces it with the live PRICE_FROM_MARKET + lane history
+ * list is empty: the result is a STUB-basis, floor-respecting price, never `GOOD`. The rep's page replaces it with the live PRICE_FROM_MARKET + lane history
  * numbers when it prices the quote. A request that cannot be priced (non-FTL, missing lane or
  * equipment) gets `null`: "manual — no suggestion".
  */

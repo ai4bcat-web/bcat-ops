@@ -9,7 +9,7 @@
  * Write surface (least privilege, mirrored by backend.ts IAM): GmailConnection,
  * SpotRequest, SpotSettings (RW); AuditLog (Put). Customer, Quote, TmsSettings,
  * Integration, UserProfile are read-only here — a Quote is only ever created by a rep's
- * browser or by the SPOT_AUTO_QUOTE door in tms-shipment-actions.
+ * browser (SAVE_QUOTE / SEND_QUOTE via COPY).
  *
  * Amplify `a.json()` columns are written as native maps/lists by every Lambda in this
  * repo; `jsonOf` tolerates the string form too.

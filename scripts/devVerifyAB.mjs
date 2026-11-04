@@ -14,7 +14,7 @@
  * Dev only: refuses any AppSync endpoint but the dev one, any staff pool but the dev pool, any origin outside
  * ALLOWED_ORIGINS and any DynamoDB table that does not carry the dev suffix (or that carries the production one).
  * The harness always uses the SIMULATED connection (plan 11; AB_USE_REAL_GMAIL is not honoured). It never sends
- * anything: sendCalls stays 0 and a refused SPOT_SEND_DRAFT is part of the proof.
+ * anything: the mailbox is READ-ONLY (Ryne, 2026-11-04), there is no send/draft action, and AB06 proves that.
  *
  * Everything it creates is named zz-ab-… / ZZ AB …, tracked, and removed in `finally`: shipments voided (the PRO stays
  * claimed by design), quotes cancelled, ZZ customers archived, CRM rows / the harness UserProfile deleted through
@@ -23,8 +23,7 @@
  *
  * Deviations from AB-plan §11 (recorded): AB10 visibility mints a second (rep) and a third (manager) temporary identity
  * instead of waiting for DEV_VERIFY_REP2_* credentials, so the SKIP for it is gone; the sim `sent/` prefix is not read
- * directly (no bucket handle here) — "nothing sent" is proven by the request never carrying sentAt/sentVia until the
- * rep's own SPOT_SIM_MARK_SENT.
+ * directly (no bucket handle here) — the request carries no sentAt/sentVia until the rep marks it with SPOT_MARK_SENT.
  */
 import { mkdir, writeFile, readFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
@@ -72,11 +71,11 @@ export const AB_STEPS = [
   { id: 'AB02', slug: 'inbox-detection', ui: false },
   { id: 'AB03', slug: 'matching', ui: false },
   { id: 'AB04', slug: 'suggestion', ui: false },
-  { id: 'AB05', slug: 'quote-and-draft', ui: false },
-  { id: 'AB06', slug: 'send-safety', ui: false },
+  { id: 'AB05', slug: 'quote-and-suggested-response', ui: false },
+  { id: 'AB06', slug: 'read-only-mailbox', ui: false },
   { id: 'AB07', slug: 'reply-and-acceptance', ui: false },
   { id: 'AB08', slug: 'convert-and-promotion', ui: false },
-  { id: 'AB09', slug: 'auto-send-gates', ui: false },
+  { id: 'AB09', slug: 'manual-marking', ui: false },
   { id: 'AB10', slug: 'crm', ui: false },
   { id: 'AB11', slug: 'ui', ui: true },
   { id: 'AB12', slug: 'retention-disconnect', ui: false },
@@ -439,43 +438,45 @@ async function ab05QuoteDraft(ctx) {
   await ctx.ship('SEND_QUOTE', { quoteId, via: 'COPY', message: 'ZZ AB verification', to: [ctx.f.prospectEmail] })
   const quote = (await getQuote(ctx, quoteId))
   expect(quote.status === 'QUOTED' && quote.linkToken, `quote ${quote.status}, link ${quote.linkToken ? 'present' : 'missing'}`)
-  const draft = await ctx.spot('SPOT_CREATE_DRAFT', { requestId: req.id, quoteId })
-  expect(draft.draftId, 'SPOT_CREATE_DRAFT returned no draftId')
-  const got = await fullRequest(ctx, req.id)
-  expect(got.request.status === 'DRAFTED' && got.request.draftId, `request is ${got.request.status}`)
-  expect(got.draft, 'the draft cannot be read back from the simulated mailbox')
+  const sug = await ctx.spot('SPOT_SUGGEST_RESPONSE', { requestId: req.id, quoteId })
+  expect(sug.hasLink === true && sug.rateCents > 0, `suggested response hasLink ${sug.hasLink}, rate ${sug.rateCents}`)
   const rate = (ctx.f.suggestedCents / 100).toFixed(0)
-  expect(got.draft.text.includes(rate) || got.draft.text.includes(Number(rate).toLocaleString('en-US')), 'the draft text does not carry the rate')
-  expect(/\/q\//.test(got.draft.text) || got.draft.text.includes(quote.linkToken), 'the draft text does not carry the quote link')
-  expect(!/IGNORE ALL PREVIOUS/i.test(got.draft.text), 'injected instruction text reached the draft')
-  expect(!got.request.sentAt && !got.request.sentVia, 'a draft run set sentAt/sentVia: something was sent')
-  ctx.f.draftId = got.request.draftId
-  return `${quoteId} QUOTED with spotRequestId, link present; one draft (${got.draft.text.length} chars) has rate + link and no injected text; request DRAFTED, nothing sent`
+  expect(sug.body.includes(rate) || sug.body.includes(Number(rate).toLocaleString('en-US')), 'the suggested response does not carry the rate')
+  expect(/\/quote\//.test(sug.body) || sug.body.includes(quote.linkToken), 'the suggested response does not carry the quote link')
+  expect(!/IGNORE ALL PREVIOUS/i.test(sug.body), 'injected instruction text reached the suggested response')
+  expect(/^https:\/\/mail\.google\.com\/mail\//.test(sug.gmailUrl) && sug.mailto.startsWith('mailto:'), 'the compose links are malformed')
+  const got = await fullRequest(ctx, req.id)
+  expect(got.request.status === 'NEW' && !got.request.sentAt && !got.request.sentVia, `request is ${got.request.status}: producing a suggestion must change nothing`)
+  expect(got.request.quoteId === quoteId, 'the quote was not linked to the request')
+  ctx.f.suggestion = sug
+  return `${quoteId} QUOTED with spotRequestId, link present; suggested response (${sug.body.length} chars) has rate + link and no injected text; compose links well-formed; request still NEW`
 }
 
 const getQuote = async (ctx, id) => getRow(ctx.token, 'Quote', id, 'id status linkToken spotRequestId customerId amountCents')
 
 async function ab06SendSafety(ctx) {
   const id = ctx.f.req.id
-  const a = await refused('SPOT_SEND_DRAFT without confirm', /confirm/i, () => ctx.spot('SPOT_SEND_DRAFT', { requestId: id }))
-  const b = await refused('SPOT_SEND_DRAFT with confirm on dev', /dev/i, () => ctx.spot('SPOT_SEND_DRAFT', { requestId: id, confirm: true }))
-  const still = (await fullRequest(ctx, id)).request
-  expect(!still.sentAt && still.status === 'DRAFTED', `after the refused sends the request is ${still.status} sentAt ${still.sentAt ?? '-'}`)
-  const other = await refused('SPOT_SEND_DRAFT by a non-owner', /owner|not allowed|forbidden|access|connect|not found/i, () => ctx.spotRep('SPOT_SEND_DRAFT', { requestId: id, confirm: true }))
-  await ctx.spot('SPOT_SIM_MARK_SENT', { draftId: ctx.f.draftId })
-  await poll(ctx)
-  const sent = (await fullRequest(ctx, id)).request
-  expect(sent.status === 'SENT' && sent.sentVia === 'REP_GMAIL', `after the rep's own send the request is ${sent.status}/${sent.sentVia}`)
+  for (const action of ['SPOT_CREATE_DRAFT', 'SPOT_SEND_DRAFT', 'SPOT_SIM_MARK_SENT']) {
+    await refused(`${action} (must not exist)`, /unknown action/i, () => ctx.spot(action, { requestId: id, confirm: true, draftId: 'x' }))
+  }
+  await ctx.spot('SPOT_LOG_COPIED', { requestId: id, quoteId: ctx.f.quoteId })
+  const after = (await fullRequest(ctx, id)).request
+  expect(after.status === 'NEW' && !after.sentAt && !after.sentVia, `logging a copy moved the request to ${after.status}`)
   const acct = await ctx.crm('CRM_GET_ACCOUNT', { customerId: ctx.f.prospect.id })
-  expect(acct.timeline.some((e) => e.kind === 'EMAIL_OUT'), 'no EMAIL_OUT activity after the rep sent the draft')
-  return `no-confirm refused (${a.slice(0, 40)}); dev refused (${b.slice(0, 40)}); non-owner refused; rep's own send detected → SENT/REP_GMAIL + EMAIL_OUT`
+  expect(acct.timeline.some((e) => e.kind === 'QUOTE_DRAFTED'), 'no activity row after SPOT_LOG_COPIED')
+  const quote = await getQuote(ctx, ctx.f.quoteId)
+  expect(quote.status === 'QUOTED', `the quote is ${quote.status} after a copy`)
+  await refused('SPOT_MARK_SENT by a non-owner', /owner|not allowed|forbidden|access|connect|not found/i, () => ctx.spotRep('SPOT_MARK_SENT', { requestId: id }))
+  const sent = (await ctx.spot('SPOT_MARK_SENT', { requestId: id })).request
+  expect(sent.status === 'SENT' && sent.sentAt && sent.sentVia === 'APP', `after the rep marks it sent the request is ${sent.status}/${sent.sentVia}`)
+  return `draft/send/sim-send actions do not exist; SPOT_LOG_COPIED logs an activity and leaves the request NEW and the quote QUOTED; SPOT_MARK_SENT is owner-only and sets SENT`
 }
 
 async function ab07Reply(ctx) {
   const before = (await listRequests(ctx)).length
   const req = (await fullRequest(ctx, ctx.f.req.id)).request
   if (!req.gmailThreadId) throw new SkipError('a manually pasted request has no Gmail thread to reply into')
-  await inject(ctx, { from: ctx.f.prospectEmail, subject: `Re: ${req.subject}`, body: 'Thanks, please book it.', threadId: req.gmailThreadId, inReplyTo: req.draftMessageId })
+  await inject(ctx, { from: ctx.f.prospectEmail, subject: `Re: ${req.subject}`, body: 'Thanks, please book it.', threadId: req.gmailThreadId })
   await poll(ctx)
   const rows = await listRequests(ctx)
   expect(rows.length === before, `the thread reply created a new request (${before} → ${rows.length})`)
@@ -503,47 +504,17 @@ async function ab08Convert(ctx) {
 }
 
 async function ab09AutoSend(ctx) {
-  const orig = ctx.status0.settings
-  const origRep = ctx.status0.connection?.settings ?? {}
-  ctx.restore.settings = { allowAutoSend: orig.allowAutoSend ?? false }
-  ctx.restore.rep = { autoSend: origRep.autoSend ?? false }
-  const active = await makeCustomer(ctx, 'Active Auto', { status: 'ACTIVE', accountOwnerIds: [ctx.userId], quoteAutoReply: true })
-  const email = nameEmail(ctx.ts, 'auto')
-  await ctx.crm('CRM_UPSERT_CONTACT', { customerId: active.id, email, name: 'ZZ AB Auto' })
-  ctx.contactEmails.add(email)
-  await ctx.spot('SPOT_SAVE_SETTINGS', { settings: { allowAutoSend: true } })
+  // Auto-send is gone: no switch is read or written, and a stored request is never answered by the platform.
+  const status = await ctx.spot('SPOT_STATUS', {})
+  expect(!('allowAutoSend' in resolveKeys(status.settings)) && !('autoSend' in (status.connection?.settings ?? {})), 'auto-send settings are still exposed')
   await ctx.spot('SPOT_SAVE_MY_SETTINGS', { settings: { autoSend: true } })
-  const newRequest = async (tag) => {
-    const subject = `ZZ AB auto ${tag} ${ctx.ts}`
-    await inject(ctx, { from: email, subject, body: requestBody(ctx, day(3)) })
-    await poll(ctx)
-    return requestBySubject(ctx, subject)
-  }
-  const first = await newRequest('base')
-  if (!first) throw new SkipError('no model: the auto-send request was not stored, so the gate decision could not be read')
-  ctx.requestIds.add(first.id)
-  const d = (await fullRequest(ctx, first.id)).request.autoDecision
-  expect(d, 'no autoDecision on a request from an exact contact of an ACTIVE customer with auto-send on')
-  expect(d.decision !== 'SENT', 'auto-send SENT on the dev stack')
-  expect(d.reasons.some((r) => r === 'PRICE_STUB' || r === 'DEV_STACK' || r === 'PRICE_THIN') || d.decision === 'DEV_SUPPRESSED', `unexpected reasons ${d.reasons.join(',')}`)
-  const flips = []
-  const flip = async (label, apply, code, revert) => {
-    await apply()
-    const row = await newRequest(label)
-    await revert()
-    if (!row) return
-    ctx.requestIds.add(row.id)
-    const dec = (await fullRequest(ctx, row.id)).request.autoDecision
-    if (dec) { expect(dec.decision !== 'SENT' && dec.reasons.includes(code), `gate ${code}: decision ${dec.decision} reasons ${dec.reasons.join(',')}`); flips.push(code) } else flips.push(`${code}(door not invoked)`)
-  }
-  // UPSERT_CUSTOMER on an existing row needs the updatedAt of the row as last read.
-  const setOptIn = async (value) => ctx.dir('UPSERT_CUSTOMER', { id: active.id, quoteAutoReply: value, name: active.name, expectedUpdatedAt: String((await getRow(ctx.token, 'Customer', active.id, 'updatedAt')).updatedAt) })
-  await flip('optout', () => setOptIn(false), 'CUSTOMER_OPT_OUT', () => setOptIn(true))
-  await flip('reptoff', () => ctx.spot('SPOT_SAVE_MY_SETTINGS', { settings: { autoSend: false } }), 'REP_OFF', () => ctx.spot('SPOT_SAVE_MY_SETTINGS', { settings: { autoSend: true } }))
-  await flip('orgoff', () => ctx.spot('SPOT_SAVE_SETTINGS', { settings: { allowAutoSend: false } }), 'ORG_OFF', () => ctx.spot('SPOT_SAVE_SETTINGS', { settings: { allowAutoSend: true } }))
+  const after = await ctx.spot('SPOT_STATUS', {})
+  expect(!('autoSend' in (after.connection?.settings ?? {})), 'a stale autoSend key was stored')
+  const rows = await listRequests(ctx)
+  expect(rows.every((r) => !r.autoDecision && r.sentVia !== 'AUTO' && r.status !== 'AUTO_PENDING'), 'a request carries an auto-send decision')
   const door = await ctx.ship('SAVE_QUOTE', {
-    customerId: active.id, mode: 'FTL', rateType: 'SPOT', equipmentType: 'Dry Van', commodity: 'ZZ door probe', miles: 925, weightLbs: 40000,
-    spotAutoQuote: { requestId: first.id, repId: ctx.userId, customerId: active.id, contactEmail: email, autoReplyAllowed: true },
+    customerId: ctx.f.prospect.id, mode: 'FTL', rateType: 'SPOT', equipmentType: 'Dry Van', commodity: 'ZZ door probe', miles: 925, weightLbs: 40000,
+    spotAutoQuote: { requestId: ctx.f.req.id, repId: ctx.userId, customerId: ctx.f.prospect.id, contactEmail: ctx.f.prospectEmail, autoReplyAllowed: true },
     stops: [
       { type: 'pickup', name: 'ZZ AB Shipper', city: 'Chicago, IL', address: { city: 'Chicago', state: 'IL', zip: '60601' }, appt: `${day(3)}T15:00:00.000Z` },
       { type: 'delivery', name: 'ZZ AB Receiver', city: 'Dallas, TX', address: { city: 'Dallas', state: 'TX', zip: '75201' }, appt: `${day(4)}T18:00:00.000Z` },
@@ -551,9 +522,16 @@ async function ab09AutoSend(ctx) {
     lines: [{ side: 'CUSTOMER', code: 'LINEHAUL', rateCents: 120000, count: 1 }],
   })
   if (door.quote?.id) ctx.quoteIds.add(String(door.quote.id))
-  expect(door.ok === undefined && door.quote?.status === 'DRAFT', 'an AppSync-shaped spotAutoQuote payload was routed to the door')
-  return `base decision ${d.decision} [${d.reasons.join(',')}] never SENT; gates ${flips.join(', ')}; AppSync-shaped door payload ran the normal DRAFT path`
+  expect(door.ok === undefined && door.quote?.status === 'DRAFT', 'an AppSync-shaped spotAutoQuote payload did something other than the normal DRAFT path')
+  // Rep marks Lost by hand (no quote needed), on a throwaway paste so the main request is untouched.
+  const lostReq = (await ctx.spot('SPOT_ADD_MANUAL', { text: requestBody(ctx, day(5)), subject: `ZZ AB lost ${ctx.ts}`, fromEmail: ctx.f.prospectEmail, fromName: 'ZZ AB Buyer' }).catch(() => ctx.spot('SPOT_ADD_MANUAL', { text: requestBody(ctx, day(5)), subject: `ZZ AB lost ${ctx.ts}`, fromEmail: ctx.f.prospectEmail, fromName: 'ZZ AB Buyer', devExtraction: DEV_EXTRACTION(day(5)) }))).request
+  ctx.requestIds.add(lostReq.id)
+  const lost = (await ctx.spot('SPOT_MARK_OUTCOME', { requestId: lostReq.id, outcome: 'LOST', lostReason: 'ZZ price' })).request
+  expect(lost.status === 'LOST', `SPOT_MARK_OUTCOME LOST → ${lost.status}`)
+  return 'no auto-send setting exposed or stored; no request carries an auto decision; an AppSync-shaped door payload ran the normal DRAFT path; the rep can mark a request Lost by hand'
 }
+
+const resolveKeys = (o) => o ?? {}
 
 async function ab10Crm(ctx) {
   const cid = ctx.f.prospect.id
@@ -716,8 +694,6 @@ async function ab13Cleanup(ctx) {
   const say = (msg, ok) => { line(ok ? 'PASS' : 'FAIL', 'AB13-cleanup', msg); return ok }
   const attempt = async (label, fn) => { try { return await fn() } catch (err) { allOk = say(`${label} failed: ${short(err).slice(0, 120)}`, false) && allOk; return null } }
 
-  if (ctx.restore.settings) await attempt('restore org settings', () => ctx.spot('SPOT_SAVE_SETTINGS', { settings: ctx.restore.settings }))
-  if (ctx.restore.rep && ctx.connected) await attempt('restore rep settings', () => ctx.spot('SPOT_SAVE_MY_SETTINGS', { settings: ctx.restore.rep }))
   await attempt('purge my spot requests', () => ctx.spot('SPOT_PURGE_MINE', {}))
   if (ctx.connected) await attempt('disconnect simulated', () => ctx.spot('SPOT_DISCONNECT', { purge: true }))
   await attempt('purge sim inbox', () => ctx.spot('SPOT_SIM_PURGE_TEST', {}))

@@ -4726,9 +4726,10 @@ const schema = a.schema({
   // SPOT_OAUTH_FINISH, SPOT_CONNECT_SIMULATED, SPOT_DISCONNECT, SPOT_SET_PAUSED,
   // SPOT_PURGE_MINE, SPOT_SAVE_MY_SETTINGS, SPOT_POLL_NOW, SPOT_LIST_REQUESTS,
   // SPOT_GET_REQUEST, SPOT_COUNT, SPOT_ADD_MANUAL, SPOT_UPDATE_FIELDS, SPOT_SET_CUSTOMER,
-  // SPOT_CREATE_DRAFT, SPOT_SEND_DRAFT, SPOT_DISMISS, SPOT_MARK_OUTCOME,
+  // SPOT_SUGGEST_RESPONSE, SPOT_LOG_COPIED, SPOT_MARK_SENT, SPOT_DISMISS, SPOT_MARK_OUTCOME,
   // SPOT_SAVE_SETTINGS, SPOT_ADMIN_DISCONNECT and the dev-only SPOT_SIM_*. The same
-  // Lambda answers the five-minute poll rule. A reply is a DRAFT in the rep's Gmail.
+  // Lambda answers the five-minute poll rule. The mailbox is READ-ONLY: a reply is a
+  // suggested text the rep copies; nothing is drafted or sent.
   tmsSpotActions: a
     .mutation()
     .arguments({ action: a.string().required(), input: a.json() })

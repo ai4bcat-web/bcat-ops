@@ -1,0 +1,543 @@
+/*
+ * The dense list pages (Shipments Active / All / Intake, Load Tracking): a full-bleed page, a
+ * one-line header bar and a spreadsheet grid. Tokens come from theme.css; no colour literals.
+ */
+
+/* ── Page frame: no gutters, no card padding ──────────────────────────────── */
+
+.tms-shell .tms-dense-page {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  background: var(--tms-card);
+  border-top: 1px solid var(--tms-border);
+  font-size: 13px;
+}
+
+.tms-shell .tms-dense-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--tms-border);
+  background: var(--tms-card);
+}
+
+.tms-shell .tms-dense-bar .tms-dense-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.tms-shell .tms-dense-bar .tms-dense-spacer {
+  flex: 1 1 auto;
+}
+
+.tms-shell .tms-dense-bar .tms-input {
+  height: 28px;
+  min-height: 28px;
+  padding-top: 0;
+  padding-bottom: 0;
+  font-size: 12px;
+}
+
+.tms-shell .tms-dense-bar .tms-btn-sm {
+  height: 28px;
+}
+
+.tms-shell .tms-dense-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+}
+
+/* ── Density toggle + KPI strip ───────────────────────────────────────────── */
+
+.tms-shell .tms-dg-density {
+  display: inline-flex;
+  border: 1px solid var(--tms-border);
+  border-radius: var(--tms-radius-pill, 999px);
+  overflow: hidden;
+}
+
+.tms-shell .tms-dg-density-btn {
+  height: 26px;
+  padding: 0 10px;
+  border: 0;
+  background: transparent;
+  color: var(--tms-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.tms-shell .tms-dg-density-btn.tms-active {
+  background: var(--tms-surface-selected);
+  color: var(--tms-text);
+  font-weight: 600;
+}
+
+.tms-shell .tms-dg-kpis {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 20px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--tms-border);
+  background: var(--tms-surface-subtle);
+}
+
+.tms-shell .tms-dg-kpi {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.tms-shell .tms-dg-kpi-value {
+  font-size: 15px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.tms-shell .tms-dg-kpi-label {
+  font-size: 11px;
+  color: var(--tms-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.tms-shell .tms-dg-kpi-warn .tms-dg-kpi-value { color: var(--tms-badge-orange); }
+.tms-shell .tms-dg-kpi-bad .tms-dg-kpi-value { color: var(--tms-badge-red); }
+.tms-shell .tms-dg-kpi-good .tms-dg-kpi-value { color: var(--tms-badge-green); }
+
+/* ── The grid ─────────────────────────────────────────────────────────────── */
+
+.tms-shell .tms-dg {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  font-size: 12px;
+}
+
+.tms-shell .tms-dg[data-density='comfortable'] {
+  font-size: 13px;
+}
+
+.tms-shell .tms-dg-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.tms-shell .tms-dg-table {
+  table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.tms-shell .tms-dg-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  height: 30px;
+  padding: 0 6px;
+  background: var(--tms-surface-subtle);
+  color: var(--tms-muted);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  text-align: left;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--tms-border);
+  border-right: 1px solid var(--tms-border);
+}
+
+.tms-shell .tms-dg-table thead th.tms-dg-sticky {
+  z-index: 5;
+}
+
+.tms-shell .tms-dg-table thead th.tms-dg-drop {
+  box-shadow: inset 2px 0 0 0 var(--tms-primary);
+}
+
+.tms-shell .tms-dg-th {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  height: 100%;
+}
+
+.tms-shell .tms-dg-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  flex: 1 1 auto;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-transform: inherit;
+  letter-spacing: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.tms-shell .tms-dg-sort:hover {
+  color: var(--tms-text);
+}
+
+.tms-shell .tms-dg-th-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 0 1 auto;
+}
+
+.tms-shell .tms-dg-th > .tms-dg-th-label {
+  flex: 1 1 auto;
+}
+
+.tms-shell .tms-dg-filter-btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: none;
+  color: var(--tms-muted);
+  opacity: 0.55;
+  cursor: pointer;
+}
+
+.tms-shell .tms-dg-filter-btn:hover,
+.tms-shell .tms-dg-filter-btn.tms-active {
+  opacity: 1;
+  color: var(--tms-primary-ink);
+}
+
+.tms-shell .tms-dg-filter-btn.tms-active {
+  background: var(--tms-surface-selected);
+}
+
+.tms-shell .tms-dg-resize {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  bottom: 0;
+  z-index: 2;
+  width: 7px;
+  cursor: col-resize;
+}
+
+.tms-shell .tms-dg-resize:hover {
+  background: color-mix(in srgb, var(--tms-primary) 35%, transparent);
+}
+
+.tms-shell .tms-dg-table tbody tr {
+  height: var(--dg-row-h);
+  --tms-row-bg: var(--tms-row-open);
+  --tms-row-fg: var(--tms-row-open-text);
+}
+
+.tms-shell .tms-dg-table tbody tr.tms-dg-spacer {
+  height: auto;
+}
+
+.tms-shell .tms-dg-table tbody tr.tms-dg-spacer td {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.tms-shell .tms-dg-table tbody tr[data-tone='delivered'] { --tms-row-bg: var(--tms-row-delivered); --tms-row-fg: var(--tms-row-delivered-text); }
+.tms-shell .tms-dg-table tbody tr[data-tone='dispatched'] { --tms-row-bg: var(--tms-row-dispatched); --tms-row-fg: var(--tms-row-dispatched-text); }
+.tms-shell .tms-dg-table tbody tr[data-tone='departed'] { --tms-row-bg: var(--tms-row-departed); --tms-row-fg: var(--tms-row-departed-text); }
+.tms-shell .tms-dg-table tbody tr[data-tone='arrived'] { --tms-row-bg: var(--tms-row-arrived); --tms-row-fg: var(--tms-row-arrived-text); }
+.tms-shell .tms-dg-table tbody tr[data-tone='covered'] { --tms-row-bg: var(--tms-row-covered); --tms-row-fg: var(--tms-row-covered-text); }
+.tms-shell .tms-dg-table tbody tr[data-tone='hold'] { --tms-row-bg: var(--tms-row-hold); --tms-row-fg: var(--tms-row-hold-text); }
+.tms-shell .tms-dg-table tbody tr[data-tone='reserved'] { --tms-row-bg: var(--tms-row-reserved); --tms-row-fg: var(--tms-row-reserved-text); }
+.tms-shell .tms-dg-table tbody tr[data-tone='voided'],
+.tms-shell .tms-dg-table tbody tr[data-tone='canceled'] { --tms-row-bg: var(--tms-row-voided); --tms-row-fg: var(--tms-row-voided-text); }
+
+.tms-shell .tms-dg-table tbody tr:not(.tms-dg-group):not(.tms-dg-spacer) td {
+  height: var(--dg-row-h);
+  max-height: var(--dg-row-h);
+  padding: 0 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: var(--tms-row-bg);
+  color: var(--tms-row-fg);
+  border-bottom: 1px solid var(--tms-border);
+  border-right: 1px solid color-mix(in srgb, var(--tms-border) 55%, transparent);
+  line-height: 1.2;
+}
+
+/* Cell content never wraps: badges and stacked lines collapse onto one line. */
+.tms-shell .tms-dg-table tbody td > * {
+  max-width: 100%;
+}
+
+.tms-shell .tms-dg-table tbody td > div {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.tms-shell .tms-dg-table tbody td > div > * {
+  flex: 0 0 auto;
+}
+
+.tms-shell .tms-dg-table tbody td > div > :first-child {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tms-shell .tms-dg-table td.tms-dg-right {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.tms-shell .tms-dg-table td.tms-dg-sticky,
+.tms-shell .tms-dg-table th.tms-dg-sticky {
+  position: sticky;
+}
+
+.tms-shell .tms-dg-table td.tms-dg-sticky {
+  z-index: 2;
+}
+
+.tms-shell .tms-dg-table .tms-dg-sticky-last {
+  box-shadow: 1px 0 0 0 var(--tms-border), 4px 0 6px -4px color-mix(in srgb, var(--tms-text) 25%, transparent);
+}
+
+.tms-shell .tms-dg-table .tms-dg-check {
+  width: 30px;
+  min-width: 30px;
+  padding: 0;
+  text-align: center;
+}
+
+.tms-shell .tms-dg-table .tms-dg-check input {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--tms-primary);
+  cursor: pointer;
+}
+
+.tms-shell .tms-dg-table tbody tr.tms-dg-clickable { cursor: pointer; }
+.tms-shell .tms-dg-table tbody tr:hover td { box-shadow: inset 0 0 0 9999px color-mix(in srgb, var(--tms-text) 6%, transparent); }
+.tms-shell .tms-dg-table tbody tr[data-selected='true'] td { box-shadow: inset 0 0 0 9999px var(--tms-surface-selected); }
+.tms-shell .tms-dg-table tbody tr[data-tone='voided'] td,
+.tms-shell .tms-dg-table tbody tr[data-tone='canceled'] td { text-decoration: line-through; }
+
+.tms-shell .tms-dg-table tbody tr.tms-dg-group td {
+  height: var(--dg-row-h);
+  padding: 0 8px;
+  background: var(--tms-surface-subtle);
+  border-bottom: 1px solid var(--tms-border);
+}
+
+.tms-shell .tms-dg-group-head {
+  position: sticky;
+  left: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--dg-row-h);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.tms-shell .tms-dg-empty {
+  padding: 24px 16px;
+  color: var(--tms-muted);
+  text-align: center;
+}
+
+/* ── Header filter popover ────────────────────────────────────────────────── */
+
+.tms-shell .tms-dg-popover {
+  position: fixed;
+  z-index: 60;
+  width: 280px;
+  max-height: 60vh;
+  overflow: auto;
+  padding: 10px;
+  background: var(--tms-card);
+  border: 1px solid var(--tms-border);
+  border-radius: var(--tms-radius-card);
+  box-shadow: var(--tms-shadow);
+  font-size: 13px;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.tms-shell .tms-dg-filter {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tms-shell .tms-dg-filter-input {
+  width: 100%;
+}
+
+.tms-shell .tms-dg-filter-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 260px;
+  overflow: auto;
+}
+
+.tms-shell .tms-dg-filter-count {
+  margin-left: 6px;
+  color: var(--tms-muted);
+  font-size: 11px;
+}
+
+.tms-shell .tms-dg-filter-range {
+  display: flex;
+  gap: 8px;
+}
+
+.tms-shell .tms-dg-filter-range label {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+  color: var(--tms-muted);
+}
+
+.tms-shell .tms-dg-filter-clear {
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--tms-primary-ink);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+/* ── Column chooser ───────────────────────────────────────────────────────── */
+
+.tms-shell .tms-dg-chooser {
+  position: relative;
+}
+
+.tms-shell .tms-dg-chooser-pop {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 60;
+  width: 260px;
+  max-height: 60vh;
+  overflow: auto;
+  padding: 8px;
+  background: var(--tms-card);
+  border: 1px solid var(--tms-border);
+  border-radius: var(--tms-radius-card);
+  box-shadow: var(--tms-shadow);
+}
+
+.tms-shell .tms-dg-chooser-pop ul {
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+}
+
+.tms-shell .tms-dg-chooser-pop li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 0;
+}
+
+.tms-shell .tms-dg-chooser-pop label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.tms-shell .tms-dg-chooser-move button {
+  width: 20px;
+  height: 20px;
+  border: 0;
+  background: none;
+  color: var(--tms-muted);
+  cursor: pointer;
+}
+
+/* ── Footer ───────────────────────────────────────────────────────────────── */
+
+.tms-shell .tms-dense-foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 10px;
+  border-top: 1px solid var(--tms-border);
+  background: var(--tms-card);
+  font-size: 12px;
+  color: var(--tms-muted);
+}
+
+/* A fixed (icon / action) cell lets its popup menu out; the menu itself is position: fixed. */
+.tms-shell .tms-dg-table tbody tr:not(.tms-dg-group):not(.tms-dg-spacer) td.tms-dg-fixed {
+  overflow: visible;
+  text-align: center;
+}
+
+.tms-shell .tms-dense-group-by {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--tms-muted);
+}
+
+.tms-shell .tms-tracking-recent-row {
+  padding: 3px 10px;
+  border-bottom: 1px solid var(--tms-border);
+}
+
+.tms-shell .tms-dense-bar .tms-input.tms-dense-search { width: 220px; flex: 0 0 auto; }
+.tms-shell .tms-dense-bar .tms-select.tms-dense-select { width: 150px; height: 28px; min-height: 28px; padding-top: 0; padding-bottom: 0; font-size: 12px; }
+.tms-shell .tms-dense-group-by { white-space: nowrap; }
+.tms-shell .tms-dense-bar .tms-seg { flex: 0 0 auto; }
+
+/* A cell is one line in any density: stacked layouts from the old table collapse into a row. */
+.tms-shell .tms-dg-table tbody td > div,
+.tms-shell .tms-dg-table tbody td > div > div {
+  flex-direction: row !important;
+  align-items: center !important;
+  flex-wrap: nowrap !important;
+  white-space: nowrap;
+}
+.tms-shell .tms-dg-table tbody td * { white-space: nowrap; }
+.tms-shell .tms-dg-table tbody td .tms-badge { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }

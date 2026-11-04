@@ -17,7 +17,9 @@ export interface BoardFooterBarProps {
   secondsToRefresh: number
   autoRefresh: boolean
   onToggleAutoRefresh: () => void
-  onNext50: () => void
+  /** Rows one "Get next" adds. */
+  pageSize: number
+  onNextPage: () => void
   onRefresh: () => void
   onExportCsv: () => void
   onShowMap: () => void
@@ -40,7 +42,8 @@ export function BoardFooterBar({
   secondsToRefresh,
   autoRefresh,
   onToggleAutoRefresh,
-  onNext50,
+  pageSize,
+  onNextPage,
   onRefresh,
   onExportCsv,
   onShowMap,
@@ -71,9 +74,9 @@ export function BoardFooterBar({
         </button>
       </span>
 
-      <TmsButton size="sm" variant="secondary" onClick={onNext50}>
+      <TmsButton size="sm" variant="secondary" onClick={onNextPage}>
         <ChevronRight size={14} />
-        Get next 50
+        Get next {pageSize}
       </TmsButton>
 
       <TmsButton size="sm" variant="secondary" onClick={onRefresh}>

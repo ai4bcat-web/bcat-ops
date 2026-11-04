@@ -1,5 +1,17 @@
 # TMS build log
 
+## 2026-11-04 - Step AC: dense spreadsheet grid for Load Tracking and the Shipments lists (dev branch, UI only, not deployed)
+
+- **One shared grid** `src/features/tms/grid/` (`DenseGrid`, `denseGridModel`, `useDenseGridPrefs`, `DenseControls`, `DenseFilterPopover`) now draws Load Tracking and Shipments Active / All / Intake. The old `BoardGrid`, `BoardFilterPanel` and `useBoardFilters` are deleted (side filter panel gone everywhere).
+- **Grid**: per-column header filters (type-ahead text, multi-select that is the R2 `BoardTagPicker` once a facet has more than 12 values, Chicago-day date range, numeric range), click-to-sort on every column, sticky header and sticky first column (PRO / Shipment #), drag-reorder, drag-resize, auto-fit widths with per-column min/max, 30px compact / 40px comfortable fixed rows (12/13px), truncate with tooltip, 100 rows a page, virtualised (only the rows in view mount: 31 of 100 at 1440x900 on dev data).
+- **Persisted per user** (localStorage `tms:grid:<grid>:<email>`): columns, order, widths, pins, density, sort, group-by, summary open. Shipments still use the R2 Columns dialog and server column templates, which now write into the same layout. Summary/KPI strip is collapsed by default.
+- **Load Tracking**: side panel removed; Group by control (Assignee default; Status, Customer, Carrier, POD, None) draws group header rows inside the one virtualised table; My loads / All / Unassigned quick tabs (other people via the Tracker header filter); rate-con toggle, favourites, lifecycle tabs, map view, row menu and bulk reassign kept.
+- **Shipments**: Status / Customer / Carrier / ... facets are header multi-selects (VOIDED in the Status header still widens the read exactly as before; no new whole-table reads); the old Flags are three toggle buttons (Check call overdue, Open exceptions, Missing documents). Detail facets without a column are reached by adding that column and filtering it.
+- **Shell**: `TmsShell dense` (set by `TmsLayout` for /tms/shipments, /tms/shipments/intake, /tms/tracking) shows the sidebar as an icon rail that opens on hover, focus or click without touching the saved collapse preference; the page runs full bleed.
+- **Default columns that fit without horizontal scroll** (dev data, measured): Load Tracking 8 of 13 at 1440, 11 of 13 at 1920; Shipments (28-column Aljex default) 9 at 1440, 11 at 1920; Intake 7 of 8 at 1440, 8 of 8 at 1920.
+- **Screenshots** `Docs/tms-build/screenshots/ac/` (1440 and 1920): produced by a local `vite` with the production `amplify_outputs.json` aliased to the DEV stack, headless Chrome as a temporary dev admin (`scripts/devShotsAC.mjs`, identity deleted afterwards); staff-name columns blurred. The deployed dev app shows the old UI until the lead deploys.
+- Tests: new `denseGridModel`/`DenseGrid` suites, shell rail and layout tests, Shipments/Tracking/Intake tests updated (status/customer facets via header filters, 100-row pages, `Get next 100`, group headers). Targeted vitest (shipments + tms: 799 passing), tsc app, eslint clean.
+
 ## 2026-11-04 - Prod -> dev refresh and PRO dedupe (end of sequence, dev only)
 
 - `refreshDevFromProd --apply`: 43 on-demand backups (`prerefresh-2026-11-04T12-22-26-506Z-<Model>`, AVAILABLE), copy-data 49 tables / 9,963 rows / 0 failed, copy-files done. Production read only.

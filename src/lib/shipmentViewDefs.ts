@@ -531,7 +531,7 @@ export const RETIRED_SEED_VIEWS = ['dispatch', 'tracking', 'pod-collection', 'ac
 
 /**
  * Step P2. The two placeholders a shared queue view carries on the
- * `dispatcherAssigned` facet. `useBoardFilters` swaps them for the signed-in
+ * `dispatcherAssigned` facet. the board swaps them for the signed-in
  * user's Cognito username and their team's reps before the facet is applied; a
  * view that still carries one after resolution matches nothing, which is the
  * honest answer for a user who is on no team.
@@ -552,7 +552,7 @@ export const SEED_VIEWS: ShipmentViewSeed[] = [
     { columns: ALJEX_COLUMN_KEYS, isDefault: true }),
   // Step P2. The queue IS the board: a rep's work is a filter set on
   // `dispatcherAssigned`, not a second list that can disagree with the board.
-  // `@me` and `@myteam` are resolved to the signed-in user by `useBoardFilters`
+  // `@me` and `@myteam` are resolved to the signed-in user by the board
   // — a seeded view is one row for everybody, so the sentinel is the only way a
   // shared view can mean "mine" without minting a view per rep.
   seed('my-queue', 'My queue', 'Shipments',

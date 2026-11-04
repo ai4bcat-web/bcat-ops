@@ -199,8 +199,16 @@ function renderBoard(path = '/tms/shipments', initialShipments: ShipmentRow[] = 
   )
 }
 
+/** Opens a column's header filter and ticks one option of its multi-select. */
+function pickFacet(header: string, option: string) {
+  const trigger = screen.getByRole('button', { name: `Filter ${header}` })
+  if (trigger.getAttribute('aria-expanded') !== 'true') fireEvent.click(trigger)
+  fireEvent.click(screen.getByRole('checkbox', { name: `${header}: ${option}` }))
+}
+
 describe('ShipmentsBoard', () => {
   beforeEach(() => {
+    localStorage.clear()
     vi.clearAllMocks()
     __views.length = 0
     auth.isAdmin = true
@@ -214,7 +222,7 @@ describe('ShipmentsBoard', () => {
     const windows = () => __views.filter((v) => (v as { kind: string }).kind === 'window') as Array<{ months: string[]; includeVoided?: boolean }>
     expect(windows().every((w) => w.months.length === 0)).toBe(true)
 
-    fireEvent.click(screen.getByRole('checkbox', { name: /Voided/i }))
+    pickFacet('Status', 'Voided')
     await waitFor(() => expect(windows().some((w) => w.months.length > 0 && w.includeVoided === true)).toBe(true))
   })
 
@@ -226,7 +234,7 @@ describe('ShipmentsBoard', () => {
     expect(asked.every((w) => w.months!.length === 1 && !w.includeVoided)).toBe(true)
   })
 
-  it('filters rows when a status is checked and keeps counts from the unfiltered set', async () => {
+  it('narrows rows by the Status header filter and keeps its option counts from the unfiltered list', async () => {
     const shipments = [
       row('S001', { status: 'OPEN' }),
       row('S002', { status: 'DELIVERED' }),
@@ -235,53 +243,40 @@ describe('ShipmentsBoard', () => {
     renderBoard('/tms/shipments', shipments)
     await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
 
-    // Ticking Open narrows to the open row; the counts keep coming from the unfiltered set.
-    expect(screen.getByRole('checkbox', { name: /Open\s+1/i })).not.toBeChecked()
-    fireEvent.click(screen.getByRole('checkbox', { name: /Open\s+1/i }))
+    // Ticking Open narrows to the open row; the option counts keep coming from the unfiltered list.
+    fireEvent.click(screen.getByRole('button', { name: 'Filter Status' }))
+    expect(screen.getByRole('checkbox', { name: 'Status: Open' })).not.toBeChecked()
+    pickFacet('Status', 'Open')
 
     await waitFor(() => expect(screen.queryByText('S002')).toBeNull())
     expect(screen.queryByText('S003')).toBeNull()
     expect(screen.getByText('S001')).toBeTruthy()
 
-    expect(screen.getByRole('checkbox', { name: /Delivered\s+2/i })).toBeTruthy()
-    expect(screen.getByRole('checkbox', { name: /Open\s+1/i })).toBeChecked()
+    expect(screen.getByRole('checkbox', { name: 'Status: Delivered' }).closest('label')).toHaveTextContent('Delivered2')
+    expect(screen.getByRole('checkbox', { name: 'Status: Open' })).toBeChecked()
   })
 
-  it('Exclude toggle inverts one facet only', async () => {
+  it('Exclude inverts one header filter only', async () => {
     const shipments = [
-      row('S001', { status: 'OPEN', customerId: 'cust-1' }),
-      row('S002', { status: 'OPEN', customerId: 'cust-2' }),
-      row('S003', { status: 'DELIVERED', customerId: 'cust-1' }),
+      row('S001', { status: 'OPEN', customerName: 'Acme Freight' }),
+      row('S002', { status: 'OPEN', customerName: 'Globex' }),
+      row('S003', { status: 'DELIVERED', customerName: 'Acme Freight' }),
     ]
     renderBoard('/tms/shipments', shipments)
     await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
 
-    // Pick Acme Freight in the Customer facet type-ahead.
-    const customerInput = screen.getByRole('combobox', { name: /Customer/i })
-    fireEvent.change(customerInput, { target: { value: 'Acme' } })
-
-    const customerOptions = await screen.findByRole('listbox', { name: /Customer options/i })
-    fireEvent.click(within(customerOptions).getByText('Acme Freight'))
-
-    await waitFor(() => expect(screen.getByRole('button', { name: /Remove Acme Freight/i })).toBeTruthy())
+    pickFacet('Customer', 'Acme Freight')
+    await waitFor(() => expect(screen.queryByText('S002')).toBeNull())
     expect(screen.getByText('S001')).toBeTruthy()
     expect(screen.getByText('S003')).toBeTruthy()
-    expect(screen.queryByText('S002')).toBeNull()
 
-    // Flip Exclude for Customer only.
-    const customerFacet = customerInput.closest('.tms-board-detail-row') as HTMLElement
-    const excludeCheckbox = within(customerFacet).getByRole('checkbox', { name: /Exclude/i })
-    fireEvent.click(excludeCheckbox)
-
+    // Flip Exclude for the Customer filter only.
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Customer filter' })).getByRole('checkbox', { name: 'Exclude' }))
     await waitFor(() => {
       expect(screen.queryByText('S001')).toBeNull()
       expect(screen.queryByText('S003')).toBeNull()
     })
     expect(screen.getByText('S002')).toBeTruthy()
-
-    // Other facets (statuses) stay untouched.
-    expect(screen.getByRole('checkbox', { name: /Open\s+2/i })).not.toBeChecked()
-    expect(screen.getByRole('checkbox', { name: /Delivered\s+1/i })).not.toBeChecked()
   })
 
   it('gives a row the tone its status implies and voided rows are struck through', async () => {
@@ -292,9 +287,8 @@ describe('ShipmentsBoard', () => {
     const deliveredRowEl = screen.getByText('S001').closest('tr')!
     expect(deliveredRowEl).toHaveAttribute('data-tone', 'delivered')
 
-    // Show the voided row by selecting VOIDED.
-    const voidedCheckbox = screen.getByRole('checkbox', { name: /Voided/i })
-    fireEvent.click(voidedCheckbox)
+    // Show the voided row by asking the Status header for VOIDED.
+    pickFacet('Status', 'Voided')
     await waitFor(() => expect(screen.getByText('S002')).toBeTruthy())
 
     const voidedRowEl = screen.getByText('S002').closest('tr')!
@@ -324,15 +318,19 @@ describe('ShipmentsBoard', () => {
     expect(within(row4).getByText('Already released to accounting')).toBeTruthy()
   })
 
-  it('Get next 50 shows more rows', async () => {
-    const shipments = Array.from({ length: 75 }, (_, i) => row(`S${String(i).padStart(3, '0')}`, { status: 'OPEN' }))
+  it('lists 100 rows a page, mounts only the rows in view, and Get next 100 adds the rest', async () => {
+    const shipments = Array.from({ length: 250 }, (_, i) => row(`S${String(i).padStart(3, '0')}`, { status: 'OPEN' }))
     renderBoard('/tms/shipments', shipments)
     await waitFor(() => expect(screen.getByText('S000')).toBeTruthy())
 
-    expect(screen.getByText((_, node) => node?.textContent === 'Records shown 50 of 75')).toBeTruthy()
+    expect(screen.getByText((_, node) => node?.textContent === 'Records shown 100 of 250')).toBeTruthy()
+    // Virtualised: the page holds 100 rows but the DOM holds far fewer.
+    const mounted = document.querySelectorAll('tbody tr:not(.tms-dg-spacer)').length
+    expect(mounted).toBeGreaterThan(0)
+    expect(mounted).toBeLessThan(60)
 
-    fireEvent.click(screen.getByRole('button', { name: /Get next 50/i }))
-    await waitFor(() => expect(screen.getByText((_, node) => node?.textContent === 'Records shown 75 of 75')).toBeTruthy())
+    fireEvent.click(screen.getByRole('button', { name: /Get next 100/i }))
+    await waitFor(() => expect(screen.getByText((_, node) => node?.textContent === 'Records shown 200 of 250')).toBeTruthy())
   })
 
   it('Export to CSV writes the visible columns', async () => {
@@ -464,8 +462,7 @@ describe('ShipmentsBoard', () => {
     renderBoard('/tms/shipments', shipments)
 
     // Make voided rows visible by selecting VOIDED.
-    const voidedCheckbox = screen.getByRole('checkbox', { name: /Voided/i })
-    fireEvent.click(voidedCheckbox)
+    pickFacet('Status', 'Voided')
     await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
 
     fireEvent.pointerDown(screen.getByLabelText('Shipment actions'), { button: 0, pointerType: 'mouse' })
@@ -546,8 +543,7 @@ describe('ShipmentsBoard', () => {
     const shipments = [row('S001', { status: 'CANCELED', voidedAt: '2026-02-01T00:00:00.000Z', voidedBy: 'admin', voidReason: 'test' })]
     renderBoard('/tms/shipments', shipments)
 
-    const voidedCheckbox = screen.getByRole('checkbox', { name: /Voided/i })
-    fireEvent.click(voidedCheckbox)
+    pickFacet('Status', 'Voided')
     await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
 
     fireEvent.pointerDown(screen.getByLabelText('Shipment actions'), { button: 0, pointerType: 'mouse' })
@@ -624,7 +620,7 @@ describe('ShipmentsBoard', () => {
     expect(within(row4).getByTitle('Customer not linked')).toBeTruthy()
   })
 
-  it('narrows rows when a tracking/paperwork flag is checked', async () => {
+  it('narrows rows when a needs-attention toggle is pressed', async () => {
     const shipments = [
       deliveredRow('S001', { docsMissing: ['POD'] }),
       deliveredRow('S002', { docsMissing: [] }),
@@ -632,7 +628,7 @@ describe('ShipmentsBoard', () => {
     renderBoard('/tms/shipments', shipments)
     await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
 
-    fireEvent.click(screen.getByRole('checkbox', { name: /Missing documents/i }))
+    fireEvent.click(screen.getByRole('button', { name: 'Missing documents' }))
 
     await waitFor(() => {
       expect(screen.getByText('S001')).toBeTruthy()
@@ -788,26 +784,81 @@ describe('ShipmentsBoard', () => {
     expect(screen.queryByText(/My queue|Team queue/i)).toBeNull()
   })
 
-  it('starts every list with no status ticked and Reset filters returns there', async () => {
+  it('starts every list unfiltered and Clear filters returns there', async () => {
     renderBoard('/tms/shipments', [row('S001'), deliveredRow('S002')])
     await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
-    const open = screen.getByRole('checkbox', { name: /Open\s+1/i })
-    expect(open).not.toBeChecked()
-    fireEvent.click(open)
+    expect(screen.queryByRole('button', { name: /Clear \d+ filter/ })).toBeNull()
+    pickFacet('Status', 'Open')
     await waitFor(() => expect(screen.queryByText('S002')).toBeNull())
-    fireEvent.click(screen.getByRole('button', { name: /Reset filters/i }))
+    fireEvent.click(screen.getByRole('button', { name: /Clear 1 filter/i }))
     await waitFor(() => expect(screen.getByText('S002')).toBeTruthy())
   })
 
   it('drops filters when the list changes', async () => {
     renderBoard('/tms/shipments', [row('S001'), deliveredRow('S002'), deliveredRow('S003', { arStatus: 'PAID' })])
     await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
-    fireEvent.click(screen.getByRole('checkbox', { name: /Open\s+1/i }))
+    pickFacet('Status', 'Open')
     await waitFor(() => expect(screen.queryByText('S002')).toBeNull())
     fireEvent.click(screen.getByRole('tab', { name: /^All/ }))
     await waitFor(() => expect(screen.getByText('S003')).toBeTruthy())
     expect(screen.getByText('S002')).toBeTruthy()
-    expect(screen.getByRole('checkbox', { name: /Open\s+1/i })).not.toBeChecked()
+    expect(screen.queryByRole('button', { name: /Clear \d+ filter/ })).toBeNull()
+  })
+
+  describe('dense grid', () => {
+    const pros = () => [...document.querySelectorAll('tbody tr[data-tone]')].map((tr) => tr.querySelectorAll('td')[1]?.textContent)
+
+    it('opens with the PRO as the sticky first column, no side panel and the summary collapsed', async () => {
+      renderBoard('/tms/shipments', [row('S001')])
+      await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
+      const first = document.querySelectorAll('thead th')[1]
+      expect(first).toHaveTextContent('PRO #')
+      expect(first).toHaveClass('tms-dg-sticky')
+      expect(screen.queryByText('Statuses')).toBeNull()
+      expect(screen.queryByRole('region', { name: 'Summary' })).toBeNull()
+      fireEvent.click(screen.getByRole('button', { name: /Summary/ }))
+      expect(screen.getByRole('region', { name: 'Summary' })).toHaveTextContent('Shipments')
+    })
+
+    it('sorts by any column on a header click, ascending then descending', async () => {
+      renderBoard('/tms/shipments', [
+        row('S001', { customerName: 'Beta' }),
+        row('S002', { customerName: 'Gamma' }),
+        row('S003', { customerName: 'Alpha' }),
+      ])
+      await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
+      const customerHeader = screen.getAllByRole('columnheader').find((th) => th.textContent === 'Customer') as HTMLElement
+      const header = within(customerHeader).getByRole('button', { name: 'Customer' })
+      fireEvent.click(header)
+      expect(pros()).toEqual(['S003', 'S001', 'S002'])
+      fireEvent.click(header)
+      expect(pros()).toEqual(['S002', 'S001', 'S003'])
+    })
+
+    it('a header text filter narrows the rows as you type', async () => {
+      renderBoard('/tms/shipments', [row('S001', { customerReference: 'PO-100' }), row('S002', { customerReference: 'PO-200' })])
+      await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
+      fireEvent.click(screen.getByRole('button', { name: 'Filter Customer Reference Number' }))
+      fireEvent.change(screen.getByRole('textbox', { name: 'Filter Customer Reference Number' }), { target: { value: 'PO-2' } })
+      expect(pros()).toEqual(['S002'])
+    })
+
+    it('keeps the density and column order per user across a remount', async () => {
+      const first = renderBoard('/tms/shipments', [row('S001')])
+      await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
+      fireEvent.click(screen.getByRole('button', { name: 'Comfortable' }))
+      const headers = () => [...document.querySelectorAll('thead th')].map((th) => th.textContent)
+      const [, pro, second] = headers()
+      fireEvent.dragStart(screen.getByRole('columnheader', { name: new RegExp(`^${second}`) }))
+      fireEvent.drop(screen.getByRole('columnheader', { name: new RegExp(`^${pro}`) }))
+      const reordered = headers()
+      first.unmount()
+
+      renderBoard('/tms/shipments', [row('S001')])
+      await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
+      expect(screen.getByRole('button', { name: 'Comfortable' })).toHaveAttribute('aria-pressed', 'true')
+      expect(headers()).toEqual(reordered)
+    })
   })
 
   describe('Active and All lists', () => {

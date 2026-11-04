@@ -4,10 +4,11 @@
  * Authz mirrors QUOTE_ACTIONS: owner / ADMIN, or a caller in `page-quotes` / `page-tms`.
  * Ownership of a request is checked on every read and write (`canSeeSpotRequest` for
  * reads, strict owner for writes); a manager or ADMIN can read another rep's request but
- * cannot draft, send or edit it for them.
+ * cannot edit or mark it for them.
  *
- * Sending: `sendNow` below and `autoSendReply` (autoSend.ts) are the only call sites of
- * `GmailPort.sendDraft` / `sendReply`. Everything else reads, drafts, or writes our rows.
+ * READ-ONLY MAILBOX (Ryne, 2026-11-04): nothing here sends, drafts or modifies mail — the
+ * GmailPort has no such method. The rep gets a suggested response to copy (SPOT_SUGGEST_RESPONSE),
+ * logs the copy, and marks Sent / Won / Lost by hand.
  *
  * Audit rows carry ids, reason codes and counts — never message text or tokens.
  */
@@ -23,10 +24,10 @@ import type {
   SpotActionName,
   SpotConnectionView,
   SpotCountView,
-  SpotDraftResult,
   SpotGetRequestResult,
   SpotRequestRow,
   SpotStatusView,
+  SpotSuggestedResponse,
 } from '../../../src/lib/spot/types'
 import { applyRepPatch } from '../../../src/lib/spot/fields'
 import { fixtureById } from '../../../src/lib/spot/fixtures'
@@ -42,8 +43,7 @@ import type { SpotDeps } from './deps'
 import { loadAiAgents, processManual, ttlFor } from './pipeline'
 import { computeSuggestion } from './suggestion'
 import { ACTION_BUDGET_MS, ACTION_MIN_REMAINING_MS, pollAll } from './poll'
-import { reconcileOne } from './reconcile'
-import { buildReply, draftOpenUrl } from './reply'
+import { buildSuggestedResponse } from './reply'
 import { jsonOf, type Row } from './store'
 
 const OWNER_EMAIL = 'ryne@bcatcorp.com'
@@ -57,12 +57,9 @@ const ADMIN_ONLY: Record<string, true> = { SPOT_SAVE_SETTINGS: true, SPOT_ADMIN_
 const DEV_ONLY: Record<string, true> = {
   SPOT_CONNECT_SIMULATED: true,
   SPOT_SIM_INJECT: true,
-  SPOT_SIM_MARK_SENT: true,
   SPOT_SIM_RESET: true,
   SPOT_SIM_PURGE_TEST: true,
 }
-
-export const DEV_SEND_REFUSED = 'Sending is disabled on the dev stack. The draft was kept — send it from Gmail.'
 
 export interface AppSyncIdentity {
   sub?: string
@@ -215,40 +212,6 @@ async function purgeRequests(deps: SpotDeps, userId: string): Promise<number> {
   return rows.length
 }
 
-// ── The one place a draft is sent from a button ──────────────────────────────
-
-export async function sendNow(deps: SpotDeps, caller: SpotCaller, input: Row): Promise<{ request: SpotRequestRecord }> {
-  if (input.confirm !== true) throw new Error('Sending needs your confirmation.')
-  const requestId = requireString(input.requestId, 'requestId', 300)
-  const row = await ownedRequest(deps, caller, requestId)
-  if (deps.devStack) throw new Error(DEV_SEND_REFUSED)
-  if (row.status !== 'DRAFTED' || !row.draftId) throw new Error('There is no draft to send.')
-  const quote = row.quoteId ? await deps.store.getQuote(row.quoteId) : null
-  if (!quote || quote.status !== 'QUOTED') throw new Error('The quote is no longer open, so the draft was not sent.')
-  const conn = await requireConnection(deps, caller.userId)
-  if (conn.mode === 'SIMULATED') throw new Error(DEV_SEND_REFUSED)
-
-  const port = deps.portFor(conn)
-  await port.sendDraft(row.draftId)
-  const at = deps.now().toISOString()
-  const updated = await deps.store.updateRequest(
-    row.id,
-    { status: 'SENT', sentAt: at, sentVia: 'APP' },
-    { statusIn: ['DRAFTED'] },
-  )
-  await deps.store.writeAudit('SPOT_REQUEST', row.id, 'SPOT_SENT', caller.email, { via: 'APP' })
-  await logCrm(deps, {
-    customerId: row.customerId ?? undefined,
-    contactEmail: row.contactEmail ?? undefined,
-    ownerId: caller.userId,
-    kind: 'QUOTE_SENT',
-    at,
-    subject: (row.subject ?? '').slice(0, 120) || undefined,
-    refs: { spotRequestId: row.id, quoteId: row.quoteId ?? undefined, gmailThreadId: row.gmailThreadId || undefined },
-  })
-  return { request: updated }
-}
-
 // ── Handlers ─────────────────────────────────────────────────────────────────
 
 type Handler = (deps: SpotDeps, caller: SpotCaller, input: Row) => Promise<unknown>
@@ -398,19 +361,8 @@ const saveMySettings: Handler = async (deps, caller, input) => {
   if (!checked.ok) throw new Error(checked.error)
   const current = resolveRepSettings(conn.settings)
   const merged: GmailRepSettings = { ...current, ...checked.value }
-  const patch: Row = { settings: merged }
-  if (merged.autoSend !== current.autoSend) {
-    if (merged.autoSend && !resolveSpotSettings(await deps.store.getSpotSettings()).allowAutoSend) {
-      throw new Error('Auto-send is switched off for the whole organization by an admin.')
-    }
-    patch.autoSendChangedAt = deps.now().toISOString()
-    patch.autoSendChangedBy = caller.email
-  }
   const expected = typeof input.expectedVersion === 'number' ? input.expectedVersion : undefined
-  const next = await deps.store.updateConnection(caller.userId, patch, expected)
-  if (merged.autoSend !== current.autoSend) {
-    await deps.store.writeAudit('GMAIL_CONNECTION', caller.userId, 'SET_AUTO_SEND', caller.email, { from: current.autoSend, to: merged.autoSend })
-  }
+  const next = await deps.store.updateConnection(caller.userId, { settings: merged }, expected)
   return { connection: connectionView(next) }
 }
 
@@ -452,24 +404,7 @@ const getRequest: Handler = async (deps, caller, input): Promise<SpotGetRequestR
   if (!found || found.ttlEpoch * 1000 < deps.now().getTime()) return null
   if (!canSeeSpotRequest(caller.viewer, found)) throw new Error('Request not found')
 
-  let row = found
-  let draft: SpotGetRequestResult['draft'] = null
-  const owner = found.userId === caller.userId
-  const conn = owner ? await deps.store.getConnection(caller.userId) : null
-  if (owner && conn && conn.status !== 'DISCONNECTED' && row.draftId) {
-    const port = deps.portFor(conn)
-    try {
-      await reconcileOne(deps, port, caller.email, row)
-      row = (await deps.store.getRequest(id)) ?? row
-      if (row.status === 'DRAFTED' && row.draftId) {
-        const d = await port.getDraft(row.draftId)
-        if (d.exists) draft = { to: d.to, subject: d.subject, text: d.text }
-      }
-    } catch (err) {
-      console.warn('[tms-spot-quoter] draft lookup failed:', String(err))
-    }
-  }
-  return { request: await withQuoteStatus(deps, row), draft }
+  return { request: await withQuoteStatus(deps, found) }
 }
 
 const count: Handler = async (deps, caller, input): Promise<SpotCountView> => {
@@ -556,58 +491,83 @@ const setCustomer: Handler = async (deps, caller, input) => {
   return { request }
 }
 
-const createDraft: Handler = async (deps, caller, input): Promise<SpotDraftResult> => {
+/** The quote a rep names must be this request's own SELL quote; returns it, or null when none was named. */
+async function ownQuote(deps: SpotDeps, row: SpotRequestRecord, quoteId: string | undefined): Promise<Row | null> {
+  if (!quoteId) return null
+  const quote = await deps.store.getQuote(quoteId)
+  if (!quote || quote.spotRequestId !== row.id) throw new Error('That quote does not belong to this request.')
+  if (quote.side !== 'SELL') throw new Error('Only a customer (sell) quote can be answered.')
+  return quote
+}
+
+/** Remembers the request's quote pointer (money state itself always comes from the Quote). */
+function quotePointer(quote: Row | null): Row {
+  if (!quote) return {}
+  return {
+    quoteId: String(quote.id),
+    quoteNumber: typeof quote.quoteNumber === 'string' ? quote.quoteNumber : null,
+    quoteStatus: typeof quote.status === 'string' ? quote.status : null,
+  }
+}
+
+const suggestResponse: Handler = async (deps, caller, input): Promise<SpotSuggestedResponse> => {
   const requestId = requireString(input.requestId, 'requestId', 300)
-  const quoteId = requireString(input.quoteId, 'quoteId', 200)
+  const quoteId = optionalString(input.quoteId, 'quoteId', 200)
   const intro = optionalString(input.intro, 'intro', MAX_DRAFT_TEXT)
   const outro = optionalString(input.outro, 'outro', MAX_DRAFT_TEXT)
   const row = await ownedRequest(deps, caller, requestId)
-  if (!['NEW', 'NEEDS_INFO', 'DRAFTED'].includes(row.status)) throw new Error('This request is already closed or being handled.')
+  if (row.status === 'DISMISSED') throw new Error('This request was dismissed.')
+  const quote = await ownQuote(deps, row, quoteId)
+  const conn = await deps.store.getConnection(caller.userId)
+  const response = buildSuggestedResponse(deps, row, quote, resolveRepSettings(conn?.settings), {
+    intro,
+    outro,
+    googleEmail: conn?.googleEmail,
+  })
+  if (quote && row.quoteId !== String(quote.id)) await deps.store.updateRequest(row.id, quotePointer(quote))
+  return response
+}
 
-  const quote = await deps.store.getQuote(quoteId)
-  if (!quote || quote.spotRequestId !== row.id) throw new Error('That quote does not belong to this request.')
-  if (quote.side !== 'SELL') throw new Error('Only a customer (sell) quote can be drafted.')
-  if (quote.status !== 'QUOTED') throw new Error('The quote must be sent (status Quoted) before a reply draft is made.')
-
-  const conn = await requireConnection(deps, caller.userId)
-  const port = deps.portFor(conn)
-  const reply = await buildReply(deps, port, row, quote, resolveRepSettings(conn.settings), { intro, outro })
-
-  let draftId = row.draftId ?? null
-  let messageId = row.draftMessageId ?? null
-  const live = draftId ? (await port.getDraft(draftId)).exists : false
-  if (draftId && live) {
-    await port.updateDraft(draftId, reply)
-  } else {
-    const created = await port.createDraft(reply)
-    draftId = created.draftId
-    messageId = created.messageId
-  }
+const logCopied: Handler = async (deps, caller, input) => {
+  const requestId = requireString(input.requestId, 'requestId', 300)
+  const quoteId = optionalString(input.quoteId, 'quoteId', 200)
+  const row = await ownedRequest(deps, caller, requestId)
+  const quote = await ownQuote(deps, row, quoteId)
+  // No status change: copying a suggestion is not sending it.
+  const request = Object.keys(quotePointer(quote)).length ? await deps.store.updateRequest(row.id, quotePointer(quote)) : row
   const at = deps.now().toISOString()
-  await deps.store.updateRequest(
-    row.id,
-    {
-      status: 'DRAFTED',
-      draftId,
-      draftMessageId: messageId,
-      draftedAt: at,
-      quoteId,
-      quoteNumber: typeof quote.quoteNumber === 'string' ? quote.quoteNumber : row.quoteNumber ?? null,
-      quoteStatus: 'QUOTED',
-    },
-    { statusIn: ['NEW', 'NEEDS_INFO', 'DRAFTED'] },
-  )
-  await deps.store.writeAudit('SPOT_REQUEST', row.id, 'SPOT_DRAFT_CREATED', caller.email, { quoteId })
+  await deps.store.writeAudit('SPOT_REQUEST', row.id, 'SPOT_SUGGESTION_COPIED', caller.email, { quoteId: quote ? String(quote.id) : null })
   await logCrm(deps, {
     customerId: row.customerId ?? undefined,
     contactEmail: row.contactEmail ?? undefined,
     ownerId: caller.userId,
     kind: 'QUOTE_DRAFTED',
     at,
-    subject: (row.subject ?? '').slice(0, 120) || undefined,
-    refs: { spotRequestId: row.id, quoteId, gmailThreadId: row.gmailThreadId || undefined },
+    refs: { spotRequestId: row.id, quoteId: quote ? String(quote.id) : row.quoteId ?? undefined, gmailThreadId: row.gmailThreadId || undefined },
   })
-  return { draftId: draftId as string, openUrl: draftOpenUrl(conn.googleEmail, messageId) }
+  return { request }
+}
+
+const markSent: Handler = async (deps, caller, input) => {
+  const requestId = requireString(input.requestId, 'requestId', 300)
+  const row = await ownedRequest(deps, caller, requestId)
+  if (row.status !== 'NEW' && row.status !== 'NEEDS_INFO') throw new Error('Only a request that has not been answered yet can be marked sent.')
+  const at = deps.now().toISOString()
+  const request = await deps.store.updateRequest(
+    row.id,
+    { status: 'SENT', sentAt: at, sentVia: 'APP', needsAttention: false },
+    { statusIn: ['NEW', 'NEEDS_INFO'] },
+  )
+  await deps.store.writeAudit('SPOT_REQUEST', row.id, 'SPOT_MARK_SENT', caller.email, { quoteId: row.quoteId ?? null })
+  await logCrm(deps, {
+    customerId: row.customerId ?? undefined,
+    contactEmail: row.contactEmail ?? undefined,
+    ownerId: caller.userId,
+    kind: 'QUOTE_SENT',
+    at,
+    refs: { spotRequestId: row.id, quoteId: row.quoteId ?? undefined, gmailThreadId: row.gmailThreadId || undefined },
+  })
+  return { request }
 }
 
 const dismiss: Handler = async (deps, caller, input) => {
@@ -632,6 +592,15 @@ const dismiss: Handler = async (deps, caller, input) => {
 const markOutcome: Handler = async (deps, caller, input) => {
   const requestId = requireString(input.requestId, 'requestId', 300)
   const row = await ownedRequest(deps, caller, requestId)
+  const outcome = input.outcome
+  if (outcome !== undefined && outcome !== 'WON' && outcome !== 'LOST') throw new Error('outcome must be WON or LOST')
+  const lostReason = optionalString(input.lostReason, 'lostReason', 200)
+  if (outcome === 'LOST') {
+    // The rep's own call: a request can be lost without any quote at all.
+    const request = await deps.store.updateRequest(row.id, { status: 'LOST', needsAttention: false })
+    await deps.store.writeAudit('SPOT_REQUEST', row.id, 'SPOT_MARK_OUTCOME', caller.email, { outcome: 'LOST', reason: lostReason ?? null, by: 'REP' })
+    return { request }
+  }
   const quote = row.quoteId ? await deps.store.getQuote(row.quoteId) : null
   if (!quote || quote.spotRequestId !== row.id) throw new Error('This request has no quote of its own to read an outcome from.')
   const qStatus = String(quote.status)
@@ -713,9 +682,6 @@ const simInject: Handler = async (deps, caller, input) => {
   return deps.sim.inject(caller.userId, { ...message, internalDate: String(deps.now().getTime()) })
 }
 
-const simMarkSent: Handler = async (deps, caller, input) =>
-  deps.sim.markSent(caller.userId, requireString(input.draftId, 'draftId', 200))
-
 const simReset: Handler = async (deps, caller) => deps.sim.reset(caller.userId)
 
 const simPurgeTest: Handler = async (deps, caller) => {
@@ -747,14 +713,14 @@ const HANDLERS: Record<SpotActionName, Handler> = {
   SPOT_ADD_MANUAL: addManual,
   SPOT_UPDATE_FIELDS: updateFields,
   SPOT_SET_CUSTOMER: setCustomer,
-  SPOT_CREATE_DRAFT: createDraft,
-  SPOT_SEND_DRAFT: sendNow,
+  SPOT_SUGGEST_RESPONSE: suggestResponse,
+  SPOT_LOG_COPIED: logCopied,
+  SPOT_MARK_SENT: markSent,
   SPOT_DISMISS: dismiss,
   SPOT_MARK_OUTCOME: markOutcome,
   SPOT_SAVE_SETTINGS: saveSettings,
   SPOT_ADMIN_DISCONNECT: adminDisconnect,
   SPOT_SIM_INJECT: simInject,
-  SPOT_SIM_MARK_SENT: simMarkSent,
   SPOT_SIM_RESET: simReset,
   SPOT_SIM_PURGE_TEST: simPurgeTest,
 }

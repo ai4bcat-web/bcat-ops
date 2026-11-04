@@ -245,7 +245,6 @@ describe('threads', () => {
     expect(row.thread).toHaveLength(1)
     // Nothing converts or sends because a customer said yes.
     expect(row.status).toBe('DRAFTED')
-    expect(rig.port.sendCalls).toBe(0)
     expect(rig.model.classifyCalls).toHaveLength(0)
   })
 

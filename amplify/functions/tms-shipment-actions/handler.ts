@@ -117,7 +117,6 @@ import {
   convertQuote,
   counterQuote,
   duplicateQuotes,
-  isDirectSpotAutoQuote,
   markQuoteLost,
   passQuote,
   restoreQuote,
@@ -125,7 +124,6 @@ import {
   saveQuote,
   saveQuoteSettings,
   sendQuote,
-  spotAutoQuote,
   sweepExpiredQuotes,
   type BookCarrierExtra,
   type BookingVia,
@@ -159,7 +157,6 @@ import {
 } from './ownershipResolve'
 import { assertNotVoided, isVoided } from '../_shared/voided'
 import { LEAD_STAGES, promotionFor } from '../../../src/lib/crm/promote'
-import type { SpotAutoQuoteEvent } from '../../../src/lib/spot/types'
 import { batchShipmentTask, BATCH_TASK_ACTIONS } from './batch'
 import { INTAKE_ACTIONS, runIntakeAction, type IntakeAction, type IntakeDeps } from './intake'
 // ── Step P ──────────────────────────────────────────────────────────────────
@@ -1331,20 +1328,6 @@ async function getBookableCustomer(customerId: string, caller: Caller, via: Book
     }
   }
   return getActiveCustomer(customerId)
-}
-
-/** Lane samples (exact lane and ZIP3 neighbourhood) dated on or after `sinceDate`. */
-async function readLaneSamples(
-  laneKey: string | null,
-  laneKey3: string | null,
-  sinceDate: string,
-): Promise<{ exact: Row[]; zip3: Row[] }> {
-  const recent = (rows: Row[]) => rows.filter((r) => String(r.date ?? '').slice(0, 10) >= sinceDate)
-  const [exact, zip3] = await Promise.all([
-    laneKey ? queryIndex(LANE_RATE_SAMPLE_TABLE_NAME, 'laneRateSamplesByLaneKeyAndDate', 'laneKey', laneKey) : [],
-    laneKey3 ? queryIndex(LANE_RATE_SAMPLE_TABLE_NAME, 'laneRateSamplesByLaneKey3AndDate', 'laneKey3', laneKey3) : [],
-  ])
-  return { exact: recent(exact), zip3: recent(zip3) }
 }
 
 /**
@@ -7138,7 +7121,6 @@ const quoteDeps: QuoteDeps = {
   getSettings,
   getBookableCustomer,
   priceFromMarket: (input, caller) => priceFromMarket(marketRateDeps, input, caller),
-  readLaneSamples,
   getById,
   queryIndex,
   transact,
@@ -7402,13 +7384,7 @@ const demoDeps: DemoDeps = {
 
 // ── Main handler ─────────────────────────────────────────────────────────────
 
-export const handler = async (event: AppSyncEvent | SpotAutoQuoteEvent): Promise<Row> => {
-  // Step AB §4.7: the direct-invoke door, dispatched BEFORE the AppSync branch. An event that
-  // carries `spotAutoQuote` next to `arguments`/`identity` is refused, never routed.
-  if ('spotAutoQuote' in event) {
-    if (!isDirectSpotAutoQuote(event)) throw new Error('Forbidden: spotAutoQuote is a direct-invoke door')
-    return (await spotAutoQuote(quoteDeps, event.spotAutoQuote)) as unknown as Row
-  }
+export const handler = async (event: AppSyncEvent): Promise<Row> => {
   const action = event.arguments.action as Action
   const input = parseInput(event.arguments.input)
   const authorizedAction = action === 'BATCH_SHIPMENT_TASK'

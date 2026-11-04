@@ -3,11 +3,30 @@
  * partially built loads. One tab per active division (+ Unrouted), status chips, a table; a row
  * opens the review page.
  */
-import { useMemo } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
-import { Mail } from 'lucide-react'
-import { TmsAlert, TmsBadge, TmsEmptyState, TmsFilterChip, TmsPage, TmsSegmentedTabs, TmsTable, TmsTabs } from '@/features/tms/kit'
-import type { ColumnDef } from '@/features/tms/kit'
+import { Mail, Truck } from 'lucide-react'
+import { TmsAlert, TmsBadge, TmsEmptyState, TmsFilterChip, TmsSegmentedTabs } from '@/features/tms/kit'
+import { DenseGrid } from '@/features/tms/grid/DenseGrid'
+import {
+  ClearFiltersButton,
+  ColumnChooser,
+  DensityToggle,
+  DenseKpiStrip,
+  SummaryToggle,
+} from '@/features/tms/grid/DenseControls'
+import {
+  activeFilterCount,
+  filterRows,
+  nextSort,
+  reorderKeys,
+  sortDenseRows,
+  type DenseColumn,
+  type DenseColumnFilter,
+  type DenseFilters,
+} from '@/features/tms/grid/denseGridModel'
+import { useDenseGridPrefs } from '@/features/tms/grid/useDenseGridPrefs'
+import { useAuth } from '@/hooks/useAuth'
 import { flattenDivisions } from '@/features/tms/settings/taxonomyDrafts'
 import { useOwnershipDivisions } from '@/features/tms/useOwnershipDivisions'
 import { formatDateTime } from '@/lib/date'
@@ -19,6 +38,12 @@ import { useIntakePermissions } from './useIntakePermissions'
 import './intake.css'
 
 const UNROUTED = 'unrouted'
+const DEFAULT_COLUMNS = ['received', 'from', 'customer', 'reference', 'route', 'completeness', 'review', 'source']
+
+function reviewText(row: IntakeLoadRecord): string {
+  if (row.reviewedAt && row.reviewedBy) return 'Reviewed'
+  return row.status === 'OPEN' ? 'Needs review' : ''
+}
 
 type StatusChip = 'open' | 'moved' | 'dismissed'
 const CHIP_STATUS: Record<StatusChip, IntakeStatus> = { open: 'OPEN', moved: 'MOVED', dismissed: 'DISMISSED' }
@@ -44,7 +69,9 @@ function completeness(row: IntakeLoadRecord): string {
 
 export function IntakeBoard() {
   const navigate = useNavigate()
+  const { user } = useAuth()
   const [params, setParams] = useSearchParams()
+  const [filters, setFilters] = useState<DenseFilters>({})
   const { divisions } = useOwnershipDivisions()
   const { isOwnerOrAdmin } = useIntakePermissions()
 
@@ -95,45 +122,105 @@ export function IntakeBoard() {
     setParams(copy, { replace: true })
   }
 
-  const columns: Array<ColumnDef<IntakeLoadRecord>> = [
-    { key: 'received', header: 'Received', render: (r) => formatDateTime(r.receivedAt) },
-    {
-      key: 'from',
-      header: 'From / Subject',
-      render: (r) => (
-        <div className="tms-intake-from">
-          <span className="tms-intake-from-name">{r.fromName || r.fromEmail}</span>
-          <span className="tms-intake-from-subject">{r.subject || '(no subject)'}</span>
-        </div>
-      ),
-    },
-    { key: 'customer', header: 'Customer', render: (r) => r.fields.customerName ?? '—' },
-    { key: 'reference', header: 'Reference', render: (r) => r.fields.reference ?? '—' },
-    { key: 'route', header: 'Pickup → Delivery', render: route },
-    { key: 'completeness', header: 'Completeness', render: (r) => <span className="tms-intake-completeness">{completeness(r)}</span> },
-    {
-      key: 'review',
-      header: 'Review',
-      render: (r) => {
-        if (r.reviewedAt && r.reviewedBy) return <TmsBadge tone="green">Reviewed</TmsBadge>
-        return r.status === 'OPEN' ? <TmsBadge tone="orange">Needs review</TmsBadge> : '—'
+  const columns = useMemo<Array<DenseColumn<IntakeLoadRecord>>>(
+    () => [
+      { key: 'received', header: 'Received', text: (r) => formatDateTime(r.receivedAt), filter: 'date', dateOf: (r) => r.receivedAt, sortValue: (r) => r.receivedAt },
+      {
+        key: 'from',
+        header: 'From / Subject',
+        text: (r) => `${r.fromName || r.fromEmail} ${r.subject || '(no subject)'}`,
+        sortValue: (r) => r.fromName || r.fromEmail,
+        minWidth: 200,
+        maxWidth: 440,
       },
-    },
-    {
-      key: 'source',
-      header: 'E-mail',
-      render: (r) => (
-        <Link
-          className="tms-intake-source-link"
-          to={`/tms/workflows/runs/${r.runId}`}
-          aria-label="Open the source e-mail run"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <Mail size={14} aria-hidden="true" />
-        </Link>
-      ),
-    },
-  ]
+      { key: 'customer', header: 'Customer', text: (r) => r.fields.customerName ?? '—', filter: 'multi', optionsOf: (r) => (r.fields.customerName ? [{ value: r.fields.customerName, label: r.fields.customerName }] : []) },
+      { key: 'reference', header: 'Reference', text: (r) => r.fields.reference ?? '—' },
+      { key: 'route', header: 'Pickup → Delivery', text: route, minWidth: 160 },
+      {
+        key: 'completeness',
+        header: 'Completeness',
+        text: completeness,
+        filter: 'number',
+        numberOf: (r) => {
+          const { required, missing } = intakeCounts(r)
+          return required - missing
+        },
+        numberUnit: 'required fields filled',
+        minWidth: 150,
+      },
+      {
+        key: 'review',
+        header: 'Review',
+        text: reviewText,
+        filter: 'multi',
+        fixedOptions: [{ value: 'Reviewed', label: 'Reviewed' }, { value: 'Needs review', label: 'Needs review' }],
+      },
+      { key: 'source', header: 'E-mail', text: () => '', fixed: true, filter: false, sortable: false, width: 56 },
+    ],
+    [],
+  )
+  const prefs = useDenseGridPrefs({
+    gridId: 'intake',
+    email: user?.email,
+    defaultColumns: DEFAULT_COLUMNS,
+    validKeys: DEFAULT_COLUMNS,
+    defaultSort: { key: 'received', dir: 'desc' },
+  })
+  const gridColumns = useMemo(
+    () => [
+      ...prefs.columns.filter((k) => k !== 'source').map((k) => columns.find((c) => c.key === k)).filter((c) => c != null),
+      ...columns.filter((c) => c.key === 'source'),
+    ],
+    [prefs.columns, columns],
+  )
+  const filteredRows = useMemo(() => filterRows(rows, columns, filters), [rows, columns, filters])
+  const sortedRows = useMemo(() => sortDenseRows(filteredRows, columns, prefs.sort), [filteredRows, columns, prefs.sort])
+  const setColumnFilter = useCallback((key: string, next: DenseColumnFilter | null) => {
+    setFilters((prev) => {
+      const copy = { ...prev }
+      if (next) copy[key] = next
+      else delete copy[key]
+      return copy
+    })
+  }, [])
+  const kpis = useMemo(
+    () => [
+      { label: 'Tender e-mails', value: sortedRows.length },
+      { label: 'Need review', value: sortedRows.filter((r) => reviewText(r) === 'Needs review').length, tone: 'warn' as const },
+      { label: 'Reviewed', value: sortedRows.filter((r) => reviewText(r) === 'Reviewed').length, tone: 'good' as const },
+    ],
+    [sortedRows],
+  )
+
+  const renderCell = (row: IntakeLoadRecord, key: string) => {
+    switch (key) {
+      case 'from':
+        return (
+          <div className="tms-intake-from">
+            <span className="tms-intake-from-name">{row.fromName || row.fromEmail}</span>
+            <span className="tms-intake-from-subject">{row.subject || '(no subject)'}</span>
+          </div>
+        )
+      case 'completeness':
+        return <span className="tms-intake-completeness">{completeness(row)}</span>
+      case 'review':
+        if (row.reviewedAt && row.reviewedBy) return <TmsBadge tone="green">Reviewed</TmsBadge>
+        return row.status === 'OPEN' ? <TmsBadge tone="orange">Needs review</TmsBadge> : '—'
+      case 'source':
+        return (
+          <Link
+            className="tms-intake-source-link"
+            to={`/tms/workflows/runs/${row.runId}`}
+            aria-label="Open the source e-mail run"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <Mail size={14} aria-hidden="true" />
+          </Link>
+        )
+      default:
+        return columns.find((c) => c.key === key)?.text(row) ?? null
+    }
+  }
 
   const noAddress = division != null && !division.intakeEmail
   const emptyBody = noAddress ? (
@@ -153,8 +240,44 @@ export function IntakeBoard() {
   )
 
   return (
-    <TmsPage title="Shipments">
-      <ShipmentsSectionTabs current="intake" />
+    <div className="tms-dense-page">
+      <div className="tms-dense-bar">
+        <span className="tms-dense-title">
+          <Truck size={18} aria-hidden="true" /> Shipments
+        </span>
+        <ShipmentsSectionTabs current="intake" />
+        {tabs.length > 0 ? (
+          <TmsSegmentedTabs
+            aria-label="Division"
+            size="sm"
+            tabs={tabs}
+            active={selected ?? ''}
+            onSelect={(key) => update({ division: key })}
+          />
+        ) : null}
+        <TmsSegmentedTabs
+          aria-label="Intake status"
+          size="sm"
+          active={chip}
+          onSelect={(key) => update({ status: key === 'open' ? null : key })}
+          tabs={[
+            { key: 'open', label: 'Open' },
+            { key: 'moved', label: 'Moved' },
+            { key: 'dismissed', label: 'Dismissed' },
+          ]}
+        />
+        <TmsFilterChip label="Demo" value={demoOnly ? 'only' : null} onClick={() => update({ demo: demoOnly ? null : '1' })} />
+        <ClearFiltersButton count={activeFilterCount(filters)} onClear={() => setFilters({})} />
+        <span className="tms-dense-spacer" />
+        <ColumnChooser
+          all={columns.filter((c) => !c.fixed).map((c) => ({ key: c.key, label: c.header }))}
+          visible={prefs.columns.filter((k) => k !== 'source')}
+          onChange={prefs.setColumns}
+          onReset={prefs.resetColumns}
+        />
+        <DensityToggle density={prefs.density} onChange={prefs.setDensity} />
+        <SummaryToggle open={prefs.kpiOpen} onToggle={() => prefs.setKpiOpen(!prefs.kpiOpen)} />
+      </div>
       {isOwnerOrAdmin && missingAddress.length > 0 ? (
         <TmsAlert tone="orange" title="Divisions without an intake e-mail" className="tms-intake-banner">
           {missingAddress.map((d) => d.name).join(', ')} cannot receive tender e-mails yet.{' '}
@@ -162,35 +285,30 @@ export function IntakeBoard() {
         </TmsAlert>
       ) : null}
       {shown.error ? <TmsAlert tone="red" title="Could not load intake">{shown.error}</TmsAlert> : null}
-      {tabs.length > 0 ? (
-        <TmsTabs
-          className="tms-intake-tabs"
-          tabs={tabs}
-          active={selected ?? ''}
-          onSelect={(key) => update({ division: key })}
+      <DenseKpiStrip open={prefs.kpiOpen} items={kpis} />
+      <div className="tms-dense-body">
+        <DenseGrid<IntakeLoadRecord>
+          aria-label="Intake"
+          recentKey={`tms:intake:recent:${user?.email ?? 'anon'}`}
+          resetKey={`${selected}|${chip}|${demoOnly}|${JSON.stringify(filters)}|${JSON.stringify(prefs.sort)}`}
+          columns={gridColumns}
+          rows={sortedRows}
+          fitRows={rows}
+          rowKey={(r) => r.id}
+          renderCell={renderCell}
+          density={prefs.density}
+          userWidths={prefs.widths}
+          sort={prefs.sort}
+          onSort={(key) => prefs.setSort(nextSort(prefs.sort, key))}
+          filters={filters}
+          onFilterChange={setColumnFilter}
+          onReorder={(from, to) => prefs.setColumns(reorderKeys(prefs.columns, from, to))}
+          onResize={prefs.setWidth}
+          onRowClick={(r) => navigate(`/tms/shipments/intake/${encodeURIComponent(r.id)}`)}
+          empty={shown.loading ? <TmsBadge tone="gray">Loading…</TmsBadge> : rows.length > 0 ? 'No tender e-mails match the column filters.' : emptyBody}
         />
-      ) : null}
-      <TmsSegmentedTabs
-        className="tms-intake-chips"
-        size="sm"
-        aria-label="Intake status"
-        active={chip}
-        onSelect={(key) => update({ status: key === 'open' ? null : key })}
-        tabs={[
-          { key: 'open', label: 'Open' },
-          { key: 'moved', label: 'Moved' },
-          { key: 'dismissed', label: 'Dismissed' },
-        ]}
-      />
-      <TmsFilterChip label="Demo" value={demoOnly ? 'only' : null} onClick={() => update({ demo: demoOnly ? null : '1' })} />
-      <TmsTable
-        columns={columns}
-        rows={rows}
-        rowKey={(r) => r.id}
-        onRowClick={(r) => navigate(`/tms/shipments/intake/${encodeURIComponent(r.id)}`)}
-        empty={shown.loading ? <TmsBadge tone="gray">Loading…</TmsBadge> : emptyBody}
-      />
-    </TmsPage>
+      </div>
+    </div>
   )
 }
 

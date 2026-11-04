@@ -12,13 +12,10 @@ export const GMAIL_SCOPES = [
   'openid',
   'email',
   'https://www.googleapis.com/auth/gmail.readonly',
-  'https://www.googleapis.com/auth/gmail.compose',
 ] as const
 
-const REQUIRED_GMAIL_SCOPES = [
-  'https://www.googleapis.com/auth/gmail.readonly',
-  'https://www.googleapis.com/auth/gmail.compose',
-]
+/** Read-only (Ryne, 2026-11-04): the one Gmail scope this app asks for. */
+const REQUIRED_GMAIL_SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
 
 /** 32 random bytes, hex. */
 export function newState(): string {
@@ -101,7 +98,7 @@ export async function exchangeCode(
   }
 }
 
-/** Both Gmail scopes must have been ticked on the consent screen. */
+/** The read-only Gmail scope must have been ticked on the consent screen. */
 export function hasRequiredScopes(scope: string): boolean {
   const granted = new Set(scope.split(/\s+/).filter(Boolean))
   return REQUIRED_GMAIL_SCOPES.every((s) => granted.has(s))

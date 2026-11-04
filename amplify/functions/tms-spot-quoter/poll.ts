@@ -20,7 +20,6 @@ import {
   type PollContext,
   type PollStats,
 } from './pipeline'
-import { reconcileDrafts } from './reconcile'
 
 export const MAX_HELD_RUNS = 3
 export const POLL_STALE_MS = 4 * 60_000
@@ -122,7 +121,6 @@ export async function pollConnection(deps: SpotDeps, conn: GmailConnectionRecord
       patch.historyId = nextHistory
     }
 
-    await reconcileDrafts(deps, conn, port).catch((err: unknown) => console.warn('[tms-spot-quoter] reconcile failed:', redact(err)))
     patch.lastPollOk = stats.errors === 0
     // A message that could not be classified is not stored; it is retried while the cursor holds.
     patch.lastError = stats.errors > 0

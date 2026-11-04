@@ -80,6 +80,9 @@ const renderAt = (path: string) =>
           <Route path="/driver-view/:id" element={<div data-testid="page" />} />
           <Route path="/tms/shipments/intake/:id" element={<div data-testid="page" />} />
           <Route path="/tms/shipments" element={<div data-testid="page" />} />
+          <Route path="/tms/shipments/:id" element={<div data-testid="page" />} />
+          <Route path="/tms/tracking" element={<div data-testid="page" />} />
+          <Route path="/tms/tracking/links" element={<div data-testid="page" />} />
         </Route>
       </Routes>
     </MemoryRouter>,
@@ -129,6 +132,19 @@ describe('TmsLayout', () => {
   it('hands the shell the query string, so Active and All can tell the board lists apart', () => {
     renderAt('/tms/shipments?list=all')
     expect(shell.props?.activeSearch).toBe('?list=all')
+  })
+
+  it('runs the list pages dense (icon rail, full bleed) and every other /tms page normally', () => {
+    for (const path of ['/tms/shipments', '/tms/shipments?list=all', '/tms/shipments/intake', '/tms/tracking']) {
+      const view = renderAt(path)
+      expect(shell.props?.dense, path).toBe(true)
+      view.unmount()
+    }
+    for (const path of ['/tms/dashboard', '/tms/shipments/S-1', '/tms/shipments/intake/abc', '/tms/tracking/links', '/trucks']) {
+      const view = renderAt(path)
+      expect(shell.props?.dense, path).toBe(false)
+      view.unmount()
+    }
   })
 
   it('hands the shell the notification total and a bell that opens the drawer on the item list', async () => {

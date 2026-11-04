@@ -1,9 +1,7 @@
 // @vitest-environment jsdom
 /**
- * Auto-send lets a reply leave a rep's Gmail with nobody pressing Send, so the switch has
- * to be impossible to flip by accident: off unless the org allows it, and turning it on
- * takes a typed confirmation after the gates are listed. Disconnecting must offer both
- * outcomes for the stored requests.
+ * The mailbox is read-only, so the drawer must carry no way to send, draft or auto-send.
+ * Disconnecting must offer both outcomes for the stored requests.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor, fireEvent } from '@testing-library/react'
@@ -37,29 +35,19 @@ beforeEach(() => {
 })
 
 describe('RepSettingsDrawer', () => {
-  it('keeps auto-send switched off, with the reason, while the org has not allowed it', () => {
-    draw(status(false))
-    expect(screen.getByTestId('spot-autosend-toggle')).toBeDisabled()
-    expect(screen.getByTestId('spot-autosend-reason')).toBeInTheDocument()
-  })
-
-  it('turns auto-send on only after the rep types their first name', async () => {
+  it('says the mailbox is read-only and has no auto-send control', () => {
     draw(status(true))
-    fireEvent.click(screen.getByTestId('spot-autosend-toggle'))
-    const confirm = await screen.findByTestId('spot-autosend-confirm')
-    expect(confirm).toBeDisabled()
-    fireEvent.change(screen.getByTestId('spot-autosend-name'), { target: { value: 'bob' } })
-    expect(confirm).toBeDisabled()
-    fireEvent.change(screen.getByTestId('spot-autosend-name'), { target: { value: 'Jane' } })
-    expect(confirm).toBeEnabled()
-    fireEvent.click(confirm)
-    await waitFor(() => expect(api.spotAction).toHaveBeenCalledWith('SPOT_SAVE_MY_SETTINGS', { settings: { autoSend: true }, expectedVersion: 4 }))
+    expect(screen.getByTestId('spot-readonly-copy')).toHaveTextContent(/never sends or drafts mail/)
+    expect(screen.queryByTestId('spot-autosend-toggle')).toBeNull()
   })
 
-  it('turns auto-send off in one click', async () => {
-    draw(status(true, true))
-    fireEvent.click(screen.getByTestId('spot-autosend-toggle'))
-    await waitFor(() => expect(api.spotAction).toHaveBeenCalledWith('SPOT_SAVE_MY_SETTINGS', { settings: { autoSend: false }, expectedVersion: 4 }))
+  it('saves the signature, label and look-back against the loaded version', async () => {
+    draw(status(false))
+    fireEvent.change(screen.getByTestId('spot-signature'), { target: { value: 'Thanks, Jane' } })
+    fireEvent.click(screen.getByTestId('spot-settings-save'))
+    await waitFor(() => expect(api.spotAction).toHaveBeenCalledWith('SPOT_SAVE_MY_SETTINGS', {
+      settings: { watchLabel: null, lookbackDays: 2, signature: 'Thanks, Jane' }, expectedVersion: 4,
+    }))
   })
 
   it('states retention from the live org settings', () => {

@@ -27,11 +27,10 @@ import {
   prefilterStage2,
   stripQuotedHistory,
 } from '../../../src/lib/spot/prefilter'
-import { chicagoDay } from '../../../src/lib/spot/autoSend'
+import { chicagoDay } from '../../../src/lib/spot/chicagoDay'
 import { resolveRepSettings, type ResolvedSpotSettings } from '../../../src/lib/spot/settings'
 import type { SpotDeps } from './deps'
 import { jsonOf } from './store'
-import { maybeAutoSend } from './autoSend'
 import { computeSuggestion } from './suggestion'
 
 export const MAX_BODY_CHARS = 8000
@@ -327,9 +326,6 @@ export async function processMessage(ctx: PollContext, id: string): Promise<Mail
   if (!created) return 'EXISTS'
   ctx.stats.stored += 1
   await recordEmailActivity(ctx, row, 'EMAIL_IN', receivedAt)
-  if (repSettings.autoSend) {
-    await maybeAutoSend({ deps, conn, port, settings: ctx.settings, aiAgents: ctx.aiAgents }, row, meta)
-  }
   return 'STORED'
 }
 

@@ -27,22 +27,6 @@ export function rateBlock(pricing: SpotPricing, rateText: string, isManager: boo
   return { rateCents, belowFloor, needsStubAck, reason }
 }
 
-/** Every condition that must hold before a reply leaves without a person (plan §4.7), in plain words. */
-export const AUTO_SEND_GATES: readonly string[] = [
-  'An admin has allowed auto-send for the whole company, and you have switched it on.',
-  'The sender is an existing, active customer, matched by their exact e-mail address — never a prospect, never a guess from the domain.',
-  'You own the account, and the customer has agreed to automatic replies.',
-  'Every required field was read with high confidence, it is a full truckload, with no accessorials or special handling.',
-  'The price comes from live DAT data, or from at least five of our own loads on that lane — never from a simulated market price — and is at or above the floor.',
-  'The sender’s e-mail passes SPF and DKIM checks, and it is a brand-new thread with a reply address.',
-  'You have not reached the daily limit per rep or per customer.',
-  'It is never sent from the dev stack: there the reply becomes a draft instead.',
-]
-
-/** The first word of the rep's address: `jane.doe@…` → `jane`. */
-export const firstNameOf = (email: string): string => (email.split('@')[0] ?? '').split(/[._+-]/)[0] ?? ''
-
-
 export interface Form {
   oCity: string; oState: string; oZip: string; pickupDate: string
   dCity: string; dState: string; dZip: string; deliveryDate: string

@@ -1,17 +1,15 @@
 /**
  * tms-spot-quoter — everything the pipeline, the poll loop and the actions reach out
- * for, as one injectable object. `createSpotDeps()` wires the real thing (DynamoDB, SSM,
- * S3, Gmail REST, Anthropic, a Lambda invoke of tms-shipment-actions); tests build their
+ * for (read-only mailbox: no send, no draft, no door to tms-shipment-actions), as one injectable object. `createSpotDeps()` wires the real thing (DynamoDB, SSM,
+ * S3, Gmail REST, Anthropic); tests build their
  * own from fakes. Nothing outside this file constructs an AWS client except store.ts.
  */
-import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda'
 import type { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb'
 import type {
   CrmContactRecord,
   GmailConnectionRecord,
 } from '../../../src/types/tms'
 import type { SenderMatch, UpsertContactInput, AddSystemActivityInput } from '../../../src/lib/crm/types'
-import type { SpotAutoQuoteEvent, SpotAutoQuoteResult } from '../../../src/lib/spot/types'
 import type { GmailPort } from '../../../src/lib/spot/port'
 import { readPageCredentials } from '../_shared/integrationSecrets'
 import {
@@ -23,7 +21,6 @@ import {
 import { googlePort } from '../_shared/gmail/googlePort'
 import {
   simInject,
-  simMarkDraftSent,
   simPort,
   simPurgeTest,
   simReset,
@@ -70,7 +67,6 @@ export interface OAuthPort {
 
 export interface SimPorts {
   inject(userId: string, msg: SimInboxMessage): Promise<{ id: string }>
-  markSent(userId: string, draftId: string): Promise<{ messageId: string }>
   reset(userId: string): Promise<{ deleted: number }>
   purgeTest(userId: string): Promise<{ deleted: number }>
 }
@@ -82,8 +78,6 @@ export interface SpotDeps {
   oauth: OAuthPort
   sim: SimPorts
   portFor(conn: Pick<GmailConnectionRecord, 'id' | 'mode'>): GmailPort
-  /** The SPOT_AUTO_QUOTE door: a direct Lambda invoke of tms-shipment-actions. */
-  door(event: SpotAutoQuoteEvent): Promise<SpotAutoQuoteResult>
   /** Registry-style provider modes: LIVE only when the credentials exist. */
   providerModes(): Promise<{ gmail: 'STUB' | 'LIVE'; dat: 'STUB' | 'LIVE' }>
   now(): Date
@@ -111,7 +105,6 @@ function parseOrigins(raw: string | undefined): string[] {
 export function createSpotDeps(): SpotDeps {
   const store = createDynamoStore()
   const db = store.db as DynamoDBDocumentClient
-  const lambda = new LambdaClient({})
   return {
     store,
     crm: {
@@ -136,23 +129,10 @@ export function createSpotDeps(): SpotDeps {
     },
     sim: {
       inject: (userId, msg) => simInject(userId, msg),
-      markSent: (userId, draftId) => simMarkDraftSent(userId, draftId),
       reset: (userId) => simReset(userId),
       purgeTest: (userId) => simPurgeTest(userId),
     },
     portFor: (conn) => (conn.mode === 'SIMULATED' ? simPort(conn.id) : googlePort(conn.id)),
-    async door(event) {
-      const name = process.env.TMS_SHIPMENT_ACTIONS_FUNCTION_NAME
-      if (!name) throw new Error('TMS_SHIPMENT_ACTIONS_FUNCTION_NAME is not configured')
-      const out = await lambda.send(new InvokeCommand({
-        FunctionName: name,
-        InvocationType: 'RequestResponse',
-        Payload: Buffer.from(JSON.stringify(event)),
-      }))
-      if (out.FunctionError) throw new Error('The quote door failed')
-      const text = out.Payload ? Buffer.from(out.Payload).toString('utf8') : ''
-      return JSON.parse(text) as SpotAutoQuoteResult
-    },
     async providerModes() {
       // A provider whose credentials cannot be read is not connected: STUB, never an error.
       const [client, dat] = await Promise.all([

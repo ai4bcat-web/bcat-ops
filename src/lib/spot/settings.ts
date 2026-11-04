@@ -2,13 +2,14 @@
  * Step AB §2.5 — defaults and validators for the per-rep (`GmailConnection.settings`) and
  * org (`SpotSettings`) switches. Pure; relative imports only (Lambdas bundle by path).
  *
- * Auto-send is OFF by default at both levels (Ryne R1).
+ * Read-only mailbox (Ryne, 2026-11-04): there is no auto-send, send or draft switch at any level.
+ * The legacy `autoSend*` / `allowAutoSend` columns stay on the tables (additive-only schema) but
+ * nothing reads or writes them.
  */
 import type { GmailRepSettings, SpotSettingsRecord } from '../../types/tms'
 import { stripControl } from './text'
 
 export const DEFAULT_REP_SETTINGS: GmailRepSettings = {
-  autoSend: false,
   watchLabel: null,
   lookbackDays: 2,
   signature: '',
@@ -20,10 +21,6 @@ export interface ResolvedSpotSettings {
   enabled: boolean
   retentionDays: number
   dismissedRetentionDays: number
-  allowAutoSend: boolean
-  autoSendDailyCapPerRep: number
-  autoSendDailyCapPerCustomer: number
-  autoSendMinSamples: number
   modelCallsPerRepPerDay: number
   maxMessagesPerRepPerRun: number
 }
@@ -32,10 +29,6 @@ export const DEFAULT_SPOT_SETTINGS: ResolvedSpotSettings = {
   enabled: true,
   retentionDays: 90,
   dismissedRetentionDays: 14,
-  allowAutoSend: false,
-  autoSendDailyCapPerRep: 25,
-  autoSendDailyCapPerCustomer: 5,
-  autoSendMinSamples: 5,
   modelCallsPerRepPerDay: 100,
   maxMessagesPerRepPerRun: 50,
 }
@@ -43,14 +36,11 @@ export const DEFAULT_SPOT_SETTINGS: ResolvedSpotSettings = {
 type Result<T> = { ok: true; value: T } | { ok: false; error: string }
 
 const SPOT_NUMBER_BOUNDS: Record<
-  Exclude<keyof ResolvedSpotSettings, 'enabled' | 'allowAutoSend'>,
+  Exclude<keyof ResolvedSpotSettings, 'enabled'>,
   [number, number]
 > = {
   retentionDays: [1, 365],
   dismissedRetentionDays: [1, 90],
-  autoSendDailyCapPerRep: [0, 500],
-  autoSendDailyCapPerCustomer: [0, 100],
-  autoSendMinSamples: [1, 50],
   modelCallsPerRepPerDay: [0, 2000],
   maxMessagesPerRepPerRun: [1, 200],
 }
@@ -65,7 +55,6 @@ export function resolveSpotSettings(row?: Partial<SpotSettingsRecord> | null): R
   const out: ResolvedSpotSettings = { ...DEFAULT_SPOT_SETTINGS }
   if (!row) return out
   if (typeof row.enabled === 'boolean') out.enabled = row.enabled
-  if (typeof row.allowAutoSend === 'boolean') out.allowAutoSend = row.allowAutoSend
   for (const key of Object.keys(SPOT_NUMBER_BOUNDS) as (keyof typeof SPOT_NUMBER_BOUNDS)[]) {
     const [lo, hi] = SPOT_NUMBER_BOUNDS[key]
     const n = intIn(row[key], lo, hi)
@@ -78,7 +67,7 @@ export function validateSpotSettings(patch: unknown): Result<Partial<ResolvedSpo
   if (!patch || typeof patch !== 'object' || Array.isArray(patch)) return { ok: false, error: 'Settings must be an object.' }
   const src = patch as Record<string, unknown>
   const value: Partial<ResolvedSpotSettings> = {}
-  for (const key of ['enabled', 'allowAutoSend'] as const) {
+  for (const key of ['enabled'] as const) {
     if (src[key] === undefined) continue
     if (typeof src[key] !== 'boolean') return { ok: false, error: `${key} must be true or false.` }
     value[key] = src[key] as boolean
@@ -103,7 +92,6 @@ function cleanText(value: string, max: number): string {
 export function resolveRepSettings(raw: unknown): GmailRepSettings {
   const src = raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {}
   const out: GmailRepSettings = { ...DEFAULT_REP_SETTINGS }
-  if (typeof src.autoSend === 'boolean') out.autoSend = src.autoSend
   if (typeof src.watchLabel === 'string' && src.watchLabel.trim()) out.watchLabel = cleanText(src.watchLabel, LABEL_MAX) || null
   const days = intIn(src.lookbackDays, 1, 7)
   if (days != null) out.lookbackDays = days
@@ -117,7 +105,7 @@ export function validateRepSettings(patch: unknown): Result<Partial<GmailRepSett
   if (!patch || typeof patch !== 'object' || Array.isArray(patch)) return { ok: false, error: 'Settings must be an object.' }
   const src = patch as Record<string, unknown>
   const value: Partial<GmailRepSettings> = {}
-  for (const key of ['autoSend', 'notifyNew'] as const) {
+  for (const key of ['notifyNew'] as const) {
     if (src[key] === undefined) continue
     if (typeof src[key] !== 'boolean') return { ok: false, error: `${key} must be true or false.` }
     value[key] = src[key] as boolean

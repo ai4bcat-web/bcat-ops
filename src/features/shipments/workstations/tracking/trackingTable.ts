@@ -7,13 +7,11 @@ import { isRateConSent } from '@/lib/trackingAutomation'
 import { trackingEtaEstimate } from '@/lib/trackingEta'
 import type { Stop } from '@/types'
 import { boardStatusOf, type ShipmentRow } from '../../shipmentViews'
-import type { TrackingAssigneeTab, TrackingGroup, TrackingLifecycle } from './types'
+import type { TrackingAssigneeTab, TrackingLifecycle } from './types'
 
 export { isRateConSent }
 
 export const UNASSIGNED_KEY = 'unassigned'
-/** Assignee tabs shown before the rest fold into a "More assignees" select. */
-export const MAX_ASSIGNEE_TABS = 8
 
 // ── Lifecycle ────────────────────────────────────────────────────────────────
 
@@ -57,53 +55,15 @@ export function lifecycleRows(
 
 // ── Assignees ────────────────────────────────────────────────────────────────
 
-/** Unassigned first (when any), then people A→Z by the name shown. */
-export function groupByAssignee(
-  rows: readonly ShipmentRow[],
-  nameOf: (id: string) => string,
-): TrackingGroup[] {
-  const unassigned: ShipmentRow[] = []
-  const byTracker = new Map<string, ShipmentRow[]>()
-  for (const row of rows) {
-    if (!row.trackerId) {
-      unassigned.push(row)
-      continue
-    }
-    const list = byTracker.get(row.trackerId)
-    if (list) list.push(row)
-    else byTracker.set(row.trackerId, [row])
-  }
-  const people: TrackingGroup[] = [...byTracker.entries()]
-    .map(([trackerId, list]) => ({
-      key: trackerId,
-      label: list.find((r) => r.trackerName)?.trackerName ?? nameOf(trackerId),
-      trackerId,
-      rows: list,
-    }))
-    .sort((a, b) => a.label.localeCompare(b.label) || a.key.localeCompare(b.key))
-  return unassigned.length > 0
-    ? [{ key: UNASSIGNED_KEY, label: 'Unassigned', trackerId: null, rows: unassigned }, ...people]
-    : people
-}
-
-/** My loads (when the viewer is known) · All · Unassigned · one tab per other assignee. */
-export function assigneeTabs(
-  rows: readonly ShipmentRow[],
-  myId: string | null,
-  nameOf: (id: string) => string,
-): TrackingAssigneeTab[] {
-  const groups = groupByAssignee(rows, nameOf)
-  const unassigned = groups.find((g) => g.trackerId === null)?.rows.length ?? 0
+/** My loads (when the viewer is known) · All · Unassigned. Anyone else is a Tracker header filter. */
+export function assigneeTabs(rows: readonly ShipmentRow[], myId: string | null): TrackingAssigneeTab[] {
+  const unassigned = rows.filter((r) => !r.trackerId).length
   const tabs: TrackingAssigneeTab[] = []
   if (myId) {
     tabs.push({ key: 'me', label: 'My loads', count: rows.filter((r) => r.trackerId === myId).length })
   }
   tabs.push({ key: 'all', label: 'All', count: rows.length })
   tabs.push({ key: UNASSIGNED_KEY, label: 'Unassigned', count: unassigned, ...(unassigned > 0 ? { tone: 'warn' as const } : {}) })
-  for (const g of groups) {
-    if (g.trackerId === null || g.trackerId === myId) continue
-    tabs.push({ key: g.key, label: g.label, count: g.rows.length })
-  }
   return tabs
 }
 

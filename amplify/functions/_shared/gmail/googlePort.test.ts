@@ -1,6 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
 import { googlePort, stripHtml } from './googlePort'
-import { buildMime, quotedPrintable } from './mime'
 import { buildAuthUrl, hasRequiredScopes, parseIdToken, redirectUriAllowed } from './oauth'
 import { GmailApiError } from './errors'
 import { simInject, simPurgeTest, simReset, simPort, type SimS3 } from './simPort'
@@ -50,28 +49,22 @@ describe('googlePort transport', () => {
   })
 })
 
-describe('mime', () => {
-  it('refuses a header carrying a line break', () => {
-    const d = { threadId: null, to: 'a@b.test\r\nBcc: x@y.test', subject: 's', inReplyTo: null, references: null, text: 't' }
-    expect(() => buildMime(d)).toThrow(/line break/)
-    expect(() => buildMime({ ...d, to: 'a@b.test', subject: 'x\ny' })).toThrow(/line break/)
-  })
-
-  it('threads a reply and encodes a non-ASCII body safely', () => {
-    const raw = buildMime({ threadId: 't', to: 'a@b.test', subject: 'Re: Café', inReplyTo: '<1@x>', references: '<0@x> <1@x>', text: 'Prix: 2 450 € ' + 'x'.repeat(100) })
-    expect(raw).toContain('In-Reply-To: <1@x>')
-    expect(raw).toContain('References: <0@x> <1@x>')
-    expect(raw).toContain('Subject: =?UTF-8?B?')
-    for (const line of raw.split('\r\n\r\n')[1].split('\r\n')) expect(line.length).toBeLessThanOrEqual(76)
-  })
-
-  it('quoted-printable round-trips', () => {
-    const text = 'Rate = $2,450 — ok\nsecond line  '
-    const decoded = Buffer.from(
-      quotedPrintable(text).replace(/=\r\n/g, '').replace(/=([0-9A-F]{2})/g, (_m, h: string) => String.fromCharCode(parseInt(h, 16))),
-      'latin1',
-    ).toString('utf8')
-    expect(decoded.replace(/\r\n/g, '\n')).toBe(text.replace(/ +$/, (m) => m.slice(0, -1) + ' ').replace(/ $/, ' '))
+describe('googlePort is read-only on the wire', () => {
+  it('only ever issues GET requests, across every port method', async () => {
+    const methods: string[] = []
+    const f = vi.fn(async (_u: string, init?: RequestInit) => {
+      methods.push(String(init?.method))
+      return res({ emailAddress: 'a', historyId: '1', messages: [], history: [], labels: [], payload: { headers: [] }, id: 'm', threadId: 't' })
+    })
+    const port = googlePort('u', { fetchImpl: f as unknown as typeof fetch, getToken: async () => 't', sleep: async () => undefined })
+    await port.profile()
+    await port.listRecent({ lookbackDays: 1, label: 'x', max: 5 })
+    await port.listSince('1', { label: null, max: 5 })
+    await port.getMetadata('m')
+    await port.getBody('m')
+    await port.threadMessages('t')
+    expect(methods.length).toBeGreaterThan(5)
+    expect(new Set(methods)).toEqual(new Set(['GET']))
   })
 })
 
@@ -87,8 +80,10 @@ describe('oauth helpers', () => {
     expect(u.searchParams.get('access_type')).toBe('offline')
     expect(u.searchParams.get('prompt')).toBe('consent')
     expect(u.searchParams.get('hd')).toBe('bcatcorp.com')
-    expect(u.searchParams.get('scope')).toContain('gmail.compose')
+    expect(u.searchParams.get('scope')).toContain('gmail.readonly')
     expect(u.searchParams.get('state')).toBe('s1')
+    // Read-only: no compose, send or modify scope is ever requested.
+    expect(u.searchParams.get('scope')).not.toMatch(/compose|send|modify|gmail\.full|mail\.google\.com/)
   })
 
   it('only accepts the callback path on an allowed origin', () => {
@@ -99,9 +94,9 @@ describe('oauth helpers', () => {
     expect(redirectUriAllowed('https://app.test/tms/rates/spot/callback?x=1', origins)).toBe(false)
   })
 
-  it('requires both Gmail scopes', () => {
-    expect(hasRequiredScopes('openid email https://www.googleapis.com/auth/gmail.readonly')).toBe(false)
-    expect(hasRequiredScopes('https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.compose')).toBe(true)
+  it('requires the read-only Gmail scope and nothing more', () => {
+    expect(hasRequiredScopes('openid email')).toBe(false)
+    expect(hasRequiredScopes('openid email https://www.googleapis.com/auth/gmail.readonly')).toBe(true)
   })
 
   it('reads id-token claims lower-cased', () => {

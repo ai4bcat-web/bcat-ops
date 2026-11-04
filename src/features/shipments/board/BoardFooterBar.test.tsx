@@ -12,7 +12,8 @@ function renderFooter(props: Partial<Parameters<typeof BoardFooterBar>[0]> = {})
       secondsToRefresh={12}
       autoRefresh
       onToggleAutoRefresh={vi.fn()}
-      onNext50={vi.fn()}
+      pageSize={100}
+      onNextPage={vi.fn()}
       onRefresh={vi.fn()}
       onExportCsv={vi.fn()}
       onShowMap={vi.fn()}
@@ -46,7 +47,7 @@ describe('BoardFooterBar', () => {
 
   it('raises every footer callback', () => {
     const handlers = {
-      onNext50: vi.fn(),
+      onNextPage: vi.fn(),
       onRefresh: vi.fn(),
       onExportCsv: vi.fn(),
       onShowMap: vi.fn(),
@@ -55,8 +56,8 @@ describe('BoardFooterBar', () => {
       onBatchTask: vi.fn(),
       onSplitScreen: vi.fn(),
     }
-    renderFooter({ selectedCount: 2, ...handlers })
-    fireEvent.click(screen.getByRole('button', { name: /^Get next 50$/i }))
+    renderFooter({ selectedCount: 2, pageSize: 100, ...handlers })
+    fireEvent.click(screen.getByRole('button', { name: /^Get next 100$/i }))
     fireEvent.click(screen.getByRole('button', { name: /^Refresh$/i }))
     fireEvent.click(screen.getByRole('button', { name: /^Export to CSV$/i }))
     fireEvent.click(screen.getByRole('button', { name: /^Show map$/i }))

@@ -7175,7 +7175,7 @@ describe('Ivan Cartage driver (Step W)', () => {
   })
 })
 
-// ── Step AB: spot request link, prospect promotion, the SPOT_AUTO_QUOTE door ──
+// ── Step AB: spot request link, prospect promotion ──
 
 describe('Step AB — SAVE_QUOTE spotRequestId', () => {
   it('stores it on create, keeps it through an edit, and refuses a different one', async () => {
@@ -7251,113 +7251,5 @@ describe('Step AB — a prospect is promoted on its first shipment', () => {
     expect(table(TABLES.customer).get('cus-1')!.status).toBe('ACTIVE')
     expect(quoteRow(String(quote.id)).status).toBe('QUOTED')
     expect([...table(TABLES.shipment).values()]).toHaveLength(0)
-  })
-})
-
-describe('Step AB — the SPOT_AUTO_QUOTE door', () => {
-  const REP = { id: 'rep-1', email: 'rep@bcatcorp.com', role: 'CUSTOMER_REP', status: 'ACTIVE' }
-
-  function extraction(over: Row = {}): Row {
-    return {
-      customerName: null, contactName: 'Dana', contactPhone: null,
-      stops: [
-        { type: 'PICKUP', name: null, city: 'Chicago', state: 'IL', zip: '60601', dateStr: null, time: null },
-        { type: 'DELIVERY', name: null, city: 'Dallas', state: 'TX', zip: '75201', dateStr: null, time: null },
-      ],
-      pickupDate: '2026-03-09', deliveryDate: null, equipment: 'dry van', equipmentType: 'VAN', lengthFt: 53,
-      mode: 'FTL', weightLbs: 38000, pieces: null, commodity: 'paper', temperatureF: null, hazmat: null,
-      accessorials: [], targetRateDollars: null, notes: null,
-      ...over,
-    }
-  }
-  const HIGH = { source: 'MODEL', confidence: 'high' }
-  const FIELD_META = { origin: HIGH, destination: HIGH, equipment: HIGH, pickupDate: HIGH }
-
-  function seedAuto(customer: Row = {}, samples = 5): void {
-    table('UserProfile-test').set(REP.id, REP)
-    seedCustomer({
-      contacts: [{ name: 'Dana', email: 'dana@zz-acme.test' }],
-      accountOwnerIds: [REP.id],
-      quoteAutoReply: true,
-      ...customer,
-    })
-    for (let i = 0; i < samples; i += 1) {
-      table(TABLES.laneSample).set(`lrs:s${i}`, {
-        id: `lrs:s${i}`, laneKey: 'CHICAGO|IL>DALLAS|TX', laneKey3: '606>752', date: '2026-02-20',
-        loadId: `l${i}`, shipmentId: `s${i}`, customerId: 'cus-1', equipmentType: 'VAN', rateType: 'SPOT', miles: 920,
-        customerRateCents: 300_000, revenueCents: 300_000, carrierRateCents: 220_000, costCents: 220_000,
-      })
-    }
-  }
-
-  function door(over: Row = {}, event: Row = {}): Promise<Row> {
-    return handler({
-      spotAutoQuote: {
-        requestId: 'sr:rep-1:msg1', repId: REP.id, customerId: 'cus-1', contactEmail: 'dana@zz-acme.test',
-        extraction: extraction(), fieldMeta: FIELD_META, autoReplyAllowed: true, ...over,
-      },
-      ...event,
-    } as never)
-  }
-
-  it('creates one QUOTED spot SELL quote in the rep\'s name, with a link and no freight', async () => {
-    seedAuto()
-    const result = (await door()) as Row
-    expect(result).toMatchObject({ ok: true, priceBasis: 'HISTORY', stub: false, amountCents: 300_000 })
-    expect(String(result.link)).toContain('https://portal.test')
-    const quote = quoteRow(String(result.quoteId))
-    expect(quote).toMatchObject({
-      side: 'SELL', status: 'QUOTED', customerRepId: 'rep-1', spotRequestId: 'sr:rep-1:msg1',
-      customerId: 'cus-1', contactEmail: 'dana@zz-acme.test', createdBy: 'rep@bcatcorp.com',
-    })
-    expect(quote.linkToken).toBeTruthy()
-    expect([...table(TABLES.shipment).values()]).toHaveLength(0)
-    expect([...table(TABLES.order).values()]).toHaveLength(0)
-  })
-
-  it('is not reachable through an AppSync-shaped event', async () => {
-    seedAuto()
-    // The key inside the action input is just input: unknown action, nothing created.
-    await expect(
-      call('SPOT_AUTO_QUOTE', { spotAutoQuote: { requestId: 'sr:rep-1:msg1', repId: 'rep-1', customerId: 'cus-1' } }, QUOTER),
-    ).rejects.toThrow(/Unknown action|Forbidden/)
-    // The door key next to AppSync fields is refused, not routed.
-    await expect(
-      door({}, { arguments: { action: 'LIST_ALJEX_CODES' }, identity: QUOTER }),
-    ).rejects.toThrow(/Forbidden/)
-    expect(quotesOf()).toHaveLength(0)
-  })
-
-  const refusals: Array<[string, () => void, string]> = [
-    ['customer not ACTIVE', () => seedAuto({ status: 'QUALIFIED', active: false }), 'CUSTOMER_NOT_ACTIVE'],
-    ['rep not an owner', () => seedAuto({ accountOwnerIds: ['rep-9'] }), 'NOT_OWNER'],
-    ['customer opted out of auto reply', () => seedAuto({ quoteAutoReply: false }), 'CUSTOMER_OPT_OUT'],
-    ['sender not an exact contact', () => seedAuto({ contacts: [{ name: 'X', email: 'other@zz-acme.test' }] }), 'MATCH_NOT_EXACT'],
-    ['too little history means a stub price', () => seedAuto({}, 2), 'PRICE_STUB'],
-  ]
-  for (const [name, arrange, reason] of refusals) {
-    it(`refuses and creates nothing: ${name}`, async () => {
-      arrange()
-      const result = (await door()) as { ok: boolean; reasons: string[] }
-      expect(result.ok).toBe(false)
-      expect(result.reasons).toContain(reason)
-      expect(quotesOf()).toHaveLength(0)
-    })
-  }
-
-  it('refuses a second quote for the same request', async () => {
-    seedAuto()
-    expect(((await door()) as { ok: boolean }).ok).toBe(true)
-    const again = (await door()) as { ok: boolean; reasons: string[] }
-    expect(again).toMatchObject({ ok: false })
-    expect(again.reasons).toContain('DUPLICATE')
-    expect(quotesOf()).toHaveLength(1)
-  })
-
-  it('refuses a request with a low-confidence required field', async () => {
-    seedAuto()
-    const result = (await door({ fieldMeta: { ...FIELD_META, origin: { source: 'MODEL', confidence: 'low' } } })) as { reasons: string[] }
-    expect(result.reasons).toContain('FIELD_NOT_HIGH')
-    expect(quotesOf()).toHaveLength(0)
   })
 })

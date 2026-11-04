@@ -717,14 +717,14 @@ export const PROVIDERS: ProviderDescriptor[] = [
     capabilities: ['connect', 'validate', 'sync'],
     liveCapabilities: ['validate', 'sync'],
     validateHow: {
-      describe: 'Presents the client id and secret to Google’s token endpoint with a deliberately invalid code. “invalid_grant” means Google knows the client and accepted the secret; “invalid_client” means the id or secret is wrong. No mail is read.',
+      describe: 'Presents the client id and secret to Google’s token endpoint with a deliberately invalid code. “invalid_grant” means Google knows the client and accepted the secret; “invalid_client” means the id or secret is wrong. No mail is read. Reps are only ever asked for the read-only Gmail scope.',
       liveCheck: 'GOOGLE_OAUTH_CLIENT',
     },
     applicability: 'LIVE_CAPABLE',
     loadsRead: 'NONE',
-    feeds: 'Spot quoter inbox and CRM e-mail touchpoints, one Gmail connection per sales rep.',
+    feeds: 'Spot quoter inbox (read-only) and CRM e-mail touchpoints, one Gmail connection per sales rep.',
     docsUrl: 'https://developers.google.com/identity/protocols/oauth2/web-server',
-    note: 'Per-rep sign-in for the Spot quoter; does not replace the shared-inbox bridge above. Until both keys are entered the Spot quoter runs against a simulated inbox only.',
+    note: 'READ-ONLY per-rep sign-in for the Spot quoter: each rep grants view-only access to their own inbox (gmail.readonly). The app never sends, drafts or changes mail; it suggests a reply the rep copies. Does not replace the shared-inbox bridge above. Until both keys are entered the Spot quoter runs against a simulated inbox only.',
   },
   {
     key: 'OUTLOOK',

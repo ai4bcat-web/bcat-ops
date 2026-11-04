@@ -775,3 +775,45 @@
     display: none;
   }
 }
+
+/* ── Dense list pages: icon rail + full-bleed content ─────────────────────── */
+
+@media (min-width: 901px) {
+  /* The rail stays the content's margin even while it is open over the page. */
+  .tms-shell.tms-dense .tms-content,
+  .tms-shell.tms-dense.tms-is-collapsed .tms-content {
+    margin-left: calc(var(--tms-sidebar-collapsed-w) + var(--tms-shell-gap) + 6px);
+    padding: 0;
+    height: 100dvh;
+  }
+
+  .tms-shell.tms-dense {
+    height: 100dvh;
+    overflow: hidden;
+  }
+
+  .tms-shell.tms-dense .tms-sidebar {
+    transition: width 0.12s ease;
+  }
+
+  .tms-shell.tms-dense:not(.tms-is-collapsed) .tms-sidebar {
+    box-shadow: var(--tms-shadow), 12px 0 24px -8px color-mix(in srgb, var(--tms-text) 25%, transparent);
+  }
+
+  .tms-shell.tms-dense .tms-topbar {
+    top: 0;
+    border-radius: 0;
+    border-left: 0;
+    border-right: 0;
+    border-top: 0;
+    box-shadow: none;
+  }
+
+  .tms-shell.tms-dense .tms-main {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+    padding: 0;
+  }
+}

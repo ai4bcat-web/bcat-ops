@@ -91,63 +91,6 @@ export interface SpotSuggestion {
   label: string
 }
 
-// ── Auto-send (§4.7) ─────────────────────────────────────────────────────────
-export const AUTO_SEND_REASONS = [
-  'ORG_OFF',
-  'REP_OFF',
-  'NO_CUSTOMER',
-  'MATCH_NOT_EXACT',
-  'CUSTOMER_NOT_ACTIVE',
-  'NOT_OWNER',
-  'CUSTOMER_OPT_OUT',
-  'FIELD_NOT_HIGH',
-  'MODE_NOT_FTL',
-  'ACCESSORIALS',
-  'SPECIAL_HANDLING',
-  'PRICE_STUB',
-  'PRICE_THIN',
-  'BELOW_FLOOR',
-  'SENDER_AUTH',
-  'THREAD_NOT_NEW',
-  'NO_RECIPIENT',
-  'DUPLICATE',
-  'CAP_REP',
-  'CAP_CUSTOMER',
-  'DEV_STACK',
-] as const
-export type AutoSendReason = (typeof AUTO_SEND_REASONS)[number]
-
-export interface AutoSendDecision {
-  allow: boolean
-  reasons: AutoSendReason[]
-}
-
-// ── The door: `SPOT_AUTO_QUOTE`, direct invoke of tms-shipment-actions (§9.3) ──
-export interface SpotAutoQuoteEvent {
-  spotAutoQuote: {
-    requestId: string
-    repId: string
-    customerId: string
-    contactEmail: string
-    extraction: SpotExtraction
-    fieldMeta: SpotFieldMeta
-    autoReplyAllowed: true
-  }
-}
-
-export type SpotAutoQuoteResult =
-  | {
-      ok: true
-      quoteId: string
-      quoteNumber: string
-      amountCents: number
-      expiresAt: string
-      link: string
-      priceBasis: 'DAT_LIVE' | 'HISTORY'
-      stub: false
-    }
-  | { ok: false; reasons: AutoSendReason[] }
-
 // ── tmsSpotActions (§9.1) ────────────────────────────────────────────────────
 export type SpotActionName =
   | 'SPOT_STATUS'
@@ -165,14 +108,14 @@ export type SpotActionName =
   | 'SPOT_ADD_MANUAL'
   | 'SPOT_UPDATE_FIELDS'
   | 'SPOT_SET_CUSTOMER'
-  | 'SPOT_CREATE_DRAFT'
-  | 'SPOT_SEND_DRAFT'
+  | 'SPOT_SUGGEST_RESPONSE'
+  | 'SPOT_LOG_COPIED'
+  | 'SPOT_MARK_SENT'
   | 'SPOT_DISMISS'
   | 'SPOT_MARK_OUTCOME'
   | 'SPOT_SAVE_SETTINGS'
   | 'SPOT_ADMIN_DISCONNECT'
   | 'SPOT_SIM_INJECT'
-  | 'SPOT_SIM_MARK_SENT'
   | 'SPOT_SIM_RESET'
   | 'SPOT_SIM_PURGE_TEST'
 
@@ -194,8 +137,6 @@ export type SpotRequestRow = Omit<SpotRequestRecord, 'bodyText'>
 
 export interface SpotGetRequestResult {
   request: SpotRequestRecord
-  /** Fetched from Gmail at the moment of the call; null when there is no draft. */
-  draft: { to: string; subject: string; text: string } | null
 }
 
 export interface SpotCountView {
@@ -204,9 +145,18 @@ export interface SpotCountView {
   needsAttention: number
 }
 
-export interface SpotDraftResult {
-  draftId: string
-  openUrl: string
+/** The reply the rep may copy: rendered from validated fields only. The app never sends it. */
+export interface SpotSuggestedResponse {
+  to: string
+  subject: string
+  body: string
+  /** `mailto:` link with recipient, subject and body prefilled. */
+  mailto: string
+  /** Gmail compose URL (web) with recipient, subject and body prefilled. */
+  gmailUrl: string
+  rateCents: number
+  /** False when no quote exists yet, so the text carries no accept link. */
+  hasLink: boolean
 }
 
 /** input → output for every action; the typed helpers in apiClient read this. */
@@ -247,16 +197,17 @@ export interface SpotActionMap {
     input: { requestId: string; customerId: string; contactName?: string }
     output: { request: SpotRequestRecord }
   }
-  SPOT_CREATE_DRAFT: {
-    input: { requestId: string; quoteId: string; intro?: string; outro?: string }
-    output: SpotDraftResult
+  SPOT_SUGGEST_RESPONSE: {
+    input: { requestId: string; quoteId?: string; intro?: string; outro?: string }
+    output: SpotSuggestedResponse
   }
-  SPOT_SEND_DRAFT: {
-    input: { requestId: string; confirm: true }
+  SPOT_LOG_COPIED: { input: { requestId: string; quoteId?: string }; output: { request: SpotRequestRecord } }
+  SPOT_MARK_SENT: { input: { requestId: string }; output: { request: SpotRequestRecord } }
+  SPOT_DISMISS: { input: { requestId: string; reason?: string }; output: { request: SpotRequestRecord } }
+  SPOT_MARK_OUTCOME: {
+    input: { requestId: string; outcome?: 'WON' | 'LOST'; lostReason?: string }
     output: { request: SpotRequestRecord }
   }
-  SPOT_DISMISS: { input: { requestId: string; reason?: string }; output: { request: SpotRequestRecord } }
-  SPOT_MARK_OUTCOME: { input: { requestId: string }; output: { request: SpotRequestRecord } }
   SPOT_SAVE_SETTINGS: {
     input: { settings: Partial<SpotSettingsRecord>; expectedVersion?: number }
     output: { settings: SpotSettingsRecord }
@@ -266,7 +217,6 @@ export interface SpotActionMap {
     input: { fixtureId?: string; message?: Record<string, unknown> }
     output: { id: string }
   }
-  SPOT_SIM_MARK_SENT: { input: { draftId: string }; output: { messageId: string } }
   SPOT_SIM_RESET: { input: Record<string, never>; output: { deleted: number } }
   SPOT_SIM_PURGE_TEST: { input: Record<string, never>; output: { deleted: number } }
 }

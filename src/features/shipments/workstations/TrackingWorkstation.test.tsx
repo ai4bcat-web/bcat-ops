@@ -153,12 +153,29 @@ describe('assignee navigation', () => {
     await waitFor(() => expect(ids().sort()).toEqual(['S-ANN', 'S-LOOSE']))
   })
 
-  it('All shows Unassigned first, then one section per person A to Z', async () => {
+  it('All groups by Assignee by default: Unassigned first, then one section per person A to Z, rows under their header', async () => {
     renderPage('/tms/tracking?assignee=all')
     await waitFor(() => expect(ids().length).toBeGreaterThan(0))
-    const keys = screen.getAllByTestId('tracking-group').map((el) => el.getAttribute('data-group-key'))
+    const keys = screen.getAllByTestId('dense-group').map((el) => el.getAttribute('data-group-key'))
     expect(keys).toEqual(['unassigned', 'u-ann', 'u-me'])
-    expect(within(screen.getByRole('region', { name: /^Ann Lee/ })).getByText('S-ANN')).toBeInTheDocument()
+    // Rows follow their header in the one table: the Ann Lee header precedes only Ann's rows.
+    const order = [...document.querySelectorAll('[data-testid="dense-group"], [data-testid="tracking-row"]')]
+      .map((el) => el.getAttribute('data-group-key') ?? `row:${el.getAttribute('data-tracker-id')}`)
+    expect(order).toEqual([
+      'unassigned', 'row:',
+      'u-ann', 'row:u-ann', 'row:u-ann',
+      'u-me', 'row:u-me', 'row:u-me',
+    ])
+  })
+
+  it('Group by switches the sections, and None lists the rows flat', async () => {
+    renderPage('/tms/tracking?assignee=all')
+    await waitFor(() => expect(ids().length).toBeGreaterThan(0))
+    fireEvent.change(screen.getByRole('combobox', { name: 'Group by' }), { target: { value: 'status' } })
+    expect(screen.getAllByTestId('dense-group').map((el) => el.getAttribute('data-group-key'))).toEqual(['DISPATCHED'])
+    fireEvent.change(screen.getByRole('combobox', { name: 'Group by' }), { target: { value: 'none' } })
+    expect(screen.queryAllByTestId('dense-group')).toHaveLength(0)
+    expect(ids().length).toBe(5)
   })
 
   it('says so when nothing is assigned to me', async () => {
@@ -257,5 +274,95 @@ describe('navigation', () => {
     await waitFor(() => expect(ids().length).toBeGreaterThan(0))
     fireEvent.click(screen.getByRole('button', { name: /Manage links/i }))
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/tms/tracking/links'))
+  })
+})
+
+describe('dense grid', () => {
+  it('has no side filter panel', async () => {
+    renderPage('/tms/tracking?assignee=all')
+    await waitFor(() => expect(ids().length).toBeGreaterThan(0))
+    expect(screen.queryByRole('button', { name: /^Filters$/ })).not.toBeInTheDocument()
+    expect(screen.queryByText('Statuses')).not.toBeInTheDocument()
+  })
+
+  it('a header type-ahead narrows the rows', async () => {
+    shipments = [
+      row('S-A', { trackerId: 'u-ann', trackerName: 'Ann Lee', originCity: 'Austin, TX' }),
+      row('S-B', { trackerId: 'u-ann', trackerName: 'Ann Lee', originCity: 'Boise, ID' }),
+    ]
+    renderPage('/tms/tracking?assignee=all')
+    await waitFor(() => expect(ids()).toHaveLength(2))
+    fireEvent.click(screen.getByRole('button', { name: 'Filter Lane' }))
+    fireEvent.change(screen.getByRole('textbox', { name: 'Filter Lane' }), { target: { value: 'boise' } })
+    expect(ids()).toEqual(['S-B'])
+    fireEvent.click(screen.getByRole('button', { name: /Clear 1 filter/ }))
+    expect(ids().sort()).toEqual(['S-A', 'S-B'])
+  })
+
+  it('the Tracker multi-select narrows to one person', async () => {
+    renderPage('/tms/tracking?assignee=all')
+    await waitFor(() => expect(ids().length).toBeGreaterThan(0))
+    fireEvent.click(screen.getByRole('button', { name: 'Filter Tracker' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Tracker: Ann Lee' }))
+    expect(ids().sort()).toEqual(['S-ANN', 'S-OVERDUE'])
+  })
+
+  it('the Next check numeric range keeps only overdue calls', async () => {
+    renderPage('/tms/tracking?assignee=all')
+    await waitFor(() => expect(ids().length).toBeGreaterThan(0))
+    fireEvent.click(screen.getByRole('button', { name: 'Filter Next check' }))
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Next check max' }), { target: { value: '0' } })
+    expect(ids()).toEqual(['S-OVERDUE'])
+  })
+
+  it('sorts a column on click, ascending then descending', async () => {
+    shipments = [
+      row('S-B', { customerName: 'Beta' }),
+      row('S-C', { customerName: 'Gamma' }),
+      row('S-A', { customerName: 'Alpha' }),
+    ]
+    renderPage('/tms/tracking?assignee=all')
+    await waitFor(() => expect(ids()).toHaveLength(3))
+    fireEvent.change(screen.getByRole('combobox', { name: 'Group by' }), { target: { value: 'none' } })
+    const header = within(screen.getByRole('columnheader', { name: /Customer/ })).getByRole('button', { name: 'Customer' })
+    fireEvent.click(header)
+    expect(ids()).toEqual(['S-A', 'S-B', 'S-C'])
+    fireEvent.click(header)
+    expect(ids()).toEqual(['S-C', 'S-B', 'S-A'])
+  })
+
+  it('restores the viewer\'s density, columns and group-by on the next visit', async () => {
+    const first = renderPage('/tms/tracking?assignee=all')
+    await waitFor(() => expect(ids().length).toBeGreaterThan(0))
+    fireEvent.click(screen.getByRole('button', { name: 'Comfortable' }))
+    fireEvent.change(screen.getByRole('combobox', { name: 'Group by' }), { target: { value: 'status' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Columns' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Show Carrier DOT/MC' }))
+    first.unmount()
+
+    renderPage('/tms/tracking?assignee=all')
+    await waitFor(() => expect(ids().length).toBeGreaterThan(0))
+    expect(screen.getByRole('button', { name: 'Comfortable' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('combobox', { name: 'Group by' })).toHaveValue('status')
+    expect(screen.queryByRole('columnheader', { name: /Carrier DOT\/MC/ })).not.toBeInTheDocument()
+  })
+
+  it('keeps the PRO column sticky and the summary strip collapsed until asked for', async () => {
+    renderPage('/tms/tracking?assignee=all')
+    await waitFor(() => expect(ids().length).toBeGreaterThan(0))
+    const pro = screen.getByRole('columnheader', { name: /Shipment #/ })
+    expect(pro).toHaveClass('tms-dg-sticky')
+    expect(within(trackingRow('S-ANN')).getAllByRole('cell')[1]).toHaveClass('tms-dg-sticky')
+    expect(screen.queryByRole('region', { name: 'Summary' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Summary/ }))
+    expect(screen.getByRole('region', { name: 'Summary' })).toHaveTextContent('Loads')
+  })
+
+  it('draws a bounded number of rows however many loads there are', async () => {
+    shipments = Array.from({ length: 400 }, (_, i) => row(`S-${String(i).padStart(3, '0')}`, { trackerId: 'u-ann', trackerName: 'Ann Lee' }))
+    renderPage('/tms/tracking?assignee=all')
+    await waitFor(() => expect(ids().length).toBeGreaterThan(0))
+    expect(ids().length).toBeLessThan(60)
+    expect(screen.getByText('Show 100 more')).toBeInTheDocument()
   })
 })

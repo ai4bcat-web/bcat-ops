@@ -15,6 +15,7 @@ export interface SpotReplyInput {
   lengthFt: number | null
   pickupDate: string | null
   expiresAt: string | null
+  /** The public accept link; empty when no quote exists yet (the line is then left out). */
   link: string
   intro?: string | null
   outro?: string | null
@@ -72,7 +73,8 @@ export function renderSpotReply(i: SpotReplyInput): string {
   if (pickup) lines.push(`Pickup: ${pickup}`)
   const valid = longDate(i.expiresAt)
   if (valid) lines.push(`Valid through: ${valid}`)
-  lines.push('', `To accept this quote, use this link: ${oneLine(i.link, 500).replace(/\s/g, '')}`)
+  const link = oneLine(i.link, 500).replace(/\s/g, '')
+  if (link) lines.push('', `To accept this quote, use this link: ${link}`)
   const outro = userText(i.outro)
   if (outro) lines.push('', outro)
   const signature = userText(i.signature)

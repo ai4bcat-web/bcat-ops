@@ -31,8 +31,7 @@ export interface SpotTabDef {
 export const SPOT_TABS: readonly SpotTabDef[] = [
   { key: 'new', label: 'New', statuses: ['NEW'] },
   { key: 'needs-info', label: 'Needs info', statuses: ['NEEDS_INFO'] },
-  { key: 'drafted', label: 'Drafted', statuses: ['DRAFTED'] },
-  { key: 'sent', label: 'Sent', statuses: ['SENT', 'AUTO_PENDING'] },
+  { key: 'sent', label: 'Sent', statuses: ['SENT'] },
   { key: 'won', label: 'Won', statuses: ['WON'] },
   { key: 'closed', label: 'Lost / dismissed', statuses: ['LOST', 'DISMISSED'] },
 ]

@@ -4475,7 +4475,6 @@ export type GmailConnectionStatus = 'PENDING' | 'CONNECTED' | 'PAUSED' | 'NEEDS_
 
 /** Per-rep behaviour, `GmailConnection.settings`. Defaults live in `src/lib/spot/settings.ts`. */
 export interface GmailRepSettings {
-  autoSend: boolean
   watchLabel: string | null
   lookbackDays: number
   signature: string

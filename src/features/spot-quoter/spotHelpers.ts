@@ -73,3 +73,39 @@ export const gmailThreadUrl = (googleEmail: string | null | undefined, threadId:
   threadId
     ? `https://mail.google.com/mail/?authuser=${encodeURIComponent(googleEmail ?? '')}#all/${encodeURIComponent(threadId)}`
     : null
+
+/** A Gmail compose window pre-filled with the response: a plain link, no API. */
+export function gmailComposeUrl(to: string, subject: string, body: string): string {
+  const q = new URLSearchParams({ view: 'cm', fs: '1', to, su: subject, body })
+  return `https://mail.google.com/mail/?${q.toString().replaceAll('+', '%20')}`
+}
+
+export function mailtoUrl(to: string, subject: string, body: string): string {
+  const q = `subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
+  return `mailto:${encodeURIComponent(to).replace('%40', '@')}?${q}`
+}
+
+/** Clipboard API where the page may use it, else a hidden textarea and `execCommand`. */
+export async function copyText(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text)
+      return true
+    }
+  } catch {
+    /* fall through to the textarea route */
+  }
+  const area = document.createElement('textarea')
+  area.value = text
+  area.style.position = 'fixed'
+  area.style.opacity = '0'
+  document.body.appendChild(area)
+  area.select()
+  try {
+    return document.execCommand('copy')
+  } catch {
+    return false
+  } finally {
+    area.remove()
+  }
+}

@@ -1,11 +1,11 @@
 /**
  * One spot request: the mail, the fields read from it (each with its state chip, all
- * editable), the customer, the price, the reply, and the actions. Nothing here sends mail:
- * "Create quote & Gmail draft" leaves a draft in the rep's own Gmail and the rep presses
- * Send there. `Send now` exists for convenience and asks first, showing the text Gmail
- * holds at that moment.
+ * editable), the customer, the price, and a suggested response. The e-mail side is
+ * READ-ONLY: this app never sends or drafts mail. The rep edits the suggested text, copies
+ * it (or opens a Gmail compose window) and sends it themselves, then marks the request
+ * Sent / Won / Lost by hand.
  */
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
 import { ConvertQuoteDialog } from '@/features/quotes/components/ConvertQuoteDialog'
 import {
@@ -14,13 +14,12 @@ import {
 import { useAuth } from '@/hooks/useAuth'
 import { createCustomer, getQuote, saveQuote, sendQuote, spotAction } from '@/lib/apiClient'
 import { QUOTE_LINE_CODES } from '@/lib/spot/accessorials'
-import { renderSpotReply } from '@/lib/spot/replyTemplate'
 import type { LoadChargeInput, QuoteRecord, SpotEquipmentCode, SpotRequestMode } from '@/types/tms'
-import type { SpotRequestRecord, SpotStatusView } from '@/lib/spot/types'
+import type { SpotRequestRecord, SpotStatusView, SpotSuggestedResponse } from '@/lib/spot/types'
 import { FieldChip } from './FieldChips'
 import { PricingCard } from './PricingCard'
 import { formFrom, patchFromForm, rateBlock, type Form } from './spotRules'
-import { gmailThreadUrl, money, quoteStops, relativeTime, spotEnds } from './spotHelpers'
+import { copyText, gmailComposeUrl, gmailThreadUrl, mailtoUrl, quoteStops, relativeTime } from './spotHelpers'
 import { PROSPECT_STATUSES, useCustomerList } from './useCustomerIndex'
 import { useSpotPricing } from './useSpotPricing'
 import { useSpotRequest } from './useSpotRequests'
@@ -63,13 +62,11 @@ function Section({ title, children, testId }: { title: string; children: ReactNo
 
 function RequestPanel({
   request,
-  draft,
   status,
   onChanged,
   reload,
 }: {
   request: SpotRequestRecord
-  draft: { to: string; subject: string; text: string } | null
   status: SpotStatusView
   onChanged: () => void
   reload: () => void
@@ -80,12 +77,15 @@ function RequestPanel({
   const [form, setForm] = useState<Form>(() => formFrom(ex))
   const [rateEdit, setRateEdit] = useState<string | null>(null)
   const [stubAck, setStubAck] = useState(false)
-  const [intro, setIntro] = useState('')
-  const [outro, setOutro] = useState('')
+  const [createdQuoteId, setCreatedQuoteId] = useState<string | null>(null)
+  const [response, setResponse] = useState<SpotSuggestedResponse | null>(null)
+  const [subjectText, setSubjectText] = useState('')
+  const [bodyText2, setBodyText2] = useState('')
+  const [lostDialog, setLostDialog] = useState(false)
+  const [lostReason, setLostReason] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [fullBody, setFullBody] = useState(false)
-  const [sendDialog, setSendDialog] = useState(false)
   const [dismissDialog, setDismissDialog] = useState(false)
   const [dismissReason, setDismissReason] = useState('')
   const [prospectName, setProspectName] = useState(ex?.customerName ?? '')
@@ -98,14 +98,14 @@ function RequestPanel({
   const block = rateBlock(pricing, rateText, isManager, stubAck)
 
   const connection = status.connection
+  const quoteId = request.quoteId ?? createdQuoteId
   const open = request.status === 'NEW' || request.status === 'NEEDS_INFO'
-  const drafted = request.status === 'DRAFTED'
+  const sent = request.status === 'SENT'
   const patch = patchFromForm(ex, form)
   const dirty = Object.keys(patch).length > 0
   const domain = (request.fromEmail ?? '').split('@')[1]?.toLowerCase() ?? ''
   const customer = customers.find((c) => c.id === request.customerId) ?? null
   const contactEmail = request.replyTo ?? request.fromEmail ?? ''
-  const { origin, destination } = spotEnds(ex)
 
   const run = async (work: () => Promise<unknown>, done?: string): Promise<boolean> => {
     setBusy(true)
@@ -150,58 +150,65 @@ function RequestPanel({
     if (ok) { reloadCustomers(); finish() }
   }
 
-  /** The quote exists once; a retry after a failed draft goes straight to the draft. */
-  const createQuoteAndMaybeDraft = async (withDraft: boolean) => {
+  /** Raise the quote (and its public accept link) once; the response then carries the link. */
+  const createQuote = async () => {
     if (!ex || !request.customerId || block.rateCents == null) return
     const ok = await run(async () => {
-      let quoteId = request.quoteId ?? null
-      if (!quoteId) {
-        const lines: LoadChargeInput[] = [
-          { side: 'CUSTOMER', code: 'LINEHAUL', label: null, calculatedBy: 'FLAT', rateCents: block.rateCents ?? 0, count: 1, isRate: true, sortOrder: 0, note: null },
-          ...ex.accessorials
-            .filter((a) => (QUOTE_LINE_CODES as readonly string[]).includes(a))
-            .map((code, i): LoadChargeInput => ({ side: 'CUSTOMER', code, label: null, calculatedBy: 'FLAT', rateCents: 0, count: 1, isRate: false, sortOrder: i + 1, note: null })),
-        ]
-        const stops = quoteStops(ex)
-        const saved = await saveQuote({
-          side: 'SELL',
-          customerId: request.customerId,
-          customerName: customer?.name ?? null,
-          contactName: ex.contactName ?? request.fromName ?? null,
-          contactEmail,
-          customerRepId: user?.email ?? null,
-          stops,
-          pickupAppt: stops[0]?.appt || null,
-          deliveryAppt: stops[stops.length - 1]?.appt || null,
-          mode: 'FTL',
-          rateType: 'SPOT',
-          equipmentType: ex.equipmentType,
-          equipmentLengthFt: ex.lengthFt,
-          commodity: ex.commodity,
-          weightLbs: ex.weightLbs,
-          miles: pricing.market?.answer.miles ?? null,
-          lines,
-          internalNotes: `From spot request ${request.id}`,
-          spotRequestId: request.id,
-        })
-        quoteId = saved.quote.id
-        await sendQuote({ quoteId, via: 'COPY', to: contactEmail ? [contactEmail] : undefined })
-      }
-      if (withDraft) await spotAction('SPOT_CREATE_DRAFT', { requestId: request.id, quoteId, intro: intro || undefined, outro: outro || undefined })
-    }, withDraft ? 'Quote created — draft is in your Gmail' : 'Quote created')
-    // The quote may exist even when the draft failed: reload so the page says so.
-    finish()
+      const lines: LoadChargeInput[] = [
+        { side: 'CUSTOMER', code: 'LINEHAUL', label: null, calculatedBy: 'FLAT', rateCents: block.rateCents ?? 0, count: 1, isRate: true, sortOrder: 0, note: null },
+        ...ex.accessorials
+          .filter((a) => (QUOTE_LINE_CODES as readonly string[]).includes(a))
+          .map((code, i): LoadChargeInput => ({ side: 'CUSTOMER', code, label: null, calculatedBy: 'FLAT', rateCents: 0, count: 1, isRate: false, sortOrder: i + 1, note: null })),
+      ]
+      const stops = quoteStops(ex)
+      const saved = await saveQuote({
+        side: 'SELL',
+        customerId: request.customerId,
+        customerName: customer?.name ?? null,
+        contactName: ex.contactName ?? request.fromName ?? null,
+        contactEmail,
+        customerRepId: user?.email ?? null,
+        stops,
+        pickupAppt: stops[0]?.appt || null,
+        deliveryAppt: stops[stops.length - 1]?.appt || null,
+        mode: 'FTL',
+        rateType: 'SPOT',
+        equipmentType: ex.equipmentType,
+        equipmentLengthFt: ex.lengthFt,
+        commodity: ex.commodity,
+        weightLbs: ex.weightLbs,
+        miles: pricing.market?.answer.miles ?? null,
+        lines,
+        internalNotes: `From spot request ${request.id}`,
+        spotRequestId: request.id,
+      })
+      await sendQuote({ quoteId: saved.quote.id, via: 'COPY', to: contactEmail ? [contactEmail] : undefined })
+      setCreatedQuoteId(saved.quote.id)
+    }, 'Quote created')
+    if (ok) onChanged()
     return ok
   }
 
-  const updateDraft = async () => {
-    if (!request.quoteId) return
-    if (await run(() => spotAction('SPOT_CREATE_DRAFT', { requestId: request.id, quoteId: request.quoteId as string, intro: intro || undefined, outro: outro || undefined }), 'Draft updated')) finish()
+  const copyResponse = async () => {
+    if (!(await copyText(bodyText2))) {
+      toast.error('Could not copy; select the text and copy it by hand')
+      return
+    }
+    toast.success('Response copied')
+    try {
+      await spotAction('SPOT_LOG_COPIED', { requestId: request.id, quoteId: quoteId ?? undefined })
+    } catch (err) {
+      setError(messageOf(err))
+    }
   }
 
-  const sendNow = async () => {
-    if (await run(() => spotAction('SPOT_SEND_DRAFT', { requestId: request.id, confirm: true }), 'Sent from your Gmail')) {
-      setSendDialog(false)
+  const markSent = async () => {
+    if (await run(() => spotAction('SPOT_MARK_SENT', { requestId: request.id }), 'Marked as sent')) finish()
+  }
+
+  const markLost = async () => {
+    if (await run(() => spotAction('SPOT_MARK_OUTCOME', { requestId: request.id, outcome: 'LOST', lostReason: lostReason.trim() || undefined }), 'Marked as lost')) {
+      setLostDialog(false)
       finish()
     }
   }
@@ -225,27 +232,24 @@ function RequestPanel({
   const missing = request.missingFields ?? []
   const bodyText = request.bodyText ?? ''
   const gmailUrl = connection?.mode === 'GOOGLE' ? gmailThreadUrl(connection.googleEmail, request.gmailThreadId) : null
-  const draftUrl = connection?.mode === 'GOOGLE' && request.draftMessageId
-    ? `https://mail.google.com/mail/?authuser=${encodeURIComponent(connection.googleEmail ?? '')}#drafts?compose=${encodeURIComponent(request.draftMessageId)}`
-    : null
-  const preview =
-    ex && block.rateCents != null && origin && destination && ex.equipmentType
-      ? renderSpotReply({
-          rateCents: block.rateCents,
-          origin: { city: origin.city, state: origin.state },
-          destination: { city: destination.city, state: destination.state },
-          equipmentType: ex.equipmentType,
-          lengthFt: ex.lengthFt,
-          pickupDate: ex.pickupDate,
-          expiresAt: null,
-          link: '[accept link is added when the quote is created]',
-          intro,
-          outro,
-          signature: connection?.settings?.signature ?? '',
-        })
-      : null
-  const canCreate = open && !!request.customerId && !!ex && !block.reason && missing.length === 0 && !busy
+  const canCreate = open && !quoteId && !!request.customerId && !!ex && !block.reason && missing.length === 0 && !busy
   const setF = <K extends keyof Form>(key: K, value: Form[K]) => setForm((f) => ({ ...f, [key]: value }))
+  const [toText, setToText] = useState(contactEmail)
+  const [respError, setRespError] = useState<string | null>(null)
+  const closed = request.status === 'DISMISSED'
+  useEffect(() => {
+    if (closed) return
+    let live = true
+    spotAction('SPOT_SUGGEST_RESPONSE', { requestId: request.id, quoteId: quoteId ?? undefined })
+      .then((r) => {
+        if (!live) return
+        setResponse(r); setSubjectText(r.subject); setBodyText2(r.body); setToText(r.to || contactEmail); setRespError(null)
+      })
+      .catch((err: unknown) => { if (live) setRespError(messageOf(err)) })
+    return () => { live = false }
+    // contactEmail is derived from the request this panel is keyed on.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [request.id, quoteId, closed])
   const chip = (key: string) => (ex ? <FieldChip fieldKey={key} extraction={ex} fieldMeta={request.fieldMeta} /> : null)
 
   return (
@@ -374,7 +378,7 @@ function RequestPanel({
             </strong>
           ) : null}
         </p>
-        {open || drafted ? (
+        {open ? (
           <>
             <TmsSelect
               data-testid="spot-customer-select"
@@ -405,93 +409,71 @@ function RequestPanel({
         <PricingCard pricing={pricing} rateText={rateText} onRateText={setRateEdit} stubAck={stubAck} onStubAck={setStubAck} block={block} disabled={!open} />
       </Section>
 
-      <Section title="Reply" testId="spot-section-reply">
-        {drafted && draft ? (
+      <Section title="Suggested response" testId="spot-section-reply">
+        <p className="tms-muted tms-flush" data-testid="spot-readonly-note">
+          Read-only: BCAT Ops never sends or drafts mail. Edit the text, copy it and send it yourself.
+        </p>
+        {respError ? <p className="tms-field-error tms-flush">{respError}</p> : null}
+        {response ? (
           <>
-            <p className="tms-flush tms-muted">Draft in your Gmail — To {draft.to}, “{draft.subject}”</p>
-            <pre className="tms-spot-reply" data-testid="spot-draft-text">{draft.text}</pre>
-          </>
-        ) : (
-          <>
-            <TmsField label="Intro (optional, up to 600 characters)">
-              <TmsTextarea data-testid="spot-intro" rows={2} maxLength={600} value={intro} disabled={!open && !drafted} onChange={(e) => setIntro(e.target.value)} />
+            {!response.hasLink ? <p className="tms-muted tms-flush">No accept link yet — create the quote to add one.</p> : null}
+            <TmsField label="To">
+              <TmsInput data-testid="spot-resp-to" value={toText} onChange={(e) => setToText(e.target.value)} />
             </TmsField>
-            <TmsField label="Closing (optional, up to 600 characters)">
-              <TmsTextarea data-testid="spot-outro" rows={2} maxLength={600} value={outro} disabled={!open && !drafted} onChange={(e) => setOutro(e.target.value)} />
+            <TmsField label="Subject">
+              <TmsInput data-testid="spot-resp-subject" value={subjectText} onChange={(e) => setSubjectText(e.target.value)} />
             </TmsField>
-            {preview ? <pre className="tms-spot-reply" data-testid="spot-reply-preview">{preview}</pre> : <p className="tms-muted tms-flush">The reply preview appears once the lane, equipment and rate are set.</p>}
+            <TmsField label="Response">
+              <TmsTextarea data-testid="spot-resp-body" rows={10} value={bodyText2} onChange={(e) => setBodyText2(e.target.value)} />
+            </TmsField>
+            <div className="tms-spot-actions">
+              <TmsButton variant="primary" data-testid="spot-copy" onClick={() => void copyResponse()}>Copy response</TmsButton>
+              <a className="tms-btn tms-btn-secondary" data-testid="spot-open-compose" href={gmailComposeUrl(toText, subjectText, bodyText2)} target="_blank" rel="noreferrer">Open in Gmail</a>
+              <a data-testid="spot-open-mailto" href={mailtoUrl(toText, subjectText, bodyText2)}>Open in mail app</a>
+            </div>
           </>
-        )}
+        ) : !respError ? <p className="tms-muted tms-flush">Preparing the suggested response…</p> : null}
       </Section>
 
       <Section title="Actions" testId="spot-section-actions">
-        {request.autoDecision ? (
-          <TmsAlert tone={request.autoDecision.decision === 'SENT' ? 'green' : 'blue'} title={request.autoDecision.decision === 'SENT' ? `Sent automatically ${relativeTime(request.autoDecision.at)}` : `Auto-send: ${request.autoDecision.decision.toLowerCase().replace('_', ' ')}`}>
-            <span data-testid="spot-auto-decision">{request.autoDecision.reasons.join(', ') || 'All gates passed.'}{request.autoDecision.error ? ` — ${request.autoDecision.error}` : ''}</span>
-          </TmsAlert>
-        ) : null}
-        {request.quoteId && open ? (
-          <p className="tms-field-error tms-flush" data-testid="spot-draft-failed">
-            Quote {request.quoteNumber ?? request.quoteId} was created, but the Gmail draft was not.
-          </p>
-        ) : null}
         {open ? (
           <div className="tms-spot-actions">
-            <TmsButton variant="primary" data-testid="spot-create-draft" disabled={!canCreate} title={block.reason ?? (request.customerId ? undefined : 'Pick or create the customer first')} onClick={() => void createQuoteAndMaybeDraft(true)}>
-              {request.quoteId ? 'Retry Gmail draft' : 'Create quote & Gmail draft'}
+            <TmsButton variant="primary" data-testid="spot-create-quote" disabled={!canCreate} title={block.reason ?? (request.customerId ? undefined : 'Pick or create the customer first')} onClick={() => void createQuote()}>
+              Create quote
             </TmsButton>
-            {!request.quoteId ? (
-              <TmsButton data-testid="spot-create-quote" disabled={!canCreate} title={block.reason ?? undefined} onClick={() => void createQuoteAndMaybeDraft(false)}>
-                Create quote only
-              </TmsButton>
-            ) : null}
+            <TmsButton data-testid="spot-mark-sent" disabled={busy} onClick={() => void markSent()}>Mark sent</TmsButton>
             <TmsButton variant="destructive" data-testid="spot-dismiss" disabled={busy} onClick={() => setDismissDialog(true)}>Dismiss</TmsButton>
           </div>
         ) : null}
         {!request.customerId && open ? <p className="tms-muted tms-flush">Pick or create the customer to quote this.</p> : null}
-        {block.reason && open && request.customerId ? <p className="tms-muted tms-flush" data-testid="spot-create-reason">{block.reason}</p> : null}
+        {block.reason && open && request.customerId && !quoteId ? <p className="tms-muted tms-flush" data-testid="spot-create-reason">{block.reason}</p> : null}
 
-        {drafted ? (
+        {sent ? (
           <div className="tms-spot-actions">
-            <p className="tms-flush">Draft ready in your Gmail — nothing has been sent.</p>
-            {draftUrl ? <a href={draftUrl} target="_blank" rel="noreferrer" data-testid="spot-open-draft">Open draft in Gmail</a> : null}
-            <TmsButton data-testid="spot-update-draft" disabled={busy} onClick={() => void updateDraft()}>Update draft</TmsButton>
-            <span title={status.devStack ? 'Sending is disabled on the dev stack. Send the draft from Gmail.' : undefined}>
-              <TmsButton data-testid="spot-send-now" disabled={busy || status.devStack || !draft} onClick={() => setSendDialog(true)}>Send now</TmsButton>
-            </span>
-            <TmsButton variant="destructive" data-testid="spot-dismiss" disabled={busy} onClick={() => setDismissDialog(true)}>Dismiss</TmsButton>
+            {request.sentAt ? <p className="tms-flush tms-muted">Marked sent {relativeTime(request.sentAt)}.</p> : null}
+            {quoteId ? <TmsButton data-testid="spot-convert" disabled={busy} onClick={() => void openConvert()}>Convert to shipment</TmsButton> : null}
+            <TmsButton data-testid="spot-mark-won" disabled={busy} onClick={() => void run(() => spotAction('SPOT_MARK_OUTCOME', { requestId: request.id, outcome: 'WON' }), 'Marked as won').then((ok) => ok && finish())}>Mark won</TmsButton>
+            <TmsButton variant="destructive" data-testid="spot-mark-lost" disabled={busy} onClick={() => setLostDialog(true)}>Mark lost</TmsButton>
           </div>
         ) : null}
-
-        {request.status === 'SENT' || request.status === 'AUTO_PENDING' || (drafted && request.customerReplyAt) ? (
-          request.sentAt ? <p className="tms-flush tms-muted">Sent {relativeTime(request.sentAt)}{request.sentVia === 'AUTO' ? ' automatically' : ''}.</p> : null
-        ) : null}
-        {request.quoteId && (request.status === 'SENT' || drafted) ? (
-          <TmsButton data-testid="spot-convert" disabled={busy} onClick={() => void openConvert()}>Convert to shipment</TmsButton>
-        ) : null}
         {request.status === 'WON' && request.shipmentNumber ? <p className="tms-flush">Booked as shipment {request.shipmentNumber}.</p> : null}
-        {request.quoteId ? <p className="tms-flush tms-muted">Quote {request.quoteNumber ?? request.quoteId}{request.quoteStatus ? ` · ${request.quoteStatus}` : ''}{suggested != null && open ? ` · suggested ${money(suggested)}` : ''}</p> : null}
+        {quoteId ? <p className="tms-flush tms-muted">Quote {request.quoteNumber ?? quoteId}{request.quoteStatus ? ` · ${request.quoteStatus}` : ''}</p> : null}
       </Section>
 
       <TmsDialog
-        open={sendDialog}
-        onOpenChange={setSendDialog}
-        title="Send this e-mail now?"
-        description="This sends the e-mail from your Gmail now."
+        open={lostDialog}
+        onOpenChange={setLostDialog}
+        title="Mark this request lost?"
         footer={
           <>
-            <TmsButton onClick={() => setSendDialog(false)}>Cancel</TmsButton>
-            <TmsButton variant="primary" data-testid="spot-send-confirm" disabled={busy} onClick={() => void sendNow()}>Send</TmsButton>
+            <TmsButton onClick={() => setLostDialog(false)}>Cancel</TmsButton>
+            <TmsButton variant="destructive" data-testid="spot-lost-confirm" disabled={busy} onClick={() => void markLost()}>Mark lost</TmsButton>
           </>
         }
       >
-        {draft ? (
-          <div data-testid="spot-send-preview">
-            <p className="tms-flush"><strong>To:</strong> {draft.to}</p>
-            <p className="tms-flush"><strong>Subject:</strong> {draft.subject}</p>
-            <pre className="tms-spot-reply">{draft.text.slice(0, 400)}</pre>
-          </div>
-        ) : null}
+        <TmsField label="Reason (optional)">
+          <TmsInput data-testid="spot-lost-reason" maxLength={200} value={lostReason} onChange={(e) => setLostReason(e.target.value)} />
+        </TmsField>
       </TmsDialog>
 
       <TmsDialog
@@ -517,7 +499,7 @@ function RequestPanel({
           onOpenChange={(o) => { if (!o) setConvertQuote(null) }}
           onDone={() => {
             setConvertQuote(null)
-            void run(() => spotAction('SPOT_MARK_OUTCOME', { requestId: request.id })).then(finish)
+            void run(() => spotAction('SPOT_MARK_OUTCOME', { requestId: request.id, outcome: 'WON' })).then(finish)
           }}
         />
       ) : null}
@@ -552,7 +534,6 @@ export function SpotRequestDrawer({
           <RequestPanel
             key={`${result.request.id}:${result.request.version}`}
             request={result.request}
-            draft={result.draft}
             status={status}
             onChanged={onChanged}
             reload={refresh}

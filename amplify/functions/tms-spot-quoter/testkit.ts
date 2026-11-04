@@ -10,10 +10,9 @@ import type {
   SpotRequestStatus,
   SpotSettingsRecord,
 } from '../../../src/types/tms'
-import type { GmailMessageMeta, GmailPort, OutgoingReply } from '../../../src/lib/spot/port'
+import type { GmailMessageMeta, GmailPort } from '../../../src/lib/spot/port'
 import type { RawSpotModelOutput } from '../../../src/lib/spot/normalize'
 import type { SenderMatch } from '../../../src/lib/crm/types'
-import type { SpotAutoQuoteEvent, SpotAutoQuoteResult } from '../../../src/lib/spot/types'
 import type { CrmPort, OAuthPort, SimPorts, SpotDeps } from './deps'
 import type { SpotModel } from './model'
 import { ConflictError, INDEX_KEY_ATTRS, omitEmptyKeys, type Row, type SpotStore } from './store'
@@ -190,24 +189,14 @@ export class FakePort implements GmailPort {
   inbox: string[] = []
   history = '100'
   expired = false
-  drafts = new Map<string, OutgoingReply & { messageId: string }>()
-  sentDrafts: string[] = []
-  sentReplies: OutgoingReply[] = []
   bodyCalls: string[] = []
   recentCalls = 0
   sinceCalls = 0
   failBody = new Set<string>()
-  failSend = false
-  failDraft = false
-  private seq = 0
 
   add(meta: GmailMessageMeta, body: string): void {
     this.mails.set(meta.id, { meta, body })
     this.inbox.push(meta.id)
-  }
-
-  get sendCalls(): number {
-    return this.sentDrafts.length + this.sentReplies.length
   }
 
   async profile() {
@@ -236,44 +225,6 @@ export class FakePort implements GmailPort {
   }
   async threadMessages(threadId: string) {
     return [...this.mails.values()].filter((m) => m.meta.threadId === threadId).map((m) => m.meta)
-  }
-  async createDraft(d: OutgoingReply) {
-    if (this.failDraft) throw new Error('draft failed')
-    this.seq += 1
-    const draftId = `draft-${this.seq}`
-    this.drafts.set(draftId, { ...d, messageId: `dm-${this.seq}` })
-    return { draftId, messageId: `dm-${this.seq}` }
-  }
-  async updateDraft(draftId: string, d: OutgoingReply) {
-    const current = this.drafts.get(draftId)
-    if (!current) throw new Error('no draft')
-    this.drafts.set(draftId, { ...d, messageId: current.messageId })
-  }
-  async getDraft(draftId: string) {
-    const d = this.drafts.get(draftId)
-    return d ? { exists: true, to: d.to, subject: d.subject, text: d.text } : { exists: false, to: '', subject: '', text: '' }
-  }
-  async sendDraft(draftId: string) {
-    this.sentDrafts.push(draftId)
-    return { messageId: 'sent-1' }
-  }
-  async sendReply(d: OutgoingReply) {
-    if (this.failSend) throw new Error('send failed')
-    this.sentReplies.push(d)
-    return { messageId: 'sent-2' }
-  }
-
-  /** "The rep pressed Send": the draft leaves and a SENT message appears in the thread. */
-  repSends(draftId: string, at: number): void {
-    const d = this.drafts.get(draftId)
-    if (!d) throw new Error('no draft')
-    this.drafts.delete(draftId)
-    const meta: GmailMessageMeta = {
-      id: d.messageId, threadId: d.threadId ?? `thr-${d.messageId}`, internalDate: String(at), from: 'me', to: [d.to], cc: [],
-      replyTo: null, subject: d.subject, messageId: `<${d.messageId}@x>`, inReplyTo: d.inReplyTo, references: d.references,
-      snippet: d.text.slice(0, 80), labelIds: ['SENT'], headers: {},
-    }
-    this.mails.set(meta.id, { meta, body: d.text })
   }
 }
 
@@ -375,7 +326,7 @@ export function fakeOAuth(): FakeOAuth {
   const o: FakeOAuth = {
     tokens: new Map(), revoked: [], stateCounter: 0,
     client: { clientId: 'cid', clientSecret: 'csecret', allowedDomain: '' },
-    exchange: { refreshToken: 'rt-secret-value', accessToken: 'at', scope: 'openid email gmail.readonly gmail.compose', idToken: 'x.y.z' },
+    exchange: { refreshToken: 'rt-secret-value', accessToken: 'at', scope: 'openid email gmail.readonly', idToken: 'x.y.z' },
     identity: { email: 'rep@zz-bcat.test', emailVerified: true, hd: 'zz-bcat.test' },
     async readClient() {
       return o.client
@@ -389,7 +340,7 @@ export function fakeOAuth(): FakeOAuth {
       return o.exchange
     },
     parseIdToken: () => o.identity,
-    hasRequiredScopes: (scope) => scope.includes('gmail.readonly') && scope.includes('gmail.compose'),
+    hasRequiredScopes: (scope) => scope.includes('gmail.readonly'),
     redirectUriAllowed: (uri, origins) => origins.some((origin) => uri === `${origin}/tms/rates/spot/callback`),
     async revoke(token) {
       o.revoked.push(token)
@@ -409,20 +360,15 @@ export function fakeOAuth(): FakeOAuth {
 
 export interface FakeSim extends SimPorts {
   injected: Array<{ userId: string; id?: string }>
-  marked: string[]
   resets: string[]
 }
 
 export function fakeSim(): FakeSim {
   const sim: FakeSim = {
-    injected: [], marked: [], resets: [],
+    injected: [], resets: [],
     async inject(userId, msg) {
       sim.injected.push({ userId, id: msg.id })
       return { id: msg.id ?? 'sim-1' }
-    },
-    async markSent(_userId, draftId) {
-      sim.marked.push(draftId)
-      return { messageId: 'm' }
     },
     async reset(userId) {
       sim.resets.push(userId)
@@ -445,9 +391,7 @@ export interface TestRig {
   crm: FakeCrm
   oauth: FakeOAuth
   sim: FakeSim
-  doorCalls: SpotAutoQuoteEvent[]
   clock: { now: Date }
-  setDoor(fn: (e: SpotAutoQuoteEvent) => SpotAutoQuoteResult | Error): void
 }
 
 export const REP_ID = 'rep-1'
@@ -468,18 +412,10 @@ export function makeRig(opts: { dev?: boolean; aiAgents?: AiAgentsSettings | nul
   const crm = fakeCrm()
   const oauth = fakeOAuth()
   const sim = fakeSim()
-  const doorCalls: SpotAutoQuoteEvent[] = []
-  let door: (e: SpotAutoQuoteEvent) => SpotAutoQuoteResult | Error = () => ({ ok: false, reasons: ['PRICE_STUB'] })
   if (opts.aiAgents) store.tmsSettings.value = { id: 'default', aiAgents: opts.aiAgents }
   const deps: SpotDeps = {
     store, crm, model, oauth, sim,
     portFor: () => port,
-    async door(event) {
-      doorCalls.push(event)
-      const out = door(event)
-      if (out instanceof Error) throw out
-      return out
-    },
     async providerModes() {
       return { gmail: oauth.client ? 'LIVE' : 'STUB', dat: 'STUB' }
     },
@@ -489,7 +425,7 @@ export function makeRig(opts: { dev?: boolean; aiAgents?: AiAgentsSettings | nul
     portalOrigin: 'https://ops.zz-bcat.test',
     ownDomains: ['zz-bcat.test'],
   }
-  return { deps, store, port, model, crm, oauth, sim, doorCalls, clock, setDoor: (fn) => { door = fn } }
+  return { deps, store, port, model, crm, oauth, sim, clock }
 }
 
 export function identityOf(userId: string, email: string, groups: string[] = ['page-quotes']): {
