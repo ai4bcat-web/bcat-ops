@@ -702,6 +702,31 @@ export const PROVIDERS: ProviderDescriptor[] = [
     note: "BCAT's Gmail paths are Apps Script bridges posting to a Function URL with one shared secret, not per-user OAuth",
   },
   {
+    key: 'GMAIL_REP_OAUTH',
+    label: 'Gmail (per-rep sign-in)',
+    category: 'EMAIL',
+    credentialSource: 'PAGE',
+    credentialFields: [
+      { key: 'clientId', label: 'OAuth client ID', secret: false },
+      { key: 'clientSecret', label: 'OAuth client secret', secret: true, kind: 'password' },
+    ],
+    stackSecretNames: [],
+    settingsFields: [
+      { key: 'allowedDomain', label: 'Workspace domain', type: 'text', defaultValue: '', hint: 'bcatcorp.com' },
+    ],
+    capabilities: ['connect', 'validate', 'sync'],
+    liveCapabilities: ['validate', 'sync'],
+    validateHow: {
+      describe: 'Presents the client id and secret to Google’s token endpoint with a deliberately invalid code. “invalid_grant” means Google knows the client and accepted the secret; “invalid_client” means the id or secret is wrong. No mail is read.',
+      liveCheck: 'GOOGLE_OAUTH_CLIENT',
+    },
+    applicability: 'LIVE_CAPABLE',
+    loadsRead: 'NONE',
+    feeds: 'Spot quoter inbox and CRM e-mail touchpoints, one Gmail connection per sales rep.',
+    docsUrl: 'https://developers.google.com/identity/protocols/oauth2/web-server',
+    note: 'Per-rep sign-in for the Spot quoter; does not replace the shared-inbox bridge above. Until both keys are entered the Spot quoter runs against a simulated inbox only.',
+  },
+  {
     key: 'OUTLOOK',
     label: 'Outlook',
     category: 'EMAIL',

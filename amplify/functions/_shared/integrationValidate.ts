@@ -316,6 +316,39 @@ export async function validateProvider(
         )
       }
 
+      case 'GOOGLE_OAUTH_CLIENT': {
+        const got = requireCreds(creds, ['clientId', 'clientSecret'])
+        if (!got.ok) return got.outcome
+        const [clientId, clientSecret] = got.values
+        // A deliberately invalid code: Google answers 400 invalid_grant when it knows the
+        // client and accepted the secret, 401 invalid_client when it does not. No mail is
+        // read and no token is minted.
+        const res = await call(fetchImpl, 'https://oauth2.googleapis.com/token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
+          body: new URLSearchParams({
+            grant_type: 'authorization_code',
+            code: 'invalid',
+            client_id: clientId,
+            client_secret: clientSecret,
+            redirect_uri: 'https://localhost/validate',
+          }).toString(),
+        })
+        const err = googleOAuthError(res.body)
+        if (res.status === 400 && err === 'invalid_grant') {
+          return { kind: 'HTTP', statusCode: 200, message: 'Google recognised the client id and secret.' }
+        }
+        if (res.status === 401 || err === 'invalid_client') {
+          return { kind: 'HTTP', statusCode: 401, message: 'Google rejected the client id or secret (invalid_client).' }
+        }
+        // Anything else is not a verdict; say so rather than guess an OK.
+        return {
+          kind: 'SKIPPED',
+          reason: 'NO_VALIDATE_ENDPOINT',
+          message: `Unable to verify: Google answered HTTP ${res.status}${err ? ` (${err})` : ''}.`,
+        }
+      }
+
       case 'OTR_BROKER_CHECK': {
         const got = requireCreds(creds, ['OTR_USERNAME', 'OTR_PASSWORD', 'OTR_SUBSCRIPTION_KEY'])
         if (!got.ok) return got.outcome
@@ -385,6 +418,19 @@ export async function validateProvider(
     const secrets = Object.values(creds).filter((v): v is string => typeof v === 'string')
     return errorOutcome(err, secrets)
   }
+}
+
+/** The `error` code of an OAuth error body, when the body is the JSON Google promises. */
+function googleOAuthError(body: string): string | null {
+  try {
+    const parsed: unknown = JSON.parse(body)
+    if (parsed && typeof parsed === 'object' && 'error' in parsed && typeof parsed.error === 'string') {
+      return parsed.error
+    }
+  } catch {
+    return null
+  }
+  return null
 }
 
 /** Google's `status` field, when the body is the JSON it promises. */

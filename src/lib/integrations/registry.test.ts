@@ -42,6 +42,7 @@ const EXPECTED: ProviderKey[] = [
   'OPENAPI',
   'ORDERFUL',
   'GMAIL',
+  'GMAIL_REP_OAUTH',
   'OUTLOOK',
   'HUBSPOT',
   'OTR',

@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Archive, Merge, Pencil, Settings2 } from 'lucide-react'
+import { Archive, MessageSquarePlus, Merge, Pencil, Settings2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useAuth } from '@/hooks/useAuth'
+import { useStaff } from '@/hooks/useStaff'
+import { useCrmAccounts } from '@/features/crm/useCrmAccounts'
+import { isCrmManager, isOverdue, kindLabel, relativeDay } from '@/features/crm/format'
 import { useDirectory, type CustomerRecord, type LocationRecord } from '@/hooks/useDirectory'
 import {
   TmsBadge,
@@ -35,6 +38,7 @@ import { useLocationForm } from './components/useLocationForm'
 import { LocationDetail } from './components/LocationDetail'
 import { CustomerProfile } from './components/CustomerProfile'
 import { CustomerOrgDefaults } from './components/CustomerOrgDefaults'
+import { AddNoteDialog } from './components/AddNoteDialog'
 
 function stripRecord<T extends { id: string; createdAt: string; updatedAt: string }>(record: T): Omit<T, 'id' | 'createdAt' | 'updatedAt'> {
   const { id, createdAt, updatedAt, ...rest } = record
@@ -70,7 +74,14 @@ export function CustomersPage() {
   const profileId = params.get('customer')
   // The directory's 3,000+ locations are only read by the profile's "Shipping locations" tab.
   const dir = useDirectory({ includeArchived: true, locations: profileId != null })
-  const { isAdmin, user } = useAuth()
+  const auth = useAuth()
+  const { isAdmin, user } = auth
+  const isManager = isCrmManager(auth)
+  // Managers and admins can narrow to their own accounts; everyone else is always on their own (§5.6).
+  const [scope, setScope] = useState<'mine' | 'all'>('all')
+  const crm = useCrmAccounts(isManager ? scope : 'mine')
+  const { nameOf } = useStaff(user?.email)
+  const [noteFor, setNoteFor] = useState<CustomerRecord | null>(null)
   const [query, setQuery] = useState('')
   const [filters, setFilters] = useState<CustomerFilters>(EMPTY_CUSTOMER_FILTERS)
   const [filtersOpen, setFiltersOpen] = useState(false)
@@ -99,7 +110,9 @@ export function CustomersPage() {
 
   const rowsWithStatus = useMemo(() => {
     const q = query.trim().toLowerCase()
+    const visibleOnly = crm.loaded && (!isManager || scope === 'mine')
     return dir.customers
+      .filter((c) => !visibleOnly || crm.byCustomer.has(c.id))
       .filter((c) =>
         !q || [c.name, c.contactName, c.contactEmail, c.mcNumber, c.dotNumber].some((v) => (v ?? '').toLowerCase().includes(q))
       )
@@ -108,7 +121,7 @@ export function CustomersPage() {
       .filter((c) => (filters.archived ? (c.active === false) === (filters.archived === 'yes') : true))
       .filter((c) => (filters.division ? c.defaultDivisionKey === filters.division : true))
       .map((c) => ({ record: c, effective: effectiveCustomerStatus(c, null, new Date().toISOString()), tab: boardTab(effectiveCustomerStatus(c, null, new Date().toISOString())) }))
-  }, [dir.customers, query, filters])
+  }, [dir.customers, query, filters, crm.loaded, crm.byCustomer, isManager, scope])
 
   const counts = useMemo(() => ({
     leads: rowsWithStatus.filter((r) => r.tab === 'leads').length,
@@ -171,6 +184,42 @@ export function CustomersPage() {
         </span>
       ),
     },
+    {
+      key: 'owner',
+      header: 'OWNER',
+      width: 140,
+      render: ({ record: c }) => {
+        const ownerId = crm.byCustomer.get(c.id)?.ownerId
+        return ownerId ? nameOf(ownerId) : <span className="tms-muted">—</span>
+      },
+    },
+    {
+      key: 'lastTouch',
+      header: 'LAST TOUCH',
+      width: 150,
+      render: ({ record: c }) => {
+        const row = crm.byCustomer.get(c.id)
+        return row?.lastTouchAt
+          ? <span data-testid={`crm-last-touch-${c.id}`}>{kindLabel(row.lastTouchKind)} · {relativeDay(row.lastTouchAt)}</span>
+          : <span className="tms-muted">—</span>
+      },
+    },
+    {
+      key: 'nextStep',
+      header: 'NEXT STEP',
+      width: 200,
+      render: ({ record: c }) => {
+        const row = crm.byCustomer.get(c.id)
+        if (!row?.nextStep) return <span className="tms-muted">—</span>
+        const overdue = isOverdue(row.nextStepDueAt)
+        return (
+          <span data-testid={`crm-next-step-${c.id}`} data-overdue={overdue ? 'true' : undefined}>
+            {row.nextStep}{row.nextStepDueAt ? ` · ${row.nextStepDueAt.slice(0, 10)}` : ''}
+            {overdue && <> <TmsBadge tone="red">overdue</TmsBadge></>}
+          </span>
+        )
+      },
+    },
     { key: 'contact', header: 'CONTACT', width: 160, render: ({ record: c }) => c.contactName || <span className="tms-muted">no contact yet</span> },
     { key: 'email', header: 'EMAIL', width: 200, render: ({ record: c }) => c.contactEmail ?? '—' },
     { key: 'phone', header: 'PHONE', width: 140, render: ({ record: c }) => c.contactPhone ?? '—' },
@@ -205,9 +254,10 @@ export function CustomersPage() {
     {
       key: 'actions',
       header: '',
-      width: 80,
+      width: 110,
       render: ({ record: c }) => (
         <span style={{ display: 'inline-flex', gap: 4 }} onClick={(e) => e.stopPropagation()}>
+          <TmsIconButton shape="plain" aria-label={`Add note to ${c.name}`} title="Add note" onClick={() => setNoteFor(c)}><MessageSquarePlus size={14} /></TmsIconButton>
           <TmsIconButton shape="plain" aria-label={`Edit ${c.name}`} title="Edit" onClick={() => setEditing(c)}><Pencil size={14} /></TmsIconButton>
           {isAdmin && (
             <TmsIconButton shape="plain" aria-label={`Archive ${c.name}`} title="Archive" onClick={() => void archive(c)}><Archive size={14} /></TmsIconButton>
@@ -234,10 +284,20 @@ export function CustomersPage() {
       <TmsListPage<Row>
         title="Customers"
         primaryAction={{ label: 'Customer', onClick: () => setEditing('new') }}
-        actions={isAdmin ? (
-          <TmsIconButton aria-label="Organization defaults" title="Organization defaults" onClick={() => setShowDefaults(true)}>
-            <Settings2 size={16} />
-          </TmsIconButton>
+        actions={(isAdmin || isManager) ? (
+          <>
+            {isManager && (
+              <span role="group" aria-label="Account scope" style={{ display: 'inline-flex', gap: 4 }} data-testid="crm-scope">
+                <TmsButton size="sm" variant={scope === 'mine' ? 'primary' : undefined} aria-pressed={scope === 'mine'} onClick={() => setScope('mine')} data-testid="crm-scope-mine">Mine</TmsButton>
+                <TmsButton size="sm" variant={scope === 'all' ? 'primary' : undefined} aria-pressed={scope === 'all'} onClick={() => setScope('all')} data-testid="crm-scope-all">All</TmsButton>
+              </span>
+            )}
+            {isAdmin && (
+              <TmsIconButton aria-label="Organization defaults" title="Organization defaults" onClick={() => setShowDefaults(true)}>
+                <Settings2 size={16} />
+              </TmsIconButton>
+            )}
+          </>
         ) : null}
         search={{ value: query, onChange: setQuery, placeholder: 'Search customers' }}
         onRefresh={dir.refresh}
@@ -245,7 +305,7 @@ export function CustomersPage() {
         onAddFilter={() => setFiltersOpen(true)}
         quickTabs={{
           tabs: [
-            { key: 'leads', label: 'Leads', count: counts.leads },
+            { key: 'leads', label: 'Prospects', count: counts.leads },
             { key: 'active', label: 'Active', count: counts.active },
             { key: 'inactive', label: 'Inactive', count: counts.inactive },
           ],
@@ -308,6 +368,8 @@ export function CustomersPage() {
         </div>
       </TmsDialog>
 
+      {noteFor && <AddNoteDialog customerId={noteFor.id} customerName={noteFor.name} onClose={() => setNoteFor(null)} onSaved={() => void crm.refresh()} />}
+
       {showDefaults && <CustomerOrgDefaults settings={settings} onSave={saveSettings} onClose={() => setShowDefaults(false)} />}
 
       <CustomerModal
@@ -338,7 +400,7 @@ export function CustomersPage() {
           isAdmin={isAdmin}
           currentUser={user?.email ?? ''}
           activeCustomers={dir.customers.filter((c) => c.id !== profileCustomer.id && c.active !== false && c.status !== 'BLOCKED')}
-          onClose={() => setProfileId(null)}
+          onClose={() => { setProfileId(null); void crm.refresh() }}
           onSave={async (current, next) => {
             await dir.saveCustomer(current, next)
             toast.success('Customer saved')

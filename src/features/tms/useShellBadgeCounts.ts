@@ -25,6 +25,7 @@ import { useApToReviewCount } from '@/hooks/useApToReviewCount'
 import { useQuotesToReplyCount } from '@/hooks/useQuotesToReplyCount'
 import { MOVEMENT_STATUSES } from '@/lib/brokerageCharts'
 import { countOpenIntakeLoads } from '@/lib/apiClient'
+import { useSpotNewCount } from '@/features/spot-quoter/useSpotRequests'
 import { loadReviewCount } from '@/lib/loadReview'
 import { needsCoverCount } from '@/features/tms/carrierSales/carrierSalesQueue'
 import type { ShipmentListRow } from '@/hooks/useShipments'
@@ -87,6 +88,9 @@ export function useShellBadgeCounts({ shipments }: ShellBadgeArgs): Record<strin
     hasPageAccess('loads') || hasPageAccess('tms') || hasPageAccess('intakeReview'),
   )
 
+  // Spot quote requests waiting on this rep (Quotes › Spot inbox); same page gate as the inbox.
+  const spotNew = useSpotNewCount(hasPageAccess('quotes') || hasPageAccess('tms'))
+
   const tracking = useMemo(() => movingShipments(shipments).length, [shipments])
   // Both queues are derived from the shipments the shell already holds: no new read.
   const mayReviewLoads = hasPageAccess('loadReview') || hasPageAccess('tms')
@@ -117,7 +121,7 @@ export function useShellBadgeCounts({ shipments }: ShellBadgeArgs): Record<strin
       // The parent rows' chores: moving loads are not one, so Tracking is left out of the sum.
       loadTracking: checkCallsDue + documentReviewCount,
       accounting: arToInvoiceCount + apToReviewCount,
-      // `spotNew` (Quotes › Spot inbox) is a slot: Step AB fills it with its own hook and adds the one line here.
+      spotNew,
     }
     const out: Record<string, number> = {}
     for (const [key, n] of Object.entries(counts)) if (n) out[key] = n
@@ -125,6 +129,6 @@ export function useShellBadgeCounts({ shipments }: ShellBadgeArgs): Record<strin
   }, [
     tracking, loads, maintenanceTasks, intakeItems, reviewCount, truckDocAlerts, dispatchUnread,
     checkCallsDue, documentReviewCount, arToInvoiceCount, apToReviewCount, quotesToReplyCount, intakeLoads,
-    loadReview, carrierSales,
+    loadReview, carrierSales, spotNew,
   ])
 }

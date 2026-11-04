@@ -72,9 +72,18 @@ import {
   renderQuoteEmail,
 } from '../../../src/lib/quoteNotices'
 import { newLinkToken } from '../../../src/lib/trackingLink'
+import { resolveMargin } from '../../../src/lib/flowDefaults'
+import type { RateViewAnswer } from '../../../src/lib/integrations/rateView'
+import { autoSendDecision } from '../../../src/lib/spot/autoSend'
+import { destinationStop, originStop } from '../../../src/lib/spot/normalize'
+import { DEFAULT_REP_SETTINGS, DEFAULT_SPOT_SETTINGS } from '../../../src/lib/spot/settings'
+import { suggestSpotRate } from '../../../src/lib/spot/suggest'
+import type { AutoSendReason, SpotAutoQuoteEvent, SpotAutoQuoteResult } from '../../../src/lib/spot/types'
 import type { CreditSummary } from '../../../src/lib/customerCredit'
 import type { Stop } from '../../../src/types'
 import type {
+  LaneRateSampleRecord,
+  SpotExtraction,
   ChargeCalc,
   LoadChargeInput,
   PricingDefaults,
@@ -87,6 +96,9 @@ import type {
 } from '../../../src/types/tms'
 
 // ── Dependencies ─────────────────────────────────────────────────────────────
+/** What triggered a prospect's promotion (audited `PROMOTE_PROSPECT.via`). */
+export type BookingVia = 'CREATE_SHIPMENT' | 'CONVERT_QUOTE'
+
 
 /** The charge catalog as `chargeCodeRules` resolves it, keyed by code. */
 export type QuoteChargeRules = Record<string, { label: string | null; calculatedBy: ChargeCalc | null }>
@@ -123,13 +135,22 @@ export interface QuoteDeps {
     loadFinancials: string
     shipment: string
     shipmentNotice: string
+    userProfile: string
   }
   fromAddress: string
   portalOrigin: string
   randomBytes: (size: number) => Uint8Array
   writeAudit: (entityType: string, entityId: string, action: string, caller: Caller, changes: Row) => Promise<void>
   getSettings: () => Promise<Row | null>
-  getActiveCustomer: (customerId: string) => Promise<Row>
+  /**
+   * Step AB §5.5. The gate on building freight: promotes a prospect (lead stage) to ACTIVE on its
+   * first shipment, then applies the unchanged ACTIVE check. `via` names the audited trigger.
+   */
+  getBookableCustomer: (customerId: string, caller: Caller, via: BookingVia) => Promise<Row>
+  /** Step AB §4.7. The PRICE_FROM_MARKET body, in-process, without saving. */
+  priceFromMarket: (input: Row, caller: Caller) => Promise<Row>
+  /** Step AB §4.7. Lane samples newer than `sinceDate` for the exact lane and its ZIP3 neighbourhood. */
+  readLaneSamples: (laneKey: string | null, laneKey3: string | null, sinceDate: string) => Promise<{ exact: Row[]; zip3: Row[] }>
   getById: (tableName: string, id: string) => Promise<Row | null>
   queryIndex: (tableName: string, indexName: string, keyName: string, keyValue: string) => Promise<Row[]>
   transact: (items: TransactWriteItem[], label: string) => Promise<void>
@@ -689,6 +710,14 @@ function readForm(
   return { stops, lines, miles, weightLbs, patch }
 }
 
+/** `sr:<userId>:<gmailMessageId>` (Step AB §6.3); null when absent. Immutable once set. */
+const SPOT_REQUEST_ID = /^sr:[^:]{1,100}:[A-Za-z0-9_-]{1,64}$/
+export function readSpotRequestId(value: unknown): string | null {
+  if (value == null || value === '') return null
+  if (typeof value !== 'string' || !SPOT_REQUEST_ID.test(value)) throw new Error('spotRequestId is not a valid spot request id')
+  return value
+}
+
 /** A customer nobody may quote: the relationship is over, not merely not yet begun. */
 const UNQUOTABLE_STATUSES: Record<string, true> = { CLOSED: true, BLOCKED: true }
 
@@ -722,6 +751,7 @@ export async function saveQuote(deps: QuoteDeps, input: Row, caller: Caller): Pr
   // The run a person applied to get here, kept as a back-reference. An edit that
   // does not name one leaves whatever the row already carries alone.
   const workflowRunId = optionalString(input.workflowRunId, 120)
+  const spotRequestId = readSpotRequestId(input.spotRequestId)
   const settings = await deps.getSettings()
   const existing = quoteId ? await loadQuote(deps, quoteId) : null
 
@@ -729,6 +759,9 @@ export async function saveQuote(deps: QuoteDeps, input: Row, caller: Caller): Pr
     const status = String(existing.status ?? '')
     if (status !== 'DRAFT' && status !== 'REQUESTED') {
       throw new Error(`A ${status} quote can no longer be edited — counter it or send it again`)
+    }
+    if (spotRequestId && existing.spotRequestId && existing.spotRequestId !== spotRequestId) {
+      throw new Error('A quote keeps the spot request it was created from')
     }
   }
 
@@ -754,6 +787,7 @@ export async function saveQuote(deps: QuoteDeps, input: Row, caller: Caller): Pr
       ...money,
       customerId,
       ...(workflowRunId ? { workflowRunId } : {}),
+      ...(spotRequestId ? { spotRequestId } : {}),
       customerName: optionalString(customer?.name, 200) ?? optionalString(existing.customerName, 200),
       ...stamp(existing, caller, now),
     }
@@ -789,6 +823,7 @@ export async function saveQuote(deps: QuoteDeps, input: Row, caller: Caller): Pr
     quoteMonth: monthOf(quoteDate) ?? quoteDate.slice(0, 7),
     customerId,
     workflowRunId,
+    ...(spotRequestId ? { spotRequestId } : {}),
     customerName: optionalString(customer?.name, 200),
     ...form.patch,
     ...money,
@@ -1375,7 +1410,7 @@ export async function convertQuote(deps: QuoteDeps, input: Row, caller: Caller):
 
   // The credit gate first: a customer over their limit is refused before anything
   // is written, exactly as SUBMIT_ORDER would have refused them a moment later.
-  const customer = await deps.getActiveCustomer(ci.customerId)
+  const customer = await deps.getBookableCustomer(ci.customerId, caller, 'CONVERT_QUOTE')
   const summary = (await deps.checkCredit({
     customerId: ci.customerId,
     projectedCents: amountCents,
@@ -1652,4 +1687,218 @@ export async function saveQuoteSettings(deps: QuoteDeps, input: Row, caller: Cal
   )
   await deps.writeAudit('TMS_SETTINGS', SETTINGS_ID, 'SAVE_QUOTE_SETTINGS', caller, patch)
   return { settings: await deps.getById(deps.tables.settings, SETTINGS_ID) } as unknown as Row
+}
+
+// ── Step AB §4.7: the SPOT_AUTO_QUOTE door ───────────────────────────────────
+
+/**
+ * A direct Lambda invoke shaped `{ spotAutoQuote }` — no `arguments`, no `identity`, no
+ * `requestContext`. AppSync and browser events always carry those, so a user cannot produce
+ * this shape; IAM (`lambda:InvokeFunction`, granted to the spot Lambda only) is the real fence.
+ */
+export function isDirectSpotAutoQuote(event: unknown): event is SpotAutoQuoteEvent {
+  if (!event || typeof event !== 'object') return false
+  const e = event as Record<string, unknown>
+  if (!e.spotAutoQuote || typeof e.spotAutoQuote !== 'object') return false
+  return !('arguments' in e) && !('identity' in e) && !('requestContext' in e)
+}
+
+const LANE_WINDOW_DAYS = 180
+
+function spotStops(e: SpotExtraction): Row[] {
+  const lastDelivery = e.stops.map((s) => s.type).lastIndexOf('DELIVERY')
+  const firstPickup = e.stops.findIndex((s) => s.type === 'PICKUP')
+  return e.stops.map((s, index) => {
+    const date = index === firstPickup ? e.pickupDate : index === lastDelivery ? e.deliveryDate : s.dateStr
+    return {
+      type: s.type === 'DELIVERY' ? 'delivery' : 'pickup',
+      name: s.name,
+      city: `${s.city ?? ''}, ${s.state ?? ''}`,
+      address: { city: s.city, state: s.state, zip: s.zip },
+      appt: date ? `${date}T12:00:00.000Z` : '',
+    }
+  })
+}
+
+function contactEmailsOf(customer: Row): string[] {
+  let raw: unknown = customer.contacts
+  if (typeof raw === 'string') {
+    try { raw = JSON.parse(raw) } catch { raw = [] }
+  }
+  if (!Array.isArray(raw)) return []
+  return raw
+    .map((c) => (c && typeof c === 'object' ? String((c as Row).email ?? '').trim().toLowerCase() : ''))
+    .filter(Boolean)
+}
+
+function stringList(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : []
+}
+
+/**
+ * Creates exactly one spot SELL quote in the rep's name — QUOTED with a public link — when every
+ * server-side gate holds; otherwise returns the reasons and creates nothing. Never converts, never
+ * makes a shipment, a PRO or an order. It re-verifies every gate that depends on server data
+ * (customer ACTIVE + exact contact + owner + autoReply, a fresh price, the floor, no existing quote
+ * for this request); the spot Lambda has already checked the rest (org/rep switches, caps, sender auth).
+ */
+export async function spotAutoQuote(
+  deps: QuoteDeps,
+  req: SpotAutoQuoteEvent['spotAutoQuote'],
+): Promise<SpotAutoQuoteResult> {
+  const requestId = readSpotRequestId(req.requestId)
+  if (!requestId) throw new Error('requestId is required')
+  const repId = assertString(req.repId, 'repId')
+  const customerId = assertString(req.customerId, 'customerId')
+  const contactEmail = assertString(req.contactEmail, 'contactEmail').trim().toLowerCase()
+  if (req.autoReplyAllowed !== true) throw new Error('autoReplyAllowed must be true')
+  const extraction = req.extraction
+  if (!extraction || !Array.isArray(extraction.stops)) throw new Error('extraction is required')
+
+  const profile = await deps.getById(deps.tables.userProfile, repId)
+  const email = String(profile?.email ?? '').trim().toLowerCase()
+  if (!profile || profile.status === 'INACTIVE' || !email) throw new Error(`Rep is not an active user: ${repId}`)
+  // The rep's own identity, built from their profile — no Cognito call, no admin power.
+  const caller: Caller = {
+    email,
+    sub: repId,
+    groups: [`role-${String(profile.role ?? 'CUSTOMER_REP')}`, 'page-quotes'],
+    isAdmin: false,
+  }
+
+  const customer = await deps.getById(deps.tables.customer, customerId)
+  const usable = customer && !customer.mergedIntoId ? customer : null
+  const status = usable ? String(usable.status ?? (usable.active === false ? 'INACTIVE' : 'ACTIVE')) : null
+  const settings = await deps.getSettings()
+  const margin = resolveMargin(settings, usable, 'FTL')
+
+  const prior = usable ? await deps.queryIndex(deps.tables.quote, IDX_QUOTES_BY_CUSTOMER, 'customerId', customerId) : []
+  const hasQuote = prior.some((q) => q.spotRequestId === requestId && q.status !== 'CANCELED')
+
+  // A fresh price, in-process.
+  const from = originStop(extraction)
+  const to = destinationStop(extraction)
+  let market: RateViewAnswer | null = null
+  let suggestion = null as ReturnType<typeof suggestSpotRate>
+  if (from?.city && from.state && to?.city && to.state && extraction.equipmentType) {
+    const priced = await deps.priceFromMarket(
+      {
+        originCity: from.city, originState: from.state,
+        destinationCity: to.city, destinationState: to.state,
+        equipmentType: extraction.equipmentType,
+        pickupDate: extraction.pickupDate,
+        mode: 'FTL',
+        customerId,
+      },
+      caller,
+    )
+    market = priced.answer as unknown as RateViewAnswer
+    const stops = spotStops(extraction) as unknown as Stop[]
+    const aliases = aliasMap(settings?.postalCodeAliases as Parameters<typeof aliasMap>[0])
+    const since = new Date(Date.now() - LANE_WINDOW_DAYS * 86_400_000).toISOString().slice(0, 10)
+    const lane = await deps.readLaneSamples(laneKeyFor(stops, aliases), laneKey3For(stops), since)
+    suggestion = suggestSpotRate({
+      extraction,
+      market,
+      samples: lane.exact as unknown as LaneRateSampleRecord[],
+      zip3Samples: lane.zip3 as unknown as LaneRateSampleRecord[],
+      customerId,
+      settings,
+      customer: usable,
+      nowIso: nowIso(),
+    })
+  }
+
+  const decision = autoSendDecision({
+    settings: { ...DEFAULT_SPOT_SETTINGS, allowAutoSend: true },
+    repSettings: { ...DEFAULT_REP_SETTINGS, autoSend: true },
+    devStack: false,
+    repId,
+    customer: usable
+      ? {
+          status,
+          accountOwnerIds: stringList(usable.accountOwnerIds),
+          defaultSalesRepId: optionalString(usable.defaultSalesRepId, 100),
+        }
+      : null,
+    matchHow: usable && contactEmailsOf(usable).includes(contactEmail) ? 'EMAIL' : 'DOMAIN',
+    customerAutoReply: margin.autoReply,
+    extraction,
+    fieldMeta: req.fieldMeta ?? {},
+    suggestion,
+    senderAuthOk: true,
+    threadHasOutbound: false,
+    replyTo: contactEmail,
+    hasQuoteOrDraft: hasQuote,
+    autoSentTodayRep: 0,
+    autoSentTodayCustomer: 0,
+  })
+  if (!decision.allow || !suggestion || !market) {
+    const reasons: AutoSendReason[] = decision.reasons.length ? decision.reasons : ['PRICE_STUB']
+    return { ok: false, reasons }
+  }
+  if (suggestion.basis === 'STUB') return { ok: false, reasons: ['PRICE_STUB'] }
+
+  const input: Row = {
+    customerId,
+    rateType: 'SPOT',
+    mode: 'FTL',
+    stops: spotStops(extraction),
+    equipmentType: extraction.equipmentType,
+    ...(extraction.lengthFt != null ? { equipmentLengthFt: extraction.lengthFt } : {}),
+    ...(extraction.weightLbs != null ? { weightLbs: extraction.weightLbs } : {}),
+    ...(extraction.commodity ? { commodity: extraction.commodity } : {}),
+    ...(extraction.pickupDate ? { pickupAppt: `${extraction.pickupDate}T12:00:00.000Z` } : {}),
+    ...(extraction.deliveryDate ? { deliveryAppt: `${extraction.deliveryDate}T12:00:00.000Z` } : {}),
+    ...(market.miles ? { miles: Math.round(market.miles) } : {}),
+    ...(extraction.contactName ? { contactName: extraction.contactName } : {}),
+    contactEmail,
+    customerRepId: repId,
+    lines: [{ side: 'CUSTOMER', code: 'LINEHAUL', calculatedBy: 'FLAT', rateCents: suggestion.suggestedCents, count: 1 }],
+    internalNotes: `From spot request ${requestId} (auto-quote)`,
+    spotRequestId: requestId,
+  }
+  const saved = (await saveQuote(deps, input, caller)) as unknown as {
+    quote: Row
+    pricing: { warnings: Array<{ adminOnly?: boolean }> }
+  }
+  const quoteId = String(saved.quote.id)
+  const cancel = async (note: string) => {
+    try {
+      await cancelQuote(deps, { quoteId, note }, caller)
+    } catch (err) {
+      console.warn('[tms-shipment-actions] spot auto-quote cleanup failed:', String(err))
+    }
+  }
+  // A price the rep could not send without an admin acknowledging a warning is not an auto-quote.
+  if (saved.pricing.warnings.some((w) => w.adminOnly)) {
+    await cancel('Auto-quote refused: pricing warning')
+    return { ok: false, reasons: ['BELOW_FLOOR'] }
+  }
+  let sent: Row
+  try {
+    sent = await sendQuote(deps, { quoteId, via: 'COPY', to: [contactEmail] }, caller)
+  } catch (err) {
+    await cancel('Auto-quote failed before sending')
+    throw err
+  }
+  const link = typeof sent.link === 'string' ? sent.link : null
+  const quote = sent.quote as Row
+  if (!link) {
+    await cancel('Auto-quote produced no link')
+    throw new Error('The quote link could not be minted')
+  }
+  await deps.writeAudit('QUOTE', quoteId, 'SPOT_AUTO_QUOTE', caller, {
+    requestId, customerId, amountCents: suggestion.suggestedCents, basis: suggestion.basis,
+  })
+  return {
+    ok: true,
+    quoteId,
+    quoteNumber: String(quote.id),
+    amountCents: numberOrNull(quote.amountCents) ?? suggestion.suggestedCents,
+    expiresAt: String(quote.expiresAt ?? ''),
+    link,
+    priceBasis: suggestion.basis as 'DAT_LIVE' | 'HISTORY',
+    stub: false,
+  }
 }

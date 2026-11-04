@@ -7541,6 +7541,8 @@ export interface QuoteSendResult {
 }
 
 export interface SaveQuoteInput {
+  /** Step AB: links the quote to its spot request; the server refuses a change once set. */
+  spotRequestId?: string | null
   /** Absent on create: the number is minted server-side from the settings counter. */
   quoteId?: string
   expectedVersion?: number
@@ -8450,4 +8452,85 @@ export async function runWorkflowSample(input: {
   fromEmail: string
 }): Promise<WorkflowRunRecord> {
   return workflowAction<WorkflowRunRecord>('RUN_SAMPLE', input)
+}
+
+// ── Step AB: spot quoter (tmsSpotActions) + CRM (tmsCrmActions) ──────────────
+//
+// Two routers with the `workflowAction` contract: the Lambda's own refusal ("Sending is
+// disabled on the dev stack…") is rethrown as the Error message. Neither call ever
+// carries a token or client secret; the browser only receives the Google authorization
+// URL and posts back the one-time `code`.
+
+import type { SpotActionName, SpotActionMap } from '@/lib/spot/types'
+import type { CrmActionName } from '@/lib/crm/types'
+
+export type { SpotActionName, SpotActionMap } from '@/lib/spot/types'
+export type { CrmActionName } from '@/lib/crm/types'
+
+async function callSpot(action: string, input: unknown): Promise<unknown> {
+  let r: { data: { tmsSpotActions: unknown } }
+  try {
+    r = await client.graphql({
+      query: `mutation TmsSpotActions($action: String!, $input: AWSJSON!) { tmsSpotActions(action: $action, input: $input) }`,
+      variables: { action, input: JSON.stringify(input) },
+    }) as { data: { tmsSpotActions: unknown } }
+  } catch (err) {
+    throw new Error(graphqlErrorText(err) || `${action} failed`, { cause: err })
+  }
+  return unwrapJson(r.data.tmsSpotActions)
+}
+
+/** Typed door into `tmsSpotActions`. A `null` answer is an error except where the action's output type allows it. */
+export async function spotAction<A extends SpotActionName>(
+  action: A,
+  input: SpotActionMap[A]['input'],
+): Promise<SpotActionMap[A]['output']> {
+  const v = await callSpot(action, input)
+  return v as SpotActionMap[A]['output']
+}
+
+async function callCrm(action: string, input: unknown): Promise<unknown> {
+  let r: { data: { tmsCrmActions: unknown } }
+  try {
+    r = await client.graphql({
+      query: `mutation TmsCrmActions($action: String!, $input: AWSJSON!) { tmsCrmActions(action: $action, input: $input) }`,
+      variables: { action, input: JSON.stringify(input) },
+    }) as { data: { tmsCrmActions: unknown } }
+  } catch (err) {
+    throw new Error(graphqlErrorText(err) || `${action} failed`, { cause: err })
+  }
+  return unwrapJson(r.data.tmsCrmActions)
+}
+
+/** Untyped CRM router; the slice that owns a response shape types its own helper over this. */
+export async function crmAction<T>(action: CrmActionName, input: unknown): Promise<T> {
+  const v = await callCrm(action, input)
+  if (v == null) throw new Error(`${action} returned no result`)
+  return v as T
+}
+
+export const spotStatus = () => spotAction('SPOT_STATUS', {})
+export const spotOauthStart = (redirectUri: string) => spotAction('SPOT_OAUTH_START', { redirectUri })
+export const spotOauthFinish = (code: string, state: string, redirectUri: string) =>
+  spotAction('SPOT_OAUTH_FINISH', { code, state, redirectUri })
+export const spotConnectSimulated = () => spotAction('SPOT_CONNECT_SIMULATED', {})
+export const spotDisconnect = (purge = false) => spotAction('SPOT_DISCONNECT', { purge })
+export const spotSetPaused = (paused: boolean) => spotAction('SPOT_SET_PAUSED', { paused })
+export const spotPollNow = (o: SpotActionMap['SPOT_POLL_NOW']['input'] = {}) => spotAction('SPOT_POLL_NOW', o)
+export const spotListRequests = (o: SpotActionMap['SPOT_LIST_REQUESTS']['input'] = {}) =>
+  spotAction('SPOT_LIST_REQUESTS', o)
+export const spotGetRequest = (id: string) => spotAction('SPOT_GET_REQUEST', { id })
+export const spotCount = (userId?: string) => spotAction('SPOT_COUNT', userId ? { userId } : {})
+
+/**
+ * Every rep's Gmail connection, for the org page (ADMIN only: the schema grants read to
+ * the ADMIN group and nobody else). The pending OAuth state is deliberately not selected.
+ */
+export async function listGmailConnections(): Promise<import('@/lib/spot/types').SpotConnectionView[]> {
+  const rows = await listAll<import('@/lib/spot/types').SpotConnectionView>(
+    'listGmailConnections',
+    'id userEmail mode status googleEmail connectedAt lastPollAt lastPollOk lastPollStats settings version',
+    1000,
+  )
+  return rows.map((r) => unwrapJsonFields(r, ['lastPollStats', 'settings']))
 }

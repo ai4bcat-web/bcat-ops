@@ -50,6 +50,7 @@ export type ProviderKey =
   | 'ORDERFUL'
   // E-mail, messaging, CRM
   | 'GMAIL'
+  | 'GMAIL_REP_OAUTH'
   | 'OUTLOOK'
   | 'SLACK'
   | 'TWILIO'
@@ -170,6 +171,7 @@ export interface ValidateHow {
     | 'PAYCHEX_TOKEN'
     | 'BRIDGE_LAST_INBOUND'
     | 'OPENAPI_SELF'
+    | 'GOOGLE_OAUTH_CLIENT'
 }
 
 export interface ProviderDescriptor {

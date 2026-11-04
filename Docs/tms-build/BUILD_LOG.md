@@ -1,5 +1,19 @@
 # TMS build log
 
+## 2026-11-04 - Prod -> dev refresh and PRO dedupe (end of sequence, dev only)
+
+- `refreshDevFromProd --apply`: 43 on-demand backups (`prerefresh-2026-11-04T12-22-26-506Z-<Model>`, AVAILABLE), copy-data 49 tables / 9,963 rows / 0 failed, copy-files done. Production read only.
+- Backfills re-run (node 22 needed: the supervised shell's node 20 cannot load `src/lib/proNumber.ts`): proClaims, customers, locations, shipments (932 relinked), ownAssetDrivers, legacyAr, apOpen. `revDivision` blocked by a `RETAG_SHIPMENTS` Lambda timeout (residual). 6 stop-location updates refused for driver-field auth (non-blocking, as on 11-03).
+- Counts before = after for Load/Shipment/Order/Invoice/Customer/Carrier/Location/ProClaim/LoadCarrier/CarrierBill/ArPayment/ApPayment (10,842 / 10,842 / 10,842 / 7,526 / 689 / 407 / 3,169 / 10,843 / 8,677 / 1,612 / 2,432 / 1,082). 649 PROs in both production and the Aljex import, prod Load kept. `checkDevDuplicates`: 0 duplicates. Detail in `ALJEX_IMPORT_REPORT.md` section "Prod refresh + PRO dedupe (2026-11-04)".
+
+## 2026-11-04 - Step Y deployed on dev (Amplify jobs 146 and 147)
+
+**Commits `2e9b96a` (job 146) and `354e5cc` (job 147), SUCCEED. Dev only. The entry below this one lists the five defects as deploy-pending; they are now fixed and verified live.**
+- Verified live on 146/147: POD review + shipment thread (tracking read IAM), intake PO code `PO` releases through the gate with no hand patch, `Run check call now` on a delivered load, per-load plan 2 h / 20 min honoured on the Tracking tab, UPSERT_CUSTOMER on a customer without AI memory. 43 screenshots in `Docs/tms-build/screenshots/demo/` (shots 30-40 own-asset from the job-145 run).
+- Ryne decisions applied: release gate keeps carrier bill recorded before release, approved after invoice (documented in the walkthrough); `Demo` chip isolates the ZZ rows (Shipments board, Load Review, Intake); sales rep and bill-to default from the customer but remain required and reviewed before Move to active; ZZ records left in place for Ryne.
+- Open for Ryne: a real test carrier (DOT and an e-mail he controls) for a live MCP invitation.
+- Next: end-of-sequence prod->dev refresh with the PRO dedupe check, then Step AB.
+
 ## 2026-11-04 - Step Y: end-to-end demo run on dev (brokered 99277 + Ivan Cartage 99278), DEMO_WALKTHROUGH.md
 
 - `node scripts/devDemoY.mjs` (+ `scripts/lib/demoY.mjs`) drove both flows on real dev data after `RESET_DEMO_DATA`: tender -> intake gates (required fields, then review) -> move -> MCP (Validate OK, LIVE; live invite refused HTTP 400 for the ZZ DOT) -> cover -> rate con (signed on the public link) -> tracking by assignee -> POD -> Load Review release -> invoice 20002 -> carrier bill -> factoring row; Ivan Cartage load needs a driver (dialog disabled until picked) -> Schedule -> dispatch -> owner-operator settlement (Wednesday payroll). 39 screenshots in `Docs/tms-build/screenshots/demo/`; walkthrough in `Docs/tms-build/DEMO_WALKTHROUGH.md`.

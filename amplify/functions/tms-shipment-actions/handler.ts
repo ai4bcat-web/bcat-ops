@@ -117,6 +117,7 @@ import {
   convertQuote,
   counterQuote,
   duplicateQuotes,
+  isDirectSpotAutoQuote,
   markQuoteLost,
   passQuote,
   restoreQuote,
@@ -124,8 +125,10 @@ import {
   saveQuote,
   saveQuoteSettings,
   sendQuote,
+  spotAutoQuote,
   sweepExpiredQuotes,
   type BookCarrierExtra,
+  type BookingVia,
   type QuoteChargeRules,
   type QuoteDeps,
 } from './quotes'
@@ -155,6 +158,8 @@ import {
   type ShipmentTag,
 } from './ownershipResolve'
 import { assertNotVoided, isVoided } from '../_shared/voided'
+import { LEAD_STAGES, promotionFor } from '../../../src/lib/crm/promote'
+import type { SpotAutoQuoteEvent } from '../../../src/lib/spot/types'
 import { batchShipmentTask, BATCH_TASK_ACTIONS } from './batch'
 import { INTAKE_ACTIONS, runIntakeAction, type IntakeAction, type IntakeDeps } from './intake'
 // ── Step P ──────────────────────────────────────────────────────────────────
@@ -1291,6 +1296,58 @@ async function getActiveCustomer(customerId: string): Promise<Row> {
 }
 
 /**
+ * Step AB §5.5 (Ryne R8). The gate on building freight: a prospect (lead stage) becomes an
+ * ACTIVE customer on its first shipment, then the unchanged ACTIVE check and the caller's credit
+ * gate run. The promotion ignores `requireCustomerApproval` (the first booked shipment is the
+ * approval signal) and is KEPT if the shipment creation later fails. PENDING, BLOCKED, CLOSED and
+ * DORMANT are never promoted and get the existing refusal text.
+ */
+async function getBookableCustomer(customerId: string, caller: Caller, via: BookingVia): Promise<Row> {
+  const customer = await getById(CUSTOMER_TABLE_NAME, customerId)
+  if (customer && !customer.mergedIntoId && promotionFor(optionalString(customer.status, 40)) === 'PROMOTE') {
+    const from = String(customer.status)
+    const now = nowIso()
+    try {
+      await dynamo.send(new UpdateItemCommand({
+        TableName: CUSTOMER_TABLE_NAME,
+        Key: marshall({ id: customerId }),
+        UpdateExpression:
+          'SET #status = :active, active = :true, statusReason = :reason, statusChangedAt = :now, statusChangedBy = :by, updatedAt = :now, updatedBy = :by',
+        ConditionExpression: `attribute_exists(id) AND #status IN (${LEAD_STAGES.map((_, i) => `:lead${i}`).join(', ')})`,
+        ExpressionAttributeNames: { '#status': 'status' },
+        ExpressionAttributeValues: marshall({
+          ':active': 'ACTIVE',
+          ':true': true,
+          ':reason': 'FIRST_SHIPMENT',
+          ':now': now,
+          ':by': caller.email,
+          ...Object.fromEntries(LEAD_STAGES.map((stage, i) => [`:lead${i}`, stage])),
+        }),
+      }))
+      await writeAudit('CUSTOMER', customerId, 'PROMOTE_PROSPECT', caller, { from, via })
+    } catch (err) {
+      // Someone moved the stage first; the re-read below decides on whatever it is now.
+      if (!isConflict(err)) throw err
+    }
+  }
+  return getActiveCustomer(customerId)
+}
+
+/** Lane samples (exact lane and ZIP3 neighbourhood) dated on or after `sinceDate`. */
+async function readLaneSamples(
+  laneKey: string | null,
+  laneKey3: string | null,
+  sinceDate: string,
+): Promise<{ exact: Row[]; zip3: Row[] }> {
+  const recent = (rows: Row[]) => rows.filter((r) => String(r.date ?? '').slice(0, 10) >= sinceDate)
+  const [exact, zip3] = await Promise.all([
+    laneKey ? queryIndex(LANE_RATE_SAMPLE_TABLE_NAME, 'laneRateSamplesByLaneKeyAndDate', 'laneKey', laneKey) : [],
+    laneKey3 ? queryIndex(LANE_RATE_SAMPLE_TABLE_NAME, 'laneRateSamplesByLaneKey3AndDate', 'laneKey3', laneKey3) : [],
+  ])
+  return { exact: recent(exact), zip3: recent(zip3) }
+}
+
+/**
  * Step R cutover. A shipment or order may legitimately point at no customer record
  * at all, so every read of one takes an explicit branch.
  *
@@ -1882,7 +1939,7 @@ async function createShipment(input: Row, caller: Caller): Promise<Row> {
   }
 
   const settings = await getSettings()
-  const customer = customerId ? await getActiveCustomer(customerId) : null
+  const customer = customerId ? await getBookableCustomer(customerId, caller, 'CREATE_SHIPMENT') : null
   if (customer) {
     // A customer who may not ship on open credit needs an approved limit before
     // anybody starts building, not at the moment they try to submit.
@@ -7072,13 +7129,16 @@ const quoteDeps: QuoteDeps = {
     loadFinancials: LOAD_FINANCIALS_TABLE_NAME,
     shipment: SHIPMENT_TABLE_NAME,
     shipmentNotice: SHIPMENT_NOTICE_TABLE_NAME,
+    userProfile: USER_PROFILE_TABLE_NAME,
   },
   fromAddress: FROM_ADDRESS,
   portalOrigin: PORTAL_ORIGIN,
   randomBytes,
   writeAudit,
   getSettings,
-  getActiveCustomer,
+  getBookableCustomer,
+  priceFromMarket: (input, caller) => priceFromMarket(marketRateDeps, input, caller),
+  readLaneSamples,
   getById,
   queryIndex,
   transact,
@@ -7342,7 +7402,13 @@ const demoDeps: DemoDeps = {
 
 // ── Main handler ─────────────────────────────────────────────────────────────
 
-export const handler = async (event: AppSyncEvent): Promise<Row> => {
+export const handler = async (event: AppSyncEvent | SpotAutoQuoteEvent): Promise<Row> => {
+  // Step AB §4.7: the direct-invoke door, dispatched BEFORE the AppSync branch. An event that
+  // carries `spotAutoQuote` next to `arguments`/`identity` is refused, never routed.
+  if ('spotAutoQuote' in event) {
+    if (!isDirectSpotAutoQuote(event)) throw new Error('Forbidden: spotAutoQuote is a direct-invoke door')
+    return (await spotAutoQuote(quoteDeps, event.spotAutoQuote)) as unknown as Row
+  }
   const action = event.arguments.action as Action
   const input = parseInput(event.arguments.input)
   const authorizedAction = action === 'BATCH_SHIPMENT_TASK'

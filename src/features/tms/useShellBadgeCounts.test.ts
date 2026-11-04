@@ -25,8 +25,8 @@ vi.mock('@/hooks/useDocumentReviewQueue', () => ({ useDocumentReviewQueue: () =>
 vi.mock('@/hooks/useArToInvoiceCount', () => ({ useArToInvoiceCount: () => 1 }))
 vi.mock('@/hooks/useApToReviewCount', () => ({ useApToReviewCount: () => 1 }))
 vi.mock('@/hooks/useQuotesToReplyCount', () => ({ useQuotesToReplyCount: () => 3 }))
-const intake = vi.hoisted(() => ({ count: vi.fn(async () => 2) }))
-vi.mock('@/lib/apiClient', () => ({ countOpenIntakeLoads: intake.count }))
+const intake = vi.hoisted(() => ({ count: vi.fn(async () => 2), spot: vi.fn(async () => ({ new: 2, needsInfo: 1, needsAttention: 1 })) }))
+vi.mock('@/lib/apiClient', () => ({ countOpenIntakeLoads: intake.count, spotAction: intake.spot }))
 vi.mock('@/lib/brokerageCharts', () => ({ MOVEMENT_STATUSES: ['IN_TRANSIT'] }))
 vi.mock('@/lib/loadReview', () => ({ loadReviewCount: () => 4 }))
 vi.mock('@/features/tms/carrierSales/carrierSalesQueue', () => ({ needsCoverCount: () => 5 }))
@@ -43,8 +43,6 @@ const shipments = [
 
 const args = { shipments }
 
-/** Declared in the nav, answered by Step AB's own hook (it adds one line to the resolver). */
-const RESERVED_FOR_AB = ['spotNew']
 
 describe('useShellBadgeCounts', () => {
   it('answers every badgeKey the nav config declares', async () => {
@@ -53,10 +51,10 @@ describe('useShellBadgeCounts', () => {
       if (item.badgeKey) declared.add(item.badgeKey)
       for (const child of item.children ?? []) if (child.badgeKey) declared.add(child.badgeKey)
     }
-    for (const key of RESERVED_FOR_AB) declared.delete(key)
     expect(declared.size).toBeGreaterThan(5)
     const { result } = renderHook(() => useShellBadgeCounts(args))
     // The open-intake count is a polled read, so it lands a tick after the first paint.
+    await waitFor(() => expect(result.current.spotNew).toBe(3))
     await waitFor(() => expect(result.current.intakeLoads).toBe(2))
     const unanswered = [...declared].filter((key) => !result.current[key])
     expect(unanswered).toEqual([])

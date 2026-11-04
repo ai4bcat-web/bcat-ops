@@ -169,6 +169,18 @@ describe('the quote editor', () => {
   })
 })
 
+describe('a quote raised from a spot request', () => {
+  it('links back to the request it answers, and only then', async () => {
+    const { unmount } = setup('/quotes/Q-8', '/quotes/:id', quote({ id: 'Q-8', customerId: 'CUST-1', spotRequestId: 'sr:u1:m1' }))
+    const chip = await screen.findByTestId('quote-spot-chip')
+    expect(chip.getAttribute('href')).toBe('/tms/rates/spot?request=sr%3Au1%3Am1')
+    unmount()
+    setup('/quotes/Q-9', '/quotes/:id', quote({ id: 'Q-9', customerId: 'CUST-1' }))
+    await screen.findByLabelText('Customer')
+    expect(screen.queryByTestId('quote-spot-chip')).toBeNull()
+  })
+})
+
 describe('a quote seeded from a QUOTE run', () => {
   it('opens on the customer, lane and dates the proposal states', async () => {
     vi.mocked(getWorkflowRun).mockResolvedValue(run())

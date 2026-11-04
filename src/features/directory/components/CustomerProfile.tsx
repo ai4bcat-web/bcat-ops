@@ -1,5 +1,11 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { useAuth } from '@/hooks/useAuth'
+import { isCrmManager } from '@/features/crm/format'
+import { useCrmAccount } from '@/features/crm/useCrmAccount'
+import { CrmStrip } from './CrmStrip'
+import { ActivityTab } from './ActivityTab'
+import { ContactsUnion } from './ContactsUnion'
 import { RepPicker, TeamPicker } from '@/components/RepPicker'
 import {
   TmsBadge,
@@ -70,6 +76,7 @@ interface CustomerProfileProps {
 const tabs = [
   { key: 'account', label: 'Account' },
   { key: 'contacts', label: 'Contacts' },
+  { key: 'activity', label: 'Activity' },
   { key: 'documents', label: 'Documents' },
   { key: 'locations', label: 'Shipping locations' },
   { key: 'settings', label: 'Settings' },
@@ -119,6 +126,9 @@ export function CustomerProfile({
   const [statusAction, setStatusAction] = useState<'activate' | 'deactivate' | 'close' | null>(null)
   const { loads, orders, shipments, lastLoadAt, loading: loadsLoading } = useCustomerOrders(customer.id, customer)
   const ar = useCustomerAr(customer.id)
+  const crm = useCrmAccount(customer.id)
+  const auth = useAuth()
+  const isManager = isCrmManager(auth)
   const accountOwnerIds = value.accountOwnerIdsText.split(/\r?\n/).map((s) => s.trim()).filter(Boolean)
   // The layers above the customer: org defaults only (a profile knows no division).
   const inheritedAutomation = useMemo(
@@ -213,6 +223,17 @@ export function CustomerProfile({
           ]}
         />
 
+        <CrmStrip
+          customer={customer}
+          view={crm.view}
+          loading={crm.loading}
+          error={crm.error}
+          isManager={isManager}
+          tone={customer.status ? statusTones[customer.status] : undefined}
+          onSetNextStep={crm.setNextStep}
+          onReleaseDomain={crm.releaseDomain}
+        />
+
         <TmsTabs tabs={tabs} active={tab} onSelect={setTab} />
 
         {tab === 'account' && (
@@ -276,8 +297,24 @@ export function CustomerProfile({
           </div>
         )}
 
+        {tab === 'activity' && (
+          <ActivityTab
+            view={crm.view}
+            loading={crm.loading}
+            error={crm.error}
+            onAddActivity={crm.addActivity}
+            onAddTask={crm.addTask}
+            onCompleteTask={crm.completeTask}
+          />
+        )}
+
         {tab === 'contacts' && (
           <div style={{ display: 'grid', gap: 16 }}>
+            {crm.view?.visible && (
+              <TmsCard title="People on this account">
+                <ContactsUnion view={crm.view} onAdd={crm.addContact} />
+              </TmsCard>
+            )}
             <TmsCard title="Contacts">
               <ContactsEditor
                 contacts={value.contacts}

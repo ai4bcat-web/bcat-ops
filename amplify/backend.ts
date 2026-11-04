@@ -65,6 +65,8 @@ import { tmsTrackingActions } from './functions/tms-tracking-actions/resource'
 import { tmsFinanceActions } from './functions/tms-finance-actions/resource'
 import { tmsAljexImport } from './functions/tms-aljex-import/resource'
 import { tmsDataSafety } from './functions/tms-data-safety/resource'
+import { tmsSpotQuoter } from './functions/tms-spot-quoter/resource'
+import { tmsCrmActions } from './functions/tms-crm-actions/resource'
 import { devRuleState } from './devRuleGuard'
 import { loadTrackingProjector } from './functions/load-tracking-projector/resource'
 import { shipmentNotifier } from './functions/shipment-notifier/resource'
@@ -161,6 +163,8 @@ const backend = defineBackend({
   tmsFinanceActions,
   tmsAljexImport,
   tmsDataSafety,
+  tmsSpotQuoter,
+  tmsCrmActions,
   loadTrackingProjector,
   checkCallNotifier,
   trackingAutomation,
@@ -3663,6 +3667,162 @@ factoringIntakeFn.addEnvironment('OTR_ACTIONS_FUNCTION_NAME', otrFunctionName)
 factoringIntakeFn.addToRolePolicy(
   new PolicyStatement({ actions: ['lambda:InvokeFunction'], resources: [otrFunctionArn] }),
 )
+
+// ── Step AB: per-rep Gmail spot quoter + CRM bones ──────────────────────────
+//
+// tms-spot-quoter: AppSync `tmsSpotActions` + a five-minute poll rule (DISABLED on dev by
+// the generic CfnRule loop in the dev guard below; SPOT_POLL_NOW is the manual door).
+// Least privilege, every statement named: read/write on its own three tables and the four
+// CRM tables, READ-ONLY on the tables it only looks at, PutItem on AuditLog. It holds no
+// write on Quote, Customer, Shipment, Order, Load or Invoice, no ses:*, no bedrock:*, no
+// KMS, no Secrets Manager and no Cognito admin action. The only way it creates a Quote is
+// the direct-invoke door on tms-shipment-actions (lambda:InvokeFunction on that one
+// function). No Google secret is an Amplify secret: the OAuth client id/secret are read
+// from the Integrations page parameter, each rep's refresh token from its own prefix.
+const spotFn = backend.tmsSpotQuoter.resources.lambda as LambdaFunction
+const crmFn  = backend.tmsCrmActions.resources.lambda as LambdaFunction
+const abTable = (name: string) => backend.data.resources.tables[name]
+const spotSettingsTable   = abTable('SpotSettings')
+const gmailConnTable      = abTable('GmailConnection')
+const spotRequestTable    = abTable('SpotRequest')
+const crmContactTable     = abTable('CrmContact')
+const crmDomainTable      = abTable('CrmDomain')
+const crmActivityTable    = abTable('CrmActivity')
+const crmAccountTable     = abTable('CrmAccount')
+const abCustomerTable     = abTable('Customer')
+const abQuoteTable        = abTable('Quote')
+const abSettingsTable     = abTable('TmsSettings')
+const abIntegrationTable  = abTable('Integration')
+const abUserProfileTable  = abTable('UserProfile')
+const abAuditTable        = abTable('AuditLog')
+const abShipmentTable     = abTable('Shipment')
+const abOrderTable        = abTable('Order')
+
+const gmailTokenParamPath = `/bcat/gmail/${backend.auth.resources.userPool.userPoolId}/users`
+const withIndexes = (...tables: { tableArn: string }[]) =>
+  tables.flatMap((t) => [t.tableArn, `${t.tableArn}/index/*`])
+
+spotFn.addEnvironment('SPOT_SETTINGS_TABLE_NAME',    spotSettingsTable.tableName)
+spotFn.addEnvironment('GMAIL_CONNECTION_TABLE_NAME', gmailConnTable.tableName)
+spotFn.addEnvironment('SPOT_REQUEST_TABLE_NAME',     spotRequestTable.tableName)
+spotFn.addEnvironment('CRM_CONTACT_TABLE_NAME',      crmContactTable.tableName)
+spotFn.addEnvironment('CRM_DOMAIN_TABLE_NAME',       crmDomainTable.tableName)
+spotFn.addEnvironment('CRM_ACTIVITY_TABLE_NAME',     crmActivityTable.tableName)
+spotFn.addEnvironment('CRM_ACCOUNT_TABLE_NAME',      crmAccountTable.tableName)
+spotFn.addEnvironment('CUSTOMER_TABLE_NAME',         abCustomerTable.tableName)
+spotFn.addEnvironment('QUOTE_TABLE_NAME',            abQuoteTable.tableName)
+spotFn.addEnvironment('TMS_SETTINGS_TABLE_NAME',     abSettingsTable.tableName)
+spotFn.addEnvironment('INTEGRATION_TABLE_NAME',      abIntegrationTable.tableName)
+spotFn.addEnvironment('USER_PROFILE_TABLE_NAME',     abUserProfileTable.tableName)
+spotFn.addEnvironment('AUDIT_LOG_TABLE_NAME',        abAuditTable.tableName)
+spotFn.addEnvironment('BUCKET_NAME',                 backend.storage.resources.bucket.bucketName)
+spotFn.addEnvironment('INTEGRATION_PARAM_PATH',      integrationParamPath)
+spotFn.addEnvironment('GMAIL_TOKEN_PARAM_PATH',      gmailTokenParamPath)
+spotFn.addEnvironment('TMS_SHIPMENT_ACTIONS_FUNCTION_NAME', shipmentActionsFn.functionName)
+spotFn.addEnvironment('PORTAL_ORIGINS',              JSON.stringify(PORTAL_ORIGINS))
+spotFn.addEnvironment('PORTAL_ORIGIN',               PORTAL_ORIGIN)
+spotFn.addEnvironment('USER_POOL_ID',                backend.auth.resources.userPool.userPoolId)
+
+// Its own tables, plus the CRM tables it writes system activity into (crmStore).
+spotFn.addToRolePolicy(new PolicyStatement({
+  actions:   ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem', 'dynamodb:DeleteItem', 'dynamodb:Query', 'dynamodb:Scan'],
+  resources: withIndexes(
+    gmailConnTable, spotRequestTable, spotSettingsTable,
+    crmContactTable, crmDomainTable, crmActivityTable, crmAccountTable,
+  ),
+}))
+// Read-only: it recognises a customer, prices against a quote's state and a rep's role.
+spotFn.addToRolePolicy(new PolicyStatement({
+  actions:   ['dynamodb:GetItem', 'dynamodb:Query', 'dynamodb:Scan'],
+  resources: withIndexes(abCustomerTable, abQuoteTable, abSettingsTable, abIntegrationTable, abUserProfileTable),
+}))
+spotFn.addToRolePolicy(new PolicyStatement({
+  actions:   ['dynamodb:PutItem'],
+  resources: [abAuditTable.tableArn],
+}))
+
+// SSM. The OAuth client: that one parameter, read-only (the integrations Lambda owns its
+// writes). Rep refresh tokens: the separate /bcat/gmail prefix, which the integrations
+// Lambda's /bcat/integrations/<pool>/* grant does not match and no other Lambda holds.
+spotFn.addToRolePolicy(new PolicyStatement({
+  actions:   ['ssm:GetParameter'],
+  resources: [Stack.of(spotFn).formatArn({
+    service: 'ssm',
+    resource: 'parameter',
+    resourceName: `${integrationParamPath.replace(/^\//, '')}/GMAIL_REP_OAUTH`,
+  })],
+}))
+spotFn.addToRolePolicy(new PolicyStatement({
+  actions:   ['ssm:GetParameter', 'ssm:PutParameter', 'ssm:DeleteParameter'],
+  resources: [Stack.of(spotFn).formatArn({
+    service: 'ssm',
+    resource: 'parameter',
+    resourceName: `${gmailTokenParamPath.replace(/^\//, '')}/*`,
+  })],
+}))
+
+// The SIMULATED inbox: objects under spot-sim/ and nothing else in the bucket.
+spotFn.addToRolePolicy(new PolicyStatement({
+  actions:   ['s3:GetObject', 's3:PutObject', 's3:DeleteObject'],
+  resources: [`${backend.storage.resources.bucket.bucketArn}/spot-sim/*`],
+}))
+spotFn.addToRolePolicy(new PolicyStatement({
+  actions:    ['s3:ListBucket'],
+  resources:  [backend.storage.resources.bucket.bucketArn],
+  conditions: { StringLike: { 's3:prefix': ['spot-sim/*'] } },
+}))
+
+// The one door that can mint a Quote without a browser. Same stack, no cycle:
+// tms-shipment-actions references nothing of the spot Lambda.
+shipmentActionsFn.grantInvoke(spotFn)
+
+// Every five minutes. DISABLED on dev by the dev guard's CfnRule loop.
+const spotPollRule = new Rule(spotFn.stack, 'SpotQuoterPollRule', {
+  schedule:    Schedule.rate(Duration.minutes(5)),
+  description: 'Poll each connected rep Gmail for quote requests',
+})
+spotPollRule.addTarget(new EventsLambdaTarget(spotFn, {
+  event: RuleTargetInput.fromObject({ poll: true }),
+}))
+
+// A spot request carries the mail body: DynamoDB expires it (`ttlEpoch`, epoch seconds)
+// instead of anything sweeping. Dismissed requests get a shorter horizon from the Lambda.
+backend.data.resources.cfnResources.amplifyDynamoDbTables['SpotRequest'].timeToLiveAttribute = {
+  attributeName: 'ttlEpoch',
+  enabled: true,
+}
+
+// tms-crm-actions: RW on the four CRM tables; read-only on what the timeline derives
+// from; audit PutItem. No SSM, S3, model or Gmail.
+crmFn.addEnvironment('CRM_CONTACT_TABLE_NAME',  crmContactTable.tableName)
+crmFn.addEnvironment('CRM_DOMAIN_TABLE_NAME',   crmDomainTable.tableName)
+crmFn.addEnvironment('CRM_ACTIVITY_TABLE_NAME', crmActivityTable.tableName)
+crmFn.addEnvironment('CRM_ACCOUNT_TABLE_NAME',  crmAccountTable.tableName)
+crmFn.addEnvironment('CUSTOMER_TABLE_NAME',     abCustomerTable.tableName)
+crmFn.addEnvironment('QUOTE_TABLE_NAME',        abQuoteTable.tableName)
+crmFn.addEnvironment('SHIPMENT_TABLE_NAME',     abShipmentTable.tableName)
+crmFn.addEnvironment('ORDER_TABLE_NAME',        abOrderTable.tableName)
+crmFn.addEnvironment('USER_PROFILE_TABLE_NAME', abUserProfileTable.tableName)
+crmFn.addEnvironment('AUDIT_LOG_TABLE_NAME',    abAuditTable.tableName)
+crmFn.addEnvironment('USER_POOL_ID',            backend.auth.resources.userPool.userPoolId)
+crmFn.addToRolePolicy(new PolicyStatement({
+  actions:   ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem', 'dynamodb:DeleteItem', 'dynamodb:Query', 'dynamodb:Scan'],
+  resources: withIndexes(crmContactTable, crmDomainTable, crmActivityTable, crmAccountTable),
+}))
+crmFn.addToRolePolicy(new PolicyStatement({
+  actions:   ['dynamodb:GetItem', 'dynamodb:Query', 'dynamodb:Scan'],
+  resources: withIndexes(abCustomerTable, abQuoteTable, abShipmentTable, abOrderTable, abUserProfileTable),
+}))
+crmFn.addToRolePolicy(new PolicyStatement({
+  actions:   ['dynamodb:PutItem'],
+  resources: [abAuditTable.tableArn],
+}))
+// CRM_ASSIGN_OWNER's one Customer write (accountOwnerIds only; the Lambda code enforces
+// the attribute). Nothing else on Customer is writable from here.
+crmFn.addToRolePolicy(new PolicyStatement({
+  actions:   ['dynamodb:UpdateItem'],
+  resources: [abCustomerTable.tableArn],
+}))
 
 // ── Dev stack guard (ops-dev.bcatcorp.com) ──────────────────────────────────
 // BCAT_DEV_STACK=true marks the long-lived `dev` branch stack: a full working copy of

@@ -2870,6 +2870,24 @@ describe('CONNECT_INTEGRATION', () => {
     expect(row.credentialMask).toHaveLength(2)
   })
 
+  it('stores the per-rep Gmail OAuth client in the integrations parameter and reads Google’s invalid_grant as a good client', async () => {
+    integrationTables()
+    const store = ssmStore()
+    mockFetch({ status: 400, body: '{"error":"invalid_grant","error_description":"Bad Request"}' })
+
+    const row = (await handler(
+      event(
+        'CONNECT_INTEGRATION',
+        { provider: 'GMAIL_REP_OAUTH', credentials: { clientId: 'client-id-1234.apps.example', clientSecret: 'gm-secret-abcdef' } },
+        ADMIN_CALLER,
+      ),
+    )) as Record<string, unknown>
+
+    expect(String(store.params.get(`${INTEGRATION_PATH}/GMAIL_REP_OAUTH`))).toContain('gm-secret-abcdef')
+    expect(row.health).toBe('OK')
+    expect(JSON.stringify(row)).not.toContain('gm-secret-abcdef')
+  })
+
   it('refuses a DAT service account with a plus address', async () => {
     integrationTables()
     ssmStore()

@@ -573,6 +573,11 @@ export function QuoteDetail() {
           <span>{quote.customerName ?? 'No customer'}</span>
           {quote.customerRepId && <span>rep {quote.customerRepId}</span>}
           <span>whose move: {whoseMoveLabel(quote, now)}</span>
+          {quote.spotRequestId && (
+            <Link to={`/tms/rates/spot?request=${encodeURIComponent(quote.spotRequestId)}`} data-testid="quote-spot-chip">
+              <TmsBadge tone="blue">From spot request</TmsBadge>
+            </Link>
+          )}
         </div>
       )}
 

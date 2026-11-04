@@ -3289,6 +3289,8 @@ export interface QuoteEvent {
  */
 export interface QuoteRecord {
   id: string
+  /** Step AB: the spot request this quote answers (`sr:<userId>:<messageId>`); immutable once set. */
+  spotRequestId?: string | null
   side: QuoteSide
   status: QuoteStatus
   /** A sell quote and its duplicates, or one request round across carriers. */
@@ -4458,4 +4460,306 @@ export interface WorkflowMemoryRevisions {
   orgAgentMemory: number | null
   party: number | null
   partyAgent: number | null
+}
+
+// ── Step AB: per-rep Gmail spot quoter + CRM bones ───────────────────────────
+//
+// Row shapes for the seven AB tables (amplify/data/resource.ts, "Step AB" block).
+// `GmailConnection`, `SpotRequest` and `CrmActivity` are ADMIN-read only at the schema
+// level and reach the browser exclusively through tmsSpotActions / tmsCrmActions, which
+// enforce owner/manager visibility. No token or client secret is ever part of any of
+// these shapes.
+
+export type GmailConnectionMode = 'GOOGLE' | 'SIMULATED'
+export type GmailConnectionStatus = 'PENDING' | 'CONNECTED' | 'PAUSED' | 'NEEDS_RECONNECT' | 'DISCONNECTED'
+
+/** Per-rep behaviour, `GmailConnection.settings`. Defaults live in `src/lib/spot/settings.ts`. */
+export interface GmailRepSettings {
+  autoSend: boolean
+  watchLabel: string | null
+  lookbackDays: number
+  signature: string
+  replyTemplateId: string
+  notifyNew: boolean
+}
+
+/** Numbers only — `lastPollStats` never holds message content. */
+export interface SpotPollStats {
+  listed: number
+  stage1Rejected: number
+  stage2Rejected: number
+  modelCalls: number
+  stored: number
+  attached: number
+  errors: number
+}
+
+export interface GmailConnectionRecord {
+  id: string
+  userEmail: string
+  mode: GmailConnectionMode
+  status: GmailConnectionStatus
+  googleEmail?: string | null
+  scopes?: string[] | null
+  connectedAt?: string | null
+  disconnectedAt?: string | null
+  historyId?: string | null
+  lastPollAt?: string | null
+  lastPollStartedAt?: string | null
+  lastPollOk?: boolean | null
+  lastPollStats?: SpotPollStats | null
+  lastError?: string | null
+  /** Present on the row only; the Lambda strips both before a connection reaches a browser. */
+  pendingState?: string | null
+  pendingStateExp?: string | null
+  settings?: GmailRepSettings | null
+  autoSendChangedAt?: string | null
+  autoSendChangedBy?: string | null
+  modelCallsDay?: string | null
+  modelCallsToday?: number | null
+  autoSendDay?: string | null
+  autoSendCount?: number | null
+  version: number
+  createdAt?: string
+  updatedAt?: string
+}
+
+export interface SpotSettingsRecord {
+  id: string
+  enabled?: boolean | null
+  retentionDays?: number | null
+  dismissedRetentionDays?: number | null
+  allowAutoSend?: boolean | null
+  autoSendDailyCapPerRep?: number | null
+  autoSendDailyCapPerCustomer?: number | null
+  autoSendMinSamples?: number | null
+  modelCallsPerRepPerDay?: number | null
+  maxMessagesPerRepPerRun?: number | null
+  updatedBy?: string | null
+  version?: number | null
+  createdAt?: string
+  updatedAt?: string
+}
+
+export type SpotRequestStatus =
+  | 'NEW' | 'NEEDS_INFO' | 'DRAFTED' | 'AUTO_PENDING' | 'SENT' | 'WON' | 'LOST' | 'DISMISSED'
+
+export type SpotRequestMode = 'FTL' | 'LTL' | 'PARTIAL' | 'DRAYAGE' | 'OTHER'
+
+export type SpotEquipmentCode =
+  | 'VAN' | 'REEFER' | 'FLATBED' | 'STEPDECK' | 'POWER_ONLY' | 'CONESTOGA'
+  | 'BOX_TRUCK' | 'SPRINTER' | 'OTHER'
+
+export interface SpotStop {
+  type: 'PICKUP' | 'DELIVERY'
+  name: string | null
+  city: string | null
+  state: string | null
+  zip: string | null
+  dateStr: string | null
+  time: string | null
+}
+
+/** What the model read out of a quote-request mail, after `normalize.ts`. */
+export interface SpotExtraction {
+  customerName: string | null
+  contactName: string | null
+  contactPhone: string | null
+  /** In route order, at least two for a priceable request. */
+  stops: SpotStop[]
+  /** YYYY-MM-DD */
+  pickupDate: string | null
+  deliveryDate: string | null
+  /** As written in the mail. */
+  equipment: string | null
+  equipmentType: SpotEquipmentCode | null
+  lengthFt: number | null
+  mode: SpotRequestMode | null
+  weightLbs: number | null
+  pieces: number | null
+  commodity: string | null
+  temperatureF: string | null
+  hazmat: 'YES' | 'NO' | null
+  /** Vocabulary codes (LIFTGATE, …) or `ACCESSORIAL:<text>`. */
+  accessorials: string[]
+  targetRateDollars: number | null
+  notes: string | null
+}
+
+export type SpotFieldSource = 'MODEL' | 'HEADER' | 'DIRECTORY' | 'DEFAULT' | 'REP'
+export type SpotFieldConfidence = 'high' | 'low'
+export interface SpotFieldMetaEntry {
+  source: SpotFieldSource
+  confidence: SpotFieldConfidence
+  /** True once a validator rejected the value. */
+  invalid?: boolean
+  /** True once the rep edited or ticked the field. */
+  confirmed?: boolean
+}
+export type SpotFieldMeta = Record<string, SpotFieldMetaEntry>
+
+export type SpotMatchHow = 'EMAIL' | 'DOMAIN' | 'NONE' | 'AMBIGUOUS'
+export type SpotSentVia = 'REP_GMAIL' | 'APP' | 'AUTO'
+export type SpotReplyIntent = 'ACCEPT' | 'DECLINE' | 'COUNTER' | 'QUESTION' | 'OTHER'
+
+export interface SpotThreadEntry {
+  id: string
+  at: string
+  dir: 'IN' | 'OUT'
+  /** ≤ 200 chars */
+  snippet: string
+}
+
+export interface SpotClassification {
+  kind: 'QUOTE_REQUEST' | 'FOLLOW_UP' | 'NOT_A_REQUEST'
+  confidence: 'high' | 'medium' | 'low'
+  reason: string
+}
+
+export interface SpotAutoDecision {
+  decision: 'SENT' | 'SKIPPED' | 'DEV_SUPPRESSED' | 'FAILED'
+  reasons: string[]
+  at: string
+  wouldSend?: boolean
+  error?: string | null
+}
+
+export interface SpotMatchCandidate {
+  customerId: string
+  name?: string | null
+  how?: 'EMAIL' | 'DOMAIN' | 'NAME'
+}
+
+export interface SpotRequestRecord {
+  /** `sr:<userId>:<gmailMessageId>` (`sr:<userId>:manual-<sha16>` for a pasted request). */
+  id: string
+  userId: string
+  mode?: GmailConnectionMode | null
+  gmailMessageId: string
+  gmailThreadId: string
+  receivedAt: string
+  fromEmail?: string | null
+  fromName?: string | null
+  replyTo?: string | null
+  subject?: string | null
+  /** ≤ 8 000 chars; only the owner, a manager or ADMIN receives it (SPOT_GET_REQUEST). */
+  bodyText?: string | null
+  attachments?: { name: string; contentType?: string; size?: number }[] | null
+  status: SpotRequestStatus
+  classification?: SpotClassification | null
+  extraction?: SpotExtraction | null
+  fieldMeta?: SpotFieldMeta | null
+  missingFields?: string[] | null
+  customerId?: string | null
+  contactEmail?: string | null
+  matchHow?: SpotMatchHow | null
+  matchCandidates?: SpotMatchCandidate[] | null
+  /** Last computed `SpotSuggestion` snapshot (src/lib/spot/types.ts). */
+  suggestion?: unknown
+  quoteId?: string | null
+  quoteNumber?: string | null
+  quoteStatus?: string | null
+  draftId?: string | null
+  draftMessageId?: string | null
+  draftedAt?: string | null
+  sentAt?: string | null
+  sentVia?: SpotSentVia | null
+  autoDecision?: SpotAutoDecision | null
+  thread?: SpotThreadEntry[] | null
+  customerReplyAt?: string | null
+  replyIntent?: SpotReplyIntent | null
+  needsAttention?: boolean | null
+  shipmentId?: string | null
+  shipmentNumber?: string | null
+  dismissedAt?: string | null
+  dismissedBy?: string | null
+  dismissedReason?: string | null
+  /** DynamoDB TTL, epoch seconds. */
+  ttlEpoch: number
+  version: number
+  createdAt?: string
+  updatedAt?: string
+}
+
+export type CrmContactSource = 'MANUAL' | 'SPOT_REQUEST' | 'BACKFILL' | 'CUSTOMER_JSON'
+export type CrmDomainSource = 'MANUAL' | 'SPOT_REQUEST' | 'BACKFILL' | 'WEBSITE'
+export type CrmActivityKind =
+  | 'EMAIL_IN' | 'EMAIL_OUT' | 'QUOTE_DRAFTED' | 'QUOTE_SENT' | 'CALL' | 'TEXT' | 'NOTE' | 'TASK'
+
+export interface CrmContactRecord {
+  /** Lower-case e-mail address. */
+  id: string
+  customerId?: string | null
+  name?: string | null
+  title?: string | null
+  phone?: string | null
+  ownerId?: string | null
+  source?: CrmContactSource | null
+  status?: 'ACTIVE' | 'ARCHIVED' | null
+  createdBy?: string | null
+  updatedBy?: string | null
+  version?: number | null
+  createdAt?: string
+  updatedAt?: string
+}
+
+export interface CrmDomainRecord {
+  /** Registrable domain, lower-case. */
+  id: string
+  customerId?: string | null
+  source?: CrmDomainSource | null
+  conflict?: boolean | null
+  conflictCustomerIds?: string[] | null
+  claimedBy?: string | null
+  claimedAt?: string | null
+  version?: number | null
+  createdAt?: string
+  updatedAt?: string
+}
+
+export interface CrmActivityRefs {
+  spotRequestId?: string | null
+  quoteId?: string | null
+  shipmentId?: string | null
+  gmailThreadId?: string | null
+}
+
+export interface CrmActivityRecord {
+  /** `act:<ISO>:<rand6>` */
+  id: string
+  customerId?: string | null
+  contactEmail?: string | null
+  ownerId: string
+  kind: CrmActivityKind
+  direction?: 'IN' | 'OUT' | null
+  at: string
+  /** ≤ 120 chars; e-mail kinds only, null (with `restricted`) for viewers who may not see it. */
+  subject?: string | null
+  /** ≤ 2 000 chars; NOTE / CALL / TEXT / TASK. */
+  summary?: string | null
+  refs?: CrmActivityRefs | null
+  assigneeId?: string | null
+  dueAt?: string | null
+  doneAt?: string | null
+  doneBy?: string | null
+  createdBy: string
+  version?: number | null
+  createdAt?: string
+  updatedAt?: string
+}
+
+export interface CrmAccountRecord {
+  /** = Customer.id */
+  id: string
+  lastTouchAt?: string | null
+  lastTouchKind?: CrmActivityKind | null
+  lastTouchBy?: string | null
+  nextStep?: string | null
+  nextStepDueAt?: string | null
+  nextStepBy?: string | null
+  openTaskCount?: number | null
+  updatedBy?: string | null
+  version?: number | null
+  createdAt?: string
+  updatedAt?: string
 }

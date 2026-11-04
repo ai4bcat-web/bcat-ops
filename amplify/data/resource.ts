@@ -22,6 +22,8 @@ import { tmsFinanceActions } from '../functions/tms-finance-actions/resource'
 import { workflowAgent } from '../functions/workflow-agent/resource'
 import { tmsAljexImport } from '../functions/tms-aljex-import/resource'
 import { tmsDataSafety } from '../functions/tms-data-safety/resource'
+import { tmsSpotQuoter } from '../functions/tms-spot-quoter/resource'
+import { tmsCrmActions } from '../functions/tms-crm-actions/resource'
 
 // ExpenseCategory and ExpenseEntryMethod enums are defined inline on each
 // model field — Amplify Gen 2 does not require top-level enum declarations.
@@ -1330,6 +1332,197 @@ const schema = a.schema({
     // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
     // `delete` is dropped too — nothing in step J removes an integration row.
     .disableOperations(['subscriptions', 'delete'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  // ── Step AB: per-rep Gmail spot quoter + CRM bones ───────────────────────────
+  //
+  // Seven additive tables. tms-spot-quoter owns SpotSettings, GmailConnection and
+  // SpotRequest; tms-crm-actions owns CrmContact, CrmDomain, CrmActivity and CrmAccount
+  // (the spot Lambda also writes the four CRM tables through _shared/crmStore.ts). Both
+  // use the DynamoDB SDK directly — no schema-level `allow.resource` grant. The models
+  // that carry e-mail (GmailConnection, SpotRequest, CrmActivity) are ADMIN-read only;
+  // reps reach them through the Lambdas, which enforce owner / manager visibility.
+  // No token or client secret is ever an attribute of any of them.
+
+  // Org knobs for the spot quoter. id='default'.
+  SpotSettings: a
+    .model({
+      enabled:                     a.boolean(),
+      retentionDays:               a.integer(),
+      dismissedRetentionDays:      a.integer(),
+      allowAutoSend:               a.boolean(),
+      autoSendDailyCapPerRep:      a.integer(),
+      autoSendDailyCapPerCustomer: a.integer(),
+      autoSendMinSamples:          a.integer(),
+      modelCallsPerRepPerDay:      a.integer(),
+      maxMessagesPerRepPerRun:     a.integer(),
+      updatedBy:                   a.string(),
+      version:                     a.integer(),
+    })
+    .disableOperations(['subscriptions', 'delete'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  // One row per rep who connected (or simulated) a mailbox. `id` is UserProfile.id.
+  // Metadata only: the refresh token lives in SSM under /bcat/gmail/<poolId>/users/<id>.
+  GmailConnection: a
+    .model({
+      userEmail:          a.string().required(),
+      mode:               a.enum(['GOOGLE', 'SIMULATED']),
+      status:             a.enum(['PENDING', 'CONNECTED', 'PAUSED', 'NEEDS_RECONNECT', 'DISCONNECTED']),
+      googleEmail:        a.string(),
+      scopes:             a.string().array(),
+      connectedAt:        a.datetime(),
+      disconnectedAt:     a.datetime(),
+      historyId:          a.string(),
+      lastPollAt:         a.datetime(),
+      lastPollStartedAt:  a.datetime(),
+      lastPollOk:         a.boolean(),
+      lastPollStats:      a.json(),
+      lastError:          a.string(),
+      pendingState:       a.string(),
+      pendingStateExp:    a.datetime(),
+      settings:           a.json(),
+      autoSendChangedAt:  a.datetime(),
+      autoSendChangedBy:  a.string(),
+      modelCallsDay:      a.string(),
+      modelCallsToday:    a.integer(),
+      autoSendDay:        a.string(),
+      autoSendCount:      a.integer(),
+      version:            a.integer().required(),
+    })
+    .disableOperations(['subscriptions', 'create', 'update', 'delete'])
+    .authorization((allow) => [allow.groups(['ADMIN']).to(['read'])]),
+
+  // A mail the classifier called a quote request, and nothing else from the mailbox.
+  // `id` is `sr:<userId>:<gmailMessageId>` so a conditional put is the idempotency guard.
+  // DynamoDB TTL on `ttlEpoch` (epoch SECONDS) enabled in backend.ts.
+  SpotRequest: a
+    .model({
+      userId:          a.string().required(),
+      mode:            a.enum(['GOOGLE', 'SIMULATED']),
+      gmailMessageId:  a.string().required(),
+      gmailThreadId:   a.string().required(),
+      receivedAt:      a.datetime().required(),
+      fromEmail:       a.string(),
+      fromName:        a.string(),
+      replyTo:         a.string(),
+      subject:         a.string(),
+      bodyText:        a.string(),
+      attachments:     a.json(),
+      status:          a.enum(['NEW', 'NEEDS_INFO', 'DRAFTED', 'AUTO_PENDING', 'SENT', 'WON', 'LOST', 'DISMISSED']),
+      classification:  a.json(),
+      extraction:      a.json(),
+      fieldMeta:       a.json(),
+      missingFields:   a.string().array(),
+      customerId:      a.string(),
+      contactEmail:    a.string(),
+      matchHow:        a.enum(['EMAIL', 'DOMAIN', 'NONE', 'AMBIGUOUS']),
+      matchCandidates: a.json(),
+      suggestion:      a.json(),
+      quoteId:         a.string(),
+      quoteNumber:     a.string(),
+      quoteStatus:     a.string(),
+      draftId:         a.string(),
+      draftMessageId:  a.string(),
+      draftedAt:       a.datetime(),
+      sentAt:          a.datetime(),
+      sentVia:         a.enum(['REP_GMAIL', 'APP', 'AUTO']),
+      autoDecision:    a.json(),
+      thread:          a.json(),
+      customerReplyAt: a.datetime(),
+      replyIntent:     a.string(),
+      needsAttention:  a.boolean(),
+      shipmentId:      a.string(),
+      shipmentNumber:  a.string(),
+      dismissedAt:     a.datetime(),
+      dismissedBy:     a.string(),
+      dismissedReason: a.string(),
+      ttlEpoch:        a.integer().required(),
+      version:         a.integer().required(),
+    })
+    .secondaryIndexes((index) => [
+      index('userId').sortKeys(['receivedAt']),
+      index('gmailThreadId'),
+      index('status').sortKeys(['receivedAt']),
+    ])
+    .disableOperations(['subscriptions', 'create', 'update', 'delete'])
+    .authorization((allow) => [allow.groups(['ADMIN']).to(['read'])]),
+
+  // One person at a customer. `id` is the lower-case e-mail address.
+  CrmContact: a
+    .model({
+      customerId: a.string(),
+      name:       a.string(),
+      title:      a.string(),
+      phone:      a.string(),
+      ownerId:    a.string(),
+      source:     a.enum(['MANUAL', 'SPOT_REQUEST', 'BACKFILL', 'CUSTOMER_JSON']),
+      status:     a.enum(['ACTIVE', 'ARCHIVED']),
+      createdBy:  a.string(),
+      updatedBy:  a.string(),
+      version:    a.integer(),
+    })
+    .secondaryIndexes((index) => [index('customerId')])
+    .disableOperations(['subscriptions', 'create', 'update', 'delete'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  // Registrable domain -> account. `id` is the domain.
+  CrmDomain: a
+    .model({
+      customerId:          a.string(),
+      source:              a.enum(['MANUAL', 'SPOT_REQUEST', 'BACKFILL', 'WEBSITE']),
+      conflict:            a.boolean(),
+      conflictCustomerIds: a.string().array(),
+      claimedBy:           a.string(),
+      claimedAt:           a.datetime(),
+      version:             a.integer(),
+    })
+    .secondaryIndexes((index) => [index('customerId')])
+    .disableOperations(['subscriptions', 'create', 'update', 'delete'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  // Timeline rows: notes, tasks, calls, texts, e-mail and quote-draft metadata.
+  // `id` is `act:<ISO>:<rand6>`.
+  CrmActivity: a
+    .model({
+      customerId:   a.string(),
+      contactEmail: a.string(),
+      ownerId:      a.string().required(),
+      kind:         a.enum(['EMAIL_IN', 'EMAIL_OUT', 'QUOTE_DRAFTED', 'QUOTE_SENT', 'CALL', 'TEXT', 'NOTE', 'TASK']),
+      direction:    a.enum(['IN', 'OUT']),
+      at:           a.datetime().required(),
+      subject:      a.string(),
+      summary:      a.string(),
+      refs:         a.json(),
+      assigneeId:   a.string(),
+      dueAt:        a.datetime(),
+      doneAt:       a.datetime(),
+      doneBy:       a.string(),
+      createdBy:    a.string().required(),
+      version:      a.integer(),
+    })
+    .secondaryIndexes((index) => [
+      index('customerId').sortKeys(['at']),
+      index('ownerId').sortKeys(['at']),
+      index('assigneeId').sortKeys(['dueAt']),
+    ])
+    .disableOperations(['subscriptions', 'create', 'update', 'delete'])
+    .authorization((allow) => [allow.groups(['ADMIN']).to(['read'])]),
+
+  // Last touch and next step per account. `id` is Customer.id.
+  CrmAccount: a
+    .model({
+      lastTouchAt:    a.datetime(),
+      lastTouchKind:  a.string(),
+      lastTouchBy:    a.string(),
+      nextStep:       a.string(),
+      nextStepDueAt:  a.datetime(),
+      nextStepBy:     a.string(),
+      openTaskCount:  a.integer(),
+      updatedBy:      a.string(),
+      version:        a.integer(),
+    })
+    .disableOperations(['subscriptions', 'create', 'update', 'delete'])
     .authorization((allow) => [allow.authenticated().to(['read'])]),
 
   /*
@@ -2767,6 +2960,10 @@ const schema = a.schema({
       offerAvailableAt:  a.datetime(),
       offerPostingId:    a.string(),            // the ShipmentPosting it answered
       offerMessageRef:   a.string(),            // the ShipmentMessage / e-mail it came from
+
+      // ── Step AB: the spot request this quote answers ─────────────────────
+      // `sr:<userId>:<gmailMessageId>`; set once by SAVE_QUOTE, never changed.
+      spotRequestId:     a.string(),
       createdBy:       a.string().required(),
       updatedBy:       a.string().required(),
       version:         a.integer().required(),
@@ -4524,6 +4721,30 @@ const schema = a.schema({
     .returns(a.json())
     .authorization((allow) => [allow.authenticated()])
     .handler(a.handler.function(workflowAgent)),
+
+  // Step AB: the per-rep Gmail spot quoter. Actions: SPOT_STATUS, SPOT_OAUTH_START,
+  // SPOT_OAUTH_FINISH, SPOT_CONNECT_SIMULATED, SPOT_DISCONNECT, SPOT_SET_PAUSED,
+  // SPOT_PURGE_MINE, SPOT_SAVE_MY_SETTINGS, SPOT_POLL_NOW, SPOT_LIST_REQUESTS,
+  // SPOT_GET_REQUEST, SPOT_COUNT, SPOT_ADD_MANUAL, SPOT_UPDATE_FIELDS, SPOT_SET_CUSTOMER,
+  // SPOT_CREATE_DRAFT, SPOT_SEND_DRAFT, SPOT_DISMISS, SPOT_MARK_OUTCOME,
+  // SPOT_SAVE_SETTINGS, SPOT_ADMIN_DISCONNECT and the dev-only SPOT_SIM_*. The same
+  // Lambda answers the five-minute poll rule. A reply is a DRAFT in the rep's Gmail.
+  tmsSpotActions: a
+    .mutation()
+    .arguments({ action: a.string().required(), input: a.json() })
+    .returns(a.json())
+    .authorization((allow) => [allow.authenticated()])
+    .handler(a.handler.function(tmsSpotQuoter)),
+
+  // Step AB: CRM bones. Actions: CRM_GET_ACCOUNT, CRM_LIST_ACCOUNTS, CRM_ADD_ACTIVITY,
+  // CRM_ADD_TASK, CRM_COMPLETE_TASK, CRM_SET_NEXT_STEP, CRM_LIST_FOLLOWUPS,
+  // CRM_UPSERT_CONTACT, CRM_CLAIM_DOMAIN, CRM_ASSIGN_OWNER, CRM_BACKFILL.
+  tmsCrmActions: a
+    .mutation()
+    .arguments({ action: a.string().required(), input: a.json() })
+    .returns(a.json())
+    .authorization((allow) => [allow.authenticated()])
+    .handler(a.handler.function(tmsCrmActions)),
 
   // Step C: every carrier-directory write goes through this Lambda. Actions:
   // UPSERT_CARRIER, SET_CARRIER_STATUS, UPSERT_CONTACT, ARCHIVE_CONTACT,
