@@ -93,8 +93,14 @@ export interface StageResult {
   detail: string
 }
 
-function customerOf(row: Row | null): { defaultSalesRepId?: string | null; billToParties?: unknown } | null {
-  return row ? { defaultSalesRepId: typeof row.defaultSalesRepId === 'string' ? row.defaultSalesRepId : null, billToParties: row.billToParties } : null
+function customerOf(row: Row | null): { defaultSalesRepId?: string | null; accountOwnerIds?: string[] | null; billToParties?: unknown } | null {
+  return row
+    ? {
+        defaultSalesRepId: typeof row.defaultSalesRepId === 'string' ? row.defaultSalesRepId : null,
+        accountOwnerIds: Array.isArray(row.accountOwnerIds) ? (row.accountOwnerIds as string[]) : null,
+        billToParties: row.billToParties,
+      }
+    : null
 }
 
 export async function stageIntake(run: RunRow, mail: IntakeSourceMail, input: StageInput): Promise<StageResult> {

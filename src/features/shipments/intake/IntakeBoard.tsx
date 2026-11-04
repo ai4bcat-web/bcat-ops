@@ -6,12 +6,12 @@
 import { useMemo } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { Mail } from 'lucide-react'
-import { TmsAlert, TmsBadge, TmsEmptyState, TmsPage, TmsSegmentedTabs, TmsTable, TmsTabs } from '@/features/tms/kit'
+import { TmsAlert, TmsBadge, TmsEmptyState, TmsFilterChip, TmsPage, TmsSegmentedTabs, TmsTable, TmsTabs } from '@/features/tms/kit'
 import type { ColumnDef } from '@/features/tms/kit'
 import { flattenDivisions } from '@/features/tms/settings/taxonomyDrafts'
 import { useOwnershipDivisions } from '@/features/tms/useOwnershipDivisions'
 import { formatDateTime } from '@/lib/date'
-import { intakeCounts } from '@/lib/intakeLoad'
+import { intakeCounts, isDemoIntake } from '@/lib/intakeLoad'
 import type { IntakeLoadRecord, IntakeStatus } from '@/types/intake'
 import { ShipmentsSectionTabs } from '../ShipmentsSectionTabs'
 import { useIntakeLoads } from './useIntakeLoads'
@@ -82,7 +82,8 @@ export function IntakeBoard() {
     : (tabs.find((t) => (t.count ?? 0) > 0) ?? tabs[0])?.key
 
   const division = activeDivisions.find((d) => d.code === selected)
-  const rows = shown.rows.filter((r) => (selected === UNROUTED ? isUnrouted(r) : r.divisionCode === selected))
+  const demoOnly = params.get('demo') === '1'
+  const rows = shown.rows.filter((r) => (selected === UNROUTED ? isUnrouted(r) : r.divisionCode === selected) && (!demoOnly || isDemoIntake(r)))
   const missingAddress = activeDivisions.filter((d) => !d.intakeEmail)
 
   function update(next: Record<string, string | null>) {
@@ -181,6 +182,7 @@ export function IntakeBoard() {
           { key: 'dismissed', label: 'Dismissed' },
         ]}
       />
+      <TmsFilterChip label="Demo" value={demoOnly ? 'only' : null} onClick={() => update({ demo: demoOnly ? null : '1' })} />
       <TmsTable
         columns={columns}
         rows={rows}

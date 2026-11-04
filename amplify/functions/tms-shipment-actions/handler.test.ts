@@ -2052,6 +2052,21 @@ describe('ownership tagging', () => {
     expect(table(TABLES.order).get(ids.orderId)!.customerRepId).toBe('amanda')
     expect(table(TABLES.load).get(ids.loadId)!.salesRepId).toBe('amanda')
   })
+
+  it('defaults the rep from the primary account owner and the bill-to from the customer, and leaves both empty without them', async () => {
+    const create = async (): Promise<{ shipment: Row; orders: Row[] }> =>
+      (await call('CREATE_SHIPMENT', { customerId: 'cus-1' })) as { shipment: Row; orders: Row[] }
+
+    seedCustomer({ accountOwnerIds: ['owner@bcatcorp.com'], billToParties: [{ id: 'bt-a' }, { id: 'bt-b', isDefault: true }] })
+    const withDefaults = await create()
+    expect(withDefaults.shipment.salesRepId).toBe('owner@bcatcorp.com')
+    expect(withDefaults.orders[0]).toMatchObject({ customerRepId: 'owner@bcatcorp.com', billToId: 'bt-b' })
+
+    seedCustomer({ accountOwnerIds: [], billToParties: [{ id: 'bt-a' }, { id: 'bt-b' }] })
+    const without = await create()
+    expect(without.shipment.salesRepId ?? null).toBeNull()
+    expect(without.orders[0].billToId ?? null).toBeNull()
+  })
 })
 
 // ── Step V: the tracker ─────────────────────────────────────────────────────

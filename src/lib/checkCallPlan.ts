@@ -89,7 +89,8 @@ export function normalizeCheckCallPlan(raw: unknown): CheckCallPlan | null {
   // A plan saved with SAVE_CHECK_CALL_PLAN is stored as JSON text on the Load row, and the Lambdas and the shipment bundle read
   // raw rows: parse that text, or a per-load override is silently dropped and the customer / org plan wins.
   let value = raw
-  if (typeof value === 'string') {
+  // AppSync hands an AWSJSON column holding JSON text back JSON-encoded a second time, so the browser sees "\"{...}\"": parse until it is not text.
+  for (let i = 0; i < 3 && typeof value === 'string'; i++) {
     try { value = JSON.parse(value) } catch { return null }
   }
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null

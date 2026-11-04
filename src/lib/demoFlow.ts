@@ -7,6 +7,17 @@
  * because a script said so.
  */
 
+/**
+ * The marker every walkthrough record carries in its name: "ZZ DEMO Customer …",
+ * division code ZZ_DEMO_…, references ZZDEMO-…. The "Demo" chip on the shipment
+ * lists keeps only rows whose text carries it.
+ */
+const DEMO_MARKER = /ZZ[\s_-]?DEMO/i
+
+export function isDemoText(...parts: ReadonlyArray<string | null | undefined>): boolean {
+  return parts.some((part) => part != null && DEMO_MARKER.test(part))
+}
+
 export type DemoStepKey =
   | 'P1' | 'P2' | 'P3' | 'P4' | 'P5' | 'P6' | 'P7' | 'P8' | 'P9' | 'P10' | 'P11'
 

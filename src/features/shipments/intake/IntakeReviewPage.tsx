@@ -18,7 +18,7 @@ import {
 } from '@/lib/apiClient'
 import { requiredFieldLabel } from '@/lib/flowDefaults'
 import { formatDateTime } from '@/lib/date'
-import { canMarkReviewed, canMoveToActive, fieldStatusOf, intakeFieldKeys, intakeRequired, patchIntakeFields } from '@/lib/intakeLoad'
+import { canMarkReviewed, canMoveToActive, fieldStatusOf, intakeFieldKeys, intakeRequired, patchIntakeFields, withCustomerDefaults } from '@/lib/intakeLoad'
 import type { CustomerRecord, TmsSettings } from '@/types/tms'
 import type { IntakeFields, IntakeLoadRecord, IntakeMeta, IntakeStop } from '@/types/intake'
 import { IntakeFieldRow } from './IntakeFieldRow'
@@ -101,6 +101,13 @@ function ReviewForm({ row, customers, settings, canReview, onRow, reload }: Form
 
   function edit(patch: Partial<Omit<IntakeFields, 'stops'>>) {
     setWork((w) => patchIntakeFields(w, patch, { add: [], remove: [] }))
+  }
+  function pickCustomer(id: string | null, name: string | null) {
+    const picked = id ? customers.find((c) => c.id === id) : undefined
+    setWork((w) => {
+      const next = patchIntakeFields(w, { customerId: id, customerName: picked?.name ?? name, billToId: null }, { add: [], remove: [] })
+      return withCustomerDefaults(next, picked)
+    })
   }
   function editStops(stops: IntakeStop[]) {
     setWork((w) => patchIntakeFields(w, { stops }, { add: [], remove: [] }))
@@ -250,10 +257,7 @@ function ReviewForm({ row, customers, settings, canReview, onRow, reload }: Form
               aria-label="Customer"
               disabled={!editable}
               value={work.fields.customerId ?? ''}
-              onChange={(e) => {
-                const picked = customers.find((c) => c.id === e.target.value)
-                edit({ customerId: picked?.id ?? null, customerName: picked?.name ?? work.fields.customerName, billToId: null })
-              }}
+              onChange={(e) => pickCustomer(e.target.value || null, work.fields.customerName)}
             >
               <option value="">{work.fields.customerName ? `Not matched: ${work.fields.customerName}` : '— choose customer —'}</option>
               {customerOptions.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -263,7 +267,7 @@ function ReviewForm({ row, customers, settings, canReview, onRow, reload }: Form
             <p className="tms-field-hint">
               Did you mean:{' '}
               {candidates.map((c) => (
-                <TmsButton key={c.id} size="sm" variant="ghost" disabled={!editable} onClick={() => edit({ customerId: c.id, customerName: c.name })}>
+                <TmsButton key={c.id} size="sm" variant="ghost" disabled={!editable} onClick={() => pickCustomer(c.id, c.name)}>
                   {c.name}
                 </TmsButton>
               ))}

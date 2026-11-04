@@ -16,6 +16,7 @@ import {
   divisionLabel,
   massReleaseReady,
   matchesBoardFilters,
+  isDemoShipment,
   matchesQuery,
   needsDriver,
   stopProgressOf,
@@ -65,6 +66,19 @@ describe('search', () => {
     })
     expect(matchesQuery(r, 'globex dallas')).toBe(true)
     expect(matchesQuery(r, 'chicago')).toBe(false)
+  })
+})
+
+describe('Demo chip', () => {
+  it('keeps the ZZ DEMO walkthrough shipments and drops the real book', () => {
+    const rows = [
+      row('1', { customerName: 'ZZ DEMO Customer 695311' }),
+      row('2', { customerName: 'Acme Freight', reference: 'ZZDEMO-695311' }),
+      row('3', { customerName: 'Acme Freight', searchKey: 's3 zz demo shipper lubbock' }),
+      row('4', { customerName: 'Acme Freight', reference: 'PO-4471' }),
+      row('5', { customerName: null }),
+    ]
+    expect(rows.filter(isDemoShipment).map((r) => r.id)).toEqual(['1', '2', '3'])
   })
 })
 

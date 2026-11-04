@@ -18,6 +18,7 @@ import type {
   IntakeSource,
   IntakeStop,
 } from '../types/intake'
+import { isDemoText } from './demoFlow'
 import type { TenderPrefill, TenderStopPrefill } from './intakeTender'
 import {
   REQUIRED_FIELD_CATALOG,
@@ -127,7 +128,10 @@ const clean = (v: unknown): string | null => {
   return s || null
 }
 
-/** The customer's default bill-to (`Customer.billToParties[].isDefault`), or null. */
+/**
+ * The customer's bill-to for a new load: its default party (`billToParties[].isDefault`),
+ * or null when it has none marked default.
+ */
 export function defaultBillToIdOf(customer: { billToParties?: unknown } | null | undefined): string | null {
   let raw = customer?.billToParties
   if (typeof raw === 'string') { try { raw = JSON.parse(raw) } catch { raw = null } }
@@ -136,13 +140,37 @@ export function defaultBillToIdOf(customer: { billToParties?: unknown } | null |
   return hit ? clean((hit as Row).id) : null
 }
 
+/** The sales rep a new load defaults to: `defaultSalesRepId`, else the primary account owner. */
+export function defaultSalesRepIdOf(customer: { defaultSalesRepId?: unknown; accountOwnerIds?: unknown } | null | undefined): string | null {
+  const owners = Array.isArray(customer?.accountOwnerIds) ? customer.accountOwnerIds : []
+  return clean(customer?.defaultSalesRepId) ?? clean(owners[0])
+}
+
+/**
+ * What a new intake load or shipment starts with from its customer. Only a starting
+ * value: both stay required, and the load still needs its review before it moves.
+ */
+export function customerDefaultsOf(customer: {
+  defaultSalesRepId?: unknown; accountOwnerIds?: unknown; defaultBillToId?: unknown; billToParties?: unknown
+} | null | undefined): { salesRepId: string | null; billToId: string | null } {
+  return {
+    salesRepId: defaultSalesRepIdOf(customer),
+    billToId: clean(customer?.defaultBillToId) ?? defaultBillToIdOf(customer),
+  }
+}
+
+/** The "Demo" chip: an intake load carrying the ZZ DEMO marker in its customer, sender, subject or division. */
+export function isDemoIntake(row: Pick<IntakeLoadRecord, 'fields' | 'fromName' | 'subject' | 'divisionCode'>): boolean {
+  return isDemoText(row.fields.customerName, row.fields.reference, row.fromName, row.subject, row.divisionCode)
+}
+
 export function buildIntakeDraft(input: {
   tender: TenderPrefill | null
   parserTender: TenderPrefill | null
   fillKind: 'RATECON' | 'EMAIL' | 'NONE'
   lowConfidence: readonly string[]
   party: { kind: string | null; id: string | null; name: string | null; how: string | null; candidates: IntakeCustomerCandidate[] }
-  customer: { defaultSalesRepId?: string | null; defaultBillToId?: string | null; billToParties?: unknown } | null
+  customer: { defaultSalesRepId?: string | null; accountOwnerIds?: string[] | null; defaultBillToId?: string | null; billToParties?: unknown } | null
   divisionCode: string | null
   stopFacilityHits: readonly boolean[]
 }): { fields: IntakeFields; meta: IntakeMeta; customerCandidates: IntakeCustomerCandidate[] } {
@@ -182,10 +210,10 @@ export function buildIntakeDraft(input: {
   fields.divisionCode = clean(input.divisionCode)
   mark('divisionCode', 'ADDRESS')
 
-  const customerRow = input.customer
-  fields.salesRepId = clean(customerRow?.defaultSalesRepId)
+  const defaults = customerDefaultsOf(input.customer)
+  fields.salesRepId = defaults.salesRepId
   mark('salesRepId', 'DEFAULT')
-  fields.billToId = clean(customerRow?.defaultBillToId) ?? defaultBillToIdOf(customerRow)
+  fields.billToId = defaults.billToId
   mark('billToId', 'DEFAULT')
 
   // Scalars the tender carries.
@@ -428,6 +456,28 @@ export function patchIntakeFields(
   for (const key of confirm.add) if (!confirmed.includes(key)) confirmed.push(key)
   confirmed = confirmed.filter((key) => !confirm.remove.includes(key))
   return { fields, meta, confirmed }
+}
+
+/**
+ * Choosing a customer on the review page: the bill-to belongs to the customer it was
+ * picked from, so it is replaced by the new customer's (or cleared); the sales rep only
+ * fills a blank. Both are marked DEFAULT, never confirmed, and stay required.
+ */
+export function withCustomerDefaults(
+  row: { fields: IntakeFields; meta: IntakeMeta; confirmed: string[] },
+  customer: Parameters<typeof customerDefaultsOf>[0],
+): { fields: IntakeFields; meta: IntakeMeta; confirmed: string[] } {
+  const defaults = customerDefaultsOf(customer)
+  const fields: IntakeFields = { ...row.fields }
+  const meta: IntakeMeta = { ...row.meta }
+  const set = (key: 'billToId' | 'salesRepId', value: string | null) => {
+    fields[key] = value
+    if (value) meta[key] = { source: 'DEFAULT', confidence: 'high' }
+    else delete meta[key]
+  }
+  set('billToId', defaults.billToId)
+  if (!present(fields.salesRepId)) set('salesRepId', defaults.salesRepId)
+  return { fields, meta, confirmed: row.confirmed.filter((key) => key !== 'billToId') }
 }
 
 /** Keys where the reviewer's draft differs from what automation produced. */

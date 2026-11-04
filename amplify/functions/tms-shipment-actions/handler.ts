@@ -241,6 +241,7 @@ import {
   numericSchemeSwitchError,
   proSchemeOf,
 } from './proScheme'
+import { customerDefaultsOf } from '../../../src/lib/intakeLoad'
 import { evaluateReleaseGate, releaseGateError } from '../../../src/lib/releaseGate'
 import { isEmailAddress } from '../../../src/lib/emailAddress'
 import { mcpPacketStanding, rateConMcpRefusal } from '../../../src/lib/mcpPacket'
@@ -1956,7 +1957,8 @@ async function createShipment(input: Row, caller: Caller): Promise<Row> {
   }
 
   const customerName = customer ? optionalString(customer.name, 200) : typedCustomerName
-  const salesRepId = optionalString(customer?.defaultSalesRepId, 100)
+  const defaults = customerDefaultsOf(customer)
+  const salesRepId = optionalString(defaults.salesRepId, 100)
   const trackerId = await activeProfileIdOrNull(customer?.defaultTrackerId)
   const shipment: Row = {
     id: shipmentId,
@@ -2002,7 +2004,7 @@ async function createShipment(input: Row, caller: Caller): Promise<Row> {
     customerName,
     customerContactId: null,
     customerRepId: salesRepId,
-    billToId: null,
+    billToId: defaults.billToId,
     costCenter: null,
     mode,
     rateType: 'SPOT',
@@ -3977,7 +3979,8 @@ async function writeCustomerToBundle(
 
   const customerId = String(customer.id)
   const customerName = optionalString(customer.name, 200)
-  const defaultRepId = optionalString(customer.defaultSalesRepId, 100)
+  const defaults = customerDefaultsOf(customer)
+  const defaultRepId = optionalString(defaults.salesRepId, 100)
   const now = nowIso()
   const linked: Row = { ...shipment, customerId, customerName }
   const takesRep = defaultRepId != null && optionalString(shipment.salesRepId, 100) == null
@@ -4001,6 +4004,9 @@ async function writeCustomerToBundle(
         customerName,
         ...(defaultRepId != null && optionalString(order.customerRepId, 100) == null
           ? { customerRepId: defaultRepId }
+          : {}),
+        ...(defaults.billToId != null && optionalString(order.billToId, 100) == null
+          ? { billToId: defaults.billToId }
           : {}),
         updatedBy: caller.email,
         updatedAt: now,

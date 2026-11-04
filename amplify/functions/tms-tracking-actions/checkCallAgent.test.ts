@@ -304,6 +304,20 @@ describe('runCheckCallPlan', () => {
     expect(load && 'nextCheckCallAt' in load ? load.nextCheckCallAt : undefined).toBeUndefined()
   })
 
+  it('sends the delivered milestone without writing NULL into the worklist index key', async () => {
+    const store = new MemoryStore()
+    seedSettings(store)
+    seedCustomer(store)
+    seedShipment(store, { status: 'DELIVERED' })
+    seedLoad(store, { status: 'DELIVERED', checkCallOpen: 'OPEN', nextCheckCallAt: '2026-02-02T11:00:00.000Z' })
+    seedCarrier(store)
+    seedLink(store)
+    const deps = makeDeps(store)
+    await expect(runCheckCallPlan(deps, { shipmentId: 'shp-1' }, CALLER)).resolves.toBeDefined()
+    const load = store.getById('Load-test', 'lod-1')
+    expect(load?.nextCheckCallAt ?? undefined).not.toBeNull()
+  })
+
   it('keeps VOICE in a stored plan but never sends it', async () => {
     const store = new MemoryStore()
     seedSettings(store)

@@ -3,7 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { TmsAlert, TmsBadge, TmsButton, TmsDialog, TmsListPage, TmsSelect, TmsStatRow, type ColumnDef } from '@/features/tms/kit'
 import { useAuth } from '@/hooks/useAuth'
 import type { ShipmentListRow } from '@/hooks/useShipments'
-import { matchesQuery } from '@/features/shipments/shipmentViews'
+import { isDemoShipment, matchesQuery } from '@/features/shipments/shipmentViews'
 import { batchShipmentTask, listAuditLogsFor } from '@/lib/apiClient'
 import { failingReasons, LOAD_REVIEW_CHECKS, LOAD_REVIEW_CHECK_LABEL, releasedWithin, reviewAgeDays, type LoadReviewVerdict } from '@/lib/loadReview'
 import { formatCents } from '@/lib/invoiceBuild'
@@ -35,7 +35,8 @@ export function LoadReviewPage() {
   const filtered = source.filter(({ row }) => matchesQuery(row, params.get('q') ?? '')
     && (!params.get('division') || row.revDivision === params.get('division'))
     && (!params.get('rep') || row.salesRepId === params.get('rep'))
-    && (!params.get('customer') || row.customerId === params.get('customer')))
+    && (!params.get('customer') || row.customerId === params.get('customer'))
+    && (params.get('demo') !== '1' || isDemoShipment(row)))
   const pageNumber = Math.max(0, Number(params.get('page')) || 0)
   const page = filtered.slice(pageNumber * 50, pageNumber * 50 + 50)
   const eligible = filtered.filter((entry) => entry.verdict?.ok)
@@ -113,7 +114,10 @@ export function LoadReviewPage() {
     <TmsListPage title="Load Review" rows={page} columns={columns} rowKey={({ row }) => row.id} onRowClick={({ row }) => update({ shipment: row.id })}
       onRefresh={() => void refresh()} search={{ value: params.get('q') ?? '', onChange: (q) => update({ q, page: null }), placeholder: 'Shipment, customer or reference' }}
       quickTabs={{ active: tab, onSelect: (key) => { update({ tab: key, page: null }); setSelected(new Set()) }, tabs: [{ key: 'fixes', label: 'Needs fixes', count: needs.length }, { key: 'ready', label: 'Looks ready', count: ready.length }, { key: 'all', label: 'All in review', count: queue.length }, { key: 'released', label: 'Released (14 d)', count: released.length }] }}
-      filterChips={['division', 'rep', 'customer'].map((key) => ({ key, label: key === 'division' ? 'Revenue division' : key === 'rep' ? 'Sales rep' : 'Customer', value: params.get(key), onClick: () => setFilter(key) }))}
+      filterChips={[
+        ...['division', 'rep', 'customer'].map((key) => ({ key, label: key === 'division' ? 'Revenue division' : key === 'rep' ? 'Sales rep' : 'Customer', value: params.get(key), onClick: () => setFilter(key) })),
+        { key: 'demo', label: 'Demo', value: params.get('demo') === '1' ? 'only' : null, onClick: () => update({ demo: params.get('demo') === '1' ? null : '1', page: null }) },
+      ]}
       actions={tab !== 'released' && <TmsButton onClick={() => setSelected(new Set(eligible.slice(0, 100).map(({ row }) => row.id)))}>Select all looks ready (up to 100)</TmsButton>}
       banner={<TmsStatRow columns={5} items={[{ label: 'In review', value: String(queue.length) }, { label: 'Looks ready', value: String(ready.length) }, { label: 'Needs fixes', value: String(needs.length) }, { label: 'Oldest', value: `${Math.max(0, ...queue.map(({ row }) => reviewAgeDays(row, now) ?? 0))} d` }, { label: 'Value in review', value: formatCents(queue.reduce((sum, { row }) => sum + (row.orderRevenueCents ?? row.revenueCents ?? 0), 0)) }]} />}
       page={{ from: filtered.length ? pageNumber * 50 + 1 : 0, to: pageNumber * 50 + page.length, total: filtered.length, pageSize: 50 }}

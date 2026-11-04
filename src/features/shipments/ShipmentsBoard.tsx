@@ -29,7 +29,7 @@ import { BatchTaskDialog, type BatchTaskAction, type BatchTaskResult } from './b
 import { BoardMapView } from './board/BoardMapView'
 import { ColumnsPickerDialog } from './board/ColumnsPickerDialog'
 import { ShipmentsSectionTabs } from './ShipmentsSectionTabs'
-import { TmsBadge, TmsButton, TmsInput, TmsSegmentedTabs, statusTone } from '@/features/tms/kit'
+import { TmsBadge, TmsButton, TmsFilterChip, TmsInput, TmsSegmentedTabs, statusTone } from '@/features/tms/kit'
 import { useOwnershipDivisions } from '@/features/tms/useOwnershipDivisions'
 import { useAuth } from '@/hooks/useAuth'
 import { useDirectory } from '@/hooks/useDirectory'
@@ -71,6 +71,7 @@ import {
   needsDriver,
   toCsv,
   visibleColumns,
+  isDemoShipment,
   type ShipmentRow,
 } from './shipmentViews'
 import type { BatchShipmentTask, CustomerRecord, LocationRecord, ShipmentColumnTemplateRecord, TmsSettings, UserProfileRecord } from '@/types/tms'
@@ -528,7 +529,7 @@ function BoardPane({
   // with the Tracking desk). The board keeps what is its own: columns, sort,
   // selection and the batch. The list scope applies before the filters.
   const {
-    rows: filteredRows,
+    rows: boardRows,
     filters,
     panelProps,
   } = useBoardFilters({
@@ -567,6 +568,19 @@ function BoardPane({
     return refresh()
   }, [refresh])
 
+  // The "Demo" chip: only the ZZ DEMO walkthrough rows. It lives in the URL (`?demo=1`)
+  // so the isolated view can be bookmarked or handed over as a link.
+  const demoOnly = params.get('demo') === '1'
+  const filteredRows = useMemo(() => (demoOnly ? boardRows.filter(isDemoShipment) : boardRows), [boardRows, demoOnly])
+  const toggleDemo = useCallback(() => {
+    setPageSize(PAGE_SIZE_INITIAL)
+    setParams((prev) => {
+      const next = new URLSearchParams(prev)
+      if (next.get('demo') === '1') next.delete('demo')
+      else next.set('demo', '1')
+      return next
+    }, { replace: true })
+  }, [setParams])
   const sortedRows = useMemo(() => sortRows(filteredRows, sort), [filteredRows, sort])
   const shownRows = useMemo(() => sortedRows.slice(0, pageSize), [sortedRows, pageSize])
 
@@ -900,6 +914,7 @@ function BoardPane({
                 tabs={[{ key: 'active', label: 'Active' }, { key: 'all', label: 'All' }]}
               />
             )}
+            <TmsFilterChip label="Demo" value={demoOnly ? 'only' : null} onClick={toggleDemo} />
           </div>
 
           <div className="flex-1 overflow-hidden">

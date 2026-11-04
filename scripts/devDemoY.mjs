@@ -675,6 +675,35 @@ STAGES.own = async (ctx) => {
   } finally { await b2.close() }
 }
 
+// ───────────────────────────── verify146: the five fixes, live ─────────────────────────────
+STAGES.verify146 = async (ctx) => {
+  const S = ctx.state
+  const V = (S.log.verify146 = {})
+  const bundle = await bundleOf(ctx)
+  V.poCodes = (bundle.orders[0].references ?? []).map((r) => r.code)
+  V.poWorkaroundUsed = Boolean(S.log.poWorkaround)
+  V.releaseAfterBill = S.log.reviewAfter?.length === 0 && S.log.releasedStatus === 'UNBILLED'
+  V.podReview = S.log.podReview
+  const thread = await ctx.trk('LIST_SHIPMENT_THREAD', { shipmentId: S.shipmentId }).catch((e) => ({ error: short(e) }))
+  V.thread = thread.error ?? { messages: (thread.messages ?? []).length }
+  const run = await ctx.trk('RUN_CHECK_CALL_PLAN', { shipmentId: S.shipmentId }).catch((e) => ({ error: short(e) }))
+  V.runOnDelivered = run.error ?? { checked: run.checked, skipped: run.skipped, reasons: (run.reasons ?? []).slice(0, 2) }
+  const load = bundle.loads[0]
+  V.loadPlanStored = load.checkCallPlan
+  const c = (await ctx.gql(`query { getCustomer(id: ${JSON.stringify(S.customerId)}) { id name updatedAt mcNumber } }`)).getCustomer
+  const up = await ctx.dir('UPSERT_CUSTOMER', { id: c.id, expectedUpdatedAt: c.updatedAt, name: c.name, mcNumber: c.mcNumber, billingEmail: `zz-demo-ap2-${S.ts}@example.invalid`, creditLimitCents: 100000000 }).then((r) => ({ ok: true, billingEmail: !!(r.customer ?? r).billingEmail })).catch((e) => ({ ok: false, error: short(e) }))
+  V.upsertCustomer = up
+  const b = await openBrowser(ctx.id)
+  try {
+    await b.navigate('/tms/dashboard'); await pause(3500)
+    await shot(b, shipUrl(S, 'tracking'), '41-verify-tracking-tab-per-load-plan', { wait: waitText(b, 'Tracking') })
+    V.trackingTabPlanText = (await b.evaluate(`(() => { const t = document.body.innerText.replace(/\\s+/g,' '); const i = t.search(/every|Every/); return i < 0 ? null : t.slice(Math.max(0,i-80), i+160) })()`))
+    V.trackingTabInterval = await b.evaluate(`(() => { const el = [...document.querySelectorAll('input[type="number"]')][0]; return el ? el.value : null })()`)
+    await shot(b, shipUrl(S, 'documents'), '42-verify-pod-reviewed', { wait: waitText(b, 'POD') })
+  } finally { await b.close() }
+  say(JSON.stringify(V, null, 1))
+}
+
 // ───────────────────────────── retire: tidy an earlier attempt ─────────────────────────────
 /** Void the ZZ shipments, archive the ZZ customer / carrier / division, and forget the state (nothing is deleted; a PRO is permanent). */
 STAGES.retire = async (ctx) => {

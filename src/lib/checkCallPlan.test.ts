@@ -43,6 +43,7 @@ describe('reading a stored plan', () => {
     // a plan stored as JSON text (SAVE_CHECK_CALL_PLAN writes the load row that way) is still the plan
     expect(normalizeCheckCallPlan(JSON.stringify({ intervalHours: 2, escalateAfterMinutes: 20, channels: ['SMS'], milestones: ['DELIVERED'] }))).toMatchObject({ intervalHours: 2, escalateAfterMinutes: 20, channels: ['SMS'] })
     expect(normalizeCheckCallPlan('{not json')).toBeNull()
+    expect(normalizeCheckCallPlan(JSON.stringify(JSON.stringify({ intervalHours: 3, escalateAfterMinutes: 45, channels: ['EMAIL'], milestones: ['DELIVERED'] })))).toMatchObject({ intervalHours: 3, escalateAfterMinutes: 45 })
     expect(normalizeCheckCallPlan([])).toBeNull()
   })
 

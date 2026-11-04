@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { needsLine } from './flowDefaults'
+import { isDemoText } from './demoFlow'
 import {
-  buildIntakeDraft, canMarkReviewed, canMoveToActive, correctedKeys, emptyIntakeFields, fieldStatusOf, intakeCounts,
-  intakeMissing, intakeRequired, patchIntakeFields, toCreateShipmentInput,
+  buildIntakeDraft, canMarkReviewed, canMoveToActive, correctedKeys, customerDefaultsOf, emptyIntakeFields, fieldStatusOf, intakeCounts,
+  intakeMissing, intakeRequired, isDemoIntake, patchIntakeFields, toCreateShipmentInput, withCustomerDefaults,
 } from './intakeLoad'
 import type { TenderPrefill } from './intakeTender'
 import type { IntakeFields, IntakeLoadRecord, IntakeMeta } from '../types/intake'
@@ -161,6 +162,70 @@ describe('canMoveToActive', () => {
     const moved = canMoveToActive({ ...base, fields }, ctx)
     expect(moved).toMatchObject({ ok: false, needsReview: false })
     expect(moved.missing).toEqual(['Bill-to party'])
+  })
+})
+
+describe('customer defaults for a new load', () => {
+  const owner = { accountOwnerIds: ['owner@bcatcorp.com', 'second@bcatcorp.com'] }
+
+  it('takes the default rep, else the primary account owner, and the bill-to marked default', () => {
+    expect(customerDefaultsOf({ defaultSalesRepId: 'rep1', ...owner, billToParties: [{ id: 'a' }, { id: 'b', isDefault: true }] })).toEqual({ salesRepId: 'rep1', billToId: 'b' })
+    expect(customerDefaultsOf({ ...owner, billToParties: [{ id: 'a', isDefault: true }] })).toEqual({ salesRepId: 'owner@bcatcorp.com', billToId: 'a' })
+    expect(customerDefaultsOf({ billToParties: JSON.stringify([{ id: 'j', isDefault: true }]) }).billToId).toBe('j')
+  })
+
+  it('a customer without defaults leaves both empty, and parties with none marked default are no choice', () => {
+    expect(customerDefaultsOf({ billToParties: [{ id: 'only' }] }).billToId).toBeNull()
+    expect(customerDefaultsOf({ accountOwnerIds: [], billToParties: [] })).toEqual({ salesRepId: null, billToId: null })
+    expect(customerDefaultsOf(null)).toEqual({ salesRepId: null, billToId: null })
+    expect(customerDefaultsOf({ billToParties: [{ id: 'a' }, { id: 'b' }] }).billToId).toBeNull()
+  })
+
+  it('the staged draft starts with the defaults, marked DEFAULT, but is still blocked until reviewed', () => {
+    const d = draft({ customer: { accountOwnerIds: ['owner@bcatcorp.com'], billToParties: [{ id: 'bt1', isDefault: true }] } })
+    expect(d.fields).toMatchObject({ salesRepId: 'owner@bcatcorp.com', billToId: 'bt1' })
+    expect(d.meta.salesRepId.source).toBe('DEFAULT')
+    const row = { fields: { ...d.fields, customerRateCents: 150000, deliveryNumber: 'D1' }, meta: d.meta, confirmed: [], reviewedBy: null, reviewedAt: null }
+    expect(canMoveToActive(row, ctx)).toMatchObject({ ok: false, needsReview: true, missing: [] })
+  })
+
+  it('a customer without defaults leaves the fields empty and the gate still blocks on them', () => {
+    const d = draft({ customer: { billToParties: [{ id: 'a' }, { id: 'b' }] } })
+    expect(d.fields.salesRepId).toBeNull()
+    expect(d.fields.billToId).toBeNull()
+    expect(d.meta.salesRepId).toBeUndefined()
+    const row = { fields: { ...d.fields, customerRateCents: 150000, deliveryNumber: 'D1' }, meta: d.meta, confirmed: [], reviewedBy: 'rev@bcatcorp.com', reviewedAt: '2026-11-03T16:00:00.000Z' }
+    const moved = canMoveToActive(row, ctx)
+    expect(moved.ok).toBe(false)
+    expect(moved.missing).toEqual(expect.arrayContaining(['Bill-to party', 'Sales rep']))
+  })
+
+  it('picking a customer on the review page swaps the bill-to, only fills a blank rep, and never confirms', () => {
+    const d = draft({ customer: { defaultSalesRepId: 'rep1', billToParties: [{ id: 'old', isDefault: true }] } })
+    const picked = withCustomerDefaults({ ...d, confirmed: ['billToId'] }, { defaultSalesRepId: 'other', billToParties: [{ id: 'new', isDefault: true }] })
+    expect(picked.fields).toMatchObject({ billToId: 'new', salesRepId: 'rep1' })
+    expect(picked.confirmed).toEqual([])
+    const bare = withCustomerDefaults({ ...d, confirmed: [] }, { billToParties: [{ id: 'a' }, { id: 'b' }] })
+    expect(bare.fields.billToId).toBeNull()
+    expect(bare.meta.billToId).toBeUndefined()
+    const blankRep = withCustomerDefaults({ ...d, confirmed: [], fields: { ...d.fields, salesRepId: null } }, { defaultSalesRepId: 'other' })
+    expect(blankRep.fields.salesRepId).toBe('other')
+    expect(blankRep.meta.salesRepId.source).toBe('DEFAULT')
+  })
+})
+
+describe('Demo chip matching', () => {
+  const row = (over: Partial<Parameters<typeof isDemoIntake>[0]> = {}) => ({ fields: { ...emptyIntakeFields(), ...over.fields }, fromName: null, subject: null, divisionCode: null, ...over }) as Parameters<typeof isDemoIntake>[0]
+
+  it('matches the ZZ DEMO naming wherever the demo script puts it, and nothing else', () => {
+    expect(isDemoText('ZZ DEMO Customer 695311')).toBe(true)
+    expect(isDemoText(null, 'ZZ_DEMO_1793791695311')).toBe(true)
+    expect(isDemoText('ZZDEMO-695311')).toBe(true)
+    expect(isDemoText('zz demo shipper')).toBe(true)
+    expect(isDemoText('Acme Foods', 'Demo Dispatcher', 'ZZ Carrier', null, undefined)).toBe(false)
+    expect(isDemoIntake(row({ fields: { ...emptyIntakeFields(), customerName: 'ZZ DEMO Customer 1' } }))).toBe(true)
+    expect(isDemoIntake(row({ divisionCode: 'ZZ_DEMO_17' }))).toBe(true)
+    expect(isDemoIntake(row({ subject: 'Tender 123', fromName: 'Real Shipper' }))).toBe(false)
   })
 })
 

@@ -383,14 +383,14 @@ export async function runCheckCallPlan(
       }
       acted += 1
       await deps.transact([
-        updateItemTx(deps.tables.load, loadId, {
+        updateItemTx(deps.tables.load, loadId, withoutNullIndexKey({
           nextCheckCallAt: tick.nextDueAt,
           lastCheckCallAt: now,
           checkCallEscalatedAt: now,
           checkCallOpen: 'OPEN',
           updatedAt: now,
           updatedBy: caller.email,
-        }, String(load.updatedAt ?? '')),
+        }).patch, String(load.updatedAt ?? ''), { remove: withoutNullIndexKey({ nextCheckCallAt: tick.nextDueAt }).remove }),
       ])
       processed.push({ loadId, kind: 'ESCALATE_DISPATCHER', reason, sent })
       continue
@@ -401,14 +401,14 @@ export async function runCheckCallPlan(
       escalated += 1
       acted += 1
       await deps.transact([
-        updateItemTx(deps.tables.load, loadId, {
+        updateItemTx(deps.tables.load, loadId, withoutNullIndexKey({
           nextCheckCallAt: tick.nextDueAt,
           checkCallFlaggedAt: now,
           checkCallFlagReason: reason,
           checkCallOpen: 'OPEN',
           updatedAt: now,
           updatedBy: caller.email,
-        }, String(load.updatedAt ?? '')),
+        }).patch, String(load.updatedAt ?? ''), { remove: withoutNullIndexKey({ nextCheckCallAt: tick.nextDueAt }).remove }),
         updateItemTx(deps.tables.shipment, shipmentId, {
           trackingFlaggedAt: now,
           trackingFlagReason: reason,
@@ -525,8 +525,9 @@ export async function runCheckCallPlan(
     }
     // The reply clock only starts when something actually reached a provider-accepted send.
     if (anySent) sharedUpdate.checkCallAwaitingSince = now
+    const shared = withoutNullIndexKey(sharedUpdate)
     await deps.transact([
-      updateItemTx(deps.tables.load, loadId, sharedUpdate, String(load.updatedAt ?? '')),
+      updateItemTx(deps.tables.load, loadId, shared.patch, String(load.updatedAt ?? ''), { remove: shared.remove }),
     ])
     if (attempted > 0) {
       acted += 1
@@ -538,6 +539,14 @@ export async function runCheckCallPlan(
   }
 
   return { checked: results.length, acted, escalated, skipped, deferred, reasons: results.map((r) => r.tick.reason), processed }
+}
+
+/** `nextCheckCallAt` is the worklist index's sort key: DynamoDB refuses NULL there, so "nothing due" removes the attribute. */
+function withoutNullIndexKey(patch: Row): { patch: Row; remove: string[] } {
+  if (patch.nextCheckCallAt !== null) return { patch, remove: [] }
+  const { nextCheckCallAt: _drop, ...rest } = patch
+  void _drop
+  return { patch: rest, remove: ['nextCheckCallAt'] }
 }
 
 export async function saveCheckCallPlan(deps: CheckCallDeps, input: Row, caller: Caller): Promise<Row> {
