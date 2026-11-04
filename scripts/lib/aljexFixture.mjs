@@ -466,7 +466,13 @@ export function generateAljex({ rows = 1000, seed = 1, anomalies = 'standard' } 
       put(cells, 'carrierPhone', carrier.phone);
       put(cells, 'carrierEmail', carrier.email);
       put(cells, 'carrierDispatcher', `${pick(FIRST)} ${pick(LAST)}`);
-      if (!isIvan && idx % 4 === 0) put(cells, 'driverName', `${pick(FIRST)} ${pick(LAST)}`);
+      if (!isIvan && idx % 4 === 0) {
+        // Real Aljex: `Carrier Ref #` repeats Driver Name, which is a bare first name shared by many loads.
+        const driverFirst = pick(FIRST);
+        pick(LAST);
+        put(cells, 'driverName', driverFirst);
+        put(cells, 'carrierRefNo', driverFirst);
+      }
       put(cells, 'carrierCaIntrastate', carrier.caIntrastate ?? '');
       put(cells, 'carrierCaIntrastateExp', us(carrier.caExp ?? ''));
       put(cells, 'carrierTxPuc', carrier.txPuc ?? '');

@@ -196,7 +196,7 @@ async function planPhase(store: EngineStore, job: AljexImportJob, root: string):
   await runApLedger({ store: overlay, root, stage, profile, counts, reentry: false })
   const cons = conservation(counts)
   if (!cons.ok) warnings.push(`conservation broken for ${cons.broken.join(', ')}`)
-  const summaryReport = await reconcile(overlay, job.id, { counts, write: false })
+  const summaryReport = await reconcile(overlay, job.id, { counts, write: false, findings })
   const plan: AljexPlanSummary = { classes, warnings, bridge: summaryReport.bridge }
   await store.putObject(stageKey(root, 'plan-summary.json'), JSON.stringify(plan))
   const patch: EngineRow = { status: 'PLANNED', phase: 'PLAN', entityCounts: counts, cursor: { phase: 'PLAN' }, error: null }

@@ -76,6 +76,32 @@ describe('Aljex import engine on the synthetic fixture', () => {
     expect((job.options as { reconciled?: boolean }).reconciled).toBe(true)
   })
 
+  it('numbers every bill by its PRO (the invoice number): unique per carrier even when many rows share one Carrier Ref #', async () => {
+    const { store } = await applied()
+    const bills = table(store, 'carrierBill')
+    const refs = new Map<string, number>()
+    for (const r of table(store, 'legacyAljexRow')) {
+      const fields = (typeof r.fields === 'string' ? JSON.parse(r.fields) : r.fields) as Record<string, { h: string; v: string }>
+      for (const cell of Object.values(fields ?? {})) {
+        const ref = cell.h === 'Carrier Ref #' ? cell.v.trim() : ''
+        if (ref) refs.set(ref, (refs.get(ref) ?? 0) + 1)
+      }
+    }
+    expect(refs.size).toBeGreaterThan(0)
+    // The fixture reproduces the real shape: one carrier-ref text on many loads.
+    expect(Math.max(0, ...refs.values())).toBeGreaterThan(1)
+    const invoiceByShipment = new Map(table(store, 'invoice').map((i) => [i.shipmentId as string, i.number as string]))
+    const seen = new Set<string>()
+    for (const b of bills) {
+      expect(b.billNumber).toBe(b.loadNumber)
+      const inv = invoiceByShipment.get(b.shipmentId as string)
+      if (inv !== undefined) expect(b.billNumber).toBe(inv)
+      const key = `${b.carrierId}|${String(b.billNumber).toUpperCase()}`
+      expect(seen.has(key)).toBe(false)
+      seen.add(key)
+    }
+  })
+
   it('keeps every invoice self-consistent and every charge sum equal to the invoice amount', async () => {
     const { store } = await applied()
     const payments = table(store, 'arPayment')
@@ -416,6 +442,69 @@ describe('dedupe against records already on the target', () => {
     expect(order.invoiceId).toBeTruthy()
     expect(order.arStatus).toMatch(/PAID|UNPAID/)
     expect(table(store, 'auditLog').some((a) => a.entityId === 'live-order-1' && a.action === 'ALJEX_IMPORT_ENRICH')).toBe(true)
+  })
+})
+
+describe('reconciliation scope', () => {
+  it('ties on everything the import wrote and names every invoiced row it did not write', async () => {
+    const clean = makeStore()
+    await fullRun(clean, fixture.csv, 'P')
+    const orderById = new Map(table(clean, 'order').map((o) => [o.id as string, o]))
+    const invoices = table(clean, 'invoice')
+    const invoicesOf = (customerId: unknown) => invoices.filter((i) => i.customerId === customerId)
+    // A paid invoice of a customer that has other invoiced loads in the file.
+    const enrichInv = invoices.find((i) => typeof i.paidCents === 'number' && i.paidCents > 0 && invoicesOf(i.customerId).length > 1)!
+    const others = invoices.filter((i) => i.id !== enrichInv.id && i.customerId !== enrichInv.customerId)
+    const [mismatchInv, invoicedInv] = others
+    const store = makeStore()
+    // The live copy of an invoice's PRO: a shipment/order/load without finance, claimed by a backfill.
+    const seedLive = (inv: EngineRow, n: number, tweak: (order: EngineRow) => void): string => {
+      const order = orderById.get(inv.orderId as string)!
+      const shipment = table(clean, 'shipment').find((s) => s.id === order.shipmentId)!
+      const load = table(clean, 'load').find((l) => l.shipmentId === shipment.id)!
+      const liveOrder = { ...order, id: `live-order-${n}`, shipmentId: `live-shp-${n}`, arStatus: 'DOCS_NEEDED' } as EngineRow
+      for (const k of ['invoiceId', 'invoiceNumber', 'invoicedAt', 'arBalanceCents']) delete liveOrder[k]
+      tweak(liveOrder)
+      store.seed('order', [liveOrder])
+      store.seed('shipment', [{ ...shipment, id: `live-shp-${n}`, status: 'DELIVERED', legacySource: undefined, legacyImported: undefined, importRunId: undefined, loadIds: [`live-load-${n}`], orderIds: [`live-order-${n}`] } as EngineRow])
+      store.seed('load', [{ ...load, id: `live-load-${n}`, shipmentId: `live-shp-${n}`, orderId: `live-order-${n}`, stops: '[]' } as EngineRow])
+      store.seed('proClaim', [{ id: normalizePro(load.aljexId as string)!, loadId: `live-load-${n}`, claimedAt: FIXED_NOW, claimedBy: 'backfill', origin: 'BACKFILL' }])
+      return liveOrder.id as string
+    }
+    const enrichOrder = seedLive(enrichInv, 1, () => {})
+    seedLive(mismatchInv, 2, (o) => { o.revenueCents = (o.revenueCents as number) + 100 })
+    seedLive(invoicedInv, 3, (o) => { o.invoiceId = 'prod-invoice-3' })
+    // Two directory customers share the enriched invoice's customer name: the import cannot pick one, so the
+    // account stays unresolved while the live order already carries its own customer.
+    const customerName = table(clean, 'customer').find((c) => c.id === enrichInv.customerId)!.name as string
+    const dup = (id: string): EngineRow => ({ id, name: customerName, normalizedName: customerName.toLowerCase(), status: 'ACTIVE', active: true })
+    store.seed('customer', [dup('dup-customer-1'), dup('dup-customer-2')])
+
+    await stage(store, fixture.csv, 'aljexrun:SC')
+    await plan(store, 'aljexrun:SC')
+    const done = await apply(store, 'aljexrun:SC', 'aljexrun:AC')
+    expect(done.status).toBe('APPLIED')
+
+    // The enriched invoice keeps the live order's customer, so its receipt must be written for that customer.
+    const enriched = table(store, 'order').find((o) => o.id === enrichOrder)!
+    const paidOnInvoice = table(store, 'arPayment').flatMap((p) => (p.applications as Array<{ invoiceId: string; amountCents: number }>) ?? []).filter((a) => a.invoiceId === enriched.invoiceId).reduce((n, a) => n + a.amountCents, 0)
+    expect(paidOnInvoice).toBe(enrichInv.paidCents)
+
+    const summary = await reconcile(store, done.id)
+    expect(summary.reconciled).toBe(true)
+    for (const b of summary.bridge) if (b.diffCents != null) expect({ key: b.key, diff: b.diffCents }).toEqual({ key: b.key, diff: 0 })
+    const byKey = new Map(summary.bridge.map((b) => [b.key, b]))
+    for (const code of ['INVOICE_NO_CUSTOMER', 'ENRICH_MISMATCH', 'EXISTING_INVOICE']) {
+      expect(byKey.get(`notImported:${code}:invoiceTotal`)?.fileCents, code).toBeGreaterThan(0)
+    }
+    // The written scope and the not-imported items add up to every invoiced load of the file.
+    const written = byKey.get('invoiceTotal')!
+    const all = byKey.get('invoiceTotalAll')!
+    const notImported = summary.bridge.filter((b) => /^notImported:.*:invoiceTotal$/.test(b.key)).reduce((n, b) => n + (b.fileCents ?? 0), 0)
+    expect((written.fileCents ?? 0) + notImported).toBe(all.fileCents)
+    // PLAN shows the same bridge before anything is written.
+    const plannedBridge = (JSON.parse(await readAll(store.getObject('imports/jobs/aljexrun:SC/plan-summary.json'))) as { bridge: Array<{ key: string; diffCents: number | null }> }).bridge
+    for (const b of plannedBridge) if (b.diffCents != null) expect({ key: b.key, diff: b.diffCents }).toEqual({ key: b.key, diff: 0 })
   })
 })
 

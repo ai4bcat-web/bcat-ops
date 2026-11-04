@@ -10,7 +10,7 @@ import { noonUtcIso } from '../../../../src/lib/aljex/dates'
 import type { AljexProfile } from '../../../../src/lib/aljex/profile'
 import { normalizePro } from '../../../../src/lib/proNumber'
 import { rowIds } from './aggregate'
-import { loadCarrierLookup, loadCustomerLookup, scanRows, text } from './directory'
+import { loadCarrierLookup, scanRows, text } from './directory'
 import { rowFacts, type ApLine } from './facts'
 import { readChunk, type StageData } from './stage'
 import { IMPORT_ACTOR, bump, type Counts } from './types'
@@ -82,8 +82,8 @@ async function* stagedRows(store: EngineStore, root: string, stage: StageData): 
 
 /** Orders/invoices/bills the import wrote itself: the ledger rows only apply to those. */
 async function importedIndex(store: EngineStore) {
-  const invoiceByOrder = new Map<string, string>()
-  for (const i of await scanRows(store, 'invoice', ['id', 'orderId', 'createdBy'])) if (text(i.createdBy) === IMPORT_ACTOR) invoiceByOrder.set(text(i.orderId), text(i.id))
+  const invoiceByOrder = new Map<string, { id: string; customerId: string }>()
+  for (const i of await scanRows(store, 'invoice', ['id', 'orderId', 'customerId', 'createdBy'])) if (text(i.createdBy) === IMPORT_ACTOR) invoiceByOrder.set(text(i.orderId), { id: text(i.id), customerId: text(i.customerId) })
   const bills = new Set<string>()
   for (const b of await scanRows(store, 'carrierBill', ['id', 'createdBy'])) if (text(b.createdBy) === IMPORT_ACTOR) bills.add(text(b.id))
   const orderByPro = new Map<string, { orderId: string; activeLoadCarrierId: string }>()
@@ -96,17 +96,19 @@ async function importedIndex(store: EngineStore) {
 
 export async function runArLedger(args: { store: EngineStore; root: string; stage: StageData; profile: AljexProfile; counts: Counts; reentry: boolean }): Promise<void> {
   const { store, root, stage, profile, counts } = args
-  const [customers, idx] = await Promise.all([loadCustomerLookup(store), importedIndex(store)])
+  const idx = await importedIndex(store)
   const groups = new Map<string, Group>()
   const memoLines = stage.masters.memos?.byInvoice ?? {}
   for await (const row of stagedRows(store, root, stage)) {
     if (row.kind !== 'LOAD') continue
     const facts = rowFacts(row, profile, stage.masters.window)
     if (!facts.invoice) continue
-    const customerId = customers.byAccount.get(row.customer.account)
     const ref = idx.orderByPro.get(row.proKey as string)
-    const invoiceId = ref ? idx.invoiceByOrder.get(ref.orderId) : undefined
-    if (!customerId || !invoiceId) continue
+    const invoice = ref ? idx.invoiceByOrder.get(ref.orderId) : undefined
+    // The receipt belongs to the customer of the invoice it pays: an enriched invoice keeps the live order's
+    // customer, which the file's account code need not resolve to.
+    if (!invoice?.customerId) continue
+    const { id: invoiceId, customerId } = invoice
     // Credits/debits are memo adjustment lines on the invoice itself (DECIDED-1): only receipts are ledger rows.
     const math = invoiceMath(row, memoNet(memoLines[row.proKey as string]))
     const lines = row.payments.filter((p) => p.amountCents !== 0)

@@ -232,8 +232,9 @@ export function parseArgv(argv) {
 export function backfillCommands({ outputsPath, planDir }) {
   const lines = []
   for (const b of BACKFILLS) {
-    const base = ['node', `scripts/${b.script}`, ...(b.auth ? ['--outputs', outputsPath] : []), ...b.args, '--plan', `${planDir}/${b.name}.json`]
-    lines.push({ name: b.name, dryRun: base.join(' '), apply: [...base, '--apply', ...b.applyArgs].join(' ') })
+    // The plan records its environment; apply refuses a plan made under another one, so both phases carry the same --env.
+    const base = ['node', `scripts/${b.script}`, ...(b.auth ? ['--outputs', outputsPath] : []), ...b.args, ...b.applyArgs, '--plan', `${planDir}/${b.name}.json`]
+    lines.push({ name: b.name, dryRun: base.join(' '), apply: [...base, '--apply'].join(' ') })
   }
   return lines
 }

@@ -1,5 +1,101 @@
 # TMS build log
 
+## 2026-11-04 — Step X done on dev: prod->dev refresh, rehearsals and the FULL Aljex import loaded and reconciled
+
+**Executed on the dev stack only (suffix `nc3jsnxdmjhkpequimypiatkma-NONE`). Production was only READ (`copy-data`/`copy-files` read production); nothing was written to production, no SSM
+secret was written, nothing merged to main, and the Aljex export stayed outside the repo.** Full report: `Docs/tms-build/ALJEX_IMPORT_REPORT.md` (counts, reconciliation, every warning category with
+example PROs, the list of PROs present in both production and the Aljex file, open items).
+
+### 1. Production -> dev refresh (before the import)
+On-demand DynamoDB backups of the 49 dev tables it overwrites were taken first (kept, never deleted). `scripts/refreshDevFromProd.mjs --apply` copied 49 operational tables (9,944 rows read from
+production in about a minute; INCLUDE list in the script header: Load, Driver, Customer, Location, Equipment, Factoring, pay tables ...; EXCLUDE: TmsSettings, DispatchSettings, Division, AuditLog, telemetry
+tables whose ids differ across stacks; 39 dev-only models cannot be touched, Integration credentials live in SSM). `copy-files` skipped by the orchestrator default only if no S3 sync was needed
+(see summary). Counts (production | dev before | dev after): Load 932 | 3,539 | 3,580 (+41 new production loads); Location 181 | 160 | 189; IntakeItem 1,824 | 1,742 | 1,824; MaintenanceInvoice 181 | 174 | 181;
+TimeClockEntry 68 | 52 | 68. Dev already held 891 of production's 932 loads (the copy rewrote them with production values); the other ~2,650 dev loads are dev test data and were left alone.
+The copy strips the shipment-link fields from the copied Loads, so the backfills were re-run in order with temporary ADMIN logins (deleted afterwards): proClaims (0 actions), customers (715 applied),
+locations (325 applied, 7 per-load `updateLoad` "Unauthorized" refusals: stop-location links only, not blocking), shipments (932 relinked), revDivision, ownAssetDrivers (708 leg names filled),
+legacyAr, apOpen. Then `checkDevDuplicates`: 3,580 loads = 3,580 shipments, 0 duplicate PRO/number/invoice. **Orchestrator bug fixed on the way:** backfill plans were made without `--env` but applied
+with it, so apply refused; both phases now carry the same `--env`.
+
+### 2. Rehearsals (throwaway table copies, tag `rh1`..`rh3`)
+17 tables restored from dev (so dedupe against today's production loads is real) in 4.5 minutes. 1-in-8 slice (988 loads): plan 75 s + apply 38 s (218 rows/s). It did NOT reconcile at first
+(three bridge differences), so per Ryne's rule the question was escalated to Fable, which found **one engine bug** (the AR ledger dropped $550 of enriched-invoice receipts because it resolved the
+customer from the file's account code, which was one of the name-conflict accounts) and **two legitimate differences the bridge did not name** (invoices not written for unresolved customers; enriched
+receipts counted only on the BCAT side). Fix: ledger takes the customer from the invoice it pays; the bridge is now scoped to what the import wrote and every gap is either zero or a named, quantified
+"not imported" item (`reconciled` = all differences exactly 0). Both a 1-in-8 and a 1-in-7 slice then reconciled YES; the full-file rehearsal on `rh3` reconciled YES (plan 524 s, apply 186 s, 45 rows/s).
+The guard works: the first LIVE attempt was REFUSED because only a slice had been rehearsed ("a LIVE apply of real data needs a RECONCILED rehearsal with the same stageHash").
+
+### 3. FULL import into the live dev tables (8,320 rows, tag `aljexfull1`, run `aljexrun:20261104055134A`)
+Plan 520 s, apply 188 s (44 rows/s), conservation OK, **reconciled YES, 0 errors**. Before | after: Load 3,580 | 10,564 (+6,984); Shipment/Order the same; Customer 373 | 677 (+304); Carrier 19 | 402 (+383);
+Location 189 | 3,169 (+2,980); Invoice 37 | 7,522 (+7,485 = 6,881 created + 604 enriched); ArPayment 41 | 2,432 (+2,391); CarrierBill 4 | 1,608 (+1,604); ApPayment 15 | 1,082 (+1,067); ProClaim 3,581 | 10,565 (+6,984);
+LegacyAljexRow 0 | 8,038 (complete raw rows, side table); LoadCarrier 1,617 | 8,575. Stage: 7,913 load rows + 403 memos, 4 byte-identical duplicate rows skipped, 7 junk dates.
+Entity outcomes (staged/created/matched/enriched/skipped/conflicts): LOAD 7,917/6,984/47/604/4/278; CUSTOMER 486/304/171/0/0/11; CARRIER 1,672/383/0/0/1,289/0 (12-month rule); LOCATION 16,300/2,980/13,320;
+INVOICE 7,782/6,881/0/604/0/297; BILL 1,604/1,604; AR_PAYMENT 2,391; AP_PAYMENT 1,067; memos 403 (400 applied as invoice adjustment lines, 3 orphans listed).
+
+| Check (file vs BCAT, dollars) | File | BCAT | Diff |
+|---|---:|---:|---:|
+| LH revenue, imported loads | 8,432,886.35 | 8,432,886.35 | 0.00 |
+| Invoice Amount = charge lines | 9,347,426.72 | 9,347,426.72 | 0.00 |
+| Invoice totals incl. memo adjustments (written) | 9,710,003.68 | 9,710,003.68 | 0.00 |
+| Payments received | 9,401,340.02 | 9,401,340.02 | 0.00 |
+| Open AR (positive Bal Due) / unapplied credit / net | 309,468.34 / 804.68 / 308,663.66 | same | 0.00 |
+| Carrier payments (non-fee) vs AP payments | 1,953,718.99 | 1,953,718.99 | 0.00 |
+| Open AP (derived; compare with your Aljex AP aging) | n/a | 149,396.86 | n/a |
+| Whole file, every invoiced load, invoices written + named not-imported items | 9,931,903.83 | 9,931,903.83 | 0.00 |
+Not imported and named: 19 loads with an invoice but no customer (invoice $22,075.73, payments $8,575.73); 278 loads that already exist in production and disagree with Aljex on revenue or carrier (ENRICH_MISMATCH:
+invoice $199,824.42, payments $163,094.23, memos -$2,401.36). Your three file totals (LH 9,106,729.69 / Invoice Amount 10,029,258.90 / Bal Due 358,893.85) are reproduced by the profiler; the
+difference to the imported figures is exactly these named items plus the 81 uninvoiced loads ($83,159.75), the 3 orphan memos ($2,750.00) and the carriers/loads outside the import rules: see the report.
+
+### 4. Numbering and series (dev)
+Numeric scheme enabled. **Counter is 99001, not 14913:** production itself holds a load with PRO 99001 (a LEGACY claim) and the old importer left four test claims 90001-90004, and the seed is forward-only, so the next new
+PRO on dev is 99002 (still above 14912). **Ryne: tell me if you want the 99001 load re-numbered so new PROs continue at 14913.** The new invoice series starts at 20000, plain numbers (highest imported invoice number 14887).
+
+### 5. Defects found and fixed in this step
+(a) AR ledger customer resolution (above). (b) **Imported carrier bills took their bill number from Aljex "Carrier Ref #", which equals the driver name on every row**: 35 duplicate (carrier, billNumber) groups and driver names in a bill-number field.
+Engine now numbers bills by PRO (same string as the invoice number); 385 affected bills were repaired on dev by `scripts/fixAljexBillNumbers.mjs` (idempotent; every bill's money fields byte-identical before and after); duplicate check 0.
+(c) Live apply guard and orchestrator `--env` bug (above). The engine fixes are in the working tree and ship with the next deploy (the deployed Lambda worker is job 141; the import above ran the same engine from the CLI).
+
+### 6. Duplicate check and PRO overlap
+`scripts/checkDevDuplicates.mjs` after the import: 0 duplicate groups (Load.aljexId, shipment number, load number, invoice number, carrier bill); 0 PROs carried by both a pre-existing and an import-created load.
+929 PROs exist both in production and in the Aljex file: 651 had Aljex finance attached to the production load (production Load row kept), 278 are mismatches left untouched (all listed in the report appendix). To be re-run after the end-of-sequence refresh and after the demo.
+
+### 7. Open items for Ryne
+1. Confirm or change the four UNCONFIRMED division intake e-mails. 2. Decide on PRO 99001 (above). 3. Map Aljex rep/staff codes to users at Settings > Users (then bulk reassign). 4. The 278 ENRICH_MISMATCH PROs and the 28 no-customer loads need a look (lists in the report).
+5. Open AP ($149,396.86 derived): compare with your Aljex AP aging report (the export has no AP balance column). 6. Imported carriers are PENDING until the MyCarrierPackets pull runs (press Validate on dev; then Settings > Integrations > MyCarrierPackets > Pull all monitored carriers now).
+7. Customer terms are not in the export: invoices assume Net 30 (org default) until customer terms are set.
+
+## 2026-11-04 — Aljex exit Phase 0 deployed on dev (importer for the 486-column export, backups, export-all, MCP live adapter)
+
+**Committed and deployed on dev (Amplify job 141, commit `1a9eba7`). Dev only; nothing to main; the Aljex export file stays outside the repo (PII) and was never read
+by any builder (only by the aggregate-only profiler).** Plans/docs: `PHASE0-plan.md`, `ALJEX_MAPPING.md`, `MCP_INTEGRATION.md`, `ALJEX_EXIT_PLAN.md`.
+- **Profile of the export (aggregates only):** 8,320 rows x 486 columns (rows are right-truncated: 474 fields on 7,883 rows, 473 on the 403 memo rows, up to 486 on 2),
+  PRO 6000-14912, 8,316 distinct PROs (4 byte-identical duplicate rows), 165 multi-stop loads, 3,658 IVAN CARTAGE rows of which only 4 have a driver name. The profiler
+  reproduces Ryne's three totals to the cent: LH Revenue 9,106,729.69, Invoice Amount 10,029,258.90, Bal Due 358,893.85. Invoice Amount = the sum of the 21 charge
+  extensions on every row; Bal Due = Invoice - Payments - Credits + Debits on every invoiced load (101 uninvoiced loads have a blank Bal Due, 81 of them carry an Invoice Amount
+  totalling 83,159.75); there is no invoice-number column, so invoice number = PRO.
+- **Importer (new, replaces the 31-column one):** positional mapper (`src/lib/aljex/*`), resumable engine with an async self-invoking Lambda worker and an offline CLI on the
+  same engine (`scripts/importAljex.mjs`), accurate dry-run/plan, idempotent by PRO/invoice/bill/MC-DOT/normalized key, ENRICH/UNLINKED/CONFLICT classification against loads already
+  on dev (live records are never rewritten), reconciliation report, tagged rehearsal tables, guards (production refused, LIVE needs a reconciled rehearsal, synthetic bands).
+- **Ryne's mapping decisions applied (DECIDED):** all ALJEX_MAPPING defaults (Ivan = Carrier Name, LOADED->PICKED_UP, CONSIGNEE->UNLOADING, P=pickup/S=delivery, unknown Type of
+  Shipment -> FTL with the code kept, the 9 no-customer loads imported and listed); **the 403 blank-status rows are AR memos -> adjustment lines on the referenced invoice (not voided
+  shipments)**; the complete raw Aljex row is stored in the `LegacyAljexRow` side table keyed by PRO (NOT on Load: the legacy pages read the whole Load table); promoted
+  columns (CA/TX permits + expiries -> Carrier, Quote#/Manifest/Container/refs -> shipment references, OSD flag, advance/quick-pay fees -> AP lines, Lead Source -> Customer,
+  freight/accessorial flags, Currency validated); Aljex sales-rep and staff codes stored on the shipment with a Settings > Users code-to-user mapping table and a bulk reassign
+  (audited, dry-run first); carriers used in the last 12 months only (rest skipped and listed); PROs preserved (`Load.aljexId`), numeric scheme, counter seeded above the max, new
+  invoice series starting at 20000 (configurable in TmsSettings, must exceed the highest imported invoice number); imported loads carry a legacy flag that satisfies the release
+  gate, bill approval document checks and the Step W driver gates and is excluded from the Needs-driver report.
+- **Data safety:** point-in-time recovery on the dev tables (about 85 MB, cents per month), a private versioned export bucket, a nightly export Lambda (its EventBridge rule is
+  explicitly allow-listed enabled in the dev guard), and an admin "Export everything to CSV" action (Settings > Company > Data & backups) that also produces accountant-ready CSVs
+  of invoices, AR payments/credits and carrier bills/AP payments (no QuickBooks, per Ryne).
+- **MyCarrierPackets (carrier source of truth):** the Validate bug is fixed (the generic Validate never called MCP; it now does the token call: 200 LIVE, 400/401/403 invalid
+  credentials, anything else unable-to-verify); the MCP guide has no webhooks, so completion is polled (`CarriersChanges` >= 4 minutes apart); a carrier profile pull (insurance,
+  W-9 tax id, payment method + remit-to, contacts, safety/risk, authority, packet status; MCP wins, every overwrite audited), a "Pull all monitored carriers now" button with last sync
+  and counts, and a resumable backfill matching MC, then DOT, then normalized name. All tested against mocks only: Ryne has not pressed Validate yet, so the live run is pending.
+- **Rev divisions:** `scripts/seedRevDivisions.mjs` seeds Ivan Cartage, BCAT Logistics, Auto Shipping, Owner Operators (renames Best Care Auto Transport to Auto Shipping; never
+  deletes). Intake e-mail placeholders, all **UNCONFIRMED** (badge shown until confirmed): `tenders-ivan-cartage@bcatcorp.com`, `tenders-bcat-logistics@bcatcorp.com`,
+  `tenders-auto-shipping@bcatcorp.com`, `tenders-owner-operators@bcatcorp.com`. **Ryne: please confirm or replace these.**
+- **Gates:** `tsc` clean, `eslint` 0 errors, `npm run test` 571 files / 7,475 tests, `npm run build` OK.
+
 ## 2026-11-03 — Step W deployed on dev (Ivan Cartage / own-asset loads require a driver)
 
 **Committed and deployed on dev (Amplify jobs 139 and 140; commits `e6429f3`, `ec0d8e8`). Dev only. No schema change, no data deploy.**

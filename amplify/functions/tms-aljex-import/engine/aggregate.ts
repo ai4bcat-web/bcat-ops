@@ -670,6 +670,16 @@ export function legacyRow(row: CanonicalRow, shipmentId: string | undefined, env
   })
 }
 
+/**
+ * `Carrier Ref #` is preserved verbatim on the leg's driver text and in the LegacyAljexRow raw row. It only
+ * lands on the bill as a note when it carries something the leg's driver text does not.
+ */
+function carrierRefNote(row: CanonicalRow): string | undefined {
+  const ref = row.carrierRefNo.trim()
+  if (!ref || ref === (row.carrier?.driverName ?? '').trim()) return undefined
+  return `Carrier Ref # (Aljex): ${ref}`
+}
+
 export function buildBill(row: CanonicalRow, ap: ApFacts, ids: RowIds, carrier: CarrierRef, billDate: string, termsDays: number, facts: RowFacts, env: LoadEnv): EngineRow {
   const lines: EngineRow[] = row.projectedExpenses
     .filter((p) => p.amountCents !== 0)
@@ -697,7 +707,10 @@ export function buildBill(row: CanonicalRow, ap: ApFacts, ids: RowIds, carrier: 
     payeeKind: 'CARRIER',
     divisionKey: facts.ownAsset ? 'IVAN_CARTAGE' : 'BCAT_LOGISTICS',
     status: ap.status,
-    billNumber: row.carrierRefNo || row.pro,
+    // Aljex has no bill-number column. `Carrier Ref #` is a copy of Driver Name (not unique), so the number is the
+    // load's PRO: exactly the string the Invoice number carries, unique per load, one bill per load leg (`:1`).
+    billNumber: row.pro,
+    note: carrierRefNote(row),
     billDate,
     billMonth: monthOf(billDate),
     recordedAt: noonUtcIso(billDate),

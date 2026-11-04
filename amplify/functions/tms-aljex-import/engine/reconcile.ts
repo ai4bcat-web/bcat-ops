@@ -5,6 +5,7 @@
  */
 import type { AljexEntityCounts, AljexImportJob, EngineRow, EngineStore, ImportBridgeLine, ImportMemoSummary, ImportReportSummary } from '../../../../src/types/tms'
 import { ageOpenItems } from '../../../../src/lib/arAging'
+import { normalizePro } from '../../../../src/lib/proNumber'
 import type { CanonicalRow } from '../../../../src/lib/aljex/canonical'
 import { invoiceMath, memoNet } from './memos'
 import { rowIds } from './aggregate'
@@ -56,7 +57,7 @@ async function readFindings(store: EngineStore, jobId: string, stage: StageData)
   return out
 }
 
-export async function reconcile(store: EngineStore, jobId: string, opts: { counts?: AljexEntityCounts; write?: boolean } = {}): Promise<ImportReportSummary> {
+export async function reconcile(store: EngineStore, jobId: string, opts: { counts?: AljexEntityCounts; write?: boolean; findings?: Finding[] } = {}): Promise<ImportReportSummary> {
   const [job] = (await store.getMany('aljexImportJob', [jobId])) as unknown as AljexImportJob[]
   if (!job) throw new Error(`No such import job: ${jobId}`)
   const root = await rootJobIdOf(store, job)
@@ -66,80 +67,165 @@ export async function reconcile(store: EngineStore, jobId: string, opts: { count
   const sliced = typeof job.options?.sliceEvery === 'number' && job.options.sliceEvery > 1
   const asOf = typeof job.options?.asOf === 'string' && job.options.asOf ? job.options.asOf : store.now().slice(0, 10)
 
-  // Rows of the file whose PRO this import owns (its ProClaim points at the deterministic load).
+  // ── scope ──────────────────────────────────────────────────────────────────────────────────
+  // IMPORTED: the PRO's claim points at the deterministic load this import created. ENRICHED: a live load
+  // the import wrote an invoice/bill on. The bridge ties on everything the import WROTE (imported + enriched);
+  // an invoiced row it did not write is a named, quantified reconciling item (never a silent gap).
   const claims = new Map<string, string>()
   for (const c of await scanRows(store, 'proClaim', ['id', 'loadId'])) claims.set(text(c.id), text(c.loadId))
   const rows: CanonicalRow[] = []
   for (let c = 0; c < stage.masters.chunkCount; c++) rows.push(...(await readChunk(store, root, c)))
-  const owned = rows.filter((r) => claims.get(r.proKey as string) === rowIds(r).loadId)
-  const ownedLoads = owned.filter((r) => r.kind === 'LOAD')
-  const orderIds = new Set(owned.map((r) => rowIds(r).orderId))
-  const shipmentIds = new Set(owned.map((r) => rowIds(r).shipmentId))
-
-  // ── file side ──────────────────────────────────────────────────────────────────────────────
-  const invRows = ownedLoads.filter((r) => rowFacts(r, profile, window).invoice)
-  const memoApplied = Object.values(stage.masters.memos.byInvoice).flat()
-  // Memos whose Reference # is a load of this file: the load's Credits/Debits column echoes them, invoiced or not.
-  const memoLinked = [...memoApplied, ...stage.masters.memos.orphans.filter((o) => o.reason === 'REFERENCE_NOT_INVOICED')]
-  const f = {
-    lh: ownedLoads.reduce((n, r) => n + (r.charges.find((c) => c.line === 1)?.extensionCents ?? r.money.lhRevenueCents), 0),
-    invoiceAmount: ownedLoads.reduce((n, r) => n + r.money.invoiceAmountCents, 0),
-    invoiceTotal: invRows.reduce((n, r) => n + invoiceMath(r, memoNet(stage.masters.memos.byInvoice[r.proKey as string])).totalCents, 0),
-    payments: invRows.reduce((n, r) => n + r.money.paymentsReceivedCents, 0),
-    memosApplied: memoApplied.reduce((n, m) => n + m.signedAmountCents, 0),
-    memoCredLinked: memoLinked.filter((m) => m.kind === 'CRED').reduce((n, m) => n + m.signedAmountCents, 0),
-    memoDebtLinked: memoLinked.filter((m) => m.kind === 'DEBT').reduce((n, m) => n + m.signedAmountCents, 0),
-    residuals: invRows.reduce((n, r) => n + invoiceMath(r, memoNet(stage.masters.memos.byInvoice[r.proKey as string])).residualCents, 0),
-    openAr: invRows.reduce((n, r) => n + Math.max(0, r.money.balDueCents ?? 0), 0),
-    unapplied: invRows.reduce((n, r) => n + Math.max(0, -(r.money.balDueCents ?? 0)), 0),
-    netOpenAr: invRows.reduce((n, r) => n + (r.money.balDueCents ?? 0), 0),
+  const fileLoads = rows.filter((r) => r.kind === 'LOAD')
+  const ownedLoads = fileLoads.filter((r) => claims.get(r.proKey as string) === rowIds(r).loadId)
+  const ownedKeys = new Set(ownedLoads.map((r) => r.proKey as string))
+  const orderIds = new Set(ownedLoads.map((r) => rowIds(r).orderId))
+  const shipmentIds = new Set(ownedLoads.map((r) => rowIds(r).shipmentId))
+  // Live loads by PRO (what ENRICH works on, and the ledgers' lookup).
+  const live = new Map<string, { orderId: string; shipmentId: string; activeLoadCarrierId: string }>()
+  for (const l of await scanRows(store, 'load', ['aljexId', 'orderId', 'shipmentId', 'activeLoadCarrierId'])) {
+    const k = normalizePro(text(l.aljexId))
+    if (k && text(l.orderId)) live.set(k, { orderId: text(l.orderId), shipmentId: text(l.shipmentId), activeLoadCarrierId: text(l.activeLoadCarrierId) })
   }
-  const loadCredits = rows.filter((r) => r.kind === 'LOAD').reduce((n, r) => n + Math.abs(r.money.creditsCents), 0)
-  const loadDebits = rows.filter((r) => r.kind === 'LOAD').reduce((n, r) => n + r.money.debitsCents, 0)
+  const orderIdOf = (r: CanonicalRow): string | undefined => (ownedKeys.has(r.proKey as string) ? rowIds(r).orderId : live.get(r.proKey as string)?.orderId)
+  const scopeOrderIds = new Set([...orderIds, ...fileLoads.flatMap((r) => { const o = live.get(r.proKey as string)?.orderId; return o ? [o] : [] })])
+  const scopeShipmentIds = new Set([...shipmentIds, ...fileLoads.flatMap((r) => { const s = live.get(r.proKey as string)?.shipmentId; return s ? [s] : [] })])
 
   // ── table side ─────────────────────────────────────────────────────────────────────────────
-  const orders = (await scanRows(store, 'order', ['id', 'customerRateCents', 'revenueCents', 'arStatus'])).filter((o) => orderIds.has(text(o.id)))
-  const invoices = (await scanRows(store, 'invoice', ['id', 'number', 'orderId', 'customerId', 'customerName', 'totalCents', 'paidCents', 'balanceCents', 'arOpen', 'dueAt', 'status', 'createdBy', 'lines'])).filter((i) => orderIds.has(text(i.orderId)) && text(i.createdBy) === IMPORT_ACTOR)
+  const allOrders = await scanRows(store, 'order', ['id', 'customerRateCents', 'revenueCents', 'arStatus', 'invoiceId'])
+  const orders = allOrders.filter((o) => orderIds.has(text(o.id)))
+  const orderById = new Map(allOrders.map((o) => [text(o.id), o]))
+  const invoices = (await scanRows(store, 'invoice', ['id', 'number', 'orderId', 'customerId', 'customerName', 'totalCents', 'paidCents', 'balanceCents', 'arOpen', 'dueAt', 'status', 'createdBy', 'lines'])).filter((i) => scopeOrderIds.has(text(i.orderId)) && text(i.createdBy) === IMPORT_ACTOR)
+  const invoiceByOrder = new Map(invoices.map((i) => [text(i.orderId), i]))
   const openInvoices = invoices.filter((i) => i.arOpen === 'OPEN')
   const arPayments = (await scanRows(store, 'arPayment', ['id', 'kind', 'amountCents', 'appliedCents', 'unappliedCents', 'createdBy'])).filter((p) => text(p.createdBy) === IMPORT_ACTOR)
-  const bills = (await scanRows(store, 'carrierBill', ['id', 'shipmentId', 'carrierId', 'carrierName', 'balanceCents', 'apOpen', 'dueAt', 'createdBy'])).filter((b) => shipmentIds.has(text(b.shipmentId)) && text(b.createdBy) === IMPORT_ACTOR)
+  const bills = (await scanRows(store, 'carrierBill', ['id', 'shipmentId', 'carrierId', 'carrierName', 'balanceCents', 'apOpen', 'dueAt', 'createdBy'])).filter((b) => scopeShipmentIds.has(text(b.shipmentId)) && text(b.createdBy) === IMPORT_ACTOR)
   const openBills = bills.filter((b) => b.apOpen === 'OPEN')
   const apPayments = (await scanRows(store, 'apPayment', ['id', 'amountCents', 'appliedCents', 'unappliedCents', 'createdBy'])).filter((p) => text(p.createdBy) === IMPORT_ACTOR)
   const charges = (await scanRows(store, 'loadCharge', ['id', 'shipmentId', 'side', 'code', 'amountCents'])).filter((c) => shipmentIds.has(text(c.shipmentId)))
   const customerCharges = charges.filter((c) => c.side === 'CUSTOMER')
   const shipments = (await scanRows(store, 'shipment', ['id', 'status'])).filter((s) => shipmentIds.has(text(s.id)))
 
+  const counts = opts.counts ?? job.entityCounts ?? stage.index.stageCounts
+  const cons = conservation(counts)
+  const findingsList = opts.findings ? [...stage.index.findings, ...opts.findings] : await readFindings(store, jobId, stage)
+  const findingCodes = new Map<string, Set<string>>()
+  for (const x of findingsList) if (x.pro) (findingCodes.get(x.pro) ?? findingCodes.set(x.pro, new Set()).get(x.pro)!).add(x.code)
+
+  // ── file side ──────────────────────────────────────────────────────────────────────────────
+  const memoByInvoice = stage.masters.memos.byInvoice
+  const memoApplied = Object.values(memoByInvoice).flat()
+  // Memos whose Reference # is a load of this file: the load's Credits/Debits column echoes them, invoiced or not.
+  const memoLinked = [...memoApplied, ...stage.masters.memos.orphans.filter((o) => o.reason === 'REFERENCE_NOT_INVOICED')]
+  const moneyOf = (r: CanonicalRow) => {
+    const m = invoiceMath(r, memoNet(memoByInvoice[r.proKey as string]))
+    const bal = r.money.balDueCents ?? 0
+    return { total: m.totalCents, payments: m.paymentsCents, memo: m.adjustmentCents, residual: m.residualCents, open: Math.max(0, bal), unapplied: Math.max(0, -bal), net: bal }
+  }
+  const zero = () => ({ n: 0, total: 0, payments: 0, memo: 0, residual: 0, open: 0, unapplied: 0, net: 0 })
+  type Money = ReturnType<typeof zero>
+  const addTo = (acc: Money, r: CanonicalRow): void => {
+    const m = moneyOf(r)
+    acc.n += 1
+    acc.total += m.total
+    acc.payments += m.payments
+    acc.memo += m.memo
+    acc.residual += m.residual
+    acc.open += m.open
+    acc.unapplied += m.unapplied
+    acc.net += m.net
+  }
+  // Why an invoiced row of the file has no invoice in the tables (null = unexplained).
+  const NOT_WRITTEN_REASONS: Array<[string, string]> = [
+    ['INVOICE_NO_CUSTOMER', 'customer unresolved, no invoice written'],
+    ['ENRICH_MISMATCH', 'live record disagrees on revenue/carrier, not enriched'],
+    ['PRO_CLAIMED_ELSEWHERE', 'PRO claimed by another record, not imported'],
+    ['UNLINKED_EXISTING', 'live load has no shipment, not touched'],
+    ['ENRICH_NO_ORDER', 'live load has no order, not touched'],
+    ['EXISTING_INVOICE', 'live order already invoiced, left as is'],
+  ]
+  const reasonOf = (r: CanonicalRow): string | null => {
+    const codes = findingCodes.get(r.pro)
+    for (const [code] of NOT_WRITTEN_REASONS) if (codes?.has(code)) return code
+    const orderId = orderIdOf(r)
+    if (orderId && text(orderById.get(orderId)?.invoiceId)) return 'EXISTING_INVOICE'
+    return null
+  }
+  const written = zero()
+  const all = zero()
+  const notWritten = new Map<string, Money>()
+  const unexplained = zero()
+  const writtenRows: CanonicalRow[] = []
+  for (const r of fileLoads) {
+    if (!rowFacts(r, profile, window).invoice) continue
+    addTo(all, r)
+    const orderId = orderIdOf(r)
+    if (orderId && invoiceByOrder.has(orderId)) {
+      addTo(written, r)
+      writtenRows.push(r)
+      continue
+    }
+    const reason = reasonOf(r)
+    if (reason == null) addTo(unexplained, r)
+    else addTo(notWritten.get(reason) ?? notWritten.set(reason, zero()).get(reason)!, r)
+  }
+  const f = {
+    lh: ownedLoads.reduce((n, r) => n + (r.charges.find((c) => c.line === 1)?.extensionCents ?? r.money.lhRevenueCents), 0),
+    invoiceAmount: ownedLoads.reduce((n, r) => n + r.money.invoiceAmountCents, 0),
+    memoCredLinked: memoLinked.filter((m) => m.kind === 'CRED').reduce((n, m) => n + m.signedAmountCents, 0),
+    memoDebtLinked: memoLinked.filter((m) => m.kind === 'DEBT').reduce((n, m) => n + m.signedAmountCents, 0),
+  }
+  const loadCredits = fileLoads.reduce((n, r) => n + Math.abs(r.money.creditsCents), 0)
+  const loadDebits = fileLoads.reduce((n, r) => n + r.money.debitsCents, 0)
+
   const billIds = new Set(bills.map((b) => text(b.id)))
-  const apPaidFile = ownedLoads.reduce((n, r) => {
-    const ap = billIds.has(rowIds(r).billId) ? rowFacts(r, profile, window).ap : null
+  // Same bill id the AP ledger writes against: the live leg of an existing load, else the deterministic one.
+  const apPaidFile = fileLoads.reduce((n, r) => {
+    const billId = `cb:${live.get(r.proKey as string)?.activeLoadCarrierId || rowIds(r).loadCarrierId}:1`
+    const ap = billIds.has(billId) ? rowFacts(r, profile, window).ap : null
     return ap ? n + ap.carrierPayments.concat(ap.extraLines).reduce((s, l) => s + l.amountCents, 0) : n
   }, 0)
   const openAr = sum(openInvoices, 'balanceCents')
   const unapplied = sum(arPayments.filter((p) => p.kind === 'PAYMENT'), 'unappliedCents')
+  const bcatInvoiceTotal = sum(invoices, 'totalCents')
+  const bcatPayments = sum(arPayments.filter((p) => p.kind === 'PAYMENT'), 'amountCents')
   const adjustmentLinesOf = (i: EngineRow): Array<{ code?: string; label?: string; amountCents: number }> => ((i.lines as Array<{ code?: string; label?: string; amountCents: number }> | undefined) ?? []).filter((l) => l.code === 'ADJUSTMENT')
   const memoLineCents = invoices.reduce((n, i) => n + adjustmentLinesOf(i).filter((l) => /^(Credit|Debit) memo /.test(l.label ?? '')).reduce((s, l) => s + l.amountCents, 0), 0)
   const residualLineCents = invoices.reduce((n, i) => n + adjustmentLinesOf(i).filter((l) => l.label === 'Aljex balance adjustment').reduce((s, l) => s + l.amountCents, 0), 0)
+  const named = [...notWritten.values()]
+  const namedSum = (field: 'total' | 'payments' | 'memo'): number => named.reduce((n, m) => n + m[field], 0)
   const bridge: ImportBridgeLine[] = [
     line('lh', 'Σ LH revenue (imported loads) vs Σ order customer rate', f.lh, sum(orders, 'customerRateCents')),
     line('chargeIdentity', 'Σ Invoice Amount (imported loads) vs Σ CUSTOMER charges', f.invoiceAmount, sum(customerCharges, 'amountCents')),
-    line('invoiceTotal', 'Σ Invoice Amount + memo adjustments + residuals (invoiced loads) vs Σ invoice totals', f.invoiceTotal, sum(invoices, 'totalCents')),
-    line('payments', 'Σ payments received vs Σ AR payments', f.payments, sum(arPayments.filter((p) => p.kind === 'PAYMENT'), 'amountCents')),
-    line('memoAdjustments', 'Σ applied CRED/DEBT memos vs Σ memo adjustment lines on invoices', f.memosApplied, memoLineCents),
+    line('invoiceTotal', 'Σ Invoice Amount + memo adjustments + residuals (invoices written) vs Σ invoice totals', written.total, bcatInvoiceTotal),
+    line('payments', 'Σ payments received (invoices written) vs Σ AR payments', written.payments, bcatPayments),
+    line('memoAdjustments', 'Σ applied CRED/DEBT memos (invoices written) vs Σ memo adjustment lines on invoices', written.memo, memoLineCents),
     line('memoOrphans', 'Σ CRED/DEBT memos whose reference has no invoice (reported, not applied)', stage.masters.memos.orphanCents, null),
-    line('balanceResiduals', 'Σ Bal Due the memos do not explain vs Σ residual invoice lines', f.residuals, residualLineCents),
-    line('openAr', 'Σ positive Bal Due vs open invoice balances', f.openAr, openAr),
-    line('unapplied', 'Σ overpaid Bal Due vs unapplied customer credit', f.unapplied, unapplied),
-    line('netOpenAr', 'Σ Bal Due vs open AR net of unapplied credit', f.netOpenAr, openAr - unapplied),
+    line('balanceResiduals', 'Σ Bal Due the memos do not explain vs Σ residual invoice lines', written.residual, residualLineCents),
+    line('openAr', 'Σ positive Bal Due vs open invoice balances', written.open, openAr),
+    line('unapplied', 'Σ overpaid Bal Due vs unapplied customer credit', written.unapplied, unapplied),
+    line('netOpenAr', 'Σ Bal Due vs open AR net of unapplied credit', written.net, openAr - unapplied),
+    // Each side must satisfy invoice total − payments = open AR (net of unapplied credit); the expected residual is 0.
+    line('identityFile', 'File: Σ invoice totals − Σ payments − Σ Bal Due (must be 0)', written.total - written.payments - written.net, 0),
+    line('identityBcat', 'BCAT: Σ invoice totals − Σ AR payments − (open AR − unapplied) (must be 0)', 0, bcatInvoiceTotal - bcatPayments - (openAr - unapplied)),
     // A slice keeps every Nth row, so memos and the loads they reference no longer line up: informational only.
     line('memoCredits', 'Σ CRED memos referencing a load of this file vs −Σ load Credits column (cross-check)', f.memoCredLinked, sliced ? null : -loadCredits),
     line('memoDebits', 'Σ DEBT memos referencing a load of this file vs Σ load Debits column (cross-check)', f.memoDebtLinked, sliced ? null : loadDebits),
-    line('apPaid', 'Σ paid carrier expense (non-fee) vs Σ AP payments', apPaidFile, sum(apPayments, 'amountCents')),
+    line('apPaid', 'Σ paid carrier expense (non-fee, bills written) vs Σ AP payments', apPaidFile, sum(apPayments, 'amountCents')),
     line('openAp', 'Open AP (derived; compare with the Aljex AP aging)', null, sum(openBills, 'balanceCents')),
   ]
-
-  const counts = opts.counts ?? job.entityCounts ?? stage.index.stageCounts
-  const cons = conservation(counts)
-  const findingsList = await readFindings(store, jobId, stage)
+  // Invoiced rows of the file the import did not write: named, quantified (file column only), then the whole-file tie.
+  for (const [code, label] of NOT_WRITTEN_REASONS) {
+    const m = notWritten.get(code)
+    if (!m) continue
+    bridge.push(line(`notImported:${code}:invoiceTotal`, `Not imported (${label}), ${m.n} load(s): Σ invoice totals`, m.total, null))
+    bridge.push(line(`notImported:${code}:payments`, `Not imported (${label}): Σ payments received`, m.payments, null))
+    if (m.memo !== 0) bridge.push(line(`notImported:${code}:memos`, `Not imported (${label}): Σ memos`, m.memo, null))
+  }
+  bridge.push(
+    line('invoiceTotalAll', 'Σ invoice totals, every invoiced load of the file vs invoices written + the not-imported items above', all.total, bcatInvoiceTotal + namedSum('total')),
+    line('paymentsAll', 'Σ payments received, every invoiced load of the file vs AR payments + the not-imported items above', all.payments, bcatPayments + namedSum('payments')),
+    line('memosAll', 'Σ applied CRED/DEBT memos, every invoiced load of the file vs memo lines written + the not-imported items above', all.memo, memoLineCents + namedSum('memo')),
+  )
   const findingCounts: Record<string, number> = {}
   for (const x of findingsList) findingCounts[x.code] = (findingCounts[x.code] ?? 0) + 1
   const reconciled = cons.ok && bridge.every((b) => b.diffCents == null || b.diffCents === 0) && (counts.LOAD?.errors ?? 0) === 0
@@ -149,10 +235,10 @@ export async function reconcile(store: EngineStore, jobId: string, opts: { count
   const files: Record<string, string> = {}
   const header = (...cols: string[]) => csvLine(cols)
   files['findings.csv'] = [header('code', 'pro', 'row', 'detail'), ...findingsList.map((x) => csvLine([x.code, x.pro ?? '', x.rowNumber ?? '', x.detail ?? '']))].join('\n')
-  const ownedByOrder = new Map(ownedLoads.map((r) => [rowIds(r).orderId, r]))
+  const rowByOrder = new Map(fileLoads.flatMap((r) => { const o = orderIdOf(r); return o ? [[o, r] as const] : [] }))
   const variances: string[] = [header('pro', 'file_balance', 'bcat_balance', 'difference')]
   for (const i of invoices) {
-    const r = ownedByOrder.get(text(i.orderId))
+    const r = rowByOrder.get(text(i.orderId))
     if (!r) continue
     const file = Math.max(0, r.money.balDueCents ?? 0)
     const bcat = typeof i.balanceCents === 'number' ? i.balanceCents : 0
