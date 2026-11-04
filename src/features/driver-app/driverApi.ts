@@ -112,6 +112,8 @@ export interface DriverProfile {
   trailerRequired?: boolean | null
   /** One of Ivan's own local drivers (not box truck, not owner operator). Optional: older API. */
   ivanLocal?: boolean | null
+  /** The work phone in the driver's truck (TruckConfig.phone), E.164; null when the truck has none. Optional: older API. */
+  workPhone?: { number: string; label: string | null; truckNumber: string | null } | null
 }
 
 export interface DriverTruck {

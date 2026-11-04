@@ -54,6 +54,7 @@ vi.mock('@/lib/apiClient', async (importOriginal) => {
     listCheckCallsByLoad: vi.fn(async () => events),
     listTrackingLinksByShipment: vi.fn(async () => links),
     listTruckPositions: vi.fn(async () => []),
+    listTruckConfigs: vi.fn(async () => []),
     textDriver: vi.fn(async () => ({ messageId: null, smsStatus: 'NOT_CONFIGURED', smsError: null })),
     sendTrackingLink: vi.fn(),
     revokeTrackingLink: vi.fn(),
@@ -127,10 +128,11 @@ describe('TrackingSection', () => {
   it('announces an overdue check call and schedules a snooze from the reminder it read', async () => {
     render(<TrackingSection bundle={bundle} customer={null} catalog={[]} actions={actions} />)
 
-    const banner = await screen.findByTestId('check-call-banner')
-    expect(banner.textContent).toContain('Check call overdue since')
+    const next = await screen.findByTestId('strip-next-check')
+    expect(next.textContent).toContain('overdue')
 
-    fireEvent.click(within(banner).getByRole('button', { name: 'Snooze 1 h' }))
+    fireEvent.click(within(next).getByRole('button', { name: 'Check call reminder' }))
+    fireEvent.click(within(screen.getByTestId('strip-next-check-menu')).getByRole('button', { name: 'Snooze 1 h' }))
     await waitFor(() => expect(setNextCheckCall).toHaveBeenCalledTimes(1))
     expect(typeof setNextCheckCall.mock.calls[0][0]).toBe('string')
   })

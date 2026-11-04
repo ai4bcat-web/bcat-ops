@@ -372,39 +372,6 @@
   flex: 0 0 auto;
 }
 
-/* Live shipments under Tracking */
-
-.tms-shell .tms-nav-live {
-  margin: 2px 0 4px 12px;
-  padding-left: 8px;
-  border-left: 1px solid var(--tms-border);
-}
-
-.tms-shell .tms-nav-live-item {
-  display: flex;
-  flex-direction: column;
-  padding: 4px 8px;
-  border-radius: var(--tms-radius-sm);
-  color: var(--tms-text-2);
-  font-size: 12px;
-  font-weight: 500;
-  text-decoration: none;
-}
-
-.tms-shell .tms-nav-live-item:hover {
-  background: var(--tms-surface-hover);
-  color: var(--tms-text);
-}
-
-.tms-shell .tms-nav-live-sub {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--tms-muted);
-  font-size: 11px;
-  font-weight: 400;
-}
-
 /* Sidebar foot */
 
 .tms-shell .tms-sidebar-foot {

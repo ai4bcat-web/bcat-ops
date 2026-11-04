@@ -2,7 +2,7 @@
  * Sidebar badge counts for the one staff shell.
  *
  * Answers every `badgeKey` the nav config declares (`NavItemDef.badgeKey`, children
- * included): the moving-loads and open-intake counts, the twelve counts the retired legacy
+ * included): the open-intake count, the twelve counts the retired legacy
  * `NavBar` resolved, and the composites the parent rows carry (`loadTracking`, `accounting`).
  * A key whose count is zero is omitted — the shell renders no badge for an absent key. Each
  * sub-hook keeps whatever page-access gate it carries on its own (e.g. `useArToInvoiceCount`
@@ -23,7 +23,6 @@ import { useDocumentReviewQueue } from '@/hooks/useDocumentReviewQueue'
 import { useArToInvoiceCount } from '@/hooks/useArToInvoiceCount'
 import { useApToReviewCount } from '@/hooks/useApToReviewCount'
 import { useQuotesToReplyCount } from '@/hooks/useQuotesToReplyCount'
-import { MOVEMENT_STATUSES } from '@/lib/brokerageCharts'
 import { countOpenIntakeLoads } from '@/lib/apiClient'
 import { useSpotNewCount } from '@/features/spot-quoter/useSpotRequests'
 import { loadReviewCount } from '@/lib/loadReview'
@@ -31,13 +30,6 @@ import { needsCoverCount } from '@/features/tms/carrierSales/carrierSalesQueue'
 import type { ShipmentListRow } from '@/hooks/useShipments'
 
 const POLL_MS = 60_000
-
-/** The loads moving right now — the same definition the dashboard's Tracked metric uses. */
-export function movingShipments(shipments: ShipmentListRow[]): ShipmentListRow[] {
-  return shipments.filter(
-    (row) => row.loadStatus != null && MOVEMENT_STATUSES.includes(row.loadStatus) && !row.voidedAt,
-  )
-}
 
 export interface ShellBadgeArgs {
   shipments: ShipmentListRow[]
@@ -91,7 +83,6 @@ export function useShellBadgeCounts({ shipments }: ShellBadgeArgs): Record<strin
   // Spot quote requests waiting on this rep (Quotes › Spot inbox); same page gate as the inbox.
   const spotNew = useSpotNewCount(hasPageAccess('quotes') || hasPageAccess('tms'))
 
-  const tracking = useMemo(() => movingShipments(shipments).length, [shipments])
   // Both queues are derived from the shipments the shell already holds: no new read.
   const mayReviewLoads = hasPageAccess('loadReview') || hasPageAccess('tms')
   const mayWorkLoads = hasPageAccess('loads') || hasPageAccess('tms')
@@ -101,7 +92,6 @@ export function useShellBadgeCounts({ shipments }: ShellBadgeArgs): Record<strin
   return useMemo(() => {
     // Every open intake item, appt-move tasks included: the intake queue lists them all.
     const counts: Record<string, number> = {
-      tracking,
       intakeLoads,
       loads: loads.length,
       maintenance: maintenanceTasks.filter((t) => t.status === 'upcoming').length,
@@ -118,7 +108,7 @@ export function useShellBadgeCounts({ shipments }: ShellBadgeArgs): Record<strin
       quotesToReply: quotesToReplyCount,
       loadReview,
       carrierSales,
-      // The parent rows' chores: moving loads are not one, so Tracking is left out of the sum.
+      // The parent rows' chores: Load Tracking is the check calls due plus the documents to review.
       loadTracking: checkCallsDue + documentReviewCount,
       accounting: arToInvoiceCount + apToReviewCount,
       spotNew,
@@ -127,7 +117,7 @@ export function useShellBadgeCounts({ shipments }: ShellBadgeArgs): Record<strin
     for (const [key, n] of Object.entries(counts)) if (n) out[key] = n
     return out
   }, [
-    tracking, loads, maintenanceTasks, intakeItems, reviewCount, truckDocAlerts, dispatchUnread,
+    loads, maintenanceTasks, intakeItems, reviewCount, truckDocAlerts, dispatchUnread,
     checkCallsDue, documentReviewCount, arToInvoiceCount, apToReviewCount, quotesToReplyCount, intakeLoads,
     loadReview, carrierSales, spotNew,
   ])

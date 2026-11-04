@@ -706,6 +706,14 @@ for live-or-stub; their credential list is in the Step J entry below.
 - [ ] **Cognito.** Staff pool is vanilla with `ADMIN`/`DISPATCHER` groups. Driver pool is custom
   (`bcat-driver-pool`) with `PRE_SIGN_UP` → `driver-signup-gate` and `POST_CONFIRMATION` →
   `driver-welcome` triggers; verify production SES sender `noreply@bcatcorp.com`.
+- [ ] **Steps AJ/AK additive fields.** `Customer.trackingMode` / `trackingMethod` /
+  `driverSmsTarget`, `Shipment.trackingPrefs`, `TruckConfig.phone` / `phoneLabel` — all six
+  nullable, **no backfill**, no migration script; verify against the production table suffix
+  (`5ucwdyvwivelbo4k4jomvrwel4-NONE`) and re-run `scripts/measureDataTemplate.mjs` (six scalar
+  attributes). Until someone sets a value behaviour is unchanged: every SMS still goes to the
+  personal number and Step V decides automation. After the deploy confirm `tms-tracking-actions`
+  has `TRUCK_CONFIG_TABLE_NAME` and `DRIVER_TABLE_NAME`, and `driver-app-api` and
+  `dispatch-twilio-webhook` have `TRUCK_CONFIG_TABLE_NAME`.
 
 **After the merge / deploy to production**
 
@@ -739,6 +747,11 @@ Run these backfills **in order** against the production tables:
 - [ ] Confirm `backfillDriverDocScans.mjs` is **not** run accidentally: it defaults to the
   production table suffix and has no production guard.
 - [ ] Run `scripts/devVerifyP.mjs` against prod in read-only mode before announcing cut-over.
+- [ ] Enter each truck's work phone on Fleet (`/trucks`); Settings › Truck work phones lists the
+  gaps. Do **NOT** run `scripts/seedTruckPhone.mjs` on production (it is dev-only and refuses a
+  production suffix; its number comes only from `--phone=` / `AJK_SEED_PHONE`, never the repo).
+- [ ] Old bookmarks `/tms/check-calls`, `/tms/documents/review`, `/check-calls`, `/documents`
+  redirect to the Load Tracking grid focus views (`legacyRoutes.ts`); no server-side redirect work.
 
 **Decision:** Do not merge `dev` → `main` or push to `main` from this session. Awaiting Ryne's
 go/no-go.

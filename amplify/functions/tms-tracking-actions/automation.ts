@@ -14,6 +14,8 @@
  */
 import { renderTemplate, isQuietNow, isRateConSent, resolveAutomation } from '../../../src/lib/trackingAutomation'
 import { MAX_SMS_BODY } from '../../../src/lib/dispatch'
+import { allowsAutoRequests, channelsAllowedBy, effectiveTrackingPrefs } from '../../../src/lib/trackingPrefs'
+import { resolveDriverSms } from './driverPhone'
 import { isVoided } from '../_shared/voided'
 import type { Caller } from '../_shared/actionInputs'
 import type { Row } from '../_shared/shipmentStore'
@@ -153,7 +155,19 @@ export async function runTrackingAutomation(deps: AutomationDeps, input: Row, ca
           if (!carrier || carrier.kind !== 'CARRIER' || carrier.status !== 'ACTIVE' || !isRateConSent(carrier)) continue
           result.pod.checked += 1
 
-          const recipients = (['EMAIL', 'SMS'] as const).filter((c) => (c === 'EMAIL' ? carrier.dispatcherEmail : carrier.driverPhone))
+          // Step AJ: a manual customer is never asked automatically; the method trims the channels.
+          const customerId = String(shipment.customerId ?? '')
+          if (customerId && !customers.has(customerId)) customers.set(customerId, await deps.getById(deps.tables.customer, customerId))
+          const customer = customerId ? customers.get(customerId) ?? null : null
+          const prefs = effectiveTrackingPrefs({ shipment, customer })
+          if (!allowsAutoRequests(prefs)) {
+            result.pod.skipped += 1
+            note(`${String(shipment.number ?? shipmentId)}: Customer tracking is manual`)
+            continue
+          }
+          // Step AK: the driver is texted on the truck's work phone, personal as the fallback.
+          const sms = await resolveDriverSms(deps, { carrier, shipment, customer, load })
+          const recipients = channelsAllowedBy(prefs.method, ['EMAIL', 'SMS'] as const).filter((c) => (c === 'EMAIL' ? carrier.dispatcherEmail : sms.to))
           const pending: ('EMAIL' | 'SMS')[] = []
           for (const channel of recipients) {
             // One ask per leg per channel, whoever made it: an automatic claim, or a person's
@@ -169,9 +183,6 @@ export async function runTrackingAutomation(deps: AutomationDeps, input: Row, ca
           }
 
           settings ??= await deps.getSettings()
-          const customerId = String(shipment.customerId ?? '')
-          if (customerId && !customers.has(customerId)) customers.set(customerId, await deps.getById(deps.tables.customer, customerId))
-          const customer = customerId ? customers.get(customerId) ?? null : null
           const { policy } = resolveAutomation({
             settings,
             customer,
@@ -213,6 +224,7 @@ export async function runTrackingAutomation(deps: AutomationDeps, input: Row, ca
             idPrefix: 'auto:pod',
             channels: allowed,
             templates,
+            sms,
             authorKind: 'AGENT',
             caller,
           })

@@ -76,6 +76,8 @@ vi.mock('@/lib/complianceClient', () => ({
 vi.mock('@/lib/apiClient', () => ({
   driverTrailerFieldDeployed: () => true,
   listCompanyPhones: vi.fn().mockResolvedValue([]),
+  listTruckConfigs: vi.fn().mockResolvedValue([{ truckId: 't1', unitNumber: '214', phone: '+13125550142', phoneLabel: null, createdAt: '', updatedAt: '' }]),
+  upsertTruckConfig: vi.fn(),
   updateCompanyPhone: vi.fn(),
   graphqlErrorText: () => '',
   listDriverPaySettings: vi.fn().mockResolvedValue([
@@ -145,6 +147,14 @@ describe('Files hub renders', () => {
     // Phone and email share a Contact column now — ten columns were being clipped.
     expect(screen.getByText('Contact')).toBeTruthy()
     expect(screen.getByText('zak@bcatcorp.com')).toBeTruthy()
+  })
+
+  it('shows the driver\'s truck work phone above their personal number', async () => {
+    const { fireEvent } = await import('@testing-library/react')
+    renderIn(<FilesPage />)
+    fireEvent.click(screen.getByText('Drivers'))
+    expect((await screen.findByTestId('driver-phone-work')).textContent).toBe('Work (truck 214): (312) 555-0142')
+    expect(screen.getAllByTestId('driver-phone-personal').map((n) => n.textContent)).toContain('Personal: (847) 293-6704')
   })
 
   it('finds a driver by their email', async () => {

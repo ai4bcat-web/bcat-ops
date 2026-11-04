@@ -62,14 +62,17 @@ const recordAF = (bad, id, detail) => {
 }
 const fmt = (n, d = 1) => (n == null || Number.isNaN(n) ? '—' : n.toFixed(d))
 
+/** The dense grid (Step AC) mounts only the rows in view plus overscan (~31 at 900 px, ~43 at 1000 px), so "first rows" is reached at a window's worth, not at 50/100 rows. */
+const DENSE_ROWS_CAP = 20
+
 /** Page -> readiness spec, from independent API reads (expected row counts). */
 export function pageSpecs(expected) {
   const rowsOr = (n, cap) => (n === 0 ? { minRows: 0, expectEmpty: true } : { minRows: Math.min(n, cap) })
   return {
     '/tms/dashboard': { minRows: 0, minCharts: 4, kpi: true, kpiTestId: KPI_TESTIDS['/tms/dashboard'] },
-    '/tms/tracking': rowsOr(expected.trackingRows, 100),
-    '/tms/shipments': rowsOr(expected.activeLowerBound, 50),
-    '/tms/shipments?list=all': rowsOr(expected.activeLowerBound, 50),
+    '/tms/tracking': rowsOr(expected.trackingRows, DENSE_ROWS_CAP),
+    '/tms/shipments': rowsOr(expected.activeLowerBound, DENSE_ROWS_CAP),
+    '/tms/shipments?list=all': rowsOr(expected.activeLowerBound, DENSE_ROWS_CAP),
     '/tms/customers': rowsOr(expected.customers, 50),
     '/tms/brokerage/users': { minRows: 3 },
     '/tms/invoicing': rowsOr(expected.unbilledOrders, 1),

@@ -973,6 +973,10 @@ const schema = a.schema({
       checkCallPlan:         a.json(),         // CheckCallPlan — cadence + channels, overridable per load
       defaultTrackerId:      a.string(),       // Step V. UserProfile id copied onto new shipments as the tracker (blank = unassigned)
       trackingAutomation:    a.json(),         // Step V. AutomationPolicyPatch — auto check calls / POD / quiet hours / templates
+      // Steps AJ/AK. null = legacy (Step V switches decide / plan channels as configured / WORK_THEN_PERSONAL).
+      trackingMode:          a.enum(['AGENT', 'MANUAL']),
+      trackingMethod:        a.enum(['EMAIL', 'SMS', 'BOTH']),
+      driverSmsTarget:       a.enum(['WORK_THEN_PERSONAL', 'WORK_ONLY', 'PERSONAL']),
     })
     .secondaryIndexes((index) => [index('normalizedName')])
     // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
@@ -1977,6 +1981,8 @@ const schema = a.schema({
       // P8. The tracking agent raised a flag the Tracking page shows.
       trackingFlaggedAt: a.datetime(),
       trackingFlagReason: a.string(),
+      // Step AJ. Per-shipment override { mode?, method?, driverSms? }; null/absent = inherit the customer.
+      trackingPrefs:   a.json(),
       createdBy:       a.string().required(),
       updatedBy:       a.string().required(),
       version:         a.integer(),
@@ -3945,6 +3951,9 @@ const schema = a.schema({
       complianceStatus:       a.enum(['COMPLIANT', 'EXPIRING_SOON', 'NON_COMPLIANT', 'UNKNOWN']), // cached, updated by scanner
       assignedFuelCardNumber: a.string(),   // LAST 4 DIGITS ONLY — never store full card numbers
       assignedPhone:          a.string(),
+      // Steps AJ/AK. The work phone physically in this truck (E.164, +1XXXXXXXXXX); null = none.
+      phone:                  a.string(),
+      phoneLabel:             a.string(),   // free label, e.g. "Cab phone"
       assignedTablet:         a.string(),
       eldSerialNumber:        a.string(),
       inServiceDate:          a.date(),

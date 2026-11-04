@@ -44,6 +44,18 @@ describe('matchDriverByPhone', () => {
     expect(matchDriverByPhone(drivers, '+17735550000')).toBeNull()
     expect(matchDriverByPhone(drivers, 'nope')).toBeNull()
   })
+  it('knows a driver by the work phone in their truck', () => {
+    const roster = [{ id: 'jb', name: 'John B', phone: '(312) 555-0101', active: true, workPhone: '+13125550111' }]
+    expect(matchDriverByPhone(roster, '+1 312 555 0111')?.id).toBe('jb')
+    expect(matchDriverByPhone(roster, '+13125550101')?.id).toBe('jb')
+  })
+  it('a personal number outranks someone else\'s work phone', () => {
+    const roster = [
+      { id: 'a', name: 'A', phone: '+13125550101', active: true, workPhone: '+13125550111' },
+      { id: 'b', name: 'B', phone: '+13125550111', active: true },
+    ]
+    expect(matchDriverByPhone(roster, '+13125550111')?.id).toBe('b')
+  })
 })
 
 describe('display', () => {

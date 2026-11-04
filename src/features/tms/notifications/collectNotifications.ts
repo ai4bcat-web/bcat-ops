@@ -7,6 +7,7 @@
  * there is no read state. `total` counts every item the user may see; `items` is capped so
  * the drawer stays short, which means the badge never under-counts.
  */
+import { CHECK_CALLS_LANDING, DOCS_LANDING } from '@/features/shipments/workstations/tracking/legacyRoutes'
 
 export type NotificationKind =
   | 'CHECK_CALLS'
@@ -195,10 +196,10 @@ export function collectNotifications(input: CollectInput): NotificationGroup[] {
         title: `${row.label} — check call ${row.state === 'OVERDUE' ? 'overdue' : 'due'}`,
         detail: row.carrierName ?? 'No carrier on the load',
         at: row.nextCheckCallAt,
-        to: row.shipmentId ? `/tms/shipments/${row.shipmentId}?tab=tracking` : '/tms/check-calls',
+        to: row.shipmentId ? `/tms/shipments/${row.shipmentId}?tab=tracking` : CHECK_CALLS_LANDING,
       })
     }
-    groups.push(group('CHECK_CALLS', 'Check calls', '/tms/check-calls', 'Open worklist', items))
+    groups.push(group('CHECK_CALLS', 'Check calls', CHECK_CALLS_LANDING, 'Open worklist', items))
   }
 
   // (2) PODs missing
@@ -303,7 +304,7 @@ export function collectNotifications(input: CollectInput): NotificationGroup[] {
         title: `${plural(input.reviewDocuments.length, 'carrier upload')} waiting for review`,
         detail: 'Nothing a carrier sends counts until someone accepts it',
         at: oldest,
-        to: '/tms/documents',
+        to: DOCS_LANDING,
       })
     }
     if (canReviewDrivers) {

@@ -19,6 +19,9 @@ export const HOME_ROOTS = [
   'Locations', 'Accounting', 'Settings', 'ASSETS', 'CAR SHIPPING', 'COMPANY',
 ]
 
+export const CHECK_CALLS_LANDING = '/tms/tracking?assignee=all&focus=checkcalls'
+export const DOCS_LANDING = '/tms/tracking?assignee=all&focus=docs'
+
 const page = (pattern, home, navPath, guard) => ({ pattern, kind: 'page', home, navPath, guard })
 const redirect = (pattern, landing) => ({ pattern, kind: 'redirect', home: `→ ${landing}`, navPath: null, guard: '—', landing })
 const hidden = (pattern, home, guard) => ({ pattern, kind: 'hidden', home, navPath: null, guard })
@@ -41,11 +44,10 @@ export const AA_HOMES = [
   page('/tms/shipments/:id', 'Shipments', '/tms/shipments', 'loads|tms'),
   redirect('/tms/dispatch', '/tms/carrier-sales'),
   page('/tms/carrier-sales', 'Carrier Sales', '/tms/carrier-sales', 'loads|tms'),
-  page('/tms/tracking', 'Load Tracking › Tracking', '/tms/tracking', 'loads|tms'),
-  page('/tms/tracking/links', 'Load Tracking › Customer links', '/tms/tracking/links', 'loads|tms'),
-  page('/tms/documents/review', 'Load Tracking › Document review', '/tms/documents/review', 'loads|tms'),
-  redirect('/tms/documents/*', '/tms/documents/review'),
-  page('/tms/check-calls', 'Load Tracking › Check calls', '/tms/check-calls', 'loads|tms'),
+  page('/tms/tracking', 'Load Tracking', '/tms/tracking', 'loads|tms'),
+  offnav('/tms/tracking/links', 'Load Tracking › Customer links (off-nav)', 'loads|tms'),
+  redirect('/tms/documents/*', DOCS_LANDING),
+  redirect('/tms/check-calls', CHECK_CALLS_LANDING),
   page('/tms/load-review', 'Load Review', '/tms/load-review', 'loadReview|tms'),
   page('/tms/rates', 'Quotes › Quotes', '/tms/rates', 'quotes|tms'),
   page('/tms/rates/new', 'Quotes › Quotes', '/tms/rates', 'quotes|tms'),
@@ -123,8 +125,8 @@ export const AA_HOMES = [
   redirect('/grid', '/tms/shipments'),
   redirect('/shipments', '/tms/shipments'),
   redirect('/shipments/:id', '/tms/shipments/:id'),
-  redirect('/check-calls', '/tms/check-calls'),
-  redirect('/documents', '/tms/documents/review'),
+  redirect('/check-calls', CHECK_CALLS_LANDING),
+  redirect('/documents', DOCS_LANDING),
   redirect('/drivers', '/files'),
   redirect('/factoring', '/tms/factors'),
   redirect('/ar', '/tms/invoicing'),
@@ -185,10 +187,10 @@ export const AA_OLD_URLS = [
   ['/tms/dispatch', '/tms/carrier-sales'],
   ['/tms/tracking', '/tms/tracking'],
   ['/tms/tracking/links', '/tms/tracking/links'],
-  ['/tms/documents/review', '/tms/documents/review'],
-  ['/tms/documents', '/tms/documents/review'],
-  ['/tms/documents/view/zz-x', '/tms/documents/review'],
-  ['/tms/check-calls', '/tms/check-calls'],
+  ['/tms/documents/review', '/tms/tracking', '?assignee=all&focus=docs'],
+  ['/tms/documents', '/tms/tracking', '?assignee=all&focus=docs'],
+  ['/tms/documents/view/zz-x', '/tms/tracking', '?assignee=all&focus=docs'],
+  ['/tms/check-calls', '/tms/tracking', '?assignee=all&focus=checkcalls'],
   ['/tms/rates', '/tms/rates'],
   ['/tms/rates/new', '/tms/rates/new'],
   ['/tms/rates/lanes', '/tms/rates/lanes'],
@@ -256,8 +258,8 @@ export const AA_OLD_URLS = [
   ['/grid', '/tms/shipments'],
   ['/shipments', '/tms/shipments'],
   ['/shipments/zz-x', '/tms/shipments/zz-x'],
-  ['/check-calls', '/tms/check-calls'],
-  ['/documents', '/tms/documents/review'],
+  ['/check-calls', '/tms/tracking', '?assignee=all&focus=checkcalls'],
+  ['/documents', '/tms/tracking', '?assignee=all&focus=docs'],
   ['/drivers', '/files'],
   ['/factoring', '/tms/factors'],
   ['/ar', '/tms/invoicing'],
@@ -300,10 +302,6 @@ export const AA_SIDEBAR = [
   ['Intake', '/tms/shipments/intake', 1],
   ['Carrier Sales', '/tms/carrier-sales', 0],
   ['Load Tracking', '/tms/tracking', 0],
-  ['Tracking', '/tms/tracking', 1],
-  ['Check calls', '/tms/check-calls', 1],
-  ['Document review', '/tms/documents/review', 1],
-  ['Customer links', '/tms/tracking/links', 1],
   ['Load Review', '/tms/load-review', 0],
   ['Customers', '/tms/customers', 0],
   ['Customers', '/tms/customers', 1],
@@ -336,14 +334,13 @@ export const AA_SIDEBAR_SECTIONS = ['ASSETS', 'CAR SHIPPING', 'COMPANY']
 export const AA_SIDEBAR_PARENTS = [
   { label: 'Quotes', open: '/tms/rates' },
   { label: 'Shipments', open: '/tms/shipments' },
-  { label: 'Load Tracking', open: '/tms/tracking' },
   { label: 'Customers', open: '/tms/customers' },
   { label: 'Accounting', open: '/tms/invoicing' },
   { label: 'Settings', open: '/tms/brokerage' },
 ]
 
 /** Sidebar badge slots the shell must declare (aria-label text is asserted loosely, by the visible row label). */
-export const AA_BADGE_ROWS = ['Quotes', 'Intake', 'Carrier Sales', 'Load Tracking', 'Check calls', 'Document review', 'Load Review', 'Accounting', 'Accounts Receivable', 'Accounts Payable']
+export const AA_BADGE_ROWS = ['Quotes', 'Intake', 'Carrier Sales', 'Load Tracking', 'Load Review', 'Accounting', 'Accounts Receivable', 'Accounts Payable']
 
 /** Rows only an ADMIN/owner sees (§2.8): none may render for a plain `page-tms` user. */
 export const AA_ADMIN_ONLY_HREFS = [

@@ -227,7 +227,7 @@ describe('LoadReviewPage', () => {
     await screen.findByText('Missing document: POD')
     const hrefs = within(screen.getByRole('dialog')).getAllByRole('link').map((a) => a.getAttribute('href'))
     expect(hrefs).toContain('/tms/shipments/s-3?tab=documents')
-    expect(hrefs).toContain('/tms/documents/review')
+    expect(hrefs).toContain('/tms/tracking?assignee=all&focus=docs')
   })
 
   it('a server failure on open is shown in the drawer and Move stays disabled', async () => {

@@ -806,6 +806,47 @@ describe('UPSERT_CUSTOMER', () => {
       })),
     ).rejects.toThrow(/notAPlaceholder/)
   })
+
+  it('stores tracking mode, method and driver SMS target, and refuses a value outside the enums', async () => {
+    send.mockImplementation(withSettingsGet((cmd: MockCommand) => {
+      if (cmd.__type === 'Scan') return Promise.resolve({ Items: [], LastEvaluatedKey: undefined })
+      if (cmd.__type === 'Put') return Promise.resolve({})
+      throw new Error('unexpected')
+    }))
+    const result = await handler(event('UPSERT_CUSTOMER', {
+      name: 'Acme', trackingMode: 'MANUAL', trackingMethod: 'SMS', driverSmsTarget: 'WORK_ONLY',
+    }))
+    expect(result).toMatchObject({ trackingMode: 'MANUAL', trackingMethod: 'SMS', driverSmsTarget: 'WORK_ONLY' })
+
+    for (const bad of [{ trackingMode: 'AUTO' }, { trackingMethod: 'FAX' }, { driverSmsTarget: 'TRUCK' }]) {
+      await expect(handler(event('UPSERT_CUSTOMER', { name: 'Acme', ...bad }))).rejects.toThrow(/must be one of/)
+    }
+  })
+
+  it('keeps the stored tracking choices when a save does not carry them, and clears them on null', async () => {
+    const existing = makeDynamoItem({
+      id: 'c-1', name: 'Batory Foods', normalizedName: 'batory foods', active: true,
+      trackingMode: 'MANUAL', trackingMethod: 'EMAIL', driverSmsTarget: 'PERSONAL',
+      createdAt: '2025-01-01', createdBy: 'someone@bcatcorp.com', updatedAt: '2025-01-02',
+    })
+    let update: MockCommand | undefined
+    send.mockImplementation((cmd: MockCommand) => {
+      if (cmd.__type === 'Get') return Promise.resolve({ Item: existing })
+      if (cmd.__type === 'Scan') return Promise.resolve({ Items: [existing], LastEvaluatedKey: undefined })
+      if (cmd.__type === 'Update') { update = cmd; return Promise.resolve({ Attributes: existing }) }
+      throw new Error('unexpected')
+    })
+    await handler(event('UPSERT_CUSTOMER', { id: 'c-1', expectedUpdatedAt: '2025-01-02', name: 'Batory Foods', mcNumber: '123456' }))
+    const updatedValues = () => (update?.input as { ExpressionAttributeValues?: Record<string, unknown> } | undefined)?.ExpressionAttributeValues
+    expect(updatedValues()).toMatchObject({
+      ':trackingMode': { S: 'MANUAL' }, ':trackingMethod': { S: 'EMAIL' }, ':driverSmsTarget': { S: 'PERSONAL' },
+    })
+
+    await handler(event('UPSERT_CUSTOMER', { id: 'c-1', expectedUpdatedAt: '2025-01-02', name: 'Batory Foods', trackingMode: null }))
+    expect(updatedValues()).toMatchObject({
+      ':trackingMode': { NULL: true }, ':trackingMethod': { S: 'EMAIL' },
+    })
+  })
 })
 
 // ── SET_CUSTOMER_STATUS ───────────────────────────────────────────────────────

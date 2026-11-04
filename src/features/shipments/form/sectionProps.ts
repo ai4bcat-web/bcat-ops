@@ -65,6 +65,8 @@ export interface FormCtx {
   directory: {
     customers: CustomerRecord[]
     locations: LocationRecord[]
+    /** Starts the one-time read of the locations table; the form does not read it on mount. */
+    ensureLocations?: () => void
     carriers: CarrierRecord[]
     staff: UserProfileRecord[]
   }

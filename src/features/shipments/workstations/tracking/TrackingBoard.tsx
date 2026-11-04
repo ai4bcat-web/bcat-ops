@@ -9,7 +9,7 @@
  *   data-testid="tracking-row", data-status, data-shipment-id and data-tracker-id.
  */
 import { useCallback, useMemo, useState } from 'react'
-import { Heart, Link2, MoreHorizontal, Plus, Search, Settings2, X } from 'lucide-react'
+import { Heart, Link2, MoreHorizontal, Plus, Search, X } from 'lucide-react'
 import { TrackerPicker } from '@/components/TrackerPicker'
 import { BoardMapView } from '../../board/BoardMapView'
 import { DenseGrid } from '@/features/tms/grid/DenseGrid'
@@ -34,6 +34,8 @@ import {
 import { useDenseGridPrefs } from '@/features/tms/grid/useDenseGridPrefs'
 import { TmsBadge, TmsButton, TmsIconButton, TmsInput, TmsSegmentedTabs, TmsSelect, type TmsTone } from '@/features/tms/kit'
 import { formatBoardDateTime } from '@/lib/date'
+import { CHECK_CALL_TYPE_LABELS } from '@/lib/checkCalls'
+import type { EffectiveTrackingPrefs } from '@/lib/trackingPrefs'
 import { boardStatusOf, type BoardStatusKey, type ShipmentRow } from '../../shipmentViews'
 import { relativeTime as relativeTimeOf } from '../motion'
 import {
@@ -43,6 +45,7 @@ import {
   TRACKING_GROUPERS,
   motionText,
   nextCheckMinutes,
+  docsText,
   trackingColumns,
 } from './trackingColumns'
 import { nextEventText } from './nextEventText'
@@ -50,9 +53,14 @@ import {
   UNASSIGNED_KEY,
   durationText,
   etaOf,
+  focusRows,
+  hasDocsToReview,
+  hasException,
+  isCheckCallDue,
   nextCheckCallStateOf,
   podStateOf,
   type PodState,
+  type TrackingFocus,
 } from './trackingTable'
 import type { TrackingBoardProps } from './types'
 
@@ -102,6 +110,17 @@ function lateText(minutes: number): string {
   return `${Math.round(minutes / 1440)} d`
 }
 
+const FOCUS_EMPTY: Record<TrackingFocus, string> = {
+  checkcalls: 'No check calls are due.',
+  docs: 'No carrier uploads are waiting on review.',
+  exceptions: 'No open exceptions.',
+}
+
+function modeText(p: EffectiveTrackingPrefs): string {
+  if (p.mode === 'MANUAL') return 'Manual'
+  return p.mode === 'AGENT' ? 'Agent' : 'Not set'
+}
+
 function emptyMessage(props: Pick<TrackingBoardProps, 'activeAssignee' | 'includeUnsent' | 'lifecycle'>): string {
   if (props.activeAssignee === 'me') return 'Nothing assigned to you — pick All.'
   if (props.activeAssignee !== 'all') return 'Nothing in this view.'
@@ -130,10 +149,16 @@ export function TrackingBoard(props: TrackingBoardProps) {
     onToggleFavorite,
     onOpenShipment,
     onCreateShipment,
-    onManageLinks,
     onCreateCustomerUrl,
     onRequestCheckCall,
     onRequestPod,
+    onLogCheckCall,
+    onSnooze,
+    onReviewDocs,
+    focus,
+    onFocus,
+    graceMinutes,
+    prefsOf,
     onAssignTracker,
     email,
     nameOf,
@@ -148,7 +173,7 @@ export function TrackingBoard(props: TrackingBoardProps) {
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [pageSize, setPageSize] = useState(PAGE_SIZE)
 
-  const allColumns = useMemo(() => trackingColumns({ nowMs, nameOf }), [nowMs, nameOf])
+  const allColumns = useMemo(() => trackingColumns({ nowMs, nameOf, prefsOf }), [nowMs, nameOf, prefsOf])
   const prefs = useDenseGridPrefs({
     gridId: 'tracking',
     email,
@@ -162,7 +187,17 @@ export function TrackingBoard(props: TrackingBoardProps) {
     [prefs.columns, allColumns],
   )
 
-  const fitRows = useMemo(() => (favoritesOnly ? rows.filter((r) => favorites.has(r.id)) : rows), [rows, favoritesOnly, favorites])
+  const focused = useMemo(() => focusRows(rows, focus, nowMs, graceMinutes), [rows, focus, nowMs, graceMinutes])
+  const fitRows = useMemo(() => (favoritesOnly ? focused.filter((r) => favorites.has(r.id)) : focused), [focused, favoritesOnly, favorites])
+  const focusTabs = useMemo(
+    () => [
+      { key: 'all', label: 'All' },
+      { key: 'checkcalls', label: 'Check calls due', count: rows.filter((r) => isCheckCallDue(r, nowMs, graceMinutes)).length },
+      { key: 'docs', label: 'Docs to review', count: rows.filter(hasDocsToReview).length },
+      { key: 'exceptions', label: 'Exceptions', count: rows.filter(hasException).length },
+    ],
+    [rows, nowMs, graceMinutes],
+  )
   const grouper = prefs.groupBy ? TRACKING_GROUPERS[prefs.groupBy] : undefined
   const { ordered, groups } = useMemo(() => {
     const filtered = filterRows(fitRows, allColumns, filters)
@@ -245,6 +280,12 @@ export function TrackingBoard(props: TrackingBoardProps) {
           return <CarrierCell row={row} />
         case 'tracker':
           return <TrackerCell row={row} />
+        case 'checkCalls':
+          return <CheckCallsCell row={row} nowMs={nowMs} />
+        case 'docs':
+          return <DocsCell row={row} />
+        case 'mode':
+          return prefsOf ? <span>{modeText(prefsOf(row))}</span> : null
         case 'actions':
           return (
             <RowMenu
@@ -253,6 +294,9 @@ export function TrackingBoard(props: TrackingBoardProps) {
               onCreateCustomerUrl={() => onCreateCustomerUrl(row)}
               onRequestCheckCall={() => onRequestCheckCall(row)}
               onRequestPod={() => onRequestPod(row)}
+              onLogCheckCall={() => onLogCheckCall(row)}
+              onSnooze={() => onSnooze(row)}
+              onReviewDocs={() => onReviewDocs(row)}
               onAssignTracker={(trackerId) => onAssignTracker([row.id], trackerId)}
             />
           )
@@ -260,7 +304,7 @@ export function TrackingBoard(props: TrackingBoardProps) {
           return null
       }
     },
-    [favorites, onOpenShipment, onToggleFavorite, onCreateCustomerUrl, onRequestCheckCall, onRequestPod, onAssignTracker, nowMs],
+    [favorites, onOpenShipment, onToggleFavorite, onCreateCustomerUrl, onRequestCheckCall, onRequestPod, onLogCheckCall, onSnooze, onReviewDocs, onAssignTracker, nowMs, prefsOf],
   )
 
   const kpis = useMemo<DenseKpi[]>(() => {
@@ -270,12 +314,14 @@ export function TrackingBoard(props: TrackingBoardProps) {
     let late = 0
     let unassigned = 0
     let podNeeded = 0
+    let docsReview = 0
     for (const r of ordered) {
       if (motionText(r, nowMs) === 'Moving') moving += 1
       if ((nextCheckMinutes(r, nowMs) ?? 0) < 0) overdue += 1
       if (etaOf(r, nowMs)?.lateMinutes) late += 1
       if (!r.trackerId) unassigned += 1
       if (podStateOf(r) === 'NEEDED') podNeeded += 1
+      if (hasDocsToReview(r)) docsReview += 1
     }
     return [
       { label: 'Loads', value: ordered.length },
@@ -284,6 +330,7 @@ export function TrackingBoard(props: TrackingBoardProps) {
       { label: 'Running late', value: late, tone: late > 0 ? 'warn' : undefined },
       { label: 'Unassigned', value: unassigned, tone: unassigned > 0 ? 'warn' : undefined },
       { label: 'POD needed', value: podNeeded, tone: podNeeded > 0 ? 'warn' : undefined },
+      { label: 'Docs to review', value: docsReview, tone: docsReview > 0 ? 'warn' : undefined },
     ]
   }, [prefs.kpiOpen, ordered, nowMs])
 
@@ -331,13 +378,24 @@ export function TrackingBoard(props: TrackingBoardProps) {
           onChange={(e) => { setQuery(e.target.value); setPageSize(PAGE_SIZE) }}
           className="tms-dense-search"
         />
-        <TmsSegmentedTabs
-          aria-label="Shipment lifecycle"
-          size="sm"
-          tabs={LIFECYCLE_TABS}
-          active={lifecycle}
-          onSelect={(key) => onLifecycle(key as typeof lifecycle)}
-        />
+        {!focus && (
+          <TmsSegmentedTabs
+            aria-label="Shipment lifecycle"
+            size="sm"
+            tabs={LIFECYCLE_TABS}
+            active={lifecycle}
+            onSelect={(key) => onLifecycle(key as typeof lifecycle)}
+          />
+        )}
+        <div data-testid="tracking-focus-tabs">
+          <TmsSegmentedTabs
+            aria-label="Focus"
+            size="sm"
+            tabs={focusTabs}
+            active={focus ?? 'all'}
+            onSelect={(key) => onFocus(key === 'all' ? null : (key as TrackingFocus))}
+          />
+        </div>
         <div data-testid="tracking-assignee-tabs">
           <TmsSegmentedTabs aria-label="Assignee" size="sm" tabs={assigneeTabs} active={activeAssignee} onSelect={onSelectAssignee} />
         </div>
@@ -366,9 +424,6 @@ export function TrackingBoard(props: TrackingBoardProps) {
         </TmsButton>
         <ClearFiltersButton count={filterCount} onClear={() => { setFilters({}); setPageSize(PAGE_SIZE) }} />
         <span className="tms-dense-spacer" />
-        <TmsButton size="sm" variant="secondary" onClick={onManageLinks}>
-          <Settings2 size={14} /> Manage links
-        </TmsButton>
         <TmsButton
           size="sm"
           variant="secondary"
@@ -425,7 +480,7 @@ export function TrackingBoard(props: TrackingBoardProps) {
           <DenseGrid<ShipmentRow>
             aria-label="Load tracking"
             recentKey={`tms:tracking:recent:${email ?? 'anon'}`}
-            resetKey={`${query}|${lifecycle}|${activeAssignee}|${includeUnsent}|${favoritesOnly}|${prefs.groupBy}|${JSON.stringify(filters)}|${JSON.stringify(prefs.sort)}`}
+            resetKey={`${query}|${lifecycle}|${activeAssignee}|${focus ?? ''}|${includeUnsent}|${favoritesOnly}|${prefs.groupBy}|${JSON.stringify(filters)}|${JSON.stringify(prefs.sort)}`}
             columns={gridColumns}
             rows={shown}
             fitRows={fitRows}
@@ -450,7 +505,7 @@ export function TrackingBoard(props: TrackingBoardProps) {
             renderGroupHeader={renderGroupHeader}
             empty={
               <span data-testid="tracking-empty">
-                {rows.length === 0 ? emptyMessage({ activeAssignee, includeUnsent, lifecycle }) : 'No shipments match the column filters.'}
+                {rows.length === 0 ? emptyMessage({ activeAssignee, includeUnsent, lifecycle }) : fitRows.length === 0 && focus ? FOCUS_EMPTY[focus] : 'No shipments match the column filters.'}
               </span>
             }
           />
@@ -557,6 +612,28 @@ function PodCell({ row }: { row: ShipmentRow }) {
   return <TmsBadge tone={POD_TONES[state]}>{POD_LABELS[state]}</TmsBadge>
 }
 
+function CheckCallsCell({ row, nowMs }: { row: ShipmentRow; nowMs: number }) {
+  const next = nextCheckCallStateOf(row, nowMs)
+  const last = row.lastCheckCallType
+    ? `${(CHECK_CALL_TYPE_LABELS as Record<string, string>)[row.lastCheckCallType] ?? row.lastCheckCallType} ${relativeTimeOf(row.lastCheckCallAt ?? null, nowMs) ?? ''}`.trim()
+    : null
+  if (!last && next.kind === 'NONE' && !hasException(row)) return <span className="tms-tracking-cell-muted">—</span>
+  return (
+    <span className="tms-tracking-tracking-cell">
+      {last && <span>{last}</span>}
+      {next.kind === 'OVERDUE' && <TmsBadge tone="red" title={formatBoardDateTime(next.at)}>overdue {durationText(next.minutes)}</TmsBadge>}
+      {next.kind === 'UPCOMING' && <span className="tms-tracking-cell-muted" title={formatBoardDateTime(next.at)}>due in {durationText(next.minutes)}</span>}
+      {hasException(row) && <TmsBadge tone="red">{row.openIncidentCount} exception{row.openIncidentCount === 1 ? '' : 's'}</TmsBadge>}
+    </span>
+  )
+}
+
+function DocsCell({ row }: { row: ShipmentRow }) {
+  if (hasDocsToReview(row)) return <TmsBadge tone="orange">{row.pendingDocReviewCount} to review</TmsBadge>
+  const text = docsText(row)
+  return <span className="tms-tracking-cell-muted">{text || '—'}</span>
+}
+
 function TrackerCell({ row }: { row: ShipmentRow }) {
   if (!row.trackerId) return <TmsBadge tone="orange">Unassigned</TmsBadge>
   return <span className="tms-tracking-team-cell">{row.trackerName ?? row.trackerId}</span>
@@ -582,6 +659,9 @@ function RowMenu({
   onCreateCustomerUrl,
   onRequestCheckCall,
   onRequestPod,
+  onLogCheckCall,
+  onSnooze,
+  onReviewDocs,
   onAssignTracker,
 }: {
   row: ShipmentRow
@@ -589,6 +669,9 @@ function RowMenu({
   onCreateCustomerUrl: () => void
   onRequestCheckCall: () => Promise<void>
   onRequestPod: () => Promise<void>
+  onLogCheckCall: () => Promise<void>
+  onSnooze: () => Promise<void>
+  onReviewDocs: () => void
   onAssignTracker: (trackerId: string | null) => Promise<void>
 }) {
   const [assigning, setAssigning] = useState(false)
@@ -629,6 +712,33 @@ function RowMenu({
         </button>
         <button type="button" className="tms-tracking-rowmenu-item" onClick={onCreateCustomerUrl}>
           Create customer URL
+        </button>
+        <button
+          type="button"
+          className="tms-tracking-rowmenu-item"
+          disabled={busy || voided}
+          title={checkCallReason}
+          onClick={() => { void run(onLogCheckCall) }}
+        >
+          Log check call…
+        </button>
+        <button
+          type="button"
+          className="tms-tracking-rowmenu-item"
+          disabled={busy || voided}
+          title={checkCallReason}
+          onClick={() => { void run(onSnooze) }}
+        >
+          Snooze 1 h
+        </button>
+        <button
+          type="button"
+          className="tms-tracking-rowmenu-item"
+          disabled={!hasDocsToReview(row)}
+          title={hasDocsToReview(row) ? undefined : 'No carrier upload is waiting on review.'}
+          onClick={onReviewDocs}
+        >
+          Review documents…
         </button>
         <button
           type="button"

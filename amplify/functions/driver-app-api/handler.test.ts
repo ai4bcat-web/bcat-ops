@@ -112,6 +112,7 @@ vi.hoisted(() => {
   process.env.DRIVER_SUBMISSION_TABLE_NAME = 'DriverSubmission-test'
   process.env.DRIVER_SUBMISSION_DOC_TABLE_NAME = 'DriverSubmissionDoc-test'
   process.env.DRIVER_TABLE_NAME = 'Driver-test'
+  process.env.TRUCK_CONFIG_TABLE_NAME = 'TruckConfig-test'
   process.env.DISPATCH_PARAM_PATH = '/bcat/dispatch/test'
   process.env.DRIVER_PAY_SETTING_TABLE_NAME = 'DriverPaySetting-test'
   process.env.AMAZON_TRIP_TABLE_NAME = 'AmazonTrip-test'
@@ -574,7 +575,7 @@ beforeEach(() => {
     const tableRecords = tables[table]
 
     if (cmd instanceof GetCommand) {
-      const id = input.Key?.id as string | undefined
+      const id = (input.Key?.id ?? input.Key?.truckId) as string | undefined
       return { Item: id && tableRecords?.[id] ? { ...tableRecords[id] } : undefined }
     }
 
@@ -682,6 +683,7 @@ describe('driver-app-api handler', () => {
         // No truck assigned to this fixture driver, so there is no PM to report.
         pm: null,
         truck: null,
+        workPhone: null,
         trailer: null,
         dispatchPhone: '+12248756477',
         dispatcher: null,
@@ -690,6 +692,17 @@ describe('driver-app-api handler', () => {
         trailerRequired: false,
         ivanLocal: false,
       })
+    })
+
+    it('shows the work phone riding in the driver\'s assigned truck, and nothing for a truck without one', async () => {
+      tables['Driver-test'][DRIVER_A_ID].assignedTruckId = 'trk-12'
+      tables['TruckConfig-test'] = { 'trk-12': { truckId: 'trk-12', unitNumber: '12', phone: '(312) 555-0111', phoneLabel: 'Cab phone' } }
+      const withPhone = JSON.parse((await handler(baseEvent('/me'))).body)
+      expect(withPhone.workPhone).toEqual({ number: '+13125550111', label: 'Cab phone', truckNumber: '12' })
+
+      tables['TruckConfig-test']['trk-12'].phone = null
+      const without = JSON.parse((await handler(baseEvent('/me'))).body)
+      expect(without.workPhone).toBeNull()
     })
   })
 

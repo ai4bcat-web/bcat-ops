@@ -23,7 +23,7 @@ import { getStops } from '@/lib/stops'
 import { markAllStopsDone } from '@/lib/stopEvents'
 import { staffUploadDriverDoc } from '@/lib/driverSubmissionsClient'
 import type { DispatchMedia } from '@/lib/dispatch'
-import type { Load } from '@/types'
+import type { Driver, Load } from '@/types'
 import { staffName } from './dispatchUi'
 import { FilterDialog } from './FilterDialog'
 import { applyFilters, readFilters, writeFilters, filterCount, type DispatchFilters } from './dispatchFilters'
@@ -34,6 +34,14 @@ import { useLoadPaperwork } from '@/hooks/useLoadPaperwork'
 import { loadHasPod } from '@/lib/podPresence'
 import { chicagoDateStr } from '@/lib/date'
 import { weekStartOfISO } from '@/features/driver-pay/week'
+import { DriverPhones } from '@/components/DriverPhones'
+import { useDriverPhones } from '@/hooks/useTruckConfigs'
+
+/** Both numbers on file for the driver in the open conversation (reference only: the Call/Text links above are the conversation's own number). */
+function SelectedDriverPhones({ driver, unitNumber }: { driver: Driver; unitNumber: string | null }) {
+  const phones = useDriverPhones(driver, { unitNumber })
+  return <span data-testid="dispatch-driver-phones" style={{ minWidth: 0 }}><DriverPhones phones={phones} variant="inline" /></span>
+}
 
 type Tab = 'OPEN' | 'UNREAD' | 'MINE' | 'ARCHIVED'
 const TABS: { key: Tab; label: string }[] = [
@@ -269,6 +277,7 @@ export function DispatchPage({ compact = false, onHide }: { compact?: boolean; o
             <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600, color: 'var(--tms-text-2)' }}>{prettyPhone(selected.phone)}</span>
             <a href={`tel:${selected.phone}`} title="Call from your phone" style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: 'var(--tms-primary)', fontWeight: 600 }}><Phone className="size-3" />Call</a>
             <a href={`sms:${selected.phone}`} title="Text from your own phone (not the dispatch number)" style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: 'var(--tms-primary)', fontWeight: 600 }}><MessageSquare className="size-3" />Text</a>
+            {selectedDriver ? <SelectedDriverPhones driver={selectedDriver} unitNumber={equipment.find((e) => e.id === selectedDriver.assignedTruckId)?.unitNumber ?? null} /> : null}
             {selectedDriver ? <span>{selectedDriver.fleetGroup === 'AMAZON' ? 'Owner operator' : selectedDriver.fleetGroup === 'BOX_TRUCK' ? 'Box truck' : selectedDriver.fleetGroup === 'LOCAL' ? 'Ivan local' : 'Driver'}{selectedDriver.active ? '' : ' · inactive'}</span> : <span>Not a driver on file</span>}
             {selectedDriver ? (
               unitTypeEditable(selectedDriver) ? (

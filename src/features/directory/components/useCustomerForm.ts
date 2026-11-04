@@ -14,6 +14,7 @@ import type {
   CheckCallPlan,
 } from '@/types/tms'
 import type { AutomationPolicyPatch } from '@/lib/trackingAutomation'
+import { DEFAULT_DRIVER_SMS_TARGET, type DriverSmsTarget, type TrackingMethod, type TrackingMode } from '@/lib/trackingPrefs'
 
 function linesToArray(value: string): string[] {
   return value.split(/\r?\n/).map((s) => s.trim()).filter(Boolean)
@@ -120,6 +121,10 @@ export interface CustomerFormValue {
   defaultTrackerId: string
   /** Customer layer of the tracking-automation policy; null = inherit everything. */
   trackingAutomation: AutomationPolicyPatch | null
+  /** Step AJ/AK; '' = never chosen (legacy customer), left out of the saved record. */
+  trackingMode: TrackingMode | ''
+  trackingMethod: TrackingMethod | ''
+  driverSmsTarget: DriverSmsTarget | ''
 }
 
 const APPT_WORKFLOW_OPTIONS: { value: 'UNSET' | 'NONE' | 'BATORY'; label: string }[] = [
@@ -197,6 +202,10 @@ function emptyCustomerForm(initial?: CustomerRecord | null): CustomerFormValue {
     checkCallPlan: initial?.checkCallPlan ?? null,
     defaultTrackerId: initial?.defaultTrackerId ?? '',
     trackingAutomation: initial?.trackingAutomation ?? null,
+    // A new customer is asked, never left null (D-AJ7); a legacy customer shows "Not set".
+    trackingMode: initial ? (initial.trackingMode ?? '') : 'AGENT',
+    trackingMethod: initial ? (initial.trackingMethod ?? '') : 'BOTH',
+    driverSmsTarget: initial ? (initial.driverSmsTarget ?? '') : DEFAULT_DRIVER_SMS_TARGET,
   }
 }
 
@@ -329,6 +338,10 @@ export function useCustomerForm(initial?: CustomerRecord | null) {
     checkCallPlan: value.checkCallPlan,
     defaultTrackerId: value.defaultTrackerId.trim() || null,
     trackingAutomation: value.trackingAutomation && Object.keys(value.trackingAutomation).length ? value.trackingAutomation : null,
+    // '' = never chosen: leave the key off so a save of another field keeps what is stored.
+    ...(value.trackingMode ? { trackingMode: value.trackingMode } : {}),
+    ...(value.trackingMethod ? { trackingMethod: value.trackingMethod } : {}),
+    ...(value.driverSmsTarget ? { driverSmsTarget: value.driverSmsTarget } : {}),
   })
 
   const errors = useMemo(() => validateCustomerForm(value), [value])

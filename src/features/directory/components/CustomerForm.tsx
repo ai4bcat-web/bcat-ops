@@ -8,6 +8,7 @@ import { getTmsSettings } from '@/lib/apiClient'
 import type { Division, CustomerStatus, Team } from '@/types/tms'
 import type { CustomerFormValue } from './useCustomerForm'
 import { APPT_WORKFLOW_OPTIONS, INVOICE_FREQUENCY_OPTIONS } from './useCustomerForm'
+import { TrackingPrefsFields, type TrackingPrefsValue } from './TrackingPrefsFields'
 
 const STATUS_OPTIONS: CustomerStatus[] = ['NEW', 'CONTACTED', 'QUALIFIED', 'QUOTED', 'NURTURING', 'PENDING', 'ACTIVE']
 
@@ -106,6 +107,14 @@ export function CustomerForm({
           <TmsField label="Aliases">
             <TmsTextarea value={value.aliasesText} onChange={(e) => set('aliasesText', e.target.value)} placeholder="One per line" />
           </TmsField>
+          <div style={{ display: 'grid', gap: 8 }}>
+            <div className="tms-field-label">Tracking</div>
+            <TrackingPrefsFields
+              value={value}
+              onChange={(patch) => Object.entries(patch).forEach(([k, v]) => set(k as keyof TrackingPrefsValue, v as never))}
+              legacyHint
+            />
+          </div>
         </div>
       )}
 

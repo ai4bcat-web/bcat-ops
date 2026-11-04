@@ -5,8 +5,10 @@ import { useAuth } from '@/hooks/useAuth'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import { useAllComplianceDocuments } from '@/hooks/useAllComplianceDocuments'
 import { effectiveExpiration } from '@/lib/truckDocs'
-import { listTruckConfigs, upsertTruckConfig } from '@/lib/apiClient'
-import type { TruckConfig } from '@/lib/apiClient'
+import { useTruckConfigs } from '@/hooks/useTruckConfigs'
+import { trucksWithoutPhone } from '@/lib/workPhone'
+import { formatPhone } from '@/lib/utils'
+import { TruckPhoneEditor } from './TruckPhoneEditor'
 import { provisionTruckCosts, applyTruckCosts, readTruckCosts, hasAnyTruckCost, type TruckCostInputs } from '@/lib/truckCosts'
 import { getUnitPremiumCents, setUnitPremiumCurrentPeriod } from '@/lib/insuranceClient'
 import { useExpenseData } from '@/hooks/useExpenseData'
@@ -818,6 +820,8 @@ interface EquipRowProps {
   driverName?:       string
   colSpan:           number
   ownershipType?:    TruckOwnership
+  phone?:            string | null
+  phoneLabel?:       string | null
   onOwnershipChange: (truckId: string, unitNumber: string, type: TruckOwnership) => void
   onEdit:            (e: Equipment) => void
   onDelete:          (id: string) => void
@@ -847,11 +851,12 @@ function OwnershipBadge({
   )
 }
 
-function EquipRow({ equip, dates, tasks, invoices, driverName, colSpan, ownershipType, onOwnershipChange, onEdit, onDelete, onPark }: EquipRowProps) {
+function EquipRow({ equip, dates, tasks, invoices, driverName, colSpan, ownershipType, phone, phoneLabel, onOwnershipChange, onEdit, onDelete, onPark }: EquipRowProps) {
   const navigate = useNavigate()
   const { hasPageAccess } = useAuth()
   const canFiles = hasPageAccess('files')
   const [expanded, setExpanded] = useState(false)
+  const [editingPhone, setEditingPhone] = useState(false)
 
   const upcomingTasks = tasks.filter((t) => t.status === 'upcoming')
   const highTasks     = upcomingTasks.filter((t) => t.priority === 'high')
@@ -914,6 +919,37 @@ function EquipRow({ equip, dates, tasks, invoices, driverName, colSpan, ownershi
             </>
           ) : (
             <span className="text-muted-foreground/40 text-xs">—</span>
+          )}
+        </td>
+
+        {/* Work phone — the phone in the truck; edited inline */}
+        <td style={tdBase} onClick={(e) => e.stopPropagation()}>
+          {!isTruck ? (
+            <span className="text-muted-foreground/40 text-xs">—</span>
+          ) : editingPhone ? (
+            <TruckPhoneEditor
+              truckId={equip.id}
+              unitNumber={equip.unitNumber}
+              phone={phone}
+              phoneLabel={phoneLabel}
+              onDone={() => setEditingPhone(false)}
+            />
+          ) : (
+            <button
+              type="button"
+              onClick={() => setEditingPhone(true)}
+              title={phone ? 'Edit work phone' : 'Add work phone'}
+              style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit' }}
+            >
+              {phone ? (
+                <>
+                  <div className="text-sm font-medium text-foreground">{formatPhone(phone)}</div>
+                  {phoneLabel && <div className="text-xs text-muted-foreground">{phoneLabel}</div>}
+                </>
+              ) : (
+                <span className="text-xs font-medium" style={{ color: equip.active ? 'var(--tms-badge-orange)' : 'var(--tms-muted)' }}>+ Add phone</span>
+              )}
+            </button>
           )}
         </td>
 
@@ -1013,8 +1049,9 @@ export function TrucksPage() {
   const [typeFilter, setTypeFilter]       = useState<'all' | 'truck' | 'trailer'>('all')
   const [search, setSearch]               = useState('')
   const [showForm, setShowForm]           = useState<Equipment | 'new' | null>(null)
-  const [truckConfigs, setTruckConfigs]   = useState<Map<string, TruckConfig>>(new Map())
-  const [sortKey, setSortKey]             = useState<'equipment' | 'plate' | 'compliance' | 'assignment' | 'openTasks' | 'repairSpend'>('equipment')
+  const { byId: truckConfigs, upsert: upsertTruckConfig } = useTruckConfigs()
+  const [noPhoneOnly, setNoPhoneOnly]     = useState(false)
+  const [sortKey, setSortKey]             = useState<'equipment' | 'plate' | 'compliance' | 'assignment' | 'phone' | 'openTasks' | 'repairSpend'>('equipment')
   const [sortDir, setSortDir]             = useState<'asc' | 'desc'>('asc')
 
   function toggleSort(k: typeof sortKey) {
@@ -1022,28 +1059,18 @@ export function TrucksPage() {
     else { setSortKey(k); setSortDir(k === 'openTasks' || k === 'repairSpend' || k === 'compliance' ? 'desc' : 'asc') }
   }
 
-  useEffect(() => {
-    listTruckConfigs()
-      .then((configs) => {
-        setTruckConfigs(new Map(configs.map((c) => [c.truckId, c])))
-      })
-      .catch((err) => console.warn('[TrucksPage] failed to load TruckConfigs:', err))
-  }, [])
-
   async function handleOwnershipChange(truckId: string, unitNumber: string, type: TruckOwnership) {
-    // Optimistic update
-    setTruckConfigs((prev) => {
-      const next = new Map(prev)
-      next.set(truckId, { ...(prev.get(truckId) ?? { truckId, unitNumber, createdAt: '', updatedAt: '' }), ownershipType: type })
-      return next
-    })
+    // The hook applies the change optimistically and rolls back on error.
     try {
-      const saved = await upsertTruckConfig({ truckId, unitNumber, ownershipType: type })
-      setTruckConfigs((prev) => new Map(prev).set(truckId, saved))
+      await upsertTruckConfig({ truckId, unitNumber, ownershipType: type })
     } catch (err) {
       console.error('[TrucksPage] upsertTruckConfig failed:', err)
     }
   }
+
+  // Trucks with no work phone (parked ones excluded) — the Fleet half of the AK gap report.
+  const noPhone = trucksWithoutPhone({ equipment, configs: truckConfigs })
+  const noPhoneIds = new Set(noPhone.map((t) => t.truckId))
 
   // Per-truck values used for both display and column sorting.
   const complianceDatesOf = useComplianceDates()
@@ -1063,6 +1090,7 @@ export function TrucksPage() {
 
   const filtered = equipment.filter((e) => {
     if (typeFilter !== 'all' && e.type !== typeFilter) return false
+    if (noPhoneOnly && !noPhoneIds.has(e.id)) return false
     if (search) {
       const q = search.toLowerCase()
       return (
@@ -1082,6 +1110,13 @@ export function TrucksPage() {
       case 'plate':       cmp = (a.plate ?? '').localeCompare(b.plate ?? ''); break
       case 'compliance':  cmp = complianceRankOf(a) - complianceRankOf(b); break
       case 'assignment':  cmp = driverNameOf(a).localeCompare(driverNameOf(b)); break
+      case 'phone': {
+        // Present before missing in either direction: a gap is never "the biggest number".
+        const pa = truckConfigs.get(a.id)?.phone ?? ''
+        const pb = truckConfigs.get(b.id)?.phone ?? ''
+        if (!pa !== !pb) return pa ? -1 : 1
+        cmp = pa.localeCompare(pb); break
+      }
       case 'openTasks':   cmp = taskCountOf(a) - taskCountOf(b); break
       case 'repairSpend': cmp = repairOf(a) - repairOf(b); break
     }
@@ -1234,6 +1269,21 @@ export function TrucksPage() {
               }}
             />
           </div>
+          {noPhone.length > 0 || noPhoneOnly ? (
+            <button
+              type="button"
+              aria-pressed={noPhoneOnly}
+              onClick={() => setNoPhoneOnly((v) => !v)}
+              style={{
+                height: 34, padding: '0 12px', borderRadius: 7, cursor: 'pointer', fontFamily: 'inherit', fontSize: 12.5, fontWeight: 600,
+                border: '1px solid var(--tms-badge-orange)',
+                background: noPhoneOnly ? 'var(--tms-badge-orange-tint)' : 'transparent',
+                color: 'var(--tms-badge-orange)',
+              }}
+            >
+              No phone ({noPhone.length})
+            </button>
+          ) : null}
         </div>
 
         {/* Equipment table */}
@@ -1267,6 +1317,11 @@ export function TrucksPage() {
                     <div style={{ fontSize: 12, color: 'var(--tms-muted)', marginTop: 2, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                       {e.plate && <span>{e.plate}</span>}
                       {driver?.name && <span>· {driver.name}</span>}
+                      {e.type === 'truck' && (
+                        truckConfigs.get(e.id)?.phone
+                          ? <span>· {formatPhone(truckConfigs.get(e.id)!.phone!)}</span>
+                          : e.active && <span style={{ color: 'var(--tms-badge-orange)' }}>· No phone</span>
+                      )}
                       {repair > 0 && <span>· ${repair.toFixed(0)} repairs</span>}
                     </div>
                   </button>
@@ -1281,6 +1336,7 @@ export function TrucksPage() {
                   <col style={{ width: 96 }} />
                   <col style={{ width: 200 }} />
                   <col style={{ width: 150 }} />
+                  <col style={{ width: 150 }} />
                   <col style={{ width: 130 }} />
                   <col style={{ width: 112 }} />
                   <col style={{ width: 132 }} />
@@ -1289,14 +1345,14 @@ export function TrucksPage() {
                   <tr>
                     {([
                       ['Equipment', 'equipment'], ['Plate', 'plate'], ['Compliance', 'compliance'],
-                      ['Assignment', 'assignment'], ['Open Tasks', 'openTasks'], ['Repair Spend', 'repairSpend'],
+                      ['Assignment', 'assignment'], ['Phone', 'phone'], ['Open Tasks', 'openTasks'], ['Repair Spend', 'repairSpend'],
                     ] as const).map(([label, k], i) => {
                       const active = sortKey === k
                       return (
                         <th
                           key={k}
                           onClick={() => toggleSort(k)}
-                          style={{ ...thBase, textAlign: i === 5 ? 'right' : 'left', cursor: 'pointer', userSelect: 'none' }}
+                          style={{ ...thBase, textAlign: i === 6 ? 'right' : 'left', cursor: 'pointer', userSelect: 'none' }}
                         >
                           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: active ? 'var(--tms-text)' : undefined }}>
                             {label}
@@ -1321,8 +1377,10 @@ export function TrucksPage() {
                         tasks={tasks}
                         invoices={invs}
                         driverName={driver?.name}
-                        colSpan={7}
+                        colSpan={8}
                         ownershipType={truckConfigs.get(e.id)?.ownershipType}
+                        phone={truckConfigs.get(e.id)?.phone}
+                        phoneLabel={truckConfigs.get(e.id)?.phoneLabel}
                         onOwnershipChange={handleOwnershipChange}
                         onEdit={setShowForm}
                         onDelete={handleDelete}

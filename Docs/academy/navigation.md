@@ -31,8 +31,8 @@ Only the BROKERAGE pages changed address and look. An ASSETS or CAR SHIPPING pag
 | Shipments | `/tms/shipments` | `/loads`, `/grid`, `/shipments` |
 | One shipment | `/tms/shipments/:id` | `/shipments/:id` |
 | A saved department view | `/tms/shipments/view/<slug>` | — (new) |
-| Check calls | `/tms/check-calls` | `/check-calls` |
-| Documents (review queue) | `/tms/documents` | `/documents` |
+| Check calls (now the **Check calls due** focus on Load Tracking) | `/tms/tracking?assignee=all&focus=checkcalls` | `/check-calls`, `/tms/check-calls` |
+| Documents to review (now the **Documents to review** focus on Load Tracking) | `/tms/tracking?assignee=all&focus=docs` | `/documents`, `/tms/documents` |
 | Rates | `/tms/rates` | `/quotes` |
 | One quote | `/tms/rates/:id` | `/quotes/:id` |
 | Lane rates | `/tms/rates/lanes` | `/rates` |

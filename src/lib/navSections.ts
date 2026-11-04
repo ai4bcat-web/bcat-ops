@@ -141,21 +141,7 @@ export const PINNED_ITEMS: NavItemDef[] = [
   },
   { to: '/tms/shipments', label: 'Shipments', icon: Package, pageKey: 'loads', section: BROKERAGE, tms: true, children: SHIPMENT_CHILDREN },
   { to: '/tms/carrier-sales', label: 'Carrier Sales', icon: PhoneCall, pageKey: 'loads', section: BROKERAGE, tms: true, badgeKey: 'carrierSales' },
-  {
-    to: '/tms/tracking',
-    label: 'Load Tracking',
-    icon: Activity,
-    pageKey: 'loads',
-    section: BROKERAGE,
-    tms: true,
-    badgeKey: 'loadTracking',
-    children: [
-      { to: '/tms/tracking', label: 'Tracking', pageKey: 'loads', tms: true, badgeKey: 'tracking', exclude: ['/tms/tracking/links'] },
-      { to: '/tms/check-calls', label: 'Check calls', pageKey: 'loads', tms: true, badgeKey: 'checkCalls' },
-      { to: '/tms/documents/review', label: 'Document review', pageKey: 'loads', tms: true, badgeKey: 'documentReview' },
-      { to: '/tms/tracking/links', label: 'Customer links', pageKey: 'loads', tms: true },
-    ],
-  },
+  { to: '/tms/tracking', label: 'Load Tracking', icon: Activity, pageKey: 'loads', section: BROKERAGE, tms: true, badgeKey: 'loadTracking' },
   { to: '/tms/load-review', label: 'Load Review', icon: ClipboardList, pageKey: 'loadReview', section: BROKERAGE, tms: true, badgeKey: 'loadReview' },
   {
     to: '/tms/customers',
@@ -220,7 +206,7 @@ const QUOTES: TmsBreadcrumbItem = { label: 'Quotes', to: '/tms/rates' }
 const SHIPMENTS: TmsBreadcrumbItem = { label: 'Shipments', to: SHIPMENTS_PATH }
 const ACCOUNTING: TmsBreadcrumbItem = { label: 'Accounting' }
 const SETTINGS: TmsBreadcrumbItem = { label: 'Settings' }
-const LOAD_TRACKING: TmsBreadcrumbItem = { label: 'Load Tracking' }
+const LOAD_TRACKING: TmsBreadcrumbItem = { label: 'Load Tracking', to: '/tms/tracking' }
 const AR: TmsBreadcrumbItem = { label: 'Accounts Receivable', to: '/tms/invoicing' }
 const AP: TmsBreadcrumbItem = { label: 'Accounts Payable', to: '/tms/invoicing/payable' }
 
@@ -240,10 +226,8 @@ const CRUMBS: CrumbRule[] = [
   // After the generic shipment branch, or an intake load would read "Shipment".
   { path: INTAKE_PATH, crumbs: [SHIPMENTS, { label: 'Intake' }] },
   { path: INTAKE_PATH, prefix: true, crumbs: [SHIPMENTS, { label: 'Intake', to: INTAKE_PATH }, { label: 'Load' }] },
-  { path: '/tms/tracking', crumbs: [LOAD_TRACKING, { label: 'Tracking' }] },
+  { path: '/tms/tracking', crumbs: [{ label: 'Load Tracking' }] },
   { path: '/tms/tracking/links', crumbs: [LOAD_TRACKING, { label: 'Customer links' }] },
-  { path: '/tms/check-calls', crumbs: [LOAD_TRACKING, { label: 'Check calls' }] },
-  { path: '/tms/documents/review', crumbs: [LOAD_TRACKING, { label: 'Document review' }] },
   { path: '/tms/customers/follow-ups', crumbs: [{ label: 'Customers', to: '/tms/customers' }, { label: 'Follow-ups' }] },
   { path: '/tms/invoicing', crumbs: [ACCOUNTING, { label: 'Accounts Receivable' }] },
   { path: '/tms/invoicing/invoices', prefix: true, crumbs: [ACCOUNTING, AR, { label: 'Invoice' }] },

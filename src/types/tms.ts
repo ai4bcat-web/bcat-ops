@@ -15,6 +15,8 @@ export type {
   AutomationChannel, AutomationPolicy, AutomationPolicyPatch, AutomationTemplates, DivisionAutomation,
   QuietHours, TrackingAutomationSettings,
 } from '../lib/trackingAutomation'
+import type { DriverSmsTarget, TrackingMethod, TrackingMode, TrackingPrefsOverride } from '../lib/trackingPrefs'
+export type { DriverSmsTarget, TrackingMethod, TrackingMode, TrackingPrefsOverride } from '../lib/trackingPrefs'
 export type { RateViewAnswer } from '../lib/integrations/rateView'
 
 // ── Integrations (Step J) ────────────────────────────────────────────────────
@@ -289,6 +291,10 @@ export interface CustomerRecord {
   defaultTrackerId?: string | null
   /** Step V. Auto check calls / POD / quiet hours / templates; a field-level patch over division and global. */
   trackingAutomation?: AutomationPolicyPatch | null
+  /** Steps AJ/AK. null = legacy: Step V switches decide / plan channels as configured / work phone then personal. */
+  trackingMode?: TrackingMode | null
+  trackingMethod?: TrackingMethod | null
+  driverSmsTarget?: DriverSmsTarget | null
 
   createdAt: string
   updatedAt: string
@@ -1863,6 +1869,8 @@ export interface ShipmentRecord {
   /** P8. The tracking agent's own flag, shown on the Tracking page. */
   trackingFlaggedAt?: string | null
   trackingFlagReason?: string | null
+  /** Step AJ. Per-shipment tracking override; absent/null = inherit the customer (`effectiveTrackingPrefs`). */
+  trackingPrefs?: TrackingPrefsOverride | null
   createdBy: string
   updatedBy: string
   version?: number | null

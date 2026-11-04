@@ -25,20 +25,11 @@ import { useTmsTheme } from './tmsTheme'
 import './theme.css'
 import './shell.css'
 
-export interface TmsLiveChild {
-  id: string
-  label: string
-  sub?: string | null
-  to: string
-}
-
 export interface TmsNavChild {
   /** May carry a query: `/tms/shipments?list=all`. */
   to: string
   label: string
   badgeKey?: string
-  /** Shipments currently moving, listed under the Tracking child. Set by `NavRow`. */
-  live?: TmsLiveChild[]
   /** Default false = prefix match (the path or anything under it). */
   exact?: boolean
   /** Path prefixes that belong to a sibling child (`/tms/invoicing/payable`). */
@@ -91,8 +82,7 @@ export interface TmsShellProps {
   activeSearch?: string
   breadcrumb: TmsBreadcrumbItem[]
   user: { initial: string; email: string; name?: string | null }
-  /** Numeric counts for `badgeKey` items (see `useShellBadgeCounts`; absent or 0 renders no badge).
-   *  `tracking` carries the shipments currently moving. */
+  /** Numeric counts for `badgeKey` items (see `useShellBadgeCounts`; absent or 0 renders no badge). */
   badgeCounts?: Record<string, number>
   /** The businesses the switcher offers. Fewer than two means a static org card, no menu. */
   companies?: TmsCompanyOption[]
@@ -102,8 +92,6 @@ export interface TmsShellProps {
   onOpenNotifications?: () => void
   /** Whether the drawer is open (the bell's `aria-expanded`). */
   notificationsOpen?: boolean
-  /** Most recently updated moving shipments, newest first, already sliced. */
-  trackedLoads?: TmsLiveChild[]
   /** The Log out button renders only when this is provided. */
   onLogout?: () => void
   onSearch?: (q: string) => void
@@ -124,7 +112,6 @@ export interface TmsShellProps {
 
 const COLLAPSE_KEY = 'tms-sidebar-collapsed'
 export const SHIPMENTS_PATH = '/tms/shipments'
-const TRACKING_PATH = '/tms/tracking'
 
 const COMPANY_GROUP = 'COMPANY'
 const ALL_BUSINESSES = 'All businesses'
@@ -158,10 +145,9 @@ interface NavChildren {
   groups: TmsNavChildGroup[]
 }
 
-/** The children as data; only the Tracking child gets the live loads list opening under it. */
-function childrenFor(item: TmsNavItem, trackedLoads: TmsLiveChild[]): NavChildren {
-  const items = (item.children ?? []).map((c) => (c.to === TRACKING_PATH ? { ...c, live: trackedLoads } : c))
-  return { items, groups: item.childGroups ?? [] }
+/** The children as data. */
+function childrenFor(item: TmsNavItem): NavChildren {
+  return { items: item.children ?? [], groups: item.childGroups ?? [] }
 }
 
 function NavChildRow({
@@ -177,46 +163,17 @@ function NavChildRow({
 }) {
   const active = isChildActive(activePath, activeSearch, child)
   const count = child.badgeKey != null ? (badgeCounts?.[child.badgeKey] ?? 0) : 0
-  const live = child.live ?? []
-  const expandable = live.length > 0
-  // Under the workstation the live list opens by itself; a caret click overrides that.
-  const [override, setOverride] = useState<boolean | null>(null)
-  const open = expandable && (override ?? active)
-
   return (
-    <>
-      <div className="tms-nav-childrow">
-        <NavLink
-          to={child.to}
-          className={`tms-nav-child${active ? ' tms-active' : ''}`}
-          title={child.label}
-        >
-          <span className="tms-nav-child-label">{child.label}</span>
-          <TmsCountBadge count={count} className="tms-nav-child-badge" />
-        </NavLink>
-        {expandable ? (
-          <button
-            type="button"
-            className="tms-nav-caret"
-            aria-label={`${open ? 'Collapse' : 'Expand'} ${child.label}`}
-            aria-expanded={open}
-            onClick={() => setOverride(!open)}
-          >
-            {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-          </button>
-        ) : null}
-      </div>
-      {open ? (
-        <div className="tms-nav-live">
-          {live.map((load) => (
-            <NavLink key={load.id} to={load.to} className="tms-nav-live-item" title={load.label}>
-              <span>{load.label}</span>
-              {load.sub ? <span className="tms-nav-live-sub">{load.sub}</span> : null}
-            </NavLink>
-          ))}
-        </div>
-      ) : null}
-    </>
+    <div className="tms-nav-childrow">
+      <NavLink
+        to={child.to}
+        className={`tms-nav-child${active ? ' tms-active' : ''}`}
+        title={child.label}
+      >
+        <span className="tms-nav-child-label">{child.label}</span>
+        <TmsCountBadge count={count} className="tms-nav-child-badge" />
+      </NavLink>
+    </div>
   )
 }
 
@@ -225,18 +182,13 @@ function NavRow({
   activePath,
   activeSearch,
   badgeCounts,
-  trackedLoads,
 }: {
   item: TmsNavItem
   activePath: string
   activeSearch: string
   badgeCounts?: Record<string, number>
-  trackedLoads: TmsLiveChild[]
 }) {
-  const { items, groups } = useMemo(
-    () => childrenFor(item, trackedLoads),
-    [item, trackedLoads],
-  )
+  const { items, groups } = useMemo(() => childrenFor(item), [item])
   const anyChildActive = useMemo(
     () =>
       items.some((c) => isChildActive(activePath, activeSearch, c)) ||
@@ -314,7 +266,6 @@ function NavSectionBlock({
   activePath: string
   activeSearch: string
   badgeCounts?: Record<string, number>
-  trackedLoads: TmsLiveChild[]
 }) {
   // Choosing a business folds the other business sections to their header; a header click
   // afterwards wins until the business changes again.
@@ -455,7 +406,6 @@ export function TmsShell({
   notificationCount = 0,
   onOpenNotifications,
   notificationsOpen = false,
-  trackedLoads = [],
   onLogout,
   onSearch,
   fill = false,
@@ -524,7 +474,7 @@ export function TmsShell({
   const userName = personName({ name: user.name, email: user.email }, 'Team member')
   const shownEmail = user.email.includes('@') ? user.email : ''
   const dark = theme === 'dark'
-  const rowProps = { activePath, activeSearch, badgeCounts, trackedLoads }
+  const rowProps = { activePath, activeSearch, badgeCounts }
 
   return (
     <div

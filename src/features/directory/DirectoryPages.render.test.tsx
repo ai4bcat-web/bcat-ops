@@ -315,6 +315,24 @@ describe('DirectoryPages', () => {
     ))
   })
 
+  it('saves a tracking choice made in the profile, and leaves the keys off when none was made', async () => {
+    saveCustomer.mockClear()
+    renderCustomers()
+    await waitFor(() => expect(screen.getByText('Legacy Active')).toBeTruthy())
+    fireEvent.click(screen.getByText('Legacy Active'))
+    fireEvent.click(await screen.findByText('Settings'))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(saveCustomer).toHaveBeenCalledTimes(1))
+    expect(saveCustomer.mock.calls[0][1]).not.toHaveProperty('trackingMode')
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Manual' }))
+    fireEvent.click(screen.getByRole('radio', { name: 'SMS to driver' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(saveCustomer).toHaveBeenCalledTimes(2))
+    expect(saveCustomer.mock.calls[1][1]).toEqual(expect.objectContaining({ trackingMode: 'MANUAL', trackingMethod: 'SMS' }))
+  })
+
   it('saves the username of a rep picked from the directory', async () => {
     renderCustomers()
     await waitFor(() => expect(screen.getByText('Legacy Active')).toBeTruthy())
@@ -354,7 +372,7 @@ describe('DirectoryPages', () => {
 })
 
 /** The add/edit dialog's form, driven the way the dialog drives it. */
-function CustomerFormHarness({ initial, onSave }: { initial: CustomerRecord; onSave: (record: CustomerRecord) => void }) {
+function CustomerFormHarness({ initial, onSave }: { initial: CustomerRecord | null; onSave: (record: CustomerRecord) => void }) {
   const { value, set, toRecord, errors } = useCustomerForm(initial)
   return (
     <>
@@ -401,5 +419,52 @@ describe('CustomerForm', () => {
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
       accountOwnerIds: ['legacy.owner@nowhere.test', 'dana@bcatcorp.com'],
     }))
+  })
+
+  it('preselects AGENT / BOTH / work-then-personal on a new customer and writes all three', () => {
+    const onSave = vi.fn()
+    render(<CustomerFormHarness initial={null} onSave={onSave} />)
+    expect((screen.getByRole('radio', { name: 'AI agent tracking' }) as HTMLInputElement).checked).toBe(true)
+    expect((screen.getByRole('radio', { name: 'Both' }) as HTMLInputElement).checked).toBe(true)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save form' }))
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
+      trackingMode: 'AGENT', trackingMethod: 'BOTH', driverSmsTarget: 'WORK_THEN_PERSONAL',
+    }))
+  })
+
+  it('round-trips a changed choice into the saved record', () => {
+    const onSave = vi.fn()
+    render(<CustomerFormHarness initial={null} onSave={onSave} />)
+    fireEvent.click(screen.getByRole('radio', { name: 'Manual' }))
+    fireEvent.click(screen.getByRole('radio', { name: 'SMS to driver' }))
+    fireEvent.change(screen.getByLabelText('Driver SMS goes to'), { target: { value: 'PERSONAL' } })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save form' }))
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
+      trackingMode: 'MANUAL', trackingMethod: 'SMS', driverSmsTarget: 'PERSONAL',
+    }))
+  })
+
+  it('shows "Not set" for a legacy customer and sends no tracking keys when another field is saved', () => {
+    const onSave = vi.fn()
+    render(<CustomerFormHarness initial={legacy} onSave={onSave} />)
+    expect(screen.getByText(/Not set — follows Settings/)).toBeTruthy()
+    expect(screen.getAllByRole('radio').every((r) => !(r as HTMLInputElement).checked)).toBe(true)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save form' }))
+    const record = onSave.mock.calls[0][0] as Record<string, unknown>
+    expect(record).not.toHaveProperty('trackingMode')
+    expect(record).not.toHaveProperty('trackingMethod')
+    expect(record).not.toHaveProperty('driverSmsTarget')
+  })
+
+  it('keeps the stored choices of a customer that has them', () => {
+    const onSave = vi.fn()
+    render(<CustomerFormHarness initial={{ ...legacy, trackingMode: 'MANUAL', trackingMethod: 'EMAIL', driverSmsTarget: 'WORK_ONLY' }} onSave={onSave} />)
+    expect((screen.getByRole('radio', { name: 'Manual' }) as HTMLInputElement).checked).toBe(true)
+    expect((screen.getByRole('radio', { name: 'E-mail thread (dispatcher)' }) as HTMLInputElement).checked).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: 'Save form' }))
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ trackingMode: 'MANUAL', trackingMethod: 'EMAIL', driverSmsTarget: 'WORK_ONLY' }))
   })
 })

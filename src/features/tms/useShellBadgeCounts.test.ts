@@ -27,11 +27,10 @@ vi.mock('@/hooks/useApToReviewCount', () => ({ useApToReviewCount: () => 1 }))
 vi.mock('@/hooks/useQuotesToReplyCount', () => ({ useQuotesToReplyCount: () => 3 }))
 const intake = vi.hoisted(() => ({ count: vi.fn(async () => 2), spot: vi.fn(async () => ({ new: 2, needsInfo: 1, needsAttention: 1 })) }))
 vi.mock('@/lib/apiClient', () => ({ countOpenIntakeLoads: intake.count, spotAction: intake.spot }))
-vi.mock('@/lib/brokerageCharts', () => ({ MOVEMENT_STATUSES: ['IN_TRANSIT'] }))
 vi.mock('@/lib/loadReview', () => ({ loadReviewCount: () => 4 }))
 vi.mock('@/features/tms/carrierSales/carrierSalesQueue', () => ({ needsCoverCount: () => 5 }))
 
-import { useShellBadgeCounts, movingShipments } from './useShellBadgeCounts'
+import { useShellBadgeCounts } from './useShellBadgeCounts'
 import { NAV_ITEMS } from '@/lib/navItems'
 import { PINNED_ITEMS } from '@/lib/navSections'
 import type { ShipmentListRow } from '@/hooks/useShipments'
@@ -70,10 +69,10 @@ describe('useShellBadgeCounts', () => {
     expect('tracking' in result.current).toBe(false)
   })
 
-  it('sums the parent rows from their children, leaving moving loads out of Load Tracking', async () => {
+  it('sums the parent rows from their children', async () => {
     const { result } = renderHook(() => useShellBadgeCounts(args))
     await waitFor(() => expect(result.current.intakeLoads).toBe(2))
-    // checkCalls 1 + documentReview 1; tracking (1 moving load) is not a chore.
+    // checkCalls 1 + documentReview 1.
     expect(result.current.loadTracking).toBe(2)
     // arToInvoice 1 + apToReview 1.
     expect(result.current.accounting).toBe(2)
@@ -89,9 +88,5 @@ describe('useShellBadgeCounts', () => {
     } finally {
       auth.hasPageAccess = () => true
     }
-  })
-
-  it('counts a voided load out of Tracking', () => {
-    expect(movingShipments(shipments).map((s) => s.id)).toEqual(['s1'])
   })
 })

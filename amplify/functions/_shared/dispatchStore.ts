@@ -316,7 +316,7 @@ export class DispatchStore {
     do {
       const r = await this.db.send(new ScanCommand({
         TableName: this.t.drivers,
-        ProjectionExpression: '#id, #name, #phone, #active, dispatcherPrimary, dispatcherBackup',
+        ProjectionExpression: '#id, #name, #phone, #active, dispatcherPrimary, dispatcherBackup, assignedTruckId',
         ExpressionAttributeNames: { '#id': 'id', '#name': 'name', '#phone': 'phone', '#active': 'active' },
         ExclusiveStartKey: key,
       }))

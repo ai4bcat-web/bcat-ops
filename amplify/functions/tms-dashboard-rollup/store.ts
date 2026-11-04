@@ -264,7 +264,7 @@ export function rollupSource(db: DynamoDBDocumentClient, t: SourceTables): Rollu
         pages(db, {
           TableName: t.load,
           IndexName: 'loadsByShipmentId',
-          KeyConditionExpression: '#s = :s',
+          KeyConditionExpression: '#shipmentId = :s',
           ProjectionExpression: projection(LOAD_FIELDS),
           ExpressionAttributeNames: names(LOAD_FIELDS),
           ExpressionAttributeValues: { ':s': shipmentId },

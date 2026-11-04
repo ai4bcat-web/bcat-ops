@@ -6,6 +6,7 @@ import type { ShipmentBundle } from '@/types/tms'
 import { LABEL } from './labels'
 
 const h = vi.hoisted(() => ({
+  toastInfo: vi.fn(),
   runCreate: vi.fn(),
   runSaveDraft: vi.fn(),
   runEditSave: vi.fn(),
@@ -13,6 +14,8 @@ const h = vi.hoisted(() => ({
   runUploadQueued: vi.fn(async () => []),
   shipment: { bundle: null as unknown, loading: false, error: null as string | null },
   navigate: vi.fn(),
+  useDirectory: vi.fn(),
+  listLocations: vi.fn(async () => []),
 }))
 
 vi.mock('./pipelines', () => ({
@@ -20,18 +23,18 @@ vi.mock('./pipelines', () => ({
   runSubmit: h.runSubmit, runUploadQueued: h.runUploadQueued,
 }))
 vi.mock('react-router-dom', async (orig) => ({ ...(await orig<typeof import('react-router-dom')>()), useNavigate: () => h.navigate }))
-vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn(), message: vi.fn() } }))
+vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn(), message: vi.fn(), info: h.toastInfo } }))
 vi.mock('@/hooks/useAuth', () => ({ useAuth: () => ({ user: { email: 'rep@example.invalid' }, isAdmin: false }) }))
 vi.mock('@/hooks/useShipment', () => ({
   useShipment: () => ({ ...h.shipment, refresh: vi.fn(), replace: vi.fn() }),
 }))
 vi.mock('@/hooks/useDirectory', () => ({
-  useDirectory: () => ({ customers: [], locations: [], refresh: vi.fn() }),
+  useDirectory: (opts: unknown) => { h.useDirectory(opts); return { customers: [], locations: [], refresh: vi.fn() } },
 }))
 vi.mock('@/hooks/useCarriers', () => ({ useCarriers: () => ({ carriers: [] }) }))
 vi.mock('@/hooks/useStaff', () => ({ useStaff: () => ({ staff: [] }) }))
 vi.mock('@/features/tms/useOwnershipDivisions', () => ({ useOwnershipDivisions: () => ({ divisions: null }) }))
-vi.mock('@/lib/apiClient', () => ({ getTmsSettings: vi.fn(async () => null) }))
+vi.mock('@/lib/apiClient', () => ({ getTmsSettings: vi.fn(async () => null), listLocations: h.listLocations }))
 vi.mock('./useFormActions', () => ({
   useFormActions: (o: { busy: boolean }) => ({ actions: {}, dialogs: null, busy: o.busy }),
 }))
@@ -88,6 +91,13 @@ beforeEach(() => {
 })
 
 describe('ShipmentFormPage — create mode', () => {
+  it('does not read the locations table on mount', async () => {
+    renderForm('create')
+    await screen.findByTestId('ship-form-create')
+    expect(h.useDirectory).toHaveBeenCalledWith({ locations: false })
+    expect(h.listLocations).not.toHaveBeenCalled()
+  })
+
   it('Create with an empty form shows the required list and calls nothing', async () => {
     renderForm('create')
     fireEvent.click(screen.getByTestId('ship-form-create'))
@@ -104,6 +114,7 @@ describe('ShipmentFormPage — create mode', () => {
     fireEvent.click(screen.getByTestId('ship-form-save-draft'))
     await screen.findByTestId('ship-form-issues')
     expect(h.runSaveDraft).not.toHaveBeenCalled()
+    expect(h.toastInfo).toHaveBeenCalledWith(expect.stringMatching(/local draft/i))
 
     fireEvent.change(screen.getByTestId(CUSTOMER_TESTID), { target: { value: 'ZZ Customer' } })
     fireEvent.click(screen.getByTestId('ship-form-save-draft'))

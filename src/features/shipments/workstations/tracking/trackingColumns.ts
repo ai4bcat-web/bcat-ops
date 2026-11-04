@@ -7,11 +7,16 @@
  */
 import type { DenseColumn, DenseOption } from '@/features/tms/grid/denseGridModel'
 import { formatBoardDateTime } from '@/lib/date'
+import { CHECK_CALL_TYPE_LABELS } from '@/lib/checkCalls'
+import { DOCUMENT_TYPE_LABELS } from '@/lib/shipmentDocuments'
+import type { EffectiveTrackingPrefs, TrackingMethod } from '@/lib/trackingPrefs'
 import { boardStatusOf, type BoardStatusKey, type ShipmentRow } from '../../shipmentViews'
 import { motionOf, relativeTime } from '../motion'
 import { nextEventText } from './nextEventText'
 import {
   UNASSIGNED_KEY,
+  hasDocsToReview,
+  hasException,
   durationText,
   etaOf,
   nextCheckCallStateOf,
@@ -93,13 +98,48 @@ function lastLocationSort(row: ShipmentRow, nowMs: number): number {
 export interface TrackingColumnContext {
   nowMs: number
   nameOf: (id: string) => string
+  /** Resolved tracking prefs of a row (customer's choice); the `mode` column prints them. */
+  prefsOf?: (row: ShipmentRow) => EffectiveTrackingPrefs
 }
 
 export const TRACKING_DEFAULT_COLUMNS = [
-  'shipment', 'status', 'customer', 'lane', 'pickup', 'delivery', 'lastLocation', 'ping', 'eta', 'nextCheck', 'pod', 'carrier', 'tracker',
+  'shipment', 'status', 'customer', 'lane', 'pickup', 'delivery', 'lastLocation', 'ping', 'eta', 'nextCheck', 'pod', 'checkCalls', 'docs', 'carrier', 'tracker',
 ]
 
-export function trackingColumns({ nowMs, nameOf }: TrackingColumnContext): DenseColumn<ShipmentRow>[] {
+const DOC_STATES = { REVIEW: 'To review', MISSING: 'Missing', OK: 'OK' } as const
+
+const METHOD_SHORT: Record<TrackingMethod, string> = { EMAIL: 'E-mail', SMS: 'SMS', BOTH: 'E-mail + SMS' }
+
+/** The Docs column's state: a carrier upload to review beats missing paperwork beats fine. */
+function docStateOf(row: ShipmentRow): keyof typeof DOC_STATES | null {
+  if (hasDocsToReview(row)) return 'REVIEW'
+  if (row.docsMissing == null) return null
+  return row.docsMissing.length > 0 ? 'MISSING' : 'OK'
+}
+
+export function docsText(row: ShipmentRow): string {
+  if (hasDocsToReview(row)) return `${row.pendingDocReviewCount} to review`
+  if (row.docsMissing && row.docsMissing.length > 0) {
+    return `Missing: ${row.docsMissing.map((t) => (DOCUMENT_TYPE_LABELS as Record<string, string>)[t] ?? t).join(', ')}`
+  }
+  return ''
+}
+
+/** "Check-in 2 h ago · due in 22 m" / "overdue 35 m"; exceptions appended. */
+function checkCallsText(row: ShipmentRow, nowMs: number): string {
+  const parts: string[] = []
+  if (row.lastCheckCallType) {
+    const label = (CHECK_CALL_TYPE_LABELS as Record<string, string>)[row.lastCheckCallType] ?? row.lastCheckCallType
+    const ago = relativeTime(row.lastCheckCallAt ?? null, nowMs)
+    parts.push(ago ? `${label} ${ago}` : label)
+  }
+  const next = nextCheckText(row, nowMs)
+  if (next) parts.push(next.startsWith('overdue') ? next : `due ${next}`)
+  if (hasException(row)) parts.push(`${row.openIncidentCount} exception${row.openIncidentCount === 1 ? '' : 's'}`)
+  return parts.join(' · ')
+}
+
+export function trackingColumns({ nowMs, nameOf, prefsOf }: TrackingColumnContext): DenseColumn<ShipmentRow>[] {
   return [
     { key: 'shipment', header: 'Shipment #', group: 'Shipment', text: (r) => r.number },
     {
@@ -190,6 +230,31 @@ export function trackingColumns({ nowMs, nameOf }: TrackingColumnContext): Dense
       fixedOptions: (Object.keys(POD_LABELS) as Array<keyof typeof POD_LABELS>).map((k) => ({ value: k, label: POD_LABELS[k] })),
     },
     {
+      key: 'checkCalls',
+      header: 'Check calls',
+      group: 'Tracking',
+      text: (r) => checkCallsText(r, nowMs),
+      filter: 'number',
+      numberOf: (r) => {
+        const next = nextCheckCallStateOf(r, nowMs)
+        return next.kind === 'OVERDUE' ? next.minutes : null
+      },
+      numberUnit: 'min overdue',
+      align: 'right',
+    },
+    {
+      key: 'docs',
+      header: 'Docs',
+      group: 'Tracking',
+      text: docsText,
+      filter: 'multi',
+      optionsOf: (r) => {
+        const state = docStateOf(r)
+        return state ? [{ value: state, label: DOC_STATES[state] }] : []
+      },
+      fixedOptions: (Object.keys(DOC_STATES) as Array<keyof typeof DOC_STATES>).map((k) => ({ value: k, label: DOC_STATES[k] })),
+    },
+    {
       key: 'carrier',
       header: 'Carrier DOT/MC',
       group: 'Carrier',
@@ -205,6 +270,18 @@ export function trackingColumns({ nowMs, nameOf }: TrackingColumnContext): Dense
       filter: 'multi',
       optionsOf: (r) => [{ value: r.trackerId ?? UNASSIGNED_KEY, label: trackerLabel(r, nameOf) }],
     },
+    ...(prefsOf
+      ? [{
+          key: 'mode',
+          header: 'Tracking mode',
+          group: 'Tracking',
+          text: (r: ShipmentRow) => {
+            const p = prefsOf(r)
+            if (p.mode === 'MANUAL') return 'Manual'
+            return `${p.mode === 'AGENT' ? 'Agent' : 'Not set'}${p.method ? ` · ${METHOD_SHORT[p.method]}` : ''}`
+          },
+        } satisfies DenseColumn<ShipmentRow>]
+      : []),
   ]
 }
 

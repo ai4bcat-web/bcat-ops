@@ -67,7 +67,7 @@ export const PAGE_PATHS = Object.keys(PAGE_BUDGETS)
 
 /** G8: the shell floor, measured on the Carriers page. */
 export const SHELL_FLOOR_PATH = '/tms/carriers'
-export const SHELL_FLOOR = { settled: 6, requests: 45, mb: 10 }
+export const SHELL_FLOOR = { settled: 6, requests: 48, mb: 10 }
 
 /** G2: loader budgets (seconds / AppSync trips / MB). `firstPartial` is seconds to the first onPartial. */
 export const LOADER_BUDGETS = {

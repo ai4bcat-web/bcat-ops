@@ -14,6 +14,7 @@ import {
   threadReplyAddress,
 } from '../../../src/lib/shipmentThread'
 import { assertEnum, assertString, optionalString, type Caller } from '../_shared/actionInputs'
+import { resolveDriverSmsForLeg } from './driverPhone'
 import { isConflict, putItem, type Row, updateItemTx } from '../_shared/shipmentStore'
 
 export type ShipmentMessageChannel = 'EMAIL' | 'SMS' | 'VOICE'
@@ -63,8 +64,12 @@ export interface ThreadDeps {
     document: string
     checkCall: string
     trackingLink: string
+    /** Step AK: Driver table, for the personal number / assigned truck. Absent = the leg's snapshot number only. */
+    driver?: string
   }
   getById(tableName: string, id: string): Promise<Row | null>
+  /** Step AK: TruckConfig by `truckId`. Absent = no work phones (driver texts use the leg's number). */
+  getTruckConfig?(truckId: string): Promise<Row | null>
   queryIndex(tableName: string, indexName: string, keyName: string, keyValue: string): Promise<Row[]>
   transact(items: TransactWriteItem[]): Promise<void>
   readBundle(shipmentId: string): Promise<Row>
@@ -181,12 +186,24 @@ export async function sendShipmentMessage(deps: ThreadDeps, input: Row, caller: 
   const kind = cleanKind(input.kind)
   const now = deps.now()
   const isEmail = channel === 'EMAIL'
-  const to = cleanRecipient(input.to)
+  const explicitTo = cleanRecipient(input.to)
   const cc = cleanRecipient(input.cc)
   const subject = optionalString(input.subject, 1000)
   const body = optionalString(input.body, 50000)
   const inReplyTo = optionalString(input.inReplyTo, 500)
   const replyParty = cleanParty(input.party) ?? (isEmail ? 'DISPATCHER' : 'DRIVER')
+  // Step AK: a driver text with no explicit number goes to the truck's work phone (personal as the fallback),
+  // per the customer / shipment override. An explicit `to` always wins.
+  let to = explicitTo
+  if (!isEmail && !explicitTo && replyParty === 'DRIVER') {
+    const loadCarrierId = optionalString(input.loadCarrierId, 100)
+    const carrier = loadCarrierId ? await deps.getById(deps.tables.loadCarrier, loadCarrierId) : null
+    if (carrier) {
+      const target = await resolveDriverSmsForLeg(deps, { carrier, shipment })
+      to = target.to
+      if (!to) throw new Error(target.reason ?? 'No phone for this driver')
+    }
+  }
   const authorKind = input.authorKind === 'AGENT' ? 'AGENT' : 'PERSON'
   const authorName =
     typeof input.authorName === 'string' && input.authorName.trim()

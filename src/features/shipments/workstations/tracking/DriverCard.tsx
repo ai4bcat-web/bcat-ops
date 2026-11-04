@@ -4,6 +4,8 @@
  * dispatcher beneath. Presence is never claimed — only stored facts show.
  */
 import { Mail, Phone } from 'lucide-react'
+import { DriverPhones } from '@/components/DriverPhones'
+import type { DriverPhones as Phones } from '@/lib/workPhone'
 import { TmsAvatar, TmsBadge } from '@/features/tms/kit'
 import type { LoadWorkflowStatus } from '@/types/tms'
 import { driverStatusPill } from './statusTimeline'
@@ -18,11 +20,14 @@ export interface DriverCardProps {
   driver: DriverCardParty | null
   dispatcher?: DriverCardParty | null
   loadStatus?: LoadWorkflowStatus | null
+  /** Work (truck) and personal numbers; the Call button dials the work phone when there is one. */
+  phones?: Phones | null
 }
 
-export function DriverCard({ driver, dispatcher, loadStatus }: DriverCardProps) {
+export function DriverCard({ driver, dispatcher, loadStatus, phones }: DriverCardProps) {
   const name = driver?.name?.trim() || null
   const pill = driverStatusPill(loadStatus)
+  const callNumber = phones?.work?.number ?? phones?.personal ?? driver?.phone ?? null
   const hasDispatcher = Boolean(dispatcher?.name || dispatcher?.phone || dispatcher?.email)
   return (
     <section className="tms-driver-card" data-testid="driver-card" aria-label="Driver">
@@ -30,11 +35,11 @@ export function DriverCard({ driver, dispatcher, loadStatus }: DriverCardProps) 
         <TmsAvatar label={name ?? 'Driver'} size="md" />
         <div className="tms-driver-card-id">
           <span className="tms-driver-card-name">{name ?? 'No driver on file'}</span>
-          {driver?.phone && <span className="tms-driver-card-sub">{driver.phone}</span>}
+          {phones ? <DriverPhones phones={phones} variant="stacked" /> : driver?.phone && <span className="tms-driver-card-sub">{driver.phone}</span>}
         </div>
         {pill && <TmsBadge tone={pill.tone} data-testid="driver-status-pill">{pill.label}</TmsBadge>}
-        {driver?.phone && (
-          <a className="tms-icon-link" href={`tel:${driver.phone}`} aria-label={`Call ${name ?? 'driver'}`} title={`Call ${driver.phone}`}>
+        {callNumber && (
+          <a className="tms-icon-link" href={`tel:${callNumber}`} aria-label={`Call ${name ?? 'driver'}`} title={`Call ${callNumber}`}>
             <Phone size={15} aria-hidden />
           </a>
         )}

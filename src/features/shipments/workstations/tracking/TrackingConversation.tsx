@@ -15,7 +15,9 @@ import {
   type TmsTone,
 } from '@/features/tms/kit'
 import { formatDateTime } from '@/lib/date'
+import { prettyPhone } from '@/lib/dispatch'
 import { trackingThreadMessages } from '@/lib/shipmentThread'
+import type { SmsTarget } from '@/lib/workPhone'
 import type { ShipmentBundle, ShipmentMessageRecord } from '@/types/tms'
 import {
   commitDocument, prepareDocumentUpload, putPresignedFile,
@@ -59,6 +61,14 @@ export interface TrackingConversationProps {
   bundle?: ShipmentBundle | null
   /** True = show every message unfiltered (full history view). */
   filtersOff?: boolean
+  /**
+   * One pane of the two-pane view: only this channel's messages, no recipient/channel selects,
+   * no formatting toolbar, a one-line header and a two-row composer. SMS goes to the driver
+   * (the server picks the number), e-mail to the dispatcher.
+   */
+  lockChannel?: ComposerChannel
+  /** SMS pane: where a text will land, resolved with the same rule the server uses. */
+  smsTarget?: SmsTarget | null
   onSendMessage: (input: {
     channel: ComposerChannel
     to: string | null
@@ -339,6 +349,40 @@ const FORMAT_BUTTONS: FormatBtn[] = [
   { icon: Link2, markdown: '[$1](url)', label: 'Link' },
 ]
 
+// ── Locked-pane header ───────────────────────────────────────────────────────
+
+/** One line over a single-channel pane: who the channel talks to and the address it will use. */
+function PaneHeader({ channel, driver, dispatcher, smsTarget }: {
+  channel: ComposerChannel
+  driver?: TrackingConversationRecipient | null
+  dispatcher?: TrackingConversationRecipient | null
+  smsTarget?: SmsTarget | null
+}) {
+  const Icon = channel === 'SMS' ? MessageSquare : Mail
+  if (channel === 'EMAIL') {
+    return (
+      <div className="tms-convo-head" data-testid="pane-head-email">
+        <Icon size={13} aria-hidden /> <strong>E-mail</strong>
+        <span className="tms-muted">· {dispatcher?.name ?? 'dispatcher'}</span>
+        <span className="tms-convo-addr" title={dispatcher?.email ?? undefined}>{dispatcher?.email ?? 'no e-mail on file'}</span>
+      </div>
+    )
+  }
+  const source = smsTarget?.source === 'WORK'
+    ? `work phone${smsTarget.phones.truckNumber ? ` (truck ${smsTarget.phones.truckNumber})` : ''}`
+    : smsTarget?.source === 'PERSONAL' ? 'personal phone' : null
+  return (
+    <div className="tms-convo-head" data-testid="pane-head-sms">
+      <Icon size={13} aria-hidden /> <strong>SMS</strong>
+      <span className="tms-muted">· {driver?.name ?? 'driver'}</span>
+      <span className="tms-convo-addr" data-testid="sms-target" title={smsTarget?.reason ?? undefined}>
+        {smsTarget?.to ? <>To {prettyPhone(smsTarget.to)}{source ? ` · ${source}` : ''}</> : 'no number'}
+      </span>
+      {smsTarget?.reason ? <span className="tms-convo-warn" data-testid="sms-target-reason">{smsTarget.reason}</span> : null}
+    </div>
+  )
+}
+
 // ── Main Component ───────────────────────────────────────────────────────────
 
 export function TrackingConversation({
@@ -350,6 +394,8 @@ export function TrackingConversation({
   conversationKey,
   bundle,
   filtersOff = false,
+  lockChannel,
+  smsTarget,
   onSendMessage,
   onRefresh,
 }: TrackingConversationProps) {
@@ -363,6 +409,8 @@ export function TrackingConversation({
   const [showMentions, setShowMentions] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const mentionRef = useRef<HTMLDivElement>(null)
+  const composerRef = useRef<HTMLDivElement>(null)
+  const locked = lockChannel != null
 
   // Staff list for @mentions (polls every 5 min).
   const staff = useStaff(userName)
@@ -390,11 +438,16 @@ export function TrackingConversation({
     setPendingFiles([])
   }
 
+  // Locked panes fix both choices; the free composer keeps them in state.
+  const activeChannel: ComposerChannel = lockChannel ?? channel
+  const activeRecipient: RecipientKey = lockChannel ? (lockChannel === 'SMS' ? 'driver' : 'dispatcher') : recipient
+
   const recipientAddress = useMemo(() => {
-    const party = recipient === 'driver' ? driver : dispatcher
+    if (lockChannel === 'SMS') return smsTarget?.to ?? null
+    const party = activeRecipient === 'driver' ? driver : dispatcher
     if (!party) return null
-    return channel === 'EMAIL' ? (party.email ?? null) : (party.phone ?? null)
-  }, [recipient, channel, driver, dispatcher])
+    return activeChannel === 'EMAIL' ? (party.email ?? null) : (party.phone ?? null)
+  }, [lockChannel, smsTarget, activeRecipient, activeChannel, driver, dispatcher])
 
   const recipientAvailable = Boolean(recipientAddress)
 
@@ -403,8 +456,10 @@ export function TrackingConversation({
   // Filter out offers/quotes/tenders, start at first RATE_CON.
   const sortedMessages = useMemo(() => {
     const src = filtersOff ? messages : trackingThreadMessages(messages)
-    return [...src].sort((a, b) => Date.parse(a.at) - Date.parse(b.at))
-  }, [messages, filtersOff])
+    return [...src]
+      .filter((m) => !lockChannel || m.channel === lockChannel)
+      .sort((a, b) => Date.parse(a.at) - Date.parse(b.at))
+  }, [messages, filtersOff, lockChannel])
 
   // Build the thread items: messages interspersed with kind pills and cards.
   interface ThreadItem {
@@ -419,7 +474,7 @@ export function TrackingConversation({
     const items: ThreadItem[] = []
 
     // If we have a bundle and messages, slot the load card before the first real message.
-    if (bundle && sortedMessages.length > 0) {
+    if (bundle && !locked && sortedMessages.length > 0) {
       items.push({ kind: 'load-card', at: sortedMessages[0].at })
     }
 
@@ -441,7 +496,7 @@ export function TrackingConversation({
       return order[a.kind] - order[b.kind]
     })
     return items
-  }, [sortedMessages, bundle])
+  }, [sortedMessages, bundle, locked])
 
   const send = useCallback(async () => {
     if (!body.trim() || !recipientAvailable) return
@@ -449,11 +504,12 @@ export function TrackingConversation({
     const documentIds = pendingFiles.filter((f) => f.documentId).map((f) => f.documentId!)
     try {
       await onSendMessage({
-        channel,
-        to: recipientAddress ?? null,
-        subject: channel === 'EMAIL' ? (subject.trim() || null) : null,
+        channel: activeChannel,
+        // The SMS pane leaves the number to the server (truck phone first), which writes the one it used.
+        to: lockChannel === 'SMS' ? null : recipientAddress ?? null,
+        subject: activeChannel === 'EMAIL' ? (subject.trim() || null) : null,
         body: body.trim(),
-        party: recipient.toUpperCase() as 'DRIVER' | 'DISPATCHER',
+        party: activeRecipient.toUpperCase() as 'DRIVER' | 'DISPATCHER',
         ...(documentIds.length > 0 ? { documentIds } : {}),
       })
       toast.success('Message sent')
@@ -466,7 +522,7 @@ export function TrackingConversation({
     } finally {
       setBusy(false)
     }
-  }, [body, recipientAvailable, recipientAddress, channel, subject, onSendMessage, onRefresh, pendingFiles, recipient])
+  }, [body, recipientAvailable, recipientAddress, lockChannel, activeChannel, activeRecipient, subject, onSendMessage, onRefresh, pendingFiles])
 
   // ── File handling ──────────────────────────────────────────────────────────
 
@@ -525,13 +581,13 @@ export function TrackingConversation({
   }, [])
 
   const canSend = body.trim().length > 0 && recipientAvailable && !busy && !uploadingFiles
-  const attachmentEnabled = channel === 'EMAIL'
+  const attachmentEnabled = activeChannel === 'EMAIL'
   const hasError = pendingFiles.some((f) => f.error)
 
   // ── Markdown formatting ────────────────────────────────────────────────────
 
   const applyFormat = useCallback((fmt: FormatBtn) => {
-    const textarea = document.querySelector<HTMLTextAreaElement>('[aria-label="Message body"]')
+    const textarea = composerRef.current?.querySelector<HTMLTextAreaElement>('textarea')
     if (!textarea) {
       setBody((prev) => prev + fmt.markdown.replace('$1', ''))
       return
@@ -553,13 +609,14 @@ export function TrackingConversation({
   // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
-    <div data-testid="tracking-thread" className="tms-convo-root">
+    <div data-testid="tracking-thread" className={`tms-convo-root${locked ? ' tms-convo-compact' : ''}`} data-channel={lockChannel}>
+      {lockChannel && <PaneHeader channel={lockChannel} driver={driver} dispatcher={dispatcher} smsTarget={smsTarget} />}
       {/* Messages + cards + pills */}
       <div className="tms-convo-stream" data-testid="convo-stream">
         {loading ? (
           <p className="tms-muted text-sm">Loading thread…</p>
         ) : threadItems.length === 0 ? (
-          <TmsEmptyState compact title="No messages" message="Send a message to start the thread." />
+          <TmsEmptyState compact title="No messages" message={lockChannel === 'SMS' ? 'No texts with the driver yet.' : lockChannel === 'EMAIL' ? 'No e-mails with the dispatcher yet.' : 'Send a message to start the thread.'} />
         ) : (
           <ul className="tms-thread-list" data-testid="detail-thread">
             {threadItems.map((item, idx) => {
@@ -576,9 +633,9 @@ export function TrackingConversation({
       </div>
 
       {/* Composer */}
-      <div className="tms-thread-composer" data-testid="thread-composer">
+      <div className="tms-thread-composer" data-testid="thread-composer" ref={composerRef}>
         {/* Formatting toolbar */}
-        <div className="tms-convo-toolbar" role="toolbar" aria-label="Formatting">
+        {!locked && <div className="tms-convo-toolbar" role="toolbar" aria-label="Formatting">
           {FORMAT_BUTTONS.map((fmt) => (
             <TmsButton
               key={fmt.label}
@@ -591,9 +648,12 @@ export function TrackingConversation({
               <fmt.icon size={14} />
             </TmsButton>
           ))}
-        </div>
+        </div>}
 
-        <div className="tms-thread-composer-top">
+        {lockChannel === 'EMAIL' && (
+          <TmsInput aria-label="Subject" placeholder="Subject" value={subject} onChange={(e) => setSubject(e.target.value)} />
+        )}
+        {!locked && <div className="tms-thread-composer-top">
           <TmsSelect
             aria-label="Recipient"
             value={recipient}
@@ -620,8 +680,22 @@ export function TrackingConversation({
               onChange={(e) => setSubject(e.target.value)}
             />
           )}
-        </div>
+        </div>}
 
+        {locked ? (
+          <>
+            <TmsTextarea
+              aria-label={lockChannel === 'SMS' ? 'Text message body' : 'E-mail body'}
+              placeholder={lockChannel === 'SMS' ? 'Text the driver…' : 'E-mail the dispatcher…'}
+              value={body}
+              onChange={(e) => setBody(e.target.value)}
+              rows={2}
+            />
+            <span className="tms-thread-signature-preview tms-convo-sig" data-testid="signature-preview">
+              The server will sign it: <em>{signature}</em>
+            </span>
+          </>
+        ) : (
         <TmsField
           label="Message"
           hint={
@@ -638,6 +712,7 @@ export function TrackingConversation({
             rows={4}
           />
         </TmsField>
+        )}
 
         {/* Attachments bar */}
         {pendingFiles.length > 0 && (
@@ -662,6 +737,7 @@ export function TrackingConversation({
 
         <div className="tms-thread-composer-foot">
           <div className="tms-convo-composer-actions">
+            {lockChannel !== 'SMS' && (
             <TmsButton
               size="sm"
               variant="ghost"
@@ -671,6 +747,7 @@ export function TrackingConversation({
             >
               <Paperclip size={14} />
             </TmsButton>
+            )}
             <input
               ref={fileInputRef}
               type="file"
@@ -679,15 +756,15 @@ export function TrackingConversation({
               style={{ display: 'none' }}
               onChange={(e) => { const f = e.target.files; void handleFiles(f); e.target.value = '' }}
             />
-            <TmsButton
+            {!locked && <TmsButton
               size="sm"
               variant="ghost"
               title="Mention a team member"
               onClick={() => setShowMentions((prev) => !prev)}
             >
               <AtSign size={14} />
-            </TmsButton>
-            {showMentions && (
+            </TmsButton>}
+            {!locked && showMentions && (
               <div className="tms-convo-mention-dropdown" ref={mentionRef}>
                 {staff.staff.length === 0 && !staff.loading ? (
                   <span className="tms-convo-mention-empty">No team members</span>
@@ -701,7 +778,7 @@ export function TrackingConversation({
                         className="tms-convo-mention-item"
                         onClick={() => {
                           const mention = `@${name} `
-                          const textarea = document.querySelector<HTMLTextAreaElement>('[aria-label="Message body"]')
+                          const textarea = composerRef.current?.querySelector<HTMLTextAreaElement>('textarea')
                           if (textarea) {
                             const s = textarea.selectionStart
                             setBody(body.slice(0, s) + mention + body.slice(s))
@@ -730,9 +807,11 @@ export function TrackingConversation({
         </div>
         {!recipientAvailable && (
           <p className="tms-thread-composer-error">
-            {recipient === 'driver'
-              ? `This driver has no ${channel === 'EMAIL' ? 'e-mail' : 'phone'} on file.`
-              : `This dispatcher has no ${channel === 'EMAIL' ? 'e-mail' : 'phone'} on file.`}
+            {lockChannel === 'SMS'
+              ? (smsTarget?.reason ?? 'No phone for this driver.')
+              : activeRecipient === 'driver'
+                ? `This driver has no ${activeChannel === 'EMAIL' ? 'e-mail' : 'phone'} on file.`
+                : `This dispatcher has no ${activeChannel === 'EMAIL' ? 'e-mail' : 'phone'} on file.`}
           </p>
         )}
         {hasError && (

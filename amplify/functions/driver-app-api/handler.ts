@@ -26,7 +26,7 @@ import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda'
 import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm'
 import { DynamoDBClient as DispatchDynamo } from '@aws-sdk/client-dynamodb'
 import { DispatchStore, tablesFromEnv as dispatchTablesFromEnv, recordDriverStatus } from '../_shared/dispatchStore'
-import { dispatcherContactFor } from '../../../src/lib/dispatch'
+import { dispatcherContactFor, toE164Strict } from '../../../src/lib/dispatch'
 import { slackClient } from '../_shared/slackApi'
 import { mirrorInbound, slackMirrorEnabled } from '../_shared/slackDispatch'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
@@ -181,6 +181,8 @@ const CUSTOMER_TABLE_NAME = process.env.CUSTOMER_TABLE_NAME ?? ''
 const LOCATION_TABLE_NAME = process.env.LOCATION_TABLE_NAME ?? ''
 const POD_DOCUMENT_TABLE_NAME = process.env.POD_DOCUMENT_TABLE_NAME ?? ''
 const EQUIPMENT_TABLE = process.env.EQUIPMENT_TABLE_NAME ?? ''
+/** Step AK: the truck's work phone. Unset = the app simply shows no work-phone line. */
+const TRUCK_CONFIG_TABLE = process.env.TRUCK_CONFIG_TABLE_NAME ?? ''
 const TRUCK_LOCATION_TABLE = process.env.TRUCK_LOCATION_TABLE_NAME ?? ''
 const MAINTENANCE_TASK_TABLE = process.env.MAINTENANCE_TASK_TABLE_NAME ?? ''
 const MOTIVE_API_KEY = process.env.MOTIVE_API_KEY ?? ''
@@ -1830,6 +1832,25 @@ async function truckForDriver(driver: DriverRow): Promise<{ id: string; unitNumb
   }
 }
 
+/**
+ * The work phone in the driver's truck (`TruckConfig.phone`), for the app's header. Display-only:
+ * dispatch texts this number, the driver does not edit it. Null without a truck, a number, or the table.
+ */
+async function workPhoneForDriver(driver: DriverRow): Promise<{ number: string; label: string | null; truckNumber: string | null } | null> {
+  const truckId = (driver.assignedTruckId ?? '').trim()
+  if (!truckId || !TRUCK_CONFIG_TABLE) return null
+  try {
+    const config = (await ddb.send(new GetCommand({ TableName: TRUCK_CONFIG_TABLE, Key: { truckId } }))).Item as
+      { phone?: string | null; phoneLabel?: string | null; unitNumber?: string | null } | undefined
+    const number = toE164Strict(config?.phone)
+    if (!number) return null
+    return { number, label: config?.phoneLabel?.trim() || null, truckNumber: config?.unitNumber?.trim() || null }
+  } catch (err) {
+    console.error('[driver-app-api] could not read the truck work phone', { truckId, err })
+    return null
+  }
+}
+
 async function trailerForDriver(driver: DriverRow): Promise<{ id: string; unitNumber: string } | null> {
   const trailerId = (driver.assignedTrailerId ?? '').trim()
   if (!trailerId || !EQUIPMENT_TABLE) return null
@@ -2490,6 +2511,8 @@ export const handler = async (event: FnUrlEvent) => {
         pm: await pmForDriver(driver),
         // The truck they are in — what the ELD fix, the PM line and dispatch all key on.
         truck: await truckForDriver(driver),
+        // The work phone riding in that truck (Step AK), display-only. null when there is none.
+        workPhone: await workPhoneForDriver(driver),
         // The trailer they said they started the day with, if asked.
         trailer: await trailerForDriver(driver),
         // The number to call or text dispatch, pinned to the top of the app.

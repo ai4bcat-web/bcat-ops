@@ -6,7 +6,7 @@
  * here). Picking a location prefills address, contact and hours. The pencil opens the
  * explicit "Add location" dialog: a Location is only ever created from that dialog.
  */
-import { memo, useMemo, useState } from 'react'
+import { memo, useEffect, useMemo, useState } from 'react'
 import { Pencil } from 'lucide-react'
 import { toast } from 'sonner'
 import { DirectoryCreateDialog } from '@/components/directory-picker/DirectoryCreateDialog'
@@ -45,6 +45,9 @@ export function StopFields({ stop, prefix, required, onChange, ctx }: StopFields
   const err = (def: LabelDef) => issueFor(ctx, section, def.testId)
   const isBatory = requiresApptProofs({ customer: ctx.customer?.name ?? '', customerApptWorkflow: ctx.customer?.apptWorkflow ?? null })
 
+  const needsLocations = query.trim().length >= 2
+  const ensureLocations = ctx.directory.ensureLocations
+  useEffect(() => { if (needsLocations) ensureLocations?.() }, [needsLocations, ensureLocations])
   const matches = useMemo(
     () => (query.trim().length < 2 ? [] : findLocationMatches({ name: query, city: stop.city || undefined }, ctx.directory.locations).slice(0, 8)),
     [query, stop.city, ctx.directory.locations],

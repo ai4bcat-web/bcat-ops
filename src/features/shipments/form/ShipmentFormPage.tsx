@@ -13,8 +13,8 @@ import { useCarriers } from '@/hooks/useCarriers'
 import { useDirectory } from '@/hooks/useDirectory'
 import { useShipment } from '@/hooks/useShipment'
 import { useStaff } from '@/hooks/useStaff'
-import { getTmsSettings } from '@/lib/apiClient'
-import type { ShipmentBundle, TmsSettings } from '@/types/tms'
+import { getTmsSettings, listLocations } from '@/lib/apiClient'
+import type { LocationRecord, ShipmentBundle, TmsSettings } from '@/types/tms'
 import { SECTION_COMPONENTS } from './defaultSections'
 import { FormSection } from './FormSection'
 import { SECTION_ORDER, SECTION_TITLE } from './labels'
@@ -66,7 +66,15 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId }: { initialBundle
   const navigate = useNavigate()
   const { user, isAdmin } = useAuth()
   const email = user?.email ?? ''
-  const directory = useDirectory()
+  const directory = useDirectory({ locations: false })
+  // The locations table is 3,000+ rows: read it once, the first time a stop is searched or saved.
+  const [locations, setLocations] = useState<LocationRecord[]>([])
+  const locationsRead = useRef<Promise<LocationRecord[]> | null>(null)
+  const loadLocations = useCallback((): Promise<LocationRecord[]> => {
+    locationsRead.current ??= listLocations().then((rows) => { setLocations(rows); return rows })
+    return locationsRead.current
+  }, [])
+  const ensureLocations = useCallback(() => { void loadLocations().catch(() => { locationsRead.current = null }) }, [loadLocations])
   const { carriers } = useCarriers()
   const { staff } = useStaff(email)
   const { divisions } = useOwnershipDivisions()
@@ -82,12 +90,13 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId }: { initialBundle
   const rootRef = useRef<HTMLDivElement>(null)
 
   const pipelineCtx = useMemo(() => ({
-    locations: directory.locations,
+    locations,
+    loadLocations,
     settings,
     actorName: email,
-    refreshDirectory: () => { void directory.refresh() },
+    refreshDirectory: () => { locationsRead.current = null; void directory.refresh() },
     onNotice: (msg: string) => { toast.message(msg) },
-  }), [directory, settings, email])
+  }), [directory, locations, loadLocations, settings, email])
 
   const isOpen = (key: SectionKey) => open[key] !== false
   const setSectionOpen = useCallback((keys: SectionKey[], value: boolean) => {
@@ -150,14 +159,14 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId }: { initialBundle
     bundle,
     shipmentStatus: status,
     locked,
-    directory: { customers: directory.customers, locations: directory.locations, carriers, staff },
+    directory: { customers: directory.customers, locations, ensureLocations, carriers, staff },
     settings,
     customer: form.customer,
     divisions: flattenDivisions(divisions ?? []),
     busy,
     actions,
     issues: form.issues,
-  }), [mode, bundle, status, locked, directory.customers, directory.locations, carriers, staff, settings, form.customer, divisions, busy, actions, form.issues])
+  }), [mode, bundle, status, locked, directory.customers, locations, ensureLocations, carriers, staff, settings, form.customer, divisions, busy, actions, form.issues])
 
   // Slice onChange handlers are created once; they read the latest values through `update`.
   const slice = useMemo(() => {

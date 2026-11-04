@@ -2135,6 +2135,42 @@ describe('tracker assignee', () => {
     await expect(call('ASSIGN_TRACKER', { shipmentIds: [a.shipmentId], trackerId: 'tess' }, OUTSIDER)).rejects.toThrow(/page-loads/)
   })
 
+  it('sets, clears and audits a per-shipment tracking override without touching other shipments', async () => {
+    const a = await createDraft()
+    const other = await createDraft()
+
+    const set = (await call('SET_TRACKING_PREFS', { shipmentId: a.shipmentId, prefs: { mode: 'MANUAL', driverSms: 'PERSONAL' } }, TMS_USER)) as { shipment: Row }
+    expect(set.shipment.trackingPrefs).toEqual({ mode: 'MANUAL', driverSms: 'PERSONAL' })
+    expect(table(TABLES.shipment).get(a.shipmentId)!.trackingPrefs).toEqual({ mode: 'MANUAL', driverSms: 'PERSONAL' })
+    expect(table(TABLES.shipment).get(other.shipmentId)!.trackingPrefs ?? null).toBeNull()
+
+    // A null key inherits, so an all-null override is no override.
+    await call('SET_TRACKING_PREFS', { shipmentId: a.shipmentId, prefs: { mode: null, method: null } }, TMS_USER)
+    expect(table(TABLES.shipment).get(a.shipmentId)!.trackingPrefs ?? null).toBeNull()
+
+    await call('SET_TRACKING_PREFS', { shipmentId: a.shipmentId, prefs: { method: 'EMAIL' } }, TMS_USER)
+    await call('SET_TRACKING_PREFS', { shipmentId: a.shipmentId, prefs: null }, TMS_USER)
+    expect(table(TABLES.shipment).get(a.shipmentId)!.trackingPrefs ?? null).toBeNull()
+
+    const audits = [...table(TABLES.audit).values()]
+      .filter((row) => row.action === 'SET_TRACKING_PREFS' && row.entityId === a.shipmentId)
+      .map((row) => JSON.parse(String(row.changes)))
+    expect(audits).toHaveLength(4)
+    expect(audits).toContainEqual({ from: null, to: { mode: 'MANUAL', driverSms: 'PERSONAL' } })
+    expect(audits).toContainEqual({ from: { method: 'EMAIL' }, to: null })
+  })
+
+  it('refuses a tracking override from an outsider, on a voided shipment, or with a value outside the enums', async () => {
+    const a = await createDraft()
+    await expect(call('SET_TRACKING_PREFS', { shipmentId: a.shipmentId, prefs: { mode: 'MANUAL' } }, OUTSIDER)).rejects.toThrow(/page-loads/)
+    await expect(call('SET_TRACKING_PREFS', { shipmentId: a.shipmentId, prefs: { mode: 'ROBOT' } }, TMS_USER)).rejects.toThrow(/mode must be one of/)
+    await expect(call('SET_TRACKING_PREFS', { shipmentId: a.shipmentId, prefs: { flavor: 'x' } }, TMS_USER)).rejects.toThrow(/Unknown tracking preference/)
+    expect(table(TABLES.shipment).get(a.shipmentId)!.trackingPrefs ?? null).toBeNull()
+
+    Object.assign(table(TABLES.shipment).get(a.shipmentId)!, { voidedAt: '2026-10-29T00:00:00Z' })
+    await expect(call('SET_TRACKING_PREFS', { shipmentId: a.shipmentId, prefs: { mode: 'MANUAL' } }, TMS_USER)).rejects.toThrow(/voided/)
+  })
+
   it('fills an empty tracker when a customer is linked but never overwrites one', async () => {
     seedCustomer({ defaultTrackerId: 'tess' })
     const bundle = (await call('CREATE_SHIPMENT', { customerName: 'BATORY' })) as { shipment: Row }

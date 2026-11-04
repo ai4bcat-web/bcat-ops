@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { Radar, Save } from 'lucide-react'
 import { toast } from 'sonner'
 import { TmsButton, TmsField, TmsInput, TmsSelect, TmsTextarea } from '@/features/tms/kit'
@@ -138,6 +139,10 @@ export function TrackingSettingsCard() {
       title="Tracking & check calls"
       description="How often a tracked load is called, when a missed call counts as overdue, how long a public link lives and what a customer is allowed to see. Leave a box blank to use the house default."
     >
+      <p style={{ margin: '0 0 10px', fontSize: 13 }}>
+        <Link to="/tms/tracking/links">Manage customer links</Link>
+        <span className="tms-muted"> — see, extend or revoke the tracking links out to customers and carriers.</span>
+      </p>
       {loading ? <Loading /> : (
         <Stack>
           <div className="tms-grid tms-grid-4">

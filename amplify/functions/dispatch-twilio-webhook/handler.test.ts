@@ -142,6 +142,86 @@ describe('inbound texts', () => {
   })
 })
 
+describe('work phones and the shipment bridge', () => {
+  const WORK = '+13125550111'
+  const TEXT = { From: WORK, To: '+12242221305', MessageSid: 'SMw1', Body: 'Passing Joliet now', NumMedia: '0', AccountSid: 'ACtest' }
+  const truckPhones = async () => ({ 'trk-12': WORK })
+  const live = (over: Record<string, unknown> = {}) => ({ id: 'lod-1', shipmentId: 'shp-1', status: 'IN_TRANSIT', ...over })
+  function bridge(loads: unknown[]) {
+    const calls: Array<{ action: string; input: Record<string, unknown> }> = []
+    return {
+      calls,
+      deps: {
+        loadsForDriver: async () => loads,
+        invokeTracking: async (a: { action: string; input: Record<string, unknown> }) => { calls.push(a) },
+        dispatchNumber: CONFIG.dispatchNumber,
+      },
+    }
+  }
+
+  beforeEach(() => {
+    store.drivers = [{ id: 'd-john', name: 'John B', phone: '(312) 555-0101', active: true, assignedTruckId: 'trk-12' }]
+  })
+
+  it('a text from a driver\'s truck work phone opens their conversation, not an unknown one', async () => {
+    await handleEvent(post('/sms', TEXT), { ...deps(), truckPhones } as never)
+    const [c] = [...store.conversations.values()]
+    expect(c.driverId).toBe('d-john')
+  })
+
+  it('without the truck lookup the same text is an unknown number', async () => {
+    await handleEvent(post('/sms', TEXT), deps() as never)
+    const [c] = [...store.conversations.values()]
+    expect(c.driverId).toBeNull()
+  })
+
+  it('writes the text into the shipment thread as an inbound SMS, deduplicated on the Twilio sid', async () => {
+    const b = bridge([live()])
+    await handleEvent(post('/sms', TEXT), { ...deps(), truckPhones, shipmentBridge: b.deps } as never)
+    expect(b.calls).toEqual([{
+      action: 'INGEST_SHIPMENT_MESSAGE',
+      input: expect.objectContaining({
+        shipmentId: 'shp-1', loadId: 'lod-1', channel: 'SMS', party: 'DRIVER', from: WORK,
+        to: CONFIG.dispatchNumber, body: 'Passing Joliet now', messageId: 'sms:SMw1',
+      }),
+    }])
+  })
+
+  it('picks the shipment that is waiting on a reply when the driver has several live ones', async () => {
+    const b = bridge([
+      live({ id: 'lod-1', shipmentId: 'shp-1' }),
+      live({ id: 'lod-2', shipmentId: 'shp-2', checkCallAwaitingSince: '2026-10-10T14:00:00Z' }),
+    ])
+    await handleEvent(post('/sms', TEXT), { ...deps(), truckPhones, shipmentBridge: b.deps } as never)
+    expect(b.calls[0].input).toMatchObject({ shipmentId: 'shp-2', loadId: 'lod-2' })
+  })
+
+  it('never guesses: several live shipments and none waiting stays in Dispatch only', async () => {
+    const b = bridge([live({ id: 'lod-1', shipmentId: 'shp-1' }), live({ id: 'lod-2', shipmentId: 'shp-2' })])
+    await handleEvent(post('/sms', TEXT), { ...deps(), truckPhones, shipmentBridge: b.deps } as never)
+    expect(b.calls).toHaveLength(0)
+    expect(store.messages.size).toBe(1) // still filed in the Dispatch conversation
+  })
+
+  it('ignores delivered loads, unknown senders and picture-only texts', async () => {
+    const b = bridge([live({ status: 'DELIVERED' })])
+    await handleEvent(post('/sms', TEXT), { ...deps(), truckPhones, shipmentBridge: b.deps } as never)
+    const open = bridge([live()])
+    await handleEvent(post('/sms', { ...TEXT, From: '+17735550123', MessageSid: 'SMw2' }), { ...deps(), truckPhones, shipmentBridge: open.deps } as never)
+    await handleEvent(post('/sms', { ...TEXT, MessageSid: 'SMw3', Body: '' }), { ...deps(), truckPhones, shipmentBridge: open.deps } as never)
+    expect(b.calls).toHaveLength(0)
+    expect(open.calls).toHaveLength(0)
+  })
+
+  it('a failing router never fails the webhook or loses the Dispatch copy', async () => {
+    const b = bridge([live()])
+    b.deps.invokeTracking = async () => { throw new Error('boom') }
+    const r = await handleEvent(post('/sms', TEXT), { ...deps(), truckPhones, shipmentBridge: b.deps } as never)
+    expect(r.statusCode).toBe(200)
+    expect(store.messages.size).toBe(1)
+  })
+})
+
 describe('delivery receipts', () => {
   it('updates the outbound message and never regresses delivered to sent', async () => {
     const c = await store.createConversation({ phone: '+18475550100' })

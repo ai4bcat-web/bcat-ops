@@ -26,12 +26,11 @@ import { CarriersPage } from '@/features/carriers/CarriersPage'
 import { RateConSignPage } from '@/features/carriers/RateConSignPage'
 import { ShipmentsBoard } from '@/features/shipments/ShipmentsBoard'
 import { ShipmentPage } from '@/features/shipments/ShipmentPage'
-import { CheckCallsPage } from '@/features/tracking/CheckCallsPage'
 import CustomerTrackPage from '@/features/tracking/CustomerTrackPage'
 import CarrierPingPage from '@/features/tracking/CarrierPingPage'
 import CarrierUploadPage from '@/features/tracking/CarrierUploadPage'
-import { DocumentReviewPage } from '@/features/documents/DocumentReviewPage'
 import { TrackingWorkstation } from '@/features/shipments/workstations/TrackingWorkstation'
+import { CHECK_CALLS_LANDING, DOCS_LANDING } from '@/features/shipments/workstations/tracking/legacyRoutes'
 import { IntakeBoard } from '@/features/shipments/intake/IntakeBoard'
 import { IntakeReviewPage } from '@/features/shipments/intake/IntakeReviewPage'
 import CustomerLinksPage from '@/features/shipments/workstations/CustomerLinksPage'
@@ -163,9 +162,9 @@ export default function App() {
                   <Route path="carrier-sales" element={<RequirePage page={['loads', 'tms']}><CarrierSalesPage /></RequirePage>} />
                   <Route path="tracking" element={<RequirePage page={['loads', 'tms']}><TrackingWorkstation /></RequirePage>} />
                   <Route path="tracking/links" element={<RequirePage page={['loads', 'tms']}><CustomerLinksPage /></RequirePage>} />
-                  <Route path="documents/review" element={<RequirePage page={['loads', 'tms']}><DocumentReviewPage /></RequirePage>} />
-                  <Route path="documents/*" element={<Navigate to="/tms/documents/review" replace />} />
-                  <Route path="check-calls" element={<RequirePage page={['loads', 'tms']}><CheckCallsPage /></RequirePage>} />
+                  {/* Retired pages: the Tracking grid's Focus control replaced them (legacyRoutes.ts). */}
+                  <Route path="documents/*" element={<Navigate to={DOCS_LANDING} replace />} />
+                  <Route path="check-calls" element={<Navigate to={CHECK_CALLS_LANDING} replace />} />
                   {/* Load Review: the pre-billing queue. `?shipment=<id>` opens a load's checklist. */}
                   <Route path="load-review" element={<RequirePage page={['loadReview', 'tms']}><LoadReviewPage /></RequirePage>} />
                   {/* Quotes (path stays /tms/rates): customer quotes and carrier offers, with the lane history behind them. */}
@@ -205,8 +204,8 @@ export default function App() {
               <Route path="/loads" element={<Navigate to="/tms/shipments" replace />} />
               <Route path="/shipments" element={<ParamRedirect to="/tms/shipments" />} />
               <Route path="/shipments/:id" element={<ParamRedirect to="/tms/shipments/:id" />} />
-              <Route path="/check-calls" element={<ParamRedirect to="/tms/check-calls" />} />
-              <Route path="/documents" element={<Navigate to="/tms/documents/review" replace />} />
+              <Route path="/check-calls" element={<Navigate to={CHECK_CALLS_LANDING} replace />} />
+              <Route path="/documents" element={<Navigate to={DOCS_LANDING} replace />} />
               {/* Retired: the driver roster and editor now live in the Files hub. */}
               <Route path="/drivers" element={<Navigate to="/files" replace />} />
               <Route path="/fleet-dashboard" element={<RequirePage page="fleetManagerDashboard"><FleetManagerDashboardPage /></RequirePage>} />

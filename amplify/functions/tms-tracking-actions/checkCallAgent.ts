@@ -24,6 +24,8 @@ import {
   type TemplatePlaceholder,
 } from '../../../src/lib/trackingAutomation'
 import { MAX_SMS_BODY } from '../../../src/lib/dispatch'
+import { allowsAutoRequests, channelsAllowedBy, effectiveTrackingPrefs } from '../../../src/lib/trackingPrefs'
+import { resolveDriverSms } from './driverPhone'
 import { TZ } from '../../../src/lib/date'
 import { isVoided } from '../_shared/voided'
 import { assertExpectedUpdatedAt, assertString, optionalString, type Caller } from '../_shared/actionInputs'
@@ -210,6 +212,7 @@ export async function runCheckCallPlan(
     shipment.customerId ? deps.getById(deps.tables.customer, String(shipment.customerId)) : Promise.resolve(null),
   ])
 
+  const prefs = effectiveTrackingPrefs({ shipment, customer })
   const knownIds = new Set(messages.map((m) => String(m.id ?? '')))
   const results: TickResult[] = []
   for (const load of loads) {
@@ -222,11 +225,13 @@ export async function runCheckCallPlan(
       revSubdivision: optionalString(shipment.revSubdivision, 100),
     })
     const policy = resolved.policy
-    const enabled = resolved.plan.channels.filter(isChannelEnabled)
-    const plan = enabled.length ? resolved.plan : null
+    const methodChannels = channelsAllowedBy(prefs.method, resolved.plan.channels)
+    const enabled = methodChannels.filter(isChannelEnabled)
+    const plan = enabled.length ? { ...resolved.plan, channels: methodChannels } : null
     let blocked: string | null = null
     if (auto) {
-      if (!policy.checkCallsAuto) blocked = 'Automatic check calls are off'
+      if (!allowsAutoRequests(prefs)) blocked = 'Customer tracking is manual'
+      else if (!policy.checkCallsAuto) blocked = 'Automatic check calls are off'
       else if (!carrier || carrier.kind !== 'CARRIER' || carrier.status !== 'ACTIVE') blocked = 'Not a brokered carrier leg'
       else if (!isRateConSent(carrier)) blocked = 'Rate confirmation not sent'
     }
@@ -242,6 +247,7 @@ export async function runCheckCallPlan(
       continue
     }
     if (!plan) {
+      const methodExcluded = resolved.plan.channels.some(isChannelEnabled) && !methodChannels.some(isChannelEnabled)
       results.push({
         load,
         tick: {
@@ -249,7 +255,7 @@ export async function runCheckCallPlan(
           milestone: null,
           channels: [],
           nextDueAt: null,
-          reason: 'No enabled channel',
+          reason: methodExcluded ? 'Tracking method excludes every enabled channel' : 'No enabled channel',
         },
         plan: null,
         carrier,
@@ -434,7 +440,10 @@ export async function runCheckCallPlan(
       : `${milestoneMessageId(loadId, String(milestone))}:email`
 
     const dispatcherEmail = optionalString(carrier?.dispatcherEmail, 250)
-    const hasSms = Boolean(carrier && carrier.driverPhone && tick.channels.includes('SMS'))
+    const wantsSms = Boolean(carrier && tick.channels.includes('SMS'))
+    // Step AK: the truck's work phone first, the driver's own number as the fallback (per the customer / shipment override).
+    const sms = wantsSms && carrier ? await resolveDriverSms(deps, { carrier, shipment, customer, load }) : null
+    const hasSms = Boolean(sms?.to)
     const hasEmail = Boolean(dispatcherEmail && tick.channels.includes('EMAIL'))
     // A channel held back by quiet hours: nothing is stamped, so the next tick sends it if the slot is still open.
     const held = (hasSms && !channels.includes('SMS')) || (hasEmail && !channels.includes('EMAIL'))
@@ -461,7 +470,7 @@ export async function runCheckCallPlan(
           channel: 'SMS',
           kind: 'CHECK_CALL',
           party: 'DRIVER',
-          to: carrier!.driverPhone,
+          to: sms?.to,
           body,
           label: carrier,
           authorKind: 'AGENT',
@@ -491,7 +500,7 @@ export async function runCheckCallPlan(
 
     if (attempted + covered === 0 && !held) {
       skipped += 1
-      processed.push({ loadId, kind: 'NONE', reason: 'No available channel' })
+      processed.push({ loadId, kind: 'NONE', reason: wantsSms && !sms?.to && !hasEmail ? sms?.reason ?? 'No driver phone' : 'No available channel' })
       continue
     }
 

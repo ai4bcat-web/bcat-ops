@@ -3,6 +3,8 @@ import { AlertTriangle, Mail, MessageSquare, Phone, Play, FileImage } from 'luci
 import { APIProvider, useApiIsLoaded } from '@vis.gl/react-google-maps'
 import { toast } from 'sonner'
 import { TrackerPicker } from '@/components/TrackerPicker'
+import { useDriverPhones } from '@/hooks/useTruckConfigs'
+import { useAppStore } from '@/store/useAppStore'
 import { AuthContext } from '@/hooks/useAuth'
 import { TmsButton, TmsCard, TmsEmptyState, TmsField, TmsInput, TmsMetaList, TmsStatRow, TmsTimeline } from '@/features/tms/kit'
 import { formatDateTime } from '@/lib/date'
@@ -14,11 +16,10 @@ import {
   isChannelEnabled,
 } from '@/lib/checkCallPlan'
 import type { CheckCallChannel, CheckCallMilestone, CheckCallPlan } from '@/lib/checkCallPlan'
-import type { CustomerRecord, ShipmentBundle, ShipmentMessageRecord, TmsSettings } from '@/types/tms'
+import type { CustomerRecord, ShipmentBundle, TmsSettings } from '@/types/tms'
 import type { ShipmentRow } from '@/features/shipments/shipmentViews'
 import { TrackingDetailMap } from './TrackingDetailMap'
 import { googleMapsExtras } from './googleMapsExtras'
-import { TrackingConversation } from './TrackingConversation'
 import { resolveCheckCallPlanWithSource } from './checkCallPlanSource'
 import { DriverCard } from './DriverCard'
 import { buildStatusTimeline, estimateEta, etaUnavailableReason, formatMiles, legGeometry } from './statusTimeline'
@@ -28,14 +29,11 @@ const CHANNEL_ICONS: Record<CheckCallChannel, typeof Mail> = { EMAIL: Mail, SMS:
 interface TrackingDetailPanelProps {
   row: ShipmentRow
   bundle: ShipmentBundle | null
-  messages: ShipmentMessageRecord[]
   loading: boolean
   customers: CustomerRecord[]
   settings: TmsSettings | null
-  userName?: string | null
   mapsKey?: string
   mapsMapId?: string
-  onSendMessage: (input: { channel: 'EMAIL' | 'SMS'; to: string | null; subject: string | null; body: string }) => Promise<void>
   onSavePlan: (loadId: string, plan: CheckCallPlan, expectedUpdatedAt?: string) => Promise<void>
   onRefresh: () => void | Promise<void>
 }
@@ -46,11 +44,14 @@ export function TrackingDetailPanel(props: TrackingDetailPanelProps) {
   return <DetailSession key={props.row.id} {...props} />
 }
 
-function DetailSession({ row, bundle, messages, loading, customers, settings, userName, mapsKey, mapsMapId, onSendMessage, onSavePlan, onRefresh }: TrackingDetailPanelProps) {
+function DetailSession({ row, bundle, loading, customers, settings, mapsKey, mapsMapId, onSavePlan, onRefresh }: TrackingDetailPanelProps) {
   const geo = useMemo(() => legGeometry(bundle, row.id), [bundle, row.id])
   const { load, lastKnown, pingAt, deliveryStop, destination } = geo
   const carrier = geo.leg
   const customer = customers.find((c) => c.id === row.customerId) ?? null
+  const drivers = useAppStore((s) => s.drivers)
+  const driverRecord = carrier?.driverId ? drivers.find((d) => d.id === carrier.driverId) ?? null : null
+  const phones = useDriverPhones(driverRecord, { loadTruckId: carrier?.truckId, legDriverPhone: carrier?.driverPhone, unitNumber: carrier?.truckNumber })
   const resolved = useMemo(() => resolveCheckCallPlanWithSource(load, customer, settings), [load, customer, settings])
   const [plan, setPlan] = useState(resolved.plan)
   const [previousPlan, setPreviousPlan] = useState(resolved.plan)
@@ -158,6 +159,7 @@ function DetailSession({ row, bundle, messages, loading, customers, settings, us
           driver={carrier ? { name: carrier.driverName, phone: carrier.driverPhone } : null}
           dispatcher={carrier ? { name: carrier.dispatcherName, phone: carrier.dispatcherPhone, email: carrier.dispatcherEmail } : null}
           loadStatus={row.loadStatus ?? load.status}
+          phones={phones}
         />
         <div data-testid="tracking-cadence">
           <TmsCard title="Check-call plan">
@@ -190,12 +192,6 @@ function DetailSession({ row, bundle, messages, loading, customers, settings, us
             </div>
           </TmsCard>
         </div>
-        <TmsCard title={`Thread — ${row.number}`}>
-          <TrackingConversation conversationKey={row.id} messages={messages} userName={userName}
-            driver={{ name: carrier?.driverName, phone: carrier?.driverPhone }}
-            dispatcher={{ name: carrier?.dispatcherName, phone: carrier?.dispatcherPhone, email: carrier?.dispatcherEmail }}
-            onSendMessage={onSendMessage} onRefresh={onRefresh} />
-        </TmsCard>
       </>}
     </div>
   )

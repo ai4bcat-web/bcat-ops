@@ -24,6 +24,7 @@ import { ApSettingsCard } from './ApSettingsCard'
 import { QuoteSettingsCard } from './QuoteSettingsCard'
 import { ShipmentSettingsCard } from './ShipmentSettingsCard'
 import { ChargeCodesCard } from './ChargeCodesCard'
+import { TruckPhonesCard } from './TruckPhonesCard'
 import { CustomerSettingsCard } from './CustomerSettingsCard'
 import { CarrierDocumentsCard } from './CarrierDocumentsCard'
 import { ConsolidationCard } from './ConsolidationCard'
@@ -55,6 +56,7 @@ export function SettingsPage() {
           <CarrierDocumentsCard />
           <TrackingSettingsCard />
           <TrackingAutomationCard />
+          <TruckPhonesCard />
           <PostalCodeAliasesCard />
           <DocumentSettingsCard />
           <ArSettingsCard />

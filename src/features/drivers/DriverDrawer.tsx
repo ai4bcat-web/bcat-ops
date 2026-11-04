@@ -30,6 +30,9 @@ import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { SidePanel } from '@/features/files/SidePanel'
+import { DriverPhones } from '@/components/DriverPhones'
+import { useTruckConfigs } from '@/hooks/useTruckConfigs'
+import { workPhoneFor } from '@/lib/workPhone'
 import { panelBtn } from '@/lib/ui/panel-btn'
 import { driverSchema, type DriverFormValues } from '@/lib/schemas'
 import type { Driver } from '@/types'
@@ -110,6 +113,19 @@ export function DriverDrawer({ open, driver: driverProp, onClose }: DriverDrawer
   const watchName = watch('name')
   const watchColorKey = watch('colorKey')
   const watchFleet = watch('fleetGroup')
+  const watchTruckId = watch('assignedTruckId')
+
+  // The work phone belongs to the truck selected in the form, so it follows the select live.
+  // The personal number is the editable Phone field above it, so it is left out here.
+  const { byId: truckConfigs } = useTruckConfigs()
+  const workPhones = (() => {
+    const phones = workPhoneFor({
+      driver: { assignedTruckId: watchTruckId ?? null },
+      truck: (id) => truckConfigs.get(id),
+      unitNumber: trucks.find((t) => t.id === watchTruckId)?.unitNumber ?? null,
+    })
+    return { ...phones, personal: null, personalRaw: null }
+  })()
 
   // Reset form and photo state whenever the drawer opens or the driver changes
   useEffect(() => {
@@ -295,9 +311,14 @@ export function DriverDrawer({ open, driver: driverProp, onClose }: DriverDrawer
                       <Input {...register('name')} placeholder="Full name" className={cn('h-9', errors.name && 'border-destructive')} />
                       {errors.name && <p className="text-xs text-destructive mt-1">{errors.name.message}</p>}
                     </Field>
-                    <Field label="Phone *" hint="10-digit US">
+                    <Field label="Personal phone *" hint="10-digit US">
                       <Input {...register('phone')} placeholder="(312) 555-0100" type="tel" className={cn('h-9', errors.phone && 'border-destructive')} />
                       {errors.phone && <p className="text-xs text-destructive mt-1">{errors.phone.message}</p>}
+                      {workPhones.truckId && (
+                        <div style={{ fontSize: 12, marginTop: 4 }} data-testid="driver-drawer-work-phone">
+                          <DriverPhones phones={workPhones} variant="stacked" />
+                        </div>
+                      )}
                     </Field>
                     <Field label="Email" hint="for onboarding portal invite">
                       <Input {...register('email')} placeholder="driver@example.com" className="h-9" type="email" />

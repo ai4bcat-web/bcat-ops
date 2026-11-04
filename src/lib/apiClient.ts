@@ -52,6 +52,7 @@ import type {
   IntakeFields, IntakeLoadRecord, IntakeStatus as IntakeLoadStatus,
 } from '@/types/intake'
 import { cachedList, invalidateLists } from '@/lib/listCache'
+import { parseTrackingPrefs, type TrackingPrefsOverride } from '@/lib/trackingPrefs'
 import { batchByIndex, batchByIndexPairs, batchGet, setDefaultGraphqlRunner } from '@/lib/aliasBatch'
 import { LOAD_WORKFLOW_STATUSES } from '@/lib/shipmentStatus'
 
@@ -1296,7 +1297,7 @@ const CUSTOMER_V5_FIELDS = [
   'quoteAutoReply', 'requiredLoadFields', 'checkCallPlan',
 ]
 // Step V: the default tracker a new shipment inherits and the automation policy override.
-const CUSTOMER_V6_FIELDS = ['defaultTrackerId', 'trackingAutomation']
+const CUSTOMER_V6_FIELDS = ['defaultTrackerId', 'trackingAutomation', 'trackingMode', 'trackingMethod', 'driverSmsTarget']
 const CUSTOMER_JSON_FIELDS: (keyof CustomerRecord)[] = ['billingAddress', 'contacts', 'billToParties', 'requiredReferences', 'chargeCodeOverrides', 'defaultCharges', 'pricingDefaults', 'quotingDefaults', 'visibilityPrefs', 'ediSettings', 'aiMemory', 'checkCallPlan', 'trackingAutomation']
 let customersHaveV2 = true
 let customersHaveV3 = true
@@ -2080,6 +2081,21 @@ let shipmentsHaveIntake = true
 // Step V: the person tracking the shipment. Own flag, same reason.
 const SHIPMENT_TRACKER_FIELDS = ['trackerId']
 let shipmentsHaveTracker = true
+// Step AJ: the per-shipment tracking override (one JSON field). Own flag, same reason.
+const SHIPMENT_TRACKING_PREFS_FIELDS = ['trackingPrefs']
+let shipmentsHaveTrackingPrefs = true
+/** AppSync hands the AWSJSON back as a string, the Lambda bundle as an object: normalise both so consumers see `TrackingPrefsOverride | null`. */
+function withParsedPrefs<T>(result: T): T {
+  const fix = (row: unknown) => {
+    if (row && typeof row === 'object' && 'trackingPrefs' in row) {
+      row.trackingPrefs = parseTrackingPrefs(row.trackingPrefs)
+    }
+  }
+  if (Array.isArray(result)) result.forEach(fix)
+  else if (result instanceof Map) result.forEach(fix)
+  else fix(result)
+  return result
+}
 // Aljex-exit: verbatim Aljex codes (mapped to people in Settings > Users) and the OSD flag.
 const SHIPMENT_ALJEX_FIELDS = ['salesRepCode', 'createdByCode', 'serviceRepCode', 'dispatcherCode', 'osd']
 let shipmentsHaveAljexCodes = true
@@ -2088,19 +2104,24 @@ let shipmentsHaveAljexCodes = true
 async function readShipments<T>(run: (fields: string) => Promise<T>): Promise<T> {
   for (;;) {
     try {
-      return await run([
+      return withParsedPrefs(await run([
         SHIPMENT_FIELDS,
         shipmentsHaveDelivery ? SHIPMENT_DELIVERY_FIELDS.join(' ') : '',
         shipmentsHaveTracker ? SHIPMENT_TRACKER_FIELDS.join(' ') : '',
+        shipmentsHaveTrackingPrefs ? SHIPMENT_TRACKING_PREFS_FIELDS.join(' ') : '',
         shipmentsHaveRevTag ? SHIPMENT_REV_FIELDS.join(' ') : '',
         shipmentsHaveCoverage ? SHIPMENT_COVERAGE_FIELDS.join(' ') : '',
         shipmentsHaveIntake ? SHIPMENT_INTAKE_FIELDS.join(' ') : '',
         shipmentsHaveAljexCodes ? SHIPMENT_ALJEX_FIELDS.join(' ') : '',
-      ].filter(Boolean).join(' '))
+      ].filter(Boolean).join(' ')))
     } catch (err) {
       if (shipmentsHaveAljexCodes && fieldNamed(SHIPMENT_ALJEX_FIELDS, err)) {
         console.warn('[apiClient] backend has no Aljex code fields on Shipment yet — querying without them until deploy')
         shipmentsHaveAljexCodes = false
+        continue
+      }
+      if (shipmentsHaveTrackingPrefs && fieldNamed(SHIPMENT_TRACKING_PREFS_FIELDS, err)) {
+        shipmentsHaveTrackingPrefs = false
         continue
       }
       if (shipmentsHaveTracker && fieldNamed(SHIPMENT_TRACKER_FIELDS, err)) {
@@ -5563,6 +5584,9 @@ export interface TruckConfig {
   complianceStatus?:      'COMPLIANT' | 'EXPIRING_SOON' | 'NON_COMPLIANT' | 'UNKNOWN' | null
   assignedFuelCardNumber?: string | null   // LAST 4 ONLY
   assignedPhone?:         string | null
+  /** Steps AJ/AK. The work phone in this truck, E.164; null = none. Not `assignedPhone` (DOT onboarding inventory). */
+  phone?:                 string | null
+  phoneLabel?:            string | null
   assignedTablet?:        string | null
   eldSerialNumber?:       string | null
   inServiceDate?:         string | null
@@ -5571,27 +5595,37 @@ export interface TruckConfig {
 }
 
 const TRUCK_CONFIG_FIELDS = `truckId unitNumber ownershipType motiveVehicleId motiveVehicleNumber onboardingStatus complianceStatus assignedFuelCardNumber assignedPhone assignedTablet eldSerialNumber inServiceDate createdAt updatedAt`
+// Steps AJ/AK: the work phone in the truck. Own flag, same reason as the other newer groups.
+const TRUCK_CONFIG_PHONE_FIELDS = ['phone', 'phoneLabel']
+let truckConfigsHavePhone = true
+const truckConfigFields = () => (truckConfigsHavePhone ? `${TRUCK_CONFIG_FIELDS} ${TRUCK_CONFIG_PHONE_FIELDS.join(' ')}` : TRUCK_CONFIG_FIELDS)
 
 export async function listTruckConfigs(): Promise<TruckConfig[]> {
-  const result = await client.graphql({
-    query: `query ListTruckConfigs { listTruckConfigs(limit: 100) { items { ${TRUCK_CONFIG_FIELDS} } } }`,
-  }) as { data: { listTruckConfigs: { items: TruckConfig[] } } }
-  return result.data.listTruckConfigs.items ?? []
+  for (;;) {
+    try {
+      return await listAll<TruckConfig>('listTruckConfigs', truckConfigFields(), 1000)
+    } catch (err) {
+      if (!truckConfigsHavePhone || !fieldNamed(TRUCK_CONFIG_PHONE_FIELDS, err)) throw err
+      console.warn('[apiClient] backend has no TruckConfig phone fields yet — querying without them until deploy')
+      truckConfigsHavePhone = false
+    }
+  }
 }
 
+/** `phone` is E.164 (`normalizeTruckPhone`); send `null` for `phone`/`phoneLabel` to clear. */
 export async function upsertTruckConfig(
   input: Pick<TruckConfig, 'truckId' | 'unitNumber'> & Partial<Omit<TruckConfig, 'truckId' | 'unitNumber' | 'createdAt' | 'updatedAt'>>,
 ): Promise<TruckConfig> {
   // Try update first; if it doesn't exist, create it
   try {
     const result = await client.graphql({
-      query: `mutation UpdateTruckConfig($input: UpdateTruckConfigInput!) { updateTruckConfig(input: $input) { ${TRUCK_CONFIG_FIELDS} } }`,
+      query: `mutation UpdateTruckConfig($input: UpdateTruckConfigInput!) { updateTruckConfig(input: $input) { ${truckConfigFields()} } }`,
       variables: { input },
     }) as { data: { updateTruckConfig: TruckConfig } }
     return result.data.updateTruckConfig
   } catch {
     const result = await client.graphql({
-      query: `mutation CreateTruckConfig($input: CreateTruckConfigInput!) { createTruckConfig(input: $input) { ${TRUCK_CONFIG_FIELDS} } }`,
+      query: `mutation CreateTruckConfig($input: CreateTruckConfigInput!) { createTruckConfig(input: $input) { ${truckConfigFields()} } }`,
       variables: { input },
     }) as { data: { createTruckConfig: TruckConfig } }
     return result.data.createTruckConfig
@@ -8604,4 +8638,17 @@ export interface UpdateStopDetailsInput {
 }
 export async function updateStopDetails(input: UpdateStopDetailsInput): Promise<ShipmentBundle> {
   return shipmentAction<ShipmentBundle>('UPDATE_STOP', { ...input, op: 'SET_DETAILS' })
+}
+
+// ── Steps AJ/AK ───────────────────────────────────────────────────────────────
+
+/**
+ * Set (or clear, with null / all-inherit) the per-shipment tracking override.
+ * Resolves against the customer at read time; see `effectiveTrackingPrefs`.
+ */
+export async function setTrackingPrefs(
+  input: { shipmentId: string; prefs: TrackingPrefsOverride | null; expectedUpdatedAt?: string },
+): Promise<{ shipment: ShipmentRecord }> {
+  const r = await shipmentAction<{ shipment: ShipmentRecord }>('SET_TRACKING_PREFS', input)
+  return { shipment: withParsedPrefs(r.shipment) }
 }

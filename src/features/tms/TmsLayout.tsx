@@ -6,7 +6,7 @@
  */
 import { useEffect, useMemo, useState } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { TmsShell, type TmsLiveChild } from '@/features/tms/TmsShell'
+import { TmsShell } from '@/features/tms/TmsShell'
 import { useOwnershipDivisions } from '@/features/tms/useOwnershipDivisions'
 import { buildNavSections, companyOptions, tmsBreadcrumb } from '@/lib/navSections'
 import { useAuth } from '@/hooks/useAuth'
@@ -17,7 +17,7 @@ import { useStaff } from '@/hooks/useStaff'
 import { personName } from '@/lib/roles'
 import { useAppStore } from '@/store/useAppStore'
 import { DispatchDrawer } from '@/features/dispatch/DispatchDrawer'
-import { useShellBadgeCounts, movingShipments } from '@/features/tms/useShellBadgeCounts'
+import { useShellBadgeCounts } from '@/features/tms/useShellBadgeCounts'
 
 /** The list pages that run edge to edge on an icon rail (Shipments Active / All / Intake, Load Tracking). */
 const DENSE_PATHS = new Set(['/tms/shipments', '/tms/shipments/intake', '/tms/tracking', '/tms/shipments/new'])
@@ -73,18 +73,6 @@ export function TmsLayout() {
   )
 
   const badgeCounts = useShellBadgeCounts({ shipments })
-
-  // "Tracking" is the loads moving right now, the same definition the dashboard's Tracked
-  // metric uses. The rail lists the six most recently updated ones.
-  const trackedLoads = useMemo<TmsLiveChild[]>(
-    () =>
-      [...movingShipments(shipments)]
-        .sort((a, b) => (b.lastUpdateAt ?? '').localeCompare(a.lastUpdateAt ?? ''))
-        .slice(0, 6)
-        .map((row) => ({ id: row.id, label: row.number, sub: row.customerName ?? null, to: `/tms/shipments/${row.id}` })),
-    [shipments],
-  )
-
   // The bell's number is everything the notification drawer lists for this person.
   const { groups: notificationGroups, count: notificationCount } = useNotifications(shipments)
   const [notificationsOpen, setNotificationsOpen] = useState(false)
@@ -109,7 +97,6 @@ export function TmsLayout() {
       notificationCount={notificationCount}
       onOpenNotifications={() => setNotificationsOpen(true)}
       notificationsOpen={notificationsOpen}
-      trackedLoads={trackedLoads}
       onLogout={() => { void logout() }}
       onSearch={(q) => navigate(`/tms/shipments?q=${encodeURIComponent(q)}`)}
       fill={legacy}

@@ -15,6 +15,22 @@ const api = vi.hoisted(() => ({
   getShipmentBundle: vi.fn(),
   getTmsSettings: vi.fn(),
   listTrackingLinksByShipment: vi.fn(),
+  logCheckCall: vi.fn(),
+  setNextCheckCall: vi.fn(),
+  textDriver: vi.fn(),
+}))
+// The drawer, the review dialog and the log dialog have their own tests; here only what the desk hands them.
+vi.mock('./tracking/TrackingDrawer', () => ({
+  TrackingDrawer: ({ shipmentId, onClose }: { shipmentId: string | null; onClose: () => void }) =>
+    shipmentId ? <div data-testid="tracking-drawer">{shipmentId}<button type="button" onClick={onClose}>close drawer</button></div> : null,
+}))
+vi.mock('@/features/documents/DocumentReviewDialog', () => ({
+  DocumentReviewDialog: ({ shipmentId }: { shipmentId: string }) => <div data-testid="review-dialog">{shipmentId}</div>,
+}))
+vi.mock('../components/LogCheckCallDialog', () => ({
+  LogCheckCallDialog: ({ onSubmit }: { onSubmit: (v: { at: string; type: string }) => Promise<void> }) => (
+    <button type="button" onClick={() => { void onSubmit({ at: '2026-10-29T12:00:00.000Z', type: 'LOCATION_UPDATE' }) }}>submit log</button>
+  ),
 }))
 vi.mock('@/lib/apiClient', () => api)
 const refresh = vi.fn(async () => {})
@@ -186,14 +202,15 @@ describe('assignee navigation', () => {
 })
 
 describe('row actions', () => {
-  it('opens the shipment Tracking tab on a row click, but not when ticking its checkbox', async () => {
+  it('opens the tracking drawer on a row click, but not when ticking its checkbox', async () => {
     renderPage('/tms/tracking?assignee=all')
     await waitFor(() => expect(ids().length).toBeGreaterThan(0))
     fireEvent.click(within(trackingRow('S-ANN')).getByRole('checkbox'))
-    expect(screen.getByTestId('location')).toHaveTextContent('/tms/tracking')
+    expect(screen.getByTestId('location')).not.toHaveTextContent('shipment=')
 
     fireEvent.click(trackingRow('S-ANN'))
-    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/tms/shipments/S-ANN?tab=tracking'))
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('shipment=S-ANN'))
+    expect(screen.getByTestId('tracking-drawer')).toHaveTextContent('S-ANN')
   })
 
   it('reassigns the selected rows of a section in one call', async () => {
@@ -248,32 +265,118 @@ describe('computed cells', () => {
   it('flags an overdue check call and a POD that is needed', async () => {
     renderPage('/tms/tracking?assignee=all')
     await waitFor(() => expect(ids().length).toBeGreaterThan(0))
-    expect(within(trackingRow('S-OVERDUE')).getByText('overdue 35 m')).toBeInTheDocument()
+    expect(within(trackingRow('S-OVERDUE')).getAllByText('overdue 35 m').length).toBeGreaterThan(0)
 
     fireEvent.click(screen.getByRole('tab', { name: 'POD due' }))
     expect(within(trackingRow('S-PODDUE')).getByText('POD needed')).toBeInTheDocument()
   })
 })
 
-describe('legacy Inbox links', () => {
-  it('sends ?tab=inbox&shipment= to the shipment Tracking tab', async () => {
+describe('shipment drawer', () => {
+  it('opens the drawer for ?shipment= on the grid, including the old ?tab=inbox bookmark', async () => {
     renderPage('/tms/tracking?tab=inbox&shipment=S-ANN')
-    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/tms/shipments/S-ANN?tab=tracking'))
+    await waitFor(() => expect(screen.getByTestId('tracking-drawer')).toHaveTextContent('S-ANN'))
+    expect(screen.getByTestId('location')).toHaveTextContent('/tms/tracking?')
+    expect(ids().length).toBeGreaterThan(0)
   })
 
-  it('offers no Inbox tab', async () => {
+  it('closing the drawer drops only ?shipment=', async () => {
+    renderPage('/tms/tracking?assignee=all&shipment=S-ANN')
+    await waitFor(() => expect(screen.getByTestId('tracking-drawer')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: 'close drawer' }))
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/tms/tracking?assignee=all'))
+    expect(screen.getByTestId('location')).not.toHaveTextContent('shipment=')
+  })
+
+  it('offers no Inbox tab and no Manage links button', async () => {
     renderPage('/tms/tracking?assignee=all')
     await waitFor(() => expect(ids().length).toBeGreaterThan(0))
     expect(screen.queryByRole('tab', { name: 'Inbox' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Manage links/i })).not.toBeInTheDocument()
   })
 })
 
-describe('navigation', () => {
-  it('Manage links reaches the Customer Links page', async () => {
+describe('focus', () => {
+  const docs = row('S-DOCS', { trackerId: 'u-ann', trackerName: 'Ann Lee', pendingDocReviewCount: 2 })
+  const excepted = row('S-EXC', { trackerId: 'u-ann', trackerName: 'Ann Lee', openIncidentCount: 1 })
+  const deliveredWithUpload = row('S-DELDOC', { status: 'DELIVERED', trackerId: 'u-ann', trackerName: 'Ann Lee', docsMissing: ['POD'], pendingDocReviewCount: 1 })
+
+  beforeEach(() => { shipments = [ann, overdue, docs, excepted, deliveredWithUpload] })
+
+  it('Check calls due lists only what the old worklist listed, by the same clock', async () => {
+    renderPage('/tms/tracking?assignee=all&focus=checkcalls')
+    await waitFor(() => expect(ids()).toEqual(['S-OVERDUE']))
+  })
+
+  it('Docs to review spans lifecycles: a delivered load with an upload waiting is listed', async () => {
+    renderPage('/tms/tracking?assignee=all&focus=docs')
+    await waitFor(() => expect(ids().sort()).toEqual(['S-DELDOC', 'S-DOCS']))
+  })
+
+  it('Exceptions lists open incidents, and the tab counts come from the unfocused rows', async () => {
+    renderPage('/tms/tracking?assignee=all&focus=exceptions')
+    await waitFor(() => expect(ids()).toEqual(['S-EXC']))
+    expect(screen.getByRole('tab', { name: /^Check calls due/ })).toHaveTextContent('1')
+    expect(screen.getByRole('tab', { name: /^Docs to review/ })).toHaveTextContent('2')
+  })
+
+  it('choosing a focus writes ?focus= and All clears it', async () => {
     renderPage('/tms/tracking?assignee=all')
     await waitFor(() => expect(ids().length).toBeGreaterThan(0))
-    fireEvent.click(screen.getByRole('button', { name: /Manage links/i }))
-    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/tms/tracking/links'))
+    fireEvent.click(screen.getByRole('tab', { name: /^Docs to review/ }))
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('focus=docs'))
+    fireEvent.click(within(screen.getByTestId('tracking-focus-tabs')).getByRole('tab', { name: 'All' }))
+    await waitFor(() => expect(screen.getByTestId('location')).not.toHaveTextContent('focus='))
+  })
+})
+
+describe('check call and document row actions', () => {
+  const bundle = {
+    shipment: { id: 'S-OVERDUE' },
+    loads: [{ id: 'L-1', updatedAt: '2026-03-02T00:00:00.000Z', stops: [] }],
+    loadCarriers: [{ id: 'LC-1', status: 'ACTIVE' }],
+  }
+
+  it('snoozes an hour with the CAS token of the load it read', async () => {
+    api.getShipmentBundle.mockResolvedValue(bundle)
+    api.setNextCheckCall.mockResolvedValue({})
+    renderPage('/tms/tracking?assignee=all')
+    await waitFor(() => expect(ids().length).toBeGreaterThan(0))
+    fireEvent.click(within(trackingRow('S-OVERDUE')).getByRole('button', { name: 'Snooze 1 h' }))
+
+    await waitFor(() => expect(api.setNextCheckCall).toHaveBeenCalledTimes(1))
+    expect(api.setNextCheckCall).toHaveBeenCalledWith({
+      loadId: 'L-1',
+      expectedUpdatedAt: '2026-03-02T00:00:00.000Z',
+      nextCheckCallAt: new Date(now + 3_600_000).toISOString(),
+    })
+    await waitFor(() => expect(refresh).toHaveBeenCalled())
+  })
+
+  it('logs a check call through the shared dialog with the load token', async () => {
+    api.getShipmentBundle.mockResolvedValue(bundle)
+    api.logCheckCall.mockResolvedValue({})
+    renderPage('/tms/tracking?assignee=all')
+    await waitFor(() => expect(ids().length).toBeGreaterThan(0))
+    fireEvent.click(within(trackingRow('S-OVERDUE')).getByRole('button', { name: 'Log check call…' }))
+
+    fireEvent.click(await screen.findByRole('button', { name: 'submit log' }))
+    await waitFor(() => expect(api.logCheckCall).toHaveBeenCalledTimes(1))
+    expect(api.logCheckCall).toHaveBeenCalledWith({
+      loadId: 'L-1',
+      expectedUpdatedAt: '2026-03-02T00:00:00.000Z',
+      type: 'LOCATION_UPDATE',
+      at: '2026-10-29T12:00:00.000Z',
+    })
+  })
+
+  it('enables Review documents only for a row with uploads waiting, and opens that shipment', async () => {
+    shipments = [ann, row('S-DOCS', { trackerId: 'u-ann', trackerName: 'Ann Lee', pendingDocReviewCount: 2 })]
+    renderPage('/tms/tracking?assignee=all')
+    await waitFor(() => expect(ids().length).toBe(2))
+    expect(within(trackingRow('S-ANN')).getByRole('button', { name: 'Review documents…' })).toBeDisabled()
+    fireEvent.click(within(trackingRow('S-DOCS')).getByRole('button', { name: 'Review documents…' }))
+    expect(await screen.findByTestId('review-dialog')).toHaveTextContent('S-DOCS')
   })
 })
 

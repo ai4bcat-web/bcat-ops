@@ -396,7 +396,8 @@ const RUNNERS = {
     for (const name of ['Equipment', 'Revenue Type', 'Weight', 'Description']) if (!text.includes(name)) bad.push(`issues strip does not name ${name}`)
     if ((await pathOf(b)) !== url) bad.push('Create on an empty form navigated away')
     await shotFile(b, '06-issues-strip')
-    await click(b, 'ship-form-save-draft'); await pause(1200)
+    await click(b, 'ship-form-save-draft')
+    await b.poll(async () => /local draft/i.test(await bodyText(b)), 'local-draft notice', 6_000).catch(() => {})
     if (shipmentIdFromPath(await pathOf(b))) bad.push('Save draft with no customer created a server shipment')
     if (!/local draft/i.test(await bodyText(b))) bad.push('Save draft with no customer did not say it was kept as a local draft')
     failures(bad)
@@ -480,8 +481,9 @@ const RUNNERS = {
     await pickFrom(b, tid('f-stop-2-name'), tid('f-stop-2-name-option'), ctx.locNames.stop2)
     await fill(b, 'f-stop-2-appt', localDt(2, 12))
     // Roles, More Information
-    await selectFirst(b, 'f-roles-salesRepId')
+    // Sales Representative is a RepPicker (not a <select>); the ZZ customer's default rep prefills it.
     await fill(b, 'f-more-specialInstructions', 'S'.repeat(420))
+    await b.click({ selector: `${tid('section-more-body')} [role="tab"]`, pattern: '^Rate Confirmation Notes' }); await pause(200)
     await fill(b, 'f-more-rateConNotes', 'R'.repeat(260))
     // Rates: per-hour customer line haul + FSC % + one accessorial
     await fill(b, 'f-rates-customerRateType', 'PER_HOUR')
@@ -538,7 +540,7 @@ const RUNNERS = {
     if (!stops[3]?.requestedEnd) bad.push('consignee has no requestedEnd (Must Deliver)')
     eq('pickup contact.hours', stops[0]?.contact?.hours, '06:00-14:00')
     if (!bundle.shipment.revDivision) bad.push('no revenue division on the shipment')
-    if (!order.salesRepId) bad.push('no sales representative on the order')
+    if (!bundle.shipment.salesRepId) bad.push('no sales representative on the shipment')
     const own = bundle.charges.filter((c) => c.side === 'CUSTOMER')
     const lh = own.find((c) => c.code === 'LINEHAUL')
     eq('LINEHAUL calculatedBy / count / rateCents', [lh?.calculatedBy, lh?.count, lh?.rateCents], ['FLAT', 2, 60000])
@@ -586,8 +588,8 @@ const RUNNERS = {
     await click(b, 'ship-form-submit')
     await b.poll(async () => {
       const status = (await getBundle(ctx, ctx.fullId)).shipment.status
-      return status !== 'DRAFT' || await has(b, tid('ship-form-issues')) || /refus|cannot|credit|must|required/i.test(await bodyText(b))
-    }, 'Submit order result', 45_000)
+      return status !== 'DRAFT' || await has(b, tid('ship-form-issues')) || await has(b, tid('ship-form-partial'))
+    }, 'Submit order result', 60_000).catch(() => {})
     const after = await getBundle(ctx, ctx.fullId)
     if (after.shipment.status !== 'DRAFT') {
       ctx.submitted = true
@@ -709,7 +711,7 @@ async function cleanup(ctx) {
   }
   if (ctx.carrierId) {
     const row = await getRow(ctx.token, 'Carrier', ctx.carrierId, 'id updatedAt status').catch(() => null)
-    if (row) await ctx.car('SET_CARRIER_STATUS', { id: ctx.carrierId, expectedUpdatedAt: String(row.updatedAt), status: 'INACTIVE', reason: 'ZZ AH harness' }).then(() => say(`carrier ${ctx.carrierId} set INACTIVE`), (err) => say(`carrier retire failed: ${short(err).slice(0, 80)}`, false))
+    if (row) await ctx.car('SET_CARRIER_STATUS', { id: ctx.carrierId, expectedUpdatedAt: String(row.updatedAt), status: 'INACTIVE', reason: 'INACTIVE_AGREEMENT' }).then(() => say(`carrier ${ctx.carrierId} set INACTIVE`), (err) => say(`carrier retire failed: ${short(err).slice(0, 80)}`, false))
   }
   for (const id of ctx.locationIds) {
     const row = await getRow(ctx.token, 'Location', id, 'id updatedAt').catch(() => null)

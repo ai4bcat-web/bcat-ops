@@ -11,7 +11,7 @@ related: [shipments-orders-loads, carriers-and-booking]
 
 Once a load is dispatched, the question stops being "who is hauling it" and becomes "where is it". This article covers the four ways BCAT knows where freight is, how to log a check call, which events move a load's status, the reminder system, incidents, and the two public links — the one the carrier's driver taps and the one the customer watches.
 
-Everything here lives on the shipment's **Tracking** tab (between Carrier and Documents) and on **Check calls** (`/tms/check-calls`).
+Everything here lives on the shipment's **Tracking** tab (between Carrier and Documents), in the tracking drawer that opens when you click a row on **Load Tracking** (`/tms/tracking`), and on that grid's **Focus** control (All · Check calls due · Documents to review · Exceptions). The old Check calls and Document review pages are gone; their URLs open the grid on the matching focus.
 
 ## The four tracking methods
 
@@ -71,7 +71,7 @@ A load with an outstanding check call shows a banner on the Tracking tab:
 - **Due** — the time has arrived (exactly at the scheduled minute).
 - **Overdue** — the grace period has run out on top of that (default 15 minutes).
 
-From the banner you can edit the reminder, snooze an hour, or say there is no reminder needed. **Check calls** (`/tms/check-calls`) is the same data as a worklist, with tabs for Overdue, Due, Scheduled and Exceptions, the driver's phone as a tap-to-call link, and Log check call inline. The nav badge counts Due plus Overdue.
+From the banner you can edit the reminder, snooze an hour, or say there is no reminder needed. On **Load Tracking**, the **Check calls due** focus is the same data as a worklist (due and overdue loads), with Log check call and Snooze 1 h on each row's menu. The nav badge on Load Tracking counts Due plus Overdue.
 
 Outside the app, a scheduled job sweeps every five minutes and Slack-DMs the load's carrier rep (and/or a channel you nominate) once for Due and once for Overdue per scheduled time. Rescheduling a check call re-arms both. The channel is configurable: in-app only, Slack only, or both. Staff are never texted or emailed about a check call.
 
@@ -79,7 +79,7 @@ Outside the app, a scheduled job sweeps every five minutes and Slack-DMs the loa
 
 ## Incidents and their charges
 
-An `INCIDENT` check call requires one of the standard incident types — detention, breakdown, delay, attempted delivery, refused by consignee, TONU, claim, theft, and the rest. The row stays **open** until somebody resolves it, and the open count is shown on the load, on the board as an **Exceptions** badge, and on the Check calls page's Exceptions tab.
+An `INCIDENT` check call requires one of the standard incident types — detention, breakdown, delay, attempted delivery, refused by consignee, TONU, claim, theft, and the rest. The row stays **open** until somebody resolves it, and the open count is shown on the load, on the board as an **Exceptions** badge, and under the **Exceptions** focus on Load Tracking.
 
 An incident may carry money. Each charge row takes a side:
 

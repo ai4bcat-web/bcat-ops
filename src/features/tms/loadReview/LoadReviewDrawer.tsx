@@ -9,6 +9,7 @@ import { useOwnershipDivisions } from '@/features/tms/useOwnershipDivisions'
 import { ReleaseGateList } from '@/features/shipments/components/ReleaseGateCard'
 import { releaseGateMessages } from '@/features/shipments/components/releaseGateView'
 import { reviewLoad, readyToInvoice, setSalesRep, setRevTag, type LoadReviewResult } from '@/lib/apiClient'
+import { DOCS_LANDING } from '@/features/shipments/workstations/tracking/legacyRoutes'
 import { evaluateLoadReview, failingReasons, reviewAgeDays, LOAD_REVIEW_CHECKS, LOAD_REVIEW_CHECK_LABEL } from '@/lib/loadReview'
 import { formatCents } from '@/lib/invoiceBuild'
 import { formatDateTime } from '@/lib/date'
@@ -96,7 +97,7 @@ export function LoadReviewDrawer({ row, onClose, onRefresh, onMoved, onFailure }
         <TmsButton disabled={busy || !division} onClick={() => void fix(() => setRevTag({ shipmentId: row.id, divisionCode: division, subdivisionCode: subdivision || undefined }))}>Set division</TmsButton>
       </div>}
       {verdict.checks[key].reasons.map((reason, index) => reason.action?.kind === 'OPEN_TAB' ? <p key={`${reason.code}-${index}`}>{shipmentLink(reason.action.tab, `Open ${reason.action.tab}`)}</p> : null)}
-      {key === 'documents' && <p>{canOpen ? <Link to="/tms/documents/review">Review uploads</Link> : <span title="Needs the Shipments grant">Review uploads</span>}</p>}
+      {key === 'documents' && <p>{canOpen ? <Link to={DOCS_LANDING}>Review uploads</Link> : <span title="Needs the Shipments grant">Review uploads</span>}</p>}
     </TmsCard>)}
     {verdict.warnings.map((warning) => <p key={warning}>{warning}</p>)}
   </TmsDrawer>

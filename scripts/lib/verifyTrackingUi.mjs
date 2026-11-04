@@ -18,7 +18,8 @@ export async function verifyTrackingUi({ storage, shipmentIds, origin = DEV_ORIG
     if (bookingTab) throw new Error('Tracking still exposes offers through a Booking tab')
     await capture('P8-UI-tracking-table.png')
     const selected = rows[0]
-    await evaluate(`document.querySelector('[data-testid="tracking-row"][data-shipment-id="${selected}"]').click()`)
+    // A row click now opens the tracking drawer (`?shipment=`); this check is about the full-page Tracking tab.
+    await command('Page.navigate', { url: `${origin}/tms/shipments/${selected}?tab=tracking` })
     await poll(() => evaluate(`(() => {
       const detail = document.querySelector('[data-testid="tracking-detail"]');
       return detail?.dataset.shipmentId === ${JSON.stringify(selected)} &&
@@ -37,8 +38,7 @@ export async function verifyTrackingUi({ storage, shipmentIds, origin = DEV_ORIG
     await command('Page.navigate', { url: `${origin}/tms/tracking/links` })
     await poll(() => evaluate(`!!document.querySelector('[data-testid="customer-links-page"]')`), 'Manage Customer Links page')
     await capture('P8-UI-manage-customer-links.png')
-    // `?shipment=` is a legacy Inbox bookmark that now redirects to the shipment page, so the
-    // action is driven from the table itself: the seeded row's own menu (and the toolbar button).
+    // The action is driven from the table itself: the seeded row's own menu (and the toolbar button).
     await command('Page.navigate', { url: `${origin}/tms/tracking?assignee=all` })
     await poll(() => evaluate(`!!document.querySelector('[data-testid="tracking-row"][data-shipment-id="${selected}"]')`), 'seeded shipment row on the Tracking table')
     const toolbarEnabled = await poll(() => evaluate(`(() => { const button = [...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Create Customer URL'); return button ? !button.disabled : false })()`), 'Create Customer URL toolbar button enabled')

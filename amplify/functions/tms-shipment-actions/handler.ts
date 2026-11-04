@@ -156,6 +156,7 @@ import {
   type ShipmentTag,
 } from './ownershipResolve'
 import { assertNotVoided, isVoided } from '../_shared/voided'
+import { parseTrackingPrefs, validateTrackingPrefsOverride } from '../../../src/lib/trackingPrefs'
 import { LEAD_STAGES, promotionFor } from '../../../src/lib/crm/promote'
 import { batchShipmentTask, BATCH_TASK_ACTIONS } from './batch'
 import { INTAKE_ACTIONS, runIntakeAction, type IntakeAction, type IntakeDeps } from './intake'
@@ -573,6 +574,7 @@ type Action =
   | 'REASSIGN_SHIPMENTS_BY_REP_CODE'
   | 'ASSIGN_CARRIER_REP'
   | 'ASSIGN_TRACKER'
+  | 'SET_TRACKING_PREFS'
   | 'BATCH_SHIPMENT_TASK'
   | 'TEST_OWNERSHIP_RULES'
   | 'RETAG_SHIPMENTS'
@@ -3526,6 +3528,38 @@ async function assignTracker(input: Row, caller: Caller): Promise<Row> {
     updated.push(shipmentId)
   }
   return { updated, skipped }
+}
+
+/**
+ * SET_TRACKING_PREFS — the per-shipment override of the customer's tracking mode, method and
+ * driver-SMS target (Step AJ). `prefs` is `{ mode?, method?, driverSms? }`; a key left out or
+ * null inherits the customer, and an empty override (or `prefs: null`) clears the field.
+ * Refused on a voided shipment. Same authorization as ASSIGN_TRACKER.
+ */
+async function setTrackingPrefs(input: Row, caller: Caller): Promise<Row> {
+  const shipmentId = assertString(input.shipmentId, 'shipmentId')
+  if (!('prefs' in input)) throw new Error('prefs is required; send null to inherit everything')
+  const prefs = validateTrackingPrefsOverride(input.prefs)
+  const expectedUpdatedAt = input.expectedUpdatedAt == null ? null : assertExpectedUpdatedAt(input)
+
+  const shipment = await getById(SHIPMENT_TABLE_NAME, shipmentId)
+  if (!shipment) throw new Error(`Shipment not found: ${shipmentId}`)
+  assertNotVoided(shipment)
+
+  await transact(
+    [updateItemTx(SHIPMENT_TABLE_NAME, shipmentId, {
+      trackingPrefs: prefs,
+      updatedBy: caller.email,
+      updatedAt: nowIso(),
+      version: (numberOrNull(shipment.version) ?? 1) + 1,
+    }, expectedUpdatedAt)],
+    'shipment',
+  )
+  await writeAudit('SHIPMENT', shipmentId, 'SET_TRACKING_PREFS', caller, {
+    from: parseTrackingPrefs(shipment.trackingPrefs),
+    to: prefs,
+  })
+  return { shipment: await getById(SHIPMENT_TABLE_NAME, shipmentId) } as unknown as Row
 }
 
 /**
@@ -7665,6 +7699,8 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return reassignShipmentsByRepCode(input, caller)
     case 'ASSIGN_TRACKER':
       return assignTracker(input, caller)
+    case 'SET_TRACKING_PREFS':
+      return setTrackingPrefs(input, caller)
     case 'ASSIGN_CARRIER_REP':
       return assignCarrierRep(input, caller)
     case 'BATCH_SHIPMENT_TASK':

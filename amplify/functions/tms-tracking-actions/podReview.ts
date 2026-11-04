@@ -8,6 +8,8 @@
 import { assertString, optionalString, type Caller } from '../_shared/actionInputs'
 import { IDX_DOCUMENTS_BY_SHIPMENT, type Row, updateItemTx } from '../_shared/shipmentStore'
 import { sendShipmentMessage, type ThreadDeps } from './thread'
+import { resolveDriverSmsForLeg } from './driverPhone'
+import type { SmsTarget } from '../../../src/lib/workPhone'
 
 export interface PodReviewDeps extends ThreadDeps {
   /** Run the app-side POD legibility / page-count / signature reviewer. */
@@ -45,6 +47,8 @@ export interface RequestPodForLegInput {
   channels?: readonly ('SMS' | 'EMAIL')[]
   /** Already-rendered replacements for the built-in text. */
   templates?: { sms?: string | null; emailSubject?: string | null; emailBody?: string | null }
+  /** The driver number already resolved by the caller (`resolveDriverSms`); default resolves here. */
+  sms?: SmsTarget
   authorKind?: 'AGENT' | 'PERSON'
   caller: Caller
 }
@@ -90,7 +94,9 @@ export async function requestPodForLeg(
       ),
     )
   }
-  if (carrier.driverPhone && wants('SMS')) {
+  // Step AK: the truck's work phone first, personal as the fallback; the sweep hands in what it already resolved.
+  const sms = wants('SMS') ? input.sms ?? (await resolveDriverSmsForLeg(deps, { carrier, shipment })) : null
+  if (sms?.to) {
     messages.push(
       await sendShipmentMessage(
         deps,
@@ -102,7 +108,7 @@ export async function requestPodForLeg(
           channel: 'SMS',
           kind: 'POD_REQUEST',
           party: 'DRIVER',
-          to: carrier.driverPhone,
+          to: sms.to,
           body: input.templates?.sms || defaultBody,
           label: carrier,
           ...author,

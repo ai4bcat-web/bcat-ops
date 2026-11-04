@@ -27,6 +27,8 @@ import { blockingIssues, issueSummary, validateForm, type ValidationLevel } from
 export interface PipelineCtx {
   customer: CustomerRecord | null
   locations: LocationRecord[]
+  /** Resolves the full directory (loaded on first need); linking stops to it must see every location, never a partial list. */
+  loadLocations?: () => Promise<LocationRecord[]>
   settings: TmsSettings | null
   actorName: string
   isBatory: boolean
@@ -128,7 +130,7 @@ async function applyRoles(r: Runner, values: ShipmentFormValues): Promise<void> 
 /** The first stop writes the form's linked locations back onto the form so SAVE keeps the links. */
 async function linkedValues(values: ShipmentFormValues, ctx: PipelineCtx): Promise<ShipmentFormValues> {
   try {
-    const linked = await linkStopsToDirectory(toStops(values), ctx.locations, {
+    const linked = await linkStopsToDirectory(toStops(values), ctx.loadLocations ? await ctx.loadLocations() : ctx.locations, {
       createLocation, refresh: ctx.refreshDirectory, notify: ctx.onNotice,
     })
     return {

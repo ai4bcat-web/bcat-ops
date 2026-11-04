@@ -86,8 +86,6 @@ export const ROUTES = [
   { nn: '08', slug: 'tracking', path: '/tms/tracking?tab=tracking', pattern: '/tms/tracking', wideOk: true },
   { nn: '09', slug: 'tracking-by-assignee', path: '/tms/tracking', pattern: '/tms/tracking', dark: true, wideOk: true },
   { nn: '10', slug: 'tracking-links', path: '/tms/tracking/links', pattern: '/tms/tracking/links' },
-  { nn: '11a', slug: 'documents-review', path: '/tms/documents/review', pattern: '/tms/documents/review' },
-  { nn: '12', slug: 'check-calls', path: '/tms/check-calls', pattern: '/tms/check-calls' },
   { nn: '13', slug: 'rates', path: '/tms/rates', pattern: '/tms/rates', dark: true },
   { nn: '13a', slug: 'rates-lanes', path: '/tms/rates/lanes', pattern: '/tms/rates/lanes' },
   { nn: '14', slug: 'rates-detail', path: '/tms/rates/{quote}', pattern: '/tms/rates/:id', dark: true },
@@ -143,7 +141,6 @@ export const STATES = [
   { id: '05-drawer', nn: '05', slug: 'board-drawer', path: '/tms/shipments', dark: true, steps: [{ click: { selector: FIRST_ROW } }] },
   // Step AH: the board button opens the Aljex create form (a route), no longer the mint-a-load dialog.
   { id: '06-new', nn: '06', slug: 'new-shipment', path: '/tms/shipments', dark: true, steps: [{ click: { selector: '[data-testid="create-shipment"]' } }], expect: '[data-testid="ship-form"]' },
-  { id: '12-tabs', nn: '12', slug: 'check-calls-tabs', path: '/tms/check-calls', tabs: true },
   { id: '08-tabs', nn: '08', slug: 'tracking-tabs', path: '/tms/tracking?tab=tracking', tabs: true },
   { id: '15-tabs', nn: '15', slug: 'invoicing-tabs', path: '/tms/invoicing', tabs: true, dark: true },
   { id: '16-tabs', nn: '16', slug: 'payable-tabs', path: '/tms/invoicing/payable', tabs: true },

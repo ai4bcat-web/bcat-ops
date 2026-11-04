@@ -29,6 +29,8 @@ const api = vi.hoisted(() => ({
   })),
   listCustomers: vi.fn(async () => []),
   listLocations: vi.fn(async () => []),
+  listTruckConfigs: vi.fn(async () => []),
+  upsertTruckConfig: vi.fn(),
 }))
 vi.mock('@/lib/apiClient', () => api)
 
@@ -60,7 +62,7 @@ describe('SettingsPage', () => {
 
   it('renders the step I cards for an admin', async () => {
     render(<MemoryRouter><SettingsPage /></MemoryRouter>)
-    for (const heading of ['Shipments', 'Consolidation', 'Customer settings', 'Carrier documents', 'Charge codes', 'Teams', 'Roles & pages', 'Commissions']) {
+    for (const heading of ['Shipments', 'Consolidation', 'Customer settings', 'Carrier documents', 'Charge codes', 'Teams', 'Roles & pages', 'Commissions', 'Truck work phones']) {
       expect(screen.getAllByText(heading).length).toBeGreaterThan(0)
     }
   })
@@ -204,7 +206,7 @@ describe('CommissionSettingsCard', () => {
 describe('TrackingSettingsCard', () => {
   it('saves the four shared tracking defaults and says nothing reads them yet', async () => {
     settingsAre({ trackByDefault: true, trackingIntervalMin: 30, trackingDurationHours: 72 })
-    render(<TrackingSettingsCard />)
+    render(<MemoryRouter><TrackingSettingsCard /></MemoryRouter>)
     await waitFor(() => expect(screen.getByLabelText('Tracking ping interval minutes')).toBeTruthy())
 
     expect(screen.getAllByText(/used once a tracking provider is live/i).length).toBeGreaterThan(0)
@@ -227,7 +229,7 @@ describe('TrackingSettingsCard', () => {
 
   it('refuses a ping interval under five minutes without calling the save', async () => {
     settingsAre({})
-    render(<TrackingSettingsCard />)
+    render(<MemoryRouter><TrackingSettingsCard /></MemoryRouter>)
     await waitFor(() => expect(screen.getByLabelText('Tracking ping interval minutes')).toBeTruthy())
 
     fireEvent.change(screen.getByLabelText('Tracking ping interval minutes'), { target: { value: '2' } })

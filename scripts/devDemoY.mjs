@@ -402,7 +402,7 @@ STAGES.tracking = async (ctx) => {
     await b.poll(waitText(b, 'Tracking automation'), 'the tracking automation card', 60_000).catch(() => say('  (tracking automation card not found)'))
     await snapAt(b, '16-settings-tracking-automation', 'Tracking automation')
     await snapAt(b, '16b-settings-documents-pod-request', '^Documents')
-    await shot(b, '/tms/check-calls', '17-check-calls', { wait: waitText(b, 'Check') })
+    await shot(b, '/tms/tracking?assignee=all&focus=checkcalls', '17-check-calls', { wait: waitText(b, 'Check') })
   } finally { await b.close() }
 }
 
@@ -463,7 +463,7 @@ STAGES.delivered = async (ctx) => {
     await b.navigate('/tms/dashboard'); await pause(3500)
     await shot(b, shipUrl(S, 'tracking'), '18-shipment-tracking-delivered', { wait: waitText(b, 'Tracking') })
     await shot(b, shipUrl(S, 'documents'), '19-shipment-documents-pod', { wait: waitText(b, 'POD') })
-    await shot(b, '/tms/documents/review', '20-document-review-workstation', { wait: waitText(b, 'Document') })
+    await shot(b, '/tms/tracking?assignee=all&focus=docs', '20-document-review-workstation', { wait: waitText(b, 'Document') })
   } finally { await b.close() }
 }
 

@@ -63,7 +63,7 @@ describe('buildNavSections', () => {
     const kids = (label: string) => labels(pinned.find((i) => i.label === label)?.children)
     expect(kids('Quotes')).toEqual(['Quotes', 'Lane rates', 'Spot inbox'])
     expect(kids('Shipments')).toEqual(['Active', 'All', 'Intake'])
-    expect(kids('Load Tracking')).toEqual(['Tracking', 'Check calls', 'Document review', 'Customer links'])
+    expect(pinned.find((i) => i.label === 'Load Tracking')?.children).toBeUndefined()
     expect(kids('Customers')).toEqual(['Customers', 'Follow-ups'])
     expect(kids('Accounting')).toEqual(['Accounts Receivable', 'Accounts Payable', 'Vendors', 'Factoring'])
     expect(kids('Settings')).toEqual([
@@ -260,10 +260,8 @@ describe('tmsBreadcrumb', () => {
     expect(tmsBreadcrumb('/tms/shipments/intake/abc')[1].to).toBe('/tms/shipments/intake')
   })
 
-  it('files the tracking pages under Load Tracking', () => {
-    expect(labels('/tms/tracking')).toEqual(['Load Tracking', 'Tracking'])
-    expect(labels('/tms/documents/review')).toEqual(['Load Tracking', 'Document review'])
-    expect(labels('/tms/check-calls')).toEqual(['Load Tracking', 'Check calls'])
+  it('files Load Tracking as one crumb, Customer links under it, and drops the retired pages', () => {
+    expect(labels('/tms/tracking')).toEqual(['Load Tracking'])
     expect(labels('/tms/tracking/links')).toEqual(['Load Tracking', 'Customer links'])
   })
 

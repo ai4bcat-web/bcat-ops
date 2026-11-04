@@ -45,6 +45,7 @@ import { CreditLimitCard } from './CreditLimitCard'
 import { CustomerArTab } from './CustomerArTab'
 import { StatusActionDialog } from './StatusActionDialog'
 import { FlowDefaultsCard } from './FlowDefaultsCard'
+import { TrackingPrefsFields } from './TrackingPrefsFields'
 import { TrackingAutomationEditor } from '@/features/settings/automation/TrackingAutomationEditor'
 import { resolveAutomation } from '@/lib/trackingAutomation'
 import type {
@@ -442,6 +443,9 @@ export function CustomerProfile({
               }}
               onChange={(patch) => setPartial(patch)}
             />
+            <TmsCard title="Tracking">
+              <TrackingPrefsFields value={value} onChange={(patch) => setPartial(patch)} legacyHint />
+            </TmsCard>
             <TmsCard title="Tracking automation">
               <p className="tms-muted" style={{ fontSize: 12, margin: '0 0 8px' }}>
                 Overrides the org defaults for this customer. Division overrides apply per shipment.

@@ -12,11 +12,27 @@ export function DispatchBar() {
   const profile = useDriverProfile()
   const phone = profile?.dispatchPhone ?? null
   const own = profile?.dispatcher ?? null
-  if (!phone && !own) return null
+  const work = profile?.workPhone ?? null
+  if (!phone && !own && !work) return null
   return (
     <div className="shrink-0 border-b border-border bg-card">
-      {own && <Line label={`Your dispatcher · ${own.name}`} phone={own.phone} primary />}
-      {phone && <Line label="Dispatch" phone={phone} primary={!own} />}
+      {work && <WorkPhoneLine number={work.number} label={work.label} truckNumber={work.truckNumber} />}
+      {own && <Line label={`Your dispatcher · ${own.name}`} phone={own.phone} primary={!work} />}
+      {phone && <Line label="Dispatch" phone={phone} primary={!own && !work} />}
+    </div>
+  )
+}
+
+/** Display only: the number dispatch reaches the driver on while they are in this truck. */
+function WorkPhoneLine({ number, label, truckNumber }: { number: string; label: string | null; truckNumber: string | null }) {
+  return (
+    <div className="flex items-center justify-between gap-3 px-4 py-1.5" data-testid="driver-work-phone">
+      <div className="min-w-0">
+        <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+          Work phone{truckNumber ? ` · truck ${truckNumber}` : ''}{label ? ` · ${label}` : ''}
+        </div>
+        <a href={`tel:${number}`} className="font-mono text-sm font-bold tabular-nums text-foreground">{prettyPhone(number)}</a>
+      </div>
     </div>
   )
 }

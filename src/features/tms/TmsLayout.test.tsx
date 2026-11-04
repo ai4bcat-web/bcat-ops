@@ -38,7 +38,7 @@ vi.mock('@/store/useAppStore', () => ({
 }))
 vi.mock('@/features/dispatch/DispatchDrawer', () => ({ DispatchDrawer: () => <aside data-testid="dispatch-aside" /> }))
 // The badge resolver has its own test; here the layout only needs its shape.
-vi.mock('@/features/tms/useShellBadgeCounts', () => ({ useShellBadgeCounts: () => ({}), movingShipments: () => [] }))
+vi.mock('@/features/tms/useShellBadgeCounts', () => ({ useShellBadgeCounts: () => ({}) }))
 
 const auth = vi.hoisted(() => ({
   user: { email: 'rep@bcatcorp.com', groups: [] as string[], userId: 'u1' },
@@ -152,7 +152,7 @@ describe('TmsLayout', () => {
   it('hands the shell the notification total and a bell that opens the drawer on the item list', async () => {
     notifications.count = 3
     notifications.groups = [{
-      kind: 'CHECK_CALLS', label: 'Check calls', total: 1, moreTo: '/tms/check-calls', moreLabel: 'Open worklist',
+      kind: 'CHECK_CALLS', label: 'Check calls', total: 1, moreTo: '/tms/tracking?assignee=all&focus=checkcalls', moreLabel: 'Open worklist',
       items: [{ id: 'cc:s1', kind: 'CHECK_CALLS', severity: 'critical', title: 'L-1 — check call overdue', detail: 'Acme', at: null, to: '/tms/shipments/s1?tab=tracking' }],
     }]
     renderAt('/tms/dashboard')

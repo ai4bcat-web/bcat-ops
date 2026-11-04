@@ -64,7 +64,10 @@ vi.mock('@/hooks/useDirectory', () => ({
 }))
 vi.mock('@/store/useAppStore', () => ({
   useAppStore: (sel: (s: Record<string, unknown>) => unknown) =>
-    sel({ setSelectedLoad: vi.fn(), openNewShipment: vi.fn() }),
+    sel({ setSelectedLoad: vi.fn(), openNewShipment: vi.fn(), equipment: [] }),
+}))
+vi.mock('@/hooks/useTruckConfigs', () => ({
+  useDriverPhones: () => ({ truckId: null, truckNumber: null, work: null, personal: null, personalRaw: null }),
 }))
 
 const { SchedulerView } = await import('./SchedulerView')

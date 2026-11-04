@@ -29,6 +29,7 @@ import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'crypto'
 import Anthropic from '@anthropic-ai/sdk'
 import { validateCommissionPlans, validatePaySchedule } from '../../../src/lib/commission'
 import { validateAutomationPatch } from '../../../src/lib/trackingAutomation'
+import { DRIVER_SMS_TARGETS, TRACKING_METHODS, TRACKING_MODES } from '../../../src/lib/trackingPrefs'
 import { teamMembership, validateTeams } from '../../../src/lib/teams'
 import { SEED_DIVISIONS, SEED_RULES, validateDivisions, validateRules } from '../../../src/lib/ownership'
 import { checkIntakeEmail, normalizeIntakeEmail } from '../../../src/lib/intakeMail'
@@ -1144,6 +1145,11 @@ async function upsertCustomer(input: Record<string, unknown>, caller: Caller): P
     // Absent keys keep what is stored so a patch that predates the fields never clears them.
     defaultTrackerId: 'defaultTrackerId' in input ? optionalString(input.defaultTrackerId, 100) : (existing?.defaultTrackerId as string | undefined) ?? null,
     trackingAutomation: 'trackingAutomation' in input ? trackingAutomation : (existing?.trackingAutomation as Record<string, unknown> | undefined) ?? null,
+    // Steps AJ/AK — how the customer's loads are tracked and which driver number is texted.
+    // Absent keys keep what is stored (a profile save of another field must never wipe them); null clears.
+    trackingMode: 'trackingMode' in input ? optionalEnumStrict(input.trackingMode, TRACKING_MODES, 'trackingMode') : (existing?.trackingMode as string | undefined) ?? null,
+    trackingMethod: 'trackingMethod' in input ? optionalEnumStrict(input.trackingMethod, TRACKING_METHODS, 'trackingMethod') : (existing?.trackingMethod as string | undefined) ?? null,
+    driverSmsTarget: 'driverSmsTarget' in input ? optionalEnumStrict(input.driverSmsTarget, DRIVER_SMS_TARGETS, 'driverSmsTarget') : (existing?.driverSmsTarget as string | undefined) ?? null,
 
     createdBy: isCreate ? caller.email : (existing?.createdBy as string) ?? caller.email,
     updatedBy: caller.email,

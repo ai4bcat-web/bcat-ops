@@ -196,7 +196,11 @@ export function useShipmentForm(opts: UseShipmentFormOptions) {
       const blocking = blockingIssues(validateForm(v, {
         level, mode: bundle ? 'edit' : 'create', customer: customerOf(v.customer.id), settings,
       }))
-      if (blocking.length > 0) { onBlocked(blocking); return }
+      if (blocking.length > 0) {
+        if (kind === 'draft') toast.info('Kept as a local draft on this browser. Pick a customer to save it to the server.')
+        onBlocked(blocking)
+        return
+      }
       const pctx = pipelineCtxFor(v)
       const wasCreate = !bundle
       let result: PipelineResult

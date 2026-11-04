@@ -29,6 +29,8 @@ import { packetItems } from './entityPacket'
 import { approveDocument, rejectDocument } from '@/lib/documentReview'
 import { downloadFromUrl } from '@/lib/download'
 import type { FileHubState } from '@/hooks/useFileHub'
+import { DriverPhones } from '@/components/DriverPhones'
+import { useDriverPhones } from '@/hooks/useTruckConfigs'
 import type { ComplianceDocument, Driver } from '@/types'
 
 export type { FileEntity }
@@ -60,6 +62,10 @@ export function EntityFilePanel({ entity, hub, onClose, onEditDriver, canSeePriv
   const drivers = useAppStore((s) => s.drivers)
   const equipment = useAppStore((s) => s.equipment)
   const updateDriver = useAppStore((s) => s.updateDriver)
+  const driverEntity = entity.kind === 'DRIVER' ? entity.driver : null
+  const driverPhones = useDriverPhones(driverEntity, {
+    unitNumber: equipment.find((e) => e.id === driverEntity?.assignedTruckId)?.unitNumber ?? null,
+  })
   const updateEquipment = useAppStore((s) => s.updateEquipment)
 
   const entityType = entity.kind
@@ -322,7 +328,13 @@ export function EntityFilePanel({ entity, hub, onClose, onEditDriver, canSeePriv
       >
         {/* Details */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px 16px', marginBottom: 20 }}>
-          {fields.map((f) => (
+          {entity.kind === 'DRIVER' && (driverPhones.truckId || driverPhones.personal || driverPhones.personalRaw) && (
+            <div data-testid="driver-file-phones">
+              <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--tms-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Phone</div>
+              <div style={{ fontSize: 13.5, color: 'var(--tms-text)', marginTop: 2 }}><DriverPhones phones={driverPhones} variant="stacked" /></div>
+            </div>
+          )}
+          {fields.filter((f) => !(entity.kind === 'DRIVER' && f.label === 'Phone')).map((f) => (
             <div key={f.label}>
               <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--tms-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{f.label}</div>
               <div style={{ fontSize: 13.5, color: f.value ? 'var(--tms-text)' : 'var(--tms-muted)', marginTop: 2 }}>{f.value || '—'}</div>

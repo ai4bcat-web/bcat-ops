@@ -1,8 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
-import { DocumentReviewPage } from './DocumentReviewPage'
+import { DocumentReviewPanel } from './DocumentReviewPanel'
 import type { ShipmentBundle, ShipmentDocumentRecord } from '@/types/tms'
 
 class ResizeObserverStub { observe() {} unobserve() {} disconnect() {} }
@@ -39,30 +38,29 @@ const bundle = {
   documents: [],
 } as unknown as ShipmentBundle
 
-const { listDocumentReviewQueue, getShipmentBundle, reviewDocument } = vi.hoisted(() => ({
-  listDocumentReviewQueue: vi.fn(),
+const { getShipmentBundle, reviewDocument, onDecided } = vi.hoisted(() => ({
+  onDecided: vi.fn(),
   getShipmentBundle: vi.fn(),
   reviewDocument: vi.fn(),
 }))
 
 vi.mock('@/lib/apiClient', () => ({
-  listDocumentReviewQueue,
   getShipmentBundle,
   getShipmentDocumentUrl: vi.fn(async () => 'https://example.test/pod-scan.pdf'),
   reviewDocument,
 }))
 
 beforeEach(() => {
-  listDocumentReviewQueue.mockReset().mockResolvedValue(pending)
+  onDecided.mockReset()
   getShipmentBundle.mockReset().mockResolvedValue(bundle)
   reviewDocument.mockReset().mockResolvedValue({ bundle, document: pending[0] })
 })
 
 function renderPage() {
-  render(<MemoryRouter><DocumentReviewPage /></MemoryRouter>)
+  render(<DocumentReviewPanel documents={pending} onDecided={onDecided} />)
 }
 
-describe('DocumentReviewPage', () => {
+describe('DocumentReviewPanel', () => {
   it('lists a pending upload with the type the carrier claimed and who sent it', async () => {
     renderPage()
 
@@ -91,6 +89,7 @@ describe('DocumentReviewPage', () => {
       decision: 'ACCEPT',
       type: 'LUMPER_RECEIPT',
     })
+    await waitFor(() => expect(onDecided).toHaveBeenCalledTimes(1))
   })
 
   it('refuses to reject until a note says why', async () => {

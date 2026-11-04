@@ -8,7 +8,7 @@ import type { NotificationGroup } from './collectNotifications'
 
 const groups: NotificationGroup[] = [
   {
-    kind: 'CHECK_CALLS', label: 'Check calls', total: 12, moreTo: '/tms/check-calls', moreLabel: 'Open worklist',
+    kind: 'CHECK_CALLS', label: 'Check calls', total: 12, moreTo: '/tms/tracking?assignee=all&focus=checkcalls', moreLabel: 'Open worklist',
     items: [{ id: 'cc:1', kind: 'CHECK_CALLS', severity: 'critical', title: 'L-1 overdue', detail: 'Acme', at: null, to: '/tms/shipments/s1?tab=tracking' }],
   },
   {
@@ -42,7 +42,7 @@ describe('NotificationsDrawer', () => {
 
   it('links to the owning page when a group has more than it shows, and closes on item click', () => {
     const onOpenChange = renderDrawer(groups)
-    expect(screen.getByRole('link', { name: /Open worklist — 11 more/ })).toHaveAttribute('href', '/tms/check-calls')
+    expect(screen.getByRole('link', { name: /Open worklist — 11 more/ })).toHaveAttribute('href', '/tms/tracking?assignee=all&focus=checkcalls')
     expect(screen.queryByRole('link', { name: /Open Errors tab/ })).toBeNull()
     fireEvent.click(screen.getByRole('link', { name: /L-1 overdue/ }))
     expect(onOpenChange).toHaveBeenCalledWith(false)

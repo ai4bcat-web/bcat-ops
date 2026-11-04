@@ -4,6 +4,9 @@ import {
   assigneeTabs,
   defaultAssignee,
   etaOf,
+  focusRows,
+  isCheckCallDue,
+  parseFocus,
   lifecycleOf,
   nextCheckCallStateOf,
   podStateOf,
@@ -88,6 +91,36 @@ describe('nextCheckCallStateOf', () => {
   it('shows nothing when none is scheduled or the shipment is finished', () => {
     expect(nextCheckCallStateOf(row('A'), nowMs)).toEqual({ kind: 'NONE' })
     expect(nextCheckCallStateOf(delivered({ nextCheckCallAt: '2026-10-29T13:20:00Z' }), nowMs)).toEqual({ kind: 'NONE' })
+  })
+})
+
+describe('focus', () => {
+  const GRACE = 30
+  const upcoming = row('UP', { nextCheckCallAt: '2026-10-29T12:40:00Z' })
+  const due = row('DUE', { nextCheckCallAt: '2026-10-29T11:50:00Z' })
+  const overdue = row('OVD', { nextCheckCallAt: '2026-10-29T11:00:00Z' })
+  const finished = delivered({ nextCheckCallAt: '2026-10-29T11:00:00Z' })
+  const none = row('NONE')
+
+  it('Check calls due is DUE plus OVERDUE on the notifier clock, grace included, never a finished load', () => {
+    const ids = focusRows([upcoming, due, overdue, finished, none], 'checkcalls', nowMs, GRACE).map((r) => r.id)
+    expect(ids).toEqual(['DUE', 'OVD'])
+    // Inside the grace a missed call is DUE, past it OVERDUE; either way it is listed.
+    expect(isCheckCallDue(row('A', { nextCheckCallAt: '2026-10-29T11:31:00Z' }), nowMs, GRACE)).toBe(true)
+    expect(isCheckCallDue(upcoming, nowMs, GRACE)).toBe(false)
+  })
+
+  it('Docs and Exceptions read the counters the grid already carries', () => {
+    const rows = [row('A', { pendingDocReviewCount: 2 }), row('B', { openIncidentCount: 1 }), row('C', { pendingDocReviewCount: 0, openIncidentCount: 0 })]
+    expect(focusRows(rows, 'docs', nowMs).map((r) => r.id)).toEqual(['A'])
+    expect(focusRows(rows, 'exceptions', nowMs).map((r) => r.id)).toEqual(['B'])
+    expect(focusRows(rows, null, nowMs).map((r) => r.id)).toEqual(['A', 'B', 'C'])
+  })
+
+  it('reads only the three known ?focus= values', () => {
+    expect(parseFocus('docs')).toBe('docs')
+    expect(parseFocus('all')).toBeNull()
+    expect(parseFocus(null)).toBeNull()
   })
 })
 

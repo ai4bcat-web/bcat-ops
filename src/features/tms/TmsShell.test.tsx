@@ -41,10 +41,6 @@ const PINNED: TmsNavItem[] = [
     label: 'Load Tracking',
     icon: Truck,
     badgeKey: 'loadTracking',
-    children: [
-      { to: '/tms/tracking', label: 'Tracking', badgeKey: 'tracking', exclude: ['/tms/tracking/links'] },
-      { to: '/tms/tracking/links', label: 'Customer links' },
-    ],
   },
   {
     to: '/tms/invoicing',
@@ -194,10 +190,11 @@ describe('TmsShell', () => {
     expect(screen.queryByText('Views')).not.toBeInTheDocument()
   })
 
-  it('shows a parent badge and a child badge independently', () => {
-    renderShell('/tms/tracking', undefined, { badgeCounts: { loadTracking: 5, tracking: 2 } })
+  it('renders a parent with no children as one link with its badge and no caret', () => {
+    renderShell('/tms/tracking', undefined, { badgeCounts: { loadTracking: 5 } })
     expect(rail().getByRole('link', { name: /^Load Tracking/ })).toHaveTextContent('5')
-    expect(rail().getByRole('link', { name: /^Tracking/ })).toHaveTextContent('2')
+    expect(rail().queryByRole('button', { name: /Load Tracking/ })).not.toBeInTheDocument()
+    expect(rail().queryByRole('link', { name: 'Check calls' })).not.toBeInTheDocument()
     expect(rail().getByRole('link', { name: /^Accounting/ })).not.toHaveTextContent(/\d/)
   })
 
@@ -344,22 +341,6 @@ describe('TmsShell', () => {
     expect(trail.getByRole('link', { name: 'Dashboard home' })).toHaveAttribute('href', '/tms/dashboard')
     expect(trail.getByRole('link', { name: 'Shipments' })).toHaveAttribute('href', '/tms/shipments')
     expect(trail.getByText('Load')).toHaveAttribute('aria-current', 'page')
-  })
-
-  it('counts moving shipments on Tracking and lists them when it is expanded', () => {
-    renderShell('/tms/tracking/links', undefined, {
-      badgeCounts: { tracking: 2 },
-      trackedLoads: [
-        { id: 'a', label: 'SHP-1', sub: 'Acme', to: '/tms/shipments/a' },
-        { id: 'b', label: 'SHP-2', sub: null, to: '/tms/shipments/b' },
-      ],
-    })
-    expect(rail().getByRole('link', { name: /^Tracking/ })).toHaveTextContent('2')
-    expect(rail().queryByRole('link', { name: /SHP-1/ })).not.toBeInTheDocument()
-
-    fireEvent.click(rail().getByRole('button', { name: 'Expand Tracking' }))
-    expect(rail().getByRole('link', { name: /SHP-1/ })).toHaveAttribute('href', '/tms/shipments/a')
-    expect(rail().getByRole('link', { name: /SHP-2/ })).toHaveAttribute('href', '/tms/shipments/b')
   })
 
   it('renders a legacy badge key and omits zero or absent counts', () => {

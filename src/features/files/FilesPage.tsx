@@ -6,7 +6,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { useFileHub } from '@/hooks/useFileHub'
 import { Avatar } from '@/components/ui/avatar'
 import { getColor } from '@/lib/driverColors'
-import { formatPhone, formatVin } from '@/lib/utils'
+import { formatVin } from '@/lib/utils'
 import {
   slotsForDriver, slotsForAsset, readyScore, slotState, truckSlotState, driverExpiry, visibleSlots,
   type ReadyScore, type SlotState, type ExpiryInfo,
@@ -27,6 +27,8 @@ import { TmsScrollPage } from '@/features/tms/kit/TmsScrollPage'
 import { PrivateDocsModal } from './PrivateDocsModal'
 import { InviteDriverModal } from './InviteDriverModal'
 import { IvanPhones } from '@/features/driver-info/IvanPhones'
+import { DriverPhones } from '@/components/DriverPhones'
+import { useDriverPhones } from '@/hooks/useTruckConfigs'
 import { useComplianceSettings } from '@/hooks/useComplianceSettings'
 import { downloadEntityPacket, packetToast, driverForTruck, type FileEntity } from './entityPacket'
 import type { Driver } from '@/types'
@@ -107,6 +109,13 @@ function ExpiryCell({ info }: { info: ExpiryInfo }) {
       )}
     </td>
   )
+}
+
+/** Work (truck N) and Personal lines for one driver row; "—" when there is no number at all. */
+function DriverPhoneLines({ driver, unitNumber }: { driver: Driver; unitNumber: string | null }) {
+  const phones = useDriverPhones(driver, { unitNumber })
+  if (!phones.truckId && !phones.personal && !phones.personalRaw) return <div style={{ color: 'var(--tms-text-2)' }}>—</div>
+  return <div style={{ color: 'var(--tms-text-2)', fontSize: 12 }}><DriverPhones phones={phones} variant="stacked" /></div>
 }
 
 export function FilesPage() {
@@ -378,7 +387,7 @@ export function FilesPage() {
                     </td>
                     <td style={{ ...TD, maxWidth: 210 }}
                       title={emailOf(d) || 'No email — an application can’t be sent without one'}>
-                      <div style={{ color: 'var(--tms-text-2)', whiteSpace: 'nowrap' }}>{d.phone ? formatPhone(d.phone) : '—'}</div>
+                      <DriverPhoneLines driver={d} unitNumber={truck?.unitNumber ?? null} />
                       <div style={{ fontSize: 11.5, color: emailOf(d) ? 'var(--tms-muted)' : 'var(--tms-badge-orange)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {emailOf(d) || 'no email'}
                       </div>

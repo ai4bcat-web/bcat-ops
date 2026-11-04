@@ -3,6 +3,7 @@
  * and the three computed cells (ETA, next check call, POD state). No React, no I/O —
  * the board and the workstation both lean on it so the rules live once.
  */
+import { checkCallState } from '@/lib/checkCalls'
 import { isRateConSent } from '@/lib/trackingAutomation'
 import { trackingEtaEstimate } from '@/lib/trackingEta'
 import type { Stop } from '@/types'
@@ -162,4 +163,47 @@ export function durationText(minutes: number): string {
     return m === 0 ? `${Math.floor(minutes / 60)} h` : `${Math.floor(minutes / 60)} h ${m} m`
   }
   return `${Math.round(minutes / 1440)} d`
+}
+
+// ── Focus (the old Check calls / Document review worklists, as filters of the same rows) ──
+
+export type TrackingFocus = 'checkcalls' | 'docs' | 'exceptions'
+
+/** The `?focus=` URL value as a focus; anything else is "All". */
+export function parseFocus(value: string | null): TrackingFocus | null {
+  return value === 'checkcalls' || value === 'docs' || value === 'exceptions' ? value : null
+}
+
+/**
+ * A reminder on the clock that has come due or is overdue: the same `checkCallState` the sidebar
+ * badge, the notifier and the retired worklist read. Finished loads carry no reminder.
+ */
+export function isCheckCallDue(row: ShipmentRow, nowMs: number, graceMinutes?: number | null): boolean {
+  if (nextCheckCallStateOf(row, nowMs).kind === 'NONE') return false
+  const state = checkCallState(row, nowMs, graceMinutes)
+  return state === 'DUE' || state === 'OVERDUE'
+}
+
+/** A carrier upload nobody has accepted or refused yet. */
+export function hasDocsToReview(row: ShipmentRow): boolean {
+  return (row.pendingDocReviewCount ?? 0) > 0
+}
+
+/** An open exception (breakdown, delay) nobody has closed out. */
+export function hasException(row: ShipmentRow): boolean {
+  return (row.openIncidentCount ?? 0) > 0
+}
+
+export function focusRows(
+  rows: readonly ShipmentRow[],
+  focus: TrackingFocus | null,
+  nowMs: number,
+  graceMinutes?: number | null,
+): ShipmentRow[] {
+  switch (focus) {
+    case 'checkcalls': return rows.filter((r) => isCheckCallDue(r, nowMs, graceMinutes))
+    case 'docs': return rows.filter(hasDocsToReview)
+    case 'exceptions': return rows.filter(hasException)
+    default: return [...rows]
+  }
 }

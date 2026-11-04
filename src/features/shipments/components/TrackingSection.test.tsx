@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen, waitFor, fireEvent } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import { AuthContext } from '@/hooks/useAuth'
 import { TrackingSection } from './TrackingSection'
@@ -26,6 +26,7 @@ vi.mock('@/lib/apiClient', async () => {
     listCheckCallsByLoad: vi.fn(async () => []),
     listTrackingLinksByShipment: vi.fn(async () => []),
     listTruckPositions: vi.fn(async () => []),
+    listTruckConfigs: vi.fn(async () => []),
     listShipmentMessages,
     sendShipmentMessage,
     runCheckCallPlan,
@@ -84,8 +85,8 @@ describe('TrackingSection delivery ETA', () => {
   it('renders the stored delivery ETA from the active load carrier', async () => {
     renderTab()
     const eta = await screen.findByTestId('delivery-eta')
-    expect(eta.textContent).toContain('ETA to delivery')
-    expect(eta.textContent).toContain('Mar 3, 2026')
+    expect(eta.textContent).toContain('ETA')
+    expect(eta.textContent).toContain('Mar 3')
   })
 
   it('does not render a zero or placeholder ETA when the carrier has none stored', async () => {
@@ -97,7 +98,9 @@ describe('TrackingSection delivery ETA', () => {
       </AuthContext.Provider>,
     )
     await waitFor(() => expect(screen.getByTestId('last-known')).toBeInTheDocument())
-    expect(screen.queryByTestId('delivery-eta')).not.toBeInTheDocument()
+    const eta = screen.getByTestId('delivery-eta')
+    expect(eta.textContent).not.toMatch(/\d{4}|Mar|1970|12:00 AM/)
+    expect(eta.textContent).toContain('—')
   })
 })
 
@@ -107,7 +110,10 @@ describe('TrackingSection shared detail pane', () => {
     await waitFor(() => expect(screen.getByTestId('tracking-detail-map')).toBeInTheDocument())
     expect(screen.getByTestId('tracking-eta')).toBeInTheDocument()
     expect(screen.getByTestId('tracking-cadence')).toBeInTheDocument()
-    expect(screen.getByTestId('tracking-thread')).toBeInTheDocument()
+    // Two panes, one per channel, each its own thread.
+    expect(screen.getAllByTestId('tracking-thread')).toHaveLength(2)
+    expect(screen.getByTestId('pane-sms')).toBeInTheDocument()
+    expect(screen.getByTestId('pane-email')).toBeInTheDocument()
   })
 
   it('computes the ETA from the last ping against the delivery appointment and labels the basis', async () => {
@@ -167,10 +173,12 @@ describe('TrackingSection shared detail pane', () => {
     renderTab(true)
 
     await waitFor(() => expect(screen.getByTestId('detail-thread')).toBeInTheDocument())
+    // Both messages are SMS, so they sit in the SMS pane only.
+    expect(within(screen.getByTestId('pane-email')).queryByTestId('detail-thread')).not.toBeInTheDocument()
     const authors = screen.getAllByTestId('thread-author')
     expect(authors[0]).toHaveTextContent('Agent')
     expect(authors[1]).toHaveTextContent('Person — Maria')
-    expect(screen.getByTestId('signature-preview')).toHaveTextContent('— Maria, BCAT Tracking')
+    expect(screen.getAllByTestId('signature-preview')[0]).toHaveTextContent('— Maria, BCAT Tracking')
   })
 
   it('preserves Run check call now: the result is shown against the plan', async () => {

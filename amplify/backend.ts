@@ -4,6 +4,7 @@ import { CfnFunction, Function as LambdaFunction, FunctionUrl, FunctionUrlAuthTy
 import { CfnRule, Rule, Schedule, RuleTargetInput } from 'aws-cdk-lib/aws-events'
 import { LambdaFunction as EventsLambdaTarget } from 'aws-cdk-lib/aws-events-targets'
 import { ArnFormat, Aspects, CfnOutput, Duration, Fn, RemovalPolicy, Stack } from 'aws-cdk-lib'
+import { StringParameter } from 'aws-cdk-lib/aws-ssm'
 import type { IConstruct } from 'constructs'
 import {
   UserPool,
@@ -922,6 +923,47 @@ for (const fn of [dispatchWebhookFn, dispatchActionsFn, dispatchSlackBridgeFn, d
     actions: ['dynamodb:Scan', 'dynamodb:PutItem'],
     resources: [driverSubmissionTable.tableArn, driverSubmissionDocTable.tableArn],
   }))
+}
+
+// Steps AJ/AK — per-truck driver work phones.
+//  * tracking-actions and driver-app-api read TruckConfig (GetItem by truckId): every driver text goes to
+//    the truck's work phone, and the driver app shows it. tracking-actions already has DRIVER_TABLE_NAME
+//    (the loop above) and Scan on Driver; it gains GetItem for the personal number / assigned truck.
+//  * the dispatch webhook scans TruckConfig so a text from a truck's work phone is matched to its driver,
+//    and carries that text into the shipment thread by invoking tracking-actions as a system caller.
+//    The function name travels through SSM (written in the tracking stack, read at run time): the tracking
+//    stack already references the webhook stack (WEBHOOK_URL), so passing the name as an env var here
+//    would close a CloudFormation cycle.
+{
+  const truckConfigTable = backend.data.resources.tables['TruckConfig']
+  for (const fn of [trackingActionsFn, driverApiFn]) {
+    fn.addEnvironment('TRUCK_CONFIG_TABLE_NAME', truckConfigTable.tableName)
+    fn.addToRolePolicy(new PolicyStatement({ actions: ['dynamodb:GetItem'], resources: [truckConfigTable.tableArn] }))
+  }
+  trackingActionsFn.addToRolePolicy(new PolicyStatement({ actions: ['dynamodb:GetItem'], resources: [dispatchDriverTable.tableArn] }))
+
+  dispatchWebhookFn.addEnvironment('TRUCK_CONFIG_TABLE_NAME', truckConfigTable.tableName)
+  dispatchWebhookFn.addToRolePolicy(new PolicyStatement({ actions: ['dynamodb:Scan'], resources: [truckConfigTable.tableArn] }))
+
+  const trackingFnParamName = `/bcat/tracking-actions/${backend.auth.resources.userPool.userPoolId}/function-name`
+  new StringParameter(Stack.of(trackingActionsFn), 'TrackingActionsFunctionName', {
+    parameterName: trackingFnParamName,
+    stringValue: trackingActionsFn.functionName,
+  })
+  dispatchWebhookFn.addEnvironment('TRACKING_ACTIONS_PARAM_NAME', trackingFnParamName)
+  dispatchWebhookFn.addToRolePolicy(new PolicyStatement({
+    actions: ['ssm:GetParameter'],
+    resources: [Stack.of(dispatchWebhookFn).formatArn({
+      service: 'ssm',
+      resource: 'parameter',
+      resourceName: trackingFnParamName.replace(/^\//, ''),
+    })],
+  }))
+  trackingActionsFn.addPermission('DispatchWebhookInvoke', {
+    principal: dispatchWebhookFn.grantPrincipal,
+    action: 'lambda:InvokeFunction',
+    sourceArn: dispatchWebhookFn.functionArn,
+  })
 }
 
 // The five-minute nudge also flags drivers sitting at a stop past two hours

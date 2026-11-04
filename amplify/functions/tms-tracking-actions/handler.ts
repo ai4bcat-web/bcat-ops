@@ -72,6 +72,7 @@ import { loadDispatchConfig, type DispatchConfig } from '../_shared/dispatchConf
 import { sendDispatchText, type SendDeps } from '../_shared/dispatchSend'
 import { sendMessage } from '../_shared/twilio'
 import { MAX_SMS_BODY, toE164Strict } from '../../../src/lib/dispatch'
+import { resolveDriverSmsForLeg } from './driverPhone'
 import { linkExpiry, smsBodyFor } from '../../../src/lib/trackingLink'
 import {
   DEFAULT_REQUIRED_CARRIER_UPLOAD_TYPES,
@@ -126,6 +127,9 @@ const AUDIT_LOG_TABLE_NAME = process.env.AUDIT_LOG_TABLE_NAME ?? ''
 const SHIPMENT_DOCUMENT_TABLE_NAME = process.env.SHIPMENT_DOCUMENT_TABLE_NAME ?? ''
 const SHIPMENT_NOTICE_TABLE_NAME = process.env.SHIPMENT_NOTICE_TABLE_NAME ?? ''
 const CUSTOMER_TABLE_NAME = process.env.CUSTOMER_TABLE_NAME ?? ''
+/** Step AK: the driver's work phone (TruckConfig) and personal number / assigned truck (Driver). Unset = no routing, snapshot number only. */
+const TRUCK_CONFIG_TABLE_NAME = process.env.TRUCK_CONFIG_TABLE_NAME ?? ''
+const DRIVER_TABLE_NAME = process.env.DRIVER_TABLE_NAME ?? ''
 /** Step P8. The shipment's own e-mail/SMS thread. This router is its only writer. */
 const USER_PROFILE_TABLE_NAME = process.env.USER_PROFILE_TABLE_NAME ?? ''
 const SHIPMENT_MESSAGE_TABLE_NAME = process.env.SHIPMENT_MESSAGE_TABLE_NAME ?? ''
@@ -345,6 +349,7 @@ function getGroups(identity?: AppSyncIdentity | null): string[] {
 export const SYSTEM_CALLERS: Record<string, readonly Action[]> = {
   'tracking-automation': ['RUN_TRACKING_AUTOMATION'],
   'shipment-email-intake': ['INGEST_SHIPMENT_MESSAGE', 'INGEST_ATTACHMENT'],
+  'dispatch-twilio-webhook': ['INGEST_SHIPMENT_MESSAGE'],
 }
 
 export const SYSTEM_CALLER_EMAIL = 'system@bcatcorp.com'
@@ -463,6 +468,13 @@ const getById = (tableName: string, id: string) => storeGetById(dynamo, tableNam
 const queryIndex = (tableName: string, indexName: string, keyName: string, keyValue: string) =>
   storeQueryIndex(dynamo, tableName, indexName, keyName, keyValue)
 const transact = (items: TransactWriteItem[], label: string) => storeTransact(dynamo, items, label)
+
+/** TruckConfig is keyed by `truckId`, not `id`, so it cannot go through `getById`. Unset table = no work phones. */
+async function getTruckConfig(truckId: string): Promise<Row | null> {
+  if (!TRUCK_CONFIG_TABLE_NAME) return null
+  const result = await dynamo.send(new GetItemCommand({ TableName: TRUCK_CONFIG_TABLE_NAME, Key: marshall({ truckId }) }))
+  return result.Item ? unmarshall(result.Item) : null
+}
 
 function getSettings(): Promise<Row | null> {
   if (!TMS_SETTINGS_TABLE_NAME) return Promise.resolve(null)
@@ -807,7 +819,7 @@ async function sendTrackingLink(input: Row, caller: Caller): Promise<Row> {
 
   const loadId = String(loadCarrier.loadId)
   const shipmentId = String(loadCarrier.shipmentId)
-  const [load] = await Promise.all([getById(LOAD_TABLE_NAME, loadId), liveShipment(shipmentId)])
+  const [load, shipment] = await Promise.all([getById(LOAD_TABLE_NAME, loadId), liveShipment(shipmentId)])
   if (!load) throw new Error(`Load not found: ${loadId}`)
   const loadStatus = String(load.status ?? '')
   if (CLOSED_LOAD_STATUSES.includes(loadStatus)) {
@@ -816,7 +828,10 @@ async function sendTrackingLink(input: Row, caller: Caller): Promise<Row> {
 
   // COPY exists for the dispatcher who will paste the link into their own thread, so
   // it needs no number. A text does.
-  const phone = toE164Strict(optionalString(input.to, 40) ?? optionalString(loadCarrier.driverPhone, 40))
+  const explicitTo = optionalString(input.to, 40)
+  const phone = explicitTo != null
+    ? toE164Strict(explicitTo)
+    : (await resolveDriverSmsForLeg(threadDeps, { carrier: loadCarrier, shipment })).to
   if (via === 'SMS' && !phone) {
     throw new Error('No phone number to text — add the driver\'s number to the assignment, or copy the link instead')
   }
@@ -1262,14 +1277,18 @@ async function textDriver(input: Row, caller: Caller): Promise<Row> {
 
   const loadCarrier = await getById(LOAD_CARRIER_TABLE_NAME, loadCarrierId)
   if (!loadCarrier) throw new Error(`Load carrier not found: ${loadCarrierId}`)
-  await liveShipment(String(loadCarrier.shipmentId))
+  const shipment = await liveShipment(String(loadCarrier.shipmentId))
 
-  const phone = toE164Strict(optionalString(loadCarrier.driverPhone, 40))
+  // Step AK: the truck's work phone first, the driver's own number as the fallback.
+  const target = await resolveDriverSmsForLeg(threadDeps, { carrier: loadCarrier, shipment })
+  const phone = target.to
   if (!phone) {
     return {
       messageId: null,
       smsStatus: 'FAILED' satisfies SmsStatus,
-      smsError: 'No driver phone number on this assignment',
+      smsError: target.source === 'NONE' && target.reason && target.reason !== 'No phone for this driver'
+        ? target.reason
+        : 'No driver phone number on this assignment',
     }
   }
 
@@ -1281,7 +1300,7 @@ async function textDriver(input: Row, caller: Caller): Promise<Row> {
 
   if (sms.status === 'SENT') {
     await writeAudit('LOAD_CARRIER', loadCarrierId, 'TEXT_DRIVER', caller, {
-      loadId: String(loadCarrier.loadId), to: phone, messageId: sms.messageId,
+      loadId: String(loadCarrier.loadId), to: phone, source: target.source, messageId: sms.messageId,
     })
   }
   return { messageId: sms.messageId, smsStatus: sms.status, smsError: sms.error }
@@ -2168,6 +2187,7 @@ const STEP_P_TABLES = {
   document: SHIPMENT_DOCUMENT_TABLE_NAME,
   checkCall: LOAD_CHECK_CALL_TABLE_NAME,
   trackingLink: TRACKING_LINK_TABLE_NAME,
+  driver: DRIVER_TABLE_NAME,
 }
 
 /**
@@ -2306,6 +2326,7 @@ async function geocodeReply(text: string): Promise<{ city: string; state: string
 const threadDeps: ThreadDeps = {
   tables: STEP_P_TABLES,
   getById,
+  getTruckConfig,
   queryIndex,
   transact: (items) => transact(items, 'shipmentThread'),
   readBundle: (shipmentId) => storeReadBundle(stepPStore, shipmentId) as unknown as Promise<Row>,

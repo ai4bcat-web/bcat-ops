@@ -19,7 +19,8 @@ import { EventCard } from './EventCard'
 import type { Load, Driver, ViewMode, Stop } from '@/types'
 import type { TmsSettings } from '@/types/tms'
 import { formatTime } from '@/lib/date'
-import { formatPhone } from '@/lib/utils'
+import { prettyPhone } from '@/lib/dispatch'
+import { useDriverPhones } from '@/hooks/useTruckConfigs'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
@@ -56,6 +57,25 @@ interface SchedulerViewProps {
   viewMode: ViewMode
   weekStart: string
   onDatesSet: (info: DatesSetArg) => void
+}
+
+/** Resource label under the driver's name: work phone (with its truck) first, personal second, load count last. */
+function SchedulerDriverPhones({ driver, loadCount }: { driver: Driver; loadCount: number }) {
+  const unitNumber = useAppStore((s) => s.equipment.find((e) => e.id === driver.assignedTruckId)?.unitNumber ?? null)
+  const phones = useDriverPhones(driver, { unitNumber })
+  const personal = phones.personal ? prettyPhone(phones.personal) : phones.personalRaw
+  const workNumber = phones.work ? prettyPhone(phones.work.number) : 'none'
+  const work = phones.truckId ? `W (T${phones.truckNumber ?? '?'}) ${workNumber}` : null
+  const title = [
+    phones.truckId ? `Work (truck ${phones.truckNumber ?? '?'}): ${workNumber}` : null,
+    personal ? `Personal: ${personal}` : null,
+  ].filter(Boolean).join('\n')
+  return (
+    <span title={title || undefined} className="block">
+      {work && <span className="block truncate" style={phones.work ? undefined : { color: 'var(--tms-badge-orange)' }}>{work}</span>}
+      <span className="block truncate">{personal ? `P ${personal}` : '—'} · {loadCount}</span>
+    </span>
+  )
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -231,7 +251,7 @@ export function SchedulerView({
             {isBroker ? (
               <span className="font-medium uppercase tracking-wide text-[10px]" style={{ color: 'var(--tms-muted)' }}>Broker · {loadCount} load{loadCount !== 1 ? 's' : ''}</span>
             ) : (
-              <span>{formatPhone(driver.phone)} · {loadCount}</span>
+              <SchedulerDriverPhones driver={driver} loadCount={loadCount} />
             )}
           </div>
         </div>
