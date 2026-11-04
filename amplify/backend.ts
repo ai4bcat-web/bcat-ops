@@ -945,7 +945,10 @@ for (const fn of [dispatchWebhookFn, dispatchActionsFn, dispatchSlackBridgeFn, d
   dispatchWebhookFn.addEnvironment('TRUCK_CONFIG_TABLE_NAME', truckConfigTable.tableName)
   dispatchWebhookFn.addToRolePolicy(new PolicyStatement({ actions: ['dynamodb:Scan'], resources: [truckConfigTable.tableArn] }))
 
-  const trackingFnParamName = `/bcat/tracking-actions/${backend.auth.resources.userPool.userPoolId}/function-name`
+  let trackingRootStack: Stack = Stack.of(trackingActionsFn)
+  while (trackingRootStack.nestedStackParent) trackingRootStack = trackingRootStack.nestedStackParent
+  // Plain string at synth time (no tokens), distinct per deployment: the root stack name, hashed.
+  const trackingFnParamName = `/bcat/tracking-actions/${createHash('sha256').update(trackingRootStack.stackName).digest('hex').slice(0, 16)}/function-name`
   new StringParameter(Stack.of(trackingActionsFn), 'TrackingActionsFunctionName', {
     parameterName: trackingFnParamName,
     stringValue: trackingActionsFn.functionName,
