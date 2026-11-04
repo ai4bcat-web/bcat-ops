@@ -9,6 +9,7 @@ import type { AmazonDispute } from '@/types/dispute'
 import { getMondayOf } from '@/lib/date'
 import { currentMonth, monthsCovering } from '@/lib/shipmentWindows'
 import * as api from '@/lib/apiClient'
+import { inactiveChanges } from '@/lib/fleetActive'
 import { withDerivedLegacy, withStopsFromLegacy } from '@/lib/stops'
 import { errorMessage } from '@/lib/utils/errorMessage'
 import type { NewShipmentPrefill } from '@/features/shipments/components/NewShipmentDialog'
@@ -709,7 +710,7 @@ export const useAppStore = create<AppState>()(
       },
 
       loadReferenceData: () => {
-        if (get().drivers.length > 0) return Promise.resolve()
+        if (get().drivers.length > 0 && get().fleetLoaded) return Promise.resolve()
         referenceLoad ??= (async () => {
           try {
             const drivers = await api.listDrivers()
@@ -718,6 +719,8 @@ export const useAppStore = create<AppState>()(
           } catch (err) {
             referenceLoad = null
             console.warn('[store] loadReferenceData: drivers failed', err)
+            // Retryable, but whoever waits on the fleet must not wait on the roster.
+            set({ fleetLoaded: true })
             return
           }
           try {
@@ -725,6 +728,8 @@ export const useAppStore = create<AppState>()(
             if (equipment.length > 0) set({ equipment })
           } catch (err) {
             console.warn('[store] loadReferenceData: equipment unavailable', err)
+          } finally {
+            set({ fleetLoaded: true })
           }
         })()
         return referenceLoad
@@ -822,9 +827,13 @@ export const useAppStore = create<AppState>()(
         return item
       },
       updateEquipment: (id, patch) => {
+        const before = get().equipment.find((e) => e.id === id)
         set((s) => ({ equipment: s.equipment.map((e) => e.id === id ? { ...e, ...patch, updatedAt: nowIso() } : e) }))
         api.updateEquipment(id, patch as Partial<Omit<Equipment, 'id' | 'createdAt' | 'updatedAt'>>)
           .catch((err) => console.error('[store] updateEquipment failed', err))
+        // Parking / reactivating a truck or trailer is a fleet decision worth a trail.
+        const changes = before ? inactiveChanges(before, patch) : {}
+        if (Object.keys(changes).length > 0) writeAudit(get().currentUserEmail, 'Equipment', id, 'update', changes)
       },
       deleteEquipment: (id) => {
         const { maintenanceTasks, maintenanceInvoices } = get()

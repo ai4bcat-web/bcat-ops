@@ -52,6 +52,7 @@ const send = vi.hoisted(() => {
   // Step J — the integration framework's table and its SSM path.
   process.env.INTEGRATION_TABLE_NAME = 'Integration-test'
   process.env.CARRIER_TABLE_NAME = 'Carrier-test'
+  process.env.SHIPMENT_MESSAGE_TABLE_NAME = 'ShipmentMessage-test'
   process.env.INTEGRATION_PARAM_PATH = '/bcat/integrations/us-east-1_TEST'
   process.env.DISPATCH_PARAM_PATH = '/bcat/dispatch/us-east-1_TEST'
   return vi.fn()
@@ -2282,7 +2283,7 @@ describe('SAVE_OWNERSHIP_DIVISION', () => {
 
     it.each([
       ['nonsense', /valid e-mail address/],
-      ['ai4bcat@gmail.com', /already used by another mailbox/],
+      ['quotes@bcatcorp.com', /already used by another mailbox/],
       ['ai4bcat+tracking-shp-1@gmail.com', /shipment reply threads/],
     ])('refuses %s', async (intakeEmail, message) => {
       const tables = ownershipTables({ 'OwnershipDivision-test': [division({ code: 'ASSETS' })] })
@@ -2290,6 +2291,12 @@ describe('SAVE_OWNERSHIP_DIVISION', () => {
         handler(event('SAVE_OWNERSHIP_DIVISION', { code: 'LOCAL', name: 'Local', intakeEmail }, ADMIN_CALLER)),
       ).rejects.toThrow(message)
       expect(tables.divisions.get('LOCAL')).toBeUndefined()
+    })
+
+    it('accepts the demo intake mailbox (ai4bcat@gmail.com), lower-cased', async () => {
+      const tables = ownershipTables({ 'OwnershipDivision-test': [division({ code: 'ASSETS' })] })
+      await handler(event('SAVE_OWNERSHIP_DIVISION', { code: 'LOCAL', name: 'Local', intakeEmail: ' AI4BCAT@gmail.com ' }, ADMIN_CALLER))
+      expect(tables.divisions.get('LOCAL')).toMatchObject({ intakeEmail: 'ai4bcat@gmail.com' })
     })
 
     it('refuses an address another active division owns, case-insensitively, but not an archived one’s', async () => {
@@ -3396,5 +3403,28 @@ describe('ASK_ACADEMY', () => {
 
   it('rejects empty articles', async () => {
     await expect(handler(event({ question: 'What?' }))).rejects.toThrow('At least one Academy article is required')
+  })
+})
+
+describe('Find & Invite actions (Step AD): who may call them', () => {
+  beforeEach(() => {
+    lambdaSend.mockReset()
+  })
+
+  it.each([['page-carriers'], ['page-loads'], ['page-tms'], ['ADMIN']])('%s may look a carrier up; with no LIVE credentials the answer is a labelled stub and MCP is never called', async (group) => {
+    integrationTables({ 'Integration-test': [{ id: 'MYCARRIERPACKETS', provider: 'MYCARRIERPACKETS', kind: 'PROVIDER', status: 'NOT_CONNECTED', mode: 'STUB', health: 'UNKNOWN', version: 1 }] })
+    ssmStore()
+    const fetchSpy = vi.fn()
+    globalThis.fetch = fetchSpy as unknown as typeof fetch
+
+    const out = (await handler(event('MCP_PREVIEW_CARRIER', { mcNumber: 'MC274623' }, identity({ groups: [group] })))) as unknown as { mode: string; card: { source: string } }
+
+    expect(out).toMatchObject({ mode: 'STUB', card: { source: 'STUB' } })
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it.each(['MCP_PREVIEW_CARRIER', 'MCP_GET_CARRIER', 'MCP_SEND_INVITE', 'MCP_ADD_CARRIER'])('%s refuses a caller whose only grant is page-customers', async (action) => {
+    integrationTables()
+    await expect(handler(event(action, { mcNumber: 'MC274623', email: 'a@b.co' }, PAGE_CUSTOMER_CALLER))).rejects.toThrow(/Forbidden/)
   })
 })

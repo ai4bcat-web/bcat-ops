@@ -10,7 +10,7 @@
  * a link to a carrier lands somewhere you can keep working from.
  */
 import { useEffect, useMemo, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { Download } from 'lucide-react'
 import { toast } from 'sonner'
 import { RepPicker } from '@/components/RepPicker'
@@ -121,11 +121,14 @@ export function CarriersPage() {
     <>
       <TmsListPage<CarrierRow>
         title="Carriers"
-        primaryAction={{ label: 'Carrier', onClick: () => setNewCarrierOpen(true) }}
+        // Step AM: a carrier enters the directory only through MyCarrierPackets (Find & invite / Cover). This hand entry
+        // is an admin-only data fix, audited server-side; nobody else sees it.
+        primaryAction={isAdmin ? { label: 'Carrier (admin data fix)', onClick: () => setNewCarrierOpen(true) } : undefined}
         actions={
-          isAdmin
-            ? <TmsButton aria-label="CSV" onClick={exportCsv}><Download size={14} /> CSV</TmsButton>
-            : undefined
+          <>
+            <Link className="tms-btn tms-btn-secondary" to="/tms/carriers/find" data-testid="launch-find-invite">Find &amp; invite</Link>
+            {isAdmin ? <TmsButton aria-label="CSV" onClick={exportCsv}><Download size={14} /> CSV</TmsButton> : null}
+          </>
         }
         quickTabs={{
           tabs: CARRIER_TABS.map((t) => ({ key: t.key, label: t.label, count: counts[t.key] })),
@@ -279,7 +282,7 @@ function FilterRail({ filters, equipment, owners, onChange }: {
   )
 }
 
-/** "+ Carrier" collects only what identifies them; everything else is the profile's job. */
+/** Admin-only data fix: collects only what identifies them; everything else is the profile's job. */
 function NewCarrierDialog({ onClose, onCreated }: { onClose: () => void; onCreated: (id: string) => void }) {
   const [name, setName] = useState('')
   const [type, setType] = useState<CarrierType>('TL')
@@ -315,7 +318,7 @@ function NewCarrierDialog({ onClose, onCreated }: { onClose: () => void; onCreat
     <TmsDialog
       open
       onOpenChange={(open) => { if (!open) onClose() }}
-      title="Add carrier"
+      title="Add carrier (admin data fix)"
       footer={
         <>
           <TmsButton variant="ghost" onClick={onClose} disabled={busy}>Cancel</TmsButton>
@@ -348,8 +351,9 @@ function NewCarrierDialog({ onClose, onCreated }: { onClose: () => void; onCreat
           placeholder="Pick an account owner…"
         />
       </TmsField>
-      <p className="text-xs tms-muted">
-        New carriers land in Pending. They cannot be booked until compliance moves them to Active.
+      <p className="text-xs tms-muted" data-testid="admin-data-fix-note">
+        Carriers normally arrive through MyCarrierPackets (Find &amp; invite, or Cover on a load). This is an audited data fix: the carrier lands in
+        Pending and only becomes Active when MyCarrierPackets reports its setup complete.
       </p>
       {error && <p className="text-xs" style={{ color: 'var(--tms-badge-red)' }}>{error}</p>}
     </TmsDialog>

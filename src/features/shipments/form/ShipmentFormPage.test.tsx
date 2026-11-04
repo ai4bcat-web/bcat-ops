@@ -3,10 +3,12 @@ import { fireEvent, render, screen, waitFor, act } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ShipmentBundle } from '@/types/tms'
-import { LABEL } from './labels'
+import { LABEL, SECTION_ORDER } from './labels'
 
 const h = vi.hoisted(() => ({
   toastInfo: vi.fn(),
+  intakeRow: null as unknown,
+  linkIntakeShipment: vi.fn(async () => ({})),
   runCreate: vi.fn(),
   runSaveDraft: vi.fn(),
   runEditSave: vi.fn(),
@@ -34,7 +36,8 @@ vi.mock('@/hooks/useDirectory', () => ({
 vi.mock('@/hooks/useCarriers', () => ({ useCarriers: () => ({ carriers: [] }) }))
 vi.mock('@/hooks/useStaff', () => ({ useStaff: () => ({ staff: [] }) }))
 vi.mock('@/features/tms/useOwnershipDivisions', () => ({ useOwnershipDivisions: () => ({ divisions: null }) }))
-vi.mock('@/lib/apiClient', () => ({ getTmsSettings: vi.fn(async () => null), listLocations: h.listLocations }))
+vi.mock('@/lib/apiClient', () => ({ getTmsSettings: vi.fn(async () => null), listLocations: h.listLocations, linkIntakeShipment: h.linkIntakeShipment }))
+vi.mock('../intake/useIntakeLoads', () => ({ useIntakeLoad: () => ({ row: h.intakeRow, loading: false, error: null, reload: vi.fn(), setRow: vi.fn() }) }))
 vi.mock('./useFormActions', () => ({
   useFormActions: (o: { busy: boolean }) => ({ actions: {}, dialogs: null, busy: o.busy }),
 }))
@@ -73,9 +76,9 @@ function bundleOf(status: string): ShipmentBundle {
   } as unknown as ShipmentBundle
 }
 
-function renderForm(mode: 'create' | 'edit') {
+function renderForm(mode: 'create' | 'edit', entry?: string | { pathname: string; state: unknown }) {
   return render(
-    <MemoryRouter initialEntries={[mode === 'create' ? '/new' : '/sh-1/edit']}>
+    <MemoryRouter initialEntries={[entry ?? (mode === 'create' ? '/new' : '/sh-1/edit')]}>
       <Routes>
         <Route path="/new" element={<ShipmentFormPage mode="create" />} />
         <Route path="/:id/edit" element={<ShipmentFormPage mode="edit" />} />
@@ -86,6 +89,7 @@ function renderForm(mode: 'create' | 'edit') {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  h.intakeRow = null
   localStorage.clear()
   h.shipment = { bundle: null, loading: false, error: null }
 })
@@ -190,6 +194,23 @@ describe('ShipmentFormPage — sections and issues', () => {
   })
 })
 
+describe('ShipmentFormPage — layout contract', () => {
+  it('sections sit in Aljex tab order, all open, with no positive tabindex', () => {
+    renderForm('create')
+    const toggles = [...document.querySelectorAll<HTMLElement>('[data-section-toggle]')].map((n) => n.dataset.sectionToggle)
+    expect(toggles).toEqual([...SECTION_ORDER])
+    for (const t of document.querySelectorAll<HTMLElement>('[data-section-toggle]')) expect(t.getAttribute('aria-expanded')).toBe('true')
+    expect([...document.querySelectorAll('[tabindex]')].every((n) => Number(n.getAttribute('tabindex')) <= 0)).toBe(true)
+  })
+
+  it('the issues strip names required fields without asterisks', async () => {
+    renderForm('create')
+    fireEvent.click(screen.getByTestId('ship-form-create'))
+    const strip = await screen.findByTestId('ship-form-issues')
+    expect(strip.textContent).not.toContain('*')
+  })
+})
+
 describe('ShipmentFormPage — edit mode', () => {
   it('a DRAFT shows Save changes and Submit order, and Save changes runs the edit pipeline', async () => {
     h.shipment = { bundle: bundleOf('DRAFT'), loading: false, error: null }
@@ -210,5 +231,32 @@ describe('ShipmentFormPage — edit mode', () => {
     expect(screen.queryByTestId('ship-form-save-draft')).toBeNull()
     expect(screen.queryByTestId('ship-form-submit')).toBeNull()
     expect(screen.getByTestId('ship-form-save').textContent).toBe('Save changes')
+  })
+})
+
+describe('ShipmentFormPage — from an intake load', () => {
+  const row = { id: 'il:r1', fields: { customerName: 'Acme Paper', equipmentType: 'Dry Van', stops: [] } }
+
+  it('pre-fills from the e-mail extraction and says so; a plain create has no such banner', async () => {
+    h.intakeRow = row
+    renderForm('create', { pathname: '/new', state: { intakeId: 'il:r1' } })
+    await waitFor(() => expect((screen.getByTestId('f-shipping-equipmentType') as HTMLInputElement).value).toBe('Dry Van'))
+    expect((screen.getByTestId(CUSTOMER_TESTID) as HTMLInputElement).value).toBe('Acme Paper')
+    expect(screen.getByTestId('ship-form-intake-banner')).toBeTruthy()
+  })
+
+  it('ties the intake load to the shipment once the create succeeds', async () => {
+    h.intakeRow = row
+    h.runSaveDraft.mockResolvedValue({ ok: true, bundle: bundleOf('DRAFT'), steps: [], failedSteps: [] })
+    renderForm('create', { pathname: '/new', state: { intakeId: 'il:r1' } })
+    await waitFor(() => expect((screen.getByTestId('f-shipping-equipmentType') as HTMLInputElement).value).toBe('Dry Van'))
+    fireEvent.click(screen.getByTestId('ship-form-save-draft'))
+    await waitFor(() => expect(h.linkIntakeShipment).toHaveBeenCalledWith({ intakeId: 'il:r1', shipmentId: 'sh-1' }))
+  })
+
+  it('does not look at an intake id on the edit route', () => {
+    h.shipment = { bundle: bundleOf('DRAFT'), loading: false, error: null }
+    renderForm('edit', { pathname: '/sh-1/edit', state: { intakeId: 'il:r1' } })
+    expect(screen.queryByTestId('ship-form-intake-banner')).toBeNull()
   })
 })

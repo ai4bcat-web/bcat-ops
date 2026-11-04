@@ -23,3 +23,4 @@
 .tms-intake-email-meta { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 12px; margin-bottom: 12px; }
 .tms-intake-email-key { color: var(--tms-muted); }
 .tms-intake-attachments { margin: 8px 0 0; padding-left: 18px; }
+.tms-intake-row-actions { display: inline-flex; align-items: center; gap: 8px; }

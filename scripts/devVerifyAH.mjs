@@ -35,9 +35,12 @@ import { DEV_API, DEV_POOL, mintIdentity, deleteIdentity, gql, routerAs } from '
 import { createWalk } from './lib/uiWalk.mjs'
 import { AA_HOMES } from './lib/aaRoutes.mjs'
 import { requiredPatterns, missingFromRoutes } from './devVerifyS2.mjs'
+import { discoverDevSuffix, devTable, doc } from './devVerifyU.mjs'
+import { PutCommand, DeleteCommand } from '@aws-sdk/lib-dynamodb'
 
 const DEV_APPSYNC = /^https:\/\/f5iqzdpidzalvjys7yxijn5ave\.appsync-api\.us-east-1\.amazonaws\.com\/graphql$/
 const SHOTS = resolve('Docs/tms-build/screenshots/ah')
+const SHOTS2 = resolve('Docs/tms-build/screenshots/ah2') // Ryne's feedback round, 1440 px
 const VOID_REASON = 'AH harness'
 
 const ALLOW_PROBLEMS = [
@@ -75,6 +78,13 @@ export const AH_STEPS = [
   { id: 'AH12', slug: 'submit-order' },
   { id: 'AH13', slug: 'edit-live' },
   { id: 'AH14', slug: 'cover-entry' },
+  { id: 'AH15', slug: 'feedback-required-style' },
+  { id: 'AH16', slug: 'feedback-customer-emails-bill-to' },
+  { id: 'AH17', slug: 'feedback-auto-miles' },
+  { id: 'AH18', slug: 'feedback-check-calls-preview' },
+  { id: 'AH19', slug: 'feedback-sections-1440' },
+  { id: 'AH20', slug: 'feedback-intake-prefill' },
+  { id: 'AH21', slug: 'feedback-intake-create-links' },
 ]
 
 // ───────────────────────────── selectors (every literal id here is checked by --inventory) ─────────────────────────────
@@ -234,6 +244,7 @@ async function pickFrom(b, inputSelector, optionSelector, text) {
 }
 const CUSTOMER_OPTION = `${tid('f-customer-name')} li button`
 
+const localDay = (offset) => localDt(offset, 0).slice(0, 10)
 const localDt = (dayOffset, hh, mm = 0) => {
   const d = new Date(Date.now() + dayOffset * 86_400_000)
   const p = (n) => String(n).padStart(2, '0')
@@ -248,6 +259,12 @@ async function openForm(b, path) {
 
 async function shotFile(b, name) {
   const file = join(SHOTS, `${name}-L.png`)
+  await b.screenshot(file)
+  written.push(file)
+}
+
+async function shotFile2(b, name) {
+  const file = join(SHOTS2, `${name}-L.png`)
   await b.screenshot(file)
   written.push(file)
 }
@@ -644,6 +661,163 @@ const RUNNERS = {
     await b.press('Escape'); await pause(300)
     return 'Cover opens the booking dialog with the carrier picked in the form (not confirmed: booking a carrier is out of scope here)'
   },
+
+  // ── Ryne's feedback round (AH15-AH20): run at 1440 px, light theme ──
+  async AH15(ctx) {
+    const b = ctx.b
+    await b.setViewport(1440, 1400)
+    await openForm(b, '/tms/shipments/new')
+    const facts = await b.evaluate(`(() => {
+      const mainText = document.querySelector('.tms-ship-form').innerText;
+      const stars = [...document.querySelectorAll('.tms-ship-form label')].filter((l) => /\\s\\*\\s*$/.test(l.textContent)).length;
+      const req = document.querySelector('.tms-field-req input, .tms-field-req select');
+      const plain = [...document.querySelectorAll('.tms-field:not(.tms-field-req) input.tms-input')].find((i) => !i.disabled && !i.readOnly);
+      const rgb = (el) => getComputedStyle(el).borderColor + '|' + getComputedStyle(el).backgroundColor;
+      const green = (c) => { const m = /rgba?\\((\\d+), (\\d+), (\\d+)/.exec(c); return !!m && Number(m[2]) > Number(m[1]) && Number(m[2]) >= Number(m[3]); };
+      return { stars, hasReq: !!req, reqStyle: req ? rgb(req) : '', plainStyle: plain ? rgb(plain) : '', reqCount: document.querySelectorAll('.tms-field-req').length, anyGreen: req ? green(getComputedStyle(req).borderColor) || green(getComputedStyle(req).backgroundColor) : false, mainText: mainText.length };
+    })()`)
+    const bad = []
+    if (facts.stars > 0) bad.push(`${facts.stars} labels still end in an asterisk`)
+    if (!facts.hasReq) bad.push('no .tms-field-req wrapper on the form')
+    if (facts.reqStyle === facts.plainStyle) bad.push('a required input looks the same as an optional one')
+    if (!facts.anyGreen) bad.push(`required input is not green (${facts.reqStyle})`)
+    await shotFile2(b, '15-required-style')
+    failures(bad)
+    return `${facts.reqCount} required fields styled green, no asterisks`
+  },
+
+  async AH16(ctx) {
+    const b = ctx.b
+    await openForm(b, '/tms/shipments/new')
+    const emailInputs = await b.evaluate(`document.querySelectorAll('[data-testid^="f-customer-email-"]').length`)
+    expect(emailInputs === 2, `${emailInputs} customer e-mail fields, wanted 2`)
+    await pickFrom(b, `${tid('f-customer-name')} input`, CUSTOMER_OPTION, ctx.customerName)
+    await b.poll(() => has(b, tid('f-customer-billToBlock')), 'Bill To block', 10_000)
+    const bad = []
+    const rowText = (k) => b.evaluate(`document.querySelector(${JSON.stringify(tid(`f-customer-billTo-${k}`))})?.innerText ?? null`)
+    for (const k of ['terms', 'factoring', 'emails', 'limit', 'available']) {
+      const t = await rowText(k)
+      if (t == null) bad.push(`Bill To block has no ${k} row`)
+    }
+    const editable = await b.evaluate(`document.querySelector(${JSON.stringify(tid('f-customer-billToBlock'))}).querySelectorAll('input:not([readonly]):not([disabled]), textarea, select').length`)
+    if (editable > 0) bad.push(`Bill To block has ${editable} editable controls (it must be read-only)`)
+    await b.evaluate(`document.querySelector(${JSON.stringify(tid('section-customer'))}).scrollIntoView({ block: 'start' })`)
+    await shotFile2(b, '16-customer-bill-to')
+    failures(bad)
+    return `2 customer e-mail fields; Bill To block shows terms, factoring, billing e-mails and credit for the ZZ customer read-only`
+  },
+
+  async AH17(ctx) {
+    const b = ctx.b
+    await openForm(b, '/tms/shipments/new')
+    await pickFrom(b, tid('f-pickup-name'), tid('f-pickup-name-option'), ctx.locNames.shipper)
+    await pickFrom(b, tid('f-consignee-name'), tid('f-consignee-name-option'), ctx.locNames.receiver)
+    const read = (id) => b.evaluate(`document.querySelector(${JSON.stringify(tid(id))})?.value ?? ''`)
+    await b.poll(async () => Number(await read('f-shipping-customerMiles')) > 0, 'Customer Miles auto-filled', 30_000)
+    const miles = Number(await read('f-shipping-customerMiles'))
+    const truck = Number(await read('f-shipping-truckMiles'))
+    const bad = []
+    if (!(miles > 500 && miles < 1300)) bad.push(`Chicago to Dallas came out as ${miles} miles`)
+    if (!(truck > 0)) bad.push('Truck Miles was not calculated')
+    const source = await b.evaluate(`document.querySelector(${JSON.stringify(tid('f-shipping-milesSource'))})?.innerText ?? ''`)
+    await fill(b, 'f-shipping-customerMiles', '777'); await pause(1500)
+    if ((await read('f-shipping-customerMiles')) !== '777') bad.push('a typed Customer Miles was overwritten by the calculation')
+    await b.evaluate(`document.querySelector(${JSON.stringify(tid('section-shipping'))}).scrollIntoView({ block: 'start' })`)
+    await shotFile2(b, '17-auto-miles')
+    failures(bad)
+    return `Customer Miles ${miles} / Truck Miles ${truck} calculated from the two stops (${JSON.stringify(source.slice(0, 60))}); an override sticks`
+  },
+
+  async AH18(ctx) {
+    expect(ctx.fullId, 'AH09 did not create a shipment')
+    const b = ctx.b
+    await openForm(b, `/tms/shipments/${ctx.fullId}/edit`)
+    await b.evaluate(`document.querySelector(${JSON.stringify(tid('section-checkCalls'))}).scrollIntoView({ block: 'start' })`)
+    const facts = await b.evaluate(`(() => {
+      const s = document.querySelector('[data-testid="section-checkCalls"]');
+      const link = s.querySelector('[data-testid="f-checkCalls-add"]');
+      return { strip: !!s.querySelector('[data-testid="tracking-strip"]'), link: link?.getAttribute('href') ?? null, inputs: s.querySelectorAll('input:not([type=checkbox]), textarea, select').length };
+    })()`)
+    const bad = []
+    if (!facts.strip) bad.push('no Load Tracking summary strip in Check Calls')
+    if (!facts.link || !facts.link.includes('/tms/tracking')) bad.push(`"Open in Load Tracking" link is ${JSON.stringify(facts.link)}`)
+    if (facts.inputs > 0) bad.push(`Check Calls still has ${facts.inputs} entry inputs (it should be a read-only preview)`)
+    await shotFile2(b, '18-check-calls-preview')
+    failures(bad)
+    return 'Check Calls is a read-only preview: tracking summary strip + link to Load Tracking, no entry form'
+  },
+
+  async AH19(ctx) {
+    const b = ctx.b
+    await b.setViewport(1440, 1400)
+    await openForm(b, `/tms/shipments/${ctx.fullId}/edit`)
+    for (const [n, [key]] of SECTIONS.entries()) {
+      await b.evaluate(`(() => { const s = document.querySelector(${JSON.stringify(tid(`section-${key}`))}); const t = document.querySelector(${JSON.stringify(tid(`section-${key}-toggle`))}); if (t && t.getAttribute('aria-expanded') === 'false') t.click(); s.scrollIntoView({ block: 'start' }) })()`)
+      await pause(250)
+      await shotFile2(b, `19-${String(n + 1).padStart(2, '0')}-section-${key}`)
+    }
+    const overflow = await b.evaluate(`document.documentElement.scrollWidth - innerWidth`)
+    expect(overflow <= 1, `horizontal scroll of ${overflow}px at 1440`)
+    return '12 section screenshots at 1440 px (Docs/tms-build/screenshots/ah2)'
+  },
+
+  async AH20(ctx) {
+    const b = ctx.b
+    expect(ctx.suffix, 'no AWS access to stage an intake row (the harness needs the dev tables)')
+    const id = `il:zz-ah-${ctx.ts}`
+    ctx.intakeId = id
+    const stop = (type, name, city, state, zip, date, time) => ({ type, name, street: '1 ZZ Test Way', city, state, zip, date, time, instructions: type === 'pickup' ? 'ZZ AH dock 4' : null })
+    const fields = {
+      customerId: ctx.customerId, customerName: ctx.customerName, billToId: null, salesRepId: null, divisionCode: null,
+      reference: `ZZ-AH-INTAKE-PO-${ctx.ts}`, pickupNumber: `ZZ-AH-INTAKE-PU-${ctx.ts}`, deliveryNumber: null,
+      equipmentType: 'Reefer', commodity: `ZZ AH intake freight ${ctx.ts}`, weightLb: 18000, customerRateCents: 250000,
+      stops: [stop('pickup', ctx.locNames.shipper, 'Chicago', 'IL', '60601', localDay(2), '09:00'), stop('delivery', ctx.locNames.receiver, 'Dallas', 'TX', '75201', localDay(4), null)],
+    }
+    const now = new Date().toISOString()
+    await doc.send(new PutCommand({ TableName: devTable('IntakeLoad', ctx.suffix), Item: {
+      __typename: 'IntakeLoad', id, status: 'OPEN', divisionCode: null, toAddress: null, toAddresses: [], runId: `zz-ah-run-${ctx.ts}`, sourceKey: null,
+      subject: `ZZ AH tender ${ctx.ts}`, fromEmail: `zz-ah-sender-${ctx.ts}@example.invalid`, fromName: 'ZZ AH Sender', receivedAt: now, bodyText: 'ZZ AH harness tender',
+      attachments: JSON.stringify([]), parseState: 'PARSED', parseNote: null, format: 'harness', fields: JSON.stringify(fields), autoFields: JSON.stringify(fields), meta: JSON.stringify({}),
+      confirmed: [], missingFields: [], shipmentId: null, shipmentNumber: null, createdBy: 'zz-ah-harness', updatedBy: 'zz-ah-harness', version: 1, createdAt: now, updatedAt: now,
+    } }))
+    await openForm(b, `/tms/shipments/new?intake=${encodeURIComponent(id)}`)
+    await b.poll(() => has(b, tid('ship-form-intake-banner')), 'the pre-fill banner', 30_000)
+    const val = (testId) => b.evaluate(`document.querySelector(${JSON.stringify(tid(testId))})?.value ?? null`)
+    const bad = []
+    const eq = (label, got, want) => { if (got !== want) bad.push(`${label}: ${JSON.stringify(got)} ≠ ${JSON.stringify(want)}`) }
+    eq('equipment', await val('f-shipping-equipmentType'), 'Reefer')
+    eq('weight', await val('f-shipping-weightLbs'), '18000')
+    eq('description', await val('f-shipping-description'), fields.commodity)
+    eq('customer ref', await val('f-customer-refNo'), fields.reference)
+    eq('pickup ref', await val('f-pickup-refNo'), fields.pickupNumber)
+    eq('customer LH rate', await val('f-rates-customerLhRate'), '2500.00')
+    eq('pickup city', await val('f-pickup-city'), 'Chicago')
+    eq('consignee city', await val('f-consignee-city'), 'Dallas')
+    const chips = await b.evaluate(`[...document.querySelectorAll('[data-testid$="-from-email"]')].map((n) => n.getAttribute('data-testid'))`)
+    for (const want of ['f-shipping-equipmentType-from-email', 'f-shipping-weightLbs-from-email', 'f-pickup-city-from-email', 'f-consignee-city-from-email']) {
+      if (!chips.includes(want)) bad.push(`no "from e-mail" chip on ${want.replace('-from-email', '')}`)
+    }
+    await shotFile2(b, '20-intake-prefill')
+    // Intake board: the row offers Create shipment
+    failures(bad)
+    ctx.intakePrefilled = chips.length
+    return `${chips.length} fields pre-filled and marked from the intake load`
+  },
+
+  async AH21(ctx) {
+    const b = ctx.b
+    expect(ctx.intakePrefilled, 'AH20 did not pre-fill')
+    ctx.revDivision = await selectFirst(b, 'f-shipping-revDivision')
+    await fill(b, 'f-shipping-weightLbs', '18000')
+    await click(b, 'ship-form-create')
+    const sid = await waitEditUrl(ctx, b, 'create from intake')
+    const linked = await b.poll(async () => {
+      const r = await gql(ctx.token, 'query($id: ID!) { getIntakeLoad(id: $id) { status shipmentId } }', { id: ctx.intakeId })
+      return r.getIntakeLoad?.status === 'MOVED' && r.getIntakeLoad?.shipmentId === sid
+    }, 'intake load linked to the new shipment', 30_000).then(() => true, () => false)
+    expect(linked, 'the intake load was not marked MOVED and linked to the shipment created from it')
+    return `shipment ${sid} created from the pre-filled form; intake load is MOVED and linked`
+  },
 }
 
 // ───────────────────────────── helpers that talk to dev ─────────────────────────────
@@ -709,6 +883,9 @@ async function cleanup(ctx) {
       say(`shipment ${id} ${after?.voidedAt ? 'voided and confirmed' : 'NOT confirmed voided'}`, !!after?.voidedAt)
     } catch (err) { say(`shipment ${id} void failed: ${short(err).slice(0, 100)}`, false) }
   }
+  if (ctx.intakeId && ctx.suffix) {
+    await doc.send(new DeleteCommand({ TableName: devTable('IntakeLoad', ctx.suffix), Key: { id: ctx.intakeId } })).then(() => say(`intake row ${ctx.intakeId} deleted`), (err) => say(`intake row delete failed: ${short(err).slice(0, 80)}`, false))
+  }
   if (ctx.carrierId) {
     const row = await getRow(ctx.token, 'Carrier', ctx.carrierId, 'id updatedAt status').catch(() => null)
     if (row) await ctx.car('SET_CARRIER_STATUS', { id: ctx.carrierId, expectedUpdatedAt: String(row.updatedAt), status: 'INACTIVE', reason: 'INACTIVE_AGREEMENT' }).then(() => say(`carrier ${ctx.carrierId} set INACTIVE`), (err) => say(`carrier retire failed: ${short(err).slice(0, 80)}`, false))
@@ -746,6 +923,7 @@ async function main() {
   if (!(await inventory())) { process.exitCode = 1; return }
 
   await mkdir(SHOTS, { recursive: true })
+  await mkdir(SHOTS2, { recursive: true })
   const ts = Date.now()
   const emails = { admin: `zz-ah-admin-${ts}@example.invalid`, tms: `zz-ah-tms-${ts}@example.invalid` }
   const made = []
@@ -758,6 +936,7 @@ async function main() {
     ctx.dir = routerAs(ctx.token, 'tmsDirectoryActions')
     ctx.car = routerAs(ctx.token, 'tmsCarrierActions')
     ctx.shipAs = { admin: routerAs(ctx.token, 'tmsShipmentActions') }
+    ctx.suffix = await discoverDevSuffix().catch(() => null)
     await setupFixtures(ctx)
     console.log(`fixtures: customer ${ctx.customerId}, carrier ${ctx.carrierId}, ${ctx.locationIds.length} locations`)
 
@@ -780,6 +959,7 @@ async function main() {
   const pass = report.filter((r) => r.status === 'PASS').length
   const failed = report.filter((r) => r.status === 'FAIL').length
   console.log(`\nsummary: ${JSON.stringify({ pass, fail: failed })}`)
+  await writeFile(join(SHOTS2, 'index.txt'), `${written.filter((f) => f.includes('/ah2/')).map((f) => f.replace(`${process.cwd()}/`, '')).join('\n')}\n`)
   await writeFile(join(SHOTS, 'index.txt'), `${written.map((f) => f.replace(`${process.cwd()}/`, '')).join('\n')}\n`)
   if (failed > 0) process.exitCode = 1
 }

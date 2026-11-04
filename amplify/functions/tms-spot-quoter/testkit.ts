@@ -335,7 +335,7 @@ export function fakeOAuth(): FakeOAuth {
       o.stateCounter += 1
       return `state-${o.stateCounter}`
     },
-    buildAuthUrl: (x) => `https://accounts.example/auth?state=${x.state}&login_hint=${x.loginHint}`,
+    buildAuthUrl: (x) => `https://accounts.example/auth?state=${x.state}&login_hint=${x.loginHint}${x.hd ? `&hd=${x.hd}` : ''}`,
     async exchangeCode() {
       return o.exchange
     },

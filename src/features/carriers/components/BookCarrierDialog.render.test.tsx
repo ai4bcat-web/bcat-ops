@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { BookCarrierDialog, type BookCarrierFields } from './BookCarrierDialog'
 import type { CarrierRecord, ShipmentBundle, TmsSettings, UserProfileRecord } from '@/types/tms'
 
@@ -187,5 +188,28 @@ describe('BookCarrierDialog', () => {
       truckNumber: 'T-9',
       charges: [expect.objectContaining({ side: 'CARRIER', code: 'LUMPER', rateCents: 7500 })],
     })
+  })
+
+  it('offers "Find & invite a carrier" on the pick step, and carries the load and the typed search to the Find & Invite page', async () => {
+    state.carrier = carrier()
+    const onClose = vi.fn()
+    const Where = () => <p data-testid="where">{useLocation().pathname + useLocation().search}</p>
+    render(
+      <MemoryRouter>
+        <Routes>
+          <Route path="*" element={<><Where /><BookCarrierDialog bundle={bundle} isAdmin={false} busy={false} onClose={onClose} onConfirm={vi.fn()} onRateCon={vi.fn()} /></>} />
+        </Routes>
+      </MemoryRouter>,
+    )
+    fireEvent.change(screen.getByLabelText('Search carriers'), { target: { value: 'Ivan Cartage' } })
+    fireEvent.click(screen.getByRole('button', { name: /Find & invite a carrier/ }))
+
+    const where = screen.getByTestId('where').textContent!
+    expect(where.startsWith('/tms/carriers/find?')).toBe(true)
+    const params = new URLSearchParams(where.split('?')[1])
+    expect(params.get('shipmentId')).toBe('shp-1')
+    expect(params.get('loadId')).toBe('load-1')
+    expect(params.get('q')).toBe('Ivan Cartage')
+    expect(onClose).toHaveBeenCalled()
   })
 })

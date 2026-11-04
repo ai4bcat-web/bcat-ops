@@ -38,6 +38,7 @@ vi.mock('@aws-sdk/s3-request-presigner', () => ({ getSignedUrl }))
 const TABLES = {
   loadCarrier: 'LoadCarrier-test',
   load: 'Load-test',
+  shipment: 'Shipment-test',
   carrierDoc: 'CarrierDocument-test',
   division: 'Division-test',
   settings: 'TmsSettings-test',
@@ -147,6 +148,7 @@ let handler: typeof HandlerModule.handler
 beforeAll(async () => {
   process.env.LOAD_CARRIER_TABLE_NAME = TABLES.loadCarrier
   process.env.LOAD_TABLE_NAME = TABLES.load
+  process.env.SHIPMENT_TABLE_NAME = TABLES.shipment
   process.env.CARRIER_DOCUMENT_TABLE_NAME = TABLES.carrierDoc
   process.env.DIVISION_TABLE_NAME = TABLES.division
   process.env.SETTINGS_TABLE_NAME = TABLES.settings
@@ -184,6 +186,7 @@ function seedLoadCarrier(extra: Row = {}): Row {
 
 function seedRest(): void {
   table(TABLES.load).set('lod-1', { id: 'lod-1', loadNumber: 'S000001-1', divisionKey: 'BCAT_LOGISTICS' })
+  table(TABLES.shipment).set('shp-1', { id: 'shp-1', number: 'S000001' })
   table(TABLES.division).set('BCAT_LOGISTICS', { key: 'BCAT_LOGISTICS', name: 'BCAT Logistics', legalName: 'BCAT Logistics LLC' })
   table(TABLES.carrierDoc).set('cdoc-1', { id: 'cdoc-1', carrierId: 'car-1', type: 'RATE_CON', s3Key: 'rate-confirms/carrier/lod-1/lcr-1-v1.pdf' })
   table(TABLES.settings).set('default', { id: 'default' })
@@ -244,7 +247,9 @@ describe('rate-con-sign-api', () => {
         brokerName: 'BCAT Logistics LLC',
         status: 'OPENED',
         totalCents: 180_000,
-        requiredFields: ['DRIVER_NAME', 'DRIVER_PHONE', 'TRUCK_NUMBER'],
+        // Step AM: the four driver fields are always asked for, and only those still empty.
+        requiredFields: ['DRIVER_NAME', 'DRIVER_PHONE', 'TRUCK_NUMBER', 'TRAILER_NUMBER'],
+        driverInfo: { driverName: null, driverPhone: null, truckNumber: null, trailerNumber: null },
         pdfUrl: 'https://signed.example/rate-con.pdf',
       })
       const row = table(TABLES.loadCarrier).get('lcr-1')!
@@ -252,11 +257,18 @@ describe('rate-con-sign-api', () => {
       expect(row.rateConRequestCount).toBe(1)
     })
 
-    it('takes the required fields from settings when they are configured', async () => {
+    it('asks for the settings\' extra fields on top of the four driver fields', async () => {
       seedLoadCarrier()
-      table(TABLES.settings).set('default', { id: 'default', rateConRequiredFields: ['DRIVER_NAME', 'TRAILER_NUMBER'] })
+      table(TABLES.settings).set('default', { id: 'default', rateConRequiredFields: ['DRIVER_NAME', 'PLATES'] })
       const { body } = await json(post({ token: TOKEN, action: 'get' }))
-      expect(body.requiredFields).toEqual(['DRIVER_NAME', 'TRAILER_NUMBER'])
+      expect(body.requiredFields).toEqual(['DRIVER_NAME', 'PLATES', 'DRIVER_PHONE', 'TRUCK_NUMBER', 'TRAILER_NUMBER'])
+    })
+
+    it('does not ask the carrier again for what the office already entered, and prefills it', async () => {
+      seedLoadCarrier({ driverName: 'Yuri Petrov', truckNumber: '4471' })
+      const { body } = await json(post({ token: TOKEN, action: 'get' }))
+      expect(body.requiredFields).toEqual(['DRIVER_PHONE', 'TRAILER_NUMBER'])
+      expect(body.driverInfo).toEqual({ driverName: 'Yuri Petrov', driverPhone: null, truckNumber: '4471', trailerNumber: null })
     })
 
     it('is a 404 for a token nobody holds', async () => {
@@ -294,7 +306,7 @@ describe('rate-con-sign-api', () => {
   describe('submit', () => {
     const payload = {
       signerName: 'Yuri Petrov',
-      fields: { DRIVER_NAME: 'Yuri Petrov', DRIVER_PHONE: '312-555-0101', TRUCK_NUMBER: '4471' },
+      fields: { DRIVER_NAME: 'Yuri Petrov', DRIVER_PHONE: '312-555-0101', TRUCK_NUMBER: '4471', TRAILER_NUMBER: 'T-88' },
       pdfBase64: PDF_BASE64,
     }
 
@@ -315,12 +327,36 @@ describe('rate-con-sign-api', () => {
         driverName: 'Dispatch Knew This',
         driverPhone: '312-555-0101',
         truckNumber: '4471',
+        trailerNumber: 'T-88',
+        // Signing with all four driver fields in reaches the top rung, and the board mirrors it.
+        assignmentStatus: 'DRIVER_INFO_ENTERED',
       })
+      expect(table(TABLES.shipment).get('shp-1')!.carrierAssignmentStatus).toBe('DRIVER_INFO_ENTERED')
+      expect(table(TABLES.load).get('lod-1')!.carrierAssignmentStatus).toBe('DRIVER_INFO_ENTERED')
       expect(s3Send).toHaveBeenCalledTimes(1)
       const signed = [...table(TABLES.carrierDoc).values()].find((d) => d.source === 'SIGNED')!
       expect(signed).toMatchObject({ carrierId: 'car-1', type: 'RATE_CON', loadCarrierId: 'lcr-1', uploadedBy: 'CARRIER_PORTAL' })
       const audit = [...table(TABLES.audit).values()][0]
       expect(audit).toMatchObject({ entityType: 'LOAD_CARRIER', entityId: 'lcr-1', action: 'rate_con_signed', user: 'CARRIER_PORTAL' })
+      // Field keys only: the driver's name and phone never reach the audit log.
+      expect(JSON.stringify(audit)).not.toMatch(/312-555-0101|Yuri Petrov"/)
+    })
+
+    it('refuses to sign while a driver field the office did not enter is still missing', async () => {
+      seedLoadCarrier({ rateConStatus: 'OPENED', driverName: 'Office Entered', driverPhone: '312-555-0000' })
+      const short = { ...payload, fields: { TRUCK_NUMBER: '4471' } }
+      const { status, body } = await json(post({ token: TOKEN, action: 'submit', payload: short }))
+      expect(status).toBe(400)
+      expect(String(body.error)).toMatch(/TRAILER_NUMBER/)
+      expect(table(TABLES.loadCarrier).get('lcr-1')!.rateConStatus).toBe('OPENED')
+    })
+
+    it('an assignment at RATE_CON_SENT climbs to the top on signing and keeps its earlier timestamp', async () => {
+      seedLoadCarrier({ rateConStatus: 'OPENED', assignmentStatus: 'RATE_CON_SENT', assignmentTimes: JSON.stringify({ RATE_CON_SENT: '2026-03-01T00:00:00.000Z' }) })
+      await post({ token: TOKEN, action: 'submit', payload })
+      const row = table(TABLES.loadCarrier).get('lcr-1')!
+      expect(row.assignmentStatus).toBe('DRIVER_INFO_ENTERED')
+      expect(JSON.parse(String(row.assignmentTimes))).toMatchObject({ RATE_CON_SENT: '2026-03-01T00:00:00.000Z', DRIVER_INFO_ENTERED: expect.any(String) })
     })
 
     it('refuses a second signature on the same rate con', async () => {
@@ -386,7 +422,7 @@ describe('rate-con-sign-api', () => {
         payload: { ...payload, fields: { DRIVER_NAME: 'Yuri Petrov' } },
       }))
       expect(missing.status).toBe(400)
-      expect(String(missing.body.error)).toMatch(/DRIVER_PHONE, TRUCK_NUMBER/)
+      expect(String(missing.body.error)).toMatch(/DRIVER_PHONE, TRUCK_NUMBER, TRAILER_NUMBER/)
       expect(table(TABLES.loadCarrier).get('lcr-1')!.rateConStatus).toBe('SENT')
     })
 

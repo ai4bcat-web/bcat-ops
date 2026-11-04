@@ -31,7 +31,7 @@ const contacts = [
   contact({ id: 'c2', name: 'Pat', email: 'pat@swift.com', types: ['ACCOUNTING'] }),
 ]
 const carrier = (mcpStatus?: string | null) =>
-  ({ id: 'car-1', name: 'Swift', email: 'main@swift.com', mcpStatus }) as CarrierRecord
+  ({ id: 'car-1', name: 'Swift', status: 'ACTIVE', email: 'main@swift.com', mcpStatus }) as CarrierRecord
 
 function setup(opts: { carrier?: CarrierRecord | null; rateConVersion?: number } = {}) {
   const onSend = vi.fn(async () => {})
@@ -129,6 +129,12 @@ describe('RateConPanel MyCarrierPackets gate', () => {
     setup({ carrier: carrier('ACCEPTABLE') })
     expect(sendButton()).toBeEnabled()
     expect(screen.queryByRole('status')).not.toBeInTheDocument()
+  })
+
+  it('blocks Send for a carrier that is not Active even with a completed packet (MyCarrierPackets moved it out of compliance)', () => {
+    setup({ carrier: { ...carrier('ACCEPTABLE'), status: 'INACTIVE' } as CarrierRecord })
+    expect(sendButton()).toBeDisabled()
+    expect(screen.getByRole('status')).toHaveTextContent('not Active')
   })
 
   it('does not pre-block while the carrier bundle has not loaded (the server decides)', () => {

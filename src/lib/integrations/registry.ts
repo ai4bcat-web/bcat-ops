@@ -703,7 +703,7 @@ export const PROVIDERS: ProviderDescriptor[] = [
   },
   {
     key: 'GMAIL_REP_OAUTH',
-    label: 'Gmail (per-rep sign-in)',
+    label: 'Google (Gmail sign-in)',
     category: 'EMAIL',
     credentialSource: 'PAGE',
     credentialFields: [
@@ -712,7 +712,7 @@ export const PROVIDERS: ProviderDescriptor[] = [
     ],
     stackSecretNames: [],
     settingsFields: [
-      { key: 'allowedDomain', label: 'Workspace domain', type: 'text', defaultValue: '', hint: 'bcatcorp.com' },
+      { key: 'allowedDomain', label: 'Workspace domain (optional)', type: 'text', defaultValue: '', hint: 'Leave blank to allow any Google account, e.g. a consumer Gmail test user. A domain such as bcatcorp.com restricts sign-in to that Workspace.' },
     ],
     capabilities: ['connect', 'validate', 'sync'],
     liveCapabilities: ['validate', 'sync'],
@@ -833,7 +833,7 @@ export const PROVIDERS: ProviderDescriptor[] = [
     applicability: 'LIVE_CAPABLE',
     loadsRead: 'NONE',
     feeds: 'Geocoding, Places autocomplete and place details behind every address field, and the lane map.',
-    liveLink: { label: 'Lane research', to: '/tms/rates/lanes' },
+    liveLink: { label: 'Quotes', to: '/tms/rates' },
   },
   {
     key: 'ANTHROPIC',

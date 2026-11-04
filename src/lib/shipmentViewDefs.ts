@@ -316,7 +316,7 @@ export function matchesBoardFilters<R extends BoardFilterableRow>(row: R, set: B
 /** Aljex Active Shipments default column order. */
 export const ALJEX_COLUMN_KEYS = [
   'exceptions', 'status', 'proNumber', 'massRelease', 'equip', 'customerReference', 'description',
-  'revenueType', 'salesRep', 'customerName', 'carrier', 'customerTotalRate', 'carrierTotalRates',
+  'revenueType', 'salesRep', 'customerName', 'carrier', 'carrierAssignment', 'customerTotalRate', 'carrierTotalRates',
   'grossProfit', 'netMargin', 'pickupShip', 'originCity', 'destinationCity', 'deliveryAppt', 'stops',
   'driver', 'truck', 'arStatus', 'apStatus', 'lastUpdateAt', 'nextCheckCallAt', 'mode', 'docsMissing',
 ]
@@ -355,7 +355,7 @@ export const BOARD_COLUMN_KEYS = [
   'lastCheckCallType', 'lastKnownAt', 'lastKnownCity', 'lastKnownState', 'lastKnownSource',
   'loadDeliveredAt', 'cargoValue', 'loadNotes', 'podNotes',
   // Carrier leg.
-  'carrierName', 'carrierMc', 'carrierRep', 'carrierDispatcher', 'carrierDispatcherPhone',
+  'carrierAssignment', 'carrierName', 'carrierMc', 'carrierRep', 'carrierDispatcher', 'carrierDispatcherPhone',
   'carrierDispatcherEmail', 'driverPhone', 'driver2', 'driver2Phone', 'trailerNumber',
   'plates', 'vin', 'seal', 'tripNumber', 'pickupEta', 'deliveryEta', 'rateConStatus',
   'rateConSentAt', 'rateConSignedAt', 'carrierRate', 'legCost', 'apBalance', 'apPaidAt',

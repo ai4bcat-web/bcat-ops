@@ -18,6 +18,9 @@ import { TmsAlert, TmsButton, TmsCard, TmsInput, TmsMetaList, TmsPublicFrame, Tm
 // It must never import anything that needs Cognito (no useAuth, no apiClient); the
 // only backend it talks to is the rate-con-sign Function URL via rateConSignClient.
 
+/** Step AM: the four the broker needs to track the truck. The rep may already have entered some; the carrier fills the rest. */
+const DRIVER_FIELDS: RateConRequiredField[] = ['DRIVER_NAME', 'DRIVER_PHONE', 'TRUCK_NUMBER', 'TRAILER_NUMBER']
+
 const FIELD_LABELS: Record<RateConRequiredField, string> = {
   DRIVER_NAME: 'Driver name',
   DRIVER_PHONE: 'Driver phone',
@@ -94,11 +97,22 @@ export function RateConSignPage() {
   }, [token])
 
   const requiredFields = useMemo<RateConRequiredField[]>(() => state?.requiredFields ?? [], [state])
+  // What the rep already put on the assignment fills the form until the carrier types over it.
+  const prefill = useMemo<Record<string, string>>(() => ({
+    DRIVER_NAME: state?.driverInfo?.driverName ?? '',
+    DRIVER_PHONE: state?.driverInfo?.driverPhone ?? '',
+    TRUCK_NUMBER: state?.driverInfo?.truckNumber ?? '',
+    TRAILER_NUMBER: state?.driverInfo?.trailerNumber ?? '',
+  }), [state])
+  const valueOf = (field: string): string => fields[field] ?? prefill[field] ?? ''
   const trimmedFields = useMemo(() => {
     const out: Record<string, string> = {}
-    for (const field of requiredFields) out[field] = (fields[field] ?? '').trim()
+    for (const field of requiredFields) out[field] = (fields[field] ?? prefill[field] ?? '').trim()
     return out
-  }, [requiredFields, fields])
+  }, [requiredFields, fields, prefill])
+  const driverFields = requiredFields.filter((f) => DRIVER_FIELDS.includes(f))
+  const tripFields = requiredFields.filter((f) => !DRIVER_FIELDS.includes(f))
+  const onFile = DRIVER_FIELDS.filter((f) => !requiredFields.includes(f) && prefill[f] !== '')
 
   // The link is dead the moment it lapses, even if the row still says SENT — the
   // Lambda refuses a late submit, so never show a form that cannot be posted.
@@ -254,17 +268,42 @@ export function RateConSignPage() {
           </div>
         </TmsCard>
 
-        {/* Trip details the broker requires before dispatch. */}
-        {requiredFields.length > 0 && (
-          <TmsCard title="Trip details">
+        {/* Driver and truck: all four are mandatory, and tracking texts this driver. Only the ones the rep has not entered yet are asked. */}
+        {driverFields.length > 0 && (
+          <TmsCard title="Driver and truck">
+            <p className="tms-public-sub">{state.brokerName} tracks this load by the driver’s phone, so all of these are required.</p>
+            {onFile.length > 0 && (
+              <p className="tms-public-sub" data-testid="driver-on-file">
+                Already on file: {onFile.map((f) => `${FIELD_LABELS[f]} ${prefill[f]}`).join(' · ')}
+              </p>
+            )}
             <div className="tms-public-grid-2">
-              {requiredFields.map((field) => (
+              {driverFields.map((field) => (
                 <div key={field} className="tms-public-field">
                   <label className="tms-public-label" htmlFor={`rate-con-${field}`}>{FIELD_LABELS[field] ?? field}</label>
                   <TmsInput
                     id={`rate-con-${field}`}
                     type={fieldInputType(field)}
-                    value={fields[field] ?? ''}
+                    value={valueOf(field)}
+                    onChange={(e) => setFields((prev) => ({ ...prev, [field]: e.target.value }))}
+                  />
+                </div>
+              ))}
+            </div>
+          </TmsCard>
+        )}
+
+        {/* Other trip details the broker requires before dispatch. */}
+        {tripFields.length > 0 && (
+          <TmsCard title="Trip details">
+            <div className="tms-public-grid-2">
+              {tripFields.map((field) => (
+                <div key={field} className="tms-public-field">
+                  <label className="tms-public-label" htmlFor={`rate-con-${field}`}>{FIELD_LABELS[field] ?? field}</label>
+                  <TmsInput
+                    id={`rate-con-${field}`}
+                    type={fieldInputType(field)}
+                    value={valueOf(field)}
                     onChange={(e) => setFields((prev) => ({ ...prev, [field]: e.target.value }))}
                   />
                 </div>

@@ -9,8 +9,8 @@
 import { useCallback, useState } from 'react'
 import { toast } from 'sonner'
 import {
-  assignAsset, assignCarrier, bookCarrier, clearRevTag, dispatchLoad, duplicateShipment, getShipmentBundle,
-  logCheckCall, recalcCharges, removeLoadCarrier, resolveIncident, saveOrderForm, sendRateCon,
+  assignAsset, assignCarrier, bookCarrier, clearRevTag, dispatchLoad, duplicateShipment, enterDriverInfo, getShipmentBundle,
+  logCheckCall, markRateConSigned, recalcCharges, removeLoadCarrier, resolveIncident, saveOrderForm, sendRateCon,
   setArStatus, setEta, setLoadStatus, setNextCheckCall, setQuickPay, setRevTag, setSalesRep, setShipmentCustomer,
   setShipmentStatus, sendTrackingLink, submitOrder, tenderRespond, updateStop, voidRateCon,
 } from '@/lib/apiClient'
@@ -34,6 +34,9 @@ export interface ShipmentActions {
   setQuickPay: (input: { loadCarrierId: string; quickPayDays: number | null }) => Promise<void>
   sendRateCon: (input: { loadCarrierId: string; pdfBase64: string; to: string[]; cc?: string[]; expiresHours?: number }) => Promise<void>
   voidRateCon: (input: { loadCarrierId: string }) => Promise<void>
+  /** Step AM — the ladder's two hand steps; both answer with the bundle. */
+  enterDriverInfo: (input: Parameters<typeof enterDriverInfo>[0]) => Promise<void>
+  markRateConSigned: (input: Parameters<typeof markRateConSigned>[0]) => Promise<void>
   /**
    * Step R — the revenue tag and the sales rep. The tag is normally the ownership
    * rules' answer; these two are the hand override and the way back to the rules.
@@ -158,6 +161,12 @@ export function useShipmentActions(
     voidRateCon: async (input) => {
       await call('Void rate con', () => voidRateCon(input))
     },
+    enterDriverInfo: async (input) => {
+      await call('Driver info', () => enterDriverInfo(input), { quiet: true })
+    },
+    markRateConSigned: async (input) => {
+      await call('Mark signed', () => markRateConSigned(input), { quiet: true })
+    },
     onSetRevTag: async (input) => {
       await call('Set division tag', () => setRevTag({ shipmentId, ...input }))
     },
@@ -246,11 +255,14 @@ export function useShipmentActions(
         await call('Assign carrier', () => assignCarrier({ loadId: load?.id ?? '', ...input }))
       },
       onBookCarrier: book,
-      onRemoveCarrier: async (loadCarrierId, outcome, reason, note) => {
-        await call('Remove carrier', () => removeLoadCarrier({ loadCarrierId, outcome, reason, note }))
+      onRemoveCarrier: async (loadCarrierId, outcome, reason, note, repostToDat) => {
+        await call('Remove carrier', () => removeLoadCarrier({ loadCarrierId, outcome, reason, note, ...(repostToDat ? { repostToDat } : {}) }))
       },
       onSetArStatus: async (status) => {
         await call('AR status', () => setArStatus({ orderId: order?.id ?? '', status }))
+      },
+      onCovered: async () => {
+        if (shipmentId) onBundle(await getShipmentBundle(shipmentId))
       },
     },
   }

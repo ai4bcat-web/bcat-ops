@@ -46,7 +46,7 @@ export interface HistoricalRatesProps {
 }
 
 /** Shipping Requirements also owns Mode, which lives outside `values.ship`. */
-export type ShippingRequirementsProps = SliceSectionProps<'ship'> & { mode: FormMode; onModeChange: (mode: FormMode) => void }
+export type ShippingRequirementsProps = SliceSectionProps<'ship'> & { mode: FormMode; onModeChange: (mode: FormMode) => void; routeKey: string }
 
 /** Rates also prices off Customer Miles / Weight, which live in Shipping Requirements. */
 export type RatesSectionProps = SliceSectionProps<'rates'> & { ship: ShipmentFormValues['ship'] }

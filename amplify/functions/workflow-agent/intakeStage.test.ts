@@ -58,6 +58,15 @@ describe('stageIntake', () => {
     expect(db.intake.get('il:wf:TENDER:abc')).toMatchObject({ divisionCode: null, toAddress: null })
   })
 
+  it('DEMO: a division owning the demo Gmail mailbox receives mail sent to it; mail to an unrelated address stays Unrouted', async () => {
+    db.divisions = [{ id: 'D', code: 'D', name: 'Demo', active: true, intakeEmail: 'ai4bcat@gmail.com' }]
+    await stageIntake(run(), mail(['AI4BCAT@gmail.com']), BARE)
+    expect(db.intake.get('il:wf:TENDER:abc')).toMatchObject({ divisionCode: 'D', toAddress: 'ai4bcat@gmail.com' })
+    db.intake.clear()
+    await stageIntake(run(), mail(['stranger@gmail.com']), BARE)
+    expect(db.intake.get('il:wf:TENDER:abc')).toMatchObject({ divisionCode: null })
+  })
+
   it('is one row per e-mail: a second stage is a no-op and never overwrites an edited row', async () => {
     await stageIntake(run(), mail(['tenders+a@bcatcorp.com']), BARE)
     db.intake.set('il:wf:TENDER:abc', { ...(db.intake.get('il:wf:TENDER:abc') as Row), commodity: 'edited', version: 4 })

@@ -96,6 +96,7 @@ export const ROUTES = [
   { nn: '16a', slug: 'bill-detail', path: '/tms/invoicing/payable/bills/{bill}', pattern: '/tms/invoicing/payable/bills/:id' },
   { nn: '17', slug: 'carriers', path: '/tms/carriers', pattern: '/tms/carriers', dark: true },
   { nn: '17b', slug: 'carrier-drawer', path: '/tms/carriers/{carrier}', pattern: '/tms/carriers/:id', dark: true },
+  { nn: '17c', slug: 'carrier-find-invite', path: '/tms/carriers/find', pattern: '/tms/carriers/find' },
   { nn: '18', slug: 'factors', path: '/tms/factors', pattern: '/tms/factors', dark: true },
   { nn: '19', slug: 'customers', path: '/tms/customers', pattern: '/tms/customers', dark: true },
   { nn: '20', slug: 'locations', path: '/tms/locations', pattern: '/tms/locations' },

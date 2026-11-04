@@ -132,8 +132,7 @@ export const PINNED_ITEMS: NavItemDef[] = [
     tms: true,
     badgeKey: 'quotesToReply',
     children: [
-      { to: '/tms/rates', label: 'Quotes', pageKey: 'quotes', tms: true, badgeKey: 'quotesToReply', exclude: ['/tms/rates/lanes', '/tms/rates/spot'] },
-      { to: '/tms/rates/lanes', label: 'Lane rates', pageKey: 'quotes', tms: true },
+      { to: '/tms/rates', label: 'Quotes', pageKey: 'quotes', tms: true, badgeKey: 'quotesToReply', exclude: ['/tms/rates/spot'] },
       ...(SHOW_RESERVED_AB
         ? [{ to: '/tms/rates/spot', label: 'Spot inbox', pageKey: 'quotes', tms: true, badgeKey: 'spotNew' }]
         : []),
@@ -157,7 +156,18 @@ export const PINNED_ITEMS: NavItemDef[] = [
         : []),
     ],
   },
-  { to: '/tms/carriers', label: 'Carriers', icon: Truck, pageKey: 'carriers', section: BROKERAGE, tms: true },
+  {
+    to: '/tms/carriers',
+    label: 'Carriers',
+    icon: Truck,
+    pageKey: 'carriers',
+    section: BROKERAGE,
+    tms: true,
+    children: [
+      { to: '/tms/carriers', label: 'Carriers', pageKey: 'carriers', tms: true, exclude: ['/tms/carriers/find'] },
+      { to: '/tms/carriers/find', label: 'Find & Invite', pageKey: 'carriers', tms: true },
+    ],
+  },
   { to: '/tms/locations', label: 'Locations', icon: MapPin, pageKey: 'locations', section: BROKERAGE, tms: true },
   {
     to: '/tms/invoicing',
@@ -218,7 +228,6 @@ const CRUMBS: CrumbRule[] = [
   { path: '/tms/rates', crumbs: [{ label: 'Quotes' }] },
   { path: '/tms/rates', prefix: true, crumbs: [QUOTES, { label: 'Quote' }] },
   { path: '/tms/rates/new', crumbs: [QUOTES, { label: 'New quote' }] },
-  { path: '/tms/rates/lanes', crumbs: [QUOTES, { label: 'Lane rates' }] },
   { path: '/tms/rates/spot', prefix: true, crumbs: [QUOTES, { label: 'Spot inbox' }] },
   { path: SHIPMENTS_PATH, crumbs: [{ label: 'Shipments' }] },
   { path: SHIPMENTS_PATH, prefix: true, crumbs: [SHIPMENTS, { label: 'Shipment' }] },
@@ -228,6 +237,7 @@ const CRUMBS: CrumbRule[] = [
   { path: INTAKE_PATH, prefix: true, crumbs: [SHIPMENTS, { label: 'Intake', to: INTAKE_PATH }, { label: 'Load' }] },
   { path: '/tms/tracking', crumbs: [{ label: 'Load Tracking' }] },
   { path: '/tms/tracking/links', crumbs: [LOAD_TRACKING, { label: 'Customer links' }] },
+  { path: '/tms/carriers/find', crumbs: [{ label: 'Carriers', to: '/tms/carriers' }, { label: 'Find & Invite' }] },
   { path: '/tms/customers/follow-ups', crumbs: [{ label: 'Customers', to: '/tms/customers' }, { label: 'Follow-ups' }] },
   { path: '/tms/invoicing', crumbs: [ACCOUNTING, { label: 'Accounts Receivable' }] },
   { path: '/tms/invoicing/invoices', prefix: true, crumbs: [ACCOUNTING, AR, { label: 'Invoice' }] },

@@ -1,13 +1,17 @@
 /**
  * `/tms/carrier-sales` — the loads that still need a truck, the offers waiting on us and
- * the covered loads whose rate confirmation is out. Small on purpose: every row's action
- * is a link to the shipment's Carrier/Driver tab, which is the one booking path
- * (`CarrierOffersSection`, `AssignCarrierDialog`, rate con send). This page decides what to
- * look at next; it never books, sends or posts anything itself.
+ * the covered loads on the carrier assignment ladder (Step AM). Cover opens the Cover dialog (MC lookup,
+ * MyCarrierPackets preview, setup packet, assign); the Covered tab shows each load's rung and filters by it,
+ * and Open goes to the shipment's Carrier tab where the ladder's buttons live. Sending, signing and driver
+ * info happen there, never from this list.
  */
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { TmsBadge, TmsCard, TmsListPage } from '@/features/tms/kit'
+import { TmsBadge, TmsButton, TmsCard, TmsListPage, TmsSelect } from '@/features/tms/kit'
+import { CoverCarrierDialog } from '@/features/carriers/cover/CoverCarrierDialog'
+import { CarrierAssignmentChip } from '@/features/shipments/components/CarrierAssignmentChip'
+import { LADDER_FILTER_OPTIONS } from '@/features/shipments/carrierLadder'
+import type { CarrierAssignmentStatus } from '@/lib/carrierAssignment'
 import type { ColumnDef } from '@/features/tms/kit'
 import { expiryChip, statusLabel, theirNumberCents, whoseMoveLabel } from '@/features/quotes/quoteViews'
 import type { QuoteChip } from '@/features/quotes/quoteViews'
@@ -19,6 +23,7 @@ import { formatDateTime } from '@/lib/date'
 import { formatCents } from '@/lib/invoiceBuild'
 import { mcpPacketStanding } from '@/lib/mcpPacket'
 import type { QuoteRecord, RateConStatus } from '@/types/tms'
+import { QuotePostingsCard } from './QuotePostingsCard'
 import { coveredRows, needsCoverRows, offersByShipment, openOffers } from './carrierSalesQueue'
 
 type TabKey = 'needs-cover' | 'offers' | 'covered'
@@ -106,6 +111,9 @@ function CarrierSalesView({ offers }: { offers: OffersState | null }) {
   const { shipments, loading: shipmentsLoading, partial, error, refresh } = useShipments({ kind: 'working' })
   const [tab, setTab] = useState<TabKey>('needs-cover')
   const [search, setSearch] = useState('')
+  // Step AM: Cover opens a dialog right here instead of hopping to the shipment, and the Covered tab filters by ladder rung.
+  const [coverRow, setCoverRow] = useState<ShipmentListRow | null>(null)
+  const [ladderFilter, setLadderFilter] = useState<CarrierAssignmentStatus | 'ALL'>('ALL')
   const [pageSize, setPageSize] = useState(50)
   const [now] = useState(() => Date.now())
   const [nowIso] = useState(() => new Date().toISOString())
@@ -153,7 +161,7 @@ function CarrierSalesView({ offers }: { offers: OffersState | null }) {
       header: '',
       width: 100,
       render: (r) => (canOpenShipment
-        ? <Link className="tms-btn tms-btn-primary tms-btn-sm" to={carrierTabPath(r.id)} aria-label={`Cover ${r.number}`}>Cover</Link>
+        ? <TmsButton variant="primary" size="sm" aria-label={`Cover ${r.number}`} data-testid="cover-row" onClick={() => setCoverRow(r)}>Cover</TmsButton>
         : null),
     },
   ]
@@ -234,6 +242,12 @@ function CarrierSalesView({ offers }: { offers: OffersState | null }) {
       ),
     },
     { key: 'sent', header: 'SENT', width: 190, render: (r) => formatDateTime(r.rateConSentAt) },
+    {
+      key: 'ladder',
+      header: 'CARRIER STATUS',
+      width: 290,
+      render: (r) => <CarrierAssignmentChip ladder={r.carrierAssignmentStatus} shipmentStatus={r.status} />,
+    },
     { key: 'packet', header: 'PACKET', width: 140, render: (r) => <PacketChip row={r} /> },
     {
       key: 'open',
@@ -246,7 +260,7 @@ function CarrierSalesView({ offers }: { offers: OffersState | null }) {
   ]
 
   const needsFiltered = needs.filter(matchShipment)
-  const coveredFiltered = covered.filter(matchShipment)
+  const coveredFiltered = covered.filter(matchShipment).filter((r) => ladderFilter === 'ALL' || r.carrierAssignmentStatus === ladderFilter)
   const offersFiltered = offerRows.filter(matchOffer)
 
   const tabs = [
@@ -262,6 +276,23 @@ function CarrierSalesView({ offers }: { offers: OffersState | null }) {
     quickTabs: { tabs, active: tab, onSelect: (key: string) => setTab(key as TabKey) },
     banner: (
       <>
+        <p className="tms-muted" style={{ fontSize: 12, margin: 0 }}>
+          Need a carrier that is not in the directory?{' '}
+          <Link to="/tms/carriers/find?from=carrier-sales" data-testid="launch-find-invite">Find &amp; invite a carrier</Link>
+        </p>
+        {tab === 'covered' ? (
+          <label className="flex items-center gap-2" style={{ fontSize: 12 }}>
+            <span className="tms-muted">Carrier status</span>
+            <TmsSelect
+              aria-label="Carrier status filter"
+              value={ladderFilter}
+              onChange={(e) => setLadderFilter(e.target.value as CarrierAssignmentStatus | 'ALL')}
+            >
+              <option value="ALL">All</option>
+              {LADDER_FILTER_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </TmsSelect>
+          </label>
+        ) : null}
         {tab === 'offers' ? (
           <p className="tms-muted" style={{ fontSize: 12, margin: 0 }}>
             Accepting, countering and sending the setup packet happen on the shipment’s Carrier tab.{' '}
@@ -269,6 +300,7 @@ function CarrierSalesView({ offers }: { offers: OffersState | null }) {
           </p>
         ) : null}
         <StepTCard />
+        <QuotePostingsCard />
       </>
     ),
     onClearFilters: () => setSearch(''),
@@ -296,13 +328,23 @@ function CarrierSalesView({ offers }: { offers: OffersState | null }) {
 
   const rows = tab === 'needs-cover' ? needsFiltered : coveredFiltered
   return (
-    <TmsListPage<ShipmentListRow>
-      {...common}
-      columns={tab === 'needs-cover' ? needsColumns : coveredColumns}
-      rows={rows.slice(0, pageSize)}
-      rowKey={(r) => r.id}
-      page={{ from: rows.length === 0 ? 0 : 1, to: Math.min(pageSize, rows.length), total: rows.length, pageSize, onPageSize: setPageSize }}
-      emptyText={emptyFor(tab === 'needs-cover' ? 'Every live load has a carrier.' : 'No covered load is waiting on a rate confirmation.')}
-    />
+    <>
+      <TmsListPage<ShipmentListRow>
+        {...common}
+        columns={tab === 'needs-cover' ? needsColumns : coveredColumns}
+        rows={rows.slice(0, pageSize)}
+        rowKey={(r) => r.id}
+        page={{ from: rows.length === 0 ? 0 : 1, to: Math.min(pageSize, rows.length), total: rows.length, pageSize, onPageSize: setPageSize }}
+        emptyText={emptyFor(tab === 'needs-cover' ? 'Every live load has a carrier.' : 'No covered load is waiting on a rate confirmation.')}
+      />
+      {coverRow && (
+        <CoverCarrierDialog
+          shipmentId={coverRow.id}
+          shipmentNumber={coverRow.number}
+          onClose={() => setCoverRow(null)}
+          onCovered={() => { void refresh() }}
+        />
+      )}
+    </>
   )
 }

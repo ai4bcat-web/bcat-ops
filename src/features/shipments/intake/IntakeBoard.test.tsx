@@ -25,6 +25,11 @@ function Where() {
   return <div data-testid="where">{loc.pathname + loc.search}</div>
 }
 
+function NewWhere() {
+  const loc = useLocation()
+  return <div data-testid="new-state">{JSON.stringify(loc.state)}</div>
+}
+
 function renderBoard(url = '/tms/shipments/intake', isOwner = true) {
   vi.spyOn(auth, 'useAuth').mockReturnValue({ isOwner, isAdmin: false, hasPageAccess: () => true } as unknown as auth.AuthContextValue)
   return render(
@@ -32,6 +37,7 @@ function renderBoard(url = '/tms/shipments/intake', isOwner = true) {
       <Routes>
         <Route path="/tms/shipments/intake" element={<><IntakeBoard /><Where /></>} />
         <Route path="/tms/shipments/intake/:id" element={<Where />} />
+        <Route path="/tms/shipments/new" element={<NewWhere />} />
       </Routes>
     </MemoryRouter>,
   )
@@ -93,6 +99,19 @@ describe('IntakeBoard', () => {
     expect(await screen.findByText('Moved one')).toBeInTheDocument()
     fireEvent.click(within(screen.getByRole('table')).getByText('Moved one'))
     expect(screen.getByTestId('where')).toHaveTextContent('/tms/shipments/intake/il%3Amoved')
+  })
+
+  it('Create shipment on an open row opens the new-shipment form carrying that intake id, not the review page', async () => {
+    renderBoard('/tms/shipments/intake?division=BRK')
+    await screen.findByText('First tender')
+    fireEvent.click(screen.getAllByTestId('intake-create-shipment')[0])
+    expect(JSON.parse(screen.getByTestId('new-state').textContent ?? '{}')).toEqual({ intakeId: expect.stringMatching(/^il:/) })
+  })
+
+  it('offers no Create shipment on a row that already moved', async () => {
+    renderBoard('/tms/shipments/intake?division=BRK&status=moved')
+    await screen.findByText('Moved one')
+    expect(screen.queryByTestId('intake-create-shipment')).toBeNull()
   })
 
   it('shows completeness text for each row', async () => {

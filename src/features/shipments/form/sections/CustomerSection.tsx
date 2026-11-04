@@ -15,8 +15,11 @@ import type { CustomerRecord, LocationRecord } from '@/types/tms'
 import { applyCustomerDefaults, isLocked, lockReason } from '../model'
 import { LABEL, labelFor } from '../labels'
 import type { SliceSectionProps } from '../sectionRegistry'
+import { BillToBlock } from './BillToBlock'
 import { LField } from './formControls'
 import { ctl, disabledState, issueFor } from './fieldUtil'
+
+const VISIBLE_EMAILS = 2
 
 function CustomerImpl({ value, onChange, ctx, form }: SliceSectionProps<'customer'>) {
   const base = disabledState(ctx)
@@ -39,7 +42,11 @@ function CustomerImpl({ value, onChange, ctx, form }: SliceSectionProps<'custome
     if (!id) { onChange({ id: '', contactId: '', billToId: '' }); return }
     const picked = (record as CustomerRecord | null | undefined) ?? ctx.directory.customers.find((c) => c.id === id) ?? null
     if (!picked) return
-    form.update((prev) => applyCustomerDefaults({ ...prev, customer: { ...prev.customer, useTyped: false, typedName: '' } }, picked))
+    form.update((prev) => {
+      const seeded = applyCustomerDefaults({ ...prev, customer: { ...prev.customer, useTyped: false, typedName: '' } }, picked)
+      // Only the first two e-mail slots are on the form; defaults never fill a hidden one.
+      return { ...seeded, customer: { ...seeded.customer, emails: seeded.customer.emails.map((e, i) => (i < VISIBLE_EMAILS ? e : prev.customer.emails[i] ?? '')) } }
+    })
   }
 
   const contacts = (customer?.contacts ?? []).filter((c) => c.active || c.id === value.contactId)
@@ -114,7 +121,7 @@ function CustomerImpl({ value, onChange, ctx, form }: SliceSectionProps<'custome
       <LField def={LABEL.customer.hours}>
         <TmsInput {...ctl(LABEL.customer.hours)} value={value.hours} disabled={base.disabled} onChange={(e) => onChange({ hours: e.target.value })} />
       </LField>
-      {value.emails.map((email, i) => {
+      {value.emails.slice(0, VISIBLE_EMAILS).map((email, i) => {
         const def = LABEL.customer.email(i + 1)
         return (
           <LField key={def.testId} def={def} error={err(def.testId)}>
@@ -131,6 +138,7 @@ function CustomerImpl({ value, onChange, ctx, form }: SliceSectionProps<'custome
           {billTos.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
         </TmsSelect>
       </LField>
+      {customer && <BillToBlock key={customer.id} customer={customer} settings={ctx.settings} billToId={value.billToId} />}
     </div>
   )
 }

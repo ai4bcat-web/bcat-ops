@@ -130,7 +130,7 @@ describe('CarriersPage', () => {
   it('creates a carrier owned by the rep picked from the directory', async () => {
     renderBoard()
     await waitFor(() => expect(screen.getByText('Carriers')).toBeTruthy())
-    fireEvent.click(screen.getByRole('button', { name: /Carrier$/ }))
+    fireEvent.click(screen.getByRole('button', { name: /admin data fix/ }))
 
     fireEvent.change(await screen.findByLabelText('Carrier name'), { target: { value: 'New Haul' } })
     fireEvent.change(screen.getByLabelText('MC number'), { target: { value: '999999' } })
@@ -146,7 +146,7 @@ describe('CarriersPage', () => {
   it('still takes an owner nobody has a profile for, exactly as typed', async () => {
     renderBoard()
     await waitFor(() => expect(screen.getByText('Carriers')).toBeTruthy())
-    fireEvent.click(screen.getByRole('button', { name: /Carrier$/ }))
+    fireEvent.click(screen.getByRole('button', { name: /admin data fix/ }))
 
     fireEvent.change(await screen.findByLabelText('Carrier name'), { target: { value: 'Old Haul' } })
     fireEvent.change(screen.getByLabelText('MC number'), { target: { value: '888888' } })
@@ -161,5 +161,19 @@ describe('CarriersPage', () => {
     await waitFor(() => expect(upsertCarrier).toHaveBeenCalledWith(
       expect.objectContaining({ accountOwnerIds: ['legacy.rep@nowhere.test'] }),
     ))
+  })
+
+  it('hides hand entry of a carrier from everyone but an admin: carriers come through MyCarrierPackets', async () => {
+    auth.isAdmin = false
+    renderBoard()
+    await waitFor(() => expect(screen.getByText('Carriers')).toBeTruthy())
+    expect(screen.queryByRole('button', { name: /admin data fix/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Add carrier/ })).toBeNull()
+  })
+
+  it('launches Find & invite from the Carriers header for every user', () => {
+    auth.isAdmin = false
+    renderBoard()
+    expect(screen.getByTestId('launch-find-invite').getAttribute('href')).toBe('/tms/carriers/find')
   })
 })

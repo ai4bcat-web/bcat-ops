@@ -39,6 +39,7 @@ import { paperworkShortLabel, type PaperworkLocation } from '@/lib/paperworkLoca
 import { DOCUMENT_TYPE_LABELS } from '@/lib/shipmentDocuments'
 import { SHIPMENT_STATUS_LABELS } from '@/lib/shipmentStatus'
 import { boardStatusOf, detailValuesFor } from '@/lib/shipmentViewDefs'
+import { assignmentChipText } from './carrierLadder'
 export { ALJEX_COLUMN_KEYS, boardStatusOf, matchesBoardFilters } from '@/lib/shipmentViewDefs'
 
 export type {
@@ -892,6 +893,8 @@ export const BOARD_COLUMNS: BoardColumn[] = [
   { key: 'podNotes', label: 'POD Notes', group: 'Load', value: (r) => r.podNotes ?? '', width: 200 },
   // ── Carrier leg (the ACTIVE LoadCarrier) ──────────────────────────────────
   { key: 'carrierName', label: 'Carrier Name', group: 'Carrier', value: (r) => r.carrierName ?? '', width: 180 },
+  // Step AM: the assignment ladder chip; the shipment's own status takes over once driver info is in and it is moving.
+  { key: 'carrierAssignment', label: 'Carrier Status', group: 'Carrier leg', value: (r) => assignmentChipText(r, statusWithProgress(r)), width: 260 },
   { key: 'carrierMc', label: 'Carrier MC', group: 'Carrier leg', value: (r) => r.carrierMc ?? '', width: 110 },
   { key: 'carrierRep', label: 'Carrier Rep', group: 'Carrier leg', value: (r) => r.dispatcherAssignedName ?? r.dispatcherAssignedId ?? '', width: 140 },
   { key: 'carrierDispatcher', label: 'Carrier Dispatcher', group: 'Carrier leg', value: (r) => r.carrierDispatcherName ?? '', width: 150 },

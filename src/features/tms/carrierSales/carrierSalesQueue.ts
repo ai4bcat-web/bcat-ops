@@ -51,12 +51,15 @@ export interface CarrierSalesRow {
 
 const NEEDS_COVER_STATUSES: readonly ShipmentStatus[] = ['OPEN', 'BOOKED', 'PLANNED']
 
-function isLive(row: CarrierSalesRow): boolean {
+/** The few fields liveness and need-to-cover read, so a board row (whose facets are optional) can ask too. */
+export type NeedsCoverRow = Pick<CarrierSalesRow, 'status' | 'voidedAt' | 'legacyImported' | 'buildState'> & { assignmentType?: AssignmentType | null }
+
+function isLive(row: NeedsCoverRow): boolean {
   return !row.voidedAt && row.status !== 'CANCELED' && row.legacyImported !== true && row.buildState !== 'BUILDING'
 }
 
 /** A live, not-yet-hauled load nobody has covered. */
-export function needsCover(row: CarrierSalesRow): boolean {
+export function needsCover(row: NeedsCoverRow): boolean {
   if (!isLive(row)) return false
   if (!NEEDS_COVER_STATUSES.includes(row.status)) return false
   return row.assignmentType === null || row.assignmentType === 'NEED_TO_COVER'

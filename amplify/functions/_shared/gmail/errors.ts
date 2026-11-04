@@ -1,6 +1,6 @@
 /** The refresh token is revoked or expired: the connection must be re-made by the rep. */
 export class NeedsReconnect extends Error {
-  constructor(message = 'Google no longer accepts this connection; reconnect Gmail.') {
+  constructor(message = 'Google no longer accepts this connection (access expires after 7 days while the Google app is in Testing mode, or when it is revoked); reconnect Gmail.') {
     super(message)
     this.name = 'NeedsReconnect'
   }

@@ -3,7 +3,7 @@
  * `/tms/shipments/new` (mode "create") and `/tms/shipments/:id/edit` (mode "edit").
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useLocation, useNavigate, useParams } from 'react-router-dom'
+import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { TmsAlert, TmsBadge, TmsButton, TmsDialog } from '@/features/tms/kit'
 import { flattenDivisions } from '@/features/tms/settings/taxonomyDrafts'
@@ -13,10 +13,14 @@ import { useCarriers } from '@/hooks/useCarriers'
 import { useDirectory } from '@/hooks/useDirectory'
 import { useShipment } from '@/hooks/useShipment'
 import { useStaff } from '@/hooks/useStaff'
-import { getTmsSettings, listLocations } from '@/lib/apiClient'
+import { getTmsSettings, linkIntakeShipment, listLocations } from '@/lib/apiClient'
+import { useIntakeLoad } from '../intake/useIntakeLoads'
 import type { LocationRecord, ShipmentBundle, TmsSettings } from '@/types/tms'
+import { routeSignature } from './sections/milesEstimate'
 import { SECTION_COMPONENTS } from './defaultSections'
 import { FormSection } from './FormSection'
+import { FromEmailContext } from './fromEmail'
+import { intakePrefill } from './intakePrefill'
 import { SECTION_ORDER, SECTION_TITLE } from './labels'
 import { lockedFields, type FormMode, type FormStop, type ShipmentFormValues } from './model'
 import type { FormCtx, FormIssue, SectionKey } from './sectionProps'
@@ -47,7 +51,10 @@ export function ShipmentFormPage({ mode }: { mode: 'create' | 'edit' }) {
   const { id } = useParams()
   const location = useLocation()
   const { bundle, loading, error } = useShipment(mode === 'edit' ? (id ?? null) : null)
+  const [search] = useSearchParams()
   const prefill = (location.state as { customerId?: string } | null)?.customerId
+  // Intake → Create shipment: the intake load's id arrives as router state, or `?intake=` after a refresh.
+  const intakeId = mode === 'create' ? ((location.state as { intakeId?: string } | null)?.intakeId ?? search.get('intake') ?? undefined) : undefined
   if (mode === 'edit' && (loading || !bundle)) {
     return (
       <div className="tms-dense-page tms-ship-form" data-testid="ship-form-loading">
@@ -59,11 +66,14 @@ export function ShipmentFormPage({ mode }: { mode: 'create' | 'edit' }) {
       </div>
     )
   }
-  return <ShipmentFormInner key={`${mode}:${id ?? 'new'}`} initialBundle={mode === 'edit' ? bundle : null} prefillCustomerId={prefill} />
+  return <ShipmentFormInner key={`${mode}:${id ?? 'new'}`} initialBundle={mode === 'edit' ? bundle : null} prefillCustomerId={prefill} intakeId={intakeId} />
 }
 
-function ShipmentFormInner({ initialBundle, prefillCustomerId }: { initialBundle: ShipmentBundle | null; prefillCustomerId?: string }) {
+function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { initialBundle: ShipmentBundle | null; prefillCustomerId?: string; intakeId?: string }) {
   const navigate = useNavigate()
+  const intake = useIntakeLoad(intakeId)
+  const [fromEmail, setFromEmail] = useState<ReadonlySet<string>>(() => new Set())
+  const seededFor = useRef<string | null>(null)
   const { user, isAdmin } = useAuth()
   const email = user?.email ?? ''
   const directory = useDirectory({ locations: false })
@@ -125,6 +135,12 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId }: { initialBundle
     prefillCustomerId,
     onCreated: (b) => {
       toast.success(`Shipment ${b.shipment.number} created`)
+      // The shipment exists whatever happens to the link; the intake row is tied to it best-effort.
+      if (intakeId) {
+        linkIntakeShipment({ intakeId, shipmentId: b.shipment.id })
+          .then(() => toast.success('Intake load marked as moved'))
+          .catch((err: unknown) => toast.error(`Created, but the intake load was not linked: ${err instanceof Error ? err.message : 'unknown error'}`))
+      }
       navigate(`/tms/shipments/${b.shipment.id}/edit`, { replace: true })
     },
     onSubmitted: (b) => {
@@ -134,6 +150,17 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId }: { initialBundle
     onBlocked: (issues) => setSectionOpen([...new Set(issues.map((i) => i.section))], true),
   })
   const { values, update, getValues, bundle, mode, busy: pipelineBusy } = form
+
+  // Pre-fill once, when the intake row and the customer directory have both arrived.
+  const { seedValues } = form
+  useEffect(() => {
+    const row = intake.row
+    if (!intakeId || !row || directory.loading || seededFor.current === intakeId) return
+    seededFor.current = intakeId
+    const pre = intakePrefill(row, row.fields.customerId ? directory.customers.find((c) => c.id === row.fields.customerId) ?? null : null)
+    seedValues(pre.values, true)
+    setFromEmail(new Set(pre.fromEmail))
+  }, [intakeId, intake.row, directory.loading, directory.customers, seedValues])
 
   const { actions, dialogs, busy } = useFormActions({
     values, update, bundle, setBundle: form.setBundle, busy: pipelineBusy, settings, isAdmin, brokerName: 'BCAT Logistics',
@@ -199,7 +226,7 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId }: { initialBundle
   const C = SECTION_COMPONENTS
   const lastIndex = Math.max(0, values.stops.length - 1)
   const sectionBody: Record<SectionKey, React.ReactNode> = {
-    shipping: <C.shipping value={values.ship} onChange={slice.ship} ctx={ctx} form={formApi} mode={values.mode} onModeChange={slice.mode} />,
+    shipping: <C.shipping value={values.ship} onChange={slice.ship} ctx={ctx} form={formApi} mode={values.mode} onModeChange={slice.mode} routeKey={routeSignature(values.stops)} />,
     customer: <C.customer value={values.customer} onChange={slice.customer} ctx={ctx} form={formApi} />,
     pickup: <C.pickup kind="pickup" index={0} stop={values.stops[0]} onChange={onPickup} ctx={ctx} form={formApi} />,
     consignee: <C.consignee kind="consignee" index={lastIndex} stop={values.stops[lastIndex]} onChange={onConsignee} ctx={ctx} form={formApi} />,
@@ -332,6 +359,12 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId }: { initialBundle
           </TmsAlert>
         ) : null}
 
+        {intakeId && intake.error ? <TmsAlert tone="orange" className="tms-ship-banner">Could not load the e-mail to pre-fill from: {intake.error}</TmsAlert> : null}
+        {fromEmail.size > 0 ? (
+          <TmsAlert tone="blue" className="tms-ship-banner"><span data-testid="ship-form-intake-banner">Pre-filled from the e-mail / rate confirmation ({fromEmail.size} fields). Fields marked “from e-mail” need a look before you create.</span></TmsAlert>
+        ) : null}
+
+        <FromEmailContext.Provider value={fromEmail}>
         <div className="tms-ship-grid">
           {SECTION_ORDER.map((key) => (
             <FormSection key={key} id={key} title={SECTION_TITLE[key]} open={isOpen(key)} onToggle={toggle} errorCount={errorsBySection(key)}>
@@ -339,6 +372,7 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId }: { initialBundle
             </FormSection>
           ))}
         </div>
+        </FromEmailContext.Provider>
       </div>
 
       {dialogs}

@@ -44,6 +44,7 @@ import {
   carrierStatusReasonsFor,
 } from '../../../src/lib/carrierStatus'
 import { normalizeQuickPayTiers } from '../../../src/lib/quickPay'
+import { mcpPacketStanding } from '../../../src/lib/mcpPacket'
 import { normalizeName } from '../../../src/lib/tmsDirectory'
 import { validatePartyMemory } from '../../../src/lib/workflows/memory'
 import type { CarrierStatus, CarrierStatusReason, InsurancePolicy } from '../../../src/types/tms'
@@ -643,16 +644,6 @@ const CARRIER_UPDATE_SKIP: Record<string, true> = {
   lastLoadAt: true,
 }
 
-/**
- * Does this tenant insist a carrier be reviewed before it can be booked? Absent
- * settings mean yes: an un-configured tenant keeps the approval queue rather than
- * silently letting anyone mint ACTIVE carriers.
- */
-async function carrierApprovalRequired(): Promise<boolean> {
-  const settings = await getById(SETTINGS_TABLE_NAME, SETTINGS_ID)
-  return settings?.requireCarrierApproval !== false
-}
-
 async function upsertCarrier(input: Row, caller: Caller): Promise<Row> {
   const name = assertString(input.name, 'name')
   const normalizedName = normalizeName(name)
@@ -675,17 +666,14 @@ async function upsertCarrier(input: Row, caller: Caller): Promise<Row> {
 
   await assertNoDuplicateCarrier(id, normalizedName, mcNumber, dotNumber)
 
-  // A new carrier is unvetted paperwork until somebody looks at it, and who may skip
-  // that queue is a tenant decision: with requireCarrierApproval off, anyone on the
-  // carriers page may open one already ACTIVE by asking for it. With it on — and when
-  // the setting was never saved — only an admin may. Status moves through
-  // SET_CARRIER_STATUS afterwards either way.
-  const requestedStatus = optionalEnumStrict(input.status, CARRIER_STATUSES, 'status')
-  const mayOpenActive = isCreate && requestedStatus === 'ACTIVE'
-    && (caller.isAdmin || !(await carrierApprovalRequired()))
-  const status: CarrierStatus = isCreate
-    ? (mayOpenActive ? 'ACTIVE' : 'PENDING')
-    : ((existing?.status as CarrierStatus | undefined) ?? 'PENDING')
+  // Step AM. A carrier enters the directory through MyCarrierPackets (preview / invite / packet) and
+  // is ACTIVE only when MCP says its setup is complete. A hand-typed row is an admin's data fix: it
+  // is always PENDING, and it is audited as one.
+  if (isCreate && !caller.isAdmin) {
+    throw new Error('Forbidden: carriers enter the directory through MyCarrierPackets (Carriers > Find & Invite). Only an ADMIN may add one by hand as a data fix.')
+  }
+  optionalEnumStrict(input.status, CARRIER_STATUSES, 'status')
+  const status: CarrierStatus = isCreate ? 'PENDING' : ((existing?.status as CarrierStatus | undefined) ?? 'PENDING')
 
   const now = nowIso()
   const item: Row = {
@@ -773,7 +761,7 @@ async function upsertCarrier(input: Row, caller: Caller): Promise<Row> {
         ConditionExpression: 'attribute_not_exists(id)',
       }),
     )
-    await writeAudit('CARRIER', id, 'UPSERT_CARRIER', caller, { created: true, name, type, status })
+    await writeAudit('CARRIER', id, 'UPSERT_CARRIER', caller, { created: true, name, type, status, manualDataFix: true })
     return item
   }
 
@@ -846,6 +834,13 @@ async function setCarrierStatus(input: Row, caller: Caller): Promise<Row> {
   const mayEditStatus = caller.isAdmin || caller.groups.includes('claim-CARRIER_STATUS_EDIT')
   if (!canTransitionCarrierStatus(from, status, mayEditStatus)) {
     throw new Error(`Cannot move a carrier from ${from ?? 'PENDING'} to ${status}`)
+  }
+
+  // Step AM. Setup complete is MyCarrierPackets' word, never a person's: a carrier becomes ACTIVE when
+  // mcp-sync sees a completed, monitored packet. A person may bring one back to ACTIVE only when MCP's
+  // own record already says complete (e.g. after an INACTIVE they set), or for an Aljex-imported carrier.
+  if (status === 'ACTIVE' && !existing.legacyImported && !mcpPacketStanding(existing).completed) {
+    throw new Error('A carrier becomes ACTIVE only when MyCarrierPackets reports its setup complete. Send the setup packet from Carriers > Find & Invite.')
   }
 
   // Switching a carrier off is always on the record.

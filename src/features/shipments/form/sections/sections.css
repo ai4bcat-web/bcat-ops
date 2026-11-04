@@ -49,3 +49,8 @@
 .tms-ship-form .ship-history-table th { text-align: left; border-bottom: 1px solid var(--tms-border); padding: 2px 4px; }
 .tms-ship-form .ship-history-table td { padding: 2px 4px; }
 .tms-ship-form .ship-pick-num { width: 72px; flex: 0 0 72px; }
+.tms-ship-form .ship-billto { border-top: 1px solid var(--tms-border); padding-top: 6px; display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.tms-ship-form .ship-billto-list { margin: 0; display: flex; flex-direction: column; gap: 2px; }
+.tms-ship-form .ship-billto-row { display: flex; justify-content: space-between; gap: 8px; }
+.tms-ship-form .ship-billto-row dt { color: var(--tms-text-muted); }
+.tms-ship-form .ship-billto-row dd { margin: 0; text-align: right; overflow-wrap: anywhere; }

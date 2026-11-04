@@ -7,6 +7,7 @@
  * extra card and loses nothing, which is what keeps adding a provider a registry edit.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { SPOT_CALLBACK_PATH } from '@/features/spot-quoter/useSpotRequests'
 import { Copy } from 'lucide-react'
 import {
   TmsBadge, TmsButton, TmsCard, TmsDialog, TmsEmptyState, TmsField, TmsInput, TmsSelect, TmsTable,
@@ -700,6 +701,38 @@ function McpExtra({ row }: ExtrasProps) {
   )
 }
 
+/**
+ * Setup steps for the Gmail sign-in client. The redirect URI is computed from this very
+ * origin so what is shown is exactly what Google must be given (it must match character
+ * for character). Written for a consumer Gmail account on an External / Testing consent screen.
+ */
+function GoogleSetupCard() {
+  const redirectUri = `${window.location.origin}${SPOT_CALLBACK_PATH}`
+  return (
+    <TmsCard title="Google setup">
+      <ol data-testid="google-setup-steps">
+        <li>In Google Cloud Console, open APIs &amp; Services and enable the Gmail API.</li>
+        <li>
+          Under OAuth consent screen choose <strong>External</strong> and leave it in <strong>Testing</strong>. Add the
+          mailbox that will be connected (for the demo, ai4bcat@gmail.com) as a <strong>test user</strong>. The only scope
+          needed is <code>gmail.readonly</code>.
+        </li>
+        <li>
+          Under Credentials create an OAuth client of type <strong>Web application</strong>. Add this exact address as an
+          authorized redirect URI: <code data-testid="google-redirect-uri">{redirectUri}</code>
+        </li>
+        <li>Paste the Client ID and Client secret above and save. The secret is write-only: it shows as saved and is never displayed again.</li>
+        <li>Open the Spot inbox and choose Connect Gmail, then sign in with the test-user account.</li>
+      </ol>
+      <p className="tms-muted">
+        Google expires access for apps in Testing mode after 7 days. When that happens the connection shows
+        “Needs reconnect” and mail stops being read until someone signs in again; nothing retries in the meantime. Leave the
+        Workspace domain blank for a consumer Gmail account. The same client is used by the spot quoter and, later, the AP inbox sync.
+      </p>
+    </TmsCard>
+  )
+}
+
 export function ProviderExtras(props: ExtrasProps) {
   switch (props.descriptor.key) {
     case 'QUICKBOOKS_ONLINE':
@@ -710,6 +743,8 @@ export function ProviderExtras(props: ExtrasProps) {
       return <McpExtra {...props} />
     case 'DAT':
       return <DatEmailsExtra />
+    case 'GMAIL_REP_OAUTH':
+      return <GoogleSetupCard />
     case 'ORDERFUL':
       return <EdiExtra />
     case 'ARTISPAY':

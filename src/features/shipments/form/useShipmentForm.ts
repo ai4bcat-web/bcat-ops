@@ -238,7 +238,7 @@ export function useShipmentForm(opts: UseShipmentFormOptions) {
   return {
     values, update, getValues, dirty, mode, bundle, setBundle, customer,
     issues, attempt, busy, partial, retry,
-    drafts, resumeDraft, discardDraft,
+    drafts, resumeDraft, discardDraft, seedValues: reseed,
     run,
   }
 }

@@ -138,7 +138,7 @@ describe('DivisionsPage', () => {
 
     it.each([
       ['not an address', /valid e-mail address/],
-      ['ai4bcat@gmail.com', /already used by another mailbox/],
+      ['quotes@bcatcorp.com', /already used by another mailbox/],
       ['ai4bcat+tracking-shp-1@gmail.com', /shipment reply threads/],
       ['Assets@BCATcorp.com', /already receives tenders for Ivan Cartage/],
     ])('refuses %s with its reason', async (value, message) => {
@@ -147,6 +147,15 @@ describe('DivisionsPage', () => {
       save()
       expect((await screen.findAllByText(message)).length).toBeGreaterThan(0)
       expect(mocks.saveOwnershipDivision).not.toHaveBeenCalled()
+    })
+
+    it('accepts the demo intake mailbox (ai4bcat@gmail.com) and saves it', async () => {
+      mocks.saveOwnershipDivision.mockResolvedValue({})
+      const input = await open()
+      fireEvent.change(input, { target: { value: 'ai4bcat@gmail.com' } })
+      save()
+      await waitFor(() => expect(mocks.saveOwnershipDivision).toHaveBeenCalledTimes(1))
+      expect(mocks.saveOwnershipDivision.mock.calls[0][0]).toMatchObject({ intakeEmail: 'ai4bcat@gmail.com' })
     })
 
     it('saves a valid address lower-cased', async () => {

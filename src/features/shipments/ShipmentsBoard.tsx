@@ -66,6 +66,7 @@ import {
   tenderRespond,
 } from '@/lib/apiClient'
 import { saveBlob } from '@/lib/download'
+import { activeUnits } from '@/lib/fleetActive'
 import { checkCallState } from '@/lib/checkCalls'
 import { formatCents } from '@/lib/invoiceBuild'
 import { customerDisplayName, isCustomerUnresolved } from '@/lib/customerResolution'
@@ -77,6 +78,8 @@ import { cn } from '@/lib/utils'
 import { ShipmentDrawer } from './components/ShipmentDrawer'
 import { ShipmentRowActions, type ShipmentActionHandlers } from './components/StatusActions'
 import { UnvoidShipmentDialog } from './components/UnvoidShipmentDialog'
+import { CoverCarrierDialog } from '@/features/carriers/cover/CoverCarrierDialog'
+import { needsCover } from '@/features/tms/carrierSales/carrierSalesQueue'
 import { RepointCustomerDialog } from './components/RepointCustomerDialog'
 
 import {
@@ -509,7 +512,7 @@ function BoardPane({
   const [batchRunning, setBatchRunning] = useState(false)
   const [columnTemplateId, setColumnTemplateId] = useState<string | null>(null)
   const [dialogShipment, setDialogShipment] = useState<ShipmentRow | null>(null)
-  const [dialogKind, setDialogKind] = useState<'unvoid' | 'repoint' | null>(null)
+  const [dialogKind, setDialogKind] = useState<'unvoid' | 'repoint' | 'cover' | null>(null)
 
   // The page decides what to fetch, so it hears what this pane is asking for: the Status
   // header's VOIDED option widens the query, and a typed PRO adds that exact row (R4, §4.3).
@@ -669,7 +672,7 @@ function BoardPane({
     const driverParams = (driverId: string): Record<string, unknown> => {
       const d = ivanDrivers.find((x) => x.id === driverId)
       const truck = d?.assignedTruckId ? equipment.find((e) => e.id === d.assignedTruckId) : undefined
-      const trailer = d?.assignedTrailerId ? equipment.find((e) => e.id === d.assignedTrailerId) : undefined
+      const trailer = d?.assignedTrailerId ? activeUnits(equipment).find((e) => e.id === d.assignedTrailerId) : undefined
       return {
         driverId,
         ...(truck ? { truckId: truck.id, truckNumber: truck.unitNumber } : {}),
@@ -817,6 +820,8 @@ function BoardPane({
             tenderRespond({ shipmentId: row.id, expectedUpdatedAt: row.updatedAt, decision, reason })),
         onUnvoid: () => { setDialogShipment(row); setDialogKind('unvoid') },
         onRepointCustomer: () => { setDialogShipment(row); setDialogKind('repoint') },
+        // Step AM: a load that still needs a truck offers Cover right on its row.
+        ...(needsCover(row) ? { onCover: () => { setDialogShipment(row); setDialogKind('cover') } } : {}),
       }
     },
     [refresh],
@@ -1108,6 +1113,15 @@ function BoardPane({
           open
           onOpenChange={(open) => { if (!open) setDialogShipment(null) }}
           onUnvoided={async () => { setDialogShipment(null); await handleRefresh() }}
+        />
+      )}
+
+      {dialogShipment && dialogKind === 'cover' && (
+        <CoverCarrierDialog
+          shipmentId={dialogShipment.id}
+          shipmentNumber={dialogShipment.number}
+          onClose={() => setDialogShipment(null)}
+          onCovered={() => { void handleRefresh() }}
         />
       )}
 

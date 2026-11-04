@@ -21,6 +21,7 @@ import { nextLoadStatuses, LOAD_WORKFLOW_STATUS_LABELS, isTruckloadMode } from '
 import { formatDateTimeInput, fromDateTimeInput } from '@/lib/date'
 import { formatCents } from '@/lib/tmsDirectory'
 import { BookCarrierDialog, type BookCarrierFields } from '@/features/carriers/components/BookCarrierDialog'
+import { CoverCarrierDialog } from '@/features/carriers/cover/CoverCarrierDialog'
 import { TmsButton, TmsDialog, TmsField, TmsIconButton, TmsInput, TmsSelect, TmsTextarea } from '@/features/tms/kit'
 import { type RemoveLoadCarrierReason } from '@/lib/apiClient'
 import { VoidShipmentDialog } from './VoidShipmentDialog'
@@ -67,6 +68,8 @@ export interface ShipmentActionHandlers {
   onTenderRespond: (decision: 'ACCEPT' | 'REJECT' | 'RESET', reason?: string) => Promise<void>
   onUnvoid?: () => void
   onRepointCustomer?: () => void
+  /** Step AM: open the Cover dialog for this shipment (the board offers it only for a load that needs a carrier). */
+  onCover?: () => void
 }
 
 /** Everything the row menu needs to read, including what the void dialog stamps. */
@@ -117,6 +120,11 @@ export function ShipmentRowActions({ shipment, isAdmin, cancelDeleteAdminOnly, h
         </DropdownMenuTrigger>
         <DropdownMenuContent align={align} className="tms-portal w-56" onClick={(e) => e.stopPropagation()}>
           <DropdownMenuLabel>Shipment</DropdownMenuLabel>
+          {handlers.onCover && (
+            <DropdownMenuItem disabled={voided} data-testid="row-cover" onSelect={() => handlers.onCover?.()}>
+              <Building2 size={14} className="mr-2" />Cover…
+            </DropdownMenuItem>
+          )}
           <DropdownMenuItem disabled={voided} onSelect={() => setDialog({ kind: 'duplicate' })}>
             <Copy size={14} className="mr-2" />Duplicate
           </DropdownMenuItem>
@@ -237,12 +245,16 @@ export interface LoadActionHandlers {
   onBookCarrier: (input: BookCarrierFields) => Promise<void>
   onRemoveCarrier: (
     loadCarrierId: string, outcome: 'BOUNCED' | 'TONU', reason: RemoveLoadCarrierReason, note?: string,
+    /** Step AM: put the freed load back on DAT. Optional, off unless the rep ticks it. */
+    repostToDat?: boolean,
   ) => Promise<void>
   onSetArStatus: (status: 'DOCS_NEEDED' | 'INVOICE_NOT_NEEDED') => Promise<void>
+  /** Step AM: the Cover dialog assigned a carrier; re-read the shipment. */
+  onCovered?: () => Promise<void>
 }
 
 type LoadDialog =
-  | { kind: 'asset' } | { kind: 'carrier' } | { kind: 'book' } | { kind: 'remove'; outcome: 'BOUNCED' | 'TONU' } | null
+  | { kind: 'asset' } | { kind: 'carrier' } | { kind: 'book' } | { kind: 'cover' } | { kind: 'remove'; outcome: 'BOUNCED' | 'TONU' } | null
 
 export function LoadActions({
   load, mode, bundle, activeCarrier, drivers, trucks, trailers, arStatus, isAdmin, voided = false, handlers, onRateCon, onError,
@@ -304,13 +316,21 @@ export function LoadActions({
             <Truck size={14} className="mr-2" />{ownLeg ? 'Change driver…' : 'Book Ivan Cartage (own fleet)'}
           </DropdownMenuItem>
           {bookable && (
+            <DropdownMenuItem disabled={voided} onSelect={() => setDialog({ kind: 'cover' })}>
+              <Building2 size={14} className="mr-2" />Cover…
+            </DropdownMenuItem>
+          )}
+          {bookable && (
             <DropdownMenuItem disabled={voided} onSelect={() => setDialog({ kind: 'book' })}>
               <FileSignature size={14} className="mr-2" />Book carrier
             </DropdownMenuItem>
           )}
-          <DropdownMenuItem disabled={voided} onSelect={() => setDialog({ kind: 'carrier' })}>
-            <Building2 size={14} className="mr-2" />Assign carrier (name only)
-          </DropdownMenuItem>
+          {/* Step AM: a carrier typed in by name never went through MyCarrierPackets, so only an admin can data-fix one. */}
+          {isAdmin && (
+            <DropdownMenuItem disabled={voided} onSelect={() => setDialog({ kind: 'carrier' })}>
+              <Building2 size={14} className="mr-2" />Assign carrier by name (admin data fix)
+            </DropdownMenuItem>
+          )}
           {activeCarrier && (
             <>
               <DropdownMenuItem disabled={voided} onSelect={() => setDialog({ kind: 'remove', outcome: 'BOUNCED' })}>
@@ -369,6 +389,14 @@ export function LoadActions({
           onConfirm={(input) => run(() => handlers.onAssignCarrier(input))}
         />
       )}
+      {dialog?.kind === 'cover' && (
+        <CoverCarrierDialog
+          shipmentId={bundle.shipment.id}
+          shipmentNumber={bundle.shipment.number}
+          onClose={() => setDialog(null)}
+          onCovered={() => { void handlers.onCovered?.() }}
+        />
+      )}
       {dialog?.kind === 'book' && (
         <BookCarrierDialog
           bundle={bundle}
@@ -385,7 +413,7 @@ export function LoadActions({
           loadCarrier={activeCarrier}
           busy={busy}
           onClose={() => setDialog(null)}
-          onConfirm={(reason, note) => run(() => handlers.onRemoveCarrier(activeCarrier.id, dialog.outcome, reason, note))}
+          onConfirm={(reason, note, repostToDat) => run(() => handlers.onRemoveCarrier(activeCarrier.id, dialog.outcome, reason, note, repostToDat))}
         />
       )}
     </>
@@ -571,10 +599,12 @@ export function RemoveCarrierDialog({ outcome, loadCarrier, busy, onClose, onCon
   loadCarrier: LoadCarrierRecord
   busy: boolean
   onClose: () => void
-  onConfirm: (reason: RemoveLoadCarrierReason, note?: string) => void
+  onConfirm: (reason: RemoveLoadCarrierReason, note?: string, repostToDat?: boolean) => void
 }) {
   const [reason, setReason] = useState('')
   const [note, setNote] = useState('')
+  // Step AM: re-posting the freed load to DAT is a choice, never a default.
+  const [repost, setRepost] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const options = outcome === 'TONU' ? TONU_REASONS : BOUNCE_REASONS
 
@@ -590,7 +620,7 @@ export function RemoveCarrierDialog({ outcome, loadCarrier, busy, onClose, onCon
             variant="primary"
             onClick={() => {
               if (!reason) { setError('Pick a reason.'); return }
-              onConfirm(reason as RemoveLoadCarrierReason, note.trim() || undefined)
+              onConfirm(reason as RemoveLoadCarrierReason, note.trim() || undefined, repost)
             }}
             disabled={busy}
           >
@@ -615,6 +645,19 @@ export function RemoveCarrierDialog({ outcome, loadCarrier, busy, onClose, onCon
             onChange={(e) => setNote(e.target.value)}
           />
         </TmsField>
+        <p className="tms-muted text-xs" data-testid="remove-carrier-effect">
+          The load goes back to Open. {loadCarrier.carrierName ?? 'The carrier'} stays in the load’s history.
+        </p>
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={repost}
+            onChange={(e) => setRepost(e.target.checked)}
+            disabled={busy}
+            aria-label="Re-post to DAT"
+          />
+          Re-post this load to DAT
+        </label>
         {outcome === 'TONU' && (
           <p className="rounded-[var(--tms-radius)] border border-[color:var(--tms-border)] p-2 text-xs">
             The carrier keeps ${formatCents(loadCarrier.carrierRateCents ?? 0)} — the cost line stays on the load.

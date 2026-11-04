@@ -2936,25 +2936,33 @@ describe('carrier booking', () => {
     })
   })
 
-  it('refuses to send the rate con when driver or dispatcher fields are missing', async () => {
+  it('refuses to send the rate con without a dispatcher email, but never waits on the driver (that is the last rung)', async () => {
     const { loadId } = await bookableLoad()
     seedCarrier()
     seedCarrierDocs()
 
-    const _noDriverName = await book(loadId, { driverName: null })
+    // No driver at all: the carrier enters it on the signing page, or the rep after signing.
+    await book(loadId, { driverName: null, driverPhone: null })
     const id1 = String(activeCarrier().id)
-    await expect(call('SEND_RATE_CON', { loadCarrierId: id1, pdfBase64: PDF_BASE64, to: ['dispatch@swift.com'] })).rejects.toThrow(/driver name/)
+    await call('SEND_RATE_CON', { loadCarrierId: id1, pdfBase64: PDF_BASE64, to: ['dispatch@swift.com'] })
+    expect(table(TABLES.carrier).get(id1)!.rateConStatus).toBe('SENT')
     await call('REMOVE_LOAD_CARRIER', { loadCarrierId: id1, outcome: 'BOUNCED', reason: 'OTHER', note: 'test' })
-
-    await book(loadId, { driverPhone: null })
-    const id2 = String(activeCarrier().id)
-    await expect(call('SEND_RATE_CON', { loadCarrierId: id2, pdfBase64: PDF_BASE64, to: ['dispatch@swift.com'] })).rejects.toThrow(/driver phone/)
-    await call('REMOVE_LOAD_CARRIER', { loadCarrierId: id2, outcome: 'BOUNCED', reason: 'OTHER', note: 'test' })
 
     table(TABLES.carrierDirectory).get('car-1')!.dispatcherEmail = null
     await book(loadId)
-    const id3 = String(activeCarrier().id)
-    await expect(call('SEND_RATE_CON', { loadCarrierId: id3, pdfBase64: PDF_BASE64, to: ['dispatch@swift.com'] })).rejects.toThrow(/dispatcher email/)
+    const id2 = String(activeCarrier().id)
+    await expect(call('SEND_RATE_CON', { loadCarrierId: id2, pdfBase64: PDF_BASE64, to: ['dispatch@swift.com'] })).rejects.toThrow(/dispatcher email/)
+  })
+
+  it('a tenant can still require the driver before send through rateConRequiredFields', async () => {
+    const { loadId } = await bookableLoad()
+    seedCarrier()
+    seedCarrierDocs()
+    table(TABLES.settings).set('default', { ...(table(TABLES.settings).get('default') ?? { id: 'default' }), rateConRequiredFields: ['DRIVER_NAME'] })
+    await book(loadId, { driverName: null })
+    await expect(
+      call('SEND_RATE_CON', { loadCarrierId: String(activeCarrier().id), pdfBase64: PDF_BASE64, to: ['dispatch@swift.com'] }),
+    ).rejects.toThrow(/driver name/)
   })
 
   it('opens the thread and records the rate-con email as its first message', async () => {
@@ -3042,7 +3050,7 @@ describe('carrier booking', () => {
     const { loadId } = await bookableLoad()
     seedCarrier()
     seedCarrierDocs()
-    await book(loadId)
+    await book(loadId, { truckNumber: '4471', trailerNumber: 'T-88' })
     const loadCarrierId = String(activeCarrier().id)
 
     await call('DISPATCH_LOAD', {
@@ -3437,6 +3445,10 @@ describe('check calls', () => {
     const ids = await openLoad()
     await call('ASSIGN_CARRIER', { loadId: ids.loadId, carrierName: 'SWIFT', carrierRateCents: 180_000 })
     const carrierId = String([...table(TABLES.carrier).values()].find((c) => c.status === 'ACTIVE')!.id)
+    // Step AM: dispatch needs the four driver fields on the assignment.
+    table(TABLES.carrier).set(carrierId, {
+      ...table(TABLES.carrier).get(carrierId)!, driverName: 'Yuri', driverPhone: '+12245550137', truckNumber: '4471', trailerNumber: 'T-88',
+    })
     return { ...ids, carrierId }
   }
 
@@ -7139,6 +7151,8 @@ describe('Ivan Cartage driver (Step W)', () => {
     it('leaves a brokered load exactly as it was: no driver asked at dispatch or delivery', async () => {
       const { loadId } = await openLoad()
       await call('ASSIGN_CARRIER', { loadId, carrierName: 'Swift', carrierRateCents: 100_000 })
+      const assignment = [...table(TABLES.carrier).values()].find((c) => c.status === 'ACTIVE')!
+      table(TABLES.carrier).set(String(assignment.id), { ...assignment, driverName: 'Yuri', driverPhone: '+12245550137', truckNumber: '4471', trailerNumber: 'T-88' })
       await call('DISPATCH_LOAD', { loadId, dispatchedAt: '2026-03-02T12:00:00.000Z' })
       for (const status of ['LOADING', 'IN_TRANSIT', 'UNLOADING', 'DELIVERED']) {
         await call('SET_LOAD_STATUS', { loadId, status })
@@ -7595,5 +7609,349 @@ describe('Step AH — UPDATE_STOP SET_DETAILS', () => {
     expect(stopOf(loadId, 'stp-pu').contact).toMatchObject({ name: 'New Name', hours: '8-4' })
     await send({ name: 'New Name', hours: '6-2' })
     expect(stopOf(loadId, 'stp-pu').contact).toMatchObject({ hours: '6-2' })
+  })
+})
+
+// ── Step AE: Push to DAT from a quote ────────────────────────────────────────
+
+describe('POST_QUOTE_LOAD / UNPOST_QUOTE_LOAD routing and authorisation', () => {
+  const seedQuote = () => table(TABLES.quote).set('Q-AE-1', {
+    id: 'Q-AE-1', side: 'SELL', status: 'QUOTED', equipmentType: 'VAN', topSpendCents: 200_000,
+    stops: [
+      { type: 'pickup', sequence: 0, appt: '2026-11-10T15:00:00.000Z', city: 'Chicago, IL', address: { city: 'Chicago', state: 'IL', zip: '60601' } },
+      { type: 'delivery', sequence: 1, appt: '2026-11-11T15:00:00.000Z', city: 'Dallas, TX', address: { city: 'Dallas', state: 'TX', zip: '75201' } },
+    ],
+  })
+
+  it('lets the quote desk push a quote to DAT: a labelled STUB posting row, and unpost keeps it', async () => {
+    seedQuote()
+    const posted = (await call('POST_QUOTE_LOAD', { quoteId: 'Q-AE-1' }, QUOTER)) as { postings: Row[] }
+    expect(posted.postings[0]).toMatchObject({ provider: 'DAT', mode: 'STUB', status: 'POSTED', shipmentId: 'quote:Q-AE-1' })
+    expect(String(posted.postings[0].message)).toMatch(/STUB/)
+    expect(table(TABLES.posting).get('post:quote:Q-AE-1:DAT')).toMatchObject({ status: 'POSTED', mode: 'STUB' })
+
+    await call('UNPOST_QUOTE_LOAD', { quoteId: 'Q-AE-1' }, QUOTER)
+    expect(table(TABLES.posting).get('post:quote:Q-AE-1:DAT')).toMatchObject({ status: 'UNPOSTED' })
+  })
+
+  it('refuses a caller with no quote, load or TMS grant', async () => {
+    seedQuote()
+    await expect(call('POST_QUOTE_LOAD', { quoteId: 'Q-AE-1' }, OUTSIDER)).rejects.toThrow(/Forbidden/)
+    await expect(call('UNPOST_QUOTE_LOAD', { quoteId: 'Q-AE-1' }, OUTSIDER)).rejects.toThrow(/Forbidden/)
+    expect(table(TABLES.posting).size).toBe(0)
+  })
+})
+
+// ── Step AM — the cover flow and the carrier assignment ladder ───────────────
+
+describe('Step AM — cover flow and assignment ladder', () => {
+  const PDF = Buffer.from('%PDF-1.4 rate con').toString('base64')
+  const FOUR = { driverName: 'Yuri Petrov', driverPhone: '+12245550137', truckNumber: '4471', trailerNumber: 'T-88' }
+
+  /** A directory carrier with no findings, MyCarrierPackets-complete and ACTIVE unless overridden. */
+  function carrierRow(extra: Row = {}): void {
+    seedBookableCarrier('car-1', { mcpStatus: 'ACCEPTABLE', ...extra })
+  }
+
+  async function cover(loadId: string, input: Row = {}): Promise<Row> {
+    return call('COVER_CARRIER', {
+      loadId,
+      expectedUpdatedAt: table(TABLES.load).get(loadId)!.updatedAt,
+      carrierId: 'car-1',
+      carrierRateCents: 180_000,
+      ...input,
+    })
+  }
+
+  const active = (): Row => [...table(TABLES.carrier).values()].find((c) => c.status === 'ACTIVE')!
+  const shipmentRung = (shipmentId: string): unknown => table(TABLES.shipment).get(shipmentId)!.carrierAssignmentStatus
+  const loadRung = (loadId: string): unknown => table(TABLES.load).get(loadId)!.carrierAssignmentStatus
+  /** What MyCarrierPackets' sync does when it activates the carrier. */
+  const mcpActivates = (): void => {
+    table(TABLES.carrierDirectory).set('car-1', { ...table(TABLES.carrierDirectory).get('car-1')!, status: 'ACTIVE' })
+  }
+
+  async function coveredPending(): Promise<{ shipmentId: string; loadId: string; loadCarrierId: string }> {
+    const ids = await sourcingLoad()
+    carrierRow({ status: 'PENDING', mcpStatus: 'INVITED', mcpInvitedAt: '2026-11-04T10:00:00.000Z' })
+    await cover(ids.loadId)
+    return { ...ids, loadCarrierId: String(active().id) }
+  }
+
+  async function coveredActive(): Promise<{ shipmentId: string; loadId: string; loadCarrierId: string }> {
+    const ids = await sourcingLoad()
+    carrierRow()
+    await cover(ids.loadId)
+    return { ...ids, loadCarrierId: String(active().id) }
+  }
+
+  function signedPdf(shipmentId: string, extra: Row = {}): string {
+    const id = 'sdoc-signed-1'
+    table(TABLES.shipmentDocument).set(id, {
+      id, shipmentId, type: 'RATE_CON', status: 'ACTIVE', contentType: 'application/pdf', name: 'signed.pdf',
+      s3Key: `shipments/${shipmentId}/signed.pdf`, ...extra,
+    })
+    return id
+  }
+
+  describe('COVER_CARRIER', () => {
+    it('assigns an ACTIVE carrier at ASSIGNED_SETUP_COMPLETE, covers the load and mirrors the rung', async () => {
+      const { shipmentId, loadId, loadCarrierId } = await coveredActive()
+      const row = table(TABLES.carrier).get(loadCarrierId)!
+      expect(row).toMatchObject({ kind: 'CARRIER', status: 'ACTIVE', assignmentStatus: 'ASSIGNED_SETUP_COMPLETE', rateConStatus: 'NOT_SENT' })
+      expect(JSON.parse(String(row.assignmentTimes))).toEqual({ ASSIGNED_SETUP_COMPLETE: expect.any(String) })
+      expect(table(TABLES.load).get(loadId)).toMatchObject({ status: 'BOOKED', assignmentType: 'CARRIER', activeLoadCarrierId: loadCarrierId })
+      // Board 'Covered': the shipment is BOOKED with a carrier on it.
+      expect(table(TABLES.shipment).get(shipmentId)!.status).toBe('BOOKED')
+      expect(shipmentRung(shipmentId)).toBe('ASSIGNED_SETUP_COMPLETE')
+      expect(loadRung(loadId)).toBe('ASSIGNED_SETUP_COMPLETE')
+    })
+
+    it('assigns a carrier still in MCP setup as ASSIGNED_SETUP_PENDING, with no paperwork findings asked yet', async () => {
+      // No insurance and no documents on file: MyCarrierPackets has yet to collect them.
+      const ids = await sourcingLoad()
+      table(TABLES.carrierDirectory).set('car-1', {
+        id: 'car-1', __typename: 'Carrier', name: 'NEW CARRIER', status: 'PENDING', mcNumber: '900001', mcpStatus: 'INVITED',
+        mcpInvitedAt: '2026-11-04T10:00:00.000Z', createdBy: 'mcp-sync', updatedBy: 'mcp-sync',
+        createdAt: '2026-11-04T10:00:00.000Z', updatedAt: '2026-11-04T10:00:00.000Z',
+      })
+      await cover(ids.loadId)
+      expect(active()).toMatchObject({ assignmentStatus: 'ASSIGNED_SETUP_PENDING', carrierName: 'NEW CARRIER' })
+      expect(table(TABLES.load).get(ids.loadId)!.status).toBe('BOOKED')
+      expect(shipmentRung(ids.shipmentId)).toBe('ASSIGNED_SETUP_PENDING')
+    })
+
+    it('refuses a carrier that is not active until the setup packet has been sent', async () => {
+      const { loadId } = await sourcingLoad()
+      carrierRow({ status: 'PENDING', mcpStatus: 'NOT_INVITED' })
+      await expect(cover(loadId)).rejects.toThrow(/has not been sent a MyCarrierPackets setup packet/)
+      expect([...table(TABLES.carrier).values()]).toHaveLength(0)
+      expect(table(TABLES.load).get(loadId)!.status).toBe('SOURCING')
+    })
+
+    it('refuses an UNACCEPTABLE packet outright, acknowledged or not', async () => {
+      const { loadId } = await sourcingLoad()
+      carrierRow({ mcpStatus: 'UNACCEPTABLE' })
+      await expect(cover(loadId)).rejects.toThrow(/UNACCEPTABLE/)
+      await expect(cover(loadId, { acknowledgeWarnings: ['MCP_UNACCEPTABLE'] })).rejects.toThrow(/UNACCEPTABLE/)
+      expect([...table(TABLES.carrier).values()]).toHaveLength(0)
+    })
+
+    it('warns on a MODERATE packet: refused until MCP_MODERATE is acknowledged, then recorded', async () => {
+      const { loadId } = await sourcingLoad()
+      carrierRow({ mcpStatus: 'MODERATE' })
+      await expect(cover(loadId)).rejects.toThrow(/Acknowledge these before booking: .*MODERATE/)
+      await cover(loadId, { acknowledgeWarnings: ['MCP_MODERATE'] })
+      expect(active().bookingWarnings).toEqual(['MCP_MODERATE'])
+    })
+
+    it('refuses INACTIVE and DO_NOT_USE carriers', async () => {
+      const { loadId } = await sourcingLoad()
+      carrierRow({ status: 'INACTIVE', mcpInvitedAt: 'x' })
+      await expect(cover(loadId)).rejects.toThrow(/PENDING or REVIEW/)
+      carrierRow({ status: 'DO_NOT_USE', mcpInvitedAt: 'x' })
+      await expect(cover(loadId)).rejects.toThrow(/do not use/)
+    })
+
+    it('still keeps the whole booking gate for an ACTIVE carrier (an expired policy blocks)', async () => {
+      const { loadId } = await sourcingLoad()
+      carrierRow({ insurancePolicies: [{ id: 'i', type: 'CARGO', limitCents: 1, expiresAt: '2020-01-01T00:00:00.000Z' }] })
+      await expect(cover(loadId)).rejects.toThrow(/insurance/i)
+    })
+
+    it('BOOK_CARRIER (the offer path) puts its ACTIVE assignment on the ladder too', async () => {
+      const { loadId } = await sourcingLoad()
+      carrierRow()
+      await call('BOOK_CARRIER', { loadId, expectedUpdatedAt: table(TABLES.load).get(loadId)!.updatedAt, carrierId: 'car-1', carrierRateCents: 180_000 })
+      expect(active().assignmentStatus).toBe('ASSIGNED_SETUP_COMPLETE')
+    })
+  })
+
+  describe('rate con is gated on MyCarrierPackets setup', () => {
+    it('refuses to send while the carrier is not ACTIVE, even when the packet reads complete', async () => {
+      const { loadCarrierId } = await coveredPending()
+      // The packet completed at MCP but the sync has not flipped the carrier yet.
+      table(TABLES.carrierDirectory).set('car-1', { ...table(TABLES.carrierDirectory).get('car-1')!, mcpStatus: 'ACCEPTABLE' })
+      await expect(call('SEND_RATE_CON', { loadCarrierId, pdfBase64: PDF, to: ['dispatch@swift.com'] })).rejects.toThrow(/not set up yet/)
+      expect(table(TABLES.carrier).get(loadCarrierId)!.rateConStatus).toBe('NOT_SENT')
+    })
+
+    it('refuses to send while the packet is not complete (the existing MCP message)', async () => {
+      const { loadCarrierId } = await coveredPending()
+      await expect(call('SEND_RATE_CON', { loadCarrierId, pdfBase64: PDF, to: ['dispatch@swift.com'] })).rejects.toThrow(/needs a completed MyCarrierPackets packet/)
+    })
+
+    it('sends once MCP activates the carrier, climbing to RATE_CON_SENT and mirroring it', async () => {
+      const { shipmentId, loadId, loadCarrierId } = await coveredPending()
+      table(TABLES.carrierDirectory).set('car-1', { ...table(TABLES.carrierDirectory).get('car-1')!, mcpStatus: 'ACCEPTABLE' })
+      mcpActivates()
+      await call('SEND_RATE_CON', { loadCarrierId, pdfBase64: PDF, to: ['dispatch@swift.com'] })
+      expect(table(TABLES.carrier).get(loadCarrierId)).toMatchObject({ rateConStatus: 'SENT', assignmentStatus: 'RATE_CON_SENT' })
+      expect(shipmentRung(shipmentId)).toBe('RATE_CON_SENT')
+      expect(loadRung(loadId)).toBe('RATE_CON_SENT')
+    })
+
+    it('a re-send never walks the ladder back', async () => {
+      const { shipmentId, loadId, loadCarrierId } = await coveredActive()
+      await call('SEND_RATE_CON', { loadCarrierId, pdfBase64: PDF, to: ['dispatch@swift.com'] })
+      await call('MARK_RATE_CON_SIGNED', { loadCarrierId, documentId: signedPdf(shipmentId) })
+      expect(loadRung(loadId)).toBe('RATE_CON_SIGNED')
+      table(TABLES.carrier).set(loadCarrierId, { ...table(TABLES.carrier).get(loadCarrierId)!, rateConStatus: 'EXPIRED' })
+      await call('SEND_RATE_CON', { loadCarrierId, pdfBase64: PDF, to: ['dispatch@swift.com'] })
+      expect(table(TABLES.carrier).get(loadCarrierId)!.assignmentStatus).toBe('RATE_CON_SIGNED')
+    })
+  })
+
+  describe('MARK_RATE_CON_SIGNED', () => {
+    async function sent(): Promise<{ shipmentId: string; loadId: string; loadCarrierId: string }> {
+      const ids = await coveredActive()
+      await call('SEND_RATE_CON', { loadCarrierId: ids.loadCarrierId, pdfBase64: PDF, to: ['dispatch@swift.com'] })
+      return ids
+    }
+
+    it('records the uploaded signed PDF and climbs to RATE_CON_SIGNED', async () => {
+      const { shipmentId, loadId, loadCarrierId } = await sent()
+      await call('MARK_RATE_CON_SIGNED', { loadCarrierId, documentId: signedPdf(shipmentId) })
+      const row = table(TABLES.carrier).get(loadCarrierId)!
+      expect(row).toMatchObject({
+        rateConStatus: 'SIGNED', rateConToken: null, rateConKey: `shipments/${shipmentId}/signed.pdf`, assignmentStatus: 'RATE_CON_SIGNED',
+      })
+      expect(String(row.rateConSignerName)).toMatch(/marked signed/)
+      expect(row.rateConSignedAt).toBeTruthy()
+      expect(JSON.parse(String(row.assignmentTimes))).toMatchObject({ RATE_CON_SENT: expect.any(String), RATE_CON_SIGNED: expect.any(String) })
+      expect(shipmentRung(shipmentId)).toBe('RATE_CON_SIGNED')
+      expect(loadRung(loadId)).toBe('RATE_CON_SIGNED')
+    })
+
+    it('needs the rate con to have been sent first', async () => {
+      const { shipmentId, loadCarrierId } = await coveredActive()
+      await expect(call('MARK_RATE_CON_SIGNED', { loadCarrierId, documentId: signedPdf(shipmentId) })).rejects.toThrow(/Send the rate confirmation first/)
+    })
+
+    it('refuses a pending carrier: nothing can be signed before MyCarrierPackets sets it up', async () => {
+      const { shipmentId, loadCarrierId } = await coveredPending()
+      await expect(call('MARK_RATE_CON_SIGNED', { loadCarrierId, documentId: signedPdf(shipmentId) })).rejects.toThrow(/only after MyCarrierPackets reports/)
+    })
+
+    it('needs an uploaded PDF filed as a rate con on this shipment', async () => {
+      const { shipmentId, loadCarrierId } = await sent()
+      await expect(call('MARK_RATE_CON_SIGNED', { loadCarrierId, documentId: 'nope' })).rejects.toThrow(/Upload the signed rate confirmation/)
+      await expect(call('MARK_RATE_CON_SIGNED', { loadCarrierId, documentId: signedPdf('other-shipment') })).rejects.toThrow(/Upload the signed rate confirmation/)
+      table(TABLES.shipmentDocument).set('sdoc-pod', { id: 'sdoc-pod', shipmentId, type: 'POD', status: 'ACTIVE', contentType: 'application/pdf', s3Key: 'k' })
+      await expect(call('MARK_RATE_CON_SIGNED', { loadCarrierId, documentId: 'sdoc-pod' })).rejects.toThrow(/filed as a rate confirmation/)
+      await expect(call('MARK_RATE_CON_SIGNED', { loadCarrierId, documentId: signedPdf(shipmentId, { contentType: 'image/png' }) })).rejects.toThrow(/must be a PDF/)
+      await expect(call('MARK_RATE_CON_SIGNED', { loadCarrierId, documentId: signedPdf(shipmentId, { status: 'VOIDED' }) })).rejects.toThrow(/voided/)
+      expect(table(TABLES.carrier).get(loadCarrierId)!.rateConStatus).toBe('SENT')
+    })
+
+    it('cannot sign twice', async () => {
+      const { shipmentId, loadCarrierId } = await sent()
+      const documentId = signedPdf(shipmentId)
+      await call('MARK_RATE_CON_SIGNED', { loadCarrierId, documentId })
+      await expect(call('MARK_RATE_CON_SIGNED', { loadCarrierId, documentId })).rejects.toThrow(/already signed/)
+    })
+  })
+
+  describe('ENTER_DRIVER_INFO', () => {
+    it('needs all four fields and names the ones missing', async () => {
+      const { loadCarrierId } = await coveredActive()
+      await expect(call('ENTER_DRIVER_INFO', { loadCarrierId, ...FOUR, trailerNumber: ' ' })).rejects.toThrow(/Driver info is required: enter the trailer number/)
+      await expect(call('ENTER_DRIVER_INFO', { loadCarrierId, driverName: 'Yuri Petrov' })).rejects.toThrow(/driver phone, truck number and trailer number/)
+      expect(table(TABLES.carrier).get(loadCarrierId)!.driverName).toBeFalsy()
+    })
+
+    it('is possible only once MCP says the carrier is set up', async () => {
+      const { loadCarrierId } = await coveredPending()
+      await expect(call('ENTER_DRIVER_INFO', { loadCarrierId, ...FOUR })).rejects.toThrow(/only after MyCarrierPackets reports/)
+      mcpActivates()
+      await call('ENTER_DRIVER_INFO', { loadCarrierId, ...FOUR })
+      expect(table(TABLES.carrier).get(loadCarrierId)!.assignmentStatus).toBe('DRIVER_INFO_ENTERED')
+    })
+
+    it('climbs to DRIVER_INFO_ENTERED, mirrors it, and audits key names only', async () => {
+      const { shipmentId, loadId, loadCarrierId } = await coveredActive()
+      await call('ENTER_DRIVER_INFO', { loadCarrierId, ...FOUR })
+      expect(table(TABLES.carrier).get(loadCarrierId)).toMatchObject({ ...FOUR, assignmentStatus: 'DRIVER_INFO_ENTERED' })
+      expect(shipmentRung(shipmentId)).toBe('DRIVER_INFO_ENTERED')
+      expect(loadRung(loadId)).toBe('DRIVER_INFO_ENTERED')
+      const audit = [...table(TABLES.audit).values()].find((a) => a.action === 'ENTER_DRIVER_INFO')!
+      expect(JSON.stringify(audit)).not.toMatch(/Yuri|2245550137|4471/)
+      expect(JSON.parse(String(audit.changes))).toMatchObject({ keys: ['driverName', 'driverPhone', 'truckNumber', 'trailerNumber'] })
+    })
+
+    it('editing the last missing field through UPDATE_LOAD_CARRIER_DETAILS earns the same rung', async () => {
+      const { loadId, loadCarrierId } = await coveredActive()
+      await call('ENTER_DRIVER_INFO', { loadCarrierId, ...FOUR, trailerNumber: 'T-1' })
+      // The details editor can fill a field the ladder was waiting on (here: start from a partial row).
+      table(TABLES.carrier).set(loadCarrierId, { ...table(TABLES.carrier).get(loadCarrierId)!, trailerNumber: null, assignmentStatus: 'ASSIGNED_SETUP_COMPLETE' })
+      await call('UPDATE_LOAD_CARRIER_DETAILS', {
+        loadCarrierId, expectedUpdatedAt: table(TABLES.carrier).get(loadCarrierId)!.updatedAt, trailerNumber: 'T-88',
+      })
+      expect(table(TABLES.carrier).get(loadCarrierId)!.assignmentStatus).toBe('DRIVER_INFO_ENTERED')
+      expect(loadRung(loadId)).toBe('DRIVER_INFO_ENTERED')
+    })
+  })
+
+  describe('DISPATCH_LOAD is blocked until the driver info is entered', () => {
+    it('refuses with the four fields missing, then dispatches once they are entered', async () => {
+      const { loadId, loadCarrierId } = await coveredActive()
+      await expect(call('DISPATCH_LOAD', { loadId, dispatchedAt: '2026-03-02T11:00:00.000Z' })).rejects.toThrow(/Driver info is required before dispatch: enter the driver name, driver phone, truck number and trailer number/)
+      expect(table(TABLES.load).get(loadId)!.status).toBe('BOOKED')
+
+      await call('ENTER_DRIVER_INFO', { loadCarrierId, ...FOUR })
+      await call('DISPATCH_LOAD', { loadId, dispatchedAt: '2026-03-02T11:00:00.000Z' })
+      expect(table(TABLES.load).get(loadId)!.status).toBe('DISPATCHED')
+    })
+
+    it('typing the driver into the dispatch box does not stand in for entering it', async () => {
+      const { loadId } = await coveredActive()
+      await expect(call('DISPATCH_LOAD', { loadId, dispatchedAt: '2026-03-02T11:00:00.000Z', ...FOUR })).rejects.toThrow(/Driver info is required/)
+    })
+
+    it('refuses a carrier whose setup is not complete', async () => {
+      const { loadId, loadCarrierId } = await coveredPending()
+      table(TABLES.carrier).set(loadCarrierId, { ...table(TABLES.carrier).get(loadCarrierId)!, ...FOUR })
+      await expect(call('DISPATCH_LOAD', { loadId, dispatchedAt: '2026-03-02T11:00:00.000Z' })).rejects.toThrow(/not set up yet/)
+    })
+  })
+
+  describe('REMOVE_LOAD_CARRIER resets to OPEN and keeps history', () => {
+    it('clears the board mirrors, returns the load to sourcing and keeps the rung on the retired row', async () => {
+      const { shipmentId, loadId, loadCarrierId } = await coveredActive()
+      await call('REMOVE_LOAD_CARRIER', { loadCarrierId, outcome: 'BOUNCED', reason: 'CARRIER_CANNOT_TAKE' })
+      expect(table(TABLES.carrier).get(loadCarrierId)).toMatchObject({ status: 'BOUNCED', assignmentStatus: 'ASSIGNED_SETUP_COMPLETE' })
+      expect(table(TABLES.load).get(loadId)).toMatchObject({ status: 'SOURCING', activeLoadCarrierId: null, carrierAssignmentStatus: null })
+      expect(shipmentRung(shipmentId)).toBeNull()
+      expect(table(TABLES.shipment).get(shipmentId)!.status).toBe('OPEN')
+      // Nothing is reposted unless somebody ticks the box.
+      expect([...table(TABLES.posting).values()]).toHaveLength(0)
+    })
+
+    it('a pending carrier can be removed too, and the next assignment starts a fresh ladder', async () => {
+      const { loadId, loadCarrierId } = await coveredPending()
+      await call('REMOVE_LOAD_CARRIER', { loadCarrierId, outcome: 'BOUNCED', reason: 'OTHER' })
+      mcpActivates()
+      await cover(loadId)
+      expect(active()).toMatchObject({ assignmentStatus: 'ASSIGNED_SETUP_COMPLETE', sequence: 2 })
+    })
+
+    it('reposts to DAT through POST_LOAD only when repostToDat is true', async () => {
+      const { shipmentId, loadId, loadCarrierId } = await coveredActive()
+      const out = (await call('REMOVE_LOAD_CARRIER', { loadCarrierId, outcome: 'BOUNCED', reason: 'GAVE_BACK', repostToDat: true })) as Row
+      expect(out.repost).toMatchObject({ ok: true })
+      expect([...table(TABLES.posting).values()].map((p) => ({ provider: p.provider, shipmentId: p.shipmentId, status: p.status }))).toEqual([
+        { provider: 'DAT', shipmentId, status: 'POSTED' },
+      ])
+      expect(table(TABLES.load).get(loadId)!.status).toBe('SOURCING')
+    })
+
+    it('a repost that cannot happen is reported and never undoes the removal', async () => {
+      const { shipmentId, loadCarrierId } = await coveredActive()
+      table(TABLES.shipment).set(shipmentId, { ...table(TABLES.shipment).get(shipmentId)!, buildState: 'BUILDING', missingFields: ['COMMODITY'] })
+      const out = (await call('REMOVE_LOAD_CARRIER', { loadCarrierId, outcome: 'BOUNCED', reason: 'GAVE_BACK', repostToDat: true })) as Row
+      expect(out.repost).toMatchObject({ ok: false })
+      expect(String((out.repost as Row).message)).toMatch(/Finish building/)
+      expect(table(TABLES.carrier).get(loadCarrierId)!.status).toBe('BOUNCED')
+    })
   })
 })

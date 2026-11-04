@@ -193,6 +193,26 @@ describe('INTAKE_DISMISS', () => {
   })
 })
 
+describe('INTAKE_LINK_SHIPMENT', () => {
+  beforeEach(() => { rows(T.shipment).set('shp-1', { id: 'shp-1', number: 'S000123' }) })
+
+  it('ties an open row to the shipment the create form built and marks it MOVED, once', async () => {
+    await run('INTAKE_LINK_SHIPMENT', { intakeId: 'il:r1', shipmentId: 'shp-1' })
+    expect(intake()).toMatchObject({ status: 'MOVED', shipmentId: 'shp-1', shipmentNumber: 'S000123' })
+    await run('INTAKE_LINK_SHIPMENT', { intakeId: 'il:r1', shipmentId: 'shp-1' })
+    expect(audits.filter((a) => a.action === 'INTAKE_LINK_SHIPMENT')).toHaveLength(2) // intake + shipment, not four
+  })
+
+  it('refuses a missing shipment, a second shipment and a dismissed row', async () => {
+    await expect(run('INTAKE_LINK_SHIPMENT', { intakeId: 'il:r1', shipmentId: 'nope' })).rejects.toThrow(/Shipment not found/)
+    await run('INTAKE_LINK_SHIPMENT', { intakeId: 'il:r1', shipmentId: 'shp-1' })
+    rows(T.shipment).set('shp-2', { id: 'shp-2', number: 'S000124' })
+    await expect(run('INTAKE_LINK_SHIPMENT', { intakeId: 'il:r1', shipmentId: 'shp-2' })).rejects.toThrow(/already became another/)
+    seedIntake({ status: 'DISMISSED' })
+    await expect(run('INTAKE_LINK_SHIPMENT', { intakeId: 'il:r1', shipmentId: 'shp-1' })).rejects.toThrow(/open intake load/)
+  })
+})
+
 describe('INTAKE_MARK_REVIEWED', () => {
   it('records who reviewed and when, bumps the version and audits it', async () => {
     const out = (await run('INTAKE_MARK_REVIEWED', { intakeId: 'il:r1', expectedVersion: 3 })) as unknown as {

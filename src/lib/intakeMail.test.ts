@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import {
   checkIntakeEmail,
+  DEMO_INTAKE_ADDRESSES,
+  RESERVED_INTAKE_ADDRESSES,
   intakeEmailOwner,
   matchDivisionByAddresses,
   normalizeIntakeEmail,
@@ -28,9 +30,9 @@ describe('checkIntakeEmail', () => {
     ['Name <a@b.com>', 'FORMAT'],
     ['a@@b.com', 'FORMAT'],
     [`${'x'.repeat(65)}@bcatcorp.com`, 'FORMAT'],
-    ['ai4bcat@gmail.com', 'RESERVED'],
-    ['quotes@bcatcorp.com', 'RESERVED'],
     ['ai4bcat+tracking-shp-1@gmail.com', 'RESERVED'],
+    ['quotes@bcatcorp.com', 'RESERVED'],
+    ['trucks@bcatcorp.com', 'RESERVED'],
   ])('refuses %j as %s', (raw, problem) => {
     expect(checkIntakeEmail(raw)).toMatchObject({ problem })
     expect(checkIntakeEmail(raw).message).toBeTruthy()
@@ -39,6 +41,17 @@ describe('checkIntakeEmail', () => {
   it('allows the intake mailbox plus addresses and warns, not blocks, on an unknown domain', () => {
     expect(checkIntakeEmail('ai4bcat+tenders-assets@gmail.com')).toMatchObject({ problem: null, unverifiedDomain: false })
     expect(checkIntakeEmail('loads@partner.example')).toMatchObject({ problem: null, unverifiedDomain: true })
+  })
+
+  it('DEMO: the consumer demo mailbox may be owned by a division and routes; every other reserved address is still refused', () => {
+    expect(DEMO_INTAKE_ADDRESSES).toEqual(['ai4bcat@gmail.com'])
+    expect(checkIntakeEmail(' AI4BCAT@gmail.com ')).toMatchObject({ email: 'ai4bcat@gmail.com', problem: null, unverifiedDomain: false })
+    for (const reserved of RESERVED_INTAKE_ADDRESSES.filter((a) => !DEMO_INTAKE_ADDRESSES.includes(a))) {
+      expect(checkIntakeEmail(reserved)).toMatchObject({ problem: 'RESERVED' })
+    }
+    const divisions = [{ code: 'DEMO', active: true, intakeEmail: 'ai4bcat@gmail.com' }]
+    expect(matchDivisionByAddresses(['stranger@else.com'], divisions)).toBeNull()
+    expect(matchDivisionByAddresses(['stranger@else.com', 'AI4BCAT@gmail.com'], divisions)).toEqual({ divisionCode: 'DEMO', address: 'ai4bcat@gmail.com' })
   })
 })
 

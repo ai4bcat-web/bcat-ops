@@ -184,3 +184,26 @@ No MCP signature algorithm exists to implement, and the credential field and pag
 Token lifetime / `expires_in`; the real `CarrierPacketStatus`, `OverallRating`, `ReviewState` strings; whether
 `GetCarrierData` answers for a carrier MCP has never seen; the exact shape of `MonitoredCarriers` rows and of `CarriersChanges.CarrierList[].CarrierDetails` (adapter falls back to PreviewCarrier); the query
 parameter name (`Docket` vs `DocketNumber`); `CoverageLimit` units; 429 behaviour.
+
+## Find & Invite (Step AD)
+
+Carriers > Find & Invite (`/tms/carriers/find`) reviews one carrier on MyCarrierPackets and invites it. Calls run in `tms-directory-actions` (`mcpFind.ts`); credentials are read there through the same Integration gate as the sync (`mcpFindGate`) and never leave the Lambda.
+
+| Action | MCP call | Notes |
+| --- | --- | --- |
+| `MCP_PREVIEW_CARRIER` | `PreviewCarrier?DOTNumber=&docketNumber=` | profile, FMCSA status, risk, certificates, approved e-mails; works for a carrier that never touched MCP |
+| `MCP_GET_CARRIER` | `GetCarrierData` | packet, contacts, equipment, lanes, monitoring (same body `mcp-sync` reads) |
+| `MCP_SEND_INVITE` | `EmailPacketInvitation?dotNumber=&docketNumber=&carrierEmail=&username=<integration user>` | then Carrier row stamp, AuditLog, shipment-thread NOTE when launched from a load |
+| `MCP_ADD_CARRIER` | (via `mcp-sync` `ADD_CARRIER`: GetCarrierData) | creates the PENDING row from MCP unless one matches; refused in STUB |
+
+Not LIVE => STUB: a labelled fixture, no MCP call, no invitation, no row. The review card (`src/lib/integrations/mcpReview.ts`) is built by one mapper for live bodies and fixtures. MCP has no name search endpoint: a typed name searches our directory only. `username` is the integration user (guide spelling; swagger calls it `userName`). Live test: `node scripts/devVerifyAD.mjs --live` (MC 274623 only, one invitation to ai4bcat@gmail.com, results in `MCP_LIVE_TEST.md`).
+
+Audit: `MCP_PREVIEW_CARRIER` / `MCP_GET_CARRIER` (INTEGRATION), `MCP_SEND_INVITE` (CARRIER, else INTEGRATION), `MCP_ADD_CARRIER` (CARRIER) carry identifiers, mode, HTTP status and response key names only. Additive Carrier fields: `mcpInvitedAt`, `mcpInvitedTo`, `mcpInvitedBy`.
+
+## Cover flow and Carrier.status (Step AM)
+
+- **Carrier.status is MyCarrierPackets' to drive** (`src/lib/integrations/mcpCarrierStatus.ts`, applied by every pull: backfill, changes poll, single pull, create). Packet complete (`PENDING_REVIEW | ACCEPTABLE | MODERATE | UNACCEPTABLE*` per `mcpPacketStanding`) with no lapse => `ACTIVE` (from PENDING / REVIEW, or from an INACTIVE that `mcp-sync` itself set). A lapse on an ACTIVE carrier => `INACTIVE` with the reason: `UNACCEPTABLE` review => `SAFETY_ISSUES`, authority `INACTIVE` => `INACTIVE_AUTHORITY`, all cargo policies expired => `EXPIRED_INSURANCE`. `DO_NOT_USE` and an INACTIVE a person set are never touched; a carrier with no MCP data (Aljex-imported) is left alone. The status change is in the `MCP_PULL` audit (`fields.status`). [INFERENCE: "monitored" = completed packet read from MCP; the guide has no per-carrier monitored flag on GetCarrierData.]
+- **No manual setup-complete**: `SET_CARRIER_STATUS -> ACTIVE` is refused unless the packet is complete (or the row is Aljex-imported). `UPSERT_CARRIER` create is ADMIN-only, always PENDING, audited `manualDataFix`.
+- `MCP_SEND_INVITE` gained `ensureCarrier: true`: after a LIVE invitation, `mcp-sync ADD_CARRIER` makes the PENDING row from MCP and stamps the invite on it; the reply carries `carrierId / carrierCreated / carrierError` (a failed row creation is reported, not thrown, so a retry cannot invite twice). STUB creates nothing.
+- When MCP turns a carrier ACTIVE, `mcp-sync` advances its assignments waiting on setup to `ASSIGNED_SETUP_COMPLETE` (`mcpLadder.ts`; conditional write, audit `ASSIGNMENT_ADVANCED`, mirrors on Load + Shipment). `mcp-sync` gained UpdateItem on Load/Shipment/LoadCarrier and a Query on the LoadCarrier carrier index.
+- **UI (Step AM)**: the Cover dialog (`src/features/carriers/cover/`) is the only assignment entry: directory hit by MC / DOT (ACTIVE assigns at once, no MCP call), otherwise `MCP_PREVIEW_CARRIER` + the AD review card and "Send setup packet via MyCarrierPackets" (e-mail picker: MCP-approved + typed; `MCP_SEND_INVITE` with `ensureCarrier`, then `COVER_CARRIER`). Find & Invite no longer has "Add to carriers"; its invite creates the Pending row. The carrier status dialog offers Active only once MCP reports the packet complete (Aljex-imported carriers excepted). The rate con panel and the ladder buttons wait for Carrier ACTIVE.

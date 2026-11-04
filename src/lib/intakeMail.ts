@@ -14,6 +14,15 @@ export const SHARED_TENDERS_MAILBOX = 'tenders@bcatcorp.com'
 const COMPANY_DOMAIN = 'bcatcorp.com'
 
 /**
+ * DEMO ONLY (Ryne, 2026-11-04): the consumer Gmail used as the demo intake mailbox
+ * (it is also the shared bridge inbox, `THREAD_MAILBOX`, which is otherwise reserved).
+ * A division may own exactly these addresses despite being reserved. This is data, not a
+ * bypass: every other reserved address is still refused. Remove the entry once the demo
+ * moves to a company-domain mailbox.
+ */
+export const DEMO_INTAKE_ADDRESSES: readonly string[] = ['ai4bcat@gmail.com']
+
+/**
  * Addresses that already mean something else in the mail system and would hijack routing:
  * the catch-all inbox itself and the other agents' bridge inboxes. (`+tracking` plus
  * addresses — shipment reply threads — are refused separately, by shape.)
@@ -57,7 +66,7 @@ export function checkIntakeEmail(raw: unknown): IntakeEmailCheck {
   }
   const local = email.slice(0, at)
   const domain = email.slice(at + 1)
-  if (RESERVED_INTAKE_ADDRESSES.includes(email)) {
+  if (RESERVED_INTAKE_ADDRESSES.includes(email) && !DEMO_INTAKE_ADDRESSES.includes(email)) {
     return fail('RESERVED', 'That address is already used by another mailbox. Choose a different one.')
   }
   if (local.includes('+tracking')) {

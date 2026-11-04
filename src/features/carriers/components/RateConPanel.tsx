@@ -93,7 +93,10 @@ export function RateConPanel({ bundle, loadCarrier, carrier, contacts, settings,
   const standing = carrier ? mcpPacketStanding(carrier) : null
   // When the carrier bundle has not loaded the server is the authority; only a loaded
   // carrier known to lack a completed packet pre-blocks the button.
-  const blocked = standing != null && !standing.completed
+  // Step AM: the rate con also waits for the carrier to be ACTIVE, which only MyCarrierPackets makes it
+  // (packet complete and monitored; a lapse flips it back to Inactive).
+  const notActive = carrier != null && carrier.status !== 'ACTIVE'
+  const blocked = (standing != null && !standing.completed) || notActive
 
   const load = bundle.loads[0]
   const division = divisions.find((d) => d.key === load?.divisionKey) ?? null
@@ -217,6 +220,8 @@ export function RateConPanel({ bundle, loadCarrier, carrier, contacts, settings,
 
   return (
     <div
+      id="rate-con-panel"
+      data-testid="rate-con-panel"
       className="flex flex-col gap-3 p-3"
       style={{ border: '1px solid var(--tms-border)', borderRadius: 'var(--tms-radius)' }}
     >
@@ -283,7 +288,9 @@ export function RateConPanel({ bundle, loadCarrier, carrier, contacts, settings,
 
       {blocked && carrier && standing && (
         <p role="status" className="text-xs" style={{ color: 'var(--tms-badge-red)' }}>
-          Can't send yet — {carrier.name} {standing.reason}{' '}
+          Can't send yet — {carrier.name} {standing.completed
+            ? 'is not Active: MyCarrierPackets has not confirmed its setup, or has moved it out of compliance.'
+            : standing.reason}{' '}
           <Link to={`/tms/carriers/${carrier.id}`} className="underline">Open carrier profile</Link>
           {' '}(send a setup packet there).
         </p>
@@ -300,7 +307,7 @@ export function RateConPanel({ bundle, loadCarrier, carrier, contacts, settings,
           onClick={send}
           disabled={busy || working || blocked || noRecipients}
           title={blocked
-            ? 'This carrier has no completed MyCarrierPackets packet'
+            ? 'This carrier is not Active: MyCarrierPackets has not confirmed its setup'
             : noRecipients ? 'Pick at least one recipient' : undefined}
         >
           <Send size={14} />{version > 0 ? 'Re-send' : 'Send'}

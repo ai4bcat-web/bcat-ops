@@ -206,8 +206,8 @@ export function SpotInboxPage() {
         <div className="tms-spot-banner">
           <TmsAlert tone="blue" title="Gmail sign-in is not set up yet">
             <span data-testid="spot-not-configured">
-              Gmail sign-in is not set up yet. An admin adds the Google OAuth client under Settings → Integrations → Gmail
-              (per-rep sign-in). Nothing is read from anyone’s mailbox until then.{' '}
+              Gmail sign-in is not set up yet. An admin adds the Google OAuth client under Settings → Integrations → Google
+              (Gmail sign-in). Nothing is read from anyone’s mailbox until then.{' '}
               <Link to="/tms/brokerage/integrations">Open Integrations</Link>
             </span>
             {status.devStack ? (

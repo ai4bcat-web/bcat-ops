@@ -46,6 +46,8 @@ export interface PostingDeps {
     load: string
     order: string
     integration: string
+    /** Step AE: only the quote / spot-request posting actions read it. */
+    quote?: string
   }
   getById(table: string, id: string): Promise<Row | null>
   queryIndex(table: string, index: string, key: string, value: string): Promise<Row[]>
@@ -367,4 +369,191 @@ export async function listPostings(deps: PostingDeps, input: Row): Promise<Row> 
     return byPosted || String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? ''))
   })
   return { postings: rows }
+}
+
+// ── Step AE: Push to DAT from a quote or a spot request ──────────────────────
+//
+// A load board posting is a statement about a lane at a price; it needs no shipment. A quote (or a
+// spot request that has no quote yet) is posted through the SAME provider adapter and the SAME
+// `ShipmentPosting` rows as POST_LOAD, with no schema change: the row's required `shipmentId` carries
+// the subject key (`quote:<quoteId>` / `spot:<requestId>`), its deterministic id is
+// `post:<key>:<PROVIDER>`, and the link to the other record rides in `note` as `[quote Q1 · spot sr:…]`.
+// No Shipment row exists, so none is touched. Live when the provider's credentials exist, otherwise the
+// adapter's labelled STUB answer is recorded exactly as for a shipment.
+
+const DEFAULT_QUOTE_PROVIDERS = ['DAT']
+const UNPOSTABLE_QUOTE_STATUS = ['LOST', 'PASS', 'CANCELED']
+
+function quotePostingProviders(value: unknown): string[] {
+  const providers = value == null ? DEFAULT_QUOTE_PROVIDERS : assertProviders(value)
+  for (const provider of providers) {
+    if (!POSTABLE_PROVIDERS.includes(provider)) {
+      throw new Error(`${provider} is not a postable provider. Choose one of: ${POSTABLE_PROVIDERS.join(', ')}`)
+    }
+  }
+  return providers
+}
+
+/** The posting subject key: the quote when there is one, else the spot request. */
+export function quotePostingKey(input: Row): { key: string; quoteId: string | null; spotRequestId: string | null } {
+  const quoteId = optionalString(input.quoteId, 80)
+  const spotRequestId = optionalString(input.spotRequestId, 300)
+  if (!quoteId && !spotRequestId) throw new Error('quoteId or spotRequestId is required')
+  return { key: quoteId ? `quote:${quoteId}` : `spot:${spotRequestId}`, quoteId, spotRequestId }
+}
+
+function placeField(stop: Row | undefined, field: 'city' | 'state'): string | null {
+  if (!stop) return null
+  const address = (stop.address ?? null) as Row | null
+  const direct = typeof stop[field] === 'string' && stop[field] ? String(stop[field]) : null
+  const nested = address && typeof address[field] === 'string' && address[field] ? String(address[field]) : null
+  if (field === 'state') return nested ?? direct
+  return nested ?? (direct ? direct.split(',')[0].trim() : null)
+}
+
+/** POST_QUOTE_LOAD — offer a quote's (or a spot request's) lane to the load board. */
+export async function postQuoteLoad(deps: PostingDeps, input: Row, caller: Caller): Promise<Row> {
+  const { key, quoteId, spotRequestId } = quotePostingKey(input)
+  const providers = quotePostingProviders(input.providers)
+  const rateInput = optionalInteger(input.rateCents, { label: 'rateCents', min: 0 })
+  const userNote = optionalString(input.note, 500)
+  const contactEmail = optionalString(input.contactEmail, 200)
+  const contactPhone = optionalString(input.contactPhone, 40)
+
+  let snapshot: Omit<LaneSnapshot, 'loadId'>
+  let linkedSpot = spotRequestId
+  if (quoteId) {
+    if (!deps.tables.quote) throw new Error('Quote table is not configured')
+    const quote = await deps.getById(deps.tables.quote, quoteId)
+    if (!quote) throw new Error(`Quote ${quoteId} not found`)
+    if (quote.side !== 'SELL') throw new Error('Only a customer quote can be pushed to the board')
+    if (UNPOSTABLE_QUOTE_STATUS.includes(String(quote.status))) throw new Error(`A ${String(quote.status).toLowerCase()} quote cannot be posted`)
+    if (quote.shipmentId) throw new Error('This quote is already a shipment — post it from the shipment')
+    const stops = readStops(quote)
+    const pickup = stops.find((s) => s.type === 'pickup') ?? stops[0]
+    const delivery = [...stops].reverse().find((s) => s.type === 'delivery') ?? (stops.length > 1 ? stops[stops.length - 1] : undefined)
+    snapshot = {
+      originCity: placeField(pickup, 'city'),
+      originState: placeField(pickup, 'state'),
+      destinationCity: placeField(delivery, 'city'),
+      destinationState: placeField(delivery, 'state'),
+      pickupAppt: typeof pickup?.appt === 'string' && pickup.appt ? pickup.appt : null,
+      equipmentType: typeof quote.equipmentType === 'string' ? quote.equipmentType : null,
+      lengthFt: numberOrNull(quote.equipmentLengthFt),
+      weightLbs: numberOrNull(quote.weightLbs),
+      // What we would pay a carrier: the rep's number, else the quote's own buy ceiling / target.
+      rateCents: rateInput ?? numberOrNull(quote.topSpendCents) ?? numberOrNull(quote.targetBuyCents),
+    }
+    linkedSpot = linkedSpot ?? (typeof quote.spotRequestId === 'string' ? quote.spotRequestId : null)
+  } else {
+    const pickupDate = optionalString(input.pickupDate, 40)
+    snapshot = {
+      originCity: optionalString(input.originCity, 120),
+      originState: optionalString(input.originState, 40),
+      destinationCity: optionalString(input.destinationCity, 120),
+      destinationState: optionalString(input.destinationState, 40),
+      pickupAppt: pickupDate ? (pickupDate.length === 10 ? `${pickupDate}T12:00:00.000Z` : pickupDate) : null,
+      equipmentType: optionalString(input.equipmentType, 60),
+      lengthFt: optionalInteger(input.lengthFt, { label: 'lengthFt', min: 0 }),
+      weightLbs: optionalInteger(input.weightLbs, { label: 'weightLbs', min: 0 }),
+      rateCents: rateInput,
+    }
+  }
+  if (!snapshot.originCity || !snapshot.originState || !snapshot.destinationCity || !snapshot.destinationState) {
+    throw new Error('The load needs a pickup and a delivery city and state before it can be posted')
+  }
+  if (!snapshot.equipmentType) throw new Error('The load needs an equipment type before it can be posted')
+
+  const note = [userNote, `[${[quoteId ? `quote ${quoteId}` : null, linkedSpot ? `spot ${linkedSpot}` : null].filter(Boolean).join(' · ')}]`]
+    .filter(Boolean).join(' ')
+  const existing = await deps.queryIndex(deps.tables.posting, IDX_POSTINGS_BY_SHIPMENT, 'shipmentId', key)
+  const existingById: Record<string, Row> = {}
+  for (const p of existing) existingById[String(p.id)] = p
+  const now = deps.now()
+  const txItems: TransactWriteItem[] = []
+  const postingRows: Row[] = []
+
+  for (const provider of providers) {
+    const adapter = await deps.adapterFor(provider)
+    let answer: AdapterAnswer
+    try {
+      answer = await adapter.post({ provider, shipmentId: key, loadId: null, ...snapshot, contactEmail, contactPhone, note })
+    } catch (err) {
+      answer = { mode: 'STUB', ok: false, message: String(err) }
+    }
+    const id = postingId(key, provider)
+    const prior = existingById[id]
+    const status = answer.ok ? 'POSTED' : 'FAILED'
+    const row: Row = {
+      id,
+      __typename: 'ShipmentPosting',
+      shipmentId: key,
+      loadId: null,
+      provider,
+      status,
+      mode: answer.mode,
+      boardPostingId: answer.externalId ?? null,
+      message: answer.message,
+      ...snapshot,
+      contactEmail,
+      contactPhone,
+      note,
+      ...(status === 'POSTED'
+        ? { postedAt: now, postedBy: caller.email }
+        : prior?.postedAt ? { postedAt: prior.postedAt, postedBy: prior.postedBy } : {}),
+      createdBy: prior?.createdBy ?? caller.email,
+      createdAt: prior?.createdAt ?? now,
+      updatedBy: caller.email,
+      updatedAt: now,
+      version: (typeof prior?.version === 'number' ? prior.version : 0) + 1,
+    }
+    const patch: Row = { ...row }
+    delete patch.id
+    postingRows.push(row)
+    txItems.push(updateItemTx(deps.tables.posting, id, patch, null, { remove: ['unpostedAt', 'unpostedBy'] }))
+    await deps.writeAudit('SHIPMENT_POSTING', id, 'POST_QUOTE_LOAD', caller, { provider, status, mode: answer.mode, subject: key })
+  }
+  await deps.transact(txItems)
+  return { postings: postingRows }
+}
+
+/** UNPOST_QUOTE_LOAD — take a quote's / spot request's posting down. The row stays, flipped to UNPOSTED. */
+export async function unpostQuoteLoad(deps: PostingDeps, input: Row, caller: Caller): Promise<Row> {
+  const { key } = quotePostingKey(input)
+  const providers = quotePostingProviders(input.providers)
+  const existing = await deps.queryIndex(deps.tables.posting, IDX_POSTINGS_BY_SHIPMENT, 'shipmentId', key)
+  const byId: Record<string, Row> = {}
+  for (const p of existing) byId[String(p.id)] = p
+  const now = deps.now()
+  const txItems: TransactWriteItem[] = []
+  const postingRows: Row[] = []
+
+  for (const provider of providers) {
+    const id = postingId(key, provider)
+    const prior = byId[id]
+    if (!prior) continue
+    const adapter = await deps.adapterFor(provider)
+    let answer: AdapterAnswer
+    try {
+      answer = await adapter.unpost({ provider, shipmentId: key, boardPostingId: prior.boardPostingId, ...prior })
+    } catch (err) {
+      answer = { mode: prior.mode === 'LIVE' ? 'LIVE' : 'STUB', ok: false, message: String(err) }
+    }
+    const patch: Row = {
+      message: answer.message,
+      updatedBy: caller.email,
+      updatedAt: now,
+      version: (typeof prior.version === 'number' ? prior.version : 0) + 1,
+    }
+    if (answer.ok) {
+      patch.status = 'UNPOSTED'
+      patch.unpostedAt = now
+      patch.unpostedBy = caller.email
+    }
+    postingRows.push({ ...prior, ...patch })
+    txItems.push(updateItemTx(deps.tables.posting, id, patch, null))
+    await deps.writeAudit('SHIPMENT_POSTING', id, 'UNPOST_QUOTE_LOAD', caller, { provider, status: patch.status ?? prior.status, subject: key })
+  }
+  if (txItems.length) await deps.transact(txItems)
+  return { postings: postingRows }
 }

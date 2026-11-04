@@ -4,6 +4,7 @@ import outputs from '../../amplify_outputs.json'
 import type { Load, Stop, ApptType, Driver, AuditLogEntry, EntityType, AuditAction, FactoringItem, FactoringItemStatus, TimeClockEntry } from '@/types'
 import type { RateConExtract, RateConFreight } from '@/lib/otrInvoice'
 import type { McpPullState } from '@/lib/integrations/mcpPull'
+import type { McpReviewCard } from '@/lib/integrations/mcpReview'
 import type { Equipment, MaintenanceTask, MaintenanceInvoice } from '@/types/equipment'
 import { fuelDedupKey } from '@/lib/driverFuel'
 import { fileContentType } from '@/lib/disputeFiles'
@@ -43,6 +44,7 @@ import type {
 } from '@/types/tms'
 import type { CreditSummary } from '@/lib/customerCredit'
 import type { QuotePricingResult } from '@/lib/quotes'
+import type { LaneIntelligence } from '@/lib/laneIntel'
 import type { ResolveContext, Resolution } from '@/lib/ownership'
 import type { ReleaseGateResult } from '@/lib/releaseGate'
 import type { LoadReviewReason } from '@/lib/loadReview'
@@ -163,6 +165,7 @@ const LOAD_SHIPMENT_FIELDS = `
   lastKnownLat lastKnownLng lastKnownPreviousAt lastKnownPreviousCity lastKnownPreviousState
   lastKnownPreviousLat lastKnownPreviousLng lastKnownSource openIncidentCount deliveredAt
   checkCallDueNotifiedAt checkCallOverdueNotifiedAt checkCallPlan checkCallPlanStartedAt checkCallAwaitingSince checkCallEscalatedAt checkCallFlaggedAt checkCallFlagReason
+  carrierAssignmentStatus
 `
 // Step R's revenue tags, mirrored from the shipment so the fleet pages can group by
 // business without joining. Their own flag: they land one deploy after the shipment
@@ -269,7 +272,7 @@ function undefinedLoadFields(err: unknown): { hot: boolean; stops: boolean; sort
     freight: /'(commodity|weight|pieces|piecesUnit)'/i.test(msg),
     cargoValue: /'cargoValueCents'/i.test(msg),
     podNotes: /'podNotes'/i.test(msg),
-    shipment: /'(shipmentId|orderId|loadNumber|leg|status|statusChangedAt|statusChangedBy|statusSource|carrierRepId|assignmentType|activeLoadCarrierId|carrierName|equipmentType|divisionKey|trackingProvider|nextCheckCallAt|nextCheckCallNote|checkCallOpen|pickupMonth|lastCheckCallAt|lastCheckCallType|lastKnownAt|lastKnownCity|lastKnownState|lastKnownLat|lastKnownLng|lastKnownPreviousAt|lastKnownPreviousCity|lastKnownPreviousState|lastKnownPreviousLat|lastKnownPreviousLng|lastKnownSource|openIncidentCount|deliveredAt|checkCallDueNotifiedAt|checkCallOverdueNotifiedAt)'/i.test(msg),
+    shipment: /'(shipmentId|orderId|loadNumber|leg|status|statusChangedAt|statusChangedBy|statusSource|carrierRepId|assignmentType|activeLoadCarrierId|carrierName|equipmentType|divisionKey|trackingProvider|nextCheckCallAt|nextCheckCallNote|checkCallOpen|pickupMonth|lastCheckCallAt|lastCheckCallType|lastKnownAt|lastKnownCity|lastKnownState|lastKnownLat|lastKnownLng|lastKnownPreviousAt|lastKnownPreviousCity|lastKnownPreviousState|lastKnownPreviousLat|lastKnownPreviousLng|lastKnownSource|openIncidentCount|deliveredAt|checkCallDueNotifiedAt|checkCallOverdueNotifiedAt|carrierAssignmentStatus)'/i.test(msg),
     revTag: /'(revDivision|revSubdivision|revTagSource|revRuleId|salesRepId)'/i.test(msg),
     voided: /'voidedAt'/i.test(msg),
   }
@@ -1996,6 +1999,59 @@ export async function getMcpPullStatus(): Promise<McpPullState | null> {
 export async function pullMcpCarrier(carrierId: string): Promise<{ carrierId: string; result: 'SYNCED' | 'NO_PACKET' | null }> {
   return directoryAction('MYCARRIERPACKETS_SYNC_CARRIER', { carrierId })
 }
+// ── Carriers › Find & Invite (tmsDirectoryActions; the MyCarrierPackets calls run in the Lambda) ──
+
+export type McpFindMode = 'LIVE' | 'STUB'
+
+export interface McpLookupResult {
+  mode: McpFindMode
+  /** Why the answer is a stub (no credentials, not validated...); null when LIVE. */
+  reason: string | null
+  card: McpReviewCard | null
+  notFound: boolean
+}
+
+export interface McpInviteResult {
+  mode: McpFindMode
+  sent: boolean
+  message: string
+  mcpResponse?: { status: number; bodyKeys: string[]; message: string | null }
+  invitedAt?: string
+  /** Step AM. With `ensureCarrier`: the directory row the invitation created or matched. */
+  carrierId?: string | null
+  carrierCreated?: boolean
+  /** Set when the invitation went out but the PENDING row could not be made (no second invite needed). */
+  carrierError?: string | null
+  carrierLogged: boolean
+  threadLogged: boolean
+}
+
+/** PreviewCarrier: profile, FMCSA status, risk assessment, certificates, approved e-mails. */
+export async function mcpPreviewCarrier(ref: { mcNumber?: string; dotNumber?: string }): Promise<McpLookupResult> {
+  return directoryAction<McpLookupResult>('MCP_PREVIEW_CARRIER', ref)
+}
+/** GetCarrierData: the full record (packet, contacts, equipment, lanes, monitoring). */
+export async function mcpGetCarrier(ref: { mcNumber?: string; dotNumber?: string }): Promise<McpLookupResult> {
+  return directoryAction<McpLookupResult>('MCP_GET_CARRIER', ref)
+}
+/** EmailPacketInvitation; logs on the Carrier row, the audit and (from a load) the shipment thread. */
+export async function mcpSendInvite(input: {
+  mcNumber?: string
+  dotNumber?: string
+  email: string
+  carrierId?: string
+  carrierName?: string
+  shipmentId?: string
+  loadId?: string
+  /** Step AM. Create the PENDING Carrier row from MyCarrierPackets after the invitation is sent. */
+  ensureCarrier?: boolean
+}): Promise<McpInviteResult> {
+  return directoryAction<McpInviteResult>('MCP_SEND_INVITE', input)
+}
+/** Create the Carrier row from MyCarrierPackets (MCP values win; audited). Refused in STUB mode. */
+export async function mcpAddCarrier(ref: { mcNumber?: string; dotNumber?: string }): Promise<{ carrierId: string; created: boolean; matchedBy: string | null }> {
+  return directoryAction('MCP_ADD_CARRIER', ref)
+}
 export async function saveIntegrationSettings(
   provider: string,
   settings: Record<string, unknown>,
@@ -2075,6 +2131,9 @@ const SHIPMENT_REV_FIELDS = [
 let shipmentsHaveRevTag = true
 const SHIPMENT_COVERAGE_FIELDS = ['carrierRepId', 'carrierTeamKey']
 let shipmentsHaveCoverage = true
+// Step AM: the ladder rung mirrored onto the shipment. Own flag, same reason.
+const SHIPMENT_ASSIGNMENT_FIELDS = ['carrierAssignmentStatus']
+let shipmentsHaveAssignment = true
 // Step U: who reviewed the intake load this shipment was moved from. Own flag, same reason.
 const SHIPMENT_INTAKE_FIELDS = ['intakeLoadId', 'intakeReviewedBy', 'intakeReviewedAt']
 let shipmentsHaveIntake = true
@@ -2111,6 +2170,7 @@ async function readShipments<T>(run: (fields: string) => Promise<T>): Promise<T>
         shipmentsHaveTrackingPrefs ? SHIPMENT_TRACKING_PREFS_FIELDS.join(' ') : '',
         shipmentsHaveRevTag ? SHIPMENT_REV_FIELDS.join(' ') : '',
         shipmentsHaveCoverage ? SHIPMENT_COVERAGE_FIELDS.join(' ') : '',
+        shipmentsHaveAssignment ? SHIPMENT_ASSIGNMENT_FIELDS.join(' ') : '',
         shipmentsHaveIntake ? SHIPMENT_INTAKE_FIELDS.join(' ') : '',
         shipmentsHaveAljexCodes ? SHIPMENT_ALJEX_FIELDS.join(' ') : '',
       ].filter(Boolean).join(' ')))
@@ -2130,6 +2190,10 @@ async function readShipments<T>(run: (fields: string) => Promise<T>): Promise<T>
       }
       if (shipmentsHaveIntake && fieldNamed(SHIPMENT_INTAKE_FIELDS, err)) {
         shipmentsHaveIntake = false
+        continue
+      }
+      if (shipmentsHaveAssignment && fieldNamed(SHIPMENT_ASSIGNMENT_FIELDS, err)) {
+        shipmentsHaveAssignment = false
         continue
       }
       if (shipmentsHaveCoverage && fieldNamed(SHIPMENT_COVERAGE_FIELDS, err)) {
@@ -2204,6 +2268,7 @@ const LOAD_CARRIER_V2_FIELDS = [
   'rateConStatus', 'rateConToken', 'rateConSentAt', 'rateConSentTo', 'rateConExpiresAt',
   'rateConDocumentId', 'rateConSignerName', 'rateConSignerIp', 'rateConVersion',
   'bookedAt', 'bookingWarnings', 'dispatchedAt', 'dispatchNote', 'removalNote',
+  'assignmentStatus', 'assignmentTimes',
 ]
 let loadCarriersHaveCarrierV2 = true
 // Step E's upload link, the carrier's outstanding paperwork and the rating the office
@@ -2722,6 +2787,11 @@ export async function moveIntakeToActive(input: {
   return { ...r, intake: intakeRow(r.intake) }
 }
 
+/** Step AH: the create form built a shipment from this intake load's pre-fill; link them and mark the row MOVED. */
+export async function linkIntakeShipment(input: { intakeId: string; shipmentId: string }): Promise<IntakeLoadRecord> {
+  return intakeRow(await shipmentAction<IntakeLoadRecord>('INTAKE_LINK_SHIPMENT', input))
+}
+
 export async function dismissIntake(input: { intakeId: string; expectedVersion: number; reason: string }): Promise<IntakeLoadRecord> {
   return intakeRow(await shipmentAction<IntakeLoadRecord>('INTAKE_DISMISS', input))
 }
@@ -2926,8 +2996,11 @@ export interface RemoveLoadCarrierInput {
   outcome: 'BOUNCED' | 'TONU'
   reason: RemoveLoadCarrierReason
   note?: string
+  /** Step AM. Optional, default off: put the freight back on DAT (the POST_LOAD path) after the carrier comes off. */
+  repostToDat?: boolean
 }
-export async function removeLoadCarrier(input: RemoveLoadCarrierInput): Promise<ShipmentBundle> {
+/** `repost` is present only when `repostToDat` was asked for; a failed repost never undoes the removal. */
+export async function removeLoadCarrier(input: RemoveLoadCarrierInput): Promise<ShipmentBundle & { repost?: { ok: boolean; message: string } }> {
   return shipmentAction<ShipmentBundle>('REMOVE_LOAD_CARRIER', input)
 }
 
@@ -7871,6 +7944,31 @@ export async function unpostLoad(input: { shipmentId: string; providers: string[
   return shipmentAction<{ postings: ShipmentPostingRecord[] }>('UNPOST_LOAD', input)
 }
 
+export interface PostQuoteLoadInput {
+  /** Post a customer quote's lane; or, with no quote yet, a spot request's (then the lane fields are required). */
+  quoteId?: string | null
+  spotRequestId?: string | null
+  providers?: string[]
+  rateCents?: number | null
+  note?: string | null
+  originCity?: string | null
+  originState?: string | null
+  destinationCity?: string | null
+  destinationState?: string | null
+  equipmentType?: string | null
+  pickupDate?: string | null
+  weightLbs?: number | null
+}
+
+/** Step AE: Push to DAT from a quote / spot request — the same board posting as a shipment's, with no shipment. */
+export async function postQuoteLoad(input: PostQuoteLoadInput): Promise<{ postings: ShipmentPostingRecord[] }> {
+  return shipmentAction<{ postings: ShipmentPostingRecord[] }>('POST_QUOTE_LOAD', input)
+}
+
+export async function unpostQuoteLoad(input: { quoteId?: string | null; spotRequestId?: string | null; providers?: string[] }): Promise<{ postings: ShipmentPostingRecord[] }> {
+  return shipmentAction<{ postings: ShipmentPostingRecord[] }>('UNPOST_QUOTE_LOAD', input)
+}
+
 export interface BuildGateResult {
   shipment: ShipmentRecord
   missingFields: string[]
@@ -7915,6 +8013,25 @@ export async function priceFromMarket(input: {
   expectedUpdatedAt?: string
 }): Promise<MarketRateResult & { quote?: QuoteRecord }> {
   return shipmentAction<MarketRateResult & { quote?: QuoteRecord }>('PRICE_FROM_MARKET', input)
+}
+
+/**
+ * Step AE. The Rate-intelligence panel's two history sections for one lane: what we ran it for
+ * (LaneRateSample, incl. the imported Aljex history) and what we quoted it for (Quote outcomes), last
+ * 24 months, computed server-side from indexed reads.
+ */
+export async function getLaneIntelligence(input: {
+  originCity?: string | null
+  originState?: string | null
+  originZip?: string | null
+  destinationCity?: string | null
+  destinationState?: string | null
+  destinationZip?: string | null
+  equipmentType?: string | null
+  /** The quote the panel sits on: it is not its own history. */
+  excludeQuoteId?: string | null
+}): Promise<LaneIntelligence> {
+  return shipmentAction<LaneIntelligence>('LANE_INTELLIGENCE', input)
 }
 
 /** Log a carrier's answer to a posting as a BUY-side offer on the shipment. */
@@ -8651,4 +8768,32 @@ export async function setTrackingPrefs(
 ): Promise<{ shipment: ShipmentRecord }> {
   const r = await shipmentAction<{ shipment: ShipmentRecord }>('SET_TRACKING_PREFS', input)
   return { shipment: withParsedPrefs(r.shipment) }
+}
+
+// ── Step AM · cover flow and the carrier assignment ladder ────────────────────
+
+export interface CoverCarrierInput extends BookCarrierInput {
+  /** The directory Carrier to assign. Not ACTIVE = assigned waiting on MyCarrierPackets setup (invite must have been sent). */
+  carrierId: string
+}
+/** Assign a carrier (ACTIVE or still in MCP setup) and cover the shipment. UNACCEPTABLE refuses; acknowledge `MCP_MODERATE`. */
+export async function coverCarrier(input: CoverCarrierInput): Promise<ShipmentBundle> {
+  return shipmentAction<ShipmentBundle>('COVER_CARRIER', input)
+}
+
+/** The signed PDF is uploaded first (PREPARE_DOCUMENT_UPLOAD + COMMIT_DOCUMENT, type RATE_CON); `documentId` names it. */
+export async function markRateConSigned(input: { loadCarrierId: string; documentId: string }): Promise<ShipmentBundle> {
+  return shipmentAction<ShipmentBundle>('MARK_RATE_CON_SIGNED', input)
+}
+
+export interface EnterDriverInfoInput {
+  loadCarrierId: string
+  driverName: string
+  driverPhone: string
+  truckNumber: string
+  trailerNumber: string
+}
+/** All four are mandatory; dispatch is blocked until they are on the assignment. */
+export async function enterDriverInfo(input: EnterDriverInfoInput): Promise<ShipmentBundle> {
+  return shipmentAction<ShipmentBundle>('ENTER_DRIVER_INFO', input)
 }

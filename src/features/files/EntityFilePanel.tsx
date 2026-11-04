@@ -7,6 +7,7 @@ import { Avatar } from '@/components/ui/avatar'
 import { getColor } from '@/lib/driverColors'
 import { ACCEPTED_DOC_EXT } from '@/lib/complianceClient'
 import { driverTrailerFieldDeployed } from '@/lib/apiClient'
+import { activeUnits } from '@/lib/fleetActive'
 import {
   slotsForAsset, slotsForDriver, slotState, docOutsideSlots, DRIVER_FILE_SLOTS, driverExpiryPatch,
   visibleSlots, visibleDocs, responsibilityFor, RESPONSIBILITY_LABELS, type FileSlot, type SlotState,
@@ -92,7 +93,7 @@ export function EntityFilePanel({ entity, hub, onClose, onEditDriver, canSeePriv
   const targetSlot = useRef<FileSlot | null>(null)
 
   const trailers = useMemo(
-    () => equipment.filter((e) => e.type === 'trailer')
+    () => activeUnits(equipment, 'trailer')
       .sort((a, b) => a.unitNumber.localeCompare(b.unitNumber, undefined, { numeric: true })),
     [equipment],
   )

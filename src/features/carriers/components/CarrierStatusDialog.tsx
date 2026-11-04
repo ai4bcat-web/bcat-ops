@@ -13,6 +13,7 @@ import {
   carrierStatusReasonsFor,
   nextCarrierStatuses,
 } from '@/lib/carrierStatus'
+import { mcpPacketStanding } from '@/lib/mcpPacket'
 import type { CarrierRecord, CarrierStatus, CarrierStatusReason } from '@/types/tms'
 
 interface CarrierStatusDialogProps {
@@ -23,7 +24,10 @@ interface CarrierStatusDialogProps {
 }
 
 export function CarrierStatusDialog({ carrier, isAdmin, onClose, onConfirm }: CarrierStatusDialogProps) {
-  const targets = nextCarrierStatuses(carrier.status, isAdmin)
+  // Step AM: Active is MyCarrierPackets' call (packet complete and monitored), never a hand move. Carriers imported
+  // from Aljex keep their old standing and may still be reactivated by hand.
+  const mcpOwnsActive = carrier.legacyImported !== true && !mcpPacketStanding(carrier).completed
+  const targets = nextCarrierStatuses(carrier.status, isAdmin).filter((t) => !(t === 'ACTIVE' && mcpOwnsActive))
   const [status, setStatus] = useState<CarrierStatus | ''>(targets[0] ?? '')
   const [reason, setReason] = useState<CarrierStatusReason | ''>('')
   const [note, setNote] = useState('')
@@ -77,10 +81,17 @@ export function CarrierStatusDialog({ carrier, isAdmin, onClose, onConfirm }: Ca
             {CARRIER_STATUS_LABELS[carrier.status]}
           </span>
         </p>
+        {mcpOwnsActive && nextCarrierStatuses(carrier.status, isAdmin).includes('ACTIVE') && (
+          <p className="tms-muted text-xs" data-testid="active-by-mcp">
+            Active is set by MyCarrierPackets once this carrier completes its packet and is monitored.
+          </p>
+        )}
 
         {targets.length === 0 ? (
           <p style={{ color: 'var(--tms-badge-red)' }}>
-            Only an admin can move a carrier out of Do not use.
+            {mcpOwnsActive && nextCarrierStatuses(carrier.status, isAdmin).includes('ACTIVE')
+              ? 'No manual move is available: MyCarrierPackets decides when this carrier becomes Active.'
+              : 'Only an admin can move a carrier out of Do not use.'}
           </p>
         ) : (
           <>

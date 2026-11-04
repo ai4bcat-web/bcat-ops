@@ -8,7 +8,7 @@
  * on the dev stack.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor, fireEvent } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import { MemoryRouter } from 'react-router-dom'
 import type { SpotRequestRecord, SpotStatusView } from '@/lib/spot/types'
@@ -24,6 +24,12 @@ const api = vi.hoisted(() => ({
   saveQuote: vi.fn(),
   sendQuote: vi.fn(),
   getQuote: vi.fn(),
+  getLaneIntelligence: vi.fn(),
+  listShipmentPostings: vi.fn(),
+  postQuoteLoad: vi.fn(),
+  unpostQuoteLoad: vi.fn(),
+  markQuoteLost: vi.fn(),
+  graphqlErrorText: (e: unknown) => (e instanceof Error ? e.message : String(e)),
 }))
 vi.mock('@/lib/apiClient', () => api)
 
@@ -84,6 +90,12 @@ const STUB_ANSWER = {
   targetBps: 2000, floorBps: 1200, autoReply: false, suggestedSellCents: 250000, belowFloor: false, floorSellCents: 227000, marginAtSuggested: 0.2,
 }
 
+const NO_INTEL = {
+  laneKey: 'CHICAGO|IL>DALLAS|TX', laneKey3: '606>752', equipmentType: 'VAN', fromDate: '2024-11-04', months: 24, generatedAt: 'x', truncated: false,
+  runs: { stats: { count: 0, customer: { count: 0, avgCents: null, lowCents: null, highCents: null }, carrier: { count: 0, avgCents: null, lowCents: null, highCents: null }, marginAvgBps: null, lastDate: null }, rows: [] },
+  quotes: { stats: { count: 0, won: 0, lost: 0, expired: 0, pending: 0, winRate: null, avgQuotedCents: null, avgWonCents: null }, rows: [] },
+}
+
 const RESPONSE = {
   to: 'pat@zz-acme.test', subject: 'Re: Van Chicago to Dallas', body: 'Rate $2,600 Chicago, IL to Dallas, TX & back', mailto: '', gmailUrl: '', rateCents: 260000, hasLink: false,
 }
@@ -117,6 +129,10 @@ beforeEach(() => {
   api.priceFromMarket.mockResolvedValue(STUB_ANSWER)
   api.listLaneSamples.mockResolvedValue([])
   api.listLaneSamplesByZip3.mockResolvedValue([])
+  api.getLaneIntelligence.mockResolvedValue(NO_INTEL)
+  api.listShipmentPostings.mockResolvedValue([])
+  api.postQuoteLoad.mockResolvedValue({ postings: [] })
+  api.markQuoteLost.mockResolvedValue({ quote: {} })
 })
 
 describe('Spot inbox connection states', () => {
@@ -300,6 +316,28 @@ describe('Spot request detail', () => {
     fireEvent.change(await screen.findByTestId('spot-lost-reason'), { target: { value: 'went with a cheaper carrier' } })
     fireEvent.click(screen.getByTestId('spot-lost-confirm'))
     await waitFor(() => expect(calls('SPOT_MARK_OUTCOME')[1][1]).toEqual({ requestId: 'sr:u1:m1', outcome: 'LOST', lostReason: 'went with a cheaper carrier' }))
+    // the quote behind the request is closed too, with the coded reason, so the lane's quote history records the loss
+    await waitFor(() => expect(api.markQuoteLost).toHaveBeenCalledWith({ quoteId: 'Q1', reason: 'TOO_HIGH', note: 'went with a cheaper carrier' }))
+  })
+
+  it('pushes the request lane to DAT from the drawer (no quote yet), keyed to the request', async () => {
+    setup()
+    draw('/tms/rates/spot?request=sr:u1:m1')
+    fireEvent.click(await screen.findByTestId('push-dat-post'))
+    await waitFor(() => expect(api.postQuoteLoad).toHaveBeenCalledWith(expect.objectContaining({
+      quoteId: null, spotRequestId: 'sr:u1:m1', originCity: 'Chicago', destinationState: 'TX', equipmentType: 'VAN', providers: ['DAT'],
+    })))
+    expect(api.listShipmentPostings).toHaveBeenCalledWith('spot:sr:u1:m1')
+  })
+
+  it('shows the Rate intelligence panel for the request lane: stub market, ran, quoted', async () => {
+    setup()
+    draw('/tms/rates/spot?request=sr:u1:m1')
+    const panel = await screen.findByTestId('spot-section-intel')
+    expect(await within(panel).findByTestId('rate-intel-stub')).toBeInTheDocument()
+    expect(within(panel).getByTestId('rate-intel-ran')).toBeInTheDocument()
+    expect(within(panel).getByTestId('rate-intel-quoted')).toBeInTheDocument()
+    await waitFor(() => expect(api.getLaneIntelligence).toHaveBeenCalledWith(expect.objectContaining({ originCity: 'Chicago', destinationState: 'TX', equipmentType: 'VAN' })))
   })
 
   it('sends only the fields the rep changed', async () => {

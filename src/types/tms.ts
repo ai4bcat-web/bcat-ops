@@ -10,6 +10,8 @@ import type { TenderPrefill } from '../lib/intakeTender'
 // feature code keeps importing the TMS vocabulary from one place.
 import type { CheckCallPlan } from '../lib/checkCallPlan'
 export type { CheckCallChannel, CheckCallMilestone, CheckCallPlan } from '../lib/checkCallPlan'
+import type { CarrierAssignmentStatus } from '../lib/carrierAssignment'
+export type { CarrierAssignmentStatus } from '../lib/carrierAssignment'
 import type { AutomationPolicyPatch, TrackingAutomationSettings } from '../lib/trackingAutomation'
 export type {
   AutomationChannel, AutomationPolicy, AutomationPolicyPatch, AutomationTemplates, DivisionAutomation,
@@ -1829,6 +1831,8 @@ export interface ShipmentRecord {
   trackerId?: string | null
   /** Step I. Cognito username of the rep covering the shipment; mirrored onto every load. */
   carrierRepId?: string | null
+  /** Step AM. Ladder rung of the active carrier assignment; null when nobody is assigned. */
+  carrierAssignmentStatus?: CarrierAssignmentStatus | null
   /** Step I. Team assigned to cover the shipment. */
   carrierTeamKey?: string | null
   /** Void is the only exit: the PRO, the history and the documents all stay. */
@@ -2021,6 +2025,10 @@ export interface LoadCarrierRecord {
   ratingNote?: string | null
   ratedAt?: string | null
   ratedBy?: string | null
+  // Step AM — the assignment ladder (src/lib/carrierAssignment.ts)
+  assignmentStatus?: CarrierAssignmentStatus | null
+  /** JSON string map status -> ISO time; read with `parseAssignmentTimes`. */
+  assignmentTimes?: string | Partial<Record<CarrierAssignmentStatus, string>> | null
   createdBy: string
   updatedBy: string
   createdAt: string
@@ -2147,6 +2155,8 @@ export interface ShipmentLoadFields {
   assignmentType?: AssignmentType | null
   activeLoadCarrierId?: string | null
   carrierName?: string | null
+  /** Step AM. Mirror of the active assignment's ladder rung; null when nobody is assigned. */
+  carrierAssignmentStatus?: CarrierAssignmentStatus | null
   equipmentType?: string | null
   divisionKey?: string | null
   trackingProvider?: TrackingProvider | null
@@ -2361,6 +2371,10 @@ export interface CarrierRecord {
   mcpPacketCompletedAt?: string | null
   mcpSyncedAt?: string | null
   mcpSyncRunId?: string | null
+  /** Step AD: the last packet invitation sent from Find & Invite. */
+  mcpInvitedAt?: string | null
+  mcpInvitedTo?: string | null
+  mcpInvitedBy?: string | null
   /** Human-edited notes the agents read for this carrier. Never agent-written. */
   aiMemory?: PartyAiMemory | null
   equipment?: string[] | null

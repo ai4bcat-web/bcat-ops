@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi } from 'vitest'
+import { beforeEach, describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import type { CustomerRecord } from '@/types/tms'
 import { emptyValues, type ShipmentFormValues } from '../model'
@@ -7,6 +7,9 @@ import type { FormCtx } from '../sectionProps'
 import { CustomerSection } from './CustomerSection'
 import { ValuesHost, type Host } from './SectionHost'
 import { makeCtx, sliceChange } from './sectionTestKit'
+
+const ordersMock = vi.fn()
+vi.mock('@/hooks/useCustomerOrders', () => ({ useCustomerOrders: (...a: unknown[]) => ordersMock(...a) }))
 
 // The real picker is a search box; what matters here is which customers it is OFFERED and what we do with a pick.
 vi.mock('@/components/directory-picker/DirectoryPicker', () => ({
@@ -29,6 +32,8 @@ const ACME = {
 } as unknown as CustomerRecord
 const PENDING = { ...base, id: 'c-pend', name: 'Pending Co', status: 'PENDING', active: true } as unknown as CustomerRecord
 const BLOCKED = { ...base, id: 'c-blk', name: 'Blocked Co', status: 'BLOCKED', active: false } as unknown as CustomerRecord
+
+beforeEach(() => ordersMock.mockReturnValue({ orders: [], shipments: [], loads: [], loading: false }))
 
 function setup(over: Partial<FormCtx> = {}, seed?: (v: ShipmentFormValues) => ShipmentFormValues) {
   const host: { current: Host | null } = { current: null }
@@ -62,15 +67,18 @@ describe('CustomerSection', () => {
     expect(v.customer.contactId).toBe('k1')
     expect(v.customer.emails[0]).toBe('pat@acme.test')
     expect(v.customer.emails).toHaveLength(6)
+    expect(v.customer.emails.slice(2).every((e) => e === '')).toBe(true)
     expect(v.customer.hours).toBe('8-4')
     expect(v.ship.revDivision).toBe('MINE')
     expect(screen.getByLabelText('City')).toHaveProperty('value', 'Joliet')
     expect(screen.getByLabelText('Phone')).toHaveProperty('value', '(312) 555-0100')
   })
 
-  it('shows six Email slots and hides inactive contacts', () => {
+  it('shows exactly two Email fields and hides inactive contacts', () => {
     setup(undefined, (v) => ({ ...v, customer: { ...v.customer, id: 'c-acme' } }))
-    for (let n = 1; n <= 6; n++) expect(screen.getByLabelText(`Email ${n}`)).toBeTruthy()
+    expect(screen.getByLabelText('Email 1')).toBeTruthy()
+    expect(screen.getByLabelText('Email 2')).toBeTruthy()
+    expect(screen.queryByLabelText('Email 3')).toBeNull()
     const contact = screen.getByLabelText('Contact') as HTMLSelectElement
     expect(Array.from(contact.options).map((o) => o.text)).toEqual(['', 'Pat Primary'])
   })
@@ -102,5 +110,65 @@ describe('CustomerSection', () => {
     const v = host.current!.getValues()
     expect(v.customer.id).toBe('')
     expect(v.customer.hours).toBe('9-5')
+  })
+
+  describe('Bill To block', () => {
+    const blk = (k: string) => screen.getByTestId(`f-customer-billTo-${k}`).textContent
+
+    it('is absent until a customer is chosen, then fills from the customer record', () => {
+      const host = setup()
+      expect(screen.queryByTestId('f-customer-billToBlock')).toBeNull()
+      fireEvent.click(screen.getByText('Acme Foods'))
+      expect(host.current!.getValues().customer.id).toBe('c-acme')
+      expect(blk('factoring')).toBe('No factor')
+      expect(screen.getByText('Open customer profile').getAttribute('href')).toBe('/tms/customers/c-acme')
+    })
+
+    it('shows terms, factoring, billing e-mails, limit and the credit still available', () => {
+      const withTerms = { ...ACME, paymentTermsDays: 30, factored: true, billingEmail: 'ap@acme.test', creditLimitCents: 1_000_000 } as unknown as CustomerRecord
+      ordersMock.mockReturnValue({
+        orders: [{ id: 'o1', customerId: 'c-acme', shipmentId: 's1', revenueCents: 250_000, arStatus: null }],
+        shipments: [{ id: 's1', status: 'IN_TRANSIT' }],
+        loads: [], loading: false,
+      })
+      render(
+        <ValuesHost initial={{ ...emptyValues(), customer: { ...emptyValues().customer, id: 'c-acme' } }}>
+          {(values, update, form) => (
+            <CustomerSection value={values.customer} onChange={sliceChange(update, 'customer')} form={form}
+              ctx={makeCtx({ customer: withTerms, directory: { customers: [withTerms], locations: [], carriers: [], staff: [] } })} />
+          )}
+        </ValuesHost>,
+      )
+      expect(blk('terms')).toBe('Net 30')
+      expect(blk('factoring')).toBe('Factored')
+      expect(blk('emails')).toBe('ap@acme.test')
+      expect(blk('limit')).toBe('$10,000.00')
+      expect(blk('available')).toBe('$7,500.00')
+    })
+
+    it('has no editable control and says so when there is no limit', () => {
+      setup(undefined, (v) => ({ ...v, customer: { ...v.customer, id: 'c-acme' } }))
+      const block = screen.getByTestId('f-customer-billToBlock')
+      expect(block.querySelectorAll('input, select, textarea')).toHaveLength(0)
+      expect(blk('limit')).toBe('No limit set')
+      expect(blk('terms')).toBe('—')
+    })
+
+    it('a bill-to party’s own terms and e-mail win over the customer’s', () => {
+      const c = {
+        ...ACME, paymentTermsDays: 30, billingEmail: 'ap@acme.test',
+        billToParties: [{ id: 'b1', name: 'Alt AP', paymentTermsDays: 45, email: 'alt@acme.test', isDefault: true }],
+      } as unknown as CustomerRecord
+      render(
+        <ValuesHost initial={{ ...emptyValues(), customer: { ...emptyValues().customer, id: 'c-acme', billToId: 'b1' } }}>
+          {(values, update, form) => (
+            <CustomerSection value={values.customer} onChange={sliceChange(update, 'customer')} form={form}
+              ctx={makeCtx({ customer: c, directory: { customers: [c], locations: [], carriers: [], staff: [] } })} />
+          )}
+        </ValuesHost>,
+      )
+      expect(blk('terms')).toBe('Net 45')
+      expect(blk('emails')).toBe('alt@acme.test, ap@acme.test')
+    })
   })
 })

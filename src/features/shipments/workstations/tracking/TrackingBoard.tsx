@@ -37,6 +37,7 @@ import { formatBoardDateTime } from '@/lib/date'
 import { CHECK_CALL_TYPE_LABELS } from '@/lib/checkCalls'
 import type { EffectiveTrackingPrefs } from '@/lib/trackingPrefs'
 import { boardStatusOf, type BoardStatusKey, type ShipmentRow } from '../../shipmentViews'
+import { CarrierAssignmentChip } from '../../components/CarrierAssignmentChip'
 import { relativeTime as relativeTimeOf } from '../motion'
 import {
   POD_LABELS,
@@ -278,6 +279,8 @@ export function TrackingBoard(props: TrackingBoardProps) {
           return <PodCell row={row} />
         case 'carrier':
           return <CarrierCell row={row} />
+        case 'carrierAssignment':
+          return <CarrierAssignmentChip ladder={row.carrierAssignmentStatus} shipmentStatus={row.status} shipmentStatusText={boardStatusOf(row)} />
         case 'tracker':
           return <TrackerCell row={row} />
         case 'checkCalls':

@@ -17,6 +17,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Building2, Send, Truck, UserCog, UserMinus } from 'lucide-react'
 import { RateConPanel } from '@/features/carriers/components/RateConPanel'
+import { CoverCarrierDialog } from '@/features/carriers/cover/CoverCarrierDialog'
 import { CarrierOffersCard } from '@/features/quotes/components/CarrierOffersCard'
 import { getCarrierBundle, getTmsSettings } from '@/lib/apiClient'
 import { useDrivers } from '@/hooks/useDrivers'
@@ -31,13 +32,16 @@ import { RemoveCarrierDialog } from './StatusActions'
 import { OWN_FLEET_CALENDAR_PATH, OWN_FLEET_DISPATCH_PATH, settlementPathFor } from './ownFleet'
 import { AssignDriverDialog } from './AssignDriverDialog'
 import { distinctStopDrivers } from '@/lib/ownAssetDriver'
+import { isCarrierAssignmentStatus } from '@/lib/carrierAssignment'
+import { CarrierLadderCard } from './CarrierLadderCard'
+import { dispatchBlock } from '../carrierLadder'
 import { useTrucks } from '@/hooks/useTrucks'
 import type { ShipmentActions } from '../useShipmentActions'
 import type { CarrierBundle, ShipmentBundle, TmsSettings } from '@/types/tms'
 
 const OWN_FLEET_SCHEDULE_PATH = '/schedule'
 
-type CarrierDialog = { kind: 'dispatch' } | { kind: 'assign' } | { kind: 'remove'; outcome: 'BOUNCED' | 'TONU' } | null
+type CarrierDialog = { kind: 'dispatch' } | { kind: 'assign' } | { kind: 'cover' } | { kind: 'remove'; outcome: 'BOUNCED' | 'TONU' } | null
 
 export function CarrierSection({ bundle, actions, isAdmin = false }: {
   bundle: ShipmentBundle
@@ -102,6 +106,15 @@ export function CarrierSection({ bundle, actions, isAdmin = false }: {
     />
   ) : null
 
+  const coverDialog = dialog?.kind === 'cover' ? (
+    <CoverCarrierDialog
+      shipmentId={shipmentId}
+      shipmentNumber={bundle.shipment.number}
+      onClose={() => setDialog(null)}
+      onCovered={() => { void actions.reload() }}
+    />
+  ) : null
+
   if (!loadCarrier) {
     return (
       <div className="space-y-4">
@@ -110,8 +123,18 @@ export function CarrierSection({ bundle, actions, isAdmin = false }: {
         {offers}
         {ownAssetNoLeg
           ? noDriverBanner
-          : <p className="tms-muted text-sm">Nobody is on this load yet. Book a carrier from the Overview tab.</p>}
+          : (
+            <div className="flex flex-wrap items-center gap-3">
+              <p className="tms-muted text-sm">Nobody is on this load yet.</p>
+              {!voided && !legacy && (
+                <TmsButton variant="primary" size="sm" data-testid="cover-open" onClick={() => setDialog({ kind: 'cover' })} disabled={actions.busy}>
+                  Cover
+                </TmsButton>
+              )}
+            </div>
+          )}
         {assignDialog}
+        {coverDialog}
       </div>
     )
   }
@@ -126,6 +149,8 @@ export function CarrierSection({ bundle, actions, isAdmin = false }: {
   const rateCents = loadCarrier.carrierRateCents ?? 0
   const tier = loadCarrier.quickPayDays ? tierFor(loadCarrier.quickPayDays, tiers) : null
   const feeCents = loadCarrier.quickPayFeeCents ?? (tier ? quickPayFee(rateCents, tier.feeBps) : null)
+  // Step AM: on the ladder, Dispatch waits for the four driver fields. Tracking keys off that record.
+  const driverGate = !isOwnAsset && isCarrierAssignmentStatus(loadCarrier.assignmentStatus) ? dispatchBlock(loadCarrier) : null
 
   return (
     <div className="space-y-4">
@@ -187,6 +212,16 @@ export function CarrierSection({ bundle, actions, isAdmin = false }: {
       </TmsCard>
 
       {!isOwnAsset && (
+        <CarrierLadderCard
+          bundle={bundle}
+          loadCarrier={loadCarrier}
+          carrier={carrierBundle?.carrier ?? null}
+          actions={actions}
+          onRemove={() => setDialog({ kind: 'remove', outcome: 'BOUNCED' })}
+        />
+      )}
+
+      {!isOwnAsset && (
         <TmsCard title="Quick pay">
           <div className="flex flex-wrap items-end gap-3">
             <TmsField label="Term" className="min-w-48">
@@ -233,8 +268,8 @@ export function CarrierSection({ bundle, actions, isAdmin = false }: {
         {load?.status === 'BOOKED' && (
           <TmsButton
             variant="primary" size="sm" onClick={() => setDialog({ kind: 'dispatch' })}
-            disabled={actions.busy || ownAssetNoDriver}
-            title={ownAssetNoDriver ? 'Pick the driver before dispatching' : undefined}
+            disabled={actions.busy || ownAssetNoDriver || driverGate != null}
+            title={ownAssetNoDriver ? 'Pick the driver before dispatching' : driverGate ?? undefined}
           >
             <Send size={14} className="mr-1" />Dispatch
           </TmsButton>
@@ -267,8 +302,8 @@ export function CarrierSection({ bundle, actions, isAdmin = false }: {
           loadCarrier={loadCarrier}
           busy={actions.busy}
           onClose={() => setDialog(null)}
-          onConfirm={(reason, note) => {
-            void actions.load.onRemoveCarrier(loadCarrier.id, dialog.outcome, reason, note)
+          onConfirm={(reason, note, repostToDat) => {
+            void actions.load.onRemoveCarrier(loadCarrier.id, dialog.outcome, reason, note, repostToDat)
               .then(() => setDialog(null))
               .catch(() => { /* already reported */ })
           }}

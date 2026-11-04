@@ -19,6 +19,7 @@
  * its booking actions, so a `@/` alias would break the function build.
  */
 import { effectiveCarrierStatus } from './carrierStatus'
+import { MCP_PACKET_COMPLETED_STATUSES, normalizeMcpStatus } from './mcpPacket'
 import type {
   CarrierDocumentRecord,
   CarrierDocumentType,
@@ -43,6 +44,9 @@ export type BookingReason =
   | 'DOC_EXPIRED'
   | 'MISSING_REQUIRED_FIELD'
   | 'DOUBLE_BOOKED'
+  | 'MCP_UNACCEPTABLE'
+  | 'MCP_MODERATE'
+  | 'SETUP_NOT_STARTED'
 
 export interface BookingFinding {
   reason: BookingReason
@@ -355,6 +359,54 @@ export function evaluateCarrierBooking(input: CarrierBookingInput): CarrierBooki
     })
   }
   return { blocks, warnings }
+}
+
+// ── Cover (Step AM) ─────────────────────────────────────────────────────────
+
+/** What the full booking gate still enforces for a carrier whose setup is not done: nothing about paperwork MCP has yet to collect. */
+const SETUP_PENDING_KEEPS: readonly BookingReason[] = ['DO_NOT_USE', 'AUTHORITY_INACTIVE', 'ALREADY_COVERED', 'NEGATIVE_CARRIER_CHARGE']
+
+export interface CoverCarrierFacts {
+  status?: string | null
+  mcpStatus?: string | null
+  mcpInvitedAt?: string | null
+}
+
+/** The packet has been sent for or started: the only state from which a not-yet-active carrier may be covered. */
+function packetStarted(carrier: CoverCarrierFacts): boolean {
+  if (carrier.mcpInvitedAt) return true
+  const status = normalizeMcpStatus(carrier.mcpStatus)
+  return status === 'INVITED' || status === 'IN_PROGRESS' || (status != null && (MCP_PACKET_COMPLETED_STATUSES as readonly string[]).includes(status))
+}
+
+/**
+ * The COVER_CARRIER layer over `evaluateCarrierBooking`. UNACCEPTABLE packets block, MODERATE warns
+ * (acknowledged by key `MCP_MODERATE`). A carrier that is not ACTIVE is assignable only from PENDING /
+ * REVIEW and only after the setup packet was sent; for it the insurance and paperwork findings are not
+ * judged yet (MyCarrierPackets collects them) — they are judged by the rate-con gate once it is ACTIVE.
+ */
+export function applyCoverRules(carrier: CoverCarrierFacts, result: CarrierBookingResult): CarrierBookingResult & { setupPending: boolean } {
+  const status = carrier.status ?? 'PENDING'
+  const setupPending = status !== 'ACTIVE'
+  const finding = (reason: BookingReason, detail: string): BookingFinding => ({ reason, key: reason, detail, adminOnly: false })
+  let blocks = result.blocks
+  let warnings = result.warnings
+  if (setupPending) {
+    blocks = blocks.filter((b) => SETUP_PENDING_KEEPS.includes(b.reason))
+    warnings = []
+    if (status !== 'PENDING' && status !== 'REVIEW') {
+      blocks = [...blocks, finding('STATUS_NOT_ALLOWED', `Carrier status is ${status}; only a carrier still in setup (PENDING or REVIEW) can be covered before MyCarrierPackets activates it.`)]
+    } else if (!packetStarted(carrier)) {
+      blocks = [...blocks, finding('SETUP_NOT_STARTED', 'This carrier has not been sent a MyCarrierPackets setup packet. Send the packet first, then assign the carrier.')]
+    }
+  }
+  const mcp = normalizeMcpStatus(carrier.mcpStatus)
+  if (mcp === 'UNACCEPTABLE' || mcp === 'UNACCEPTABLE_REVIEW') {
+    blocks = [...blocks, finding('MCP_UNACCEPTABLE', 'MyCarrierPackets rates this carrier UNACCEPTABLE; it cannot be assigned.')]
+  } else if (mcp === 'MODERATE') {
+    warnings = [...warnings, finding('MCP_MODERATE', 'MyCarrierPackets rates this carrier MODERATE risk.')]
+  }
+  return { blocks, warnings, setupPending }
 }
 
 // ── helpers ─────────────────────────────────────────────────────────────────

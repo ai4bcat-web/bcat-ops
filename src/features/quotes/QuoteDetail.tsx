@@ -35,9 +35,12 @@ import type { MarketRateResult } from '@/lib/apiClient'
 import { formatDateTime } from '@/lib/date'
 import { formatCents } from '@/lib/invoiceBuild'
 import { humanChargeCode, priceQuoteLines, quoteState } from '@/lib/quotes'
+import { laneInputOfStops } from '@/lib/laneIntel'
 import { MoneyField } from '@/features/directory/components/MoneyField'
 import { MODE_OPTIONS } from '@/features/shipments/orderDraft'
 import { LaneHistoryPanel } from './components/LaneHistoryPanel'
+import { PushToDatCard } from './components/PushToDatCard'
+import { RateIntelligencePanel } from './components/RateIntelligencePanel'
 import { ConvertQuoteDialog } from './components/ConvertQuoteDialog'
 import { CounterDialog } from './components/CounterDialog'
 import { DuplicateQuoteDialog } from './components/DuplicateQuoteDialog'
@@ -687,6 +690,20 @@ export function QuoteDetail() {
       <TmsDetailSplit
         aside={
         <div style={{ display: 'grid', gap: 16, alignContent: 'start' }}>
+          <RateIntelligencePanel
+            lane={laneInputOfStops(stops)}
+            equipmentType={form.equipmentType || null}
+            customerId={quote?.customerId ?? form.customerId ?? null}
+            excludeQuoteId={quote?.id ?? null}
+          />
+          {quote && quote.side === 'SELL' && (
+            <PushToDatCard
+              quoteId={quote.id}
+              spotRequestId={quote.spotRequestId ?? null}
+              disabled={['WON', 'LOST', 'PASS', 'CANCELED'].includes(quote.status) || !!quote.shipmentId}
+              disabledReason={quote.shipmentId ? 'This quote is a shipment now — post it from the shipment.' : 'A closed quote cannot be posted.'}
+            />
+          )}
           <LaneHistoryPanel
             laneKey={quote?.laneKey ?? laneKeys.laneKey}
             laneKey3={quote?.laneKey3 ?? laneKeys.laneKey3}

@@ -15,6 +15,7 @@ import { McpApiError } from './mcpAdapter'
 import { addToIndex, auditChanges, buildCarrierIndex, mapProfileToCarrier, matchCarrier, mcKey, dotKey } from './mcpProfile'
 import type { McpContact, McpPayment, McpProfile, MatchedBy } from './mcpProfile'
 import { normalizeName as carrierKey } from '../tmsDirectory'
+import { mcpCarrierStatusPatch } from './mcpCarrierStatus'
 
 type Row = Record<string, unknown>
 
@@ -100,6 +101,8 @@ export interface McpPullDeps {
   newId(): string
   sleep(ms: number): Promise<void>
   nowMs(): number
+  /** Step AM. Called after MCP flipped a carrier's status, so assignments waiting on setup can advance. */
+  carrierStatusChanged?(carrierId: string, status: string): Promise<void>
 }
 
 export interface McpPullOptions {
@@ -183,12 +186,22 @@ export async function applyProfileToCarrier(
   let changes: ReturnType<typeof mapProfileToCarrier>['changes'] = {}
   for (let attempt = 0; attempt < 2 && current; attempt++) {
     const mapped = mapProfileToCarrier(current, profile)
+    // Step AM. MCP drives Carrier.status: packet complete + monitored => ACTIVE, a lapse => INACTIVE.
+    const statusPatch = mcpCarrierStatusPatch({ ...current, ...mapped.patch }, ctx.now)
+    if (statusPatch.status !== undefined) {
+      mapped.changes.status = { before: current.status ?? null, after: statusPatch.status, kind: 'OVERWROTE' }
+    }
+    mapped.patch = { ...mapped.patch, ...statusPatch }
     changes = mapped.changes
     const stamp = current.mcpSyncRunId === ctx.runId ? {} : { mcpSyncedAt: ctx.now, mcpSyncRunId: ctx.runId }
-    const patch = { ...mapped.patch, ...stamp }
+    const patch: Row = { ...mapped.patch, ...stamp }
     if (Object.keys(patch).length === 0) { outcome = 'UNCHANGED'; break }
     const written = await deps.writeCarrier(current, patch)
-    if (written === 'WRITTEN') { outcome = Object.keys(mapped.patch).length > 0 ? 'UPDATED' : 'UNCHANGED'; break }
+    if (written === 'WRITTEN') {
+      outcome = Object.keys(mapped.patch).length > 0 ? 'UPDATED' : 'UNCHANGED'
+      if (typeof patch.status === 'string') await deps.carrierStatusChanged?.(String(carrier.id), patch.status)
+      break
+    }
     outcome = 'CONFLICT'
     current = await deps.reloadCarrier(String(carrier.id))
   }
@@ -210,17 +223,18 @@ export async function applyProfileToCarrier(
 
 function newCarrierRow(deps: McpPullDeps, profile: McpProfile, runId: string, now: string): Row {
   const { patch } = mapProfileToCarrier({}, profile)
-  return {
+  const row: Row = {
     id: deps.newId(), __typename: 'Carrier',
     ...patch,
     name: profile.legalName ?? `MC ${profile.carrier.mcNumber || profile.carrier.dotNumber}`,
     normalizedName: carrierKey(profile.legalName ?? ''),
     ...(profile.carrier.mcNumber ? { mcNumber: profile.carrier.mcNumber } : {}),
-    // Compliance is MCP's to say; activation is a person's. PENDING cannot be booked until someone activates it.
+    // Step AM. PENDING until MCP says the packet is complete and the carrier is monitored; then (and only then) ACTIVE.
     status: 'PENDING', version: 1,
     mcpSyncedAt: now, mcpSyncRunId: runId,
     createdBy: MCP_PULL_ACTOR, updatedBy: MCP_PULL_ACTOR, createdAt: now, updatedAt: now,
   }
+  return { ...row, ...mcpCarrierStatusPatch(row, now) }
 }
 
 // ── A slice of the backfill ───────────────────────────────────────────────────
@@ -395,4 +409,33 @@ export async function pullOneCarrier(
   const outcome = await applyProfileToCarrier(deps, carrier, profile, { runId, matchedBy: 'MC', now })
   if (outcome === 'CONFLICT') throw new Error('The carrier changed while it was being synced; try again.')
   return 'SYNCED'
+}
+
+export interface AddCarrierResult {
+  result: 'CREATED' | 'EXISTS' | 'NO_MCP_RECORD' | 'NO_NAME'
+  carrierId?: string
+  matchedBy?: MatchedBy
+}
+
+/**
+ * "Add to carriers" from the Find & Invite page: fetch the full MCP profile and, when no
+ * Carrier row matches it (MC, then DOT, then an exact name), create one pre-filled from MCP
+ * through the same row + contacts + payment + `MCP_CREATE` audit the backfill uses. A row that
+ * already exists is left exactly as it is: the caller shows it, it does not rewrite it.
+ */
+export async function addCarrierFromMcp(
+  deps: McpPullDeps,
+  ref: { mcNumber?: string; dotNumber?: string },
+  runId: string,
+): Promise<AddCarrierResult> {
+  const profile = await deps.fetchProfile(ref)
+  if (!profile) return { result: 'NO_MCP_RECORD' }
+  const index = buildCarrierIndex(await deps.loadCarriers())
+  const match = matchCarrier(index, profile)
+  if (match) return { result: 'EXISTS', carrierId: String(match.rows[0]!.id), matchedBy: match.by }
+  if (!profile.legalName) return { result: 'NO_NAME' }
+  const counts = emptyCounts()
+  const touched = new Set<string>()
+  await ingestProfile(deps, index, profile, counts, [], { runId, now: new Date(deps.nowMs()).toISOString(), createUnmatched: true }, touched)
+  return { result: 'CREATED', carrierId: [...touched][0] }
 }

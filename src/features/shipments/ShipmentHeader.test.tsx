@@ -60,4 +60,19 @@ describe('the shipment header', () => {
     expect(screen.queryByText('VOIDED')).toBeNull()
     expect(screen.queryByTestId('voided-note')).toBeNull()
   })
+
+  it('shows the carrier-assignment rung beside the status while the ladder is climbing (Step AM)', () => {
+    mountWith(shipment({ status: 'BOOKED', carrierAssignmentStatus: 'RATE_CON_SENT' }))
+    expect(screen.getByTestId('assignment-chip').textContent).toBe('Rate con sent')
+  })
+
+  it('leaves the status alone once driver info is in and the shipment is moving: no second chip', () => {
+    mountWith(shipment({ status: 'IN_TRANSIT', carrierAssignmentStatus: 'DRIVER_INFO_ENTERED' }))
+    expect(screen.queryByTestId('assignment-chip')).toBeNull()
+  })
+
+  it('shows no chip for a shipment nobody is assigned to', () => {
+    mountWith(shipment({ status: 'OPEN' }))
+    expect(screen.queryByTestId('assignment-chip')).toBeNull()
+  })
 })

@@ -16,7 +16,7 @@
  * linked to the id that came back. A failed link leaves the quote saved.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { QuoteDetail } from './QuoteDetail'
@@ -46,6 +46,15 @@ vi.mock('@/lib/apiClient', () => ({
 // The panel and the dialogs read their own data; here they would only drag the lane
 // statistics and the shipment Lambda into a test about which customer is picked.
 vi.mock('./components/LaneHistoryPanel', () => ({ LaneHistoryPanel: () => null }))
+vi.mock('./components/PushToDatCard', () => ({
+  PushToDatCard: (p: { quoteId: string; disabled?: boolean }) => <div data-testid="push-dat-mock" data-quote={p.quoteId} data-disabled={String(!!p.disabled)} />,
+}))
+// Echoes what the page hands the panel: the panel's own sections are tested in RateIntelligencePanel.test.
+vi.mock('./components/RateIntelligencePanel', () => ({
+  RateIntelligencePanel: (p: { lane: { originCity?: string; destinationCity?: string } | null; equipmentType: string | null; excludeQuoteId: string | null }) => (
+    <div data-testid="rate-intel-mock" data-lane={p.lane ? `${p.lane.originCity}>${p.lane.destinationCity}` : ''} data-equipment={p.equipmentType ?? ''} data-exclude={p.excludeQuoteId ?? ''} />
+  ),
+}))
 vi.mock('./components/ConvertQuoteDialog', () => ({ ConvertQuoteDialog: () => null }))
 vi.mock('./components/CounterDialog', () => ({ CounterDialog: () => null }))
 vi.mock('./components/DuplicateQuoteDialog', () => ({ DuplicateQuoteDialog: () => null }))
@@ -148,6 +157,34 @@ function saved(id: string): { quote: QuoteRecord; pricing: QuotePricingResult } 
 }
 
 beforeEach(() => vi.clearAllMocks())
+
+describe('Rate intelligence on the quote page', () => {
+  it('is shown for a saved quote with its own lane and equipment, excluding the quote itself', () => {
+    setup('/tms/rates/Q000007', '/tms/rates/:id', quote({
+      id: 'Q000007',
+      equipmentType: 'VAN',
+      stops: [
+        { id: 's1', type: 'pickup', city: 'Chicago, IL', address: { city: 'Chicago', state: 'IL', zip: '60601' }, appt: '', driverId: null, sequence: 0 },
+        { id: 's2', type: 'delivery', city: 'Dallas, TX', address: { city: 'Dallas', state: 'TX', zip: '75201' }, appt: '', driverId: null, sequence: 1 },
+      ] as unknown as QuoteRecord['stops'],
+    }))
+    const panel = screen.getByTestId('rate-intel-mock')
+    expect(panel).toHaveAttribute('data-lane', 'Chicago>Dallas')
+    expect(panel).toHaveAttribute('data-equipment', 'VAN')
+    expect(panel).toHaveAttribute('data-exclude', 'Q000007')
+  })
+
+  it('offers Push to DAT on an open quote, switched off once it is closed or a shipment', () => {
+    setup('/tms/rates/Q000008', '/tms/rates/:id', quote({ id: 'Q000008', status: 'QUOTED' }))
+    expect(screen.getByTestId('push-dat-mock')).toHaveAttribute('data-disabled', 'false')
+    cleanup()
+    setup('/tms/rates/Q000009', '/tms/rates/:id', quote({ id: 'Q000009', status: 'LOST' }))
+    expect(screen.getByTestId('push-dat-mock')).toHaveAttribute('data-disabled', 'true')
+    cleanup()
+    setup('/tms/rates/Q000010', '/tms/rates/:id', quote({ id: 'Q000010', status: 'QUOTED', shipmentId: 'S1' }))
+    expect(screen.getByTestId('push-dat-mock')).toHaveAttribute('data-disabled', 'true')
+  })
+})
 
 describe('the quote editor', () => {
   it('opens a new quote on the customer the link named', async () => {

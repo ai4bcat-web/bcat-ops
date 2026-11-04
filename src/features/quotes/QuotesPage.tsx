@@ -544,9 +544,6 @@ export function QuotesPage() {
       <TmsListPage<QuoteRecord>
         title="Quotes"
         primaryAction={{ label: 'Quote', onClick: () => navigate('/tms/rates/new') }}
-        actions={
-          <Link className="tms-btn tms-btn-secondary" to="/tms/rates/lanes">Lane rates</Link>
-        }
         search={{ value: query, onChange: setQuery, placeholder: 'Search quotes, customers, lanes' }}
         onRefresh={() => void refreshAll()}
         filterChips={chips}

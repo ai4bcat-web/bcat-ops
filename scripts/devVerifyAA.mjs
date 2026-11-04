@@ -319,9 +319,9 @@ async function sidebarGate(b, ctx, theme) {
     await lit('/tms/shipments?list=all', 'All')
     const all = await b.evaluate(`[...document.querySelectorAll('.tms-nav-child.tms-active .tms-nav-child-label')].map((n) => n.textContent.trim())`)
     if (all.includes('Active')) fail('Active and All are both lit on ?list=all')
-    await lit('/tms/rates/lanes', 'Lane rates')
+    await lit('/tms/rates/spot', 'Spot inbox')
     const q = await b.evaluate(`[...document.querySelectorAll('.tms-nav-child.tms-active .tms-nav-child-label')].map((n) => n.textContent.trim())`)
-    if (q.includes('Quotes')) fail('Quotes child is lit on /tms/rates/lanes')
+    if (q.includes('Quotes')) fail('Quotes child is lit on /tms/rates/spot')
     await lit('/tms/vendors', 'Accounting')
     await lit('/tms/vendors', 'Vendors')
     await lit('/tms/invoicing/payable', 'Accounts Payable')
@@ -329,7 +329,7 @@ async function sidebarGate(b, ctx, theme) {
     if (ar.includes('Accounts Receivable')) fail('Accounts Receivable is lit on /tms/invoicing/payable')
     await lit('/compliance', 'Compliance')
     await lit('/compliance', 'Settings')
-    return 'Active/All, Quotes/Lane rates, AR/AP, Accounting parent, Settings › Compliance light exactly their own rows'
+    return 'Active/All, Quotes/Spot inbox, AR/AP, Accounting parent, Settings › Compliance light exactly their own rows'
   })
   if (theme !== 'light') return
   await step('AA01-collapsed-rail', async () => {

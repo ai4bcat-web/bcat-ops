@@ -13,6 +13,7 @@ import { provisionTruckCosts, applyTruckCosts, readTruckCosts, hasAnyTruckCost, 
 import { getUnitPremiumCents, setUnitPremiumCurrentPeriod } from '@/lib/insuranceClient'
 import { useExpenseData } from '@/hooks/useExpenseData'
 import { holdingArea } from '@/lib/truckInactive'
+import { activeUnits, driversHoldingTrailer, fleetCounts, reactivatePatch, unitsInTab, type FleetTab } from '@/lib/fleetActive'
 import { todayChicago } from '@/lib/recurringRevision'
 import { MarkInactiveDialog, HoldingArea } from './TruckParking'
 import { toast } from 'sonner'
@@ -637,9 +638,10 @@ interface DetailPanelProps {
   tasks: MaintenanceTask[]
   invoices: MaintenanceInvoice[]
   driverName?: string
+  onPark: (e: Equipment) => void
 }
 
-function DetailPanel({ equip, dates, tasks, invoices, driverName }: DetailPanelProps) {
+function DetailPanel({ equip, dates, tasks, invoices, driverName, onPark }: DetailPanelProps) {
   const addMaintenanceTask    = useAppStore((s) => s.addMaintenanceTask)
   const updateMaintenanceTask = useAppStore((s) => s.updateMaintenanceTask)
   const deleteMaintenanceTask = useAppStore((s) => s.deleteMaintenanceTask)
@@ -692,6 +694,16 @@ function DetailPanel({ equip, dates, tasks, invoices, driverName }: DetailPanelP
       {equip.notes && (
         <p className="text-sm text-muted-foreground bg-card rounded-lg px-4 py-3 border border-border">{equip.notes}</p>
       )}
+
+      <div className="flex items-center gap-3 text-sm">
+        {!equip.active && (
+          <span className="text-muted-foreground">Inactive{equip.inactiveSince ? ` from ${equip.inactiveSince}` : ''}</span>
+        )}
+        <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => onPark(equip)}>
+          {equip.active ? <PauseCircle className="size-3" /> : <PlayCircle className="size-3" />}
+          {equip.active ? 'Mark inactive' : 'Reactivate'}
+        </Button>
+      </div>
 
       <Separator />
 
@@ -984,16 +996,14 @@ function EquipRow({ equip, dates, tasks, invoices, driverName, colSpan, ownershi
                 <TooltipContent>Compliance &amp; onboarding</TooltipContent>
               </Tooltip>
             )}
-            {isTruck && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => onPark(equip)}>
-                    {equip.active ? <PauseCircle className="size-3.5" /> : <PlayCircle className="size-3.5" />}
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>{equip.active ? 'Mark inactive' : 'Reactivate'}</TooltipContent>
-              </Tooltip>
-            )}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="sm" className="h-7 w-7 p-0" aria-label={equip.active ? 'Mark inactive' : 'Reactivate'} onClick={() => onPark(equip)}>
+                  {equip.active ? <PauseCircle className="size-3.5" /> : <PlayCircle className="size-3.5" />}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{equip.active ? 'Mark inactive' : 'Reactivate'}</TooltipContent>
+            </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => onEdit(equip)}>
@@ -1020,7 +1030,7 @@ function EquipRow({ equip, dates, tasks, invoices, driverName, colSpan, ownershi
       {expanded && (
         <tr>
           <td colSpan={colSpan} style={{ padding: 0, borderBottom: '1px solid var(--tms-border)', background: 'var(--tms-bg)' }}>
-            <DetailPanel equip={equip} dates={dates} tasks={tasks} invoices={invoices} driverName={driverName} />
+            <DetailPanel equip={equip} dates={dates} tasks={tasks} invoices={invoices} driverName={driverName} onPark={onPark} />
           </td>
         </tr>
       )}
@@ -1042,11 +1052,12 @@ export function TrucksPage() {
   const drivers             = useAppStore((s) => s.drivers)
   const addEquipment        = useAppStore((s) => s.addEquipment)
   const updateEquipment     = useAppStore((s) => s.updateEquipment)
+  const updateDriver        = useAppStore((s) => s.updateDriver)
   const deleteEquipment     = useAppStore((s) => s.deleteEquipment)
   // Expense data — used to prefill + upsert a truck's recurring operating costs.
   const expenseData         = useExpenseData()
 
-  const [typeFilter, setTypeFilter]       = useState<'all' | 'truck' | 'trailer'>('all')
+  const [typeFilter, setTypeFilter]       = useState<FleetTab>('all')
   const [search, setSearch]               = useState('')
   const [showForm, setShowForm]           = useState<Equipment | 'new' | null>(null)
   const { byId: truckConfigs, upsert: upsertTruckConfig } = useTruckConfigs()
@@ -1087,8 +1098,7 @@ export function TrucksPage() {
     return states.reduce((w, s) => Math.max(w, SEVERITY_ORDER[s]), 0)
   }
 
-  const filtered = equipment.filter((e) => {
-    if (typeFilter !== 'all' && e.type !== typeFilter) return false
+  const filtered = unitsInTab(equipment, typeFilter).filter((e) => {
     if (noPhoneOnly && !noPhoneIds.has(e.id)) return false
     if (search) {
       const q = search.toLowerCase()
@@ -1122,9 +1132,8 @@ export function TrucksPage() {
     return cmp * dir
   })
 
-  const trucks        = equipment.filter((e) => e.type === 'truck')
-  const trailers      = equipment.filter((e) => e.type === 'trailer')
-  const alertCount    = equipment.filter((e) => {
+  const counts        = fleetCounts(equipment)
+  const alertCount    = activeUnits(equipment).filter((e) => {
     const d = complianceDatesOf(e)
     // IFTA and IRP are a truck requirement — trailers are exempt, the same rule the
     // Asset Documents catalog applies, so they must not raise an alert here either.
@@ -1137,17 +1146,18 @@ export function TrucksPage() {
   const openTaskCount = maintenanceTasks.filter((t) => t.status === 'upcoming').length
 
   const FLEET_KPIS: TmsStat[] = [
-    { label: 'Total Units',       value: String(equipment.length), icon: Truck },
-    { label: 'Trucks',            value: String(trucks.length),    icon: Truck },
-    { label: 'Trailers',          value: String(trailers.length),  icon: Container },
+    { label: 'Total Units',       value: String(counts.total),    icon: Truck },
+    { label: 'Trucks',            value: String(counts.trucks),   icon: Truck },
+    { label: 'Trailers',          value: String(counts.trailers), icon: Container },
     { label: 'Compliance Alerts', value: String(alertCount),       icon: AlertTriangle, tone: alertCount > 0 ? 'bad' : 'default', onClick: canTruckDocs ? () => navigate('/truck-docs') : undefined, ariaLabel: canTruckDocs ? 'View compliance alerts' : undefined },
     { label: 'Open Tasks',        value: String(openTaskCount),    icon: Wrench, tone: openTaskCount > 0 ? 'warn' : 'default', onClick: canMaintenance ? () => navigate('/maintenance') : undefined, ariaLabel: canMaintenance ? 'View open tasks' : undefined },
   ]
 
   const TABS = [
-    { key: 'all' as const,     label: 'All' },
-    { key: 'truck' as const,   label: 'Trucks' },
-    { key: 'trailer' as const, label: 'Trailers' },
+    { key: 'all' as const,      label: 'All' },
+    { key: 'truck' as const,    label: 'Trucks' },
+    { key: 'trailer' as const,  label: 'Trailers' },
+    { key: 'inactive' as const, label: counts.inactive > 0 ? `Inactive (${counts.inactive})` : 'Inactive' },
   ]
 
   function handleSave(data: Omit<Equipment, 'id' | 'createdAt' | 'updatedAt'>, costs?: TruckCostInputs) {
@@ -1194,8 +1204,8 @@ export function TrucksPage() {
     if (!e.active) {
       // Back on the road: insurance counts again from today's totals, and any plates/ELD
       // still held on it are simply its own costs again.
-      updateEquipment(e.id, { active: true, inactiveSince: null })
-      toast.success(`Unit ${e.unitNumber} is active again`)
+      updateEquipment(e.id, reactivatePatch)
+      toast.success(`${e.type === 'trailer' ? 'Trailer' : 'Unit'} ${e.unitNumber} is active again`)
       return
     }
     setParkPremium(0)
@@ -1203,7 +1213,7 @@ export function TrucksPage() {
     getUnitPremiumCents(e.id).then((c) => setParkPremium(c / 100)).catch(() => {})
   }
   const held = holdingArea(equipment, todayChicago(), expenseData.recurring, expenseData.allocations, expenseData.expenseTypes)
-  const activeTrucks = equipment.filter((e) => e.type === 'truck' && e.active)
+  const activeTrucks = activeUnits(equipment, 'truck')
     .sort((a, b) => a.unitNumber.localeCompare(b.unitNumber, undefined, { numeric: true }))
 
   function handleDelete(id: string) {
@@ -1290,7 +1300,7 @@ export function TrucksPage() {
           {filtered.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 gap-2 text-muted-foreground">
               <Truck className="size-8 opacity-20" />
-              <p className="text-sm">No equipment found.</p>
+              <p className="text-sm">{typeFilter === 'inactive' ? 'No inactive equipment.' : 'No equipment found.'}</p>
             </div>
           ) : isMobile ? (
             <div>
@@ -1399,6 +1409,8 @@ export function TrucksPage() {
           truck={parkTruck}
           insuranceAnnual={parkPremium}
           expenses={{ recurring: expenseData.recurring, allocations: expenseData.allocations, expenseTypes: expenseData.expenseTypes }}
+          heldBy={parkTruck.type === 'trailer' ? driversHoldingTrailer(parkTruck.id, drivers) : []}
+          onUnassign={(driverId) => { void updateDriver(driverId, { assignedTrailerId: null }) }}
           onDone={(patch) => { updateEquipment(parkTruck.id, patch); expenseData.refresh() }}
           onClose={() => setParkTruck(null)}
         />

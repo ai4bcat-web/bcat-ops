@@ -1072,7 +1072,7 @@ const MCP_PULL_STATE_ID = `pull:${MCP_PROVIDER}`
 let lambdaClient: LambdaClient | null = null
 
 /** Invoke mcp-sync. `async` returns once the invocation is accepted; otherwise the reply is parsed. */
-async function invokeMcpSync(payload: Record<string, unknown>, mode: 'async' | 'sync'): Promise<Record<string, unknown>> {
+export async function invokeMcpSync(payload: Record<string, unknown>, mode: 'async' | 'sync'): Promise<Record<string, unknown>> {
   const functionName = process.env.MCP_SYNC_FUNCTION_NAME ?? ''
   if (!functionName) throw new Error('MyCarrierPackets sync is not wired on this stack (MCP_SYNC_FUNCTION_NAME).')
   lambdaClient ??= new LambdaClient({})
@@ -1093,6 +1093,19 @@ async function liveRefusal(deps: IntegrationDeps): Promise<string | null> {
 
 function liveCredentialsOf(creds: Record<string, string | null>): Record<string, string> {
   return Object.fromEntries(Object.entries(creds).map(([k, v]) => [k, v ?? '']))
+}
+
+/**
+ * Find & Invite: LIVE with the decrypted integration credentials, or the reason it is not
+ * (the same gate the sync Lambda applies). The credentials never leave this process.
+ */
+export async function mcpFindGate(
+  deps: IntegrationDeps,
+): Promise<{ live: true; credentials: Record<string, string> } | { live: false; reason: string }> {
+  const descriptor = descriptorOrThrow(MCP_PROVIDER)
+  const credentials = liveCredentialsOf(await credentialsFor(descriptor))
+  const refusal = mcpSyncRefusal(await getRow(deps, descriptor.key), credentials)
+  return refusal ? { live: false, reason: refusal } : { live: true, credentials }
 }
 
 /**

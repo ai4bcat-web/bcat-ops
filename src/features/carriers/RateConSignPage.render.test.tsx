@@ -5,17 +5,19 @@ import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import type { RateConSignState } from '@/lib/rateConSignClient'
 
 const getRateCon = vi.hoisted(() => vi.fn())
+const submitRateCon = vi.hoisted(() => vi.fn())
+const stampSignature = vi.hoisted(() => vi.fn())
 
 vi.mock('@/lib/rateConSignClient', () => ({
   RATE_CON_SIGN_API_URL: 'https://rate-con.example',
   rateConSignAvailable: true,
   RateConSignError: class RateConSignError extends Error {},
   getRateCon,
-  submitRateCon: vi.fn(),
+  submitRateCon,
   declineRateCon: vi.fn(),
 }))
 // The real module pulls in jspdf/pdf-lib, which this page only needs at signing time.
-vi.mock('@/lib/carrierRateCon', () => ({ stampSignature: vi.fn() }))
+vi.mock('@/lib/carrierRateCon', () => ({ stampSignature }))
 
 const { RateConSignPage } = await import('./RateConSignPage')
 
@@ -78,5 +80,48 @@ describe('RateConSignPage', () => {
     expect(screen.queryByLabelText('Driver name')).toBeNull()
     expect(screen.queryByLabelText('Your full name')).toBeNull()
     expect(screen.queryByRole('button', { name: /Sign rate confirmation/ })).toBeNull()
+  })
+
+  it('asks the carrier for all four driver fields (Step AM) under one Driver and truck heading', async () => {
+    getRateCon.mockResolvedValue({ ...SENT, requiredFields: ['DRIVER_NAME', 'DRIVER_PHONE', 'TRUCK_NUMBER', 'TRAILER_NUMBER'] })
+    renderPage()
+    await waitFor(() => expect(screen.getByLabelText('Trailer number')).toBeTruthy())
+    expect(screen.getByText('Driver and truck')).toBeTruthy()
+    expect(screen.queryByText('Trip details')).toBeNull()
+    expect(signButton().disabled).toBe(true)
+  })
+
+  it('asks only for what the rep has not entered, and shows what is already on file', async () => {
+    getRateCon.mockResolvedValue({
+      ...SENT,
+      requiredFields: ['TRUCK_NUMBER', 'TRAILER_NUMBER'],
+      driverInfo: { driverName: 'Dan Ruiz', driverPhone: '555-0101', truckNumber: null, trailerNumber: null },
+    })
+    renderPage()
+    await waitFor(() => expect(screen.getByLabelText('Truck number')).toBeTruthy())
+    expect(screen.queryByLabelText('Driver name')).toBeNull()
+    expect(screen.getByTestId('driver-on-file').textContent).toMatch(/Driver name Dan Ruiz.*Driver phone 555-0101/)
+  })
+
+  it('signs and enters the driver in one submit: the four fields go with the signature', async () => {
+    getRateCon.mockResolvedValue({ ...SENT, requiredFields: ['DRIVER_NAME', 'DRIVER_PHONE', 'TRUCK_NUMBER', 'TRAILER_NUMBER'] })
+    stampSignature.mockResolvedValue(new Uint8Array([1, 2, 3]))
+    submitRateCon.mockResolvedValue({ ok: true })
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, arrayBuffer: async () => new ArrayBuffer(3) })))
+    renderPage()
+    await waitFor(() => expect(screen.getByLabelText('Trailer number')).toBeTruthy())
+    fireEvent.change(screen.getByLabelText('Driver name'), { target: { value: ' Dan Ruiz ' } })
+    fireEvent.change(screen.getByLabelText('Driver phone'), { target: { value: '555-0101' } })
+    fireEvent.change(screen.getByLabelText('Truck number'), { target: { value: '417' } })
+    fireEvent.change(screen.getByLabelText('Trailer number'), { target: { value: 'T-88' } })
+    fireEvent.change(screen.getByLabelText('Your full name'), { target: { value: 'Maria Lopez' } })
+    fireEvent.click(screen.getByRole('checkbox'))
+    fireEvent.click(signButton())
+
+    await waitFor(() => expect(submitRateCon).toHaveBeenCalledTimes(1))
+    expect(submitRateCon.mock.calls[0]![0].fields).toEqual({
+      DRIVER_NAME: 'Dan Ruiz', DRIVER_PHONE: '555-0101', TRUCK_NUMBER: '417', TRAILER_NUMBER: 'T-88',
+    })
+    vi.unstubAllGlobals()
   })
 })

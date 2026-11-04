@@ -162,7 +162,7 @@ describe('idempotency and retries', () => {
       throw new NeedsReconnect('revoked')
     }
     await pollAll(rig.deps)
-    expect(rig.store.connections.get(REP_ID)!.status).toBe('NEEDS_RECONNECT')
+    expect(rig.store.connections.get(REP_ID)).toMatchObject({ status: 'NEEDS_RECONNECT', lastError: expect.stringContaining('7 days') })
     const again = await pollAll(rig.deps)
     expect(again.polled).toBe(0)
   })

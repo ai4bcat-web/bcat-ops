@@ -285,17 +285,24 @@ const oauthFinish: Handler = async (deps, caller, input) => {
   if (!client) throw new Error('NOT_CONFIGURED: Gmail sign-in is not set up yet.')
   const exchange = await deps.oauth.exchangeCode({ clientId: client.clientId, clientSecret: client.clientSecret, code, redirectUri })
   if (!exchange.refreshToken || !deps.oauth.hasRequiredScopes(exchange.scope)) {
-    throw new Error('Google did not grant read and compose access; connect again and tick every box.')
+    throw new Error('Google did not grant read-only Gmail access or a refresh token; connect again and tick the Gmail box.')
   }
   if (!exchange.idToken) throw new Error('Google returned no identity for this sign-in.')
   const identity = deps.oauth.parseIdToken(exchange.idToken)
-  const profile = await deps.store.getUserProfile(caller.userId)
-  const expectedEmail = String(profile?.email ?? caller.email).toLowerCase()
-  if (!identity.emailVerified || identity.email !== expectedEmail) {
-    throw new Error('You can only connect your own mailbox. Sign in with the Google account that matches your BCAT e-mail.')
-  }
+  // Workspace mode (a domain is configured): the rep must sign in with their own BCAT
+  // address on that domain. Consumer mode (domain blank = any account, e.g. a shared
+  // ai4bcat@gmail.com in an External/Testing consent screen): the verified account the rep
+  // just signed into is the mailbox; the identity must still be verified by Google.
   const allowed = await allowedDomainOf(deps)
-  if (allowed && identity.hd !== allowed) throw new Error(`Only ${allowed} accounts can be connected.`)
+  if (!identity.emailVerified) throw new Error('Google has not verified this account\'s e-mail address.')
+  if (allowed) {
+    const profile = await deps.store.getUserProfile(caller.userId)
+    const expectedEmail = String(profile?.email ?? caller.email).toLowerCase()
+    if (identity.email !== expectedEmail) {
+      throw new Error('You can only connect your own mailbox. Sign in with the Google account that matches your BCAT e-mail.')
+    }
+    if (identity.hd !== allowed) throw new Error(`Only ${allowed} accounts can be connected.`)
+  }
 
   const at = deps.now().toISOString()
   await deps.oauth.putToken(caller.userId, {

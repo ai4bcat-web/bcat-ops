@@ -36,7 +36,9 @@ export function useCurrentInsurance() {
 
   const inputs = useMemo(() => {
     const insItems: InsItem[] = items.map((i) => ({ kind: i.kind, equipmentId: i.equipmentId, annualCents: i.annualCents }))
-    const trucks: TruckLite[] = equipment.filter((e) => e.type === 'truck').map((e) => ({ id: e.id, active: e.active !== false, inactiveSince: e.inactiveSince ?? null }))
+    const lite = (type: 'truck' | 'trailer'): TruckLite[] => equipment.filter((e) => e.type === type).map((e) => ({ id: e.id, active: e.active !== false, inactiveSince: e.inactiveSince ?? null }))
+    const trucks = lite('truck')
+    const trailers = lite('trailer')
     // Drivers on the BOX_TRUCK pay group run box trucks — they share the trailer split
     // but their WC lands on their assigned truck (or spreads if unassigned) like any driver's.
     const boxTruckDriverIds = new Set(paySettings.filter((s) => s.payGroup === 'BOX_TRUCK' && s.active !== false).map((s) => s.driverId))
@@ -44,19 +46,20 @@ export function useCurrentInsurance() {
     const drv: DriverLite[] = drivers.map((d) => ({
       id: d.id, assignedTruckId: d.assignedTruckId, active: d.active && d.type !== 'broker', boxTruck: boxTruckDriverIds.has(d.id),
     }))
-    return { insItems, trucks, drv }
+    return { insItems, trucks, trailers, drv }
   }, [items, equipment, drivers, paySettings])
 
   /** Today's picture: trucks parked as of today carry no insurance. */
   const allocation = useMemo(() => {
     const today = todayChicago()
     const live = inputs.trucks.map((t) => ({ id: t.id, active: truckActiveOn(t, today) }))
-    return computeInsuranceAllocation(inputs.insItems, live, inputs.drv)
+    const liveTrailers = inputs.trailers.map((t) => ({ id: t.id, active: truckActiveOn(t, today) }))
+    return computeInsuranceAllocation(inputs.insItems, live, inputs.drv, liveTrailers)
   }, [inputs])
 
-  /** Insurance $ per truck over a range, stopping on each truck's inactive date. */
+  /** Insurance $ per truck over a range, stopping on each truck's and trailer's inactive date. */
   const rangeByTruck = useCallback(
-    (range: { start: string; end: string }) => insuranceRangeByTruckDated(inputs.insItems, inputs.trucks, inputs.drv, range),
+    (range: { start: string; end: string }) => insuranceRangeByTruckDated(inputs.insItems, inputs.trucks, inputs.drv, range, inputs.trailers),
     [inputs],
   )
 

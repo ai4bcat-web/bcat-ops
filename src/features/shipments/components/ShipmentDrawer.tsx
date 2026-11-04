@@ -17,6 +17,7 @@ import {
   type TmsProfileColumn,
 } from '@/features/tms/kit'
 import { LegacyBadge } from '@/features/tms/brokerage/company/components/LegacyBadge'
+import { CarrierAssignmentChip } from './CarrierAssignmentChip'
 import { ShipmentDetail } from './ShipmentDetail'
 import { type DetailTabKey } from './detailTabs'
 import { ShipmentRowActions } from './StatusActions'
@@ -74,6 +75,7 @@ export function ShipmentDrawer({ shipmentId, onClose, onChanged, ...options }: S
       headerExtra={(
         <>
           {shipment && <TmsBadge tone={statusTone(shipment.status)}>{SHIPMENT_STATUS_LABELS[shipment.status]}</TmsBadge>}
+          {shipment && <CarrierAssignmentChip ladder={shipment.carrierAssignmentStatus} shipmentStatus={shipment.status} ladderOnly />}
           {shipment?.voidedAt && <TmsBadge tone="red">VOIDED</TmsBadge>}
           {shipment && <LegacyBadge legacyImported={shipment.legacyImported} importRunId={shipment.importRunId} importedAt={shipment.createdAt} />}
           {shipmentId && (
@@ -126,6 +128,7 @@ export function ShipmentPageBody({ shipmentId, options, initialTab }: {
         chips={(
           <>
             <TmsBadge tone={statusTone(shipment.status)}>{SHIPMENT_STATUS_LABELS[shipment.status]}</TmsBadge>
+            <CarrierAssignmentChip ladder={shipment.carrierAssignmentStatus} shipmentStatus={shipment.status} ladderOnly />
             {shipment.voidedAt && <TmsBadge tone="red">VOIDED</TmsBadge>}
             <LegacyBadge legacyImported={shipment.legacyImported} importRunId={shipment.importRunId} importedAt={shipment.createdAt} />
           </>

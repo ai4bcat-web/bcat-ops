@@ -1,6 +1,8 @@
 import { lazy, Suspense } from 'react'
-import { BrowserRouter, Routes, Route, Navigate, useLocation, useParams } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useParams } from 'react-router-dom'
 import { UpdateBanner } from '@/components/UpdateBanner'
+import { ParamRedirect } from '@/components/ParamRedirect'
+import { RETIRED_ROUTES } from '@/lib/retiredRoutes'
 import { DriverAutoUpdate } from '@/components/DriverAutoUpdate'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { AuthProvider } from '@/context/AuthContext'
@@ -24,6 +26,7 @@ import { ApptsPage } from '@/features/appts/ApptsPage'
 import { CustomersPage, LocationsPage } from '@/features/directory/DirectoryPages'
 import { CarriersPage } from '@/features/carriers/CarriersPage'
 import { RateConSignPage } from '@/features/carriers/RateConSignPage'
+import { FindInvitePage } from '@/features/carriers/find/FindInvitePage'
 import { ShipmentsBoard } from '@/features/shipments/ShipmentsBoard'
 import { ShipmentPage } from '@/features/shipments/ShipmentPage'
 import CustomerTrackPage from '@/features/tracking/CustomerTrackPage'
@@ -66,7 +69,6 @@ import { CarrierSalesPage } from '@/features/tms/carrierSales/CarrierSalesPage'
 import { SpotInboxPage } from '@/features/spot-quoter/SpotInboxPage'
 import { SpotCallbackPage } from '@/features/spot-quoter/SpotCallbackPage'
 import { FollowUpsPage } from '@/features/directory/FollowUpsPage'
-import { LaneRatesPage } from '@/features/quotes/LaneRatesPage'
 import { QuoteRespondPage } from '@/features/quotes/public/QuoteRespondPage'
 import { FactoringPage } from '@/features/factoring/FactoringPage'
 import { InvoicingPage } from '@/features/ar/InvoicingPage'
@@ -84,21 +86,6 @@ import { DriverRoutes } from '@/features/driver-app/DriverRoutes'
 
 // The Aljex create/edit form is ~150 controls; load it only when someone opens it.
 const ShipmentFormPage = lazy(() => import('@/features/shipments/form/ShipmentFormPage').then((m) => ({ default: m.ShipmentFormPage })))
-
-/**
- * A legacy path redirected to its `/tms/*` home, carrying its route params, query and
- * hash across — a bookmarked `/ar/invoices/INV-12?tab=email` must land on the same
- * invoice, on the same tab.
- */
-function ParamRedirect({ to }: { to: string }) {
-  const params = useParams()
-  const { search, hash } = useLocation()
-  const path = to
-    .split('/')
-    .map((segment) => (segment.startsWith(':') ? params[segment.slice(1)] ?? '' : segment))
-    .join('/')
-  return <Navigate to={`${path}${search}${hash}`} replace />
-}
 
 /** A retired saved-view URL: the all-shipments slug maps to the All list, the rest to Active. */
 function SavedViewRedirect() {
@@ -169,7 +156,6 @@ export default function App() {
                   <Route path="load-review" element={<RequirePage page={['loadReview', 'tms']}><LoadReviewPage /></RequirePage>} />
                   {/* Quotes (path stays /tms/rates): customer quotes and carrier offers, with the lane history behind them. */}
                   <Route path="rates" element={<RequirePage page={['quotes', 'tms']}><QuotesPage /></RequirePage>} />
-                  <Route path="rates/lanes" element={<RequirePage page={['quotes', 'tms']}><LaneRatesPage /></RequirePage>} />
                   {/* Step AB slots, declared before `rates/:id` so a static segment is never read as a quote id. */}
                   <Route path="rates/spot" element={<RequirePage page={['quotes', 'tms']}><SpotInboxPage /></RequirePage>} />
                   <Route path="rates/spot/callback" element={<RequirePage page={['quotes', 'tms']}><SpotCallbackPage /></RequirePage>} />
@@ -181,6 +167,7 @@ export default function App() {
                   <Route path="invoicing/payable" element={<RequirePage page={['carrierPay', 'tms']}><InvoicingPage /></RequirePage>} />
                   <Route path="invoicing/payable/bills/:id" element={<RequirePage page={['carrierPay', 'tms']}><BillDetail /></RequirePage>} />
                   <Route path="carriers" element={<RequirePage page={['carriers', 'tms']}><CarriersPage /></RequirePage>} />
+                  <Route path="carriers/find" element={<RequirePage page={['carriers', 'loads', 'tms']}><FindInvitePage /></RequirePage>} />
                   <Route path="carriers/:id" element={<RequirePage page={['carriers', 'tms']}><CarriersPage /></RequirePage>} />
                   <Route path="factors" element={<RequirePage page={['factoring', 'tms']}><FactoringPage /></RequirePage>} />
                   <Route path="customers" element={<RequirePage page={['customers', 'tms']}><CustomersPage /></RequirePage>} />
@@ -274,7 +261,8 @@ export default function App() {
               <Route path="/quotes" element={<ParamRedirect to="/tms/rates" />} />
               <Route path="/quotes/new" element={<ParamRedirect to="/tms/rates/new" />} />
               <Route path="/quotes/:id" element={<ParamRedirect to="/tms/rates/:id" />} />
-              <Route path="/rates" element={<ParamRedirect to="/tms/rates/lanes" />} />
+              {/* Step AE: retired pages (Quotes › Lane rates, the old /rates) land on Quotes. */}
+              {RETIRED_ROUTES.map((r) => <Route key={r.path} path={r.path} element={<ParamRedirect to={r.to} />} />)}
               <Route path="/commissions" element={<ParamRedirect to="/tms/brokerage/commissions" />} />
               <Route path="/reports" element={<ParamRedirect to="/tms/brokerage/reports" />} />
               {/* legacy redirects */}

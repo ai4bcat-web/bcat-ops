@@ -7,6 +7,7 @@ import { TmsEmptyState } from '@/features/tms/kit/TmsEmptyState'
 import { TmsScrollPage } from '@/features/tms/kit/TmsScrollPage'
 import { TmsStatRow } from '@/features/tms/kit/TmsStatRow'
 import { useAppStore } from '@/store/useAppStore'
+import { fleetCounts } from '@/lib/fleetActive'
 import { useAuth } from '@/hooks/useAuth'
 import { useDriverAvailability } from '@/hooks/useDriverAvailability'
 import { useTruckDocAlerts } from '@/hooks/useTruckDocAlerts'
@@ -118,10 +119,9 @@ export function FleetManagerDashboardPage() {
   const { expired, expiring } = useTruckDocAlerts()
 
   const stats = useMemo(() => {
-    const trucks = equipment.filter((e) => e.type === 'truck').length
-    const trailers = equipment.filter((e) => e.type === 'trailer').length
+    const { total, trucks, trailers } = fleetCounts(equipment)
     const openTasks = maintenanceTasks.filter((t) => t.status === 'upcoming').length
-    return { total: equipment.length, trucks, trailers, openTasks }
+    return { total, trucks, trailers, openTasks }
   }, [equipment, maintenanceTasks])
 
   const docsExpiring = expired + expiring

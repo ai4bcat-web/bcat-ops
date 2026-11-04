@@ -352,13 +352,14 @@ describe('Gmail OAuth connect', () => {
     expect(rig.oauth.tokens.size).toBe(0)
   })
 
+  const WORKSPACE = (r: TestRig) => r.store.integrations.set('GMAIL_REP_OAUTH', { id: 'GMAIL_REP_OAUTH', settings: { allowedDomain: 'zz-bcat.test' } })
   it.each([
-    ['a different Google account', (r: TestRig) => { r.oauth.identity = { email: 'someone@zz-bcat.test', emailVerified: true, hd: 'zz-bcat.test' } }, /your own mailbox/],
-    ['an unverified e-mail', (r: TestRig) => { r.oauth.identity = { email: REP_EMAIL, emailVerified: false, hd: 'zz-bcat.test' } }, /your own mailbox/],
-    ['a missing refresh token', (r: TestRig) => { r.oauth.exchange = { ...r.oauth.exchange, refreshToken: null } }, /read and compose/],
-    ['a missing Gmail scope', (r: TestRig) => { r.oauth.exchange = { ...r.oauth.exchange, scope: 'openid email' } }, /read and compose/],
+    ['a different Google account (Workspace mode)', (r: TestRig) => { WORKSPACE(r); r.oauth.identity = { email: 'someone@zz-bcat.test', emailVerified: true, hd: 'zz-bcat.test' } }, /your own mailbox/],
+    ['an unverified e-mail', (r: TestRig) => { r.oauth.identity = { email: REP_EMAIL, emailVerified: false, hd: 'zz-bcat.test' } }, /not verified/],
+    ['a missing refresh token', (r: TestRig) => { r.oauth.exchange = { ...r.oauth.exchange, refreshToken: null } }, /read-only Gmail access/],
+    ['a missing Gmail scope', (r: TestRig) => { r.oauth.exchange = { ...r.oauth.exchange, scope: 'openid email' } }, /read-only Gmail access/],
     ['a wrong Workspace domain', (r: TestRig) => {
-      r.store.integrations.set('GMAIL_REP_OAUTH', { id: 'GMAIL_REP_OAUTH', settings: { allowedDomain: 'zz-bcat.test' } })
+      WORKSPACE(r)
       r.oauth.identity = { email: REP_EMAIL, emailVerified: true, hd: 'other.test' }
     }, /Only zz-bcat\.test/],
   ])('refuses %s and stores no token', async (_label, tamper, message) => {
@@ -368,6 +369,23 @@ describe('Gmail OAuth connect', () => {
     await expect(finish(rig, state)).rejects.toThrow(message)
     expect(rig.oauth.tokens.size).toBe(0)
     expect(rig.store.connections.get(REP_ID)!.status).toBe('PENDING')
+  })
+
+  it('with no domain configured, a consumer Gmail account (no hd claim) connects, and no hd is sent to Google', async () => {
+    const rig = makeRig()
+    rig.oauth.identity = { email: 'ai4bcat@gmail.com', emailVerified: true, hd: null }
+    const out = (await call(rig, 'SPOT_OAUTH_START', { redirectUri })) as { url: string }
+    expect(out.url).not.toContain('hd=')
+    const done = (await finish(rig, rig.store.connections.get(REP_ID)!.pendingState as string)) as { connection: Record<string, unknown> }
+    expect(done.connection).toMatchObject({ status: 'CONNECTED', googleEmail: 'ai4bcat@gmail.com' })
+    expect(rig.oauth.tokens.get(REP_ID)?.googleEmail).toBe('ai4bcat@gmail.com')
+  })
+
+  it('a configured domain is still sent as hd', async () => {
+    const rig = makeRig()
+    WORKSPACE(rig)
+    const out = (await call(rig, 'SPOT_OAUTH_START', { redirectUri })) as { url: string }
+    expect(out.url).toContain('hd=zz-bcat.test')
   })
 })
 

@@ -92,6 +92,8 @@ import {
   type IntegrationActionName,
   type IntegrationDeps,
 } from './integrations'
+import { MCP_FIND_ACTIONS, runMcpFindAction, type McpFindActionName, type McpFindDeps } from './mcpFind'
+import { parsePoints, routeMiles } from './routeMiles'
 
 const dynamo = new DynamoDBClient({})
 const cognito = new CognitoIdentityProviderClient({})
@@ -182,6 +184,10 @@ type Action =
   | 'ASK_ACADEMY'
   // Step J — the integration framework. Owner/ADMIN only, every one of them.
   | IntegrationActionName
+  // Step AD — Carriers › Find & Invite (MyCarrierPackets lookups, invitation, add to carriers).
+  | McpFindActionName
+  // Step AH — road miles for the shipment form (Distance Matrix, else a labelled estimate).
+  | 'GET_ROUTE_MILES'
 
 interface AppSyncIdentity {
   sub: string
@@ -231,6 +237,10 @@ function getGroups(identity?: AppSyncIdentity | null): string[] {
 
 function isIntegrationAction(action: Action): action is IntegrationActionName {
   return Object.prototype.hasOwnProperty.call(INTEGRATION_ACTIONS, action)
+}
+
+function isMcpFindAction(action: Action): action is McpFindActionName {
+  return Object.prototype.hasOwnProperty.call(MCP_FIND_ACTIONS, action)
 }
 
 async function authorize(action: Action, identity?: AppSyncIdentity | null): Promise<Caller> {
@@ -293,6 +303,15 @@ async function authorize(action: Action, identity?: AppSyncIdentity | null): Pro
     // Credentials for every outside system the brokerage holds: owner/ADMIN only,
     // and not grantable through a page claim (spec §8.1's "Broker Admin only").
     if (!isOwner && !isAdmin) throw new Error(`Forbidden: ${action} requires owner or ADMIN`)
+  } else if (isMcpFindAction(action)) {
+    // Finding and inviting a carrier is carrier-desk work, not credential management: the page
+    // groups that open Carriers or build loads may use it (the credentials stay in this Lambda).
+    const ok = isOwner || isAdmin || groups.includes('page-carriers') || groups.includes('page-loads') || groups.includes(TMS_PAGE_GROUP)
+    if (!ok) throw new Error(`Forbidden: ${action} requires owner, ADMIN, page-carriers, page-loads, or ${TMS_PAGE_GROUP}`)
+  } else if (action === 'GET_ROUTE_MILES') {
+    // Read-only measuring for whoever builds loads; the key never leaves this Lambda.
+    const ok = isOwner || isAdmin || groups.includes('page-loads') || groups.includes(TMS_PAGE_GROUP)
+    if (!ok) throw new Error(`Forbidden: ${action} requires owner, ADMIN, page-loads, or ${TMS_PAGE_GROUP}`)
   } else if (assistantActions[action]) {
     const ok = isOwner || isAdmin || groups.includes(TMS_PAGE_GROUP)
     if (!ok) throw new Error(`Forbidden: ${action} requires owner, ADMIN, or ${TMS_PAGE_GROUP}`)
@@ -3262,6 +3281,11 @@ const integrationDeps: IntegrationDeps = {
     writeAudit(entityType, entityId, auditAction, caller, changes),
 }
 
+const mcpFindDeps: McpFindDeps = {
+  ...integrationDeps,
+  shipmentMessageTableName: process.env.SHIPMENT_MESSAGE_TABLE_NAME ?? '',
+}
+
 // ── Main handler ───────────────────────────────────────────────────────────────
 
 export const handler = async (event: AppSyncEvent): Promise<Record<string, unknown>> => {
@@ -3274,6 +3298,10 @@ export const handler = async (event: AppSyncEvent): Promise<Record<string, unkno
     // the same AWSJSON return as SAVE_OWNERSHIP_RULES already does.
     const result = await runIntegrationAction(action, input, caller, integrationDeps)
     return result as Record<string, unknown>
+  }
+
+  if (isMcpFindAction(action)) {
+    return (await runMcpFindAction(action, input, caller, mcpFindDeps)) as Record<string, unknown>
   }
 
   switch (action) {
@@ -3328,6 +3356,11 @@ export const handler = async (event: AppSyncEvent): Promise<Record<string, unkno
       return deleteColumnTemplate(input, caller)
     case 'ENSURE_OWNERSHIP_SEED':
       return ensureOwnershipSeed(caller)
+    case 'GET_ROUTE_MILES':
+      return { ...(await routeMiles(parsePoints(input.stops), {
+        apiKey: process.env.GOOGLE_MAPS_API_KEY ?? '',
+        fetchJson: async (url) => (await fetch(url)).json(),
+      })) }
     default:
       throw new Error(`Unknown action: ${action}`)
   }

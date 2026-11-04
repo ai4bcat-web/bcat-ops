@@ -113,6 +113,8 @@ const schema = a.schema({
       assignmentType:  a.enum(['OWN_ASSET', 'CARRIER', 'NEED_TO_COVER']),
       activeLoadCarrierId: a.string(),  // the ACTIVE LoadCarrier row, if any
       carrierName:     a.string(),   // snapshot of the active carrier's name
+      // Step AM. Mirror of the active assignment's ladder rung (src/lib/carrierAssignment.ts); read-only to a client.
+      carrierAssignmentStatus: a.string().authorization((allow) => [allow.authenticated().to(['read'])]),
       equipmentType:   a.string(),
       divisionKey:     a.string(),
       trackingProvider: a.enum(['NONE', 'MANUAL', 'LINK', 'DRIVER_APP', 'MOTIVE']),
@@ -1931,6 +1933,8 @@ const schema = a.schema({
       trackerId:       a.string(),   // Step V. UserProfile id of the person tracking it (null = unassigned)
       carrierRepId:    a.string(),   // Step I. rep covering the shipment, mirrored onto every load
       carrierTeamKey:  a.string(),   // Step I. team assigned to cover the shipment
+      // Step AM. Mirror of the active carrier assignment's ladder rung; null when nobody is assigned.
+      carrierAssignmentStatus: a.string(),
       // Ryne, 2026-10-28: Void is the only way a shipment leaves the working
       // set. The row, the PRO, the history and the documents all stay; the
       // number is never reused and the shipment can never be invoiced again.
@@ -2187,6 +2191,11 @@ const schema = a.schema({
       updatedBy:       a.string().required(),
       // The carrier offer this assignment was booked from (Step H).
       quoteId:         a.string(),
+      // ── Assignment ladder (Step AM) ──────────────────────────────────────
+      // ASSIGNED_SETUP_PENDING | ASSIGNED_SETUP_COMPLETE | RATE_CON_SENT | RATE_CON_SIGNED |
+      // DRIVER_INFO_ENTERED (src/lib/carrierAssignment.ts). `assignmentTimes` is a JSON map status -> ISO.
+      assignmentStatus: a.string(),
+      assignmentTimes:  a.json(),
     })
     .secondaryIndexes((index) => [
       index('loadId'),
@@ -3452,6 +3461,10 @@ const schema = a.schema({
       mcpPacketCompletedAt:  a.datetime(),
       mcpSyncedAt:           a.datetime(),
       mcpSyncRunId:          a.string(),
+      // Step AD: the last MyCarrierPackets packet invitation sent from Find & Invite.
+      mcpInvitedAt:          a.datetime(),
+      mcpInvitedTo:          a.string(),
+      mcpInvitedBy:          a.string(),
 
       accountOwnerIds: a.string().array(),   // [0] is primary owner
       teamKey:         a.string(),

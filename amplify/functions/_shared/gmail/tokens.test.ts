@@ -72,4 +72,22 @@ describe('tokens', () => {
     const f = vi.fn(async () => json({ error: 'invalid_grant' }, 400))
     await expect(getAccessToken('rep-1', f as unknown as typeof fetch)).rejects.toBeInstanceOf(NeedsReconnect)
   })
+
+  it('a Testing-mode 7-day expiry (invalid_grant with a description) is NeedsReconnect, tells the user what to do, and leaks no secret', async () => {
+    await connected()
+    const f = vi.fn(async () => json({ error: 'invalid_grant', error_description: 'Token has been expired or revoked. cs r1' }, 400))
+    const err = await getAccessToken('rep-1', f as unknown as typeof fetch).catch((e: Error) => e)
+    expect(err).toBeInstanceOf(NeedsReconnect)
+    expect((err as Error).message).toMatch(/reconnect Gmail/)
+    expect((err as Error).message).not.toMatch(/\bcs\b|\br1\b/)
+    await expect(getAccessToken('rep-1', f as unknown as typeof fetch)).rejects.toBeInstanceOf(NeedsReconnect)
+  })
+
+  it('any other refresh failure is not NeedsReconnect and its message carries neither secret nor refresh token', async () => {
+    await connected()
+    const f = vi.fn(async () => json({ error: 'server_error', error_description: 'cs r1' }, 500))
+    const err = await getAccessToken('rep-1', f as unknown as typeof fetch).catch((e: Error) => e)
+    expect(err).not.toBeInstanceOf(NeedsReconnect)
+    expect((err as Error).message).not.toMatch(/\bcs\b|\br1\b/)
+  })
 })

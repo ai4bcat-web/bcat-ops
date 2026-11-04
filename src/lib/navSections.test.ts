@@ -61,7 +61,7 @@ describe('buildNavSections', () => {
       'Customers', 'Carriers', 'Locations', 'Accounting', 'Settings',
     ])
     const kids = (label: string) => labels(pinned.find((i) => i.label === label)?.children)
-    expect(kids('Quotes')).toEqual(['Quotes', 'Lane rates', 'Spot inbox'])
+    expect(kids('Quotes')).toEqual(['Quotes', 'Spot inbox'])
     expect(kids('Shipments')).toEqual(['Active', 'All', 'Intake'])
     expect(pinned.find((i) => i.label === 'Load Tracking')?.children).toBeUndefined()
     expect(kids('Customers')).toEqual(['Customers', 'Follow-ups'])
@@ -113,7 +113,8 @@ describe('buildNavSections', () => {
   it('shows a carriers-only grant Carriers and nothing else', () => {
     const { pinned, sections } = buildNavSections({ divisions: FOUR, hasPageAccess: grants('carriers') })
     expect(labels(pinned)).toEqual(['Carriers'])
-    expect(pinned[0].children).toBeUndefined()
+    // Find & Invite is a Carriers sub-page on the same grant.
+    expect(labels(pinned[0].children)).toEqual(['Carriers', 'Find & Invite'])
     expect(sections).toEqual([])
   })
 
@@ -156,7 +157,7 @@ describe('buildNavSections', () => {
     const quotes = pinnedOf('quotes')
     expect(labels(quotes)).toEqual(['Quotes'])
     expect(quotes[0].to).toBe('/tms/rates')
-    expect(labels(quotes[0].children)).toEqual(['Quotes', 'Lane rates', 'Spot inbox'])
+    expect(labels(quotes[0].children)).toEqual(['Quotes', 'Spot inbox'])
   })
 
   it('keeps a fleet user out of the freight list and the Brokerage business', () => {
@@ -279,7 +280,6 @@ describe('tmsBreadcrumb', () => {
     expect(labels('/tms/rates')).toEqual(['Quotes'])
     expect(labels('/tms/rates/new')).toEqual(['Quotes', 'New quote'])
     expect(labels('/tms/rates/Q-12')).toEqual(['Quotes', 'Quote'])
-    expect(labels('/tms/rates/lanes')).toEqual(['Quotes', 'Lane rates'])
     expect(labels('/tms/rates/spot/callback')).toEqual(['Quotes', 'Spot inbox'])
   })
 

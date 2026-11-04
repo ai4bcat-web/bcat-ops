@@ -1,7 +1,7 @@
 /** Pure helpers shared by the AH4 sections (kept out of the component files for fast refresh). */
 import { LABEL, labelFor, type LabelDef } from '../labels'
 import { bookedAddressSnapshot } from '@/features/loads/legFields'
-import type { LocationRecord } from '@/types/tms'
+import type { CustomerRecord, LocationRecord } from '@/types/tms'
 import { type FormStop, isLocked, lockReason, type LockKey } from '../model'
 import type { FormCtx, SectionKey } from '../sectionProps'
 
@@ -83,5 +83,15 @@ export function stopPatchFromLocation(loc: LocationRecord): Partial<FormStop> {
     hours: loc.hours ?? '',
     geo: hasGeo ? { lat: snap.lat, lng: snap.lng, timezone: snap.timezone ?? null, geocodeExpiresAt: snap.geocodeExpiresAt ?? null } : null,
   }
+}
+
+
+/** The e-mails invoices go to: the picked bill-to party's, then the customer's billing e-mail, de-duplicated. */
+export function billingEmailsOf(customer: CustomerRecord, billToId: string): string[] {
+  const party = customer.billToParties?.find((b) => b.id === billToId)
+  const seen = new Set<string>()
+  return [party?.email, customer.billingEmail]
+    .map((e) => (e ?? '').trim())
+    .filter((e) => e !== '' && !seen.has(e.toLowerCase()) && !!seen.add(e.toLowerCase()))
 }
 

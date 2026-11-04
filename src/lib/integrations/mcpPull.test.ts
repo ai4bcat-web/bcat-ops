@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { McpApiError } from './mcpAdapter'
 import { normalizeMcpProfile, mapProfileToCarrier, matchCarrier, buildCarrierIndex, mcKey } from './mcpProfile'
 import type { McpProfile } from './mcpProfile'
-import { newPullState, pullOneCarrier, runBackfillSlice, runChangesPoll } from './mcpPull'
+import { addCarrierFromMcp, newPullState, pullOneCarrier, runBackfillSlice, runChangesPoll } from './mcpPull'
 import type { McpPullDeps } from './mcpPull'
 
 type Row = Record<string, unknown>
@@ -161,7 +161,7 @@ const fleet = () => ({
     '7000003': body({ DOTNumber: 7000003, MCNumber: 'MC900003', LegalName: 'Brand New Test Co' }),
   } as Record<string, Row>,
   carriers: [
-    { id: 'c1', name: 'Zephyr Test Freight', mcNumber: 'MC-900001', status: 'PENDING', updatedAt: 'u0' },
+    { id: 'c1', name: 'Zephyr Test Freight', mcNumber: 'MC-900001', dotNumber: '7000001', status: 'PENDING', updatedAt: 'u0' },
     { id: 'c2', name: 'Quill Test Lines', dotNumber: '7000002', status: 'PENDING', updatedAt: 'u0' },
     { id: 'c9', name: 'Ours Only Trucking', mcNumber: 'MC-111111', status: 'PENDING', updatedAt: 'u0' },
   ] as Row[],
@@ -179,7 +179,9 @@ describe('runBackfillSlice', () => {
     expect(w.carriers.get('c1')).toMatchObject({ mcpStatus: 'ACCEPTABLE', einNumber: '12-3456789', mcpSyncRunId: 'run-1', name: 'Zephyr Test Freight LLC' })
     expect(w.carriers.get('c2')).toMatchObject({ dotNumber: '7000002', mcNumber: 'MC900002' }) // matched by DOT, MC filled in
     const created = [...w.carriers.values()].find((r) => r.name === 'Brand New Test Co')!
-    expect(created).toMatchObject({ status: 'PENDING', createdBy: 'mcp-sync', mcpStatus: 'ACCEPTABLE' })
+    // Packet complete + monitored (it came from the monitored list): MyCarrierPackets makes it ACTIVE.
+    expect(created).toMatchObject({ status: 'ACTIVE', statusChangedBy: 'mcp-sync', createdBy: 'mcp-sync', mcpStatus: 'ACCEPTABLE' })
+    expect(w.carriers.get('c1')).toMatchObject({ status: 'ACTIVE', statusChangedBy: 'mcp-sync' })
 
     expect(w.contacts.filter((c) => c.carrierId === 'c1').map((c) => c.name).sort()).toEqual(['Clay Mz', 'Dee Patch'])
     expect(w.contacts.find((c) => c.name === 'Dee Patch')).toMatchObject({ isPrimary: true, types: ['DISPATCH'] })
@@ -293,5 +295,71 @@ describe('pullOneCarrier', () => {
     expect(await pullOneCarrier(w.deps, 'c2', 'r')).toBe('NO_PACKET')
     expect(await pullOneCarrier(w.deps, 'c3', 'r')).toBe('NO_PACKET')
     expect(await pullOneCarrier(w.deps, 'missing', 'r')).toBe('NO_PACKET')
+  })
+})
+
+describe('addCarrierFromMcp (Find & Invite: Add to carriers)', () => {
+  it('creates a row pre-filled from MCP (ACTIVE only because its packet is complete), with contacts, payment and an MCP_CREATE audit, and no secret anywhere', async () => {
+    const w = world({ profiles: { '7000001': body() } })
+    const out = await addCarrierFromMcp(w.deps, { dotNumber: '7000001', mcNumber: 'MC900001' }, 'run-add')
+    expect(out.result).toBe('CREATED')
+    const row = w.carriers.get(out.carrierId!)!
+    expect(row).toMatchObject({
+      name: 'Zephyr Test Freight LLC', dbaName: 'Zephyr Test', mcNumber: 'MC900001', dotNumber: '7000001', phone: '555-0100',
+      status: 'ACTIVE', mcpStatus: 'ACCEPTABLE', safetyRating: 'SATISFACTORY', authorityStatus: 'ACTIVE', einNumber: '12-3456789',
+    })
+    expect(w.contacts.filter((c) => c.carrierId === out.carrierId)).toHaveLength(2)
+    expect(w.audits).toHaveLength(1)
+    expect(w.audits[0]).toMatchObject({ entityId: out.carrierId, action: 'MCP_CREATE', changes: { source: 'MYCARRIERPACKETS', matchedBy: 'CREATED', fields: { einNumber: { after: '***6789' } } } })
+    expect(JSON.stringify([...w.payments, ...w.audits])).not.toMatch(/000011112222|999988887777|12-3456789/)
+  })
+
+  it('leaves a carrier that is already in the directory exactly as it is (matched on DOT when the MC differs)', async () => {
+    const w = world({ carriers: [{ id: 'c1', name: 'Hand Typed Name', dotNumber: '7000001', phone: '000', updatedAt: 'u0' }], profiles: { '7000001': body() } })
+    const out = await addCarrierFromMcp(w.deps, { dotNumber: '7000001' }, 'run-add')
+    expect(out).toEqual({ result: 'EXISTS', carrierId: 'c1', matchedBy: 'DOT' })
+    expect(w.carriers.get('c1')).toMatchObject({ name: 'Hand Typed Name', phone: '000' })
+    expect(w.carriers.size).toBe(1)
+    expect(w.audits).toEqual([])
+  })
+
+  it('creates nothing when MCP has no record, or no legal name to name the row by', async () => {
+    const w = world({ profiles: { '7000001': body({ LegalName: undefined, CompanyName: undefined, AssureAdvantage: undefined }) } })
+    expect((await addCarrierFromMcp(w.deps, { dotNumber: '404' }, 'r')).result).toBe('NO_MCP_RECORD')
+    expect((await addCarrierFromMcp(w.deps, { dotNumber: '7000001' }, 'r')).result).toBe('NO_NAME')
+    expect(w.carriers.size).toBe(0)
+  })
+})
+
+describe('MCP drives Carrier.status through the pull (Step AM)', () => {
+  const lapsedBody = () => body({
+    AssureAdvantage: [{ CarrierDetails: {
+      Safety: { rating: 'Satisfactory', ratingDate: '2025-05-01' },
+      Authority: { commonAuthority: 'A', authGrantDate: '2019-03-02' },
+      RiskAssessmentDetails: { TotalPoints: 20, OverallRating: 'Pass', ReviewState: '' },
+      CertData: { Certificate: [{ Coverage: [{ insurerName: 'Fake Mutual', policyNumber: 'P-1', type: 'Cargo', expirationDate: '2026-10-01', coverageLimit: '100000' }] }] },
+    } }],
+  })
+
+  it('activates a PENDING carrier whose packet is complete, audits the change and tells the ladder', async () => {
+    const w = world({ carriers: [{ id: 'c1', name: 'Zephyr Test Freight', mcNumber: 'MC-900001', dotNumber: '7000001', status: 'PENDING', updatedAt: 'u0' }], profiles: { '7000001': body() } })
+    const changed = vi.fn(async () => undefined)
+    w.deps.carrierStatusChanged = changed
+    expect(await pullOneCarrier(w.deps, 'c1', 'r1')).toBe('SYNCED')
+    expect(w.carriers.get('c1')).toMatchObject({ status: 'ACTIVE', statusChangedBy: 'mcp-sync' })
+    expect(changed).toHaveBeenCalledWith('c1', 'ACTIVE')
+    expect(w.audits[0]!.changes).toMatchObject({ fields: { status: { before: 'PENDING', after: 'ACTIVE' } } })
+  })
+
+  it('flips an ACTIVE carrier INACTIVE when MCP reports its cargo insurance lapsed', async () => {
+    const w = world({ carriers: [{ id: 'c1', name: 'Zephyr Test Freight', mcNumber: 'MC-900001', dotNumber: '7000001', status: 'ACTIVE', mcpStatus: 'ACCEPTABLE', updatedAt: 'u0' }], profiles: { '7000001': lapsedBody() } })
+    expect(await pullOneCarrier(w.deps, 'c1', 'r1')).toBe('SYNCED')
+    expect(w.carriers.get('c1')).toMatchObject({ status: 'INACTIVE', statusReason: 'EXPIRED_INSURANCE', statusChangedBy: 'mcp-sync' })
+  })
+
+  it('does not undo a person\'s DO_NOT_USE', async () => {
+    const w = world({ carriers: [{ id: 'c1', name: 'Zephyr Test Freight', mcNumber: 'MC-900001', dotNumber: '7000001', status: 'DO_NOT_USE', updatedAt: 'u0' }], profiles: { '7000001': body() } })
+    await pullOneCarrier(w.deps, 'c1', 'r1')
+    expect(w.carriers.get('c1')!.status).toBe('DO_NOT_USE')
   })
 })

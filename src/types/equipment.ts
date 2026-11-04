@@ -22,7 +22,7 @@ export interface Equipment {
   ownership: Ownership
   insured: boolean
   active: boolean
-  /** The day the truck was marked inactive (YYYY-MM-DD). */
+  /** The day the truck or trailer was marked inactive (YYYY-MM-DD). */
   inactiveSince?: string | null
   dotInspectionDate?: string        // YYYY-MM-DD
   iftaExpirationDate?: string

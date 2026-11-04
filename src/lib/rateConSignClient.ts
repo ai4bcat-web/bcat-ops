@@ -32,7 +32,10 @@ export interface RateConSignState {
   brokerName: string
   status: RateConStatus
   expiresAt: string | null
+  /** Still-empty fields only: a field the rep already entered is not asked for again. */
   requiredFields: RateConRequiredField[]
+  /** Step AM: what the rep already entered, to prefill the form (never contains a required, still-empty field). */
+  driverInfo?: { driverName?: string | null; driverPhone?: string | null; truckNumber?: string | null; trailerNumber?: string | null }
   totalCents: number
   pdfUrl: string
 }

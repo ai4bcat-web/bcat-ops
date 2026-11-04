@@ -253,6 +253,8 @@ export interface McpPagination {
 
 interface McpRawResponse {
   body: unknown
+  /** HTTP status of the answer (always 2xx here: anything else throws). */
+  status: number
   /** The `X-Pagination` response header the guide describes, when present. */
   pagination: McpPagination | null
 }
@@ -294,9 +296,9 @@ async function mcpPostRaw(
     if (!res.ok) throw new McpApiError(`MyCarrierPackets ${path} failed (HTTP ${res.status})`, kindOfStatus(res.status), res.status, retryAfterOf(res))
     const raw = await res.text()
     const pagination = paginationOf(res)
-    if (!raw.trim()) return { body: null, pagination }
+    if (!raw.trim()) return { body: null, status: res.status, pagination }
     try {
-      return { body: JSON.parse(raw) as unknown, pagination }
+      return { body: JSON.parse(raw) as unknown, status: res.status, pagination }
     } catch {
       throw new McpApiError(`MyCarrierPackets ${path} answered with something that is not JSON`, 'SERVER', res.status)
     }
@@ -649,6 +651,76 @@ export async function fetchMcpCarrierRaw(
   if (normalizeMcpCarrier(data, ref, nowMs)) return data
   const preview = await mcpPost('/api/v1/Carrier/PreviewCarrier', { DOTNumber: dot, docketNumber: docket }, creds, fetchImpl, opts)
   return normalizeMcpCarrier(preview, ref, nowMs) ? (Array.isArray(preview) ? preview[0] : preview) : null
+}
+
+/**
+ * PreviewCarrier, untouched: profile, FMCSA status, risk assessment, certificates and the
+ * e-mails MCP has approved for the carrier. Works for a carrier that never touched MCP.
+ * Null when MCP knows no such carrier.
+ */
+export async function fetchMcpPreviewRaw(
+  ref: McpCarrierRef,
+  credentials: Record<string, string | null | undefined>,
+  fetchImpl: typeof fetch = fetch,
+  opts?: McpClientOptions,
+): Promise<unknown | null> {
+  const creds = requireCreds(credentials)
+  const dot = dotOf(ref.dotNumber)
+  const docket = docketOf(ref.mcNumber)
+  if (!dot && !docket) throw new Error('A DOT or MC number is required for a MyCarrierPackets lookup')
+  const preview = await mcpPost('/api/v1/Carrier/PreviewCarrier', { DOTNumber: dot, docketNumber: docket }, creds, fetchImpl, opts)
+  return normalizeMcpCarrier(preview, ref, (opts?.now ?? Date.now)()) ? (Array.isArray(preview) ? preview[0] : preview) : null
+}
+
+/** GetCarrierData, untouched (packet, W-9, contacts, equipment, lanes, Assure Advantage). Null when MCP has nothing. */
+export async function fetchMcpDataRaw(
+  ref: McpCarrierRef,
+  credentials: Record<string, string | null | undefined>,
+  fetchImpl: typeof fetch = fetch,
+  opts?: McpClientOptions,
+): Promise<unknown | null> {
+  const creds = requireCreds(credentials)
+  const dot = dotOf(ref.dotNumber)
+  const docket = docketOf(ref.mcNumber)
+  if (!dot && !docket) throw new Error('A DOT or MC number is required for a MyCarrierPackets lookup')
+  const data = await mcpPost('/api/v1/Carrier/GetCarrierData', { DOTNumber: dot, DocketNumber: docket, Docket: docket }, creds, fetchImpl, opts)
+  return normalizeMcpCarrier(data, ref, (opts?.now ?? Date.now)()) ? (Array.isArray(data) ? data[0] : data) : null
+}
+
+export interface McpInvitationResult {
+  status: number
+  /** Top-level keys of MCP's answer: shape evidence for logs, never values. */
+  bodyKeys: string[]
+  message: string | null
+}
+
+/**
+ * EmailPacketInvitation, a person's action. `username` is the MCP integration user sending it
+ * (the guide recommends it). Returns the HTTP status and the answer's key names only.
+ */
+export async function inviteMcpCarrier(
+  input: { email: string; dotNumber?: string; mcNumber?: string },
+  credentials: Record<string, string | null | undefined>,
+  fetchImpl: typeof fetch = fetch,
+  opts?: McpClientOptions,
+): Promise<McpInvitationResult> {
+  const creds = requireCreds(credentials)
+  const dot = dotOf(input.dotNumber)
+  const docket = docketOf(input.mcNumber)
+  if (!dot && !docket) throw new Error('A DOT or MC number is required to invite a carrier on MyCarrierPackets.')
+  const { body, status } = await mcpPostRaw(
+    '/api/v1/Carrier/EmailPacketInvitation',
+    { dotNumber: dot, docketNumber: docket, carrierEmail: input.email, username: creds.username },
+    creds,
+    fetchImpl,
+    opts,
+  )
+  const message = typeof body === 'string' ? body : text(field(body, 'Message')) ?? null
+  return {
+    status,
+    bodyKeys: body && typeof body === 'object' && !Array.isArray(body) ? Object.keys(body as Rec).sort() : [],
+    message,
+  }
 }
 
 /**

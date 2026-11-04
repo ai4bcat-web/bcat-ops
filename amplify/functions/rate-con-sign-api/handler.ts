@@ -20,12 +20,14 @@ import {
 import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { randomUUID } from 'crypto'
+import { advanceTarget, driverInfoGaps, isCarrierAssignmentStatus, ladderPatch } from '../../../src/lib/carrierAssignment'
 
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}))
 const s3 = new S3Client({})
 
 const LOAD_CARRIER_TABLE = process.env.LOAD_CARRIER_TABLE_NAME!
 const LOAD_TABLE = process.env.LOAD_TABLE_NAME!
+const SHIPMENT_TABLE = process.env.SHIPMENT_TABLE_NAME ?? ''
 const CARRIER_DOCUMENT_TABLE = process.env.CARRIER_DOCUMENT_TABLE_NAME!
 const DIVISION_TABLE = process.env.DIVISION_TABLE_NAME!
 const SETTINGS_TABLE = process.env.SETTINGS_TABLE_NAME!
@@ -64,7 +66,12 @@ const FIELD_TO_COLUMN: Record<string, string> = {
   PICKUP_ETA: 'pickupEtaAt',
 }
 
-const DEFAULT_REQUIRED_FIELDS = ['DRIVER_NAME', 'DRIVER_PHONE', 'TRUCK_NUMBER']
+/**
+ * Step AM. Driver name, phone, truck # and trailer # are always required to sign: tracking keys off
+ * them, and the carrier is the one who knows. A field the office already entered is not asked again.
+ */
+const DRIVER_INFO_FIELD_KEYS = ['DRIVER_NAME', 'DRIVER_PHONE', 'TRUCK_NUMBER', 'TRAILER_NUMBER']
+const DEFAULT_REQUIRED_FIELDS = DRIVER_INFO_FIELD_KEYS
 
 interface FnUrlEvent {
   body?: string | null
@@ -200,12 +207,15 @@ function isAlreadyAnswered(err: unknown): boolean {
   return err.name === 'ConditionalCheckFailedException'
 }
 
-/** What the carrier has to fill in before they may sign, settings first. */
-function requiredFieldsOf(settings: Record<string, unknown> | null): string[] {
+/** What the carrier still has to fill in before they may sign: the settings' fields plus the driver four. */
+function requiredFieldsOf(settings: Record<string, unknown> | null, row: LoadCarrierRow): string[] {
   const raw = settings?.rateConRequiredFields
-  if (!Array.isArray(raw)) return DEFAULT_REQUIRED_FIELDS
-  const known = raw.filter((f): f is string => typeof f === 'string' && f in FIELD_TO_COLUMN)
-  return known.length > 0 ? known : DEFAULT_REQUIRED_FIELDS
+  const known = Array.isArray(raw) ? raw.filter((f): f is string => typeof f === 'string' && f in FIELD_TO_COLUMN) : []
+  const wanted = [...new Set([...(known.length > 0 ? known : DEFAULT_REQUIRED_FIELDS), ...DRIVER_INFO_FIELD_KEYS])]
+  return wanted.filter((f) => {
+    const have = row[FIELD_TO_COLUMN[f]]
+    return !(typeof have === 'string' && have.trim())
+  })
 }
 
 function readFields(value: unknown): Record<string, string> {
@@ -269,7 +279,11 @@ export const handler = async (event: FnUrlEvent) => {
           brokerName: String(division?.legalName ?? division?.name ?? ''),
           status: status === 'SENT' ? 'OPENED' : status,
           expiresAt: row.rateConExpiresAt ?? null,
-          requiredFields: requiredFieldsOf(settings),
+          requiredFields: requiredFieldsOf(settings, row),
+          driverInfo: {
+            driverName: row.driverName ?? null, driverPhone: row.driverPhone ?? null,
+            truckNumber: row.truckNumber ?? null, trailerNumber: row.trailerNumber ?? null,
+          },
           totalCents: Number(row.costCents ?? row.carrierRateCents ?? 0),
           pdfUrl,
         })
@@ -291,7 +305,7 @@ export const handler = async (event: FnUrlEvent) => {
 
         const fields = readFields(payload.fields)
         const settings = await getRow(SETTINGS_TABLE, { id: SETTINGS_ID })
-        const missing = requiredFieldsOf(settings).filter((f) => !fields[f])
+        const missing = requiredFieldsOf(settings, row).filter((f) => !fields[f])
         if (missing.length > 0) throw new PortalError(400, `Still missing: ${missing.join(', ')}`)
 
         const version = Number(row.rateConVersion ?? 1)
@@ -316,9 +330,18 @@ export const handler = async (event: FnUrlEvent) => {
 
         // Claim the signature before writing anything else: a racer that loses the
         // claim leaves no PDF in the bucket and no document row to explain later.
+        // Step AM. Signing climbs the ladder; with the four driver fields in, it climbs to the top. A rate
+        // con only goes out to a set-up carrier, so setup is complete here whatever MCP says a minute later.
+        const current = isCarrierAssignmentStatus(row.assignmentStatus) ? row.assignmentStatus : null
+        const rung = advanceTarget(current, {
+          carrierStatus: 'ACTIVE', rateConStatus: 'SIGNED', rateConSignedAt: now,
+          driverName: String(filled.driverName ?? row.driverName ?? ''), driverPhone: String(filled.driverPhone ?? row.driverPhone ?? ''),
+          truckNumber: String(filled.truckNumber ?? row.truckNumber ?? ''), trailerNumber: String(filled.trailerNumber ?? row.trailerNumber ?? ''),
+        })
         try {
           await ddb.send(UpdateCommandFromObject(LOAD_CARRIER_TABLE, { id: row.id }, {
             ...filled,
+            ...(rung ? ladderPatch(row, rung, now) : {}),
             rateConStatus: 'SIGNED',
             rateConSignedAt: now,
             rateConSignerName: signerName,
@@ -346,7 +369,20 @@ export const handler = async (event: FnUrlEvent) => {
           }))
         }
 
-        await audit(row.id, 'rate_con_signed', { loadId: row.loadId, signerName, s3Key, fields, source: 'CARRIER_PORTAL' })
+        if (rung) {
+          // The board's mirror of the rung. The signature is already recorded, so a failure here is logged, not thrown.
+          const mirror = { carrierAssignmentStatus: rung, updatedAt: now }
+          try {
+            if (SHIPMENT_TABLE && row.shipmentId) await ddb.send(UpdateCommandFromObject(SHIPMENT_TABLE, { id: row.shipmentId }, mirror))
+            await ddb.send(UpdateCommandFromObject(LOAD_TABLE, { id: row.loadId }, mirror))
+          } catch (err) {
+            console.error('[rate-con-sign-api] ladder mirror failed', row.id, err instanceof Error ? err.message : String(err))
+          }
+        }
+        await audit(row.id, 'rate_con_signed', {
+          loadId: row.loadId, signerName, s3Key, fieldKeys: Object.keys(fields), assignmentStatus: rung ?? row.assignmentStatus ?? null,
+          driverInfoComplete: driverInfoGaps({ ...row, ...filled }).length === 0, source: 'CARRIER_PORTAL',
+        })
         return reply(200, { ok: true })
       }
 

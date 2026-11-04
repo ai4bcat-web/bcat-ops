@@ -462,7 +462,7 @@ describe('Aljex column order', () => {
   it('lists the Active Shipments default columns in plan order', () => {
     expect(ALJEX_COLUMN_KEYS).toEqual([
       'exceptions', 'status', 'proNumber', 'massRelease', 'equip', 'customerReference', 'description',
-      'revenueType', 'salesRep', 'customerName', 'carrier', 'customerTotalRate', 'carrierTotalRates',
+      'revenueType', 'salesRep', 'customerName', 'carrier', 'carrierAssignment', 'customerTotalRate', 'carrierTotalRates',
       'grossProfit', 'netMargin', 'pickupShip', 'originCity', 'destinationCity', 'deliveryAppt', 'stops',
       'driver', 'truck', 'arStatus', 'apStatus', 'lastUpdateAt', 'nextCheckCallAt', 'mode', 'docsMissing',
     ])

@@ -130,7 +130,7 @@ export async function pollConnection(deps: SpotDeps, conn: GmailConnectionRecord
     patch.lastPollOk = false
     if (err instanceof NeedsReconnect) {
       patch.status = 'NEEDS_RECONNECT'
-      patch.lastError = 'Google no longer accepts this connection. Reconnect Gmail.'
+      patch.lastError = 'Google no longer accepts this connection (a Google app in Testing mode expires access after 7 days). Reconnect Gmail.'
     } else {
       patch.lastError = redact(err)
       stats.errors += 1

@@ -463,12 +463,11 @@ describe('UPSERT_CARRIER clears index keys by removing them', () => {
 
 // ── Creating a carrier ───────────────────────────────────────────────────────
 
-describe('UPSERT_CARRIER create', () => {
+describe('UPSERT_CARRIER create (admin data fix only; carriers enter through MyCarrierPackets)', () => {
   it('opens a carrier that has neither an MC nor a DOT number on file', async () => {
-    // A broker types the name and the phone first; the numbers arrive with the packet.
-    // Writing those two index keys as NULL fails the PutItem outright, so the carrier
-    // could never be opened at all.
-    const created = await call('UPSERT_CARRIER', { name: 'No Numbers Trucking', type: 'TL', phone: '555-0101' })
+    // The numbers arrive with the packet. Writing those two index keys as NULL fails the PutItem
+    // outright, so the carrier could never be opened at all.
+    const created = await call('UPSERT_CARRIER', { name: 'No Numbers Trucking', type: 'TL', phone: '555-0101' }, ADMIN)
 
     const stored = storedCarrier(String(created.id))
     expect('mcNumber' in stored).toBe(false)
@@ -482,65 +481,34 @@ describe('UPSERT_CARRIER create', () => {
     expect(indexRows(TABLES.carrier, 'carriersByDotNumber')).toEqual([])
   })
 
-  it('lands PENDING even when the caller asks for ACTIVE', async () => {
-    const created = await call('UPSERT_CARRIER', {
-      name: 'Knight Swift Logistics',
-      type: 'TL',
-      mcNumber: '222333',
-      dotNumber: '444555',
-      status: 'ACTIVE',
-    })
+  it('refuses a hand-typed carrier from anybody who is not an admin', async () => {
+    await expect(
+      call('UPSERT_CARRIER', { name: 'Rogue Freight', type: 'TL', mcNumber: '222333' }),
+    ).rejects.toThrow(/carriers enter the directory through MyCarrierPackets/)
+    expect(table(TABLES.carrier).size).toBe(0)
+  })
+
+  it('lands PENDING even when an admin asks for ACTIVE, and audits the data fix', async () => {
+    const created = await call(
+      'UPSERT_CARRIER',
+      { name: 'Knight Swift Logistics', type: 'TL', mcNumber: '222333', dotNumber: '444555', status: 'ACTIVE' },
+      ADMIN,
+    )
     expect(created.status).toBe('PENDING')
     expect(storedCarrier(String(created.id)).status).toBe('PENDING')
+    const audit = [...table(TABLES.audit).values()].find((a) => a.action === 'UPSERT_CARRIER')
+    expect(JSON.parse(String(audit!.changes))).toMatchObject({ created: true, manualDataFix: true, status: 'PENDING' })
   })
 
   it('keeps the CA Intrastate / TX PUC numbers and refuses an expiry that is not a calendar date', async () => {
     const created = await call('UPSERT_CARRIER', {
       name: 'Lone Star Freight', type: 'TL', caIntrastateNumber: 'CA-1', caIntrastateExpiresAt: '2027-03-01',
       txPucNumber: 'TX-9', txPucExpiresAt: '2027-04-15',
-    })
+    }, ADMIN)
     expect(storedCarrier(String(created.id))).toMatchObject({
       caIntrastateNumber: 'CA-1', caIntrastateExpiresAt: '2027-03-01', txPucNumber: 'TX-9', txPucExpiresAt: '2027-04-15',
     })
-    await expect(call('UPSERT_CARRIER', { name: 'Bad Date Inc', type: 'TL', txPucExpiresAt: '04/15/2027' })).rejects.toThrow(/YYYY-MM-DD/)
-  })
-
-  it('lets an admin open a carrier straight to ACTIVE', async () => {
-    const created = await call(
-      'UPSERT_CARRIER',
-      { name: 'Knight Swift Logistics', type: 'TL', mcNumber: '222333', dotNumber: '444555', status: 'ACTIVE' },
-      ADMIN,
-    )
-    expect(created.status).toBe('ACTIVE')
-  })
-
-  it('keeps the approval queue when the setting was never saved', async () => {
-    expect(table(TABLES.settings).size).toBe(0)
-    const created = await call('UPSERT_CARRIER', {
-      name: 'Unvetted Freight',
-      type: 'TL',
-      mcNumber: '222333',
-      dotNumber: '444555',
-      status: 'ACTIVE',
-    })
-    expect(created.status).toBe('PENDING')
-  })
-
-  it('lets a page-carriers user open an ACTIVE carrier once approval is switched off', async () => {
-    table(TABLES.settings).set('default', {
-      id: 'default',
-      requireCarrierApproval: false,
-      createdAt: '2026-01-01T00:00:00.000Z',
-      updatedAt: '2026-01-01T00:00:00.000Z',
-    })
-    const created = await call('UPSERT_CARRIER', {
-      name: 'Knight Swift Logistics',
-      type: 'TL',
-      mcNumber: '222333',
-      dotNumber: '444555',
-      status: 'ACTIVE',
-    })
-    expect(created.status).toBe('ACTIVE')
+    await expect(call('UPSERT_CARRIER', { name: 'Bad Date Inc', type: 'TL', txPucExpiresAt: '04/15/2027' }, ADMIN)).rejects.toThrow(/YYYY-MM-DD/)
   })
 })
 
@@ -650,6 +618,26 @@ describe('SET_CARRIER_STATUS', () => {
     const reopened = await call('SET_CARRIER_STATUS', move, clerk)
     expect(reopened.status).toBe('INACTIVE')
     expect(reopened.statusChangedBy).toBe('clerk@bcatcorp.com')
+  })
+
+  it('cannot mark setup complete by hand: ACTIVE needs a completed MyCarrierPackets packet', async () => {
+    carrier({ status: 'PENDING', mcpStatus: 'INVITED' })
+    const move = { id: 'car-1', expectedUpdatedAt: '2026-01-01T00:00:00.000Z', status: 'ACTIVE' }
+    await expect(call('SET_CARRIER_STATUS', move)).rejects.toThrow(/only when MyCarrierPackets reports its setup complete/)
+    await expect(call('SET_CARRIER_STATUS', move, ADMIN)).rejects.toThrow(/only when MyCarrierPackets reports its setup complete/)
+    expect(storedCarrier().status).toBe('PENDING')
+  })
+
+  it('lets a person reactivate when MyCarrierPackets already reports the packet complete', async () => {
+    carrier({ status: 'INACTIVE', mcpStatus: 'ACCEPTABLE' })
+    const moved = await call('SET_CARRIER_STATUS', { id: 'car-1', expectedUpdatedAt: '2026-01-01T00:00:00.000Z', status: 'ACTIVE' })
+    expect(moved.status).toBe('ACTIVE')
+  })
+
+  it('leaves an Aljex-imported carrier as it was: it may still be activated by hand', async () => {
+    carrier({ status: 'PENDING', legacyImported: true })
+    const moved = await call('SET_CARRIER_STATUS', { id: 'car-1', expectedUpdatedAt: '2026-01-01T00:00:00.000Z', status: 'ACTIVE' })
+    expect(moved.status).toBe('ACTIVE')
   })
 
   it('never reopens DO_NOT_USE straight to ACTIVE, even for an admin', async () => {
@@ -771,7 +759,10 @@ describe('authorization', () => {
   it('lets a page-tms caller work the carrier directory', async () => {
     // Step R: Carriers is a BROKERAGE page, and `page-tms` is the one grant for it.
     const tmsUser = { sub: 'sub-tms', username: 'tms', claims: { email: 'broker@bcatcorp.com', 'cognito:groups': ['page-tms'] } }
-    const saved = await call('UPSERT_CARRIER', { name: 'Page TMS Carrier', type: 'TL' }, tmsUser)
+    carrier()
+    const saved = await call('UPSERT_CARRIER', {
+      id: 'car-1', expectedUpdatedAt: '2026-01-01T00:00:00.000Z', name: 'Page TMS Carrier', type: 'TL',
+    }, tmsUser)
     expect(saved.name).toBe('Page TMS Carrier')
   })
 

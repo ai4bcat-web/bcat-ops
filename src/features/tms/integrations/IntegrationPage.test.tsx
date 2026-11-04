@@ -80,6 +80,33 @@ describe('IntegrationPage credential sources', () => {
     expect(screen.getByText('Save credentials')).toBeInTheDocument()
   })
 
+  it('GOOGLE: Client ID and write-only Client secret, an optional domain, and setup steps with this app’s callback URL', async () => {
+    api.listIntegrations.mockResolvedValue([
+      rowFor('GMAIL_REP_OAUTH', {
+        status: 'CONNECTED', health: 'OK',
+        credentialMask: [{ key: 'clientId', last4: 'ent.' }, { key: 'clientSecret', last4: 'cret' }],
+      }),
+    ])
+    draw('gmail-rep-oauth')
+
+    await waitFor(() => expect(screen.getByText('Credentials')).toBeInTheDocument())
+    expect(document.body.textContent).not.toContain('csecret-full-value')
+    fireEvent.click(screen.getByRole('button', { name: 'Edit credentials' }))
+    expect(screen.getByLabelText('OAuth client ID')).toBeInTheDocument()
+    const secret = screen.getByLabelText('OAuth client secret')
+    expect(secret).toHaveAttribute('type', 'password')
+    expect((secret as HTMLInputElement).value).toBe('')
+    expect(screen.getByLabelText('Workspace domain (optional)')).toBeInTheDocument()
+
+    expect(screen.getByTestId('google-redirect-uri')).toHaveTextContent(`${window.location.origin}/tms/rates/spot/callback`)
+    const steps = screen.getByTestId('google-setup-steps').textContent ?? ''
+    expect(steps).toMatch(/External/)
+    expect(steps).toMatch(/Testing/)
+    expect(steps).toMatch(/Web application/)
+    expect(steps).toMatch(/test user/)
+    expect(steps).toMatch(/ai4bcat@gmail\.com/)
+  })
+
   it('STACK: names the secrets and the console command, and offers no way to edit them here', async () => {
     api.listIntegrations.mockResolvedValue([
       rowFor('OTR', { credentialSource: 'STACK', health: 'UNABLE_TO_VERIFY', healthReason: 'NEUTERED_ON_DEV' }),

@@ -2,15 +2,17 @@
  * Section 1: Shipping Requirements. Aljex's three field columns, the Temp / Pallet / Tarps
  * boxes, then the two-column flag grid. DOM order = `SHIPPING_TAB_ORDER`, then the flags.
  */
-import { memo, useState } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 import type { ChangeEvent } from 'react'
 import { TmsButton, TmsInput, TmsSelect } from '@/features/tms/kit'
-import { calculateTotalsFromPicks, suggestMiles } from '../mapping'
+import { calculateTotalsFromPicks } from '../mapping'
 import { activeLoadCarrier, type FlagKey, type FormMode, type ShipmentFormValues, type TriState } from '../model'
 import { LABEL, FLAG_COLUMNS } from '../labels'
 import { EQUIPMENT_SUGGESTIONS, FORM_MODE_OPTIONS, FREIGHT_CLASSES, MAX, TRI_STATE_OPTIONS } from '../constants'
 import type { SliceSectionProps } from '../sectionRegistry'
 import { LField } from './formControls'
+import { mayAutoFill, type RoutePointInput } from './milesEstimate'
+import { getRouteMiles } from './routeMilesApi'
 import { ctl, digitsOnly, disabledState, dollarText, issueFor, signedDigits } from './fieldUtil'
 
 type Ship = ShipmentFormValues['ship']
@@ -18,6 +20,8 @@ type Ship = ShipmentFormValues['ship']
 export type ShippingRequirementsProps = SliceSectionProps<'ship'> & {
   mode: FormMode
   onModeChange: (mode: FormMode) => void
+  /** `routeSignature(values.stops)`: changes only when the measurable route does ('' = not measurable yet). */
+  routeKey: string
 }
 
 const triToValue = (v: TriState): string => (v === null ? 'na' : v ? 'yes' : 'no')
@@ -25,7 +29,7 @@ const valueToTri = (v: string): TriState => (v === 'yes' ? true : v === 'no' ? f
 
 const EQUIPMENT_LIST_ID = 'ship-equipment-suggestions'
 
-function ShippingRequirementsImpl({ value, onChange, ctx, form, mode, onModeChange }: ShippingRequirementsProps) {
+function ShippingRequirementsImpl({ value, onChange, ctx, form, mode, onModeChange, routeKey }: ShippingRequirementsProps) {
   const [hint, setHint] = useState('')
   const base = disabledState(ctx)
   const set = (patch: Partial<Ship>) => onChange(patch)
@@ -64,12 +68,37 @@ function ShippingRequirementsImpl({ value, onChange, ctx, form, mode, onModeChan
     })
     setHint(`${t.picks} ${t.picks === 1 ? 'pick' : 'picks'} counted`)
   }
-  const suggest = () => {
-    const miles = suggestMiles(form.getValues().stops)
-    if (miles === null) { setHint('Suggest needs both stops picked from the directory with coordinates.'); return }
-    set({ customerMiles: String(miles) })
-    setHint(`Suggested ${miles} miles (straight line × 1.2)`)
-  }
+  // Customer Miles / Truck Miles follow the route until a person types over them.
+  const [milesNote, setMilesNote] = useState('')
+  const lastAuto = useRef({ customer: '', truck: '' })
+  const onChangeRef = useRef(onChange)
+  useEffect(() => { onChangeRef.current = onChange })
+  const milesBlocked = value.disableMileage || milesLock.disabled
+  useEffect(() => {
+    if (!routeKey || milesBlocked) return
+    let alive = true
+    const timer = setTimeout(() => {
+      getRouteMiles(JSON.parse(routeKey) as RoutePointInput[])
+        .then(({ miles, source, error }) => {
+          if (!alive) return
+          if (error) { setMilesNote('Could not measure the route — type the miles'); return }
+          if (miles === null) return
+          const next = String(miles)
+          onChangeRef.current((prev) => {
+            const patch: Partial<Ship> = {}
+            if (mayAutoFill(prev.customerMiles, lastAuto.current.customer)) patch.customerMiles = next
+            if (mayAutoFill(prev.truckMiles, lastAuto.current.truck)) patch.truckMiles = next
+            lastAuto.current = {
+              customer: patch.customerMiles ?? lastAuto.current.customer,
+              truck: patch.truckMiles ?? lastAuto.current.truck,
+            }
+            return { ...prev, ...patch }
+          })
+          setMilesNote(source === 'google' ? 'Miles from the stop addresses' : 'est. — straight line × 1.2')
+        })
+    }, 600)
+    return () => { alive = false; clearTimeout(timer) }
+  }, [routeKey, milesBlocked])
 
   const activeCarrier = activeLoadCarrier(ctx.bundle)
   const flagChecked = (k: FlagKey) => value.flags[k]
@@ -127,11 +156,7 @@ function ShippingRequirementsImpl({ value, onChange, ctx, form, mode, onModeChan
         <LField def={LABEL.shipping.truckMiles} error={err(LABEL.shipping.truckMiles.testId)}>
           <TmsInput {...ctl(LABEL.shipping.truckMiles)} inputMode="numeric" value={value.truckMiles} disabled={base.disabled} onChange={txt('truckMiles', digitsOnly)} />
         </LField>
-        {!value.disableMileage && (
-          <button type="button" className="ship-link" data-testid="f-shipping-suggestMiles" disabled={milesLock.disabled} onClick={suggest}>
-            Suggest
-          </button>
-        )}
+        {milesNote && !value.disableMileage && <span className="ship-hint" data-testid="f-shipping-milesSource">{milesNote}</span>}
         {hint && <span className="ship-hint" role="status" data-testid="f-shipping-hint">{hint}</span>}
       </div>
 

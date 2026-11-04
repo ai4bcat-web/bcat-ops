@@ -1900,6 +1900,7 @@ trackingApiFn.addToRolePolicy(new PolicyStatement({
 const rateConSignApiFn      = backend.rateConSignApi.resources.lambda as LambdaFunction
 const signLoadCarrierTable  = backend.data.resources.tables['LoadCarrier']
 const signLoadTable         = backend.data.resources.tables['Load']
+const signShipmentTable     = backend.data.resources.tables['Shipment']
 const signCarrierDocTable   = backend.data.resources.tables['CarrierDocument']
 const signDivisionTable     = backend.data.resources.tables['Division']
 const signSettingsTable     = backend.data.resources.tables['TmsSettings']
@@ -1936,6 +1937,14 @@ rateConSignApiFn.addToRolePolicy(
     resources: [signLoadCarrierTable.tableArn],
   })
 )
+// Step AM: signing moves the assignment up the ladder, and the board's mirror of the rung lives on the
+// Load and the Shipment. UpdateItem only; nothing else of either table is reachable from here.
+rateConSignApiFn.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['dynamodb:UpdateItem'],
+    resources: [signLoadTable.tableArn, signShipmentTable.tableArn],
+  })
+)
 // Signing writes exactly two new rows: the signed-copy CarrierDocument and the
 // audit trail of who typed their name into the page.
 rateConSignApiFn.addToRolePolicy(
@@ -1949,6 +1958,7 @@ backend.storage.resources.bucket.grantReadWrite(rateConSignApiFn, 'rate-confirms
 
 rateConSignApiFn.addEnvironment('LOAD_CARRIER_TABLE_NAME',    signLoadCarrierTable.tableName)
 rateConSignApiFn.addEnvironment('LOAD_TABLE_NAME',            signLoadTable.tableName)
+rateConSignApiFn.addEnvironment('SHIPMENT_TABLE_NAME',        signShipmentTable.tableName)
 rateConSignApiFn.addEnvironment('CARRIER_DOCUMENT_TABLE_NAME', signCarrierDocTable.tableName)
 rateConSignApiFn.addEnvironment('DIVISION_TABLE_NAME',        signDivisionTable.tableName)
 rateConSignApiFn.addEnvironment('SETTINGS_TABLE_NAME',        signSettingsTable.tableName)
@@ -2262,6 +2272,30 @@ mcpSyncFn.addToRolePolicy(
   new PolicyStatement({ actions: ['dynamodb:PutItem'], resources: [mcpSyncAuditTable.tableArn] }),
 )
 directoryActionsFn.addEnvironment('MCP_SYNC_FUNCTION_NAME', mcpSyncFn.functionName)
+// Step AM: when MCP activates a carrier, assignments waiting on setup advance (LoadCarrier) and the
+// rung is mirrored onto the Load and Shipment rows. No other write reaches those tables from here.
+const mcpSyncLoadCarrierTable = backend.data.resources.tables['LoadCarrier']
+const mcpSyncShipmentTable    = backend.data.resources.tables['Shipment']
+const mcpSyncLoadTable        = backend.data.resources.tables['Load']
+mcpSyncFn.addEnvironment('LOAD_CARRIER_TABLE_NAME', mcpSyncLoadCarrierTable.tableName)
+mcpSyncFn.addEnvironment('SHIPMENT_TABLE_NAME',     mcpSyncShipmentTable.tableName)
+mcpSyncFn.addEnvironment('LOAD_TABLE_NAME',         mcpSyncLoadTable.tableName)
+mcpSyncFn.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['dynamodb:Query', 'dynamodb:UpdateItem'],
+    resources: [mcpSyncLoadCarrierTable.tableArn, `${mcpSyncLoadCarrierTable.tableArn}/index/*`],
+  }),
+)
+mcpSyncFn.addToRolePolicy(
+  new PolicyStatement({ actions: ['dynamodb:UpdateItem'], resources: [mcpSyncShipmentTable.tableArn, mcpSyncLoadTable.tableArn] }),
+)
+// Step AD (Find & Invite): the invitation is noted on the load's thread. PutItem on ShipmentMessage only:
+// no Shipment, Order or invoice table is reachable from here.
+const directoryMessageTable = backend.data.resources.tables['ShipmentMessage']
+directoryActionsFn.addEnvironment('SHIPMENT_MESSAGE_TABLE_NAME', directoryMessageTable.tableName)
+directoryActionsFn.addToRolePolicy(
+  new PolicyStatement({ actions: ['dynamodb:PutItem'], resources: [directoryMessageTable.tableArn] }),
+)
 directoryActionsFn.addToRolePolicy(
   new PolicyStatement({ actions: ['lambda:InvokeFunction'], resources: [mcpSyncFn.functionArn] }),
 )

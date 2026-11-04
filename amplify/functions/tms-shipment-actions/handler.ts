@@ -174,9 +174,12 @@ import {
   listPostings,
   postLoad,
   unpostLoad,
+  postQuoteLoad,
+  unpostQuoteLoad,
   type PostingDeps,
 } from './postings'
 import { priceFromMarket, type MarketRateDeps } from './marketRate'
+import { getLaneIntelligence, type LaneIntelDeps } from './laneIntel'
 import {
   listCarrierOffers,
   recordCarrierOffer,
@@ -220,7 +223,7 @@ import {
   stopEventId,
 } from '../../../src/lib/checkCalls'
 import { creditSummaryForCustomer, resolveCreditPolicy, type CreditSummary } from '../../../src/lib/customerCredit'
-import { evaluateCarrierBooking } from '../../../src/lib/carrierEligibility'
+import { applyCoverRules, evaluateCarrierBooking } from '../../../src/lib/carrierEligibility'
 import { quickPayFee, quickPayTiersOf, tierFor } from '../../../src/lib/quickPay'
 import {
   outsideCarrierLoadPatch,
@@ -249,6 +252,10 @@ import { evaluateReleaseGate, releaseGateError } from '../../../src/lib/releaseG
 import { isEmailAddress } from '../../../src/lib/emailAddress'
 import { mcpPacketStanding, rateConMcpRefusal } from '../../../src/lib/mcpPacket'
 import { composeRateConCc } from './rateConRecipients'
+import {
+  advanceTarget, deriveAssignmentStatus, driverInfoGaps, isCarrierAssignmentStatus, ladderPatch,
+  type AssignmentFacts, type CarrierAssignmentStatus,
+} from '../../../src/lib/carrierAssignment'
 import {
   FROZEN_LOCKED_LOAD_KEYS,
   INVOICE_LOCKED_ORDER_KEYS,
@@ -548,6 +555,7 @@ type Action =
   | 'INTAKE_MOVE_TO_ACTIVE'
   | 'INTAKE_MARK_REVIEWED'
   | 'INTAKE_DISMISS'
+  | 'INTAKE_LINK_SHIPMENT'
   | 'SAVE_ORDER_FORM'
   | 'CHECK_CREDIT'
   | 'SUBMIT_ORDER'
@@ -584,6 +592,10 @@ type Action =
   | 'ASSIGN_ASSET'
   | 'ASSIGN_CARRIER'
   | 'BOOK_CARRIER'
+  // Step AM. The cover flow and the assignment ladder it climbs.
+  | 'COVER_CARRIER'
+  | 'ENTER_DRIVER_INFO'
+  | 'MARK_RATE_CON_SIGNED'
   | 'SET_QUICK_PAY'
   | 'SEND_RATE_CON'
   | 'VOID_RATE_CON'
@@ -642,6 +654,9 @@ type Action =
   | 'UNPOST_LOAD'
   | 'LIST_POSTINGS'
   | 'PRICE_FROM_MARKET'
+  | 'LANE_INTELLIGENCE'
+  | 'POST_QUOTE_LOAD'
+  | 'UNPOST_QUOTE_LOAD'
   | 'RECORD_CARRIER_OFFER'
   | 'LIST_CARRIER_OFFERS'
   | 'SEND_SETUP_PACKET'
@@ -694,6 +709,11 @@ const OFFER_ACTIONS: Record<string, true> = {
   // Step P4. Asking what the lane pays is quoting work and dispatch work alike;
   // it writes a price onto a quote only when that quote is still unsent.
   PRICE_FROM_MARKET: true,
+  // Step AE. The Rate-intelligence panel's two history sections: bounded index reads, no writes.
+  LANE_INTELLIGENCE: true,
+  // Step AE. Push to DAT from a quote or spot request: the same board posting as POST_LOAD, with no shipment.
+  POST_QUOTE_LOAD: true,
+  UNPOST_QUOTE_LOAD: true,
 }
 
 /**
@@ -4904,6 +4924,7 @@ async function removeLoadCarrier(input: Row, caller: Caller): Promise<Row> {
   // So is the tracking link their driver was texted: we no longer track this truck,
   // and a live token on a carrier we dropped is a public page nobody is watching.
   const removedAt = nowIso()
+  const repostToDat = optionalBoolean(input.repostToDat) ?? false
   const trackingLink = await activeCarrierPingLink(carrier)
   const stopsTracking = trackingLink != null || carrier.trackingStartedAt != null
   await transact(
@@ -4913,6 +4934,8 @@ async function removeLoadCarrier(input: Row, caller: Caller): Promise<Row> {
         ...(voidsRateCon ? { rateConStatus: 'VOIDED', rateConToken: null } : {}),
         ...(stopsTracking ? { trackingLinkId: null, trackingStoppedAt: removedAt } : {}),
       }),
+      // Step AM. Nobody is on the shipment now; the retired row keeps its rung as history.
+      updateItemTx(SHIPMENT_TABLE_NAME, shipmentId, ladderMirror(null, removedAt), null),
       ...(trackingLink
         ? [updateItemTx(TRACKING_LINK_TABLE_NAME, String(trackingLink.id), {
             status: 'REVOKED',
@@ -4952,6 +4975,7 @@ async function removeLoadCarrier(input: Row, caller: Caller): Promise<Row> {
       ...uncovered,
       stops: JSON.stringify(uncovered.stops),
       activeLoadCarrierId: null,
+      carrierAssignmentStatus: null,
       trackingProvider: 'NONE',
       ...tag,
       status: 'SOURCING',
@@ -4972,12 +4996,25 @@ async function removeLoadCarrier(input: Row, caller: Caller): Promise<Row> {
 
   await writeAudit('LOAD_CARRIER', loadCarrierId, `REMOVE_LOAD_CARRIER:${outcome}`, caller, {
     loadId, reason, note, voidedRateCon: voidsRateCon, revokedTrackingLink: trackingLink != null,
+    assignmentStatus: carrier.assignmentStatus ?? null, repostToDat,
   })
   // Step H. A TONU after the freight delivered does not un-deliver it: the lane
   // keeps the sample it recorded and the statistics stop counting it. `load` was
   // read before the removal, so this is the rung the load was actually at.
   if (outcome === 'TONU' && isDeliveredOrLater(load.status)) await excludeLaneSample(quoteDeps, loadId)
-  return rederiveShipmentStatus(shipmentId, caller)
+  const bundle = await rederiveShipmentStatus(shipmentId, caller)
+  if (!repostToDat) return bundle
+  // Step AM. Optional, default off: put the freight back on DAT through the ordinary POST_LOAD path.
+  // The removal is already committed, so a refused or failed post is reported, never thrown.
+  let repost: { ok: boolean; message: string }
+  try {
+    await postLoad(postingDeps, { shipmentId, loadId, providers: ['DAT'] }, caller)
+    repost = { ok: true, message: 'Reposted to DAT.' }
+  } catch (err) {
+    repost = { ok: false, message: err instanceof Error ? err.message : 'The DAT post failed.' }
+  }
+  await writeAudit('LOAD_CARRIER', loadCarrierId, 'REMOVE_LOAD_CARRIER:REPOST_DAT', caller, { loadId, ok: repost.ok })
+  return { ...(await readBundle(shipmentId)) as unknown as Row, repost }
 }
 
 async function listLoadCarriersByCarrier(input: Row, caller: Caller): Promise<Row> {
@@ -5039,6 +5076,45 @@ function carrierOwnCostCents(charges: Row[], loadCarrierId: string): number {
     .reduce((sum, c) => sum + (numberOrNull(c.amountCents) ?? 0), 0)
 }
 
+// ── The assignment ladder (Step AM) ──────────────────────────────────────────
+// One LoadCarrier climbs ASSIGNED_SETUP_PENDING -> ... -> DRIVER_INFO_ENTERED
+// (src/lib/carrierAssignment.ts). The rung is derived from facts — MCP decides setup, the rate-con
+// record decides sent/signed, the four driver fields decide the last — and only ever moves up.
+
+/** Facts for the ladder from an assignment row with this write's changes laid over it. */
+function assignmentFacts(row: Row, directoryStatus: unknown, over: Row = {}): AssignmentFacts {
+  const merged = { ...row, ...over }
+  return {
+    carrierStatus: typeof directoryStatus === 'string' ? directoryStatus : null,
+    rateConStatus: merged.rateConStatus as string | null | undefined,
+    rateConSignedAt: merged.rateConSignedAt as string | null | undefined,
+    driverName: merged.driverName as string | null | undefined,
+    driverPhone: merged.driverPhone as string | null | undefined,
+    truckNumber: merged.truckNumber as string | null | undefined,
+    trailerNumber: merged.trailerNumber as string | null | undefined,
+  }
+}
+
+/** The ladder columns this write earns `row`, or null when it stays where it is. */
+function ladderStep(row: Row, directoryStatus: unknown, over: Row, now: string): { to: CarrierAssignmentStatus; cols: Row } | null {
+  const current = isCarrierAssignmentStatus(row.assignmentStatus) ? row.assignmentStatus : null
+  const to = advanceTarget(current, assignmentFacts(row, directoryStatus, over))
+  return to ? { to, cols: ladderPatch(row, to, now) } : null
+}
+
+/** The rung shown on the board: mirrored onto the Shipment and the Load. */
+function ladderMirror(status: CarrierAssignmentStatus | null, now: string): Row {
+  return { carrierAssignmentStatus: status, updatedAt: now }
+}
+
+/** Mirror the rung when the shipment row is not already part of the transaction. */
+function ladderMirrorWrites(row: Row, status: CarrierAssignmentStatus | null, now: string): TransactWriteItem[] {
+  return [
+    updateItemTx(SHIPMENT_TABLE_NAME, String(row.shipmentId), ladderMirror(status, now), null),
+    updateItemTx(LOAD_TABLE_NAME, String(row.loadId), ladderMirror(status, now), null),
+  ]
+}
+
 /**
  * Book a directory carrier onto a load.
  *
@@ -5047,7 +5123,7 @@ function carrierOwnCostCents(charges: Row[], loadCarrierId: string): number {
  * acknowledged by key, and the keys that were acknowledged are kept on the row so
  * the next person can see what was waved through and by whom.
  */
-async function bookCarrier(input: Row, caller: Caller, extra?: BookCarrierExtra): Promise<Row> {
+async function bookCarrier(input: Row, caller: Caller, extra?: BookCarrierExtra, options: { cover?: boolean } = {}): Promise<Row> {
   const loadId = assertString(input.loadId, 'loadId')
   const expectedUpdatedAt = assertExpectedUpdatedAt(input)
   const carrierId = assertString(input.carrierId, 'carrierId')
@@ -5109,7 +5185,7 @@ async function bookCarrier(input: Row, caller: Caller, extra?: BookCarrierExtra)
     activeOtherRows.map((c) => [String(c.loadId), optionalString(activeOtherLoads.get(String(c.loadId))?.pickupAppt, 60)]),
   )
 
-  const { blocks, warnings } = evaluateCarrierBooking({
+  const evaluated = evaluateCarrierBooking({
     carrier: carrier as unknown as CarrierRecord,
     documents: documents as unknown as CarrierDocumentRecord[],
     load: {
@@ -5133,8 +5209,13 @@ async function bookCarrier(input: Row, caller: Caller, extra?: BookCarrierExtra)
     isAdmin: caller.isAdmin,
   })
 
+  // Step AM. COVER_CARRIER is BOOK_CARRIER plus the MCP rules: UNACCEPTABLE blocks, MODERATE needs an
+  // acknowledgement, and a carrier that is not yet ACTIVE is assigned in the setup-pending state.
+  const cover = options.cover === true ? applyCoverRules(carrier, evaluated) : null
+  const blocks = cover ? cover.blocks : evaluated.blocks
+  const warnings = cover ? cover.warnings : evaluated.warnings
   if (blocks.length > 0) {
-    throw new Error(`${carrierName ?? 'That carrier'} cannot be booked: ${blocks.map((b) => b.detail).join(' ')}`)
+    throw new Error(`${carrierName ?? 'That carrier'} cannot be ${cover ? 'assigned' : 'booked'}: ${blocks.map((b) => b.detail).join(' ')}`)
   }
   const acknowledgedKeys = new Set(acknowledged)
   const unacknowledged = warnings.filter((w) => !acknowledgedKeys.has(w.key))
@@ -5213,6 +5294,14 @@ async function bookCarrier(input: Row, caller: Caller, extra?: BookCarrierExtra)
     settings,
   )
 
+  const startRung = deriveAssignmentStatus(assignmentFacts({}, carrier.status ?? 'PENDING', {
+    rateConStatus: 'NOT_SENT',
+    driverName: optionalString(input.driverName, 120),
+    driverPhone: optionalString(input.driverPhone, 40),
+    truckNumber: optionalString(input.truckNumber, 40),
+    trailerNumber: optionalString(input.trailerNumber, 40),
+  }))
+  const ladderCols = ladderPatch({}, startRung, now)
   const loadCarrier: Row = {
     id: newCarrierId,
     __typename: 'LoadCarrier',
@@ -5253,6 +5342,8 @@ async function bookCarrier(input: Row, caller: Caller, extra?: BookCarrierExtra)
     apStatusChangedAt: now,
     // Step H. An offer that won the load names itself on the assignment it bought.
     ...(extra?.loadCarrierFields ?? {}),
+    // Step AM. The ladder starts where the facts put it: waiting on setup unless the carrier is ACTIVE.
+    ...ladderCols,
     createdBy: caller.email,
     updatedBy: caller.email,
     createdAt: now,
@@ -5288,6 +5379,7 @@ async function bookCarrier(input: Row, caller: Caller, extra?: BookCarrierExtra)
         updatedBy: caller.email,
         updatedAt: now,
       }, null),
+      updateItemTx(SHIPMENT_TABLE_NAME, shipmentId, ladderMirror(startRung, now), null),
       // Step H. ACCEPT_OFFER stamps its offer WON and closes the round's losers
       // here, so the quote thread and the assignment land together or not at all.
       ...(extra?.writes ?? []),
@@ -5311,6 +5403,7 @@ async function bookCarrier(input: Row, caller: Caller, extra?: BookCarrierExtra)
         ...cleared,
         stops: JSON.stringify(cleared.stops),
         activeLoadCarrierId: newCarrierId,
+        carrierAssignmentStatus: startRung,
         equipmentType,
         trackingProvider,
         ...tag,
@@ -5325,11 +5418,12 @@ async function bookCarrier(input: Row, caller: Caller, extra?: BookCarrierExtra)
     'Load update',
   )
 
-  await writeAudit('LOAD_CARRIER', newCarrierId, 'BOOK_CARRIER', caller, {
+  await writeAudit('LOAD_CARRIER', newCarrierId, cover ? 'COVER_CARRIER' : 'BOOK_CARRIER', caller, {
     loadId,
     carrierId,
     carrierRateCents,
     contactId,
+    assignmentStatus: startRung,
     blocks: [],
     warnings: warnings.map((w) => w.key),
     acknowledged,
@@ -5451,6 +5545,9 @@ async function sendRateConEmail(args: {
   }
 }
 
+// Step AM. The driver is the LAST rung of the ladder (entered by the rep, or by the carrier on the
+// signing page), so a rate con goes out without one. A tenant may still demand more through
+// `rateConRequiredFields`; the driver keys stay in the table for that.
 const RATE_CON_SEND_FIELDS: Record<string, { column: string; label: string }> = {
   DRIVER_NAME: { column: 'driverName', label: 'driver name' },
   DRIVER_PHONE: { column: 'driverPhone', label: 'driver phone' },
@@ -5519,6 +5616,10 @@ async function sendRateCon(input: Row, caller: Caller): Promise<Row> {
   if (!standing.completed) {
     throw new Error(rateConMcpRefusal(String(directoryCarrier.name ?? carrier.carrierName ?? 'This carrier'), standing))
   }
+  // Step AM. Setup complete is MyCarrierPackets' word alone: the directory carrier is ACTIVE.
+  if (directoryCarrier.status !== 'ACTIVE') {
+    throw new Error(`${String(directoryCarrier.name ?? carrier.carrierName ?? 'This carrier')} is not set up yet (status ${String(directoryCarrier.status ?? 'PENDING')}). A rate confirmation can be sent only after MyCarrierPackets reports the carrier's setup complete.`)
+  }
   const loadId = String(carrier.loadId)
   const shipmentId = String(carrier.shipmentId)
   await requireLiveShipment(shipmentId)
@@ -5529,7 +5630,7 @@ async function sendRateCon(input: Row, caller: Caller): Promise<Row> {
   if (!BUCKET_NAME) throw new Error('Document storage is not configured')
 
   const settings = await getSettings()
-  const requiredKeys: string[] = Object.keys(RATE_CON_SEND_FIELDS)
+  const requiredKeys: string[] = ['DISPATCHER_EMAIL']
   if (Array.isArray(settings?.rateConRequiredFields)) {
     for (const key of settings.rateConRequiredFields as string[]) {
       if (!requiredKeys.includes(key)) requiredKeys.push(key)
@@ -5616,6 +5717,7 @@ async function sendRateCon(input: Row, caller: Caller): Promise<Row> {
     updatedAt: now,
   }
 
+  const sentRung = ladderStep(carrier, directoryCarrier.status, { rateConStatus: 'SENT' }, now)
   const transactionItems: TransactWriteItem[] = [
     putItem(CARRIER_DOCUMENT_TABLE_NAME, {
       id: documentId,
@@ -5643,6 +5745,7 @@ async function sendRateCon(input: Row, caller: Caller): Promise<Row> {
       rateConVersion: version,
       // The signing API's per-token rate limit counts from zero for each new link.
       rateConRequestCount: 0,
+      ...(sentRung?.cols ?? {}),
       updatedBy: caller.email,
       updatedAt: now,
     }, null),
@@ -5653,10 +5756,14 @@ async function sendRateCon(input: Row, caller: Caller): Promise<Row> {
       updateItemTx(SHIPMENT_TABLE_NAME, shipmentId, {
         threadKey,
         threadOpenedAt: now,
+        ...(sentRung ? ladderMirror(sentRung.to, now) : {}),
         updatedAt: now,
         updatedBy: caller.email,
       }, String(shipment.updatedAt ?? '')),
     )
+    if (sentRung) transactionItems.push(updateItemTx(LOAD_TABLE_NAME, loadId, ladderMirror(sentRung.to, now), null))
+  } else if (sentRung) {
+    transactionItems.push(...ladderMirrorWrites(carrier, sentRung.to, now))
   }
 
   await transact(transactionItems, 'rate confirmation')
@@ -5701,6 +5808,7 @@ async function sendRateCon(input: Row, caller: Caller): Promise<Row> {
 
   await writeAudit('LOAD_CARRIER', loadCarrierId, 'SEND_RATE_CON', caller, {
     loadId, version, to, cc, senderCc: composed.senderCopied ? caller.email : null, mcpStatus: standing.status,
+    assignmentStatus: sentRung?.to ?? carrier.assignmentStatus ?? null,
     expiresAt, documentId, s3Key, threadKey, emailStatus: emailOutcome.status,
   })
   return readBundle(shipmentId) as unknown as Row
@@ -5731,6 +5839,99 @@ async function voidRateCon(input: Row, caller: Caller): Promise<Row> {
   return readBundle(String(carrier.shipmentId)) as unknown as Row
 }
 
+// ── ENTER_DRIVER_INFO / MARK_RATE_CON_SIGNED (Step AM) ───────────────────────
+
+/** The one assignment these two actions work on: live, outside-carrier, directory-backed, set up. */
+async function setUpAssignment(loadCarrierId: string, what: string): Promise<{ row: Row; directory: Row }> {
+  const row = await getById(LOAD_CARRIER_TABLE_NAME, loadCarrierId)
+  if (!row) throw new Error(`Load carrier not found: ${loadCarrierId}`)
+  if (row.status !== 'ACTIVE') throw new Error('That assignment has already been removed')
+  const carrierId = optionalString(row.carrierId, 100)
+  if (row.kind === 'OWN_ASSET' || !carrierId) throw new Error(`${what} belongs to an outside-carrier assignment`)
+  const directory = await getById(CARRIER_TABLE_NAME, carrierId)
+  if (!directory) throw new Error(`Carrier not found: ${carrierId}`)
+  if (directory.status !== 'ACTIVE') {
+    throw new Error(`${what} is possible only after MyCarrierPackets reports ${String(directory.name ?? row.carrierName ?? 'the carrier')}'s setup complete (carrier status ${String(directory.status ?? 'PENDING')}).`)
+  }
+  await requireLiveShipment(String(row.shipmentId))
+  return { row, directory }
+}
+
+/**
+ * Driver name, phone, truck # and trailer # — all four. Tracking (the driver SMS, the check-call
+ * agent) keys off this record, so dispatch waits for it. Entered by the rep here, or by the carrier
+ * on the signing page.
+ */
+async function enterDriverInfo(input: Row, caller: Caller): Promise<Row> {
+  const loadCarrierId = assertString(input.loadCarrierId, 'loadCarrierId')
+  const fields: Row = {
+    driverName: optionalString(input.driverName, 120),
+    driverPhone: optionalString(input.driverPhone, 40),
+    truckNumber: optionalString(input.truckNumber, 40),
+    trailerNumber: optionalString(input.trailerNumber, 40),
+  }
+  const gaps = driverInfoGaps(fields)
+  if (gaps.length > 0) throw new Error(`Driver info is required: enter the ${formatMissingFields(gaps)}.`)
+
+  const { row, directory } = await setUpAssignment(loadCarrierId, 'Entering driver info')
+  const now = nowIso()
+  const step = ladderStep(row, directory.status, fields, now)
+  await transact(
+    [
+      updateItemTx(LOAD_CARRIER_TABLE_NAME, loadCarrierId, { ...fields, ...(step?.cols ?? {}), updatedBy: caller.email, updatedAt: now }, null),
+      ...(step ? ladderMirrorWrites(row, step.to, now) : []),
+    ],
+    'driver info',
+  )
+  // Keys only: a name and a phone number never reach the audit log.
+  await writeAudit('LOAD_CARRIER', loadCarrierId, 'ENTER_DRIVER_INFO', caller, {
+    loadId: String(row.loadId), keys: Object.keys(fields), assignmentStatus: step?.to ?? row.assignmentStatus ?? null,
+  })
+  return readBundle(String(row.shipmentId)) as unknown as Row
+}
+
+/**
+ * The carrier signed on paper or by e-mail: the rep uploads the signed PDF (PREPARE_DOCUMENT_UPLOAD +
+ * COMMIT_DOCUMENT, type RATE_CON) and names it here. The signing link remains the other way to sign.
+ */
+async function markRateConSigned(input: Row, caller: Caller): Promise<Row> {
+  const loadCarrierId = assertString(input.loadCarrierId, 'loadCarrierId')
+  const documentId = assertString(input.documentId, 'documentId')
+  const { row, directory } = await setUpAssignment(loadCarrierId, 'Marking a rate confirmation signed')
+  const status = String(row.rateConStatus ?? 'NOT_SENT')
+  if (!['SENT', 'OPENED', 'EXPIRED'].includes(status)) {
+    throw new Error(status === 'SIGNED'
+      ? 'That rate confirmation is already signed'
+      : 'Send the rate confirmation first; only one that was sent can be marked signed')
+  }
+  const document = await getById(SHIPMENT_DOCUMENT_TABLE_NAME, documentId)
+  if (!document || document.shipmentId !== row.shipmentId) throw new Error('Upload the signed rate confirmation to this shipment first')
+  if (document.type !== 'RATE_CON') throw new Error('The uploaded document must be filed as a rate confirmation')
+  if (document.status !== 'ACTIVE') throw new Error('That document has been voided; upload the signed copy again')
+  if (document.contentType !== 'application/pdf') throw new Error('The signed rate confirmation must be a PDF')
+
+  const now = nowIso()
+  const signed: Row = {
+    rateConStatus: 'SIGNED',
+    rateConSignedAt: now,
+    rateConSignerName: `${caller.email} (marked signed)`,
+    rateConKey: String(document.s3Key),
+    rateConToken: null,
+  }
+  const step = ladderStep(row, directory.status, signed, now)
+  await transact(
+    [
+      updateItemTx(LOAD_CARRIER_TABLE_NAME, loadCarrierId, { ...signed, ...(step?.cols ?? {}), updatedBy: caller.email, updatedAt: now }, null),
+      ...(step ? ladderMirrorWrites(row, step.to, now) : []),
+    ],
+    'rate confirmation',
+  )
+  await writeAudit('LOAD_CARRIER', loadCarrierId, 'MARK_RATE_CON_SIGNED', caller, {
+    loadId: String(row.loadId), from: status, documentId, s3Key: String(document.s3Key), assignmentStatus: step?.to ?? row.assignmentStatus ?? null,
+  })
+  return readBundle(String(row.shipmentId)) as unknown as Row
+}
+
 // ── DISPATCH_LOAD ────────────────────────────────────────────────────────────
 
 /**
@@ -5759,6 +5960,16 @@ async function dispatchLoad(input: Row, caller: Caller): Promise<Row> {
   // message and not the generic one.
   await assertOwnAssetDriver(load, active, 'DISPATCH')
   if (!active) throw new Error('That load has nobody on it to dispatch')
+  // Step AM. An outside carrier is dispatched only once MyCarrierPackets says it is set up and the four
+  // driver fields (name, phone, truck #, trailer #) are on the assignment: tracking keys off them.
+  if (active.kind === 'CARRIER') {
+    const directory = optionalString(active.carrierId, 100) ? await getById(CARRIER_TABLE_NAME, String(active.carrierId)) : null
+    if (directory && directory.status !== 'ACTIVE') {
+      throw new Error(`${String(directory.name ?? active.carrierName ?? 'The carrier')} is not set up yet: dispatch waits for MyCarrierPackets to report setup complete.`)
+    }
+    const gaps = driverInfoGaps(active)
+    if (gaps.length > 0) throw new Error(`Driver info is required before dispatch: enter the ${formatMissingFields(gaps)}.`)
+  }
 
   const warnings = new Set(
     (Array.isArray(active.bookingWarnings) ? active.bookingWarnings : []).map((w) => String(w)),
@@ -6289,14 +6500,20 @@ async function updateLoadCarrierDetails(input: Row, caller: Caller): Promise<Row
   await requireLiveShipment(shipmentId)
   if (String(assignment.updatedAt ?? '') !== expectedUpdatedAt) throw conflictError('assignment', null)
 
+  // Step AM. Filling in the last driver field here earns the same rung ENTER_DRIVER_INFO does.
+  const directoryId = optionalString(assignment.carrierId, 100)
+  const directory = directoryId ? await getById(CARRIER_TABLE_NAME, directoryId) : null
+  const now = nowIso()
+  const step = directory ? ladderStep(assignment, directory.status, patch, now) : null
   await transact(
     [
       updateItemTx(
         LOAD_CARRIER_TABLE_NAME,
         loadCarrierId,
-        { ...patch, updatedBy: caller.email, updatedAt: nowIso() },
+        { ...patch, ...(step?.cols ?? {}), updatedBy: caller.email, updatedAt: now },
         expectedUpdatedAt,
       ),
+      ...(step ? ladderMirrorWrites(assignment, step.to, now) : []),
     ],
     'assignment',
   )
@@ -7494,6 +7711,7 @@ const postingDeps: PostingDeps = {
     load: LOAD_TABLE_NAME,
     order: ORDER_TABLE_NAME,
     integration: INTEGRATION_TABLE_NAME,
+    quote: QUOTE_TABLE_NAME,
   },
   getById,
   queryIndex,
@@ -7501,6 +7719,12 @@ const postingDeps: PostingDeps = {
   readBundle,
   writeAudit,
   adapterFor: boardAdapterFor,
+  now: nowIso,
+}
+
+const laneIntelDeps: LaneIntelDeps = {
+  db: dynamo,
+  tables: { quote: QUOTE_TABLE_NAME, laneSample: LANE_RATE_SAMPLE_TABLE_NAME },
   now: nowIso,
 }
 
@@ -7666,6 +7890,7 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
     case 'INTAKE_MOVE_TO_ACTIVE':
     case 'INTAKE_MARK_REVIEWED':
     case 'INTAKE_DISMISS':
+    case 'INTAKE_LINK_SHIPMENT':
       return runIntakeAction(intakeDeps, action as IntakeAction, input, caller)
     case 'SAVE_ORDER_FORM':
       return (await saveOrderForm(input, caller)).bundle as unknown as Row
@@ -7745,6 +7970,12 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return assignCarrier(input, caller)
     case 'BOOK_CARRIER':
       return bookCarrier(input, caller)
+    case 'COVER_CARRIER':
+      return bookCarrier(input, caller, undefined, { cover: true })
+    case 'ENTER_DRIVER_INFO':
+      return enterDriverInfo(input, caller)
+    case 'MARK_RATE_CON_SIGNED':
+      return markRateConSigned(input, caller)
     case 'SET_QUICK_PAY':
       return setQuickPay(input, caller)
     case 'SEND_RATE_CON':
@@ -7849,6 +8080,12 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return listPostings(postingDeps, input)
     case 'PRICE_FROM_MARKET':
       return priceFromMarket(marketRateDeps, input, caller)
+    case 'POST_QUOTE_LOAD':
+      return postQuoteLoad(postingDeps, input, caller)
+    case 'UNPOST_QUOTE_LOAD':
+      return unpostQuoteLoad(postingDeps, input, caller)
+    case 'LANE_INTELLIGENCE':
+      return { ...(await getLaneIntelligence(laneIntelDeps, input)) }
     case 'RECORD_CARRIER_OFFER':
       return recordCarrierOffer(carrierOfferDeps, input, caller)
     case 'LIST_CARRIER_OFFERS':

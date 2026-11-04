@@ -8,18 +8,22 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
 import { ConvertQuoteDialog } from '@/features/quotes/components/ConvertQuoteDialog'
+import { PushToDatCard } from '@/features/quotes/components/PushToDatCard'
+import { RateIntelligencePanel } from '@/features/quotes/components/RateIntelligencePanel'
+import { LOST_REASON_LABEL } from '@/features/quotes/quoteViews'
 import {
   TmsAlert, TmsBadge, TmsButton, TmsDialog, TmsDrawer, TmsField, TmsInput, TmsSelect, TmsTextarea,
 } from '@/features/tms/kit'
 import { useAuth } from '@/hooks/useAuth'
-import { createCustomer, getQuote, saveQuote, sendQuote, spotAction } from '@/lib/apiClient'
+import { createCustomer, getQuote, markQuoteLost, saveQuote, sendQuote, spotAction } from '@/lib/apiClient'
+import { LOST_REASONS, isOpenQuoteStatus } from '@/lib/quotes'
 import { QUOTE_LINE_CODES } from '@/lib/spot/accessorials'
-import type { LoadChargeInput, QuoteRecord, SpotEquipmentCode, SpotRequestMode } from '@/types/tms'
+import type { LoadChargeInput, QuoteLostReason, QuoteRecord, SpotEquipmentCode, SpotRequestMode } from '@/types/tms'
 import type { SpotRequestRecord, SpotStatusView, SpotSuggestedResponse } from '@/lib/spot/types'
 import { FieldChip } from './FieldChips'
 import { PricingCard } from './PricingCard'
 import { formFrom, patchFromForm, rateBlock, type Form } from './spotRules'
-import { copyText, gmailComposeUrl, gmailThreadUrl, mailtoUrl, quoteStops, relativeTime } from './spotHelpers'
+import { copyText, gmailComposeUrl, gmailThreadUrl, mailtoUrl, quoteStops, relativeTime, spotEnds } from './spotHelpers'
 import { PROSPECT_STATUSES, useCustomerList } from './useCustomerIndex'
 import { useSpotPricing } from './useSpotPricing'
 import { useSpotRequest } from './useSpotRequests'
@@ -83,6 +87,7 @@ function RequestPanel({
   const [bodyText2, setBodyText2] = useState('')
   const [lostDialog, setLostDialog] = useState(false)
   const [lostReason, setLostReason] = useState('')
+  const [lostCode, setLostCode] = useState<QuoteLostReason>('TOO_HIGH')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [fullBody, setFullBody] = useState(false)
@@ -93,6 +98,10 @@ function RequestPanel({
   const { customers, reload: reloadCustomers } = useCustomerList()
 
   const pricing = useSpotPricing(ex, request.customerId)
+  const ends = spotEnds(ex)
+  const rateLane = ends.origin && ends.destination
+    ? { originCity: ends.origin.city, originState: ends.origin.state, originZip: ends.origin.zip, destinationCity: ends.destination.city, destinationState: ends.destination.state, destinationZip: ends.destination.zip }
+    : null
   const suggested = pricing.suggestion?.suggestedCents ?? null
   const rateText = rateEdit ?? (suggested != null ? String(suggested / 100) : '')
   const block = rateBlock(pricing, rateText, isManager, stubAck)
@@ -206,8 +215,16 @@ function RequestPanel({
     if (await run(() => spotAction('SPOT_MARK_SENT', { requestId: request.id }), 'Marked as sent')) finish()
   }
 
+  // The request is the rep's call and is closed first; the quote behind it (when one is still open) is
+  // closed with the same reason so the lane's quote history records a loss, not a quote left pending.
   const markLost = async () => {
-    if (await run(() => spotAction('SPOT_MARK_OUTCOME', { requestId: request.id, outcome: 'LOST', lostReason: lostReason.trim() || undefined }), 'Marked as lost')) {
+    const note = lostReason.trim()
+    const ok = await run(async () => {
+      await spotAction('SPOT_MARK_OUTCOME', { requestId: request.id, outcome: 'LOST', lostReason: note || undefined })
+      const openQuote = quoteId && (!request.quoteStatus || isOpenQuoteStatus(request.quoteStatus as QuoteRecord['status']))
+      if (openQuote) await markQuoteLost({ quoteId, reason: lostCode, note: note || undefined })
+    }, 'Marked as lost')
+    if (ok) {
       setLostDialog(false)
       finish()
     }
@@ -409,6 +426,33 @@ function RequestPanel({
         <PricingCard pricing={pricing} rateText={rateText} onRateText={setRateEdit} stubAck={stubAck} onStubAck={setStubAck} block={block} disabled={!open} />
       </Section>
 
+      <div data-testid="spot-section-intel">
+        <RateIntelligencePanel
+          lane={rateLane}
+          equipmentType={ex?.equipmentType ?? null}
+          customerId={request.customerId}
+          pickupDate={ex?.pickupDate ?? null}
+          excludeQuoteId={quoteId}
+          market={pricing.market}
+          marketLoading={pricing.loading}
+          marketError={pricing.error}
+        />
+      </div>
+
+      <div data-testid="spot-section-push-dat">
+        <PushToDatCard
+          quoteId={quoteId}
+          spotRequestId={request.id}
+          load={{
+            originCity: ends.origin?.city, originState: ends.origin?.state,
+            destinationCity: ends.destination?.city, destinationState: ends.destination?.state,
+            equipmentType: ex?.equipmentType ?? null, pickupDate: ex?.pickupDate ?? null, weightLbs: ex?.weightLbs ?? null,
+          }}
+          disabled={!(open || sent) || !rateLane || !ex?.equipmentType}
+          disabledReason={!(open || sent) ? 'This request is closed.' : 'Needs a pickup, a delivery and an equipment type.'}
+        />
+      </div>
+
       <Section title="Suggested response" testId="spot-section-reply">
         <p className="tms-muted tms-flush" data-testid="spot-readonly-note">
           Read-only: BCAT Ops never sends or drafts mail. Edit the text, copy it and send it yourself.
@@ -471,7 +515,15 @@ function RequestPanel({
           </>
         }
       >
-        <TmsField label="Reason (optional)">
+        <TmsField label="Why we did not get it">
+          <TmsSelect
+            data-testid="spot-lost-code"
+            value={lostCode}
+            onChange={(e) => setLostCode(e.target.value as QuoteLostReason)}
+            options={LOST_REASONS.map((value) => ({ value, label: LOST_REASON_LABEL[value] }))}
+          />
+        </TmsField>
+        <TmsField label="Note (optional)">
           <TmsInput data-testid="spot-lost-reason" maxLength={200} value={lostReason} onChange={(e) => setLostReason(e.target.value)} />
         </TmsField>
       </TmsDialog>

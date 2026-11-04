@@ -13,6 +13,7 @@
  * payroll does not.
  */
 import { useEffect, useMemo, useState } from 'react'
+import { useInRouterContext, useNavigate } from 'react-router-dom'
 import { Building2, Plus, Trash2 } from 'lucide-react'
 import { RepPicker } from '@/components/RepPicker'
 import {
@@ -81,6 +82,7 @@ export interface BookCarrierDialogProps {
 
 export function BookCarrierDialog({ bundle, isAdmin, busy, onClose, onConfirm, onRateCon, initial }: BookCarrierDialogProps) {
   const { carriers, loading: carriersLoading } = useCarriers()
+  const inRouter = useInRouterContext()
   const [settings, setSettings] = useState<TmsSettings | null>(null)
   const [step, setStep] = useState<1 | 2 | 3>(initial?.carrierId ? 2 : 1)
   const [search, setSearch] = useState('')
@@ -294,6 +296,14 @@ export function BookCarrierDialog({ bundle, isAdmin, busy, onClose, onConfirm, o
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Name, MC or DOT"
           />
+          {inRouter && (
+            <FindInviteLauncher
+              shipmentId={bundle.shipment.id}
+              loadId={bundle.loads[0]?.id}
+              query={search}
+              onLeave={onClose}
+            />
+          )}
           {carriersLoading && <p className="tms-muted">Loading carriers…</p>}
           {!carriersLoading && candidates.length === 0 && (
             <p className="tms-muted">No bookable carrier matches that search.</p>
@@ -507,6 +517,30 @@ export function BookCarrierDialog({ bundle, isAdmin, busy, onClose, onConfirm, o
 
       {error && <p className="mt-2 text-xs" style={{ color: 'var(--tms-badge-red)' }}>{error}</p>}
     </TmsDialog>
+  )
+}
+
+/** Step AD: carrier not in the directory? Review it on MyCarrierPackets and invite it, from this load. */
+function FindInviteLauncher({ shipmentId, loadId, query, onLeave }: { shipmentId: string; loadId?: string; query: string; onLeave: () => void }) {
+  const navigate = useNavigate()
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <span className="tms-muted" style={{ fontSize: 12 }}>Not in the list?</span>
+      <TmsButton
+        variant="ghost"
+        size="sm"
+        data-testid="launch-find-invite"
+        onClick={() => {
+          const p = new URLSearchParams({ shipmentId })
+          if (loadId) p.set('loadId', loadId)
+          if (query.trim()) p.set('q', query.trim())
+          onLeave()
+          navigate(`/tms/carriers/find?${p.toString()}`)
+        }}
+      >
+        Find &amp; invite a carrier
+      </TmsButton>
+    </div>
   )
 }
 

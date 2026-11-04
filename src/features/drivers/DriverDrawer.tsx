@@ -16,6 +16,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { Trash2, Building2, Truck, Camera, Check, ShieldCheck, User } from 'lucide-react'
 import { FormSection, Field } from '@/components/ui/form-section'
 import { errorMessage } from '@/lib/utils/errorMessage'
+import { activeUnits } from '@/lib/fleetActive'
 import { useDrivers } from '@/hooks/useDrivers'
 import { useAppStore } from '@/store/useAppStore'
 import { uploadDriverPhoto, deleteDriverPhoto } from '@/lib/apiClient'
@@ -91,8 +92,8 @@ export function DriverDrawer({ open, driver: driverProp, onClose }: DriverDrawer
   })
 
   // Trucks available to assign (manually-added or Motive-connected — both are Equipment).
-  const trucks = useAppStore((s) => s.equipment).filter((e) => e.type === 'truck' && e.active)
-  const trailers = useAppStore((s) => s.equipment).filter((e) => e.type === 'trailer' && e.active)
+  const trucks = activeUnits(useAppStore((s) => s.equipment), 'truck')
+  const trailers = activeUnits(useAppStore((s) => s.equipment), 'trailer')
 
   // Read the DOCUMENTS, not just the driver record. The record only carries an expiry if
   // someone typed one during upload, so a CDL that is plainly on file could leave this

@@ -55,3 +55,18 @@ form JSON and promote later). Collapsible sections in this order:
   underlying name where it differs.
 - Dense layout per Step AC: full width, compact inputs, sections collapsible, keyboard tab order
   matches Aljex's.
+
+## Ryne's feedback on the first dev cut (2026-11-04, screenshot aljex-create/30-dev-first-cut-feedback.png)
+1. Required fields: highlight the input (green border/background) instead of an asterisk.
+2. Miles: auto-calculate Customer Miles and Truck Miles from the stop addresses (Google Distance Matrix when
+   the server key exists, else the existing geocode/estimate path); user can override.
+3. Customer section: only TWO e-mail fields, not six.
+4. New **Bill To** block directly under Customer in the same section, READ-ONLY, filled when a customer is
+   chosen: payment terms, factor / no factor (factoring status), billing e-mails, credit limit (+ available).
+5. Check Calls section becomes a read-only PREVIEW of the Load Tracking view for this load (summary strip +
+   last check calls + link "Open in Load Tracking"), not a separate entry form.
+6. Overall: more concise, better flow, fits on one page — collapsible sections, dense inputs, logical tab order,
+   no dead space (see the empty right half of Shipping Requirements in the screenshot).
+7. Intake -> Create shipment: from an Intake row, "Create shipment" opens this form PRE-FILLED with everything
+   extracted from the e-mail thread / rate confirmation for that load (customer, stops, dates, equipment, weight,
+   commodity, refs, rate); extracted fields are marked so the reviewer sees what came from the e-mail.

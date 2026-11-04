@@ -5,6 +5,7 @@
  */
 import type { DenseColumn, DenseOption } from '@/features/tms/grid/denseGridModel'
 import { customerDisplayName } from '@/lib/customerResolution'
+import { LADDER_FILTER_OPTIONS, assignmentChipText } from './carrierLadder'
 import { BOARD_COLUMNS, boardStatusOf, type ShipmentRow } from './shipmentViews'
 
 export function sentence(value: string): string {
@@ -84,6 +85,17 @@ export const SHIPMENT_GRID_COLUMNS: DenseColumn<ShipmentRow>[] = BOARD_COLUMNS.m
         return [{ value: status, label: sentence(status) }]
       },
       sortValue: statusCellText,
+    }
+  }
+  if (col.key === 'carrierAssignment') {
+    // The facet is the ladder rung (five labels); the cell prints the chip, which shows the shipment's status once it has taken over.
+    return {
+      ...base,
+      filter: 'multi',
+      fixedOptions: LADDER_FILTER_OPTIONS,
+      optionsOf: (row) => LADDER_FILTER_OPTIONS.filter((o) => o.value === row.carrierAssignmentStatus),
+      sortValue: (row) => LADDER_FILTER_OPTIONS.findIndex((o) => o.value === row.carrierAssignmentStatus),
+      text: (row) => assignmentChipText(row, statusCellText(row)),
     }
   }
   if (col.key === 'customerName') {

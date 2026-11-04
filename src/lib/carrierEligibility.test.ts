@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { evaluateCarrierBooking, insuranceState, oosBps } from './carrierEligibility'
-import type { BookingFinding, CarrierBookingInput } from './carrierEligibility'
+import { applyCoverRules, evaluateCarrierBooking, insuranceState, oosBps } from './carrierEligibility'
+import type { BookingFinding, BookingReason, CarrierBookingInput } from './carrierEligibility'
 import type { CarrierDocumentRecord, CarrierDocumentType, CarrierRecord, InsurancePolicy } from '../types/tms'
 
 const NOW = '2026-06-01T00:00:00.000Z'
@@ -318,5 +318,47 @@ describe('oosBps', () => {
   it('reports the out-of-service share in basis points', () => {
     expect(oosBps(40, 3)).toBe(750)
     expect(oosBps(3, null)).toBe(0)
+  })
+})
+
+describe('applyCoverRules (Step AM)', () => {
+  const finding = (reason: BookingReason): BookingFinding => ({ reason, key: reason, detail: reason, adminOnly: false })
+  const reasons = (list: BookingFinding[]) => list.map((f) => f.reason)
+
+  it('blocks an UNACCEPTABLE packet, even on an ACTIVE carrier, and warns (acknowledgeable) on MODERATE', () => {
+    expect(reasons(applyCoverRules({ status: 'ACTIVE', mcpStatus: 'UNACCEPTABLE' }, { blocks: [], warnings: [] }).blocks)).toEqual(['MCP_UNACCEPTABLE'])
+    expect(reasons(applyCoverRules({ status: 'ACTIVE', mcpStatus: 'UNACCEPTABLE_REVIEW' }, { blocks: [], warnings: [] }).blocks)).toEqual(['MCP_UNACCEPTABLE'])
+    const moderate = applyCoverRules({ status: 'ACTIVE', mcpStatus: 'MODERATE' }, { blocks: [], warnings: [] })
+    expect(moderate.blocks).toEqual([])
+    expect(moderate.warnings.map((w) => w.key)).toEqual(['MCP_MODERATE'])
+  })
+
+  it('an ACTIVE carrier keeps the whole booking gate and is not setup-pending', () => {
+    const out = applyCoverRules({ status: 'ACTIVE', mcpStatus: 'ACCEPTABLE' }, { blocks: [finding('INSURANCE_EXPIRED')], warnings: [finding('MISSING_DOC')] })
+    expect(out).toMatchObject({ setupPending: false })
+    expect(reasons(out.blocks)).toEqual(['INSURANCE_EXPIRED'])
+    expect(reasons(out.warnings)).toEqual(['MISSING_DOC'])
+  })
+
+  it('a PENDING carrier is assignable only after the setup packet was sent', () => {
+    const gate = { blocks: [finding('STATUS_NOT_ALLOWED'), finding('INSURANCE_EXPIRED')], warnings: [finding('MISSING_DOC')] }
+    expect(reasons(applyCoverRules({ status: 'PENDING', mcpStatus: 'NOT_INVITED' }, gate).blocks)).toEqual(['SETUP_NOT_STARTED'])
+    for (const sent of [{ mcpInvitedAt: '2026-11-04T10:00:00.000Z' }, { mcpStatus: 'INVITED' }, { mcpStatus: 'IN_PROGRESS' }]) {
+      const out = applyCoverRules({ status: 'PENDING', ...sent }, gate)
+      expect(out).toMatchObject({ blocks: [], warnings: [], setupPending: true })
+    }
+  })
+
+  it('setup-pending keeps the refusals that do not depend on paperwork MCP has yet to collect', () => {
+    const out = applyCoverRules({ status: 'REVIEW', mcpInvitedAt: 'x' }, {
+      blocks: [finding('DO_NOT_USE'), finding('AUTHORITY_INACTIVE'), finding('ALREADY_COVERED'), finding('NEGATIVE_CARRIER_CHARGE'), finding('INSURANCE_UNVERIFIED')],
+      warnings: [],
+    })
+    expect(reasons(out.blocks)).toEqual(['DO_NOT_USE', 'AUTHORITY_INACTIVE', 'ALREADY_COVERED', 'NEGATIVE_CARRIER_CHARGE'])
+  })
+
+  it('an INACTIVE or DO_NOT_USE carrier cannot be assigned as setup-pending', () => {
+    expect(reasons(applyCoverRules({ status: 'INACTIVE', mcpInvitedAt: 'x' }, { blocks: [], warnings: [] }).blocks)).toEqual(['STATUS_NOT_ALLOWED'])
+    expect(reasons(applyCoverRules({ status: 'DO_NOT_USE', mcpInvitedAt: 'x' }, { blocks: [finding('DO_NOT_USE')], warnings: [] }).blocks)).toEqual(['DO_NOT_USE', 'STATUS_NOT_ALLOWED'])
   })
 })

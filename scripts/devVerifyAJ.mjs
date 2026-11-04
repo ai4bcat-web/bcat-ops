@@ -620,6 +620,9 @@ const RUNNERS = {
       }
       await b.navigate('/tms/tracking?assignee=all'); await waitLoaded(b)
       const rowSel = `[data-testid="tracking-row"][data-shipment-id="${id}"]`
+      // An own-fleet leg has no TMS rate con, and the desk lists rate-con-sent loads only (by design)
+      // until "Include loads without a TMS rate con" is on.
+      await b.poll(() => b.evaluate(`(() => { const t = [...document.querySelectorAll('button')].find((x) => /Include loads without a TMS rate con/.test(x.textContent)); if (!t) return false; if (t.getAttribute('aria-pressed') !== 'true') t.click(); return true })()`), 'the include-unsent toggle', 30_000)
       await b.poll(() => has(b, rowSel), 'the own-fleet fixture row on the grid', 45_000)
       await b.evaluate(`document.querySelector(${JSON.stringify(rowSel)}).click()`)
       await b.poll(async () => (await searchOf(b)).includes(`shipment=${id}`), 'row click adds ?shipment=', 15_000)

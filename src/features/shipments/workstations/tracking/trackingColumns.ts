@@ -10,6 +10,7 @@ import { formatBoardDateTime } from '@/lib/date'
 import { CHECK_CALL_TYPE_LABELS } from '@/lib/checkCalls'
 import { DOCUMENT_TYPE_LABELS } from '@/lib/shipmentDocuments'
 import type { EffectiveTrackingPrefs, TrackingMethod } from '@/lib/trackingPrefs'
+import { LADDER_FILTER_OPTIONS, assignmentChipText } from '../../carrierLadder'
 import { boardStatusOf, type BoardStatusKey, type ShipmentRow } from '../../shipmentViews'
 import { motionOf, relativeTime } from '../motion'
 import { nextEventText } from './nextEventText'
@@ -103,7 +104,7 @@ export interface TrackingColumnContext {
 }
 
 export const TRACKING_DEFAULT_COLUMNS = [
-  'shipment', 'status', 'customer', 'lane', 'pickup', 'delivery', 'lastLocation', 'ping', 'eta', 'nextCheck', 'pod', 'checkCalls', 'docs', 'carrier', 'tracker',
+  'shipment', 'status', 'customer', 'lane', 'pickup', 'delivery', 'lastLocation', 'ping', 'eta', 'nextCheck', 'pod', 'checkCalls', 'docs', 'carrier', 'carrierAssignment', 'tracker',
 ]
 
 const DOC_STATES = { REVIEW: 'To review', MISSING: 'Missing', OK: 'OK' } as const
@@ -261,6 +262,17 @@ export function trackingColumns({ nowMs, nameOf, prefsOf }: TrackingColumnContex
       text: (r) => (r.carrierName || r.carrierMc || r.carrierDot ? `${r.carrierName ?? '—'} · DOT ${r.carrierDot ?? '—'} · MC ${r.carrierMc ?? '—'}` : ''),
       filter: 'multi',
       optionsOf: (r) => (r.carrierName ? [{ value: r.carrierName, label: r.carrierName }] : []),
+    },
+    {
+      // Step AM: where the carrier is on the assignment ladder; the shipment's status takes over once driver info is in and it is moving.
+      key: 'carrierAssignment',
+      header: 'Carrier status',
+      group: 'Carrier',
+      text: (r) => assignmentChipText(r, boardStatusOf(r)),
+      filter: 'multi',
+      optionsOf: (r) => LADDER_FILTER_OPTIONS.filter((o) => o.value === r.carrierAssignmentStatus),
+      fixedOptions: LADDER_FILTER_OPTIONS,
+      sortValue: (r) => LADDER_FILTER_OPTIONS.findIndex((o) => o.value === r.carrierAssignmentStatus),
     },
     {
       key: 'tracker',

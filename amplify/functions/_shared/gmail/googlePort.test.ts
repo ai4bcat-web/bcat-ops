@@ -83,6 +83,14 @@ describe('oauth helpers', () => {
     expect(u.searchParams.get('scope')).toContain('gmail.readonly')
     expect(u.searchParams.get('state')).toBe('s1')
     // Read-only: no compose, send or modify scope is ever requested.
+  })
+
+  it('sends no hd restriction unless one is given, and still asks offline + consent for read-only scope', () => {
+    const u = new URL(buildAuthUrl({ clientId: 'cid', redirectUri: 'https://app.test/tms/rates/spot/callback', state: 's1', loginHint: 'ai4bcat@gmail.com' }))
+    expect(u.searchParams.has('hd')).toBe(false)
+    expect(u.searchParams.get('access_type')).toBe('offline')
+    expect(u.searchParams.get('prompt')).toBe('consent')
+    expect(u.searchParams.get('scope')).toContain('gmail.readonly')
     expect(u.searchParams.get('scope')).not.toMatch(/compose|send|modify|gmail\.full|mail\.google\.com/)
   })
 

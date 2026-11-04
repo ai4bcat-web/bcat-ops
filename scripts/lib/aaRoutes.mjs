@@ -52,7 +52,7 @@ export const AA_HOMES = [
   page('/tms/rates', 'Quotes › Quotes', '/tms/rates', 'quotes|tms'),
   page('/tms/rates/new', 'Quotes › Quotes', '/tms/rates', 'quotes|tms'),
   page('/tms/rates/:id', 'Quotes › Quotes', '/tms/rates', 'quotes|tms'),
-  page('/tms/rates/lanes', 'Quotes › Lane rates', '/tms/rates/lanes', 'quotes|tms'),
+  redirect('/tms/rates/lanes', '/tms/rates'),
   page('/tms/rates/spot', 'Quotes › Spot inbox', '/tms/rates/spot', 'quotes|tms'),
   page('/tms/rates/spot/callback', 'Quotes › Spot inbox', '/tms/rates/spot', 'quotes|tms'),
   page('/tms/invoicing', 'Accounting › Accounts Receivable', '/tms/invoicing', 'invoicing|tms'),
@@ -64,6 +64,7 @@ export const AA_HOMES = [
   page('/tms/customers', 'Customers › Customers', '/tms/customers', 'customers|tms'),
   page('/tms/customers/follow-ups', 'Customers › Follow-ups', '/tms/customers/follow-ups', 'customers|tms'),
   page('/tms/carriers', 'Carriers', '/tms/carriers', 'carriers|tms'),
+  page('/tms/carriers/find', 'Carriers › Find & Invite', '/tms/carriers', 'carriers|loads|tms'),
   page('/tms/carriers/:id', 'Carriers', '/tms/carriers', 'carriers|tms'),
   page('/tms/locations', 'Locations', '/tms/locations', 'locations|tms'),
   hidden('/tms/workflows', 'Settings (breadcrumb only)', 'tms'),
@@ -141,7 +142,7 @@ export const AA_HOMES = [
   redirect('/quotes', '/tms/rates'),
   redirect('/quotes/new', '/tms/rates/new'),
   redirect('/quotes/:id', '/tms/rates/:id'),
-  redirect('/rates', '/tms/rates/lanes'),
+  redirect('/rates', '/tms/rates'),
   redirect('/commissions', '/tms/brokerage/commissions'),
   redirect('/reports', '/tms/brokerage/reports'),
   redirect('/settings', '/tms/brokerage'),
@@ -193,7 +194,7 @@ export const AA_OLD_URLS = [
   ['/tms/check-calls', '/tms/tracking', '?assignee=all&focus=checkcalls'],
   ['/tms/rates', '/tms/rates'],
   ['/tms/rates/new', '/tms/rates/new'],
-  ['/tms/rates/lanes', '/tms/rates/lanes'],
+  ['/tms/rates/lanes', '/tms/rates'],
   ['/tms/rates/zz-x', '/tms/rates/zz-x'],
   ['/tms/invoicing', '/tms/invoicing'],
   ['/tms/invoicing/invoices/zz-x', '/tms/invoicing/invoices/zz-x'],
@@ -203,6 +204,7 @@ export const AA_OLD_URLS = [
   ['/tms/factors', '/tms/factors'],
   ['/tms/customers', '/tms/customers'],
   ['/tms/carriers', '/tms/carriers'],
+  ['/tms/carriers/find', '/tms/carriers/find'],
   ['/tms/carriers/zz-x', '/tms/carriers/zz-x'],
   ['/tms/locations', '/tms/locations'],
   ['/tms/workflows', '/tms/workflows'],
@@ -274,7 +276,7 @@ export const AA_OLD_URLS = [
   ['/quotes', '/tms/rates'],
   ['/quotes/new', '/tms/rates/new'],
   ['/quotes/zz-x', '/tms/rates/zz-x'],
-  ['/rates', '/tms/rates/lanes'],
+  ['/rates', '/tms/rates'],
   ['/commissions', '/tms/brokerage/commissions'],
   ['/reports', '/tms/brokerage/reports'],
   ['/settings', '/tms/brokerage'],
@@ -294,7 +296,6 @@ export const AA_SIDEBAR = [
   ['Company Dashboard', '/tms/dashboard', 0],
   ['Quotes', '/tms/rates', 0],
   ['Quotes', '/tms/rates', 1],
-  ['Lane rates', '/tms/rates/lanes', 1],
   ['Spot inbox', '/tms/rates/spot', 1],
   ['Shipments', '/tms/shipments', 0],
   ['Active', '/tms/shipments', 1],
@@ -307,6 +308,7 @@ export const AA_SIDEBAR = [
   ['Customers', '/tms/customers', 1],
   ['Follow-ups', '/tms/customers/follow-ups', 1],
   ['Carriers', '/tms/carriers', 0],
+  ['Find & Invite', '/tms/carriers/find', 1],
   ['Locations', '/tms/locations', 0],
   ['Accounting', '/tms/invoicing', 0],
   ['Accounts Receivable', '/tms/invoicing', 1],
@@ -400,6 +402,9 @@ export async function aaSourcePatterns(root = process.cwd()) {
     const path = m[2]
     found.add(normalise(inside && !path.startsWith('/') ? `/tms/${path}` : path))
   }
+  // Step AE: retired pages are declared as data in retiredRoutes.ts and mounted by App.tsx.
+  const retired = await readFile(join(root, 'src/lib/retiredRoutes.ts'), 'utf8')
+  for (const m of retired.matchAll(/path:\s*'([^']+)'/g)) found.add(normalise(m[1]))
   const brokerage = await readFile(join(root, 'src/features/tms/brokerage/BrokeragePage.tsx'), 'utf8')
   const tabsFrom = brokerage.indexOf('const TABS')
   const tabs = brokerage.slice(tabsFrom, brokerage.indexOf(']\n', tabsFrom))

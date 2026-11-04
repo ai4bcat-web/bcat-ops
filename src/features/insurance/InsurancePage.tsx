@@ -236,9 +236,9 @@ function EditView({
   onRemoveOrphan: (r: UnitRow) => void
 }) {
   const trucksPriced = truckRows.filter((r) => !r.orphaned && !r.inactive && r.annualCents > 0).length
-  const trailersPriced = trailerRows.filter((r) => !r.orphaned && r.annualCents > 0).length
+  const trailersPriced = trailerRows.filter((r) => !r.orphaned && !r.inactive && r.annualCents > 0).length
   const trucksLive = truckRows.filter((r) => !r.orphaned && !r.inactive).length
-  const trailersLive = trailerRows.filter((r) => !r.orphaned).length
+  const trailersLive = trailerRows.filter((r) => !r.orphaned && !r.inactive).length
 
   return (
     <>
@@ -298,7 +298,7 @@ function UnitTable({
                   <td style={{ ...tdStyle, fontWeight: 600, color: 'var(--tms-text)' }}>
                     #{r.unitNumber}
                     {r.orphaned && <span style={{ marginLeft: 8, fontSize: 10.5, fontWeight: 600, color: 'var(--tms-badge-orange)', background: 'var(--tms-badge-orange-tint)', borderRadius: 999, padding: '1px 7px' }}>not in fleet</span>}
-                    {r.inactive && <span title="Truck is marked inactive — its premium is not in the totals" style={{ marginLeft: 8, fontSize: 10.5, fontWeight: 600, color: 'var(--tms-muted)', background: 'var(--tms-surface)', borderRadius: 999, padding: '1px 7px' }}>inactive · not counted</span>}
+                    {r.inactive && <span title="Marked inactive — its premium is not in the totals" style={{ marginLeft: 8, fontSize: 10.5, fontWeight: 600, color: 'var(--tms-muted)', background: 'var(--tms-surface)', borderRadius: 999, padding: '1px 7px' }}>inactive · not counted</span>}
                   </td>
                   <td style={tdStyle}>{r.equipment ? `${r.equipment.make} ${r.equipment.model}${r.equipment.year ? ` · ${r.equipment.year}` : ''}` : '—'}</td>
                   <td style={{ ...tdStyle, textAlign: 'right' }}>

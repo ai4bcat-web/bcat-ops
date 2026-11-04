@@ -11,6 +11,7 @@
  *  - { kind: 'PULL_ALL', startedBy, restart? }   (async, from the Integrations page): a slice of
  *    the backfill over MCP's monitored list; resumes a partial run unless `restart`.
  *  - { kind: 'PULL_ONE', carrierId }             (sync): one carrier, full profile.
+ *  - { kind: 'ADD_CARRIER', mcNumber?, dotNumber? } (sync, Find & Invite): create the row from MCP unless one matches.
  *  - { kind: 'IMPORT_BATCH', carrierIds, ... }   (sync, from the Aljex import router).
  *
  * Every path refuses unless the MYCARRIERPACKETS row reports LIVE and healthy, and every path
@@ -24,8 +25,9 @@ import { heartbeatUpdate, MCP_INTEGRATION_ID } from './heartbeat'
 import { fetchMcpCarrierRaw, listCarrierChanges, listCompletedPackets, listMonitoredCarriers } from '../../../src/lib/integrations/mcpAdapter'
 import { mcpSyncRefusal, mcpUpdateItem } from '../../../src/lib/integrations/mcpBatchSync'
 import { normalizeMcpProfile } from '../../../src/lib/integrations/mcpProfile'
+import { advanceAfterCarrierActive, type LadderDeps } from '../../../src/lib/integrations/mcpLadder'
 import {
-  newPullState, pullOneCarrier, runBackfillSlice, runChangesPoll, MCP_PULL_ACTOR,
+  addCarrierFromMcp, newPullState, pullOneCarrier, runBackfillSlice, runChangesPoll, MCP_PULL_ACTOR,
   type McpPullDeps, type McpPullState,
 } from '../../../src/lib/integrations/mcpPull'
 
@@ -38,6 +40,10 @@ const PAYMENT_TABLE_NAME = process.env.CARRIER_PAYMENT_METHOD_TABLE_NAME ?? ''
 const AUDIT_LOG_TABLE_NAME = process.env.AUDIT_LOG_TABLE_NAME ?? ''
 const INTEGRATION_TABLE_NAME = process.env.INTEGRATION_TABLE_NAME ?? ''
 const INTEGRATION_PARAM_PATH = process.env.INTEGRATION_PARAM_PATH ?? ''
+// Step AM: an assignment waiting on carrier setup advances when MCP activates the carrier.
+const LOAD_CARRIER_TABLE_NAME = process.env.LOAD_CARRIER_TABLE_NAME ?? ''
+const SHIPMENT_TABLE_NAME = process.env.SHIPMENT_TABLE_NAME ?? ''
+const LOAD_TABLE_NAME = process.env.LOAD_TABLE_NAME ?? ''
 
 /** The one key a webhook parameter carries; never part of the API credentials. */
 const WEBHOOK_SECRET_KEY = 'webhookSigningSecret'
@@ -152,6 +158,39 @@ function patchUpdate(patch: Row) {
   return { UpdateExpression: `SET ${sets.join(', ')}`, ExpressionAttributeNames: names, ExpressionAttributeValues: values }
 }
 
+function ladderDeps(): LadderDeps {
+  const put = (TableName: string, Key: Record<string, unknown>, patch: Row, condition?: { expression: string; values: Record<string, unknown> }) =>
+    ddb.send(new UpdateCommand({
+      TableName, Key, ...patchUpdate(patch),
+      ...(condition ? { ConditionExpression: condition.expression, ExpressionAttributeValues: { ...patchUpdate(patch).ExpressionAttributeValues, ...condition.values } } : {}),
+    }))
+  return {
+    assignmentsOf: (carrierId) => queryByCarrier(LOAD_CARRIER_TABLE_NAME, 'loadCarriersByCarrierId', carrierId),
+    advance: async (row, patch) => {
+      try {
+        await put(LOAD_CARRIER_TABLE_NAME, { id: String(row.id) }, patch, { expression: 'assignmentStatus = :was', values: { ':was': row.assignmentStatus } })
+        return 'WRITTEN'
+      } catch (err) {
+        if (err instanceof ConditionalCheckFailedException) return 'CONFLICT'
+        throw err
+      }
+    },
+    mirror: async (row, status) => {
+      const at = new Date().toISOString()
+      if (row.shipmentId) await put(SHIPMENT_TABLE_NAME, { id: String(row.shipmentId) }, { carrierAssignmentStatus: status, updatedAt: at })
+      if (row.loadId) await put(LOAD_TABLE_NAME, { id: String(row.loadId) }, { carrierAssignmentStatus: status, updatedAt: at })
+    },
+    audit: async (entityId, action, changes) => {
+      if (!AUDIT_LOG_TABLE_NAME) return
+      const now = new Date().toISOString()
+      await ddb.send(new PutCommand({
+        TableName: AUDIT_LOG_TABLE_NAME,
+        Item: { id: randomUUID(), __typename: 'AuditLog', entityType: 'LOAD_CARRIER', entityId, action, user: MCP_PULL_ACTOR, changes: JSON.stringify(changes), createdAt: now, updatedAt: now },
+      }))
+    },
+  }
+}
+
 function pullDeps(credentials: Record<string, string>): McpPullDeps {
   const profileOf = (raw: unknown) => normalizeMcpProfile(raw)
   return {
@@ -209,6 +248,16 @@ function pullDeps(credentials: Record<string, string>): McpPullDeps {
       return { profiles, totalPages }
     },
     listCompleted: async (range) => (await listCompletedPackets(range, credentials)).map((p) => ({ dotNumber: p.dotNumber, docketNumber: p.docketNumber })),
+    carrierStatusChanged: async (carrierId, status) => {
+      if (status !== 'ACTIVE' || !LOAD_CARRIER_TABLE_NAME) return
+      // Best-effort: the carrier write is already committed, and the next sync retries nothing here,
+      // so a failure is logged for the operator rather than failing the pull.
+      try {
+        await advanceAfterCarrierActive(ladderDeps(), { id: carrierId }, new Date().toISOString())
+      } catch (err) {
+        console.error('[mcp-sync] ladder advance failed', carrierId, err instanceof Error ? err.message : String(err))
+      }
+    },
     newId: () => randomUUID(),
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
     nowMs: Date.now,
@@ -228,8 +277,9 @@ async function gate(): Promise<{ credentials: Record<string, string>; createUnma
 
 interface PullAllEvent { kind: 'PULL_ALL'; startedBy?: string; restart?: boolean }
 interface PullOneEvent { kind: 'PULL_ONE'; carrierId: string }
+interface AddCarrierEvent { kind: 'ADD_CARRIER'; mcNumber?: string; dotNumber?: string }
 interface ImportBatchEvent { kind: 'IMPORT_BATCH'; carrierIds?: string[]; maxLookups?: number; cursor?: { lastCarrierId?: string } | null }
-type Event = PullAllEvent | PullOneEvent | ImportBatchEvent | { kind?: undefined }
+type Event = PullAllEvent | PullOneEvent | AddCarrierEvent | ImportBatchEvent | { kind?: undefined }
 
 /** A slice of the backfill (or a changes poll once it is done). Returns the state it saved. */
 async function pullSlice(started: { startedBy: string; restart: boolean } | null): Promise<McpPullState | { refused: string } | { busy: true }> {
@@ -264,6 +314,14 @@ async function pullOne(event: PullOneEvent) {
   if ('refusal' in g) return { ready: false, reason: NOT_LIVE, result: null }
   const result = await pullOneCarrier(pullDeps(g.credentials), event.carrierId, randomUUID())
   return { ready: true, result }
+}
+
+/** Find & Invite "Add to carriers" (sync): create the Carrier row from MCP unless one already matches. */
+async function addCarrier(event: AddCarrierEvent) {
+  const g = await gate()
+  if ('refusal' in g) return { ready: false, reason: g.refusal }
+  const out = await addCarrierFromMcp(pullDeps(g.credentials), { mcNumber: event.mcNumber, dotNumber: event.dotNumber }, randomUUID())
+  return { ready: true, ...out }
 }
 
 /**
@@ -307,6 +365,7 @@ export const handler = async (event?: Event) => {
   switch (event?.kind) {
     case 'IMPORT_BATCH': return importBatch(event)
     case 'PULL_ONE': return pullOne(event)
+    case 'ADD_CARRIER': return addCarrier(event)
     case 'PULL_ALL': {
       const out = await pullSlice({ startedBy: event.startedBy ?? 'admin', restart: event.restart === true })
       return 'status' in out ? { ran: true, status: out.status } : { ran: false, ...out }

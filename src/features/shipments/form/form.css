@@ -4,14 +4,14 @@
  */
 
 .tms-shell .tms-ship-form {
-  --ship-gap: 8px;
+  --ship-gap: 6px;
 }
 
 .tms-shell .tms-ship-form-scroll {
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
-  padding: 8px;
+  padding: 6px;
   background: var(--tms-surface-subtle);
 }
 
@@ -74,7 +74,7 @@
   align-items: center;
   gap: 4px;
   flex: 1 1 auto;
-  min-height: 28px;
+  min-height: 24px;
   background: none;
   border: 0;
   padding: 0;
@@ -96,7 +96,7 @@
 }
 
 .tms-shell .tms-ship-section-body {
-  padding: 8px;
+  padding: 6px 8px;
 }
 
 .tms-shell .tms-ship-section-body[hidden] {
@@ -118,18 +118,43 @@
   font-size: 12px;
 }
 
-.tms-shell .tms-ship-form .tms-field-label[data-required='true'] {
-  color: var(--tms-badge-red);
+/* Required = green input (Ryne, item 1): no asterisks anywhere. Sections mark a required field with
+   the `tms-field-req` class on its TmsField (LField does it) or an aria-label ending "(required)". */
+.tms-shell .tms-ship-form .tms-field-req .tms-input,
+.tms-shell .tms-ship-form .tms-field-req .tms-select,
+.tms-shell .tms-ship-form .tms-field-req textarea,
+.tms-shell .tms-ship-form .tms-field-req input:not([type='checkbox']),
+.tms-shell .tms-ship-form [aria-label$='(required)'] {
+  border-color: var(--tms-badge-green);
+  background-color: var(--tms-badge-green-tint);
 }
 
 /* ── Aljex rows ───────────────────────────────────────────────────────────── */
 
-@media (min-width: 1100px) {
+@media (min-width: 1100px) and (max-width: 1499px) {
   .tms-shell .tms-ship-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .tms-shell .tms-ship-section-shipping {
+    grid-column: 1 / -1;
+  }
+}
+
+/* Tight vertical rhythm inside cards (no dead space). */
+.tms-shell .tms-ship-form .tms-field {
+  gap: 2px;
+  margin-bottom: 0;
+}
+
+@media (min-width: 1280px) and (max-width: 1499px) {
+  .tms-shell .tms-ship-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .tms-shell .tms-ship-section-shipping,
+  .tms-shell .tms-ship-section-more,
+  .tms-shell .tms-ship-section-rates {
     grid-column: 1 / -1;
   }
 }
@@ -169,4 +194,14 @@
   .tms-shell .tms-ship-section-checkCalls {
     grid-column: span 5;
   }
+}
+
+/* Fields pre-filled from an intake e-mail / rate confirmation (Ryne's feedback 7). */
+.tms-shell .tms-ship-form .tms-from-email {
+  margin-left: 6px; padding: 0 5px; border-radius: 8px; font-size: 10px; font-weight: 600; line-height: 14px;
+  background: var(--tms-badge-blue-bg, var(--tms-surface-subtle)); color: var(--tms-badge-blue, var(--tms-primary-ink));
+}
+.tms-shell .tms-ship-form .tms-field-from-email .tms-input,
+.tms-shell .tms-ship-form .tms-field-from-email .tms-select {
+  box-shadow: inset 3px 0 0 var(--tms-badge-blue, var(--tms-primary-ink));
 }

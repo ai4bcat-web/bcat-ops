@@ -6,7 +6,7 @@
 import { useCallback, useMemo, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { Mail, Truck } from 'lucide-react'
-import { TmsAlert, TmsBadge, TmsEmptyState, TmsFilterChip, TmsSegmentedTabs } from '@/features/tms/kit'
+import { TmsAlert, TmsBadge, TmsButton, TmsEmptyState, TmsFilterChip, TmsSegmentedTabs } from '@/features/tms/kit'
 import { DenseGrid } from '@/features/tms/grid/DenseGrid'
 import {
   ClearFiltersButton,
@@ -155,7 +155,7 @@ export function IntakeBoard() {
         filter: 'multi',
         fixedOptions: [{ value: 'Reviewed', label: 'Reviewed' }, { value: 'Needs review', label: 'Needs review' }],
       },
-      { key: 'source', header: 'E-mail', text: () => '', fixed: true, filter: false, sortable: false, width: 56 },
+      { key: 'source', header: 'E-mail', text: () => '', fixed: true, filter: false, sortable: false, width: 190 },
     ],
     [],
   )
@@ -208,6 +208,7 @@ export function IntakeBoard() {
         return row.status === 'OPEN' ? <TmsBadge tone="orange">Needs review</TmsBadge> : '—'
       case 'source':
         return (
+          <span className="tms-intake-row-actions">
           <Link
             className="tms-intake-source-link"
             to={`/tms/workflows/runs/${row.runId}`}
@@ -216,6 +217,16 @@ export function IntakeBoard() {
           >
             <Mail size={14} aria-hidden="true" />
           </Link>
+          {row.status === 'OPEN' ? (
+            <TmsButton
+              size="sm"
+              data-testid="intake-create-shipment"
+              onClick={(e) => { e.stopPropagation(); navigate('/tms/shipments/new', { state: { intakeId: row.id } }) }}
+            >
+              Create shipment
+            </TmsButton>
+          ) : null}
+          </span>
         )
       default:
         return columns.find((c) => c.key === key)?.text(row) ?? null

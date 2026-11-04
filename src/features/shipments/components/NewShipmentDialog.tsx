@@ -38,6 +38,7 @@ import { useTrucks } from '@/hooks/useTrucks'
 import { useLoads } from '@/hooks/useLoads'
 import { assignAsset, createLocation, createShipment, getTmsSettings } from '@/lib/apiClient'
 import { distinctStopDrivers } from '@/lib/ownAssetDriver'
+import { activeUnits } from '@/lib/fleetActive'
 import { apptNotices } from '@/lib/apptNotify'
 import { requiresApptProofs } from '@/lib/apptQueue'
 import { effectiveCustomerStatus } from '@/lib/customerCredit'
@@ -352,7 +353,7 @@ export function NewShipmentDialog({ open, prefill, defaultMode = 'FTL', onClose,
       if (pickedDriverId) {
         const driver = drivers.find((d) => d.id === pickedDriverId)
         const truck = driver?.assignedTruckId ? equipment.find((e) => e.id === driver.assignedTruckId) : undefined
-        const trailer = driver?.assignedTrailerId ? equipment.find((e) => e.id === driver.assignedTrailerId) : undefined
+        const trailer = driver?.assignedTrailerId ? activeUnits(equipment).find((e) => e.id === driver.assignedTrailerId) : undefined
         try {
           await assignAsset({
             loadId: bundle.loads[0].id,

@@ -41,7 +41,7 @@ import {
 import { requiresApptProofs } from '../../../src/lib/apptQueue'
 import type { IntakeFields, IntakeLoadRecord, IntakeMeta } from '../../../src/types/intake'
 
-export const INTAKE_ACTIONS = ['INTAKE_SAVE_DRAFT', 'INTAKE_MARK_REVIEWED', 'INTAKE_MOVE_TO_ACTIVE', 'INTAKE_DISMISS'] as const
+export const INTAKE_ACTIONS = ['INTAKE_SAVE_DRAFT', 'INTAKE_MARK_REVIEWED', 'INTAKE_MOVE_TO_ACTIVE', 'INTAKE_DISMISS', 'INTAKE_LINK_SHIPMENT'] as const
 export type IntakeAction = (typeof INTAKE_ACTIONS)[number]
 
 /** A PROMOTING row with no shipment older than this was abandoned (Lambda timeout is shorter). */
@@ -259,6 +259,31 @@ export async function intakeDismiss(deps: IntakeDeps, input: Row, caller: Caller
   return intakeRecordOf(saved) as unknown as Row
 }
 
+// ── INTAKE_LINK_SHIPMENT ─────────────────────────────────────────────────────
+
+/**
+ * The Aljex create form built the shipment from an intake load's pre-fill: tie the two together
+ * and mark the row MOVED (the same end state as INTAKE_MOVE_TO_ACTIVE). Idempotent for the same
+ * shipment; refuses a row already moved to a different one. No version token: the form never
+ * edits the row, and the shipment exists either way.
+ */
+export async function intakeLinkShipment(deps: IntakeDeps, input: Row, caller: Caller): Promise<Row> {
+  const intakeId = assertString(input.intakeId, 'intakeId')
+  const shipmentId = assertString(input.shipmentId, 'shipmentId')
+  const row = await loadRow(deps, intakeId)
+  const shipment = await deps.getById(deps.tables.shipment, shipmentId)
+  if (!shipment) throw new Error(`Shipment not found: ${shipmentId}`)
+  if (row.shipmentId && row.shipmentId !== shipmentId) throw new Error('This intake load already became another shipment')
+  if (row.status === 'MOVED' && row.shipmentId === shipmentId) return intakeRecordOf(row) as unknown as Row
+  if (row.status !== 'OPEN' && row.status !== 'PROMOTING') throw new Error('Only an open intake load can be linked to a shipment')
+  const shipmentNumber = String(shipment.number ?? '')
+  const saved = await writeIntake(deps, row, { shipmentId, shipmentNumber, status: 'MOVED', updatedBy: caller.email }, [], false)
+  const changes: Row = { linkedBy: caller.email, runId: row.runId ?? null, via: 'CREATE_FORM' }
+  await deps.writeAudit('INTAKE_LOAD', intakeId, 'INTAKE_LINK_SHIPMENT', caller, { ...changes, shipmentId })
+  await deps.writeAudit('SHIPMENT', shipmentId, 'INTAKE_LINK_SHIPMENT', caller, { ...changes, intakeId })
+  return intakeRecordOf(saved) as unknown as Row
+}
+
 // ── INTAKE_MARK_REVIEWED ─────────────────────────────────────────────────────
 
 /** The explicit reviewer act the move gate checks. An incomplete load cannot be reviewed. */
@@ -473,5 +498,7 @@ export function runIntakeAction(deps: IntakeDeps, action: IntakeAction, input: R
       return intakeMoveToActive(deps, input, caller)
     case 'INTAKE_DISMISS':
       return intakeDismiss(deps, input, caller)
+    case 'INTAKE_LINK_SHIPMENT':
+      return intakeLinkShipment(deps, input, caller)
   }
 }

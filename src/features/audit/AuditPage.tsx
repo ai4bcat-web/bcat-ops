@@ -45,7 +45,7 @@ const COLUMNS: ColumnDef<AuditLogEntry>[] = [
 const LOOKUP_ENTITY_TYPES = [
   'Load', 'LOAD', 'Shipment', 'SHIPMENT', 'Order', 'ORDER', 'LoadCarrier', 'LOAD_CARRIER',
   'Driver', 'DRIVER', 'Carrier', 'CARRIER', 'Customer', 'CUSTOMER', 'Quote', 'QUOTE',
-  'Invoice', 'INVOICE', 'CarrierBill', 'CARRIER_BILL',
+  'Invoice', 'INVOICE', 'CarrierBill', 'CARRIER_BILL', 'Equipment',
 ]
 
 export function AuditPage() {
