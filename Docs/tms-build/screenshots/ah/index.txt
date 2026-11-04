@@ -14,7 +14,6 @@ Docs/tms-build/screenshots/ah/04-11-section-documents-L.png
 Docs/tms-build/screenshots/ah/04-12-section-checkCalls-L.png
 Docs/tms-build/screenshots/ah/04-00-form-top-L.png
 Docs/tms-build/screenshots/ah/06-issues-strip-L.png
-Docs/tms-build/screenshots/ah/AH06-failure-L.png
 Docs/tms-build/screenshots/ah/07-resume-draft-banner-L.png
 Docs/tms-build/screenshots/ah/09-filled-form-L.png
 Docs/tms-build/screenshots/ah/09-after-create-edit-mode-L.png

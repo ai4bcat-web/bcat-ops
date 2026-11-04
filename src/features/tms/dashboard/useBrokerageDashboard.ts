@@ -45,20 +45,13 @@ function unionById<T extends { id: string }>(...sets: T[][]): T[] {
 
 /**
  * One window's data: the shipments picking up in the window (±1 month, the UTC-vs-local month edge;
- * `applyFilters` then cuts to the exact days) plus the open-work set, which the live strips read
- * whatever the window is. Joined tables come with them by id, so the work grows with the window and
- * with open work, never with the table.
+ * `applyFilters` then cuts to the exact days) with their orders, loads and legs joined by id.
+ * Tier A (the window alone) is enough to draw every window card, so it is reported first. The
+ * only rows outside the window the cards read are the ones the open invoices and bills point to
+ * (AR/AP by rep); those are fetched BY ID once the open lists are in, never as a working set.
  */
 async function readWindow(from: string, to: string, onPartial: (b: DashboardBundle) => void): Promise<DashboardBundle> {
   const months = monthsCovering(from, to, 1)
-  // The working set lands in two steps (open rows joined, then the delivered backlog). Neither
-  // blocks the first draw: tier A is the window alone. A loader that never reports a partial
-  // resolves this with its final bundle.
-  let firstWorking!: (b: BoardBundle) => void
-  const workingFirst = new Promise<BoardBundle>((resolve) => { firstWorking = resolve })
-  const workingFinal = loadBoardBundle({ kind: 'working' }, { onPartial: (b) => firstWorking(b) })
-  let finished = false
-  workingFinal.then((b) => { finished = true; firstWorking(b) }, () => {})
   const [windowed, samples, quotes, openInvoices, openBills, profiles, divisions] = await Promise.all([
     loadBoardBundle({ kind: 'window', months, financials: false }),
     loadSamples(from, to),
@@ -69,12 +62,11 @@ async function readWindow(from: string, to: string, onPartial: (b: DashboardBund
     listOwnershipDivisions(),
   ])
   const rest = { samples, quotes, openInvoices, openBills, profiles, divisions }
-  if (finished) return assemble(windowed, await workingFinal, rest) // final already landed: nothing partial to show
+  const inWindow = new Set(windowed.shipments.map((s) => s.id))
+  const referents = [...new Set([...openInvoices, ...openBills].map((row) => row.shipmentId).filter((id): id is string => !!id && !inWindow.has(id)))]
+  if (referents.length === 0) return assemble(windowed, emptyBoard, rest)
   onPartial(assemble(windowed, emptyBoard, rest))
-  const first = await workingFirst
-  if (finished) return assemble(windowed, await workingFinal, rest)
-  onPartial(assemble(windowed, first, rest))
-  return assemble(windowed, await workingFinal, rest)
+  return assemble(windowed, await loadBoardBundle({ kind: 'ids', ids: referents, financials: false }), rest)
 }
 
 const emptyBoard: BoardBundle = { shipments: [], orders: [], loads: [], loadCarriers: [], loadFinancials: [] }
@@ -88,13 +80,13 @@ interface WindowRest {
   divisions: Awaited<ReturnType<typeof listOwnershipDivisions>>
 }
 
-function assemble(windowed: BoardBundle, working: BoardBundle, { samples, quotes, openInvoices, openBills, profiles, divisions }: WindowRest): DashboardBundle {
-  const shipments = mergeShipmentSets(windowed.shipments, working.shipments)
-  const loadCarriers = unionById(windowed.loadCarriers, working.loadCarriers)
+function assemble(windowed: BoardBundle, extra: BoardBundle, { samples, quotes, openInvoices, openBills, profiles, divisions }: WindowRest): DashboardBundle {
+  const shipments = mergeShipmentSets(windowed.shipments, extra.shipments)
+  const loadCarriers = unionById(windowed.loadCarriers, extra.loadCarriers)
   const data: DashboardData = {
     shipments,
-    orders: unionById(windowed.orders, working.orders),
-    loads: hydrateLoads(unionById(windowed.loads, working.loads), shipments, loadCarriers, samples.rows),
+    orders: unionById(windowed.orders, extra.orders),
+    loads: hydrateLoads(unionById(windowed.loads, extra.loads), shipments, loadCarriers, samples.rows),
     loadCarriers,
     samples: samples.rows,
     openInvoices,

@@ -129,14 +129,16 @@ async function pollCount(token, month, day, ok, seconds) {
 // ───────────────────────────── steps ─────────────────────────────
 async function backfill(token, lambda) {
   const name = await findRollupFunction(lambda)
-  const to = addMonth(chicagoToday().slice(0, 7), 1)
+  const scan = await fullScan(token)
+  const dataMonths = scan.shipments.filter((s) => !s.voidedAt && s.pickupMonth && s.pickupMonth >= BACKFILL_FLOOR).map((s) => s.pickupMonth)
+  // Future-dated shipments exist on dev: the one-off backfill covers every month that has data.
+  const to = [addMonth(chicagoToday().slice(0, 7), 1), ...dataMonths].sort().pop()
   const res = await lambda.send(new InvokeCommand({ FunctionName: name, InvocationType: 'RequestResponse', Payload: Buffer.from(JSON.stringify({ backfill: { from: BACKFILL_FLOOR, to } })) }))
   const body = JSON.parse(Buffer.from(res.Payload).toString() || '{}')
   if (res.FunctionError || body.errorMessage) throw new Error(`backfill invoke failed: ${short(body.errorMessage ?? res.FunctionError)}`)
   record('PASS', 'backfill invoke', `${BACKFILL_FLOOR}..${to} (summary keys: ${Object.keys(body).join(', ') || 'none'})`)
 
-  const scan = await fullScan(token)
-  const months = [...new Set(scan.shipments.filter((s) => !s.voidedAt && s.pickupMonth && s.pickupMonth >= BACKFILL_FLOOR).map((s) => s.pickupMonth))].sort()
+  const months = [...new Set(dataMonths)].sort()
   const ids = [...months.map((m) => `M:${m}`), 'L:CURRENT']
   const rows = []
   for (let i = 0; i < ids.length; i += 40) rows.push(...await readRows(token, ids.slice(i, i + 40)))

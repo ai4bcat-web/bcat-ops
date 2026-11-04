@@ -25,7 +25,7 @@ interface Table {
   loadCarriers: LoadCarrierRecord[]
 }
 
-const table = vi.hoisted(() => ({ value: null as unknown as Table, views: [] as unknown[] }))
+const table = vi.hoisted(() => ({ value: null as unknown as Table, views: [] as unknown[], invoices: [] as unknown[] }))
 
 const monthOf = (s: ShipmentRecord) => (s.pickupAppt ?? '').slice(0, 7)
 const joined = (shipments: ShipmentRecord[]) => {
@@ -42,10 +42,11 @@ const joined = (shipments: ShipmentRecord[]) => {
 
 // What the backend returns for each view: the month index minus voided rows, and the open work.
 vi.mock('@/lib/boardData', () => ({
-  loadBoardBundle: vi.fn(async (view: { kind: string; months?: string[] }) => {
+  loadBoardBundle: vi.fn(async (view: { kind: string; months?: string[]; ids?: string[] }) => {
     table.views.push(view)
     const live = table.value.shipments.filter((s) => !s.voidedAt)
     if (view.kind === 'window') return joined(live.filter((s) => view.months!.includes(monthOf(s))))
+    if (view.kind === 'ids') return joined(table.value.shipments.filter((s) => view.ids!.includes(s.id)))
     const open = live.filter((s) => {
       const order = table.value.orders.find((o) => o.shipmentId === s.id)
       return (s.status !== 'DELIVERED' && s.status !== 'CANCELED') || (s.status === 'DELIVERED' && order?.arStatus === 'DOCS_NEEDED')
@@ -54,7 +55,7 @@ vi.mock('@/lib/boardData', () => ({
   }),
 }))
 vi.mock('@/lib/apiClient', () => ({
-  listOpenInvoices: vi.fn(async () => []),
+  listOpenInvoices: vi.fn(async () => table.invoices),
   listOpenBills: vi.fn(async () => []),
   listUserProfiles: vi.fn(async () => []),
   listOwnershipDivisions: vi.fn(async () => []),
@@ -121,6 +122,7 @@ const ALL = [...CLASSIC_CHARTS, ...BROKERAGE_CHARTS]
 beforeEach(() => {
   table.value = buildTable()
   table.views = []
+  table.invoices = []
   clearDashboardCache()
 })
 
@@ -157,11 +159,20 @@ describe('dashboard window equivalence', () => {
     }
   })
 
-  it('reads the window padded one month either side, plus the open-work set', async () => {
+  it('reads the window padded one month either side and no working set', async () => {
     const filters: DashboardFilters = { ...defaultFilters(new Date('2026-11-15T12:00:00Z')), from: '2026-11-01', to: '2026-11-30' }
     const { result } = renderHook(() => useBrokerageDashboard(filters))
-    await waitFor(() => expect(result.current.loading).toBe(false))
-    expect(table.views).toContainEqual({ kind: 'window', months: ['2026-10', '2026-11', '2026-12'], financials: false })
-    expect(table.views).toContainEqual({ kind: 'working' })
+    await waitFor(() => expect(result.current.final).toBe(true))
+    expect(table.views).toEqual([{ kind: 'window', months: ['2026-10', '2026-11', '2026-12'], financials: false }])
+  })
+
+  it('fetches the rows an open invoice points to by id, after the window has drawn', async () => {
+    const filters: DashboardFilters = { ...defaultFilters(new Date('2026-11-15T12:00:00Z')), from: '2026-11-01', to: '2026-11-30' }
+    const outside = table.value.shipments.find((s) => !monthOf(s).match(/^2026-1[0-2]$/))!
+    table.invoices = [{ id: 'inv1', orderId: 'o', shipmentId: outside.id, balanceCents: 100 }]
+    const { result } = renderHook(() => useBrokerageDashboard(filters))
+    await waitFor(() => expect(result.current.final).toBe(true))
+    expect(table.views).toContainEqual({ kind: 'ids', ids: [outside.id], financials: false })
+    expect(result.current.data?.shipments.map((s) => s.id)).toContain(outside.id)
   })
 })

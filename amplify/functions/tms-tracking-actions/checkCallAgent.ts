@@ -24,7 +24,7 @@ import {
   type TemplatePlaceholder,
 } from '../../../src/lib/trackingAutomation'
 import { MAX_SMS_BODY } from '../../../src/lib/dispatch'
-import { allowsAutoRequests, channelsAllowedBy, effectiveTrackingPrefs } from '../../../src/lib/trackingPrefs'
+import { allowsAutoRequests, channelsAllowedBy, effectiveTrackingPrefs, type TrackingMethod } from '../../../src/lib/trackingPrefs'
 import { resolveDriverSms } from './driverPhone'
 import { TZ } from '../../../src/lib/date'
 import { isVoided } from '../_shared/voided'
@@ -72,13 +72,20 @@ function milestoneMessageId(loadId: string, milestone: string): string {
   return `msg:${loadId}:${milestone}`
 }
 
-function milestoneSentForLoad(loadId: string, messages: Row[]): Record<string, true> {
+/**
+ * Milestones already said. The e-mail row carries an `:email` suffix, the SMS row does not, so a customer
+ * whose method is EMAIL (or SMS) is only "done" with a milestone once that channel went out: switching
+ * the method later must still send the channel that never did.
+ */
+function milestoneSentForLoad(loadId: string, messages: Row[], method: TrackingMethod | null): Record<string, true> {
   const prefix = `msg:${loadId}:`
   const sent: Record<string, true> = {}
   for (const message of messages) {
     const id = String(message.id ?? '')
     if (!id.startsWith(prefix)) continue
-    const milestone = id.slice(prefix.length)
+    const isEmail = id.endsWith(':email')
+    if ((method === 'EMAIL' && !isEmail) || (method === 'SMS' && isEmail)) continue
+    const milestone = id.slice(prefix.length).replace(/:email$/, '')
     if (CHECK_CALL_MILESTONES.includes(milestone as CheckCallMilestone)) sent[milestone] = true
   }
   return sent
@@ -112,12 +119,12 @@ export async function activePingLink(deps: CheckCallDeps, loadId: string): Promi
   return links.find((l) => l.kind === 'CARRIER_PING' && l.status === 'ACTIVE') ?? null
 }
 
-function resolveTick(load: Row, plan: CheckCallPlan, messages: Row[], now: string): CheckCallTick {
+function resolveTick(load: Row, plan: CheckCallPlan, messages: Row[], now: string, method: TrackingMethod | null): CheckCallTick {
   return nextCheckCallAction({
     plan,
     status: String(load.status ?? ''),
     lastCheckCallAt: load.lastCheckCallAt as string | null | undefined,
-    milestonesSent: Object.keys(milestoneSentForLoad(String(load.id), messages)),
+    milestonesSent: Object.keys(milestoneSentForLoad(String(load.id), messages, method)),
     awaitingSince: load.checkCallAwaitingSince as string | null | undefined,
     escalatedAt: load.checkCallEscalatedAt as string | null | undefined,
     checkCallFlaggedAt: load.checkCallFlaggedAt as string | null | undefined,
@@ -264,7 +271,16 @@ export async function runCheckCallPlan(
       })
       continue
     }
-    const tick = resolveTick(load, plan, messages, deps.now())
+    let tick = resolveTick(load, plan, messages, deps.now(), prefs.method)
+    // A person's run after the method changed: the slot already went out on the other channel only, so the
+    // channel that never did is still owed (the claim id keeps it to once per slot).
+    if (!auto && carrier && tick.kind === 'NONE' && tick.reason === 'Not due yet') {
+      const slotIndex = cadenceSlot(load, Math.max(1, plan.intervalHours * HOUR_MS), Date.parse(deps.now())).index
+      const slotId = (c: string) => `auto:cc:${carrier.id}:${slotIndex}:${c}`
+      const spent = messages.some((m) => String(m.id ?? '').startsWith(`auto:cc:${carrier.id}:${slotIndex}:`))
+      const owed = plan.channels.filter((c) => (c === 'SMS' || c === 'EMAIL') && isChannelEnabled(c) && !messages.some((m) => m.id === slotId(c)))
+      if (spent && owed.length) tick = { ...tick, kind: 'CADENCE', channels: owed, reason: `Every ${plan.intervalHours} h in transit` }
+    }
     results.push({ load, tick, plan, carrier, policy, blocked: null })
   }
 

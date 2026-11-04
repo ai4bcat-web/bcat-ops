@@ -28,9 +28,13 @@ export interface RawRollupRow {
 
 type WireRow = Omit<RawRollupRow, 'payload'> & { payload: unknown }
 
+/** AWSJSON arrives as a JSON string, and the Lambda stores a string already: decode until an object comes out. */
 function parsePayload(payload: unknown): unknown {
-  if (typeof payload !== 'string') return payload
-  try { return JSON.parse(payload) } catch { return null }
+  let value = payload
+  for (let depth = 0; typeof value === 'string' && depth < 3; depth++) {
+    try { value = JSON.parse(value) } catch { return null }
+  }
+  return value
 }
 
 const rowsKey = (ids: readonly string[]) => `rollup:rows:${ids.join(',')}`

@@ -6,7 +6,7 @@ import { useIsMobile } from '@/hooks/useIsMobile'
 import { useAllComplianceDocuments } from '@/hooks/useAllComplianceDocuments'
 import { effectiveExpiration } from '@/lib/truckDocs'
 import { useTruckConfigs } from '@/hooks/useTruckConfigs'
-import { trucksWithoutPhone } from '@/lib/workPhone'
+import { useTrucksWithoutPhone } from '@/hooks/useTrucksWithoutPhone'
 import { formatPhone } from '@/lib/utils'
 import { TruckPhoneEditor } from './TruckPhoneEditor'
 import { provisionTruckCosts, applyTruckCosts, readTruckCosts, hasAnyTruckCost, type TruckCostInputs } from '@/lib/truckCosts'
@@ -1069,8 +1069,7 @@ export function TrucksPage() {
   }
 
   // Trucks with no work phone (parked ones excluded) — the Fleet half of the AK gap report.
-  const noPhone = trucksWithoutPhone({ equipment, configs: truckConfigs })
-  const noPhoneIds = new Set(noPhone.map((t) => t.truckId))
+  const { missing: noPhone, ids: noPhoneIds, loading: phonesLoading } = useTrucksWithoutPhone()
 
   // Per-truck values used for both display and column sorting.
   const complianceDatesOf = useComplianceDates()
@@ -1269,7 +1268,7 @@ export function TrucksPage() {
               }}
             />
           </div>
-          {noPhone.length > 0 || noPhoneOnly ? (
+          {!phonesLoading && (noPhone.length > 0 || noPhoneOnly) ? (
             <button
               type="button"
               aria-pressed={noPhoneOnly}

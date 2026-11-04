@@ -47,7 +47,7 @@ function monthPayload(month: string, n = 1): MonthPayload {
   return { v: 1, month, ship: { [`${month}-03`]: { 'BROKERAGE|': { st: { DELIVERED: n }, ld: n, trk: 0, pod: 0 } } }, fin: {} }
 }
 
-function harness(opts: { store?: ReturnType<typeof fakeStore>; computes?: Partial<Computes>; now?: () => Date } = {}) {
+function harness(opts: { store?: ReturnType<typeof fakeStore>; computes?: Partial<Computes>; now?: () => Date; sleep?: (ms: number) => Promise<void> } = {}) {
   const store = opts.store ?? fakeStore()
   const computes: Computes = {
     month: vi.fn(async (_s, month) => monthPayload(month)),
@@ -61,6 +61,7 @@ function harness(opts: { store?: ReturnType<typeof fakeStore>; computes?: Partia
     computes,
     tableByName: { 'Shipment-tbl': 'Shipment', 'Invoice-tbl': 'Invoice', 'Load-tbl': 'Load' },
     now: opts.now ?? (() => NOW),
+    sleep: opts.sleep ?? (async () => undefined),
   }
   return { store, computes, deps }
 }
@@ -143,7 +144,7 @@ describe('recomputeKey', () => {
     err.mockRestore()
   })
 
-  it('throttles a stream recompute of a row refreshed under 30 s ago, but not a sweep', async () => {
+  it('throttles a direct stream recompute of a row refreshed under 15 s ago, but not a sweep', async () => {
     const fresh = new Date(NOW.getTime() - (MIN_RECOMPUTE_INTERVAL_MS - 5_000)).toISOString()
     const store = fakeStore([{ id: 'M:2026-11', kind: 'M', periodKey: '2026-11', schemaVersion: 1, payload: '{}', computedAt: fresh, version: 1 }])
     const { deps } = harness({ store })
@@ -201,6 +202,28 @@ describe('processStream', () => {
     expect(months).toEqual(['2026-09', '2026-08', '2026-07'])
     expect(store.rows.has('D:M:2026-05')).toBe(true)
     expect(store.rows.has('D:M:2026-09')).toBe(false)
+  })
+
+  it('a write right after a recompute is picked up within the invocation, not left to the sweep', async () => {
+    let t = NOW.getTime()
+    const fresh = new Date(t - 5_000).toISOString()
+    const store = fakeStore([{ id: 'M:2026-11', kind: 'M', periodKey: '2026-11', schemaVersion: 1, payload: '{}', computedAt: fresh, version: 1 }])
+    const { deps, computes } = harness({ store, now: () => new Date(t), sleep: async (ms) => { t += ms } })
+    const base = { id: 's1', pickupAppt: '2026-11-03T10:00:00Z', pickupMonth: '2026-11', status: 'BOOKED' }
+    const { summary } = await processStream(deps, { Records: [streamRecord('Shipment-tbl', '1', base, { ...base, status: 'DELIVERED' })] })
+    expect(computes.month).toHaveBeenCalledTimes(1)
+    expect(summary.written).toContain('M:2026-11')
+    expect(store.rows.has('D:M:2026-11')).toBe(false)
+  })
+
+  it('retries a key another invocation holds once that lease is gone', async () => {
+    const store = fakeStore()
+    await store.acquireLease('M:2026-11', Math.floor(NOW.getTime() / 1000), 120)
+    const { deps, computes } = harness({ store, sleep: async () => { await store.releaseLease('M:2026-11') } })
+    const base = { id: 's1', pickupAppt: '2026-11-03T10:00:00Z', pickupMonth: '2026-11', status: 'BOOKED' }
+    await processStream(deps, { Records: [streamRecord('Shipment-tbl', '1', base, { ...base, status: 'DELIVERED' })] })
+    expect(computes.month).toHaveBeenCalledTimes(1)
+    expect(store.rows.has('M:2026-11')).toBe(true)
   })
 
   it('a failed recompute keeps the marker and does not fail the batch', async () => {

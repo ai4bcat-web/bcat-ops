@@ -607,8 +607,8 @@ const RUNNERS = {
       await shotFile(b, 'AJ02-grid-default-L')
       const chips = await b.evaluate(`[...document.querySelectorAll('[data-testid="tracking-focus-tabs"] button, [data-testid="tracking-focus-tabs"] [role="tab"]')].map((x) => x.textContent.trim())`)
       expect(chips.length >= 4, `Focus control shows ${chips.length} options: ${chips.join(' | ')}`)
-      const countOf = (re) => Number(chips.find((c) => re.test(c))?.match(/\((\d+)\)/)?.[1] ?? NaN)
-      for (const [slug, re, landing] of [['checkcalls', /check calls/i, 'AJ03-grid-focus-checkcalls-L'], ['docs', /document/i, 'AJ04-grid-focus-docs-L']]) {
+      const countOf = (re) => Number(chips.find((c) => re.test(c))?.match(/(\d+)$/)?.[1] ?? NaN)
+      for (const [slug, re, landing] of [['checkcalls', /check calls/i, 'AJ03-grid-focus-checkcalls-L'], ['docs', /docs to review/i, 'AJ04-grid-focus-docs-L']]) {
         const n = countOf(re)
         expect(Number.isFinite(n), `the ${slug} chip carries no count: ${chips.join(' | ')}`)
         await clickText(b, tid('tracking-focus-tabs'), re.source)

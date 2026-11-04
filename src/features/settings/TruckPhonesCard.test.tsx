@@ -27,7 +27,7 @@ beforeEach(() => {
       truck('t-parked', '3', { active: false }),
       { id: 'tr-1', unitNumber: 'T9', type: 'trailer', active: true } as Equipment,
     ],
-    drivers: [],
+    drivers: [], fleetLoaded: true,
   })
 })
 

@@ -2,9 +2,8 @@ import { useState } from 'react'
 import { Phone } from 'lucide-react'
 import { TruckPhoneEditor } from '@/features/trucks/TruckPhoneEditor'
 import { TmsButton } from '@/features/tms/kit'
-import { useTruckConfigs } from '@/hooks/useTruckConfigs'
+import { useTrucksWithoutPhone } from '@/hooks/useTrucksWithoutPhone'
 import { useAppStore } from '@/store/useAppStore'
-import { trucksWithoutPhone } from '@/lib/workPhone'
 import { Hint, Loading, SettingsCard } from './settingsKit'
 
 /**
@@ -12,12 +11,10 @@ import { Hint, Loading, SettingsCard } from './settingsKit'
  * `TruckConfig.phone`. Each row can take the number right here (same editor as Fleet).
  */
 export function TruckPhonesCard() {
-  const equipment = useAppStore((s) => s.equipment)
   const drivers = useAppStore((s) => s.drivers)
-  const { byId, loading } = useTruckConfigs()
+  const { missing, byId, loading } = useTrucksWithoutPhone()
   const [editing, setEditing] = useState<string | null>(null)
 
-  const missing = trucksWithoutPhone({ equipment, configs: byId })
   const driverName = (truckId: string, assignedDriverId: string | null) =>
     drivers.find((d) => d.id === assignedDriverId || d.assignedTruckId === truckId)?.name ?? null
 

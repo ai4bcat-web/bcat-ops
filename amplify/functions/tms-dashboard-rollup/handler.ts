@@ -41,7 +41,7 @@ import {
 /** Above this the row is not written: DynamoDB caps an item at 400 KB. */
 export const MAX_PAYLOAD_BYTES = 300_000
 /** A key recomputed this recently stays dirty for the next batch or sweep (stream storms). */
-export const MIN_RECOMPUTE_INTERVAL_MS = 30_000
+export const MIN_RECOMPUTE_INTERVAL_MS = 15_000
 export const LEASE_SECONDS = 120
 /** Months (with their LG twin) one stream invocation recomputes; the rest wait for the sweep. */
 export const STREAM_MAX_MONTHS = 3
@@ -90,6 +90,8 @@ export interface RollupDeps {
   /** Source table name (from the stream ARN) → RollupSourceTable. */
   tableByName: Record<string, RollupSourceTable>
   now(): Date
+  /** Waits between retries of a throttled / leased key (injectable so tests do not sleep). */
+  sleep(ms: number): Promise<void>
 }
 
 export const libComputes: Computes = {
@@ -218,7 +220,16 @@ async function recomputeKeys(
       return
     }
     try {
-      const outcome = await recomputeKey(deps, key, { respectMinInterval: opts.respectMinInterval })
+      let outcome = await recomputeKey(deps, key, { respectMinInterval: opts.respectMinInterval })
+      // A stream event must not be left to the 5-minute sweep: while the key is throttled or
+      // leased by another invocation and its D: marker is still there (a newer write bumped
+      // it), wait and try again inside the budget.
+      for (let attempt = 0; opts.respectMinInterval && (outcome === 'throttled' || outcome === 'leased') && attempt < 8; attempt++) {
+        if (deps.now().getTime() + MIN_RECOMPUTE_INTERVAL_MS + KEY_RESERVE_MS > opts.deadline) break
+        if (!(await deps.store.get(`D:${key}`))) break
+        await deps.sleep(outcome === 'throttled' ? 2_000 : 1_500)
+        outcome = await recomputeKey(deps, key, { respectMinInterval: true })
+      }
       if (outcome === 'written' || outcome === 'too-large') into.written.push(key)
       if (outcome !== 'written') into.skipped.push({ key, why: outcome })
     } catch (err) {
@@ -363,6 +374,7 @@ export function depsFromEnv(): RollupDeps {
       [tables.carrierBill]: 'CarrierBill',
     },
     now: () => new Date(),
+    sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   }
 }
 

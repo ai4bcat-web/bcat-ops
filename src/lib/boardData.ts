@@ -37,7 +37,7 @@ export type BoardView =
   /** pickupMonth fan-out; `includeVoided` drops the server-side void filter. */
   | { kind: 'window'; months: string[]; includeVoided?: boolean; /** `false` skips the per-load financials read (the dashboard reads none). */ financials?: boolean }
   /** A getShipment batch (worklists, error tab). */
-  | { kind: 'ids'; ids: string[] }
+  | { kind: 'ids'; ids: string[]; /** `false` skips the per-load financials read. */ financials?: boolean }
   | { kind: 'status'; status: ShipmentStatus }
   | { kind: 'customer'; customerId: string }
   | { kind: 'month'; month: string }
@@ -80,7 +80,7 @@ export function boardViewKey(view: BoardView): string {
   switch (view.kind) {
     case 'working': return 'board:working'
     case 'window': return `board:window:${[...new Set(view.months)].sort().join(',')}${view.includeVoided ? ':voided' : ''}${view.financials === false ? ':nofin' : ''}`
-    case 'ids': return `board:ids:${hashIds([...new Set(view.ids)].sort())}`
+    case 'ids': return `board:ids:${hashIds([...new Set(view.ids)].sort())}${view.financials === false ? ':nofin' : ''}`
     case 'status': return `board:status:${view.status}`
     case 'customer': return `board:customer:${view.customerId}`
     case 'month': return `board:month:${view.month}`
@@ -189,7 +189,7 @@ async function fetchBundle(view: BoardView, onPartial?: (b: BoardBundle) => void
       return joinShipments(mergeShipmentSets(...sets), view.financials !== false)
     }
     case 'ids':
-      return joinShipments([...(await getShipmentsBatch(view.ids, false)).values()])
+      return joinShipments([...(await getShipmentsBatch(view.ids, false)).values()], view.financials !== false)
     case 'status':
       return joinShipments(await listShipmentsByStatus(view.status))
     case 'customer':

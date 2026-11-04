@@ -153,6 +153,19 @@ describe('tracking method (AJ): filters channels in AUTO and manual runs', () =>
     }
   })
 
+  it('switching the method later still sends the channel that never went out (EMAIL run, then SMS run)', async () => {
+    const store = new MemoryStore()
+    seed(store, { customer: { trackingMethod: 'EMAIL' }, load: { status: 'IN_TRANSIT' } })
+    const deps = makeDeps(store)
+    await runCheckCallPlan(deps, { shipmentId: 'shp-1' }, CALLER)
+    expect(channels(store)).toEqual(['EMAIL'])
+    store.seed({ id: 'cus-1', __typename: 'Customer', name: 'ACME', trackingMethod: 'SMS' })
+    await runCheckCallPlan(deps, { shipmentId: 'shp-1' }, CALLER)
+    expect(channels(store)).toEqual(['EMAIL', 'SMS'])
+    await runCheckCallPlan(deps, { shipmentId: 'shp-1' }, CALLER) // nothing new: both channels are spent
+    expect(channels(store)).toEqual(['EMAIL', 'SMS'])
+  })
+
   it('a shipment method override beats the customer', async () => {
     const store = new MemoryStore()
     seed(store, { customer: { trackingMethod: 'BOTH' }, shipment: { trackingPrefs: { method: 'EMAIL' } } })

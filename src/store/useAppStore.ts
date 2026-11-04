@@ -407,6 +407,8 @@ interface AppState {
    */
   auditLog: AuditLogEntry[]
   isLoading: boolean
+  /** True once this session's fleet read finished (success or fallback); before it, `equipment` is the persisted/seed copy. */
+  fleetLoaded: boolean
   error: string | null
   currentUserEmail: string
 
@@ -554,6 +556,7 @@ export const useAppStore = create<AppState>()(
       loadedMonths: new Set<string>(),
       auditLog: [],
       isLoading: false,
+      fleetLoaded: false,
       error: null,
       currentUserEmail: 'dispatch@bcat.local',
 
@@ -606,6 +609,8 @@ export const useAppStore = create<AppState>()(
             }
           } catch (err) {
             console.warn('[store] Fleet backend unavailable — using local data until the Amplify deploy', err)
+          } finally {
+            set({ fleetLoaded: true })
           }
         }
 

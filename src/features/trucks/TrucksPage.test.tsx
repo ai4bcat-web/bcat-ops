@@ -42,7 +42,7 @@ beforeEach(() => {
   ])
   useAppStore.setState({
     equipment: [truck('a', '1'), truck('b', '2'), truck('c', '3'), truck('p', '4', { active: false })],
-    drivers: [], maintenanceTasks: [], maintenanceInvoices: [],
+    drivers: [], fleetLoaded: true, maintenanceTasks: [], maintenanceInvoices: [],
   })
 })
 

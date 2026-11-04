@@ -1,21 +1,21 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, renderHook, waitFor } from '@testing-library/react'
+import { renderHook, waitFor } from '@testing-library/react'
 
-let releaseFinal!: () => void
-const emptyBundle = (ids: string[]) => ({
-  shipments: ids.map((id) => ({ id })), orders: [], loads: [], loadCarriers: [], loadFinancials: [],
-})
+const bundle = (ids: string[]) => ({ shipments: ids.map((id) => ({ id })), orders: [], loads: [], loadCarriers: [], loadFinancials: [] })
+const views: Array<{ kind: string }> = []
+let releaseReferents!: () => void
 vi.mock('@/lib/boardData', () => ({
-  loadBoardBundle: vi.fn(async (view: { kind: string }, opts?: { onPartial?: (b: unknown) => void }) => {
-    if (view.kind === 'window') return emptyBundle(['w1'])
-    opts?.onPartial?.(emptyBundle(['open1']))
-    await new Promise<void>((r) => { releaseFinal = r })
-    return emptyBundle(['open1', 'delivered1'])
+  loadBoardBundle: vi.fn(async (view: { kind: string }) => {
+    views.push(view)
+    if (view.kind === 'window') return bundle(['w1'])
+    await new Promise<void>((r) => { releaseReferents = r })
+    return bundle(['inv1'])
   }),
 }))
 vi.mock('@/lib/apiClient', () => ({
-  listOpenInvoices: async () => [], listOpenBills: async () => [], listUserProfiles: async () => [], listOwnershipDivisions: async () => [],
+  listOpenInvoices: async () => [{ id: 'i', shipmentId: 'inv1', balanceCents: 1 }],
+  listOpenBills: async () => [], listUserProfiles: async () => [], listOwnershipDivisions: async () => [],
 }))
 vi.mock('@/lib/reportsClient', () => ({
   loadSamples: async () => ({ rows: [], failedMonths: [] }),
@@ -27,16 +27,17 @@ vi.mock('@/lib/dashboardCharts', () => ({ hydrateLoads: () => [] }))
 const { useBrokerageDashboard, clearDashboardCache } = await import('./useBrokerageDashboard')
 
 describe('useBrokerageDashboard', () => {
-  beforeEach(() => clearDashboardCache())
+  beforeEach(() => { clearDashboardCache(); views.length = 0 })
 
-  it('draws the window first, then adds the open-work set, then the delivered backlog; only the last is final', async () => {
+  it('draws the window first, then adds the rows the open invoices point to; only the last is final', async () => {
     const { result } = renderHook(() => useBrokerageDashboard({ from: '2026-11-01', to: '2026-11-30' } as never))
-    await waitFor(() => expect(result.current.data?.shipments.map((s) => s.id).sort()).toEqual(['open1', 'w1']))
+    await waitFor(() => expect(result.current.data?.shipments.map((s) => s.id)).toEqual(['w1']))
     expect(result.current.loading).toBe(false)
     expect(result.current.final).toBe(false)
-    await waitFor(() => expect(releaseFinal).toBeTypeOf('function'))
-    act(() => releaseFinal())
-    await waitFor(() => expect(result.current.data?.shipments.map((s) => s.id).sort()).toEqual(['delivered1', 'open1', 'w1']))
-    expect(result.current.final).toBe(true)
+    await waitFor(() => expect(releaseReferents).toBeTypeOf('function'))
+    releaseReferents()
+    await waitFor(() => expect(result.current.final).toBe(true))
+    expect(result.current.data?.shipments.map((s) => s.id).sort()).toEqual(['inv1', 'w1'])
+    expect(views.map((v) => v.kind)).toEqual(['window', 'ids'])
   })
 })

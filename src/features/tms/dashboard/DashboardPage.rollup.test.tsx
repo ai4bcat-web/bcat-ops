@@ -85,7 +85,7 @@ const source: MonthSource = {
   shipmentsByIds: async (ids) => shipments.filter((s) => ids.includes(s.id)).map(lite),
 }
 
-/** Rows the backend would hold for the default window, `ageMs` old. */
+/** Rows the backend would hold (AppSync hands back the Lambda's already-stringified AWSJSON string-encoded again) for the default window, `ageMs` old. */
 async function seedRows(ageMs: number, schemaVersion = 1) {
   hoisted.rows.clear()
   const computedAt = new Date(Date.now() - ageMs).toISOString()
@@ -93,10 +93,10 @@ async function seedRows(ageMs: number, schemaVersion = 1) {
   for (const month of rollupMonthsFor(from, to, 1)) {
     if (month > MONTH) continue
     const payload: MonthPayload = await computeMonth(source, month)
-    hoisted.rows.set(`M:${month}`, { id: `M:${month}`, kind: 'M', periodKey: month, schemaVersion, payload: JSON.stringify(payload), computedAt })
+    hoisted.rows.set(`M:${month}`, { id: `M:${month}`, kind: 'M', periodKey: month, schemaVersion, payload: JSON.stringify(JSON.stringify(payload)), computedAt })
   }
   const live: LivePayload = await computeLive({ openInvoices: async () => [], openBills: async () => [], shipmentsByIds: source.shipmentsByIds, loadsByIds: async () => [] })
-  hoisted.rows.set('L:CURRENT', { id: 'L:CURRENT', kind: 'L', periodKey: 'CURRENT', schemaVersion, payload: JSON.stringify(live), computedAt })
+  hoisted.rows.set('L:CURRENT', { id: 'L:CURRENT', kind: 'L', periodKey: 'CURRENT', schemaVersion, payload: JSON.stringify(JSON.stringify(live)), computedAt })
 }
 
 class IdleObserver {
