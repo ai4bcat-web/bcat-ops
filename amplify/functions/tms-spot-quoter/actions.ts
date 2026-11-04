@@ -273,7 +273,7 @@ async function allowedDomainOf(deps: SpotDeps): Promise<string> {
 
 const oauthStart: Handler = async (deps, caller, input) => {
   const redirectUri = requireString(input.redirectUri, 'redirectUri', 500)
-  const client = (await deps.providerModes()).gmail === 'LIVE' ? await deps.oauth.readClient() : null
+  const client = await deps.oauth.readClient().catch(() => null)
   if (!client) throw new Error('NOT_CONFIGURED: Gmail sign-in is not set up yet. An admin adds the Google OAuth client under Settings → Integrations.')
   if (!deps.oauth.redirectUriAllowed(redirectUri, deps.portalOrigins)) throw new Error('That redirect address is not allowed.')
   const state = deps.oauth.newState()

@@ -152,7 +152,11 @@ export function createSpotDeps(): SpotDeps {
       return JSON.parse(text) as SpotAutoQuoteResult
     },
     async providerModes() {
-      const [client, dat] = await Promise.all([readOAuthClient(), readPageCredentials('DAT')])
+      // A provider whose credentials cannot be read is not connected: STUB, never an error.
+      const [client, dat] = await Promise.all([
+        readOAuthClient().catch(() => null),
+        readPageCredentials('DAT').catch(() => null),
+      ])
       return { gmail: client ? 'LIVE' : 'STUB', dat: dat ? 'LIVE' : 'STUB' }
     },
     now: () => new Date(),

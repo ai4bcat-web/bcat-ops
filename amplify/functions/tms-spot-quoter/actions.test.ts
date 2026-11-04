@@ -287,6 +287,17 @@ describe('Gmail OAuth connect', () => {
     expect(rig.store.connections.size).toBe(0)
   })
 
+  it('an unreadable OAuth client reads as NOT_CONFIGURED, and status still answers', async () => {
+    const rig = makeRig()
+    rig.oauth.readClient = async () => {
+      throw new Error('Could not read the stored credentials; try again')
+    }
+    rig.deps.providerModes = async () => ({ gmail: 'STUB', dat: 'STUB' })
+    await expect(call(rig, 'SPOT_OAUTH_START', { redirectUri })).rejects.toThrow(/NOT_CONFIGURED/)
+    const status = (await call(rig, 'SPOT_STATUS', {})) as { gmailProvider: { mode: string } }
+    expect(status.gmailProvider.mode).toBe('STUB')
+  })
+
   it('refuses a redirect address that is not the app’s callback', async () => {
     const rig = makeRig()
     await expect(call(rig, 'SPOT_OAUTH_START', { redirectUri: 'https://evil.test/tms/rates/spot/callback' })).rejects.toThrow(/not allowed/)

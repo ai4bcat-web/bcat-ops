@@ -3746,11 +3746,11 @@ spotFn.addToRolePolicy(new PolicyStatement({
 // Lambda's /bcat/integrations/<pool>/* grant does not match and no other Lambda holds.
 spotFn.addToRolePolicy(new PolicyStatement({
   actions:   ['ssm:GetParameter'],
-  resources: [Stack.of(spotFn).formatArn({
+  resources: ['GMAIL_REP_OAUTH', 'DAT'].map((provider) => Stack.of(spotFn).formatArn({
     service: 'ssm',
     resource: 'parameter',
-    resourceName: `${integrationParamPath.replace(/^\//, '')}/GMAIL_REP_OAUTH`,
-  })],
+    resourceName: `${integrationParamPath.replace(/^\//, '')}/${provider}`,
+  })),
 }))
 spotFn.addToRolePolicy(new PolicyStatement({
   actions:   ['ssm:GetParameter', 'ssm:PutParameter', 'ssm:DeleteParameter'],
