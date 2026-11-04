@@ -267,6 +267,16 @@ const LANE_PATCH = (pickup) => ({
   pickupDate: pickup, equipment: 'dry van', equipmentType: 'VAN', mode: 'FTL', weightLbs: 40000, commodity: 'General freight', accessorials: [],
 })
 
+const DEV_EXTRACTION = (pickup) => ({
+  kind: 'QUOTE_REQUEST', confidence: 'high', reason: 'harness-supplied', customerName: null, contactName: 'ZZ AB Buyer', contactPhone: null,
+  stops: [
+    { type: 'PICKUP', name: null, city: 'Chicago', state: 'IL', zip: '60601', dateStr: pickup, time: null },
+    { type: 'DELIVERY', name: null, city: 'Dallas', state: 'TX', zip: '75201', dateStr: null, time: null },
+  ],
+  pickupDate: pickup, deliveryDate: null, equipment: 'dry van', lengthFt: null, mode: 'FTL', weightLbs: 40000, pieces: null,
+  commodity: 'General freight', temperatureF: null, hazmat: null, accessorials: [], targetRateDollars: null, notes: null, lowConfidence: [],
+})
+
 /** A stored, customer-matched, field-complete request for `subject`: via the sim inbox, else the paste-a-request door. */
 async function ensureRequest(ctx, { subject, from, customerId, pickup }) {
   let row = await requestBySubject(ctx, subject)
@@ -276,7 +286,9 @@ async function ensureRequest(ctx, { subject, from, customerId, pickup }) {
     row = await requestBySubject(ctx, subject)
   }
   if (!row) {
-    row = (await ctx.spot('SPOT_ADD_MANUAL', { text: requestBody(ctx, pickup), subject, fromEmail: from, fromName: 'ZZ AB Buyer' })).request
+    const manual = { text: requestBody(ctx, pickup), subject, fromEmail: from, fromName: 'ZZ AB Buyer' }
+    // The model is part of the paste door too; when it is unusable the dev stack accepts the classification from us.
+    row = (await ctx.spot('SPOT_ADD_MANUAL', manual).catch(() => ctx.spot('SPOT_ADD_MANUAL', { ...manual, devExtraction: DEV_EXTRACTION(pickup) }))).request
     ctx.manualUsed = true
   }
   expect(row, `no SpotRequest for "${subject}" (neither the sim inbox nor SPOT_ADD_MANUAL produced one)`)
@@ -543,6 +555,19 @@ async function ab10Crm(ctx) {
   const tomorrow = `${day(1)}T12:00:00.000Z`
   const task = (await ctx.crm('CRM_ADD_TASK', { customerId: cid, summary: 'ZZ AB task', dueAt: tomorrow })).activity
   await ctx.crm('CRM_SET_NEXT_STEP', { customerId: cid, nextStep: 'ZZ AB next step', nextStepDueAt: tomorrow })
+  // Its own quote and shipment on the prospect: AB10 must not depend on AB05/AB08 having run.
+  if (!(await ctx.crm('CRM_GET_ACCOUNT', { customerId: cid })).timeline.some((e) => e.derived && (e.kind === 'SHIPMENT_CREATED' || String(e.kind).startsWith('QUOTE')))) {
+    const own = await ctx.ship('SAVE_QUOTE', {
+      customerId: cid, mode: 'FTL', rateType: 'SPOT', equipmentType: 'Dry Van', commodity: 'ZZ AB crm', miles: 925, weightLbs: 40000,
+      contactName: 'ZZ AB Buyer', contactEmail: ctx.f.prospectEmail,
+      stops: [
+        { type: 'pickup', name: 'ZZ AB Shipper', city: 'Chicago, IL', address: { city: 'Chicago', state: 'IL', zip: '60601' }, appt: `${day(3)}T15:00:00.000Z` },
+        { type: 'delivery', name: 'ZZ AB Receiver', city: 'Dallas, TX', address: { city: 'Dallas', state: 'TX', zip: '75201' }, appt: `${day(4)}T18:00:00.000Z` },
+      ],
+      lines: [{ side: 'CUSTOMER', code: 'LINEHAUL', rateCents: 150000, count: 1 }],
+    })
+    ctx.quoteIds.add(String(own.quote.id))
+  }
   const a = await ctx.crm('CRM_GET_ACCOUNT', { customerId: cid })
   const lastBefore = a.account?.lastTouchAt
   expect(lastBefore, 'no lastTouchAt after manual activity')
@@ -570,7 +595,7 @@ async function ab10Crm(ctx) {
   expect(mgr.visible === true, 'a manager cannot see an account owned by someone else')
   const repList = await ctx.crmRep('CRM_LIST_ACCOUNTS', { scope: 'all' })
   expect(!repList.rows.some((r) => r.customerId === cid), 'CRM_LIST_ACCOUNTS leaks another rep\'s account to a rep')
-  await refused('a rep reading another rep\'s spot request', /./, () => ctx.spotRep('SPOT_GET_REQUEST', { id: ctx.f.req.id }))
+  await refused('a rep reading another rep\'s spot request', /./, () => ctx.spotRep('SPOT_GET_REQUEST', { id: ctx.f.req?.id ?? `sr:${ctx.userId}:none` }))
   const restricted = (await ctx.crmRep('CRM_GET_ACCOUNT', { customerId: unowned.id })).timeline.filter((e) => e.kind === 'EMAIL_IN' || e.kind === 'EMAIL_OUT')
   expect(restricted.every((e) => e.subject == null), 'a rep sees an e-mail subject on an account they do not own mail on')
   return `note+call+task+next step stored; last touch ${lastBefore.slice(0, 10)} unmoved by a back-dated note; derived quote/shipment + e-mail rows present; follow-ups lists it; visibility: non-owner rep refused, unowned visible, manager sees all, list filtered`

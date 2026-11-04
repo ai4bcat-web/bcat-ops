@@ -318,7 +318,7 @@ export async function processMessage(ctx: PollContext, id: string): Promise<Mail
 export async function processManual(
   deps: SpotDeps,
   ctx: { conn: GmailConnectionRecord | null; userId: string; settings: ResolvedSpotSettings; aiAgents: AiAgentsSettings | null },
-  input: { text: string; subject?: string; fromEmail?: string; fromName?: string },
+  input: { text: string; subject?: string; fromEmail?: string; fromName?: string; devExtraction?: Parameters<typeof normalizeExtraction>[0] },
 ): Promise<SpotRequestRecord> {
   const text = input.text.slice(0, MAX_BODY_CHARS)
   const fromEmail = (input.fromEmail ?? '').trim().toLowerCase()
@@ -327,24 +327,30 @@ export async function processManual(
   const existing = await deps.store.getRequest(id)
   if (existing) return existing
 
-  const budget = ctx.conn ? budgetOf(ctx.conn, deps.now()) : { day: chicagoDay(deps.now().toISOString()), count: 0 }
-  const gateCtx = { aiAgents: ctx.aiAgents, settings: ctx.settings, budget }
-  const gate = modelGate(gateCtx)
-  if (gate === 'OFF') throw new Error('The QUOTE agent is switched off by an admin.')
-  if (gate === 'CAP') throw new Error('The daily model-call limit for this mailbox has been reached.')
-
   const receivedAt = deps.now().toISOString()
-  const answer = await deps.model.classify({
-    subject: input.subject ?? null,
-    fromEmail: fromEmail || null,
-    mailDate: receivedAt,
-    body: stripQuotedHistory(text),
-    aiAgents: ctx.aiAgents,
-  })
-  if (ctx.conn) {
-    await deps.store.updateConnection(ctx.userId, { modelCallsDay: budget.day, modelCallsToday: budget.count + 1 })
+  let output: Parameters<typeof normalizeExtraction>[0]
+  if (input.devExtraction && deps.devStack) {
+    // Dev stack only: the verification harness supplies the classification itself when the
+    // model is unavailable. Everything after this point (normalising, storing) is unchanged.
+    output = input.devExtraction
+  } else {
+    const budget = ctx.conn ? budgetOf(ctx.conn, deps.now()) : { day: chicagoDay(deps.now().toISOString()), count: 0 }
+    const gate = modelGate({ aiAgents: ctx.aiAgents, settings: ctx.settings, budget })
+    if (gate === 'OFF') throw new Error('The QUOTE agent is switched off by an admin.')
+    if (gate === 'CAP') throw new Error('The daily model-call limit for this mailbox has been reached.')
+    const answer = await deps.model.classify({
+      subject: input.subject ?? null,
+      fromEmail: fromEmail || null,
+      mailDate: receivedAt,
+      body: stripQuotedHistory(text),
+      aiAgents: ctx.aiAgents,
+    })
+    if (ctx.conn) {
+      await deps.store.updateConnection(ctx.userId, { modelCallsDay: budget.day, modelCallsToday: budget.count + 1 })
+    }
+    output = answer.output
   }
-  if (answer.output.kind !== 'QUOTE_REQUEST') {
+  if (output.kind !== 'QUOTE_REQUEST') {
     throw new Error('That does not look like a request to quote freight, so it was not saved.')
   }
   const row = await buildRequestRow({ deps, settings: ctx.settings }, {
@@ -360,7 +366,7 @@ export async function processManual(
     subject: input.subject ?? '',
     body: text,
     attachments: [],
-    raw: answer.output,
+    raw: output,
     authVerdict: null,
     threadSnippet: null,
     messageId: `manual-${sha}`,

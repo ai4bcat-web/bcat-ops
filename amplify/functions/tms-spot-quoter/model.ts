@@ -14,8 +14,16 @@ import type { SpotReplyIntent } from '../../../src/types/tms'
 import { memoryPromptFor } from '../../../src/lib/workflows/memory'
 import { callModel, emailPrompt, resetModelBudget } from '../workflow-agent/model'
 
-const STR = ['string', 'null']
-const NUM = ['number', 'null']
+/*
+ * Anthropic's structured output compiles every type array / anyOf as a union and refuses
+ * a schema with many of them. So every leaf is a plain string or number and "unknown" is a
+ * sentinel the model is told to use: '' for text, -1 for numbers. `fromSentinels` maps
+ * them back to null before anything else sees the answer.
+ */
+const NO_TEXT = 'Empty string when the message does not say.'
+const NO_NUM = 'Use -1 when the message does not say.'
+const STR = 'string'
+const NUM = 'number'
 
 export const SPOT_REQUEST_SCHEMA = {
   type: 'object',
@@ -29,9 +37,9 @@ export const SPOT_REQUEST_SCHEMA = {
     kind: { type: 'string', description: 'One of QUOTE_REQUEST, FOLLOW_UP, NOT_A_REQUEST. QUOTE_REQUEST asks us to price freight. FOLLOW_UP is a reply about a quote or thread that already exists. Everything else (newsletters, invoices, tenders already priced, out-of-office, internal chatter, carriers offering trucks) is NOT_A_REQUEST.' },
     confidence: { type: 'string', description: 'One of high, medium, low.' },
     reason: { type: 'string', description: 'One short sentence (max 200 characters) naming what decided it.' },
-    customerName: { type: STR, description: 'The company asking for the price.' },
-    contactName: { type: STR },
-    contactPhone: { type: STR },
+    customerName: { type: STR, description: `The company asking for the price. ${NO_TEXT}` },
+    contactName: { type: STR, description: NO_TEXT },
+    contactPhone: { type: STR, description: NO_TEXT },
     stops: {
       type: 'array',
       description: 'At least two for a quote request, in route order.',
@@ -41,28 +49,28 @@ export const SPOT_REQUEST_SCHEMA = {
         required: ['type', 'name', 'city', 'state', 'zip', 'dateStr', 'time'],
         properties: {
           type: { type: 'string', description: 'PICKUP or DELIVERY' },
-          name: { type: STR, description: 'Facility name.' },
-          city: { type: STR },
-          state: { type: STR, description: 'Two-letter state code.' },
-          zip: { type: STR },
-          dateStr: { type: STR, description: 'YYYY-MM-DD; relative dates resolved against the message date.' },
-          time: { type: STR, description: 'HH:mm 24h, only when a real appointment time is stated.' },
+          name: { type: STR, description: `Facility name. ${NO_TEXT}` },
+          city: { type: STR, description: NO_TEXT },
+          state: { type: STR, description: `Two-letter state code. ${NO_TEXT}` },
+          zip: { type: STR, description: NO_TEXT },
+          dateStr: { type: STR, description: 'YYYY-MM-DD; relative dates resolved against the message date. ' + NO_TEXT },
+          time: { type: STR, description: `HH:mm 24h, only when a real appointment time is stated. ${NO_TEXT}` },
         },
       },
     },
-    pickupDate: { type: STR, description: 'YYYY-MM-DD; relative dates resolved against the message date.' },
-    deliveryDate: { type: STR, description: 'YYYY-MM-DD.' },
-    equipment: { type: STR, description: 'Equipment asked for, as written.' },
-    lengthFt: { type: NUM },
-    mode: { type: STR, description: 'One of FTL, LTL, PARTIAL, DRAYAGE, OTHER.' },
-    weightLbs: { type: NUM, description: 'Total weight in pounds.' },
-    pieces: { type: NUM },
-    commodity: { type: STR, description: 'At most 60 characters.' },
-    temperatureF: { type: STR },
-    hazmat: { type: STR, description: 'YES or NO when the message says so.' },
+    pickupDate: { type: STR, description: `YYYY-MM-DD; relative dates resolved against the message date. ${NO_TEXT}` },
+    deliveryDate: { type: STR, description: `YYYY-MM-DD. ${NO_TEXT}` },
+    equipment: { type: STR, description: `Equipment asked for, as written. ${NO_TEXT}` },
+    lengthFt: { type: NUM, description: NO_NUM },
+    mode: { type: STR, description: `One of FTL, LTL, PARTIAL, DRAYAGE, OTHER. ${NO_TEXT}` },
+    weightLbs: { type: NUM, description: `Total weight in pounds. ${NO_NUM}` },
+    pieces: { type: NUM, description: NO_NUM },
+    commodity: { type: STR, description: `At most 60 characters. ${NO_TEXT}` },
+    temperatureF: { type: STR, description: NO_TEXT },
+    hazmat: { type: STR, description: `YES or NO when the message says so. ${NO_TEXT}` },
     accessorials: { type: 'array', items: { type: 'string' }, description: 'Extra services as written: liftgate, inside delivery, appointment, lumper, …' },
-    targetRateDollars: { type: NUM, description: 'Only when the customer named a number themselves. Never your own estimate.' },
-    notes: { type: STR, description: 'One short sentence a person should see, or null.' },
+    targetRateDollars: { type: NUM, description: `Only when the customer named a number themselves. Never your own estimate. ${NO_NUM}` },
+    notes: { type: STR, description: `One short sentence a person should see. ${NO_TEXT}` },
     lowConfidence: {
       type: 'array',
       items: { type: 'string' },
@@ -70,6 +78,42 @@ export const SPOT_REQUEST_SCHEMA = {
     },
   },
 } as const
+
+function text(v: unknown): string | null {
+  return typeof v === 'string' && v.trim() !== '' ? v : null
+}
+function num(v: unknown): number | null {
+  return typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : null
+}
+
+/** The model's sentinel answer → the nullable shape `normalizeExtraction` reads. */
+export function fromSentinels(raw: Record<string, unknown>): RawSpotModelOutput {
+  const stops = Array.isArray(raw.stops) ? raw.stops : []
+  return {
+    ...raw,
+    customerName: text(raw.customerName),
+    contactName: text(raw.contactName),
+    contactPhone: text(raw.contactPhone),
+    stops: stops.map((s: Record<string, unknown>) => ({
+      type: s.type, name: text(s.name), city: text(s.city), state: text(s.state),
+      zip: text(s.zip), dateStr: text(s.dateStr), time: text(s.time),
+    })),
+    pickupDate: text(raw.pickupDate),
+    deliveryDate: text(raw.deliveryDate),
+    equipment: text(raw.equipment),
+    lengthFt: num(raw.lengthFt),
+    mode: text(raw.mode),
+    weightLbs: num(raw.weightLbs),
+    pieces: num(raw.pieces),
+    commodity: text(raw.commodity),
+    temperatureF: text(raw.temperatureF),
+    hazmat: text(raw.hazmat),
+    targetRateDollars: num(raw.targetRateDollars),
+    notes: text(raw.notes),
+    accessorials: Array.isArray(raw.accessorials) ? raw.accessorials : [],
+    lowConfidence: Array.isArray(raw.lowConfidence) ? raw.lowConfidence : [],
+  } as unknown as RawSpotModelOutput
+}
 
 export const REPLY_INTENT_SCHEMA = {
   type: 'object',
@@ -111,8 +155,8 @@ export const realModel: SpotModel = {
       `${CLASSIFY_INSTRUCTION}\nThe message was sent on ${input.mailDate}; resolve relative dates against it.`,
     ].filter(Boolean).join('\n\n')
     const prompt = emailPrompt(text, { subject: input.subject, fromEmail: input.fromEmail, body: input.body })
-    const answer = await callModel<RawSpotModelOutput>(SPOT_REQUEST_SCHEMA, [], prompt, 1200)
-    return { output: answer.value, inputTokens: answer.inputTokens, outputTokens: answer.outputTokens }
+    const answer = await callModel<Record<string, unknown>>(SPOT_REQUEST_SCHEMA, [], prompt, 1200)
+    return { output: fromSentinels(answer.value), inputTokens: answer.inputTokens, outputTokens: answer.outputTokens }
   },
 
   async replyIntent(input) {

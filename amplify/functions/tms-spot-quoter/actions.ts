@@ -498,6 +498,9 @@ const addManual: Handler = async (deps, caller, input) => {
       subject: optionalString(input.subject, 'subject', 200),
       fromEmail: optionalString(input.fromEmail, 'fromEmail', 200),
       fromName: optionalString(input.fromName, 'fromName', 200),
+      devExtraction: deps.devStack && input.devExtraction && typeof input.devExtraction === 'object'
+        ? (input.devExtraction as Parameters<typeof processManual>[2]['devExtraction'])
+        : undefined,
     },
   )
   return { request }

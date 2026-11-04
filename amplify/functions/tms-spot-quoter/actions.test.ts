@@ -270,6 +270,23 @@ describe('manual paste', () => {
   })
 })
 
+describe('manual paste with a supplied classification (dev only)', () => {
+  it('stores it without any model call on the dev stack, and ignores it elsewhere', async () => {
+    const dev = makeRig({ dev: true })
+    dev.store.connections.set(REP_ID, connectedRow())
+    dev.model.answer = () => new Error('model unavailable')
+    const out = (await call(dev, 'SPOT_ADD_MANUAL', { text: 'van Chicago to Dallas', fromEmail: 'dana@zz-acme.test', devExtraction: requestRaw() })) as { request: SpotRequestRecord }
+    expect(out.request.status).toBe('NEW')
+    expect(dev.model.classifyCalls).toHaveLength(0)
+
+    const prod = makeRig()
+    prod.store.connections.set(REP_ID, connectedRow())
+    prod.model.answer = () => new Error('model unavailable')
+    await expect(call(prod, 'SPOT_ADD_MANUAL', { text: 'van Chicago to Dallas', devExtraction: requestRaw() })).rejects.toThrow(/model unavailable/)
+    expect(prod.store.requests.size).toBe(0)
+  })
+})
+
 describe('Gmail OAuth connect', () => {
   const redirectUri = 'https://ops.zz-bcat.test/tms/rates/spot/callback'
 
