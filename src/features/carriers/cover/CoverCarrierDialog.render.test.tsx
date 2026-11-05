@@ -107,6 +107,15 @@ describe('CoverCarrierDialog', () => {
     expect(await screen.findByTestId('cover-directory')).toBeTruthy()
   })
 
+  it('a rate and carrier handed in by the shipment form are prefilled, so Assign needs no retyping', async () => {
+    mocks.carriers = [carrierRow({ status: 'ACTIVE', mcpStatus: 'ACCEPTABLE' })]
+    render(<MemoryRouter><CoverCarrierDialog shipmentId="shp-1" initialQuery="900001" initialRateCents={190_000} onClose={onClose} onCovered={onCovered} /></MemoryRouter>)
+    expect(await screen.findByTestId('cover-directory')).toBeTruthy()
+    expect((screen.getByRole('textbox', { name: /carrier rate/i }) as HTMLInputElement).value).toMatch(/1,?900/)
+    fireEvent.click(screen.getByTestId('cover-assign'))
+    await waitFor(() => expect(mocks.cover).toHaveBeenCalledWith(expect.objectContaining({ carrierId: 'car-1', carrierRateCents: 190_000 })))
+  })
+
   it('will not assign until a rate is entered', async () => {
     mocks.carriers = [carrierRow({ status: 'ACTIVE', mcpStatus: 'ACCEPTABLE' })]
     renderDialog()

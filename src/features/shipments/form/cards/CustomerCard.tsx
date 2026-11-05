@@ -18,7 +18,7 @@ import { applyCustomerDefaults, isLocked, lockReason } from '../model'
 import { ctl, disabledState, issueFor } from '../sections/fieldUtil'
 import { LField } from '../sections/formControls'
 import { type CardProps, sliceOf } from './cardRegistry'
-import { pushRecent, readRecents, recentFirst } from './recents'
+import { pushRecent, rankWithRecents, readRecents, recentFirst } from './recents'
 import { Typeahead, type TypeaheadItem } from './Typeahead'
 import './cards.css'
 
@@ -55,8 +55,7 @@ export function CustomerCard({ values, update, ctx, form }: CardProps) {
       id: c.id, label: c.name, sub: isRecent ? 'Recent' : undefined, recent: isRecent,
     })
     if (!q) return recentFirst(shippable, recent).filter((c) => recent.includes(c.id)).map((c) => toItem(c, true))
-    const hits = findCustomerMatches(q, shippable).map((m) => m.record)
-    return recentFirst(hits, recent).slice(0, OFFERED).map((c) => toItem(c, recent.includes(c.id)))
+    return rankWithRecents(findCustomerMatches(q, shippable), recent).slice(0, OFFERED).map((c) => toItem(c, recent.includes(c.id)))
   }, [query, shippable, recent])
 
   const pick = (id: string | null) => {

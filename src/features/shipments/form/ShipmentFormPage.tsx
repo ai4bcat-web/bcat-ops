@@ -155,7 +155,7 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
   }, [intakeId, intake.row, directory.loading, directory.customers, seedValues])
 
   const { actions, dialogs, busy } = useFormActions({
-    values, update, bundle, setBundle: form.setBundle, busy: pipelineBusy, settings, isAdmin, brokerName: 'BCAT Logistics',
+    values, update, bundle, setBundle: form.setBundle, busy: pipelineBusy, settings, carriers, isAdmin, brokerName: 'BCAT Logistics',
   })
 
   const formApi = useMemo<FormApi>(() => ({
@@ -250,7 +250,7 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
       <FormHeader
         title={title} status={status} dirty={form.dirty} pro={pro} mode={mode} formMode={values.mode}
         revDivision={values.ship.revDivision} divisions={ctx.divisions} locked={locked} disabled={busy || voided}
-        update={update} onBack={cancel}
+        update={update}
       />
 
       <div className="tms-ship-form-scroll">
@@ -259,11 +259,11 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
         {mode === 'create' && form.drafts.length > 0 ? (
           <div data-testid="ship-form-drafts">
             {form.drafts.map((d) => (
-              <TmsAlert key={d.clientDraftId} tone="blue" className="tms-ship-banner">
-                <span>You have an unsaved draft from {new Date(d.savedAt).toLocaleString()} — </span>
+              <div key={d.clientDraftId} className="tms-ship-draft" role="status">
+                <span>Unsaved draft from {new Date(d.savedAt).toLocaleString()}</span>
                 <TmsButton size="sm" variant="ghost" data-testid={`ship-form-draft-resume-${d.clientDraftId}`} onClick={() => form.resumeDraft(d.clientDraftId)}>Resume</TmsButton>
                 <TmsButton size="sm" variant="ghost" data-testid={`ship-form-draft-discard-${d.clientDraftId}`} onClick={() => form.discardDraft(d.clientDraftId)}>Discard</TmsButton>
-              </TmsAlert>
+              </div>
             ))}
           </div>
         ) : null}

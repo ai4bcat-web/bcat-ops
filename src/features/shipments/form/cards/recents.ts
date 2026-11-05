@@ -31,3 +31,20 @@ export function recentFirst<T extends { id: string }>(items: readonly T[], recen
   const seen = new Set(head.map((i) => i.id))
   return [...head, ...items.filter((i) => !seen.has(i.id))]
 }
+
+/** A recent match may jump the queue only while it is about as good as the best one (score within this). */
+export const RECENT_BOOST_BAND = 0.1
+
+/**
+ * Typed-query ranking: matches arrive best first. Recently used ones move to the front, but only
+ * those scoring within `RECENT_BOOST_BAND` of the best match, so a stale recent never buries the
+ * exact name the person is typing.
+ */
+export function rankWithRecents<T extends { id: string }>(
+  matches: readonly { record: T; score: number }[], recent: readonly string[],
+): T[] {
+  const best = matches[0]?.score ?? 0
+  const close = matches.filter((m) => m.score >= best - RECENT_BOOST_BAND).map((m) => m.record)
+  const far = matches.filter((m) => m.score < best - RECENT_BOOST_BAND).map((m) => m.record)
+  return [...recentFirst(close, recent), ...far]
+}

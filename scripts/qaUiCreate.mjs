@@ -38,9 +38,9 @@ try {
   await b.evaluate(`document.querySelector('${tid('f-customer-name')} li button')?.click()`)
   await b.poll(() => b.evaluate(`!!document.querySelector('${tid('f-customer-billToBlock')}')`), 'Bill To', 20_000).catch(() => {})
   await pause(1000)
-  const bt = await b.evaluate(`(() => { const blk = document.querySelector('${tid('f-customer-billToBlock')}'); if (!blk) return null; const r = blk.getBoundingClientRect(); const cust = document.querySelector('${tid('section-customer')}').getBoundingClientRect(); return { rows: ['terms', 'factoring', 'emails', 'limit', 'available'].filter((k) => document.querySelector('[data-testid="f-customer-billTo-' + k + '"]')), editable: blk.querySelectorAll('input:not([readonly]):not([disabled]), textarea, select').length, insideCustomerSection: r.top >= cust.top && r.bottom <= cust.bottom + 1, belowName: true } })()`)
-  rec('Bill To block read-only under Customer', bt && bt.rows.length === 5 && bt.editable === 0 && bt.insideCustomerSection ? 'PASS' : 'FAIL', bt)
-  await b.evaluate(`document.querySelector('${tid('section-customer')}').scrollIntoView({ block: 'start' })`); await b.screenshot(`${SHOTS}/create-bill-to-1440.png`)
+  const bt = await b.evaluate(`(() => { const blk = document.querySelector('${tid('f-customer-billToBlock')}'); if (!blk) return null; const card = document.querySelector('${tid('section-billTo')}').getBoundingClientRect(); const r = blk.getBoundingClientRect(); return { rows: ['terms', 'factoring', 'emails', 'limit', 'available'].filter((k) => document.querySelector('[data-testid="f-customer-billTo-' + k + '"], [data-testid="card-billTo-' + (k === 'limit' ? 'limit' : k) + '"]')), editable: document.querySelector('${tid('section-billTo')}').querySelectorAll('input:not([readonly]):not([disabled]), textarea, select').length, insideBillToCard: r.top >= card.top && r.bottom <= card.bottom + 1 } })()`)
+  rec('Bill To card read-only, own card under Customer', bt && bt.rows.length === 5 && bt.editable === 0 && bt.insideBillToCard ? 'PASS' : 'FAIL', bt)
+  await b.evaluate(`document.querySelector('${tid('section-billTo')}').scrollIntoView({ block: 'start' })`); await b.screenshot(`${SHOTS}/create-bill-to-1440.png`)
   // 2 auto miles: pick two existing locations (names read from the Locations board, never printed)
   await b.navigate('/tms/locations'); await b.poll(() => b.evaluate(`document.querySelectorAll('.tms-main table tbody tr').length > 2`), 'locations', 40_000).catch(() => {}); await pause(2500)
   const locs = await b.evaluate(`(() => { const out = []; for (const tr of document.querySelectorAll('.tms-main table tbody tr')) { const t = (tr.querySelector('td')?.textContent ?? '').trim(); if (t.length > 4 && !/^zz/i.test(t)) out.push(t); if (out.length >= 40) break } return out })()`)
@@ -50,9 +50,9 @@ try {
   const pickLoc = async (field, q) => { await setValue(tid(field), q); await b.poll(() => b.evaluate(`!!document.querySelector('${tid(field + '-option')}')`), field, 10_000).catch(() => {}); const ok = await b.evaluate(`(() => { const o = document.querySelector('${tid(field + '-option')}'); if (!o) return false; o.click(); return true })()`); await pause(800); return ok }
   let picked = [false, false]; let pickedAt = []
   for (const name of locs) {
-    if (!picked[0]) { picked[0] = await pickLoc('f-pickup-name', name.slice(0, 18)); if (picked[0]) pickedAt.push(name); continue }
-    picked[1] = await pickLoc('f-consignee-name', name.slice(0, 18))
-    const geo = await b.evaluate(`[document.querySelector('${tid('f-pickup-city')}')?.value, document.querySelector('${tid('f-consignee-city')}')?.value]`)
+    if (!picked[0]) { picked[0] = await pickLoc('f-pickup-name', name); if (picked[0]) pickedAt.push(name); continue }
+    picked[1] = await pickLoc('f-consignee-name', name)
+    const geo = await b.evaluate(`[document.querySelector('${tid('f-pickup-addressLine')}')?.innerText, document.querySelector('${tid('f-consignee-addressLine')}')?.innerText]`)
     if (picked[1] && geo[0] && geo[1] && geo[0] !== geo[1]) break
     picked[1] = false
   }
@@ -60,21 +60,20 @@ try {
   for (let i = 0; i < 30 && !(miles > 0); i += 1) { await pause(1000); miles = Number(await b.evaluate(`document.querySelector('${tid('f-shipping-customerMiles')}')?.value ?? ''`)) }
   const truck = Number(await b.evaluate(`document.querySelector('${tid('f-shipping-truckMiles')}')?.value ?? ''`))
   const src = await b.evaluate(`document.querySelector('${tid('f-shipping-milesSource')}')?.innerText ?? ''`)
-  const cities = (await b.evaluate(`[document.querySelector('${tid('f-pickup-city')}')?.value, document.querySelector('${tid('f-consignee-city')}')?.value]`)).map((x) => (x ? 'set' : 'empty')); const _unused = await b.evaluate(`[document.querySelector('${tid('f-pickup-city')}')?.value, document.querySelector('${tid('f-consignee-city')}')?.value].map((x) => (x ? 'set' : 'empty'))`)
+  const cities = (await b.evaluate(`[document.querySelector('${tid('f-pickup-addressLine')}')?.innerText, document.querySelector('${tid('f-consignee-addressLine')}')?.innerText]`)).map((x) => (x && !/No address/.test(x) ? 'set' : 'empty'))
   const dbg = await b.evaluate(`({ ps: document.querySelector('${tid('f-pickup-state')}')?.value?.length, cs: document.querySelector('${tid('f-consignee-state')}')?.value?.length, pz: !!document.querySelector('${tid('f-pickup-zip')}')?.value, note: document.querySelector('${tid('f-shipping-milesSource')}')?.innerText ?? null, disabled: document.querySelector('${tid('f-shipping-disableMileage')}')?.checked })`)
   console.log('miles debug', JSON.stringify(dbg), JSON.stringify(b.problems()).slice(0, 400))
   rec('auto miles from the stop addresses', miles > 0 && truck > 0 ? 'PASS' : 'FAIL', { locationsTried: locs.length, picked, customerMiles: miles, truckMiles: truck, source: src.slice(0, 60), cities })
-  await b.evaluate(`document.querySelector('${tid('section-shipping')}').scrollIntoView({ block: 'start' })`); await b.screenshot(`${SHOTS}/create-auto-miles-1440.png`)
+  await b.evaluate(`document.querySelector('${tid('section-route')}').scrollIntoView({ block: 'start' })`); await b.screenshot(`${SHOTS}/create-auto-miles-1440.png`)
   // 6 layout: total scroll height, columns, no horizontal overflow, tab order
-  const lay = await b.evaluate(`(() => { const sc = document.querySelector('.tms-ship-form-scroll'); const secs = [...document.querySelectorAll('[data-testid^="section-"]')].filter((s) => !/-(toggle|body)$/.test(s.getAttribute('data-testid'))); return { scrollH: sc.scrollHeight, clientH: sc.clientHeight, screens: +(sc.scrollHeight / sc.clientHeight).toFixed(1), hOverflow: Math.max(sc.scrollWidth - sc.clientWidth, document.documentElement.scrollWidth - innerWidth), sections: secs.map((s) => s.getAttribute('data-testid').replace('section-', '') + ':' + Math.round(s.getBoundingClientRect().height) + (s.querySelector('[aria-expanded="false"]') ? 'c' : '')), threeCol: (() => { const r = ['customer', 'pickup', 'consignee'].map((k) => document.querySelector('[data-testid="section-' + k + '"]').getBoundingClientRect().top); return Math.max(...r) - Math.min(...r) < 4 })() } })()`)
-  rec('one-page layout (3-up Customer / Pick Up / Consignee, no h-overflow)', lay.hOverflow <= 1 && lay.threeCol ? 'PASS' : 'FAIL', lay)
-  // collapse all sections -> whole form on one screen?
-  await b.evaluate(`document.querySelectorAll('[data-testid$="-toggle"][aria-expanded="true"]').forEach((t) => t.click())`); await pause(600)
-  const col = await b.evaluate(`(() => { const sc = document.querySelector('.tms-ship-form-scroll'); return { scrollH: sc.scrollHeight, clientH: sc.clientHeight } })()`)
-  rec('all sections collapsed fit one screen', col.scrollH <= col.clientH + 1 ? 'PASS' : 'FAIL', col)
-  await b.screenshot(`${SHOTS}/create-collapsed-1440.png`)
+  const lay = await b.evaluate(`(() => { const sc = document.querySelector('.tms-ship-form-scroll'); const cards = [...document.querySelectorAll('.tms-ship-card')].map((s) => s.dataset.testid.replace('section-', '')); const rail = document.querySelector('[data-testid="ship-form-rail"]').getBoundingClientRect(); return { cards, hOverflow: Math.max(sc.scrollWidth - sc.clientWidth, document.documentElement.scrollWidth - innerWidth), railWidth: Math.round(rail.width), railTop: Math.round(rail.top) } })()`)
+  rec('nine cards in order, 360 px rail, no h-overflow', lay.hOverflow <= 1 && lay.cards.join() === 'customer,billTo,route,freight,rates,rateHistory,carrier,tracking,documents' && lay.railWidth === 360 ? 'PASS' : 'FAIL', lay)
+  // first screen: Customer, Bill To, the pickup stop and the rail's Create button are visible without scrolling
+  await b.evaluate(`document.querySelector('.tms-ship-form-scroll')?.scrollTo(0, 0)`); await pause(400)
+  const fold = await b.evaluate(`(() => { const r = (id) => document.querySelector('[data-testid="' + id + '"]')?.getBoundingClientRect(); const pu = r('f-pickup-name'); const c = r('ship-form-create'); const cu = r('section-customer'); const bt = r('section-billTo'); return { customerBottom: Math.round(cu?.bottom ?? -1), billToTop: Math.round(bt?.top ?? -1), pickupBottom: Math.round(pu?.bottom ?? -1), createBottom: Math.round(c?.bottom ?? -1), h: innerHeight } })()`)
+  rec('first screen at 1440x900 shows Customer, Bill To, Route start and the rail', fold.pickupBottom > 0 && fold.pickupBottom <= fold.h && fold.createBottom <= fold.h && fold.billToTop < fold.h ? 'PASS' : 'FAIL', fold)
+  await b.screenshot(`${SHOTS}/create-first-screen-1440.png`)
   // tab order through Shipping Requirements starts at Mode and moves in reading order
-  await b.evaluate(`document.querySelectorAll('[data-testid$="-toggle"][aria-expanded="false"]').forEach((t) => t.click())`); await pause(500)
   await b.evaluate(`document.querySelector('${tid('f-shipping-mode')}')?.focus()`)
   const seen = []
   for (let i = 0; i < 14; i += 1) { await b.command('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 }); await b.command('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 }); seen.push(await b.evaluate(`document.activeElement?.getAttribute('data-testid') ?? document.activeElement?.getAttribute('aria-label') ?? document.activeElement?.tagName`)) }
@@ -86,11 +85,11 @@ try {
   const sid = await b.evaluate(`document.querySelector('a[aria-label="Open full page"]')?.getAttribute('href') ?? null`)
   if (sid) {
     await b.navigate(sid.replace(/\?.*$/, '') + '/edit'); await ready()
-    await b.evaluate(`document.querySelector('${tid('section-checkCalls')}')?.scrollIntoView({ block: 'start' })`); await pause(1500)
-    const cc = await b.evaluate(`(() => { const s = document.querySelector('[data-testid="section-checkCalls"]'); if (!s) return null; const link = s.querySelector('[data-testid="f-checkCalls-add"]'); return { strip: !!s.querySelector('[data-testid="tracking-strip"]'), link: link?.getAttribute('href')?.replace(/\\/shipments\\/[^/?]+/, '/shipments/<id>') ?? null, inputs: s.querySelectorAll('input:not([type=checkbox]), textarea, select').length, rows: s.querySelectorAll('tbody tr, .tms-recent-row, li').length } })()`)
-    rec('Check Calls = read-only Load Tracking preview', cc && cc.strip && cc.link?.includes('/tms/tracking') && cc.inputs === 0 ? 'PASS' : 'FAIL', cc)
+    await b.evaluate(`document.querySelector('${tid('section-tracking')}')?.scrollIntoView({ block: 'start' })`); await pause(1500)
+    const cc = await b.evaluate(`(() => { const s = document.querySelector('[data-testid="section-tracking"]'); if (!s) return null; const link = s.querySelector('[data-testid="card-tracking-open"]'); return { strip: !!s.querySelector('[data-testid="card-tracking-facts"]'), link: link?.getAttribute('href')?.replace(/\\/shipments\\/[^/?]+/, '/shipments/<id>') ?? null, inputs: s.querySelectorAll('input:not([type=checkbox]), textarea, select').length, rows: s.querySelectorAll('tbody tr, .tms-recent-row, li').length } })()`)
+    rec('Tracking card = read-only Load Tracking pull', cc && cc.strip && cc.link?.includes('/tms/tracking') && cc.inputs === 0 ? 'PASS' : 'FAIL', cc)
     await b.screenshot(`${SHOTS}/create-check-calls-preview-1440.png`)
-  } else rec('Check Calls preview', 'SKIP', 'no shipment link on the board')
+  } else rec('Tracking card', 'SKIP', 'no shipment link on the board')
   // 7 intake prefill: open an intake row, press Create shipment, read the banner + chips (nothing saved)
   await b.navigate('/tms/shipments/intake'); await b.waitFor('.tms-dg-scroll', 60000); await pause(3500)
   const btn = await b.evaluate(`document.querySelectorAll('[data-testid="intake-create-shipment"]').length`)

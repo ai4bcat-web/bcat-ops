@@ -1,9 +1,8 @@
 /**
- * The header bar (Step AR): breadcrumb, title, Division and Mode pills, status chip, read-only PRO.
+ * The header bar (Step AR): title (the shell's top bar already shows the Shipments / New shipment breadcrumb), Division and Mode pills, status chip, read-only PRO.
  * Division is the top-level revenue division (`ship.revDivision`; Revenue Type in Freight picks the
  * sub-division of the same field). Mode is `values.mode`.
  */
-import { ChevronRight } from 'lucide-react'
 import { memo } from 'react'
 import { TmsBadge } from '@/features/tms/kit'
 import type { DivisionTreeRow } from '@/features/tms/settings/taxonomyDrafts'
@@ -25,21 +24,15 @@ export interface FormHeaderProps {
   locked: LockSet
   disabled: boolean
   update: FormApi['update']
-  onBack: () => void
 }
 
-function FormHeaderImpl({ title, status, dirty, pro, mode, formMode, revDivision, divisions, locked, disabled, update, onBack }: FormHeaderProps) {
+function FormHeaderImpl({ title, status, dirty, pro, mode, formMode, revDivision, divisions, locked, disabled, update }: FormHeaderProps) {
   const tops = divisions.filter((r) => r.depth === 0 && (r.division.active || r.division.code === revDivision))
   const modeKnown = FORM_MODE_OPTIONS.some((o) => o.value === formMode)
   const modeLocked = isLocked(locked, 'mode')
   const draft = status === 'NEW' || status === 'DRAFT'
   return (
     <header className="tms-ship-hdr" data-testid="ship-form-header">
-      <nav className="tms-ship-hdr-crumb" aria-label="Breadcrumb">
-        <button type="button" className="tms-ship-hdr-link" data-testid="ship-form-back" onClick={onBack}>Shipments</button>
-        <ChevronRight size={12} aria-hidden="true" />
-        <span aria-current="page">{mode === 'create' ? 'New shipment' : 'Edit'}</span>
-      </nav>
       <h1 className="tms-ship-hdr-title" data-testid="ship-form-title">{title}</h1>
       <select
         className="tms-ship-pill" aria-label="Division" data-testid="f-header-division" value={revDivision} disabled={disabled}

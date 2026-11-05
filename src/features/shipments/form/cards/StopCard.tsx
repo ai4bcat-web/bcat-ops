@@ -22,7 +22,7 @@ import type { FormStop } from '../model'
 import type { FormCtx } from '../sectionProps'
 import { LField } from '../sections/formControls'
 import { type StopKey, ctl, digitsOnly, disabledState, issueFor, maskPhone, stopDef, stopPatchFromLocation } from '../sections/fieldUtil'
-import { pushRecent, readRecents, recentFirst } from './recents'
+import { pushRecent, rankWithRecents, readRecents, recentFirst } from './recents'
 import { Typeahead, type TypeaheadItem } from './Typeahead'
 
 export interface StopCardProps {
@@ -85,8 +85,7 @@ export function StopCard({ stop, index, count, prefix, onChange, ctx, onRemove, 
         .map((r) => ({ id: r.id, label: r.name, sub: sub(r), recent: true }))
     }
     if (q.length < 2) return []
-    const hits = findLocationMatches({ name: q, city: stop.city || undefined }, ctx.directory.locations).map((m) => m.record)
-    return recentFirst(hits, recent).slice(0, OFFERED).map((r) => ({ id: r.id, label: r.name, sub: sub(r), recent: recent.includes(r.id) }))
+    return rankWithRecents(findLocationMatches({ name: q, city: stop.city || undefined }, ctx.directory.locations), recent).slice(0, OFFERED).map((r) => ({ id: r.id, label: r.name, sub: sub(r), recent: recent.includes(r.id) }))
   }, [query, stop.city, ctx.directory.locations, recent])
 
   const typeName = (text: string) => {

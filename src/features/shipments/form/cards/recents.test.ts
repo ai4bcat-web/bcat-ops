@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from 'vitest'
-import { pushRecent, readRecents, recentFirst } from './recents'
+import { pushRecent, rankWithRecents, readRecents, recentFirst } from './recents'
 
 beforeEach(() => localStorage.clear())
 
@@ -21,5 +21,12 @@ describe('recents', () => {
   it('puts recent items first in recency order and leaves the rest in place', () => {
     const items = ['a', 'b', 'c', 'd'].map((id) => ({ id }))
     expect(recentFirst(items, ['c', 'zzz', 'a']).map((i) => i.id)).toEqual(['c', 'a', 'b', 'd'])
+  })
+
+  it('a recent match jumps the queue only when it is about as good as the best match', () => {
+    const m = (id: string, score: number) => ({ record: { id }, score })
+    const ranked = [m('exact', 1), m('close', 0.95), m('stale', 0.5)]
+    expect(rankWithRecents(ranked, ['stale']).map((r) => r.id)).toEqual(['exact', 'close', 'stale'])
+    expect(rankWithRecents(ranked, ['close']).map((r) => r.id)).toEqual(['close', 'exact', 'stale'])
   })
 })

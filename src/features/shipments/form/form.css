@@ -22,6 +22,20 @@
   margin-bottom: 8px;
 }
 
+.tms-shell .tms-ship-form .tms-ship-draft {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin-bottom: 8px;
+  padding: 4px 12px;
+  border: 1px solid var(--tms-border);
+  border-radius: var(--tms-radius-sm);
+  background: var(--tms-badge-blue-tint);
+  color: var(--tms-text-2);
+  font-size: 12px;
+}
+
 .tms-shell .tms-ship-form .tms-ship-issues button {
   background: none;
   border: 0;
@@ -42,28 +56,6 @@
   padding: 8px 16px;
   background: var(--tms-card);
   border-bottom: 1px solid var(--tms-border);
-}
-
-.tms-shell .tms-ship-hdr-crumb {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  color: var(--tms-muted);
-  font-size: 12px;
-}
-
-.tms-shell .tms-ship-hdr-link {
-  background: none;
-  border: 0;
-  padding: 0;
-  color: var(--tms-muted);
-  font: inherit;
-  cursor: pointer;
-}
-
-.tms-shell .tms-ship-hdr-link:hover {
-  color: var(--tms-text);
-  text-decoration: underline;
 }
 
 .tms-shell .tms-ship-hdr-title {
@@ -483,7 +475,7 @@
     top: 0;
     bottom: auto;
     align-self: start;
-    max-height: calc(100vh - 160px);
+    max-height: calc(100vh - 150px);
   }
 
   .tms-shell .tms-rail-sheetbar {

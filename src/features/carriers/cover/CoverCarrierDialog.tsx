@@ -43,11 +43,13 @@ const refOf = (c: CarrierRecord): Ref => ({
   ...(c.dotNumber ? { dotNumber: c.dotNumber } : {}),
 })
 
-export function CoverCarrierDialog({ shipmentId, shipmentNumber, initialQuery = '', onClose, onCovered }: {
+export function CoverCarrierDialog({ shipmentId, shipmentNumber, initialQuery = '', initialRateCents, onClose, onCovered }: {
   shipmentId: string
   shipmentNumber?: string
   /** Look this MC / DOT up as soon as the directory has loaded (Carrier Sales' "Cover with this carrier"). */
   initialQuery?: string
+  /** The carrier rate already typed somewhere (the shipment form's Rates card); the rep can still change it. */
+  initialRateCents?: number
   onClose: () => void
   /** The covered shipment bundle, for the caller to swap in or refresh from. */
   onCovered: (bundle: ShipmentBundle) => void
@@ -60,7 +62,7 @@ export function CoverCarrierDialog({ shipmentId, shipmentNumber, initialQuery = 
   const [ref, setRef] = useState<Ref | null>(null)
   const [preview, setPreview] = useState<McpLookupResult | null>(null)
   const [previewing, setPreviewing] = useState(false)
-  const [rateCents, setRateCents] = useState<number | null>(null)
+  const [rateCents, setRateCents] = useState<number | null>(initialRateCents && initialRateCents > 0 ? initialRateCents : null)
   const [acked, setAcked] = useState(false)
   const [inviteOpen, setInviteOpen] = useState(false)
   const [working, setWorking] = useState(false)

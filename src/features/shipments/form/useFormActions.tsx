@@ -16,7 +16,8 @@ import { useTrucks } from '@/hooks/useTrucks'
 import {
   commitDocument, logCheckCall, prepareDocumentUpload, putPresignedFile, sendCarrierSetupPacket,
 } from '@/lib/apiClient'
-import type { ShipmentBundle, ShipmentDocumentType, TmsSettings } from '@/types/tms'
+import type { CarrierRecord, ShipmentBundle, ShipmentDocumentType, TmsSettings } from '@/types/tms'
+import { financialPreview } from './mapping'
 import { activeLoadCarrier, type ShipmentFormValues } from './model'
 import { RateConDialog } from './RateConDialog'
 import { toLogCheckCallInput } from './checkCallNote'
@@ -35,10 +36,12 @@ export function useFormActions(o: {
   /** A pipeline is running. */
   busy: boolean
   settings: TmsSettings | null
+  /** The carrier directory: the carrier picked on the form seeds Cover's lookup. */
+  carriers: CarrierRecord[]
   isAdmin: boolean
   brokerName: string
 }): { actions: FormActions; dialogs: ReactNode; busy: boolean } {
-  const { values, update, bundle, setBundle, settings, isAdmin, brokerName } = o
+  const { values, update, bundle, setBundle, settings, carriers, isAdmin, brokerName } = o
   // The bundle BOOK_CARRIER answered with: runCover applies the form's seal / PU ETA on top of it.
   const latestBundle = useRef(bundle)
   const track = useCallback((b: ShipmentBundle) => { latestBundle.current = b; setBundle(b) }, [setBundle])
@@ -113,6 +116,12 @@ export function useFormActions(o: {
   }), [setBundle, update])
 
   const close = () => setDialog(null)
+  // Cover starts from what the form already says: the picked carrier's MC / DOT and the typed carrier rate.
+  const picked = dialog === 'book' ? carriers.find((c) => c.id === values.carrier.carrierId) : undefined
+  const coverSeed = {
+    query: picked?.mcNumber ? picked.mcNumber.replace(/^MC/i, '') : (picked?.dotNumber ?? ''),
+    rateCents: dialog === 'book' ? financialPreview(values, null, null).carrierTotalLhCents : 0,
+  }
   let node: ReactNode = null
   if (dialog === 'book' && bundle) {
     // Step AM ladder: directory carrier assigned straight away, otherwise an MCP lookup and invite.
@@ -120,6 +129,8 @@ export function useFormActions(o: {
       <CoverCarrierDialog
         shipmentId={bundle.shipment.id}
         shipmentNumber={bundle.shipment.number}
+        initialQuery={coverSeed.query}
+        initialRateCents={coverSeed.rateCents}
         onClose={close}
         onCovered={async (covered) => {
           track(covered)

@@ -254,7 +254,9 @@ async function selectFirst(b, id) {
 async function pickFrom(b, inputSelector, optionSelector, text) {
   await setValue(b, inputSelector, text)
   await b.poll(() => has(b, optionSelector), `suggestion for ${optionSelector}`, 15_000)
-  await clickSel(b, optionSelector)
+  // Prefer the suggestion that carries the typed name (a recent but different place may be listed first).
+  const hit = await b.evaluate(`(() => { const o = [...document.querySelectorAll(${JSON.stringify(optionSelector)})]; const el = o.find((n) => n.textContent.includes(${JSON.stringify(text)})) ?? o[0]; if (!el) return false; el.scrollIntoView({ block: 'center' }); el.click(); return true })()`)
+  if (!hit) throw new Error(`click ${optionSelector}: no-element`)
   await pause(300)
 }
 const CUSTOMER_OPTION = `${tid('f-customer-name')} li button`
@@ -383,11 +385,10 @@ const RUNNERS = {
     await b.setViewport(1440, 900)
     await openForm(b, '/tms/shipments/new')
     const bad = []
-    // header: breadcrumb, title, Division + Mode pills, status chip, read-only PRO preview
+    // header: title, Division + Mode pills, status chip, read-only PRO preview
     const title = await textOf(b, 'ship-form-title')
     if (title !== 'New shipment') bad.push(`title is ${JSON.stringify(title)}`)
     for (const id of ['ship-form-header', 'f-header-division', 'f-shipping-mode', 'ship-form-status', 'ship-form-pro']) if (!(await has(b, tid(id)))) bad.push(`header lacks ${id}`)
-    if (!(await has(b, '.tms-ship-hdr-crumb'))) bad.push('no breadcrumb')
     if ((await textOf(b, 'ship-form-status')) !== 'Draft') bad.push('status chip is not Draft')
     if (await has(b, `${tid('ship-form-pro')} input`)) bad.push('the PRO preview is editable')
     // five numbered cards in build order
@@ -416,9 +417,10 @@ const RUNNERS = {
       seen.push(await b.evaluate(`(() => { const a = document.activeElement; const c = a?.closest('.tms-ship-card, [data-testid="ship-form-rail"]'); return c?.dataset.testid ?? '' })()`))
     }
     const order = seen.filter((x, i, all) => x && all.indexOf(x) === i)
-    const wantOrder = [...SECTIONS.map(([k]) => `section-${k}`), 'ship-form-rail']
+    // Bill To, Rate history and Tracking hold no inputs, so the Tab walk skips them
+    const wantOrder = ['customer', 'route', 'freight', 'rates', 'carrier', 'documents'].map((k) => `section-${k}`).concat('ship-form-rail')
     const got = order.filter((x) => wantOrder.includes(x))
-    if (got.join() !== wantOrder.slice(0, got.length).join() || got.length < 5) bad.push(`Tab order ${got.join(' > ')}`)
+    if (got.join() !== wantOrder.slice(0, got.length).join() || got.length < 6) bad.push(`Tab order ${got.join(' > ')}`)
     for (const width of [1440, 1280]) {
       await b.setViewport(width, 900); await pause(300)
       const ov = await overflowOf(b)
@@ -653,7 +655,7 @@ const RUNNERS = {
     await shotFile(b, '11-edit-mode-reloaded')
     const editTitle = await textOf(b, 'ship-form-title')
     if (!/^Edit PRO /.test(editTitle ?? '')) bad.push(`edit title is ${JSON.stringify(editTitle)}`)
-    if (!(await has(b, tid('more-tab-checkCalls'))) || !(await has(b, tid('more-tab-updates')))) bad.push('edit mode lacks the Check calls / Updates tabs')
+    if (!(await has(b, tid('card-tracking-updates')))) bad.push('edit mode lacks the Updates feed in the Tracking card')
     await b.setViewport(1440, 1800); await pause(400); await shotAR(b, 'edit-1440')
     await b.setViewport(1280, 1800); await pause(400); await shotAR(b, 'edit-1280')
     await b.setViewport(1440, 900)
@@ -1090,7 +1092,7 @@ const RUNNERS = {
     await pause(500)
     const card = await b.evaluate(`(() => {
       const body = document.querySelector('[data-testid="section-carrier-body"]');
-      const sel = body.querySelector('select[aria-label="Driver 1"]');
+      const sel = body.querySelector('select[data-testid="f-carrier-driver1"]');
       const typed = [...body.querySelectorAll('input[type="text"], input:not([type])')].filter((i) => /driver/i.test(i.getAttribute('aria-label') ?? '') || /driver/i.test(i.getAttribute('data-testid') ?? '')).length;
       return { select: !!sel, options: sel ? [...sel.options].map((o) => o.textContent) : [], typed, empty: !!body.querySelector('[data-testid="carrier-empty"]') };
     })()`)
@@ -1101,8 +1103,8 @@ const RUNNERS = {
     if (card.typed > 0) bad.push(`${card.typed} free-text driver inputs on the Ivan Cartage card`)
     if (card.empty) bad.push('the Ivan Cartage card is still the collapsed "No carrier yet" card')
     if (!card.options.some((o) => o.includes(ctx.driverName))) bad.push('the ZZ roster driver is not offered')
-    const driverId = await b.evaluate(`(() => { const sel = document.querySelector('[data-testid="section-carrier-body"] select[aria-label="Driver 1"]'); return [...sel.options].find((o) => o.textContent.includes(${JSON.stringify(ctx.driverName)}))?.value ?? null })()`)
-    await setValue(b, '[data-testid="section-carrier-body"] select[aria-label="Driver 1"]', driverId)
+    const driverId = await b.evaluate(`(() => { const sel = document.querySelector('[data-testid="section-carrier-body"] select[data-testid="f-carrier-driver1"]'); return [...sel.options].find((o) => o.textContent.includes(${JSON.stringify(ctx.driverName)}))?.value ?? null })()`)
+    await setValue(b, '[data-testid="section-carrier-body"] select[data-testid="f-carrier-driver1"]', driverId)
     await pause(300)
     const truck = await b.evaluate(`document.querySelector('[data-testid="section-carrier-body"]').innerText`)
     await b.evaluate(`document.querySelector(${JSON.stringify(tid('section-carrier'))}).scrollIntoView({ block: 'center' })`)
@@ -1125,6 +1127,7 @@ const RUNNERS = {
     const bad = []
     for (const [width, height] of [[1440, 900], [1280, 800]]) {
       await b.setViewport(width, height)
+      await b.evaluate(`Object.keys(localStorage).filter((k) => k.includes('ship-form:draft')).forEach((k) => localStorage.removeItem(k))`)
       await openForm(b, '/tms/shipments/new')
       await pickFrom(b, `${tid('f-customer-name')} input`, CUSTOMER_OPTION, ctx.customerName)
       await pause(400)
@@ -1169,6 +1172,8 @@ const RUNNERS = {
       confirmed: [], missingFields: [], shipmentId: null, shipmentNumber: null, createdBy: 'zz-ar-harness', updatedBy: 'zz-ar-harness', version: 1, createdAt: now, updatedAt: now,
     } }))
     await b.navigate('/tms/shipments/intake'); await waitLoaded(b)
+    await b.click({ pattern: '^Unrouted' }).catch(() => {})
+    await pause(800)
     const rowSel = `[data-testid="intake-create-shipment"]`
     await b.poll(async () => (await b.evaluate(`[...document.querySelectorAll('tr, [role="row"]')].some((r) => r.innerText.includes(${JSON.stringify(`ZZ AR tender ${ctx.ts}`)}))`)), 'the staged intake row on the board', 60_000).catch(async (err) => { throw new Error(`${err.message} (page: ${JSON.stringify((await bodyText(b)).replace(/\s+/g, ' ').slice(0, 300))})`) })
     await b.evaluate(`(() => { const r = [...document.querySelectorAll('tr, [role="row"]')].find((x) => x.innerText.includes(${JSON.stringify(`ZZ AR tender ${ctx.ts}`)})); r.querySelector(${JSON.stringify(rowSel)}).click() })()`)
@@ -1244,7 +1249,9 @@ const RUNNERS = {
     await fill(b, 'f-shipping-equipmentType', 'Dry Van')
     await b.poll(() => has(b, tid('card-rateHistory-ran')), 'the "what we ran it for" block', 30_000).catch(() => bad.push('no "what we ran it for" block for a lane'))
     if (!(await has(b, tid('card-rateHistory-dat')))) bad.push('no DAT RateView block')
+    await b.poll(async () => !/Looking up/i.test(await b.evaluate(`document.querySelector('[data-testid="card-rateHistory-dat"]')?.innerText ?? 'Looking up'`)), 'DAT block settled', 40_000).catch(() => bad.push('the DAT block never left "Looking up DAT…"'))
     const dat = await b.evaluate(`document.querySelector('[data-testid="card-rateHistory-dat"]')?.innerText ?? ''`)
+    if (!/not connected/i.test(dat)) bad.push(`the DAT block does not say "DAT not connected" (${JSON.stringify(dat.replace(/\s+/g, ' ').slice(0, 120))})`)
     if (/\\$\\s?\\d/.test(dat) && /not connected/i.test(dat)) bad.push('the DAT block shows a dollar figure while saying DAT is not connected')
     await b.evaluate(`document.querySelector(${JSON.stringify(tid('section-rateHistory'))}).scrollIntoView({ block: 'start' })`)
     await shotAR(b, 'rate-history-1440')

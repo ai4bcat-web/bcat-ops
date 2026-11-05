@@ -17,6 +17,8 @@
   margin: 0;
 }
 .tms-shell .tms-card-billto-item { min-width: 0; }
+/* The requirement chips run along one full-width row instead of wrapping inside one narrow column. */
+.tms-shell .tms-card-billto-item:has([data-testid='card-billTo-requirements']) { grid-column: 1 / -1; }
 .tms-shell .tms-card-billto-label {
   font-size: 11px;
   font-weight: 600;
