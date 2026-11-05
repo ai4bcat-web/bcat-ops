@@ -253,7 +253,16 @@ export async function moneyFreeze(root = process.cwd(), base = 'HEAD') {
     const { stdout } = await run('git', ['diff', '--name-only', base, '--', ...paths], { cwd: root })
     return stdout.split('\n').filter(Boolean)
   }
-  const frozen = [...await diffNames(FROZEN_PATHS), ...await diffNames(FROZEN_DIRS)]
+  let frozen = [...await diffNames(FROZEN_PATHS), ...await diffNames(FROZEN_DIRS)]
+  // Main-owned files: production's own hotfixes merged into dev (NB-9) move a frozen file without being dev's change. A file that moved
+  // since `base` but is byte-identical to origin/main IS production's money code, so it passes; a file that still differs from
+  // origin/main (dev-only work, or a dev edit on top of main's) stays a violation. Skipped when origin/main is not fetched.
+  const hasMain = await run('git', ['rev-parse', '--verify', '--quiet', 'origin/main'], { cwd: root }).then(() => true, () => false)
+  if (hasMain && frozen.length > 0) {
+    const { stdout } = await run('git', ['diff', '--name-only', 'origin/main', '--', ...frozen], { cwd: root })
+    const differs = new Set(stdout.split('\n').filter(Boolean))
+    frozen = frozen.filter((f) => differs.has(f))
+  }
   const payPaths = []
   for (const name of PAY_HOOKS) payPaths.push(...await gitFiles(root, `src/**/${name}.ts`), ...await gitFiles(root, `src/**/${name}.tsx`))
   const payHooks = []

@@ -132,8 +132,8 @@ export function DashboardPage() {
   const windowKey = `${filters.from}|${filters.to}`
   const [refreshedWindow, setRefreshedWindow] = useState<string | null>(null)
   // The KPI strip paints from the rollup; the exact bundle (charts, filter options, Export) is read only once something needs it:
-  // the chart grid is within reach of the viewport, a filter chip is open, Export was pressed, or the KPIs themselves need the exact path.
-  const [gridRef, gridNear] = useOnVisible<HTMLDivElement>('600px')
+  // the chart grid is within 150 px of the viewport (the first card row sits ~1,390 px down at 1440x900, so a normal viewport does not read it at mount; a wider look-ahead did), a filter chip is open, Export was pressed, or the KPIs themselves need the exact path.
+  const [gridRef, gridNear] = useOnVisible<HTMLDivElement>('150px')
   const [exportWanted, setExportWanted] = useState(false)
   const [kpisNeedExact, setKpisNeedExact] = useState(false)
   const exactEnabled = gridNear || (openChip !== null && openChip !== 'date' && openChip !== 'division' && openChip !== 'add') || exportWanted || kpisNeedExact || refreshedWindow === windowKey || hasFacetFilter(filters)

@@ -1,17 +1,17 @@
 {
-  "at": "2026-11-05T05:04:12.074Z",
+  "at": "2026-11-05T05:59:14.209Z",
   "summary": {
     "/tms/dashboard": {
       "label": "Brokerage dashboard (this month)",
-      "firstRowsS": null,
-      "settledS": 7.225300001144409,
-      "requests": 85,
-      "mb": 12.722567,
+      "firstRowsS": 1.2566000003814697,
+      "settledS": 6.481600000381469,
+      "requests": 86,
+      "mb": 12.738686,
       "p95": {
-        "firstRows": null,
-        "settled": 7.253,
-        "requests": 85,
-        "mb": 12.737073
+        "firstRows": 2.5075,
+        "settled": 6.73689999961853,
+        "requests": 86,
+        "mb": 12.738686
       },
       "rowsAtEnd": [
         0,
@@ -31,15 +31,15 @@
     },
     "/tms/tracking": {
       "label": "Load tracking",
-      "firstRowsS": 2.8827000007629393,
-      "settledS": 5.4325,
+      "firstRowsS": 2.8335,
+      "settledS": 4.36510000038147,
       "requests": 48,
-      "mb": 6.684465,
+      "mb": 6.684799,
       "p95": {
-        "firstRows": 3.6805,
-        "settled": 5.9753999996185305,
+        "firstRows": 2.8873999996185304,
+        "settled": 4.949600000381469,
         "requests": 48,
-        "mb": 6.684465
+        "mb": 6.684799
       },
       "rowsAtEnd": [
         5,
@@ -55,15 +55,15 @@
     },
     "/tms/shipments": {
       "label": "Shipments board (Active)",
-      "firstRowsS": 3.1983999996185304,
-      "settledS": 4.948800001144409,
+      "firstRowsS": 3.479099998474121,
+      "settledS": 4.818,
       "requests": 54,
-      "mb": 9.304488,
+      "mb": 9.304822,
       "p95": {
-        "firstRows": 3.48060000038147,
-        "settled": 5.1455,
+        "firstRows": 3.6885,
+        "settled": 4.989600000381469,
         "requests": 54,
-        "mb": 9.304488
+        "mb": 9.304822
       },
       "rowsAtEnd": [
         34,
@@ -79,15 +79,15 @@
     },
     "/tms/shipments?list=all": {
       "label": "Shipments board (All, month window)",
-      "firstRowsS": 3.281699998855591,
-      "settledS": 5.162300001144409,
+      "firstRowsS": 3.536,
+      "settledS": 4.778,
       "requests": 68,
-      "mb": 10.760567,
+      "mb": 10.767121,
       "p95": {
-        "firstRows": 3.5182000007629393,
-        "settled": 5.54360000038147,
+        "firstRows": 3.5832000007629397,
+        "settled": 5.19360000038147,
         "requests": 68,
-        "mb": 10.760567
+        "mb": 10.767121
       },
       "rowsAtEnd": [
         34,
@@ -103,15 +103,15 @@
     },
     "/tms/customers": {
       "label": "Customers",
-      "firstRowsS": null,
-      "settledS": 4.303200000762939,
+      "firstRowsS": 2.2843999996185302,
+      "settledS": 4.540799999237061,
       "requests": 50,
-      "mb": 6.835715,
+      "mb": 6.842833,
       "p95": {
-        "firstRows": null,
-        "settled": 4.821099998474121,
+        "firstRows": 2.35410000038147,
+        "settled": 5.3265,
         "requests": 50,
-        "mb": 6.83832
+        "mb": 6.842833
       },
       "rowsAtEnd": [
         37,
@@ -127,15 +127,15 @@
     },
     "/tms/brokerage/users": {
       "label": "Users",
-      "firstRowsS": 0.883,
-      "settledS": 4.23089999961853,
+      "firstRowsS": 0.8145,
+      "settledS": 4.49089999961853,
       "requests": 51,
-      "mb": 6.690201,
+      "mb": 6.694337,
       "p95": {
-        "firstRows": 0.9335,
-        "settled": 4.547100000381469,
+        "firstRows": 0.9087999992370606,
+        "settled": 5.06089999961853,
         "requests": 51,
-        "mb": 6.690502
+        "mb": 6.694337
       },
       "rowsAtEnd": [
         7,
@@ -151,15 +151,15 @@
     },
     "/tms/invoicing": {
       "label": "Invoicing (AR)",
-      "firstRowsS": 2.6397000007629394,
-      "settledS": 4.6968000011444095,
-      "requests": 69,
-      "mb": 9.657644,
+      "firstRowsS": 2.1515,
+      "settledS": 5.08770000076294,
+      "requests": 68,
+      "mb": 9.362756,
       "p95": {
-        "firstRows": 2.7551000003814696,
-        "settled": 4.791800001144409,
-        "requests": 69,
-        "mb": 9.657644
+        "firstRows": 2.92710000038147,
+        "settled": 5.98260000038147,
+        "requests": 68,
+        "mb": 9.362756
       },
       "rowsAtEnd": [
         2,
@@ -175,15 +175,15 @@
     },
     "/tms/invoicing/payable": {
       "label": "Invoicing (payable)",
-      "firstRowsS": 1.729,
-      "settledS": 3.7829000015258787,
+      "firstRowsS": 1.7567000007629394,
+      "settledS": 4.10420000076294,
       "requests": 58,
-      "mb": 7.178339,
+      "mb": 7.182475,
       "p95": {
-        "firstRows": 1.7337000007629395,
-        "settled": 4.506400001525879,
+        "firstRows": 2.4007000007629395,
+        "settled": 5.18589999961853,
         "requests": 58,
-        "mb": 7.178339
+        "mb": 7.182475
       },
       "rowsAtEnd": [
         21,
@@ -199,15 +199,15 @@
     },
     "/tms/carriers": {
       "label": "Carriers (shell floor probe)",
-      "firstRowsS": 1.7292999992370606,
-      "settledS": 3.6888999996185303,
+      "firstRowsS": 1.6853000011444093,
+      "settledS": 4.136300001144409,
       "requests": 48,
-      "mb": 6.680663,
+      "mb": 6.684799,
       "p95": {
-        "firstRows": 1.774,
-        "settled": 3.841699998855591,
+        "firstRows": 1.7856999988555908,
+        "settled": 4.563199998855591,
         "requests": 48,
-        "mb": 6.680663
+        "mb": 6.684799
       },
       "rowsAtEnd": [
         31,
@@ -223,15 +223,15 @@
     },
     "/schedule": {
       "label": "Schedule (legacy)",
-      "firstRowsS": 4.38939999961853,
-      "settledS": 4.38939999961853,
-      "requests": 80,
-      "mb": 10.376565,
+      "firstRowsS": 4.432,
+      "settledS": 4.432,
+      "requests": 78,
+      "mb": 10.380135,
       "p95": {
-        "firstRows": 5.018,
-        "settled": 5.018,
-        "requests": 80,
-        "mb": 10.376565
+        "firstRows": 5.1815,
+        "settled": 5.1815,
+        "requests": 78,
+        "mb": 10.380135
       },
       "rowsAtEnd": [
         0,
@@ -247,15 +247,15 @@
     },
     "/calendar": {
       "label": "Calendar (legacy)",
-      "firstRowsS": 4.598800001144409,
-      "settledS": 4.598800001144409,
-      "requests": 86,
-      "mb": 12.99272,
+      "firstRowsS": 4.962300001144409,
+      "settledS": 4.962300001144409,
+      "requests": 84,
+      "mb": 12.99629,
       "p95": {
-        "firstRows": 5.306099998474121,
-        "settled": 5.306099998474121,
-        "requests": 86,
-        "mb": 12.99272
+        "firstRows": 5.74,
+        "settled": 5.74,
+        "requests": 84,
+        "mb": 12.99629
       },
       "rowsAtEnd": [
         0,
@@ -271,15 +271,15 @@
     },
     "/dashboard": {
       "label": "Dashboard (legacy)",
-      "firstRowsS": 0.8771000003814697,
-      "settledS": 6.16029999923706,
-      "requests": 136,
-      "mb": 19.653167,
+      "firstRowsS": 0.8136000003814697,
+      "settledS": 6.011700000762939,
+      "requests": 133,
+      "mb": 19.656454,
       "p95": {
-        "firstRows": 1.0858999996185303,
-        "settled": 6.4375,
-        "requests": 136,
-        "mb": 19.653167
+        "firstRows": 1.0735,
+        "settled": 6.786699998855591,
+        "requests": 133,
+        "mb": 19.656454
       },
       "rowsAtEnd": [
         3,
@@ -289,16 +289,7 @@
       "fullTableOps": [],
       "mutations": [],
       "maxChainDepth": 4,
-      "repeated": [
-        {
-          "op": "managePods",
-          "times": 4
-        },
-        {
-          "op": "managePods",
-          "times": 4
-        }
-      ],
+      "repeated": [],
       "problems": [],
       "dashboardKpi": []
     }
@@ -306,25 +297,29 @@
   "kpi": {
     "/tms/dashboard": {
       "medians": {
-        "cold": 1.835,
-        "warm": 0.9391999988555908,
-        "spa": 0.060900001525878905,
-        "chartsCold": null,
-        "chartsWarm": null,
-        "allCold": 1.9995,
-        "spaRequests": 38,
-        "spaMb": 6.050685,
+        "cold": 1.7902000007629395,
+        "warm": 0.9552999992370605,
+        "spa": 0.08110000038146972,
+        "chartsCold": 4.78339999961853,
+        "chartsWarm": 4.3972999992370605,
+        "allCold": 1.989,
+        "chartsRequests": 86,
+        "chartsMb": 12.738686,
+        "spaRequests": 39,
+        "spaMb": 6.051651,
         "kpiFlips": 0
       },
       "p95": {
-        "cold": 1.8991000003814698,
-        "warm": 1.1623999996185304,
-        "spa": 0.2786000003814697,
-        "chartsCold": null,
-        "chartsWarm": null,
-        "allCold": 2.5081000003814697,
-        "spaRequests": 38,
-        "spaMb": 6.050685,
+        "cold": 1.9396000003814697,
+        "warm": 1.4328999996185303,
+        "spa": 0.31839999961853027,
+        "chartsCold": 4.819700000762939,
+        "chartsWarm": 5.1796999988555905,
+        "chartsRequests": 86,
+        "chartsMb": 12.738686,
+        "allCold": 2.435400001525879,
+        "spaRequests": 39,
+        "spaMb": 6.051651,
         "kpiFlips": 0
       },
       "sources": {
@@ -348,25 +343,29 @@
     },
     "/dashboard": {
       "medians": {
-        "cold": 1.8572999992370605,
-        "warm": 0.826,
-        "spa": 0.10139999961853027,
-        "chartsCold": 1.8572999992370605,
-        "chartsWarm": 0.8778000011444091,
-        "allCold": 6.50310000038147,
-        "spaRequests": 90,
-        "spaMb": 12.985041,
+        "cold": 1.8376000003814696,
+        "warm": 0.9300999984741211,
+        "spa": 0.06579999923706055,
+        "chartsCold": 1.8376000003814696,
+        "chartsWarm": 0.9967999992370605,
+        "allCold": 5.710400001525879,
+        "chartsRequests": 133,
+        "chartsMb": 19.656454,
+        "spaRequests": 87,
+        "spaMb": 12.984192,
         "kpiFlips": 0
       },
       "p95": {
-        "cold": 2.3486000003814698,
-        "warm": 1.0915,
-        "spa": 0.3627999992370605,
-        "chartsCold": 2.3851000003814695,
-        "chartsWarm": 1.1471000003814698,
-        "allCold": 6.604899999618531,
-        "spaRequests": 90,
-        "spaMb": 12.99335,
+        "cold": 1.8511000003814697,
+        "warm": 1.3556000003814697,
+        "spa": 0.5156000003814697,
+        "chartsCold": 1.8925,
+        "chartsWarm": 1.4075,
+        "chartsRequests": 133,
+        "chartsMb": 19.656454,
+        "allCold": 5.7558999996185305,
+        "spaRequests": 87,
+        "spaMb": 12.984192,
         "kpiFlips": 0
       },
       "sources": {

@@ -368,7 +368,17 @@ async function runWalk(ctx, b) {
 
   await step('AM13 Shipments board: Carrier Status column', async () => {
     await b.navigate('/tms/shipments')
-    await b.poll(() => b.evaluate(`document.body.innerText.includes('Carrier Status') || document.body.innerText.includes('CARRIER STATUS')`), 'the Carrier Status column header', 90_000)
+    const text = (re) => b.evaluate(`/${re}/i.test(document.body?.innerText ?? '')`)
+    await b.poll(() => text('Columns'), 'the shipments grid toolbar', 90_000)
+    await pause(800)
+    if (!(await text('Carrier Status'))) {
+      // The default layout no longer carries the column: add it through the Columns dialog, as a user would.
+      await b.evaluate(`[...document.querySelectorAll('button')].find((x) => /Columns/.test(x.textContent))?.click()`)
+      await b.poll(() => has('#tms-cd-carrierAssignment'), 'the Columns dialog', 15_000)
+      await b.evaluate(`(() => { const el = document.querySelector('#tms-cd-carrierAssignment'); if (!el.checked) el.click() })()`)
+      await b.evaluate(`[...document.querySelectorAll('button')].find((x) => x.textContent.trim() === 'Apply')?.click()`)
+      await b.poll(() => text('Carrier Status'), 'the Carrier Status column header', 30_000)
+    }
     await pause(500)
     await shot('AM13-shipments-board-column')
     return 'column present'

@@ -7,7 +7,7 @@
  *   node scripts/devVerifyPerf.mjs --baseline            pre-change numbers: 12 pages x 3 cold runs -> Docs/tms-build/perf/baseline-<date>.json
  *   node scripts/devVerifyPerf.mjs                       full gate: G0..G8 (browser) + G1/G2/G7 (API, via devVerifyPerfApi.mts)
  *   node scripts/devVerifyPerf.mjs --ratchet             lower every ceiling in perfBudgets.mjs to measured p95 x 1.5 from perf/last-run.json (never raises)
- *   options: --runs=N (default 3)  --pages=/tms/carriers,/schedule  --base=<sha> (G6, default aac15dd)  --no-api  --verbose
+ *   options: --runs=N (default 3)  --pages=/tms/carriers,/schedule  --base=<sha> (G6, default ef6b7af)  --no-api  --verbose
  *            --no-kpi (skip the Step AF cold/warm/spa KPI modes)  --enforce-af (KPI budgets, G11, G12 fail the run; default: WARN until AF_ENFORCED)
  *
  * Step AF: /tms/dashboard and /dashboard are also measured in three modes (cold / warm / spa, 1440x900) until the KPI strip
@@ -44,7 +44,12 @@ const PERF_DIR = resolve('Docs/tms-build/perf')
 // financials, invoice or bill arithmetic changed. Any later money change is a real diff against this base.
 // Re-baselined a064b26 -> aac15dd (review of `git diff a064b26 HEAD -- amplify/functions/tms-finance-actions/`): only NB3's table-name wiring
 // moved (handler.ts imports the generated tableEnv.ts, which applies DATA_TABLE_SUFFIX); no money arithmetic changed.
-const DEFAULT_BASE = 'aac15dd'
+// Re-baselined aac15dd -> ef6b7af (Perf pass 3 review). NB-9 merged production's hotfixes (pay-credit approval, settlement e-mail copy, otr-actions
+// documents): `git diff origin/main` of src/lib/otrInvoice.ts(+test), driver-pay-emailer/handler.ts is EMPTY (identical to production);
+// useBoxTruckPay.ts differs from main only by useEnsureLoadRange (the PERF windowing line); otr-actions/handler.ts differs by Step F's
+// shipment-document lookups (no amount/rate arithmetic). The credit filter (creditCounts) and MC check are main's own, unchanged here.
+// G6 now also passes a frozen file that moved since the base but is byte-identical to origin/main (moneyFreeze, perfGaps.mjs).
+const DEFAULT_BASE = 'ef6b7af'
 const LEGACY_LOAD_READ = '\\b(listLoads|listLoadBy[A-Za-z]+|getLoad)\\b'
 
 const args = process.argv.slice(2)
